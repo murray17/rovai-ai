@@ -2011,12 +2011,11 @@ mod tests {
         context::ContextMaterialization,
         memory::{MEMORY_AGENT_MUTATIONS_PER_RUN, MemoryCreationOrigin, RetireMemoryCommand},
         memory_retrieval::{MemoryCacheState, MemoryReadInput, MemorySearchInput},
-        message_delivery::{DeliveryDispatchTrigger, dispatch_pending_for_recipient},
-        runtime::{
-            AcknowledgeAgentRunCancellationCommand, CancelCampTurnCommand, FailAgentRunCommand,
-        },
+        message_delivery::dispatch_pending_for_recipient,
+        runtime::{AcknowledgeAgentRunCancellationCommand, FailAgentRunCommand},
     };
     use crate::{
+        camp_attachment::CampAttachmentStore,
         camp_attachment_view::CampAttachmentViewStore,
         collaboration::{
             AddCampMemberCommand, CollaborationService, CreateCampCommand, CreateTaskCommand,
@@ -2038,11 +2037,14 @@ mod tests {
         },
         memory_tool::{MemoryToolService, MemoryWriteToolInput, MemoryWriteToolInvocation},
         message_delivery::{
-            CancelMessageDeliveryCommand, MessageDeliveryService, RetryMessageDeliveryCommand,
+            CancelMessageDeliveryCommand, DeliveryDispatchOutcome, DeliveryDispatchTrigger,
+            MessageDeliveryService, RetryMessageDeliveryCommand,
+            mark_unstarted_deliveries_interrupted_before_dispatch,
         },
         runtime::{
-            BindNativeSessionCommand, ClaimAgentRunCommand, ExecutionRuntimeService,
-            MissingSendRecoveryBoundary, MissingSendRecoveryCandidate, SucceedAgentRunCommand,
+            BindNativeSessionCommand, CancelCampTurnCommand, ClaimAgentRunCommand,
+            ExecutionRuntimeService, MissingSendRecoveryBoundary, MissingSendRecoveryCandidate,
+            SucceedAgentRunCommand,
         },
     };
 
@@ -2629,6 +2631,132 @@ mod tests {
         }
     }
 
+    fn send_projection_blocked_attachment(
+        fixture: &mut Fixture,
+        call_id: &str,
+    ) -> (String, String) {
+        let file_name = format!("{call_id}.txt");
+        let authority_path = fixture.directory.join(&file_name);
+        std::fs::write(&authority_path, b"zero-attempt cancellation fixture").unwrap();
+        let attachment_store = CampAttachmentStore::new(&fixture.directory);
+        let draft = attachment_store
+            .save_body(
+                &mut fixture.database,
+                &fixture.camp_id,
+                "agent attachment fixture",
+            )
+            .unwrap();
+        let draft = attachment_store
+            .prepare_from_path(
+                &mut fixture.database,
+                &fixture.camp_id,
+                draft.revision,
+                &authority_path,
+                &file_name,
+            )
+            .unwrap();
+        let attachment_id = draft.attachments.last().unwrap().id.clone();
+        let authority: AuthorityAttachment = fixture
+            .database
+            .connection()
+            .query_row(
+                r#"
+                SELECT id, display_name, media_type, byte_size,
+                       content_digest, storage_path, preview_kind
+                FROM prepared_attachment WHERE id = ?1
+                "#,
+                [&attachment_id],
+                |row| {
+                    Ok(AuthorityAttachment {
+                        attachment_id: row.get(0)?,
+                        display_name: row.get(1)?,
+                        media_type: row.get(2)?,
+                        byte_size: row.get::<_, i64>(3)? as u64,
+                        content_digest: row.get(4)?,
+                        storage_path: std::path::PathBuf::from(row.get::<_, String>(5)?),
+                        preview_kind: row.get(6)?,
+                    })
+                },
+            )
+            .unwrap();
+        let mut invocation = fixture.public_send_invocation(call_id, "", &["agent_2"]);
+        invocation.input.files = vec![file_name.clone()];
+        invocation.frozen_files = vec![authority];
+        let sent = TeamToolService::default()
+            .send_public_message(&mut fixture.database, &invocation)
+            .unwrap();
+        assert_eq!(sent.result.status, CommandResultStatus::Accepted);
+        let delivery_id = sent.result.payload["deliveryIds"][0]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let operation_id = fixture
+            .database
+            .connection()
+            .query_row(
+                "SELECT projection_operation_id FROM message_delivery WHERE id = ?1",
+                [&delivery_id],
+                |row| row.get::<_, String>(0),
+            )
+            .unwrap();
+        let gate: (String, i64, Option<String>) = fixture
+            .database
+            .connection()
+            .query_row(
+                r#"
+                SELECT dispatch_phase, dispatch_attempt_count, pre_dispatch_gate
+                FROM message_delivery WHERE id = ?1
+                "#,
+                [&delivery_id],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(
+            gate,
+            (
+                "projection_blocked".to_string(),
+                0,
+                Some("attachment_projection".to_string()),
+            )
+        );
+        (delivery_id, operation_id)
+    }
+
+    fn promote_queued_publication(
+        fixture: &mut Fixture,
+        view: &CampAttachmentViewStore,
+        expected_operation_id: &str,
+    ) {
+        let plan = view
+            .plan_queued_publication(&mut fixture.database, &fixture.camp_id)
+            .unwrap()
+            .expect("queued attachment publication should exist");
+        assert_eq!(plan.operation_id(), expected_operation_id);
+        let attachment_store = CampAttachmentStore::new(&fixture.directory);
+        let copied = CampAttachmentViewStore::copy_publication(&attachment_store, plan).unwrap();
+        let prepared = view
+            .finish_publication_staging(&mut fixture.database, copied)
+            .unwrap();
+        view.gate_publication(&mut fixture.database, &prepared)
+            .unwrap();
+        view.promote_publication(&mut fixture.database, &prepared)
+            .unwrap();
+    }
+
+    struct DeliveryCancellationSnapshot {
+        status: String,
+        dispatch_phase: String,
+        dispatch_attempt_count: i64,
+        wait_condition: Option<String>,
+        active_dispatch_attempt_id: Option<String>,
+        pre_dispatch_gate: Option<String>,
+        projection_operation_id: Option<String>,
+        manual_intervention_required: i64,
+        failure_code: Option<String>,
+        ended_at: Option<String>,
+        version: i64,
+    }
+
     #[cfg(feature = "slow-tests")]
     fn public_send_schema_teaches_alias_boundary_and_canonical_to_values() {
         let schema = TeamToolService::camp_message_send_input_schema();
@@ -3020,6 +3148,320 @@ mod tests {
             .unwrap();
         assert_eq!(retry.result.status, CommandResultStatus::Rejected);
         assert_eq!(retry.result.code, "message_delivery.retry_not_allowed");
+    }
+
+    #[test]
+    fn camp_turn_stop_cancels_projection_blocked_delivery_and_restart_cannot_revive_it() {
+        let mut fixture = Fixture::new();
+        let (delivery_id, operation_id) =
+            send_projection_blocked_attachment(&mut fixture, "cancel-projection-on-turn-stop");
+        let (camp_turn_id, turn_version): (String, i64) = fixture
+            .database
+            .connection()
+            .query_row(
+                r#"
+                SELECT turn.id, turn.version
+                FROM message_delivery AS delivery
+                JOIN camp_turn AS turn ON turn.id = delivery.camp_turn_id
+                WHERE delivery.id = ?1
+                "#,
+                [&delivery_id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        let stopped = ExecutionRuntimeService::default()
+            .request_camp_turn_cancellation(
+                &mut fixture.database,
+                &user_envelope(
+                    "cancel-projection-blocked-turn",
+                    Some(&fixture.camp_id),
+                    CancelCampTurnCommand {
+                        camp_id: fixture.camp_id.clone(),
+                        camp_turn_id,
+                        expected_version: turn_version,
+                    },
+                ),
+            )
+            .unwrap();
+        assert_eq!(stopped.result.status, CommandResultStatus::Accepted);
+
+        let cancelled: DeliveryCancellationSnapshot = fixture
+            .database
+            .connection()
+            .query_row(
+                r#"
+                SELECT status, dispatch_phase, dispatch_attempt_count,
+                       wait_condition, active_dispatch_attempt_id,
+                       pre_dispatch_gate, projection_operation_id,
+                       manual_intervention_required, failure_code, ended_at, version
+                FROM message_delivery WHERE id = ?1
+                "#,
+                [&delivery_id],
+                |row| {
+                    Ok(DeliveryCancellationSnapshot {
+                        status: row.get(0)?,
+                        dispatch_phase: row.get(1)?,
+                        dispatch_attempt_count: row.get(2)?,
+                        wait_condition: row.get(3)?,
+                        active_dispatch_attempt_id: row.get(4)?,
+                        pre_dispatch_gate: row.get(5)?,
+                        projection_operation_id: row.get(6)?,
+                        manual_intervention_required: row.get(7)?,
+                        failure_code: row.get(8)?,
+                        ended_at: row.get(9)?,
+                        version: row.get(10)?,
+                    })
+                },
+            )
+            .unwrap();
+        assert_eq!(&cancelled.status, "cancelled");
+        assert_eq!(&cancelled.dispatch_phase, "terminal");
+        assert_eq!(cancelled.dispatch_attempt_count, 0);
+        assert_eq!(
+            (
+                &cancelled.wait_condition,
+                &cancelled.active_dispatch_attempt_id,
+                &cancelled.pre_dispatch_gate,
+                &cancelled.projection_operation_id,
+            ),
+            (&None, &None, &None, &None)
+        );
+        assert_eq!(cancelled.manual_intervention_required, 0);
+        assert_eq!(
+            cancelled.failure_code.as_deref(),
+            Some("camp_turn_cancelled")
+        );
+        assert!(cancelled.ended_at.is_some());
+
+        let view = CampAttachmentViewStore::for_test(&fixture.database).unwrap();
+        promote_queued_publication(&mut fixture, &view, &operation_id);
+        assert!(
+            view.resolve_semantic_publication_success(&mut fixture.database, &operation_id)
+                .unwrap()
+                .is_empty()
+        );
+        let after_late_success: (String, String, i64, i64) = fixture
+            .database
+            .connection()
+            .query_row(
+                r#"
+                SELECT status, dispatch_phase, dispatch_attempt_count, version
+                FROM message_delivery WHERE id = ?1
+                "#,
+                [&delivery_id],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )
+            .unwrap();
+        assert_eq!(
+            after_late_success,
+            (
+                "cancelled".to_string(),
+                "terminal".to_string(),
+                0,
+                cancelled.version,
+            )
+        );
+        drop(view);
+
+        let mut reopened = crate::db::Database::open(&fixture.directory).unwrap();
+        mark_unstarted_deliveries_interrupted_before_dispatch(&mut reopened).unwrap();
+        assert_eq!(
+            crate::message_delivery::dispatch_delivery(
+                &mut reopened,
+                &delivery_id,
+                DeliveryDispatchTrigger::Accepted,
+                true,
+            )
+            .unwrap(),
+            DeliveryDispatchOutcome::NotDispatchable
+        );
+        let after_restart: (String, String, i64, Option<String>, Option<String>) = reopened
+            .connection()
+            .query_row(
+                r#"
+                SELECT status, dispatch_phase, dispatch_attempt_count,
+                       projection_operation_id, ended_at
+                FROM message_delivery WHERE id = ?1
+                "#,
+                [&delivery_id],
+                |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                    ))
+                },
+            )
+            .unwrap();
+        assert_eq!(
+            after_restart,
+            (
+                "cancelled".to_string(),
+                "terminal".to_string(),
+                0,
+                None,
+                cancelled.ended_at,
+            )
+        );
+    }
+
+    #[test]
+    fn explicit_zero_attempt_cancellation_handles_projection_and_interrupted_states() {
+        let mut fixture = Fixture::new();
+        let (projection_delivery_id, operation_id) =
+            send_projection_blocked_attachment(&mut fixture, "explicit-projection-cancel");
+        let projection_version: i64 = fixture
+            .database
+            .connection()
+            .query_row(
+                "SELECT version FROM message_delivery WHERE id = ?1",
+                [&projection_delivery_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let cancelled = MessageDeliveryService::default()
+            .cancel(
+                &mut fixture.database,
+                &user_envelope(
+                    "cancel-zero-attempt-projection",
+                    Some(&fixture.camp_id),
+                    CancelMessageDeliveryCommand {
+                        delivery_id: projection_delivery_id.clone(),
+                        expected_version: projection_version,
+                    },
+                ),
+            )
+            .unwrap();
+        assert_eq!(cancelled.result.code, "message_delivery.cancelled");
+        let projection_state: (
+            String,
+            String,
+            i64,
+            Option<String>,
+            Option<String>,
+            Option<String>,
+        ) = fixture
+            .database
+            .connection()
+            .query_row(
+                r#"
+                SELECT status, dispatch_phase, dispatch_attempt_count,
+                       pre_dispatch_gate, projection_operation_id, failure_code
+                FROM message_delivery WHERE id = ?1
+                "#,
+                [&projection_delivery_id],
+                |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                        row.get(5)?,
+                    ))
+                },
+            )
+            .unwrap();
+        assert_eq!(
+            projection_state,
+            (
+                "cancelled".to_string(),
+                "terminal".to_string(),
+                0,
+                None,
+                None,
+                Some("explicit_cancelled".to_string()),
+            )
+        );
+        let view = CampAttachmentViewStore::for_test(&fixture.database).unwrap();
+        assert!(
+            view.resolve_semantic_publication_terminal_failure(
+                &mut fixture.database,
+                &operation_id,
+                "late_projection_failure",
+            )
+            .unwrap()
+            .is_empty()
+        );
+        drop(view);
+        assert_eq!(
+            fixture
+                .database
+                .connection()
+                .query_row(
+                    "SELECT status || ':' || dispatch_phase || ':' || dispatch_attempt_count FROM message_delivery WHERE id = ?1",
+                    [&projection_delivery_id],
+                    |row| row.get::<_, String>(0),
+                )
+                .unwrap(),
+            "cancelled:terminal:0"
+        );
+
+        let (interrupted_delivery_id, _) =
+            send_projection_blocked_attachment(&mut fixture, "interrupted-then-cancelled");
+        fixture
+            .database
+            .connection()
+            .execute(
+                r#"
+                UPDATE message_delivery
+                SET dispatch_phase = 'never_attempted',
+                    pre_dispatch_gate = NULL, projection_operation_id = NULL,
+                    version = version + 1
+                WHERE id = ?1 AND status = 'pending'
+                  AND dispatch_phase = 'projection_blocked'
+                  AND dispatch_attempt_count = 0
+                "#,
+                [&interrupted_delivery_id],
+            )
+            .unwrap();
+        mark_unstarted_deliveries_interrupted_before_dispatch(&mut fixture.database).unwrap();
+        let interrupted_version: i64 = fixture
+            .database
+            .connection()
+            .query_row(
+                r#"
+                SELECT version FROM message_delivery
+                WHERE id = ?1 AND status = 'interrupted_before_dispatch'
+                  AND dispatch_phase = 'terminal' AND dispatch_attempt_count = 0
+                "#,
+                [&interrupted_delivery_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let cancelled = MessageDeliveryService::default()
+            .cancel(
+                &mut fixture.database,
+                &user_envelope(
+                    "cancel-interrupted-zero-attempt",
+                    Some(&fixture.camp_id),
+                    CancelMessageDeliveryCommand {
+                        delivery_id: interrupted_delivery_id.clone(),
+                        expected_version: interrupted_version,
+                    },
+                ),
+            )
+            .unwrap();
+        assert_eq!(cancelled.result.code, "message_delivery.cancelled");
+        assert_eq!(
+            fixture
+                .database
+                .connection()
+                .query_row(
+                    r#"
+                    SELECT status || ':' || dispatch_phase || ':' ||
+                           dispatch_attempt_count || ':' ||
+                           manual_intervention_required || ':' || failure_code
+                    FROM message_delivery WHERE id = ?1
+                    "#,
+                    [&interrupted_delivery_id],
+                    |row| row.get::<_, String>(0),
+                )
+                .unwrap(),
+            "cancelled:terminal:0:0:explicit_cancelled"
+        );
     }
 
     #[test]
@@ -3865,6 +4307,45 @@ mod tests {
             )
             .unwrap();
         assert_eq!(state, ("cancelled".into(), "cancelled".into(), None));
+        let attempt: (
+            i64,
+            Option<String>,
+            Option<String>,
+            String,
+            Option<String>,
+            Option<String>,
+        ) = fixture
+            .database
+            .connection()
+            .query_row(
+                r#"
+                SELECT delivery.dispatch_attempt_count, delivery.wait_condition,
+                       delivery.active_dispatch_attempt_id,
+                       attempt.status, attempt.wait_condition, attempt.ended_at
+                FROM message_delivery AS delivery
+                JOIN message_delivery_attempt AS attempt
+                  ON attempt.delivery_id = delivery.id
+                 AND attempt.ordinal = delivery.dispatch_attempt_count
+                WHERE delivery.id = ?1
+                "#,
+                [&completion_delivery_id],
+                |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                        row.get(5)?,
+                    ))
+                },
+            )
+            .unwrap();
+        assert_eq!(attempt.0, 1);
+        assert_eq!((attempt.1, attempt.2), (None, None));
+        assert_eq!(attempt.3, "cancelled");
+        assert_eq!(attempt.4, None);
+        assert!(attempt.5.is_some());
 
         let source_run_id = fixture.source_run_id.clone();
         fixture.succeed_run(&source_run_id, fixture.source_epoch, "Lead 首轮结束");

@@ -57,7 +57,7 @@ pending Delivery 在 cutover 中终态化，已 materialized 下游 Run 纳入 r
 version。
 
 当前规范见 [Camp Membership v1](../../contracts/camp-membership-v1.md)、
-[Message Delivery v6](../../contracts/message-delivery-v6.md)、[Gather v4](../../contracts/gather-v4.md)和
+[Message Delivery v7](../../contracts/message-delivery-v7.md)、[Gather v4](../../contracts/gather-v4.md)和
 [Missing-Send Recovery Publication v2](../../contracts/missing-send-recovery-publication-v2.md)。
 
 ### 后果
@@ -124,3 +124,46 @@ Camp membership。Renderer/User 路径不携带 source authority。
 
 - **按事件到达顺序直接写名册：** 网络顺序不能证明领域顺序；
 - **只校验一个全局来源名：** 不足以隔离 Camp/租户绑定与 reconciliation generation。
+
+<a id="v1-29-d05"></a>
+## V1.29-D05：Message Delivery 允许零 attempt 取消，并以独立后继迁移保持身份唯一
+
+### 背景
+
+带附件的 Agent-to-Agent Send 会先创建 `projection_blocked` Delivery：状态仍为 pending、attempt count 为 0，
+但由 attachment projection gate 占据 recipient FIFO。CampTurn Stop 的批量取消随后尝试把该行写为
+`cancelled + terminal + attempt=0`；旧 SQLite CHECK 没有允许这一取消终态，导致整个 Stop 事务以 constraint
+275 回滚。显式取消和批量取消还分别维护 SQL，清理 wait、attempt 与 projection association 的集合不一致。
+
+Migration 110、Data Contract `v1.23 / schema 64` 和 Message Delivery v6 已由 dynamic Camp membership 使用；
+零 attempt 取消不能复用同一迁移或合同身份，否则由 current-main 数据库升级时会跳过 CHECK 重建，并让两种
+不同结构宣称同一 Data Contract。
+
+### 决定
+
+Migration 111 从 `v1.23 / schema 64` 升到 `v1.24 / schema 65`，只为 Message Delivery 增加合法分支
+`status=cancelled AND dispatch_phase=terminal AND dispatch_attempt_count=0`。取消不得为满足约束而创建虚假 attempt。
+
+`MessageDeliveryService::cancel` 与 CampTurn/Execution Budget 批量取消复用一个底层 Delivery 转换。该转换保留既有
+attempt count；若当前 attempting/waiting attempt 存在，则将其终结为 cancelled；随后原子清除 Delivery 的 wait、
+active attempt、pre-dispatch gate 和 projection operation association，写入明确 reason、ended time、version 与事件。
+入口各自保留授权、membership、Gather 和 CampTurn settlement 规则，不再各自实现第二份 Delivery 状态 SQL。
+
+Projection success/failure 继续只 CAS 仍为 pending、仍绑定同一 operation 的 gate。取消清除 association 后，迟到
+completion 可以结算 publication 自身，但不能释放、失败或重新调度已取消 Delivery。Dispatch Pump 与 startup
+recovery 同样只推进非终态合格行，重启不改变 cancelled terminal。
+
+### 后果
+
+真实 `projection_blocked` CampTurn Stop 可以提交，pending/interrupted-before-dispatch 的零 attempt 显式取消也合法；
+已有 attempt 的取消保持审计 count 并终结对应 attempt。新合同为 Message Delivery v7。升级测试从 current-main
+Migration 110 数据库执行 111，并验证重启幂等与终态单调。该 hotfix 不依赖或引入 Managed Attachment v2、legacy
+compatibility reconciler、Runtime permission evidence 或其他附件存储重构。
+
+### 被拒绝方案
+
+- 复用 Migration 110、`v1.23 / schema 64` 或 Message Delivery v6：无法区分 dynamic membership 与取消结构；
+- 取消时插入虚假 attempt：破坏“attempt 只证明真实 dispatch fence”的审计语义；
+- 只给批量 Stop 增加特判：显式取消、attempt cleanup 与 projection cleanup 继续漂移；
+- 让迟到 projection completion 重开 Delivery：违反 terminal monotonicity，并可能在用户停止后唤醒 Agent；
+- 把本 hotfix 绑定到 Managed Attachment v2：扩大故障恢复时间，并让独立取消正确性依赖未交付 Schema。

@@ -55,6 +55,6 @@ tombstone, public history and path availability remain defined by Camp Attachmen
 
 - [Camp Message Send v11](camp-message-send-v11.md)
 - [Camp Attachment v4](camp-attachment-v4.md)
-- [Message Delivery v5](message-delivery-v5.md)
+- [Message Delivery v7](message-delivery-v7.md)
 - [Built-in Tool Transport v19](builtin-tool-transport-v19.md)
 - [V1.19-D02](../versions/v1.19/decisions.md#v1-19-d02)

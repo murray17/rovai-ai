@@ -11,8 +11,8 @@ last_updated: 2026-08-26
 
 # Rovai-ai v1.29：Camp 动态队员管理
 
-> 当前状态：Core、Desktop IPC、Renderer、自动化门禁与隔离真实 App 验收均已完成。本轮按用户要求只
-> 推送独立 worktree 分支，不创建 PR、不合并 `main`，也不替换当前 App。
+> 当前状态：动态 Camp membership 的 Core、Desktop IPC、Renderer、自动化门禁与隔离真实 App 验收均已完成；
+> 后继 Message Delivery zero-attempt cancellation hotfix 已完成实现与自动化验证，不替换当前 App。
 
 前置版本：[v1.28 Grok Build + MiniMax M3](../v1.28/README.md)已按冻结时事实转为 historical。
 
@@ -24,8 +24,10 @@ reconciliation 完成已接受工作的正式结算。
 
 ## 交付范围
 
-- Data Contract 升级为 `v1.23 / projection schema 64`，Migration 110 增加 Camp membership generation、
-  membership reconciliation、外部来源绑定和 Delivery admission membership version；旧非终态技术工作 clean break；
+- Migration 110 建立 `v1.23 / projection schema 64`，增加 Camp membership generation、membership
+  reconciliation、外部来源绑定和 Delivery admission membership version；旧非终态技术工作 clean break；
+- Migration 111 将当前 Data Contract 升为 `v1.24 / projection schema 65`，只放宽 Message Delivery 的零 attempt
+  cancelled terminal；显式/批量取消共用同一转换，迟到 projection completion 和 restart 不能复活终态；
 - 新增 `camps.members.add`、`camps.members.removalPreview`、`camps.members.remove` Desktop API；增加使用
   exact membership generation/version 的添加、预览和移除命令；
 - 添加不创建 Conversation，也不修改已冻结 AgentRun 的 Collaboration State；曾离开的 Agent 再次添加仍是一次
@@ -62,15 +64,15 @@ reconciliation 完成已接受工作的正式结算。
 
 验收状态由[实施计划](implementation-plan.md)维护。交付必须覆盖 add/remove 幂等和冲突、最后成员、Lead
 替换、所有业务工具 exact-run fence、Delivery/Gather/terminal publication、Migration clean break、双主题与键盘
-交互。本轮交付止于经过验证并已 push 的独立分支；PR、`main` 合并和本机 App 替换等待后续明确指令。
+交互，以及从 current-main Migration 110 数据库执行 Migration 111 的零 attempt 取消与重启幂等回归。
 
 ## 跨版本文档影响
 
 | 范围 | 结论 | 证据或理由 |
 | --- | --- | --- |
 | Version lifecycle | 已更新 | 本概览、[实施计划](implementation-plan.md)、[决定](decisions.md)与[版本索引](../README.md)共同切换 `current_version`。 |
-| Decisions | 已更新 | [v1.29 决定](decisions.md)冻结 cutover/reconciliation、exact membership lifetime、稳定模型投影和受信外部来源边界。 |
-| Contracts | 已更新 | 新增 [Camp Membership v1](../../contracts/camp-membership-v1.md)，并升级 [Camp Open Projection v7](../../contracts/camp-open-projection-v7.md)、[Message Delivery v6](../../contracts/message-delivery-v6.md)、[Gather v4](../../contracts/gather-v4.md)及[Missing-Send Recovery Publication v2](../../contracts/missing-send-recovery-publication-v2.md)。 |
+| Decisions | 已更新 | [v1.29 决定](decisions.md)冻结 cutover/reconciliation、exact membership lifetime、稳定模型投影、受信外部来源边界及零 attempt 取消的独立后继迁移。 |
+| Contracts | 已更新 | 新增 [Camp Membership v1](../../contracts/camp-membership-v1.md)，并升级 [Camp Open Projection v7](../../contracts/camp-open-projection-v7.md)、[Message Delivery v7](../../contracts/message-delivery-v7.md)、[Gather v4](../../contracts/gather-v4.md)及[Missing-Send Recovery Publication v2](../../contracts/missing-send-recovery-publication-v2.md)。 |
 | Architecture | 已更新 | 新增[动态 Camp 队员关系](../../architecture/dynamic-camp-membership.md)，并同步 Camp open、A2A、Gather、Built-in 与基础不变量。 |
 | UI | 已更新 | [Camp 会话工作区](../../ui/components/conversation-workspace.md)冻结添加入口、成员菜单、移除预览、最后成员和 reconciliation 状态。 |
 | Runtime Activity | 确认无需更新 | 成员变化使用 Core 领域事件与既有 Run/Delivery terminal activity，不新增 Runtime activity kind。 |
