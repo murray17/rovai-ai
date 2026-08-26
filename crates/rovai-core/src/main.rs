@@ -11777,8 +11777,6 @@ fn codex_delta_batch_identity(incoming: &CodexIncoming) -> Option<(&str, &str, i
         "item/agentMessage/delta"
             | "item/reasoning/summaryTextDelta"
             | "item/plan/delta"
-            | "item/commandExecution/outputDelta"
-            | "command/exec/outputDelta"
             | "item/fileChange/patchUpdated"
     )
     .then_some((
@@ -11788,34 +11786,17 @@ fn codex_delta_batch_identity(incoming: &CodexIncoming) -> Option<(&str, &str, i
     ))
 }
 
-fn is_codex_command_output_delta(message: &Value) -> bool {
-    message
-        .get("method")
-        .and_then(Value::as_str)
-        .is_some_and(|method| {
-            matches!(
-                method,
-                "item/commandExecution/outputDelta" | "command/exec/outputDelta"
-            )
-        })
-}
-
-fn is_codex_command_output_delta_batch(messages: &[Value]) -> bool {
-    !messages.is_empty() && messages.iter().all(is_codex_command_output_delta)
-}
-
-fn codex_command_output_delta_matches_route(
-    message: &Value,
-    native_thread_id: &str,
-    native_turn_id: &str,
-) -> bool {
-    message.get("method").and_then(Value::as_str) == Some("item/commandExecution/outputDelta")
-        && message.pointer("/params/threadId").and_then(Value::as_str) == Some(native_thread_id)
-        && message.pointer("/params/turnId").and_then(Value::as_str) == Some(native_turn_id)
+fn is_codex_command_output_delta_notification(message: &Value) -> bool {
+    message.get("id").is_none()
         && message
-            .pointer("/params/itemId")
+            .get("method")
             .and_then(Value::as_str)
-            .is_some_and(|item_id| !item_id.trim().is_empty())
+            .is_some_and(|method| {
+                matches!(
+                    method,
+                    "item/commandExecution/outputDelta" | "command/exec/outputDelta"
+                )
+            })
 }
 
 fn acp_delta_batch_identity(
@@ -11977,6 +11958,11 @@ async fn process_codex_events(
                 _ = &mut shutdown => break,
             },
         };
+        if let CodexIncoming::Message { message, .. } = &incoming
+            && is_codex_command_output_delta_notification(message)
+        {
+            continue;
+        }
         let Some(mut runtime_route_permit) = core.planned_shutdown.enter_runtime_route().await
         else {
             break;
@@ -14233,37 +14219,6 @@ async fn process_runtime_usage_flusher(core: Arc<Core>, mut shutdown: oneshot::R
     }
 }
 
-async fn codex_command_output_delta_batch_admission_open(
-    core: &Core,
-    host_instance_id: &str,
-    agent_run_id: &str,
-    execution_epoch: i64,
-    messages: &[Value],
-) -> Result<bool> {
-    let Some(runtime) = core
-        .codex_cli
-        .get_agent_run_on_host(host_instance_id, agent_run_id, execution_epoch)
-        .await
-    else {
-        return Ok(false);
-    };
-    let Some((native_thread_id, native_turn_id)) = runtime.active_command_output_route().await
-    else {
-        return Ok(false);
-    };
-    if !messages.iter().all(|message| {
-        codex_command_output_delta_matches_route(message, &native_thread_id, &native_turn_id)
-    }) {
-        return Ok(false);
-    }
-    let database = core.database.lock().await;
-    ExecutionEvidenceService.command_output_delta_admission_open(
-        &database,
-        agent_run_id,
-        execution_epoch,
-    )
-}
-
 async fn process_agent_run_codex_delta_batch(
     core: &Arc<Core>,
     output: &mpsc::UnboundedSender<String>,
@@ -14273,27 +14228,6 @@ async fn process_agent_run_codex_delta_batch(
     messages: Vec<Value>,
     runtime_route_permit: &mut rovai_core::planned_shutdown::RuntimeRoutePermit,
 ) {
-    if is_codex_command_output_delta_batch(&messages) {
-        match codex_command_output_delta_batch_admission_open(
-            core,
-            host_instance_id,
-            agent_run_id,
-            execution_epoch,
-            &messages,
-        )
-        .await
-        {
-            Ok(true) => {}
-            Ok(false) => return,
-            Err(error) => {
-                eprintln!(
-                    "failed to apply the transient Command output fence for AgentRun {agent_run_id}: {error:#}"
-                );
-                return;
-            }
-        }
-        return;
-    }
     let prepared = match prepare_codex_delta_batch(&messages) {
         Ok(Some(prepared)) => prepared,
         Ok(None) => {
@@ -14455,6 +14389,9 @@ async fn process_agent_run_codex_message(
     message: Value,
     runtime_route_permit: &mut rovai_core::planned_shutdown::RuntimeRoutePermit,
 ) {
+    if is_codex_command_output_delta_notification(&message) {
+        return;
+    }
     let Some(runtime) = core
         .codex_cli
         .get_agent_run_on_host(host_instance_id, agent_run_id, execution_epoch)
@@ -14521,27 +14458,6 @@ async fn process_agent_run_codex_message(
         return;
     }
     let (event_type, payload) = codex::normalize_event(&method, &params);
-    if ExecutionEvidenceService::is_transient_command_output_event(event_type) {
-        match codex_command_output_delta_batch_admission_open(
-            core,
-            host_instance_id,
-            agent_run_id,
-            execution_epoch,
-            std::slice::from_ref(&message),
-        )
-        .await
-        {
-            Ok(true) => {}
-            Ok(false) => return,
-            Err(error) => {
-                eprintln!(
-                    "failed to apply the transient Command output fence for AgentRun {agent_run_id}: {error:#}"
-                );
-                return;
-            }
-        }
-        return;
-    }
     runtime.observe_agent_message(&method, &params).await;
     let evidence =
         match persist_runtime_evidence(core, agent_run_id, execution_epoch, event_type, &payload)
@@ -17272,10 +17188,7 @@ while IFS= read -r _ignored; do :; done
                 }
             }),
         };
-        assert_eq!(
-            codex_delta_batch_identity(&command_output_delta),
-            Some(("codex-host", "run-1", 2))
-        );
+        assert!(codex_delta_batch_identity(&command_output_delta).is_none());
         let CodexIncoming::Message {
             message: command_output_message,
             ..
@@ -17283,42 +17196,23 @@ while IFS= read -r _ignored; do :; done
         else {
             unreachable!()
         };
-        assert!(is_codex_command_output_delta_batch(std::slice::from_ref(
+        assert!(is_codex_command_output_delta_notification(
             &command_output_message
-        )));
-        assert!(codex_command_output_delta_matches_route(
-            &command_output_message,
-            "thread-1",
-            "turn-1"
-        ));
-        assert!(!codex_command_output_delta_matches_route(
-            &command_output_message,
-            "thread-1",
-            "turn-old"
-        ));
-        assert!(!codex_command_output_delta_matches_route(
-            &command_output_message,
-            "thread-old",
-            "turn-1"
         ));
         let legacy_output_delta = json!({
             "method": "command/exec/outputDelta",
             "params": {"itemId": "command-1", "delta": "legacy"}
         });
-        assert!(is_codex_command_output_delta(&legacy_output_delta));
-        assert!(!codex_command_output_delta_matches_route(
-            &legacy_output_delta,
-            "thread-1",
-            "turn-1"
+        assert!(is_codex_command_output_delta_notification(
+            &legacy_output_delta
         ));
-        let missing_item_id = json!({
+        let id_bearing_output_delta = json!({
+            "id": 7,
             "method": "item/commandExecution/outputDelta",
-            "params": {"threadId": "thread-1", "turnId": "turn-1", "delta": "late"}
+            "params": {"threadId": "thread-1", "turnId": "turn-1", "itemId": "command-1", "delta": "request"}
         });
-        assert!(!codex_command_output_delta_matches_route(
-            &missing_item_id,
-            "thread-1",
-            "turn-1"
+        assert!(!is_codex_command_output_delta_notification(
+            &id_bearing_output_delta
         ));
         assert!(
             prepare_codex_delta_batch(std::slice::from_ref(&command_output_message))

@@ -377,9 +377,15 @@ last_updated: 2026-08-26
   相邻 raw object 字段不公开；command 观察必须绑定同一原生 operation identity，terminal 优先采用自身当前的
   公共 command，仅在缺失时回退 started phase 缓存，不能要求 Renderer 从 digest、title、output 或私有
   terminal 还原。
-- Codex `command.output.delta` 只是 stdout/stderr 运输片段。未来新事件必须在同一 Host/Run/execution epoch、
-  Native Thread/Turn、active route 与 Run cancellation/terminal fence 下完成准入检查，随后直接丢弃；它不写
-  Execution Evidence、不推进 Canonical Activity、不创建 Managed Blob，也不进入 Renderer live event state。
+- Codex `command.output.delta` 只是 stdout/stderr 运输片段。未来无 `id` 的
+  `item/commandExecution/outputDelta` 在 Codex Host stdout ingress 的当前 Native Thread/Turn route 读锁内分类；
+  精确当前 route 与非空 `itemId` 记为 current delta，旧 Turn、已 deactivate/unbind、字段缺失及 legacy
+  `command/exec/outputDelta` 记为 rejected delta，两类都在构造或发送 `CodexIncoming` 前直接丢弃。带 `id` 的
+  同名 JSON-RPC request 不参与 early-drop，继续走既有 request response 路径；Core 的漏网防御在 shutdown route
+  permit、batching、Runtime lookup 和数据库读取前无条件丢弃 delta notification。因为没有任何 delta 接受态或可变
+  sink，该路径不再执行 Run/epoch/lease 数据库 admission；terminal 尚未被 Core 消费的竞态中即使分类为 current，
+  结果仍是丢弃。它不写 Execution Evidence、不推进 Canonical Activity、不创建 Managed Blob，也不进入 Renderer
+  live event state。
   `item/completed` 的 `aggregatedOutput` 是 Command 最终输出的唯一权威，大输出继续按既有阈值进入 Managed Blob。
   已存在的历史 delta Evidence/Blob 保持原样且仍可读取，本规则不迁移、删除、重写或重建历史。
 - Adapter 必须优先从原生 terminal semantic event 提供完整公开输出。若未来某个 Adapter 无法提供完整 terminal
