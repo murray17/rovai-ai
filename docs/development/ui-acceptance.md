@@ -1,7 +1,7 @@
 ---
 document_type: development-guide
 authority: desktop-ui-acceptance-infrastructure
-last_updated: 2026-08-24
+last_updated: 2026-08-26
 ---
 
 # 桌面 UI 验收与隔离数据
@@ -190,7 +190,7 @@ pnpm accept:member-lifecycle-ui
 
 ### Agent 执行过程门禁
 
-Renderer 的权威行为见 [Run Process Detail Surface v20](../contracts/run-process-detail-surface-v20.md) 与
+Renderer 的权威行为见 [Run Process Detail Surface v21](../contracts/run-process-detail-surface-v21.md) 与
 [当前 UI 详规：Camp 执行过程](../ui/components/conversation-workspace.md#camp-执行过程)。修改 AgentRun 分组、执行台、Drawer、
 Task Related execution、停止结果或 Inspector 页签后，至少运行：
 
