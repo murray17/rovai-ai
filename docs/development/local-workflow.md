@@ -1,7 +1,7 @@
 ---
 document_type: development-guide
 authority: local-development-workflow
-last_updated: 2026-08-25
+last_updated: 2026-08-26
 ---
 
 # 本地开发与 App 隔离流程
@@ -137,7 +137,7 @@ AI Agent 不得把 `open "$(pwd)/dist/mac-arm64/Rovai AI.app"` 当作打包验�
 
 日常安装版必须位于仓库和生成目录之外。把一个已验收构建提升为日常安装版属于显式用户操作，
 不是 `pnpm build`、`pnpm package:mac`、测试或 AI 收尾步骤。`package:mac` 是隔离验收用 ad-hoc 产物，
-不得复制到日常安装位置；日常提升只能使用 `pnpm package:mac:daily` 生成的固定签名产物和
+不得复制到日常安装位置；日常提升只能使用 `pnpm package:mac:daily` 生成并完成专用门禁的 ad-hoc 产物和
 `pnpm install:mac:daily` 安装门。提升前必须：
 
 1. 完成隔离 App 验收；
@@ -155,12 +155,13 @@ AI Agent 不得把 `open "$(pwd)/dist/mac-arm64/Rovai AI.app"` 当作打包验�
 
 ```bash
 pnpm package:mac:daily
-pnpm install:mac:daily -- --backup "/Applications/Rovai AI.backup-before-<timestamp>.app"
+pnpm install:mac:daily --backup "/Applications/Rovai AI.backup-before-<timestamp>.app"
 ```
 
 安装脚本以 no-follow 路径项检查准入 target 和 backup：任何既有 backup 路径项、以及符号链接 target 都在
 验签、复制或改名前 fail closed，dangling symlink 也不例外。脚本在源、同文件系统暂存和最终目标三个位置
-执行固定签名验证，并在最终验证失败时尽力恢复旧安装。交换开始前失败会明确报告旧安装仍在规范路径；若
+执行架构、Bundle ID 与 ad-hoc 签名验证，并在最终验证失败时尽力恢复旧安装。交换开始前失败会明确报告
+旧安装仍在规范路径；若
 宿主文件系统在回滚期间又拒绝改名，脚本会分别报告规范路径是旧安装、未验证候选或缺失，并保留可用的
 备份/失败候选位置，不会把不完整回滚误报成成功。需要管理员权限时，只提升安装脚本本身；不要以管理员
 身份执行依赖安装或构建。
@@ -171,7 +172,7 @@ pnpm install:mac:daily -- --backup "/Applications/Rovai AI.backup-before-<timest
 无需终止当前进程：
 
 1. 记录当前 App、Core 和 Helper 的 PID，并确认它们都来自同一个日常 `.app`；新构建必须通过
-   `package:mac:daily` 的固定签名与架构验证；
+   `package:mac:daily` 的 ad-hoc 签名、Bundle ID 与架构验证；
 2. 用 `install:mac:daily` 把新 bundle 复制到日常安装目录的唯一暂存路径；脚本验证暂存 bundle 后，将旧
    App 原子改名到不存在的显式备份路径，再把暂存 App 原子改名到规范路径，不修改 `userData`；
 3. 脚本从规范安装路径第三次验证新 App、Core 和 CLI；任一复制、改名或验证失败时，在不扩大清理范围的

@@ -49,13 +49,13 @@ test('installs only after source and same-volume stage verification', (context) 
   assert.equal(verified[2], target)
 })
 
-test('refuses an unverified source before changing the daily installation', (context) => {
+test('refuses a non-ad-hoc source before changing the daily installation', (context) => {
   const directory = mkdtempSync(join(tmpdir(), 'rovai-daily-reject-'))
   context.after(() => rmSync(directory, { recursive: true, force: true }))
   const source = join(directory, 'source.app')
   const target = join(directory, 'target.app')
   const backup = join(directory, 'backup.app')
-  writeFileSync(source, 'adhoc')
+  writeFileSync(source, 'certificate-signed')
   writeFileSync(target, 'old')
 
   assert.throws(() => installMacosDailyTransactionForTest({
@@ -63,7 +63,7 @@ test('refuses an unverified source before changing the daily installation', (con
     targetPath: target,
     backupPath: backup,
     arch: 'arm64',
-    verifyApp() { throw new Error('App uses an ad-hoc signature') },
+    verifyApp() { throw new Error('App is not ad-hoc signed') },
     copyApp() { throw new Error('copy must not run') }
   }), (error) => {
     assert.ok(error instanceof DailyMacosInstallError)
