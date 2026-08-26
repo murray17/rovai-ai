@@ -401,4 +401,33 @@ describe('AppUpdatesService', () => {
     expect(failing.install()).toBe(false)
     expect(failingUpdater.quitAndInstall).toHaveBeenCalledTimes(2)
   })
+
+  it('keeps a failed staged install retryable when an interval check fires', async () => {
+    const updater = new FakeUpdater()
+    const updates = service(updater)
+    updater.checkForUpdates.mockImplementation(async () => {
+      emitAvailable(updater)
+      return {}
+    })
+    updater.quitAndInstall.mockImplementation(() => {
+      throw new Error('installer unavailable')
+    })
+
+    await updates.check()
+    await updates.download()
+    expect(updates.install()).toBe(false)
+    expect(updates.get()).toMatchObject({
+      status: 'install_failed',
+      availableRelease: { version: '0.0.3' }
+    })
+
+    await expect(updates.check('interval')).resolves.toMatchObject({
+      status: 'install_failed',
+      availableRelease: { version: '0.0.3' }
+    })
+    expect(updater.checkForUpdates).toHaveBeenCalledOnce()
+    expect(updates.install()).toBe(false)
+    expect(updater.quitAndInstall).toHaveBeenCalledTimes(2)
+    expect(updater.downloadUpdate).toHaveBeenCalledOnce()
+  })
 })

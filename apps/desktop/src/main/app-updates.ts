@@ -511,6 +511,7 @@ function blocksCheck(status: AppUpdateSnapshot['status']): boolean {
     || status === 'downloading'
     || status === 'ready_to_install'
     || status === 'installing'
+    || status === 'install_failed'
 }
 
 function isFailureStatus(status: AppUpdateSnapshot['status']): boolean {
