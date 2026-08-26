@@ -96,6 +96,13 @@ App 的 `app-update.yml` 读取官方 `murray17/rovai-ai` GitHub Release 通道�
 `ROVAI_DISABLE_AUTO_UPDATE_CHECKS=1`，避免访问真实 Release 通道。该变量不对日常实例生效，也不构成
 更新功能或签名连续性的发布证据。完整状态合同见 [App Update v1](../contracts/app-update-v1.md)。
 
+[`build/release-notes.md`](../../build/release-notes.md) 是 macOS 与 Windows 共用的唯一发布说明源；
+`package.json#build.releaseInfo.releaseNotesFile` 必须显式指向它。首个非空行必须是
+`# Rovai AI v<package.json version>`，正文必须非空且不超过 100,000 字符。electron-builder 把其原始
+Markdown 写入 `latest-mac.yml` / `latest.yml` 的 `releaseNotes`，使 updater 不再把 GitHub Atom HTML
+fallback 当作页面日志内容。发布者不得手工维护另一份 manifest 日志，也不得为日志展示增加 Renderer
+GitHub 请求；版本提升必须在同一个 Release PR 中更新该文件。
+
 macOS 正式 Release 必须在同一个版本标签中上传以下完整集合：
 
 ```text
@@ -110,7 +117,8 @@ latest-mac.yml
 `rovai-macos-signed` 的组合 artifact。它的 `latest-mac.yml` 由
 `scripts/merge-macos-update-info.mjs` 合并，必须同时包含 arm64 与 x64 ZIP；发布者只能上传这份
 组合清单，不能任选一个架构构建出的单架构 `latest-mac.yml`。少任一 ZIP 或清单时，另一架构可能
-拿到错误更新包，因此发布必须 fail closed。
+拿到错误更新包，因此发布必须 fail closed。每个架构的 `scripts/verify-macos-release.mjs` 还必须验证
+清单日志与源 Markdown 完全相同；合并器拒绝两个架构之间任何稳定 Release 元数据差异。
 
 已发布的 v0.0.1 没有 ZIP/`latest-mac.yml`，旧 App 也没有自动安装能力，所以
 `v0.0.1 → v0.0.2` 是一次性手动迁移；从 v0.0.2 安装完成后，后续完整 Release 才能使用应用内升级。

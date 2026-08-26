@@ -15,6 +15,10 @@ import { release, tmpdir } from 'node:os'
 import { basename, join, relative, resolve } from 'node:path'
 import { createInterface } from 'node:readline'
 import { parse as parseYaml } from 'yaml'
+import {
+  assertUpdateInfoReleaseNotes,
+  configuredReleaseNotesFile
+} from './lib/release-notes.mjs'
 import { inspectPortableExecutable } from './lib/windows-pe.mjs'
 import { coreDataDirectoryArguments } from './lib/runtime-camp-files-root.mjs'
 
@@ -112,6 +116,13 @@ async function verifyUpdateArtifacts() {
   if (!updateInfo || updateInfo.version !== packageMetadata.version) {
     throw new Error('latest.yml has the wrong version')
   }
+  const releaseNotesPath = join(root, configuredReleaseNotesFile(packageMetadata))
+  assertUpdateInfoReleaseNotes({
+    updateInfo,
+    releaseNotes: await readFile(releaseNotesPath, 'utf8'),
+    version: packageMetadata.version,
+    manifestName: 'latest.yml'
+  })
   const installerName = basename(installer)
   const installerEntry = Array.isArray(updateInfo.files)
     ? updateInfo.files.find((entry) => entry?.url === installerName)
@@ -124,7 +135,7 @@ async function verifyUpdateArtifacts() {
   }
   const blockmapSize = (await stat(installerBlockmap)).size
   if (blockmapSize <= 0) throw new Error('NSIS updater blockmap is empty')
-  report.push('latest.yml: version, sha512 and size passed')
+  report.push('latest.yml: version, release notes, sha512 and size passed')
   report.push(`NSIS updater blockmap: ${relative(root, installerBlockmap)}`)
   return {
     updateInfo: {

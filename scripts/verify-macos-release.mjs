@@ -17,6 +17,10 @@ import {
   MACOS_SIGNING_POLICY,
   assertStableMacosSignature
 } from './lib/macos-signing-policy.mjs'
+import {
+  assertUpdateInfoReleaseNotes,
+  configuredReleaseNotesFile
+} from './lib/release-notes.mjs'
 
 const EXPECTED_APP_ID = MACOS_SIGNING_POLICY.appId
 const EXPECTED_AUTHORITY = MACOS_SIGNING_POLICY.authority
@@ -89,6 +93,13 @@ function verifyUpdateArtifacts() {
   if (!updateInfo || updateInfo.version !== packageMetadata.version) {
     throw new Error('latest-mac.yml has the wrong version')
   }
+  const releaseNotesPath = join(root, configuredReleaseNotesFile(packageMetadata))
+  assertUpdateInfoReleaseNotes({
+    updateInfo,
+    releaseNotes: readFileSync(releaseNotesPath, 'utf8'),
+    version: packageMetadata.version,
+    manifestName: 'latest-mac.yml'
+  })
   const zipName = basename(zipPath)
   const zipEntry = Array.isArray(updateInfo.files)
     ? updateInfo.files.find((entry) => entry?.url === zipName)
@@ -100,7 +111,7 @@ function verifyUpdateArtifacts() {
     throw new Error(`latest-mac.yml has the wrong size for ${zipName}`)
   }
   report.push(`Update ZIP: ${relative(root, zipPath)}`)
-  report.push('latest-mac.yml: version, sha512 and size passed')
+  report.push('latest-mac.yml: version, release notes, sha512 and size passed')
 }
 
 function artifactName(extension) {
