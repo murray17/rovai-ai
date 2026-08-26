@@ -50,8 +50,10 @@ pub struct Database {
     runtime_camp_files_root_identity_digest: String,
 }
 
-const CURRENT_DATA_CONTRACT_VERSION: &str = "v1.23";
-const CURRENT_PROJECTION_SCHEMA_VERSION: i64 = 64;
+const CURRENT_DATA_CONTRACT_VERSION: &str = "v1.24";
+const CURRENT_PROJECTION_SCHEMA_VERSION: i64 = 65;
+const V111_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.23";
+const V111_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION: i64 = 64;
 const V110_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.22";
 const V110_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION: i64 = 63;
 const V108_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.21";
@@ -173,6 +175,7 @@ struct CurrentMigrationState {
     v108: bool,
     v109: bool,
     v110: bool,
+    v111: bool,
 }
 
 impl CurrentMigrationState {
@@ -182,6 +185,51 @@ impl CurrentMigrationState {
             return false;
         }
         if contract == CURRENT_DATA_CONTRACT_VERSION && schema == CURRENT_PROJECTION_SCHEMA_VERSION
+        {
+            return self.v70
+                && self.v71
+                && self.v76
+                && self.v77
+                && self.v78
+                && self.v79
+                && self.v80
+                && self.v81
+                && self.v82
+                && self.v83
+                && self.v84
+                && self.v85
+                && self.v86
+                && self.v87
+                && self.v88
+                && self.v89
+                && self.v90
+                && self.v91
+                && self.v92
+                && self.v93
+                && self.v94
+                && self.v95
+                && self.v96
+                && self.v97
+                && self.v98
+                && self.v99
+                && self.v100
+                && self.v101
+                && self.v102
+                && self.v103
+                && self.v104
+                && self.v105
+                && self.v106
+                && self.v107
+                && self.v108
+                && self.v109
+                && self.v110
+                && self.v111;
+        }
+        if self.v111 {
+            return false;
+        }
+        if contract == V111_MIGRATION_SOURCE_DATA_CONTRACT_VERSION
+            && schema == V111_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION
         {
             return self.v70
                 && self.v71
@@ -1224,7 +1272,8 @@ fn load_current_migration_state(
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 107),
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 108),
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 109),
-               EXISTS(SELECT 1 FROM schema_migration WHERE version = 110)
+               EXISTS(SELECT 1 FROM schema_migration WHERE version = 110),
+               EXISTS(SELECT 1 FROM schema_migration WHERE version = 111)
         "#,
         [],
         |row| {
@@ -1270,6 +1319,7 @@ fn load_current_migration_state(
                 v108: row.get(38)?,
                 v109: row.get(39)?,
                 v110: row.get(40)?,
+                v111: row.get(41)?,
             })
         },
     )
@@ -2727,6 +2777,9 @@ impl Database {
             if !self.schema_migration_applied(110)? {
                 self.migrate_dynamic_camp_membership_v110()?;
             }
+            if !self.schema_migration_applied(111)? {
+                self.migrate_message_delivery_zero_attempt_cancellation_v111()?;
+            }
             if let Err(error) =
                 crate::notification::maintain_notification_episode_retention(self.connection())
             {
@@ -3106,6 +3159,9 @@ impl Database {
         }
         if !self.schema_migration_applied(110)? {
             self.migrate_dynamic_camp_membership_v110()?;
+        }
+        if !self.schema_migration_applied(111)? {
+            self.migrate_message_delivery_zero_attempt_cancellation_v111()?;
         }
         if let Err(error) =
             crate::notification::maintain_notification_episode_retention(self.connection())
@@ -15636,6 +15692,109 @@ impl Database {
         Ok(())
     }
 
+    fn migrate_message_delivery_zero_attempt_cancellation_v111(&mut self) -> Result<()> {
+        self.connection
+            .execute_batch("PRAGMA foreign_keys = OFF;")?;
+        let migration_result = (|| -> Result<()> {
+            let transaction = self
+                .connection
+                .transaction_with_behavior(TransactionBehavior::Immediate)?;
+            let current_schema: String = transaction.query_row(
+                "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'message_delivery'",
+                [],
+                |row| row.get(0),
+            )?;
+            let renamed_schema = if current_schema.contains("CREATE TABLE \"message_delivery\"") {
+                current_schema.replacen(
+                    "CREATE TABLE \"message_delivery\"",
+                    "CREATE TABLE message_delivery_v111",
+                    1,
+                )
+            } else {
+                current_schema.replacen(
+                    "CREATE TABLE message_delivery",
+                    "CREATE TABLE message_delivery_v111",
+                    1,
+                )
+            };
+            let interrupted_terminal_branch =
+                "OR (status = 'interrupted_before_dispatch' AND dispatch_attempt_count = 0)";
+            let expanded_terminal_branches = r#"OR (status = 'cancelled' AND dispatch_attempt_count = 0
+                        AND dispatch_phase = 'terminal')
+                    OR (status = 'interrupted_before_dispatch' AND dispatch_attempt_count = 0)"#;
+            let delivery_v111 = renamed_schema
+                .replace(
+                    "REFERENCES message_delivery(id)",
+                    "REFERENCES message_delivery_v111(id)",
+                )
+                .replacen(interrupted_terminal_branch, expanded_terminal_branches, 1);
+            if !delivery_v111.contains("CREATE TABLE message_delivery_v111")
+                || !delivery_v111.contains(expanded_terminal_branches)
+            {
+                anyhow::bail!(
+                    "v111 could not admit zero-attempt terminal Message Delivery cancellation"
+                );
+            }
+            let delivery_columns = table_columns(&transaction, "message_delivery")?
+                .into_iter()
+                .map(|column| format!("\"{}\"", column.replace('"', "\"\"")))
+                .collect::<Vec<_>>()
+                .join(", ");
+            let dependent_schema = {
+                let mut statement = transaction.prepare(
+                    r#"
+                    SELECT sql
+                    FROM sqlite_master
+                    WHERE tbl_name = 'message_delivery'
+                      AND type IN ('index', 'trigger')
+                      AND sql IS NOT NULL
+                    ORDER BY CASE type WHEN 'index' THEN 0 ELSE 1 END, name
+                    "#,
+                )?;
+                statement
+                    .query_map([], |row| row.get::<_, String>(0))?
+                    .collect::<rusqlite::Result<Vec<_>>>()?
+            };
+
+            transaction.execute_batch(&delivery_v111)?;
+            transaction.execute_batch(&format!(
+                "INSERT INTO message_delivery_v111({delivery_columns}) \
+                 SELECT {delivery_columns} FROM message_delivery;\n\
+                 DROP TABLE message_delivery;\n\
+                 ALTER TABLE message_delivery_v111 RENAME TO message_delivery;"
+            ))?;
+            for schema in dependent_schema {
+                transaction.execute_batch(&schema)?;
+            }
+            transaction.execute_batch(
+                r#"
+                UPDATE rovai_data_contract
+                SET contract_version = 'v1.24', projection_schema_version = 65,
+                    reset_reason = NULL, updated_at = datetime('now')
+                WHERE singleton = 1;
+
+                INSERT INTO schema_migration(version, applied_at)
+                VALUES (111, datetime('now'));
+                "#,
+            )?;
+            transaction.commit()?;
+            Ok(())
+        })();
+        let foreign_keys_result = self.connection.execute_batch("PRAGMA foreign_keys = ON;");
+        migration_result?;
+        foreign_keys_result?;
+        if let Some((table, row_id)) = self
+            .connection
+            .query_row("PRAGMA foreign_key_check", [], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+            })
+            .optional()?
+        {
+            anyhow::bail!("v111 migration left a foreign-key violation in {table} row {row_id}");
+        }
+        Ok(())
+    }
+
     fn migrate_runtime_entrypoint_locator_identity_v109(&mut self) -> Result<()> {
         let transaction = self
             .connection
@@ -20068,7 +20227,111 @@ impl Database {
 }
 
 #[cfg(test)]
+fn downgrade_current_schema_to_v110_source_for_test(connection: &Connection) {
+    let has_v111: bool = connection
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM schema_migration WHERE version = 111)",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    if !has_v111 {
+        return;
+    }
+    connection
+        .execute_batch("PRAGMA foreign_keys = OFF;")
+        .unwrap();
+    let current_schema: String = connection
+        .query_row(
+            "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'message_delivery'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    let expanded_terminal_branches = r#"OR (status = 'cancelled' AND dispatch_attempt_count = 0
+                        AND dispatch_phase = 'terminal')
+                    OR (status = 'interrupted_before_dispatch' AND dispatch_attempt_count = 0)"#;
+    let interrupted_terminal_branch =
+        "OR (status = 'interrupted_before_dispatch' AND dispatch_attempt_count = 0)";
+    let renamed_schema = if current_schema.contains("CREATE TABLE \"message_delivery\"") {
+        current_schema.replacen(
+            "CREATE TABLE \"message_delivery\"",
+            "CREATE TABLE message_delivery_v110_source",
+            1,
+        )
+    } else {
+        current_schema.replacen(
+            "CREATE TABLE message_delivery",
+            "CREATE TABLE message_delivery_v110_source",
+            1,
+        )
+    };
+    let source_schema = renamed_schema
+        .replace(
+            "REFERENCES message_delivery(id)",
+            "REFERENCES message_delivery_v110_source(id)",
+        )
+        .replacen(expanded_terminal_branches, interrupted_terminal_branch, 1);
+    assert!(source_schema.contains("CREATE TABLE message_delivery_v110_source"));
+    assert!(!source_schema.contains(expanded_terminal_branches));
+    let delivery_columns = table_columns(connection, "message_delivery")
+        .unwrap()
+        .into_iter()
+        .map(|column| format!("\"{}\"", column.replace('"', "\"\"")))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let dependent_schema = connection
+        .prepare(
+            r#"
+            SELECT sql
+            FROM sqlite_master
+            WHERE tbl_name = 'message_delivery'
+              AND type IN ('index', 'trigger')
+              AND sql IS NOT NULL
+            ORDER BY CASE type WHEN 'index' THEN 0 ELSE 1 END, name
+            "#,
+        )
+        .unwrap()
+        .query_map([], |row| row.get::<_, String>(0))
+        .unwrap()
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .unwrap();
+    connection.execute_batch(&source_schema).unwrap();
+    connection
+        .execute_batch(&format!(
+            "INSERT INTO message_delivery_v110_source({delivery_columns}) \
+             SELECT {delivery_columns} FROM message_delivery;\n\
+             DROP TABLE message_delivery;\n\
+             ALTER TABLE message_delivery_v110_source RENAME TO message_delivery;"
+        ))
+        .unwrap();
+    for schema in dependent_schema {
+        connection.execute_batch(&schema).unwrap();
+    }
+    connection
+        .execute_batch(
+            r#"
+            UPDATE rovai_data_contract
+            SET contract_version = 'v1.23', projection_schema_version = 64
+            WHERE singleton = 1;
+            DELETE FROM schema_migration WHERE version = 111;
+            PRAGMA foreign_keys = ON;
+            "#,
+        )
+        .unwrap();
+    assert_eq!(
+        connection
+            .query_row("SELECT COUNT(*) FROM pragma_foreign_key_check", [], |row| {
+                row.get::<_, i64>(0)
+            })
+            .unwrap(),
+        0
+    );
+}
+
+#[cfg(test)]
 fn downgrade_current_schema_to_v109_source_for_test(connection: &Connection) {
+    downgrade_current_schema_to_v110_source_for_test(connection);
     let has_v110: bool = connection
         .query_row(
             "SELECT EXISTS(SELECT 1 FROM schema_migration WHERE version = 110)",
@@ -20797,6 +21060,7 @@ mod tests {
             v108: version >= 108,
             v109: version >= 109,
             v110: version >= 110,
+            v111: version >= 111,
         }
     }
 
@@ -20807,6 +21071,12 @@ mod tests {
                 "current",
                 CURRENT_DATA_CONTRACT_VERSION,
                 CURRENT_PROJECTION_SCHEMA_VERSION,
+                111,
+            ),
+            (
+                "v1.23/schema-64 after dynamic Camp membership",
+                V111_MIGRATION_SOURCE_DATA_CONTRACT_VERSION,
+                V111_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION,
                 110,
             ),
             (
@@ -21033,7 +21303,7 @@ mod tests {
             );
         }
 
-        let current = migration_state_through(103);
+        let current = migration_state_through(111);
         let v092_source = migration_state_through(91);
         let mut missing_intermediate = current;
         missing_intermediate.v84 = false;
@@ -21103,7 +21373,7 @@ mod tests {
             )
             .expect("current contract marker should load");
 
-        assert_eq!(state, migration_state_through(110));
+        assert_eq!(state, migration_state_through(111));
         assert!(state.admits(&contract, schema));
         assert!(has_admissible_data_contract(
             &directory.join("rovai.sqlite")
@@ -23322,6 +23592,238 @@ mod tests {
     }
 
     #[test]
+    fn v111_upgrades_current_main_v110_and_keeps_zero_attempt_cancellation_terminal() {
+        let (mut database, directory) = crate::test_support::seeded_runtime_database();
+        let workspace = directory.join("v111-workspace");
+        std::fs::create_dir_all(&workspace).unwrap();
+        let collaboration = crate::collaboration::CollaborationService::default();
+        let camp = collaboration
+            .create_camp(
+                &mut database,
+                &crate::command::CommandEnvelope {
+                    command_id: Uuid::new_v4().to_string(),
+                    actor: crate::command::ActorRef::User {
+                        user_id: "test-user".to_string(),
+                    },
+                    camp_id: None,
+                    expected_versions: Vec::new(),
+                    execution_epoch: None,
+                    payload: crate::collaboration::CreateCampCommand::for_test(
+                        workspace.display().to_string(),
+                    ),
+                },
+            )
+            .unwrap();
+        let camp_id = camp.result.payload["campId"].as_str().unwrap().to_string();
+        let sent = collaboration
+            .send_test_camp_message(
+                &mut database,
+                &crate::command::CommandEnvelope {
+                    command_id: Uuid::new_v4().to_string(),
+                    actor: crate::command::ActorRef::User {
+                        user_id: "test-user".to_string(),
+                    },
+                    camp_id: Some(camp_id.clone()),
+                    expected_versions: Vec::new(),
+                    execution_epoch: None,
+                    payload: crate::collaboration::TestCampMessageCommand {
+                        camp_id: camp_id.clone(),
+                        draft_revision: None,
+                        body: "Migration 111 must preserve terminal cancellation".to_string(),
+                        prepared_attachment_ids: Vec::new(),
+                        address: crate::collaboration::TestCampMessageAddress::Default,
+                        reply_to_camp_message_id: None,
+                        execution: Some(crate::collaboration::ExecutionRequest {
+                            task_id: None,
+                            purpose: "Seed a current-main Message Delivery source".to_string(),
+                            completion_role: "required".to_string(),
+                            budget: None,
+                        }),
+                    },
+                },
+            )
+            .unwrap();
+        let source_run_id = sent.result.payload["agentRunIds"][0]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let camp_turn_id = sent.result.payload["campTurnId"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let message_id = sent.result.payload["campMessageId"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let now = chrono::Utc::now().to_rfc3339();
+        let delivery_id = Uuid::new_v4().to_string();
+        database
+            .connection()
+            .execute(
+                r#"
+                INSERT INTO message_delivery(
+                    id, camp_id, camp_turn_id, message_id,
+                    recipient_agent_id, recipient_canonical_position,
+                    recipient_digest, message_body_digest,
+                    source_agent_run_id, edge_kind,
+                    target_parent_agent_run_id, return_to_agent_run_id,
+                    a2a_root_agent_run_id, a2a_depth,
+                    ancestor_agent_ids_json, recipient_presentation_snapshot_json,
+                    frozen_snapshot_json, queue_sequence,
+                    status, dispatch_phase, wait_condition,
+                    dispatch_attempt_count, active_dispatch_attempt_id,
+                    scheduler_correlation_id, context_manifest_id,
+                    retry_generation, manual_intervention_required,
+                    version, created_at, updated_at
+                ) VALUES (
+                    ?1, ?2, ?3, ?4, ?5, 0,
+                    'sha256:recipient-v111', 'sha256:message-v111',
+                    ?6, 'forward', ?6, NULL, ?6, 1, '[]', '{}',
+                    '{"frozenContext":{"formatterVersion":21,"profileVersion":4}}',
+                    1, 'pending', 'never_attempted', NULL,
+                    0, NULL, NULL, NULL, 0, 0, 1, ?7, ?7
+                )
+                "#,
+                params![
+                    &delivery_id,
+                    &camp_id,
+                    &camp_turn_id,
+                    &message_id,
+                    MUWA_AGENT_ID,
+                    &source_run_id,
+                    &now,
+                ],
+            )
+            .unwrap();
+
+        downgrade_current_schema_to_v110_source_for_test(database.connection());
+        let source_marker: (String, i64, i64, i64) = database
+            .connection()
+            .query_row(
+                r#"
+                SELECT contract_version, projection_schema_version,
+                       (SELECT COUNT(*) FROM schema_migration WHERE version = 110),
+                       (SELECT COUNT(*) FROM schema_migration WHERE version = 111)
+                FROM rovai_data_contract WHERE singleton = 1
+                "#,
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )
+            .unwrap();
+        assert_eq!(source_marker, ("v1.23".to_string(), 64, 1, 0));
+        assert!(connection_has_admissible_data_contract(database.connection()).unwrap());
+        let source_write = database.connection().execute(
+            r#"
+            UPDATE message_delivery
+            SET status = 'cancelled', dispatch_phase = 'terminal',
+                failure_code = 'upgrade_test_cancelled',
+                updated_at = ?2, ended_at = ?2
+            WHERE id = ?1
+            "#,
+            params![&delivery_id, &now],
+        );
+        let source_error = source_write
+            .expect_err("the current-main v110 CHECK must reproduce the zero-attempt conflict");
+        match source_error {
+            rusqlite::Error::SqliteFailure(error, _) => {
+                assert_eq!(error.extended_code, 275);
+            }
+            other => panic!("expected SQLite CHECK constraint failure, got {other:?}"),
+        }
+        drop(database);
+
+        let upgraded = Database::open(&directory).expect("v110 source should migrate to v111");
+        let upgraded_marker: (String, i64, i64, i64, i64) = upgraded
+            .connection()
+            .query_row(
+                r#"
+                SELECT contract_version, projection_schema_version,
+                       (SELECT COUNT(*) FROM schema_migration WHERE version = 110),
+                       (SELECT COUNT(*) FROM schema_migration WHERE version = 111),
+                       (SELECT COUNT(*) FROM pragma_foreign_key_check)
+                FROM rovai_data_contract WHERE singleton = 1
+                "#,
+                [],
+                |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                    ))
+                },
+            )
+            .unwrap();
+        assert_eq!(upgraded_marker, ("v1.24".to_string(), 65, 1, 1, 0));
+        assert_table_columns(
+            upgraded.connection(),
+            "message_delivery",
+            &["recipient_membership_version_at_admission"],
+            &[],
+        );
+        upgraded
+            .connection()
+            .execute(
+                r#"
+                UPDATE message_delivery
+                SET status = 'cancelled', dispatch_phase = 'terminal',
+                    wait_condition = NULL, active_dispatch_attempt_id = NULL,
+                    pre_dispatch_gate = NULL, projection_operation_id = NULL,
+                    manual_intervention_required = 0,
+                    failure_code = 'upgrade_test_cancelled',
+                    updated_at = ?2, ended_at = ?2
+                WHERE id = ?1
+                "#,
+                params![&delivery_id, &now],
+            )
+            .expect("v111 must admit zero-attempt terminal cancellation");
+        drop(upgraded);
+
+        let mut restarted = Database::open(&directory).expect("v111 restart should be idempotent");
+        crate::message_delivery::mark_unstarted_deliveries_interrupted_before_dispatch(
+            &mut restarted,
+        )
+        .unwrap();
+        let restarted_state: (String, String, i64, i64, String, i64) = restarted
+            .connection()
+            .query_row(
+                r#"
+                SELECT status, dispatch_phase, dispatch_attempt_count,
+                       (SELECT COUNT(*) FROM schema_migration WHERE version = 111),
+                       (SELECT contract_version FROM rovai_data_contract WHERE singleton = 1),
+                       (SELECT projection_schema_version FROM rovai_data_contract WHERE singleton = 1)
+                FROM message_delivery WHERE id = ?1
+                "#,
+                [&delivery_id],
+                |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                        row.get(5)?,
+                    ))
+                },
+            )
+            .unwrap();
+        assert_eq!(
+            restarted_state,
+            (
+                "cancelled".to_string(),
+                "terminal".to_string(),
+                0,
+                1,
+                "v1.24".to_string(),
+                65,
+            )
+        );
+        drop(restarted);
+        std::fs::remove_dir_all(directory).expect("temporary database should be removable");
+    }
+
+    #[test]
     fn v110_clean_breaks_nonterminal_runs_and_installs_membership_fences() {
         let directory = std::env::temp_dir().join(format!("rovai-db-v110-test-{}", Uuid::new_v4()));
         let database = crate::test_support::fresh_schema_database_fast_at(&directory);
@@ -23402,7 +23904,7 @@ mod tests {
         downgrade_current_schema_to_v109_source_for_test(database.connection());
         drop(database);
 
-        let reopened = Database::open(&directory).expect("v109 source should migrate to v110");
+        let reopened = Database::open(&directory).expect("v109 source should migrate through v111");
         assert_eq!(
             reopened
                 .connection()
@@ -23410,6 +23912,7 @@ mod tests {
                     r#"
                     SELECT contract_version, projection_schema_version,
                            (SELECT COUNT(*) FROM schema_migration WHERE version = 110),
+                           (SELECT COUNT(*) FROM schema_migration WHERE version = 111),
                            (SELECT membership_generation FROM camp WHERE id = 'camp-v109')
                     FROM rovai_data_contract WHERE singleton = 1
                     "#,
@@ -23418,11 +23921,12 @@ mod tests {
                         row.get::<_, String>(0)?,
                         row.get::<_, i64>(1)?,
                         row.get::<_, i64>(2)?,
-                        row.get::<_, i64>(3)?
+                        row.get::<_, i64>(3)?,
+                        row.get::<_, i64>(4)?
                     )),
                 )
                 .unwrap(),
-            ("v1.23".to_string(), 64, 1, 1)
+            ("v1.24".to_string(), 65, 1, 1, 1)
         );
         assert_eq!(
             reopened

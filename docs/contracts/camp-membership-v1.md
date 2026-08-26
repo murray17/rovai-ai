@@ -105,7 +105,7 @@ type CampMembershipReconciliationView = {
 
 每个 AgentRun 冻结创建时的 membership version。所有 Agent 业务工具在 invocation 时必须同时验证 current
 Run/lease/binding 与 exact active membership version。Delivery 和 Gather 的附加规则分别由
-[Message Delivery v6](message-delivery-v6.md)与[Gather v4](gather-v4.md)拥有。终态 evidence 可以使用只允许
+[Message Delivery v7](message-delivery-v7.md)与[Gather v4](gather-v4.md)拥有。终态 evidence 可以使用只允许
 settlement 的窄路径；普通与自动 publication 仍必须匹配 exact lifetime。
 
 目标寻址与 source lifetime 是两条独立规则：旧 Run 的 Context 不补丁，但其新 send 可按 admission 时的当前

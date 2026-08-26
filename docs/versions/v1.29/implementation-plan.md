@@ -14,6 +14,8 @@ last_updated: 2026-08-26
 - [x] active member（包括 away）相同 capability overrides 保持 no-op，不同 overrides 显式 conflict；受信
   source 的 accepted no-op 正常推进 source reconciliation generation；
 - [x] 完成 Migration 110、membership generation/version、外部来源绑定与旧非终态工作 clean break；
+- [x] 独立完成 Migration 111 zero-attempt cancellation hotfix：从 current-main v110 数据库升级到
+  Data Contract v1.24/schema 65，显式/批量取消复用转换并清除 wait/attempt/projection association；
 - [x] 完成 add、removal preview、atomic cutover、durable reconciliation 与任务释放；
 - [x] 给 Agent 业务工具、Message Delivery、Gather completion 和公开输出增加 exact membership lifetime fence；
 - [x] 收口 ordinary outbound source lifetime：pending Delivery cutover、materialized target reconciliation 与
@@ -24,7 +26,10 @@ last_updated: 2026-08-26
 - [x] 运行完整自动化、文档治理和格式/Clippy 门禁；
 - [x] 使用隔离 userData 在真实 App 验收日/夜主题、键盘、添加、移除、冲突和恢复；
 - [x] 提交并推送 `rovai/dynamic-camp-membership` worktree 分支；
-- [x] 按用户最新范围把交付止于分支 push；不创建 PR、不合入 `main`、不替换本机 App。
+- [x] dynamic membership 基线已通过独立 PR 合入 `main`；zero-attempt cancellation 继续使用独立 PR，
+  不替换本机 App；
+- [x] 以真实 `projection_blocked` CampTurn Stop、显式 pending/interrupted 取消、已有 attempt 取消、迟到
+  projection success/failure、current-main v110→v111 升级及 restart 回归证明 cancelled terminal 单调；
 
 ## 验收原则
 
@@ -40,16 +45,18 @@ last_updated: 2026-08-26
 - `pnpm test`：76 个 Vitest 文件、533 个 Renderer/TypeScript 测试与 198 个 Node 协议测试通过；
 - `pnpm typecheck`、`cargo check --workspace --all-targets`、
   `cargo clippy --workspace --all-targets --all-features -- -D warnings` 通过；
+- `cargo test -p rovai-core --lib`：319/319 通过；其中 Migration 111 回归从 current-main 的
+  `v1.23 / schema 64 / migration 110` 数据库复现 SQLite 275，再升级到 `v1.24 / schema 65`，验证
+  zero-attempt cancellation 可写、Migration 111 重启幂等且 terminal Delivery 不复活；
 - `cargo test -p rovai-core --bin rovai`：25/25 通过；
-- `cargo test -p rovai-core --features slow-tests --lib slow_tests::`：288/288 通过，覆盖动态 membership、
+- `cargo test -p rovai-core --features slow-tests --lib slow_tests::`：289/289 通过，覆盖动态 membership、
   active-away no-op/source generation、当前名册 target admission、ordinary outbound source-lifetime
   cutover/dispatch/retry fence、exact-run business-tool fence、Delivery/Gather settlement 与 Missing-Send
   Recovery publication fence；
-- `DOCS_BASE_REF=2efe219cc91cc37bf2be30a5df41c027822219fa pnpm docs:check:ci` 通过；
+- `node --test scripts/benchmark/protocol/product-contract.test.mjs`、`pnpm docs:test`、`pnpm docs:check` 通过；
+- `DOCS_BASE_REF=6af4098c27de3df2b79908a2092465d4c040eb6d pnpm docs:check:ci` 通过；
 - `pnpm package:mac:unsigned` 通过；`pnpm accept:member-lifecycle-ui` 使用系统临时目录中的隔离 userData
   与打包 App 通过，覆盖最后成员禁用、模型详情、添加、移出预览、普通再次添加、日/夜主题、键盘、无横向
   溢出、重启持久化和旧库迁移；当前受限执行环境不允许 macOS/Chromium sandbox 初始化，因此仅该验收进程
   使用 `ROVAI_MEMBER_LIFECYCLE_ACCEPT_NO_SANDBOX=1`，产品默认启动参数未改变；
-- 默认库测试共 315 项，其中 314 项通过；唯一未通过项是既有 macOS Runtime sandbox 环境探针，系统
-  `/usr/bin/sandbox-exec` 在当前宿主直接返回 `sandbox_apply: Operation not permitted`。该环境限制已独立复现，
-  与本版本功能路径无关，未修改或退役测试。
+- 本次 `pnpm test:rust:pr` 三个分组全部通过，无忽略或失败测试。

@@ -11,7 +11,7 @@ last_updated: 2026-08-26
 本文件定义 v0.45 以后 Agent-to-Agent 协作的长期组件边界。字段级输入、错误和状态合同
 分别见 [Camp Message Send v12](../contracts/camp-message-send-v12.md)、
 [Current User Attention v4](../contracts/current-user-attention-v4.md)、
-[Message Delivery v6](../contracts/message-delivery-v6.md)、
+[Message Delivery v7](../contracts/message-delivery-v7.md)、
 [Missing-Send Recovery Publication v2](../contracts/missing-send-recovery-publication-v2.md)、
 [Camp History Retrieval v2](../contracts/camp-history-v2.md)；决策理由见
 [Message Delivery 不变量](foundational-invariants.md#collaboration-delivery)、
@@ -101,7 +101,7 @@ Message Delivery Dispatch Pump 是投递、排队和物化的唯一权威。它�
 recipient、message、Task、`forward | return` edge、target lineage 和 presentation snapshot，不重新
 解析正文或扩大目标。
 
-Message Delivery v6 以 `deliveryKind`、`dispatchDisposition`、`completionRole`、可选 pre-dispatch gate 和冻结的
+Message Delivery v7 以 `deliveryKind`、`dispatchDisposition`、`completionRole`、可选 pre-dispatch gate 和冻结的
 `recipientMembershipVersionAtAdmission` 形成 closed union。普通
 public A2A 继续拥有 message/edge/lineage；Gather 的精确 return 可以作为 `gather_captured` 直接 settled，
 但其 CampMessage 始终公开；Barrier 创建的 `gather_completion` 没有公开 recipient/edge lineage，却继续进入
@@ -130,6 +130,12 @@ accepted/pending (no attempt)
 一次实际 dispatch attempt 必须先留下可恢复的 attempt fence。若 Core 在该 fence 建立前崩溃，
 Delivery 终态为 `interrupted_before_dispatch`，不能被启动、恢复、Camp 打开、新消息、Run
 结束、Runtime 恢复或容量事件隐式重新排队。用户只能对这条 Delivery 显式 Retry 或 Cancel。
+
+Cancel 是单调终态，不以是否已有 attempt 为前提。`pending` 的 `never_attempted | projection_blocked` 或
+`interrupted_before_dispatch` 可以直接转为 `cancelled + terminal + attempt=0`，不得伪造 attempt。已经有 attempt
+时保留正数 count，并把当前 attempting/waiting attempt 终结为 cancelled。显式取消与 CampTurn/预算批量取消复用
+同一底层转换，同时清除 wait、active attempt、pre-dispatch gate 与 projection operation association；迟到的
+projection success/failure、普通 Pump 和 startup recovery 都只允许推进仍为 pending 的匹配行，不能复活终态。
 
 已经建立过 attempt、但因 `target_busy`、`runtime_unavailable` 或
 `capacity_unavailable` 暂时阻塞的 Delivery 保持 pending，并记录 waitCondition。只有同一
