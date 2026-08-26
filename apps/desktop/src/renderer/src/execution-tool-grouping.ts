@@ -81,10 +81,6 @@ export function toolActivityGroupPresentation(
   const failed = statuses.filter((status) => status === 'failed').length
   const stopped = statuses.filter((status) => status === 'stopped').length
   const recorded = statuses.filter((status) => status === 'recorded').length
-  const settled = completed + failed + stopped + recorded
-  const settledCountLabel = recorded > 0
-    ? `已汇总 ${settled} 项操作`
-    : `已执行 ${settled} 项操作`
 
   if (activeIndex >= 0) {
     const status = statuses[activeIndex]
@@ -102,13 +98,14 @@ export function toolActivityGroupPresentation(
   }
 
   if (isLiveTail && runStatus === 'running') {
+    const currentTitle = items[items.length - 1].step.title
     return {
       status: 'running',
       statusLabel: '执行中',
       primary: '执行中',
-      currentTitle: null,
-      countLabel: settledCountLabel,
-      accessibleLabel: `执行中；${settledCountLabel}`
+      currentTitle,
+      countLabel: null,
+      accessibleLabel: `执行中：${currentTitle}`
     }
   }
 
