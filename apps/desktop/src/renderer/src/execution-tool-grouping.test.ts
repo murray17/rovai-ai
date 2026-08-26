@@ -54,7 +54,7 @@ describe('execution Tool grouping', () => {
     expect(groupConsecutiveToolItems([tool('one')])[0].key).toBe(grouped[0].key)
   })
 
-  it('shows the last active Tool and keeps the settled count in the running summary', () => {
+  it('shows only the last active Tool while an operation is in progress', () => {
     const presentation = toolActivityGroupPresentation([
       tool('one'),
       tool('two', 'running'),
@@ -66,8 +66,8 @@ describe('execution Tool grouping', () => {
       statusLabel: '等待审批',
       primary: '等待审批',
       currentTitle: '指令 three',
-      countLabel: '已执行 1 项操作',
-      accessibleLabel: '等待审批：指令 three；已执行 1 项操作'
+      countLabel: null,
+      accessibleLabel: '等待审批：指令 three'
     })
 
     expect(toolActivityGroupPresentation([
@@ -76,7 +76,7 @@ describe('execution Tool grouping', () => {
     ], 'running')).toMatchObject({
       status: 'running',
       statusLabel: '执行中',
-      countLabel: '已执行 1 项操作'
+      countLabel: null
     })
 
     expect(toolActivityGroupPresentation([
@@ -88,16 +88,16 @@ describe('execution Tool grouping', () => {
     ], 'running')).toMatchObject({
       primary: '执行中',
       currentTitle: '指令 five',
-      countLabel: '已执行 4 项操作',
-      accessibleLabel: '执行中：指令 five；已执行 4 项操作'
+      countLabel: null,
+      accessibleLabel: '执行中：指令 five'
     })
 
     expect(toolActivityGroupPresentation([
       tool('one', 'recorded'),
       tool('two', 'running')
     ], 'running')).toMatchObject({
-      countLabel: '已汇总 1 项操作',
-      accessibleLabel: '执行中：指令 two；已汇总 1 项操作'
+      countLabel: null,
+      accessibleLabel: '执行中：指令 two'
     })
   })
 
@@ -120,6 +120,37 @@ describe('execution Tool grouping', () => {
       status: 'recorded',
       statusLabel: '已记录',
       primary: '已汇总 1 项操作',
+      countLabel: null
+    })
+  })
+
+  it('keeps a settled trailing Tool group active until the running Run reaches a real boundary', () => {
+    expect(toolActivityGroupPresentation([
+      tool('one'),
+      tool('two', 'failed'),
+      tool('three')
+    ], 'running', true)).toEqual({
+      status: 'running',
+      statusLabel: '执行中',
+      primary: '执行中',
+      currentTitle: null,
+      countLabel: '已执行 3 项操作',
+      accessibleLabel: '执行中；已执行 3 项操作'
+    })
+
+    expect(toolActivityGroupPresentation([
+      tool('one', 'recorded')
+    ], 'running', true)).toMatchObject({
+      status: 'running',
+      primary: '执行中',
+      countLabel: '已汇总 1 项操作'
+    })
+
+    expect(toolActivityGroupPresentation([
+      tool('one')
+    ], 'succeeded', true)).toMatchObject({
+      status: 'completed',
+      primary: '已执行 1 项操作',
       countLabel: null
     })
   })
@@ -150,7 +181,7 @@ describe('execution Tool grouping', () => {
     const items = [tool('one', 'running')]
     expect(toolActivityGroupHasActiveTool(items, 'running')).toBe(true)
     expect(toolActivityGroupHasActiveTool(items, 'cancelled')).toBe(false)
-    expect(toolActivityGroupPresentation(items, 'cancelled')).toMatchObject({
+    expect(toolActivityGroupPresentation(items, 'cancelled', true)).toMatchObject({
       status: 'stopped',
       statusLabel: '已停止',
       countLabel: null

@@ -4216,12 +4216,69 @@ describe('task event projections', () => {
     }))
     expect(markup).toContain('tool-call-static')
     expect(markup).toContain('class="tool-activity-group status-running"')
-    expect(markup).toContain('aria-label="执行中：检查工作区状态；已执行 0 项操作"')
+    expect(markup).toContain('aria-label="执行中：检查工作区状态"')
+    expect(markup).not.toContain('class="tool-group-count"')
     expect(markup).toContain('aria-live="polite"')
     expect(markup).not.toContain('<span>正在处理</span>')
     expect(markup).not.toContain('<details class="process-action tool-call-disclosure')
     expect(markup).toContain('tool-call-disclosure-slot is-placeholder')
     expect(markup).not.toContain('>execute<')
+  })
+
+  it('keeps the settled live-tail Tool group active until a non-Tool boundary arrives', () => {
+    const settledTool = {
+      key: 'tool:settled',
+      kind: 'tool' as const,
+      step: {
+        id: 'tool-settled',
+        title: 'pnpm test',
+        detail: 'Tests passed',
+        status: 'completed' as const,
+        activityDomain: 'shell',
+        toolName: null,
+        credibility: 'runtime_structured' as const
+      }
+    }
+    const run: AgentRunView = {
+      id: 'run-live-tail', campTurnId: 'turn-live-tail', conversationId: 'conversation-live-tail',
+      agentId: 'agent-live-tail', taskId: null, responsibilityKey: 'direct:agent-live-tail',
+      responsibilityGeneration: 0, purpose: '验证连续操作摘要', completionRole: 'required',
+      status: 'running', waitReason: null, cancelRequestedAt: null, cancelReasonCode: null,
+      cancelAcknowledgedAt: null, executionEpoch: 1, terminalResolutionSource: null,
+      terminalReasonCode: null, failure: null, runtimeModel: null,
+      permissionSemantics: 'runtime_managed_v2', invocationKind: 'direct',
+      triggerDeliveryGeneration: 0, a2aParentAgentRunId: null, a2aRootAgentRunId: null,
+      a2aDepth: 0, executionEvidenceCount: 1, hasUnsettledExternalEffects: false,
+      workspace: { path: '/repo' }, startingGitObservation: null, endingGitObservation: null,
+      version: 1, createdAt: '2026-08-26T00:00:00Z', startedAt: '2026-08-26T00:00:01Z',
+      endedAt: null, updatedAt: '2026-08-26T00:00:02Z'
+    }
+
+    const liveTailMarkup = renderToStaticMarkup(createElement(RunExecutionDisclosure, {
+      run,
+      progress: { items: [settledTool] },
+      campId: 'camp-live-tail',
+      focused: true
+    }))
+    expect(liveTailMarkup).toContain('class="tool-activity-group status-running"')
+    expect(liveTailMarkup).toContain('aria-label="执行中；已执行 1 项操作"')
+    expect(liveTailMarkup).toContain('class="tool-group-count"')
+    expect(liveTailMarkup).not.toContain('<span>正在处理</span>')
+
+    const boundaryMarkup = renderToStaticMarkup(createElement(RunExecutionDisclosure, {
+      run,
+      progress: {
+        items: [
+          settledTool,
+          { key: 'narration:boundary', kind: 'narration', body: '继续检查结果。' }
+        ]
+      },
+      campId: 'camp-live-tail',
+      focused: true
+    }))
+    expect(boundaryMarkup).toContain('class="tool-activity-group status-completed"')
+    expect(boundaryMarkup).toContain('aria-label="已执行 1 项操作；状态：全部成功"')
+    expect(boundaryMarkup).toContain('<span>正在处理</span>')
   })
 
   it('keeps complete Built-in Camp public results behind nested lazy Tool rows', () => {

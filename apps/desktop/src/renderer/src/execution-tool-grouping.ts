@@ -65,7 +65,8 @@ export function toolActivityGroupHasActiveTool(
 
 export function toolActivityGroupPresentation(
   items: ToolProgressItem[],
-  runStatus: AgentRunView['status']
+  runStatus: AgentRunView['status'],
+  isLiveTail = false
 ): ToolActivityGroupPresentation {
   const statuses = items.map((item) => activityStatusForAgentRun(item.step.status, runStatus))
   let activeIndex = -1
@@ -81,22 +82,33 @@ export function toolActivityGroupPresentation(
   const stopped = statuses.filter((status) => status === 'stopped').length
   const recorded = statuses.filter((status) => status === 'recorded').length
   const settled = completed + failed + stopped + recorded
+  const settledCountLabel = recorded > 0
+    ? `已汇总 ${settled} 项操作`
+    : `已执行 ${settled} 项操作`
 
   if (activeIndex >= 0) {
     const status = statuses[activeIndex]
     const primary = status === 'waiting' ? '等待审批' : '执行中'
     const currentTitle = items[activeIndex].step.title
     const statusLabel = status === 'waiting' ? '等待审批' : '执行中'
-    const countLabel = recorded > 0
-      ? `已汇总 ${settled} 项操作`
-      : `已执行 ${settled} 项操作`
     return {
       status,
       statusLabel,
       primary,
       currentTitle,
-      countLabel,
-      accessibleLabel: `${primary}：${currentTitle}；${countLabel}`
+      countLabel: null,
+      accessibleLabel: `${primary}：${currentTitle}`
+    }
+  }
+
+  if (isLiveTail && runStatus === 'running') {
+    return {
+      status: 'running',
+      statusLabel: '执行中',
+      primary: '执行中',
+      currentTitle: null,
+      countLabel: settledCountLabel,
+      accessibleLabel: `执行中；${settledCountLabel}`
     }
   }
 
