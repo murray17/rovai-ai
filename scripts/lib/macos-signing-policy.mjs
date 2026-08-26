@@ -5,6 +5,21 @@ export const MACOS_SIGNING_POLICY = Object.freeze({
   certificateSha256: '875C6F486E223AB1889A2AD63860FBE48F7E8C0E4D94832656896BA5DA4EF82E'
 })
 
+export function assertAdhocMacosSignature(label, {
+  details,
+  designatedRequirement
+}) {
+  if (!/^Signature=adhoc$/m.test(details)) {
+    throw new Error(`${label} is not ad-hoc signed`)
+  }
+  if (/^Authority=/m.test(details)) {
+    throw new Error(`${label} ad-hoc signature unexpectedly has a certificate authority`)
+  }
+  if (!/designated\s*=>\s*cdhash\b/i.test(designatedRequirement)) {
+    throw new Error(`${label} ad-hoc signature is missing a CDHash designated requirement`)
+  }
+}
+
 export function assertStableMacosSignature(label, {
   details,
   designatedRequirement,

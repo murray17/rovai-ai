@@ -1,6 +1,6 @@
 import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { verifyMacosApp } from './lib/macos-app-verification.mjs'
+import { verifyAdhocMacosApp } from './lib/macos-app-verification.mjs'
 
 const root = resolve(fileURLToPath(new URL('..', import.meta.url)))
 const arch = process.argv[2]
@@ -16,11 +16,10 @@ if (arch !== 'arm64' && arch !== 'x64') {
 }
 
 try {
-  const result = verifyMacosApp(appPath, arch, { root })
-  console.log(`Stable macOS ${result.architecture} App signature verified`)
+  const result = verifyAdhocMacosApp(appPath, arch, { root })
+  console.log(`Ad-hoc macOS ${result.architecture} App signature verified`)
   console.log(`App: ${result.appPath}`)
-  console.log(`Authority: ${result.authority}`)
-  console.log(`Certificate root: ${result.certificateRoot}`)
+  console.log(`Signature: ${result.signature}`)
 } catch (error) {
   console.error(error instanceof Error ? error.message : String(error))
   process.exit(1)

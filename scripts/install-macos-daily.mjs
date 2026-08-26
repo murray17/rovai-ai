@@ -20,7 +20,7 @@ try {
     arch,
     root
   })
-  console.log('Stable-signed daily macOS App installed')
+  console.log('Ad-hoc-signed local daily macOS App installed')
   console.log(`Source retained: ${result.sourcePath}`)
   console.log(`Installed: ${result.targetPath}`)
   console.log(`Backup: ${result.backupPath ?? 'none (target did not previously exist)'}`)

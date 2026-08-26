@@ -3,7 +3,7 @@ import { existsSync, readFileSync } from 'node:fs'
 import { basename, join, resolve } from 'node:path'
 import {
   MACOS_SIGNING_POLICY,
-  assertStableMacosSignature
+  assertAdhocMacosSignature
 } from './macos-signing-policy.mjs'
 
 const EXPECTED_ARCHITECTURES = Object.freeze({
@@ -21,7 +21,7 @@ function defaultRun(command, args, cwd) {
   return output
 }
 
-export function verifyMacosApp(appPath, arch, options = {}) {
+export function verifyAdhocMacosApp(appPath, arch, options = {}) {
   const expectedArchitecture = EXPECTED_ARCHITECTURES[arch]
   if (!expectedArchitecture) throw new Error(`unsupported macOS architecture: ${arch}`)
 
@@ -36,7 +36,6 @@ export function verifyMacosApp(appPath, arch, options = {}) {
       label: 'App',
       path: resolvedAppPath,
       binaryPath: join(resolvedAppPath, 'Contents', 'MacOS', executableName),
-      expectedIdentifier: MACOS_SIGNING_POLICY.appId,
       deep: true
     },
     {
@@ -73,15 +72,14 @@ export function verifyMacosApp(appPath, arch, options = {}) {
     const requirementOutput = run('/usr/bin/codesign', ['-d', '-r-', target.path], root)
     const designatedRequirement = requirementOutput
       .split('\n')
-      .map((line) => line.trim())
+      .map((line) => line.trim().replace(/^#\s*/, ''))
       .find((line) => line.startsWith('designated =>'))
     if (!designatedRequirement) {
       throw new Error(`${target.label} has no designated requirement`)
     }
-    assertStableMacosSignature(target.label, {
+    assertAdhocMacosSignature(target.label, {
       details,
-      designatedRequirement,
-      expectedIdentifier: target.expectedIdentifier
+      designatedRequirement
     })
   }
 
@@ -100,7 +98,6 @@ export function verifyMacosApp(appPath, arch, options = {}) {
   return {
     appPath: resolvedAppPath,
     architecture: arch,
-    authority: MACOS_SIGNING_POLICY.authority,
-    certificateRoot: MACOS_SIGNING_POLICY.certificateRoot
+    signature: 'ad-hoc'
   }
 }
