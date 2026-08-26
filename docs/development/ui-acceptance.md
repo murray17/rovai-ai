@@ -190,7 +190,7 @@ pnpm accept:member-lifecycle-ui
 
 ### Agent 执行过程门禁
 
-Renderer 的权威行为见 [Run Process Detail Surface v22](../contracts/run-process-detail-surface-v22.md) 与
+Renderer 的权威行为见 [Run Process Detail Surface v23](../contracts/run-process-detail-surface-v23.md) 与
 [当前 UI 详规：Camp 执行过程](../ui/components/conversation-workspace.md#camp-执行过程)。修改 AgentRun 分组、执行台、Drawer、
 Task Related execution、停止结果或 Inspector 页签后，至少运行：
 
@@ -250,7 +250,7 @@ pnpm accept:runtime-activity-ui
   公开的 `tool_use.input.command` 仍渲染为可展开 disclosure，而不是不可操作的静态 Tool 行。同一
   AgentRun 的最大连续 Tool 默认进入收起组，narration、plan 与 diagnostic 必须截断分组；活动组摘要显示
   最后一条 running/waiting 操作且不同时追加累计数，终态组不把失败或 recorded 冒充成功。running Run 的
-  尾组在 Tool 间隙必须保持“执行中 · 已执行/已汇总 N 项操作”和 running 图标，不短暂切成终态，也不重复渲染
+  尾组在 Tool 间隙必须保持“执行中 · <最近一条指令>”和 running 图标，不短暂切成终态，也不重复渲染
   “正在处理”；真实非 Tool 或 Run 边界到达后才收口。组 summary 与所有 Tool 行都必须保持
   `16px 类型图标 / 可缩略名称 / 16px 状态轨 / 20px disclosure 轨` 四列；不可展开行保留末轨
   占位，组图标与摘要文字共享 16px 中心线；Shell、File、Git、Network、Permission、Runtime、Plan、Tool 和 Unknown 使用统一 16px 单色

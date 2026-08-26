@@ -3309,7 +3309,7 @@ function assertRuntimeRows(observed) {
     if (expected.agentId === activeAgentId) {
       assert(row.focusedStatus === 'running'
         && row.toolGroupLayouts[0]?.statusLabel === '执行中'
-        && row.toolGroupLayouts[0]?.summaryAriaLabel === '执行中；已执行 1 项操作'
+        && row.toolGroupLayouts[0]?.summaryAriaLabel === `执行中：${expected.expectedToolName}`
         && row.toolStates.length === 1
         && row.toolStates[0].label === '成功'
         && row.toolStates[0].status === 'completed',

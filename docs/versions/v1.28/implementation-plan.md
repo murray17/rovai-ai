@@ -59,7 +59,7 @@ Checklist 仍拥有完整通用步骤，本页只记录本版本的具体状态�
   pre-dispatch reconciliation 省略异常项、重建健康 catalog 并保持 Camp `ready`；新 Context 不投影 stale path，
   exact Authority 恢复后自动复活，unresolved writer intent 与 root/containment 安全错误继续 fail closed；
 - [x] 把同一 Run 内最大连续 Tool 收成 Renderer-only 摘要，保留 chronology 与 identity，活动态显示最后一条
-  非终态操作且不同时追加累计数，尾组间隙显示已结算总数，终态不追加结果文字；组内有成功即使用绿色
+  非终态操作且不同时追加累计数，尾组间隙继续显示最近一条具体指令，终态不追加结果文字；组内有成功即使用绿色
   状态、仅全部失败使用红色；精确 Tool 首次展开前不挂载完整结果，并覆盖失败、停止、仅记录、双主题、
   Inspector 与换位性能；
 - [x] running Run 的尾 Tool 组在操作间隙保持活动摘要和稳定高度，直到 narration/plan/diagnostic 或 Run 状态

@@ -4261,8 +4261,9 @@ describe('task event projections', () => {
       focused: true
     }))
     expect(liveTailMarkup).toContain('class="tool-activity-group status-running"')
-    expect(liveTailMarkup).toContain('aria-label="执行中；已执行 1 项操作"')
-    expect(liveTailMarkup).toContain('class="tool-group-count"')
+    expect(liveTailMarkup).toContain('aria-label="执行中：pnpm test"')
+    expect(liveTailMarkup).toContain('class="tool-group-current"')
+    expect(liveTailMarkup).not.toContain('class="tool-group-count"')
     expect(liveTailMarkup).not.toContain('<span>正在处理</span>')
 
     const boundaryMarkup = renderToStaticMarkup(createElement(RunExecutionDisclosure, {
