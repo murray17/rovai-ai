@@ -631,6 +631,30 @@ try {
   await waitForExpression(running.cdp,
     `document.querySelector('.camp-members-panel')?.getAttribute('data-state') === 'active'`)
 
+  const memberActionPresentation = await evaluate(running.cdp, `(() => {
+    const trigger = document.querySelector(
+      '.camp-member-action-button[aria-label=${JSON.stringify(`${membershipLead.displayName}的队员操作`)}]'
+    )
+    if (!(trigger instanceof HTMLElement)) return null
+    const rect = trigger.getBoundingClientRect()
+    const style = getComputedStyle(trigger)
+    return {
+      width: Math.round(rect.width),
+      height: Math.round(rect.height),
+      borderTopWidth: style.borderTopWidth,
+      dotPositions: [...trigger.querySelectorAll('circle')]
+        .map((circle) => circle.getAttribute('cx'))
+        .join(',')
+    }
+  })()`)
+  assert(
+    memberActionPresentation?.width === 28
+      && memberActionPresentation?.height === 28
+      && memberActionPresentation?.borderTopWidth === '0px'
+      && memberActionPresentation?.dotPositions === '3,8,13',
+    `Member action trigger is unexpected: ${JSON.stringify(memberActionPresentation)}`
+  )
+
   await focusElement(
     running.cdp,
     `.camp-member-action-button[aria-label=${JSON.stringify(`${membershipLead.displayName}的队员操作`)}]`
@@ -732,13 +756,21 @@ try {
     const dialog = document.querySelector('.camp-member-removal-dialog')
     return {
       title: dialog?.querySelector('h2')?.textContent?.trim(),
+      description: dialog?.querySelector('.app-dialog-description')?.textContent?.trim(),
+      hasBody: Boolean(dialog?.querySelector('.app-dialog-body')),
+      hasImpactList: Boolean(dialog?.querySelector('.app-dialog-impact-list')),
+      hasPlaceholderImpactCopy: /没有需要收拢|没有需要释放|没有待结算/.test(dialog?.textContent ?? ''),
       keepsHistory: dialog?.textContent?.includes('历史消息、执行证据与审计记录不会删除'),
       immediateFence: dialog?.textContent?.includes('立即阻止该队员的新消息与工具写入')
     }
   })()`)
   assert(
     removalPreview.title === `移出${membershipCandidate.displayName}？`
-      && removalPreview.keepsHistory
+      && removalPreview.description?.includes(`${membershipCandidate.displayName}将不再接收这里的新工作`)
+      && !removalPreview.hasBody
+      && !removalPreview.hasImpactList
+      && !removalPreview.hasPlaceholderImpactCopy
+      && !removalPreview.keepsHistory
       && removalPreview.immediateFence,
     `Removal preview is unexpected: ${JSON.stringify(removalPreview)}`
   )
@@ -1389,7 +1421,8 @@ try {
       campLastMemberRemovalVisibleAndDisabled: true,
       campRuntimeDetailsExpandableFromOverflowMenu: true,
       campAddRemoveAndOrdinaryReadd: true,
-      campRemovalPreviewExplainsFenceAndRetainedHistory: true,
+      campMemberActionUsesFramelessHorizontalOverflow: true,
+      campRemovalPreviewShowsOnlyActualImpact: true,
       campMembershipGenerationAndLifetimeMonotonic: true,
       horizontalOverflow: false
     },

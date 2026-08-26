@@ -2603,8 +2603,9 @@ button.task-event-card:focus-visible .task-card-chevron { color: var(--brand-ink
 .camp-inspector-member-state.is-away strong { color: var(--faint); }
 .camp-inspector-member-state .runtime-ready { color: var(--success); }
 .camp-inspector-member-state .runtime-attention { color: var(--attention); }
-.camp-member-action-button { display: grid; width: 28px; height: 28px; place-items: center; padding: 0 0 5px; border-radius: 6px; color: var(--faint); background: transparent; font-size: 12px; font-weight: 800; letter-spacing: -1px; cursor: pointer; }
-.camp-member-action-button:hover:not(:disabled), .camp-member-action-button[data-state="open"] { color: var(--ink); background: var(--surface-hover); }
+.camp-member-action-button { display: grid; width: 28px; height: 28px; place-items: center; padding: 0; border: 0; border-radius: 6px; color: var(--faint); background: transparent; cursor: pointer; }
+.camp-member-action-button > svg { width: 16px; height: 16px; fill: currentColor; }
+.camp-member-action-button:hover:not(:disabled), .camp-member-action-button:focus-visible, .camp-member-action-button[data-state="open"] { color: var(--ink); background: var(--surface-hover); }
 .camp-member-action-button:disabled { cursor: not-allowed; opacity: .45; }
 .camp-member-menu { z-index: 210; width: 188px; max-width: calc(100vw - 20px); overflow: hidden; padding: 4px; border: 1px solid var(--line-strong); border-radius: 7px; color: var(--ink); background: var(--surface); box-shadow: var(--shadow-menu); }
 .camp-member-menu-item { display: grid; min-height: 40px; gap: 2px; padding: 6px 8px; border-radius: 5px; outline: 0; cursor: pointer; }
@@ -2628,6 +2629,10 @@ button.task-event-card:focus-visible .task-card-chevron { color: var(--brand-ink
 .camp-member-dialog-alert { margin-bottom: 11px; padding: 9px 10px; border-left: 3px solid var(--attention); color: var(--attention); background: var(--attention-soft); font-size: 10px; line-height: 1.5; }
 .camp-member-dialog-alert.is-success { border-left-color: var(--success); color: var(--success); background: var(--success-soft); }
 .camp-member-dialog-alert.is-danger { border-left-color: var(--danger); color: var(--danger); background: var(--danger-soft); }
+.camp-member-removal-dialog .app-dialog-impact { grid-template-columns: 18px minmax(0, 1fr); column-gap: 10px; row-gap: 2px; }
+.camp-member-removal-dialog .app-dialog-impact > svg { width: 16px; height: 16px; margin-top: 0; }
+.camp-member-removal-dialog .app-dialog-impact > strong { line-height: 16px; }
+.camp-member-removal-dialog .app-dialog-impact > span { grid-column: 2; }
 .camp-member-search-field { display: grid; grid-template-columns: 18px minmax(0, 1fr); align-items: center; gap: 7px; margin-bottom: 10px; padding: 0 10px; border: 1px solid var(--control-line); border-radius: 7px; background: var(--input); }
 .camp-member-search-field:focus-within { border-color: var(--brand); box-shadow: 0 0 0 2px var(--focus-soft); }
 .camp-member-search-field svg { width: 16px; height: 16px; fill: none; stroke: var(--faint); stroke-linecap: round; stroke-width: 1.6; }

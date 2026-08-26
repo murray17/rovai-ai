@@ -5717,6 +5717,24 @@ function CampMembersPanel({
     })
   }
 
+  const removalPreview = removalPreviewState.status === 'ready'
+    ? removalPreviewState.preview
+    : null
+  const removalDeliveryCount = removalPreview
+    ? removalPreview.pendingDeliveryCount + removalPreview.runningDeliveryCount
+    : 0
+  const removalMessageGatherCount = removalPreview
+    ? removalDeliveryCount + removalPreview.openGatherItemCount
+    : 0
+  const removalHasActualImpact = Boolean(removalPreview && (
+    removalPreview.nonTerminalAgentRunCount > 0
+    || removalPreview.openAssignedTaskCount > 0
+    || removalMessageGatherCount > 0
+    || removalPreview.isDefaultLead
+  ))
+  const showRemovalDialogBody = removalPreviewState.status !== 'ready'
+    || Boolean(removalPreview && (!removalPreview.removable || removalHasActualImpact))
+
   return (
     <section aria-label="当前会话队员">
       <div className="camp-members-summary">
@@ -5860,7 +5878,13 @@ function CampMembersPanel({
                     type="button"
                     aria-label={`${member.displayName}的队员操作`}
                     disabled={busy}
-                  >•••</button>
+                  >
+                    <svg viewBox="0 0 16 16" aria-hidden="true">
+                      <circle cx="3" cy="8" r="1.35" />
+                      <circle cx="8" cy="8" r="1.35" />
+                      <circle cx="13" cy="8" r="1.35" />
+                    </svg>
+                  </button>
                 </DropdownMenu.Trigger>
                 <DropdownMenu.Portal>
                   <DropdownMenu.Content
@@ -6006,60 +6030,61 @@ function CampMembersPanel({
           >
             <AppDialogHeader
               title={`移出${removalTarget?.displayName ?? '这位队员'}？`}
-              description="只影响当前会话，不会永久移除这位队员。"
+              description={`只影响当前会话：移出后，${removalTarget?.displayName ?? '这位队员'}将不再接收这里的新工作。`}
               descriptionId="camp-remove-member-description"
               icon="user"
               kicker="当前会话"
               closeDisabled={removeSubmitting}
             />
-            <AppDialogBody>
-              {(removalPreviewState.status === 'loading' || removalPreviewState.status === 'idle') && (
-                <div className="camp-member-preview-loading" aria-label="正在读取移出影响">
-                  <span /><span /><span className="is-short" />
-                </div>
-              )}
-              {(removalPreviewState.status === 'conflict' || removalPreviewState.status === 'error') && (
-                <div className={`camp-member-dialog-alert ${removalPreviewState.status === 'conflict' ? 'is-attention' : 'is-danger'}`} role="alert">
-                  {removalPreviewState.message}
-                </div>
-              )}
-              {removalPreviewState.status === 'ready' && (
-                <>
-                  {!removalPreviewState.preview.removable && (
-                    <div className="camp-member-dialog-alert is-danger" role="alert">
-                      会话至少保留 1 位队员，本次没有移出任何队员。
-                    </div>
-                  )}
-                  <AppDialogImpactList>
-                    <AppDialogImpact tone={removalPreviewState.preview.nonTerminalAgentRunCount > 0 ? 'warning' : 'keep'} icon="bolt" label="已开始的执行">
-                      {removalPreviewState.preview.nonTerminalAgentRunCount > 0
-                        ? `${removalPreviewState.preview.nonTerminalAgentRunCount} 个将停止接收新写入，并在后台收拢。`
-                        : '没有需要收拢的执行。'}
-                    </AppDialogImpact>
-                    <AppDialogImpact tone={removalPreviewState.preview.openAssignedTaskCount > 0 ? 'warning' : 'keep'} icon="keep" label="未完成任务">
-                      {removalPreviewState.preview.openAssignedTaskCount > 0
-                        ? `${removalPreviewState.preview.openAssignedTaskCount} 个任务将释放负责人。`
-                        : '没有需要释放负责人的任务。'}
-                    </AppDialogImpact>
-                    <AppDialogImpact tone={removalPreviewState.preview.pendingDeliveryCount + removalPreviewState.preview.runningDeliveryCount > 0 ? 'warning' : 'keep'} icon="info" label="消息与 Gather">
-                      {removalPreviewState.preview.pendingDeliveryCount + removalPreviewState.preview.runningDeliveryCount + removalPreviewState.preview.openGatherItemCount > 0
-                        ? `${removalPreviewState.preview.pendingDeliveryCount + removalPreviewState.preview.runningDeliveryCount} 个投递、${removalPreviewState.preview.openGatherItemCount} 个 Gather 项将正式结算。`
-                        : '没有待结算的消息或 Gather 项。'}
-                    </AppDialogImpact>
-                    {removalPreviewState.preview.isDefaultLead && (
-                      <AppDialogImpact tone="warning" icon="user" label="队长职责">
-                        {removalPreviewState.preview.nextDefaultLeadAgentId
-                          ? `将交给${profileById.get(removalPreviewState.preview.nextDefaultLeadAgentId)?.displayName ?? '另一位在队队员'}。`
-                          : '剩余队员都处于暂离状态，会话将暂时没有队长；有人归队后自动恢复。'}
-                      </AppDialogImpact>
+            {showRemovalDialogBody && (
+              <AppDialogBody>
+                {(removalPreviewState.status === 'loading' || removalPreviewState.status === 'idle') && (
+                  <div className="camp-member-preview-loading" aria-label="正在读取移出影响">
+                    <span /><span /><span className="is-short" />
+                  </div>
+                )}
+                {(removalPreviewState.status === 'conflict' || removalPreviewState.status === 'error') && (
+                  <div className={`camp-member-dialog-alert ${removalPreviewState.status === 'conflict' ? 'is-attention' : 'is-danger'}`} role="alert">
+                    {removalPreviewState.message}
+                  </div>
+                )}
+                {removalPreview && (
+                  <>
+                    {!removalPreview.removable && (
+                      <div className="camp-member-dialog-alert is-danger" role="alert">
+                        会话至少保留 1 位队员，本次没有移出任何队员。
+                      </div>
                     )}
-                    <AppDialogImpact tone="keep" icon="shield" label="继续保留">
-                      历史消息、执行证据与审计记录不会删除；已经发生的外部效果不会撤销。
-                    </AppDialogImpact>
-                  </AppDialogImpactList>
-                </>
-              )}
-            </AppDialogBody>
+                    {removalHasActualImpact && (
+                      <AppDialogImpactList>
+                        {removalPreview.nonTerminalAgentRunCount > 0 && (
+                          <AppDialogImpact tone="warning" icon="bolt" label="已开始的执行">
+                            {removalPreview.nonTerminalAgentRunCount} 个执行将停止接收新写入，并在后台收拢。
+                          </AppDialogImpact>
+                        )}
+                        {removalPreview.openAssignedTaskCount > 0 && (
+                          <AppDialogImpact tone="warning" icon="keep" label="未完成任务">
+                            {removalPreview.openAssignedTaskCount} 个任务将释放负责人，回到待分配状态。
+                          </AppDialogImpact>
+                        )}
+                        {removalMessageGatherCount > 0 && (
+                          <AppDialogImpact tone="warning" icon="info" label="消息与 Gather">
+                            {removalDeliveryCount} 个投递、{removalPreview.openGatherItemCount} 个 Gather 项将正式结算。
+                          </AppDialogImpact>
+                        )}
+                        {removalPreview.isDefaultLead && (
+                          <AppDialogImpact tone="warning" icon="user" label="队长职责">
+                            {removalPreview.nextDefaultLeadAgentId
+                              ? `将交给${profileById.get(removalPreview.nextDefaultLeadAgentId)?.displayName ?? '另一位在队队员'}。`
+                              : '剩余队员都处于暂离状态，会话将暂时没有队长；有人归队后自动恢复。'}
+                          </AppDialogImpact>
+                        )}
+                      </AppDialogImpactList>
+                    )}
+                  </>
+                )}
+              </AppDialogBody>
+            )}
             <AppDialogFooter note={removalPreviewState.status === 'ready' ? '提交后立即阻止该队员的新消息与工具写入。' : '请先读取 Core 权威影响。'}>
               <Dialog.Close asChild><button className="quiet-button" type="button" disabled={removeSubmitting}>取消</button></Dialog.Close>
               {(removalPreviewState.status === 'conflict' || removalPreviewState.status === 'error') && removalTarget && (

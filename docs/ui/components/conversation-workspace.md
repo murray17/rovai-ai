@@ -53,14 +53,17 @@ Camp 可以回到 Quick Chat。Notification navigation、恢复位置写入和�
 时保留失败项和明确原因，已成功项立即从候选移除，不伪装为整批回滚。
 
 成员行保持头像、身份、Runtime 名称与静态“可用/不可用”状态。模型信息展开与“移出当前会话”统一收进
-行尾单个 `•••` 菜单，避免并排按钮破坏层级。菜单项必须有文本动作名、键盘焦点、Esc/外部点击关闭和
+行尾单个水平三点菜单，避免并排按钮破坏层级。入口保留 `28×28px` 命中区，静止态无边框、无底色，
+仅在悬停、键盘聚焦或菜单打开时显示低强调度底色。菜单项必须有文本动作名、键盘焦点、Esc/外部点击关闭和
 `aria-expanded`；模型项只控制既有详情 disclosure，不改变 Runtime 配置。
 
 Camp 只有一位 active member 时，“移出当前会话”仍可见但禁用，并直接解释“Camp 至少需要一位队员”。
 其他成员选择移除后，先打开读取
 [Camp Membership v1](../../contracts/camp-membership-v1.md)权威 preview 的确认 Dialog；读取期间显示骨架，失败
-原位重试。Dialog 展示会被停止的 Run、被释放的 Task、等待/运行 Delivery 与 Gather Item 计数；Default Lead
-必须先选择有效 successor。确认提交 exact membership generation/version，冲突后不自动重放，必须刷新 preview。
+原位重试。Dialog 只展示实际存在的影响：会被停止的 Run、被释放的 Task、等待/运行 Delivery 与 Gather Item，
+对应计数为零时整行不出现；没有任何实际影响时正文区整体折叠，不用“没有需要处理”或“继续保留”补齐版面。
+每项图标与标题首行基线对齐。Default Lead 必须先选择有效 successor。确认提交 exact membership
+generation/version，冲突后不自动重放，必须刷新 preview。
 
 移除提交成功即关闭 Dialog 并刷新 Camp。仍有运行责任在正式结算时，当前会话区域显示低强调度“正在收口”
 及已结算/目标 Run 数，不阻断阅读、Composer 或其他成员操作；完成后随权威 refresh 消失。UI 不把这一状态
