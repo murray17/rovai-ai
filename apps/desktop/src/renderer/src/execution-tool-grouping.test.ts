@@ -133,9 +133,9 @@ describe('execution Tool grouping', () => {
       status: 'running',
       statusLabel: '执行中',
       primary: '执行中',
-      currentTitle: null,
-      countLabel: '已执行 3 项操作',
-      accessibleLabel: '执行中；已执行 3 项操作'
+      currentTitle: '指令 three',
+      countLabel: null,
+      accessibleLabel: '执行中：指令 three'
     })
 
     expect(toolActivityGroupPresentation([
@@ -143,7 +143,9 @@ describe('execution Tool grouping', () => {
     ], 'running', true)).toMatchObject({
       status: 'running',
       primary: '执行中',
-      countLabel: '已汇总 1 项操作'
+      currentTitle: '指令 one',
+      countLabel: null,
+      accessibleLabel: '执行中：指令 one'
     })
 
     expect(toolActivityGroupPresentation([
