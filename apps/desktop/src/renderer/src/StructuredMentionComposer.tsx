@@ -14,6 +14,7 @@ import {
   type KeyboardEvent,
   type MouseEvent,
   type PointerEvent,
+  type ReactNode,
   type RefObject
 } from 'react'
 import {
@@ -242,6 +243,17 @@ export function shouldSubmitStructuredComposerOnEnter(input: {
     && !input.suggestionMenuOpen
 }
 
+export function shouldReconcileStructuredComposerComposition(input: {
+  scheduledGeneration: number
+  currentGeneration: number
+  isComposing: boolean
+  sameEditor: boolean
+}): boolean {
+  return input.scheduledGeneration === input.currentGeneration
+    && !input.isComposing
+    && input.sameEditor
+}
+
 export function shouldHandleStructuredComposerBackspaceAtStart(input: {
   key: string
   isComposing: boolean
@@ -279,6 +291,8 @@ const EDITOR_STYLE: CSSProperties = {
   cursor: 'text'
 }
 
+const EDITOR_CARET_SENTINEL = '\u200B'
+
 type StructuredComposerQuery =
   | { kind: 'mention'; value: StructuredMentionQuery }
   | { kind: 'skill'; value: StructuredSkillQuery }
@@ -308,6 +322,7 @@ export function StructuredMentionComposer({
   const lastSelectionRef = useRef<StructuredMentionSelection>({ anchor: 0, focus: 0 })
   const isComposingRef = useRef(false)
   const compositionFrameRef = useRef<number | null>(null)
+  const compositionGenerationRef = useRef(0)
   const [query, setQuery] = useState<StructuredComposerQuery | null>(null)
   const [activeOption, setActiveOption] = useState(0)
   const [editorDomRevision, setEditorDomRevision] = useState(0)
@@ -344,8 +359,10 @@ export function StructuredMentionComposer({
   }, [query?.kind, query?.value.query, query?.value.start])
 
   useEffect(() => () => {
+    compositionGenerationRef.current += 1
     if (compositionFrameRef.current !== null) {
       window.cancelAnimationFrame(compositionFrameRef.current)
+      compositionFrameRef.current = null
     }
   }, [])
 
@@ -391,12 +408,13 @@ export function StructuredMentionComposer({
     ) setQuery(null)
   }
 
-  const syncNativeDom = (nativeEvent?: InputEvent): void => {
+  const syncNativeDom = (nativeEvent?: InputEvent): StructuredMentionEditorState | null => {
     const editor = editorRef.current
-    if (!editor) return
+    if (!editor) return null
     const nextContent = readStructuredContent(editor)
     const nextSelection = readDomSelection(editor)
     const requiresOwnershipReset = !editorDomMatchesReactProjection(editor, content)
+    const contentChanged = !structuredContentEqual(content, nextContent)
     lastSelectionRef.current = nextSelection
     if (requiresOwnershipReset) {
       // IME and native contenteditable editing may wrap, replace, or insert
@@ -409,7 +427,7 @@ export function StructuredMentionComposer({
         || document.activeElement === editor
       setEditorDomRevision((current) => current + 1)
     }
-    if (!structuredContentEqual(content, nextContent)) {
+    if (contentChanged) {
       pendingSelectionRef.current = nextSelection
       onChange(nextContent)
     }
@@ -437,6 +455,16 @@ export function StructuredMentionComposer({
     } else if (nativeEvent) {
       setQuery(null)
     }
+    return { content: nextContent, selection: nextSelection }
+  }
+
+  const reconcilePendingComposition = (): StructuredMentionEditorState | null => {
+    const frame = compositionFrameRef.current
+    if (frame === null || isComposingRef.current) return null
+    window.cancelAnimationFrame(frame)
+    compositionFrameRef.current = null
+    compositionGenerationRef.current += 1
+    return syncNativeDom()
   }
 
   const chooseMentionOption = (option: StructuredMentionOption | undefined): void => {
@@ -465,11 +493,14 @@ export function StructuredMentionComposer({
     window.requestAnimationFrame(() => editorRef.current?.focus())
   }
 
-  const deleteFromKeyboard = (direction: 'backward' | 'forward'): void => {
-    const selection = currentSelection()
+  const deleteFromKeyboard = (
+    direction: 'backward' | 'forward',
+    state = editorState()
+  ): void => {
+    const selection = state.selection
     const next = direction === 'backward'
-      ? deleteStructuredBackward(editorState(selection))
-      : deleteStructuredForward(editorState(selection))
+      ? deleteStructuredBackward(state)
+      : deleteStructuredForward(state)
     setQuery((current) => {
       if (!current) return null
       const nextQuery = queryAfterDeletion(current.value, selection, direction)
@@ -535,6 +566,9 @@ export function StructuredMentionComposer({
       || event.nativeEvent.keyCode === 229
     if (isComposing) return
     if (document.activeElement !== event.currentTarget) return
+    const reconciledCompositionState = ['Enter', 'Backspace', 'Delete'].includes(event.key)
+      ? reconcilePendingComposition()
+      : null
 
     if (menuOpen && (event.key === 'ArrowDown' || event.key === 'ArrowUp')) {
       event.preventDefault()
@@ -565,7 +599,7 @@ export function StructuredMentionComposer({
       && shouldHandleStructuredComposerBackspaceAtStart({
         key: event.key,
         isComposing,
-        selection: currentSelection()
+        selection: reconciledCompositionState?.selection ?? currentSelection()
       })
     ) {
       event.preventDefault()
@@ -575,18 +609,18 @@ export function StructuredMentionComposer({
     }
     if (event.key === 'Backspace') {
       event.preventDefault()
-      deleteFromKeyboard('backward')
+      deleteFromKeyboard('backward', reconciledCompositionState ?? editorState())
       return
     }
     if (event.key === 'Delete') {
       event.preventDefault()
-      deleteFromKeyboard('forward')
+      deleteFromKeyboard('forward', reconciledCompositionState ?? editorState())
       return
     }
     if (event.key === 'Enter' && event.shiftKey) {
       event.preventDefault()
       setQuery(null)
-      emitState(insertStructuredText(editorState(), '\n'))
+      emitState(insertStructuredText(reconciledCompositionState ?? editorState(), '\n'))
       return
     }
     if (shouldSubmitStructuredComposerOnEnter({
@@ -627,16 +661,29 @@ export function StructuredMentionComposer({
 
   const handleCompositionStart = (_event: CompositionEvent<HTMLDivElement>): void => {
     isComposingRef.current = true
+    compositionGenerationRef.current += 1
+    if (compositionFrameRef.current !== null) {
+      window.cancelAnimationFrame(compositionFrameRef.current)
+      compositionFrameRef.current = null
+    }
     setQuery(null)
   }
 
-  const handleCompositionEnd = (_event: CompositionEvent<HTMLDivElement>): void => {
+  const handleCompositionEnd = (event: CompositionEvent<HTMLDivElement>): void => {
     isComposingRef.current = false
     if (compositionFrameRef.current !== null) {
       window.cancelAnimationFrame(compositionFrameRef.current)
     }
+    const scheduledGeneration = compositionGenerationRef.current
+    const scheduledEditor = event.currentTarget
     compositionFrameRef.current = window.requestAnimationFrame(() => {
       compositionFrameRef.current = null
+      if (!shouldReconcileStructuredComposerComposition({
+        scheduledGeneration,
+        currentGeneration: compositionGenerationRef.current,
+        isComposing: isComposingRef.current,
+        sameEditor: editorRef.current === scheduledEditor
+      })) return
       syncNativeDom()
     })
   }
@@ -694,11 +741,16 @@ export function StructuredMentionComposer({
         onMouseUp={(_event: MouseEvent<HTMLDivElement>) => closeQueryIfSelectionMoved()}
         onBlur={() => setQuery(null)}
       >
+        {content.length === 0 && (
+          <span data-editor-segment="text" data-editor-empty="true" key="text-0">
+            <br data-editor-empty-break="true" />
+          </span>
+        )}
         {content.map((segment, index) => {
           if (segment.kind === 'text') {
             return (
               <span data-editor-segment="text" key={`text-${index}`}>
-                {segment.text}
+                {renderEditorText(segment.text)}
               </span>
             )
           }
@@ -980,15 +1032,48 @@ function readStructuredContent(editor: HTMLDivElement): StructuredMentionContent
         }
         continue
       }
-      if (element.tagName === 'BR') {
-        content.push({ kind: 'text', text: '\n' })
+      if (element.dataset.editorSegment === 'text') {
+        const text = readEditorTextNode(element)
+        if (text) content.push({ kind: 'text', text })
         continue
       }
     }
-    const text = node.textContent ?? ''
+    const text = readEditorTextNode(node)
     if (text) content.push({ kind: 'text', text })
   }
   return normalizeStructuredMentionContent(content)
+}
+
+function renderEditorText(text: string): ReactNode[] {
+  const lines = text.split('\n')
+  const nodes: ReactNode[] = []
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index]
+    if (line) nodes.push(line)
+    if (index < lines.length - 1) {
+      nodes.push(<br data-editor-line-break="true" key={`line-break-${index}`} />)
+    }
+  }
+  if (text.endsWith('\n')) {
+    nodes.push(
+      <span data-editor-caret-host="true" key="caret-host">
+        {EDITOR_CARET_SENTINEL}
+      </span>
+    )
+  }
+  return nodes
+}
+
+function readEditorTextNode(node: Node): string {
+  if (node.nodeType === Node.TEXT_NODE) return node.textContent ?? ''
+  if (node.nodeType === Node.ELEMENT_NODE) {
+    const element = node as HTMLElement
+    if (isEditorCaretHost(element)) return readEditorCaretHostText(element)
+    if (element.tagName === 'BR') {
+      return isEditorCaretBreak(element) ? '' : '\n'
+    }
+  }
+  return [...node.childNodes].map(readEditorTextNode).join('')
 }
 
 function editorDomMatchesReactProjection(
@@ -996,6 +1081,9 @@ function editorDomMatchesReactProjection(
   content: StructuredMentionContent
 ): boolean {
   const children = [...editor.childNodes]
+  if (content.length === 0) {
+    return children.length === 1 && isEditorTextSegment(children[0], true)
+  }
   if (children.length !== content.length) return false
   return children.every((node, index) => {
     if (node.nodeType !== Node.ELEMENT_NODE) return false
@@ -1003,8 +1091,7 @@ function editorDomMatchesReactProjection(
     const segment = content[index]
     if (!segment) return false
     if (segment.kind === 'text') {
-      return element.dataset.editorSegment === 'text'
-        && [...element.childNodes].every((child) => child.nodeType === Node.TEXT_NODE)
+      return isEditorTextSegment(element)
     }
     if (element.dataset.editorSegment !== 'token') return false
     if (segment.kind === 'all_members_mention') {
@@ -1018,6 +1105,18 @@ function editorDomMatchesReactProjection(
     return element.dataset.tokenKind === 'member_mention'
       && element.dataset.agentId === segment.agentId
   })
+}
+
+function isEditorTextSegment(node: Node | undefined, allowEmptyBreak = false): boolean {
+  return node?.nodeType === Node.ELEMENT_NODE
+    && (node as HTMLElement).dataset.editorSegment === 'text'
+    && [...node.childNodes].every((child) => child.nodeType === Node.TEXT_NODE
+      || (child.nodeType === Node.ELEMENT_NODE
+        && (isEditorCaretHost(child as HTMLElement)
+          || ((child as HTMLElement).tagName === 'BR'
+            && ((allowEmptyBreak && (child as HTMLElement).dataset.editorEmptyBreak === 'true')
+              || (child as HTMLElement).dataset.editorLineBreak === 'true'
+              || (child as HTMLElement).dataset.editorCaretBreak === 'true')))))
 }
 
 function readDomSelection(editor: HTMLDivElement): StructuredMentionSelection {
@@ -1082,7 +1181,7 @@ function domPointOffset(editor: HTMLDivElement, node: Node, offset: number): num
     const range = document.createRange()
     range.selectNodeContents(segment)
     range.setEnd(node, offset)
-    return start + range.toString().length
+    return start + editorTextNodeLength(range.cloneContents())
   } catch {
     return start
   }
@@ -1101,9 +1200,32 @@ function editorNodeLength(node: Node): number {
   if (node.nodeType === Node.ELEMENT_NODE) {
     const element = node as HTMLElement
     if (element.dataset.editorSegment === 'token') return 1
-    if (element.tagName === 'BR') return 1
   }
-  return node.textContent?.length ?? 0
+  return editorTextNodeLength(node)
+}
+
+function editorTextNodeLength(node: Node): number {
+  if (node.nodeType === Node.TEXT_NODE) return node.textContent?.length ?? 0
+  if (node.nodeType === Node.ELEMENT_NODE) {
+    const element = node as HTMLElement
+    if (isEditorCaretHost(element)) return readEditorCaretHostText(element).length
+    if (element.tagName === 'BR') return isEditorCaretBreak(element) ? 0 : 1
+  }
+  return [...node.childNodes]
+    .reduce((length, child) => length + editorTextNodeLength(child), 0)
+}
+
+function isEditorCaretBreak(element: HTMLElement): boolean {
+  return element.dataset.editorEmptyBreak === 'true'
+    || element.dataset.editorCaretBreak === 'true'
+}
+
+function isEditorCaretHost(element: HTMLElement): boolean {
+  return element.dataset.editorCaretHost === 'true'
+}
+
+function readEditorCaretHostText(element: HTMLElement): string {
+  return (element.textContent ?? '').replaceAll(EDITOR_CARET_SENTINEL, '')
 }
 
 function domPointAtOffset(editor: HTMLDivElement, targetOffset: number): { node: Node; offset: number } {
@@ -1130,16 +1252,22 @@ function textPointAtOffset(root: Node, targetOffset: number): { node: Node; offs
   if (root.nodeType === Node.TEXT_NODE) {
     return { node: root, offset: clamp(targetOffset, 0, root.textContent?.length ?? 0) }
   }
-  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT)
-  let remaining = targetOffset
-  let textNode = walker.nextNode()
-  while (textNode) {
-    const length = textNode.textContent?.length ?? 0
-    if (remaining <= length) return { node: textNode, offset: remaining }
-    remaining -= length
-    textNode = walker.nextNode()
+  const children = [...root.childNodes]
+  let cursor = 0
+  for (let index = 0; index < children.length; index += 1) {
+    const child = children[index]
+    const length = editorTextNodeLength(child)
+    if (child.nodeType === Node.ELEMENT_NODE && (child as HTMLElement).tagName === 'BR') {
+      if (targetOffset <= cursor) return { node: root, offset: index }
+      cursor += length
+      if (targetOffset <= cursor) return { node: root, offset: index + 1 }
+      continue
+    }
+    const end = cursor + length
+    if (targetOffset <= end) return textPointAtOffset(child, targetOffset - cursor)
+    cursor = end
   }
-  return { node: root, offset: 0 }
+  return { node: root, offset: children.length }
 }
 
 function closestEditorSegment(node: Node): HTMLElement | null {
