@@ -63,11 +63,11 @@ describe('execution Tool grouping', () => {
 
     expect(presentation).toEqual({
       status: 'waiting',
+      statusLabel: '等待审批',
       primary: '等待审批',
       currentTitle: '指令 three',
-      countLabel: '1 项已完成',
-      countTone: 'neutral',
-      accessibleLabel: '等待审批：指令 three；1 项已完成'
+      countLabel: '已执行 1 项操作',
+      accessibleLabel: '等待审批：指令 three；已执行 1 项操作'
     })
 
     expect(toolActivityGroupPresentation([
@@ -75,28 +75,74 @@ describe('execution Tool grouping', () => {
       tool('two', 'running')
     ], 'running')).toMatchObject({
       status: 'running',
-      countLabel: '1 项失败',
-      countTone: 'danger'
+      statusLabel: '执行中',
+      countLabel: '已执行 1 项操作'
+    })
+
+    expect(toolActivityGroupPresentation([
+      tool('one'),
+      tool('two'),
+      tool('three'),
+      tool('four', 'failed'),
+      tool('five', 'running')
+    ], 'running')).toMatchObject({
+      primary: '执行中',
+      currentTitle: '指令 five',
+      countLabel: '已执行 4 项操作',
+      accessibleLabel: '执行中：指令 five；已执行 4 项操作'
+    })
+
+    expect(toolActivityGroupPresentation([
+      tool('one', 'recorded'),
+      tool('two', 'running')
+    ], 'running')).toMatchObject({
+      countLabel: '已汇总 1 项操作',
+      accessibleLabel: '执行中：指令 two；已汇总 1 项操作'
     })
   })
 
-  it('summarizes failure, stop and not-executed outcomes without calling them successful', () => {
+  it('uses a successful group result when any Tool succeeded and omits terminal outcome copy', () => {
     expect(toolActivityGroupPresentation([
       tool('one'),
       tool('two', 'failed'),
       tool('three', 'stopped')
     ], 'failed')).toMatchObject({
-      status: 'failed',
+      status: 'completed',
+      statusLabel: '含成功操作',
       primary: '已执行 3 项操作',
-      countLabel: '1 项失败 · 1 项已停止'
+      countLabel: null,
+      accessibleLabel: '已执行 3 项操作；状态：含成功操作'
     })
 
     expect(toolActivityGroupPresentation([
       tool('one', 'recorded')
     ], 'succeeded')).toMatchObject({
       status: 'recorded',
+      statusLabel: '已记录',
       primary: '已汇总 1 项操作',
-      countLabel: '1 项仅记录'
+      countLabel: null
+    })
+  })
+
+  it('uses danger only when every Tool failed and keeps other no-success outcomes neutral', () => {
+    expect(toolActivityGroupPresentation([
+      tool('one', 'failed'),
+      tool('two', 'failed')
+    ], 'failed')).toMatchObject({
+      status: 'failed',
+      statusLabel: '全部失败',
+      primary: '已执行 2 项操作',
+      countLabel: null
+    })
+
+    expect(toolActivityGroupPresentation([
+      tool('one', 'failed'),
+      tool('two', 'stopped')
+    ], 'failed')).toMatchObject({
+      status: 'stopped',
+      statusLabel: '已停止，含失败操作',
+      primary: '已执行 2 项操作',
+      countLabel: null
     })
   })
 
@@ -106,7 +152,8 @@ describe('execution Tool grouping', () => {
     expect(toolActivityGroupHasActiveTool(items, 'cancelled')).toBe(false)
     expect(toolActivityGroupPresentation(items, 'cancelled')).toMatchObject({
       status: 'stopped',
-      countLabel: '1 项已停止'
+      statusLabel: '已停止',
+      countLabel: null
     })
   })
 })

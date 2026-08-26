@@ -7122,8 +7122,7 @@ function ToolActivityGroupIcon(): JSX.Element {
   )
 }
 
-function ToolActivityGroupState({ status }: { status: string }): JSX.Element {
-  const label = toolCallStatusLabel(status)
+function ToolActivityGroupState({ status, label }: { status: string; label: string }): JSX.Element {
   return (
     <span
       className={`tool-group-state status-${status}`}
@@ -7170,12 +7169,12 @@ function ToolActivityGroup({
                 </span>
               </>
             )}
-            <span className={`tool-group-count${presentation.countTone === 'danger' ? ' is-danger' : ''}`}>
-              {presentation.countLabel}
-            </span>
+            {presentation.countLabel && (
+              <span className="tool-group-count">{presentation.countLabel}</span>
+            )}
           </span>
         </span>
-        <ToolActivityGroupState status={presentation.status} />
+        <ToolActivityGroupState status={presentation.status} label={presentation.statusLabel} />
         <span className="tool-group-disclosure" aria-hidden="true">
           <svg viewBox="0 0 16 16" focusable="false">
             <path d="m4.75 6.25 3.25 3.5 3.25-3.5" />
