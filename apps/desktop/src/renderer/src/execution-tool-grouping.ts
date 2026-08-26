@@ -19,10 +19,10 @@ export type GroupedExecutionProgressItem =
 
 export type ToolActivityGroupPresentation = {
   status: ActivityStatus
+  statusLabel: string
   primary: string
   currentTitle: string | null
-  countLabel: string
-  countTone: 'neutral' | 'danger'
+  countLabel: string | null
   accessibleLabel: string
 }
 
@@ -80,52 +80,50 @@ export function toolActivityGroupPresentation(
   const failed = statuses.filter((status) => status === 'failed').length
   const stopped = statuses.filter((status) => status === 'stopped').length
   const recorded = statuses.filter((status) => status === 'recorded').length
+  const settled = completed + failed + stopped + recorded
 
   if (activeIndex >= 0) {
     const status = statuses[activeIndex]
     const primary = status === 'waiting' ? '等待审批' : '执行中'
     const currentTitle = items[activeIndex].step.title
-    const settledOutcomes = [
-      completed > 0 ? `${completed} 项已完成` : null,
-      failed > 0 ? `${failed} 项失败` : null,
-      stopped > 0 ? `${stopped} 项已停止` : null,
-      recorded > 0 ? `${recorded} 项仅记录` : null
-    ].filter((value): value is string => value !== null)
-    const countLabel = settledOutcomes.length > 0
-      ? settledOutcomes.join(' · ')
-      : '0 项已完成'
+    const statusLabel = status === 'waiting' ? '等待审批' : '执行中'
+    const countLabel = recorded > 0
+      ? `已汇总 ${settled} 项操作`
+      : `已执行 ${settled} 项操作`
     return {
       status,
+      statusLabel,
       primary,
       currentTitle,
       countLabel,
-      countTone: failed > 0 || stopped > 0 ? 'danger' : 'neutral',
       accessibleLabel: `${primary}：${currentTitle}；${countLabel}`
     }
   }
 
   const total = items.length
-  const status: ActivityStatus = failed > 0
-    ? 'failed'
-    : stopped > 0
-      ? 'stopped'
-      : recorded > 0
-        ? 'recorded'
-        : 'completed'
+  let status: ActivityStatus
+  let statusLabel: string
+  if (completed > 0) {
+    status = 'completed'
+    statusLabel = completed === total ? '全部成功' : '含成功操作'
+  } else if (failed === total) {
+    status = 'failed'
+    statusLabel = '全部失败'
+  } else if (stopped > 0) {
+    status = 'stopped'
+    statusLabel = failed > 0 ? '已停止，含失败操作' : '已停止'
+  } else {
+    status = 'recorded'
+    statusLabel = failed > 0 ? '已记录，含失败操作' : '已记录'
+  }
   const primary = recorded > 0 ? `已汇总 ${total} 项操作` : `已执行 ${total} 项操作`
-  const outcomes = [
-    failed > 0 ? `${failed} 项失败` : null,
-    stopped > 0 ? `${stopped} 项已停止` : null,
-    recorded > 0 ? `${recorded} 项仅记录` : null
-  ].filter((value): value is string => value !== null)
-  const countLabel = outcomes.length > 0 ? outcomes.join(' · ') : '全部成功'
 
   return {
     status,
+    statusLabel,
     primary,
     currentTitle: null,
-    countLabel,
-    countTone: failed > 0 || stopped > 0 ? 'danger' : 'neutral',
-    accessibleLabel: `${primary}；${countLabel}`
+    countLabel: null,
+    accessibleLabel: `${primary}；状态：${statusLabel}`
   }
 }
