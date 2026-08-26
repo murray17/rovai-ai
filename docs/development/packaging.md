@@ -137,7 +137,7 @@ codesign --verify --strict \
 
 ```bash
 pnpm package:mac:daily
-pnpm install:mac:daily -- --backup "/Applications/Rovai AI.backup-before-<timestamp>.app"
+pnpm install:mac:daily --backup "/Applications/Rovai AI.backup-before-<timestamp>.app"
 ```
 
 `package:mac:daily` 不读取本机 Keychain 证书；构建后立即验证 App、Core、CLI 的架构、ad-hoc 签名、

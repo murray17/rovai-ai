@@ -155,7 +155,7 @@ AI Agent 不得把 `open "$(pwd)/dist/mac-arm64/Rovai AI.app"` 当作打包验�
 
 ```bash
 pnpm package:mac:daily
-pnpm install:mac:daily -- --backup "/Applications/Rovai AI.backup-before-<timestamp>.app"
+pnpm install:mac:daily --backup "/Applications/Rovai AI.backup-before-<timestamp>.app"
 ```
 
 安装脚本以 no-follow 路径项检查准入 target 和 backup：任何既有 backup 路径项、以及符号链接 target 都在
