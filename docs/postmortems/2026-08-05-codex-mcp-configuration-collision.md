@@ -7,282 +7,248 @@ systems:
   - codex-runtime-adapter
   - mcp-runtime-projection
   - macos-packaged-app
-last_updated: 2026-08-06
+last_updated: 2026-08-26
 ---
 
-# Codex MCP Configuration Collision and AgentRun Startup Failure
+# Codex MCP 配置冲突与 AgentRun 启动失败
 
-> Current architecture note (2026-08-06): the isolated-Home remediation below is the historical
-> incident resolution, not the current product contract. v0.43 supersedes it with Codex Native Home,
-> app-server `config/read`, `NativeWinsSkip`, and thread-scoped additive MCP; see
-> [ADR-0125](../versions/v0.43/decisions.md#adr-0125) and
-> [ADR-0126](../versions/v0.43/decisions.md#adr-0126).
+> **爱丽丝的小结：** 这次不是用户把 `context7` 的名字起错了，而是 Rovai 把“我想覆盖配置”
+> 误当成“Codex 会整表替换”。同名 stdio/HTTP 条目被深度合并，Run 连第一轮都没走到。
+> 事故当时靠 Isolated Home 修住；那是历史方案，今天应以 Native Home 与增量 MCP 为准。
 
-## Executive summary
+> 当前架构说明（2026-08-06）：下文的隔离 Home 修复是本次事故的历史解决方案，
+> 不是当前产品合同。v0.43 已用 Codex Native Home、app-server `config/read`、
+> `NativeWinsSkip` 和 thread-scoped additive MCP 取代该方案；参见
+> [ADR-0125](../versions/v0.43/decisions.md#adr-0125) 与
+> [ADR-0126](../versions/v0.43/decisions.md#adr-0126)。
 
-On 2026-08-05, a Codex AgentRun launched by Rovai failed before its first model turn. The user's
-native Codex configuration contained a stdio MCP server named `context7`, while Rovai assigned an
-HTTP MCP server with the same canonical name. Rovai passed its MCP table as a runtime override and
-assumed the table would replace lower-precedence MCP configuration. Codex instead deep-merged the
-same-named entries, producing one invalid server definition containing both stdio `command` and
-HTTP `url` fields. Codex rejected the effective configuration with:
+## 摘要
+
+2026-08-05，Rovai 启动的一个 Codex AgentRun 在第一次模型轮次前失败。用户的原生
+Codex 配置中有一个名为 `context7` 的 stdio MCP Server，而 Rovai 分配了同一规范名称的
+HTTP MCP Server。Rovai 把自己的 MCP 表作为 Runtime override 传入，并假定整张表会替换
+低优先级 MCP 配置；Codex 实际上对同名条目进行了深度合并，生成了一个同时包含 stdio
+`command` 与 HTTP `url` 字段的无效 Server 定义。Codex 因而拒绝有效配置并报错：
 
 ```text
 failed to load configuration: url is not supported for stdio in mcp_servers.context7
 ```
 
-The same architecture also allowed unrelated user MCP definitions to remain ambient even when
-they did not cause a startup failure. The user configuration was valid for native Codex use; the
-collision was caused by Rovai's incorrect isolation boundary, not by the user's server name or
-transport choice.
+同一架构还会让无关的用户 MCP 定义留在环境中，即使它们没有导致启动失败。用户配置对于
+原生 Codex 使用完全有效；冲突来自 Rovai 错误的隔离边界，而不是用户选择的 Server 名称或
+transport。
 
-The incident was resolved by introducing a persistent Isolated Codex Home for every
-`(Camp, AgentProfile)` pair, sanitizing user top-level MCP configuration from the isolated copy,
-writing the complete Rovai-owned MCP set atomically, validating Codex's effective configuration,
-and replacing the globally shared Codex app-server with an AgentRun-scoped process. The user's
-real `~/.codex/config.toml` remains unchanged. A fresh packaged macOS application was then tested
-against the original cross-transport collision scenario.
+当时的解决方案是：为每个 `(Camp, AgentProfile)` 建立持久 Isolated Codex Home，从隔离副本
+中清除用户顶层 MCP 配置，原子写入 Rovai 拥有的完整 MCP 集合，验证 Codex 的有效配置，
+并以 AgentRun-scoped 进程替换全局共享的 Codex app-server。用户真实的
+`~/.codex/config.toml` 未被修改。随后用全新打包的 macOS 应用重新验证了原始的跨 transport
+同名冲突场景。
 
-This is a blameless review. The decisions described here were locally reasonable under the
-replacement semantics Rovai assumed at the time. The purpose of the document is to correct the
-system conditions that made the incident possible, not to attribute fault to an individual or to
-the user's valid Codex setup.
+本复盘不归咎个人。基于 Rovai 当时假定的替换语义，相关决定在局部上都有合理性。本文的
+目的，是修正让事故成为可能的系统条件，而不是责怪某位开发者或用户的有效 Codex 配置。
 
-## Incident metadata
+## 事故元数据
 
-| Field | Value |
+| 字段 | 值 |
 |---|---|
-| Detection | User reported a failed local Camp execution and questioned whether the packaged application contained the latest Core |
-| Affected path | Rovai-managed Codex AgentRun startup |
-| Trigger condition | User and Rovai MCP servers shared a name but used incompatible transports |
-| User-visible symptom | The AgentRun failed before producing model output |
-| Data integrity | No Camp data corruption and no modification of the user's real Codex configuration were found |
-| Security boundary | Ambient user MCP configuration could enter the effective Codex configuration; no invocation or credential disclosure was found in this incident |
-| Resolution | v0.39 Codex Home and process isolation, shipped in commit [`efc50da`](https://github.com/murray17/rovai-ai/commit/efc50daee7a95a078aaa25b8e5fc6cc1e2fa7cc3) |
-| Incident duration | Not calculated because the first-failure and recovery timestamps were not retained as structured incident data |
+| 发现方式 | 用户报告本地 Camp 执行失败，并质疑打包应用是否包含最新 Core |
+| 受影响路径 | Rovai 管理的 Codex AgentRun 启动 |
+| 触发条件 | 用户与 Rovai 的 MCP Server 同名，但使用不兼容的 transport |
+| 用户可见症状 | AgentRun 在产生模型输出前失败 |
+| 数据完整性 | 未发现 Camp 数据损坏，也未修改用户真实的 Codex 配置 |
+| 安全边界 | 环境中的用户 MCP 配置可能进入 Codex 有效配置；本次事故未发现调用或凭据披露 |
+| 解决方案 | v0.39 Codex Home 与进程隔离，由 commit [`efc50da`](https://github.com/murray17/rovai-ai/commit/efc50daee7a95a078aaa25b8e5fc6cc1e2fa7cc3) 交付 |
+| 事故持续时间 | 未计算；首次失败与恢复时间未作为结构化事故数据保留 |
 
-## Impact
+## 影响
 
-The observed AgentRun could not start, so the requested work did not execute and the user had to
-investigate and retry after a new build. The directly affected population was Codex AgentRuns whose
-effective configuration contained a name collision capable of producing an invalid merged MCP
-entry. Other Runtime adapters were not on this configuration path.
+已观察到的 AgentRun 无法启动，因此用户请求的工作没有执行，只能在新构建完成后调查并
+重试。直接受影响的是有效配置中存在同名冲突、且该冲突会生成无效合并 MCP 条目的 Codex
+AgentRun。其他 Runtime Adapter 不经过这条配置路径。
 
-The latent impact was broader than the visible failure. With the former design, differently named
-MCP servers from the user's native Codex configuration could remain available to a Rovai AgentRun.
-That violated Rovai's intended ownership of the external MCP set even when Codex accepted the
-configuration. We found no evidence that an unintended server was invoked during this incident,
-but startup success alone would not have proved isolation.
+潜在影响比可见失败更广。旧设计会让用户原生 Codex 配置中名称不同的 MCP Server 继续对
+Rovai AgentRun 可用；即使 Codex 接受配置，这也违反了 Rovai 对外部 MCP 集合的预期所有权。
+本次事故没有发现非预期 Server 被调用的证据，但仅仅启动成功并不能证明已经隔离。
 
-There was no evidence of database corruption, loss of Camp history, modification of
-`~/.codex/config.toml`, or disclosure of a persisted Team Gateway credential.
+没有证据表明数据库损坏、Camp 历史丢失、`~/.codex/config.toml` 被修改，或持久化的 Team
+Gateway 凭据被披露。
 
-## Detection and response
+## 发现与响应
 
-The incident was detected by the user from the failed conversation rather than by an automated
-isolation check. The failure text identified a transport inconsistency, but the initial diagnostic
-surface did not establish all of the following in one place:
+事故由用户从失败的会话中发现，而不是由自动化隔离检查发现。错误文本指出了 transport
+不一致，但最初的诊断界面无法在一个位置确认以下事实：
 
-- which `CODEX_HOME` the failing process had loaded;
-- which configuration layers contributed to the effective MCP entry;
-- whether the running Core came from current source or an older packaged application;
-- whether Rovai's requested MCP table exactly matched Codex's effective table.
+- 失败进程实际加载了哪个 `CODEX_HOME`；
+- 哪些配置层共同组成了有效 MCP 条目；
+- 正在运行的 Core 来自当前源码还是旧版打包应用；
+- Rovai 请求的 MCP 表是否与 Codex 有效表精确一致。
 
-Investigation reproduced both cross-transport directions: user stdio versus Rovai HTTP, and user
-HTTP versus Rovai stdio. That established that the defect was not specific to Context7 or to one
-transport. Inspection of the process model then showed that a global app-server could not support
-different per-member Homes, even if configuration generation alone were corrected.
+调查复现了两个跨 transport 方向：用户 stdio 对 Rovai HTTP，以及用户 HTTP 对 Rovai
+stdio。这证明缺陷并不只与 Context7 或某一种 transport 有关。进一步检查进程模型后发现，
+即使只修正配置生成，全局 app-server 也无法支持不同成员各自的 Home。
 
-## Timeline
+## 时间线
 
-All times are Asia/Shanghai. Exact discovery and intermediate-response times were not captured, so
-the timeline deliberately avoids invented precision.
+所有时间均为 Asia/Shanghai。由于没有记录准确的发现时间和中间响应时间，时间线有意避免
+虚构精度。
 
-| Time | Event |
+| 时间 | 事件 |
 |---|---|
-| Before 2026-08-05 | Rovai used a globally shared Codex app-server, inherited the user's real Codex Home, and supplied `mcp_servers` as a runtime override. Tests did not prove cross-transport same-name isolation against Codex's effective configuration. |
-| 2026-08-05, time not recorded | A local Codex AgentRun failed before its first model turn with a same-name stdio/HTTP MCP configuration error. |
-| 2026-08-05, time not recorded | Investigation confirmed that Codex deep-merged the user and Rovai entries instead of replacing the lower-precedence entry. The possibility of running an older packaged Core also made initial build provenance unclear. |
-| 2026-08-05, time not recorded | The design boundary was corrected: persistent state was keyed by Camp and AgentProfile, while the live app-server was scoped to an AgentRun. ADR-0107 and the v0.39 implementation contract were accepted. |
-| 2026-08-05, time not recorded | The Isolated Codex Home manager, exact MCP replacement, effective-config validation, per-AgentRun process lifecycle, cleanup protocol, and regression coverage were implemented. |
-| 2026-08-05 14:20:01 | The final packaged arm64 Core was built with Mach-O UUID `83AA9EBD-065F-3D59-B0C2-08A99E63562B`. |
-| 2026-08-05, after packaging | Real Codex 0.146.0 smoke tests passed for isolated config, project-config exclusion, `AGENTS.md` preservation, new process IDs across AgentRuns, same-Home thread resume, and stdio/HTTP projection in both Debug and packaged Core paths. |
-| 2026-08-05 14:28:51 | Commit `efc50da` recorded the completed fix and acceptance evidence. |
+| 2026-08-05 之前 | Rovai 使用全局共享的 Codex app-server，继承用户真实的 Codex Home，并以 Runtime override 提供 `mcp_servers`。测试没有依据 Codex 有效配置证明跨 transport 的同名隔离。 |
+| 2026-08-05，时间未记录 | 本地 Codex AgentRun 在第一次模型轮次前因同名 stdio/HTTP MCP 配置错误失败。 |
+| 2026-08-05，时间未记录 | 调查确认 Codex 深度合并了用户与 Rovai 条目，而非替换低优先级条目。可能正在运行旧版打包 Core，也让最初的构建来源不清晰。 |
+| 2026-08-05，时间未记录 | 设计边界被修正：持久状态按 Camp 与 AgentProfile 分键，活跃 app-server 则限定于单个 AgentRun。ADR-0107 与 v0.39 实现合同获接受。 |
+| 2026-08-05，时间未记录 | 实现 Isolated Codex Home manager、精确 MCP 替换、有效配置验证、逐 AgentRun 进程生命周期、清理协议与回归覆盖。 |
+| 2026-08-05 14:20:01 | 最终打包的 arm64 Core 构建完成，Mach-O UUID 为 `83AA9EBD-065F-3D59-B0C2-08A99E63562B`。 |
+| 2026-08-05，打包后 | 使用真实 Codex 0.146.0 的 smoke test 通过：隔离配置、排除 project config、保留 `AGENTS.md`、不同 AgentRun 使用新 PID、同一 Home 恢复 thread，以及 Debug/打包 Core 路径中的 stdio/HTTP 投影。 |
+| 2026-08-05 14:28:51 | Commit `efc50da` 记录完整修复与验收证据。 |
 
-## Technical root cause
+## 技术根因
 
-Rovai modeled a runtime `mcp_servers` override as a whole-table replacement. Codex's configuration
-semantics merge nested tables across sources. For a same-named server, transport-specific fields
-from both sources survived:
+Rovai 把 Runtime `mcp_servers` override 建模为整表替换，而 Codex 的配置语义会跨来源合并
+嵌套表。对于同名 Server，两个来源的 transport 专属字段都会保留：
 
 ```text
-user ~/.codex/config.toml             Rovai runtime override
-[mcp_servers.context7]                [mcp_servers.context7]
-command = "npx"                       url = "https://..."
-                 \                    /
-                  effective deep merge
-                 command + url in one entry
-                            |
-                       startup rejected
+用户 ~/.codex/config.toml            Rovai Runtime override
+[mcp_servers.context7]               [mcp_servers.context7]
+command = "npx"                      url = "https://..."
+                 \                   /
+                   有效配置深度合并
+                 同一条目同时有 command + url
+                              |
+                           启动被拒绝
 ```
 
-This incorrect replacement assumption was the immediate configuration root cause. The deeper
-architectural root cause was ownership mismatch: Rovai attempted to promise a task-specific MCP
-boundary while starting Codex inside a user-owned configuration root and reusing one process across
-multiple Camps and members. `CODEX_HOME` is process-scoped and also contains native session state,
-so a global process and the user's Home could not provide the required isolation or continuity
-model.
+这个错误的替换假设是直接配置根因。更深层的架构根因是所有权不匹配：Rovai 承诺任务专属的
+MCP 边界，却在用户拥有的配置根中启动 Codex，并让一个进程跨多个 Camp 和成员复用。
+`CODEX_HOME` 是进程级的，同时包含原生 Session 状态，因此全局进程和用户 Home 无法提供
+所需的隔离与连续性模型。
 
-## Contributing factors
+## 促成因素
 
-### Missing effective-configuration invariant
+### 缺少有效配置不变量
 
-Rovai validated the configuration it intended to send, not the complete configuration Codex
-actually loaded. There was no pre-turn `config/read` assertion that the effective top-level MCP set
-and each transport identity exactly matched the frozen Rovai projection.
+Rovai 验证的是自己打算发送的配置，而不是 Codex 实际加载的完整配置。第一次模型轮次前
+没有 `config/read` 断言来证明有效顶层 MCP 集合及每个 transport identity 与冻结的 Rovai
+投影精确一致。
 
-### Incomplete collision coverage
+### 冲突覆盖不完整
 
-Earlier smoke coverage did not exercise both directions of a same-name stdio/HTTP collision against
-a real Codex app-server. Tests that only compare rendered JSON or use the same transport cannot
-detect stale transport fields created by a deep merge.
+早期 smoke 覆盖没有针对真实 Codex app-server 测试同名 stdio/HTTP 冲突的两个方向。只比较
+渲染后的 JSON，或者只使用同一 transport，无法发现深度合并留下的旧 transport 字段。
 
-### Process and state lifecycles were coupled incorrectly
+### 进程与状态生命周期错误耦合
 
-The global app-server cache optimized process reuse before Rovai had a correct Home identity. Native
-session continuity was therefore implicitly tied to a shared process instead of to the durable
-`(Camp, AgentProfile)` state root.
+全局 app-server cache 在 Rovai 建立正确的 Home identity 前就优先优化了进程复用。原生 Session
+连续性因此被隐式绑定到共享进程，而不是持久的 `(Camp, AgentProfile)` 状态根。
 
-### Packaged-build provenance was not immediately visible
+### 打包构建来源不够直观
 
-Source tests and an installed application can execute different Core binaries. The initial question
-about whether a new package had been produced was reasonable because the diagnostic surface did not
-show a verifiable Core build identity. This did not create the MCP collision, but it increased time
-to establish whether a local reproduction contained the candidate fix.
+源码测试与已安装应用可能运行不同的 Core 二进制。最初追问是否已经生成新包很合理，因为
+诊断界面没有展示可验证的 Core 构建身份。这没有制造 MCP 冲突，但延长了确认本地复现是否
+包含候选修复所需的时间。
 
-### Lifecycle terminology was initially ambiguous
+### 生命周期术语最初有歧义
 
-The word "task" could refer to a domain Task, CampTurn, AgentRun, or Camp. That ambiguity initially
-made retention proposals easier to attach to the wrong object. The final design explicitly uses the
-Camp as the persistent Home boundary and AgentRun as the process boundary.
+“task”可能指领域 Task、CampTurn、AgentRun 或 Camp。这种歧义最初让保留策略更容易被挂到
+错误对象上。最终设计明确以 Camp 作为持久 Home 边界，以 AgentRun 作为进程边界。
 
-## Why existing safeguards did not prevent the incident
+## 既有防护为何没有阻止事故
 
-- Canonical MCP JSON and stable assignment identities defined what Rovai wanted to project, but did
-  not prove how Codex combined that projection with ambient configuration.
-- A whole-table runtime override removed the need to edit user files, but it was not a replacement
-  primitive under Codex's merge semantics.
-- Startup failure surfaced an invalid mixed transport, but differently named ambient MCP servers
-  could have remained undetected because they produced no error.
-- Source-level verification did not prove that the packaged app under test contained the same Core
-  binary.
+- 规范 MCP JSON 与稳定 Assignment identity 定义了 Rovai 想投影什么，却不能证明 Codex 如何
+  将投影与环境配置组合。
+- 整表 Runtime override 无需修改用户文件，但在 Codex 合并语义下并不是替换原语。
+- 启动失败暴露了无效的混合 transport；名称不同的环境 MCP Server 则可能因不报错而继续
+  潜伏。
+- 源码级验证不能证明测试中的打包应用包含同一个 Core 二进制。
 
-## What was not the cause
+## 不属于根因的事项
 
-- Reusing the canonical MCP name `context7` was not an error. Rovai is responsible for isolating
-  namespaces it claims to own.
-- Choosing HTTP in Rovai and stdio in native Codex was not an error. Both definitions were valid in
-  their intended environments.
-- Context7 service availability did not cause the failure; Codex rejected configuration before any
-  server call.
-- A potentially stale package did not create the merge defect. It made fix verification less
-  certain until the packaged Core identity was recorded.
+- 复用规范 MCP 名称 `context7` 不是错误；Rovai 有责任隔离自己声称拥有的命名空间。
+- Rovai 选择 HTTP、原生 Codex 选择 stdio 不是错误；两项定义在各自环境中都有效。
+- Context7 服务可用性没有导致失败；Codex 在调用任何 Server 前就拒绝了配置。
+- 可能过期的安装包没有制造合并缺陷；在记录打包 Core identity 前，它只让修复验证更不确定。
 
-## Resolution and recovery
+## 解决与恢复
 
-The correction separated persistent identity from process lifetime:
+当时的修正把持久 identity 与进程生命周期分开：
 
-1. Rovai now creates `<data>/codex-homes/<camp_id>/<agent_profile_id>/` and reuses it for later
-   AgentRuns by the same member in the same Camp.
-2. On first creation, Rovai copies the user's non-MCP configuration, removes the complete top-level
-   `mcp_servers` table, marks the execution project untrusted, writes Rovai's complete external MCP
-   set, and atomically publishes an owner marker.
-3. Authentication and plugin state remain available through narrow shared links; the user's real
-   configuration is never modified. Plugin-provided MCP remains an explicit exception to the
-   top-level external MCP guarantee.
-4. Every AgentRun gets a new Codex app-server with its isolated `CODEX_HOME`. Terminal Runs shut the
-   process down, while later Runs use the same Home to resume the native thread.
-5. Before the first model turn, Rovai reads and validates Codex's effective configuration. Unknown
-   top-level MCP servers, stale transport fields, or an active project `.codex` layer fail closed.
-6. A Camp deletion enqueues durable cleanup and immediately removes its Homes when possible. Valid
-   Camps retain their Homes; unknown orphan directories are eligible for cleanup after 72 hours.
-7. The macOS package was rebuilt and its embedded Core identity was recorded before repeating the
-   original real-Runtime scenario.
+1. Rovai 创建 `<data>/codex-homes/<camp_id>/<agent_profile_id>/`，并供同一 Camp 中同一成员的
+   后续 AgentRun 复用。
+2. 首次创建时，Rovai 复制用户的非 MCP 配置，移除完整顶层 `mcp_servers` 表，把执行项目标为
+   untrusted，写入 Rovai 的完整外部 MCP 集合，并原子发布 owner marker。
+3. 认证和 plugin 状态通过窄共享链接继续可用；用户真实配置从不修改。plugin 提供的 MCP 是
+   顶层外部 MCP 保证中的明确例外。
+4. 每个 AgentRun 使用带隔离 `CODEX_HOME` 的新 Codex app-server。Run 终结时关闭进程，后续
+   Run 则用同一 Home 恢复原生 thread。
+5. 第一次模型轮次前，Rovai 读取并验证 Codex 有效配置。未知顶层 MCP Server、遗留 transport
+   字段或活跃 project `.codex` 层都会 fail closed。
+6. 删除 Camp 会进入持久清理队列，并在可能时立即删除其 Home。有效 Camp 保留 Home；未知
+   orphan 目录在 72 小时后可清理。
+7. 重新构建 macOS 包并记录内嵌 Core identity，再重复原始真实 Runtime 场景。
 
-## What went well
+## 做得好的地方
 
-- The concrete Codex error preserved the MCP name and invalid transport relationship, making the
-  configuration collision reproducible.
-- The investigation expanded from the visible `context7` failure to the broader ambient-MCP
-  isolation breach instead of applying a name-specific workaround.
-- The design review identified the process-lifetime defect before shipping a config-only patch that
-  would still have shared state across members and Camps.
-- The final validation used a real Codex app-server and the packaged Core, not only mocks or rendered
-  configuration snapshots.
-- The user-owned `~/.codex/config.toml` remained untouched throughout remediation and testing.
+- 具体的 Codex 错误保留了 MCP 名称和无效 transport 关系，使配置冲突可稳定复现。
+- 调查从可见的 `context7` 失败扩展到更广的环境 MCP 隔离破坏，没有采用名称特判补丁。
+- 设计审查在发布仅修配置的补丁前发现了进程生命周期缺陷，避免继续跨成员与 Camp 共享状态。
+- 最终验证使用真实 Codex app-server 与打包 Core，而不只依赖 mock 或渲染配置快照。
+- 整个修复和测试过程中，用户拥有的 `~/.codex/config.toml` 始终未被修改。
 
-## What could be improved
+## 可以改进的地方
 
-- Effective configuration should have been treated as the launch invariant from the first MCP
-  projection implementation.
-- Cross-source, same-name, cross-transport cases should have been mandatory compatibility tests.
-- Runtime diagnostics should identify the Core build and isolated Home without exposing secrets.
-- Incident milestones should be recorded as structured timestamps so detection and recovery time
-  can be measured rather than reconstructed.
-- Optimization through process reuse should follow a documented ownership model, not precede it.
+- 从第一次实现 MCP 投影起，就应把有效配置视为启动不变量。
+- 跨来源、同名、跨 transport 应成为强制兼容性测试。
+- Runtime 诊断应在不暴露秘密的前提下标识 Core 构建和隔离 Home。
+- 应把事故里程碑记录为结构化时间戳，以便测量发现和恢复时间，而不是事后重建。
+- 通过进程复用进行优化，应晚于明确的所有权模型，而不是早于它。
 
-## Where we were fortunate
+## 幸运之处
 
-- The conflicting transport fields caused a hard startup failure. A silent merge of valid but
-  unintended servers would have been harder to detect.
-- The failure occurred in a local environment with a reproducible user configuration rather than
-  after broader distribution.
-- The required continuity boundary already aligned with the existing Camp-and-AgentProfile
-  Conversation identity, avoiding a destructive migration of user session history.
+- 冲突的 transport 字段导致硬启动失败；若悄悄合并出有效但非预期的 Server，会更难发现。
+- 故障发生在具有可复现用户配置的本地环境，而不是更广泛分发后。
+- 所需连续性边界已经与既有 Camp-and-AgentProfile Conversation identity 对齐，避免了对用户
+  Session 历史的破坏性迁移。
 
-## Corrective and preventive actions
+## 纠正与预防措施
 
-Status reflects the evidence available when this postmortem was published. Accountable roles must
-be mapped to a named maintainer before an open action starts.
+状态反映本复盘发布时可用的证据。任何开放事项开始前，责任角色都必须映射到具体维护者。
 
-| ID | Action | Accountable role | Priority | Status | Evidence or target |
+| ID | 措施 | 责任角色 | 优先级 | 状态 | 证据或目标 |
 |---|---|---|---|---|---|
-| PM-01 | Isolate persistent Codex state by Camp and AgentProfile without modifying the user's real configuration | Codex Runtime | P0 | Complete | `CodexHomeManager`; ADR-0107 |
-| PM-02 | Replace global Codex app-server reuse with AgentRun-scoped process ownership and bounded shutdown | Runtime Lifecycle | P0 | Complete | Real test proves distinct PIDs and same-Home thread resume |
-| PM-03 | Validate the effective config before the first model turn and fail closed on unknown top-level MCP or project config | Codex Runtime | P0 | Complete | `config/read` validation and regression tests |
-| PM-04 | Add bidirectional stdio/HTTP same-name tests using a real Codex app-server | MCP Integration | P0 | Complete | `scripts/smoke-mcp-projection.mjs` |
-| PM-05 | Rebuild and verify the packaged macOS Core against the original scenario | Release Engineering | P0 | Complete | UUID `83AA9EBD-065F-3D59-B0C2-08A99E63562B` |
-| PM-06 | Make the real cross-transport projection smoke a required release gate on a compatible macOS runner | Release Engineering | P1 | Planned | Target: next Codex Runtime release |
-| PM-07 | Include redacted Core build identity, effective config source, and Isolated Home identity in exported launch diagnostics | Core Observability | P1 | Planned | Target: v0.41 planning |
-| PM-08 | Record structured detection, acknowledgement, mitigation, and recovery timestamps for release-blocking local incidents | Release Engineering | P2 | Planned | Target: incident template and release checklist update |
+| PM-01 | 按 Camp 和 AgentProfile 隔离持久 Codex 状态，且不修改用户真实配置 | Codex Runtime | P0 | 已完成 | `CodexHomeManager`；ADR-0107 |
+| PM-02 | 用 AgentRun-scoped 进程所有权与有界关闭替换全局 Codex app-server 复用 | Runtime Lifecycle | P0 | 已完成 | 真实测试证明 PID 不同且同一 Home 可恢复 thread |
+| PM-03 | 第一次模型轮次前验证有效配置；遇到未知顶层 MCP 或 project config 时 fail closed | Codex Runtime | P0 | 已完成 | `config/read` 验证与回归测试 |
+| PM-04 | 使用真实 Codex app-server 增加双向 stdio/HTTP 同名测试 | MCP Integration | P0 | 已完成 | `scripts/smoke-mcp-projection.mjs` |
+| PM-05 | 针对原始场景重建并验证打包的 macOS Core | Release Engineering | P0 | 已完成 | UUID `83AA9EBD-065F-3D59-B0C2-08A99E63562B` |
+| PM-06 | 在兼容的 macOS runner 上把真实跨 transport 投影 smoke 设为强制发布门禁 | Release Engineering | P1 | 已计划 | 目标：下一次 Codex Runtime 发布 |
+| PM-07 | 在导出的启动诊断中加入脱敏 Core 构建 identity、有效配置来源与 Isolated Home identity | Core Observability | P1 | 已计划 | 目标：v0.41 规划 |
+| PM-08 | 为阻断发布的本地事故记录结构化的发现、确认、缓解和恢复时间 | Release Engineering | P2 | 已计划 | 目标：更新事故模板与发布清单 |
 
-## Recurrence criteria
+## 复发判据
 
-This incident is considered to have recurred if any Rovai-managed Codex AgentRun:
+若任何 Rovai 管理的 Codex AgentRun 出现以下情况，即视为本事故复发：
 
-- loads a user top-level MCP server not present in its frozen Rovai projection;
-- combines transport fields from two same-named MCP definitions;
-- enables project `.codex` configuration in a workspace where only `AGENTS.md` project instructions
-  should be preserved;
-- reuses a live Codex process across different Isolated Codex Homes; or
-- cannot establish which Core binary and Home produced a launch failure.
+- 加载了不在冻结 Rovai 投影中的用户顶层 MCP Server；
+- 合并了两个同名 MCP 定义的 transport 字段；
+- 在只应保留 `AGENTS.md` 项目指令的工作区启用了 project `.codex` 配置；
+- 跨不同 Isolated Codex Home 复用了同一个活跃 Codex 进程；或
+- 无法确认一次启动失败由哪个 Core 二进制和 Home 产生。
 
-Any recurrence should be treated as an isolation failure even if the model turn succeeds.
+即使模型轮次成功，任何上述情况也应按隔离失败处理。
 
-## Lessons
+## 经验
 
-Configuration intent is not configuration evidence. When an external runtime merges layered
-configuration, isolation must be established at the source boundary and verified from the runtime's
-effective view. Durable session state and live process reuse are separate lifecycle decisions; they
-must not share an identity merely because one implementation previously stored both behind a global
-client. Finally, packaged-binary provenance is part of incident response: a fix is not operationally
-verified until the artifact under test can be tied to the validated source.
+配置意图不等于配置证据。外部 Runtime 合并分层配置时，隔离必须在来源边界建立，并从
+Runtime 的有效视图验证。持久 Session 状态与活跃进程复用是不同的生命周期决定；不能只因
+旧实现把二者放在一个全局 client 后面，就让它们共享 identity。最后，打包二进制来源也是
+事故响应的一部分：只有测试中的 artifact 能与已验证源码建立对应，修复才算完成运行验证。
 
-## References
+## 参考资料
 
-- [ADR-0107: Camp-Member Isolated Codex Home and AgentRun-Scoped App Server](../versions/v0.39/decisions.md#adr-0107)
-- [v0.39 Codex Isolated Home implementation contract](../versions/v0.39/codex-home-isolation.md)
-- [v0.39 implementation and acceptance evidence](../versions/v0.39/implementation-plan.md)
-- [ADR-0103: Canonical MCP JSON and Stable Assignment Identity](../versions/v0.37/decisions.md#adr-0103)
-- [ADR-0104: Rovai-Preferred MCP Projection and Non-Blocking External Degradation](../versions/v0.37/decisions.md#adr-0104)
-- [Fix commit `efc50da`](https://github.com/murray17/rovai-ai/commit/efc50daee7a95a078aaa25b8e5fc6cc1e2fa7cc3)
+- [ADR-0107：Camp-Member Isolated Codex Home 与 AgentRun-Scoped App Server](../versions/v0.39/decisions.md#adr-0107)
+- [v0.39 Codex Isolated Home 实现合同](../versions/v0.39/codex-home-isolation.md)
+- [v0.39 实现与验收证据](../versions/v0.39/implementation-plan.md)
+- [ADR-0103：Canonical MCP JSON 与 Stable Assignment Identity](../versions/v0.37/decisions.md#adr-0103)
+- [ADR-0104：Rovai-Preferred MCP Projection 与 Non-Blocking External Degradation](../versions/v0.37/decisions.md#adr-0104)
+- [修复 commit `efc50da`](https://github.com/murray17/rovai-ai/commit/efc50daee7a95a078aaa25b8e5fc6cc1e2fa7cc3)
