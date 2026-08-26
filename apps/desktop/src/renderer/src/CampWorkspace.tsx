@@ -7136,19 +7136,21 @@ function ToolActivityGroupState({ status, label }: { status: string; label: stri
 function ToolActivityGroup({
   campId,
   items,
+  liveTail,
   runId,
   runStatus,
   completeEvidence
 }: {
   campId: string
   items: ToolProgressItem[]
+  liveTail: boolean
   runId: string
   runStatus: AgentRunView['status']
   completeEvidence: {
     byToolId: Map<string, PresentableExecutionEvidence>
   }
 }): JSX.Element {
-  const presentation = toolActivityGroupPresentation(items, runStatus)
+  const presentation = toolActivityGroupPresentation(items, runStatus, liveTail)
   return (
     <details className={`tool-activity-group status-${presentation.status}`}>
       <summary
@@ -7170,7 +7172,10 @@ function ToolActivityGroup({
               </>
             )}
             {presentation.countLabel && (
-              <span className="tool-group-count">{presentation.countLabel}</span>
+              <>
+                <span className="tool-group-separator">·</span>
+                <span className="tool-group-count">{presentation.countLabel}</span>
+              </>
             )}
           </span>
         </span>
@@ -7286,6 +7291,12 @@ export function RunExecutionDisclosure({
     [processItems]
   )
   const hasActiveTool = toolActivityGroupHasActiveTool(activeToolItems, run.status)
+  const trailingProcessItem = groupedProcessItems[groupedProcessItems.length - 1]
+  const liveTailToolGroupKey = run.status === 'running'
+    && !cancelling
+    && trailingProcessItem?.kind === 'toolGroup'
+    ? trailingProcessItem.key
+    : null
   const activeRetryDiagnostic = nonTerminal
     ? processItems.reduce<RuntimeDiagnostic | null>((latest, item) =>
         item.kind === 'diagnostic' ? item.diagnostic : latest, null)
@@ -7331,6 +7342,7 @@ export function RunExecutionDisclosure({
               key={item.key}
               campId={campId}
               items={item.items}
+              liveTail={item.key === liveTailToolGroupKey}
               runId={run.id}
               runStatus={run.status}
               completeEvidence={completeEvidence}
@@ -7401,18 +7413,23 @@ export function RunExecutionDisclosure({
           </button>
         </div>
       )}
-      {nonTerminal && !cancelling && run.waitReason !== 'recovery_blocked' && !hasActiveTool && (
-        <div className="process-action current" role="status">
-          <span className="process-spinner" aria-hidden="true" />
-          <span>{run.status === 'waiting'
-            ? agentRunWaitDetail(run.waitReason) ?? '等待继续'
-            : run.status === 'queued'
-              ? '等待开始'
-              : activeRetryDiagnostic
-                ? `等待 Claude Code 自动重试（${activeRetryDiagnostic.attempt}/${activeRetryDiagnostic.maxAttempts}）`
-                : '正在处理'}</span>
-        </div>
-      )}
+      {nonTerminal
+        && !cancelling
+        && run.waitReason !== 'recovery_blocked'
+        && !hasActiveTool
+        && liveTailToolGroupKey === null
+        && (
+          <div className="process-action current" role="status">
+            <span className="process-spinner" aria-hidden="true" />
+            <span>{run.status === 'waiting'
+              ? agentRunWaitDetail(run.waitReason) ?? '等待继续'
+              : run.status === 'queued'
+                ? '等待开始'
+                : activeRetryDiagnostic
+                  ? `等待 Claude Code 自动重试（${activeRetryDiagnostic.attempt}/${activeRetryDiagnostic.maxAttempts}）`
+                  : '正在处理'}</span>
+          </div>
+        )}
       {cancelling && nonTerminal && (
         <div className="process-action cancelling" role="status">
           停止请求已发送，正在等待 Agent 运行时退出。

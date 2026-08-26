@@ -1992,19 +1992,28 @@ async function collectRuntimeRows(cdp) {
         .map((summary) => {
           const icon = summary.querySelector('.tool-group-icon')
           const iconSvg = icon?.querySelector('svg')
+          const copy = summary.querySelector('.tool-group-copy')
+          const line = summary.querySelector('.tool-group-line')
           const state = summary.querySelector('.tool-group-state')
           const disclosure = summary.querySelector('.tool-group-disclosure')
           const summaryStyle = getComputedStyle(summary)
           const iconRect = icon?.getBoundingClientRect()
           const iconSvgRect = iconSvg?.getBoundingClientRect()
+          const copyRect = copy?.getBoundingClientRect()
           const stateRect = state?.getBoundingClientRect()
           const disclosureRect = disclosure?.getBoundingClientRect()
           return {
             display: summaryStyle.display,
             childCount: summary.children.length,
             iconWidth: iconRect?.width ?? 0,
+            iconHeight: iconRect?.height ?? 0,
             iconSvgWidth: iconSvgRect?.width ?? 0,
             iconSvgHeight: iconSvgRect?.height ?? 0,
+            copyHeight: copyRect?.height ?? 0,
+            iconCopyCenterDelta: iconRect && copyRect
+              ? Math.abs((iconRect.top + iconRect.height / 2) - (copyRect.top + copyRect.height / 2))
+              : Number.POSITIVE_INFINITY,
+            lineHeight: line ? getComputedStyle(line).lineHeight : null,
             stateWidth: stateRect?.width ?? 0,
             disclosureWidth: disclosureRect?.width ?? 0,
             statusLabel: state?.getAttribute('aria-label') ?? null,
@@ -3273,8 +3282,12 @@ function assertRuntimeRows(observed) {
       && row.toolGroupLayouts.every((layout) => layout.display === 'grid'
         && layout.childCount === 4
         && Math.abs(layout.iconWidth - 16) <= .5
+        && Math.abs(layout.iconHeight - 16) <= .5
         && Math.abs(layout.iconSvgWidth - 16) <= .5
         && Math.abs(layout.iconSvgHeight - 16) <= .5
+        && layout.copyHeight >= 16
+        && layout.iconCopyCenterDelta <= .5
+        && layout.lineHeight === '16px'
         && Math.abs(layout.stateWidth - 16) <= .5
         && Math.abs(layout.disclosureWidth - 20) <= .5
         && layout.statusLabel
@@ -3293,7 +3306,15 @@ function assertRuntimeRows(observed) {
         && layout.statusLabel
         && layout.summaryAriaLabel === null),
     `${expected.runtimeName} Tool row did not keep four fixed tracks and a 16px SVG: ${JSON.stringify(row)}`)
-    if (expected.cancelledWithInProgressActivity) {
+    if (expected.agentId === activeAgentId) {
+      assert(row.focusedStatus === 'running'
+        && row.toolGroupLayouts[0]?.statusLabel === '执行中'
+        && row.toolGroupLayouts[0]?.summaryAriaLabel === '执行中；已执行 1 项操作'
+        && row.toolStates.length === 1
+        && row.toolStates[0].label === '成功'
+        && row.toolStates[0].status === 'completed',
+      `${expected.runtimeName} settled live-tail Tool group did not retain active feedback: ${JSON.stringify(row)}`)
+    } else if (expected.cancelledWithInProgressActivity) {
       assert(row.focusedStatus === 'cancelled'
         && row.toolGroupLayouts[0]?.statusLabel === '已停止'
         && row.toolStates.length === 1
@@ -3303,7 +3324,7 @@ function assertRuntimeRows(observed) {
         && row.toolStateAnimations[0] === 'none',
       `${expected.runtimeName} cancelled Run did not stop its in-progress activity presentation: ${JSON.stringify(row)}`)
     } else {
-      assert(row.toolGroupLayouts[0]?.statusLabel === '成功'
+      assert(row.toolGroupLayouts[0]?.statusLabel === '全部成功'
         && row.toolStates.length === 1
         && row.toolStates[0].label === '成功'
         && row.toolStates[0].status === 'completed',
