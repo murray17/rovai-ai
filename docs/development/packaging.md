@@ -85,11 +85,16 @@ pnpm dist:mac
 `Rovai-AI-<version>-<arch>` 文件名；文件名由 `package.json#build.mac.artifactName` 决定，DMG
 内部仍是 `Rovai AI.app`。
 
-## 一键更新发布集合
+## 主动检查更新发布集合
 
-应用内“检查更新”只由用户触发。Main 通过打包进 App 的 `app-update.yml` 读取官方
-`murray17/rovai-ai` GitHub Release 通道；发现新版本后自动下载 ZIP，Renderer 显示进度，用户点击
-“安装并重启”后才进入受控关闭与安装。
+正式打包 App 在首个主窗口加载完成 5 秒后主动检查，之后在每轮完成 6 小时后再检查。Main 通过打包进
+App 的 `app-update.yml` 读取官方 `murray17/rovai-ai` GitHub Release 通道；检查只形成共享版本事实和
+可关闭的全局提醒，不自动下载。下载、安装和重启分别由用户显式确认，下载进度由 Renderer 投影；
+“安装并重启”先让 updater stage 安装器，再进入既有受控关闭。
+
+本地隔离 packaged UI 验收可以在同时满足隔离实例 admission 时设置
+`ROVAI_DISABLE_AUTO_UPDATE_CHECKS=1`，避免访问真实 Release 通道。该变量不对日常实例生效，也不构成
+更新功能或签名连续性的发布证据。完整状态合同见 [App Update v1](../contracts/app-update-v1.md)。
 
 macOS 正式 Release 必须在同一个版本标签中上传以下完整集合：
 
