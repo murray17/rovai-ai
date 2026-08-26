@@ -148,7 +148,7 @@ try {
   await pressKey(running.cdp, 'Escape')
   await waitForExpression(running.cdp, `!document.querySelector('.new-camp-dialog')`)
 
-  await mouseClick(running.cdp, '.unified-sidebar button[aria-label="设置"]')
+  await mouseClick(running.cdp, '.unified-sidebar button[aria-label^="设置"]')
   await waitForSelector(running.cdp, '.settings-sidebar-menu')
   const settingsDestinations = await evaluate(running.cdp,
     `[...document.querySelectorAll('.settings-sidebar-menu strong')].map((node) => node.textContent)`)
@@ -490,7 +490,7 @@ try {
     '叮叮',
     outputDir
   ))
-  await mouseClick(running.cdp, '.unified-sidebar button[aria-label="设置"]')
+  await mouseClick(running.cdp, '.unified-sidebar button[aria-label^="设置"]')
   await waitForSelector(running.cdp, '.settings-sidebar-menu')
   await mouseClick(running.cdp, '.settings-sidebar-menu button', 'Agent 运行时', true)
   await waitForSelector(running.cdp, '.runtime-installations')
@@ -1152,7 +1152,7 @@ try {
     `Member content roster did not coexist with global navigation: ${JSON.stringify(quickChatRosterState)}`
   )
   await evaluate(running.cdp,
-    `document.querySelector('.unified-sidebar button[aria-label="设置"]')?.click()`)
+    `document.querySelector('.unified-sidebar button[aria-label^="设置"]')?.click()`)
   await waitForSelector(running.cdp, '.settings-sidebar-menu', 30_000)
   await mouseClick(running.cdp, '.settings-sidebar-back', '返回 App', true)
   await waitForSelector(running.cdp, '.members-view', 30_000)
