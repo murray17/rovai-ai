@@ -38,6 +38,7 @@ const acceptanceHome = join(fixtureRoot, 'home')
 const debugPort = Number(process.env.ROVAI_STRUCTURED_MENTIONS_ACCEPT_DEBUG_PORT ?? 9491)
 const skillPickerOnly = cliArguments.includes('--skill-picker-only')
 const skillContextSmoke = cliArguments.includes('--skill-context-smoke')
+const imeNewlineOnly = cliArguments.includes('--ime-newline-only')
 const continuationOnly = cliArguments.includes('--continuation-only')
 const replyBackspaceOnly = cliArguments.includes('--reply-backspace-only')
 const databasePath = join(dataDir, 'rovai.sqlite')
@@ -133,6 +134,7 @@ let cleanupFailure = null
 let result = null
 
 try {
+  acceptance: {
   // Clipboard mutation is forbidden unless the complete macOS Pasteboard can be
   // archived first. The archive includes every item, flavor, and byte payload.
   clipboardArchive = await snapshotClipboard()
@@ -222,6 +224,19 @@ try {
   await waitForSelector(running.cdp, '#camp-message.structured-mention-editor')
   await waitForExpression(running.cdp,
     `document.querySelector('#camp-message')?.getAttribute('contenteditable') === 'true'`)
+  if (imeNewlineOnly) {
+    const imeNewlineInspection = await acceptImeNewlineRegression(running.cdp, campId)
+    result = {
+      acceptance: 'composer-ime-newline-ui',
+      appPath,
+      campId,
+      ...imeNewlineInspection,
+      clipboardItemCountBeforeTest: clipboardArchive.length,
+      clipboardRestored: false,
+      isolatedUserDataRemoved: false
+    }
+    break acceptance
+  }
   await focusEditorAtEnd(running.cdp)
   await running.cdp.send('Input.insertText', { text: '/' })
   await waitForExpression(running.cdp, `(() => {
@@ -698,6 +713,115 @@ try {
   await waitForValue(async () => request(running.cdp, 'camp.composerDraft.get', { campId }),
     (draft) => deepEqual(draft.content, []), 10_000)
 
+  // The first native character in an empty editor must stay inside the same
+  // contenteditable host. Remounting here resets the platform IME context, so
+  // the first Pinyin key after plain text can escape as a Latin character.
+  await evaluate(running.cdp, `(() => {
+    const editor = document.querySelector('#camp-message')
+    if (!(editor instanceof HTMLDivElement)) return false
+    window.__structuredMentionFirstInputEditor = editor
+    editor.focus()
+    const selection = window.getSelection()
+    const range = document.createRange()
+    range.selectNodeContents(editor)
+    range.collapse(false)
+    selection?.removeAllRanges()
+    selection?.addRange(range)
+    return true
+  })()`)
+  await running.cdp.send('Input.insertText', { text: '1' })
+  await waitForExpression(running.cdp,
+    `document.querySelector('#camp-message')?.textContent === '1'`)
+  await evaluate(running.cdp,
+    `new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))`, true)
+  const firstNativeInputInspection = await evaluate(running.cdp, `(() => {
+    const editor = document.querySelector('#camp-message')
+    const selection = window.getSelection()
+    if (!(editor instanceof HTMLDivElement) || !selection?.anchorNode) return null
+    const beforeCaret = document.createRange()
+    beforeCaret.selectNodeContents(editor)
+    beforeCaret.setEnd(selection.anchorNode, selection.anchorOffset)
+    return {
+      stayedMounted: editor === window.__structuredMentionFirstInputEditor,
+      stayedFocused: document.activeElement === editor,
+      text: editor.textContent,
+      textSegmentCount: editor.querySelectorAll(':scope > [data-editor-segment="text"]').length,
+      caretOffset: beforeCaret.toString().length
+    }
+  })()`)
+  assert(
+    firstNativeInputInspection?.stayedMounted
+      && firstNativeInputInspection.stayedFocused
+      && firstNativeInputInspection.text === '1'
+      && firstNativeInputInspection.textSegmentCount === 1
+      && firstNativeInputInspection.caretOffset === 1,
+    `The first native character reset the IME editor host: ${JSON.stringify(firstNativeInputInspection)}`
+  )
+  await selectWholeEditor(running.cdp)
+  await pressKey(running.cdp, {
+    key: 'Backspace', code: 'Backspace', windowsVirtualKeyCode: 8, nativeVirtualKeyCode: 51
+  })
+  await waitForValue(async () => request(running.cdp, 'camp.composerDraft.get', { campId }),
+    (draft) => deepEqual(draft.content, []), 10_000)
+
+  const firstNativeCompositionInspection = await evaluate(running.cdp, `(async () => {
+    const editor = document.querySelector('#camp-message')
+    const segment = editor?.querySelector(':scope > [data-editor-segment="text"]')
+    if (!(editor instanceof HTMLDivElement) || !(segment instanceof HTMLElement)) return null
+    editor.focus()
+    const selection = window.getSelection()
+    const initialRange = document.createRange()
+    initialRange.setStart(segment, 0)
+    initialRange.collapse(true)
+    selection?.removeAllRanges()
+    selection?.addRange(initialRange)
+    editor.dispatchEvent(new CompositionEvent('compositionstart', { bubbles: true, data: '' }))
+    const text = document.createTextNode('你')
+    segment.replaceChildren(text)
+    const committedRange = document.createRange()
+    committedRange.setStart(text, text.data.length)
+    committedRange.collapse(true)
+    selection?.removeAllRanges()
+    selection?.addRange(committedRange)
+    editor.dispatchEvent(new InputEvent('input', {
+      bubbles: true,
+      inputType: 'insertCompositionText',
+      data: '你',
+      isComposing: true
+    }))
+    editor.dispatchEvent(new CompositionEvent('compositionend', { bubbles: true, data: '你' }))
+    await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))
+    const reconciledEditor = document.querySelector('#camp-message')
+    const reconciledSelection = window.getSelection()
+    if (!(reconciledEditor instanceof HTMLDivElement) || !reconciledSelection?.anchorNode) return null
+    const beforeCaret = document.createRange()
+    beforeCaret.selectNodeContents(reconciledEditor)
+    beforeCaret.setEnd(reconciledSelection.anchorNode, reconciledSelection.anchorOffset)
+    return {
+      stayedMounted: reconciledEditor === editor,
+      stayedFocused: document.activeElement === reconciledEditor,
+      text: reconciledEditor.textContent,
+      caretOffset: beforeCaret.toString().length
+    }
+  })()`, true)
+  assert(
+    firstNativeCompositionInspection?.stayedMounted
+      && firstNativeCompositionInspection.stayedFocused
+      && firstNativeCompositionInspection.text === '你'
+      && firstNativeCompositionInspection.caretOffset === 1,
+    `The first IME composition reset the editor host: ${JSON.stringify(firstNativeCompositionInspection)}`
+  )
+  await waitForValue(async () => request(running.cdp, 'camp.composerDraft.get', { campId }),
+    (draft) => deepEqual(draft.content, [{ kind: 'text', text: '你' }]), 10_000)
+  await selectWholeEditor(running.cdp)
+  await pressKey(running.cdp, {
+    key: 'Backspace', code: 'Backspace', windowsVirtualKeyCode: 8, nativeVirtualKeyCode: 51
+  })
+  await waitForValue(async () => request(running.cdp, 'camp.composerDraft.get', { campId }),
+    (draft) => deepEqual(draft.content, []), 10_000)
+
+  await acceptImeNewlineRegression(running.cdp, campId)
+
   // A native contenteditable/IME edit may wrap a React-owned segment. The
   // Composer must replace the editor host instead of imperatively removing the
   // wrapper, otherwise the next controlled clear crashes React in removeChild
@@ -769,6 +893,117 @@ try {
   assert(!nativeOwnershipErrors.some((error) =>
     `${error.message}\n${error.error}`.includes('removeChild')),
     `Native DOM ownership still crashed React: ${JSON.stringify(nativeOwnershipErrors)}`)
+
+  // A completed composition is reconciled on the next animation frame. A new
+  // composition that starts first must cancel that old reconciliation instead
+  // of letting it remount the editor underneath the new IME session.
+  const overlappingCompositionInspection = await evaluate(running.cdp, `(async () => {
+    const editor = document.querySelector('#camp-message')
+    if (!(editor instanceof HTMLDivElement)) return null
+    editor.focus()
+    editor.dispatchEvent(new CompositionEvent('compositionstart', { bubbles: true, data: '' }))
+    const text = document.createTextNode('首')
+    editor.replaceChildren(text)
+    const range = document.createRange()
+    range.setStart(text, text.data.length)
+    range.collapse(true)
+    const selection = window.getSelection()
+    selection?.removeAllRanges()
+    selection?.addRange(range)
+    editor.dispatchEvent(new CompositionEvent('compositionend', { bubbles: true, data: '首' }))
+    editor.dispatchEvent(new CompositionEvent('compositionstart', { bubbles: true, data: '' }))
+    await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))
+    const stayedMountedDuringNextComposition = document.querySelector('#camp-message') === editor
+    const stayedFocusedDuringNextComposition = document.activeElement === editor
+    editor.dispatchEvent(new CompositionEvent('compositionend', { bubbles: true, data: '首' }))
+    await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))
+    const reconciledEditor = document.querySelector('#camp-message')
+    return {
+      stayedMountedDuringNextComposition,
+      stayedFocusedDuringNextComposition,
+      reconciledAfterNextComposition: reconciledEditor !== editor,
+      reconciledText: reconciledEditor?.textContent ?? null,
+      focusedAfterReconciliation: document.activeElement === reconciledEditor
+    }
+  })()`, true)
+  assert(
+    overlappingCompositionInspection?.stayedMountedDuringNextComposition
+      && overlappingCompositionInspection.stayedFocusedDuringNextComposition
+      && overlappingCompositionInspection.reconciledAfterNextComposition
+      && overlappingCompositionInspection.reconciledText === '首'
+      && overlappingCompositionInspection.focusedAfterReconciliation,
+    `A stale composition frame crossed into the next IME session: ${JSON.stringify(overlappingCompositionInspection)}`
+  )
+  await waitForValue(async () => request(running.cdp, 'camp.composerDraft.get', { campId }),
+    (draft) => deepEqual(draft.content, [{ kind: 'text', text: '首' }]), 10_000)
+  await selectWholeEditor(running.cdp)
+  await pressKey(running.cdp, {
+    key: 'Backspace', code: 'Backspace', windowsVirtualKeyCode: 8, nativeVirtualKeyCode: 51
+  })
+  await waitForValue(async () => request(running.cdp, 'camp.composerDraft.get', { campId }),
+    (draft) => deepEqual(draft.content, []), 10_000)
+
+  // If Shift+Enter arrives after compositionend but before its frame, settle
+  // the committed DOM first and apply exactly one newline to that fresh state.
+  const pendingCompositionShortcutInspection = await evaluate(running.cdp, `(async () => {
+    const editor = document.querySelector('#camp-message')
+    if (!(editor instanceof HTMLDivElement)) return null
+    editor.focus()
+    editor.dispatchEvent(new CompositionEvent('compositionstart', { bubbles: true, data: '' }))
+    const text = document.createTextNode('123213213')
+    editor.replaceChildren(text)
+    const range = document.createRange()
+    range.setStart(text, text.data.length)
+    range.collapse(true)
+    const selection = window.getSelection()
+    selection?.removeAllRanges()
+    selection?.addRange(range)
+    editor.dispatchEvent(new CompositionEvent('compositionend', {
+      bubbles: true,
+      data: '123213213'
+    }))
+    const shortcut = new KeyboardEvent('keydown', {
+      bubbles: true,
+      cancelable: true,
+      key: 'Enter',
+      code: 'Enter',
+      shiftKey: true
+    })
+    editor.dispatchEvent(shortcut)
+    await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))
+    const reconciledEditor = document.querySelector('#camp-message')
+    const readDomText = (node) => {
+      if (node.nodeType === Node.TEXT_NODE) return node.textContent ?? ''
+      if (!(node instanceof HTMLElement)) return ''
+      if (node.dataset.editorCaretHost === 'true') {
+        return (node.textContent ?? '').replaceAll('\\u200B', '')
+      }
+      if (node.tagName === 'BR') {
+        return node.dataset.editorCaretBreak === 'true'
+          || node.dataset.editorEmptyBreak === 'true' ? '' : '\\n'
+      }
+      return [...node.childNodes].map(readDomText).join('')
+    }
+    return {
+      defaultPrevented: shortcut.defaultPrevented,
+      text: reconciledEditor ? readDomText(reconciledEditor) : null,
+      focused: document.activeElement === reconciledEditor
+    }
+  })()`, true)
+  assert(
+    pendingCompositionShortcutInspection?.defaultPrevented
+      && pendingCompositionShortcutInspection.text === '123213213\n'
+      && pendingCompositionShortcutInspection.focused,
+    `Shift+Enter did not settle pending IME text before adding one newline: ${JSON.stringify(pendingCompositionShortcutInspection)}`
+  )
+  await waitForValue(async () => request(running.cdp, 'camp.composerDraft.get', { campId }),
+    (draft) => deepEqual(draft.content, [{ kind: 'text', text: '123213213\n' }]), 10_000)
+  await selectWholeEditor(running.cdp)
+  await pressKey(running.cdp, {
+    key: 'Backspace', code: 'Backspace', windowsVirtualKeyCode: 8, nativeVirtualKeyCode: 51
+  })
+  await waitForValue(async () => request(running.cdp, 'camp.composerDraft.get', { campId }),
+    (draft) => deepEqual(draft.content, []), 10_000)
 
   await focusEditorAtEnd(running.cdp)
   await running.cdp.send('Input.insertText', { text: expectedContent[0].text })
@@ -1650,6 +1885,7 @@ try {
     isolatedUserDataRemoved: false
   }
   }
+  }
 } catch (error) {
   testFailure = error
 } finally {
@@ -1782,6 +2018,9 @@ async function removeDirectoryWithRetry(path) {
 async function launchApp(userDataDir, port, width, height) {
   const stderr = []
   const child = spawn(join(appPath, 'Contents', 'MacOS', 'Rovai AI'), [
+    ...(process.env.ROVAI_STRUCTURED_MENTIONS_ACCEPT_DISABLE_SANDBOX === '1'
+      ? ['--no-sandbox']
+      : []),
     `--remote-debugging-port=${port}`,
     `--user-data-dir=${userDataDir}`
   ], {
@@ -1881,6 +2120,135 @@ async function openCamp(cdp, campId) {
   })()`)
   assert(opened, `Could not open Camp ${campId}`)
   await waitForSelector(cdp, '.camp-workspace', 30_000)
+}
+
+async function acceptImeNewlineRegression(cdp, campId) {
+  await selectWholeEditor(cdp)
+  await pressKey(cdp, {
+    key: 'Backspace', code: 'Backspace', windowsVirtualKeyCode: 8, nativeVirtualKeyCode: 51
+  })
+  await waitForValue(async () => request(cdp, 'camp.composerDraft.get', { campId }),
+    (draft) => deepEqual(draft.content, []), 10_000)
+
+  // A trailing model newline must have a real DOM line box. Chromium inserts
+  // the next native character before a terminal LF text character, which makes
+  // one Shift+Enter appear ineffective and breaks the next IME composition.
+  await focusEditorAtEnd(cdp)
+  await cdp.send('Input.insertText', { text: '123213213' })
+  await waitForValue(async () => request(cdp, 'camp.composerDraft.get', { campId }),
+    (draft) => deepEqual(draft.content, [{ kind: 'text', text: '123213213' }]), 10_000)
+  const trailingNewlineInspection = await evaluate(cdp, `(async () => {
+    const editor = document.querySelector('#camp-message')
+    if (!(editor instanceof HTMLDivElement)) return null
+    const shortcut = new KeyboardEvent('keydown', {
+      bubbles: true,
+      cancelable: true,
+      key: 'Enter',
+      code: 'Enter',
+      shiftKey: true
+    })
+    editor.dispatchEvent(shortcut)
+    await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))
+    const reconciledEditor = document.querySelector('#camp-message')
+    window.__structuredMentionPostNewlineEditor = reconciledEditor
+    window.__structuredMentionImeErrors = []
+    window.__structuredMentionImeInputEvents = []
+    window.addEventListener('error', (event) => {
+      window.__structuredMentionImeErrors.push({
+        message: event.message,
+        error: event.error instanceof Error ? event.error.stack : null
+      })
+    })
+    for (const type of ['beforeinput', 'input']) {
+      document.addEventListener(type, (event) => {
+        window.__structuredMentionImeInputEvents.push({
+          type,
+          inputType: event.inputType,
+          data: event.data,
+          isComposing: event.isComposing,
+          defaultPrevented: event.defaultPrevented,
+          targetHtml: event.target instanceof HTMLElement ? event.target.innerHTML : null
+        })
+      })
+    }
+    const readDomText = (node) => {
+      if (node.nodeType === Node.TEXT_NODE) return node.textContent ?? ''
+      if (!(node instanceof HTMLElement)) return ''
+      if (node.dataset.editorCaretHost === 'true') {
+        return (node.textContent ?? '').replaceAll('\\u200B', '')
+      }
+      if (node.tagName === 'BR') {
+        return node.dataset.editorCaretBreak === 'true'
+          || node.dataset.editorEmptyBreak === 'true' ? '' : '\\n'
+      }
+      return [...node.childNodes].map(readDomText).join('')
+    }
+    return {
+      defaultPrevented: shortcut.defaultPrevented,
+      text: reconciledEditor ? readDomText(reconciledEditor) : null,
+      html: reconciledEditor?.innerHTML ?? null,
+      focused: document.activeElement === reconciledEditor
+    }
+  })()`, true)
+  assert(
+    trailingNewlineInspection?.defaultPrevented
+      && trailingNewlineInspection.text === '123213213\n'
+      && trailingNewlineInspection.focused,
+    `Shift+Enter did not create one trailing newline: ${JSON.stringify(trailingNewlineInspection)}`
+  )
+
+  await cdp.send('Input.insertText', { text: 'n' })
+  await evaluate(cdp,
+    `new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))`, true)
+  const postNewlineInputInspection = await evaluate(cdp, `(() => {
+    const editor = document.querySelector('#camp-message')
+    if (!(editor instanceof HTMLDivElement)) return {
+      text: null,
+      html: null,
+      stayedMounted: false,
+      focused: false,
+      errors: window.__structuredMentionImeErrors ?? [],
+      inputEvents: window.__structuredMentionImeInputEvents ?? [],
+      bodyText: document.body.innerText.slice(0, 500)
+    }
+    const readDomText = (node) => {
+      if (node.nodeType === Node.TEXT_NODE) return node.textContent ?? ''
+      if (!(node instanceof HTMLElement)) return ''
+      if (node.dataset.editorCaretHost === 'true') {
+        return (node.textContent ?? '').replaceAll('\\u200B', '')
+      }
+      if (node.tagName === 'BR') {
+        return node.dataset.editorCaretBreak === 'true'
+          || node.dataset.editorEmptyBreak === 'true' ? '' : '\\n'
+      }
+      return [...node.childNodes].map(readDomText).join('')
+    }
+    return {
+      text: readDomText(editor),
+      html: editor.innerHTML,
+      stayedMounted: editor === window.__structuredMentionPostNewlineEditor,
+      focused: document.activeElement === editor,
+      errors: window.__structuredMentionImeErrors ?? [],
+      inputEvents: window.__structuredMentionImeInputEvents ?? []
+    }
+  })()`)
+  assert(
+    postNewlineInputInspection?.text === '123213213\nn'
+      && postNewlineInputInspection.stayedMounted
+      && postNewlineInputInspection.focused,
+    `The first native character landed before the trailing newline: ${JSON.stringify(postNewlineInputInspection)}`
+  )
+  const draft = await waitForValue(async () => request(cdp, 'camp.composerDraft.get', { campId }),
+    (value) => deepEqual(value.content, [{ kind: 'text', text: '123213213\nn' }]), 10_000)
+
+  await selectWholeEditor(cdp)
+  await pressKey(cdp, {
+    key: 'Backspace', code: 'Backspace', windowsVirtualKeyCode: 8, nativeVirtualKeyCode: 51
+  })
+  await waitForValue(async () => request(cdp, 'camp.composerDraft.get', { campId }),
+    (value) => deepEqual(value.content, []), 10_000)
+
+  return { trailingNewlineInspection, postNewlineInputInspection, draft }
 }
 
 async function focusEditorAtEnd(cdp) {
@@ -2047,7 +2415,12 @@ async function selectWholeEditor(cdp) {
     const selection = window.getSelection()
     selection?.removeAllRanges()
     selection?.addRange(range)
-    return selection?.toString() === editor.textContent
+    if (!selection || selection.rangeCount !== 1) return false
+    const selectedRange = selection.getRangeAt(0)
+    return selectedRange.startContainer === editor
+      && selectedRange.startOffset === 0
+      && selectedRange.endContainer === editor
+      && selectedRange.endOffset === editor.childNodes.length
   })()`)
   assert(selected, 'Could not select the whole Composer body')
 }

@@ -2731,7 +2731,7 @@ details summary { min-height: 28px; padding: 5px 0; color: var(--muted); font-si
 .structured-mention-composer { width: 100%; min-height: 0; }
 .structured-mention-editor { display: block; width: 100%; min-height: 42px; max-height: min(180px, 26vh); overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; outline: 0; scrollbar-width: thin; }
 .structured-mention-editor:focus-visible { outline: 0; }
-.structured-mention-editor:not(:empty) + .structured-mention-placeholder { visibility: hidden; }
+.structured-mention-editor:not(:has(> [data-editor-empty="true"]:only-child > [data-editor-empty-break="true"]:only-child)) + .structured-mention-placeholder { visibility: hidden; }
 .composer-reply-region { display: grid; min-width: 0; gap: 4px; padding: 1px 0 2px; }
 .composer-reply-line {
   display: grid;

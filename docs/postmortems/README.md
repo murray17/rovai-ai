@@ -1,7 +1,7 @@
 ---
 document_type: postmortem-index
 authority: incident-history
-last_updated: 2026-08-26
+last_updated: 2026-08-27
 ---
 
 # 事故复盘
@@ -40,3 +40,4 @@ last_updated: 2026-08-26
 | 2026-08-25 | [Codex 命令输出增量放大阻断 Camp 打开与恢复](2026-08-25-codex-command-output-delta-camp-open-amplification.md) | 已关闭；继续跟踪后续措施 |
 | 2026-08-26 | [Windows Codex Runtime 发现与验收隔离缺口](2026-08-26-windows-codex-runtime-discovery-and-acceptance-isolation.md) | 已关闭；继续跟踪后续措施 |
 | 2026-08-26 | [Gather 完成投递缺少公开因果展示，导致 A2A 调度误判](2026-08-26-gather-completion-causal-handoff-not-visible.md) | 事实调查已关闭；展示改进待跟踪 |
+| 2026-08-26 | [Camp Composer 行尾换行破坏中文输入法首字符组合](2026-08-26-composer-ime-trailing-newline-caret-host.md) | 已关闭；继续跟踪自动化覆盖 |
