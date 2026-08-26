@@ -6,7 +6,7 @@ import {
 } from 'node:fs'
 import { basename, dirname, isAbsolute, join, resolve } from 'node:path'
 import { randomUUID } from 'node:crypto'
-import { verifyMacosApp } from './macos-app-verification.mjs'
+import { verifyAdhocMacosApp } from './macos-app-verification.mjs'
 
 const DAILY_APP_NAME = 'Rovai AI.app'
 const DEFAULT_FILE_SYSTEM = Object.freeze({
@@ -35,7 +35,7 @@ export function installMacosDailyTransactionForTest({
   backupPath,
   arch,
   root = process.cwd(),
-  verifyApp = (candidate) => verifyMacosApp(candidate, arch, { root }),
+  verifyApp = (candidate) => verifyAdhocMacosApp(candidate, arch, { root }),
   copyApp = copyAppWithDitto,
   fileSystem = DEFAULT_FILE_SYSTEM
 }) {
@@ -52,7 +52,7 @@ export function installMacosDailyTransactionForTest({
     throw new Error('daily install target and backup must use the same directory')
   }
   if (fileSystem.pathEntry(source) === 'absent') {
-    throw new Error(`signed source App does not exist: ${source}`)
+    throw new Error(`ad-hoc source App does not exist: ${source}`)
   }
   if (fileSystem.pathEntry(backup) !== 'absent') {
     throw new Error(`backup path already exists: ${backup}`)
