@@ -1,8 +1,8 @@
 ---
 document_type: versions-index
 authority: version-lifecycle
-current_version: v1.28
-last_updated: 2026-08-25
+current_version: v1.29
+last_updated: 2026-08-26
 ---
 
 # Rovai-ai 版本记录
@@ -179,4 +179,5 @@ last_updated: 2026-08-25
 | v1.25 | `historical` | Codex 最终 Camp 答案指导已实现；冻结时多次真实行为观察仍未完成 | [v1.25/README.md](v1.25/README.md) |
 | v1.26 | `historical` | Cursor Agent Catalog 接入、同名命令防碰撞与保守平台未准入 | [v1.26/README.md](v1.26/README.md) |
 | v1.27 | `historical` | Kimi Code identity、MiniMax M3 私有配置、cold exact resume 与 macOS arm64 准入 | [v1.27/README.md](v1.27/README.md) |
-| v1.28 | `current` | Grok Build、MiniMax M3、`>= 1.0.0` 与标准 ACP resume；macOS arm64/x64、Windows x64 1.0.5 已分别补证 | [v1.28/README.md](v1.28/README.md) |
+| v1.28 | `historical` | Grok Build、MiniMax M3、`>= 1.0.0` 与标准 ACP resume；macOS arm64/x64、Windows x64 1.0.5 已分别补证 | [v1.28/README.md](v1.28/README.md) |
+| v1.29 | `current` | Command Diff 与 Camp/exact-root Workspace Change Window 设计；实现尚未开始 | [v1.29/README.md](v1.29/README.md) |

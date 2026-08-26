@@ -1,7 +1,7 @@
 ---
 document_type: current-decision-navigation
 authority: current-authority-and-rationale-routing
-last_updated: 2026-08-25
+last_updated: 2026-08-26
 ---
 
 # 当前规范与决定理由导航
@@ -17,8 +17,8 @@ last_updated: 2026-08-25
 
 ## Camp、Workspace 与 Published Attachments
 
-- 当前规范：[Camp/Composer 基础不变量](../architecture/foundational-invariants.md#camp-lifecycle)、[Camp Identity](../architecture/camp-identity.md)、[Camp Identity v1](../contracts/camp-identity-v1.md)、[Camp Activation](../architecture/camp-activation-lifecycle.md)、[Composer Draft](../architecture/camp-composer-draft.md)、[Camp Composer Draft v4](../contracts/camp-composer-draft-v4.md)、[Camp Open](../architecture/camp-open-read-path.md)、[Camp Open Projection v6](../contracts/camp-open-projection-v6.md)、[Camp Published Attachment View](../architecture/camp-published-attachment-view.md)、[Camp Attachment v5](../contracts/camp-attachment-v5.md)、[Camp Published Attachment View v3](../contracts/camp-published-attachment-view-v3.md)、[Camp Permanent Deletion v2](../contracts/camp-permanent-deletion-v2.md)、[First-run](../architecture/first-run-onboarding.md)及[First-run Onboarding v2](../contracts/first-run-onboarding-v2.md)。
-- 理由来源：[v0.22](../versions/v0.22/decisions.md)、[v0.23](../versions/v0.23/decisions.md)、[v0.25](../versions/v0.25/decisions.md)、[v0.43](../versions/v0.43/decisions.md)、[v0.77](../versions/v0.77/decisions.md)、[v0.80](../versions/v0.80/decisions.md)、[v0.97](../versions/v0.97/decisions.md)、[v1.00](../versions/v1.00/decisions.md)、[v1.10](../versions/v1.10/decisions.md)、[V1.15-D01](../versions/v1.15/decisions.md#v1-15-d01)、[V1.15-D04](../versions/v1.15/decisions.md#v1-15-d04)、[V1.15-D06](../versions/v1.15/decisions.md#v1-15-d06)、[V1.16-D01](../versions/v1.16/decisions.md#v1-16-d01)、[V1.17-D01](../versions/v1.17/decisions.md#v1-17-d01)、[V1.19-D01](../versions/v1.19/decisions.md#v1-19-d01)、[V1.19-D02](../versions/v1.19/decisions.md#v1-19-d02)、[V1.20-D01](../versions/v1.20/decisions.md#v1-20-d01)、[V1.27-D08](../versions/v1.27/decisions.md#v1-27-d08)。
+- 当前规范：[Camp/Composer 基础不变量](../architecture/foundational-invariants.md#camp-lifecycle)、[Camp Identity](../architecture/camp-identity.md)、[Camp Identity v1](../contracts/camp-identity-v1.md)、[Camp Activation](../architecture/camp-activation-lifecycle.md)、[Composer Draft](../architecture/camp-composer-draft.md)、[Camp Composer Draft v4](../contracts/camp-composer-draft-v4.md)、[Camp Open](../architecture/camp-open-read-path.md)、[Camp Open Projection v6](../contracts/camp-open-projection-v6.md)、[Camp Published Attachment View](../architecture/camp-published-attachment-view.md)、[Camp Attachment v5](../contracts/camp-attachment-v5.md)、[Camp Published Attachment View v3](../contracts/camp-published-attachment-view-v3.md)、[Camp Permanent Deletion v2](../contracts/camp-permanent-deletion-v2.md)、[Workspace Change Observation](../architecture/workspace-change-observation.md)、[Workspace Change Observation v1](../contracts/workspace-change-observation-v1.md)、[First-run](../architecture/first-run-onboarding.md)及[First-run Onboarding v2](../contracts/first-run-onboarding-v2.md)。
+- 理由来源：[v0.22](../versions/v0.22/decisions.md)、[v0.23](../versions/v0.23/decisions.md)、[v0.25](../versions/v0.25/decisions.md)、[v0.43](../versions/v0.43/decisions.md)、[v0.77](../versions/v0.77/decisions.md)、[v0.80](../versions/v0.80/decisions.md)、[v0.97](../versions/v0.97/decisions.md)、[v1.00](../versions/v1.00/decisions.md)、[v1.10](../versions/v1.10/decisions.md)、[V1.15-D01](../versions/v1.15/decisions.md#v1-15-d01)、[V1.15-D04](../versions/v1.15/decisions.md#v1-15-d04)、[V1.15-D06](../versions/v1.15/decisions.md#v1-15-d06)、[V1.16-D01](../versions/v1.16/decisions.md#v1-16-d01)、[V1.17-D01](../versions/v1.17/decisions.md#v1-17-d01)、[V1.19-D01](../versions/v1.19/decisions.md#v1-19-d01)、[V1.19-D02](../versions/v1.19/decisions.md#v1-19-d02)、[V1.20-D01](../versions/v1.20/decisions.md#v1-20-d01)、[V1.27-D08](../versions/v1.27/decisions.md#v1-27-d08)、[V1.29-D02](../versions/v1.29/decisions.md#v1-29-d02)。
 
 ## Member identity
 
@@ -63,8 +63,8 @@ last_updated: 2026-08-25
 
 ## Evidence、Runtime Activity 与 Usage
 
-- 当前规范：[Evidence/Activity 基础不变量](../architecture/foundational-invariants.md#evidence-canonical-activity)、[Runtime Monitoring](../architecture/runtime-monitoring.md)、[Runtime Usage Monitoring v3](../contracts/runtime-usage-monitoring-v3.md)、[Runtime Activity Registry](../runtime-activity/registry.md)。
-- 理由来源：[v0.17](../versions/v0.17/decisions.md)、[v0.41](../versions/v0.41/decisions.md)、[v0.96](../versions/v0.96/decisions.md)、[v0.99](../versions/v0.99/decisions.md)。
+- 当前规范：[Evidence/Activity 基础不变量](../architecture/foundational-invariants.md#evidence-canonical-activity)、[Workspace Change Observation](../architecture/workspace-change-observation.md)、[Workspace Change Observation v1](../contracts/workspace-change-observation-v1.md)、[Runtime Monitoring](../architecture/runtime-monitoring.md)、[Runtime Usage Monitoring v3](../contracts/runtime-usage-monitoring-v3.md)、[Runtime Activity Registry](../runtime-activity/registry.md)。
+- 理由来源：[v0.17](../versions/v0.17/decisions.md)、[v0.41](../versions/v0.41/decisions.md)、[v0.96](../versions/v0.96/decisions.md)、[v0.99](../versions/v0.99/decisions.md)、[V1.29-D01](../versions/v1.29/decisions.md#v1-29-d01)。
 
 ## Qualification 与 Benchmark
 

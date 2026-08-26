@@ -1,7 +1,7 @@
 ---
 document_type: architecture
 authority: current-foundational-invariants
-last_updated: 2026-08-24
+last_updated: 2026-08-26
 ---
 
 # 当前基础架构不变量
@@ -64,7 +64,18 @@ last_updated: 2026-08-24
 
 - 每个 Camp 的持久 Workspace Binding 由 `projectBindingKind: quick_chat | directory` 和绝对、规范化、可遍历且安全的 `projectPath` 组成。`quick_chat` 指向应用受管的 Quick Chat 目录，`directory` 指向用户明确选择的安全目录。Core 拒绝文件系统根、产品私有数据树、直接 Git 元数据目录和 bare repository；Runtime 权限仍独立决定 Agent 实际可做什么。
 - Git 是对当前目录的动态能力，而不是 Camp 身份。Core 在创建、Run 启动、Git 专用操作和 Run 终止等边界重新观测 `not_git | git_valid | git_invalid`；Git 失效只关闭 Git 专用行为，不废止安全目录、协作历史或普通文件工作。
-- AgentRun 冻结 workspace 路径及起止 Git observation 作为审计事实。导航按规范目录路径分组，不引入 Project 表、Repository Scope 或 Git-common-directory 身份。
+- Workspace Change Window 是 Camp、exact execution root 与冻结 repository worktree identity scoped 的附加 Git
+  观察对象；同 key 重叠 Run 共享两个稳定捕获点，结果只表示该范围的净变化，不归因给单个 Run/Agent，也不排除
+  用户编辑器、外部程序或其他 scope 写入。
+- Core DB 是 Window/OID/状态/授权与最终 Managed Blob 的长期权威。Rovai 可以向用户 Git object database 写 raw
+  blob/tree，并在 `refs/rovai/` 下创建 CAS 保护的短期 GC pin，但不得修改用户 index、staged 状态、普通 ref，
+  不经过 clean/LFS filter、textconv 或 external diff，也不主动 prune；ref 删除不保证 object bytes 立即消失。
+- Window capture 与 closing 始终有严格上限且 fail-open；baseline/final、身份、ref、稳定性、恢复或持久化无法证明时
+  显式 unavailable，不事后扫描补猜边界，也不让普通 Run 永久排队。synthetic tree 只覆盖 exact root，no-follow
+  symlink，并把 sparse omission、nested repository 和 submodule 当作明确边界。
+- AgentRun 冻结 workspace 路径及起止 Git observation 作为审计事实，并只引用参与的 `windowId`。Window worktree
+  identity 只服务捕获完整性与授权，不成为 Project/导航身份；导航仍按规范目录路径分组，不引入 Project 表或
+  Repository Scope。
 - **Quick Chat / 快速对话** 是应用受管 workspace 的规范领域与产品分组术语，不是 Camp 或 Project。Rust variant 使用 `QuickChat`，存储与 IPC 值使用 `quick_chat`，JavaScript/TypeScript property 使用 `quickChat`，CSS/test identifier 与受管目录名使用 `quick-chat`。旧称只允许存在于历史快照和迁移证据；当前代码、合同与投影不保留 alias、deprecated field、dual read 或旧 wire value 翻译。
 
 <a id="camp-composer"></a>
@@ -130,7 +141,7 @@ last_updated: 2026-08-24
 - Camp、CampMember、Default Lead、Conversation、CampMessage、CampTurn、AgentRun 和 Task 由 Core 作为同一协作边界协调。Presence、Camp membership、Runtime readiness、Capability、权限、预算和 fencing 是相互独立的准入轴，不能由其中一项推导其余项。
 - CampMember 只表达 Camp 内关系，不复制全局 Presence。成员顺序使用稳定、不复用的关系序列；Default Lead 必须是当前有效关系且符合领导资格，关系/Presence 变化时由 Core 在同一命令中确定性修复或拒绝，不由 Renderer 自选替代。
 - Camp 只冻结 workspace binding 和成员关系，Git/Project 是可重观测投影而不是新聚合。新 Camp 不预创建 Conversation 或 Run；原子 Execution Admission 为精确目标惰性创建 Conversation、公共消息、Turn 与 queued Run，多目标保持 all-or-none。Workspace、Git、Runtime 与可执行文件检查属于后续 Scheduler dispatch 边界。永久删除默认要求 quiescent，force 只能在用户明确确认和持久停止/隔离边界后执行。
-- Renderer 可以先本地显示待确认的用户消息，但不得把它当成 CampMessage。Core 接受发送时原子持久公共消息、Turn、目标 Run 和冻结配置；Scheduler 在执行边界完成 workspace、Runtime、Git、当前 membership/permission/fence 检查。失败产生诚实 Run 终态，不撤销已接受消息；ending Git observation 属于终态审计而不是发送准入。
+- Renderer 可以先本地显示待确认的用户消息，但不得把它当成 CampMessage。Core 接受发送时原子持久公共消息、Turn、目标 Run 和冻结配置；Scheduler 在执行边界完成 workspace、Runtime、Git、当前 membership/permission/fence 检查。失败产生诚实 Run 终态，不撤销已接受消息；per-Run ending Git observation 属于终态审计，Workspace Change Window 属于独立、可失败的附加观察，二者都不是发送准入。
 - 一次 CampTurn 的 root Run 与 A2A 后代共享冻结 execution budget。Core 以一个事务检查与消费总 AgentRun、accepted A2A、depth、fanout 和相关 allowance，并对重放返回同一结果；客户端、Runtime 或多条 Delivery 不能拆分请求绕过预算。
 - CampMessage/CampTurn/AgentRun/Conversation 与 Domain Event 的创建、开始、更新和结束字段使用调用时 UTC wall clock；`AgentRun.created_at` 属于输入接受边界，`started_at` 属于实际 claim 边界。Execution Budget 另用非倒退 observation，取 wall clock、进程 awake elapsed anchor 和上次 observation 的最大值，使系统休眠计入 deadline、wall clock 回拨不延长预算；Budget observation 不得写入业务审计时间。
 - Composer Stop 作用于整个 CampTurn 执行树；共享 ExecutionDrawer 的 Run Stop 只作用于当前 AgentRun，不写 Turn cancel request、不取消兄弟 Run/Delivery，也不创建公共时间线消息。两者都由 Core 先幂等持久取消意图并立即关闭相应 Run 的新领域写入，再由既有 coordinator 有界中断 Runtime；只有可靠 Runtime 终态才能声称已取消。外部效果是否待确认必须作为独立事实保留；缺少权威终态时设置 `hasUnsettledExternalEffects`，不得从 Run 的取消状态推断效果已经结算。
@@ -369,6 +380,10 @@ last_updated: 2026-08-24
 - `phase` 只表示 started/progress/terminal 位置，`outcome` 独立表示证据支持的结果。乱序、冲突、waiting、Run 终态和 recovery 使用同一 reducer，不能从进程退出或 UI 消失猜 success/cancelled。
 - 每个 operation 的默认 classifier/version 首次建立后固定。新分类器通过显式平行 reprojection 和可追溯迁移产生，不静默改写历史，也不中途改变 live operation 语义。
 - 分类升级生成显式平行 projection/version，携带来源 Evidence set、classifier/mapping digest、输出 digest 和可回滚迁移记录；默认历史读取保持首次建立版本，live operation 不中途换 classifier。当前产品只维护一张 current Canonical Activity Projection 和当前 Mapping Registry；任意历史身份 replay 基础设施未准入前，不伪造已支持的重放能力。
+- Runtime-reported Command Diff 只能由 Adapter/version 明确声明为完整 snapshot、exact mutation 或完整
+  before/after 的结构化字段进入 append-only Evidence，并归约为既有 Canonical Activity 的 typed
+  `diffProjection`。projection 保留 revision、全部 source Evidence IDs 和 available/unavailable/conflict；它不拥有
+  独立 phase/outcome/identity。路径规范化不授予文件读取权，局部或语义不明字段不补猜，旧 Evidence 不推测回填。
 - 所有已接入 Runtime 共享同一 Activity contract/schema；Coverage level 只描述 Adapter 能实际观测的 `fine_grained | run_level | unknown`，不降级全局合同，也不表示未观测操作未发生。初始分层和每次升级都必须有真实 Runtime evidence、Registry 变更、fixture 与恢复一致性验证。
 - Shell command 只有在协议的封闭公共字段中出现时才能进入 Evidence：Claude 仅 Bash command，通用 ACP 仅
   `rawInput.command` 字符串，TRAE CLI CN 额外仅允许 `rawInput.Command` 字符串，Antigravity 仅明确 Shell

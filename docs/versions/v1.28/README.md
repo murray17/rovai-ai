@@ -1,12 +1,12 @@
 ---
 document_type: version-overview
 version: v1.28
-lifecycle: current
+lifecycle: historical
 authority: version-scope-and-status
 design_status: confirmed
 implementation_status: in_progress
 model_context_change: true
-last_updated: 2026-08-25
+last_updated: 2026-08-26
 ---
 
 # Rovai-ai v1.28：Grok Build + MiniMax M3 本地 Runtime 接入
@@ -22,6 +22,7 @@ last_updated: 2026-08-25
 > macOS arm64/x64 与 Windows x64 已分别用 `grok 1.0.5` 完成真实 Deep Probe、cold resume 与产品矩阵。
 
 前置版本：[v1.27 Kimi Code + MiniMax M3](../v1.27/README.md)已按冻结时事实转为 historical。
+后续版本：[v1.29 Command Diff 与 Workspace Change Window](../v1.29/README.md)。
 
 ## 版本目标
 
