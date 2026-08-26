@@ -3,17 +3,17 @@ document_type: contract
 name: Runtime Launch and Verification
 version: v27
 status: accepted
-source_version: v1.29
+source_version: v1.30
 last_updated: 2026-08-26
 ---
 
 # Runtime Launch and Verification v27
 
 v27 replaces [v26](runtime-launch-and-verification-v26.md). It incorporates the accepted v1.28 TRAE/ACP/Grok changes
-recorded below and the v1.29 Pi contract. All other Runtime terms from v26 remain unchanged. For Pi, this version
+recorded below and the v1.30 Pi contract. All other Runtime terms from v26 remain unchanged. For Pi, this version
 replaces the v26 provider overlay, one-Host/one-Session, fixed launch-time Bootstrap/Skill and
 unsupported-MCP terms with the confirmed
-[model-context-change revision 1](../versions/v1.29/model-context-change.md). If a v26 Pi term conflicts with this
+[model-context-change revision 1](../versions/v1.30/model-context-change.md). If a v26 Pi term conflicts with this
 document, v27 is authoritative.
 
 ## Product identity、discovery 与平台
@@ -191,7 +191,7 @@ Migration 110 then follows Grok's Migration 107/108 chain and upgrades `v1.22 / 
   compaction/platform rows.
 
 This contract specifies the implemented Pi behavior; it does not by itself grant First-Class admission. The current
-[v1.29 checklist report](../versions/v1.29/checklist-report.md) remains authoritative for evidence completeness.
+[v1.30 checklist report](../versions/v1.30/checklist-report.md) remains authoritative for evidence completeness.
 
 ## v1.28 Runtime changes retained by v27
 
@@ -318,7 +318,7 @@ Execution Budget 使用独立的进程内非倒退 observation：取当前 wall 
 ## References
 
 - [Runtime Launch and Verification v26](runtime-launch-and-verification-v26.md)
-- [Confirmed Pi model-context change](../versions/v1.29/model-context-change.md)
+- [Confirmed Pi model-context change](../versions/v1.30/model-context-change.md)
 - [Pi Runtime Research](../research/pi-runtime-research.md)
 - [Runtime 兼容性清单](../runtime-compatibility.md)
 - [Built-in Tool Runtime](../architecture/builtin-tool-runtime.md)

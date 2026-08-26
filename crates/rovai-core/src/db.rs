@@ -50,8 +50,10 @@ pub struct Database {
     runtime_camp_files_root_identity_digest: String,
 }
 
-const CURRENT_DATA_CONTRACT_VERSION: &str = "v1.24";
-const CURRENT_PROJECTION_SCHEMA_VERSION: i64 = 65;
+const CURRENT_DATA_CONTRACT_VERSION: &str = "v1.25";
+const CURRENT_PROJECTION_SCHEMA_VERSION: i64 = 66;
+const V112_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.24";
+const V112_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION: i64 = 65;
 const V111_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.23";
 const V111_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION: i64 = 64;
 const V110_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.22";
@@ -178,6 +180,7 @@ struct CurrentMigrationState {
     v109: bool,
     v110: bool,
     v111: bool,
+    v112: bool,
 }
 
 impl CurrentMigrationState {
@@ -187,6 +190,52 @@ impl CurrentMigrationState {
             return false;
         }
         if contract == CURRENT_DATA_CONTRACT_VERSION && schema == CURRENT_PROJECTION_SCHEMA_VERSION
+        {
+            return self.v70
+                && self.v71
+                && self.v76
+                && self.v77
+                && self.v78
+                && self.v79
+                && self.v80
+                && self.v81
+                && self.v82
+                && self.v83
+                && self.v84
+                && self.v85
+                && self.v86
+                && self.v87
+                && self.v88
+                && self.v89
+                && self.v90
+                && self.v91
+                && self.v92
+                && self.v93
+                && self.v94
+                && self.v95
+                && self.v96
+                && self.v97
+                && self.v98
+                && self.v99
+                && self.v100
+                && self.v101
+                && self.v102
+                && self.v103
+                && self.v104
+                && self.v105
+                && self.v106
+                && self.v107
+                && self.v108
+                && self.v109
+                && self.v110
+                && self.v111
+                && self.v112;
+        }
+        if self.v112 {
+            return false;
+        }
+        if contract == V112_MIGRATION_SOURCE_DATA_CONTRACT_VERSION
+            && schema == V112_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION
         {
             return self.v70
                 && self.v71
@@ -1320,7 +1369,8 @@ fn load_current_migration_state(
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 108),
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 109),
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 110),
-               EXISTS(SELECT 1 FROM schema_migration WHERE version = 111)
+               EXISTS(SELECT 1 FROM schema_migration WHERE version = 111),
+               EXISTS(SELECT 1 FROM schema_migration WHERE version = 112)
         "#,
         [],
         |row| {
@@ -1367,6 +1417,7 @@ fn load_current_migration_state(
                 v109: row.get(39)?,
                 v110: row.get(40)?,
                 v111: row.get(41)?,
+                v112: row.get(42)?,
             })
         },
     )
@@ -2890,10 +2941,13 @@ impl Database {
                 self.migrate_runtime_entrypoint_locator_identity_v109()?;
             }
             if !self.schema_migration_applied(110)? {
-                self.migrate_pi_runtime_catalog_v110()?;
+                self.migrate_dynamic_camp_membership_v110()?;
             }
             if !self.schema_migration_applied(111)? {
-                self.migrate_pi_managed_context_v111()?;
+                self.migrate_pi_runtime_catalog_v111()?;
+            }
+            if !self.schema_migration_applied(112)? {
+                self.migrate_pi_managed_context_v112()?;
             }
             if let Err(error) =
                 crate::notification::maintain_notification_episode_retention(self.connection())
@@ -3273,10 +3327,13 @@ impl Database {
             self.migrate_runtime_entrypoint_locator_identity_v109()?;
         }
         if !self.schema_migration_applied(110)? {
-            self.migrate_pi_runtime_catalog_v110()?;
+            self.migrate_dynamic_camp_membership_v110()?;
         }
         if !self.schema_migration_applied(111)? {
-            self.migrate_pi_managed_context_v111()?;
+            self.migrate_pi_runtime_catalog_v111()?;
+        }
+        if !self.schema_migration_applied(112)? {
+            self.migrate_pi_managed_context_v112()?;
         }
         if let Err(error) =
             crate::notification::maintain_notification_episode_retention(self.connection())
@@ -15606,7 +15663,7 @@ impl Database {
         Ok(())
     }
 
-    fn migrate_pi_runtime_catalog_v110(&mut self) -> Result<()> {
+    fn migrate_pi_runtime_catalog_v111(&mut self) -> Result<()> {
         self.connection
             .execute_batch("PRAGMA foreign_keys = OFF;")?;
         let migration_result = (|| -> Result<()> {
@@ -15636,12 +15693,12 @@ impl Database {
                 let definition = create_sql
                     .find('(')
                     .map(|offset| &create_sql[offset..])
-                    .with_context(|| format!("v110 could not read the {table} table definition"))?;
-                let replacement_name = format!("{table}_v110");
+                    .with_context(|| format!("v111 could not read the {table} table definition"))?;
+                let replacement_name = format!("{table}_v111");
                 let replacement_sql = format!("CREATE TABLE {replacement_name} {definition}")
                     .replace(closed_set, expanded_closed_set);
                 if !replacement_sql.contains(expanded_closed_set) {
-                    anyhow::bail!("v110 could not expand the {table} closed set");
+                    anyhow::bail!("v111 could not expand the {table} closed set");
                 }
 
                 let dependent_schema = {
@@ -15701,7 +15758,7 @@ impl Database {
 
             transaction.execute_batch(
                 r#"
-                CREATE TABLE adapter_installation_v110 (
+                CREATE TABLE adapter_installation_v111 (
                     id TEXT PRIMARY KEY,
                     adapter_kind TEXT NOT NULL CHECK(adapter_kind IN (
                         'codex-cli', 'pi', 'opencode-cli', 'copilot-cli',
@@ -15727,7 +15784,7 @@ impl Database {
                     updated_at TEXT NOT NULL
                 );
 
-                INSERT INTO adapter_installation_v110(
+                INSERT INTO adapter_installation_v111(
                     id, adapter_kind, executable_path, command_name,
                     installation_class, source, auth_scope, enabled, generation,
                     path_state, version, created_at, updated_at
@@ -15737,7 +15794,7 @@ impl Database {
                        path_state, version, created_at, updated_at
                 FROM adapter_installation;
 
-                CREATE TABLE agent_profile_v110 (
+                CREATE TABLE agent_profile_v111 (
                     uuid TEXT PRIMARY KEY,
                     id TEXT NOT NULL UNIQUE,
                     slug TEXT NOT NULL UNIQUE,
@@ -15776,7 +15833,7 @@ impl Database {
                     growth_topic TEXT NOT NULL DEFAULT ''
                 );
 
-                INSERT INTO agent_profile_v110(
+                INSERT INTO agent_profile_v111(
                     uuid, id, slug, display_name, accent, runtime_enabled,
                     visual_state_json, created_at, updated_at, avatar_ref,
                     default_capabilities_json, default_provider, default_model,
@@ -15798,7 +15855,7 @@ impl Database {
                        working_principles, growth_topic
                 FROM agent_profile;
 
-                CREATE TABLE skill_group_assignment_v110 (
+                CREATE TABLE skill_group_assignment_v111 (
                     group_key TEXT NOT NULL CHECK(group_key IN (
                         'codex', 'pi', 'opencode', 'copilot', 'claude_compatible',
                         'antigravity', 'kiro', 'qoder', 'codebuddy', 'qwen', 'trae',
@@ -15813,7 +15870,7 @@ impl Database {
                         REFERENCES skill_revision(id, skill_id) ON DELETE CASCADE
                 );
 
-                CREATE TABLE skill_projection_observation_v110 (
+                CREATE TABLE skill_projection_observation_v111 (
                     execution_root TEXT NOT NULL,
                     group_key TEXT NOT NULL CHECK(group_key IN (
                         'codex', 'pi', 'opencode', 'copilot', 'claude_compatible',
@@ -15848,13 +15905,13 @@ impl Database {
                         REFERENCES skill_revision(id, skill_id) ON DELETE CASCADE
                 );
 
-                INSERT INTO skill_group_assignment_v110(
+                INSERT INTO skill_group_assignment_v111(
                     group_key, skill_id, revision_id, created_at, updated_at
                 )
                 SELECT group_key, skill_id, revision_id, created_at, updated_at
                 FROM skill_group_assignment;
 
-                INSERT INTO skill_projection_observation_v110(
+                INSERT INTO skill_projection_observation_v111(
                     execution_root, group_key, skill_id, revision_id, entry_path,
                     delivered_via_group_key, duplicate_visible, state,
                     last_error_code, last_observed_at, operation_id, entry_identity
@@ -15868,10 +15925,10 @@ impl Database {
                 DROP TABLE skill_group_assignment;
                 DROP TABLE agent_profile;
                 DROP TABLE adapter_installation;
-                ALTER TABLE adapter_installation_v110 RENAME TO adapter_installation;
-                ALTER TABLE agent_profile_v110 RENAME TO agent_profile;
-                ALTER TABLE skill_group_assignment_v110 RENAME TO skill_group_assignment;
-                ALTER TABLE skill_projection_observation_v110
+                ALTER TABLE adapter_installation_v111 RENAME TO adapter_installation;
+                ALTER TABLE agent_profile_v111 RENAME TO agent_profile;
+                ALTER TABLE skill_group_assignment_v111 RENAME TO skill_group_assignment;
+                ALTER TABLE skill_projection_observation_v111
                     RENAME TO skill_projection_observation;
 
                 CREATE UNIQUE INDEX adapter_installation_managed_default_unique
@@ -15995,12 +16052,12 @@ impl Database {
                   );
 
                 UPDATE rovai_data_contract
-                SET contract_version = 'v1.23', projection_schema_version = 64,
+                SET contract_version = 'v1.24', projection_schema_version = 65,
                     reset_reason = NULL, updated_at = datetime('now')
                 WHERE singleton = 1;
 
                 INSERT INTO schema_migration(version, applied_at)
-                VALUES (110, datetime('now'));
+                VALUES (111, datetime('now'));
                 "#,
             )?;
             if !had_grok_skill_group {
@@ -16071,12 +16128,12 @@ impl Database {
             })
             .optional()?
         {
-            anyhow::bail!("v110 migration left a foreign-key violation in {table} row {row_id}");
+            anyhow::bail!("v111 migration left a foreign-key violation in {table} row {row_id}");
         }
         Ok(())
     }
 
-    fn migrate_pi_managed_context_v111(&mut self) -> Result<()> {
+    fn migrate_pi_managed_context_v112(&mut self) -> Result<()> {
         self.connection
             .execute_batch("PRAGMA foreign_keys = OFF;")?;
         let migration_result = (|| -> Result<()> {
@@ -16092,12 +16149,12 @@ impl Database {
                 transaction.execute_batch(
                     r#"
                     UPDATE rovai_data_contract
-                    SET contract_version = 'v1.24', projection_schema_version = 65,
+                    SET contract_version = 'v1.25', projection_schema_version = 66,
                         reset_reason = NULL, updated_at = datetime('now')
                     WHERE singleton = 1;
 
                     INSERT INTO schema_migration(version, applied_at)
-                    VALUES (111, datetime('now'));
+                    VALUES (112, datetime('now'));
                     "#,
                 )?;
                 transaction.commit()?;
@@ -16105,7 +16162,7 @@ impl Database {
             }
             transaction.execute_batch(
                 r#"
-                CREATE TEMP TABLE pi_v111_binding_fence AS
+                CREATE TEMP TABLE pi_v112_binding_fence AS
                 SELECT conversation.id AS conversation_id,
                        conversation.native_binding_id AS native_binding_id,
                        conversation.native_binding_generation AS native_binding_generation
@@ -16139,19 +16196,19 @@ impl Database {
 
                 DELETE FROM bootstrap_redelivery_requirement
                 WHERE EXISTS(
-                    SELECT 1 FROM pi_v111_binding_fence AS fence
+                    SELECT 1 FROM pi_v112_binding_fence AS fence
                     WHERE fence.native_binding_id = bootstrap_redelivery_requirement.native_binding_id
                       AND fence.native_binding_generation = bootstrap_redelivery_requirement.native_binding_generation
                 );
                 DELETE FROM native_session_compaction_observation
                 WHERE EXISTS(
-                    SELECT 1 FROM pi_v111_binding_fence AS fence
+                    SELECT 1 FROM pi_v112_binding_fence AS fence
                     WHERE fence.native_binding_id = native_session_compaction_observation.native_binding_id
                       AND fence.native_binding_generation = native_session_compaction_observation.native_binding_generation
                 );
                 DELETE FROM native_session_compaction_observer_lease
                 WHERE EXISTS(
-                    SELECT 1 FROM pi_v111_binding_fence AS fence
+                    SELECT 1 FROM pi_v112_binding_fence AS fence
                     WHERE fence.native_binding_id = native_session_compaction_observer_lease.native_binding_id
                       AND fence.native_binding_generation = native_session_compaction_observer_lease.native_binding_generation
                 );
@@ -16169,10 +16226,10 @@ impl Database {
                     native_installation_generation = NULL,
                     native_session_compatibility_key = NULL,
                     version = version + 1, updated_at = datetime('now')
-                WHERE id IN (SELECT conversation_id FROM pi_v111_binding_fence);
+                WHERE id IN (SELECT conversation_id FROM pi_v112_binding_fence);
 
                 DROP INDEX IF EXISTS native_session_bootstrap_conversation_idx;
-                CREATE TABLE native_session_bootstrap_evidence_v111 (
+                CREATE TABLE native_session_bootstrap_evidence_v112 (
                     id TEXT PRIMARY KEY,
                     conversation_id TEXT NOT NULL REFERENCES conversation(id),
                     native_binding_id TEXT NOT NULL,
@@ -16216,7 +16273,7 @@ impl Database {
                     )
                 );
 
-                INSERT INTO native_session_bootstrap_evidence_v111(
+                INSERT INTO native_session_bootstrap_evidence_v112(
                     id, conversation_id, native_binding_id, native_binding_generation,
                     contract_version, bootstrap_formatter_version,
                     session_charter_blob_id, session_charter_digest,
@@ -16235,7 +16292,7 @@ impl Database {
                 FROM native_session_bootstrap_evidence;
 
                 DROP TABLE native_session_bootstrap_evidence;
-                ALTER TABLE native_session_bootstrap_evidence_v111
+                ALTER TABLE native_session_bootstrap_evidence_v112
                     RENAME TO native_session_bootstrap_evidence;
                 CREATE INDEX native_session_bootstrap_conversation_idx
                     ON native_session_bootstrap_evidence(
@@ -16294,15 +16351,15 @@ impl Database {
                     SELECT RAISE(ABORT, 'Pi managed input receipt is required');
                 END;
 
-                DROP TABLE pi_v111_binding_fence;
+                DROP TABLE pi_v112_binding_fence;
 
                 UPDATE rovai_data_contract
-                SET contract_version = 'v1.24', projection_schema_version = 65,
+                SET contract_version = 'v1.25', projection_schema_version = 66,
                     reset_reason = NULL, updated_at = datetime('now')
                 WHERE singleton = 1;
 
                 INSERT INTO schema_migration(version, applied_at)
-                VALUES (111, datetime('now'));
+                VALUES (112, datetime('now'));
                 "#,
             )?;
             transaction.commit()?;
@@ -16318,8 +16375,209 @@ impl Database {
             })
             .optional()?
         {
-            anyhow::bail!("v111 migration left a foreign-key violation in {table} row {row_id}");
+            anyhow::bail!("v112 migration left a foreign-key violation in {table} row {row_id}");
         }
+        Ok(())
+    }
+
+    fn migrate_dynamic_camp_membership_v110(&mut self) -> Result<()> {
+        let transaction = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let now = chrono::Utc::now().to_rfc3339();
+
+        // Membership-version fencing cannot safely inherit work admitted by an
+        // older binary. Preserve all terminal evidence, but close the previous
+        // contract's non-terminal execution graph before adding the new fence.
+        transaction.execute(
+            r#"
+            UPDATE gather_item
+            SET status = 'cancelled', terminal_source = 'delivery',
+                error_code = 'camp_membership_v1_required',
+                terminal_resolution_source = 'migration',
+                terminal_reason_code = 'camp_membership_v1_clean_break',
+                version = version + 1, ended_at = ?1, updated_at = ?1
+            WHERE status IN ('pending', 'running')
+            "#,
+            [&now],
+        )?;
+        transaction.execute(
+            r#"
+            UPDATE gather_record
+            SET status = 'cancelled',
+                cancellation_reason_code = 'camp_membership_v1_required',
+                version = version + 1, cancelled_at = ?1, updated_at = ?1
+            WHERE status IN ('collecting', 'ready', 'completing')
+            "#,
+            [&now],
+        )?;
+        transaction.execute(
+            r#"
+            UPDATE message_delivery_attempt
+            SET status = 'failed', wait_condition = NULL,
+                failure_code = 'camp_membership_v1_required',
+                failure_detail_json = '{"reason":"camp_membership_v1_clean_break"}',
+                ended_at = ?1
+            WHERE status = 'attempting'
+            "#,
+            [&now],
+        )?;
+        transaction.execute(
+            r#"
+            UPDATE message_delivery
+            SET status = CASE
+                    WHEN status = 'pending' AND dispatch_attempt_count = 0
+                    THEN 'interrupted_before_dispatch'
+                    ELSE 'failed'
+                END,
+                dispatch_phase = 'terminal', wait_condition = NULL,
+                active_dispatch_attempt_id = NULL,
+                manual_intervention_required = CASE
+                    WHEN status = 'pending' AND dispatch_attempt_count = 0 THEN 1
+                    ELSE 0
+                END,
+                failure_code = 'camp_membership_v1_required',
+                failure_detail_json = '{"reason":"camp_membership_v1_clean_break"}',
+                version = version + 1, ended_at = ?1, updated_at = ?1
+            WHERE status IN ('pending', 'running')
+            "#,
+            [&now],
+        )?;
+        transaction.execute(
+            r#"
+            UPDATE agent_run
+            SET status = 'failed', ended_at = ?1,
+                last_error_code = 'camp_membership_v1_required',
+                public_runtime_failure_json = NULL,
+                wait_reason = NULL, wait_deadline_at = NULL,
+                runtime_recovery_required = 0,
+                execution_lease_owner = NULL,
+                execution_lease_expires_at = NULL,
+                manual_retry_allowed = 0,
+                version = version + 1, updated_at = ?1
+            WHERE status IN ('queued', 'running', 'waiting')
+            "#,
+            [&now],
+        )?;
+        transaction.execute(
+            r#"
+            UPDATE camp_turn
+            SET status = 'failed', ended_at = ?1,
+                version = version + 1, updated_at = ?1
+            WHERE status IN ('running', 'waiting')
+            "#,
+            [&now],
+        )?;
+
+        transaction.execute_batch(
+            r#"
+            ALTER TABLE camp ADD COLUMN
+                membership_generation INTEGER NOT NULL DEFAULT 1
+                CHECK(membership_generation >= 1);
+            ALTER TABLE message_delivery ADD COLUMN
+                recipient_membership_version_at_admission INTEGER
+                CHECK(
+                    recipient_membership_version_at_admission IS NULL
+                    OR recipient_membership_version_at_admission >= 1
+                );
+
+            CREATE TABLE camp_membership_source_binding (
+                camp_id TEXT NOT NULL REFERENCES camp(id) ON DELETE CASCADE,
+                source_namespace TEXT NOT NULL CHECK(length(trim(source_namespace)) > 0),
+                binding_id TEXT NOT NULL CHECK(length(trim(binding_id)) > 0),
+                trusted_component_id TEXT NOT NULL CHECK(length(trim(trusted_component_id)) > 0),
+                last_reconciliation_generation INTEGER NOT NULL DEFAULT 0
+                    CHECK(last_reconciliation_generation >= 0),
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                PRIMARY KEY(camp_id, source_namespace, binding_id)
+            );
+
+            CREATE TABLE camp_membership_reconciliation (
+                id TEXT PRIMARY KEY,
+                camp_id TEXT NOT NULL REFERENCES camp(id) ON DELETE CASCADE,
+                agent_id TEXT NOT NULL REFERENCES agent_profile(id),
+                membership_version INTEGER NOT NULL CHECK(membership_version >= 1),
+                command_id TEXT NOT NULL,
+                status TEXT NOT NULL CHECK(status IN ('reconciling', 'completed')),
+                reason_code TEXT NOT NULL CHECK(length(trim(reason_code)) > 0),
+                target_run_count INTEGER NOT NULL DEFAULT 0 CHECK(target_run_count >= 0),
+                settled_run_count INTEGER NOT NULL DEFAULT 0 CHECK(settled_run_count >= 0),
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                completed_at TEXT,
+                UNIQUE(camp_id, command_id),
+                UNIQUE(camp_id, agent_id, membership_version),
+                CHECK(settled_run_count <= target_run_count),
+                CHECK(
+                    (status = 'reconciling' AND completed_at IS NULL)
+                    OR (status = 'completed' AND completed_at IS NOT NULL
+                        AND settled_run_count = target_run_count)
+                )
+            );
+            CREATE INDEX camp_membership_reconciliation_camp_idx
+                ON camp_membership_reconciliation(camp_id, status, created_at, id);
+
+            CREATE TABLE camp_membership_reconciliation_run (
+                reconciliation_id TEXT NOT NULL
+                    REFERENCES camp_membership_reconciliation(id) ON DELETE CASCADE,
+                agent_run_id TEXT NOT NULL REFERENCES agent_run(id) ON DELETE CASCADE,
+                settled_at TEXT,
+                PRIMARY KEY(reconciliation_id, agent_run_id)
+            );
+            CREATE INDEX camp_membership_reconciliation_run_agent_idx
+                ON camp_membership_reconciliation_run(agent_run_id, settled_at);
+
+            CREATE TRIGGER camp_membership_reconciliation_run_terminal
+            AFTER UPDATE OF status ON agent_run
+            WHEN OLD.status IN ('queued', 'running', 'waiting')
+             AND NEW.status IN ('succeeded', 'failed', 'cancelled')
+             AND EXISTS(
+                 SELECT 1 FROM camp_membership_reconciliation_run
+                 WHERE agent_run_id = NEW.id AND settled_at IS NULL
+             )
+            BEGIN
+                UPDATE camp_membership_reconciliation_run
+                SET settled_at = COALESCE(NEW.ended_at, NEW.updated_at)
+                WHERE agent_run_id = NEW.id AND settled_at IS NULL;
+
+                UPDATE camp_membership_reconciliation
+                SET settled_run_count = (
+                        SELECT COUNT(*)
+                        FROM camp_membership_reconciliation_run
+                        WHERE reconciliation_id = camp_membership_reconciliation.id
+                          AND settled_at IS NOT NULL
+                    ),
+                    status = CASE WHEN NOT EXISTS(
+                        SELECT 1
+                        FROM camp_membership_reconciliation_run
+                        WHERE reconciliation_id = camp_membership_reconciliation.id
+                          AND settled_at IS NULL
+                    ) THEN 'completed' ELSE 'reconciling' END,
+                    completed_at = CASE WHEN NOT EXISTS(
+                        SELECT 1
+                        FROM camp_membership_reconciliation_run
+                        WHERE reconciliation_id = camp_membership_reconciliation.id
+                          AND settled_at IS NULL
+                    ) THEN COALESCE(NEW.ended_at, NEW.updated_at) ELSE NULL END,
+                    updated_at = COALESCE(NEW.ended_at, NEW.updated_at)
+                WHERE id IN (
+                    SELECT reconciliation_id
+                    FROM camp_membership_reconciliation_run
+                    WHERE agent_run_id = NEW.id
+                );
+            END;
+
+            UPDATE rovai_data_contract
+            SET contract_version = 'v1.23', projection_schema_version = 64,
+                reset_reason = NULL, updated_at = datetime('now')
+            WHERE singleton = 1;
+
+            INSERT INTO schema_migration(version, applied_at)
+            VALUES (110, datetime('now'));
+            "#,
+        )?;
+        transaction.commit()?;
         Ok(())
     }
 
@@ -20755,15 +21013,15 @@ impl Database {
 }
 
 #[cfg(test)]
-pub(crate) fn downgrade_current_schema_to_v111_source_for_test(connection: &Connection) {
-    let has_v111: bool = connection
+pub(crate) fn downgrade_current_schema_to_v112_source_for_test(connection: &Connection) {
+    let has_v112: bool = connection
         .query_row(
-            "SELECT EXISTS(SELECT 1 FROM schema_migration WHERE version = 111)",
+            "SELECT EXISTS(SELECT 1 FROM schema_migration WHERE version = 112)",
             [],
             |row| row.get(0),
         )
         .unwrap();
-    if !has_v111 {
+    if !has_v112 {
         return;
     }
     connection
@@ -20776,7 +21034,7 @@ pub(crate) fn downgrade_current_schema_to_v111_source_for_test(connection: &Conn
             DROP TABLE pi_managed_input_receipt;
             DROP INDEX native_session_bootstrap_conversation_idx;
 
-            CREATE TABLE native_session_bootstrap_evidence_v110_source (
+            CREATE TABLE native_session_bootstrap_evidence_v111_source (
                 id TEXT PRIMARY KEY,
                 conversation_id TEXT NOT NULL REFERENCES conversation(id),
                 native_binding_id TEXT NOT NULL,
@@ -20797,7 +21055,7 @@ pub(crate) fn downgrade_current_schema_to_v111_source_for_test(connection: &Conn
                 created_at TEXT NOT NULL,
                 UNIQUE(native_binding_id, native_binding_generation)
             );
-            INSERT INTO native_session_bootstrap_evidence_v110_source(
+            INSERT INTO native_session_bootstrap_evidence_v111_source(
                 id, conversation_id, native_binding_id, native_binding_generation,
                 contract_version, bootstrap_formatter_version,
                 session_charter_blob_id, session_charter_digest,
@@ -20814,15 +21072,15 @@ pub(crate) fn downgrade_current_schema_to_v111_source_for_test(connection: &Conn
             FROM native_session_bootstrap_evidence
             WHERE delivery_mode <> 'managed_system_prompt';
             DROP TABLE native_session_bootstrap_evidence;
-            ALTER TABLE native_session_bootstrap_evidence_v110_source
+            ALTER TABLE native_session_bootstrap_evidence_v111_source
                 RENAME TO native_session_bootstrap_evidence;
             CREATE INDEX native_session_bootstrap_conversation_idx
                 ON native_session_bootstrap_evidence(
                     conversation_id, native_binding_generation
                 );
-            DELETE FROM schema_migration WHERE version = 111;
+            DELETE FROM schema_migration WHERE version = 112;
             UPDATE rovai_data_contract
-            SET contract_version = 'v1.23', projection_schema_version = 64
+            SET contract_version = 'v1.24', projection_schema_version = 65
             WHERE singleton = 1;
             PRAGMA foreign_keys = ON;
             "#,
@@ -20831,8 +21089,89 @@ pub(crate) fn downgrade_current_schema_to_v111_source_for_test(connection: &Conn
 }
 
 #[cfg(test)]
-fn downgrade_current_schema_to_v102_source_for_test(connection: &Connection) {
+fn downgrade_current_schema_to_v111_source_for_test(connection: &Connection) {
+    downgrade_current_schema_to_v112_source_for_test(connection);
+    let has_v111: bool = connection
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM schema_migration WHERE version = 111)",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    if !has_v111 {
+        return;
+    }
+    connection
+        .execute_batch(
+            r#"
+            UPDATE rovai_data_contract
+            SET contract_version = 'v1.23', projection_schema_version = 64
+            WHERE singleton = 1;
+            DELETE FROM schema_migration WHERE version = 111;
+            "#,
+        )
+        .unwrap();
+}
+
+#[cfg(test)]
+fn downgrade_current_schema_to_v109_source_for_test(connection: &Connection) {
     downgrade_current_schema_to_v111_source_for_test(connection);
+    let has_v110: bool = connection
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM schema_migration WHERE version = 110)",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    if !has_v110 {
+        return;
+    }
+    connection
+        .execute_batch(
+            r#"
+            PRAGMA foreign_keys = OFF;
+            DROP TRIGGER camp_membership_reconciliation_run_terminal;
+            DROP INDEX camp_membership_reconciliation_run_agent_idx;
+            DROP TABLE camp_membership_reconciliation_run;
+            DROP TABLE camp_membership_reconciliation;
+            DROP TABLE camp_membership_source_binding;
+            ALTER TABLE camp DROP COLUMN membership_generation;
+            ALTER TABLE message_delivery DROP COLUMN recipient_membership_version_at_admission;
+            UPDATE rovai_data_contract
+            SET contract_version = 'v1.22', projection_schema_version = 63
+            WHERE singleton = 1;
+            DELETE FROM schema_migration WHERE version = 110;
+            PRAGMA foreign_keys = ON;
+            "#,
+        )
+        .unwrap();
+}
+
+#[cfg(test)]
+fn downgrade_current_schema_to_v108_source_for_test(connection: &Connection) {
+    downgrade_current_schema_to_v109_source_for_test(connection);
+    let has_v109: bool = connection
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM schema_migration WHERE version = 109)",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    if !has_v109 {
+        return;
+    }
+    connection
+        .execute_batch(
+            r#"
+            DROP TABLE runtime_entrypoint_locator_identity;
+            DELETE FROM schema_migration WHERE version = 109;
+            "#,
+        )
+        .unwrap();
+}
+
+#[cfg(test)]
+fn downgrade_current_schema_to_v102_source_for_test(connection: &Connection) {
     let has_v102: bool = connection
         .query_row(
             "SELECT EXISTS(SELECT 1 FROM schema_migration WHERE version = 102)",
@@ -20843,6 +21182,7 @@ fn downgrade_current_schema_to_v102_source_for_test(connection: &Connection) {
     if !has_v102 {
         return;
     }
+    downgrade_current_schema_to_v108_source_for_test(connection);
     connection
         .execute_batch("PRAGMA foreign_keys = OFF;")
         .unwrap();
@@ -20956,8 +21296,6 @@ fn downgrade_current_schema_to_v102_source_for_test(connection: &Connection) {
             UPDATE rovai_data_contract
             SET contract_version = 'v1.15', projection_schema_version = 56
             WHERE singleton = 1;
-            DROP TABLE runtime_entrypoint_locator_identity;
-            DELETE FROM schema_migration WHERE version = 110;
             DELETE FROM schema_migration WHERE version = 109;
             DELETE FROM schema_migration WHERE version = 108;
             DELETE FROM schema_migration WHERE version = 107;
@@ -21507,6 +21845,7 @@ mod tests {
             v109: version >= 109,
             v110: version >= 110,
             v111: version >= 111,
+            v112: version >= 112,
         }
     }
 
@@ -21517,6 +21856,12 @@ mod tests {
                 "current",
                 CURRENT_DATA_CONTRACT_VERSION,
                 CURRENT_PROJECTION_SCHEMA_VERSION,
+                112,
+            ),
+            (
+                "v1.24/schema-65",
+                V112_MIGRATION_SOURCE_DATA_CONTRACT_VERSION,
+                V112_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION,
                 111,
             ),
             (
@@ -21526,13 +21871,13 @@ mod tests {
                 110,
             ),
             (
-                "v1.22/schema-63 after locator migration",
+                "v1.22/schema-63 before dynamic Camp membership",
                 V110_MIGRATION_SOURCE_DATA_CONTRACT_VERSION,
                 V110_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION,
                 109,
             ),
             (
-                "v1.22/schema-63",
+                "v1.22/schema-63 before runtime locator identity",
                 V109_MIGRATION_SOURCE_DATA_CONTRACT_VERSION,
                 V109_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION,
                 108,
@@ -21819,7 +22164,7 @@ mod tests {
             )
             .expect("current contract marker should load");
 
-        assert_eq!(state, migration_state_through(111));
+        assert_eq!(state, migration_state_through(112));
         assert!(state.admits(&contract, schema));
         assert!(has_admissible_data_contract(
             &directory.join("rovai.sqlite")
@@ -24046,8 +24391,8 @@ mod tests {
     }
 
     #[test]
-    fn v110_adds_pi_catalog_and_delivery_without_expanding_custom_skills() {
-        let directory = std::env::temp_dir().join(format!("rovai-db-v110-test-{}", Uuid::new_v4()));
+    fn v111_adds_pi_catalog_and_delivery_without_expanding_custom_skills() {
+        let directory = std::env::temp_dir().join(format!("rovai-db-v111-test-{}", Uuid::new_v4()));
         let mut database = crate::test_support::fresh_schema_database_at(&directory);
         database
             .connection()
@@ -24055,10 +24400,10 @@ mod tests {
                 r#"
                 DELETE FROM skill_group_assignment WHERE group_key = 'pi';
                 DELETE FROM skill_projection_observation WHERE group_key = 'pi';
+                DELETE FROM schema_migration WHERE version = 112;
                 DELETE FROM schema_migration WHERE version = 111;
-                DELETE FROM schema_migration WHERE version = 110;
                 UPDATE rovai_data_contract
-                SET contract_version = 'v1.22', projection_schema_version = 63
+                SET contract_version = 'v1.23', projection_schema_version = 64
                 WHERE singleton = 1;
 
                 INSERT INTO skill(
@@ -24134,7 +24479,7 @@ mod tests {
                 .unwrap();
         }
 
-        database.migrate_pi_runtime_catalog_v110().unwrap();
+        database.migrate_pi_runtime_catalog_v111().unwrap();
 
         let migrated: (i64, i64, i64, i64, i64, i64) = database
             .connection()
@@ -24200,14 +24545,14 @@ mod tests {
             .query_row(
                 r#"
                 SELECT contract_version, projection_schema_version,
-                       (SELECT COUNT(*) FROM schema_migration WHERE version = 110)
+                       (SELECT COUNT(*) FROM schema_migration WHERE version = 111)
                 FROM rovai_data_contract WHERE singleton = 1
                 "#,
                 [],
                 |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
             )
             .unwrap();
-        assert_eq!(contract, ("v1.23".to_string(), 64, 1));
+        assert_eq!(contract, ("v1.24".to_string(), 65, 1));
         for table in [
             "adapter_installation",
             "agent_profile",
@@ -24239,8 +24584,8 @@ mod tests {
     }
 
     #[test]
-    fn v111_adds_managed_bootstrap_evidence_and_receipt_acceptance_gate() {
-        let directory = std::env::temp_dir().join(format!("rovai-db-v111-test-{}", Uuid::new_v4()));
+    fn v112_adds_managed_bootstrap_evidence_and_receipt_acceptance_gate() {
+        let directory = std::env::temp_dir().join(format!("rovai-db-v112-test-{}", Uuid::new_v4()));
         let mut database = crate::test_support::fresh_schema_database_fast_at(&directory);
         database
             .connection()
@@ -24253,7 +24598,7 @@ mod tests {
                 DROP TABLE pi_managed_input_receipt;
                 DROP INDEX native_session_bootstrap_conversation_idx;
 
-                CREATE TABLE native_session_bootstrap_evidence_v110_source (
+                CREATE TABLE native_session_bootstrap_evidence_v111_source (
                     id TEXT PRIMARY KEY,
                     conversation_id TEXT NOT NULL REFERENCES conversation(id),
                     native_binding_id TEXT NOT NULL,
@@ -24274,7 +24619,7 @@ mod tests {
                     created_at TEXT NOT NULL,
                     UNIQUE(native_binding_id, native_binding_generation)
                 );
-                INSERT INTO native_session_bootstrap_evidence_v110_source(
+                INSERT INTO native_session_bootstrap_evidence_v111_source(
                     id, conversation_id, native_binding_id, native_binding_generation,
                     contract_version, bootstrap_formatter_version,
                     session_charter_blob_id, session_charter_digest,
@@ -24291,36 +24636,36 @@ mod tests {
                 FROM native_session_bootstrap_evidence
                 WHERE delivery_mode <> 'managed_system_prompt';
                 DROP TABLE native_session_bootstrap_evidence;
-                ALTER TABLE native_session_bootstrap_evidence_v110_source
+                ALTER TABLE native_session_bootstrap_evidence_v111_source
                     RENAME TO native_session_bootstrap_evidence;
                 CREATE INDEX native_session_bootstrap_conversation_idx
                     ON native_session_bootstrap_evidence(
                         conversation_id, native_binding_generation
                     );
-                DELETE FROM schema_migration WHERE version = 111;
+                DELETE FROM schema_migration WHERE version = 112;
                 UPDATE rovai_data_contract
-                SET contract_version = 'v1.23', projection_schema_version = 64
+                SET contract_version = 'v1.24', projection_schema_version = 65
                 WHERE singleton = 1;
                 PRAGMA foreign_keys = ON;
                 "#,
             )
             .unwrap();
 
-        database.migrate_pi_managed_context_v111().unwrap();
+        database.migrate_pi_managed_context_v112().unwrap();
 
         let contract: (String, i64, i64) = database
             .connection()
             .query_row(
                 r#"
                 SELECT contract_version, projection_schema_version,
-                       (SELECT COUNT(*) FROM schema_migration WHERE version = 111)
+                       (SELECT COUNT(*) FROM schema_migration WHERE version = 112)
                 FROM rovai_data_contract WHERE singleton = 1
                 "#,
                 [],
                 |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
             )
             .unwrap();
-        assert_eq!(contract, ("v1.24".to_string(), 65, 1));
+        assert_eq!(contract, ("v1.25".to_string(), 66, 1));
         let bootstrap_schema: String = database
             .connection()
             .query_row(
@@ -24358,6 +24703,204 @@ mod tests {
         );
 
         drop(database);
+        std::fs::remove_dir_all(directory).expect("temporary database should be removable");
+    }
+
+    #[test]
+    fn v110_clean_breaks_nonterminal_runs_and_installs_membership_fences() {
+        let directory = std::env::temp_dir().join(format!("rovai-db-v110-test-{}", Uuid::new_v4()));
+        let database = crate::test_support::fresh_schema_database_fast_at(&directory);
+        database
+            .connection()
+            .execute_batch(
+                r#"
+                INSERT INTO camp(
+                    id, title, project_binding_kind, project_path,
+                    default_lead_agent_id, last_message_sequence,
+                    version, created_at, updated_at
+                ) VALUES (
+                    'camp-v109', 'V109 migration fixture', 'directory', '/tmp/rovai-v109',
+                    'agent_1', 0, 1,
+                    '2026-08-25T00:00:00Z', '2026-08-25T00:00:00Z'
+                );
+                INSERT INTO camp_member(
+                    camp_id, agent_id, status, capability_overrides_json,
+                    version, joined_at
+                ) VALUES (
+                    'camp-v109', 'agent_1', 'active', '{}', 1,
+                    '2026-08-25T00:00:00Z'
+                );
+                INSERT INTO conversation(
+                    id, camp_id, agent_id,
+                    summary_through_message_sequence, last_message_sequence,
+                    version, created_at, updated_at
+                ) VALUES (
+                    'conversation-v109', 'camp-v109', 'agent_1',
+                    0, 0, 1,
+                    '2026-08-25T00:00:00Z', '2026-08-25T00:00:00Z'
+                );
+                INSERT INTO camp_turn(
+                    id, camp_id, trigger_type, trigger_id, status,
+                    version, created_at, updated_at, ended_at
+                ) VALUES
+                    (
+                        'turn-v109-active', 'camp-v109', 'system_event',
+                        'trigger-v109-active', 'running', 1,
+                        '2026-08-25T00:00:00Z', '2026-08-25T00:00:00Z', NULL
+                    ),
+                    (
+                        'turn-v109-terminal', 'camp-v109', 'system_event',
+                        'trigger-v109-terminal', 'completed', 1,
+                        '2026-08-25T00:00:00Z', '2026-08-25T00:00:01Z',
+                        '2026-08-25T00:00:01Z'
+                    );
+                INSERT INTO agent_run(
+                    id, camp_turn_id, conversation_id,
+                    initial_camp_context_through_sequence,
+                    initial_conversation_context_through_sequence,
+                    responsibility_key, responsibility_generation,
+                    start_reason, purpose, completion_role,
+                    effective_config_json, workspace_json, permission_semantics,
+                    status, idempotency_key, version,
+                    created_at, ended_at, updated_at
+                ) VALUES
+                    (
+                        'run-v109-active', 'turn-v109-active', 'conversation-v109',
+                        0, 0, 'active-v109', 0,
+                        'initial', 'must be clean-broken', 'required',
+                        '{}', '{"executionRoot":"/tmp/rovai-v109","access":"write"}',
+                        'runtime_managed_v2', 'queued', 'active-v109', 1,
+                        '2026-08-25T00:00:00Z', NULL, '2026-08-25T00:00:00Z'
+                    ),
+                    (
+                        'run-v109-terminal', 'turn-v109-terminal', 'conversation-v109',
+                        0, 0, 'terminal-v109', 0,
+                        'initial', 'must remain evidence', 'required',
+                        '{}', '{"executionRoot":"/tmp/rovai-v109","access":"write"}',
+                        'runtime_managed_v2', 'succeeded', 'terminal-v109', 1,
+                        '2026-08-25T00:00:00Z', '2026-08-25T00:00:01Z',
+                        '2026-08-25T00:00:01Z'
+                    );
+                "#,
+            )
+            .unwrap();
+        downgrade_current_schema_to_v109_source_for_test(database.connection());
+        drop(database);
+
+        let reopened = Database::open(&directory).expect("v109 source should migrate to current");
+        assert_eq!(
+            reopened
+                .connection()
+                .query_row(
+                    r#"
+                    SELECT contract_version, projection_schema_version,
+                           (SELECT COUNT(*) FROM schema_migration WHERE version = 110),
+                           (SELECT membership_generation FROM camp WHERE id = 'camp-v109')
+                    FROM rovai_data_contract WHERE singleton = 1
+                    "#,
+                    [],
+                    |row| Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, i64>(1)?,
+                        row.get::<_, i64>(2)?,
+                        row.get::<_, i64>(3)?
+                    )),
+                )
+                .unwrap(),
+            (
+                CURRENT_DATA_CONTRACT_VERSION.to_string(),
+                CURRENT_PROJECTION_SCHEMA_VERSION,
+                1,
+                1,
+            )
+        );
+        assert_eq!(
+            reopened
+                .connection()
+                .query_row(
+                    r#"
+                    SELECT active.status, active.last_error_code,
+                           active.ended_at IS NOT NULL,
+                           terminal.status,
+                           turn.status, turn.ended_at IS NOT NULL
+                    FROM agent_run AS active
+                    JOIN agent_run AS terminal ON terminal.id = 'run-v109-terminal'
+                    JOIN camp_turn AS turn ON turn.id = 'turn-v109-active'
+                    WHERE active.id = 'run-v109-active'
+                    "#,
+                    [],
+                    |row| {
+                        Ok((
+                            row.get::<_, String>(0)?,
+                            row.get::<_, Option<String>>(1)?,
+                            row.get::<_, bool>(2)?,
+                            row.get::<_, String>(3)?,
+                            row.get::<_, String>(4)?,
+                            row.get::<_, bool>(5)?,
+                        ))
+                    },
+                )
+                .unwrap(),
+            (
+                "failed".to_string(),
+                Some("camp_membership_v1_required".to_string()),
+                true,
+                "succeeded".to_string(),
+                "failed".to_string(),
+                true,
+            )
+        );
+        assert_table_columns(
+            reopened.connection(),
+            "message_delivery",
+            &["recipient_membership_version_at_admission"],
+            &[],
+        );
+        assert_schema_objects(
+            reopened.connection(),
+            "table",
+            &[
+                "camp_membership_source_binding",
+                "camp_membership_reconciliation",
+                "camp_membership_reconciliation_run",
+            ],
+            true,
+        );
+        assert_schema_objects(
+            reopened.connection(),
+            "trigger",
+            &["camp_membership_reconciliation_run_terminal"],
+            true,
+        );
+        assert_schema_objects(
+            reopened.connection(),
+            "index",
+            &["camp_membership_reconciliation_run_agent_idx"],
+            true,
+        );
+        let reconciliation_run_schema: String = reopened
+            .connection()
+            .query_row(
+                "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'camp_membership_reconciliation_run'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(
+            !reconciliation_run_schema.contains("agent_run_id TEXT NOT NULL UNIQUE"),
+            "one Run may formally settle more than one concurrent membership reconciliation"
+        );
+        assert_eq!(
+            reopened
+                .connection()
+                .query_row("SELECT COUNT(*) FROM pragma_foreign_key_check", [], |row| {
+                    row.get::<_, i64>(0)
+                })
+                .unwrap(),
+            0
+        );
+
+        drop(reopened);
         std::fs::remove_dir_all(directory).expect("temporary database should be removable");
     }
 
@@ -25611,7 +26154,7 @@ mod tests {
     fn v052_marker_state_is_admitted_without_compatibility_rows() {
         let directory = std::env::temp_dir().join(format!("rovai-db-v71-test-{}", Uuid::new_v4()));
         let database = Database::open(&directory).expect("database should open");
-        downgrade_current_schema_to_v111_source_for_test(database.connection());
+        downgrade_current_schema_to_v112_source_for_test(database.connection());
         // This intentionally exercises admission of the supported marker state.
         // It is not a real v0.52 schema fixture: the underlying schema is current.
         // A real historical fixture must be generated from an authoritative v0.52
@@ -25626,7 +26169,7 @@ mod tests {
                 DELETE FROM schema_migration WHERE version = 70;
                 DELETE FROM schema_migration WHERE version = 71;
                 INSERT OR IGNORE INTO schema_migration(version, applied_at)
-                VALUES (111, datetime('now'));
+                VALUES (112, datetime('now'));
                 "#,
             )
             .unwrap();

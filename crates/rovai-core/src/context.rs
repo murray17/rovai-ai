@@ -7986,7 +7986,7 @@ mod slow_tests {
                 ],
             )
             .unwrap();
-        crate::db::downgrade_current_schema_to_v111_source_for_test(fixture.database.connection());
+        crate::db::downgrade_current_schema_to_v112_source_for_test(fixture.database.connection());
         fixture
             .database
             .connection()
@@ -8003,7 +8003,7 @@ mod slow_tests {
                 DELETE FROM schema_migration WHERE version = 70;
                 DELETE FROM schema_migration WHERE version = 71;
                 INSERT OR IGNORE INTO schema_migration(version, applied_at)
-                VALUES (111, datetime('now'));
+                VALUES (112, datetime('now'));
                 PRAGMA foreign_keys = ON;
                 "#,
             )
@@ -8444,7 +8444,7 @@ mod slow_tests {
                 |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
             )
             .unwrap();
-        assert_eq!(contract, ("v1.24".to_string(), 65, 1));
+        assert_eq!(contract, ("v1.25".to_string(), 66, 1));
         drop(reopened);
         std::fs::remove_dir_all(directory).unwrap();
     }

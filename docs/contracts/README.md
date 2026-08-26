@@ -30,7 +30,9 @@ Architecture 解释组件如何组成，Version 概览记录交付范围；它�
 | [Camp Identity v1（当前）](camp-identity-v1.md) | 唯一 `rvcamp_` UUIDv7/Crockford 主键、strict boundary、SQLite/JSON/path 使用与 Native Session identity 分离 |
 | [First-run Onboarding v2（当前）](first-run-onboarding-v2.md) | v1 admission/provisioning 不变；schema 2 增加无可用 Runtime 时无产品副作用的 `runtime_deferred` 终态 |
 | [First-run Onboarding v1（历史）](first-run-onboarding-v1.md) | Desktop 首次安装判定、三页 mandatory 状态、幂等 provisioning、`初次集结` 与第四页 Draft-only 入口；不允许无 Runtime 完成 |
-| [Camp Open Projection v6（当前）](camp-open-projection-v6.md) | v5 read/evidence 不变；Message Attachment 增加 Runtime projection state，Renderer 诚实展示 pending/recovery/failed |
+| [Camp Membership v1（当前）](camp-membership-v1.md) | 动态添加/移除、至少一位成员、generation/version、atomic cutover、durable reconciliation、exact lifetime fence 与受信外部来源 |
+| [Camp Open Projection v7（当前）](camp-open-projection-v7.md) | v6 read/attachment state 不变；Snapshot 33/Open 4 增加 membership generation 与活动 reconciliation |
+| [Camp Open Projection v6（历史）](camp-open-projection-v6.md) | v5 read/evidence 不变；Message Attachment 增加 Runtime projection state，Renderer 诚实展示 pending/recovery/failed |
 | [Camp Open Projection v5（历史）](camp-open-projection-v5.md) | v4 activation-aware enter 与 wire 不变；Camp open 完整返回所有 non-terminal Run Evidence，Renderer live event 不做最后 N 项裁剪 |
 | [Camp Open Projection v4（历史）](camp-open-projection-v4.md) | v3 wire/window/模型事实不变；`camps.enter` 对 Pending 直接读投影、对 Active 保持 reconcile-before-read；non-terminal Evidence 仍为最近 80 条 |
 | [Camp Open Projection v3（历史）](camp-open-projection-v3.md) | v2 methods/window/取消事实不变；AgentRun 默认策略的首个实际模型观测、Camp Open schema 3 与 Read Model schema 32；`camps.enter` 尚未区分 Pending |
@@ -45,7 +47,7 @@ Architecture 解释组件如何组成，Version 概览记录交付范围；它�
 | [Tool Interaction Measurement v1（历史）](tool-interaction-measurement-v1.md) | Opportunity-based Camp/Memory/A2A trace、确定性 oracle/coverage 与独立 Tool-Use Judge 初版边界 |
 | [Paired Collaboration Experiment v1（当前）](paired-collaboration-experiment-v1.md) | Team/Solo pre-registration、fresh arms、typed resources 与 outcome-conditioned paired comparison |
 | [ACP Client Terminal v1（当前）](acp-client-terminal-v1.md) | Runtime-specific `disabled/local_bridged` policy、标准 ACP Terminal wire、本地 ManagedProcess 派生、workspace/Run fencing、有界输出与 cancellation/release cleanup |
-| [Runtime Launch and Verification v27（当前）](runtime-launch-and-verification-v27.md) | 保留 v26 边界，并合并 v1.28 的 Grok `>= 1.0.0`/标准 ACP resume 与 v1.29 的 Pi 原生认证、workspace resident multi-session Host、managed System Prompt receipt、动态 Skills、Core-managed stdio MCP 和 exact Session binding |
+| [Runtime Launch and Verification v27（当前）](runtime-launch-and-verification-v27.md) | 保留 v26 边界，并合并 v1.28 的 Grok `>= 1.0.0`/标准 ACP resume 与 v1.30 的 Pi 原生认证、workspace resident multi-session Host、managed System Prompt receipt、动态 Skills、Core-managed stdio MCP 和 exact Session binding |
 | [Runtime Launch and Verification v26（历史）](runtime-launch-and-verification-v26.md) | v25 launch/权限/Cursor 边界不变；增加 TRAE 专属 `rawInput.Command`、ACP error/activity/failure 与时间域规则，并补充 Grok Build 的官方配置、load-only continuation、原生 rules、compaction、Plugin MCP 和 generic agent-text 边界 |
 | [Runtime Launch and Verification v25（历史）](runtime-launch-and-verification-v25.md) | v24 的 Kimi `yolo` 与十二种 Runtime 最高权限默认不变；Cursor 在 Settings 与普通成员 Runtime selector 中保持隐藏，历史配置只读保留；不含 v26 的 TRAE command、ACP error/activity、failure 与时间域修正 |
 | [Runtime Launch and Verification v24（历史）](runtime-launch-and-verification-v24.md) | v23 的 Kimi Home、continuation、External MCP 与 Cursor Settings 边界不变；十二种 Runtime 新队员统一使用已验证的原生最高权限默认，Kimi 为 `yolo` |
@@ -125,7 +127,8 @@ Architecture 解释组件如何组成，Version 概览记录交付范围；它�
 | [Current User Attention v3 (historical)](current-user-attention-v3.md) | v2 精确确认加同 CampTurn 一卡、逐 Mention acknowledgement、最早未确认 action 与导航版本绑定；不含普通会话可见即已读 |
 | [Current User Attention v2 (historical)](current-user-attention-v2.md) | v1 当前用户注意力加 Message Mention 独立已读、锚点导航、焦点确认与 Markdown 保真；不含 Episode 聚合 |
 | [Current User Attention v1 (historical)](current-user-attention-v1.md) | 当前用户身份、结构化内容与原子通知基线；不含独立已读、锚点窗口与 Markdown 保真勘误 |
-| [Missing-Send Recovery Publication v1（当前）](missing-send-recovery-publication-v1.md) | 成功 AgentRun 的 typed final candidate、同 Run accepted-send 抑制、recipient-free 原子恢复消息与 terminal replay/竞态语义 |
+| [Missing-Send Recovery Publication v2（当前）](missing-send-recovery-publication-v2.md) | v1 candidate/replay 不变；普通输出与 Missing-Send 均受 frozen membership lifetime publication fence 约束 |
+| [Missing-Send Recovery Publication v1（历史）](missing-send-recovery-publication-v1.md) | 成功 AgentRun 的 typed final candidate、同 Run accepted-send 抑制、recipient-free 原子恢复消息与 terminal replay/竞态语义 |
 | [Pending Camp Activation v1（当前）](pending-camp-activation-v1.md) | 一键 Pending 创建、Snapshot/Navigation activation state、首消息原子激活、mutation guard 与窄 discard/启动清理 |
 | [Camp Attachment v5（当前）](camp-attachment-v5.md) | v4 ingress/Runtime 不变；Published Authority 的 Desktop open target、Core 风险判定与 Renderer 无路径边界 |
 | [Camp Attachment v4（历史）](camp-attachment-v4.md) | v3 publication 不变；Run tmp 逐 lease 隔离，并以共享 per-Camp gate 串行 Authority 权限切换与清理 |
@@ -155,10 +158,12 @@ Architecture 解释组件如何组成，Version 概览记录交付范围；它�
 | [Camp Message Send v1 (historical)](camp-message-send-v1.md) | v0.45 `camp.message.send` / `rovai send`、Addressing Token、recipient resolution、fanout、lineage 与错误 |
 | [Camp Message Send v2 (historical)](camp-message-send-v2.md) | v0.46 隐式 Camp 与 Agent 输入 reply default target；不作为 v0.62 send 入口 |
 | [Camp Message Send v3 (historical)](camp-message-send-v3.md) | v0.62 caller return 与 Core-managed reply reference；不含 v0.65 Current User Attention |
-| [Gather v3（当前）](gather-v3.md) | v2 lifecycle/limits 不变；Completion Input 使用 `agent_v1` request/captured 投影、projected digest 与 schema v3 |
+| [Gather v4（当前）](gather-v4.md) | v3 input/projection 不变；冻结 initiator membership lifetime，成员移除级联取消并只由正式 terminal settlement 推进 |
+| [Gather v3（历史）](gather-v3.md) | v2 lifecycle/limits 不变；Completion Input 使用 `agent_v1` request/captured 投影、projected digest 与 schema v3 |
 | [Gather v2（历史）](gather-v2.md) | v1 lifecycle 加当前代最后 captured result、独立回传限额、完整 request 与 completion input v2 |
 | [Gather v1（历史）](gather-v1.md) | GatherRecord/Item、Default Lead 接受、持久 capture/Barrier、completion snapshot/FIFO 与旧 capture budget/input v1 |
-| [Message Delivery v5（当前）](message-delivery-v5.md) | v4 联合/FIFO 不变；增加无 attempt 的 `projection_blocked` gate、成功释放与失败 settlement |
+| [Message Delivery v6（当前）](message-delivery-v6.md) | v5 lifecycle/gate 不变；admission 冻结 recipient membership version，离开后再添加不能复活 dispatch/retry |
+| [Message Delivery v5（历史）](message-delivery-v5.md) | v4 联合/FIFO 不变；增加无 attempt 的 `projection_blocked` gate、成功释放与失败 settlement |
 | [Message Delivery v4（历史）](message-delivery-v4.md) | v3 判别联合加 generation-strict last capture projection 与独立 captured-return allowance |
 | [Message Delivery v3（历史）](message-delivery-v3.md) | public/captured/completion 判别联合、Delivery-level completion role 与初版 Gather settlement |
 | [Message Delivery v2 (historical)](message-delivery-v2.md) | `forward | return` 冻结边、target lineage、caller continuation，以及 v1 queue/attempt/recovery/settlement |

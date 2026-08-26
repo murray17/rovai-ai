@@ -1,12 +1,12 @@
 ---
 document_type: acceptance-record
-version: v1.29
+version: v1.30
 authority: version-runtime-integration-acceptance
 status: core_compatible
-last_updated: 2026-08-25
+last_updated: 2026-08-26
 ---
 
-# v1.29 Pi Runtime 新版 Checklist 对比报告
+# v1.30 Pi Runtime 新版 Checklist 对比报告
 
 本报告按合并 `main` 后的
 [Agent Runtime 一等接入与准入 Checklist](../../development/runtime-integration-checklist.md)重新审计 Pi。清单当前

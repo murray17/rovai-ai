@@ -28,7 +28,7 @@ digest-bound `qualified`。
 Grok Build 在 adapter-scoped 证据分别覆盖的 macOS arm64、macOS x64 与 Windows x64 均为 `qualified`；
 三个宿主平台各自绑定独立 evidence digest，不互相外推。
 Pi 当前代码把 macOS arm64 投影为 `qualified`，但合并后的新版 Checklist 复核只支持
-`core_compatible` 结论；该 product-visibility mismatch 是 v1.29 的显式未闭合项。macOS x64 与 Windows x64
+`core_compatible` 结论；该 product-visibility mismatch 是 v1.30 的显式未闭合项。macOS x64 与 Windows x64
 仍为 `not_qualified`。
 Cursor identity 仅保留内部兼容与历史读取，默认不进入 discovery/check/AgentRun；Settings 的 Agent Runtime
 目录不展示该项。设置页的
@@ -901,9 +901,9 @@ MCP bridge。合并 `main` 后的新版 Checklist 还要求以下真实矩阵，
   suppression 已通过；
 - crash、protocol error、Probe timeout、App shutdown 与不可变 adapter-scoped platform artifact。
 
-因此 v1.29 的严格 admission 为 `core_compatible`。当前 macOS arm64 `qualified` 代码行早于新版清单，是已记录
+因此 v1.30 的严格 admission 为 `core_compatible`。当前 macOS arm64 `qualified` 代码行早于新版清单，是已记录
 的 product-visibility mismatch；macOS x64、Windows x64 仍不准入。完整逐轴判断见
-[v1.29 Checklist 报告](versions/v1.29/checklist-report.md)。
+[v1.30 Checklist 报告](versions/v1.30/checklist-report.md)。
 
 ## 历史：内置 MCP / Antigravity 专项复核
 

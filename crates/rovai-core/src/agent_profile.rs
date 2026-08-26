@@ -839,6 +839,7 @@ pub struct MemberRemovalPreview {
     pub current_camp_membership_count: i64,
     pub open_assigned_task_count: i64,
     pub default_lead_camp_count: i64,
+    pub sole_member_camp_count: i64,
     pub removable: bool,
 }
 
@@ -2612,13 +2613,29 @@ impl AgentProfileService {
                         WHERE assignee_agent_id = profile.id
                           AND status IN ('pending', 'in_progress', 'blocked')),
                        (SELECT COUNT(*) FROM camp
-                        WHERE default_lead_agent_id = profile.id)
+                        WHERE default_lead_agent_id = profile.id),
+                       (SELECT COUNT(*)
+                        FROM camp_member AS own_membership
+                        WHERE own_membership.agent_id = profile.id
+                          AND own_membership.status = 'active'
+                          AND NOT EXISTS(
+                              SELECT 1
+                              FROM camp_member AS peer_membership
+                              JOIN agent_profile AS peer_profile
+                                ON peer_profile.id = peer_membership.agent_id
+                              WHERE peer_membership.camp_id = own_membership.camp_id
+                                AND peer_membership.agent_id <> own_membership.agent_id
+                                AND peer_membership.status = 'active'
+                                AND peer_membership.leave_requested_at IS NULL
+                                AND peer_profile.profile_status <> 'removed'
+                          ))
                 FROM agent_profile AS profile
                 WHERE profile.id = ?1 AND profile.profile_status <> 'removed'
                 "#,
                 [agent_id],
                 |row| {
                     let non_terminal_agent_run_count = row.get::<_, i64>(3)?;
+                    let sole_member_camp_count = row.get::<_, i64>(7)?;
                     Ok(MemberRemovalPreview {
                         agent_id: row.get(0)?,
                         display_name: row.get(1)?,
@@ -2627,7 +2644,8 @@ impl AgentProfileService {
                         current_camp_membership_count: row.get(4)?,
                         open_assigned_task_count: row.get(5)?,
                         default_lead_camp_count: row.get(6)?,
-                        removable: non_terminal_agent_run_count == 0,
+                        sole_member_camp_count,
+                        removable: non_terminal_agent_run_count == 0 && sole_member_camp_count == 0,
                     })
                 },
             )
@@ -2702,6 +2720,33 @@ impl AgentProfileService {
                     json!({ "count": non_terminal_agent_run_count }),
                 ));
             }
+            let sole_member_camp_count: i64 = transaction.query_row(
+                r#"
+                SELECT COUNT(*)
+                FROM camp_member AS own_membership
+                WHERE own_membership.agent_id = ?1
+                  AND own_membership.status = 'active'
+                  AND NOT EXISTS(
+                      SELECT 1
+                      FROM camp_member AS peer_membership
+                      JOIN agent_profile AS peer_profile
+                        ON peer_profile.id = peer_membership.agent_id
+                      WHERE peer_membership.camp_id = own_membership.camp_id
+                        AND peer_membership.agent_id <> own_membership.agent_id
+                        AND peer_membership.status = 'active'
+                        AND peer_membership.leave_requested_at IS NULL
+                        AND peer_profile.profile_status <> 'removed'
+                  )
+                "#,
+                [&envelope.payload.agent_id],
+                |row| row.get(0),
+            )?;
+            if sole_member_camp_count > 0 {
+                return Ok(CommandHandlerResult::rejected(
+                    "agent_profile.sole_camp_member",
+                    json!({ "count": sole_member_camp_count }),
+                ));
+            }
             let now = chrono::Utc::now().to_rfc3339();
             let current_camps = {
                 let mut statement = transaction.prepare(
@@ -2720,6 +2765,9 @@ impl AgentProfileService {
                     transaction,
                     &camp_id,
                     &envelope.payload.agent_id,
+                    None,
+                    "agent_profile_removed",
+                    &envelope.command_id,
                     &envelope.actor,
                     envelope.execution_epoch,
                     &now,
@@ -5545,6 +5593,7 @@ mod slow_tests {
                     source: InstallationSource::InheritedPath,
                     auth_scope: "default".to_string(),
                     snapshot: ready_pi_snapshot(),
+                    entrypoint_locator_identity: None,
                 },
             )
             .expect("complete Pi Machine Ready installation should commit");
@@ -6412,7 +6461,9 @@ mod slow_tests {
             AddCampMemberCommand {
                 camp_id: camp_id.clone(),
                 agent_id: "agent_2".to_string(),
+                expected_membership_generation: 1,
                 capability_overrides: json!({}),
+                source: None,
             },
         );
         add_member.camp_id = Some(camp_id);
@@ -7907,7 +7958,9 @@ mod slow_tests {
                     payload: AddCampMemberCommand {
                         camp_id: camp_id.clone(),
                         agent_id: "agent_1".to_string(),
+                        expected_membership_generation: 1,
                         capability_overrides: json!({}),
+                        source: None,
                     },
                 },
             )
@@ -7926,7 +7979,9 @@ mod slow_tests {
                     payload: AddCampMemberCommand {
                         camp_id: camp_id.clone(),
                         agent_id: "agent_2".to_string(),
+                        expected_membership_generation: 1,
                         capability_overrides: json!({}),
+                        source: None,
                     },
                 },
             )

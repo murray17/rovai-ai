@@ -433,7 +433,7 @@ Not qualified: macOS x64, Windows x64
 
 ## 16. 2026-08-25 revision 1 复核与实现回填
 
-开发者已确认 [model-context-change revision 1](../versions/v1.29/model-context-change.md)。源码和本机 Pi
+开发者已确认 [model-context-change revision 1](../versions/v1.30/model-context-change.md)。源码和本机 Pi
 `0.84.2` 复核得到以下新结论：
 
 | 轴 | revision 1 证据 | 当前实现结论 |
@@ -444,7 +444,7 @@ Not qualified: macOS x64, Windows x64
 | Bootstrap | slow test 证明 profile edit 不改变同 Binding full bytes、无 redelivery overlay、receipt 前不能 accepted | `managed_system_prompt` + `before_agent_start` append + blocking Managed Input Receipt v1 |
 | Skills | Session replacement 重建 ResourceLoader；`get_commands` 与 receipt 提供 actual catalog；真实 Pi smoke 已调用 managed Skill并验证 restart/conflict/delete lifecycle | exact `W/.pi/skills` 同时接纳 project-native 与 Rovai ready Skills；collision/escape/missing fail closed；update/delete 后相邻 Session 隔离仍待闭合 |
 | MCP | Core stdio fixture 完成 initialize/initialized/tools-list/tools-call；真实 Pi `0.84.2` 已调用两个 assigned stdio Tool并逐次 durable approve | `AdditivePerRun / RovaiWins / CoreManaged`；stdio supported、HTTP adapter unsupported；assignment lifecycle、deny/cancel 与相邻 Session 隔离仍待闭合 |
-| Migration | Grok 107/108、主线 locator 109 后的 Pi Migration 110/111 与 synthetic chain 定向回归通过 | v1.24/schema 65；旧 nonterminal Pi state clean break，completed history 与非 Pi state保留 |
+| Migration | Grok 107/108、主线 locator 109、Camp membership 110 后的 Pi Migration 111/112 与 synthetic chain 定向回归通过 | v1.25/schema 66；旧 nonterminal Pi state clean break，completed history 与非 Pi state保留 |
 | Compaction | ordinary managed prompt 真实 smoke 已通过；manual/threshold/overflow+retry 完整矩阵未执行 | protected instruction/no-redelivery 已实现，但 Compaction 继续 Disabled/unqualified |
 
 当前产品语义由
@@ -454,7 +454,7 @@ Not qualified: macOS x64, Windows x64
 合并 `main` 后，新版 First-Class Checklist 不再允许以 Disabled/fixture 替代完整能力轴。现有 revision 1
 实现因此只达到 `core_compatible`：Compaction、结构化 Usage、Skill/MCP 完整 lifecycle、完整 Tool output、
 Missing-Send tool→final、shutdown/cleanup 与不可变平台资格矩阵仍需闭合。逐轴差距见
-[v1.29 Checklist 报告](../versions/v1.29/checklist-report.md)。
+[v1.30 Checklist 报告](../versions/v1.30/checklist-report.md)。
 
 ## 上游来源
 
