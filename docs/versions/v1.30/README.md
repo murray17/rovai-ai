@@ -19,8 +19,7 @@ last_updated: 2026-08-26
 > Tool output/Missing-Send/cleanup Golden Flows 与不可变平台资格证据仍未全部闭合。代码中的目录投影因此是
 > 待完成准入的实现事实，不应被本文解释为已经满足新版正式发布门槛。
 >
-> 前置版本：[v1.28 Grok Build + MiniMax M3 本地 Runtime 接入](../v1.28/README.md)已按冻结时事实转为
-> historical。
+> 前置版本：[v1.29 Camp 动态队员管理](../v1.29/README.md)已按冻结时事实转为 historical。
 
 ## 版本目标
 
@@ -51,7 +50,8 @@ revision 并重新确认。
   bytes；Extension 以 `P_final = Pi base prompt + "\n\n" + frozen Bootstrap` 投递，并在 provider request 前提交
   blocking Managed Input Receipt v1；
 - `.pi/skills` 每次 Session activation 动态发现，包含 Workspace 合格的项目原生 Pi Skills和 Rovai
-  Reconciler 的 ready Skills；`get_commands` 与 receipt 验证 once-only、name、description、path 和 containment；
+  Reconciler 的 ready Skills；`get_commands` 与 receipt 验证 once-only、name、description、path 和 containment，
+  Core 并从合格 `SKILL.md` 独立推导 `modelVisible`，拒绝 Extension 自报漂移；
 - External MCP 改为 `AdditivePerRun / RovaiWins / CoreManaged`：stdio 由 Core 完成 initialize/list/call 并注册
   Pi proxy Tools，每次调用都 durable approve；Streamable HTTP 继续 unsupported；
 - `bash/write/edit` 继续 blocking Approval，read/search 不弹审批；未知 Extension UI、Tool、mutation、超时、
@@ -114,10 +114,9 @@ Binding、ContextManifest 和 Runtime Input Delivery 不失效。
 
 | 范围 | 结论 | 证据或理由 |
 | --- | --- | --- |
-| Version lifecycle | 已更新 | v1.28 冻结为 historical，v1.30 成为唯一 current；revision 1 在同一已确认版本内完成受治理的模型上下文修正。 |
-| Model context | 已确认并实施 | [Revision 1](model-context-change.md)冻结最终 System Prompt、Skills/MCP、receipt、迁移和模型副作用。 |
+| Version lifecycle | 已更新 | v1.29 冻结为 historical，v1.30 成为唯一 current。 |
 | Decisions | 已更新 | [V1.30-D02](decisions.md#v1-30-d02)替代 D01 中的 provider overlay、一 Host 一 Session、fixed Skill 与 MCP Unsupported。 |
-| Contracts | 已更新 | [Runtime Launch and Verification v27](../../contracts/runtime-launch-and-verification-v27.md)成为当前入口；v26 转为历史。 |
+| Contracts | 已更新 | 已确认的 [Revision 1](model-context-change.md)冻结 System Prompt、Skills/MCP、receipt、迁移和模型副作用；[Runtime Launch and Verification v27](../../contracts/runtime-launch-and-verification-v27.md)成为当前入口，v26 转为历史。 |
 | Architecture | 已更新 | [Runtime Catalog Boundaries](../../architecture/runtime-catalog-boundaries.md)记录 Pi resident/process key 与 per-run binding。 |
 | UI | 确认无需更新 | 既有 Pi Runtime/模型/权限入口继续消费 capability snapshot；revision 1 只改变 Runtime 与 Evidence 语义。 |
 | Runtime Activity | 已更新 | [Mapping Registry](../../runtime-activity/registry.md)补充 managed receipt、MCP Approval 与当前真实证据层次。 |

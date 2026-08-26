@@ -125,9 +125,11 @@ the exact `<workspace>/.pi/skills` root. That root may contain both project-nati
 ready Skills; user-home, ancestor, Package and third-party Extension discovery remain disabled.
 
 Core calls `get_commands` before prompt and verifies every expected managed Skill exactly once, its name,
-description digest and lexical entry path, plus canonical target containment. Duplicate real files, duplicate names,
-missing expected Skills, prior-Session paths and workspace escapes stop the Host. `switch_session`/`new_session`
-rebuilds Pi's ResourceLoader, so Skill changes take effect per Session activation without restarting the process.
+description digest and lexical entry path, plus canonical target containment. After containment validation, Core reads the
+exact `SKILL.md` and independently derives `modelVisible` from `disable-model-invocation`; the managed receipt must match
+that result. Duplicate real files, duplicate names, missing expected Skills, prior-Session paths and workspace escapes
+stop the Host. `switch_session`/`new_session` rebuilds Pi's ResourceLoader, so Skill changes take effect per Session
+activation without restarting the process.
 
 ## External MCP and Approval
 
@@ -170,9 +172,9 @@ causes ordinary-message redelivery.
 ## Data transition
 
 Migration 109 first records the durable Runtime entrypoint locator identity without changing the Data Contract.
-Migration 110 then follows Grok's Migration 107/108 chain and upgrades `v1.22 / schema 63 / migration 109` to
-`v1.23 / schema 64` by adding the Pi adapter/catalog/Skill closed sets. Migration 111 finally upgrades to
-`v1.24 / schema 65`:
+Migration 110 then adds dynamic Camp membership and upgrades `v1.22 / schema 63 / migration 109` to
+`v1.23 / schema 64`. Pi Migration 111 adds the adapter/catalog/Skill closed sets and upgrades to
+`v1.24 / schema 65`; Pi Migration 112 finally upgrades to `v1.25 / schema 66`:
 
 - adds `managed_system_prompt`, Bootstrap Evidence v2 identity/full-Bootstrap fields and the private one-to-one
   `pi_managed_input_receipt` acceptance gate;

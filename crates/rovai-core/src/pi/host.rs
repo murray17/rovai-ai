@@ -27,6 +27,7 @@ use rovai_core::{
     },
     mcp_projection::PreparedMcpProjection,
     runtime_discovery::configure_active_runtime_command,
+    skill::MAX_SKILL_FILE_BYTES,
     skill_projection::PreparedSkillExposure,
 };
 use serde::{Deserialize, Serialize};
@@ -822,17 +823,7 @@ impl PiRuntime {
         {
             bail!("Pi managed input receipt Skill catalog digest is invalid");
         }
-        if receipt.skill_catalog.len() != self.skill_command_catalog.len()
-            || receipt
-                .skill_catalog
-                .iter()
-                .zip(&self.skill_command_catalog)
-                .any(|(observed, expected)| {
-                    observed.name != expected.name
-                        || observed.description_digest != expected.description_digest
-                        || observed.entry_path != expected.entry_path
-                })
-        {
+        if !skill_catalogs_match(&receipt.skill_catalog, &self.skill_command_catalog) {
             bail!("Pi managed input receipt Skill catalog changed after get_commands");
         }
         validate_receipt_skills(
@@ -1000,6 +991,16 @@ struct PiReceiptSkill {
     description_digest: String,
     entry_path: String,
     model_visible: bool,
+}
+
+fn skill_catalogs_match(observed: &[PiReceiptSkill], expected: &[PiReceiptSkill]) -> bool {
+    observed.len() == expected.len()
+        && observed.iter().zip(expected).all(|(observed, expected)| {
+            observed.name == expected.name
+                && observed.description_digest == expected.description_digest
+                && observed.entry_path == expected.entry_path
+                && observed.model_visible == expected.model_visible
+        })
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -1671,7 +1672,90 @@ fn validate_skill_commands(
             .then(left.entry_path.cmp(&right.entry_path))
     });
     validate_receipt_skills(&receipt, skill_root, workspace, expected_managed_skills)?;
+    for skill in &mut receipt {
+        skill.model_visible = pi_skill_model_visible(Path::new(&skill.entry_path))?;
+    }
     Ok(receipt)
+}
+
+fn pi_skill_model_visible(path: &Path) -> Result<bool> {
+    let path = path
+        .canonicalize()
+        .context("Pi Skill model visibility path cannot be resolved")?;
+    let metadata =
+        std::fs::metadata(&path).context("Pi Skill model visibility metadata is unavailable")?;
+    if !metadata.is_file() || metadata.len() > MAX_SKILL_FILE_BYTES {
+        bail!("Pi Skill model visibility source is not an admissible regular file");
+    }
+    let mut markdown = String::new();
+    File::open(&path)
+        .context("Pi Skill model visibility source cannot be opened")?
+        .take(MAX_SKILL_FILE_BYTES + 1)
+        .read_to_string(&mut markdown)
+        .context("Pi Skill model visibility source must be UTF-8 text")?;
+    if markdown.len() as u64 > MAX_SKILL_FILE_BYTES {
+        bail!("Pi Skill model visibility source exceeded the Skill file limit");
+    }
+    pi_skill_model_visible_from_markdown(&markdown)
+}
+
+fn pi_skill_model_visible_from_markdown(markdown: &str) -> Result<bool> {
+    let mut lines = markdown.lines();
+    if lines.next().map(str::trim) != Some("---") {
+        return Ok(true);
+    }
+    let mut disabled = false;
+    let mut found_end = false;
+    for line in lines {
+        if line.trim() == "---" {
+            found_end = true;
+            break;
+        }
+        if line.starts_with(' ') || line.starts_with('\t') {
+            continue;
+        }
+        let Some((key, raw_value)) = line.split_once(':') else {
+            continue;
+        };
+        if key.trim() != "disable-model-invocation" {
+            continue;
+        }
+        disabled = pi_yaml_boolean_is_true(raw_value);
+    }
+    if !found_end {
+        bail!("Pi Skill model visibility frontmatter has no closing delimiter");
+    }
+    Ok(!disabled)
+}
+
+fn pi_yaml_boolean_is_true(raw_value: &str) -> bool {
+    let comment = raw_value.char_indices().find_map(|(index, character)| {
+        (character == '#'
+            && raw_value[..index]
+                .chars()
+                .next_back()
+                .is_none_or(char::is_whitespace))
+        .then_some(index)
+    });
+    let value = raw_value[..comment.unwrap_or(raw_value.len())].trim();
+    let (value, explicitly_boolean) = value
+        .strip_prefix("!!bool")
+        .or_else(|| value.strip_prefix("!<tag:yaml.org,2002:bool>"))
+        .map_or((value, false), |value| (value.trim(), true));
+    let value = if explicitly_boolean {
+        value
+            .strip_prefix('"')
+            .and_then(|value| value.strip_suffix('"'))
+            .or_else(|| {
+                value
+                    .strip_prefix('\'')
+                    .and_then(|value| value.strip_suffix('\''))
+            })
+            .unwrap_or(value)
+    } else {
+        value
+    };
+    matches!(value, "true" | "True" | "TRUE")
 }
 
 fn validate_receipt_skills(
@@ -2066,6 +2150,105 @@ mod tests {
             Sha256::digest(format!("rovai-pi-managed-input-receipt-v1\n{canonical}").as_bytes())
         );
         assert_eq!(managed_receipt_nonce(&value).unwrap(), expected);
+    }
+
+    #[test]
+    fn managed_skill_catalog_rejects_a_model_visibility_change() {
+        let expected = vec![PiReceiptSkill {
+            name: "manual-only".to_string(),
+            description_digest: "a".repeat(64),
+            entry_path: "/workspace/.pi/skills/manual-only/SKILL.md".to_string(),
+            model_visible: false,
+        }];
+        let mut observed = expected.clone();
+        observed[0].model_visible = true;
+
+        assert!(!skill_catalogs_match(&observed, &expected));
+        assert!(skill_catalogs_match(&expected, &expected));
+    }
+
+    #[test]
+    fn pi_skill_visibility_matches_native_yaml_boolean_forms() {
+        for value in [
+            "true",
+            "True",
+            "TRUE",
+            "!!bool true",
+            "!!bool \"true\"",
+            "!<tag:yaml.org,2002:bool> true",
+            "true # command only",
+            "true\t# command only",
+        ] {
+            let markdown =
+                format!("---\ndescription: command only\ndisable-model-invocation: {value}\n---\n");
+            assert!(!pi_skill_model_visible_from_markdown(&markdown).unwrap());
+        }
+        for value in ["false", "yes", "\"true\"", "[true]"] {
+            let markdown = format!(
+                "---\ndescription: model visible\ndisable-model-invocation: {value}\n---\n"
+            );
+            assert!(pi_skill_model_visible_from_markdown(&markdown).unwrap());
+        }
+    }
+
+    #[test]
+    fn skill_command_validation_keeps_manual_only_skills_out_of_model_visibility() {
+        let workspace = std::env::temp_dir().join(format!(
+            "rovai-pi-skill-visibility-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let skill_root = workspace.join(".pi/skills");
+        let visible_path = skill_root.join("visible/SKILL.md");
+        let manual_path = skill_root.join("manual-only/SKILL.md");
+        std::fs::create_dir_all(visible_path.parent().unwrap()).unwrap();
+        std::fs::create_dir_all(manual_path.parent().unwrap()).unwrap();
+        std::fs::write(
+            &visible_path,
+            "---\nname: visible\ndescription: model visible\n---\n",
+        )
+        .unwrap();
+        std::fs::write(
+            &manual_path,
+            "---\nname: manual-only\ndescription: command only\ndisable-model-invocation: true\n---\n",
+        )
+        .unwrap();
+        let response = json!({
+            "data": {
+                "commands": [
+                    {
+                        "name": "skill:visible",
+                        "description": "model visible",
+                        "source": "skill",
+                        "sourceInfo": {"path": visible_path},
+                    },
+                    {
+                        "name": "skill:manual-only",
+                        "description": "command only",
+                        "source": "skill",
+                        "sourceInfo": {"path": manual_path},
+                    },
+                ]
+            }
+        });
+
+        let catalog = validate_skill_commands(&response, &skill_root, &workspace, &[]).unwrap();
+        assert_eq!(catalog.len(), 2);
+        assert_eq!(
+            catalog
+                .iter()
+                .find(|skill| skill.name == "manual-only")
+                .map(|skill| skill.model_visible),
+            Some(false)
+        );
+        assert_eq!(
+            catalog
+                .iter()
+                .find(|skill| skill.name == "visible")
+                .map(|skill| skill.model_visible),
+            Some(true)
+        );
+
+        std::fs::remove_dir_all(workspace).unwrap();
     }
 
     #[tokio::test]

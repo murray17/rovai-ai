@@ -72,7 +72,8 @@ last_updated: 2026-08-26
   Extension discovery 继续关闭；
 - [x] 目录同时接纳 Workspace 项目原生 Pi Skills 与 Rovai Reconciler ready Skills；
 - [x] `get_commands` + receipt 验证 expected Skill once-only、name、description digest、entry path、canonical
-  target 与 Workspace containment；duplicate/collision/escape/missing fail closed；
+  target 与 Workspace containment；Core 从已验证路径的 `SKILL.md` 独立推导 `modelVisible` 并与 receipt 比较；
+  duplicate/collision/escape/missing/visibility mismatch fail closed；
 - [x] A→B→A Session replacement 重建 ResourceLoader，Skill 变化不要求重启 Host，且不保留上一 Session catalog。
 
 ## 6. External MCP 与 Approval

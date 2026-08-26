@@ -3,18 +3,16 @@ document_type: runtime-research
 runtime: pi
 upstream: earendil-works/pi
 authority: research-evidence-only
-status: implemented
-admission: macos_arm64_qualified
-last_updated: 2026-08-25
+last_updated: 2026-08-26
 ---
 
 # Pi Runtime 接入研究
 
 > 本文按 [`runtime-integration-checklist.md`](https://github.com/murray17/rovai-ai/blob/main/docs/development/runtime-integration-checklist.md) 整理。
 > Pi 不是 ACP Runtime；应直接接入其官方 JSONL RPC，而不是通过 TUI 抓屏或把第三方 ACP shim 当作上游合同。
-> 第 1–13 节保留接入前研究快照；其 `NotImplemented` / `Blocked` 与未准入结论不能覆盖后续真实证据。
-> 当前实施与准入结论见第 14–16 节、[Runtime Launch and Verification v27](../contracts/runtime-launch-and-verification-v27.md)
-> 和 [Runtime 兼容性清单](../runtime-compatibility.md)。
+> 第 1–13 节保留接入前研究快照；第 14–16 节只回填后续可复核证据。当前实施合同与产品准入不由本文拥有，
+> 分别以 [Runtime Launch and Verification v27](../contracts/runtime-launch-and-verification-v27.md)、
+> [Runtime 兼容性清单](../runtime-compatibility.md)和当前版本验收报告为准。
 
 ## 基本结论
 
@@ -27,8 +25,8 @@ Exact launch command:
   pi --mode rpc --no-extensions --no-skills --no-context-files --no-prompt-templates --no-themes
      --no-approve --no-builtin-tools --extension <rovai-pi-host-v2>
 Transport: strict LF-delimited JSON over stdin/stdout
-当前 Admission: macOS arm64 qualified；macOS x64 / Windows x64 not_qualified
-一句话结论: 独立 JSONL RPC、原生认证/默认模型、workspace resident Host、动态 Bootstrap/Skills、Core-managed stdio MCP 与 exact resume 已实现；Usage/Compaction Disabled。
+2026-08-25 证据快照: 代码登记 macOS arm64 qualified，但新版 Checklist 复核只达到 core_compatible；macOS x64 / Windows x64 not_qualified
+当次实现观察: 独立 JSONL RPC、原生认证/默认模型、workspace resident Host、动态 Bootstrap/Skills、Core-managed stdio MCP 与 exact resume 已实现；Usage/Compaction Disabled。
 最接近的现有 Adapter: 新建 Pi RPC Transport；可复用 Runtime Fleet、Event normalization、process cleanup 与 Session fencing。
 ```
 
@@ -436,7 +434,7 @@ Not qualified: macOS x64, Windows x64
 开发者已确认 [model-context-change revision 1](../versions/v1.30/model-context-change.md)。源码和本机 Pi
 `0.84.2` 复核得到以下新结论：
 
-| 轴 | revision 1 证据 | 当前实现结论 |
+| 轴 | revision 1 证据 | 当次实现观察 |
 | --- | --- | --- |
 | Auth/model | 不设置 `PI_CODING_AGENT_DIR`、provider 或 model 的真实 Prompt 使用用户 Pi native default 成功；执行时 provider 由用户自己的 Pi 配置决定，不固化到产品合同 | 不再读取 Claude settings或注入 token；支持 `pi://runtime-default` 与显式 `pi://model?...` exact list/set/state |
 | Resident Host | deterministic Fleet test 证明 workspace Host 跨 Camp/member invalidation 继续复用；Host 仍 single-flight | compatibility 只含 workspace/process state；Session/identity/Skills/MCP/model 逐 Run binding，不跨 Workspace复用 |
