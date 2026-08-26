@@ -56,7 +56,7 @@ try {
     outputDir,
     verified: {
       isolatedPackagedApplication: true,
-      packagedVersion: '0.0.2',
+      packagedVersion: '0.0.3',
       typedIdleUpdaterSnapshot: true,
       productAndBundleName: 'Rovai AI',
       existingSettingsVisualWorld: true,
@@ -91,12 +91,12 @@ async function openAboutUpdates(cdp) {
   assert(selected, 'About & Updates Settings entry was unavailable')
   await waitForSelector(cdp, '.about-updates-settings')
   await waitForExpression(cdp,
-    `document.querySelector('.about-version-value code')?.textContent === 'v0.0.2'`)
+    `document.querySelector('.about-version-value code')?.textContent === 'v0.0.3'`)
 }
 
 async function assertAboutUpdates(cdp, context) {
   const updaterSnapshot = await evaluate(cdp, 'window.rovai.appUpdates.get()', true)
-  assert(updaterSnapshot?.currentVersion === '0.0.2' && updaterSnapshot.status === 'idle',
+  assert(updaterSnapshot?.currentVersion === '0.0.3' && updaterSnapshot.status === 'idle',
     `${context} returned the wrong updater snapshot: ${JSON.stringify(updaterSnapshot)}`)
 
   const state = await evaluate(cdp, `(() => {
@@ -126,7 +126,7 @@ async function assertAboutUpdates(cdp, context) {
   assert(state.heading === '关于与更新', `${context} omitted the page heading`)
   assert(state.description === '查看当前版本，检查并安装 Rovai AI 更新。',
     `${context} used the wrong description`)
-  assert(state.product === 'Rovai AI' && state.version === 'v0.0.2',
+  assert(state.product === 'Rovai AI' && state.version === 'v0.0.3',
     `${context} used the wrong product/version: ${JSON.stringify(state)}`)
   assert(state.action === '检查更新' && state.actionTag === 'BUTTON' && state.actionFocused,
     `${context} did not expose a keyboard-focusable check action`)
