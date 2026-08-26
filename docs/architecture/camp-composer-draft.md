@@ -3,13 +3,13 @@ document_type: architecture
 architecture: camp-composer-draft
 authority: camp-composer-draft-and-user-send-boundaries
 status: accepted
-last_updated: 2026-08-20
+last_updated: 2026-08-27
 ---
 
 # Camp Composer Draft 架构
 
 Camp Composer Draft 是用户下一条 Camp 消息的唯一持久编辑真源。字段、命令和错误见
-[Camp Composer Draft v4](../contracts/camp-composer-draft-v4.md)；长期取舍见
+[Camp Composer Draft v5](../contracts/camp-composer-draft-v5.md)；长期取舍见
 [Composer Draft 不变量](foundational-invariants.md#camp-composer)、
 [Composer Draft 不变量](foundational-invariants.md#camp-composer)与
 [Composer Draft 不变量](foundational-invariants.md#camp-composer)与
@@ -58,14 +58,15 @@ exact Draft send
   -> load exact ordered ready Prepared Attachment IDs
      -> non-empty body OR at least one ready attachment
         -> continue with reply / continuation / recipient validation
-        -> semantic commit consumes Draft and creates pending publication
+        -> durable Managed v2 ingest copies/promotes once outside SQLite
+        -> final semantic commit consumes Draft and creates available refs + ordinary Runs
      -> empty body AND no ready attachment
         -> reject camp_message.empty_body and preserve the Draft
 
 attachment-only accepted
   -> persist body="" + structured_content_json="[]"
-  -> keep message_attachment / publication / CampTurn / AgentRun in the same transaction
-  -> persistent writer intent keeps AgentRun queued until projection resolves
+  -> keep managed_attachment / Message refs / CampTurn / AgentRun in the same transaction
+  -> no legacy View writer intent; active Runs are neither awaited nor fenced
 ```
 
 ## Continuation flow
@@ -119,8 +120,8 @@ message回看更早记录。动态空白候选可以因失效被抑制；已经�
 
 ## References
 
-- [Camp Composer Draft v4](../contracts/camp-composer-draft-v4.md)
-- [Camp Attachment v5](../contracts/camp-attachment-v5.md)
-- [Camp Published Attachment View v4](../contracts/camp-published-attachment-view-v4.md)
+- [Camp Composer Draft v5](../contracts/camp-composer-draft-v5.md)
+- [Camp Attachment v6](../contracts/camp-attachment-v6.md)
+- [Camp Published Attachment View v4（legacy v1）](../contracts/camp-published-attachment-view-v4.md)
 - [Public A2A Message 与 Message Delivery](public-a2a-message-delivery.md)
 - [Camp 会话工作区](../ui/components/conversation-workspace.md)

@@ -41,6 +41,7 @@ use crate::{
         resolve_current_input_skills, validate_persisted_resolution,
     },
     db::Database,
+    managed_attachment::resolve_managed_attachment_path,
     managed_blob::ManagedBlobStore,
     mcp_projection::{McpExposureSnapshot, PreparedMcpProjection},
     memory::{MemoryScopeKind, MemoryService, RelationshipDirection},
@@ -3137,6 +3138,7 @@ struct SharedMessageAttachment {
     media_type: String,
     path: String,
     content_digest: String,
+    legacy_view_backed: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -3367,6 +3369,7 @@ fn final_referenced_attachment_ids(
 ) -> Vec<String> {
     let mut ids = current
         .iter()
+        .filter(|attachment| attachment.legacy_view_backed)
         .map(|attachment| attachment.attachment_id.clone())
         .chain(
             shared
@@ -3378,6 +3381,7 @@ fn final_referenced_attachment_ids(
                     message
                         .attachments
                         .iter()
+                        .filter(|attachment| attachment.legacy_view_backed)
                         .map(|attachment| attachment.attachment_id.clone())
                 }),
         )
@@ -3819,11 +3823,26 @@ fn project_shared_message<R: ContextReadConnection>(
     )?;
     let mut attachment_statement = database.context_connection().prepare(
         r#"
-        SELECT id, display_name, media_type, content_digest
-        FROM message_attachment
-        WHERE camp_message_id = ?1
-          AND runtime_projection_state = 'available'
-        ORDER BY created_at, id
+        WITH attachment AS (
+            SELECT id, display_name, media_type, content_digest,
+                   position AS ordinal, 'legacy_v1' AS storage_model
+            FROM message_attachment
+            WHERE camp_message_id = ?1
+              AND runtime_projection_state = 'available'
+            UNION ALL
+            SELECT managed.id, reference.display_name_snapshot,
+                   managed.media_type, managed.content_digest,
+                   reference.ordinal, 'managed_v2'
+            FROM camp_message_attachment_ref AS reference
+            JOIN managed_attachment AS managed
+              ON managed.camp_id = reference.camp_id
+             AND managed.id = reference.attachment_id
+            WHERE reference.camp_message_id = ?1
+              AND managed.state = 'available'
+        )
+        SELECT id, display_name, media_type, content_digest, storage_model
+        FROM attachment
+        ORDER BY ordinal, id
         "#,
     )?;
     let attachment_rows = attachment_statement
@@ -3833,25 +3852,38 @@ fn project_shared_message<R: ContextReadConnection>(
                 row.get::<_, String>(1)?,
                 row.get::<_, String>(2)?,
                 row.get::<_, String>(3)?,
+                row.get::<_, String>(4)?,
             ))
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
     drop(attachment_statement);
     let attachments = attachment_rows
         .into_iter()
-        .map(|(attachment_id, name, media_type, content_digest)| {
-            Ok(SharedMessageAttachment {
-                path: resolve_published_attachment_path(
-                    database.context_connection(),
-                    &camp_id,
-                    &attachment_id,
-                )?,
-                attachment_id,
-                name,
-                media_type,
-                content_digest,
-            })
-        })
+        .map(
+            |(attachment_id, name, media_type, content_digest, storage_model)| {
+                let legacy_view_backed = storage_model == "legacy_v1";
+                Ok(SharedMessageAttachment {
+                    path: if legacy_view_backed {
+                        resolve_published_attachment_path(
+                            database.context_connection(),
+                            &camp_id,
+                            &attachment_id,
+                        )?
+                    } else {
+                        resolve_managed_attachment_path(
+                            database.context_connection(),
+                            &camp_id,
+                            &attachment_id,
+                        )?
+                    },
+                    attachment_id,
+                    name,
+                    media_type,
+                    content_digest,
+                    legacy_view_backed,
+                })
+            },
+        )
         .collect::<Result<Vec<_>>>()?;
     let prefix = body_prefix(&body, profile.max_message_body_chars);
     Ok(SharedMessage {
@@ -4721,6 +4753,8 @@ struct CampAttachmentRef {
     attachment_id: String,
     path: String,
     content_digest: String,
+    #[serde(skip)]
+    legacy_view_backed: bool,
 }
 
 fn load_current_attachment_refs<R: ContextReadConnection>(
@@ -4729,13 +4763,28 @@ fn load_current_attachment_refs<R: ContextReadConnection>(
 ) -> Result<Vec<CampAttachmentRef>> {
     let mut statement = database.context_connection().prepare(
         r#"
-        SELECT id, camp_id, content_digest
-        FROM message_attachment
-        WHERE ((
-            ?1 IS NOT NULL AND camp_message_id = ?1
-        ) OR (?2 IS NOT NULL AND conversation_message_id = ?2))
-        AND runtime_projection_state = 'available'
-        ORDER BY position, id
+        WITH attachment AS (
+            SELECT id, camp_id, content_digest, position AS ordinal,
+                   'legacy_v1' AS storage_model
+            FROM message_attachment
+            WHERE ((
+                ?1 IS NOT NULL AND camp_message_id = ?1
+            ) OR (?2 IS NOT NULL AND conversation_message_id = ?2))
+              AND runtime_projection_state = 'available'
+            UNION ALL
+            SELECT managed.id, managed.camp_id, managed.content_digest,
+                   reference.ordinal, 'managed_v2'
+            FROM camp_message_attachment_ref AS reference
+            JOIN managed_attachment AS managed
+              ON managed.camp_id = reference.camp_id
+             AND managed.id = reference.attachment_id
+            WHERE ?1 IS NOT NULL
+              AND reference.camp_message_id = ?1
+              AND managed.state = 'available'
+        )
+        SELECT id, camp_id, content_digest, storage_model
+        FROM attachment
+        ORDER BY ordinal, id
         "#,
     )?;
     let rows = statement
@@ -4749,21 +4798,32 @@ fn load_current_attachment_refs<R: ContextReadConnection>(
                     row.get::<_, String>(0)?,
                     row.get::<_, String>(1)?,
                     row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?,
                 ))
             },
         )?
         .collect::<rusqlite::Result<Vec<_>>>()?;
     drop(statement);
     rows.into_iter()
-        .map(|(attachment_id, camp_id, content_digest)| {
+        .map(|(attachment_id, camp_id, content_digest, storage_model)| {
+            let legacy_view_backed = storage_model == "legacy_v1";
             Ok(CampAttachmentRef {
-                path: resolve_published_attachment_path(
-                    database.context_connection(),
-                    &camp_id,
-                    &attachment_id,
-                )?,
+                path: if legacy_view_backed {
+                    resolve_published_attachment_path(
+                        database.context_connection(),
+                        &camp_id,
+                        &attachment_id,
+                    )?
+                } else {
+                    resolve_managed_attachment_path(
+                        database.context_connection(),
+                        &camp_id,
+                        &attachment_id,
+                    )?
+                },
                 attachment_id,
                 content_digest,
+                legacy_view_backed,
             })
         })
         .collect()
@@ -6221,7 +6281,9 @@ mod slow_tests {
             UpdateAgentProfileCommand, VerifiedManagedInstallation,
         },
         agent_runtime_adapter::SkillDeliveryGroupKey,
-        camp_attachment::{CampAttachmentStore, consume_prepared_attachments},
+        camp_attachment::{
+            CampAttachmentStore, consume_prepared_attachments, remove_managed_attachment_tree,
+        },
         camp_attachment_view::{
             CampAttachmentViewStore, commit_publication_in_message_transaction,
             resolve_published_attachment_path,
@@ -6247,6 +6309,10 @@ mod slow_tests {
         context_delivery::CONTEXT_DELIVERY_PROFILE_V4,
         current_input_skill::{
             CurrentInputSkillResolution, SkillSelectionEntry, SkillSelectionSnapshot,
+        },
+        managed_attachment::{
+            CommitManagedAttachmentIngest, ManagedAttachmentIngestSource, ManagedAttachmentService,
+            ManagedAttachmentStore, resolve_managed_attachment_path,
         },
         mcp::{
             CreateMcpServerParams, McpConfigStore, McpMutationResult, SetMcpAssignmentParams,
@@ -6762,6 +6828,10 @@ mod slow_tests {
             .unwrap();
         assert_eq!(camp.result.status, CommandResultStatus::Accepted);
         let camp_id = camp.result.payload["campId"].as_str().unwrap().to_string();
+        let view = CampAttachmentViewStore::for_test(&database).unwrap();
+        view.ensure_empty_camp_ready(&mut database, &camp_id)
+            .unwrap();
+        drop(view);
         let run_id = camp.result.payload["agentRunIds"][0]
             .as_str()
             .unwrap()
@@ -6830,6 +6900,7 @@ mod slow_tests {
                         files: Vec::new(),
                     },
                     frozen_files: Vec::new(),
+                    managed_attachment_ingest_intent_id: None,
                 },
                 &run_id,
                 execution_epoch,
@@ -9405,6 +9476,135 @@ mod slow_tests {
                 .code,
             "camp.manifest_unavailable"
         );
+        fixture.cleanup();
+    }
+
+    #[test]
+    fn managed_v2_context_projects_the_database_path_without_probing_the_payload() {
+        let mut fixture = fixture();
+        let blob_store = ManagedBlobStore::new(&fixture.directory);
+        let camp_message_id: String = fixture
+            .database
+            .connection()
+            .query_row(
+                "SELECT id FROM camp_message WHERE camp_id = ?1 AND sequence = 1",
+                [&fixture.camp_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let source_path = fixture.directory.join("managed-v2-context-source.txt");
+        std::fs::write(&source_path, b"runtime reads this later").unwrap();
+        let draft_store = CampAttachmentStore::new(&fixture.directory);
+        let draft = draft_store
+            .prepare_from_path(
+                &mut fixture.database,
+                &fixture.camp_id,
+                0,
+                &source_path,
+                "managed-v2-context.txt",
+            )
+            .unwrap();
+        let attachment_ids = draft
+            .attachments
+            .iter()
+            .map(|attachment| attachment.id.clone())
+            .collect::<Vec<_>>();
+        let managed_store = ManagedAttachmentStore::for_database(&fixture.database);
+        let plan = managed_store
+            .begin_composer_ingest(
+                &mut fixture.database,
+                &fixture.camp_id,
+                "managed-v2-context-command",
+                draft.revision,
+                &attachment_ids,
+            )
+            .unwrap()
+            .unwrap();
+        let prepared = managed_store
+            .materialize_composer(&draft_store, &plan)
+            .unwrap();
+        managed_store
+            .record_promoted(&mut fixture.database, &prepared)
+            .unwrap();
+        let now = chrono::Utc::now().to_rfc3339();
+        let transaction = fixture.database.connection_mut().transaction().unwrap();
+        ManagedAttachmentService
+            .commit_ingest(
+                &transaction,
+                CommitManagedAttachmentIngest {
+                    intent_id: prepared.intent_id(),
+                    camp_id: &fixture.camp_id,
+                    camp_message_id: &camp_message_id,
+                    expected_source: ManagedAttachmentIngestSource::Composer,
+                    created_by_type: "user",
+                    created_by_id: "current-user",
+                    now: &now,
+                },
+            )
+            .unwrap();
+        transaction.commit().unwrap();
+        let projected_path = resolve_managed_attachment_path(
+            fixture.database.connection(),
+            &fixture.camp_id,
+            &attachment_ids[0],
+        )
+        .unwrap();
+        remove_managed_attachment_tree(
+            std::path::Path::new(&projected_path)
+                .parent()
+                .unwrap()
+                .parent()
+                .unwrap(),
+        )
+        .unwrap();
+        assert!(!std::path::Path::new(&projected_path).exists());
+
+        let ContextMaterialization::Ready(materialized) = ContextService
+            .materialize(
+                &mut fixture.database,
+                &blob_store,
+                &MaterializeContextRequest {
+                    agent_run_id: &fixture.run_id,
+                    execution_epoch: fixture.execution_epoch,
+                    charter_delivery_mode: CharterDeliveryMode::NativeAppend,
+                    max_payload_bytes: DEFAULT_MAX_CONTEXT_PAYLOAD_BYTES,
+                },
+            )
+            .unwrap()
+        else {
+            panic!("missing v2 payload must not block DB-only Context assembly");
+        };
+        assert!(
+            materialized
+                .rendered_payload
+                .contains("managed-v2-context.txt")
+        );
+        assert!(materialized.rendered_payload.contains(&projected_path));
+        assert!(
+            !materialized
+                .rendered_payload
+                .contains("unavailable attachment")
+        );
+        assert_eq!(
+            fixture
+                .database
+                .connection()
+                .query_row(
+                    "SELECT state FROM managed_attachment WHERE camp_id = ?1 AND id = ?2",
+                    params![fixture.camp_id, attachment_ids[0]],
+                    |row| row.get::<_, String>(0),
+                )
+                .unwrap(),
+            "available"
+        );
+        remove_managed_attachment_tree(
+            std::path::Path::new(&projected_path)
+                .ancestors()
+                .nth(6)
+                .unwrap(),
+        )
+        .unwrap();
+        draft_store.remove_camp(&fixture.camp_id).unwrap();
         fixture.cleanup();
     }
 

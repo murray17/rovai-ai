@@ -2,7 +2,7 @@
 document_type: versions-index
 authority: version-lifecycle
 current_version: v1.29
-last_updated: 2026-08-26
+last_updated: 2026-08-27
 ---
 
 # Rovai-ai 版本记录
@@ -180,4 +180,4 @@ last_updated: 2026-08-26
 | v1.26 | `historical` | Cursor Agent Catalog 接入、同名命令防碰撞与保守平台未准入 | [v1.26/README.md](v1.26/README.md) |
 | v1.27 | `historical` | Kimi Code identity、MiniMax M3 私有配置、cold exact resume 与 macOS arm64 准入 | [v1.27/README.md](v1.27/README.md) |
 | v1.28 | `historical` | Grok Build、MiniMax M3、`>= 1.0.0` 与标准 ACP resume；macOS arm64/x64、Windows x64 1.0.5 已分别补证；Published Attachment 后置完整性故障局部降级 | [v1.28/README.md](v1.28/README.md) |
-| v1.29 | `current` | Camp 动态添加与移除队员、原子 cutover、持久 reconciliation、exact membership lifetime fence 与会话区管理交互 | [v1.29/README.md](v1.29/README.md) |
+| v1.29 | `current` | 动态 Camp membership、zero-attempt cancellation，以及不等待活跃 Run 的 Managed Attachment v2 写路径 | [v1.29/README.md](v1.29/README.md) |

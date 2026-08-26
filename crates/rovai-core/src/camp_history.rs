@@ -4,7 +4,7 @@ use std::{
     path::Path,
 };
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
 use rusqlite::{OptionalExtension, Transaction, TransactionBehavior, params};
 use serde::Deserialize;
@@ -2039,16 +2039,36 @@ fn load_attachments(
     message_id: &str,
 ) -> Result<(Vec<Value>, usize)> {
     let count = transaction.query_row(
-        "SELECT COUNT(*) FROM message_attachment WHERE camp_message_id = ?1",
+        r#"
+        SELECT
+            (SELECT COUNT(*) FROM message_attachment WHERE camp_message_id = ?1)
+          + (SELECT COUNT(*) FROM camp_message_attachment_ref WHERE camp_message_id = ?1)
+        "#,
         [message_id],
         |row| row.get::<_, i64>(0),
     )? as usize;
     let mut statement = transaction.prepare(
         r#"
-        SELECT id, display_name, media_type, byte_size, storage_path
-        FROM message_attachment
-        WHERE camp_message_id = ?1
-        ORDER BY position, id
+        SELECT id, display_name, media_type, byte_size, storage_path,
+               kind, file_count, storage_model
+        FROM (
+            SELECT id, display_name, media_type, byte_size, storage_path,
+                   NULL AS kind, NULL AS file_count, 'legacy_v1' AS storage_model,
+                   position AS ordinal
+            FROM message_attachment
+            WHERE camp_message_id = ?1
+            UNION ALL
+            SELECT managed.id, reference.display_name_snapshot,
+                   managed.media_type, managed.byte_size,
+                   managed.root_relative_payload_path, managed.kind,
+                   managed.file_count, 'managed_v2', reference.ordinal
+            FROM camp_message_attachment_ref AS reference
+            JOIN managed_attachment AS managed
+              ON managed.camp_id = reference.camp_id
+             AND managed.id = reference.attachment_id
+            WHERE reference.camp_message_id = ?1
+        )
+        ORDER BY ordinal, id
         LIMIT ?2
         "#,
     )?;
@@ -2060,19 +2080,41 @@ fn load_attachments(
                 row.get::<_, String>(2)?,
                 row.get::<_, i64>(3)?,
                 row.get::<_, String>(4)?,
+                row.get::<_, Option<String>>(5)?,
+                row.get::<_, Option<i64>>(6)?,
+                row.get::<_, String>(7)?,
             ))
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
     let attachments = attachments
         .into_iter()
         .map(
-            |(attachment_id, name, media_type, byte_size, storage_path)| {
-                let summary = managed_attachment_summary(Path::new(&storage_path), &media_type)?;
+            |(
+                attachment_id,
+                name,
+                media_type,
+                byte_size,
+                storage_path,
+                persisted_kind,
+                persisted_file_count,
+                storage_model,
+            )| {
+                let (kind, file_count) = if storage_model == "managed_v2" {
+                    (
+                        persisted_kind.context("Managed Attachment has no persisted kind")?,
+                        persisted_file_count
+                            .context("Managed Attachment has no persisted file count")?,
+                    )
+                } else {
+                    let summary =
+                        managed_attachment_summary(Path::new(&storage_path), &media_type)?;
+                    (summary.kind, i64::try_from(summary.file_count)?)
+                };
                 Ok(json!({
                     "attachmentId": attachment_id,
                     "name": truncate_metadata(name),
-                    "kind": summary.kind,
-                    "fileCount": summary.file_count,
+                    "kind": kind,
+                    "fileCount": file_count,
                     "mediaType": truncate_metadata(media_type),
                     "byteSize": byte_size,
                 }))
@@ -2085,7 +2127,11 @@ fn load_attachments(
 fn attachment_count(transaction: &Transaction<'_>, message_id: &str) -> Result<usize> {
     transaction
         .query_row(
-            "SELECT COUNT(*) FROM message_attachment WHERE camp_message_id = ?1",
+            r#"
+            SELECT
+                (SELECT COUNT(*) FROM message_attachment WHERE camp_message_id = ?1)
+              + (SELECT COUNT(*) FROM camp_message_attachment_ref WHERE camp_message_id = ?1)
+            "#,
             [message_id],
             |row| row.get::<_, i64>(0),
         )

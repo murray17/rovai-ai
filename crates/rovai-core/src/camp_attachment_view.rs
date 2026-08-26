@@ -35,6 +35,7 @@ pub const MAX_CONCURRENT_STAGING_OPERATIONS: i64 = 8;
 
 const ROOT_MARKER: &str = ".runtime-camp-files-root.json";
 const ROOT_LOCK: &str = ".runtime-camp-files.lock";
+const MANAGED_V2_DIRECTORY: &str = ".managed-v2";
 const LEGACY_ROOT_MARKER_SCHEMA_VERSION: i64 = 1;
 const ROOT_MARKER_SCHEMA_VERSION: i64 = 2;
 const INSTANCE_KEY_DOMAIN: &[u8] = b"rovai-runtime-camp-files-instance-v1\0";
@@ -2487,8 +2488,11 @@ impl CampAttachmentViewStore {
                 validate_managed_directory(&attachment_root, None)?;
                 let existing = read_typed_attachment_directory_ids(&attachment_root)?;
                 if replace_existing {
-                    remove_managed_tree(&attachment_root)?;
-                    ensure_private_directory(&attachment_root)?;
+                    set_directory_mode(&attachment_root, 0o700)?;
+                    for attachment_id in existing {
+                        remove_managed_tree(&attachment_root.join(attachment_id))?;
+                    }
+                    sync_directory(&attachment_root)?;
                 } else if !existing.is_empty() {
                     anyhow::bail!(
                         "camp_attachment_view_recovery_required: initial View target is not empty"
@@ -4621,6 +4625,7 @@ fn verify_committed_view_entry_receipt(camp_id: &str, entry: &CommittedViewEntry
 fn read_typed_attachment_directory_ids(path: &Path) -> Result<std::collections::BTreeSet<String>> {
     read_exact_utf8_names(path)?
         .into_iter()
+        .filter(|name| name != MANAGED_V2_DIRECTORY)
         .map(|name| {
             validate_attachment_id(&name)?;
             Ok(name)
@@ -5776,6 +5781,31 @@ mod tests {
         view.ensure_empty_camp_ready(&mut database, &camp_id)
             .unwrap();
         (database, data_dir, camp_id, view)
+    }
+
+    #[test]
+    fn legacy_rebuild_target_preserves_managed_v2_resources() {
+        let (_database, _data_dir, camp_id, view) = fixture();
+        let attachment_root = view.camp_attachment_root(&camp_id).unwrap();
+        set_directory_mode(&attachment_root, 0o700).unwrap();
+        let managed_root = attachment_root.join(MANAGED_V2_DIRECTORY);
+        ensure_private_directory(&managed_root).unwrap();
+        fs::write(managed_root.join("sentinel"), b"managed-v2").unwrap();
+        let legacy_id = Uuid::new_v4().to_string();
+        let legacy_root = attachment_root.join(&legacy_id);
+        ensure_private_directory(&legacy_root).unwrap();
+        fs::write(legacy_root.join("legacy"), b"legacy-v1").unwrap();
+        set_directory_mode(&attachment_root, 0o500).unwrap();
+
+        assert_eq!(
+            view.prepare_backfill_target(&camp_id, true).unwrap(),
+            attachment_root
+        );
+        assert_eq!(
+            fs::read(managed_root.join("sentinel")).unwrap(),
+            b"managed-v2"
+        );
+        assert!(!legacy_root.exists());
     }
 
     fn publish_current_draft(

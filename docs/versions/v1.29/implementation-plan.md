@@ -3,7 +3,7 @@ document_type: implementation-plan
 version: v1.29
 authority: implementation-and-acceptance-status
 status: completed
-last_updated: 2026-08-26
+last_updated: 2026-08-27
 ---
 
 # v1.29 实施计划
@@ -16,6 +16,9 @@ last_updated: 2026-08-26
 - [x] 完成 Migration 110、membership generation/version、外部来源绑定与旧非终态工作 clean break；
 - [x] 独立完成 Migration 111 zero-attempt cancellation hotfix：从 current-main v110 数据库升级到
   Data Contract v1.24/schema 65，显式/批量取消复用转换并清除 wait/attempt/projection association；
+- [x] 完成 Migration 112 Managed Attachment v2：新 Composer/Agent 文件经 durable intent 一次 ingest，最终
+  Message/ref/Delivery 事务绕过 legacy View gate，历史 v1 保持只读兼容；
+- [x] 保持 Context DB-only：v2 payload 缺失时仍投影持久路径，不增加 unavailable descriptor 或 Run Fact；
 - [x] 完成 add、removal preview、atomic cutover、durable reconciliation 与任务释放；
 - [x] 给 Agent 业务工具、Message Delivery、Gather completion 和公开输出增加 exact membership lifetime fence；
 - [x] 收口 ordinary outbound source lifetime：pending Delivery cutover、materialized target reconciliation 与
@@ -45,16 +48,22 @@ last_updated: 2026-08-26
 - `pnpm test`：76 个 Vitest 文件、533 个 Renderer/TypeScript 测试与 198 个 Node 协议测试通过；
 - `pnpm typecheck`、`cargo check --workspace --all-targets`、
   `cargo clippy --workspace --all-targets --all-features -- -D warnings` 通过；
-- `cargo test -p rovai-core --lib`：319/319 通过；其中 Migration 111 回归从 current-main 的
+- `cargo test -p rovai-core --all-targets`：Core library 324/324、CLI 25/25、Host 161/161 通过，4 个显式
+  manual Runtime smoke 保持 ignored；其中 Migration 111 回归从 current-main 的
   `v1.23 / schema 64 / migration 110` 数据库复现 SQLite 275，再升级到 `v1.24 / schema 65`，验证
-  zero-attempt cancellation 可写、Migration 111 重启幂等且 terminal Delivery 不复活；
-- `cargo test -p rovai-core --bin rovai`：25/25 通过；
+  zero-attempt cancellation 可写、Migration 111 重启幂等且 terminal Delivery 不复活；Migration 112 再从
+  `v1.24 / schema 65 / migration 111` 升级到 `v1.25 / schema 66` 并验证重启幂等；
+- Managed v2 回归覆盖源 Run 仍为 `running` 时发送 4 个共 14 MiB 文件、Delivery 在源 Run 结束前开始、零
+  legacy publication operation/gate、同一 attachmentId 多 Message ref 不二次复制、Context 在 payload 被删后
+  仍只按数据库投影稳定路径、legacy rebuild 不删除 v2 resource，以及 staging/promote 两个 commit 前 crash
+  窗口的 orphan cleanup 与同 command id 重试；
+- `cargo clippy -p rovai-core --all-targets --all-features -- -D warnings` 通过；
 - `cargo test -p rovai-core --features slow-tests --lib slow_tests::`：289/289 通过，覆盖动态 membership、
   active-away no-op/source generation、当前名册 target admission、ordinary outbound source-lifetime
   cutover/dispatch/retry fence、exact-run business-tool fence、Delivery/Gather settlement 与 Missing-Send
   Recovery publication fence；
 - `node --test scripts/benchmark/protocol/product-contract.test.mjs`、`pnpm docs:test`、`pnpm docs:check` 通过；
-- `DOCS_BASE_REF=6af4098c27de3df2b79908a2092465d4c040eb6d pnpm docs:check:ci` 通过；
+- `DOCS_BASE_REF=f588c773c2652a9e78887a31d17de8ed37524bb0 pnpm docs:check:ci` 通过；
 - `pnpm package:mac:unsigned` 通过；`pnpm accept:member-lifecycle-ui` 使用系统临时目录中的隔离 userData
   与打包 App 通过，覆盖最后成员禁用、模型详情、添加、移出预览、普通再次添加、日/夜主题、键盘、无横向
   溢出、重启持久化和旧库迁移；当前受限执行环境不允许 macOS/Chromium sandbox 初始化，因此仅该验收进程

@@ -1,7 +1,7 @@
 ---
 document_type: architecture
 authority: current-foundational-invariants
-last_updated: 2026-08-26
+last_updated: 2026-08-27
 ---
 
 # 当前基础架构不变量
@@ -82,11 +82,11 @@ last_updated: 2026-08-26
 ### 附件、首次运行与删除
 
 - Camp Attachment 是 `file | directory` 封闭联合。Core 负责分类、无 symlink 遍历、限制、复制、摘要和只读快照；一个目录作为一个层级附件全成全败，包含隐藏项和空目录。
-- Authority Attachment 始终位于 `<data_dir>/camp-attachments/`；Prepared Attachment、Agent Run-local ingress 与 private metadata 只供 Core 使用。发送事务 commit 后的 `message_attachment` 才是 Camp 公共事实，消息寻址、Prompt、Run、Conversation 或 Session 都不缩小其 Camp-wide 可见性。
-- Timeline 用户打开只以已发布 Authority Attachment 为来源。Renderer 只提交 canonical Camp/Attachment identity；Core 必须匹配同 Camp `message_attachment` 并重验精确受管路径、类型、receipt 与 no-follow tree，Desktop Main 才能执行原生确认和系统 Shell。Authority path 与原始系统错误不得进入 Renderer；Runtime projection state 只影响队员读取，不禁用仍完整的 Authority preview/open/reveal。Unix Camp root 保持 traversal-only `0100`，精确 Attachment container 使用不可写且可枚举的 `0500`，payload 文件/目录保持 `0400/0500`；legacy container 只在完整校验和 per-Camp admission 内收敛。Main 必须在 best-effort reveal 前验证 parent 可枚举且 target 仍存在，不能因 Electron `void` 调用未抛错就宣称成功。
-- 同一 Authority instance/Camp 的 root 权限切换、child create/remove、Agent/Composer ingress、失败清理和 Camp removal 必须经过跨 Store 实例共享的 per-Camp admission；已持有者不得重入。不同 Camp 可并行，且该 admission 不得把文件 copy/hash 带入 Database mutex 或 built-in invocation guard。
-- Runtime 不读取 Authority Camp tree，只获得实例隔离、可重建的 Published Attachment View 精确 `attachments` 根。只有 `runtime_projection_state = available` 的公共附件属于当前 Runtime Desired Catalog；未解决 publication 的 `pending | recovery_required` writer intent 阻断新 Runtime admission，`failed` 保留公共/UI 事实但只有 resolution tombstone、没有 Runtime path。已成功解决的附件后来因 Authority 缺失或 kind/size/digest/tree 校验失败进入 `recovery_required` 时，只从新 Context、path resolver 与物理 View 省略该附件，不改变其成功发布历史，也不阻断 Camp。
-- Composer 与 Agent ingress 共享统一 publication coordinator：短事务先提交公共语义、revision、reservation、writer intent 与 gate，Worker 再按 Camp FIFO 在数据库锁外 copy/verify/fsync。Scheduler 必须先取得一次 read admission并完成 full verification；失败时释放 read admission，在 bounded write admission 内从 Authority 重建或局部降级异常附件，随后最多重试一次。成功 authorization、Claim 与完整 Run 复用同一 read admission；Claim 仍须确认无 writer intent。成功和 terminal failure 都推进 contiguous resolved revision，failed 不得被 rebuild 静默复活。
+- Prepared Attachment、Agent workspace 与 `ROVAI_RUN_TMP` ingress 在发送前只供 Core 使用。所有新写入在 Send 时复制一次到 Camp-scoped Managed Attachment v2；commit 后的 `managed_attachment` 是 Camp 公共资源，`camp_message_attachment_ref` 只表达有序引用。消息寻址、Prompt、Run、Conversation 或 Session 都不把 Camp-public 资源变成 Context-private capability。
+- Managed v2 payload 是唯一长期物理副本，位于既有 Runtime Camp `attachments/.managed-v2/` 根并保存强制 digest/tree receipt。Runtime 被视为可信的同 UID 本地程序；只读 mode 防误写而非强隔离，没有第二份 Authority 自动重建。显式 preview/open/reveal 仍重验 exact Camp/Attachment、路径、类型与 receipt；Renderer 不接收本地路径或原始系统错误。
+- Managed v2 使用 durable ingest intent、quota reservation、私有同卷 staging、no-replace promote、final reverify/fsync 与最终 SQLite semantic commit。它不取得 legacy View write admission，不等待 quiescence/AgentRun，不推进 generation，不停止或 fence 已运行 Run，也不创建 `projection_blocked` Delivery；新 Delivery 直接进入普通 Dispatch Pump。
+- Context、Camp History 与 Camp Open 对 v2 只查持久 metadata 并组合路径，不 `stat/open/read_dir/digest` payload。文件后来不可读时由 Runtime 原生工具失败；Context 不生成 unavailable descriptor/Run Fact，也不据此改写全局附件状态。
+- 历史 `message_attachment`、Authority 与 Published Attachment View 保持只读兼容，不批量迁移、不双写。Legacy writer intent、generation、recovery 与 `projection_blocked` 只收口既有 v1 operation；View verifier 忽略 `.managed-v2` 保留子树。旧 Camp 无需转换历史附件即可发送新 v2 消息和继续运行。
 - 首次安装 admission 与训练进度由 Electron Main 在 Core 启动前以私有版本化 Desktop 状态拥有；产品数据库存在性参与 clean/fail-closed 判定。正常 Provisioning 通过可重试 checkpoint 幂等创建首个成员、Runtime 选择和“初次集结”Camp/Draft，不把半完成状态伪装为已完成；无可用 Runtime 且 provisioning 尚未开始时可以原子完成为 `runtime_deferred`，但不得创建成员、Runtime 配置、Camp、Run 或 onboarding restore target，也不得在以后启动时重新打开训练营。
 - Camp 永久删除保持 User-only、exact-version 和单事务聚合删除。普通模式要求 quiescent；用户明确确认的 force 模式先持久化停止/隔离边界，再删除 Camp 聚合并异步清理受管资源，不能把未知 Runtime 外部效果宣称为已撤销。
 
