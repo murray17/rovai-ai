@@ -56,8 +56,14 @@ const api: RovaiApi = {
     check() {
       return ipcRenderer.invoke('rovai:app-updates-check')
     },
+    download() {
+      return ipcRenderer.invoke('rovai:app-updates-download')
+    },
     install() {
       return ipcRenderer.invoke('rovai:app-updates-install')
+    },
+    dismissPrompt(promptId: string) {
+      return ipcRenderer.invoke('rovai:app-updates-dismiss-prompt', promptId)
     },
     onChanged(listener: (snapshot: AppUpdateSnapshot) => void): () => void {
       const handler = (

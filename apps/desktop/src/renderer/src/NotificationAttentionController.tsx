@@ -49,6 +49,7 @@ interface NotificationAttentionControllerProps {
   ): Promise<boolean>
   onError(message: string): void
   visibleSources: VisibleNotificationSources | null
+  onHeadsUpVisibleChange?(visible: boolean): void
 }
 
 export const emptyNotificationHeadsUpState = (): NotificationHeadsUpState => ({
@@ -221,7 +222,8 @@ export function NotificationAttentionController({
   onCancelNavigation,
   onRefreshVisibleCamp,
   onError,
-  visibleSources
+  visibleSources,
+  onHeadsUpVisibleChange
 }: NotificationAttentionControllerProps): React.JSX.Element {
   const [preference, setPreference] = useState<NotificationPreference | null>(null)
   const [headsUpState, setHeadsUpState] = useState<NotificationHeadsUpState>(
@@ -572,6 +574,11 @@ export function NotificationAttentionController({
 
   const currentHeadsUp = headsUpState.entries[0] ?? null
   const headsUpOverflow = headsUpState.overflowEntries.length
+  const visibleHeadsUp = windowAttentive && (currentHeadsUp !== null || headsUpOverflow > 0)
+  useEffect(() => {
+    onHeadsUpVisibleChange?.(visibleHeadsUp)
+    return () => onHeadsUpVisibleChange?.(false)
+  }, [onHeadsUpVisibleChange, visibleHeadsUp])
   if (!windowAttentive) return <></>
   return (
     <>

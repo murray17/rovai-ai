@@ -162,21 +162,39 @@ Coverage, clean-break and freshness semantics local to that page.
 
 About & Updates belongs to the Support group and extends the same borderless `1040px` settings track,
 two-column section rhythm and quiet raised rows used by reviewed settings pages. The first viewport
-shows the installed Rovai AI version and one primary action. It is a compact one-click updater surface,
-not an updater dashboard or installation wizard.
+shows the installed Rovai AI version and one primary action. It is a compact updater surface, not an
+updater dashboard or installation wizard.
 
-Checking is always a user action. One click asks the packaged Main-process updater for the latest stable
-release from the public official `murray17/rovai-ai` GitHub release channel. When a newer release exists,
-download begins immediately and the same bounded row shows determinate percent, transferred/total bytes
-and speed without blocking navigation or ordinary App use. Renderer receives only the typed update
-snapshot; it never receives a remote URL, HTML, local installer path or updater credential.
+Packaged Main checks the official stable `murray17/rovai-ai` GitHub Release channel five seconds after the
+first window load and again six hours after each automatic check settles. Checking never starts a download.
+Only explicit user actions start download, installation and restart. A manual page check updates the shared
+snapshot but does not create a global reminder.
 
-The page keeps the installed version visible through idle, checking, downloading, up-to-date,
-ready-to-install, installing and recoverable check/download/install failure states. Download completion
-changes the primary action to “安装并重启”; installation is never triggered by checking alone. There is
-no background request, timer, GitHub token, pause queue, release-notes reader or automatic retry. Main
-uses the existing controlled-shutdown boundary before the updater-owned restart; Renderer does not add
-task waiting, hash, signature or shutdown controls to this surface.
+The global reminder borrows the quiet footprint of collaboration-complete attention: a non-modal 340px
+surface at the lower right, target/current version, compact “稍后 / 查看更新内容 / 下载更新” actions and
+no focus grab or timeout. It is a dedicated update prompt rather than a normal Notification Episode. Do not
+stack it with ordinary heads-up, dialogs, onboarding, shutdown or the same release already open in About.
+Main owns an in-memory prompt generation and exact dismiss; closing one reminder does not remove the release
+badge and the next automatic round may create another generation.
+
+The ordinary Settings footer keeps its remembered-section behavior. When an actionable release exists, a
+separate focusable badge beside Settings deep-links to About without overwriting `lastSettingsSection`; the
+About row inside Settings repeats the badge as non-interactive status. Available, checking/downloading,
+ready/installing and failed states use different icon/copy and accessible names, not color alone.
+
+The page keeps the installed version visible through idle, checking, available, downloading, up-to-date,
+ready-to-install, installing and recoverable check/download/install failure states. A known release is a
+separate fact and remains visible when a later check fails. Its valid name, version, date and bounded release
+notes appear below the action; empty notes have an explicit state, long notes scroll within a bounded region,
+and all notes use the shared safe Markdown renderer. Renderer receives no remote HTML, local installer path
+or updater credential.
+
+Downloading shows determinate percent, transferred/total bytes and speed without blocking navigation or
+ordinary App use. Repeated download requests visibly remain one operation. Download completion changes the
+primary action to “安装并重启”; `ready_to_install` never quits by itself. A synchronous install failure leaves
+the App and Core usable and offers retry. Fixed GitHub Releases/support links appear only when the updater is
+unavailable or an in-App download failed; network and invalid-release failures do not offer an unverified
+installation handoff. Main stages the updater before entering the existing controlled-shutdown boundary.
 
 ## Inheritance and hard boundaries
 

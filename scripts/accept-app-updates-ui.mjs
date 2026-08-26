@@ -61,7 +61,9 @@ try {
       productAndBundleName: 'Rovai AI',
       existingSettingsVisualWorld: true,
       noVerticalHeadingRules: true,
-      noReleaseNotesOrExternalHandoff: true,
+      automaticChecksDeterministicallyDisabled: true,
+      typedReleaseAndPromptAxes: true,
+      externalHandoffHiddenWithoutEligibleFailure: true,
       keyboardFocus: true,
       dayAndNightLayouts: true,
       compactReducedMotionLayout: true,
@@ -76,7 +78,7 @@ try {
 
 async function openAboutUpdates(cdp) {
   const opened = await evaluate(cdp, `(() => {
-    const button = document.querySelector('.unified-sidebar-footer button[aria-label="设置"]')
+    const button = document.querySelector('.unified-sidebar-footer .sidebar-settings-main')
     button?.click()
     return Boolean(button)
   })()`)
@@ -96,12 +98,17 @@ async function openAboutUpdates(cdp) {
 
 async function assertAboutUpdates(cdp, context) {
   const updaterSnapshot = await evaluate(cdp, 'window.rovai.appUpdates.get()', true)
-  assert(updaterSnapshot?.currentVersion === '0.0.3' && updaterSnapshot.status === 'idle',
+  assert(updaterSnapshot?.currentVersion === '0.0.3'
+    && updaterSnapshot.status === 'idle'
+    && updaterSnapshot.availableRelease === null
+    && updaterSnapshot.lastCheckSource === null
+    && updaterSnapshot.lastSuccessfulCheckAt === null
+    && updaterSnapshot.pendingPrompt === null,
     `${context} returned the wrong updater snapshot: ${JSON.stringify(updaterSnapshot)}`)
 
   const state = await evaluate(cdp, `(() => {
     const surface = document.querySelector('.about-updates-settings')
-    const action = document.querySelector('.about-update-control > button')
+    const action = document.querySelector('.about-update-actions > .primary-button')
     const headingCopy = document.querySelector('.about-updates-settings .settings-page-heading-copy')
     const sectionHeading = document.querySelector('.about-updates-settings .section-heading')
     action?.focus()
@@ -116,7 +123,10 @@ async function assertAboutUpdates(cdp, context) {
       statusRole: surface?.querySelector('.about-update-status')?.getAttribute('role'),
       source: surface?.querySelector('.about-update-source')?.textContent ?? '',
       progressVisible: Boolean(surface?.querySelector('progress')),
-      forbiddenCopy: /Release Notes 摘要|在 GitHub 查看|校验 hash|等待当前任务/.test(surface?.textContent ?? ''),
+      releaseVisible: Boolean(surface?.querySelector('.about-release-section')),
+      fallbackVisible: Boolean(surface?.querySelector('.about-update-fallback')),
+      globalPromptVisible: Boolean(document.querySelector('.app-update-prompt')),
+      forbiddenCopy: /校验 hash|等待当前任务|自动开始下载/.test(surface?.textContent ?? ''),
       headingRule: headingCopy ? getComputedStyle(headingCopy, '::before').content : 'missing',
       sectionRule: sectionHeading ? getComputedStyle(sectionHeading, '::before').content : 'missing',
       documentOverflow: document.documentElement.scrollWidth > window.innerWidth + 1,
@@ -124,7 +134,7 @@ async function assertAboutUpdates(cdp, context) {
     }
   })()`)
   assert(state.heading === '关于与更新', `${context} omitted the page heading`)
-  assert(state.description === '查看当前版本，检查并安装 Rovai AI 更新。',
+  assert(state.description === 'Rovai AI 会在正式打包版本中主动检查更新；下载、安装和重启始终由你确认。',
     `${context} used the wrong description`)
   assert(state.product === 'Rovai AI' && state.version === 'v0.0.3',
     `${context} used the wrong product/version: ${JSON.stringify(state)}`)
@@ -132,8 +142,12 @@ async function assertAboutUpdates(cdp, context) {
     `${context} did not expose a keyboard-focusable check action`)
   assert(state.statusRole === 'status' && state.source.includes('GitHub Release'),
     `${context} omitted updater status/source evidence`)
-  assert(!state.progressVisible && !state.forbiddenCopy,
-    `${context} rendered download or removed handoff controls while idle`)
+  assert(!state.progressVisible
+    && !state.releaseVisible
+    && !state.fallbackVisible
+    && !state.globalPromptVisible
+    && !state.forbiddenCopy,
+  `${context} rendered release, prompt, progress, or fallback UI while idle`)
   assert(state.headingRule === 'none' && state.sectionRule === 'none',
     `${context} restored vertical heading rules: ${JSON.stringify(state)}`)
   assert(!state.documentOverflow && !state.surfaceOverflow,
@@ -163,6 +177,7 @@ async function launchApp(width, height) {
   const executable = join(appPath, 'Contents', 'MacOS', 'Rovai AI')
   const stderr = []
   const child = spawn(executable, [
+    '--no-sandbox',
     `--remote-debugging-port=${port}`,
     `--user-data-dir=${dataDir}`
   ], {
@@ -170,7 +185,8 @@ async function launchApp(width, height) {
     stdio: ['ignore', 'ignore', 'pipe'],
     env: {
       ...process.env,
-      ROVAI_ALLOW_ISOLATED_INSTANCE: '1'
+      ROVAI_ALLOW_ISOLATED_INSTANCE: '1',
+      ROVAI_DISABLE_AUTO_UPDATE_CHECKS: '1'
     }
   })
   child.stderr.on('data', (chunk) => stderr.push(String(chunk)))

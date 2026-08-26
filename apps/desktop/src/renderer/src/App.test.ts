@@ -7,6 +7,7 @@ import type {
   AgentProfile,
   AgentRunView,
   AgentRunExecutionEvidenceView,
+  AppUpdateSnapshot,
   CampComposerDraftView,
   CampMessageView,
   CampOpenProjection,
@@ -139,6 +140,7 @@ import {
 
 import { MemoryLibrary } from './MemoryLibrary'
 import { SafeMarkdown } from './SafeMarkdown'
+import type { AppUpdatesController } from './useAppUpdates'
 import {
   activityStatusForAgentRun,
   agentRunPresentation,
@@ -156,6 +158,42 @@ import {
   selectCompleteExecutionEvidence,
   type LiveRuntimeEvent
 } from './ui-model'
+
+function testAppUpdatesController(): AppUpdatesController {
+  return {
+    snapshot: null,
+    loading: false,
+    loadError: true,
+    actionError: null,
+    check: async () => false,
+    download: async () => false,
+    install: async () => false,
+    dismissPrompt: async () => false
+  }
+}
+
+function testAppUpdateSnapshot(overrides: Partial<AppUpdateSnapshot> = {}): AppUpdateSnapshot {
+  return {
+    currentVersion: '0.0.2',
+    status: 'available',
+    availableRelease: {
+      version: '0.0.3',
+      releaseName: null,
+      releaseDate: null,
+      releaseNotes: null
+    },
+    lastCheckSource: 'startup',
+    checkedAt: '2026-08-24T08:00:00.000Z',
+    lastSuccessfulCheckAt: '2026-08-24T08:00:01.000Z',
+    downloadPercent: null,
+    transferredBytes: null,
+    totalBytes: null,
+    bytesPerSecond: null,
+    failureReason: null,
+    pendingPrompt: { id: 'prompt-1', version: '0.0.3' },
+    ...overrides
+  }
+}
 
 describe('active Camp event invalidation', () => {
   it('refreshes the active Camp when a persisted AgentRun reaches terminal', () => {
@@ -2076,6 +2114,43 @@ describe('task event projections', () => {
     expect(markup).toContain('管理项目“empty-project”')
   })
 
+  it('keeps Settings restoration separate from the actionable update badge', () => {
+    const baseProps = {
+      state: 'ready' as const,
+      navigation: null,
+      activeCampId: null,
+      updateSnapshot: testAppUpdateSnapshot(),
+      onNewConversation: () => undefined,
+      onMembers: () => undefined,
+      onMemory: () => undefined,
+      pendingMemoryCount: 0,
+      onSettings: () => undefined,
+      onOpenUpdates: () => undefined,
+      onOpenProject: () => undefined,
+      onCamp: () => undefined,
+      onRemoveProject: async () => undefined,
+      onRename: async () => undefined,
+      onDelete: async () => undefined,
+      onError: () => undefined
+    }
+    const ordinary = renderToStaticMarkup(createElement(CampNavigation, {
+      ...baseProps,
+      view: 'camp'
+    }))
+    expect(ordinary).toContain('role="group" aria-label="设置与应用更新"')
+    expect(ordinary).toContain('aria-label="设置，打开上次保留的设置页面"')
+    expect(ordinary).toContain('aria-label="打开关于与更新，Rovai AI v0.0.3 更新可用"')
+    expect(ordinary).toContain('>更新可用</span>')
+
+    const settings = renderToStaticMarkup(createElement(CampNavigation, {
+      ...baseProps,
+      view: 'settings',
+      settingsSection: 'general'
+    }))
+    expect(settings).toContain('aria-label="关于与更新，Rovai AI v0.0.3 更新可用"')
+    expect(settings).toContain('settings-app-update-badge')
+  })
+
   it('keeps navigation marker slots stable and lets the project row control selection and disclosure', () => {
     const makeCamp = (id: string, marker: 'none' | 'unread_completed' | 'loading') => ({
       id,
@@ -2231,6 +2306,7 @@ describe('task event projections', () => {
       agents: [],
       installations: [],
       busy: null,
+      updates: testAppUpdatesController(),
       onDiagnosticsNavigate: () => undefined,
       onReload: async () => undefined,
       onThemeChange: () => undefined
@@ -2261,6 +2337,7 @@ describe('task event projections', () => {
       agents: [],
       installations: [],
       busy: null,
+      updates: testAppUpdatesController(),
       section: 'notifications',
       onDiagnosticsNavigate: () => undefined,
       onReload: async () => undefined,
@@ -2283,6 +2360,7 @@ describe('task event projections', () => {
       agents: [],
       installations: [],
       busy: null,
+      updates: testAppUpdatesController(),
       section: 'appearance',
       onDiagnosticsNavigate: () => undefined,
       onReload: async () => undefined,
@@ -2303,6 +2381,7 @@ describe('task event projections', () => {
       agents: [],
       installations: [],
       busy: null,
+      updates: testAppUpdatesController(),
       section: 'runtime',
       onDiagnosticsNavigate: () => undefined,
       onReload: async () => undefined,
@@ -5052,6 +5131,7 @@ describe('task event projections', () => {
       agents: [],
       installations: [],
       busy: null,
+      updates: testAppUpdatesController(),
       section: 'appearance',
       onDiagnosticsNavigate: () => undefined,
       onReload: async () => undefined,
@@ -5069,6 +5149,7 @@ describe('task event projections', () => {
       agents: [],
       installations: [],
       busy: null,
+      updates: testAppUpdatesController(),
       section: 'diagnostics',
       onDiagnosticsNavigate: () => undefined,
       onReload: async () => undefined,

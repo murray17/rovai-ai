@@ -85,6 +85,24 @@ Checklist 仍拥有完整通用步骤，本页只记录本版本的具体状态�
   unbind/malformed/legacy 分类、带 `id` request 保留、flood 后 terminal 顺序、terminal aggregate/blob、interruption
   与 PR #63 Tool chronology/grouping/lazy disclosure 回归。
 
+## Desktop 主动更新
+
+- [x] 以独立 worktree 实现 Main-owned App Update v1 snapshot：`availableRelease`、检查来源/时间、内存
+  prompt 代次和 exact dismiss；updater 初始化失败只降级，不阻断启动；
+- [x] 首个窗口加载 5 秒后检查，并从每轮完成安排下一次 6 小时检查；手动/自动参与者合并，自动参与
+  不丢提示语义，退出取消 timer；
+- [x] 设置 `autoDownload=false`，增加显式下载 IPC、download mutex、progress、event/reject 单结算和直接
+  重试；`ready_to_install` 只有用户确认才安装；
+- [x] 抽取幂等 Main quit coordinator，按 updater-first → native `before-quit` → 唯一 Core drain →
+  `app.exit(0)` 收口；同步安装失败保留 App/Core；
+- [x] 增加不抢焦点的右下角更新提醒、普通设置旁独立状态徽标、About 行徽标和全状态 About 页面；
+  深链遵守成员草稿 guard，不覆盖 `lastSettingsSection`，确认同版本日志渲染后才 dismiss；
+- [x] 使用 SafeMarkdown 展示有界更新日志，覆盖空/长/不可信内容；fallback 只在 updater unavailable 或
+  download failure 出现；
+- [x] 完成 Main 并发/失败、退出协调、Renderer 页面/徽标矩阵、类型检查、文档治理、Impeccable detector、
+  Day/Night 及 `1440×920` / `1040×700` / 200% 等效布局 packaged UI 验收；签名 macOS arm64/x64 与
+  Windows x64 的真实跨版本安装继续作为 Release qualification 边界。
+
 ## 验收原则
 
 - 任一真实模型、权限、Tool、Session、进程清理或数据迁移门禁失败时，对应平台不得保持 `qualified`；

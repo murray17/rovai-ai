@@ -1814,6 +1814,7 @@ export interface AppearanceApi {
 export type AppUpdateStatus =
   | 'idle'
   | 'checking'
+  | 'available'
   | 'up_to_date'
   | 'downloading'
   | 'ready_to_install'
@@ -1829,22 +1830,41 @@ export type AppUpdateFailureReason =
   | 'download_failed'
   | 'install_failed'
 
+export type AppUpdateCheckSource = 'startup' | 'interval' | 'manual'
+
+export interface AppUpdateRelease {
+  version: string
+  releaseName: string | null
+  releaseDate: string | null
+  releaseNotes: string | null
+}
+
+export interface AppUpdatePrompt {
+  id: string
+  version: string
+}
+
 export interface AppUpdateSnapshot {
   currentVersion: string
   status: AppUpdateStatus
-  latestVersion: string | null
+  availableRelease: AppUpdateRelease | null
+  lastCheckSource: AppUpdateCheckSource | null
   checkedAt: string | null
+  lastSuccessfulCheckAt: string | null
   downloadPercent: number | null
   transferredBytes: number | null
   totalBytes: number | null
   bytesPerSecond: number | null
   failureReason: AppUpdateFailureReason | null
+  pendingPrompt: AppUpdatePrompt | null
 }
 
 export interface AppUpdatesApi {
   get(): Promise<AppUpdateSnapshot>
   check(): Promise<AppUpdateSnapshot>
+  download(): Promise<AppUpdateSnapshot>
   install(): Promise<boolean>
+  dismissPrompt(promptId: string): Promise<boolean>
   onChanged(listener: (snapshot: AppUpdateSnapshot) => void): () => void
 }
 

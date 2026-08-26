@@ -82,6 +82,7 @@ import {
   resolveWindowsDataRoot
 } from './windows-data-root'
 import { AppUpdatesService, type DesktopAutoUpdater } from './app-updates'
+import { AppQuitCoordinator } from './app-quit-coordinator'
 
 const mainStartupStartedAt = performance.now()
 console.info('[startup] stage=main_module_loaded elapsed_ms=0.0')
@@ -237,8 +238,6 @@ let restorableLocations: RestorableLocationStore | null = null
 let navigationPreferences: NavigationPreferencesStore | null = null
 const projectAccessTransactions = new ProjectAccessTransactionCoordinator()
 let userAutomation: UserAutomationServer | null = null
-let quitDrainStarted = false
-let quitDrainCompleted = false
 const desktopSessions = new DesktopSessionRegistry()
 const memberAvatars = new MemberAvatarAssetService(coreDataPath)
 
@@ -246,14 +245,24 @@ async function initializeAppUpdates(): Promise<void> {
   // electron-updater eagerly touches Electron's native autoUpdater while the
   // module is evaluated. Loading it before app.whenReady() can stall packaged
   // macOS startup before our main module runs, so keep it on the ready path.
-  const updaterModule = await import('electron-updater')
-  const autoUpdater = updaterModule.autoUpdater
-    ?? (updaterModule.default as { autoUpdater?: DesktopAutoUpdater } | undefined)?.autoUpdater
-  if (!autoUpdater) throw new Error('electron-updater did not expose autoUpdater')
+  let autoUpdater: DesktopAutoUpdater | null = null
+  try {
+    const updaterModule = await import('electron-updater')
+    autoUpdater = (updaterModule.autoUpdater
+      ?? (updaterModule.default as { autoUpdater?: DesktopAutoUpdater } | undefined)?.autoUpdater
+      ?? null) as DesktopAutoUpdater | null
+    if (!autoUpdater) throw new Error('electron-updater did not expose autoUpdater')
+  } catch (error) {
+    console.warn('[rovai] Application updater is unavailable; startup will continue.', error)
+  }
   const service = new AppUpdatesService({
     currentVersion: () => app.getVersion(),
     isPackaged: () => app.isPackaged,
-    updater: autoUpdater as unknown as DesktopAutoUpdater
+    updater: autoUpdater as unknown as DesktopAutoUpdater | null,
+    automaticChecksEnabled: !(
+      isolatedAcceptanceInstance
+      && process.env.ROVAI_DISABLE_AUTO_UPDATE_CHECKS === '1'
+    )
   })
   service.onChanged((snapshot) => {
     if (!mainWindow || mainWindow.isDestroyed() || mainWindow.webContents.isDestroyed()) return
@@ -381,6 +390,9 @@ function createWindow(): void {
     window.webContents.send('rovai:page-zoom-changed', percentage)
   })
   window.webContents.on('zoom-changed', queuePageZoomFeedback)
+  window.webContents.once('did-finish-load', () => {
+    appUpdates?.startAutomaticChecks()
+  })
 
   let persistBoundsTimer: ReturnType<typeof setTimeout> | null = null
   const flushBounds = (): void => {
@@ -562,12 +574,25 @@ ipcMain.handle('rovai:app-updates-get', (event) => {
 
 ipcMain.handle('rovai:app-updates-check', (event) => {
   requireMainWindow(event.sender)
-  return requireAppUpdates().check()
+  return requireAppUpdates().check('manual')
+})
+
+ipcMain.handle('rovai:app-updates-download', (event) => {
+  requireMainWindow(event.sender)
+  return requireAppUpdates().download()
 })
 
 ipcMain.handle('rovai:app-updates-install', (event) => {
   requireMainWindow(event.sender)
   return requireAppUpdates().install()
+})
+
+ipcMain.handle('rovai:app-updates-dismiss-prompt', (event, promptId: unknown) => {
+  requireMainWindow(event.sender)
+  if (typeof promptId !== 'string' || promptId.length === 0 || promptId.length > 200) {
+    throw new Error('Invalid application update prompt id')
+  }
+  return requireAppUpdates().dismissPrompt(promptId)
 })
 
 ipcMain.handle('rovai:window-application-menu-popup', (event, input: unknown) => {
@@ -1129,36 +1154,39 @@ ipcMain.handle('rovai:export-memory', async () => {
   return result.filePath
 })
 
+const appQuitCoordinator = new AppQuitCoordinator({
+  updateInstallPending: () => appUpdates?.get().status === 'installing',
+  beforeDrain: () => {
+    appUpdates?.dispose()
+    nativeTheme.removeListener('updated', publishAppearance)
+  },
+  drain: async () => {
+    const stopAutomation = userAutomation?.stop() ?? Promise.resolve()
+    userAutomation = null
+    try {
+      await stopAutomation
+    } catch (error) {
+      console.error('Rovai User Automation shutdown failed', error)
+    }
+    const result = await core.shutdown()
+    console.error(`[rovai-core] controlled shutdown result ${JSON.stringify(result)}`)
+  },
+  reportFailure: (error) => {
+    console.error('Rovai Core controlled shutdown failed', error)
+  },
+  finish: () => {
+    // The updater has already staged its installer before update-driven quit.
+    // app.exit finishes the bounded drain without reopening native negotiation.
+    app.exit(0)
+  }
+})
+
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit()
 })
 
 app.on('before-quit', (event) => {
-  if (quitDrainCompleted) return
-  event.preventDefault()
-  if (quitDrainStarted) return
-  quitDrainStarted = true
-  nativeTheme.removeListener('updated', publishAppearance)
-  const stopAutomation = userAutomation?.stop() ?? Promise.resolve()
-  userAutomation = null
-  void stopAutomation
-    .catch((error) => {
-      console.error('Rovai User Automation shutdown failed', error)
-    })
-    .then(() => core.shutdown())
-    .then((result) => {
-      console.error(`[rovai-core] controlled shutdown result ${JSON.stringify(result)}`)
-    })
-    .catch((error) => {
-      console.error('Rovai Core controlled shutdown failed', error)
-    })
-    .finally(() => {
-      quitDrainCompleted = true
-      // The first native quit cycle was intentionally cancelled while Core
-      // drained. Core has now exited, so finish without a second native
-      // termination negotiation extending the bounded shutdown window.
-      app.exit(0)
-    })
+  appQuitCoordinator.handleBeforeQuit(event)
 })
 
 function requireGeneralPreferences(): GeneralPreferencesStore {

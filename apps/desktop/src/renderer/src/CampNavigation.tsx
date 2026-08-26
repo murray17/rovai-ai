@@ -10,6 +10,7 @@ import {
 import * as Dialog from '@radix-ui/react-dialog'
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
 import type {
+  AppUpdateSnapshot,
   NavigationPin,
   NavigationCampItem,
   NavigationCampPage,
@@ -17,6 +18,10 @@ import type {
   ProjectNavigationGroup,
   SettingsSection
 } from '@contracts'
+import {
+  appUpdateBadgePresentation,
+  type AppUpdateBadgePresentation
+} from './app-update-presentation'
 import { writeClipboardText } from './clipboard'
 import {
   AppDialogBody,
@@ -193,11 +198,13 @@ export function CampNavigation({
   pinnedCampItems = [],
   platform = 'darwin',
   settingsSection = 'general',
+  updateSnapshot = null,
   onNewConversation,
   onMembers,
   onMemory,
   pendingMemoryCount,
   onSettings,
+  onOpenUpdates = () => undefined,
   onSettingsSectionChange = () => undefined,
   onSettingsBack = () => undefined,
   onOpenProject,
@@ -223,11 +230,13 @@ export function CampNavigation({
   pinnedCampItems?: NavigationCampItem[]
   platform?: NodeJS.Platform
   settingsSection?: NavigationSettingsSection
+  updateSnapshot?: AppUpdateSnapshot | null
   onNewConversation(): void
   onMembers(): void
   onMemory(): void
   pendingMemoryCount: number
   onSettings(): void
+  onOpenUpdates?(): void
   onSettingsSectionChange?(section: NavigationSettingsSection): void
   onSettingsBack?(): void
   onOpenProject(): void
@@ -253,6 +262,8 @@ export function CampNavigation({
   const loadingGroupsRef = useRef<Set<string>>(new Set())
   const sidebarRef = useRef<HTMLElement>(null)
   const settingsButtonRef = useRef<HTMLButtonElement>(null)
+  const updateButtonRef = useRef<HTMLButtonElement>(null)
+  const settingsReturnFocusRef = useRef<'settings' | 'updates'>('settings')
   const previousViewRef = useRef(view)
   const dialogReturnFocusTargetRef = useRef<string | null>(null)
   const nextSidebarFocusRequestIdRef = useRef(1)
@@ -284,6 +295,7 @@ export function CampNavigation({
     quickChatTotalCount,
     paginationByGroup['quick-chat']
   )
+  const updateBadge = appUpdateBadgePresentation(updateSnapshot)
 
   useEffect(() => {
     paginationByGroupRef.current = paginationByGroup
@@ -293,7 +305,10 @@ export function CampNavigation({
     if (previousViewRef.current === 'settings' && view !== 'settings') {
       // The settings entry is remounted when the ordinary navigation returns.
       // Restore focus after that render so keyboard users return to their entry point.
-      settingsButtonRef.current?.focus()
+      const returnTarget = settingsReturnFocusRef.current === 'updates'
+        ? updateButtonRef.current ?? settingsButtonRef.current
+        : settingsButtonRef.current
+      returnTarget?.focus()
     }
     previousViewRef.current = view
   }, [view])
@@ -522,6 +537,7 @@ export function CampNavigation({
           ? (
               <SettingsSidebarNavigation
                 section={settingsSection}
+                updateBadge={updateBadge}
                 onSectionChange={onSettingsSectionChange}
                 onBack={onSettingsBack}
               />
@@ -680,15 +696,36 @@ export function CampNavigation({
         </section>
           </div>
       <div className="unified-sidebar-footer">
-        <button
-          ref={settingsButtonRef}
-          className="rail-button"
-          type="button"
-          aria-label="设置"
-          onClick={onSettings}
-        >
-          <span className="rail-glyph" aria-hidden="true"><NavigationIcon name="settings" /></span><span className="rail-label">设置</span>
-        </button>
+        <div className="sidebar-settings-entry" role="group" aria-label="设置与应用更新">
+          <button
+            ref={settingsButtonRef}
+            className="rail-button sidebar-settings-main"
+            type="button"
+            aria-label="设置，打开上次保留的设置页面"
+            onClick={() => {
+              settingsReturnFocusRef.current = 'settings'
+              onSettings()
+            }}
+          >
+            <span className="rail-glyph" aria-hidden="true"><NavigationIcon name="settings" /></span><span className="rail-label">设置</span>
+          </button>
+          {updateBadge && (
+            <button
+              ref={updateButtonRef}
+              className={`app-update-badge is-${updateBadge.kind}`}
+              type="button"
+              aria-label={`打开关于与更新，${updateBadge.accessibleLabel}`}
+              title={updateBadge.accessibleLabel}
+              onClick={() => {
+                settingsReturnFocusRef.current = 'updates'
+                onOpenUpdates()
+              }}
+            >
+              <UpdateBadgeIcon kind={updateBadge.kind} />
+              <span>{updateBadge.label}</span>
+            </button>
+          )}
+        </div>
       </div>
               </>
             )}
@@ -830,10 +867,12 @@ const SETTINGS_SIDEBAR_GROUPS: SettingsSidebarGroup[] = [
 
 function SettingsSidebarNavigation({
   section,
+  updateBadge,
   onSectionChange,
   onBack
 }: {
   section: NavigationSettingsSection
+  updateBadge: AppUpdateBadgePresentation | null
   onSectionChange(section: NavigationSettingsSection): void
   onBack(): void
 }): JSX.Element {
@@ -857,14 +896,26 @@ function SettingsSidebarNavigation({
               <h2 id={headingId} className="settings-sidebar-group-title">{group.label}</h2>
               {group.items.map((item) => (
                 <button
-                  className={section === item.key ? 'active' : ''}
+                  className={`${section === item.key ? 'active' : ''} ${item.key === 'about' && updateBadge ? 'has-update-badge' : ''}`.trim()}
                   type="button"
                   aria-current={section === item.key ? 'page' : undefined}
+                  aria-label={item.key === 'about' && updateBadge
+                    ? `关于与更新，${updateBadge.accessibleLabel}`
+                    : undefined}
                   key={item.key}
                   onClick={() => onSectionChange(item.key)}
                 >
                   <span aria-hidden="true"><NavigationIcon name={item.icon} /></span>
                   <strong>{item.label}</strong>
+                  {item.key === 'about' && updateBadge && (
+                    <span
+                      className={`app-update-badge settings-app-update-badge is-${updateBadge.kind}`}
+                      aria-hidden="true"
+                    >
+                      <UpdateBadgeIcon kind={updateBadge.kind} />
+                      <span>{updateBadge.label}</span>
+                    </span>
+                  )}
                 </button>
               ))}
             </section>
@@ -873,6 +924,23 @@ function SettingsSidebarNavigation({
       </nav>
     </div>
   )
+}
+
+function UpdateBadgeIcon({
+  kind
+}: {
+  kind: AppUpdateBadgePresentation['kind']
+}): JSX.Element {
+  if (kind === 'ready') {
+    return <svg viewBox="0 0 16 16" aria-hidden="true"><path d="m3 8 3 3 7-7" /></svg>
+  }
+  if (kind === 'failed') {
+    return <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 2 14 13H2ZM8 6v3m0 2h.01" /></svg>
+  }
+  if (kind === 'available') {
+    return <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 2v8m0 0 3-3m-3 3L5 7M3 13h10" /></svg>
+  }
+  return <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 2a6 6 0 1 1-5.2 3" /></svg>
 }
 
 function CommandPalette({
