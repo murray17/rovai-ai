@@ -96,6 +96,35 @@ describe('navigation preferences', () => {
     await expect(readNavigationPreferences(filePath)).resolves.toEqual(snapshot)
   })
 
+  it('reinstates the exact removed record when a Core restore transaction rolls back', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'rovai-navigation-preferences-'))
+    cleanup.push(directory)
+    const filePath = join(directory, 'navigation.json')
+    const removedProject = {
+      targetKey: 'directory:/work/a',
+      removedAt: '2026-08-11T08:00:00.000Z'
+    }
+    await writeFile(filePath, JSON.stringify({
+      schemaVersion: 2,
+      pins: [{ kind: 'camp', targetKey: CAMP_B, pinnedAt: '2026-08-11T07:03:00Z' }],
+      removedProjects: [removedProject]
+    }))
+    const store = await NavigationPreferencesStore.load(
+      filePath,
+      () => '2026-08-25T09:00:00.000Z'
+    )
+
+    await store.restoreProject(removedProject.targetKey)
+    const snapshot = await store.reinstateRemovedProject(removedProject)
+
+    expect(snapshot).toEqual({
+      schemaVersion: 2,
+      pins: [{ kind: 'camp', targetKey: CAMP_B, pinnedAt: '2026-08-11T07:03:00Z' }],
+      removedProjects: [removedProject]
+    })
+    await expect(readNavigationPreferences(filePath)).resolves.toEqual(snapshot)
+  })
+
   it('cleans malformed, duplicate and non-directory records', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'rovai-navigation-preferences-'))
     cleanup.push(directory)

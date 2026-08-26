@@ -137,5 +137,5 @@ Execution Budget 使用独立的进程内非倒退 observation：取当前 wall 
 - [AgentRun Recovery](../architecture/agent-run-recovery.md)
 - [Evidence 与 Canonical Activity](../architecture/foundational-invariants.md#evidence-canonical-activity)
 - [Runtime Activity Mapping Registry](../runtime-activity/registry.md)
-- [Run Process Detail Surface v19](run-process-detail-surface-v19.md)
+- [Run Process Detail Surface v20](run-process-detail-surface-v20.md)
 - [v1.28 model-context change revision 2](../versions/v1.28/model-context-change-grok-native-rules.md)

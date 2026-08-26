@@ -6699,6 +6699,7 @@ mod slow_tests {
                             "codex-cli:app-server-v2".to_string(),
                         ),
                     },
+                    entrypoint_locator_identity: None,
                 },
             )
             .unwrap();

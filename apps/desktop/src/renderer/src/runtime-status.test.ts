@@ -211,6 +211,11 @@ function availability(
       source: found ? 'inherited_path' : null,
       reportedVersion: found ? 'kiro-cli 2.15.1' : null,
       executableFingerprint: found ? 'sha256:kiro' : null,
+      searchPathSource: found ? 'inherited_path' : null,
+      entrypointKind: found ? 'native_executable' : null,
+      candidateExtension: found ? 'native' : null,
+      resolvedNativeTarget: false,
+      versionProbeSucceeded: found ? true : null,
       searchGeneration: 1,
       observedAt: '2026-07-31T00:00:00Z',
       diagnosticCode: null

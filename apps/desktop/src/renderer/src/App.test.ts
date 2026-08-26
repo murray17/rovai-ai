@@ -123,7 +123,10 @@ import {
   limitDraftNameInput,
   normalizeDraftName,
   planInitialCampSelection,
+  projectWorkspaceActionsDisabled,
   toggleCampMemberSelection,
+  workspaceInspectionShouldStart,
+  workspaceSubmissionBlocked,
   workspaceGitPresentation
 } from './NewConversationDialog'
 import {
@@ -495,6 +498,17 @@ describe('cold startup route presentation', () => {
 })
 
 describe('Project directory selection', () => {
+  it('blocks Project actions and inspection until removed authority is ready', () => {
+    const workspace = { name: 'Downloads', projectPath: '/Users/person/Downloads' }
+
+    expect(projectWorkspaceActionsDisabled(false, false)).toBe(true)
+    expect(projectWorkspaceActionsDisabled(false, true)).toBe(false)
+    expect(workspaceInspectionShouldStart(true, false, workspace.projectPath)).toBe(false)
+    expect(workspaceInspectionShouldStart(true, true, workspace.projectPath)).toBe(true)
+    expect(workspaceSubmissionBlocked(workspace, false)).toBe(true)
+    expect(workspaceSubmissionBlocked(null, false)).toBe(false)
+  })
+
   it('selects the Project without entering the new-conversation flow', async () => {
     const workspace = { name: 'rovai-ai', projectPath: '/repo/rovai-ai' }
     const effects: unknown[] = []
@@ -523,6 +537,19 @@ describe('Project directory selection', () => {
 
     expect(outcome).toBe('cancelled')
     expect(effects).toEqual([])
+  })
+
+  it('does not select or inspect a Project when restoring its access state fails', async () => {
+    const workspace = { name: 'Downloads', projectPath: '/Users/person/Downloads' }
+    const selectProject = vi.fn()
+
+    await expect(selectProjectDirectory(
+      async () => workspace,
+      async () => { throw new Error('restore failed') },
+      selectProject
+    )).rejects.toThrow('restore failed')
+
+    expect(selectProject).not.toHaveBeenCalled()
   })
 })
 
@@ -2351,6 +2378,28 @@ describe('task event projections', () => {
     expect(markup).toContain('id="projects-heading"')
   })
 
+  it('disables the sidebar Project picker while navigation authority is loading', () => {
+    const markup = renderToStaticMarkup(createElement(CampNavigation, {
+      view: 'compose',
+      state: 'loading',
+      navigation: null,
+      activeCampId: null,
+      onNewConversation: () => undefined,
+      onMembers: () => undefined,
+      onMemory: () => undefined,
+      pendingMemoryCount: 0,
+      onSettings: () => undefined,
+      onOpenProject: () => undefined,
+      onCamp: () => undefined,
+      onRemoveProject: async () => undefined,
+      onRename: async () => undefined,
+      onDelete: async () => undefined,
+      onError: () => undefined
+    }))
+
+    expect(markup).toMatch(/aria-label="选择工作目录"[^>]*disabled=""/)
+  })
+
   it('keeps an unready Default Lead selectable while warning that execution is blocked', () => {
     const profile = agentProfile()
     const unreadyProfile: AgentProfile = {
@@ -3760,8 +3809,43 @@ describe('task event projections', () => {
     expect(agentRunTerminalNote({
       terminalReasonCode: 'planned_shutdown_cancelled'
     })).toBe('因 Rovai 计划关闭，执行引擎已确认取消本次执行。')
+    expect(agentRunPresentation({
+      status: 'failed',
+      waitReason: null,
+      terminalReasonCode: 'runtime_interrupted'
+    })).toEqual({
+      label: '执行已中断',
+      tone: 'neutral'
+    })
+    expect(agentRunStateTag({
+      status: 'failed',
+      waitReason: null,
+      terminalReasonCode: 'runtime_interrupted'
+    })).toEqual({
+      tag: 'INTERRUPTED',
+      tone: 'neutral'
+    })
+    expect(agentRunTerminalNote({
+      terminalReasonCode: 'runtime_interrupted'
+    })).toBe('执行连续性已中断，最终结果无法确认；本次执行未被记为已取消。')
     expect(agentRunTerminalNote({ terminalReasonCode: null })).toBeNull()
     expect(formatByteSize(4_096)).toBe('4.0 KB')
+  })
+
+  it('drops 100,000 transient Command output frames before Renderer state', () => {
+    let accepted = 0
+    for (let index = 0; index < 100_000; index += 1) {
+      const event = liveRuntimeEventFromCore({
+        method: 'command.output.delta',
+        params: {
+          agentRunId: 'run-output-heavy',
+          executionEpoch: 3,
+          payload: { itemId: 'command-1', delta: `frame-${index}` }
+        }
+      }, `transient-${index}`)
+      if (event !== null) accepted += 1
+    }
+    expect(accepted).toBe(0)
   })
 
   it('omits live reasoning summaries while projecting narration, plans and execution steps', () => {
@@ -4061,6 +4145,35 @@ describe('task event projections', () => {
     expect(activityStatusForAgentRun('running', 'failed')).toBe('running')
   })
 
+  it('projects an interrupted terminal as stopped without claiming cancellation', () => {
+    const canonical = canonicalActivity('command-interrupted', {
+      activityDomain: 'shell', phase: 'terminal', outcome: 'unsettled'
+    })
+    const progress = buildLiveExecutionProgress([{
+      id: 'command-interrupted-terminal',
+      agentRunId: 'run-interrupted',
+      eventType: 'activity.completed',
+      payload: {
+        reasonCode: 'runtime_interrupted',
+        item: {
+          id: 'command-interrupted',
+          type: 'commandExecution',
+          status: 'interrupted',
+          command: 'long-running-command',
+          aggregatedOutput: null
+        }
+      },
+      canonical,
+      createdAt: '2026-08-18T03:00:00Z'
+    }], 'run-interrupted')
+
+    expect(canonical.outcome).toBe('unsettled')
+    expect(progress.items[0]).toMatchObject({
+      kind: 'tool',
+      step: { status: 'stopped' }
+    })
+  })
+
   it('shows a failed Claude run public failure even when no execution evidence was recorded', () => {
     const run: AgentRunView = {
       id: 'run-claude-failed', campTurnId: 'turn-1', conversationId: 'conversation-claude',
@@ -4134,12 +4247,73 @@ describe('task event projections', () => {
       run, progress, campId: 'camp-1', focused: true
     }))
     expect(markup).toContain('tool-call-static')
+    expect(markup).toContain('class="tool-activity-group status-running"')
+    expect(markup).toContain('aria-label="执行中：检查工作区状态"')
+    expect(markup).not.toContain('class="tool-group-count"')
+    expect(markup).toContain('aria-live="polite"')
+    expect(markup).not.toContain('<span>正在处理</span>')
     expect(markup).not.toContain('<details class="process-action tool-call-disclosure')
     expect(markup).toContain('tool-call-disclosure-slot is-placeholder')
     expect(markup).not.toContain('>execute<')
   })
 
-  it('opens complete Built-in Camp public results in their Tool rows', () => {
+  it('keeps the settled live-tail Tool group active until a non-Tool boundary arrives', () => {
+    const settledTool = {
+      key: 'tool:settled',
+      kind: 'tool' as const,
+      step: {
+        id: 'tool-settled',
+        title: 'pnpm test',
+        detail: 'Tests passed',
+        status: 'completed' as const,
+        activityDomain: 'shell',
+        toolName: null,
+        credibility: 'runtime_structured' as const
+      }
+    }
+    const run: AgentRunView = {
+      id: 'run-live-tail', campTurnId: 'turn-live-tail', conversationId: 'conversation-live-tail',
+      agentId: 'agent-live-tail', taskId: null, responsibilityKey: 'direct:agent-live-tail',
+      responsibilityGeneration: 0, purpose: '验证连续操作摘要', completionRole: 'required',
+      status: 'running', waitReason: null, cancelRequestedAt: null, cancelReasonCode: null,
+      cancelAcknowledgedAt: null, executionEpoch: 1, terminalResolutionSource: null,
+      terminalReasonCode: null, failure: null, runtimeModel: null,
+      permissionSemantics: 'runtime_managed_v2', invocationKind: 'direct',
+      triggerDeliveryGeneration: 0, a2aParentAgentRunId: null, a2aRootAgentRunId: null,
+      a2aDepth: 0, executionEvidenceCount: 1, hasUnsettledExternalEffects: false,
+      workspace: { path: '/repo' }, startingGitObservation: null, endingGitObservation: null,
+      version: 1, createdAt: '2026-08-26T00:00:00Z', startedAt: '2026-08-26T00:00:01Z',
+      endedAt: null, updatedAt: '2026-08-26T00:00:02Z'
+    }
+
+    const liveTailMarkup = renderToStaticMarkup(createElement(RunExecutionDisclosure, {
+      run,
+      progress: { items: [settledTool] },
+      campId: 'camp-live-tail',
+      focused: true
+    }))
+    expect(liveTailMarkup).toContain('class="tool-activity-group status-running"')
+    expect(liveTailMarkup).toContain('aria-label="执行中；已执行 1 项操作"')
+    expect(liveTailMarkup).toContain('class="tool-group-count"')
+    expect(liveTailMarkup).not.toContain('<span>正在处理</span>')
+
+    const boundaryMarkup = renderToStaticMarkup(createElement(RunExecutionDisclosure, {
+      run,
+      progress: {
+        items: [
+          settledTool,
+          { key: 'narration:boundary', kind: 'narration', body: '继续检查结果。' }
+        ]
+      },
+      campId: 'camp-live-tail',
+      focused: true
+    }))
+    expect(boundaryMarkup).toContain('class="tool-activity-group status-completed"')
+    expect(boundaryMarkup).toContain('aria-label="已执行 1 项操作；状态：全部成功"')
+    expect(boundaryMarkup).toContain('<span>正在处理</span>')
+  })
+
+  it('keeps complete Built-in Camp public results behind nested lazy Tool rows', () => {
     const readResult = {
       mode: 'item',
       message: { messageId: 'message-1', body: '完整消息正文' }
@@ -4230,12 +4404,16 @@ describe('task event projections', () => {
     const markup = renderToStaticMarkup(createElement(RunExecutionDisclosure, {
       run, progress, campId: 'camp-1', focused: true
     }))
+    expect(markup.match(/<details class="tool-activity-group/g)).toHaveLength(1)
+    expect(markup).toContain('aria-label="已执行 2 项操作；状态：全部成功"')
+    expect(markup).not.toContain('>全部成功<')
+    expect(markup).not.toContain('class="tool-group-count"')
     expect(markup.match(/<details class="process-action tool-call-disclosure/g)).toHaveLength(2)
     expect(markup).not.toContain('tool-output-copy-button')
-    expect(markup).toContain('search-result-1')
-    expect(markup).toContain('search-result-14')
-    expect(markup).toContain('role="region"')
-    expect(markup).toContain('的完整结果，可滚动')
+    expect(markup).not.toContain('search-result-1')
+    expect(markup).not.toContain('search-result-14')
+    expect(markup).not.toContain('role="region"')
+    expect(markup).not.toContain('tool-call-result-scroll')
     expect(markup).not.toContain('complete-evidence-control')
     expect(markup).not.toContain('complete-evidence-standalone')
     expect(markup).not.toContain('查看完整工具调用')
@@ -4290,15 +4468,17 @@ describe('task event projections', () => {
 
     for (const domain of domains) {
       expect(markup).toContain(`data-icon-domain="${domain}"`)
-      expect(markup).toContain(`${domain} complete result`)
+      expect(markup).not.toContain(`${domain} complete result`)
     }
+    expect(markup).toContain('aria-label="已执行 9 项操作；状态：全部成功"')
+    expect(markup.match(/class="tool-group-icon"/g)).toHaveLength(1)
     expect(markup.match(/class="tool-call-icon"/g)).toHaveLength(domains.length)
     expect(markup.match(/<svg viewBox="0 0 16 16"/g)?.length).toBeGreaterThanOrEqual(domains.length)
     expect(markup.match(/<summary class="tool-call-summary">/g)).toHaveLength(domains.length)
     expect(markup.match(/class="tool-call-state status-completed"/g)).toHaveLength(domains.length)
     expect(markup.match(/class="tool-call-disclosure-slot"/g)).toHaveLength(domains.length)
     expect(markup).toMatch(/tool-call-icon[\s\S]*tool-call-title[\s\S]*tool-call-state[\s\S]*tool-call-disclosure-slot/)
-    expect(markup).not.toMatch(/<summary[^>]*aria-label=/)
+    expect(markup).not.toMatch(/<summary class="tool-call-summary"[^>]*aria-label=/)
   })
 
   it('keeps a Claude Bash command expandable when the tool result has no output', () => {
@@ -4364,7 +4544,8 @@ describe('task event projections', () => {
     expect(markup).not.toContain('tool-call-disclosure-slot is-placeholder')
     expect(markup).toContain('class="tool-call-state status-completed"')
     expect(markup).toContain('aria-label="成功"')
-    expect(markup).toContain('tool-call-result-scroll')
+    expect(markup).not.toContain('tool-call-result-scroll')
+    expect(markup).not.toContain('ROVAI_CLAUDE_EMPTY_OUTPUT_OK</pre>')
     expect(markup).toContain(
       'class="tool-call-title" title="printf &#x27;%s\\n&#x27; &#x27;ROVAI_CLAUDE_EMPTY_OUTPUT_OK&#x27;"'
     )
@@ -5141,7 +5322,7 @@ describe('task event projections', () => {
     expect(markup).not.toContain('前往 Agent 运行时')
   })
 
-  it('keeps all product checks visible without exposing diagnostic or installation details', () => {
+  it('keeps all product checks visible with redacted discovery diagnostics', () => {
     const health: HealthStatus = {
       core: { ok: true, version: '0.0.1', dataDir: '/tmp/rovai' },
       database: { ok: true, path: '/tmp/rovai/rovai.db' },
@@ -5209,6 +5390,8 @@ describe('task event projections', () => {
     expect(markup.match(/检查可用性/g)).toHaveLength(12)
     expect(markup).not.toContain('重新扫描安装')
     expect(markup).toContain('codex-cli 1.0.0')
+    expect(markup).toContain('来源 inherited_path · 入口 native_executable · 后缀 native')
+    expect(markup).toContain('Native 目标 未解析 · Version Probe 成功')
     expect(markup).not.toContain('九种已支持产品')
     expect(markup).not.toContain('自查命令')
     expect(markup).not.toContain('command -v')
@@ -5348,6 +5531,11 @@ function productAvailability(
       source: status === 'missing' || status === 'detecting' ? null : 'inherited_path',
       reportedVersion: status === 'missing' || status === 'detecting' ? null : `${runtimeKind} 1.0.0`,
       executableFingerprint: status === 'missing' || status === 'detecting' ? null : `sha256:${runtimeKind}`,
+      searchPathSource: status === 'missing' || status === 'detecting' ? null : 'inherited_path',
+      entrypointKind: status === 'missing' || status === 'detecting' ? null : 'native_executable',
+      candidateExtension: status === 'missing' || status === 'detecting' ? null : 'native',
+      resolvedNativeTarget: false,
+      versionProbeSucceeded: status === 'missing' || status === 'detecting' ? null : true,
       searchGeneration: 1,
       observedAt: '2026-07-22T00:00:00Z',
       diagnosticCode: null

@@ -13,10 +13,13 @@ import { tmpdir } from 'node:os'
 import { basename, join, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { parse as parseYaml } from 'yaml'
+import {
+  MACOS_SIGNING_POLICY,
+  assertStableMacosSignature
+} from './lib/macos-signing-policy.mjs'
 
-const EXPECTED_APP_ID = 'ai.rovai.desktop'
-const EXPECTED_AUTHORITY = 'Rovai Release Signing'
-const EXPECTED_CERTIFICATE_ROOT = '465802da7386e9676668078e7d44704cbbeadd1e'
+const EXPECTED_APP_ID = MACOS_SIGNING_POLICY.appId
+const EXPECTED_AUTHORITY = MACOS_SIGNING_POLICY.authority
 const EXPECTED_ARCHITECTURES = {
   arm64: 'arm64',
   x64: 'x86_64'
@@ -145,17 +148,8 @@ function findPackagedApp() {
   return matching[0]
 }
 
-function signatureDetails(label, targetPath) {
+function signatureDetails(label, targetPath, expectedIdentifier = null) {
   const details = run('/usr/bin/codesign', ['-d', '--verbose=4', targetPath])
-  if (/^Signature=adhoc$/m.test(details)) {
-    throw new Error(`${label} uses an ad-hoc signature`)
-  }
-
-  const authorities = [...details.matchAll(/^Authority=(.+)$/gm)].map((match) => match[1].trim())
-  if (!authorities.includes(EXPECTED_AUTHORITY)) {
-    throw new Error(`${label} is missing Authority=${EXPECTED_AUTHORITY}`)
-  }
-
   const requirementOutput = run('/usr/bin/codesign', ['-d', '-r-', targetPath])
   const designatedRequirement = requirementOutput
     .split('\n')
@@ -163,21 +157,15 @@ function signatureDetails(label, targetPath) {
     .find((line) => line.startsWith('designated =>'))
 
   if (!designatedRequirement) throw new Error(`${label} has no designated requirement`)
-  if (/designated\s*=>\s*cdhash\b/i.test(designatedRequirement)) {
-    throw new Error(`${label} uses a CDHash-only designated requirement`)
-  }
+  assertStableMacosSignature(label, {
+    details,
+    designatedRequirement,
+    expectedIdentifier
+  })
 
   report.push(`${label} authority: ${EXPECTED_AUTHORITY}`)
   report.push(`${label} designated requirement: ${designatedRequirement}`)
   return { details, designatedRequirement }
-}
-
-function assertCertificateRoot(label, designatedRequirement) {
-  const normalized = designatedRequirement.toLowerCase()
-  const expected = `certificate root = h"${EXPECTED_CERTIFICATE_ROOT}"`
-  if (!normalized.includes(expected)) {
-    throw new Error(`${label} designated requirement has the wrong certificate root`)
-  }
 }
 
 function detachDmg() {
@@ -265,18 +253,9 @@ try {
   }
   report.push(`Bundle ID: ${bundleId}`)
 
-  const appSignature = signatureDetails('App', appPath)
-  const normalizedRequirement = appSignature.designatedRequirement.toLowerCase()
-  if (!normalizedRequirement.includes(`identifier "${EXPECTED_APP_ID}"`)) {
-    throw new Error('App designated requirement has the wrong identifier')
-  }
-  assertCertificateRoot('App', appSignature.designatedRequirement)
-
-  const coreSignature = signatureDetails('rovai-core', corePath)
-  assertCertificateRoot('rovai-core', coreSignature.designatedRequirement)
-
-  const cliSignature = signatureDetails('rovai', cliPath)
-  assertCertificateRoot('rovai', cliSignature.designatedRequirement)
+  signatureDetails('App', appPath, EXPECTED_APP_ID)
+  signatureDetails('rovai-core', corePath)
+  signatureDetails('rovai', cliPath)
   report.push('CDHash-only signature found: no')
   report.push('Result: passed')
 } catch (error) {

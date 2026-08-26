@@ -4918,6 +4918,7 @@ fn planned_shutdown_abortive_terminal_facts(
     match outcome {
         RuntimeTerminalOutcome::Failed => Ok(("failed", "planned_shutdown_failed")),
         RuntimeTerminalOutcome::Cancelled => Ok(("cancelled", "planned_shutdown_cancelled")),
+        RuntimeTerminalOutcome::Interrupted => Ok(("failed", "runtime_interrupted")),
         RuntimeTerminalOutcome::Succeeded => {
             anyhow::bail!("planned shutdown abortive settlement cannot record success")
         }
@@ -6836,6 +6837,10 @@ mod tests {
                 (
                     RuntimeTerminalOutcome::Cancelled,
                     ("cancelled", "planned_shutdown_cancelled"),
+                ),
+                (
+                    RuntimeTerminalOutcome::Interrupted,
+                    ("failed", "runtime_interrupted"),
                 ),
             ] {
                 assert_eq!(

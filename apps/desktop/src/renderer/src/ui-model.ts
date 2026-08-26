@@ -156,6 +156,9 @@ export function agentRunPresentation(
   if (run.status === 'queued') return { label: '已排队', tone: 'neutral' }
   if (run.status === 'running') return { label: '执行中', tone: 'info' }
   if (run.status === 'succeeded') return { label: '已完成', tone: 'success' }
+  if (run.terminalReasonCode === 'runtime_interrupted') {
+    return { label: '执行已中断', tone: 'neutral' }
+  }
   if (run.status === 'failed') return { label: '失败', tone: 'danger' }
   if (run.status === 'cancelled') {
     return run.terminalReasonCode === 'planned_shutdown_cancelled'
@@ -187,6 +190,9 @@ export function agentRunStateTag(
   if (run.status === 'running') return { tag: 'RUNNING', tone: 'brand' }
   if (run.status === 'queued') return { tag: 'QUEUED', tone: 'neutral' }
   if (run.status === 'succeeded') return { tag: 'DONE', tone: 'success' }
+  if (run.terminalReasonCode === 'runtime_interrupted') {
+    return { tag: 'INTERRUPTED', tone: 'neutral' }
+  }
   if (run.status === 'failed') return { tag: 'FAILED', tone: 'danger' }
   if (run.status === 'cancelled') {
     return run.terminalReasonCode === 'planned_shutdown_cancelled'
@@ -226,7 +232,6 @@ const LIVE_RUNTIME_EVENT_TYPES = new Set([
   'activity.started',
   'activity.completed',
   'agent.text.delta',
-  'command.output.delta',
   'file.change.updated',
   'agent.reasoning.summary.delta',
   'agent.thought.delta',
@@ -697,6 +702,7 @@ export function executionEvidenceResultText(
 function activityStatus(status: string | null, eventType: string): ActivityStatus {
   const normalized = status?.toLowerCase() ?? ''
   if (normalized.includes('fail') || normalized.includes('error')) return 'failed'
+  if (normalized.includes('interrupt') || normalized.includes('cancel') || normalized.includes('stop')) return 'stopped'
   if (normalized.includes('progress') || normalized.includes('running') || eventType === 'activity.started' || normalized === 'started') return 'running'
   if (normalized.includes('complete') || normalized.includes('success') || eventType === 'activity.completed') return 'completed'
   if (normalized.includes('wait') || normalized.includes('approval')) return 'waiting'
@@ -1329,6 +1335,7 @@ function canonicalActivityStatus(
   if (canonical.outcome === 'failed') return 'failed'
   if (canonical.outcome === 'succeeded') return 'completed'
   if (canonical.outcome === 'cancelled') return 'stopped'
+  if (canonical.phase === 'terminal' && fallback === 'stopped') return 'stopped'
   if (canonical.outcome !== 'unknown') return 'recorded'
   if (canonical.phase === 'started' || canonical.phase === 'progress') return 'running'
   return canonical.phase === 'terminal' ? 'recorded' : fallback

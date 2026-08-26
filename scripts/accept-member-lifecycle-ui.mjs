@@ -114,8 +114,8 @@ try {
     'Fresh database did not record schema Migration v41'
   )
   assert(
-    await migrationApplied(join(freshDataDir, 'rovai.sqlite'), 109),
-    'Fresh database did not record dynamic Camp membership Migration v109'
+    await migrationApplied(join(freshDataDir, 'rovai.sqlite'), 110),
+    'Fresh database did not record dynamic Camp membership Migration v110'
   )
 
   await openNewConversation(running.cdp)
@@ -1348,7 +1348,7 @@ try {
     reportPath: join(outputDir, 'member-lifecycle-acceptance.json'),
     verified: {
       freshSchemaV41: true,
-      freshSchemaV109DynamicCampMembership: true,
+      freshSchemaV110DynamicCampMembership: true,
       v14MemberRuntimeResetOnSchemaV41: true,
       mentionComposerUsesMemberName: true,
       contextSettingsDestinationRemoved: true,

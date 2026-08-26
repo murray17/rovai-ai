@@ -39,6 +39,11 @@ import {
 import { legacyUserDataPath } from './user-data-path'
 import { deleteRetiredManagedDirectory } from './quick-chat-cutover'
 import { NavigationPreferencesStore } from './navigation-preferences'
+import {
+  ProjectAccessTransactionCoordinator,
+  removedProjectRootsFromSnapshot,
+  restoreProjectAccessFailClosed
+} from './project-access-restore'
 import { RUNTIME_RENDERER_CORE_METHODS } from './runtime-core-methods'
 import {
   GeneralPreferencesStore,
@@ -233,6 +238,7 @@ let generalPreferences: GeneralPreferencesStore | null = null
 let onboarding: OnboardingStore | null = null
 let restorableLocations: RestorableLocationStore | null = null
 let navigationPreferences: NavigationPreferencesStore | null = null
+const projectAccessTransactions = new ProjectAccessTransactionCoordinator()
 let userAutomation: UserAutomationServer | null = null
 let quitDrainStarted = false
 let quitDrainCompleted = false
@@ -300,11 +306,7 @@ function publishAppearance(): AppearanceSnapshot {
 }
 
 function removedSkillProjectRoots(): string[] {
-  return requireNavigationPreferences()
-    .get()
-    .removedProjects
-    .filter((project) => project.targetKey.startsWith('directory:'))
-    .map((project) => project.targetKey.slice('directory:'.length))
+  return removedProjectRootsFromSnapshot(requireNavigationPreferences().get())
 }
 
 async function synchronizeCoreProjectAccessFromNavigation(): Promise<void> {
@@ -707,10 +709,12 @@ ipcMain.handle('rovai:window-reset-bounds', (event) => {
   )
 })
 
-ipcMain.handle('rovai:navigation-preferences-get', () => requireNavigationPreferences().get())
+ipcMain.handle('rovai:navigation-preferences-get', () =>
+  projectAccessTransactions.run(async () => requireNavigationPreferences().get())
+)
 
 ipcMain.handle('rovai:navigation-preferences-replace-pins', (_event, pins: NavigationPin[]) =>
-  requireNavigationPreferences().replacePins(pins)
+  projectAccessTransactions.run(() => requireNavigationPreferences().replacePins(pins))
 )
 
 ipcMain.handle(
@@ -722,32 +726,50 @@ ipcMain.handle(
     if (!targetKey.startsWith('directory:')) {
       throw new Error('Invalid Project removal target')
     }
-    const executionRoot = targetKey.slice('directory:'.length)
-    await core.request('skills.projectAccess.remove', { executionRoot })
-    try {
-      const result = await requireNavigationPreferences().removeProject(targetKey, relatedCampIds)
-      core.setRemovedSkillProjectRoots(removedSkillProjectRoots())
-      return result
-    } catch (error) {
-      await synchronizeCoreProjectAccessFromNavigation().catch(() => undefined)
-      throw error
-    }
+    return projectAccessTransactions.run(async () => {
+      const executionRoot = targetKey.slice('directory:'.length)
+      await core.request('skills.projectAccess.remove', { executionRoot })
+      try {
+        const result = await requireNavigationPreferences().removeProject(targetKey, relatedCampIds)
+        core.setRemovedSkillProjectRoots(removedProjectRootsFromSnapshot(result))
+        return result
+      } catch (error) {
+        await synchronizeCoreProjectAccessFromNavigation().catch(() => undefined)
+        throw error
+      }
+    })
   }
 )
 
 ipcMain.handle('rovai:navigation-preferences-restore-project', async (_event, targetKey: unknown) => {
   if (typeof targetKey !== 'string') throw new Error('Invalid Project restore request')
   if (!targetKey.startsWith('directory:')) throw new Error('Invalid Project restore target')
-  const executionRoot = targetKey.slice('directory:'.length)
-  await core.request('skills.projectAccess.restore', { executionRoot })
-  try {
-    const result = await requireNavigationPreferences().restoreProject(targetKey)
-    core.setRemovedSkillProjectRoots(removedSkillProjectRoots())
-    return result
-  } catch (error) {
-    await synchronizeCoreProjectAccessFromNavigation().catch(() => undefined)
-    throw error
-  }
+  return projectAccessTransactions.run(async () => {
+    const executionRoot = targetKey.slice('directory:'.length)
+    const navigationPreferences = requireNavigationPreferences()
+    const previousSnapshot = navigationPreferences.get()
+    const removedProject = previousSnapshot.removedProjects.find(
+      (project) => project.targetKey === targetKey
+    )
+    return restoreProjectAccessFailClosed({
+      previousSnapshot,
+      restorationRequired: Boolean(removedProject),
+      persistRestoredPreference: () => navigationPreferences.restoreProject(targetKey),
+      activateExecutionRoot: async () => {
+        await core.request('skills.projectAccess.restore', { executionRoot })
+      },
+      suspendExecutionRoot: async () => {
+        await core.request('skills.projectAccess.remove', { executionRoot })
+      },
+      persistPreviousPreference: () => {
+        if (!removedProject) throw new Error('Project restore transaction has no removed pre-state')
+        return navigationPreferences.reinstateRemovedProject(removedProject)
+      },
+      publishRemovedRoots: (snapshot) => {
+        core.setRemovedSkillProjectRoots(removedProjectRootsFromSnapshot(snapshot))
+      }
+    })
+  })
 })
 
 ipcMain.handle('rovai:member-avatar-select-source', async () => {

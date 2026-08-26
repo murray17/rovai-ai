@@ -1307,6 +1307,7 @@ html[data-rovai-platform="win32"] .unified-sidebar-drag {
 .execution-drawer-inspector .execution-process-card { padding: 9px; }
 .execution-drawer-inspector .execution-run-model code { max-width: 18ch; }
 .execution-drawer-inspector .execution-run-recipients { display: grid; grid-template-columns: auto minmax(0, 1fr); }
+.execution-drawer-inspector .tool-group-items { margin-left: 16px; padding-left: 5px; }
 .inspector-meta { flex: 0 0 auto; overflow: hidden; padding: 8px 12px; border-top: 1px solid var(--line); color: var(--faint); font: 500 10px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; text-overflow: ellipsis; white-space: nowrap; }
 
 @media (max-width: 1040px) {
@@ -1601,6 +1602,7 @@ button.camp-world-map-live-caption { cursor: pointer; font: inherit; }
 .quick-chat-continue-title { padding: 0 2px 6px; color: var(--faint); font-size: 10.5px; font-weight: 700; letter-spacing: 0.6px; }
 .quick-chat-continue-row { display: flex; width: 100%; min-height: 32px; align-items: center; gap: 8px; padding: 6px 8px; border: 0; border-radius: 6px; color: var(--ink); background: transparent; cursor: pointer; font-size: 12.5px; text-align: left; }
 .quick-chat-continue-row:hover { background: var(--surface-muted); }
+.quick-chat-continue-row .truncate { min-width: 0; flex: 1 1 auto; }
 .quick-chat-continue-row .camp-marker-slot { display: block; width: 7px; height: 7px; flex: 0 0 7px; }
 .quick-chat-continue-row .camp-marker-slot .task-dot { display: block; width: 7px; height: 7px; border: 0; border-radius: 50%; background: var(--info); }
 .quick-chat-continue-row .camp-loading-spinner { margin-left: auto; }
@@ -2195,6 +2197,7 @@ button.task-event-card:focus-visible .task-card-chevron { color: var(--brand-ink
   background: var(--muted);
   animation: none;
 }
+.execution-disclosure.is-cancelling .tool-group-state.status-running { color: var(--muted); }
 .execution-disclosure.is-cancelling .live-progress-plan li.plan-inProgress {
   color: var(--muted);
 }
@@ -2242,6 +2245,37 @@ button.task-event-card:focus-visible .task-card-chevron { color: var(--brand-ink
 .process-action.history-load-error { display: flex; align-items: center; justify-content: space-between; gap: 8px; color: var(--danger); }
 .process-action.cancelling { padding: 7px 9px; border-left: 2px solid var(--muted); background: var(--neutral-soft); }
 .process-spinner { width: 11px; height: 11px; margin: 1px; border: 1.5px solid var(--line-strong); border-top-color: var(--muted); border-radius: 50%; animation: camp-marker-spin 900ms linear infinite; }
+.tool-activity-group { min-width: 0; }
+.tool-activity-group > summary { list-style: none; cursor: pointer; user-select: none; }
+.tool-activity-group > summary::-webkit-details-marker { display: none; }
+.tool-activity-group > summary::marker { display: none; content: ""; }
+.tool-group-summary { display: grid; min-width: 0; min-height: 28px; grid-template-columns: 16px minmax(0, 1fr) 16px 20px; align-items: center; column-gap: 8px; padding: 2px; border-radius: 6px; color: var(--muted); }
+.tool-activity-group > summary:hover { color: var(--ink); background: var(--surface-hover); }
+.tool-group-icon { display: inline-grid; width: 16px; height: 16px; align-self: center; place-items: center; color: var(--muted); }
+.tool-group-icon svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.35; vector-effect: non-scaling-stroke; }
+.tool-group-icon circle { fill: currentColor; stroke: none; }
+.tool-group-copy { display: flex; min-width: 0; min-height: 16px; align-items: center; overflow: hidden; }
+.tool-group-line { display: flex; min-width: 0; align-items: center; gap: 5px; overflow: hidden; line-height: 16px; white-space: nowrap; }
+.tool-group-line strong { flex: 0 0 auto; color: var(--ink); font-size: 10.5px; font-weight: 670; }
+.tool-group-separator { flex: 0 0 auto; color: var(--faint); }
+.tool-group-current { min-width: 0; overflow: hidden; color: var(--evidence-muted); font-size: 10.5px; text-overflow: ellipsis; white-space: nowrap; }
+.tool-group-count { flex: 0 0 auto; color: var(--faint); font-size: 10px; }
+.tool-group-state { position: relative; display: grid; width: 16px; height: 24px; place-items: center; color: var(--muted); }
+.tool-group-state::before { width: 7px; height: 7px; border-radius: 50%; background: currentColor; content: ""; }
+.tool-group-state.status-running { color: var(--info); }
+.tool-group-state.status-running::after { position: absolute; width: 11px; height: 11px; border: 1px solid currentColor; border-radius: 50%; content: ""; opacity: .36; }
+.tool-group-state.status-completed { color: var(--success); }
+.tool-group-state.status-failed { color: var(--danger); }
+.tool-group-state.status-stopped { color: var(--muted); }
+.tool-group-state.status-failed::before,
+.tool-group-state.status-stopped::before { border-radius: 1px; transform: rotate(45deg); }
+.tool-group-state.status-waiting { color: var(--attention); }
+.tool-group-state.status-waiting::before { box-sizing: border-box; border: 1px solid currentColor; background: transparent; }
+.tool-group-disclosure { display: grid; width: 20px; height: 20px; place-items: center; border-radius: 5px; color: var(--faint); }
+.tool-group-disclosure svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.45; transition: transform 120ms ease; }
+.tool-activity-group > summary:hover .tool-group-disclosure { color: var(--ink); background: var(--surface-muted); }
+.tool-activity-group[open] > summary .tool-group-disclosure svg { transform: rotate(180deg); }
+.tool-group-items { position: relative; display: grid; gap: 1px; margin: 3px 0 4px 23px; padding: 4px 0 4px 8px; border-left: 1px solid var(--line); }
 .tool-call-summary { display: grid; min-width: 0; min-height: 24px; grid-template-columns: 16px minmax(0, 1fr) 16px 20px; align-items: center; column-gap: 8px; padding: 1px 2px; }
 .tool-call-disclosure > summary { list-style: none; cursor: pointer; }
 .tool-call-disclosure > summary::-webkit-details-marker { display: none; }
@@ -6110,6 +6144,7 @@ button.attachment-open:disabled { cursor: wait; opacity: .76; }
 .runtime-product-copy { display: grid; min-width: 0; gap: 3px; }
 .runtime-product-copy strong { overflow: hidden; color: var(--ink); font-size: 12.5px; font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
 .runtime-product-copy small { overflow: hidden; color: var(--workspace-faint); font-size: 10.5px; font-variant-numeric: tabular-nums; text-overflow: ellipsis; white-space: nowrap; }
+.runtime-product-copy .runtime-discovery-diagnostic { color: var(--muted); }
 .runtime-product-status { justify-self: end; white-space: nowrap; }
 .runtime-product-check { width: 110px; justify-content: center; white-space: nowrap; }
 .runtime-product-row > .runtime-failure-notice { grid-column: 2 / -1; }
@@ -6500,8 +6535,11 @@ button.attachment-open:disabled { cursor: wait; opacity: .76; }
   }
   .execution-drawer-resize-handle::after { background: ButtonText; }
   .run-pulse-chip-state,
+  .tool-group-state,
   .tool-call-state { color: CanvasText !important; }
+  .tool-group-state.status-waiting::before,
   .run-pulse-chip-state.state-waiting::before { border-color: CanvasText; background: Canvas; }
+  .tool-group-state.status-running::after,
   .run-pulse-chip-state.state-running::after { border-color: CanvasText; opacity: 1; }
   .tool-call-result-scroll:focus-visible { outline-color: Highlight; }
   .member-avatar,

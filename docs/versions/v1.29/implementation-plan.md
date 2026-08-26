@@ -13,7 +13,7 @@ last_updated: 2026-08-26
 - [x] 确认添加、移除、至少一位成员、Lead successor、普通再次添加与模型上下文边界；
 - [x] active member（包括 away）相同 capability overrides 保持 no-op，不同 overrides 显式 conflict；受信
   source 的 accepted no-op 正常推进 source reconciliation generation；
-- [x] 完成 Migration 109、membership generation/version、外部来源绑定与旧非终态工作 clean break；
+- [x] 完成 Migration 110、membership generation/version、外部来源绑定与旧非终态工作 clean break；
 - [x] 完成 add、removal preview、atomic cutover、durable reconciliation 与任务释放；
 - [x] 给 Agent 业务工具、Message Delivery、Gather completion 和公开输出增加 exact membership lifetime fence；
 - [x] 收口 ordinary outbound source lifetime：pending Delivery cutover、materialized target reconciliation 与

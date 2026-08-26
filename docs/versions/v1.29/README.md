@@ -24,7 +24,7 @@ reconciliation 完成已接受工作的正式结算。
 
 ## 交付范围
 
-- Data Contract 升级为 `v1.23 / projection schema 64`，Migration 109 增加 Camp membership generation、
+- Data Contract 升级为 `v1.23 / projection schema 64`，Migration 110 增加 Camp membership generation、
   membership reconciliation、外部来源绑定和 Delivery admission membership version；旧非终态技术工作 clean break；
 - 新增 `camps.members.add`、`camps.members.removalPreview`、`camps.members.remove` Desktop API；增加使用
   exact membership generation/version 的添加、预览和移除命令；

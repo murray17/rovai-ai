@@ -44,14 +44,15 @@ use rovai_core::{
         RecordActionResultCommand, RecordObservedActionCommand, ResolveActionApprovalCommand,
     },
     agent_profile::{
-        AdapterInstallationView, AdapterKind, AdapterProbeAttempt, AgentProfileService,
-        ClearMemberRuntimeConfigurationCommand, CreateAdapterInstallationCommand,
-        CreateAgentProfileCommand, DiscoveredManagedInstallation, FrozenAgentRuntimeConfig,
-        InstallationClass, InstallationSource, ManagedProbeFailure,
+        AdapterCapabilitySnapshot, AdapterInstallationView, AdapterKind, AdapterProbeAttempt,
+        AgentProfileService, ClearMemberRuntimeConfigurationCommand,
+        CreateAdapterInstallationCommand, CreateAgentProfileCommand, DiscoveredManagedInstallation,
+        FrozenAgentRuntimeConfig, InstallationClass, InstallationSource, ManagedProbeFailure,
         RecordAdapterCapabilitySnapshotCommand, RemoveMemberCommand, ReorderAgentProfilesCommand,
-        RuntimeModelCatalogCacheStatus, RuntimeReadinessStatus, SetAgentProfileAvatarCommand,
-        SetMemberPresenceCommand, SetMemberRuntimeConfigurationCommand,
-        UpdateAdapterInstallationCommand, UpdateAgentProfileCommand, VerifiedManagedInstallation,
+        RuntimeEntrypointLocatorIdentity, RuntimeModelCatalogCacheStatus, RuntimeReadinessStatus,
+        SetAgentProfileAvatarCommand, SetMemberPresenceCommand,
+        SetMemberRuntimeConfigurationCommand, UpdateAdapterInstallationCommand,
+        UpdateAgentProfileCommand, VerifiedManagedInstallation,
     },
     agent_runtime_adapter::{
         AcpProbeObservation, AgentRuntimeAdapterRegistry, AntigravityProbeObservation,
@@ -185,9 +186,10 @@ use rovai_core::{
         RestartNativeSessionCommand, SucceedAgentRunCommand,
     },
     runtime_discovery::{
-        RuntimeDiscoveryObservation, RuntimeDiscoveryStatus, RuntimeLaunchPurpose,
-        RuntimeSearchEnvironment, catalog_entries, discover_runtime_path, discover_runtime_version,
-        is_executable_file, runtime_launch_allowed, runtime_visible_path,
+        RuntimeDiscoveryObservation, RuntimeDiscoveryStatus, RuntimeExecutableCandidate,
+        RuntimeLaunchPurpose, RuntimeSearchEnvironment, catalog_entries, discover_runtime_path,
+        discover_runtime_path_with_manual_candidates, discover_runtime_version,
+        is_runtime_entrypoint_file, runtime_launch_allowed, runtime_visible_path,
         with_runtime_search_environment,
     },
     runtime_failure::{
@@ -1020,6 +1022,23 @@ const RUNTIME_CHECK_MAX_CONCURRENCY: usize = 2;
 const RUNTIME_PROBE_UPDATE_RETRY_DELAY: Duration = Duration::from_millis(300);
 const RUNTIME_PROBE_MAX_EXECUTIONS: usize = 2;
 const RUNTIME_CHECK_EXECUTION_COOLDOWN: Duration = Duration::from_secs(3);
+
+fn apply_entrypoint_locator_compatibility(
+    snapshot: &mut AdapterCapabilitySnapshot,
+    identity: Option<&RuntimeEntrypointLocatorIdentity>,
+) {
+    let Some(identity) = identity else {
+        return;
+    };
+    let base = snapshot
+        .native_session_compatibility_key
+        .take()
+        .unwrap_or_else(|| "runtime-entrypoint".to_string());
+    snapshot.native_session_compatibility_key = Some(format!(
+        "{base}:windows-resolved-command-shim-v1:{}",
+        identity.compatibility_fingerprint
+    ));
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum RuntimeCheckOutcome {
@@ -1926,15 +1945,30 @@ impl Core {
         self.runtime_product_diagnostics.write().await.clear();
         let managed_installations = {
             let database = self.database.lock().await;
-            match AgentProfileService::default().list_installations(&database) {
-                Ok(installations) => installations
-                    .into_iter()
-                    .filter(|installation| {
+            let service = AgentProfileService::default();
+            match service.list_installations(&database) {
+                Ok(installations) => {
+                    let mut managed = HashMap::new();
+                    for installation in installations.into_iter().filter(|installation| {
                         installation.installation_class == InstallationClass::ManagedDefault
                             && installation.auth_scope == "default"
-                    })
-                    .map(|installation| (installation.adapter_kind, installation))
-                    .collect::<HashMap<_, _>>(),
+                    }) {
+                        let locator = match service
+                            .runtime_entrypoint_locator_identity(&database, &installation.id)
+                        {
+                            Ok(locator) => locator,
+                            Err(error) => {
+                                eprintln!(
+                                    "failed to load Runtime entrypoint locator for {}: {error:#}",
+                                    installation.adapter_kind.as_str()
+                                );
+                                continue;
+                            }
+                        };
+                        managed.insert(installation.adapter_kind, (installation, locator));
+                    }
+                    managed
+                }
                 Err(error) => {
                     eprintln!("failed to load managed Runtime discovery fallbacks: {error:#}");
                     HashMap::new()
@@ -1961,14 +1995,46 @@ impl Core {
             let search = search.clone();
             let managed_installation = managed_installations.get(&kind).cloned();
             let handle = path_tasks.spawn_blocking(move || {
-                let mut observation = discover_runtime_path(kind, &search);
+                let explicit_saved_path = managed_installation
+                    .as_ref()
+                    .filter(|(installation, _)| {
+                        matches!(
+                            installation.source,
+                            InstallationSource::Manual | InstallationSource::Custom
+                        )
+                    })
+                    .map(|(installation, locator)| {
+                        locator
+                            .as_ref()
+                            .map(|identity| PathBuf::from(&identity.canonical_shim_path))
+                            .unwrap_or_else(|| PathBuf::from(&installation.executable_path))
+                    });
+                let mut observation = if let Some(saved_path) = explicit_saved_path {
+                    let mut observation =
+                        discover_runtime_path_with_manual_candidates(kind, &search, [saved_path]);
+                    if observation.discovery_status == RuntimeDiscoveryStatus::Found {
+                        observation.source = managed_installation
+                            .as_ref()
+                            .map(|(installation, _)| installation.source);
+                    }
+                    observation
+                } else {
+                    discover_runtime_path(kind, &search)
+                };
                 let mut missing_managed_installation = None;
                 if observation.discovery_status == RuntimeDiscoveryStatus::Missing
-                    && let Some(installation) = managed_installation
+                    && let Some((installation, locator)) = managed_installation
                 {
-                    let saved_path = PathBuf::from(&installation.executable_path);
-                    if is_executable_file(&saved_path) {
-                        let canonical = canonical_runtime_path(&saved_path);
+                    let saved_path = locator
+                        .as_ref()
+                        .map(|identity| PathBuf::from(&identity.canonical_shim_path))
+                        .unwrap_or_else(|| PathBuf::from(&installation.executable_path));
+                    let saved_candidate = search
+                        .candidates(kind, [saved_path])
+                        .into_iter()
+                        .find(|candidate| is_runtime_entrypoint_file(&candidate.path));
+                    if let Some(candidate) = saved_candidate {
+                        let canonical = canonical_runtime_path(&candidate.path);
                         match fingerprint_executable(&canonical) {
                             Ok(fingerprint) => {
                                 observation.discovery_status = RuntimeDiscoveryStatus::Found;
@@ -1976,6 +2042,14 @@ impl Core {
                                     Some(canonical.to_string_lossy().to_string());
                                 observation.source = Some(installation.source);
                                 observation.executable_fingerprint = Some(fingerprint);
+                                observation.search_path_source = candidate.search_path_source;
+                                observation.entrypoint_kind = Some(candidate.entrypoint_kind);
+                                observation.candidate_extension =
+                                    Some(candidate.candidate_extension);
+                                observation.resolved_native_target =
+                                    candidate.resolved_native_target;
+                                observation.entrypoint_locator_identity =
+                                    candidate.entrypoint_locator_identity;
                                 observation.diagnostic_code = None;
                             }
                             Err(_) => {
@@ -2155,7 +2229,7 @@ impl Core {
             .source
             .context("light Runtime discovery did not include source")?;
         let registry = AgentRuntimeAdapterRegistry::default();
-        let snapshot =
+        let mut snapshot =
             if observation.reported_version.is_some() && observation.diagnostic_code.is_none() {
                 registry.light_ready_snapshot(
                     observation.runtime_kind,
@@ -2175,6 +2249,10 @@ impl Core {
                         .unwrap_or_else(|| "runtime_light_probe_incomplete".to_string()),
                 )?
             };
+        apply_entrypoint_locator_compatibility(
+            &mut snapshot,
+            observation.entrypoint_locator_identity.as_ref(),
+        );
         let mut database = self.database.lock().await;
         AgentProfileService::default().commit_discovered_managed_installation(
             &mut database,
@@ -2185,6 +2263,7 @@ impl Core {
                 source,
                 auth_scope: "default".to_string(),
                 snapshot,
+                entrypoint_locator_identity: observation.entrypoint_locator_identity.clone(),
             },
         )?;
         Ok(())
@@ -2196,15 +2275,20 @@ impl Core {
         executable_path: &Path,
         executable_fingerprint: &str,
         source: InstallationSource,
+        candidate: &RuntimeExecutableCandidate,
         search_generation: u64,
     ) -> Result<()> {
         let observed_at = chrono::Utc::now().to_rfc3339();
-        let snapshot = AgentRuntimeAdapterRegistry::default().light_ready_snapshot(
+        let mut snapshot = AgentRuntimeAdapterRegistry::default().light_ready_snapshot(
             kind,
             None,
             executable_fingerprint.to_string(),
             observed_at.clone(),
         )?;
+        apply_entrypoint_locator_compatibility(
+            &mut snapshot,
+            candidate.entrypoint_locator_identity.as_ref(),
+        );
         {
             let mut database = self.database.lock().await;
             AgentProfileService::default().commit_discovered_managed_installation(
@@ -2216,6 +2300,7 @@ impl Core {
                     source,
                     auth_scope: "default".to_string(),
                     snapshot,
+                    entrypoint_locator_identity: candidate.entrypoint_locator_identity.clone(),
                 },
             )?;
         }
@@ -2227,9 +2312,15 @@ impl Core {
             source: Some(source),
             reported_version: None,
             executable_fingerprint: Some(executable_fingerprint.to_string()),
+            search_path_source: candidate.search_path_source,
+            entrypoint_kind: Some(candidate.entrypoint_kind),
+            candidate_extension: Some(candidate.candidate_extension),
+            resolved_native_target: candidate.resolved_native_target,
+            version_probe_succeeded: None,
             search_generation,
             observed_at,
             diagnostic_code: None,
+            entrypoint_locator_identity: candidate.entrypoint_locator_identity.clone(),
         })
         .await;
         Ok(())
@@ -2822,10 +2913,20 @@ impl Core {
         purpose: RuntimeLaunchPurpose,
         deadline: tokio::time::Instant,
     ) -> Result<RuntimeCheckOutcome> {
-        let (existing, search) = {
+        let (existing, existing_entrypoint_locator, search) = {
             let database = self.database.lock().await;
+            let service = AgentProfileService::default();
+            let existing = service.managed_installation(&database, kind, "default")?;
+            let existing_entrypoint_locator = existing
+                .as_ref()
+                .map(|installation| {
+                    service.runtime_entrypoint_locator_identity(&database, &installation.id)
+                })
+                .transpose()?
+                .flatten();
             (
-                AgentProfileService::default().managed_installation(&database, kind, "default")?,
+                existing,
+                existing_entrypoint_locator,
                 self.runtime_search_environment.read().await.clone(),
             )
         };
@@ -2833,21 +2934,20 @@ impl Core {
             .as_ref()
             .map(|installation| canonical_runtime_path(Path::new(&installation.executable_path)));
         let mut unresolved_diagnostic = None;
-        let mut candidates = Vec::new();
-        if let Some(installation) = existing.as_ref() {
-            candidates.push((
-                PathBuf::from(&installation.executable_path),
+        let candidates = if let Some(installation) = existing.as_ref().filter(|installation| {
+            matches!(
                 installation.source,
-            ));
-        }
-        candidates.extend(
-            search
-                .candidates(kind, std::iter::empty())
-                .into_iter()
-                .map(|candidate| (candidate.path, candidate.source)),
-        );
-        let mut dedupe = BTreeSet::new();
-        candidates.retain(|(path, _)| dedupe.insert(path.clone()));
+                InstallationSource::Manual | InstallationSource::Custom
+            )
+        }) {
+            let explicit_path = existing_entrypoint_locator
+                .as_ref()
+                .map(|identity| PathBuf::from(&identity.canonical_shim_path))
+                .unwrap_or_else(|| PathBuf::from(&installation.executable_path));
+            search.candidates(kind, [explicit_path])
+        } else {
+            search.candidates(kind, std::iter::empty())
+        };
 
         if candidates.is_empty() {
             let mut database = self.database.lock().await;
@@ -2894,8 +2994,10 @@ impl Core {
             return Ok(RuntimeCheckOutcome::StableFailure);
         }
 
-        'candidate: for (path, source) in candidates {
-            if !is_executable_file(&path) {
+        'candidate: for candidate in candidates {
+            let path = &candidate.path;
+            let source = candidate.source;
+            if !is_runtime_entrypoint_file(path) {
                 note_product_runtime_diagnostic(
                     &mut unresolved_diagnostic,
                     "path_missing",
@@ -2932,7 +3034,7 @@ impl Core {
                 }
                 continue;
             }
-            let mut canonical = canonical_runtime_path(&path);
+            let mut canonical = canonical_runtime_path(path);
             let mut candidate_fingerprint = match fingerprint_executable(&canonical) {
                 Ok(fingerprint) => fingerprint,
                 Err(error) => {
@@ -2974,18 +3076,27 @@ impl Core {
                 }
             };
             let targets_current_installation = existing_canonical_path.as_ref() == Some(&canonical);
-            let mut identity_changed = targets_current_installation
-                && existing
+            let executable_identity_changed = existing
+                .as_ref()
+                .and_then(|installation| installation.snapshot.as_ref())
+                .and_then(|snapshot| snapshot.executable_fingerprint.as_deref())
+                != Some(candidate_fingerprint.as_str());
+            let locator_identity_changed = existing_entrypoint_locator
+                .as_ref()
+                .map(|identity| identity.compatibility_fingerprint.as_str())
+                != candidate
+                    .entrypoint_locator_identity
                     .as_ref()
-                    .and_then(|installation| installation.snapshot.as_ref())
-                    .and_then(|snapshot| snapshot.executable_fingerprint.as_deref())
-                    != Some(candidate_fingerprint.as_str());
+                    .map(|identity| identity.compatibility_fingerprint.as_str());
+            let mut identity_changed = targets_current_installation
+                && (executable_identity_changed || locator_identity_changed);
             if identity_changed {
                 self.commit_rebound_runtime_candidate(
                     kind,
                     &canonical,
                     &candidate_fingerprint,
                     source,
+                    &candidate,
                     search.generation(),
                 )
                 .await?;
@@ -3078,8 +3189,8 @@ impl Core {
                         {
                             return Ok(RuntimeCheckOutcome::Superseded);
                         }
-                        if !is_executable_file(&path) {
-                            let rebound_path = canonical_runtime_path(&path);
+                        if !is_runtime_entrypoint_file(path) {
+                            let rebound_path = canonical_runtime_path(path);
                             let mut database = self.database.lock().await;
                             AgentProfileService::default().record_managed_probe_failure(
                                 &mut database,
@@ -3111,7 +3222,7 @@ impl Core {
                             );
                             continue 'candidate;
                         }
-                        canonical = canonical_runtime_path(&path);
+                        canonical = canonical_runtime_path(path);
                         candidate_fingerprint = match fingerprint_executable(&canonical) {
                             Ok(fingerprint) => fingerprint,
                             Err(error) => {
@@ -3164,6 +3275,7 @@ impl Core {
                                 &canonical,
                                 &candidate_fingerprint,
                                 source,
+                                &candidate,
                                 search.generation(),
                             )
                             .await?;
@@ -3172,7 +3284,17 @@ impl Core {
                     }
                 }
             };
-            let RuntimeDeepProbeResult { snapshot, failure } = deep_probe;
+            let RuntimeDeepProbeResult {
+                mut snapshot,
+                failure,
+            } = deep_probe;
+            if !candidate.entrypoint_locator_identity_is_current() {
+                return Ok(RuntimeCheckOutcome::Superseded);
+            }
+            apply_entrypoint_locator_compatibility(
+                &mut snapshot,
+                candidate.entrypoint_locator_identity.as_ref(),
+            );
             if !self
                 .runtime_probe_identity_is_current(
                     kind,
@@ -3196,6 +3318,7 @@ impl Core {
                         source,
                         auth_scope: "default".to_string(),
                         snapshot: snapshot.clone(),
+                        entrypoint_locator_identity: candidate.entrypoint_locator_identity.clone(),
                     },
                 )?;
                 drop(database);
@@ -3206,9 +3329,15 @@ impl Core {
                     source: Some(source),
                     reported_version: snapshot.reported_version,
                     executable_fingerprint: snapshot.executable_fingerprint,
+                    search_path_source: candidate.search_path_source,
+                    entrypoint_kind: Some(candidate.entrypoint_kind),
+                    candidate_extension: Some(candidate.candidate_extension),
+                    resolved_native_target: candidate.resolved_native_target,
+                    version_probe_succeeded: Some(true),
                     search_generation: search.generation(),
                     observed_at: chrono::Utc::now().to_rfc3339(),
                     diagnostic_code: None,
+                    entrypoint_locator_identity: candidate.entrypoint_locator_identity.clone(),
                 })
                 .await;
                 self.runtime_product_diagnostics.write().await.remove(&kind);
@@ -11699,8 +11828,6 @@ fn codex_delta_batch_identity(incoming: &CodexIncoming) -> Option<(&str, &str, i
         "item/agentMessage/delta"
             | "item/reasoning/summaryTextDelta"
             | "item/plan/delta"
-            | "item/commandExecution/outputDelta"
-            | "command/exec/outputDelta"
             | "item/fileChange/patchUpdated"
     )
     .then_some((
@@ -11708,6 +11835,19 @@ fn codex_delta_batch_identity(incoming: &CodexIncoming) -> Option<(&str, &str, i
         agent_run_id.as_str(),
         *execution_epoch,
     ))
+}
+
+fn is_codex_command_output_delta_notification(message: &Value) -> bool {
+    message.get("id").is_none()
+        && message
+            .get("method")
+            .and_then(Value::as_str)
+            .is_some_and(|method| {
+                matches!(
+                    method,
+                    "item/commandExecution/outputDelta" | "command/exec/outputDelta"
+                )
+            })
 }
 
 fn acp_delta_batch_identity(
@@ -11869,6 +12009,11 @@ async fn process_codex_events(
                 _ = &mut shutdown => break,
             },
         };
+        if let CodexIncoming::Message { message, .. } = &incoming
+            && is_codex_command_output_delta_notification(message)
+        {
+            continue;
+        }
         let Some(mut runtime_route_permit) = core.planned_shutdown.enter_runtime_route().await
         else {
             break;
@@ -12770,13 +12915,14 @@ async fn process_agent_run_acp_message(
                 eprintln!(
                     "failed to persist Runtime Evidence for AgentRun {agent_run_id}: {error:#}"
                 );
-                if ExecutionEvidenceService::is_runtime_evidence_event(event_type) {
+                if ExecutionEvidenceService::is_durable_runtime_evidence_event(event_type) {
                     return;
                 }
                 None
             }
         };
-    if ExecutionEvidenceService::is_runtime_evidence_event(event_type) && evidence.is_none() {
+    if ExecutionEvidenceService::is_durable_runtime_evidence_event(event_type) && evidence.is_none()
+    {
         return;
     }
     let evidence_id = evidence.as_ref().map(|evidence| evidence.id.as_str());
@@ -13163,7 +13309,7 @@ async fn persist_runtime_evidence(
     event_type: &str,
     payload: &Value,
 ) -> Result<Option<AgentRunExecutionEvidence>> {
-    if !ExecutionEvidenceService::is_runtime_evidence_event(event_type) {
+    if !ExecutionEvidenceService::is_durable_runtime_evidence_event(event_type) {
         return Ok(None);
     }
     let mut database = core.database.lock().await;
@@ -14231,6 +14377,60 @@ async fn process_agent_run_codex_delta_batch(
     }
 }
 
+async fn persist_interrupted_codex_activities(
+    core: &Core,
+    output: &mpsc::UnboundedSender<String>,
+    runtime: &CodexRuntime,
+    agent_run_id: &str,
+    execution_epoch: i64,
+) -> Result<usize> {
+    let mut inserted = 0_usize;
+    for mut item in runtime.open_action_items().await {
+        let Some(item_fields) = item.as_object_mut() else {
+            continue;
+        };
+        item_fields.insert(
+            "status".to_string(),
+            Value::String("interrupted".to_string()),
+        );
+        if item_fields.get("type").and_then(Value::as_str) == Some("commandExecution") {
+            item_fields.insert("aggregatedOutput".to_string(), Value::Null);
+        }
+        let payload = json!({
+            "reasonCode": "runtime_interrupted",
+            "item": item,
+        });
+        let recorded = {
+            let mut database = core.database.lock().await;
+            ExecutionEvidenceService.record_interrupted_runtime_activity(
+                &mut database,
+                &ManagedBlobStore::new(&core.data_dir),
+                agent_run_id,
+                execution_epoch,
+                &payload,
+            )?
+        };
+        let Some(recorded) = recorded else {
+            continue;
+        };
+        inserted += usize::from(recorded.inserted);
+        let evidence = recorded.into_evidence();
+        emit(
+            output,
+            &evidence.event_type,
+            json!({
+                "agentRunId": agent_run_id,
+                "executionEpoch": execution_epoch,
+                "nativeMethod": "turn/completed",
+                "evidenceId": evidence.id,
+                "payload": evidence.payload,
+                "canonical": evidence.canonical,
+            }),
+        );
+    }
+    Ok(inserted)
+}
+
 async fn process_agent_run_codex_message(
     core: &Arc<Core>,
     output: &mpsc::UnboundedSender<String>,
@@ -14240,6 +14440,9 @@ async fn process_agent_run_codex_message(
     message: Value,
     runtime_route_permit: &mut rovai_core::planned_shutdown::RuntimeRoutePermit,
 ) {
+    if is_codex_command_output_delta_notification(&message) {
+        return;
+    }
     let Some(runtime) = core
         .codex_cli
         .get_agent_run_on_host(host_instance_id, agent_run_id, execution_epoch)
@@ -14302,11 +14505,11 @@ async fn process_agent_run_codex_message(
     {
         eprintln!("failed to persist Codex Usage for AgentRun {agent_run_id}: {error:#}");
     }
-    runtime.observe_agent_message(&method, &params).await;
     if method == "thread/tokenUsage/updated" {
         return;
     }
     let (event_type, payload) = codex::normalize_event(&method, &params);
+    runtime.observe_agent_message(&method, &params).await;
     let evidence =
         match persist_runtime_evidence(core, agent_run_id, execution_epoch, event_type, &payload)
             .await
@@ -14316,13 +14519,14 @@ async fn process_agent_run_codex_message(
                 eprintln!(
                     "failed to persist Runtime Evidence for AgentRun {agent_run_id}: {error:#}"
                 );
-                if ExecutionEvidenceService::is_runtime_evidence_event(event_type) {
+                if ExecutionEvidenceService::is_durable_runtime_evidence_event(event_type) {
                     return;
                 }
                 None
             }
         };
-    if ExecutionEvidenceService::is_runtime_evidence_event(event_type) && evidence.is_none() {
+    if ExecutionEvidenceService::is_durable_runtime_evidence_event(event_type) && evidence.is_none()
+    {
         return;
     }
     let evidence_id = evidence.as_ref().map(|evidence| evidence.id.as_str());
@@ -14428,6 +14632,20 @@ async fn process_agent_run_codex_message(
         eprintln!("ignored fenced native Turn completion for AgentRun {agent_run_id}");
         return;
     }
+    if completed.status == "interrupted"
+        && let Err(error) = persist_interrupted_codex_activities(
+            core,
+            output,
+            &runtime,
+            agent_run_id,
+            execution_epoch,
+        )
+        .await
+    {
+        eprintln!(
+            "failed to persist interrupted Runtime Activities for AgentRun {agent_run_id}: {error:#}"
+        );
+    }
     if let Err(error) =
         flush_runtime_monitoring_run(core, agent_run_id, execution_epoch, "terminal_flush").await
     {
@@ -14442,8 +14660,10 @@ async fn process_agent_run_codex_message(
     };
     let planned_outcome = if completed.status == "completed" && final_agent_message.is_some() {
         RuntimeTerminalOutcome::Succeeded
-    } else if matches!(completed.status.as_str(), "cancelled" | "interrupted") {
+    } else if completed.status == "cancelled" {
         RuntimeTerminalOutcome::Cancelled
+    } else if completed.status == "interrupted" {
+        RuntimeTerminalOutcome::Interrupted
     } else {
         RuntimeTerminalOutcome::Failed
     };
@@ -14482,10 +14702,10 @@ async fn process_agent_run_codex_message(
                 .flatten()
                 .map(|execution| execution.workspace.execution_root)
         };
-        let error_code = if completed.status == "completed" {
-            "runtime_missing_final_output".to_string()
-        } else {
-            format!("runtime_turn_{}", completed.status)
+        let error_code = match completed.status.as_str() {
+            "completed" => "runtime_missing_final_output".to_string(),
+            "interrupted" => "runtime_interrupted".to_string(),
+            status => format!("runtime_turn_{status}"),
         };
         let error_detail = Some(match &completed.error {
             Some(error) => format!(
@@ -14640,7 +14860,11 @@ async fn process_agent_run_codex_message(
                         agent_run_id: agent_run_id.to_string(),
                         expected_version: execution.version,
                         execution_epoch,
-                        error_code: format!("runtime_turn_{}", completed.status),
+                        error_code: if completed.status == "interrupted" {
+                            "runtime_interrupted".to_string()
+                        } else {
+                            format!("runtime_turn_{}", completed.status)
+                        },
                         error_detail: Some(match &completed.error {
                             Some(error) => format!(
                                 "Codex Native Turn {} ended as {}: {}",
@@ -16385,6 +16609,7 @@ mod tests {
                     source: InstallationSource::Manual,
                     auth_scope: "default".to_string(),
                     snapshot,
+                    entrypoint_locator_identity: None,
                 },
             )
             .unwrap();
@@ -17000,6 +17225,51 @@ while IFS= read -r _ignored; do :; done
         }
         let codex_terminal = codex_message("codex-host", "run-1", 2, "item/completed");
         assert!(codex_delta_batch_identity(&codex_terminal).is_none());
+        let command_output_delta = CodexIncoming::Message {
+            host_instance_id: "codex-host".to_string(),
+            agent_run_id: "run-1".to_string(),
+            execution_epoch: 2,
+            message: json!({
+                "method": "item/commandExecution/outputDelta",
+                "params": {
+                    "threadId": "thread-1",
+                    "turnId": "turn-1",
+                    "itemId": "command-1",
+                    "delta": "line one\n",
+                }
+            }),
+        };
+        assert!(codex_delta_batch_identity(&command_output_delta).is_none());
+        let CodexIncoming::Message {
+            message: command_output_message,
+            ..
+        } = command_output_delta
+        else {
+            unreachable!()
+        };
+        assert!(is_codex_command_output_delta_notification(
+            &command_output_message
+        ));
+        let legacy_output_delta = json!({
+            "method": "command/exec/outputDelta",
+            "params": {"itemId": "command-1", "delta": "legacy"}
+        });
+        assert!(is_codex_command_output_delta_notification(
+            &legacy_output_delta
+        ));
+        let id_bearing_output_delta = json!({
+            "id": 7,
+            "method": "item/commandExecution/outputDelta",
+            "params": {"threadId": "thread-1", "turnId": "turn-1", "itemId": "command-1", "delta": "request"}
+        });
+        assert!(!is_codex_command_output_delta_notification(
+            &id_bearing_output_delta
+        ));
+        assert!(
+            prepare_codex_delta_batch(std::slice::from_ref(&command_output_message))
+                .unwrap()
+                .is_none()
+        );
 
         let acp_delta = acp_message(
             (
@@ -18207,6 +18477,42 @@ while IFS= read -r _ignored; do :; done
             assert_eq!(payload["output"], expected_output, "{adapter_kind}");
             assert!(!serialized.contains(secret), "{adapter_kind}");
             assert!(payload["rawOutputDigest"].is_string(), "{adapter_kind}");
+        }
+    }
+
+    #[test]
+    fn every_acp_adapter_uses_terminal_runtime_action_output_not_command_delta() {
+        let acp_adapters = AdapterKind::ALL
+            .into_iter()
+            .filter(|adapter_kind| adapter_kind.uses_acp())
+            .collect::<Vec<_>>();
+        assert_eq!(acp_adapters.len(), 10);
+        for adapter_kind in acp_adapters {
+            let expected_output = format!("{} terminal output", adapter_kind.as_str());
+            let (event_type, payload) = normalize_acp_event(
+                adapter_kind,
+                "session/update",
+                &json!({
+                    "update": {
+                        "sessionUpdate": "tool_call_update",
+                        "toolCallId": format!("{}-command", adapter_kind.as_str()),
+                        "status": "completed",
+                        "kind": "execute",
+                        "content": [{"type": "text", "text": expected_output}],
+                    }
+                }),
+            );
+            assert_eq!(event_type, "runtime.action", "{adapter_kind:?}");
+            assert_eq!(payload["status"], "completed", "{adapter_kind:?}");
+            assert_eq!(payload["output"], expected_output, "{adapter_kind:?}");
+            assert!(
+                ExecutionEvidenceService::is_durable_runtime_evidence_event(event_type),
+                "{adapter_kind:?}"
+            );
+            assert!(
+                !ExecutionEvidenceService::is_transient_command_output_event(event_type),
+                "{adapter_kind:?}"
+            );
         }
     }
 

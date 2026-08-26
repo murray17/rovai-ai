@@ -9,7 +9,7 @@ const packageMetadata = JSON.parse(readFileSync(
 describe('desktop package metadata', () => {
   it('keeps the visible brand separate from Electron helper bundle identity', () => {
     expect(packageMetadata.productName).toBe('Rovai AI')
-    expect(packageMetadata.version).toBe('0.0.2')
+    expect(packageMetadata.version).toBe('0.0.3')
     expect(packageMetadata.build.productName).toBe('Rovai AI')
     expect(packageMetadata.build.mac.executableName).toBeUndefined()
     expect(packageMetadata.build.win.executableName).toBe('Rovai-ai')
@@ -29,6 +29,27 @@ describe('desktop package metadata', () => {
     expect(packageMetadata.build.mac.target).toEqual(['dir', 'dmg', 'zip'])
     expect(packageMetadata.scripts['dist:mac:release:arm64']).toContain('--mac dmg zip')
     expect(packageMetadata.scripts['dist:mac:release:x64']).toContain('--mac dmg zip')
+  })
+
+  it('uses the fixed release identity for daily installation artifacts', () => {
+    const stableSigning = [
+      packageMetadata.scripts['package:mac:daily'],
+      packageMetadata.scripts['dist:mac:release:arm64'],
+      packageMetadata.scripts['dist:mac:release:x64']
+    ]
+    for (const command of stableSigning) {
+      expect(command).toContain('-c.mac.identity="Rovai Release Signing"')
+      expect(command).toContain('-c.forceCodeSigning=true')
+      expect(command).not.toContain('identity=-')
+    }
+    expect(packageMetadata.scripts['package:mac:daily']).toContain(
+      'scripts/verify-macos-app.mjs arm64'
+    )
+    expect(packageMetadata.scripts['install:mac:daily']).toContain(
+      'scripts/install-macos-daily.mjs'
+    )
+    expect(packageMetadata.scripts['package:mac:unsigned']).toContain('identity=-')
+    expect(packageMetadata.scripts['package:mac']).toContain('identity=-')
   })
 
   it('does not build or package a native open-panel prewarmer', () => {

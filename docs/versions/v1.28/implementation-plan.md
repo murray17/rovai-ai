@@ -3,7 +3,7 @@ document_type: implementation-plan
 version: v1.28
 authority: implementation-and-acceptance-status
 status: in_progress
-last_updated: 2026-08-25
+last_updated: 2026-08-26
 ---
 
 # v1.28 实施计划
@@ -58,7 +58,32 @@ Checklist 仍拥有完整通用步骤，本页只记录本版本的具体状态�
 - [x] 把已成功 resolved 附件的后置 Authority/digest 故障收窄为附件局部 `recovery_required`：startup 与
   pre-dispatch reconciliation 省略异常项、重建健康 catalog 并保持 Camp `ready`；新 Context 不投影 stale path，
   exact Authority 恢复后自动复活，unresolved writer intent 与 root/containment 安全错误继续 fail closed；
+- [x] 把同一 Run 内最大连续 Tool 收成 Renderer-only 摘要，保留 chronology 与 identity，活动态显示最后一条
+  非终态操作且不同时追加累计数，尾组间隙显示已结算总数，终态不追加结果文字；组内有成功即使用绿色
+  状态、仅全部失败使用红色；精确 Tool 首次展开前不挂载完整结果，并覆盖失败、停止、仅记录、双主题、
+  Inspector 与换位性能；
+- [x] running Run 的尾 Tool 组在操作间隙保持活动摘要和稳定高度，直到 narration/plan/diagnostic 或 Run 状态
+  形成真实边界才收口；移除组后瞬时 Loading 往返，并让 16px 组图标与摘要文字共享中心线；
+- [x] 补齐 Windows Runtime rescan 的 HKCU/HKLM PATH hydration、Codex installer known location、
+  `.exe/.cmd/.bat` closed discovery、npm/pnpm native target resolution、受控 command-shim launch/identity、
+  resolved locator evidence 持久化与 snapshot/Host fencing、PATH 传播、Job cleanup 与 Windows 回归；`.ps1`
+  保持关闭；
 - [x] 运行 Impeccable detector，整理 worktree 交接，并通过 PR 交付 `main`。
+
+## Command output 持久化优化
+
+- [x] 逐项核验 13 个 Adapter：仅 Codex 产生 `command.output.delta`；十个 ACP Adapter、Claude Code 与
+  Antigravity 都已有完整 terminal semantic output，当前无需 spool；
+- [x] 对未来 Codex delta 在 Host stdout ingress 完成三态 method/route 分类并直接丢弃：精确当前 route 与
+  stale/malformed/legacy 都不构造 `CodexIncoming`；下游漏网 guard 早于 shutdown route permit、batching、
+  Runtime lookup 与数据库读取，停止 Evidence、Canonical、Managed Blob 与 Renderer live-state 写入；历史
+  Evidence/Blob 保持原样；
+- [x] 保留 terminal Command 的 command/status/exitCode/aggregatedOutput，大输出继续进入精确 Tool 的 Managed Blob；
+- [x] 将 Runtime interruption 投影为 terminal/unsettled + `runtime_interrupted`，Renderer 显示
+  stopped/interrupted，不伪造 cancelled；
+- [x] 覆盖真实 Host ingress 连续 100,000 delta 零 `CodexIncoming`、零 DB/Renderer 项，current/old/deactivate/
+  unbind/malformed/legacy 分类、带 `id` request 保留、flood 后 terminal 顺序、terminal aggregate/blob、interruption
+  与 PR #63 Tool chronology/grouping/lazy disclosure 回归。
 
 ## 验收原则
 

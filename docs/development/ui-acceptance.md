@@ -1,7 +1,7 @@
 ---
 document_type: development-guide
 authority: desktop-ui-acceptance-infrastructure
-last_updated: 2026-08-24
+last_updated: 2026-08-26
 ---
 
 # 桌面 UI 验收与隔离数据
@@ -190,7 +190,7 @@ pnpm accept:member-lifecycle-ui
 
 ### Agent 执行过程门禁
 
-Renderer 的权威行为见 [Run Process Detail Surface v19](../contracts/run-process-detail-surface-v19.md) 与
+Renderer 的权威行为见 [Run Process Detail Surface v22](../contracts/run-process-detail-surface-v22.md) 与
 [当前 UI 详规：Camp 执行过程](../ui/components/conversation-workspace.md#camp-执行过程)。修改 AgentRun 分组、执行台、Drawer、
 Task Related execution、停止结果或 Inspector 页签后，至少运行：
 
@@ -247,15 +247,20 @@ pnpm accept:runtime-activity-ui
   76ch，代码、表格、Task 和审批等现有结构化内容才可进入既有工件通道，身份色只进入头像、名称或身份点；
 - Canonical Activity 未报告工具时仍不补造 Tool 行；同一 Runtime 真实报告的 Tool 名称和 source 继续
   与 Runtime evidence 一致；Claude Bash fixture 必须覆盖 terminal output 为 `null` 的情况，并证明仅凭
-  公开的 `tool_use.input.command` 仍渲染为可展开 disclosure，而不是不可操作的静态 Tool 行。所有 Tool 行
-  必须保持 `16px 类型图标 / 可缩略名称 / 16px 状态轨 / 20px disclosure 轨` 四列；不可展开行保留末轨
-  占位，Shell、File、Git、Network、Permission、Runtime、Plan、Tool 和 Unknown 使用统一 16px 单色
-  线性 SVG，状态只由右侧带辅助名称的小点表达；
+  公开的 `tool_use.input.command` 仍渲染为可展开 disclosure，而不是不可操作的静态 Tool 行。同一
+  AgentRun 的最大连续 Tool 默认进入收起组，narration、plan 与 diagnostic 必须截断分组；活动组摘要显示
+  最后一条 running/waiting 操作且不同时追加累计数，终态组不把失败或 recorded 冒充成功。running Run 的
+  尾组在 Tool 间隙必须保持“执行中 · 已执行/已汇总 N 项操作”和 running 图标，不短暂切成终态，也不重复渲染
+  “正在处理”；真实非 Tool 或 Run 边界到达后才收口。组 summary 与所有 Tool 行都必须保持
+  `16px 类型图标 / 可缩略名称 / 16px 状态轨 / 20px disclosure 轨` 四列；不可展开行保留末轨
+  占位，组图标与摘要文字共享 16px 中心线；Shell、File、Git、Network、Permission、Runtime、Plan、Tool 和 Unknown 使用统一 16px 单色
+  线性 SVG，状态只由右侧带辅助名称的形状表达；打开组只显示完整 Tool chronology，不自动打开任一结果；
 - 同一 Run 至少 15 个 Canonical Tool operation 时，较早项、中间项和最后项全部按首次出现顺序保留；
   Built-in `camp.read/search` fixture 的顶层 `input/output` 为空、公共结果只在 `coreEnvelope.result` 时，
   两条 Tool 行仍可展开，完整结果不含 Envelope、request/receipt 或 canonical input。
-- 超过 Renderer 原预览上限且由 Managed Blob 保存完整 Payload 的 Tool 输出在 disclosure 打开前不读取、
-  不把全文挂入 DOM；打开精确 Tool 行后按需读取并在固定最大高度的可聚焦结果 region 内完整渲染，
+- 超过 Renderer 原预览上限且由 Managed Blob 保存完整 Payload 的 Tool 输出在精确 Tool disclosure 打开前
+  不读取、不把全文挂入 DOM；只打开外层 Tool 组仍必须保持零结果 region，打开精确 Tool 行后才按需读取并
+  在固定最大高度的可聚焦结果 region 内完整渲染，
   首、中、末 8,000 行以上标记都存在，不显示截断提示或复制按钮。溢出使用内部滚动条，Arrow、
   Page Up/Down、Space、Home/End 可滚动，Escape 返回对应 summary 且不关闭 Drawer；读取失败保留精确
   错误与重试，成功后焦点进入结果。`1040×700` 与 200% zoom 下结果、执行台、Approval Dock 和 Composer

@@ -1635,6 +1635,9 @@ export function RuntimeInstallationsPanel({ health, onReload }: {
               item ?? null,
               health === null
             )
+            const discoveryDiagnostic = item
+              ? runtimeDiscoveryDiagnostic(item.discovery)
+              : null
             return (
               <article key={runtimeKind} className="runtime-product-row">
                 <span className="runtime-product-logo" aria-hidden="true">
@@ -1645,6 +1648,9 @@ export function RuntimeInstallationsPanel({ health, onReload }: {
                   <small>{admission?.status !== 'qualified'
                     ? presentation.detail
                     : item?.reportedVersion ?? adapterMaturityLabel(runtimeKind)}</small>
+                  {discoveryDiagnostic && (
+                    <small className="runtime-discovery-diagnostic">{discoveryDiagnostic}</small>
+                  )}
                 </div>
                 <span className={`runtime-snapshot-badge runtime-product-status status-${presentation.status}`}>
                   {presentation.label}
@@ -1663,6 +1669,21 @@ export function RuntimeInstallationsPanel({ health, onReload }: {
       </section>
     </>
   )
+}
+
+function runtimeDiscoveryDiagnostic(
+  discovery: ProductRuntimeAvailability['discovery']
+): string | null {
+  if (!discovery.entrypointKind || !discovery.candidateExtension) return null
+  const source = discovery.searchPathSource ?? discovery.source ?? 'unknown'
+  const target = discovery.resolvedNativeTarget ? '已解析' : '未解析'
+  const versionProbe = discovery.versionProbeSucceeded === true
+    ? '成功'
+    : discovery.versionProbeSucceeded === false ? '失败' : '未运行'
+  const extension = discovery.candidateExtension === 'native'
+    ? 'native'
+    : `.${discovery.candidateExtension}`
+  return `来源 ${source} · 入口 ${discovery.entrypointKind} · 后缀 ${extension} · Native 目标 ${target} · Version Probe ${versionProbe}`
 }
 
 function identityCommand(draft: IdentityDraft, agent: AgentProfile | null): CreateAgentProfileCommand | UpdateAgentProfileCommand {

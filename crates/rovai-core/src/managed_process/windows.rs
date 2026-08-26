@@ -53,7 +53,10 @@ use windows_sys::Win32::{
 
 use super::{
     ManagedChildStderr, ManagedChildStdin, ManagedChildStdout, ManagedProcessLaunchSpec,
-    ManagedStdinPolicy, ManagedWindowsArgvDialect,
+    ManagedStdinPolicy, ManagedWindowsArgvDialect, WindowsRuntimeEntrypoint,
+};
+use crate::windows_runtime_entrypoint::{
+    capture_windows_command_shim, serialize_command_shim_command_line,
 };
 
 const WINDOWS_COMMAND_LINE_LIMIT: usize = 32_767;
@@ -85,11 +88,20 @@ impl WindowsManagedProcess {
         let application = wide_nul(spec.application().as_os_str(), "application")?;
         let working_directory =
             wide_nul(spec.working_directory().as_os_str(), "working directory")?;
-        let mut command_line = serialize_command_line(
-            spec.windows_argv_dialect(),
-            spec.application().as_os_str(),
-            spec.arguments(),
-        )?;
+        let mut command_line = match spec.windows_entrypoint() {
+            WindowsRuntimeEntrypoint::NativeExecutable { .. } => serialize_command_line(
+                spec.windows_argv_dialect(),
+                spec.application().as_os_str(),
+                spec.arguments(),
+            )?,
+            WindowsRuntimeEntrypoint::CommandShim {
+                shim, interpreter, ..
+            } => serialize_command_shim_command_line(
+                interpreter.as_os_str(),
+                shim,
+                spec.arguments(),
+            )?,
+        };
         let environment = serialize_environment(spec.environment())?;
 
         // Holding a non-delete/non-write-share handle closes the path replacement
@@ -103,6 +115,36 @@ impl WindowsManagedProcess {
                 "managed_process.invalid_application: application identity changed before launch"
             );
         }
+        let command_shim_lock = match spec.windows_entrypoint() {
+            WindowsRuntimeEntrypoint::NativeExecutable { executable } => {
+                if executable != spec.application() {
+                    bail!(
+                        "managed_process.invalid_application: native entrypoint identity is inconsistent"
+                    );
+                }
+                None
+            }
+            WindowsRuntimeEntrypoint::CommandShim {
+                shim,
+                interpreter,
+                resolved_target,
+                identity,
+            } => {
+                if interpreter != spec.application() || resolved_target.is_some() {
+                    bail!(
+                        "managed_process.invalid_application: command shim identity is inconsistent"
+                    );
+                }
+                let shim_wide = wide_nul(shim.as_os_str(), "command shim")?;
+                let lock = open_application_for_launch(&shim_wide)?;
+                if capture_windows_command_shim(shim)? != *identity {
+                    bail!(
+                        "managed_process.invalid_application: command shim identity changed before launch"
+                    );
+                }
+                Some(lock)
+            }
+        };
         let job = create_kill_on_close_job()?;
 
         let (child_stdin, parent_stdin) = child_read_pipe()?;
@@ -162,6 +204,7 @@ impl WindowsManagedProcess {
         if created == 0 {
             return Err(last_os_error("managed_process.atomic_assignment_failed"));
         }
+        drop(command_shim_lock);
 
         let process = owned_handle(process_information.hProcess, "managed_process.spawn_failed")?;
         let thread = owned_handle(process_information.hThread, "managed_process.spawn_failed")?;

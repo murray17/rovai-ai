@@ -2,7 +2,7 @@
 document_type: version-decisions
 version: v1.28
 lifecycle: historical
-last_updated: 2026-08-25
+last_updated: 2026-08-26
 ---
 
 # v1.28 决策记录
@@ -367,3 +367,111 @@ admission 覆盖 Claim 和整个 Run。
 - 删除 `message_attachment` 或把成功 publication 改成 `failed`：会重写公共历史、ledger 与审计事实；
 - 从残留 View 复制回 Authority：颠倒 Authority/派生关系，且可能固化已损坏字节；
 - 对所有路径/根错误都局部降级：会掩盖 containment 或实例身份破坏。
+
+<a id="v1-28-d11"></a>
+## V1.28-D11：Windows Runtime discovery 冻结 `.exe/.cmd/.bat` closed set 与 Registry PATH hydration
+
+### 背景
+
+Windows 官方 Codex installer 将 binary 安装到 `%LOCALAPPDATA%\Programs\OpenAI\Codex\bin` 并只为后续进程更新
+User PATH；npm/pnpm 的常见入口则是 `codex.cmd`。Desktop 已启动后仅复用 inherited PATH、Discovery 只接受
+`.exe`，会让其他新开的工具可找到 Codex 而 Agent Runtime rescan 仍显示 Missing。另一方面，直接扩大 PATHEXT 或
+把任意脚本伪装成 executable 会破坏 executable identity、argv 安全与 Job ownership。
+
+### 决定
+
+Windows 每次 Runtime Search Environment capture/rescan 只读读取 HKCU User PATH 与 HKLM Machine PATH，在当前
+环境变量快照下展开 `REG_SZ/REG_EXPAND_SZ`，过滤空、相对、未展开与不存在目录，并按 inherited、HKCU、HKLM、
+known locations 稳定、大小写不敏感去重。该 PATH 快照显式进入 discovery、version/deep/health Probe、AgentRun 与
+Runtime 子命令，不修改 Registry 或 Core 全局环境。Codex installer 默认目录继续作为 known-location fallback。
+
+entrypoint closed set 固定为 `.exe/.cmd/.bat`，同目录按该顺序；`.ps1/.com` 与 PowerShell fallback 不开放。手动绝对
+路径和 Adapter override 各自是 terminal candidate set，错误或 Probe 失败不回退自动 PATH。已知 Codex npm/pnpm
+`.cmd` 只能在有界、exact-template、package containment 与 metadata 校验全部通过后解析到 platform package 的真实
+`codex.exe`，正式 path、fingerprint、Probe 与 launch 均绑定 native target。不能验证为 native target 的 bounded
+`.cmd` 与 `.bat` 保持 `windows_command_shim` identity。
+
+`windows_command_shim` 只通过 Managed Runtime Process 启动：固定 canonical System32 `cmd.exe` 为
+`lpApplicationName`，使用 `/e:on /v:off /d /c` 与 Core-owned batch serializer，拒绝 raw command fragment 和
+NUL/CR/LF。compatibility composite fingerprint 覆盖 shim kind、canonical path、content digest、interpreter path
+及 fingerprint；CreateProcess 前在打开 identity 下复核。已解析为 native target 的 Codex shim 另存不公开的 durable
+locator identity，覆盖 shim path/content、interpreter path/fingerprint、resolved target path/fingerprint；其 composite
+digest 进入 Installation generation、snapshot Session key 与 Host compatibility，因此只改 shim 也会撤销旧 Ready 并
+重新 Deep Probe。现有原子 Job-list、stdio handle list、cancel、timeout 与 cleanup 不变。诊断只新增 source、
+entrypoint kind、candidate extension、native target resolution 与 version Probe 结果，并继续经过既有路径脱敏。
+
+### 后果
+
+Desktop 无需重启即可发现 installer 写入 User/Machine PATH 的 Runtime；npm/pnpm Codex 优先绕过 Node wrapper并获得
+native identity；只有 `.bat` 或通用 `.cmd` 的 Runtime 也能被明确发现、Probe 和正式运行。shim 内容、native target、
+interpreter、PATH winner 或 reported version 变化都会触发新 Probe/Host compatibility。batch 脚本内部若再次使用
+`%*` 或自定义变量展开，其二次解析语义仍属于脚本，不由 Core 伪装成 native argv 保证；generic shim argv 中无法
+普遍无损表示的字面引号、`%` 与末尾反斜杠会在 CreateProcess 前 fail closed，因此 prompt 继续只经 stdin。
+
+### 被拒绝方案
+
+- 只增加 Codex known location：仍无法解决 Rovai 启动后新增 User/Machine PATH 与其他 Runtime；
+- 直接按 PATHEXT 启动 `.cmd/.bat/.ps1`：扩大解释器面且丢失真实 entrypoint identity；
+- 使用 `cmd.exe /c` 字符串拼接：允许 metacharacter 注入、AutoRun 改义与不可验证 argv；
+- 对 npm shim 执行后观察 child 来猜 target：执行了未验证脚本，也可能把任意 executable 误绑定为 Codex；
+- 显式路径失败后继续 PATH：把用户选择静默替换成另一安装，破坏 fail-closed 语义。
+
+<a id="v1-28-d12"></a>
+## V1.28-D12：Command output delta 在 Host ingress 丢弃，terminal aggregate 是唯一输出权威
+
+### 背景
+
+Codex app-server 会把命令 stdout/stderr 拆成大量 `command.output.delta`。旧路径把每片都写入
+`agent_run_execution_evidence`，长命令可产生数万至十万行，而当前 Renderer 实际不消费这些 delta 展示实时输出；
+最终 `item/completed` 已携带完整 `command`、`status`、`exitCode` 和 `aggregatedOutput`。继续逐片段持久化既不增加
+用户可见事实，又放大数据库、恢复与 Renderer 投影成本。
+
+对全部 13 个 Adapter 的归一化路径逐项核验：只有 `codex-cli` 产生这种 output delta；十个 ACP Adapter 的 terminal
+`tool_call_update`、Claude Code 的 Bash `tool_result` 与 Antigravity 的 terminal tool step 都已经生成包含完整公开
+output 的单一 `runtime.action`。当前没有 Adapter 需要额外 accumulator 或 spool。
+
+### 决定
+
+只对未来新产生的数据采用 clean break。既有历史 Evidence、Managed Blob 与 Canonical Activity 不迁移、不删除、
+不改写、不重建，旧 Camp 的历史性能问题留待独立治理，历史 delta 继续可读。
+
+Codex Host 必须先处理既有 JSON-RPC response，再对无 `id` notification 识别
+`item/commandExecution/outputDelta` 与 `command/exec/outputDelta`。识别和 route 验证分离：精确匹配当前 Native
+Thread/Turn 且 `itemId` 非空时分类为 current delta；旧 Turn、已 deactivate/unbind、字段缺失或 legacy shape 分类为
+rejected delta。两类都必须在同一 route 读锁临界区内消费并直接丢弃，不构造或发送 `CodexIncoming`。带 `id` 的
+同名 server request 不参与 early-drop，继续走既有 request routing / unsupported-request response。
+
+Host ingress 不因看到 `turn/completed` 提前 deactivate Turn；Core 继续拥有既有 terminal 顺序。在 terminal 通知已到达、
+但 Core 尚未消费的窗口内，delta 可能仍分类为 current，但结果同样是丢弃。由于该 transport 没有接受态、accumulator
+或其他可变 sink，不再执行 AgentRun/execution epoch/lease/Run-state 数据库 admission。Core 仍保留无条件漏网 guard，
+并把它放在 shutdown route permit、batching、Runtime lookup 与数据库读取之前。最终效果仍是不写 Execution Evidence、
+不更新 Canonical Activity、不创建 Managed Blob，也不进入 Renderer `liveRuntimeEvents`。
+
+Codex `item/completed.commandExecution.aggregatedOutput` 是最终 Command 输出的唯一权威，terminal semantic record 继续
+保留 `command`、`status` 与 `exitCode`；超过现有阈值时继续写 Managed Blob，并只在用户展开精确 Tool 时惰性读取。
+十个 ACP Adapter、Claude Code 与 Antigravity 保持现有 terminal semantic output，不新增 spool。未来若某个 Adapter
+无法提供完整 terminal aggregate，只允许 Adapter-owned 临时 spool，必须有硬上限、在 terminal 生成完整或明确
+truncated 的单一输出，并在 Run 结束后删除；Core 与 Renderer 不得无限拼接 String 或恢复逐 delta 持久化。
+
+Runtime 权威报告 interruption 时，尚未结算的已 started Activity 写入
+`phase=terminal / outcome=unsettled / reasonCode=runtime_interrupted`，Renderer 显示 stopped/interrupted。进程失联或
+Host 退出若仍有恢复可能，继续走 recovery；只有 Runtime 权威取消终态才能记录为 `cancelled`。
+
+PR #63 的每个 Tool identity、chronology、状态、结果与 Renderer-only 连续分组不变；terminal 大输出仍绑定精确 Tool
+并按既有第二级 disclosure 惰性读取。
+
+### 后果
+
+一个产生 100,000 个 output delta 的 Command 向 Core `codex_tx` 发送 0 条 delta，对未来数据库与 Renderer live
+state 也都新增 0 个 delta 项，只留下单一 terminal semantic result。无界队列、数据库写放大和 React state/排序风险
+均不再随 stdout/stderr frame 数增长；大输出容量仍由 Managed Blob 合同承担。历史数据量不会因本决定缩小。
+
+### 被拒绝方案
+
+- 把 delta 继续写 Evidence，只在读取时合并：仍保留数据库写放大和历史恢复成本；
+- 把每个 delta 改放 Renderer state：把膨胀从 SQLite 转移到 React 内存、排序与 progress rebuild；
+- 在 Core 中无限拼接完整 output：把协议流量变成无界常驻内存；
+- 把整个 `codex_tx` 改成 bounded blocking channel：stdout reader 还负责 JSON-RPC response 与 terminal event，阻塞
+  会把 output flood 的背压扩散到控制与终态路径；
+- 借本次修改清理或重写历史：扩大故障面并改变既有 Evidence/Blob 审计事实；
+- 将 interruption 写成 cancelled：把连续性未知伪装成 Runtime 权威取消。

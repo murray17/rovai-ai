@@ -6,7 +6,7 @@ authority: version-scope-and-status
 design_status: confirmed
 implementation_status: in_progress
 model_context_change: true
-last_updated: 2026-08-25
+last_updated: 2026-08-26
 ---
 
 # Rovai-ai v1.28：Grok Build + MiniMax M3 本地 Runtime 接入
@@ -20,6 +20,8 @@ last_updated: 2026-08-25
 > 不变，把 Grok 首次交付改为原生 `_meta.rules`，并以结构化 completion 驱动 Redelivery v2。实现经
 > 独立 worktree 验收后通过 PR 交付 `main`；`>= 1.0.0 / session.resume` clean break 的确定性实现已完成，
 > macOS arm64/x64 与 Windows x64 已分别用 `grok 1.0.5` 完成真实 Deep Probe、cold resume 与产品矩阵。
+> 新产生的 Codex command output delta 已改为 Host stdout ingress route 分类后直接丢弃，不进入 Core 无界队列；Command terminal aggregate 保持唯一输出权威，
+> 历史 Evidence/Blob 不迁移。全部 13 个 Adapter 的 terminal output 路径已逐项核验，无 Adapter 需要新增 spool。
 
 前置版本：[v1.27 Kimi Code + MiniMax M3](../v1.27/README.md)已按冻结时事实转为 historical。
 
@@ -67,11 +69,28 @@ Product Runtime 接入。复用本机 MiniMax API Key，但改用 Grok 官方 cu
 - Windows x64 BYOK Camp 验收发现 Renderer 未消费 Core 已持久化后的通用 `agent_run.terminal` 通知；通用
   Camp invalidation 已补齐为 single-flight + trailing refresh，并以事件 → `camps.open` → `succeeded` 页面投影的
   平台无关链路回归覆盖，macOS/Windows 及所有 Runtime 共用同一终态收敛路径。
+- Windows Runtime Search 每次 rescan 重新 hydration HKCU/HKLM PATH，并固定 `.exe → .cmd → .bat` closed set；
+  已知 npm/pnpm Codex shim 解析到真实 `codex.exe`，其他 bounded command shim 以独立 identity 经受控 System32
+  `cmd.exe`、原子 Job 与 batch argv serializer 启动；resolved shim locator identity 内部持久化并参与 snapshot、
+  Installation generation 与 Host fencing，`.ps1` 继续不支持。
 - 修复 macOS Runtime Files 持久身份误用 boot-local `st_dev` 的启动回归；marker schema 2 改用稳定卷 UUID，
   schema 1 只在确定性私有实例根内 rekey，并由 SQLite/Authority reconciliation 受控重建旧物理 View receipt。
 - 放松已成功发布附件的后置完整性门禁：缺失或 digest/size/tree 不一致只把该附件降级为
   `recovery_required` 并从新 Runtime Context 省略，Camp、健康附件、公共历史与审计继续可用；exact Authority
   恢复后自动重建。
+- Camp 执行台把同一 Run 内最大连续的 Tool 派生为默认收起的摘要，运行中只显示最后一条非终态操作，
+  不同时追加累计数；展开后
+  保留完整 chronology，并把完整 Tool 结果延迟到精确 Tool 首次展开；分组不改变 Core Evidence、Tool identity
+  或 non-terminal open projection。running Run 的尾组在 Tool 间隙保持运行摘要，直到真实 process/Run 边界
+  才收口；组图标与摘要文字共享 16px 中心线，避免终态/Loading 往返和可见上下错位。
+- Codex `command.output.delta` 对未来数据采用 transport-only clean break：Host stdout ingress 在处理 JSON-RPC response
+  后识别无 `id` notification，按当前 Thread/Turn route 把精确与 stale/malformed/legacy delta 分类并全部丢弃，
+  不构造 `CodexIncoming`、不进入 Core 无界队列，也不写 Evidence/Canonical/Blob 或 Renderer live state；带 `id`
+  的同名 request 保留既有 response 路径，下游漏网 guard 早于 batching、Runtime lookup 与数据库读取；
+  terminal `aggregatedOutput` 继续作为 Command 输出唯一权威并沿用大正文 Managed Blob 阈值。十个 ACP Adapter、
+  Claude Code 与 Antigravity 已在各自 terminal semantic event 中给出完整公开输出，不需要临时 spool。
+- Runtime 明确报告 interruption 时，尚未结算的 Activity 记录为 terminal/unsettled，reason code 为
+  `runtime_interrupted`；Renderer 显示 stopped/interrupted。只有 Runtime 权威取消终态才写成 cancelled。
 
 ## 安全与兼容边界
 
@@ -81,6 +100,8 @@ Product Runtime 接入。复用本机 MiniMax API Key，但改用 Grok 官方 cu
 - `_x.ai/*` vendor notification 只按已知 Session metadata/lifecycle 路由，不作为公开 assistant 输出；
 - 原生 Session ID 仅保留在既有绑定边界，资格证据不持久化完整 Native ID；
 - Cursor 与 Kimi 的平台准入、provider 和 continuation 结论不因新增 Grok identity 改变。
+- 本次只改变未来新产生的 command output transport；不迁移、删除、重写任何历史 Evidence 或 Blob，也不重建
+  canonical history。PR #63 的 Tool identity、chronology、Renderer-only 连续分组与精确 Tool Blob 惰性读取不变。
 
 ## 验收
 
@@ -94,11 +115,11 @@ External MCP 支持性裁决、文档治理与 Impeccable UI detector。
 | 范围 | 结论 | 证据或理由 |
 | --- | --- | --- |
 | Version lifecycle | 已更新 | 本概览、[实施计划](implementation-plan.md)、[决定](decisions.md)与[版本索引](../README.md)共同切换 `current_version`。 |
-| Decisions | 已更新 | [V1.28-D01](decisions.md#v1-28-d01)冻结 provider/Home/auth 边界，[V1.28-D02](decisions.md#v1-28-d02)冻结公开输出与平台准入，[V1.28-D03](decisions.md#v1-28-d03)冻结 External MCP 的 Plugin 追加边界，[V1.28-D04](decisions.md#v1-28-d04)保存初始 load-only 取舍，[V1.28-D05](decisions.md#v1-28-d05)冻结 native rules 与 structured compaction redelivery，[V1.28-D06](decisions.md#v1-28-d06)冻结 `>= 1.0.0` 与标准 ACP resume clean break，[V1.28-D07](decisions.md#v1-28-d07)冻结 macOS Runtime Files 稳定卷 identity 与旧 marker rekey，[V1.28-D08](decisions.md#v1-28-d08)冻结 startup rebuild failure 的 Camp-local fail-closed 边界，[V1.28-D09](decisions.md#v1-28-d09)冻结空集 controlled rebuild 的 completion 与 root receipt，[V1.28-D10](decisions.md#v1-28-d10)冻结已成功发布附件的当前可读性局部降级与 Camp 继续运行。 |
-| Contracts | 已更新 | [Runtime Launch and Verification v27](../../contracts/runtime-launch-and-verification-v27.md)收敛 Grok 版本门、Ready 与 continuation；[Camp Published Attachment View v4](../../contracts/camp-published-attachment-view-v4.md)区分不可变发布历史与当前 Runtime availability，并定义附件局部降级、Context 省略和自动恢复；[Runtime Platform Admission](../../contracts/runtime-platform-admission-v1.md)的逐平台证据边界不变。receipt wire、Data Contract 与 Renderer API 不变。 |
-| Architecture | 已更新 | [Runtime Catalog Boundaries](../../architecture/runtime-catalog-boundaries.md)补充 Grok identity、provider 与原生状态边界；[Native Session Bootstrap Redelivery](../../architecture/native-session-bootstrap-redelivery.md)补充 Grok detector；[Camp Published Attachment View](../../architecture/camp-published-attachment-view.md)补充稳定卷 identity、schema-1 rekey、空集受控重建、附件局部可用性与 pre-dispatch repair；[Camp Open Read Path](../../architecture/camp-open-read-path.md)明确可靠 `agent_run.terminal` 后的权威投影刷新。 |
-| UI | 已更新 | 复用现有 Runtime catalog、状态与成员参数组件；member-workspace brief 明确 generic agent text 可原样进入执行台与 final；Renderer 补齐通用 AgentRun 终态 invalidation、single-flight/trailing refresh 与完整页面链路回归，避免 Camp 保留运行中旧快照或因连续终态通知并发读取。 |
-| Runtime Activity | 已更新 | [Registry](../../runtime-activity/registry.md)新增 Grok ACP run-level 映射。 |
+| Decisions | 已更新 | [V1.28-D01](decisions.md#v1-28-d01)冻结 provider/Home/auth 边界，[V1.28-D02](decisions.md#v1-28-d02)冻结公开输出与平台准入，[V1.28-D03](decisions.md#v1-28-d03)冻结 External MCP 的 Plugin 追加边界，[V1.28-D04](decisions.md#v1-28-d04)保存初始 load-only 取舍，[V1.28-D05](decisions.md#v1-28-d05)冻结 native rules 与 structured compaction redelivery，[V1.28-D06](decisions.md#v1-28-d06)冻结 `>= 1.0.0` 与标准 ACP resume clean break，[V1.28-D07](decisions.md#v1-28-d07)冻结 macOS Runtime Files 稳定卷 identity 与旧 marker rekey，[V1.28-D08](decisions.md#v1-28-d08)冻结 startup rebuild failure 的 Camp-local fail-closed 边界，[V1.28-D09](decisions.md#v1-28-d09)冻结空集 controlled rebuild 的 completion 与 root receipt，[V1.28-D10](decisions.md#v1-28-d10)冻结已成功发布附件的当前可读性局部降级与 Camp 继续运行，[V1.28-D11](decisions.md#v1-28-d11)冻结 Windows PATH hydration、`.exe/.cmd/.bat` entrypoint 与 command-shim identity，[V1.28-D12](decisions.md#v1-28-d12)冻结 command output delta 的 transport-only clean break、terminal aggregate 权威与 interrupted 语义。 |
+| Contracts | 已更新 | [Runtime Launch and Verification v27](../../contracts/runtime-launch-and-verification-v27.md)收敛 Grok 版本门、Ready 与 continuation；[Camp Published Attachment View v4](../../contracts/camp-published-attachment-view-v4.md)区分不可变发布历史与当前 Runtime availability，并定义附件局部降级、Context 省略和自动恢复；[Run Process Detail Surface v22](../../contracts/run-process-detail-surface-v22.md)继承 Renderer-only 连续 Tool 聚合、摘要归约和第二级结果惰性 disclosure，并增加 running 尾组延迟收口、稳定间隙摘要与 16px 图标/文字中心线；[Managed Runtime Process v1](../../contracts/managed-runtime-process-v1.md)补充受控 Windows `.cmd/.bat` identity、argv 与 Job 边界；[Runtime Platform Admission](../../contracts/runtime-platform-admission-v1.md)的逐平台证据边界不变。receipt wire、Data Contract 与 Renderer API 不变。 |
+| Architecture | 已更新 | [Runtime Catalog Boundaries](../../architecture/runtime-catalog-boundaries.md)补充 Grok identity、provider 与原生状态边界；[Native Session Bootstrap Redelivery](../../architecture/native-session-bootstrap-redelivery.md)补充 Grok detector；[Camp Published Attachment View](../../architecture/camp-published-attachment-view.md)补充稳定卷 identity、schema-1 rekey、空集受控重建、附件局部可用性与 pre-dispatch repair；[Camp Open Read Path](../../architecture/camp-open-read-path.md)明确可靠 `agent_run.terminal` 后的权威投影刷新；[基础不变量](../../architecture/foundational-invariants.md#evidence-canonical-activity)补充 transient delta、terminal aggregate 与 interruption 边界。 |
+| UI | 已更新 | 复用现有 Runtime catalog、状态与成员参数组件；member-workspace brief 明确 generic agent text 可原样进入执行台与 final；Renderer 补齐通用 AgentRun 终态 invalidation、single-flight/trailing refresh 与完整页面链路回归，避免 Camp 保留运行中旧快照或因连续终态通知并发读取；Camp 会话工作区增加连续 Tool 摘要和完整结果按精确 Tool 惰性挂载，当前操作存在时不重复累计数，running 尾组在 Tool 间隙保持活动摘要直至真实边界，终态摘要不追加结果文字，组内有成功即使用绿色状态、仅全部失败使用红色，组图标与摘要文字共用 16px 中心线，并排除新 command output delta 的 live-state 累积。 |
+| Runtime Activity | 已更新 | [Registry](../../runtime-activity/registry.md)新增 Grok ACP run-level 映射，并记录全部 13 个 Adapter 的 terminal output authority 与无需 spool 的核验结论。 |
 | Runtime compatibility | 已更新 | [兼容性清单](../../runtime-compatibility.md)与 macOS arm64/x64、Windows x64 三份 adapter-scoped 证据记录各自实测边界。 |
 | Documentation routing | 确认无需更新 | 既有 Runtime checklist、Research、Architecture、Contract 与 Version 路由足以到达本版本。 |
 | Root README | 确认无需更新 | 本次新增兼容 Runtime，不改变项目定位或常青产品承诺。 |

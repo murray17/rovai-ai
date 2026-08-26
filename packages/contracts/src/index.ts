@@ -345,6 +345,21 @@ export interface CommandHealth {
 
 export type RuntimeDiscoveryStatus = 'detecting' | 'found' | 'missing'
 
+export type RuntimeSearchPathSource =
+  | 'inherited_path'
+  | 'user_registry_path'
+  | 'machine_registry_path'
+  | 'login_shell'
+  | 'known_location'
+
+export type RuntimeDiscoveryEntrypointKind =
+  | 'native_executable'
+  | 'npm_cmd_shim'
+  | 'pnpm_cmd_shim'
+  | 'windows_command_shim'
+
+export type RuntimeCandidateExtension = 'native' | 'exe' | 'cmd' | 'bat'
+
 export interface RuntimeDiscoveryObservation {
   runtimeKind: AdapterKind
   discoveryStatus: RuntimeDiscoveryStatus
@@ -352,6 +367,11 @@ export interface RuntimeDiscoveryObservation {
   source: Exclude<InstallationSource, 'custom'> | null
   reportedVersion: string | null
   executableFingerprint: string | null
+  searchPathSource: RuntimeSearchPathSource | null
+  entrypointKind: RuntimeDiscoveryEntrypointKind | null
+  candidateExtension: RuntimeCandidateExtension | null
+  resolvedNativeTarget: boolean
+  versionProbeSucceeded: boolean | null
   searchGeneration: number
   observedAt: string
   diagnosticCode: string | null
@@ -1151,6 +1171,7 @@ export interface AgentRunView {
     | 'planned_shutdown_completed'
     | 'planned_shutdown_failed'
     | 'planned_shutdown_cancelled'
+    | 'runtime_interrupted'
     | null
   failure: RuntimeFailureView | null
   runtimeModel: { modelId: string | null } | null

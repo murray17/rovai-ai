@@ -52,8 +52,8 @@ pub struct Database {
 
 const CURRENT_DATA_CONTRACT_VERSION: &str = "v1.23";
 const CURRENT_PROJECTION_SCHEMA_VERSION: i64 = 64;
-const V109_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.22";
-const V109_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION: i64 = 63;
+const V110_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.22";
+const V110_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION: i64 = 63;
 const V108_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.21";
 const V108_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION: i64 = 62;
 const V107_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.20";
@@ -172,6 +172,7 @@ struct CurrentMigrationState {
     v107: bool,
     v108: bool,
     v109: bool,
+    v110: bool,
 }
 
 impl CurrentMigrationState {
@@ -217,13 +218,14 @@ impl CurrentMigrationState {
                 && self.v106
                 && self.v107
                 && self.v108
-                && self.v109;
+                && self.v109
+                && self.v110;
         }
-        if self.v109 {
+        if self.v110 {
             return false;
         }
-        if contract == V109_MIGRATION_SOURCE_DATA_CONTRACT_VERSION
-            && schema == V109_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION
+        if contract == V110_MIGRATION_SOURCE_DATA_CONTRACT_VERSION
+            && schema == V110_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION
         {
             return self.v70
                 && self.v71
@@ -1221,7 +1223,8 @@ fn load_current_migration_state(
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 106),
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 107),
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 108),
-               EXISTS(SELECT 1 FROM schema_migration WHERE version = 109)
+               EXISTS(SELECT 1 FROM schema_migration WHERE version = 109),
+               EXISTS(SELECT 1 FROM schema_migration WHERE version = 110)
         "#,
         [],
         |row| {
@@ -1266,6 +1269,7 @@ fn load_current_migration_state(
                 v107: row.get(37)?,
                 v108: row.get(38)?,
                 v109: row.get(39)?,
+                v110: row.get(40)?,
             })
         },
     )
@@ -2718,7 +2722,10 @@ impl Database {
                 self.migrate_grok_compaction_detector_v108()?;
             }
             if !self.schema_migration_applied(109)? {
-                self.migrate_dynamic_camp_membership_v109()?;
+                self.migrate_runtime_entrypoint_locator_identity_v109()?;
+            }
+            if !self.schema_migration_applied(110)? {
+                self.migrate_dynamic_camp_membership_v110()?;
             }
             if let Err(error) =
                 crate::notification::maintain_notification_episode_retention(self.connection())
@@ -3095,7 +3102,10 @@ impl Database {
             self.migrate_grok_compaction_detector_v108()?;
         }
         if !self.schema_migration_applied(109)? {
-            self.migrate_dynamic_camp_membership_v109()?;
+            self.migrate_runtime_entrypoint_locator_identity_v109()?;
+        }
+        if !self.schema_migration_applied(110)? {
+            self.migrate_dynamic_camp_membership_v110()?;
         }
         if let Err(error) =
             crate::notification::maintain_notification_episode_retention(self.connection())
@@ -15425,7 +15435,7 @@ impl Database {
         Ok(())
     }
 
-    fn migrate_dynamic_camp_membership_v109(&mut self) -> Result<()> {
+    fn migrate_dynamic_camp_membership_v110(&mut self) -> Result<()> {
         let transaction = self
             .connection
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
@@ -15617,6 +15627,36 @@ impl Database {
             SET contract_version = 'v1.23', projection_schema_version = 64,
                 reset_reason = NULL, updated_at = datetime('now')
             WHERE singleton = 1;
+
+            INSERT INTO schema_migration(version, applied_at)
+            VALUES (110, datetime('now'));
+            "#,
+        )?;
+        transaction.commit()?;
+        Ok(())
+    }
+
+    fn migrate_runtime_entrypoint_locator_identity_v109(&mut self) -> Result<()> {
+        let transaction = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        transaction.execute_batch(
+            r#"
+            CREATE TABLE runtime_entrypoint_locator_identity (
+                installation_id TEXT PRIMARY KEY
+                    REFERENCES adapter_installation(id) ON DELETE CASCADE,
+                entrypoint_kind TEXT NOT NULL CHECK(entrypoint_kind IN (
+                    'npm_cmd_shim', 'pnpm_cmd_shim'
+                )),
+                canonical_shim_path TEXT NOT NULL,
+                shim_content_digest TEXT NOT NULL,
+                canonical_interpreter_path TEXT NOT NULL,
+                interpreter_fingerprint TEXT NOT NULL,
+                resolved_target_path TEXT NOT NULL,
+                resolved_target_fingerprint TEXT NOT NULL,
+                compatibility_fingerprint TEXT NOT NULL,
+                verified_at TEXT NOT NULL
+            );
 
             INSERT INTO schema_migration(version, applied_at)
             VALUES (109, datetime('now'));
@@ -20028,15 +20068,15 @@ impl Database {
 }
 
 #[cfg(test)]
-fn downgrade_current_schema_to_v108_source_for_test(connection: &Connection) {
-    let has_v109: bool = connection
+fn downgrade_current_schema_to_v109_source_for_test(connection: &Connection) {
+    let has_v110: bool = connection
         .query_row(
-            "SELECT EXISTS(SELECT 1 FROM schema_migration WHERE version = 109)",
+            "SELECT EXISTS(SELECT 1 FROM schema_migration WHERE version = 110)",
             [],
             |row| row.get(0),
         )
         .unwrap();
-    if !has_v109 {
+    if !has_v110 {
         return;
     }
     connection
@@ -20053,8 +20093,31 @@ fn downgrade_current_schema_to_v108_source_for_test(connection: &Connection) {
             UPDATE rovai_data_contract
             SET contract_version = 'v1.22', projection_schema_version = 63
             WHERE singleton = 1;
-            DELETE FROM schema_migration WHERE version = 109;
+            DELETE FROM schema_migration WHERE version = 110;
             PRAGMA foreign_keys = ON;
+            "#,
+        )
+        .unwrap();
+}
+
+#[cfg(test)]
+fn downgrade_current_schema_to_v108_source_for_test(connection: &Connection) {
+    downgrade_current_schema_to_v109_source_for_test(connection);
+    let has_v109: bool = connection
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM schema_migration WHERE version = 109)",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    if !has_v109 {
+        return;
+    }
+    connection
+        .execute_batch(
+            r#"
+            DROP TABLE runtime_entrypoint_locator_identity;
+            DELETE FROM schema_migration WHERE version = 109;
             "#,
         )
         .unwrap();
@@ -20733,6 +20796,7 @@ mod tests {
             v107: version >= 107,
             v108: version >= 108,
             v109: version >= 109,
+            v110: version >= 110,
         }
     }
 
@@ -20743,13 +20807,19 @@ mod tests {
                 "current",
                 CURRENT_DATA_CONTRACT_VERSION,
                 CURRENT_PROJECTION_SCHEMA_VERSION,
-                109,
+                110,
             ),
             (
-                "v1.22/schema-63",
-                V109_MIGRATION_SOURCE_DATA_CONTRACT_VERSION,
-                V109_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION,
+                "v1.22/schema-63 before runtime locator identity",
+                V110_MIGRATION_SOURCE_DATA_CONTRACT_VERSION,
+                V110_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION,
                 108,
+            ),
+            (
+                "v1.22/schema-63 before dynamic Camp membership",
+                V110_MIGRATION_SOURCE_DATA_CONTRACT_VERSION,
+                V110_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION,
+                109,
             ),
             (
                 "v1.21/schema-62",
@@ -21033,7 +21103,7 @@ mod tests {
             )
             .expect("current contract marker should load");
 
-        assert_eq!(state, migration_state_through(109));
+        assert_eq!(state, migration_state_through(110));
         assert!(state.admits(&contract, schema));
         assert!(has_admissible_data_contract(
             &directory.join("rovai.sqlite")
@@ -23252,8 +23322,8 @@ mod tests {
     }
 
     #[test]
-    fn v109_clean_breaks_nonterminal_runs_and_installs_membership_fences() {
-        let directory = std::env::temp_dir().join(format!("rovai-db-v109-test-{}", Uuid::new_v4()));
+    fn v110_clean_breaks_nonterminal_runs_and_installs_membership_fences() {
+        let directory = std::env::temp_dir().join(format!("rovai-db-v110-test-{}", Uuid::new_v4()));
         let database = crate::test_support::fresh_schema_database_fast_at(&directory);
         database
             .connection()
@@ -23329,17 +23399,17 @@ mod tests {
                 "#,
             )
             .unwrap();
-        downgrade_current_schema_to_v108_source_for_test(database.connection());
+        downgrade_current_schema_to_v109_source_for_test(database.connection());
         drop(database);
 
-        let reopened = Database::open(&directory).expect("v108 source should migrate to v109");
+        let reopened = Database::open(&directory).expect("v109 source should migrate to v110");
         assert_eq!(
             reopened
                 .connection()
                 .query_row(
                     r#"
                     SELECT contract_version, projection_schema_version,
-                           (SELECT COUNT(*) FROM schema_migration WHERE version = 109),
+                           (SELECT COUNT(*) FROM schema_migration WHERE version = 110),
                            (SELECT membership_generation FROM camp WHERE id = 'camp-v109')
                     FROM rovai_data_contract WHERE singleton = 1
                     "#,
@@ -23441,6 +23511,52 @@ mod tests {
         );
 
         drop(reopened);
+        std::fs::remove_dir_all(directory).expect("temporary database should be removable");
+    }
+
+    #[test]
+    fn v109_adds_durable_runtime_entrypoint_locator_identity() {
+        let directory =
+            std::env::temp_dir().join(format!("rovai-db-v109-test-{}", uuid::Uuid::new_v4()));
+        let mut database = Database::open(&directory).expect("database should open");
+        database
+            .connection()
+            .execute_batch(
+                r#"
+                DROP TABLE runtime_entrypoint_locator_identity;
+                DELETE FROM schema_migration WHERE version = 109;
+                "#,
+            )
+            .unwrap();
+
+        database
+            .migrate_runtime_entrypoint_locator_identity_v109()
+            .unwrap();
+        let columns = database
+            .connection()
+            .prepare("PRAGMA table_info(runtime_entrypoint_locator_identity)")
+            .unwrap()
+            .query_map([], |row| row.get::<_, String>(1))
+            .unwrap()
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .unwrap();
+        assert!(columns.contains(&"canonical_shim_path".to_string()));
+        assert!(columns.contains(&"shim_content_digest".to_string()));
+        assert!(columns.contains(&"canonical_interpreter_path".to_string()));
+        assert!(columns.contains(&"resolved_target_fingerprint".to_string()));
+        assert_eq!(
+            database
+                .connection()
+                .query_row(
+                    "SELECT COUNT(*) FROM schema_migration WHERE version = 109",
+                    [],
+                    |row| row.get::<_, i64>(0),
+                )
+                .unwrap(),
+            1
+        );
+
+        drop(database);
         std::fs::remove_dir_all(directory).expect("temporary database should be removable");
     }
 
