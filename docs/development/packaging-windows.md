@@ -47,11 +47,13 @@ App/Core/CLI 的 PE32+ 架构、icon/version/manifest、hash、CLI contract 与�
 `ROVAI_WINDOWS_SIGNER_SHA256` allowlist；缺少任一发布条件时 verifier 必须失败。
 
 NSIS Release 还必须同版本上传 installer、`.exe.blockmap` 与 `latest.yml`。verifier 会检查 packaged
-`app-update.yml` 指向官方 GitHub 通道，并核对 `latest.yml` 中 installer 的版本、sha512 和大小；缺少
-任一更新文件时不得发布应用内升级。初始安装仍使用 assisted installer，应用内“安装并重启”使用
-silent upgrade，不再次展示安装向导。verifier 还冻结运行中升级协调器：先向安装目录内旧 Electron
-主窗口发送标准关闭请求，完整等待 20 秒 Planned Shutdown，再进入最多 5 秒的精确安装树强制回收；
-不得恢复 electron-builder 默认的 1 秒等待或仅按相同路径前缀批量结束进程。
+`app-update.yml` 指向官方 GitHub 通道，并核对 `latest.yml` 中 installer 的版本、sha512 和大小。它还从
+[`build/release-notes.md`](../../build/release-notes.md) 读取与 `package.json.version` 绑定的共用 Markdown，
+要求 `latest.yml.releaseNotes` 存在且与源文件完全相同；缺少、为空、版本标题陈旧、内容漂移或缺少任一
+更新文件时不得发布应用内升级。初始安装仍使用 assisted installer，应用内“安装并重启”使用 silent
+upgrade，不再次展示安装向导。verifier 还冻结运行中升级协调器：先向安装目录内旧 Electron 主窗口发送
+标准关闭请求，完整等待 20 秒 Planned Shutdown，再进入最多 5 秒的精确安装树强制回收；不得恢复
+electron-builder 默认的 1 秒等待或仅按相同路径前缀批量结束进程。
 
 正式打包 App 主动检查该发布集合，但不自动下载；用户显式“下载更新”后才进入一轮互斥下载，并在
 `ready_to_install` 再确认“安装并重启”。Updater 必须先同步 stage/启动 silent installer，Main 随后在其
