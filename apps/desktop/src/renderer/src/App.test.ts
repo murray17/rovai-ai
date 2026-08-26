@@ -4216,7 +4216,7 @@ describe('task event projections', () => {
     }))
     expect(markup).toContain('tool-call-static')
     expect(markup).toContain('class="tool-activity-group status-running"')
-    expect(markup).toContain('aria-label="执行中：检查工作区状态；0 项已完成"')
+    expect(markup).toContain('aria-label="执行中：检查工作区状态；已执行 0 项操作"')
     expect(markup).toContain('aria-live="polite"')
     expect(markup).not.toContain('<span>正在处理</span>')
     expect(markup).not.toContain('<details class="process-action tool-call-disclosure')
@@ -4316,7 +4316,9 @@ describe('task event projections', () => {
       run, progress, campId: 'camp-1', focused: true
     }))
     expect(markup.match(/<details class="tool-activity-group/g)).toHaveLength(1)
-    expect(markup).toContain('aria-label="已执行 2 项操作；全部成功"')
+    expect(markup).toContain('aria-label="已执行 2 项操作；状态：全部成功"')
+    expect(markup).not.toContain('>全部成功<')
+    expect(markup).not.toContain('class="tool-group-count"')
     expect(markup.match(/<details class="process-action tool-call-disclosure/g)).toHaveLength(2)
     expect(markup).not.toContain('tool-output-copy-button')
     expect(markup).not.toContain('search-result-1')
@@ -4379,7 +4381,7 @@ describe('task event projections', () => {
       expect(markup).toContain(`data-icon-domain="${domain}"`)
       expect(markup).not.toContain(`${domain} complete result`)
     }
-    expect(markup).toContain('aria-label="已执行 9 项操作；全部成功"')
+    expect(markup).toContain('aria-label="已执行 9 项操作；状态：全部成功"')
     expect(markup.match(/class="tool-group-icon"/g)).toHaveLength(1)
     expect(markup.match(/class="tool-call-icon"/g)).toHaveLength(domains.length)
     expect(markup.match(/<svg viewBox="0 0 16 16"/g)?.length).toBeGreaterThanOrEqual(domains.length)

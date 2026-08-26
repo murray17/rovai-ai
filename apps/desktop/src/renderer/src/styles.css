@@ -1307,7 +1307,6 @@ html[data-rovai-platform="win32"] .unified-sidebar-drag {
 .execution-drawer-inspector .execution-process-card { padding: 9px; }
 .execution-drawer-inspector .execution-run-model code { max-width: 18ch; }
 .execution-drawer-inspector .execution-run-recipients { display: grid; grid-template-columns: auto minmax(0, 1fr); }
-.execution-drawer-inspector .tool-group-count { display: none; }
 .execution-drawer-inspector .tool-group-items { margin-left: 16px; padding-left: 5px; }
 .inspector-meta { flex: 0 0 auto; overflow: hidden; padding: 8px 12px; border-top: 1px solid var(--line); color: var(--faint); font: 500 10px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; text-overflow: ellipsis; white-space: nowrap; }
 
@@ -2261,14 +2260,13 @@ button.task-event-card:focus-visible .task-card-chevron { color: var(--brand-ink
 .tool-group-separator { flex: 0 0 auto; color: var(--faint); }
 .tool-group-current { min-width: 0; overflow: hidden; color: var(--evidence-muted); font-size: 10.5px; text-overflow: ellipsis; white-space: nowrap; }
 .tool-group-count { flex: 0 0 auto; color: var(--faint); font-size: 10px; }
-.tool-group-count.is-danger { color: var(--danger); font-weight: 680; }
 .tool-group-state { position: relative; display: grid; width: 16px; height: 24px; place-items: center; color: var(--muted); }
 .tool-group-state::before { width: 7px; height: 7px; border-radius: 50%; background: currentColor; content: ""; }
 .tool-group-state.status-running { color: var(--info); }
 .tool-group-state.status-running::after { position: absolute; width: 11px; height: 11px; border: 1px solid currentColor; border-radius: 50%; content: ""; opacity: .36; }
 .tool-group-state.status-completed { color: var(--success); }
-.tool-group-state.status-failed,
-.tool-group-state.status-stopped { color: var(--danger); }
+.tool-group-state.status-failed { color: var(--danger); }
+.tool-group-state.status-stopped { color: var(--muted); }
 .tool-group-state.status-failed::before,
 .tool-group-state.status-stopped::before { border-radius: 1px; transform: rotate(45deg); }
 .tool-group-state.status-waiting { color: var(--attention); }

@@ -17,4 +17,10 @@ describe('execution console layout', () => {
     expect(styleBlock('.run-pulse-inspector .run-pulse-chip-copy') ?? '')
       .not.toMatch(/margin(?:-inline-start)?:/)
   })
+
+  it('keeps the Tool group operation count visible in the right sidecar', () => {
+    expect(styles).not.toMatch(
+      /\.execution-drawer-inspector \.tool-group-count\s*\{[^}]*display:\s*none/
+    )
+  })
 })
