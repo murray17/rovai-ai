@@ -13,73 +13,71 @@ systems:
 last_updated: 2026-08-26
 ---
 
-# Codex Command Output Delta Amplification Blocked Camp Open and Recovery
+# Codex 命令输出增量放大阻断 Camp 打开与恢复
 
-## Executive summary
+> **爱丽丝的小结：** 这回不是 SQLite 坏了，是我们把每一小段命令输出都当成永久证据，
+> 又在非终态 Camp 打开时一口气搬回来。84,620 条记录没有撒谎，系统只是没给数量划边界。
+> 先把 Run 收进终态恢复访问，再从最早 ingress 丢掉瞬态 delta，才算真正关上水龙头。
 
-On 2026-08-25, a local conversation remained on recovery after the application was restarted. An
-initial stale Run in the first reported Camp was repaired, but recovery still did not complete. The
-second blocker was a different Camp whose AgentRun had stopped making progress and was persisted as
-`waiting / recovery_blocked`. Because that status was nonterminal, every normal open of that Camp
-attempted to return the Run's complete Execution Evidence.
+## 摘要
 
-The Run had accumulated 84,620 Evidence rows. Of those, 78,837 rows (93.2%) were
-`command.output.delta`: small stdout/stderr transport frames emitted while Codex commands ran. Their
-declared content totaled 9,027,234 bytes; all Evidence content for the Run totaled 15,345,180 bytes,
-before SQLite row, JSON envelope, IPC serialization, canonical-activity attachment, and Renderer
-object overhead. The database snapshot contained 120,734 Evidence rows overall, including 97,893
-command output deltas. A SQLite backup passed `quick_check`; the failure was read and projection
-amplification, not database corruption.
+2026-08-25，一个本地会话在应用重启后始终停留于恢复状态。最初报告的 Camp 中有一个旧 Run，
+修复它后恢复仍未完成。第二个阻断来自另一个 Camp：其中一个 AgentRun 已停止推进，并以
+`waiting / recovery_blocked` 持久化。由于该状态不是终态，每次正常打开 Camp 都会尝试返回该
+Run 的全部 Execution Evidence。
 
-Rovai had treated every Codex output frame as an append-only semantic Evidence record even though
-Codex's terminal `item/completed.commandExecution.aggregatedOutput` already supplied the authoritative
-Command result. The same frames also entered Renderer live state. Transaction batching reduced write
-overhead but preserved one durable row and one UI event per frame. Camp open then deliberately loaded
-complete Evidence for every nonterminal Run, turning the recovery-blocked Run's frame cardinality into
-an unbounded open response and Renderer rebuild.
+该 Run 共积累 84,620 条 Evidence，其中 78,837 条（93.2%）是 `command.output.delta`，即 Codex
+执行命令时发出的细小 stdout/stderr transport frame。它们声明的内容总量为 9,027,234 字节；
+该 Run 所有 Evidence 内容合计 15,345,180 字节，尚未计入 SQLite 行、JSON Envelope、IPC
+序列化、Canonical Activity 挂载以及 Renderer 对象的额外开销。数据库快照总计 120,734 条
+Evidence，其中 97,893 条为命令输出增量。SQLite 备份通过 `quick_check`；故障属于读取与投影
+放大，而非数据库损坏。
 
-Immediate recovery preserved a pre-repair SQLite backup and converged the affected Run to a terminal
-failure without deleting its Evidence. Once terminal, its history moved behind the existing exact-Run
-lazy read path and the Camp could be opened without mounting all 84,620 rows. This operator recovery
-did not solve recurrence.
+Rovai 曾把每一个 Codex 输出 frame 都当作 append-only 语义 Evidence 持久化，尽管 Codex 终态
+`item/completed.commandExecution.aggregatedOutput` 已提供权威 Command 结果。同一批 frame 也
+进入 Renderer live state。事务批处理减少了写入开销，却仍为每个 frame 保留一条持久记录和
+一个 UI event。Camp open 又刻意为每个非终态 Run 加载完整 Evidence，最终把 recovery-blocked
+Run 的 frame 数量放大成无界 open response 和 Renderer 重建。
 
-The product correction was delivered in two stages. [PR #69](https://github.com/murray17/rovai-ai/pull/69)
-made future Codex command output deltas transient: they no longer write Execution Evidence, update
-Canonical Activity, create Managed Blobs, or enter Renderer live state; terminal `aggregatedOutput`
-remains the single authoritative result. [PR #72](https://github.com/murray17/rovai-ai/pull/72) moved
-the drop to Codex Host stdout ingress so output floods never enter Core's unbounded `codex_tx` queue.
-Both changes intentionally leave historical Evidence and Blob data unchanged.
+即时恢复先保留修复前 SQLite 备份，再在不删除 Evidence 的前提下把受影响 Run 收敛为终态
+失败。进入终态后，其历史转到既有的 exact-Run lazy read 路径，Camp 不再需要挂载全部 84,620
+条记录便可打开。该运维修复并未解决复发风险。
 
-This is a blameless review. Durable per-event capture, complete nonterminal projection, and streaming
-transaction batching were each locally understandable choices. The incident emerged because no seam
-owned an end-to-end cardinality invariant distinguishing transport frames from semantic execution
-facts.
+产品修正在两个阶段交付。[PR #69](https://github.com/murray17/rovai-ai/pull/69) 让后续 Codex
+命令输出增量成为瞬态数据：它们不再写入 Execution Evidence、更新 Canonical Activity、创建
+Managed Blob 或进入 Renderer live state；终态 `aggregatedOutput` 继续作为唯一权威结果。
+[PR #72](https://github.com/murray17/rovai-ai/pull/72) 又把丢弃位置前移到 Codex Host stdout
+ingress，使输出洪流不会进入 Core 的无界 `codex_tx` 队列。两项变更均有意保留历史 Evidence
+与 Blob 数据不变。
 
-## Incident metadata
+本复盘不归咎个人。逐事件持久捕获、完整非终态投影与 streaming 事务批处理，每项在局部上
+都可以理解。事故产生于没有任何 seam 拥有端到端 cardinality 不变量，因而未区分 transport
+frame 与语义执行事实。
 
-| Field | Value |
+## 事故元数据
+
+| 字段 | 值 |
 |---|---|
-| Detection | User reported that a conversation would not close normally; after App restart and repair of the first stale Run, recovery still failed and read-only inspection found the high-cardinality second blocker |
-| Affected path | Codex stdout ingestion, Execution Evidence durability, nonterminal Camp open projection, and Renderer runtime-activity reconstruction |
-| Trigger condition | A prolonged Codex Run emitted high-cardinality command output frames and later remained nonterminal as `waiting / recovery_blocked` |
-| User-visible symptom | The Camp could not reach a usable open projection and restarting the App did not clear the restoring-conversation state |
-| Diagnosed Run | 84,620 Evidence rows; 78,837 command output deltas; 15,345,180 declared Evidence content bytes |
-| Diagnosed database | 120,734 Evidence rows; 97,893 command output deltas; 69,574,656-byte SQLite backup; `quick_check = ok` |
-| Data integrity | No SQLite corruption was found; the pre-repair backup and all 84,620 Evidence rows were retained |
-| Immediate recovery | Converged the recovery-blocked Run to terminal failure so historical Evidence moved behind exact-Run lazy loading |
-| Recurrence prevention | [PR #69](https://github.com/murray17/rovai-ai/pull/69) and [PR #72](https://github.com/murray17/rovai-ai/pull/72) |
-| Incident duration | Not calculated because user-visible detection, acknowledgement, and meaningful-paint recovery were not retained as structured timestamps |
+| 发现方式 | 用户报告会话无法正常关闭；App 重启并修复第一个旧 Run 后仍无法恢复，只读检查随后发现高基数的第二个阻断 |
+| 受影响路径 | Codex stdout ingest、Execution Evidence 持久化、非终态 Camp open 投影与 Renderer Runtime Activity 重建 |
+| 触发条件 | 一个长时间 Codex Run 产生高基数命令输出 frame，之后以 `waiting / recovery_blocked` 保持非终态 |
+| 用户可见症状 | Camp 无法得到可用的 open projection，重启 App 也不能结束“正在恢复会话”状态 |
+| 已诊断 Run | 84,620 条 Evidence；78,837 条 command output delta；15,345,180 声明 Evidence 内容字节 |
+| 已诊断数据库 | 120,734 条 Evidence；97,893 条 command output delta；SQLite 备份 69,574,656 字节；`quick_check = ok` |
+| 数据完整性 | 未发现 SQLite 损坏；修复前备份和全部 84,620 条 Evidence 均保留 |
+| 即时恢复 | 把 recovery-blocked Run 收敛为终态失败，使历史 Evidence 转入 exact-Run lazy loading |
+| 防止复发 | [PR #69](https://github.com/murray17/rovai-ai/pull/69) 与 [PR #72](https://github.com/murray17/rovai-ai/pull/72) |
+| 事故持续时间 | 未计算；用户可见发现、确认和 meaningful paint 恢复时间未作为结构化时间戳保留 |
 
-## Impact
+## 影响
 
-The affected Camp could not complete its normal open or cold-restore path while the bloated Run
-remained nonterminal. Closing and restarting the application did not reduce the workload because the
-Run status and Evidence were durable; startup selected the same Camp and encountered the same open
-projection again.
+在臃肿 Run 保持非终态期间，受影响 Camp 无法完成正常打开或冷恢复。关闭并重启应用不会减少
+工作量，因为 Run 状态与 Evidence 均已持久化；启动会再次选择同一 Camp，并再次进入相同的
+open projection。
 
-The diagnosed Run contained this Evidence distribution:
+已诊断 Run 的 Evidence 分布如下：
 
-| Evidence type | Rows | Declared content bytes |
+| Evidence 类型 | 条数 | 声明内容字节 |
 |---|---:|---:|
 | `command.output.delta` | 78,837 | 9,027,234 |
 | `agent.text.delta` | 2,749 | 224,918 |
@@ -88,324 +86,277 @@ The diagnosed Run contained this Evidence distribution:
 | Reasoning summary started/completed | 1,140 | 383,600 |
 | File change started/completed | 220 | 557,076 |
 | Narration started/completed | 68 | 21,042 |
-| Tool call started/completed and plan | 53 | 16,075 |
-| **Total** | **84,620** | **15,345,180** |
+| Tool call started/completed 与 plan | 53 | 16,075 |
+| **合计** | **84,620** | **15,345,180** |
 
-These byte counts come from `content_byte_count`; they do not include SQLite record/index overhead,
-payload preview envelopes, IPC JSON syntax, deserialized Rust/JavaScript objects, canonical activity
-attachment, React state, or sorting/rebuild scratch space. Therefore 15.3 MB is a lower bound on the
-material handled by the open path, not the peak process-memory measurement.
+这些字节数来自 `content_byte_count`，不包括 SQLite record/index 开销、payload preview Envelope、
+IPC JSON 语法、反序列化后的 Rust/JavaScript 对象、Canonical Activity 挂载、React state 或
+排序/重建临时空间。因此 15.3 MB 只是 open path 所处理物料的下界，而不是进程峰值内存。
 
-The snapshot also showed that 78,837 deltas were concentrated in one nonterminal Run. The broader
-database had 97,893 delta rows out of 120,734 total Evidence rows (81.1%), demonstrating that this was
-not a normal relationship between semantic operations and durable evidence volume.
+快照还显示 78,837 条增量集中在单个非终态 Run。整个数据库的 120,734 条 Evidence 中有
+97,893 条增量（81.1%），说明这不是语义操作数量与持久 Evidence 体量之间的正常关系。
 
-No Camp messages, attachments, command terminal results, or Evidence rows were deleted to restore
-access. No historical migration or compaction was shipped with the product fixes. Old Camps can still
-retain their original row counts; after the affected Run became terminal, existing terminal-history
-lazy loading kept those rows off the normal Camp open path.
+为恢复访问，没有删除 Camp message、attachment、Command 终态结果或 Evidence 行。产品修复
+也没有交付历史迁移或压缩。旧 Camp 仍可保留原始行数；受影响 Run 进入终态后，既有终态历史
+lazy loading 会使这些行避开正常 Camp open path。
 
-### Causality boundary
+### 因果边界
 
-The retained backup distinguishes two adjacent recovery problems. The first Camp named during
-diagnosis had a stale nonterminal Run with zero Execution Evidence at backup time. Repairing that Run
-did not restore the application, which led to discovery of the second Camp and its 84,620-row
-nonterminal Run. This postmortem covers that second delta-amplification blocker.
+保留的备份区分了相邻的两个恢复问题。诊断最初提到的 Camp 中有一个旧非终态 Run，在备份时
+Execution Evidence 为零。修复它并未恢复应用，由此才发现第二个 Camp 及其中具有 84,620 条
+记录的非终态 Run。本复盘只讨论第二个 delta amplification 阻断。
 
-The evidence therefore supports two narrower conclusions, not one broad one: stale Run lifecycle
-state caused the first Camp's close/recovery defect, while delta cardinality made the second Camp's
-nonterminal open projection unbounded. The delta rows must not be cited as the cause of the first
-Camp's zero-Evidence stale Run merely because both symptoms occurred during the same recovery
-sequence.
+因此，证据支持两个较窄的结论，而不是一个笼统结论：旧 Run 的生命周期状态导致第一个 Camp
+的关闭/恢复缺陷；增量基数则让第二个 Camp 的非终态 open projection 变成无界。不能因为两个
+症状出现在同一恢复过程，就把 delta 行说成第一个 Camp 零 Evidence 旧 Run 的原因。
 
-## Detection and response
+## 发现与响应
 
-The incident was detected by the user from the product surface, not from a cardinality alert. The
-conversation first resisted normal closure. After application exit and restart, the target stayed on
-recovery rather than reaching meaningful content. A first stale Run was repaired, but the user
-reported that recovery still did not complete; investigation then found the high-cardinality second
-blocker.
+事故由用户从产品界面发现，而不是 cardinality 告警。会话先是无法正常关闭；退出并重启应用
+后，目标始终停在恢复状态，无法显示有效内容。修复第一个旧 Run 后，用户报告恢复仍未完成，
+调查才发现高基数的第二个阻断。
 
-A read-only inspection of the daily database and its pre-repair backup established four facts:
+对 daily database 及修复前备份的只读检查确认了四项事实：
 
-- SQLite integrity was intact (`quick_check = ok`);
-- the affected Run was `waiting` with `wait_reason = recovery_blocked` and had no `ended_at`;
-- Camp open semantics classified that Run as nonterminal and therefore requested its complete
-  Execution Evidence without a limit;
-- 78,837 of the Run's 84,620 Evidence rows were stdout/stderr transport frames, not distinct Commands
-  or Tool results.
+- SQLite 完整性正常（`quick_check = ok`）；
+- 受影响 Run 为 `waiting`，`wait_reason = recovery_blocked`，且没有 `ended_at`；
+- Camp open 语义把该 Run 视为非终态，因而无上限地请求其完整 Execution Evidence；
+- 84,620 条 Evidence 中有 78,837 条是 stdout/stderr transport frame，而不是不同 Command
+  或 Tool 结果。
 
-The database was backed up before recovery. The affected Run was then made terminal while preserving
-its Evidence, allowing normal Camp open to use summary data and defer terminal Run history until the
-user selected the exact Run. The retained backup and current database both contain exactly 84,620
-Evidence rows for that Run, so recovery did not depend on deleting the incident evidence.
+恢复前先备份数据库，再把受影响 Run 收敛为终态，同时保留其 Evidence。这让正常 Camp open
+能够使用摘要数据，并把终态 Run 历史推迟到用户选择 exact Run 时再加载。保留的备份与当前
+数据库中，该 Run 均恰好有 84,620 条 Evidence，因此恢复并未依赖删除事故证据。
 
-The first product review removed delta durability and Renderer delivery but found a remaining queue
-risk: Codex stdout was still parsed into `CodexIncoming` and sent through an
-`mpsc::unbounded_channel` before Core recognized and discarded the delta. A second correction moved
-classification and dropping to stdout ingress while preserving JSON-RPC response and server-request
-routing. This closed both the persisted/read amplification and transient queue amplification paths.
+第一次产品审查移除了增量持久化和 Renderer delivery，但发现仍有队列风险：Codex stdout
+仍会被解析成 `CodexIncoming`，并在 Core 识别后丢弃增量前进入 `mpsc::unbounded_channel`。
+第二次修正把分类和丢弃移到 stdout ingress，同时保留 JSON-RPC response 与 server-request
+routing，由此同时关闭持久化/读取放大与瞬态队列放大。
 
-## Timeline
+## 时间线
 
-All times are Asia/Hong_Kong. Persisted Runtime times were converted from UTC. Times not retained as
-structured evidence are deliberately left imprecise.
+所有时间均为 Asia/Hong_Kong。持久 Runtime 时间由 UTC 转换而来；未保留为结构化证据的
+时间有意保持不精确。
 
-| Time | Event |
+| 时间 | 事件 |
 |---|---|
-| Before 2026-08-25 | Codex `command.output.delta` frames were normalized as durable Execution Evidence and Renderer live events. Streaming batches reduced transaction count but retained per-frame cardinality. |
-| 2026-08-25 20:06:23 | The later-affected AgentRun was created and started. |
-| 2026-08-25 20:07:01 | The Run persisted its first observed `command.output.delta`. |
-| 2026-08-25 22:31:37 | The Run persisted its last observed delta. It had accumulated 84,620 Evidence rows, including 78,837 deltas, and later appeared as `waiting / recovery_blocked`. |
-| 2026-08-25, time not recorded | The user could not close the first conversation normally. After exiting and restarting the App, the UI remained on recovery. |
-| 2026-08-25 22:50 | A 69,574,656-byte SQLite backup was retained before repair. It later passed `quick_check` and preserved both recovery blockers for analysis. |
-| 2026-08-25 22:52:22 | The first reported Camp's stale, zero-Evidence Run converged to terminal `cancelled`. Recovery still did not complete. |
-| 2026-08-25 23:01:39 | The second Camp's 84,620-row Run converged from `waiting / recovery_blocked` to terminal `failed`; all Evidence rows remained present. |
-| 2026-08-26 00:39 | [PR #63](https://github.com/murray17/rovai-ai/pull/63) merged continuous Tool grouping and two-level result disclosure. It did not create, delete, or compact delta Evidence. |
-| 2026-08-26 10:08 | [PR #69](https://github.com/murray17/rovai-ai/pull/69) merged the future-data clean break: zero delta Evidence, Canonical Activity, Blob, or Renderer live events; terminal aggregate remained authoritative. |
-| 2026-08-26, after PR #69 | A post-fix verification Camp completed multiple Runs with zero new `command.output.delta` Evidence rows. |
-| 2026-08-26 13:04 | [PR #72](https://github.com/murray17/rovai-ai/pull/72) merged Host-ingress early-drop after a production-ingress test sent 100,000 valid deltas into a non-consuming receiver and observed zero `CodexIncoming` sends, followed by correctly ordered terminal events. |
+| 2026-08-25 之前 | Codex `command.output.delta` frame 被规范化为持久 Execution Evidence 和 Renderer live event。Streaming batch 减少事务数，但仍保留逐 frame 基数。 |
+| 2026-08-25 20:06:23 | 后来受影响的 AgentRun 被创建并启动。 |
+| 2026-08-25 20:07:01 | Run 持久化第一条观测到的 `command.output.delta`。 |
+| 2026-08-25 22:31:37 | Run 持久化最后一条观测到的 delta。它共积累 84,620 条 Evidence，其中 78,837 条为 delta，之后呈现为 `waiting / recovery_blocked`。 |
+| 2026-08-25，时间未记录 | 用户无法正常关闭第一个会话。退出并重启 App 后，UI 仍停留在恢复状态。 |
+| 2026-08-25 22:50 | 修复前保留 69,574,656 字节 SQLite 备份。备份随后通过 `quick_check`，并保留两个恢复阻断供分析。 |
+| 2026-08-25 22:52:22 | 最初报告 Camp 的旧零 Evidence Run 收敛为终态 `cancelled`，但恢复仍未完成。 |
+| 2026-08-25 23:01:39 | 第二个 Camp 的 84,620 行 Run 从 `waiting / recovery_blocked` 收敛为终态 `failed`；全部 Evidence 仍在。 |
+| 2026-08-26 00:39 | [PR #63](https://github.com/murray17/rovai-ai/pull/63) 合并连续 Tool 分组与两级结果披露；它没有创建、删除或压缩 delta Evidence。 |
+| 2026-08-26 10:08 | [PR #69](https://github.com/murray17/rovai-ai/pull/69) 合并面向未来数据的 clean break：delta 不再生成 Evidence、Canonical Activity、Blob 或 Renderer live event；终态 aggregate 继续作为权威。 |
+| 2026-08-26，PR #69 后 | 修复后的验证 Camp 完成多个 Run，没有新增 `command.output.delta` Evidence。 |
+| 2026-08-26 13:04 | [PR #72](https://github.com/murray17/rovai-ai/pull/72) 合并 Host-ingress early drop。生产 ingress 测试向未消费的 receiver 发送 100,000 个有效 delta，观察到零 `CodexIncoming` send，随后终态 event 仍按正确顺序到达。 |
 
-## Technical root cause
+## 技术根因
 
-The failure combined a semantic-classification defect with a read-cardinality coupling:
+故障由语义分类缺陷与读取基数耦合共同造成：
 
 ```text
-Codex command stdout/stderr
-  -> one outputDelta notification per transport frame
+Codex 命令 stdout/stderr
+  -> 每个 transport frame 产生一个 outputDelta notification
   -> CodexIncoming
   -> Core streaming batch
-  -> one Execution Evidence row per frame
-  -> one Renderer live event per frame
+  -> 每个 frame 一条 Execution Evidence
+  -> 每个 frame 一个 Renderer live event
 
-Runtime continuity ends
-  -> AgentRun remains waiting / recovery_blocked
-  -> Camp open treats Run as nonterminal
-  -> load every Evidence row for the Run (no limit)
-  -> serialize + IPC parse + canonical attachment + sort/rebuild
-  -> Camp open/recovery cannot reach a usable surface
+Runtime 连续性结束
+  -> AgentRun 保持 waiting / recovery_blocked
+  -> Camp open 把 Run 视为非终态
+  -> 加载该 Run 的全部 Evidence（无上限）
+  -> 序列化 + IPC parse + canonical attachment + 排序/重建
+  -> Camp open/恢复无法到达可用界面
 ```
 
-### Transport frames were misclassified as durable semantic evidence
+### Transport frame 被误分类为持久语义 Evidence
 
-`command.output.delta` only carries partial stdout/stderr bytes. A frame does not add a new Command
-identity, lifecycle transition, exit status, or final result. Codex already provides those facts in
-`item/started` and terminal `item/completed`, whose `commandExecution` payload includes `command`,
-`status`, `exitCode`, and `aggregatedOutput`.
+`command.output.delta` 只包含部分 stdout/stderr 字节。单个 frame 不会增加新的 Command
+identity、生命周期转换、退出状态或最终结果。Codex 已通过 `item/started` 和终态
+`item/completed` 提供这些事实，后者的 `commandExecution` payload 包含 `command`、`status`、
+`exitCode` 与 `aggregatedOutput`。
 
-Persisting both sources duplicated the same output at different granularities: thousands of
-transport records plus one terminal semantic result. Managed Blob thresholds could bound a single
-large body but could not bound tens of thousands of individually small rows.
+同时持久化两类来源，等于以不同粒度重复同一输出：数千条 transport record 加一条终态语义
+结果。Managed Blob 阈值可以约束单个大正文，却无法约束数万条各自很小的记录。
 
-### Complete nonterminal Evidence made transport cardinality part of Camp open
+### 完整非终态 Evidence 让 transport 基数进入 Camp open
 
-The Camp open read model intentionally returns complete Evidence for `queued`, `running`, and
-`waiting` Runs so an active execution can be reconstructed after refresh. It supplies no row limit
-for that collection. This is a valid completeness requirement only when durable event cardinality is
-semantically bounded.
+Camp open read model 有意为 `queued`、`running` 和 `waiting` Run 返回完整 Evidence，以便刷新后
+重建活跃执行。该 collection 没有行数上限。只有在持久 event 基数由语义约束时，这才是合理的
+完整性要求。
 
-Once the affected Run became `waiting / recovery_blocked`, it remained on that complete path. The
-output-frame count therefore determined the open response size even though the Renderer did not need
-each frame to display the final command output.
+受影响 Run 变为 `waiting / recovery_blocked` 后一直留在完整路径。即使 Renderer 并不需要
+每个 frame 才能显示最终命令输出，输出 frame 数量仍决定了 open response 大小。
 
-### Downstream dropping alone left an unbounded ingress queue
+### 只在下游丢弃仍会留下无界 ingress 队列
 
-PR #69 correctly made deltas transient after they reached Core, but the Codex stdout reader still
-constructed `CodexIncoming` and sent it into `mpsc::unbounded_channel`. A high-output command could
-therefore enqueue JSON events faster than Core consumed and discarded them. Replacing the whole
-channel with a bounded blocking channel was unsafe because the same reader also handles JSON-RPC
-responses and terminal events.
+PR #69 正确地让增量在进入 Core 后变为瞬态，但 Codex stdout reader 仍构造 `CodexIncoming`
+并将其发送进 `mpsc::unbounded_channel`。高输出命令可能比 Core 消费和丢弃更快地排入 JSON
+event。直接把整个 channel 换成有界阻塞 channel 并不安全，因为同一 reader 还处理 JSON-RPC
+response 与终态 event。
 
-PR #72 separated method classification from route validation at Host ingress. Valid current-route,
-stale, malformed, unbound, and legacy output-delta notifications are all consumed before
-`CodexIncoming` construction. ID-bearing messages retain the existing server-request response path,
-and semantic/terminal events continue through Core.
+PR #72 在 Host ingress 将 method classification 与 route validation 分离。有效 current-route、
+stale、malformed、unbound 和 legacy output-delta notification 都在构造 `CodexIncoming` 前被
+消费。带 ID 的消息继续使用既有 server-request response 路径，语义/终态 event 则继续进入 Core。
 
-## Contributing factors
+## 促成因素
 
-### Transaction batching optimized the wrong unit
+### 事务批处理优化了错误的单位
 
-Batching streaming deltas reduced SQLite transaction overhead, which improved throughput, but the
-durability unit remained one frame. The optimization made high-cardinality ingestion cheaper without
-placing a hard bound on the rows later consumed by read paths.
+Streaming delta 批处理减少了 SQLite 事务开销，提高了吞吐，但持久化单位仍是单个 frame。
+这个优化让高基数 ingest 更便宜，却没有对后续 read path 消费的行数设置硬上限。
 
-### Active Evidence completeness assumed bounded producers
+### Active Evidence 完整性假定 producer 有界
 
-The Camp open contract correctly avoided losing live execution state, but it did not distinguish
-high-value semantic progress from transport-only output. There was no maximum event cardinality or
-payload budget at the producer/read-model boundary.
+Camp open 合同正确地避免丢失 live execution 状态，却没有区分高价值语义进度与纯 transport
+输出。producer/read-model 边界没有最大 event 基数或 payload budget。
 
-### Renderer used a generic live-event path
+### Renderer 使用通用 live-event 路径
 
-Output frames entered the same live collection used for plan, narration, reasoning, Tool, and
-lifecycle updates. Repeated append, sort, and progress reconstruction amplified the database and IPC
-cost in React state even though the command display could use terminal aggregate output.
+输出 frame 进入与 plan、narration、reasoning、Tool 和生命周期更新相同的 live collection。
+即使命令展示可使用终态 aggregate output，重复 append、sort 和 progress reconstruction 仍会
+在 React state 中放大数据库与 IPC 成本。
 
-### Recovery preserved the expensive classification
+### 恢复保留了昂贵分类
 
-After continuity loss, `waiting / recovery_blocked` honestly represented a nonterminal Run under the
-then-current recovery model. It also kept all Evidence on the complete Camp-open path. Restarting the
-App therefore replayed the workload instead of clearing it.
+连续性丢失后，按当时恢复模型，`waiting / recovery_blocked` 如实表达非终态 Run；但它也让
+全部 Evidence 留在 Camp-open 完整路径。重启 App 因而重放工作量，而不是清理它。
 
-### Existing tests proved correctness at ordinary cardinality
+### 既有测试只证明普通基数下的正确性
 
-Tests covered Evidence ordering, batching, paging, terminal output, and Renderer projection. They did
-not inject 100,000 output frames through production ingress while keeping the receiver unconsumed, nor
-assert zero durable rows and zero Renderer events.
+测试覆盖 Evidence 顺序、batching、paging、终态输出与 Renderer 投影，却没有通过生产 ingress
+注入 100,000 个输出 frame 并让 receiver 保持不消费，也没有断言零持久行和零 Renderer event。
 
-### Incident observability lacked cardinality and phase timings
+### 事故可观测性缺少基数与阶段耗时
 
-The product did not report per-Run Evidence type counts, Camp-open response bytes, JSON parse time,
-Renderer rebuild time, or meaningful-paint latency in one diagnostic record. Investigation required
-read-only database queries and source-level reconstruction.
+产品没有在一条诊断记录中报告逐 Run Evidence 类型计数、Camp-open response 字节、JSON parse
+耗时、Renderer 重建时间或 meaningful-paint latency。调查需要只读数据库查询与源码还原。
 
-## Why existing safeguards did not prevent the incident
+## 既有防护为何没有阻止事故
 
-- SQLite transaction batching reduced write amplification per transaction, not the number of rows.
-- Managed Blob thresholds applied to large individual bodies and did not aggregate small delta rows.
-- Stable Evidence sequence and canonical operation identity preserved ordering but imposed no producer
-  cardinality bound.
-- Terminal Run Evidence was already lazy-loaded, but the affected Run was `waiting`, so terminal
-  history paging did not apply.
-- Runtime route and epoch fences rejected stale events; the flood consisted mostly of then-current
-  route events and therefore passed admission.
-- Renderer result disclosure deferred large terminal Tool bodies, not the generic live-event array
-  already populated by deltas.
-- Restart recovery reused durable Run/Evidence state by design, so process restart was not a cleanup
-  mechanism.
+- SQLite 事务批处理减少了每个事务的写放大，却没有减少行数。
+- Managed Blob 阈值作用于单个大正文，不会聚合小 delta 行。
+- 稳定 Evidence sequence 与规范 operation identity 保证顺序，却没有 producer cardinality 上限。
+- 终态 Run Evidence 已采用 lazy loading；受影响 Run 为 `waiting`，所以终态 history paging 不适用。
+- Runtime route 与 epoch fence 会拒绝 stale event；洪流大多来自当时的 current route，因而通过准入。
+- Renderer 结果披露延迟了大型终态 Tool 正文，但不会延迟已由 delta 填满的通用 live-event 数组。
+- 重启恢复按设计复用持久 Run/Evidence 状态，因此进程重启不是清理机制。
 
-## What was not the cause
+## 不属于根因的事项
 
-- SQLite corruption did not cause the failure; the retained backup passed `quick_check`.
-- The terminal `aggregatedOutput` and Managed Blob path did not create the row count. They remain the
-  correct final output authority and bounded large-content path.
-- PR #63's Tool grouping and two-level disclosure did not create the historical deltas. It changed
-  Renderer presentation while preserving Core Evidence identity and nonterminal open completeness.
-- Other Runtime adapters did not produce Codex `command.output.delta`. The 13-Adapter audit found
-  complete terminal semantic output for every current adapter and no adapter that required a spool.
-- User command choice was not an error. The host is responsible for safely handling valid high-output
-  Runtime traffic.
-- Restarting the application did not create the amplification; it re-entered the same durable open and
-  recovery path.
-- The first reported Camp's stale Run did not contain the 78,837 deltas. It was a separate lifecycle
-  blocker and is not reclassified as a delta incident in this report.
+- SQLite 损坏没有导致失败；保留备份通过 `quick_check`。
+- 终态 `aggregatedOutput` 与 Managed Blob 路径没有制造行数；它们继续是正确的最终输出权威与
+  有界大内容路径。
+- PR #63 的 Tool 分组与两级披露没有创建历史 delta；它改变 Renderer 展示，同时保留 Core
+  Evidence identity 与非终态 open 完整性。
+- 其他 Runtime Adapter 不产生 Codex `command.output.delta`。对 13 个 Adapter 的审计确认，每个
+  当前 Adapter 都有完整终态语义输出，无需 spool。
+- 用户选择的命令不是错误；Host 有责任安全处理有效的高输出 Runtime 流量。
+- 重启应用没有制造放大；它只是重新进入同一持久 open 与 recovery 路径。
+- 最初报告 Camp 的旧 Run 不含这 78,837 条 delta；它是独立的生命周期阻断，本复盘不把它
+  重新分类为 delta 事故。
 
-## Resolution and recovery
+## 解决与恢复
 
-The immediate and product recoveries addressed different layers:
+即时恢复与产品恢复处理了不同层次：
 
-1. A pre-repair SQLite backup was retained and verified.
-2. The affected `waiting / recovery_blocked` Run was converged to terminal failure without deleting
-   Evidence. Its 84,620 historical rows remain available through exact-Run history reads.
-3. PR #69 stopped future output deltas from writing Evidence, Canonical Activity, Managed Blobs, or
-   Renderer live state. It retained semantic started/completed records, command identity, status,
-   exit code, terminal aggregate output, and exact Tool result lazy loading.
-4. Adapter review confirmed that all current adapters already provide terminal semantic output; no
-   Core/Renderer accumulator or Adapter spool was added.
-5. Runtime interruption now projects unsettled/stopped rather than fabricating authoritative
-   cancellation.
-6. PR #72 drops output-delta notifications at Codex Host stdout ingress after JSON-RPC response
-   handling and under current Thread/Turn route validation. Legacy or unprovable shapes fail closed.
-7. Core retains early unconditional transient guards as defense in depth, before batching, Runtime
-   lookup, shutdown route permits, and database reads.
-8. A production-ingress regression sends 100,000 current-route deltas while the receiver remains
-   unconsumed, observes an empty receiver, then proves `item/completed` and `turn/completed` still
-   arrive in order with terminal aggregate behavior intact.
+1. 保留并验证修复前 SQLite 备份。
+2. 在不删除 Evidence 的情况下，将受影响的 `waiting / recovery_blocked` Run 收敛为终态失败；
+   其 84,620 条历史记录继续可通过 exact-Run history read 获取。
+3. PR #69 阻止后续 output delta 写入 Evidence、Canonical Activity、Managed Blob 或 Renderer
+   live state，同时保留语义 started/completed record、Command identity、status、exit code、
+   终态 aggregate output 与 exact Tool result lazy loading。
+4. Adapter 审查确认所有当前 Adapter 已提供终态语义输出，因此没有增加 Core/Renderer
+   accumulator 或 Adapter spool。
+5. Runtime interruption 现在投影 unsettled/stopped，而不伪造权威 cancellation。
+6. PR #72 在处理 JSON-RPC response 后、current Thread/Turn route validation 下，于 Codex Host
+   stdout ingress 丢弃 output-delta notification；legacy 或不可证明的形态 fail closed。
+7. Core 保留早期无条件 transient guard 作为纵深防御，并把它们放在 batching、Runtime lookup、
+   shutdown route permit 与数据库读取之前。
+8. 生产 ingress 回归在 receiver 不消费时发送 100,000 个 current-route delta，确认 receiver
+   为空，再证明 `item/completed` 与 `turn/completed` 仍按顺序到达，终态 aggregate 行为不变。
 
-The changes apply only to future Runtime traffic. They do not migrate, delete, rewrite, compact, or
-rebuild historical Evidence, Blob, or Canonical Activity data. Historical performance remediation is
-a separate governance and migration problem.
+这些变更只影响后续 Runtime 流量，不迁移、删除、重写、压缩或重建历史 Evidence、Blob 或
+Canonical Activity。历史性能修复属于独立治理与迁移问题。
 
-## What went well
+## 做得好的地方
 
-- The daily database and a pre-repair backup preserved enough structure to distinguish corruption,
-  recovery state, semantic operations, and transport frames.
-- Exact counts showed that output transport, not Command count, dominated the affected Run.
-- Immediate recovery preserved all Evidence instead of deleting rows to make the UI responsive.
-- The review did not stop at database and Renderer elimination; it found and closed the remaining
-  unbounded Core ingress queue.
-- Terminal command semantics, large-output Managed Blob handling, Tool chronology, grouping, and exact
-  Tool lazy disclosure were retained and regression tested.
-- Both fixes passed repository CI before merge.
+- Daily database 与修复前备份保存了足够结构，能区分损坏、恢复状态、语义操作和 transport frame。
+- 精确计数证明受影响 Run 的主要体量来自输出 transport，而非 Command 数量。
+- 即时恢复保留全部 Evidence，没有为了让 UI 响应而删除行。
+- 审查没有停在数据库和 Renderer 消除，还找到并关闭了剩余的无界 Core ingress 队列。
+- 终态命令语义、大输出 Managed Blob、Tool chronology、分组和 exact Tool lazy disclosure 均保留并经过回归测试。
+- 两项修复合并前均通过仓库 CI。
 
-## What could be improved
+## 可以改进的地方
 
-- Transport-versus-semantic classification should be explicit at every Runtime adapter ingress before
-  a new event type can enter durable or UI-generic paths.
-- High-cardinality tests should exercise the production ingress and a deliberately non-consuming
-  downstream receiver, not only a pure predicate or normal consumer.
-- Camp-open diagnostics should report collection counts and serialized byte size before IPC without
-  logging user content.
-- Run recovery should make it easy to identify which nonterminal collection dominates a blocked open
-  response.
-- Incident response should retain structured detection, acknowledgement, repair, restart, and
-  meaningful-paint timestamps.
-- Historical delta treatment needs a separately reviewed migration/compaction policy rather than an
-  incident-specific deletion.
+- 每个 Runtime Adapter ingress 都应在新 event type 进入持久或 UI 通用路径前，显式分类 transport 与 semantic。
+- 高基数测试应覆盖生产 ingress 和刻意不消费的下游 receiver，而不只是纯 predicate 或正常 consumer。
+- Camp-open 诊断应在 IPC 前报告 collection count 与序列化字节，且不记录用户内容。
+- Run recovery 应能快速指出是哪一个非终态 collection 主导了阻断的 open response。
+- 事故响应应保留结构化的发现、确认、修复、重启与 meaningful-paint 时间戳。
+- 历史 delta 处理需要独立审查的迁移/压缩策略，而不是事故专用删除。
 
-## Where we were fortunate
+## 幸运之处
 
-- The database remained internally consistent and a backup was retained before operator recovery.
-- The high-cardinality data was append-only Evidence, so terminalizing the Run restored the existing
-  lazy-read boundary without destroying the incident record.
-- Codex terminal events already carried complete aggregate output, allowing transport frames to be
-  removed from durable and UI paths without inventing a new accumulator.
-- No current non-Codex Adapter depended on the delta durability behavior.
-- The remaining ingress queue risk was found before the first fix was treated as complete.
+- 数据库内部一致，且运维修复前保留了备份。
+- 高基数数据是 append-only Evidence，因此把 Run 终态化即可恢复既有 lazy-read 边界而不破坏事故记录。
+- Codex 终态 event 已包含完整 aggregate output，因此可移除 transport frame 而无需发明新 accumulator。
+- 当前非 Codex Adapter 均不依赖 delta 持久行为。
+- 在第一项修复被视为完成前，剩余 ingress queue 风险已经被发现。
 
-## Corrective and preventive actions
+## 纠正与预防措施
 
-Status reflects evidence available when this postmortem was published. Accountable roles must be
-mapped to a named maintainer before an open action starts.
+状态反映本复盘发布时可用的证据。任何开放事项开始前，责任角色都必须映射到具体维护者。
 
-| ID | Action | Accountable role | Priority | Status | Evidence or target |
+| ID | 措施 | 责任角色 | 优先级 | 状态 | 证据或目标 |
 |---|---|---|---|---|---|
-| CDO-01 | Stop future Codex command output deltas from writing Evidence, Canonical Activity, Managed Blobs, or Renderer live state | Runtime Activity | P0 | Complete | PR #69; V1.28-D12 |
-| CDO-02 | Preserve terminal command/status/exitCode/aggregatedOutput and large-output Blob behavior across all current adapters | Runtime Adapters | P0 | Complete | 13-Adapter durability audit; PR #69 |
-| CDO-03 | Drop current, stale, malformed, unbound, and legacy output-delta notifications at Codex Host ingress without swallowing ID-bearing requests | Codex Runtime | P0 | Complete | PR #72; `CodexIngressDisposition` |
-| CDO-04 | Prove 100,000 production-ingress deltas produce zero `CodexIncoming` sends and do not delay ordered terminal events | Codex Runtime | P0 | Complete | `stdout_ingress_drops_command_output_flood_and_preserves_terminal_events` |
-| CDO-05 | Keep downstream transient guards before batching, Runtime lookup, shutdown permit, and database reads | Core Runtime | P0 | Complete | PR #72 defense-in-depth tests |
-| CDO-06 | Define a separately governed historical delta migration or compaction policy, including backup, authorization, audit, and rollback requirements | Core Data | P1 | Planned | Future historical Evidence performance project; explicitly outside PR #69/#72 |
-| CDO-07 | Add content-free Camp-open diagnostics for collection cardinality, response bytes, and meaningful-paint phase timing | Core Observability | P2 | Planned | Target: Diagnostics planning |
-| CDO-08 | Record structured incident detection, mitigation, recovery, and verification timestamps | Release Engineering | P2 | Planned | Target: incident-response template update |
+| CDO-01 | 停止后续 Codex 命令输出 delta 写入 Evidence、Canonical Activity、Managed Blob 或 Renderer live state | Runtime Activity | P0 | 已完成 | PR #69；V1.28-D12 |
+| CDO-02 | 在所有当前 Adapter 中保留终态 command/status/exitCode/aggregatedOutput 与大输出 Blob 行为 | Runtime Adapters | P0 | 已完成 | 13-Adapter durability 审计；PR #69 |
+| CDO-03 | 在 Codex Host ingress 丢弃 current、stale、malformed、unbound 和 legacy output-delta notification，且不吞掉带 ID 请求 | Codex Runtime | P0 | 已完成 | PR #72；`CodexIngressDisposition` |
+| CDO-04 | 证明 100,000 个生产 ingress delta 产生零 `CodexIncoming` send，且不延迟有序终态 event | Codex Runtime | P0 | 已完成 | `stdout_ingress_drops_command_output_flood_and_preserves_terminal_events` |
+| CDO-05 | 在 batching、Runtime lookup、shutdown permit 与数据库读取前保留下游 transient guard | Core Runtime | P0 | 已完成 | PR #72 纵深防御测试 |
+| CDO-06 | 为历史 delta 定义独立治理的迁移或压缩策略，包含备份、授权、审计与回滚要求 | Core Data | P1 | 已计划 | 后续历史 Evidence 性能项目；明确不属于 PR #69/#72 |
+| CDO-07 | 增加不含内容的 Camp-open 诊断：collection 基数、response 字节与 meaningful-paint 阶段耗时 | Core Observability | P2 | 已计划 | 目标：Diagnostics 规划 |
+| CDO-08 | 记录结构化事故发现、缓解、恢复与验证时间 | Release Engineering | P2 | 已计划 | 目标：更新事故响应模板 |
 
-## Recurrence criteria
+## 复发判据
 
-This incident is considered to have recurred if any future Codex output-delta notification:
+若后续任何 Codex output-delta notification 出现以下情况，即视为本事故复发：
 
-- enters `CodexIncoming` or the Core `codex_tx` queue;
-- creates Execution Evidence, Canonical Activity, a Managed Blob, or a Renderer live event;
-- makes Camp-open work grow with stdout/stderr frame count rather than semantic operation count;
-- delays or prevents JSON-RPC responses, `item/completed`, or `turn/completed` from being processed; or
-- updates any operation after terminal, cancellation, Host unbind, Turn replacement, or route
-  supersession.
+- 进入 `CodexIncoming` 或 Core `codex_tx` 队列；
+- 创建 Execution Evidence、Canonical Activity、Managed Blob 或 Renderer live event；
+- 让 Camp-open 工作量随 stdout/stderr frame 数量而不是语义操作数量增长；
+- 延迟或阻止 JSON-RPC response、`item/completed` 或 `turn/completed` 的处理；或
+- 在 operation 终态、cancellation、Host unbind、Turn replacement 或 route supersession 后更新 operation。
 
-The continued existence of historical delta rows is accepted debt, not by itself a recurrence. A new
-automatic rewrite or deletion of that history without separately approved migration semantics would
-be a different data-governance incident.
+历史 delta 行继续存在属于已接受的技术债，本身不算复发。若未经独立批准的迁移语义就自动
+重写或删除这段历史，则属于另一项数据治理事故。
 
-## Lessons
+## 经验
 
-Streaming is a transport property, not a durability requirement. A frame should become durable only
-when it adds a fact that cannot be reconstructed from the terminal semantic record. Optimizing how
-quickly unbounded events are written does not bound the system; every downstream read, IPC, and UI
-projection inherits the producer's cardinality.
+Streaming 是 transport 属性，不是持久化要求。只有 frame 增加了无法从终态语义 record 重建的
+事实时，才应持久化。优化无界 event 的写入速度并不会让系统变得有界；每一个下游 read、IPC
+和 UI projection 都会继承 producer 的 cardinality。
 
-Complete active-state recovery and bounded Camp open are compatible only when the durable event set is
-semantically bounded before it reaches the read model. Finally, eliminating a database write is not
-enough when an earlier unbounded queue still accepts the same flood. Cardinality control belongs at
-the earliest ingress that can classify the event without blocking control and terminal traffic.
+只有在持久 event 到达 read model 前已经由语义约束，完整 active-state recovery 与有界 Camp
+open 才能兼容。最后，如果更早的无界队列仍接受同一洪流，只消除数据库写入仍不够。
+Cardinality 控制应放在能够安全分类 event、又不会阻断 control 与 terminal traffic 的最早 ingress。
 
-## References
+## 参考资料
 
-- [PR #69: Make command output deltas transient](https://github.com/murray17/rovai-ai/pull/69)
-- [PR #72: Drop Codex command output deltas at ingress](https://github.com/murray17/rovai-ai/pull/72)
-- [PR #63: Continuous Tool grouping and two-level result disclosure](https://github.com/murray17/rovai-ai/pull/63)
-- [V1.28-D12: Command output delta Host-ingress clean break](../versions/v1.28/decisions.md#v1-28-d12)
-- [Current Execution Evidence and Canonical Activity invariants](../architecture/foundational-invariants.md#evidence-canonical-activity)
+- [PR #69：让 command output delta 成为瞬态数据](https://github.com/murray17/rovai-ai/pull/69)
+- [PR #72：在 ingress 丢弃 Codex command output delta](https://github.com/murray17/rovai-ai/pull/72)
+- [PR #63：连续 Tool 分组与两级结果披露](https://github.com/murray17/rovai-ai/pull/63)
+- [V1.28-D12：Command output delta Host-ingress clean break](../versions/v1.28/decisions.md#v1-28-d12)
+- [当前 Execution Evidence 与 Canonical Activity 不变量](../architecture/foundational-invariants.md#evidence-canonical-activity)
 - [Camp Open Read Path](../architecture/camp-open-read-path.md)
 - [Camp Open Projection v6](../contracts/camp-open-projection-v6.md)
 - [Run Process Detail Surface v20](../contracts/run-process-detail-surface-v20.md)
 - [Runtime Activity Mapping Registry](../runtime-activity/registry.md#command-output-durability-audit)
-- [Codex ingress implementation](../../crates/rovai-core/src/codex.rs)
-- [Camp open read-model implementation](../../crates/rovai-core/src/read_model.rs)
+- [Codex ingress 实现](../../crates/rovai-core/src/codex.rs)
+- [Camp open read-model 实现](../../crates/rovai-core/src/read_model.rs)

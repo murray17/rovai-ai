@@ -158,6 +158,12 @@ watchdog 只在 Core 协议未按期结束时使用平台明确的强制结束�
 已授权退出，不能再进入一轮 native termination negotiation 并扩大有界关闭窗口。Preload/Renderer 不暴露
 此方法。
 
+应用内更新退出使用同一个 Main 协调器，但必须先由 updater 同步 stage/启动平台安装器，再允许其触发
+`before-quit`。协调器在第一次事件冻结 `normal | update_install` reason、取消更新 timer，并且仍只调用一次
+`CoreClient.shutdown()`。不得为了更新先关闭 Core 再调用 updater：若 installer 同步拒绝或抛错，App 必须回到
+`install_failed` 且 Core 继续可用。updater 已接受后，重复 `before-quit` 只复用当前 drain；最终仍由
+`app.exit(0)` 收口，不重新发起 native quit。详细动作与状态见 [App Update v1](../contracts/app-update-v1.md)。
+
 Windows 的 Runtime/Probe 根进程在执行第一条用户代码前已经进入 kill-on-close Job，且 Runtime descendants 不得
 继承 Job handle 或 Electron↔Core pipe handle。planned shutdown 仍先请求可靠 Runtime terminal 并执行 product
 fence；只有 deadline 后的 process teardown 才关闭 Job。Job cleanup 证明 Rovai 进程权已经收口，不改变本文件对

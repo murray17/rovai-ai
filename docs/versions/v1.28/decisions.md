@@ -475,3 +475,48 @@ state 也都新增 0 个 delta 项，只留下单一 terminal semantic result。
   会把 output flood 的背压扩散到控制与终态路径；
 - 借本次修改清理或重写历史：扩大故障面并改变既有 Evidence/Blob 审计事实；
 - 将 interruption 写成 cancelled：把连续性未知伪装成 Runtime 权威取消。
+
+<a id="v1-28-d13"></a>
+## V1.28-D13：主动检查与用户确认更新分层，提醒代次和 release 事实由 Main 拥有
+
+### 背景
+
+既有更新页只允许手动检查，发现新版后立即下载；它不能在普通页面及时告知新版本，也把“了解有更新”和
+“同意下载”合成一个动作。若仅在 Renderer 增加关闭布尔值，窗口重建会丢状态，手动/自动并发也无法判断是否
+应提醒；若每次检查先清空 flat snapshot，临时网络失败又会抹掉仍有效的版本和重试目标。安装路径还必须与
+Main 已有 Planned Shutdown 协调，不能先关闭 Core 再尝试启动 installer。
+
+### 决定
+
+正式打包 App 在主窗口首次加载完成 5 秒后检查，并在每轮检查完成 6 小时后递归安排下一轮。检查只发现版本，
+`autoDownload` 和普通退出自动安装均关闭；下载、安装、重启必须分别由用户确认。手动检查与自动检查共享一个
+in-flight Promise 和参与来源集合；只要该轮含自动来源，发现新版就生成提醒。
+
+Main 是唯一更新权威。Snapshot 把当前操作 `status`、最后有效 `availableRelease`、检查时间/来源和内存
+`pendingPrompt {id, version}` 分离。自动轮次为同一版本也生成新 prompt ID；Renderer 只能 exact-ID dismiss，
+不持久化 snooze。下载有独立互斥 Promise，provider event 与 reject 至多结算一次；`download_failed` 直接重试
+同一已知 release。无效 release 不进入下载，远程 notes 有界规范化并由 Renderer SafeMarkdown 展示。
+
+全局提醒是右下角、非 modal、不抢焦点的专用轻量浮层，不进入 Core Notification Episode；普通 heads-up、dialog、
+Onboarding、关闭过程和同一 release 的 About 页面优先。普通设置主入口继续恢复 `lastSettingsSection`，独立更新
+徽标才临时深链 About，且成功渲染并定位同一版本日志后才关闭 prompt。
+
+安装采用 updater-first 顺序：用户确认后先让 updater 同步 stage/启动安装器，只有它接受后才由 native quit 进入
+Main 的幂等协调器和唯一 Core drain；同步失败回到 `install_failed`，App/Core 保持可用。普通退出与更新退出复用
+同一 `before-quit -> CoreClient.shutdown() -> app.exit(0)` 边界。
+
+### 后果
+
+用户会被主动告知版本，但不会因检查而消费带宽、关闭工作或重启。提醒关闭后 release 和状态徽标仍存在，下一轮
+自动检查可以再次提醒；窗口重建通过 `get()` 恢复共享事实。网络检查失败保留上次 release；只有 updater 不可用
+或下载失败才显示固定官方 fallback。调度、并发、提醒、下载、安装失败和 Renderer 状态矩阵可确定性单测，真实
+签名跨版本升级仍按 macOS/Windows 发布集合独立验收。
+
+### 被拒绝方案
+
+- 自动检查后直接下载：把发现版本误当成用户同意网络与磁盘副作用；
+- Renderer 本地保存 `closed` 或 snooze：无法跨窗口和并发轮次精确归属，也引入未要求的持久静默策略；
+- 用单一 status 覆盖 release：检查失败会丢失仍有效的版本、日志和下载重试目标；
+- 用普通 Notification Episode 承载更新：混淆 Core 协作动态与 Desktop 发布通道，并造成 heads-up 竞争；
+- 先关闭 Core 再启动 updater：同步 installer 失败会留下不可恢复的半退出应用；
+- 所有失败都展示 GitHub 下载：会把网络或无效 metadata 错误升级成未经验证的安装 handoff。

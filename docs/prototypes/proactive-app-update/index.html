@@ -1,0 +1,1618 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="day">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>Rovai AI · 主动更新探测交互稿</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --rail-width: 270px;
+      --canvas: #eceeef;
+      --surface: #fbfbfa;
+      --surface-raised: #ffffff;
+      --surface-subtle: #f0f2f4;
+      --surface-muted: #e7eaed;
+      --surface-selected: #e9ecee;
+      --surface-hover: #e8eaea;
+      --surface-sunken: #e4e8eb;
+      --workspace-surface-subtle: #f4f5f4;
+      --workspace-surface-raised: #ffffff;
+      --workspace-line: #d5dadd;
+      --workspace-line-strong: #bdc6ca;
+      --conversation-surface: #ffffff;
+      --topbar: #fbfbfa;
+      --input: #ffffff;
+      --ink: #171b20;
+      --muted: #616a73;
+      --faint: #6e7382;
+      --line: #dfe4e8;
+      --line-strong: #c7cfd6;
+      --control-line: #8b9389;
+      --brand: #526f88;
+      --brand-hover: #3d5874;
+      --brand-contrast: #ffffff;
+      --brand-soft: #e9eef3;
+      --brand-ink: #405f7e;
+      --rail: #f3f4f4;
+      --rail-ink: #626b72;
+      --rail-line: #dadde0;
+      --rail-logo: #526f88;
+      --ember: #d3a45f;
+      --success: #3e775c;
+      --success-soft: #e7f1ea;
+      --attention: #8a6226;
+      --attention-soft: #f8edda;
+      --danger: #a24c46;
+      --danger-soft: #f7e6e3;
+      --info: #416c86;
+      --info-soft: #e5eef3;
+      --neutral: #5f6678;
+      --neutral-soft: #ecefe9;
+      --focus: #526f88;
+      --focus-soft: rgb(82 111 136 / 16%);
+      --overlay: rgb(28 32 43 / 42%);
+      --shadow-float: 0 18px 56px rgb(38 45 58 / 14%);
+      --inline-code-canvas: #eef2f5;
+      --code-block-canvas: #eef2f5;
+      --evidence-ink: #252a36;
+      --evidence-line: #d5dad3;
+      --identity-1: #a65f4a;
+      --identity-2: #39777a;
+      --identity-3: #74628f;
+    }
+
+    html[data-theme="night"] {
+      color-scheme: dark;
+      --canvas: #0d1114;
+      --surface: #151a1e;
+      --surface-raised: #1b2227;
+      --surface-subtle: #1a2024;
+      --surface-muted: #242d33;
+      --surface-selected: #222c33;
+      --surface-hover: #1d252b;
+      --surface-sunken: #10161a;
+      --workspace-surface-subtle: #11171b;
+      --workspace-surface-raised: #1c2328;
+      --workspace-line: #2b353b;
+      --workspace-line-strong: #3d4950;
+      --conversation-surface: #181d21;
+      --topbar: #151a1e;
+      --input: #1b2227;
+      --ink: #e7ecef;
+      --muted: #abb5bc;
+      --faint: #919da6;
+      --line: #333e46;
+      --line-strong: #53616b;
+      --control-line: #687b88;
+      --brand: #7897ae;
+      --brand-hover: #b1c8d8;
+      --brand-contrast: #091116;
+      --brand-soft: #22303a;
+      --brand-ink: #c0d4e1;
+      --rail: #11161a;
+      --rail-ink: #a6b1b8;
+      --rail-line: #313b43;
+      --rail-logo: #b1c8d8;
+      --ember: #d2aa72;
+      --success: #82b695;
+      --success-soft: #1a2b22;
+      --attention: #d2ac70;
+      --attention-soft: #302719;
+      --danger: #d6857f;
+      --danger-soft: #321e1d;
+      --info: #83afc9;
+      --info-soft: #182832;
+      --neutral: #abb5bc;
+      --neutral-soft: #242d33;
+      --focus: #8fb3cb;
+      --focus-soft: rgb(143 179 203 / 18%);
+      --overlay: rgb(0 0 0 / 58%);
+      --shadow-float: 0 22px 64px rgb(0 0 0 / 42%);
+      --inline-code-canvas: #1d252b;
+      --code-block-canvas: #1d252b;
+      --evidence-ink: #dce4e9;
+      --evidence-line: #35424a;
+      --identity-1: #c98572;
+      --identity-2: #70b0ae;
+      --identity-3: #a89ac8;
+    }
+
+    * { box-sizing: border-box; }
+    html, body { width: 100%; min-width: 0; height: 100%; margin: 0; }
+    body {
+      overflow: hidden;
+      color: var(--ink);
+      background: var(--canvas);
+      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif;
+      font-size: 13px;
+      font-synthesis: none;
+      text-rendering: optimizeLegibility;
+    }
+    button, select { color: inherit; font: inherit; }
+    button { -webkit-app-region: no-drag; }
+    button:active:not(:disabled) { transform: translateY(1px); }
+    button:disabled { cursor: default; opacity: .62; }
+    :where(button, select, [tabindex]):focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+    ::selection { color: var(--ink); background: var(--brand-soft); }
+    * { scrollbar-color: var(--line-strong) transparent; scrollbar-width: thin; }
+    [hidden] { display: none !important; }
+    .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+
+    .prototype-root {
+      display: grid;
+      width: 100vw;
+      height: 100vh;
+      grid-template-rows: minmax(0, 1fr) auto;
+      overflow: hidden;
+    }
+    .product-frame { position: relative; min-width: 0; min-height: 0; overflow: hidden; border-bottom: 1px solid var(--line-strong); background: var(--surface); }
+    .product-screen { position: absolute; inset: 0; min-width: 0; min-height: 0; overflow: hidden; background: var(--surface); }
+
+    .app-shell {
+      display: grid;
+      width: 100%;
+      height: 100%;
+      grid-template-columns: var(--rail-width) minmax(0, 1fr);
+      grid-template-rows: 50px minmax(0, 1fr);
+      overflow: hidden;
+    }
+    .unified-sidebar {
+      position: relative;
+      z-index: 4;
+      display: flex;
+      min-height: 0;
+      grid-column: 1;
+      grid-row: 1 / -1;
+      flex-direction: column;
+      overflow: hidden;
+      padding: 0 10px 10px;
+      border-right: 1px solid var(--rail-line);
+      background: var(--rail);
+    }
+    .sidebar-drag { height: 38px; flex: 0 0 38px; -webkit-app-region: drag; }
+    .traffic-lights { position: absolute; top: 12px; left: 14px; display: flex; gap: 8px; }
+    .traffic-lights span { width: 11px; height: 11px; border: 1px solid rgb(0 0 0 / 10%); border-radius: 50%; }
+    .traffic-lights span:nth-child(1) { background: #ff5f57; }
+    .traffic-lights span:nth-child(2) { background: #ffbd2e; }
+    .traffic-lights span:nth-child(3) { background: #28c840; }
+    .unified-brand { display: flex; flex: 0 0 auto; align-items: center; justify-content: space-between; gap: 8px; padding: 0 8px 14px; }
+    .rail-logo { display: flex; min-width: 0; height: 38px; align-items: center; gap: 10px; color: var(--rail-logo); }
+    .rail-logo svg { width: 20px; height: 20px; flex: 0 0 20px; }
+    .rail-logo .horizon { fill: none; stroke: currentColor; stroke-linecap: round; stroke-width: 2.08; }
+    .rail-logo .point { fill: var(--ember); stroke: var(--rail); stroke-width: .65; }
+    .rail-logo strong { color: var(--ink); font-size: 15px; font-weight: 700; letter-spacing: -.01em; }
+
+    .rail-nav { display: grid; flex: 0 0 auto; gap: 3px; margin-bottom: 12px; }
+    .rail-button {
+      position: relative;
+      display: flex;
+      width: 100%;
+      min-height: 34px;
+      min-width: 0;
+      align-items: center;
+      gap: 8px;
+      padding: 0 9px;
+      border: 0;
+      border-radius: 7px;
+      color: var(--rail-ink);
+      background: transparent;
+      cursor: pointer;
+      text-align: left;
+    }
+    .rail-button:hover:not(:disabled) { color: var(--ink); background: var(--surface-muted); }
+    .rail-button.active { color: var(--brand-ink); background: var(--surface-selected); }
+    .rail-icon { display: grid; width: 20px; height: 20px; flex: 0 0 20px; place-items: center; }
+    .rail-icon svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.6; }
+    .rail-label { min-width: 0; flex: 1 1 auto; overflow: hidden; font-size: 14px; font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
+    .conversation-jump { display: flex; min-height: 32px; flex: 0 0 auto; align-items: center; gap: 8px; margin: 0 2px 10px; padding: 6px 7px 6px 10px; border: 1px solid var(--line); border-radius: 7px; color: var(--faint); background: var(--surface); cursor: pointer; font-size: 12px; text-align: left; }
+    .conversation-jump:hover { border-color: var(--line-strong); color: var(--muted); }
+    .conversation-jump span { min-width: 0; flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .conversation-jump kbd { padding: 2px 5px; border-radius: 4px; color: var(--faint); background: var(--surface-muted); font: 500 10px/1.2 ui-monospace, SFMono-Regular, Menlo, monospace; }
+
+    .rail-scroll { min-height: 0; flex: 1 1 auto; overflow-y: auto; padding-right: 2px; }
+    .rail-section { padding: 2px 0 12px; }
+    .rail-section-title { display: flex; align-items: center; justify-content: space-between; margin: 0; padding: 0 9px 5px; color: var(--faint); font-size: 10.5px; font-weight: 650; letter-spacing: .04em; }
+    .project-row, .camp-row { display: flex; width: 100%; min-height: 31px; min-width: 0; align-items: center; gap: 7px; padding: 4px 8px; border: 0; border-radius: 6px; color: var(--rail-ink); background: transparent; cursor: pointer; text-align: left; }
+    .project-row:hover, .camp-row:hover { color: var(--ink); background: var(--surface-muted); }
+    .project-row svg, .camp-row svg { width: 14px; height: 14px; flex: 0 0 14px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.55; }
+    .project-row strong, .camp-row span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .project-row strong { font-size: 12px; }
+    .camp-row { padding-left: 29px; font-size: 11.5px; }
+    .camp-row.active { color: var(--brand-ink); background: var(--surface-selected); }
+    .rail-footer { display: grid; flex: 0 0 auto; gap: 4px; padding-top: 8px; border-top: 1px solid var(--line); }
+    .settings-entry { display: grid; min-width: 0; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 4px; }
+    .settings-entry .rail-button { min-width: 0; }
+    .settings-update-shortcut { margin-right: 3px; cursor: pointer; }
+    .settings-update-shortcut:hover { color: var(--ink); background: var(--surface-hover); }
+
+    .topbar {
+      z-index: 2;
+      display: flex;
+      min-width: 0;
+      grid-column: 2;
+      grid-row: 1;
+      align-items: center;
+      gap: 10px;
+      padding: 0 18px;
+      border-bottom: 1px solid var(--line);
+      background: var(--topbar);
+      -webkit-app-region: drag;
+    }
+    .context-breadcrumb { display: flex; min-width: 0; flex: 0 1 auto; align-items: baseline; gap: 7px; }
+    .context-project, .context-sep { color: var(--faint); font-size: 12px; white-space: nowrap; }
+    .topbar h1 { max-width: min(560px, 46vw); margin: 0; overflow: hidden; font-size: 13px; font-weight: 700; line-height: 1.3; text-overflow: ellipsis; white-space: nowrap; }
+    .day-badge { padding: 2px 6px; border-radius: 5px; color: var(--faint); background: var(--surface-muted); font: 500 10px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: nowrap; }
+    .topbar-actions { display: flex; align-items: center; gap: 8px; margin-left: auto; -webkit-app-region: no-drag; }
+    .topbar-status { padding: 3px 7px; border: 0; border-radius: 6px; color: var(--attention); background: var(--attention-soft); font-size: 11px; font-weight: 700; white-space: nowrap; }
+    .icon-button { display: grid; width: 30px; height: 30px; padding: 0; place-items: center; border: 0; border-radius: 6px; color: var(--muted); background: transparent; cursor: pointer; }
+    .icon-button:hover { color: var(--ink); background: var(--surface-muted); }
+    .icon-button svg { width: 17px; height: 17px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.65; }
+
+    .camp-main { position: relative; display: flex; min-width: 0; min-height: 0; grid-column: 2; grid-row: 2; flex-direction: column; overflow: hidden; background: var(--conversation-surface); }
+    .timeline { min-height: 0; flex: 1 1 auto; overflow-y: auto; padding: 26px 32px 18px; }
+    .timeline-track { display: grid; width: min(760px, 100%); margin: 0 auto; gap: 22px; }
+    .date-rule { display: flex; align-items: center; gap: 12px; color: var(--faint); font-size: 10px; }
+    .date-rule::before, .date-rule::after { height: 1px; flex: 1 1 auto; background: var(--line); content: ""; }
+    .message-row { display: grid; min-width: 0; grid-template-columns: 30px minmax(0, 1fr); gap: 11px; }
+    .avatar { display: grid; width: 30px; height: 30px; place-items: center; border: 1px solid color-mix(in srgb, currentColor 32%, var(--line)); border-radius: 50%; color: var(--identity-1); background: var(--surface-subtle); font-size: 10px; font-weight: 700; }
+    .avatar.is-second { color: var(--identity-2); }
+    .avatar.is-third { color: var(--identity-3); }
+    .message-copy { min-width: 0; }
+    .message-meta { display: flex; align-items: baseline; gap: 7px; margin: 0 0 5px; }
+    .message-meta strong { color: var(--ink); font-size: 11.5px; }
+    .message-meta time { color: var(--faint); font-size: 9.5px; font-variant-numeric: tabular-nums; }
+    .message-copy p { max-width: 70ch; margin: 0; color: var(--ink); font-size: 13px; line-height: 1.62; overflow-wrap: anywhere; }
+    .message-copy p + p { margin-top: 8px; }
+    .tool-evidence { display: flex; max-width: 660px; align-items: center; gap: 9px; margin-top: 8px; padding: 7px 9px; border: 1px solid var(--evidence-line); border-radius: 6px; color: var(--muted); background: var(--workspace-surface-subtle); font-size: 10.5px; }
+    .tool-evidence code { color: var(--evidence-ink); font: 10.5px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; overflow-wrap: anywhere; }
+    .composer { flex: 0 0 auto; padding: 0 27px 14px; background: var(--conversation-surface); }
+    .composer-route { display: flex; width: min(760px, 100%); min-height: 31px; margin: 0 auto 5px; align-items: center; gap: 7px; color: var(--faint); font-size: 10.5px; }
+    .composer-box { display: grid; width: min(760px, 100%); min-height: 72px; grid-template-columns: minmax(0, 1fr) auto; margin: 0 auto; align-items: end; gap: 10px; padding: 10px; border: 1px solid var(--control-line); border-radius: 8px; background: var(--input); }
+    .composer-box:focus-within { border-color: var(--focus); box-shadow: 0 0 0 3px var(--focus-soft); }
+    .composer-box textarea { width: 100%; min-width: 0; height: 48px; resize: none; padding: 2px; border: 0; outline: 0; color: var(--ink); background: transparent; font-family: inherit; font-size: 13px; line-height: 1.55; }
+    .composer-box textarea::placeholder { color: var(--faint); opacity: 1; }
+    .composer-box textarea:focus-visible { outline: 0; }
+
+    .primary-button, .quiet-button {
+      display: inline-flex;
+      min-height: 32px;
+      align-items: center;
+      justify-content: center;
+      gap: 7px;
+      padding: 5px 11px;
+      border-radius: 7px;
+      cursor: pointer;
+      font-size: 11px;
+      font-weight: 650;
+      white-space: nowrap;
+    }
+    .primary-button { border: 1px solid var(--brand); color: var(--brand-contrast); background: var(--brand); }
+    .primary-button:hover:not(:disabled) { border-color: var(--brand-hover); background: var(--brand-hover); }
+    .quiet-button:hover:not(:disabled) { background: var(--surface-hover); }
+    .quiet-button { border: 1px solid var(--line-strong); color: var(--muted); background: transparent; }
+    .button-icon { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.7; }
+    .button-spinner { width: 12px; height: 12px; border: 1.5px solid color-mix(in srgb, currentColor 34%, transparent); border-top-color: currentColor; border-radius: 50%; animation: spin 720ms linear infinite; }
+
+    .update-prompt-layer { position: absolute; z-index: 30; right: 18px; width: min(340px, calc(100% - 36px)); pointer-events: none; }
+    .product-frame[data-screen="camp"] .update-prompt-layer { bottom: 126px; }
+    .product-frame[data-screen="about"] .update-prompt-layer { bottom: 18px; }
+    .update-prompt {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 32px;
+      overflow: hidden;
+      border: 1px solid var(--line-strong);
+      border-radius: 10px;
+      color: var(--ink);
+      background: var(--surface-raised);
+      box-shadow: var(--shadow-float);
+      pointer-events: auto;
+      animation: prompt-enter 180ms ease-out both;
+    }
+    .prompt-main { display: grid; min-width: 0; gap: 9px; padding: 12px 4px 10px 15px; }
+    .prompt-copy { display: grid; min-width: 0; gap: 3px; }
+    .prompt-copy strong { color: var(--brand-ink); font-size: 11px; font-weight: 650; }
+    .prompt-copy > span { color: var(--ink); font-size: 12px; line-height: 1.45; overflow-wrap: anywhere; }
+    .prompt-copy b { font-weight: 650; }
+    .prompt-copy small { overflow: hidden; color: var(--faint); font-size: 10px; line-height: 1.45; text-overflow: ellipsis; white-space: nowrap; }
+    .prompt-copy code { color: inherit; font: 600 10px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; font-variant-numeric: tabular-nums; }
+    .prompt-close { width: 28px; height: 28px; margin-top: 7px; }
+    .prompt-actions { display: flex; min-width: 0; flex-wrap: wrap; align-items: center; gap: 3px; margin-left: -6px; }
+    .prompt-action { display: inline-flex; min-height: 26px; align-items: center; padding: 3px 6px; border: 0; border-radius: 6px; background: transparent; cursor: pointer; font-size: 10px; font-weight: 620; white-space: nowrap; }
+    .prompt-action-quiet { color: var(--faint); }
+    .prompt-action-secondary { color: var(--muted); }
+    .prompt-action-primary { color: var(--brand-ink); background: var(--brand-soft); }
+    .prompt-action:hover { color: var(--ink); background: var(--surface-muted); }
+
+    .update-badge { display: inline-flex; min-height: 22px; flex: 0 0 auto; align-items: center; gap: 5px; padding: 3px 7px; border: 1px solid transparent; border-radius: 999px; font-size: 9.5px; font-weight: 700; line-height: 1; white-space: nowrap; }
+    .update-badge svg { display: none; width: 12px; height: 12px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.8; }
+    .update-badge[data-kind="available"] { border-color: color-mix(in srgb, var(--attention) 30%, var(--line)); color: var(--attention); background: var(--attention-soft); }
+    .update-badge[data-kind="downloading"], .update-badge[data-kind="installing"] { border-color: color-mix(in srgb, var(--info) 30%, var(--line)); color: var(--info); background: var(--info-soft); }
+    .update-badge[data-kind="ready"] { border-color: color-mix(in srgb, var(--success) 30%, var(--line)); color: var(--success); background: var(--success-soft); }
+    .update-badge[data-kind="failed"] { border-color: color-mix(in srgb, var(--danger) 30%, var(--line)); color: var(--danger); background: var(--danger-soft); }
+    .update-badge[data-kind="available"] .badge-icon-available,
+    .update-badge[data-kind="downloading"] .badge-icon-downloading,
+    .update-badge[data-kind="installing"] .badge-icon-installing,
+    .update-badge[data-kind="ready"] .badge-icon-ready,
+    .update-badge[data-kind="failed"] .badge-icon-failed { display: block; }
+    .update-badge[data-kind="downloading"] .badge-icon-downloading,
+    .update-badge[data-kind="installing"] .badge-icon-installing { animation: spin 920ms linear infinite; }
+
+    .settings-shell { display: grid; width: 100%; height: 100%; grid-template-columns: var(--rail-width) minmax(0, 1fr); overflow: hidden; background: var(--surface); }
+    .settings-sidebar { grid-column: 1; }
+    .settings-navigation { display: flex; min-height: 0; flex: 1 1 auto; flex-direction: column; }
+    .settings-heading { display: grid; gap: 10px; padding: 4px 0 11px; border-bottom: 1px solid var(--line); }
+    .settings-back { display: grid; width: 100%; min-height: 36px; grid-template-columns: 22px minmax(0, 1fr); gap: 8px; align-items: center; padding: 6px 9px; border: 0; border-radius: 8px; color: var(--muted); background: transparent; cursor: pointer; text-align: left; }
+    .settings-back:hover { color: var(--ink); background: var(--surface-muted); }
+    .settings-back svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.7; }
+    .settings-back strong { font-size: 13px; font-weight: 600; }
+    .settings-title { display: grid; gap: 3px; padding: 0 9px 3px; }
+    .settings-title strong { font-size: 17px; letter-spacing: -.02em; }
+    .settings-title span { color: var(--faint); font-size: 10px; }
+    .settings-menu { display: grid; min-height: 0; flex: 1 1 auto; align-content: start; gap: 16px; overflow-y: auto; padding: 10px 0; }
+    .settings-group { display: grid; gap: 3px; }
+    .settings-group h2 { margin: 0; padding: 0 9px 4px; color: var(--faint); font-size: 11px; font-weight: 650; letter-spacing: .04em; line-height: 16px; }
+    .settings-menu button { position: relative; display: grid; width: 100%; min-height: 36px; min-width: 0; grid-template-columns: 22px minmax(0, 1fr) auto; gap: 8px; align-items: center; padding: 6px 9px; border: 0; border-radius: 8px; color: var(--rail-ink); background: transparent; cursor: pointer; text-align: left; }
+    .settings-menu button:hover { color: var(--ink); background: var(--surface-muted); }
+    .settings-menu button.active { color: var(--brand-ink); background: var(--surface-selected); }
+    .settings-menu button.active::before { position: absolute; top: 7px; bottom: 7px; left: 0; width: 3px; border-radius: 0 3px 3px 0; background: var(--brand); content: ""; }
+    .settings-menu .menu-icon { display: grid; width: 22px; place-items: center; color: var(--faint); }
+    .settings-menu button.active .menu-icon { color: var(--brand-ink); }
+    .settings-menu svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.55; }
+    .settings-menu strong { min-width: 0; overflow: hidden; font-size: 13px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+
+    .settings-main { min-width: 0; min-height: 0; grid-column: 2; overflow-y: auto; background: var(--surface); }
+    .settings-panel { min-height: 100%; padding: 27px 27px 48px; }
+    .about-settings { display: grid; width: min(1040px, 100%); max-width: 1040px; margin: 0 auto; padding-bottom: 24px; }
+    .page-heading { display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; padding-bottom: 24px; }
+    .page-heading-copy { min-width: 0; }
+    .page-heading h1 { margin: 0; color: var(--ink); font-size: 25px; font-weight: 620; line-height: 1.15; letter-spacing: -.025em; }
+    .page-heading p { max-width: 680px; margin: 8px 0 0; color: var(--muted); font-size: 11px; line-height: 1.55; }
+    .page-state-summary { display: inline-flex; flex: 0 0 auto; align-items: center; gap: 6px; padding: 5px 8px; border: 1px solid var(--line); border-radius: 6px; color: var(--muted); background: var(--surface-subtle); font-size: 10px; font-weight: 650; }
+    .page-state-summary i { width: 6px; height: 6px; border-radius: 50%; color: var(--neutral); background: currentColor; }
+    .page-state-summary[data-tone="attention"] { color: var(--attention); background: var(--attention-soft); }
+    .page-state-summary[data-tone="info"] { color: var(--info); background: var(--info-soft); }
+    .page-state-summary[data-tone="success"] { color: var(--success); background: var(--success-soft); }
+    .page-state-summary[data-tone="danger"] { color: var(--danger); background: var(--danger-soft); }
+
+    .settings-section { display: grid; grid-template-columns: minmax(98px, 132px) minmax(0, 1fr); align-items: start; gap: clamp(22px, 4vw, 42px); padding: 28px 0; border-bottom: 1px solid var(--line); }
+    .settings-section:last-child { border-bottom: 0; }
+    .section-heading h2 { margin: 0; color: var(--ink); font-size: 15px; font-weight: 620; }
+    .section-heading p { margin: 6px 0 0; color: var(--faint); font-size: 10px; line-height: 1.45; }
+    .version-row { display: flex; min-height: 76px; align-items: center; justify-content: space-between; gap: 24px; padding: 15px 17px; border-radius: 10px; background: var(--workspace-surface-raised); }
+    .product-name { display: grid; min-width: 0; gap: 4px; }
+    .product-name strong { font-size: 13px; font-weight: 650; }
+    .product-name small { color: var(--muted); font-size: 10.5px; }
+    .version-value { display: grid; flex: 0 0 auto; justify-items: end; gap: 5px; }
+    .version-value span { color: var(--faint); font-size: 9.5px; }
+    .version-value code { color: var(--ink); font: 650 12px/1.25 ui-monospace, SFMono-Regular, Menlo, monospace; font-variant-numeric: tabular-nums; }
+
+    .update-body { display: grid; min-width: 0; gap: 10px; }
+    .update-control { display: flex; min-height: 86px; align-items: center; justify-content: space-between; gap: 22px; padding: 15px 17px; border-radius: 10px; background: var(--workspace-surface-raised); }
+    .update-control-copy { display: grid; min-width: 0; gap: 5px; }
+    .update-control-copy strong { color: var(--ink); font-size: 12.5px; font-weight: 650; }
+    .update-control-copy p { max-width: 570px; margin: 0; color: var(--muted); font-size: 10.5px; line-height: 1.55; }
+    .update-actions { display: flex; flex: 0 0 auto; align-items: center; justify-content: flex-end; gap: 7px; }
+    .update-status { display: grid; min-height: 72px; grid-template-columns: 16px minmax(0, 1fr); align-items: start; gap: 9px; padding: 13px; border-radius: 9px; color: var(--muted); background: var(--workspace-surface-subtle); }
+    .status-icon { display: grid; width: 16px; height: 16px; margin-top: 1px; place-items: center; color: var(--neutral); }
+    .status-icon svg { display: none; width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.8; }
+    .update-status[data-tone="attention"] { background: var(--attention-soft); }
+    .update-status[data-tone="attention"] .status-icon, .update-status[data-tone="attention"] .status-copy strong { color: var(--attention); }
+    .update-status[data-tone="info"] { background: var(--info-soft); }
+    .update-status[data-tone="info"] .status-icon, .update-status[data-tone="info"] .status-copy strong { color: var(--info); }
+    .update-status[data-tone="success"] { background: var(--success-soft); }
+    .update-status[data-tone="success"] .status-icon, .update-status[data-tone="success"] .status-copy strong { color: var(--success); }
+    .update-status[data-tone="danger"] { background: var(--danger-soft); }
+    .update-status[data-tone="danger"] .status-icon, .update-status[data-tone="danger"] .status-copy strong, .update-status[data-tone="danger"] .status-copy p { color: var(--danger); }
+    .update-status[data-tone="neutral"] .status-icon-neutral,
+    .update-status[data-tone="attention"] .status-icon-attention,
+    .update-status[data-tone="info"] .status-icon-info,
+    .update-status[data-tone="success"] .status-icon-success,
+    .update-status[data-tone="danger"] .status-icon-danger { display: block; }
+    .update-status[data-busy="true"] .status-icon-info { animation: spin 850ms linear infinite; }
+    .status-copy { display: grid; min-width: 0; gap: 4px; }
+    .status-copy strong { color: var(--ink); font-size: 11px; font-weight: 650; }
+    .status-copy p { margin: 0; color: var(--muted); font-size: 10.5px; line-height: 1.5; overflow-wrap: anywhere; }
+    .check-meta { display: flex; min-width: 0; flex-wrap: wrap; gap: 5px 14px; padding: 1px 2px 0; color: var(--faint); font-size: 9.5px; line-height: 1.45; }
+    .check-meta code { color: var(--muted); font: 500 9.5px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; }
+
+    .download-progress { display: grid; gap: 7px; padding: 12px 13px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); }
+    .progress-heading, .progress-meta { display: flex; justify-content: space-between; gap: 12px; }
+    .progress-heading { color: var(--muted); font-size: 10.5px; }
+    .progress-heading strong { color: var(--ink); font-variant-numeric: tabular-nums; }
+    .progress-meta { color: var(--faint); font-size: 9.5px; font-variant-numeric: tabular-nums; }
+    progress { width: 100%; height: 6px; overflow: hidden; border: 0; border-radius: 999px; color: var(--brand); background: var(--surface-muted); appearance: none; }
+    progress::-webkit-progress-bar { border-radius: inherit; background: var(--surface-muted); }
+    progress::-webkit-progress-value { border-radius: inherit; background: var(--brand); }
+    progress::-moz-progress-bar { border-radius: inherit; background: var(--brand); }
+
+    .fallback-row { display: grid; min-width: 0; grid-template-columns: 18px minmax(0, 1fr) auto; align-items: center; gap: 9px; padding: 10px 12px; border: 1px solid color-mix(in srgb, var(--danger) 28%, var(--line)); border-radius: 8px; color: var(--danger); background: var(--danger-soft); }
+    .fallback-row > svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.7; }
+    .fallback-copy { min-width: 0; }
+    .fallback-copy strong { display: block; font-size: 10.5px; }
+    .fallback-copy span { display: block; margin-top: 2px; font-size: 9.5px; line-height: 1.45; }
+    .fallback-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
+    .fallback-actions a { display: inline-flex; min-height: 28px; align-items: center; padding: 4px 8px; border: 1px solid color-mix(in srgb, var(--danger) 42%, var(--line)); border-radius: 6px; color: var(--danger); background: var(--surface-raised); font-size: 9.5px; font-weight: 650; text-decoration: none; }
+    .fallback-actions a:hover { text-decoration: underline; text-underline-offset: 2px; }
+
+    .release-body { min-width: 0; }
+    .release-header { display: flex; min-width: 0; align-items: flex-start; justify-content: space-between; gap: 18px; padding-bottom: 13px; }
+    .release-title { min-width: 0; }
+    .release-title h3 { margin: 0; color: var(--ink); font-size: 14px; font-weight: 650; line-height: 1.4; overflow-wrap: anywhere; }
+    .release-title p { margin: 4px 0 0; color: var(--muted); font-size: 10.5px; line-height: 1.5; }
+    .release-version { flex: 0 0 auto; padding: 4px 7px; border-radius: 5px; color: var(--brand-ink); background: var(--brand-soft); font: 650 10.5px/1.3 ui-monospace, SFMono-Regular, Menlo, monospace; }
+    .release-notes { max-width: 76ch; padding-top: 13px; border-top: 1px solid var(--line); color: var(--ink); font-size: 12px; line-height: 1.65; overflow-wrap: anywhere; word-break: break-word; }
+    .release-notes h4 { margin: 18px 0 7px; color: var(--ink); font-size: 12.5px; font-weight: 680; }
+    .release-notes h4:first-child { margin-top: 0; }
+    .release-notes p { margin: 0 0 9px; }
+    .release-notes ul { margin: 0 0 10px; padding-left: 20px; }
+    .release-notes li + li { margin-top: 5px; }
+    .release-notes code { padding: 1px 4px; border-radius: 3px; color: var(--evidence-ink); background: var(--inline-code-canvas); font: 10.5px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; overflow-wrap: anywhere; }
+    .release-notes pre { max-width: 100%; margin: 10px 0; padding: 10px; overflow-x: auto; border: 1px solid var(--evidence-line); border-radius: 6px; color: var(--evidence-ink); background: var(--code-block-canvas); }
+    .release-notes pre code { padding: 0; background: transparent; white-space: pre-wrap; }
+    .release-notes a { color: var(--brand-ink); text-decoration-thickness: 1px; text-underline-offset: 2px; }
+    .release-empty { display: flex; min-height: 66px; align-items: center; margin: 0 !important; padding: 12px; border-radius: 8px; color: var(--muted); background: var(--surface-subtle); }
+    .release-source { margin: 10px 0 0; color: var(--faint); font-size: 9.5px; line-height: 1.45; }
+
+    .general-rows { display: grid; }
+    .general-row { display: grid; min-width: 0; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 18px; padding: 13px 2px; border-bottom: 1px solid var(--line); }
+    .general-row:first-child { padding-top: 4px; }
+    .general-row strong { font-size: 11.5px; font-weight: 620; }
+    .general-row span { color: var(--muted); font-size: 10.5px; }
+    .prototype-scope-note { margin: 12px 0 0; color: var(--faint); font-size: 10px; line-height: 1.55; }
+
+    .review-lab { position: relative; z-index: 100; display: flex; min-width: 0; flex-wrap: wrap; align-items: center; gap: 8px 10px; padding: 9px 12px; border-top: 1px dashed var(--attention); color: var(--ink); background: var(--canvas); }
+    .review-lab.is-collapsed { min-height: 42px; padding-top: 6px; padding-bottom: 6px; }
+    .review-lab.is-collapsed .review-controls, .review-lab.is-collapsed .review-facts { display: none; }
+    .review-label { display: flex; min-width: 206px; align-items: center; gap: 8px; }
+    .review-label-mark { display: grid; width: 25px; height: 25px; place-items: center; border: 1px dashed var(--attention); border-radius: 6px; color: var(--attention); background: var(--attention-soft); }
+    .review-label-mark svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.7; }
+    .review-label strong { display: block; font-size: 10.5px; }
+    .review-label span { display: block; margin-top: 1px; color: var(--faint); font-size: 9px; }
+    .review-controls { display: flex; min-width: 0; flex: 1 1 620px; flex-wrap: wrap; align-items: center; gap: 7px; }
+    .review-field { display: flex; align-items: center; gap: 5px; color: var(--faint); font-size: 9.5px; }
+    .review-field select { min-height: 29px; max-width: 186px; padding: 4px 25px 4px 8px; border: 1px solid var(--control-line); border-radius: 6px; color: var(--ink); background: var(--surface-raised); cursor: pointer; font-size: 10px; }
+    .review-button { display: inline-flex; min-height: 29px; align-items: center; gap: 6px; padding: 4px 8px; border: 1px solid var(--line-strong); border-radius: 6px; color: var(--muted); background: var(--surface-raised); cursor: pointer; font-size: 9.5px; font-weight: 650; }
+    .review-button:hover { color: var(--ink); background: var(--surface-hover); }
+    .review-button svg { width: 13px; height: 13px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.7; }
+    .review-facts { display: flex; min-width: 0; flex: 0 1 auto; flex-wrap: wrap; justify-content: flex-end; gap: 5px 12px; margin-left: auto; color: var(--faint); font-size: 9px; }
+    .review-facts code { color: var(--muted); font: 600 9px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; }
+    .review-collapse { margin-left: auto; }
+    .review-lab:not(.is-collapsed) .review-collapse { margin-left: 0; }
+    .review-collapse svg { transition: transform 140ms ease; }
+    .review-lab.is-collapsed .review-collapse svg { transform: rotate(180deg); }
+
+    @keyframes spin { to { transform: rotate(360deg); } }
+    @keyframes prompt-enter {
+      from { opacity: 0; transform: translateY(-7px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    @media (max-width: 1120px) {
+      .timeline { padding-right: 24px; padding-left: 24px; }
+      .settings-panel { padding-right: 22px; padding-left: 22px; }
+      .settings-section { gap: 24px; }
+      .update-control { align-items: flex-start; }
+      .review-facts { flex-basis: calc(100% - 216px); justify-content: flex-start; margin-left: 216px; }
+    }
+
+    @media (max-height: 720px) {
+      .timeline { padding-top: 18px; }
+      .timeline-track { gap: 17px; }
+      .composer { padding-bottom: 10px; }
+      .settings-panel { padding-top: 22px; }
+      .settings-section { padding-top: 24px; padding-bottom: 24px; }
+      .product-frame[data-screen="camp"] .update-prompt-layer { right: 10px; bottom: 124px; }
+      .product-frame[data-screen="about"] .update-prompt-layer { right: 10px; bottom: 10px; }
+    }
+
+    @media (max-width: 900px) {
+      :root { --rail-width: 230px; }
+      .settings-section { grid-template-columns: minmax(0, 1fr); gap: 13px; }
+      .section-heading p { display: none; }
+      .fallback-row { grid-template-columns: 18px minmax(0, 1fr); }
+      .fallback-actions { grid-column: 2; justify-content: flex-start; }
+      .review-facts { margin-left: 0; }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
+    }
+
+    @media (forced-colors: active) {
+      .update-prompt, .version-row, .update-control, .update-status, .download-progress, .review-lab { border: 1px solid CanvasText; }
+      .primary-button { color: ButtonText; background: ButtonFace; }
+      .update-badge, .page-state-summary { border-color: CanvasText; }
+    }
+  </style>
+</head>
+<body>
+  <!--
+    THESIS: One durable release fact follows the user from a quiet global prompt to a deliberate update action; this refuses both silent auto-download and an updater dashboard.
+    OWN-WORLD: Rovai Porcelain Day / Steel Night, 270px rail, 50px Camp topbar, open setting sections, semantic status color, and one true floating elevation.
+    STORY: An automatic check may ask once; dismiss keeps a low-noise badge; the About surface preserves release evidence through checking and failure; download and restart remain explicit.
+    FIRST VIEWPORT: A normal Camp remains primary while a compact non-modal update prompt occupies the exclusive global overlay slot; the Steel download action is last in reading order.
+    FORM: Precise local extension of the existing Camp and Settings surfaces; concept roll is not applicable to this brief-pinned local extension.
+    FINISH: unreviewed and undocumented is unfinished; this build ends with the finish review, the verdict, and DESIGN.md
+  -->
+  <div class="prototype-root">
+    <div class="product-frame" id="product-frame" data-screen="camp">
+      <div class="update-prompt-layer" id="update-prompt-layer">
+        <section class="update-prompt" id="update-prompt" aria-live="polite" aria-label="Rovai AI 应用更新提醒">
+          <div class="prompt-main">
+            <div class="prompt-copy">
+              <strong>更新可用</strong>
+              <span>Rovai AI <b id="prompt-target-version">v0.0.3</b> 可以下载</span>
+              <small>当前 <code id="prompt-current-version">v0.0.2</code> · 下载不会自动开始</small>
+            </div>
+            <div class="prompt-actions">
+              <button class="prompt-action prompt-action-quiet" id="prompt-later" type="button">稍后</button>
+              <button class="prompt-action prompt-action-secondary" id="prompt-view-notes" type="button">查看更新内容</button>
+              <button class="prompt-action prompt-action-primary" id="prompt-download" type="button">下载更新</button>
+            </div>
+          </div>
+          <button class="icon-button prompt-close" id="prompt-close" type="button" aria-label="关闭本次更新提醒">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg>
+          </button>
+        </section>
+      </div>
+
+      <section class="product-screen" id="camp-screen" aria-label="Camp 页面更新提醒示例">
+        <div class="app-shell">
+          <aside class="unified-sidebar" aria-label="全局导航">
+            <div class="traffic-lights" aria-hidden="true"><span></span><span></span><span></span></div>
+            <div class="sidebar-drag" aria-hidden="true"></div>
+            <div class="unified-brand">
+              <span class="rail-logo" role="img" aria-label="Rovai AI">
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M12 2 13.16 7.3 17.76 8.84 13.16 10.38 12 15.68 10.84 10.38 6.24 8.84 10.84 7.3Z" fill="currentColor"/>
+                  <path class="horizon" d="M3 20.96Q12 15.96 21 20.96"/>
+                  <circle class="point" cx="12" cy="18.46" r="1.05"/>
+                </svg>
+                <strong>Rovai AI</strong>
+              </span>
+            </div>
+
+            <nav class="rail-nav" aria-label="主要页面">
+              <button class="rail-button" type="button">
+                <span class="rail-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L8 18l-4 1 1-4Z"/></svg></span><span class="rail-label">新对话</span>
+              </button>
+              <button class="rail-button" type="button">
+                <span class="rail-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M9 11a4 4 0 1 0 0-8M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></svg></span><span class="rail-label">队员</span>
+              </button>
+              <button class="rail-button" type="button">
+                <span class="rail-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 5a3 3 0 1 0-5.83 1H5a3 3 0 0 0 0 6h1a3 3 0 0 0 3 3v4M12 5a3 3 0 1 1 5.83 1H19a3 3 0 0 1 0 6h-1a3 3 0 0 1-3 3v4M9 19h6"/></svg></span><span class="rail-label">记忆</span>
+              </button>
+            </nav>
+
+            <button class="conversation-jump" type="button"><span>跳转到对话…</span><kbd aria-hidden="true">⌘K</kbd></button>
+
+            <div class="rail-scroll">
+              <section class="rail-section" aria-labelledby="prototype-projects">
+                <h2 class="rail-section-title" id="prototype-projects">项目</h2>
+                <button class="project-row" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg><strong>opensource / rovai-ai</strong></button>
+                <button class="camp-row active" type="button" aria-current="page"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16v11H8l-4 4Z"/></svg><span>主动更新方案评审</span></button>
+                <button class="camp-row" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16v11H8l-4 4Z"/></svg><span>运行监控验收</span></button>
+              </section>
+              <section class="rail-section" aria-labelledby="prototype-quick-chat">
+                <h2 class="rail-section-title" id="prototype-quick-chat">快速对话</h2>
+                <button class="camp-row" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16v11H8l-4 4Z"/></svg><span>本机打包排查</span></button>
+              </section>
+            </div>
+
+            <div class="rail-footer">
+              <div class="settings-entry" role="group" aria-label="设置与应用更新">
+                <button class="rail-button" id="camp-settings-button" type="button" aria-label="设置，打开上次保留的设置页面">
+                  <span class="rail-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06-2.12 2.12-.06-.06a1.7 1.7 0 0 0-1.88-.34 1.7 1.7 0 0 0-1.03 1.56V20h-3v-.08A1.7 1.7 0 0 0 10.68 18a1.7 1.7 0 0 0-1.88.34l-.06.06-2.12-2.12.06-.06A1.7 1.7 0 0 0 7 14.34a1.7 1.7 0 0 0-1.56-1.03H5v-3h.44A1.7 1.7 0 0 0 7 9.28 1.7 1.7 0 0 0 6.66 7.4l-.06-.06 2.12-2.12.06.06A1.7 1.7 0 0 0 10.66 5a1.7 1.7 0 0 0 1.03-1.56V3h3v.44A1.7 1.7 0 0 0 15.72 5a1.7 1.7 0 0 0 1.88-.34l.06-.06 2.12 2.12-.06.06A1.7 1.7 0 0 0 19.4 8.66a1.7 1.7 0 0 0 1.56 1.03H21v3h-.04A1.7 1.7 0 0 0 19.4 15Z"/></svg></span>
+                  <span class="rail-label">设置</span>
+                </button>
+                <button class="update-badge settings-update-shortcut" id="camp-update-shortcut" data-update-badge type="button" aria-label="打开关于与更新，Rovai AI v0.0.3 更新可用" hidden>
+                  <svg class="badge-icon-available" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 2v8m0 0 3-3m-3 3L5 7M3 13h10"/></svg>
+                  <svg class="badge-icon-downloading" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 2a6 6 0 1 1-5.2 3"/></svg>
+                  <svg class="badge-icon-ready" viewBox="0 0 16 16" aria-hidden="true"><path d="m3 8 3 3 7-7"/></svg>
+                  <svg class="badge-icon-failed" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 2 14 13H2ZM8 6v3m0 2h.01"/></svg>
+                  <svg class="badge-icon-installing" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 2a6 6 0 1 1-5.2 3"/></svg>
+                  <span data-badge-label></span>
+                </button>
+              </div>
+            </div>
+          </aside>
+
+          <header class="topbar">
+            <div class="context-breadcrumb"><span class="context-project">rovai-ai</span><span class="context-sep" aria-hidden="true">›</span><h1>主动更新方案评审</h1></div>
+            <span class="day-badge">第 1 天</span>
+            <div class="topbar-actions">
+              <button class="topbar-status" type="button">待审批 1</button>
+              <button class="icon-button" type="button" aria-label="显示右侧检查器">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M15 4v16M18 9l-2 3 2 3"/></svg>
+              </button>
+            </div>
+          </header>
+
+          <main class="camp-main">
+            <div class="timeline">
+              <div class="timeline-track">
+                <div class="date-rule"><span>今天</span></div>
+                <article class="message-row">
+                  <span class="avatar">你</span>
+                  <div class="message-copy">
+                    <div class="message-meta"><strong>你</strong><time>15:10</time></div>
+                    <p>更新检查自动执行，但下载、安装和重启必须由用户主动确认。提醒关闭后，仍保留低打扰的更新入口。</p>
+                  </div>
+                </article>
+                <article class="message-row">
+                  <span class="avatar is-second">爱</span>
+                  <div class="message-copy">
+                    <div class="message-meta"><strong>爱丽丝</strong><time>15:24</time></div>
+                    <p>主路径成立。提醒需要由 Main 持有检查来源、代次和精确 dismiss；检查失败也不能抹掉上一次有效的新版本事实。</p>
+                    <div class="tool-evidence"><svg class="button-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12 4 4L19 6"/></svg><code>availableRelease 与 operationStatus 分离</code></div>
+                  </div>
+                </article>
+                <article class="message-row">
+                  <span class="avatar is-third">奥</span>
+                  <div class="message-copy">
+                    <div class="message-meta"><strong>奥黛丽</strong><time>15:28</time></div>
+                    <p>我会把提醒、徽标、下载进度、更新日志与恢复路径放进同一份可切换原型；评审状态与产品界面保持清楚的视觉边界。</p>
+                  </div>
+                </article>
+              </div>
+            </div>
+            <div class="composer">
+              <div class="composer-route"><span>发送到</span><strong>@爱丽丝</strong><span>· 当前 Camp</span></div>
+              <div class="composer-box">
+                <textarea id="camp-composer" aria-label="消息" placeholder="发送消息，或输入 @ 提及队员"></textarea>
+                <button class="primary-button" type="button" aria-label="发送消息">
+                  <svg class="button-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m22 2-7 20-4-9-9-4ZM22 2 11 13"/></svg>
+                </button>
+              </div>
+            </div>
+
+          </main>
+        </div>
+      </section>
+
+      <section class="product-screen" id="about-screen" aria-label="关于与更新页面示例" hidden>
+        <div class="settings-shell">
+          <aside class="unified-sidebar settings-sidebar" aria-label="设置分类">
+            <div class="traffic-lights" aria-hidden="true"><span></span><span></span><span></span></div>
+            <div class="sidebar-drag" aria-hidden="true"></div>
+            <div class="unified-brand">
+              <span class="rail-logo" role="img" aria-label="Rovai AI">
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M12 2 13.16 7.3 17.76 8.84 13.16 10.38 12 15.68 10.84 10.38 6.24 8.84 10.84 7.3Z" fill="currentColor"/>
+                  <path class="horizon" d="M3 20.96Q12 15.96 21 20.96"/>
+                  <circle class="point" cx="12" cy="18.46" r="1.05"/>
+                </svg>
+                <strong>Rovai AI</strong>
+              </span>
+            </div>
+            <div class="settings-navigation">
+              <div class="settings-heading">
+                <button class="settings-back" id="settings-back" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 18-6-6 6-6"/></svg><strong>返回 App</strong></button>
+                <div class="settings-title"><strong>设置</strong><span>应用级偏好与本机能力</span></div>
+              </div>
+              <nav class="settings-menu" aria-label="设置页面">
+                <section class="settings-group" aria-labelledby="settings-app-group"><h2 id="settings-app-group">应用</h2>
+                  <button id="settings-general-button" type="button"><span class="menu-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h10M18 7h2M4 17h2M10 17h10"/><circle cx="16" cy="7" r="2"/><circle cx="8" cy="17" r="2"/></svg></span><strong>通用</strong></button>
+                  <button type="button"><span class="menu-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3a9 9 0 1 0 9 9 7 7 0 0 1-9-9Z"/></svg></span><strong>外观</strong></button>
+                  <button type="button"><span class="menu-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9ZM10 21h4"/></svg></span><strong>提醒</strong></button>
+                </section>
+                <section class="settings-group" aria-labelledby="settings-capability-group"><h2 id="settings-capability-group">能力</h2>
+                  <button type="button"><span class="menu-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 2.4 5.2L20 9l-4 4 .9 5.7L12 16l-4.9 2.7L8 13 4 9l5.6-.8L12 3Z"/></svg></span><strong>Skills</strong></button>
+                  <button type="button"><span class="menu-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 8h8v8H8zM4 12h4m8 0h4M12 4v4m0 8v4"/></svg></span><strong>MCP</strong></button>
+                  <button type="button"><span class="menu-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="5" width="16" height="14" rx="2"/><path d="M8 9h8M8 13h5"/></svg></span><strong>Agent 运行时</strong></button>
+                </section>
+                <section class="settings-group" aria-labelledby="settings-support-group"><h2 id="settings-support-group">支持</h2>
+                  <button type="button"><span class="menu-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 19V9m5 10V5m5 14v-7m5 7V3"/></svg></span><strong>运行监控</strong></button>
+                  <button type="button"><span class="menu-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 4h6M10 4v5a5 5 0 0 0 10 0V4M4 14v1a5 5 0 0 0 5 5h1"/><circle cx="4" cy="11" r="2"/></svg></span><strong>诊断与修复</strong></button>
+                  <button class="active" id="settings-about-button" type="button" aria-current="page">
+                    <span class="menu-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 11v5m0-8h.01"/></svg></span><strong>关于与更新</strong>
+                    <span class="update-badge" data-update-badge hidden>
+                      <svg class="badge-icon-available" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 2v8m0 0 3-3m-3 3L5 7M3 13h10"/></svg>
+                      <svg class="badge-icon-downloading" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 2a6 6 0 1 1-5.2 3"/></svg>
+                      <svg class="badge-icon-ready" viewBox="0 0 16 16" aria-hidden="true"><path d="m3 8 3 3 7-7"/></svg>
+                      <svg class="badge-icon-failed" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 2 14 13H2ZM8 6v3m0 2h.01"/></svg>
+                      <svg class="badge-icon-installing" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 2a6 6 0 1 1-5.2 3"/></svg>
+                      <span data-badge-label></span>
+                    </span>
+                  </button>
+                </section>
+              </nav>
+            </div>
+          </aside>
+
+          <main class="settings-main" id="settings-main">
+            <div class="settings-panel" id="general-settings-panel" hidden>
+              <div class="about-settings">
+                <header class="page-heading">
+                  <div class="page-heading-copy"><h1 id="general-page-heading" tabindex="-1">通用</h1><p>管理应用启动、恢复与本机使用偏好。</p></div>
+                </header>
+
+                <section class="settings-section" aria-labelledby="general-startup-heading">
+                  <div class="section-heading"><h2 id="general-startup-heading">启动与恢复</h2><p>上次访问</p></div>
+                  <div>
+                    <div class="general-rows">
+                      <div class="general-row"><strong>重新打开 Rovai AI 时</strong><span>恢复上次会话</span></div>
+                      <div class="general-row"><strong>设置入口</strong><span>恢复上次在设置侧栏选择的页面</span></div>
+                    </div>
+                    <p class="prototype-scope-note">此简化页面只用于验证设置入口的稳定去向；通用设置本身不属于本次更新原型范围。</p>
+                  </div>
+                </section>
+              </div>
+            </div>
+
+            <div class="settings-panel" id="about-settings-panel">
+              <div class="about-settings">
+                <header class="page-heading">
+                  <div class="page-heading-copy"><h1 id="about-page-heading" tabindex="-1">关于与更新</h1><p>Rovai AI 会在正式打包版本中主动检查更新；下载、安装和重启始终由你确认。</p></div>
+                  <span class="page-state-summary" id="page-state-summary"><i aria-hidden="true"></i><span id="page-state-label">更新可用</span></span>
+                </header>
+
+                <section class="settings-section" aria-labelledby="version-heading">
+                  <div class="section-heading"><h2 id="version-heading">版本</h2><p>当前安装</p></div>
+                  <div class="version-row">
+                    <div class="product-name"><strong>Rovai AI</strong><small>桌面应用 · macOS arm64</small></div>
+                    <div class="version-value"><span>当前版本</span><code id="current-version">v0.0.2</code></div>
+                  </div>
+                </section>
+
+                <section class="settings-section" aria-labelledby="update-heading">
+                  <div class="section-heading"><h2 id="update-heading">更新</h2><p>检查、下载与安装</p></div>
+                  <div class="update-body">
+                    <div class="update-control">
+                      <div class="update-control-copy"><strong id="control-title">Rovai AI v0.0.3 可用</strong><p id="control-detail">已找到新版本。只有点击“下载更新”后才会开始下载。</p></div>
+                      <div class="update-actions">
+                        <button class="quiet-button" id="manual-check" type="button">重新检查</button>
+                        <button class="primary-button" id="update-primary" type="button">下载更新</button>
+                      </div>
+                    </div>
+
+                    <div class="download-progress" id="download-progress" hidden>
+                      <div class="progress-heading"><span>下载进度</span><strong id="progress-percent">42%</strong></div>
+                      <progress id="progress" max="100" value="42" aria-label="更新下载进度，42%"></progress>
+                      <div class="progress-meta"><span id="progress-transfer">62.2 MB / 148 MB</span><span id="progress-speed">3.8 MB/s</span></div>
+                    </div>
+
+                    <div class="update-status" id="update-status" data-tone="attention" role="status" aria-live="polite" tabindex="-1">
+                      <span class="status-icon" aria-hidden="true">
+                        <svg class="status-icon-neutral" viewBox="0 0 16 16"><circle cx="8" cy="8" r="5"/><path d="M8 7v3m0-5h.01"/></svg>
+                        <svg class="status-icon-attention" viewBox="0 0 16 16"><path d="M8 2v8m0 0 3-3m-3 3L5 7M3 13h10"/></svg>
+                        <svg class="status-icon-info" viewBox="0 0 16 16"><path d="M8 2a6 6 0 1 1-5.2 3"/></svg>
+                        <svg class="status-icon-success" viewBox="0 0 16 16"><path d="m3 8 3 3 7-7"/></svg>
+                        <svg class="status-icon-danger" viewBox="0 0 16 16"><path d="M8 2 14 13H2ZM8 6v3m0 2h.01"/></svg>
+                      </span>
+                      <div class="status-copy"><strong id="status-title">等待下载确认</strong><p id="status-detail">自动检查已完成。你可以继续工作，更新不会自行下载。</p></div>
+                    </div>
+
+                    <div class="check-meta" aria-label="更新检查记录">
+                      <span>本次检查 <code id="last-attempt">今天 15:40 · 自动</code></span>
+                      <span>上次成功 <code id="last-success">今天 15:40</code></span>
+                    </div>
+
+                    <div class="fallback-row" id="fallback-row" hidden>
+                      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 9v4m0 4h.01M10.3 3.8 2.4 18a2 2 0 0 0 1.8 3h15.6a2 2 0 0 0 1.8-3L13.7 3.8a2 2 0 0 0-3.4 0Z"/></svg>
+                      <div class="fallback-copy"><strong id="fallback-title">应用内下载未完成</strong><span id="fallback-detail">可以重试下载，或改用官方发布页。</span></div>
+                      <div class="fallback-actions"><a href="https://github.com/murray17/rovai-ai/releases" target="_blank" rel="noreferrer noopener">官方 Releases</a><a href="https://github.com/murray17/rovai-ai/issues" target="_blank" rel="noreferrer noopener">获取支持</a></div>
+                    </div>
+
+                    <p class="release-source">自动更新来自 Rovai AI 的正式 GitHub Release 通道。</p>
+                  </div>
+                </section>
+
+                <section class="settings-section" id="release-section" aria-labelledby="release-notes-heading">
+                  <div class="section-heading"><h2 id="release-notes-heading" tabindex="-1">更新日志</h2><p>最后一次有效发布信息</p></div>
+                  <div class="release-body">
+                    <div class="release-header">
+                      <div class="release-title"><h3 id="release-name">更安静、更可靠的桌面更新</h3><p>发布日期：<time id="release-date" datetime="2026-08-25">2026-08-25</time></p></div>
+                      <code class="release-version" id="release-version">v0.0.3</code>
+                    </div>
+                    <div class="release-notes" id="release-notes"></div>
+                  </div>
+                </section>
+              </div>
+            </div>
+          </main>
+        </div>
+      </section>
+
+      <div class="sr-only" id="state-announcer" aria-live="polite"></div>
+    </div>
+
+    <aside class="review-lab" id="review-lab" aria-label="原型评审工具，不属于产品界面">
+      <div class="review-label">
+        <span class="review-label-mark" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 3v18M3 12h18M5.6 5.6l12.8 12.8M18.4 5.6 5.6 18.4"/></svg></span>
+        <span><strong>原型评审工具 · 非产品界面</strong><span>切换页面、状态、日志和主题</span></span>
+      </div>
+      <div class="review-controls">
+        <label class="review-field">页面
+          <select id="review-screen">
+            <option value="camp">普通 Camp</option>
+            <option value="about">设置 · 关于与更新</option>
+          </select>
+        </label>
+        <label class="review-field">状态
+          <select id="review-state">
+            <option value="idle">尚未检查</option>
+            <option value="checking">检查中（保留旧 Release）</option>
+            <option value="checking_empty">首次检查中（无旧 Release）</option>
+            <option value="available" selected>更新可用</option>
+            <option value="downloading">下载中 42%</option>
+            <option value="ready_to_install">可安装</option>
+            <option value="installing">安装与受控退出</option>
+            <option value="up_to_date">已是最新</option>
+            <option value="check_failed_network">检查失败（保留旧 Release）</option>
+            <option value="check_failed_network_empty">检查失败（无旧 Release）</option>
+            <option value="check_failed_invalid_release">发布信息无效</option>
+            <option value="check_failed_unavailable">自动更新不可用</option>
+            <option value="download_failed">下载失败</option>
+            <option value="install_failed">安装失败</option>
+          </select>
+        </label>
+        <label class="review-field">Release 事实
+          <select id="review-release">
+            <option value="known" selected>v0.0.3</option>
+            <option value="none">无有效 Release</option>
+          </select>
+        </label>
+        <label class="review-field">日志
+          <select id="review-notes">
+            <option value="standard" selected>常规</option>
+            <option value="empty">为空</option>
+            <option value="long">超长内容</option>
+            <option value="safe">安全 Markdown</option>
+          </select>
+        </label>
+        <button class="review-button" id="next-auto-check" type="button">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 12a8 8 0 1 1-2.34-5.66L20 8.68M20 4v4.68h-4.68"/></svg>模拟下一轮自动检查
+        </button>
+        <button class="review-button" id="theme-toggle" type="button" aria-pressed="false">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3a9 9 0 1 0 9 9 7 7 0 0 1-9-9Z"/></svg><span>切到夜间</span>
+        </button>
+      </div>
+      <output class="review-facts" id="review-facts" aria-live="polite"></output>
+      <button class="review-button review-collapse" id="review-collapse" type="button" aria-expanded="true">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 15 6-6 6 6"/></svg><span>收起</span>
+      </button>
+    </aside>
+  </div>
+
+  <script>
+    const root = document.documentElement
+    const productFrame = document.querySelector('#product-frame')
+    const campScreen = document.querySelector('#camp-screen')
+    const aboutScreen = document.querySelector('#about-screen')
+    const reviewScreen = document.querySelector('#review-screen')
+    const reviewState = document.querySelector('#review-state')
+    const reviewRelease = document.querySelector('#review-release')
+    const reviewNotes = document.querySelector('#review-notes')
+    const reviewFacts = document.querySelector('#review-facts')
+    const reviewLab = document.querySelector('#review-lab')
+    const themeToggle = document.querySelector('#theme-toggle')
+    const reviewCollapse = document.querySelector('#review-collapse')
+    const stateAnnouncer = document.querySelector('#state-announcer')
+    const promptLayer = document.querySelector('#update-prompt-layer')
+    const updateStatus = document.querySelector('#update-status')
+    const updatePrimary = document.querySelector('#update-primary')
+    const manualCheck = document.querySelector('#manual-check')
+    const progressBlock = document.querySelector('#download-progress')
+    const progressBar = document.querySelector('#progress')
+    const releaseSection = document.querySelector('#release-section')
+    const releaseNotes = document.querySelector('#release-notes')
+    const fallbackRow = document.querySelector('#fallback-row')
+    const campSettingsButton = document.querySelector('#camp-settings-button')
+    const campUpdateShortcut = document.querySelector('#camp-update-shortcut')
+    const settingsGeneralButton = document.querySelector('#settings-general-button')
+    const settingsAboutButton = document.querySelector('#settings-about-button')
+    const generalSettingsPanel = document.querySelector('#general-settings-panel')
+    const aboutSettingsPanel = document.querySelector('#about-settings-panel')
+
+    const releaseFixture = {
+      version: '0.0.3',
+      name: '更安静、更可靠的桌面更新',
+      date: '2026-08-25'
+    }
+
+    const demo = {
+      screen: 'camp',
+      updateState: 'available',
+      notes: 'standard',
+      theme: 'day',
+      checkSource: 'startup',
+      promptGeneration: 3,
+      pendingPrompt: { id: 'auto-check-003', version: '0.0.3' },
+      availableRelease: { ...releaseFixture },
+      settingsSection: 'about',
+      lastSettingsSection: 'general',
+      settingsReturnFocus: null,
+      lastDismissedPromptId: null,
+      promptReturnFocus: null,
+      progress: 42,
+      progressTimer: null,
+      stateTimer: null
+    }
+
+    const statePresentation = {
+      idle: {
+        pageLabel: '尚未检查', tone: 'neutral', title: '尚未检查更新',
+        detail: '打开此页面不会触发下载。点击“检查更新”获取最新正式版本。',
+        controlTitle: 'Rovai AI 更新', controlDetail: '正式打包版本会定期自动检查；也可以在此手动检查。',
+        action: '检查更新', actionKind: 'check'
+      },
+      checking: {
+        pageLabel: '检查中', tone: 'info', title: '正在重新检查',
+        detail: '检查期间仍保留上一次成功获取的 v0.0.3 发布信息。',
+        controlTitle: '正在检查更新', controlDetail: '正在连接正式发布通道。现有更新信息不会在检查开始时被清空。',
+        action: '正在检查…', actionKind: 'busy'
+      },
+      checking_empty: {
+        pageLabel: '检查中', tone: 'info', title: '正在首次检查更新',
+        detail: '尚无有效 Release。检查完成前不会显示更新徽标、目标版本或更新日志。',
+        controlTitle: '正在检查更新', controlDetail: '正在连接正式发布通道；不会自动开始下载。',
+        action: '正在检查…', actionKind: 'busy'
+      },
+      available: {
+        pageLabel: '更新可用', tone: 'attention', title: '等待下载确认',
+        detail: '自动检查已完成。你可以继续工作，更新不会自行下载。',
+        controlTitle: 'Rovai AI v0.0.3 可用', controlDetail: '已找到新版本。只有点击“下载更新”后才会开始下载。',
+        action: '下载更新', actionKind: 'download'
+      },
+      downloading: {
+        pageLabel: '下载中', tone: 'info', title: '正在下载 v0.0.3',
+        detail: '下载请求已受理；重复点击会合并到同一次下载。你可以继续使用 Rovai AI。',
+        controlTitle: '正在下载 Rovai AI v0.0.3', controlDetail: '下载完成后才会出现安装动作，当前不会自动重启。',
+        action: '下载中 42%', actionKind: 'busy'
+      },
+      ready_to_install: {
+        pageLabel: '可安装', tone: 'success', title: 'v0.0.3 已准备好',
+        detail: '只有点击“安装并重启”后，主进程才会开始受控退出与安装。',
+        controlTitle: 'Rovai AI v0.0.3 已下载', controlDetail: '更新已准备好；你可以稍后安装，不会因检查完成而自动重启。',
+        action: '安装并重启', actionKind: 'install'
+      },
+      installing: {
+        pageLabel: '准备重启', tone: 'info', title: '正在交给主进程完成安装',
+        detail: '窗口可能随即关闭；此页面不承诺持续显示。主进程必须先完成受控关闭协调，再触发更新器重启。',
+        controlTitle: '正在准备安装 Rovai AI v0.0.3', controlDetail: '安装请求只受理一次。若窗口仍保持打开，更新服务会回报可恢复结果。',
+        action: '正在准备重启…', actionKind: 'busy'
+      },
+      up_to_date: {
+        pageLabel: '已是最新', tone: 'success', title: '当前已是最新版本',
+        detail: 'Rovai AI v0.0.3 已安装。需要时可以重新检查正式发布通道。',
+        controlTitle: 'Rovai AI 已是最新版本', controlDetail: '当前安装与正式发布通道一致。',
+        action: '重新检查', actionKind: 'check'
+      },
+      check_failed_network: {
+        pageLabel: '检查未完成', tone: 'danger', title: '本次检查未完成',
+        detail: '网络连接失败；下方仍显示上次成功检查得到的 v0.0.3，低打扰更新徽标也会保留。',
+        controlTitle: '无法完成本次更新检查', controlDetail: '当前版本没有变化，上一次有效发布信息仍可查看。',
+        action: '重试检查', actionKind: 'check'
+      },
+      check_failed_network_empty: {
+        pageLabel: '检查未完成', tone: 'danger', title: '本次检查未完成',
+        detail: '网络连接失败，且尚无有效 Release。当前版本没有变化，可以稍后重试。',
+        controlTitle: '无法完成本次更新检查', controlDetail: '没有可保留的发布信息；普通网络失败不会显示备用安装入口。',
+        action: '重试检查', actionKind: 'check'
+      },
+      check_failed_invalid_release: {
+        pageLabel: '发布信息无效', tone: 'danger', title: '暂时无法验证这个发布版本',
+        detail: '正式发布信息缺少必要字段，因此不会显示目标版本、下载动作或备用安装入口。',
+        controlTitle: '发布信息暂不可用', controlDetail: '请稍后重新检查；Rovai AI 不会引导安装未经验证的包。',
+        action: '重新检查', actionKind: 'check'
+      },
+      check_failed_unavailable: {
+        pageLabel: '更新不可用', tone: 'danger', title: '应用内自动更新当前不可用',
+        detail: '当前安装无法使用自动更新；上一次有效发布信息仍保留，可改用官方发布页。',
+        controlTitle: '应用内更新不可用', controlDetail: '可以稍后重试，或从官方 Releases 获取已验证的正式版本。',
+        action: '重试检查', actionKind: 'check'
+      },
+      download_failed: {
+        pageLabel: '下载失败', tone: 'danger', title: '更新下载中断',
+        detail: '没有安装任何内容。v0.0.3 发布信息仍有效，可以直接重试同一下载。',
+        controlTitle: 'Rovai AI v0.0.3 下载未完成', controlDetail: '当前版本未受影响；重试会继续针对同一目标版本。',
+        action: '重试下载', actionKind: 'download'
+      },
+      install_failed: {
+        pageLabel: '安装失败', tone: 'danger', title: '更新未能开始安装',
+        detail: 'Rovai AI 仍保持打开，已下载的 v0.0.3 保留，可以重试安装。',
+        controlTitle: 'Rovai AI v0.0.3 尚未安装', controlDetail: '受控退出未被永久提交；当前 App 与 Core 必须保持可继续使用。',
+        action: '重试安装', actionKind: 'install'
+      }
+    }
+
+    function hasKnownRelease() {
+      return demo.availableRelease !== null
+    }
+
+    function currentVersion() {
+      return demo.updateState === 'up_to_date' ? '0.0.3' : '0.0.2'
+    }
+
+    function publicStatus() {
+      const releaseVersion = demo.availableRelease?.version
+      if (demo.updateState === 'available' || demo.updateState.startsWith('checking')) {
+        return releaseVersion ? { kind: 'available', label: '更新可用', accessible: `Rovai AI v${releaseVersion} 更新可用` } : null
+      }
+      if (demo.updateState.startsWith('check_failed')) {
+        return releaseVersion
+          ? { kind: 'available', label: '更新可用', accessible: `Rovai AI v${releaseVersion} 更新可用，本次检查未完成` }
+          : { kind: 'failed', label: '重试检查', accessible: 'Rovai AI 更新检查未完成，需要重试' }
+      }
+      if (demo.updateState === 'downloading') return { kind: 'downloading', label: `${Math.round(demo.progress)}%`, accessible: `Rovai AI 更新正在下载，${Math.round(demo.progress)}%` }
+      if (demo.updateState === 'ready_to_install') return { kind: 'ready', label: '可安装', accessible: 'Rovai AI 更新已下载，可以安装' }
+      if (demo.updateState === 'installing') return { kind: 'installing', label: '重启中', accessible: 'Rovai AI 正在准备安装并重启' }
+      if (demo.updateState === 'download_failed') return { kind: 'failed', label: '重试下载', accessible: 'Rovai AI 更新下载失败，需要重试' }
+      if (demo.updateState === 'install_failed') return { kind: 'failed', label: '重试安装', accessible: 'Rovai AI 更新安装失败，需要重试' }
+      return null
+    }
+
+    function setText(selector, value) {
+      const element = document.querySelector(selector)
+      if (element) element.textContent = value
+    }
+
+    function renderBadges() {
+      const status = publicStatus()
+      document.querySelectorAll('[data-update-badge]').forEach((badge) => {
+        if (!status) {
+          badge.hidden = true
+          badge.removeAttribute('data-kind')
+          return
+        }
+        badge.hidden = false
+        badge.dataset.kind = status.kind
+        badge.querySelector('[data-badge-label]').textContent = status.label
+        badge.setAttribute(
+          'aria-label',
+          badge === campUpdateShortcut ? `打开关于与更新，${status.accessible}` : status.accessible
+        )
+      })
+      campSettingsButton.setAttribute('aria-label', '设置，打开上次保留的设置页面')
+    }
+
+    function renderPrompt() {
+      const displayedVersion = demo.screen === 'about' && demo.settingsSection === 'about'
+        ? demo.availableRelease?.version ?? null
+        : null
+      const aboutAlreadyExplainsPrompt = demo.pendingPrompt?.version === displayedVersion
+      const shouldShow = demo.updateState === 'available'
+        && demo.pendingPrompt !== null
+        && !aboutAlreadyExplainsPrompt
+      promptLayer.hidden = !shouldShow
+      if (!shouldShow) return
+      setText('#prompt-target-version', `v${demo.pendingPrompt.version}`)
+      setText('#prompt-current-version', `v${currentVersion()}`)
+    }
+
+    function appendHeading(text) {
+      const heading = document.createElement('h4')
+      heading.textContent = text
+      releaseNotes.append(heading)
+    }
+
+    function appendParagraph(text) {
+      const paragraph = document.createElement('p')
+      paragraph.textContent = text
+      releaseNotes.append(paragraph)
+    }
+
+    function appendList(items) {
+      const list = document.createElement('ul')
+      items.forEach((item) => {
+        const row = document.createElement('li')
+        row.textContent = item
+        list.append(row)
+      })
+      releaseNotes.append(list)
+    }
+
+    function renderReleaseNotes() {
+      const renderKey = `${demo.availableRelease?.version ?? 'none'}:${demo.notes}`
+      if (releaseNotes.dataset.renderKey === renderKey && releaseNotes.childNodes.length > 0) return
+      releaseNotes.dataset.renderKey = renderKey
+      releaseNotes.replaceChildren()
+      if (demo.notes === 'empty') {
+        const empty = document.createElement('p')
+        empty.className = 'release-empty'
+        empty.textContent = '此版本暂无更新说明。'
+        releaseNotes.append(empty)
+        return
+      }
+      if (demo.notes === 'long') {
+        appendHeading('协作与恢复')
+        appendParagraph('本次示例更新集中改善长时间运行的 Camp 协作体验。更新说明可以很长，但正文仍限制在舒适阅读宽度，页面只发生纵向滚动。')
+        appendList([
+          '改进长对话恢复后的定位与状态说明。',
+          '减少运行中切换页面时的布局跳动。',
+          '补充任务失败、恢复中与外部效果待确认的区分。',
+          '修复窄窗口下长路径、长版本名和长中文文案挤压操作按钮的问题。',
+          '保持 Day 与 Night 使用同一套组件和状态矩阵。'
+        ])
+        appendHeading('更新体验')
+        appendParagraph('自动检查只发现事实，不代替用户下载。下载开始后，进度、已传输总量和速度会同步到所有页面；完成后仍需用户明确选择安装并重启。')
+        appendList([
+          '关闭提醒只精确 dismiss 当前自动检查代次。',
+          '下一次六小时自动检查可以产生新的提醒。',
+          '手动检查只更新此页面，不生成全局提醒。',
+          '检查失败不会清除最后一次有效的新版本与更新日志。',
+          '下载或安装失败时保留可恢复动作和仍然成立的版本事实。'
+        ])
+        appendHeading('无障碍与平台')
+        appendParagraph('状态同时使用图标、文字、颜色与稳定位置表达。焦点顺序与视觉顺序一致；减少动态效果时不依赖入场动画或旋转来传达状态。')
+        appendParagraph('这是一段用于验证超长 Release Notes 的示例内容，不代表正式版本事实。正式实现还需要在 macOS arm64、macOS x64 与 Windows x64 上完成真实升级验收。')
+        return
+      }
+      if (demo.notes === 'safe') {
+        appendHeading('安全展示')
+        appendParagraph('Markdown 标题、列表、行内代码和 HTTPS 链接可以保留；HTML、图片、脚本及不安全协议不会被执行。')
+        appendList(['修复更新状态在窗口重建后的恢复。', '保留最后一次有效的发布信息。'])
+        const paragraph = document.createElement('p')
+        paragraph.append('允许的链接：')
+        const link = document.createElement('a')
+        link.href = 'https://github.com/murray17/rovai-ai/releases'
+        link.target = '_blank'
+        link.rel = 'noreferrer noopener'
+        link.textContent = '官方 Releases'
+        paragraph.append(link, '；非 HTTPS 示例保持为不可点击代码：')
+        const code = document.createElement('code')
+        code.textContent = 'http://not-safe.example'
+        paragraph.append(code, '。')
+        releaseNotes.append(paragraph)
+        const pre = document.createElement('pre')
+        const preCode = document.createElement('code')
+        preCode.textContent = 'status: available\ndownload: user-confirmed\ninstall: user-confirmed'
+        pre.append(preCode)
+        releaseNotes.append(pre)
+        return
+      }
+      appendHeading('本次更新')
+      appendList([
+        '新增主动检查后的全局更新提醒，不会自动开始下载。',
+        '下载进度可在不同页面间持续同步。',
+        '改进安装失败后的恢复反馈与重试入口。'
+      ])
+      appendParagraph('下载期间可以继续使用 Rovai AI；安装和重启只会在你确认后开始。')
+    }
+
+    function renderAbout() {
+      const presentation = statePresentation[demo.updateState]
+      const busy = demo.updateState.startsWith('checking') || ['downloading', 'installing'].includes(demo.updateState)
+      const showRelease = hasKnownRelease()
+      const showProgress = demo.updateState === 'downloading'
+      const showFallback = ['check_failed_unavailable', 'download_failed'].includes(demo.updateState)
+
+      setText('#current-version', `v${currentVersion()}`)
+      setText('#page-state-label', presentation.pageLabel)
+      document.querySelector('#page-state-summary').dataset.tone = presentation.tone
+      setText('#control-title', presentation.controlTitle)
+      setText('#control-detail', presentation.controlDetail)
+      setText('#status-title', presentation.title)
+      setText('#status-detail', presentation.detail)
+      updateStatus.dataset.tone = presentation.tone
+      updateStatus.dataset.busy = String(busy)
+      updateStatus.setAttribute('role', presentation.tone === 'danger' ? 'alert' : 'status')
+
+      if (demo.updateState === 'check_failed_unavailable' && !showRelease) {
+        setText('#control-detail', '当前安装无法使用应用内自动更新；尚无可保留的有效发布信息。')
+        setText('#status-detail', '当前安装无法使用自动更新。可以从官方 Releases 获取已验证的正式版本。')
+      }
+
+      updatePrimary.disabled = busy
+      updatePrimary.dataset.actionKind = presentation.actionKind
+      updatePrimary.replaceChildren()
+      if (busy) {
+        const spinner = document.createElement('span')
+        spinner.className = 'button-spinner'
+        spinner.setAttribute('aria-hidden', 'true')
+        updatePrimary.append(spinner)
+      }
+      const primaryLabel = document.createElement('span')
+      primaryLabel.dataset.primaryLabel = ''
+      primaryLabel.textContent = demo.updateState === 'downloading' ? `下载中 ${Math.round(demo.progress)}%` : presentation.action
+      updatePrimary.append(primaryLabel)
+      updatePrimary.setAttribute('aria-busy', String(busy))
+
+      const primaryIsCheck = presentation.actionKind === 'check'
+      manualCheck.hidden = primaryIsCheck
+      manualCheck.disabled = busy || ['ready_to_install', 'install_failed'].includes(demo.updateState)
+      manualCheck.textContent = '重新检查'
+
+      progressBlock.hidden = !showProgress
+      if (showProgress) {
+        const percent = Math.round(demo.progress)
+        const transferred = (148 * percent / 100).toFixed(1)
+        progressBar.value = percent
+        progressBar.setAttribute('aria-label', `更新下载进度，${percent}%`)
+        setText('#progress-percent', `${percent}%`)
+        setText('#progress-transfer', `${transferred} MB / 148 MB`)
+        setText('#progress-speed', percent < 2 ? '正在计算速度…' : '3.8 MB/s')
+      }
+
+      const sourceLabel = demo.checkSource === 'manual' ? '手动' : demo.checkSource === 'interval' ? '周期' : '启动'
+      const attemptLabel = demo.updateState === 'idle'
+        ? '尚无'
+        : demo.updateState.startsWith('checking')
+          ? `进行中 · ${sourceLabel}`
+          : demo.checkSource === 'manual'
+            ? '今天 15:43 · 手动'
+            : demo.checkSource === 'interval'
+              ? '今天 21:40 · 周期'
+              : '今天 15:40 · 启动'
+      setText('#last-attempt', attemptLabel)
+      setText('#last-success', showRelease || demo.updateState === 'up_to_date' ? '今天 15:40' : '尚无')
+      fallbackRow.hidden = !showFallback
+      if (demo.updateState === 'check_failed_unavailable') {
+        setText('#fallback-title', '应用内自动更新不可用')
+        setText('#fallback-detail', '官方 Releases 是备用入口；无效发布信息不会引导安装。')
+      } else if (demo.updateState === 'download_failed') {
+        setText('#fallback-title', '应用内下载未完成')
+        setText('#fallback-detail', '优先重试下载，也可以改用官方 Releases 或获取支持。')
+      }
+
+      releaseSection.hidden = !showRelease
+      if (showRelease) {
+        setText('#release-name', demo.availableRelease.name)
+        setText('#release-date', demo.availableRelease.date)
+        document.querySelector('#release-date').setAttribute('datetime', demo.availableRelease.date)
+        setText('#release-version', `v${demo.availableRelease.version}`)
+        renderReleaseNotes()
+      }
+    }
+
+    function renderProgressOnly() {
+      if (demo.updateState !== 'downloading') return
+      const percent = Math.round(demo.progress)
+      const transferred = (148 * percent / 100).toFixed(1)
+      progressBar.value = percent
+      progressBar.setAttribute('aria-label', `更新下载进度，${percent}%`)
+      setText('#progress-percent', `${percent}%`)
+      setText('#progress-transfer', `${transferred} MB / 148 MB`)
+      setText('#progress-speed', percent < 2 ? '正在计算速度…' : '3.8 MB/s')
+      const primaryLabel = updatePrimary.querySelector('[data-primary-label]')
+      if (primaryLabel) primaryLabel.textContent = `下载中 ${percent}%`
+      renderBadges()
+    }
+
+    function renderReviewFacts() {
+      const operation = demo.updateState.startsWith('checking')
+        ? 'checking'
+        : demo.updateState.startsWith('check_failed')
+          ? 'check_failed'
+          : demo.updateState
+      const prompt = demo.pendingPrompt ? demo.pendingPrompt.id : 'none'
+      const releaseFact = hasKnownRelease() ? `v${demo.availableRelease.version}` : 'none'
+      reviewFacts.replaceChildren()
+      const facts = [
+        ['操作状态', operation],
+        ['有效 Release', releaseFact],
+        ['设置分区', demo.settingsSection],
+        ['上次设置', demo.lastSettingsSection],
+        ['pendingPrompt', prompt],
+        ['最近 dismiss', demo.lastDismissedPromptId ?? 'none'],
+        ['浮层槽', promptLayer.hidden ? 'free' : 'update']
+      ]
+      facts.forEach(([label, value]) => {
+        const span = document.createElement('span')
+        span.append(`${label} `)
+        const code = document.createElement('code')
+        code.textContent = value
+        span.append(code)
+        reviewFacts.append(span)
+      })
+    }
+
+    function render() {
+      root.dataset.theme = demo.theme
+      productFrame.dataset.screen = demo.screen
+      campScreen.hidden = demo.screen !== 'camp'
+      aboutScreen.hidden = demo.screen !== 'about'
+      const generalSelected = demo.settingsSection === 'general'
+      generalSettingsPanel.hidden = !generalSelected
+      aboutSettingsPanel.hidden = generalSelected
+      settingsGeneralButton.classList.toggle('active', generalSelected)
+      settingsAboutButton.classList.toggle('active', !generalSelected)
+      if (generalSelected) {
+        settingsGeneralButton.setAttribute('aria-current', 'page')
+        settingsAboutButton.removeAttribute('aria-current')
+      } else {
+        settingsGeneralButton.removeAttribute('aria-current')
+        settingsAboutButton.setAttribute('aria-current', 'page')
+      }
+      reviewScreen.value = demo.screen
+      reviewState.value = demo.updateState
+      reviewRelease.value = hasKnownRelease() ? 'known' : 'none'
+      reviewRelease.disabled = ![
+        'checking',
+        'checking_empty',
+        'check_failed_network',
+        'check_failed_network_empty',
+        'check_failed_unavailable'
+      ].includes(demo.updateState)
+      reviewNotes.value = demo.notes
+      themeToggle.setAttribute('aria-pressed', String(demo.theme === 'night'))
+      themeToggle.querySelector('span').textContent = demo.theme === 'night' ? '切到日间' : '切到夜间'
+      renderBadges()
+      renderPrompt()
+      renderAbout()
+      renderReviewFacts()
+    }
+
+    function announce(message) {
+      stateAnnouncer.textContent = ''
+      window.requestAnimationFrame(() => { stateAnnouncer.textContent = message })
+    }
+
+    function clearTimers() {
+      window.clearInterval(demo.progressTimer)
+      window.clearTimeout(demo.stateTimer)
+      demo.progressTimer = null
+      demo.stateTimer = null
+    }
+
+    function productFocusTarget() {
+      if (demo.screen === 'about') {
+        if (demo.settingsSection === 'general') return document.querySelector('#general-page-heading')
+        return updatePrimary.disabled ? document.querySelector('#about-page-heading') : updatePrimary
+      }
+      return document.querySelector('#camp-composer')
+    }
+
+    function focusAfterRender(preferredTarget) {
+      window.requestAnimationFrame(() => {
+        const preferredIsUsable = preferredTarget instanceof HTMLElement
+          && preferredTarget.isConnected
+          && !preferredTarget.closest('[hidden]')
+          && !preferredTarget.matches(':disabled')
+        const target = preferredIsUsable ? preferredTarget : productFocusTarget()
+        target?.focus({ preventScroll: true })
+      })
+    }
+
+    function dismissCurrentPrompt() {
+      if (!demo.pendingPrompt) return
+      const promptHadFocus = document.querySelector('#update-prompt').contains(document.activeElement)
+      const returnTarget = demo.promptReturnFocus
+      demo.lastDismissedPromptId = demo.pendingPrompt.id
+      demo.pendingPrompt = null
+      demo.promptReturnFocus = null
+      render()
+      announce('本次更新提醒已关闭。更新入口仍保留状态徽标。')
+      if (promptHadFocus) focusAfterRender(returnTarget)
+    }
+
+    function settingsHeading(section) {
+      return document.querySelector(section === 'about' ? '#about-page-heading' : '#general-page-heading')
+    }
+
+    function openSettings(section, returnFocus, { remember = true } = {}) {
+      demo.settingsSection = section
+      if (remember) demo.lastSettingsSection = section
+      demo.settingsReturnFocus = returnFocus
+      demo.screen = 'about'
+      render()
+      focusAfterRender(settingsHeading(section))
+    }
+
+    function openUpdateSettings(returnFocus) {
+      const promptId = demo.pendingPrompt?.id ?? null
+      const promptVersion = demo.pendingPrompt?.version ?? null
+      openSettings('about', returnFocus, { remember: false })
+      window.requestAnimationFrame(() => {
+        const aboutPresented = demo.screen === 'about'
+          && demo.settingsSection === 'about'
+          && !aboutSettingsPanel.hidden
+        if (
+          aboutPresented
+          && promptId
+          && demo.pendingPrompt?.id === promptId
+          && demo.pendingPrompt.version === promptVersion
+          && demo.availableRelease?.version === promptVersion
+        ) {
+          demo.lastDismissedPromptId = promptId
+          demo.pendingPrompt = null
+          renderReviewFacts()
+        }
+      })
+      announce('已打开关于与更新。设置主入口仍保留原有去向。')
+    }
+
+    function changeSettingsSection(section) {
+      demo.settingsSection = section
+      demo.lastSettingsSection = section
+      render()
+      focusAfterRender(settingsHeading(section))
+    }
+
+    function closeSettings() {
+      const returnTarget = demo.settingsReturnFocus
+      demo.settingsReturnFocus = null
+      demo.screen = 'camp'
+      render()
+      const focusTarget = returnTarget === campUpdateShortcut && campUpdateShortcut.hidden
+        ? campSettingsButton
+        : returnTarget ?? campSettingsButton
+      focusAfterRender(focusTarget)
+    }
+
+    function runManualCheck() {
+      if (demo.updateState.startsWith('checking') || ['downloading', 'installing'].includes(demo.updateState)) return
+      clearTimers()
+      const actionHadFocus = updatePrimary === document.activeElement || manualCheck === document.activeElement
+      demo.checkSource = 'manual'
+      demo.updateState = hasKnownRelease() ? 'checking' : 'checking_empty'
+      render()
+      announce('正在手动检查更新。不会显示全局更新提醒。')
+      if (actionHadFocus) focusAfterRender(updateStatus)
+      demo.stateTimer = window.setTimeout(() => {
+        demo.availableRelease = { ...releaseFixture }
+        demo.updateState = 'available'
+        render()
+        announce('手动检查完成，Rovai AI v0.0.3 可用。未显示全局提醒。')
+      }, 900)
+    }
+
+    function startDownload() {
+      if (!['available', 'download_failed'].includes(demo.updateState) || !hasKnownRelease()) return
+      clearTimers()
+      const promptHadFocus = document.querySelector('#update-prompt').contains(document.activeElement)
+      const pageActionHadFocus = updatePrimary === document.activeElement
+      const returnTarget = demo.promptReturnFocus
+      if (demo.pendingPrompt) {
+        demo.lastDismissedPromptId = demo.pendingPrompt.id
+        demo.pendingPrompt = null
+      }
+      demo.promptReturnFocus = null
+      demo.updateState = 'downloading'
+      demo.progress = 0
+      render()
+      announce('已开始下载 Rovai AI v0.0.3。重复请求会合并到同一次下载。')
+      if (promptHadFocus) focusAfterRender(returnTarget)
+      if (pageActionHadFocus) focusAfterRender(updateStatus)
+      demo.progressTimer = window.setInterval(() => {
+        demo.progress = Math.min(100, demo.progress + 6)
+        renderProgressOnly()
+        if (demo.progress >= 100) {
+          window.clearInterval(demo.progressTimer)
+          demo.progressTimer = null
+          demo.updateState = 'ready_to_install'
+          render()
+          announce('Rovai AI v0.0.3 已下载，等待你确认安装并重启。')
+        }
+      }, 320)
+    }
+
+    function startInstall() {
+      if (!['ready_to_install', 'install_failed'].includes(demo.updateState)) return
+      clearTimers()
+      const actionHadFocus = updatePrimary === document.activeElement
+      demo.updateState = 'installing'
+      render()
+      announce('安装请求已受理，正在交给主进程协调受控退出。')
+      if (actionHadFocus) focusAfterRender(updateStatus)
+    }
+
+    function activatePrimaryAction() {
+      const actionKind = statePresentation[demo.updateState].actionKind
+      if (actionKind === 'check') runManualCheck()
+      if (actionKind === 'download') startDownload()
+      if (actionKind === 'install') startInstall()
+    }
+
+    document.querySelector('#prompt-close').addEventListener('click', dismissCurrentPrompt)
+    document.querySelector('#prompt-later').addEventListener('click', dismissCurrentPrompt)
+    document.querySelector('#prompt-download').addEventListener('click', startDownload)
+    document.querySelector('#prompt-view-notes').addEventListener('click', () => {
+      const promptId = demo.pendingPrompt?.id ?? null
+      const promptVersion = demo.pendingPrompt?.version ?? null
+      demo.settingsSection = 'about'
+      demo.settingsReturnFocus = campUpdateShortcut
+      demo.screen = 'about'
+      render()
+      window.requestAnimationFrame(() => {
+        const aboutPresented = demo.screen === 'about'
+          && demo.settingsSection === 'about'
+          && !aboutSettingsPanel.hidden
+        if (
+          aboutPresented
+          && promptId
+          && demo.pendingPrompt?.id === promptId
+          && demo.pendingPrompt.version === promptVersion
+          && demo.availableRelease?.version === promptVersion
+        ) {
+          demo.lastDismissedPromptId = promptId
+          demo.pendingPrompt = null
+          demo.promptReturnFocus = null
+          renderReviewFacts()
+        }
+        const heading = document.querySelector('#release-notes-heading')
+        heading.focus({ preventScroll: true })
+        const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches
+        heading.scrollIntoView({ block: 'start', behavior: reducedMotion ? 'auto' : 'smooth' })
+        announce('已打开关于与更新，并定位到 v0.0.3 更新日志。')
+      })
+    })
+
+    campSettingsButton.addEventListener('click', () => openSettings(demo.lastSettingsSection, campSettingsButton))
+    campUpdateShortcut.addEventListener('click', () => openUpdateSettings(campUpdateShortcut))
+    settingsGeneralButton.addEventListener('click', () => changeSettingsSection('general'))
+    settingsAboutButton.addEventListener('click', () => changeSettingsSection('about'))
+    document.querySelector('#settings-back').addEventListener('click', closeSettings)
+    updatePrimary.addEventListener('click', activatePrimaryAction)
+    manualCheck.addEventListener('click', runManualCheck)
+
+    reviewScreen.addEventListener('change', (event) => {
+      demo.screen = event.target.value
+      if (demo.screen === 'about') demo.settingsSection = 'about'
+      render()
+    })
+    reviewState.addEventListener('change', (event) => {
+      clearTimers()
+      demo.updateState = event.target.value
+      demo.progress = demo.updateState === 'downloading' ? 42 : demo.updateState === 'ready_to_install' ? 100 : 0
+      if ([
+        'checking',
+        'available',
+        'downloading',
+        'ready_to_install',
+        'installing',
+        'check_failed_network',
+        'download_failed',
+        'install_failed'
+      ].includes(demo.updateState)) {
+        demo.availableRelease = { ...releaseFixture }
+      }
+      if ([
+        'idle',
+        'checking_empty',
+        'up_to_date',
+        'check_failed_network_empty',
+        'check_failed_invalid_release'
+      ].includes(demo.updateState)) {
+        demo.availableRelease = null
+      }
+      if (demo.updateState !== 'available') demo.pendingPrompt = null
+      render()
+    })
+    reviewRelease.addEventListener('change', (event) => {
+      demo.availableRelease = event.target.value === 'known' ? { ...releaseFixture } : null
+      if (demo.updateState === 'checking' || demo.updateState === 'checking_empty') {
+        demo.updateState = hasKnownRelease() ? 'checking' : 'checking_empty'
+      }
+      if (demo.updateState === 'check_failed_network' || demo.updateState === 'check_failed_network_empty') {
+        demo.updateState = hasKnownRelease() ? 'check_failed_network' : 'check_failed_network_empty'
+      }
+      render()
+    })
+    reviewNotes.addEventListener('change', (event) => {
+      demo.notes = event.target.value
+      render()
+    })
+    document.querySelector('#next-auto-check').addEventListener('click', () => {
+      clearTimers()
+      demo.promptGeneration += 1
+      demo.checkSource = 'interval'
+      demo.updateState = 'available'
+      demo.availableRelease = { ...releaseFixture }
+      demo.progress = 0
+      demo.promptReturnFocus = document.activeElement
+      demo.pendingPrompt = {
+        id: `auto-check-${String(demo.promptGeneration).padStart(3, '0')}`,
+        version: releaseFixture.version
+      }
+      demo.screen = 'camp'
+      render()
+      announce(`下一轮自动检查发现 v${releaseFixture.version}，已生成新的更新提醒。`)
+    })
+    themeToggle.addEventListener('click', () => {
+      demo.theme = demo.theme === 'night' ? 'day' : 'night'
+      render()
+    })
+    reviewCollapse.addEventListener('click', () => {
+      const collapsed = reviewLab.classList.toggle('is-collapsed')
+      reviewCollapse.setAttribute('aria-expanded', String(!collapsed))
+      reviewCollapse.querySelector('span').textContent = collapsed ? '展开评审工具' : '收起'
+    })
+
+    render()
+  </script>
+</body>
+</html>

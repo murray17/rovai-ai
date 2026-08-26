@@ -5,6 +5,7 @@ import type {
   AgentProfile,
   AgentRunView,
   ActionApprovalView,
+  AppUpdatePrompt as AppUpdatePromptValue,
   AppearanceSnapshot,
   CampActivationState,
   CampCreationPreflight,
@@ -71,6 +72,8 @@ import { openRuntimeModelCatalog } from './runtime-check'
 import { PanelToggleIcon } from './PanelToggleIcon'
 import { AppearanceSettings } from './AppearanceSettings'
 import { AboutUpdatesSettings } from './AboutUpdatesSettings'
+import { AppUpdatePrompt } from './AppUpdatePrompt'
+import { useAppUpdates, type AppUpdatesController } from './useAppUpdates'
 import {
   NotificationAttentionController,
   type NotificationNavigationResult
@@ -527,6 +530,7 @@ export function App(): React.JSX.Element {
   const [appearance, setAppearance] = useState<AppearanceSnapshot>(
     () => initialAppearanceSnapshot(document.documentElement)
   )
+  const appUpdates = useAppUpdates()
   const [health, setHealth] = useState<HealthStatus | null>(null)
   const [healthLoading, setHealthLoading] = useState(false)
   const [healthAttempted, setHealthAttempted] = useState(false)
@@ -560,6 +564,7 @@ export function App(): React.JSX.Element {
   const [confirmingRunIds, setConfirmingRunIds] = useState<Set<string>>(() => new Set())
   const [state, setState] = useState<LoadState>('loading')
   const [shuttingDown, setShuttingDown] = useState(false)
+  const [notificationHeadsUpVisible, setNotificationHeadsUpVisible] = useState(false)
   const [startupSnapshot, setStartupSnapshot] = useState<DesktopStartupSnapshot | null>(null)
   const [startupRouteTarget, setStartupRouteTarget] = useState<RestorableLocation | null>(null)
   const [startupStatus, setStartupStatus] = useState<StartupStatus>('loading')
@@ -1875,8 +1880,70 @@ export function App(): React.JSX.Element {
   const chooseSettingsSection = (section: SettingsSection): void => {
     setSettingsSection(section)
     void window.rovai.generalPreferences.setLastSettingsSection(section)
+      .then(setGeneralPreferences)
       .catch((nextError) => setError(errorMessage(nextError)))
   }
+
+  const commitSettingsSurface = (section: SettingsSection): void => {
+    cancelPendingCampActivation()
+    setNotificationFocus(null)
+    setSettingsSection(section)
+    setView('settings')
+  }
+
+  const openSettings = (): void => {
+    const rememberedSection = generalPreferences?.lastSettingsSection ?? 'general'
+    void requestMemberTransition(() => commitSettingsSurface(rememberedSection))
+  }
+
+  const openUpdateSettings = async (
+    prompt: AppUpdatePromptValue | null = appUpdates.snapshot?.pendingPrompt ?? null
+  ): Promise<boolean> => {
+    const expectedVersion = prompt?.version ?? appUpdates.snapshot?.availableRelease?.version
+    if (!expectedVersion) return false
+    try {
+      const transitioned = await requestMemberTransition(() => commitSettingsSurface('about'))
+      if (!transitioned) return false
+      await afterNextPaint()
+      const releaseSection = document.querySelector<HTMLElement>('.about-release-section')
+      if (releaseSection?.dataset.appUpdateReleaseVersion !== expectedVersion) return false
+      const heading = document.querySelector<HTMLElement>('#about-release-notes-heading')
+      heading?.focus({ preventScroll: true })
+      releaseSection.scrollIntoView({ block: 'start' })
+      return Boolean(heading)
+    } catch (nextError) {
+      setError(`无法打开更新内容：${errorMessage(nextError)}`)
+      return false
+    }
+  }
+
+  useEffect(() => {
+    const prompt = appUpdates.snapshot?.pendingPrompt
+    const release = appUpdates.snapshot?.availableRelease
+    if (view !== 'settings'
+        || settingsSection !== 'about'
+        || !prompt
+        || release?.version !== prompt.version) return undefined
+    let secondFrame = 0
+    const firstFrame = window.requestAnimationFrame(() => {
+      secondFrame = window.requestAnimationFrame(() => {
+        const releaseSection = document.querySelector<HTMLElement>('.about-release-section')
+        if (releaseSection?.dataset.appUpdateReleaseVersion === prompt.version) {
+          void appUpdates.dismissPrompt(prompt.id)
+        }
+      })
+    })
+    return () => {
+      window.cancelAnimationFrame(firstFrame)
+      if (secondFrame) window.cancelAnimationFrame(secondFrame)
+    }
+  }, [
+    appUpdates.dismissPrompt,
+    appUpdates.snapshot?.availableRelease,
+    appUpdates.snapshot?.pendingPrompt,
+    settingsSection,
+    view
+  ])
 
   const commitMemoryLocation = useCallback((): void => {
     if (!startupResolvedSessionId.current || viewRef.current !== 'memory') return
@@ -2884,6 +2951,7 @@ export function App(): React.JSX.Element {
         pins={navigationPins}
         pinnedCampItems={pinnedCampItems}
         settingsSection={settingsSection}
+        updateSnapshot={appUpdates.snapshot}
         onNewConversation={beginNewConversation}
         onMembers={() => chooseView('members')}
         onMemory={() => {
@@ -2891,7 +2959,8 @@ export function App(): React.JSX.Element {
           chooseView('memory')
         }}
         pendingMemoryCount={pendingMemoryCount}
-        onSettings={() => chooseView('settings')}
+        onSettings={openSettings}
+        onOpenUpdates={() => void openUpdateSettings()}
         onSettingsSectionChange={chooseSettingsSection}
         onSettingsBack={closeSettings}
         onOpenProject={() => void openProject()}
@@ -3047,6 +3116,7 @@ export function App(): React.JSX.Element {
             installations={installations}
             busy={busy}
             section={settingsSection}
+            updates={appUpdates}
             onDiagnosticsNavigate={(section) => chooseSettingsSection(section)}
             onReload={async () => {
               await Promise.all([loadOverview(), loadHealth()])
@@ -3139,6 +3209,18 @@ export function App(): React.JSX.Element {
         onRefreshVisibleCamp={refreshVisibleNotificationCamp}
         onError={setToast}
         visibleSources={visibleNotificationSources}
+        onHeadsUpVisibleChange={setNotificationHeadsUpVisible}
+      />
+      <AppUpdatePrompt
+        snapshot={appUpdates.snapshot}
+        campComposerVisible={view === 'camp'}
+        blocked={notificationHeadsUpVisible
+          || newConversationOpen
+          || shuttingDown
+          || (view === 'settings' && settingsSection === 'about')}
+        onDismiss={appUpdates.dismissPrompt}
+        onOpenDetails={openUpdateSettings}
+        onDownload={appUpdates.download}
       />
       {shuttingDown && <ControlledShutdownOverlay />}
     </div>
@@ -3286,6 +3368,7 @@ export function SettingsView({
   installations,
   busy,
   section,
+  updates,
   onDiagnosticsNavigate,
   onReload,
   onThemeChange
@@ -3300,6 +3383,7 @@ export function SettingsView({
   installations: AdapterInstallation[]
   busy: string | null
   section: SettingsSection
+  updates: AppUpdatesController
   onDiagnosticsNavigate(section: 'mcp' | 'runtime', runtimeKind?: AdapterKind): void
   onReload(): Promise<void>
   onThemeChange(preference: ThemePreference): void
@@ -3344,7 +3428,7 @@ export function SettingsView({
           <DiagnosticsCenter onNavigate={onDiagnosticsNavigate} platform={platform} />
         )}
         {section === 'about' && (
-          <AboutUpdatesSettings />
+          <AboutUpdatesSettings updates={updates} />
         )}
       </div>
     </div>

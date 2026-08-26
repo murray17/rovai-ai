@@ -101,9 +101,8 @@ last_updated: 2026-08-26
 `docs/contracts/` 保存字段级、可测试的长期接口合同；`docs/architecture/` 保存跨版本系统结构、
 组件职责和权威边界。版本文档只引用它们，不复制完整协议或长期架构。
 
-`docs/postmortems/` stores blameless incident analyses, evidence, and corrective-action tracking.
-Postmortems explain how failures occurred and how recurrence risk is reduced; they do not replace
-current Architecture/Contracts, current-version scope, or implementation evidence.
+`docs/postmortems/` 保存中文无责事故复盘、证据与纠正措施跟踪。复盘解释故障如何发生、如何
+降低复发风险；它们不能替代当前架构与合同、当前版本范围或实现证据。
 
 ## 权威性与冲突处理
 
