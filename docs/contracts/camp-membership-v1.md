@@ -42,9 +42,12 @@ type RemoveCampMemberCommand = {
 `camps.members.add` 与 `camps.members.remove` 是 User-authorized typed Desktop mutation。add 对同一 active member
 且相同 `capabilityOverrides` 为成功 no-op；若 overrides 不同则拒绝为 `camp.member_capability_conflict`，不得推进
 membership version/generation、发出 added event 或使既有 Run 失效。能力修改属于未来独立的 version-qualified
-命令，不由 add 兼任。generation/version 冲突必须拒绝并要求重读。移除 Default Lead 时，若仍有 `present` 的
-active member，必须使用 preview 给出的有效 successor；若剩余 current members 全部暂离，则允许 successor 为
-null，并由既有 Default Lead reconciliation 在有人归队后恢复。移除非 Lead 时不得携带 replacement。
+命令，不由 add 兼任。该 active-member 分支独立于 Member Presence：`away` 仍按相同规则 no-op/conflict；只有
+left/不存在的真实添加要求 Profile 为 `present`。受信 source 的 accepted no-op 只推进 source reconciliation
+generation，不推进 Camp/member version。generation/version 冲突必须拒绝并要求重读。移除 Default Lead 时，
+若仍有 `present` 的 active member，必须使用 preview 给出的有效 successor；若剩余 current members 全部暂离，
+则允许 successor 为 null，并由既有 Default Lead reconciliation 在有人归队后恢复。移除非 Lead 时不得携带
+replacement。
 
 `camps.members.removalPreview(campId, agentId)` 返回：
 

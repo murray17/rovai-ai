@@ -29,8 +29,9 @@ reconciliation 完成已接受工作的正式结算。
 - 新增 `camps.members.add`、`camps.members.removalPreview`、`camps.members.remove` Desktop API；增加使用
   exact membership generation/version 的添加、预览和移除命令；
 - 添加不创建 Conversation，也不修改已冻结 AgentRun 的 Collaboration State；曾离开的 Agent 再次添加仍是一次
-  普通“添加队员”，产品不暴露 rejoined 状态；对 active member 的相同 overrides 为 no-op，不同 overrides
-  返回 capability conflict，不由 add 静默修改能力或旋转 lifetime；
+  普通“添加队员”，产品不暴露 rejoined 状态；对 active member（包括 away）的相同 overrides 为 no-op，不同
+  overrides 返回 capability conflict，不由 add 静默修改能力或旋转 lifetime；受信 source 的 accepted no-op
+  正常推进自身 reconciliation generation；
 - Camp 始终至少保留一位 active member。移除 Default Lead 时优先使用有效 successor；若剩余成员全部暂离，
   允许暂时没有 Lead，待有人归队后由既有 reconciliation 恢复。非 Lead 不接受无意义的 replacement；
 - 移除在同一提交中结束 membership、推进 generation、切换 Lead、取消目标 Run/Gather/Delivery 并释放未终态

@@ -11,7 +11,8 @@ last_updated: 2026-08-26
 ## 实施步骤
 
 - [x] 确认添加、移除、至少一位成员、Lead successor、普通再次添加与模型上下文边界；
-- [x] active member 相同 capability overrides 保持 no-op，不同 overrides 显式 conflict；
+- [x] active member（包括 away）相同 capability overrides 保持 no-op，不同 overrides 显式 conflict；受信
+  source 的 accepted no-op 正常推进 source reconciliation generation；
 - [x] 完成 Migration 109、membership generation/version、外部来源绑定与旧非终态工作 clean break；
 - [x] 完成 add、removal preview、atomic cutover、durable reconciliation 与任务释放；
 - [x] 给 Agent 业务工具、Message Delivery、Gather completion 和公开输出增加 exact membership lifetime fence；
@@ -40,10 +41,11 @@ last_updated: 2026-08-26
 - `pnpm typecheck`、`cargo check --workspace --all-targets`、
   `cargo clippy --workspace --all-targets --all-features -- -D warnings` 通过；
 - `cargo test -p rovai-core --bin rovai`：25/25 通过；
-- `cargo test -p rovai-core --features slow-tests --lib slow_tests::`：286/286 通过，覆盖动态 membership、
-  当前名册 target admission、ordinary outbound source-lifetime cutover/dispatch/retry fence、exact-run
-  business-tool fence、Delivery/Gather settlement 与 Missing-Send Recovery publication fence；
-- `DOCS_BASE_REF=abda52ca5340429e0b7af6557f01d046a52200cc pnpm docs:check:ci` 通过；
+- `cargo test -p rovai-core --features slow-tests --lib slow_tests::`：288/288 通过，覆盖动态 membership、
+  active-away no-op/source generation、当前名册 target admission、ordinary outbound source-lifetime
+  cutover/dispatch/retry fence、exact-run business-tool fence、Delivery/Gather settlement 与 Missing-Send
+  Recovery publication fence；
+- `DOCS_BASE_REF=2efe219cc91cc37bf2be30a5df41c027822219fa pnpm docs:check:ci` 通过；
 - `pnpm package:mac:unsigned` 通过；`pnpm accept:member-lifecycle-ui` 使用系统临时目录中的隔离 userData
   与打包 App 通过，覆盖最后成员禁用、模型详情、添加、移出预览、普通再次添加、日/夜主题、键盘、无横向
   溢出、重启持久化和旧库迁移；当前受限执行环境不允许 macOS/Chromium sandbox 初始化，因此仅该验收进程

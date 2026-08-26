@@ -51,8 +51,10 @@ Camp 使用单调 membership generation，每段成员关系使用单调 version
 Delivery admission、Gather initiator/completion 与普通 publication 必须匹配冻结的 exact membership version。
 普通 outbound Delivery 的 dispatch/retry 还必须匹配 source Run 的 exact membership lifetime；source 离开时，
 pending Delivery 在 cutover 中终态化，已 materialized 下游 Run 纳入 reconciliation。终态 evidence 使用独立窄
-授权，只能结算既有责任，不能恢复业务工具或公开发布。Active member 的 add 只有相同 capability overrides
-可以 no-op；不同 overrides 必须 conflict，能力变更不能借 add 绕过 lifetime 收口。
+授权，只能结算既有责任，不能恢复业务工具或公开发布。Active member 的 add 独立于 Member Presence，包括
+`away` 在内都只有相同 capability overrides 可以 no-op；不同 overrides 必须 conflict，能力变更不能借 add
+绕过 lifetime 收口。受信 source 的 accepted no-op 推进其 reconciliation generation，但不推进 Camp/member
+version。
 
 当前规范见 [Camp Membership v1](../../contracts/camp-membership-v1.md)、
 [Message Delivery v6](../../contracts/message-delivery-v6.md)、[Gather v4](../../contracts/gather-v4.md)和

@@ -1387,32 +1387,6 @@ impl CollaborationService {
                     |row| row.get::<_, String>(0),
                 )
                 .optional()?;
-            if profile_status.as_deref() != Some("present") {
-                return Ok(rejected("agent.unavailable", "AgentProfile is not active"));
-            }
-            let active_member_count: i64 = transaction.query_row(
-                r#"
-                SELECT COUNT(*)
-                FROM camp_member
-                JOIN agent_profile ON agent_profile.id = camp_member.agent_id
-                WHERE camp_member.camp_id = ?1
-                  AND camp_member.status = 'active'
-                  AND camp_member.leave_requested_at IS NULL
-                  AND agent_profile.profile_status = 'present'
-                "#,
-                [&envelope.payload.camp_id],
-                |row| row.get(0),
-            )?;
-            if active_member_count > 0 && default_lead.is_none() {
-                return Ok(rejected(
-                    "camp.default_lead_invariant",
-                    "Camp has active members but no Default Lead",
-                ));
-            }
-
-            let now = chrono::Utc::now().to_rfc3339();
-            let capability_overrides_json =
-                serde_json::to_string(&envelope.payload.capability_overrides)?;
             let current_membership = transaction
                 .query_row(
                     r#"
@@ -1434,6 +1408,9 @@ impl CollaborationService {
                 current_membership.as_ref()
                 && status == "active"
             {
+                if !matches!(profile_status.as_deref(), Some("present") | Some("away")) {
+                    return Ok(rejected("agent.unavailable", "AgentProfile is not active"));
+                }
                 let current_overrides = serde_json::from_str::<Value>(current_overrides_json)
                     .context("active Camp membership capability overrides are invalid")?;
                 if current_overrides != envelope.payload.capability_overrides {
@@ -1447,6 +1424,7 @@ impl CollaborationService {
                         }),
                     ));
                 }
+                let now = chrono::Utc::now().to_rfc3339();
                 advance_membership_source_generation(
                     transaction,
                     &envelope.actor,
@@ -1473,6 +1451,32 @@ impl CollaborationService {
                     }),
                 ));
             }
+            if profile_status.as_deref() != Some("present") {
+                return Ok(rejected("agent.unavailable", "AgentProfile is not active"));
+            }
+            let active_member_count: i64 = transaction.query_row(
+                r#"
+                SELECT COUNT(*)
+                FROM camp_member
+                JOIN agent_profile ON agent_profile.id = camp_member.agent_id
+                WHERE camp_member.camp_id = ?1
+                  AND camp_member.status = 'active'
+                  AND camp_member.leave_requested_at IS NULL
+                  AND agent_profile.profile_status = 'present'
+                "#,
+                [&envelope.payload.camp_id],
+                |row| row.get(0),
+            )?;
+            if active_member_count > 0 && default_lead.is_none() {
+                return Ok(rejected(
+                    "camp.default_lead_invariant",
+                    "Camp has active members but no Default Lead",
+                ));
+            }
+
+            let now = chrono::Utc::now().to_rfc3339();
+            let capability_overrides_json =
+                serde_json::to_string(&envelope.payload.capability_overrides)?;
             transaction.execute(
                 r#"
                 INSERT INTO camp_member(
@@ -5734,7 +5738,8 @@ mod slow_tests {
     use super::*;
     use crate::{
         agent_profile::{
-            AdapterKind, AgentProfileService, RemoveMemberCommand, configure_test_runtime,
+            AdapterKind, AgentProfileService, RemoveMemberCommand, SetMemberPresenceCommand,
+            configure_test_runtime,
         },
         camp_attachment::CampAttachmentStore,
         camp_attachment_view::CampAttachmentViewStore,
@@ -6702,6 +6707,212 @@ mod slow_tests {
         assert_eq!(row_count(&database, "camp_message"), 0);
         assert_eq!(row_count(&database, "camp_turn"), 0);
         assert_eq!(row_count(&database, "agent_run"), 0);
+        drop(database);
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[derive(Debug, PartialEq, Eq)]
+    struct CampMemberAddTestState {
+        membership_generation: i64,
+        membership_version: i64,
+        profile_presence: String,
+        member_added_event_count: usize,
+    }
+
+    fn camp_member_add_test_state(
+        database: &mut Database,
+        camp_id: &str,
+        agent_id: &str,
+    ) -> CampMemberAddTestState {
+        let snapshot = ReadModelService.camp_snapshot(database, camp_id).unwrap();
+        let member = snapshot
+            .members
+            .iter()
+            .find(|member| member.agent_id == agent_id)
+            .unwrap();
+        CampMemberAddTestState {
+            membership_generation: snapshot.camp.membership_generation,
+            membership_version: member.version,
+            profile_presence: member.profile_presence.clone(),
+            member_added_event_count: snapshot
+                .timeline
+                .iter()
+                .filter(|event| event.event_type == "camp.member_added")
+                .count(),
+        }
+    }
+
+    fn set_test_member_away(database: &mut Database, agent_id: &str, command_id: &str) {
+        let service = AgentProfileService::default();
+        let profile = service.get_profile(database, agent_id).unwrap().unwrap();
+        let execution = service
+            .set_presence(
+                database,
+                &user_envelope(
+                    command_id,
+                    None,
+                    SetMemberPresenceCommand {
+                        agent_id: profile.agent_id,
+                        expected_version: profile.version,
+                        presence: "away".to_string(),
+                    },
+                ),
+            )
+            .unwrap();
+        assert_eq!(execution.result.code, "agent_profile.presence_changed");
+    }
+
+    #[test]
+    fn active_away_member_add_is_idempotent() {
+        let (mut database, directory) = test_database();
+        let service = CollaborationService::default();
+        let camp_id =
+            create_camp_with_members(&service, &mut database, &directory, &["agent_1", "agent_2"]);
+        set_test_member_away(
+            &mut database,
+            "agent_2",
+            "active-member-goes-away-before-idempotent-add",
+        );
+        let before = camp_member_add_test_state(&mut database, &camp_id, "agent_2");
+
+        let unchanged = service
+            .add_camp_member(
+                &mut database,
+                &user_envelope(
+                    "active-away-member-idempotent-add",
+                    Some(&camp_id),
+                    AddCampMemberCommand {
+                        camp_id: camp_id.clone(),
+                        agent_id: "agent_2".to_string(),
+                        expected_membership_generation: before.membership_generation,
+                        capability_overrides: json!({}),
+                        source: None,
+                    },
+                ),
+            )
+            .unwrap();
+        assert_eq!(unchanged.result.status, CommandResultStatus::Applied);
+        assert_eq!(unchanged.result.code, "camp.member_unchanged");
+
+        let conflicting = service
+            .add_camp_member(
+                &mut database,
+                &user_envelope(
+                    "active-away-member-capability-conflict",
+                    Some(&camp_id),
+                    AddCampMemberCommand {
+                        camp_id: camp_id.clone(),
+                        agent_id: "agent_2".to_string(),
+                        expected_membership_generation: before.membership_generation,
+                        capability_overrides: json!({"task.create": "deny"}),
+                        source: None,
+                    },
+                ),
+            )
+            .unwrap();
+        assert_eq!(conflicting.result.status, CommandResultStatus::Rejected);
+        assert_eq!(conflicting.result.code, "camp.member_capability_conflict");
+
+        let after = camp_member_add_test_state(&mut database, &camp_id, "agent_2");
+        assert_eq!(after.profile_presence, "away");
+        assert_eq!(after, before);
+
+        drop(database);
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn external_noop_for_active_away_member_advances_source_generation() {
+        let (mut database, directory) = test_database();
+        let service = CollaborationService::default();
+        let camp_id = create_camp_with_members(&service, &mut database, &directory, &["agent_1"]);
+        database
+            .connection()
+            .execute(
+                r#"
+                INSERT INTO camp_membership_source_binding(
+                    camp_id, source_namespace, binding_id, trusted_component_id,
+                    last_reconciliation_generation, created_at, updated_at
+                ) VALUES (?1, 'channel.membership', 'channel-away-member',
+                          'channel-membership-sync', 0, datetime('now'), datetime('now'))
+                "#,
+                [&camp_id],
+            )
+            .unwrap();
+        let added = service
+            .add_camp_member(
+                &mut database,
+                &system_envelope(
+                    "external-add-before-member-goes-away",
+                    &camp_id,
+                    "channel-membership-sync",
+                    AddCampMemberCommand {
+                        camp_id: camp_id.clone(),
+                        agent_id: "agent_2".to_string(),
+                        expected_membership_generation: 1,
+                        capability_overrides: json!({}),
+                        source: Some(CampMembershipMutationSource {
+                            namespace: "channel.membership".to_string(),
+                            binding_id: "channel-away-member".to_string(),
+                            reconciliation_generation: 1,
+                        }),
+                    },
+                ),
+            )
+            .unwrap();
+        assert_eq!(added.result.code, "camp.member_added");
+
+        set_test_member_away(
+            &mut database,
+            "agent_2",
+            "external-member-goes-away-before-noop",
+        );
+        let before = camp_member_add_test_state(&mut database, &camp_id, "agent_2");
+
+        let unchanged = service
+            .add_camp_member(
+                &mut database,
+                &system_envelope(
+                    "external-noop-for-active-away-member",
+                    &camp_id,
+                    "channel-membership-sync",
+                    AddCampMemberCommand {
+                        camp_id: camp_id.clone(),
+                        agent_id: "agent_2".to_string(),
+                        expected_membership_generation: before.membership_generation,
+                        capability_overrides: json!({}),
+                        source: Some(CampMembershipMutationSource {
+                            namespace: "channel.membership".to_string(),
+                            binding_id: "channel-away-member".to_string(),
+                            reconciliation_generation: 2,
+                        }),
+                    },
+                ),
+            )
+            .unwrap();
+        assert_eq!(unchanged.result.status, CommandResultStatus::Applied);
+        assert_eq!(unchanged.result.code, "camp.member_unchanged");
+
+        let after = camp_member_add_test_state(&mut database, &camp_id, "agent_2");
+        assert_eq!(after.profile_presence, "away");
+        assert_eq!(after, before);
+        assert_eq!(
+            database
+                .connection()
+                .query_row(
+                    r#"
+                    SELECT last_reconciliation_generation
+                    FROM camp_membership_source_binding
+                    WHERE camp_id = ?1 AND source_namespace = 'channel.membership'
+                      AND binding_id = 'channel-away-member'
+                    "#,
+                    [&camp_id],
+                    |row| row.get::<_, i64>(0),
+                )
+                .unwrap(),
+            2
+        );
+
         drop(database);
         std::fs::remove_dir_all(directory).unwrap();
     }
