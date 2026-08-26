@@ -81,7 +81,7 @@ impl Deref for RecordedExecutionEvidence {
 pub struct ExecutionEvidenceService;
 
 impl ExecutionEvidenceService {
-    pub fn is_runtime_evidence_event(event_type: &str) -> bool {
+    pub fn is_durable_runtime_evidence_event(event_type: &str) -> bool {
         matches!(
             event_type,
             "agent.reasoning.summary.delta"
@@ -90,12 +90,15 @@ impl ExecutionEvidenceService {
                 | "runtime.plan"
                 | "runtime.plan.delta"
                 | "runtime.diagnostic"
-                | "command.output.delta"
                 | "file.change.updated"
                 | "runtime.action"
                 | "activity.started"
                 | "activity.completed"
         )
+    }
+
+    pub fn is_transient_command_output_event(event_type: &str) -> bool {
+        event_type == "command.output.delta"
     }
 
     pub fn is_batchable_runtime_delta_event(event_type: &str) -> bool {
@@ -105,9 +108,33 @@ impl ExecutionEvidenceService {
                 | "agent.thought.delta"
                 | "agent.text.delta"
                 | "runtime.plan.delta"
-                | "command.output.delta"
                 | "file.change.updated"
         )
+    }
+
+    pub fn command_output_delta_admission_open(
+        &self,
+        database: &Database,
+        agent_run_id: &str,
+        execution_epoch: i64,
+    ) -> Result<bool> {
+        database
+            .connection()
+            .query_row(
+                r#"
+                SELECT EXISTS(
+                    SELECT 1
+                    FROM agent_run
+                    WHERE id = ?1
+                      AND execution_epoch = ?2
+                      AND status IN ('running', 'waiting')
+                      AND cancel_requested_at IS NULL
+                )
+                "#,
+                params![agent_run_id, execution_epoch],
+                |row| row.get(0),
+            )
+            .map_err(Into::into)
     }
 
     pub fn prepare_runtime_event(
@@ -303,6 +330,51 @@ impl ExecutionEvidenceService {
             agent_run_id,
             execution_epoch,
             "runtime.action",
+            payload,
+            true,
+        )
+    }
+
+    pub fn record_interrupted_runtime_activity(
+        &self,
+        database: &mut Database,
+        blob_store: &ManagedBlobStore,
+        agent_run_id: &str,
+        execution_epoch: i64,
+        payload: &Value,
+    ) -> Result<Option<RecordedExecutionEvidence>> {
+        if payload.get("reasonCode").and_then(Value::as_str) != Some("runtime_interrupted")
+            || payload.pointer("/item/status").and_then(Value::as_str) != Some("interrupted")
+        {
+            anyhow::bail!("interrupted Runtime Activity must carry the interrupted terminal facts");
+        }
+        let item_id = payload
+            .pointer("/item/id")
+            .and_then(Value::as_str)
+            .context("interrupted Runtime Activity has no item id")?;
+        let started_source_key = format!("activity.started:{item_id}:updated");
+        let started_exists: bool = database.connection().query_row(
+            r#"
+            SELECT EXISTS(
+                SELECT 1
+                FROM agent_run_execution_evidence
+                WHERE agent_run_id = ?1
+                  AND execution_epoch = ?2
+                  AND source_event_key = ?3
+            )
+            "#,
+            params![agent_run_id, execution_epoch, started_source_key],
+            |row| row.get(0),
+        )?;
+        if !started_exists {
+            return Ok(None);
+        }
+        self.record_runtime_event_with_fence_policy(
+            database,
+            blob_store,
+            agent_run_id,
+            execution_epoch,
+            "activity.completed",
             payload,
             true,
         )
@@ -547,7 +619,6 @@ fn evidence_classification(
         "agent.text.delta" => Some(("narration", "updated")),
         "runtime.plan" | "runtime.plan.delta" => Some(("plan", "updated")),
         "runtime.diagnostic" => Some(("step", "updated")),
-        "command.output.delta" => Some(("command", "updated")),
         "file.change.updated" => Some(("file_change", "updated")),
         "runtime.action" => Some((
             if payload
@@ -597,10 +668,6 @@ fn normalize_public_payload(event_type: &str, payload: &Value) -> Value {
             "maxAttempts": payload.get("maxAttempts"),
             "retryAfterSeconds": payload.get("retryAfterSeconds"),
         }),
-        "command.output.delta" => serde_json::json!({
-            "itemId": payload.get("itemId"),
-            "delta": payload.get("delta").or_else(|| payload.get("output")),
-        }),
         "file.change.updated" => serde_json::json!({
             "itemId": payload.get("itemId"),
             "patch": payload.get("patch").or_else(|| payload.get("delta")),
@@ -633,6 +700,7 @@ fn normalize_public_payload(event_type: &str, payload: &Value) -> Value {
         "activity.started" | "activity.completed" => {
             let item = payload.get("item").unwrap_or(&Value::Null);
             serde_json::json!({
+                "reasonCode": payload.get("reasonCode"),
                 "item": {
                     "id": item.get("id"),
                     "type": item.get("type"),
@@ -1272,28 +1340,125 @@ mod tests {
             .prepare_binding_credential(&mut database, &run_id, execution_epoch, false)
             .unwrap();
         let blob_store = ManagedBlobStore::new(&directory);
-        let secret = format!("EVIDENCE_ONLY_{}", "x".repeat(20_000));
+        let output_delta = json!({ "itemId": "command-1", "delta": "transport only" });
+        for _ in 0..100_000 {
+            let evidence = ExecutionEvidenceService
+                .record_runtime_event(
+                    &mut database,
+                    &blob_store,
+                    &run_id,
+                    execution_epoch,
+                    "command.output.delta",
+                    &output_delta,
+                )
+                .unwrap();
+            assert!(evidence.is_none());
+        }
+        let durable_delta_count: i64 = database
+            .connection()
+            .query_row(
+                "SELECT COUNT(*) FROM agent_run_execution_evidence WHERE agent_run_id = ?1 AND event_type = 'command.output.delta'",
+                [&run_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(durable_delta_count, 0);
+        assert!(
+            ExecutionEvidenceService
+                .command_output_delta_admission_open(&database, &run_id, execution_epoch)
+                .unwrap()
+        );
+        assert!(
+            !ExecutionEvidenceService
+                .command_output_delta_admission_open(&database, &run_id, execution_epoch + 1)
+                .unwrap()
+        );
+        database
+            .connection()
+            .execute_batch("SAVEPOINT command_output_terminal_fence")
+            .unwrap();
+        let terminal_probe_at = chrono::Utc::now().to_rfc3339();
+        database
+            .connection()
+            .execute(
+                "UPDATE agent_run SET status = 'failed', ended_at = ?2, updated_at = ?2 WHERE id = ?1",
+                params![run_id, terminal_probe_at],
+            )
+            .unwrap();
+        assert!(
+            !ExecutionEvidenceService
+                .command_output_delta_admission_open(&database, &run_id, execution_epoch)
+                .unwrap()
+        );
+        database
+            .connection()
+            .execute_batch(
+                "ROLLBACK TO command_output_terminal_fence; RELEASE command_output_terminal_fence",
+            )
+            .unwrap();
+        assert!(
+            ExecutionEvidenceService
+                .command_output_delta_admission_open(&database, &run_id, execution_epoch)
+                .unwrap()
+        );
+
+        let secret = format!("EVIDENCE_ONLY_{}", "x".repeat(573_647));
+        let started_command = ExecutionEvidenceService
+            .record_runtime_event(
+                &mut database,
+                &blob_store,
+                &run_id,
+                execution_epoch,
+                "activity.started",
+                &json!({
+                    "item": {
+                        "id": "command-1",
+                        "type": "commandExecution",
+                        "command": "cargo test",
+                        "status": "inProgress",
+                    }
+                }),
+            )
+            .unwrap()
+            .unwrap();
+        assert_eq!(started_command.sequence, 1);
         let evidence = ExecutionEvidenceService
             .record_runtime_event(
                 &mut database,
                 &blob_store,
                 &run_id,
                 execution_epoch,
-                "command.output.delta",
-                &json!({ "itemId": "command-1", "delta": secret }),
+                "activity.completed",
+                &json!({
+                    "item": {
+                        "id": "command-1",
+                        "type": "commandExecution",
+                        "command": "cargo test",
+                        "status": "completed",
+                        "exitCode": 0,
+                        "aggregatedOutput": secret,
+                    }
+                }),
             )
             .unwrap()
             .unwrap();
         assert!(evidence.inserted);
         assert!(evidence.is_truncated);
         assert!(evidence.content_blob_id.is_some());
-        assert_eq!(evidence.sequence, 1);
+        assert_eq!(evidence.sequence, 2);
         let canonical = evidence
             .canonical
             .as_ref()
             .expect("activity Evidence should persist its Canonical Projection");
         assert_eq!(canonical.activity_domain, "shell");
         assert_eq!(canonical.semantic_kind.as_deref(), Some("shell.execute"));
+        assert_eq!(evidence.payload["item"]["command"], "cargo test");
+        assert_eq!(evidence.payload["item"]["status"], "completed");
+        assert_eq!(evidence.payload["item"]["exitCode"], 0);
+        let full_payload = ExecutionEvidenceService
+            .read_full_payload(&database, &blob_store, &camp_id, &evidence.id)
+            .unwrap();
+        assert_eq!(full_payload["item"]["aggregatedOutput"], secret);
         let canonical_count: i64 = database
             .connection()
             .query_row(
@@ -1310,12 +1475,12 @@ mod tests {
                 json!({"itemId": "message-1", "delta": "hello "}),
             ),
             (
-                "command.output.delta",
-                json!({"itemId": "command-1", "delta": "line 1\n"}),
+                "agent.text.delta",
+                json!({"itemId": "message-2", "delta": "world"}),
             ),
             (
-                "command.output.delta",
-                json!({"itemId": "command-1", "delta": "line 2\n"}),
+                "agent.text.delta",
+                json!({"itemId": "message-3", "delta": "!"}),
             ),
         ]
         .into_iter()
@@ -1347,17 +1512,10 @@ mod tests {
                 .iter()
                 .map(|evidence| evidence.sequence)
                 .collect::<Vec<_>>(),
-            vec![2, 3, 4]
+            vec![3, 4, 5]
         );
         assert_eq!(batch[0].payload["delta"], "hello ");
-        assert!(batch[0].canonical.is_none());
-        let command_projection = batch[2]
-            .canonical
-            .as_ref()
-            .expect("Command Delta batch must retain its Canonical Projection");
-        assert_eq!(command_projection.last_evidence_sequence, 4);
-        assert_eq!(command_projection.revision, 3);
-        assert_eq!(command_projection.source_evidence_ids.len(), 3);
+        assert!(batch.iter().all(|evidence| evidence.canonical.is_none()));
 
         let runtime_diagnostic = ExecutionEvidenceService
             .prepare_runtime_event(
@@ -1417,7 +1575,27 @@ mod tests {
             .unwrap()
             .expect("a Built-in Tool start must be durable before execution");
         assert!(started_tool.inserted);
-        assert_eq!(started_tool.sequence, 5);
+        assert_eq!(started_tool.sequence, 6);
+
+        let interrupted_started = ExecutionEvidenceService
+            .record_runtime_event(
+                &mut database,
+                &blob_store,
+                &run_id,
+                execution_epoch,
+                "activity.started",
+                &json!({
+                    "item": {
+                        "id": "command-interrupted",
+                        "type": "commandExecution",
+                        "command": "long-running-command",
+                        "status": "inProgress",
+                    }
+                }),
+            )
+            .unwrap()
+            .unwrap();
+        assert_eq!(interrupted_started.sequence, 7);
 
         let materialized = ContextService
             .materialize(
@@ -1463,6 +1641,35 @@ mod tests {
                 },
             )
             .unwrap();
+        assert!(
+            !ExecutionEvidenceService
+                .command_output_delta_admission_open(&database, &run_id, execution_epoch)
+                .unwrap()
+        );
+        let interrupted = ExecutionEvidenceService
+            .record_interrupted_runtime_activity(
+                &mut database,
+                &blob_store,
+                &run_id,
+                execution_epoch,
+                &json!({
+                    "reasonCode": "runtime_interrupted",
+                    "item": {
+                        "id": "command-interrupted",
+                        "type": "commandExecution",
+                        "command": "long-running-command",
+                        "status": "interrupted",
+                        "aggregatedOutput": null,
+                    }
+                }),
+            )
+            .unwrap()
+            .expect("an already-started Activity must receive one interruption terminal");
+        assert_eq!(interrupted.sequence, 8);
+        assert_eq!(interrupted.payload["reasonCode"], "runtime_interrupted");
+        let interrupted_canonical = interrupted.canonical.as_ref().unwrap();
+        assert_eq!(interrupted_canonical.phase, "terminal");
+        assert_eq!(interrupted_canonical.outcome, "unsettled");
         let late = ExecutionEvidenceService
             .record_runtime_event(
                 &mut database,
@@ -1518,7 +1725,7 @@ mod tests {
             .unwrap()
             .expect("terminal Team Tool result must survive the Turn fence");
         assert!(failed.inserted);
-        assert_eq!(failed.sequence, 6);
+        assert_eq!(failed.sequence, 9);
         assert_eq!(
             failed.payload["errorCode"],
             "team_tool.execution_budget_exhausted"
@@ -1550,7 +1757,7 @@ mod tests {
             .unwrap()
             .expect("the first replay observation must remain visible");
         assert!(replay.inserted);
-        assert_eq!(replay.sequence, 7);
+        assert_eq!(replay.sequence, 10);
         assert_eq!(replay.payload["idempotentReplay"], true);
 
         let replay_duplicate = ExecutionEvidenceService
@@ -1565,7 +1772,7 @@ mod tests {
             .unwrap();
         assert!(replay_duplicate.inserted);
         assert_ne!(replay_duplicate.id, replay.id);
-        assert_eq!(replay_duplicate.sequence, 8);
+        assert_eq!(replay_duplicate.sequence, 11);
 
         drop(database);
         std::fs::remove_dir_all(directory).unwrap();

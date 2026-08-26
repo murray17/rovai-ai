@@ -1125,6 +1125,7 @@ export interface AgentRunView {
     | 'planned_shutdown_completed'
     | 'planned_shutdown_failed'
     | 'planned_shutdown_cancelled'
+    | 'runtime_interrupted'
     | null
   failure: RuntimeFailureView | null
   runtimeModel: { modelId: string | null } | null

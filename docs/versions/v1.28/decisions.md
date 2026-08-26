@@ -2,7 +2,7 @@
 document_type: version-decisions
 version: v1.28
 lifecycle: current
-last_updated: 2026-08-25
+last_updated: 2026-08-26
 ---
 
 # v1.28 决策记录
@@ -415,3 +415,55 @@ interpreter、PATH winner 或 reported version 变化都会触发新 Probe/Host 
 - 使用 `cmd.exe /c` 字符串拼接：允许 metacharacter 注入、AutoRun 改义与不可验证 argv；
 - 对 npm shim 执行后观察 child 来猜 target：执行了未验证脚本，也可能把任意 executable 误绑定为 Codex；
 - 显式路径失败后继续 PATH：把用户选择静默替换成另一安装，破坏 fail-closed 语义。
+
+<a id="v1-28-d12"></a>
+## V1.28-D12：Command output delta 改为 fenced transient，terminal aggregate 是唯一输出权威
+
+### 背景
+
+Codex app-server 会把命令 stdout/stderr 拆成大量 `command.output.delta`。旧路径把每片都写入
+`agent_run_execution_evidence`，长命令可产生数万至十万行，而当前 Renderer 实际不消费这些 delta 展示实时输出；
+最终 `item/completed` 已携带完整 `command`、`status`、`exitCode` 和 `aggregatedOutput`。继续逐片段持久化既不增加
+用户可见事实，又放大数据库、恢复与 Renderer 投影成本。
+
+对全部 13 个 Adapter 的归一化路径逐项核验：只有 `codex-cli` 产生这种 output delta；十个 ACP Adapter 的 terminal
+`tool_call_update`、Claude Code 的 Bash `tool_result` 与 Antigravity 的 terminal tool step 都已经生成包含完整公开
+output 的单一 `runtime.action`。当前没有 Adapter 需要额外 accumulator 或 spool。
+
+### 决定
+
+只对未来新产生的数据采用 clean break。既有历史 Evidence、Managed Blob 与 Canonical Activity 不迁移、不删除、
+不改写、不重建，旧 Camp 的历史性能问题留待独立治理，历史 delta 继续可读。
+
+Codex `command.output.delta` 仍须通过现有 Host instance、AgentRun、execution epoch、Native Thread/Turn、delivery、
+active route 与 lease/Run-state fence。route 与 Run-state 准入在 transient path 的唯一临界读取中完成；任何 terminal、
+cancel request、Host unbind/exit、Turn replacement、epoch supersede 或 route/lease fence 关闭后到达的片段都直接拒绝。
+通过 fence 的片段同样直接丢弃：不写 Execution Evidence、不更新 Canonical Activity、不创建 Managed Blob，也不进入
+Renderer `liveRuntimeEvents`。该路径没有接受后的可变输出状态，因此 fence 检查之后不存在可被迟到片段更新的窗口。
+
+Codex `item/completed.commandExecution.aggregatedOutput` 是最终 Command 输出的唯一权威，terminal semantic record 继续
+保留 `command`、`status` 与 `exitCode`；超过现有阈值时继续写 Managed Blob，并只在用户展开精确 Tool 时惰性读取。
+十个 ACP Adapter、Claude Code 与 Antigravity 保持现有 terminal semantic output，不新增 spool。未来若某个 Adapter
+无法提供完整 terminal aggregate，只允许 Adapter-owned 临时 spool，必须有硬上限、在 terminal 生成完整或明确
+truncated 的单一输出，并在 Run 结束后删除；Core 与 Renderer 不得无限拼接 String 或恢复逐 delta 持久化。
+
+Runtime 权威报告 interruption 时，尚未结算的已 started Activity 写入
+`phase=terminal / outcome=unsettled / reasonCode=runtime_interrupted`，Renderer 显示 stopped/interrupted。进程失联或
+Host 退出若仍有恢复可能，继续走 recovery；只有 Runtime 权威取消终态才能记录为 `cancelled`。
+
+PR #63 的每个 Tool identity、chronology、状态、结果与 Renderer-only 连续分组不变；terminal 大输出仍绑定精确 Tool
+并按既有第二级 disclosure 惰性读取。
+
+### 后果
+
+一个产生 100,000 个 output delta 的 Command 对未来数据库与 Renderer live state 都新增 0 个 delta 项，只留下单一
+terminal semantic result。数据库写放大和 React state/排序风险不再随 stdout/stderr frame 数增长；大输出容量仍由
+Managed Blob 合同承担。历史数据量不会因本决定缩小。
+
+### 被拒绝方案
+
+- 把 delta 继续写 Evidence，只在读取时合并：仍保留数据库写放大和历史恢复成本；
+- 把每个 delta 改放 Renderer state：把膨胀从 SQLite 转移到 React 内存、排序与 progress rebuild；
+- 在 Core 中无限拼接完整 output：把协议流量变成无界常驻内存；
+- 借本次修改清理或重写历史：扩大故障面并改变既有 Evidence/Blob 审计事实；
+- 将 interruption 写成 cancelled：把连续性未知伪装成 Runtime 权威取消。

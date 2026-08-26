@@ -501,9 +501,13 @@ export function attachmentDropIsBlocked({
 export function agentRunTerminalNote(
   run: Pick<AgentRunView, 'terminalReasonCode'>
 ): string | null {
-  return run.terminalReasonCode === 'planned_shutdown_cancelled'
-    ? '因 Rovai 计划关闭，执行引擎已确认取消本次执行。'
-    : null
+  if (run.terminalReasonCode === 'planned_shutdown_cancelled') {
+    return '因 Rovai 计划关闭，执行引擎已确认取消本次执行。'
+  }
+  if (run.terminalReasonCode === 'runtime_interrupted') {
+    return '执行连续性已中断，最终结果无法确认；本次执行未被记为已取消。'
+  }
+  return null
 }
 
 export function agentRunShowsUnsettledWarning(

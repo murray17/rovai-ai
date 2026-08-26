@@ -3777,8 +3777,43 @@ describe('task event projections', () => {
     expect(agentRunTerminalNote({
       terminalReasonCode: 'planned_shutdown_cancelled'
     })).toBe('因 Rovai 计划关闭，执行引擎已确认取消本次执行。')
+    expect(agentRunPresentation({
+      status: 'failed',
+      waitReason: null,
+      terminalReasonCode: 'runtime_interrupted'
+    })).toEqual({
+      label: '执行已中断',
+      tone: 'neutral'
+    })
+    expect(agentRunStateTag({
+      status: 'failed',
+      waitReason: null,
+      terminalReasonCode: 'runtime_interrupted'
+    })).toEqual({
+      tag: 'INTERRUPTED',
+      tone: 'neutral'
+    })
+    expect(agentRunTerminalNote({
+      terminalReasonCode: 'runtime_interrupted'
+    })).toBe('执行连续性已中断，最终结果无法确认；本次执行未被记为已取消。')
     expect(agentRunTerminalNote({ terminalReasonCode: null })).toBeNull()
     expect(formatByteSize(4_096)).toBe('4.0 KB')
+  })
+
+  it('drops 100,000 transient Command output frames before Renderer state', () => {
+    let accepted = 0
+    for (let index = 0; index < 100_000; index += 1) {
+      const event = liveRuntimeEventFromCore({
+        method: 'command.output.delta',
+        params: {
+          agentRunId: 'run-output-heavy',
+          executionEpoch: 3,
+          payload: { itemId: 'command-1', delta: `frame-${index}` }
+        }
+      }, `transient-${index}`)
+      if (event !== null) accepted += 1
+    }
+    expect(accepted).toBe(0)
   })
 
   it('omits live reasoning summaries while projecting narration, plans and execution steps', () => {
@@ -4076,6 +4111,35 @@ describe('task event projections', () => {
     expect(activityStatusForAgentRun('running', 'cancelled')).toBe('stopped')
     expect(activityStatusForAgentRun('completed', 'cancelled')).toBe('completed')
     expect(activityStatusForAgentRun('running', 'failed')).toBe('running')
+  })
+
+  it('projects an interrupted terminal as stopped without claiming cancellation', () => {
+    const canonical = canonicalActivity('command-interrupted', {
+      activityDomain: 'shell', phase: 'terminal', outcome: 'unsettled'
+    })
+    const progress = buildLiveExecutionProgress([{
+      id: 'command-interrupted-terminal',
+      agentRunId: 'run-interrupted',
+      eventType: 'activity.completed',
+      payload: {
+        reasonCode: 'runtime_interrupted',
+        item: {
+          id: 'command-interrupted',
+          type: 'commandExecution',
+          status: 'interrupted',
+          command: 'long-running-command',
+          aggregatedOutput: null
+        }
+      },
+      canonical,
+      createdAt: '2026-08-18T03:00:00Z'
+    }], 'run-interrupted')
+
+    expect(canonical.outcome).toBe('unsettled')
+    expect(progress.items[0]).toMatchObject({
+      kind: 'tool',
+      step: { status: 'stopped' }
+    })
   })
 
   it('shows a failed Claude run public failure even when no execution evidence was recorded', () => {

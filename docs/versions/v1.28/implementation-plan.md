@@ -3,7 +3,7 @@ document_type: implementation-plan
 version: v1.28
 authority: implementation-and-acceptance-status
 status: in_progress
-last_updated: 2026-08-25
+last_updated: 2026-08-26
 ---
 
 # v1.28 实施计划
@@ -65,6 +65,18 @@ Checklist 仍拥有完整通用步骤，本页只记录本版本的具体状态�
   resolved locator evidence 持久化与 snapshot/Host fencing、PATH 传播、Job cleanup 与 Windows 回归；`.ps1`
   保持关闭；
 - [x] 运行 Impeccable detector，整理 worktree 交接，并通过 PR 交付 `main`。
+
+## Command output 持久化优化
+
+- [x] 逐项核验 13 个 Adapter：仅 Codex 产生 `command.output.delta`；十个 ACP Adapter、Claude Code 与
+  Antigravity 都已有完整 terminal semantic output，当前无需 spool；
+- [x] 对未来 Codex delta 保留 Host/Run/epoch/Thread/Turn/route/Run-state fence 后直接丢弃，停止 Evidence、
+  Canonical、Managed Blob 与 Renderer live-state 写入；历史 Evidence/Blob 保持原样；
+- [x] 保留 terminal Command 的 command/status/exitCode/aggregatedOutput，大输出继续进入精确 Tool 的 Managed Blob；
+- [x] 将 Runtime interruption 投影为 terminal/unsettled + `runtime_interrupted`，Renderer 显示
+  stopped/interrupted，不伪造 cancelled；
+- [x] 覆盖 100,000 delta 零 DB/Renderer 项、cancel/terminal/Host/epoch/route fence、terminal aggregate/blob、
+  interruption 与 PR #63 Tool chronology/grouping/lazy disclosure 回归。
 
 ## 验收原则
 

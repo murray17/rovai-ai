@@ -11788,6 +11788,36 @@ fn codex_delta_batch_identity(incoming: &CodexIncoming) -> Option<(&str, &str, i
     ))
 }
 
+fn is_codex_command_output_delta(message: &Value) -> bool {
+    message
+        .get("method")
+        .and_then(Value::as_str)
+        .is_some_and(|method| {
+            matches!(
+                method,
+                "item/commandExecution/outputDelta" | "command/exec/outputDelta"
+            )
+        })
+}
+
+fn is_codex_command_output_delta_batch(messages: &[Value]) -> bool {
+    !messages.is_empty() && messages.iter().all(is_codex_command_output_delta)
+}
+
+fn codex_command_output_delta_matches_route(
+    message: &Value,
+    native_thread_id: &str,
+    native_turn_id: &str,
+) -> bool {
+    message.get("method").and_then(Value::as_str) == Some("item/commandExecution/outputDelta")
+        && message.pointer("/params/threadId").and_then(Value::as_str) == Some(native_thread_id)
+        && message.pointer("/params/turnId").and_then(Value::as_str) == Some(native_turn_id)
+        && message
+            .pointer("/params/itemId")
+            .and_then(Value::as_str)
+            .is_some_and(|item_id| !item_id.trim().is_empty())
+}
+
 fn acp_delta_batch_identity(
     incoming: &AcpIncoming,
 ) -> Option<(AdapterKind, &str, &str, i64, &str, &str, &str)> {
@@ -12848,13 +12878,14 @@ async fn process_agent_run_acp_message(
                 eprintln!(
                     "failed to persist Runtime Evidence for AgentRun {agent_run_id}: {error:#}"
                 );
-                if ExecutionEvidenceService::is_runtime_evidence_event(event_type) {
+                if ExecutionEvidenceService::is_durable_runtime_evidence_event(event_type) {
                     return;
                 }
                 None
             }
         };
-    if ExecutionEvidenceService::is_runtime_evidence_event(event_type) && evidence.is_none() {
+    if ExecutionEvidenceService::is_durable_runtime_evidence_event(event_type) && evidence.is_none()
+    {
         return;
     }
     let evidence_id = evidence.as_ref().map(|evidence| evidence.id.as_str());
@@ -13241,7 +13272,7 @@ async fn persist_runtime_evidence(
     event_type: &str,
     payload: &Value,
 ) -> Result<Option<AgentRunExecutionEvidence>> {
-    if !ExecutionEvidenceService::is_runtime_evidence_event(event_type) {
+    if !ExecutionEvidenceService::is_durable_runtime_evidence_event(event_type) {
         return Ok(None);
     }
     let mut database = core.database.lock().await;
@@ -14202,6 +14233,37 @@ async fn process_runtime_usage_flusher(core: Arc<Core>, mut shutdown: oneshot::R
     }
 }
 
+async fn codex_command_output_delta_batch_admission_open(
+    core: &Core,
+    host_instance_id: &str,
+    agent_run_id: &str,
+    execution_epoch: i64,
+    messages: &[Value],
+) -> Result<bool> {
+    let Some(runtime) = core
+        .codex_cli
+        .get_agent_run_on_host(host_instance_id, agent_run_id, execution_epoch)
+        .await
+    else {
+        return Ok(false);
+    };
+    let Some((native_thread_id, native_turn_id)) = runtime.active_command_output_route().await
+    else {
+        return Ok(false);
+    };
+    if !messages.iter().all(|message| {
+        codex_command_output_delta_matches_route(message, &native_thread_id, &native_turn_id)
+    }) {
+        return Ok(false);
+    }
+    let database = core.database.lock().await;
+    ExecutionEvidenceService.command_output_delta_admission_open(
+        &database,
+        agent_run_id,
+        execution_epoch,
+    )
+}
+
 async fn process_agent_run_codex_delta_batch(
     core: &Arc<Core>,
     output: &mpsc::UnboundedSender<String>,
@@ -14211,6 +14273,27 @@ async fn process_agent_run_codex_delta_batch(
     messages: Vec<Value>,
     runtime_route_permit: &mut rovai_core::planned_shutdown::RuntimeRoutePermit,
 ) {
+    if is_codex_command_output_delta_batch(&messages) {
+        match codex_command_output_delta_batch_admission_open(
+            core,
+            host_instance_id,
+            agent_run_id,
+            execution_epoch,
+            &messages,
+        )
+        .await
+        {
+            Ok(true) => {}
+            Ok(false) => return,
+            Err(error) => {
+                eprintln!(
+                    "failed to apply the transient Command output fence for AgentRun {agent_run_id}: {error:#}"
+                );
+                return;
+            }
+        }
+        return;
+    }
     let prepared = match prepare_codex_delta_batch(&messages) {
         Ok(Some(prepared)) => prepared,
         Ok(None) => {
@@ -14309,6 +14392,60 @@ async fn process_agent_run_codex_delta_batch(
     }
 }
 
+async fn persist_interrupted_codex_activities(
+    core: &Core,
+    output: &mpsc::UnboundedSender<String>,
+    runtime: &CodexRuntime,
+    agent_run_id: &str,
+    execution_epoch: i64,
+) -> Result<usize> {
+    let mut inserted = 0_usize;
+    for mut item in runtime.open_action_items().await {
+        let Some(item_fields) = item.as_object_mut() else {
+            continue;
+        };
+        item_fields.insert(
+            "status".to_string(),
+            Value::String("interrupted".to_string()),
+        );
+        if item_fields.get("type").and_then(Value::as_str) == Some("commandExecution") {
+            item_fields.insert("aggregatedOutput".to_string(), Value::Null);
+        }
+        let payload = json!({
+            "reasonCode": "runtime_interrupted",
+            "item": item,
+        });
+        let recorded = {
+            let mut database = core.database.lock().await;
+            ExecutionEvidenceService.record_interrupted_runtime_activity(
+                &mut database,
+                &ManagedBlobStore::new(&core.data_dir),
+                agent_run_id,
+                execution_epoch,
+                &payload,
+            )?
+        };
+        let Some(recorded) = recorded else {
+            continue;
+        };
+        inserted += usize::from(recorded.inserted);
+        let evidence = recorded.into_evidence();
+        emit(
+            output,
+            &evidence.event_type,
+            json!({
+                "agentRunId": agent_run_id,
+                "executionEpoch": execution_epoch,
+                "nativeMethod": "turn/completed",
+                "evidenceId": evidence.id,
+                "payload": evidence.payload,
+                "canonical": evidence.canonical,
+            }),
+        );
+    }
+    Ok(inserted)
+}
+
 async fn process_agent_run_codex_message(
     core: &Arc<Core>,
     output: &mpsc::UnboundedSender<String>,
@@ -14380,11 +14517,32 @@ async fn process_agent_run_codex_message(
     {
         eprintln!("failed to persist Codex Usage for AgentRun {agent_run_id}: {error:#}");
     }
-    runtime.observe_agent_message(&method, &params).await;
     if method == "thread/tokenUsage/updated" {
         return;
     }
     let (event_type, payload) = codex::normalize_event(&method, &params);
+    if ExecutionEvidenceService::is_transient_command_output_event(event_type) {
+        match codex_command_output_delta_batch_admission_open(
+            core,
+            host_instance_id,
+            agent_run_id,
+            execution_epoch,
+            std::slice::from_ref(&message),
+        )
+        .await
+        {
+            Ok(true) => {}
+            Ok(false) => return,
+            Err(error) => {
+                eprintln!(
+                    "failed to apply the transient Command output fence for AgentRun {agent_run_id}: {error:#}"
+                );
+                return;
+            }
+        }
+        return;
+    }
+    runtime.observe_agent_message(&method, &params).await;
     let evidence =
         match persist_runtime_evidence(core, agent_run_id, execution_epoch, event_type, &payload)
             .await
@@ -14394,13 +14552,14 @@ async fn process_agent_run_codex_message(
                 eprintln!(
                     "failed to persist Runtime Evidence for AgentRun {agent_run_id}: {error:#}"
                 );
-                if ExecutionEvidenceService::is_runtime_evidence_event(event_type) {
+                if ExecutionEvidenceService::is_durable_runtime_evidence_event(event_type) {
                     return;
                 }
                 None
             }
         };
-    if ExecutionEvidenceService::is_runtime_evidence_event(event_type) && evidence.is_none() {
+    if ExecutionEvidenceService::is_durable_runtime_evidence_event(event_type) && evidence.is_none()
+    {
         return;
     }
     let evidence_id = evidence.as_ref().map(|evidence| evidence.id.as_str());
@@ -14506,6 +14665,20 @@ async fn process_agent_run_codex_message(
         eprintln!("ignored fenced native Turn completion for AgentRun {agent_run_id}");
         return;
     }
+    if completed.status == "interrupted"
+        && let Err(error) = persist_interrupted_codex_activities(
+            core,
+            output,
+            &runtime,
+            agent_run_id,
+            execution_epoch,
+        )
+        .await
+    {
+        eprintln!(
+            "failed to persist interrupted Runtime Activities for AgentRun {agent_run_id}: {error:#}"
+        );
+    }
     if let Err(error) =
         flush_runtime_monitoring_run(core, agent_run_id, execution_epoch, "terminal_flush").await
     {
@@ -14520,8 +14693,10 @@ async fn process_agent_run_codex_message(
     };
     let planned_outcome = if completed.status == "completed" && final_agent_message.is_some() {
         RuntimeTerminalOutcome::Succeeded
-    } else if matches!(completed.status.as_str(), "cancelled" | "interrupted") {
+    } else if completed.status == "cancelled" {
         RuntimeTerminalOutcome::Cancelled
+    } else if completed.status == "interrupted" {
+        RuntimeTerminalOutcome::Interrupted
     } else {
         RuntimeTerminalOutcome::Failed
     };
@@ -14560,10 +14735,10 @@ async fn process_agent_run_codex_message(
                 .flatten()
                 .map(|execution| execution.workspace.execution_root)
         };
-        let error_code = if completed.status == "completed" {
-            "runtime_missing_final_output".to_string()
-        } else {
-            format!("runtime_turn_{}", completed.status)
+        let error_code = match completed.status.as_str() {
+            "completed" => "runtime_missing_final_output".to_string(),
+            "interrupted" => "runtime_interrupted".to_string(),
+            status => format!("runtime_turn_{status}"),
         };
         let error_detail = Some(match &completed.error {
             Some(error) => format!(
@@ -14718,7 +14893,11 @@ async fn process_agent_run_codex_message(
                         agent_run_id: agent_run_id.to_string(),
                         expected_version: execution.version,
                         execution_epoch,
-                        error_code: format!("runtime_turn_{}", completed.status),
+                        error_code: if completed.status == "interrupted" {
+                            "runtime_interrupted".to_string()
+                        } else {
+                            format!("runtime_turn_{}", completed.status)
+                        },
                         error_detail: Some(match &completed.error {
                             Some(error) => format!(
                                 "Codex Native Turn {} ended as {}: {}",
@@ -17079,6 +17258,73 @@ while IFS= read -r _ignored; do :; done
         }
         let codex_terminal = codex_message("codex-host", "run-1", 2, "item/completed");
         assert!(codex_delta_batch_identity(&codex_terminal).is_none());
+        let command_output_delta = CodexIncoming::Message {
+            host_instance_id: "codex-host".to_string(),
+            agent_run_id: "run-1".to_string(),
+            execution_epoch: 2,
+            message: json!({
+                "method": "item/commandExecution/outputDelta",
+                "params": {
+                    "threadId": "thread-1",
+                    "turnId": "turn-1",
+                    "itemId": "command-1",
+                    "delta": "line one\n",
+                }
+            }),
+        };
+        assert_eq!(
+            codex_delta_batch_identity(&command_output_delta),
+            Some(("codex-host", "run-1", 2))
+        );
+        let CodexIncoming::Message {
+            message: command_output_message,
+            ..
+        } = command_output_delta
+        else {
+            unreachable!()
+        };
+        assert!(is_codex_command_output_delta_batch(std::slice::from_ref(
+            &command_output_message
+        )));
+        assert!(codex_command_output_delta_matches_route(
+            &command_output_message,
+            "thread-1",
+            "turn-1"
+        ));
+        assert!(!codex_command_output_delta_matches_route(
+            &command_output_message,
+            "thread-1",
+            "turn-old"
+        ));
+        assert!(!codex_command_output_delta_matches_route(
+            &command_output_message,
+            "thread-old",
+            "turn-1"
+        ));
+        let legacy_output_delta = json!({
+            "method": "command/exec/outputDelta",
+            "params": {"itemId": "command-1", "delta": "legacy"}
+        });
+        assert!(is_codex_command_output_delta(&legacy_output_delta));
+        assert!(!codex_command_output_delta_matches_route(
+            &legacy_output_delta,
+            "thread-1",
+            "turn-1"
+        ));
+        let missing_item_id = json!({
+            "method": "item/commandExecution/outputDelta",
+            "params": {"threadId": "thread-1", "turnId": "turn-1", "delta": "late"}
+        });
+        assert!(!codex_command_output_delta_matches_route(
+            &missing_item_id,
+            "thread-1",
+            "turn-1"
+        ));
+        assert!(
+            prepare_codex_delta_batch(std::slice::from_ref(&command_output_message))
+                .unwrap()
+                .is_none()
+        );
 
         let acp_delta = acp_message(
             (
@@ -18286,6 +18532,42 @@ while IFS= read -r _ignored; do :; done
             assert_eq!(payload["output"], expected_output, "{adapter_kind}");
             assert!(!serialized.contains(secret), "{adapter_kind}");
             assert!(payload["rawOutputDigest"].is_string(), "{adapter_kind}");
+        }
+    }
+
+    #[test]
+    fn every_acp_adapter_uses_terminal_runtime_action_output_not_command_delta() {
+        let acp_adapters = AdapterKind::ALL
+            .into_iter()
+            .filter(|adapter_kind| adapter_kind.uses_acp())
+            .collect::<Vec<_>>();
+        assert_eq!(acp_adapters.len(), 10);
+        for adapter_kind in acp_adapters {
+            let expected_output = format!("{} terminal output", adapter_kind.as_str());
+            let (event_type, payload) = normalize_acp_event(
+                adapter_kind,
+                "session/update",
+                &json!({
+                    "update": {
+                        "sessionUpdate": "tool_call_update",
+                        "toolCallId": format!("{}-command", adapter_kind.as_str()),
+                        "status": "completed",
+                        "kind": "execute",
+                        "content": [{"type": "text", "text": expected_output}],
+                    }
+                }),
+            );
+            assert_eq!(event_type, "runtime.action", "{adapter_kind:?}");
+            assert_eq!(payload["status"], "completed", "{adapter_kind:?}");
+            assert_eq!(payload["output"], expected_output, "{adapter_kind:?}");
+            assert!(
+                ExecutionEvidenceService::is_durable_runtime_evidence_event(event_type),
+                "{adapter_kind:?}"
+            );
+            assert!(
+                !ExecutionEvidenceService::is_transient_command_output_event(event_type),
+                "{adapter_kind:?}"
+            );
         }
     }
 
