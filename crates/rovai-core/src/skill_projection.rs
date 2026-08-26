@@ -3567,7 +3567,7 @@ mod slow_tests {
     }
 
     #[test]
-    fn removed_root_waits_for_its_active_run_then_cleans_once() {
+    fn removed_root_waits_for_its_active_run_cleans_once_and_restores_without_resolving() {
         let root = temporary_directory("rovai-projection-removed-root");
         let canonical_root = root.canonicalize().unwrap();
         let data = temporary_directory("rovai-projection-db");
@@ -3619,6 +3619,13 @@ mod slow_tests {
             )
             .unwrap_err();
         assert!(format!("{error:#}").contains("access is suspended"));
+
+        let restoration = SkillProjectionReconciler
+            .restore_execution_root(&mut database, canonical_root.to_string_lossy().as_ref())
+            .unwrap();
+        assert_eq!(restoration.access_state, "active");
+        assert!(!restoration.cleanup_pending);
+        assert!(!canonical_root.exists());
     }
 
     #[test]

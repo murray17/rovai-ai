@@ -19,13 +19,13 @@ works.
 | Path | SHA-256 | Role | Source classification | Source | Binary |
 |---|---|---|---|---|---|
 | `apps/desktop/src/renderer/src/assets/characters/luoke/icon-192.png` | `2680338ed6d3557b6ab543b97460c4620ecffe0d3a801bd34c3c3c06a6eefe9a` | character avatar | `AI_GENERATED_FIRST_PARTY` | approved | approved |
-| `apps/desktop/src/renderer/src/assets/characters/luoke/source.png` | `9bf86dcef1bf9a9c743d390b783c38a024f925e3faa98e745df8ba1a4338d1dc` | character portrait | `AI_GENERATED_FIRST_PARTY` | approved | approved |
+| `apps/desktop/src/renderer/src/assets/characters/luoke/source.avif` | `76da2efcd588b17589955391962024e47d2667e8e84e4744acef11f89d5f0626` | character portrait | `AI_GENERATED_FIRST_PARTY` | approved | approved |
 | `apps/desktop/src/renderer/src/assets/characters/mianzhi/icon-192.png` | `9fbd4eb0e7356b4c6ddf2d86a676178476b93747a4687a6e89d06684014ed142` | character avatar | `AI_GENERATED_FIRST_PARTY` | approved | approved |
-| `apps/desktop/src/renderer/src/assets/characters/mianzhi/source.png` | `a4a88ea58ba4ac058032de68b94df28d2792367f0c473b27147b6a3084a463be` | character portrait | `AI_GENERATED_FIRST_PARTY` | approved | approved |
+| `apps/desktop/src/renderer/src/assets/characters/mianzhi/source.avif` | `dda274619f2efe5882dbf24566837bea0b87067b1bfcc147bf3e0ed63c121649` | character portrait | `AI_GENERATED_FIRST_PARTY` | approved | approved |
 | `apps/desktop/src/renderer/src/assets/characters/muwa/icon-192.png` | `2f40a6ee8f0a0d1cfc11d8010fc9d990d9dd2dfbb14ea27bbdf97e2c50619a4d` | character avatar | `AI_GENERATED_FIRST_PARTY` | approved | approved |
-| `apps/desktop/src/renderer/src/assets/characters/muwa/source.png` | `3bfdb617fecd666adb97ec40b77e7365b0db380376f1f2fef5c672c56859da0a` | character portrait | `AI_GENERATED_FIRST_PARTY` | approved | approved |
+| `apps/desktop/src/renderer/src/assets/characters/muwa/source.avif` | `217b1a6e6333d55ddb5b884da74d77cb794416553a3225637e321ed8594b1cc5` | character portrait | `AI_GENERATED_FIRST_PARTY` | approved | approved |
 | `apps/desktop/src/renderer/src/assets/characters/qilu/icon-192.png` | `9abc0b6b53cef994b32e8c14c02fa8cad3be5325168d1f6907c47b327a024438` | character avatar | `AI_GENERATED_FIRST_PARTY` | approved | approved |
-| `apps/desktop/src/renderer/src/assets/characters/qilu/source.png` | `7a568b00debc1475d943ee5231897648e6ac67c5a78eb523d17ca8e92e79dcbf` | character portrait | `AI_GENERATED_FIRST_PARTY` | approved | approved |
+| `apps/desktop/src/renderer/src/assets/characters/qilu/source.avif` | `73b5cabd1b68af9fef692c6c80a3e9773afd62dc7de2af853bbb3fb7dab9c369` | character portrait | `AI_GENERATED_FIRST_PARTY` | approved | approved |
 | `apps/desktop/src/renderer/src/assets/world-map/harbor-city-2k.webp` | `a2f8bdd324331d46a31ba1f2771defe4fda22a131a15654a30915e62b8107d94` | world map | `AI_GENERATED_FIRST_PARTY` | approved | approved |
 | `build/icon.png` | `b0427759b487324dfb6ccb2ad0ee18a9dfc0666f23a326db72e800b24a5a003b` | application icon | `AI_GENERATED_FIRST_PARTY` | approved | approved |
 | `build/icon.svg` | `58a0b8ca29b4d04bf44f7358be1485d8ea0efd4757b9db3016a566a53e983d50` | application icon | `AI_GENERATED_FIRST_PARTY` | approved | approved |
@@ -43,9 +43,9 @@ works.
 | `docs/prototypes/execution-console-command-status/preview-right.png` | `3c4527d030cd81944970ab6205a7ad4ef823dad250e25b5f50a9ed4798eaa954` | prototype screenshot | `FIRST_PARTY_PROJECT_SCREENSHOT` | approved | not included |
 | `docs/prototypes/mention-popover/assets/role-card-fox-4x5.png` | `9bf86dcef1bf9a9c743d390b783c38a024f925e3faa98e745df8ba1a4338d1dc` | duplicate prototype character illustration | `AI_GENERATED_FIRST_PARTY` | approved | not included |
 
-The fox prototype asset is a byte-identical duplicate of the Luoke packaged
-portrait. The manifest intentionally records both tracked paths and permits
-duplicate content hashes while rejecting duplicate paths.
+The fox prototype asset preserves the full-resolution source used to derive
+the optimized Luoke packaged portrait. The manifest records both tracked
+artifacts independently.
 
 ## Embedded prototype artwork
 

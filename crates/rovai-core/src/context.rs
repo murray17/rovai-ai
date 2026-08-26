@@ -4008,6 +4008,7 @@ fn project_shared_message<R: ContextReadConnection>(
         SELECT id, display_name, media_type, content_digest
         FROM message_attachment
         WHERE camp_message_id = ?1
+          AND runtime_projection_state = 'available'
         ORDER BY created_at, id
         "#,
     )?;
@@ -4916,9 +4917,10 @@ fn load_current_attachment_refs<R: ContextReadConnection>(
         r#"
         SELECT id, camp_id, content_digest
         FROM message_attachment
-        WHERE (
+        WHERE ((
             ?1 IS NOT NULL AND camp_message_id = ?1
-        ) OR (?2 IS NOT NULL AND conversation_message_id = ?2)
+        ) OR (?2 IS NOT NULL AND conversation_message_id = ?2))
+        AND runtime_projection_state = 'available'
         ORDER BY position, id
         "#,
     )?;
@@ -6898,6 +6900,7 @@ mod slow_tests {
                             "codex-cli:app-server-v2".to_string(),
                         ),
                     },
+                    entrypoint_locator_identity: None,
                 },
             )
             .unwrap();
@@ -7983,7 +7986,7 @@ mod slow_tests {
                 ],
             )
             .unwrap();
-        crate::db::downgrade_current_schema_to_v110_source_for_test(fixture.database.connection());
+        crate::db::downgrade_current_schema_to_v111_source_for_test(fixture.database.connection());
         fixture
             .database
             .connection()
@@ -8000,7 +8003,7 @@ mod slow_tests {
                 DELETE FROM schema_migration WHERE version = 70;
                 DELETE FROM schema_migration WHERE version = 71;
                 INSERT OR IGNORE INTO schema_migration(version, applied_at)
-                VALUES (110, datetime('now'));
+                VALUES (111, datetime('now'));
                 PRAGMA foreign_keys = ON;
                 "#,
             )
@@ -9863,6 +9866,57 @@ mod slow_tests {
         assert!(evidence.to_string().contains(&attachment_content_digest));
         assert!(evidence.to_string().contains(&camp_message_id));
         assert_eq!(canonical_json_digest(&evidence).unwrap(), evidence_digest);
+
+        fixture
+            .database
+            .connection()
+            .execute(
+                r#"
+                UPDATE message_attachment
+                SET runtime_projection_state = 'recovery_required'
+                WHERE id = ?1
+                "#,
+                [&attachment_id],
+            )
+            .unwrap();
+        let (degraded_run_id, degraded_epoch) = complete_run_and_start_followup(
+            &mut fixture,
+            &followup_run_id,
+            "FOLLOWUP_AFTER_ATTACHMENT_INTEGRITY_FAILURE",
+        );
+        let ContextMaterialization::Ready(degraded) = service
+            .materialize(
+                &mut fixture.database,
+                &store,
+                &MaterializeContextRequest {
+                    agent_run_id: &degraded_run_id,
+                    execution_epoch: degraded_epoch,
+                    charter_delivery_mode: CharterDeliveryMode::NativeAppend,
+                    max_payload_bytes: DEFAULT_MAX_CONTEXT_PAYLOAD_BYTES,
+                },
+            )
+            .unwrap()
+        else {
+            panic!("attachment-local integrity degradation must not block Context");
+        };
+        assert!(
+            !degraded.rendered_payload.contains("requirements.txt"),
+            "an unavailable attachment must not retain a model-visible path"
+        );
+        assert!(!degraded.rendered_payload.contains(&stable_path));
+        let degraded_attachment_refs: String = fixture
+            .database
+            .connection()
+            .query_row(
+                "SELECT attachment_refs_json FROM context_manifest WHERE id = ?1",
+                [&degraded.manifest_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            serde_json::from_str::<Value>(&degraded_attachment_refs).unwrap(),
+            json!([])
+        );
         CampAttachmentStore::new(&fixture.directory)
             .remove_camp(&fixture.camp_id)
             .unwrap();

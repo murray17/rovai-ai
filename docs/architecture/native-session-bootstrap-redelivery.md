@@ -1,7 +1,7 @@
 ---
 document_type: architecture
 authority: native-session-bootstrap-redelivery
-last_updated: 2026-08-24
+last_updated: 2026-08-25
 ---
 
 # Native Session Bootstrap Redelivery
@@ -71,7 +71,7 @@ Bootstrap baseline；同一 epoch 重启幂等。尚未接受输入的新 Bindin
 | OpenCode | `session.compacted` / `completed` | 隔离 native Plugin event；prompt 仍走 ACP | ACP 主消息流不转发 native event，完成事件本身可靠 |
 | Kiro | `_kiro.dev/compaction/status` 且 `params.status.type=completed` | 当前 ACP inbound route | 目标版本真实 compact 明确发出 started 后 completed；忽略 started 与 summary |
 | Kimi Code | `kimi.acp.compaction.completed_text.v1` / `completed` | Kimi-only Prompt lifecycle correlation + idle/detached completion compatibility route | Kimi native ACP server 把内部 lifecycle 降格为同形 `agent_message_chunk`；Active Prompt 只有 exact started 建立 pending 后的 exact completed 才准入，blocked 保持 pending，cancelled 清除 pending；idle/detached 保留 exact completion detector |
-| Grok Build | `grok.acp.auto_compact_completed.v1` / `completed` | 当前 ACP `_x.ai/session_notification` inbound route | `0.2.118` no-leader live wire 提供 exact Session ID、`auto_compact_completed` 与非空 `_meta.eventId`；event ID 作为 Runtime occurrence identity，started/failed/cancelled/replay/unknown 全部忽略 |
+| Grok Build | `grok.acp.auto_compact_completed.v1` / `completed` | 当前 ACP `_x.ai/session_notification` inbound route | `0.2.118` no-leader live wire 是初始历史证据；当前支持门为 `>= 1.0.0`，detector 保持 `best_effort` 且目标版本需分别复核。event ID 作为 Runtime occurrence identity，started/failed/cancelled/replay/unknown 全部忽略 |
 | Qoder | `PostCompact` / `completed` | 隔离 `--settings` Hook | 目标版本真实 `/compact` 完成态可靠 |
 | CodeBuddy | `SessionStart(source=compact)` / `completed` | 隔离 `--plugin-dir` Plugin Hook | `2.133.1` emergency auto compaction 完成后真实触发；CLI additional settings 未注册 lifecycle Hook。该版本 pre-message compaction 绕过全部相关 Hook，故 detector 仍是有明确 coverage gap 的 `best_effort`，不做 token 推断 |
 | Qwen Code | `PostCompact` / `completed` | 私有 `QWEN_HOME` user Hook | 上游 HookRegistry 不读取 system Hook；私有 user settings 保留原配置且不修改用户文件。trigger matcher 为 exact match，使用 `*` 后由 relay 校验 `manual|auto` |

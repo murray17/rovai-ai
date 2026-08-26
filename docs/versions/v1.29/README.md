@@ -36,8 +36,8 @@ revision 并重新确认。
 ## 交付范围
 
 - 保留 `AdapterKind=pi`、`pi-jsonl-rpc-v1`、Runtime Activity descriptor、Renderer 目录和 macOS arm64
-  admission 实现；Migration 109 增加 Pi catalog，Migration 110 增加 managed context，最终 Data Contract 为
-  `v1.24 / schema 65 / migration 110`；
+  admission 实现；主线 Migration 109 保留 Runtime entrypoint locator identity，Migration 110 增加 Pi catalog，
+  Migration 111 增加 managed context，最终 Data Contract 为 `v1.24 / schema 65 / migration 111`；
 - 正式启动只固定隔离门禁和 `rovai-pi-host-v2`，不再传 `--provider/--model/--append-system-prompt/--skill/
   --tools`，也不覆盖 `PI_CODING_AGENT_DIR` 或读取 Claude settings；
 - `pi://runtime-default` 使用 Pi 原生默认；显式 `pi://model?...` 通过 `get_available_models -> set_model ->
@@ -70,7 +70,7 @@ Identity 属于 Native Binding，不属于 Host。同一 Binding 的后继 Run �
 Identity/Bootstrap；AgentProfile 编辑不会热更既有 Pi Session。新 Native Session/Binding 才读取新身份，所以
 一个 resident Host 可以先后承载不同成员而不串身份。
 
-Migration 110 fence 所有缺少 frozen identity/managed receipt 的旧非终态 Pi technical state，使用稳定
+Migration 111 fence 所有缺少 frozen identity/managed receipt 的旧非终态 Pi technical state，使用稳定
 `pi_managed_context_v1_required` 失败码并清除旧 locator；已完成的 CampMessage、Task、Action/Approval、Activity、
 final 和历史 Evidence 保留只读。启动时旧 Pi session/config root 移入版本化 inactive-data quarantine；非 Pi
 Binding、ContextManifest 和 Runtime Input Delivery 不失效。
@@ -88,7 +88,7 @@ Binding、ContextManifest 和 Runtime Input Delivery 不失效。
 - 真实 Missing-Send smoke 的 zero-send publication 与 accepted-send suppression 通过；Pi 独立 tool→final
   recovery 断言仍待补齐；
 - Rust 回归覆盖 workspace resident reuse、member/camp invalidation 不淘汰 Pi Host、Bootstrap identity freeze、
-  accepted receipt gate、无 Pi redelivery overlay，以及 Grok 107/108 后的 Pi Migration 109/110；
+  accepted receipt gate、无 Pi redelivery overlay，以及主线 Migration 109 后的 Pi Migration 110/111；
 - 合并后的确定性门禁与真实 smoke 结果由[新版 Checklist 对比报告](checklist-report.md)逐项记录，未执行的
   Golden Flow 不以旧分支结果、fixture 或实现存在冒充；
 - 合并后 Built-in CLI full smoke 的 source 15-operation Run 和 Gather completion 已执行，但 recipient Run 被

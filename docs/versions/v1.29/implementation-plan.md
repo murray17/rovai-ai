@@ -17,8 +17,8 @@ last_updated: 2026-08-25
 
 - [x] revision 1 已由 Murray Xue 于 `2026-08-25T10:34:14+08:00` 二次确认；
 - [x] Runtime Launch 当前合同升级为 v27；v26 保持冻结历史；
-- [x] 在 Grok Migration 107/108 之后新增 Pi Migration 109/110，最终 Data Contract 升级为
-  `v1.24 / schema 65 / migration 110`；
+- [x] 保留主线 Runtime entrypoint locator identity Migration 109，在其后新增 Pi Migration 110/111，最终
+  Data Contract 升级为 `v1.24 / schema 65 / migration 111`；
 - [x] Bootstrap v3/Formatter 3、Context Formatter 21、ContextManifest 21 与 Delivery Profile 4 bytes 不变；
   新增 Bootstrap Evidence v2、`managed_system_prompt` 和 Pi Managed Input Receipt v1。
 
@@ -101,18 +101,19 @@ last_updated: 2026-08-25
 
 ## 8. Migration 与兼容
 
-- [x] Migration 109 从 Grok 的 v1.22/schema 63/migration 108 增加 Pi catalog 与 Skill group，升级为
+- [x] Migration 110 从主线 v1.22/schema 63/migration 109 增加 Pi catalog 与 Skill group，升级为
   v1.23/schema 64；
-- [x] Migration 110 从 v1.23/schema 64 增加 Evidence v2/receipt table/acceptance trigger，升级为
+- [x] Migration 111 从 v1.23/schema 64 增加 Evidence v2/receipt table/acceptance trigger，升级为
   v1.24/schema 65；
 - [x] nonterminal legacy Pi Runs 以 `pi_managed_context_v1_required` fence，清除旧 Pi locator/compaction state；
 - [x] completed Pi 业务历史保持只读，非 Pi Binding/Manifest/Delivery 不失效；
 - [x] 启动时旧 Pi session/config root 移入版本化 inactive-data quarantine，不复用旧 approval-v1 Host state；
-- [x] 旧 migration synthetic fixture 已适配 schema 65 约束，并保留 Grok 107/108 与 Pi 109/110 逐版本验证。
+- [x] 旧 migration synthetic fixture 已适配 schema 65 约束，并保留 Grok 107/108、主线 locator 109 与 Pi
+  110/111 逐版本验证。
 
 ## 9. 自动化与收尾
 
-- [x] Pi adapter capability、workspace Fleet LRU、Bootstrap Evidence/receipt、Migration 109/110 与 MCP bridge 定向
+- [x] Pi adapter capability、workspace Fleet LRU、Bootstrap Evidence/receipt、Migration 110/111 与 MCP bridge 定向
   tests 通过；
 - [x] `--features slow-tests` 的 Pi identity freeze/no-redelivery/receipt acceptance 回归通过；
 - [x] 真实 `ROVAI_REAL_PI_EXECUTABLE=/opt/homebrew/bin/pi` managed-input smoke 通过；

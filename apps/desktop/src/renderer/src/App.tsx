@@ -5,6 +5,7 @@ import type {
   AgentProfile,
   AgentRunView,
   ActionApprovalView,
+  AppUpdatePrompt as AppUpdatePromptValue,
   AppearanceSnapshot,
   CampActivationState,
   CampCreationPreflight,
@@ -32,6 +33,7 @@ import type {
   NavigationSnapshot,
   ProjectNavigationGroup,
   RestorableLocation,
+  RovaiApi,
   HearthReviewItem,
   SendCampMessageResult,
   StoredCommandResult,
@@ -67,6 +69,8 @@ import { openRuntimeModelCatalog } from './runtime-check'
 import { PanelToggleIcon } from './PanelToggleIcon'
 import { AppearanceSettings } from './AppearanceSettings'
 import { AboutUpdatesSettings } from './AboutUpdatesSettings'
+import { AppUpdatePrompt } from './AppUpdatePrompt'
+import { useAppUpdates, type AppUpdatesController } from './useAppUpdates'
 import {
   NotificationAttentionController,
   type NotificationNavigationResult
@@ -101,11 +105,12 @@ import {
 } from './OnboardingFlow'
 import { provisionFirstRun } from './onboarding-provisioning'
 import {
+  currentProjectAccessDecision,
   currentProjectForCamp,
   currentProjectGroup,
   currentProjectWorkspace,
   navigationIncludingCurrentWorkspace,
-  navigationWithoutRemovedProjects,
+  navigationWithProjectAuthority,
   persistCurrentProject,
   projectTargetKey,
   readCurrentProject,
@@ -121,6 +126,91 @@ export function appendLiveRuntimeEvent(
   event: LiveRuntimeEvent
 ): LiveRuntimeEvent[] {
   return [...current, event]
+}
+
+const ACTIVE_CAMP_INVALIDATION_EVENTS = new Set([
+  'agent_run.cancelled',
+  'agent_run.recovery_blocker_resolved',
+  'agent_run.runtime_model_observed',
+  'agent_run.terminal'
+])
+
+export function shouldRefreshActiveCampForCoreEvent(
+  event: CoreEvent,
+  activeCampId: string | null
+): boolean {
+  if (!activeCampId || !ACTIVE_CAMP_INVALIDATION_EVENTS.has(event.method)) return false
+  const eventCampId = stringField(asRecord(event.params), 'campId')
+  if (event.method === 'agent_run.runtime_model_observed') {
+    return eventCampId === activeCampId
+  }
+  return !eventCampId || eventCampId === activeCampId
+}
+
+export interface ActiveCampRefreshCoordinator {
+  refresh(campId: string): Promise<void>
+}
+
+export function createActiveCampRefreshCoordinator(
+  refreshOnce: (campId: string) => Promise<void>
+): ActiveCampRefreshCoordinator {
+  const activeRefreshes = new Map<string, {
+    dirty: boolean
+    completion: Promise<void>
+  }>()
+
+  return {
+    refresh(campId: string): Promise<void> {
+      const active = activeRefreshes.get(campId)
+      if (active) {
+        active.dirty = true
+        return active.completion
+      }
+
+      const entry = {
+        dirty: false,
+        completion: Promise.resolve()
+      }
+      activeRefreshes.set(campId, entry)
+      entry.completion = Promise.resolve()
+        .then(async () => {
+          try {
+            let lastError: unknown = null
+            do {
+              entry.dirty = false
+              try {
+                await refreshOnce(campId)
+                lastError = null
+              } catch (nextError) {
+                lastError = nextError
+              }
+            } while (entry.dirty)
+            if (lastError !== null) throw lastError
+          } finally {
+            if (activeRefreshes.get(campId) === entry) activeRefreshes.delete(campId)
+          }
+        })
+      return entry.completion
+    }
+  }
+}
+
+export function refreshActiveCampForCoreEvent(
+  event: CoreEvent,
+  activeCampId: string | null,
+  coordinator: ActiveCampRefreshCoordinator
+): Promise<void> | null {
+  return shouldRefreshActiveCampForCoreEvent(event, activeCampId) && activeCampId
+    ? coordinator.refresh(activeCampId)
+    : null
+}
+
+export function requestAuthoritativeCampOpenProjection(
+  api: Pick<RovaiApi, 'request'>,
+  campId: string,
+  traceId: string
+): Promise<CampOpenProjection> {
+  return api.request<CampOpenProjection>('camps.open', { traceId, campId })
 }
 
 type LoadState = 'loading' | 'ready' | 'error'
@@ -431,6 +521,7 @@ export function App(): React.JSX.Element {
   const [appearance, setAppearance] = useState<AppearanceSnapshot>(
     () => initialAppearanceSnapshot(document.documentElement)
   )
+  const appUpdates = useAppUpdates()
   const [health, setHealth] = useState<HealthStatus | null>(null)
   const [healthLoading, setHealthLoading] = useState(false)
   const [healthAttempted, setHealthAttempted] = useState(false)
@@ -439,6 +530,7 @@ export function App(): React.JSX.Element {
   const [navigation, setNavigation] = useState<NavigationSnapshot | null>(null)
   const [navigationPins, setNavigationPins] = useState<NavigationPin[]>([])
   const [removedProjectKeys, setRemovedProjectKeys] = useState<Set<string>>(() => new Set())
+  const [removedProjectAuthorityReady, setRemovedProjectAuthorityReady] = useState(false)
   const [pinnedCampItems, setPinnedCampItems] = useState<NavigationCampItem[]>([])
   const [pendingMemoryCount, setPendingMemoryCount] = useState(0)
   const [memoryReviewNotice, setMemoryReviewNotice] = useState(false)
@@ -463,6 +555,7 @@ export function App(): React.JSX.Element {
   const [confirmingRunIds, setConfirmingRunIds] = useState<Set<string>>(() => new Set())
   const [state, setState] = useState<LoadState>('loading')
   const [shuttingDown, setShuttingDown] = useState(false)
+  const [notificationHeadsUpVisible, setNotificationHeadsUpVisible] = useState(false)
   const [startupSnapshot, setStartupSnapshot] = useState<DesktopStartupSnapshot | null>(null)
   const [startupRouteTarget, setStartupRouteTarget] = useState<RestorableLocation | null>(null)
   const [startupStatus, setStartupStatus] = useState<StartupStatus>('loading')
@@ -576,7 +669,7 @@ export function App(): React.JSX.Element {
           commandId: crypto.randomUUID(),
           command: { campId }
         })
-      : await window.rovai.request<CampOpenProjection>('camps.open', { traceId, campId })
+      : await requestAuthoritativeCampOpenProjection(window.rovai, campId, traceId)
     if (projection.schemaVersion !== 3) throw new Error('会话打开数据版本不兼容。')
     console.info(
       `[camp-open] trace=${traceId} stage=renderer_received method=${method} `
@@ -717,6 +810,7 @@ export function App(): React.JSX.Element {
         setRemovedProjectKeys(new Set(
           resolvedNavigationPreferences.removedProjects.map((project) => project.targetKey)
         ))
+        setRemovedProjectAuthorityReady(true)
         setPinnedCampItems(resolvedPins.camps)
         await Promise.all([
           nextAgentsPromise,
@@ -800,24 +894,17 @@ export function App(): React.JSX.Element {
     setRemovedProjectKeys(new Set(
       snapshot.removedProjects.map((project) => project.targetKey)
     ))
+    setRemovedProjectAuthorityReady(true)
   }, [])
 
   const restoreNavigationProject = useCallback(async (projectPath: string): Promise<void> => {
     const targetKey = projectTargetKey(projectPath)
-    setRemovedProjectKeys((current) => {
-      if (!current.has(targetKey)) return current
-      const next = new Set(current)
-      next.delete(targetKey)
-      return next
-    })
     try {
       const snapshot = await window.rovai.navigationPreferences.restoreProject(targetKey)
       applyNavigationPreferences(snapshot)
     } catch (nextError) {
-      // A local navigation preference must never block opening or creating the
-      // Core-owned Camp. Keep the Project visible for this session and surface
-      // that only its cross-restart restoration could not be saved.
-      setError(`项目已重新显示，但侧栏恢复状态未能保存：${errorMessage(nextError)}`)
+      setError(`项目访问状态未能恢复，已停止后续目录检查：${errorMessage(nextError)}`)
+      throw nextError
     }
   }, [applyNavigationPreferences])
 
@@ -957,10 +1044,6 @@ export function App(): React.JSX.Element {
         + `elapsed_ms=${(performance.now() - startedAt).toFixed(1)}`
       )
       void (async () => {
-        if (snapshot.camp.projectBindingKind === 'directory') {
-          await restoreNavigationProject(snapshot.camp.projectPath)
-          if (selectionGeneration !== campSelectionGeneration.current) return
-        }
         await loadNavigation()
         if (selectionGeneration !== campSelectionGeneration.current) return
         console.info(
@@ -987,13 +1070,13 @@ export function App(): React.JSX.Element {
       }
       return false
     }
-  }, [clearCampOpenFeedback, loadNavigation, requestCampProjection, restoreNavigationProject, setCampSnapshot])
+  }, [clearCampOpenFeedback, loadNavigation, requestCampProjection, setCampSnapshot])
 
   useEffect(() => window.rovai.userAutomation.onOpenCamp(({ campId }) => {
     void activateCamp(campId, { reconcileDefaultLead: false })
   }), [activateCamp])
 
-  const refreshActiveCampSnapshot = useCallback(async (campId: string): Promise<void> => {
+  const refreshActiveCampSnapshotOnce = useCallback(async (campId: string): Promise<void> => {
     const { snapshot } = await requestCampProjection(campId, 'open')
     if (activeCampIdRef.current !== campId) return
     if (snapshot.throughGlobalSequence < campEventSequenceMarker.current) return
@@ -1001,6 +1084,16 @@ export function App(): React.JSX.Element {
     setCampSnapshot(snapshot)
     setConfirmingRunIds(new Set())
   }, [requestCampProjection, setCampSnapshot])
+
+  const activeCampRefreshCoordinator = useMemo(
+    () => createActiveCampRefreshCoordinator(refreshActiveCampSnapshotOnce),
+    [refreshActiveCampSnapshotOnce]
+  )
+
+  const refreshActiveCampSnapshot = useCallback(
+    (campId: string): Promise<void> => activeCampRefreshCoordinator.refresh(campId),
+    [activeCampRefreshCoordinator]
+  )
 
   const loadEarlierCampMessages = useCallback(async (): Promise<void> => {
     const requestedSnapshot = campSnapshotRef.current
@@ -1132,31 +1225,36 @@ export function App(): React.JSX.Element {
     ? currentProject.projectPath
     : null
   const visibleNavigation = useMemo(
-    () => navigationWithoutRemovedProjects(navigation, removedProjectKeys),
-    [navigation, removedProjectKeys]
+    () => navigationWithProjectAuthority(
+      navigation,
+      removedProjectKeys,
+      removedProjectAuthorityReady
+    ),
+    [navigation, removedProjectAuthorityReady, removedProjectKeys]
   )
-  const authoritativeCurrentProjectPath = currentProjectGroup(
-    visibleNavigation,
-    currentProject
-  )?.projectPath ?? null
+  const currentProjectAccess = currentProjectAccessDecision({
+    currentProject,
+    currentWorkspaceHint,
+    navigation: visibleNavigation,
+    removedProjectKeys,
+    removedProjectAuthorityReady
+  })
 
   useEffect(() => {
-    if (!visibleNavigation) return undefined
-    if (
-      currentProject.kind === 'directory'
-      && removedProjectKeys.has(projectTargetKey(currentProject.projectPath))
-    ) {
+    if (currentProjectAccess === 'wait') return undefined
+    if (currentProjectAccess === 'fallback') {
       const fallback: CurrentProject = { kind: 'quick_chat' }
       setCurrentProject(fallback)
       setCurrentWorkspaceHint(null)
       persistCurrentProject(fallback)
       return undefined
     }
-    if (currentProject.kind === 'quick_chat' || authoritativeCurrentProjectPath) {
+    if (currentProjectAccess === 'clear_hint') {
       setCurrentWorkspaceHint(null)
       return undefined
     }
-    if (currentWorkspaceHint?.projectPath === currentProject.projectPath) return undefined
+    if (currentProjectAccess === 'keep_hint') return undefined
+    if (currentProject.kind !== 'directory') return undefined
 
     let cancelled = false
     void window.rovai.request<WorkspaceInspection>('workspaces.inspect', {
@@ -1172,12 +1270,10 @@ export function App(): React.JSX.Element {
     })
     return () => { cancelled = true }
   }, [
-    authoritativeCurrentProjectPath,
+    currentProjectAccess,
     currentProject.kind,
     currentProjectPath,
-    currentWorkspaceHint?.projectPath,
-    removedProjectKeys,
-    visibleNavigation !== null
+    currentWorkspaceHint?.projectPath
   ])
 
   useEffect(() => {
@@ -1301,10 +1397,6 @@ export function App(): React.JSX.Element {
           + `elapsed_ms=${(performance.now() - startedAt).toFixed(1)}`
         )
         void (async () => {
-          if (snapshot.camp.projectBindingKind === 'directory') {
-            await restoreNavigationProject(snapshot.camp.projectPath)
-            if (cancelled || selectionGeneration !== campSelectionGeneration.current) return
-          }
           await loadNavigation()
           if (cancelled || selectionGeneration !== campSelectionGeneration.current) return
           console.info(
@@ -1337,7 +1429,6 @@ export function App(): React.JSX.Element {
     loadNavigation,
     loadOverview,
     requestCampProjection,
-    restoreNavigationProject,
     setCampSnapshot,
     startupSnapshot
   ])
@@ -1501,24 +1592,19 @@ export function App(): React.JSX.Element {
           void Promise.all([loadHealth(), loadMemberData()]).catch(() => undefined)
         }, 80)
       }
-      if (
-        event.method === 'agent_run.cancelled'
-        || event.method === 'agent_run.recovery_blocker_resolved'
-        || event.method === 'agent_run.runtime_model_observed'
-      ) {
-        const eventCampId = stringField(params, 'campId')
-        const campId = activeCampIdRef.current
-        const targetsActiveCamp = event.method === 'agent_run.runtime_model_observed'
-          ? eventCampId === campId
-          : !eventCampId || eventCampId === campId
-        if (campId && targetsActiveCamp) {
-          void refreshActiveCampSnapshot(campId).catch((nextError) => {
-            if (activeCampIdRef.current === campId) setError(errorMessage(nextError))
-          })
-        }
+      const campId = activeCampIdRef.current
+      const refresh = refreshActiveCampForCoreEvent(
+        event,
+        campId,
+        activeCampRefreshCoordinator
+      )
+      if (refresh && campId) {
+        void refresh.catch((nextError) => {
+          if (activeCampIdRef.current === campId) setError(errorMessage(nextError))
+        })
       }
     })
-  }, [loadHealth, loadMemberData, loadOverview, refreshActiveCampSnapshot])
+  }, [activeCampRefreshCoordinator, loadHealth, loadMemberData, loadOverview])
 
   useEffect(() => {
     if (!campSnapshot) {
@@ -1709,6 +1795,7 @@ export function App(): React.JSX.Element {
   }
 
   const openProject = async (): Promise<void> => {
+    if (!removedProjectAuthorityReady) return
     setError(null)
     try {
       await selectProjectDirectory(
@@ -1784,8 +1871,70 @@ export function App(): React.JSX.Element {
   const chooseSettingsSection = (section: SettingsSection): void => {
     setSettingsSection(section)
     void window.rovai.generalPreferences.setLastSettingsSection(section)
+      .then(setGeneralPreferences)
       .catch((nextError) => setError(errorMessage(nextError)))
   }
+
+  const commitSettingsSurface = (section: SettingsSection): void => {
+    cancelPendingCampActivation()
+    setNotificationFocus(null)
+    setSettingsSection(section)
+    setView('settings')
+  }
+
+  const openSettings = (): void => {
+    const rememberedSection = generalPreferences?.lastSettingsSection ?? 'general'
+    void requestMemberTransition(() => commitSettingsSurface(rememberedSection))
+  }
+
+  const openUpdateSettings = async (
+    prompt: AppUpdatePromptValue | null = appUpdates.snapshot?.pendingPrompt ?? null
+  ): Promise<boolean> => {
+    const expectedVersion = prompt?.version ?? appUpdates.snapshot?.availableRelease?.version
+    if (!expectedVersion) return false
+    try {
+      const transitioned = await requestMemberTransition(() => commitSettingsSurface('about'))
+      if (!transitioned) return false
+      await afterNextPaint()
+      const releaseSection = document.querySelector<HTMLElement>('.about-release-section')
+      if (releaseSection?.dataset.appUpdateReleaseVersion !== expectedVersion) return false
+      const heading = document.querySelector<HTMLElement>('#about-release-notes-heading')
+      heading?.focus({ preventScroll: true })
+      releaseSection.scrollIntoView({ block: 'start' })
+      return Boolean(heading)
+    } catch (nextError) {
+      setError(`无法打开更新内容：${errorMessage(nextError)}`)
+      return false
+    }
+  }
+
+  useEffect(() => {
+    const prompt = appUpdates.snapshot?.pendingPrompt
+    const release = appUpdates.snapshot?.availableRelease
+    if (view !== 'settings'
+        || settingsSection !== 'about'
+        || !prompt
+        || release?.version !== prompt.version) return undefined
+    let secondFrame = 0
+    const firstFrame = window.requestAnimationFrame(() => {
+      secondFrame = window.requestAnimationFrame(() => {
+        const releaseSection = document.querySelector<HTMLElement>('.about-release-section')
+        if (releaseSection?.dataset.appUpdateReleaseVersion === prompt.version) {
+          void appUpdates.dismissPrompt(prompt.id)
+        }
+      })
+    })
+    return () => {
+      window.cancelAnimationFrame(firstFrame)
+      if (secondFrame) window.cancelAnimationFrame(secondFrame)
+    }
+  }, [
+    appUpdates.dismissPrompt,
+    appUpdates.snapshot?.availableRelease,
+    appUpdates.snapshot?.pendingPrompt,
+    settingsSection,
+    view
+  ])
 
   const commitMemoryLocation = useCallback((): void => {
     if (!startupResolvedSessionId.current || viewRef.current !== 'memory') return
@@ -2664,6 +2813,7 @@ export function App(): React.JSX.Element {
         pins={navigationPins}
         pinnedCampItems={pinnedCampItems}
         settingsSection={settingsSection}
+        updateSnapshot={appUpdates.snapshot}
         onNewConversation={beginNewConversation}
         onMembers={() => chooseView('members')}
         onMemory={() => {
@@ -2671,7 +2821,8 @@ export function App(): React.JSX.Element {
           chooseView('memory')
         }}
         pendingMemoryCount={pendingMemoryCount}
-        onSettings={() => chooseView('settings')}
+        onSettings={openSettings}
+        onOpenUpdates={() => void openUpdateSettings()}
         onSettingsSectionChange={chooseSettingsSection}
         onSettingsBack={closeSettings}
         onOpenProject={() => void openProject()}
@@ -2824,6 +2975,7 @@ export function App(): React.JSX.Element {
             installations={installations}
             busy={busy}
             section={settingsSection}
+            updates={appUpdates}
             onDiagnosticsNavigate={(section) => chooseSettingsSection(section)}
             onReload={async () => {
               await Promise.all([loadOverview(), loadHealth()])
@@ -2892,6 +3044,7 @@ export function App(): React.JSX.Element {
         preflight={campCreationPreflight}
         agents={agents}
         busy={busy === 'create-camp' || busy === 'open-project'}
+        projectAccessReady={removedProjectAuthorityReady}
         returnFocusElement={newConversationReturnFocus.current}
         onOpenChange={setNewConversationOpen}
         onChooseWorkspaceDirectory={chooseWorkspaceDirectory}
@@ -2915,6 +3068,18 @@ export function App(): React.JSX.Element {
         onRefreshVisibleCamp={refreshVisibleNotificationCamp}
         onError={setToast}
         visibleSources={visibleNotificationSources}
+        onHeadsUpVisibleChange={setNotificationHeadsUpVisible}
+      />
+      <AppUpdatePrompt
+        snapshot={appUpdates.snapshot}
+        campComposerVisible={view === 'camp'}
+        blocked={notificationHeadsUpVisible
+          || newConversationOpen
+          || shuttingDown
+          || (view === 'settings' && settingsSection === 'about')}
+        onDismiss={appUpdates.dismissPrompt}
+        onOpenDetails={openUpdateSettings}
+        onDownload={appUpdates.download}
       />
       {shuttingDown && <ControlledShutdownOverlay />}
     </div>
@@ -3062,6 +3227,7 @@ export function SettingsView({
   installations,
   busy,
   section,
+  updates,
   onDiagnosticsNavigate,
   onReload,
   onThemeChange
@@ -3076,6 +3242,7 @@ export function SettingsView({
   installations: AdapterInstallation[]
   busy: string | null
   section: SettingsSection
+  updates: AppUpdatesController
   onDiagnosticsNavigate(section: 'mcp' | 'runtime', runtimeKind?: AdapterKind): void
   onReload(): Promise<void>
   onThemeChange(preference: ThemePreference): void
@@ -3120,7 +3287,7 @@ export function SettingsView({
           <DiagnosticsCenter onNavigate={onDiagnosticsNavigate} platform={platform} />
         )}
         {section === 'about' && (
-          <AboutUpdatesSettings />
+          <AboutUpdatesSettings updates={updates} />
         )}
       </div>
     </div>

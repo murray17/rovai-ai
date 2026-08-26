@@ -20,8 +20,9 @@ use crate::{
         AgentRuntimeAdapterRegistry, CLAUDE_CODE_RUNTIME_DEFAULT_MODEL_ID, ExecutableFileIdentity,
         PI_MACHINE_PROTOCOL, PI_NATIVE_SESSION_COMPATIBILITY_KEY, PI_RUNTIME_DEFAULT_MODEL_ID,
         TRAE_RUNTIME_DEFAULT_MODEL_ID, observe_executable_file_identity,
-        trae_static_permission_options, validate_machine_ready_snapshot,
-        validate_pi_machine_ready_evidence, validate_trae_machine_ready_evidence,
+        trae_static_permission_options, validate_grok_machine_ready_evidence,
+        validate_machine_ready_snapshot, validate_pi_machine_ready_evidence,
+        validate_trae_machine_ready_evidence,
     },
     collaboration::end_camp_membership,
     command::{
@@ -894,6 +895,18 @@ pub struct RecordAdapterCapabilitySnapshotCommand {
     pub failure: Option<RuntimeFailureView>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RuntimeEntrypointLocatorIdentity {
+    pub entrypoint_kind: String,
+    pub canonical_shim_path: String,
+    pub shim_content_digest: String,
+    pub canonical_interpreter_path: String,
+    pub interpreter_fingerprint: String,
+    pub resolved_target_path: String,
+    pub resolved_target_fingerprint: String,
+    pub compatibility_fingerprint: String,
+}
+
 #[derive(Debug, Clone)]
 pub struct VerifiedManagedInstallation {
     pub adapter_kind: AdapterKind,
@@ -902,6 +915,7 @@ pub struct VerifiedManagedInstallation {
     pub source: InstallationSource,
     pub auth_scope: String,
     pub snapshot: AdapterCapabilitySnapshot,
+    pub entrypoint_locator_identity: Option<RuntimeEntrypointLocatorIdentity>,
 }
 
 #[derive(Debug, Clone)]
@@ -912,6 +926,7 @@ pub struct DiscoveredManagedInstallation {
     pub source: InstallationSource,
     pub auth_scope: String,
     pub snapshot: AdapterCapabilitySnapshot,
+    pub entrypoint_locator_identity: Option<RuntimeEntrypointLocatorIdentity>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -1278,6 +1293,49 @@ impl AgentProfileService {
             .context("failed to load verified Runtime executable identity")
     }
 
+    pub fn runtime_entrypoint_locator_identity(
+        &self,
+        database: &Database,
+        installation_id: &str,
+    ) -> Result<Option<RuntimeEntrypointLocatorIdentity>> {
+        database
+            .connection()
+            .query_row(
+                r#"
+                SELECT locator.entrypoint_kind, locator.canonical_shim_path,
+                       locator.shim_content_digest,
+                       locator.canonical_interpreter_path,
+                       locator.interpreter_fingerprint,
+                       locator.resolved_target_path,
+                       locator.resolved_target_fingerprint,
+                       locator.compatibility_fingerprint
+                FROM runtime_entrypoint_locator_identity AS locator
+                JOIN adapter_installation AS installation
+                  ON installation.id = locator.installation_id
+                JOIN adapter_capability_snapshot AS snapshot
+                  ON snapshot.installation_id = installation.id
+                WHERE locator.installation_id = ?1
+                  AND locator.resolved_target_path = installation.executable_path
+                  AND locator.resolved_target_fingerprint = snapshot.executable_fingerprint
+                "#,
+                [installation_id],
+                |row| {
+                    Ok(RuntimeEntrypointLocatorIdentity {
+                        entrypoint_kind: row.get(0)?,
+                        canonical_shim_path: row.get(1)?,
+                        shim_content_digest: row.get(2)?,
+                        canonical_interpreter_path: row.get(3)?,
+                        interpreter_fingerprint: row.get(4)?,
+                        resolved_target_path: row.get(5)?,
+                        resolved_target_fingerprint: row.get(6)?,
+                        compatibility_fingerprint: row.get(7)?,
+                    })
+                },
+            )
+            .optional()
+            .context("failed to load Runtime entrypoint locator identity")
+    }
+
     pub fn runtime_dispatch_blocker(
         &self,
         database: &Database,
@@ -1437,6 +1495,21 @@ impl AgentProfileService {
                 }),
             )));
         }
+        if runtime.adapter_kind == AdapterKind::GrokBuild
+            && let Err(error) = validate_grok_machine_ready_evidence(
+                runtime.reported_version.as_deref(),
+                Some(&runtime.executable_fingerprint),
+                &runtime.capabilities,
+            )
+        {
+            return Ok(Some(runtime_blocker(
+                "runtime_probe_required",
+                json!({
+                    "installationId": runtime.installation_id,
+                    "detail": error.to_string(),
+                }),
+            )));
+        }
         Ok(None)
     }
 
@@ -1557,6 +1630,15 @@ impl AgentProfileService {
         if verified.source == InstallationSource::Custom {
             anyhow::bail!("managed Installation cannot use a custom source");
         }
+        let verified_fingerprint = verified
+            .snapshot
+            .executable_fingerprint
+            .as_deref()
+            .context("managed Installation requires an executable fingerprint")?;
+        let next_locator_fingerprint = verified
+            .entrypoint_locator_identity
+            .as_ref()
+            .map(|identity| identity.compatibility_fingerprint.as_str());
         let executable_identity =
             observe_executable_file_identity(Path::new(&verified.executable_path)).ok();
         if verified.adapter_kind == AdapterKind::TraeCnCli && executable_identity.is_none() {
@@ -1569,10 +1651,13 @@ impl AgentProfileService {
                 r#"
                 SELECT installation.id, installation.executable_path,
                        installation.generation, installation.version,
-                       snapshot.executable_fingerprint
+                       snapshot.executable_fingerprint,
+                       locator.compatibility_fingerprint
                 FROM adapter_installation AS installation
                 LEFT JOIN adapter_capability_snapshot AS snapshot
                   ON snapshot.installation_id = installation.id
+                LEFT JOIN runtime_entrypoint_locator_identity AS locator
+                  ON locator.installation_id = installation.id
                 WHERE installation.adapter_kind = ?1
                   AND installation.auth_scope = ?2
                   AND installation.installation_class = 'managed_default'
@@ -1585,16 +1670,21 @@ impl AgentProfileService {
                         row.get::<_, i64>(2)?,
                         row.get::<_, i64>(3)?,
                         row.get::<_, Option<String>>(4)?,
+                        row.get::<_, Option<String>>(5)?,
                     ))
                 },
             )
             .optional()?;
         let now = chrono::Utc::now().to_rfc3339();
         let (installation_id, previous_path, previous_fingerprint, identity_changed) =
-            if let Some((id, path, _generation, _version, fingerprint)) = existing {
+            if let Some((id, path, _generation, _version, fingerprint, locator_fingerprint)) =
+                existing
+            {
                 let identity_changed = path != verified.executable_path
                     || fingerprint != verified.snapshot.executable_fingerprint;
-                if identity_changed {
+                let compatibility_changed =
+                    identity_changed || locator_fingerprint.as_deref() != next_locator_fingerprint;
+                if compatibility_changed {
                     transaction.execute(
                         r#"
                         UPDATE adapter_installation
@@ -1663,6 +1753,14 @@ impl AgentProfileService {
                 &verified.snapshot.last_attempted_at,
             )?;
         }
+        replace_runtime_entrypoint_locator_identity(
+            &transaction,
+            &installation_id,
+            &verified.executable_path,
+            verified_fingerprint,
+            verified.entrypoint_locator_identity.as_ref(),
+            &verified.snapshot.last_attempted_at,
+        )?;
         insert_probe_attempt(
             &transaction,
             &installation_id,
@@ -1716,6 +1814,15 @@ impl AgentProfileService {
         if discovered.source == InstallationSource::Custom {
             anyhow::bail!("managed Installation cannot use a custom source");
         }
+        let discovered_fingerprint = discovered
+            .snapshot
+            .executable_fingerprint
+            .as_deref()
+            .context("static managed Installation requires an executable fingerprint")?;
+        let next_locator_fingerprint = discovered
+            .entrypoint_locator_identity
+            .as_ref()
+            .map(|identity| identity.compatibility_fingerprint.as_str());
         #[cfg(unix)]
         let executable_is_usable = std::fs::metadata(&discovered.executable_path)
             .is_ok_and(|metadata| metadata.is_file() && metadata.permissions().mode() & 0o111 != 0);
@@ -1737,10 +1844,13 @@ impl AgentProfileService {
                        snapshot.permission_schema_digest,
                        snapshot.permission_options_json,
                        snapshot.model_catalog_json,
-                       snapshot.last_successful_probe_at
+                       snapshot.last_successful_probe_at,
+                       locator.compatibility_fingerprint
                 FROM adapter_installation AS installation
                 LEFT JOIN adapter_capability_snapshot AS snapshot
                   ON snapshot.installation_id = installation.id
+                LEFT JOIN runtime_entrypoint_locator_identity AS locator
+                  ON locator.installation_id = installation.id
                 WHERE installation.adapter_kind = ?1
                   AND installation.auth_scope = ?2
                   AND installation.installation_class = 'managed_default'
@@ -1757,6 +1867,7 @@ impl AgentProfileService {
                         row.get::<_, Option<String>>(6)?,
                         row.get::<_, Option<String>>(7)?,
                         row.get::<_, Option<String>>(8)?,
+                        row.get::<_, Option<String>>(9)?,
                     ))
                 },
             )
@@ -1781,12 +1892,15 @@ impl AgentProfileService {
             permission_options_json,
             model_catalog_json,
             last_successful_probe_at,
+            locator_fingerprint,
         )) = existing
         {
             let identity_changed =
                 path != discovered.executable_path || fingerprint.as_deref() != next_fingerprint;
+            let compatibility_changed =
+                identity_changed || locator_fingerprint.as_deref() != next_locator_fingerprint;
             transaction.execute(
-                if identity_changed {
+                if compatibility_changed {
                     r#"
                     UPDATE adapter_installation
                     SET executable_path = ?2, command_name = ?3, source = ?4,
@@ -1831,13 +1945,13 @@ impl AgentProfileService {
                     }
                     _ => false,
                 };
-            let preserve_existing = !identity_changed
+            let preserve_existing = !compatibility_changed
                 && (schema_matches || normalize_legacy_trae_schema)
                 && (probe_status.as_deref() == Some("ready")
                     || (probe_status.as_deref() == Some("light_ready")
                         && discovered.snapshot.probe_status == "light_failed"
                         && executable_is_usable));
-            let retained_lkg = identity_changed
+            let retained_lkg = compatibility_changed
                 .then(|| {
                     let models_json = model_catalog_json?;
                     let last_successful_probe_at = last_successful_probe_at?;
@@ -1922,6 +2036,14 @@ impl AgentProfileService {
                 &discovered.snapshot.last_attempted_at,
             )?;
         }
+        replace_runtime_entrypoint_locator_identity(
+            &transaction,
+            &installation_id,
+            &discovered.executable_path,
+            discovered_fingerprint,
+            discovered.entrypoint_locator_identity.as_ref(),
+            &discovered.snapshot.last_attempted_at,
+        )?;
         if identity_changed {
             transaction.execute(
                 r#"
@@ -3535,6 +3657,70 @@ fn upsert_runtime_executable_identity(
     Ok(())
 }
 
+fn replace_runtime_entrypoint_locator_identity(
+    transaction: &Transaction<'_>,
+    installation_id: &str,
+    executable_path: &str,
+    executable_fingerprint: &str,
+    identity: Option<&RuntimeEntrypointLocatorIdentity>,
+    verified_at: &str,
+) -> Result<()> {
+    let Some(identity) = identity else {
+        transaction.execute(
+            "DELETE FROM runtime_entrypoint_locator_identity WHERE installation_id = ?1",
+            [installation_id],
+        )?;
+        return Ok(());
+    };
+    if !matches!(
+        identity.entrypoint_kind.as_str(),
+        "npm_cmd_shim" | "pnpm_cmd_shim"
+    ) || identity.canonical_shim_path.is_empty()
+        || identity.canonical_interpreter_path.is_empty()
+        || identity.resolved_target_path != executable_path
+        || identity.resolved_target_fingerprint != executable_fingerprint
+        || !identity.shim_content_digest.starts_with("sha256:")
+        || !identity.interpreter_fingerprint.starts_with("sha256:")
+        || !identity.resolved_target_fingerprint.starts_with("sha256:")
+        || !identity.compatibility_fingerprint.starts_with("sha256:")
+    {
+        anyhow::bail!("Runtime entrypoint locator identity is inconsistent with the executable");
+    }
+    transaction.execute(
+        r#"
+        INSERT INTO runtime_entrypoint_locator_identity(
+            installation_id, entrypoint_kind, canonical_shim_path,
+            shim_content_digest, canonical_interpreter_path,
+            interpreter_fingerprint, resolved_target_path,
+            resolved_target_fingerprint, compatibility_fingerprint, verified_at
+        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
+        ON CONFLICT(installation_id) DO UPDATE SET
+            entrypoint_kind = excluded.entrypoint_kind,
+            canonical_shim_path = excluded.canonical_shim_path,
+            shim_content_digest = excluded.shim_content_digest,
+            canonical_interpreter_path = excluded.canonical_interpreter_path,
+            interpreter_fingerprint = excluded.interpreter_fingerprint,
+            resolved_target_path = excluded.resolved_target_path,
+            resolved_target_fingerprint = excluded.resolved_target_fingerprint,
+            compatibility_fingerprint = excluded.compatibility_fingerprint,
+            verified_at = excluded.verified_at
+        "#,
+        params![
+            installation_id,
+            identity.entrypoint_kind,
+            identity.canonical_shim_path,
+            identity.shim_content_digest,
+            identity.canonical_interpreter_path,
+            identity.interpreter_fingerprint,
+            identity.resolved_target_path,
+            identity.resolved_target_fingerprint,
+            identity.compatibility_fingerprint,
+            verified_at,
+        ],
+    )?;
+    Ok(())
+}
+
 #[allow(clippy::too_many_arguments)]
 fn insert_probe_attempt(
     transaction: &Transaction<'_>,
@@ -3882,6 +4068,22 @@ pub(crate) fn resolve_frozen_runtime_binding(
         serde_json::from_str(&capabilities_json).context("invalid Adapter capabilities")?;
     capabilities.sort();
     capabilities.dedup();
+    if probe_status.as_deref() == Some("ready")
+        && adapter_kind == AdapterKind::GrokBuild
+        && let Err(error) = validate_grok_machine_ready_evidence(
+            reported_version.as_deref(),
+            Some(&executable_fingerprint),
+            &capabilities,
+        )
+    {
+        return Ok(Err(runtime_blocker(
+            "runtime_probe_required",
+            json!({
+                "installationId": installation_id,
+                "detail": error.to_string(),
+            }),
+        )));
+    }
     let protocols: Vec<String> = if preflight_required {
         vec![provisional_runtime_protocol(adapter_kind).to_string()]
     } else {
@@ -3896,6 +4098,7 @@ pub(crate) fn resolve_frozen_runtime_binding(
             installation_id: &installation_id,
             executable_path: &executable_path,
             auth_scope: &auth_scope,
+            reported_version: reported_version.as_deref(),
             executable_fingerprint: &executable_fingerprint,
             protocols: &protocols,
             native_session_compatibility_key: native_session_compatibility_key.as_deref(),
@@ -5460,6 +5663,7 @@ mod slow_tests {
                     source: InstallationSource::InheritedPath,
                     auth_scope: "default".to_string(),
                     snapshot: ready,
+                    entrypoint_locator_identity: None,
                 },
             )
             .unwrap();
@@ -5498,6 +5702,7 @@ mod slow_tests {
                     source: InstallationSource::InheritedPath,
                     auth_scope: "default".to_string(),
                     snapshot: static_snapshot,
+                    entrypoint_locator_identity: None,
                 },
             )
             .unwrap();
@@ -5622,6 +5827,7 @@ mod slow_tests {
                     source: InstallationSource::InheritedPath,
                     auth_scope: "default".to_string(),
                     snapshot,
+                    entrypoint_locator_identity: None,
                 },
             )
             .unwrap();
@@ -5915,6 +6121,7 @@ mod slow_tests {
                     source: InstallationSource::InheritedPath,
                     auth_scope: "default".to_string(),
                     snapshot: ready_snapshot,
+                    entrypoint_locator_identity: None,
                 },
             )
             .expect("verified managed Installation should be created");
@@ -6310,6 +6517,7 @@ mod slow_tests {
                     source: InstallationSource::InheritedPath,
                     auth_scope: "default".to_string(),
                     snapshot: ready_codex_snapshot(),
+                    entrypoint_locator_identity: None,
                 },
             )
             .unwrap();
@@ -6434,6 +6642,7 @@ mod slow_tests {
                     source: InstallationSource::InheritedPath,
                     auth_scope: "default".to_string(),
                     snapshot: ready_codex_snapshot(),
+                    entrypoint_locator_identity: None,
                 },
             )
             .unwrap();
@@ -6572,6 +6781,7 @@ mod slow_tests {
                     source: InstallationSource::InheritedPath,
                     auth_scope: "default".to_string(),
                     snapshot: static_snapshot,
+                    entrypoint_locator_identity: None,
                 },
             )
             .unwrap();
@@ -6779,6 +6989,7 @@ mod slow_tests {
                     source: InstallationSource::InheritedPath,
                     auth_scope: "default".to_string(),
                     snapshot: startup_snapshot,
+                    entrypoint_locator_identity: None,
                 },
             )
             .unwrap();
@@ -6844,6 +7055,7 @@ mod slow_tests {
                     source: InstallationSource::InheritedPath,
                     auth_scope: "default".to_string(),
                     snapshot: original_snapshot,
+                    entrypoint_locator_identity: None,
                 },
             )
             .unwrap();
@@ -6955,6 +7167,7 @@ mod slow_tests {
                     source: InstallationSource::KnownLocation,
                     auth_scope: "default".to_string(),
                     snapshot: replacement_snapshot,
+                    entrypoint_locator_identity: None,
                 },
             )
             .unwrap();
@@ -7058,6 +7271,7 @@ mod slow_tests {
                     source: InstallationSource::InheritedPath,
                     auth_scope: "default".to_string(),
                     snapshot,
+                    entrypoint_locator_identity: None,
                 },
             )
             .unwrap();
@@ -7091,6 +7305,7 @@ mod slow_tests {
                     source: InstallationSource::InheritedPath,
                     auth_scope: "default".to_string(),
                     snapshot: transient_failure,
+                    entrypoint_locator_identity: None,
                 },
             )
             .unwrap();
@@ -7241,6 +7456,7 @@ mod slow_tests {
                     source: InstallationSource::InheritedPath,
                     auth_scope: "default".to_string(),
                     snapshot: legacy_snapshot,
+                    entrypoint_locator_identity: None,
                 },
             )
             .unwrap();
@@ -7283,6 +7499,7 @@ mod slow_tests {
                     source: InstallationSource::InheritedPath,
                     auth_scope: "default".to_string(),
                     snapshot: current_snapshot,
+                    entrypoint_locator_identity: None,
                 },
             )
             .unwrap();
@@ -7356,6 +7573,7 @@ mod slow_tests {
                     source: InstallationSource::InheritedPath,
                     auth_scope: "default".to_string(),
                     snapshot: verified_snapshot,
+                    entrypoint_locator_identity: None,
                 },
             )
             .unwrap();
@@ -7407,6 +7625,7 @@ mod slow_tests {
                     source: InstallationSource::InheritedPath,
                     auth_scope: "default".to_string(),
                     snapshot,
+                    entrypoint_locator_identity: None,
                 },
             )
             .unwrap();
@@ -7745,6 +7964,96 @@ mod slow_tests {
             .expect("lead and profile should remain queryable");
         assert_eq!(lead.as_deref(), Some("agent_1"));
         assert_eq!(status, "away");
+        drop(database);
+        std::fs::remove_dir_all(directory).expect("temporary database should be removable");
+    }
+
+    #[test]
+    fn resolved_command_shim_locator_is_durable_and_invalidates_ready_snapshot_on_change() {
+        let (mut database, directory) = production_like_database();
+        let service = AgentProfileService::default();
+        let executable = test_executable_path(&directory, "resolved-codex");
+        std::fs::write(&executable, b"native codex").unwrap();
+        let executable_path = executable.to_string_lossy().into_owned();
+        let executable_fingerprint = "sha256:test".to_string();
+        let locator = |suffix: &str| RuntimeEntrypointLocatorIdentity {
+            entrypoint_kind: "npm_cmd_shim".to_string(),
+            canonical_shim_path: directory
+                .join("npm/codex.cmd")
+                .to_string_lossy()
+                .into_owned(),
+            shim_content_digest: format!("sha256:shim-{suffix}"),
+            canonical_interpreter_path: directory
+                .join("System32/cmd.exe")
+                .to_string_lossy()
+                .into_owned(),
+            interpreter_fingerprint: "sha256:cmd".to_string(),
+            resolved_target_path: executable_path.clone(),
+            resolved_target_fingerprint: executable_fingerprint.clone(),
+            compatibility_fingerprint: format!("sha256:locator-{suffix}"),
+        };
+        let first_locator = locator("one");
+        let mut ready = ready_codex_snapshot();
+        ready.executable_fingerprint = Some(executable_fingerprint.clone());
+        let installation_id = service
+            .commit_verified_managed_installation(
+                &mut database,
+                VerifiedManagedInstallation {
+                    adapter_kind: AdapterKind::CodexCli,
+                    executable_path: executable_path.clone(),
+                    command_name: "codex".to_string(),
+                    source: InstallationSource::Manual,
+                    auth_scope: "default".to_string(),
+                    snapshot: ready.clone(),
+                    entrypoint_locator_identity: Some(first_locator.clone()),
+                },
+            )
+            .unwrap();
+        assert_eq!(
+            service
+                .runtime_entrypoint_locator_identity(&database, &installation_id)
+                .unwrap(),
+            Some(first_locator)
+        );
+
+        let second_locator = locator("two");
+        let mut light = ready;
+        light.authentication_status = "unknown".to_string();
+        light.probe_status = "light_ready".to_string();
+        light.capabilities.clear();
+        light.protocols.clear();
+        light.last_successful_probe_at = None;
+        light.native_session_compatibility_key = Some(format!(
+            "runtime-entrypoint:windows-resolved-command-shim-v1:{}",
+            second_locator.compatibility_fingerprint
+        ));
+        service
+            .commit_discovered_managed_installation(
+                &mut database,
+                DiscoveredManagedInstallation {
+                    adapter_kind: AdapterKind::CodexCli,
+                    executable_path,
+                    command_name: "codex".to_string(),
+                    source: InstallationSource::Manual,
+                    auth_scope: "default".to_string(),
+                    snapshot: light,
+                    entrypoint_locator_identity: Some(second_locator.clone()),
+                },
+            )
+            .unwrap();
+
+        let installation = service
+            .managed_installation(&database, AdapterKind::CodexCli, "default")
+            .unwrap()
+            .unwrap();
+        assert_eq!(installation.generation, 2);
+        assert_eq!(installation.snapshot.unwrap().probe_status, "light_ready");
+        assert_eq!(
+            service
+                .runtime_entrypoint_locator_identity(&database, &installation_id)
+                .unwrap(),
+            Some(second_locator)
+        );
         drop(database);
         std::fs::remove_dir_all(directory).expect("temporary database should be removable");
     }

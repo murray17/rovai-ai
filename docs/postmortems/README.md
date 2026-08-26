@@ -1,19 +1,42 @@
 ---
 document_type: postmortem-index
 authority: incident-history
-last_updated: 2026-08-05
+last_updated: 2026-08-26
 ---
 
-# Postmortems
+# 事故复盘
 
-This directory contains blameless analyses of significant failures and near misses. A postmortem
-records the best evidence available at publication time, distinguishes triggers from systemic root
-causes, and assigns measurable corrective actions.
+本目录保存重大故障与险情的无责复盘。复盘记录发布时能够取得的最佳证据，区分触发条件
+与系统性根因，并分配可测量的纠正措施。
 
-Postmortems are historical evidence. Architecture requirements belong in accepted ADRs, current
-delivery status belongs in the active version documentation, and implementation claims require
-code and reproducible validation.
+从 2026-08-26 起，本目录的复盘正文统一使用中文；代码符号、协议字段、外部产品名与无法准确
+翻译的技术标识保留原文。既有英文复盘已回译为中文。翻译不得改变事故事实、状态、数值、
+链接或纠正措施结论。
 
-| Incident date | Incident | Status |
+## 受理队员的小结
+
+每份复盘的实际受理队员都必须在文档标题后、其他说明与 `## 摘要` 前留下自己的小结。
+受理队员是负责调查并交付本次复盘的队员；有多位队员共同受理时，每人各写一段。仅执行
+翻译、链接修复或排版维护的队员不因此新增小结。
+
+```md
+> **<队员名>的小结：** <用该队员自己的语气写 2–4 句>
+```
+
+小结应先说明直接结论、系统性根因，以及最重要的修复方向或适用边界，再用该队员稳定的
+表达风格帮助读者记住事故。风格可以有性格，但其中的事实必须能由正文证据支持，不得弱化
+不确定性、归咎个人，或改变正文中的证据、状态和当前架构说明。
+
+完成标准：标题后为每位实际受理队员提供一段署名与语气相符的小结，且小结中的事实均可由
+正文证据支持。
+
+复盘是历史证据。架构要求应写入当前 Architecture/Contract 及相应决定理由；当前交付
+状态属于当前版本文档；实现主张必须由代码与可复现验证支持。复盘不能替代这些当前权威。
+
+| 事故日期 | 事故 | 状态 |
 |---|---|---|
-| 2026-08-05 | [Codex MCP Configuration Collision and AgentRun Startup Failure](2026-08-05-codex-mcp-configuration-collision.md) | Closed; follow-up actions tracked |
+| 2026-08-05 | [Codex MCP 配置冲突与 AgentRun 启动失败](2026-08-05-codex-mcp-configuration-collision.md) | 已关闭；继续跟踪后续措施 |
+| 2026-08-25 | [已回滚的 Camp 清理写入意图阻断 AgentRun 准入](2026-08-25-rolled-back-camp-cleanup-writer-intent.md) | 已关闭；继续跟踪后续措施 |
+| 2026-08-25 | [Codex 命令输出增量放大阻断 Camp 打开与恢复](2026-08-25-codex-command-output-delta-camp-open-amplification.md) | 已关闭；继续跟踪后续措施 |
+| 2026-08-26 | [Windows Codex Runtime 发现与验收隔离缺口](2026-08-26-windows-codex-runtime-discovery-and-acceptance-isolation.md) | 已关闭；继续跟踪后续措施 |
+| 2026-08-26 | [Gather 完成投递缺少公开因果展示，导致 A2A 调度误判](2026-08-26-gather-completion-causal-handoff-not-visible.md) | 事实调查已关闭；展示改进待跟踪 |

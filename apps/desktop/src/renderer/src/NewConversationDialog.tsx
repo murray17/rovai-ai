@@ -26,6 +26,7 @@ export function NewConversationDialog({
   preflight,
   agents,
   busy,
+  projectAccessReady,
   returnFocusElement,
   onOpenChange,
   onChooseWorkspaceDirectory,
@@ -40,6 +41,7 @@ export function NewConversationDialog({
   preflight: CampCreationPreflight
   agents: AgentProfile[]
   busy: boolean
+  projectAccessReady: boolean
   returnFocusElement: HTMLElement | null
   onOpenChange(open: boolean): void
   onChooseWorkspaceDirectory(): Promise<WorkspaceSelection | null>
@@ -57,6 +59,7 @@ export function NewConversationDialog({
   const [memberError, setMemberError] = useState<string | null>(null)
   const [submitError, setSubmitError] = useState<string | null>(null)
   const projectTriggerRef = useRef<HTMLButtonElement>(null)
+  const closeButtonRef = useRef<HTMLButtonElement>(null)
   const nameInputRef = useRef<HTMLInputElement>(null)
   const profileById = useMemo(
     () => new Map(agents.map((agent) => [agent.agentId, agent])),
@@ -75,6 +78,8 @@ export function NewConversationDialog({
   const nameError = nameLength > 80 ? '对话名称最多 80 个字符。' : null
   const lead = selectedMembers.find((member) => member.agentId === leadId) ?? null
   const leadProfile = lead ? profileById.get(lead.agentId) : undefined
+  const projectActionsDisabled = projectWorkspaceActionsDisabled(busy, projectAccessReady)
+  const projectSubmissionBlocked = workspaceSubmissionBlocked(workspace, projectAccessReady)
 
   useEffect(() => {
     if (!open) return
@@ -96,7 +101,7 @@ export function NewConversationDialog({
     : null
 
   useEffect(() => {
-    if (!open || !pendingGitInspectionPath) return
+    if (!workspaceInspectionShouldStart(open, projectAccessReady, pendingGitInspectionPath)) return
     let cancelled = false
     setGitInspectionStatus('loading')
     void window.rovai.request<WorkspaceInspection>('workspaces.inspect', {
@@ -110,7 +115,7 @@ export function NewConversationDialog({
       setGitInspectionStatus('failed')
     })
     return () => { cancelled = true }
-  }, [open, workspace])
+  }, [open, pendingGitInspectionPath, projectAccessReady])
 
   useEffect(() => {
     if (open && optionalOpen) nameInputRef.current?.focus()
@@ -136,6 +141,7 @@ export function NewConversationDialog({
   }
 
   const chooseWorkspaceDirectory = async (): Promise<void> => {
+    if (projectActionsDisabled) return
     setSubmitError(null)
     try {
       const selected = await onChooseWorkspaceDirectory()
@@ -151,6 +157,7 @@ export function NewConversationDialog({
   }
 
   const selectKnownWorkspace = (project: ProjectNavigationGroup): void => {
+    if (projectActionsDisabled) return
     setSubmitError(null)
     setWorkspace({ name: project.name, projectPath: project.projectPath })
     setGitInspectionStatus('idle')
@@ -159,7 +166,13 @@ export function NewConversationDialog({
 
   const submit = async (event: FormEvent): Promise<void> => {
     event.preventDefault()
-    if (busy || selectedMemberIds.length === 0 || !leadId || nameError) return
+    if (
+      busy
+      || projectSubmissionBlocked
+      || selectedMemberIds.length === 0
+      || !leadId
+      || nameError
+    ) return
     setSubmitError(null)
     try {
       await onCreate({
@@ -174,8 +187,12 @@ export function NewConversationDialog({
     }
   }
 
-  const projectLabel = workspace?.name ?? '使用快速对话'
-  const projectDetail = workspace?.projectPath ?? 'Rovai AI 管理的快速对话目录'
+  const projectLabel = projectAccessReady
+    ? workspace?.name ?? '使用快速对话'
+    : '正在载入项目…'
+  const projectDetail = projectAccessReady
+    ? workspace?.projectPath ?? 'Rovai AI 管理的快速对话目录'
+    : '正在确认本机项目访问状态'
   const gitPresentation = workspaceGitPresentation(workspace, gitInspectionStatus)
 
   return (
@@ -192,7 +209,10 @@ export function NewConversationDialog({
           aria-describedby="new-camp-dialog-description"
           onOpenAutoFocus={(event) => {
             event.preventDefault()
-            projectTriggerRef.current?.focus()
+            const focusTarget = projectAccessReady
+              ? projectTriggerRef.current
+              : closeButtonRef.current
+            focusTarget?.focus()
           }}
           onCloseAutoFocus={(event) => {
             event.preventDefault()
@@ -217,7 +237,7 @@ export function NewConversationDialog({
                 </Dialog.Description>
               </div>
               <Dialog.Close asChild>
-                <button className="dialog-close" type="button" aria-label="关闭创建新对话" disabled={busy}>×</button>
+                <button ref={closeButtonRef} className="dialog-close" type="button" aria-label="关闭创建新对话" disabled={busy}>×</button>
               </Dialog.Close>
             </header>
 
@@ -232,7 +252,8 @@ export function NewConversationDialog({
                     type="button"
                     aria-haspopup="listbox"
                     aria-expanded={projectMenuOpen}
-                    disabled={busy}
+                    aria-busy={!projectAccessReady}
+                    disabled={projectActionsDisabled}
                     onClick={() => setProjectMenuOpen((current) => !current)}
                   >
                     <span className="new-camp-picker-icon" aria-hidden="true">
@@ -258,6 +279,7 @@ export function NewConversationDialog({
                         detail="Rovai AI 管理的快速对话目录"
                         kind="quick-chat"
                         selected={workspace === null}
+                        disabled={projectActionsDisabled}
                         onSelect={() => {
                           setWorkspace(null)
                           setProjectMenuOpen(false)
@@ -271,11 +293,12 @@ export function NewConversationDialog({
                             detail={candidate.projectPath}
                             kind="project"
                             selected={workspace?.projectPath === candidate.projectPath}
+                            disabled={projectActionsDisabled}
                             onSelect={() => selectKnownWorkspace(candidate)}
                           />
                         )
                       })}
-                      <button className="new-camp-project-option choose-local" type="button" role="option" aria-selected="false" onClick={() => void chooseWorkspaceDirectory()}>
+                      <button className="new-camp-project-option choose-local" type="button" role="option" aria-selected="false" disabled={projectActionsDisabled} onClick={() => void chooseWorkspaceDirectory()}>
                         <span aria-hidden="true">＋</span><span><strong>选择工作目录…</strong><small>普通目录与 Git worktree 均可</small></span>
                       </button>
                     </div>
@@ -509,7 +532,7 @@ export function NewConversationDialog({
               </div>
               <div>
                 <Dialog.Close asChild><button className="quiet-button" type="button" disabled={busy}>取消</button></Dialog.Close>
-                <button className="primary-button" type="submit" disabled={busy || selectedMembers.length === 0 || !leadId || Boolean(nameError)}>
+                <button className="primary-button" type="submit" disabled={busy || projectSubmissionBlocked || selectedMembers.length === 0 || !leadId || Boolean(nameError)}>
                   {busy ? '正在创建…' : '创建'}
                 </button>
               </div>
@@ -519,6 +542,28 @@ export function NewConversationDialog({
       </Dialog.Portal>
     </Dialog.Root>
   )
+}
+
+export function projectWorkspaceActionsDisabled(
+  busy: boolean,
+  projectAccessReady: boolean
+): boolean {
+  return busy || !projectAccessReady
+}
+
+export function workspaceInspectionShouldStart(
+  open: boolean,
+  projectAccessReady: boolean,
+  pendingPath: string | null
+): pendingPath is string {
+  return open && projectAccessReady && pendingPath !== null
+}
+
+export function workspaceSubmissionBlocked(
+  workspace: WorkspaceChoice | null,
+  projectAccessReady: boolean
+): boolean {
+  return workspace !== null && !projectAccessReady
 }
 
 function SectionHeading({ step, title, detail, optional = false, suffix }: {
@@ -544,15 +589,16 @@ function DropdownChevron(): React.JSX.Element {
   )
 }
 
-function ProjectOption({ label, detail, kind, selected, onSelect }: {
+function ProjectOption({ label, detail, kind, selected, disabled, onSelect }: {
   label: string
   detail: string
   kind: 'quick-chat' | 'project'
   selected: boolean
+  disabled: boolean
   onSelect(): void
 }): React.JSX.Element {
   return (
-    <button className={`new-camp-project-option ${selected ? 'selected' : ''}`} type="button" role="option" aria-selected={selected} onClick={onSelect}>
+    <button className={`new-camp-project-option ${selected ? 'selected' : ''}`} type="button" role="option" aria-selected={selected} disabled={disabled} onClick={onSelect}>
       <span className="new-camp-project-option-icon" aria-hidden="true"><WorkspaceIcon kind={kind} /></span>
       <span><strong>{label}</strong><small>{detail}</small></span><b aria-hidden="true">✓</b>
     </button>

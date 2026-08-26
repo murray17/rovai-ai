@@ -105,5 +105,5 @@ Prepared image preview remains available only to the current Composer Draft and 
 ## References
 
 - [Camp Attachment v4](camp-attachment-v4.md)
-- [Camp Published Attachment View v3](camp-published-attachment-view-v3.md)
+- [Camp Published Attachment View v4](camp-published-attachment-view-v4.md)
 - [V1.20-D01](../versions/v1.20/decisions.md#v1-20-d01)

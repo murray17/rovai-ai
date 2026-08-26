@@ -1,7 +1,7 @@
 ---
 document_type: architecture-index
 authority: long-lived-architecture-routing
-last_updated: 2026-08-23
+last_updated: 2026-08-25
 ---
 
 # 长期系统架构
@@ -14,6 +14,7 @@ last_updated: 2026-08-23
 | --- | --- |
 | [Benchmark Protocol](benchmark-protocol.md) | Core 外的 Adapter/Profile/Execution/Evaluation/Reporting、Process/Outcome/Tool-Use Judge、Tool Interaction、typed Resource 与 paired counterfactual 模块 |
 | [Diagnostics Center](diagnostics-center.md) | Core 严格只读诊断组装、Skill/MCP 审计、Runtime 缓存事实、Renderer 单项修复复检、Electron v5 导出与 Startup Recovery 边界 |
+| [Desktop App Updates](desktop-app-updates.md) | Main 单一更新快照、完成后递归调度、检查来源合并、提醒代次、显式下载/安装、Renderer 深链与 updater-first 受控退出边界 |
 | [AgentRun Recovery](agent-run-recovery.md) | AgentRun、Native Session、Runtime Input Delivery 与 Native Turn 分离，accepted-input blocker、Scheduler fence、用户/预算安全收敛与未来 reconcile capability |
 | [Built-in Tool Runtime](builtin-tool-runtime.md) | 十五项固定 Agent CLI operation、`camp.read` 安全 Timeline 默认、single-Camp History target、safe Agent output projection、Core Router、Runtime Fleet、精确 help、Dynamic Context、ContextManifest/ACK 与外部 MCP 的关系 |
 | [Camp Identity](camp-identity.md) | 唯一 `rvcamp_` CampId 的生成、持久化、Context/Tool/path 流转、clean break 与 Native Session identity seam |
@@ -28,7 +29,7 @@ last_updated: 2026-08-23
 | [Camp Activation Lifecycle](camp-activation-lifecycle.md) | 一键 Pending、Composer Draft、Navigation、Restorable Location、首消息原子激活与启动清理的组件权威 |
 | [Camp Composer Draft](camp-composer-draft.md) | Structured Content、附件、持久 reply/continuation、显式接收者修复、发送物化、exact-revision user send 与 timeline projection 的组件权威 |
 | [Camp Open Read Path](camp-open-read-path.md) | Desktop 两阶段冷启动壳层、enter/reconcile、有界 SQLite open projection、渐进消息、当前会话精确查找/anchored 定位、Run detail、high-water/cache 与 meaningful-paint 后台维护边界 |
-| [Camp Published Attachment View](camp-published-attachment-view.md) | 私有 Authority、Draft/Published 授权分界、实例/Camp 隔离 Runtime View、publication gate、generation fencing、恢复与清理的组件权威 |
+| [Camp Published Attachment View](camp-published-attachment-view.md) | 私有 Authority、Draft/Published 授权分界、实例/Camp 隔离 Runtime View、publication gate、附件局部可用性、generation fencing、恢复与清理的组件权威 |
 | [First-run Onboarding](first-run-onboarding.md) | Desktop 首次安装 admission、schema 2 三页状态、无 Runtime 延后完成、幂等 Core provisioning、`初次集结` restore 与 Draft-only 第四页边界 |
 | [当前基础架构不变量](foundational-invariants.md) | Core、Camp、身份、协作、Runtime、Context、Memory、Skill、Evidence、Qualification 与 Renderer 的跨主题当前规范内核 |
 | [Skill Projection Reconciliation](skill-projection-reconciliation.md) | Skill Library desired state、bundled bootstrap 快速路径、root access ledger、事件驱动 dirty、当前 Run 完整校验 preflight、start-time SkillExposureSnapshot 与无历史目录扫描边界 |

@@ -3,7 +3,7 @@ document_type: contract
 contract: managed-runtime-process-v1
 status: accepted
 source_version: v1.05
-last_updated: 2026-08-21
+last_updated: 2026-08-25
 ---
 
 # Managed Runtime Process v1
@@ -11,7 +11,8 @@ last_updated: 2026-08-21
 本合同拥有 Core-managed Runtime/Probe 进程的跨平台启动接口与 Windows 原子 Job 语义。决策理由见
 [ADR-0211](../versions/v1.05/decisions.md#adr-0211)。Runtime terminal 与领域终态仍由既有 AgentRun、
 Fleet 与 Planned Shutdown 合同拥有；进程退出不是 Provider outcome。macOS User Automation credential 隔离的
-修正理由见[V1.21-D03](../versions/v1.21/decisions.md#v1-21-d03)。
+修正理由见[V1.21-D03](../versions/v1.21/decisions.md#v1-21-d03)。Windows command shim 扩展见
+[V1.28-D11](../versions/v1.28/decisions.md#v1-28-d11)。
 
 ## 1. Module interface
 
@@ -34,13 +35,31 @@ Core 初始化时可以向 Managed Process 配置实例级 protected local trees
 冻结，路径必须是规范化绝对路径，且不会作为普通 Runtime environment 字段暴露。所有 purpose 和 Adapter 共享
 同一保护集，调用方不能选择性关闭。
 
-Windows 第一版的 launch policy 只允许：
+Windows launch policy 只允许以下封闭 entrypoint：
 
 - 经 Runtime Platform Admission 的 native `.exe`；
-- Adapter 明确声明的 `ValidatedNodeShim`，验证受支持 shim 形状后解析到绝对 `node.exe + entry script` 并直接启动。
+- 已知 npm/pnpm Codex `.cmd` locator，经验证后解析到 platform package 内真实 native `codex.exe`；
+- bounded regular `.cmd` / `.bat` `CommandShim`，以明确的 `windows_command_shim` identity 启动。
 
-任意 `.com`、`.cmd`、`.bat`、`.ps1` 和通用 `cmd.exe /s /c` 不属于 v1。无法解析的 shim 保持 Runtime
-`not_qualified`。用户 prompt 只能经 stdin 投递。
+`.com`、`.ps1`、PowerShell fallback、PATHEXT 全量扩展和调用方自行拼装的通用 Shell command 不属于 v1。
+用户 prompt 仍只能经 stdin 投递；command shim argv 只承载 Adapter 声明的控制参数。
+
+Discovery 可以把已知 npm/pnpm 生成的 Codex `codex.cmd` 作为只读 locator：有界验证精确模板、
+`@openai/codex` entrypoint、对应 Windows x64 platform package 与固定 vendor 路径后，只把最终 canonical
+`codex.exe` 交给 fingerprint、version probe、Installation 和本接口。此时 `.cmd` 只保留 discovery
+diagnostic，不执行 `.cmd`、`node.exe` 或 Node entrypoint；最终 identity 与 executable fingerprint 均属于
+`codex.exe`。任一结构、范围或 metadata 校验失败都不能猜测或绑定其他 native executable；它只能保持为明确的
+`CommandShim` 候选并接受自身的 Probe 结果。
+
+`CommandShim` capture 必须验证绝对路径、普通非 reparse 文件与 128 KiB 有界内容，冻结 canonical shim path、
+content digest、canonical System32 `cmd.exe` path 及 interpreter fingerprint。启动前在打开的 shim/interpreter
+identity 下重新计算；任一变化都 fail closed。`lpApplicationName` 固定为已验证的 System32 `cmd.exe`，command
+line 只由 Core 的 batch-specific builder 生成，参数为 `/e:on /v:off /d /c`，不读取 AutoRun 或 Shell profile。
+builder 拒绝 NUL/CR/LF，不允许调用方提交 raw command fragment，并对空参数、空格、反斜杠、`&|<>^!` 做真实
+Windows 执行测试。由于 `cmd.exe` 无法为所有 `%1`/`%*` consumer 无损表示字面引号，且 `%...%` 可能在 batch
+内部再次展开，末尾反斜杠也会随 consumer 的 `%1`/`%*` 写法产生歧义；generic `CommandShim` 的 argv 出现 `"`、
+`%` 或末尾 `\` 时必须在 CreateProcess 前 fail closed，不能静默改变 argv 或尝试猜测脚本的二次解析方式。路径中的
+`%!&^` 仍通过冻结的内部环境变量安全传递；已验证 Codex npm/pnpm shim 则绕过 batch，直接启动 native executable。
 
 ## 2. Windows atomic launch
 
@@ -64,9 +83,20 @@ attribute 不可用、嵌套 Job 不兼容或 handle policy 不能证明时，�
 
 ## 3. Application and argv
 
-`lpApplicationName` 必须是已打开并验证身份的绝对 native executable path。mutable command line 由 argv
-serializer 生成；serializer 必须匹配目标 Runtime 的 Windows 参数解析器，不能宣称存在适用于所有程序的通用
-quoting。每个已准入 policy 至少测试空参数、空格、引号、尾部反斜杠、Unicode 和长参数。
+native entrypoint 的 `lpApplicationName` 必须是已打开并验证身份的绝对 Runtime executable path；command shim
+的 `lpApplicationName` 必须是上述已验证 System32 `cmd.exe`，shim 同时保持打开并在 CreateProcess 前复核。
+mutable command line 由 entrypoint-specific argv serializer 生成；serializer 必须匹配 native Runtime 或 Windows
+batch 的参数解析器，不能宣称存在适用于所有程序的通用 quoting。每个已准入 policy 至少测试空参数、空格、
+Unicode、长参数、cmd metacharacter 注入和脚本路径含空格，并验证字面引号、`%` 与尾部反斜杠在启动前被拒绝。
+
+compatibility identity 至少包含 entrypoint kind、canonical entrypoint path、reported version 与 executable
+fingerprint。native 使用 executable 内容 fingerprint；`windows_command_shim` 使用 domain-separated composite
+fingerprint，覆盖 canonical shim path、shim content digest、extension、canonical interpreter path 与 interpreter
+fingerprint。已验证 Codex locator 解析成功后，Installation 与正式 launch identity 仍绑定 native target；Core 另外持久化
+不公开的 locator identity，覆盖 canonical shim path/content digest、canonical interpreter path/fingerprint 以及 resolved
+target path/fingerprint。该 identity 的 domain-separated digest 进入 Session/Host compatibility；即使 `codex.exe` 未变，
+shim locator 改写也必须递增 Installation generation、撤销旧 Ready snapshot 并重新 Deep Probe。公开诊断只投影类型与
+是否解析成功，不投影用户 Home 下的 locator path。
 
 ## 4. Ownership and termination
 
@@ -106,11 +136,14 @@ pipe handle。Main 被强制终止后，Core 必须在 deadline 内通过 stdin 
 - Core 正常关闭、Core 强杀、Electron Main 强杀均在 deadline 内清除孙进程；
 - 重复压力测试无偶发逃逸，并覆盖外层 CI Job；
 - 子进程只继承声明的 stdio，不继承 Job、token 或无关文件 handle；
+- `.cmd/.bat` 的内容或 interpreter identity 变化使旧 capture 失效，timeout/cancel 清理完整 shim child tree；
+- Windows rescan 的 inherited/HKCU/HKLM/known PATH 快照同时进入 discovery、Probe 与正式 AgentRun；
 - macOS process-group 启动、终止和 Fleet 回归保持；
 - macOS 受管 shell 及其后代不能读取或写入 `automation-v1` credential/context，但仍能读取保护树外的 fixture。
 
 ## References
 
 - [ADR-0211](../versions/v1.05/decisions.md#adr-0211)
+- [V1.28-D11](../versions/v1.28/decisions.md#v1-28-d11)
 - [Windows Desktop Platform](../architecture/windows-desktop-platform.md)
 - [Planned Shutdown](../architecture/planned-shutdown.md)

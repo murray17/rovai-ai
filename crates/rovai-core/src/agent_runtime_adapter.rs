@@ -12,6 +12,11 @@ use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use url::form_urlencoded;
 
+#[cfg(windows)]
+use crate::windows_runtime_entrypoint::{
+    capture_windows_command_shim, command_shim_extension, system_cmd_executable,
+};
+
 use crate::{
     agent_profile::{
         AdapterCapabilitySnapshot, AdapterKind, AdapterPermissionConfig, ModelDescriptor,
@@ -25,7 +30,8 @@ use crate::{
     mcp::McpServerDefinition,
     platform::HostPlatformKey,
     runtime_platform_admission::{
-        GROK_BUILD_MACOS_ARM64_EVIDENCE_REVISION, MACOS_RUNTIME_COMPATIBILITY_EVIDENCE_REVISION,
+        GROK_BUILD_MACOS_ARM64_EVIDENCE_REVISION, GROK_BUILD_MACOS_X64_EVIDENCE_REVISION,
+        GROK_BUILD_WINDOWS_X64_EVIDENCE_REVISION, MACOS_RUNTIME_COMPATIBILITY_EVIDENCE_REVISION,
         RuntimePlatformAdmission, RuntimePlatformAdmissionReasonCode,
         WINDOWS_RUNTIME_COMPATIBILITY_EVIDENCE_REVISION,
     },
@@ -47,7 +53,54 @@ pub trait AgentRuntimeAdapter {
     ) -> Result<AdapterRuntimeProjection>;
 }
 
+pub const GROK_BUILD_MINIMUM_VERSION: [u64; 3] = [1, 0, 0];
+pub const GROK_BUILD_MINIMUM_VERSION_LABEL: &str = "1.0.0";
+
+pub fn grok_build_minimum_version_satisfied(reported_version: Option<&str>) -> bool {
+    reported_version
+        .and_then(parse_reported_runtime_version)
+        .is_some_and(|(version, prerelease)| {
+            version > GROK_BUILD_MINIMUM_VERSION
+                || (version == GROK_BUILD_MINIMUM_VERSION && !prerelease)
+        })
+}
+
+fn parse_reported_runtime_version(value: &str) -> Option<([u64; 3], bool)> {
+    value
+        .split(|character: char| {
+            !(character.is_ascii_alphanumeric() || matches!(character, '.' | '-' | '+' | '_'))
+        })
+        .filter(|part| !part.is_empty())
+        .find_map(|part| {
+            let digit_start = part.find(|character: char| character.is_ascii_digit())?;
+            let version = &part[digit_start..];
+            let numeric_end = version
+                .find(|character: char| !character.is_ascii_digit() && character != '.')
+                .unwrap_or(version.len());
+            let numeric = &version[..numeric_end];
+            let suffix = &version[numeric_end..];
+            let mut components = numeric.split('.');
+            let version = [
+                components.next()?.parse().ok()?,
+                components.next()?.parse().ok()?,
+                components.next()?.parse().ok()?,
+            ];
+            if components.next().is_some() {
+                return None;
+            }
+            Some((version, suffix.starts_with('-')))
+        })
+}
+
 pub fn executable_fingerprint(path: &Path) -> Result<String> {
+    #[cfg(windows)]
+    if command_shim_extension(path).is_some() {
+        return Ok(capture_windows_command_shim(path)?.compatibility_fingerprint());
+    }
+    file_content_fingerprint(path)
+}
+
+fn file_content_fingerprint(path: &Path) -> Result<String> {
     let canonical = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
     let mut file = File::open(&canonical)
         .with_context(|| format!("failed to open {}", canonical.display()))?;
@@ -88,14 +141,21 @@ pub fn observe_executable_file_identity(path: &Path) -> Result<ExecutableFileIde
         anyhow::bail!("Runtime executable is not a file: {}", canonical.display());
     }
     #[cfg(windows)]
-    if !canonical
-        .extension()
-        .is_some_and(|extension| extension.to_string_lossy().eq_ignore_ascii_case("exe"))
+    let is_command_shim = command_shim_extension(&canonical).is_some();
+    #[cfg(windows)]
+    if !is_command_shim
+        && !canonical
+            .extension()
+            .is_some_and(|extension| extension.to_string_lossy().eq_ignore_ascii_case("exe"))
     {
         anyhow::bail!(
-            "Runtime executable is not a native Windows EXE: {}",
+            "Runtime entrypoint is not a native Windows EXE or .cmd/.bat shim: {}",
             canonical.display()
         );
+    }
+    #[cfg(windows)]
+    if is_command_shim {
+        capture_windows_command_shim(&canonical)?;
     }
     #[cfg(unix)]
     {
@@ -123,12 +183,35 @@ pub fn observe_executable_file_identity(path: &Path) -> Result<ExecutableFileIde
         Some(format!("unix:{}:{}", metadata.dev(), metadata.ino()))
     };
     #[cfg(windows)]
-    let file_id = Some(windows_executable_file_id(&file).with_context(|| {
-        format!(
-            "failed to read opened Runtime identity for {}",
-            canonical.display()
-        )
-    })?);
+    let file_id = {
+        let entrypoint_file_id = windows_executable_file_id(&file).with_context(|| {
+            format!(
+                "failed to read opened Runtime identity for {}",
+                canonical.display()
+            )
+        })?;
+        if is_command_shim {
+            let interpreter = system_cmd_executable()?;
+            let interpreter_file = File::open(&interpreter).with_context(|| {
+                format!(
+                    "failed to open command interpreter {}",
+                    interpreter.display()
+                )
+            })?;
+            let interpreter_metadata = interpreter_file.metadata()?;
+            let interpreter_file_id = windows_executable_file_id(&interpreter_file)?;
+            let interpreter_modified = interpreter_metadata
+                .modified()?
+                .duration_since(UNIX_EPOCH)?
+                .as_nanos();
+            Some(format!(
+                "windows_command_shim:{entrypoint_file_id}:{interpreter_file_id}:{}:{interpreter_modified}",
+                interpreter_metadata.len()
+            ))
+        } else {
+            Some(entrypoint_file_id)
+        }
+    };
     #[cfg(not(any(unix, windows)))]
     let file_id = None;
     Ok(ExecutableFileIdentity {
@@ -179,7 +262,11 @@ pub fn verify_executable_integrity(
     expected_fingerprint: &str,
 ) -> Result<ExecutableIntegrityStatus> {
     let observed = observe_executable_file_identity(path)?;
-    if verified_identity == Some(&observed) {
+    #[cfg(windows)]
+    let requires_full_dependency_check = command_shim_extension(path).is_some();
+    #[cfg(not(windows))]
+    let requires_full_dependency_check = false;
+    if !requires_full_dependency_check && verified_identity == Some(&observed) {
         return Ok(ExecutableIntegrityStatus::Unchanged);
     }
     let current_fingerprint = executable_fingerprint(path)?;
@@ -195,11 +282,47 @@ pub struct AdapterRuntimeResolutionInput<'a> {
     pub installation_id: &'a str,
     pub executable_path: &'a str,
     pub auth_scope: &'a str,
+    pub reported_version: Option<&'a str>,
     pub executable_fingerprint: &'a str,
     pub protocols: &'a [String],
     pub native_session_compatibility_key: Option<&'a str>,
     pub permissions: &'a AdapterPermissionConfig,
     pub permission_descriptors: &'a [PermissionOptionDescriptor],
+}
+
+fn runtime_entrypoint_kind(executable_path: &str) -> &'static str {
+    #[cfg(windows)]
+    if command_shim_extension(Path::new(executable_path)).is_some() {
+        return "windows_command_shim";
+    }
+    #[cfg(not(windows))]
+    let _ = executable_path;
+    "native_executable"
+}
+
+fn runtime_entrypoint_compatibility(input: &AdapterRuntimeResolutionInput<'_>) -> Result<Value> {
+    #[cfg(windows)]
+    if command_shim_extension(Path::new(input.executable_path)).is_some() {
+        let identity = capture_windows_command_shim(Path::new(input.executable_path))?;
+        let compatibility_fingerprint = identity.compatibility_fingerprint();
+        if compatibility_fingerprint != input.executable_fingerprint {
+            anyhow::bail!("Runtime command shim compatibility identity changed before freeze");
+        }
+        return Ok(json!({
+            "entrypointKind": "windows_command_shim",
+            "canonicalShimPath": identity.shim,
+            "shimContentDigest": identity.content_digest,
+            "canonicalInterpreterPath": identity.interpreter,
+            "interpreterFingerprint": identity.interpreter_fingerprint,
+            "resolvedTarget": Value::Null,
+            "compatibilityFingerprint": compatibility_fingerprint,
+        }));
+    }
+    Ok(json!({
+        "entrypointKind": "native_executable",
+        "canonicalExecutablePath": input.executable_path,
+        "executableFingerprint": input.executable_fingerprint,
+    }))
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -570,18 +693,23 @@ impl AgentRuntimeAdapterRegistry {
             );
         }
         if kind == AdapterKind::GrokBuild {
-            if platform == HostPlatformKey::MacosArm64 {
-                return RuntimePlatformAdmission::qualified(
+            return match platform {
+                HostPlatformKey::MacosArm64 => RuntimePlatformAdmission::qualified(
                     kind,
                     platform,
                     GROK_BUILD_MACOS_ARM64_EVIDENCE_REVISION,
-                );
-            }
-            return RuntimePlatformAdmission::not_qualified(
-                kind,
-                platform,
-                RuntimePlatformAdmissionReasonCode::QualificationEvidenceMissing,
-            );
+                ),
+                HostPlatformKey::MacosX64 => RuntimePlatformAdmission::qualified(
+                    kind,
+                    platform,
+                    GROK_BUILD_MACOS_X64_EVIDENCE_REVISION,
+                ),
+                HostPlatformKey::WindowsX64 => RuntimePlatformAdmission::qualified(
+                    kind,
+                    platform,
+                    GROK_BUILD_WINDOWS_X64_EVIDENCE_REVISION,
+                ),
+            };
         }
         if platform == HostPlatformKey::WindowsX64 {
             return RuntimePlatformAdmission::qualified(
@@ -838,11 +966,17 @@ impl AgentRuntimeAdapterRegistry {
             AdapterKind::GrokBuild => grok_permission_options(),
         };
         let permission_schema_digest = adapter_permission_schema_digest(kind, &permission_options)?;
+        let grok_version_unsupported = kind == AdapterKind::GrokBuild
+            && !grok_build_minimum_version_satisfied(reported_version.as_deref());
         Ok(AdapterCapabilitySnapshot {
             reported_version,
             executable_fingerprint: Some(executable_fingerprint),
             authentication_status: "unknown".to_string(),
-            probe_status: "light_ready".to_string(),
+            probe_status: if grok_version_unsupported {
+                "light_failed".to_string()
+            } else {
+                "light_ready".to_string()
+            },
             permission_schema_version: 1,
             permission_schema_digest,
             capabilities: Vec::new(),
@@ -853,7 +987,8 @@ impl AgentRuntimeAdapterRegistry {
             last_attempted_at: observed_at,
             last_successful_probe_at: None,
             stale_at: None,
-            last_error: None,
+            last_error: grok_version_unsupported
+                .then(|| "runtime_version_below_minimum".to_string()),
             native_session_compatibility_key: None,
         })
     }
@@ -1338,7 +1473,11 @@ impl AgentRuntimeAdapter for CodexCliAdapterPolicy {
             "adapterKind": self.kind(),
             "installationId": input.installation_id,
             "executablePath": input.executable_path,
+            "entrypointKind": runtime_entrypoint_kind(input.executable_path),
             "executableFingerprint": input.executable_fingerprint,
+            "reportedVersion": input.reported_version,
+            "runtimeEntrypoint": runtime_entrypoint_compatibility(&input)?,
+            "nativeSessionCompatibilityKey": input.native_session_compatibility_key,
             "authScope": input.auth_scope,
             "protocolVersion": protocol_version,
             "permissionSchemaVersion": input.permissions.schema_version,
@@ -1749,6 +1888,20 @@ pub fn validate_machine_ready_snapshot(
         }
         return Ok(());
     }
+    if adapter_kind == AdapterKind::GrokBuild && snapshot.probe_status == "ready" {
+        validate_grok_machine_ready_evidence(
+            snapshot.reported_version.as_deref(),
+            snapshot.executable_fingerprint.as_deref(),
+            &snapshot.capabilities,
+        )?;
+        if snapshot.authentication_status != "authenticated"
+            || snapshot.models.is_empty()
+            || snapshot.permission_options.is_empty()
+        {
+            anyhow::bail!("Grok Build ready snapshot does not satisfy the machine Ready contract");
+        }
+        return Ok(());
+    }
     if adapter_kind != AdapterKind::TraeCnCli || snapshot.probe_status != "ready" {
         return Ok(());
     }
@@ -1785,6 +1938,38 @@ pub fn validate_pi_machine_ready_evidence(
                 String::new()
             } else {
                 format!(": {}", missing.join(", "))
+            }
+        );
+    }
+    Ok(())
+}
+
+pub fn validate_grok_machine_ready_evidence(
+    reported_version: Option<&str>,
+    executable_fingerprint: Option<&str>,
+    capabilities: &[String],
+) -> Result<()> {
+    let required = [
+        "acp.initialize",
+        "grok.authenticate",
+        "session.new",
+        "session.resume",
+    ];
+    let missing = required
+        .into_iter()
+        .filter(|required| !capabilities.iter().any(|capability| capability == required))
+        .collect::<Vec<_>>();
+    if !grok_build_minimum_version_satisfied(reported_version)
+        || executable_fingerprint.is_none_or(|value| value.trim().is_empty())
+        || !missing.is_empty()
+    {
+        anyhow::bail!(
+            "Grok Build machine Ready evidence requires version >= {} and standard ACP resume{}",
+            GROK_BUILD_MINIMUM_VERSION_LABEL,
+            if missing.is_empty() {
+                String::new()
+            } else {
+                format!(": missing {}", missing.join(", "))
             }
         );
     }
@@ -1896,7 +2081,7 @@ fn acp_capability_snapshot(
             .and_then(|value| value.pointer("/agentCapabilities/loadSession"))
             .and_then(Value::as_bool)
             == Some(true);
-        if supports_load {
+        if supports_load && adapter_kind != AdapterKind::GrokBuild {
             capabilities.push("session.load".to_string());
         }
         let supports_resume = observation
@@ -2554,7 +2739,10 @@ fn resolve_acp_runtime(
         "adapterKind": expected_kind,
         "installationId": input.installation_id,
         "executablePath": input.executable_path,
+        "entrypointKind": runtime_entrypoint_kind(input.executable_path),
         "executableFingerprint": input.executable_fingerprint,
+        "reportedVersion": input.reported_version,
+        "runtimeEntrypoint": runtime_entrypoint_compatibility(&input)?,
         "authScope": input.auth_scope,
         "protocolVersion": protocol_version,
         "permissionSchemaVersion": input.permissions.schema_version,
@@ -2675,7 +2863,10 @@ impl AgentRuntimeAdapter for ClaudeCodeCliAdapterPolicy {
             "adapterKind": self.kind(),
             "installationId": input.installation_id,
             "executablePath": input.executable_path,
+            "entrypointKind": runtime_entrypoint_kind(input.executable_path),
             "executableFingerprint": input.executable_fingerprint,
+            "reportedVersion": input.reported_version,
+            "runtimeEntrypoint": runtime_entrypoint_compatibility(&input)?,
             "authScope": input.auth_scope,
             "protocolVersion": protocol_version,
             "permissionSchemaVersion": input.permissions.schema_version,
@@ -2748,7 +2939,10 @@ impl AgentRuntimeAdapter for AntigravityAppAdapterPolicy {
             "adapterKind": self.kind(),
             "installationId": input.installation_id,
             "executablePath": input.executable_path,
+            "entrypointKind": runtime_entrypoint_kind(input.executable_path),
             "executableFingerprint": input.executable_fingerprint,
+            "reportedVersion": input.reported_version,
+            "runtimeEntrypoint": runtime_entrypoint_compatibility(&input)?,
             "authScope": input.auth_scope,
             "protocolVersion": protocol_version,
             "permissionSchemaVersion": input.permissions.schema_version,
@@ -2923,6 +3117,61 @@ mod tests {
         std::fs::remove_file(path).expect("remove Runtime fixture");
     }
 
+    #[cfg(windows)]
+    #[test]
+    fn windows_command_shim_compatibility_exposes_every_fenced_identity_component() {
+        let path = std::env::temp_dir().join(format!(
+            "rovai-runtime-command-shim-{}.cmd",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::write(&path, b"@echo runtime 1.0.0\r\n").unwrap();
+        let fingerprint = executable_fingerprint(&path).unwrap();
+        let executable_path = path.to_string_lossy().into_owned();
+        let protocols = Vec::new();
+        let permissions = AdapterPermissionConfig {
+            adapter_kind: AdapterKind::CodexCli,
+            schema_version: 1,
+            values: json!({}),
+        };
+        let permission_descriptors = Vec::new();
+        let input = AdapterRuntimeResolutionInput {
+            installation_id: "command-shim-test",
+            executable_path: &executable_path,
+            auth_scope: "local_user",
+            reported_version: Some("1.0.0"),
+            executable_fingerprint: &fingerprint,
+            protocols: &protocols,
+            native_session_compatibility_key: None,
+            permissions: &permissions,
+            permission_descriptors: &permission_descriptors,
+        };
+        let compatibility = runtime_entrypoint_compatibility(&input).unwrap();
+        assert_eq!(
+            compatibility["entrypointKind"],
+            json!("windows_command_shim")
+        );
+        for key in [
+            "canonicalShimPath",
+            "shimContentDigest",
+            "canonicalInterpreterPath",
+            "interpreterFingerprint",
+            "compatibilityFingerprint",
+        ] {
+            assert!(
+                compatibility.get(key).is_some_and(|value| !value.is_null()),
+                "missing command-shim compatibility field {key}"
+            );
+        }
+        assert!(compatibility["resolvedTarget"].is_null());
+
+        std::fs::write(&path, b"@echo runtime 2.0.0\r\n").unwrap();
+        assert!(
+            runtime_entrypoint_compatibility(&input).is_err(),
+            "stale shim fingerprint must fail Runtime freeze"
+        );
+        std::fs::remove_file(path).unwrap();
+    }
+
     fn descriptor(key: &str, scope: RuntimeOptionScope) -> PermissionOptionDescriptor {
         PermissionOptionDescriptor {
             key: key.to_string(),
@@ -2960,6 +3209,7 @@ mod tests {
                 installation_id: "codex-local",
                 executable_path: "/opt/bin/codex",
                 auth_scope: "local_user",
+                reported_version: Some("1.0.0"),
                 executable_fingerprint: "sha256:one",
                 protocols: &protocols,
                 native_session_compatibility_key: Some("codex-cli:app-server-v2"),
@@ -2973,6 +3223,7 @@ mod tests {
                 installation_id: "codex-local",
                 executable_path: "/opt/bin/codex",
                 auth_scope: "local_user",
+                reported_version: Some("1.0.0"),
                 protocols: &protocols,
                 native_session_compatibility_key: Some("codex-cli:app-server-v2"),
                 permissions: &permissions,
@@ -2984,9 +3235,23 @@ mod tests {
                 installation_id: "codex-local",
                 executable_path: "/opt/bin/codex",
                 auth_scope: "local_user",
+                reported_version: Some("1.0.0"),
                 executable_fingerprint: "sha256:one",
                 protocols: &protocols,
                 native_session_compatibility_key: Some("codex-cli:app-server-v3"),
+                permissions: &permissions,
+                permission_descriptors: &descriptors,
+            })
+            .expect("runtime should resolve");
+        let changed_reported_version = adapter
+            .resolve_runtime(AdapterRuntimeResolutionInput {
+                installation_id: "codex-local",
+                executable_path: "/opt/bin/codex",
+                auth_scope: "local_user",
+                reported_version: Some("1.1.0"),
+                executable_fingerprint: "sha256:one",
+                protocols: &protocols,
+                native_session_compatibility_key: Some("codex-cli:app-server-v2"),
                 permissions: &permissions,
                 permission_descriptors: &descriptors,
             })
@@ -2999,9 +3264,17 @@ mod tests {
             resolved.host_config_digest,
             upgraded_host.host_config_digest
         );
+        assert_ne!(
+            resolved.host_config_digest, changed_reported_version.host_config_digest,
+            "reported version must fence the Runtime Host configuration"
+        );
         assert_eq!(
             resolved.binding_compatibility_digest, changed_session_key.binding_compatibility_digest,
             "the Adapter session key is persisted and evaluated independently"
+        );
+        assert_ne!(
+            resolved.host_config_digest, changed_session_key.host_config_digest,
+            "the native session key must fence a Runtime Host"
         );
         let current_contract_digest = canonical_json_digest(&json!({
             "adapterKind": AdapterKind::CodexCli,
@@ -3224,14 +3497,17 @@ mod tests {
         let snapshot = AgentRuntimeAdapterRegistry::default()
             .acp_capability_snapshot(AcpProbeObservation {
                 adapter_kind: AdapterKind::GrokBuild,
-                reported_version: Some("grok 0.2.118".to_string()),
+                reported_version: Some("grok 1.0.0".to_string()),
                 executable_fingerprint: Some("sha256:grok".to_string()),
                 authentication_status: "authenticated".to_string(),
                 probe_status: "ready".to_string(),
                 capabilities: vec!["grok.authenticate".to_string()],
                 initialize_result: Some(json!({
                     "protocolVersion": 1,
-                    "agentCapabilities": {"loadSession": true}
+                    "agentCapabilities": {
+                        "loadSession": true,
+                        "sessionCapabilities": {"resume": {}}
+                    }
                 })),
                 session_result: Some(json!({
                     "sessionId": "grok-test",
@@ -3268,9 +3544,53 @@ mod tests {
                 .contains(&"context.charter.native_append".to_string())
         );
         assert!(
+            snapshot
+                .capabilities
+                .contains(&"session.resume".to_string())
+        );
+        assert!(!snapshot.capabilities.contains(&"session.load".to_string()));
+        assert!(
             !snapshot
                 .capabilities
                 .contains(&"context.charter.first_payload".to_string())
+        );
+        validate_machine_ready_snapshot(AdapterKind::GrokBuild, &snapshot)
+            .expect("Grok >= 1.0.0 with ACP resume should satisfy Ready");
+
+        let mut load_only = snapshot;
+        load_only
+            .capabilities
+            .retain(|capability| capability != "session.resume");
+        assert!(validate_machine_ready_snapshot(AdapterKind::GrokBuild, &load_only).is_err());
+    }
+
+    #[test]
+    fn grok_minimum_version_gate_is_release_aware() {
+        assert!(!grok_build_minimum_version_satisfied(Some("grok 0.2.118")));
+        assert!(!grok_build_minimum_version_satisfied(Some(
+            "grok 1.0.0-beta.1"
+        )));
+        assert!(grok_build_minimum_version_satisfied(Some("grok 1.0.0")));
+        assert!(grok_build_minimum_version_satisfied(Some(
+            "grok v1.1.0 (build)"
+        )));
+        assert!(!grok_build_minimum_version_satisfied(Some(
+            "grok development"
+        )));
+        assert!(!grok_build_minimum_version_satisfied(None));
+
+        let old = AgentRuntimeAdapterRegistry::default()
+            .light_ready_snapshot(
+                AdapterKind::GrokBuild,
+                Some("grok 0.2.118".to_string()),
+                "sha256:grok-old".to_string(),
+                "2026-08-25T00:00:00Z".to_string(),
+            )
+            .unwrap();
+        assert_eq!(old.probe_status, "light_failed");
+        assert_eq!(
+            old.last_error.as_deref(),
+            Some("runtime_version_below_minimum")
         );
     }
 
@@ -3495,6 +3815,7 @@ mod tests {
                         installation_id: "copilot-local",
                         executable_path: "/opt/bin/copilot",
                         auth_scope: "local_user",
+                        reported_version: Some("1.0.0"),
                         executable_fingerprint: "sha256:test",
                         protocols: &protocols,
                         native_session_compatibility_key: Some("copilot-cli:acp-v1"),
@@ -3536,6 +3857,7 @@ mod tests {
                         installation_id: "kiro-local",
                         executable_path: "/opt/bin/kiro-cli",
                         auth_scope: "local_user",
+                        reported_version: Some("1.0.0"),
                         executable_fingerprint: "sha256:test",
                         protocols: &protocols,
                         native_session_compatibility_key: Some("kiro-cli:acp-v1"),
@@ -3620,6 +3942,7 @@ mod tests {
                         installation_id: "agy-local",
                         executable_path: "/opt/bin/agy",
                         auth_scope: "local_user",
+                        reported_version: Some("1.0.0"),
                         executable_fingerprint: "sha256:test",
                         protocols: &protocols,
                         native_session_compatibility_key: Some("antigravity-app:cli-v1"),

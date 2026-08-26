@@ -345,6 +345,21 @@ export interface CommandHealth {
 
 export type RuntimeDiscoveryStatus = 'detecting' | 'found' | 'missing'
 
+export type RuntimeSearchPathSource =
+  | 'inherited_path'
+  | 'user_registry_path'
+  | 'machine_registry_path'
+  | 'login_shell'
+  | 'known_location'
+
+export type RuntimeDiscoveryEntrypointKind =
+  | 'native_executable'
+  | 'npm_cmd_shim'
+  | 'pnpm_cmd_shim'
+  | 'windows_command_shim'
+
+export type RuntimeCandidateExtension = 'native' | 'exe' | 'cmd' | 'bat'
+
 export interface RuntimeDiscoveryObservation {
   runtimeKind: AdapterKind
   discoveryStatus: RuntimeDiscoveryStatus
@@ -352,6 +367,11 @@ export interface RuntimeDiscoveryObservation {
   source: Exclude<InstallationSource, 'custom'> | null
   reportedVersion: string | null
   executableFingerprint: string | null
+  searchPathSource: RuntimeSearchPathSource | null
+  entrypointKind: RuntimeDiscoveryEntrypointKind | null
+  candidateExtension: RuntimeCandidateExtension | null
+  resolvedNativeTarget: boolean
+  versionProbeSucceeded: boolean | null
   searchGeneration: number
   observedAt: string
   diagnosticCode: string | null
@@ -1106,6 +1126,7 @@ export interface AgentRunView {
     | 'planned_shutdown_completed'
     | 'planned_shutdown_failed'
     | 'planned_shutdown_cancelled'
+    | 'runtime_interrupted'
     | null
   failure: RuntimeFailureView | null
   runtimeModel: { modelId: string | null } | null
@@ -1794,6 +1815,7 @@ export interface AppearanceApi {
 export type AppUpdateStatus =
   | 'idle'
   | 'checking'
+  | 'available'
   | 'up_to_date'
   | 'downloading'
   | 'ready_to_install'
@@ -1809,22 +1831,41 @@ export type AppUpdateFailureReason =
   | 'download_failed'
   | 'install_failed'
 
+export type AppUpdateCheckSource = 'startup' | 'interval' | 'manual'
+
+export interface AppUpdateRelease {
+  version: string
+  releaseName: string | null
+  releaseDate: string | null
+  releaseNotes: string | null
+}
+
+export interface AppUpdatePrompt {
+  id: string
+  version: string
+}
+
 export interface AppUpdateSnapshot {
   currentVersion: string
   status: AppUpdateStatus
-  latestVersion: string | null
+  availableRelease: AppUpdateRelease | null
+  lastCheckSource: AppUpdateCheckSource | null
   checkedAt: string | null
+  lastSuccessfulCheckAt: string | null
   downloadPercent: number | null
   transferredBytes: number | null
   totalBytes: number | null
   bytesPerSecond: number | null
   failureReason: AppUpdateFailureReason | null
+  pendingPrompt: AppUpdatePrompt | null
 }
 
 export interface AppUpdatesApi {
   get(): Promise<AppUpdateSnapshot>
   check(): Promise<AppUpdateSnapshot>
+  download(): Promise<AppUpdateSnapshot>
   install(): Promise<boolean>
+  dismissPrompt(promptId: string): Promise<boolean>
   onChanged(listener: (snapshot: AppUpdateSnapshot) => void): () => void
 }
 

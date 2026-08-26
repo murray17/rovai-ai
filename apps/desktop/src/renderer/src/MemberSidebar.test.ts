@@ -132,6 +132,11 @@ function availability(
       source: 'inherited_path',
       reportedVersion: 'runtime 1.0.0',
       executableFingerprint: 'sha256:test',
+      searchPathSource: 'inherited_path',
+      entrypointKind: 'native_executable',
+      candidateExtension: 'native',
+      resolvedNativeTarget: false,
+      versionProbeSucceeded: true,
       searchGeneration: 1,
       observedAt: '2026-08-01T00:00:00Z',
       diagnosticCode: null

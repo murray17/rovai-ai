@@ -1,7 +1,7 @@
 ---
 document_type: architecture
 authority: current-foundational-invariants
-last_updated: 2026-08-24
+last_updated: 2026-08-26
 ---
 
 # 当前基础架构不变量
@@ -85,8 +85,8 @@ last_updated: 2026-08-24
 - Authority Attachment 始终位于 `<data_dir>/camp-attachments/`；Prepared Attachment、Agent Run-local ingress 与 private metadata 只供 Core 使用。发送事务 commit 后的 `message_attachment` 才是 Camp 公共事实，消息寻址、Prompt、Run、Conversation 或 Session 都不缩小其 Camp-wide 可见性。
 - Timeline 用户打开只以已发布 Authority Attachment 为来源。Renderer 只提交 canonical Camp/Attachment identity；Core 必须匹配同 Camp `message_attachment` 并重验精确受管路径、类型、receipt 与 no-follow tree，Desktop Main 才能执行原生确认和系统 Shell。Authority path 与原始系统错误不得进入 Renderer；Runtime projection state 只影响队员读取，不禁用仍完整的 Authority preview/open/reveal。Unix Camp root 保持 traversal-only `0100`，精确 Attachment container 使用不可写且可枚举的 `0500`，payload 文件/目录保持 `0400/0500`；legacy container 只在完整校验和 per-Camp admission 内收敛。Main 必须在 best-effort reveal 前验证 parent 可枚举且 target 仍存在，不能因 Electron `void` 调用未抛错就宣称成功。
 - 同一 Authority instance/Camp 的 root 权限切换、child create/remove、Agent/Composer ingress、失败清理和 Camp removal 必须经过跨 Store 实例共享的 per-Camp admission；已持有者不得重入。不同 Camp 可并行，且该 admission 不得把文件 copy/hash 带入 Database mutex 或 built-in invocation guard。
-- Runtime 不读取 Authority Camp tree，只获得实例隔离、可重建的 Published Attachment View 精确 `attachments` 根。只有 `runtime_projection_state = available` 的公共附件属于 Runtime Desired Catalog；`pending | recovery_required` 阻断新 Runtime admission，`failed` 保留公共/UI 事实但只有 resolution tombstone、没有 Runtime path。
-- Composer 与 Agent ingress 共享统一 publication coordinator：短事务先提交公共语义、revision、reservation、writer intent 与 gate，Worker 再按 Camp FIFO 在数据库锁外 copy/verify/fsync。Scheduler 必须先取得一次 read admission，再在同一数据库临界区确认无 writer intent并 Claim；完整 Run 复用该 admission。成功和 terminal failure 都推进 contiguous resolved revision，failed 不得被 rebuild 静默复活。
+- Runtime 不读取 Authority Camp tree，只获得实例隔离、可重建的 Published Attachment View 精确 `attachments` 根。只有 `runtime_projection_state = available` 的公共附件属于当前 Runtime Desired Catalog；未解决 publication 的 `pending | recovery_required` writer intent 阻断新 Runtime admission，`failed` 保留公共/UI 事实但只有 resolution tombstone、没有 Runtime path。已成功解决的附件后来因 Authority 缺失或 kind/size/digest/tree 校验失败进入 `recovery_required` 时，只从新 Context、path resolver 与物理 View 省略该附件，不改变其成功发布历史，也不阻断 Camp。
+- Composer 与 Agent ingress 共享统一 publication coordinator：短事务先提交公共语义、revision、reservation、writer intent 与 gate，Worker 再按 Camp FIFO 在数据库锁外 copy/verify/fsync。Scheduler 必须先取得一次 read admission并完成 full verification；失败时释放 read admission，在 bounded write admission 内从 Authority 重建或局部降级异常附件，随后最多重试一次。成功 authorization、Claim 与完整 Run 复用同一 read admission；Claim 仍须确认无 writer intent。成功和 terminal failure 都推进 contiguous resolved revision，failed 不得被 rebuild 静默复活。
 - 首次安装 admission 与训练进度由 Electron Main 在 Core 启动前以私有版本化 Desktop 状态拥有；产品数据库存在性参与 clean/fail-closed 判定。正常 Provisioning 通过可重试 checkpoint 幂等创建首个成员、Runtime 选择和“初次集结”Camp/Draft，不把半完成状态伪装为已完成；无可用 Runtime 且 provisioning 尚未开始时可以原子完成为 `runtime_deferred`，但不得创建成员、Runtime 配置、Camp、Run 或 onboarding restore target，也不得在以后启动时重新打开训练营。
 - Camp 永久删除保持 User-only、exact-version 和单事务聚合删除。普通模式要求 quiescent；用户明确确认的 force 模式先持久化停止/隔离边界，再删除 Camp 聚合并异步清理受管资源，不能把未知 Runtime 外部效果宣称为已撤销。
 
@@ -185,7 +185,7 @@ last_updated: 2026-08-24
 - 每个 Run 的文件、Shell、Git、网络和 Runtime tool 权限由接收 Runtime 的冻结配置拥有；Rovai Core 继续强制产品自有路径、凭据、受管内容和领域命令安全。A2A 不获得调用者 workspace 参数。
 - Product Runtime Catalog 是编译时封闭的可执行 Adapter 集合；只有具备 Adapter、所需 built-in/MCP 能力、深检、冻结 Run 配置和必要 evidence 的 Runtime 才能进入。兼容性候选留在研究文档；Settings 可以显示明确标记为 pending/unsupported 的静态 Preview，但 Preview 不是 AdapterKind、Installation、Readiness、成员选项或执行能力，也不进入 Core/Contract。
 - Catalog 与本机 Availability、成员 Readiness 是三个独立层。Core 拥有 discovery、check attempt、capability snapshot、退避和结果缓存；Renderer 只读缓存、发送 ensure/check 意图并展示一个可操作主状态，不从路径、版本或错误文本自行判定可执行性。
-- Core 在启动时构建不可变 Runtime Search Environment，按既有 Installation、显式自定义入口、Adapter 专用环境、继承/login-shell `PATH` 与平台已知目录的受控优先级规范化候选。它不修改全局 `PATH`，不收集 Shell 其他环境或凭据，发现、检查和真实启动都显式使用冻结快照。
+- Core 在启动和每次 rescan 时构建不可变 Runtime Search Environment。Windows 上，手动绝对路径、Adapter 专用环境 override、自动 PATH/known locations 是依次封闭的 candidate set；显式入口失败不能回退另一个同名 Runtime。Windows 每次 capture 只读合并 inherited process PATH、HKCU User PATH、HKLM Machine PATH 与 known locations，按该顺序稳定、大小写不敏感去重，并忽略无效或不存在目录；Registry 失败不阻断 inherited PATH。冻结 PATH 同时用于发现、version/deep/health Probe、AgentRun 与 Runtime 必要子命令。Windows 同目录候选只允许 `.exe → .cmd → .bat`，不随 PATHEXT 放开 `.ps1`。Codex npm/pnpm `.cmd` 只可作为受限 locator 解析到 package 内真实 native `codex.exe`；解析成功后脚本、Node entrypoint 与 `node.exe` 不成为 Installation 或 launch identity，但 Core 必须内部持久化 canonical shim/content、System32 interpreter identity 及 resolved target identity 的 locator evidence。locator digest 参与 Installation generation、snapshot 与 Host compatibility；shim 改写即使仍指向同一 native executable 也撤销旧 Ready evidence。其他 `.cmd/.bat` 必须保持 `windows_command_shim` identity，其 canonical path、内容 digest 与 canonical System32 interpreter identity 共同 fence snapshot/Host，并只经 Managed Runtime Process 的受控 batch serializer 启动。
 - 静态 discovery/rescan 只允许路径、权限、文件身份和 Adapter 声明的无副作用有界身份命令。纯找到可执行文件是 `found_uninspected`；身份命令成功才可形成 `light_ready`，但二者都不声称认证、协议、模型、Session 或 capability Ready。启动、页面打开、成员选择、过期和重扫不自动深检；深检只由用户明确检查、模型 Picker 的按需刷新或真实 Run 的统一 Dispatch Preflight 触发。
 - Runtime Check Manager 是 deep-verification attempt 生命周期的唯一所有者：同 Runtime 最多一个在途 attempt，全局上限为二，执行优先于显式检查。Ready/StableFailure/Superseded/error/timeout/panic/abort/cancel/shutdown 经同一 finalize 收口，提交必须同时匹配 search generation 与 fingerprint；短命进程必须有独立进程树、绝对 deadline、有界输出和有界 cleanup。Managed resolution 不在 Adapter Deep Probe 外重复启动 version gate；每轮包含 version 在内的完整 Probe 前后复核 executable file identity。首次被更新取代时在原 attempt/deadline 内重新绑定当前 path/fingerprint 并最多重试一次；第二次仍变化只 deferred，不持久化失败或唤醒执行，并在三秒进程内冷却后允许 Scheduler 自动发起新的有界 attempt。
 - executable fingerprint 变化立即撤销旧 Deep Probe 对当前 Runtime 的 Ready、capability、认证、动态权限与 Session compatibility 资格。旧成功 models 与原 `lastSuccessfulProbeAt` 可以在既有 24 小时窗口内作为 stale LKG 保留，到期即 expired；它只服务模型选择体验，不能证明当前 binary 的模型支持或绕过 Dispatch Preflight。公开 `lastProbeAttempt` 只投影当前 snapshot fingerprint 的 attempt，旧行只保留历史诊断价值。
@@ -205,7 +205,7 @@ last_updated: 2026-08-24
 - `AgentRuntimeFleetManager` 是唯一正式进程所有者，内聚 spawn/reuse/stop/reap、唯一 lease、Resident accounting、TTL/LRU/Sweeper、Core generation 与崩溃清理。Adapter 生成 opaque compatibility digest 并证明 health/quiescence；Manager 不解析模型、权限、MCP 或 Runtime 私有字段。所有事件、释放、取消与迟到回调必须匹配不可复制的 `process_id + agent_run_id + execution_epoch + lease_generation`。
 - Reusable Host 的 `ROVAI_RUN_TMP` 使用进程稳定 exact path，但每次 bind 必须在 active lease/context 前 fail-closed 清空、重建并恢复私有权限；unbind/fence best-effort 清理不能替代下一 bind 重置。所有 Adapter 只把 execution workspace、当前 Camp exact attachment root 和该 exact writable Run tmp 交给 Runtime，不暴露 process root/父目录；file ingress 同时绑定 process、lease generation、Run、epoch 与 exact root。
 - IdleWarm 复用必须精确匹配 `camp_id + agent_profile_id + runtime_compatibility_digest`；process digest 与 Native Session binding digest 是不同身份。Resident 的 per-member/global 配额只约束跨 Run 保留的 IdleWarm/BusyResident/Stopping，不阻止无兼容 Resident 时创建本 Run 独占且终态即关闭的 Burst。acquire 在一个锁下原子选择兼容空闲进程、Resident 容量或 Burst，必要时按 LRU 淘汰空闲 Resident。
-- Runtime compatibility 必须绑定 Camp Published Attachment View contract 3、精确 `attachments` root、visibility mode 和必要 generation。没有真实 live-append Probe 时一律 generation-fenced；View mutation 在 write admission 内停止旧 Host。Runtime 不能收到 pending/failed path、instance/Camps parent、其他 Camp 或 Authority attachment root。
+- Runtime compatibility 必须绑定 Camp Published Attachment View contract 4、精确 `attachments` root、visibility mode 和必要 generation。没有真实 live-append Probe 时一律 generation-fenced；View mutation 在 write admission 内停止旧 Host。Runtime 不能收到 pending/recovery-required/failed path、instance/Camps parent、其他 Camp 或 Authority attachment root。
 - Run 结束只有在输入结果已知、输出和 tool work 收敛、Team/Run lease 已解绑且 Adapter 能证明进程 quiescent/healthy 时才可进入 IdleWarm；否则必须关闭。Fleet 启动时必须同时启动单调时间 TTL 与 LRU Sweeper，配置变更、Camp 删除、成员永久移除、不健康和容量回收也会立即使精确 scope 失效/停止；已冻结活跃 Run 只标记 run 后退役，不被容量策略中断。
 - IdleWarm 可保留精确冻结的外部 MCP 投影、Runtime 内存、私有配置与其进程/连接直到 TTL、失效或容量回收；这不等于 AgentRun 终态即撤销外部凭据。空闲期没有活跃 Run lease，built-in/Team 调用 fail closed；不能证明安全保留精确字节时必须关闭整个 Runtime。
 - Fleet 是单一 Core generation 的内存状态，不写 SQLite、不跨重启接管。正常关闭停止并 reap 全部进程；崩溃清理只能在 owner record、旧 generation、进程组组长与命令身份均可证明时终止，不能仅凭 PID、路径或 UID 猜测性杀进程。
@@ -366,7 +366,7 @@ last_updated: 2026-08-24
 - Canonical Runtime Activity 是 Core 从不可变 Evidence 构建、持久但可重建的版本化投影，不是新的效果真源。Lifecycle/Read Side 只从选定的 canonical projection 派生，不跳过它直接从 Runtime 标题或 evidence payload 猜状态。
 - `source_event_key` 与 Core-scoped `operationId` 是严格分离的身份：前者只在一个已声明 observation scope 内去重单个来源事件，后者才能跨 phase/evidence 合并同一操作。Core 只接受协议原生 ID、自有调用/receipt 关联或 Adapter 按封闭规则构造的可证明身份；不用时间、文本、路径或顺序相似性聚合。重放使用同一规则得到同一 identity/归约结果。
 - Activity Domain（历史字段名 `capabilityKind`）是稳定顶层观测域；可选 `semanticKind` 只能在 Evidence 支持时细分，`presentationHint` 永不成为 canonical semantics。Domain/kind 词汇扩展必须在 Mapping Registry 注册、版本化并提供 replay fixture；无证据时保留已有域或 `unknown`。
-- `phase` 只表示 started/progress/terminal 位置，`outcome` 独立表示证据支持的结果。乱序、冲突、waiting、Run 终态和 recovery 使用同一 reducer，不能从进程退出或 UI 消失猜 success/cancelled。
+- `phase` 只表示 started/progress/terminal 位置，`outcome` 独立表示证据支持的结果。乱序、冲突、waiting、Run 终态和 recovery 使用同一 reducer，不能从进程退出或 UI 消失猜 success/cancelled。Runtime 明确报告连续性中断时，未结算 operation 使用 `phase=terminal / outcome=unsettled / reasonCode=runtime_interrupted`；只有 Runtime 的权威取消终态才能写成 `cancelled`，仍可恢复的 Host 失联继续属于 recovery 而不是 interruption terminal。
 - 每个 operation 的默认 classifier/version 首次建立后固定。新分类器通过显式平行 reprojection 和可追溯迁移产生，不静默改写历史，也不中途改变 live operation 语义。
 - 分类升级生成显式平行 projection/version，携带来源 Evidence set、classifier/mapping digest、输出 digest 和可回滚迁移记录；默认历史读取保持首次建立版本，live operation 不中途换 classifier。当前产品只维护一张 current Canonical Activity Projection 和当前 Mapping Registry；任意历史身份 replay 基础设施未准入前，不伪造已支持的重放能力。
 - 所有已接入 Runtime 共享同一 Activity contract/schema；Coverage level 只描述 Adapter 能实际观测的 `fine_grained | run_level | unknown`，不降级全局合同，也不表示未观测操作未发生。初始分层和每次升级都必须有真实 Runtime evidence、Registry 变更、fixture 与恢复一致性验证。
@@ -377,6 +377,20 @@ last_updated: 2026-08-24
   相邻 raw object 字段不公开；command 观察必须绑定同一原生 operation identity，terminal 优先采用自身当前的
   公共 command，仅在缺失时回退 started phase 缓存，不能要求 Renderer 从 digest、title、output 或私有
   terminal 还原。
+- Codex `command.output.delta` 只是 stdout/stderr 运输片段。未来无 `id` 的
+  `item/commandExecution/outputDelta` 在 Codex Host stdout ingress 的当前 Native Thread/Turn route 读锁内分类；
+  精确当前 route 与非空 `itemId` 记为 current delta，旧 Turn、已 deactivate/unbind、字段缺失及 legacy
+  `command/exec/outputDelta` 记为 rejected delta，两类都在构造或发送 `CodexIncoming` 前直接丢弃。带 `id` 的
+  同名 JSON-RPC request 不参与 early-drop，继续走既有 request response 路径；Core 的漏网防御在 shutdown route
+  permit、batching、Runtime lookup 和数据库读取前无条件丢弃 delta notification。因为没有任何 delta 接受态或可变
+  sink，该路径不再执行 Run/epoch/lease 数据库 admission；terminal 尚未被 Core 消费的竞态中即使分类为 current，
+  结果仍是丢弃。它不写 Execution Evidence、不推进 Canonical Activity、不创建 Managed Blob，也不进入 Renderer
+  live event state。
+  `item/completed` 的 `aggregatedOutput` 是 Command 最终输出的唯一权威，大输出继续按既有阈值进入 Managed Blob。
+  已存在的历史 delta Evidence/Blob 保持原样且仍可读取，本规则不迁移、删除、重写或重建历史。
+- Adapter 必须优先从原生 terminal semantic event 提供完整公开输出。若未来某个 Adapter 无法提供完整 terminal
+  aggregate，只能在 Adapter 内使用有硬上限、Run 结束即删除的临时 spool，并在 terminal 生成完整或明确
+  truncated 的单一结果；Core 与 Renderer 都不得无限拼接字符串，也不得退回逐片段持久化。
 
 <a id="evidence-usage"></a>
 

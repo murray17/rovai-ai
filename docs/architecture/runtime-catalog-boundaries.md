@@ -301,22 +301,23 @@ Grok 模型/provider 直接使用官方 `$GROK_HOME/config.toml` 的 `[models]`�
 
 正式 AgentRun 继承用户原生 `HOME` / `GROK_HOME`。BYOK Probe 把官方 `config.toml`、managed config 与
 requirements config 复制到临时 `GROK_HOME`，不复制 `.env`；account-auth Probe 为读取既有 cached token
-保留原生 Home。官方配置摘要同时 fence warm Host 与 cold HistoryRestore。
+保留原生 Home。官方配置摘要同时 fence warm Host 与 Native Session resume。
 
 Grok/MiniMax `<think>` 若由 Runtime 作为普通 `agent_message_chunk` 发出，就与其他 ACP agent text 一样原样
 进入执行台 Evidence、Camp final 与 Missing-Send，不做 provider-specific 清洗或重分类。`_x.ai/*`
 notification 只作为已知 Session metadata/lifecycle 安全路由。Runtime Fleet LRU 保留 compatible warm
-Host/Session；当前版本没有
-resume advertisement，cold continuation 只用 exact `session/load` HistoryRestore，replay 在 bounded loading
-phase 隔离，失败后只允许一次 fresh fallback。
+Host/Session。三个宿主平台共享 `grok >= 1.0.0` 最低版本门；light discovery 低于门槛时为 `light_failed`，
+Deep Probe 与 Ready 必须观察 `initialize.agentCapabilities.sessionCapabilities.resume` 对象。cold continuation
+只调用 exact `session/resume`；Grok 不声明或选择 `session.load` 产品能力，失败后只允许一次 fresh fallback。
+其他 Runtime 的通用 load/HistoryRestore 路径不变。
 
 External MCP 为 `AdditivePerRun / NativeWinsSkip`。`grok 0.2.118` 的 ACP Session 忽略 `mcpServers`，Core 因此
 在私有 Runtime 目录生成临时 Plugin 并用 process `--plugin-dir` 追加；`grok inspect --json` 已发现的所有
 native 名称都保留，冲突 Assignment skip，不同名 Server 可追加，完整集合进入 Host compatibility，Plugin 随
 Host 清理。Core 不写 project/user config。managed Skill 投影到 `.grok/skills`。Usage/Cost 保持 Disabled。
 
-`grok-build × macos-arm64` 只绑定独立 adapter-scoped qualification evidence；macOS x64 与 Windows x64
-保持 `not_qualified / runtime_platform.qualification_evidence_missing`。
+`grok-build × macos-arm64`、`grok-build × macos-x64` 与 `grok-build × windows-x64` 分别绑定独立、目标主机
+生成的 adapter-scoped qualification evidence；三个宿主平台不得互相继承 evidence digest。
 
 ## Pi Coding Agent 当前边界
 
@@ -348,8 +349,10 @@ Compaction、结构化 Usage、Skill/MCP 完整 lifecycle、六类 output/Missin
 
 ## 队员最高权限默认
 
-Runtime Host compatibility 还绑定 Camp Attachment View contract 3。Scheduler 在 Camp read admission 内、Claim
-之前检查持久 publication writer intent；存在 pending/recovery operation 时 Run 保持 queued。一次 dispatch 的
+Runtime Host compatibility 还绑定 Camp Attachment View contract 4。Scheduler 在 Camp read admission 内完成
+full verification；校验失败时释放 read admission，在 bounded write admission 内做一次 Authority rebuild/附件局部
+降级并重试。Claim 之前仍检查持久 publication writer intent；存在 unresolved pending/recovery operation 时 Run
+保持 queued，已成功 resolved 附件的当前 `recovery_required` 只省略该附件。一次 dispatch 的
 Context freeze、Runtime authorization、Host acquire/resume 和 input delivery 复用同一 admission 与 verified
 authorization，不能在公平 writer 排队后再次申请 read gate，也不能对同一 View 重复全量扫描。
 

@@ -766,6 +766,12 @@ try {
       runtimeCount: observed.length,
       canonicalToolRows: totalToolRows,
       codexLifecycleMergedToOneRow: observed.find((row) => row.runtime === 'Codex CLI')?.toolTitles.length === 1,
+      toolGroupsCollapsedByDefault: observed.every((row) => row.toolTitles.length === 0
+        ? row.groupingDefaults.groupCount === 0
+        : row.groupingDefaults.groupCount === 1 && row.groupingDefaults.openGroupCount === 0),
+      toolResultsLazyBeforePreciseDisclosure: observed.every(
+        (row) => row.groupingDefaults.resultRegionCount === 0
+      ),
       sameAgentRunsShareOneProcess: observed.find((row) => row.agentId === activeAgentId)?.runCount === 2,
       recoveryBlockerPresentation,
       runningRunFocusedWithEvidence: observed.find((row) => row.agentId === activeAgentId)?.focusedEvidenceOpen === true,
@@ -1938,7 +1944,15 @@ async function collectRuntimeRows(cdp) {
     } else {
       await wait(150)
     }
-    rows.push(await evaluate(cdp, `(() => {
+    const groupingDefaults = await evaluate(cdp, `(() => ({
+      groupCount: document.querySelectorAll('.execution-drawer details.tool-activity-group').length,
+      openGroupCount: document.querySelectorAll('.execution-drawer details.tool-activity-group[open]').length,
+      resultRegionCount: document.querySelectorAll('.execution-drawer .tool-call-result-scroll').length,
+      labels: [...document.querySelectorAll('.execution-drawer .tool-group-summary')]
+        .map((summary) => summary.getAttribute('aria-label') ?? '')
+    }))()`)
+    await openToolActivityGroups(cdp)
+    const row = await evaluate(cdp, `(() => {
       const selectedMember = ${JSON.stringify(memberName)}
       const article = [...document.querySelectorAll(${JSON.stringify(runArticleSelector)})]
         .find((candidate) => candidate.querySelector('.bubble-meta strong')?.textContent?.trim() === selectedMember)
@@ -1972,6 +1986,38 @@ async function collectRuntimeRows(cdp) {
             summaryAriaLabel: toolRow.matches('summary')
               ? toolRow.getAttribute('aria-label')
               : null
+          }
+        })
+      const toolGroupLayouts = [...document.querySelectorAll('.execution-drawer .tool-group-summary')]
+        .map((summary) => {
+          const icon = summary.querySelector('.tool-group-icon')
+          const iconSvg = icon?.querySelector('svg')
+          const copy = summary.querySelector('.tool-group-copy')
+          const line = summary.querySelector('.tool-group-line')
+          const state = summary.querySelector('.tool-group-state')
+          const disclosure = summary.querySelector('.tool-group-disclosure')
+          const summaryStyle = getComputedStyle(summary)
+          const iconRect = icon?.getBoundingClientRect()
+          const iconSvgRect = iconSvg?.getBoundingClientRect()
+          const copyRect = copy?.getBoundingClientRect()
+          const stateRect = state?.getBoundingClientRect()
+          const disclosureRect = disclosure?.getBoundingClientRect()
+          return {
+            display: summaryStyle.display,
+            childCount: summary.children.length,
+            iconWidth: iconRect?.width ?? 0,
+            iconHeight: iconRect?.height ?? 0,
+            iconSvgWidth: iconSvgRect?.width ?? 0,
+            iconSvgHeight: iconSvgRect?.height ?? 0,
+            copyHeight: copyRect?.height ?? 0,
+            iconCopyCenterDelta: iconRect && copyRect
+              ? Math.abs((iconRect.top + iconRect.height / 2) - (copyRect.top + copyRect.height / 2))
+              : Number.POSITIVE_INFINITY,
+            lineHeight: line ? getComputedStyle(line).lineHeight : null,
+            stateWidth: stateRect?.width ?? 0,
+            disclosureWidth: disclosureRect?.width ?? 0,
+            statusLabel: state?.getAttribute('aria-label') ?? null,
+            summaryAriaLabel: summary.getAttribute('aria-label') ?? null
           }
         })
       const modelPresentations = stages.map((stage) => {
@@ -2033,6 +2079,10 @@ async function collectRuntimeRows(cdp) {
         toolStateAnimations: [...document.querySelectorAll('.execution-drawer .tool-call-state')]
           .map((node) => getComputedStyle(node).animationName),
         toolLayouts,
+        toolGroupLayouts,
+        openToolGroupCount: document.querySelectorAll(
+          '.execution-drawer details.tool-activity-group[open]'
+        ).length,
         toolSourceLabelCount: document.querySelectorAll('.execution-drawer .tool-call-source').length,
         hasVisibleSourceLabel: /Core 已验证|Runtime 报告/.test(
           document.querySelector('.execution-drawer')?.textContent ?? ''
@@ -2040,9 +2090,18 @@ async function collectRuntimeRows(cdp) {
         body: article?.querySelector('.message-content')?.textContent?.trim()
           ?? article?.querySelector('.safe-markdown')?.textContent?.trim() ?? ''
       }
-    })()`))
+    })()`)
+    rows.push({ ...row, groupingDefaults })
   }
   return rows
+}
+
+async function openToolActivityGroups(cdp) {
+  await evaluate(cdp, `(() => {
+    document.querySelectorAll('.execution-drawer details.tool-activity-group:not([open]) > summary')
+      .forEach((summary) => summary.click())
+    return true
+  })()`)
 }
 
 async function collectFocusedRuntimeModelLayout(cdp) {
@@ -2163,6 +2222,8 @@ async function verifyResponsiveRuntimeModelLayouts(cdp, capturesDirectory) {
   const openedLongResultAtZoom = await evaluate(cdp, `(() => {
     const disclosure = [...document.querySelectorAll('.execution-drawer details.tool-call-disclosure')]
       .find((candidate) => candidate.querySelector('.tool-call-title')?.textContent?.trim() === ${JSON.stringify(codexExpectedCommand)})
+    const group = disclosure?.closest('details.tool-activity-group')
+    if (group && !group.open) group.querySelector(':scope > summary')?.click()
     if (disclosure && !disclosure.open) disclosure.querySelector(':scope > summary')?.click()
     return Boolean(disclosure)
   })()`)
@@ -2566,15 +2627,18 @@ async function verifyCompleteToolOutput(cdp) {
   const opened = await evaluate(cdp, `(() => {
     const disclosure = [...document.querySelectorAll('.execution-drawer details.tool-call-disclosure')]
       .find((candidate) => candidate.querySelector('.tool-call-title')?.textContent?.trim() === ${JSON.stringify(codexExpectedCommand)})
+    const group = disclosure?.closest('details.tool-activity-group')
     const beforeText = disclosure?.querySelector('.tool-call-detail')?.textContent ?? ''
+    if (group && !group.open) group.querySelector(':scope > summary')?.click()
     if (disclosure && !disclosure.open) disclosure.querySelector('summary')?.click()
     return {
       found: Boolean(disclosure),
+      groupOpen: group?.open ?? false,
       fullResultAbsentBeforeExpansion: !beforeText.includes(${JSON.stringify(longToolOutputMiddleMarker)})
         && !beforeText.includes(${JSON.stringify(longToolOutputLastMarker)})
     }
   })()`)
-  assert(opened.found && opened.fullResultAbsentBeforeExpansion,
+  assert(opened.found && opened.groupOpen && opened.fullResultAbsentBeforeExpansion,
     `Long Tool output was missing or loaded before expansion: ${JSON.stringify(opened)}`)
   await waitForExpression(cdp, `(() => {
     const result = document.querySelector('.execution-drawer .tool-call-result-scroll')
@@ -2607,6 +2671,7 @@ async function verifyCompleteToolOutput(cdp) {
       tabIndex: result?.tabIndex ?? null,
       ariaLabel: result?.getAttribute('aria-label') ?? null,
       summaryAriaLabel: summary?.getAttribute('aria-label') ?? null,
+      groupOpen: disclosure?.closest('details.tool-activity-group')?.open ?? false,
       resultHeight: rect?.height ?? 0,
       overscrollBehavior: style?.overscrollBehavior ?? null,
       scrollbarGutter: style?.scrollbarGutter ?? null,
@@ -2630,6 +2695,7 @@ async function verifyCompleteToolOutput(cdp) {
     && presentation.tabIndex === 0
     && presentation.ariaLabel?.includes('完整结果')
     && presentation.summaryAriaLabel === null
+    && presentation.groupOpen
     && presentation.resultHeight <= 221
     && presentation.overscrollBehavior === 'contain'
     && presentation.scrollbarGutter?.includes('stable')
@@ -2685,7 +2751,8 @@ async function verifyCompleteToolOutput(cdp) {
     return {
       outerRatio: ratio(body),
       resultRatio: ratio(result),
-      disclosureOpen: result.closest('details.tool-call-disclosure')?.open ?? false
+      disclosureOpen: result.closest('details.tool-call-disclosure')?.open ?? false,
+      groupOpen: result.closest('details.tool-activity-group')?.open ?? false
     }
   })()`)
   await waitForExpression(cdp,
@@ -2704,6 +2771,7 @@ async function verifyCompleteToolOutput(cdp) {
       && drawer === window.__rovaiExecutionDrawerIdentity
       && result === window.__rovaiToolResultIdentity
       && result?.closest('details.tool-call-disclosure')?.open
+      && result?.closest('details.tool-activity-group')?.open
       && (body.scrollHeight - body.clientHeight <= 1
         || Math.abs(ratio(body) - ${JSON.stringify(readingStart.outerRatio)}) <= .03)
       && Math.abs(ratio(result) - ${JSON.stringify(readingStart.resultRatio)}) <= .03
@@ -2729,6 +2797,7 @@ async function verifyCompleteToolOutput(cdp) {
         sameDrawer: drawer === window.__rovaiExecutionDrawerIdentity,
         sameResult: result === window.__rovaiToolResultIdentity,
         open: result?.closest('details.tool-call-disclosure')?.open ?? false,
+        groupOpen: result?.closest('details.tool-activity-group')?.open ?? false,
         outer: body ? reading(body) : null,
         result: result ? reading(result) : null
       }
@@ -2750,7 +2819,8 @@ async function verifyCompleteToolOutput(cdp) {
       sameResult: result === window.__rovaiToolResultIdentity,
       outerRatio: ratio(body),
       resultRatio: ratio(result),
-      open: result?.closest('details.tool-call-disclosure')?.open ?? false
+      open: result?.closest('details.tool-call-disclosure')?.open ?? false,
+      groupOpen: result?.closest('details.tool-activity-group')?.open ?? false
     }
   })()`)
   await evaluate(cdp,
@@ -2767,6 +2837,7 @@ async function verifyCompleteToolOutput(cdp) {
       && drawer === window.__rovaiExecutionDrawerIdentity
       && result === window.__rovaiToolResultIdentity
       && result?.closest('details.tool-call-disclosure')?.open
+      && result?.closest('details.tool-activity-group')?.open
       && Math.abs(ratio(body) - ${JSON.stringify(readingStart.outerRatio)}) <= .03
       && Math.abs(ratio(result) - ${JSON.stringify(readingStart.resultRatio)}) <= .03
   })()`
@@ -2791,6 +2862,7 @@ async function verifyCompleteToolOutput(cdp) {
         sameDrawer: drawer === window.__rovaiExecutionDrawerIdentity,
         sameResult: result === window.__rovaiToolResultIdentity,
         open: result?.closest('details.tool-call-disclosure')?.open ?? false,
+        groupOpen: result?.closest('details.tool-activity-group')?.open ?? false,
         outer: body ? reading(body) : null,
         result: result ? reading(result) : null
       }
@@ -2814,19 +2886,23 @@ async function verifyCompleteToolOutput(cdp) {
       sameResult: result === window.__rovaiToolResultIdentity,
       outerRatio: ratio(body),
       resultRatio: ratio(result),
-      open: result?.closest('details.tool-call-disclosure')?.open ?? false
+      open: result?.closest('details.tool-call-disclosure')?.open ?? false,
+      groupOpen: result?.closest('details.tool-activity-group')?.open ?? false
     }
     delete window.__rovaiExecutionDrawerIdentity
     delete window.__rovaiToolResultIdentity
     return value
   })()`)
   assert(readingStart.disclosureOpen
+    && readingStart.groupOpen
     && inspectorReading.sameDrawer
     && inspectorReading.sameResult
     && inspectorReading.open
+    && inspectorReading.groupOpen
     && bottomReading.sameDrawer
     && bottomReading.sameResult
-    && bottomReading.open,
+    && bottomReading.open
+    && bottomReading.groupOpen,
   `Execution console placement did not preserve DOM identity and reading state: ${JSON.stringify({
     readingStart,
     inspectorReading,
@@ -2861,15 +2937,19 @@ async function verifyClaudeCommandDisclosure(cdp) {
     const disclosure = [...document.querySelectorAll('.execution-drawer details.tool-call-disclosure')]
       .find((candidate) => candidate.querySelector('.tool-call-title')?.textContent?.trim()
         === ${JSON.stringify(claudeExpectedCommand)})
+    const group = disclosure?.closest('details.tool-activity-group')
+    if (group && !group.open) group.querySelector(':scope > summary')?.click()
     disclosure?.querySelector('summary')?.click()
     return {
       found: Boolean(disclosure),
+      groupOpen: group?.open ?? false,
       open: disclosure?.open ?? false,
       detail: disclosure?.querySelector('.tool-call-detail pre')?.textContent ?? '',
       staticCount: document.querySelectorAll('.execution-drawer .tool-call-static .tool-call-title').length
     }
   })()`)
   assert(presentation.found
+    && presentation.groupOpen
     && presentation.open
     && presentation.detail.includes('ROVAI_CLAUDE_EMPTY_OUTPUT_OK')
     && presentation.staticCount === 0,
@@ -3021,6 +3101,7 @@ async function verifyExecutionDrawerResizeControl(cdp) {
 }
 
 async function verifyExecutionAutoFollowControl(cdp) {
+  await openToolActivityGroups(cdp)
   await evaluate(cdp, `(() => {
     document.querySelectorAll('.execution-drawer details.tool-call-disclosure:not([open]) > summary')
       .forEach((summary) => summary.click())
@@ -3184,10 +3265,34 @@ function assertRuntimeRows(observed) {
         `Long Codex model id did not exercise single-line ellipsis: ${JSON.stringify(row)}`)
     }
     if (expected.expectedToolName === null) {
-      assert(row.toolTitles.length === 0,
+      assert(row.toolTitles.length === 0
+        && row.groupingDefaults.groupCount === 0
+        && row.toolGroupLayouts.length === 0,
         `${expected.runtimeName} invented an unreported tool: ${JSON.stringify(row)}`)
       continue
     }
+    assert(row.groupingDefaults.groupCount === 1
+      && row.groupingDefaults.openGroupCount === 0
+      && row.groupingDefaults.resultRegionCount === 0
+      && row.groupingDefaults.labels.length === 1
+      && row.groupingDefaults.labels[0]
+      && row.openToolGroupCount === 1,
+    `${expected.runtimeName} Tool group was not collapsed by default or mounted a result eagerly: ${JSON.stringify(row)}`)
+    assert(row.toolGroupLayouts.length === 1
+      && row.toolGroupLayouts.every((layout) => layout.display === 'grid'
+        && layout.childCount === 4
+        && Math.abs(layout.iconWidth - 16) <= .5
+        && Math.abs(layout.iconHeight - 16) <= .5
+        && Math.abs(layout.iconSvgWidth - 16) <= .5
+        && Math.abs(layout.iconSvgHeight - 16) <= .5
+        && layout.copyHeight >= 16
+        && layout.iconCopyCenterDelta <= .5
+        && layout.lineHeight === '16px'
+        && Math.abs(layout.stateWidth - 16) <= .5
+        && Math.abs(layout.disclosureWidth - 20) <= .5
+        && layout.statusLabel
+        && layout.summaryAriaLabel),
+    `${expected.runtimeName} Tool group did not keep four fixed tracks and an accessible summary: ${JSON.stringify(row)}`)
     assert(row.toolTitles.length === 1 && row.toolTitles[0] === expected.expectedToolName,
       `${expected.runtimeName} tool title mismatch: ${JSON.stringify(row)}`)
     assert(row.toolLayouts.length === 1
@@ -3201,8 +3306,17 @@ function assertRuntimeRows(observed) {
         && layout.statusLabel
         && layout.summaryAriaLabel === null),
     `${expected.runtimeName} Tool row did not keep four fixed tracks and a 16px SVG: ${JSON.stringify(row)}`)
-    if (expected.cancelledWithInProgressActivity) {
+    if (expected.agentId === activeAgentId) {
+      assert(row.focusedStatus === 'running'
+        && row.toolGroupLayouts[0]?.statusLabel === '执行中'
+        && row.toolGroupLayouts[0]?.summaryAriaLabel === `执行中：${expected.expectedToolName}`
+        && row.toolStates.length === 1
+        && row.toolStates[0].label === '成功'
+        && row.toolStates[0].status === 'completed',
+      `${expected.runtimeName} settled live-tail Tool group did not retain active feedback: ${JSON.stringify(row)}`)
+    } else if (expected.cancelledWithInProgressActivity) {
       assert(row.focusedStatus === 'cancelled'
+        && row.toolGroupLayouts[0]?.statusLabel === '已停止'
         && row.toolStates.length === 1
         && row.toolStates[0].label === '已停止'
         && row.toolStates[0].status === 'stopped'
@@ -3210,7 +3324,8 @@ function assertRuntimeRows(observed) {
         && row.toolStateAnimations[0] === 'none',
       `${expected.runtimeName} cancelled Run did not stop its in-progress activity presentation: ${JSON.stringify(row)}`)
     } else {
-      assert(row.toolStates.length === 1
+      assert(row.toolGroupLayouts[0]?.statusLabel === '全部成功'
+        && row.toolStates.length === 1
         && row.toolStates[0].label === '成功'
         && row.toolStates[0].status === 'completed',
       `${expected.runtimeName} terminal Tool state was not a concise accessible success marker: ${JSON.stringify(row)}`)

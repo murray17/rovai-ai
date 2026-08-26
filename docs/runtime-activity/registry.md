@@ -2,7 +2,7 @@
 document_type: runtime-activity-mapping-registry
 authority: runtime-activity-mapping-catalog
 classifier_version: activity-v1
-last_updated: 2026-08-25
+last_updated: 2026-08-26
 ---
 
 # Runtime Activity Mapping Registry
@@ -21,7 +21,7 @@ last_updated: 2026-08-25
 | `trae-cn-cli` | TRAE CLI CN | ACP v1 | `fine_grained` | 同 ACP 合同；标准 `rawInput.command` 与 TRAE Bash 实测 `rawInput.Command` 的非空字符串进入公开 input，`Description` 等相邻字段保持私有；命令结构补全缺失的 execute kind；同 `toolCallId` 的 terminal 自带 command/kind/digest；Terminal content 只作 display anchor | 实测 `Command + Description` started、相邻 raw 字段排除、非 TRAE 大写字段 fail-closed、稀疏 terminal、非零 exit code 与固定 `printf` fixture 已建立 | `traecli 0.120.52` completion/cancel、Approval allow/deny、Missing-Send tool→final 与 MCP Projection 正式 Smoke 通过；六类 command 的 started/terminal 展示通过；正式 full matrix 仍被既有 nonzero status 漂移阻断 |
 | `cursor-agent` | Cursor Agent | ACP v1 | `run_level` | 仅采用 ACP 标准 Session/Prompt 终态；`cursor/update_todos`、`cursor/task`、`cursor/generate_image` 保持私有且不生成 Activity，未知 Cursor 扩展 fail closed；认证和结构化工具事件尚未完成真实 admission | 私有 request 路由、私有 notification 隔离与 Runtime-level unknown fallback fixture 已建立 | `2026.08.11-e8db854` 隔离探测通过 initialize；authenticate 超时且未取得 authenticated Session，因此无 completion/tool smoke，不声明细粒度 coverage |
 | `kimi-code-cli` | Kimi Code | ACP v1 | `run_level` | 标准 ACP Shell update 保留稳定 Tool ID、公开 command/output 与 terminal；普通 `agent_message_chunk` 原样进入 agent text Evidence，不按 provider 或 `<think>` 标签清洗；缺少结构化事件时不补造细粒度 Activity | Kimi run-level mapping、Tool chronology、generic agent-text 与 Runtime-level fallback fixture 已建立 | `kimi 0.32.0` + MiniMax M3 真实 prompt、Shell allow/deny、固定 `printf` output、cancel、cleanup 与完整十五项 Built-in CLI matrix 通过；`run_level` 只表示缺少结构化事件时不补造细粒度 Activity，不否定 Built-in transport 资格 |
-| `grok-build` | Grok Build | ACP v1 | `run_level` | 标准 ACP tool update 按既有安全归一；`_x.ai/*` notification 保持 metadata，普通 assistant text 原样进入 agent text Evidence；缺少结构化 Tool 事件时不补造细粒度 Activity | Grok run-level mapping、官方 config、generic agent-text 与 Missing-Send fixture 已建立 | `grok 0.2.118` + MiniMax-M3 的 macOS arm64 真实矩阵由 v1.28 adapter-scoped evidence 冻结；Usage/Cost 不从 vendor metadata 推断 |
+| `grok-build` | Grok Build | ACP v1 | `run_level` | 标准 ACP tool update 按既有安全归一；`_x.ai/*` notification 保持 metadata，普通 assistant text 原样进入 agent text Evidence；缺少结构化 Tool 事件时不补造细粒度 Activity | Grok run-level mapping、官方 config、generic agent-text 与 Missing-Send fixture 已建立 | macOS arm64、macOS x64 与 Windows x64 已分别用 `grok 1.0.5` + MiniMax-M3 通过真实 Deep Probe、AgentRun 与 cold resume；`0.2.118` 原始矩阵保留为历史证据；Usage/Cost 不从 vendor metadata 推断 |
 | `pi` | Pi Coding Agent | Pi JSONL RPC v1 | `fine_grained` | 原生 `tool_execution_start/end` 的稳定 Tool call ID、Tool name、公开 input/result 形成唯一 lifecycle；`message_end.message` 是 assistant snapshot，`agent_settled` 是唯一成功 terminal；MCP proxy 归一为 `mcpToolCall` | Pi JSONL parser、managed Approval、Tool lifecycle、final/accepted receipt 与 unknown shape fail-closed fixture 已建立 | `0.84.2` 已完成基础 native-default、exact resume、allow/deny 与 cancel smoke；新版 Checklist 要求的六类 command output、三类 Missing-Send 与真实 MCP Tool call 尚未形成完整不可变资格证据 |
 | `claude-code-cli` | Claude Code | Claude stream-json + bounded stderr fallback | `fine_grained` | `tool_use.id` 是 lifecycle identity；Bash/Read/Edit/Write 等原生名称映射到既有 kind；仅 Bash 的公开 `input.command` 进入 started 与 terminal input，仅 Bash tool result 的公开 stdout/stderr 进入 output；公开 `text_delta` 进入 narration；session-bound `system/api_retry` 只投影固定 code/status、次数和等待秒数，不产生 Tool | partial + complete message 去重、started→terminal command 自包含、空输出 Bash、narration/fallback、stdout 未结束前 structured retry diagnostic 与 provider error/UUID/Session/raw stderr 不泄露 fixture 通过 | 既有 Skill turn 与 MCP projection 通过；`2.1.220` 原生 Bash command-output、公开 narration、Session continuation 与实际 `system/api_retry` 429 重试流已实证；完整展示 post-fix smoke 待运行 |
 | `antigravity-app` | Antigravity | Antigravity stream-json / legacy text | `run_level` | capability-gated stream-json 使用 `conversation_id + step_index` 作为结构化 tool identity；仅 Shell 工具公开 `tool_info.parameters.CommandLine` 为 `input.command`，terminal 缺失 parameters 时按相同 identity 补齐；`toolName` 保留原生 ID 但不作为标题；旧版 text 保持 run-level，私有日志不产生工具 Evidence | stream-json command/lifecycle/output、非 Shell 输入排除与 legacy fallback fixture 通过 | 既有 manual completion + Skill turn 通过；`agy 1.1.13` 原生 `run_command` output、Session continuation 与 AGY→Codex handoff smoke 通过 |
@@ -92,6 +92,28 @@ command output 与生命周期投影，不把一次 pass 扩大为所有模型�
 恢复后的同一 Evidence shape，不创造新事实，也不扩大其他 Runtime 的 command input 边界。Codex `0.147.0` 的本地 app-server schema 与实际 AgentRun
 均证明 `commandExecution.title` 可以为空，而 `commandActions` 是协议必填字段；修复 fixture 使用该真实
 wire shape，Core post-fix live smoke 仍需单独运行。
+
+### Command output durability audit
+
+2026-08-26 对全部 13 个 Adapter 的归一化路径逐项核验后，terminal output 权威如下：
+
+| 协议路径 | Adapter identities | terminal semantic output | 临时输出片段 |
+|---|---|---|---|
+| Codex app-server | identity：`codex-cli` | `item/completed` 的 `commandExecution.aggregatedOutput`，并保留 `command`、`status`、`exitCode` | 无 `id` 的 `command.output.delta` 在 Host stdout ingress 按当前 Thread/Turn route 分类后直接丢弃，不进入 `CodexIncoming`；legacy shape fail closed |
+| ACP v1 | identities：`opencode-cli`、`copilot-cli`、`kiro-cli`、`qoder-cli`、`codebuddy-cli`、`qwen-code`、`trae-cn-cli`、`cursor-agent`、`kimi-code-cli`、`grok-build` | terminal `tool_call_update` 归一为一条 `runtime.action.payload.output` | 这十个 Adapter 不产生 `command.output.delta` |
+| Claude stream-json | identity：`claude-code-cli` | terminal Bash `tool_result` 归一为一条 `runtime.action.payload.output` | 不产生 `command.output.delta` |
+| Antigravity stream-json | identity：`antigravity-app` | terminal tool step 归一为一条 `runtime.action.payload.output` | 不产生 `command.output.delta` |
+
+因此当前 Adapter 均不需要输出 spool。未来只有在原生 terminal 无法给出完整 aggregate 时，才允许 Adapter-owned
+临时 spool；它必须有明确硬上限、生成完整或明确 truncated 的 terminal result，并在 Run 结束后删除。Core 或
+Renderer 不得用无界字符串 accumulator 补偿协议缺口，也不得把片段逐条持久化。
+
+Codex 的 transport-only delta 不写 Execution Evidence、不更新 Canonical Activity、不创建 Managed Blob，也不进入
+Renderer `liveRuntimeEvents`。Host ingress 对精确当前 Thread/Turn + 非空 `itemId` 与 stale/malformed/unbound/legacy
+分别给出 current/rejected 分类，但两者都在同一 route 读锁下消费并丢弃；因此 terminal 尚未被 Core 消费前的 delta
+即使仍分类为 current，也没有可更新的状态。带 `id` 的同名 request 保持 request response 路径，下游漏网 guard 位于
+shutdown route permit、batching、Runtime lookup 与数据库之前。既有历史 `command.output.delta` Evidence/Blob 不迁移、
+不删除、不重写，并继续由历史只读展示路径解析。
 
 ### ACP v1
 
@@ -165,6 +187,9 @@ Canonical Activity 分类，结构化 kind 仍映射 `shell.execute`。
 - 只有相同 operationId 合并；
 - lifecycle completion 可以只报告 identity/status；这类稀疏更新只推进 phase/outcome，不得用 Evidence-kind fallback 覆盖同一 operation 已报告的结构化 domain、semantic kind 或 title；
 - terminal 冲突为 `unsettled`；
+- Runtime 明确报告 interruption 时，已 started 且尚未结算的 operation 归约为
+  `phase=terminal / outcome=unsettled / reasonCode=runtime_interrupted`，Renderer 显示 stopped/interrupted；
+  只有 Runtime 权威取消终态才归约为 `cancelled`；
 - 无结构化工具名时显示 presentation hint 或 activity-domain fallback，不伪造函数名；
 - title、provider 和 Runtime 名称永远不决定 domain 或 identity；唯一例外是 Adapter 白名单公开的 ACP
   `rawInput.command`，以及仅 `trae-cn-cli` 的 `rawInput.Command`，可在原生 kind 缺失时证明

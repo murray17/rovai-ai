@@ -83,6 +83,12 @@ import {
   nextConversationFindIndex,
   pendingConversationFindStatus
 } from './camp-conversation-find'
+import {
+  groupConsecutiveToolItems,
+  toolActivityGroupHasActiveTool,
+  toolActivityGroupPresentation,
+  type ToolProgressItem
+} from './execution-tool-grouping'
 
 const NON_TERMINAL_RUNS = new Set(['queued', 'running', 'waiting'])
 const EXECUTION_EVIDENCE_PAGE_LIMIT = 1_000
@@ -495,9 +501,13 @@ export function attachmentDropIsBlocked({
 export function agentRunTerminalNote(
   run: Pick<AgentRunView, 'terminalReasonCode'>
 ): string | null {
-  return run.terminalReasonCode === 'planned_shutdown_cancelled'
-    ? '因 Rovai 计划关闭，执行引擎已确认取消本次执行。'
-    : null
+  if (run.terminalReasonCode === 'planned_shutdown_cancelled') {
+    return '因 Rovai 计划关闭，执行引擎已确认取消本次执行。'
+  }
+  if (run.terminalReasonCode === 'runtime_interrupted') {
+    return '执行连续性已中断，最终结果无法确认；本次执行未被记为已取消。'
+  }
+  return null
 }
 
 export function agentRunShowsUnsettledWarning(
@@ -7040,9 +7050,10 @@ function ToolCallRow({
   completeEvidence?: PresentableExecutionEvidence
 }): JSX.Element {
   const [expanded, setExpanded] = useState(false)
+  const [activated, setActivated] = useState(false)
   const summaryRef = useRef<HTMLElement>(null)
   const status = activityStatusForAgentRun(step.status, runStatus)
-  const hasDetail = Boolean(step.detail)
+  const hasDetail = Boolean(step.detail) || completeEvidence !== undefined
   const summary = (
     <>
       <ToolCallIcon activityDomain={step.activityDomain} />
@@ -7076,18 +7087,120 @@ function ToolCallRow({
     <details
       className={`process-action tool-call-disclosure status-${status}`}
       data-activity-domain={step.activityDomain}
-      onToggle={(event) => setExpanded(event.currentTarget.open)}
+      onToggle={(event) => {
+        const nextExpanded = event.currentTarget.open
+        setExpanded(nextExpanded)
+        if (nextExpanded) setActivated(true)
+      }}
     >
       <summary ref={summaryRef} className="tool-call-summary">{summary}</summary>
-      <ToolCallDetail
-        campId={campId}
-        detail={step.detail}
-        completeEvidence={completeEvidence}
-        expanded={expanded}
-        resultKey={`${runId}:${step.id}`}
-        title={step.title}
-        summaryRef={summaryRef}
-      />
+      {activated && (
+        <ToolCallDetail
+          campId={campId}
+          detail={step.detail}
+          completeEvidence={completeEvidence}
+          expanded={expanded}
+          resultKey={`${runId}:${step.id}`}
+          title={step.title}
+          summaryRef={summaryRef}
+        />
+      )}
+    </details>
+  )
+}
+
+function ToolActivityGroupIcon(): JSX.Element {
+  return (
+    <span className="tool-group-icon" aria-hidden="true">
+      <svg viewBox="0 0 16 16" focusable="false">
+        <circle cx="2.25" cy="4" r="0.65" />
+        <circle cx="2.25" cy="8" r="0.65" />
+        <circle cx="2.25" cy="12" r="0.65" />
+        <path d="M5 4h8M5 8h8M5 12h8" />
+      </svg>
+    </span>
+  )
+}
+
+function ToolActivityGroupState({ status, label }: { status: string; label: string }): JSX.Element {
+  return (
+    <span
+      className={`tool-group-state status-${status}`}
+      role="img"
+      aria-label={label}
+      title={label}
+    />
+  )
+}
+
+function ToolActivityGroup({
+  campId,
+  items,
+  liveTail,
+  runId,
+  runStatus,
+  completeEvidence
+}: {
+  campId: string
+  items: ToolProgressItem[]
+  liveTail: boolean
+  runId: string
+  runStatus: AgentRunView['status']
+  completeEvidence: {
+    byToolId: Map<string, PresentableExecutionEvidence>
+  }
+}): JSX.Element {
+  const presentation = toolActivityGroupPresentation(items, runStatus, liveTail)
+  return (
+    <details className={`tool-activity-group status-${presentation.status}`}>
+      <summary
+        className="tool-group-summary"
+        aria-label={presentation.accessibleLabel}
+        aria-live="polite"
+        aria-atomic="true"
+      >
+        <ToolActivityGroupIcon />
+        <span className="tool-group-copy" aria-hidden="true">
+          <span className="tool-group-line">
+            <strong>{presentation.primary}</strong>
+            {presentation.currentTitle && (
+              <>
+                <span className="tool-group-separator">·</span>
+                <span className="tool-group-current" title={presentation.currentTitle}>
+                  {presentation.currentTitle}
+                </span>
+              </>
+            )}
+            {presentation.countLabel && (
+              <>
+                <span className="tool-group-separator">·</span>
+                <span className="tool-group-count">{presentation.countLabel}</span>
+              </>
+            )}
+          </span>
+        </span>
+        <ToolActivityGroupState status={presentation.status} label={presentation.statusLabel} />
+        <span className="tool-group-disclosure" aria-hidden="true">
+          <svg viewBox="0 0 16 16" focusable="false">
+            <path d="m4.75 6.25 3.25 3.5 3.25-3.5" />
+          </svg>
+        </span>
+      </summary>
+      <div className="tool-group-items">
+        {items.map((item) => {
+          const step = item.step
+          return (
+            <ToolCallRow
+              key={item.key}
+              campId={campId}
+              step={step}
+              runId={runId}
+              runStatus={runStatus}
+              completeEvidence={completeEvidence.byToolId.get(step.id)}
+            />
+          )
+        })}
+      </div>
     </details>
   )
 }
@@ -7166,9 +7279,24 @@ export function RunExecutionDisclosure({
     .filter(isPresentableExecutionEvidence)
   const effectiveProgress = historicalProgress ?? progress
   const finalKey = finalBody ? comparableMessageText(finalBody) : null
-  const processItems = (effectiveProgress?.items ?? []).filter((item) =>
+  const processItems = useMemo(() => (effectiveProgress?.items ?? []).filter((item) =>
     item.kind !== 'narration' || !finalKey || comparableMessageText(item.body) !== finalKey
+  ), [effectiveProgress?.items, finalKey])
+  const groupedProcessItems = useMemo(
+    () => groupConsecutiveToolItems(processItems),
+    [processItems]
   )
+  const activeToolItems = useMemo(
+    () => processItems.filter((item): item is ToolProgressItem => item.kind === 'tool'),
+    [processItems]
+  )
+  const hasActiveTool = toolActivityGroupHasActiveTool(activeToolItems, run.status)
+  const trailingProcessItem = groupedProcessItems[groupedProcessItems.length - 1]
+  const liveTailToolGroupKey = run.status === 'running'
+    && !cancelling
+    && trailingProcessItem?.kind === 'toolGroup'
+    ? trailingProcessItem.key
+    : null
   const activeRetryDiagnostic = nonTerminal
     ? processItems.reduce<RuntimeDiagnostic | null>((latest, item) =>
         item.kind === 'diagnostic' ? item.diagnostic : latest, null)
@@ -7207,7 +7335,20 @@ export function RunExecutionDisclosure({
           仍有外部效果待确认
         </p>
       )}
-      {processItems.map((item) => {
+      {groupedProcessItems.map((item) => {
+        if (item.kind === 'toolGroup') {
+          return (
+            <ToolActivityGroup
+              key={item.key}
+              campId={campId}
+              items={item.items}
+              liveTail={item.key === liveTailToolGroupKey}
+              runId={run.id}
+              runStatus={run.status}
+              completeEvidence={completeEvidence}
+            />
+          )
+        }
         if (item.kind === 'diagnostic') {
           return nonTerminal
             ? <RuntimeRetryNotice diagnostic={item.diagnostic} key={item.key} />
@@ -7237,19 +7378,7 @@ export function RunExecutionDisclosure({
             </div>
           )
         }
-        if (item.kind !== 'tool') return null
-        const step = item.step
-        const fullEvidence = completeEvidence.byToolId.get(step.id)
-        return (
-          <ToolCallRow
-            key={item.key}
-            campId={campId}
-            step={step}
-            runId={run.id}
-            runStatus={run.status}
-            completeEvidence={fullEvidence}
-          />
-        )
+        return null
       })}
       {historyStatus === 'loading' && (
         <div className="process-action current" role="status">
@@ -7284,18 +7413,23 @@ export function RunExecutionDisclosure({
           </button>
         </div>
       )}
-      {nonTerminal && !cancelling && run.waitReason !== 'recovery_blocked' && (
-        <div className="process-action current" role="status">
-          <span className="process-spinner" aria-hidden="true" />
-          <span>{run.status === 'waiting'
-            ? agentRunWaitDetail(run.waitReason) ?? '等待继续'
-            : run.status === 'queued'
-              ? '等待开始'
-              : activeRetryDiagnostic
-                ? `等待 Claude Code 自动重试（${activeRetryDiagnostic.attempt}/${activeRetryDiagnostic.maxAttempts}）`
-                : '正在处理'}</span>
-        </div>
-      )}
+      {nonTerminal
+        && !cancelling
+        && run.waitReason !== 'recovery_blocked'
+        && !hasActiveTool
+        && liveTailToolGroupKey === null
+        && (
+          <div className="process-action current" role="status">
+            <span className="process-spinner" aria-hidden="true" />
+            <span>{run.status === 'waiting'
+              ? agentRunWaitDetail(run.waitReason) ?? '等待继续'
+              : run.status === 'queued'
+                ? '等待开始'
+                : activeRetryDiagnostic
+                  ? `等待 Claude Code 自动重试（${activeRetryDiagnostic.attempt}/${activeRetryDiagnostic.maxAttempts}）`
+                  : '正在处理'}</span>
+          </div>
+        )}
       {cancelling && nonTerminal && (
         <div className="process-action cancelling" role="status">
           停止请求已发送，正在等待 Agent 运行时退出。

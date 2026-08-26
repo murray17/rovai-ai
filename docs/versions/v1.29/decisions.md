@@ -101,8 +101,9 @@ state。用户于 `2026-08-25T10:34:14+08:00` 确认
 6. cold resume 继续只使用 full UUID + exact canonical file，但失败不再按 D01 “至多新建一个 Session”降级；
    当前输入 fail closed 并记录 controlled continuity loss。`agent_settled` final、Pi 无 sandbox、managed native
    Tool Approval、Usage/Cost Disabled、Compaction Disabled 和非 arm64 平台未准入均不变。
-7. Grok 已占用 Migration 107/108。Pi catalog 使用 Migration 109 升至 `v1.23 / schema 64`，managed context
-   使用 Migration 110 升至 `v1.24 / schema 65`；110 fence 缺少 frozen identity/managed receipt 的旧
+7. Grok 已占用 Migration 107/108，主线 Runtime entrypoint locator identity 已占用 Migration 109。Pi catalog
+   使用 Migration 110 升至 `v1.23 / schema 64`，managed context 使用 Migration 111 升至
+   `v1.24 / schema 65`；111 fence 缺少 frozen identity/managed receipt 的旧
    nonterminal Pi state 并清理旧 locator，completed 业务历史与非 Pi technical state 不回写、不失效。
 
 当前字段级规范见

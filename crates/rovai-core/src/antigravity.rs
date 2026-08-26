@@ -19,7 +19,7 @@ use rovai_core::{
         ManagedWindowsArgvDialect,
     },
     runtime::{AgentRunWorkspace, PermissionSemantics},
-    runtime_discovery::{configure_active_runtime_command, is_executable_file},
+    runtime_discovery::{configure_active_runtime_command, is_runtime_entrypoint_file},
     runtime_failure::{
         RuntimeFailureError, RuntimeFailureOrigin, RuntimeFailurePhase, RuntimeFailureView,
         public_runtime_failure_from_output,
@@ -262,7 +262,7 @@ impl AntigravityAppRuntimeAdapter {
             .first()
             .context("Antigravity companion has no execution root")?;
         let executable = Path::new(&request.runtime.executable_path);
-        if !is_executable_file(executable) {
+        if !is_runtime_entrypoint_file(executable) {
             let internal = anyhow::anyhow!(
                 "Antigravity companion executable is missing or not executable: {}",
                 executable.display()
@@ -1519,6 +1519,51 @@ mod tests {
             })),
             None
         );
+    }
+
+    #[test]
+    fn command_terminal_carries_the_complete_public_output() {
+        let conversation_id = "0bdd2166-d420-40c6-94be-70b93eb290c5";
+        let mut capture = AntigravityStreamCapture::default();
+        let started = normalize_antigravity_tool_step(
+            &serde_json::json!({
+                "conversation_id": conversation_id,
+                "step_index": 4,
+                "state": "RUNNING",
+                "step_type": "tool",
+                "tool_name": "run_command",
+                "tool_info": {
+                    "name": "run_command",
+                    "parameters": {"CommandLine": "pnpm test"}
+                }
+            }),
+            &mut capture,
+        )
+        .unwrap()
+        .unwrap();
+        let completed = normalize_antigravity_tool_step(
+            &serde_json::json!({
+                "conversation_id": conversation_id,
+                "step_index": 4,
+                "state": "DONE",
+                "step_type": "tool",
+                "tool_name": "run_command",
+                "tool_info": {
+                    "name": "run_command",
+                    "output": "complete Antigravity output"
+                }
+            }),
+            &mut capture,
+        )
+        .unwrap()
+        .unwrap();
+
+        assert_eq!(started.event_type, "runtime.action");
+        assert_eq!(started.payload["status"], "in_progress");
+        assert_eq!(completed.event_type, "runtime.action");
+        assert_eq!(completed.payload["status"], "completed");
+        assert_eq!(completed.payload["input"]["command"], "pnpm test");
+        assert_eq!(completed.payload["output"], "complete Antigravity output");
     }
 
     #[test]
