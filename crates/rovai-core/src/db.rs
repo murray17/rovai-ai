@@ -50,8 +50,10 @@ pub struct Database {
     runtime_camp_files_root_identity_digest: String,
 }
 
-const CURRENT_DATA_CONTRACT_VERSION: &str = "v1.22";
-const CURRENT_PROJECTION_SCHEMA_VERSION: i64 = 63;
+const CURRENT_DATA_CONTRACT_VERSION: &str = "v1.23";
+const CURRENT_PROJECTION_SCHEMA_VERSION: i64 = 64;
+const V110_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.22";
+const V110_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION: i64 = 63;
 const V108_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.21";
 const V108_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION: i64 = 62;
 const V107_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.20";
@@ -169,6 +171,8 @@ struct CurrentMigrationState {
     v106: bool,
     v107: bool,
     v108: bool,
+    v109: bool,
+    v110: bool,
 }
 
 impl CurrentMigrationState {
@@ -178,6 +182,50 @@ impl CurrentMigrationState {
             return false;
         }
         if contract == CURRENT_DATA_CONTRACT_VERSION && schema == CURRENT_PROJECTION_SCHEMA_VERSION
+        {
+            return self.v70
+                && self.v71
+                && self.v76
+                && self.v77
+                && self.v78
+                && self.v79
+                && self.v80
+                && self.v81
+                && self.v82
+                && self.v83
+                && self.v84
+                && self.v85
+                && self.v86
+                && self.v87
+                && self.v88
+                && self.v89
+                && self.v90
+                && self.v91
+                && self.v92
+                && self.v93
+                && self.v94
+                && self.v95
+                && self.v96
+                && self.v97
+                && self.v98
+                && self.v99
+                && self.v100
+                && self.v101
+                && self.v102
+                && self.v103
+                && self.v104
+                && self.v105
+                && self.v106
+                && self.v107
+                && self.v108
+                && self.v109
+                && self.v110;
+        }
+        if self.v110 {
+            return false;
+        }
+        if contract == V110_MIGRATION_SOURCE_DATA_CONTRACT_VERSION
+            && schema == V110_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION
         {
             return self.v70
                 && self.v71
@@ -1174,7 +1222,9 @@ fn load_current_migration_state(
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 105),
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 106),
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 107),
-               EXISTS(SELECT 1 FROM schema_migration WHERE version = 108)
+               EXISTS(SELECT 1 FROM schema_migration WHERE version = 108),
+               EXISTS(SELECT 1 FROM schema_migration WHERE version = 109),
+               EXISTS(SELECT 1 FROM schema_migration WHERE version = 110)
         "#,
         [],
         |row| {
@@ -1218,6 +1268,8 @@ fn load_current_migration_state(
                 v106: row.get(36)?,
                 v107: row.get(37)?,
                 v108: row.get(38)?,
+                v109: row.get(39)?,
+                v110: row.get(40)?,
             })
         },
     )
@@ -2672,6 +2724,9 @@ impl Database {
             if !self.schema_migration_applied(109)? {
                 self.migrate_runtime_entrypoint_locator_identity_v109()?;
             }
+            if !self.schema_migration_applied(110)? {
+                self.migrate_dynamic_camp_membership_v110()?;
+            }
             if let Err(error) =
                 crate::notification::maintain_notification_episode_retention(self.connection())
             {
@@ -3048,6 +3103,9 @@ impl Database {
         }
         if !self.schema_migration_applied(109)? {
             self.migrate_runtime_entrypoint_locator_identity_v109()?;
+        }
+        if !self.schema_migration_applied(110)? {
+            self.migrate_dynamic_camp_membership_v110()?;
         }
         if let Err(error) =
             crate::notification::maintain_notification_episode_retention(self.connection())
@@ -15377,6 +15435,207 @@ impl Database {
         Ok(())
     }
 
+    fn migrate_dynamic_camp_membership_v110(&mut self) -> Result<()> {
+        let transaction = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let now = chrono::Utc::now().to_rfc3339();
+
+        // Membership-version fencing cannot safely inherit work admitted by an
+        // older binary. Preserve all terminal evidence, but close the previous
+        // contract's non-terminal execution graph before adding the new fence.
+        transaction.execute(
+            r#"
+            UPDATE gather_item
+            SET status = 'cancelled', terminal_source = 'delivery',
+                error_code = 'camp_membership_v1_required',
+                terminal_resolution_source = 'migration',
+                terminal_reason_code = 'camp_membership_v1_clean_break',
+                version = version + 1, ended_at = ?1, updated_at = ?1
+            WHERE status IN ('pending', 'running')
+            "#,
+            [&now],
+        )?;
+        transaction.execute(
+            r#"
+            UPDATE gather_record
+            SET status = 'cancelled',
+                cancellation_reason_code = 'camp_membership_v1_required',
+                version = version + 1, cancelled_at = ?1, updated_at = ?1
+            WHERE status IN ('collecting', 'ready', 'completing')
+            "#,
+            [&now],
+        )?;
+        transaction.execute(
+            r#"
+            UPDATE message_delivery_attempt
+            SET status = 'failed', wait_condition = NULL,
+                failure_code = 'camp_membership_v1_required',
+                failure_detail_json = '{"reason":"camp_membership_v1_clean_break"}',
+                ended_at = ?1
+            WHERE status = 'attempting'
+            "#,
+            [&now],
+        )?;
+        transaction.execute(
+            r#"
+            UPDATE message_delivery
+            SET status = CASE
+                    WHEN status = 'pending' AND dispatch_attempt_count = 0
+                    THEN 'interrupted_before_dispatch'
+                    ELSE 'failed'
+                END,
+                dispatch_phase = 'terminal', wait_condition = NULL,
+                active_dispatch_attempt_id = NULL,
+                manual_intervention_required = CASE
+                    WHEN status = 'pending' AND dispatch_attempt_count = 0 THEN 1
+                    ELSE 0
+                END,
+                failure_code = 'camp_membership_v1_required',
+                failure_detail_json = '{"reason":"camp_membership_v1_clean_break"}',
+                version = version + 1, ended_at = ?1, updated_at = ?1
+            WHERE status IN ('pending', 'running')
+            "#,
+            [&now],
+        )?;
+        transaction.execute(
+            r#"
+            UPDATE agent_run
+            SET status = 'failed', ended_at = ?1,
+                last_error_code = 'camp_membership_v1_required',
+                public_runtime_failure_json = NULL,
+                wait_reason = NULL, wait_deadline_at = NULL,
+                runtime_recovery_required = 0,
+                execution_lease_owner = NULL,
+                execution_lease_expires_at = NULL,
+                manual_retry_allowed = 0,
+                version = version + 1, updated_at = ?1
+            WHERE status IN ('queued', 'running', 'waiting')
+            "#,
+            [&now],
+        )?;
+        transaction.execute(
+            r#"
+            UPDATE camp_turn
+            SET status = 'failed', ended_at = ?1,
+                version = version + 1, updated_at = ?1
+            WHERE status IN ('running', 'waiting')
+            "#,
+            [&now],
+        )?;
+
+        transaction.execute_batch(
+            r#"
+            ALTER TABLE camp ADD COLUMN
+                membership_generation INTEGER NOT NULL DEFAULT 1
+                CHECK(membership_generation >= 1);
+            ALTER TABLE message_delivery ADD COLUMN
+                recipient_membership_version_at_admission INTEGER
+                CHECK(
+                    recipient_membership_version_at_admission IS NULL
+                    OR recipient_membership_version_at_admission >= 1
+                );
+
+            CREATE TABLE camp_membership_source_binding (
+                camp_id TEXT NOT NULL REFERENCES camp(id) ON DELETE CASCADE,
+                source_namespace TEXT NOT NULL CHECK(length(trim(source_namespace)) > 0),
+                binding_id TEXT NOT NULL CHECK(length(trim(binding_id)) > 0),
+                trusted_component_id TEXT NOT NULL CHECK(length(trim(trusted_component_id)) > 0),
+                last_reconciliation_generation INTEGER NOT NULL DEFAULT 0
+                    CHECK(last_reconciliation_generation >= 0),
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                PRIMARY KEY(camp_id, source_namespace, binding_id)
+            );
+
+            CREATE TABLE camp_membership_reconciliation (
+                id TEXT PRIMARY KEY,
+                camp_id TEXT NOT NULL REFERENCES camp(id) ON DELETE CASCADE,
+                agent_id TEXT NOT NULL REFERENCES agent_profile(id),
+                membership_version INTEGER NOT NULL CHECK(membership_version >= 1),
+                command_id TEXT NOT NULL,
+                status TEXT NOT NULL CHECK(status IN ('reconciling', 'completed')),
+                reason_code TEXT NOT NULL CHECK(length(trim(reason_code)) > 0),
+                target_run_count INTEGER NOT NULL DEFAULT 0 CHECK(target_run_count >= 0),
+                settled_run_count INTEGER NOT NULL DEFAULT 0 CHECK(settled_run_count >= 0),
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                completed_at TEXT,
+                UNIQUE(camp_id, command_id),
+                UNIQUE(camp_id, agent_id, membership_version),
+                CHECK(settled_run_count <= target_run_count),
+                CHECK(
+                    (status = 'reconciling' AND completed_at IS NULL)
+                    OR (status = 'completed' AND completed_at IS NOT NULL
+                        AND settled_run_count = target_run_count)
+                )
+            );
+            CREATE INDEX camp_membership_reconciliation_camp_idx
+                ON camp_membership_reconciliation(camp_id, status, created_at, id);
+
+            CREATE TABLE camp_membership_reconciliation_run (
+                reconciliation_id TEXT NOT NULL
+                    REFERENCES camp_membership_reconciliation(id) ON DELETE CASCADE,
+                agent_run_id TEXT NOT NULL REFERENCES agent_run(id) ON DELETE CASCADE,
+                settled_at TEXT,
+                PRIMARY KEY(reconciliation_id, agent_run_id)
+            );
+            CREATE INDEX camp_membership_reconciliation_run_agent_idx
+                ON camp_membership_reconciliation_run(agent_run_id, settled_at);
+
+            CREATE TRIGGER camp_membership_reconciliation_run_terminal
+            AFTER UPDATE OF status ON agent_run
+            WHEN OLD.status IN ('queued', 'running', 'waiting')
+             AND NEW.status IN ('succeeded', 'failed', 'cancelled')
+             AND EXISTS(
+                 SELECT 1 FROM camp_membership_reconciliation_run
+                 WHERE agent_run_id = NEW.id AND settled_at IS NULL
+             )
+            BEGIN
+                UPDATE camp_membership_reconciliation_run
+                SET settled_at = COALESCE(NEW.ended_at, NEW.updated_at)
+                WHERE agent_run_id = NEW.id AND settled_at IS NULL;
+
+                UPDATE camp_membership_reconciliation
+                SET settled_run_count = (
+                        SELECT COUNT(*)
+                        FROM camp_membership_reconciliation_run
+                        WHERE reconciliation_id = camp_membership_reconciliation.id
+                          AND settled_at IS NOT NULL
+                    ),
+                    status = CASE WHEN NOT EXISTS(
+                        SELECT 1
+                        FROM camp_membership_reconciliation_run
+                        WHERE reconciliation_id = camp_membership_reconciliation.id
+                          AND settled_at IS NULL
+                    ) THEN 'completed' ELSE 'reconciling' END,
+                    completed_at = CASE WHEN NOT EXISTS(
+                        SELECT 1
+                        FROM camp_membership_reconciliation_run
+                        WHERE reconciliation_id = camp_membership_reconciliation.id
+                          AND settled_at IS NULL
+                    ) THEN COALESCE(NEW.ended_at, NEW.updated_at) ELSE NULL END,
+                    updated_at = COALESCE(NEW.ended_at, NEW.updated_at)
+                WHERE id IN (
+                    SELECT reconciliation_id
+                    FROM camp_membership_reconciliation_run
+                    WHERE agent_run_id = NEW.id
+                );
+            END;
+
+            UPDATE rovai_data_contract
+            SET contract_version = 'v1.23', projection_schema_version = 64,
+                reset_reason = NULL, updated_at = datetime('now')
+            WHERE singleton = 1;
+
+            INSERT INTO schema_migration(version, applied_at)
+            VALUES (110, datetime('now'));
+            "#,
+        )?;
+        transaction.commit()?;
+        Ok(())
+    }
+
     fn migrate_runtime_entrypoint_locator_identity_v109(&mut self) -> Result<()> {
         let transaction = self
             .connection
@@ -19809,6 +20068,62 @@ impl Database {
 }
 
 #[cfg(test)]
+fn downgrade_current_schema_to_v109_source_for_test(connection: &Connection) {
+    let has_v110: bool = connection
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM schema_migration WHERE version = 110)",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    if !has_v110 {
+        return;
+    }
+    connection
+        .execute_batch(
+            r#"
+            PRAGMA foreign_keys = OFF;
+            DROP TRIGGER camp_membership_reconciliation_run_terminal;
+            DROP INDEX camp_membership_reconciliation_run_agent_idx;
+            DROP TABLE camp_membership_reconciliation_run;
+            DROP TABLE camp_membership_reconciliation;
+            DROP TABLE camp_membership_source_binding;
+            ALTER TABLE camp DROP COLUMN membership_generation;
+            ALTER TABLE message_delivery DROP COLUMN recipient_membership_version_at_admission;
+            UPDATE rovai_data_contract
+            SET contract_version = 'v1.22', projection_schema_version = 63
+            WHERE singleton = 1;
+            DELETE FROM schema_migration WHERE version = 110;
+            PRAGMA foreign_keys = ON;
+            "#,
+        )
+        .unwrap();
+}
+
+#[cfg(test)]
+fn downgrade_current_schema_to_v108_source_for_test(connection: &Connection) {
+    downgrade_current_schema_to_v109_source_for_test(connection);
+    let has_v109: bool = connection
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM schema_migration WHERE version = 109)",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    if !has_v109 {
+        return;
+    }
+    connection
+        .execute_batch(
+            r#"
+            DROP TABLE runtime_entrypoint_locator_identity;
+            DELETE FROM schema_migration WHERE version = 109;
+            "#,
+        )
+        .unwrap();
+}
+
+#[cfg(test)]
 fn downgrade_current_schema_to_v102_source_for_test(connection: &Connection) {
     let has_v102: bool = connection
         .query_row(
@@ -19820,6 +20135,7 @@ fn downgrade_current_schema_to_v102_source_for_test(connection: &Connection) {
     if !has_v102 {
         return;
     }
+    downgrade_current_schema_to_v108_source_for_test(connection);
     connection
         .execute_batch("PRAGMA foreign_keys = OFF;")
         .unwrap();
@@ -19933,6 +20249,7 @@ fn downgrade_current_schema_to_v102_source_for_test(connection: &Connection) {
             UPDATE rovai_data_contract
             SET contract_version = 'v1.15', projection_schema_version = 56
             WHERE singleton = 1;
+            DELETE FROM schema_migration WHERE version = 109;
             DELETE FROM schema_migration WHERE version = 108;
             DELETE FROM schema_migration WHERE version = 107;
             DELETE FROM schema_migration WHERE version = 106;
@@ -20478,6 +20795,8 @@ mod tests {
             v106: version >= 106,
             v107: version >= 107,
             v108: version >= 108,
+            v109: version >= 109,
+            v110: version >= 110,
         }
     }
 
@@ -20488,7 +20807,19 @@ mod tests {
                 "current",
                 CURRENT_DATA_CONTRACT_VERSION,
                 CURRENT_PROJECTION_SCHEMA_VERSION,
+                110,
+            ),
+            (
+                "v1.22/schema-63 before runtime locator identity",
+                V110_MIGRATION_SOURCE_DATA_CONTRACT_VERSION,
+                V110_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION,
                 108,
+            ),
+            (
+                "v1.22/schema-63 before dynamic Camp membership",
+                V110_MIGRATION_SOURCE_DATA_CONTRACT_VERSION,
+                V110_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION,
+                109,
             ),
             (
                 "v1.21/schema-62",
@@ -20772,7 +21103,7 @@ mod tests {
             )
             .expect("current contract marker should load");
 
-        assert_eq!(state, migration_state_through(108));
+        assert_eq!(state, migration_state_through(110));
         assert!(state.admits(&contract, schema));
         assert!(has_admissible_data_contract(
             &directory.join("rovai.sqlite")
@@ -22987,6 +23318,199 @@ mod tests {
         );
 
         drop(database);
+        std::fs::remove_dir_all(directory).expect("temporary database should be removable");
+    }
+
+    #[test]
+    fn v110_clean_breaks_nonterminal_runs_and_installs_membership_fences() {
+        let directory = std::env::temp_dir().join(format!("rovai-db-v110-test-{}", Uuid::new_v4()));
+        let database = crate::test_support::fresh_schema_database_fast_at(&directory);
+        database
+            .connection()
+            .execute_batch(
+                r#"
+                INSERT INTO camp(
+                    id, title, project_binding_kind, project_path,
+                    default_lead_agent_id, last_message_sequence,
+                    version, created_at, updated_at
+                ) VALUES (
+                    'camp-v109', 'V109 migration fixture', 'directory', '/tmp/rovai-v109',
+                    'agent_1', 0, 1,
+                    '2026-08-25T00:00:00Z', '2026-08-25T00:00:00Z'
+                );
+                INSERT INTO camp_member(
+                    camp_id, agent_id, status, capability_overrides_json,
+                    version, joined_at
+                ) VALUES (
+                    'camp-v109', 'agent_1', 'active', '{}', 1,
+                    '2026-08-25T00:00:00Z'
+                );
+                INSERT INTO conversation(
+                    id, camp_id, agent_id,
+                    summary_through_message_sequence, last_message_sequence,
+                    version, created_at, updated_at
+                ) VALUES (
+                    'conversation-v109', 'camp-v109', 'agent_1',
+                    0, 0, 1,
+                    '2026-08-25T00:00:00Z', '2026-08-25T00:00:00Z'
+                );
+                INSERT INTO camp_turn(
+                    id, camp_id, trigger_type, trigger_id, status,
+                    version, created_at, updated_at, ended_at
+                ) VALUES
+                    (
+                        'turn-v109-active', 'camp-v109', 'system_event',
+                        'trigger-v109-active', 'running', 1,
+                        '2026-08-25T00:00:00Z', '2026-08-25T00:00:00Z', NULL
+                    ),
+                    (
+                        'turn-v109-terminal', 'camp-v109', 'system_event',
+                        'trigger-v109-terminal', 'completed', 1,
+                        '2026-08-25T00:00:00Z', '2026-08-25T00:00:01Z',
+                        '2026-08-25T00:00:01Z'
+                    );
+                INSERT INTO agent_run(
+                    id, camp_turn_id, conversation_id,
+                    initial_camp_context_through_sequence,
+                    initial_conversation_context_through_sequence,
+                    responsibility_key, responsibility_generation,
+                    start_reason, purpose, completion_role,
+                    effective_config_json, workspace_json, permission_semantics,
+                    status, idempotency_key, version,
+                    created_at, ended_at, updated_at
+                ) VALUES
+                    (
+                        'run-v109-active', 'turn-v109-active', 'conversation-v109',
+                        0, 0, 'active-v109', 0,
+                        'initial', 'must be clean-broken', 'required',
+                        '{}', '{"executionRoot":"/tmp/rovai-v109","access":"write"}',
+                        'runtime_managed_v2', 'queued', 'active-v109', 1,
+                        '2026-08-25T00:00:00Z', NULL, '2026-08-25T00:00:00Z'
+                    ),
+                    (
+                        'run-v109-terminal', 'turn-v109-terminal', 'conversation-v109',
+                        0, 0, 'terminal-v109', 0,
+                        'initial', 'must remain evidence', 'required',
+                        '{}', '{"executionRoot":"/tmp/rovai-v109","access":"write"}',
+                        'runtime_managed_v2', 'succeeded', 'terminal-v109', 1,
+                        '2026-08-25T00:00:00Z', '2026-08-25T00:00:01Z',
+                        '2026-08-25T00:00:01Z'
+                    );
+                "#,
+            )
+            .unwrap();
+        downgrade_current_schema_to_v109_source_for_test(database.connection());
+        drop(database);
+
+        let reopened = Database::open(&directory).expect("v109 source should migrate to v110");
+        assert_eq!(
+            reopened
+                .connection()
+                .query_row(
+                    r#"
+                    SELECT contract_version, projection_schema_version,
+                           (SELECT COUNT(*) FROM schema_migration WHERE version = 110),
+                           (SELECT membership_generation FROM camp WHERE id = 'camp-v109')
+                    FROM rovai_data_contract WHERE singleton = 1
+                    "#,
+                    [],
+                    |row| Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, i64>(1)?,
+                        row.get::<_, i64>(2)?,
+                        row.get::<_, i64>(3)?
+                    )),
+                )
+                .unwrap(),
+            ("v1.23".to_string(), 64, 1, 1)
+        );
+        assert_eq!(
+            reopened
+                .connection()
+                .query_row(
+                    r#"
+                    SELECT active.status, active.last_error_code,
+                           active.ended_at IS NOT NULL,
+                           terminal.status,
+                           turn.status, turn.ended_at IS NOT NULL
+                    FROM agent_run AS active
+                    JOIN agent_run AS terminal ON terminal.id = 'run-v109-terminal'
+                    JOIN camp_turn AS turn ON turn.id = 'turn-v109-active'
+                    WHERE active.id = 'run-v109-active'
+                    "#,
+                    [],
+                    |row| {
+                        Ok((
+                            row.get::<_, String>(0)?,
+                            row.get::<_, Option<String>>(1)?,
+                            row.get::<_, bool>(2)?,
+                            row.get::<_, String>(3)?,
+                            row.get::<_, String>(4)?,
+                            row.get::<_, bool>(5)?,
+                        ))
+                    },
+                )
+                .unwrap(),
+            (
+                "failed".to_string(),
+                Some("camp_membership_v1_required".to_string()),
+                true,
+                "succeeded".to_string(),
+                "failed".to_string(),
+                true,
+            )
+        );
+        assert_table_columns(
+            reopened.connection(),
+            "message_delivery",
+            &["recipient_membership_version_at_admission"],
+            &[],
+        );
+        assert_schema_objects(
+            reopened.connection(),
+            "table",
+            &[
+                "camp_membership_source_binding",
+                "camp_membership_reconciliation",
+                "camp_membership_reconciliation_run",
+            ],
+            true,
+        );
+        assert_schema_objects(
+            reopened.connection(),
+            "trigger",
+            &["camp_membership_reconciliation_run_terminal"],
+            true,
+        );
+        assert_schema_objects(
+            reopened.connection(),
+            "index",
+            &["camp_membership_reconciliation_run_agent_idx"],
+            true,
+        );
+        let reconciliation_run_schema: String = reopened
+            .connection()
+            .query_row(
+                "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'camp_membership_reconciliation_run'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(
+            !reconciliation_run_schema.contains("agent_run_id TEXT NOT NULL UNIQUE"),
+            "one Run may formally settle more than one concurrent membership reconciliation"
+        );
+        assert_eq!(
+            reopened
+                .connection()
+                .query_row("SELECT COUNT(*) FROM pragma_foreign_key_check", [], |row| {
+                    row.get::<_, i64>(0)
+                })
+                .unwrap(),
+            0
+        );
+
+        drop(reopened);
         std::fs::remove_dir_all(directory).expect("temporary database should be removable");
     }
 

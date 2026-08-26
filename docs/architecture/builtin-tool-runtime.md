@@ -3,7 +3,7 @@ document_type: architecture
 architecture: builtin-tool-runtime
 authority: builtin-tool-component-boundaries
 status: accepted
-last_updated: 2026-08-25
+last_updated: 2026-08-26
 ---
 
 # Built-in Tool Runtime Architecture
@@ -14,9 +14,9 @@ last_updated: 2026-08-25
 [Camp History Retrieval v4](../contracts/camp-history-v4.md)、
 [Durable Task v3](../contracts/durable-task-v3.md) 和
 [Camp Message Send v12](../contracts/camp-message-send-v12.md)、
-[Gather v3](../contracts/gather-v3.md)、
+[Gather v4](../contracts/gather-v4.md)、
 [Current User Attention v4](../contracts/current-user-attention-v4.md)与
-[Missing-Send Recovery Publication v1](../contracts/missing-send-recovery-publication-v1.md) 为准；v19 及更早 Transport 只保留
+[Missing-Send Recovery Publication v2](../contracts/missing-send-recovery-publication-v2.md) 为准；v19 及更早 Transport 只保留
 historical 语义。决策理由见
 [Built-in 运输不变量](foundational-invariants.md#skills-builtin-transport)、
 [Built-in 运输不变量](foundational-invariants.md#skills-builtin-transport)、
@@ -91,6 +91,10 @@ Domain canonical result
 CLI 是运输与投影客户端，不拥有领域逻辑、授权、receipt 或 Replay 真源。Router 验证输入、解析
 active lease、调用既有领域服务，并生成完整 Envelope、receipt、Replay 和 Core Activity。Projection
 不能参与 receipt、Replay 或授权决策。
+
+每次 Agent 业务 operation 都必须匹配 current Run、lease、Native Binding 与 Run 冻结的 exact active Camp
+membership version；这一统一 Router fence 覆盖整个 catalog，而不是只覆盖 send。terminal evidence 通过独立窄
+路径结算既有 Run/Delivery/Gather，不因此获得业务 operation 或 public publication 权限。
 
 ## 权威与边界
 
@@ -521,7 +525,7 @@ Run Camp，origin/reference/recent 三类消息不得跨 Camp。单消息保留 
 不能丢失。截断只投影 `nextBodyOffset`，omitted aggregate 只投影 count 与最小/最大 sequence envelope。
 
 同一 Structured `CurrentUserMention(local_user)` 在 Human/FTS 投影为 `@你`，在 Agent Current Input、Shared
-Conversation、reference closure、Camp History 和 Gather v3 投影为 `@Principal`；content digest 不变，Agent
+Conversation、reference closure、Camp History 和 Gather v4 投影为 `@Principal`；content digest 不变，Agent
 offset/digest 只在 `agent_v1` 空间计算。Recent selector 在 top-15 前排除目标 Agent 自己发布的消息，且
 whole-history omission 使用同一 eligible set；自身消息仍可作为必要 reference ancestor。ContextManifest v20 冻结该 audience、真实 Camp/source refs、完整
 body length、truncation/offset、source/projected digests、A2A guidance closed evidence、attachment identity/digest

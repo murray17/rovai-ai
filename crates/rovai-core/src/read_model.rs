@@ -21,13 +21,13 @@ use crate::{
     skill_projection::SkillExposureSnapshot,
 };
 
-pub const READ_MODEL_SCHEMA_VERSION: i64 = 32;
+pub const READ_MODEL_SCHEMA_VERSION: i64 = 33;
 pub const EVENT_BATCH_SCHEMA_VERSION: i64 = 9;
 pub const NAVIGATION_SCHEMA_VERSION: i64 = 3;
 pub const EXECUTION_EVIDENCE_PAGE_SCHEMA_VERSION: i64 = 1;
 pub const CAMP_MESSAGE_AROUND_SCHEMA_VERSION: i64 = 1;
 pub const CAMP_MESSAGE_FIND_SCHEMA_VERSION: i64 = 1;
-pub const CAMP_OPEN_SCHEMA_VERSION: i64 = 3;
+pub const CAMP_OPEN_SCHEMA_VERSION: i64 = 4;
 pub const CAMP_MESSAGE_PAGE_SCHEMA_VERSION: i64 = 1;
 pub const AGENT_RUN_DIAGNOSTIC_SCHEMA_VERSION: i64 = 1;
 pub const NAVIGATION_RECENT_CAMP_LIMIT: usize = 5;
@@ -132,6 +132,7 @@ pub struct CampView {
     pub project_binding_kind: String,
     pub project_path: String,
     pub default_lead_agent_id: Option<String>,
+    pub membership_generation: i64,
     pub version: i64,
     pub created_at: String,
     pub updated_at: String,
@@ -151,6 +152,20 @@ pub struct CampMemberView {
     pub member_order: i64,
     pub is_default_lead: bool,
     pub version: i64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CampMembershipReconciliationView {
+    pub id: String,
+    pub agent_id: String,
+    pub membership_version: i64,
+    pub status: String,
+    pub reason_code: String,
+    pub target_run_count: i64,
+    pub settled_run_count: i64,
+    pub created_at: String,
+    pub updated_at: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -630,6 +645,7 @@ pub struct CampSnapshot {
     pub through_global_sequence: i64,
     pub camp: CampView,
     pub members: Vec<CampMemberView>,
+    pub membership_reconciliations: Vec<CampMembershipReconciliationView>,
     pub tasks: Vec<TaskView>,
     pub messages: Vec<CampMessageView>,
     pub message_deliveries: Vec<MessageDeliveryView>,
@@ -683,6 +699,7 @@ pub struct CampOpenProjection {
     pub through_global_sequence: i64,
     pub camp: CampView,
     pub members: Vec<CampMemberView>,
+    pub membership_reconciliations: Vec<CampMembershipReconciliationView>,
     pub tasks: Vec<TaskView>,
     pub messages: Vec<CampMessageView>,
     pub message_deliveries: Vec<MessageDeliveryView>,
@@ -747,6 +764,7 @@ pub struct MessageDeliveryView {
     pub camp_turn_id: String,
     pub task_id: Option<String>,
     pub recipient_agent_id: String,
+    pub recipient_membership_version_at_admission: Option<i64>,
     pub status: String,
     pub dispatch_phase: String,
     pub wait_condition: Option<String>,
@@ -957,6 +975,7 @@ impl ReadModelService {
         let through_global_sequence = current_global_sequence(&transaction)?;
         let camp = load_camp(&transaction, camp_id)?.context("Camp does not exist")?;
         let members = load_members(&transaction, camp_id, camp.default_lead_agent_id.as_deref())?;
+        let membership_reconciliations = load_membership_reconciliations(&transaction, camp_id)?;
         let tasks = load_tasks(&transaction, camp_id, None)?;
         let messages = load_messages(&transaction, camp_id, 1_000)?;
         let message_deliveries = load_message_deliveries(&transaction, camp_id, None)?;
@@ -986,6 +1005,7 @@ impl ReadModelService {
             through_global_sequence,
             camp,
             members,
+            membership_reconciliations,
             tasks,
             messages,
             message_deliveries,
@@ -1008,6 +1028,7 @@ impl ReadModelService {
         let through_global_sequence = current_global_sequence(&transaction)?;
         let camp = load_camp(&transaction, camp_id)?.context("Camp does not exist")?;
         let members = load_members(&transaction, camp_id, camp.default_lead_agent_id.as_deref())?;
+        let membership_reconciliations = load_membership_reconciliations(&transaction, camp_id)?;
         let counts = load_camp_open_counts(&transaction, camp_id)?;
         let tasks = load_tasks(&transaction, camp_id, Some(CAMP_OPEN_TASK_LIMIT))?;
         let messages = load_messages(&transaction, camp_id, CAMP_OPEN_MESSAGE_LIMIT)?;
@@ -1049,6 +1070,7 @@ impl ReadModelService {
             through_global_sequence,
             camp,
             members,
+            membership_reconciliations,
             tasks,
             messages,
             message_deliveries,
@@ -1863,7 +1885,7 @@ fn load_camp(transaction: &Transaction<'_>, camp_id: &str) -> Result<Option<Camp
         .query_row(
             r#"
             SELECT id, title, activation_state, project_binding_kind, project_path,
-                   default_lead_agent_id,
+                   default_lead_agent_id, membership_generation,
                    version, created_at, updated_at
             FROM camp WHERE id = ?1
             "#,
@@ -1876,9 +1898,10 @@ fn load_camp(transaction: &Transaction<'_>, camp_id: &str) -> Result<Option<Camp
                     project_binding_kind: row.get(3)?,
                     project_path: row.get(4)?,
                     default_lead_agent_id: row.get(5)?,
-                    version: row.get(6)?,
-                    created_at: row.get(7)?,
-                    updated_at: row.get(8)?,
+                    membership_generation: row.get(6)?,
+                    version: row.get(7)?,
+                    created_at: row.get(8)?,
+                    updated_at: row.get(9)?,
                 })
             },
         )
@@ -1923,6 +1946,37 @@ fn load_members(
         })?
         .collect::<rusqlite::Result<Vec<_>>>()
         .context("failed to load Camp members")
+}
+
+fn load_membership_reconciliations(
+    transaction: &Transaction<'_>,
+    camp_id: &str,
+) -> Result<Vec<CampMembershipReconciliationView>> {
+    let mut statement = transaction.prepare(
+        r#"
+        SELECT id, agent_id, membership_version, status, reason_code,
+               target_run_count, settled_run_count, created_at, updated_at
+        FROM camp_membership_reconciliation
+        WHERE camp_id = ?1 AND status = 'reconciling'
+        ORDER BY created_at, id
+        "#,
+    )?;
+    statement
+        .query_map([camp_id], |row| {
+            Ok(CampMembershipReconciliationView {
+                id: row.get(0)?,
+                agent_id: row.get(1)?,
+                membership_version: row.get(2)?,
+                status: row.get(3)?,
+                reason_code: row.get(4)?,
+                target_run_count: row.get(5)?,
+                settled_run_count: row.get(6)?,
+                created_at: row.get(7)?,
+                updated_at: row.get(8)?,
+            })
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .context("failed to load Camp membership reconciliations")
 }
 
 fn load_tasks(
@@ -2521,7 +2575,8 @@ fn load_message_deliveries(
                gather_id, gather_dispatch_delivery_id,
                recipient_canonical_position, edge_kind,
                target_parent_agent_run_id, return_to_agent_run_id,
-               target_conversation_id
+               target_conversation_id,
+               recipient_membership_version_at_admission
         FROM message_delivery
         WHERE camp_id = ?1
         ORDER BY
@@ -2597,6 +2652,7 @@ fn load_message_deliveries(
                 camp_turn_id: row.get(2)?,
                 task_id: row.get(3)?,
                 recipient_agent_id: row.get(4)?,
+                recipient_membership_version_at_admission: row.get(28)?,
                 status: row.get(5)?,
                 dispatch_phase: row.get(6)?,
                 wait_condition: row.get(7)?,
@@ -4477,7 +4533,9 @@ mod slow_tests {
                     AddCampMemberCommand {
                         camp_id: camp_id.clone(),
                         agent_id: "agent_1".to_string(),
+                        expected_membership_generation: 1,
                         capability_overrides: json!({}),
+                        source: None,
                     },
                 ),
             )
@@ -4747,7 +4805,9 @@ mod slow_tests {
                     AddCampMemberCommand {
                         camp_id: camp_id.clone(),
                         agent_id: "agent_2".to_string(),
+                        expected_membership_generation: 1,
                         capability_overrides: json!({}),
+                        source: None,
                     },
                 ),
             )

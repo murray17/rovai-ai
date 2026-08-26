@@ -3665,7 +3665,9 @@ mod tests {
                     AddCampMemberCommand {
                         camp_id: camp_id.clone(),
                         agent_id: "agent_2".to_string(),
+                        expected_membership_generation: 1,
                         capability_overrides: json!({}),
+                        source: None,
                     },
                 ),
             )

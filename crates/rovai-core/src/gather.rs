@@ -11,6 +11,7 @@ use crate::{
     },
     collaboration::append_domain_event,
     command::{ActorRef, canonical_json_digest},
+    message_delivery::current_recipient_membership_version,
 };
 
 pub const GATHER_TOOL_NAME: &str = "team.gather";
@@ -609,10 +610,15 @@ pub(crate) fn cancel_gathers_for_turn(
     )
 }
 
+pub(crate) struct GatherInitiatorLifetime<'a> {
+    pub camp_id: &'a str,
+    pub agent_id: &'a str,
+    pub membership_version: i64,
+}
+
 pub(crate) fn cancel_gathers_for_initiator(
     transaction: &Transaction<'_>,
-    camp_id: &str,
-    initiator_agent_id: &str,
+    initiator: GatherInitiatorLifetime<'_>,
     reason_code: &str,
     actor: &ActorRef,
     execution_epoch: Option<i64>,
@@ -621,16 +627,29 @@ pub(crate) fn cancel_gathers_for_initiator(
     let gather_ids = {
         let mut statement = transaction.prepare(
             r#"
-            SELECT id FROM gather_record
-            WHERE camp_id = ?1 AND initiator_agent_id = ?2
-              AND status IN ('collecting', 'ready', 'completing')
-            ORDER BY created_at, id
+            SELECT gather_record.id
+            FROM gather_record
+            JOIN agent_run
+              ON agent_run.id = gather_record.initiator_agent_run_id
+            WHERE gather_record.camp_id = ?1
+              AND gather_record.initiator_agent_id = ?2
+              AND CAST(
+                    json_extract(agent_run.effective_config_json, '$.campMemberVersion')
+                    AS INTEGER
+                  ) = ?3
+              AND gather_record.status IN ('collecting', 'ready', 'completing')
+            ORDER BY gather_record.created_at, gather_record.id
             "#,
         )?;
         statement
-            .query_map(params![camp_id, initiator_agent_id], |row| {
-                row.get::<_, String>(0)
-            })?
+            .query_map(
+                params![
+                    initiator.camp_id,
+                    initiator.agent_id,
+                    initiator.membership_version
+                ],
+                |row| row.get::<_, String>(0),
+            )?
             .collect::<rusqlite::Result<Vec<_>>>()?
     };
     for gather_id in &gather_ids {
@@ -897,6 +916,7 @@ fn run_barrier(
              AND camp_member.agent_id = ?3
             JOIN agent_profile ON agent_profile.id = camp_member.agent_id
             JOIN conversation ON conversation.id = ?4
+            JOIN agent_run AS initiator_run ON initiator_run.id = ?5
             WHERE camp.id = ?1 AND camp_turn.id = ?2
               AND camp_turn.status IN ('running', 'waiting')
               AND camp_turn.cancel_requested_at IS NULL
@@ -906,6 +926,14 @@ fn run_barrier(
               AND agent_profile.profile_status = 'present'
               AND conversation.camp_id = camp.id
               AND conversation.agent_id = ?3
+              AND initiator_run.camp_turn_id = camp_turn.id
+              AND initiator_run.conversation_id = conversation.id
+              AND CAST(
+                    json_extract(
+                        initiator_run.effective_config_json,
+                        '$.campMemberVersion'
+                    ) AS INTEGER
+                  ) = camp_member.version
         )
         "#,
         params![
@@ -913,6 +941,7 @@ fn run_barrier(
             gather.camp_turn_id,
             gather.initiator_agent_id,
             gather.initiator_conversation_id,
+            gather.initiator_agent_run_id,
         ],
         |row| row.get(0),
     )?;
@@ -952,6 +981,12 @@ fn run_barrier(
         params![gather.camp_id, gather.initiator_agent_id],
         |row| row.get(0),
     )?;
+    let recipient_membership_version = current_recipient_membership_version(
+        transaction,
+        &gather.camp_id,
+        &gather.initiator_agent_id,
+    )?
+    .context("Gather initiator has no active membership at the completion barrier")?;
     let frozen_snapshot = json!({
         "schemaVersion": 3,
         "deliveryKind": "gather_completion",
@@ -961,6 +996,7 @@ fn run_barrier(
         "requestMessageId": gather.request_message_id,
         "sourceAgentRunId": gather.initiator_agent_run_id,
         "recipientAgentId": gather.initiator_agent_id,
+        "recipientMembershipVersionAtAdmission": recipient_membership_version,
         "targetConversationId": gather.initiator_conversation_id,
         "completionInputSchemaVersion": GATHER_COMPLETION_INPUT_SCHEMA_VERSION,
         "completionInputDigest": payload_digest,
@@ -987,7 +1023,8 @@ fn run_barrier(
             scheduler_correlation_id, context_manifest_id,
             target_agent_run_id, retry_generation,
             manual_intervention_required, failure_code, failure_detail_json,
-            version, created_at, updated_at, ended_at
+            version, created_at, updated_at, ended_at,
+            recipient_membership_version_at_admission
         ) VALUES (
             ?1, ?2, ?3, ?4, ?5, NULL, NULL, NULL,
             NULL, NULL, NULL, NULL, ?6, NULL, NULL, NULL,
@@ -996,7 +1033,7 @@ fn run_barrier(
             ?9, ?10, ?11,
             'pending', 'never_attempted', NULL,
             0, NULL, NULL, NULL, NULL, 0, 0, NULL, NULL,
-            1, ?12, ?12, NULL
+            1, ?12, ?12, NULL, ?13
         )
         "#,
         params![
@@ -1012,6 +1049,7 @@ fn run_barrier(
             camp_boundary,
             queue_sequence,
             now,
+            recipient_membership_version,
         ],
     )?;
     let updated = transaction.execute(

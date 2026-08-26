@@ -191,7 +191,7 @@ The versioned atomic user command that saves exactly one AgentProfile's six iden
 _Avoid_: whole-profile save, avatar update, Runtime update, Memory update, multi-section transaction
 
 **Peer Member Identity Projection**:
-The Collaboration State v2 subset of another current Camp Member's identity containing exactly Agent ID, Name, Team Role, and Professional Responsibilities. The current Agent is never a peer; away and leave-requested relationships remain current until formally left. Personality Traits, Working Principles, Growth Topic, availability, busy state, Runtime eligibility and execution reason remain outside this projection.
+The Collaboration State v2 subset of another current Camp Member's identity containing exactly Agent ID, Name, Team Role, and Professional Responsibilities. The current Agent is never a peer; away and leave-requested relationships remain current until formally left. Each newly frozen AgentRun receives the then-current peer set. An already frozen Run is never patched with a roster delta, and no peer entry, `rosterVersion`, “Member joined” or “Member left this turn” notice is added to model context. Personality Traits, Working Principles, Growth Topic, availability, busy state, Runtime eligibility and execution reason remain outside this projection.
 _Avoid_: complete Member Identity Bootstrap Projection, personality profile, peer instruction, availability projection, Capability projection
 
 **Agent UUID**:
@@ -555,20 +555,32 @@ The additional count bound on active Memories formed directly by an Agent, appli
 _Avoid_: provisional capacity, authority quota, user Memory capacity, automatic eviction
 
 **CampMember**:
-The persistent membership relationship that associates an AgentProfile with one Camp and carries Camp-specific permissions. It does not duplicate Member Presence; away and removed identities remain historically related to their Camps while being ineligible for current participation. Membership may still change through the existing recoverable join, leave, and rejoin lifecycle, but adding or reactivating a CampMember never eagerly creates a Conversation; an existing Conversation remains available for that AgentProfile's continuity, while a missing one is created only at a later admitted execution targeting that member.
-_Avoid_: AgentProfile, Member, Member Presence, eager Conversation allocation
+The persistent membership relationship that associates an AgentProfile with one Camp and carries Camp-specific permissions. It does not duplicate Member Presence; a left relationship remains historical evidence rather than a selectable current participant. Adding the same AgentProfile after a prior leave is an ordinary new product addition with a new CampMember version: the UI, receipt and event do not expose a distinct “rejoined” state. Addition never eagerly creates a Conversation; an existing Conversation remains available for that AgentProfile's continuity, while a missing one is created only at a later admitted execution targeting that Member.
+_Avoid_: rejoined Member, resurrected Run, eager Conversation allocation, Member Presence copy
 
 **Current CampMember**:
-A CampMember whose membership in one Camp is currently effective. It is independent of Member Presence: an away AgentProfile may remain a Current CampMember, while ending the membership removes that Camp-scoped participation relationship.
+A CampMember whose membership in one Camp is currently effective. It is independent of Member Presence: an away AgentProfile may remain a Current CampMember, while ending the membership immediately removes that Camp-scoped participation relationship. Every Camp must retain at least one Current CampMember.
 _Avoid_: active CampMember, present Member, Executable Assignee
+
+**Camp Membership Generation**:
+The Camp-wide positive Core revision advanced by every effective Member addition or removal. User and trusted synchronization mutations compare the exact generation before commit so two stale roster edits cannot both succeed; it is Renderer/Core concurrency state and is not projected to a model as `rosterVersion`.
+_Avoid_: Collaboration State version, Member count, event sequence, model-visible roster revision
+
+**Camp Membership Cutover**:
+The atomic first phase of removing one Current CampMember: Core marks the relationship left, advances its version and the Camp Membership Generation, repairs Default Lead when needed, blocks all later business writes from Runs frozen under that membership version, requests cancellation of affected Runs, formally cancels Gather/Delivery work that has not begun, and releases non-terminal Task assignments. It preserves public history, terminal evidence and already-started external effects.
+_Avoid_: best-effort leave, UI-only removal, rollback of external effects, synchronous process termination
+
+**Camp Membership Reconciliation**:
+The durable second phase created by a Camp Membership Cutover for every affected non-terminal AgentRun. It remains `reconciling` until those exact Runs reach a formal terminal settlement, then becomes `completed`; adding the same Member again cannot satisfy, reopen or retarget the old reconciliation.
+_Avoid_: polling hint, Renderer progress authority, Run revival, implicit success
 
 **Executable Assignee**:
 A Task Assignee who is both a Current CampMember and has `present` Member Presence. It is an identity eligibility condition for admitting new Task-linked execution, not a claim about Runtime Readiness or immediate process availability.
 _Avoid_: active assignee, Runtime-ready assignee, Current CampMember
 
 **Initial Camp Membership**:
-The non-empty, user-selected set of present AgentProfiles that become CampMembers when a New Conversation Draft's creation is accepted. An unselected Member is outside that Camp rather than merely omitted from its first execution. The creation UI prevents removing the final selected member and explains that at least one Member must remain, preserving a valid Default Lead candidate. v0.22 configures this initial set but does not add a post-creation Camp membership editor or promise one in the creation interface.
-_Avoid_: First-message recipients, all present Members, Project team, post-creation membership UI
+The non-empty, user-selected set of present AgentProfiles that become CampMembers when a New Conversation Draft's creation is accepted. An unselected Member is outside that Camp rather than merely omitted from its first execution. The creation UI prevents removing the final selected Member and explains that at least one Member must remain, preserving a valid Default Lead candidate. Later Camp-scoped additions and removals use the independent Dynamic Camp Membership commands and do not rewrite this creation fact.
+_Avoid_: First-message recipients, all present Members, Project team, current roster snapshot
 
 **Camp Collaboration Mode**:
 The durable Camp policy persisted as the closed value `peer | lead_coordinated`, distinct from per-message explicit addressing. Current Camp creation exposes no collaboration-mode UI and always submits `peer`; Core still rejects `lead_coordinated` as unsupported and retains the field only for stable domain/storage compatibility. There is no current mode-change surface.
@@ -1487,7 +1499,7 @@ A durable, append-only, user-visible record of provider-reported reasoning summa
 _Avoid_: chain of thought, Camp message, Renderer-only live cache, searchable Agent context, raw provider packet, Task completion evidence
 
 **Agent Execution Process**:
-The long-lived, user-visible execution activity for one `(Camp, Agent ID)` pair, materialized by the first admitted AgentRun and spanning one or more separate AgentRun facts while that Camp exists. It is a presentation-level continuity over those Runs and their evidence, remains available when no Run is active or the latest Run is terminal, and retains the same identity across an ended and later rejoined CampMember relationship; an absent Agent is omitted from the current Run Pulse until it rejoins.
+The long-lived, user-visible execution activity for one `(Camp, Agent ID)` pair, materialized by the first admitted AgentRun and spanning one or more separate AgentRun facts while that Camp exists. It is a presentation-level continuity over those Runs and their evidence, remains available when no Run is active or the latest Run is terminal, and retains the same identity if that AgentProfile is later added to the Camp again; a left Agent is omitted from the current Run Pulse until a new membership is added.
 _Avoid_: Conversation, AgentRun, per-Run execution entry, Runtime process, execution controller
 
 **Execution Evidence Content**:
@@ -1539,8 +1551,8 @@ An immutable Agent-authored public Camp message that may address zero or more Ca
 _Avoid_: private handoff, per-recipient message copy, delivery status message, user-only projection
 
 **Message Delivery**:
-The recipient-specific A2A execution responsibility created by one accepted Public A2A Message. Each Delivery freezes `forward | return` edge kind, the lineage of its future target Run, recipient identity, recipient-local queue position, execution basis, and `pending | running | failed | cancelled | settled | interrupted_before_dispatch` lifecycle; `pending` distinguishes an initial no-attempt state from a post-attempt temporary wait condition, while `interrupted_before_dispatch` is a manual-intervention state because no dispatch attempt was established before a Core crash.
-_Avoid_: per-recipient message, passive read receipt, AgentRun, public timeline item
+The recipient-specific A2A execution responsibility created by one accepted Public A2A Message. Each Delivery freezes `forward | return` edge kind, the lineage of its future target Run, recipient identity and membership lifetime, source Run lifetime where required, recipient-local queue position, execution basis, and `pending | running | failed | cancelled | settled | interrupted_before_dispatch` lifecycle. A valid old source Run may address a Member added after its Context freeze because target admission uses the current roster; once accepted, an ended source lifetime cannot materialize or retry that Delivery. `pending` distinguishes an initial no-attempt state from a post-attempt temporary wait condition, while `interrupted_before_dispatch` is a manual-intervention state because no dispatch attempt was established before a Core crash.
+_Avoid_: per-recipient message, passive read receipt, AgentRun, public timeline item, frozen target roster
 
 **Delivery Wait Condition**:
 The recipient-scoped temporary reason that keeps a Message Delivery pending after a real dispatch attempt, such as `target_busy`, `runtime_unavailable`, or `capacity_unavailable`. Only the corresponding recipient/Camp execution event may invoke another Dispatch Pump; a wait condition is not a terminal failure or proof that a Run started.

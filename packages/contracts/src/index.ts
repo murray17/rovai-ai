@@ -304,6 +304,7 @@ export interface MemberRemovalPreview {
   currentCampMembershipCount: number
   openAssignedTaskCount: number
   defaultLeadCampCount: number
+  soleMemberCampCount: number
   removable: boolean
 }
 
@@ -855,6 +856,51 @@ export interface CampMemberView {
   memberOrder: number
   isDefaultLead: boolean
   version: number
+}
+
+export interface CampMembershipReconciliationView {
+  id: string
+  agentId: string
+  membershipVersion: number
+  status: 'reconciling'
+  reasonCode: string
+  targetRunCount: number
+  settledRunCount: number
+  createdAt: string
+  updatedAt: string
+}
+
+export interface AddCampMemberCommand {
+  campId: string
+  agentId: string
+  expectedMembershipGeneration: number
+  capabilityOverrides?: Record<string, unknown>
+}
+
+export interface RemoveCampMemberCommand {
+  campId: string
+  agentId: string
+  expectedMembershipGeneration: number
+  expectedMembershipVersion: number
+  replacementDefaultLeadAgentId?: string | null
+  reason?: string | null
+}
+
+export interface CampMemberRemovalPreview {
+  campId: string
+  agentId: string
+  displayName: string
+  membershipGeneration: number
+  membershipVersion: number
+  isDefaultLead: boolean
+  nextDefaultLeadAgentId: string | null
+  nonTerminalAgentRunCount: number
+  openAssignedTaskCount: number
+  pendingDeliveryCount: number
+  runningDeliveryCount: number
+  openGatherItemCount: number
+  removable: boolean
+  blockerCode: 'camp.member_not_active' | 'camp.last_member_required' | null
 }
 
 export interface TaskView {
@@ -1477,7 +1523,7 @@ export interface DomainEventView {
 }
 
 export interface CampSnapshot {
-  schemaVersion: 32
+  schemaVersion: 33
   throughGlobalSequence: number
   camp: {
     id: string
@@ -1486,11 +1532,13 @@ export interface CampSnapshot {
     projectBindingKind: ProjectBindingKind
     projectPath: string
     defaultLeadAgentId: string | null
+    membershipGeneration: number
     version: number
     createdAt: string
     updatedAt: string
   }
   members: CampMemberView[]
+  membershipReconciliations: CampMembershipReconciliationView[]
   tasks: TaskView[]
   messages: CampMessageView[]
   messageDeliveries: MessageDeliveryView[]
@@ -1517,10 +1565,11 @@ export interface CampOpenMessageCoverage extends CampOpenCollectionCoverage {
 }
 
 export interface CampOpenProjection {
-  schemaVersion: 3
+  schemaVersion: 4
   throughGlobalSequence: number
   camp: CampSnapshot['camp']
   members: CampMemberView[]
+  membershipReconciliations: CampMembershipReconciliationView[]
   tasks: TaskView[]
   messages: CampMessageView[]
   messageDeliveries: MessageDeliveryView[]
@@ -1596,6 +1645,7 @@ interface MessageDeliveryBaseView {
   campTurnId: string
   taskId: string | null
   recipientAgentId: string
+  recipientMembershipVersionAtAdmission: number | null
   status: 'pending' | 'running' | 'settled' | 'failed' | 'cancelled' | 'interrupted_before_dispatch' | string
   dispatchPhase: 'never_attempted' | 'attempting' | 'attempted_waiting' | 'materialized' | 'terminal' | string
   waitCondition: 'target_busy' | 'runtime_unavailable' | 'capacity_unavailable' | null
@@ -2572,6 +2622,9 @@ export type CoreMethod =
   | 'camps.create'
   | 'camps.discardPending'
   | 'camps.rename'
+  | 'camps.members.add'
+  | 'camps.members.removalPreview'
+  | 'camps.members.remove'
   | 'camps.changeDefaultLead'
   | 'camps.reconcileDefaultLead'
   | 'camps.exists'
