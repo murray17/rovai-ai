@@ -115,7 +115,8 @@ impl MessageDeliveryService {
                     SELECT camp_id, status, version, retry_generation,
                            delivery_kind, gather_id, failure_code,
                            recipient_agent_id,
-                           recipient_membership_version_at_admission
+                           recipient_membership_version_at_admission,
+                           source_agent_run_id
                     FROM message_delivery WHERE id = ?1
                     "#,
                     [&envelope.payload.delivery_id],
@@ -130,6 +131,7 @@ impl MessageDeliveryService {
                             row.get::<_, Option<String>>(6)?,
                             row.get::<_, String>(7)?,
                             row.get::<_, Option<i64>>(8)?,
+                            row.get::<_, String>(9)?,
                         ))
                     },
                 )
@@ -144,6 +146,7 @@ impl MessageDeliveryService {
                 failure_code,
                 recipient_agent_id,
                 recipient_membership_version_at_admission,
+                source_agent_run_id,
             )) = target
             else {
                 return Ok(rejected(
@@ -188,6 +191,14 @@ impl MessageDeliveryService {
                 return Ok(rejected(
                     "message_delivery.recipient_membership_changed",
                     "The recipient membership changed after this Delivery was admitted",
+                ));
+            }
+            if delivery_requires_source_membership_fence(&delivery_kind, gather_id.as_deref())
+                && !source_run_membership_matches(transaction, &camp_id, &source_agent_run_id)?
+            {
+                return Ok(rejected(
+                    "message_delivery.source_membership_changed",
+                    "The source membership changed after this Delivery was admitted",
                 ));
             }
             if delivery_kind == "gather_completion"
@@ -2283,6 +2294,26 @@ fn process_dispatch_attempt(
         transaction.commit()?;
         return Ok(outcome);
     }
+    if delivery_requires_source_membership_fence(
+        &delivery.delivery_kind,
+        delivery.gather_id.as_deref(),
+    ) && !source_run_membership_matches(
+        &transaction,
+        &delivery.camp_id,
+        &delivery.source_agent_run_id,
+    )? {
+        let outcome = terminal_dispatch(
+            &transaction,
+            &delivery,
+            attempt_id,
+            "failed",
+            "source_membership_changed",
+            &actor,
+            &now,
+        )?;
+        transaction.commit()?;
+        return Ok(outcome);
+    }
     let conversation_id = if delivery.delivery_kind == "gather_completion" {
         let conversation_id = delivery
             .target_conversation_id
@@ -2945,6 +2976,47 @@ fn recipient_membership_matches(
         current_recipient_membership_version(transaction, camp_id, agent_id)?
             == Some(membership_version),
     )
+}
+
+fn delivery_requires_source_membership_fence(delivery_kind: &str, gather_id: Option<&str>) -> bool {
+    delivery_kind == "public_a2a" && gather_id.is_none()
+}
+
+fn source_run_membership_matches(
+    transaction: &Transaction<'_>,
+    camp_id: &str,
+    source_agent_run_id: &str,
+) -> Result<bool> {
+    transaction
+        .query_row(
+            r#"
+            SELECT EXISTS(
+                SELECT 1
+                FROM agent_run AS source_run
+                JOIN camp_turn AS source_turn
+                  ON source_turn.id = source_run.camp_turn_id
+                JOIN conversation AS source_conversation
+                  ON source_conversation.id = source_run.conversation_id
+                JOIN camp_member AS source_member
+                  ON source_member.camp_id = source_turn.camp_id
+                 AND source_member.agent_id = source_conversation.agent_id
+                WHERE source_run.id = ?1
+                  AND source_turn.camp_id = ?2
+                  AND source_conversation.camp_id = ?2
+                  AND source_member.status = 'active'
+                  AND source_member.leave_requested_at IS NULL
+                  AND source_member.version = CAST(
+                      json_extract(
+                          source_run.effective_config_json,
+                          '$.campMemberVersion'
+                      ) AS INTEGER
+                  )
+            )
+            "#,
+            params![source_agent_run_id, camp_id],
+            |row| row.get(0),
+        )
+        .map_err(Into::into)
 }
 
 fn ensure_delivery_conversation(

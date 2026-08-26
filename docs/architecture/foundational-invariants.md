@@ -109,8 +109,8 @@ last_updated: 2026-08-24
 - `present | away | removed` 是 AgentProfile 的独立生命周期。Runtime 配置、可用性、认证或探测结果不得隐式改变 Presence；`removed` 是不可逆终态。
 - `away` 阻止新 Run，但保留身份、CampMember、Task assignment、Runtime 配置、头像、Memory 和历史；归队只恢复未来活动资格。永久移除只在不存在非终态 Run 时推进 Presence 和审计，不物理删除身份或历史关联。
 - removed 成员从活动名册、寻址、分配、Runtime/Skill/MCP 投影和未来 Memory counterparty 中排除，但历史消息、Task、Run 和审计继续显示原身份。历史配置可以成为不可执行的保留事实，不能阻止当前 Installation 清理。
-- CampMember 表达 Camp 内关系而不是复制全局 Presence。成员顺序稳定，Default Lead 必须是当前有效关系；Camp 至少保留一位 active member。动态添加/移除使用 Camp membership generation 与关系 exact version；曾离开成员再次添加是普通添加但形成新的 membership lifetime，不复活旧授权。
-- 移除使用原子 cutover 与持久 reconciliation：同一提交结束关系、切换必要的 Lead、释放未终态 Task 并关闭新业务效果；仍在途的 Run/Delivery/Gather 只通过正式 terminal settlement 收口。外部 roster 事件必须通过受信 System allowlist、Camp-bound source namespace/binding 与 exact next reconciliation generation 才能进入同一领域命令。
+- CampMember 表达 Camp 内关系而不是复制全局 Presence。成员顺序稳定，Default Lead 必须是当前有效关系；Camp 至少保留一位 active member。动态添加/移除使用 Camp membership generation 与关系 exact version；曾离开成员再次添加是普通添加但形成新的 membership lifetime，不复活旧授权。对当前 active member 的相同 capability overrides add 是 no-op，不同 overrides 必须 conflict，不能借 add 静默旋转 lifetime。
+- 移除使用原子 cutover 与持久 reconciliation：同一提交结束关系、切换必要的 Lead、释放未终态 Task 并关闭新业务效果；该 lifetime 的 pending ordinary outbound Delivery 同步终态化，已 materialized 下游 Run 与成员自己的在途 Run 一起请求取消并进入 reconciliation；其余 Run/Delivery/Gather 只通过正式 terminal settlement 收口。外部 roster 事件必须通过受信 System allowlist、Camp-bound source namespace/binding 与 exact next reconciliation generation 才能进入同一领域命令。
 
 <a id="member-projection"></a>
 
@@ -163,7 +163,7 @@ last_updated: 2026-08-24
 
 ### Message Delivery、返回链与恢复发布
 
-- 公共 CampMessage 与 per-recipient Message Delivery 是两个事实；先通过唯一幂等 publication fence 接受消息，再为每个冻结收件人创建持久执行责任。Delivery admission 冻结收件人的 exact membership version；dispatch、materialization 与 retry 都必须匹配，离开后再次添加不能复活旧责任。Delivery 失败、取消或恢复不撤销公开消息，公开消息也不自动证明已投递。
+- 公共 CampMessage 与 per-recipient Message Delivery 是两个事实；先通过唯一幂等 publication fence 接受消息，再为每个冻结收件人创建持久执行责任。Delivery admission 冻结收件人的 exact membership version；dispatch、materialization 与 retry 都必须匹配，离开后再次添加不能复活旧责任。普通 outbound A2A 还必须匹配 source Run 冻结的 membership lifetime：source 离开会终态化 pending Delivery，并把已 materialized 下游 Run 纳入 reconciliation。Source Run 的 frozen peer projection 不限制新 send 的 target roster；仍有效的旧 Run 可以联系后来加入的当前成员。Delivery 失败、取消或恢复不撤销公开消息，公开消息也不自动证明已投递。
 - Dispatch Pump 是 recipient-scoped、事件驱动且可恢复的；accepted、attempt generation、waiting、retry eligibility、cancellation、terminal settlement 和当前 Run/Native Binding 由 Core 状态推进。中断在途 attempt 必须在新 attempt 前经 fencing/reconciliation，不轮询 Runtime 文本、不从进程消失猜结果。
 - `forward | return` 是独立 Delivery 边类型。Caller return 使用 Core 管理的 reply reference、caller lineage 和显式收件人；模型不提交可伪造 reply target，返回不通过文本 mention、Conversation 默认目标或 Runtime 私有历史猜测。只有可证明的当前 Gather capture 可以在不创建普通 caller continuation 的情况下结算对应 Item。
 - Runtime Adapter 明确冻结 public-output mode 和独立 Missing-Send Recovery policy。Runtime automatic final 只能按模式发布无收件人的公开输出，不从正文派生 Delivery/reply。普通输出与成功 Run 的 Missing-Send 候选都必须通过 frozen membership lifetime publication fence；终态 evidence 可以窄结算旧责任但不能发布。竞态、重放和终态恢复经同一 publication identity 去重。

@@ -1430,15 +1430,23 @@ impl CollaborationService {
                     },
                 )
                 .optional()?;
-            let unchanged =
-                current_membership
-                    .as_ref()
-                    .is_some_and(|(status, current_overrides_json, _)| {
-                        status == "active"
-                            && serde_json::from_str::<Value>(current_overrides_json).ok()
-                                == Some(envelope.payload.capability_overrides.clone())
-                    });
-            if unchanged {
+            if let Some((status, current_overrides_json, membership_version)) =
+                current_membership.as_ref()
+                && status == "active"
+            {
+                let current_overrides = serde_json::from_str::<Value>(current_overrides_json)
+                    .context("active Camp membership capability overrides are invalid")?;
+                if current_overrides != envelope.payload.capability_overrides {
+                    return Ok(CommandHandlerResult::rejected(
+                        "camp.member_capability_conflict",
+                        json!({
+                            "message": "The active Camp member has different capability overrides",
+                            "agentId": envelope.payload.agent_id,
+                            "currentMembershipVersion": membership_version,
+                            "currentMembershipGeneration": membership_generation,
+                        }),
+                    ));
+                }
                 advance_membership_source_generation(
                     transaction,
                     &envelope.actor,
@@ -1452,7 +1460,7 @@ impl CollaborationService {
                         "campId": envelope.payload.camp_id,
                         "agentId": envelope.payload.agent_id,
                         "membershipStatus": "active",
-                        "membershipVersion": current_membership.as_ref().map(|value| value.2),
+                        "membershipVersion": membership_version,
                         "membershipGeneration": membership_generation,
                         "changed": false,
                     }),
@@ -1622,22 +1630,16 @@ impl CollaborationService {
         } else {
             None
         };
-        let non_terminal_agent_run_count: i64 = connection.query_row(
-            r#"
-            SELECT COUNT(*)
-            FROM agent_run
-            JOIN camp_turn ON camp_turn.id = agent_run.camp_turn_id
-            JOIN conversation ON conversation.id = agent_run.conversation_id
-            WHERE camp_turn.camp_id = ?1 AND conversation.agent_id = ?2
-              AND agent_run.status IN ('queued', 'running', 'waiting')
-              AND CAST(
-                    json_extract(agent_run.effective_config_json, '$.campMemberVersion')
-                    AS INTEGER
-                  ) = ?3
-            "#,
-            params![camp_id, agent_id, membership_version],
-            |row| row.get(0),
-        )?;
+        let affected_deliveries =
+            camp_membership_affected_deliveries(connection, camp_id, agent_id, membership_version)?;
+        let non_terminal_agent_run_count = camp_membership_affected_run_ids(
+            connection,
+            camp_id,
+            agent_id,
+            membership_version,
+            &affected_deliveries,
+        )?
+        .len() as i64;
         let open_assigned_task_count: i64 = connection.query_row(
             r#"
             SELECT COUNT(*) FROM task
@@ -1647,24 +1649,14 @@ impl CollaborationService {
             params![camp_id, agent_id],
             |row| row.get(0),
         )?;
-        let (pending_delivery_count, running_delivery_count): (i64, i64) = connection.query_row(
-            r#"
-                SELECT
-                    SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END),
-                    SUM(CASE WHEN status = 'running' THEN 1 ELSE 0 END)
-                FROM message_delivery
-                WHERE camp_id = ?1 AND recipient_agent_id = ?2
-                  AND status IN ('pending', 'running')
-                  AND recipient_membership_version_at_admission = ?3
-                "#,
-            params![camp_id, agent_id, membership_version],
-            |row| {
-                Ok((
-                    row.get::<_, Option<i64>>(0)?.unwrap_or(0),
-                    row.get::<_, Option<i64>>(1)?.unwrap_or(0),
-                ))
-            },
-        )?;
+        let pending_delivery_count = affected_deliveries
+            .iter()
+            .filter(|delivery| delivery.status == "pending")
+            .count() as i64;
+        let running_delivery_count = affected_deliveries
+            .iter()
+            .filter(|delivery| delivery.status == "running")
+            .count() as i64;
         let open_gather_item_count: i64 = connection.query_row(
             r#"
             SELECT COUNT(*)
@@ -5069,6 +5061,142 @@ fn actor_parts(actor: &ActorRef) -> (&'static str, &str, Option<&str>) {
 }
 
 #[derive(Debug)]
+struct CampMembershipAffectedDelivery {
+    id: String,
+    camp_turn_id: String,
+    status: String,
+    dispatch_attempt_count: i64,
+    active_dispatch_attempt_id: Option<String>,
+    target_agent_run_id: Option<String>,
+    failure_code: String,
+}
+
+fn camp_membership_affected_deliveries(
+    connection: &Connection,
+    camp_id: &str,
+    agent_id: &str,
+    membership_version: i64,
+) -> Result<Vec<CampMembershipAffectedDelivery>> {
+    let mut statement = connection.prepare(
+        r#"
+        WITH affected AS (
+            SELECT delivery.id, delivery.camp_turn_id, delivery.status,
+                   delivery.dispatch_attempt_count,
+                   delivery.active_dispatch_attempt_id,
+                   delivery.target_agent_run_id,
+                   delivery.created_at,
+                   (
+                       delivery.recipient_agent_id = ?2
+                       AND delivery.recipient_membership_version_at_admission = ?3
+                   ) AS recipient_affected,
+                   EXISTS(
+                       SELECT 1
+                       FROM gather_record
+                       JOIN agent_run AS initiator_run
+                         ON initiator_run.id = gather_record.initiator_agent_run_id
+                       WHERE gather_record.id = delivery.gather_id
+                         AND gather_record.camp_id = ?1
+                         AND gather_record.initiator_agent_id = ?2
+                         AND gather_record.status IN ('collecting', 'ready', 'completing')
+                         AND CAST(
+                               json_extract(
+                                   initiator_run.effective_config_json,
+                                   '$.campMemberVersion'
+                               ) AS INTEGER
+                             ) = ?3
+                   ) AS gather_initiator_affected,
+                   (
+                       delivery.delivery_kind = 'public_a2a'
+                       AND delivery.gather_id IS NULL
+                       AND EXISTS(
+                           SELECT 1
+                           FROM agent_run AS source_run
+                           JOIN camp_turn AS source_turn
+                             ON source_turn.id = source_run.camp_turn_id
+                           JOIN conversation AS source_conversation
+                             ON source_conversation.id = source_run.conversation_id
+                           WHERE source_run.id = delivery.source_agent_run_id
+                             AND source_turn.camp_id = delivery.camp_id
+                             AND source_conversation.camp_id = delivery.camp_id
+                             AND source_conversation.agent_id = ?2
+                             AND CAST(
+                                   json_extract(
+                                       source_run.effective_config_json,
+                                       '$.campMemberVersion'
+                                   ) AS INTEGER
+                                 ) = ?3
+                       )
+                   ) AS source_affected
+            FROM message_delivery AS delivery
+            WHERE delivery.camp_id = ?1
+              AND delivery.status IN ('pending', 'running')
+        )
+        SELECT id, camp_turn_id, status, dispatch_attempt_count,
+               active_dispatch_attempt_id, target_agent_run_id,
+               CASE
+                   WHEN recipient_affected THEN 'recipient_membership_ended'
+                   WHEN gather_initiator_affected THEN 'gather_initiator_left_camp'
+                   ELSE 'source_membership_ended'
+               END
+        FROM affected
+        WHERE recipient_affected OR gather_initiator_affected OR source_affected
+        ORDER BY created_at, id
+        "#,
+    )?;
+    Ok(statement
+        .query_map(params![camp_id, agent_id, membership_version], |row| {
+            Ok(CampMembershipAffectedDelivery {
+                id: row.get(0)?,
+                camp_turn_id: row.get(1)?,
+                status: row.get(2)?,
+                dispatch_attempt_count: row.get(3)?,
+                active_dispatch_attempt_id: row.get(4)?,
+                target_agent_run_id: row.get(5)?,
+                failure_code: row.get(6)?,
+            })
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?)
+}
+
+fn camp_membership_affected_run_ids(
+    connection: &Connection,
+    camp_id: &str,
+    agent_id: &str,
+    membership_version: i64,
+    affected_deliveries: &[CampMembershipAffectedDelivery],
+) -> Result<Vec<String>> {
+    let mut statement = connection.prepare(
+        r#"
+        SELECT agent_run.id
+        FROM agent_run
+        JOIN camp_turn ON camp_turn.id = agent_run.camp_turn_id
+        JOIN conversation ON conversation.id = agent_run.conversation_id
+        WHERE camp_turn.camp_id = ?1
+          AND conversation.agent_id = ?2
+          AND agent_run.status IN ('queued', 'running', 'waiting')
+          AND CAST(
+                json_extract(agent_run.effective_config_json, '$.campMemberVersion')
+                AS INTEGER
+              ) = ?3
+        ORDER BY agent_run.created_at, agent_run.id
+        "#,
+    )?;
+    let mut run_ids = statement
+        .query_map(params![camp_id, agent_id, membership_version], |row| {
+            row.get::<_, String>(0)
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    run_ids.extend(
+        affected_deliveries
+            .iter()
+            .filter_map(|delivery| delivery.target_agent_run_id.clone()),
+    );
+    run_ids.sort();
+    run_ids.dedup();
+    Ok(run_ids)
+}
+
+#[derive(Debug)]
 pub(crate) struct CampMembershipEndOutcome {
     pub membership_version: i64,
     pub membership_generation: i64,
@@ -5188,88 +5316,19 @@ pub(crate) fn end_camp_membership(
             )?
             .collect::<rusqlite::Result<Vec<_>>>()?
     };
-    let affected_deliveries = {
-        let mut statement = transaction.prepare(
-            r#"
-            SELECT delivery.id, delivery.camp_turn_id, delivery.status,
-                   delivery.dispatch_attempt_count,
-                   delivery.active_dispatch_attempt_id,
-                   delivery.target_agent_run_id
-            FROM message_delivery AS delivery
-            WHERE delivery.camp_id = ?1
-              AND delivery.status IN ('pending', 'running')
-              AND (
-                    (
-                        delivery.recipient_agent_id = ?2
-                        AND delivery.recipient_membership_version_at_admission = ?3
-                    )
-                    OR EXISTS(
-                        SELECT 1
-                        FROM gather_record
-                        JOIN agent_run AS initiator_run
-                          ON initiator_run.id = gather_record.initiator_agent_run_id
-                        WHERE gather_record.id = delivery.gather_id
-                          AND gather_record.camp_id = ?1
-                          AND gather_record.initiator_agent_id = ?2
-                          AND gather_record.status IN ('collecting', 'ready', 'completing')
-                          AND CAST(
-                                json_extract(
-                                    initiator_run.effective_config_json,
-                                    '$.campMemberVersion'
-                                ) AS INTEGER
-                              ) = ?3
-                    )
-              )
-            ORDER BY delivery.created_at, delivery.id
-            "#,
-        )?;
-        statement
-            .query_map(
-                params![camp_id, agent_id, current_membership_version],
-                |row| {
-                    Ok((
-                        row.get::<_, String>(0)?,
-                        row.get::<_, String>(1)?,
-                        row.get::<_, String>(2)?,
-                        row.get::<_, i64>(3)?,
-                        row.get::<_, Option<String>>(4)?,
-                        row.get::<_, Option<String>>(5)?,
-                    ))
-                },
-            )?
-            .collect::<rusqlite::Result<Vec<_>>>()?
-    };
-    let mut affected_run_ids = {
-        let mut statement = transaction.prepare(
-            r#"
-            SELECT agent_run.id
-            FROM agent_run
-            JOIN camp_turn ON camp_turn.id = agent_run.camp_turn_id
-            JOIN conversation ON conversation.id = agent_run.conversation_id
-            WHERE camp_turn.camp_id = ?1
-              AND conversation.agent_id = ?2
-              AND agent_run.status IN ('queued', 'running', 'waiting')
-              AND CAST(
-                    json_extract(agent_run.effective_config_json, '$.campMemberVersion')
-                    AS INTEGER
-                  ) = ?3
-            ORDER BY agent_run.created_at, agent_run.id
-            "#,
-        )?;
-        statement
-            .query_map(
-                params![camp_id, agent_id, current_membership_version],
-                |row| row.get::<_, String>(0),
-            )?
-            .collect::<rusqlite::Result<Vec<_>>>()?
-    };
-    affected_run_ids.extend(
-        affected_deliveries
-            .iter()
-            .filter_map(|delivery| delivery.5.clone()),
-    );
-    affected_run_ids.sort();
-    affected_run_ids.dedup();
+    let affected_deliveries = camp_membership_affected_deliveries(
+        transaction,
+        camp_id,
+        agent_id,
+        current_membership_version,
+    )?;
+    let affected_run_ids = camp_membership_affected_run_ids(
+        transaction,
+        camp_id,
+        agent_id,
+        current_membership_version,
+        &affected_deliveries,
+    )?;
 
     let changed = transaction.execute(
         r#"
@@ -5388,25 +5447,23 @@ pub(crate) fn end_camp_membership(
 
     let mut affected_turn_ids = BTreeSet::new();
     let mut cancelled_delivery_count = 0_usize;
-    for (delivery_id, camp_turn_id, status, attempt_count, active_attempt_id, _) in
-        &affected_deliveries
-    {
-        affected_turn_ids.insert(camp_turn_id.clone());
-        if status != "pending" {
+    for delivery in &affected_deliveries {
+        affected_turn_ids.insert(delivery.camp_turn_id.clone());
+        if delivery.status != "pending" {
             continue;
         }
-        if let Some(attempt_id) = active_attempt_id {
+        if let Some(attempt_id) = &delivery.active_dispatch_attempt_id {
             transaction.execute(
                 r#"
                 UPDATE message_delivery_attempt
                 SET status = 'cancelled', wait_condition = NULL,
-                    failure_code = 'recipient_membership_ended', ended_at = ?2
+                    failure_code = ?3, ended_at = ?2
                 WHERE id = ?1 AND status = 'attempting'
                 "#,
-                params![attempt_id, now],
+                params![attempt_id, now, delivery.failure_code],
             )?;
         }
-        let terminal_status = if *attempt_count == 0 {
+        let terminal_status = if delivery.dispatch_attempt_count == 0 {
             "interrupted_before_dispatch"
         } else {
             "cancelled"
@@ -5417,19 +5474,20 @@ pub(crate) fn end_camp_membership(
             SET status = ?2, dispatch_phase = 'terminal', wait_condition = NULL,
                 active_dispatch_attempt_id = NULL,
                 manual_intervention_required = CASE WHEN ?3 = 0 THEN 1 ELSE 0 END,
-                failure_code = 'recipient_membership_ended',
+                failure_code = ?4,
                 failure_detail_json = json_object(
-                    'reason', 'camp_membership_ended',
-                    'agentId', ?4,
-                    'membershipVersion', ?5
+                    'reason', ?4,
+                    'agentId', ?5,
+                    'membershipVersion', ?6
                 ),
-                version = version + 1, updated_at = ?6, ended_at = ?6
+                version = version + 1, updated_at = ?7, ended_at = ?7
             WHERE id = ?1 AND status = 'pending'
             "#,
             params![
-                delivery_id,
+                delivery.id,
                 terminal_status,
-                attempt_count,
+                delivery.dispatch_attempt_count,
+                delivery.failure_code,
                 agent_id,
                 membership_version,
                 now,
@@ -5441,20 +5499,20 @@ pub(crate) fn end_camp_membership(
                 transaction,
                 "message_delivery.cancelled",
                 Some(camp_id),
-                Some(("message_delivery", delivery_id)),
+                Some(("message_delivery", &delivery.id)),
                 actor,
                 execution_epoch,
                 &json!({
-                    "deliveryId": delivery_id,
-                    "failureCode": "recipient_membership_ended",
+                    "deliveryId": delivery.id,
+                    "failureCode": delivery.failure_code,
                     "membershipVersion": membership_version,
                 }),
             )?;
             settle_item_from_delivery_terminal(
                 transaction,
-                delivery_id,
+                &delivery.id,
                 terminal_status,
-                Some("recipient_membership_ended"),
+                Some(&delivery.failure_code),
                 actor,
                 execution_epoch,
                 now,
@@ -6714,6 +6772,44 @@ mod slow_tests {
                 .unwrap(),
             1
         );
+
+        let conflicting = service
+            .add_camp_member(
+                &mut database,
+                &user_envelope(
+                    "configured-camp-add-member-capability-conflict",
+                    Some(&camp_id),
+                    AddCampMemberCommand {
+                        camp_id: camp_id.clone(),
+                        agent_id: "agent_2".to_string(),
+                        expected_membership_generation: 2,
+                        capability_overrides: json!({"task.create": "deny"}),
+                        source: None,
+                    },
+                ),
+            )
+            .unwrap();
+        assert_eq!(conflicting.result.status, CommandResultStatus::Rejected);
+        assert_eq!(conflicting.result.code, "camp.member_capability_conflict");
+        assert_eq!(conflicting.result.payload["currentMembershipVersion"], 1);
+        assert_eq!(conflicting.result.payload["currentMembershipGeneration"], 2);
+        let unchanged_state: (i64, String, i64, i64) = database
+            .connection()
+            .query_row(
+                r#"
+                SELECT member.version, member.capability_overrides_json,
+                       camp.membership_generation,
+                       (SELECT COUNT(*) FROM event_log
+                        WHERE event_type = 'camp.member_added' AND camp_id = ?1)
+                FROM camp_member AS member
+                JOIN camp ON camp.id = member.camp_id
+                WHERE member.camp_id = ?1 AND member.agent_id = 'agent_2'
+                "#,
+                [&camp_id],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )
+            .unwrap();
+        assert_eq!(unchanged_state, (1, "{}".to_string(), 2, 1));
 
         database
             .connection()

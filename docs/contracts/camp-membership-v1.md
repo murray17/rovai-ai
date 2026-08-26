@@ -40,9 +40,11 @@ type RemoveCampMemberCommand = {
 ```
 
 `camps.members.add` 与 `camps.members.remove` 是 User-authorized typed Desktop mutation。add 对同一 active member
-为成功 no-op；generation/version 冲突必须拒绝并要求重读。移除 Default Lead 时，若仍有 `present` 的 active
-member，必须使用 preview 给出的有效 successor；若剩余 current members 全部暂离，则允许 successor 为 null，
-并由既有 Default Lead reconciliation 在有人归队后恢复。移除非 Lead 时不得携带 replacement。
+且相同 `capabilityOverrides` 为成功 no-op；若 overrides 不同则拒绝为 `camp.member_capability_conflict`，不得推进
+membership version/generation、发出 added event 或使既有 Run 失效。能力修改属于未来独立的 version-qualified
+命令，不由 add 兼任。generation/version 冲突必须拒绝并要求重读。移除 Default Lead 时，若仍有 `present` 的
+active member，必须使用 preview 给出的有效 successor；若剩余 current members 全部暂离，则允许 successor 为
+null，并由既有 Default Lead reconciliation 在有人归队后恢复。移除非 Lead 时不得携带 replacement。
 
 `camps.members.removalPreview(campId, agentId)` 返回：
 
@@ -66,13 +68,16 @@ type CampMemberRemovalPreview = {
 ```
 
 Preview 是只读影响说明，不是授权；remove 必须提交 preview 返回的 exact generation/version，并在事务内重做
-全部验证。Renderer 遇到冲突只能刷新权威 preview 后让用户重试。
+全部验证。Run 与 Delivery 计数同时包含目标成员自己的工作，以及其当前 membership lifetime 已接受的普通
+outbound A2A 和已 materialized 下游 Run。Renderer 遇到冲突只能刷新权威 preview 后让用户重试。
 
 ## 3. Cutover 与 reconciliation
 
 成功 remove 在一个提交中结束 membership、推进 generation/version、必要时切换 Default Lead、释放成员的
 非终态 Task、取消尚未结算的 Run/Gather/Delivery，并创建需要后续 terminal settlement 的 reconciliation。
-提交即是业务 cutover：旧 lifetime 不得再产生业务写入或公开输出。
+该 lifetime 已接受但尚未 materialize 的普通 outbound A2A 在提交内终态化；已经 materialized 的下游 Run 与成员
+自己的非终态 Run 一起写入 reconciliation 并请求取消。提交即是业务 cutover：旧 lifetime 不得再产生业务写入、
+公开输出或新的下游 Run。
 
 Read side 只投影 `status = reconciling` 的活动项：
 
@@ -99,6 +104,10 @@ type CampMembershipReconciliationView = {
 Run/lease/binding 与 exact active membership version。Delivery 和 Gather 的附加规则分别由
 [Message Delivery v6](message-delivery-v6.md)与[Gather v4](gather-v4.md)拥有。终态 evidence 可以使用只允许
 settlement 的窄路径；普通与自动 publication 仍必须匹配 exact lifetime。
+
+目标寻址与 source lifetime 是两条独立规则：旧 Run 的 Context 不补丁，但其新 send 可按 admission 时的当前
+active 名册联系后来加入的成员；send 已接受后，普通 outbound Delivery 的 materialization/retry 仍必须匹配
+source Run 冻结的原 membership version。
 
 ## 5. 外部来源
 

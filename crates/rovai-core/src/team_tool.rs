@@ -2108,6 +2108,10 @@ mod tests {
 
     impl Fixture {
         fn new() -> Self {
+            Self::with_members(&["agent_1", "agent_2", "agent_3"])
+        }
+
+        fn with_members(member_agent_ids: &[&str]) -> Self {
             let mut database = crate::test_support::seeded_runtime_database_owned();
             let directory = database.directory().to_path_buf();
             let workspace = directory.join("workspace");
@@ -2121,14 +2125,14 @@ mod tests {
                         None,
                         CreateCampCommand::for_test_with_members(
                             workspace.to_string_lossy().to_string(),
-                            &["agent_1", "agent_2", "agent_3"],
+                            member_agent_ids,
                             "agent_1",
                         ),
                     ),
                 )
                 .expect("Camp should be created");
             let camp_id = camp.result.payload["campId"].as_str().unwrap().to_string();
-            for (index, agent_id) in ["agent_1", "agent_2", "agent_3"].iter().enumerate() {
+            for (index, agent_id) in member_agent_ids.iter().enumerate() {
                 collaboration
                     .add_camp_member(
                         &mut database,
@@ -2270,6 +2274,40 @@ mod tests {
                 source_epoch,
                 credential,
             }
+        }
+
+        #[cfg(feature = "slow-tests")]
+        fn queue_direct_run(&mut self, command_id: &str, agent_id: &str) -> String {
+            CollaborationService::default()
+                .send_test_camp_message(
+                    &mut self.database,
+                    &user_envelope(
+                        command_id,
+                        Some(&self.camp_id),
+                        TestCampMessageCommand {
+                            camp_id: self.camp_id.clone(),
+                            draft_revision: None,
+                            body: format!("Keep {agent_id} busy"),
+                            prepared_attachment_ids: Vec::new(),
+                            address: TestCampMessageAddress::Explicit {
+                                agent_ids: vec![agent_id.to_string()],
+                            },
+                            reply_to_camp_message_id: None,
+                            execution: Some(ExecutionRequest {
+                                task_id: None,
+                                purpose: "Occupy the recipient FIFO".to_string(),
+                                completion_role: "required".to_string(),
+                                budget: None,
+                            }),
+                        },
+                    ),
+                )
+                .expect("direct Run should queue")
+                .result
+                .payload["agentRunIds"][0]
+                .as_str()
+                .expect("direct Run id should exist")
+                .to_string()
         }
 
         fn public_send_invocation(
@@ -6769,6 +6807,294 @@ Use this exact public input @agent_2";
     }
 
     #[cfg(feature = "slow-tests")]
+    fn an_existing_run_can_address_a_member_added_after_its_context_was_frozen() {
+        let mut fixture = Fixture::with_members(&["agent_1", "agent_2"]);
+        let added = CollaborationService::default()
+            .add_camp_member(
+                &mut fixture.database,
+                &user_envelope(
+                    "add-member-after-source-context-freeze",
+                    Some(&fixture.camp_id),
+                    AddCampMemberCommand {
+                        camp_id: fixture.camp_id.clone(),
+                        agent_id: "agent_3".to_string(),
+                        expected_membership_generation: 1,
+                        capability_overrides: json!({}),
+                        source: None,
+                    },
+                ),
+            )
+            .unwrap();
+        assert_eq!(added.result.code, "camp.member_added");
+
+        let invocation = fixture.public_send_invocation(
+            "send-to-member-added-after-source-freeze",
+            "Current target membership controls this admission",
+            &["agent_3"],
+        );
+        let sent = TeamToolService::default()
+            .send_public_message(&mut fixture.database, &invocation)
+            .unwrap();
+        assert_eq!(sent.result.status, CommandResultStatus::Accepted);
+        assert_eq!(
+            sent.result.payload["effectiveRecipients"],
+            json!(["agent_3"])
+        );
+        let delivery_id = sent.result.payload["deliveryIds"][0].as_str().unwrap();
+        assert_eq!(
+            fixture
+                .database
+                .connection()
+                .query_row(
+                    "SELECT status FROM message_delivery WHERE id = ?1",
+                    [delivery_id],
+                    |row| row.get::<_, String>(0),
+                )
+                .unwrap(),
+            "running"
+        );
+    }
+
+    #[cfg(feature = "slow-tests")]
+    fn pending_outbound_delivery_is_cancelled_when_source_membership_ends() {
+        let mut fixture = Fixture::new();
+        let _busy_run_id = fixture.queue_direct_run("queue-pending-outbound-recipient", "agent_2");
+        let invocation = fixture.public_send_invocation(
+            "pending-outbound-before-source-leaves",
+            "This old outbound work must not materialize",
+            &["agent_2"],
+        );
+        let sent = TeamToolService::default()
+            .send_public_message(&mut fixture.database, &invocation)
+            .unwrap();
+        let delivery_id = sent.result.payload["deliveryIds"][0]
+            .as_str()
+            .unwrap()
+            .to_string();
+        assert_eq!(
+            fixture
+                .database
+                .connection()
+                .query_row(
+                    "SELECT status || ':' || wait_condition FROM message_delivery WHERE id = ?1",
+                    [&delivery_id],
+                    |row| row.get::<_, String>(0),
+                )
+                .unwrap(),
+            "pending:target_busy"
+        );
+
+        let collaboration = CollaborationService::default();
+        let preview = collaboration
+            .camp_member_removal_preview(&fixture.database, &fixture.camp_id, "agent_1")
+            .unwrap()
+            .unwrap();
+        assert_eq!(preview.pending_delivery_count, 1);
+        assert_eq!(preview.running_delivery_count, 0);
+        let removed = collaboration
+            .remove_camp_member(
+                &mut fixture.database,
+                &user_envelope(
+                    "remove-pending-outbound-source",
+                    Some(&fixture.camp_id),
+                    RemoveCampMemberCommand {
+                        camp_id: fixture.camp_id.clone(),
+                        agent_id: "agent_1".to_string(),
+                        expected_membership_generation: preview.membership_generation,
+                        expected_membership_version: preview.membership_version,
+                        replacement_default_lead_agent_id: preview.next_default_lead_agent_id,
+                        reason: Some("test source membership cutover".to_string()),
+                        source: None,
+                    },
+                ),
+            )
+            .unwrap();
+        assert_eq!(removed.result.status, CommandResultStatus::Accepted);
+        assert_eq!(removed.result.payload["cancelledDeliveryCount"], 1);
+        assert_eq!(
+            fixture
+                .database
+                .connection()
+                .query_row(
+                    r#"
+                    SELECT status || ':' || failure_code || ':' ||
+                           COALESCE(target_agent_run_id, '')
+                    FROM message_delivery WHERE id = ?1
+                    "#,
+                    [&delivery_id],
+                    |row| row.get::<_, String>(0),
+                )
+                .unwrap(),
+            "cancelled:source_membership_ended:"
+        );
+    }
+
+    #[cfg(feature = "slow-tests")]
+    fn running_outbound_delivery_target_is_reconciled_when_source_membership_ends() {
+        let mut fixture = Fixture::new();
+        let invocation = fixture.public_send_invocation(
+            "running-outbound-before-source-leaves",
+            "This materialized target belongs to the old source lifetime",
+            &["agent_2"],
+        );
+        let sent = TeamToolService::default()
+            .send_public_message(&mut fixture.database, &invocation)
+            .unwrap();
+        let delivery_id = sent.result.payload["deliveryIds"][0]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let target_run_id: String = fixture
+            .database
+            .connection()
+            .query_row(
+                "SELECT target_agent_run_id FROM message_delivery WHERE id = ?1",
+                [&delivery_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+
+        let collaboration = CollaborationService::default();
+        let preview = collaboration
+            .camp_member_removal_preview(&fixture.database, &fixture.camp_id, "agent_1")
+            .unwrap()
+            .unwrap();
+        assert_eq!(preview.pending_delivery_count, 0);
+        assert_eq!(preview.running_delivery_count, 1);
+        assert_eq!(preview.non_terminal_agent_run_count, 2);
+        let removed = collaboration
+            .remove_camp_member(
+                &mut fixture.database,
+                &user_envelope(
+                    "remove-running-outbound-source",
+                    Some(&fixture.camp_id),
+                    RemoveCampMemberCommand {
+                        camp_id: fixture.camp_id.clone(),
+                        agent_id: "agent_1".to_string(),
+                        expected_membership_generation: preview.membership_generation,
+                        expected_membership_version: preview.membership_version,
+                        replacement_default_lead_agent_id: preview.next_default_lead_agent_id,
+                        reason: Some("test source membership cutover".to_string()),
+                        source: None,
+                    },
+                ),
+            )
+            .unwrap();
+        assert_eq!(removed.result.status, CommandResultStatus::Accepted);
+        assert_eq!(removed.result.payload["cancelRequestedRunCount"], 2);
+        let target_state: (Option<String>, i64) = fixture
+            .database
+            .connection()
+            .query_row(
+                r#"
+                SELECT run.cancel_requested_at,
+                       (SELECT COUNT(*)
+                        FROM camp_membership_reconciliation_run AS link
+                        WHERE link.agent_run_id = run.id)
+                FROM agent_run AS run
+                WHERE run.id = ?1
+                "#,
+                [&target_run_id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert!(target_state.0.is_some());
+        assert_eq!(target_state.1, 1);
+    }
+
+    #[cfg(feature = "slow-tests")]
+    fn dispatch_and_retry_reject_delivery_from_ended_source_membership() {
+        let mut fixture = Fixture::new();
+        let busy_run_id = fixture.queue_direct_run("queue-source-fence-recipient", "agent_2");
+        let invocation = fixture.public_send_invocation(
+            "source-fenced-outbound-delivery",
+            "Dispatch must independently fence the source lifetime",
+            &["agent_2"],
+        );
+        let sent = TeamToolService::default()
+            .send_public_message(&mut fixture.database, &invocation)
+            .unwrap();
+        let delivery_id = sent.result.payload["deliveryIds"][0]
+            .as_str()
+            .unwrap()
+            .to_string();
+
+        let now = chrono::Utc::now().to_rfc3339();
+        // Bypass the normal cutover cancellation to exercise the independent
+        // dispatch/retry fence against a later membership lifetime.
+        fixture
+            .database
+            .connection()
+            .execute(
+                r#"
+                UPDATE camp_member
+                SET status = 'active', version = version + 2,
+                    joined_at = ?3, left_at = NULL
+                WHERE camp_id = ?1 AND agent_id = ?2
+                "#,
+                params![fixture.camp_id, "agent_1", now],
+            )
+            .unwrap();
+        fixture
+            .database
+            .connection()
+            .execute(
+                r#"
+                UPDATE agent_run
+                SET status = 'succeeded', ended_at = ?2, updated_at = ?2,
+                    version = version + 1
+                WHERE id = ?1
+                "#,
+                params![busy_run_id, now],
+            )
+            .unwrap();
+
+        let dispatched = dispatch_pending_for_recipient(
+            &mut fixture.database,
+            &fixture.camp_id,
+            "agent_2",
+            DeliveryDispatchTrigger::TargetRunEnded,
+            true,
+        )
+        .unwrap();
+        assert!(matches!(
+            dispatched.as_slice(),
+            [crate::message_delivery::DeliveryDispatchOutcome::Terminal {
+                status,
+                failure_code,
+            }] if status == "failed" && failure_code == "source_membership_changed"
+        ));
+
+        let delivery_version: i64 = fixture
+            .database
+            .connection()
+            .query_row(
+                "SELECT version FROM message_delivery WHERE id = ?1",
+                [&delivery_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let retried = MessageDeliveryService::default()
+            .retry(
+                &mut fixture.database,
+                &user_envelope(
+                    "retry-source-fenced-delivery",
+                    Some(&fixture.camp_id),
+                    RetryMessageDeliveryCommand {
+                        delivery_id,
+                        expected_version: delivery_version,
+                    },
+                ),
+            )
+            .unwrap();
+        assert_eq!(retried.result.status, CommandResultStatus::Rejected);
+        assert_eq!(
+            retried.result.code,
+            "message_delivery.source_membership_changed"
+        );
+    }
+
+    #[cfg(feature = "slow-tests")]
     fn a_terminal_delivery_cannot_be_retried_after_the_recipient_leaves_and_rejoins() {
         let mut fixture = Fixture::new();
         let invocation = fixture.public_send_invocation(
@@ -9139,6 +9465,22 @@ Use this exact public input @agent_2";
         #[test]
         fn a_terminal_delivery_cannot_be_retried_after_the_recipient_leaves_and_rejoins() {
             super::a_terminal_delivery_cannot_be_retried_after_the_recipient_leaves_and_rejoins();
+        }
+        #[test]
+        fn an_existing_run_can_address_a_member_added_after_its_context_was_frozen() {
+            super::an_existing_run_can_address_a_member_added_after_its_context_was_frozen();
+        }
+        #[test]
+        fn pending_outbound_delivery_is_cancelled_when_source_membership_ends() {
+            super::pending_outbound_delivery_is_cancelled_when_source_membership_ends();
+        }
+        #[test]
+        fn running_outbound_delivery_target_is_reconciled_when_source_membership_ends() {
+            super::running_outbound_delivery_target_is_reconciled_when_source_membership_ends();
+        }
+        #[test]
+        fn dispatch_and_retry_reject_delivery_from_ended_source_membership() {
+            super::dispatch_and_retry_reject_delivery_from_ended_source_membership();
         }
         #[test]
         fn public_send_rejects_a_left_recipient_and_accepts_a_new_membership() {

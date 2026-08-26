@@ -29,13 +29,18 @@ reconciliation 完成已接受工作的正式结算。
 - 新增 `camps.members.add`、`camps.members.removalPreview`、`camps.members.remove` Desktop API；增加使用
   exact membership generation/version 的添加、预览和移除命令；
 - 添加不创建 Conversation，也不修改已冻结 AgentRun 的 Collaboration State；曾离开的 Agent 再次添加仍是一次
-  普通“添加队员”，产品不暴露 rejoined 状态；
+  普通“添加队员”，产品不暴露 rejoined 状态；对 active member 的相同 overrides 为 no-op，不同 overrides
+  返回 capability conflict，不由 add 静默修改能力或旋转 lifetime；
 - Camp 始终至少保留一位 active member。移除 Default Lead 时优先使用有效 successor；若剩余成员全部暂离，
   允许暂时没有 Lead，待有人归队后由既有 reconciliation 恢复。非 Lead 不接受无意义的 replacement；
 - 移除在同一提交中结束 membership、推进 generation、切换 Lead、取消目标 Run/Gather/Delivery 并释放未终态
-  Task；随后持久 reconciliation 只通过正式 Run/Delivery terminal settlement 推进；
+  Task；普通 pending outbound A2A 同步终态化，已 materialized 下游 Run 纳入持久 reconciliation，后者只通过
+  正式 Run/Delivery terminal settlement 推进；
 - 每个 Agent 业务工具都绑定 exact Run membership version；Delivery 和 Gather completion 冻结接收者/发起者
-  membership version。离开后重新添加得到新的 membership lifetime，不会恢复旧授权；
+  membership version，普通 outbound Delivery 另校验 source Run lifetime。离开后重新添加得到新的 membership
+  lifetime，不会恢复旧授权；
+- 旧 Run 的冻结 peers 不是 strict target roster；其新 send 可寻址后来加入的当前 active member，但 accepted
+  Delivery 不能越过 source membership cutover；
 - 普通公开输出与 Missing-Send Recovery 统一经过 publication fence；窄 terminal evidence 可以结算旧工作，
   但不能在离队后发布内容；
 - 外部成员同步仅是提示：只有 System allowlist、已绑定的 source namespace/binding 和严格递增的 reconciliation
