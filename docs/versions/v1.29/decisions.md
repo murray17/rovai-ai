@@ -195,6 +195,11 @@ Context、Camp Open 与 Camp History 对 v2 只读 SQLite metadata 并构造路�
 descriptor、伪造正文或 Run Fact，也不因一次 Runtime 权限/读取错误改写附件全局状态。Runtime 继续获得现有
 Camp-scoped `attachments` root，不建立 per-Run copy、Inline、Host broker 或通用权限证据平台。
 
+新 Context 只为成功解析的 legacy v1 引用冻结 legacy receipt；无成功 legacy 引用时使用 no-legacy sentinel，
+不得读取或验证 `camp_attachment_view`。legacy locator/View 解析失败只产生安全诊断并省略该引用。新 Run 直接验证
+稳定 Camp root，使用 `live_append_v1` compatibility；Scheduler 不再取得 legacy read admission、检查 unresolved
+writer intent 或在 dispatch 前重建 View。旧 publication gate/generation 仅收口升级前遗留 operation。
+
 当前规范见 [Camp Attachments](../../architecture/camp-published-attachment-view.md)、
 [Camp Attachment v6](../../contracts/camp-attachment-v6.md)、
 [Camp Composer Draft v5](../../contracts/camp-composer-draft-v5.md)、
@@ -206,6 +211,7 @@ Camp-scoped `attachments` root，不建立 per-Run copy、Inline、Host broker �
 - A 保持 running 时，其附件可完成 v2 commit，B 的 attempt 可在 A 结束前开始；
 - v2 没有第二份 Authority，Runtime 同 UID 强隔离不再是产品保证；
 - Context 热路径不会因历史文件缺失增加逐附件磁盘 I/O；
+- 坏掉或未完成的 legacy View 不再阻断不引用成功 legacy 路径的 Context、Runtime Input Delivery 或 v2-only Run；
 - 0.01/0.02/0.03 等旧库按顺序升级，legacy Camp 无需转换历史附件即可继续对话并写入 v2；
 - 显式 preview/open 仍执行动作时完整校验，不把该成本转移到每次 Context。
 

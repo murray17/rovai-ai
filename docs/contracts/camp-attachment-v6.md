@@ -65,9 +65,20 @@ Context and read-model assembly query SQLite metadata only. They construct the p
 bytes later disappear. The Runtime or its tool observes its own native filesystem failure when it actually reads the
 path; such a per-Run failure does not mutate global attachment state.
 
+Only successfully resolved legacy v1 references participate in the frozen legacy receipt. With no resolved legacy
+reference, the unchanged receipt shape carries `catalogRevision = -1` and an empty referenced-entry set; Context,
+Frozen Delivery and Runtime Input Delivery MUST NOT read or validate `camp_attachment_view`. A legacy database locator or
+View resolution failure is recorded as the safe diagnostic reason `legacy_locator_unavailable` and that reference is
+omitted. It MUST NOT fail a v2-only Context or Run and MUST NOT trigger payload probing or an unavailable descriptor.
+
 Adapters continue receiving the existing Camp-scoped `attachments` root. v2 adds no Inline bytes, per-Run copy, Host
 broker, global attachment root or new permission-evidence database. Existing Session/Runtime permission behavior owns
 whether a later filesystem child is readable.
+
+New dispatch authorization validates the admitted Runtime Files Root identity, exact Camp-root construction, private root mode
+and workspace non-overlap. It uses stable `live_append_v1` Camp-root compatibility and MUST NOT acquire the legacy View
+read admission, inspect unresolved publication/writer state, rebuild the legacy View, or bind a legacy generation. Those
+mechanisms remain available only inside legacy publication recovery and cleanup.
 
 Explicit image preview and Desktop open/reveal are different from Context assembly: they revalidate the exact v2 path,
 type and digest/tree receipt immediately before returning a privileged local target. A failed explicit open does not

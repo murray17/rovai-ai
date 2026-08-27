@@ -75,6 +75,16 @@ Context、Camp History 与 Camp Open 通过 v1/v2 SQL union 读取持久 metadat
 root-relative locator 组合；这些路径在组装时不做 `stat/open/read_dir/digest`。本地文件缺失不会在这一阶段生成
 unavailable descriptor、伪造正文、Run Fact 或全局状态变更。Runtime 真正读文件时由其原生工具报告失败。
 
+只有成功从 legacy catalog 解析出的 v1 attachmentId 才进入本次 Context 的 legacy receipt。若没有成功解析出的
+legacy 引用，receipt 使用 `catalogRevision = -1` 的 no-legacy sentinel，Context、Frozen Delivery 与 Runtime Input
+Delivery 均不查询或验证 Camp legacy View state。legacy locator/View 数据无法解析时，只记录不含路径和内容的
+`legacy_locator_unavailable` 诊断并省略该引用；不得让同一 Context、v2 Message 或 Run 失败，也不得转为逐文件探测。
+
+新 Run 的 Runtime authorization 只绑定已准入 Runtime Files Root identity、精确 Camp `attachments` root、workspace
+不重叠和 root containment，使用稳定的 `live_append_v1` root compatibility；Scheduler 不取得 legacy View read
+admission、不检查 unresolved writer intent，也不在 dispatch 前触发 legacy rebuild。legacy publication 的 mutation
+gate、recovery 与 generation 只服务升级前遗留 operation，不能成为新 Run 的前置条件。
+
 显式 preview/open/reveal 是独立安全动作，必须在动作前重验 exact Camp/attachment、路径、节点类型和 receipt；
 它们的失败不扩大 Context 热路径。
 
@@ -86,7 +96,8 @@ unavailable descriptor、伪造正文、Run Fact 或全局状态变更。Runtime
 operation；新 v2 intent 永不进入它。
 
 历史 Camp 可继续打开、加载旧消息、发送新 v2 消息和运行 Agent。新 Context 不为缺失 legacy/v2 文件增加逐项
-磁盘探测。Camp 删除仍先执行既有 Runtime process fence，然后清理同一 Camp root 中的 legacy View 与 v2 payload；
+磁盘探测；损坏或未完成的 legacy View 最多使对应旧引用不进入新 Context，不能阻断 v2-only Run。Camp 删除仍先
+执行既有 Runtime process fence，然后清理同一 Camp root 中的 legacy View 与 v2 payload；
 备份必须保留仍受支持的 legacy Authority/View 和 Runtime Camp root。
 
 ## References

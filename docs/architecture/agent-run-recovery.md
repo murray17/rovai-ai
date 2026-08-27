@@ -57,10 +57,11 @@ Scheduler 只领取 queued，或确有自动动作的 `waiting/runtime_recovery`
 纵深防御；`recovery_blocked` 永不进入候选集合。Codex/ACP Adapter 遇到既有 accepted Delivery 时必须
 fail closed，不得发 `agent_run.input_resumed` 或等待一个不存在的旧 Host response route。
 
-当前输入 retry/resume 对 legacy v1 引用还必须匹配同一 Camp Published Attachment View root identity、冻结 Entry
-receipt 与 Runtime Attachment Auth Receipt。generation/root 不兼容时 fence Native Binding；不得重新选择 Context、
-生成新 View path、修改已冻结 bytes，或把 Authority Attachment path 当降级入口。Managed v2 路径使用同一稳定
-Camp root 和持久 locator，不进入 legacy generation/Entry receipt，也不在恢复时探测 payload。
+当前输入 retry/resume 必须保持冻结 attachment refs、legacy receipt 自身 digest 与精确模型 bytes，但不再要求
+当前 legacy View ready、append-only successor 或 generation 匹配。新的 Runtime Attachment Auth Receipt 重新验证
+同一 admitted Runtime Files Root identity 与精确 Camp root，使用 `live_append_v1` 且无 compatibility generation；
+不得重新选择 Context、生成新路径、探测 payload 或把 Authority Attachment path 当降级入口。Managed v2 路径使用
+同一稳定 Camp root 和持久 locator，不进入 legacy generation/Entry receipt。
 
 未来若某 Adapter 通过 P1 实验，Core 才能为它增加独立的 `native_turn_reconciliation` 状态与 Coordinator。
 该 Coordinator 只能 lookup/reattach 同一 Provider Turn，不能调用新的 prompt API。

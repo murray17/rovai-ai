@@ -208,7 +208,7 @@ last_updated: 2026-08-27
 - `AgentRuntimeFleetManager` 是唯一正式进程所有者，内聚 spawn/reuse/stop/reap、唯一 lease、Resident accounting、TTL/LRU/Sweeper、Core generation 与崩溃清理。Adapter 生成 opaque compatibility digest 并证明 health/quiescence；Manager 不解析模型、权限、MCP 或 Runtime 私有字段。所有事件、释放、取消与迟到回调必须匹配不可复制的 `process_id + agent_run_id + execution_epoch + lease_generation`。
 - Reusable Host 的 `ROVAI_RUN_TMP` 使用进程稳定 exact path，但每次 bind 必须在 active lease/context 前 fail-closed 清空、重建并恢复私有权限；unbind/fence best-effort 清理不能替代下一 bind 重置。所有 Adapter 只把 execution workspace、当前 Camp exact attachment root 和该 exact writable Run tmp 交给 Runtime，不暴露 process root/父目录；file ingress 同时绑定 process、lease generation、Run、epoch 与 exact root。
 - IdleWarm 复用必须精确匹配 `camp_id + agent_profile_id + runtime_compatibility_digest`；process digest 与 Native Session binding digest 是不同身份。Resident 的 per-member/global 配额只约束跨 Run 保留的 IdleWarm/BusyResident/Stopping，不阻止无兼容 Resident 时创建本 Run 独占且终态即关闭的 Burst。acquire 在一个锁下原子选择兼容空闲进程、Resident 容量或 Burst，必要时按 LRU 淘汰空闲 Resident。
-- Runtime compatibility 必须绑定 Camp Published Attachment View contract 4、精确 `attachments` root、visibility mode 和必要 generation。没有真实 live-append Probe 时一律 generation-fenced；View mutation 在 write admission 内停止旧 Host。Runtime 不能收到 pending/recovery-required/failed path、instance/Camps parent、其他 Camp 或 Authority attachment root。
+- Runtime compatibility 必须绑定 Camp Published Attachment View contract 4、精确 `attachments` root 与 `live_append_v1` visibility mode；新 Run 不绑定 legacy generation，不取得 legacy read admission，也不因 unresolved publication/writer state触发 dispatch-time rebuild。Legacy View mutation gate/generation 仅收口升级前遗留 publication 与 cleanup。Runtime 不能收到 instance/Camps parent、其他 Camp 或 Authority attachment root。
 - Run 结束只有在输入结果已知、输出和 tool work 收敛、Team/Run lease 已解绑且 Adapter 能证明进程 quiescent/healthy 时才可进入 IdleWarm；否则必须关闭。Fleet 启动时必须同时启动单调时间 TTL 与 LRU Sweeper，配置变更、Camp 删除、成员永久移除、不健康和容量回收也会立即使精确 scope 失效/停止；已冻结活跃 Run 只标记 run 后退役，不被容量策略中断。
 - IdleWarm 可保留精确冻结的外部 MCP 投影、Runtime 内存、私有配置与其进程/连接直到 TTL、失效或容量回收；这不等于 AgentRun 终态即撤销外部凭据。空闲期没有活跃 Run lease，built-in/Team 调用 fail closed；不能证明安全保留精确字节时必须关闭整个 Runtime。
 - Fleet 是单一 Core generation 的内存状态，不写 SQLite、不跨重启接管。正常关闭停止并 reap 全部进程；崩溃清理只能在 owner record、旧 generation、进程组组长与命令身份均可证明时终止，不能仅凭 PID、路径或 UID 猜测性杀进程。
@@ -223,7 +223,7 @@ last_updated: 2026-08-27
 ### 恢复、取消与计划关闭
 
 - Runtime accepted input 只有在能证明原 Native Turn 的 identity、接受状态和可重连终态时才能恢复。证据不足进入 `recovery_blocked` 或 continuity-lost，不能重发可能已经产生外部效果的输入。
-- 新输入的恢复先验证冻结 Manifest 的稳定 attachment semantic receipt，再独立验证当前本机 Runtime View 与物理 Auth Receipt；语义未变的 controlled rebuild 不使历史 Context 失效，但 root/Entry identity 或 generation 改变仍 fence 旧 Host 并要求新 dispatch authorization。路径和历史 payload 不重新解析或改写。Migration 99/100 的旧非终态输入按 delivery/action evidence 诚实终结，历史 Manifest/Blob/Auth Receipt/ACK 保留但不可再 dispatch。
+- 新输入的恢复验证冻结 Manifest attachment receipt 的 closed shape/digest，再独立验证 admitted Runtime Files Root identity、精确 Camp root containment 与当前 Camp-root Auth Receipt；不要求 legacy View ready、append-only successor 或 generation 匹配。路径和历史 payload 不重新解析、探测或改写。Migration 99/100 的旧非终态输入按 delivery/action evidence 诚实终结，历史 Manifest/Blob/Auth Receipt/ACK 保留但不可再 dispatch。
 - Cancellation 有“已请求”和“Runtime 已终结”两个阶段。Run-local 请求提交即 fence 该 Run 的新 Camp/Task/Tool/A2A 写入，但不代表 Runtime 已退出；发送中断失败、进程失联或超时不能被投影为确定取消，Run、Activity 和 UI 必须保留 unknown/unsettled。
 - 计划关闭先持久化 shutdown cycle 和 product execution fence，阻止新 launch/terminal admission，再请求 Runtime 收敛并优先等待可靠终态。达到统一 deadline 后可以停止产品，但不能伪造 Runtime outcome。
 - Diagnostics 是严格只读、最小化数据的 Core view；修复必须是用户显式选择的独立动作。导出集中脱敏，不能把 secret、完整路径、模型输入或 Runtime 原始输出作为便利诊断数据。
@@ -268,7 +268,7 @@ last_updated: 2026-08-27
 ### ContextManifest 与结构化 Run Facts
 
 - ContextManifest、模型输入 bytes、Runtime Input Delivery Evidence 和 Native Session/Run 状态是四个独立权威。Manifest 冻结模型实际可见选择、formatter/profile/section 版本、来源 digest、遗漏、水位和 exact compact payload digest；交付 evidence 记录 Runtime 实际接受。日志摘要、Run 状态或 Manifest 本身不能互相代替。
-- Manifest 的附件 receipt 只冻结 Camp ID、稳定相对 View path、available attachment semantic identity 和 append-only Runtime catalog revision/digest；failed tombstone 属于 Core resolution ledger而不产生模型路径。inode/device/file ID、root/Entry identity、publication operation、physical generation 与 physical catalog 只属于当前本机完整性和 Runtime Auth Receipt。
+- Manifest 的附件 receipt 对成功解析的 legacy v1 引用冻结 Camp ID、稳定相对 View path 与 attachment semantic identity；无成功 legacy 引用时使用 `catalogRevision = -1` 的 no-legacy sentinel，不读取当前 View。Managed v2 identity/path 由 attachment refs冻结，不进入 legacy catalog。inode/device/file ID、root/Entry identity、publication operation、physical generation 与 physical catalog 不进入模型或新的 dispatch 前置条件。
 - 模型投影可以 compact，但不得丢失、重命名或自由文本化 authoritative fact。稳定产品规则留在 Session Charter，per-Run 事实只出现一次；每个 schema/formatter/profile/manifest/section 版本跟随实际 owner 独立推进，不用一个全局数字伪造同步升级。
 - Shared Conversation 始终属于一个 Camp，动态 continuation 使用有界公共消息而不复制私有历史。每个新 Run 的 closed、typed `RUN_FACTS` 必须包含当前 Camp exact Published Attachment root、enumerate/read、scope 与 read-only 事实；Task reference、Session continuity、accepted-input/outcome uncertainty、Gather generation 和 delegation budget 继续作为可选事实。字段缺失与值 unknown 必须可区分。
 - Self-active Task snapshot 只选当前成员在当前 Camp 显式负责的非终态 Task，按 Profile 的稳定 order/limit/budget priority 冻结。真实空集合产生显式 empty snapshot；候选存在但被上限/预算全部排除时整段省略并记 aggregate omitted count，不泄露被排除 ID。Renderer/Skill 不得临时改排序。

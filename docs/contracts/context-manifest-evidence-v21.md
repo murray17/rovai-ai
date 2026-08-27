@@ -4,7 +4,7 @@ contract: context-manifest-evidence-v21
 authority: agent-run-context-evidence
 status: accepted
 version: 21
-last_updated: 2026-08-20
+last_updated: 2026-08-27
 ---
 
 # ContextManifest Evidence v21 Contract
@@ -24,12 +24,12 @@ ContextManifest = 21
 Context Delivery Profile = 4
 Run Facts = 2
 Gather Completion Input = 3
-Camp Attachment View Contract = 2
+Camp Attachment View Contract = 4
 Camp Attachment View Receipt = 2
 Runtime Attachment Auth Receipt = 1
-Data Contract = v1.15
-Projection Schema = 56
-Latest Migration = 101
+Data Contract = v1.25
+Projection Schema = 66
+Latest Migration = 112
 ```
 
 ## Attachment evidence
@@ -43,6 +43,11 @@ Each Manifest adds the canonical `CampAttachmentViewReceiptV2` and digest define
 catalog revision/prefix and complete semantic identity of every explicitly referenced attachment. It does not freeze an
 absolute root, root/Entry filesystem identity, publication operation, physical generation or physical catalog digest.
 
+Managed v2 references are frozen by `attachmentRefs` and do not enter the legacy semantic catalog receipt. Only legacy
+v1 references whose database locator resolves successfully enter `referencedEntries`. When that set is empty, the same
+receipt wire uses `catalogRevision = -1`, zero entries and the canonical empty digest to mean “legacy View not required”.
+This sentinel is self-validating and never reads current `camp_attachment_view` state.
+
 Persisted pairing is closed:
 
 ```text
@@ -55,18 +60,17 @@ There is no legacy dispatch, dual write, historical receipt rewrite or dispatch-
 
 ## Materialization, A2A and dispatch
 
-Direct and A2A materialization use the same Camp read admission, resolve all selected paths from the ready View, load the
-semantic receipt, measure the unchanged final Formatter 21 bytes and atomically freeze Manifest/Managed Blob/prepared
-delivery evidence. Frozen A2A Context validates the same v2 receipt and never reselects history or rewrites model bytes.
+Direct and A2A materialization resolve selected legacy paths from database View metadata and safely omit a legacy reference
+whose locator/View state is unavailable. They do not inspect payload bytes. The remaining legacy semantic receipt, or the
+no-legacy sentinel, is atomically frozen with Manifest/Managed Blob/prepared delivery evidence. Frozen A2A Context validates
+the receipt's own closed shape and digest and never reselects history or rewrites model bytes.
 
-Resume and pre-dispatch validation accept only an append-only semantic successor: the frozen catalog prefix and referenced
-Entries must still match. A semantics-preserving controlled rebuild is admissible even if inode/device/file identity,
-operation ID and physical generation changed. Semantic path, kind, counts, bytes/content digest or catalog-prefix drift is
-not admissible.
-
-Runtime dispatch then performs a separate current-local integrity admission and creates the unchanged physical
-`RuntimeAttachmentAuthReceiptV1`. A retry from `not_accepted` reuses exact frozen Formatter/Manifest bytes but creates a
-current Auth Receipt and request digest. An accepted delivery is never resent merely because the View was rebuilt.
+Resume and pre-dispatch validation preserve the exact frozen receipt and paths but do not require the current legacy View
+to remain ready. Runtime dispatch separately validates the admitted Runtime Files Root identity, exact Camp root,
+containment and workspace non-overlap, then creates `RuntimeAttachmentAuthReceiptV1` with `live_append_v1` and no
+compatibility generation. A retry from `not_accepted` reuses exact frozen Formatter/Manifest bytes but creates a current
+Camp-root Auth Receipt and request digest. It does not take a legacy read admission, inspect unresolved writer state or
+trigger a View rebuild.
 
 ## Migration 100 clean break
 

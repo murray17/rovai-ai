@@ -71,12 +71,9 @@ use rovai_core::{
         builtin_tool_catalog_digest, builtin_tool_description, recovery_for_error_code,
     },
     camp_attachment::{CampAttachmentStore, CampComposerReplyRecipient},
-    camp_attachment_publication::{
-        AuthorityAttachment, database_has_unresolved_writer_intent, unresolved_publication_camp_ids,
-    },
+    camp_attachment_publication::{AuthorityAttachment, unresolved_publication_camp_ids},
     camp_attachment_view::{
-        CampAttachmentRuntimeAuthorization, CampAttachmentViewStore, CampAttachmentVisibilityMode,
-        PreparedCampAttachmentCleanup,
+        CampAttachmentRuntimeAuthorization, CampAttachmentViewStore, PreparedCampAttachmentCleanup,
     },
     camp_content::StructuredCampMessageContent,
     camp_history::{
@@ -239,32 +236,17 @@ const RUNTIME_EVIDENCE_DELTA_BATCH_MAX_ITEMS: usize = 32;
 const CAMP_ATTACHMENT_VIEW_MUTATION_DEADLINE: Duration = Duration::from_secs(55);
 const CAMP_ATTACHMENT_VIEW_QUIESCENCE_POLL_INTERVAL: Duration = Duration::from_millis(100);
 
-async fn run_under_attachment_read_admission<F, Fut, T>(
-    camp_id: String,
-    gate: Arc<RwLock<()>>,
-    claim: F,
-) -> (CampAttachmentReadAdmission, T)
-where
-    F: FnOnce() -> Fut,
-    Fut: Future<Output = T>,
-{
-    let guard = gate.read_owned().await;
-    let claim = claim().await;
-    (
-        CampAttachmentReadAdmission {
-            camp_id,
-            _guard: guard,
-        },
-        claim,
-    )
-}
-
 struct CampAttachmentReadAdmission {
     camp_id: String,
-    _guard: tokio::sync::OwnedRwLockReadGuard<()>,
 }
 
 impl CampAttachmentReadAdmission {
+    fn for_camp(camp_id: &str) -> Self {
+        Self {
+            camp_id: camp_id.to_string(),
+        }
+    }
+
     fn prove(&self, camp_id: &str) -> Result<()> {
         if self.camp_id != camp_id {
             anyhow::bail!("Camp Attachment read admission does not match the AgentRun Camp");
@@ -1730,44 +1712,13 @@ impl Core {
         CampAttachmentReadAdmission,
         CampAttachmentRuntimeAuthorization,
     )> {
-        let gate = self.attachment_view_gate(camp_id).await;
-        for attempt in 0..2 {
-            let (admission, authorization) =
-                run_under_attachment_read_admission(camp_id.to_string(), gate.clone(), || {
-                    self.verified_camp_runtime_authorization(
-                        camp_id,
-                        workspace,
-                        CampAttachmentVisibilityMode::GenerationFencedV1,
-                    )
-                })
-                .await;
-            match authorization {
-                Ok(authorization) => return Ok((admission, authorization)),
-                Err(_) if attempt == 0 => {
-                    drop(admission);
-                    self.reconcile_camp_attachment_view_for_dispatch(camp_id)
-                        .await?;
-                }
-                Err(error) => {
-                    return Err(error).context(
-                        "Camp Attachment View remained unavailable after attachment-local reconciliation",
-                    );
-                }
-            }
-        }
-        unreachable!("the two-attempt attachment verification loop always returns")
-    }
-
-    async fn reconcile_camp_attachment_view_for_dispatch(&self, camp_id: &str) -> Result<()> {
-        let (_mutation, deadline) = self.acquire_camp_attachment_mutation(camp_id).await?;
-        self.wait_for_camp_attachment_quiescence(camp_id, deadline)
+        let authorization = self
+            .verified_camp_runtime_authorization(camp_id, workspace)
             .await?;
-        let mut database = self.database.lock().await;
-        self.attachment_views.reconcile_camp(
-            &mut database,
-            &CampAttachmentStore::new(&self.data_dir),
-            camp_id,
-        )
+        Ok((
+            CampAttachmentReadAdmission::for_camp(camp_id),
+            authorization,
+        ))
     }
 
     async fn wait_for_camp_attachment_quiescence(
@@ -6859,35 +6810,30 @@ impl Core {
         };
         let claim = {
             let mut database = self.database.lock().await;
-            (|| {
-                if database_has_unresolved_writer_intent(&database, &candidate.camp_id)? {
-                    anyhow::bail!("camp_attachment_view_not_ready");
-                }
-                ExecutionRuntimeService::default().claim_agent_run(
-                    &mut database,
-                    &CommandEnvelope {
-                        command_id: uuid::Uuid::new_v4().to_string(),
-                        actor: ActorRef::System {
-                            component_id: "agent-run-scheduler".to_string(),
-                        },
-                        camp_id: Some(candidate.camp_id.clone()),
-                        expected_versions: Vec::new(),
-                        execution_epoch: None,
-                        payload: ClaimAgentRunCommand {
-                            agent_run_id: candidate.agent_run_id.clone(),
-                            expected_version: candidate.version,
-                            lease_owner: format!(
-                                "codex:{}:{}",
-                                candidate.agent_run_id,
-                                uuid::Uuid::new_v4()
-                            ),
-                            lease_seconds: 120,
-                            workspace: Some(workspace),
-                            starting_git_observation,
-                        },
+            ExecutionRuntimeService::default().claim_agent_run(
+                &mut database,
+                &CommandEnvelope {
+                    command_id: uuid::Uuid::new_v4().to_string(),
+                    actor: ActorRef::System {
+                        component_id: "agent-run-scheduler".to_string(),
                     },
-                )
-            })()
+                    camp_id: Some(candidate.camp_id.clone()),
+                    expected_versions: Vec::new(),
+                    execution_epoch: None,
+                    payload: ClaimAgentRunCommand {
+                        agent_run_id: candidate.agent_run_id.clone(),
+                        expected_version: candidate.version,
+                        lease_owner: format!(
+                            "codex:{}:{}",
+                            candidate.agent_run_id,
+                            uuid::Uuid::new_v4()
+                        ),
+                        lease_seconds: 120,
+                        workspace: Some(workspace),
+                        starting_git_observation,
+                    },
+                },
+            )
         };
         let claim = match claim {
             Ok(claim) if claim.result.status == CommandResultStatus::Accepted => claim,
@@ -6988,8 +6934,8 @@ impl Core {
                     &mut launch_permit,
                 )
                 .await;
-            // Managed v2 sends never enter this gate. Release the lifecycle admission before
-            // waking any legacy v1 publication intent that predates the current Run.
+            // New Runs carry only a Camp-scoped root proof. Their terminal path may wake legacy
+            // recovery work, but no legacy View admission is held across the Run lifecycle.
             if !release_agent_run_attachment_admission(
                 attachment_view_admission,
                 &core.attachment_projection_requests,
@@ -8938,23 +8884,10 @@ impl Core {
         &self,
         camp_id: &str,
         workspace: &Path,
-        visibility_mode: CampAttachmentVisibilityMode,
     ) -> Result<CampAttachmentRuntimeAuthorization> {
-        let verification = {
-            let database = self.database.lock().await;
-            self.attachment_views.prepare_camp_runtime_authorization(
-                &database,
-                camp_id,
-                Some(workspace),
-                visibility_mode,
-            )?
-        };
-        let verified = tokio::task::spawn_blocking(move || verification.verify())
-            .await
-            .context("Camp Attachment View verification task failed")??;
         let database = self.database.lock().await;
         self.attachment_views
-            .complete_verified_camp_runtime_authorization(&database, verified)
+            .camp_root_runtime_authorization(&database, camp_id, Some(workspace))
     }
 
     async fn launch_agent_run(
@@ -17101,7 +17034,7 @@ while IFS= read -r _ignored; do :; done
 
     #[cfg(all(target_os = "macos", feature = "slow-tests"))]
     #[tokio::test]
-    async fn dispatch_attachment_admission_does_not_scan_managed_v2_content() {
+    async fn v2_dispatch_admission_ignores_broken_legacy_view_and_managed_payload() {
         use std::os::unix::fs::PermissionsExt;
 
         let root = std::env::temp_dir().join(format!(
@@ -17198,11 +17131,7 @@ while IFS= read -r _ignored; do :; done
             .unwrap()
             .path;
         let initial_authorization = core
-            .verified_camp_runtime_authorization(
-                &camp_id,
-                &workspace,
-                CampAttachmentVisibilityMode::GenerationFencedV1,
-            )
+            .verified_camp_runtime_authorization(&camp_id, &workspace)
             .await
             .unwrap();
         assert!(managed_path.starts_with(&initial_authorization.attachment_root));
@@ -17212,6 +17141,12 @@ while IFS= read -r _ignored; do :; done
         fs::set_permissions(payload_container, fs::Permissions::from_mode(0o700)).unwrap();
         fs::remove_file(&managed_path).unwrap();
         fs::set_permissions(payload_container, fs::Permissions::from_mode(0o500)).unwrap();
+        {
+            let mut database = core.database.lock().await;
+            core.attachment_views
+                .mark_legacy_view_broken_for_test(&mut database, &camp_id)
+                .unwrap();
+        }
 
         let (admission, authorization) = core
             .verified_camp_attachment_admission(&camp_id, &workspace)
@@ -17222,9 +17157,11 @@ while IFS= read -r _ignored; do :; done
         assert!(authorization.attachment_root.is_dir());
         {
             let database = core.database.lock().await;
-            core.attachment_views
-                .verify_camp_ready(&database, &camp_id)
-                .unwrap();
+            assert!(
+                core.attachment_views
+                    .verify_camp_ready(&database, &camp_id)
+                    .is_err()
+            );
         }
 
         let view_attachment_root = authorization.attachment_root.clone();
@@ -17253,50 +17190,17 @@ while IFS= read -r _ignored; do :; done
         fs::remove_dir_all(root).unwrap();
     }
 
-    #[tokio::test]
-    async fn agent_run_claim_waits_for_attachment_read_admission_and_retains_it() {
-        let gate = Arc::new(RwLock::new(()));
-        let writer = gate.clone().write_owned().await;
-        let claim_started = Arc::new(std::sync::atomic::AtomicBool::new(false));
-        let claim_started_in_task = claim_started.clone();
-        let claim_task = tokio::spawn(run_under_attachment_read_admission(
-            "rvcamp_test".to_string(),
-            gate.clone(),
-            move || async move {
-                claim_started_in_task.store(true, std::sync::atomic::Ordering::Release);
-                "claimed"
-            },
-        ));
-
-        tokio::task::yield_now().await;
-        assert!(
-            !claim_started.load(std::sync::atomic::Ordering::Acquire),
-            "Claim must remain queued while publication owns the write gate"
-        );
-        drop(writer);
-        let (admission, claim) = tokio::time::timeout(Duration::from_secs(1), claim_task)
-            .await
-            .expect("Claim should proceed after publication releases the gate")
-            .unwrap();
-        assert_eq!(claim, "claimed");
+    #[test]
+    fn agent_run_attachment_admission_is_camp_scoped_without_a_generation_gate() {
+        let admission = CampAttachmentReadAdmission::for_camp("rvcamp_test");
         admission.prove("rvcamp_test").unwrap();
         assert!(admission.prove("rvcamp_other").is_err());
-
-        assert!(
-            tokio::time::timeout(Duration::from_millis(20), gate.clone().write_owned())
-                .await
-                .is_err(),
-            "the returned admission must cover the claimed Run lifecycle"
-        );
         let (projection_tx, mut projection_rx) = mpsc::unbounded_channel();
         assert!(release_agent_run_attachment_admission(
             admission,
             &projection_tx
         ));
-        assert_eq!(projection_rx.recv().await.as_deref(), Some("rvcamp_test"));
-        tokio::time::timeout(Duration::from_secs(1), gate.write_owned())
-            .await
-            .expect("the write gate should reopen before projection is reawakened");
+        assert_eq!(projection_rx.try_recv().as_deref(), Ok("rvcamp_test"));
     }
 
     #[test]

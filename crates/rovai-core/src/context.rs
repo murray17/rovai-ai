@@ -14,10 +14,9 @@ use crate::{
     agent_profile::{AdapterKind, validate_stored_member_identity},
     camp_attachment_view::{
         CAMP_ATTACHMENT_VIEW_RECEIPT_VERSION, CampAttachmentViewReceiptV2,
-        CampAttachmentVisibilityMode, RUNTIME_ATTACHMENT_AUTH_RECEIPT_VERSION,
-        load_camp_attachment_view_receipt, resolve_published_attachment_path,
-        resolve_published_attachment_root, runtime_attachment_auth_receipt,
-        validate_append_only_view_receipt,
+        RUNTIME_ATTACHMENT_AUTH_RECEIPT_VERSION, load_camp_attachment_view_receipt,
+        resolve_camp_attachment_root, resolve_published_attachment_path,
+        runtime_camp_root_attachment_auth_receipt, validate_frozen_camp_attachment_view_receipt,
     },
     camp_content::{
         AGENT_MESSAGE_PROJECTION_AUDIENCE, StructuredCampMessageContent, mentions_current_user,
@@ -1349,7 +1348,7 @@ impl ContextService {
             &frozen.a2a_guidance_evidence_digest,
             &frozen.rendered_payload,
         )?;
-        validate_frozen_view_receipt(transaction, &snapshot, frozen)?;
+        validate_frozen_view_receipt(&snapshot, frozen)?;
         validate_frozen_current_input_source(transaction, &snapshot, frozen)
     }
 
@@ -1492,17 +1491,16 @@ impl ContextService {
                     .as_deref()
                     .context("ContextManifest has no Camp Attachment View receipt")?;
                 validate_manifest_view_receipt(
-                    &transaction,
                     &target.camp_id,
                     delivery_evidence.2.as_deref(),
                     manifest_view_receipt_digest,
                 )?;
-                let (attachment_auth, attachment_auth_digest) = runtime_attachment_auth_receipt(
-                    &transaction,
-                    &target.camp_id,
-                    manifest_view_receipt_digest,
-                    CampAttachmentVisibilityMode::GenerationFencedV1,
-                )?;
+                let (attachment_auth, attachment_auth_digest) =
+                    runtime_camp_root_attachment_auth_receipt(
+                        &transaction,
+                        &target.camp_id,
+                        manifest_view_receipt_digest,
+                    )?;
                 let runtime_payload_digest =
                     runtime_payload_digest.unwrap_or(delivery_evidence.1.as_str());
                 let runtime_request_digest = canonical_json_digest(&json!({
@@ -1633,18 +1631,12 @@ impl ContextService {
             .13
             .as_deref()
             .context("ContextManifest has no Camp Attachment View receipt")?;
-        validate_manifest_view_receipt(
-            &transaction,
-            &row.7,
-            row.12.as_deref(),
-            manifest_view_receipt_digest,
-        )?;
+        validate_manifest_view_receipt(&row.7, row.12.as_deref(), manifest_view_receipt_digest)?;
         let (runtime_attachment_auth_receipt, runtime_attachment_auth_receipt_digest) =
-            runtime_attachment_auth_receipt(
+            runtime_camp_root_attachment_auth_receipt(
                 &transaction,
                 &row.7,
                 manifest_view_receipt_digest,
-                CampAttachmentVisibilityMode::GenerationFencedV1,
             )?;
         let runtime_payload_digest = runtime_payload_digest.unwrap_or(row.0.as_str());
         let runtime_request_digest = canonical_json_digest(&json!({
@@ -1983,7 +1975,6 @@ impl ContextService {
 }
 
 fn validate_manifest_view_receipt(
-    connection: &rusqlite::Connection,
     camp_id: &str,
     receipt_json: Option<&str>,
     expected_digest: &str,
@@ -2000,7 +1991,7 @@ fn validate_manifest_view_receipt(
     if receipt.camp_id != camp_id {
         anyhow::bail!("ContextManifest Camp Attachment View receipt belongs to another Camp");
     }
-    validate_append_only_view_receipt(connection, &receipt)
+    validate_frozen_camp_attachment_view_receipt(&receipt)
 }
 
 #[derive(Debug)]
@@ -2994,7 +2985,7 @@ fn build_run_facts<R: ContextReadConnection>(
     a2a_run_count: i64,
 ) -> Result<RunFacts> {
     let published_attachment_root =
-        resolve_published_attachment_root(database.context_connection(), &snapshot.camp_id)?;
+        resolve_camp_attachment_root(database.context_connection(), &snapshot.camp_id)?;
     let mut facts = RunFacts {
         schema_version: 2,
         camp_resources: CampResourcesFact {
@@ -3857,34 +3848,26 @@ fn project_shared_message<R: ContextReadConnection>(
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
     drop(attachment_statement);
-    let attachments = attachment_rows
-        .into_iter()
-        .map(
-            |(attachment_id, name, media_type, content_digest, storage_model)| {
-                let legacy_view_backed = storage_model == "legacy_v1";
-                Ok(SharedMessageAttachment {
-                    path: if legacy_view_backed {
-                        resolve_published_attachment_path(
-                            database.context_connection(),
-                            &camp_id,
-                            &attachment_id,
-                        )?
-                    } else {
-                        resolve_managed_attachment_path(
-                            database.context_connection(),
-                            &camp_id,
-                            &attachment_id,
-                        )?
-                    },
-                    attachment_id,
-                    name,
-                    media_type,
-                    content_digest,
-                    legacy_view_backed,
-                })
-            },
-        )
-        .collect::<Result<Vec<_>>>()?;
+    let mut attachments = Vec::with_capacity(attachment_rows.len());
+    for (attachment_id, name, media_type, content_digest, storage_model) in attachment_rows {
+        let Some((path, legacy_view_backed)) = resolve_context_attachment_path(
+            database.context_connection(),
+            &camp_id,
+            &attachment_id,
+            &storage_model,
+        )?
+        else {
+            continue;
+        };
+        attachments.push(SharedMessageAttachment {
+            path,
+            attachment_id,
+            name,
+            media_type,
+            content_digest,
+            legacy_view_backed,
+        });
+    }
     let prefix = body_prefix(&body, profile.max_message_body_chars);
     Ok(SharedMessage {
         camp_id,
@@ -4757,6 +4740,32 @@ struct CampAttachmentRef {
     legacy_view_backed: bool,
 }
 
+fn resolve_context_attachment_path(
+    connection: &Connection,
+    camp_id: &str,
+    attachment_id: &str,
+    storage_model: &str,
+) -> Result<Option<(String, bool)>> {
+    match storage_model {
+        "legacy_v1" => {
+            match resolve_published_attachment_path(connection, camp_id, attachment_id) {
+                Ok(path) => Ok(Some((path, true))),
+                Err(_) => {
+                    eprintln!(
+                        "legacy_attachment_context_skipped camp_id={camp_id} attachment_id={attachment_id} reason=legacy_locator_unavailable"
+                    );
+                    Ok(None)
+                }
+            }
+        }
+        "managed_v2" => Ok(Some((
+            resolve_managed_attachment_path(connection, camp_id, attachment_id)?,
+            false,
+        ))),
+        _ => anyhow::bail!("Context Attachment has an unsupported storage model"),
+    }
+}
+
 fn load_current_attachment_refs<R: ContextReadConnection>(
     database: &R,
     current_input: &CurrentInput,
@@ -4804,29 +4813,25 @@ fn load_current_attachment_refs<R: ContextReadConnection>(
         )?
         .collect::<rusqlite::Result<Vec<_>>>()?;
     drop(statement);
-    rows.into_iter()
-        .map(|(attachment_id, camp_id, content_digest, storage_model)| {
-            let legacy_view_backed = storage_model == "legacy_v1";
-            Ok(CampAttachmentRef {
-                path: if legacy_view_backed {
-                    resolve_published_attachment_path(
-                        database.context_connection(),
-                        &camp_id,
-                        &attachment_id,
-                    )?
-                } else {
-                    resolve_managed_attachment_path(
-                        database.context_connection(),
-                        &camp_id,
-                        &attachment_id,
-                    )?
-                },
-                attachment_id,
-                content_digest,
-                legacy_view_backed,
-            })
-        })
-        .collect()
+    let mut attachments = Vec::with_capacity(rows.len());
+    for (attachment_id, camp_id, content_digest, storage_model) in rows {
+        let Some((path, legacy_view_backed)) = resolve_context_attachment_path(
+            database.context_connection(),
+            &camp_id,
+            &attachment_id,
+            &storage_model,
+        )?
+        else {
+            continue;
+        };
+        attachments.push(CampAttachmentRef {
+            path,
+            attachment_id,
+            content_digest,
+            legacy_view_backed,
+        });
+    }
+    Ok(attachments)
 }
 
 fn count_a2a_runs<R: ContextReadConnection>(database: &R, camp_turn_id: &str) -> Result<i64> {
@@ -5482,7 +5487,7 @@ fn load_frozen_delivery_context(
         &frozen.a2a_guidance_evidence_digest,
         &frozen.rendered_payload,
     )?;
-    validate_frozen_view_receipt(database, snapshot, &frozen)?;
+    validate_frozen_view_receipt(snapshot, &frozen)?;
     validate_frozen_current_input_source(database, snapshot, &frozen)?;
     Ok(Some(frozen))
 }
@@ -5547,8 +5552,7 @@ fn validate_frozen_current_input_source<R: ContextReadConnection>(
     Ok(())
 }
 
-fn validate_frozen_view_receipt<R: ContextReadConnection>(
-    database: &R,
+fn validate_frozen_view_receipt(
     snapshot: &RunSnapshot,
     frozen: &FrozenDeliveryContext,
 ) -> Result<()> {
@@ -5577,7 +5581,7 @@ fn validate_frozen_view_receipt<R: ContextReadConnection>(
     {
         anyhow::bail!("Frozen Delivery Context Camp Attachment View receipt digest is invalid");
     }
-    validate_append_only_view_receipt(database.context_connection(), &receipt)
+    validate_frozen_camp_attachment_view_receipt(&receipt)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -6367,8 +6371,22 @@ mod slow_tests {
         fn cleanup(self) {
             let directory = self.directory.clone();
             drop(self);
-            std::fs::remove_dir_all(directory).unwrap();
+            remove_managed_attachment_tree(&directory).unwrap();
         }
+    }
+
+    #[test]
+    fn unavailable_legacy_locator_is_omitted_without_filesystem_fallback() {
+        let connection = Connection::open_in_memory().unwrap();
+        let resolved = resolve_context_attachment_path(
+            &connection,
+            "rvcamp_01h47kvsy5fk1shh6w1g60eecf",
+            "6b756c5d-ed05-4a0c-b66e-611fa8e4a063",
+            "legacy_v1",
+        )
+        .unwrap();
+
+        assert_eq!(resolved, None);
     }
 
     #[test]
@@ -8086,7 +8104,7 @@ mod slow_tests {
             .unwrap();
         assert_eq!(second_run_after_restart, second_run);
         drop(reopened_again);
-        std::fs::remove_dir_all(directory).unwrap();
+        remove_managed_attachment_tree(&directory).unwrap();
     }
 
     #[test]
@@ -8247,6 +8265,7 @@ mod slow_tests {
 
         let directory = fixture.directory.clone();
         let run_id = fixture.run_id.clone();
+        remove_managed_attachment_tree(fixture.database.runtime_camp_files_root()).unwrap();
         drop(fixture.database);
         let reopened = Database::open(&directory).unwrap();
 
@@ -8311,9 +8330,9 @@ mod slow_tests {
                 |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
             )
             .unwrap();
-        assert_eq!(contract, ("v1.24".to_string(), 65, 1));
+        assert_eq!(contract, ("v1.25".to_string(), 66, 1));
         drop(reopened);
-        std::fs::remove_dir_all(directory).unwrap();
+        remove_managed_attachment_tree(&directory).unwrap();
     }
 
     #[test]
@@ -9558,6 +9577,18 @@ mod slow_tests {
         )
         .unwrap();
         assert!(!std::path::Path::new(&projected_path).exists());
+        fixture
+            .database
+            .connection()
+            .execute(
+                r#"
+                UPDATE camp_attachment_view
+                SET state = 'integrity_failed', last_error_code = 'legacy_fixture_broken'
+                WHERE camp_id = ?1
+                "#,
+                [&fixture.camp_id],
+            )
+            .unwrap();
 
         let ContextMaterialization::Ready(materialized) = ContextService
             .materialize(
@@ -9585,6 +9616,27 @@ mod slow_tests {
                 .rendered_payload
                 .contains("unavailable attachment")
         );
+        let delivery = ContextService
+            .prepare_input_delivery_for_context(
+                &mut fixture.database,
+                &fixture.run_id,
+                fixture.execution_epoch,
+                &materialized,
+            )
+            .unwrap();
+        assert_eq!(delivery.status, "prepared");
+        let receipt: Value = fixture
+            .database
+            .connection()
+            .query_row(
+                "SELECT camp_attachment_view_receipt_json FROM context_manifest WHERE id = ?1",
+                [&materialized.manifest_id],
+                |row| row.get::<_, String>(0),
+            )
+            .map(|receipt| serde_json::from_str(&receipt).unwrap())
+            .unwrap();
+        assert_eq!(receipt["catalogRevision"], -1);
+        assert_eq!(receipt["referencedEntries"], json!([]));
         assert_eq!(
             fixture
                 .database

@@ -2496,6 +2496,23 @@ mod slow_tests {
                     byte_size INTEGER NOT NULL DEFAULT 0,
                     storage_path TEXT NOT NULL DEFAULT ''
                 );
+                CREATE TABLE managed_attachment (
+                    id TEXT NOT NULL,
+                    camp_id TEXT NOT NULL,
+                    kind TEXT NOT NULL,
+                    media_type TEXT NOT NULL,
+                    byte_size INTEGER NOT NULL,
+                    file_count INTEGER NOT NULL,
+                    root_relative_payload_path TEXT NOT NULL,
+                    PRIMARY KEY(camp_id, id)
+                );
+                CREATE TABLE camp_message_attachment_ref (
+                    camp_id TEXT NOT NULL,
+                    camp_message_id TEXT NOT NULL,
+                    ordinal INTEGER NOT NULL,
+                    attachment_id TEXT NOT NULL,
+                    display_name_snapshot TEXT NOT NULL
+                );
                 CREATE TABLE event_log (
                     event_type TEXT NOT NULL,
                     command_id TEXT,
@@ -2694,6 +2711,23 @@ mod slow_tests {
                     created_by_type TEXT NOT NULL,
                     created_by_id TEXT NOT NULL,
                     created_at TEXT NOT NULL
+                );
+                CREATE TABLE managed_attachment (
+                    id TEXT NOT NULL,
+                    camp_id TEXT NOT NULL,
+                    kind TEXT NOT NULL,
+                    media_type TEXT NOT NULL,
+                    byte_size INTEGER NOT NULL,
+                    file_count INTEGER NOT NULL,
+                    root_relative_payload_path TEXT NOT NULL,
+                    PRIMARY KEY(camp_id, id)
+                );
+                CREATE TABLE camp_message_attachment_ref (
+                    camp_id TEXT NOT NULL,
+                    camp_message_id TEXT NOT NULL,
+                    ordinal INTEGER NOT NULL,
+                    attachment_id TEXT NOT NULL,
+                    display_name_snapshot TEXT NOT NULL
                 );
                 INSERT INTO camp_message(
                     id, camp_id, sequence, author_type, author_id, body,

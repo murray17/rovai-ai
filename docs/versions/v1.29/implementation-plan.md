@@ -19,6 +19,8 @@ last_updated: 2026-08-27
 - [x] 完成 Migration 112 Managed Attachment v2：新 Composer/Agent 文件经 durable intent 一次 ingest，最终
   Message/ref/Delivery 事务绕过 legacy View gate，历史 v1 保持只读兼容；
 - [x] 保持 Context DB-only：v2 payload 缺失时仍投影持久路径，不增加 unavailable descriptor 或 Run Fact；
+- [x] 解除新 Run 对 legacy View readiness 的隐式依赖：no-legacy receipt 不查 View，失败 legacy locator 安全省略，
+  dispatch 使用稳定 Camp root 且不取得 read admission、不检查 unresolved writer intent、不触发 rebuild；
 - [x] 完成 add、removal preview、atomic cutover、durable reconciliation 与任务释放；
 - [x] 给 Agent 业务工具、Message Delivery、Gather completion 和公开输出增加 exact membership lifetime fence；
 - [x] 收口 ordinary outbound source lifetime：pending Delivery cutover、materialized target reconciliation 与
@@ -45,7 +47,8 @@ last_updated: 2026-08-27
 
 ## 验证证据
 
-- `pnpm test`：76 个 Vitest 文件、533 个 Renderer/TypeScript 测试与 198 个 Node 协议测试通过；
+- `pnpm test`：82 个 Vitest 文件、584 个 Renderer/TypeScript 测试通过；Node 协议测试 219 个通过、
+  1 个既有用例按环境条件跳过；
 - `pnpm typecheck`、`cargo check --workspace --all-targets`、
   `cargo clippy --workspace --all-targets --all-features -- -D warnings` 通过；
 - `cargo test -p rovai-core --all-targets`：Core library 324/324、CLI 25/25、Host 161/161 通过，4 个显式
@@ -58,7 +61,7 @@ last_updated: 2026-08-27
   仍只按数据库投影稳定路径、legacy rebuild 不删除 v2 resource，以及 staging/promote 两个 commit 前 crash
   窗口的 orphan cleanup 与同 command id 重试；
 - `cargo clippy -p rovai-core --all-targets --all-features -- -D warnings` 通过；
-- `cargo test -p rovai-core --features slow-tests --lib slow_tests::`：289/289 通过，覆盖动态 membership、
+- `cargo test -p rovai-core --features slow-tests --lib slow_tests::`：291/291 通过，覆盖动态 membership、
   active-away no-op/source generation、当前名册 target admission、ordinary outbound source-lifetime
   cutover/dispatch/retry fence、exact-run business-tool fence、Delivery/Gather settlement 与 Missing-Send
   Recovery publication fence；

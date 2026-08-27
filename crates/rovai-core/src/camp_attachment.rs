@@ -4222,6 +4222,28 @@ fn sync_parent(_path: &Path) -> Result<()> {
     Ok(())
 }
 
+#[cfg(any(test, feature = "slow-tests"))]
+#[doc(hidden)]
+pub fn insert_test_camp(database: &Database, camp_id: &str) {
+    database
+        .connection()
+        .execute(
+            r#"
+        INSERT INTO camp(
+            id, title, name_origin, collaboration_mode,
+            project_binding_kind, project_path,
+            last_message_sequence, version, created_at, updated_at
+        ) VALUES (
+            ?1, 'Draft test', 'user', 'peer',
+            'quick_chat', '/quick-chat-draft-test',
+            0, 1, '2026-08-03T00:00:00Z', '2026-08-03T00:00:00Z'
+        )
+        "#,
+            [camp_id],
+        )
+        .unwrap();
+}
+
 #[cfg(test)]
 mod agent_source_tests {
     use super::*;
@@ -4475,28 +4497,6 @@ mod windows_attachment_tests {
         }
         fs::remove_dir_all(fixture).unwrap();
     }
-}
-
-#[cfg(any(test, feature = "slow-tests"))]
-#[doc(hidden)]
-pub fn insert_test_camp(database: &Database, camp_id: &str) {
-    database
-        .connection()
-        .execute(
-            r#"
-        INSERT INTO camp(
-            id, title, name_origin, collaboration_mode,
-            project_binding_kind, project_path,
-            last_message_sequence, version, created_at, updated_at
-        ) VALUES (
-            ?1, 'Draft test', 'user', 'peer',
-            'quick_chat', '/quick-chat-draft-test',
-            0, 1, '2026-08-03T00:00:00Z', '2026-08-03T00:00:00Z'
-        )
-        "#,
-            [camp_id],
-        )
-        .unwrap();
 }
 
 #[cfg(all(test, feature = "slow-tests"))]
