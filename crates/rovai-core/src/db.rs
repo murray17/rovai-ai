@@ -1353,11 +1353,124 @@ fn connection_has_admissible_data_contract(connection: &Connection) -> rusqlite:
         |row| row.get(0),
     );
     let migration_state = load_current_migration_state(connection);
-    Ok(matches!(
+    let normally_admissible = matches!(
         (marker, projection_exists, migration_state),
         (Ok(Some((contract, schema, classifier))), Ok(true), Ok(migrations))
             if classifier == V043_CLASSIFIER_VERSION
                 && migrations.admits(&contract, schema)
+    );
+    if normally_admissible {
+        return Ok(true);
+    }
+    connection_has_legacy_feishu_migration_collision(connection)
+}
+
+fn connection_has_legacy_feishu_migration_collision(
+    connection: &Connection,
+) -> rusqlite::Result<bool> {
+    let marker = connection
+        .query_row(
+            r#"
+            SELECT contract_version, projection_schema_version, classifier_version
+            FROM rovai_data_contract
+            WHERE singleton = 1
+            "#,
+            [],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, i64>(1)?,
+                    row.get::<_, String>(2)?,
+                ))
+            },
+        )
+        .optional()?;
+    if marker
+        != Some((
+            CURRENT_DATA_CONTRACT_VERSION.to_string(),
+            CURRENT_PROJECTION_SCHEMA_VERSION,
+            V043_CLASSIFIER_VERSION.to_string(),
+        ))
+    {
+        return Ok(false);
+    }
+    let migrations = load_current_migration_state(connection)?;
+    if !migrations.admits(
+        V115_MIGRATION_SOURCE_DATA_CONTRACT_VERSION,
+        V115_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION,
+    ) {
+        return Ok(false);
+    }
+
+    let required_table_count: i64 = connection.query_row(
+        r#"
+        SELECT COUNT(*)
+        FROM sqlite_master
+        WHERE type = 'table'
+          AND name IN (
+              'canonical_runtime_activity',
+              'project_binding',
+              'external_principal',
+              'external_principal_app_identity',
+              'channel_conversation',
+              'channel_conversation_binding',
+              'feishu_account',
+              'feishu_member_bot',
+              'external_group_bot_roster_state',
+              'external_group_bot_roster',
+              'channel_inbound_aggregate',
+              'channel_inbound_observation',
+              'channel_turn_request',
+              'channel_delivery',
+              'feishu_member_bot_publication_intent'
+          )
+        "#,
+        [],
+        |row| row.get(0),
+    )?;
+    if required_table_count != 15 {
+        return Ok(false);
+    }
+    let developer_account_column_count: i64 = connection.query_row(
+        r#"
+        SELECT COUNT(*)
+        FROM pragma_table_info('feishu_account')
+        WHERE name IN (
+            'user_id_digest', 'tenant_id', 'user_name', 'email', 'brand',
+            'connected_at', 'last_verified_at'
+        )
+        "#,
+        [],
+        |row| row.get(0),
+    )?;
+    if developer_account_column_count != 7 {
+        return Ok(false);
+    }
+
+    let schema_sql = |table: &str| -> rusqlite::Result<Option<String>> {
+        connection
+            .query_row(
+                "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?1",
+                [table],
+                |row| row.get(0),
+            )
+            .optional()
+    };
+    let planned_shutdown_schema = schema_sql("planned_shutdown_cycle")?;
+    let camp_message_schema = schema_sql("camp_message")?;
+    let context_manifest_schema = schema_sql("context_manifest")?;
+    Ok(matches!(
+        (
+            planned_shutdown_schema,
+            camp_message_schema,
+            context_manifest_schema
+        ),
+        (Some(planned), Some(message), Some(manifest))
+            if planned.contains("CHECK(protocol_version = 2)")
+                && !planned.contains("protocol_version IN (2, 3)")
+                && message.contains("'external_principal'")
+                && manifest.contains("context_manifest_version = 22")
+                && manifest.contains("formatter_version = 22")
     ))
 }
 
@@ -1543,6 +1656,53 @@ fn table_columns(connection: &Connection, table: &str) -> Result<Vec<String>> {
     Ok(statement
         .query_map([], |row| row.get::<_, String>(1))?
         .collect::<rusqlite::Result<Vec<_>>>()?)
+}
+
+fn migrate_planned_shutdown_protocol_v3_schema(transaction: &Transaction<'_>) -> Result<()> {
+    transaction.execute_batch(
+        r#"
+        CREATE TABLE planned_shutdown_cycle_v113 (
+            core_generation TEXT PRIMARY KEY
+                CHECK(length(trim(core_generation)) > 0),
+            protocol_version INTEGER NOT NULL
+                CHECK(protocol_version IN (2, 3)),
+            requested_at TEXT NOT NULL,
+            settled_at TEXT,
+            fenced_agent_run_count INTEGER
+                CHECK(fenced_agent_run_count IS NULL OR fenced_agent_run_count >= 0),
+            unsettled_effect_agent_run_count INTEGER
+                CHECK(
+                    unsettled_effect_agent_run_count IS NULL
+                    OR unsettled_effect_agent_run_count >= 0
+                ),
+            CHECK (
+                (settled_at IS NULL
+                    AND fenced_agent_run_count IS NULL
+                    AND unsettled_effect_agent_run_count IS NULL)
+                OR
+                (settled_at IS NOT NULL
+                    AND fenced_agent_run_count IS NOT NULL
+                    AND unsettled_effect_agent_run_count IS NOT NULL)
+            )
+        );
+
+        INSERT INTO planned_shutdown_cycle_v113(
+            core_generation, protocol_version, requested_at, settled_at,
+            fenced_agent_run_count, unsettled_effect_agent_run_count
+        )
+        SELECT core_generation, protocol_version, requested_at, settled_at,
+               fenced_agent_run_count, unsettled_effect_agent_run_count
+        FROM planned_shutdown_cycle;
+
+        DROP TABLE planned_shutdown_cycle;
+        ALTER TABLE planned_shutdown_cycle_v113 RENAME TO planned_shutdown_cycle;
+
+        CREATE INDEX planned_shutdown_cycle_pending_idx
+            ON planned_shutdown_cycle(requested_at, core_generation)
+            WHERE settled_at IS NULL;
+        "#,
+    )?;
+    Ok(())
 }
 
 fn admit_migration_action_resolution_source_v99(transaction: &Transaction<'_>) -> Result<()> {
@@ -2113,6 +2273,9 @@ impl Database {
             runtime_camp_files_root_identity_digest: runtime_camp_files_root_identity_digest
                 .to_string(),
         };
+        if initialized_database != 0 {
+            database.reconcile_legacy_feishu_migration_collision()?;
+        }
         database.migrate(initialized_database == 0)?;
         if let Some(reason) = reset_reason {
             database.connection.execute(
@@ -16675,54 +16838,35 @@ impl Database {
         let transaction = self
             .connection
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        migrate_planned_shutdown_protocol_v3_schema(&transaction)?;
         transaction.execute_batch(
             r#"
-            CREATE TABLE planned_shutdown_cycle_v113 (
-                core_generation TEXT PRIMARY KEY
-                    CHECK(length(trim(core_generation)) > 0),
-                protocol_version INTEGER NOT NULL
-                    CHECK(protocol_version IN (2, 3)),
-                requested_at TEXT NOT NULL,
-                settled_at TEXT,
-                fenced_agent_run_count INTEGER
-                    CHECK(fenced_agent_run_count IS NULL OR fenced_agent_run_count >= 0),
-                unsettled_effect_agent_run_count INTEGER
-                    CHECK(
-                        unsettled_effect_agent_run_count IS NULL
-                        OR unsettled_effect_agent_run_count >= 0
-                    ),
-                CHECK (
-                    (settled_at IS NULL
-                        AND fenced_agent_run_count IS NULL
-                        AND unsettled_effect_agent_run_count IS NULL)
-                    OR
-                    (settled_at IS NOT NULL
-                        AND fenced_agent_run_count IS NOT NULL
-                        AND unsettled_effect_agent_run_count IS NOT NULL)
-                )
-            );
-
-            INSERT INTO planned_shutdown_cycle_v113(
-                core_generation, protocol_version, requested_at, settled_at,
-                fenced_agent_run_count, unsettled_effect_agent_run_count
-            )
-            SELECT core_generation, protocol_version, requested_at, settled_at,
-                   fenced_agent_run_count, unsettled_effect_agent_run_count
-            FROM planned_shutdown_cycle;
-
-            DROP TABLE planned_shutdown_cycle;
-            ALTER TABLE planned_shutdown_cycle_v113 RENAME TO planned_shutdown_cycle;
-
-            CREATE INDEX planned_shutdown_cycle_pending_idx
-                ON planned_shutdown_cycle(requested_at, core_generation)
-                WHERE settled_at IS NULL;
-
             INSERT INTO schema_migration(version, applied_at)
             VALUES (113, datetime('now'));
             "#,
         )?;
         transaction.commit()?;
         Ok(())
+    }
+
+    fn reconcile_legacy_feishu_migration_collision(&mut self) -> Result<bool> {
+        if !connection_has_legacy_feishu_migration_collision(&self.connection)? {
+            return Ok(false);
+        }
+        let transaction = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        if !connection_has_legacy_feishu_migration_collision(&transaction)? {
+            anyhow::bail!("legacy Feishu migration collision changed before reconciliation");
+        }
+        migrate_planned_shutdown_protocol_v3_schema(&transaction)?;
+        transaction.execute(
+            "INSERT INTO schema_migration(version, applied_at) VALUES (115, datetime('now'))",
+            [],
+        )?;
+        transaction.commit()?;
+        eprintln!("reconciled legacy Feishu migration marker collision");
+        Ok(true)
     }
 
     fn migrate_runtime_entrypoint_locator_identity_v109(&mut self) -> Result<()> {
@@ -21446,6 +21590,78 @@ fn downgrade_current_schema_to_v112_source_for_test(connection: &Connection) {
 }
 
 #[cfg(test)]
+fn downgrade_current_schema_to_legacy_feishu_collision_for_test(connection: &Connection) {
+    connection
+        .execute_batch(
+            r#"
+            INSERT INTO feishu_account(
+                id, identity_digest, display_name, tenant_name, status,
+                created_at, updated_at, user_id_digest, tenant_id
+            ) VALUES (
+                'legacy-feishu-account', 'legacy-identity-digest', 'Legacy Owner',
+                'Legacy Tenant', 'disconnected', datetime('now'), datetime('now'),
+                'legacy-user-digest', 'legacy-tenant-id'
+            );
+
+            INSERT INTO feishu_member_bot(
+                agent_id, account_id, app_id, bot_display_name, credential_ref,
+                status, created_at, updated_at, published_at
+            ) VALUES (
+                'agent_1', 'legacy-feishu-account', 'cli_legacy_member_bot',
+                'Legacy Member Bot', 'legacy-member-bot-credential', 'published',
+                datetime('now'), datetime('now'), datetime('now')
+            );
+
+            INSERT INTO planned_shutdown_cycle(
+                core_generation, protocol_version, requested_at
+            ) VALUES ('legacy-pending-v2-generation', 2, datetime('now'));
+
+            BEGIN IMMEDIATE;
+            CREATE TABLE planned_shutdown_cycle_legacy_collision (
+                core_generation TEXT PRIMARY KEY
+                    CHECK(length(trim(core_generation)) > 0),
+                protocol_version INTEGER NOT NULL
+                    CHECK(protocol_version = 2),
+                requested_at TEXT NOT NULL,
+                settled_at TEXT,
+                fenced_agent_run_count INTEGER
+                    CHECK(fenced_agent_run_count IS NULL OR fenced_agent_run_count >= 0),
+                unsettled_effect_agent_run_count INTEGER
+                    CHECK(
+                        unsettled_effect_agent_run_count IS NULL
+                        OR unsettled_effect_agent_run_count >= 0
+                    ),
+                CHECK (
+                    (settled_at IS NULL
+                        AND fenced_agent_run_count IS NULL
+                        AND unsettled_effect_agent_run_count IS NULL)
+                    OR
+                    (settled_at IS NOT NULL
+                        AND fenced_agent_run_count IS NOT NULL
+                        AND unsettled_effect_agent_run_count IS NOT NULL)
+                )
+            );
+            INSERT INTO planned_shutdown_cycle_legacy_collision(
+                core_generation, protocol_version, requested_at, settled_at,
+                fenced_agent_run_count, unsettled_effect_agent_run_count
+            )
+            SELECT core_generation, protocol_version, requested_at, settled_at,
+                   fenced_agent_run_count, unsettled_effect_agent_run_count
+            FROM planned_shutdown_cycle;
+            DROP TABLE planned_shutdown_cycle;
+            ALTER TABLE planned_shutdown_cycle_legacy_collision
+                RENAME TO planned_shutdown_cycle;
+            CREATE INDEX planned_shutdown_cycle_pending_idx
+                ON planned_shutdown_cycle(requested_at, core_generation)
+                WHERE settled_at IS NULL;
+            DELETE FROM schema_migration WHERE version = 115;
+            COMMIT;
+            "#,
+        )
+        .unwrap();
+}
+
+#[cfg(test)]
 fn downgrade_current_schema_to_v111_source_for_test(connection: &Connection) {
     downgrade_current_schema_to_v112_source_for_test(connection);
     let has_v112: bool = connection
@@ -25127,6 +25343,97 @@ mod tests {
             3
         );
         drop(restarted);
+        std::fs::remove_dir_all(directory).expect("temporary database should be removable");
+    }
+
+    #[test]
+    fn legacy_feishu_migration_marker_collision_reconciles_without_quarantine() {
+        let (database, directory) = crate::test_support::seeded_runtime_database();
+        database
+            .connection()
+            .execute("DELETE FROM schema_migration WHERE version = 115", [])
+            .unwrap();
+        assert!(
+            !connection_has_admissible_data_contract(database.connection()).unwrap(),
+            "a generic current store missing v115 must still fail closed"
+        );
+        database
+            .connection()
+            .execute(
+                "INSERT INTO schema_migration(version, applied_at) VALUES (115, datetime('now'))",
+                [],
+            )
+            .unwrap();
+        downgrade_current_schema_to_legacy_feishu_collision_for_test(database.connection());
+
+        assert!(
+            connection_has_admissible_data_contract(database.connection()).unwrap(),
+            "the exact legacy Feishu marker collision must remain an admissible upgrade source"
+        );
+        drop(database);
+
+        let reopened = Database::open_with_data_contract_enforcement(&directory, true)
+            .expect("the legacy Feishu marker collision should reconcile before migration");
+        assert!(
+            !directory.join("inactive-data-quarantine").exists(),
+            "a recognized marker collision must not quarantine valid local state"
+        );
+        assert_eq!(
+            reopened
+                .connection()
+                .query_row(
+                    r#"
+                    SELECT
+                        (SELECT COUNT(*) FROM schema_migration WHERE version IN (113, 114, 115)),
+                        (SELECT COUNT(*) FROM feishu_account
+                         WHERE id = 'legacy-feishu-account'
+                           AND user_id_digest = 'legacy-user-digest'
+                           AND tenant_id = 'legacy-tenant-id'),
+                        (SELECT COUNT(*) FROM feishu_member_bot
+                         WHERE agent_id = 'agent_1'
+                           AND app_id = 'cli_legacy_member_bot'),
+                        (SELECT COUNT(*) FROM planned_shutdown_cycle
+                         WHERE core_generation = 'legacy-pending-v2-generation'
+                           AND protocol_version = 2),
+                        (SELECT COUNT(*) FROM pragma_foreign_key_check)
+                    "#,
+                    [],
+                    |row| {
+                        Ok((
+                            row.get::<_, i64>(0)?,
+                            row.get::<_, i64>(1)?,
+                            row.get::<_, i64>(2)?,
+                            row.get::<_, i64>(3)?,
+                            row.get::<_, i64>(4)?,
+                        ))
+                    },
+                )
+                .unwrap(),
+            (3, 1, 1, 1, 0)
+        );
+        let cycle_schema: String = reopened
+            .connection()
+            .query_row(
+                "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'planned_shutdown_cycle'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(cycle_schema.contains("protocol_version IN (2, 3)"));
+        reopened
+            .connection()
+            .execute(
+                r#"
+                INSERT INTO planned_shutdown_cycle(
+                    core_generation, protocol_version, requested_at
+                ) VALUES ('reconciled-v3-generation', 3, datetime('now'))
+                "#,
+                [],
+            )
+            .unwrap();
+        assert!(connection_has_current_data_contract(reopened.connection()).unwrap());
+
+        drop(reopened);
         std::fs::remove_dir_all(directory).expect("temporary database should be removable");
     }
 
