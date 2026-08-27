@@ -8,7 +8,9 @@ last_updated: 2026-08-27
 
 # v1.29 Camp 动态队员管理与 Workspace Change Observation 实施计划
 
-本计划记录两组交付的实现与验收事实。Camp 动态队员管理和 Managed Attachment v2 已完成；Workspace Change Observation 的未勾选项仍不得从 accepted Contract 或局部测试推导为交付。
+本计划记录 Camp 动态队员管理、Workspace Change Observation 与 ACP Client FS 权限收敛的实现和验收事实。
+Camp 动态队员管理、Managed Attachment v2 与 ACP Client FS 权限收敛已完成；Workspace Change Observation 的
+未勾选项仍不得从 accepted Contract 或局部测试推导为交付。
 
 ## 已完成：Camp 动态队员管理与 Managed Attachment v2
 
@@ -158,6 +160,25 @@ last_updated: 2026-08-27
 - [x] 在 HTML 评审稿完成 Porcelain Day / Steel Night、底部/右侧执行台、文件行展开、无可靠终态隐藏与
   `View` 入口的浏览器视觉检查；
 - [ ] 完成真实 App 双主题、键盘/焦点与实际 Runtime file-diff acceptance，并把证据写回本计划。
+
+## 7. ACP Client FS 权限收敛
+
+- [x] 删除 `authorized_file_writes`、`authorize_file_write()`、one-time matching error，以及 Runtime Delivery
+  中把 Approval scope 映射成单次文件 token 的桥；
+- [x] `fs/read_text_file` / `fs/write_text_file` 不再调用 `scoped_path()` 或读取 Workspace access；绝对路径按
+  Runtime 请求执行，相对路径仅以 execution root 为解析基准；
+- [x] 保留 path/content 参数、Host/Run/epoch/Session/Prompt、cancel/detach 与 JSON-RPC correlation 校验；
+- [x] 十种 ACP Adapter 的全自动/绕过模式直接选择 native allow 作协议兼容，不创建 Approval/Action；交互模式
+  保留现有 exact native option 流程，且两种结果都不参与 Client FS 鉴权；
+- [x] 新增唯一 ACP Client FS 回归 owner：修复前在首次写入处以
+  `read-only AgentRun cannot write files` 失败；修复后在 `read_only` metadata 下成功写 execution root 外绝对路径、
+  连续覆盖同一路径并读回第二次内容；
+- [x] 更新真实 ACP smoke 的目的与决策文案，不再声称存在 one-time file write authorization；
+- [x] 建立 [Runtime Launch and Verification v28](../../contracts/runtime-launch-and-verification-v28.md)、
+  [V1.29-D10](decisions.md#v1-29-d10)、当前 Architecture、术语和跨版本路由；无 schema 或 Migration 变化。
+- [x] `pnpm test:rust:staged` 通过 workspace all-target check 与 Core bin 169/169（另 4 项 manual smoke ignored）；
+  `cargo clippy -p rovai-core --bin rovai-core -- -D warnings`、`cargo fmt --all -- --check`、ACP smoke 脚本语法、
+  `pnpm docs:test`、`pnpm docs:check` 与精确 merge-base 的 `docs:check:ci` 均通过。
 
 ## 交付阻断条件
 

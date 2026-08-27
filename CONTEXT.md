@@ -1275,16 +1275,20 @@ The immutable Adapter, model, and Adapter Permission Configuration snapshot sele
 _Avoid_: live AgentProfile settings, sender Runtime configuration, Core permission policy
 
 **Runtime-Managed Permission**:
-A permission boundary in which an Agent's Adapter Permission Configuration and native Runtime decide filesystem, Shell, and network access. Rovai-ai persists and relays native permission requests and user decisions but adds no Workspace-derived authorization policy.
+A permission boundary in which an Agent's Adapter Permission Configuration and native Runtime decide filesystem, Shell, and network access. Rovai-ai persists and relays interactive native permission requests and user decisions but adds no Workspace-derived authorization policy; a Runtime bypass mode may receive a direct protocol-compatible allow response. ACP Client Filesystem requests never mint, consume, or depend on a second Core file authorization.
 _Avoid_: Core permission, unrestricted mode, Agent self-authorization
+
+**ACP Client Filesystem Proxy**:
+The fenced ACP `fs/read_text_file` and `fs/write_text_file` execution surface through which Core performs the exact file request of the current Runtime. Absolute paths remain absolute and relative paths resolve from the Run Workspace only as a base; Core validates protocol and parameters but applies no execution-root containment, Workspace access mode, or one-time file-write authorization. Runtime-Managed Permission and the operating system own actual access.
+_Avoid_: Core filesystem sandbox, Workspace capability, permission token, Runtime Permission Request, Rovai managed-content API
 
 **Permission Semantics**:
 The immutable authorization interpretation frozen for one AgentRun. Existing non-terminal Runs may retain legacy Core-enforced semantics solely for recovery, while every newly created Run uses Runtime-Managed Permission; this is not a user-selectable product setting.
 _Avoid_: permission preference, application mode switch, permanent dual-policy system
 
 **Runtime Permission Request**:
-A native Runtime request asking the user to authorize a specific operation or resource scope. Rovai-ai persists its complete fenced native identity and exact options, presents the safe actionable view, records the user's selected native decision, and returns that decision to the same Runtime binding.
-_Avoid_: Core policy decision, Workspace upgrade, silent permission grant
+A native Runtime request asking the ACP client to select one exact native decision for an operation or resource scope. In an interactive Runtime mode, Rovai-ai persists its complete fenced identity and options, presents the safe actionable view, records the user's selection, and returns it to the same Runtime binding. In a frozen bypass mode, Core may directly select the native non-persistent allow option only for protocol compatibility. Neither path grants ACP Client Filesystem access or upgrades the Run Workspace.
+_Avoid_: Core file permission, Workspace upgrade, ACP filesystem token, unfenced automatic grant
 
 **Runtime Permission Attention Episode**:
 A Camp-scoped generation that begins when its eligible pending Runtime Permission Requests change from none to one or more and resolves when none remain. A later zero-to-nonzero transition is a new generation and therefore a new Notification Episode.

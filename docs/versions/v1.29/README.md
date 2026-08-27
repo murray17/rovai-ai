@@ -12,7 +12,8 @@ last_updated: 2026-08-27
 # Rovai-ai v1.29：Camp 动态队员管理与 Workspace Change Observation
 
 > 当前状态：动态 Camp membership、Message Delivery zero-attempt cancellation 与 Managed Attachment v2 已完成；
-> Workspace Change Observation 的产品、安全与 UI 边界已确认，Core/Renderer 主路径已实现并通过定向回归，
+> Workspace Change Observation 的产品、安全与 UI 边界已确认，Core/Renderer 主路径已实现并通过定向回归；
+> ACP Client FS 已收敛为 Runtime-owned 权限下的无二次授权执行代理，
 > 跨平台 Git fixture、Codex/ACP 真实 Runtime file-diff smoke 与删除/恢复长尾仍待补齐；Claude Code `2.1.220`
 > 原生 Edit smoke 已通过。
 > 本版本只声明两层变更观察：Runtime 对单个
@@ -73,7 +74,11 @@ reconciliation 完成已接受工作的正式结算。
   `unavailable`，普通文件工作继续，且不事后重新扫描猜测旧边界；
 - 非 Git execution root 不创建 Window，也不伪造 not-applicable 持久对象。
 - Codex、ACP 与 Claude Edit 的可靠终态文件 Evidence 扁平显示为同级 `修改 xxx` 行；完整 Review 只属于会话中的
-  `Files Changed` 历史卡片。
+  `Files Changed` 历史卡片；
+- ACP `fs/read_text_file` / `fs/write_text_file` 只作 fenced 文件执行代理：绝对路径按 Runtime 请求执行，
+  相对路径以 execution root 为解析基准，不做 Core containment、Workspace access 或一次性 token 鉴权；
+  Runtime 全自动/绕过模式的合格 `session/request_permission` 直接回复 native allow，交互模式仍保留 Approval，
+  两者都不控制 Client FS 执行资格。
 
 ## 明确不做
 
@@ -115,16 +120,18 @@ Activity 与 Renderer，不追加模型上下文。
 - 动态 membership 覆盖 add/remove 幂等与冲突、最后成员、Lead 替换、所有业务工具 exact-run fence、
   Delivery/Gather/terminal publication、Migration clean break、双主题与键盘交互；
 - Managed Attachment v2 覆盖从 Migration 111 升级 112、活跃 source Run 下 14 MiB 附件直接 dispatch、ref-only
-  复用与 DB-only Context path 回归。
+  复用与 DB-only Context path 回归；
+- ACP Client FS 回归覆盖 `read_only` metadata、execution root 外绝对路径、未预授权首写、同路径连续第二次写和
+  readback；十种 ACP Adapter 的全自动/交互模式使用同一表驱动 owner 验证 compatibility allow 分类。
 
 ## 跨版本文档影响
 
 | 范围 | 结论 | 证据或理由 |
 | --- | --- | --- |
 | Version lifecycle | 已更新 | v1.28 按冻结时事实转为 historical；本概览、[实施计划](implementation-plan.md)、[决定](decisions.md)与[版本索引](../README.md)建立唯一 current v1.29。 |
-| Decisions | 已更新 | [V1.29-D01–D06](decisions.md#v1-29-d01)冻结 membership cutover、exact lifetime、受信外部同步、零 attempt 取消与 Managed Attachment v2；[V1.29-D07](decisions.md#v1-29-d07)冻结两层 diff 与既有 Canonical Activity 权威；[V1.29-D08](decisions.md#v1-29-d08)冻结 Camp/exact-root Window、受控 Git checkpoint 和 fail-open Coordinator；[V1.29-D09](decisions.md#v1-29-d09)冻结终态文件行与历史卡片交互。 |
-| Contracts | 已更新 | 新增 [Camp Membership v1](../../contracts/camp-membership-v1.md)与 [Workspace Change Observation v1](../../contracts/workspace-change-observation-v1.md)，并升级 Camp Open、Attachment、Composer、Message Delivery、Gather 与 Missing-Send Recovery 等相关合同。 |
-| Architecture | 已更新 | 新增[动态 Camp 队员关系](../../architecture/dynamic-camp-membership.md)与 [Workspace Change Observation](../../architecture/workspace-change-observation.md)；附件架构切换为 Managed v2 当前写入与 legacy v1 只读兼容，[基础架构不变量](../../architecture/foundational-invariants.md#camp-workspace)同步长期边界。 |
+| Decisions | 已更新 | [V1.29-D01–D06](decisions.md#v1-29-d01)冻结 membership cutover、exact lifetime、受信外部同步、零 attempt 取消与 Managed Attachment v2；[V1.29-D07](decisions.md#v1-29-d07)冻结两层 diff 与既有 Canonical Activity 权威；[V1.29-D08](decisions.md#v1-29-d08)冻结 Camp/exact-root Window、受控 Git checkpoint 和 fail-open Coordinator；[V1.29-D09](decisions.md#v1-29-d09)冻结终态文件行与历史卡片交互；[V1.29-D10](decisions.md#v1-29-d10)冻结 ACP Client FS 的 Runtime-owned 权限与无二次授权代理。 |
+| Contracts | 已更新 | 新增 [Camp Membership v1](../../contracts/camp-membership-v1.md)与 [Workspace Change Observation v1](../../contracts/workspace-change-observation-v1.md)，升级 Camp Open、Attachment、Composer、Message Delivery、Gather 与 Missing-Send Recovery 等相关合同；[Runtime Launch and Verification v28](../../contracts/runtime-launch-and-verification-v28.md)替代 v27，收口 ACP Client FS 与 permission compatibility response。 |
+| Architecture | 已更新 | 新增[动态 Camp 队员关系](../../architecture/dynamic-camp-membership.md)与 [Workspace Change Observation](../../architecture/workspace-change-observation.md)；附件架构切换为 Managed v2 当前写入与 legacy v1 只读兼容；[基础架构不变量](../../architecture/foundational-invariants.md#runtime-platform-security)与 [Runtime Catalog Boundaries](../../architecture/runtime-catalog-boundaries.md)同步 Runtime-owned ACP 文件权限。 |
 | UI | 已更新 | [Camp 会话工作区](../../ui/components/conversation-workspace.md)冻结成员管理、Canonical Activity presentation rows、`Files Changed` 卡片与只读 View；其他布局不变。 |
 | Runtime Activity | 已更新 | Registry 记录 Codex terminal fileChange、ACP terminal standard Diff、Claude Edit exact mutation 和 Antigravity fail-closed 边界。 |
 | Runtime compatibility | 已更新 | 13 个 adapter 均已按实际协议族归类；当前代码 fixture 覆盖 Codex、十个 ACP adapter、Claude Edit 与 Antigravity negative gate；Claude Code `2.1.220` Edit 已完成真实 smoke，Codex/ACP 真实 file-diff smoke 仍待补。 |
@@ -137,3 +144,4 @@ Activity 与 Renderer，不追加模型上下文。
 - [版本决定](decisions.md)
 - [Workspace Change Observation 架构](../../architecture/workspace-change-observation.md)
 - [Workspace Change Observation v1 合同](../../contracts/workspace-change-observation-v1.md)
+- [Runtime Launch and Verification v28](../../contracts/runtime-launch-and-verification-v28.md)

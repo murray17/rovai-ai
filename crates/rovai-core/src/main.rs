@@ -1675,15 +1675,6 @@ impl AgentRunRuntime {
         }
     }
 
-    async fn authorize_file_write(&self, action_kind: &str, request: &Value) -> Result<()> {
-        if let Self::Acp(runtime) = self
-            && action_kind == "file_write"
-        {
-            runtime.authorize_file_write(request).await?;
-        }
-        Ok(())
-    }
-
     async fn cancel(&self) -> Result<()> {
         match self {
             Self::Codex(runtime) => runtime.interrupt().await,
@@ -7780,86 +7771,15 @@ impl Core {
                 active_attempt = Some((attempt_id, action_execution_epoch));
             }
 
-            let mut response_approved = approved;
-            // Grok mediates the native decision itself, then delegates the
-            // approved write through ACP `fs/write_text_file`. Mirror the
-            // durable approval into that one-shot filesystem gate.
-            if approved
-                && (!runtime_managed || runtime.adapter_kind() == AdapterKind::GrokBuild)
-                && let Err(error) = runtime
-                    .authorize_file_write(&candidate.action_kind, &candidate.response_context)
-                    .await
-            {
-                response_approved = false;
-                if let Some((attempt_id, action_execution_epoch)) = active_attempt.clone() {
-                    let result = {
-                        let mut database = self.database.lock().await;
-                        ActionSafetyService::default().record_result(
-                            &mut database,
-                            &CommandEnvelope {
-                                command_id: format!(
-                                    "runtime-action-authorization-rejected:{}:{attempt_id}",
-                                    candidate.action_id
-                                ),
-                                actor: ActorRef::System {
-                                    component_id: component_id.clone(),
-                                },
-                                camp_id: Some(candidate.camp_id.clone()),
-                                expected_versions: Vec::new(),
-                                execution_epoch: None,
-                                payload: RecordActionResultCommand {
-                                    action_id: candidate.action_id.clone(),
-                                    attempt_id,
-                                    action_execution_epoch,
-                                    outcome: ActionResultOutcome::Failed,
-                                    result_code: "runtime_scope_validation_failed".to_string(),
-                                    result_summary:
-                                        "Rovai-ai rejected the approved action because its concrete scope was unsafe"
-                                            .to_string(),
-                                    result_data: json!({"error": format!("{error:#}")}),
-                                    effect_disposition: "none".to_string(),
-                                },
-                            },
-                        )
-                    };
-                    if let Err(record_error) = result {
-                        self.fail_leased_runtime_delivery(
-                            &candidate,
-                            &payload_digest,
-                            &lease_owner,
-                            &format!(
-                                "Runtime write authorization and result recording failed: {error:#}; {record_error:#}"
-                            ),
-                        )
-                        .await;
-                        continue;
-                    }
-                    active_attempt = None;
-                }
-                emit(
-                    output,
-                    "action.scope_rejected",
-                    json!({
-                        "agentRunId": candidate.agent_run_id,
-                        "executionEpoch": candidate.target_execution_epoch,
-                        "actionId": candidate.action_id,
-                        "error": format!("{error:#}"),
-                    }),
-                );
-            }
             let response = if let Some(response) = frozen_runtime_response {
                 Ok(response)
             } else if candidate.native_method == "session/request_permission" {
-                acp::legacy_approval_result(&candidate.response_context, response_approved)
+                acp::legacy_approval_result(&candidate.response_context, approved)
             } else {
                 codex::approval_result(
                     &candidate.native_method,
                     &candidate.response_context,
-                    if response_approved {
-                        "accept"
-                    } else {
-                        "decline"
-                    },
+                    if approved { "accept" } else { "decline" },
                 )
             };
             let delivery_result = match response {
@@ -13178,11 +13098,7 @@ async fn process_agent_run_acp_message(
                 Ok(result) => runtime.respond(id, result).await,
                 Err(error) => {
                     runtime
-                        .respond_error(
-                            id,
-                            -32000,
-                            &format!("Rovai-ai file read rejected: {error:#}"),
-                        )
+                        .respond_error(id, -32000, &format!("Rovai-ai file read failed: {error:#}"))
                         .await
                 }
             },
@@ -13193,7 +13109,7 @@ async fn process_agent_run_acp_message(
                         .respond_error(
                             id,
                             -32000,
-                            &format!("Rovai-ai file write rejected: {error:#}"),
+                            &format!("Rovai-ai file write failed: {error:#}"),
                         )
                         .await
                 }
@@ -13825,6 +13741,29 @@ async fn process_agent_run_acp_approval_request(
             return Ok(());
         }
     };
+    if execution.permission_semantics == PermissionSemantics::RuntimeManagedV2
+        && acp::automatically_allows_permission_requests(
+            execution.runtime.adapter_kind,
+            &execution.runtime.permissions.values,
+        )
+    {
+        match acp::legacy_approval_result(params, true) {
+            Ok(response) => runtime.respond(request_id, response).await?,
+            Err(error) => {
+                reject_acp_request(
+                    output,
+                    runtime,
+                    agent_run_id,
+                    execution_epoch,
+                    request_id,
+                    params,
+                    &format!("ACP automatic permission response was rejected: {error}"),
+                )
+                .await?;
+            }
+        }
+        return Ok(());
+    }
     if execution.permission_semantics == PermissionSemantics::CoreEnforcedV1
         && execution.workspace.access == "read_only"
         && matches!(

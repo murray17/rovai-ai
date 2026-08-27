@@ -346,3 +346,53 @@ workspace writer lease 可以强化隔离和归因，但会显著增加 v1 的�
 - **只展示“编辑了 N 个文件”文字：** 无法直接定位和独立展开单文件变化；
 - **在执行台展示 Window observation：** 混淆 Operation Evidence 与共享净变化，并破坏现有执行布局；
 - **从 Tool 名、路径或 shell 命令猜 diff：** 无法证明完整性，异常退出时尤其会产生伪结果。
+
+<a id="v1-29-d10"></a>
+## V1.29-D10：ACP Client FS 仅作执行代理，文件权限由 Runtime 单独拥有
+
+### 背景
+
+ACP Runtime 已经通过自己的 sandbox、permission/approval mode 与原生用户交互决定文件权限，但 Core 曾在
+`fs/write_text_file` 上再维护一份 `authorized_file_writes`：只有 matching permission response 生成的一次性路径
+token 才能写，并且 read/write 都通过 `scoped_path()` 限制在 execution root。Qwen Code、CodeBuddy、Kimi 和
+Grok 等全自动模式可以合法地不发送 permission request，却仍使用 ACP Client FS 完成写入，于是第二层 token
+无法产生，Runtime 已允许的操作反而被 Core 以 `file write has no matching one-time Rovai-ai authorization`
+拒绝。这个机制既不能代表 Runtime 的真实权限，也把 execution root 错当成 sandbox。
+
+### 决定
+
+1. 文件、Shell、网络权限只由冻结的 Adapter Permission Configuration、原生 Runtime sandbox/permission mode
+   与操作系统拥有。Core 不建立可与它们分歧的通用文件权限层；
+2. `fs/read_text_file` / `fs/write_text_file` 成为 fenced ACP Client Filesystem Proxy：绝对路径按 Runtime 请求
+   执行，相对路径以 execution root 为解析基准，但不 containment；不读取 Workspace access，不调用
+   `scoped_path()`，不 canonicalize 后拒绝 root escape；
+3. 删除 `authorized_file_writes`、`authorize_file_write()`、one-time matching error，以及 Runtime Delivery 把
+   Approval 映射为文件 token/scope validation 的桥；同一 Run 可以连续多次写同一或不同路径；
+4. `session/request_permission` 继续校验 current Run/epoch/Session/Prompt、request identity 和 native option。
+   冻结配置处于 Adapter 已验证的全自动/绕过交互模式时，Core 直接选择 native non-persistent allow 作为 ACP
+   兼容响应，不创建 Approval/Action；交互模式继续保存 exact native request、用户决定和 response delivery；
+5. permission response 与 Client FS 执行资格完全解耦。它不 mint、consume 或 revoke 文件权限；stale
+   Session、cancel/detach、非法参数、未知 method 和 OS I/O failure 仍由 Core 正常 fail closed；
+6. Rovai 自有 blob、附件 Authority、私有配置、凭据、IPC、Built-in Tool lease 与领域命令继续按自然产品边界
+   保护。这些边界不是 Runtime 已知任意路径的第二份 filesystem allowlist。
+
+当前字段级规范见 [Runtime Launch and Verification v28](../../contracts/runtime-launch-and-verification-v28.md)。
+
+### 后果
+
+- ACP Runtime 的权限配置成为单一文件权限解释；execution root 继续是工作目录和相对路径基准，不再冒充 sandbox；
+- 全自动 Runtime 无需先制造虚假的 permission request，连续 Client FS 写入不再因 token 被消费而失败；
+- 选择较窄模式的用户仍可收到 Runtime 原生 Approval；该 UI/审计事实不承诺 Core 拦截 Runtime 的每种文件 I/O；
+- 与 Runtime 同 UID 且知道某个路径时，Core Client FS 不提供额外隔离保证；隔离必须由 Runtime sandbox、permission
+  mode 或操作系统承担；
+- 旧 `CoreEnforcedV1` 只为既有非终态 Run 的非 FS Action recovery 保留，不再参与 Client FS read/write。
+
+### 被拒绝方案
+
+- **修补 one-time token 的数量或有效期：** 仍要求 Runtime 权限事件和 FS callback 一一对应，无法覆盖自动模式、
+  多次写入或 Runtime 内部授权；
+- **把 execution root 改成可申请扩展的 Core sandbox：** 建立第二套路径 capability、symlink/canonicalization 与
+  生命周期模型，继续可能和 Runtime 决策冲突；
+- **解析 shell/tool input 预授权路径：** 无法证明实际副作用，且会把启发式猜测升级成安全权威；
+- **所有 permission request 都静默 allow：** 会覆盖用户选择的交互式 Runtime 模式；只有已冻结的全自动/绕过模式
+  使用兼容 allow，其余仍走原生 Approval。

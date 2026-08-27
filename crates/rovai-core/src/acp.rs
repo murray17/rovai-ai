@@ -2711,7 +2711,6 @@ pub struct AcpRuntime {
     attachment_access_root: Option<PathBuf>,
     workspace_access: String,
     active_observation: Mutex<Option<AcpPromptObservation>>,
-    authorized_file_writes: Mutex<HashSet<PathBuf>>,
 }
 
 #[derive(Debug)]
@@ -2859,7 +2858,6 @@ impl AcpRuntime {
             attachment_access_root,
             workspace_access,
             active_observation: Mutex::new(None),
-            authorized_file_writes: Mutex::new(HashSet::new()),
         })
     }
 
@@ -3478,32 +3476,18 @@ impl AcpRuntime {
         self.owner.execution_epoch
     }
 
-    pub async fn authorize_file_write(&self, request: &Value) -> Result<()> {
-        if self.workspace_access == "read_only" {
-            bail!("read-only AgentRun cannot authorize file writes");
-        }
-        for path in acp_tool_paths(request) {
-            let scoped = scoped_path(&self.execution_root, &path)?;
-            self.authorized_file_writes.lock().await.insert(scoped);
-        }
-        Ok(())
-    }
-
     pub async fn read_text_file(&self, params: &Value) -> Result<Value> {
         let path = params
             .get("path")
             .and_then(Value::as_str)
             .context("fs/read_text_file has no path")?;
-        let path = scoped_path(&self.execution_root, path)?;
+        let path = client_filesystem_path(&self.execution_root, path);
         let content = std::fs::read_to_string(&path)
             .with_context(|| format!("failed to read {}", path.display()))?;
         Ok(json!({"content": content}))
     }
 
     pub async fn write_text_file(&self, params: &Value) -> Result<Value> {
-        if self.workspace_access == "read_only" {
-            bail!("read-only AgentRun cannot write files");
-        }
         let path = params
             .get("path")
             .and_then(Value::as_str)
@@ -3512,10 +3496,7 @@ impl AcpRuntime {
             .get("content")
             .and_then(Value::as_str)
             .context("fs/write_text_file has no content")?;
-        let path = scoped_path(&self.execution_root, path)?;
-        if !self.authorized_file_writes.lock().await.remove(&path) {
-            bail!("file write has no matching one-time Rovai-ai authorization");
-        }
+        let path = client_filesystem_path(&self.execution_root, path);
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
         }
@@ -5275,6 +5256,27 @@ fn requested_path(context: &InterceptedAcpActionContext<'_>, value: &str) -> Res
     })
 }
 
+pub fn automatically_allows_permission_requests(
+    adapter_kind: AdapterKind,
+    permissions: &Value,
+) -> bool {
+    match adapter_kind {
+        AdapterKind::OpencodeCli => permissions["permission"] == "allow",
+        AdapterKind::CopilotCli => permissions["allow_all"] == "on",
+        AdapterKind::KiroCli => permissions["trust_all_tools"] == "on",
+        AdapterKind::QoderCli | AdapterKind::TraeCnCli => {
+            permissions["permission_mode"] == "bypass_permissions"
+        }
+        AdapterKind::CodebuddyCli | AdapterKind::GrokBuild => {
+            permissions["permission_mode"] == "bypassPermissions"
+        }
+        AdapterKind::QwenCode => permissions["approval_mode"] == "yolo",
+        AdapterKind::CursorAgent => permissions["approval_policy"] == "force",
+        AdapterKind::KimiCodeCli => permissions["permission_mode"] == "yolo",
+        AdapterKind::CodexCli | AdapterKind::ClaudeCodeCli | AdapterKind::AntigravityApp => false,
+    }
+}
+
 fn effective_action_kind<'a>(
     adapter_kind: AdapterKind,
     reported_kind: &'a str,
@@ -5768,6 +5770,15 @@ fn scoped_path(root: &Path, value: &str) -> Result<PathBuf> {
     Ok(canonical)
 }
 
+fn client_filesystem_path(execution_root: &Path, value: &str) -> PathBuf {
+    let path = Path::new(value);
+    if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        execution_root.join(path)
+    }
+}
+
 fn canonicalize_allow_missing(path: &Path) -> Result<PathBuf> {
     let mut cursor = path;
     let mut missing = Vec::new();
@@ -6257,6 +6268,81 @@ while IFS= read -r ignored; do :; done
 
         std::fs::remove_dir_all(kimi_root).unwrap();
         std::fs::remove_dir_all(trae_root).unwrap();
+    }
+
+    #[tokio::test]
+    async fn client_filesystem_proxies_runtime_paths_without_core_file_authorization() {
+        let root =
+            std::env::temp_dir().join(format!("rovai-acp-client-fs-root-{}", uuid::Uuid::new_v4()));
+        let outside = std::env::temp_dir().join(format!(
+            "rovai-acp-client-fs-outside-{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::create_dir_all(&outside).unwrap();
+        let executable = root.join("traecli");
+        make_executable(
+            &executable,
+            r#"#!/bin/sh
+IFS= read -r initialize || exit 1
+printf '%s\n' '{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":1,"agentCapabilities":{}}}'
+while IFS= read -r ignored; do :; done
+"#,
+        );
+        let frozen = frozen_trae_runtime(&executable);
+        let workspace = AgentRunWorkspace::runtime_managed_path(root.to_string_lossy().to_string());
+        let (incoming, _receiver) = mpsc::unbounded_channel();
+        let host = AcpHost::spawn(
+            &root,
+            &workspace,
+            PermissionSemantics::RuntimeManagedV2,
+            &frozen,
+            incoming,
+            Some(exact_builtin_tools(&root)),
+            CompactionDetectorPolicy::Disabled,
+            true,
+            &BTreeMap::new(),
+            &root.join("private"),
+            None,
+        )
+        .await
+        .unwrap();
+        let runtime = AcpRuntime::from_host(
+            AcpRuntimeOwner {
+                agent_run_id: "run-client-fs-proxy".to_string(),
+                execution_epoch: 1,
+            },
+            host.clone(),
+            "sha256:compatibility".to_string(),
+            "sha256:mcp".to_string(),
+            root.clone(),
+            Some(exact_attachment_root(&root)),
+            "read_only".to_string(),
+        );
+        let target = outside.join("runtime-owned.txt");
+        let first_write = runtime
+            .write_text_file(&json!({"path": target, "content": "first"}))
+            .await;
+        let second_write = runtime
+            .write_text_file(&json!({"path": target, "content": "second"}))
+            .await;
+        let read = runtime.read_text_file(&json!({"path": target})).await;
+
+        host.shutdown().await;
+        let persisted = std::fs::read_to_string(&target).ok();
+        std::fs::remove_dir_all(&root).unwrap();
+        std::fs::remove_dir_all(&outside).unwrap();
+
+        assert!(
+            first_write.is_ok(),
+            "Core must not require a separate ACP file-write authorization: {first_write:?}"
+        );
+        assert!(
+            second_write.is_ok(),
+            "ACP Client FS writes must not consume one-time Core authorization: {second_write:?}"
+        );
+        assert_eq!(read.unwrap()["content"], "second");
+        assert_eq!(persisted.as_deref(), Some("second"));
     }
 
     #[tokio::test]
@@ -9636,6 +9722,79 @@ while IFS= read -r ignored; do :; done
             approval_result(&request, "reject").expect("denial should map"),
             json!({"outcome": {"outcome": "selected", "optionId": "reject"}})
         );
+    }
+
+    #[test]
+    fn acp_bypass_modes_auto_allow_protocol_permission_requests() {
+        let automatic = [
+            (AdapterKind::OpencodeCli, json!({"permission": "allow"})),
+            (AdapterKind::CopilotCli, json!({"allow_all": "on"})),
+            (AdapterKind::KiroCli, json!({"trust_all_tools": "on"})),
+            (
+                AdapterKind::QoderCli,
+                json!({"permission_mode": "bypass_permissions"}),
+            ),
+            (
+                AdapterKind::CodebuddyCli,
+                json!({"permission_mode": "bypassPermissions"}),
+            ),
+            (AdapterKind::QwenCode, json!({"approval_mode": "yolo"})),
+            (
+                AdapterKind::TraeCnCli,
+                json!({"permission_mode": "bypass_permissions"}),
+            ),
+            (
+                AdapterKind::CursorAgent,
+                json!({"execution_mode": "agent", "approval_policy": "force"}),
+            ),
+            (AdapterKind::KimiCodeCli, json!({"permission_mode": "yolo"})),
+            (
+                AdapterKind::GrokBuild,
+                json!({"permission_mode": "bypassPermissions"}),
+            ),
+        ];
+        for (adapter_kind, permissions) in automatic {
+            assert!(
+                automatically_allows_permission_requests(adapter_kind, &permissions),
+                "{} bypass mode must not create a second Core authorization",
+                adapter_kind.as_str()
+            );
+        }
+
+        let interactive = [
+            (AdapterKind::OpencodeCli, json!({"permission": "ask"})),
+            (AdapterKind::CopilotCli, json!({"allow_all": "off"})),
+            (AdapterKind::KiroCli, json!({"trust_all_tools": "off"})),
+            (AdapterKind::QoderCli, json!({"permission_mode": "default"})),
+            (
+                AdapterKind::CodebuddyCli,
+                json!({"permission_mode": "default"}),
+            ),
+            (AdapterKind::QwenCode, json!({"approval_mode": "default"})),
+            (
+                AdapterKind::TraeCnCli,
+                json!({"permission_mode": "default"}),
+            ),
+            (
+                AdapterKind::CursorAgent,
+                json!({"execution_mode": "agent", "approval_policy": "default"}),
+            ),
+            (
+                AdapterKind::KimiCodeCli,
+                json!({"permission_mode": "default"}),
+            ),
+            (
+                AdapterKind::GrokBuild,
+                json!({"permission_mode": "default"}),
+            ),
+        ];
+        for (adapter_kind, permissions) in interactive {
+            assert!(
+                !automatically_allows_permission_requests(adapter_kind, &permissions),
+                "{} interactive mode must preserve its ACP permission request",
+                adapter_kind.as_str()
+            );
+        }
     }
 
     #[test]
