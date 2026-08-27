@@ -20,16 +20,17 @@ ChannelTurnRequest、群 roster 和 ChannelDelivery 的字段与状态语义。C
 | --- | --- |
 | ProjectBinding create/update/archive | `local_user` |
 | 渠道会话 bind/switch | `local_user` |
-| 连接/断开账号、停用队员 Bot | 本机主人经 typed Desktop API |
+| 连接/断开账号、发布/停用队员 Bot、选择兼容发布 | 本机主人经 typed Desktop API |
 | inbound observe/finalize、roster、Host tick、delivery settle | `feishu-channel-host` System component |
 | Camp membership source mutation | `channel-membership-sync` + exact `feishu` source binding/generation |
 
 `ExternalPrincipal` 没有上述管理能力。不存在 authorized user、sender allowlist、项目申请或飞书侧项目选择。
 绑定会话中的任意成员可发送私聊消息，或在群/话题显式 mention 已发布 Bot。
 
-App Secret 只存于 Electron Main 的 OS `safeStorage`。Core 仅持久化 `credentialRef`；Renderer/API Snapshot
-不得出现 `appSecret`、Cookie、CSRF、token、原始 credential payload、transport conversation 或 pending aggregate。
-系统加密不可用时 credential write 必须失败，不能降级为明文。
+Developer Session Cookie jar 与 App Secret 只存于 Electron Main，并以 OS `safeStorage` 加密。Core 仅持久化
+Developer Identity 的摘要/显示字段和每 Bot `credentialRef`；Renderer/API Snapshot 不得出现 `userId`、
+`appSecret`、Cookie、CSRF、token、原始 credential payload、transport conversation 或 pending aggregate。系统加密
+不可用时 Session/credential write 必须失败，不能降级为明文。
 
 ## 2. ProjectBinding 与渠道会话
 
@@ -85,21 +86,47 @@ ExternalPrincipal、ChannelTurnRequest、Camp、CampMessage、CampTurn 或 Agent
 
 ## 3. 飞书账号与队员 Bot
 
-一个 `feishu_account` 可以处于 `connected | disconnected | session_expired`。新 account upsert 会在同一 Core
-事务把此前 connected account 变为 disconnected；已发布 Bot 不迁移、不停用，并继续使用自己的 credential 和
-WebSocket。显式 disconnect 只结束当前 provisioning account/credential，不影响已发布 Bot。
+`feishu_account` 表达 Developer Identity，不表达 App：`accountId` 是
+`digest(brand + tenantId + userId)`，并保存 `userIdDigest + tenantId + userName + email? + tenantName + brand +
+status + version + connectedAt + lastVerifiedAt`。状态为 `connected | disconnected | session_expired`。缺少真实
+`userId/userName/tenantId/tenantName` 时不能 upsert connected；同一 `accountId` 的 identity digest 不可变化。
 
-每个 Agent 至多一个 `feishu_member_bot`，每个 `appId` 和 `credentialRef` 唯一。当前实现使用官方设备注册：
+连接只有以下状态：
 
 ```text
-preparing -> awaiting_scan -> authorizing -> connecting -> terminal
+preparing -> awaiting_scan -> scan_confirmed -> inspecting_identity -> connected
+                                                         \-> expired | cancelled | failed
 ```
 
-二维码 attempt 只有最新 exact `attemptId` 可以更新 UI；取消/关闭 abort poll，迟到回调不提交账号或 Secret。
-连接二维码建立后续发布目标；每名队员仍以官方单应用创建二维码确认。一次只能进行一个 attempt。SDK 的
-`appPreset` 冻结队员名称/描述，最小 addons 包含 Bot、消息读写、群信息/成员和 receive/bot roster 事件。官方
-注册的 avatar preset 只接受可由确认页访问的 URL；Rovai 不把本机受控头像发布到公网，因此头像在飞书确认页
-由主人确认，Renderer 不宣称已经上传队员头像。
+二维码 attempt 的 purpose 是 `account_login`，只登录开放平台并保存 Developer Session，不创建 App、Secret 或
+WebSocket。只有最新 exact `attemptId` 可以更新 UI；取消/切换会 abort 旧窗口并废弃迟到回调。新 identity upsert
+在同一 Core 事务把此前 connected account 变为 disconnected。显式 disconnect 只删除 Developer Session 并断开
+当前 account；已有 Bot credential、映射和 WebSocket 不删除、不迁移、不停用。
+
+每次普通发布先持久化 `MemberBotPublicationIntent`：
+
+```text
+created -> session_verified -> app_created -> credentials_read
+        -> bot_configured -> version_published -> connection_verified -> completed
+        \-> failed_recoverable | failed_unknown_remote_state
+```
+
+Intent 冻结 `agentId + accountId + expectedUserIdDigest + expectedTenantId + requestedAppName + provisioningMode`，所有
+推进带 exact version。普通 `developer_session` 模式在创建前复核当前 Session 的原始 `userId + tenantId`，再使用
+官方应用注册 begin/poll 协议，并把确认 URL 加载到同一已登录的 Electron Session；Renderer 不接收二维码。确认页
+返回 App credential 后，平台 preset/addons 已应用 Bot、名称/描述、最小 scopes 与 receive/roster 事件。协议不返回
+外部 version ID，因此 `publishedVersionId` 可以为空，但 Core 的 `version_published` 只在注册确认成功后推进。
+
+确认页若跳到登录、身份漂移或 Session 失效，普通发布必须失败并要求重新连接，不能调用兼容 API。SDK
+`registerApp` 只用于主人显式选择 `compat_registration`；其 QR purpose 是
+`member_bot_compat_registration`，每名队员单独扫码，且结果不覆盖 Developer Identity。
+
+一旦 intent 持有 `remoteAppId`，后续状态不得改成另一个 App。App Secret 写入失败，或网络中断导致无法证明远端是否
+创建成功时，写 `failed_unknown_remote_state + failureCode` 并锁住自动再创建；持久 credential 已存在时才允许
+`failed_recoverable` 继续验证同一 App。Main 重启按这些事实收敛，不从 UI 临时进度推断。
+
+官方注册的 avatar preset 只接受确认页可访问的 URL；Rovai 不把本机受控头像发布到公网，因此本机头像仅作确认预览，
+Renderer 不宣称已经上传。
 
 Bot 只有 WebSocket 首次握手与 identity 回读成功、credential 已写入 safeStorage 且 Core upsert 成功后才成为
 `published`。Main 启动时为所有 published Bot 读取 exact credential 并独立恢复长连接；单连接失败只改变该 Bot
@@ -237,8 +264,9 @@ identity 和 Core transport aggregation阻止再次触发。
 
 ## 8. Snapshot 与恢复
 
-Core Host snapshot schema 1 包含 account、member bots、ProjectBindings、unbound/bound conversations，以及仅供
-Main 的 `transportConversations` 与 `pendingAggregates`。Main 对 Renderer 投影 schema 2，必须删除后两项与所有
+Core Host snapshot schema 1 包含 Developer Identity account、member bots、publication intents、ProjectBindings、
+unbound/bound conversations，以及仅供 Main 的 `transportConversations` 与 `pendingAggregates`。Main 对 Renderer
+投影 schema 3，只保留账号显示字段、每 Bot 状态和当前 provisioning 进度，必须删除后两项、原始 userId 与所有
 credential refs。
 
 启动恢复依次：恢复所有 published Bot 长连接；周期性重取已知父群 roster；finalize 已 ready 的 collecting
@@ -247,9 +275,12 @@ aggregate；Host tick 终结超时 aggregate、投影 request output、完成 te
 
 ## 9. Data Contract
 
-Migration 113 从 `Data Contract v1.25 / projection schema 66` 升到 `v1.26 / schema 67`，增加本合同的 Core 表、
-`external_principal` CampMessage author、ContextManifest 22 pairing 和 Formatter 22 new-write trigger。它逐字保留
-既有 Camp、消息、Manifest 和 terminal evidence，不把历史飞书消息回填为渠道事实。
+Migration 113 从 `Data Contract v1.25 / projection schema 66` 升到 `v1.26 / schema 67`，增加基础渠道表、
+`external_principal` CampMessage author、ContextManifest 22 pairing 和 Formatter 22 new-write trigger。Migration 114
+再升到 `Data Contract v1.27 / projection schema 68`，给 `feishu_account` 增加真实 Developer Identity/Session 时间字段，
+并增加持久 publication intent。旧 controller account 记录全部退出 connected；没有 Bot 引用的错误记录删除，有已发布
+Bot 引用的旧记录仅作历史外键保留，不能再投影为当前账号。两次迁移均保留既有 Camp、消息、Manifest、Bot credential
+reference 与 terminal evidence，不自动删除远端测试 App。
 
 ## References
 

@@ -142,23 +142,61 @@ Host 只提交所有 published Bot 的完整 `isInChat` 快照。普通群首次
 
 ### 决定
 
-Main 使用 OS safeStorage 保存每 App Secret，Core 只保存 credential ref 和业务身份。公开输出和状态先由 Core 从
+Main 使用 OS safeStorage 保存 Developer Session Cookie jar 与每 App Secret，Core 只保存 identity 摘要、
+credential ref 和业务身份。公开输出和状态先由 Core 从
 权威请求/CampMessage 投影为 durable ChannelDelivery；Main 使用 lease 领取、发送并回写结果。只有 Core 已提交
 内容可以外发，实际作者使用其独立 Bot，不能用另一个 Bot 冒充。Renderer snapshot 删除 credential 和 Host-only
 恢复字段。
 
-官方 SDK 的单应用注册是当前可验证实现：连接账号和发布每名队员都使用互斥 QR attempt；不伪造一次扫码后台
-批量创建能力。当前规范见 [飞书渠道架构](../../architecture/feishu-channel.md#输出恢复与秘密)和
+Developer Session 与 App provisioning 的进一步边界由 [V1.30-D06](#v1-30-d06)修正；本决定继续拥有
+Main/Core/Renderer 的秘密和 Outbox 分工。当前规范见 [飞书渠道架构](../../architecture/feishu-channel.md#输出恢复与秘密)和
 [Feishu Channel v1](../../contracts/feishu-channel-v1.md#7-channeldelivery)。
 
 ### 后果
 
 - 飞书不可用不回滚或丢失 Core CampMessage；
 - App 间故障隔离，重启后可恢复连接、queue card 和 Outbox；
-- 当前交互诚实显示每个官方注册二维码，未来若引入受支持的账号级 provisioning API，需要新的凭据/协议决定。
+- 断开 Developer Session 不删除已发布 Bot credential，也不停止其独立长连接。
 
 ### 被拒绝方案
 
 - **Secret 存 SQLite 或返回 Renderer：** 扩大日志、诊断和 UI 注入暴露面；
-- **直接转发 Runtime stream：** 可能泄漏推理/工具输出且没有公共消息 authority；
-- **未验证的开放平台后台 Cookie 自动化：** 私有接口和 CSRF 变化无法形成稳定产品合同。
+- **直接转发 Runtime stream：** 可能泄漏推理/工具输出且没有公共消息 authority。
+
+<a id="v1-30-d06"></a>
+## V1.30-D06：Developer Session 与队员 App credential 分离，普通发布复用账号会话
+
+### 背景
+
+把 `registerApp` 创建出的“Rovai 渠道管理”App 当成账号连接，会把 App credential 误当 Developer Identity；连接
+本身会意外新增远端应用，用户名/企业只能写占位值，而每名队员发布仍要重新扫码。另一方面，直接调用开放平台后台
+私有 CSRF 接口虽能隐藏交互，却没有稳定公开合同。
+
+### 决定
+
+连接只建立独立 Developer Web Session，读取真实 `userId + userName + tenantId + tenantName + brand`，并用
+`safeStorage` 加密 Cookie jar；不创建 App、Secret 或 Bot。Core account 使用本地不透明 identity ID 与 digest。
+
+普通发布由 `FeishuMemberBotProvisioner` 复核原始 user/tenant，调用官方应用注册 begin/poll 协议，并把官方确认 URL
+加载到同一已登录 Session。正常路径不调用 SDK `registerApp`、不向 Renderer 产生二维码；若页面跳回登录或身份
+漂移则 fail closed。SDK `registerApp` 只保留为主人明确选择的逐队员兼容扫码流程，不得成为静默 fallback。
+
+每次创建前写持久 `MemberBotPublicationIntent`；远端结果未知时锁定自动重试，已冻结 App ID/credential ref 不可换成
+第二个 App。当前规范见[飞书渠道架构](../../architecture/feishu-channel.md#开发者会话与队员发布)、
+[Feishu Channel v1](../../contracts/feishu-channel-v1.md#3-飞书账号与队员-bot)和
+[渠道设置](../../ui/components/channel-settings.md#渠道连接与二维码)。
+
+### 后果
+
+- 一次账号登录可服务多个队员发布；连接与发布是两个独立生命周期；
+- 真实 identity 能在切换/失效时做 exact user/tenant 检查，Renderer 不再显示假 owner/tenant；
+- 正常发布仍需要主人在官方确认窗口核对，但不会要求再次扫码；
+- Web 页面身份读取是版本敏感的可替换 Adapter，真实租户效果必须独立验收，不能由本地测试声明成功。
+
+### 被拒绝方案
+
+- **保留或改名 controller App：** 它既不是账号 Session，也没有渠道运行职责；
+- **连接/发布共用 `registerApp`：** 会把每次应用注册误投影为账号授权；
+- **普通失败后自动弹兼容二维码：** 改变用户选择，并可能在未知远端状态下重复建 App；
+- **调用开发者后台私有 Cookie/CSRF 创建接口：** 页面内部接口变化和 CSRF 无法形成可维护合同；
+- **用占位 identity 标记 connected：** 无法证明发布发生在预期 user/tenant。

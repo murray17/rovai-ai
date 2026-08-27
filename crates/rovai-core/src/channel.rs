@@ -91,9 +91,12 @@ impl DomainCommand for BindChannelConversationCommand {
 #[serde(rename_all = "camelCase")]
 pub struct UpsertFeishuAccountCommand {
     pub account_id: String,
-    pub identity_digest: String,
-    pub display_name: String,
+    pub user_id_digest: String,
+    pub tenant_id: String,
+    pub user_name: String,
+    pub email: Option<String>,
     pub tenant_name: String,
+    pub brand: String,
 }
 
 impl sealed::Sealed for UpsertFeishuAccountCommand {}
@@ -106,6 +109,52 @@ impl DomainCommand for UpsertFeishuAccountCommand {
 pub struct DisconnectFeishuAccountCommand {
     pub account_id: String,
     pub expected_version: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExpireFeishuAccountCommand {
+    pub account_id: String,
+    pub expected_version: i64,
+}
+
+impl sealed::Sealed for ExpireFeishuAccountCommand {}
+impl DomainCommand for ExpireFeishuAccountCommand {
+    const TYPE: &'static str = "feishu_account.expire";
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateMemberBotPublicationIntentCommand {
+    pub publication_intent_id: String,
+    pub account_id: String,
+    pub agent_id: String,
+    pub expected_user_id_digest: String,
+    pub expected_tenant_id: String,
+    pub requested_app_name: String,
+    pub provisioning_mode: String,
+}
+
+impl sealed::Sealed for CreateMemberBotPublicationIntentCommand {}
+impl DomainCommand for CreateMemberBotPublicationIntentCommand {
+    const TYPE: &'static str = "feishu_member_bot_publication_intent.create";
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AdvanceMemberBotPublicationIntentCommand {
+    pub publication_intent_id: String,
+    pub expected_version: i64,
+    pub state: String,
+    pub remote_app_id: Option<String>,
+    pub credential_ref: Option<String>,
+    pub last_completed_step: Option<String>,
+    pub failure_code: Option<String>,
+}
+
+impl sealed::Sealed for AdvanceMemberBotPublicationIntentCommand {}
+impl DomainCommand for AdvanceMemberBotPublicationIntentCommand {
+    const TYPE: &'static str = "feishu_member_bot_publication_intent.advance";
 }
 
 impl sealed::Sealed for DisconnectFeishuAccountCommand {}
@@ -312,10 +361,36 @@ pub struct PendingChannelAggregateView {
 #[serde(rename_all = "camelCase")]
 pub struct FeishuAccountView {
     pub account_id: String,
-    pub display_name: String,
+    pub user_id_digest: String,
+    pub tenant_id: String,
+    pub user_name: String,
+    pub email: Option<String>,
     pub tenant_name: String,
+    pub brand: String,
     pub status: String,
     pub version: i64,
+    pub connected_at: String,
+    pub last_verified_at: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MemberBotPublicationIntentView {
+    pub publication_intent_id: String,
+    pub agent_id: String,
+    pub account_id: String,
+    pub expected_user_id_digest: String,
+    pub expected_tenant_id: String,
+    pub requested_app_name: String,
+    pub provisioning_mode: String,
+    pub state: String,
+    pub remote_app_id: Option<String>,
+    pub credential_ref: Option<String>,
+    pub last_completed_step: Option<String>,
+    pub failure_code: Option<String>,
+    pub version: i64,
+    pub created_at: String,
+    pub updated_at: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -337,6 +412,7 @@ pub struct FeishuChannelSnapshot {
     pub schema_version: i64,
     pub account: Option<FeishuAccountView>,
     pub member_bots: Vec<FeishuMemberBotView>,
+    pub publication_intents: Vec<MemberBotPublicationIntentView>,
     pub project_bindings: Vec<ProjectBindingView>,
     pub unbound_conversations: Vec<UnboundChannelConversationView>,
     pub conversation_bindings: Vec<ChannelConversationBindingView>,
@@ -472,8 +548,16 @@ impl ChannelService {
         let account = connection
             .query_row(
                 r#"
-                SELECT id, display_name, tenant_name, status, version
+                SELECT id, user_id_digest, tenant_id, user_name, email,
+                       tenant_name, brand, status, version,
+                       connected_at, last_verified_at
                 FROM feishu_account
+                WHERE user_id_digest IS NOT NULL
+                  AND tenant_id IS NOT NULL
+                  AND user_name IS NOT NULL
+                  AND brand IS NOT NULL
+                  AND connected_at IS NOT NULL
+                  AND last_verified_at IS NOT NULL
                 ORDER BY CASE status WHEN 'connected' THEN 0 ELSE 1 END,
                          updated_at DESC, id
                 LIMIT 1
@@ -482,10 +566,16 @@ impl ChannelService {
                 |row| {
                     Ok(FeishuAccountView {
                         account_id: row.get(0)?,
-                        display_name: row.get(1)?,
-                        tenant_name: row.get(2)?,
-                        status: row.get(3)?,
-                        version: row.get(4)?,
+                        user_id_digest: row.get(1)?,
+                        tenant_id: row.get(2)?,
+                        user_name: row.get(3)?,
+                        email: row.get(4)?,
+                        tenant_name: row.get(5)?,
+                        brand: row.get(6)?,
+                        status: row.get(7)?,
+                        version: row.get(8)?,
+                        connected_at: row.get(9)?,
+                        last_verified_at: row.get(10)?,
                     })
                 },
             )
@@ -509,6 +599,37 @@ impl ChannelService {
                     status: row.get(5)?,
                     failure_code: row.get(6)?,
                     version: row.get(7)?,
+                })
+            },
+        )?;
+        let publication_intents = query_rows(
+            connection,
+            r#"
+            SELECT id, agent_id, account_id, expected_user_id_digest,
+                   expected_tenant_id, requested_app_name, provisioning_mode,
+                   state, remote_app_id, credential_ref, last_completed_step,
+                   failure_code, version, created_at, updated_at
+            FROM feishu_member_bot_publication_intent
+            ORDER BY created_at DESC, id
+            "#,
+            [],
+            |row| {
+                Ok(MemberBotPublicationIntentView {
+                    publication_intent_id: row.get(0)?,
+                    agent_id: row.get(1)?,
+                    account_id: row.get(2)?,
+                    expected_user_id_digest: row.get(3)?,
+                    expected_tenant_id: row.get(4)?,
+                    requested_app_name: row.get(5)?,
+                    provisioning_mode: row.get(6)?,
+                    state: row.get(7)?,
+                    remote_app_id: row.get(8)?,
+                    credential_ref: row.get(9)?,
+                    last_completed_step: row.get(10)?,
+                    failure_code: row.get(11)?,
+                    version: row.get(12)?,
+                    created_at: row.get(13)?,
+                    updated_at: row.get(14)?,
                 })
             },
         )?;
@@ -654,6 +775,7 @@ impl ChannelService {
             schema_version: 1,
             account,
             member_bots,
+            publication_intents,
             project_bindings,
             unbound_conversations,
             conversation_bindings,
@@ -1007,9 +1129,14 @@ impl ChannelService {
         envelope: &CommandEnvelope<UpsertFeishuAccountCommand>,
     ) -> Result<CommandExecution> {
         validate_nonempty(&envelope.payload.account_id, "accountId")?;
-        validate_digest(&envelope.payload.identity_digest, "identityDigest")?;
-        let display_name = normalize_display_name(&envelope.payload.display_name)?;
+        validate_digest(&envelope.payload.user_id_digest, "userIdDigest")?;
+        validate_nonempty(&envelope.payload.tenant_id, "tenantId")?;
+        let user_name = normalize_display_name(&envelope.payload.user_name)?;
+        let email = normalize_optional_email(envelope.payload.email.as_deref())?;
         let tenant_name = normalize_display_name(&envelope.payload.tenant_name)?;
+        if !matches!(envelope.payload.brand.as_str(), "feishu" | "lark") {
+            anyhow::bail!("brand must be feishu or lark");
+        }
         self.gateway.execute(database, envelope, |transaction| {
             if !is_channel_host(&envelope.actor) {
                 return Ok(rejected(
@@ -1019,12 +1146,13 @@ impl ChannelService {
             }
             let conflicting_identity = transaction
                 .query_row(
-                    "SELECT identity_digest FROM feishu_account WHERE id = ?1",
+                    "SELECT user_id_digest FROM feishu_account WHERE id = ?1",
                     [&envelope.payload.account_id],
-                    |row| row.get::<_, String>(0),
+                    |row| row.get::<_, Option<String>>(0),
                 )
                 .optional()?
-                .is_some_and(|digest| digest != envelope.payload.identity_digest);
+                .flatten()
+                .is_some_and(|digest| digest != envelope.payload.user_id_digest);
             if conflicting_identity {
                 return Ok(rejected(
                     "feishu_account.identity_conflict",
@@ -1045,21 +1173,42 @@ impl ChannelService {
                 r#"
                 INSERT INTO feishu_account(
                     id, identity_digest, display_name, tenant_name,
-                    status, version, created_at, updated_at, disconnected_at
-                ) VALUES (?1, ?2, ?3, ?4, 'connected', 1, ?5, ?5, NULL)
+                    status, version, created_at, updated_at, disconnected_at,
+                    user_id_digest, tenant_id, user_name, email, brand,
+                    connected_at, last_verified_at
+                ) VALUES (
+                    ?1, ?2, ?3, ?4, 'connected', 1, ?8, ?8, NULL,
+                    ?2, ?5, ?3, ?6, ?7, ?8, ?8
+                )
                 ON CONFLICT(id) DO UPDATE SET
+                    identity_digest = excluded.identity_digest,
                     display_name = excluded.display_name,
                     tenant_name = excluded.tenant_name,
+                    user_id_digest = excluded.user_id_digest,
+                    tenant_id = excluded.tenant_id,
+                    user_name = excluded.user_name,
+                    email = excluded.email,
+                    brand = excluded.brand,
                     status = 'connected',
                     disconnected_at = NULL,
+                    connected_at = CASE
+                        WHEN feishu_account.status = 'connected'
+                         AND feishu_account.connected_at IS NOT NULL
+                        THEN feishu_account.connected_at
+                        ELSE excluded.connected_at
+                    END,
+                    last_verified_at = excluded.last_verified_at,
                     version = feishu_account.version + 1,
                     updated_at = excluded.updated_at
                 "#,
                 params![
                     envelope.payload.account_id,
-                    envelope.payload.identity_digest,
-                    display_name,
+                    envelope.payload.user_id_digest,
+                    user_name,
                     tenant_name,
+                    envelope.payload.tenant_id,
+                    email,
+                    envelope.payload.brand,
                     now,
                 ],
             )?;
@@ -1121,6 +1270,325 @@ impl ChannelService {
                 "feishu_account.disconnected",
                 json!({ "accountId": envelope.payload.account_id, "version": version + 1 }),
                 None,
+            ))
+        })
+    }
+
+    pub fn expire_feishu_account(
+        &self,
+        database: &mut Database,
+        envelope: &CommandEnvelope<ExpireFeishuAccountCommand>,
+    ) -> Result<CommandExecution> {
+        self.gateway.execute(database, envelope, |transaction| {
+            if !is_channel_host(&envelope.actor) {
+                return Ok(rejected(
+                    "channel.host_required",
+                    "Only the trusted Feishu Channel Host can expire a developer session",
+                ));
+            }
+            let version = transaction
+                .query_row(
+                    "SELECT version FROM feishu_account WHERE id = ?1 AND status = 'connected'",
+                    [&envelope.payload.account_id],
+                    |row| row.get::<_, i64>(0),
+                )
+                .optional()?;
+            let Some(version) = version else {
+                return Ok(rejected(
+                    "feishu_account.not_connected",
+                    "Connected Feishu account does not exist",
+                ));
+            };
+            if version != envelope.payload.expected_version {
+                return Ok(version_conflict(version));
+            }
+            let now = Utc::now().to_rfc3339();
+            transaction.execute(
+                r#"
+                UPDATE feishu_account
+                SET status = 'session_expired', disconnected_at = ?2,
+                    version = version + 1, updated_at = ?2
+                WHERE id = ?1 AND version = ?3
+                "#,
+                params![envelope.payload.account_id, now, version],
+            )?;
+            Ok(CommandHandlerResult::applied(
+                "feishu_account.session_expired",
+                json!({ "accountId": envelope.payload.account_id, "version": version + 1 }),
+                None,
+            ))
+        })
+    }
+
+    pub fn create_member_bot_publication_intent(
+        &self,
+        database: &mut Database,
+        envelope: &CommandEnvelope<CreateMemberBotPublicationIntentCommand>,
+    ) -> Result<CommandExecution> {
+        for (value, field) in [
+            (
+                &envelope.payload.publication_intent_id,
+                "publicationIntentId",
+            ),
+            (&envelope.payload.account_id, "accountId"),
+            (&envelope.payload.agent_id, "agentId"),
+            (&envelope.payload.expected_tenant_id, "expectedTenantId"),
+        ] {
+            validate_nonempty(value, field)?;
+        }
+        validate_digest(
+            &envelope.payload.expected_user_id_digest,
+            "expectedUserIdDigest",
+        )?;
+        let requested_app_name = normalize_display_name(&envelope.payload.requested_app_name)?;
+        if !matches!(
+            envelope.payload.provisioning_mode.as_str(),
+            "developer_session" | "compat_registration"
+        ) {
+            anyhow::bail!("provisioningMode must be developer_session or compat_registration");
+        }
+        self.gateway.execute(database, envelope, |transaction| {
+            if !is_channel_host(&envelope.actor) {
+                return Ok(rejected(
+                    "channel.host_required",
+                    "Only the trusted Feishu Channel Host can create publication intents",
+                ));
+            }
+            let account_matches: bool = transaction.query_row(
+                r#"
+                SELECT EXISTS(
+                    SELECT 1 FROM feishu_account
+                    WHERE id = ?1 AND status = 'connected'
+                      AND user_id_digest = ?2 AND tenant_id = ?3
+                )
+                "#,
+                params![
+                    envelope.payload.account_id,
+                    envelope.payload.expected_user_id_digest,
+                    envelope.payload.expected_tenant_id,
+                ],
+                |row| row.get(0),
+            )?;
+            if !account_matches {
+                return Ok(rejected(
+                    "feishu_account.identity_mismatch",
+                    "Publication intent requires the exact connected developer identity",
+                ));
+            }
+            let agent_present: bool = transaction.query_row(
+                "SELECT EXISTS(SELECT 1 FROM agent_profile WHERE id = ?1 AND profile_status = 'present')",
+                [&envelope.payload.agent_id],
+                |row| row.get(0),
+            )?;
+            if !agent_present {
+                return Ok(rejected(
+                    "agent.unavailable",
+                    "Bot publication requires a present AgentProfile",
+                ));
+            }
+            let has_active: bool = transaction.query_row(
+                r#"
+                SELECT EXISTS(
+                    SELECT 1 FROM feishu_member_bot_publication_intent
+                    WHERE agent_id = ?1
+                      AND state NOT IN (
+                        'completed', 'failed_recoverable'
+                      )
+                )
+                "#,
+                [&envelope.payload.agent_id],
+                |row| row.get(0),
+            )?;
+            if has_active {
+                return Ok(rejected(
+                    "feishu_publication_intent.active_conflict",
+                    "This member already has an active publication intent",
+                ));
+            }
+            let now = Utc::now().to_rfc3339();
+            transaction.execute(
+                r#"
+                INSERT INTO feishu_member_bot_publication_intent(
+                    id, agent_id, account_id, expected_user_id_digest,
+                    expected_tenant_id, requested_app_name, provisioning_mode,
+                    state, remote_app_id, credential_ref, last_completed_step,
+                    failure_code, version, created_at, updated_at
+                ) VALUES (
+                    ?1, ?2, ?3, ?4, ?5, ?6, ?7,
+                    'created', NULL, NULL, NULL, NULL, 1, ?8, ?8
+                )
+                "#,
+                params![
+                    envelope.payload.publication_intent_id,
+                    envelope.payload.agent_id,
+                    envelope.payload.account_id,
+                    envelope.payload.expected_user_id_digest,
+                    envelope.payload.expected_tenant_id,
+                    requested_app_name,
+                    envelope.payload.provisioning_mode,
+                    now,
+                ],
+            )?;
+            Ok(CommandHandlerResult::applied(
+                "feishu_member_bot_publication_intent.created",
+                json!({
+                    "publicationIntentId": envelope.payload.publication_intent_id,
+                    "version": 1,
+                }),
+                Some(EntityReference {
+                    entity_type: "feishu_member_bot_publication_intent".to_string(),
+                    entity_id: envelope.payload.publication_intent_id.clone(),
+                }),
+            ))
+        })
+    }
+
+    pub fn advance_member_bot_publication_intent(
+        &self,
+        database: &mut Database,
+        envelope: &CommandEnvelope<AdvanceMemberBotPublicationIntentCommand>,
+    ) -> Result<CommandExecution> {
+        validate_nonempty(
+            &envelope.payload.publication_intent_id,
+            "publicationIntentId",
+        )?;
+        validate_publication_intent_state(&envelope.payload.state)?;
+        if let Some(app_id) = &envelope.payload.remote_app_id {
+            validate_nonempty(app_id, "remoteAppId")?;
+        }
+        if let Some(credential_ref) = &envelope.payload.credential_ref {
+            validate_nonempty(credential_ref, "credentialRef")?;
+        }
+        if let Some(step) = &envelope.payload.last_completed_step {
+            validate_nonempty(step, "lastCompletedStep")?;
+        }
+        if let Some(code) = &envelope.payload.failure_code {
+            validate_nonempty(code, "failureCode")?;
+        }
+        self.gateway.execute(database, envelope, |transaction| {
+            if !is_channel_host(&envelope.actor) {
+                return Ok(rejected(
+                    "channel.host_required",
+                    "Only the trusted Feishu Channel Host can advance publication intents",
+                ));
+            }
+            let current = transaction
+                .query_row(
+                    r#"
+                    SELECT state, remote_app_id, credential_ref, version
+                    FROM feishu_member_bot_publication_intent
+                    WHERE id = ?1
+                    "#,
+                    [&envelope.payload.publication_intent_id],
+                    |row| {
+                        Ok((
+                            row.get::<_, String>(0)?,
+                            row.get::<_, Option<String>>(1)?,
+                            row.get::<_, Option<String>>(2)?,
+                            row.get::<_, i64>(3)?,
+                        ))
+                    },
+                )
+                .optional()?;
+            let Some((current_state, current_app_id, current_credential_ref, version)) = current
+            else {
+                return Ok(rejected(
+                    "feishu_publication_intent.not_found",
+                    "Publication intent does not exist",
+                ));
+            };
+            if version != envelope.payload.expected_version {
+                return Ok(version_conflict(version));
+            }
+            if !publication_intent_transition_allowed(&current_state, &envelope.payload.state) {
+                return Ok(rejected(
+                    "feishu_publication_intent.invalid_transition",
+                    "Publication intent transition is not allowed",
+                ));
+            }
+            if current_app_id.is_some()
+                && envelope.payload.remote_app_id.is_some()
+                && current_app_id != envelope.payload.remote_app_id
+            {
+                return Ok(rejected(
+                    "feishu_publication_intent.remote_app_conflict",
+                    "Publication intent cannot change its remote App identity",
+                ));
+            }
+            if current_credential_ref.is_some()
+                && envelope.payload.credential_ref.is_some()
+                && current_credential_ref != envelope.payload.credential_ref
+            {
+                return Ok(rejected(
+                    "feishu_publication_intent.credential_conflict",
+                    "Publication intent cannot change its credential reference",
+                ));
+            }
+            let remote_app_id = envelope.payload.remote_app_id.clone().or(current_app_id);
+            let credential_ref = envelope
+                .payload
+                .credential_ref
+                .clone()
+                .or(current_credential_ref);
+            if publication_intent_requires_app(&envelope.payload.state) && remote_app_id.is_none() {
+                return Ok(rejected(
+                    "feishu_publication_intent.remote_app_required",
+                    "This publication state requires a frozen remote App ID",
+                ));
+            }
+            if matches!(
+                envelope.payload.state.as_str(),
+                "credentials_read"
+                    | "bot_configured"
+                    | "version_published"
+                    | "connection_verified"
+                    | "completed"
+            ) && credential_ref.is_none()
+            {
+                return Ok(rejected(
+                    "feishu_publication_intent.credential_required",
+                    "This publication state requires a frozen credential reference",
+                ));
+            }
+            if envelope.payload.state.starts_with("failed_")
+                && envelope.payload.failure_code.is_none()
+            {
+                return Ok(rejected(
+                    "feishu_publication_intent.failure_code_required",
+                    "A failed publication intent requires a failure code",
+                ));
+            }
+            let now = Utc::now().to_rfc3339();
+            transaction.execute(
+                r#"
+                UPDATE feishu_member_bot_publication_intent
+                SET state = ?2, remote_app_id = ?3, credential_ref = ?4,
+                    last_completed_step = ?5, failure_code = ?6,
+                    version = version + 1, updated_at = ?7
+                WHERE id = ?1 AND version = ?8
+                "#,
+                params![
+                    envelope.payload.publication_intent_id,
+                    envelope.payload.state,
+                    remote_app_id,
+                    credential_ref,
+                    envelope.payload.last_completed_step,
+                    envelope.payload.failure_code,
+                    now,
+                    version,
+                ],
+            )?;
+            Ok(CommandHandlerResult::applied(
+                "feishu_member_bot_publication_intent.advanced",
+                json!({
+                    "publicationIntentId": envelope.payload.publication_intent_id,
+                    "state": envelope.payload.state,
+                    "version": version + 1,
+                }),
+                Some(EntityReference {
+                    entity_type: "feishu_member_bot_publication_intent".to_string(),
+                    entity_id: envelope.payload.publication_intent_id.clone(),
+                }),
             ))
         })
     }
@@ -3577,6 +4045,84 @@ fn normalize_display_name(value: &str) -> Result<String> {
     Ok(value)
 }
 
+fn normalize_optional_email(value: Option<&str>) -> Result<Option<String>> {
+    let Some(value) = value else {
+        return Ok(None);
+    };
+    let value = value.trim();
+    if value.is_empty() {
+        return Ok(None);
+    }
+    if value.len() > 320
+        || value.chars().any(char::is_control)
+        || !value.contains('@')
+        || value.starts_with('@')
+        || value.ends_with('@')
+    {
+        anyhow::bail!("email must be a bounded email address");
+    }
+    Ok(Some(value.to_string()))
+}
+
+fn validate_publication_intent_state(value: &str) -> Result<()> {
+    if !matches!(
+        value,
+        "created"
+            | "session_verified"
+            | "app_created"
+            | "credentials_read"
+            | "bot_configured"
+            | "version_published"
+            | "connection_verified"
+            | "completed"
+            | "failed_recoverable"
+            | "failed_unknown_remote_state"
+    ) {
+        anyhow::bail!("unknown member Bot publication intent state");
+    }
+    Ok(())
+}
+
+fn publication_intent_transition_allowed(current: &str, next: &str) -> bool {
+    if current == next {
+        return true;
+    }
+    if matches!(current, "completed" | "failed_unknown_remote_state") {
+        return false;
+    }
+    if matches!(next, "failed_recoverable" | "failed_unknown_remote_state") {
+        return true;
+    }
+    let rank = |state: &str| match state {
+        "created" => Some(0),
+        "session_verified" => Some(1),
+        "app_created" => Some(2),
+        "credentials_read" => Some(3),
+        "bot_configured" => Some(4),
+        "version_published" => Some(5),
+        "connection_verified" => Some(6),
+        "completed" => Some(7),
+        _ => None,
+    };
+    match (rank(current), rank(next)) {
+        (Some(current), Some(next)) => next == current + 1,
+        (None, Some(_)) if current == "failed_recoverable" => true,
+        _ => false,
+    }
+}
+
+fn publication_intent_requires_app(state: &str) -> bool {
+    matches!(
+        state,
+        "app_created"
+            | "credentials_read"
+            | "bot_configured"
+            | "version_published"
+            | "connection_verified"
+            | "completed"
+    )
+}
+
 fn validate_nonempty(value: &str, field: &str) -> Result<()> {
     if value.trim() != value || value.is_empty() || value.len() > 512 {
         anyhow::bail!("{field} must be a bounded canonical value");
@@ -3758,16 +4304,27 @@ mod tests {
     }
 
     fn connect_account(service: &ChannelService, database: &mut Database) {
+        connect_account_with_command_id(service, database, "account");
+    }
+
+    fn connect_account_with_command_id(
+        service: &ChannelService,
+        database: &mut Database,
+        command_id: &str,
+    ) {
         service
             .upsert_feishu_account(
                 database,
                 &host_envelope(
-                    "account",
+                    command_id,
                     UpsertFeishuAccountCommand {
                         account_id: "account_1".to_string(),
-                        identity_digest: format!("sha256:{}", "a".repeat(64)),
-                        display_name: "主人".to_string(),
+                        user_id_digest: format!("sha256:{}", "a".repeat(64)),
+                        tenant_id: "tenant_1".to_string(),
+                        user_name: "主人".to_string(),
+                        email: Some("owner@example.com".to_string()),
                         tenant_name: "测试租户".to_string(),
+                        brand: "feishu".to_string(),
                     },
                 ),
             )
@@ -3916,6 +4473,99 @@ mod tests {
     }
 
     #[test]
+    fn developer_identity_and_unknown_publication_state_are_persistent_core_facts() {
+        let mut database = seeded_runtime_database_owned();
+        let service = ChannelService::default();
+        connect_account(&service, &mut database);
+        let first = service.snapshot(&database).unwrap().account.unwrap();
+        assert_eq!(first.account_id, "account_1");
+        assert_eq!(first.user_id_digest, format!("sha256:{}", "a".repeat(64)));
+        assert_eq!(first.tenant_id, "tenant_1");
+        assert_eq!(first.user_name, "主人");
+        assert_eq!(first.email.as_deref(), Some("owner@example.com"));
+        assert_eq!(first.brand, "feishu");
+
+        connect_account_with_command_id(&service, &mut database, "account-verify");
+        let verified = service.snapshot(&database).unwrap().account.unwrap();
+        assert_eq!(verified.connected_at, first.connected_at);
+        assert!(verified.version > first.version);
+
+        let created = service
+            .create_member_bot_publication_intent(
+                &mut database,
+                &host_envelope(
+                    "publication-create",
+                    CreateMemberBotPublicationIntentCommand {
+                        publication_intent_id: "intent_1".to_string(),
+                        account_id: "account_1".to_string(),
+                        agent_id: "agent_1".to_string(),
+                        expected_user_id_digest: format!("sha256:{}", "a".repeat(64)),
+                        expected_tenant_id: "tenant_1".to_string(),
+                        requested_app_name: "木瓦".to_string(),
+                        provisioning_mode: "developer_session".to_string(),
+                    },
+                ),
+            )
+            .unwrap();
+        assert_eq!(created.result.status, CommandResultStatus::Applied);
+        for (version, state) in [(1, "session_verified"), (2, "failed_unknown_remote_state")] {
+            let failure_code = (state == "failed_unknown_remote_state")
+                .then(|| "registration_transport_lost".to_string());
+            let advanced = service
+                .advance_member_bot_publication_intent(
+                    &mut database,
+                    &host_envelope(
+                        &format!("publication-{state}"),
+                        AdvanceMemberBotPublicationIntentCommand {
+                            publication_intent_id: "intent_1".to_string(),
+                            expected_version: version,
+                            state: state.to_string(),
+                            remote_app_id: None,
+                            credential_ref: None,
+                            last_completed_step: (state == "session_verified")
+                                .then(|| state.to_string()),
+                            failure_code,
+                        },
+                    ),
+                )
+                .unwrap();
+            assert_eq!(advanced.result.status, CommandResultStatus::Applied);
+        }
+        let snapshot = service.snapshot(&database).unwrap();
+        assert_eq!(
+            snapshot.publication_intents[0].state,
+            "failed_unknown_remote_state"
+        );
+        assert_eq!(
+            snapshot.publication_intents[0].failure_code.as_deref(),
+            Some("registration_transport_lost")
+        );
+
+        let duplicate = service
+            .create_member_bot_publication_intent(
+                &mut database,
+                &host_envelope(
+                    "publication-duplicate",
+                    CreateMemberBotPublicationIntentCommand {
+                        publication_intent_id: "intent_2".to_string(),
+                        account_id: "account_1".to_string(),
+                        agent_id: "agent_1".to_string(),
+                        expected_user_id_digest: format!("sha256:{}", "a".repeat(64)),
+                        expected_tenant_id: "tenant_1".to_string(),
+                        requested_app_name: "木瓦".to_string(),
+                        provisioning_mode: "developer_session".to_string(),
+                    },
+                ),
+            )
+            .unwrap();
+        assert_eq!(duplicate.result.status, CommandResultStatus::Rejected);
+        assert_eq!(
+            duplicate.result.code,
+            "feishu_publication_intent.active_conflict"
+        );
+    }
+
+    #[test]
     fn first_observation_only_collects_and_unbound_finalize_creates_no_execution() {
         let mut database = seeded_runtime_database_owned();
         let service = ChannelService::default();
@@ -3926,9 +4576,12 @@ mod tests {
                     "account",
                     UpsertFeishuAccountCommand {
                         account_id: "account_1".to_string(),
-                        identity_digest: format!("sha256:{}", "a".repeat(64)),
-                        display_name: "主人".to_string(),
+                        user_id_digest: format!("sha256:{}", "a".repeat(64)),
+                        tenant_id: "tenant_1".to_string(),
+                        user_name: "主人".to_string(),
+                        email: Some("owner@example.com".to_string()),
                         tenant_name: "测试租户".to_string(),
+                        brand: "feishu".to_string(),
                     },
                 ),
             )

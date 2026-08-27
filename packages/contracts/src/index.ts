@@ -1987,11 +1987,21 @@ export interface ChannelConversationBindingView {
   version: number
 }
 
+export type ChannelQrAttemptPurpose = 'account_login' | 'member_bot_compat_registration'
+
 export interface ChannelQrAttemptView {
   attemptId: string
-  purpose: 'connect' | 'publish'
+  purpose: ChannelQrAttemptPurpose
   agentId: string | null
-  stage: 'preparing' | 'awaiting_scan' | 'authorizing' | 'connecting' | 'failed'
+  stage:
+    | 'preparing'
+    | 'awaiting_scan'
+    | 'scan_confirmed'
+    | 'inspecting_identity'
+    | 'connected'
+    | 'expired'
+    | 'cancelled'
+    | 'failed'
   qrDataUrl: string | null
   expiresAt: string | null
   detail: string
@@ -1999,8 +2009,12 @@ export interface ChannelQrAttemptView {
 
 export interface ChannelAccountView {
   accountId: string
-  displayName: string
+  userName: string
+  email?: string
   tenantName: string
+  brand: 'feishu' | 'lark'
+  connectedAt: string
+  lastVerifiedAt: string
 }
 
 export interface ChannelConnectionView {
@@ -2016,6 +2030,24 @@ export interface ChannelMemberBotView {
   failureCode: string | null
 }
 
+export interface MemberBotProvisioningView {
+  publicationIntentId: string
+  agentId: string
+  stage:
+    | 'verifying_session'
+    | 'creating_app'
+    | 'configuring_bot'
+    | 'configuring_permissions'
+    | 'publishing_version'
+    | 'verifying_connection'
+    | 'completed'
+    | 'failed'
+    | 'unknown_remote_state'
+  detail: string
+  remoteAppId: string | null
+  failureCode: string | null
+}
+
 export interface ChannelProviderView {
   kind: ChannelKind
   displayName: string
@@ -2025,12 +2057,13 @@ export interface ChannelProviderView {
 }
 
 export interface ChannelSettingsSnapshot {
-  schemaVersion: 2
+  schemaVersion: 3
   channels: ChannelProviderView[]
   projectBindings: ProjectBindingView[]
   unboundConversations: UnboundChannelConversationView[]
   conversationBindings: ChannelConversationBindingView[]
   activeQrAttempt: ChannelQrAttemptView | null
+  activeProvisioning: MemberBotProvisioningView | null
 }
 
 export interface ChannelsApi {
@@ -2038,6 +2071,7 @@ export interface ChannelsApi {
   connect(): Promise<ChannelSettingsSnapshot>
   disconnect(): Promise<ChannelSettingsSnapshot>
   publishMemberBot(agentId: string): Promise<ChannelSettingsSnapshot>
+  publishMemberBotCompat(agentId: string): Promise<ChannelSettingsSnapshot>
   retryMemberBot(agentId: string): Promise<ChannelSettingsSnapshot>
   disableMemberBot(agentId: string): Promise<ChannelSettingsSnapshot>
   cancelQrAttempt(attemptId: string): Promise<ChannelSettingsSnapshot>
@@ -2754,6 +2788,9 @@ export type CoreMethod =
   | 'channels.feishu.snapshot'
   | 'channels.feishu.account.upsert'
   | 'channels.feishu.account.disconnect'
+  | 'channels.feishu.account.expire'
+  | 'channels.feishu.publicationIntent.create'
+  | 'channels.feishu.publicationIntent.advance'
   | 'channels.feishu.memberBot.upsert'
   | 'channels.feishu.memberBot.disable'
   | 'channels.conversations.bind'

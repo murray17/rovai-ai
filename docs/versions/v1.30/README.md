@@ -11,9 +11,9 @@ last_updated: 2026-08-27
 
 # Rovai-ai v1.30：飞书队员 Bot 与 Camp 渠道
 
-> 当前状态：Core、Migration、Electron Host、Renderer、自动化和隔离 Desktop 视觉验收均已完成。当前采用飞书
-> 官方 SDK 的单应用设备注册，因此连接与每名队员发布分别需要一次二维码确认；未实现、不伪装未公开的开放
-> 平台后台 Cookie 自动化。
+> 当前状态：Core、Migration、Electron Host、Renderer 与本地自动化已完成账号/发布生命周期纠偏。连接只建立
+> Developer Web Session；普通发布复用该 Session，不向 Renderer 显示二维码；`registerApp` 仅为显式兼容路径。
+> 真实飞书租户的“连接不增 App、连续发布不扫码”仍是发布环境验收项，不由本地自动化代替。
 
 前置版本：[v1.29 Camp 动态队员管理](../v1.29/README.md)已按完成事实转为 historical。
 
@@ -25,15 +25,18 @@ last_updated: 2026-08-27
 
 ## 交付范围
 
-- Migration 113 建立 `Data Contract v1.26 / projection schema 67`，新增 ProjectBinding、ExternalPrincipal、
+- Migration 113 建立基础渠道与 Context 22；Migration 114 把当前合同推进到
+  `Data Contract v1.27 / projection schema 68`，新增真实 Developer Identity 字段与持久 publication intent；
+  Migration 113 新增 ProjectBinding、ExternalPrincipal、
   channel conversation/binding、Feishu account/member Bot、group roster、inbound aggregate、ChannelTurnRequest 和
   ChannelDelivery，并允许 ExternalPrincipal CampMessage author 与 ContextManifest/Formatter 22；
 - ProjectBinding 使用 opaque ID、显示名、kind、canonical path、status/version，只有 `local_user` 能维护或绑定；
   Camp 创建时解析并冻结既有 workspace kind/path；
 - 未绑定消息只记录本地待绑定会话与 TTL transport facts，不建立 Principal、CampMessage、CampTurn 或 Run；绑定
   不回放旧消息，发送者必须重新发送；
-- Feishu Host 使用官方注册二维码、安全存储、独立 App credential 与多 WebSocket registry；账号切换不迁移或
-  停用已发布 Bot，单连接故障隔离，重启恢复 published Bot；
+- Feishu Host 用独立 Web Session 登录并展示真实 user/tenant；普通队员发布复用该 Session 的官方确认页，显式兼容
+  模式才调用 `registerApp` 二维码。Session Cookie 与独立 App credential 分开加密，账号切换/断开不迁移、停用或
+  删除已发布 Bot，单连接故障隔离，重启恢复 published Bot 与 publication intent；
 - 私聊按 receiving App 隔离；普通群一个 Camp；话题按 canonical topic 一个 Camp。群/话题只有显式 mention
   published managed Bot 才进入 Core；
 - 同一 external message 的第一条 observation 只进入 collecting；canonical mentions 完整或全部预期 App 到齐后
@@ -57,8 +60,9 @@ last_updated: 2026-08-27
 - 不让同一 Camp 多个根 CampTurn 并行，不从自由文本/普通 reply 推断 continuation；
 - 不同步未 mention 群历史，不让 Bot 回推触发 A2A；
 - 不自动删除飞书开放平台应用；停用只关闭 Rovai 绑定与本地 credential；
-- 不使用未公开的开放平台后台 Cookie/CSRF 接口模拟“一次扫码创建多个应用”；
-- 官方设备注册只预填 Bot 名称和描述；Rovai 本地受控头像不上传到公网，实际头像由主人在飞书确认页确认；
+- 不调用未公开的开放平台后台 Cookie/CSRF 创建接口；Developer Session Adapter 只负责登录、身份读取和加载官方
+  确认页，页面结构变化仍需真实租户回归；
+- 官方注册确认只接受确认页可访问的头像 URL；Rovai 本地受控头像不上传到公网，实际头像由主人在飞书确认页确认；
 - 当前消息附件一期只冻结名称/类型摘要，不下载为 Camp Attachment；公开输出附件也不回传图片/文件，Outbox
   只发送状态卡、文本和卡片；
 - Core 没有权威公开 delta 时，飞书只显示处理中与最终已提交 CampMessage，不转发 Runtime 原始 stdout/推理。
@@ -72,17 +76,18 @@ ExternalQuote 的确定性 agent projection。Bootstrap、Session Charter、sect
 
 ## 验收
 
-实施与证据由[实施计划](implementation-plan.md)维护。仓库内完成门槛已通过，包括 v112→v113 升级、owner-only/未绑定负向、
+实施与证据由[实施计划](implementation-plan.md)维护。仓库内完成门槛包括 v112→v114 升级、Developer Identity/
+publication intent、连接不注册 App、正常发布不产生 QR、identity drift/unknown remote fail-closed、owner-only/未绑定负向、
 multi-Bot fail-closed、FIFO promotion、普通群/话题 roster、ExternalQuote/Context bytes、safeStorage/Renderer
-秘密隔离、Host 恢复、双主题和完整 Rust/TypeScript/文档/构建门禁。真实飞书租户扫码、应用创建和收发仍需要拥有
-可用企业权限的主人在发布环境执行，自动化不伪造外部成功。
+秘密隔离、Host 恢复、双主题和完整 Rust/TypeScript/文档/构建门禁。真实飞书租户登录、应用创建、连续免扫码发布
+和收发仍需要拥有可用企业权限的主人在发布环境执行，自动化不伪造外部成功。
 
 ## 跨版本文档影响
 
 | 范围 | 结论 | 证据或理由 |
 | --- | --- | --- |
 | Version lifecycle | 已更新 | 本概览、[实施计划](implementation-plan.md)、[决定](decisions.md)与[版本索引](../README.md)共同切换 `current_version`。 |
-| Decisions | 已更新 | [v1.30 决定](decisions.md)冻结 owner-only Binding、聚合/统一 admission、ExternalQuote、roster 复用及 Main/Outbox/官方注册边界。 |
+| Decisions | 已更新 | [v1.30 决定](decisions.md)冻结 owner-only Binding、聚合/统一 admission、ExternalQuote、roster、Main/Outbox 与 Developer Session/Provisioner 边界。 |
 | Contracts | 已更新 | 新增 [Feishu Channel v1](../../contracts/feishu-channel-v1.md)，并把 [ContextManifest Evidence v22](../../contracts/context-manifest-evidence-v22.md)设为新 AgentRun 当前入口。 |
 | Architecture | 已更新 | 新增[飞书渠道架构](../../architecture/feishu-channel.md)，连接 Renderer、Main Host、Core admission、Camp membership 与 Outbox 权威。 |
 | UI | 已更新 | 新增[渠道设置](../../ui/components/channel-settings.md)，并更新 UI/component 索引；视觉继续使用现有 Porcelain Day / Steel Night。 |

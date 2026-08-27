@@ -26,9 +26,9 @@ Gather Completion Input = 3
 Camp Attachment View Contract = 2
 Camp Attachment View Receipt = 2
 Runtime Attachment Auth Receipt = 1
-Data Contract = v1.26
-Projection Schema = 67
-Latest Migration = 113
+Data Contract = v1.27
+Projection Schema = 68
+Latest Migration = 114
 ```
 
 New-write ContextManifest pairing is closed:
@@ -123,6 +123,9 @@ an ExternalPrincipal source or ExternalQuote necessarily changes the selected Ca
 Migration 113 preserves historical Manifest rows and extends the closed table constraints to pairing 22/22. The new-write
 trigger rejects any new ContextManifest not using version 22. Historical terminal v19-v21 evidence remains readable and is
 not rewritten; an already frozen v21 Runtime input remains its original evidence rather than being relabeled v22.
+
+Migration 114 advances the Data Contract for Feishu Developer Identity and publication intents. It does not change the
+ContextManifest/Formatter 22/22 pairing or rewrite historical context evidence.
 
 Adapter Binding compatibility includes Formatter/Manifest 22, so a new input cannot reuse a binding whose context contract
 digest only admits 21. Native Session Bootstrap bytes, Bootstrap Formatter and Session Charter revision do not change.

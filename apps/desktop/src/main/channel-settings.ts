@@ -21,15 +21,34 @@ import type {
 } from '@contracts'
 import type { CoreClient } from './core-client'
 import type { ChannelCredentialStore, FeishuAppCredential } from './channel-credential-store'
+import type {
+  FeishuDeveloperIdentity,
+  FeishuDeveloperSessionService,
+  FeishuLoginStage
+} from './feishu-developer-session'
+import {
+  FEISHU_MEMBER_BOT_ADDONS,
+  UnavailableFeishuDeveloperSessionService,
+  UnavailableFeishuMemberBotProvisioner,
+  isUnknownRemoteProvisioningError,
+  type FeishuMemberBotProvisioner,
+  type MemberBotProvisioningStep
+} from './feishu-member-bot-provisioner'
 
 type CoreChannelSnapshot = {
   schemaVersion: 1
   account: {
     accountId: string
-    displayName: string
+    userIdDigest: string
+    tenantId: string
+    userName: string
+    email: string | null
     tenantName: string
-    status: 'connected' | 'disconnected'
+    brand: 'feishu' | 'lark'
+    status: 'connected' | 'disconnected' | 'session_expired'
     version: number
+    connectedAt: string
+    lastVerifiedAt: string
   } | null
   memberBots: Array<{
     agentId: string
@@ -40,6 +59,33 @@ type CoreChannelSnapshot = {
     status: 'published' | 'disabled'
     failureCode: string | null
     version: number
+  }>
+  publicationIntents: Array<{
+    publicationIntentId: string
+    agentId: string
+    accountId: string
+    expectedUserIdDigest: string
+    expectedTenantId: string
+    requestedAppName: string
+    provisioningMode: 'developer_session' | 'compat_registration'
+    state:
+      | 'created'
+      | 'session_verified'
+      | 'app_created'
+      | 'credentials_read'
+      | 'bot_configured'
+      | 'version_published'
+      | 'connection_verified'
+      | 'completed'
+      | 'failed_recoverable'
+      | 'failed_unknown_remote_state'
+    remoteAppId: string | null
+    credentialRef: string | null
+    lastCompletedStep: string | null
+    failureCode: string | null
+    version: number
+    createdAt: string
+    updatedAt: string
   }>
   projectBindings: ProjectBindingView[]
   unboundConversations: UnboundChannelConversationView[]
@@ -79,14 +125,15 @@ type ClaimedChannelDelivery = {
   recipientOpenId?: string | null
 }
 
-type RegistrationResult = Awaited<ReturnType<typeof registerApp>>
 type RegisterApp = typeof registerApp
 type CreateChannel = typeof createLarkChannel
 
 export interface ChannelHostDependencies {
   core: Pick<CoreClient, 'request'>
   credentialStore: ChannelCredentialStore
-  registerApp?: RegisterApp
+  developerSession?: FeishuDeveloperSessionService
+  memberBotProvisioner?: FeishuMemberBotProvisioner
+  registerAppCompat?: RegisterApp
   createChannel?: CreateChannel
   now?: () => number
   setInterval?: typeof globalThis.setInterval
@@ -118,35 +165,14 @@ type RawInboundEvent = {
   }
 }
 
-const CONTROLLER_CREDENTIAL_REF = 'feishu-controller'
 const HOST_WORKER_ID = `desktop-${randomUUID()}`
 const ROSTER_CACHE_MS = 20_000
 const ROSTER_SWEEP_MS = 30_000
-const BOT_ADDONS = {
-  preset: true,
-  scopes: {
-    tenant: [
-      'im:message',
-      'im:message:readonly',
-      'im:message:send_as_bot',
-      'im:chat:readonly',
-      'im:chat.members:read'
-    ]
-  },
-  events: {
-    items: {
-      tenant: [
-        'im.message.receive_v1',
-        'im.chat.member.bot.added_v1',
-        'im.chat.member.bot.deleted_v1'
-      ]
-    }
-  }
-}
-
 export class ChannelSettingsService {
   readonly #dependencies: ChannelHostDependencies | null
-  readonly #registerApp: RegisterApp
+  readonly #developerSession: FeishuDeveloperSessionService
+  readonly #memberBotProvisioner: FeishuMemberBotProvisioner
+  readonly #registerAppCompat: RegisterApp
   readonly #createChannel: CreateChannel
   readonly #now: () => number
   readonly #listeners = new Set<(snapshot: ChannelSettingsSnapshot) => void>()
@@ -158,6 +184,8 @@ export class ChannelSettingsService {
   readonly #rosterReconciliations = new Map<string, Promise<boolean>>()
   #activeQrAttempt: ChannelQrAttemptView | null = null
   #activeQrAbort: AbortController | null = null
+  #activeProvisioning: ChannelSettingsSnapshot['activeProvisioning'] = null
+  #activeProvisioningAbort: AbortController | null = null
   #pumpTimer: ReturnType<typeof globalThis.setInterval> | null = null
   #pumping = false
   #started = false
@@ -167,7 +195,11 @@ export class ChannelSettingsService {
 
   constructor(dependencies?: ChannelHostDependencies) {
     this.#dependencies = dependencies ?? null
-    this.#registerApp = dependencies?.registerApp ?? registerApp
+    this.#developerSession = dependencies?.developerSession
+      ?? new UnavailableFeishuDeveloperSessionService()
+    this.#memberBotProvisioner = dependencies?.memberBotProvisioner
+      ?? new UnavailableFeishuMemberBotProvisioner()
+    this.#registerAppCompat = dependencies?.registerAppCompat ?? registerApp
     this.#createChannel = dependencies?.createChannel ?? createLarkChannel
     this.#now = dependencies?.now ?? Date.now
   }
@@ -177,7 +209,20 @@ export class ChannelSettingsService {
     this.#started = true
     this.#stopped = false
     try {
-      const snapshot = await this.#coreSnapshot()
+      await this.#dependencies.credentialStore.delete('feishu-controller')
+      let snapshot = await this.#coreSnapshot()
+      if (snapshot.account?.status === 'connected') {
+        const identity = await this.#developerSession.inspect().catch(() => null)
+        if (!identity || accountIdForIdentity(identity) !== snapshot.account.accountId) {
+          await this.#expireAccount(snapshot.account)
+          snapshot = await this.#coreSnapshot()
+        } else {
+          await this.#upsertAccount(identity)
+          snapshot = await this.#coreSnapshot()
+        }
+      }
+      await this.#recoverPublicationIntents(snapshot)
+      snapshot = await this.#coreSnapshot()
       for (const bot of snapshot.memberBots.filter((candidate) => candidate.status === 'published')) {
         try {
           await this.#startPublishedBot(bot)
@@ -201,6 +246,8 @@ export class ChannelSettingsService {
     this.#stopped = true
     this.#activeQrAbort?.abort()
     this.#activeQrAbort = null
+    this.#activeProvisioningAbort?.abort()
+    this.#activeProvisioningAbort = null
     if (this.#pumpTimer) {
       const clear = this.#dependencies?.clearInterval ?? globalThis.clearInterval
       clear(this.#pumpTimer)
@@ -224,40 +271,48 @@ export class ChannelSettingsService {
 
   async connect(): Promise<ChannelSettingsSnapshot> {
     this.#requireHost()
-    const result = await this.#register('connect', null, {
-      name: 'Rovai 渠道管理',
-      desc: 'Rovai AI 飞书渠道管理应用'
-    })
-    const credential: FeishuAppCredential = {
-      appId: result.client_id,
-      appSecret: result.client_secret
+    if (this.#activeQrAttempt) throw new Error('已有一个飞书二维码流程正在进行。')
+    this.#activeProvisioningAbort?.abort()
+    const previous = (await this.#coreSnapshot()).account
+    const attemptId = randomUUID()
+    const abort = new AbortController()
+    this.#activeQrAbort = abort
+    this.#activeQrAttempt = {
+      attemptId,
+      purpose: 'account_login',
+      agentId: null,
+      stage: 'preparing',
+      qrDataUrl: null,
+      expiresAt: null,
+      detail: '正在准备飞书开放平台登录…'
     }
-    const accountId = result.client_id
-    const identityDigest = digest(`feishu-owner\0${result.user_info?.open_id ?? accountId}`)
-    const previousCredential = await this.#dependencies!.credentialStore.read(
-      CONTROLLER_CREDENTIAL_REF
-    )
-    await this.#dependencies!.credentialStore.write(CONTROLLER_CREDENTIAL_REF, credential)
+    void this.#emit()
     try {
-      await this.#command('channels.feishu.account.upsert', {
-        accountId,
-        identityDigest,
-        displayName: '飞书主人',
-        tenantName: result.user_info?.tenant_brand === 'lark' ? 'Lark 工作区' : '飞书企业'
+      const identity = await this.#developerSession.beginLogin({
+        forceFresh: true,
+        signal: abort.signal,
+        onQrReady: ({ payload, expiresAt }) => {
+          if (this.#activeQrAttempt?.attemptId !== attemptId) return
+          this.#activeQrAttempt = {
+            ...this.#activeQrAttempt,
+            stage: 'awaiting_scan',
+            qrDataUrl: payload,
+            expiresAt,
+            detail: '请使用飞书扫码登录开放平台。'
+          }
+          void this.#emit()
+        },
+        onStatus: (stage) => this.#updateLoginAttempt(attemptId, stage)
       })
-    } catch (error) {
-      try {
-        if (previousCredential) {
-          await this.#dependencies!.credentialStore.write(
-            CONTROLLER_CREDENTIAL_REF,
-            previousCredential
-          )
-        } else {
-          await this.#dependencies!.credentialStore.delete(CONTROLLER_CREDENTIAL_REF)
-        }
-      } catch (rollbackError) {
-        console.warn('[rovai] Failed to restore the previous Feishu controller credential.', rollbackError)
+      if (this.#activeQrAttempt?.attemptId !== attemptId) {
+        throw new Error('feishu_login_cancelled')
       }
+      await this.#upsertAccount(identity)
+    } catch (error) {
+      if (previous?.status === 'connected') {
+        await this.#expireAccount(previous).catch(() => undefined)
+      }
+      this.#failQr(error)
       throw error
     }
     this.#finishQr()
@@ -267,6 +322,9 @@ export class ChannelSettingsService {
   async disconnect(): Promise<ChannelSettingsSnapshot> {
     this.#requireHost()
     const snapshot = await this.#coreSnapshot()
+    this.#activeProvisioningAbort?.abort()
+    this.#activeProvisioningAbort = null
+    await this.#developerSession.disconnect()
     if (snapshot.account?.status === 'connected') {
       await this.#command('channels.feishu.account.disconnect', {
         accountId: snapshot.account.accountId,
@@ -275,34 +333,15 @@ export class ChannelSettingsService {
     }
     this.#activeQrAbort?.abort()
     this.#finishQr()
-    await this.#dependencies!.credentialStore.delete(CONTROLLER_CREDENTIAL_REF)
     return this.#emit()
   }
 
   async publishMemberBot(agentId: string): Promise<ChannelSettingsSnapshot> {
-    this.#requireHost()
-    const snapshot = await this.#coreSnapshot()
-    const account = snapshot.account?.status === 'connected' ? snapshot.account : null
-    if (!account) throw new Error('请先连接飞书账号。')
-    const agent = await this.#dependencies!.core.request<AgentProfile>('members.get', { agentId })
-    if (!agent || agent.presence !== 'present') throw new Error('该队员当前不可发布。')
-    const result = await this.#register('publish', agentId, {
-      name: agent.displayName,
-      desc: `Rovai AI 队员 · ${agent.teamRole || '协作者'}`
-    })
-    const credentialRef = memberCredentialRef(agentId)
-    const credential = { appId: result.client_id, appSecret: result.client_secret }
-    await this.#dependencies!.credentialStore.write(credentialRef, credential)
-    try {
-      await this.#publishCredential(account.accountId, agent, credentialRef, credential)
-    } catch (error) {
-      this.#publicationFailures.set(agentId, channelFailureCode(error))
-      this.#failQr(error)
-      throw error
-    }
-    this.#publicationFailures.delete(agentId)
-    this.#finishQr()
-    return this.#emit()
+    return this.#publishNewMemberBot(agentId, 'developer_session')
+  }
+
+  async publishMemberBotCompat(agentId: string): Promise<ChannelSettingsSnapshot> {
+    return this.#publishNewMemberBot(agentId, 'compat_registration')
   }
 
   async retryMemberBot(agentId: string): Promise<ChannelSettingsSnapshot> {
@@ -315,7 +354,36 @@ export class ChannelSettingsService {
     if (!account) throw new Error('请先重新连接飞书账号。')
     const agent = await this.#dependencies!.core.request<AgentProfile>('members.get', { agentId })
     await this.#publishCredential(account.accountId, agent, credentialRef, credential)
+    const intent = latestPublicationIntent(snapshot, agentId)
+    if (intent?.state === 'failed_recoverable') {
+      let version = intent.version
+      const remoteAppId = intent.remoteAppId ?? credential.appId
+      await this.#advancePublicationIntent(intent.publicationIntentId, version, {
+        state: 'connection_verified',
+        remoteAppId,
+        credentialRef,
+        lastCompletedStep: 'connection_verified',
+        failureCode: null
+      })
+      version += 1
+      await this.#advancePublicationIntent(intent.publicationIntentId, version, {
+        state: 'completed',
+        remoteAppId,
+        credentialRef,
+        lastCompletedStep: 'completed',
+        failureCode: null
+      })
+    }
     this.#publicationFailures.delete(agentId)
+    if (this.#activeProvisioning?.agentId === agentId) {
+      this.#activeProvisioning = {
+        ...this.#activeProvisioning,
+        stage: 'completed',
+        detail: '发布完成。',
+        remoteAppId: credential.appId,
+        failureCode: null
+      }
+    }
     return this.#emit()
   }
 
@@ -396,18 +464,238 @@ export class ChannelSettingsService {
     return this.#emit()
   }
 
-  async #register(
-    purpose: 'connect' | 'publish',
-    agentId: string | null,
+  async #publishNewMemberBot(
+    agentId: string,
+    mode: 'developer_session' | 'compat_registration'
+  ): Promise<ChannelSettingsSnapshot> {
+    this.#requireHost()
+    if (this.#activeProvisioning && !['completed', 'failed', 'unknown_remote_state'].includes(
+      this.#activeProvisioning.stage
+    )) throw new Error('已有一名队员正在发布。')
+    if (this.#activeQrAttempt) throw new Error('已有一个飞书二维码流程正在进行。')
+    const snapshot = await this.#coreSnapshot()
+    const account = snapshot.account?.status === 'connected' ? snapshot.account : null
+    if (!account) throw new Error('飞书登录已过期，请先重新连接账号。')
+    const previousIntent = latestPublicationIntent(snapshot, agentId)
+    if (previousIntent?.state === 'failed_unknown_remote_state') {
+      throw new Error('上次创建结果无法确认。为避免重复创建应用，请先在飞书开放平台核对。')
+    }
+    if (
+      previousIntent
+      && !['completed', 'failed_recoverable', 'failed_unknown_remote_state'].includes(
+        previousIntent.state
+      )
+    ) {
+      throw new Error('该队员已有未完成的发布记录。')
+    }
+    if (previousIntent?.state === 'failed_recoverable' && previousIntent.remoteAppId) {
+      const stored = previousIntent.credentialRef
+        ? await this.#dependencies!.credentialStore.read(previousIntent.credentialRef)
+        : null
+      if (stored) return this.retryMemberBot(agentId)
+      throw new Error('上次已创建远端应用但凭据未保存，不能自动创建第二个应用。')
+    }
+    const identity = await this.#developerSession.inspect()
+    if (
+      !identity
+      || accountIdForIdentity(identity) !== account.accountId
+      || userIdDigest(identity.userId) !== account.userIdDigest
+      || identity.tenantId !== account.tenantId
+    ) {
+      await this.#expireAccount(account).catch(() => undefined)
+      throw new Error('飞书登录已过期或账号已变化，请先重新连接账号。')
+    }
+    const agent = await this.#dependencies!.core.request<AgentProfile>('members.get', { agentId })
+    if (!agent || agent.presence !== 'present') throw new Error('该队员当前不可发布。')
+
+    const publicationIntentId = `rvfpi_${randomUUID().replaceAll('-', '')}`
+    await this.#command('channels.feishu.publicationIntent.create', {
+      publicationIntentId,
+      accountId: account.accountId,
+      agentId,
+      expectedUserIdDigest: account.userIdDigest,
+      expectedTenantId: account.tenantId,
+      requestedAppName: agent.displayName,
+      provisioningMode: mode
+    })
+    let intentVersion = 1
+    const advanceIntent = async (
+      payload: {
+        state: CoreChannelSnapshot['publicationIntents'][number]['state']
+        remoteAppId: string | null
+        credentialRef: string | null
+        lastCompletedStep: string | null
+        failureCode: string | null
+      }
+    ): Promise<void> => {
+      await this.#advancePublicationIntent(publicationIntentId, intentVersion, payload)
+      intentVersion += 1
+    }
+    let remoteAppId: string | null = null
+    let credentialWritten = false
+    const credentialRef = memberCredentialRef(agentId)
+    const abort = new AbortController()
+    this.#activeProvisioningAbort = abort
+    this.#activeProvisioning = {
+      publicationIntentId,
+      agentId,
+      stage: 'verifying_session',
+      detail: '正在校验飞书账号…',
+      remoteAppId: null,
+      failureCode: null
+    }
+    await this.#emit()
+    try {
+      await advanceIntent({
+        state: 'session_verified',
+        remoteAppId: null,
+        credentialRef: null,
+        lastCompletedStep: 'session_verified',
+        failureCode: null
+      })
+      let credential: FeishuAppCredential
+      let botDisplayName = agent.displayName
+      if (mode === 'developer_session') {
+        this.#setProvisioningProgress('creating_app', '请在飞书确认窗口核对并确认创建应用。')
+        const provisioned = await this.#memberBotProvisioner.create({
+          publicationIntentId,
+          agentId,
+          appName: agent.displayName,
+          appDescription: `Rovai AI 队员 · ${agent.teamRole || '协作者'}`,
+          expectedDeveloperIdentity: {
+            userId: identity.userId,
+            tenantId: identity.tenantId
+          },
+          signal: abort.signal,
+          onProgress: (step, appId) => this.#handleProvisioningProgress(step, appId)
+        })
+        remoteAppId = provisioned.appId
+        botDisplayName = provisioned.botDisplayName
+        credential = { appId: provisioned.appId, appSecret: provisioned.appSecret }
+      } else {
+        this.#setProvisioningProgress(
+          'creating_app',
+          '兼容模式需要为当前队员单独扫码确认。'
+        )
+        const result = await this.#registerCompat(agentId, {
+          name: agent.displayName,
+          desc: `Rovai AI 队员 · ${agent.teamRole || '协作者'}`
+        })
+        remoteAppId = result.client_id
+        credential = { appId: result.client_id, appSecret: result.client_secret }
+      }
+      await advanceIntent({
+        state: 'app_created',
+        remoteAppId,
+        credentialRef: null,
+        lastCompletedStep: 'app_created',
+        failureCode: null
+      })
+      this.#setProvisioningProgress('configuring_bot', '正在保存独立 Bot 凭据…', remoteAppId)
+      await this.#dependencies!.credentialStore.write(credentialRef, credential)
+      credentialWritten = true
+      await advanceIntent({
+        state: 'credentials_read',
+        remoteAppId,
+        credentialRef,
+        lastCompletedStep: 'credentials_read',
+        failureCode: null
+      })
+      await advanceIntent({
+        state: 'bot_configured',
+        remoteAppId,
+        credentialRef,
+        lastCompletedStep: 'bot_configured',
+        failureCode: null
+      })
+      this.#setProvisioningProgress(
+        'publishing_version',
+        '正在确认权限、事件和发布配置…',
+        remoteAppId
+      )
+      await advanceIntent({
+        state: 'version_published',
+        remoteAppId,
+        credentialRef,
+        lastCompletedStep: 'version_published',
+        failureCode: null
+      })
+      this.#setProvisioningProgress(
+        'verifying_connection',
+        '正在验证 Bot 长连接…',
+        remoteAppId
+      )
+      await this.#publishCredential(
+        account.accountId,
+        { ...agent, displayName: botDisplayName },
+        credentialRef,
+        credential
+      )
+      await advanceIntent({
+        state: 'connection_verified',
+        remoteAppId,
+        credentialRef,
+        lastCompletedStep: 'connection_verified',
+        failureCode: null
+      })
+      await advanceIntent({
+        state: 'completed',
+        remoteAppId,
+        credentialRef,
+        lastCompletedStep: 'completed',
+        failureCode: null
+      })
+      this.#publicationFailures.delete(agentId)
+      this.#activeProvisioning = {
+        publicationIntentId,
+        agentId,
+        stage: 'completed',
+        detail: '发布完成。',
+        remoteAppId,
+        failureCode: null
+      }
+      this.#finishQr()
+      return this.#emit()
+    } catch (error) {
+      const failureCode = channelFailureCode(error)
+      const unknownRemoteState = isUnknownRemoteProvisioningError(error)
+        || (remoteAppId !== null && !credentialWritten)
+      await this.#advancePublicationIntent(publicationIntentId, intentVersion, {
+        state: unknownRemoteState ? 'failed_unknown_remote_state' : 'failed_recoverable',
+        remoteAppId,
+        credentialRef: credentialWritten ? credentialRef : null,
+        lastCompletedStep: null,
+        failureCode
+      }).catch(() => undefined)
+      this.#publicationFailures.set(agentId, failureCode)
+      this.#activeProvisioning = {
+        publicationIntentId,
+        agentId,
+        stage: unknownRemoteState ? 'unknown_remote_state' : 'failed',
+        detail: unknownRemoteState
+          ? '无法确认远端应用是否已经创建；已停止自动重试。'
+          : '发布没有完成，可以在排除问题后重试。',
+        remoteAppId,
+        failureCode
+      }
+      await this.#emit()
+      throw error
+    } finally {
+      if (this.#activeProvisioningAbort === abort) this.#activeProvisioningAbort = null
+    }
+  }
+
+  async #registerCompat(
+    agentId: string,
     appPreset: { name: string; desc: string }
-  ): Promise<RegistrationResult> {
+  ): Promise<Awaited<ReturnType<RegisterApp>>> {
     if (this.#activeQrAttempt) throw new Error('已有一个飞书二维码流程正在进行。')
     const attemptId = randomUUID()
     const abort = new AbortController()
     this.#activeQrAbort = abort
     this.#activeQrAttempt = {
       attemptId,
-      purpose,
+      purpose: 'member_bot_compat_registration',
       agentId,
       stage: 'preparing',
       qrDataUrl: null,
@@ -416,12 +704,12 @@ export class ChannelSettingsService {
     }
     void this.#emit()
     try {
-      const result = await this.#registerApp({
+      const result = await this.#registerAppCompat({
         source: 'rovai-ai',
         signal: abort.signal,
         createOnly: true,
         appPreset,
-        addons: BOT_ADDONS,
+        addons: FEISHU_MEMBER_BOT_ADDONS,
         onQRCodeReady: (info) => {
           void QRCode.toDataURL(info.url, { width: 256, margin: 1 }).then((qrDataUrl) => {
             if (this.#activeQrAttempt?.attemptId !== attemptId) return
@@ -430,9 +718,7 @@ export class ChannelSettingsService {
               stage: 'awaiting_scan',
               qrDataUrl,
               expiresAt: new Date(this.#now() + info.expireIn * 1_000).toISOString(),
-              detail: purpose === 'connect'
-                ? '请用飞书扫码并确认连接。'
-                : '请用飞书扫码确认创建这名队员的独立 Bot。'
+              detail: '请用飞书扫码确认创建这名队员的独立 Bot。'
             }
             void this.#emit()
           })
@@ -441,7 +727,7 @@ export class ChannelSettingsService {
           if (this.#activeQrAttempt?.attemptId !== attemptId) return
           this.#activeQrAttempt = {
             ...this.#activeQrAttempt,
-            stage: 'authorizing',
+            stage: 'scan_confirmed',
             detail: '已扫码，等待飞书确认…'
           }
           void this.#emit()
@@ -450,14 +736,145 @@ export class ChannelSettingsService {
       if (this.#activeQrAttempt?.attemptId !== attemptId) throw new Error('二维码流程已取消。')
       this.#activeQrAttempt = {
         ...this.#activeQrAttempt,
-        stage: 'connecting',
-        detail: purpose === 'connect' ? '正在验证飞书连接…' : '正在验证 Bot 并建立长连接…'
+        stage: 'inspecting_identity',
+        detail: '正在读取 Bot 凭据并验证配置…'
       }
       void this.#emit()
       return result
     } catch (error) {
       this.#failQr(error)
       throw error
+    }
+  }
+
+  async #upsertAccount(identity: FeishuDeveloperIdentity): Promise<void> {
+    await this.#command('channels.feishu.account.upsert', {
+      accountId: accountIdForIdentity(identity),
+      userIdDigest: userIdDigest(identity.userId),
+      tenantId: identity.tenantId,
+      userName: identity.userName,
+      email: identity.email ?? null,
+      tenantName: identity.tenantName,
+      brand: identity.brand
+    })
+  }
+
+  async #expireAccount(account: NonNullable<CoreChannelSnapshot['account']>): Promise<void> {
+    if (account.status !== 'connected') return
+    await this.#command('channels.feishu.account.expire', {
+      accountId: account.accountId,
+      expectedVersion: account.version
+    })
+  }
+
+  async #advancePublicationIntent(
+    publicationIntentId: string,
+    expectedVersion: number,
+    input: {
+      state: CoreChannelSnapshot['publicationIntents'][number]['state']
+      remoteAppId: string | null
+      credentialRef: string | null
+      lastCompletedStep: string | null
+      failureCode: string | null
+    }
+  ): Promise<void> {
+    await this.#command('channels.feishu.publicationIntent.advance', {
+      publicationIntentId,
+      expectedVersion,
+      ...input
+    })
+  }
+
+  #setProvisioningProgress(
+    stage: NonNullable<ChannelSettingsSnapshot['activeProvisioning']>['stage'],
+    detail: string,
+    remoteAppId: string | null = this.#activeProvisioning?.remoteAppId ?? null
+  ): void {
+    if (!this.#activeProvisioning) return
+    this.#activeProvisioning = {
+      ...this.#activeProvisioning,
+      stage,
+      detail,
+      remoteAppId
+    }
+    void this.#emit()
+  }
+
+  #handleProvisioningProgress(step: MemberBotProvisioningStep, remoteAppId?: string): void {
+    const progress: Record<MemberBotProvisioningStep, {
+      stage: NonNullable<ChannelSettingsSnapshot['activeProvisioning']>['stage']
+      detail: string
+    }> = {
+      session_verified: {
+        stage: 'creating_app',
+        detail: '飞书账号已校验，正在准备创建应用…'
+      },
+      app_created: {
+        stage: 'configuring_bot',
+        detail: '应用已创建，正在启用 Bot…'
+      },
+      credentials_read: {
+        stage: 'configuring_permissions',
+        detail: '已读取应用凭据，正在确认权限与事件…'
+      },
+      bot_configured: {
+        stage: 'publishing_version',
+        detail: 'Bot 配置已完成，正在确认发布版本…'
+      },
+      version_published: {
+        stage: 'verifying_connection',
+        detail: '版本已发布，正在验证长连接…'
+      }
+    }
+    const next = progress[step]
+    this.#setProvisioningProgress(
+      next.stage,
+      next.detail,
+      remoteAppId ?? this.#activeProvisioning?.remoteAppId ?? null
+    )
+  }
+
+  #updateLoginAttempt(attemptId: string, stage: FeishuLoginStage): void {
+    if (this.#activeQrAttempt?.attemptId !== attemptId) return
+    const details: Partial<Record<FeishuLoginStage, string>> = {
+      preparing: '正在准备飞书开放平台登录…',
+      awaiting_scan: '请使用飞书扫码登录开放平台。',
+      scan_confirmed: '已扫码，正在确认登录…',
+      inspecting_identity: '正在读取飞书账号与企业身份…',
+      connected: '飞书账号已连接。',
+      expired: '登录二维码已过期，请关闭后重试。',
+      cancelled: '登录已取消。',
+      failed: '飞书账号登录失败。'
+    }
+    this.#activeQrAttempt = {
+      ...this.#activeQrAttempt,
+      stage,
+      detail: details[stage] ?? this.#activeQrAttempt.detail
+    }
+    void this.#emit()
+  }
+
+  async #recoverPublicationIntents(snapshot: CoreChannelSnapshot): Promise<void> {
+    const active = snapshot.publicationIntents.filter((intent) => ![
+      'completed',
+      'failed_recoverable',
+      'failed_unknown_remote_state'
+    ].includes(intent.state))
+    for (const intent of active) {
+      const credential = intent.credentialRef
+        ? await this.#dependencies!.credentialStore.read(intent.credentialRef)
+        : null
+      const safeToRetry = intent.state === 'created'
+        || (Boolean(intent.remoteAppId) && Boolean(intent.credentialRef) && Boolean(credential))
+      await this.#advancePublicationIntent(intent.publicationIntentId, intent.version, {
+        state: safeToRetry ? 'failed_recoverable' : 'failed_unknown_remote_state',
+        remoteAppId: intent.remoteAppId,
+        credentialRef: intent.credentialRef,
+        lastCompletedStep: intent.lastCompletedStep,
+        failureCode: safeToRetry
+          ? 'desktop_restarted'
+          : 'desktop_restarted_with_unknown_remote_state'
+      })
     }
   }
 
@@ -936,7 +1353,10 @@ export class ChannelSettingsService {
         failureCode: this.#publicationFailures.get(bot.agentId) ?? bot.failureCode
       })
     }
-    if (this.#activeQrAttempt?.purpose === 'publish' && this.#activeQrAttempt.agentId) {
+    if (
+      this.#activeQrAttempt?.purpose === 'member_bot_compat_registration'
+      && this.#activeQrAttempt.agentId
+    ) {
       const agentId = this.#activeQrAttempt.agentId
       bots.set(agentId, {
         agentId,
@@ -944,6 +1364,21 @@ export class ChannelSettingsService {
         botDisplayName: bots.get(agentId)?.botDisplayName ?? null,
         appId: bots.get(agentId)?.appId ?? null,
         failureCode: this.#activeQrAttempt.stage === 'failed' ? 'registration_failed' : null
+      })
+    }
+    if (this.#activeProvisioning) {
+      const { agentId, stage, remoteAppId, failureCode } = this.#activeProvisioning
+      const existing = bots.get(agentId)
+      bots.set(agentId, {
+        agentId,
+        publicationStatus: stage === 'failed' || stage === 'unknown_remote_state'
+          ? 'failed'
+          : stage === 'completed'
+            ? 'published'
+            : 'provisioning',
+        botDisplayName: existing?.botDisplayName ?? null,
+        appId: remoteAppId ?? existing?.appId ?? null,
+        failureCode
       })
     }
     for (const [agentId, failureCode] of this.#publicationFailures) {
@@ -957,17 +1392,25 @@ export class ChannelSettingsService {
       })
     }
     return {
-      schemaVersion: 2,
+      schemaVersion: 3,
       channels: [{
         kind: 'feishu',
         displayName: '飞书',
         hostStatus: 'ready',
         connection: {
-          status: connected ? 'connected' : 'not_connected',
-          account: connected && snapshot.account ? {
+          status: connected
+            ? 'connected'
+            : snapshot.account?.status === 'session_expired'
+              ? 'session_expired'
+              : 'not_connected',
+          account: snapshot.account?.status !== 'disconnected' && snapshot.account ? {
             accountId: snapshot.account.accountId,
-            displayName: snapshot.account.displayName,
-            tenantName: snapshot.account.tenantName
+            userName: snapshot.account.userName,
+            ...(snapshot.account.email ? { email: snapshot.account.email } : {}),
+            tenantName: snapshot.account.tenantName,
+            brand: snapshot.account.brand,
+            connectedAt: snapshot.account.connectedAt,
+            lastVerifiedAt: snapshot.account.lastVerifiedAt
           } : null
         },
         memberBots: [...bots.values()].sort((left, right) => left.agentId.localeCompare(right.agentId))
@@ -975,7 +1418,10 @@ export class ChannelSettingsService {
       projectBindings: snapshot.projectBindings,
       unboundConversations: snapshot.unboundConversations,
       conversationBindings: snapshot.conversationBindings,
-      activeQrAttempt: this.#activeQrAttempt ? structuredClone(this.#activeQrAttempt) : null
+      activeQrAttempt: this.#activeQrAttempt ? structuredClone(this.#activeQrAttempt) : null,
+      activeProvisioning: this.#activeProvisioning
+        ? structuredClone(this.#activeProvisioning)
+        : null
     }
   }
 
@@ -1030,7 +1476,7 @@ export class ChannelSettingsService {
 
 function unavailableSnapshot(): ChannelSettingsSnapshot {
   return {
-    schemaVersion: 2,
+    schemaVersion: 3,
     channels: [{
       kind: 'feishu',
       displayName: '飞书',
@@ -1041,7 +1487,8 @@ function unavailableSnapshot(): ChannelSettingsSnapshot {
     projectBindings: [],
     unboundConversations: [],
     conversationBindings: [],
-    activeQrAttempt: null
+    activeQrAttempt: null,
+    activeProvisioning: null
   }
 }
 
@@ -1051,6 +1498,21 @@ function memberCredentialRef(agentId: string): string {
 
 function digest(value: string): `sha256:${string}` {
   return `sha256:${createHash('sha256').update(value).digest('hex')}`
+}
+
+function userIdDigest(userId: string): `sha256:${string}` {
+  return digest(`feishu-user\0${userId}`)
+}
+
+function accountIdForIdentity(identity: FeishuDeveloperIdentity): `sha256:${string}` {
+  return digest(`${identity.brand}\0${identity.tenantId}\0${identity.userId}`)
+}
+
+function latestPublicationIntent(
+  snapshot: CoreChannelSnapshot,
+  agentId: string
+): CoreChannelSnapshot['publicationIntents'][number] | null {
+  return snapshot.publicationIntents.find((intent) => intent.agentId === agentId) ?? null
 }
 
 function stableCommandId(...parts: string[]): string {

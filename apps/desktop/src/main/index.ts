@@ -89,6 +89,8 @@ import {
 import { AppQuitCoordinator } from './app-quit-coordinator'
 import { ChannelSettingsService } from './channel-settings'
 import { SafeStorageChannelCredentialStore } from './channel-credential-store'
+import { ElectronFeishuDeveloperSessionService } from './feishu-developer-session'
+import { FeishuWebSessionMemberBotProvisioner } from './feishu-member-bot-provisioner'
 
 const mainStartupStartedAt = performance.now()
 console.info('[startup] stage=main_module_loaded elapsed_ms=0.0')
@@ -249,9 +251,15 @@ const projectAccessTransactions = new ProjectAccessTransactionCoordinator()
 let userAutomation: UserAutomationServer | null = null
 const desktopSessions = new DesktopSessionRegistry()
 const memberAvatars = new MemberAvatarAssetService(coreDataPath)
+const feishuDeveloperSession = new ElectronFeishuDeveloperSessionService(
+  coreDataPath,
+  () => mainWindow
+)
 const channelSettings = new ChannelSettingsService({
   core,
-  credentialStore: new SafeStorageChannelCredentialStore(coreDataPath)
+  credentialStore: new SafeStorageChannelCredentialStore(coreDataPath),
+  developerSession: feishuDeveloperSession,
+  memberBotProvisioner: new FeishuWebSessionMemberBotProvisioner(feishuDeveloperSession)
 })
 channelSettings.onChanged((snapshot) => {
   if (!mainWindow || mainWindow.isDestroyed() || mainWindow.webContents.isDestroyed()) return
@@ -704,6 +712,12 @@ ipcMain.handle('rovai:channels-publish-member-bot', (event, agentId: unknown) =>
   requireMainWindow(event.sender)
   if (typeof agentId !== 'string' || !agentId) throw new Error('Invalid Agent ID')
   return channelSettings.publishMemberBot(agentId)
+})
+
+ipcMain.handle('rovai:channels-publish-member-bot-compat', (event, agentId: unknown) => {
+  requireMainWindow(event.sender)
+  if (typeof agentId !== 'string' || !agentId) throw new Error('Invalid Agent ID')
+  return channelSettings.publishMemberBotCompat(agentId)
 })
 
 ipcMain.handle('rovai:channels-retry-member-bot', (event, agentId: unknown) => {

@@ -18,13 +18,16 @@ last_updated: 2026-08-27
 Renderer 渠道设置
   └─ typed Preload API
        └─ Electron Main / Feishu Channel Host
-          ├─ OS safeStorage：App Secret
-          ├─ 官方注册二维码与每 App WebSocket
+          ├─ Developer Session Adapter：开放平台登录、身份回读、加密 Cookie jar
+          ├─ Member Bot Provisioner：身份复核、应用确认与发布状态机
+          ├─ OS safeStorage：每 Agent App Secret
+          ├─ 显式兼容注册二维码与每 App WebSocket
           ├─ 入站规范化、群 Bot roster 观测
           └─ 领取并发送 Core ChannelDelivery
                          │
                          ▼
                     Rust Core
+          ├─ Developer Identity / Publication Intent
           ├─ ProjectBinding / conversation binding
           ├─ ExternalPrincipal / App identity
           ├─ multi-Bot aggregate / ChannelTurnRequest
@@ -34,11 +37,33 @@ Renderer 渠道设置
 
 Rust Core 是项目绑定、渠道会话、Camp、消息、Turn、Run、成员关系、排队和 Outbox 的唯一持久权威。
 Electron Main 只拥有需要网络和本机秘密的 Feishu Host；Renderer 只获得设置投影与主人操作，不获得 App
-Secret、原始飞书身份、Host 恢复游标或本机路径以外的内部路由事实。
+Secret、原始 `userId`、Session Cookie、Host 恢复游标或内部路由事实。
 
 `ExternalPrincipal` 表达消息作者、上下文来源和回复目标。它不是 `local_user`，不能连接账号、发布 Bot、维护
 `ProjectBinding`、绑定会话或执行任何主人命令。绑定后的群成员只因显式 `@` 受管 Bot 而获得一次消息入口，
 不会因此得到 Camp、项目或本机管理权限。
+
+## 开发者会话与队员发布
+
+“连接飞书账号”只在独立 Electron Session 中加载开放平台登录页，截取真实登录二维码，回读
+`userId + userName + tenantId + tenantName + brand`，并把 Cookie jar 经 `safeStorage` 加密后原子写入本机私有文件。
+它不创建 App、不产生 App ID/Secret，也不启动 Bot。Core 只保存由 `brand + tenantId + userId` 派生的不透明
+`accountId`、`userIdDigest` 与可展示身份；缺少任一必需身份字段时不能进入 connected。
+
+普通队员发布先创建持久 `MemberBotPublicationIntent`，再要求当前 Web Session 仍属于 intent 冻结的
+`userId + tenantId`。`MemberBotProvisioner` 使用官方应用注册协议的 begin/poll，并在同一已登录 Electron Session
+中打开官方确认页；因此正常路径不向 Renderer 产生二维码。平台确认成功后，官方 preset/addons 一次提交 Bot、
+最小权限与事件，Main 保存独立 credential、验证 WebSocket，再完成 intent。确认页若跳回登录、身份漂移或 Session
+失效，流程 fail closed，并要求主人重新连接。
+
+SDK `registerApp` 只由主人显式选择“兼容扫码发布”时调用；正常失败不得静默切换。兼容流程不覆盖 Developer
+Identity。创建结果不确定、或已取得远端 App ID 但凭据尚未安全提交时，intent 进入
+`failed_unknown_remote_state`，自动重试被锁住，避免重复创建 App。Main 启动时只从持久 intent 判断可恢复/待人工核对，
+不从 Renderer 状态推断。
+
+Developer Session Adapter 依赖开放平台 Web 登录页和公开页面身份对象，是可替换、版本敏感的边界；它不调用开发者
+后台私有 CSRF 创建接口。仓库自动化只验证 fail-closed 状态机、秘密隔离和协议拼装，真实租户的“连接不增 App、
+连续发布不扫码”必须另行验收，不能由本地测试冒充。
 
 ## 项目与会话
 
@@ -118,5 +143,6 @@ Agent 输出使用实际作者 Agent 的已发布 Bot；作者 Bot 不可用时�
 
 Core Snapshot 保存 pending aggregate、transport conversation 和 delivery 恢复事实，Main 启动后恢复所有 published
 Bot 长连接、过期 lease、collecting finalize 与 Outbox。Renderer snapshot 在 Main 中剥离这些 Host-only 字段。
-每个 App Secret 只以随机 credential ref 关联 Core，在 Electron `safeStorage` 可用时加密落盘；明文不进入 SQLite、
-Renderer、日志、Agent Context 或诊断输出。
+每个 App Secret 只以随机 credential ref 关联 Core；Developer Session Cookie jar 和 App Secret 都只在 Electron
+`safeStorage` 可用时加密落盘。明文不进入 SQLite、Renderer、日志、Agent Context 或诊断输出。断开账号只删除
+Developer Session；已发布 Bot 的 credential 与 WebSocket 生命周期保持独立。

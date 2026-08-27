@@ -2,9 +2,11 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import * as Dialog from '@radix-ui/react-dialog'
 import type {
   AgentProfile,
+  ChannelAccountView,
   ChannelMemberBotView,
   ChannelProviderView,
   ChannelSettingsSnapshot,
+  MemberBotProvisioningView,
   ProjectBindingView
 } from '@contracts'
 import {
@@ -27,6 +29,7 @@ export function ChannelSettings({ agents }: { agents: AgentProfile[] }): React.J
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
+  const [publishAgentId, setPublishAgentId] = useState<string | null>(null)
   const [manageAgentId, setManageAgentId] = useState<string | null>(null)
   const [editingBinding, setEditingBinding] = useState<ProjectBindingView | null>(null)
 
@@ -57,14 +60,16 @@ export function ChannelSettings({ agents }: { agents: AgentProfile[] }): React.J
   const run = useCallback(async (
     key: string,
     action: () => Promise<ChannelSettingsSnapshot>
-  ): Promise<void> => {
-    if (busy) return
+  ): Promise<boolean> => {
+    if (busy) return false
     setBusy(key)
     setError(null)
     try {
       setSnapshot(assertChannelSettingsSnapshot(await action()))
+      return true
     } catch (nextError) {
       setError(channelErrorMessage(nextError))
+      return false
     } finally {
       setBusy(null)
     }
@@ -93,10 +98,11 @@ export function ChannelSettings({ agents }: { agents: AgentProfile[] }): React.J
         error={error}
         onRetry={() => void load()}
         onConnect={() => void run('connect', () => window.rovai.channels.connect())}
-        onPublish={(_, agent) => void run(
-          `publish:${agent.agentId}`,
-          () => window.rovai.channels.publishMemberBot(agent.agentId)
-        )}
+        onDisconnect={() => void run('disconnect', () => window.rovai.channels.disconnect())}
+        onPublish={(_, agent) => {
+          setError(null)
+          setPublishAgentId(agent.agentId)
+        }}
         onRetryPublish={(_, agent) => void run(
           `retry:${agent.agentId}`,
           () => window.rovai.channels.retryMemberBot(agent.agentId)
@@ -137,6 +143,29 @@ export function ChannelSettings({ agents }: { agents: AgentProfile[] }): React.J
         onClose={(attemptId) => void cancelQrAttempt(attemptId)}
       />
 
+      <PublishBotDialog
+        agent={agents.find((candidate) => candidate.agentId === publishAgentId) ?? null}
+        account={channel?.connection.account ?? null}
+        provisioning={snapshot?.activeProvisioning?.agentId === publishAgentId
+          ? snapshot.activeProvisioning
+          : null}
+        busy={busy !== null}
+        error={error}
+        onClose={() => setPublishAgentId(null)}
+        onReconnect={() => {
+          setPublishAgentId(null)
+          void run('connect', () => window.rovai.channels.connect())
+        }}
+        onPublish={(agentId) => {
+          void run(`publish:${agentId}`, () => window.rovai.channels.publishMemberBot(agentId))
+            .then((completed) => { if (completed) setPublishAgentId(null) })
+        }}
+        onPublishCompat={(agentId) => {
+          void run(`publish:${agentId}`, () => window.rovai.channels.publishMemberBotCompat(agentId))
+            .then((completed) => { if (completed) setPublishAgentId(null) })
+        }}
+      />
+
       <ManageBotDialog
         agent={agents.find((candidate) => candidate.agentId === manageAgentId) ?? null}
         bot={channel?.memberBots.find((candidate) => candidate.agentId === manageAgentId) ?? null}
@@ -173,6 +202,7 @@ export function ChannelSettingsView({
   error = null,
   onRetry = () => undefined,
   onConnect,
+  onDisconnect,
   onPublish,
   onRetryPublish,
   onManage,
@@ -188,6 +218,7 @@ export function ChannelSettingsView({
   error?: string | null
   onRetry?(): void
   onConnect?(channel: ChannelProviderView): void
+  onDisconnect?(channel: ChannelProviderView): void
   onPublish?(channel: ChannelProviderView, agent: AgentProfile): void
   onRetryPublish?(channel: ChannelProviderView, agent: AgentProfile): void
   onManage?(channel: ChannelProviderView, agent: AgentProfile): void
@@ -257,6 +288,7 @@ export function ChannelSettingsView({
               channel={channel}
               busy={busy}
               onConnect={onConnect}
+              onDisconnect={onDisconnect}
             />
             <p className="channel-owner-note">
               <OwnerShieldIcon />
@@ -522,11 +554,13 @@ function ChannelSectionHeading({
 function ChannelConnectionRow({
   channel,
   busy,
-  onConnect
+  onConnect,
+  onDisconnect
 }: {
   channel: ChannelProviderView
   busy: string | null
   onConnect?: (channel: ChannelProviderView) => void
+  onDisconnect?: (channel: ChannelProviderView) => void
 }): React.JSX.Element {
   const account = channel.connection.account
   const connected = channel.connection.status === 'connected' && account !== null
@@ -536,12 +570,15 @@ function ChannelConnectionRow({
       <ChannelMark />
       <div className="channel-connection-label">
         <strong>飞书开放平台</strong>
-        <span>{hostReady ? '企业自建应用 · WebSocket' : '渠道宿主尚未就绪'}</span>
+        <span>{hostReady ? '开发者账号会话 · 本机加密保存' : '渠道宿主尚未就绪'}</span>
       </div>
       {connected ? (
         <div className="channel-account-summary">
-          <span className="channel-account-avatar" aria-hidden="true">{firstGrapheme(account.displayName)}</span>
-          <span><strong>{account.displayName}</strong><small>{account.tenantName}</small></span>
+          <span className="channel-account-avatar" aria-hidden="true">{firstGrapheme(account.userName)}</span>
+          <span>
+            <strong>{account.userName}</strong>
+            <small>{account.email ? `${account.email} · ` : ''}{account.tenantName} · {account.brand === 'lark' ? 'Lark' : '飞书'}</small>
+          </span>
         </div>
       ) : (
         <span className="channel-account-empty">{hostReady ? '还没有连接飞书账号' : '连接能力尚未开放'}</span>
@@ -549,15 +586,27 @@ function ChannelConnectionRow({
       <span className={`channel-connection-status${connected ? ' is-connected' : ''}`}>
         {connected ? '已连接' : channel.connection.status === 'session_expired' ? '需重新连接' : '未连接'}
       </span>
-      <button
-        className="quiet-button compact"
-        type="button"
-        disabled={!hostReady || busy !== null || !onConnect}
-        title={!hostReady ? '飞书渠道宿主尚未接入' : undefined}
-        onClick={() => onConnect?.(channel)}
-      >
-        {busy === 'connect' ? '等待扫码…' : connected ? '切换连接' : hostReady ? '连接飞书' : '尚未开放'}
-      </button>
+      <div className="channel-connection-actions">
+        {connected && (
+          <button
+            className="channel-row-action"
+            type="button"
+            disabled={busy !== null || !onDisconnect}
+            onClick={() => onDisconnect?.(channel)}
+          >
+            {busy === 'disconnect' ? '断开中…' : '断开'}
+          </button>
+        )}
+        <button
+          className="quiet-button compact"
+          type="button"
+          disabled={!hostReady || busy !== null || !onConnect}
+          title={!hostReady ? '飞书渠道宿主尚未接入' : undefined}
+          onClick={() => onConnect?.(channel)}
+        >
+          {busy === 'connect' ? '等待扫码…' : connected ? '切换账号' : hostReady ? '登录开放平台' : '尚未开放'}
+        </button>
+      </div>
     </div>
   )
 }
@@ -645,10 +694,12 @@ function QrDialog({
     <Dialog.Root open onOpenChange={(open) => { if (!open) onClose(attempt.attemptId) }}>
       <Dialog.Portal>
         <Dialog.Overlay className="dialog-overlay app-dialog-overlay" />
-        <AppDialogContent className="channel-qr-dialog">
+          <AppDialogContent className="channel-qr-dialog">
           <AppDialogHeader
-            title={attempt.purpose === 'connect' ? '连接飞书' : '发布队员 Bot'}
-            description="扫码后请在飞书页面核对应用名称、权限与事件，再确认创建。"
+            title={attempt.purpose === 'account_login' ? '登录飞书开放平台' : '兼容扫码发布'}
+            description={attempt.purpose === 'account_login'
+              ? '使用飞书扫码登录开发者平台。本次不会创建应用、读取 App Secret 或发布 Bot。'
+              : '仅在正常发布流程不可用时使用；这次会为当前队员单独扫码注册应用。'}
             icon="shield"
             closeDisabled={busy && attempt.stage !== 'failed'}
           />
@@ -659,12 +710,114 @@ function QrDialog({
                 : <span aria-hidden="true"><ChannelMark /></span>}
             </div>
             <strong>{attempt.detail}</strong>
-            <small>{attempt.expiresAt ? `二维码有效期至 ${formatLocalTime(attempt.expiresAt)}` : '连接凭据只会保存到本机系统安全存储。'}</small>
+            <small>{attempt.expiresAt
+              ? `二维码有效期至 ${formatLocalTime(attempt.expiresAt)}`
+              : attempt.purpose === 'account_login'
+                ? '开发者会话只会保存到本机系统安全存储。'
+                : '兼容流程不会替代或切换当前开发者账号。'}</small>
           </AppDialogBody>
-          <AppDialogFooter note="旧二维码在取消或刷新后不会覆盖当前状态。">
+          <AppDialogFooter note={attempt.purpose === 'account_login'
+            ? '登录后，后续正常发布会复用同一开发者会话。'
+            : '取消后不会自动切换到其他发布方式。'}>
             <button className="quiet-button" type="button" onClick={() => onClose(attempt.attemptId)}>
               {attempt.stage === 'failed' ? '关闭' : '取消'}
             </button>
+          </AppDialogFooter>
+        </AppDialogContent>
+      </Dialog.Portal>
+    </Dialog.Root>
+  )
+}
+
+function PublishBotDialog({
+  agent,
+  account,
+  provisioning,
+  busy,
+  error,
+  onClose,
+  onReconnect,
+  onPublish,
+  onPublishCompat
+}: {
+  agent: AgentProfile | null
+  account: ChannelAccountView | null
+  provisioning: MemberBotProvisioningView | null
+  busy: boolean
+  error: string | null
+  onClose: () => void
+  onReconnect: () => void
+  onPublish: (agentId: string) => void
+  onPublishCompat: (agentId: string) => void
+}): React.JSX.Element {
+  if (!agent || !account) return <></>
+  const terminal = provisioning
+    ? ['completed', 'failed', 'unknown_remote_state'].includes(provisioning.stage)
+    : false
+  const retryLocked = provisioning?.stage === 'unknown_remote_state'
+  const sessionUnavailable = Boolean(error && /登录已过期|账号已变化|重新连接账号/.test(error))
+  return (
+    <Dialog.Root open onOpenChange={(open) => { if (!open && (!busy || terminal)) onClose() }}>
+      <Dialog.Portal>
+        <Dialog.Overlay className="dialog-overlay app-dialog-overlay" />
+        <AppDialogContent className="channel-publish-dialog">
+          <AppDialogHeader
+            title={`发布「${agent.displayName}」为飞书 Bot`}
+            description="Rovai 会复用当前开发者会话，在飞书官方确认窗口完成这名队员的独立应用发布。正常流程不需要再次扫码。"
+            icon="server"
+            closeDisabled={busy && !terminal}
+          />
+          <AppDialogBody>
+            <div className="channel-publish-identity">
+              <MemberAvatar
+                agentId={agent.agentId}
+                avatarRef={agent.avatarRef}
+                displayName={agent.displayName}
+                size="workspace"
+                decorative
+              />
+              <span><strong>{agent.displayName}</strong><small>{agent.teamRole || '协作者'}</small></span>
+              <span className="channel-publish-arrow" aria-hidden="true">→</span>
+              <ChannelMark />
+              <span><strong>独立飞书 Bot</strong><small>权限、事件与长连接彼此隔离</small></span>
+            </div>
+            <div className="channel-dialog-fact"><span>发布账号</span><strong>{account.userName}</strong></div>
+            <div className="channel-dialog-fact"><span>所属租户</span><strong>{account.tenantName}</strong></div>
+            <div className="channel-dialog-fact"><span>应用说明</span><strong>Rovai AI 队员 · {agent.teamRole || '协作者'}</strong></div>
+            {error && <div className="channel-dialog-error" role="alert">{error}</div>}
+            {provisioning ? (
+              <div className={`channel-provisioning-state is-${provisioning.stage}`} role="status">
+                <span className="channel-provisioning-dot" aria-hidden="true" />
+                <span>
+                  <strong>{provisioningLabel(provisioning.stage)}</strong>
+                  <small>{provisioning.detail}</small>
+                  {provisioning.remoteAppId && <code>{provisioning.remoteAppId}</code>}
+                </span>
+              </div>
+            ) : (
+              <p className="channel-publish-note">
+                创建前会再次校验账号和租户；一旦身份变化或会话过期，发布会停止，不会自动改走兼容流程。
+              </p>
+            )}
+          </AppDialogBody>
+          <AppDialogFooter note={retryLocked
+            ? '远端结果无法确认。请先在飞书开放平台核对，避免重复创建应用。'
+            : '兼容扫码发布只在正常流程不可用时手动选择。'}>
+            <button className="quiet-button" type="button" disabled={busy && !terminal} onClick={onClose}>取消</button>
+            {!retryLocked && !sessionUnavailable && (
+              <button className="quiet-button" type="button" disabled={busy} onClick={() => onPublishCompat(agent.agentId)}>
+                兼容扫码发布
+              </button>
+            )}
+            {sessionUnavailable ? (
+              <button className="primary-button" type="button" disabled={busy} onClick={onReconnect}>
+                重新连接飞书
+              </button>
+            ) : !retryLocked && (
+              <button className="primary-button" type="button" disabled={busy} onClick={() => onPublish(agent.agentId)}>
+                {busy ? '发布中…' : provisioning?.stage === 'failed' ? '重新发布' : '确认发布'}
+              </button>
+            )}
           </AppDialogFooter>
         </AppDialogContent>
       </Dialog.Portal>
@@ -803,6 +956,20 @@ function publicationLabel(status: ChannelMemberBotView['publicationStatus'] | 'u
   }
 }
 
+function provisioningLabel(stage: MemberBotProvisioningView['stage']): string {
+  switch (stage) {
+    case 'verifying_session': return '正在校验账号'
+    case 'creating_app': return '正在创建应用'
+    case 'configuring_bot': return '正在配置 Bot'
+    case 'configuring_permissions': return '正在配置权限与事件'
+    case 'publishing_version': return '正在发布版本'
+    case 'verifying_connection': return '正在验证长连接'
+    case 'completed': return '发布完成'
+    case 'unknown_remote_state': return '远端状态待核对'
+    default: return '发布未完成'
+  }
+}
+
 function conversationKindLabel(kind: 'p2p' | 'group' | 'topic'): string {
   if (kind === 'p2p') return '私聊'
   if (kind === 'topic') return '话题'
@@ -824,7 +991,7 @@ function formatLocalTime(value: string): string {
 
 function assertChannelSettingsSnapshot(value: ChannelSettingsSnapshot): ChannelSettingsSnapshot {
   if (
-    value.schemaVersion !== 2
+    value.schemaVersion !== 3
     || !Array.isArray(value.channels)
     || !Array.isArray(value.projectBindings)
     || !Array.isArray(value.unboundConversations)

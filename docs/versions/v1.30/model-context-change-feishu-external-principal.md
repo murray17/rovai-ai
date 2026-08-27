@@ -242,4 +242,5 @@ ExternalQuote 投影文本或改变 Profile/预算/section order 的方案都必
 - ContextManifest 保存 source/projected/exact payload digest，Runtime Input Delivery bytes 与 prepared payload一致；
 - negative：Host override、ExternalPrincipal raw identity、external message ID、被引消息单独 CampMessage、历史 reply
   projection 和 Formatter 21 new write 均不存在；
-- Migration 113 从 v1.25/schema 66 保留历史 Manifest/消息并安装 22/22 pairing、schema 67 与外键完整性。
+- Migration 113 从 v1.25/schema 66 保留历史 Manifest/消息并安装 22/22 pairing 与 schema 67；Migration 114
+  只增加 Feishu Developer Identity/publication intent 并推进到 v1.27/schema 68，不改变或重写 Context pairing。

@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import { describe, expect, it, vi } from 'vitest'
 import {
   ChannelSettingsService,
@@ -7,6 +8,7 @@ import type {
   ChannelCredentialStore,
   FeishuAppCredential
 } from './channel-credential-store'
+import type { FeishuDeveloperIdentity } from './feishu-developer-session'
 
 function channelCore(
   handler: (method: string, params: unknown) => unknown | Promise<unknown>
@@ -39,6 +41,7 @@ function coreSnapshot(overrides: Record<string, unknown> = {}): Record<string, u
     schemaVersion: 1,
     account: null,
     memberBots: [],
+    publicationIntents: [],
     projectBindings: [],
     unboundConversations: [],
     conversationBindings: [],
@@ -48,12 +51,85 @@ function coreSnapshot(overrides: Record<string, unknown> = {}): Record<string, u
   }
 }
 
+function identity(overrides: Partial<FeishuDeveloperIdentity> = {}): FeishuDeveloperIdentity {
+  return {
+    brand: 'feishu',
+    userId: 'owner-user-id',
+    userName: 'Murray',
+    email: 'murray@example.com',
+    tenantId: 'tenant-1',
+    tenantName: '星海科技',
+    ...overrides
+  }
+}
+
+function connectedAccount(value = identity()): Record<string, unknown> {
+  const digest = (input: string): string => `sha256:${createHash('sha256').update(input).digest('hex')}`
+  return {
+    accountId: digest(`${value.brand}\0${value.tenantId}\0${value.userId}`),
+    userIdDigest: digest(`feishu-user\0${value.userId}`),
+    tenantId: value.tenantId,
+    userName: value.userName,
+    email: value.email ?? null,
+    tenantName: value.tenantName,
+    brand: value.brand,
+    status: 'connected',
+    version: 1,
+    connectedAt: '2026-08-27T00:00:00Z',
+    lastVerifiedAt: '2026-08-27T00:00:00Z'
+  }
+}
+
+function developerSession(value = identity()): NonNullable<ChannelHostDependencies['developerSession']> & {
+  inspect: ReturnType<typeof vi.fn>
+  disconnect: ReturnType<typeof vi.fn>
+} {
+  return {
+    beginLogin: vi.fn(async () => value),
+    inspect: vi.fn(async () => value),
+    requireExpectedIdentity: vi.fn(async () => value),
+    disconnect: vi.fn(async () => undefined)
+  }
+}
+
+function presentAgent(agentId = 'agent-a'): Record<string, unknown> {
+  return {
+    agentId,
+    displayName: '审阅员',
+    avatarRef: null,
+    accent: null,
+    teamRole: '代码审阅',
+    professionalResponsibilities: '',
+    personalityTraits: [],
+    workingPrinciples: '',
+    growthTopic: '',
+    defaultCapabilities: [],
+    presence: 'present',
+    runtimeConfiguration: null,
+    runtimeReadiness: { status: 'ready', blockers: [] },
+    memberOrder: 0,
+    version: 1,
+    createdAt: '2026-08-27T00:00:00Z',
+    updatedAt: '2026-08-27T00:00:00Z',
+    removedAt: null
+  }
+}
+
+function fakeCreateChannel(): NonNullable<ChannelHostDependencies['createChannel']> {
+  return vi.fn(() => ({
+    botIdentity: { openId: 'bot-open-id', name: '审阅员' },
+    on: vi.fn(() => () => undefined),
+    connect: vi.fn(async () => undefined),
+    disconnect: vi.fn(async () => undefined)
+  })) as unknown as NonNullable<ChannelHostDependencies['createChannel']>
+}
+
 describe('channel settings service', () => {
   it('projects only public Feishu setup facts while the host is unavailable', async () => {
     const snapshot = await new ChannelSettingsService().get()
 
     expect(snapshot).toEqual({
-      schemaVersion: 2,
+      schemaVersion: 3,
       channels: [{
         kind: 'feishu',
         displayName: '飞书',
@@ -67,7 +143,8 @@ describe('channel settings service', () => {
       projectBindings: [],
       unboundConversations: [],
       conversationBindings: [],
-      activeQrAttempt: null
+      activeQrAttempt: null,
+      activeProvisioning: null
     })
     expect(JSON.stringify(snapshot)).not.toMatch(/cookie|csrf|secret|token/i)
   })
@@ -89,10 +166,16 @@ describe('channel settings service', () => {
       core: channelCore(() => coreSnapshot({
         account: {
           accountId: 'controller-app',
-          displayName: 'Murray',
+          userIdDigest: `sha256:${'a'.repeat(64)}`,
+          tenantId: 'tenant-1',
+          userName: 'Murray',
+          email: 'murray@example.com',
           tenantName: '星海科技',
+          brand: 'feishu',
           status: 'connected',
-          version: 3
+          version: 3,
+          connectedAt: '2026-08-27T00:00:00Z',
+          lastVerifiedAt: '2026-08-27T00:00:00Z'
         },
         memberBots: [{
           agentId: 'agent-a',
@@ -115,26 +198,334 @@ describe('channel settings service', () => {
     expect(serialized).not.toMatch(/credentialRef|super-secret|tenant-private|chat-private|aggregate-private/)
   })
 
-  it('restores the previous encrypted controller credential when Core rejects a switch', async () => {
-    const previous = { appId: 'old-app', appSecret: 'old-secret' }
-    const credentialStore = memoryCredentialStore({ 'feishu-controller': previous })
-    const registerApp = vi.fn(async () => ({
-      client_id: 'new-app',
-      client_secret: 'new-secret',
-      user_info: { open_id: 'owner-open-id', tenant_brand: 'feishu' }
-    })) as unknown as NonNullable<ChannelHostDependencies['registerApp']>
+  it('connects a real developer identity without registering an app or storing a controller secret', async () => {
+    const credentialStore = memoryCredentialStore()
+    const registerAppCompat = vi.fn()
+    const beginLogin = vi.fn(async () => ({
+      brand: 'feishu' as const,
+      userId: 'owner-user-id',
+      userName: 'Murray',
+      email: 'murray@example.com',
+      tenantId: 'tenant-1',
+      tenantName: '星海科技'
+    }))
+    const commands: Array<{ method: string; params: unknown }> = []
     const service = new ChannelSettingsService({
       credentialStore,
-      registerApp,
-      core: channelCore((method) => {
-        if (method === 'channels.feishu.account.upsert') throw new Error('core_rejected')
+      registerAppCompat: registerAppCompat as unknown as NonNullable<ChannelHostDependencies['registerAppCompat']>,
+      developerSession: {
+        beginLogin,
+        async inspect() { return null },
+        async requireExpectedIdentity() { throw new Error('not_used') },
+        async disconnect() {}
+      },
+      core: channelCore((method, params) => {
+        commands.push({ method, params })
+        if (method === 'channels.feishu.account.upsert') return { status: 'applied' }
         return coreSnapshot()
       })
     })
 
-    await expect(service.connect()).rejects.toThrow('core_rejected')
+    await service.connect()
 
-    expect(credentialStore.values.get('feishu-controller')).toEqual(previous)
-    expect(JSON.stringify(await service.get())).not.toContain('new-secret')
+    expect(beginLogin).toHaveBeenCalledWith(expect.objectContaining({ forceFresh: true }))
+    expect(registerAppCompat).not.toHaveBeenCalled()
+    expect(credentialStore.values.size).toBe(0)
+    const upsert = commands.find((entry) => entry.method === 'channels.feishu.account.upsert')
+    expect(upsert).toBeDefined()
+    expect(JSON.stringify(upsert)).toContain('Murray')
+    expect(JSON.stringify(upsert)).toContain('murray@example.com')
+    expect(JSON.stringify(upsert)).not.toContain('owner-user-id')
+    expect(JSON.stringify(upsert)).toContain('tenant-1')
+    expect(JSON.stringify(upsert)).not.toMatch(/appSecret|client_secret|controller/i)
+  })
+
+  it('uses the developer session for normal publishing and reserves QR registration for the explicit compatibility path', async () => {
+    const owner = identity()
+    const credentialStore = memoryCredentialStore()
+    const provision = vi.fn(async () => ({
+      appId: 'cli-normal',
+      appSecret: 'normal-secret',
+      botOpenId: 'bot-open-id',
+      botDisplayName: '审阅员',
+      publishedVersionId: null
+    }))
+    const registerAppCompat = vi.fn(async () => ({
+      client_id: 'cli-compat',
+      client_secret: 'compat-secret'
+    }))
+    const service = new ChannelSettingsService({
+      credentialStore,
+      developerSession: developerSession(owner),
+      memberBotProvisioner: { create: provision },
+      registerAppCompat: registerAppCompat as unknown as NonNullable<ChannelHostDependencies['registerAppCompat']>,
+      createChannel: fakeCreateChannel(),
+      core: channelCore((method) => {
+        if (method === 'channels.feishu.snapshot') {
+          return coreSnapshot({ account: connectedAccount(owner) })
+        }
+        if (method === 'members.get') return presentAgent()
+        return { status: 'applied' }
+      })
+    })
+
+    const normal = await service.publishMemberBot('agent-a')
+
+    expect(provision).toHaveBeenCalledTimes(1)
+    expect(provision).toHaveBeenCalledWith(expect.objectContaining({
+      expectedDeveloperIdentity: { userId: owner.userId, tenantId: owner.tenantId }
+    }))
+    expect(registerAppCompat).not.toHaveBeenCalled()
+    expect(normal.activeQrAttempt).toBeNull()
+    expect(normal.activeProvisioning).toMatchObject({
+      agentId: 'agent-a',
+      stage: 'completed',
+      remoteAppId: 'cli-normal'
+    })
+    expect([...credentialStore.values.values()]).toContainEqual({
+      appId: 'cli-normal',
+      appSecret: 'normal-secret'
+    })
+
+    await service.publishMemberBotCompat('agent-a')
+
+    expect(registerAppCompat).toHaveBeenCalledTimes(1)
+    expect(provision).toHaveBeenCalledTimes(1)
+  })
+
+  it('fails closed on developer identity drift without creating or compat-registering an app', async () => {
+    const owner = identity()
+    const provision = vi.fn()
+    const registerAppCompat = vi.fn()
+    const service = new ChannelSettingsService({
+      credentialStore: memoryCredentialStore(),
+      developerSession: developerSession(identity({ userId: 'different-owner' })),
+      memberBotProvisioner: { create: provision },
+      registerAppCompat: registerAppCompat as unknown as NonNullable<ChannelHostDependencies['registerAppCompat']>,
+      core: channelCore((method) => {
+        if (method === 'channels.feishu.snapshot') {
+          return coreSnapshot({ account: connectedAccount(owner) })
+        }
+        return { status: 'applied' }
+      })
+    })
+
+    await expect(service.publishMemberBot('agent-a')).rejects.toThrow('账号已变化')
+
+    expect(provision).not.toHaveBeenCalled()
+    expect(registerAppCompat).not.toHaveBeenCalled()
+  })
+
+  it('does not persist a placeholder account when login cannot produce a complete identity', async () => {
+    const commands: string[] = []
+    const service = new ChannelSettingsService({
+      credentialStore: memoryCredentialStore(),
+      developerSession: {
+        async beginLogin() { throw new Error('feishu_developer_identity_incomplete') },
+        async inspect() { return null },
+        async requireExpectedIdentity() { throw new Error('not_used') },
+        async disconnect() {}
+      },
+      core: channelCore((method) => {
+        commands.push(method)
+        return method === 'channels.feishu.snapshot' ? coreSnapshot() : { status: 'applied' }
+      })
+    })
+
+    await expect(service.connect()).rejects.toThrow('feishu_developer_identity_incomplete')
+
+    expect(commands).not.toContain('channels.feishu.account.upsert')
+  })
+
+  it('does not silently use compatibility registration when the developer session has expired', async () => {
+    const owner = identity()
+    const provision = vi.fn()
+    const registerAppCompat = vi.fn()
+    const expiredSession = developerSession(owner)
+    expiredSession.inspect.mockResolvedValue(null)
+    const service = new ChannelSettingsService({
+      credentialStore: memoryCredentialStore(),
+      developerSession: expiredSession,
+      memberBotProvisioner: { create: provision },
+      registerAppCompat: registerAppCompat as unknown as NonNullable<ChannelHostDependencies['registerAppCompat']>,
+      core: channelCore((method) => {
+        if (method === 'channels.feishu.snapshot') return coreSnapshot({ account: connectedAccount(owner) })
+        return { status: 'applied' }
+      })
+    })
+
+    await expect(service.publishMemberBot('agent-a')).rejects.toThrow('登录已过期')
+
+    expect(provision).not.toHaveBeenCalled()
+    expect(registerAppCompat).not.toHaveBeenCalled()
+  })
+
+  it('disconnects only the developer session and preserves member Bot credentials', async () => {
+    const owner = identity()
+    const session = developerSession(owner)
+    const credential = { appId: 'cli-member', appSecret: 'member-secret' }
+    const credentialStore = memoryCredentialStore({ 'feishu-member-existing': credential })
+    let account = connectedAccount(owner)
+    const service = new ChannelSettingsService({
+      credentialStore,
+      developerSession: session,
+      core: channelCore((method) => {
+        if (method === 'channels.feishu.snapshot') return coreSnapshot({ account })
+        if (method === 'channels.feishu.account.disconnect') {
+          account = { ...account, status: 'disconnected', version: 2 }
+          return { status: 'applied' }
+        }
+        return { status: 'applied' }
+      })
+    })
+
+    await service.disconnect()
+
+    expect(session.disconnect).toHaveBeenCalledTimes(1)
+    expect(credentialStore.values.get('feishu-member-existing')).toEqual(credential)
+  })
+
+  it('clears the in-memory failure projection after retrying a saved Bot credential', async () => {
+    const owner = identity()
+    const credentialStore = memoryCredentialStore()
+    let publicationIntent: Record<string, unknown> | null = null
+    let memberBots: Record<string, unknown>[] = []
+    let connectCount = 0
+    const createChannel = vi.fn(() => ({
+      botIdentity: { openId: 'bot-open-id', name: '审阅员' },
+      on: vi.fn(() => () => undefined),
+      connect: vi.fn(async () => {
+        connectCount += 1
+        if (connectCount === 1) throw new Error('handshake_failed')
+      }),
+      disconnect: vi.fn(async () => undefined)
+    })) as unknown as NonNullable<ChannelHostDependencies['createChannel']>
+    const service = new ChannelSettingsService({
+      credentialStore,
+      developerSession: developerSession(owner),
+      memberBotProvisioner: {
+        async create() {
+          return {
+            appId: 'cli-retry',
+            appSecret: 'retry-secret',
+            botDisplayName: '审阅员',
+            publishedVersionId: null
+          }
+        }
+      },
+      createChannel,
+      core: channelCore((method, rawParams) => {
+        if (method === 'channels.feishu.snapshot') {
+          return coreSnapshot({
+            account: connectedAccount(owner),
+            memberBots,
+            publicationIntents: publicationIntent ? [publicationIntent] : []
+          })
+        }
+        if (method === 'members.get') return presentAgent()
+        const params = rawParams as { command?: Record<string, unknown> }
+        if (method === 'channels.feishu.publicationIntent.create') {
+          publicationIntent = {
+            ...params.command,
+            state: 'created',
+            remoteAppId: null,
+            credentialRef: null,
+            lastCompletedStep: null,
+            failureCode: null,
+            version: 1,
+            createdAt: '2026-08-27T00:00:00Z',
+            updatedAt: '2026-08-27T00:00:00Z'
+          }
+        } else if (method === 'channels.feishu.publicationIntent.advance' && publicationIntent) {
+          publicationIntent = {
+            ...publicationIntent,
+            ...params.command,
+            version: Number(publicationIntent.version) + 1,
+            updatedAt: '2026-08-27T00:01:00Z'
+          }
+        } else if (method === 'channels.feishu.memberBot.upsert') {
+          memberBots = [{
+            agentId: 'agent-a',
+            accountId: connectedAccount(owner).accountId,
+            appId: 'cli-retry',
+            botDisplayName: '审阅员',
+            credentialRef: 'feishu-member-agent-a',
+            status: 'published',
+            failureCode: null,
+            version: 1
+          }]
+        }
+        return { status: 'applied' }
+      })
+    })
+
+    await expect(service.publishMemberBot('agent-a')).rejects.toThrow('handshake_failed')
+    const retried = await service.retryMemberBot('agent-a')
+
+    expect(retried.activeProvisioning).toMatchObject({
+      agentId: 'agent-a',
+      stage: 'completed',
+      remoteAppId: 'cli-retry'
+    })
+    expect(retried.channels[0].memberBots).toContainEqual(expect.objectContaining({
+      agentId: 'agent-a',
+      publicationStatus: 'published'
+    }))
+    expect(publicationIntent).toMatchObject({ state: 'completed' })
+  })
+
+  it('persists unknown remote state and blocks a second app creation attempt', async () => {
+    const owner = identity()
+    const unknownError = Object.assign(new Error('registration_transport_lost'), {
+      code: 'registration_transport_lost',
+      remoteState: 'unknown' as const
+    })
+    const provision = vi.fn(async () => { throw unknownError })
+    let publicationIntent: Record<string, unknown> | null = null
+    let createCount = 0
+    const service = new ChannelSettingsService({
+      credentialStore: memoryCredentialStore(),
+      developerSession: developerSession(owner),
+      memberBotProvisioner: { create: provision },
+      core: channelCore((method, rawParams) => {
+        if (method === 'channels.feishu.snapshot') {
+          return coreSnapshot({
+            account: connectedAccount(owner),
+            publicationIntents: publicationIntent ? [publicationIntent] : []
+          })
+        }
+        if (method === 'members.get') return presentAgent()
+        const params = rawParams as { command?: Record<string, unknown> }
+        if (method === 'channels.feishu.publicationIntent.create') {
+          createCount += 1
+          publicationIntent = {
+            ...params.command,
+            state: 'created',
+            remoteAppId: null,
+            credentialRef: null,
+            lastCompletedStep: null,
+            failureCode: null,
+            version: 1,
+            createdAt: '2026-08-27T00:00:00Z',
+            updatedAt: '2026-08-27T00:00:00Z'
+          }
+        } else if (method === 'channels.feishu.publicationIntent.advance' && publicationIntent) {
+          publicationIntent = {
+            ...publicationIntent,
+            ...params.command,
+            version: Number(publicationIntent.version) + 1,
+            updatedAt: '2026-08-27T00:01:00Z'
+          }
+        }
+        return { status: 'applied' }
+      })
+    })
+
+    await expect(service.publishMemberBot('agent-a')).rejects.toThrow('registration_transport_lost')
+    await expect(service.publishMemberBot('agent-a')).rejects.toThrow('避免重复创建应用')
+
+    expect(provision).toHaveBeenCalledTimes(1)
+    expect(createCount).toBe(1)
+    expect(publicationIntent).toMatchObject({ state: 'failed_unknown_remote_state' })
   })
 })

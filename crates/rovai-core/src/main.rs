@@ -84,12 +84,13 @@ use rovai_core::{
     camp_id::CampId,
     camp_open::CampOpenService,
     channel::{
-        ArchiveProjectBindingCommand, BindChannelConversationCommand, ChannelHostTickCommand,
-        ChannelService, CreateProjectBindingCommand, DisableFeishuMemberBotCommand,
-        DisconnectFeishuAccountCommand, FinalizeChannelInboundCommand,
-        ObserveChannelInboundCommand, ReconcileFeishuGroupRosterCommand,
-        SettleChannelDeliveryCommand, UpdateProjectBindingCommand, UpsertFeishuAccountCommand,
-        UpsertFeishuMemberBotCommand,
+        AdvanceMemberBotPublicationIntentCommand, ArchiveProjectBindingCommand,
+        BindChannelConversationCommand, ChannelHostTickCommand, ChannelService,
+        CreateMemberBotPublicationIntentCommand, CreateProjectBindingCommand,
+        DisableFeishuMemberBotCommand, DisconnectFeishuAccountCommand, ExpireFeishuAccountCommand,
+        FinalizeChannelInboundCommand, ObserveChannelInboundCommand,
+        ReconcileFeishuGroupRosterCommand, SettleChannelDeliveryCommand,
+        UpdateProjectBindingCommand, UpsertFeishuAccountCommand, UpsertFeishuMemberBotCommand,
     },
     collaboration::{
         AddCampMemberCommand, CampActivationState, CampCollaborationMode, ChangeDefaultLeadCommand,
@@ -4629,6 +4630,51 @@ impl Core {
                 let execution = ChannelService::default().disconnect_feishu_account(
                     &mut database,
                     &user_command_envelope(params.command_id, params.command),
+                )?;
+                Ok(serde_json::to_value(execution.result)?)
+            }
+            "channels.feishu.account.expire" => {
+                let params: UserCommandParams<ExpireFeishuAccountCommand> =
+                    serde_json::from_value(request.params.clone())?;
+                let mut database = self.database.lock().await;
+                let execution = ChannelService::default().expire_feishu_account(
+                    &mut database,
+                    &system_command_envelope(
+                        params.command_id,
+                        "feishu-channel-host",
+                        None,
+                        params.command,
+                    ),
+                )?;
+                Ok(serde_json::to_value(execution.result)?)
+            }
+            "channels.feishu.publicationIntent.create" => {
+                let params: UserCommandParams<CreateMemberBotPublicationIntentCommand> =
+                    serde_json::from_value(request.params.clone())?;
+                let mut database = self.database.lock().await;
+                let execution = ChannelService::default().create_member_bot_publication_intent(
+                    &mut database,
+                    &system_command_envelope(
+                        params.command_id,
+                        "feishu-channel-host",
+                        None,
+                        params.command,
+                    ),
+                )?;
+                Ok(serde_json::to_value(execution.result)?)
+            }
+            "channels.feishu.publicationIntent.advance" => {
+                let params: UserCommandParams<AdvanceMemberBotPublicationIntentCommand> =
+                    serde_json::from_value(request.params.clone())?;
+                let mut database = self.database.lock().await;
+                let execution = ChannelService::default().advance_member_bot_publication_intent(
+                    &mut database,
+                    &system_command_envelope(
+                        params.command_id,
+                        "feishu-channel-host",
+                        None,
+                        params.command,
+                    ),
                 )?;
                 Ok(serde_json::to_value(execution.result)?)
             }

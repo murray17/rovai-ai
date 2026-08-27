@@ -50,8 +50,10 @@ pub struct Database {
     runtime_camp_files_root_identity_digest: String,
 }
 
-const CURRENT_DATA_CONTRACT_VERSION: &str = "v1.26";
-const CURRENT_PROJECTION_SCHEMA_VERSION: i64 = 67;
+const CURRENT_DATA_CONTRACT_VERSION: &str = "v1.27";
+const CURRENT_PROJECTION_SCHEMA_VERSION: i64 = 68;
+const V114_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.26";
+const V114_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION: i64 = 67;
 const V113_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.25";
 const V113_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION: i64 = 66;
 const V112_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.24";
@@ -182,6 +184,7 @@ struct CurrentMigrationState {
     v111: bool,
     v112: bool,
     v113: bool,
+    v114: bool,
 }
 
 impl CurrentMigrationState {
@@ -191,6 +194,54 @@ impl CurrentMigrationState {
             return false;
         }
         if contract == CURRENT_DATA_CONTRACT_VERSION && schema == CURRENT_PROJECTION_SCHEMA_VERSION
+        {
+            return self.v70
+                && self.v71
+                && self.v76
+                && self.v77
+                && self.v78
+                && self.v79
+                && self.v80
+                && self.v81
+                && self.v82
+                && self.v83
+                && self.v84
+                && self.v85
+                && self.v86
+                && self.v87
+                && self.v88
+                && self.v89
+                && self.v90
+                && self.v91
+                && self.v92
+                && self.v93
+                && self.v94
+                && self.v95
+                && self.v96
+                && self.v97
+                && self.v98
+                && self.v99
+                && self.v100
+                && self.v101
+                && self.v102
+                && self.v103
+                && self.v104
+                && self.v105
+                && self.v106
+                && self.v107
+                && self.v108
+                && self.v109
+                && self.v110
+                && self.v111
+                && self.v112
+                && self.v113
+                && self.v114;
+        }
+        if self.v114 {
+            return false;
+        }
+        if contract == V114_MIGRATION_SOURCE_DATA_CONTRACT_VERSION
+            && schema == V114_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION
         {
             return self.v70
                 && self.v71
@@ -1374,7 +1425,8 @@ fn load_current_migration_state(
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 110),
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 111),
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 112),
-               EXISTS(SELECT 1 FROM schema_migration WHERE version = 113)
+               EXISTS(SELECT 1 FROM schema_migration WHERE version = 113),
+               EXISTS(SELECT 1 FROM schema_migration WHERE version = 114)
         "#,
         [],
         |row| {
@@ -1423,6 +1475,7 @@ fn load_current_migration_state(
                 v111: row.get(41)?,
                 v112: row.get(42)?,
                 v113: row.get(43)?,
+                v114: row.get(44)?,
             })
         },
     )
@@ -2889,6 +2942,9 @@ impl Database {
             if !self.schema_migration_applied(113)? {
                 self.migrate_channel_platform_v113()?;
             }
+            if !self.schema_migration_applied(114)? {
+                self.migrate_feishu_developer_session_v114()?;
+            }
             if let Err(error) =
                 crate::notification::maintain_notification_episode_retention(self.connection())
             {
@@ -3277,6 +3333,9 @@ impl Database {
         }
         if !self.schema_migration_applied(113)? {
             self.migrate_channel_platform_v113()?;
+        }
+        if !self.schema_migration_applied(114)? {
+            self.migrate_feishu_developer_session_v114()?;
         }
         if let Err(error) =
             crate::notification::maintain_notification_episode_retention(self.connection())
@@ -16398,6 +16457,75 @@ impl Database {
         Ok(())
     }
 
+    fn migrate_feishu_developer_session_v114(&mut self) -> Result<()> {
+        let transaction = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        transaction.execute_batch(
+            r#"
+            ALTER TABLE feishu_account ADD COLUMN user_id_digest TEXT;
+            ALTER TABLE feishu_account ADD COLUMN tenant_id TEXT;
+            ALTER TABLE feishu_account ADD COLUMN user_name TEXT;
+            ALTER TABLE feishu_account ADD COLUMN email TEXT;
+            ALTER TABLE feishu_account ADD COLUMN brand TEXT
+                CHECK(brand IS NULL OR brand IN ('feishu', 'lark'));
+            ALTER TABLE feishu_account ADD COLUMN connected_at TEXT;
+            ALTER TABLE feishu_account ADD COLUMN last_verified_at TEXT;
+
+            UPDATE feishu_account
+            SET status = 'disconnected', disconnected_at = COALESCE(disconnected_at, datetime('now')),
+                version = version + 1, updated_at = datetime('now')
+            WHERE status IN ('connected', 'session_expired');
+
+            DELETE FROM feishu_account
+            WHERE id NOT IN (SELECT account_id FROM feishu_member_bot);
+
+            CREATE TABLE feishu_member_bot_publication_intent (
+                id TEXT PRIMARY KEY,
+                agent_id TEXT NOT NULL REFERENCES agent_profile(id),
+                account_id TEXT NOT NULL REFERENCES feishu_account(id),
+                expected_user_id_digest TEXT NOT NULL
+                    CHECK(length(trim(expected_user_id_digest)) > 0),
+                expected_tenant_id TEXT NOT NULL CHECK(length(trim(expected_tenant_id)) > 0),
+                requested_app_name TEXT NOT NULL CHECK(length(trim(requested_app_name)) > 0),
+                provisioning_mode TEXT NOT NULL
+                    CHECK(provisioning_mode IN ('developer_session', 'compat_registration')),
+                state TEXT NOT NULL CHECK(state IN (
+                    'created', 'session_verified', 'app_created', 'credentials_read',
+                    'bot_configured', 'version_published', 'connection_verified',
+                    'completed', 'failed_recoverable', 'failed_unknown_remote_state'
+                )),
+                remote_app_id TEXT,
+                credential_ref TEXT,
+                last_completed_step TEXT,
+                failure_code TEXT,
+                version INTEGER NOT NULL DEFAULT 1 CHECK(version >= 1),
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                CHECK(
+                    (state = 'failed_unknown_remote_state' AND failure_code IS NOT NULL)
+                    OR state <> 'failed_unknown_remote_state'
+                )
+            );
+            CREATE INDEX feishu_member_bot_publication_intent_agent_idx
+                ON feishu_member_bot_publication_intent(agent_id, created_at DESC, id);
+            CREATE UNIQUE INDEX feishu_member_bot_publication_intent_active_agent_idx
+                ON feishu_member_bot_publication_intent(agent_id)
+                WHERE state NOT IN ('completed', 'failed_recoverable');
+
+            UPDATE rovai_data_contract
+            SET contract_version = 'v1.27', projection_schema_version = 68,
+                reset_reason = NULL, updated_at = datetime('now')
+            WHERE singleton = 1;
+
+            INSERT INTO schema_migration(version, applied_at)
+            VALUES (114, datetime('now'));
+            "#,
+        )?;
+        transaction.commit()?;
+        Ok(())
+    }
+
     fn migrate_managed_attachment_v2_v112(&mut self) -> Result<()> {
         let transaction = self
             .connection
@@ -21178,6 +21306,7 @@ fn downgrade_current_schema_to_v112_source_for_test(connection: &Connection) {
             DROP TABLE channel_inbound_aggregate;
             DROP TABLE external_group_bot_roster;
             DROP TABLE external_group_bot_roster_state;
+            DROP TABLE feishu_member_bot_publication_intent;
             DROP TABLE feishu_member_bot;
             DROP TABLE feishu_account;
             DROP TABLE channel_conversation_binding;
@@ -21189,6 +21318,7 @@ fn downgrade_current_schema_to_v112_source_for_test(connection: &Connection) {
             SET contract_version = 'v1.25', projection_schema_version = 66
             WHERE singleton = 1;
             DELETE FROM schema_migration WHERE version = 113;
+            DELETE FROM schema_migration WHERE version = 114;
             PRAGMA foreign_keys = ON;
             "#,
         )
@@ -22077,6 +22207,7 @@ mod tests {
             v111: version >= 111,
             v112: version >= 112,
             v113: version >= 113,
+            v114: version >= 114,
         }
     }
 
@@ -22087,6 +22218,12 @@ mod tests {
                 "current",
                 CURRENT_DATA_CONTRACT_VERSION,
                 CURRENT_PROJECTION_SCHEMA_VERSION,
+                114,
+            ),
+            (
+                "v1.26/schema-67 after Feishu channel platform",
+                V114_MIGRATION_SOURCE_DATA_CONTRACT_VERSION,
+                V114_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION,
                 113,
             ),
             (
@@ -22401,7 +22538,7 @@ mod tests {
             )
             .expect("current contract marker should load");
 
-        assert_eq!(state, migration_state_through(113));
+        assert_eq!(state, migration_state_through(114));
         assert!(state.admits(&contract, schema));
         assert!(has_admissible_data_contract(
             &directory.join("rovai.sqlite")
@@ -24724,7 +24861,7 @@ mod tests {
     }
 
     #[test]
-    fn v113_upgrades_v112_preserves_existing_evidence_and_installs_channel_contract() {
+    fn v114_upgrades_v112_preserves_evidence_and_installs_developer_session_contract() {
         let (database, directory) = crate::test_support::seeded_runtime_database();
         downgrade_current_schema_to_v112_source_for_test(database.connection());
         let source_counts: (i64, i64) = database
@@ -24768,6 +24905,7 @@ mod tests {
                     r#"
                     SELECT contract_version, projection_schema_version,
                            (SELECT COUNT(*) FROM schema_migration WHERE version = 113),
+                           (SELECT COUNT(*) FROM schema_migration WHERE version = 114),
                            (SELECT COUNT(*) FROM pragma_foreign_key_check)
                     FROM rovai_data_contract WHERE singleton = 1
                     "#,
@@ -24777,12 +24915,14 @@ mod tests {
                         row.get::<_, i64>(1)?,
                         row.get::<_, i64>(2)?,
                         row.get::<_, i64>(3)?,
+                        row.get::<_, i64>(4)?,
                     )),
                 )
                 .unwrap(),
             (
                 CURRENT_DATA_CONTRACT_VERSION.to_string(),
                 CURRENT_PROJECTION_SCHEMA_VERSION,
+                1,
                 1,
                 0,
             )
@@ -24811,6 +24951,7 @@ mod tests {
                 "channel_conversation",
                 "channel_turn_request",
                 "channel_delivery",
+                "feishu_member_bot_publication_intent",
             ],
             true,
         );
@@ -24833,6 +24974,22 @@ mod tests {
             .unwrap();
         assert!(manifest_schema.contains("context_manifest_version = 22"));
         assert!(manifest_schema.contains("formatter_version = 22"));
+        for column in [
+            "user_id_digest",
+            "tenant_id",
+            "user_name",
+            "email",
+            "brand",
+            "connected_at",
+            "last_verified_at",
+        ] {
+            assert!(
+                table_columns(upgraded.connection(), "feishu_account")
+                    .unwrap()
+                    .contains(&column.to_string()),
+                "Migration 114 should install feishu_account.{column}"
+            );
+        }
         drop(upgraded);
 
         let restarted = Database::open(&directory).expect("v113 restart should be idempotent");
@@ -24840,12 +24997,12 @@ mod tests {
             restarted
                 .connection()
                 .query_row(
-                    "SELECT COUNT(*) FROM schema_migration WHERE version = 113",
+                    "SELECT COUNT(*) FROM schema_migration WHERE version IN (113, 114)",
                     [],
                     |row| row.get::<_, i64>(0),
                 )
                 .unwrap(),
-            1
+            2
         );
         drop(restarted);
         std::fs::remove_dir_all(directory).expect("temporary database should be removable");

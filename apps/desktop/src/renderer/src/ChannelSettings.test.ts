@@ -47,7 +47,7 @@ describe('Channel settings', () => {
 
   it('renders connected account and published Bot facts without exposing credentials', () => {
     const snapshot: ChannelSettingsSnapshot = {
-      schemaVersion: 2,
+      schemaVersion: 3,
       channels: [{
         kind: 'feishu',
         displayName: '飞书',
@@ -56,8 +56,12 @@ describe('Channel settings', () => {
           status: 'connected',
           account: {
             accountId: 'account-1',
-            displayName: 'Murray',
-            tenantName: '星海科技'
+            userName: 'Murray',
+            email: 'murray@example.com',
+            tenantName: '星海科技',
+            brand: 'feishu',
+            connectedAt: '2026-08-27T00:00:00Z',
+            lastVerifiedAt: '2026-08-27T00:00:00Z'
           }
         },
         memberBots: [{
@@ -71,12 +75,14 @@ describe('Channel settings', () => {
       projectBindings: [],
       unboundConversations: [],
       conversationBindings: [],
-      activeQrAttempt: null
+      activeQrAttempt: null,
+      activeProvisioning: null
     }
     const markup = renderToStaticMarkup(createElement(ChannelSettingsView, {
       agents: [agent('agent-a', 0)],
       snapshot,
       onConnect: () => undefined,
+      onDisconnect: () => undefined,
       onManage: () => undefined
     }))
 
@@ -84,7 +90,9 @@ describe('Channel settings', () => {
     expect(markup).toContain('星海科技')
     expect(markup).toContain('审阅员芝士')
     expect(markup).toContain('已发布')
-    expect(markup).toContain('>切换连接</button>')
+    expect(markup).toContain('murray@example.com')
+    expect(markup).toContain('>切换账号</button>')
+    expect(markup).toContain('>断开</button>')
     expect(markup).toContain('>管理</button>')
     expect(markup).not.toMatch(/app secret|cookie|csrf|token/i)
   })
@@ -126,7 +134,7 @@ describe('Channel settings', () => {
 
 function unavailableSnapshot(): ChannelSettingsSnapshot {
   return {
-    schemaVersion: 2,
+    schemaVersion: 3,
     channels: [{
       kind: 'feishu',
       displayName: '飞书',
@@ -137,7 +145,8 @@ function unavailableSnapshot(): ChannelSettingsSnapshot {
     projectBindings: [],
     unboundConversations: [],
     conversationBindings: [],
-    activeQrAttempt: null
+    activeQrAttempt: null,
+    activeProvisioning: null
   }
 }
 
