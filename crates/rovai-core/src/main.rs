@@ -13509,6 +13509,18 @@ fn normalize_acp_event_with_completion(
                     .and_then(|value| canonical_json_digest(value).ok()),
             });
             if public_status == "completed"
+                && let Some(path) =
+                    completion.and_then(|value| value.public_file_operation_path.as_ref())
+            {
+                payload["runtimeFileOperation"] = json!({
+                    "adapterKind": adapter_kind.as_str(),
+                    "protocolFamily": "acp-v1",
+                    "sourceEventKind": "session/update.tool_call_update.completed",
+                    "operationKind": "write",
+                    "path": path,
+                });
+            }
+            if public_status == "completed"
                 && let Some(changes) =
                     completion.and_then(|value| value.public_file_changes.as_ref())
             {
@@ -19005,6 +19017,39 @@ while IFS= read -r _ignored; do :; done
         let (_, without_completion) =
             normalize_acp_event(AdapterKind::OpencodeCli, "session/update", &params);
         assert!(without_completion.get("runtimeDiff").is_none());
+    }
+
+    #[test]
+    fn successful_terminal_acp_write_location_uses_an_independent_file_operation_channel() {
+        let params = json!({
+            "update": {
+                "sessionUpdate": "tool_call_update",
+                "toolCallId": "edit-file",
+                "status": "completed",
+                "kind": "edit",
+                "locations": [{"path": "/repo/src/app.ts"}],
+                "content": [{"type": "content", "content": {"type": "text", "text": "updated"}}]
+            }
+        });
+        let completion = acp::completed_action(AdapterKind::QoderCli, &params)
+            .unwrap()
+            .expect("terminal ACP edit should complete");
+        let (_, payload) = normalize_acp_event_with_completion(
+            AdapterKind::QoderCli,
+            "session/update",
+            &params,
+            Some(&completion),
+        );
+
+        assert_eq!(
+            payload.pointer("/runtimeFileOperation/path"),
+            Some(&json!("/repo/src/app.ts"))
+        );
+        assert_eq!(
+            payload.pointer("/runtimeFileOperation/operationKind"),
+            Some(&json!("write"))
+        );
+        assert!(payload.get("runtimeDiff").is_none());
     }
 
     #[test]

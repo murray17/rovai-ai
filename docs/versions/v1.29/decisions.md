@@ -321,27 +321,34 @@ workspace writer lease 可以强化隔离和归因，但会显著增加 v1 的�
 
 把 `apply_patch`、文件数汇总和逐文件 diff 嵌套成三层，会重复 Runtime 的实现名并制造第二个 Activity 层级；
 同时，把 Workspace Window 状态塞进执行台会改变现有会话/执行布局，也会暗示它属于某个 Run。不同 Runtime 的
-文件事件名并不一致，必须以协议终态内容而不是 Tool 名称统一。
+文件事件名并不一致，必须区分“成功文件操作的结构化 path”和“可展开的可靠内容”，而不是按 Tool 显示名统一。
 
 ### 决定
 
 1. Codex 只从 `item/completed + fileChange + completed` 接纳最终 `changes[]`；不消费 started、patchUpdated、
    turn diff 或 `apply_patch` input。Codex add/delete 完整内容在 Core 规范化为 unified diff；
-2. 全部 ACP adapter 只从 terminal `tool_call_update` 的标准 `ToolCallContent::Diff` 累计内容接纳完整
-   before/after。Claude Code 只从完整 `assistant.tool_use(name=Edit)` 与 matching 非错误 `user.tool_result`
+2. 全部 ACP adapter 对成功 terminal `edit | write`，只从同一 ToolCall 的标准累计 `locations[].path` 接纳唯一
+   文件操作 presentation；terminal 省略或清空 location 时可以复用该 ToolCall 先前已报告的非空 location。
+   不解析 raw input、title、output 或文件内容，kind 冲突、路径缺失/多值或失败时不生成文件操作行；
+3. ACP 只从 terminal `tool_call_update` 的标准 `ToolCallContent::Diff` 累计内容接纳完整
+   before/after。Kiro 的单 entry rooted-relative path 只有与同 ToolCall 唯一 location 完全对应时才归一化；其他
+   ACP adapter 及不匹配路径继续 fail closed。Claude Code 只从完整 `assistant.tool_use(name=Edit)` 与 matching 非错误 `user.tool_result`
    接纳 `file_path/old_string/new_string` 的 `exact_mutation`；不读文件、不生成 hunk 行号，`replace_all` 与其他 Tool
    保持普通 Tool Activity。Antigravity 没有等价可靠内容，保持普通 Tool Activity；
-3. 一条 FileChange Evidence 与一条 Canonical Activity 可以投影多条同级 `修改 <basename> +A −D` 行；每行
-   独立展开 inline diff。删除 `apply_patch` 父行和“编辑了 N 个文件”聚合层，不创建逐文件权威 Activity；
-4. 完整 Review 只从 `WorkspaceDiffCompleted → diffBlobId` 打开。会话卡片标题固定 `Files Changed`，右侧只放
+4. 一条 FileChange Evidence 与一条 Canonical Activity 可以投影文件操作 presentation 和可选 Diff。只有唯一
+   可靠路径时显示普通 `修改 <basename>` 行；另有可靠内容时才显示 `+A −D` 并展开 inline diff。删除
+   `apply_patch` 父行和“编辑了 N 个文件”聚合层，不创建逐文件权威 Activity；
+5. 完整 Review 只从 `WorkspaceDiffCompleted → diffBlobId` 打开。会话卡片标题固定 `Files Changed`，右侧只放
    中性 `View`；文件行顶格且无分隔，不显示时间、已保存、参与运行或底部 metadata；
-5. 执行台不增加共享工作区观察，不改变会话 rail、底部/右侧 placement、Tool list 整行宽度或其他既有样式。
+6. 执行台不增加共享工作区观察，不改变会话 rail、底部/右侧 placement、Tool list 整行宽度或其他既有样式。
 
 ### 后果
 
+- Kimi Code、Qoder 等只提供成功 Edit/Write 与标准唯一 path 的 ACP Runtime 也能显示 `修改 xxx`，但没有可靠
+  old/new 时不显示计数或空 Diff；
 - 非 Git 项目仍可显示 Runtime 可靠终态的 `修改 xxx` 行；Workspace 卡片仍只在 Git Window `complete` 时出现；
 - Claude 同一文件连续 Edit 保留各自 Tool identity 和片段 Diff，不被错误归并成最终净变化；
-- 一个 Runtime 没有可靠 terminal file content 时，UI 不显示占位或推测摘要；
+- 一个 Runtime 没有可靠 terminal file content 时仍可显示已证明的单文件操作，但不显示占位 Diff 或推测摘要；
 - 后续 Window 不覆盖旧卡片，Git refs/objects 或当前 workspace 不再参与历史读取；
 - Renderer 只消费 Canonical typed projection，不维护 Runtime-specific 分支或第二套 Activity。
 
@@ -350,7 +357,8 @@ workspace writer lease 可以强化隔离和归因，但会显著增加 v1 的�
 - **展示 `apply_patch → 编辑了 N 个文件 → files`：** 重复层级且把 Runtime 实现名误当产品语义；
 - **只展示“编辑了 N 个文件”文字：** 无法直接定位和独立展开单文件变化；
 - **在执行台展示 Window observation：** 混淆 Operation Evidence 与共享净变化，并破坏现有执行布局；
-- **从 Tool 名、路径或 shell 命令猜 diff：** 无法证明完整性，异常退出时尤其会产生伪结果。
+- **把可靠路径当成 diff：** 路径只足以命名成功文件操作，不能证明 old/new、增删计数或 inline 内容；
+- **从 Tool 显示名、raw input、output 或 shell 命令猜文件操作/diff：** 无法证明完整性，异常退出时尤其会产生伪结果。
 
 <a id="v1-29-d10"></a>
 ## V1.29-D10：ACP Client FS/Terminal 仅作执行代理，文件与 Shell 权限由 Runtime 单独拥有

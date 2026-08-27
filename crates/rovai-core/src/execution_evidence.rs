@@ -11,6 +11,7 @@ use crate::{
     db::Database,
     managed_blob::ManagedBlobStore,
     runtime_diff::{self, COMMAND_DIFF_SCHEMA_VERSION},
+    runtime_file_operation::{self, FILE_OPERATION_SCHEMA_VERSION},
 };
 
 const INLINE_PAYLOAD_LIMIT_BYTES: usize = 16 * 1024;
@@ -437,6 +438,12 @@ impl ExecutionEvidenceService {
 
         let source_event_key = source_event_key(event_type, payload);
         let mut payload = normalize_public_payload(event_type, payload);
+        normalize_runtime_file_operation_evidence(
+            &mut payload,
+            workspace_json.as_deref(),
+            runtime_adapter_kind.as_deref(),
+            runtime_reported_version.as_deref(),
+        );
         normalize_runtime_diff_evidence(
             &mut payload,
             workspace_json.as_deref(),
@@ -686,6 +693,7 @@ fn normalize_public_payload(event_type: &str, payload: &Value) -> Value {
                 "idempotentReplay": payload.get("idempotentReplay"),
                 "receiptId": payload.get("receiptId"),
                 "operationProjection": payload.get("operationProjection"),
+                "runtimeFileOperation": payload.get("runtimeFileOperation"),
                 "runtimeDiff": payload.get("runtimeDiff"),
             });
             if let Some(core_envelope) = payload.get("coreEnvelope") {
@@ -742,9 +750,16 @@ fn normalize_runtime_diff_evidence(
                 .and_then(Value::as_str)
                 .map(str::to_string)
         });
+    let file_operation_path =
+        runtime_file_operation::path_from_evidence(payload).map(str::to_string);
     let admitted = execution_root.as_deref().map(Path::new).map(|root| {
-        runtime_diff::admit_runtime_diff(payload, root, frozen_adapter_kind)
-            .unwrap_or(Err("runtime_diff_candidate_missing"))
+        runtime_diff::admit_runtime_diff_with_file_operation_path(
+            payload,
+            root,
+            frozen_adapter_kind,
+            file_operation_path.as_deref(),
+        )
+        .unwrap_or(Err("runtime_diff_candidate_missing"))
     });
     let source = serde_json::json!({
         "adapterKind": candidate.get("adapterKind"),
@@ -774,6 +789,61 @@ fn normalize_runtime_diff_evidence(
             "source": "runtime_reported",
             "status": "unavailable",
             "safeReasonCode": "runtime_diff_execution_root_unavailable",
+            "sourceMetadata": source,
+        }),
+    };
+}
+
+fn normalize_runtime_file_operation_evidence(
+    payload: &mut Value,
+    workspace_json: Option<&str>,
+    frozen_adapter_kind: Option<&str>,
+    observed_runtime_version: Option<&str>,
+) {
+    let Some(candidate) = payload.get("runtimeFileOperation").cloned() else {
+        return;
+    };
+    if candidate.is_null() {
+        return;
+    }
+    let execution_root = workspace_json
+        .and_then(|workspace| serde_json::from_str::<Value>(workspace).ok())
+        .and_then(|workspace| {
+            workspace
+                .get("executionRoot")
+                .and_then(Value::as_str)
+                .map(str::to_string)
+        });
+    let admitted = execution_root.as_deref().map(Path::new).map(|root| {
+        runtime_file_operation::admit_runtime_file_operation(payload, root, frozen_adapter_kind)
+            .unwrap_or(Err("runtime_file_operation_candidate_missing"))
+    });
+    let source = serde_json::json!({
+        "adapterKind": candidate.get("adapterKind"),
+        "observedRuntimeVersion": observed_runtime_version,
+        "sourceEventKind": candidate.get("sourceEventKind"),
+    });
+    payload["runtimeFileOperation"] = match admitted {
+        Some(Ok(admitted)) => serde_json::json!({
+            "schemaVersion": FILE_OPERATION_SCHEMA_VERSION,
+            "source": "runtime_reported",
+            "status": "available",
+            "operationKind": admitted.operation_kind,
+            "path": admitted.path,
+            "sourceMetadata": source,
+        }),
+        Some(Err(reason)) => serde_json::json!({
+            "schemaVersion": FILE_OPERATION_SCHEMA_VERSION,
+            "source": "runtime_reported",
+            "status": "unavailable",
+            "safeReasonCode": reason,
+            "sourceMetadata": source,
+        }),
+        None => serde_json::json!({
+            "schemaVersion": FILE_OPERATION_SCHEMA_VERSION,
+            "source": "runtime_reported",
+            "status": "unavailable",
+            "safeReasonCode": "runtime_file_operation_execution_root_missing",
             "sourceMetadata": source,
         }),
     };
@@ -1295,6 +1365,100 @@ mod tests {
             "-const enabled = false\n+const enabled = true\n"
         );
         assert!(!entry.diff.contains("@@"));
+    }
+
+    #[test]
+    fn acp_file_operation_path_is_durable_without_fabricating_a_diff_projection() {
+        let mut payload = normalize_public_payload(
+            "runtime.action",
+            &json!({
+                "toolCallId": "qoder-edit",
+                "status": "completed",
+                "kind": "edit",
+                "runtimeFileOperation": {
+                    "adapterKind": "qoder-cli",
+                    "protocolFamily": "acp-v1",
+                    "sourceEventKind": "session/update.tool_call_update.completed",
+                    "operationKind": "write",
+                    "path": "/repo/rovai-runtime-validation/qoder-cli.txt"
+                }
+            }),
+        );
+        normalize_runtime_file_operation_evidence(
+            &mut payload,
+            Some(r#"{"executionRoot":"/repo"}"#),
+            Some("qoder-cli"),
+            Some("1.1.28"),
+        );
+        normalize_runtime_diff_evidence(
+            &mut payload,
+            Some(r#"{"executionRoot":"/repo"}"#),
+            Some("qoder-cli"),
+            Some("1.1.28"),
+        );
+
+        assert_eq!(payload["runtimeFileOperation"]["status"], "available");
+        assert_eq!(
+            payload["runtimeFileOperation"]["path"],
+            "rovai-runtime-validation/qoder-cli.txt"
+        );
+        assert!(payload["runtimeDiff"].is_null());
+        assert!(runtime_diff::projection_from_evidence(&payload, "evidence-qoder").is_none());
+    }
+
+    #[test]
+    fn kiro_single_diff_uses_the_same_tool_calls_normalized_location_when_diff_path_is_rooted_wrong()
+     {
+        let mut payload = normalize_public_payload(
+            "runtime.action",
+            &json!({
+                "toolCallId": "kiro-edit",
+                "status": "completed",
+                "kind": "edit",
+                "runtimeFileOperation": {
+                    "adapterKind": "kiro-cli",
+                    "protocolFamily": "acp-v1",
+                    "sourceEventKind": "session/update.tool_call_update.completed",
+                    "operationKind": "write",
+                    "path": "/repo/rovai-runtime-validation/kiro-cli.txt"
+                },
+                "runtimeDiff": {
+                    "adapterKind": "kiro-cli",
+                    "protocolFamily": "acp-v1",
+                    "sourceEventKind": "session/update.tool_call_update.completed",
+                    "semanticKind": "complete_before_after",
+                    "entries": [{
+                        "path": "/rovai-runtime-validation/kiro-cli.txt",
+                        "oldText": "state=before\n",
+                        "newText": "state=after\n"
+                    }]
+                }
+            }),
+        );
+        normalize_runtime_file_operation_evidence(
+            &mut payload,
+            Some(r#"{"executionRoot":"/repo"}"#),
+            Some("kiro-cli"),
+            Some("kiro-cli 2.18.1"),
+        );
+        normalize_runtime_diff_evidence(
+            &mut payload,
+            Some(r#"{"executionRoot":"/repo"}"#),
+            Some("kiro-cli"),
+            Some("kiro-cli 2.18.1"),
+        );
+
+        assert_eq!(payload["runtimeDiff"]["status"], "available");
+        assert_eq!(
+            payload["runtimeDiff"]["entries"][0]["path"],
+            "rovai-runtime-validation/kiro-cli.txt"
+        );
+        let projection = runtime_diff::projection_from_evidence(&payload, "evidence-kiro")
+            .expect("Kiro diff should project after structured path reconciliation");
+        assert_eq!(
+            projection.entries.as_ref().unwrap()[0].path,
+            "rovai-runtime-validation/kiro-cli.txt"
+        );
     }
 
     #[test]

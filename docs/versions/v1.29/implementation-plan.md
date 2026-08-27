@@ -140,6 +140,13 @@ Camp 动态队员管理、Managed Attachment v2 与 ACP Client FS 权限收敛�
 
 ## 5. Command Diff 与 Canonical Activity
 
+- [x] 将“成功文件操作”和“可展开 Diff”拆成同一 terminal Evidence 的两个独立子投影：ACP terminal
+  `edit | write` + 同 ToolCall 唯一标准 location 生成既有 Activity 的 `修改 <basename>`，没有 old/new 时不生成
+  `diffProjection`、计数或空 inline diff；
+- [x] ACP ToolCall 累计状态保留先前非空 location，并保留首次可信结构化 kind，覆盖 Kimi terminal location、Qoder
+  sparse terminal location 以及实测 `read -> terminal edit` 冲突不伪造写操作；
+- [x] Kiro 单 entry rooted-relative Diff 仅在同 ToolCall 唯一已准入 location 与去根锚路径完全相等时纠正；不做
+  suffix 猜测、不读取文件、不扩展到其他 ACP adapter；
 - [x] 为 Codex app-server terminal fileChange、全部十个 ACP v1 adapter 与 Claude 原生 Edit matching
   tool-use/result exact mutation 建立协议语义 allowlist；Claude 其他 Tool 与 Antigravity fail closed；
 - [x] 在 Codex/ACP public normalizer 中保留内部候选，并更新 Runtime Activity Registry 与 terminal fixtures；
@@ -150,7 +157,8 @@ Camp 动态队员管理、Managed Attachment v2 与 ACP Client FS 权限收敛�
   `tool_result` 才发布 Evidence，失败/缺失/取消/其他 Tool 不生成 Diff，同文件连续 Edit 不合并；
 - [x] Claude Code `2.1.220` 真实 smoke 已验证 native Edit matching terminal Evidence、同 Activity available
   projection、无 `@@` exact fragment 与实际文件更新；
-- [ ] 对支持 Runtime 逐个执行真实 terminal file-diff smoke，冻结实测版本与 wire artifact。
+- [ ] 用修复后的真实 App 复测 Kimi Code `0.38.0`、Qoder `1.1.28` 的 path-only `修改 xxx`，以及 Kiro `2.18.1`
+  的同 Activity `修改 xxx` + inline Diff；再对其余支持 Runtime 逐个执行 terminal file-diff smoke 并冻结 wire artifact。
 
 ## 6. Presentation handoff 与验收
 

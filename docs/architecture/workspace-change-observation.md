@@ -18,7 +18,9 @@ Managed Blob 和 Camp authorization 权威。
 Runtime structured event
   -> public normalizer + Adapter/version semantic allowlist
   -> append-only Execution Evidence
-  -> existing Canonical Activity.diffProjection
+  -> existing Canonical Activity
+       -> reliable terminal file-operation path -> file.write + `修改 <basename>`
+       -> optional reliable content -> diffProjection
   -> original Tool / Command row
 
 first admitted Run for WindowKey
@@ -33,27 +35,38 @@ first admitted Run for WindowKey
   -> one Camp-scoped Files Changed card / read-only View
 ```
 
-`Command Diff` 的权威来源是 Runtime 对精确 Operation 的结构化报告。`Workspace Change Window Diff` 的权威来源
-是两个稳定 synthetic tree 之间的比较。二者都不是文件写入因果证明，不能互相补全或覆盖。
+`Runtime File Operation` 的权威来源是成功 Operation 的结构化 kind 与可靠单文件路径；`Command Diff` 的权威
+来源是 Runtime 对同一精确 Operation 的可靠 old/new 或 patch 内容；`Workspace Change Window Diff` 的权威来源
+是两个稳定 synthetic tree 之间的比较。三者不能互相补全或覆盖。
 
 ## 组件职责
 
 ### Adapter normalizer 与 Canonical Activity
 
 - 每个 Adapter/version 必须声明可接受事件的 wire 位置、完整性和更新语义。public normalizer 只保留已声明字段；
-- normalized diff update 作为 append-only Evidence 落库。Canonical Activity Projection 从全部 source Evidence
-  确定性归约单调 revision、source IDs 与 availability/conflict；
+- normalized file-operation path 与可选 diff 作为同一 terminal append-only Evidence 的独立安全子投影落库。
+  Canonical Activity Projection 从全部 source Evidence 确定性归约文件操作 presentation，以及 Diff 的单调
+  revision、source IDs 与 availability/conflict；
 - Activity identity、顺序、phase 和 outcome 继续由现有 Canonical Activity 拥有。不存在可独立写入或排序的
   `OperationDiffActivity`；
 - 路径只能相对 Run 冻结的 canonical execution root 解析。规范化和越界检查不获得文件读取权，也不以当前文件
   内容补足 Runtime 的局部数据。
 
-当前有三种来源完成准入：Codex app-server 的 terminal `fileChange`、ACP v1 terminal ToolCall 的标准
+ACP v1 的成功 terminal `edit | write` 在同一 ToolCall 累计状态中具有唯一标准 `locations[].path` 时，即可把既有
+Activity 投影为 `修改 <basename>`；terminal 省略 location 时复用同 ToolCall 先前非空 location。该通路不解析
+raw input、title、output 或当前文件，且首次结构化 kind 不被冲突的 terminal kind 覆盖，因此 Qoder 的实测
+`read -> terminal edit` 漂移不会产生伪文件操作。
+
+当前有三种可靠内容来源完成 Diff 准入：Codex app-server 的 terminal `fileChange`、ACP v1 terminal ToolCall 的标准
 `ToolCallContent::Diff` 累计内容，以及 Claude stream-json 中完整 `assistant.tool_use(name=Edit)` 与相同
 `tool_use_id` 的非错误 `user.tool_result` 配对。Codex add/delete 的完整文件内容在 Core 规范化为 unified diff；
 ACP collection update 按协议 replace 语义缓存到 terminal；Claude 只保存 `file_path/old_string/new_string` 所证明的
 `exact_mutation` 片段，不读取文件定位、不生成 hunk 行号，`replace_all` 与其他 Tool 均 fail closed。Antigravity
 仍没有等价可靠内容，不按 Tool 名或 shell 文本补造 diff。
+
+Kiro 的单 entry 标准 Diff 若把相对路径错误地根锚定，Core 只在同一 ToolCall 已准入唯一 location，且移除根锚后的
+Diff path 与该规范化 location 完全相等时对齐路径；不做 suffix 猜测、不读取文件，也不把该兼容扩展给其他 ACP
+adapter。
 
 ### Window Coordinator
 
@@ -148,10 +161,12 @@ Rovai 不主动对用户仓库执行 prune。成功删除 ref 只撤销 Rovai �
 
 ## Presentation boundary
 
-- Command Diff 始终是既有 Canonical Activity 的 typed 子投影；`available | conflict | unavailable` 不从 Activity
+- Runtime File Operation 与 Command Diff 始终是既有 Canonical Activity 的 typed 子投影；前者只决定
+  `file.write / 修改 <basename>` presentation，后者才携带可展开内容。`available | conflict | unavailable` 不从 Activity
   outcome 推断，也不形成可独立排序或写入的 Activity；
-- Renderer 把一条 available Activity 的 entries 扁平投影为同级 `修改 xxx` 行。每行只展开自己的 inline diff；
-  不展示 `apply_patch`、文件数聚合父行或 Operation Review；
+- 只有路径、没有可靠 Diff 的成功 Activity 仍显示普通 `修改 xxx` 行，但没有 `+ / −` 和 inline diff；Renderer
+  把另有 available Diff 的 entries 扁平投影为同级 `修改 xxx` 行，每行只展开自己的 inline diff；不展示
+  `apply_patch`、文件数聚合父行或 Operation Review；
 - `exact_mutation` 只显示 `− oldText / + newText` 片段，不显示文件行号或 `@@`；同一文件的多个 Edit 保留各自
   Tool identity 和时序，不合并为 Command 层净变化；
 - Workspace `complete` Evidence 在 Camp 会话时间线追加一张 `Files Changed` 卡片，`View` 读取不可变 blob。

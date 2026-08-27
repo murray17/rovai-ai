@@ -4959,6 +4959,41 @@ describe('task event projections', () => {
     expect(markup).not.toContain('编辑了 2 个文件')
   })
 
+  it('keeps a successful path-only file operation as a normal 修改 row without an inline diff', () => {
+    const progress = buildLiveExecutionProgress([{
+      id: 'terminal-qoder-edit', agentRunId: 'run-qoder', eventType: 'runtime.action',
+      payload: {
+        toolCallId: 'qoder-edit',
+        status: 'completed',
+        kind: 'edit',
+        output: 'Successfully modified file'
+      },
+      canonical: canonicalActivity('qoder-edit', {
+        activityDomain: 'file',
+        semanticKind: 'file.write',
+        toolName: 'Edit',
+        presentationHint: '修改 qoder-cli.txt',
+        phase: 'terminal',
+        outcome: 'succeeded'
+      }),
+      createdAt: '2026-08-27T00:00:00Z'
+    }], 'run-qoder')
+
+    expect(progress.items).toHaveLength(1)
+    expect(progress.items[0]).toMatchObject({
+      kind: 'tool',
+      step: {
+        title: '修改 qoder-cli.txt',
+        detail: 'Successfully modified file',
+        status: 'completed',
+        activityDomain: 'file'
+      }
+    })
+    if (progress.items[0]?.kind !== 'tool') throw new Error('expected one file Tool row')
+    expect(progress.items[0].step.fileChanges).toBeUndefined()
+    expect(progress.items[0].step.fileChangeSemantics).toBeUndefined()
+  })
+
   it('renders consecutive Claude Edit mutations as separate rows without inferred hunk line numbers', () => {
     const exactEdit = (
       toolCallId: string,

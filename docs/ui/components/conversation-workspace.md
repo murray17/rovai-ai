@@ -295,11 +295,14 @@ disclosure 继续在原位渲染完整公开结果，不再截断，不再提供
 ### Runtime 终态文件变更与 Workspace Change Window
 
 只有 [Workspace Change Observation v1](../../contracts/workspace-change-observation-v1.md)准入的可靠终态文件
-Evidence 才进入文件变更呈现。一条 Canonical Activity 的多个 change 直接成为对应 Run stage 中的同级
-`修改 <basename> +A −D` 行；每行复用现有 File Tool 图标并独立展开 inline unified diff。Renderer 不显示
-`apply_patch` 父行或“编辑了 N 个文件”聚合层，不从 started/incremental patch、Tool input、路径或命令文本推测修改，
-也不为逐文件行创建新的 Activity identity。没有可靠终态内容时保留普通 Tool Activity，或在只剩
-`apply_patch` 实现细节时不渲染该实现行。文件行留在现有“已执行 N 项操作”集合内；集合计数仍按权威
+Evidence 才进入文件变更呈现。成功 Edit/Write 的结构化 kind 与同 ToolCall 唯一标准 path 足以把原 Tool 行呈现为
+`修改 <basename>`；它不证明 old/new，因此没有可靠内容时不显示 `+A −D`、不提供空 inline diff。另有已准入
+Command Diff 时，一条 Canonical Activity 的多个 change 才直接成为对应 Run stage 中的同级
+`修改 <basename> +A −D` 行；每行复用现有 File Tool 图标并独立展开 inline unified diff。
+
+Renderer 不显示 `apply_patch` 父行或“编辑了 N 个文件”聚合层，不从 Tool 显示名、raw input、output、命令文本或
+当前文件推测修改/diff，也不为逐文件行创建新的 Activity identity。路径缺失、多个候选、失败或 kind 冲突时保留
+普通 Tool Activity；只剩 `apply_patch` 实现细节时不渲染该实现行。文件行留在现有“已执行 N 项操作”集合内；集合计数仍按权威
 Canonical Activity 计算，不按逐文件 presentation row 扩增。展开后的 Tool 列表顶格使用现有整行宽度，
 文件 inline diff 不再增加一层结构缩进。
 

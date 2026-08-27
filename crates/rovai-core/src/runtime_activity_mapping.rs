@@ -201,6 +201,10 @@ fn file_changes_presentation_hint(item: &Value) -> Option<String> {
     }
 }
 
+pub(crate) fn file_operation_presentation_hint(path: &str) -> Option<String> {
+    compact_path_label(path).map(|path| format!("修改 {path}"))
+}
+
 fn compact_path_label(path: &str) -> Option<String> {
     let path = path.trim().trim_end_matches(['/', '\\']);
     let leaf = path.rsplit(['/', '\\']).next()?.trim();

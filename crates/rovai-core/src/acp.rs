@@ -3339,10 +3339,15 @@ impl AcpRuntime {
             .or_default();
         if let Some(reported_kind) = update.get("kind").and_then(Value::as_str) {
             let raw_input = update.get("rawInput").cloned().unwrap_or_else(|| json!({}));
-            observed.native_kind = Some(
-                effective_action_kind(self.host.adapter_kind, reported_kind, &raw_input)
-                    .to_string(),
-            );
+            let incoming_kind =
+                effective_action_kind(self.host.adapter_kind, reported_kind, &raw_input);
+            if observed
+                .native_kind
+                .as_deref()
+                .is_none_or(|existing| existing == "other")
+            {
+                observed.native_kind = Some(incoming_kind.to_string());
+            }
         } else if public_acp_shell_command(self.host.adapter_kind, update.get("rawInput")).is_some()
         {
             observed.native_kind = Some("execute".to_string());
@@ -3350,7 +3355,14 @@ impl AcpRuntime {
         if let Some(raw_input) = update.get("rawInput").filter(|value| !value.is_null()) {
             observed.raw_input = Some(raw_input.clone());
         }
-        if let Some(locations) = update.get("locations").filter(|value| !value.is_null()) {
+        if let Some(locations) = update
+            .get("locations")
+            .filter(|value| !value.is_null())
+            .filter(|value| value.as_array().is_none_or(|items| !items.is_empty()))
+        {
+            // Several ACP runtimes omit (or explicitly empty) locations in the
+            // terminal update after reporting the exact target on the started
+            // update. Keep that same-ToolCall location as cumulative evidence.
             observed.locations = Some(locations.clone());
         }
         if update.get("content").is_some() {
@@ -5282,7 +5294,10 @@ fn effective_action_kind<'a>(
     reported_kind: &'a str,
     raw_input: &Value,
 ) -> &'a str {
-    if matches!(reported_kind, "edit" | "move" | "delete" | "execute") {
+    if matches!(
+        reported_kind,
+        "edit" | "write" | "move" | "delete" | "execute"
+    ) {
         return reported_kind;
     }
 
@@ -5456,6 +5471,7 @@ pub struct CompletedAcpAction {
     pub native_item_id: String,
     pub native_kind: String,
     pub public_command: Option<String>,
+    pub public_file_operation_path: Option<String>,
     pub public_file_changes: Option<Value>,
     pub observation_digest: String,
     pub outcome: ActionResultOutcome,
@@ -5521,10 +5537,15 @@ pub fn completed_action(
     let public_file_changes = succeeded
         .then(|| public_acp_file_changes(update.get("content")))
         .flatten();
+    let public_file_operation_path = (succeeded
+        && matches!(native_kind.as_str(), "edit" | "write"))
+    .then(|| single_public_acp_location_path(update.get("locations")))
+    .flatten();
     Ok(Some(CompletedAcpAction {
         native_item_id: native_item_id.clone(),
         native_kind,
         public_command,
+        public_file_operation_path,
         public_file_changes,
         observation_digest,
         outcome: if succeeded {
@@ -5567,6 +5588,7 @@ fn reconcile_completed_action(
     observed: ObservedToolMetadata,
     mut completion: CompletedAcpAction,
 ) -> Result<CompletedAcpAction> {
+    let observed_file_operation_path = single_public_acp_location_path(observed.locations.as_ref());
     let observed_raw_input_digest = observed
         .raw_input
         .as_ref()
@@ -5602,6 +5624,16 @@ fn reconcile_completed_action(
         &completion.native_kind,
     )
     .to_string();
+    completion.public_file_operation_path =
+        (matches!(completion.outcome, ActionResultOutcome::Succeeded)
+            && matches!(completion.native_kind.as_str(), "edit" | "write"))
+        .then(|| {
+            completion
+                .public_file_operation_path
+                .clone()
+                .or(observed_file_operation_path)
+        })
+        .flatten();
     if let Some(result_data) = completion.result_data.as_object_mut() {
         result_data.insert(
             "kind".to_string(),
@@ -5643,6 +5675,23 @@ fn public_acp_file_changes(content: Option<&Value>) -> Option<Value> {
     (!changes.is_empty()).then_some(Value::Array(changes))
 }
 
+fn single_public_acp_location_path(locations: Option<&Value>) -> Option<String> {
+    let mut paths = locations?
+        .as_array()?
+        .iter()
+        .filter_map(|location| location.get("path").and_then(Value::as_str))
+        .map(str::trim)
+        .filter(|path| !path.is_empty())
+        .map(str::to_string)
+        .collect::<Vec<_>>();
+    paths.sort();
+    paths.dedup();
+    match paths.as_slice() {
+        [path] => Some(path.clone()),
+        _ => None,
+    }
+}
+
 fn acp_effect_disposition(succeeded: bool, native_kind: &str) -> &'static str {
     if succeeded {
         "complete"
@@ -5650,7 +5699,7 @@ fn acp_effect_disposition(succeeded: bool, native_kind: &str) -> &'static str {
         // A failed process may still have changed external state before it
         // returned a non-successful result.
         "unknown"
-    } else if matches!(native_kind, "edit" | "move" | "delete") {
+    } else if matches!(native_kind, "edit" | "write" | "move" | "delete") {
         // A failed filesystem operation may have applied only part of its
         // requested change.
         "partial"
@@ -5716,7 +5765,7 @@ fn acp_tool_exit_code(update: &Value) -> Option<i64> {
 }
 
 pub fn is_potential_side_effect(kind: &str) -> bool {
-    matches!(kind, "edit" | "move" | "delete" | "execute")
+    matches!(kind, "edit" | "write" | "move" | "delete" | "execute")
 }
 
 fn acp_tool_paths(request: &Value) -> Vec<String> {
@@ -10121,5 +10170,87 @@ while IFS= read -r ignored; do :; done
         .unwrap()
         .expect("failed ACP edit should still complete its audit action");
         assert!(failed.public_file_changes.is_none());
+    }
+
+    #[test]
+    fn successful_terminal_acp_write_keeps_one_structured_location_without_inventing_a_diff() {
+        let completion = completed_action(
+            AdapterKind::KimiCodeCli,
+            &json!({
+                "update": {
+                    "sessionUpdate": "tool_call_update",
+                    "toolCallId": "tool-edit",
+                    "status": "completed",
+                    "kind": "edit",
+                    "locations": [{"path": "/repo/src/app.ts"}],
+                    "content": [{"type": "content", "content": {"type": "text", "text": "updated"}}]
+                }
+            }),
+        )
+        .unwrap()
+        .expect("terminal ACP edit should complete");
+
+        assert_eq!(
+            completion.public_file_operation_path.as_deref(),
+            Some("/repo/src/app.ts")
+        );
+        assert!(completion.public_file_changes.is_none());
+    }
+
+    #[test]
+    fn sparse_terminal_write_reuses_the_started_location_but_kind_conflicts_do_not_fabricate_writes()
+     {
+        let terminal_edit = json!({
+            "sessionUpdate": "tool_call_update",
+            "toolCallId": "tool-edit",
+            "status": "completed",
+            "kind": "edit",
+            "locations": []
+        });
+        let completion = completed_action(
+            AdapterKind::QoderCli,
+            &json!({"update": terminal_edit.clone()}),
+        )
+        .unwrap()
+        .expect("terminal ACP edit should complete");
+        let reconciled = reconcile_completed_action(
+            AdapterKind::QoderCli,
+            &terminal_edit,
+            ObservedToolMetadata {
+                native_kind: Some("edit".to_string()),
+                observation_digest: None,
+                raw_input: None,
+                locations: Some(json!([{"path": "/repo/src/app.ts"}])),
+                public_file_changes: None,
+            },
+            completion,
+        )
+        .unwrap();
+        assert_eq!(
+            reconciled.public_file_operation_path.as_deref(),
+            Some("/repo/src/app.ts")
+        );
+
+        let read_completion = completed_action(
+            AdapterKind::QoderCli,
+            &json!({"update": terminal_edit.clone()}),
+        )
+        .unwrap()
+        .expect("terminal ACP result should complete");
+        let reconciled_read = reconcile_completed_action(
+            AdapterKind::QoderCli,
+            &terminal_edit,
+            ObservedToolMetadata {
+                native_kind: Some("read".to_string()),
+                observation_digest: None,
+                raw_input: None,
+                locations: Some(json!([{"path": "/repo/src/app.ts"}])),
+                public_file_changes: None,
+            },
+            read_completion,
+        )
+        .unwrap();
+        assert_eq!(reconciled_read.native_kind, "read");
+        assert!(reconciled_read.public_file_operation_path.is_none());
     }
 }

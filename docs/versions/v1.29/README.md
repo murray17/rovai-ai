@@ -13,6 +13,7 @@ last_updated: 2026-08-27
 
 > 当前状态：动态 Camp membership、Message Delivery zero-attempt cancellation 与 Managed Attachment v2 已完成；
 > Workspace Change Observation 的产品、安全与 UI 边界已确认，Core/Renderer 主路径已实现并通过定向回归；
+> ACP 成功 Edit/Write 的可靠单文件路径现可独立生成 `修改 xxx`，标准 Diff 只负责可选 inline 内容；
 > ACP Client FS 已收敛为 Runtime-owned 权限下的无二次授权执行代理，
 > 跨平台 Git fixture、Codex/ACP 真实 Runtime file-diff smoke 与删除/恢复长尾仍待补齐；Claude Code `2.1.220`
 > 原生 Edit smoke 已通过。
@@ -55,7 +56,8 @@ reconciliation 完成已接受工作的正式结算。
 - Camp 会话增加“邀请”入口、成员菜单、权威移除影响预览、最后成员禁用说明与非阻塞 reconciliation 状态；
 - 新附件使用 Managed Attachment v2、CampMessage refs 与 durable ingest intent，不再进入 legacy publication gate，
   不等待或 fence 活跃 AgentRun；Context 继续使用 DB-only descriptor，legacy v1 只读兼容；
-- 在 append-only Execution Evidence 之上为既有 Canonical Activity 增加 typed `diffProjection`；
+- 在 append-only Execution Evidence 之上为既有 Canonical Activity 增加 typed file-operation presentation 与可选
+  `diffProjection`；成功 Edit/Write 的唯一协议路径足以生成 `修改 <basename>`，但不获得增删计数或 inline diff；
   `phase`、`outcome` 和活动 identity 继续由现有 Canonical Activity 拥有，不建立第二套活动权威；
 - 仅接纳 Adapter/version 明确声明为 unified diff snapshot、complete patch snapshot、exact mutation 或完整
   before/after 的 Runtime 数据；路径必须相对冻结 execution root 规范化并做越界检查，但该检查不授予额外文件读取权；
@@ -80,8 +82,9 @@ reconciliation 完成已接受工作的正式结算。
 - final publication 或 ref cleanup 失败时，在关闭事务中清除 final candidate/manifest root，并把 expected
   baseline/final OID 留在持久 cleanup ledger；closed Window 也可在启动维护中安全重试，且从不删除已改写 target；
 - 非 Git execution root 不创建 Window，也不伪造 not-applicable 持久对象。
-- Codex、ACP 与 Claude Edit 的可靠终态文件 Evidence 扁平显示为同级 `修改 xxx` 行；完整 Review 只属于会话中的
-  `Files Changed` 历史卡片；
+- Codex、ACP 与 Claude Edit 的可靠终态文件 Evidence 扁平显示为同级 `修改 xxx` 行；Kimi/Qoder 等 ACP Runtime
+  即使没有标准 Diff，只要成功 terminal Edit/Write 具有同 ToolCall 唯一标准 location，也保留该文件操作行；
+  可靠 old/new 或标准 Diff 才附加 `+ / −` 与 inline 内容，完整 Review 只属于会话中的 `Files Changed` 历史卡片；
 - ACP `fs/read_text_file` / `fs/write_text_file` 只作 fenced 文件执行代理：绝对路径按 Runtime 请求执行，
   相对路径以 execution root 为解析基准，不做 Core containment、Workspace access 或一次性 token 鉴权；
   Runtime 全自动/绕过模式的合格 `session/request_permission` 直接回复 native allow，交互模式仍保留 Approval，
@@ -124,11 +127,14 @@ Activity 与 Renderer，不追加模型上下文。
 - Window 的 `lifecycle` 与 `captureStatus` 独立，`no_changes` 与 `unavailable` 不混淆；
 - Command Diff 只来自 adapter/version allowlist，replay 后 `revision`、`sourceEvidenceIds` 和 conflict/availability
   结果确定；
+- ACP 成功 terminal Edit/Write 的唯一标准 location 在同一 Canonical Activity 上生成 `修改 xxx`；路径缺失、多个
+  location、失败或 kind 冲突保持普通 Tool，且 path-only 不生成 `diffProjection`；
 - `Files Changed` 卡片只读完成 Evidence，后续 Window、当前 workspace 或临时 ref 清理不改变旧卡片；
 - presentation 不把 Window 结果归因给单个 Run/Agent；`externalWriterObserved` 只表示 Core 观察到的其他 Rovai
   运行发生物理范围重叠，不声称探测所有外部写入者；
-- Codex terminal fileChange、十个 ACP adapter 的标准 Diff 通路，以及 Claude 原生 Edit 的 matching
-  tool-use/result `exact_mutation` 均有 fixture；Claude 其他 Tool 与 Antigravity 因缺少等价可靠内容明确 fail closed；
+- Codex terminal fileChange、十个 ACP adapter 的成功 Edit/Write path-only 通路与标准 Diff 通路，以及 Claude 原生
+  Edit 的 matching tool-use/result `exact_mutation` 均有 fixture；Kiro rooted-relative Diff 只按同 ToolCall 唯一
+  location 精确对齐，Claude 其他 Tool 与 Antigravity 因缺少等价可靠内容明确 fail closed；
 - 动态 membership 覆盖 add/remove 幂等与冲突、最后成员、Lead 替换、所有业务工具 exact-run fence、
   Delivery/Gather/terminal publication、Migration clean break、双主题与键盘交互；
 - Managed Attachment v2 覆盖从 Migration 111 升级 112、活跃 source Run 下 14 MiB 附件直接 dispatch、ref-only
@@ -147,8 +153,8 @@ Activity 与 Renderer，不追加模型上下文。
 | Contracts | 已更新 | 新增 [Camp Membership v1](../../contracts/camp-membership-v1.md)与 [Workspace Change Observation v1](../../contracts/workspace-change-observation-v1.md)，升级 Camp Open、Attachment、Composer、Message Delivery、Gather 与 Missing-Send Recovery 等相关合同；[Runtime Launch and Verification v28](../../contracts/runtime-launch-and-verification-v28.md)替代 v27，收口 ACP Client FS 与 permission compatibility response；[ACP Client Terminal v2](../../contracts/acp-client-terminal-v2.md)替代 v1，取消显式 cwd 的 execution-root containment。 |
 | Architecture | 已更新 | 新增[动态 Camp 队员关系](../../architecture/dynamic-camp-membership.md)与 [Workspace Change Observation](../../architecture/workspace-change-observation.md)；附件架构切换为 Managed v2 当前写入与 legacy v1 只读兼容；[基础架构不变量](../../architecture/foundational-invariants.md#runtime-platform-security)与 [Runtime Catalog Boundaries](../../architecture/runtime-catalog-boundaries.md)同步 Runtime-owned ACP 文件与 Shell 权限。 |
 | UI | 已更新 | [Camp 会话工作区](../../ui/components/conversation-workspace.md)冻结成员管理、Canonical Activity presentation rows、`Files Changed` 卡片与只读 View；其他布局不变。 |
-| Runtime Activity | 已更新 | Registry 记录 Codex terminal fileChange、ACP terminal standard Diff、Claude Edit exact mutation 和 Antigravity fail-closed 边界。 |
-| Runtime compatibility | 已更新 | 13 个 adapter 均已按实际协议族归类；当前代码 fixture 覆盖 Codex、十个 ACP adapter、Claude Edit 与 Antigravity negative gate；Claude Code `2.1.220` Edit 已完成真实 smoke，Codex/ACP 真实 file-diff smoke 仍待补。 |
+| Runtime Activity | 已更新 | Registry 记录 Codex terminal fileChange、ACP terminal Edit/Write 唯一路径、ACP standard Diff、Claude Edit exact mutation 和 Antigravity fail-closed 边界。 |
+| Runtime compatibility | 已更新 | 13 个 adapter 均已按实际协议族归类；当前代码 fixture 覆盖 Codex、十个 ACP adapter 的 path-only/standard Diff、Claude Edit 与 Antigravity negative gate；Kimi `0.38.0`、Qoder `1.1.28` 和 Kiro `2.18.1` 的 pre-fix 真实 wire 已核验，修复后真实 App 复测仍待补。 |
 | Documentation routing | 已更新 | 文档总导航、Architecture/Contract 索引与当前决定导航已增加动态 membership、Managed Attachment v2、Workspace Change Observation 与 ACP Client Terminal v2 入口。 |
 | Root README | 确认无需更新 | 当前仍为 in-progress，且不改变项目定位或已交付的常青能力声明。 |
 

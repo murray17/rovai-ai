@@ -57,11 +57,21 @@ pub fn admit_runtime_diff(
     execution_root: &Path,
     frozen_adapter_kind: Option<&str>,
 ) -> Option<Result<AdmittedCommandDiff, &'static str>> {
+    admit_runtime_diff_with_file_operation_path(payload, execution_root, frozen_adapter_kind, None)
+}
+
+pub fn admit_runtime_diff_with_file_operation_path(
+    payload: &Value,
+    execution_root: &Path,
+    frozen_adapter_kind: Option<&str>,
+    file_operation_path: Option<&str>,
+) -> Option<Result<AdmittedCommandDiff, &'static str>> {
     let candidate = payload.get("runtimeDiff")?;
     Some(admit_candidate(
         candidate,
         execution_root,
         frozen_adapter_kind,
+        file_operation_path,
     ))
 }
 
@@ -69,6 +79,7 @@ fn admit_candidate(
     candidate: &Value,
     execution_root: &Path,
     frozen_adapter_kind: Option<&str>,
+    file_operation_path: Option<&str>,
 ) -> Result<AdmittedCommandDiff, &'static str> {
     let adapter_kind = candidate
         .get("adapterKind")
@@ -132,6 +143,11 @@ fn admit_candidate(
             .and_then(Value::as_str)
             .ok_or("runtime_diff_path_invalid")?;
         let source_path = normalize_reported_path(execution_root, raw_path)
+            .or_else(|| {
+                (adapter == AdapterKind::KiroCli && raw_entries.len() == 1)
+                    .then(|| reconcile_kiro_rooted_diff_path(raw_path, file_operation_path))
+                    .flatten()
+            })
             .ok_or("runtime_diff_path_outside_root")?;
         let change_kind = normalized_change_kind(raw, semantic_kind)?;
         let path = if adapter == AdapterKind::CodexCli && change_kind == "update" {
@@ -315,7 +331,7 @@ fn normalized_change_kind(raw: &Value, semantic_kind: &str) -> Result<String, &'
     .to_string())
 }
 
-fn normalize_reported_path(execution_root: &Path, reported: &str) -> Option<String> {
+pub(crate) fn normalize_reported_path(execution_root: &Path, reported: &str) -> Option<String> {
     if reported.trim().is_empty() || reported.contains('\0') {
         return None;
     }
@@ -342,6 +358,33 @@ fn normalize_reported_path(execution_root: &Path, reported: &str) -> Option<Stri
         return None;
     }
     Some(clean.to_string_lossy().replace('\\', "/"))
+}
+
+fn reconcile_kiro_rooted_diff_path(
+    reported_diff_path: &str,
+    normalized_file_operation_path: Option<&str>,
+) -> Option<String> {
+    let reported_path = Path::new(reported_diff_path);
+    if !reported_path.is_absolute() {
+        return None;
+    }
+    let mut rooted_relative = PathBuf::new();
+    for component in reported_path.components() {
+        match component {
+            Component::Normal(value) => {
+                if value.to_string_lossy().eq_ignore_ascii_case(".git") {
+                    return None;
+                }
+                rooted_relative.push(value);
+            }
+            Component::RootDir | Component::Prefix(_) | Component::CurDir => {}
+            Component::ParentDir => return None,
+        }
+    }
+    let rooted_relative = rooted_relative.to_string_lossy().replace('\\', "/");
+    let normalized_file_operation_path = normalized_file_operation_path?;
+    (rooted_relative == normalized_file_operation_path)
+        .then(|| normalized_file_operation_path.to_string())
 }
 
 pub fn unified_diff_counts(diff: &str) -> (u64, u64) {
@@ -683,6 +726,74 @@ mod tests {
         )
         .expect("candidate should be present");
         assert_eq!(result, Err("runtime_diff_path_outside_root"));
+    }
+
+    #[test]
+    fn kiro_single_diff_can_reconcile_to_the_same_tool_calls_admitted_file_location() {
+        let result = admit_runtime_diff_with_file_operation_path(
+            &json!({
+                "runtimeDiff": {
+                    "adapterKind": "kiro-cli",
+                    "protocolFamily": "acp-v1",
+                    "sourceEventKind": "session/update.tool_call_update.completed",
+                    "semanticKind": "complete_before_after",
+                    "entries": [{
+                        "path": "/src/app.ts",
+                        "oldText": "before\n",
+                        "newText": "after\n"
+                    }]
+                }
+            }),
+            Path::new("/repo"),
+            Some("kiro-cli"),
+            Some("src/app.ts"),
+        )
+        .expect("candidate should be present")
+        .expect("Kiro single-file location should reconcile the malformed rooted path");
+
+        assert_eq!(result.entries[0].path, "src/app.ts");
+
+        let mismatched_kiro = admit_runtime_diff_with_file_operation_path(
+            &json!({
+                "runtimeDiff": {
+                    "adapterKind": "kiro-cli",
+                    "protocolFamily": "acp-v1",
+                    "sourceEventKind": "session/update.tool_call_update.completed",
+                    "semanticKind": "complete_before_after",
+                    "entries": [{
+                        "path": "/src/other.ts",
+                        "oldText": "before\n",
+                        "newText": "after\n"
+                    }]
+                }
+            }),
+            Path::new("/repo"),
+            Some("kiro-cli"),
+            Some("src/app.ts"),
+        )
+        .expect("candidate should be present");
+        assert_eq!(mismatched_kiro, Err("runtime_diff_path_outside_root"));
+
+        let qoder = admit_runtime_diff_with_file_operation_path(
+            &json!({
+                "runtimeDiff": {
+                    "adapterKind": "qoder-cli",
+                    "protocolFamily": "acp-v1",
+                    "sourceEventKind": "session/update.tool_call_update.completed",
+                    "semanticKind": "complete_before_after",
+                    "entries": [{
+                        "path": "/src/app.ts",
+                        "oldText": "before\n",
+                        "newText": "after\n"
+                    }]
+                }
+            }),
+            Path::new("/repo"),
+            Some("qoder-cli"),
+            Some("src/app.ts"),
+        )
+        .expect("candidate should be present");
+        assert_eq!(qoder, Err("runtime_diff_path_outside_root"));
     }
 
     #[test]

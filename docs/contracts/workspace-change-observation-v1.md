@@ -8,23 +8,46 @@ last_updated: 2026-08-27
 
 # Workspace Change Observation v1
 
-本合同定义 Command Diff projection 与 Workspace Change Window 的 v1 字段、状态、捕获、授权和失败语义。
+本合同定义 Runtime File Operation presentation、Command Diff projection 与 Workspace Change Window 的 v1
+字段、状态、捕获、授权和失败语义。
 accepted 只表示目标语义已冻结；当前实现状态由 [v1.29 实施计划](../versions/v1.29/implementation-plan.md)拥有。
 
 ## 1. Closed product layers
 
-产品只存在以下两层：
+产品存在三个彼此独立的观测概念：
 
 | 层 | 定义 | 不证明 |
 | --- | --- | --- |
+| `runtime_file_operation` | Runtime 对一个成功 Tool Operation 以协议结构化字段明确报告的单文件写操作与可靠路径 | old/new 内容、增删行数、当前磁盘状态或最终净变化 |
 | `command_diff` | Runtime 对一个精确 Canonical Tool/Command Operation 明确报告的修改 | 当前磁盘最终状态、其他 Operation、单文件完整历史 |
 | `workspace_change_window` | 当前 Camp、exact execution root 的重叠 Run 集合在两个稳定 synthetic tree 捕获点之间的 Git 净变化 | 单个 Run/Agent/Tool 的因果归属，或没有用户/外部程序写入 |
 
-两层不能互相补全、去重或覆盖。非 Git execution root 不创建 Workspace Window。
+三个概念不能互相补全、去重或覆盖。`runtime_file_operation` 与 `command_diff` 可以投影到同一条 Canonical
+Activity；前者存在不要求后者存在。非 Git execution root 不创建 Workspace Window。
 
-## 2. Command Diff Evidence 与 projection
+## 2. Runtime 文件操作与 Command Diff Evidence
 
-### 2.1 Admission
+### 2.1 单文件操作 admission
+
+ACP v1 的一个 ToolCall 只有同时满足以下条件，才可在其既有 Canonical Activity 上投影一条
+`修改 <basename>` 文件操作行：
+
+1. 同一 `toolCallId` 的 terminal `session/update.tool_call_update` 明确为 `completed`；
+2. 累计结构化 `kind` 为 `edit | write`。首次可信结构化 kind 不得被后续冲突 kind 覆盖，因而
+   `read -> terminal edit` 不可伪造成写操作；
+3. 同一 ToolCall 的标准 `locations[].path` 累计状态能确定唯一、非空路径；terminal 省略或给出空 locations 时，
+   可以复用该 ToolCall 先前已报告的非空 location；
+4. 路径能相对该 Run 冻结的 canonical execution root 做纯词法规范化，且不为空、不含 root escape 或 Git
+   metadata path。
+
+该通路不读取 `rawInput`、title、output、shell command 或当前文件，不从成功文案提取路径，也不声明 old/new
+内容或增删行数。路径缺失、多个候选、失败、取消、kind 冲突或规范化失败时保持普通 Tool Activity。终态
+`runtimeFileOperation` 作为同一条 append-only Execution Evidence 的安全子投影落库，不创建第二条 Activity。
+
+Codex terminal `fileChange` 与 Claude `Edit` exact mutation 本身已经同时证明文件操作与内容，继续直接投影
+`修改 <basename>`；Antigravity 没有等价的可靠单文件终态路径，因此不按 Tool 名补造。
+
+### 2.2 Command Diff admission
 
 一个 Runtime event 只有同时满足以下条件才可生成 normalized diff Evidence：
 
@@ -36,20 +59,27 @@ accepted 只表示目标语义已冻结；当前实现状态由 [v1.29 实施计
 5. bytes、file count 和 patch size 满足对应 adapter profile 的严格上限。
 
 除明确 allowlist 为 `exact_mutation` 的局部替换外，局部 before/after、仅路径、自由文本中的 fenced diff、语义未声明的
-`diff` / `patch` 字段和需要读取当前文件才能补全的数据必须拒绝进入 Diff View。拒绝可以产生安全 diagnostic，
-但不能伪造 diff Evidence。
+`diff` / `patch` 字段和需要读取当前文件才能补全的数据必须拒绝进入 Diff View。可靠的仅路径事件可以按 2.1
+生成文件操作行，但仍不得获得 `diffProjection`、`+A −D` 或 inline diff。拒绝可以产生安全 diagnostic，但不能
+伪造 diff Evidence。
 
 v1 的 Runtime allowlist 冻结为：
 
 | 协议族 | 可靠终态 | 内容语义 | v1 处理 |
 | --- | --- | --- | --- |
 | Codex app-server | `item/completed` 且 `item.type=fileChange`、`item.status=completed` | `changes[].kind=update` 的 `diff` 是 unified diff；add/delete 的 `diff` 是完整新/旧内容 | 规范化为逐文件 unified diff 后准入 |
-| ACP v1 | `session/update.tool_call_update` 最终累计状态为 `completed` | 标准 `ToolCallContent::Diff { path, oldText?, newText }`；collection update 是 replace，不是 append | 只从该 Tool call 的终态累计 content 生成完整 before/after Evidence |
+| ACP v1 | `session/update.tool_call_update` 最终累计状态为 `completed` | 标准 `ToolCallContent::Diff { path, oldText?, newText }`；collection update 是 replace，不是 append | 只从该 ToolCall 的终态累计 content 生成完整 before/after Evidence；没有 Diff 时不影响 2.1 的路径操作行 |
 | Claude stream-json | `assistant.tool_use(name=Edit)` 与相同 `tool_use_id` 的非错误 `user.tool_result` 配对 | `file_path + old_string + new_string` 只证明一次精确片段替换，不证明真实文件行号或完整文件 before/after | 仅准入 `Edit` 的 `exact_mutation`；保存片段，不读取文件，不生成 hunk 行号 |
 | Antigravity stream-json | 没有等价的终态完整文件集合 | Tool 名称和 step terminal 不能证明 patch | 不准入，不按名称推测 |
 
 Codex 的 `item/started`、`item/fileChange/patchUpdated`、`turn/diff/updated` 以及任何名为 `apply_patch` 的 Tool
 都不是 v1 Command Diff 数据源。`apply_patch` 输入不解析；异常退出时没有上述可靠终态就不生成文件 presentation。
+
+Kiro `2.18.1` 的实测终态同时包含标准 ACP Diff 与唯一 location，但旧 Evidence 只持久化了
+`runtime_diff_path_outside_root`，没有保留被拒绝的原始 path。为覆盖 Kiro 已知的 rooted-relative wire shape，仅当
+adapter 为 Kiro、终态只有一个 Diff entry、同 ToolCall 已准入唯一 location，且去掉 Diff path 的根锚后与该
+location 完全相等时，Core 才以 location 对齐该 entry。任一条件不满足仍返回
+`runtime_diff_path_outside_root`；其他 ACP adapter 不使用此兼容规则。
 
 Claude Code v1 只暂存完整 `assistant.tool_use` 中、`name` 精确为 `Edit` 且字段类型完整的 mutation：
 
@@ -68,7 +98,7 @@ stream 结束丢弃。`old_string` 不含真实文件位置，因此 Core 不读
 `@@ -L,+L @@`。Bash/shell 文本不解析；`Write / NotebookEdit / ApplyPatch` 保持普通 Tool Activity，除非未来协议提供
 可靠完整 before/after。
 
-### 2.2 Append-only Evidence
+### 2.3 Append-only Evidence
 
 normalized update 至少冻结：
 
@@ -92,7 +122,7 @@ CommandDiffEvidence {
 加入从 workspace 读取的 bytes。Evidence 是 append-only，重复 source identity 必须幂等，迟到或乱序事件仍按既有
 Activity replay order 归约。
 
-### 2.3 Existing Canonical Activity projection
+### 2.4 Existing Canonical Activity projection
 
 既有 Tool/Command Activity 可选增加：
 
@@ -116,6 +146,8 @@ diffProjection: null | {
 - `sourceEvidenceIds` 包含形成当前结论的全部已排序来源，不因新 snapshot 覆盖而删除审计 lineage；
 - `available` 才可携带可渲染 `entries`；`unavailable` 不保留部分 patch；互不兼容且无法由 adapter 规则确定性排序/
   合并的完整声明得到 `conflict`，不得最后写入胜出；
+- 成功的 `runtimeFileOperation` 可把同一 Activity 归约为 `file.write` 并给出 `修改 <basename>` presentation hint；
+  它不创建 `diffProjection`。只有同一 Evidence 另有已准入 Diff 时，Renderer 才显示增删计数和 inline diff；
 - Activity `phase`、`outcome`、标题、identity 和排序不从 `diffProjection` 推导；
 - 任何 consumer 都不得把 projection 变成第二条可独立排序、写入或拥有 phase/outcome 的 Activity；具体 UI 形式
   不由本合同冻结。
@@ -390,7 +422,9 @@ Core 观察到所有用户、shell、IDE、hook 或外部进程。
 
 v1 presentation 冻结为：
 
-- Command 层不展示 `apply_patch` 父行或“编辑了 N 个文件”聚合层；一条可靠终态 Activity 的每个 change 是同级
+- Command 层不展示 `apply_patch` 父行或“编辑了 N 个文件”聚合层；成功 Edit/Write 的唯一可靠路径直接把原 Tool
+  Activity 呈现为 `修改 <basename>`。没有可靠内容时不显示增删计数、不提供空 inline diff，也不伪造 Diff；
+- 一条另有可靠 Command Diff 的 Activity 才把每个 change 呈现为同级
   `修改 <basename>  +A −D` presentation row，独立展开当前文件 inline diff，不跳转文件、不打开独立 Review；
 - `exact_mutation` 展开只显示 `oldText/newText` 片段的 `− / +` 行，不展示文件行号、hunk header、上下文定位或任何
   从当前 workspace 推测出的内容；同一文件连续 Edit 仍按各自 Tool identity 显示为多行，不合并净变化；

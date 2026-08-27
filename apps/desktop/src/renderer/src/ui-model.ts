@@ -795,6 +795,7 @@ export function executionActivityTitle(
     if (canonical?.toolName && !genericShellTitle(canonical.toolName)) return canonical.toolName
     if (presentationHint && !genericShellTitle(presentationHint)) return presentationHint
   } else {
+    if (canonical?.activityDomain === 'file' && presentationHint) return presentationHint
     if (canonical?.toolName) return canonical.toolName
     if (presentationHint) return presentationHint
   }
