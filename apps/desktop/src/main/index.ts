@@ -91,6 +91,7 @@ import { ChannelSettingsService } from './channel-settings'
 import { SafeStorageChannelCredentialStore } from './channel-credential-store'
 import { ElectronFeishuDeveloperSessionService } from './feishu-developer-session'
 import { FeishuWebSessionMemberBotProvisioner } from './feishu-member-bot-provisioner'
+import { isolatedSafeStorageApplicationName } from './safe-storage-application-name'
 
 const mainStartupStartedAt = performance.now()
 console.info('[startup] stage=main_module_loaded elapsed_ms=0.0')
@@ -205,14 +206,20 @@ const allowedMethods = new Set<CoreMethod>([
   'diagnostics.export'
 ])
 const APP_NAME = 'Rovai AI'
-app.setName(APP_NAME)
 const hasExplicitUserDataDirectory = app.commandLine.hasSwitch('user-data-dir')
+const explicitUserDataDirectory = hasExplicitUserDataDirectory
+  ? app.commandLine.getSwitchValue('user-data-dir')
+  : null
+const isolatedAcceptanceInstance =
+  process.env.ROVAI_ALLOW_ISOLATED_INSTANCE === '1'
+  && hasExplicitUserDataDirectory
+app.setName(isolatedAcceptanceInstance
+  ? isolatedSafeStorageApplicationName(APP_NAME, explicitUserDataDirectory ?? '')
+  : APP_NAME)
 let coreDataPath: string
 if (process.platform === 'win32') {
   const windowsRoot = resolveWindowsDataRoot(
-    hasExplicitUserDataDirectory
-      ? app.commandLine.getSwitchValue('user-data-dir')
-      : null,
+    explicitUserDataDirectory,
     process.env.LOCALAPPDATA
   )
   const layout = prepareWindowsDataRoot(resolveCoreBinary(), windowsRoot)
@@ -230,9 +237,6 @@ if (process.platform === 'win32') {
   if (legacyDataPath) app.setPath('userData', legacyDataPath)
   coreDataPath = app.getPath('userData')
 }
-const isolatedAcceptanceInstance =
-  process.env.ROVAI_ALLOW_ISOLATED_INSTANCE === '1'
-  && hasExplicitUserDataDirectory
 const primaryInstance = isolatedAcceptanceInstance || app.requestSingleInstanceLock()
 if (!primaryInstance) app.quit()
 const core = new CoreClient(coreDataPath)

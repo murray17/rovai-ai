@@ -49,6 +49,10 @@ Secret、原始 `userId`、Session Cookie、Host 恢复游标或内部路由事�
 `userId + userName + tenantId + tenantName + brand`，并把 Cookie jar 经 `safeStorage` 加密后原子写入本机私有文件。
 它不创建 App、不产生 App ID/Secret，也不启动 Bot。Core 只保存由 `brand + tenantId + userId` 派生的不透明
 `accountId`、`userIdDigest` 与可展示身份；缺少任一必需身份字段时不能进入 connected。
+登录页打开前先异步预检 OS 安全存储；身份回读与安全保存是两个可见阶段。安全存储操作和身份回读都具有固定截止
+时间，系统拒绝、超时或身份不完整会 fail closed，不让 Renderer 永久停留在 loading。显式隔离验收实例在 Electron
+ready 前把应用名切换为 `Rovai AI Isolated <userData 摘要>`，从而与日常 App 和其他验收目录使用不同的 macOS
+Keychain 命名空间；摘要不暴露原始路径，非隔离 App 继续使用原应用名以保持既有密文可读。
 
 普通队员发布先创建持久 `MemberBotPublicationIntent`，再要求当前 Web Session 仍属于 intent 冻结的
 `userId + tenantId`。`MemberBotProvisioner` 使用官方应用注册协议的 begin/poll，并在同一已登录 Electron Session
@@ -144,5 +148,5 @@ Agent 输出使用实际作者 Agent 的已发布 Bot；作者 Bot 不可用时�
 Core Snapshot 保存 pending aggregate、transport conversation 和 delivery 恢复事实，Main 启动后恢复所有 published
 Bot 长连接、过期 lease、collecting finalize 与 Outbox。Renderer snapshot 在 Main 中剥离这些 Host-only 字段。
 每个 App Secret 只以随机 credential ref 关联 Core；Developer Session Cookie jar 和 App Secret 都只在 Electron
-`safeStorage` 可用时加密落盘。明文不进入 SQLite、Renderer、日志、Agent Context 或诊断输出。断开账号只删除
-Developer Session；已发布 Bot 的 credential 与 WebSocket 生命周期保持独立。
+`safeStorage` 可用时经异步 API 加密落盘。明文不进入 SQLite、Renderer、日志、Agent Context 或诊断输出，也不因
+安全存储超时而降级。断开账号只删除 Developer Session；已发布 Bot 的 credential 与 WebSocket 生命周期保持独立。

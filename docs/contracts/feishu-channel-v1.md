@@ -30,7 +30,9 @@ ChannelTurnRequest、群 roster 和 ChannelDelivery 的字段与状态语义。C
 Developer Session Cookie jar 与 App Secret 只存于 Electron Main，并以 OS `safeStorage` 加密。Core 仅持久化
 Developer Identity 的摘要/显示字段和每 Bot `credentialRef`；Renderer/API Snapshot 不得出现 `userId`、
 `appSecret`、Cookie、CSRF、token、原始 credential payload、transport conversation 或 pending aggregate。系统加密
-不可用时 Session/credential write 必须失败，不能降级为明文。
+不可用或 15 秒内未完成时 Session/credential read/write 必须失败，不能降级为明文。登录必须在打开飞书页面前完成
+安全存储预检；显式隔离验收实例使用由其 `userData` 目录摘要派生的独立应用名作为 safeStorage 命名空间，目录原文
+不得进入命名空间或日志。
 
 ## 2. ProjectBinding 与渠道会话
 
@@ -94,14 +96,17 @@ status + version + connectedAt + lastVerifiedAt`。状态为 `connected | discon
 连接只有以下状态：
 
 ```text
-preparing -> awaiting_scan -> scan_confirmed -> inspecting_identity -> connected
-                                                         \-> expired | cancelled | failed
+checking_secure_storage -> preparing -> awaiting_scan -> scan_confirmed
+                                              -> inspecting_identity -> securing_session -> connected
+                                                                   \-> expired | cancelled | failed
 ```
 
 二维码 attempt 的 purpose 是 `account_login`，只登录开放平台并保存 Developer Session，不创建 App、Secret 或
 WebSocket。只有最新 exact `attemptId` 可以更新 UI；取消/切换会 abort 旧窗口并废弃迟到回调。新 identity upsert
 在同一 Core 事务把此前 connected account 变为 disconnected。显式 disconnect 只删除 Developer Session 并断开
 当前 account；已有 Bot credential、映射和 WebSocket 不删除、不迁移、不停用。
+开放平台已经到达但连续 20 秒仍不能产生完整必需身份时，attempt 必须以
+`feishu_developer_identity_incomplete` 失败；轮询不得重入，也不能一直保留在 identity inspection。
 
 每次普通发布先持久化 `MemberBotPublicationIntent`：
 

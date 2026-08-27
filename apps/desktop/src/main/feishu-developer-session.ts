@@ -10,10 +10,12 @@ import {
 } from 'electron'
 
 export type FeishuLoginStage =
+  | 'checking_secure_storage'
   | 'preparing'
   | 'awaiting_scan'
   | 'scan_confirmed'
   | 'inspecting_identity'
+  | 'securing_session'
   | 'connected'
   | 'expired'
   | 'cancelled'
@@ -79,6 +81,8 @@ const FEISHU_PORTAL_URL = 'https://open.feishu.cn/app?lang=zh-CN'
 const SESSION_PARTITION = `rovai-feishu-developer-${randomUUID()}`
 const LOGIN_TIMEOUT_MS = 10 * 60_000
 const LOGIN_POLL_MS = 500
+const IDENTITY_INSPECTION_TIMEOUT_MS = 20_000
+const SAFE_STORAGE_OPERATION_TIMEOUT_MS = 15_000
 
 export class ElectronFeishuDeveloperSessionService implements FeishuDeveloperPortalSession {
   #browserSession: Session | null = null
@@ -100,6 +104,8 @@ export class ElectronFeishuDeveloperSessionService implements FeishuDeveloperPor
     onStatus?(status: FeishuLoginStage): void
   } = {}): Promise<FeishuDeveloperIdentity> {
     this.#closeActiveLogin()
+    options.onStatus?.('checking_secure_storage')
+    await this.#store.requireAvailable()
     await this.#ensureRestored()
     if (options.forceFresh) {
       await this.#session.clearStorageData()
@@ -123,7 +129,9 @@ export class ElectronFeishuDeveloperSessionService implements FeishuDeveloperPor
     try {
       return await new Promise<FeishuDeveloperIdentity>((resolve, reject) => {
         const startedAt = Date.now()
+        let identityInspectionStartedAt: number | null = null
         let pollTimer: ReturnType<typeof setInterval> | null = null
+        let pollInProgress = false
 
         const cleanup = (): void => {
           if (pollTimer) clearInterval(pollTimer)
@@ -147,23 +155,38 @@ export class ElectronFeishuDeveloperSessionService implements FeishuDeveloperPor
         })
 
         const poll = async (): Promise<void> => {
-          if (terminal || window.isDestroyed() || window.webContents.isDestroyed()) return
-          if (Date.now() - startedAt >= LOGIN_TIMEOUT_MS) {
-            emitStage('expired')
-            finish(sessionError('feishu_login_expired'))
-            return
-          }
+          if (
+            terminal
+            || pollInProgress
+            || window.isDestroyed()
+            || window.webContents.isDestroyed()
+          ) return
+          pollInProgress = true
           try {
+            if (Date.now() - startedAt >= LOGIN_TIMEOUT_MS) {
+              emitStage('expired')
+              finish(sessionError('feishu_login_expired'))
+              return
+            }
             const currentUrl = window.webContents.getURL()
             if (isDeveloperPortalUrl(currentUrl)) {
               emitStage('inspecting_identity')
+              identityInspectionStartedAt ??= Date.now()
               const identity = await readDeveloperIdentity(window, currentUrl)
-              if (!identity) return
+              if (!identity) {
+                if (Date.now() - identityInspectionStartedAt >= IDENTITY_INSPECTION_TIMEOUT_MS) {
+                  emitStage('failed')
+                  finish(sessionError('feishu_developer_identity_incomplete'))
+                }
+                return
+              }
+              emitStage('securing_session')
               await this.#persist(identity)
               emitStage('connected')
               finish(identity)
               return
             }
+            identityInspectionStartedAt = null
             if (!isFeishuLoginUrl(currentUrl)) return
             const pageText = await window.webContents.executeJavaScript(
               'document.body?.innerText?.slice(0, 4000) ?? ""',
@@ -186,6 +209,8 @@ export class ElectronFeishuDeveloperSessionService implements FeishuDeveloperPor
           } catch (error) {
             emitStage('failed')
             finish(normalizeSessionError(error, 'feishu_login_failed'))
+          } finally {
+            pollInProgress = false
           }
         }
 
@@ -193,7 +218,10 @@ export class ElectronFeishuDeveloperSessionService implements FeishuDeveloperPor
         pollTimer.unref?.()
         void window.loadURL(FEISHU_PORTAL_URL)
           .then(() => poll())
-          .catch((error) => finish(normalizeSessionError(error, 'feishu_login_failed')))
+          .catch((error) => {
+            if (isExpectedPortalRedirectAbort(error, window)) return
+            finish(normalizeSessionError(error, 'feishu_login_failed'))
+          })
       })
     } finally {
       if (this.#activeLoginWindow === window) this.#activeLoginWindow = null
@@ -386,6 +414,17 @@ class SafeStorageFeishuDeveloperSessionStore {
     this.#path = join(userDataPath, 'channel-credentials', 'feishu-developer-session.bin')
   }
 
+  async requireAvailable(): Promise<void> {
+    try {
+      const available = await boundedSafeStorageOperation(
+        safeStorage.isAsyncEncryptionAvailable()
+      )
+      if (!available) throw sessionError('system_credential_encryption_unavailable')
+    } catch {
+      throw sessionError('system_credential_encryption_unavailable')
+    }
+  }
+
   async read(): Promise<StoredDeveloperSession | null> {
     let encoded: string
     try {
@@ -394,17 +433,32 @@ class SafeStorageFeishuDeveloperSessionStore {
       if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null
       throw error
     }
-    requireEncryption()
-    const plaintext = safeStorage.decryptString(Buffer.from(encoded, 'base64'))
+    await this.requireAvailable()
+    let plaintext: string
+    try {
+      const decrypted = await boundedSafeStorageOperation(
+        safeStorage.decryptStringAsync(Buffer.from(encoded, 'base64'))
+      )
+      plaintext = decrypted.result
+    } catch {
+      throw sessionError('system_credential_encryption_unavailable')
+    }
     const parsed = JSON.parse(plaintext) as StoredDeveloperSession
     if (!isStoredDeveloperSession(parsed)) throw sessionError('feishu_session_store_invalid')
     return parsed
   }
 
   async write(value: StoredDeveloperSession): Promise<void> {
-    requireEncryption()
+    await this.requireAvailable()
     await mkdir(dirname(this.#path), { recursive: true, mode: 0o700 })
-    const encrypted = safeStorage.encryptString(JSON.stringify(value)).toString('base64')
+    let encrypted: string
+    try {
+      encrypted = (await boundedSafeStorageOperation(
+        safeStorage.encryptStringAsync(JSON.stringify(value))
+      )).toString('base64')
+    } catch {
+      throw sessionError('system_credential_encryption_unavailable')
+    }
     const temporaryPath = `${this.#path}.${randomUUID()}.tmp`
     await writeFile(temporaryPath, encrypted, { encoding: 'utf8', mode: 0o600 })
     await chmod(temporaryPath, 0o600)
@@ -537,6 +591,15 @@ function isFeishuLoginUrl(value: string): boolean {
   }
 }
 
+function isExpectedPortalRedirectAbort(error: unknown, window: BrowserWindow): boolean {
+  if (!error || typeof error !== 'object') return false
+  const candidate = error as { code?: unknown; errno?: unknown }
+  if (candidate.code !== 'ERR_ABORTED' && candidate.errno !== -3) return false
+  if (window.isDestroyed() || window.webContents.isDestroyed()) return false
+  const currentUrl = window.webContents.getURL()
+  return isFeishuLoginUrl(currentUrl) || isDeveloperPortalUrl(currentUrl)
+}
+
 function brandFromUrl(value: string): 'feishu' | 'lark' {
   return new URL(value).hostname.toLowerCase().endsWith('larksuite.com') ? 'lark' : 'feishu'
 }
@@ -569,10 +632,23 @@ function normalizedOptional(value: unknown): string | undefined {
   return normalizedRequired(value) ?? undefined
 }
 
-function requireEncryption(): void {
-  if (!safeStorage.isEncryptionAvailable()) {
-    throw sessionError('system_credential_encryption_unavailable')
-  }
+function boundedSafeStorageOperation<T>(operation: Promise<T>): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      reject(sessionError('system_credential_encryption_unavailable'))
+    }, SAFE_STORAGE_OPERATION_TIMEOUT_MS)
+    timer.unref?.()
+    operation.then(
+      (value) => {
+        clearTimeout(timer)
+        resolve(value)
+      },
+      (error) => {
+        clearTimeout(timer)
+        reject(error)
+      }
+    )
+  })
 }
 
 function sessionError(code: string): Error {

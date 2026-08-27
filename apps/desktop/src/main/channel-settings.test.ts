@@ -335,6 +335,32 @@ describe('channel settings service', () => {
     await expect(service.connect()).rejects.toThrow('feishu_developer_identity_incomplete')
 
     expect(commands).not.toContain('channels.feishu.account.upsert')
+    expect((await service.get()).activeQrAttempt).toMatchObject({
+      stage: 'failed',
+      detail: '已登录飞书，但未能读取完整的账号与企业信息。请关闭后重试。'
+    })
+  })
+
+  it('turns secure-storage rejection into an actionable login error', async () => {
+    const service = new ChannelSettingsService({
+      credentialStore: memoryCredentialStore(),
+      developerSession: {
+        async beginLogin() { throw new Error('system_credential_encryption_unavailable') },
+        async inspect() { return null },
+        async requireExpectedIdentity() { throw new Error('not_used') },
+        async disconnect() {}
+      },
+      core: channelCore((method) => (
+        method === 'channels.feishu.snapshot' ? coreSnapshot() : { status: 'applied' }
+      ))
+    })
+
+    await expect(service.connect()).rejects.toThrow('system_credential_encryption_unavailable')
+
+    expect((await service.get()).activeQrAttempt).toMatchObject({
+      stage: 'failed',
+      detail: '无法访问系统安全存储。macOS 上请在钥匙串提示中选择“允许”，然后重试。'
+    })
   })
 
   it('does not silently use compatibility registration when the developer session has expired', async () => {

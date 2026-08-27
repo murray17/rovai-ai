@@ -35,6 +35,9 @@ Dialog、状态点和间距复用现有组件语法。
 它展示 preparing、awaiting scan、scan confirmed、identity inspection、过期/错误和取消；关闭必须取消 exact attempt，
 迟到状态不再打开或更新 UI。兼容发布可复用 QR Dialog，但 purpose 与文案必须是
 `member_bot_compat_registration`，不能使用账号登录的说明。
+账号登录在 preparing 前展示安全存储检查，在 identity inspection 后展示安全保存；两者必须使用不同文案，不能把
+钥匙串等待描述成“读取账号”。安全存储拒绝、身份读取超时和页面失败使用中文可操作提示，不向用户显示 `unknown`
+或原始异常文本。
 
 普通发布不得进入 QR Dialog。点击列表“发布”先打开独立确认 Dialog，展示现有 `MemberAvatar`、队员名称/职责、
 应用说明、当前开发者账号和租户；“确认发布”后在同一 Dialog 逐步展示账号校验、创建应用、配置 Bot、权限/事件、

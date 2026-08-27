@@ -284,7 +284,7 @@ export class ChannelSettingsService {
       stage: 'preparing',
       qrDataUrl: null,
       expiresAt: null,
-      detail: '正在准备飞书开放平台登录…'
+      detail: '正在检查系统安全存储…'
     }
     void this.#emit()
     try {
@@ -837,10 +837,12 @@ export class ChannelSettingsService {
   #updateLoginAttempt(attemptId: string, stage: FeishuLoginStage): void {
     if (this.#activeQrAttempt?.attemptId !== attemptId) return
     const details: Partial<Record<FeishuLoginStage, string>> = {
+      checking_secure_storage: '正在检查系统安全存储；如出现系统授权提示，请选择允许…',
       preparing: '正在准备飞书开放平台登录…',
       awaiting_scan: '请使用飞书扫码登录开放平台。',
       scan_confirmed: '已扫码，正在确认登录…',
       inspecting_identity: '正在读取飞书账号与企业身份…',
+      securing_session: '身份读取完成，正在安全保存开发者会话…',
       connected: '飞书账号已连接。',
       expired: '登录二维码已过期，请关闭后重试。',
       cancelled: '登录已取消。',
@@ -1464,7 +1466,7 @@ export class ChannelSettingsService {
       stage: 'failed',
       qrDataUrl: null,
       expiresAt: null,
-      detail: `飞书操作失败：${channelFailureCode(error)}`
+      detail: channelFailureDetail(error)
     }
     void this.#emit()
   }
@@ -1524,6 +1526,25 @@ function channelFailureCode(error: unknown): string {
   if (error instanceof LarkChannelError) return error.code
   if (error instanceof Error && /^[a-z][a-z0-9_.-]{1,80}$/i.test(error.message)) return error.message
   return 'unknown'
+}
+
+function channelFailureDetail(error: unknown): string {
+  const code = channelFailureCode(error)
+  const details: Record<string, string> = {
+    system_credential_encryption_unavailable:
+      '无法访问系统安全存储。macOS 上请在钥匙串提示中选择“允许”，然后重试。',
+    feishu_developer_identity_incomplete:
+      '已登录飞书，但未能读取完整的账号与企业信息。请关闭后重试。',
+    feishu_login_failed: '无法打开飞书登录页面，请检查网络后重试。',
+    feishu_login_expired: '飞书登录已超时，请关闭后重试。',
+    feishu_login_cancelled: '飞书登录已取消。',
+    feishu_developer_session_expired: '飞书开发者会话已过期，请重新登录。',
+    feishu_developer_identity_changed: '飞书账号或企业身份已变化，请重新连接。'
+  }
+  if (details[code]) return details[code]
+  return code === 'unknown'
+    ? '飞书操作失败，请关闭后重试。'
+    : `飞书操作失败（${code}），请关闭后重试。`
 }
 
 function canonicalInboundBody(

@@ -1994,10 +1994,12 @@ export interface ChannelQrAttemptView {
   purpose: ChannelQrAttemptPurpose
   agentId: string | null
   stage:
+    | 'checking_secure_storage'
     | 'preparing'
     | 'awaiting_scan'
     | 'scan_confirmed'
     | 'inspecting_identity'
+    | 'securing_session'
     | 'connected'
     | 'expired'
     | 'cancelled'

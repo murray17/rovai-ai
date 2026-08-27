@@ -127,7 +127,9 @@ ROVAI_ALLOW_ISOLATED_INSTANCE=1 \
 
 Desktop 检测到这组显式隔离标记后，会以
 `--skill-library-root "$FIXTURE_ROOT/user-data/managed-skill-library"` 启动 Core；验收脚本不得绕过
-Desktop 另起一个仍指向日常全局 Skill Library 的 Core。
+Desktop 另起一个仍指向日常全局 Skill Library 的 Core。它还会用显式 `userData` 的非敏感摘要派生独立应用名，
+隔离 macOS Keychain 中的 safeStorage 项。每次验证重新生成的 ad-hoc `.app` 都必须重新执行 `mktemp -d`，不能复用
+上一构建的 fixture：macOS Keychain 会把访问控制与代码签名身份关联，复用目录可能触发旧授权或拒绝访问。
 
 AI Agent 不得把 `open "$(pwd)/dist/mac-arm64/Rovai AI.app"` 当作打包验证，因为该命令没有证明
 `userData` 隔离。签名和二进制检查不需要启动 App，优先使用
