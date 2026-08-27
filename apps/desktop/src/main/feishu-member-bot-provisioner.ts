@@ -68,7 +68,8 @@ const MEMBER_BOT_MANIFEST_REQUIREMENTS = {
   scopes: {
     tenant: [
       'im:message',
-      'im:message:readonly',
+      'im:message.p2p_msg:readonly',
+      'im:message.group_at_msg:readonly',
       'im:message:send_as_bot',
       'im:chat:readonly',
       'im:chat.members:read'
@@ -248,8 +249,30 @@ export class FeishuWebSessionMemberBotProvisioner implements FeishuMemberBotProv
         input.remoteAppId,
         input.signal
       )
-      if (input.avatarSource?.pngBytes && publishedVersion.appVersion === '1.0.0') {
-        const avatar = requireAvatarSource(input.avatarSource)
+      const needsAvatarRepair = Boolean(
+        input.avatarSource?.pngBytes && publishedVersion.appVersion === '1.0.0'
+      )
+      let needsReadinessRepair = false
+      if (!needsAvatarRepair) {
+        try {
+          await client.verifyMemberBot({
+            appId: input.remoteAppId,
+            versionId: publishedVersion.versionId,
+            configuration: {
+              tenantScopes: MEMBER_BOT_MANIFEST_REQUIREMENTS.scopes.tenant,
+              tenantEvents: MEMBER_BOT_MANIFEST_REQUIREMENTS.events.items.tenant
+            },
+            signal: input.signal
+          })
+        } catch (error) {
+          if (!isRepairableMemberBotVerificationError(error)) throw error
+          needsReadinessRepair = true
+        }
+      }
+      if (needsAvatarRepair || needsReadinessRepair) {
+        const avatar = input.avatarSource?.pngBytes
+          ? requireAvatarSource(input.avatarSource)
+          : await this.#readDefaultAvatar()
         const avatarUrl = await client.uploadAppIcon({ ...avatar, signal: input.signal })
         const configuration: FeishuMemberBotConsoleConfiguration = {
           appName: consoleAppName(input.appName),
@@ -268,18 +291,21 @@ export class FeishuWebSessionMemberBotProvisioner implements FeishuMemberBotProv
           input.signal
         )
         input.onProgress?.('permissions_events_configured', input.remoteAppId)
+        const repairVersion = incrementPatchVersion(publishedVersion.appVersion)
         const repairVersionId = await client.createVersion({
           appId: input.remoteAppId,
           ownerUserId: identity.userId,
-          appVersion: '1.0.1',
-          remark: '同步 Rovai 队员头像',
-          changeLog: '使用当前 Rovai 队员头像修正飞书 Bot 身份。',
+          appVersion: repairVersion,
+          remark: needsReadinessRepair ? '修复飞书 Bot 接收配置' : '同步 Rovai 队员头像',
+          changeLog: needsReadinessRepair
+            ? '补全消息权限、事件订阅与长连接在线配置。'
+            : '使用当前 Rovai 队员头像修正飞书 Bot 身份。',
           reuseExisting: true,
           signal: input.signal
         })
         publishedVersion = {
           ...(await client.publishVersion(input.remoteAppId, repairVersionId, input.signal)),
-          appVersion: '1.0.1'
+          appVersion: repairVersion
         }
         await client.verifyMemberBot({
           appId: input.remoteAppId,
@@ -290,15 +316,6 @@ export class FeishuWebSessionMemberBotProvisioner implements FeishuMemberBotProv
       } else {
         input.onProgress?.('bot_configured', input.remoteAppId)
         input.onProgress?.('permissions_events_configured', input.remoteAppId)
-        await client.verifyMemberBot({
-          appId: input.remoteAppId,
-          versionId: publishedVersion.versionId,
-          configuration: {
-            tenantScopes: MEMBER_BOT_MANIFEST_REQUIREMENTS.scopes.tenant,
-            tenantEvents: MEMBER_BOT_MANIFEST_REQUIREMENTS.events.items.tenant
-          },
-          signal: input.signal
-        })
       }
       input.onProgress?.('version_published', input.remoteAppId)
       await this.#developerSession.persist()
@@ -371,6 +388,27 @@ function provisioningErrorCode(error: unknown, fallback: string): string {
     if (typeof code === 'string' && code) return code
   }
   return error instanceof Error && error.message ? error.message : fallback
+}
+
+function isRepairableMemberBotVerificationError(error: unknown): boolean {
+  return error instanceof FeishuOpenPlatformApiError && [
+    'feishu_console_avatar_verification_failed',
+    'feishu_console_bot_verification_failed',
+    'feishu_console_scope_catalog_missing',
+    'feishu_console_scope_verification_failed',
+    'feishu_console_event_verification_failed',
+    'feishu_console_callback_verification_failed'
+  ].includes(error.code)
+}
+
+function incrementPatchVersion(version: string): string {
+  const match = /^(\d{1,4})\.(\d{1,4})\.(\d{1,4})$/.exec(version)
+  if (!match) throw provisioningError('feishu_console_app_version_invalid', 'unknown')
+  const patch = Number(match[3]) + 1
+  if (patch > 9_999) {
+    throw provisioningError('feishu_console_app_version_invalid', 'unknown')
+  }
+  return `${match[1]}.${match[2]}.${patch}`
 }
 
 function consoleAppName(value: string): string {

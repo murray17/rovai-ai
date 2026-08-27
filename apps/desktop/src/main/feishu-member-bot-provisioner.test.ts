@@ -172,6 +172,62 @@ describe('Feishu Web Session member Bot provisioner', () => {
     expect(client.publishVersion).not.toHaveBeenCalled()
   })
 
+  it('repairs missing online message readiness on the frozen app with the next version', async () => {
+    const operations: string[] = []
+    const portal = fakePortal()
+    const client = fakeOpenPlatformClient(operations)
+    client.findPublishedVersion.mockImplementation(async () => {
+      operations.push('find_published_version')
+      return { versionId: 'version_2', status: 2, appVersion: '1.0.1' }
+    })
+    client.verifyMemberBot
+      .mockImplementationOnce(async () => {
+        operations.push('verify')
+        throw new FeishuOpenPlatformApiError(
+          'feishu_console_scope_verification_failed',
+          true
+        )
+      })
+      .mockImplementationOnce(async () => { operations.push('verify') })
+
+    const result = await new FeishuWebSessionMemberBotProvisioner(portal, {
+      createClient: () => client
+    }).reconcile({
+      publicationIntentId: 'intent-existing',
+      agentId: 'agent-a',
+      remoteAppId: 'cli_dingding',
+      appName: '叮叮',
+      appDescription: 'Rovai AI 队员 · 游学者',
+      avatarSource: {
+        pngBytes: new Uint8Array([9, 8, 7]),
+        width: 192,
+        height: 192
+      },
+      expectedDeveloperIdentity: { userId: 'owner-user', tenantId: 'tenant-1' }
+    })
+
+    expect(result.appId).toBe('cli_dingding')
+    expect(operations).toEqual([
+      'read_secret',
+      'find_published_version',
+      'verify',
+      'upload_avatar',
+      'enable_bot',
+      'configure_scopes',
+      'configure_events',
+      'configure_callbacks',
+      'create_version',
+      'publish_version',
+      'verify'
+    ])
+    expect(client.createApp).not.toHaveBeenCalled()
+    expect(client.createVersion).toHaveBeenCalledWith(expect.objectContaining({
+      appId: 'cli_dingding',
+      appVersion: '1.0.2',
+      reuseExisting: true
+    }))
+  })
+
   it('fails before opening the console when the expected identity cannot be proven', async () => {
     const portal = fakePortal()
     vi.mocked(portal.requireExpectedIdentity)

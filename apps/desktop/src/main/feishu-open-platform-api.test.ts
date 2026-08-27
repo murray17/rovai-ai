@@ -10,7 +10,12 @@ const configuration: FeishuMemberBotConsoleConfiguration = {
   appName: '叮叮',
   appDescription: 'Rovai AI 队员 · 游学者',
   avatarUrl: 'https://sf3-cn.feishucdn.com/obj/avatar.png',
-  tenantScopes: ['im:message', 'im:message:send_as_bot'],
+  tenantScopes: [
+    'im:message',
+    'im:message.p2p_msg:readonly',
+    'im:message.group_at_msg:readonly',
+    'im:message:send_as_bot'
+  ],
   tenantEvents: ['im.message.receive_v1']
 }
 
@@ -19,6 +24,10 @@ describe('OpenPlatformApiClient', () => {
     const calls: Array<{ url: URL; init?: RequestInit }> = []
     let manifest = '{}'
     let detailReads = 0
+    let botEnabled = false
+    let scopesConfigured = false
+    let eventMode = 0
+    let appEvents: string[] = []
     const session = fakeSession(async (rawUrl, init) => {
       const url = new URL(rawUrl)
       calls.push({ url, init })
@@ -30,6 +39,41 @@ describe('OpenPlatformApiClient', () => {
       }
       if (url.pathname === '/developers/v1/secret/cli_dingding') {
         return apiResponse({ secret: 'app-secret' })
+      }
+      if (url.pathname === '/developers/v1/robot/switch/cli_dingding') {
+        botEnabled = true
+        return apiResponse({})
+      }
+      if (url.pathname === '/developers/v1/robot/cli_dingding') {
+        return apiResponse({ enable: botEnabled })
+      }
+      if (url.pathname === '/developers/v1/scope/all/cli_dingding') {
+        return apiResponse({
+          scopes: configuration.tenantScopes.map((name, index) => ({
+            id: `scope_${index}`,
+            name,
+            status: scopesConfigured ? (detailReads >= 2 ? 5 : 1) : 0,
+            supportScopeIdentityTypes: [2]
+          }))
+        })
+      }
+      if (url.pathname === '/developers/v1/scope/update/cli_dingding') {
+        scopesConfigured = true
+        return apiResponse({})
+      }
+      if (url.pathname === '/developers/v1/event/cli_dingding') {
+        return apiResponse({ eventMode, events: [], appEvents, userEvents: [] })
+      }
+      if (url.pathname === '/developers/v1/event/switch/cli_dingding') {
+        eventMode = Number(jsonBody(init).eventMode)
+        return apiResponse({})
+      }
+      if (url.pathname === '/developers/v1/event/update/cli_dingding') {
+        appEvents = [...appEvents, ...stringBodyArray(jsonBody(init).appEvents)]
+        return apiResponse({})
+      }
+      if (url.pathname === '/developers/v1/callback/cli_dingding') {
+        return apiResponse({ callbackMode: 0, callbacks: [] })
       }
       if (url.pathname === '/developers/v1/manifest/get/cli_dingding') {
         return apiResponse({ appManifest: manifest })
@@ -83,10 +127,19 @@ describe('OpenPlatformApiClient', () => {
       '/developers/v1/app/create',
       '/developers/v1/secret/cli_dingding',
       '/developers/v1/robot/switch/cli_dingding',
+      '/developers/v1/scope/all/cli_dingding',
+      '/developers/v1/scope/update/cli_dingding',
+      '/developers/v1/scope/all/cli_dingding',
       '/developers/v1/manifest/get/cli_dingding',
       '/developers/v1/manifest/upsert',
+      '/developers/v1/event/cli_dingding',
+      '/developers/v1/event/switch/cli_dingding',
+      '/developers/v1/event/cli_dingding',
+      '/developers/v1/event/update/cli_dingding',
+      '/developers/v1/event/cli_dingding',
       '/developers/v1/manifest/get/cli_dingding',
       '/developers/v1/manifest/upsert',
+      '/developers/v1/callback/cli_dingding',
       '/developers/v1/manifest/get/cli_dingding',
       '/developers/v1/manifest/upsert',
       '/developers/v1/app_version/create/cli_dingding',
@@ -95,6 +148,10 @@ describe('OpenPlatformApiClient', () => {
       '/developers/v1/publish/release/cli_dingding/version_1',
       '/developers/v1/app_version/detail/cli_dingding/version_1',
       '/developers/v1/manifest/get/cli_dingding',
+      '/developers/v1/robot/cli_dingding',
+      '/developers/v1/scope/all/cli_dingding',
+      '/developers/v1/event/cli_dingding',
+      '/developers/v1/callback/cli_dingding',
       '/developers/v1/app_version/detail/cli_dingding/version_1'
     ])
     const firstHeaders = new Headers(calls[0].init?.headers)
@@ -114,7 +171,22 @@ describe('OpenPlatformApiClient', () => {
         subscription_type: 'websocket',
         items: { tenant: configuration.tenantEvents }
       },
-      callbacks: { subscription_type: 'websocket', items: [] }
+      callbacks: { items: [] }
+    })
+    expect(jsonBody(calls.find(({ url }) => (
+      url.pathname === '/developers/v1/scope/update/cli_dingding'
+    ))?.init)).toMatchObject({
+      appScopeIDs: ['scope_0', 'scope_1', 'scope_2', 'scope_3'],
+      userScopeIDs: [],
+      scopeIds: [],
+      operation: 'add'
+    })
+    expect(jsonBody(calls.find(({ url }) => (
+      url.pathname === '/developers/v1/event/update/cli_dingding'
+    ))?.init)).toMatchObject({
+      operation: 'add',
+      appEvents: ['im.message.receive_v1'],
+      eventMode: 4
     })
   })
 
@@ -132,6 +204,138 @@ describe('OpenPlatformApiClient', () => {
     expect(error).toBeInstanceOf(FeishuOpenPlatformApiError)
     expect(String(error)).toContain('feishu_console_read_secret_rejected_10042')
     expect(String(error)).not.toMatch(/app-secret-was-here|do-not-leak/)
+  })
+
+  it('rejects a manifest-only message subscription when the online event state is not ready', async () => {
+    const paths: string[] = []
+    const manifest = JSON.stringify({
+      avatar_url: configuration.avatarUrl,
+      bot: { enable: true },
+      scopes: { tenant: configuration.tenantScopes },
+      events: {
+        subscription_type: 'websocket',
+        items: { tenant: configuration.tenantEvents }
+      },
+      callbacks: { subscription_type: 'websocket', items: [] }
+    })
+    const session = fakeSession(async (rawUrl) => {
+      const url = new URL(rawUrl)
+      paths.push(url.pathname)
+      if (url.pathname === '/developers/v1/manifest/get/cli_dingding') {
+        return apiResponse({ appManifest: manifest })
+      }
+      if (url.pathname === '/developers/v1/app_version/detail/cli_dingding/version_1') {
+        return apiResponse({ status: 2 })
+      }
+      if (url.pathname === '/developers/v1/event/cli_dingding') {
+        return apiResponse({ eventMode: 0, events: [], appEvents: [], userEvents: [] })
+      }
+      if (url.pathname === '/developers/v1/robot/cli_dingding') {
+        return apiResponse({ enable: true })
+      }
+      if (url.pathname === '/developers/v1/scope/all/cli_dingding') {
+        return apiResponse({
+          scopes: configuration.tenantScopes.map((name, index) => ({
+            id: `scope_${index}`,
+            name,
+            status: 5
+          }))
+        })
+      }
+      if (url.pathname === '/developers/v1/callback/cli_dingding') {
+        return apiResponse({ callbackMode: 0, callbacks: [] })
+      }
+      throw new Error(`unexpected request: ${url.pathname}`)
+    })
+
+    await expect(new OpenPlatformApiClient(session).verifyMemberBot({
+      appId: 'cli_dingding',
+      versionId: 'version_1',
+      configuration
+    })).rejects.toMatchObject({
+      code: 'feishu_console_event_verification_failed'
+    })
+    expect(paths).toContain('/developers/v1/event/cli_dingding')
+  })
+
+  it('fails closed when the event mode switch does not become effective', async () => {
+    const paths: string[] = []
+    const session = fakeSession(async (rawUrl) => {
+      const url = new URL(rawUrl)
+      paths.push(url.pathname)
+      if (url.pathname === '/developers/v1/event/cli_dingding') {
+        return apiResponse({ eventMode: 0, appEvents: [] })
+      }
+      if (url.pathname === '/developers/v1/event/switch/cli_dingding') {
+        return apiResponse({})
+      }
+      throw new Error(`unexpected request: ${url.pathname}`)
+    })
+
+    await expect(new OpenPlatformApiClient(session).configureEvents(
+      'cli_dingding',
+      configuration
+    )).rejects.toMatchObject({ code: 'feishu_console_event_verification_failed' })
+    expect(paths).toEqual([
+      '/developers/v1/event/cli_dingding',
+      '/developers/v1/event/switch/cli_dingding',
+      '/developers/v1/event/cli_dingding'
+    ])
+  })
+
+  it('fails before mutation when a critical P2P scope is absent from the catalog', async () => {
+    const paths: string[] = []
+    const session = fakeSession(async (rawUrl) => {
+      const url = new URL(rawUrl)
+      paths.push(url.pathname)
+      if (url.pathname === '/developers/v1/scope/all/cli_dingding') {
+        return apiResponse({
+          scopes: configuration.tenantScopes
+            .filter((name) => name !== 'im:message.p2p_msg:readonly')
+            .map((name, index) => ({ id: `scope_${index}`, name, status: 0 }))
+        })
+      }
+      throw new Error(`unexpected request: ${url.pathname}`)
+    })
+
+    await expect(new OpenPlatformApiClient(session).configureScopes(
+      'cli_dingding',
+      configuration
+    )).rejects.toMatchObject({ code: 'feishu_console_scope_catalog_missing' })
+    expect(paths).toEqual(['/developers/v1/scope/all/cli_dingding'])
+  })
+
+  it('switches an enabled callback subscription to long connection and reads it back', async () => {
+    const calls: Array<{ url: URL; init?: RequestInit }> = []
+    let callbackMode = 1
+    let manifest = '{}'
+    const session = fakeSession(async (rawUrl, init) => {
+      const url = new URL(rawUrl)
+      calls.push({ url, init })
+      if (url.pathname === '/developers/v1/callback/cli_dingding') {
+        return apiResponse({ callbackMode, callbacks: ['card.action.trigger'] })
+      }
+      if (url.pathname === '/developers/v1/callback/switch/cli_dingding') {
+        callbackMode = Number(jsonBody(init).callbackMode)
+        return apiResponse({})
+      }
+      if (url.pathname === '/developers/v1/manifest/get/cli_dingding') {
+        return apiResponse({ appManifest: manifest })
+      }
+      if (url.pathname === '/developers/v1/manifest/upsert') {
+        manifest = String(jsonBody(init).appManifest)
+        return apiResponse({})
+      }
+      throw new Error(`unexpected request: ${url.pathname}`)
+    })
+
+    await expect(new OpenPlatformApiClient(session).configureCallbacksAndWebSocket(
+      'cli_dingding',
+      configuration
+    )).resolves.toBeUndefined()
+    expect(jsonBody(calls.find(({ url }) => (
+      url.pathname === '/developers/v1/callback/switch/cli_dingding'
+    ))?.init)).toEqual({ clientId: 'cli_dingding', callbackMode: 4 })
   })
 
   it('reconciles a release HTTP 400 when the version was published remotely', async () => {
@@ -255,4 +459,11 @@ function apiResponse(data: unknown): Response {
 function jsonBody(init?: RequestInit): Record<string, unknown> {
   if (typeof init?.body !== 'string') throw new Error('expected JSON body')
   return JSON.parse(init.body) as Record<string, unknown>
+}
+
+function stringBodyArray(value: unknown): string[] {
+  if (!Array.isArray(value) || value.some((item) => typeof item !== 'string')) {
+    throw new Error('expected string array')
+  }
+  return value
 }

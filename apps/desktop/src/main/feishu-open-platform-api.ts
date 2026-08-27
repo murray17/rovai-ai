@@ -23,6 +23,25 @@ export interface FeishuPublishedVersionSummary extends FeishuPublishedVersion {
   appVersion: string
 }
 
+export interface FeishuOpenPlatformEventState {
+  eventMode: number | null
+  events: string[]
+  appEvents: string[]
+  userEvents: string[]
+}
+
+export interface FeishuOpenPlatformCallbackState {
+  callbackMode: number | null
+  callbacks: string[]
+}
+
+export interface FeishuOpenPlatformScope {
+  id: string
+  name: string
+  appStatus: number | null
+  supportsAppIdentity: boolean
+}
+
 export class FeishuOpenPlatformApiError extends Error {
   readonly code: string
   readonly outcomeUnknown: boolean
@@ -55,6 +74,10 @@ type ClientOptions = {
 }
 
 const MANIFEST_SCHEMA_VERSION = '0.0.1'
+export const FEISHU_LONG_CONNECTION_MODE = 4
+const FEISHU_SCOPE_STATUS_DISABLED = 0
+const FEISHU_SCOPE_STATUS_ENABLED = 5
+const FEISHU_APP_SCOPE_IDENTITY_TYPE = 2
 const PUBLISHED_VERSION_STATUS = 2
 const WAIT_PUBLISH_VERSION_STATUS = 5
 const REJECTED_VERSION_STATUS = 3
@@ -176,9 +199,39 @@ export class OpenPlatformApiClient {
     configuration: FeishuMemberBotConsoleConfiguration,
     signal?: AbortSignal
   ): Promise<void> {
+    const id = requireResourceId(appId, 'feishu_console_app_id_invalid')
+    const current = await this.readScopeCatalog(id, signal)
+    const required = resolveRequiredAppScopes(current, configuration.tenantScopes)
+    const disabled = required.filter((scope) => scope.appStatus === FEISHU_SCOPE_STATUS_DISABLED)
+    if (disabled.length > 0) {
+      await this.#request(
+        'configure_scopes',
+        `/developers/v1/scope/update/${encodeURIComponent(id)}`,
+        {
+          body: {
+            clientId: id,
+            appScopeIDs: disabled.map((scope) => scope.id),
+            userScopeIDs: [],
+            scopeIds: [],
+            operation: 'add'
+          },
+          mutation: true,
+          signal
+        }
+      )
+    }
+    const updated = resolveRequiredAppScopes(
+      await this.readScopeCatalog(id, signal),
+      configuration.tenantScopes
+    )
+    if (updated.some((scope) => (
+      scope.appStatus === null || scope.appStatus === FEISHU_SCOPE_STATUS_DISABLED
+    ))) {
+      throw apiError('feishu_console_scope_update_verification_failed', true)
+    }
     await this.#updateManifest(
-      'configure_scopes',
-      appId,
+      'configure_scope_manifest',
+      id,
       configuration,
       (manifest) => {
         const scopes = recordAt(manifest, 'scopes')
@@ -200,9 +253,51 @@ export class OpenPlatformApiClient {
     configuration: FeishuMemberBotConsoleConfiguration,
     signal?: AbortSignal
   ): Promise<void> {
+    const id = requireResourceId(appId, 'feishu_console_app_id_invalid')
+    let state = await this.readEventState(id, signal)
+    if (state.eventMode !== FEISHU_LONG_CONNECTION_MODE) {
+      await this.#request(
+        'switch_event',
+        `/developers/v1/event/switch/${encodeURIComponent(id)}`,
+        {
+          body: { clientId: id, eventMode: FEISHU_LONG_CONNECTION_MODE },
+          mutation: true,
+          signal
+        }
+      )
+      state = await this.readEventState(id, signal)
+      if (state.eventMode !== FEISHU_LONG_CONNECTION_MODE) {
+        throw apiError('feishu_console_event_verification_failed', true)
+      }
+    }
+    const existing = new Set(state.appEvents)
+    const missing = configuration.tenantEvents.filter((event) => !existing.has(event))
+    if (missing.length > 0) {
+      await this.#request(
+        'configure_events',
+        `/developers/v1/event/update/${encodeURIComponent(id)}`,
+        {
+          body: {
+            clientId: id,
+            operation: 'add',
+            events: [],
+            appEvents: missing,
+            userEvents: [],
+            eventMode: FEISHU_LONG_CONNECTION_MODE
+          },
+          mutation: true,
+          signal
+        }
+      )
+    }
+    state = await this.readEventState(id, signal)
+    if (
+      state.eventMode !== FEISHU_LONG_CONNECTION_MODE
+      || !includesEvery(state.appEvents, configuration.tenantEvents)
+    ) throw apiError('feishu_console_event_verification_failed', true)
     await this.#updateManifest(
-      'configure_events',
-      appId,
+      'configure_event_manifest',
+      id,
       configuration,
       (manifest) => {
         const events = recordAt(manifest, 'events')
@@ -229,9 +324,26 @@ export class OpenPlatformApiClient {
     configuration: FeishuMemberBotConsoleConfiguration,
     signal?: AbortSignal
   ): Promise<void> {
+    const id = requireResourceId(appId, 'feishu_console_app_id_invalid')
+    let state = await this.readCallbackState(id, signal)
+    if (state.callbacks.length > 0 && state.callbackMode !== FEISHU_LONG_CONNECTION_MODE) {
+      await this.#request(
+        'switch_callback',
+        `/developers/v1/callback/switch/${encodeURIComponent(id)}`,
+        {
+          body: { clientId: id, callbackMode: FEISHU_LONG_CONNECTION_MODE },
+          mutation: true,
+          signal
+        }
+      )
+      state = await this.readCallbackState(id, signal)
+      if (state.callbackMode !== FEISHU_LONG_CONNECTION_MODE) {
+        throw apiError('feishu_console_callback_verification_failed', true)
+      }
+    }
     await this.#updateManifest(
-      'configure_callbacks',
-      appId,
+      'configure_callback_manifest',
+      id,
       configuration,
       (manifest) => {
         const callbacks = recordAt(manifest, 'callbacks')
@@ -239,13 +351,119 @@ export class OpenPlatformApiClient {
           ...manifest,
           callbacks: {
             ...callbacks,
-            items: stringArray(callbacks.items),
-            subscription_type: 'websocket'
+            items: stringArray(callbacks.items)
           }
         }
       },
       signal
     )
+  }
+
+  async readScopeCatalog(
+    appId: string,
+    signal?: AbortSignal
+  ): Promise<FeishuOpenPlatformScope[]> {
+    const id = requireResourceId(appId, 'feishu_console_app_id_invalid')
+    const data = await this.#request(
+      'read_scopes',
+      `/developers/v1/scope/all/${encodeURIComponent(id)}`,
+      { body: { clientId: id }, signal }
+    )
+    const record = requireRecord(data, 'feishu_console_scope_catalog_invalid')
+    if (!Array.isArray(record.scopes)) {
+      throw apiError('feishu_console_scope_catalog_invalid', false)
+    }
+    return record.scopes.flatMap((candidate) => {
+      const scope = optionalRecord(candidate)
+      const scopeId = firstString(scope, ['id', 'scopeId', 'scope_id'])
+      const name = firstString(scope, ['name', 'scopeName', 'scope_name'])
+      if (!scopeId || !isResourceId(scopeId) || !name) return []
+      const identityStatus = optionalRecord(scope.scopeType2ScopeStatus)
+      const appStatus = numericValue(
+        identityStatus[String(FEISHU_APP_SCOPE_IDENTITY_TYPE)]
+          ?? identityStatus.App
+          ?? identityStatus.app
+          ?? scope.status
+      )
+      const identityTypes = unionNumericArrays(
+        scope.supportScopeIdentityTypes,
+        scope.scopeType
+      )
+      const explicitIdentityType = numericValue(scope.scopeIdentityType)
+      if (explicitIdentityType !== null) identityTypes.push(explicitIdentityType)
+      const hasIdentityMetadata = identityTypes.length > 0
+        || Object.keys(identityStatus).length > 0
+      return [{
+        id: scopeId,
+        name,
+        appStatus,
+        supportsAppIdentity: !hasIdentityMetadata
+          || identityTypes.includes(FEISHU_APP_SCOPE_IDENTITY_TYPE)
+          || String(FEISHU_APP_SCOPE_IDENTITY_TYPE) in identityStatus
+      }]
+    })
+  }
+
+  async readEventState(
+    appId: string,
+    signal?: AbortSignal
+  ): Promise<FeishuOpenPlatformEventState> {
+    const id = requireResourceId(appId, 'feishu_console_app_id_invalid')
+    const data = await this.#request(
+      'read_event',
+      `/developers/v1/event/${encodeURIComponent(id)}`,
+      { body: { needEventDetail: true }, signal }
+    )
+    const record = requireRecord(data, 'feishu_console_event_response_invalid')
+    return {
+      eventMode: numericValue(record.eventMode),
+      events: uniqueStrings([
+        ...eventIdentifiers(record.events),
+        ...eventIdentifiers(record.eventDetails)
+      ]),
+      appEvents: uniqueStrings([
+        ...eventIdentifiers(record.appEvents),
+        ...eventIdentifiers(record.appEventDetails)
+      ]),
+      userEvents: uniqueStrings([
+        ...eventIdentifiers(record.userEvents),
+        ...eventIdentifiers(record.userEventDetails)
+      ])
+    }
+  }
+
+  async readCallbackState(
+    appId: string,
+    signal?: AbortSignal
+  ): Promise<FeishuOpenPlatformCallbackState> {
+    const id = requireResourceId(appId, 'feishu_console_app_id_invalid')
+    const data = await this.#request(
+      'read_callback',
+      `/developers/v1/callback/${encodeURIComponent(id)}`,
+      { body: { clientId: id }, signal }
+    )
+    const record = requireRecord(data, 'feishu_console_callback_response_invalid')
+    return {
+      callbackMode: numericValue(record.callbackMode),
+      callbacks: uniqueStrings([
+        ...eventIdentifiers(record.callbacks),
+        ...eventIdentifiers(record.callbackDetails)
+      ])
+    }
+  }
+
+  async readBotEnabled(appId: string, signal?: AbortSignal): Promise<boolean> {
+    const id = requireResourceId(appId, 'feishu_console_app_id_invalid')
+    const data = await this.#request(
+      'read_bot',
+      `/developers/v1/robot/${encodeURIComponent(id)}`,
+      { body: { clientId: id }, signal }
+    )
+    const record = requireRecord(data, 'feishu_console_bot_response_invalid')
+    if (typeof record.enable !== 'boolean') {
+      throw apiError('feishu_console_bot_response_invalid', false)
+    }
+    return record.enable
   }
 
   async createVersion(input: {
@@ -387,29 +605,46 @@ export class OpenPlatformApiClient {
     configuration: FeishuMemberBotVerificationRequirements
     signal?: AbortSignal
   }): Promise<void> {
-    const manifest = await this.readManifest(input.appId, input.signal)
-    const version = await this.readVersion(input.appId, input.versionId, input.signal)
+    const [
+      manifest,
+      botEnabled,
+      scopeCatalog,
+      eventState,
+      callbackState,
+      version
+    ] = await Promise.all([
+      input.configuration.avatarUrl
+        ? this.readManifest(input.appId, input.signal)
+        : Promise.resolve({} as Record<string, unknown>),
+      this.readBotEnabled(input.appId, input.signal),
+      this.readScopeCatalog(input.appId, input.signal),
+      this.readEventState(input.appId, input.signal),
+      this.readCallbackState(input.appId, input.signal),
+      this.readVersion(input.appId, input.versionId, input.signal)
+    ])
     if (version.status !== PUBLISHED_VERSION_STATUS) {
       throw apiError('feishu_console_version_not_published', true)
     }
-    const bot = recordAt(manifest, 'bot')
-    const scopes = recordAt(manifest, 'scopes')
-    const events = recordAt(manifest, 'events')
-    const eventItems = recordAt(events, 'items')
-    const callbacks = recordAt(manifest, 'callbacks')
     if (
       input.configuration.avatarUrl
       && manifest.avatar_url !== input.configuration.avatarUrl
     ) throw apiError('feishu_console_avatar_verification_failed', true)
-    if (bot.enable !== true) throw apiError('feishu_console_bot_verification_failed', true)
-    if (!includesEvery(scopes.tenant, input.configuration.tenantScopes)) {
+    if (!botEnabled) throw apiError('feishu_console_bot_verification_failed', true)
+    const requiredScopes = resolveRequiredAppScopes(
+      scopeCatalog,
+      input.configuration.tenantScopes
+    )
+    if (requiredScopes.some((scope) => scope.appStatus !== FEISHU_SCOPE_STATUS_ENABLED)) {
       throw apiError('feishu_console_scope_verification_failed', true)
     }
     if (
-      events.subscription_type !== 'websocket'
-      || !includesEvery(eventItems.tenant, input.configuration.tenantEvents)
+      eventState.eventMode !== FEISHU_LONG_CONNECTION_MODE
+      || !includesEvery(eventState.appEvents, input.configuration.tenantEvents)
     ) throw apiError('feishu_console_event_verification_failed', true)
-    if (callbacks.subscription_type !== 'websocket') {
+    if (
+      callbackState.callbacks.length > 0
+      && callbackState.callbackMode !== FEISHU_LONG_CONNECTION_MODE
+    ) {
       throw apiError('feishu_console_callback_verification_failed', true)
     }
   }
@@ -637,6 +872,53 @@ function firstString(
 function stringArray(value: unknown): string[] {
   if (!Array.isArray(value)) return []
   return value.map(normalizedString).filter((item): item is string => Boolean(item))
+}
+
+function uniqueStrings(values: readonly string[]): string[] {
+  return [...new Set(values)]
+}
+
+function eventIdentifiers(value: unknown): string[] {
+  if (Array.isArray(value)) return value.flatMap(eventIdentifiers)
+  const direct = normalizedString(value)
+  if (direct) return [direct]
+  const record = optionalRecord(value)
+  if (Object.keys(record).length === 0) return []
+  const identifier = firstString(record, ['id', 'eventId', 'event_id'])
+  return uniqueStrings([
+    ...(identifier ? [identifier] : []),
+    ...eventIdentifiers(record.items)
+  ])
+}
+
+function unionNumericArrays(...values: unknown[]): number[] {
+  const numbers = values.flatMap((value) => (
+    Array.isArray(value)
+      ? value.map(numericValue).filter((item): item is number => item !== null)
+      : []
+  ))
+  return [...new Set(numbers)]
+}
+
+function resolveRequiredAppScopes(
+  catalog: readonly FeishuOpenPlatformScope[],
+  requiredNames: readonly string[]
+): FeishuOpenPlatformScope[] {
+  const scopes = requiredNames.map((name) => catalog
+    .filter((scope) => scope.name === name && scope.supportsAppIdentity)
+    .sort((left, right) => scopeStatusPriority(right.appStatus)
+      - scopeStatusPriority(left.appStatus))[0])
+  if (scopes.some((scope) => !scope)) {
+    throw apiError('feishu_console_scope_catalog_missing', false)
+  }
+  return scopes as FeishuOpenPlatformScope[]
+}
+
+function scopeStatusPriority(status: number | null): number {
+  if (status === FEISHU_SCOPE_STATUS_ENABLED) return 3
+  if (status !== null && status !== FEISHU_SCOPE_STATUS_DISABLED) return 2
+  if (status === FEISHU_SCOPE_STATUS_DISABLED) return 1
+  return 0
 }
 
 function unionStrings(existing: unknown, required: readonly string[]): string[] {

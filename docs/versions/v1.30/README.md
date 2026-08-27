@@ -6,7 +6,7 @@ authority: version-scope-and-status
 design_status: confirmed
 implementation_status: completed
 model_context_change: true
-last_updated: 2026-08-27
+last_updated: 2026-08-28
 ---
 
 # Rovai-ai v1.30：飞书队员 Bot 与 Camp 渠道
@@ -36,12 +36,13 @@ last_updated: 2026-08-27
 - 未绑定消息只记录本地待绑定会话与 TTL transport facts，不建立 Principal、CampMessage、CampTurn 或 Run；绑定
   不回放旧消息，发送者必须重新发送；
 - Feishu Host 用独立 Web Session 登录并展示真实 user/tenant；普通队员发布从同一 Electron Session 取得 console
-  bootstrap，经 `OpenPlatformApiClient` 创建应用、读取 Secret、启用 Bot、配置 scopes/events/callback WebSocket、
-  上传当前队员受控头像、创建/发布版本并回读验证。旧 registration/确认/poll 实现及其 typed API/IPC/Renderer 入口已删除。Session Cookie 与独立 App credential
+  bootstrap，经 `OpenPlatformApiClient` 创建应用、读取 Secret、启用 Bot；Scope 名称经在线 catalog 映射为 App identity
+  ID，Event/Callback 通过独立在线 API 切换长连接并回读，Manifest 不再自证运行时 readiness；上传当前队员受控头像、
+  创建/发布版本并联合验证在线 Bot、Scope、Event、Callback 与 version。旧 registration/确认/poll 实现及其 typed API/IPC/Renderer 入口已删除。Session Cookie 与独立 App credential
   分开加密，账号切换/断开不迁移、关闭或删除已发布 Bot，单连接故障隔离，重启恢复 published Bot 与 publication
   intent；release 错误后继续以 version detail 收敛。每名队员的首个 App ID 由 Core 状态机永久冻结，完成、历史 disabled 恢复、凭据
   丢失和 unknown recovery 都只核对并恢复同一 App，不存在换绑或第二次创建；初始版本头像错误时在同一 App 发布幂等
-  `1.0.1` 修复版本；
+  `1.0.1` 修复版本；已冻结 App 的在线接收配置不完整时只在原 App 发布下一 patch 修复版本；
 - 私聊按 receiving App 隔离；普通群一个 Camp；话题按 canonical topic 一个 Camp。群/话题只有显式 mention
   published managed Bot 才进入 Core；
 - 同一 external message 的第一条 observation 只进入 collecting；canonical mentions 完整或全部预期 App 到齐后
@@ -56,6 +57,8 @@ last_updated: 2026-08-27
   和 A2A exact need 加入，不污染历史话题；
 - ChannelDelivery Outbox 提供唯一状态卡、admitted 原位更新、实际作者 Bot 输出、attention、lease、retry、终态和
   重启恢复。飞书失败不回滚已提交 CampMessage；
+- Main 记录脱敏的 Bot 长连接、SDK policy、message normalized 与 handler accepted/rejected 分层诊断；不记录消息正文、
+  Secret、Cookie 或完整外部 identity，当前 SDK 无 raw hook 时不虚构 raw-event 层；
 - 设置页按 Rovai 现有 Porcelain/Steel 视觉实现连接、队员 Bot、项目绑定、待绑定/已绑定会话、账号二维码和错误
   状态；已发布 Bot 只提供按绑定 brand 生成的官方应用详情链接，不再提供 Rovai 管理/停用入口；Renderer 不接触
   Secret 或 Host-only transport facts。
@@ -84,7 +87,8 @@ ExternalQuote 的确定性 agent projection。Bootstrap、Session Charter、sect
 ## 验收
 
 实施与证据由[实施计划](implementation-plan.md)维护。仓库内完成门槛包括 v112→v114 升级、Developer Identity/
-publication intent、队员 App 身份冻结/历史 disabled 同 App 恢复、连接不注册 App、发布不产生 QR/飞书确认页、console 配置与回读、identity drift/unknown remote fail-closed、owner-only/未绑定负向、
+publication intent、队员 App 身份冻结/历史 disabled 同 App 恢复、连接不注册 App、发布不产生 QR/飞书确认页、在线
+Scope/Event/Callback 配置与回读、Manifest 假阳性回归、identity drift/unknown remote fail-closed、owner-only/未绑定负向、
 multi-Bot fail-closed、FIFO promotion、普通群/话题 roster、ExternalQuote/Context bytes、safeStorage/Renderer
 秘密隔离、Host 恢复、双主题和完整 Rust/TypeScript/文档/构建门禁。真实飞书租户登录、应用创建、无平台确认发布
 和收发仍需要拥有可用企业权限的主人在发布环境执行，自动化不伪造外部成功。

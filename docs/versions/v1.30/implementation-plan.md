@@ -3,7 +3,7 @@ document_type: implementation-plan
 version: v1.30
 authority: implementation-and-acceptance-status
 status: completed
-last_updated: 2026-08-27
+last_updated: 2026-08-28
 ---
 
 # v1.30 实施计划
@@ -22,6 +22,10 @@ last_updated: 2026-08-27
   release 错误后的 published read-back、unknown remote 防重复、冻结 App 显式核对接管和多 WebSocket Host/启动恢复；
 - [x] 普通发布解析并上传 exact 队员受控头像；无引用才回退 Rovai icon，冻结 `1.0.0` App 可在显式核对中发布幂等
   `1.0.1` 头像修复版本且不创建第二个 App；
+- [x] 把消息权限、Event 与 Callback readiness 从 Manifest 自证切到开放平台在线 API：补齐 P2P/group-at scopes、
+  `eventMode=4`、receive/roster events、发布后在线回读和同一冻结 App 的下一 patch 修复；
+- [x] 增加脱敏的 WebSocket、SDK policy、message normalized 与 handler accepted/rejected 分层诊断；SDK 无归一化前
+  raw hook 时不伪造 raw-event 日志；
 - [x] Core publication 状态机永久冻结每名队员的 App ID；完成后重复发布拒绝，历史 disabled 与凭据恢复只重开同一 intent、
   核对同一 App，不存在换绑或第二次创建；
 - [x] 完成 p2p/group/topic identity、显式 mention gate、多 Bot collecting/finalize/timeout/mismatch；
@@ -47,6 +51,8 @@ last_updated: 2026-08-27
 - 连接不调用任何 App 创建接口或写入 App credential；发布不产生 QR/飞书确认页，registration 协议没有实现、API 或
   交互入口；
 - identity 漂移、Session 失效、完成后重复发布、历史 disabled 恢复与未知远端状态全部 fail closed 或复用冻结 App，不能静默创建第二个 App；
+- Manifest、HTTP 200 与 WebSocket 握手都不能单独证明消息可达；critical scope、event subscription、长连接模式和
+  published version 必须通过在线回读；
 - 已发布 Bot 的本机动作只有跳转官方应用详情；Rovai 不声称可以停用或关闭远端 Bot；
 - 自动化只证明本地状态机和网络边界，不把未执行的真实租户外部效果写成通过。
 
@@ -61,7 +67,8 @@ last_updated: 2026-08-27
 - `cargo test -p rovai-core --bin rovai`；
 - `cargo test -p rovai-core --bin rovai-core`；
 - Migration 114 upgrade、Developer Identity/publication intent、队员 App 身份冻结/历史 disabled 同 App reactivation、Channel 状态机、ExternalQuote、Context bytes 与
-  Secret projection、内置/managed 头像解析、正常发布头像传递与冻结 App 头像修复定向测试全部通过；
+  Secret projection、内置/managed 头像解析、正常发布头像传递、冻结 App 头像/readiness 修复、Manifest 假阳性、P2P
+  Scope ID 映射和 Event/Callback mode fail-closed 定向测试全部通过；
 - `pnpm typecheck`；
 - `pnpm test`；
 - `pnpm build:desktop`；
@@ -78,5 +85,6 @@ last_updated: 2026-08-27
 - Renderer snapshot 与 Preload 不包含 Secret、credential ref、transport conversation 或 pending aggregate。
 
 真实飞书租户的“连接前后 App 数量不变、发布只展示 Rovai 进度且不出现飞书创建确认页、连续发布两名队员均不
-重新扫码、已发布行跳转绑定 App 的官方详情页、Session 失效不建未知 App、切换账号后旧 Bot 继续运行”和消息收发属于发布环境验收，仍需主人持有可用
+重新扫码、已发布行跳转绑定 App 的官方详情页、Session 失效不建未知 App、切换账号后旧 Bot 继续运行，以及私聊进入
+`channel.on('message')` 后按未绑定/已绑定路径响应”属于发布环境验收，仍需主人持有可用
 企业权限；本地自动化没有把这些外部效果伪造为通过。

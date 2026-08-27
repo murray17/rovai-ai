@@ -386,6 +386,20 @@ export class ChannelSettingsService {
     if (bot && credential.appId !== bot.appId) {
       throw new Error('本机凭据与该队员冻结的飞书应用不一致；为避免换绑，已停止重试。')
     }
+    if (
+      bot?.status === 'published'
+      && intent?.state === 'completed'
+      && this.#memberBotProvisioner.reconcile
+      && snapshot.account?.status === 'connected'
+    ) {
+      const identity = await this.#developerSession.inspect().catch(() => null)
+      if (
+        identity
+        && accountIdForIdentity(identity) === snapshot.account.accountId
+        && userIdDigest(identity.userId) === snapshot.account.userIdDigest
+        && identity.tenantId === snapshot.account.tenantId
+      ) return this.#publishNewMemberBot(agentId, 'retry')
+    }
     const bindingAccountId = bot?.accountId ?? intent?.accountId
     if (!bindingAccountId) throw new Error('该队员缺少可恢复的飞书账号绑定。')
     const agent = await this.#dependencies!.core.request<AgentProfile>('members.get', { agentId })
@@ -1115,18 +1129,54 @@ export class ChannelSettingsService {
       channel,
       unsubscribers: []
     }
-    managed.unsubscribers.push(channel.on('message', (message) => this.#handleMessage(managed, message)))
+    managed.unsubscribers.push(channel.on('message', (message) => {
+      logFeishuBotDiagnostic('message.normalized', messageDiagnostic(managed, message))
+      return this.#handleMessage(managed, message)
+    }))
+    managed.unsubscribers.push(channel.on('reject', (event) => {
+      logFeishuBotDiagnostic('message.rejected', {
+        appIdDigest: digest(managed.appId),
+        agentId: managed.agentId,
+        eventType: 'im.message.receive_v1',
+        messageIdDigest: digest(event.messageId),
+        chatIdDigest: digest(event.chatId),
+        reason: `sdk_policy_${event.reason}`
+      })
+    }))
     managed.unsubscribers.push(channel.on('botAdded', (event) => this.#handleBotAdded(event)))
     managed.unsubscribers.push(channel.on('error', (error) => {
+      logFeishuBotDiagnostic('ws.error', {
+        appIdDigest: digest(managed.appId),
+        agentId: managed.agentId,
+        reason: error.code
+      })
       this.#publicationFailures.set(agentId, error.code)
       void this.#emit()
     }))
+    managed.unsubscribers.push(channel.on('reconnecting', () => {
+      logFeishuBotDiagnostic('ws.reconnecting', {
+        appIdDigest: digest(managed.appId),
+        agentId: managed.agentId
+      })
+    }))
     managed.unsubscribers.push(channel.on('reconnected', () => {
+      logFeishuBotDiagnostic('ws.reconnected', {
+        appIdDigest: digest(managed.appId),
+        agentId: managed.agentId
+      })
       this.#publicationFailures.delete(agentId)
       void this.#emit()
     }))
     try {
+      logFeishuBotDiagnostic('ws.connecting', {
+        appIdDigest: digest(managed.appId),
+        agentId: managed.agentId
+      })
       await channel.connect()
+      logFeishuBotDiagnostic('ws.connected', {
+        appIdDigest: digest(managed.appId),
+        agentId: managed.agentId
+      })
       return managed
     } catch (error) {
       await this.#disconnectManaged(managed)
@@ -1140,21 +1190,43 @@ export class ChannelSettingsService {
   }
 
   async #handleMessage(managed: ManagedChannel, message: NormalizedMessage): Promise<void> {
-    if (this.#stopped) return
+    const reject = (reason: string, conversationKind?: string): void => {
+      logFeishuBotDiagnostic('message.rejected', {
+        ...messageDiagnostic(managed, message),
+        ...(conversationKind ? { conversationKind } : {}),
+        reason
+      })
+    }
+    if (this.#stopped) {
+      reject('host_stopped')
+      return
+    }
     const raw = (message.raw ?? {}) as RawInboundEvent
     const coreSnapshot = await this.#coreSnapshot()
     const tenantKey = raw.sender?.tenant_key || raw.tenant_key || coreSnapshot.account?.accountId
-    if (!tenantKey) return
+    if (!tenantKey) {
+      reject('tenant_key_missing')
+      return
+    }
     const senderExternalUserId = raw.sender?.sender_id?.union_id
       || raw.sender?.sender_id?.user_id
       || raw.sender?.sender_id?.open_id
       || message.senderId
     const conversationKind = await this.#conversationKind(managed.channel, message)
-    if (conversationKind !== 'p2p' && !message.mentionedBot) return
+    if (conversationKind !== 'p2p' && !message.mentionedBot) {
+      reject('bot_not_mentioned', conversationKind)
+      return
+    }
     if (conversationKind !== 'p2p'
-      && !await this.#reconcileChatRoster(message.chatId, tenantKey, false, coreSnapshot)) return
+      && !await this.#reconcileChatRoster(message.chatId, tenantKey, false, coreSnapshot)) {
+      reject('roster_reconciliation_failed', conversationKind)
+      return
+    }
     const topicKey = conversationKind === 'topic' ? (message.threadId || message.rootId || '') : ''
-    if (conversationKind === 'topic' && !topicKey) return
+    if (conversationKind === 'topic' && !topicKey) {
+      reject('topic_key_missing', conversationKind)
+      return
+    }
     const knownByOpenId = new Map(
       [...this.#managedChannels.values()]
         .filter((candidate) => candidate.channel.botIdentity?.openId)
@@ -1191,7 +1263,10 @@ export class ChannelSettingsService {
       mentionedByAppId.set(managed.appId, managed)
     }
     const mentioned = [...mentionedByAppId.values()]
-    if (mentioned.length === 0) return
+    if (mentioned.length === 0) {
+      reject('canonical_mention_missing', conversationKind)
+      return
+    }
     const acknowledgementAppId = mentioned[0].appId
     const expectedApps = mentioned.map((candidate) => candidate.appId).sort()
     const canonicalAgentIds = [...new Set(mentioned.map((candidate) => candidate.agentId))].sort()
@@ -1233,7 +1308,14 @@ export class ChannelSettingsService {
       expectedAppIds: expectedApps,
       acknowledgementAppId
     }, false)
-    if (observation.status === 'rejected') return
+    if (observation.status === 'rejected') {
+      reject(`core_${safeDiagnosticReason(observation.code)}`, conversationKind)
+      return
+    }
+    logFeishuBotDiagnostic('message.accepted', {
+      ...messageDiagnostic(managed, message),
+      conversationKind
+    })
     const aggregateId = stringPayload(observation, 'aggregateId')
     if (observation.payload.readyToFinalize === true) {
       await this.#finalizeAggregate(
@@ -1670,6 +1752,30 @@ function memberCredentialRef(agentId: string): string {
 
 function digest(value: string): `sha256:${string}` {
   return `sha256:${createHash('sha256').update(value).digest('hex')}`
+}
+
+function messageDiagnostic(
+  managed: Pick<ManagedChannel, 'agentId' | 'appId'>,
+  message: Pick<NormalizedMessage, 'messageId' | 'chatId'>
+): Record<string, string> {
+  return {
+    appIdDigest: digest(managed.appId),
+    agentId: managed.agentId,
+    eventType: 'im.message.receive_v1',
+    messageIdDigest: digest(message.messageId),
+    chatIdDigest: digest(message.chatId)
+  }
+}
+
+function safeDiagnosticReason(value: string): string {
+  return value.replace(/[^A-Za-z0-9_.-]/g, '_').slice(0, 96) || 'unknown'
+}
+
+function logFeishuBotDiagnostic(
+  stage: string,
+  fields: Readonly<Record<string, string>>
+): void {
+  console.info(`[feishu.bot.${stage}] ${JSON.stringify(fields)}`)
 }
 
 function userIdDigest(userId: string): `sha256:${string}` {

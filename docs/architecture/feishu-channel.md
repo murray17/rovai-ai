@@ -3,7 +3,7 @@ document_type: architecture
 architecture: feishu-channel
 authority: feishu-channel-component-and-authority-boundaries
 status: accepted
-last_updated: 2026-08-27
+last_updated: 2026-08-28
 ---
 
 # 飞书渠道架构
@@ -62,9 +62,11 @@ Keychain 命名空间；摘要不暴露原始路径，非隔离 App 继续使用
 路径只允许 `/developers/`，相似域、跨源 URL 和页面身份漂移均在创建前拒绝。
 
 `OpenPlatformApiClient` 按顺序上传受控队员头像、创建自建应用、读取 App Secret、启用 Bot、配置 tenant scopes、
-receive/roster events、callback 与 event WebSocket mode，创建并发布 `1.0.0` 版本，再回读 manifest 与 version status。
-scopes、events 和 callbacks 使用开放平台当前 manifest console API 分步写入；每一步保留服务端已有字段并在最终回读中
-证明目标 `avatar_url`、必需集合、Bot enable、两类 WebSocket mode 与 published status。完成后 Main 才把独立 credential 写入
+receive/roster events、callback 与 event WebSocket mode，创建并发布 `1.0.0` 版本，再回读在线配置与 version status。
+头像与兼容元数据可以继续写 manifest；Scope 使用在线 catalog 把名称映射为 App identity ID，再经 scope update 写入；
+Event 独立切到 `eventMode=4` 并写入 receive/roster App events；只有存在 callback items 时才要求在线
+`callbackMode=4`。最终回读以 robot、scope、event、callback 和 version detail API 为运行时 authority，manifest 中的
+scope/event/WebSocket 字段不能自证配置完成。完成后 Main 才把独立 credential 写入
 safeStorage、验证 Bot WebSocket 并完成 intent。普通流程始终保持隐藏窗口，不打开飞书“创建飞书智能体应用 /
 立即创建”确认页，也不向 Renderer 产生二维码。
 
@@ -93,7 +95,7 @@ deadline 内回读同一 App 与 Version。回读为 published 时收敛成功�
 开放平台 console API 和页面 bootstrap 是版本敏感、未公开稳定合同的 Adapter 边界。它被限制在独立 client 中，使用
 exact origin/path、严格响应结构、秘密不出 Main、创建后 read-back verification 和 fail-closed error mapping；页面或
 协议变化不得降级为确认页、SDK 注册或另一条静默创建路径。真实租户仍须回归“连接不增 App、普通发布不弹平台确认、
-配置完整且能建立长连接”。
+在线 Scope/Event 状态完整且能建立长连接并实际收到消息”。
 
 旧的 `/oauth/v1/app/registration + verification_uri_complete + showRegistrationConfirmation + pollRegistration`
 兼容协议已经从 Provisioner、Developer Session、typed API、IPC 与 Renderer 全部移除。console 发布失败只返回可诊断
@@ -103,10 +105,12 @@ exact origin/path、严格响应结构、秘密不出 Main、创建后 read-back
 不从 Renderer 状态推断。
 
 当该未知 intent 已冻结 `remoteAppId` 时，主人再次点击普通“发布”是显式 reconciliation，而不是新的 create attempt。
-Host 复核同一 Developer Identity，先对冻结 App 读取 Secret、版本列表/detail 与 manifest；不得创建 App 或改变 App ID。
+Host 复核同一 Developer Identity，先对冻结 App 读取 Secret、版本列表/detail、在线 Bot/Scope/Event/Callback 状态与
+manifest 头像元数据；不得创建 App 或改变 App ID。
 若最新 published 仍为初始 `1.0.0` 且队员有可用受控头像，reconciliation 会把同一头像上传到同一 App、
 重放幂等 manifest 配置，并创建或复用 `1.0.1` 头像修复版本后发布与回读。若 `1.0.1` 已 published，则只回读验证，
-不重复上传或发布。完成证明后才保存 credential、验证 WebSocket，并让同一 intent 从
+不重复上传或发布。头像已正确但在线消息权限、事件或模式不完整时，reconciliation 在同一 App 配置后使用下一 patch
+版本发布；readiness 已完整时保持只读。完成证明后才保存 credential、验证 WebSocket，并让同一 intent 从
 `failed_unknown_remote_state` 进入 `credentials_read` 后继续完成；Core 拒绝更换 App ID。缺少冻结 App ID、头像读取失败
 或远端核对失败时仍保持未知状态，不允许创建第二个 App。
 
@@ -188,6 +192,8 @@ Agent 输出使用实际作者 Agent 的已发布 Bot；作者 Bot 不可用时�
 
 Core Snapshot 保存 pending aggregate、transport conversation 和 delivery 恢复事实，Main 启动后恢复所有 published
 Bot 长连接、过期 lease、collecting finalize 与 Outbox。Renderer snapshot 在 Main 中剥离这些 Host-only 字段。
+Host 为连接阶段、SDK policy reject、归一化 message 和 Rovai handler 接受/拒绝记录结构化诊断；所有 App/message/chat
+identity 都先摘要，消息正文与外部用户 ID 不进入日志。当前 SDK 不提供归一化前 raw-event hook，Host 不虚构该观测层。
 每个 App Secret 只以随机 credential ref 关联 Core；Developer Session Cookie jar 和 App Secret 都只在 Electron
 `safeStorage` 可用时经异步 API 加密落盘。明文不进入 SQLite、Renderer、日志、Agent Context 或诊断输出，也不因
 安全存储超时而降级。断开账号只删除 Developer Session；已发布 Bot 的 credential 与 WebSocket 生命周期保持独立。

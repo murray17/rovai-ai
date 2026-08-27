@@ -845,4 +845,94 @@ describe('channel settings service', () => {
       remoteAppId: 'cli-published-remotely'
     })
   })
+
+  it('rechecks online readiness on retry for a completed Bot without changing its app id', async () => {
+    const owner = identity()
+    const credentialRef = 'credential-agent-a'
+    const credentialStore = memoryCredentialStore({
+      [credentialRef]: { appId: 'cli-frozen', appSecret: 'existing-secret' }
+    })
+    const create = vi.fn()
+    const reconcile = vi.fn(async () => ({
+      appId: 'cli-frozen',
+      appSecret: 'existing-secret',
+      botDisplayName: '审阅员',
+      publishedVersionId: 'version_2'
+    }))
+    let publicationIntent: Record<string, unknown> = {
+      publicationIntentId: 'intent-completed',
+      agentId: 'agent-a',
+      accountId: connectedAccount(owner).accountId,
+      expectedUserIdDigest: connectedAccount(owner).userIdDigest,
+      expectedTenantId: owner.tenantId,
+      requestedAppName: '审阅员',
+      provisioningMode: 'developer_session',
+      state: 'completed',
+      remoteAppId: 'cli-frozen',
+      credentialRef,
+      lastCompletedStep: 'completed',
+      failureCode: null,
+      version: 7,
+      createdAt: '2026-08-27T00:00:00Z',
+      updatedAt: '2026-08-27T00:01:00Z'
+    }
+    const memberBot = {
+      agentId: 'agent-a',
+      accountId: connectedAccount(owner).accountId,
+      brand: 'feishu',
+      appId: 'cli-frozen',
+      botDisplayName: '审阅员',
+      credentialRef,
+      status: 'published',
+      failureCode: null,
+      version: 3
+    }
+    const service = new ChannelSettingsService({
+      credentialStore,
+      developerSession: developerSession(owner),
+      memberBotProvisioner: { create, reconcile },
+      memberBotAvatarSource: {
+        resolve: vi.fn(async () => ({
+          pngBytes: new Uint8Array([4, 5, 6]),
+          width: 192,
+          height: 192
+        }))
+      },
+      createChannel: fakeCreateChannel(),
+      core: channelCore((method, rawParams) => {
+        if (method === 'channels.feishu.snapshot') {
+          return coreSnapshot({
+            account: connectedAccount(owner),
+            memberBots: [memberBot],
+            publicationIntents: [publicationIntent]
+          })
+        }
+        if (method === 'members.get') return presentAgent()
+        const params = rawParams as { command?: Record<string, unknown> }
+        if (method === 'channels.feishu.publicationIntent.advance') {
+          publicationIntent = {
+            ...publicationIntent,
+            ...params.command,
+            version: Number(publicationIntent.version) + 1,
+            updatedAt: '2026-08-27T00:02:00Z'
+          }
+        }
+        return { status: 'applied' }
+      })
+    })
+
+    await expect(service.retryMemberBot('agent-a')).resolves.toMatchObject({
+      activeProvisioning: { stage: 'completed', remoteAppId: 'cli-frozen' }
+    })
+    expect(create).not.toHaveBeenCalled()
+    expect(reconcile).toHaveBeenCalledWith(expect.objectContaining({
+      remoteAppId: 'cli-frozen',
+      publicationIntentId: 'intent-completed'
+    }))
+    expect(publicationIntent).toMatchObject({
+      state: 'completed',
+      remoteAppId: 'cli-frozen',
+      credentialRef
+    })
+  })
 })

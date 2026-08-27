@@ -4,7 +4,7 @@ contract: feishu-channel-v1
 authority: feishu-channel-project-binding-admission-delivery
 status: accepted
 version: 1
-last_updated: 2026-08-27
+last_updated: 2026-08-28
 ---
 
 # Feishu Channel v1 Contract
@@ -148,11 +148,23 @@ Electron `Session.fetch` 与 `credentials=include`；不允许手工复制 Cooki
 `https://open.feishu.cn | https://open.larksuite.com`，请求路径只接受 `/developers/`。页面 identity 必须再次匹配
 intent 冻结的 `userId + tenantId`。任何跨源、相似域、登录跳转、身份漂移、bootstrap/响应结构缺失都 fail closed。
 
-正常 provisioner 必须从 console API 创建应用并取得非空 App ID/Secret，启用 Bot，以分步 manifest upsert 配置本
-合同的 tenant scopes、receive/roster events、event/callback `websocket` mode，创建并发布版本。返回前必须回读并
-验证 Bot enable、所有必需 scopes/events、两类 WebSocket mode 和 published version status；普通模式的
-`publishedVersionId` 不得为空。普通流程不得调用 `/oauth/v1/app/registration`、不得调用
+正常 provisioner 必须从 console API 创建应用并取得非空 App ID/Secret，启用 Bot，并通过开放平台在线 Scope、Event
+和 Callback API 配置运行时能力。Manifest 只可保存名称、头像和兼容元数据，不能作为 scopes、事件订阅或长连接模式
+已经生效的 authority。普通模式的 `publishedVersionId` 不得为空。普通流程不得调用 `/oauth/v1/app/registration`、不得调用
 `showRegistrationConfirmation`，也不得打开飞书“创建飞书智能体应用 / 立即创建”页面。
+
+Scope 必须先通过 `/developers/v1/scope/all/:appId` 把当前 catalog 中的名称映射为 App identity scope ID，再用
+`/developers/v1/scope/update/:appId` 提交；catalog 缺失或发布后在线状态不是 enabled 都 fail closed。消息入口至少要求
+`im:message`、`im:message.p2p_msg:readonly`、`im:message.group_at_msg:readonly` 与
+`im:message:send_as_bot`。当前目标租户 catalog 使用 `im:chat:readonly`，不得把未经 catalog 证明的
+`im:chat:read` 写成固定名称；roster 读取还要求 `im:chat.members:read`。
+
+Event 必须通过 `/developers/v1/event/:appId` 回读，以 `/developers/v1/event/switch/:appId` 把 `eventMode` 设置为 `4`，
+再由 `/developers/v1/event/update/:appId` 写入 App events。最终在线状态必须包含
+`im.message.receive_v1`、`im.chat.member.bot.added_v1`、`im.chat.member.bot.deleted_v1` 且 `eventMode=4`。
+如果在线 callback 集合非空，`callbackMode` 同样必须经 callback switch 与回读证明为 `4`；当前没有 interactive callback
+items 时不要求虚构 callback 配置。返回前还必须回读在线 Bot enable、上述 scopes/events/callback 条件和 published
+version status。任一 mutation 的 HTTP/envelope 成功都不能替代最终回读。
 
 版本 detail read-back 是发布状态 authority。commit/release 的单次 HTTP 或 envelope 失败不能独自证明发布失败；
 release 每个 attempt 最多提交一次，随后除取消和 Developer Session 失效外必须在原 deadline 内继续回读同一 App 与
@@ -169,10 +181,11 @@ console 失败都不得要求队员再次扫码、打开平台创建确认页或
 
 主人对含冻结 `remoteAppId` 的 `failed_unknown_remote_state` 再次执行普通发布时，必须进入同一 intent 的显式
 reconciliation，不得创建新 intent、新 App 或更换 `remoteAppId`。它先复核 exact Developer Identity，
-再读取冻结 App 的 Secret、版本列表/detail 与 manifest。最新 published 为 `1.0.0` 且当前队员头像可用时，允许且只允许
+再读取冻结 App 的 Secret、版本列表/detail、在线 Bot/Scope/Event/Callback 状态与 manifest 头像元数据。最新 published 为 `1.0.0` 且当前队员头像可用时，允许且只允许
 针对同一 App 执行头像修复：upload 当前受控 icon、重放幂等 manifest 配置、创建或复用 `1.0.1`、commit/release 并回读。
-`1.0.1` 已 published 时不得重复 upload/configure/create-version/commit/release。published status、目标头像、完整
-Bot/scopes/events/WebSocket 配置同时成立后，才写 credential 并允许 Core 以 exact version 从
+头像已经正确但在线消息权限、事件订阅或长连接模式不完整时，同一 reconciliation 可以配置原 App，并创建或复用 latest
+published 的下一 patch 版本；不得以修复为名调用 create App。在线 readiness 已完整时不得重复
+upload/configure/create-version/commit/release。published status、目标头像、完整在线 Bot/scopes/events/WebSocket 配置同时成立后，才写 credential 并允许 Core 以 exact version 从
 `failed_unknown_remote_state -> credentials_read` 继续。核对失败继续保持 unknown，缺少冻结 App ID 时仍禁止重试。
 
 普通发布在创建 intent 和任何 console mutation 前解析 `AgentProfile.avatarRef`。内置引用读取 exact 打包
@@ -184,6 +197,11 @@ Bot/scopes/events/WebSocket 配置同时成立后，才写 credential 并允许 
 Bot 只有 WebSocket 首次握手与 identity 回读成功、credential 已写入 safeStorage 且 Core upsert 成功后才成为
 `published`。Main 启动时为所有 published Bot 读取 exact credential 并独立恢复长连接；单连接失败只改变该 Bot
 的可见 failure，不停止其他 Bot。
+
+Main 必须为每个 Bot 记录脱敏的 `ws.connecting/connected/reconnecting/reconnected/error`、SDK policy reject、
+`message.normalized` 与 Rovai handler `message.accepted/rejected` 诊断。App、message、chat ID 只记录 SHA-256 digest，
+原因使用固定代码；不得记录 App Secret、Cookie、CSRF、完整外部身份或消息正文。当前 Channel SDK 没有归一化前的 raw
+event hook，因此不得把 `message.normalized` 冒充 `raw_event.received`。
 
 ## 4. ExternalPrincipal 与 Structured Content
 

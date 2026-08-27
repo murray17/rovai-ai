@@ -2,7 +2,7 @@
 document_type: version-decisions
 version: v1.30
 lifecycle: current
-last_updated: 2026-08-27
+last_updated: 2026-08-28
 ---
 
 # v1.30 决策记录
@@ -172,6 +172,8 @@ Main/Core/Renderer 的秘密和 Outbox 分工。当前规范见 [飞书渠道架
 企业只能写占位值，而每名队员发布仍要重新扫码。继续把官方 application registration begin/poll 当作普通发布，虽能
 复用已登录 Session，却仍会打开飞书“创建飞书智能体应用 / 立即创建”确认页，无法形成 Rovai 自己拥有的连续发布
 体验。开放平台 console API 与页面 CSRF 又是版本敏感、未公开稳定合同，需要明确隔离而不能扩散到业务层。
+Manifest 可以保存应用元数据，但它不是飞书运行时权限、事件订阅或接收模式的在线 authority；写入后再读同一 Manifest
+会形成自证假阳性，即使 WebSocket 能握手也不代表飞书会推送消息。
 
 ### 决定
 
@@ -180,8 +182,9 @@ Main/Core/Renderer 的秘密和 Outbox 分工。当前规范见 [飞书渠道架
 
 普通发布由 `FeishuWebSessionMemberBotProvisioner` 先复核原始 user/tenant，再从同一 Electron Session 读取 Cookie
 jar、加载开放平台页取得 CSRF 与 exact API origin。`OpenPlatformApiClient` 使用该 Session 的 Chromium fetch，依次
-创建 App、读取 Secret、启用 Bot、分步配置 scopes/events/callback WebSocket、创建并发布版本，最后回读 manifest 和
-version status。Cookie、CSRF、Secret 不离开 Main；origin/path、响应 shape 与 read-back verification 全部 fail
+创建 App、读取 Secret、启用 Bot、通过独立在线 API 配置 scopes/events/callback WebSocket、创建并发布版本，最后回读
+robot、scope catalog、event/callback state 与 version status。Manifest 只保留头像和兼容元数据，不参与运行时 readiness
+判定。Cookie、CSRF、Secret 不离开 Main；origin/path、响应 shape 与 read-back verification 全部 fail
 closed。正常路径不调用 application registration endpoint，不打开飞书确认页，也不向 Renderer 产生二维码。
 
 该 console Adapter 明确接受上游内部协议可能变化的代价：实现集中在一个 typed client，只有精确 Feishu/Lark
@@ -201,7 +204,8 @@ origin 与 `/developers/` 路径可达，协议变化只产生可诊断失败；
 [渠道设置](../../ui/components/channel-settings.md#渠道连接与二维码)。
 
 锁定的是任何第二个 App 和换绑，不是对同一冻结 App 的主人显式核对。未知 intent 已有 `remoteAppId` 时，再次普通发布
-继续使用同一 intent 和冻结 App ID，缺少 App ID 的未知结果仍不可恢复。队员头像来源与同 App 头像修复 mutation 的
+继续使用同一 intent 和冻结 App ID；在线 readiness 不完整时只允许在同一 App 配置并发布下一 patch 版本，缺少 App ID
+的未知结果仍不可恢复。队员头像来源与同 App 头像修复 mutation 的
 后续修正见 [V1.30-D07](#v1-30-d07)。
 
 ### 后果
@@ -209,6 +213,7 @@ origin 与 `/developers/` 路径可达，协议变化只产生可诊断失败；
 - 一次账号登录可服务多个队员发布；连接与发布是两个独立生命周期；
 - 真实 identity 能在切换/失效时做 exact user/tenant 检查，Renderer 不再显示假 owner/tenant；
 - 正常发布只展示 Rovai 的账号校验、创建、配置、发布、验证和完成进度，不出现飞书创建确认页；
+- WebSocket 握手与 Manifest 都不是消息可达证明；只有在线 Scope/Event/Callback 状态和 published version 联合通过才完成发布；
 - Rovai 不再提供 Bot 管理/停用命令；已发布 Bot 只按绑定 brand 和冻结 App ID 跳转官方应用详情页，远端生命周期由主人
   在开放平台治理；
 - Web 页面身份/bootstrap 与 console API 是版本敏感的可替换 Adapter，真实租户效果必须独立验收，不能由本地测试
@@ -223,6 +228,7 @@ origin 与 `/developers/` 路径可达，协议变化只产生可诊断失败；
 - **在 Rovai 中保留无远端控制力的管理/停用动作：** 会让用户误以为本机状态能够关闭飞书 Bot；
 - **把 console endpoint 散落在 ChannelSettings/Renderer：** 扩大 Cookie/CSRF 暴露面，且无法统一做同源准入、响应校验
   和回读；
+- **以 Manifest 写入与回读自证权限/事件已生效：** 无法证明飞书运行时会向长连接投递消息；
 - **用占位 identity 标记 connected：** 无法证明发布发生在预期 user/tenant。
 
 <a id="v1-30-d07"></a>
@@ -242,7 +248,8 @@ console 路径本来就能上传 PNG bytes，Main 也已经拥有内置素材和
 无法读取时在远端 mutation 前 fail closed。上传 URL 同时写入创建请求与 manifest，并纳入 read-back verification。
 
 主人显式重试一个已经冻结 `remoteAppId` 的 unknown intent 时仍不得创建第二个 App。若其 latest published 是初始
-`1.0.0`，允许在同一 App 上传当前队员头像、重放幂等配置并创建或复用 `1.0.1` 修复版本；`1.0.1` 已 published 时只读
+`1.0.0`，允许在同一 App 上传当前队员头像、重放幂等在线配置并创建或复用 `1.0.1` 修复版本；头像及在线 readiness
+已经完整时只读
 验证，避免重复发布。当前规范见
 [飞书渠道架构](../../architecture/feishu-channel.md#开发者会话与队员发布)、
 [Feishu Channel v1](../../contracts/feishu-channel-v1.md#3-飞书账号与队员-bot)和
