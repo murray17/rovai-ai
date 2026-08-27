@@ -4098,6 +4098,7 @@ button.attachment-open:disabled { cursor: wait; opacity: .76; }
 .channel-dialog-path > span,
 .channel-dialog-field > span { color: var(--faint); font-size: 10px; font-weight: 620; }
 .channel-dialog-fact strong { color: var(--ink); font-size: 11.5px; font-weight: 620; }
+.channel-dialog-fact code { min-width: 0; overflow: hidden; color: var(--evidence-muted); font: 10.5px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; text-overflow: ellipsis; white-space: nowrap; }
 .channel-dialog-field,
 .channel-dialog-path { display: grid; gap: 7px; }
 .channel-dialog-field input { width: 100%; height: 36px; padding: 0 10px; border: 1px solid var(--line-strong); border-radius: 8px; color: var(--ink); background: var(--surface); font-size: 11.5px; outline: none; }

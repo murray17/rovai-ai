@@ -1386,6 +1386,17 @@ impl ChannelService {
                     "Bot publication requires a present AgentProfile",
                 ));
             }
+            let member_bot_bound: bool = transaction.query_row(
+                "SELECT EXISTS(SELECT 1 FROM feishu_member_bot WHERE agent_id = ?1)",
+                [&envelope.payload.agent_id],
+                |row| row.get(0),
+            )?;
+            if member_bot_bound {
+                return Ok(rejected(
+                    "feishu_member_bot.already_bound",
+                    "This member already has an immutable Feishu App binding",
+                ));
+            }
             let has_active: bool = transaction.query_row(
                 r#"
                 SELECT EXISTS(
@@ -1403,6 +1414,22 @@ impl ChannelService {
                 return Ok(rejected(
                     "feishu_publication_intent.active_conflict",
                     "This member already has an active publication intent",
+                ));
+            }
+            let app_identity_frozen: bool = transaction.query_row(
+                r#"
+                SELECT EXISTS(
+                    SELECT 1 FROM feishu_member_bot_publication_intent
+                    WHERE agent_id = ?1 AND remote_app_id IS NOT NULL
+                )
+                "#,
+                [&envelope.payload.agent_id],
+                |row| row.get(0),
+            )?;
+            if app_identity_frozen {
+                return Ok(rejected(
+                    "feishu_publication_intent.app_identity_frozen",
+                    "This member already has a frozen Feishu App identity",
                 ));
             }
             let now = Utc::now().to_rfc3339();
@@ -1475,7 +1502,7 @@ impl ChannelService {
             let current = transaction
                 .query_row(
                     r#"
-                    SELECT state, remote_app_id, credential_ref, version
+                    SELECT agent_id, account_id, state, remote_app_id, credential_ref, version
                     FROM feishu_member_bot_publication_intent
                     WHERE id = ?1
                     "#,
@@ -1483,14 +1510,23 @@ impl ChannelService {
                     |row| {
                         Ok((
                             row.get::<_, String>(0)?,
-                            row.get::<_, Option<String>>(1)?,
-                            row.get::<_, Option<String>>(2)?,
-                            row.get::<_, i64>(3)?,
+                            row.get::<_, String>(1)?,
+                            row.get::<_, String>(2)?,
+                            row.get::<_, Option<String>>(3)?,
+                            row.get::<_, Option<String>>(4)?,
+                            row.get::<_, i64>(5)?,
                         ))
                     },
                 )
                 .optional()?;
-            let Some((current_state, current_app_id, current_credential_ref, version)) = current
+            let Some((
+                agent_id,
+                account_id,
+                current_state,
+                current_app_id,
+                current_credential_ref,
+                version,
+            )) = current
             else {
                 return Ok(rejected(
                     "feishu_publication_intent.not_found",
@@ -1505,6 +1541,44 @@ impl ChannelService {
                     "feishu_publication_intent.invalid_transition",
                     "Publication intent transition is not allowed",
                 ));
+            }
+            if current_state == "completed" && envelope.payload.state == "session_verified" {
+                let Some(frozen_app_id) = current_app_id.as_deref() else {
+                    return Ok(rejected(
+                        "feishu_publication_intent.reactivation_binding_mismatch",
+                        "Completed publication cannot be reactivated without its frozen App",
+                    ));
+                };
+                let Some(frozen_credential_ref) = current_credential_ref.as_deref() else {
+                    return Ok(rejected(
+                        "feishu_publication_intent.reactivation_binding_mismatch",
+                        "Completed publication cannot be reactivated without its frozen credential identity",
+                    ));
+                };
+                let exact_disabled_binding: bool = transaction.query_row(
+                    r#"
+                    SELECT EXISTS(
+                        SELECT 1
+                        FROM feishu_member_bot AS bot
+                        JOIN feishu_account AS account ON account.id = bot.account_id
+                        WHERE bot.agent_id = ?1 AND bot.account_id = ?2
+                          AND bot.app_id = ?3
+                          AND bot.credential_ref = ?4
+                          AND bot.status IN ('published', 'disabled')
+                          AND account.status = 'connected'
+                    )
+                    "#,
+                    params![agent_id, account_id, frozen_app_id, frozen_credential_ref],
+                    |row| row.get(0),
+                )?;
+                if !exact_disabled_binding
+                    || envelope.payload.remote_app_id.as_deref() != Some(frozen_app_id)
+                {
+                    return Ok(rejected(
+                        "feishu_publication_intent.reactivation_binding_mismatch",
+                        "Only an existing member Bot may recover its exact frozen App",
+                    ));
+                }
             }
             if current_state == "failed_unknown_remote_state"
                 && envelope.payload.state == "credentials_read"
@@ -1558,6 +1632,29 @@ impl ChannelService {
                     "feishu_publication_intent.credential_required",
                     "This publication state requires a frozen credential reference",
                 ));
+            }
+            if matches!(
+                envelope.payload.state.as_str(),
+                "connection_verified" | "completed"
+            ) {
+                let exact_published_binding: bool = transaction.query_row(
+                    r#"
+                    SELECT EXISTS(
+                        SELECT 1 FROM feishu_member_bot
+                        WHERE agent_id = ?1 AND account_id = ?2
+                          AND app_id = ?3 AND credential_ref = ?4
+                          AND status = 'published'
+                    )
+                    "#,
+                    params![agent_id, account_id, remote_app_id, credential_ref,],
+                    |row| row.get(0),
+                )?;
+                if !exact_published_binding {
+                    return Ok(rejected(
+                        "feishu_publication_intent.member_bot_binding_required",
+                        "Connection completion requires the exact published member Bot binding",
+                    ));
+                }
             }
             if envelope.payload.state.starts_with("failed_")
                 && envelope.payload.failure_code.is_none()
@@ -1623,17 +1720,6 @@ impl ChannelService {
                     "Only the trusted Feishu Channel Host can persist Bot facts",
                 ));
             }
-            let account_connected: bool = transaction.query_row(
-                "SELECT EXISTS(SELECT 1 FROM feishu_account WHERE id = ?1 AND status = 'connected')",
-                [&envelope.payload.account_id],
-                |row| row.get(0),
-            )?;
-            if !account_connected {
-                return Ok(rejected(
-                    "feishu_account.not_connected",
-                    "Bot publication requires the connected Feishu account",
-                ));
-            }
             let agent_present: bool = transaction.query_row(
                 "SELECT EXISTS(SELECT 1 FROM agent_profile WHERE id = ?1 AND profile_status = 'present')",
                 [&envelope.payload.agent_id],
@@ -1645,6 +1731,61 @@ impl ChannelService {
                     "Bot publication requires a present AgentProfile",
                 ));
             }
+            let existing_binding = transaction
+                .query_row(
+                    r#"
+                    SELECT account_id, app_id, credential_ref, status
+                    FROM feishu_member_bot
+                    WHERE agent_id = ?1
+                    "#,
+                    [&envelope.payload.agent_id],
+                    |row| {
+                        Ok((
+                            row.get::<_, String>(0)?,
+                            row.get::<_, String>(1)?,
+                            row.get::<_, String>(2)?,
+                            row.get::<_, String>(3)?,
+                        ))
+                    },
+                )
+                .optional()?;
+            if let Some((account_id, app_id, credential_ref, status)) = &existing_binding {
+                if account_id != &envelope.payload.account_id
+                    || app_id != &envelope.payload.app_id
+                    || credential_ref != &envelope.payload.credential_ref
+                {
+                    return Ok(rejected(
+                        "feishu_member_bot.binding_immutable",
+                        "A member Bot cannot change its Feishu App, owner account, or credential identity",
+                    ));
+                }
+                if status != "published"
+                    && !member_bot_publication_ready(transaction, &envelope.payload)?
+                {
+                    return Ok(rejected(
+                        "feishu_member_bot.publication_state_required",
+                        "Reactivating a member Bot requires its matching publication state machine",
+                    ));
+                }
+            } else {
+                let account_connected: bool = transaction.query_row(
+                    "SELECT EXISTS(SELECT 1 FROM feishu_account WHERE id = ?1 AND status = 'connected')",
+                    [&envelope.payload.account_id],
+                    |row| row.get(0),
+                )?;
+                if !account_connected {
+                    return Ok(rejected(
+                        "feishu_account.not_connected",
+                        "Initial Bot publication requires the connected Feishu account",
+                    ));
+                }
+                if !member_bot_publication_ready(transaction, &envelope.payload)? {
+                    return Ok(rejected(
+                        "feishu_member_bot.publication_state_required",
+                        "Initial Bot binding requires the matching publication state machine",
+                    ));
+                }
+            }
             let now = Utc::now().to_rfc3339();
             transaction.execute(
                 r#"
@@ -1654,11 +1795,8 @@ impl ChannelService {
                     created_at, updated_at, published_at
                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'published', NULL, 1, ?7, ?7, ?7)
                 ON CONFLICT(agent_id) DO UPDATE SET
-                    account_id = excluded.account_id,
-                    app_id = excluded.app_id,
                     bot_open_id = excluded.bot_open_id,
                     bot_display_name = excluded.bot_display_name,
-                    credential_ref = excluded.credential_ref,
                     status = 'published', failure_code = NULL,
                     published_at = excluded.published_at,
                     version = feishu_member_bot.version + 1,
@@ -4097,7 +4235,7 @@ fn publication_intent_transition_allowed(current: &str, next: &str) -> bool {
         return true;
     }
     if current == "completed" {
-        return false;
+        return next == "session_verified";
     }
     if current == "failed_unknown_remote_state" {
         return next == "credentials_read";
@@ -4268,6 +4406,29 @@ fn version_conflict(current_version: i64) -> CommandHandlerResult {
     )
 }
 
+fn member_bot_publication_ready(
+    transaction: &Transaction<'_>,
+    command: &UpsertFeishuMemberBotCommand,
+) -> Result<bool> {
+    Ok(transaction.query_row(
+        r#"
+        SELECT EXISTS(
+            SELECT 1 FROM feishu_member_bot_publication_intent
+            WHERE agent_id = ?1 AND account_id = ?2
+              AND remote_app_id = ?3 AND credential_ref = ?4
+              AND state = 'version_published'
+        )
+        "#,
+        params![
+            command.agent_id,
+            command.account_id,
+            command.app_id,
+            command.credential_ref,
+        ],
+        |row| row.get(0),
+    )?)
+}
+
 fn query_rows<T, P, F>(
     connection: &rusqlite::Connection,
     sql: &str,
@@ -4349,6 +4510,55 @@ mod tests {
         agent_id: &str,
         app_id: &str,
     ) {
+        let publication_intent_id = format!("intent-{agent_id}");
+        let credential_ref = format!("feishu/member/{agent_id}");
+        service
+            .create_member_bot_publication_intent(
+                database,
+                &host_envelope(
+                    &format!("create-{publication_intent_id}"),
+                    CreateMemberBotPublicationIntentCommand {
+                        publication_intent_id: publication_intent_id.clone(),
+                        account_id: "account_1".to_string(),
+                        agent_id: agent_id.to_string(),
+                        expected_user_id_digest: format!("sha256:{}", "a".repeat(64)),
+                        expected_tenant_id: "tenant_1".to_string(),
+                        requested_app_name: agent_id.to_string(),
+                        provisioning_mode: "developer_session".to_string(),
+                    },
+                ),
+            )
+            .unwrap();
+        for (expected_version, state) in [
+            (1, "session_verified"),
+            (2, "app_created"),
+            (3, "credentials_read"),
+            (4, "bot_configured"),
+            (5, "version_published"),
+        ] {
+            service
+                .advance_member_bot_publication_intent(
+                    database,
+                    &host_envelope(
+                        &format!("{publication_intent_id}-{state}"),
+                        AdvanceMemberBotPublicationIntentCommand {
+                            publication_intent_id: publication_intent_id.clone(),
+                            expected_version,
+                            state: state.to_string(),
+                            remote_app_id: (state != "session_verified")
+                                .then(|| app_id.to_string()),
+                            credential_ref: matches!(
+                                state,
+                                "credentials_read" | "bot_configured" | "version_published"
+                            )
+                            .then(|| credential_ref.clone()),
+                            last_completed_step: Some(state.to_string()),
+                            failure_code: None,
+                        },
+                    ),
+                )
+                .unwrap();
+        }
         service
             .upsert_feishu_member_bot(
                 database,
@@ -4360,11 +4570,30 @@ mod tests {
                         app_id: app_id.to_string(),
                         bot_open_id: Some(format!("ou_bot_{agent_id}")),
                         bot_display_name: agent_id.to_string(),
-                        credential_ref: format!("feishu/member/{agent_id}"),
+                        credential_ref: credential_ref.clone(),
                     },
                 ),
             )
             .unwrap();
+        for (expected_version, state) in [(6, "connection_verified"), (7, "completed")] {
+            service
+                .advance_member_bot_publication_intent(
+                    database,
+                    &host_envelope(
+                        &format!("{publication_intent_id}-{state}"),
+                        AdvanceMemberBotPublicationIntentCommand {
+                            publication_intent_id: publication_intent_id.clone(),
+                            expected_version,
+                            state: state.to_string(),
+                            remote_app_id: Some(app_id.to_string()),
+                            credential_ref: Some(credential_ref.clone()),
+                            last_completed_step: Some(state.to_string()),
+                            failure_code: None,
+                        },
+                    ),
+                )
+                .unwrap();
+        }
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -4627,6 +4856,191 @@ mod tests {
     }
 
     #[test]
+    fn member_bot_app_binding_is_immutable_across_disable_and_reactivation() {
+        let mut database = seeded_runtime_database_owned();
+        let service = ChannelService::default();
+        connect_account(&service, &mut database);
+        publish_bot(&service, &mut database, "agent_1", "cli_app_1");
+
+        let duplicate_intent = service
+            .create_member_bot_publication_intent(
+                &mut database,
+                &host_envelope(
+                    "duplicate-completed-publication",
+                    CreateMemberBotPublicationIntentCommand {
+                        publication_intent_id: "intent-replacement".to_string(),
+                        account_id: "account_1".to_string(),
+                        agent_id: "agent_1".to_string(),
+                        expected_user_id_digest: format!("sha256:{}", "a".repeat(64)),
+                        expected_tenant_id: "tenant_1".to_string(),
+                        requested_app_name: "木瓦".to_string(),
+                        provisioning_mode: "developer_session".to_string(),
+                    },
+                ),
+            )
+            .unwrap();
+        assert_eq!(
+            duplicate_intent.result.status,
+            CommandResultStatus::Rejected
+        );
+        assert_eq!(
+            duplicate_intent.result.code,
+            "feishu_member_bot.already_bound"
+        );
+
+        let replacement = service
+            .upsert_feishu_member_bot(
+                &mut database,
+                &host_envelope(
+                    "replace-bound-app",
+                    UpsertFeishuMemberBotCommand {
+                        account_id: "account_1".to_string(),
+                        agent_id: "agent_1".to_string(),
+                        app_id: "cli_app_2".to_string(),
+                        bot_open_id: Some("ou_replacement".to_string()),
+                        bot_display_name: "木瓦".to_string(),
+                        credential_ref: "feishu/member/agent_1".to_string(),
+                    },
+                ),
+            )
+            .unwrap();
+        assert_eq!(replacement.result.status, CommandResultStatus::Rejected);
+        assert_eq!(
+            replacement.result.code,
+            "feishu_member_bot.binding_immutable"
+        );
+
+        service
+            .disable_feishu_member_bot(
+                &mut database,
+                &owner_envelope(
+                    "disable-bound-app",
+                    DisableFeishuMemberBotCommand {
+                        agent_id: "agent_1".to_string(),
+                    },
+                ),
+            )
+            .unwrap();
+        let reopened = service
+            .advance_member_bot_publication_intent(
+                &mut database,
+                &host_envelope(
+                    "reopen-bound-app",
+                    AdvanceMemberBotPublicationIntentCommand {
+                        publication_intent_id: "intent-agent_1".to_string(),
+                        expected_version: 8,
+                        state: "session_verified".to_string(),
+                        remote_app_id: Some("cli_app_1".to_string()),
+                        credential_ref: Some("feishu/member/agent_1".to_string()),
+                        last_completed_step: Some("session_verified".to_string()),
+                        failure_code: None,
+                    },
+                ),
+            )
+            .unwrap();
+        assert_eq!(reopened.result.status, CommandResultStatus::Applied);
+
+        let premature_reactivation = service
+            .upsert_feishu_member_bot(
+                &mut database,
+                &host_envelope(
+                    "premature-reactivation",
+                    UpsertFeishuMemberBotCommand {
+                        account_id: "account_1".to_string(),
+                        agent_id: "agent_1".to_string(),
+                        app_id: "cli_app_1".to_string(),
+                        bot_open_id: Some("ou_bot_agent_1".to_string()),
+                        bot_display_name: "木瓦".to_string(),
+                        credential_ref: "feishu/member/agent_1".to_string(),
+                    },
+                ),
+            )
+            .unwrap();
+        assert_eq!(
+            premature_reactivation.result.status,
+            CommandResultStatus::Rejected
+        );
+        assert_eq!(
+            premature_reactivation.result.code,
+            "feishu_member_bot.publication_state_required"
+        );
+
+        for (expected_version, state) in [
+            (9, "app_created"),
+            (10, "credentials_read"),
+            (11, "bot_configured"),
+            (12, "version_published"),
+        ] {
+            service
+                .advance_member_bot_publication_intent(
+                    &mut database,
+                    &host_envelope(
+                        &format!("reactivate-{state}"),
+                        AdvanceMemberBotPublicationIntentCommand {
+                            publication_intent_id: "intent-agent_1".to_string(),
+                            expected_version,
+                            state: state.to_string(),
+                            remote_app_id: Some("cli_app_1".to_string()),
+                            credential_ref: Some("feishu/member/agent_1".to_string()),
+                            last_completed_step: Some(state.to_string()),
+                            failure_code: None,
+                        },
+                    ),
+                )
+                .unwrap();
+        }
+        let reactivated = service
+            .upsert_feishu_member_bot(
+                &mut database,
+                &host_envelope(
+                    "reactivate-bound-app",
+                    UpsertFeishuMemberBotCommand {
+                        account_id: "account_1".to_string(),
+                        agent_id: "agent_1".to_string(),
+                        app_id: "cli_app_1".to_string(),
+                        bot_open_id: Some("ou_bot_agent_1".to_string()),
+                        bot_display_name: "木瓦".to_string(),
+                        credential_ref: "feishu/member/agent_1".to_string(),
+                    },
+                ),
+            )
+            .unwrap();
+        assert_eq!(reactivated.result.status, CommandResultStatus::Applied);
+        for (expected_version, state) in [(13, "connection_verified"), (14, "completed")] {
+            service
+                .advance_member_bot_publication_intent(
+                    &mut database,
+                    &host_envelope(
+                        &format!("reactivate-{state}"),
+                        AdvanceMemberBotPublicationIntentCommand {
+                            publication_intent_id: "intent-agent_1".to_string(),
+                            expected_version,
+                            state: state.to_string(),
+                            remote_app_id: Some("cli_app_1".to_string()),
+                            credential_ref: Some("feishu/member/agent_1".to_string()),
+                            last_completed_step: Some(state.to_string()),
+                            failure_code: None,
+                        },
+                    ),
+                )
+                .unwrap();
+        }
+        let binding: (String, String) = database
+            .connection()
+            .query_row(
+                "SELECT app_id, status FROM feishu_member_bot WHERE agent_id = 'agent_1'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(binding, ("cli_app_1".to_string(), "published".to_string()));
+        assert_eq!(
+            service.snapshot(&database).unwrap().publication_intents[0].state,
+            "completed"
+        );
+    }
+
+    #[test]
     fn first_observation_only_collects_and_unbound_finalize_creates_no_execution() {
         let mut database = seeded_runtime_database_owned();
         let service = ChannelService::default();
@@ -4647,22 +5061,7 @@ mod tests {
                 ),
             )
             .unwrap();
-        service
-            .upsert_feishu_member_bot(
-                &mut database,
-                &host_envelope(
-                    "bot",
-                    UpsertFeishuMemberBotCommand {
-                        account_id: "account_1".to_string(),
-                        agent_id: "agent_1".to_string(),
-                        app_id: "cli_app_1".to_string(),
-                        bot_open_id: Some("ou_bot".to_string()),
-                        bot_display_name: "木瓦".to_string(),
-                        credential_ref: "feishu/member/agent_1".to_string(),
-                    },
-                ),
-            )
-            .unwrap();
+        publish_bot(&service, &mut database, "agent_1", "cli_app_1");
         let observation = service
             .observe_inbound(
                 &mut database,

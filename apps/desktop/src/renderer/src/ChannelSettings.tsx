@@ -30,6 +30,7 @@ export function ChannelSettings({ agents }: { agents: AgentProfile[] }): React.J
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
   const [publishAgentId, setPublishAgentId] = useState<string | null>(null)
+  const [publishBoundAppId, setPublishBoundAppId] = useState<string | null>(null)
   const [manageAgentId, setManageAgentId] = useState<string | null>(null)
   const [editingBinding, setEditingBinding] = useState<ProjectBindingView | null>(null)
 
@@ -99,8 +100,11 @@ export function ChannelSettings({ agents }: { agents: AgentProfile[] }): React.J
         onRetry={() => void load()}
         onConnect={() => void run('connect', () => window.rovai.channels.connect())}
         onDisconnect={() => void run('disconnect', () => window.rovai.channels.disconnect())}
-        onPublish={(_, agent) => {
+        onPublish={(provider, agent) => {
           setError(null)
+          setPublishBoundAppId(
+            provider.memberBots.find((bot) => bot.agentId === agent.agentId)?.appId ?? null
+          )
           setPublishAgentId(agent.agentId)
         }}
         onRetryPublish={(_, agent) => void run(
@@ -146,23 +150,38 @@ export function ChannelSettings({ agents }: { agents: AgentProfile[] }): React.J
       <PublishBotDialog
         agent={agents.find((candidate) => candidate.agentId === publishAgentId) ?? null}
         account={channel?.connection.account ?? null}
+        boundAppId={publishBoundAppId}
         provisioning={snapshot?.activeProvisioning?.agentId === publishAgentId
           ? snapshot.activeProvisioning
           : null}
         busy={busy !== null}
         error={error}
-        onClose={() => setPublishAgentId(null)}
+        onClose={() => {
+          setPublishAgentId(null)
+          setPublishBoundAppId(null)
+        }}
         onReconnect={() => {
           setPublishAgentId(null)
+          setPublishBoundAppId(null)
           void run('connect', () => window.rovai.channels.connect())
         }}
         onPublish={(agentId) => {
           void run(`publish:${agentId}`, () => window.rovai.channels.publishMemberBot(agentId))
-            .then((completed) => { if (completed) setPublishAgentId(null) })
+            .then((completed) => {
+              if (completed) {
+                setPublishAgentId(null)
+                setPublishBoundAppId(null)
+              }
+            })
         }}
         onPublishCompat={(agentId) => {
           void run(`publish:${agentId}`, () => window.rovai.channels.publishMemberBotCompat(agentId))
-            .then((completed) => { if (completed) setPublishAgentId(null) })
+            .then((completed) => {
+              if (completed) {
+                setPublishAgentId(null)
+                setPublishBoundAppId(null)
+              }
+            })
         }}
       />
 
@@ -644,6 +663,7 @@ function ChannelMemberBotTable({
           const status = bot?.publicationStatus ?? 'unpublished'
           const published = status === 'published'
           const failed = status === 'failed'
+          const disabled = status === 'disabled'
           const provisioning = status === 'provisioning'
           const action = published ? onManage : failed ? onRetryPublish : onPublish
           const actionBusy = busy === `publish:${agent.agentId}` || busy === `retry:${agent.agentId}`
@@ -668,7 +688,15 @@ function ChannelMemberBotTable({
                   disabled={!connected || busy !== null || provisioning || !action}
                   onClick={() => action?.(channel, agent)}
                 >
-                  {actionBusy || provisioning ? '处理中…' : published ? '管理' : failed ? '重试' : connected ? '发布' : '等待连接'}
+                  {actionBusy || provisioning
+                    ? '处理中…'
+                    : published
+                      ? '管理'
+                      : failed
+                        ? '重试'
+                        : connected
+                          ? disabled ? '重新发布' : '发布'
+                          : '等待连接'}
                 </button>
               </div>
             </div>
@@ -732,6 +760,7 @@ function QrDialog({
 function PublishBotDialog({
   agent,
   account,
+  boundAppId,
   provisioning,
   busy,
   error,
@@ -742,6 +771,7 @@ function PublishBotDialog({
 }: {
   agent: AgentProfile | null
   account: ChannelAccountView | null
+  boundAppId: string | null
   provisioning: MemberBotProvisioningView | null
   busy: boolean
   error: string | null
@@ -762,8 +792,12 @@ function PublishBotDialog({
         <Dialog.Overlay className="dialog-overlay app-dialog-overlay" />
         <AppDialogContent className="channel-publish-dialog">
           <AppDialogHeader
-            title={`发布「${agent.displayName}」为飞书 Bot`}
-            description="Rovai 会复用当前开发者会话，在后台创建、配置并发布这名队员的独立应用。正常流程不会打开飞书创建确认页，也不需要再次扫码。"
+            title={boundAppId
+              ? `重新发布「${agent.displayName}」飞书 Bot`
+              : `发布「${agent.displayName}」为飞书 Bot`}
+            description={boundAppId
+              ? 'Rovai 会核对并恢复这名队员已经绑定的飞书应用。App ID 保持不变，不会创建或换绑其他应用。'
+              : 'Rovai 会复用当前开发者会话，在后台创建、配置并发布这名队员的独立应用。正常流程不会打开飞书创建确认页，也不需要再次扫码。'}
             icon="server"
             closeDisabled={busy && !terminal}
           />
@@ -783,28 +817,33 @@ function PublishBotDialog({
             </div>
             <div className="channel-dialog-fact"><span>发布账号</span><strong>{account.userName}</strong></div>
             <div className="channel-dialog-fact"><span>所属租户</span><strong>{account.tenantName}</strong></div>
+            {boundAppId && <div className="channel-dialog-fact"><span>绑定应用</span><code>{boundAppId}</code></div>}
             <div className="channel-dialog-fact"><span>应用说明</span><strong>Rovai AI 队员 · {agent.teamRole || '协作者'}</strong></div>
             {error && <div className="channel-dialog-error" role="alert">{error}</div>}
             {provisioning ? (
               <div className={`channel-provisioning-state is-${provisioning.stage}`} role="status">
                 <span className="channel-provisioning-dot" aria-hidden="true" />
                 <span>
-                  <strong>{provisioningLabel(provisioning.stage)}</strong>
+                  <strong>{provisioningLabel(provisioning.stage, Boolean(boundAppId))}</strong>
                   <small>{provisioning.detail}</small>
                   {provisioning.remoteAppId && <code>{provisioning.remoteAppId}</code>}
                 </span>
               </div>
             ) : (
               <p className="channel-publish-note">
-                创建前会再次校验账号和租户；一旦身份变化或会话过期，发布会停止，不会自动改走兼容流程。
+                {boundAppId
+                  ? '该队员的飞书身份已冻结到此应用；重新发布只恢复原应用的配置、版本和连接。'
+                  : '创建前会再次校验账号和租户；一旦身份变化或会话过期，发布会停止，不会自动改走兼容流程。'}
               </p>
             )}
           </AppDialogBody>
           <AppDialogFooter note={retryLocked
             ? '远端结果无法确认。请先在飞书开放平台核对，避免重复创建应用。'
-            : '兼容扫码发布只在正常流程不可用时手动选择。'}>
+            : boundAppId
+              ? '重新发布始终复用已绑定应用，不提供换绑入口。'
+              : '兼容扫码发布只在正常流程不可用时手动选择。'}>
             <button className="quiet-button" type="button" disabled={busy && !terminal} onClick={onClose}>取消</button>
-            {!retryLocked && !sessionUnavailable && (
+            {!boundAppId && !retryLocked && !sessionUnavailable && (
               <button className="quiet-button" type="button" disabled={busy} onClick={() => onPublishCompat(agent.agentId)}>
                 兼容扫码发布
               </button>
@@ -815,7 +854,9 @@ function PublishBotDialog({
               </button>
             ) : !retryLocked && (
               <button className="primary-button" type="button" disabled={busy} onClick={() => onPublish(agent.agentId)}>
-                {busy ? '发布中…' : provisioning?.stage === 'failed' ? '重新发布' : '确认发布'}
+                {busy
+                  ? boundAppId ? '恢复中…' : '发布中…'
+                  : boundAppId ? '确认重新发布' : provisioning?.stage === 'failed' ? '重新发布' : '确认发布'}
               </button>
             )}
           </AppDialogFooter>
@@ -844,9 +885,10 @@ function ManageBotDialog({
       <Dialog.Portal>
         <Dialog.Overlay className="dialog-overlay app-dialog-overlay" />
         <AppDialogContent tone="attention">
-          <AppDialogHeader title={`管理 ${agent.displayName} Bot`} description="停用后会关闭该 Bot 的长连接并删除本机凭据；飞书中的应用需由主人自行决定是否保留。" icon="server" closeDisabled={busy} />
+          <AppDialogHeader title={`管理 ${agent.displayName} Bot`} description="停用后会关闭该 Bot 的长连接并删除本机凭据；飞书中的应用仍是这名队员的唯一绑定，重新发布会继续使用同一 App ID。" icon="server" closeDisabled={busy} />
           <AppDialogBody>
             <div className="channel-dialog-fact"><span>飞书名称</span><strong>{bot.botDisplayName ?? agent.displayName}</strong></div>
+            {bot.appId && <div className="channel-dialog-fact"><span>绑定应用</span><code>{bot.appId}</code></div>}
             <div className="channel-dialog-fact"><span>状态</span><strong>{publicationLabel(bot.publicationStatus)}</strong></div>
           </AppDialogBody>
           <AppDialogFooter>
@@ -956,10 +998,13 @@ function publicationLabel(status: ChannelMemberBotView['publicationStatus'] | 'u
   }
 }
 
-function provisioningLabel(stage: MemberBotProvisioningView['stage']): string {
+function provisioningLabel(
+  stage: MemberBotProvisioningView['stage'],
+  recoveringFrozenApp = false
+): string {
   switch (stage) {
     case 'verifying_session': return '正在校验飞书账号…'
-    case 'creating_app': return '正在创建应用…'
+    case 'creating_app': return recoveringFrozenApp ? '正在核对应用…' : '正在创建应用…'
     case 'configuring_bot': return '正在配置 Bot…'
     case 'configuring_permissions': return '正在配置权限和事件…'
     case 'publishing_version': return '正在发布版本…'

@@ -22,6 +22,8 @@ last_updated: 2026-08-27
   release 错误后的 published read-back、unknown remote 防重复、冻结 App 显式核对接管和多 WebSocket Host/启动恢复；
 - [x] 普通发布解析并上传 exact 队员受控头像；无引用才回退 Rovai icon，冻结 `1.0.0` App 可在显式核对中发布幂等
   `1.0.1` 头像修复版本且不创建第二个 App；
+- [x] Core publication 状态机永久冻结每名队员的 App ID；完成后重复发布拒绝，停用和凭据恢复只重开同一 intent、
+  核对同一 App，不存在换绑或第二次创建；
 - [x] 完成 p2p/group/topic identity、显式 mention gate、多 Bot collecting/finalize/timeout/mismatch；
 - [x] 完成 ChannelTurnRequest 单根 FIFO、统一原子 admission、永久失败/Runtime deferred 与 queue card 更新；
 - [x] 完成 ExternalQuote structured segment、`replyTo=null`、ExternalPrincipal source 与 CURRENT_INPUT v22；
@@ -44,7 +46,7 @@ last_updated: 2026-08-27
 - Secret 与 raw Feishu identity 不进入 Renderer/Agent；公开输出只来自 Core 已提交内容；
 - 连接不调用任何 App 创建接口或写入 App credential；普通发布不产生 QR/飞书确认页，registration 兼容模式只能
   显式选择；
-- identity 漂移、Session 失效与未知远端状态全部 fail closed，不能静默创建第二个 App；
+- identity 漂移、Session 失效、完成后重复发布、停用恢复与未知远端状态全部 fail closed 或复用冻结 App，不能静默创建第二个 App；
 - 自动化只证明本地状态机和网络边界，不把未执行的真实租户外部效果写成通过。
 
 ## 验证证据
@@ -57,7 +59,7 @@ last_updated: 2026-08-27
 - `cargo test -p rovai-core --lib`；
 - `cargo test -p rovai-core --bin rovai`；
 - `cargo test -p rovai-core --bin rovai-core`；
-- Migration 114 upgrade、Developer Identity/publication intent、Channel 状态机、ExternalQuote、Context bytes 与
+- Migration 114 upgrade、Developer Identity/publication intent、队员 App 身份冻结/同 App reactivation、Channel 状态机、ExternalQuote、Context bytes 与
   Secret projection、内置/managed 头像解析、正常发布头像传递与冻结 App 头像修复定向测试全部通过；
 - `pnpm typecheck`；
 - `pnpm test`；

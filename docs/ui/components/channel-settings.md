@@ -61,9 +61,11 @@ registration 确认窗口，并在 Session 失效时要求该队员单独扫码/
 | provisioning | 发布中 | 禁用当前行 |
 | published | 已发布 | 管理 |
 | failed | 发布失败 / 远端状态待核对 | 重试或核对同一 App |
-| disabled | 已停用 | 重新发布 |
+| disabled | 已停用 | 重新发布同一 App |
 
-管理 Dialog 显示队员身份、Bot 名称和 App ID，并提供停用。停用不声称删除飞书开放平台应用或历史消息。Renderer
+管理 Dialog 显示队员身份、Bot 名称和 App ID，并提供停用。停用不声称删除飞书开放平台应用或历史消息。重新发布
+Dialog 必须显示已经冻结的 App ID，明确“不会创建或换绑其他应用”，并隐藏兼容扫码创建入口；进度中的创建阶段改为
+“正在核对应用…”。Renderer
 头像只从现有 `MemberAvatar` 读取；发布时 Main 独立解析同一个受控 `avatarRef` 并上传 exact icon rendition，渠道页不
 解析或接收本机头像路径。非空头像引用无法安全读取时，发布失败而不是展示或上传另一身份。
 

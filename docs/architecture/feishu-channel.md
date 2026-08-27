@@ -69,6 +69,16 @@ scopes、events 和 callbacks 使用开放平台当前 manifest console API 分�
 safeStorage、验证 Bot WebSocket 并完成 intent。普通流程始终保持隐藏窗口，不打开飞书“创建飞书智能体应用 /
 立即创建”确认页，也不向 Renderer 产生二维码。
 
+队员与飞书 App 的一对一身份不是 Renderer 按钮约定，而是 Core publication 状态机不变量。首次远端创建取得 App ID
+后，intent 永久冻结 `agentId + accountId + remoteAppId`，并在首次写入后冻结 `credentialRef`；新 intent 不能越过已有冻结身份，Bot 写入只能
+承接同一 intent 的 `version_published`，`connection_verified/completed` 又必须回指 exact published Bot。已有 Bot 的
+Core 写路径只更新连接回读、显示字段和 lifecycle status，不更新 App、账号或 credential identity，也不存在换绑命令。
+
+停用只把 Bot 置为 `disabled`、关闭连接并删除本机 Secret，原 App ID 仍属于该队员。重新发布要求连接原开发者账号，
+把同一 completed intent 重新推进到 `session_verified`，随后由 console reconciliation 核对原 App、重读 Secret、配置并
+验证后回到 `completed`；状态机中的 `app_created` 在这条路径表示原 App 已确认。兼容注册、新 intent 和第二次 create App
+均不可用于重新发布。发布状态为 `published` 时再次调用普通 publish 直接拒绝；凭据丢失的显式 retry 也只核对同一 App。
+
 头像来源与 `AgentProfile.avatarRef` 使用同一受控身份：内置引用由 Main 读取打包内对应 `icon-192.png`，managed 引用
 通过既有 `MemberAvatarAssetService` 校验 manifest、大小、尺寸和 SHA-256 后读取 icon rendition。Main 不接收 Renderer
 路径，也不把绝对路径传给飞书。`avatarRef=null` 才使用打包内 Rovai App icon 作为明确 fallback；非空引用未知、缺失或

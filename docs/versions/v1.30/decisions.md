@@ -193,12 +193,15 @@ origin 与 `/developers/` 路径可达，协议变化只产生可诊断失败；
 `open.feishu.cn | open.larksuite.com` 的精确 `/page/launcher | /page/cli` 与非空 `user_code`，不得成为普通失败的
 fallback。
 
-每次创建前写持久 `MemberBotPublicationIntent`；远端结果未知时锁定自动重试，已冻结 App ID/credential ref 不可换成
-第二个 App。当前规范见[飞书渠道架构](../../architecture/feishu-channel.md#开发者会话与队员发布)、
+首次创建前写持久 `MemberBotPublicationIntent`；第一次取得 App ID 后，状态机永久冻结该队员的
+`agentId + accountId + remoteAppId`，并在首次写入后冻结 `credentialRef`。失败、完成、停用和重新发布都不能新建 intent 或把 Bot 记录换成
+第二个 App；`completed` 后只允许在 exact Bot 绑定仍存在且原账号已连接时重开同一 intent，核对并恢复原 App。Core
+在 intent create、Bot 首次写入、连接完成和重复 upsert 各状态边界交叉验证这份身份，不以 Renderer 隐藏按钮代替唯一性。
+当前规范见[飞书渠道架构](../../architecture/feishu-channel.md#开发者会话与队员发布)、
 [Feishu Channel v1](../../contracts/feishu-channel-v1.md#3-飞书账号与队员-bot)和
 [渠道设置](../../ui/components/channel-settings.md#渠道连接与二维码)。
 
-锁定的是自动创建和第二个 App，不是对同一冻结 App 的主人显式核对。未知 intent 已有 `remoteAppId` 时，再次普通发布
+锁定的是任何第二个 App 和换绑，不是对同一冻结 App 的主人显式核对。未知 intent 已有 `remoteAppId` 时，再次普通发布
 继续使用同一 intent 和冻结 App ID，缺少 App ID 的未知结果仍不可恢复。队员头像来源与同 App 头像修复 mutation 的
 后续修正见 [V1.30-D07](#v1-30-d07)。
 

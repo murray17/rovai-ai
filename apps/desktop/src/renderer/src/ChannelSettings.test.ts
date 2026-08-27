@@ -70,6 +70,12 @@ describe('Channel settings', () => {
           botDisplayName: '审阅员芝士',
           appId: 'cli_agent_a',
           failureCode: null
+        }, {
+          agentId: 'agent-b',
+          publicationStatus: 'disabled',
+          botDisplayName: '资料员石墨',
+          appId: 'cli_agent_b',
+          failureCode: null
         }]
       }],
       projectBindings: [],
@@ -79,10 +85,11 @@ describe('Channel settings', () => {
       activeProvisioning: null
     }
     const markup = renderToStaticMarkup(createElement(ChannelSettingsView, {
-      agents: [agent('agent-a', 0)],
+      agents: [agent('agent-a', 0), agent('agent-b', 1)],
       snapshot,
       onConnect: () => undefined,
       onDisconnect: () => undefined,
+      onPublish: () => undefined,
       onManage: () => undefined
     }))
 
@@ -94,6 +101,7 @@ describe('Channel settings', () => {
     expect(markup).toContain('>切换账号</button>')
     expect(markup).toContain('>断开</button>')
     expect(markup).toContain('>管理</button>')
+    expect(markup).toContain('>重新发布</button>')
     expect(markup).not.toMatch(/app secret|cookie|csrf|token/i)
   })
 

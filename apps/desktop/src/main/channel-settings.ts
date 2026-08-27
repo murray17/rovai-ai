@@ -346,42 +346,96 @@ export class ChannelSettingsService {
   }
 
   async publishMemberBot(agentId: string): Promise<ChannelSettingsSnapshot> {
-    return this.#publishNewMemberBot(agentId, 'developer_session')
+    return this.#publishNewMemberBot(agentId, 'developer_session', 'publish')
   }
 
   async publishMemberBotCompat(agentId: string): Promise<ChannelSettingsSnapshot> {
-    return this.#publishNewMemberBot(agentId, 'compat_registration')
+    return this.#publishNewMemberBot(agentId, 'compat_registration', 'publish')
   }
 
   async retryMemberBot(agentId: string): Promise<ChannelSettingsSnapshot> {
     this.#requireHost()
-    const credentialRef = memberCredentialRef(agentId)
-    const credential = await this.#dependencies!.credentialStore.read(credentialRef)
-    if (!credential) return this.publishMemberBot(agentId)
     const snapshot = await this.#coreSnapshot()
-    const account = snapshot.account?.status === 'connected' ? snapshot.account : null
-    if (!account) throw new Error('请先重新连接飞书账号。')
-    const agent = await this.#dependencies!.core.request<AgentProfile>('members.get', { agentId })
-    await this.#publishCredential(account.accountId, agent, credentialRef, credential)
+    const bot = snapshot.memberBots.find((candidate) => candidate.agentId === agentId) ?? null
     const intent = latestPublicationIntent(snapshot, agentId)
-    if (intent?.state === 'failed_recoverable') {
-      let version = intent.version
-      const remoteAppId = intent.remoteAppId ?? credential.appId
-      await this.#advancePublicationIntent(intent.publicationIntentId, version, {
-        state: 'connection_verified',
-        remoteAppId,
+    const credentialRef = bot?.credentialRef ?? memberCredentialRef(agentId)
+    const credential = await this.#dependencies!.credentialStore.read(credentialRef)
+    let retryIntentVersion = intent?.version ?? null
+    let retryLastCompletedStep = intent?.lastCompletedStep ?? null
+    const canResumeInitialConnection = !bot
+      && credential !== null
+      && intent?.state === 'failed_recoverable'
+      && intent.lastCompletedStep === 'version_published'
+      && intent.remoteAppId === credential.appId
+      && intent.credentialRef === credentialRef
+    if (canResumeInitialConnection) {
+      if (snapshot.account?.status !== 'connected' || snapshot.account.accountId !== intent.accountId) {
+        throw new Error('请先连接最初发布该队员应用的飞书账号。')
+      }
+      await this.#advancePublicationIntent(intent.publicationIntentId, intent.version, {
+        state: 'version_published',
+        remoteAppId: credential.appId,
         credentialRef,
-        lastCompletedStep: 'connection_verified',
+        lastCompletedStep: 'version_published',
         failureCode: null
       })
-      version += 1
-      await this.#advancePublicationIntent(intent.publicationIntentId, version, {
-        state: 'completed',
-        remoteAppId,
-        credentialRef,
-        lastCompletedStep: 'completed',
-        failureCode: null
-      })
+      retryIntentVersion = intent.version + 1
+      retryLastCompletedStep = 'version_published'
+    }
+    if (
+      (!bot && !canResumeInitialConnection)
+      || bot?.status === 'disabled'
+      || !credential
+      || intent?.state === 'failed_unknown_remote_state'
+    ) {
+      return this.#publishNewMemberBot(agentId, 'developer_session', 'retry')
+    }
+    if (bot && credential.appId !== bot.appId) {
+      throw new Error('本机凭据与该队员冻结的飞书应用不一致；为避免换绑，已停止重试。')
+    }
+    const bindingAccountId = bot?.accountId ?? intent?.accountId
+    if (!bindingAccountId) throw new Error('该队员缺少可恢复的飞书账号绑定。')
+    const agent = await this.#dependencies!.core.request<AgentProfile>('members.get', { agentId })
+    const recoveringIntent = intent?.state === 'failed_recoverable' ? intent : null
+    const remoteAppId = recoveringIntent?.remoteAppId ?? credential.appId
+    const advanceRetryIntent = async (
+      state: 'connection_verified' | 'completed',
+      lastCompletedStep: 'connection_verified' | 'completed'
+    ): Promise<void> => {
+      if (!recoveringIntent || retryIntentVersion === null) return
+      await this.#advancePublicationIntent(
+        recoveringIntent.publicationIntentId,
+        retryIntentVersion,
+        {
+          state,
+          remoteAppId,
+          credentialRef,
+          lastCompletedStep,
+          failureCode: null
+        }
+      )
+      retryIntentVersion += 1
+      retryLastCompletedStep = lastCompletedStep
+    }
+    try {
+      await this.#publishCredential(bindingAccountId, agent, credentialRef, credential)
+      await advanceRetryIntent('connection_verified', 'connection_verified')
+      await advanceRetryIntent('completed', 'completed')
+    } catch (error) {
+      if (recoveringIntent && retryIntentVersion !== null) {
+        await this.#advancePublicationIntent(
+          recoveringIntent.publicationIntentId,
+          retryIntentVersion,
+          {
+            state: 'failed_recoverable',
+            remoteAppId,
+            credentialRef,
+            lastCompletedStep: retryLastCompletedStep,
+            failureCode: channelFailureCode(error)
+          }
+        ).catch(() => undefined)
+      }
+      throw error
     }
     this.#publicationFailures.delete(agentId)
     if (this.#activeProvisioning?.agentId === agentId) {
@@ -475,7 +529,8 @@ export class ChannelSettingsService {
 
   async #publishNewMemberBot(
     agentId: string,
-    mode: 'developer_session' | 'compat_registration'
+    mode: 'developer_session' | 'compat_registration',
+    operation: 'publish' | 'retry'
   ): Promise<ChannelSettingsSnapshot> {
     this.#requireHost()
     if (this.#activeProvisioning && !['completed', 'failed', 'unknown_remote_state'].includes(
@@ -485,8 +540,36 @@ export class ChannelSettingsService {
     const snapshot = await this.#coreSnapshot()
     const account = snapshot.account?.status === 'connected' ? snapshot.account : null
     if (!account) throw new Error('飞书登录已过期，请先重新连接账号。')
+    const existingBot = snapshot.memberBots.find((bot) => bot.agentId === agentId) ?? null
     const previousIntent = latestPublicationIntent(snapshot, agentId)
-    if (previousIntent?.state === 'failed_unknown_remote_state') {
+    if (existingBot?.status === 'published' && operation === 'publish') {
+      throw new Error('该队员已经绑定并发布为飞书 Bot，不会创建第二个应用。')
+    }
+    if (existingBot) {
+      if (mode !== 'developer_session') {
+        throw new Error('该队员已经绑定飞书应用；后续只能通过普通流程恢复同一个应用。')
+      }
+      if (
+        !previousIntent
+        || previousIntent.remoteAppId !== existingBot.appId
+        || previousIntent.accountId !== existingBot.accountId
+        || (previousIntent.credentialRef !== null
+          && previousIntent.credentialRef !== existingBot.credentialRef)
+      ) {
+        throw new Error('该队员的飞书应用状态不一致；为避免换绑，已停止操作。')
+      }
+      if (account.accountId !== existingBot.accountId) {
+        throw new Error('请先连接最初发布该队员应用的飞书账号。')
+      }
+      if (!['completed', 'failed_recoverable', 'failed_unknown_remote_state'].includes(
+        previousIntent.state
+      )) {
+        throw new Error('该队员已有未完成的同应用发布记录。')
+      }
+    } else if (previousIntent?.state === 'completed') {
+      throw new Error('该队员已有已完成的发布状态，但本地 Bot 绑定缺失；不会创建第二个应用。')
+    }
+    if (!existingBot && previousIntent?.state === 'failed_unknown_remote_state') {
       if (mode !== 'developer_session' || !previousIntent.remoteAppId) {
         throw new Error('上次创建结果无法确认。为避免重复创建应用，请先在飞书开放平台核对。')
       }
@@ -498,13 +581,6 @@ export class ChannelSettingsService {
       )
     ) {
       throw new Error('该队员已有未完成的发布记录。')
-    }
-    if (previousIntent?.state === 'failed_recoverable' && previousIntent.remoteAppId) {
-      const stored = previousIntent.credentialRef
-        ? await this.#dependencies!.credentialStore.read(previousIntent.credentialRef)
-        : null
-      if (stored) return this.retryMemberBot(agentId)
-      throw new Error('上次已创建远端应用但凭据未保存，不能自动创建第二个应用。')
     }
     const identity = await this.#developerSession.inspect()
     if (
@@ -522,8 +598,13 @@ export class ChannelSettingsService {
     const avatarSource = mode === 'developer_session'
       ? await this.#memberBotAvatarSource.resolve(agent.avatarRef)
       : undefined
-    if (previousIntent?.state === 'failed_unknown_remote_state') {
-      return this.#reconcileUnknownMemberBot(
+    if (
+      existingBot
+      || (previousIntent?.remoteAppId
+        && ['failed_recoverable', 'failed_unknown_remote_state'].includes(previousIntent.state))
+    ) {
+      if (!previousIntent) throw new Error('该队员缺少可恢复的飞书发布状态。')
+      return this.#reconcileFrozenMemberBot(
         account,
         identity,
         agent,
@@ -544,6 +625,7 @@ export class ChannelSettingsService {
       provisioningMode: mode
     })
     let intentVersion = 1
+    let lastCompletedStep: string | null = null
     const advanceIntent = async (
       payload: {
         state: CoreChannelSnapshot['publicationIntents'][number]['state']
@@ -555,6 +637,7 @@ export class ChannelSettingsService {
     ): Promise<void> => {
       await this.#advancePublicationIntent(publicationIntentId, intentVersion, payload)
       intentVersion += 1
+      lastCompletedStep = payload.lastCompletedStep
     }
     let remoteAppId: string | null = null
     let credentialWritten = false
@@ -698,7 +781,7 @@ export class ChannelSettingsService {
         state: unknownRemoteState ? 'failed_unknown_remote_state' : 'failed_recoverable',
         remoteAppId,
         credentialRef: credentialWritten ? credentialRef : null,
-        lastCompletedStep: null,
+        lastCompletedStep,
         failureCode
       }).catch(() => undefined)
       this.#publicationFailures.set(agentId, failureCode)
@@ -719,7 +802,7 @@ export class ChannelSettingsService {
     }
   }
 
-  async #reconcileUnknownMemberBot(
+  async #reconcileFrozenMemberBot(
     account: NonNullable<CoreChannelSnapshot['account']>,
     identity: FeishuDeveloperIdentity,
     agent: AgentProfile,
@@ -731,7 +814,7 @@ export class ChannelSettingsService {
     if (!remoteAppId || !this.#memberBotProvisioner.reconcile) {
       throw new Error('当前版本无法核对已创建的飞书应用；为避免重复创建应用，不会自动重试。')
     }
-    const credentialRef = memberCredentialRef(agent.agentId)
+    const credentialRef = intent.credentialRef ?? memberCredentialRef(agent.agentId)
     const abort = new AbortController()
     this.#activeProvisioningAbort = abort
     this.#activeProvisioning = {
@@ -760,6 +843,16 @@ export class ChannelSettingsService {
     }
 
     try {
+      const reopeningCompletedBinding = intent.state === 'completed'
+      if (reopeningCompletedBinding) {
+        await advanceIntent({
+          state: 'session_verified',
+          remoteAppId,
+          credentialRef,
+          lastCompletedStep: 'session_verified',
+          failureCode: null
+        })
+      }
       const provisioned = await this.#memberBotProvisioner.reconcile({
         publicationIntentId: intent.publicationIntentId,
         agentId: agent.agentId,
@@ -776,6 +869,15 @@ export class ChannelSettingsService {
       })
       if (provisioned.appId !== remoteAppId || !provisioned.publishedVersionId) {
         throw new Error('feishu_console_reconciliation_identity_mismatch')
+      }
+      if (reopeningCompletedBinding) {
+        await advanceIntent({
+          state: 'app_created',
+          remoteAppId,
+          credentialRef,
+          lastCompletedStep: 'app_created',
+          failureCode: null
+        })
       }
       const credential = {
         appId: remoteAppId,
@@ -920,17 +1022,24 @@ export class ChannelSettingsService {
   }
 
   #handleProvisioningProgress(step: MemberBotProvisioningStep, remoteAppId?: string): void {
+    const recoveringFrozenApp = Boolean(
+      remoteAppId ?? this.#activeProvisioning?.remoteAppId
+    )
     const progress: Record<MemberBotProvisioningStep, {
       stage: NonNullable<ChannelSettingsSnapshot['activeProvisioning']>['stage']
       detail: string
     }> = {
       session_verified: {
         stage: 'creating_app',
-        detail: '账号校验完成，正在创建独立应用。'
+        detail: recoveringFrozenApp
+          ? '账号校验完成，正在核对已绑定应用。'
+          : '账号校验完成，正在创建独立应用。'
       },
       app_created: {
         stage: 'configuring_bot',
-        detail: '应用已创建，正在启用 Bot…'
+        detail: recoveringFrozenApp
+          ? '已确认原应用，正在核对 Bot 配置…'
+          : '应用已创建，正在启用 Bot…'
       },
       bot_configured: {
         stage: 'configuring_permissions',
@@ -1019,12 +1128,8 @@ export class ChannelSettingsService {
       await this.#disconnectManaged(managed)
       throw error
     }
-    const previous = [...this.#managedChannels.values()]
-      .find((candidate) => candidate.agentId === agent.agentId && candidate.appId !== managed.appId)
-    if (previous) {
-      this.#managedChannels.delete(previous.appId)
-      await this.#disconnectManaged(previous)
-    }
+    const previous = this.#managedChannels.get(managed.appId)
+    if (previous) await this.#disconnectManaged(previous)
     this.#managedChannels.set(managed.appId, managed)
   }
 

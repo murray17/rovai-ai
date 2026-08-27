@@ -39,8 +39,9 @@ last_updated: 2026-08-27
   bootstrap，经 `OpenPlatformApiClient` 创建应用、读取 Secret、启用 Bot、配置 scopes/events/callback WebSocket、
   上传当前队员受控头像、创建/发布版本并回读验证。旧 registration/确认/poll 只在显式兼容模式使用。Session Cookie 与独立 App credential
   分开加密，账号切换/断开不迁移、停用或删除已发布 Bot，单连接故障隔离，重启恢复 published Bot 与 publication
-  intent；release 错误后继续以 version detail 收敛，含冻结 App ID 的 unknown intent 支持主人显式核对并接管同一 App，
-  初始版本头像错误时在同一 App 发布幂等 `1.0.1` 修复版本，不创建第二个 App；
+  intent；release 错误后继续以 version detail 收敛。每名队员的首个 App ID 由 Core 状态机永久冻结，完成、停用、凭据
+  丢失和 unknown recovery 都只核对并恢复同一 App，不存在换绑或第二次创建；初始版本头像错误时在同一 App 发布幂等
+  `1.0.1` 修复版本；
 - 私聊按 receiving App 隔离；普通群一个 Camp；话题按 canonical topic 一个 Camp。群/话题只有显式 mention
   published managed Bot 才进入 Core；
 - 同一 external message 的第一条 observation 只进入 collecting；canonical mentions 完整或全部预期 App 到齐后
@@ -82,7 +83,7 @@ ExternalQuote 的确定性 agent projection。Bootstrap、Session Charter、sect
 ## 验收
 
 实施与证据由[实施计划](implementation-plan.md)维护。仓库内完成门槛包括 v112→v114 升级、Developer Identity/
-publication intent、连接不注册 App、正常发布不产生 QR/飞书确认页、console 配置与回读、identity drift/unknown remote fail-closed、owner-only/未绑定负向、
+publication intent、队员 App 身份冻结/停用后同 App 恢复、连接不注册 App、正常发布不产生 QR/飞书确认页、console 配置与回读、identity drift/unknown remote fail-closed、owner-only/未绑定负向、
 multi-Bot fail-closed、FIFO promotion、普通群/话题 roster、ExternalQuote/Context bytes、safeStorage/Renderer
 秘密隔离、Host 恢复、双主题和完整 Rust/TypeScript/文档/构建门禁。真实飞书租户登录、应用创建、无平台确认发布
 和收发仍需要拥有可用企业权限的主人在发布环境执行，自动化不伪造外部成功。

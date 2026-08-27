@@ -109,13 +109,26 @@ WebSocket。只有最新 exact `attemptId` 可以更新 UI；取消/切换会 ab
 开放平台已经到达但连续 20 秒仍不能产生完整必需身份时，attempt 必须以
 `feishu_developer_identity_incomplete` 失败；轮询不得重入，也不能一直保留在 identity inspection。
 
-每次普通发布先持久化 `MemberBotPublicationIntent`：
+首次普通发布先持久化 `MemberBotPublicationIntent`：
 
 ```text
 created -> session_verified -> app_created -> credentials_read
         -> bot_configured -> version_published -> connection_verified -> completed
         \-> failed_recoverable | failed_unknown_remote_state
 ```
+
+每名队员的飞书 App 身份由这一个持久状态机冻结。第一次取得非空 `remoteAppId` 后，`agentId + accountId +
+remoteAppId` 成为不可换绑身份，`credentialRef` 在首次写入后同样冻结；`completed` 不是再次创建 App 的许可。Core 从此拒绝为该队员创建会产生
+第二个 App 的 intent，也拒绝 `memberBot.upsert` 改写上述绑定。首次写入 `feishu_member_bot` 只能发生在同一 intent 的
+`version_published`，`connection_verified | completed` 又必须引用已经写入且状态为 `published` 的 exact Bot 绑定。
+数据库主键和唯一索引只是约束的最后防线，不替代这些状态转换。
+
+在尚未取得 `remoteAppId` 的 `failed_recoverable` 之后可以开始一次新的首次发布尝试；一旦任何 intent 已冻结
+`remoteAppId`，后续发布、核对、重试和恢复都只能沿用该 App。Bot 生命周期为
+`unpublished -> published -> disabled -> published`，最后一步使用原 completed intent 进入
+`session_verified -> app_created -> ... -> completed`，其中 `app_created` 表示已核对原 App 身份，不表示新建。
+重新发布要求当前 Developer Session 仍是原 `accountId`，通过普通 console reconciliation 读取同一 App Secret、配置、
+版本并验证连接；不得进入 compatibility registration。停用删除本机 Secret 和连接，但不删除、释放或允许替换 App ID。
 
 Intent 冻结 `agentId + accountId + expectedUserIdDigest + expectedTenantId + requestedAppName + provisioningMode`，所有
 推进带 exact version。普通 `developer_session` 模式必须执行以下顺序，且不得进入 compatibility protocol：
@@ -152,7 +165,7 @@ Version。任何回读的 published 立即收敛成功，rejected 立即失败�
 官方确认 URL 只接受 `https://open.feishu.cn | open.larksuite.com` 上的 `/page/launcher | /page/cli` 与非空
 `user_code`；不得放宽到相似域、任意飞书路径、HTTP、显式端口或 URL userinfo。正常失败不得静默切换兼容模式。
 
-一旦 intent 持有 `remoteAppId`，后续状态不得改成另一个 App。App Secret 写入失败，或网络中断导致无法证明远端是否
+一旦 intent 持有 `remoteAppId`，包括失败、完成、停用和重新发布在内的后续状态都不得改成另一个 App。App Secret 写入失败，或网络中断导致无法证明远端是否
 创建成功时，写 `failed_unknown_remote_state + failureCode` 并锁住自动再创建；持久 credential 已存在时才允许
 `failed_recoverable` 继续验证同一 App。Main 重启按这些事实收敛，不从 UI 临时进度推断。
 

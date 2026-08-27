@@ -308,10 +308,122 @@ describe('channel settings service', () => {
       appSecret: 'normal-secret'
     })
 
-    await service.publishMemberBotCompat('agent-a')
+    await service.publishMemberBotCompat('agent-b')
 
     expect(compatProvision).toHaveBeenCalledTimes(1)
     expect(provision).toHaveBeenCalledTimes(1)
+  })
+
+  it('keeps one frozen app binding and reactivates a disabled Bot without creating another app', async () => {
+    const owner = identity()
+    const account = connectedAccount(owner)
+    const credentialStore = memoryCredentialStore()
+    const create = vi.fn()
+    const compatCreate = vi.fn()
+    const reconcile = vi.fn(async () => ({
+      appId: 'cli-frozen',
+      appSecret: 'recovered-secret',
+      botDisplayName: '审阅员',
+      publishedVersionId: 'version-existing'
+    }))
+    let publicationIntent: Record<string, unknown> = {
+      publicationIntentId: 'intent-frozen',
+      agentId: 'agent-a',
+      accountId: account.accountId,
+      expectedUserIdDigest: account.userIdDigest,
+      expectedTenantId: owner.tenantId,
+      requestedAppName: '审阅员',
+      provisioningMode: 'developer_session',
+      state: 'completed',
+      remoteAppId: 'cli-frozen',
+      credentialRef: 'credential-frozen',
+      lastCompletedStep: 'completed',
+      failureCode: null,
+      version: 8,
+      createdAt: '2026-08-27T00:00:00Z',
+      updatedAt: '2026-08-27T00:01:00Z'
+    }
+    let memberBot: Record<string, unknown> = {
+      agentId: 'agent-a',
+      accountId: account.accountId,
+      appId: 'cli-frozen',
+      botDisplayName: '审阅员',
+      credentialRef: 'credential-frozen',
+      status: 'published',
+      failureCode: null,
+      version: 1
+    }
+    const advancedStates: string[] = []
+    let intentCreates = 0
+    const service = new ChannelSettingsService({
+      credentialStore,
+      developerSession: developerSession(owner),
+      memberBotProvisioner: { create, reconcile },
+      compatMemberBotProvisioner: { create: compatCreate },
+      createChannel: fakeCreateChannel(),
+      core: channelCore((method, rawParams) => {
+        if (method === 'channels.feishu.snapshot') {
+          return coreSnapshot({
+            account,
+            memberBots: [memberBot],
+            publicationIntents: [publicationIntent]
+          })
+        }
+        if (method === 'members.get') return presentAgent()
+        const params = rawParams as { command?: Record<string, unknown> }
+        if (method === 'channels.feishu.publicationIntent.create') intentCreates += 1
+        if (method === 'channels.feishu.publicationIntent.advance') {
+          const state = String(params.command?.state)
+          advancedStates.push(state)
+          publicationIntent = {
+            ...publicationIntent,
+            ...params.command,
+            version: Number(publicationIntent.version) + 1,
+            updatedAt: '2026-08-27T00:02:00Z'
+          }
+        }
+        if (method === 'channels.feishu.memberBot.upsert') {
+          expect(params.command).toMatchObject({
+            agentId: 'agent-a',
+            accountId: account.accountId,
+            appId: 'cli-frozen',
+            credentialRef: 'credential-frozen'
+          })
+          memberBot = { ...memberBot, status: 'published', version: 2 }
+        }
+        return { status: 'applied' }
+      })
+    })
+
+    await expect(service.publishMemberBot('agent-a'))
+      .rejects.toThrow('不会创建第二个应用')
+    await expect(service.publishMemberBotCompat('agent-a'))
+      .rejects.toThrow('不会创建第二个应用')
+
+    memberBot = { ...memberBot, status: 'disabled', version: 2 }
+    const reactivated = await service.publishMemberBot('agent-a')
+
+    expect(create).not.toHaveBeenCalled()
+    expect(compatCreate).not.toHaveBeenCalled()
+    expect(intentCreates).toBe(0)
+    expect(reconcile).toHaveBeenCalledWith(expect.objectContaining({
+      publicationIntentId: 'intent-frozen',
+      remoteAppId: 'cli-frozen'
+    }))
+    expect(advancedStates).toEqual([
+      'session_verified',
+      'app_created',
+      'credentials_read',
+      'bot_configured',
+      'version_published',
+      'connection_verified',
+      'completed'
+    ])
+    expect(reactivated.channels[0].memberBots).toContainEqual(expect.objectContaining({
+      agentId: 'agent-a',
+      appId: 'cli-frozen',
+      publicationStatus: 'published'
+    }))
   })
 
   it('fails before creating an intent when an assigned avatar has no safe Main resolver', async () => {
@@ -459,7 +571,7 @@ describe('channel settings service', () => {
     expect(credentialStore.values.get('feishu-member-existing')).toEqual(credential)
   })
 
-  it('clears the in-memory failure projection after retrying a saved Bot credential', async () => {
+  it('keeps a failed connection retry recoverable before completing the same Bot binding', async () => {
     const owner = identity()
     const credentialStore = memoryCredentialStore()
     let publicationIntent: Record<string, unknown> | null = null
@@ -470,7 +582,7 @@ describe('channel settings service', () => {
       on: vi.fn(() => () => undefined),
       connect: vi.fn(async () => {
         connectCount += 1
-        if (connectCount === 1) throw new Error('handshake_failed')
+        if (connectCount <= 2) throw new Error('handshake_failed')
       }),
       disconnect: vi.fn(async () => undefined)
     })) as unknown as NonNullable<ChannelHostDependencies['createChannel']>
@@ -534,6 +646,12 @@ describe('channel settings service', () => {
     })
 
     await expect(service.publishMemberBot('agent-a')).rejects.toThrow('handshake_failed')
+    await expect(service.retryMemberBot('agent-a')).rejects.toThrow('handshake_failed')
+    expect(publicationIntent).toMatchObject({
+      state: 'failed_recoverable',
+      remoteAppId: 'cli-retry',
+      lastCompletedStep: 'version_published'
+    })
     const retried = await service.retryMemberBot('agent-a')
 
     expect(retried.activeProvisioning).toMatchObject({
