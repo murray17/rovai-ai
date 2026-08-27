@@ -27,7 +27,8 @@ ChannelTurnRequest、群 roster 和 ChannelDelivery 的字段与状态语义。C
 `ExternalPrincipal` 没有上述管理能力。不存在 authorized user、sender allowlist、项目申请或飞书侧项目选择。
 绑定会话中的任意成员可发送私聊消息，或在群/话题显式 mention 已发布 Bot。
 
-Developer Session Cookie jar 与 App Secret 只存于 Electron Main，并以 OS `safeStorage` 加密。Core 仅持久化
+Developer Session Cookie jar 与 App Secret 只存于 Electron Main，并以 OS `safeStorage` 加密；页面 bootstrap 取得的
+CSRF 只在一次 Main 发布流程内存活。Core 仅持久化
 Developer Identity 的摘要/显示字段和每 Bot `credentialRef`；Renderer/API Snapshot 不得出现 `userId`、
 `appSecret`、Cookie、CSRF、token、原始 credential payload、transport conversation 或 pending aggregate。系统加密
 不可用或 15 秒内未完成时 Session/credential read/write 必须失败，不能降级为明文。登录必须在打开飞书页面前完成
@@ -117,26 +118,41 @@ created -> session_verified -> app_created -> credentials_read
 ```
 
 Intent 冻结 `agentId + accountId + expectedUserIdDigest + expectedTenantId + requestedAppName + provisioningMode`，所有
-推进带 exact version。普通 `developer_session` 模式在创建前复核当前 Session 的原始 `userId + tenantId`，再使用
-官方应用注册 begin/poll 协议，并把确认 URL 加载到同一已登录的 Electron Session；Renderer 不接收二维码。确认页
-返回 App credential 后，平台 preset/addons 已应用 Bot、名称/描述、最小 scopes 与 receive/roster 事件。协议不返回
-外部 version ID，因此 `publishedVersionId` 可以为空，但 Core 的 `version_published` 只在注册确认成功后推进。
+推进带 exact version。普通 `developer_session` 模式必须执行以下顺序，且不得进入 compatibility protocol：
 
-确认页若跳到登录、身份漂移或 Session 失效，普通发布必须失败并要求重新连接，不能调用兼容 API。SDK
-`registerApp` 只用于主人显式选择 `compat_registration`；其 QR purpose 是
-`member_bot_compat_registration`，每名队员单独扫码，且结果不覆盖 Developer Identity。
+```text
+requireExpectedIdentity
+  -> read current Electron Session cookies
+  -> load Open Platform page and obtain csrfToken + exact apiOrigin
+  -> console create app -> read secret -> enable Bot
+  -> configure scopes -> configure events -> configure callbacks/WebSocket
+  -> create version -> publish version -> read back/verify
+  -> return ProvisionedMemberBot
+```
 
-官方确认 URL 的 admitted 入口为 `https://open.feishu.cn | open.larksuite.com` 上的 `/page/launcher`（线上 begin
-响应）或 `/page/cli`（官方 CLI 兼容入口），并带非空 `user_code`。允许追加经过 URL 编码的官方 preset/addons
-参数，但不得放宽到相似域、任意飞书路径、HTTP、显式端口或 URL userinfo。URL 在窗口导航前被本地拒绝时，尚未
-进入远端创建阶段，Intent 必须进入 `failed_recoverable`，不得进入 `failed_unknown_remote_state`。
+Cookie value、CSRF 与 App Secret 不得离开 Main，也不得进入错误、日志或 Renderer。console fetch 必须使用同一
+Electron `Session.fetch` 与 `credentials=include`；不允许手工复制 Cookie header。`apiOrigin` 只接受当前 brand 对应的
+`https://open.feishu.cn | https://open.larksuite.com`，请求路径只接受 `/developers/`。页面 identity 必须再次匹配
+intent 冻结的 `userId + tenantId`。任何跨源、相似域、登录跳转、身份漂移、bootstrap/响应结构缺失都 fail closed。
+
+正常 provisioner 必须从 console API 创建应用并取得非空 App ID/Secret，启用 Bot，以分步 manifest upsert 配置本
+合同的 tenant scopes、receive/roster events、event/callback `websocket` mode，创建并发布版本。返回前必须回读并
+验证 Bot enable、所有必需 scopes/events、两类 WebSocket mode 和 published version status；普通模式的
+`publishedVersionId` 不得为空。普通流程不得调用 `/oauth/v1/app/registration`、不得调用
+`showRegistrationConfirmation`，也不得打开飞书“创建飞书智能体应用 / 立即创建”页面。
+
+`FeishuCompatMemberBotProvisioner` 独占
+`/oauth/v1/app/registration + verification_uri_complete + showRegistrationConfirmation + pollRegistration`。它只由
+主人显式选择 `compat_registration` 时进入，可能要求每名队员单独扫码/确认，且结果不覆盖 Developer Identity。
+官方确认 URL 只接受 `https://open.feishu.cn | open.larksuite.com` 上的 `/page/launcher | /page/cli` 与非空
+`user_code`；不得放宽到相似域、任意飞书路径、HTTP、显式端口或 URL userinfo。正常失败不得静默切换兼容模式。
 
 一旦 intent 持有 `remoteAppId`，后续状态不得改成另一个 App。App Secret 写入失败，或网络中断导致无法证明远端是否
 创建成功时，写 `failed_unknown_remote_state + failureCode` 并锁住自动再创建；持久 credential 已存在时才允许
 `failed_recoverable` 继续验证同一 App。Main 重启按这些事实收敛，不从 UI 临时进度推断。
 
-官方注册的 avatar preset 只接受确认页可访问的 URL；Rovai 不把本机受控头像发布到公网，因此本机头像仅作确认预览，
-Renderer 不宣称已经上传。
+普通发布由 Main 向 console image endpoint 上传打包内受控 Rovai App icon；本机成员头像仍只作 Rovai 身份展示，
+Renderer 不宣称已把成员头像上传到飞书。兼容模式的 avatar preset 仍只能使用确认页可访问的 URL。
 
 Bot 只有 WebSocket 首次握手与 identity 回读成功、credential 已写入 safeStorage 且 Core upsert 成功后才成为
 `published`。Main 启动时为所有 published Bot 读取 exact credential 并独立恢复长连接；单连接失败只改变该 Bot

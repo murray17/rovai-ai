@@ -90,7 +90,10 @@ import { AppQuitCoordinator } from './app-quit-coordinator'
 import { ChannelSettingsService } from './channel-settings'
 import { SafeStorageChannelCredentialStore } from './channel-credential-store'
 import { ElectronFeishuDeveloperSessionService } from './feishu-developer-session'
-import { FeishuWebSessionMemberBotProvisioner } from './feishu-member-bot-provisioner'
+import {
+  FeishuCompatMemberBotProvisioner,
+  FeishuWebSessionMemberBotProvisioner
+} from './feishu-member-bot-provisioner'
 import { isolatedSafeStorageApplicationName } from './safe-storage-application-name'
 
 const mainStartupStartedAt = performance.now()
@@ -263,7 +266,8 @@ const channelSettings = new ChannelSettingsService({
   core,
   credentialStore: new SafeStorageChannelCredentialStore(coreDataPath),
   developerSession: feishuDeveloperSession,
-  memberBotProvisioner: new FeishuWebSessionMemberBotProvisioner(feishuDeveloperSession)
+  memberBotProvisioner: new FeishuWebSessionMemberBotProvisioner(feishuDeveloperSession),
+  compatMemberBotProvisioner: new FeishuCompatMemberBotProvisioner(feishuDeveloperSession)
 })
 channelSettings.onChanged((snapshot) => {
   if (!mainWindow || mainWindow.isDestroyed() || mainWindow.webContents.isDestroyed()) return

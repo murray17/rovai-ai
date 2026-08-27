@@ -50,7 +50,21 @@ export interface FeishuRegistrationPage {
   closed: Promise<'closed' | 'session_expired'>
 }
 
+export interface FeishuOpenPlatformSession {
+  brand: 'feishu' | 'lark'
+  apiOrigin: string
+  csrfToken: string
+  fetch(input: string, init?: RequestInit): Promise<Response>
+}
+
 export interface FeishuDeveloperPortalSession extends FeishuDeveloperSessionService {
+  openPlatformSession(input: {
+    expectedIdentity: {
+      userId: string
+      tenantId: string
+    }
+    signal?: AbortSignal
+  }): Promise<FeishuOpenPlatformSession>
   showRegistrationConfirmation(input: {
     url: string
     signal?: AbortSignal
@@ -77,6 +91,13 @@ type PortalIdentity = Partial<{
   tenantName: string
 }>
 
+type OpenPlatformBootstrap = Partial<{
+  csrfToken: string
+  apiOrigin: string
+  userId: string
+  tenantId: string
+}>
+
 const FEISHU_PORTAL_URL = 'https://open.feishu.cn/app?lang=zh-CN'
 const SESSION_PARTITION = `rovai-feishu-developer-${randomUUID()}`
 const LOGIN_TIMEOUT_MS = 10 * 60_000
@@ -91,6 +112,7 @@ export class ElectronFeishuDeveloperSessionService implements FeishuDeveloperPor
   #restored = false
   #activeLoginWindow: BrowserWindow | null = null
   #activeRegistrationWindows = new Set<BrowserWindow>()
+  #activeOpenPlatformWindows = new Set<BrowserWindow>()
 
   constructor(userDataPath: string, getParentWindow: () => BrowserWindow | null = () => null) {
     this.#store = new SafeStorageFeishuDeveloperSessionStore(userDataPath)
@@ -267,9 +289,80 @@ export class ElectronFeishuDeveloperSessionService implements FeishuDeveloperPor
       if (!window.isDestroyed()) window.destroy()
     }
     this.#activeRegistrationWindows.clear()
+    for (const window of this.#activeOpenPlatformWindows) {
+      if (!window.isDestroyed()) window.destroy()
+    }
+    this.#activeOpenPlatformWindows.clear()
     await this.#session.clearStorageData()
     await this.#store.delete()
     this.#restored = true
+  }
+
+  async openPlatformSession(input: {
+    expectedIdentity: {
+      userId: string
+      tenantId: string
+    }
+    signal?: AbortSignal
+  }): Promise<FeishuOpenPlatformSession> {
+    await this.#ensureRestored()
+    if (input.signal?.aborted) throw sessionError('feishu_provisioning_cancelled')
+    const stored = await this.#store.read()
+    if (!stored) throw sessionError('feishu_developer_session_expired')
+    const portalUrl = portalUrlForBrand(stored.identity.brand)
+    const cookies = await this.#session.cookies.get({ url: portalUrl })
+    if (cookies.length === 0) throw sessionError('feishu_developer_session_expired')
+
+    const window = this.#createWindow(false)
+    this.#activeOpenPlatformWindows.add(window)
+    const onAbort = (): void => {
+      if (!window.isDestroyed()) window.destroy()
+    }
+    input.signal?.addEventListener('abort', onAbort, { once: true })
+    try {
+      await window.loadURL(portalUrl)
+      if (input.signal?.aborted) throw sessionError('feishu_provisioning_cancelled')
+      const currentUrl = window.webContents.getURL()
+      if (!isDeveloperPortalUrl(currentUrl)) {
+        throw sessionError('feishu_developer_session_expired')
+      }
+      const bootstrap = await readOpenPlatformBootstrap(window)
+      const csrfToken = normalizedRequired(bootstrap.csrfToken)
+      const userId = normalizedRequired(bootstrap.userId)
+      const tenantId = normalizedRequired(bootstrap.tenantId)
+      if (!csrfToken || !userId || !tenantId) {
+        throw sessionError('feishu_open_platform_bootstrap_incomplete')
+      }
+      if (
+        userId !== input.expectedIdentity.userId
+        || tenantId !== input.expectedIdentity.tenantId
+      ) throw sessionError('feishu_developer_identity_changed')
+      const apiOrigin = requireOpenPlatformOrigin(bootstrap.apiOrigin, stored.identity.brand)
+      return {
+        brand: stored.identity.brand,
+        apiOrigin,
+        csrfToken,
+        fetch: async (rawUrl, init = {}) => {
+          const url = requireOpenPlatformApiUrl(rawUrl, apiOrigin)
+          return this.#session.fetch(url, {
+            ...init,
+            credentials: 'include'
+          })
+        }
+      }
+    } catch (error) {
+      if (input.signal?.aborted) throw sessionError('feishu_provisioning_cancelled')
+      if (
+        !window.isDestroyed()
+        && !window.webContents.isDestroyed()
+        && isFeishuLoginUrl(window.webContents.getURL())
+      ) throw sessionError('feishu_developer_session_expired')
+      throw error
+    } finally {
+      input.signal?.removeEventListener('abort', onAbort)
+      this.#activeOpenPlatformWindows.delete(window)
+      if (!window.isDestroyed()) window.destroy()
+    }
   }
 
   async showRegistrationConfirmation(input: {
@@ -507,6 +600,24 @@ async function readDeveloperIdentity(
   }
 }
 
+async function readOpenPlatformBootstrap(
+  window: BrowserWindow
+): Promise<OpenPlatformBootstrap> {
+  return await window.webContents.executeJavaScript(
+    `(() => {
+      const user = window.user ?? {}
+      const apiOrigin = window.outDomain?.larkOpen ?? window.location?.origin ?? ''
+      return {
+        csrfToken: typeof window.csrfToken === 'string' ? window.csrfToken : '',
+        apiOrigin: typeof apiOrigin === 'string' ? apiOrigin : '',
+        userId: typeof user.id === 'string' ? user.id : '',
+        tenantId: typeof user.tenantId === 'string' ? user.tenantId : ''
+      }
+    })()`,
+    true
+  ) as OpenPlatformBootstrap
+}
+
 async function qrCanvasBounds(window: BrowserWindow): Promise<{
   x: number
   y: number
@@ -608,6 +719,46 @@ function portalUrlForBrand(brand: 'feishu' | 'lark'): string {
   return brand === 'lark'
     ? 'https://open.larksuite.com/app'
     : FEISHU_PORTAL_URL
+}
+
+function requireOpenPlatformOrigin(
+  value: unknown,
+  brand: 'feishu' | 'lark'
+): string {
+  const expected = brand === 'lark'
+    ? 'https://open.larksuite.com'
+    : 'https://open.feishu.cn'
+  let url: URL
+  try {
+    url = new URL(String(value ?? ''))
+  } catch {
+    throw sessionError('feishu_open_platform_origin_rejected')
+  }
+  if (
+    url.origin !== expected
+    || url.pathname !== '/'
+    || url.search !== ''
+    || url.hash !== ''
+    || url.username !== ''
+    || url.password !== ''
+  ) throw sessionError('feishu_open_platform_origin_rejected')
+  return expected
+}
+
+function requireOpenPlatformApiUrl(value: string, apiOrigin: string): string {
+  let url: URL
+  try {
+    url = new URL(value, apiOrigin)
+  } catch {
+    throw sessionError('feishu_open_platform_api_url_rejected')
+  }
+  if (
+    url.origin !== apiOrigin
+    || !url.pathname.startsWith('/developers/')
+    || url.username !== ''
+    || url.password !== ''
+  ) throw sessionError('feishu_open_platform_api_url_rejected')
+  return url.toString()
 }
 
 function requireRegistrationUrl(value: string): string {

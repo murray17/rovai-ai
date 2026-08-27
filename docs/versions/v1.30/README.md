@@ -12,8 +12,9 @@ last_updated: 2026-08-27
 # Rovai-ai v1.30：飞书队员 Bot 与 Camp 渠道
 
 > 当前状态：Core、Migration、Electron Host、Renderer 与本地自动化已完成账号/发布生命周期纠偏。连接只建立
-> Developer Web Session；普通发布复用该 Session，不向 Renderer 显示二维码；`registerApp` 仅为显式兼容路径。
-> 真实飞书租户的“连接不增 App、连续发布不扫码”仍是发布环境验收项，不由本地自动化代替。
+> Developer Web Session；普通发布经同一 Session 直连开放平台 console API，不显示二维码或飞书创建确认页；旧
+> application registration 协议仅为显式兼容路径。真实飞书租户的“连接不增 App、普通发布不弹确认页”仍是发布
+> 环境验收项，不由本地自动化代替。
 
 前置版本：[v1.29 Camp 动态队员管理](../v1.29/README.md)已按完成事实转为 historical。
 
@@ -34,9 +35,11 @@ last_updated: 2026-08-27
   Camp 创建时解析并冻结既有 workspace kind/path；
 - 未绑定消息只记录本地待绑定会话与 TTL transport facts，不建立 Principal、CampMessage、CampTurn 或 Run；绑定
   不回放旧消息，发送者必须重新发送；
-- Feishu Host 用独立 Web Session 登录并展示真实 user/tenant；普通队员发布复用该 Session 的官方确认页，显式兼容
-  模式才调用 `registerApp` 二维码。Session Cookie 与独立 App credential 分开加密，账号切换/断开不迁移、停用或
-  删除已发布 Bot，单连接故障隔离，重启恢复 published Bot 与 publication intent；
+- Feishu Host 用独立 Web Session 登录并展示真实 user/tenant；普通队员发布从同一 Electron Session 取得 console
+  bootstrap，经 `OpenPlatformApiClient` 创建应用、读取 Secret、启用 Bot、配置 scopes/events/callback WebSocket、
+  创建/发布版本并回读验证。旧 registration/确认/poll 只在显式兼容模式使用。Session Cookie 与独立 App credential
+  分开加密，账号切换/断开不迁移、停用或删除已发布 Bot，单连接故障隔离，重启恢复 published Bot 与 publication
+  intent；
 - 私聊按 receiving App 隔离；普通群一个 Camp；话题按 canonical topic 一个 Camp。群/话题只有显式 mention
   published managed Bot 才进入 Core；
 - 同一 external message 的第一条 observation 只进入 collecting；canonical mentions 完整或全部预期 App 到齐后
@@ -60,9 +63,10 @@ last_updated: 2026-08-27
 - 不让同一 Camp 多个根 CampTurn 并行，不从自由文本/普通 reply 推断 continuation；
 - 不同步未 mention 群历史，不让 Bot 回推触发 A2A；
 - 不自动删除飞书开放平台应用；停用只关闭 Rovai 绑定与本地 credential；
-- 不调用未公开的开放平台后台 Cookie/CSRF 创建接口；Developer Session Adapter 只负责登录、身份读取和加载官方
-  确认页，页面结构变化仍需真实租户回归；
-- 官方注册确认只接受确认页可访问的头像 URL；Rovai 本地受控头像不上传到公网，实际头像由主人在飞书确认页确认；
+- 不把开放平台 console API 声称为公开稳定合同；页面 bootstrap 或 endpoint 变化必须在隔离 client 中 fail closed，
+  不得静默回退到确认页或第二条创建路径；
+- 普通发布只上传打包内受控 Rovai App icon，不声称把本机成员头像上传到飞书；兼容 avatar preset 仍只接受确认页
+  可访问的 URL；
 - 当前消息附件一期只冻结名称/类型摘要，不下载为 Camp Attachment；公开输出附件也不回传图片/文件，Outbox
   只发送状态卡、文本和卡片；
 - Core 没有权威公开 delta 时，飞书只显示处理中与最终已提交 CampMessage，不转发 Runtime 原始 stdout/推理。
@@ -77,9 +81,9 @@ ExternalQuote 的确定性 agent projection。Bootstrap、Session Charter、sect
 ## 验收
 
 实施与证据由[实施计划](implementation-plan.md)维护。仓库内完成门槛包括 v112→v114 升级、Developer Identity/
-publication intent、连接不注册 App、正常发布不产生 QR、identity drift/unknown remote fail-closed、owner-only/未绑定负向、
+publication intent、连接不注册 App、正常发布不产生 QR/飞书确认页、console 配置与回读、identity drift/unknown remote fail-closed、owner-only/未绑定负向、
 multi-Bot fail-closed、FIFO promotion、普通群/话题 roster、ExternalQuote/Context bytes、safeStorage/Renderer
-秘密隔离、Host 恢复、双主题和完整 Rust/TypeScript/文档/构建门禁。真实飞书租户登录、应用创建、连续免扫码发布
+秘密隔离、Host 恢复、双主题和完整 Rust/TypeScript/文档/构建门禁。真实飞书租户登录、应用创建、无平台确认发布
 和收发仍需要拥有可用企业权限的主人在发布环境执行，自动化不伪造外部成功。
 
 ## 跨版本文档影响

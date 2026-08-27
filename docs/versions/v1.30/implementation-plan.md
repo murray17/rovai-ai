@@ -17,14 +17,15 @@ last_updated: 2026-08-27
 - [x] 完成 owner-only ProjectBinding、会话 bind/switch、Camp workspace freeze 与未绑定 resend 边界；
 - [x] 删除 controller App 账号模型；完成 Developer Web Session、真实 user/tenant 回读、safeStorage Cookie jar、
   identity drift/expiry fail-closed 与断开不删除 Bot credential；
-- [x] 完成 Web Session MemberBotProvisioner、普通发布无 Renderer QR、显式 `registerApp` 兼容模式、持久
-  publication intent、unknown remote 防重复和多 WebSocket Host/启动恢复；
+- [x] 完成 Web Session MemberBotProvisioner、Session cookie/CSRF console bootstrap、OpenPlatformApiClient 创建/
+  配置/发布/回读、普通发布无 Renderer QR/飞书确认页、独立 Compat Provisioner、持久 publication intent、
+  unknown remote 防重复和多 WebSocket Host/启动恢复；
 - [x] 完成 p2p/group/topic identity、显式 mention gate、多 Bot collecting/finalize/timeout/mismatch；
 - [x] 完成 ChannelTurnRequest 单根 FIFO、统一原子 admission、永久失败/Runtime deferred 与 queue card 更新；
 - [x] 完成 ExternalQuote structured segment、`replyTo=null`、ExternalPrincipal source 与 CURRENT_INPUT v22；
 - [x] 完成父群 authoritative roster、普通群完整 membership、话题按需 membership 与 disable reconciliation；
 - [x] 完成 ChannelDelivery Outbox、实际作者 Bot、原生 Principal mention、lease/retry/attention 和恢复；
-- [x] 完成 Preload/Renderer typed API、真实账号投影、账号/兼容 QR purpose、普通 Provisioning Dialog 与
+- [x] 完成 Preload/Renderer typed API、真实账号投影、账号 QR/兼容确认边界、普通 Provisioning Dialog 与
   Rovai 双主题 Bot/Project/Conversation surface；
 - [x] 完成当前 Architecture、Contracts、UI、Version Decision、Context change 与导航；
 - [x] 运行完整 Rust、TypeScript、文档、Clippy、Desktop build 与 Migration 门禁；
@@ -39,7 +40,8 @@ last_updated: 2026-08-27
 - 飞书 reply 只形成当前消息的 ExternalQuote，不产生内部 reply 或第二条 CampMessage；
 - 普通群 roster 与话题按需扩张都复用 Camp Membership v1 exact source generation；
 - Secret 与 raw Feishu identity 不进入 Renderer/Agent；公开输出只来自 Core 已提交内容；
-- 连接不调用 `registerApp` 或写入 App credential；普通发布不产生 QR，兼容模式只能显式选择；
+- 连接不调用任何 App 创建接口或写入 App credential；普通发布不产生 QR/飞书确认页，registration 兼容模式只能
+  显式选择；
 - identity 漂移、Session 失效与未知远端状态全部 fail closed，不能静默创建第二个 App；
 - 自动化只证明本地状态机和网络边界，不把未执行的真实租户外部效果写成通过。
 
@@ -70,5 +72,6 @@ last_updated: 2026-08-27
   保持 fail closed；
 - Renderer snapshot 与 Preload 不包含 Secret、credential ref、transport conversation 或 pending aggregate。
 
-真实飞书租户的“连接前后 App 数量不变、连续发布两名队员均不重新扫码、Session 失效不建未知 App、切换账号后旧
-Bot 继续运行”和消息收发属于发布环境验收，仍需主人持有可用企业权限；本地自动化没有把这些外部效果伪造为通过。
+真实飞书租户的“连接前后 App 数量不变、普通发布只展示 Rovai 进度且不出现飞书创建确认页、连续发布两名队员均不
+重新扫码、Session 失效不建未知 App、切换账号后旧 Bot 继续运行”和消息收发属于发布环境验收，仍需主人持有可用
+企业权限；本地自动化没有把这些外部效果伪造为通过。

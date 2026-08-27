@@ -164,25 +164,34 @@ Main/Core/Renderer 的秘密和 Outbox 分工。当前规范见 [飞书渠道架
 - **直接转发 Runtime stream：** 可能泄漏推理/工具输出且没有公共消息 authority。
 
 <a id="v1-30-d06"></a>
-## V1.30-D06：Developer Session 与队员 App credential 分离，普通发布复用账号会话
+## V1.30-D06：Developer Session 与队员 App credential 分离，普通发布直连开放平台控制台
 
 ### 背景
 
-把 `registerApp` 创建出的“Rovai 渠道管理”App 当成账号连接，会把 App credential 误当 Developer Identity；连接
-本身会意外新增远端应用，用户名/企业只能写占位值，而每名队员发布仍要重新扫码。另一方面，直接调用开放平台后台
-私有 CSRF 接口虽能隐藏交互，却没有稳定公开合同。
+把应用注册结果当成账号连接，会把 App credential 误当 Developer Identity；连接本身会意外新增远端应用，用户名/
+企业只能写占位值，而每名队员发布仍要重新扫码。继续把官方 application registration begin/poll 当作普通发布，虽能
+复用已登录 Session，却仍会打开飞书“创建飞书智能体应用 / 立即创建”确认页，无法形成 Rovai 自己拥有的连续发布
+体验。开放平台 console API 与页面 CSRF 又是版本敏感、未公开稳定合同，需要明确隔离而不能扩散到业务层。
 
 ### 决定
 
 连接只建立独立 Developer Web Session，读取真实 `userId + userName + tenantId + tenantName + brand`，并用
 `safeStorage` 加密 Cookie jar；不创建 App、Secret 或 Bot。Core account 使用本地不透明 identity ID 与 digest。
 
-普通发布由 `FeishuMemberBotProvisioner` 复核原始 user/tenant，调用官方应用注册 begin/poll 协议，并把官方确认 URL
-加载到同一已登录 Session。正常路径不调用 SDK `registerApp`、不向 Renderer 产生二维码；若页面跳回登录或身份
-漂移则 fail closed。SDK `registerApp` 只保留为主人明确选择的逐队员兼容扫码流程，不得成为静默 fallback。
-官方当前 begin 确认入口是 `open.feishu.cn | open.larksuite.com` 的精确 `/page/launcher` 路径，官方 CLI 另有
-`/page/cli` 兼容入口；二者都不是 accounts 登录路径。Main 以 exact origin/path 和非空 `user_code` 做导航准入。
-本地 URL 拒绝发生在确认和创建之前，必须保持可重试，不能触发未知远端状态锁。
+普通发布由 `FeishuWebSessionMemberBotProvisioner` 先复核原始 user/tenant，再从同一 Electron Session 读取 Cookie
+jar、加载开放平台页取得 CSRF 与 exact API origin。`OpenPlatformApiClient` 使用该 Session 的 Chromium fetch，依次
+创建 App、读取 Secret、启用 Bot、分步配置 scopes/events/callback WebSocket、创建并发布版本，最后回读 manifest 和
+version status。Cookie、CSRF、Secret 不离开 Main；origin/path、响应 shape 与 read-back verification 全部 fail
+closed。正常路径不调用 application registration endpoint，不打开飞书确认页，也不向 Renderer 产生二维码。
+
+该 console Adapter 明确接受上游内部协议可能变化的代价：实现集中在一个 typed client，只有精确 Feishu/Lark
+origin 与 `/developers/` 路径可达，协议变化只产生可诊断失败；不得静默降级为另一条创建路径。真实租户回归负责证明
+当前上游页面与 API 仍兼容，仓库测试只证明本地请求顺序、秘密边界、回读和恢复状态机。
+
+旧的 `/oauth/v1/app/registration + verification_uri_complete + showRegistrationConfirmation + pollRegistration`
+整体移入 `FeishuCompatMemberBotProvisioner`，只服务主人明确选择的兼容模式。兼容确认入口继续只接受
+`open.feishu.cn | open.larksuite.com` 的精确 `/page/launcher | /page/cli` 与非空 `user_code`，不得成为普通失败的
+fallback。
 
 每次创建前写持久 `MemberBotPublicationIntent`；远端结果未知时锁定自动重试，已冻结 App ID/credential ref 不可换成
 第二个 App。当前规范见[飞书渠道架构](../../architecture/feishu-channel.md#开发者会话与队员发布)、
@@ -193,13 +202,15 @@ Main/Core/Renderer 的秘密和 Outbox 分工。当前规范见 [飞书渠道架
 
 - 一次账号登录可服务多个队员发布；连接与发布是两个独立生命周期；
 - 真实 identity 能在切换/失效时做 exact user/tenant 检查，Renderer 不再显示假 owner/tenant；
-- 正常发布仍需要主人在官方确认窗口核对，但不会要求再次扫码；
-- Web 页面身份读取是版本敏感的可替换 Adapter，真实租户效果必须独立验收，不能由本地测试声明成功。
+- 正常发布只展示 Rovai 的账号校验、创建、配置、发布、验证和完成进度，不出现飞书创建确认页；
+- Web 页面身份/bootstrap 与 console API 是版本敏感的可替换 Adapter，真实租户效果必须独立验收，不能由本地测试
+  声明成功。
 
 ### 被拒绝方案
 
 - **保留或改名 controller App：** 它既不是账号 Session，也没有渠道运行职责；
-- **连接/发布共用 `registerApp`：** 会把每次应用注册误投影为账号授权；
+- **连接/发布共用 application registration：** 会把每次应用注册误投影为账号授权，并让普通发布进入平台确认页；
 - **普通失败后自动弹兼容二维码：** 改变用户选择，并可能在未知远端状态下重复建 App；
-- **调用开发者后台私有 Cookie/CSRF 创建接口：** 页面内部接口变化和 CSRF 无法形成可维护合同；
+- **把 console endpoint 散落在 ChannelSettings/Renderer：** 扩大 Cookie/CSRF 暴露面，且无法统一做同源准入、响应校验
+  和回读；
 - **用占位 identity 标记 connected：** 无法证明发布发生在预期 user/tenant。

@@ -18,10 +18,12 @@ last_updated: 2026-08-27
 Renderer 渠道设置
   └─ typed Preload API
        └─ Electron Main / Feishu Channel Host
-          ├─ Developer Session Adapter：开放平台登录、身份回读、加密 Cookie jar
-          ├─ Member Bot Provisioner：身份复核、应用确认与发布状态机
+          ├─ Developer Session Adapter：开放平台登录、身份回读、加密 Cookie jar、控制台 bootstrap
+          ├─ OpenPlatformApiClient：同源控制台创建、配置、发布与回读
+          ├─ Member Bot Provisioner：身份复核与发布状态机
           ├─ OS safeStorage：每 Agent App Secret
-          ├─ 显式兼容注册二维码与每 App WebSocket
+          ├─ Compat Provisioner：显式兼容注册确认
+          ├─ 每 App WebSocket
           ├─ 入站规范化、群 Bot roster 观测
           └─ 领取并发送 Core ChannelDelivery
                          │
@@ -55,23 +57,30 @@ ready 前把应用名切换为 `Rovai AI Isolated <userData 摘要>`，从而与
 Keychain 命名空间；摘要不暴露原始路径，非隔离 App 继续使用原应用名以保持既有密文可读。
 
 普通队员发布先创建持久 `MemberBotPublicationIntent`，再要求当前 Web Session 仍属于 intent 冻结的
-`userId + tenantId`。`MemberBotProvisioner` 使用官方应用注册协议的 begin/poll，并在同一已登录 Electron Session
-中打开官方确认页；因此正常路径不向 Renderer 产生二维码。平台确认成功后，官方 preset/addons 一次提交 Bot、
-最小权限与事件，Main 保存独立 credential、验证 WebSocket，再完成 intent。确认页若跳回登录、身份漂移或 Session
-失效，流程 fail closed，并要求主人重新连接。
-确认页入口只接受官方精确 origin 上的注册路径：线上 begin 响应使用 `/page/launcher`，官方 CLI 兼容入口使用
-`/page/cli`；飞书 origin 为 `https://open.feishu.cn`，Lark 为 `https://open.larksuite.com`，并要求非空
-`user_code`。相似域名、非 HTTPS、用户信息、端口和其他路径均在导航前拒绝。该本地拒绝发生在主人确认和远端 App
-创建之前，因此只记为 recoverable local failure，不能误报 `failed_unknown_remote_state`。
+`userId + tenantId`。`FeishuWebSessionMemberBotProvisioner` 从同一 Electron Session 的 Cookie jar 加载开放平台页，
+只在 Main 中读取 `csrfToken + apiOrigin`；后续请求使用该 Session 的 Chromium 网络栈和 Cookie policy，不组装、记录或
+返回 Cookie header。`apiOrigin` 必须精确匹配当前 brand 的 `https://open.feishu.cn | https://open.larksuite.com`，API
+路径只允许 `/developers/`，相似域、跨源 URL 和页面身份漂移均在创建前拒绝。
 
-SDK `registerApp` 只由主人显式选择“兼容扫码发布”时调用；正常失败不得静默切换。兼容流程不覆盖 Developer
-Identity。创建结果不确定、或已取得远端 App ID 但凭据尚未安全提交时，intent 进入
+`OpenPlatformApiClient` 按顺序上传受控 App icon、创建自建应用、读取 App Secret、启用 Bot、配置 tenant scopes、
+receive/roster events、callback 与 event WebSocket mode，创建并发布 `1.0.0` 版本，再回读 manifest 与 version status。
+scopes、events 和 callbacks 使用开放平台当前 manifest console API 分步写入；每一步保留服务端已有字段并在最终回读中
+证明必需集合、Bot enable、两类 WebSocket mode 与 published status。完成后 Main 才把独立 credential 写入
+safeStorage、验证 Bot WebSocket 并完成 intent。普通流程始终保持隐藏窗口，不打开飞书“创建飞书智能体应用 /
+立即创建”确认页，也不向 Renderer 产生二维码。
+
+开放平台 console API 和页面 bootstrap 是版本敏感、未公开稳定合同的 Adapter 边界。它被限制在独立 client 中，使用
+exact origin/path、严格响应结构、秘密不出 Main、创建后 read-back verification 和 fail-closed error mapping；页面或
+协议变化不得降级为确认页、SDK 注册或另一条静默创建路径。真实租户仍须回归“连接不增 App、普通发布不弹平台确认、
+配置完整且能建立长连接”。
+
+`/oauth/v1/app/registration + verification_uri_complete + showRegistrationConfirmation + pollRegistration` 整体只属于
+`FeishuCompatMemberBotProvisioner`，由主人显式选择兼容模式时使用。兼容确认入口只接受官方精确 origin 上的
+`/page/launcher | /page/cli` 与非空 `user_code`；相似域名、非 HTTPS、用户信息、端口和其他路径均在导航前拒绝。
+正常失败不得自动进入兼容流程，兼容流程也不覆盖 Developer Identity。创建结果不确定、或已取得远端 App ID 但凭据
+尚未安全提交时，intent 进入
 `failed_unknown_remote_state`，自动重试被锁住，避免重复创建 App。Main 启动时只从持久 intent 判断可恢复/待人工核对，
 不从 Renderer 状态推断。
-
-Developer Session Adapter 依赖开放平台 Web 登录页和公开页面身份对象，是可替换、版本敏感的边界；它不调用开发者
-后台私有 CSRF 创建接口。仓库自动化只验证 fail-closed 状态机、秘密隔离和协议拼装，真实租户的“连接不增 App、
-连续发布不扫码”必须另行验收，不能由本地测试冒充。
 
 ## 项目与会话
 

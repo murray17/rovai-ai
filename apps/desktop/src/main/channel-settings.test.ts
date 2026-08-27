@@ -9,6 +9,7 @@ import type {
   FeishuAppCredential
 } from './channel-credential-store'
 import type { FeishuDeveloperIdentity } from './feishu-developer-session'
+import type { FeishuMemberBotProvisioner } from './feishu-member-bot-provisioner'
 
 function channelCore(
   handler: (method: string, params: unknown) => unknown | Promise<unknown>
@@ -200,7 +201,8 @@ describe('channel settings service', () => {
 
   it('connects a real developer identity without registering an app or storing a controller secret', async () => {
     const credentialStore = memoryCredentialStore()
-    const registerAppCompat = vi.fn()
+    const provision = vi.fn()
+    const compatProvision = vi.fn()
     const beginLogin = vi.fn(async () => ({
       brand: 'feishu' as const,
       userId: 'owner-user-id',
@@ -212,7 +214,8 @@ describe('channel settings service', () => {
     const commands: Array<{ method: string; params: unknown }> = []
     const service = new ChannelSettingsService({
       credentialStore,
-      registerAppCompat: registerAppCompat as unknown as NonNullable<ChannelHostDependencies['registerAppCompat']>,
+      memberBotProvisioner: { create: provision },
+      compatMemberBotProvisioner: { create: compatProvision },
       developerSession: {
         beginLogin,
         async inspect() { return null },
@@ -229,7 +232,8 @@ describe('channel settings service', () => {
     await service.connect()
 
     expect(beginLogin).toHaveBeenCalledWith(expect.objectContaining({ forceFresh: true }))
-    expect(registerAppCompat).not.toHaveBeenCalled()
+    expect(provision).not.toHaveBeenCalled()
+    expect(compatProvision).not.toHaveBeenCalled()
     expect(credentialStore.values.size).toBe(0)
     const upsert = commands.find((entry) => entry.method === 'channels.feishu.account.upsert')
     expect(upsert).toBeDefined()
@@ -250,15 +254,17 @@ describe('channel settings service', () => {
       botDisplayName: '审阅员',
       publishedVersionId: null
     }))
-    const registerAppCompat = vi.fn(async () => ({
-      client_id: 'cli-compat',
-      client_secret: 'compat-secret'
+    const compatProvision = vi.fn(async () => ({
+      appId: 'cli-compat',
+      appSecret: 'compat-secret',
+      botDisplayName: '审阅员',
+      publishedVersionId: null
     }))
     const service = new ChannelSettingsService({
       credentialStore,
       developerSession: developerSession(owner),
       memberBotProvisioner: { create: provision },
-      registerAppCompat: registerAppCompat as unknown as NonNullable<ChannelHostDependencies['registerAppCompat']>,
+      compatMemberBotProvisioner: { create: compatProvision },
       createChannel: fakeCreateChannel(),
       core: channelCore((method) => {
         if (method === 'channels.feishu.snapshot') {
@@ -275,7 +281,7 @@ describe('channel settings service', () => {
     expect(provision).toHaveBeenCalledWith(expect.objectContaining({
       expectedDeveloperIdentity: { userId: owner.userId, tenantId: owner.tenantId }
     }))
-    expect(registerAppCompat).not.toHaveBeenCalled()
+    expect(compatProvision).not.toHaveBeenCalled()
     expect(normal.activeQrAttempt).toBeNull()
     expect(normal.activeProvisioning).toMatchObject({
       agentId: 'agent-a',
@@ -289,19 +295,19 @@ describe('channel settings service', () => {
 
     await service.publishMemberBotCompat('agent-a')
 
-    expect(registerAppCompat).toHaveBeenCalledTimes(1)
+    expect(compatProvision).toHaveBeenCalledTimes(1)
     expect(provision).toHaveBeenCalledTimes(1)
   })
 
   it('fails closed on developer identity drift without creating or compat-registering an app', async () => {
     const owner = identity()
     const provision = vi.fn()
-    const registerAppCompat = vi.fn()
+    const compatProvision = vi.fn()
     const service = new ChannelSettingsService({
       credentialStore: memoryCredentialStore(),
       developerSession: developerSession(identity({ userId: 'different-owner' })),
       memberBotProvisioner: { create: provision },
-      registerAppCompat: registerAppCompat as unknown as NonNullable<ChannelHostDependencies['registerAppCompat']>,
+      compatMemberBotProvisioner: { create: compatProvision },
       core: channelCore((method) => {
         if (method === 'channels.feishu.snapshot') {
           return coreSnapshot({ account: connectedAccount(owner) })
@@ -313,7 +319,7 @@ describe('channel settings service', () => {
     await expect(service.publishMemberBot('agent-a')).rejects.toThrow('账号已变化')
 
     expect(provision).not.toHaveBeenCalled()
-    expect(registerAppCompat).not.toHaveBeenCalled()
+    expect(compatProvision).not.toHaveBeenCalled()
   })
 
   it('does not persist a placeholder account when login cannot produce a complete identity', async () => {
@@ -366,14 +372,14 @@ describe('channel settings service', () => {
   it('does not silently use compatibility registration when the developer session has expired', async () => {
     const owner = identity()
     const provision = vi.fn()
-    const registerAppCompat = vi.fn()
+    const compatProvision = vi.fn()
     const expiredSession = developerSession(owner)
     expiredSession.inspect.mockResolvedValue(null)
     const service = new ChannelSettingsService({
       credentialStore: memoryCredentialStore(),
       developerSession: expiredSession,
       memberBotProvisioner: { create: provision },
-      registerAppCompat: registerAppCompat as unknown as NonNullable<ChannelHostDependencies['registerAppCompat']>,
+      compatMemberBotProvisioner: { create: compatProvision },
       core: channelCore((method) => {
         if (method === 'channels.feishu.snapshot') return coreSnapshot({ account: connectedAccount(owner) })
         return { status: 'applied' }
@@ -383,7 +389,7 @@ describe('channel settings service', () => {
     await expect(service.publishMemberBot('agent-a')).rejects.toThrow('登录已过期')
 
     expect(provision).not.toHaveBeenCalled()
-    expect(registerAppCompat).not.toHaveBeenCalled()
+    expect(compatProvision).not.toHaveBeenCalled()
   })
 
   it('disconnects only the developer session and preserves member Bot credentials', async () => {
@@ -506,7 +512,12 @@ describe('channel settings service', () => {
       code: 'registration_transport_lost',
       remoteState: 'unknown' as const
     })
-    const provision = vi.fn(async () => { throw unknownError })
+    const provision = vi.fn(async (
+      input: Parameters<FeishuMemberBotProvisioner['create']>[0]
+    ) => {
+      input.onProgress?.('app_created', 'cli-unknown')
+      throw unknownError
+    })
     let publicationIntent: Record<string, unknown> | null = null
     let createCount = 0
     const service = new ChannelSettingsService({
@@ -552,6 +563,9 @@ describe('channel settings service', () => {
 
     expect(provision).toHaveBeenCalledTimes(1)
     expect(createCount).toBe(1)
-    expect(publicationIntent).toMatchObject({ state: 'failed_unknown_remote_state' })
+    expect(publicationIntent).toMatchObject({
+      state: 'failed_unknown_remote_state',
+      remoteAppId: 'cli-unknown'
+    })
   })
 })

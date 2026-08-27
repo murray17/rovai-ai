@@ -8,6 +8,8 @@ let currentUrl = 'about:blank'
 let loadUrlCount = 0
 let encryptionAvailable = true
 let encryptionCheckCount = 0
+let portalLoadsAuthenticated = false
+let portalApiOrigin = 'https://open.feishu.cn'
 let portalIdentity: Record<string, string> = {
   id: 'developer-user-1',
   name: 'Murray',
@@ -28,6 +30,14 @@ class FakeWebContents extends EventEmitter {
   setWindowOpenHandler(): void {}
 
   async executeJavaScript(source: string): Promise<unknown> {
+    if (source.includes('window.csrfToken')) {
+      return {
+        csrfToken: 'csrf-fixture',
+        apiOrigin: portalApiOrigin,
+        userId: portalIdentity.id,
+        tenantId: portalIdentity.tenantId
+      }
+    }
     if (source.includes('window.user')) {
       return portalIdentity
     }
@@ -55,6 +65,10 @@ class FakeBrowserWindow extends EventEmitter {
       currentUrl = url
       return
     }
+    if (portalLoadsAuthenticated && url.startsWith('https://open.feishu.cn/app')) {
+      currentUrl = url
+      return
+    }
     currentUrl = 'https://accounts.feishu.cn/accounts/page/login?app_id=7'
     const error = Object.assign(new Error('ERR_ABORTED (-3) loading login redirect'), {
       code: 'ERR_ABORTED',
@@ -79,9 +93,22 @@ class FakeBrowserWindow extends EventEmitter {
 const browserSession = {
   clearStorageData: vi.fn(async () => undefined),
   cookies: {
-    get: vi.fn(async () => []),
+    get: vi.fn(async () => [{
+      name: 'session',
+      value: 'private-cookie-fixture',
+      domain: '.feishu.cn',
+      path: '/',
+      secure: true,
+      httpOnly: true,
+      sameSite: 'lax',
+      session: true
+    }]),
     set: vi.fn(async () => undefined)
-  }
+  },
+  fetch: vi.fn(async () => new Response(JSON.stringify({ code: 0, data: {} }), {
+    status: 200,
+    headers: { 'content-type': 'application/json' }
+  }))
 }
 
 const temporaryRoots: string[] = []
@@ -113,6 +140,8 @@ beforeEach(() => {
   loadUrlCount = 0
   encryptionAvailable = true
   encryptionCheckCount = 0
+  portalLoadsAuthenticated = false
+  portalApiOrigin = 'https://open.feishu.cn'
   portalIdentity = {
     id: 'developer-user-1',
     name: 'Murray',
@@ -123,6 +152,7 @@ beforeEach(() => {
   browserSession.clearStorageData.mockClear()
   browserSession.cookies.get.mockClear()
   browserSession.cookies.set.mockClear()
+  browserSession.fetch.mockClear()
 })
 
 afterEach(() => {
@@ -256,4 +286,60 @@ describe('Feishu developer session login', () => {
       await login.catch(() => undefined)
     }
   })
+
+  it('bootstraps CSRF and console fetch from the authenticated Electron Session without exposing cookies', async () => {
+    const { ElectronFeishuDeveloperSessionService } = await import('./feishu-developer-session')
+    const root = mkdtempSync(join(tmpdir(), 'rovai-feishu-session-'))
+    temporaryRoots.push(root)
+    const service = new ElectronFeishuDeveloperSessionService(root)
+    await connectDeveloperSession(service)
+    portalLoadsAuthenticated = true
+
+    const platform = await service.openPlatformSession({
+      expectedIdentity: { userId: 'developer-user-1', tenantId: 'tenant-1' }
+    })
+    await platform.fetch('https://open.feishu.cn/developers/v1/app/create', {
+      method: 'POST'
+    })
+
+    expect(platform).toMatchObject({
+      brand: 'feishu',
+      apiOrigin: 'https://open.feishu.cn',
+      csrfToken: 'csrf-fixture'
+    })
+    expect(browserSession.cookies.get).toHaveBeenCalledWith({
+      url: 'https://open.feishu.cn/app?lang=zh-CN'
+    })
+    expect(browserSession.fetch).toHaveBeenCalledWith(
+      'https://open.feishu.cn/developers/v1/app/create',
+      expect.objectContaining({ method: 'POST', credentials: 'include' })
+    )
+    expect(JSON.stringify(browserSession.fetch.mock.calls)).not.toContain('private-cookie-fixture')
+  })
+
+  it('rejects a console api origin that does not match the signed-in brand', async () => {
+    const { ElectronFeishuDeveloperSessionService } = await import('./feishu-developer-session')
+    const root = mkdtempSync(join(tmpdir(), 'rovai-feishu-session-'))
+    temporaryRoots.push(root)
+    const service = new ElectronFeishuDeveloperSessionService(root)
+    await connectDeveloperSession(service)
+    portalLoadsAuthenticated = true
+    portalApiOrigin = 'https://open.feishu.cn.evil.example'
+
+    await expect(service.openPlatformSession({
+      expectedIdentity: { userId: 'developer-user-1', tenantId: 'tenant-1' }
+    })).rejects.toThrow('feishu_open_platform_origin_rejected')
+
+    expect(browserSession.fetch).not.toHaveBeenCalled()
+  })
 })
+
+async function connectDeveloperSession(
+  service: { beginLogin(): Promise<unknown> }
+): Promise<void> {
+  const login = service.beginLogin()
+  await vi.waitFor(() => expect(currentUrl).toContain('accounts.feishu.cn'))
+  currentUrl = 'https://open.feishu.cn/app?lang=zh-CN'
+  await vi.advanceTimersByTimeAsync(501)
+  await login
+}

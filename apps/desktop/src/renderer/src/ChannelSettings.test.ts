@@ -39,7 +39,7 @@ describe('Channel settings', () => {
     expect(markup.match(/class="channel-member-bot-grid channel-member-bot-row"/g)).toHaveLength(2)
     expect(markup.indexOf('队员 agent-a')).toBeLessThan(markup.indexOf('队员 agent-b'))
     expect(markup).toContain('0 已发布 · 2 未发布')
-    expect(markup).toContain('名称沿用队员；头像在飞书确认')
+    expect(markup).toContain('名称沿用队员；应用图标由 Rovai 配置')
     expect(markup).not.toContain('默认沿用队员名称与头像')
     expect(markup).toContain('disabled="" title="飞书渠道宿主尚未接入"')
     expect(markup).toContain('>等待连接</button>')

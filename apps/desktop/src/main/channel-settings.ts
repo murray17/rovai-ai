@@ -2,12 +2,10 @@ import { createHash, randomUUID } from 'node:crypto'
 import {
   createLarkChannel,
   LarkChannelError,
-  registerApp,
   type BotAddedEvent,
   type LarkChannel,
   type NormalizedMessage
 } from '@larksuiteoapi/node-sdk'
-import QRCode from 'qrcode'
 import type {
   AgentProfile,
   ChannelConversationBindingView,
@@ -27,7 +25,6 @@ import type {
   FeishuLoginStage
 } from './feishu-developer-session'
 import {
-  FEISHU_MEMBER_BOT_ADDONS,
   UnavailableFeishuDeveloperSessionService,
   UnavailableFeishuMemberBotProvisioner,
   isUnknownRemoteProvisioningError,
@@ -125,7 +122,6 @@ type ClaimedChannelDelivery = {
   recipientOpenId?: string | null
 }
 
-type RegisterApp = typeof registerApp
 type CreateChannel = typeof createLarkChannel
 
 export interface ChannelHostDependencies {
@@ -133,7 +129,7 @@ export interface ChannelHostDependencies {
   credentialStore: ChannelCredentialStore
   developerSession?: FeishuDeveloperSessionService
   memberBotProvisioner?: FeishuMemberBotProvisioner
-  registerAppCompat?: RegisterApp
+  compatMemberBotProvisioner?: FeishuMemberBotProvisioner
   createChannel?: CreateChannel
   now?: () => number
   setInterval?: typeof globalThis.setInterval
@@ -172,7 +168,7 @@ export class ChannelSettingsService {
   readonly #dependencies: ChannelHostDependencies | null
   readonly #developerSession: FeishuDeveloperSessionService
   readonly #memberBotProvisioner: FeishuMemberBotProvisioner
-  readonly #registerAppCompat: RegisterApp
+  readonly #compatMemberBotProvisioner: FeishuMemberBotProvisioner
   readonly #createChannel: CreateChannel
   readonly #now: () => number
   readonly #listeners = new Set<(snapshot: ChannelSettingsSnapshot) => void>()
@@ -199,7 +195,8 @@ export class ChannelSettingsService {
       ?? new UnavailableFeishuDeveloperSessionService()
     this.#memberBotProvisioner = dependencies?.memberBotProvisioner
       ?? new UnavailableFeishuMemberBotProvisioner()
-    this.#registerAppCompat = dependencies?.registerAppCompat ?? registerApp
+    this.#compatMemberBotProvisioner = dependencies?.compatMemberBotProvisioner
+      ?? new UnavailableFeishuMemberBotProvisioner()
     this.#createChannel = dependencies?.createChannel ?? createLarkChannel
     this.#now = dependencies?.now ?? Date.now
   }
@@ -540,7 +537,7 @@ export class ChannelSettingsService {
       publicationIntentId,
       agentId,
       stage: 'verifying_session',
-      detail: '正在校验飞书账号…',
+      detail: '正在确认当前开发者会话与发布账号一致。',
       remoteAppId: null,
       failureCode: null
     }
@@ -556,7 +553,6 @@ export class ChannelSettingsService {
       let credential: FeishuAppCredential
       let botDisplayName = agent.displayName
       if (mode === 'developer_session') {
-        this.#setProvisioningProgress('creating_app', '请在飞书确认窗口核对并确认创建应用。')
         const provisioned = await this.#memberBotProvisioner.create({
           publicationIntentId,
           agentId,
@@ -567,7 +563,10 @@ export class ChannelSettingsService {
             tenantId: identity.tenantId
           },
           signal: abort.signal,
-          onProgress: (step, appId) => this.#handleProvisioningProgress(step, appId)
+          onProgress: (step, appId) => {
+            if (appId) remoteAppId = appId
+            this.#handleProvisioningProgress(step, appId)
+          }
         })
         remoteAppId = provisioned.appId
         botDisplayName = provisioned.botDisplayName
@@ -575,14 +574,26 @@ export class ChannelSettingsService {
       } else {
         this.#setProvisioningProgress(
           'creating_app',
-          '兼容模式需要为当前队员单独扫码确认。'
+          '兼容模式正在打开飞书确认流程…'
         )
-        const result = await this.#registerCompat(agentId, {
-          name: agent.displayName,
-          desc: `Rovai AI 队员 · ${agent.teamRole || '协作者'}`
+        const provisioned = await this.#compatMemberBotProvisioner.create({
+          publicationIntentId,
+          agentId,
+          appName: agent.displayName,
+          appDescription: `Rovai AI 队员 · ${agent.teamRole || '协作者'}`,
+          expectedDeveloperIdentity: {
+            userId: identity.userId,
+            tenantId: identity.tenantId
+          },
+          signal: abort.signal,
+          onProgress: (step, appId) => {
+            if (appId) remoteAppId = appId
+            this.#handleProvisioningProgress(step, appId)
+          }
         })
-        remoteAppId = result.client_id
-        credential = { appId: result.client_id, appSecret: result.client_secret }
+        remoteAppId = provisioned.appId
+        botDisplayName = provisioned.botDisplayName
+        credential = { appId: provisioned.appId, appSecret: provisioned.appSecret }
       }
       await advanceIntent({
         state: 'app_created',
@@ -591,7 +602,6 @@ export class ChannelSettingsService {
         lastCompletedStep: 'app_created',
         failureCode: null
       })
-      this.#setProvisioningProgress('configuring_bot', '正在保存独立 Bot 凭据…', remoteAppId)
       await this.#dependencies!.credentialStore.write(credentialRef, credential)
       credentialWritten = true
       await advanceIntent({
@@ -608,11 +618,6 @@ export class ChannelSettingsService {
         lastCompletedStep: 'bot_configured',
         failureCode: null
       })
-      this.#setProvisioningProgress(
-        'publishing_version',
-        '正在确认权限、事件和发布配置…',
-        remoteAppId
-      )
       await advanceIntent({
         state: 'version_published',
         remoteAppId,
@@ -685,68 +690,6 @@ export class ChannelSettingsService {
     }
   }
 
-  async #registerCompat(
-    agentId: string,
-    appPreset: { name: string; desc: string }
-  ): Promise<Awaited<ReturnType<RegisterApp>>> {
-    if (this.#activeQrAttempt) throw new Error('已有一个飞书二维码流程正在进行。')
-    const attemptId = randomUUID()
-    const abort = new AbortController()
-    this.#activeQrAbort = abort
-    this.#activeQrAttempt = {
-      attemptId,
-      purpose: 'member_bot_compat_registration',
-      agentId,
-      stage: 'preparing',
-      qrDataUrl: null,
-      expiresAt: null,
-      detail: '正在准备飞书二维码…'
-    }
-    void this.#emit()
-    try {
-      const result = await this.#registerAppCompat({
-        source: 'rovai-ai',
-        signal: abort.signal,
-        createOnly: true,
-        appPreset,
-        addons: FEISHU_MEMBER_BOT_ADDONS,
-        onQRCodeReady: (info) => {
-          void QRCode.toDataURL(info.url, { width: 256, margin: 1 }).then((qrDataUrl) => {
-            if (this.#activeQrAttempt?.attemptId !== attemptId) return
-            this.#activeQrAttempt = {
-              ...this.#activeQrAttempt,
-              stage: 'awaiting_scan',
-              qrDataUrl,
-              expiresAt: new Date(this.#now() + info.expireIn * 1_000).toISOString(),
-              detail: '请用飞书扫码确认创建这名队员的独立 Bot。'
-            }
-            void this.#emit()
-          })
-        },
-        onStatusChange: () => {
-          if (this.#activeQrAttempt?.attemptId !== attemptId) return
-          this.#activeQrAttempt = {
-            ...this.#activeQrAttempt,
-            stage: 'scan_confirmed',
-            detail: '已扫码，等待飞书确认…'
-          }
-          void this.#emit()
-        }
-      })
-      if (this.#activeQrAttempt?.attemptId !== attemptId) throw new Error('二维码流程已取消。')
-      this.#activeQrAttempt = {
-        ...this.#activeQrAttempt,
-        stage: 'inspecting_identity',
-        detail: '正在读取 Bot 凭据并验证配置…'
-      }
-      void this.#emit()
-      return result
-    } catch (error) {
-      this.#failQr(error)
-      throw error
-    }
-  }
-
   async #upsertAccount(identity: FeishuDeveloperIdentity): Promise<void> {
     await this.#command('channels.feishu.account.upsert', {
       accountId: accountIdForIdentity(identity),
@@ -807,23 +750,23 @@ export class ChannelSettingsService {
     }> = {
       session_verified: {
         stage: 'creating_app',
-        detail: '飞书账号已校验，正在准备创建应用…'
+        detail: '账号校验完成，正在创建独立应用。'
       },
       app_created: {
         stage: 'configuring_bot',
         detail: '应用已创建，正在启用 Bot…'
       },
-      credentials_read: {
-        stage: 'configuring_permissions',
-        detail: '已读取应用凭据，正在确认权限与事件…'
-      },
       bot_configured: {
+        stage: 'configuring_permissions',
+        detail: 'Bot 已启用，正在配置权限、事件与长连接…'
+      },
+      permissions_events_configured: {
         stage: 'publishing_version',
-        detail: 'Bot 配置已完成，正在确认发布版本…'
+        detail: '权限与事件已配置，正在发布版本…'
       },
       version_published: {
         stage: 'verifying_connection',
-        detail: '版本已发布，正在验证长连接…'
+        detail: '版本已发布，正在验证连接…'
       }
     }
     const next = progress[step]

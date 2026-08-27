@@ -656,7 +656,7 @@ function ChannelMemberBotTable({
               <div className="channel-bot-identity" role="cell">
                 {bot?.botDisplayName
                   ? <><strong>{bot.botDisplayName}</strong><small>独立 Bot 身份</small></>
-                  : <span>名称沿用队员；头像在飞书确认</span>}
+                  : <span>名称沿用队员；应用图标由 Rovai 配置</span>}
               </div>
               <span className={`channel-publication-status is-${status}`} role="cell">
                 {publicationLabel(status)}
@@ -763,7 +763,7 @@ function PublishBotDialog({
         <AppDialogContent className="channel-publish-dialog">
           <AppDialogHeader
             title={`发布「${agent.displayName}」为飞书 Bot`}
-            description="Rovai 会复用当前开发者会话，在飞书官方确认窗口完成这名队员的独立应用发布。正常流程不需要再次扫码。"
+            description="Rovai 会复用当前开发者会话，在后台创建、配置并发布这名队员的独立应用。正常流程不会打开飞书创建确认页，也不需要再次扫码。"
             icon="server"
             closeDisabled={busy && !terminal}
           />
@@ -958,12 +958,12 @@ function publicationLabel(status: ChannelMemberBotView['publicationStatus'] | 'u
 
 function provisioningLabel(stage: MemberBotProvisioningView['stage']): string {
   switch (stage) {
-    case 'verifying_session': return '正在校验账号'
-    case 'creating_app': return '正在创建应用'
-    case 'configuring_bot': return '正在配置 Bot'
-    case 'configuring_permissions': return '正在配置权限与事件'
-    case 'publishing_version': return '正在发布版本'
-    case 'verifying_connection': return '正在验证长连接'
+    case 'verifying_session': return '正在校验飞书账号…'
+    case 'creating_app': return '正在创建应用…'
+    case 'configuring_bot': return '正在配置 Bot…'
+    case 'configuring_permissions': return '正在配置权限和事件…'
+    case 'publishing_version': return '正在发布版本…'
+    case 'verifying_connection': return '正在验证连接…'
     case 'completed': return '发布完成'
     case 'unknown_remote_state': return '远端状态待核对'
     default: return '发布未完成'
