@@ -694,24 +694,29 @@ try {
       && detail?.getAttribute('aria-label') === ${JSON.stringify(`${membershipLead.displayName}的当前模型配置`)}
   })()`)
 
-  await mouseClick(running.cdp, '.camp-add-member-button', '添加', true)
+  await mouseClick(running.cdp, '.camp-add-member-button', '邀请', true)
   await waitForSelector(running.cdp, '.camp-member-dialog')
   await waitForExpression(running.cdp,
     `document.activeElement === document.querySelector('.camp-member-search-field input')`)
   const addDialogState = await evaluate(running.cdp, `(() => ({
     title: document.querySelector('.camp-member-dialog h2')?.textContent?.trim(),
+    description: document.querySelector('.camp-member-dialog .app-dialog-description')?.textContent?.trim(),
+    candidateCaption: document.querySelector('.camp-member-candidate-caption strong')?.textContent?.trim(),
+    candidateListLabel: document.querySelector('.camp-member-candidate-list')?.getAttribute('aria-label'),
     candidateCount: document.querySelectorAll('.camp-member-candidate-row').length,
     hasRejoinCopy: /重新加入|已离开成员/.test(document.querySelector('.camp-member-dialog')?.textContent ?? '')
   }))()`)
   assert(
-    addDialogState.title === '添加队员'
+    addDialogState.title === '邀请队员'
+      && addDialogState.description === '选择要加入这次讨论的队员。'
+      && addDialogState.candidateCaption === '可邀请队员'
+      && addDialogState.candidateListLabel === '可邀请队员'
       && addDialogState.candidateCount === 3
       && !addDialogState.hasRejoinCopy,
     `Add-member dialog is unexpected: ${JSON.stringify(addDialogState)}`
   )
   await selectCampMemberCandidate(running.cdp, membershipCandidate.displayName)
-  await evaluate(running.cdp,
-    `document.querySelector('.camp-member-dialog .primary-button')?.click()`)
+  await mouseClick(running.cdp, '.camp-member-dialog .primary-button', '邀请队员', true)
   try {
     await waitForExpression(running.cdp,
       `document.querySelectorAll('.camp-inspector-member-row').length === 2
@@ -730,7 +735,7 @@ try {
       cause: error
     })
   }
-  await waitForText(running.cdp, '.app-toast', '已添加 1 位队员')
+  await waitForText(running.cdp, '.app-toast', '1 位队员已加入')
 
   await focusElement(
     running.cdp,
@@ -787,7 +792,7 @@ try {
       && !document.querySelector('.camp-member-removal-dialog')`, 30_000)
   await waitForText(running.cdp, '.app-toast', `已将${membershipCandidate.displayName}移出当前会话`)
 
-  await mouseClick(running.cdp, '.camp-add-member-button', '添加', true)
+  await mouseClick(running.cdp, '.camp-add-member-button', '邀请', true)
   await waitForSelector(running.cdp, '.camp-member-dialog')
   const ordinaryAddCopy = await evaluate(running.cdp,
     `document.querySelector('.camp-member-dialog')?.textContent ?? ''`)
@@ -797,11 +802,11 @@ try {
     `A previous membership was exposed as a product-level rejoin: ${ordinaryAddCopy}`
   )
   await selectCampMemberCandidate(running.cdp, membershipCandidate.displayName)
-  await mouseClick(running.cdp, '.camp-member-dialog .primary-button', '添加队员', true)
+  await mouseClick(running.cdp, '.camp-member-dialog .primary-button', '邀请队员', true)
   await waitForExpression(running.cdp,
     `document.querySelectorAll('.camp-inspector-member-row').length === 2
       && !document.querySelector('.camp-member-dialog')`, 30_000)
-  await waitForText(running.cdp, '.app-toast', '已添加 1 位队员')
+  await waitForText(running.cdp, '.app-toast', '1 位队员已加入')
   const membershipSnapshot = await request(running.cdp, 'camps.snapshot', {
     campId: membershipCampId
   })
