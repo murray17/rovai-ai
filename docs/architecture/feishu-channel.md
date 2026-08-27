@@ -69,6 +69,11 @@ scopes、events 和 callbacks 使用开放平台当前 manifest console API 分�
 safeStorage、验证 Bot WebSocket 并完成 intent。普通流程始终保持隐藏窗口，不打开飞书“创建飞书智能体应用 /
 立即创建”确认页，也不向 Renderer 产生二维码。
 
+版本发布以 detail read-back 为最终 authority，而不是 commit/release 的单次 HTTP 结果。release 一旦发出便不得在同一
+attempt 重复提交；除取消和 Developer Session 失效外，即使该请求返回 HTTP/rejected/transport failure，也继续在原
+deadline 内回读同一 App 与 Version。回读为 published 时收敛成功，为 rejected 时失败；直到 deadline 仍未收敛才保留
+原 release failure。这样覆盖个人版租户中“release 返回 400、版本实际已发布”的幂等冲突或短暂竞态，同时不重复发布。
+
 开放平台 console API 和页面 bootstrap 是版本敏感、未公开稳定合同的 Adapter 边界。它被限制在独立 client 中，使用
 exact origin/path、严格响应结构、秘密不出 Main、创建后 read-back verification 和 fail-closed error mapping；页面或
 协议变化不得降级为确认页、SDK 注册或另一条静默创建路径。真实租户仍须回归“连接不增 App、普通发布不弹平台确认、

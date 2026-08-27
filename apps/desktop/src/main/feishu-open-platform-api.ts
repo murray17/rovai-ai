@@ -323,6 +323,7 @@ export class OpenPlatformApiClient {
 
     const deadline = Date.now() + this.#publishTimeoutMs
     let releaseRequested = false
+    let releaseFailure: FeishuOpenPlatformApiError | null = null
     while (Date.now() < deadline) {
       const version = await this.readVersion(normalizedAppId, normalizedVersionId, signal)
       if (version.status === PUBLISHED_VERSION_STATUS) return version
@@ -330,19 +331,25 @@ export class OpenPlatformApiClient {
         throw apiError('feishu_console_version_rejected', false)
       }
       if (version.status === WAIT_PUBLISH_VERSION_STATUS && !releaseRequested) {
-        await this.#request(
-          'release_version',
-          `/developers/v1/publish/release/${encodeURIComponent(normalizedAppId)}/${encodeURIComponent(normalizedVersionId)}`,
-          {
-            body: {},
-            mutation: true,
-            signal
-          }
-        )
         releaseRequested = true
+        try {
+          await this.#request(
+            'release_version',
+            `/developers/v1/publish/release/${encodeURIComponent(normalizedAppId)}/${encodeURIComponent(normalizedVersionId)}`,
+            {
+              body: {},
+              mutation: true,
+              signal
+            }
+          )
+        } catch (error) {
+          if (!isReconcilableReleaseFailure(error)) throw error
+          releaseFailure = error
+        }
       }
       await this.#delay(this.#publishPollIntervalMs, signal)
     }
+    if (releaseFailure) throw releaseFailure
     throw apiError('feishu_console_publish_timeout', true)
   }
 
@@ -629,6 +636,12 @@ function normalizedApiCode(value: unknown): string {
 
 function isRedirectStatus(status: number): boolean {
   return status >= 300 && status < 400
+}
+
+function isReconcilableReleaseFailure(error: unknown): error is FeishuOpenPlatformApiError {
+  return error instanceof FeishuOpenPlatformApiError
+    && error.code !== 'feishu_provisioning_cancelled'
+    && error.code !== 'feishu_developer_session_expired'
 }
 
 function abortableDelay(milliseconds: number, signal?: AbortSignal): Promise<void> {

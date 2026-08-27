@@ -141,6 +141,11 @@ intent 冻结的 `userId + tenantId`。任何跨源、相似域、登录跳转�
 `publishedVersionId` 不得为空。普通流程不得调用 `/oauth/v1/app/registration`、不得调用
 `showRegistrationConfirmation`，也不得打开飞书“创建飞书智能体应用 / 立即创建”页面。
 
+版本 detail read-back 是发布状态 authority。commit/release 的单次 HTTP 或 envelope 失败不能独自证明发布失败；
+release 每个 attempt 最多提交一次，随后除取消和 Developer Session 失效外必须在原 deadline 内继续回读同一 App 与
+Version。任何回读的 published 立即收敛成功，rejected 立即失败；未在 deadline 内收敛才返回已保存的 release failure
+或 publish timeout。不得因 release 返回 400 而覆盖随后已经回读证明的 published 状态，也不得重发 release。
+
 `FeishuCompatMemberBotProvisioner` 独占
 `/oauth/v1/app/registration + verification_uri_complete + showRegistrationConfirmation + pollRegistration`。它只由
 主人显式选择 `compat_registration` 时进入，可能要求每名队员单独扫码/确认，且结果不覆盖 Developer Identity。

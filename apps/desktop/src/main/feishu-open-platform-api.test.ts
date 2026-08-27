@@ -133,6 +133,38 @@ describe('OpenPlatformApiClient', () => {
     expect(String(error)).not.toMatch(/app-secret-was-here|do-not-leak/)
   })
 
+  it('reconciles a release HTTP 400 when the version was published remotely', async () => {
+    let detailReads = 0
+    let releaseRequests = 0
+    const session = fakeSession(async (rawUrl) => {
+      const url = new URL(rawUrl)
+      if (url.pathname.includes('/app_version/detail/')) {
+        detailReads += 1
+        return apiResponse({ status: detailReads === 1 ? 5 : 2 })
+      }
+      if (url.pathname.includes('/publish/release/')) {
+        releaseRequests += 1
+        return new Response(JSON.stringify({ code: 10001, msg: 'already released' }), {
+          status: 400,
+          headers: { 'content-type': 'application/json' }
+        })
+      }
+      return apiResponse({})
+    })
+    const client = new OpenPlatformApiClient(session, {
+      delay: async () => undefined,
+      publishPollIntervalMs: 1,
+      publishTimeoutMs: 5_000
+    })
+
+    await expect(client.publishVersion('cli_dingding', 'version_1')).resolves.toEqual({
+      versionId: 'version_1',
+      status: 2
+    })
+    expect(detailReads).toBe(2)
+    expect(releaseRequests).toBe(1)
+  })
+
   it('marks a lost create response as an unknown remote outcome', async () => {
     const session = fakeSession(async () => {
       throw new Error('network response lost')
