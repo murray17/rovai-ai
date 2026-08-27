@@ -24,7 +24,7 @@ use rovai_core::builtin_tool_transport::{
     builtin_tool_identity_by_command,
 };
 use rovai_core::camp_message_send_teaching::{
-    CAMP_MESSAGE_SEND_FILE_HELP, CAMP_MESSAGE_SEND_HELP_EXAMPLES,
+    CAMP_MESSAGE_SEND_BODY_HELP, CAMP_MESSAGE_SEND_FILE_HELP, CAMP_MESSAGE_SEND_HELP_EXAMPLES,
     CAMP_MESSAGE_SEND_PUBLIC_ONLY_HELP, CAMP_MESSAGE_SEND_TO_HELP,
     CAMP_MESSAGE_SEND_TO_PRINCIPAL_HELP,
 };
@@ -1607,6 +1607,9 @@ fn render_flat_input_help(output: &mut String, description: &BuiltinToolDescript
             if argument.required { " required" } else { "" },
         )
         .expect("writing help to a String cannot fail");
+        if description.name == "camp.message.send" && argument.field == "body" {
+            write_indented_help(output, CAMP_MESSAGE_SEND_BODY_HELP);
+        }
         if description.name == "camp.message.send" && argument.field == "to" {
             write_indented_help(output, CAMP_MESSAGE_SEND_TO_HELP);
         }
@@ -2609,6 +2612,28 @@ mod tests {
             .find(|argument| argument.field == "body")
             .unwrap();
         assert!(!body.required);
+        assert_eq!(
+            parse_operation_input(
+                &description,
+                &[
+                    "--body".to_string(),
+                    r"First paragraph.\n\nSecond paragraph.".to_string(),
+                ]
+            )
+            .unwrap(),
+            json!({"body": r"First paragraph.\n\nSecond paragraph."})
+        );
+        assert_eq!(
+            parse_operation_input(
+                &description,
+                &[
+                    "--body".to_string(),
+                    "First paragraph.\n\nSecond paragraph.".to_string(),
+                ]
+            )
+            .unwrap(),
+            json!({"body": "First paragraph.\n\nSecond paragraph."})
+        );
         let to = description
             .arguments
             .iter()
@@ -2673,7 +2698,7 @@ mod tests {
             std::env::temp_dir().join(format!("rovai-send-v4-input-{}.json", Uuid::new_v4()));
         std::fs::write(
             &input_file,
-            r#"{"body":"Choose A or B","mentionUser":true}"#,
+            r#"{"body":"First paragraph.\n\nSecond paragraph.","mentionUser":true}"#,
         )
         .unwrap();
         assert_eq!(
@@ -2685,7 +2710,7 @@ mod tests {
                 ],
             )
             .unwrap(),
-            json!({"body": "Choose A or B", "mentionUser": true})
+            json!({"body": "First paragraph.\n\nSecond paragraph.", "mentionUser": true})
         );
         std::fs::remove_file(input_file).unwrap();
         assert!(parse_operation_input(&description, &["--mention-user".to_string()]).is_err());
@@ -2708,6 +2733,11 @@ mod tests {
         assert!(help.contains("Agent addressing schedules concrete continuing work, not CC."));
         assert!(help.contains("This option is invalid with --public-only."));
         assert!(help.contains("Restricted inline Agent addressing is disabled"));
+        assert!(help.contains("For multiline Markdown, pass real newline characters."));
+        assert!(help.contains(
+            r"Direct --body values are literal: \n inside ordinary shell quotes is text, not a line break."
+        ));
+        assert!(help.contains(r"JSON stdin/heredoc and JSON --input-file decode \n escapes."));
         assert!(help.contains("--body may be omitted for an attachment-only message"));
         assert!(help.contains("It may be combined with --to-principal."));
         assert!(!help.contains("--to-user"));
