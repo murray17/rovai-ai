@@ -1815,7 +1815,9 @@ function channelFailureDetail(error: unknown): string {
     feishu_login_expired: '飞书登录已超时，请关闭后重试。',
     feishu_login_cancelled: '飞书登录已取消。',
     feishu_developer_session_expired: '飞书开发者会话已过期，请重新登录。',
-    feishu_developer_identity_changed: '飞书账号或企业身份已变化，请重新连接。'
+    feishu_developer_identity_changed: '飞书账号或企业身份已变化，请重新连接。',
+    feishu_console_remote_app_unavailable:
+      '原飞书应用已删除或当前账号无权访问，无法按原 App ID 重试。'
   }
   if (details[code]) return details[code]
   return code === 'unknown'

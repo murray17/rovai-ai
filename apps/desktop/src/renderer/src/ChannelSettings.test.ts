@@ -134,6 +134,9 @@ describe('Channel settings', () => {
     expect(channelErrorMessage(new Error(
       "Error invoking remote method 'rovai:channels-create-project-binding': Error: This canonical path already has a Project Binding"
     ))).toBe('这个项目已经登记，无需重复添加。')
+    expect(channelErrorMessage(new Error(
+      "Error invoking remote method 'rovai:channels-retry-member-bot': Error: feishu_console_remote_app_unavailable"
+    ))).toBe('原飞书应用已删除或当前账号无权访问，无法按原 App ID 重试。')
   })
 
   it('keeps only present members in deterministic roster order', () => {

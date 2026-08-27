@@ -990,5 +990,8 @@ export function channelErrorMessage(error: unknown): string {
   if (message === 'This canonical path already has a Project Binding') {
     return '这个项目已经登记，无需重复添加。'
   }
+  if (message === 'feishu_console_remote_app_unavailable') {
+    return '原飞书应用已删除或当前账号无权访问，无法按原 App ID 重试。'
+  }
   return message || '渠道操作失败。'
 }

@@ -206,6 +206,34 @@ describe('OpenPlatformApiClient', () => {
     expect(String(error)).not.toMatch(/app-secret-was-here|do-not-leak/)
   })
 
+  it('does not misclassify a deleted App redirect as an expired Developer Session', async () => {
+    const session = fakeSession(async () => new Response(null, {
+      status: 302,
+      headers: { location: 'https://open.feishu.cn/app' }
+    }))
+
+    await expect(new OpenPlatformApiClient(session).readAppSecret(
+      'cli_dingding'
+    )).rejects.toMatchObject({
+      code: 'feishu_console_remote_app_unavailable',
+      outcomeUnknown: false
+    })
+  })
+
+  it('still classifies an account-login redirect as an expired Developer Session', async () => {
+    const session = fakeSession(async () => new Response(null, {
+      status: 302,
+      headers: { location: 'https://accounts.feishu.cn/accounts/page/login' }
+    }))
+
+    await expect(new OpenPlatformApiClient(session).readAppSecret(
+      'cli_dingding'
+    )).rejects.toMatchObject({
+      code: 'feishu_developer_session_expired',
+      outcomeUnknown: false
+    })
+  })
+
   it('rejects a manifest-only message subscription when the online event state is not ready', async () => {
     const paths: string[] = []
     const manifest = JSON.stringify({

@@ -781,8 +781,22 @@ export class OpenPlatformApiClient {
       if (options.signal?.aborted) throw apiError('feishu_provisioning_cancelled', false)
       throw apiError(`feishu_console_${operation}_transport_failed`, Boolean(options.mutation))
     }
-    if (response.status === 401 || response.status === 403 || isRedirectStatus(response.status)) {
+    if (response.status === 401 || response.status === 403) {
       throw apiError('feishu_developer_session_expired', false)
+    }
+    if (isRedirectStatus(response.status)) {
+      const location = response.headers.get('location')
+      const target = redirectTarget(location, url)
+      if (!target || isFeishuAccountLoginUrl(target)) {
+        throw apiError('feishu_developer_session_expired', false)
+      }
+      if (
+        target.origin === this.#session.apiOrigin
+        && target.pathname === '/app'
+        && operation !== 'upload_avatar'
+        && operation !== 'create_app'
+      ) throw apiError('feishu_console_remote_app_unavailable', false)
+      throw apiError(`feishu_console_${operation}_redirect_${response.status}`, false)
     }
     if (!response.ok) {
       throw apiError(
@@ -993,6 +1007,20 @@ function normalizedApiCode(value: unknown): string {
 
 function isRedirectStatus(status: number): boolean {
   return status >= 300 && status < 400
+}
+
+function redirectTarget(location: string | null, requestUrl: URL): URL | null {
+  if (!location) return null
+  try {
+    return new URL(location, requestUrl)
+  } catch {
+    return null
+  }
+}
+
+function isFeishuAccountLoginUrl(url: URL): boolean {
+  const host = url.hostname.toLowerCase()
+  return host === 'accounts.feishu.cn' || host === 'accounts.larksuite.com'
 }
 
 function isReconcilableReleaseFailure(error: unknown): error is FeishuOpenPlatformApiError {
