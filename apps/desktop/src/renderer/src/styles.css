@@ -1131,7 +1131,7 @@ html[data-rovai-platform="win32"] .unified-sidebar-drag {
 .memory-review-drawer > header { display: flex; flex: 0 0 auto; align-items: flex-start; justify-content: space-between; gap: 16px; padding: 22px 22px 16px; border-bottom: 1px solid var(--line); }
 .memory-review-drawer h2 { margin: 0; font: 680 18px/1.3 -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif; }
 .memory-review-drawer [data-radix-dialog-description] { margin: 5px 0 0; color: var(--muted); font-size: 10.5px; line-height: 1.5; }
-.memory-drawer-overlay { z-index: 65; }
+.dialog-overlay.memory-drawer-overlay { z-index: 65; }
 .memory-review-drawer-list { min-height: 0; flex: 1 1 auto; overflow-y: auto; }
 .memory-review-section { display: grid; }
 .memory-review-section + .memory-review-section { border-top: 2px solid var(--line-strong); }
