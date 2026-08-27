@@ -23,6 +23,10 @@ const electronUserDataDir = process.platform === 'win32'
   ? join(dataDir, 'Electron', 'User Data')
   : dataDir
 const coreDataDir = process.platform === 'win32' ? join(dataDir, 'Core') : dataDir
+const feedbackDataDir = join(fixtureRoot, 'feedback-user-data')
+const feedbackElectronUserDataDir = process.platform === 'win32'
+  ? join(feedbackDataDir, 'Electron', 'User Data')
+  : feedbackDataDir
 const projectRoot = join(fixtureRoot, 'project')
 const databasePath = join(coreDataDir, 'rovai.sqlite')
 const runtimeTempDir = process.env.ROVAI_PLANNED_SHUTDOWN_ACCEPT_RUNTIME_TMP ?? tmpdir()
@@ -34,6 +38,7 @@ const reportPath = join(outputDir, 'planned-shutdown-acceptance.json')
 
 let firstApp = null
 let recoveredApp = null
+let feedbackApp = null
 let failed = true
 
 try {
@@ -41,10 +46,13 @@ try {
   await mkdir(outputDir, { recursive: true })
   if (process.platform === 'win32') {
     await runProcess(packagedCoreExecutable(), ['--prepare-windows-data-root', dataDir])
+    await runProcess(packagedCoreExecutable(), ['--prepare-windows-data-root', feedbackDataDir])
   } else {
     await mkdir(dataDir, { recursive: true })
+    await mkdir(feedbackDataDir, { recursive: true })
   }
   seedCompletedOnboardingForAcceptance(electronUserDataDir)
+  seedCompletedOnboardingForAcceptance(feedbackElectronUserDataDir)
   await writeFile(join(projectRoot, 'README.md'), '# Planned shutdown acceptance fixture\n')
   await runProcess('git', ['init', '-b', 'main'], { cwd: projectRoot })
   await runProcess('git', ['config', 'user.name', 'Rovai-ai Planned Shutdown Acceptance'], {
@@ -103,40 +111,6 @@ try {
   const shutdownStartedAt = Date.now()
   const quitRequest = requestAppQuit(firstApp)
   trace(`normal quit requested for pid ${firstApp.child.pid}`)
-  let dayOverlay = null
-  let nightOverlay = null
-  let zoomOverlay = null
-  let dayCapture = null
-  let nightCapture = null
-  let zoomCapture = null
-  await waitForExpression(firstApp.cdp, `Boolean(document.querySelector('.shutdown-scrim'))`, 3_000, 20)
-
-  dayOverlay = await collectShutdownOverlay(firstApp.cdp, 'day', 1040, 700, 1)
-  dayCapture = join(outputDir, 'planned-shutdown-day-1040x700.png')
-  await capture(firstApp.cdp, dayCapture)
-
-  await evaluate(firstApp.cdp, `window.rovai.appearance.setPreference('night')`, true)
-  await waitForExpression(firstApp.cdp, `document.documentElement.dataset.theme === 'night'`, 2_000, 20)
-  nightOverlay = await collectShutdownOverlay(firstApp.cdp, 'night', 1040, 700, 1)
-  nightCapture = join(outputDir, 'planned-shutdown-night-1040x700.png')
-  await capture(firstApp.cdp, nightCapture)
-
-  await firstApp.cdp.send('Emulation.setDeviceMetricsOverride', {
-    width: 520,
-    height: 350,
-    deviceScaleFactor: 2,
-    mobile: false,
-    screenWidth: 1040,
-    screenHeight: 700
-  })
-  await waitForExpression(firstApp.cdp,
-    `innerWidth === 520 && innerHeight === 350 && Math.abs(devicePixelRatio - 2) < 0.01`,
-    2_000,
-    20)
-  zoomOverlay = await collectShutdownOverlay(firstApp.cdp, 'night', 520, 350, 2)
-  zoomCapture = join(outputDir, 'planned-shutdown-night-1040x700-zoom-200.png')
-  await capture(firstApp.cdp, zoomCapture)
-
   const firstExit = await waitForChildExit(firstApp.child, 18_000)
   trace(`packaged App exited: ${JSON.stringify(firstExit)}`)
   const shutdownElapsedMs = Date.now() - shutdownStartedAt
@@ -234,6 +208,62 @@ try {
     && finalFacts.run.terminal_reason_code === null,
   `Restart did not preserve the controlled-shutdown terminal: ${JSON.stringify(finalFacts.run)}`)
 
+  feedbackApp = await launchApp(await availablePort(), 1040, 700, {
+    userDataDirectory: feedbackDataDir,
+    waitForHealth: false
+  })
+  await setTheme(feedbackApp.cdp, 'day')
+  const feedbackDescendantPids = await descendantProcessIds(feedbackApp.child.pid)
+  const feedbackShutdownStartedAt = Date.now()
+  const feedbackQuitRequest = requestAppQuit(feedbackApp)
+  await waitForExpression(feedbackApp.cdp,
+    `Boolean(document.querySelector('.shutdown-scrim.is-visible'))`, 10_000, 20)
+  const shutdownFeedbackElapsedMs = Date.now() - feedbackShutdownStartedAt
+  assert(shutdownFeedbackElapsedMs >= 350,
+    `Safe-exit feedback appeared before the anti-flash window: ${shutdownFeedbackElapsedMs}ms`)
+
+  const dayOverlay = await collectShutdownOverlay(feedbackApp.cdp, 'day', 1040, 700, 1)
+  const dayCapture = join(outputDir, 'planned-shutdown-day-1040x700.png')
+  await capture(feedbackApp.cdp, dayCapture)
+
+  await evaluate(feedbackApp.cdp, `window.rovai.appearance.setPreference('night')`, true)
+  await waitForExpression(feedbackApp.cdp,
+    `document.documentElement.dataset.theme === 'night'`, 2_000, 20)
+  const nightOverlay = await collectShutdownOverlay(feedbackApp.cdp, 'night', 1040, 700, 1)
+  const nightCapture = join(outputDir, 'planned-shutdown-night-1040x700.png')
+  await capture(feedbackApp.cdp, nightCapture)
+
+  await feedbackApp.cdp.send('Emulation.setDeviceMetricsOverride', {
+    width: 520,
+    height: 350,
+    deviceScaleFactor: 2,
+    mobile: false,
+    screenWidth: 1040,
+    screenHeight: 700
+  })
+  await waitForExpression(feedbackApp.cdp,
+    `innerWidth === 520 && innerHeight === 350 && Math.abs(devicePixelRatio - 2) < 0.01`,
+    2_000,
+    20)
+  const zoomOverlay = await collectShutdownOverlay(feedbackApp.cdp, 'night', 520, 350, 2)
+  const zoomCapture = join(outputDir, 'planned-shutdown-night-1040x700-zoom-200.png')
+  await capture(feedbackApp.cdp, zoomCapture)
+
+  const feedbackExit = await waitForChildExit(feedbackApp.child, 18_000)
+  const feedbackShutdownElapsedMs = Date.now() - feedbackShutdownStartedAt
+  await feedbackQuitRequest
+  feedbackApp.cdp.close()
+  const feedbackShutdownResult = parseShutdownResult(feedbackApp.stderr)
+  feedbackApp = null
+  assert(feedbackExit.code === 0 && feedbackExit.signal === null,
+    `Feedback packaged App did not exit naturally: ${JSON.stringify(feedbackExit)}`)
+  assert(feedbackShutdownResult?.forcedSignal === null
+    && feedbackShutdownResult?.report?.status === 'completed',
+  `Feedback Desktop did not observe a natural Core shutdown report: ${JSON.stringify(feedbackShutdownResult)}`)
+  assert(feedbackShutdownElapsedMs < 18_000,
+    `Feedback packaged App exceeded its outer shutdown window: ${feedbackShutdownElapsedMs}ms`)
+  await assertProcessesExited(feedbackDescendantPids)
+
   const report = {
     ok: true,
     mode: `packaged-app-real-${runtimeKind}-runtime`,
@@ -246,12 +276,15 @@ try {
     },
     shutdown: {
       elapsedMs: shutdownElapsedMs,
+      feedbackElapsedMs: shutdownFeedbackElapsedMs,
+      feedbackHostElapsedMs: feedbackShutdownElapsedMs,
       recoveredElapsedMs: recoveredShutdownElapsedMs,
       naturalExit: true,
       forcedSignal: firstShutdownResult.forcedSignal,
       recoveredForcedSignal: recoveredShutdownResult.forcedSignal,
       report: firstShutdownResult.report,
       recoveredReport: recoveredShutdownResult.report,
+      feedbackReport: feedbackShutdownResult.report,
       observedDescendantProcesses: liveDescendantPids.length,
       runtimeTerminalFabricated: false,
       runtimeTerminalSettled: false,
@@ -288,8 +321,12 @@ try {
   if (failed && recoveredApp?.stderr.length) {
     await writeFile(join(outputDir, 'recovered-app-stderr.log'), recoveredApp.stderr.join(''))
   }
+  if (failed && feedbackApp?.stderr.length) {
+    await writeFile(join(outputDir, 'feedback-app-stderr.log'), feedbackApp.stderr.join(''))
+  }
   if (firstApp) await terminateIsolatedApp(firstApp)
   if (recoveredApp) await terminateIsolatedApp(recoveredApp)
+  if (feedbackApp) await terminateIsolatedApp(feedbackApp)
   if (!failed && process.env.ROVAI_KEEP_PLANNED_SHUTDOWN_FIXTURE !== '1') {
     await rm(fixtureRoot, { recursive: true, force: true })
   } else if (failed) {
@@ -298,12 +335,15 @@ try {
   }
 }
 
-async function launchApp(port, width, height) {
+async function launchApp(port, width, height, {
+  userDataDirectory = dataDir,
+  waitForHealth = true
+} = {}) {
   const executable = packagedAppExecutable()
   const stderr = []
   const child = spawn(executable, [
     `--remote-debugging-port=${port}`,
-    `--user-data-dir=${dataDir}`
+    `--user-data-dir=${userDataDirectory}`
   ], {
     cwd: root,
     stdio: ['ignore', 'ignore', 'pipe'],
@@ -339,9 +379,13 @@ async function launchApp(port, width, height) {
       features: [{ name: 'prefers-reduced-motion', value: 'reduce' }]
     })
     await waitForExpression(cdp, `Boolean(window.rovai && document.querySelector('.app-shell'))`, 45_000)
-    const health = await appRequest(cdp, 'health.check')
-    assert(await realpath(health.database.path) === await realpath(databasePath),
-      `Isolated packaged App opened the wrong database: ${health.database.path}`)
+    if (waitForHealth) {
+      const health = await appRequest(cdp, 'health.check')
+      assert(await realpath(health.database.path) === await realpath(databasePath),
+        `Isolated packaged App opened the wrong database: ${health.database.path}`)
+    } else {
+      await evaluate(cdp, `new Promise((resolve) => requestAnimationFrame(() => resolve(true)))`, true)
+    }
     return { cdp, child, stderr }
   } catch (error) {
     cdp?.close()
@@ -437,14 +481,20 @@ async function collectShutdownOverlay(cdp, theme, viewportWidth, viewportHeight,
     const progressStyle = progress ? getComputedStyle(progress) : null
     return scrim && card && cardRect ? {
       theme: document.documentElement.dataset.theme,
+      visible: scrim.classList.contains('is-visible'),
       role: scrim.getAttribute('role'),
       modal: scrim.getAttribute('aria-modal'),
+      live: scrim.getAttribute('aria-live'),
+      busy: scrim.getAttribute('aria-busy'),
       labelledBy: scrim.getAttribute('aria-labelledby'),
       describedBy: scrim.getAttribute('aria-describedby'),
       title: scrim.querySelector('h2')?.textContent?.trim() ?? null,
       description: scrim.querySelector('#controlled-shutdown-description')?.textContent?.trim() ?? null,
       evidence: scrim.querySelector('#controlled-shutdown-evidence')?.textContent?.trim() ?? null,
       actionCount: scrim.querySelectorAll('button, a, input, select, textarea').length,
+      backgroundAlertCount: document.querySelectorAll(
+        '.error-banner, .startup-route-error, .app-toast'
+      ).length,
       card: { left: cardRect.left, top: cardRect.top, right: cardRect.right, bottom: cardRect.bottom },
       viewport: { width: innerWidth, height: innerHeight, deviceScaleFactor: devicePixelRatio },
       documentScrollWidth: document.documentElement.scrollWidth,
@@ -469,15 +519,20 @@ async function collectShutdownOverlay(cdp, theme, viewportWidth, viewportHeight,
   })()`)
   assert(overlay
     && overlay.theme === theme
+    && overlay.visible === true
     && overlay.role === 'dialog'
     && overlay.modal === 'true'
+    && overlay.live === 'polite'
+    && overlay.busy === 'true'
     && overlay.labelledBy === 'controlled-shutdown-title'
     && overlay.describedBy === 'controlled-shutdown-description controlled-shutdown-evidence'
-    && overlay.title === '正在取消所有 AgentRun'
-    && overlay.description.includes('完成本地收口，然后退出')
+    && overlay.title === '正在安全退出'
+    && overlay.description.includes('保存本地状态并关闭后台服务')
+    && overlay.evidence.includes('若有尚未完成的 AgentRun，将一并取消')
     && overlay.evidence.includes('未确认的文件、命令或工具效果')
     && overlay.evidence.includes('待核对记录')
     && overlay.actionCount === 0
+    && overlay.backgroundAlertCount === 0
     && overlay.viewport.width === viewportWidth
     && overlay.viewport.height === viewportHeight
     && Math.abs(overlay.viewport.deviceScaleFactor - deviceScaleFactor) < 0.01

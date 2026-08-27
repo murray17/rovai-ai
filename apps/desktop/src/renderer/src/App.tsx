@@ -145,9 +145,12 @@ const ACTIVE_CAMP_INVALIDATION_EVENTS = new Set([
 
 export function shouldRefreshActiveCampForCoreEvent(
   event: CoreEvent,
-  activeCampId: string | null
+  activeCampId: string | null,
+  shuttingDown = false
 ): boolean {
-  if (!activeCampId || !ACTIVE_CAMP_INVALIDATION_EVENTS.has(event.method)) return false
+  if (shuttingDown || !activeCampId || !ACTIVE_CAMP_INVALIDATION_EVENTS.has(event.method)) {
+    return false
+  }
   const eventCampId = stringField(asRecord(event.params), 'campId')
   if (event.method === 'agent_run.runtime_model_observed') {
     return eventCampId === activeCampId
@@ -206,9 +209,10 @@ export function createActiveCampRefreshCoordinator(
 export function refreshActiveCampForCoreEvent(
   event: CoreEvent,
   activeCampId: string | null,
-  coordinator: ActiveCampRefreshCoordinator
+  coordinator: ActiveCampRefreshCoordinator,
+  shuttingDown = false
 ): Promise<void> | null {
-  return shouldRefreshActiveCampForCoreEvent(event, activeCampId) && activeCampId
+  return shouldRefreshActiveCampForCoreEvent(event, activeCampId, shuttingDown) && activeCampId
     ? coordinator.refresh(activeCampId)
     : null
 }
@@ -224,6 +228,7 @@ export function requestAuthoritativeCampOpenProjection(
 type LoadState = 'loading' | 'ready' | 'error'
 export type StartupStatus = 'loading' | 'waiting' | 'resolved'
 export const STARTUP_FEEDBACK_DELAY_MS = 400
+export const SHUTDOWN_FEEDBACK_DELAY_MS = 400
 export type View = 'compose' | 'camp' | 'members' | 'memory' | 'settings'
 export type SettingsSection = NavigationSettingsSection
 export type WindowDragStripPage = Extract<View, 'compose' | 'members' | 'memory' | 'settings'>
@@ -510,43 +515,67 @@ export function shouldLoadRuntimeHealth(
     )
 }
 
-export function ControlledShutdownOverlay(): React.JSX.Element {
+export function ControlledShutdownOverlay({
+  visible = true
+}: {
+  visible?: boolean
+}): React.JSX.Element {
   const dialogRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
+    if (!visible) return
     dialogRef.current?.focus({ preventScroll: true })
-  }, [])
+  }, [visible])
+
+  useEffect(() => {
+    if (visible) return undefined
+    const preventPendingInteraction = (event: KeyboardEvent): void => {
+      event.preventDefault()
+      event.stopImmediatePropagation()
+    }
+    window.addEventListener('keydown', preventPendingInteraction, true)
+    return () => window.removeEventListener('keydown', preventPendingInteraction, true)
+  }, [visible])
 
   return (
     <div
       ref={dialogRef}
-      className="shutdown-scrim"
-      role="dialog"
-      aria-modal="true"
-      aria-live="assertive"
-      aria-labelledby="controlled-shutdown-title"
-      aria-describedby="controlled-shutdown-description controlled-shutdown-evidence"
-      tabIndex={-1}
+      className={`shutdown-scrim ${visible ? 'is-visible' : 'is-pending'}`}
+      role={visible ? 'dialog' : undefined}
+      aria-modal={visible ? true : undefined}
+      aria-live={visible ? 'polite' : undefined}
+      aria-busy={visible ? true : undefined}
+      aria-hidden={visible ? undefined : true}
+      aria-labelledby={visible ? 'controlled-shutdown-title' : undefined}
+      aria-describedby={visible
+        ? 'controlled-shutdown-description controlled-shutdown-evidence'
+        : undefined}
+      tabIndex={visible ? -1 : undefined}
       onKeyDown={(event) => {
-        if (event.key !== 'Tab') return
+        if (!visible || event.key !== 'Tab') return
         event.preventDefault()
         dialogRef.current?.focus({ preventScroll: true })
       }}
     >
-      <section className="shutdown-card">
-        <span className="shutdown-stop-mark" aria-hidden="true" />
-        <div className="shutdown-card-content">
-          <p className="shutdown-kicker">正在退出</p>
-          <h2 id="controlled-shutdown-title">正在取消所有 AgentRun</h2>
-          <p id="controlled-shutdown-description">Rovai 会停止所有运行并完成本地收口，然后退出。</p>
-          <span className="shutdown-progress-track" role="progressbar" aria-label="正在完成退出收口">
-            <i />
+      {visible && (
+        <section className="shutdown-card">
+          <span className="shutdown-safe-mark" aria-hidden="true">
+            <svg viewBox="0 0 20 20" focusable="false">
+              <path d="M10 2.75 4.75 5.1v4.05c0 3.55 1.97 6.23 5.25 8.1 3.28-1.87 5.25-4.55 5.25-8.1V5.1L10 2.75Z" />
+            </svg>
           </span>
-          <p className="shutdown-evidence-note" id="controlled-shutdown-evidence">
-            未确认的文件、命令或工具效果会保留为待核对记录。
-          </p>
-        </div>
-      </section>
+          <div className="shutdown-card-content">
+            <h2 id="controlled-shutdown-title">正在安全退出</h2>
+            <p id="controlled-shutdown-description">Rovai 正在保存本地状态并关闭后台服务。</p>
+            <span className="shutdown-progress-track" role="progressbar" aria-label="正在完成安全退出">
+              <i />
+            </span>
+            <p className="shutdown-evidence-note" id="controlled-shutdown-evidence">
+              若有尚未完成的 AgentRun，将一并取消；未确认的文件、命令或工具效果会保留为待核对记录。
+            </p>
+          </div>
+        </section>
+      )}
     </div>
   )
 }
@@ -589,6 +618,8 @@ export function App(): React.JSX.Element {
   const [confirmingRunIds, setConfirmingRunIds] = useState<Set<string>>(() => new Set())
   const [state, setState] = useState<LoadState>('loading')
   const [shuttingDown, setShuttingDown] = useState(false)
+  const shuttingDownRef = useRef(false)
+  const [shutdownFeedbackVisible, setShutdownFeedbackVisible] = useState(false)
   const [notificationHeadsUpVisible, setNotificationHeadsUpVisible] = useState(false)
   const [startupSnapshot, setStartupSnapshot] = useState<DesktopStartupSnapshot | null>(null)
   const [startupRouteTarget, setStartupRouteTarget] = useState<RestorableLocation | null>(null)
@@ -1246,6 +1277,18 @@ export function App(): React.JSX.Element {
   }, [])
 
   useEffect(() => {
+    if (!shuttingDown) {
+      setShutdownFeedbackVisible(false)
+      return undefined
+    }
+    const timer = window.setTimeout(
+      () => setShutdownFeedbackVisible(true),
+      SHUTDOWN_FEEDBACK_DELAY_MS
+    )
+    return () => window.clearTimeout(timer)
+  }, [shuttingDown])
+
+  useEffect(() => {
     void loadOnboarding()
   }, [loadOnboarding])
 
@@ -1610,6 +1653,7 @@ export function App(): React.JSX.Element {
   useEffect(() => {
     return window.rovai.onEvent((event: CoreEvent) => {
       const params = asRecord(event.params)
+      if (shuttingDownRef.current) return
       const liveEvent = liveRuntimeEventFromCore(
         event,
         `live-${++liveRuntimeEventSequence.current}`
@@ -1620,7 +1664,11 @@ export function App(): React.JSX.Element {
       if (event.method === 'runtime.state') {
         const runtimeStatus = stringField(params, 'status')
         if (runtimeStatus === 'shutting_down') {
+          shuttingDownRef.current = true
           setShuttingDown(true)
+          setError(null)
+          setLocationSaveError(null)
+          setToast(null)
         } else if (runtimeStatus === 'crashed') {
           setState('error')
           setError(stringField(params, 'message') ?? '后台服务已停止。')
@@ -1647,7 +1695,8 @@ export function App(): React.JSX.Element {
       const refresh = refreshActiveCampForCoreEvent(
         event,
         campId,
-        activeCampRefreshCoordinator
+        activeCampRefreshCoordinator,
+        shuttingDownRef.current
       )
       if (refresh && campId) {
         void refresh.catch((nextError) => {
@@ -2885,7 +2934,9 @@ export function App(): React.JSX.Element {
   const startupRoutePending = !startupGateVisible && startupStatus !== 'resolved'
     ? startupRouteTarget
     : null
-  const inlineNotices = memoryReviewNotice || memoryAutoNotice.count > 0 || error || locationSaveError
+  const inlineNotices = memoryReviewNotice
+    || memoryAutoNotice.count > 0
+    || (!shuttingDown && (error || locationSaveError))
     ? (
         <>
           {memoryReviewNotice && (
@@ -2900,14 +2951,14 @@ export function App(): React.JSX.Element {
               <div><button className="quiet-button compact" type="button" onClick={openAutomaticMemory}>查看</button><button className="icon-button" type="button" aria-label="关闭自动形成提示" onClick={() => setMemoryAutoNotice({ count: 0, memoryId: null, scope: null })}>×</button></div>
             </div>
           )}
-          {error && (
+          {!shuttingDown && error && (
             <div className="error-banner" role="alert">
               <span className="error-icon" aria-hidden="true">!</span>
               <div><strong>操作未完成</strong><span>{error}</span><small>项目文件和已经写入的审计记录不会因此丢失。</small></div>
               <div className="error-actions"><button className="quiet-button" onClick={() => void loadOverview()}>刷新状态</button><button className="icon-button" aria-label="关闭错误" onClick={() => setError(null)}>×</button></div>
             </div>
           )}
-          {locationSaveError && (
+          {!shuttingDown && locationSaveError && (
             <div className="error-banner" role="alert">
               <span className="error-icon" aria-hidden="true">!</span>
               <div><strong>当前页面已打开，但下次启动位置未保存</strong><span>{locationSaveError}</span></div>
@@ -2941,7 +2992,7 @@ export function App(): React.JSX.Element {
             )}
           </section>
         )}
-        {shuttingDown && <ControlledShutdownOverlay />}
+        {shuttingDown && <ControlledShutdownOverlay visible={shutdownFeedbackVisible} />}
       </div>
     )
   }
@@ -2992,7 +3043,7 @@ export function App(): React.JSX.Element {
           )}
           onComplete={() => void completeOnboarding()}
         />
-        {shuttingDown && <ControlledShutdownOverlay />}
+        {shuttingDown && <ControlledShutdownOverlay visible={shutdownFeedbackVisible} />}
       </div>
     )
   }
@@ -3072,7 +3123,7 @@ export function App(): React.JSX.Element {
           />
         )}
         {!startupGateVisible && view !== 'members' && view !== 'memory' && inlineNotices}
-        {!startupGateVisible && toast && (
+        {!startupGateVisible && !shuttingDown && toast && (
           <div className="app-toast" role="status" aria-live="polite">
             <span>{toast}</span>
             <button className="icon-button" type="button" aria-label="关闭提示" onClick={() => setToast(null)}>×</button>
@@ -3286,7 +3337,7 @@ export function App(): React.JSX.Element {
         onOpenDetails={openUpdateSettings}
         onDownload={appUpdates.download}
       />
-      {shuttingDown && <ControlledShutdownOverlay />}
+      {shuttingDown && <ControlledShutdownOverlay visible={shutdownFeedbackVisible} />}
     </div>
   )
 }

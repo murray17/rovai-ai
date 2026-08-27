@@ -432,9 +432,11 @@ Inspector 可从 Camp 顶栏完整隐藏/恢复，常规宽 310px，`1040–1179
 ## Camp 顶栏与关闭等待面
 
 Camp Header 右侧只保留待审批摘要和 Inspector 显隐，不提供执行入口、Stop 或 `•••`。主动退出、
-重启或更新进入无操作按钮的 modal 关闭等待面：标题明确“正在取消所有 AgentRun”，说明 Rovai 正在
-停止运行并完成本地收口。稳定快照后的全部非终态 AgentRun 使用普通终态“已取消”；无法确认的外部
-效果继续显示“外部效果待确认”，不得被终态文案隐藏。普通 CampTurn Stop 继续显示“已取消”。精确边界见
+重启或更新立即阻止新的界面交互；400ms 内完成则直接退出，超过门槛才显示无操作按钮的 modal 关闭等待面。
+标题为“正在安全退出”，正文说明正在保存本地状态并关闭后台服务，并以条件文案说明尚未完成的 AgentRun
+会一并取消。关闭开始后不再刷新 Camp 投影，取消结算产生的晚到请求拒绝也不显示为错误横幅或 Toast。
+稳定快照后的全部非终态 AgentRun 使用普通终态“已取消”；无法确认的外部效果继续显示
+“外部效果待确认”，不得被终态文案隐藏。普通 CampTurn Stop 继续显示“已取消”。精确边界见
 [Planned Shutdown v3](../../contracts/planned-shutdown-v3.md)。
 
 ## Theme, keyboard and failure states

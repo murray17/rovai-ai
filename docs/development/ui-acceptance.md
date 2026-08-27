@@ -153,11 +153,14 @@ pnpm accept:planned-shutdown
 提示禁止工具、命令、文件读取与工作区修改，并在 Runtime input 变为 `accepted` 后立即请求 packaged
 App 退出。macOS 验收按该隔离 App 的精确 PID 通过 `NSRunningApplication.terminate()` 发起正常 quit，
 不得用可能占住 browser quit transaction 的 DevTools `Browser.close`，也不得匹配或关闭日常 App。
+活跃 Run 实例只负责真实耗时、取消语义与进程回收；多主题截图由同一脚本使用另一份全新隔离数据，在
+Core 首次启动仍进行本地初始化时触发慢退出，以免截图流程反过来拖慢或误判已经足够快的真实退出。
 
 验收必须证明：
 
-- `before-quit` 显示无操作控件的 accessible modal；Day/Night、`1040×700`、200% zoom 与 reduced
-  motion 下标题、unknown 说明和卡片边界均完整；
+- `before-quit` 立即阻止新界面交互，前 400ms 不显示关闭反馈；慢退出显示无操作控件的 accessible busy
+  modal，Day/Night、`1040×700`、200% zoom 与 reduced motion 下标题、条件取消说明和卡片边界均完整，
+  背景不得出现关闭阶段的错误横幅或 Toast；
 - Desktop 等待 Core 自行完成 drain 和子进程真实退出，App 以 `exit 0` 自然结束；只有验收清理失败
   分支才可对明确记录的隔离进程树发送信号；
 - one-shot Runtime 进程中断不产生 Runtime cancellation acknowledgement：AgentRun 与
