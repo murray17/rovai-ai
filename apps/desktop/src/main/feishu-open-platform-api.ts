@@ -781,8 +781,11 @@ export class OpenPlatformApiClient {
       if (options.signal?.aborted) throw apiError('feishu_provisioning_cancelled', false)
       throw apiError(`feishu_console_${operation}_transport_failed`, Boolean(options.mutation))
     }
-    if (response.status === 401 || response.status === 403) {
+    if (response.status === 401) {
       throw apiError('feishu_developer_session_expired', false)
+    }
+    if (response.status === 403) {
+      throw apiError('feishu_connection_error', false)
     }
     if (isRedirectStatus(response.status)) {
       const location = response.headers.get('location')

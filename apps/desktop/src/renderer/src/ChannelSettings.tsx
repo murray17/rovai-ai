@@ -762,6 +762,7 @@ function PublishBotDialog({
     ? ['completed', 'failed', 'unknown_remote_state'].includes(provisioning.stage)
     : false
   const retryLocked = provisioning?.stage === 'unknown_remote_state'
+  const connectionFailed = provisioning?.failureCode === 'feishu_connection_error'
   const sessionUnavailable = Boolean(error && /登录已过期|账号已变化|重新连接账号/.test(error))
   return (
     <Dialog.Root open onOpenChange={(open) => { if (!open && (!busy || terminal)) onClose() }}>
@@ -801,7 +802,11 @@ function PublishBotDialog({
               <div className={`channel-provisioning-state is-${provisioning.stage}`} role="status">
                 <span className="channel-provisioning-dot" aria-hidden="true" />
                 <span>
-                  <strong>{provisioningLabel(provisioning.stage, Boolean(boundAppId))}</strong>
+                  <strong>{provisioningLabel(
+                    provisioning.stage,
+                    Boolean(boundAppId),
+                    provisioning.failureCode
+                  )}</strong>
                   <small>{provisioning.detail}</small>
                   {provisioning.remoteAppId && <code>{provisioning.remoteAppId}</code>}
                 </span>
@@ -814,8 +819,10 @@ function PublishBotDialog({
               </p>
             )}
           </AppDialogBody>
-          <AppDialogFooter note={retryLocked
-            ? '远端结果无法确认。请先在飞书开放平台核对，避免重复创建应用。'
+          <AppDialogFooter note={connectionFailed
+            ? '已保留原应用绑定；关闭后可以稍后重试。'
+            : retryLocked
+              ? '远端结果无法确认。请先在飞书开放平台核对，避免重复创建应用。'
             : boundAppId
               ? '重新发布始终复用已绑定应用，不提供换绑入口。'
               : '发布只使用当前开发者会话，不会打开平台创建确认页。'}>
@@ -937,8 +944,10 @@ function publicationLabel(status: ChannelMemberBotView['publicationStatus'] | 'u
 
 function provisioningLabel(
   stage: MemberBotProvisioningView['stage'],
-  recoveringFrozenApp = false
+  recoveringFrozenApp = false,
+  failureCode: string | null = null
 ): string {
+  if (failureCode === 'feishu_connection_error') return '飞书连接异常'
   switch (stage) {
     case 'verifying_session': return '正在校验飞书账号…'
     case 'creating_app': return recoveringFrozenApp ? '正在核对应用…' : '正在创建应用…'
@@ -992,6 +1001,9 @@ export function channelErrorMessage(error: unknown): string {
   }
   if (message === 'feishu_console_remote_app_unavailable') {
     return '原飞书应用已删除或当前账号无权访问，无法按原 App ID 重试。'
+  }
+  if (message === 'feishu_connection_error') {
+    return '飞书连接异常，请稍后重试。'
   }
   return message || '渠道操作失败。'
 }

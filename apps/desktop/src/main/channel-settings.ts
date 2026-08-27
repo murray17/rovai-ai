@@ -737,6 +737,7 @@ export class ChannelSettingsService {
       return this.#emit()
     } catch (error) {
       const failureCode = channelFailureCode(error)
+      const connectionFailed = failureCode === 'feishu_connection_error'
       const unknownRemoteState = isUnknownRemoteProvisioningError(error)
         || (remoteAppId !== null && !credentialWritten)
       await this.#advancePublicationIntent(publicationIntentId, intentVersion, {
@@ -751,9 +752,13 @@ export class ChannelSettingsService {
         publicationIntentId,
         agentId,
         stage: unknownRemoteState ? 'unknown_remote_state' : 'failed',
-        detail: unknownRemoteState
-          ? '无法确认远端应用是否已经创建；已停止自动重试。'
-          : '发布没有完成，可以在排除问题后重试。',
+        detail: connectionFailed
+          ? remoteAppId
+            ? '飞书连接异常；已保留当前应用状态，可以稍后重试。'
+            : '飞书连接异常，可以稍后重试。'
+          : unknownRemoteState
+            ? '无法确认远端应用是否已经创建；已停止自动重试。'
+            : '发布没有完成，可以在排除问题后重试。',
         remoteAppId,
         failureCode
       }
@@ -905,6 +910,7 @@ export class ChannelSettingsService {
       return this.#emit()
     } catch (error) {
       const failureCode = channelFailureCode(error)
+      const connectionFailed = failureCode === 'feishu_connection_error'
       await this.#advancePublicationIntent(intent.publicationIntentId, intentVersion, {
         state: credentialWritten ? 'failed_recoverable' : 'failed_unknown_remote_state',
         remoteAppId,
@@ -917,9 +923,11 @@ export class ChannelSettingsService {
         publicationIntentId: intent.publicationIntentId,
         agentId: agent.agentId,
         stage: credentialWritten ? 'failed' : 'unknown_remote_state',
-        detail: credentialWritten
-          ? '已保存应用凭据，但 Bot 连接尚未完成；可以安全重试。'
-          : '无法核对已创建应用的凭据或发布状态；不会创建第二个应用。',
+        detail: connectionFailed
+          ? '飞书连接异常；已保留原应用绑定，可以稍后重试。'
+          : credentialWritten
+            ? '已保存应用凭据，但 Bot 连接尚未完成；可以安全重试。'
+            : '无法核对已创建应用的凭据或发布状态；不会创建第二个应用。',
         remoteAppId,
         failureCode
       }
@@ -1816,6 +1824,7 @@ function channelFailureDetail(error: unknown): string {
     feishu_login_cancelled: '飞书登录已取消。',
     feishu_developer_session_expired: '飞书开发者会话已过期，请重新登录。',
     feishu_developer_identity_changed: '飞书账号或企业身份已变化，请重新连接。',
+    feishu_connection_error: '飞书连接异常，请稍后重试。',
     feishu_console_remote_app_unavailable:
       '原飞书应用已删除或当前账号无权访问，无法按原 App ID 重试。'
   }

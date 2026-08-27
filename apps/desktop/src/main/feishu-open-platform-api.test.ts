@@ -220,6 +220,51 @@ describe('OpenPlatformApiClient', () => {
     })
   })
 
+  it('reports an undocumented console denial as a connection error', async () => {
+    const session = fakeSession(async () => new Response(JSON.stringify({
+      code: 10003,
+      msg: 'forbidden'
+    }), {
+      status: 403,
+      headers: { 'content-type': 'application/json' }
+    }))
+
+    await expect(new OpenPlatformApiClient(session).readAppSecret(
+      'cli_dingding'
+    )).rejects.toMatchObject({
+      code: 'feishu_connection_error',
+      outcomeUnknown: false
+    })
+  })
+
+  it('does not infer a cause from another undocumented HTTP 403 code', async () => {
+    const session = fakeSession(async () => new Response(JSON.stringify({
+      code: 10042,
+      msg: 'forbidden'
+    }), {
+      status: 403,
+      headers: { 'content-type': 'application/json' }
+    }))
+
+    await expect(new OpenPlatformApiClient(session).readAppSecret(
+      'cli_dingding'
+    )).rejects.toMatchObject({
+      code: 'feishu_connection_error',
+      outcomeUnknown: false
+    })
+  })
+
+  it('still classifies HTTP 401 as an expired Developer Session', async () => {
+    const session = fakeSession(async () => new Response(null, { status: 401 }))
+
+    await expect(new OpenPlatformApiClient(session).readAppSecret(
+      'cli_dingding'
+    )).rejects.toMatchObject({
+      code: 'feishu_developer_session_expired',
+      outcomeUnknown: false
+    })
+  })
+
   it('still classifies an account-login redirect as an expired Developer Session', async () => {
     const session = fakeSession(async () => new Response(null, {
       status: 302,
