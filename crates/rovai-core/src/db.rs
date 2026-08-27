@@ -50,8 +50,10 @@ pub struct Database {
     runtime_camp_files_root_identity_digest: String,
 }
 
-const CURRENT_DATA_CONTRACT_VERSION: &str = "v1.22";
-const CURRENT_PROJECTION_SCHEMA_VERSION: i64 = 63;
+const CURRENT_DATA_CONTRACT_VERSION: &str = "v1.29";
+const CURRENT_PROJECTION_SCHEMA_VERSION: i64 = 64;
+const V109_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.22";
+const V109_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION: i64 = 63;
 const V108_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.21";
 const V108_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION: i64 = 62;
 const V107_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.20";
@@ -169,6 +171,7 @@ struct CurrentMigrationState {
     v106: bool,
     v107: bool,
     v108: bool,
+    v109: bool,
 }
 
 impl CurrentMigrationState {
@@ -178,6 +181,49 @@ impl CurrentMigrationState {
             return false;
         }
         if contract == CURRENT_DATA_CONTRACT_VERSION && schema == CURRENT_PROJECTION_SCHEMA_VERSION
+        {
+            return self.v70
+                && self.v71
+                && self.v76
+                && self.v77
+                && self.v78
+                && self.v79
+                && self.v80
+                && self.v81
+                && self.v82
+                && self.v83
+                && self.v84
+                && self.v85
+                && self.v86
+                && self.v87
+                && self.v88
+                && self.v89
+                && self.v90
+                && self.v91
+                && self.v92
+                && self.v93
+                && self.v94
+                && self.v95
+                && self.v96
+                && self.v97
+                && self.v98
+                && self.v99
+                && self.v100
+                && self.v101
+                && self.v102
+                && self.v103
+                && self.v104
+                && self.v105
+                && self.v106
+                && self.v107
+                && self.v108
+                && self.v109;
+        }
+        if self.v109 {
+            return false;
+        }
+        if contract == V109_MIGRATION_SOURCE_DATA_CONTRACT_VERSION
+            && schema == V109_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION
         {
             return self.v70
                 && self.v71
@@ -1174,7 +1220,8 @@ fn load_current_migration_state(
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 105),
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 106),
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 107),
-               EXISTS(SELECT 1 FROM schema_migration WHERE version = 108)
+               EXISTS(SELECT 1 FROM schema_migration WHERE version = 108),
+               EXISTS(SELECT 1 FROM schema_migration WHERE version = 109)
         "#,
         [],
         |row| {
@@ -1218,6 +1265,7 @@ fn load_current_migration_state(
                 v106: row.get(36)?,
                 v107: row.get(37)?,
                 v108: row.get(38)?,
+                v109: row.get(39)?,
             })
         },
     )
@@ -2669,6 +2717,9 @@ impl Database {
             if !self.schema_migration_applied(108)? {
                 self.migrate_grok_compaction_detector_v108()?;
             }
+            if !self.schema_migration_applied(109)? {
+                self.migrate_workspace_change_observation_v109()?;
+            }
             if let Err(error) =
                 crate::notification::maintain_notification_episode_retention(self.connection())
             {
@@ -3042,6 +3093,9 @@ impl Database {
         }
         if !self.schema_migration_applied(108)? {
             self.migrate_grok_compaction_detector_v108()?;
+        }
+        if !self.schema_migration_applied(109)? {
+            self.migrate_workspace_change_observation_v109()?;
         }
         if let Err(error) =
             crate::notification::maintain_notification_episode_retention(self.connection())
@@ -15371,6 +15425,112 @@ impl Database {
         Ok(())
     }
 
+    fn migrate_workspace_change_observation_v109(&mut self) -> Result<()> {
+        let transaction = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        transaction.execute_batch(
+            r#"
+            ALTER TABLE canonical_runtime_activity
+                ADD COLUMN diff_projection_json TEXT;
+
+            CREATE TABLE workspace_change_window (
+                id TEXT PRIMARY KEY,
+                camp_id TEXT NOT NULL REFERENCES camp(id) ON DELETE CASCADE,
+                canonical_execution_root TEXT NOT NULL,
+                repository_identity_digest TEXT NOT NULL,
+                repository_root TEXT NOT NULL,
+                worktree_git_dir TEXT NOT NULL,
+                git_common_dir TEXT NOT NULL,
+                object_format TEXT NOT NULL CHECK(object_format IN ('sha1', 'sha256')),
+                object_database_dir TEXT NOT NULL,
+                object_alternates_digest TEXT,
+                ref_token TEXT NOT NULL UNIQUE,
+                lifecycle TEXT NOT NULL CHECK(lifecycle IN ('opening', 'active', 'closing', 'closed')),
+                capture_status TEXT NOT NULL CHECK(capture_status IN ('pending', 'baseline_ready', 'complete', 'no_changes', 'unavailable')),
+                capture_profile_version INTEGER NOT NULL,
+                baseline_candidate_oid TEXT,
+                baseline_oid TEXT,
+                final_candidate_oid TEXT,
+                final_oid TEXT,
+                baseline_manifest_blob_id TEXT REFERENCES managed_blob(id),
+                final_manifest_blob_id TEXT REFERENCES managed_blob(id),
+                diff_blob_id TEXT REFERENCES managed_blob(id),
+                baseline_capture_started_at TEXT,
+                baseline_captured_at TEXT,
+                final_capture_started_at TEXT,
+                final_captured_at TEXT,
+                unavailable_reason_code TEXT,
+                external_writer_observed INTEGER NOT NULL DEFAULT 0 CHECK(external_writer_observed IN (0, 1)),
+                files_json TEXT,
+                file_count INTEGER,
+                additions INTEGER,
+                deletions INTEGER,
+                cleanup_error_code TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                CHECK (
+                    (lifecycle = 'opening' AND capture_status = 'pending')
+                    OR (lifecycle = 'active' AND capture_status IN ('baseline_ready', 'unavailable'))
+                    OR (lifecycle = 'closing' AND capture_status IN ('baseline_ready', 'unavailable'))
+                    OR (lifecycle = 'closed' AND capture_status IN ('complete', 'no_changes', 'unavailable'))
+                )
+            );
+            CREATE UNIQUE INDEX workspace_change_window_active_key_unique
+                ON workspace_change_window(
+                    camp_id, canonical_execution_root, repository_identity_digest
+                )
+                WHERE lifecycle IN ('opening', 'active', 'closing');
+            CREATE INDEX workspace_change_window_camp_history_idx
+                ON workspace_change_window(camp_id, final_captured_at, created_at, id);
+
+            CREATE TABLE workspace_change_window_participant (
+                window_id TEXT NOT NULL REFERENCES workspace_change_window(id) ON DELETE CASCADE,
+                agent_run_id TEXT NOT NULL REFERENCES agent_run(id) ON DELETE CASCADE,
+                execution_epoch INTEGER NOT NULL CHECK(execution_epoch >= 1),
+                joined_at TEXT NOT NULL,
+                released_at TEXT,
+                PRIMARY KEY(window_id, agent_run_id, execution_epoch),
+                UNIQUE(agent_run_id, execution_epoch)
+            );
+            CREATE INDEX workspace_change_window_participant_active_idx
+                ON workspace_change_window_participant(window_id, released_at);
+
+            CREATE TABLE workspace_change_completed_evidence (
+                id TEXT PRIMARY KEY,
+                evidence_type TEXT NOT NULL DEFAULT 'WorkspaceDiffCompleted'
+                    CHECK(evidence_type = 'WorkspaceDiffCompleted'),
+                window_id TEXT NOT NULL UNIQUE
+                    REFERENCES workspace_change_window(id) ON DELETE CASCADE,
+                camp_id TEXT NOT NULL REFERENCES camp(id) ON DELETE CASCADE,
+                canonical_execution_root TEXT NOT NULL,
+                participant_runs_json TEXT NOT NULL,
+                files_json TEXT NOT NULL,
+                file_count INTEGER NOT NULL CHECK(file_count > 0),
+                additions INTEGER NOT NULL CHECK(additions >= 0),
+                deletions INTEGER NOT NULL CHECK(deletions >= 0),
+                diff_blob_id TEXT NOT NULL REFERENCES managed_blob(id),
+                baseline_oid TEXT NOT NULL,
+                final_oid TEXT NOT NULL,
+                captured_at TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            );
+            CREATE INDEX workspace_change_completed_evidence_camp_history_idx
+                ON workspace_change_completed_evidence(camp_id, captured_at, id);
+
+            UPDATE rovai_data_contract
+            SET contract_version = 'v1.29', projection_schema_version = 64,
+                reset_reason = NULL, updated_at = datetime('now')
+            WHERE singleton = 1;
+
+            INSERT INTO schema_migration(version, applied_at)
+            VALUES (109, datetime('now'));
+            "#,
+        )?;
+        transaction.commit()?;
+        Ok(())
+    }
+
     fn migrate_pending_camp_activation_v67(&mut self) -> Result<()> {
         let transaction = self
             .connection
@@ -19858,6 +20018,11 @@ fn downgrade_current_schema_to_v102_source_for_test(connection: &Connection) {
             DROP TABLE message_delivery;
             ALTER TABLE message_delivery_v101_source RENAME TO message_delivery;
 
+            DROP TABLE workspace_change_completed_evidence;
+            DROP TABLE workspace_change_window_participant;
+            DROP TABLE workspace_change_window;
+            ALTER TABLE canonical_runtime_activity DROP COLUMN diff_projection_json;
+
             DROP TABLE camp_attachment_publication_resolution;
             DROP INDEX IF EXISTS camp_attachment_publication_revision_unique;
             DROP INDEX IF EXISTS camp_attachment_publication_writer_intent_idx;
@@ -19897,6 +20062,7 @@ fn downgrade_current_schema_to_v102_source_for_test(connection: &Connection) {
             UPDATE rovai_data_contract
             SET contract_version = 'v1.15', projection_schema_version = 56
             WHERE singleton = 1;
+            DELETE FROM schema_migration WHERE version = 109;
             DELETE FROM schema_migration WHERE version = 108;
             DELETE FROM schema_migration WHERE version = 107;
             DELETE FROM schema_migration WHERE version = 106;
@@ -20442,6 +20608,7 @@ mod tests {
             v106: version >= 106,
             v107: version >= 107,
             v108: version >= 108,
+            v109: version >= 109,
         }
     }
 
@@ -20452,6 +20619,12 @@ mod tests {
                 "current",
                 CURRENT_DATA_CONTRACT_VERSION,
                 CURRENT_PROJECTION_SCHEMA_VERSION,
+                109,
+            ),
+            (
+                "v1.22/schema-63",
+                V109_MIGRATION_SOURCE_DATA_CONTRACT_VERSION,
+                V109_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION,
                 108,
             ),
             (
@@ -20736,7 +20909,7 @@ mod tests {
             )
             .expect("current contract marker should load");
 
-        assert_eq!(state, migration_state_through(108));
+        assert_eq!(state, migration_state_through(109));
         assert!(state.admits(&contract, schema));
         assert!(has_admissible_data_contract(
             &directory.join("rovai.sqlite")
@@ -22721,6 +22894,79 @@ mod tests {
     }
 
     #[test]
+    fn v109_adds_runtime_diff_projection_and_workspace_change_window_storage() {
+        let directory = std::env::temp_dir().join(format!("rovai-db-v109-test-{}", Uuid::new_v4()));
+        let mut database = crate::test_support::fresh_schema_database_fast_at(&directory);
+        database
+            .connection()
+            .execute_batch(
+                r#"
+                PRAGMA foreign_keys = OFF;
+                DROP TABLE workspace_change_completed_evidence;
+                DROP TABLE workspace_change_window_participant;
+                DROP TABLE workspace_change_window;
+                ALTER TABLE canonical_runtime_activity DROP COLUMN diff_projection_json;
+                DELETE FROM schema_migration WHERE version = 109;
+                UPDATE rovai_data_contract
+                SET contract_version = 'v1.22', projection_schema_version = 63
+                WHERE singleton = 1;
+                PRAGMA foreign_keys = ON;
+                "#,
+            )
+            .unwrap();
+
+        database
+            .migrate_workspace_change_observation_v109()
+            .unwrap();
+
+        assert!(
+            table_columns(database.connection(), "canonical_runtime_activity")
+                .unwrap()
+                .contains(&"diff_projection_json".to_string())
+        );
+        for table in [
+            "workspace_change_window",
+            "workspace_change_window_participant",
+            "workspace_change_completed_evidence",
+        ] {
+            assert_eq!(
+                database
+                    .connection()
+                    .query_row(
+                        "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?1)",
+                        [table],
+                        |row| row.get::<_, bool>(0),
+                    )
+                    .unwrap(),
+                true
+            );
+        }
+        assert_eq!(
+            database
+                .connection()
+                .query_row(
+                    "SELECT contract_version, projection_schema_version FROM rovai_data_contract WHERE singleton = 1",
+                    [],
+                    |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)),
+                )
+                .unwrap(),
+            ("v1.29".to_string(), 64)
+        );
+        assert_eq!(
+            database
+                .connection()
+                .query_row("SELECT COUNT(*) FROM pragma_foreign_key_check", [], |row| {
+                    row.get::<_, i64>(0)
+                })
+                .unwrap(),
+            0
+        );
+
+        drop(database);
+        std::fs::remove_dir_all(directory).expect("temporary database should be removable");
+    }
+
+    #[test]
     fn v108_adds_grok_compaction_closed_sets_and_preserves_observer_state() {
         let directory = std::env::temp_dir().join(format!("rovai-db-v108-test-{}", Uuid::new_v4()));
         let mut database = crate::test_support::fresh_schema_database_fast_at(&directory);
@@ -22816,7 +23062,12 @@ mod tests {
             .connection()
             .execute_batch(
                 r#"
+                DROP TABLE workspace_change_completed_evidence;
+                DROP TABLE workspace_change_window_participant;
+                DROP TABLE workspace_change_window;
+                ALTER TABLE canonical_runtime_activity DROP COLUMN diff_projection_json;
                 PRAGMA foreign_keys = ON;
+                DELETE FROM schema_migration WHERE version = 109;
                 DELETE FROM schema_migration WHERE version = 108;
                 UPDATE rovai_data_contract
                 SET contract_version = 'v1.21', projection_schema_version = 62

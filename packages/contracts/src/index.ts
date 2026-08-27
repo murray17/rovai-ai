@@ -1189,12 +1189,32 @@ export interface AgentRunDiagnosticGitObservation {
   observedAt: string
 }
 
+export interface CanonicalRuntimeDiffEntryView {
+  path: string
+  changeKind: 'add' | 'delete' | 'update'
+  additions: number
+  deletions: number
+  diff: string
+}
+
+export interface CanonicalRuntimeDiffProjectionView {
+  schemaVersion: 1
+  source: 'runtime_reported'
+  revision: number
+  sourceEvidenceIds: string[]
+  status: 'available' | 'unavailable' | 'conflict'
+  semanticKind?: 'unified_diff_snapshot' | 'complete_before_after'
+  entries?: CanonicalRuntimeDiffEntryView[]
+  safeReasonCode?: string
+}
+
 export interface CanonicalRuntimeActivityView {
   operationId: string
   activityDomain: string
   semanticKind: string | null
   toolName: string | null
   presentationHint: string | null
+  diffProjection?: CanonicalRuntimeDiffProjectionView | null
   phase: 'started' | 'progress' | 'terminal'
   outcome: 'succeeded' | 'failed' | 'denied' | 'cancelled' | 'not_executed' | 'unsettled' | 'unknown'
   credibility: 'core_verified' | 'runtime_structured' | 'runtime_reported' | 'unknown' | string
@@ -1455,8 +1475,34 @@ export interface DomainEventView {
   createdAt: string
 }
 
+export interface WorkspaceChangedFileView {
+  path: string
+  changeKind: string
+  additions: number
+  deletions: number
+}
+
+export interface WorkspaceChangeWindowView {
+  schemaVersion: 1
+  windowId: string
+  captureStatus: 'complete' | 'no_changes' | 'unavailable'
+  executionRootLabel: string
+  files: WorkspaceChangedFileView[]
+  fileCount: number
+  additions: number
+  deletions: number
+  capturedAt: string
+  hasDiffContent: boolean
+}
+
+export interface WorkspaceChangeWindowDiffView {
+  schemaVersion: 1
+  window: WorkspaceChangeWindowView
+  diff: string
+}
+
 export interface CampSnapshot {
-  schemaVersion: 32
+  schemaVersion: 33
   throughGlobalSequence: number
   camp: {
     id: string
@@ -1476,6 +1522,7 @@ export interface CampSnapshot {
   turns: CampTurnView[]
   agentRuns: AgentRunView[]
   executionEvidence: AgentRunExecutionEvidenceView[]
+  workspaceChangeWindows: WorkspaceChangeWindowView[]
   contextManifests: ContextManifestView[]
   approvals: ActionApprovalView[]
   actions: ActionView[]
@@ -1496,7 +1543,7 @@ export interface CampOpenMessageCoverage extends CampOpenCollectionCoverage {
 }
 
 export interface CampOpenProjection {
-  schemaVersion: 3
+  schemaVersion: 4
   throughGlobalSequence: number
   camp: CampSnapshot['camp']
   members: CampMemberView[]
@@ -1506,6 +1553,7 @@ export interface CampOpenProjection {
   turns: CampTurnView[]
   agentRuns: AgentRunView[]
   executionEvidence: AgentRunExecutionEvidenceView[]
+  workspaceChangeWindows: WorkspaceChangeWindowView[]
   approvals: ActionApprovalView[]
   timeline: DomainEventView[]
   coverage: {
@@ -2542,6 +2590,7 @@ export type CoreMethod =
   | 'agentRuns.diagnostic.get'
   | 'agentRuns.resolveRecoveryBlocker'
   | 'camps.snapshot'
+  | 'workspaceChangeWindows.getDiff'
   | 'camp.messages.page'
   | 'camp.messages.around'
   | 'camp.messages.find'

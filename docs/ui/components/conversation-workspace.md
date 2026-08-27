@@ -2,7 +2,7 @@
 document_type: ui-component-contract
 authority: renderer-camp-workspace
 status: accepted
-last_updated: 2026-08-21
+last_updated: 2026-08-27
 ---
 
 # Camp 会话工作区
@@ -247,6 +247,24 @@ disclosure 继续在原位渲染完整公开结果，不再截断，不再提供
 对应 summary。底部和 Inspector 复用同一行为。仍不显示 standalone raw Evidence、Envelope JSON 或独立
 “查看完整工具调用”。精确合同见
 [Run Process Detail Surface v19](../../contracts/run-process-detail-surface-v19.md)。
+
+### Runtime 终态文件变更与 Workspace Change Window
+
+只有 [Workspace Change Observation v1](../../contracts/workspace-change-observation-v1.md)准入的可靠终态文件
+Evidence 才进入文件变更呈现。一条 Canonical Activity 的多个 change 直接成为对应 Run stage 中的同级
+`修改 <basename> +A −D` 行；每行复用现有 File Tool 图标并独立展开 inline unified diff。Renderer 不显示
+`apply_patch` 父行或“编辑了 N 个文件”聚合层，不从 started/incremental patch、Tool input、路径或命令文本推测修改，
+也不为逐文件行创建新的 Activity identity。没有可靠终态内容时保留普通 Tool Activity，或在只剩
+`apply_patch` 实现细节时不渲染该实现行。
+
+Git Workspace Change Window 的完成 Evidence 按 `capturedAt` 进入既有会话时间线并保留连接轨道。卡片主标题固定
+为 `Files Changed`，显示总文件数与 `+ / −`、顶格且无行分隔的完整相对路径；右侧唯一动作是黑色文字、低强调
+边框的 `View`。卡片不显示时间、“已保存”、参与运行、独立工作区或底部 metadata。每个完成 Window 生成独立
+历史卡片，后续 Window 不覆盖旧卡；`no_changes`、`unavailable` 与非 Git root 不生成卡片。
+
+`View` 在当前 Camp workspace 内打开只读完整 diff，读取不可变 `WorkspaceDiffCompleted` Evidence 与 Managed Blob，
+不重新执行 Git diff、不读取当前 workspace，也不跳转单个文件。关闭后返回原会话；执行台不增加 Workspace
+observation，底部/右侧 placement、会话连接轨与 Tool list 整行宽度保持原有结构。
 
 使用“Agent 运行时默认”的 Run 在既有 `.execution-run-meta` 中保持一个模型字段：尚无可信观测时显示
 “模型 Agent 运行时默认”，首次 Runtime-native 观测到达后原位收敛为“模型 {modelId} · 默认”。固定模型

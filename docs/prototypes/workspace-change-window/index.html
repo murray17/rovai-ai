@@ -1,0 +1,1416 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="day">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Rovai AI · Change Evidence 设计稿</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --canvas: #eceeef;
+      --surface: #fbfbfa;
+      --surface-raised: #ffffff;
+      --surface-subtle: #f0f2f4;
+      --surface-muted: #e7eaed;
+      --surface-selected: #e9ecee;
+      --surface-hover: #e8eaea;
+      --surface-sunken: #e4e8eb;
+      --workspace-surface-subtle: #f4f5f4;
+      --workspace-surface-raised: #ffffff;
+      --workspace-surface-hover: #e8ebec;
+      --workspace-surface-selected: #e4eaee;
+      --workspace-line: #d5dadd;
+      --workspace-line-strong: #bdc6ca;
+      --workspace-steel: #476b85;
+      --workspace-steel-ink: #34576f;
+      --workspace-attention-soft: #f4ecdf;
+      --workspace-faint: #71808a;
+      --conversation-surface: #ffffff;
+      --inspector-surface: #ffffff;
+      --conversation-inspector-line: #c7cfd6;
+      --topbar: #fbfbfa;
+      --input: #ffffff;
+      --ink: #171b20;
+      --muted: #616a73;
+      --faint: #6e7382;
+      --line: #dfe4e8;
+      --line-strong: #c7cfd6;
+      --control-line: #8b9389;
+      --rail: #f3f4f4;
+      --rail-ink: #626b72;
+      --rail-line: #dadde0;
+      --rail-logo: #526f88;
+      --brand: #526f88;
+      --brand-hover: #3d5874;
+      --brand-contrast: #ffffff;
+      --brand-soft: #e9eef3;
+      --brand-ink: #405f7e;
+      --ember: #d3a45f;
+      --success: #3e775c;
+      --success-soft: #e7f1ea;
+      --attention: #8a6226;
+      --attention-soft: #f8edda;
+      --danger: #a24c46;
+      --danger-soft: #f7e6e3;
+      --info: #416c86;
+      --info-soft: #e5eef3;
+      --neutral: #5f6678;
+      --neutral-soft: #ecefe9;
+      --focus: #526f88;
+      --focus-soft: rgba(82, 111, 136, .16);
+      --identity-1: #a65f4a;
+      --identity-2: #39777a;
+      --identity-3: #74628f;
+      --identity-4: #9a6a32;
+      --evidence-canvas: #f4f6f3;
+      --evidence-surface: #ffffff;
+      --evidence-ink: #252a36;
+      --evidence-muted: #5f6678;
+      --evidence-line: #d5dad3;
+      --diff-add: #2f694d;
+      --diff-add-soft: #e4f0e8;
+      --diff-remove: #8f3f3a;
+      --diff-remove-soft: #f5e4e1;
+      --diff-hunk-soft: #e5eceb;
+      --shadow-float: 0 18px 56px rgba(38, 45, 58, .14);
+      --rail-width: 270px;
+      --inspector-width: 310px;
+      --sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", "Segoe UI", sans-serif;
+      --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    }
+
+    :root[data-theme="night"] {
+      color-scheme: dark;
+      --canvas: #0d1114;
+      --surface: #151a1e;
+      --surface-raised: #1b2227;
+      --surface-subtle: #1a2024;
+      --surface-muted: #242d33;
+      --surface-selected: #222c33;
+      --surface-hover: #1d252b;
+      --surface-sunken: #10161a;
+      --workspace-surface-subtle: #11171b;
+      --workspace-surface-raised: #1c2328;
+      --workspace-surface-hover: #1d252a;
+      --workspace-surface-selected: #22303a;
+      --workspace-line: #2b353b;
+      --workspace-line-strong: #3d4950;
+      --workspace-steel: #8fadc0;
+      --workspace-steel-ink: #b8d0df;
+      --workspace-attention-soft: #302617;
+      --workspace-faint: #8998a1;
+      --conversation-surface: #181d21;
+      --inspector-surface: #171d21;
+      --conversation-inspector-line: #53616b;
+      --topbar: #151a1e;
+      --input: #1b2227;
+      --ink: #e7ecef;
+      --muted: #abb5bc;
+      --faint: #919da6;
+      --line: #333e46;
+      --line-strong: #53616b;
+      --control-line: #687b88;
+      --rail: #11161a;
+      --rail-ink: #a6b1b8;
+      --rail-line: #313b43;
+      --rail-logo: #b1c8d8;
+      --brand: #7897ae;
+      --brand-hover: #b1c8d8;
+      --brand-contrast: #091116;
+      --brand-soft: #22303a;
+      --brand-ink: #c0d4e1;
+      --ember: #d2aa72;
+      --success: #82b695;
+      --success-soft: #1a2b22;
+      --attention: #d2ac70;
+      --attention-soft: #302719;
+      --danger: #d6857f;
+      --danger-soft: #321e1d;
+      --info: #83afc9;
+      --info-soft: #182832;
+      --neutral: #abb5bc;
+      --neutral-soft: #242d33;
+      --focus: #8fb3cb;
+      --focus-soft: rgba(143, 179, 203, .18);
+      --identity-1: #c98572;
+      --identity-2: #70b0ae;
+      --identity-3: #a89ac8;
+      --identity-4: #d0a46c;
+      --evidence-canvas: #12191d;
+      --evidence-surface: #171f24;
+      --evidence-ink: #dce4e9;
+      --evidence-muted: #9eabb3;
+      --evidence-line: #35424a;
+      --diff-add: #92c7a5;
+      --diff-add-soft: #1a2b22;
+      --diff-remove: #e09a94;
+      --diff-remove-soft: #321e1d;
+      --diff-hunk-soft: #1b272a;
+      --shadow-float: 0 22px 64px rgba(0, 0, 0, .42);
+    }
+
+    * { box-sizing: border-box; }
+    [hidden] { display: none !important; }
+    html, body { width: 100%; height: 100%; min-width: 1040px; margin: 0; }
+    body {
+      display: flex;
+      overflow: hidden;
+      flex-direction: column;
+      color: var(--ink);
+      background: var(--canvas);
+      font-family: var(--sans);
+      font-size: 13px;
+      line-height: 1.6;
+      text-rendering: optimizeLegibility;
+    }
+    button, select, input { color: inherit; font: inherit; }
+    button:active:not(:disabled) { transform: translateY(1px); }
+    :where(button, select, input, [tabindex]):focus-visible {
+      outline: 2px solid var(--focus);
+      outline-offset: 2px;
+    }
+    code, pre { font-family: var(--mono); }
+    ::selection { color: var(--ink); background: var(--focus-soft); }
+    * { scrollbar-color: var(--control-line) transparent; scrollbar-width: thin; }
+    .sr-only {
+      position: absolute !important;
+      width: 1px !important;
+      height: 1px !important;
+      margin: -1px !important;
+      overflow: hidden !important;
+      clip: rect(0, 0, 0, 0) !important;
+      white-space: nowrap !important;
+    }
+    .icon {
+      display: block;
+      width: 100%;
+      height: 100%;
+      fill: none;
+      stroke: currentColor;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+      stroke-width: 1.5;
+      vector-effect: non-scaling-stroke;
+    }
+
+    .prototype-bar {
+      position: relative;
+      z-index: 20;
+      display: flex;
+      min-height: 58px;
+      flex: 0 0 auto;
+      align-items: center;
+      gap: 16px;
+      padding: 7px 14px;
+      border-bottom: 1px solid var(--line-strong);
+      background: var(--surface-raised);
+    }
+    .prototype-heading { display: grid; min-width: 224px; gap: 1px; }
+    .prototype-heading strong { font-size: 12.5px; letter-spacing: -.01em; white-space: nowrap; }
+    .prototype-heading span { color: var(--faint); font-size: 9.5px; line-height: 1.35; }
+    .prototype-controls {
+      display: flex;
+      min-width: 0;
+      flex: 1 1 auto;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 8px;
+    }
+    .prototype-field { display: inline-flex; align-items: center; gap: 5px; }
+    .prototype-field > span { color: var(--faint); font-size: 9.5px; white-space: nowrap; }
+    .segments {
+      display: inline-flex;
+      min-height: 30px;
+      align-items: center;
+      gap: 2px;
+      padding: 2px;
+      border: 1px solid var(--line-strong);
+      border-radius: 7px;
+      background: var(--surface-subtle);
+    }
+    .segments button {
+      min-height: 24px;
+      padding: 0 8px;
+      border: 0;
+      border-radius: 5px;
+      color: var(--muted);
+      background: transparent;
+      cursor: pointer;
+      font-size: 10px;
+      font-weight: 680;
+      white-space: nowrap;
+    }
+    .segments button:hover { color: var(--ink); background: var(--surface-hover); }
+    .segments button[aria-pressed="true"] {
+      color: var(--brand-ink);
+      background: var(--surface-raised);
+      box-shadow: 0 1px 2px rgba(22, 30, 38, .08);
+    }
+    .prototype-select {
+      height: 30px;
+      min-width: 104px;
+      padding: 0 26px 0 8px;
+      border: 1px solid var(--line-strong);
+      border-radius: 7px;
+      color: var(--muted);
+      background: var(--surface-subtle);
+      font-size: 10px;
+    }
+    .prototype-select:disabled { cursor: default; opacity: .52; }
+
+    .prototype-stage { min-height: 0; flex: 1 1 auto; padding: 10px; }
+    .app-shell {
+      display: grid;
+      width: min(1520px, 100%);
+      height: 100%;
+      min-width: 0;
+      min-height: 0;
+      margin: 0 auto;
+      overflow: hidden;
+      grid-template-columns: var(--rail-width) minmax(0, 1fr);
+      grid-template-rows: 50px minmax(0, 1fr);
+      border: 1px solid var(--line-strong);
+      border-radius: 10px;
+      background: var(--conversation-surface);
+      box-shadow: var(--shadow-float);
+    }
+
+    .rail {
+      display: flex;
+      min-width: 0;
+      grid-column: 1;
+      grid-row: 1 / -1;
+      flex-direction: column;
+      border-right: 1px solid var(--rail-line);
+      color: var(--rail-ink);
+      background: var(--rail);
+    }
+    .rail-drag { height: 28px; flex: 0 0 28px; }
+    .rail-brand {
+      display: flex;
+      min-height: 40px;
+      align-items: center;
+      gap: 9px;
+      padding: 0 16px;
+      color: var(--ink);
+      font-size: 14px;
+      font-weight: 750;
+    }
+    .brand-mark { position: relative; width: 22px; height: 22px; color: var(--rail-logo); }
+    .brand-star {
+      position: absolute;
+      top: 1px;
+      left: 6px;
+      width: 10px;
+      height: 10px;
+      background: currentColor;
+      clip-path: polygon(50% 0, 62% 38%, 100% 50%, 62% 62%, 50% 100%, 38% 62%, 0 50%, 38% 38%);
+    }
+    .brand-horizon {
+      position: absolute;
+      right: 2px;
+      bottom: 3px;
+      left: 2px;
+      height: 8px;
+      border-top: 1.8px solid currentColor;
+      border-radius: 50% 50% 0 0;
+    }
+    .brand-horizon::after {
+      position: absolute;
+      top: -3px;
+      left: 50%;
+      width: 4px;
+      height: 4px;
+      border-radius: 50%;
+      background: var(--ember);
+      content: "";
+      transform: translateX(-50%);
+    }
+    .rail-primary { display: grid; gap: 2px; padding: 10px 10px 6px; }
+    .rail-action, .rail-row, .camp-row, .settings-row {
+      display: grid;
+      width: 100%;
+      min-width: 0;
+      min-height: 36px;
+      grid-template-columns: 20px minmax(0, 1fr) auto;
+      align-items: center;
+      gap: 8px;
+      padding: 0 9px;
+      border: 0;
+      border-radius: 7px;
+      color: var(--rail-ink);
+      background: transparent;
+      text-align: left;
+      cursor: pointer;
+      font-size: 12px;
+    }
+    .rail-action:hover, .rail-row:hover, .camp-row:hover, .settings-row:hover { color: var(--ink); background: var(--surface-hover); }
+    .rail-action > span:first-child, .rail-row > span:first-child, .settings-row > span:first-child { display: grid; width: 18px; height: 18px; place-items: center; }
+    .rail-action svg, .rail-row svg, .settings-row svg { width: 16px; height: 16px; }
+    .jump-box {
+      display: flex;
+      min-height: 34px;
+      align-items: center;
+      justify-content: space-between;
+      margin: 6px 10px 15px;
+      padding: 0 10px;
+      border: 1px solid var(--rail-line);
+      border-radius: 7px;
+      color: var(--faint);
+      background: var(--surface-raised);
+      font-size: 10px;
+    }
+    .jump-box kbd { padding: 1px 5px; border: 1px solid var(--rail-line); border-radius: 4px; background: var(--surface-subtle); font: 9px/1.4 var(--sans); }
+    .rail-section { display: grid; min-height: 0; gap: 3px; padding: 0 10px; }
+    .rail-section-title { padding: 0 8px 5px; color: var(--muted); font-size: 10px; font-weight: 750; letter-spacing: .06em; }
+    .project-row { display: grid; min-height: 36px; grid-template-columns: 18px minmax(0, 1fr) auto; align-items: center; gap: 7px; padding: 0 8px; border-radius: 7px; color: var(--ink); font-size: 11.5px; font-weight: 650; }
+    .project-row svg { width: 15px; height: 15px; color: var(--rail-ink); }
+    .project-row button { width: 24px; height: 24px; border: 0; border-radius: 5px; color: var(--rail-ink); background: transparent; cursor: pointer; }
+    .project-row button:hover { color: var(--ink); background: var(--surface-hover); }
+    .camp-list { display: grid; gap: 1px; padding-left: 4px; }
+    .camp-row { position: relative; min-height: 34px; grid-template-columns: minmax(0, 1fr) auto; padding-left: 21px; font-size: 11.5px; }
+    .camp-row.selected { color: var(--ink); background: var(--surface-selected); font-weight: 650; }
+    .camp-row.selected::before { position: absolute; top: 7px; bottom: 7px; left: 5px; width: 2px; border-radius: 2px; background: var(--brand); content: ""; }
+    .camp-row small { color: var(--faint); font-size: 8px; }
+    .rail-spacer { flex: 1 1 auto; }
+    .rail-footer { padding: 8px 10px 12px; border-top: 1px solid var(--rail-line); }
+
+    .app-topbar {
+      display: flex;
+      min-width: 0;
+      grid-column: 2;
+      grid-row: 1;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      padding: 0 14px 0 18px;
+      border-bottom: 1px solid var(--line);
+      background: var(--topbar);
+    }
+    .breadcrumb { display: flex; min-width: 0; align-items: baseline; gap: 7px; }
+    .breadcrumb span { color: var(--faint); font-size: 11px; }
+    .breadcrumb strong { overflow: hidden; color: var(--ink); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+    .day-badge { padding: 2px 6px; border-radius: 5px; color: var(--muted); background: var(--surface-muted); font: 9px/1.4 var(--mono); }
+    .topbar-actions { display: flex; align-items: center; gap: 5px; }
+    .view-tabs { display: inline-flex; padding: 2px; border: 1px solid var(--line); border-radius: 7px; background: var(--surface-subtle); }
+    .view-tabs button { min-width: 42px; min-height: 26px; padding: 0 8px; border: 0; border-radius: 5px; color: var(--muted); background: transparent; cursor: pointer; font-size: 10px; font-weight: 650; }
+    .view-tabs button.active { color: var(--brand-ink); background: var(--surface-raised); }
+    .icon-button { display: grid; width: 30px; height: 30px; place-items: center; border: 0; border-radius: 6px; color: var(--muted); background: transparent; cursor: pointer; }
+    .icon-button:hover { color: var(--ink); background: var(--surface-hover); }
+    .icon-button svg { width: 16px; height: 16px; }
+
+    .app-main { min-width: 0; min-height: 0; grid-column: 2; grid-row: 2; background: var(--conversation-surface); }
+    .context-view { display: grid; width: 100%; height: 100%; min-width: 0; min-height: 0; grid-template-columns: minmax(0, 1fr) var(--inspector-width); }
+    .conversation { display: flex; min-width: 0; min-height: 0; flex-direction: column; background: var(--conversation-surface); }
+    .timeline { min-height: 0; flex: 1 1 auto; overflow: auto; padding: 18px 34px 28px; }
+    .timeline-track { width: min(760px, 100%); margin: 0 auto; }
+    .day-divider { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 12px; margin: 0 0 18px; color: var(--faint); font: 9px/1.4 var(--mono); letter-spacing: .05em; }
+    .day-divider::before, .day-divider::after { height: 1px; background: var(--line); content: ""; }
+    .message { display: grid; grid-template-columns: 30px minmax(0, 1fr); gap: 11px; margin: 0 0 20px; }
+    .avatar { display: grid; width: 30px; height: 30px; place-items: center; border: 1px solid color-mix(in srgb, currentColor 42%, var(--line)); border-radius: 50%; color: var(--identity-2); background: color-mix(in srgb, currentColor 8%, var(--surface)); font-size: 10px; font-weight: 760; }
+    .avatar.you { color: var(--brand); }
+    .avatar.member-two { color: var(--identity-4); }
+    .message-main { min-width: 0; }
+    .message-head { display: flex; align-items: baseline; gap: 7px; margin-bottom: 4px; }
+    .message-head strong { font-size: 11.5px; }
+    .message-head span { color: var(--faint); font: 9px/1.4 var(--mono); }
+    .message-body { color: var(--ink); font-size: 12.5px; line-height: 1.72; }
+    .message-body p { margin: 0 0 8px; }
+    .message-body p:last-child { margin-bottom: 0; }
+    .mention { color: var(--brand-ink); font-weight: 680; }
+    .inline-code { padding: 0 3px; border-radius: 3px; color: var(--evidence-ink); background: var(--surface-subtle); font: 10.5px/1.5 var(--mono); }
+    .agent-note { margin-top: 9px; padding: 9px 10px; border-left: 2px solid var(--brand); color: var(--muted); background: var(--surface-subtle); font-size: 10.5px; line-height: 1.55; }
+    .workspace-evidence-event { margin: 2px 0 18px 41px; }
+    .resource-card { min-width: 0; overflow: hidden; border: 1px solid var(--evidence-line); border-radius: 9px; background: var(--evidence-surface); }
+    .resource-header { display: grid; width: 100%; min-width: 0; min-height: 52px; grid-template-columns: 32px minmax(0, 1fr) auto; align-items: center; gap: 9px; padding: 8px 10px; color: var(--evidence-ink); background: transparent; }
+    .resource-icon { display: grid; width: 32px; height: 32px; place-items: center; border-radius: 7px; color: var(--workspace-steel-ink); background: var(--workspace-surface-selected); }
+    .resource-icon svg { width: 16px; height: 16px; }
+    .resource-copy { display: grid; min-width: 0; gap: 1px; }
+    .resource-copy strong { overflow: hidden; font-size: 11.5px; text-overflow: ellipsis; white-space: nowrap; }
+    .resource-subtitle { min-height: 14px; color: var(--evidence-muted); font-size: 9px; line-height: 1.45; }
+    .resource-view-button { min-width: 48px; min-height: 28px; padding: 0 10px; border: 1px solid color-mix(in srgb, var(--control-line) 42%, var(--line)); border-radius: 6px; color: var(--ink); background: var(--surface-raised); cursor: pointer; font-size: 9.5px; font-weight: 700; }
+    .resource-view-button:hover { color: var(--ink); background: var(--surface-hover); }
+    .resource-files { border-top: 1px solid var(--evidence-line); }
+    .resource-file-row, .resource-more { display: flex; width: 100%; min-width: 0; min-height: 34px; align-items: center; gap: 8px; padding: 4px 10px; border: 0; color: var(--evidence-ink); background: color-mix(in srgb, var(--evidence-surface) 72%, transparent); text-align: left; }
+    .resource-more { cursor: pointer; }
+    .resource-more:hover { background: var(--surface-hover); }
+    .resource-path { display: flex; min-width: 0; flex: 1 1 auto; align-items: center; overflow: hidden; font: 8.5px/1.4 var(--mono); white-space: nowrap; }
+    .resource-path-dir { overflow: hidden; color: var(--evidence-muted); text-overflow: ellipsis; }
+    .resource-path-base { flex: 0 0 auto; color: var(--evidence-ink); }
+    .resource-file-stats { display: inline-flex; flex: 0 0 auto; align-items: center; gap: 6px; font: 8.5px/1.35 var(--mono); }
+    .resource-more { justify-content: flex-start; color: var(--muted); font-size: 9px; }
+    .resource-more svg { width: 12px; height: 12px; transition: transform 150ms ease-out; }
+    .resource-more[aria-expanded="true"] svg { transform: rotate(180deg); }
+    .workspace-evidence-event[hidden] { display: none; }
+    .composer-zone { flex: 0 0 auto; padding: 0 28px 14px; }
+    .composer-route { width: min(860px, 100%); margin: 0 auto 6px; padding-left: 8px; border-left: 2px solid var(--brand); color: var(--muted); font-size: 9.5px; }
+    .composer { display: grid; width: min(860px, 100%); min-height: 86px; margin: 0 auto; grid-template-rows: minmax(0, 1fr) auto; padding: 10px 11px 8px; border: 1px solid var(--control-line); border-radius: 9px; background: var(--input); }
+    .composer textarea { min-height: 40px; resize: none; border: 0; outline: 0; color: var(--ink); background: transparent; font: 12px/1.5 var(--sans); }
+    .composer textarea::placeholder { color: var(--faint); }
+    .composer-footer { display: flex; align-items: center; justify-content: space-between; }
+    .composer-attach { display: grid; width: 27px; height: 27px; place-items: center; border: 0; border-radius: 5px; color: var(--muted); background: transparent; cursor: pointer; }
+    .composer-attach svg { width: 16px; height: 16px; }
+    .send-button { min-width: 50px; height: 29px; border: 0; border-radius: 6px; color: var(--brand-contrast); background: var(--brand); cursor: pointer; font-size: 10px; font-weight: 700; }
+
+    .inspector { display: flex; min-width: 0; min-height: 0; flex-direction: column; border-left: 1px solid var(--conversation-inspector-line); background: var(--inspector-surface); }
+    .inspector-tabs { display: flex; min-height: 39px; flex: 0 0 auto; padding: 0 8px; border-bottom: 1px solid var(--line); }
+    .inspector-tabs button { position: relative; min-width: 0; min-height: 38px; flex: 1 1 0; border: 0; color: var(--muted); background: transparent; cursor: pointer; font-size: 11px; }
+    .inspector-tabs button.active { color: var(--ink); box-shadow: inset 0 -2px 0 var(--brand); font-weight: 700; }
+    .inspector-tabs small { color: var(--faint); font: 9px/1.2 var(--mono); }
+    .inspector-scroll { min-height: 0; flex: 1 1 auto; overflow: auto; }
+    .run-selector { padding: 7px 8px 6px; border-bottom: 1px solid var(--line); }
+    .run-selector-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 5px; }
+    .run-selector-title { display: flex; align-items: center; gap: 6px; color: var(--brand-ink); font-size: 9.5px; font-weight: 760; letter-spacing: .05em; }
+    .run-selector-title svg { width: 16px; height: 14px; }
+    .run-selector-head button { border: 0; color: var(--muted); background: transparent; cursor: pointer; font-size: 9px; }
+    .run-chip { display: grid; width: 100%; min-height: 40px; grid-template-columns: 25px minmax(0, 1fr) auto; align-items: center; gap: 7px; margin-top: 2px; padding: 5px 7px; border: 1px solid transparent; border-radius: 7px; color: var(--ink); background: transparent; text-align: left; cursor: pointer; }
+    .run-chip:hover { background: var(--surface-hover); }
+    .run-chip.selected { border-color: var(--control-line); background: var(--brand-soft); }
+    .mini-avatar { display: grid; width: 24px; height: 24px; place-items: center; border: 1px solid color-mix(in srgb, currentColor 40%, var(--line)); border-radius: 50%; color: var(--identity-2); background: color-mix(in srgb, currentColor 7%, var(--surface)); font-size: 8px; font-weight: 760; }
+    .mini-avatar.alt { color: var(--identity-4); }
+    .run-chip-copy { display: grid; min-width: 0; gap: 1px; }
+    .run-chip-copy strong, .run-chip-copy small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .run-chip-copy strong { font-size: 10.5px; }
+    .run-chip-copy small { color: var(--faint); font-size: 8.5px; }
+    .state-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--success); }
+    .state-dot.info { background: var(--info); box-shadow: 0 0 0 3px var(--info-soft); }
+
+    .drawer-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; padding: 10px 10px 9px; border-bottom: 1px solid var(--line); background: color-mix(in srgb, var(--surface) 96%, var(--brand-soft)); }
+    .drawer-agent { display: flex; min-width: 0; align-items: flex-start; gap: 7px; }
+    .drawer-agent-copy { display: grid; min-width: 0; gap: 1px; }
+    .drawer-agent-copy strong { overflow: hidden; font-size: 10.5px; text-overflow: ellipsis; white-space: nowrap; }
+    .drawer-agent-copy small { color: var(--faint); font-size: 8.5px; }
+    .quiet-button { min-height: 27px; padding: 0 7px; border: 1px solid var(--line); border-radius: 6px; color: var(--muted); background: var(--surface); cursor: pointer; font-size: 9px; }
+    .quiet-button:hover { color: var(--ink); border-color: var(--control-line); }
+    .run-timeline { position: relative; padding: 10px 10px 16px 32px; }
+    .run-timeline::before { position: absolute; top: 17px; bottom: 18px; left: 16px; width: 1px; background: var(--line-strong); content: ""; }
+    .run-stage { position: relative; padding: 9px; border: 1px solid color-mix(in srgb, var(--info) 46%, var(--line)); border-radius: 8px; background: color-mix(in srgb, var(--surface-raised) 88%, var(--info-soft)); }
+    .run-stage::before { position: absolute; top: 12px; left: -23px; width: 9px; height: 9px; border: 2px solid var(--info); border-radius: 50%; background: var(--info-soft); box-shadow: 0 0 0 2px var(--inspector-surface); content: ""; }
+    .run-stage-head { display: flex; align-items: center; flex-wrap: wrap; gap: 5px 7px; }
+    .run-stage-head time { font: 700 9.5px/1.35 var(--mono); }
+    .run-stage-head span { color: var(--info); font-size: 8.5px; font-weight: 760; }
+    .current-badge { padding: 2px 5px; border-radius: 999px; color: var(--info); background: var(--info-soft); font-size: 7.5px !important; }
+    .run-meta { display: flex; flex-wrap: wrap; gap: 4px 7px; margin-top: 4px; color: var(--faint); font-size: 8px; }
+    .run-meta code { color: var(--evidence-muted); font: 8px/1.3 var(--mono); }
+    .tool-list { display: grid; gap: 3px; margin-top: 9px; padding-top: 7px; border-top: 1px solid var(--line); }
+    .tool-row { display: grid; min-height: 26px; grid-template-columns: 16px minmax(0, 1fr) 16px 18px; align-items: center; gap: 6px; padding: 1px 2px; color: var(--muted); }
+    .tool-row:hover { color: var(--ink); background: var(--surface-hover); }
+    .tool-row svg { width: 14px; height: 14px; }
+    .tool-row strong { overflow: hidden; font: 500 9.5px/1.35 var(--mono); text-overflow: ellipsis; white-space: nowrap; }
+    .tool-row .state-dot { width: 6px; height: 6px; justify-self: center; }
+    .chevron { color: var(--faint); font-size: 10px; text-align: center; }
+    .file-change-activity-host { display: contents; }
+    .file-change-row { min-width: 0; }
+    .file-change-row > summary { list-style: none; }
+    .file-change-row > summary::-webkit-details-marker { display: none; }
+    .file-change-row > summary::marker { display: none; content: ""; }
+    .file-change-row-summary { display: grid; min-height: 28px; grid-template-columns: 16px minmax(0, 1fr) auto 18px; align-items: center; gap: 6px; padding: 1px 2px; border-radius: 5px; color: var(--muted); cursor: pointer; }
+    .file-change-row-summary:hover, .file-change-row[open] > .file-change-row-summary { color: var(--ink); background: var(--surface-hover); }
+    .file-change-icon { display: grid; width: 16px; height: 24px; place-items: center; color: var(--muted); }
+    .file-change-icon svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.35; vector-effect: non-scaling-stroke; }
+    .file-change-title { min-width: 0; overflow: hidden; color: var(--muted); font-size: 9.5px; text-overflow: ellipsis; white-space: nowrap; }
+    .file-change-title code { color: inherit; font: inherit; }
+    .file-change-row-summary:hover .file-change-title, .file-change-row[open] > .file-change-row-summary .file-change-title { color: inherit; }
+    .file-change-file-stats { display: flex; gap: 5px; font: 8px/1.35 var(--mono); white-space: nowrap; }
+    .file-change-disclosure { display: grid; width: 18px; height: 20px; place-items: center; border-radius: 5px; color: var(--faint); }
+    .file-change-disclosure svg { width: 13px; height: 13px; transition: transform 120ms ease; }
+    .file-change-row-summary:hover .file-change-disclosure { color: var(--ink); background: var(--surface-muted); }
+    .file-change-row[open] > .file-change-row-summary .file-change-disclosure svg { transform: rotate(180deg); }
+    .file-change-row-body { min-width: 0; margin: 2px 0 7px 22px; overflow: hidden; border: 1px solid var(--evidence-line); border-radius: 6px; background: var(--evidence-canvas); }
+    .file-change-code { max-height: min(170px, 24vh); overflow: auto; overscroll-behavior: contain; color: var(--evidence-ink); background: var(--evidence-canvas); font: 8.5px/1.45 var(--mono); scrollbar-color: var(--control-line) transparent; scrollbar-width: thin; }
+    .file-change-diff-line { display: grid; min-width: 570px; min-height: 18px; grid-template-columns: 18px 30px 30px minmax(0, 1fr); }
+    .file-change-diff-line > span { display: grid; place-items: center; color: var(--evidence-muted); user-select: none; }
+    .file-change-diff-line > span:nth-child(2), .file-change-diff-line > span:nth-child(3) { border-left: 1px solid color-mix(in srgb, var(--evidence-line) 55%, transparent); font-size: 7.5px; }
+    .file-change-diff-line code { min-width: 0; padding: 2px 8px; white-space: pre; }
+    .file-change-diff-line.add { background: var(--diff-add-soft); }
+    .file-change-diff-line.add > span:first-child { color: var(--diff-add); font-weight: 760; }
+    .file-change-diff-line.remove { background: var(--diff-remove-soft); }
+    .file-change-diff-line.remove > span:first-child { color: var(--diff-remove); font-weight: 760; }
+    .file-change-diff-line.hunk { display: block; min-width: 570px; min-height: 23px; padding: 4px 8px; color: var(--evidence-muted); background: var(--diff-hunk-soft); }
+    .file-change-diff-line.hunk code { padding: 0; }
+    .plus { color: var(--diff-add); }
+    .minus { color: var(--diff-remove); }
+    .run-processing { display: flex; align-items: center; gap: 7px; margin-top: 7px; color: var(--muted); font-size: 9px; }
+    .spinner { width: 10px; height: 10px; border: 1.5px solid var(--line-strong); border-top-color: var(--info); border-radius: 50%; animation: spin 900ms linear infinite; }
+    .inspector-meta { flex: 0 0 auto; overflow: hidden; padding: 7px 10px; border-top: 1px solid var(--line); color: var(--faint); font: 8.5px/1.4 var(--mono); text-overflow: ellipsis; white-space: nowrap; }
+
+    .ordinary-inspector-body { display: grid; gap: 14px; padding: 12px 10px; }
+    .ordinary-section { display: grid; gap: 6px; }
+    .ordinary-section-title { display: flex; align-items: center; justify-content: space-between; color: var(--muted); font-size: 9px; font-weight: 760; letter-spacing: .04em; }
+    .ordinary-section-title small { color: var(--faint); font: 8px/1.3 var(--mono); }
+    .task-preview { display: grid; gap: 5px; padding: 9px; border: 1px solid var(--line); border-radius: 7px; background: var(--surface-subtle); }
+    .task-preview-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+    .task-preview-head strong { font-size: 10px; }
+    .task-preview-head span { color: var(--info); font-size: 8px; font-weight: 760; }
+    .task-preview p { margin: 0; color: var(--muted); font-size: 9px; line-height: 1.45; }
+    .member-preview { display: grid; grid-template-columns: 26px minmax(0, 1fr) auto; align-items: center; gap: 7px; min-height: 38px; padding: 4px 5px; border-radius: 6px; }
+    .member-preview:hover { background: var(--surface-hover); }
+    .member-preview-copy { display: grid; min-width: 0; gap: 1px; }
+    .member-preview-copy strong { font-size: 9.5px; }
+    .member-preview-copy small { overflow: hidden; color: var(--faint); font-size: 8px; text-overflow: ellipsis; white-space: nowrap; }
+
+    .bottom-execution-dock { position: relative; display: flex; min-height: 188px; flex: 0 0 clamp(214px, 30vh, 284px); flex-direction: column; border-top: 1px solid var(--conversation-inspector-line); background: var(--inspector-surface); }
+    .bottom-execution-dock::before { position: absolute; top: 4px; left: 50%; width: 34px; height: 3px; border-radius: 99px; background: var(--line-strong); content: ""; transform: translateX(-50%); }
+    .bottom-run-strip { display: flex; min-height: 50px; flex: 0 0 auto; align-items: center; gap: 7px; padding: 10px 10px 6px; border-bottom: 1px solid var(--line); }
+    .bottom-run-strip-title { display: flex; flex: 0 0 auto; align-items: center; gap: 6px; padding: 0 4px; color: var(--brand-ink); font-size: 9px; font-weight: 760; }
+    .bottom-run-strip-title svg { width: 14px; height: 14px; }
+    .bottom-run-strip .run-chip { width: min(210px, 29%); min-height: 34px; margin: 0; padding: 3px 6px; }
+    .bottom-run-strip .run-chip-copy small { display: none; }
+    .placement-action { min-height: 28px; margin-left: auto; padding: 0 7px; border: 0; border-radius: 5px; color: var(--muted); background: transparent; cursor: pointer; font-size: 8.5px; white-space: nowrap; }
+    .placement-action:hover { color: var(--ink); background: var(--surface-hover); }
+    .execution-detail-host { min-height: 0; flex: 1 1 auto; overflow: hidden; }
+    .execution-detail-surface { display: flex; height: 100%; min-height: 0; flex-direction: column; }
+    .execution-detail-scroll { min-height: 0; flex: 1 1 auto; overflow: auto; }
+    .execution-detail-surface[data-placement="bottom"] .drawer-header { padding: 6px 10px; }
+    .execution-detail-surface[data-placement="bottom"] .run-timeline { padding: 7px 10px 10px 28px; }
+    .execution-detail-surface[data-placement="bottom"] .run-timeline::before { left: 14px; }
+    .execution-detail-surface[data-placement="bottom"] .run-stage { padding: 8px; }
+    .execution-detail-surface[data-placement="bottom"] .run-stage::before { left: -21px; }
+    .execution-inspector .inspector-scroll { display: flex; flex-direction: column; }
+    .execution-inspector .execution-detail-host { min-height: 280px; }
+
+    .review-workspace { display: flex; width: 100%; height: 100%; min-width: 0; min-height: 0; flex-direction: column; background: var(--surface); }
+    .review-header { display: flex; min-height: 68px; flex: 0 0 auto; align-items: center; justify-content: space-between; gap: 16px; padding: 10px 18px; border-bottom: 1px solid var(--line-strong); background: var(--surface); }
+    .review-heading { display: flex; min-width: 0; align-items: center; gap: 11px; }
+    .back-button { display: grid; width: 30px; height: 30px; flex: 0 0 30px; place-items: center; border: 1px solid var(--line); border-radius: 6px; color: var(--muted); background: var(--surface-raised); cursor: pointer; }
+    .back-button:hover { color: var(--ink); border-color: var(--control-line); }
+    .back-button svg { width: 15px; height: 15px; }
+    .review-mark { display: grid; width: 34px; height: 34px; flex: 0 0 34px; place-items: center; border-radius: 9px; color: var(--workspace-steel-ink); background: var(--workspace-surface-selected); }
+    .review-mark svg { width: 18px; height: 18px; }
+    .review-heading-copy { display: grid; min-width: 0; gap: 1px; }
+    .review-eyebrow { color: var(--workspace-steel-ink); font-size: 8.5px; font-weight: 760; letter-spacing: .08em; text-transform: uppercase; }
+    .review-title-line { display: flex; min-width: 0; align-items: center; flex-wrap: wrap; gap: 6px 9px; }
+    .review-title-line h1 { overflow: hidden; margin: 0; font-size: 15px; letter-spacing: -.01em; text-overflow: ellipsis; white-space: nowrap; }
+    .review-status { padding: 2px 7px; border-radius: 999px; color: var(--success); background: var(--success-soft); font-size: 8px; font-weight: 780; }
+    .review-status.tone-info { color: var(--info); background: var(--info-soft); }
+    .review-status.tone-attention { color: var(--attention); background: var(--attention-soft); }
+    .review-status.tone-danger { color: var(--danger); background: var(--danger-soft); }
+    .review-meta { display: flex; min-width: 0; align-items: center; flex-wrap: wrap; gap: 4px 9px; color: var(--faint); font-size: 9px; }
+    .review-meta code { color: var(--evidence-muted); font: 9px/1.35 var(--mono); }
+    .review-tools { display: flex; flex: 0 0 auto; align-items: center; gap: 5px; }
+    .review-tools button { min-height: 30px; padding: 0 9px; border: 1px solid var(--line); border-radius: 6px; color: var(--muted); background: var(--surface-raised); cursor: pointer; font-size: 9px; }
+    .review-tools button:hover:not(:disabled) { color: var(--ink); border-color: var(--control-line); }
+    .review-tools button:disabled { cursor: default; opacity: .45; }
+    .review-scroll { min-height: 0; flex: 1 1 auto; overflow: auto; padding: 12px 16px 16px; }
+    .review-frame { display: flex; width: min(1180px, 100%); min-height: 100%; margin: 0 auto; flex-direction: column; gap: 9px; }
+    .saved-evidence-banner, .truth-banner { display: grid; min-height: 48px; grid-template-columns: 24px minmax(0, 1fr); align-items: center; gap: 9px; padding: 8px 11px; border-radius: 8px; }
+    .saved-evidence-banner { color: var(--workspace-steel-ink); background: var(--workspace-surface-selected); }
+    .truth-banner { color: var(--muted); background: var(--workspace-surface-subtle); }
+    .saved-evidence-banner > span, .truth-banner > span { display: grid; width: 24px; height: 24px; place-items: center; border-radius: 6px; color: var(--workspace-steel-ink); background: var(--workspace-surface-raised); }
+    .saved-evidence-banner svg, .truth-banner svg { width: 14px; height: 14px; }
+    .saved-evidence-banner p, .truth-banner p { margin: 0; font-size: 10px; line-height: 1.5; }
+    .saved-evidence-banner strong, .truth-banner strong { color: var(--ink); }
+    .review-summary { display: grid; grid-template-columns: minmax(220px, 1.25fr) repeat(3, minmax(92px, .5fr)); overflow: hidden; border: 1px solid var(--workspace-line); border-radius: 9px; background: var(--workspace-surface-subtle); }
+    .summary-primary, .summary-stat { display: grid; min-width: 0; align-content: center; padding: 10px 12px; background: var(--workspace-surface-raised); }
+    .summary-stat { border-left: 1px solid var(--workspace-line); text-align: center; }
+    .summary-primary small, .summary-stat small { color: var(--workspace-faint); font-size: 8.5px; }
+    .summary-primary strong { overflow: hidden; margin-top: 2px; font: 600 10.5px/1.45 var(--mono); text-overflow: ellipsis; white-space: nowrap; }
+    .summary-stat strong { margin-top: 1px; font: 750 12px/1.35 var(--mono); }
+    .summary-stat strong.add { color: var(--diff-add); }
+    .summary-stat strong.remove { color: var(--diff-remove); }
+    .review-content { display: grid; min-height: 440px; flex: 1 1 auto; grid-template-columns: 228px minmax(0, 1fr); overflow: hidden; border: 1px solid var(--evidence-line); border-radius: 9px; background: var(--evidence-surface); }
+    .file-sidebar { display: flex; min-width: 0; min-height: 0; flex-direction: column; border-right: 1px solid var(--evidence-line); background: var(--surface); }
+    .file-sidebar-head { display: flex; min-height: 40px; align-items: center; justify-content: space-between; padding: 0 10px; border-bottom: 1px solid var(--evidence-line); }
+    .file-sidebar-head strong { font-size: 10px; }
+    .file-sidebar-head span { color: var(--faint); font: 8.5px/1.35 var(--mono); }
+    .file-list { min-height: 0; flex: 1 1 auto; overflow: auto; padding: 5px; }
+    .file-row { display: grid; width: 100%; min-width: 0; min-height: 42px; grid-template-columns: 18px minmax(0, 1fr); align-items: center; gap: 7px; padding: 5px 6px; border: 0; border-radius: 6px; color: var(--evidence-ink); background: transparent; text-align: left; cursor: pointer; }
+    .file-row:hover { background: var(--surface-hover); }
+    .file-row.selected { background: var(--surface-selected); }
+    .file-kind { display: grid; width: 18px; height: 18px; place-items: center; border-radius: 4px; color: var(--info); background: var(--info-soft); font: 750 8px/1 var(--mono); }
+    .file-kind.added { color: var(--success); background: var(--success-soft); }
+    .file-kind.deleted { color: var(--danger); background: var(--danger-soft); }
+    .file-copy { display: grid; min-width: 0; gap: 2px; }
+    .file-copy strong, .file-copy small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .file-copy strong { font: 550 9px/1.35 var(--mono); }
+    .file-copy small { color: var(--evidence-muted); font: 8px/1.35 var(--mono); }
+    .file-sidebar-foot { display: grid; gap: 5px; padding: 9px 10px; border-top: 1px solid var(--evidence-line); color: var(--muted); font-size: 8.5px; }
+    .file-sidebar-foot strong { color: var(--ink); font-size: 9px; }
+    .participant-list { display: flex; flex-wrap: wrap; gap: 4px; }
+    .participant-list code { padding: 2px 4px; border-radius: 4px; color: var(--evidence-muted); background: var(--evidence-canvas); font: 8px/1.35 var(--mono); }
+    .file-sidebar-foot em { color: var(--faint); font-style: normal; }
+    .diff-pane { display: flex; min-width: 0; min-height: 0; flex-direction: column; background: var(--evidence-surface); }
+    .diff-head { display: flex; min-height: 40px; flex: 0 0 auto; align-items: center; justify-content: space-between; gap: 12px; padding: 0 10px; border-bottom: 1px solid var(--evidence-line); }
+    .diff-path { display: flex; min-width: 0; align-items: center; gap: 7px; }
+    .diff-path svg { width: 14px; height: 14px; flex: 0 0 14px; color: var(--evidence-muted); }
+    .diff-path code { overflow: hidden; color: var(--evidence-ink); font: 9px/1.35 var(--mono); text-overflow: ellipsis; white-space: nowrap; }
+    .diff-stats { display: flex; flex: 0 0 auto; align-items: center; gap: 7px; font: 8.5px/1.35 var(--mono); }
+    .diff-scroll { min-width: 0; min-height: 0; flex: 1 1 auto; overflow: auto; overscroll-behavior: contain; background: var(--evidence-canvas); }
+    .diff-code { width: max(100%, 720px); padding: 7px 0 14px; color: var(--evidence-ink); font: 9.5px/1.55 var(--mono); tab-size: 2; }
+    .diff-line { display: grid; min-height: 20px; grid-template-columns: 22px 38px 38px minmax(0, 1fr); align-items: stretch; }
+    .diff-line > span { display: grid; place-items: center; color: var(--evidence-muted); user-select: none; }
+    .diff-line > span:nth-child(2), .diff-line > span:nth-child(3) { border-left: 1px solid color-mix(in srgb, var(--evidence-line) 55%, transparent); font-size: 8px; }
+    .diff-line code { display: block; min-width: 0; padding: 2px 10px; white-space: pre; }
+    .diff-line.add { background: var(--diff-add-soft); }
+    .diff-line.add > span:first-child { color: var(--diff-add); font-weight: 760; }
+    .diff-line.remove { background: var(--diff-remove-soft); }
+    .diff-line.remove > span:first-child { color: var(--diff-remove); font-weight: 760; }
+    .diff-line.hunk { display: block; min-height: 26px; padding: 5px 10px; color: var(--evidence-muted); background: var(--diff-hunk-soft); }
+    .diff-line.hunk code { padding: 0; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    @media (prefers-reduced-motion: reduce) {
+      .spinner { animation: none; border-color: var(--line-strong); border-top-color: var(--info); }
+      .resource-more svg { transition: none; }
+      * { scroll-behavior: auto !important; }
+    }
+    @media (max-width: 1220px) {
+      .prototype-heading { min-width: 190px; }
+      .prototype-heading span { display: none; }
+      .prototype-field > span { display: none; }
+      .timeline { padding-right: 24px; padding-left: 24px; }
+      .review-content { grid-template-columns: 206px minmax(0, 1fr); }
+      .review-summary { grid-template-columns: minmax(190px, 1.1fr) repeat(3, minmax(76px, .45fr)); }
+    }
+    @media (max-width: 1179px) {
+      :root { --inspector-width: 260px; }
+      .bottom-run-strip .run-chip { width: min(176px, 31%); }
+      .bottom-run-strip .run-chip-copy strong { font-size: 9.5px; }
+    }
+    @media (max-width: 1100px) {
+      .segments button { padding: 0 6px; }
+      .prototype-controls { gap: 5px; }
+      .review-header { padding-right: 12px; padding-left: 12px; }
+      .review-scroll { padding-right: 10px; padding-left: 10px; }
+      .review-summary { grid-template-columns: minmax(170px, 1fr) repeat(3, minmax(68px, .42fr)); }
+      .summary-primary, .summary-stat { padding-right: 8px; padding-left: 8px; }
+    }
+  </style>
+</head>
+<body>
+  <header class="prototype-bar">
+    <div class="prototype-heading">
+      <strong>v1.29 · Change Evidence</strong>
+      <span>高还原 UI 评审稿 · 示例数据不代表实现完成</span>
+    </div>
+    <div class="prototype-controls" aria-label="原型控制">
+      <div class="prototype-field">
+        <span>画面</span>
+        <div class="segments" id="sceneSegments">
+          <button type="button" data-view="context" aria-pressed="true">会话历史</button>
+          <button type="button" data-view="window" aria-pressed="false">Workspace Evidence</button>
+        </div>
+      </div>
+      <div class="prototype-field">
+        <span id="stateLabel">当前 Window</span>
+        <select id="stateSelect" class="prototype-select" aria-label="数据状态">
+          <option value="complete">完整</option>
+          <option value="no_changes">无净变化</option>
+          <option value="unavailable">不可用</option>
+          <option value="pending">捕获中</option>
+        </select>
+      </div>
+      <div class="prototype-field" id="fileEventField">
+        <span>Runtime 事件</span>
+        <select id="fileEventSelect" class="prototype-select" aria-label="Runtime 文件事件样例">
+          <option value="codex_terminal">Codex 终态</option>
+          <option value="none">无可靠终态</option>
+        </select>
+      </div>
+      <div class="prototype-field" id="placementField">
+        <span>执行台</span>
+        <div class="segments" id="placementSegments">
+          <button type="button" data-placement="bottom" aria-pressed="true">底部</button>
+          <button type="button" data-placement="side" aria-pressed="false">右侧</button>
+        </div>
+      </div>
+      <div class="prototype-field">
+        <span>主题</span>
+        <div class="segments" id="themeSegments">
+          <button type="button" data-theme-value="day" aria-pressed="true">日间</button>
+          <button type="button" data-theme-value="night" aria-pressed="false">夜间</button>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <main class="prototype-stage">
+    <div class="app-shell">
+      <aside class="rail" aria-label="应用导航">
+        <div class="rail-drag"></div>
+        <div class="rail-brand">
+          <span class="brand-mark" aria-hidden="true"><span class="brand-star"></span><span class="brand-horizon"></span></span>
+          <span>Rovai AI</span>
+        </div>
+        <nav class="rail-primary" aria-label="一级页面">
+          <button class="rail-action" type="button">
+            <span><svg class="icon" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14" /></svg></span><span>新对话</span>
+          </button>
+          <button class="rail-row" type="button">
+            <span><svg class="icon" viewBox="0 0 24 24"><path d="M16 20v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M22 20v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75" /></svg></span><span>队员</span>
+          </button>
+          <button class="rail-row" type="button">
+            <span><svg class="icon" viewBox="0 0 24 24"><path d="M12 3 4 7v10l8 4 8-4V7Z" /><path d="m8 9 4 2 4-2M12 11v6" /></svg></span><span>记忆</span>
+          </button>
+        </nav>
+        <div class="jump-box"><span>跳转到对话…</span><kbd>⌘K</kbd></div>
+        <section class="rail-section" aria-label="项目与对话">
+          <div class="rail-section-title">项目</div>
+          <div class="project-row">
+            <svg class="icon" viewBox="0 0 24 24"><path d="M3 7h6l2 2h10v10H3Z" /></svg>
+            <span>rovai-ai</span>
+            <button type="button" aria-label="新建对话">＋</button>
+          </div>
+          <div class="camp-list">
+            <button class="camp-row" type="button"><span>v1.29 设计讨论</span></button>
+            <button class="camp-row selected" type="button"><span>工作区变更观察</span><small>进行中</small></button>
+            <button class="camp-row" type="button"><span>Runtime 兼容性</span></button>
+          </div>
+          <div class="project-row" style="margin-top:4px">
+            <svg class="icon" viewBox="0 0 24 24"><path d="M3 7h6l2 2h10v10H3Z" /></svg>
+            <span>快速对话</span><span></span>
+          </div>
+        </section>
+        <div class="rail-spacer"></div>
+        <div class="rail-footer">
+          <button class="settings-row" type="button">
+            <span><svg class="icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06-2.83 2.83-.06-.06A1.7 1.7 0 0 0 15 19.4a1.7 1.7 0 0 0-1 .6l-.05.08V22h-4v-1.92A1.7 1.7 0 0 0 9 19.4a1.7 1.7 0 0 0-1.88.34l-.06.06-2.83-2.83.06-.06A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-.6-1l-.08-.05H2v-4h1.92A1.7 1.7 0 0 0 4.6 9a1.7 1.7 0 0 0-.34-1.88l-.06-.06 2.83-2.83.06.06A1.7 1.7 0 0 0 9 4.6a1.7 1.7 0 0 0 1-.6l.05-.08V2h4v1.92A1.7 1.7 0 0 0 15 4.6a1.7 1.7 0 0 0 1.88-.34l.06-.06 2.83 2.83-.06.06A1.7 1.7 0 0 0 19.4 9c.1.38.31.73.6 1l.08.05H22v4h-1.92a1.7 1.7 0 0 0-.68 1Z" /></svg></span><span>设置</span>
+          </button>
+        </div>
+      </aside>
+
+      <header class="app-topbar">
+        <div class="breadcrumb"><span>rovai-ai</span><span>›</span><strong>工作区变更观察</strong><span class="day-badge">第 3 天</span></div>
+        <div class="topbar-actions">
+          <div class="view-tabs" aria-label="会话视图"><button class="active" type="button">会话</button><button type="button">地图</button></div>
+          <button class="icon-button" type="button" aria-label="收起会话详情"><svg class="icon" viewBox="0 0 24 24"><path d="M9 5H4v14h5M15 5h5v14h-5M14 8l-4 4 4 4" /></svg></button>
+        </div>
+      </header>
+
+      <div class="app-main">
+        <section class="context-view" id="contextView" aria-label="Camp 会话与执行详情">
+          <section class="conversation">
+            <div class="timeline">
+              <div class="timeline-track">
+                <div class="day-divider">8月26日 周三 · DAY 3</div>
+                <article class="message">
+                  <span class="avatar you" aria-hidden="true">你</span>
+                  <div class="message-main">
+                    <div class="message-head"><strong>你</strong><span>20:10</span></div>
+                    <div class="message-body"><p><span class="mention">@叮叮</span> 先把 v1.29 的 Workspace Change Window 做出来。实现时保留两层来源，不要把工作区净变化归到某个队员名下。</p></div>
+                  </div>
+                </article>
+                <article class="message">
+                  <span class="avatar" aria-hidden="true">叮</span>
+                  <div class="message-main">
+                    <div class="message-head"><strong>叮叮</strong><span>Codex CLI · 20:11</span></div>
+                    <div class="message-body">
+                      <p>收到。我会先建立 Camp 与 exact execution root 的共享观察窗口；Runtime 侧只在可靠终态事件到达后追加一条<span class="inline-code">文件变更 Activity</span>，其中的 changes 扁平显示为单文件行。</p>
+                      <p>当前两个执行共享同一个 Window；窗口结果只说明两个稳定捕获点之间的净变化。</p>
+                      <div class="agent-note">工作区观察保持 fail-open：即使捕获不可用，普通文件工作和当前执行也会继续。</div>
+                    </div>
+                  </div>
+                </article>
+                <article class="workspace-evidence-event" id="evidenceCardA">
+                  <div class="resource-card">
+                    <div class="resource-header">
+                      <span class="resource-icon"><svg class="icon" viewBox="0 0 24 24"><path d="M4 7h6l2 2h8v10H4Z" /><path d="M8 13h8M12 11v4" /></svg></span>
+                      <span class="resource-copy">
+                        <strong>Files Changed</strong>
+                        <span class="resource-subtitle">4 个文件 · <span class="plus">+42</span> <span class="minus">−13</span></span>
+                      </span>
+                      <button class="resource-view-button workspace-evidence-open" data-evidence-index="0" type="button" aria-label="View Files Changed：4 个文件">View</button>
+                    </div>
+                    <div class="resource-files">
+                      <div class="resource-file-row"><span class="resource-path"><span class="resource-path-dir">apps/desktop/src/renderer/src/</span><span class="resource-path-base">CampWorkspace.tsx</span></span><span class="resource-file-stats"><span class="plus">+24</span><span class="minus">−7</span></span></div>
+                      <div class="resource-file-row"><span class="resource-path"><span class="resource-path-dir">apps/desktop/src/renderer/src/</span><span class="resource-path-base">styles.css</span></span><span class="resource-file-stats"><span class="plus">+12</span><span class="minus">−3</span></span></div>
+                      <div class="resource-file-row"><span class="resource-path"><span class="resource-path-dir">crates/rovai-core/src/</span><span class="resource-path-base">workspace_change.rs</span></span><span class="resource-file-stats"><span class="plus">+6</span></span></div>
+                      <div class="resource-file-row" id="evidenceAExtra" hidden><span class="resource-path"><span class="resource-path-dir">docs/contracts/</span><span class="resource-path-base">workspace-change-observation-v1.md</span></span><span class="resource-file-stats"><span class="minus">−3</span></span></div>
+                      <button class="resource-more" data-resource-more="evidenceAExtra" type="button" aria-expanded="false"><span>再显示 1 个文件</span><svg class="icon" viewBox="0 0 24 24"><path d="m7 10 5 5 5-5" /></svg></button>
+                    </div>
+                  </div>
+                </article>
+                <article class="message">
+                  <span class="avatar member-two" aria-hidden="true">木</span>
+                  <div class="message-main">
+                    <div class="message-head"><strong>木洼</strong><span>Claude Code · 20:31</span></div>
+                    <div class="message-body"><p>第二组重叠运行已结束。上一张卡片保持不变；新结果会作为另一条 Evidence 追加到当前会话。</p></div>
+                  </div>
+                </article>
+                <article class="workspace-evidence-event" id="evidenceCardB">
+                  <div class="resource-card">
+                    <div class="resource-header">
+                      <span class="resource-icon"><svg class="icon" viewBox="0 0 24 24"><path d="M4 7h6l2 2h8v10H4Z" /><path d="M8 13h8M12 11v4" /></svg></span>
+                      <span class="resource-copy">
+                        <strong>Files Changed</strong>
+                        <span class="resource-subtitle">2 个文件 · <span class="plus">+8</span> <span class="minus">−3</span></span>
+                      </span>
+                      <button class="resource-view-button workspace-evidence-open" data-evidence-index="1" type="button" aria-label="View Files Changed：2 个文件">View</button>
+                    </div>
+                    <div class="resource-files">
+                      <div class="resource-file-row"><span class="resource-path"><span class="resource-path-dir">apps/desktop/src/renderer/src/components/</span><span class="resource-path-base">WorkspaceEvidenceCard.tsx</span></span><span class="resource-file-stats"><span class="plus">+6</span><span class="minus">−2</span></span></div>
+                      <div class="resource-file-row"><span class="resource-path"><span class="resource-path-dir">apps/desktop/src/renderer/src/</span><span class="resource-path-base">styles.css</span></span><span class="resource-file-stats"><span class="plus">+2</span><span class="minus">−1</span></span></div>
+                    </div>
+                  </div>
+                </article>
+              </div>
+            </div>
+            <section class="bottom-execution-dock" id="bottomExecutionDock" aria-label="底部执行台">
+              <div class="bottom-run-strip">
+                <span class="bottom-run-strip-title"><svg class="icon" viewBox="0 0 24 24"><path d="M3 12h3l2-6 4 12 3-8 2 4h4" /></svg>执行</span>
+                <button class="run-chip selected" type="button">
+                  <span class="mini-avatar">叮</span><span class="run-chip-copy"><strong>叮叮</strong><small>Codex CLI</small></span><span class="state-dot info" aria-label="执行中"></span>
+                </button>
+                <button class="run-chip" type="button">
+                  <span class="mini-avatar alt">木</span><span class="run-chip-copy"><strong>木洼</strong><small>Claude Code</small></span><span class="state-dot" aria-label="已完成"></span>
+                </button>
+                <button class="placement-action" data-set-placement="side" type="button">移到右侧 →</button>
+              </div>
+              <div class="execution-detail-host" id="bottomExecutionHost">
+                <div class="execution-detail-surface" id="executionDetailSurface" data-placement="bottom">
+                  <header class="drawer-header">
+                    <div class="drawer-agent"><span class="mini-avatar">叮</span><span class="drawer-agent-copy"><strong>叮叮 Codex CLI Agent</strong><small>运行 7a31… · 20:11–现在 · gpt-5-codex</small></span></div>
+                    <button class="quiet-button" type="button">收起</button>
+                  </header>
+                  <div class="execution-detail-scroll">
+                    <div class="run-timeline">
+                      <article class="run-stage">
+                        <div class="run-stage-head"><time>20:11–现在</time><span>执行中</span><span class="current-badge">当前执行</span></div>
+                        <div class="run-meta"><span>执行 <code>7a31…</code></span><span>直接执行</span><span>模型 <code>gpt-5-codex</code></span></div>
+                        <div class="tool-list">
+                          <div class="file-change-activity-host" data-file-change-activity></div>
+                          <div class="tool-row"><svg class="icon" viewBox="0 0 24 24"><path d="m5 7 4 4-4 4M11 16h8" /></svg><strong>pnpm test --filter renderer</strong><span class="state-dot info"></span><span class="chevron">⌄</span></div>
+                        </div>
+                        <div class="run-processing"><span class="spinner" aria-hidden="true"></span><span>正在等待测试结果</span></div>
+                      </article>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </section>
+
+            <div class="composer-zone">
+              <div class="composer-route">默认由 Lead · 叮叮接收</div>
+              <div class="composer">
+                <textarea aria-label="消息" placeholder="继续提问、补充约束或交付下一项任务…"></textarea>
+                <div class="composer-footer">
+                  <button class="composer-attach" type="button" aria-label="添加附件"><svg class="icon" viewBox="0 0 24 24"><path d="m21.4 11.6-8.9 8.9a6 6 0 0 1-8.5-8.5l9.2-9.2a4 4 0 0 1 5.7 5.7l-9.2 9.2a2 2 0 0 1-2.8-2.8l8.5-8.5" /></svg></button>
+                  <button class="send-button" type="button">发送</button>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <aside class="inspector" id="ordinaryInspector" aria-label="会话详情">
+            <div class="inspector-tabs" role="tablist">
+              <button class="active" type="button" role="tab" aria-selected="true">任务 <small>1</small></button>
+              <button type="button" role="tab" aria-selected="false">队员 <small>3</small></button>
+            </div>
+            <div class="inspector-scroll">
+              <div class="ordinary-inspector-body">
+                <section class="ordinary-section">
+                  <div class="ordinary-section-title"><span>进行中的任务</span><small>1</small></div>
+                  <div class="task-preview">
+                    <div class="task-preview-head"><strong>Workspace Window UI</strong><span>进行中</span></div>
+                    <p>叮叮负责实现，木洼复核边界与证据读取行为。</p>
+                  </div>
+                </section>
+                <section class="ordinary-section">
+                  <div class="ordinary-section-title"><span>当前队员</span><small>3</small></div>
+                  <div class="member-preview"><span class="mini-avatar">叮</span><span class="member-preview-copy"><strong>叮叮</strong><small>Lead · Codex CLI</small></span><span class="state-dot info" aria-label="执行中"></span></div>
+                  <div class="member-preview"><span class="mini-avatar alt">木</span><span class="member-preview-copy"><strong>木洼</strong><small>Claude Code</small></span><span class="state-dot" aria-label="空闲"></span></div>
+                  <div class="member-preview"><span class="mini-avatar">穹</span><span class="member-preview-copy"><strong>星穹</strong><small>TRAE</small></span><span class="state-dot" aria-label="空闲"></span></div>
+                </section>
+              </div>
+            </div>
+            <div class="inspector-meta">Camp · rovai-ai</div>
+          </aside>
+
+          <aside class="inspector execution-inspector" id="executionInspector" hidden aria-label="右侧执行台">
+            <div class="inspector-tabs" role="tablist">
+              <button class="active" type="button" role="tab" aria-selected="true">执行 <small>2</small></button>
+              <button type="button" role="tab" aria-selected="false">任务 <small>1</small></button>
+              <button type="button" role="tab" aria-selected="false">队员 <small>3</small></button>
+            </div>
+            <div class="inspector-scroll">
+              <section class="run-selector" aria-label="执行中的队员">
+                <div class="run-selector-head">
+                  <span class="run-selector-title"><svg class="icon" viewBox="0 0 24 24"><path d="M3 12h3l2-6 4 12 3-8 2 4h4" /></svg>执行</span>
+                  <button data-set-placement="bottom" type="button">移到底部 →</button>
+                </div>
+                <button class="run-chip selected" type="button">
+                  <span class="mini-avatar">叮</span><span class="run-chip-copy"><strong>叮叮</strong><small>Codex CLI</small></span><span class="state-dot info" aria-label="执行中"></span>
+                </button>
+                <button class="run-chip" type="button">
+                  <span class="mini-avatar alt">木</span><span class="run-chip-copy"><strong>木洼</strong><small>Claude Code</small></span><span class="state-dot" aria-label="已完成"></span>
+                </button>
+              </section>
+              <div class="execution-detail-host" id="sideExecutionHost"></div>
+            </div>
+            <div class="inspector-meta">run 7a31… · seq 1842</div>
+          </aside>
+        </section>
+
+        <section class="review-workspace" id="reviewView" hidden aria-label="差异 Review">
+          <header class="review-header">
+            <div class="review-heading">
+              <button class="back-button" id="backButton" type="button" aria-label="返回会话"><svg class="icon" viewBox="0 0 24 24"><path d="m15 18-6-6 6-6" /></svg></button>
+              <span class="review-mark" id="reviewMark"><svg class="icon" viewBox="0 0 24 24"><path d="M4 7h6l2 2h8v10H4Z" /><path d="M8 13h8M12 11v4" /></svg></span>
+              <div class="review-heading-copy">
+                <span class="review-eyebrow" id="reviewEyebrow">WorkspaceDiffCompleted Evidence</span>
+                <div class="review-title-line"><h1 id="reviewTitle">运行期间工作区变化</h1><span class="review-status" id="reviewStatus">已保存</span></div>
+                <div class="review-meta" id="reviewMeta"><span>rovai-ai</span><span>2 个运行</span><code>evidence b903…</code></div>
+              </div>
+            </div>
+            <div class="review-tools">
+              <button type="button" id="previousFileButton">上一文件</button>
+              <button type="button" id="nextFileButton">下一文件</button>
+            </div>
+          </header>
+
+          <div class="review-scroll">
+            <div class="review-frame">
+              <div class="saved-evidence-banner" id="savedEvidenceBanner">
+                <span><svg class="icon" viewBox="0 0 24 24"><path d="M5 9h14v11H5Z" /><path d="M8 9V6a4 4 0 0 1 8 0v3" /></svg></span>
+                <p id="savedEvidenceCopy"><strong>这是完成时保存的只读差异。</strong> 打开旧卡片不会重新执行 Git diff，也不会读取当前工作区。</p>
+              </div>
+              <div class="truth-banner" id="truthBanner">
+                <span><svg class="icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" /><path d="M12 11v5M12 8h.01" /></svg></span>
+                <p id="truthCopy"><strong>这是该 Window 完成时保存的工作区最终净变化。</strong> 不归因于单个队员、Run 或 Tool；结果可能包含用户编辑器、外部程序或其他并行运行的修改。</p>
+              </div>
+              <div class="review-summary" id="reviewSummary">
+                <div class="summary-primary"><small id="summaryPrimaryLabel">观察范围</small><strong id="summaryPrimaryValue">rovai-ai</strong></div>
+                <div class="summary-stat"><small>文件</small><strong id="summaryFileCount">4</strong></div>
+                <div class="summary-stat"><small>新增行</small><strong class="add" id="summaryAdditions">+8</strong></div>
+                <div class="summary-stat"><small>删除行</small><strong class="remove" id="summaryDeletions">−3</strong></div>
+              </div>
+
+              <div class="review-content" id="reviewContent">
+                <aside class="file-sidebar" aria-label="变更文件">
+                  <div class="file-sidebar-head"><strong>变更文件</strong><span id="fileCountLabel">4 files</span></div>
+                  <div class="file-list" id="fileList"></div>
+                  <div class="file-sidebar-foot" id="sidebarFoot">
+                    <strong>参与执行</strong>
+                    <div class="participant-list"><code>run 7a31…</code><code>run 91fd…</code></div>
+                    <em>参与，不代表修改作者</em>
+                  </div>
+                </aside>
+                <section class="diff-pane" aria-label="当前文件差异">
+                  <header class="diff-head">
+                    <div class="diff-path"><svg class="icon" viewBox="0 0 24 24"><path d="M4 4h10l6 6v10H4Z" /><path d="M14 4v6h6" /></svg><code id="diffPath"></code></div>
+                    <div class="diff-stats"><span class="plus" id="diffAdditions"></span><span class="minus" id="diffDeletions"></span></div>
+                  </header>
+                  <div class="diff-scroll" tabindex="0" aria-label="可滚动的差异内容"><div class="diff-code" id="diffCode"></div></div>
+                </section>
+              </div>
+
+            </div>
+          </div>
+        </section>
+      </div>
+    </div>
+  </main>
+
+  <script>
+    const icons = {
+      window: '<svg class="icon" viewBox="0 0 24 24"><path d="M4 7h6l2 2h8v10H4Z"/><path d="M8 13h8M12 11v4"/></svg>'
+    };
+
+    const windowFiles = [
+      {
+        path: 'apps/desktop/src/renderer/src/CampWorkspace.tsx', kind: 'M', additions: 24, deletions: 7,
+        lines: [
+          { kind: 'hunk', text: '@@ -3821,6 +3821,18 @@ export function CampWorkspace' },
+          { kind: 'context', old: 3821, next: 3821, text: '          <Tabs.Content value="execution">' },
+          { kind: 'add', old: '', next: 3822, text: '            <WorkspaceChangeWindowEntry' },
+          { kind: 'add', old: '', next: 3823, text: '              campId={snapshot.camp.id}' },
+          { kind: 'add', old: '', next: 3824, text: '              window={workspaceChangeWindow}' },
+          { kind: 'add', old: '', next: 3825, text: '              onOpen={openWorkspaceWindow}' },
+          { kind: 'add', old: '', next: 3826, text: '            />' },
+          { kind: 'context', old: 3822, next: 3827, text: '            <RunPulse' },
+          { kind: 'context', old: 3823, next: 3828, text: '              placement="inspector"' },
+          { kind: 'hunk', text: '@@ -7162,8 +7174,15 @@ function ToolActivity' },
+          { kind: 'remove', old: 7162, next: '', text: '      <ToolResultDisclosure result={result} />' },
+          { kind: 'add', old: '', next: 7174, text: '      <TerminalFileChangeRows' },
+          { kind: 'add', old: '', next: 7175, text: '        activityId={activity.id}' },
+          { kind: 'add', old: '', next: 7176, text: '        evidence={activity.fileChangeEvidence}' },
+          { kind: 'add', old: '', next: 7177, text: '      />' },
+          { kind: 'context', old: 7163, next: 7178, text: '    </details>' }
+        ]
+      },
+      {
+        path: 'apps/desktop/src/renderer/src/styles.css', kind: 'M', additions: 12, deletions: 3,
+        lines: [
+          { kind: 'hunk', text: '@@ -1312,7 +1312,16 @@ .execution-sidecar-panel' },
+          { kind: 'context', old: 1312, next: 1312, text: '.execution-sidecar-panel {' },
+          { kind: 'remove', old: 1313, next: '', text: '  display: flex;' },
+          { kind: 'add', old: '', next: 1313, text: '  display: grid;' },
+          { kind: 'add', old: '', next: 1314, text: '  grid-template-rows: auto auto minmax(0, 1fr);' },
+          { kind: 'context', old: 1314, next: 1315, text: '  min-height: 0;' },
+          { kind: 'context', old: 1315, next: 1316, text: '}' },
+          { kind: 'hunk', text: '@@ -2470,0 +2481,6 @@' },
+          { kind: 'add', old: '', next: 2481, text: '.workspace-window-entry {' },
+          { kind: 'add', old: '', next: 2482, text: '  border-bottom: 1px solid var(--workspace-line);' },
+          { kind: 'add', old: '', next: 2483, text: '  background: var(--workspace-surface-subtle);' },
+          { kind: 'add', old: '', next: 2484, text: '}' }
+        ]
+      },
+      {
+        path: 'crates/rovai-core/src/workspace_change.rs', kind: 'A', additions: 6, deletions: 0,
+        lines: [
+          { kind: 'hunk', text: '@@ -0,0 +1,13 @@' },
+          { kind: 'add', old: '', next: 1, text: 'pub struct WorkspaceChangeWindowReadInput {' },
+          { kind: 'add', old: '', next: 2, text: '    pub camp_id: CampId,' },
+          { kind: 'add', old: '', next: 3, text: '    pub window_id: WorkspaceChangeWindowId,' },
+          { kind: 'add', old: '', next: 4, text: '}' },
+          { kind: 'add', old: '', next: 5, text: '' },
+          { kind: 'add', old: '', next: 6, text: 'pub enum CaptureStatus {' },
+          { kind: 'add', old: '', next: 7, text: '    Pending,' },
+          { kind: 'add', old: '', next: 8, text: '    BaselineReady,' },
+          { kind: 'add', old: '', next: 9, text: '    Complete,' },
+          { kind: 'add', old: '', next: 10, text: '    NoChanges,' },
+          { kind: 'add', old: '', next: 11, text: '    Unavailable,' },
+          { kind: 'add', old: '', next: 12, text: '}' }
+        ]
+      },
+      {
+        path: 'docs/contracts/workspace-change-observation-v1.md', kind: 'D', additions: 0, deletions: 3,
+        lines: [
+          { kind: 'hunk', text: '@@ -212,8 +212,2 @@ Presentation-neutral boundary' },
+          { kind: 'remove', old: 212, next: '', text: '- Consumers may display a per-run file attribution.' },
+          { kind: 'remove', old: 213, next: '', text: '- The latest participant owns the final patch.' },
+          { kind: 'context', old: 214, next: 212, text: '- Window results remain Camp-scoped and non-attributed.' }
+        ]
+      }
+    ];
+
+    const windowFilesB = [
+      {
+        path: 'apps/desktop/src/renderer/src/components/WorkspaceEvidenceCard.tsx', kind: 'M', additions: 6, deletions: 2,
+        lines: [
+          { kind: 'hunk', text: '@@ -48,7 +48,11 @@ export function WorkspaceEvidenceCard' },
+          { kind: 'context', old: 48, next: 48, text: '  return (' },
+          { kind: 'remove', old: 49, next: '', text: '    <button onClick={() => recomputeDiff(windowId)}>' },
+          { kind: 'add', old: '', next: 49, text: '    <button onClick={() => openSavedDiff(evidence.diffBlobId)}>' },
+          { kind: 'add', old: '', next: 50, text: '      <span>{evidence.files.length} 个文件</span>' },
+          { kind: 'add', old: '', next: 51, text: '      <span>完成时保存</span>' },
+          { kind: 'context', old: 50, next: 52, text: '    </button>' },
+          { kind: 'remove', old: 51, next: '', text: '  // Reads the current worktree.' }
+        ]
+      },
+      {
+        path: 'apps/desktop/src/renderer/src/styles.css', kind: 'M', additions: 2, deletions: 1,
+        lines: [
+          { kind: 'hunk', text: '@@ -2481,3 +2481,4 @@ .workspace-evidence-card' },
+          { kind: 'context', old: 2481, next: 2481, text: '.workspace-evidence-card {' },
+          { kind: 'remove', old: 2482, next: '', text: '  border-color: var(--line);' },
+          { kind: 'add', old: '', next: 2482, text: '  border-color: var(--workspace-line);' },
+          { kind: 'add', old: '', next: 2483, text: '  background: var(--evidence-surface);' },
+          { kind: 'context', old: 2483, next: 2484, text: '}' }
+        ]
+      }
+    ];
+
+    const workspaceEvidences = [
+      {
+        id: 'a18c…', capturedAt: '20:22:41', interval: '20:14:08 → 20:22:41',
+        participants: ['run 7a31…', 'run 91fd…', 'run c408…'], additions: 42, deletions: 13, files: windowFiles
+      },
+      {
+        id: 'b903…', capturedAt: '20:47:05', interval: '20:31:12 → 20:47:05',
+        participants: ['run d102…', 'run e847…'], additions: 8, deletions: 3, files: windowFilesB
+      }
+    ];
+
+    const codexTerminalFileChange = {
+      evidenceId: 'evidence file-change 42be…',
+      canonicalActivityId: 'activity 42be…',
+      sourceMethod: 'item/completed',
+      itemType: 'fileChange',
+      itemStatus: 'completed',
+      changes: [
+      {
+        path: 'apps/desktop/src/renderer/src/CampWorkspace.tsx', kind: 'M', additions: 31, deletions: 8,
+        lines: [
+          { kind: 'hunk', text: '@@ -7162,8 +7162,17 @@ function ToolActivity' },
+          { kind: 'context', old: 7162, next: 7162, text: '    <details className="tool-call-disclosure">' },
+          { kind: 'context', old: 7163, next: 7163, text: '      <summary>{presentation.title}</summary>' },
+          { kind: 'remove', old: 7164, next: '', text: '      <ToolResultDisclosure result={result} />' },
+          { kind: 'add', old: '', next: 7164, text: '      {activity.fileChangeEvidence && (' },
+          { kind: 'add', old: '', next: 7165, text: '        <TerminalFileChangeRows' },
+          { kind: 'add', old: '', next: 7166, text: '          activityId={activity.id}' },
+          { kind: 'add', old: '', next: 7167, text: '          evidence={activity.fileChangeEvidence}' },
+          { kind: 'add', old: '', next: 7168, text: '        />' },
+          { kind: 'add', old: '', next: 7169, text: '      )}' },
+          { kind: 'context', old: 7165, next: 7170, text: '    </details>' }
+        ]
+      },
+      {
+        path: 'apps/desktop/src/renderer/src/styles.css', kind: 'M', additions: 13, deletions: 3,
+        lines: [
+          { kind: 'hunk', text: '@@ -2303,6 +2303,16 @@ .tool-call-result-scroll' },
+          { kind: 'context', old: 2303, next: 2303, text: '.tool-call-result-scroll {' },
+          { kind: 'context', old: 2304, next: 2304, text: '  overflow: auto;' },
+          { kind: 'add', old: '', next: 2305, text: '  border: 1px solid var(--evidence-line);' },
+          { kind: 'add', old: '', next: 2306, text: '  color: var(--evidence-ink);' },
+          { kind: 'add', old: '', next: 2307, text: '  background: var(--evidence-canvas);' },
+          { kind: 'context', old: 2305, next: 2308, text: '}' }
+        ]
+      }
+      ]
+    };
+
+    const sceneButtons = [...document.querySelectorAll('[data-view]')];
+    const themeButtons = [...document.querySelectorAll('[data-theme-value]')];
+    const placementButtons = [...document.querySelectorAll('[data-placement]')];
+    const stateSelect = document.getElementById('stateSelect');
+    const stateLabel = document.getElementById('stateLabel');
+    const fileEventSelect = document.getElementById('fileEventSelect');
+    const fileEventField = document.getElementById('fileEventField');
+    const placementField = document.getElementById('placementField');
+    const contextView = document.getElementById('contextView');
+    const reviewView = document.getElementById('reviewView');
+    const reviewContent = document.getElementById('reviewContent');
+    const reviewSummary = document.getElementById('reviewSummary');
+    const ordinaryInspector = document.getElementById('ordinaryInspector');
+    const executionInspector = document.getElementById('executionInspector');
+    const bottomExecutionDock = document.getElementById('bottomExecutionDock');
+    const bottomExecutionHost = document.getElementById('bottomExecutionHost');
+    const sideExecutionHost = document.getElementById('sideExecutionHost');
+    const executionDetailSurface = document.getElementById('executionDetailSurface');
+    let currentView = 'context';
+    let selectedFile = 0;
+    let selectedWorkspaceEvidence = 1;
+    let windowState = 'complete';
+    let fileEventMode = 'codex_terminal';
+    let executionPlacement = 'bottom';
+
+    function escapeHtml(value) {
+      return String(value ?? '')
+        .replaceAll('&', '&amp;')
+        .replaceAll('<', '&lt;')
+        .replaceAll('>', '&gt;')
+        .replaceAll('"', '&quot;')
+        .replaceAll("'", '&#039;');
+    }
+
+    function renderTerminalFileChange(event) {
+      document.querySelectorAll('[data-file-change-activity]').forEach((host) => {
+        host.replaceChildren();
+        const isReliableCodexTerminal = event?.sourceMethod === 'item/completed'
+          && event?.itemType === 'fileChange'
+          && event?.itemStatus === 'completed';
+        if (!isReliableCodexTerminal || !event.changes?.length) return;
+
+        const rows = event.changes.map((file, index) => {
+          const pathParts = file.path.split('/');
+          const base = pathParts.pop();
+          const diffLines = file.lines.map((line) => {
+            if (line.kind === 'hunk') {
+              return `<div class="file-change-diff-line hunk"><code>${escapeHtml(line.text)}</code></div>`;
+            }
+            const sign = line.kind === 'add' ? '+' : line.kind === 'remove' ? '−' : ' ';
+            const spokenKind = line.kind === 'add' ? '新增' : line.kind === 'remove' ? '删除' : '上下文';
+            const ariaLabel = `${spokenKind}，旧行 ${line.old || '空'}，新行 ${line.next || '空'}：${line.text}`;
+            return `<div class="file-change-diff-line ${escapeHtml(line.kind)}" aria-label="${escapeHtml(ariaLabel)}"><span aria-hidden="true">${sign}</span><span aria-hidden="true">${escapeHtml(line.old)}</span><span aria-hidden="true">${escapeHtml(line.next)}</span><code>${escapeHtml(line.text || ' ')}</code></div>`;
+          }).join('');
+          const summaryLabel = `修改 ${file.path}，新增 ${file.additions} 行，删除 ${file.deletions} 行`;
+          return `<details class="file-change-row" data-evidence-id="${escapeHtml(event.evidenceId)}" data-canonical-activity-id="${escapeHtml(event.canonicalActivityId)}" data-change-index="${index}"><summary class="file-change-row-summary" aria-label="${escapeHtml(summaryLabel)}"><span class="file-change-icon" aria-hidden="true"><svg viewBox="0 0 16 16" focusable="false"><path d="M4 1.75h5.1L12.5 5v9.25H4z"/><path d="M9 1.9V5h3.2M6 8h4.4M6 10.5h3.3"/></svg></span><span class="file-change-title" title="${escapeHtml(file.path)}">修改 <code>${escapeHtml(base)}</code></span><span class="file-change-file-stats"><span class="plus">+${file.additions}</span><span class="minus">−${file.deletions}</span></span><span class="file-change-disclosure" aria-hidden="true"><svg class="icon" viewBox="0 0 24 24"><path d="m7 10 5 5 5-5"/></svg></span></summary><div class="file-change-row-body"><div class="file-change-code" tabindex="0" aria-label="${escapeHtml(file.path)} 的终态差异">${diffLines}</div></div></details>`;
+        }).join('');
+        host.innerHTML = rows;
+      });
+    }
+
+    function setExecutionPlacement(placement) {
+      executionPlacement = placement;
+      placementButtons.forEach((button) => button.setAttribute('aria-pressed', String(button.dataset.placement === placement)));
+      executionDetailSurface.dataset.placement = placement;
+      if (placement === 'bottom') {
+        bottomExecutionHost.appendChild(executionDetailSurface);
+        bottomExecutionDock.hidden = false;
+        ordinaryInspector.hidden = false;
+        executionInspector.hidden = true;
+      } else {
+        sideExecutionHost.appendChild(executionDetailSurface);
+        bottomExecutionDock.hidden = true;
+        ordinaryInspector.hidden = true;
+        executionInspector.hidden = false;
+      }
+    }
+
+    function validStates() {
+      return ['complete', 'no_changes', 'unavailable', 'pending'];
+    }
+
+    function updateStateOptions(view) {
+      const completeOption = stateSelect.querySelector('[value="complete"]');
+      completeOption.textContent = '完整';
+      stateLabel.textContent = view === 'window' ? '历史 Evidence' : '当前 Window';
+      stateSelect.disabled = view === 'window';
+
+      if (view === 'window') {
+        stateSelect.value = 'complete';
+        [...stateSelect.options].forEach((option) => { option.disabled = option.value !== 'complete'; });
+        return;
+      }
+      const valid = validStates();
+      [...stateSelect.options].forEach((option) => { option.disabled = !valid.includes(option.value); });
+      stateSelect.value = windowState;
+    }
+
+    function setView(view) {
+      currentView = view;
+      sceneButtons.forEach((button) => button.setAttribute('aria-pressed', String(button.dataset.view === view)));
+      contextView.hidden = view !== 'context';
+      reviewView.hidden = view === 'context';
+      placementField.hidden = view !== 'context';
+      fileEventField.hidden = view !== 'context';
+      updateStateOptions(view);
+      selectedFile = 0;
+      render();
+      if (view !== 'context') document.getElementById('backButton').focus();
+    }
+
+    function setTheme(theme) {
+      document.documentElement.dataset.theme = theme;
+      themeButtons.forEach((button) => button.setAttribute('aria-pressed', String(button.dataset.themeValue === theme)));
+    }
+
+    function renderContext() {
+      const latestCard = document.getElementById('evidenceCardB');
+      latestCard.hidden = windowState !== 'complete';
+    }
+
+    function renderFileList(files) {
+      const fileList = document.getElementById('fileList');
+      fileList.replaceChildren();
+      files.forEach((file, index) => {
+        const button = document.createElement('button');
+        const kindClass = file.kind === 'A' ? 'added' : file.kind === 'D' ? 'deleted' : '';
+        button.type = 'button';
+        button.className = `file-row${index === selectedFile ? ' selected' : ''}`;
+        button.setAttribute('aria-current', index === selectedFile ? 'true' : 'false');
+        button.innerHTML = `<span class="file-kind ${kindClass}">${file.kind}</span><span class="file-copy"><strong>${file.path.split('/').pop()}</strong><small><span class="plus">+${file.additions}</span> · <span class="minus">−${file.deletions}</span> · ${file.path}</small></span>`;
+        button.addEventListener('click', () => { selectedFile = index; renderReview(); });
+        fileList.appendChild(button);
+      });
+    }
+
+    function renderDiff(file) {
+      document.getElementById('diffPath').textContent = file.path;
+      document.getElementById('diffAdditions').textContent = `+${file.additions}`;
+      document.getElementById('diffDeletions').textContent = `−${file.deletions}`;
+      const code = document.getElementById('diffCode');
+      code.replaceChildren();
+      file.lines.forEach((line) => {
+        const row = document.createElement('div');
+        row.className = `diff-line ${line.kind}`;
+        if (line.kind === 'hunk') {
+          const hunkCode = document.createElement('code');
+          hunkCode.textContent = line.text;
+          row.appendChild(hunkCode);
+        } else {
+          const sign = line.kind === 'add' ? '+' : line.kind === 'remove' ? '−' : ' ';
+          row.setAttribute('aria-label', `${line.kind === 'add' ? '新增' : line.kind === 'remove' ? '删除' : '上下文'}，旧行 ${line.old || '空'}，新行 ${line.next || '空'}：${line.text}`);
+          [sign, line.old, line.next].forEach((value) => {
+            const span = document.createElement('span');
+            span.textContent = value;
+            span.setAttribute('aria-hidden', 'true');
+            row.appendChild(span);
+          });
+          const lineCode = document.createElement('code');
+          lineCode.textContent = line.text || ' ';
+          row.appendChild(lineCode);
+        }
+        code.appendChild(row);
+      });
+    }
+
+    function renderReview() {
+      if (currentView === 'context') return;
+      const evidence = workspaceEvidences[selectedWorkspaceEvidence];
+      const files = evidence.files;
+      const reviewMark = document.getElementById('reviewMark');
+      const eyebrow = document.getElementById('reviewEyebrow');
+      const status = document.getElementById('reviewStatus');
+      const savedEvidenceCopy = document.getElementById('savedEvidenceCopy');
+      const truthBanner = document.getElementById('truthBanner');
+      const truthCopy = document.getElementById('truthCopy');
+      const sidebarFoot = document.getElementById('sidebarFoot');
+      const label = document.getElementById('summaryPrimaryLabel');
+      const value = document.getElementById('summaryPrimaryValue');
+
+      reviewMark.className = 'review-mark';
+      reviewMark.innerHTML = icons.window;
+      eyebrow.className = 'review-eyebrow';
+      eyebrow.textContent = 'WorkspaceDiffCompleted Evidence';
+      document.getElementById('reviewTitle').textContent = '运行期间工作区变化';
+      document.getElementById('reviewMeta').innerHTML = `<span>rovai-ai</span><span>${evidence.participants.length} 个运行</span><span>捕获于 ${evidence.capturedAt}</span><code>evidence ${evidence.id}</code>`;
+
+      status.className = 'review-status';
+      status.textContent = '已保存';
+
+      savedEvidenceCopy.innerHTML = '<strong>这是完成时保存的只读差异。</strong> 打开旧卡片不会重新执行 Git diff，也不会读取当前工作区。';
+      truthBanner.className = 'truth-banner';
+      truthBanner.querySelector('span').innerHTML = '<svg class="icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/></svg>';
+      truthCopy.innerHTML = '<strong>这是该 Window 完成时保存的工作区最终净变化。</strong> 不归因于单个队员、Run 或 Tool；结果可能包含用户编辑器、外部程序或其他并行运行的修改。';
+
+      reviewContent.hidden = false;
+      reviewSummary.hidden = false;
+      document.getElementById('previousFileButton').disabled = selectedFile === 0;
+      document.getElementById('nextFileButton').disabled = selectedFile === files.length - 1;
+
+      label.textContent = '观察范围';
+      value.textContent = 'rovai-ai';
+      document.getElementById('summaryFileCount').textContent = String(files.length);
+      document.getElementById('summaryAdditions').textContent = `+${evidence.additions}`;
+      document.getElementById('summaryDeletions').textContent = `−${evidence.deletions}`;
+      document.getElementById('fileCountLabel').textContent = `${files.length} files`;
+      sidebarFoot.innerHTML = `<strong>参与运行</strong><div class="participant-list">${evidence.participants.map((participant) => `<code>${participant}</code>`).join('')}</div><em>参与，不代表修改作者</em>`;
+      if (selectedFile >= files.length) selectedFile = 0;
+      renderFileList(files);
+      renderDiff(files[selectedFile]);
+    }
+
+    function render() {
+      renderContext();
+      renderTerminalFileChange(fileEventMode === 'codex_terminal' ? codexTerminalFileChange : null);
+      renderReview();
+    }
+
+    sceneButtons.forEach((button) => button.addEventListener('click', () => {
+      if (button.dataset.view === 'window') selectedWorkspaceEvidence = windowState === 'complete' ? 1 : 0;
+      setView(button.dataset.view);
+    }));
+    themeButtons.forEach((button) => button.addEventListener('click', () => setTheme(button.dataset.themeValue)));
+    placementButtons.forEach((button) => button.addEventListener('click', () => setExecutionPlacement(button.dataset.placement)));
+    document.querySelectorAll('[data-set-placement]').forEach((button) => button.addEventListener('click', () => {
+      setExecutionPlacement(button.dataset.setPlacement);
+      document.querySelector(`[data-placement="${button.dataset.setPlacement}"]`).focus();
+    }));
+    stateSelect.addEventListener('change', () => {
+      if (currentView === 'context') windowState = stateSelect.value;
+      selectedFile = 0;
+      render();
+    });
+    fileEventSelect.addEventListener('change', () => {
+      fileEventMode = fileEventSelect.value;
+      render();
+    });
+    document.querySelectorAll('.workspace-evidence-open').forEach((button) => button.addEventListener('click', () => {
+      selectedWorkspaceEvidence = Number(button.dataset.evidenceIndex);
+      setView('window');
+    }));
+    document.querySelectorAll('[data-resource-more]').forEach((button) => button.addEventListener('click', () => {
+      const target = document.getElementById(button.dataset.resourceMore);
+      const expanded = button.getAttribute('aria-expanded') === 'true';
+      target.hidden = expanded;
+      button.setAttribute('aria-expanded', String(!expanded));
+      button.querySelector('span').textContent = expanded ? '再显示 1 个文件' : '收起文件';
+    }));
+    document.getElementById('backButton').addEventListener('click', () => setView('context'));
+    document.getElementById('previousFileButton').addEventListener('click', () => { if (selectedFile > 0) { selectedFile -= 1; renderReview(); } });
+    document.getElementById('nextFileButton').addEventListener('click', () => {
+      const files = workspaceEvidences[selectedWorkspaceEvidence].files;
+      if (selectedFile < files.length - 1) { selectedFile += 1; renderReview(); }
+    });
+
+    setExecutionPlacement('bottom');
+    updateStateOptions('context');
+    render();
+    requestAnimationFrame(() => {
+      const timeline = document.querySelector('.timeline');
+      timeline.scrollTop = timeline.scrollHeight;
+    });
+  </script>
+</body>
+</html>

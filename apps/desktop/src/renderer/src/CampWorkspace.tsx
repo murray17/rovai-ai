@@ -30,7 +30,9 @@ import type {
   SkillDeliveryGroupView,
   SkillView,
   StoredCommandResult,
-  StructuredCampMessageContent
+  StructuredCampMessageContent,
+  WorkspaceChangeWindowDiffView,
+  WorkspaceChangeWindowView
 } from '@contracts'
 import { EmptyInline } from './ui-elements'
 import { StructuredMentionComposer } from './StructuredMentionComposer'
@@ -824,6 +826,13 @@ export type CampConversationTimelineItem =
       message: CampMessageView
     }
   | {
+      kind: 'workspace_change'
+      id: string
+      createdAt: string
+      timelineGlobalSequence: null
+      window: WorkspaceChangeWindowView
+    }
+  | {
       kind: 'stop_event'
       id: string
       createdAt: string
@@ -838,7 +847,8 @@ export function campConversationTimeline(
   turns: CampSnapshot['turns'] = [],
   timeline: CampSnapshot['timeline'] = [],
   agentRuns: CampSnapshot['agentRuns'] = [],
-  tasks: CampSnapshot['tasks'] = []
+  tasks: CampSnapshot['tasks'] = [],
+  workspaceChangeWindows: CampSnapshot['workspaceChangeWindows'] = []
 ): CampConversationTimelineItem[] {
   const taskCreatedSequenceById = new Map(
     timeline
@@ -855,6 +865,13 @@ export function campConversationTimeline(
     createdAt: task.createdAt,
     timelineGlobalSequence: taskCreatedSequenceById.get(task.taskId) ?? null,
     task
+  }))
+  const workspaceChangeCards: CampConversationTimelineItem[] = workspaceChangeWindows.map((window) => ({
+    kind: 'workspace_change',
+    id: `workspace-change:${window.windowId}`,
+    createdAt: window.capturedAt,
+    timelineGlobalSequence: null,
+    window
   }))
   const publicMessages: CampConversationTimelineItem[] = messages
     .filter((message) => {
@@ -896,7 +913,7 @@ export function campConversationTimeline(
       hasUnsettledExternalEffects: unsettledTurnIds.has(turn.id)
     }))
 
-  return [...taskCards, ...publicMessages, ...stopEvents].sort((left, right) => {
+  return [...taskCards, ...publicMessages, ...stopEvents, ...workspaceChangeCards].sort((left, right) => {
     if (left.timelineGlobalSequence !== null && right.timelineGlobalSequence !== null) {
       const sequenceOrder = left.timelineGlobalSequence - right.timelineGlobalSequence
       if (sequenceOrder !== 0) return sequenceOrder
@@ -1242,6 +1259,57 @@ export function CampWorkspace({
       return initialCampConversationView(null, showingFirstRunWelcome)
     }
   })
+  const workspaceChangeReviewRequest = useRef(0)
+  const [workspaceChangeReview, setWorkspaceChangeReview] = useState<{
+    window: WorkspaceChangeWindowView
+    status: 'loading' | 'ready' | 'error'
+    result: WorkspaceChangeWindowDiffView | null
+    error: string | null
+  } | null>(null)
+  useEffect(() => {
+    workspaceChangeReviewRequest.current += 1
+    setWorkspaceChangeReview(null)
+  }, [snapshot.camp.id])
+  const openWorkspaceChangeReview = useCallback(async (
+    workspaceWindow: WorkspaceChangeWindowView
+  ): Promise<void> => {
+    const requestId = ++workspaceChangeReviewRequest.current
+    setWorkspaceChangeReview({
+      window: workspaceWindow,
+      status: 'loading',
+      result: null,
+      error: null
+    })
+    try {
+      const result = await window.rovai.request<WorkspaceChangeWindowDiffView>(
+        'workspaceChangeWindows.getDiff',
+        { campId: snapshot.camp.id, windowId: workspaceWindow.windowId }
+      )
+      if (
+        requestId !== workspaceChangeReviewRequest.current
+        || result.schemaVersion !== 1
+        || result.window.windowId !== workspaceWindow.windowId
+      ) return
+      setWorkspaceChangeReview({
+        window: result.window,
+        status: 'ready',
+        result,
+        error: null
+      })
+    } catch (error) {
+      if (requestId !== workspaceChangeReviewRequest.current) return
+      setWorkspaceChangeReview({
+        window: workspaceWindow,
+        status: 'error',
+        result: null,
+        error: error instanceof Error ? error.message : '文件变更暂时无法打开。'
+      })
+    }
+  }, [snapshot.camp.id])
+  const closeWorkspaceChangeReview = useCallback(() => {
+    workspaceChangeReviewRequest.current += 1
+    setWorkspaceChangeReview(null)
+  }, [])
   const firstRunConversationShownForCamp = useRef<string | null>(
     showingFirstRunWelcome ? snapshot.camp.id : null
   )
@@ -1590,13 +1658,15 @@ export function CampWorkspace({
       snapshot.turns,
       snapshot.timeline,
       snapshot.agentRuns,
-      snapshot.tasks
+      snapshot.tasks,
+      snapshot.workspaceChangeWindows
     ),
     [
       snapshot.agentRuns,
       snapshot.tasks,
       snapshot.timeline,
       snapshot.turns,
+      snapshot.workspaceChangeWindows,
       visibleCampMessages
     ]
   )
@@ -3361,7 +3431,10 @@ export function CampWorkspace({
 
   return (
     <section className="workspace-shell camp-workspace" aria-label={`会话：${snapshot.camp.title}`}>
-      <div className={`workspace-grid ${inspectorVisible ? '' : 'inspector-collapsed'}`.trim()}>
+      <div
+        className={`workspace-grid ${inspectorVisible ? '' : 'inspector-collapsed'}`.trim()}
+        hidden={workspaceChangeReview !== null}
+      >
         <section
           className="timeline-pane"
           onDragEnter={enterAttachmentDropSurface}
@@ -3572,6 +3645,17 @@ export function CampWorkspace({
                           setTaskFocusRequest((request) => request + 1)
                           openInspector('tasks')
                         }}
+                      />
+                    )
+                    continue
+                  }
+                  if (timelineItem.kind === 'workspace_change') {
+                    previousMessageAuthorKey = null
+                    items.push(
+                      <WorkspaceChangeTimelineCard
+                        key={timelineItem.id}
+                        window={timelineItem.window}
+                        onView={() => void openWorkspaceChangeReview(timelineItem.window)}
                       />
                     )
                     continue
@@ -4267,6 +4351,13 @@ export function CampWorkspace({
             : ''}
         </span>
       </div>
+      {workspaceChangeReview && (
+        <WorkspaceChangeReview
+          state={workspaceChangeReview}
+          onBack={closeWorkspaceChangeReview}
+          onRetry={() => void openWorkspaceChangeReview(workspaceChangeReview.window)}
+        />
+      )}
       {mentionPopover && (
         <MentionProfilePopover
           request={mentionPopover}
@@ -5999,6 +6090,172 @@ function FirstRunCampWelcome({
   )
 }
 
+function WorkspaceChangeTimelineCard({
+  window: workspaceWindow,
+  onView
+}: {
+  window: WorkspaceChangeWindowView
+  onView(): void
+}): JSX.Element {
+  const [showAllFiles, setShowAllFiles] = useState(false)
+  const visibleFiles = showAllFiles ? workspaceWindow.files : workspaceWindow.files.slice(0, 3)
+  const hiddenFileCount = Math.max(0, workspaceWindow.files.length - visibleFiles.length)
+  return (
+    <article className="timeline-node workspace-change-card">
+      <header className="workspace-change-card-header">
+        <span className="workspace-change-card-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24">
+            <path d="M7 3.5h7l3 3V18a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V5.5a2 2 0 0 1 2-2Z" />
+            <path d="M14 3.5V7h3.5M8.5 11.5h5M8.5 15h5" />
+          </svg>
+        </span>
+        <span className="workspace-change-card-copy">
+          <strong>Files Changed</strong>
+          <span>
+            {workspaceWindow.fileCount} 个文件
+            <span className="workspace-change-stat addition">+{workspaceWindow.additions}</span>
+            <span className="workspace-change-stat deletion">−{workspaceWindow.deletions}</span>
+          </span>
+        </span>
+        <button
+          type="button"
+          className="workspace-change-view-button"
+          aria-label={`查看 Files Changed：${workspaceWindow.fileCount} 个文件`}
+          onClick={onView}
+        >
+          View
+        </button>
+      </header>
+      <div className="workspace-change-card-files" aria-label="变更文件">
+        {visibleFiles.map((file) => (
+          <div className="workspace-change-card-file" key={file.path}>
+            <code title={file.path}>{file.path}</code>
+            <span aria-label={`新增 ${file.additions} 行，删除 ${file.deletions} 行`}>
+              {file.additions > 0 && <i className="addition">+{file.additions}</i>}
+              {file.deletions > 0 && <i className="deletion">−{file.deletions}</i>}
+            </span>
+          </div>
+        ))}
+        {hiddenFileCount > 0 && (
+          <button
+            className="workspace-change-more-files"
+            type="button"
+            onClick={() => setShowAllFiles(true)}
+          >
+            还有 {hiddenFileCount} 个文件
+          </button>
+        )}
+      </div>
+    </article>
+  )
+}
+
+function workspaceDiffSections(diff: string): string[] {
+  const starts: number[] = []
+  const matcher = /^diff --git /gmu
+  for (let match = matcher.exec(diff); match; match = matcher.exec(diff)) starts.push(match.index)
+  if (starts.length === 0) return diff.trim() ? [diff] : []
+  return starts.map((start, index) => diff.slice(start, starts[index + 1] ?? diff.length))
+}
+
+function WorkspaceChangeReview({
+  state,
+  onBack,
+  onRetry
+}: {
+  state: {
+    window: WorkspaceChangeWindowView
+    status: 'loading' | 'ready' | 'error'
+    result: WorkspaceChangeWindowDiffView | null
+    error: string | null
+  }
+  onBack(): void
+  onRetry(): void
+}): JSX.Element {
+  const [selectedFileIndex, setSelectedFileIndex] = useState(0)
+  useEffect(() => setSelectedFileIndex(0), [state.window.windowId])
+  const sections = useMemo(
+    () => workspaceDiffSections(state.result?.diff ?? ''),
+    [state.result?.diff]
+  )
+  const selectedFile = state.window.files[selectedFileIndex] ?? state.window.files[0] ?? null
+  const selectedDiff = sections[selectedFileIndex] ?? sections[0] ?? ''
+  const lines = useMemo(() => inlineDiffLines(selectedDiff), [selectedDiff])
+  return (
+    <section className="workspace-change-review" aria-label="Files Changed">
+      <header className="workspace-change-review-header">
+        <button className="workspace-change-review-back" type="button" onClick={onBack}>
+          <svg viewBox="0 0 16 16" aria-hidden="true"><path d="m9.75 3.5-4.5 4.5 4.5 4.5" /></svg>
+          返回会话
+        </button>
+        <div className="workspace-change-review-heading">
+          <h2>Files Changed</h2>
+          <span>
+            {state.window.fileCount} 个文件
+            <i className="addition">+{state.window.additions}</i>
+            <i className="deletion">−{state.window.deletions}</i>
+          </span>
+        </div>
+      </header>
+      {state.status === 'loading' && (
+        <div className="workspace-change-review-state" role="status">
+          <span className="tool-result-spinner" aria-hidden="true" />
+          正在读取文件变更…
+        </div>
+      )}
+      {state.status === 'error' && (
+        <div className="workspace-change-review-state is-error" role="alert">
+          <strong>文件变更暂时无法打开</strong>
+          <span>{state.error}</span>
+          <button className="quiet-button compact" type="button" onClick={onRetry}>重试</button>
+        </div>
+      )}
+      {state.status === 'ready' && (
+        <div className="workspace-change-review-content">
+          <nav className="workspace-change-review-files" aria-label="变更文件列表">
+            {state.window.files.map((file, index) => (
+              <button
+                type="button"
+                className={index === selectedFileIndex ? 'selected' : ''}
+                aria-current={index === selectedFileIndex ? 'true' : undefined}
+                key={`${index}:${file.path}`}
+                onClick={() => setSelectedFileIndex(index)}
+              >
+                <code title={file.path}>{file.path}</code>
+                <span>
+                  {file.additions > 0 && <i className="addition">+{file.additions}</i>}
+                  {file.deletions > 0 && <i className="deletion">−{file.deletions}</i>}
+                </span>
+              </button>
+            ))}
+          </nav>
+          <section className="workspace-change-review-diff" aria-label={selectedFile ? `${selectedFile.path} 的差异` : '文件差异'}>
+            <header>
+              <code>{selectedFile?.path ?? state.window.executionRootLabel}</code>
+            </header>
+            <div className="workspace-change-review-code" tabIndex={0}>
+              {lines.map((line, index) => line.kind === 'hunk' || line.kind === 'metadata'
+                ? (
+                    <div className={`workspace-change-review-line is-${line.kind}`} key={`${index}:${line.text}`}>
+                      <code>{line.text}</code>
+                    </div>
+                  )
+                : (
+                    <div className={`workspace-change-review-line is-${line.kind}`} key={`${index}:${line.text}`}>
+                      <span aria-hidden="true">{line.oldLine ?? ''}</span>
+                      <span aria-hidden="true">{line.newLine ?? ''}</span>
+                      <i aria-hidden="true">{line.kind === 'addition' ? '+' : line.kind === 'deletion' ? '−' : ''}</i>
+                      <code>{line.text || ' '}</code>
+                    </div>
+                  ))}
+            </div>
+          </section>
+        </div>
+      )}
+    </section>
+  )
+}
+
 function StopOutcomeEvent({
   item,
   onOpenDrawer
@@ -7026,6 +7283,104 @@ function ToolCallDetail({
 
 type ToolCallStep = Extract<LiveExecutionProgress['items'][number], { kind: 'tool' }>['step']
 
+type InlineDiffLine = {
+  kind: 'context' | 'addition' | 'deletion' | 'hunk' | 'metadata'
+  text: string
+  oldLine: number | null
+  newLine: number | null
+}
+
+function inlineDiffLines(diff: string): InlineDiffLine[] {
+  const result: InlineDiffLine[] = []
+  let oldLine = 0
+  let newLine = 0
+  let insideHunk = false
+  for (const rawLine of diff.split('\n')) {
+    if (rawLine.startsWith('diff --git ')) {
+      insideHunk = false
+      continue
+    }
+    if (rawLine.startsWith('index ')
+      || rawLine.startsWith('--- ')
+      || rawLine.startsWith('+++ ')) continue
+    if (rawLine.startsWith('@@')) {
+      const match = /^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/.exec(rawLine)
+      if (match) {
+        oldLine = Number(match[1])
+        newLine = Number(match[2])
+      }
+      insideHunk = true
+      result.push({ kind: 'hunk', text: rawLine, oldLine: null, newLine: null })
+      continue
+    }
+    if (!insideHunk || rawLine === '\\ No newline at end of file') {
+      if (rawLine !== '') {
+        result.push({ kind: 'metadata', text: rawLine, oldLine: null, newLine: null })
+      }
+      continue
+    }
+    if (rawLine.startsWith('+')) {
+      result.push({ kind: 'addition', text: rawLine.slice(1), oldLine: null, newLine })
+      newLine += 1
+      continue
+    }
+    if (rawLine.startsWith('-')) {
+      result.push({ kind: 'deletion', text: rawLine.slice(1), oldLine, newLine: null })
+      oldLine += 1
+      continue
+    }
+    if (rawLine === '' && result.length > 0) continue
+    const text = rawLine.startsWith(' ') ? rawLine.slice(1) : rawLine
+    result.push({ kind: 'context', text, oldLine, newLine })
+    oldLine += 1
+    newLine += 1
+  }
+  return result
+}
+
+function ModifiedFileRow({ change }: {
+  change: NonNullable<ToolCallStep['fileChanges']>[number]
+}): JSX.Element {
+  const fileName = change.path.split('/').filter(Boolean).at(-1) ?? change.path
+  const lines = useMemo(() => inlineDiffLines(change.diff), [change.diff])
+  return (
+    <details className="process-action modified-file-row" data-activity-domain="file">
+      <summary
+        className="modified-file-summary"
+        aria-label={`修改 ${change.path}，新增 ${change.additions} 行，删除 ${change.deletions} 行`}
+      >
+        <ToolCallIcon activityDomain="file" />
+        <span className="modified-file-title" title={change.path}>修改 {fileName}</span>
+        <span className="modified-file-stats" aria-hidden="true">
+          <span className="diff-addition">+{change.additions}</span>
+          <span className="diff-deletion">−{change.deletions}</span>
+        </span>
+        <span className="tool-call-disclosure-slot" aria-hidden="true">
+          <svg viewBox="0 0 16 16" focusable="false">
+            <path d="m4.75 6.25 3.25 3.5 3.25-3.5" />
+          </svg>
+        </span>
+      </summary>
+      <div className="modified-file-diff" tabIndex={0} aria-label={`${change.path} 的文件差异`}>
+        {lines.map((line, index) => line.kind === 'hunk' || line.kind === 'metadata'
+          ? (
+              <div className={`modified-file-diff-line is-${line.kind}`} key={`${index}:${line.text}`}>
+                <code>{line.text}</code>
+              </div>
+            )
+          : (
+              <div className={`modified-file-diff-line is-${line.kind}`} key={`${index}:${line.text}`}>
+                <span aria-hidden="true">{line.kind === 'addition' ? '+' : line.kind === 'deletion' ? '−' : ''}</span>
+                <span aria-hidden="true">{line.oldLine ?? ''}</span>
+                <span aria-hidden="true">{line.newLine ?? ''}</span>
+                <code>{line.text || ' '}</code>
+              </div>
+            ))}
+      </div>
+    </details>
+  )
+}
+
 function ToolCallRow({
   campId,
   step,
@@ -7239,6 +7594,11 @@ export function RunExecutionDisclosure({
         }
         if (item.kind !== 'tool') return null
         const step = item.step
+        if (step.fileChanges?.length) {
+          return step.fileChanges.map((change, index) => (
+            <ModifiedFileRow change={change} key={`${item.key}:file:${index}:${change.path}`} />
+          ))
+        }
         const fullEvidence = completeEvidence.byToolId.get(step.id)
         return (
           <ToolCallRow

@@ -1825,12 +1825,38 @@ pub fn normalize_event(method: &str, params: &Value) -> (&'static str, Value) {
         "thread/status/changed" => ("runtime.state", params.clone()),
         "error" => ("error", params.clone()),
         "item/started" => ("activity.started", params.clone()),
-        "item/completed" => ("activity.completed", params.clone()),
+        "item/completed" => ("activity.completed", completed_activity_payload(params)),
         _ => (
             "runtime.native",
             json!({"method": method, "params": params}),
         ),
     }
+}
+
+fn completed_activity_payload(params: &Value) -> Value {
+    let mut payload = params.clone();
+    let Some(item) = params.get("item") else {
+        return payload;
+    };
+    if item.get("type").and_then(Value::as_str) != Some("fileChange")
+        || item.get("status").and_then(Value::as_str) != Some("completed")
+    {
+        return payload;
+    }
+    let Some(changes) = item.get("changes").and_then(Value::as_array) else {
+        return payload;
+    };
+    if changes.is_empty() {
+        return payload;
+    }
+    payload["runtimeDiff"] = json!({
+        "adapterKind": "codex-cli",
+        "protocolFamily": "codex-app-server",
+        "sourceEventKind": "item/completed.fileChange.completed",
+        "semanticKind": "codex_file_change_snapshot",
+        "entries": changes,
+    });
+    payload
 }
 
 pub struct CompletedTurn {
@@ -1896,6 +1922,42 @@ mod tests {
             config: None,
             runtime_workspace_roots: None,
             ephemeral: false,
+        }
+    }
+
+    #[test]
+    fn only_completed_file_change_items_create_runtime_diff_candidates() {
+        let completed = completed_activity_payload(&json!({
+            "item": {
+                "id": "change-1",
+                "type": "fileChange",
+                "status": "completed",
+                "changes": [{
+                    "path": "src/app.ts",
+                    "kind": {"type": "update"},
+                    "diff": "@@ -1 +1 @@\n-old\n+new\n"
+                }]
+            }
+        }));
+        assert_eq!(
+            completed.pointer("/runtimeDiff/sourceEventKind"),
+            Some(&json!("item/completed.fileChange.completed"))
+        );
+        assert_eq!(
+            completed.pointer("/runtimeDiff/entries/0/path"),
+            Some(&json!("src/app.ts"))
+        );
+
+        for payload in [
+            json!({"item": {"type": "fileChange", "status": "inProgress", "changes": [{"path": "src/app.ts", "diff": "+partial"}]}}),
+            json!({"item": {"type": "commandExecution", "status": "completed", "changes": [{"path": "src/app.ts", "diff": "+guessed"}]}}),
+            json!({"item": {"type": "fileChange", "status": "completed", "changes": []}}),
+        ] {
+            assert!(
+                completed_activity_payload(&payload)
+                    .get("runtimeDiff")
+                    .is_none()
+            );
         }
     }
 

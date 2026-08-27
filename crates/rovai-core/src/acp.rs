@@ -540,6 +540,9 @@ struct ObservedToolMetadata {
     // events and Action records continue to store digests, never this payload.
     raw_input: Option<Value>,
     locations: Option<Value>,
+    // ACP v1 ToolCallUpdate.content replaces the previous content collection.
+    // Keep only validated standard Diff blocks until the matching terminal update.
+    public_file_changes: Option<Value>,
 }
 
 #[derive(Debug)]
@@ -3352,6 +3355,9 @@ impl AcpRuntime {
         if let Some(locations) = update.get("locations").filter(|value| !value.is_null()) {
             observed.locations = Some(locations.clone());
         }
+        if update.get("content").is_some() {
+            observed.public_file_changes = public_acp_file_changes(update.get("content"));
+        }
         if update.get("rawInput").is_some() || update.get("locations").is_some() {
             observed.observation_digest = Some(canonical_json_digest(&json!({
                 "nativeItemId": native_item_id,
@@ -5448,6 +5454,7 @@ pub struct CompletedAcpAction {
     pub native_item_id: String,
     pub native_kind: String,
     pub public_command: Option<String>,
+    pub public_file_changes: Option<Value>,
     pub observation_digest: String,
     pub outcome: ActionResultOutcome,
     pub result_code: String,
@@ -5509,10 +5516,14 @@ pub fn completed_action(
         "locations": update.get("locations"),
     }))?;
     let effect_disposition = acp_effect_disposition(succeeded, &native_kind);
+    let public_file_changes = succeeded
+        .then(|| public_acp_file_changes(update.get("content")))
+        .flatten();
     Ok(Some(CompletedAcpAction {
         native_item_id: native_item_id.clone(),
         native_kind,
         public_command,
+        public_file_changes,
         observation_digest,
         outcome: if succeeded {
             ActionResultOutcome::Succeeded
@@ -5563,6 +5574,11 @@ fn reconcile_completed_action(
         completion.public_command =
             public_acp_shell_command(adapter_kind, observed.raw_input.as_ref());
     }
+    if matches!(completion.outcome, ActionResultOutcome::Succeeded)
+        && completion.public_file_changes.is_none()
+    {
+        completion.public_file_changes = observed.public_file_changes;
+    }
     if let Some(native_kind) = observed.native_kind {
         completion.native_kind = native_kind;
     }
@@ -5600,6 +5616,29 @@ fn reconcile_completed_action(
         }
     }
     Ok(completion)
+}
+
+fn public_acp_file_changes(content: Option<&Value>) -> Option<Value> {
+    let blocks = content?.as_array()?;
+    let changes = blocks
+        .iter()
+        .filter(|block| block.get("type").and_then(Value::as_str) == Some("diff"))
+        .filter_map(|block| {
+            let path = block.get("path")?.as_str()?;
+            let new_text = block.get("newText")?.as_str()?;
+            let old_text = match block.get("oldText") {
+                Some(Value::String(value)) => Value::String(value.clone()),
+                Some(Value::Null) | None => Value::Null,
+                _ => return None,
+            };
+            Some(json!({
+                "path": path,
+                "oldText": old_text,
+                "newText": new_text,
+            }))
+        })
+        .collect::<Vec<_>>();
+    (!changes.is_empty()).then(|| Value::Array(changes))
 }
 
 fn acp_effect_disposition(succeeded: bool, native_kind: &str) -> &'static str {
@@ -9787,6 +9826,7 @@ while IFS= read -r ignored; do :; done
                 observation_digest: Some("observed-digest".to_string()),
                 raw_input: Some(observed_raw_input),
                 locations: None,
+                public_file_changes: None,
             },
             sparse,
         )
@@ -9840,5 +9880,60 @@ while IFS= read -r ignored; do :; done
 
         assert_eq!(execute.effect_disposition, "unknown");
         assert_eq!(edit.effect_disposition, "partial");
+    }
+
+    #[test]
+    fn successful_terminal_acp_diff_content_is_kept_for_evidence_projection_only() {
+        let completion = completed_action(
+            AdapterKind::CursorAgent,
+            &json!({
+                "update": {
+                    "sessionUpdate": "tool_call_update",
+                    "toolCallId": "tool-edit",
+                    "status": "completed",
+                    "kind": "edit",
+                    "content": [{
+                        "type": "diff",
+                        "path": "src/app.ts",
+                        "oldText": "before\n",
+                        "newText": "after\n"
+                    }]
+                }
+            }),
+        )
+        .unwrap()
+        .expect("terminal ACP edit should complete");
+
+        assert_eq!(
+            completion.public_file_changes,
+            Some(json!([{
+                "path": "src/app.ts",
+                "oldText": "before\n",
+                "newText": "after\n"
+            }]))
+        );
+        assert!(!completion.result_data.to_string().contains("before"));
+        assert!(!completion.result_data.to_string().contains("after"));
+
+        let failed = completed_action(
+            AdapterKind::CursorAgent,
+            &json!({
+                "update": {
+                    "sessionUpdate": "tool_call_update",
+                    "toolCallId": "tool-edit-failed",
+                    "status": "failed",
+                    "kind": "edit",
+                    "content": [{
+                        "type": "diff",
+                        "path": "src/app.ts",
+                        "oldText": "before\n",
+                        "newText": "partial\n"
+                    }]
+                }
+            }),
+        )
+        .unwrap()
+        .expect("failed ACP edit should still complete its audit action");
+        assert!(failed.public_file_changes.is_none());
     }
 }

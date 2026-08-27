@@ -3,7 +3,7 @@ document_type: contract
 contract: workspace-change-observation
 version: v1
 status: accepted
-last_updated: 2026-08-26
+last_updated: 2026-08-27
 ---
 
 # Workspace Change Observation v1
@@ -37,6 +37,18 @@ accepted 只表示目标语义已冻结；当前实现状态由 [v1.29 实施计
 
 局部 before/after、仅路径、自由文本中的 fenced diff、语义未声明的 `diff` / `patch` 字段和需要读取当前文件才能
 补全的数据必须拒绝进入 Diff View。拒绝可以产生安全 diagnostic，但不能伪造 diff Evidence。
+
+v1 的 Runtime allowlist 冻结为：
+
+| 协议族 | 可靠终态 | 内容语义 | v1 处理 |
+| --- | --- | --- | --- |
+| Codex app-server | `item/completed` 且 `item.type=fileChange`、`item.status=completed` | `changes[].kind=update` 的 `diff` 是 unified diff；add/delete 的 `diff` 是完整新/旧内容 | 规范化为逐文件 unified diff 后准入 |
+| ACP v1 | `session/update.tool_call_update` 最终累计状态为 `completed` | 标准 `ToolCallContent::Diff { path, oldText?, newText }`；collection update 是 replace，不是 append | 只从该 Tool call 的终态累计 content 生成完整 before/after Evidence |
+| Claude stream-json | 没有等价的终态完整文件集合 | Edit/Write 的请求或 result 不能证明完整 before/after | 不准入，不解析 Tool input |
+| Antigravity stream-json | 没有等价的终态完整文件集合 | Tool 名称和 step terminal 不能证明 patch | 不准入，不按名称推测 |
+
+Codex 的 `item/started`、`item/fileChange/patchUpdated`、`turn/diff/updated` 以及任何名为 `apply_patch` 的 Tool
+都不是 v1 Command Diff 数据源。`apply_patch` 输入不解析；异常退出时没有上述可靠终态就不生成文件 presentation。
 
 ### 2.2 Append-only Evidence
 
@@ -118,9 +130,9 @@ capture 变为 `unavailable`。
 同一 repository 的不同 `campId` 或 `canonicalExecutionRoot` 不共享 Window。Window ID 使用密码学安全随机源并含
 至少 128-bit 熵；用于 ref 的 token 是该 identity 的固定长度、路径安全编码，不接受调用方提供值。
 
-### 3.2 Authoritative record
+### 3.2 Coordinator state 与历史 Evidence
 
-Core DB 至少持久：
+Core DB 对未完成 Window 的协调状态保持唯一写入权威：
 
 ```text
 WorkspaceChangeWindowRecord {
@@ -156,10 +168,33 @@ WorkspaceChangeWindowParticipant {
 }
 ```
 
-Window 是唯一持久对象；Participant/AgentRun 只引用 `windowId`，不复制 OID、状态、summary 或 blob。capture
-manifest 冻结排序后的 path、mode、source kind、boundary/sparse provenance 与对应 entry OID，供 final sticky-path
-选择和完整性验证；它与 diff 一样是 Core-private Managed Blob。DB OID 必须按冻结 `objectFormat` 验证格式和对象
-类型。Git ref 不是权威字段，不能代替 DB recovery 或 authorization。
+Window 完成且存在非空净变化时，在同一 publication 边界追加一条不可变历史 Evidence：
+
+```text
+WorkspaceDiffCompleted {
+  evidenceId
+  windowId
+  campId
+  canonicalExecutionRoot
+  participantRuns[]
+  files[]
+  additions
+  deletions
+  diffBlobId
+  capturedAt
+  baselineOid?   // 仅诊断
+  finalOid?      // 仅诊断
+}
+```
+
+`WorkspaceChangeWindowRecord` 负责 opening/active/closing、恢复和清理；`WorkspaceDiffCompleted + diffBlobId`
+是历史卡片和只读 View 的长期权威。完成后的读取不得重新执行 Git diff，不得读取当前 workspace，也不得依赖
+baseline/final ref 或 tree 仍存在。`no_changes` 与 `unavailable` 只收口 Window 状态，不创建历史卡片 Evidence。
+
+Participant/AgentRun 只引用 `windowId`，不复制 OID、状态、summary 或 blob。capture manifest 冻结排序后的 path、
+mode、source kind、boundary/sparse provenance 与对应 entry OID，供 final sticky-path 选择和完整性验证；manifest
+是 Core-private Managed Blob。DB OID 必须按冻结 `objectFormat` 验证格式和对象类型。Git ref 不是会话历史、
+恢复索引或授权权威。
 
 ## 4. Lifecycle 与 capture state
 
@@ -285,8 +320,8 @@ final stable tree 与 baseline 相同或规范 tree diff 为空时，Window 为 
 2. rename detection 使用冻结的有界 profile；无法在上限内完成时整个 Window unavailable，不把 delete/add 猜成 rename；
 3. binary、mode-only、add/delete/modify/rename 和截断必须结构化区分；patch 超限不得伪装完整，可将整个 v1 Window
    标记 unavailable，直到合同另行定义 summary-only 成功态；
-4. patch bytes 进入 Core Managed Blob，DB 在同一 publication 边界写 authoritative reference、summary、final OID、
-   timestamps 与 `closed/complete`；
+4. patch bytes 进入 Core Managed Blob；DB 在同一 transaction 写 Window 的 final 状态，并追加不可变
+   `WorkspaceDiffCompleted`（文件摘要、participant audit、`diffBlobId`、`capturedAt`）；只有两者都成功才发布卡片；
 5. 只有 publication 成功后清理 refs。Managed Blob reference 必须进入现有 GC root，不能由 Git object/ref 代替。
 
 ## 9. Authorization and reads
@@ -300,7 +335,7 @@ WorkspaceChangeWindowReadInput {
 }
 ```
 
-Core 必须在同一 read transaction 验证 Window 精确属于 `campId`，并验证当前 User/Desktop principal 对该 Camp
+Core 必须在同一 read transaction 验证 `WorkspaceDiffCompleted` 精确属于 `campId + windowId`，并验证当前 User/Desktop principal 对该 Camp
 的读取资格。v1 不向 Agent built-in、Runtime 或模型上下文开放该 read。cross-Camp、未知或未授权统一返回安全
 not-found；不得泄露存在性。禁止以下入口：
 
@@ -308,13 +343,13 @@ not-found；不得泄露存在性。禁止以下入口：
 - 让 public client 使用本地路径直接打开 diff blob；
 - 通过 Participant 查询枚举其他 Camp Window。
 
-安全 View 可返回：schemaVersion、windowId、lifecycle、captureStatus、安全 execution-root label、当前 Camp 内
-participants `(agentRunId, executionEpoch)`、capture timestamps、summary、safe unavailable reason、
-`externalWriterObserved` 与 `hasDiffContent`。它不得返回 repositoryRoot/worktreeGitDir/gitCommonDir、raw ref、OID、
-Managed Blob ID 或其他 scope identity。
+会话卡片和 View 只返回 `WorkspaceDiffCompleted` 的安全投影：schemaVersion、windowId、`complete`、安全
+execution-root label、文件摘要、总增删、capturedAt 与 `hasDiffContent`。当前 UI 不公开 participant、ref、OID、
+Managed Blob ID、repositoryRoot/worktreeGitDir/gitCommonDir 或其他 scope identity。`no_changes/unavailable` 没有历史
+Evidence，因此不提供卡片或 diff read；其诊断仍保留在 Core Window state。
 
-diff 内容分页/读取继续提交相同 `campId + windowId`，Core 内部解析 Managed Blob reference。完成 Window 可从多个
-参与 Run 详情链接到同一 View，但只有一个逻辑对象。
+diff 内容读取继续提交相同 `campId + windowId`，Core 内部从不可变 Evidence 解析 Managed Blob reference。删除临时
+Git ref、用户继续编辑或产生后续 Window 都不得改变旧 View。
 
 Window OID、manifest、summary 或 diff 不进入 Session Bootstrap、Dynamic Context、Camp public message 或 Runtime
 输入；同 Camp membership 本身不把工作区内容授权给模型。
@@ -325,9 +360,17 @@ Window OID、manifest、summary 或 diff 不进入 Session Bootstrap、Dynamic C
 Rovai-managed、不同 WindowKey 的运行范围与当前 physical workspace path 重叠。它不说明写入实际发生，也不表示
 Core 观察到所有用户、shell、IDE、hook 或外部进程。
 
-任何 future consumer/presentation 必须保留以下语义：Window 不归因给单个 Agent/Run；结果可能包含用户编辑器、
-外部程序或其他并行运行修改；`externalWriterObserved` 不泄露对方 identity；`complete | no_changes | unavailable`
-不可混淆；非 Git root 没有 Window。布局、组件、入口、具体文案和交互不由本合同冻结，留待独立 UI 方案确认。
+v1 presentation 冻结为：
+
+- Command 层不展示 `apply_patch` 父行或“编辑了 N 个文件”聚合层；一条可靠终态 Activity 的每个 change 是同级
+  `修改 <basename>  +A −D` presentation row，独立展开当前文件 inline diff，不跳转文件、不打开独立 Review；
+- 多个文件 row 仍共享一条 Evidence 与一条 Canonical Activity，不获得独立 phase/outcome/排序身份；
+- Workspace 层只有 `complete` 在会话时间线追加 `Files Changed` 卡片。卡片右侧唯一动作为中性黑字、弱边框
+  `View`；文件名顶格、行间无分隔，不显示时间、已保存、参与运行或底部归因 footer；
+- `View` 读取历史 Evidence/blob 并在现有 Camp surface 内展示文件列表和完整 diff。执行台不增加共享工作区观察；
+  会话 rail、执行台 placement、Tool 列表宽度与其他现有结构不因本功能改变；
+- `no_changes`、`unavailable`、pending 和非 Git root 不生成卡片。Window 结果不归因给单个 Agent/Run，可能包含
+  用户编辑器、外部程序或其他并行运行修改；`externalWriterObserved` 不泄露对方 identity。
 
 ## 11. Cleanup and deletion
 

@@ -233,7 +233,7 @@ describe('active Camp event invalidation', () => {
         complete: true
       }
       return {
-        schemaVersion: 3,
+        schemaVersion: 4,
         throughGlobalSequence: terminal ? 12 : 10,
         camp: {
           id: 'camp-terminal-refresh', title: '终态刷新', activationState: 'active',
@@ -282,7 +282,7 @@ describe('active Camp event invalidation', () => {
           endedAt: terminal ? '2026-08-25T00:00:02Z' : null,
           updatedAt: '2026-08-25T00:00:02Z'
         }],
-        executionEvidence: [], approvals: [], timeline: [],
+        executionEvidence: [], workspaceChangeWindows: [], approvals: [], timeline: [],
         coverage: {
           tasks: complete,
           messages: {
@@ -562,7 +562,7 @@ describe('Camp snapshot cache', () => {
       updatedAt: '2026-08-14T00:00:00Z'
     }
     const previous = {
-      schemaVersion: 32,
+      schemaVersion: 33,
       throughGlobalSequence: 10,
       camp,
       members: [],
@@ -584,7 +584,7 @@ describe('Camp snapshot cache', () => {
       complete: true
     }
     const projection = {
-      schemaVersion: 3,
+      schemaVersion: 4,
       throughGlobalSequence: 20,
       camp,
       members: [],
@@ -594,6 +594,7 @@ describe('Camp snapshot cache', () => {
       turns: [],
       agentRuns: [],
       executionEvidence: [],
+      workspaceChangeWindows: [],
       approvals: [],
       timeline: [],
       coverage: {
@@ -934,6 +935,41 @@ describe('task event projections', () => {
       timelineGlobalSequence: null,
       createdAt: task.createdAt
     }])
+  })
+
+  it('projects every completed Workspace Window Evidence as its own immutable timeline card', () => {
+    const windows: CampSnapshot['workspaceChangeWindows'] = [{
+      schemaVersion: 1,
+      windowId: 'window-a',
+      captureStatus: 'complete',
+      executionRootLabel: 'rovai-ai',
+      files: [{
+        path: 'src/app.ts', changeKind: 'update', additions: 4, deletions: 1
+      }],
+      fileCount: 1,
+      additions: 4,
+      deletions: 1,
+      capturedAt: '2026-08-27T00:00:00Z',
+      hasDiffContent: true
+    }, {
+      schemaVersion: 1,
+      windowId: 'window-b',
+      captureStatus: 'complete',
+      executionRootLabel: 'rovai-ai',
+      files: [{
+        path: 'src/styles.css', changeKind: 'update', additions: 2, deletions: 2
+      }],
+      fileCount: 1,
+      additions: 2,
+      deletions: 2,
+      capturedAt: '2026-08-27T00:01:00Z',
+      hasDiffContent: true
+    }]
+
+    expect(campConversationTimeline([], [], [], [], [], windows)).toMatchObject([
+      { id: 'workspace-change:window-a', kind: 'workspace_change', window: { windowId: 'window-a' } },
+      { id: 'workspace-change:window-b', kind: 'workspace_change', window: { windowId: 'window-b' } }
+    ])
   })
 
   it('keeps ordinary directories quiet and presents Git detection metadata and warnings', () => {
@@ -2323,7 +2359,7 @@ describe('task event projections', () => {
       runtimeReadiness: { status: 'runtime_not_configured', blockers: [] }
     }
     const snapshot: CampSnapshot = {
-      schemaVersion: 32,
+      schemaVersion: 33,
       throughGlobalSequence: 1,
       camp: {
         id: 'camp-1', title: 'Lead 调整', activationState: 'active', projectBindingKind: 'quick_chat', projectPath: '/quick-chat',
@@ -2336,7 +2372,7 @@ describe('task event projections', () => {
         isDefaultLead: true, version: 1
       }],
       tasks: [], messages: [], messageDeliveries: [], turns: [], agentRuns: [],
-      contextManifests: [], executionEvidence: [],
+      contextManifests: [], executionEvidence: [], workspaceChangeWindows: [],
       approvals: [], actions: [], timeline: []
     }
     const markup = renderToStaticMarkup(createElement(CampWorkspace, {
@@ -2518,7 +2554,7 @@ describe('task event projections', () => {
       presence: 'away'
     }
     const snapshot: CampSnapshot = {
-      schemaVersion: 32,
+      schemaVersion: 33,
       throughGlobalSequence: 1,
       camp: {
         id: 'camp-empty', title: '暂无可用队员', activationState: 'active', projectBindingKind: 'quick_chat', projectPath: '/quick-chat',
@@ -2531,7 +2567,7 @@ describe('task event projections', () => {
         isDefaultLead: false, version: 1
       }],
       tasks: [], messages: [], messageDeliveries: [], turns: [], agentRuns: [],
-      contextManifests: [], executionEvidence: [],
+      contextManifests: [], executionEvidence: [], workspaceChangeWindows: [],
       approvals: [], actions: [], timeline: []
     }
     const markup = renderToStaticMarkup(createElement(CampWorkspace, {
@@ -2570,7 +2606,7 @@ describe('task event projections', () => {
       runtimeReadiness: { status: 'ready' as const, blockers: [] }
     }
     const snapshot: CampSnapshot = {
-      schemaVersion: 32,
+      schemaVersion: 33,
       throughGlobalSequence: 3,
       camp: {
         id: 'camp-live', title: '实现功能', activationState: 'active', projectBindingKind: 'directory', projectPath: '/repo',
@@ -2646,7 +2682,7 @@ describe('task event projections', () => {
         contentBlobId: null, contentByteCount: 120, isTruncated: false,
         occurredAt: '2026-07-28T05:00:04Z'
       }],
-      approvals: [], actions: [], timeline: []
+      workspaceChangeWindows: [], approvals: [], actions: [], timeline: []
     }
     const historicalRun = {
       ...snapshot.agentRuns[0],
@@ -3283,7 +3319,7 @@ describe('task event projections', () => {
       resolvedAt: null
     }))
     const snapshot: CampSnapshot = {
-      schemaVersion: 32,
+      schemaVersion: 33,
       throughGlobalSequence: 2,
       camp: {
         id: 'camp-approval', title: '审批停靠区', activationState: 'active', projectBindingKind: 'quick_chat', projectPath: '/quick-chat',
@@ -3304,7 +3340,7 @@ describe('task event projections', () => {
         version: 1
       })),
       tasks: [], messages: [], messageDeliveries: [], turns: [], agentRuns: [],
-      contextManifests: [], executionEvidence: [],
+      contextManifests: [], executionEvidence: [], workspaceChangeWindows: [],
       approvals, actions: [], timeline: []
     }
     const markup = renderToStaticMarkup(createElement(CampWorkspace, {
@@ -3371,7 +3407,7 @@ describe('task event projections', () => {
       createdAt: '2026-08-20T00:00:00Z'
     }
     const snapshot: CampSnapshot = {
-      schemaVersion: 32,
+      schemaVersion: 33,
       throughGlobalSequence: 1,
       camp: {
         id: 'camp-attachment-only', title: '附件消息', activationState: 'active', projectBindingKind: 'quick_chat', projectPath: '/quick-chat',
@@ -3390,6 +3426,7 @@ describe('task event projections', () => {
       agentRuns: [],
       contextManifests: [],
       executionEvidence: [],
+      workspaceChangeWindows: [],
       approvals: [],
       actions: [],
       timeline: []
@@ -3489,7 +3526,7 @@ describe('task event projections', () => {
     expect(campConversationTimeline([publicMessage]).map((item) => item.id)).toEqual([publicMessage.id])
 
     const snapshot: CampSnapshot = {
-      schemaVersion: 32,
+      schemaVersion: 33,
       throughGlobalSequence: 3,
       camp: {
         id: 'camp-a2a', title: 'Agent 协作', activationState: 'active', projectBindingKind: 'quick_chat', projectPath: '/quick-chat',
@@ -3516,6 +3553,7 @@ describe('task event projections', () => {
       agentRuns: [],
       contextManifests: [],
       executionEvidence: [],
+      workspaceChangeWindows: [],
       approvals: [],
       actions: [],
       timeline: []
@@ -3614,7 +3652,7 @@ describe('task event projections', () => {
 
   it('renders durable Task records below a single explicit creation action', () => {
     const snapshot: CampSnapshot = {
-      schemaVersion: 32,
+      schemaVersion: 33,
       throughGlobalSequence: 1,
       camp: {
         id: 'camp-task', title: 'Task 管理', activationState: 'active', projectBindingKind: 'quick_chat', projectPath: '/quick-chat',
@@ -3636,7 +3674,7 @@ describe('task event projections', () => {
         closedAt: null, availableActions: ['update']
       }],
       messages: [], messageDeliveries: [], turns: [], agentRuns: [], contextManifests: [],
-      executionEvidence: [], approvals: [], actions: [], timeline: []
+      executionEvidence: [], workspaceChangeWindows: [], approvals: [], actions: [], timeline: []
     }
     const markup = renderToStaticMarkup(createElement(TaskPanel, {
       snapshot,
@@ -4408,6 +4446,80 @@ describe('task event projections', () => {
       { kind: 'tool', step: { title: 'git status', status: 'running' } },
       { kind: 'tool', step: { title: '终端操作', status: 'completed' } }
     ])
+  })
+
+  it('flattens one reliable terminal FileChange Activity into sibling modified-file rows', () => {
+    const progress = buildLiveExecutionProgress([{
+      id: 'raw-apply-patch', agentRunId: 'run-files', eventType: 'runtime.action',
+      payload: { toolCallId: 'apply-1', status: 'completed', toolName: 'apply_patch' },
+      canonical: canonicalActivity('apply-1', {
+        activityDomain: 'file', semanticKind: 'file.write', toolName: 'apply_patch',
+        presentationHint: 'apply_patch'
+      }),
+      createdAt: '2026-08-27T00:00:00Z'
+    }, {
+      id: 'terminal-file-change', agentRunId: 'run-files', eventType: 'activity.completed',
+      payload: {
+        item: { id: 'files-1', type: 'fileChange', status: 'completed' }
+      },
+      canonical: canonicalActivity('files-1', {
+        activityDomain: 'file', semanticKind: 'file.write', toolName: null,
+        presentationHint: '编辑了 2 个文件',
+        diffProjection: {
+          schemaVersion: 1,
+          source: 'runtime_reported',
+          revision: 1,
+          sourceEvidenceIds: ['terminal-file-change'],
+          status: 'available',
+          semanticKind: 'unified_diff_snapshot',
+          entries: [{
+            path: 'src/app.ts', changeKind: 'update', additions: 2, deletions: 1,
+            diff: '@@ -1 +1,2 @@\n-old\n+new\n+next\n'
+          }, {
+            path: 'src/styles.css', changeKind: 'update', additions: 1, deletions: 1,
+            diff: 'old mode 100644\nnew mode 100755\n@@ -4 +4 @@\n-red\n+green\n'
+          }]
+        }
+      }),
+      createdAt: '2026-08-27T00:00:01Z'
+    }], 'run-files')
+
+    expect(progress.items).toHaveLength(1)
+    expect(progress.items[0]).toMatchObject({
+      kind: 'tool',
+      step: {
+        fileChanges: [
+          { path: 'src/app.ts', additions: 2, deletions: 1 },
+          { path: 'src/styles.css', additions: 1, deletions: 1 }
+        ]
+      }
+    })
+
+    const run: AgentRunView = {
+      id: 'run-files', campTurnId: 'turn-files', conversationId: 'conversation-files',
+      agentId: 'agent-files', taskId: null, responsibilityKey: 'direct:agent-files',
+      responsibilityGeneration: 0, purpose: '修改文件', completionRole: 'required',
+      status: 'succeeded', waitReason: null, cancelRequestedAt: null, cancelReasonCode: null,
+      cancelAcknowledgedAt: null, executionEpoch: 1, terminalResolutionSource: 'runtime_terminal',
+      terminalReasonCode: null, failure: null, runtimeModel: null,
+      permissionSemantics: 'runtime_managed_v2', invocationKind: 'direct',
+      triggerDeliveryGeneration: 0, a2aParentAgentRunId: null, a2aRootAgentRunId: null,
+      a2aDepth: 0, executionEvidenceCount: 2, hasUnsettledExternalEffects: false,
+      workspace: { path: '/repo' }, startingGitObservation: null, endingGitObservation: null,
+      version: 1, createdAt: '2026-08-27T00:00:00Z', startedAt: '2026-08-27T00:00:00Z',
+      endedAt: '2026-08-27T00:00:02Z', updatedAt: '2026-08-27T00:00:02Z'
+    }
+    const markup = renderToStaticMarkup(createElement(RunExecutionDisclosure, {
+      run, progress, campId: 'camp-1', focused: true
+    }))
+    expect(markup.match(/class="process-action modified-file-row"/g)).toHaveLength(2)
+    expect(markup).toContain('修改 app.ts')
+    expect(markup).toContain('修改 styles.css')
+    expect(markup).toContain('app.ts 的文件差异')
+    expect(markup).toContain('modified-file-diff-line is-metadata')
+    expect(markup).toContain('old mode 100644')
+    expect(markup).not.toContain('apply_patch')
+    expect(markup).not.toContain('编辑了 2 个文件')
   })
 
   it('uses truthful public Shell command previews across Runtime adapters', () => {

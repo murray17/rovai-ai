@@ -128,7 +128,8 @@ const ACTIVE_CAMP_INVALIDATION_EVENTS = new Set([
   'agent_run.cancelled',
   'agent_run.recovery_blocker_resolved',
   'agent_run.runtime_model_observed',
-  'agent_run.terminal'
+  'agent_run.terminal',
+  'workspace_change_window.completed'
 ])
 
 export function shouldRefreshActiveCampForCoreEvent(
@@ -317,7 +318,7 @@ export function campOpenProjectionAsSnapshot(
   const totalCount = Math.max(projection.coverage.messages.totalCount, loadedCount)
   const omittedCount = Math.max(0, totalCount - loadedCount)
   return {
-    schemaVersion: 32,
+    schemaVersion: 33,
     throughGlobalSequence: projection.throughGlobalSequence,
     camp: projection.camp,
     members: projection.members,
@@ -327,6 +328,7 @@ export function campOpenProjectionAsSnapshot(
     turns: projection.turns,
     agentRuns: projection.agentRuns,
     executionEvidence: projection.executionEvidence,
+    workspaceChangeWindows: projection.workspaceChangeWindows,
     contextManifests: [],
     approvals: projection.approvals,
     actions: [],
@@ -662,7 +664,7 @@ export function App(): React.JSX.Element {
           command: { campId }
         })
       : await requestAuthoritativeCampOpenProjection(window.rovai, campId, traceId)
-    if (projection.schemaVersion !== 3) throw new Error('会话打开数据版本不兼容。')
+    if (projection.schemaVersion !== 4) throw new Error('会话打开数据版本不兼容。')
     console.info(
       `[camp-open] trace=${traceId} stage=renderer_received method=${method} `
       + `elapsed_ms=${(performance.now() - startedAt).toFixed(1)} `

@@ -3,7 +3,7 @@ document_type: architecture
 architecture: workspace-change-observation
 authority: command-diff-and-workspace-change-window-boundaries
 status: accepted
-last_updated: 2026-08-26
+last_updated: 2026-08-27
 ---
 
 # Workspace Change Observation 架构
@@ -29,8 +29,8 @@ first admitted Run for WindowKey
   -> lease fence/unbind + descendant quiescence
   -> stable final synthetic tree
   -> verified tree-to-tree diff
-  -> Managed Blob + DB summary
-  -> one Camp-scoped Workspace Change Window view
+  -> immutable WorkspaceDiffCompleted Evidence + Managed Blob
+  -> one Camp-scoped Files Changed card / read-only View
 ```
 
 `Command Diff` 的权威来源是 Runtime 对精确 Operation 的结构化报告。`Workspace Change Window Diff` 的权威来源
@@ -47,6 +47,11 @@ first admitted Run for WindowKey
   `OperationDiffActivity`；
 - 路径只能相对 Run 冻结的 canonical execution root 解析。规范化和越界检查不获得文件读取权，也不以当前文件
   内容补足 Runtime 的局部数据。
+
+当前只有两种来源完成准入：Codex app-server 的 terminal `fileChange`，以及 ACP v1 terminal ToolCall 的标准
+`ToolCallContent::Diff` 累计内容。Codex add/delete 的完整文件内容在 Core 规范化为 unified diff；ACP collection
+update 按协议 replace 语义缓存到 terminal。Claude/Antigravity 没有等价终态完整内容，不解析 Edit/Write input、
+Tool 名或 shell 文本补造 diff。
 
 ### Window Coordinator
 
@@ -113,10 +118,11 @@ Rovai 不主动对用户仓库执行 prune。成功删除 ref 只撤销 Rovai �
 
 ### Core Store、Managed Blob 与授权
 
-- Core DB 是 Window identity、scope、participant relation、lifecycle、capture status、OID、capture manifest、
-  时间、summary、unavailable reason 和 Managed Blob reference 的唯一长期权威；Git ref 不是恢复索引或读取授权；
-- Window 是唯一逻辑对象。AgentRun 只保存 `windowId` 参与引用；可从多个参与 Run 的详情进入同一 Window view，
-  但不能复制 Window 行或 diff blob；
+- Core DB 的 Window row 是 active coordination、participant、capture、recovery 与 cleanup 的状态权威；Git ref 不是
+  恢复索引或读取授权；
+- `WorkspaceDiffCompleted` 是完成历史的不可变权威。它冻结 Window ID、Camp、participant audit、文件摘要、
+  `diffBlobId` 与 capturedAt；历史卡片和 View 只读该 Evidence/blob，不读 mutable Window row、当前 workspace 或 Git tree；
+- AgentRun 只保存 `windowId` 参与引用，不复制 Window、Evidence 或 diff blob；
 - Window capture manifest 与 diff/summary 的 Managed Blob reference 是 Core GC root。public projection 不返回
   原始磁盘路径、ref、OID 或 blob ID；
 - 任何 Window 或 diff read 都提交 `campId + windowId`，Core 在同一读边界验证 Camp 归属和当前 principal 授权。
@@ -126,16 +132,17 @@ Rovai 不主动对用户仓库执行 prune。成功删除 ref 只撤销 Rovai �
 - v1 Window read 只面向已授权的 User/Desktop read side；它不进入 Session Bootstrap、Dynamic Context、
   Camp public message、Agent built-in 或 Runtime 输入，也不因同 Camp membership 自动授权给模型。
 
-## Presentation-neutral projection boundary
+## Presentation boundary
 
 - Command Diff 始终是既有 Canonical Activity 的 typed 子投影；`available | conflict | unavailable` 不从 Activity
   outcome 推断，也不形成可独立排序或写入的 Activity；
-- Workspace Window 始终是一个 Camp-scoped 逻辑对象；授权 projection 可列出当前 Camp 的
-  `(agentRunId, executionEpoch)` 参与者，但不得指定修改作者；
-- `complete | no_changes | unavailable` 保持可区分；非 Git execution root 没有 Window；
-- 任一未来 presentation 必须说明结果可能包含用户编辑器、外部程序或其他并行运行的修改；
-  `externalWriterObserved=true` 只能描述 Core 观察到其他 Rovai scope 重叠；
-- 具体布局、组件、入口、文案和交互不由本架构冻结，留待独立 UI 方案确认。
+- Renderer 把一条 available Activity 的 entries 扁平投影为同级 `修改 xxx` 行。每行只展开自己的 inline diff；
+  不展示 `apply_patch`、文件数聚合父行或 Operation Review；
+- Workspace `complete` Evidence 在 Camp 会话时间线追加一张 `Files Changed` 卡片，`View` 读取不可变 blob。
+  `no_changes | unavailable` 与非 Git execution root 不新增卡片，执行台不新增共享工作区观察；
+- 卡片与 View 不指定修改作者，也不显示 participant audit。结果可能包含用户编辑器、外部程序或其他并行运行；
+  `externalWriterObserved=true` 只表示 Core 观察到其他 Rovai scope 重叠；
+- 现有 Camp 会话 rail、底部/右侧执行台 placement、Tool list 宽度、主题、字体和图标体系保持不变。
 
 ## References
 

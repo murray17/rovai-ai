@@ -1,4 +1,4 @@
-use std::ops::Deref;
+use std::{ops::Deref, path::Path};
 
 use anyhow::{Context, Result};
 use rusqlite::{OptionalExtension, TransactionBehavior, params};
@@ -10,6 +10,7 @@ use crate::{
     canonical_activity::{self, CanonicalRuntimeActivity, EvidenceActivityFacts},
     db::Database,
     managed_blob::ManagedBlobStore,
+    runtime_diff::{self, COMMAND_DIFF_SCHEMA_VERSION},
 };
 
 const INLINE_PAYLOAD_LIMIT_BYTES: usize = 16 * 1024;
@@ -348,7 +349,9 @@ impl ExecutionEvidenceService {
             .connection()
             .query_row(
                 r#"
-                SELECT status, execution_epoch, cancel_requested_at
+                SELECT status, execution_epoch, cancel_requested_at,
+                       workspace_json, runtime_adapter_kind,
+                       runtime_reported_version
                 FROM agent_run
                 WHERE id = ?1
                 "#,
@@ -358,11 +361,22 @@ impl ExecutionEvidenceService {
                         row.get::<_, String>(0)?,
                         row.get::<_, i64>(1)?,
                         row.get::<_, Option<String>>(2)?,
+                        row.get::<_, Option<String>>(3)?,
+                        row.get::<_, Option<String>>(4)?,
+                        row.get::<_, Option<String>>(5)?,
                     ))
                 },
             )
             .optional()?;
-        let Some((status, current_epoch, cancel_requested_at)) = current else {
+        let Some((
+            status,
+            current_epoch,
+            cancel_requested_at,
+            workspace_json,
+            runtime_adapter_kind,
+            runtime_reported_version,
+        )) = current
+        else {
             return Ok(None);
         };
         if current_epoch != execution_epoch
@@ -375,14 +389,20 @@ impl ExecutionEvidenceService {
         }
 
         let source_event_key = source_event_key(event_type, payload);
-        let payload = normalize_public_payload(event_type, payload);
+        let mut payload = normalize_public_payload(event_type, payload);
+        normalize_runtime_diff_evidence(
+            &mut payload,
+            workspace_json.as_deref(),
+            runtime_adapter_kind.as_deref(),
+            runtime_reported_version.as_deref(),
+        );
         let encoded = serde_json::to_vec(&payload)?;
         let (preview, content_blob_id, is_truncated) = if encoded.len() > INLINE_PAYLOAD_LIMIT_BYTES
         {
             let blob = blob_store.put_bytes(database, &encoded, "application/json", "normal")?;
             (bounded_preview(&payload), Some(blob.id), true)
         } else {
-            (payload, None, false)
+            (payload.clone(), None, false)
         };
         let preview_json = serde_json::to_string(&preview)?;
         let occurred_at = chrono::Utc::now().to_rfc3339();
@@ -474,7 +494,7 @@ impl ExecutionEvidenceService {
             event_type,
             kind,
             phase,
-            &preview,
+            &payload,
         );
         let canonical = upsert_canonical_activity(
             &transaction,
@@ -624,6 +644,7 @@ fn normalize_public_payload(event_type: &str, payload: &Value) -> Value {
                 "idempotentReplay": payload.get("idempotentReplay"),
                 "receiptId": payload.get("receiptId"),
                 "operationProjection": payload.get("operationProjection"),
+                "runtimeDiff": payload.get("runtimeDiff"),
             });
             if let Some(core_envelope) = payload.get("coreEnvelope") {
                 normalized["coreEnvelope"] = core_envelope.clone();
@@ -633,6 +654,7 @@ fn normalize_public_payload(event_type: &str, payload: &Value) -> Value {
         "activity.started" | "activity.completed" => {
             let item = payload.get("item").unwrap_or(&Value::Null);
             serde_json::json!({
+                "runtimeDiff": payload.get("runtimeDiff"),
                 "item": {
                     "id": item.get("id"),
                     "type": item.get("type"),
@@ -655,6 +677,58 @@ fn normalize_public_payload(event_type: &str, payload: &Value) -> Value {
         }
         _ => Value::Null,
     }
+}
+
+fn normalize_runtime_diff_evidence(
+    payload: &mut Value,
+    workspace_json: Option<&str>,
+    frozen_adapter_kind: Option<&str>,
+    observed_runtime_version: Option<&str>,
+) {
+    let Some(candidate) = payload.get("runtimeDiff").cloned() else {
+        return;
+    };
+    let execution_root = workspace_json
+        .and_then(|workspace| serde_json::from_str::<Value>(workspace).ok())
+        .and_then(|workspace| {
+            workspace
+                .get("executionRoot")
+                .and_then(Value::as_str)
+                .map(str::to_string)
+        });
+    let admitted = execution_root.as_deref().map(Path::new).map(|root| {
+        runtime_diff::admit_runtime_diff(payload, root, frozen_adapter_kind)
+            .unwrap_or(Err("runtime_diff_candidate_missing"))
+    });
+    let source = serde_json::json!({
+        "adapterKind": candidate.get("adapterKind"),
+        "observedRuntimeVersion": observed_runtime_version,
+        "sourceEventKind": candidate.get("sourceEventKind"),
+    });
+    payload["runtimeDiff"] = match admitted {
+        Some(Ok(admitted)) => serde_json::json!({
+            "schemaVersion": COMMAND_DIFF_SCHEMA_VERSION,
+            "source": "runtime_reported",
+            "status": "available",
+            "semanticKind": admitted.semantic_kind,
+            "entries": admitted.entries,
+            "sourceMetadata": source,
+        }),
+        Some(Err(reason)) => serde_json::json!({
+            "schemaVersion": COMMAND_DIFF_SCHEMA_VERSION,
+            "source": "runtime_reported",
+            "status": "unavailable",
+            "safeReasonCode": reason,
+            "sourceMetadata": source,
+        }),
+        None => serde_json::json!({
+            "schemaVersion": COMMAND_DIFF_SCHEMA_VERSION,
+            "source": "runtime_reported",
+            "status": "unavailable",
+            "safeReasonCode": "runtime_diff_execution_root_unavailable",
+            "sourceMetadata": source,
+        }),
+    };
 }
 
 fn public_command_actions(item: &Value) -> Value {
@@ -851,7 +925,8 @@ fn upsert_canonical_activity(
         .query_row(
             r#"
             SELECT operation_id, classifier_version, activity_domain,
-                   semantic_kind, tool_name, presentation_hint, phase, outcome,
+                   semantic_kind, tool_name, presentation_hint,
+                   diff_projection_json, phase, outcome,
                    credibility, coverage_level, source_authority,
                    source_evidence_ids_json, first_evidence_sequence,
                    last_evidence_sequence, revision
@@ -885,13 +960,13 @@ fn upsert_canonical_activity(
         INSERT INTO canonical_runtime_activity(
             agent_run_id, execution_epoch, operation_id, classifier_version,
             activity_domain, semantic_kind, tool_name, presentation_hint,
-            phase, outcome, credibility, coverage_level, source_authority,
+            diff_projection_json, phase, outcome, credibility, coverage_level, source_authority,
             source_evidence_ids_json, first_evidence_sequence,
             last_evidence_sequence, revision, created_at, updated_at,
             started_at, terminal_at
         ) VALUES (
             ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13,
-            ?14, ?15, ?16, ?17, ?18, ?18, ?19, ?20
+            ?14, ?15, ?16, ?17, ?18, ?19, ?19, ?20, ?21
         )
         ON CONFLICT(agent_run_id, execution_epoch, operation_id, classifier_version)
         DO UPDATE SET
@@ -899,6 +974,7 @@ fn upsert_canonical_activity(
             semantic_kind = excluded.semantic_kind,
             tool_name = excluded.tool_name,
             presentation_hint = excluded.presentation_hint,
+            diff_projection_json = excluded.diff_projection_json,
             phase = excluded.phase,
             outcome = excluded.outcome,
             credibility = excluded.credibility,
@@ -924,6 +1000,11 @@ fn upsert_canonical_activity(
             projection.semantic_kind,
             projection.tool_name,
             projection.presentation_hint,
+            projection
+                .diff_projection
+                .as_ref()
+                .map(serde_json::to_string)
+                .transpose()?,
             projection.phase,
             projection.outcome,
             projection.credibility,
@@ -951,6 +1032,7 @@ fn load_canonical_for_evidence(
             SELECT activity.operation_id, activity.classifier_version,
                    activity.activity_domain, activity.semantic_kind,
                    activity.tool_name, activity.presentation_hint,
+                   activity.diff_projection_json,
                    activity.phase, activity.outcome, activity.credibility,
                    activity.coverage_level, activity.source_authority,
                    activity.source_evidence_ids_json,
@@ -977,7 +1059,8 @@ fn load_canonical_for_evidence(
 }
 
 fn canonical_activity_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<CanonicalRuntimeActivity> {
-    let source_evidence_ids: String = row.get(11)?;
+    let diff_projection: Option<String> = row.get(6)?;
+    let source_evidence_ids: String = row.get(12)?;
     Ok(CanonicalRuntimeActivity {
         operation_id: row.get(0)?,
         classifier_version: row.get(1)?,
@@ -985,21 +1068,31 @@ fn canonical_activity_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Canonical
         semantic_kind: row.get(3)?,
         tool_name: row.get(4)?,
         presentation_hint: row.get(5)?,
-        phase: row.get(6)?,
-        outcome: row.get(7)?,
-        credibility: row.get(8)?,
-        coverage_level: row.get(9)?,
-        source_authority: row.get(10)?,
+        diff_projection: diff_projection
+            .map(|value| serde_json::from_str(&value))
+            .transpose()
+            .map_err(|error| {
+                rusqlite::Error::FromSqlConversionFailure(
+                    6,
+                    rusqlite::types::Type::Text,
+                    Box::new(error),
+                )
+            })?,
+        phase: row.get(7)?,
+        outcome: row.get(8)?,
+        credibility: row.get(9)?,
+        coverage_level: row.get(10)?,
+        source_authority: row.get(11)?,
         source_evidence_ids: serde_json::from_str(&source_evidence_ids).map_err(|error| {
             rusqlite::Error::FromSqlConversionFailure(
-                11,
+                12,
                 rusqlite::types::Type::Text,
                 Box::new(error),
             )
         })?,
-        first_evidence_sequence: row.get(12)?,
-        last_evidence_sequence: row.get(13)?,
-        revision: row.get(14)?,
+        first_evidence_sequence: row.get(13)?,
+        last_evidence_sequence: row.get(14)?,
+        revision: row.get(15)?,
     })
 }
 #[cfg(test)]

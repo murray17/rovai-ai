@@ -211,6 +211,7 @@ use rovai_core::{
         TeamToolService, TeamUpdateTaskInput,
     },
     team_tool_catalog::validate_builtin_tool_input,
+    workspace_change::{self, WindowAdmission},
 };
 use runtime_fleet::{AgentRuntimeFleetConfig, AgentRuntimeFleetManager};
 use serde::{Deserialize, Serialize};
@@ -537,6 +538,13 @@ struct CampCreationMember {
 #[serde(rename_all = "camelCase")]
 struct CampIdParams {
     camp_id: CampId,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct WorkspaceChangeWindowDiffParams {
+    camp_id: CampId,
+    window_id: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -1295,6 +1303,7 @@ struct Core {
     compaction_detector_policies: DesiredCompactionDetectorPolicies,
     agent_run_cancellation_notify: Notify,
     pending_execution_recovery: Mutex<()>,
+    workspace_change_gate: Mutex<()>,
     skill_library: SkillLibraryService,
     mcp_config: McpConfigStore,
     mcp_projection: McpProjectionService,
@@ -5378,6 +5387,17 @@ impl Core {
                     ReadModelService.camp_snapshot(&mut database, params.camp_id.as_str())?,
                 )?)
             }
+            "workspaceChangeWindows.getDiff" => {
+                let params: WorkspaceChangeWindowDiffParams =
+                    serde_json::from_value(request.params.clone())?;
+                let database = self.database.lock().await;
+                Ok(serde_json::to_value(workspace_change::read_window_diff(
+                    &database,
+                    &ManagedBlobStore::new(&self.data_dir),
+                    params.camp_id.as_str(),
+                    &params.window_id,
+                )?)?)
+            }
             "camp.messages.page" => {
                 let params: CampMessagePageParams = serde_json::from_value(request.params.clone())?;
                 let mut database = self.database.lock().await;
@@ -6468,6 +6488,10 @@ impl Core {
             }
         }
         let starting_git_observation = Some(git::observe_git(&workspace_path).await);
+        let workspace_change_guard = self.workspace_change_gate.lock().await;
+        let workspace_change_admission = self
+            .prepare_workspace_change_admission(&candidate.camp_id, &workspace_path)
+            .await;
         let attachment_view_gate = self.attachment_view_gate(&candidate.camp_id).await;
         let (attachment_view_admission, claim) = claim_agent_run_under_attachment_admission(
             candidate.camp_id.clone(),
@@ -6506,12 +6530,30 @@ impl Core {
         .await;
         let claim = match claim {
             Ok(claim) if claim.result.status == CommandResultStatus::Accepted => claim,
-            Ok(_) => return,
+            Ok(_) => {
+                if let Some(admission) = workspace_change_admission.as_ref() {
+                    let mut database = self.database.lock().await;
+                    let _ = workspace_change::abort_unjoined_window(
+                        &mut database,
+                        &self.data_dir,
+                        admission,
+                    );
+                }
+                return;
+            }
             Err(error) => {
                 eprintln!(
                     "failed to claim AgentRun {}: {error:#}",
                     candidate.agent_run_id
                 );
+                if let Some(admission) = workspace_change_admission.as_ref() {
+                    let mut database = self.database.lock().await;
+                    let _ = workspace_change::abort_unjoined_window(
+                        &mut database,
+                        &self.data_dir,
+                        admission,
+                    );
+                }
                 return;
             }
         };
@@ -6520,8 +6562,40 @@ impl Core {
                 "AgentRun claim {} did not return executionEpoch",
                 candidate.agent_run_id
             );
+            if let Some(admission) = workspace_change_admission.as_ref() {
+                let mut database = self.database.lock().await;
+                let _ = workspace_change::abort_unjoined_window(
+                    &mut database,
+                    &self.data_dir,
+                    admission,
+                );
+            }
             return;
         };
+        if let Some(admission) = workspace_change_admission.as_ref() {
+            let joined = {
+                let mut database = self.database.lock().await;
+                workspace_change::join_window_participant(
+                    &mut database,
+                    &admission.window_id,
+                    &candidate.agent_run_id,
+                    execution_epoch,
+                )
+            };
+            if let Err(error) = joined {
+                eprintln!(
+                    "Workspace Change Window participant join failed open for AgentRun {}: {error:#}",
+                    candidate.agent_run_id
+                );
+                let mut database = self.database.lock().await;
+                let _ = workspace_change::abort_unjoined_window(
+                    &mut database,
+                    &self.data_dir,
+                    admission,
+                );
+            }
+        }
+        drop(workspace_change_guard);
         let execution = {
             let database = self.database.lock().await;
             ExecutionRuntimeService::default().load_agent_run_execution(
@@ -6537,6 +6611,11 @@ impl Core {
                     "claimed AgentRun {} was fenced before dispatch",
                     candidate.agent_run_id
                 );
+                self.settle_workspace_change_after_quiescence(
+                    &candidate.agent_run_id,
+                    execution_epoch,
+                )
+                .await;
                 return;
             }
             Err(error) => {
@@ -9460,6 +9539,11 @@ impl Core {
                     &current.workspace.execution_root,
                 )
                 .await;
+                self.settle_workspace_change_after_quiescence(
+                    &current.agent_run_id,
+                    current.execution_epoch,
+                )
+                .await;
                 return Ok(());
             }
             if attempt < 79
@@ -10322,6 +10406,13 @@ impl Core {
                     .await;
             }
         }
+        if failure_persisted {
+            self.settle_workspace_change_after_quiescence(
+                &execution.agent_run_id,
+                execution.execution_epoch,
+            )
+            .await;
+        }
     }
 
     async fn fail_unmaterialized_agent_run(
@@ -10374,6 +10465,8 @@ impl Core {
                 &candidate.execution_workspace().execution_root,
             )
             .await;
+            self.settle_workspace_change_after_quiescence(&candidate.agent_run_id, execution_epoch)
+                .await;
         }
     }
 
@@ -10391,6 +10484,196 @@ impl Core {
         .ok()
         .filter(|inspection| inspection.project_path == project_path)
         .map(|inspection| inspection.git_observation)
+    }
+
+    async fn prepare_workspace_change_admission(
+        &self,
+        camp_id: &str,
+        execution_root: &Path,
+    ) -> Option<WindowAdmission> {
+        let root = execution_root.to_path_buf();
+        let identity =
+            match tokio::task::spawn_blocking(move || workspace_change::discover_repository(&root))
+                .await
+            {
+                Ok(Ok(Some(identity))) => identity,
+                Ok(Ok(None)) => return None,
+                Ok(Err(error)) => {
+                    eprintln!("Workspace Change Window Git discovery failed: {error:#}");
+                    return None;
+                }
+                Err(error) => {
+                    eprintln!("Workspace Change Window Git discovery worker failed: {error}");
+                    return None;
+                }
+            };
+        let admission = {
+            let mut database = self.database.lock().await;
+            match workspace_change::begin_or_join_window(&mut database, camp_id, &identity) {
+                Ok(admission) => admission,
+                Err(error) => {
+                    eprintln!("Workspace Change Window admission failed open: {error:#}");
+                    return None;
+                }
+            }
+        };
+        if !admission.needs_baseline {
+            return Some(admission);
+        }
+        let capture_identity = admission.identity.clone();
+        let capture = tokio::task::spawn_blocking(move || {
+            workspace_change::stable_capture(&capture_identity, &[])
+        })
+        .await;
+        match capture {
+            Ok(Ok(capture)) => {
+                let publication = {
+                    let mut database = self.database.lock().await;
+                    workspace_change::publish_baseline(
+                        &mut database,
+                        &ManagedBlobStore::new(&self.data_dir),
+                        &self.data_dir,
+                        &admission,
+                        &capture,
+                    )
+                };
+                if let Err(error) = publication {
+                    eprintln!("Workspace Change Window baseline publication failed: {error:#}");
+                    let mut database = self.database.lock().await;
+                    let _ = workspace_change::fail_baseline(
+                        &mut database,
+                        &self.data_dir,
+                        &admission,
+                        Some(&capture.tree_oid),
+                        &workspace_change_reason(&error, "workspace_change_baseline_unavailable"),
+                    );
+                }
+            }
+            Ok(Err(error)) => {
+                eprintln!("Workspace Change Window baseline capture failed: {error:#}");
+                let mut database = self.database.lock().await;
+                let _ = workspace_change::fail_baseline(
+                    &mut database,
+                    &self.data_dir,
+                    &admission,
+                    None,
+                    &workspace_change_reason(&error, "workspace_change_baseline_unavailable"),
+                );
+            }
+            Err(error) => {
+                eprintln!("Workspace Change Window baseline worker failed: {error}");
+                let mut database = self.database.lock().await;
+                let _ = workspace_change::fail_baseline(
+                    &mut database,
+                    &self.data_dir,
+                    &admission,
+                    None,
+                    "workspace_change_capture_worker_failed",
+                );
+            }
+        }
+        Some(admission)
+    }
+
+    async fn settle_workspace_change_after_quiescence(
+        &self,
+        agent_run_id: &str,
+        execution_epoch: i64,
+    ) -> Option<workspace_change::WorkspaceChangeWindowView> {
+        let _gate = self.workspace_change_gate.lock().await;
+        let close = {
+            let mut database = self.database.lock().await;
+            workspace_change::release_window_participant(
+                &mut database,
+                &ManagedBlobStore::new(&self.data_dir),
+                agent_run_id,
+                execution_epoch,
+            )
+        };
+        let close = match close {
+            Ok(Some(close)) => close,
+            Ok(None) => return None,
+            Err(error) => {
+                eprintln!("Workspace Change Window participant release failed: {error:#}");
+                return None;
+            }
+        };
+        let identity = close.identity.clone();
+        let sticky = close.baseline_manifest.entries.clone();
+        let capture = tokio::task::spawn_blocking(move || {
+            workspace_change::stable_capture(&identity, &sticky)
+        })
+        .await;
+        match capture {
+            Ok(Ok(capture)) => {
+                let publication = {
+                    let mut database = self.database.lock().await;
+                    workspace_change::publish_final(
+                        &mut database,
+                        &ManagedBlobStore::new(&self.data_dir),
+                        &self.data_dir,
+                        &close,
+                        &capture,
+                    )
+                };
+                match publication {
+                    Ok(view) => {
+                        emit(
+                            &self.output,
+                            "workspace_change_window.completed",
+                            serde_json::to_value(&view)
+                                .unwrap_or_else(|_| json!({ "windowId": view.window_id })),
+                        );
+                        Some(view)
+                    }
+                    Err(error) => {
+                        eprintln!("Workspace Change Window final publication failed: {error:#}");
+                        let mut database = self.database.lock().await;
+                        let _ = workspace_change::fail_close(
+                            &mut database,
+                            &self.data_dir,
+                            &close,
+                            &workspace_change_reason(&error, "workspace_change_final_unavailable"),
+                        );
+                        None
+                    }
+                }
+            }
+            Ok(Err(error)) => {
+                eprintln!("Workspace Change Window final capture failed: {error:#}");
+                let mut database = self.database.lock().await;
+                let _ = workspace_change::fail_close(
+                    &mut database,
+                    &self.data_dir,
+                    &close,
+                    &workspace_change_reason(&error, "workspace_change_final_unavailable"),
+                );
+                None
+            }
+            Err(error) => {
+                eprintln!("Workspace Change Window final worker failed: {error}");
+                let mut database = self.database.lock().await;
+                let _ = workspace_change::fail_close(
+                    &mut database,
+                    &self.data_dir,
+                    &close,
+                    "workspace_change_capture_worker_failed",
+                );
+                None
+            }
+        }
+    }
+}
+
+fn workspace_change_reason(error: &anyhow::Error, fallback: &str) -> String {
+    let message = error.to_string();
+    let code = message
+        .split_once(':')
+        .map_or(message.as_str(), |(code, _)| code);
+    if code.starts_with("workspace_change_") {
+        code.to_string()
+    } else {
+        fallback.to_string()
     }
 }
 
@@ -10926,6 +11209,13 @@ async fn run_core(
             serde_json::to_string(&v2_recovery)?
         );
     }
+    let recovered_workspace_windows =
+        workspace_change::recover_interrupted_windows(&mut database, &data_dir)?;
+    if recovered_workspace_windows != 0 {
+        eprintln!(
+            "Workspace Change startup recovery marked {recovered_workspace_windows} interrupted Windows unavailable"
+        );
+    }
     let (codex_tx, codex_rx) = mpsc::unbounded_channel();
     let (acp_tx, acp_rx) = mpsc::unbounded_channel();
     let (output_tx, output_rx) = mpsc::unbounded_channel();
@@ -10970,6 +11260,7 @@ async fn run_core(
         compaction_detector_policies: compaction_detector_policies.clone(),
         agent_run_cancellation_notify: Notify::new(),
         pending_execution_recovery: Mutex::new(()),
+        workspace_change_gate: Mutex::new(()),
         skill_library,
         mcp_config,
         mcp_projection,
@@ -12814,9 +13105,7 @@ fn normalize_acp_event_with_completion(
                         public_kind.as_deref().unwrap_or("other"),
                     )
                 });
-            (
-                "runtime.action",
-                json!({
+            let mut payload = json!({
                 "sessionUpdate": update.get("sessionUpdate"),
                 "toolCallId": update.get("toolCallId"),
                 "toolName": update.get("toolName"),
@@ -12839,8 +13128,20 @@ fn normalize_acp_event_with_completion(
                 "rawOutputDigest": update
                     .get("rawOutput")
                     .and_then(|value| canonical_json_digest(value).ok()),
-                }),
-            )
+            });
+            if public_status == "completed"
+                && let Some(changes) =
+                    completion.and_then(|value| value.public_file_changes.as_ref())
+            {
+                payload["runtimeDiff"] = json!({
+                    "adapterKind": adapter_kind.as_str(),
+                    "protocolFamily": "acp-v1",
+                    "sourceEventKind": "session/update.tool_call_update.completed",
+                    "semanticKind": "complete_before_after",
+                    "entries": changes,
+                });
+            }
+            ("runtime.action", payload)
         }
         Some("plan") => ("runtime.plan", update),
         Some("usage_update") => ("runtime.usage", update),
@@ -13641,6 +13942,8 @@ async fn persist_acp_prompt_completion(
                 .complete_agent_run(agent_run_id, execution_epoch)
                 .await;
         }
+        core.settle_workspace_change_after_quiescence(agent_run_id, execution_epoch)
+            .await;
         return Ok(());
     }
     for attempt in 0..80 {
@@ -13767,6 +14070,8 @@ async fn persist_acp_prompt_completion(
                         .complete_agent_run(agent_run_id, execution_epoch)
                         .await;
                 }
+                core.settle_workspace_change_after_quiescence(agent_run_id, execution_epoch)
+                    .await;
                 return Ok(());
             }
             Ok(terminal)
@@ -14436,6 +14741,8 @@ async fn process_agent_run_codex_message(
                 core.codex_cli
                     .complete_agent_run(agent_run_id, execution_epoch)
                     .await;
+                core.settle_workspace_change_after_quiescence(agent_run_id, execution_epoch)
+                    .await;
             }
             Err(error) => eprintln!(
                 "failed to persist planned shutdown terminal for AgentRun {agent_run_id}: {error:#}"
@@ -14616,6 +14923,8 @@ async fn process_agent_run_codex_message(
     runtime.clear_turn(Some(&completed.turn_id)).await;
     core.codex_cli
         .complete_agent_run(agent_run_id, execution_epoch)
+        .await;
+    core.settle_workspace_change_after_quiescence(agent_run_id, execution_epoch)
         .await;
 }
 
@@ -16145,6 +16454,7 @@ mod tests {
             compaction_detector_policies: compaction_detector_policies.clone(),
             agent_run_cancellation_notify: Notify::new(),
             pending_execution_recovery: Mutex::new(()),
+            workspace_change_gate: Mutex::new(()),
             skill_library,
             mcp_config,
             mcp_projection,
@@ -17961,6 +18271,47 @@ while IFS= read -r _ignored; do :; done
                 .expect("payload should serialize")
                 .contains("terminal-secret-identity")
         );
+    }
+
+    #[test]
+    fn successful_terminal_acp_diff_content_uses_the_internal_runtime_diff_channel() {
+        let params = json!({
+            "update": {
+                "sessionUpdate": "tool_call_update",
+                "toolCallId": "edit-file",
+                "status": "completed",
+                "kind": "edit",
+                "content": [{
+                    "type": "diff",
+                    "path": "/repo/src/app.ts",
+                    "oldText": "before\n",
+                    "newText": "after\n"
+                }]
+            }
+        });
+        let completion = acp::completed_action(AdapterKind::OpencodeCli, &params)
+            .unwrap()
+            .expect("terminal ACP edit should complete");
+        let (_, payload) = normalize_acp_event_with_completion(
+            AdapterKind::OpencodeCli,
+            "session/update",
+            &params,
+            Some(&completion),
+        );
+
+        assert!(payload["output"].is_null());
+        assert_eq!(
+            payload.pointer("/runtimeDiff/sourceEventKind"),
+            Some(&json!("session/update.tool_call_update.completed"))
+        );
+        assert_eq!(
+            payload.pointer("/runtimeDiff/entries/0/path"),
+            Some(&json!("/repo/src/app.ts"))
+        );
+
+        let (_, without_completion) =
+            normalize_acp_event(AdapterKind::OpencodeCli, "session/update", &params);
+        assert!(without_completion.get("runtimeDiff").is_none());
     }
 
     #[test]

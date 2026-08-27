@@ -2,7 +2,7 @@
 document_type: runtime-activity-mapping-registry
 authority: runtime-activity-mapping-catalog
 classifier_version: activity-v1
-last_updated: 2026-08-25
+last_updated: 2026-08-27
 ---
 
 # Runtime Activity Mapping Registry
@@ -27,6 +27,22 @@ last_updated: 2026-08-25
 
 Coverage 只描述 Core 实际能看到的粒度，不是产品支持等级。若某次运行没有报告结构化 tool event，
 该运行不能因为产品基线为 `fine_grained` 就补写工具调用。
+
+## Terminal file-change Evidence matrix
+
+此矩阵描述 v1.29 的“可靠终态文件内容”准入，不改变上表的整体 Tool coverage。`protocol-supported` 只表示
+Adapter 能消费协议标准事件；某次真实运行没有发送 Diff 时仍不显示文件行。
+
+| 协议族与适用 Adapter | 过去/当前实际接入事件 | 可靠终态内容 | Command file rows |
+| --- | --- | --- | --- |
+| Codex app-server（`codex-cli`） | Codex `item/completed`，`item.type=fileChange`、`status=completed` | `changes[] { path, kind, diff }`；update 为 unified diff，add/delete 为完整新/旧内容 | 支持；Core 统一规范化后逐 change 显示 `修改 xxx` |
+| ACP v1（`opencode-cli`、`copilot-cli`、`kiro-cli`、`qoder-cli`、`codebuddy-cli`、`qwen-code`、`trae-cn-cli`、`cursor-agent`、`kimi-code-cli`、`grok-build`） | ACP `session/update.tool_call_update`；私有 Cursor/Kimi/Grok extension 与 run-level fallback 不补造 diff | terminal 累计 `content.type=diff { path, oldText?, newText }`；只接纳标准 ACP terminal Diff | protocol-supported；某次运行没有标准 Diff 时保持原 Tool row |
+| Claude stream-json（`claude-code-cli`） | assistant `tool_use` + user `tool_result` | Edit/Write input/result 没有可证明完整的 terminal before/after | 不支持；不解析 input、不猜 patch |
+| Antigravity stream-json（`antigravity-app`） | `step_update` terminal state | step/tool 名与公开 payload 没有可证明完整的 terminal patch | 不支持；不按 edit/write 名称推测 |
+
+Codex `item/started`、`item/fileChange/patchUpdated`、`turn/diff/updated` 和原始 Tool 名 `apply_patch` 均不进入
+Command Diff。ACP `content` collection 按协议 update 的 replace 语义累计；只有成功 terminal Tool 状态才把标准
+Diff blocks 送入 append-only Evidence。Renderer 只消费 Canonical `diffProjection`，不含 Runtime 分支。
 
 ## 2026-08-24 TRAE command display 真实 smoke 记录
 
@@ -112,8 +128,9 @@ rawInput 字段保持私有并只参与完整 `rawInputDigest`。Runtime 缺失 
 与 Action outcome 为 failed，即使 ACP tool lifecycle 报告 completed。
 
 Tool output 先读取 `ToolCallContent.type = content` 包裹的公开 text Content block，并兼容旧 adapter 的
-直接 text block。`diff`、image/audio/resource 与 `type = terminal` 都不被解释为命令输出；Rovai 声明
-Client Terminal 不可用，因此不会读取 `terminalId` 或从私有 terminal 猜测 stdout。只有 Content 没有
+直接 text block。`diff`、image/audio/resource 与 `type = terminal` 都不被解释为命令输出；标准 `diff` 只在
+成功 terminal ToolCall 的独立 v1.29 file-change Evidence 通路中按完整 before/after 处理。Rovai 声明 Client
+Terminal 不可用，因此不会读取 `terminalId` 或从私有 terminal 猜测 stdout。只有 Content 没有
 公开文本时，才从 `rawOutput` 的顶层 `stdout`、`stderr`、`output`、`text` 字符串白名单回退；其他键只
 参与原有 digest，不进入公开 payload。
 

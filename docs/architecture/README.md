@@ -1,7 +1,7 @@
 ---
 document_type: architecture-index
 authority: long-lived-architecture-routing
-last_updated: 2026-08-26
+last_updated: 2026-08-27
 ---
 
 # 长期系统架构
@@ -35,5 +35,5 @@ last_updated: 2026-08-26
 | [Structured Current Input Skill Links](structured-current-input-skill-links.md) | Picker SkillMention、per-Run send snapshot、start-time desired state、verified Exposure、只读 Resolver、`CURRENT_INPUT.skills` 与 unchanged Adapter transport |
 | [User Automation](user-automation.md) | 一个 `rovai` binary 下隔离的 Agent/User transport、Main-owned 本机 IPC、封闭 dispatch、Camp navigation、CLI-owned Diagnostic Trial、双 cursor 与安全导出边界 |
 | [Windows Desktop Platform](windows-desktop-platform.md) | Windows x64 host envelope、平台 seam、原子 Job 启动、Transport v14、私有 local storage、hidden title strip + top-level menu projection + native controls、NSIS 与真实 Windows 验收组合 |
-| [Workspace Change Observation](workspace-change-observation.md) | Runtime-reported Command Diff、Camp/exact-root Window、稳定 synthetic tree、受控 Git checkpoint、fail-open Coordinator、Managed Blob 与授权读取边界 |
+| [Workspace Change Observation](workspace-change-observation.md) | Runtime 终态 Command Diff、Camp/exact-root Window、稳定 synthetic tree、临时 Git checkpoint、不可变完成 Evidence、fail-open Coordinator 与授权读取边界 |
 <!-- architecture-index:end -->

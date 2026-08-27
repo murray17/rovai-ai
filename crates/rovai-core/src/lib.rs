@@ -52,6 +52,7 @@ pub mod read_model;
 pub mod runtime;
 pub mod runtime_activity_mapping;
 pub mod runtime_basis;
+pub mod runtime_diff;
 pub mod runtime_discovery;
 pub mod runtime_failure;
 pub mod runtime_platform_admission;
@@ -61,6 +62,7 @@ pub mod skill;
 pub mod skill_projection;
 pub mod team_tool;
 pub mod team_tool_catalog;
+pub mod workspace_change;
 
 mod runtime_pricing;
 

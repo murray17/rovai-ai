@@ -9,7 +9,10 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 
-use crate::{builtin_tool_transport, runtime_activity_mapping};
+use crate::{
+    builtin_tool_transport, runtime_activity_mapping,
+    runtime_diff::{self, CommandDiffProjection},
+};
 
 pub use crate::runtime_activity_mapping::CLASSIFIER_VERSION;
 
@@ -22,6 +25,8 @@ pub struct CanonicalRuntimeActivity {
     pub semantic_kind: Option<String>,
     pub tool_name: Option<String>,
     pub presentation_hint: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub diff_projection: Option<CommandDiffProjection>,
     pub phase: String,
     pub outcome: String,
     pub credibility: String,
@@ -44,6 +49,7 @@ pub struct EvidenceActivityFacts {
     pub tool_name: Option<String>,
     pub presentation_hint: Option<String>,
     pub presentation_hint_is_explicit: bool,
+    pub diff_projection: Option<CommandDiffProjection>,
     pub phase: String,
     pub outcome: String,
     pub credibility: String,
@@ -108,10 +114,19 @@ pub fn classify_evidence(
                 | "runtime.plan.delta"
                 | "runtime.diagnostic"
         );
-    let (activity_domain, semantic_kind, runtime_classification_is_structured) =
+    let (mut activity_domain, mut semantic_kind, runtime_classification_is_structured) =
         runtime_activity_mapping::classify_with_structure(item_type, kind, payload);
-    let classification_is_structured =
-        runtime_classification_is_structured || validated_core_tool.is_some();
+    let diff_projection = runtime_diff::projection_from_evidence(payload, evidence_id);
+    if diff_projection
+        .as_ref()
+        .is_some_and(|projection| projection.status == "available")
+    {
+        activity_domain = "file".to_string();
+        semantic_kind = Some("file.write".to_string());
+    }
+    let classification_is_structured = runtime_classification_is_structured
+        || validated_core_tool.is_some()
+        || diff_projection.is_some();
     let phase = canonical_phase(event_type, phase, payload);
     let outcome = canonical_outcome(&phase, payload);
     let tool_name = validated_core_tool.clone().or(runtime_tool_name);
@@ -152,6 +167,7 @@ pub fn classify_evidence(
         tool_name,
         presentation_hint,
         presentation_hint_is_explicit,
+        diff_projection,
         phase,
         outcome,
         credibility: credibility.to_string(),
@@ -172,6 +188,7 @@ pub fn new_projection(
         semantic_kind: facts.semantic_kind,
         tool_name: facts.tool_name,
         presentation_hint: facts.presentation_hint,
+        diff_projection: facts.diff_projection,
         phase: facts.phase,
         outcome: facts.outcome,
         credibility: facts.credibility,
@@ -198,6 +215,12 @@ pub fn merge_projection(
         &projection.activity_domain,
         projection.semantic_kind.as_deref(),
     );
+    if let Some(incoming) = facts.diff_projection {
+        projection.diff_projection = Some(runtime_diff::merge_projection(
+            projection.diff_projection.take(),
+            incoming,
+        ));
+    }
     if prior_phase == "terminal"
         && facts.phase == "terminal"
         && is_settled_outcome(&prior_outcome)

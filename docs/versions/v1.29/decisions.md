@@ -2,7 +2,7 @@
 document_type: version-decisions
 version: v1.29
 lifecycle: current
-last_updated: 2026-08-26
+last_updated: 2026-08-27
 ---
 
 # v1.29 决策记录
@@ -27,8 +27,8 @@ Runtime 有时会在一个 Operation 的结构化事件中明确报告 patch 或
 3. projection 保留单调 `revision`、全部 `sourceEvidenceIds` 和明确的 availability/conflict 状态；
 4. 只有 Adapter/version 明确声明语义的数据可进入 projection。局部片段、仅路径或语义不明的 `diff` / `patch`
    字段不得包装为完整文件差异；
-5. `diffProjection` 不是可独立排序或写入的新 Activity。旧 Evidence 不做无法证明正确的回填；具体 UI 形式
-   不在本决定中冻结。
+5. `diffProjection` 不是可独立排序或写入的新 Activity。旧 Evidence 不做无法证明正确的回填；v1 presentation
+   由 [V1.29-D03](#v1-29-d03)冻结。
 
 当前规范见 [Workspace Change Observation](../../architecture/workspace-change-observation.md)与
 [Workspace Change Observation v1](../../contracts/workspace-change-observation-v1.md)。
@@ -63,8 +63,9 @@ workspace writer lease 可以强化隔离和归因，但会显著增加 v1 的�
    `repositoryRoot + worktreeGitDir + gitCommonDir + objectFormat`；
 2. 同 key 重叠 Run 共享 baseline；最后一个参与 Run 的 lease 已 fence/unbind，且属于它的 Runtime、CLI、Tool
    后代已证明 quiescent 后捕获 final。IdleWarm Host 不参与该判定；
-3. Core DB 是 Window、OID、状态、授权和最终 diff 的权威。随机 `windowId` 至少含 128-bit 熵；
-   `refs/rovai/w/<window-token>/b|f` 只以 CAS 方式临时保护 checkpoint object；
+3. Core DB 的 Window row 是 active coordination、OID、恢复与清理权威；完成时追加的不可变
+   `WorkspaceDiffCompleted + diffBlobId` 是历史卡片/读取权威。随机 `windowId` 至少含 128-bit 熵；
+   `refs/rovai/w/<window-token>/b|f` 只以 CAS 方式临时保护计算材料；
 4. snapshot 只写 raw blob/tree，不经过 index、`git add`、clean filter、LFS clean、textconv 或 external diff；
    不修改 staged 状态、普通 branch/ref，也不主动执行 prune；
 5. synthetic tree 只覆盖 exact execution root，并遵守 ignored/untracked、symlink、executable bit、sparse-checkout、
@@ -94,3 +95,38 @@ workspace writer lease 可以强化隔离和归因，但会显著增加 v1 的�
 - **跨 Camp 或跨 execution root 共享 Window：** 破坏授权边界并暴露参与者信息；
 - **ref 作为长期权威：** 用户或工具可移动/删除 ref，且无法承载 Camp 授权与生命周期；
 - **失败后重新扫描补 final：** 无法恢复原来的时间边界，会把后续用户修改混入结果。
+
+<a id="v1-29-d03"></a>
+## V1.29-D03：终态文件变更扁平呈现，完整 Review 只属于 Window Evidence
+
+### 背景
+
+把 `apply_patch`、文件数汇总和逐文件 diff 嵌套成三层，会重复 Runtime 的实现名并制造第二个 Activity 层级；
+同时，把 Workspace Window 状态塞进执行台会改变现有会话/执行布局，也会暗示它属于某个 Run。不同 Runtime 的
+文件事件名并不一致，必须以协议终态内容而不是 Tool 名称统一。
+
+### 决定
+
+1. Codex 只从 `item/completed + fileChange + completed` 接纳最终 `changes[]`；不消费 started、patchUpdated、
+   turn diff 或 `apply_patch` input。Codex add/delete 完整内容在 Core 规范化为 unified diff；
+2. 全部 ACP adapter 只从 terminal `tool_call_update` 的标准 `ToolCallContent::Diff` 累计内容接纳完整
+   before/after。Claude Code 与 Antigravity 没有等价终态内容，保持普通 Tool Activity；
+3. 一条 FileChange Evidence 与一条 Canonical Activity 可以投影多条同级 `修改 <basename> +A −D` 行；每行
+   独立展开 inline diff。删除 `apply_patch` 父行和“编辑了 N 个文件”聚合层，不创建逐文件权威 Activity；
+4. 完整 Review 只从 `WorkspaceDiffCompleted → diffBlobId` 打开。会话卡片标题固定 `Files Changed`，右侧只放
+   中性 `View`；文件行顶格且无分隔，不显示时间、已保存、参与运行或底部 metadata；
+5. 执行台不增加共享工作区观察，不改变会话 rail、底部/右侧 placement、Tool list 整行宽度或其他既有样式。
+
+### 后果
+
+- 非 Git 项目仍可显示 Runtime 可靠终态的 `修改 xxx` 行；Workspace 卡片仍只在 Git Window `complete` 时出现；
+- 一个 Runtime 没有可靠 terminal file content 时，UI 不显示占位或推测摘要；
+- 后续 Window 不覆盖旧卡片，Git refs/objects 或当前 workspace 不再参与历史读取；
+- Renderer 只消费 Canonical typed projection，不维护 Runtime-specific 分支或第二套 Activity。
+
+### 被拒绝方案
+
+- **展示 `apply_patch → 编辑了 N 个文件 → files`：** 重复层级且把 Runtime 实现名误当产品语义；
+- **只展示“编辑了 N 个文件”文字：** 无法直接定位和独立展开单文件变化；
+- **在执行台展示 Window observation：** 混淆 Operation Evidence 与共享净变化，并破坏现有执行布局；
+- **从 Tool 名、路径或 shell 命令猜 diff：** 无法证明完整性，异常退出时尤其会产生伪结果。

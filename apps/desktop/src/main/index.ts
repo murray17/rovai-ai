@@ -155,6 +155,7 @@ const allowedMethods = new Set<CoreMethod>([
   'agentRuns.cancel',
   'agentRuns.resolveRecoveryBlocker',
   'camps.snapshot',
+  'workspaceChangeWindows.getDiff',
   'camp.messages.page',
   'camp.messages.around',
   'camp.messages.find',
