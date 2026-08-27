@@ -63,10 +63,15 @@ Window Coordinator 是 Workspace Window 生命周期的唯一写入者。它与 
 - Window key 是 `campId + canonicalExecutionRoot + observedRepositoryWorktreeIdentity`。同 key 的重叠 Run
   共享一个 baseline；不同 Camp、不同 exact root 或不同 worktree identity 永远不共享持久对象。并发首个 Run
   通过 active-key 唯一约束加入同一个 `opening` Window，只有一个 capture owner；
+- 负责捕获边界的进程内 mutex 以 `canonicalExecutionRoot + observedRepositoryWorktreeIdentity` 分片，刻意不含
+  `campId`。因此不同物理工作区的捕获互不阻塞，而指向同一物理 root/worktree 的不同 Camp 仍串行决定边界；
 - 首个参与者只能在 baseline 已持久成为 `baseline_ready` 或 `unavailable` 后获准 bind 到可写 Runtime；
 - 同 key 的新 Run join 与最后参与者触发 closing 在一个原子互斥边界中决定；
 - “最后一个 Run 结束”要求其 lease 已 fence/unbind，且该 Run 的 Runtime、CLI、Tool 后代已证明 quiescent。
   可复用但不再绑定该 Run 的 IdleWarm Host 不阻止 closing；
+- 取消 ACK 后优先等待同一 Runtime/CLI/Tool 后代进入 quiescent，再走普通 participant release。若在冻结期限内
+  仍无法证明 quiescent，旧 Window 必须直接收敛为 `unavailable` 并释放该 participant；这个释放只终结观察资格，
+  不宣称 Runtime 外部效果已经停止，也不能捕获或发布 final；
 - 同一 physical execution root 已 closing 时，新 Run bind 只等待到严格 deadline。final 成功或任何不可用结论都会
   立即关闭旧 Window 并释放下一 Window；
 - baseline 失败不会阻止首个 Run，final 失败不会阻止下一 Window。一个 active 且 baseline 已失败的 Window 保持
@@ -99,6 +104,10 @@ namespace 创建短期 refs，但不能修改用户真实 index、staged 状态�
 7. tree-to-tree diff 禁用 textconv/external diff，使用有界 rename detection。结果和摘要持久进入 Managed Blob/DB 后，
    以 expected-OID compare-and-delete 清除 refs。
 
+每次 Git plumbing、ref 操作和 diff 都只使用所属捕获/发布边界剩余的绝对 deadline。stdout/stderr 在读取时即受容量
+限制；超时或超限会终止并 reap Rovai 所有的子进程树，而不是先用 `wait_with_output` 把完整输出读入内存。到达
+deadline 后观察 fail-open 为 `unavailable`，释放当前物理 workspace coordinator，不阻止其他物理工作区。
+
 Rovai 不主动对用户仓库执行 prune。成功删除 ref 只撤销 Rovai 的 GC pin，不表示 object bytes 立即从磁盘消失；
 其后生命周期由用户 Git 的可达性与 GC 策略决定。
 
@@ -122,6 +131,9 @@ Rovai 不主动对用户仓库执行 prune。成功删除 ref 只撤销 Rovai �
 
 - Core DB 的 Window row 是 active coordination、participant、capture、recovery 与 cleanup 的状态权威；Git ref 不是
   恢复索引或读取授权；
+- ref cleanup 另有以 `windowId` 为键的持久账本，冻结 baseline/final expected OID、失败码与尝试次数。发布或失败
+  关闭先在同一事务清除 candidate/failure manifest root 并登记清理，再执行 compare-and-delete；即使 Window 已
+  `closed`，startup maintenance 仍会重试，ref 已不存在视为幂等成功，OID 已改变则绝不删除；
 - `WorkspaceDiffCompleted` 是完成历史的不可变权威。它冻结 Window ID、Camp、participant audit、文件摘要、
   `diffBlobId` 与 capturedAt；历史卡片和 View 只读该 Evidence/blob，不读 mutable Window row、当前 workspace 或 Git tree；
 - AgentRun 只保存 `windowId` 参与引用，不复制 Window、Evidence 或 diff blob；

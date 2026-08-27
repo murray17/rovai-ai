@@ -1,9 +1,10 @@
 use std::{
-    collections::{BTreeMap, BTreeSet},
+    collections::{BTreeMap, BTreeSet, HashMap},
     fs,
-    io::{Read, Write},
+    io::Read,
     path::{Component, Path, PathBuf},
-    process::{Command, Output, Stdio},
+    process::{Command, Output},
+    sync::{Arc, OnceLock, Weak, mpsc as std_mpsc},
     time::{Duration, Instant},
 };
 
@@ -14,9 +15,14 @@ use anyhow::{Context, Result, bail};
 use rusqlite::{OptionalExtension, TransactionBehavior, params};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+use tokio::sync::{Mutex as AsyncMutex, OwnedMutexGuard};
 use uuid::Uuid;
 
-use crate::{db::Database, managed_blob::ManagedBlobStore};
+use crate::{
+    db::Database,
+    managed_blob::ManagedBlobStore,
+    runtime_probe_process::{ProbeCommandLimits, run_bounded_command_with_input},
+};
 
 pub const CAPTURE_PROFILE_VERSION: i64 = 1;
 const CAPTURE_DEADLINE: Duration = Duration::from_secs(8);
@@ -25,6 +31,13 @@ const CAPTURE_MAX_FILES: usize = 25_000;
 const CAPTURE_MAX_BYTES: u64 = 512 * 1024 * 1024;
 const CAPTURE_MAX_FILE_BYTES: u64 = 32 * 1024 * 1024;
 const DIFF_MAX_BYTES: usize = 24 * 1024 * 1024;
+const GIT_STDOUT_MAX_BYTES: usize = 32 * 1024 * 1024;
+const GIT_STDERR_MAX_BYTES: usize = 1024 * 1024;
+const GIT_CLEANUP_TIMEOUT: Duration = Duration::from_millis(250);
+const GIT_CLEANUP_RESERVE: Duration = Duration::from_millis(750);
+
+static WORKSPACE_CHANGE_GIT_RUNTIME: OnceLock<tokio::runtime::Runtime> = OnceLock::new();
+static WORKSPACE_CHANGE_GIT_EXECUTABLE: OnceLock<PathBuf> = OnceLock::new();
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -83,8 +96,47 @@ pub struct WindowCloseRequest {
     pub baseline_manifest: CaptureManifest,
 }
 
+#[derive(Default)]
+pub struct WorkspaceChangeCoordinator {
+    gates: AsyncMutex<HashMap<WorkspaceChangeCoordinatorKey, Weak<AsyncMutex<()>>>>,
+}
+
+impl WorkspaceChangeCoordinator {
+    pub async fn acquire(&self, identity: &RepositoryWorktreeIdentity) -> OwnedMutexGuard<()> {
+        let key = WorkspaceChangeCoordinatorKey {
+            canonical_execution_root: identity.canonical_execution_root.clone(),
+            repository_identity_digest: identity.identity_digest.clone(),
+        };
+        let gate = {
+            let mut gates = self.gates.lock().await;
+            gates.retain(|_, gate| gate.strong_count() > 0);
+            if let Some(gate) = gates.get(&key).and_then(Weak::upgrade) {
+                gate
+            } else {
+                let gate = Arc::new(AsyncMutex::new(()));
+                gates.insert(key, Arc::downgrade(&gate));
+                gate
+            }
+        };
+        gate.lock_owned().await
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+struct WorkspaceChangeCoordinatorKey {
+    canonical_execution_root: String,
+    repository_identity_digest: String,
+}
+
 #[derive(Debug, Clone)]
 struct InterruptedWindow {
+    window_id: String,
+    baseline_oid: Option<String>,
+    final_oid: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+struct PendingRefCleanup {
     window_id: String,
     ref_token: String,
     identity: RepositoryWorktreeIdentity,
@@ -149,35 +201,46 @@ struct CandidateEntry {
 }
 
 pub fn discover_repository(execution_root: &Path) -> Result<Option<RepositoryWorktreeIdentity>> {
+    discover_repository_until(execution_root, Instant::now() + CAPTURE_DEADLINE)
+}
+
+fn discover_repository_until(
+    execution_root: &Path,
+    deadline: Instant,
+) -> Result<Option<RepositoryWorktreeIdentity>> {
     let canonical_execution_root = match fs::canonicalize(execution_root) {
         Ok(path) if path.is_dir() => path,
         Ok(_) => bail!("workspace_change_execution_root_not_directory"),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
         Err(error) => return Err(error.into()),
     };
-    let probe = git_output_at(
+    let probe = git_output_at_until(
         &canonical_execution_root,
         &["rev-parse", "--is-inside-work-tree"],
+        deadline,
     )?;
     if !probe.status.success() || stdout_text(&probe).trim() != "true" {
         return Ok(None);
     }
-    let repository_root = canonical_git_path(
+    let repository_root = canonical_git_path_until(
         &canonical_execution_root,
         &["rev-parse", "--show-toplevel"],
         None,
+        deadline,
     )?;
     if !canonical_execution_root.starts_with(&repository_root) {
         bail!("workspace_change_execution_root_outside_repository");
     }
-    let worktree_git_dir = canonical_git_path(
+    let worktree_git_dir = canonical_git_path_until(
         &canonical_execution_root,
         &["rev-parse", "--absolute-git-dir"],
         None,
+        deadline,
     )?;
-    let common_raw = required_git_text_at(
+    let common_raw = required_git_text_at_until(
         &canonical_execution_root,
         &["rev-parse", "--git-common-dir"],
+        deadline,
     )?;
     let common_path = PathBuf::from(common_raw);
     let git_common_dir = fs::canonicalize(if common_path.is_absolute() {
@@ -185,17 +248,19 @@ pub fn discover_repository(execution_root: &Path) -> Result<Option<RepositoryWor
     } else {
         repository_root.join(common_path)
     })?;
-    let object_format = required_git_text_at(
+    let object_format = required_git_text_at_until(
         &canonical_execution_root,
         &["rev-parse", "--show-object-format"],
+        deadline,
     )?;
     if !matches!(object_format.as_str(), "sha1" | "sha256") {
         bail!("workspace_change_object_format_unsupported");
     }
-    let object_database_dir = canonical_git_path(
+    let object_database_dir = canonical_git_path_until(
         &canonical_execution_root,
         &["rev-parse", "--git-path", "objects"],
         Some(&repository_root),
+        deadline,
     )?;
     let alternates_path = object_database_dir.join("info").join("alternates");
     let object_alternates_digest = match fs::read(&alternates_path) {
@@ -376,11 +441,9 @@ pub fn stable_capture(
     let deadline = Instant::now() + CAPTURE_DEADLINE;
     let mut previous: Option<CaptureManifest> = None;
     for _ in 0..CAPTURE_MAX_ATTEMPTS {
-        if Instant::now() >= deadline {
-            bail!("workspace_change_capture_timeout");
-        }
-        verify_repository_identity(identity)?;
-        let manifest = capture_once(identity, sticky_entries)?;
+        ensure_capture_deadline(deadline)?;
+        verify_repository_identity_until(identity, deadline)?;
+        let manifest = capture_once(identity, sticky_entries, deadline)?;
         if previous
             .as_ref()
             .is_some_and(|previous| previous.root_tree_oid == manifest.root_tree_oid)
@@ -430,6 +493,7 @@ pub fn publish_baseline(
     admission: &WindowAdmission,
     capture: &StableCapture,
 ) -> Result<()> {
+    let deadline = Instant::now() + CAPTURE_DEADLINE;
     let manifest = blob_store.put_bytes(
         database,
         &serde_json::to_vec(&capture.manifest)?,
@@ -456,17 +520,19 @@ pub fn publish_baseline(
     if changed != 1 {
         bail!("workspace_change_baseline_candidate_fenced");
     }
-    create_ref(
+    create_ref_until(
         &admission.identity,
         data_dir,
         &baseline_ref(&admission.ref_token),
         &capture.tree_oid,
+        deadline,
     )?;
-    verify_ref(
+    verify_ref_until(
         &admission.identity,
         data_dir,
         &baseline_ref(&admission.ref_token),
         &capture.tree_oid,
+        deadline,
     )?;
     let changed = database.connection().execute(
         r#"
@@ -518,14 +584,24 @@ pub fn fail_baseline(
     candidate_oid: Option<&str>,
     reason: &str,
 ) -> Result<()> {
-    let _ = delete_ref_if_matches(
-        &admission.identity,
-        data_dir,
-        &baseline_ref(&admission.ref_token),
-        candidate_oid,
-    );
+    let transaction = database
+        .connection_mut()
+        .transaction_with_behavior(TransactionBehavior::Immediate)?;
+    let persisted_candidate_oid = transaction.query_row(
+        "SELECT baseline_candidate_oid FROM workspace_change_window WHERE id = ?1",
+        [&admission.window_id],
+        |row| row.get::<_, Option<String>>(0),
+    )?;
+    if persisted_candidate_oid
+        .as_deref()
+        .zip(candidate_oid)
+        .is_some_and(|(persisted, supplied)| persisted != supplied)
+    {
+        bail!("workspace_change_baseline_candidate_mismatch");
+    }
+    let cleanup_oid = persisted_candidate_oid.as_deref().or(candidate_oid);
     let now = chrono::Utc::now().to_rfc3339();
-    let changed = database.connection().execute(
+    let changed = transaction.execute(
         r#"
         UPDATE workspace_change_window
         SET lifecycle = 'active', capture_status = 'unavailable',
@@ -538,6 +614,16 @@ pub fn fail_baseline(
     if changed != 1 {
         bail!("workspace_change_baseline_failure_fenced");
     }
+    stage_ref_cleanup(
+        &transaction,
+        &admission.window_id,
+        cleanup_oid,
+        None,
+        None,
+        &now,
+    )?;
+    transaction.commit()?;
+    let _ = attempt_pending_ref_cleanup(database, data_dir, &admission.window_id);
     Ok(())
 }
 
@@ -584,25 +670,39 @@ pub fn abort_unjoined_window(
     if !admission.needs_baseline {
         return Ok(());
     }
-    mark_window_unavailable(
-        database,
-        &admission.window_id,
-        "workspace_change_run_admission_failed",
-        true,
+    let transaction = database
+        .connection_mut()
+        .transaction_with_behavior(TransactionBehavior::Immediate)?;
+    let baseline_oid = transaction.query_row(
+        "SELECT COALESCE(baseline_oid, baseline_candidate_oid) FROM workspace_change_window WHERE id = ?1",
+        [&admission.window_id],
+        |row| row.get::<_, Option<String>>(0),
     )?;
-    let _ = delete_ref_if_matches(
-        &admission.identity,
-        data_dir,
-        &baseline_ref(&admission.ref_token),
-        database
-            .connection()
-            .query_row(
-                "SELECT baseline_oid FROM workspace_change_window WHERE id = ?1",
-                [&admission.window_id],
-                |row| row.get::<_, Option<String>>(0),
-            )?
-            .as_deref(),
-    );
+    let now = chrono::Utc::now().to_rfc3339();
+    let changed = transaction.execute(
+        r#"
+        UPDATE workspace_change_window
+        SET lifecycle = 'closed', capture_status = 'unavailable',
+            unavailable_reason_code = 'workspace_change_run_admission_failed',
+            baseline_candidate_oid = NULL, final_candidate_oid = NULL,
+            final_manifest_blob_id = NULL, updated_at = ?2
+        WHERE id = ?1 AND lifecycle <> 'closed'
+        "#,
+        params![admission.window_id, now],
+    )?;
+    if changed != 1 {
+        bail!("workspace_change_unavailable_transition_fenced");
+    }
+    stage_ref_cleanup(
+        &transaction,
+        &admission.window_id,
+        baseline_oid.as_deref(),
+        None,
+        None,
+        &now,
+    )?;
+    transaction.commit()?;
+    let _ = attempt_pending_ref_cleanup(database, data_dir, &admission.window_id);
     Ok(())
 }
 
@@ -745,6 +845,129 @@ pub fn release_window_participant(
     }))
 }
 
+pub fn participant_repository_identity(
+    database: &Database,
+    agent_run_id: &str,
+    execution_epoch: i64,
+) -> Result<Option<RepositoryWorktreeIdentity>> {
+    database
+        .connection()
+        .query_row(
+            r#"
+            SELECT window.repository_root, window.worktree_git_dir,
+                   window.git_common_dir, window.object_format,
+                   window.object_database_dir, window.object_alternates_digest,
+                   window.repository_identity_digest,
+                   window.canonical_execution_root
+            FROM workspace_change_window_participant AS participant
+            JOIN workspace_change_window AS window ON window.id = participant.window_id
+            WHERE participant.agent_run_id = ?1
+              AND participant.execution_epoch = ?2
+              AND participant.released_at IS NULL
+            "#,
+            params![agent_run_id, execution_epoch],
+            |row| {
+                let repository_root = row.get::<_, String>(0)?;
+                let canonical_execution_root = row.get::<_, String>(7)?;
+                let execution_root_relative = Path::new(&canonical_execution_root)
+                    .strip_prefix(Path::new(&repository_root))
+                    .map(|path| path.to_string_lossy().replace('\\', "/"))
+                    .unwrap_or_default();
+                Ok(RepositoryWorktreeIdentity {
+                    repository_root,
+                    worktree_git_dir: row.get(1)?,
+                    git_common_dir: row.get(2)?,
+                    object_format: row.get(3)?,
+                    object_database_dir: row.get(4)?,
+                    object_alternates_digest: row.get(5)?,
+                    identity_digest: row.get(6)?,
+                    canonical_execution_root,
+                    execution_root_relative,
+                })
+            },
+        )
+        .optional()
+        .map_err(Into::into)
+}
+
+pub fn fail_window_participant_after_unproven_quiescence(
+    database: &mut Database,
+    data_dir: &Path,
+    agent_run_id: &str,
+    execution_epoch: i64,
+    reason: &str,
+) -> Result<()> {
+    let transaction = database
+        .connection_mut()
+        .transaction_with_behavior(TransactionBehavior::Immediate)?;
+    let row = transaction
+        .query_row(
+            r#"
+            SELECT window.id, window.baseline_oid, window.final_candidate_oid
+            FROM workspace_change_window_participant AS participant
+            JOIN workspace_change_window AS window ON window.id = participant.window_id
+            WHERE participant.agent_run_id = ?1
+              AND participant.execution_epoch = ?2
+              AND participant.released_at IS NULL
+              AND window.lifecycle = 'active'
+            "#,
+            params![agent_run_id, execution_epoch],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, Option<String>>(1)?,
+                    row.get::<_, Option<String>>(2)?,
+                ))
+            },
+        )
+        .optional()?;
+    let Some((window_id, baseline_oid, final_candidate_oid)) = row else {
+        transaction.commit()?;
+        return Ok(());
+    };
+    let now = chrono::Utc::now().to_rfc3339();
+    transaction.execute(
+        r#"
+        UPDATE workspace_change_window_participant
+        SET released_at = ?3
+        WHERE agent_run_id = ?1 AND execution_epoch = ?2
+          AND released_at IS NULL
+        "#,
+        params![agent_run_id, execution_epoch, now],
+    )?;
+    let active_count: i64 = transaction.query_row(
+        r#"
+        SELECT COUNT(*)
+        FROM workspace_change_window_participant
+        WHERE window_id = ?1 AND released_at IS NULL
+        "#,
+        [&window_id],
+        |row| row.get(0),
+    )?;
+    transaction.execute(
+        r#"
+        UPDATE workspace_change_window
+        SET lifecycle = CASE WHEN ?3 = 0 THEN 'closed' ELSE 'active' END,
+            capture_status = 'unavailable', unavailable_reason_code = ?2,
+            final_candidate_oid = NULL, final_manifest_blob_id = NULL,
+            updated_at = ?4
+        WHERE id = ?1 AND lifecycle = 'active'
+        "#,
+        params![window_id, reason, active_count, now],
+    )?;
+    stage_ref_cleanup(
+        &transaction,
+        &window_id,
+        baseline_oid.as_deref(),
+        final_candidate_oid.as_deref(),
+        None,
+        &now,
+    )?;
+    transaction.commit()?;
+    let _ = attempt_pending_ref_cleanup(database, data_dir, &window_id);
+    Ok(())
+}
+
 pub fn publish_final(
     database: &mut Database,
     blob_store: &ManagedBlobStore,
@@ -752,7 +975,8 @@ pub fn publish_final(
     request: &WindowCloseRequest,
     capture: &StableCapture,
 ) -> Result<WorkspaceChangeWindowView> {
-    verify_repository_identity(&request.identity)?;
+    let deadline = Instant::now() + CAPTURE_DEADLINE;
+    verify_repository_identity_until(&request.identity, deadline)?;
     let manifest = blob_store.put_bytes(
         database,
         &serde_json::to_vec(&capture.manifest)?,
@@ -778,28 +1002,36 @@ pub fn publish_final(
     if staged != 1 {
         bail!("workspace_change_final_candidate_fenced");
     }
-    create_ref(
+    create_ref_until(
         &request.identity,
         data_dir,
         &final_ref(&request.ref_token),
         &capture.tree_oid,
+        deadline,
     )?;
-    verify_ref(
+    verify_ref_until(
         &request.identity,
         data_dir,
         &baseline_ref(&request.ref_token),
         &request.baseline_oid,
+        deadline,
     )?;
-    verify_ref(
+    verify_ref_until(
         &request.identity,
         data_dir,
         &final_ref(&request.ref_token),
         &capture.tree_oid,
+        deadline,
     )?;
     let patch = if request.baseline_oid == capture.tree_oid {
         String::new()
     } else {
-        tree_diff(&request.identity, &request.baseline_oid, &capture.tree_oid)?
+        tree_diff(
+            &request.identity,
+            &request.baseline_oid,
+            &capture.tree_oid,
+            deadline,
+        )?
     };
     let files = summarize_patch(&patch);
     let file_count = files.len() as u64;
@@ -902,22 +1134,16 @@ pub fn publish_final(
             ],
         )?;
     }
-    transaction.commit()?;
-    let cleanup_error = cleanup_window_refs(
-        &request.identity,
-        data_dir,
-        &request.ref_token,
+    stage_ref_cleanup(
+        &transaction,
+        &request.window_id,
         Some(&request.baseline_oid),
         Some(&capture.tree_oid),
-    )
-    .err()
-    .map(|_| "workspace_change_ref_cleanup_failed");
-    if let Some(cleanup_error) = cleanup_error {
-        database.connection().execute(
-            "UPDATE workspace_change_window SET cleanup_error_code = ?2 WHERE id = ?1",
-            params![request.window_id, cleanup_error],
-        )?;
-    }
+        None,
+        &capture.captured_at,
+    )?;
+    transaction.commit()?;
+    let _ = attempt_pending_ref_cleanup(database, data_dir, &request.window_id);
     Ok(WorkspaceChangeWindowView {
         schema_version: 1,
         window_id: request.window_id.clone(),
@@ -938,14 +1164,39 @@ pub fn fail_close(
     request: &WindowCloseRequest,
     reason: &str,
 ) -> Result<()> {
-    mark_window_unavailable(database, &request.window_id, reason, true)?;
-    let _ = cleanup_window_refs(
-        &request.identity,
-        data_dir,
-        &request.ref_token,
+    let transaction = database
+        .connection_mut()
+        .transaction_with_behavior(TransactionBehavior::Immediate)?;
+    let final_candidate_oid = transaction.query_row(
+        "SELECT final_candidate_oid FROM workspace_change_window WHERE id = ?1",
+        [&request.window_id],
+        |row| row.get::<_, Option<String>>(0),
+    )?;
+    let now = chrono::Utc::now().to_rfc3339();
+    let changed = transaction.execute(
+        r#"
+        UPDATE workspace_change_window
+        SET lifecycle = 'closed', capture_status = 'unavailable',
+            unavailable_reason_code = ?2,
+            final_candidate_oid = NULL, final_manifest_blob_id = NULL,
+            updated_at = ?3
+        WHERE id = ?1 AND lifecycle <> 'closed'
+        "#,
+        params![request.window_id, reason, now],
+    )?;
+    if changed != 1 {
+        bail!("workspace_change_unavailable_transition_fenced");
+    }
+    stage_ref_cleanup(
+        &transaction,
+        &request.window_id,
         Some(&request.baseline_oid),
+        final_candidate_oid.as_deref(),
         None,
-    );
+        &now,
+    )?;
+    transaction.commit()?;
+    let _ = attempt_pending_ref_cleanup(database, data_dir, &request.window_id);
     Ok(())
 }
 
@@ -1044,10 +1295,7 @@ pub fn recover_interrupted_windows(database: &mut Database, data_dir: &Path) -> 
     let windows = {
         let mut statement = database.connection().prepare(
             r#"
-            SELECT id, ref_token, repository_root, worktree_git_dir,
-                   git_common_dir, object_format, object_database_dir,
-                   object_alternates_digest, repository_identity_digest,
-                   canonical_execution_root,
+            SELECT id,
                    COALESCE(baseline_oid, baseline_candidate_oid),
                    COALESCE(final_oid, final_candidate_oid)
             FROM workspace_change_window
@@ -1057,33 +1305,16 @@ pub fn recover_interrupted_windows(database: &mut Database, data_dir: &Path) -> 
         )?;
         statement
             .query_map([], |row| {
-                let repository_root = row.get::<_, String>(2)?;
-                let canonical_execution_root = row.get::<_, String>(9)?;
-                let execution_root_relative = Path::new(&canonical_execution_root)
-                    .strip_prefix(Path::new(&repository_root))
-                    .map(|path| path.to_string_lossy().replace('\\', "/"))
-                    .unwrap_or_default();
                 Ok(InterruptedWindow {
                     window_id: row.get(0)?,
-                    ref_token: row.get(1)?,
-                    identity: RepositoryWorktreeIdentity {
-                        repository_root,
-                        worktree_git_dir: row.get(3)?,
-                        git_common_dir: row.get(4)?,
-                        object_format: row.get(5)?,
-                        object_database_dir: row.get(6)?,
-                        object_alternates_digest: row.get(7)?,
-                        identity_digest: row.get(8)?,
-                        canonical_execution_root,
-                        execution_root_relative,
-                    },
-                    baseline_oid: row.get(10)?,
-                    final_oid: row.get(11)?,
+                    baseline_oid: row.get(1)?,
+                    final_oid: row.get(2)?,
                 })
             })?
             .collect::<rusqlite::Result<Vec<_>>>()?
     };
     if windows.is_empty() {
+        retry_pending_ref_cleanup(database, data_dir)?;
         return Ok(0);
     }
     let now = chrono::Utc::now().to_rfc3339();
@@ -1096,6 +1327,8 @@ pub fn recover_interrupted_windows(database: &mut Database, data_dir: &Path) -> 
             UPDATE workspace_change_window
             SET lifecycle = 'closed', capture_status = 'unavailable',
                 unavailable_reason_code = 'workspace_change_restart_boundary_unknown',
+                baseline_candidate_oid = NULL,
+                final_candidate_oid = NULL, final_manifest_blob_id = NULL,
                 updated_at = ?2
             WHERE id = ?1 AND lifecycle IN ('opening', 'active', 'closing')
             "#,
@@ -1109,52 +1342,51 @@ pub fn recover_interrupted_windows(database: &mut Database, data_dir: &Path) -> 
             "#,
             params![window.window_id, now],
         )?;
-    }
-    transaction.commit()?;
-    for window in &windows {
-        if cleanup_window_refs(
-            &window.identity,
-            data_dir,
-            &window.ref_token,
+        stage_ref_cleanup(
+            &transaction,
+            &window.window_id,
             window.baseline_oid.as_deref(),
             window.final_oid.as_deref(),
-        )
-        .is_err()
-        {
-            database.connection().execute(
-                r#"
-                UPDATE workspace_change_window
-                SET cleanup_error_code = 'workspace_change_ref_cleanup_failed'
-                WHERE id = ?1
-                "#,
-                [&window.window_id],
-            )?;
-        }
+            Some("workspace_change_ref_cleanup_pending"),
+            &now,
+        )?;
     }
+    transaction.commit()?;
+    retry_pending_ref_cleanup(database, data_dir)?;
     Ok(windows.len())
 }
 
 fn capture_once(
     identity: &RepositoryWorktreeIdentity,
     sticky_entries: &[CaptureManifestEntry],
+    deadline: Instant,
 ) -> Result<CaptureManifest> {
+    ensure_capture_deadline(deadline)?;
     let root = Path::new(&identity.canonical_execution_root);
     let pathspec = if identity.execution_root_relative.is_empty() {
         "."
     } else {
         identity.execution_root_relative.as_str()
     };
-    let staged = git_output(
+    let staged = git_output_until(
         identity,
         &["ls-files", "--stage", "-z", "--", pathspec],
         None,
+        deadline,
+        GIT_STDOUT_MAX_BYTES,
     )?;
     ensure_git_success(&staged, "workspace_change_ls_files_failed")?;
-    let sparse = git_output(identity, &["ls-files", "-v", "-z", "--", pathspec], None)?;
+    let sparse = git_output_until(
+        identity,
+        &["ls-files", "-v", "-z", "--", pathspec],
+        None,
+        deadline,
+        GIT_STDOUT_MAX_BYTES,
+    )?;
     ensure_git_success(&sparse, "workspace_change_sparse_probe_failed")?;
     let sparse_paths = parse_sparse_paths(&sparse.stdout)?;
     let mut candidates = parse_tracked_entries(identity, &staged.stdout, &sparse_paths)?;
-    let others = git_output(
+    let others = git_output_until(
         identity,
         &[
             "ls-files",
@@ -1165,6 +1397,8 @@ fn capture_once(
             pathspec,
         ],
         None,
+        deadline,
+        GIT_STDOUT_MAX_BYTES,
     )?;
     ensure_git_success(&others, "workspace_change_untracked_probe_failed")?;
     for repository_path in parse_nul_paths(&others.stdout)? {
@@ -1204,6 +1438,7 @@ fn capture_once(
     let mut manifest_entries = Vec::new();
     let mut tree = TreeNode::default();
     for candidate in candidates.into_values() {
+        ensure_capture_deadline(deadline)?;
         if candidate.relative_path.contains('\n') || candidate.relative_path.contains('\r') {
             bail!("workspace_change_path_encoding_unsupported");
         }
@@ -1287,7 +1522,8 @@ fn capture_once(
         if total_bytes > CAPTURE_MAX_BYTES {
             bail!("workspace_change_total_bytes_limit");
         }
-        let oid = hash_blob(identity, &bytes)?;
+        ensure_capture_deadline(deadline)?;
+        let oid = hash_blob(identity, &bytes, deadline)?;
         tree.insert(
             &candidate.relative_path,
             TreeEntry::Object {
@@ -1304,7 +1540,7 @@ fn capture_once(
         });
     }
     manifest_entries.sort_by(|left, right| left.path.cmp(&right.path));
-    let root_tree_oid = write_tree(identity, &tree)?;
+    let root_tree_oid = write_tree(identity, &tree, deadline)?;
     Ok(CaptureManifest {
         schema_version: 1,
         root_tree_oid,
@@ -1343,7 +1579,12 @@ impl TreeNode {
     }
 }
 
-fn write_tree(identity: &RepositoryWorktreeIdentity, node: &TreeNode) -> Result<String> {
+fn write_tree(
+    identity: &RepositoryWorktreeIdentity,
+    node: &TreeNode,
+    deadline: Instant,
+) -> Result<String> {
+    ensure_capture_deadline(deadline)?;
     let mut input = Vec::new();
     for (name, entry) in &node.entries {
         if name.contains('/') || name.contains('\0') {
@@ -1355,9 +1596,11 @@ fn write_tree(identity: &RepositoryWorktreeIdentity, node: &TreeNode) -> Result<
                 object_type,
                 oid,
             } => (mode.clone(), *object_type, oid.clone()),
-            TreeEntry::Directory(child) => {
-                ("040000".to_string(), "tree", write_tree(identity, child)?)
-            }
+            TreeEntry::Directory(child) => (
+                "040000".to_string(),
+                "tree",
+                write_tree(identity, child, deadline)?,
+            ),
         };
         input.extend_from_slice(mode.as_bytes());
         input.push(b' ');
@@ -1368,13 +1611,29 @@ fn write_tree(identity: &RepositoryWorktreeIdentity, node: &TreeNode) -> Result<
         input.extend_from_slice(name.as_bytes());
         input.push(0);
     }
-    let output = git_output(identity, &["mktree", "-z"], Some(&input))?;
+    let output = git_output_until(
+        identity,
+        &["mktree", "-z"],
+        Some(&input),
+        deadline,
+        GIT_STDOUT_MAX_BYTES,
+    )?;
     ensure_git_success(&output, "workspace_change_mktree_failed")?;
     Ok(stdout_text(&output).trim().to_string())
 }
 
-fn hash_blob(identity: &RepositoryWorktreeIdentity, bytes: &[u8]) -> Result<String> {
-    let output = git_output(identity, &["hash-object", "-w", "--stdin"], Some(bytes))?;
+fn hash_blob(
+    identity: &RepositoryWorktreeIdentity,
+    bytes: &[u8],
+    deadline: Instant,
+) -> Result<String> {
+    let output = git_output_until(
+        identity,
+        &["hash-object", "-w", "--stdin"],
+        Some(bytes),
+        deadline,
+        GIT_STDOUT_MAX_BYTES,
+    )?;
     ensure_git_success(&output, "workspace_change_hash_object_failed")?;
     Ok(stdout_text(&output).trim().to_string())
 }
@@ -1383,8 +1642,9 @@ fn tree_diff(
     identity: &RepositoryWorktreeIdentity,
     baseline_oid: &str,
     final_oid: &str,
+    deadline: Instant,
 ) -> Result<String> {
-    let output = git_output(
+    let output = git_output_until(
         identity,
         &[
             "-c",
@@ -1405,7 +1665,16 @@ fn tree_diff(
             final_oid,
         ],
         None,
-    )?;
+        deadline,
+        DIFF_MAX_BYTES,
+    )
+    .map_err(|error| {
+        if error.to_string() == "workspace_change_git_output_limit" {
+            anyhow::anyhow!("workspace_change_diff_size_limit")
+        } else {
+            error
+        }
+    })?;
     ensure_git_success(&output, "workspace_change_diff_failed")?;
     if output.stdout.len() > DIFF_MAX_BYTES {
         bail!("workspace_change_diff_size_limit");
@@ -1764,9 +2033,13 @@ fn captured_regular_mode(_metadata: &fs::Metadata, index_mode: &str) -> String {
     }
 }
 
-fn verify_repository_identity(identity: &RepositoryWorktreeIdentity) -> Result<()> {
-    let observed = discover_repository(Path::new(&identity.canonical_execution_root))?
-        .context("workspace_change_repository_unavailable")?;
+fn verify_repository_identity_until(
+    identity: &RepositoryWorktreeIdentity,
+    deadline: Instant,
+) -> Result<()> {
+    let observed =
+        discover_repository_until(Path::new(&identity.canonical_execution_root), deadline)?
+            .context("workspace_change_repository_unavailable")?;
     if observed.identity_digest != identity.identity_digest {
         bail!("workspace_change_repository_identity_changed");
     }
@@ -1781,11 +2054,28 @@ fn final_ref(token: &str) -> String {
     format!("refs/rovai/w/{token}/f")
 }
 
+#[cfg(test)]
 fn create_ref(
     identity: &RepositoryWorktreeIdentity,
     data_dir: &Path,
     reference: &str,
     oid: &str,
+) -> Result<()> {
+    create_ref_until(
+        identity,
+        data_dir,
+        reference,
+        oid,
+        Instant::now() + CAPTURE_DEADLINE,
+    )
+}
+
+fn create_ref_until(
+    identity: &RepositoryWorktreeIdentity,
+    data_dir: &Path,
+    reference: &str,
+    oid: &str,
+    deadline: Instant,
 ) -> Result<()> {
     let hooks = empty_hooks_dir(data_dir)?;
     let zero = if identity.object_format == "sha256" {
@@ -1793,7 +2083,7 @@ fn create_ref(
     } else {
         "0".repeat(40)
     };
-    let output = git_output(
+    let output = git_output_until(
         identity,
         &[
             "-c",
@@ -1805,18 +2095,37 @@ fn create_ref(
             &zero,
         ],
         None,
+        deadline,
+        GIT_STDOUT_MAX_BYTES,
     )?;
     ensure_git_success(&output, "workspace_change_ref_create_failed")
 }
 
+#[cfg(test)]
 fn verify_ref(
     identity: &RepositoryWorktreeIdentity,
     data_dir: &Path,
     reference: &str,
     expected: &str,
 ) -> Result<()> {
+    verify_ref_until(
+        identity,
+        data_dir,
+        reference,
+        expected,
+        Instant::now() + CAPTURE_DEADLINE,
+    )
+}
+
+fn verify_ref_until(
+    identity: &RepositoryWorktreeIdentity,
+    data_dir: &Path,
+    reference: &str,
+    expected: &str,
+    deadline: Instant,
+) -> Result<()> {
     let hooks = empty_hooks_dir(data_dir)?;
-    let output = git_output(
+    let output = git_output_until(
         identity,
         &[
             "-c",
@@ -1826,12 +2135,20 @@ fn verify_ref(
             reference,
         ],
         None,
+        deadline,
+        GIT_STDOUT_MAX_BYTES,
     )?;
     ensure_git_success(&output, "workspace_change_ref_verify_failed")?;
     if stdout_text(&output).trim() != expected {
         bail!("workspace_change_ref_tampered");
     }
-    let object_type = git_output(identity, &["cat-file", "-t", expected], None)?;
+    let object_type = git_output_until(
+        identity,
+        &["cat-file", "-t", expected],
+        None,
+        deadline,
+        GIT_STDOUT_MAX_BYTES,
+    )?;
     ensure_git_success(&object_type, "workspace_change_ref_object_missing")?;
     if stdout_text(&object_type).trim() != "tree" {
         bail!("workspace_change_ref_object_not_tree");
@@ -1839,17 +2156,18 @@ fn verify_ref(
     Ok(())
 }
 
-fn delete_ref_if_matches(
+fn delete_ref_if_matches_until(
     identity: &RepositoryWorktreeIdentity,
     data_dir: &Path,
     reference: &str,
     expected: Option<&str>,
+    deadline: Instant,
 ) -> Result<()> {
     let Some(expected) = expected else {
         return Ok(());
     };
     let hooks = empty_hooks_dir(data_dir)?;
-    let output = git_output(
+    let output = git_output_until(
         identity,
         &[
             "-c",
@@ -1861,7 +2179,28 @@ fn delete_ref_if_matches(
             expected,
         ],
         None,
+        deadline,
+        GIT_STDOUT_MAX_BYTES,
     )?;
+    if output.status.success() {
+        return Ok(());
+    }
+    let observed = git_output_until(
+        identity,
+        &["for-each-ref", "--format=%(objectname)", reference],
+        None,
+        deadline,
+        GIT_STDOUT_MAX_BYTES,
+    )?;
+    ensure_git_success(&observed, "workspace_change_ref_cleanup_probe_failed")?;
+    let observed = stdout_text(&observed);
+    let observed = observed.trim();
+    if observed.is_empty() {
+        return Ok(());
+    }
+    if observed != expected {
+        bail!("workspace_change_ref_cleanup_expected_oid_changed");
+    }
     ensure_git_success(&output, "workspace_change_ref_cleanup_failed")
 }
 
@@ -1872,8 +2211,188 @@ fn cleanup_window_refs(
     baseline_oid: Option<&str>,
     final_oid: Option<&str>,
 ) -> Result<()> {
-    delete_ref_if_matches(identity, data_dir, &baseline_ref(token), baseline_oid)?;
-    delete_ref_if_matches(identity, data_dir, &final_ref(token), final_oid)
+    let deadline = Instant::now() + CAPTURE_DEADLINE;
+    let final_result =
+        delete_ref_if_matches_until(identity, data_dir, &final_ref(token), final_oid, deadline);
+    let baseline_result = delete_ref_if_matches_until(
+        identity,
+        data_dir,
+        &baseline_ref(token),
+        baseline_oid,
+        deadline,
+    );
+    final_result.and(baseline_result)
+}
+
+fn stage_ref_cleanup(
+    transaction: &rusqlite::Transaction<'_>,
+    window_id: &str,
+    baseline_oid: Option<&str>,
+    final_oid: Option<&str>,
+    error_code: Option<&str>,
+    now: &str,
+) -> Result<()> {
+    if baseline_oid.is_none() && final_oid.is_none() {
+        return Ok(());
+    }
+    let changed = transaction.execute(
+        r#"
+        INSERT INTO workspace_change_ref_cleanup(
+            window_id, baseline_oid, final_oid, error_code,
+            attempt_count, updated_at
+        ) VALUES (?1, ?2, ?3, ?4, 0, ?5)
+        ON CONFLICT(window_id) DO UPDATE SET
+            baseline_oid = COALESCE(
+                workspace_change_ref_cleanup.baseline_oid,
+                excluded.baseline_oid
+            ),
+            final_oid = COALESCE(
+                workspace_change_ref_cleanup.final_oid,
+                excluded.final_oid
+            ),
+            error_code = COALESCE(excluded.error_code, error_code),
+            updated_at = excluded.updated_at
+        WHERE (
+                workspace_change_ref_cleanup.baseline_oid IS NULL
+                OR excluded.baseline_oid IS NULL
+                OR workspace_change_ref_cleanup.baseline_oid = excluded.baseline_oid
+            )
+          AND (
+                workspace_change_ref_cleanup.final_oid IS NULL
+                OR excluded.final_oid IS NULL
+                OR workspace_change_ref_cleanup.final_oid = excluded.final_oid
+            )
+        "#,
+        params![window_id, baseline_oid, final_oid, error_code, now],
+    )?;
+    if changed != 1 {
+        bail!("workspace_change_ref_cleanup_expected_oid_conflict");
+    }
+    Ok(())
+}
+
+fn load_pending_ref_cleanup(
+    database: &Database,
+    window_id: &str,
+) -> Result<Option<PendingRefCleanup>> {
+    database
+        .connection()
+        .query_row(
+            r#"
+            SELECT window.id, window.ref_token,
+                   window.repository_root, window.worktree_git_dir,
+                   window.git_common_dir, window.object_format,
+                   window.object_database_dir, window.object_alternates_digest,
+                   window.repository_identity_digest,
+                   window.canonical_execution_root,
+                   cleanup.baseline_oid, cleanup.final_oid
+            FROM workspace_change_ref_cleanup AS cleanup
+            JOIN workspace_change_window AS window ON window.id = cleanup.window_id
+            WHERE cleanup.window_id = ?1
+            "#,
+            [window_id],
+            |row| {
+                let repository_root = row.get::<_, String>(2)?;
+                let canonical_execution_root = row.get::<_, String>(9)?;
+                let execution_root_relative = Path::new(&canonical_execution_root)
+                    .strip_prefix(Path::new(&repository_root))
+                    .map(|path| path.to_string_lossy().replace('\\', "/"))
+                    .unwrap_or_default();
+                Ok(PendingRefCleanup {
+                    window_id: row.get(0)?,
+                    ref_token: row.get(1)?,
+                    identity: RepositoryWorktreeIdentity {
+                        repository_root,
+                        worktree_git_dir: row.get(3)?,
+                        git_common_dir: row.get(4)?,
+                        object_format: row.get(5)?,
+                        object_database_dir: row.get(6)?,
+                        object_alternates_digest: row.get(7)?,
+                        identity_digest: row.get(8)?,
+                        canonical_execution_root,
+                        execution_root_relative,
+                    },
+                    baseline_oid: row.get(10)?,
+                    final_oid: row.get(11)?,
+                })
+            },
+        )
+        .optional()
+        .map_err(Into::into)
+}
+
+fn attempt_pending_ref_cleanup(
+    database: &mut Database,
+    data_dir: &Path,
+    window_id: &str,
+) -> Result<()> {
+    let Some(cleanup) = load_pending_ref_cleanup(database, window_id)? else {
+        return Ok(());
+    };
+    let result = cleanup_window_refs(
+        &cleanup.identity,
+        data_dir,
+        &cleanup.ref_token,
+        cleanup.baseline_oid.as_deref(),
+        cleanup.final_oid.as_deref(),
+    );
+    let now = chrono::Utc::now().to_rfc3339();
+    let transaction = database
+        .connection_mut()
+        .transaction_with_behavior(TransactionBehavior::Immediate)?;
+    match result {
+        Ok(()) => {
+            transaction.execute(
+                "DELETE FROM workspace_change_ref_cleanup WHERE window_id = ?1",
+                [&cleanup.window_id],
+            )?;
+            transaction.execute(
+                "UPDATE workspace_change_window SET cleanup_error_code = NULL WHERE id = ?1",
+                [&cleanup.window_id],
+            )?;
+            transaction.commit()?;
+            Ok(())
+        }
+        Err(error) => {
+            transaction.execute(
+                r#"
+                UPDATE workspace_change_ref_cleanup
+                SET error_code = 'workspace_change_ref_cleanup_failed',
+                    attempt_count = attempt_count + 1, updated_at = ?2
+                WHERE window_id = ?1
+                "#,
+                params![cleanup.window_id, now],
+            )?;
+            transaction.execute(
+                r#"
+                UPDATE workspace_change_window
+                SET cleanup_error_code = 'workspace_change_ref_cleanup_failed'
+                WHERE id = ?1
+                "#,
+                [&cleanup.window_id],
+            )?;
+            transaction.commit()?;
+            Err(error)
+        }
+    }
+}
+
+pub fn retry_pending_ref_cleanup(database: &mut Database, data_dir: &Path) -> Result<usize> {
+    let window_ids = {
+        let mut statement = database.connection().prepare(
+            "SELECT window_id FROM workspace_change_ref_cleanup ORDER BY updated_at, window_id",
+        )?;
+        statement
+            .query_map([], |row| row.get::<_, String>(0))?
+            .collect::<rusqlite::Result<Vec<_>>>()?
+    };
+    let mut completed = 0;
+    for window_id in window_ids {
+        if attempt_pending_ref_cleanup(database, data_dir, &window_id).is_ok() {
+            completed += 1;
+        }
+    }
+    Ok(completed)
 }
 
 fn empty_hooks_dir(data_dir: &Path) -> Result<PathBuf> {
@@ -1882,39 +2401,136 @@ fn empty_hooks_dir(data_dir: &Path) -> Result<PathBuf> {
     Ok(path)
 }
 
-fn git_output(
+fn git_output_until(
     identity: &RepositoryWorktreeIdentity,
     args: &[&str],
     stdin: Option<&[u8]>,
+    deadline: Instant,
+    stdout_limit: usize,
 ) -> Result<Output> {
-    let mut command = Command::new("git");
+    let mut command = Command::new(workspace_change_git_executable()?);
     sanitize_git_command(&mut command);
     command
         .current_dir(&identity.repository_root)
         .arg(format!("--git-dir={}", identity.worktree_git_dir))
         .arg(format!("--work-tree={}", identity.repository_root))
         .args(args);
-    if stdin.is_some() {
-        command.stdin(Stdio::piped());
-    }
-    let mut child = command
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()?;
-    if let Some(stdin) = stdin {
-        child
-            .stdin
-            .take()
-            .context("workspace_change_git_stdin_unavailable")?
-            .write_all(stdin)?;
-    }
-    Ok(child.wait_with_output()?)
+    run_git_command(
+        command,
+        stdin,
+        remaining_git_execution_time(deadline)?,
+        stdout_limit,
+    )
 }
 
-fn git_output_at(cwd: &Path, args: &[&str]) -> Result<Output> {
-    let mut command = Command::new("git");
+fn git_output_at_until(cwd: &Path, args: &[&str], deadline: Instant) -> Result<Output> {
+    let mut command = Command::new(workspace_change_git_executable()?);
     sanitize_git_command(&mut command);
-    Ok(command.current_dir(cwd).args(args).output()?)
+    command.current_dir(cwd).args(args);
+    run_git_command(
+        command,
+        None,
+        remaining_git_execution_time(deadline)?,
+        GIT_STDOUT_MAX_BYTES,
+    )
+}
+
+fn remaining_git_execution_time(deadline: Instant) -> Result<Duration> {
+    let remaining = deadline.saturating_duration_since(Instant::now());
+    if remaining <= GIT_CLEANUP_RESERVE {
+        bail!("workspace_change_capture_timeout");
+    }
+    Ok(remaining - GIT_CLEANUP_RESERVE)
+}
+
+fn ensure_capture_deadline(deadline: Instant) -> Result<()> {
+    if Instant::now() >= deadline {
+        bail!("workspace_change_capture_timeout");
+    }
+    Ok(())
+}
+
+fn run_git_command(
+    command: Command,
+    stdin: Option<&[u8]>,
+    deadline: Duration,
+    stdout_limit: usize,
+) -> Result<Output> {
+    if deadline.is_zero() {
+        bail!("workspace_change_git_timeout");
+    }
+    let input = stdin.map(ToOwned::to_owned);
+    let (sender, receiver) = std_mpsc::sync_channel(1);
+    workspace_change_git_runtime().handle().spawn(async move {
+        let mut command = tokio::process::Command::from(command);
+        let result = run_bounded_command_with_input(
+            &mut command,
+            input.as_deref(),
+            ProbeCommandLimits {
+                deadline,
+                stdout_bytes: stdout_limit,
+                stderr_bytes: GIT_STDERR_MAX_BYTES,
+                cleanup_timeout: GIT_CLEANUP_TIMEOUT,
+            },
+        )
+        .await;
+        let _ = sender.send(result);
+    });
+    let bounded = receiver
+        .recv()
+        .context("workspace_change_git_runner_unavailable")
+        .and_then(|result| {
+            result.map_err(|error| {
+                if format!("{error:#}").contains("runtime_probe_timed_out") {
+                    anyhow::anyhow!("workspace_change_git_timeout")
+                } else {
+                    error.context("workspace_change_git_execution_failed")
+                }
+            })
+        })?;
+    if bounded.stdout.truncated {
+        bail!("workspace_change_git_output_limit");
+    }
+    if bounded.stderr.truncated {
+        bail!("workspace_change_git_stderr_limit");
+    }
+    Ok(Output {
+        status: bounded.status,
+        stdout: bounded.stdout.bytes,
+        stderr: bounded.stderr.bytes,
+    })
+}
+
+fn workspace_change_git_runtime() -> &'static tokio::runtime::Runtime {
+    WORKSPACE_CHANGE_GIT_RUNTIME.get_or_init(|| {
+        tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(2)
+            .thread_name("rovai-workspace-git")
+            .enable_all()
+            .build()
+            .expect("Workspace Change Git runtime must start")
+    })
+}
+
+fn workspace_change_git_executable() -> Result<&'static Path> {
+    let executable = WORKSPACE_CHANGE_GIT_EXECUTABLE.get_or_init(|| {
+        let names: &[&str] = if cfg!(windows) {
+            &["git.exe", "git.cmd", "git.bat", "git.com", "git"]
+        } else {
+            &["git"]
+        };
+        std::env::var_os("PATH")
+            .into_iter()
+            .flat_map(|path| std::env::split_paths(&path).collect::<Vec<_>>())
+            .flat_map(|directory| names.iter().map(move |name| directory.join(name)))
+            .find(|candidate| candidate.is_file())
+            .and_then(|candidate| fs::canonicalize(candidate).ok())
+            .unwrap_or_default()
+    });
+    if executable.as_os_str().is_empty() {
+        bail!("workspace_change_git_executable_unavailable");
+    }
+    Ok(executable)
 }
 
 fn sanitize_git_command(command: &mut Command) {
@@ -1943,14 +2559,24 @@ fn sanitize_git_command(command: &mut Command) {
         .env("LC_ALL", "C");
 }
 
+#[cfg(test)]
 fn required_git_text_at(cwd: &Path, args: &[&str]) -> Result<String> {
-    let output = git_output_at(cwd, args)?;
+    required_git_text_at_until(cwd, args, Instant::now() + CAPTURE_DEADLINE)
+}
+
+fn required_git_text_at_until(cwd: &Path, args: &[&str], deadline: Instant) -> Result<String> {
+    let output = git_output_at_until(cwd, args, deadline)?;
     ensure_git_success(&output, "workspace_change_git_probe_failed")?;
     Ok(stdout_text(&output).trim().to_string())
 }
 
-fn canonical_git_path(cwd: &Path, args: &[&str], relative_to: Option<&Path>) -> Result<PathBuf> {
-    let raw = PathBuf::from(required_git_text_at(cwd, args)?);
+fn canonical_git_path_until(
+    cwd: &Path,
+    args: &[&str],
+    relative_to: Option<&Path>,
+    deadline: Instant,
+) -> Result<PathBuf> {
+    let raw = PathBuf::from(required_git_text_at_until(cwd, args, deadline)?);
     fs::canonicalize(if raw.is_absolute() {
         raw
     } else {
@@ -2002,6 +2628,61 @@ mod tests {
         );
     }
 
+    fn coordinator_identity(root: &str, digest: &str) -> RepositoryWorktreeIdentity {
+        RepositoryWorktreeIdentity {
+            repository_root: format!("/repositories/{digest}"),
+            worktree_git_dir: format!("/repositories/{digest}/.git"),
+            git_common_dir: format!("/repositories/{digest}/.git"),
+            object_format: "sha1".to_string(),
+            object_database_dir: format!("/repositories/{digest}/.git/objects"),
+            object_alternates_digest: None,
+            identity_digest: digest.to_string(),
+            canonical_execution_root: root.to_string(),
+            execution_root_relative: String::new(),
+        }
+    }
+
+    #[tokio::test]
+    async fn coordinator_serializes_one_physical_root_without_blocking_another() {
+        let coordinator = WorkspaceChangeCoordinator::default();
+        let first = coordinator_identity("/workspaces/first", "identity-first");
+        let same = first.clone();
+        let second = coordinator_identity("/workspaces/second", "identity-second");
+        let first_guard = coordinator.acquire(&first).await;
+
+        assert!(
+            tokio::time::timeout(Duration::from_millis(25), coordinator.acquire(&same))
+                .await
+                .is_err(),
+            "the same physical workspace must serialize capture boundaries"
+        );
+        let second_guard =
+            tokio::time::timeout(Duration::from_millis(100), coordinator.acquire(&second))
+                .await
+                .expect("an unrelated workspace must not wait for the first capture");
+
+        drop(second_guard);
+        drop(first_guard);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn git_runner_enforces_execution_deadline_and_stdout_capacity() {
+        let mut slow = Command::new("/bin/sh");
+        slow.args(["-c", "sleep 2"]);
+        let started = Instant::now();
+        let timeout = run_git_command(slow, None, Duration::from_millis(50), 1024)
+            .expect_err("a Git child must not outlive its execution deadline");
+        assert_eq!(timeout.to_string(), "workspace_change_git_timeout");
+        assert!(started.elapsed() < Duration::from_secs(1));
+
+        let mut noisy = Command::new("/bin/sh");
+        noisy.args(["-c", "head -c 4096 /dev/zero"]);
+        let overflow = run_git_command(noisy, None, Duration::from_secs(1), 1024)
+            .expect_err("Git stdout must be bounded while it is streamed");
+        assert_eq!(overflow.to_string(), "workspace_change_git_output_limit");
+    }
+
     #[test]
     fn synthetic_tree_captures_tracked_and_untracked_without_touching_index() {
         let root = std::env::temp_dir().join(format!("rovai-window-capture-{}", Uuid::new_v4()));
@@ -2020,7 +2701,13 @@ mod tests {
         fs::write(root.join("src/tracked.txt"), "after\n").unwrap();
         fs::write(root.join("src/untracked.txt"), "newer\n").unwrap();
         let final_capture = stable_capture(&identity, &baseline.manifest.entries).unwrap();
-        let patch = tree_diff(&identity, &baseline.tree_oid, &final_capture.tree_oid).unwrap();
+        let patch = tree_diff(
+            &identity,
+            &baseline.tree_oid,
+            &final_capture.tree_oid,
+            Instant::now() + CAPTURE_DEADLINE,
+        )
+        .unwrap();
         let files = summarize_patch(&patch);
         assert_eq!(files.len(), 2);
         assert!(files.iter().any(|file| file.path == "src/tracked.txt"));
@@ -2064,6 +2751,512 @@ mod tests {
             "workspace_change_ref_tampered"
         );
         fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn failed_final_publication_releases_both_refs_and_final_manifest_root() {
+        let fixture =
+            std::env::temp_dir().join(format!("rovai-window-final-failure-{}", Uuid::new_v4()));
+        let repository = fixture.join("repository");
+        let data_dir = fixture.join("data");
+        fs::create_dir_all(&repository).unwrap();
+        run(&repository, &["init", "-q"]);
+        run(&repository, &["config", "user.email", "test@example.com"]);
+        run(&repository, &["config", "user.name", "Test"]);
+        fs::write(repository.join("tracked.txt"), "before\n").unwrap();
+        run(&repository, &["add", "tracked.txt"]);
+        run(&repository, &["commit", "-qm", "base"]);
+
+        let identity = discover_repository(&repository).unwrap().unwrap();
+        let baseline = stable_capture(&identity, &[]).unwrap();
+        fs::write(repository.join("tracked.txt"), "after\n").unwrap();
+        let final_capture = stable_capture(&identity, &baseline.manifest.entries).unwrap();
+        let mut database = crate::test_support::fresh_schema_database_fast_at(&data_dir);
+        database
+            .connection()
+            .execute(
+                r#"
+                INSERT INTO camp(
+                    id, title, project_binding_kind, project_path,
+                    last_message_sequence, version, created_at, updated_at
+                ) VALUES (
+                    'camp-final-failure', 'Final failure', 'directory', ?1,
+                    0, 1, '2026-08-27T00:00:00Z', '2026-08-27T00:00:00Z'
+                )
+                "#,
+                [identity.canonical_execution_root.as_str()],
+            )
+            .unwrap();
+        let blob_store = ManagedBlobStore::new(&data_dir);
+        let baseline_manifest = blob_store
+            .put_bytes(
+                &mut database,
+                &serde_json::to_vec(&baseline.manifest).unwrap(),
+                "application/vnd.rovai.workspace-capture+json",
+                "sensitive",
+            )
+            .unwrap();
+        let final_manifest = blob_store
+            .put_bytes(
+                &mut database,
+                &serde_json::to_vec(&final_capture.manifest).unwrap(),
+                "application/vnd.rovai.workspace-capture+json",
+                "sensitive",
+            )
+            .unwrap();
+        let ref_token = "failed-final-publication";
+        database
+            .connection()
+            .execute(
+                r#"
+                INSERT INTO workspace_change_window(
+                    id, camp_id, canonical_execution_root,
+                    repository_identity_digest, repository_root,
+                    worktree_git_dir, git_common_dir, object_format,
+                    object_database_dir, object_alternates_digest, ref_token,
+                    lifecycle, capture_status, capture_profile_version,
+                    baseline_oid, final_candidate_oid,
+                    baseline_manifest_blob_id, final_manifest_blob_id,
+                    baseline_capture_started_at, baseline_captured_at,
+                    final_capture_started_at, created_at, updated_at
+                ) VALUES (
+                    'window-final-failure', 'camp-final-failure', ?1,
+                    ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9,
+                    'closing', 'baseline_ready', 1, ?10, ?11, ?12, ?13,
+                    '2026-08-27T00:00:00Z', '2026-08-27T00:00:01Z',
+                    '2026-08-27T00:00:02Z',
+                    '2026-08-27T00:00:00Z', '2026-08-27T00:00:02Z'
+                )
+                "#,
+                params![
+                    identity.canonical_execution_root,
+                    identity.identity_digest,
+                    identity.repository_root,
+                    identity.worktree_git_dir,
+                    identity.git_common_dir,
+                    identity.object_format,
+                    identity.object_database_dir,
+                    identity.object_alternates_digest,
+                    ref_token,
+                    baseline.tree_oid,
+                    final_capture.tree_oid,
+                    baseline_manifest.id,
+                    final_manifest.id,
+                ],
+            )
+            .unwrap();
+        create_ref(
+            &identity,
+            &data_dir,
+            &baseline_ref(ref_token),
+            &baseline.tree_oid,
+        )
+        .unwrap();
+        create_ref(
+            &identity,
+            &data_dir,
+            &final_ref(ref_token),
+            &final_capture.tree_oid,
+        )
+        .unwrap();
+        let request = WindowCloseRequest {
+            window_id: "window-final-failure".to_string(),
+            ref_token: ref_token.to_string(),
+            identity: identity.clone(),
+            baseline_oid: baseline.tree_oid.clone(),
+            baseline_manifest: baseline.manifest,
+        };
+
+        fail_close(
+            &mut database,
+            &data_dir,
+            &request,
+            "workspace_change_diff_size_limit",
+        )
+        .unwrap();
+
+        for reference in [baseline_ref(ref_token), final_ref(ref_token)] {
+            let output = Command::new("git")
+                .current_dir(&repository)
+                .args(["rev-parse", "--verify", &reference])
+                .output()
+                .unwrap();
+            assert!(
+                !output.status.success(),
+                "failed publication must release {reference}"
+            );
+        }
+        let state = database
+            .connection()
+            .query_row(
+                r#"
+                SELECT lifecycle, capture_status, final_candidate_oid,
+                       final_manifest_blob_id, unavailable_reason_code
+                FROM workspace_change_window
+                WHERE id = 'window-final-failure'
+                "#,
+                [],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, Option<String>>(2)?,
+                        row.get::<_, Option<String>>(3)?,
+                        row.get::<_, String>(4)?,
+                    ))
+                },
+            )
+            .unwrap();
+        assert_eq!(state.0, "closed");
+        assert_eq!(state.1, "unavailable");
+        assert_eq!(
+            state.2, None,
+            "candidate OID must stop rooting cleanup state"
+        );
+        assert_eq!(
+            state.3, None,
+            "failed final manifest must stop rooting its managed blob"
+        );
+        assert_eq!(state.4, "workspace_change_diff_size_limit");
+
+        drop(database);
+        fs::remove_dir_all(fixture).unwrap();
+    }
+
+    #[test]
+    fn failed_ref_cleanup_persists_expected_oid_and_retries_closed_window() {
+        let fixture =
+            std::env::temp_dir().join(format!("rovai-window-cleanup-retry-{}", Uuid::new_v4()));
+        let repository = fixture.join("repository");
+        let data_dir = fixture.join("data");
+        fs::create_dir_all(&repository).unwrap();
+        run(&repository, &["init", "-q"]);
+        run(&repository, &["config", "user.email", "test@example.com"]);
+        run(&repository, &["config", "user.name", "Test"]);
+        fs::write(repository.join("tracked.txt"), "before\n").unwrap();
+        run(&repository, &["add", "tracked.txt"]);
+        run(&repository, &["commit", "-qm", "base"]);
+
+        let identity = discover_repository(&repository).unwrap().unwrap();
+        let baseline = stable_capture(&identity, &[]).unwrap();
+        fs::write(repository.join("tracked.txt"), "after\n").unwrap();
+        let final_capture = stable_capture(&identity, &baseline.manifest.entries).unwrap();
+        assert_ne!(baseline.tree_oid, final_capture.tree_oid);
+        let mut database = crate::test_support::fresh_schema_database_fast_at(&data_dir);
+        database
+            .connection()
+            .execute(
+                r#"
+                INSERT INTO camp(
+                    id, title, project_binding_kind, project_path,
+                    last_message_sequence, version, created_at, updated_at
+                ) VALUES (
+                    'camp-cleanup-retry', 'Cleanup retry', 'directory', ?1,
+                    0, 1, '2026-08-27T00:00:00Z', '2026-08-27T00:00:00Z'
+                )
+                "#,
+                [identity.canonical_execution_root.as_str()],
+            )
+            .unwrap();
+        let ref_token = "cleanup-retry";
+        database
+            .connection()
+            .execute(
+                r#"
+                INSERT INTO workspace_change_window(
+                    id, camp_id, canonical_execution_root,
+                    repository_identity_digest, repository_root,
+                    worktree_git_dir, git_common_dir, object_format,
+                    object_database_dir, object_alternates_digest, ref_token,
+                    lifecycle, capture_status, capture_profile_version,
+                    baseline_oid, final_candidate_oid,
+                    baseline_capture_started_at, baseline_captured_at,
+                    final_capture_started_at, created_at, updated_at
+                ) VALUES (
+                    'window-cleanup-retry', 'camp-cleanup-retry', ?1,
+                    ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9,
+                    'closing', 'baseline_ready', 1, ?10, ?11,
+                    '2026-08-27T00:00:00Z', '2026-08-27T00:00:01Z',
+                    '2026-08-27T00:00:02Z',
+                    '2026-08-27T00:00:00Z', '2026-08-27T00:00:02Z'
+                )
+                "#,
+                params![
+                    identity.canonical_execution_root,
+                    identity.identity_digest,
+                    identity.repository_root,
+                    identity.worktree_git_dir,
+                    identity.git_common_dir,
+                    identity.object_format,
+                    identity.object_database_dir,
+                    identity.object_alternates_digest,
+                    ref_token,
+                    baseline.tree_oid,
+                    final_capture.tree_oid,
+                ],
+            )
+            .unwrap();
+        let baseline_reference = baseline_ref(ref_token);
+        let final_reference = final_ref(ref_token);
+        create_ref(
+            &identity,
+            &data_dir,
+            &baseline_reference,
+            &baseline.tree_oid,
+        )
+        .unwrap();
+        create_ref(
+            &identity,
+            &data_dir,
+            &final_reference,
+            &final_capture.tree_oid,
+        )
+        .unwrap();
+        run(
+            &repository,
+            &[
+                "update-ref",
+                &final_reference,
+                &baseline.tree_oid,
+                &final_capture.tree_oid,
+            ],
+        );
+        let request = WindowCloseRequest {
+            window_id: "window-cleanup-retry".to_string(),
+            ref_token: ref_token.to_string(),
+            identity: identity.clone(),
+            baseline_oid: baseline.tree_oid.clone(),
+            baseline_manifest: baseline.manifest,
+        };
+
+        fail_close(
+            &mut database,
+            &data_dir,
+            &request,
+            "workspace_change_publication_failed",
+        )
+        .unwrap();
+
+        let pending = database
+            .connection()
+            .query_row(
+                r#"
+                SELECT baseline_oid, final_oid, error_code, attempt_count
+                FROM workspace_change_ref_cleanup
+                WHERE window_id = 'window-cleanup-retry'
+                "#,
+                [],
+                |row| {
+                    Ok((
+                        row.get::<_, Option<String>>(0)?,
+                        row.get::<_, Option<String>>(1)?,
+                        row.get::<_, Option<String>>(2)?,
+                        row.get::<_, i64>(3)?,
+                    ))
+                },
+            )
+            .unwrap();
+        assert_eq!(pending.0.as_deref(), Some(request.baseline_oid.as_str()));
+        assert_eq!(pending.1.as_deref(), Some(final_capture.tree_oid.as_str()));
+        assert_eq!(
+            pending.2.as_deref(),
+            Some("workspace_change_ref_cleanup_failed")
+        );
+        assert_eq!(pending.3, 1);
+        let observed = required_git_text_at(&repository, &["rev-parse", &final_reference]).unwrap();
+        assert_eq!(observed, request.baseline_oid);
+
+        run(
+            &repository,
+            &[
+                "update-ref",
+                &final_reference,
+                &final_capture.tree_oid,
+                &request.baseline_oid,
+            ],
+        );
+        assert_eq!(
+            recover_interrupted_windows(&mut database, &data_dir).unwrap(),
+            0,
+            "startup recovery must retry cleanup even when every Window is closed"
+        );
+        let pending_count = database
+            .connection()
+            .query_row(
+                "SELECT COUNT(*) FROM workspace_change_ref_cleanup WHERE window_id = 'window-cleanup-retry'",
+                [],
+                |row| row.get::<_, i64>(0),
+            )
+            .unwrap();
+        assert_eq!(pending_count, 0);
+        let cleanup_error = database
+            .connection()
+            .query_row(
+                "SELECT cleanup_error_code FROM workspace_change_window WHERE id = 'window-cleanup-retry'",
+                [],
+                |row| row.get::<_, Option<String>>(0),
+            )
+            .unwrap();
+        assert_eq!(cleanup_error, None);
+        let output = Command::new("git")
+            .current_dir(&repository)
+            .args(["rev-parse", "--verify", &final_reference])
+            .output()
+            .unwrap();
+        assert!(!output.status.success());
+
+        drop(database);
+        fs::remove_dir_all(fixture).unwrap();
+    }
+
+    #[test]
+    fn unproven_cancellation_releases_participant_and_closes_window_unavailable() {
+        let fixture =
+            std::env::temp_dir().join(format!("rovai-window-cancel-fence-{}", Uuid::new_v4()));
+        let repository = fixture.join("repository");
+        let data_dir = fixture.join("data");
+        fs::create_dir_all(&repository).unwrap();
+        run(&repository, &["init", "-q"]);
+        run(&repository, &["config", "user.email", "test@example.com"]);
+        run(&repository, &["config", "user.name", "Test"]);
+        fs::write(repository.join("tracked.txt"), "before\n").unwrap();
+        run(&repository, &["add", "tracked.txt"]);
+        run(&repository, &["commit", "-qm", "base"]);
+        let identity = discover_repository(&repository).unwrap().unwrap();
+        let baseline_oid =
+            required_git_text_at(&repository, &["rev-parse", "HEAD^{tree}"]).unwrap();
+        let mut database = crate::test_support::fresh_schema_database_fast_at(&data_dir);
+        database
+            .connection()
+            .execute(
+                r#"
+                INSERT INTO camp(
+                    id, title, project_binding_kind, project_path,
+                    last_message_sequence, version, created_at, updated_at
+                ) VALUES (
+                    'camp-cancel-fence', 'Cancel fence', 'directory', ?1,
+                    0, 1, '2026-08-27T00:00:00Z', '2026-08-27T00:00:00Z'
+                )
+                "#,
+                [identity.canonical_execution_root.as_str()],
+            )
+            .unwrap();
+        let ref_token = "cancel-fence";
+        database
+            .connection()
+            .execute(
+                r#"
+                INSERT INTO workspace_change_window(
+                    id, camp_id, canonical_execution_root,
+                    repository_identity_digest, repository_root,
+                    worktree_git_dir, git_common_dir, object_format,
+                    object_database_dir, object_alternates_digest, ref_token,
+                    lifecycle, capture_status, capture_profile_version,
+                    baseline_oid, baseline_capture_started_at, baseline_captured_at,
+                    created_at, updated_at
+                ) VALUES (
+                    'window-cancel-fence', 'camp-cancel-fence', ?1,
+                    ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9,
+                    'active', 'baseline_ready', 1, ?10,
+                    '2026-08-27T00:00:00Z', '2026-08-27T00:00:01Z',
+                    '2026-08-27T00:00:00Z', '2026-08-27T00:00:01Z'
+                )
+                "#,
+                params![
+                    identity.canonical_execution_root,
+                    identity.identity_digest,
+                    identity.repository_root,
+                    identity.worktree_git_dir,
+                    identity.git_common_dir,
+                    identity.object_format,
+                    identity.object_database_dir,
+                    identity.object_alternates_digest,
+                    ref_token,
+                    baseline_oid,
+                ],
+            )
+            .unwrap();
+        database
+            .connection()
+            .pragma_update(None, "foreign_keys", "OFF")
+            .unwrap();
+        database
+            .connection()
+            .execute(
+                r#"
+                INSERT INTO workspace_change_window_participant(
+                    window_id, agent_run_id, execution_epoch, joined_at
+                ) VALUES (
+                    'window-cancel-fence', 'cancelled-run', 7,
+                    '2026-08-27T00:00:01Z'
+                )
+                "#,
+                [],
+            )
+            .unwrap();
+        database
+            .connection()
+            .pragma_update(None, "foreign_keys", "ON")
+            .unwrap();
+        create_ref(
+            &identity,
+            &data_dir,
+            &baseline_ref(ref_token),
+            &baseline_oid,
+        )
+        .unwrap();
+
+        fail_window_participant_after_unproven_quiescence(
+            &mut database,
+            &data_dir,
+            "cancelled-run",
+            7,
+            "workspace_change_cancellation_quiescence_unproven",
+        )
+        .unwrap();
+
+        let released_at = database
+            .connection()
+            .query_row(
+                r#"
+                SELECT released_at
+                FROM workspace_change_window_participant
+                WHERE window_id = 'window-cancel-fence'
+                  AND agent_run_id = 'cancelled-run'
+                  AND execution_epoch = 7
+                "#,
+                [],
+                |row| row.get::<_, Option<String>>(0),
+            )
+            .unwrap();
+        assert!(
+            released_at.is_some(),
+            "cancelled participant must be released"
+        );
+        let state = database
+            .connection()
+            .query_row(
+                r#"
+                SELECT lifecycle, capture_status, unavailable_reason_code
+                FROM workspace_change_window
+                WHERE id = 'window-cancel-fence'
+                "#,
+                [],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?,
+                    ))
+                },
+            )
+            .unwrap();
+        assert_eq!(state.0, "closed");
+        assert_eq!(state.1, "unavailable");
+        assert_eq!(state.2, "workspace_change_cancellation_quiescence_unproven");
+
+        drop(database);
+        fs::remove_dir_all(fixture).unwrap();
     }
 
     #[test]

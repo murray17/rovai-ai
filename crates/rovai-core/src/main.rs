@@ -237,6 +237,12 @@ const RUNTIME_EVIDENCE_DELTA_BATCH_MAX_ITEMS: usize = 32;
 const CAMP_ATTACHMENT_VIEW_MUTATION_DEADLINE: Duration = Duration::from_secs(55);
 const CAMP_ATTACHMENT_VIEW_QUIESCENCE_POLL_INTERVAL: Duration = Duration::from_millis(100);
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RuntimeCancellationQuiescence {
+    Proven,
+    Unproven,
+}
+
 struct CampAttachmentReadAdmission {
     camp_id: String,
 }
@@ -1312,7 +1318,7 @@ struct Core {
     compaction_detector_policies: DesiredCompactionDetectorPolicies,
     agent_run_cancellation_notify: Notify,
     pending_execution_recovery: Mutex<()>,
-    workspace_change_gate: Mutex<()>,
+    workspace_change_coordinator: workspace_change::WorkspaceChangeCoordinator,
     skill_library: SkillLibraryService,
     mcp_config: McpConfigStore,
     mcp_projection: McpProjectionService,
@@ -6819,10 +6825,20 @@ impl Core {
                 return;
             }
         };
-        let workspace_change_guard = self.workspace_change_gate.lock().await;
-        let workspace_change_admission = self
-            .prepare_workspace_change_admission(&candidate.camp_id, &workspace_path)
+        let workspace_change_identity = self
+            .discover_workspace_change_identity(&workspace_path)
             .await;
+        let workspace_change_guard = if let Some(identity) = workspace_change_identity.as_ref() {
+            Some(self.workspace_change_coordinator.acquire(identity).await)
+        } else {
+            None
+        };
+        let workspace_change_admission = if let Some(identity) = workspace_change_identity {
+            self.prepare_workspace_change_admission(&candidate.camp_id, identity)
+                .await
+        } else {
+            None
+        };
         let claim = {
             let mut database = self.database.lock().await;
             ExecutionRuntimeService::default().claim_agent_run(
@@ -7299,13 +7315,13 @@ impl Core {
         for candidate in candidates {
             let core = self.clone();
             interrupt_tasks.spawn(async move {
-                core.interrupt_cancelled_agent_run(&candidate).await;
-                candidate
+                let quiescence = core.interrupt_cancelled_agent_run(&candidate).await;
+                (candidate, quiescence)
             });
         }
         while let Some(result) = interrupt_tasks.join_next().await {
-            let candidate = match result {
-                Ok(candidate) => candidate,
+            let (candidate, quiescence) = match result {
+                Ok(result) => result,
                 Err(error) => {
                     eprintln!("AgentRun cancellation interrupt worker failed: {error}");
                     continue;
@@ -7363,6 +7379,22 @@ impl Core {
                             candidate.execution_epoch,
                         ))
                         .await;
+                    match quiescence {
+                        RuntimeCancellationQuiescence::Proven => {
+                            self.settle_workspace_change_after_quiescence(
+                                &candidate.agent_run_id,
+                                candidate.execution_epoch,
+                            )
+                            .await;
+                        }
+                        RuntimeCancellationQuiescence::Unproven => {
+                            self.fail_workspace_change_after_unproven_cancellation(
+                                &candidate.agent_run_id,
+                                candidate.execution_epoch,
+                            )
+                            .await;
+                        }
+                    }
                     if !accepted_input_outcome_unknown {
                         let core = self.clone();
                         tokio::spawn(async move {
@@ -7427,9 +7459,12 @@ impl Core {
         }
     }
 
-    async fn interrupt_cancelled_agent_run(&self, candidate: &AgentRunCancellationCandidate) {
+    async fn interrupt_cancelled_agent_run(
+        &self,
+        candidate: &AgentRunCancellationCandidate,
+    ) -> RuntimeCancellationQuiescence {
         if candidate.status == "queued" {
-            return;
+            return RuntimeCancellationQuiescence::Proven;
         }
         if candidate.adapter_kind == "antigravity-app" {
             if run_with_cancellation_deadline(
@@ -7445,7 +7480,19 @@ impl Core {
                     candidate.agent_run_id
                 );
             }
-            return;
+            return if self
+                .antigravity_app
+                .wait_for_agent_run_quiescence(
+                    &candidate.agent_run_id,
+                    candidate.execution_epoch,
+                    RUNTIME_CANCELLATION_FENCE_TIMEOUT,
+                )
+                .await
+            {
+                RuntimeCancellationQuiescence::Proven
+            } else {
+                RuntimeCancellationQuiescence::Unproven
+            };
         }
         if candidate.adapter_kind == "claude-code-cli" {
             if run_with_cancellation_deadline(
@@ -7461,13 +7508,25 @@ impl Core {
                     candidate.agent_run_id
                 );
             }
-            return;
+            return if self
+                .claude_code_cli
+                .wait_for_agent_run_quiescence(
+                    &candidate.agent_run_id,
+                    candidate.execution_epoch,
+                    RUNTIME_CANCELLATION_FENCE_TIMEOUT,
+                )
+                .await
+            {
+                RuntimeCancellationQuiescence::Proven
+            } else {
+                RuntimeCancellationQuiescence::Unproven
+            };
         }
         let Some(runtime) = self
             .agent_run_runtime(&candidate.agent_run_id, candidate.execution_epoch)
             .await
         else {
-            return;
+            return RuntimeCancellationQuiescence::Unproven;
         };
         match run_with_cancellation_deadline(
             RUNTIME_CANCELLATION_INTERRUPT_TIMEOUT,
@@ -7495,7 +7554,7 @@ impl Core {
                 rovai_core::agent_profile::AdapterKind::CodexCli => {
                     self.codex_cli
                         .forget_agent_run(&candidate.agent_run_id, candidate.execution_epoch)
-                        .await;
+                        .await
                 }
                 kind @ (rovai_core::agent_profile::AdapterKind::OpencodeCli
                 | rovai_core::agent_profile::AdapterKind::CopilotCli
@@ -7510,7 +7569,9 @@ impl Core {
                     if let Some(adapter) = self.acp_adapter(kind) {
                         adapter
                             .forget_agent_run(&candidate.agent_run_id, candidate.execution_epoch)
-                            .await;
+                            .await
+                    } else {
+                        false
                     }
                 }
                 rovai_core::agent_profile::AdapterKind::AntigravityApp => unreachable!(),
@@ -7518,11 +7579,16 @@ impl Core {
             }
         })
         .await;
-        if fenced.is_none() {
+        if fenced != Some(true) {
             eprintln!(
                 "Runtime detach timed out for AgentRun {}; persisted cancellation fence remains authoritative",
                 candidate.agent_run_id
             );
+        }
+        if fenced == Some(true) {
+            RuntimeCancellationQuiescence::Proven
+        } else {
+            RuntimeCancellationQuiescence::Unproven
         }
     }
 
@@ -10714,27 +10780,31 @@ impl Core {
         .map(|inspection| inspection.git_observation)
     }
 
+    async fn discover_workspace_change_identity(
+        &self,
+        execution_root: &Path,
+    ) -> Option<workspace_change::RepositoryWorktreeIdentity> {
+        let root = execution_root.to_path_buf();
+        match tokio::task::spawn_blocking(move || workspace_change::discover_repository(&root))
+            .await
+        {
+            Ok(Ok(identity)) => identity,
+            Ok(Err(error)) => {
+                eprintln!("Workspace Change Window Git discovery failed: {error:#}");
+                None
+            }
+            Err(error) => {
+                eprintln!("Workspace Change Window Git discovery worker failed: {error}");
+                None
+            }
+        }
+    }
+
     async fn prepare_workspace_change_admission(
         &self,
         camp_id: &str,
-        execution_root: &Path,
+        identity: workspace_change::RepositoryWorktreeIdentity,
     ) -> Option<WindowAdmission> {
-        let root = execution_root.to_path_buf();
-        let identity =
-            match tokio::task::spawn_blocking(move || workspace_change::discover_repository(&root))
-                .await
-            {
-                Ok(Ok(Some(identity))) => identity,
-                Ok(Ok(None)) => return None,
-                Ok(Err(error)) => {
-                    eprintln!("Workspace Change Window Git discovery failed: {error:#}");
-                    return None;
-                }
-                Err(error) => {
-                    eprintln!("Workspace Change Window Git discovery worker failed: {error}");
-                    return None;
-                }
-            };
         let admission = {
             let mut database = self.database.lock().await;
             match workspace_change::begin_or_join_window(&mut database, camp_id, &identity) {
@@ -10803,12 +10873,73 @@ impl Core {
         Some(admission)
     }
 
+    async fn fail_workspace_change_after_unproven_cancellation(
+        &self,
+        agent_run_id: &str,
+        execution_epoch: i64,
+    ) {
+        let participant_identity = {
+            let database = self.database.lock().await;
+            match workspace_change::participant_repository_identity(
+                &database,
+                agent_run_id,
+                execution_epoch,
+            ) {
+                Ok(identity) => identity,
+                Err(error) => {
+                    eprintln!(
+                        "Workspace Change cancellation participant identity failed: {error:#}"
+                    );
+                    return;
+                }
+            }
+        };
+        let Some(participant_identity) = participant_identity else {
+            return;
+        };
+        let _gate = self
+            .workspace_change_coordinator
+            .acquire(&participant_identity)
+            .await;
+        let result = {
+            let mut database = self.database.lock().await;
+            workspace_change::fail_window_participant_after_unproven_quiescence(
+                &mut database,
+                &self.data_dir,
+                agent_run_id,
+                execution_epoch,
+                "workspace_change_cancellation_quiescence_unproven",
+            )
+        };
+        if let Err(error) = result {
+            eprintln!("Workspace Change cancellation terminal fence failed: {error:#}");
+        }
+    }
+
     async fn settle_workspace_change_after_quiescence(
         &self,
         agent_run_id: &str,
         execution_epoch: i64,
     ) -> Option<workspace_change::WorkspaceChangeWindowView> {
-        let _gate = self.workspace_change_gate.lock().await;
+        let participant_identity = {
+            let database = self.database.lock().await;
+            match workspace_change::participant_repository_identity(
+                &database,
+                agent_run_id,
+                execution_epoch,
+            ) {
+                Ok(identity) => identity,
+                Err(error) => {
+                    eprintln!("Workspace Change Window participant identity failed: {error:#}");
+                    return None;
+                }
+            }
+        };
+        let participant_identity = participant_identity?;
+        let _gate = self
+            .workspace_change_coordinator
+            .acquire(&participant_identity)
+            .await;
         let close = {
             let mut database = self.database.lock().await;
             workspace_change::release_window_participant(
@@ -11495,7 +11626,7 @@ async fn run_core(
         compaction_detector_policies: compaction_detector_policies.clone(),
         agent_run_cancellation_notify: Notify::new(),
         pending_execution_recovery: Mutex::new(()),
-        workspace_change_gate: Mutex::new(()),
+        workspace_change_coordinator: workspace_change::WorkspaceChangeCoordinator::default(),
         skill_library,
         mcp_config,
         mcp_projection,
@@ -16809,7 +16940,7 @@ mod tests {
             compaction_detector_policies: compaction_detector_policies.clone(),
             agent_run_cancellation_notify: Notify::new(),
             pending_execution_recovery: Mutex::new(()),
-            workspace_change_gate: Mutex::new(()),
+            workspace_change_coordinator: workspace_change::WorkspaceChangeCoordinator::default(),
             skill_library,
             mcp_config,
             mcp_projection,

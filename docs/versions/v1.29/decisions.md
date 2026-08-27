@@ -275,16 +275,21 @@ workspace writer lease 可以强化隔离和归因，但会显著增加 v1 的�
    `campId + canonicalExecutionRoot + observedRepositoryWorktreeIdentity`；身份至少冻结
    `repositoryRoot + worktreeGitDir + gitCommonDir + objectFormat`；
 2. 同 key 重叠 Run 共享 baseline；最后一个参与 Run 的 lease 已 fence/unbind，且属于它的 Runtime、CLI、Tool
-   后代已证明 quiescent 后捕获 final。IdleWarm Host 不参与该判定；
+   后代已证明 quiescent 后捕获 final。IdleWarm Host 不参与该判定；取消在期限内无法证明 quiescent 时直接把旧
+   Window 收敛为 unavailable 并释放观察 participant，不等待未知回调，也不声称 Runtime 已停止；
 3. Core DB 的 Window row 是 active coordination、OID、恢复与清理权威；完成时追加的不可变
    `WorkspaceDiffCompleted + diffBlobId` 是历史卡片/读取权威。随机 `windowId` 至少含 128-bit 熵；
-   `refs/rovai/w/<window-token>/b|f` 只以 CAS 方式临时保护计算材料；
+   `refs/rovai/w/<window-token>/b|f` 只以 CAS 方式临时保护计算材料；expected baseline/final OID 另存于不受
+   lifecycle 过滤的持久 cleanup ledger，失败关闭先清 candidate/manifest root，再允许 closed Window 重试；
 4. snapshot 只写 raw blob/tree，不经过 index、`git add`、clean filter、LFS clean、textconv 或 external diff；
    不修改 staged 状态、普通 branch/ref，也不主动执行 prune；
 5. synthetic tree 只覆盖 exact execution root，并遵守 ignored/untracked、symlink、executable bit、sparse-checkout、
    nested repository/submodule 与稳定双捕获边界；
 6. 新 Run join 与 `active -> closing` 原子互斥；同一 physical execution root 在 closing 时只允许有严格截止时间的
-   bind 等待；任何 baseline/final/ref/身份/限制故障都使观察 `unavailable`，但 Run 和普通文件工作继续；
+   bind 等待；捕获 mutex 按 `canonicalExecutionRoot + observedRepositoryWorktreeIdentity` 分片且不含 Camp，避免
+   一个仓库阻塞无关工作区，同时维持同一物理工作区的跨 Camp 边界互斥；每个 Git 子进程使用有界输出、绝对
+   deadline 与进程树 kill/reap。任何 baseline/final/ref/身份/限制故障都使观察 `unavailable`，但 Run 和普通文件
+   工作继续；
 7. 读取必须以 `campId + windowId` 授权。其他 Camp/scope 的重叠 Rovai Run 只设置布尔观察，不暴露其 Camp、Run
    或文件活动。用户编辑器与任意外部程序始终只通过通用免责声明表达，不能假称被完整探测。
 

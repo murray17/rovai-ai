@@ -83,6 +83,8 @@ Camp 动态队员管理、Managed Attachment v2 与 ACP Client FS 权限收敛�
 - [x] 建立当前 Architecture、Contract、版本决定、Runtime audit、UI 方案与跨版本路由；
 - [x] 设计并迁移 `WorkspaceChangeWindow`、active-key 唯一约束、参与关系、捕获时间、candidate/ready OID、
   capture manifest、状态、Managed Blob root 和清理 ledger；
+- [x] 完成 Migration 114，将当前 Data Contract 升为 `v1.27 / schema 68`；以 lifecycle 独立的 cleanup ledger
+  保存 baseline/final expected OID、失败码与重试次数，并迁移 closed Window 遗留 candidate；
 - [x] 为 `windowId` 建立 UUID v4、固定长度随机 ref token、create-if-absent CAS 与 ref target/type 校验；
 - [x] 冻结 v1 的 capture deadline、attempt、文件数、总字节、单文件、patch 和 rename 常量及诊断 code；
 
@@ -100,7 +102,8 @@ Camp 动态队员管理、Managed Attachment v2 与 ACP Client FS 权限收敛�
 - [x] 实现 symlink no-follow、executable bit、sparse-checkout 未物化路径、nested repository/submodule opaque boundary、
   delete 与 bounded rename detection；
 - [x] 实现连续两次 OID 相同的稳定捕获、attempt/count/bytes 限制与 `captureStartedAt` / `capturedAt`；
-- [ ] 为每个 Git 子进程补齐硬 timeout/kill，使卡住的 Git 调用也不能越过 capture deadline；
+- [x] 为 Git discovery、capture plumbing、ref 与 diff 使用同一边界的剩余绝对 deadline；stdout/stderr 流式限容，
+  超时/超限终止并 reap 进程树，不再以无界 `wait_with_output()` 承担输出上限；
 - [ ] 补齐 Linux/Windows/SHA-256/linked-worktree/sparse/symlink/submodule/ignored-transition 的独立 fixture 证据。
 
 ## 3. Window Coordinator 与恢复
@@ -110,10 +113,15 @@ Camp 动态队员管理、Managed Attachment v2 与 ACP Client FS 权限收敛�
 - [x] 以 Coordinator gate + active-key unique/CAS 合并并发首个 `opening`，并原子实现同 key join 与最后参与者
   `active -> closing` 互斥；参与 Run 只保存 `windowId`；
 - [x] 把现有 terminal/quiescent 收口路径接入 participant release；IdleWarm Host 不作为 participant；
-- [ ] Coordinator gate 在普通捕获成功/不可用后开放下一 Window；仍需以 Git 子进程硬 timeout 证明 closing 不会被
-  卡住的 Git 调用无限占用；
+- [x] 将全局 gate 改为按 `canonicalExecutionRoot + repository worktree identity` 分片的 coordinator；key 不含
+  Camp，因此同一物理 workspace 的跨 Camp 边界互斥，而无关 workspace 可并行；Git 子进程硬 deadline 证明
+  success/unavailable 后会释放 gate；
+- [x] 取消 ACK 后先等待 Runtime/CLI/Tool quiescence；证明成功复用普通 settlement，期限内无法证明则原子释放
+  participant 并把 Window 收敛为 unavailable，避免旧 active Window 永久吸收后续 Run；
 - [x] 启动恢复只依据持久状态、OID 和 fence 收口；Core crash、ref 缺失/漂移、身份变化或未知边界均标记
   `unavailable`，不做事后 rescan；
+- [x] final publication 的所有失败出口清除 final candidate/manifest root，并先登记 baseline/final expected OID
+  后尝试 compare-and-delete；cleanup failure 在 closed Window 上保持可重试，ref 已不存在按幂等成功处理；
 - [x] 记录 Core 可证明的其他 Rovai scope 重叠为 `externalWriterObserved`，不保存或投影对方 identity；
 - [ ] Camp 删除与 orphan cleanup 使用 best-effort expected-OID ref 清理，不调用 prune，不因用户仓库暂不可达破坏
   Core 领域删除。
@@ -153,7 +161,7 @@ Camp 动态队员管理、Managed Attachment v2 与 ACP Client FS 权限收敛�
 - [x] 执行台不增加 Workspace observation，现有 Camp rail、placement 与 Tool list 宽度保持不变；
 - [ ] 完成 Linux/macOS/Windows Git fixture：SHA-1 与支持时的 SHA-256、linked worktree、sparse checkout、symlink、
   executable、ignored transition、nested repo、submodule、ref tamper、并发 join/close、crash/restart 与严格超限；
-- [x] 通过 `cargo test --workspace`：Rust lib 332 项、CLI 25 项、Core bin 165 项（另有 4 项手动 Runtime
+- [x] 通过 `cargo test --workspace`：Rust lib 349 项、CLI 25 项、Core bin 169 项（另有 4 项手动 Runtime
   smoke ignored）；
 - [x] 通过 TypeScript typecheck、完整 Renderer 534 项、`pnpm test`、Desktop production build、文档测试与
   diff-aware 文档门禁；

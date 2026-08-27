@@ -50,8 +50,10 @@ pub struct Database {
     runtime_camp_files_root_identity_digest: String,
 }
 
-const CURRENT_DATA_CONTRACT_VERSION: &str = "v1.26";
-const CURRENT_PROJECTION_SCHEMA_VERSION: i64 = 67;
+const CURRENT_DATA_CONTRACT_VERSION: &str = "v1.27";
+const CURRENT_PROJECTION_SCHEMA_VERSION: i64 = 68;
+const V114_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.26";
+const V114_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION: i64 = 67;
 const V113_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.25";
 const V113_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION: i64 = 66;
 const V112_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.24";
@@ -182,6 +184,7 @@ struct CurrentMigrationState {
     v111: bool,
     v112: bool,
     v113: bool,
+    v114: bool,
 }
 
 impl CurrentMigrationState {
@@ -191,6 +194,54 @@ impl CurrentMigrationState {
             return false;
         }
         if contract == CURRENT_DATA_CONTRACT_VERSION && schema == CURRENT_PROJECTION_SCHEMA_VERSION
+        {
+            return self.v70
+                && self.v71
+                && self.v76
+                && self.v77
+                && self.v78
+                && self.v79
+                && self.v80
+                && self.v81
+                && self.v82
+                && self.v83
+                && self.v84
+                && self.v85
+                && self.v86
+                && self.v87
+                && self.v88
+                && self.v89
+                && self.v90
+                && self.v91
+                && self.v92
+                && self.v93
+                && self.v94
+                && self.v95
+                && self.v96
+                && self.v97
+                && self.v98
+                && self.v99
+                && self.v100
+                && self.v101
+                && self.v102
+                && self.v103
+                && self.v104
+                && self.v105
+                && self.v106
+                && self.v107
+                && self.v108
+                && self.v109
+                && self.v110
+                && self.v111
+                && self.v112
+                && self.v113
+                && self.v114;
+        }
+        if self.v114 {
+            return false;
+        }
+        if contract == V114_MIGRATION_SOURCE_DATA_CONTRACT_VERSION
+            && schema == V114_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION
         {
             return self.v70
                 && self.v71
@@ -1374,7 +1425,8 @@ fn load_current_migration_state(
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 110),
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 111),
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 112),
-               EXISTS(SELECT 1 FROM schema_migration WHERE version = 113)
+               EXISTS(SELECT 1 FROM schema_migration WHERE version = 113),
+               EXISTS(SELECT 1 FROM schema_migration WHERE version = 114)
         "#,
         [],
         |row| {
@@ -1423,6 +1475,7 @@ fn load_current_migration_state(
                 v111: row.get(41)?,
                 v112: row.get(42)?,
                 v113: row.get(43)?,
+                v114: row.get(44)?,
             })
         },
     )
@@ -2889,6 +2942,9 @@ impl Database {
             if !self.schema_migration_applied(113)? {
                 self.migrate_workspace_change_observation_v113()?;
             }
+            if !self.schema_migration_applied(114)? {
+                self.migrate_workspace_change_ref_cleanup_v114()?;
+            }
             if let Err(error) =
                 crate::notification::maintain_notification_episode_retention(self.connection())
             {
@@ -3277,6 +3333,9 @@ impl Database {
         }
         if !self.schema_migration_applied(113)? {
             self.migrate_workspace_change_observation_v113()?;
+        }
+        if !self.schema_migration_applied(114)? {
+            self.migrate_workspace_change_ref_cleanup_v114()?;
         }
         if let Err(error) =
             crate::notification::maintain_notification_episode_retention(self.connection())
@@ -16178,6 +16237,71 @@ impl Database {
         Ok(())
     }
 
+    fn migrate_workspace_change_ref_cleanup_v114(&mut self) -> Result<()> {
+        let transaction = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        transaction.execute_batch(
+            r#"
+            CREATE TABLE workspace_change_ref_cleanup (
+                window_id TEXT PRIMARY KEY
+                    REFERENCES workspace_change_window(id) ON DELETE CASCADE,
+                baseline_oid TEXT,
+                final_oid TEXT,
+                error_code TEXT,
+                attempt_count INTEGER NOT NULL DEFAULT 0 CHECK(attempt_count >= 0),
+                updated_at TEXT NOT NULL,
+                CHECK(baseline_oid IS NOT NULL OR final_oid IS NOT NULL)
+            );
+
+            INSERT INTO workspace_change_ref_cleanup(
+                window_id, baseline_oid, final_oid, error_code,
+                attempt_count, updated_at
+            )
+            SELECT id,
+                   COALESCE(baseline_oid, baseline_candidate_oid),
+                   COALESCE(final_oid, final_candidate_oid),
+                   COALESCE(cleanup_error_code, 'workspace_change_ref_cleanup_pending'),
+                   0, datetime('now')
+            FROM workspace_change_window
+            WHERE lifecycle = 'closed'
+              AND (
+                  cleanup_error_code IS NOT NULL
+                  OR final_candidate_oid IS NOT NULL
+                  OR baseline_candidate_oid IS NOT NULL
+              )
+              AND COALESCE(
+                  baseline_oid, baseline_candidate_oid,
+                  final_oid, final_candidate_oid
+              ) IS NOT NULL;
+
+            UPDATE workspace_change_window
+            SET baseline_candidate_oid = NULL,
+                final_candidate_oid = NULL,
+                final_manifest_blob_id = CASE
+                    WHEN capture_status = 'unavailable' THEN NULL
+                    ELSE final_manifest_blob_id
+                END,
+                cleanup_error_code = CASE
+                    WHEN id IN (SELECT window_id FROM workspace_change_ref_cleanup)
+                    THEN COALESCE(cleanup_error_code, 'workspace_change_ref_cleanup_pending')
+                    ELSE cleanup_error_code
+                END
+            WHERE lifecycle = 'closed';
+
+            UPDATE rovai_data_contract
+            SET contract_version = 'v1.27', projection_schema_version = 68,
+                reset_reason = NULL, updated_at = datetime('now')
+            WHERE singleton = 1;
+
+            INSERT INTO schema_migration(version, applied_at)
+            VALUES (114, datetime('now'));
+            "#,
+        )?;
+        transaction.commit()?;
+        Ok(())
+    }
+
     fn migrate_pending_camp_activation_v67(&mut self) -> Result<()> {
         let transaction = self
             .connection
@@ -20580,7 +20704,33 @@ impl Database {
 }
 
 #[cfg(test)]
+fn downgrade_current_schema_to_v113_source_for_test(connection: &Connection) {
+    let has_v114: bool = connection
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM schema_migration WHERE version = 114)",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    if !has_v114 {
+        return;
+    }
+    connection
+        .execute_batch(
+            r#"
+            DROP TABLE workspace_change_ref_cleanup;
+            UPDATE rovai_data_contract
+            SET contract_version = 'v1.26', projection_schema_version = 67
+            WHERE singleton = 1;
+            DELETE FROM schema_migration WHERE version = 114;
+            "#,
+        )
+        .unwrap();
+}
+
+#[cfg(test)]
 fn downgrade_current_schema_to_v112_source_for_test(connection: &Connection) {
+    downgrade_current_schema_to_v113_source_for_test(connection);
     let has_v113: bool = connection
         .query_row(
             "SELECT EXISTS(SELECT 1 FROM schema_migration WHERE version = 113)",
@@ -21479,6 +21629,7 @@ mod tests {
             v111: version >= 111,
             v112: version >= 112,
             v113: version >= 113,
+            v114: version >= 114,
         }
     }
 
@@ -21489,6 +21640,12 @@ mod tests {
                 "current",
                 CURRENT_DATA_CONTRACT_VERSION,
                 CURRENT_PROJECTION_SCHEMA_VERSION,
+                114,
+            ),
+            (
+                "v1.26/schema-67 after Workspace Change Observation",
+                V114_MIGRATION_SOURCE_DATA_CONTRACT_VERSION,
+                V114_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION,
                 113,
             ),
             (
@@ -21803,7 +21960,7 @@ mod tests {
             )
             .expect("current contract marker should load");
 
-        assert_eq!(state, migration_state_through(113));
+        assert_eq!(state, migration_state_through(114));
         assert!(state.admits(&contract, schema));
         assert!(has_admissible_data_contract(
             &directory.join("rovai.sqlite")
@@ -23844,6 +24001,110 @@ mod tests {
     }
 
     #[test]
+    fn v114_adds_durable_workspace_ref_cleanup_and_migrates_closed_candidates() {
+        let directory = std::env::temp_dir().join(format!("rovai-db-v114-test-{}", Uuid::new_v4()));
+        let mut database = crate::test_support::fresh_schema_database_fast_at(&directory);
+        downgrade_current_schema_to_v113_source_for_test(database.connection());
+        database
+            .connection()
+            .execute_batch(
+                r#"
+                INSERT INTO camp(
+                    id, title, project_binding_kind, project_path,
+                    last_message_sequence, version, created_at, updated_at
+                ) VALUES (
+                    'camp-v114', 'v114 cleanup', 'directory', '/tmp/v114',
+                    0, 1, '2026-08-27T00:00:00Z', '2026-08-27T00:00:00Z'
+                );
+                INSERT INTO workspace_change_window(
+                    id, camp_id, canonical_execution_root,
+                    repository_identity_digest, repository_root,
+                    worktree_git_dir, git_common_dir, object_format,
+                    object_database_dir, ref_token, lifecycle, capture_status,
+                    capture_profile_version, baseline_oid, final_candidate_oid,
+                    baseline_capture_started_at, baseline_captured_at,
+                    final_capture_started_at, unavailable_reason_code,
+                    created_at, updated_at
+                ) VALUES (
+                    'window-v114', 'camp-v114', '/tmp/v114',
+                    'identity-v114', '/tmp/v114', '/tmp/v114/.git',
+                    '/tmp/v114/.git', 'sha1', '/tmp/v114/.git/objects',
+                    'token-v114', 'closed', 'unavailable', 1,
+                    '1111111111111111111111111111111111111111',
+                    '2222222222222222222222222222222222222222',
+                    '2026-08-27T00:00:00Z', '2026-08-27T00:00:01Z',
+                    '2026-08-27T00:00:02Z', 'workspace_change_diff_size_limit',
+                    '2026-08-27T00:00:00Z', '2026-08-27T00:00:03Z'
+                );
+                "#,
+            )
+            .unwrap();
+
+        database
+            .migrate_workspace_change_ref_cleanup_v114()
+            .unwrap();
+
+        assert!(
+            database
+                .connection()
+                .query_row(
+                    "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'workspace_change_ref_cleanup')",
+                    [],
+                    |row| row.get::<_, bool>(0),
+                )
+                .unwrap()
+        );
+        let cleanup = database
+            .connection()
+            .query_row(
+                r#"
+                SELECT baseline_oid, final_oid
+                FROM workspace_change_ref_cleanup
+                WHERE window_id = 'window-v114'
+                "#,
+                [],
+                |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+            )
+            .unwrap();
+        assert_eq!(cleanup.0, "1111111111111111111111111111111111111111");
+        assert_eq!(cleanup.1, "2222222222222222222222222222222222222222");
+        assert_eq!(
+            database
+                .connection()
+                .query_row(
+                    "SELECT final_candidate_oid FROM workspace_change_window WHERE id = 'window-v114'",
+                    [],
+                    |row| row.get::<_, Option<String>>(0),
+                )
+                .unwrap(),
+            None
+        );
+        assert_eq!(
+            database
+                .connection()
+                .query_row(
+                    "SELECT contract_version, projection_schema_version FROM rovai_data_contract WHERE singleton = 1",
+                    [],
+                    |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)),
+                )
+                .unwrap(),
+            ("v1.27".to_string(), 68)
+        );
+        assert_eq!(
+            database
+                .connection()
+                .query_row("SELECT COUNT(*) FROM pragma_foreign_key_check", [], |row| {
+                    row.get::<_, i64>(0)
+                })
+                .unwrap(),
+            0
+        );
+
+        drop(database);
+        std::fs::remove_dir_all(directory).expect("temporary database should be removable");
+    }
+
+    #[test]
     fn v108_adds_grok_compaction_closed_sets_and_preserves_observer_state() {
         let directory = std::env::temp_dir().join(format!("rovai-db-v108-test-{}", Uuid::new_v4()));
         let mut database = crate::test_support::fresh_schema_database_fast_at(&directory);
@@ -24130,7 +24391,7 @@ mod tests {
                 },
             )
             .unwrap();
-        assert_eq!(upgraded_marker, ("v1.26".to_string(), 67, 1, 1, 0));
+        assert_eq!(upgraded_marker, ("v1.27".to_string(), 68, 1, 1, 0));
         assert_table_columns(upgraded.connection(), "camp", &["attachment_revision"], &[]);
         assert_schema_objects(
             upgraded.connection(),
@@ -24162,7 +24423,7 @@ mod tests {
                     )),
                 )
                 .unwrap(),
-            ("v1.26".to_string(), 67, 1)
+            ("v1.27".to_string(), 68, 1)
         );
         drop(restarted);
         std::fs::remove_dir_all(directory).expect("temporary database should be removable");
@@ -24332,7 +24593,7 @@ mod tests {
                 },
             )
             .unwrap();
-        assert_eq!(upgraded_marker, ("v1.26".to_string(), 67, 1, 1, 0));
+        assert_eq!(upgraded_marker, ("v1.27".to_string(), 68, 1, 1, 0));
         assert_table_columns(
             upgraded.connection(),
             "message_delivery",
@@ -24392,8 +24653,8 @@ mod tests {
                 "terminal".to_string(),
                 0,
                 1,
-                "v1.26".to_string(),
-                67,
+                "v1.27".to_string(),
+                68,
             )
         );
         drop(restarted);
@@ -24503,7 +24764,7 @@ mod tests {
                     )),
                 )
                 .unwrap(),
-            ("v1.26".to_string(), 67, 1, 1, 1)
+            ("v1.27".to_string(), 68, 1, 1, 1)
         );
         assert_eq!(
             reopened

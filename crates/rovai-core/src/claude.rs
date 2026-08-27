@@ -167,6 +167,25 @@ impl ClaudeCodeCliRuntimeAdapter {
             .is_some_and(|sender| sender.send(()).is_ok())
     }
 
+    pub async fn wait_for_agent_run_quiescence(
+        &self,
+        agent_run_id: &str,
+        execution_epoch: i64,
+        timeout: Duration,
+    ) -> bool {
+        let key = (agent_run_id.to_string(), execution_epoch);
+        let deadline = Instant::now() + timeout;
+        loop {
+            if !self.active.lock().await.contains_key(&key) {
+                return true;
+            }
+            if Instant::now() >= deadline {
+                return false;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    }
+
     pub async fn shutdown_all(&self) {
         let controls = self
             .active

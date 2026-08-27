@@ -2,7 +2,7 @@ use std::{ffi::OsStr, io, process::ExitStatus, time::Duration};
 
 use anyhow::{Context, Result, anyhow, bail};
 use tokio::{
-    io::{AsyncBufReadExt, AsyncRead, AsyncReadExt, BufReader},
+    io::{AsyncBufReadExt, AsyncRead, AsyncReadExt, AsyncWriteExt, BufReader},
     process::Command,
     task::JoinHandle,
     time::{Instant, timeout, timeout_at},
@@ -59,7 +59,29 @@ pub async fn run_bounded_command(
     command: &mut Command,
     limits: ProbeCommandLimits,
 ) -> Result<BoundedCommandOutput> {
-    let mut child = spawn_managed_probe(command, ManagedStdinPolicy::Null)?;
+    run_bounded_command_with_input(command, None, limits).await
+}
+
+pub async fn run_bounded_command_with_input(
+    command: &mut Command,
+    input: Option<&[u8]>,
+    limits: ProbeCommandLimits,
+) -> Result<BoundedCommandOutput> {
+    let stdin_policy = if input.is_some() {
+        ManagedStdinPolicy::Piped
+    } else {
+        ManagedStdinPolicy::Null
+    };
+    let mut child = spawn_managed_probe(command, stdin_policy)?;
+    let mut stdin = if input.is_some() {
+        Some(
+            child
+                .take_stdin()
+                .context("runtime_probe_stdin_unavailable")?,
+        )
+    } else {
+        None
+    };
     let stdout = child
         .take_stdout()
         .context("runtime_probe_stdout_unavailable")?;
@@ -69,6 +91,29 @@ pub async fn run_bounded_command(
     let mut stdout_task = tokio::spawn(read_bounded(stdout, limits.stdout_bytes));
     let mut stderr_task = tokio::spawn(read_bounded(stderr, limits.stderr_bytes));
     let deadline = Instant::now() + limits.deadline;
+
+    if let (Some(input), Some(mut stdin)) = (input, stdin.take()) {
+        let write_result = timeout_at(deadline, async {
+            stdin.write_all(input).await?;
+            stdin.shutdown().await
+        })
+        .await;
+        match write_result {
+            Ok(Ok(())) => {}
+            Ok(Err(error)) => {
+                terminate_process_tree(&mut child, limits.cleanup_timeout).await;
+                abort_reader(&mut stdout_task).await;
+                abort_reader(&mut stderr_task).await;
+                return Err(error).context("runtime_probe_stdin_write_failed");
+            }
+            Err(_) => {
+                terminate_process_tree(&mut child, limits.cleanup_timeout).await;
+                abort_reader(&mut stdout_task).await;
+                abort_reader(&mut stderr_task).await;
+                bail!("runtime_probe_timed_out");
+            }
+        }
+    }
 
     let status = match timeout_at(deadline, child.wait()).await {
         Ok(result) => result.context("runtime_probe_wait_failed")?,

@@ -42,7 +42,8 @@ reconciliation 完成已接受工作的正式结算。
   `v1.23 / projection schema 64` 的动态 Camp membership；Migration 111 升为 `v1.24 / schema 65`，允许
   Message Delivery 零 attempt cancelled terminal；Migration 112 升为 `v1.25 / schema 66`，建立 Managed
   Attachment v2；Migration 113 升为 `v1.26 / schema 67`，建立 Runtime diff projection 与 Workspace
-  Change Window 存储；
+  Change Window 存储；Migration 114 升为 `v1.27 / schema 68`，建立 lifecycle 独立的 Workspace ref cleanup
+  ledger，并迁移已关闭 Window 遗留的 candidate/ref 清理责任；
 - 新增 `camps.members.add`、`camps.members.removalPreview`、`camps.members.remove` Desktop API；添加不创建
   Conversation，也不修改已冻结 AgentRun 的 Collaboration State；
 - Camp 始终至少保留一位 active member。移除以 generation/version CAS 原子结束 membership、修复 Default Lead、
@@ -69,9 +70,15 @@ reconciliation 完成已接受工作的正式结算。
 - baseline 与 final 都只有在连续两次 synthetic tree OID 相同时才接受，并受严格时间、文件数和总字节上限；
   产品语义是两个稳定捕获点之间的净变化，不声称原子文件系统快照；
 - Window Coordinator 原子协调 Run join 与 `active -> closing`；最后一个 Run 的 lease 已 fence/unbind 且其
-  Runtime、CLI、Tool 后代已证明 quiescent 后才开始 final capture，IdleWarm Host 不阻止结算；
+  Runtime、CLI、Tool 后代已证明 quiescent 后才开始 final capture，IdleWarm Host 不阻止结算；取消在期限内无法
+  证明 quiescent 时关闭旧 Window 为 unavailable 并释放观察 participant，不等待未知 terminal callback；
+- Window 持久 key 继续包含 Camp；捕获 mutex 按 `canonicalExecutionRoot + repository worktree identity` 分片且
+  不含 Camp，使无关物理工作区并行、同一物理工作区的跨 Camp 捕获边界仍互斥；
 - Git 观察始终 fail-open：baseline 或 final 失败、超时、仓库身份变化、ref 缺失/漂移或超限时将 Window 标记为
-  `unavailable`，普通文件工作继续，且不事后重新扫描猜测旧边界；
+  `unavailable`，普通文件工作继续，且不事后重新扫描猜测旧边界；Git 子进程按剩余绝对 deadline 执行，以有界
+  stdout/stderr streaming 和进程树 kill/reap 保证慢 Git 与大输出不能无限占用 coordinator；
+- final publication 或 ref cleanup 失败时，在关闭事务中清除 final candidate/manifest root，并把 expected
+  baseline/final OID 留在持久 cleanup ledger；closed Window 也可在启动维护中安全重试，且从不删除已改写 target；
 - 非 Git execution root 不创建 Window，也不伪造 not-applicable 持久对象。
 - Codex、ACP 与 Claude Edit 的可靠终态文件 Evidence 扁平显示为同级 `修改 xxx` 行；完整 Review 只属于会话中的
   `Files Changed` 历史卡片；
@@ -107,6 +114,9 @@ Activity 与 Renderer，不追加模型上下文。
 - 新 Run join 与最后参与者关闭互斥；同一 physical execution root 的 closing 窗口只造成有截止时间的短暂 bind 等待；
 - baseline 在首个 Runtime 获准写入前已落库为 `baseline_ready` 或明确 `unavailable`；Window 不可用不阻止 Run；
 - ref 以 create-if-absent CAS 创建，以 expected-OID compare-and-delete 清理；diff 前 ref 必须仍精确指向 DB OID；
+- cleanup 失败不丢失 expected OID，closed Window 仍可重试；ref 已不存在按幂等成功处理，target 改写则保留诊断；
+- 同一物理 workspace 的捕获边界互斥，无关 workspace 并行；Git child 超时或输出超限后必须 kill/reap 并释放 gate；
+- 取消 ACK 后只有 quiescent proven 才可 final；无法证明时 participant 必须释放且 Window 只能 unavailable；
 - synthetic tree 的路径集合、symlink、executable bit、sparse-checkout、nested repository/submodule 和稳定捕获规则
   由跨平台 fixture 验证；
 - Window 的 `lifecycle` 与 `captureStatus` 独立，`no_changes` 与 `unavailable` 不混淆；

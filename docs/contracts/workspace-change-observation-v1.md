@@ -248,12 +248,15 @@ candidate 不得被读取为 ready checkpoint。状态转换使用 DB transactio
    `active/baseline_ready`；失败或超时时转为 `active/unavailable`。两种结果都允许 Run bind；
 3. 同 key `active` Window 的新 Run 原子加入 Participant；`new join` 与最后 Participant release 触发
    `active -> closing` 必须由同一 Coordinator mutex/transaction 决定；
-4. Participant release 只有在 Run lease 已 fence/unbind，且该 Run 的 Runtime、CLI、Tool descendants 已有权威
-   quiescence evidence 后成立。IdleWarm Host 不属于该 Run 的活跃后代；
-5. 同一 physical execution root 存在 `closing` Window 时，任何 scope 的新 Run bind 最多等待冻结的 strict
+4. 普通 Participant release 与 final capture 只有在 Run lease 已 fence/unbind，且该 Run 的 Runtime、CLI、Tool
+   descendants 已有权威 quiescence evidence 后成立。IdleWarm Host 不属于该 Run 的活跃后代；
+5. 取消 ACK 后必须在冻结期限内等待同一后代 quiescence。期限内无法证明时，不得等待未知 terminal callback，也
+   不得捕获 final；Core 原子把该 participant 标为已释放并把旧 Window 收敛为 `unavailable`，从而允许下一 Window。
+   此处 `releasedAt` 只表示不再参与该观察窗口，不构成 Runtime 或外部效果已经停止的证据；
+6. 同一 physical execution root 存在 `closing` Window 时，任何 scope 的新 Run bind 最多等待冻结的 strict
    deadline。旧 Window 成功或不可用后立即释放；deadline 到达必须把旧 Window收敛为 unavailable 并释放，不能
    永久排队；
-6. non-Git root 直接跳过本领域，不创建 not-applicable 假对象。
+7. non-Git root 直接跳过本领域，不创建 not-applicable 假对象。
 
 Core restart 后，只要旧 Window 的结束边界不能由持久 fence/quiescence 精确证明，就必须标记 unavailable；不得在
 启动后扫描当前文件并声称是旧 final。
@@ -293,6 +296,10 @@ baseline 与 final 分别重复构造完整 synthetic tree，只有连续两次 
 - 读取错误、路径/boundary 竞态或持续不能得到两个相同 OID；
 - repository/worktree identity 或 object format 变化。
 
+若 capture/ref/diff 使用 Git 子进程，每个调用必须消费同一捕获或发布边界的剩余绝对 deadline，并在读取过程中
+限制 stdout/stderr；超时或超限必须终止并 reap 所属进程树。先无限等待、再在完整输出进入内存后检查大小不满足
+strict wall-clock 或 bounded-memory 要求。
+
 产品语义严格是 baseline `capturedAt` 与 final `capturedAt` 两个稳定点之间的净变化，不声称原子 snapshot。
 
 ## 7. Git objects 与 ref protocol
@@ -328,6 +335,9 @@ refs/rovai/w/<window-token>/f
   diff 前发现漂移使 Window unavailable；publication 后的 cleanup mismatch 只记录外部清理异常并保留 ref，不得
   反向改写已经验证并持久化的 `complete | no_changes` 结果；
 - 删除 ref 不表示 object bytes 立即删除。Rovai 不对用户仓库提供即时磁盘回收保证。
+- expected baseline/final OID 必须先写入独立持久 cleanup ledger，再尝试删除；该 ledger 不受 Window lifecycle
+  过滤。ref 已不存在是幂等成功；target 已改变、仓库不可达或执行超时都保留 expected OID、失败码和重试次数。
+  final publication 失败关闭时还必须在同一事务清空 `finalCandidateOid` 与失败的 final manifest reference。
 
 ## 8. Diff persistence
 
@@ -400,7 +410,7 @@ v1 presentation 冻结为：
 
 - 正常 complete/no_changes publication 后立即尝试 expected-OID ref cleanup；
 - startup recovery 可依据 DB candidate/ready OID 重试未完成的 compare-and-delete，但不得移动 ref、采用 ref target
-  作为 checkpoint、rescan 或执行 prune；
+  作为 checkpoint、rescan 或执行 prune；重试必须包含已 `closed` Window 的持久 cleanup ledger；
 - Camp 永久删除先走既有 Run fence/quiescence，再删除 Window rows 与 Managed Blob roots；checkpoint cleanup 是
   best-effort、有持久诊断的外部清理，用户仓库不可达不能把 Core 领域删除永久卡住；
 - Window retention 由 Core 数据/Managed Blob policy 管理，不能通过长期保留 Git ref 实现。

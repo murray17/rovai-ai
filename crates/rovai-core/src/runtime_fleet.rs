@@ -904,7 +904,7 @@ impl AgentRuntimeFleetManager {
         agent_run_id: &str,
         execution_epoch: i64,
         disposition: FleetReleaseDisposition,
-    ) {
+    ) -> bool {
         let _operation = self.operations.lock().await;
         let run_lease = RunLeaseKey {
             agent_run_id: agent_run_id.to_string(),
@@ -919,12 +919,12 @@ impl AgentRuntimeFleetManager {
                 .cloned()
         };
         let Some(process_id) = process_id else {
-            return;
+            return true;
         };
         let (state_kind, retire_after_run, host) = {
             let state = self.state.lock().await;
             let Some(entry) = state.processes.get(&process_id) else {
-                return;
+                return true;
             };
             (entry.state, entry.retire_after_run, entry.host.clone())
         };
@@ -949,15 +949,16 @@ impl AgentRuntimeFleetManager {
             let sequence = state.next_sequence();
             state.process_by_run.remove(&run_lease);
             let Some(entry) = state.processes.get_mut(&process_id) else {
-                return;
+                return true;
             };
             entry.run_lease = None;
             entry.state = FleetProcessState::IdleWarm;
             entry.idle_since = Some(Instant::now());
             entry.last_used_sequence = sequence;
             state.idle_lru.insert((sequence, process_id));
+            true
         } else {
-            self.stop_process_locked(&process_id).await;
+            self.stop_process_locked(&process_id).await
         }
     }
 

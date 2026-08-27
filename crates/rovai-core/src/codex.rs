@@ -1371,7 +1371,7 @@ impl CodexCliRuntimeAdapter {
             .cloned()
     }
 
-    pub async fn forget_agent_run(&self, agent_run_id: &str, execution_epoch: i64) {
+    pub async fn forget_agent_run(&self, agent_run_id: &str, execution_epoch: i64) -> bool {
         let runtime = {
             let mut runtimes = self.agent_run_runtimes.lock().await;
             if runtimes
@@ -1388,7 +1388,7 @@ impl CodexCliRuntimeAdapter {
         }
         self.fleet
             .release(agent_run_id, execution_epoch, FleetReleaseDisposition::Stop)
-            .await;
+            .await
     }
 
     pub async fn complete_agent_run(&self, agent_run_id: &str, execution_epoch: i64) {

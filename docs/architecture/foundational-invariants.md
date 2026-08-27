@@ -66,13 +66,20 @@ last_updated: 2026-08-27
 - Git 是对当前目录的动态能力，而不是 Camp 身份。Core 在创建、Run 启动、Git 专用操作和 Run 终止等边界重新观测 `not_git | git_valid | git_invalid`；Git 失效只关闭 Git 专用行为，不废止安全目录、协作历史或普通文件工作。
 - Workspace Change Window 是 Camp、exact execution root 与冻结 repository worktree identity scoped 的附加 Git
   观察对象；同 key 重叠 Run 共享两个稳定捕获点，结果只表示该范围的净变化，不归因给单个 Run/Agent，也不排除
-  用户编辑器、外部程序或其他 scope 写入。
+  用户编辑器、外部程序或其他 scope 写入。持久 Window key 保留 Camp 授权边界；捕获 mutex 则按
+  `canonicalExecutionRoot + repository worktree identity` 分片且不含 Camp，使不同物理工作区互不阻塞、同一物理
+  工作区的跨 Camp 边界仍串行。
 - Core DB 是 Window/OID/状态/授权与最终 Managed Blob 的长期权威。Rovai 可以向用户 Git object database 写 raw
   blob/tree，并在 `refs/rovai/` 下创建 CAS 保护的短期 GC pin，但不得修改用户 index、staged 状态、普通 ref，
   不经过 clean/LFS filter、textconv 或 external diff，也不主动 prune；ref 删除不保证 object bytes 立即消失。
 - Window capture 与 closing 始终有严格上限且 fail-open；baseline/final、身份、ref、稳定性、恢复或持久化无法证明时
   显式 unavailable，不事后扫描补猜边界，也不让普通 Run 永久排队。synthetic tree 只覆盖 exact root，no-follow
-  symlink，并把 sparse omission、nested repository 和 submodule 当作明确边界。
+  symlink，并把 sparse omission、nested repository 和 submodule 当作明确边界。Git 子进程使用剩余绝对 deadline、
+  有界 stdout/stderr 与进程树 timeout/kill/reap；取消若在期限内仍不能证明后代 quiescent，只释放观察 participant
+  并关闭旧 Window 为 unavailable，不发布 final，也不把该释放表述成 Runtime 已停止。
+- Workspace ref 清理由独立持久账本保存 expected baseline/final OID，不能依赖 Window 仍为 active。发布失败会在
+  关闭事务中清除 final candidate/manifest root 并登记清理；closed Window 的失败清理可在启动维护中幂等重试，
+  ref 已不存在视为完成，target 已改变则保留诊断且不删除。
 - AgentRun 冻结 workspace 路径及起止 Git observation 作为审计事实，并只引用参与的 `windowId`。Window worktree
   identity 只服务捕获完整性与授权，不成为 Project/导航身份；导航仍按规范目录路径分组，不引入 Project 表或
   Repository Scope。
