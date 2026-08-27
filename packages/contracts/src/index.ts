@@ -1987,7 +1987,7 @@ export interface ChannelConversationBindingView {
   version: number
 }
 
-export type ChannelQrAttemptPurpose = 'account_login' | 'member_bot_compat_registration'
+export type ChannelQrAttemptPurpose = 'account_login'
 
 export interface ChannelQrAttemptView {
   attemptId: string
@@ -2029,6 +2029,7 @@ export interface ChannelMemberBotView {
   publicationStatus: ChannelPublicationStatus
   botDisplayName: string | null
   appId: string | null
+  managementUrl: string | null
   failureCode: string | null
 }
 
@@ -2073,9 +2074,7 @@ export interface ChannelsApi {
   connect(): Promise<ChannelSettingsSnapshot>
   disconnect(): Promise<ChannelSettingsSnapshot>
   publishMemberBot(agentId: string): Promise<ChannelSettingsSnapshot>
-  publishMemberBotCompat(agentId: string): Promise<ChannelSettingsSnapshot>
   retryMemberBot(agentId: string): Promise<ChannelSettingsSnapshot>
-  disableMemberBot(agentId: string): Promise<ChannelSettingsSnapshot>
   cancelQrAttempt(attemptId: string): Promise<ChannelSettingsSnapshot>
   createProjectBinding(input: {
     commandId: string
@@ -2794,7 +2793,6 @@ export type CoreMethod =
   | 'channels.feishu.publicationIntent.create'
   | 'channels.feishu.publicationIntent.advance'
   | 'channels.feishu.memberBot.upsert'
-  | 'channels.feishu.memberBot.disable'
   | 'channels.conversations.bind'
   | 'channels.membership.add'
   | 'channels.membership.remove'

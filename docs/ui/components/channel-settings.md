@@ -33,8 +33,7 @@ Dialog、状态点和间距复用现有组件语法。
 
 账号二维码使用 modal Dialog，标题“登录飞书开放平台”，并明确“本次不会创建应用、读取 App Secret 或发布 Bot”。
 它展示 preparing、awaiting scan、scan confirmed、identity inspection、过期/错误和取消；关闭必须取消 exact attempt，
-迟到状态不再打开或更新 UI。兼容发布不伪装成账号登录 QR Dialog；它是独立次级动作，可打开飞书官方
-registration 确认窗口，并在 Session 失效时要求该队员单独扫码/确认。
+迟到状态不再打开或更新 UI。账号登录是产品中唯一的扫码流程；队员发布没有兼容扫码或平台 registration 确认入口。
 账号登录在 preparing 前展示安全存储检查，在 identity inspection 后展示安全保存；两者必须使用不同文案，不能把
 钥匙串等待描述成“读取账号”。安全存储拒绝、身份读取超时和页面失败使用中文可操作提示，不向用户显示 `unknown`
 或原始异常文本。
@@ -43,8 +42,7 @@ registration 确认窗口，并在 Session 失效时要求该队员单独扫码/
 应用说明、当前开发者账号和租户；“确认发布”后在同一 Dialog 逐步展示账号校验、创建应用、配置 Bot、权限/事件、
 发布版本、验证连接与完成。阶段主文案固定为“正在校验飞书账号… / 正在创建应用… / 正在配置 Bot… /
 正在配置权限和事件… / 正在发布版本… / 正在验证连接… / 发布完成”。普通发布不得打开飞书“创建飞书智能体应用 /
-立即创建”页或其他平台确认窗口。Session 失效/身份漂移时显示“重新连接飞书”，不自动打开兼容流程。显式“兼容
-扫码发布”必须说明每名队员可能要再次扫码/确认，并作为次级入口。
+立即创建”页或其他平台确认窗口。Session 失效/身份漂移时显示“重新连接飞书”并停止发布，不存在其他发布流程。
 
 若上次发布已冻结 App ID 但落入“远端状态待核对”，主人再次点击普通“发布”沿用同一 Dialog 与进度语言，后台核对
 并接管该 App；不显示新的创建确认，也不生成第二个 App。初始版本已发布但头像仍是旧 Rovai icon 时，同一流程可以显示
@@ -59,13 +57,16 @@ registration 确认窗口，并在 Session 失效时要求该队员单独扫码/
 | --- | --- | --- |
 | unpublished | 未发布 | 发布 |
 | provisioning | 发布中 | 禁用当前行 |
-| published | 已发布 | 管理 |
+| published | 已发布 | 飞书管理（官方应用详情链接） |
 | failed | 发布失败 / 远端状态待核对 | 重试或核对同一 App |
-| disabled | 已停用 | 重新发布同一 App |
+| disabled（历史数据状态） | 已停用 | 重新发布同一 App |
 
-管理 Dialog 显示队员身份、Bot 名称和 App ID，并提供停用。停用不声称删除飞书开放平台应用或历史消息。重新发布
-Dialog 必须显示已经冻结的 App ID，明确“不会创建或换绑其他应用”，并隐藏兼容扫码创建入口；进度中的创建阶段改为
-“正在核对应用…”。Renderer
+已发布行不打开 Rovai 管理 Dialog，也不提供停用命令。“飞书管理”是带可访问名称的外部链接，使用 Main 从该 Bot
+绑定账号的 brand 与冻结 App ID 生成的精确 `managementUrl`，以 `_blank + noreferrer noopener` 交给 Electron 在系统
+浏览器打开。链接不依赖当前 Developer Session 的连接状态；Renderer 不拼接或接受任意 URL。关闭、停用、删除等
+远端应用治理只在官方开放平台完成。
+
+重新发布 Dialog 必须显示已经冻结的 App ID，明确“不会创建或换绑其他应用”；进度中的创建阶段改为“正在核对应用…”。Renderer
 头像只从现有 `MemberAvatar` 读取；发布时 Main 独立解析同一个受控 `avatarRef` 并上传 exact icon rendition，渠道页不
 解析或接收本机头像路径。非空头像引用无法安全读取时，发布失败而不是展示或上传另一身份。
 
@@ -90,7 +91,7 @@ Dialog 必须显示已经冻结的 App ID，明确“不会创建或换绑其他
 
 - 首次读取使用页面内 status；无 Snapshot 时提供重试；已有 Snapshot 刷新失败保留旧内容并显示 alert；
 - 所有异步操作使用稳定 busy key，防止双击；失败后恢复原动作；
-- Dialog 使用 Radix focus trap、Escape/关闭、可见 label、描述和 footer actions；危险停用/归档与普通主动作分层；
+- Dialog 使用 Radix focus trap、Escape/关闭、可见 label、描述和 footer actions；危险归档与普通主动作分层；
 - 状态不仅靠颜色，始终有文本；loading/failed 通过 `role=status/alert` 公布；
 - Tab 顺序按页面视觉顺序，列表按钮和 select 均可键盘操作，焦点不因 Snapshot 更新跳到页面起点。
 

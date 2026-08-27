@@ -22,7 +22,6 @@ Renderer 渠道设置
           ├─ OpenPlatformApiClient：同源控制台创建、配置、发布与回读
           ├─ Member Bot Provisioner：身份复核与发布状态机
           ├─ OS safeStorage：每 Agent App Secret
-          ├─ Compat Provisioner：显式兼容注册确认
           ├─ 每 App WebSocket
           ├─ 入站规范化、群 Bot roster 观测
           └─ 领取并发送 Core ChannelDelivery
@@ -74,10 +73,12 @@ safeStorage、验证 Bot WebSocket 并完成 intent。普通流程始终保持�
 承接同一 intent 的 `version_published`，`connection_verified/completed` 又必须回指 exact published Bot。已有 Bot 的
 Core 写路径只更新连接回读、显示字段和 lifecycle status，不更新 App、账号或 credential identity，也不存在换绑命令。
 
-停用只把 Bot 置为 `disabled`、关闭连接并删除本机 Secret，原 App ID 仍属于该队员。重新发布要求连接原开发者账号，
-把同一 completed intent 重新推进到 `session_verified`，随后由 console reconciliation 核对原 App、重读 Secret、配置并
-验证后回到 `completed`；状态机中的 `app_created` 在这条路径表示原 App 已确认。兼容注册、新 intent 和第二次 create App
-均不可用于重新发布。发布状态为 `published` 时再次调用普通 publish 直接拒绝；凭据丢失的显式 retry 也只核对同一 App。
+Rovai 不提供 Bot 管理、停用、关闭、删除或换绑命令。已发布行只提供官方开放平台应用详情入口；远端应用的停用、
+删除和其他治理由主人在飞书/Lark 开放平台完成。历史数据库中的 `disabled` 仅作为历史读取状态保留：主人连接原开发者
+账号后，可以把同一 completed intent 重新推进到 `session_verified`，由 console reconciliation 核对原 App、重读
+Secret、配置并验证后回到 `completed`；状态机中的 `app_created` 在这条路径表示原 App 已确认。新 intent 和第二次
+create App 均不可用于恢复。发布状态为 `published` 时再次调用普通 publish 直接拒绝；凭据丢失的显式 retry 也只核对
+同一 App。
 
 头像来源与 `AgentProfile.avatarRef` 使用同一受控身份：内置引用由 Main 读取打包内对应 `icon-192.png`，managed 引用
 通过既有 `MemberAvatarAssetService` 校验 manifest、大小、尺寸和 SHA-256 后读取 icon rendition。Main 不接收 Renderer
@@ -94,17 +95,16 @@ exact origin/path、严格响应结构、秘密不出 Main、创建后 read-back
 协议变化不得降级为确认页、SDK 注册或另一条静默创建路径。真实租户仍须回归“连接不增 App、普通发布不弹平台确认、
 配置完整且能建立长连接”。
 
-`/oauth/v1/app/registration + verification_uri_complete + showRegistrationConfirmation + pollRegistration` 整体只属于
-`FeishuCompatMemberBotProvisioner`，由主人显式选择兼容模式时使用。兼容确认入口只接受官方精确 origin 上的
-`/page/launcher | /page/cli` 与非空 `user_code`；相似域名、非 HTTPS、用户信息、端口和其他路径均在导航前拒绝。
-正常失败不得自动进入兼容流程，兼容流程也不覆盖 Developer Identity。创建结果不确定、或已取得远端 App ID 但凭据
+旧的 `/oauth/v1/app/registration + verification_uri_complete + showRegistrationConfirmation + pollRegistration`
+兼容协议已经从 Provisioner、Developer Session、typed API、IPC 与 Renderer 全部移除。console 发布失败只返回可诊断
+错误，不得打开注册确认页、要求队员再次扫码，或进入另一条创建路径。创建结果不确定、或已取得远端 App ID 但凭据
 尚未安全提交时，intent 进入
 `failed_unknown_remote_state`，自动重试被锁住，避免重复创建 App。Main 启动时只从持久 intent 判断可恢复/待人工核对，
 不从 Renderer 状态推断。
 
 当该未知 intent 已冻结 `remoteAppId` 时，主人再次点击普通“发布”是显式 reconciliation，而不是新的 create attempt。
-Host 复核同一 Developer Identity，先对冻结 App 读取 Secret、版本列表/detail 与 manifest；不得创建 App、改变 App ID 或
-进入兼容流程。若最新 published 仍为初始 `1.0.0` 且队员有可用受控头像，reconciliation 会把同一头像上传到同一 App、
+Host 复核同一 Developer Identity，先对冻结 App 读取 Secret、版本列表/detail 与 manifest；不得创建 App 或改变 App ID。
+若最新 published 仍为初始 `1.0.0` 且队员有可用受控头像，reconciliation 会把同一头像上传到同一 App、
 重放幂等 manifest 配置，并创建或复用 `1.0.1` 头像修复版本后发布与回读。若 `1.0.1` 已 published，则只回读验证，
 不重复上传或发布。完成证明后才保存 credential、验证 WebSocket，并让同一 intent 从
 `failed_unknown_remote_state` 进入 `credentials_read` 后继续完成；Core 拒绝更换 App ID。缺少冻结 App ID、头像读取失败
@@ -173,7 +173,7 @@ union ID、tenant key、chat ID 或 external message ID。
 
 Host 对父群中每个已发布 Bot 调用 `isInChat`，只有完整快照才提交 Core roster generation。普通群 Camp 首次创建
 使用当前全部 present Bot；以后完整快照通过 v1.29 已有 `camp.member.add/remove`、`feishu` source binding 和 exact
-reconciliation generation 同步。Bot 移出群或被本机停用都走同一原子 cutover/reconciliation。
+reconciliation generation 同步。Bot 移出群走同一原子 cutover/reconciliation。
 
 话题 Camp 首次只加入当前显式 mention 的队员，父群增加 Bot 不污染既有话题。话题内显式 mention 或 A2A exact
 target 需要一个尚未加入的队员时，Core 只有在该队员 Bot 仍 published 且 present 于父群 roster 时，才先通过同一

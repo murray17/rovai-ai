@@ -1,5 +1,4 @@
 import { readFile } from 'node:fs/promises'
-import { gzipSync } from 'node:zlib'
 import rovaiMemberBotIconPath from '../../../../build/icon.png?asset'
 import type {
   FeishuDeveloperPortalSession,
@@ -20,7 +19,6 @@ export type MemberBotProvisioningStep =
   | 'version_published'
 
 export interface MemberBotAvatarSource {
-  publicUrl?: string
   pngBytes?: Uint8Array
   width?: number
   height?: number
@@ -66,8 +64,7 @@ export interface FeishuMemberBotProvisioner {
   reconcile?(input: ReconcileMemberBotInput): Promise<ProvisionedMemberBot>
 }
 
-export const FEISHU_MEMBER_BOT_ADDONS = {
-  preset: false,
+const MEMBER_BOT_MANIFEST_REQUIREMENTS = {
   scopes: {
     tenant: [
       'im:message',
@@ -87,22 +84,6 @@ export const FEISHU_MEMBER_BOT_ADDONS = {
     }
   }
 } as const
-
-type RegistrationBeginResponse = {
-  device_code?: string
-  verification_uri_complete?: string
-  expires_in?: number
-  interval?: number
-  error?: string
-  error_description?: string
-}
-
-type RegistrationPollResponse = {
-  client_id?: string
-  client_secret?: string
-  error?: string
-  error_description?: string
-}
 
 type AvatarPng = {
   pngBytes: Uint8Array
@@ -129,8 +110,6 @@ type WebSessionProvisionerOptions = {
   createClient?: (session: FeishuOpenPlatformSession) => OpenPlatformClient
   readDefaultAvatar?: () => Promise<AvatarPng>
 }
-
-const REGISTRATION_PATH = '/oauth/v1/app/registration'
 
 export class FeishuWebSessionMemberBotProvisioner implements FeishuMemberBotProvisioner {
   readonly #developerSession: FeishuDeveloperPortalSession
@@ -188,8 +167,8 @@ export class FeishuWebSessionMemberBotProvisioner implements FeishuMemberBotProv
         appName,
         appDescription: input.appDescription,
         avatarUrl: created.avatarUrl,
-        tenantScopes: FEISHU_MEMBER_BOT_ADDONS.scopes.tenant,
-        tenantEvents: FEISHU_MEMBER_BOT_ADDONS.events.items.tenant
+        tenantScopes: MEMBER_BOT_MANIFEST_REQUIREMENTS.scopes.tenant,
+        tenantEvents: MEMBER_BOT_MANIFEST_REQUIREMENTS.events.items.tenant
       }
       await client.configureScopes(
         remoteAppId,
@@ -276,8 +255,8 @@ export class FeishuWebSessionMemberBotProvisioner implements FeishuMemberBotProv
           appName: consoleAppName(input.appName),
           appDescription: input.appDescription,
           avatarUrl,
-          tenantScopes: FEISHU_MEMBER_BOT_ADDONS.scopes.tenant,
-          tenantEvents: FEISHU_MEMBER_BOT_ADDONS.events.items.tenant
+          tenantScopes: MEMBER_BOT_MANIFEST_REQUIREMENTS.scopes.tenant,
+          tenantEvents: MEMBER_BOT_MANIFEST_REQUIREMENTS.events.items.tenant
         }
         await client.enableBot(input.remoteAppId, input.signal)
         input.onProgress?.('bot_configured', input.remoteAppId)
@@ -315,8 +294,8 @@ export class FeishuWebSessionMemberBotProvisioner implements FeishuMemberBotProv
           appId: input.remoteAppId,
           versionId: publishedVersion.versionId,
           configuration: {
-            tenantScopes: FEISHU_MEMBER_BOT_ADDONS.scopes.tenant,
-            tenantEvents: FEISHU_MEMBER_BOT_ADDONS.events.items.tenant
+            tenantScopes: MEMBER_BOT_MANIFEST_REQUIREMENTS.scopes.tenant,
+            tenantEvents: MEMBER_BOT_MANIFEST_REQUIREMENTS.events.items.tenant
           },
           signal: input.signal
         })
@@ -340,89 +319,6 @@ export class FeishuWebSessionMemberBotProvisioner implements FeishuMemberBotProv
       if (platformSessionOpened && !sessionPersisted) {
         await this.#developerSession.persist().catch(() => undefined)
       }
-    }
-  }
-}
-
-export class FeishuCompatMemberBotProvisioner implements FeishuMemberBotProvisioner {
-  readonly #developerSession: FeishuDeveloperPortalSession
-
-  constructor(developerSession: FeishuDeveloperPortalSession) {
-    this.#developerSession = developerSession
-  }
-
-  async create(input: Parameters<FeishuMemberBotProvisioner['create']>[0]): Promise<ProvisionedMemberBot> {
-    if (input.signal?.aborted) throw provisioningError('feishu_provisioning_cancelled', 'none')
-    const identity = await this.#developerSession.requireExpectedIdentity(
-      input.expectedDeveloperIdentity
-    )
-    input.onProgress?.('session_verified')
-
-    const abort = new AbortController()
-    const onAbort = (): void => abort.abort()
-    input.signal?.addEventListener('abort', onAbort, { once: true })
-    const baseUrl = identity.brand === 'lark'
-      ? 'https://accounts.larksuite.com'
-      : 'https://accounts.feishu.cn'
-    let registrationPage: Awaited<ReturnType<
-      FeishuDeveloperPortalSession['showRegistrationConfirmation']
-    >> | null = null
-    try {
-      const begin = await requestRegistration<RegistrationBeginResponse>(baseUrl, {
-        action: 'begin',
-        archetype: 'PersonalAgent',
-        auth_method: 'client_secret',
-        request_user_info: 'open_id'
-      }, abort.signal)
-      if (!begin.device_code || !begin.verification_uri_complete) {
-        throw provisioningError(begin.error || 'feishu_registration_begin_failed', 'none')
-      }
-      const verificationUrl = registrationUrl(begin.verification_uri_complete, input)
-      registrationPage = await this.#developerSession.showRegistrationConfirmation({
-        url: verificationUrl,
-        signal: abort.signal
-      })
-      const pageClosed = registrationPage.closed.then((reason) => {
-        abort.abort()
-        if (reason === 'session_expired') {
-          throw provisioningError('feishu_developer_session_expired', 'none')
-        }
-        throw provisioningError('feishu_provisioning_cancelled', 'none')
-      })
-      const result = await Promise.race([
-        pollRegistration(
-          baseUrl,
-          begin.device_code,
-          begin.interval ?? 5,
-          begin.expires_in ?? 600,
-          abort.signal
-        ),
-        pageClosed
-      ])
-      input.onProgress?.('app_created', result.client_id)
-      input.onProgress?.('bot_configured', result.client_id)
-      input.onProgress?.('permissions_events_configured', result.client_id)
-      input.onProgress?.('version_published', result.client_id)
-      await this.#developerSession.persist()
-      return {
-        appId: result.client_id,
-        appSecret: result.client_secret,
-        botDisplayName: input.appName,
-        publishedVersionId: null
-      }
-    } catch (error) {
-      if (isProvisioningError(error)) throw error
-      if (abort.signal.aborted || input.signal?.aborted) {
-        throw provisioningError('feishu_provisioning_cancelled', 'none')
-      }
-      const code = provisioningErrorCode(error, 'feishu_registration_failed')
-      const remoteState = code === 'access_denied' || registrationPage === null
-        ? 'none'
-        : 'unknown'
-      throw provisioningError(code, remoteState)
-    } finally {
-      input.signal?.removeEventListener('abort', onAbort)
-      registrationPage?.close()
     }
   }
 }
@@ -454,100 +350,6 @@ export function isUnknownRemoteProvisioningError(error: unknown): boolean {
 }
 
 type ProvisioningError = Error & { code: string; remoteState: 'none' | 'unknown' }
-
-async function requestRegistration<T>(
-  baseUrl: string,
-  fields: Record<string, string>,
-  signal: AbortSignal
-): Promise<T> {
-  let response: Response
-  try {
-    response = await fetch(`${baseUrl}${REGISTRATION_PATH}`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams(fields),
-      signal
-    })
-  } catch (error) {
-    if (signal.aborted) throw provisioningError('feishu_provisioning_cancelled', 'none')
-    throw error
-  }
-  const payload = await response.json() as T
-  if (!response.ok && !(payload as RegistrationPollResponse).error) {
-    throw provisioningError(`feishu_registration_http_${response.status}`, 'unknown')
-  }
-  return payload
-}
-
-async function pollRegistration(
-  baseUrl: string,
-  deviceCode: string,
-  initialIntervalSeconds: number,
-  expiresInSeconds: number,
-  signal: AbortSignal
-): Promise<{ client_id: string; client_secret: string }> {
-  const deadline = Date.now() + expiresInSeconds * 1_000
-  let intervalMs = Math.max(1, initialIntervalSeconds) * 1_000
-  while (Date.now() < deadline) {
-    await abortableDelay(intervalMs, signal)
-    const result = await requestRegistration<RegistrationPollResponse>(baseUrl, {
-      action: 'poll',
-      device_code: deviceCode
-    }, signal)
-    if (result.client_id && result.client_secret) {
-      return { client_id: result.client_id, client_secret: result.client_secret }
-    }
-    if (result.error === 'authorization_pending' || !result.error) continue
-    if (result.error === 'slow_down') {
-      intervalMs += 5_000
-      continue
-    }
-    if (result.error === 'access_denied') {
-      throw provisioningError('access_denied', 'none')
-    }
-    throw provisioningError(result.error ?? 'feishu_registration_failed', 'unknown')
-  }
-  throw provisioningError('expired_token', 'unknown')
-}
-
-function registrationUrl(
-  rawUrl: string,
-  input: Parameters<FeishuMemberBotProvisioner['create']>[0]
-): string {
-  const url = new URL(rawUrl)
-  url.searchParams.set('from', 'sdk')
-  url.searchParams.set('source', 'node-sdk/rovai-ai')
-  url.searchParams.set('tp', 'sdk')
-  url.searchParams.set('createOnly', 'true')
-  url.searchParams.set('name', input.appName)
-  url.searchParams.set('desc', input.appDescription)
-  if (input.avatarSource?.publicUrl) {
-    url.searchParams.append('avatar', input.avatarSource.publicUrl)
-  }
-  url.searchParams.set('addons', encodeAddons(FEISHU_MEMBER_BOT_ADDONS))
-  return url.toString()
-}
-
-function encodeAddons(value: unknown): string {
-  return gzipSync(Buffer.from(JSON.stringify(value), 'utf8'))
-    .toString('base64url')
-}
-
-function abortableDelay(milliseconds: number, signal: AbortSignal): Promise<void> {
-  if (signal.aborted) return Promise.reject(provisioningError('feishu_provisioning_cancelled', 'none'))
-  return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => {
-      signal.removeEventListener('abort', onAbort)
-      resolve()
-    }, milliseconds)
-    timer.unref?.()
-    const onAbort = (): void => {
-      clearTimeout(timer)
-      reject(provisioningError('feishu_provisioning_cancelled', 'none'))
-    }
-    signal.addEventListener('abort', onAbort, { once: true })
-  })
-}
 
 function provisioningError(code: string, remoteState: 'none' | 'unknown'): ProvisioningError {
   const error = new Error(code) as ProvisioningError

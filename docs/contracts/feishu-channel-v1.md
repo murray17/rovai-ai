@@ -20,7 +20,7 @@ ChannelTurnRequest、群 roster 和 ChannelDelivery 的字段与状态语义。C
 | --- | --- |
 | ProjectBinding create/update/archive | `local_user` |
 | 渠道会话 bind/switch | `local_user` |
-| 连接/断开账号、发布/停用队员 Bot、选择兼容发布 | 本机主人经 typed Desktop API |
+| 连接/断开账号、发布队员 Bot | 本机主人经 typed Desktop API |
 | inbound observe/finalize、roster、Host tick、delivery settle | `feishu-channel-host` System component |
 | Camp membership source mutation | `channel-membership-sync` + exact `feishu` source binding/generation |
 
@@ -124,14 +124,14 @@ remoteAppId` 成为不可换绑身份，`credentialRef` 在首次写入后同样
 数据库主键和唯一索引只是约束的最后防线，不替代这些状态转换。
 
 在尚未取得 `remoteAppId` 的 `failed_recoverable` 之后可以开始一次新的首次发布尝试；一旦任何 intent 已冻结
-`remoteAppId`，后续发布、核对、重试和恢复都只能沿用该 App。Bot 生命周期为
-`unpublished -> published -> disabled -> published`，最后一步使用原 completed intent 进入
-`session_verified -> app_created -> ... -> completed`，其中 `app_created` 表示已核对原 App 身份，不表示新建。
-重新发布要求当前 Developer Session 仍是原 `accountId`，通过普通 console reconciliation 读取同一 App Secret、配置、
-版本并验证连接；不得进入 compatibility registration。停用删除本机 Secret 和连接，但不删除、释放或允许替换 App ID。
+`remoteAppId`，后续发布、核对、重试和恢复都只能沿用该 App。当前可写生命周期只有
+`unpublished -> published`；Rovai 不提供管理、停用、关闭、删除或换绑命令。历史数据库中的 `disabled` 仍可读取，且
+只允许使用原 completed intent 进入 `session_verified -> app_created -> ... -> completed` 恢复为 `published`，其中
+`app_created` 表示已核对原 App 身份，不表示新建。恢复要求当前 Developer Session 仍是原 `accountId`，通过普通
+console reconciliation 读取同一 App Secret、配置、版本并验证连接。远端应用生命周期由主人在官方开放平台管理。
 
 Intent 冻结 `agentId + accountId + expectedUserIdDigest + expectedTenantId + requestedAppName + provisioningMode`，所有
-推进带 exact version。普通 `developer_session` 模式必须执行以下顺序，且不得进入 compatibility protocol：
+推进带 exact version。唯一的 `developer_session` 模式必须执行以下顺序：
 
 ```text
 requireExpectedIdentity
@@ -159,18 +159,16 @@ release 每个 attempt 最多提交一次，随后除取消和 Developer Session
 Version。任何回读的 published 立即收敛成功，rejected 立即失败；未在 deadline 内收敛才返回已保存的 release failure
 或 publish timeout。不得因 release 返回 400 而覆盖随后已经回读证明的 published 状态，也不得重发 release。
 
-`FeishuCompatMemberBotProvisioner` 独占
-`/oauth/v1/app/registration + verification_uri_complete + showRegistrationConfirmation + pollRegistration`。它只由
-主人显式选择 `compat_registration` 时进入，可能要求每名队员单独扫码/确认，且结果不覆盖 Developer Identity。
-官方确认 URL 只接受 `https://open.feishu.cn | open.larksuite.com` 上的 `/page/launcher | /page/cli` 与非空
-`user_code`；不得放宽到相似域、任意飞书路径、HTTP、显式端口或 URL userinfo。正常失败不得静默切换兼容模式。
+旧的 `/oauth/v1/app/registration + verification_uri_complete + showRegistrationConfirmation + pollRegistration`
+协议不属于当前产品：不存在对应 Provisioner、Developer Session 确认窗口、typed API、IPC 或 Renderer 入口。任何
+console 失败都不得要求队员再次扫码、打开平台创建确认页或切换到另一条创建路径。
 
-一旦 intent 持有 `remoteAppId`，包括失败、完成、停用和重新发布在内的后续状态都不得改成另一个 App。App Secret 写入失败，或网络中断导致无法证明远端是否
+一旦 intent 持有 `remoteAppId`，包括失败、完成、历史 `disabled` 恢复和重新发布在内的后续状态都不得改成另一个 App。App Secret 写入失败，或网络中断导致无法证明远端是否
 创建成功时，写 `failed_unknown_remote_state + failureCode` 并锁住自动再创建；持久 credential 已存在时才允许
 `failed_recoverable` 继续验证同一 App。Main 重启按这些事实收敛，不从 UI 临时进度推断。
 
 主人对含冻结 `remoteAppId` 的 `failed_unknown_remote_state` 再次执行普通发布时，必须进入同一 intent 的显式
-reconciliation，不得创建新 intent、新 App、更换 `remoteAppId` 或进入兼容模式。它先复核 exact Developer Identity，
+reconciliation，不得创建新 intent、新 App 或更换 `remoteAppId`。它先复核 exact Developer Identity，
 再读取冻结 App 的 Secret、版本列表/detail 与 manifest。最新 published 为 `1.0.0` 且当前队员头像可用时，允许且只允许
 针对同一 App 执行头像修复：upload 当前受控 icon、重放幂等 manifest 配置、创建或复用 `1.0.1`、commit/release 并回读。
 `1.0.1` 已 published 时不得重复 upload/configure/create-version/commit/release。published status、目标头像、完整
@@ -181,7 +179,7 @@ Bot/scopes/events/WebSocket 配置同时成立后，才写 credential 并允许 
 `icon-192.png`；managed 引用必须经 Main 受管头像存储的 manifest、尺寸、长度与 SHA-256 校验后读取 icon rendition。
 非空引用未知、缺失或损坏返回 `feishu_member_bot_avatar_ref_invalid | feishu_member_bot_avatar_unavailable`，不得回退成
 其他身份。只有 `avatarRef=null` 使用打包内受控 Rovai App icon。上传后的 URL 必须写入 manifest `avatar_url` 并纳入
-发布回读验证；Renderer 与 Core 都不接收本地路径。兼容模式的 avatar preset 仍只能使用确认页可访问的 URL。
+发布回读验证；Renderer 与 Core 都不接收本地路径。
 
 Bot 只有 WebSocket 首次握手与 identity 回读成功、credential 已写入 safeStorage 且 Core upsert 成功后才成为
 `published`。Main 启动时为所有 published Bot 读取 exact credential 并独立恢复长连接；单连接失败只改变该 Bot
@@ -319,10 +317,12 @@ identity 和 Core transport aggregation阻止再次触发。
 
 ## 8. Snapshot 与恢复
 
-Core Host snapshot schema 1 包含 Developer Identity account、member bots、publication intents、ProjectBindings、
+Core Host snapshot schema 1 包含 Developer Identity account、带绑定账号 brand 的 member bots、publication intents、ProjectBindings、
 unbound/bound conversations，以及仅供 Main 的 `transportConversations` 与 `pendingAggregates`。Main 对 Renderer
-投影 schema 3，只保留账号显示字段、每 Bot 状态和当前 provisioning 进度，必须删除后两项、原始 userId 与所有
-credential refs。
+投影 schema 3，只保留账号显示字段、每 Bot 状态、当前 provisioning 进度，以及由绑定 brand 和冻结 App ID 生成的
+`managementUrl`。该 URL 只能是 `https://open.feishu.cn/app/{encodedAppId}/baseinfo` 或
+`https://open.larksuite.com/app/{encodedAppId}/baseinfo`；Renderer 不接收任意管理 URL。投影必须删除 Host-only 后两项、
+原始 userId 与所有 credential refs。
 
 启动恢复依次：恢复所有 published Bot 长连接；周期性重取已知父群 roster；finalize 已 ready 的 collecting
 aggregate；Host tick 终结超时 aggregate、投影 request output、完成 terminal request、提升 FIFO 并领取 Outbox。

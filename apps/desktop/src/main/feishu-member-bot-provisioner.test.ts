@@ -4,7 +4,6 @@ import type {
   FeishuOpenPlatformSession
 } from './feishu-developer-session'
 import {
-  FeishuCompatMemberBotProvisioner,
   FeishuWebSessionMemberBotProvisioner,
   isUnknownRemoteProvisioningError
 } from './feishu-member-bot-provisioner'
@@ -75,7 +74,6 @@ describe('Feishu Web Session member Bot provisioner', () => {
     expect(portal.openPlatformSession).toHaveBeenCalledWith(expect.objectContaining({
       expectedIdentity: { userId: 'owner-user', tenantId: 'tenant-1' }
     }))
-    expect(portal.showRegistrationConfirmation).not.toHaveBeenCalled()
     expect(client.uploadAppIcon).toHaveBeenCalledWith(expect.objectContaining({
       pngBytes: memberAvatar,
       width: 192,
@@ -140,7 +138,6 @@ describe('Feishu Web Session member Bot provisioner', () => {
       appVersion: '1.0.1',
       reuseExisting: true
     }))
-    expect(portal.showRegistrationConfirmation).not.toHaveBeenCalled()
   })
 
   it('keeps reconciliation idempotent after the avatar repair version is published', async () => {
@@ -198,7 +195,6 @@ describe('Feishu Web Session member Bot provisioner', () => {
 
     expect(portal.openPlatformSession).not.toHaveBeenCalled()
     expect(createClient).not.toHaveBeenCalled()
-    expect(portal.showRegistrationConfirmation).not.toHaveBeenCalled()
   })
 
   it('marks a lost console create response as unknown remote state', async () => {
@@ -259,73 +255,6 @@ describe('Feishu Web Session member Bot provisioner', () => {
   })
 })
 
-describe('Feishu compatibility member Bot provisioner', () => {
-  it('owns the registration endpoint, confirmation page and polling protocol', async () => {
-    vi.useFakeTimers()
-    const confirmationUrls: string[] = []
-    const portal = fakePortal({
-      async showRegistrationConfirmation({ url }) {
-        confirmationUrls.push(url)
-        return { close: vi.fn(), closed: new Promise(() => undefined) }
-      }
-    })
-    const fetchMock = vi.fn()
-      .mockResolvedValueOnce(jsonResponse({
-        device_code: 'device-1',
-        verification_uri_complete: 'https://open.feishu.cn/page/cli?user_code=public-fixture',
-        interval: 0,
-        expires_in: 30
-      }))
-      .mockResolvedValueOnce(jsonResponse({
-        client_id: 'cli_compat',
-        client_secret: 'secret-compat'
-      }))
-    vi.stubGlobal('fetch', fetchMock)
-    const promise = new FeishuCompatMemberBotProvisioner(portal).create({
-      publicationIntentId: 'intent-compat',
-      agentId: 'agent-a',
-      appName: '叮叮',
-      appDescription: 'Rovai AI 队员 · 游学者',
-      expectedDeveloperIdentity: { userId: 'owner-user', tenantId: 'tenant-1' }
-    })
-
-    await vi.advanceTimersByTimeAsync(1_000)
-    const result = await promise
-
-    expect(result).toMatchObject({ appId: 'cli_compat', appSecret: 'secret-compat' })
-    expect(fetchMock).toHaveBeenCalledTimes(2)
-    expect(String(fetchMock.mock.calls[0]?.[0])).toContain('/oauth/v1/app/registration')
-    expect(confirmationUrls).toHaveLength(1)
-    const confirmation = new URL(confirmationUrls[0])
-    expect(confirmation.searchParams.get('createOnly')).toBe('true')
-    expect(confirmation.searchParams.get('name')).toBe('叮叮')
-    expect(confirmation.searchParams.get('addons')).toBeTruthy()
-    expect(portal.openPlatformSession).not.toHaveBeenCalled()
-  })
-
-  it('treats a redirect to login as an expired compatibility session', async () => {
-    const portal = fakePortal({
-      async showRegistrationConfirmation() {
-        return { close: vi.fn(), closed: Promise.resolve('session_expired' as const) }
-      }
-    })
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse({
-      device_code: 'device-1',
-      verification_uri_complete: 'https://open.feishu.cn/page/cli?user_code=public-fixture',
-      interval: 5,
-      expires_in: 30
-    })))
-
-    await expect(new FeishuCompatMemberBotProvisioner(portal).create({
-      publicationIntentId: 'intent-compat',
-      agentId: 'agent-a',
-      appName: '叮叮',
-      appDescription: 'Rovai AI 队员 · 游学者',
-      expectedDeveloperIdentity: { userId: 'owner-user', tenantId: 'tenant-1' }
-    })).rejects.toThrow('feishu_developer_session_expired')
-  })
-})
-
 function fakePortal(overrides: Partial<FeishuDeveloperPortalSession> = {}): FeishuDeveloperPortalSession {
   return {
     beginLogin: vi.fn(overrides.beginLogin ?? (async () => developerIdentity())),
@@ -336,12 +265,6 @@ function fakePortal(overrides: Partial<FeishuDeveloperPortalSession> = {}): Feis
     disconnect: vi.fn(overrides.disconnect ?? (async () => undefined)),
     openPlatformSession: vi.fn(
       overrides.openPlatformSession ?? (async () => openPlatformSession())
-    ),
-    showRegistrationConfirmation: vi.fn(
-      overrides.showRegistrationConfirmation ?? (async () => ({
-        close: vi.fn(),
-        closed: new Promise<'closed' | 'session_expired'>(() => undefined)
-      }))
     ),
     persist: vi.fn(overrides.persist ?? (async () => undefined))
   }
@@ -404,12 +327,4 @@ function developerIdentity() {
     tenantId: 'tenant-1',
     tenantName: '星海科技'
   }
-}
-
-function jsonResponse(value: unknown): Response {
-  return {
-    ok: true,
-    status: 200,
-    json: vi.fn(async () => value)
-  } as unknown as Response
 }

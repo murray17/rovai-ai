@@ -12,8 +12,8 @@ last_updated: 2026-08-27
 # Rovai-ai v1.30：飞书队员 Bot 与 Camp 渠道
 
 > 当前状态：Core、Migration、Electron Host、Renderer 与本地自动化已完成账号/发布生命周期纠偏。连接只建立
-> Developer Web Session；普通发布经同一 Session 直连开放平台 console API，不显示二维码或飞书创建确认页；旧
-> application registration 协议仅为显式兼容路径。真实飞书租户的“连接不增 App、普通发布不弹确认页”仍是发布
+> Developer Web Session；发布经同一 Session 直连开放平台 console API，不显示二维码或飞书创建确认页；旧
+> application registration 协议及其 API/交互已经退役。真实飞书租户的“连接不增 App、发布不弹确认页”仍是发布
 > 环境验收项，不由本地自动化代替。
 
 前置版本：[v1.29 Camp 动态队员管理](../v1.29/README.md)已按完成事实转为 historical。
@@ -37,9 +37,9 @@ last_updated: 2026-08-27
   不回放旧消息，发送者必须重新发送；
 - Feishu Host 用独立 Web Session 登录并展示真实 user/tenant；普通队员发布从同一 Electron Session 取得 console
   bootstrap，经 `OpenPlatformApiClient` 创建应用、读取 Secret、启用 Bot、配置 scopes/events/callback WebSocket、
-  上传当前队员受控头像、创建/发布版本并回读验证。旧 registration/确认/poll 只在显式兼容模式使用。Session Cookie 与独立 App credential
-  分开加密，账号切换/断开不迁移、停用或删除已发布 Bot，单连接故障隔离，重启恢复 published Bot 与 publication
-  intent；release 错误后继续以 version detail 收敛。每名队员的首个 App ID 由 Core 状态机永久冻结，完成、停用、凭据
+  上传当前队员受控头像、创建/发布版本并回读验证。旧 registration/确认/poll 实现及其 typed API/IPC/Renderer 入口已删除。Session Cookie 与独立 App credential
+  分开加密，账号切换/断开不迁移、关闭或删除已发布 Bot，单连接故障隔离，重启恢复 published Bot 与 publication
+  intent；release 错误后继续以 version detail 收敛。每名队员的首个 App ID 由 Core 状态机永久冻结，完成、历史 disabled 恢复、凭据
   丢失和 unknown recovery 都只核对并恢复同一 App，不存在换绑或第二次创建；初始版本头像错误时在同一 App 发布幂等
   `1.0.1` 修复版本；
 - 私聊按 receiving App 隔离；普通群一个 Camp；话题按 canonical topic 一个 Camp。群/话题只有显式 mention
@@ -56,19 +56,20 @@ last_updated: 2026-08-27
   和 A2A exact need 加入，不污染历史话题；
 - ChannelDelivery Outbox 提供唯一状态卡、admitted 原位更新、实际作者 Bot 输出、attention、lease、retry、终态和
   重启恢复。飞书失败不回滚已提交 CampMessage；
-- 设置页按 Rovai 现有 Porcelain/Steel 视觉实现连接、队员 Bot、项目绑定、待绑定/已绑定会话、二维码、管理和错误
-  状态；Renderer 不接触 Secret 或 Host-only transport facts。
+- 设置页按 Rovai 现有 Porcelain/Steel 视觉实现连接、队员 Bot、项目绑定、待绑定/已绑定会话、账号二维码和错误
+  状态；已发布 Bot 只提供按绑定 brand 生成的官方应用详情链接，不再提供 Rovai 管理/停用入口；Renderer 不接触
+  Secret 或 Host-only transport facts。
 
 ## 非目标与诚实边界
 
 - 不接入钉钉、Telegram 等其他渠道；
 - 不让同一 Camp 多个根 CampTurn 并行，不从自由文本/普通 reply 推断 continuation；
 - 不同步未 mention 群历史，不让 Bot 回推触发 A2A；
-- 不自动删除飞书开放平台应用；停用只关闭 Rovai 绑定与本地 credential；
+- 不在 Rovai 内提供远端应用关闭、停用或删除；主人通过官方开放平台应用详情页治理；
 - 不把开放平台 console API 声称为公开稳定合同；页面 bootstrap 或 endpoint 变化必须在隔离 client 中 fail closed，
   不得静默回退到确认页或第二条创建路径；
 - 普通发布上传 `AgentProfile.avatarRef` 对应的受控 icon rendition；只有无头像引用时使用 Rovai App icon。非空引用无法
-  安全读取时 fail closed，不把路径交给 Renderer 或飞书；兼容 avatar preset 仍只接受确认页可访问的 URL；
+  安全读取时 fail closed，不把路径交给 Renderer 或飞书；
 - 当前消息附件一期只冻结名称/类型摘要，不下载为 Camp Attachment；公开输出附件也不回传图片/文件，Outbox
   只发送状态卡、文本和卡片；
 - Core 没有权威公开 delta 时，飞书只显示处理中与最终已提交 CampMessage，不转发 Runtime 原始 stdout/推理。
@@ -83,7 +84,7 @@ ExternalQuote 的确定性 agent projection。Bootstrap、Session Charter、sect
 ## 验收
 
 实施与证据由[实施计划](implementation-plan.md)维护。仓库内完成门槛包括 v112→v114 升级、Developer Identity/
-publication intent、队员 App 身份冻结/停用后同 App 恢复、连接不注册 App、正常发布不产生 QR/飞书确认页、console 配置与回读、identity drift/unknown remote fail-closed、owner-only/未绑定负向、
+publication intent、队员 App 身份冻结/历史 disabled 同 App 恢复、连接不注册 App、发布不产生 QR/飞书确认页、console 配置与回读、identity drift/unknown remote fail-closed、owner-only/未绑定负向、
 multi-Bot fail-closed、FIFO promotion、普通群/话题 roster、ExternalQuote/Context bytes、safeStorage/Renderer
 秘密隔离、Host 恢复、双主题和完整 Rust/TypeScript/文档/构建门禁。真实飞书租户登录、应用创建、无平台确认发布
 和收发仍需要拥有可用企业权限的主人在发布环境执行，自动化不伪造外部成功。

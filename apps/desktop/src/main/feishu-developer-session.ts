@@ -45,11 +45,6 @@ export interface FeishuDeveloperSessionService {
   disconnect(): Promise<void>
 }
 
-export interface FeishuRegistrationPage {
-  close(): void
-  closed: Promise<'closed' | 'session_expired'>
-}
-
 export interface FeishuOpenPlatformSession {
   brand: 'feishu' | 'lark'
   apiOrigin: string
@@ -65,10 +60,6 @@ export interface FeishuDeveloperPortalSession extends FeishuDeveloperSessionServ
     }
     signal?: AbortSignal
   }): Promise<FeishuOpenPlatformSession>
-  showRegistrationConfirmation(input: {
-    url: string
-    signal?: AbortSignal
-  }): Promise<FeishuRegistrationPage>
   persist(): Promise<void>
 }
 
@@ -111,7 +102,6 @@ export class ElectronFeishuDeveloperSessionService implements FeishuDeveloperPor
   readonly #getParentWindow: () => BrowserWindow | null
   #restored = false
   #activeLoginWindow: BrowserWindow | null = null
-  #activeRegistrationWindows = new Set<BrowserWindow>()
   #activeOpenPlatformWindows = new Set<BrowserWindow>()
 
   constructor(userDataPath: string, getParentWindow: () => BrowserWindow | null = () => null) {
@@ -285,10 +275,6 @@ export class ElectronFeishuDeveloperSessionService implements FeishuDeveloperPor
 
   async disconnect(): Promise<void> {
     this.#closeActiveLogin()
-    for (const window of this.#activeRegistrationWindows) {
-      if (!window.isDestroyed()) window.destroy()
-    }
-    this.#activeRegistrationWindows.clear()
     for (const window of this.#activeOpenPlatformWindows) {
       if (!window.isDestroyed()) window.destroy()
     }
@@ -362,50 +348,6 @@ export class ElectronFeishuDeveloperSessionService implements FeishuDeveloperPor
       input.signal?.removeEventListener('abort', onAbort)
       this.#activeOpenPlatformWindows.delete(window)
       if (!window.isDestroyed()) window.destroy()
-    }
-  }
-
-  async showRegistrationConfirmation(input: {
-    url: string
-    signal?: AbortSignal
-  }): Promise<FeishuRegistrationPage> {
-    await this.#ensureRestored()
-    const url = requireRegistrationUrl(input.url)
-    const parent = this.#getParentWindow()
-    const window = this.#createWindow(true, parent)
-    this.#activeRegistrationWindows.add(window)
-    let closeReason: 'closed' | 'session_expired' = 'closed'
-    let resolveClosed: (reason: 'closed' | 'session_expired') => void = () => undefined
-    const closed = new Promise<'closed' | 'session_expired'>((resolve) => {
-      resolveClosed = resolve
-    })
-    const onAbort = (): void => {
-      if (!window.isDestroyed()) window.destroy()
-    }
-    input.signal?.addEventListener('abort', onAbort, { once: true })
-    window.webContents.on('did-navigate', (_event, nextUrl) => {
-      if (isFeishuLoginUrl(nextUrl)) {
-        closeReason = 'session_expired'
-        window.destroy()
-      }
-    })
-    window.once('closed', () => {
-      input.signal?.removeEventListener('abort', onAbort)
-      this.#activeRegistrationWindows.delete(window)
-      resolveClosed(closeReason)
-    })
-    await window.loadURL(url)
-    if (isFeishuLoginUrl(window.webContents.getURL())) {
-      closeReason = 'session_expired'
-      window.destroy()
-    } else {
-      window.show()
-    }
-    return {
-      close: () => {
-        if (!window.isDestroyed()) window.destroy()
-      },
-      closed
     }
   }
 
@@ -758,33 +700,6 @@ function requireOpenPlatformApiUrl(value: string, apiOrigin: string): string {
     || url.username !== ''
     || url.password !== ''
   ) throw sessionError('feishu_open_platform_api_url_rejected')
-  return url.toString()
-}
-
-function requireRegistrationUrl(value: string): string {
-  let url: URL
-  try {
-    url = new URL(value)
-  } catch {
-    throw sessionError('feishu_registration_url_rejected')
-  }
-  const isOfficialRegistrationConfirmation = (
-    (url.hostname === 'open.feishu.cn' || url.hostname === 'open.larksuite.com')
-    && (url.pathname === '/page/launcher' || url.pathname === '/page/cli')
-    && Boolean(normalizedRequired(url.searchParams.get('user_code')))
-  )
-  const isLegacyAccountConfirmation = (
-    (url.hostname === 'accounts.feishu.cn' || url.hostname === 'accounts.larksuite.com')
-    && url.pathname === '/accounts/page/login'
-    && Boolean(normalizedRequired(url.searchParams.get('device_code')))
-  )
-  if (
-    url.protocol !== 'https:'
-    || url.username !== ''
-    || url.password !== ''
-    || url.port !== ''
-    || (!isOfficialRegistrationConfirmation && !isLegacyAccountConfirmation)
-  ) throw sessionError('feishu_registration_url_rejected')
   return url.toString()
 }
 

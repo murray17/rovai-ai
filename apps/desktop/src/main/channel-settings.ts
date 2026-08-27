@@ -52,6 +52,7 @@ type CoreChannelSnapshot = {
   memberBots: Array<{
     agentId: string
     accountId: string
+    brand: 'feishu' | 'lark'
     appId: string
     botDisplayName: string
     credentialRef: string
@@ -66,7 +67,7 @@ type CoreChannelSnapshot = {
     expectedUserIdDigest: string
     expectedTenantId: string
     requestedAppName: string
-    provisioningMode: 'developer_session' | 'compat_registration'
+    provisioningMode: 'developer_session'
     state:
       | 'created'
       | 'session_verified'
@@ -131,7 +132,6 @@ export interface ChannelHostDependencies {
   credentialStore: ChannelCredentialStore
   developerSession?: FeishuDeveloperSessionService
   memberBotProvisioner?: FeishuMemberBotProvisioner
-  compatMemberBotProvisioner?: FeishuMemberBotProvisioner
   memberBotAvatarSource?: MemberBotAvatarSourceResolver
   createChannel?: CreateChannel
   now?: () => number
@@ -177,7 +177,6 @@ export class ChannelSettingsService {
   readonly #dependencies: ChannelHostDependencies | null
   readonly #developerSession: FeishuDeveloperSessionService
   readonly #memberBotProvisioner: FeishuMemberBotProvisioner
-  readonly #compatMemberBotProvisioner: FeishuMemberBotProvisioner
   readonly #memberBotAvatarSource: MemberBotAvatarSourceResolver
   readonly #createChannel: CreateChannel
   readonly #now: () => number
@@ -204,8 +203,6 @@ export class ChannelSettingsService {
     this.#developerSession = dependencies?.developerSession
       ?? new UnavailableFeishuDeveloperSessionService()
     this.#memberBotProvisioner = dependencies?.memberBotProvisioner
-      ?? new UnavailableFeishuMemberBotProvisioner()
-    this.#compatMemberBotProvisioner = dependencies?.compatMemberBotProvisioner
       ?? new UnavailableFeishuMemberBotProvisioner()
     this.#memberBotAvatarSource = dependencies?.memberBotAvatarSource
       ?? unavailableMemberBotAvatarSource
@@ -346,11 +343,7 @@ export class ChannelSettingsService {
   }
 
   async publishMemberBot(agentId: string): Promise<ChannelSettingsSnapshot> {
-    return this.#publishNewMemberBot(agentId, 'developer_session', 'publish')
-  }
-
-  async publishMemberBotCompat(agentId: string): Promise<ChannelSettingsSnapshot> {
-    return this.#publishNewMemberBot(agentId, 'compat_registration', 'publish')
+    return this.#publishNewMemberBot(agentId, 'publish')
   }
 
   async retryMemberBot(agentId: string): Promise<ChannelSettingsSnapshot> {
@@ -388,7 +381,7 @@ export class ChannelSettingsService {
       || !credential
       || intent?.state === 'failed_unknown_remote_state'
     ) {
-      return this.#publishNewMemberBot(agentId, 'developer_session', 'retry')
+      return this.#publishNewMemberBot(agentId, 'retry')
     }
     if (bot && credential.appId !== bot.appId) {
       throw new Error('本机凭据与该队员冻结的飞书应用不一致；为避免换绑，已停止重试。')
@@ -447,21 +440,6 @@ export class ChannelSettingsService {
         failureCode: null
       }
     }
-    return this.#emit()
-  }
-
-  async disableMemberBot(agentId: string): Promise<ChannelSettingsSnapshot> {
-    this.#requireHost()
-    await this.#command('channels.feishu.memberBot.disable', { agentId })
-    const managed = [...this.#managedChannels.values()].find((candidate) => candidate.agentId === agentId)
-    if (managed) {
-      this.#managedChannels.delete(managed.appId)
-      await this.#disconnectManaged(managed)
-      await this.#dependencies!.credentialStore.delete(managed.credentialRef)
-    } else {
-      await this.#dependencies!.credentialStore.delete(memberCredentialRef(agentId))
-    }
-    this.#publicationFailures.delete(agentId)
     return this.#emit()
   }
 
@@ -529,7 +507,6 @@ export class ChannelSettingsService {
 
   async #publishNewMemberBot(
     agentId: string,
-    mode: 'developer_session' | 'compat_registration',
     operation: 'publish' | 'retry'
   ): Promise<ChannelSettingsSnapshot> {
     this.#requireHost()
@@ -546,9 +523,6 @@ export class ChannelSettingsService {
       throw new Error('该队员已经绑定并发布为飞书 Bot，不会创建第二个应用。')
     }
     if (existingBot) {
-      if (mode !== 'developer_session') {
-        throw new Error('该队员已经绑定飞书应用；后续只能通过普通流程恢复同一个应用。')
-      }
       if (
         !previousIntent
         || previousIntent.remoteAppId !== existingBot.appId
@@ -570,7 +544,7 @@ export class ChannelSettingsService {
       throw new Error('该队员已有已完成的发布状态，但本地 Bot 绑定缺失；不会创建第二个应用。')
     }
     if (!existingBot && previousIntent?.state === 'failed_unknown_remote_state') {
-      if (mode !== 'developer_session' || !previousIntent.remoteAppId) {
+      if (!previousIntent.remoteAppId) {
         throw new Error('上次创建结果无法确认。为避免重复创建应用，请先在飞书开放平台核对。')
       }
     }
@@ -595,9 +569,7 @@ export class ChannelSettingsService {
     const agent = await this.#dependencies!.core.request<AgentProfile>('members.get', { agentId })
     if (!agent || agent.presence !== 'present') throw new Error('该队员当前不可发布。')
     const appDescription = `Rovai AI 队员 · ${agent.teamRole || '协作者'}`
-    const avatarSource = mode === 'developer_session'
-      ? await this.#memberBotAvatarSource.resolve(agent.avatarRef)
-      : undefined
+    const avatarSource = await this.#memberBotAvatarSource.resolve(agent.avatarRef)
     if (
       existingBot
       || (previousIntent?.remoteAppId
@@ -622,7 +594,7 @@ export class ChannelSettingsService {
       expectedUserIdDigest: account.userIdDigest,
       expectedTenantId: account.tenantId,
       requestedAppName: agent.displayName,
-      provisioningMode: mode
+      provisioningMode: 'developer_session'
     })
     let intentVersion = 1
     let lastCompletedStep: string | null = null
@@ -661,51 +633,27 @@ export class ChannelSettingsService {
         lastCompletedStep: 'session_verified',
         failureCode: null
       })
-      let credential: FeishuAppCredential
-      let botDisplayName = agent.displayName
-      if (mode === 'developer_session') {
-        const provisioned = await this.#memberBotProvisioner.create({
-          publicationIntentId,
-          agentId,
-          appName: agent.displayName,
-          appDescription,
-          avatarSource,
-          expectedDeveloperIdentity: {
-            userId: identity.userId,
-            tenantId: identity.tenantId
-          },
-          signal: abort.signal,
-          onProgress: (step, appId) => {
-            if (appId) remoteAppId = appId
-            this.#handleProvisioningProgress(step, appId)
-          }
-        })
-        remoteAppId = provisioned.appId
-        botDisplayName = provisioned.botDisplayName
-        credential = { appId: provisioned.appId, appSecret: provisioned.appSecret }
-      } else {
-        this.#setProvisioningProgress(
-          'creating_app',
-          '兼容模式正在打开飞书确认流程…'
-        )
-        const provisioned = await this.#compatMemberBotProvisioner.create({
-          publicationIntentId,
-          agentId,
-          appName: agent.displayName,
-          appDescription,
-          expectedDeveloperIdentity: {
-            userId: identity.userId,
-            tenantId: identity.tenantId
-          },
-          signal: abort.signal,
-          onProgress: (step, appId) => {
-            if (appId) remoteAppId = appId
-            this.#handleProvisioningProgress(step, appId)
-          }
-        })
-        remoteAppId = provisioned.appId
-        botDisplayName = provisioned.botDisplayName
-        credential = { appId: provisioned.appId, appSecret: provisioned.appSecret }
+      const provisioned = await this.#memberBotProvisioner.create({
+        publicationIntentId,
+        agentId,
+        appName: agent.displayName,
+        appDescription,
+        avatarSource,
+        expectedDeveloperIdentity: {
+          userId: identity.userId,
+          tenantId: identity.tenantId
+        },
+        signal: abort.signal,
+        onProgress: (step, appId) => {
+          if (appId) remoteAppId = appId
+          this.#handleProvisioningProgress(step, appId)
+        }
+      })
+      remoteAppId = provisioned.appId
+      const botDisplayName = provisioned.botDisplayName
+      const credential: FeishuAppCredential = {
+        appId: provisioned.appId,
+        appSecret: provisioned.appSecret
       }
       await advanceIntent({
         state: 'app_created',
@@ -1576,20 +1524,8 @@ export class ChannelSettingsService {
         publicationStatus: bot.status,
         botDisplayName: bot.botDisplayName,
         appId: bot.appId,
+        managementUrl: memberBotManagementUrl(bot.brand, bot.appId),
         failureCode: this.#publicationFailures.get(bot.agentId) ?? bot.failureCode
-      })
-    }
-    if (
-      this.#activeQrAttempt?.purpose === 'member_bot_compat_registration'
-      && this.#activeQrAttempt.agentId
-    ) {
-      const agentId = this.#activeQrAttempt.agentId
-      bots.set(agentId, {
-        agentId,
-        publicationStatus: this.#activeQrAttempt.stage === 'failed' ? 'failed' : 'provisioning',
-        botDisplayName: bots.get(agentId)?.botDisplayName ?? null,
-        appId: bots.get(agentId)?.appId ?? null,
-        failureCode: this.#activeQrAttempt.stage === 'failed' ? 'registration_failed' : null
       })
     }
     if (this.#activeProvisioning) {
@@ -1604,6 +1540,7 @@ export class ChannelSettingsService {
             : 'provisioning',
         botDisplayName: existing?.botDisplayName ?? null,
         appId: remoteAppId ?? existing?.appId ?? null,
+        managementUrl: existing?.managementUrl ?? null,
         failureCode
       })
     }
@@ -1614,6 +1551,7 @@ export class ChannelSettingsService {
         publicationStatus: bot?.publicationStatus === 'disabled' ? 'disabled' : 'failed',
         botDisplayName: bot?.botDisplayName ?? null,
         appId: bot?.appId ?? null,
+        managementUrl: bot?.managementUrl ?? null,
         failureCode
       })
     }
@@ -1716,6 +1654,14 @@ function unavailableSnapshot(): ChannelSettingsSnapshot {
     activeQrAttempt: null,
     activeProvisioning: null
   }
+}
+
+function memberBotManagementUrl(brand: 'feishu' | 'lark', appId: string): string | null {
+  if (!/^[A-Za-z0-9_-]{1,128}$/.test(appId)) return null
+  const origin = brand === 'lark'
+    ? 'https://open.larksuite.com'
+    : 'https://open.feishu.cn'
+  return `${origin}/app/${encodeURIComponent(appId)}/baseinfo`
 }
 
 function memberCredentialRef(agentId: string): string {

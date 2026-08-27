@@ -119,14 +119,8 @@ const api: RovaiApi = {
     publishMemberBot(agentId) {
       return ipcRenderer.invoke('rovai:channels-publish-member-bot', agentId)
     },
-    publishMemberBotCompat(agentId) {
-      return ipcRenderer.invoke('rovai:channels-publish-member-bot-compat', agentId)
-    },
     retryMemberBot(agentId) {
       return ipcRenderer.invoke('rovai:channels-retry-member-bot', agentId)
-    },
-    disableMemberBot(agentId) {
-      return ipcRenderer.invoke('rovai:channels-disable-member-bot', agentId)
     },
     cancelQrAttempt(attemptId) {
       return ipcRenderer.invoke('rovai:channels-cancel-qr', attemptId)

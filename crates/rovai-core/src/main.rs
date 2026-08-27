@@ -87,10 +87,10 @@ use rovai_core::{
         AdvanceMemberBotPublicationIntentCommand, ArchiveProjectBindingCommand,
         BindChannelConversationCommand, ChannelHostTickCommand, ChannelService,
         CreateMemberBotPublicationIntentCommand, CreateProjectBindingCommand,
-        DisableFeishuMemberBotCommand, DisconnectFeishuAccountCommand, ExpireFeishuAccountCommand,
-        FinalizeChannelInboundCommand, ObserveChannelInboundCommand,
-        ReconcileFeishuGroupRosterCommand, SettleChannelDeliveryCommand,
-        UpdateProjectBindingCommand, UpsertFeishuAccountCommand, UpsertFeishuMemberBotCommand,
+        DisconnectFeishuAccountCommand, ExpireFeishuAccountCommand, FinalizeChannelInboundCommand,
+        ObserveChannelInboundCommand, ReconcileFeishuGroupRosterCommand,
+        SettleChannelDeliveryCommand, UpdateProjectBindingCommand, UpsertFeishuAccountCommand,
+        UpsertFeishuMemberBotCommand,
     },
     collaboration::{
         AddCampMemberCommand, CampActivationState, CampCollaborationMode, ChangeDefaultLeadCommand,
@@ -4690,16 +4690,6 @@ impl Core {
                         None,
                         params.command,
                     ),
-                )?;
-                Ok(serde_json::to_value(execution.result)?)
-            }
-            "channels.feishu.memberBot.disable" => {
-                let params: UserCommandParams<DisableFeishuMemberBotCommand> =
-                    serde_json::from_value(request.params.clone())?;
-                let mut database = self.database.lock().await;
-                let execution = ChannelService::default().disable_feishu_member_bot(
-                    &mut database,
-                    &user_command_envelope(params.command_id, params.command),
                 )?;
                 Ok(serde_json::to_value(execution.result)?)
             }

@@ -161,49 +161,6 @@ afterEach(() => {
 })
 
 describe('Feishu developer session login', () => {
-  it('opens the official Feishu CLI app-registration confirmation page', async () => {
-    const { ElectronFeishuDeveloperSessionService } = await import('./feishu-developer-session')
-    const root = mkdtempSync(join(tmpdir(), 'rovai-feishu-session-'))
-    temporaryRoots.push(root)
-    const service = new ElectronFeishuDeveloperSessionService(root)
-
-    const page = await service.showRegistrationConfirmation({
-      url: 'https://open.feishu.cn/page/cli?user_code=public-fixture'
-    })
-
-    expect(currentUrl).toBe('https://open.feishu.cn/page/cli?user_code=public-fixture')
-    page.close()
-    await expect(page.closed).resolves.toBe('closed')
-  })
-
-  it('opens the live Feishu app-registration launcher returned by the begin endpoint', async () => {
-    const { ElectronFeishuDeveloperSessionService } = await import('./feishu-developer-session')
-    const root = mkdtempSync(join(tmpdir(), 'rovai-feishu-session-'))
-    temporaryRoots.push(root)
-    const service = new ElectronFeishuDeveloperSessionService(root)
-
-    const page = await service.showRegistrationConfirmation({
-      url: 'https://open.feishu.cn/page/launcher?user_code=public-fixture'
-    })
-
-    expect(currentUrl).toBe('https://open.feishu.cn/page/launcher?user_code=public-fixture')
-    page.close()
-    await expect(page.closed).resolves.toBe('closed')
-  })
-
-  it('rejects a lookalike app-registration confirmation origin before navigation', async () => {
-    const { ElectronFeishuDeveloperSessionService } = await import('./feishu-developer-session')
-    const root = mkdtempSync(join(tmpdir(), 'rovai-feishu-session-'))
-    temporaryRoots.push(root)
-    const service = new ElectronFeishuDeveloperSessionService(root)
-
-    await expect(service.showRegistrationConfirmation({
-      url: 'https://open.feishu.cn.evil.example/page/cli?user_code=public-fixture'
-    })).rejects.toThrow('feishu_registration_url_rejected')
-
-    expect(loadUrlCount).toBe(0)
-  })
-
   it('fails before opening the login page when secure storage is unavailable', async () => {
     const { ElectronFeishuDeveloperSessionService } = await import('./feishu-developer-session')
     const root = mkdtempSync(join(tmpdir(), 'rovai-feishu-session-'))

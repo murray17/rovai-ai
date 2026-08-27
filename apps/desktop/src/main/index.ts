@@ -90,10 +90,7 @@ import { AppQuitCoordinator } from './app-quit-coordinator'
 import { ChannelSettingsService } from './channel-settings'
 import { SafeStorageChannelCredentialStore } from './channel-credential-store'
 import { ElectronFeishuDeveloperSessionService } from './feishu-developer-session'
-import {
-  FeishuCompatMemberBotProvisioner,
-  FeishuWebSessionMemberBotProvisioner
-} from './feishu-member-bot-provisioner'
+import { FeishuWebSessionMemberBotProvisioner } from './feishu-member-bot-provisioner'
 import { ControlledMemberBotAvatarSourceResolver } from './member-bot-avatar-source'
 import { isolatedSafeStorageApplicationName } from './safe-storage-application-name'
 
@@ -269,7 +266,6 @@ const channelSettings = new ChannelSettingsService({
   credentialStore: new SafeStorageChannelCredentialStore(coreDataPath),
   developerSession: feishuDeveloperSession,
   memberBotProvisioner: new FeishuWebSessionMemberBotProvisioner(feishuDeveloperSession),
-  compatMemberBotProvisioner: new FeishuCompatMemberBotProvisioner(feishuDeveloperSession),
   memberBotAvatarSource
 })
 channelSettings.onChanged((snapshot) => {
@@ -725,22 +721,10 @@ ipcMain.handle('rovai:channels-publish-member-bot', (event, agentId: unknown) =>
   return channelSettings.publishMemberBot(agentId)
 })
 
-ipcMain.handle('rovai:channels-publish-member-bot-compat', (event, agentId: unknown) => {
-  requireMainWindow(event.sender)
-  if (typeof agentId !== 'string' || !agentId) throw new Error('Invalid Agent ID')
-  return channelSettings.publishMemberBotCompat(agentId)
-})
-
 ipcMain.handle('rovai:channels-retry-member-bot', (event, agentId: unknown) => {
   requireMainWindow(event.sender)
   if (typeof agentId !== 'string' || !agentId) throw new Error('Invalid Agent ID')
   return channelSettings.retryMemberBot(agentId)
-})
-
-ipcMain.handle('rovai:channels-disable-member-bot', (event, agentId: unknown) => {
-  requireMainWindow(event.sender)
-  if (typeof agentId !== 'string' || !agentId) throw new Error('Invalid Agent ID')
-  return channelSettings.disableMemberBot(agentId)
 })
 
 ipcMain.handle('rovai:channels-cancel-qr', (event, attemptId: unknown) => {

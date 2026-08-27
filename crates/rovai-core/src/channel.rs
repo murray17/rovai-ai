@@ -179,17 +179,6 @@ impl DomainCommand for UpsertFeishuMemberBotCommand {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct DisableFeishuMemberBotCommand {
-    pub agent_id: String,
-}
-
-impl sealed::Sealed for DisableFeishuMemberBotCommand {}
-impl DomainCommand for DisableFeishuMemberBotCommand {
-    const TYPE: &'static str = "feishu_member_bot.disable";
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ChannelAttachmentSummaryInput {
     pub name: String,
@@ -398,6 +387,7 @@ pub struct MemberBotPublicationIntentView {
 pub struct FeishuMemberBotView {
     pub agent_id: String,
     pub account_id: String,
+    pub brand: String,
     pub app_id: String,
     pub bot_display_name: String,
     pub credential_ref: String,
@@ -583,22 +573,25 @@ impl ChannelService {
         let member_bots = query_rows(
             connection,
             r#"
-            SELECT agent_id, account_id, app_id, bot_display_name,
-                   credential_ref, status, failure_code, version
-            FROM feishu_member_bot
-            ORDER BY agent_id
+            SELECT bot.agent_id, bot.account_id, COALESCE(account.brand, 'feishu'),
+                   bot.app_id, bot.bot_display_name, bot.credential_ref,
+                   bot.status, bot.failure_code, bot.version
+            FROM feishu_member_bot AS bot
+            JOIN feishu_account AS account ON account.id = bot.account_id
+            ORDER BY bot.agent_id
             "#,
             [],
             |row| {
                 Ok(FeishuMemberBotView {
                     agent_id: row.get(0)?,
                     account_id: row.get(1)?,
-                    app_id: row.get(2)?,
-                    bot_display_name: row.get(3)?,
-                    credential_ref: row.get(4)?,
-                    status: row.get(5)?,
-                    failure_code: row.get(6)?,
-                    version: row.get(7)?,
+                    brand: row.get(2)?,
+                    app_id: row.get(3)?,
+                    bot_display_name: row.get(4)?,
+                    credential_ref: row.get(5)?,
+                    status: row.get(6)?,
+                    failure_code: row.get(7)?,
+                    version: row.get(8)?,
                 })
             },
         )?;
@@ -1341,11 +1334,8 @@ impl ChannelService {
             "expectedUserIdDigest",
         )?;
         let requested_app_name = normalize_display_name(&envelope.payload.requested_app_name)?;
-        if !matches!(
-            envelope.payload.provisioning_mode.as_str(),
-            "developer_session" | "compat_registration"
-        ) {
-            anyhow::bail!("provisioningMode must be developer_session or compat_registration");
+        if envelope.payload.provisioning_mode != "developer_session" {
+            anyhow::bail!("provisioningMode must be developer_session");
         }
         self.gateway.execute(database, envelope, |transaction| {
             if !is_channel_host(&envelope.actor) {
@@ -1826,80 +1816,6 @@ impl ChannelService {
                 }),
             ))
         })
-    }
-
-    pub fn disable_feishu_member_bot(
-        &self,
-        database: &mut Database,
-        envelope: &CommandEnvelope<DisableFeishuMemberBotCommand>,
-    ) -> Result<CommandExecution> {
-        let execution = self.gateway.execute(database, envelope, |transaction| {
-            if !is_owner(&envelope.actor) {
-                return Ok(rejected(
-                    "feishu_member_bot.owner_required",
-                    "Only the local owner can disable a member Bot",
-                ));
-            }
-            let now = Utc::now().to_rfc3339();
-            let changed = transaction.execute(
-                r#"
-                UPDATE feishu_member_bot
-                SET status = 'disabled', failure_code = NULL,
-                    version = version + 1, updated_at = ?2
-                WHERE agent_id = ?1 AND status <> 'disabled'
-                "#,
-                params![envelope.payload.agent_id, now],
-            )?;
-            if changed == 0 {
-                return Ok(rejected(
-                    "feishu_member_bot.not_found",
-                    "Published member Bot does not exist",
-                ));
-            }
-            transaction.execute(
-                r#"
-                UPDATE external_group_bot_roster
-                SET status = 'absent', version = version + 1,
-                    observed_at = ?2, updated_at = ?2
-                WHERE agent_id = ?1 AND status <> 'absent'
-                "#,
-                params![envelope.payload.agent_id, now],
-            )?;
-            Ok(CommandHandlerResult::applied(
-                "feishu_member_bot.disabled",
-                json!({ "agentId": envelope.payload.agent_id }),
-                None,
-            ))
-        })?;
-        if execution.result.status != CommandResultStatus::Rejected {
-            let roster_groups = query_rows(
-                database.connection(),
-                r#"
-                SELECT DISTINCT provider, tenant_key, chat_id
-                FROM external_group_bot_roster
-                WHERE agent_id = ?1
-                ORDER BY provider, tenant_key, chat_id
-                "#,
-                [&envelope.payload.agent_id],
-                |row| {
-                    Ok((
-                        row.get::<_, String>(0)?,
-                        row.get::<_, String>(1)?,
-                        row.get::<_, String>(2)?,
-                    ))
-                },
-            )?;
-            for (provider, tenant_key, chat_id) in roster_groups {
-                reconcile_bound_group_memberships(
-                    database,
-                    &provider,
-                    &tenant_key,
-                    &chat_id,
-                    &envelope.command_id,
-                )?;
-            }
-        }
-        Ok(execution)
     }
 
     pub fn reconcile_feishu_group_roster(
@@ -4751,7 +4667,7 @@ mod tests {
         assert_eq!(created.result.status, CommandResultStatus::Applied);
         for (version, state) in [(1, "session_verified"), (2, "failed_unknown_remote_state")] {
             let failure_code = (state == "failed_unknown_remote_state")
-                .then(|| "registration_transport_lost".to_string());
+                .then(|| "provisioning_transport_lost".to_string());
             let advanced = service
                 .advance_member_bot_publication_intent(
                     &mut database,
@@ -4780,7 +4696,7 @@ mod tests {
         );
         assert_eq!(
             snapshot.publication_intents[0].failure_code.as_deref(),
-            Some("registration_transport_lost")
+            Some("provisioning_transport_lost")
         );
 
         let duplicate = service
@@ -4856,7 +4772,7 @@ mod tests {
     }
 
     #[test]
-    fn member_bot_app_binding_is_immutable_across_disable_and_reactivation() {
+    fn member_bot_app_binding_is_immutable_across_legacy_disabled_reactivation() {
         let mut database = seeded_runtime_database_owned();
         let service = ChannelService::default();
         connect_account(&service, &mut database);
@@ -4910,15 +4826,11 @@ mod tests {
             "feishu_member_bot.binding_immutable"
         );
 
-        service
-            .disable_feishu_member_bot(
-                &mut database,
-                &owner_envelope(
-                    "disable-bound-app",
-                    DisableFeishuMemberBotCommand {
-                        agent_id: "agent_1".to_string(),
-                    },
-                ),
+        database
+            .connection()
+            .execute(
+                "UPDATE feishu_member_bot SET status = 'disabled' WHERE agent_id = 'agent_1'",
+                [],
             )
             .unwrap();
         let reopened = service
@@ -5034,10 +4946,9 @@ mod tests {
             )
             .unwrap();
         assert_eq!(binding, ("cli_app_1".to_string(), "published".to_string()));
-        assert_eq!(
-            service.snapshot(&database).unwrap().publication_intents[0].state,
-            "completed"
-        );
+        let snapshot = service.snapshot(&database).unwrap();
+        assert_eq!(snapshot.member_bots[0].brand, "feishu");
+        assert_eq!(snapshot.publication_intents[0].state, "completed");
     }
 
     #[test]

@@ -69,12 +69,14 @@ describe('Channel settings', () => {
           publicationStatus: 'published',
           botDisplayName: '审阅员芝士',
           appId: 'cli_agent_a',
+          managementUrl: 'https://open.feishu.cn/app/cli_agent_a/baseinfo',
           failureCode: null
         }, {
           agentId: 'agent-b',
           publicationStatus: 'disabled',
           botDisplayName: '资料员石墨',
           appId: 'cli_agent_b',
+          managementUrl: 'https://open.feishu.cn/app/cli_agent_b/baseinfo',
           failureCode: null
         }]
       }],
@@ -89,8 +91,7 @@ describe('Channel settings', () => {
       snapshot,
       onConnect: () => undefined,
       onDisconnect: () => undefined,
-      onPublish: () => undefined,
-      onManage: () => undefined
+      onPublish: () => undefined
     }))
 
     expect(markup).toContain('Murray')
@@ -100,8 +101,14 @@ describe('Channel settings', () => {
     expect(markup).toContain('murray@example.com')
     expect(markup).toContain('>切换账号</button>')
     expect(markup).toContain('>断开</button>')
-    expect(markup).toContain('>管理</button>')
+    expect(markup).toContain('href="https://open.feishu.cn/app/cli_agent_a/baseinfo"')
+    expect(markup).toContain('target="_blank"')
+    expect(markup).toContain('rel="noreferrer noopener"')
+    expect(markup).toContain('>飞书管理</a>')
     expect(markup).toContain('>重新发布</button>')
+    expect(markup).not.toContain('>管理</button>')
+    expect(markup).not.toContain('停用 Bot')
+    expect(markup).not.toContain('兼容扫码发布')
     expect(markup).not.toMatch(/app secret|cookie|csrf|token/i)
   })
 

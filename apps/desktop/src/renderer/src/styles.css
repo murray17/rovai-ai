@@ -4001,7 +4001,7 @@ button.attachment-open:disabled { cursor: wait; opacity: .76; }
 .channel-owner-note { display: flex; align-items: flex-start; gap: 8px; margin: 10px 0 0; color: var(--faint); font-size: 9.5px; line-height: 1.55; }
 .channel-owner-note svg { width: 14px; height: 14px; flex: 0 0 14px; margin-top: 1px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.7; }
 .channel-member-bot-table { min-width: 0; overflow: hidden; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
-.channel-member-bot-grid { display: grid; min-width: 0; grid-template-columns: minmax(205px, 1.2fr) minmax(170px, 1fr) 92px 76px; gap: 14px; align-items: center; }
+.channel-member-bot-grid { display: grid; min-width: 0; grid-template-columns: minmax(205px, 1.2fr) minmax(170px, 1fr) 92px 82px; gap: 14px; align-items: center; }
 .channel-member-bot-head { min-height: 35px; padding: 0 8px; border-bottom: 1px solid var(--line); color: var(--faint); font-size: 9px; font-weight: 680; letter-spacing: .06em; text-transform: uppercase; }
 .channel-member-bot-row { min-height: 64px; padding: 8px; border-bottom: 1px solid var(--line); }
 .channel-member-bot-row:last-child { border-bottom: 0; }
@@ -4020,8 +4020,9 @@ button.attachment-open:disabled { cursor: wait; opacity: .76; }
 .channel-bot-identity small { color: var(--faint); font-size: 9.5px; }
 .channel-bot-identity > span { color: var(--faint); font-size: 10px; }
 .channel-member-action { justify-self: end; }
-.channel-row-action { min-height: 28px; padding: 4px 7px; border: 0; border-radius: 5px; color: var(--brand-ink); background: transparent; cursor: pointer; font-size: 10.5px; font-weight: 650; }
+.channel-row-action { display: inline-flex; min-height: 28px; padding: 4px 7px; align-items: center; justify-content: center; border: 0; border-radius: 5px; color: var(--brand-ink); background: transparent; cursor: pointer; font-size: 10.5px; font-weight: 650; text-decoration: none; }
 .channel-row-action:hover:not(:disabled) { background: var(--brand-soft); }
+.channel-row-action:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 .channel-row-action.is-danger { color: var(--danger); }
 .channel-row-action.is-danger:hover:not(:disabled) { background: var(--danger-soft); }
 .channel-row-action:disabled { color: var(--faint); cursor: default; opacity: 1; }

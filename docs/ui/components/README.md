@@ -18,7 +18,7 @@ Dialog、Popover 等基础原子遵守根目录 [`DESIGN.md`](../../../DESIGN.md
 | [结构化 Mention](structured-mentions.md) | Composer/历史消息的身份 token、Popover、复制粘贴、键盘和选择边界 |
 | [应用内提醒与会话未读](notification-center.md) | 暂时隐藏持久中心后的轻量 heads-up、Camp 未读点、精确可见确认与错误恢复 |
 | [队员身份与图像](member-identity.md) | stable identity color、portrait/icon、身份入口和降级行为 |
-| [渠道设置](channel-settings.md) | 主人本机的 Developer Identity、无二维码普通发布、显式兼容扫码、ProjectBinding、待绑定会话、状态和错误交互 |
+| [渠道设置](channel-settings.md) | 主人本机的 Developer Identity、单一路径无二维码发布、官方应用管理链接、ProjectBinding、待绑定会话、状态和错误交互 |
 | [会话区文件与文件夹拖放](conversation-drop-zone.md) | Drop target、Drag feedback、目录快照附件卡和响应式边界 |
 
 组件文档拥有结构、信息层级、状态呈现、键盘与焦点行为；领域对象、命令、事务和恢复语义仍由

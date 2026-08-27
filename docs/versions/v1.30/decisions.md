@@ -114,7 +114,7 @@ Binding ID。绑定后任意会话成员可通过私聊或显式 mention 使用 
 
 Host 只提交所有 published Bot 的完整 `isInChat` 快照。普通群首次及后续都把 present roster 通过既有
 `camp.member.add/remove` 与 exact source generation 同步。话题首次只使用当前 mentions，父群新增不自动扩张；
-只有话题内显式目标或 A2A exact target 且其 Bot 仍在父群时，才按需调用同一 add。移出/停用统一走既有 remove。
+只有话题内显式目标或 A2A exact target 且其 Bot 仍在父群时，才按需调用同一 add。移出统一走既有 remove。
 
 当前规范见 [飞书渠道架构](../../architecture/feishu-channel.md#bot-roster-与-camp-membership)、
 [Feishu Channel v1](../../contracts/feishu-channel-v1.md#6-camp-创建roster-与-admission)和
@@ -189,12 +189,11 @@ origin 与 `/developers/` 路径可达，协议变化只产生可诊断失败；
 当前上游页面与 API 仍兼容，仓库测试只证明本地请求顺序、秘密边界、回读和恢复状态机。
 
 旧的 `/oauth/v1/app/registration + verification_uri_complete + showRegistrationConfirmation + pollRegistration`
-整体移入 `FeishuCompatMemberBotProvisioner`，只服务主人明确选择的兼容模式。兼容确认入口继续只接受
-`open.feishu.cn | open.larksuite.com` 的精确 `/page/launcher | /page/cli` 与非空 `user_code`，不得成为普通失败的
-fallback。
+实现整体退出产品；对应 Provisioner、Developer Session 确认窗口、typed API、IPC 与 Renderer 入口一并删除。console
+发布失败保持可诊断失败，不要求队员单独扫码，不打开平台创建确认页，也不存在手动或自动 fallback。
 
 首次创建前写持久 `MemberBotPublicationIntent`；第一次取得 App ID 后，状态机永久冻结该队员的
-`agentId + accountId + remoteAppId`，并在首次写入后冻结 `credentialRef`。失败、完成、停用和重新发布都不能新建 intent 或把 Bot 记录换成
+`agentId + accountId + remoteAppId`，并在首次写入后冻结 `credentialRef`。失败、完成、历史 `disabled` 恢复和重新发布都不能新建 intent 或把 Bot 记录换成
 第二个 App；`completed` 后只允许在 exact Bot 绑定仍存在且原账号已连接时重开同一 intent，核对并恢复原 App。Core
 在 intent create、Bot 首次写入、连接完成和重复 upsert 各状态边界交叉验证这份身份，不以 Renderer 隐藏按钮代替唯一性。
 当前规范见[飞书渠道架构](../../architecture/feishu-channel.md#开发者会话与队员发布)、
@@ -210,6 +209,8 @@ fallback。
 - 一次账号登录可服务多个队员发布；连接与发布是两个独立生命周期；
 - 真实 identity 能在切换/失效时做 exact user/tenant 检查，Renderer 不再显示假 owner/tenant；
 - 正常发布只展示 Rovai 的账号校验、创建、配置、发布、验证和完成进度，不出现飞书创建确认页；
+- Rovai 不再提供 Bot 管理/停用命令；已发布 Bot 只按绑定 brand 和冻结 App ID 跳转官方应用详情页，远端生命周期由主人
+  在开放平台治理；
 - Web 页面身份/bootstrap 与 console API 是版本敏感的可替换 Adapter，真实租户效果必须独立验收，不能由本地测试
   声明成功。
 
@@ -217,7 +218,9 @@ fallback。
 
 - **保留或改名 controller App：** 它既不是账号 Session，也没有渠道运行职责；
 - **连接/发布共用 application registration：** 会把每次应用注册误投影为账号授权，并让普通发布进入平台确认页；
+- **保留显式兼容扫码发布：** 维持第二套创建路径、扩大版本敏感攻击面，并使首次发布的唯一状态机出现旁路；
 - **普通失败后自动弹兼容二维码：** 改变用户选择，并可能在未知远端状态下重复建 App；
+- **在 Rovai 中保留无远端控制力的管理/停用动作：** 会让用户误以为本机状态能够关闭飞书 Bot；
 - **把 console endpoint 散落在 ChannelSettings/Renderer：** 扩大 Cookie/CSRF 暴露面，且无法统一做同源准入、响应校验
   和回读；
 - **用占位 identity 标记 connected：** 无法证明发布发生在预期 user/tenant。
@@ -227,7 +230,7 @@ fallback。
 
 ### 背景
 
-初版普通发布统一上传 Rovai App icon，理由是本机头像不是公网 URL，兼容 registration 也只能接受 URL preset。但正常
+初版普通发布统一上传 Rovai App icon，理由是本机头像不是公网 URL。但正常
 console 路径本来就能上传 PNG bytes，Main 也已经拥有内置素材和 managed avatar 的完整性校验边界。继续使用统一 icon
 会让飞书里的独立 Bot 丢失最重要的队员身份；在远端版本已经发布、Rovai intent 仍为 unknown 时只读接管，又会把这个
 错误永久固化到当前 App。
@@ -240,7 +243,7 @@ console 路径本来就能上传 PNG bytes，Main 也已经拥有内置素材和
 
 主人显式重试一个已经冻结 `remoteAppId` 的 unknown intent 时仍不得创建第二个 App。若其 latest published 是初始
 `1.0.0`，允许在同一 App 上传当前队员头像、重放幂等配置并创建或复用 `1.0.1` 修复版本；`1.0.1` 已 published 时只读
-验证，避免重复发布。兼容 registration 仍不接收本机 bytes。当前规范见
+验证，避免重复发布。当前规范见
 [飞书渠道架构](../../architecture/feishu-channel.md#开发者会话与队员发布)、
 [Feishu Channel v1](../../contracts/feishu-channel-v1.md#3-飞书账号与队员-bot)和
 [渠道设置](../../ui/components/channel-settings.md#队员-bot)。
@@ -255,6 +258,6 @@ console 路径本来就能上传 PNG bytes，Main 也已经拥有内置素材和
 ### 被拒绝方案
 
 - **所有 Bot 继续使用 Rovai icon：** 独立 Bot 只有名称不同，无法保持队员视觉身份；
-- **把本机文件路径或 data URL 交给 Renderer/registration：** 破坏受控头像与本地路径边界；
-- **停用并新建 App：** 会产生第二个远端身份、Secret 和潜在群成员漂移；
+- **把本机文件路径或 data URL 交给 Renderer/网络请求：** 破坏受控头像与本地路径边界；
+- **删除并新建 App：** 会产生第二个远端身份、Secret 和潜在群成员漂移；
 - **unknown reconciliation 永远只读：** 能接管错误发布，但无法修复已知由本地错误输入造成的头像。

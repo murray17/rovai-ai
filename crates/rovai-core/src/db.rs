@@ -16489,7 +16489,7 @@ impl Database {
                 expected_tenant_id TEXT NOT NULL CHECK(length(trim(expected_tenant_id)) > 0),
                 requested_app_name TEXT NOT NULL CHECK(length(trim(requested_app_name)) > 0),
                 provisioning_mode TEXT NOT NULL
-                    CHECK(provisioning_mode IN ('developer_session', 'compat_registration')),
+                    CHECK(provisioning_mode = 'developer_session'),
                 state TEXT NOT NULL CHECK(state IN (
                     'created', 'session_verified', 'app_created', 'credentials_read',
                     'bot_configured', 'version_published', 'connection_verified',
