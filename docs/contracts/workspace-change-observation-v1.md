@@ -35,8 +35,9 @@ accepted 只表示目标语义已冻结；当前实现状态由 [v1.29 实施计
    或 Git metadata path；该检查不解析 symlink target、不打开路径，也不把报告路径升级为文件 identity；
 5. bytes、file count 和 patch size 满足对应 adapter profile 的严格上限。
 
-局部 before/after、仅路径、自由文本中的 fenced diff、语义未声明的 `diff` / `patch` 字段和需要读取当前文件才能
-补全的数据必须拒绝进入 Diff View。拒绝可以产生安全 diagnostic，但不能伪造 diff Evidence。
+除明确 allowlist 为 `exact_mutation` 的局部替换外，局部 before/after、仅路径、自由文本中的 fenced diff、语义未声明的
+`diff` / `patch` 字段和需要读取当前文件才能补全的数据必须拒绝进入 Diff View。拒绝可以产生安全 diagnostic，
+但不能伪造 diff Evidence。
 
 v1 的 Runtime allowlist 冻结为：
 
@@ -44,11 +45,28 @@ v1 的 Runtime allowlist 冻结为：
 | --- | --- | --- | --- |
 | Codex app-server | `item/completed` 且 `item.type=fileChange`、`item.status=completed` | `changes[].kind=update` 的 `diff` 是 unified diff；add/delete 的 `diff` 是完整新/旧内容 | 规范化为逐文件 unified diff 后准入 |
 | ACP v1 | `session/update.tool_call_update` 最终累计状态为 `completed` | 标准 `ToolCallContent::Diff { path, oldText?, newText }`；collection update 是 replace，不是 append | 只从该 Tool call 的终态累计 content 生成完整 before/after Evidence |
-| Claude stream-json | 没有等价的终态完整文件集合 | Edit/Write 的请求或 result 不能证明完整 before/after | 不准入，不解析 Tool input |
+| Claude stream-json | `assistant.tool_use(name=Edit)` 与相同 `tool_use_id` 的非错误 `user.tool_result` 配对 | `file_path + old_string + new_string` 只证明一次精确片段替换，不证明真实文件行号或完整文件 before/after | 仅准入 `Edit` 的 `exact_mutation`；保存片段，不读取文件，不生成 hunk 行号 |
 | Antigravity stream-json | 没有等价的终态完整文件集合 | Tool 名称和 step terminal 不能证明 patch | 不准入，不按名称推测 |
 
 Codex 的 `item/started`、`item/fileChange/patchUpdated`、`turn/diff/updated` 以及任何名为 `apply_patch` 的 Tool
 都不是 v1 Command Diff 数据源。`apply_patch` 输入不解析；异常退出时没有上述可靠终态就不生成文件 presentation。
+
+Claude Code v1 只暂存完整 `assistant.tool_use` 中、`name` 精确为 `Edit` 且字段类型完整的 mutation：
+
+```text
+{
+  semantics: "exact_mutation"
+  path
+  oldText
+  newText
+}
+```
+
+只有相同 `tool_use_id` 的 `user.tool_result` 明确非错误时才把该 mutation 写入终态 Evidence。缺失 result、错误、
+取消、字段不完整、`old_string == new_string`、`replace_all=true` 或非布尔 `replace_all` 均不生成 Diff；暂存状态随
+stream 结束丢弃。`old_string` 不含真实文件位置，因此 Core 不读取 workspace 搜索或补全它，也不生成
+`@@ -L,+L @@`。Bash/shell 文本不解析；`Write / NotebookEdit / ApplyPatch` 保持普通 Tool Activity，除非未来协议提供
+可靠完整 before/after。
 
 ### 2.2 Append-only Evidence
 
@@ -364,6 +382,8 @@ v1 presentation 冻结为：
 
 - Command 层不展示 `apply_patch` 父行或“编辑了 N 个文件”聚合层；一条可靠终态 Activity 的每个 change 是同级
   `修改 <basename>  +A −D` presentation row，独立展开当前文件 inline diff，不跳转文件、不打开独立 Review；
+- `exact_mutation` 展开只显示 `oldText/newText` 片段的 `− / +` 行，不展示文件行号、hunk header、上下文定位或任何
+  从当前 workspace 推测出的内容；同一文件连续 Edit 仍按各自 Tool identity 显示为多行，不合并净变化；
 - 多个文件 row 仍共享一条 Evidence 与一条 Canonical Activity，不获得独立 phase/outcome/排序身份；
 - Workspace 层只有 `complete` 在会话时间线追加 `Files Changed` 卡片。卡片右侧唯一动作为中性黑字、弱边框
   `View`；文件名顶格、行间无分隔，不显示时间、已保存、参与运行或底部归因 footer；

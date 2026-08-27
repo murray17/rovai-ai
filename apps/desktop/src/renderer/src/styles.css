@@ -2359,6 +2359,8 @@ button.task-event-card:focus-visible .task-card-chevron { color: var(--brand-ink
 .modified-file-diff-line.is-hunk code { padding: 0; }
 .modified-file-diff-line.is-metadata { display: block; min-width: 520px; min-height: 20px; padding: 2px 8px; color: var(--evidence-muted); background: var(--evidence-surface); }
 .modified-file-diff-line.is-metadata code { padding: 0; }
+.modified-file-diff.is-exact-mutation .modified-file-diff-line { min-width: 360px; grid-template-columns: 20px minmax(0, 1fr); }
+.modified-file-diff.is-exact-mutation .modified-file-diff-line code { border-left: 1px solid color-mix(in srgb, var(--evidence-line) 55%, transparent); }
 .tool-call-detail { position: relative; min-width: 0; margin: 5px 0 8px 24px; padding-right: 52px; }
 .tool-call-result-scroll { box-sizing: border-box; width: 100%; max-width: 100%; max-height: min(220px, 30vh); margin: 0; overflow: auto; overscroll-behavior: contain; scrollbar-gutter: stable; padding: 8px 9px; border: 1px solid var(--evidence-line); border-radius: 5px; color: var(--evidence-muted); background: var(--evidence-canvas); font: 10px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre-wrap; overflow-wrap: anywhere; scrollbar-color: var(--control-line) transparent; scrollbar-width: thin; }
 .tool-call-result-scroll:focus-visible { border-color: var(--focus); outline: 2px solid var(--focus); outline-offset: 2px; }

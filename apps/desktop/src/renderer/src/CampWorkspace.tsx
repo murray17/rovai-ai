@@ -7338,11 +7338,29 @@ function inlineDiffLines(diff: string): InlineDiffLine[] {
   return result
 }
 
-function ModifiedFileRow({ change }: {
+function exactMutationDiffLines(diff: string): InlineDiffLine[] {
+  return diff.split('\n').flatMap((rawLine): InlineDiffLine[] => {
+    if (rawLine === '') return []
+    if (rawLine.startsWith('+')) {
+      return [{ kind: 'addition', text: rawLine.slice(1), oldLine: null, newLine: null }]
+    }
+    if (rawLine.startsWith('-')) {
+      return [{ kind: 'deletion', text: rawLine.slice(1), oldLine: null, newLine: null }]
+    }
+    return []
+  })
+}
+
+function ModifiedFileRow({ change, semanticKind }: {
   change: NonNullable<ToolCallStep['fileChanges']>[number]
+  semanticKind: ToolCallStep['fileChangeSemantics']
 }): JSX.Element {
   const fileName = change.path.split('/').filter(Boolean).at(-1) ?? change.path
-  const lines = useMemo(() => inlineDiffLines(change.diff), [change.diff])
+  const exactMutation = semanticKind === 'exact_mutation'
+  const lines = useMemo(
+    () => exactMutation ? exactMutationDiffLines(change.diff) : inlineDiffLines(change.diff),
+    [change.diff, exactMutation]
+  )
   return (
     <details className="process-action modified-file-row" data-activity-domain="file">
       <summary
@@ -7361,8 +7379,19 @@ function ModifiedFileRow({ change }: {
           </svg>
         </span>
       </summary>
-      <div className="modified-file-diff" tabIndex={0} aria-label={`${change.path} 的文件差异`}>
-        {lines.map((line, index) => line.kind === 'hunk' || line.kind === 'metadata'
+      <div
+        className={`modified-file-diff${exactMutation ? ' is-exact-mutation' : ''}`}
+        tabIndex={0}
+        aria-label={`${change.path} 的${exactMutation ? '修改片段' : '文件差异'}`}
+      >
+        {lines.map((line, index) => exactMutation
+          ? (
+              <div className={`modified-file-diff-line is-${line.kind}`} key={`${index}:${line.text}`}>
+                <span aria-hidden="true">{line.kind === 'addition' ? '+' : '-'}</span>
+                <code>{line.text || ' '}</code>
+              </div>
+            )
+          : line.kind === 'hunk' || line.kind === 'metadata'
           ? (
               <div className={`modified-file-diff-line is-${line.kind}`} key={`${index}:${line.text}`}>
                 <code>{line.text}</code>
@@ -7596,7 +7625,11 @@ export function RunExecutionDisclosure({
         const step = item.step
         if (step.fileChanges?.length) {
           return step.fileChanges.map((change, index) => (
-            <ModifiedFileRow change={change} key={`${item.key}:file:${index}:${change.path}`} />
+            <ModifiedFileRow
+              change={change}
+              key={`${item.key}:file:${index}:${change.path}`}
+              semanticKind={step.fileChangeSemantics}
+            />
           ))
         }
         const fullEvidence = completeEvidence.byToolId.get(step.id)

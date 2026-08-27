@@ -4522,6 +4522,84 @@ describe('task event projections', () => {
     expect(markup).not.toContain('编辑了 2 个文件')
   })
 
+  it('renders consecutive Claude Edit mutations as separate rows without inferred hunk line numbers', () => {
+    const exactEdit = (
+      toolCallId: string,
+      oldText: string,
+      newText: string
+    ): LiveRuntimeEvent => ({
+      id: `terminal-${toolCallId}`,
+      agentRunId: 'run-claude-edits',
+      eventType: 'runtime.action',
+      payload: {
+        toolCallId,
+        status: 'completed',
+        kind: 'edit',
+        toolName: 'Edit'
+      },
+      canonical: canonicalActivity(toolCallId, {
+        activityDomain: 'file',
+        semanticKind: 'file.write',
+        toolName: 'Edit',
+        presentationHint: 'Edit',
+        phase: 'terminal',
+        outcome: 'succeeded',
+        diffProjection: {
+          schemaVersion: 1,
+          source: 'runtime_reported',
+          revision: 1,
+          sourceEvidenceIds: [`evidence-${toolCallId}`],
+          status: 'available',
+          semanticKind: 'exact_mutation',
+          entries: [{
+            path: 'apps/desktop/src/renderer/src/CampWorkspace.tsx',
+            changeKind: 'update',
+            additions: 1,
+            deletions: 1,
+            diff: `-${oldText}\n+${newText}\n`
+          }]
+        }
+      }),
+      createdAt: '2026-08-27T00:00:00Z'
+    })
+    const progress = buildLiveExecutionProgress([
+      exactEdit('toolu-edit-1', 'const enabled = false', 'const enabled = true'),
+      exactEdit('toolu-edit-2', 'const enabled = true', 'const enabled = ready')
+    ], 'run-claude-edits')
+
+    expect(progress.items).toHaveLength(2)
+    expect(progress.items).toMatchObject([
+      { key: 'tool:toolu-edit-1', step: { fileChangeSemantics: 'exact_mutation' } },
+      { key: 'tool:toolu-edit-2', step: { fileChangeSemantics: 'exact_mutation' } }
+    ])
+
+    const run: AgentRunView = {
+      id: 'run-claude-edits', campTurnId: 'turn-claude-edits', conversationId: 'conversation-claude-edits',
+      agentId: 'agent-claude', taskId: null, responsibilityKey: 'direct:agent-claude',
+      responsibilityGeneration: 0, purpose: '连续修改文件', completionRole: 'required',
+      status: 'succeeded', waitReason: null, cancelRequestedAt: null, cancelReasonCode: null,
+      cancelAcknowledgedAt: null, executionEpoch: 1, terminalResolutionSource: 'runtime_terminal',
+      terminalReasonCode: null, failure: null, runtimeModel: null,
+      permissionSemantics: 'runtime_managed_v2', invocationKind: 'direct',
+      triggerDeliveryGeneration: 0, a2aParentAgentRunId: null, a2aRootAgentRunId: null,
+      a2aDepth: 0, executionEvidenceCount: 4, hasUnsettledExternalEffects: false,
+      workspace: { path: '/repo' }, startingGitObservation: null, endingGitObservation: null,
+      version: 1, createdAt: '2026-08-27T00:00:00Z', startedAt: '2026-08-27T00:00:00Z',
+      endedAt: '2026-08-27T00:00:02Z', updatedAt: '2026-08-27T00:00:02Z'
+    }
+    const markup = renderToStaticMarkup(createElement(RunExecutionDisclosure, {
+      run, progress, campId: 'camp-1', focused: true
+    }))
+    expect(markup.match(/class="process-action modified-file-row"/g)).toHaveLength(2)
+    expect(markup.match(/modified-file-diff is-exact-mutation/g)).toHaveLength(2)
+    expect(markup).toContain('CampWorkspace.tsx 的修改片段')
+    expect(markup).toContain('const enabled = false')
+    expect(markup).toContain('const enabled = ready')
+    expect(markup).not.toContain('@@')
+    expect(markup).not.toContain('oldLine')
+    expect(markup).not.toContain('newLine')
+  })
+
   it('uses truthful public Shell command previews across Runtime adapters', () => {
     const genericShell = canonicalActivity('shell-command', {
       activityDomain: 'shell', semanticKind: 'shell.execute', toolName: null,

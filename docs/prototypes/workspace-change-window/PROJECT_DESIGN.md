@@ -103,7 +103,7 @@ item.status = completed
 | Codex app-server | `item/completed`，`fileChange.status=completed` | `changes[]` 含 `path / kind / diff` | 准入；每个 change 显示一条可独立展开的“修改 xxx”文件行 |
 | ACP：OpenCode、Copilot、Kiro、Qoder、CodeBuddy、Qwen、TRAE | `session/update` 中 `tool_call_update.status=completed` | ACP 标准 `content.type=diff` 提供 `path / oldText? / newText`，collection update 按 replace 语义累计到终态 | 协议准入；某次运行实际发送 Diff 时逐文件显示，否则保持普通 Tool Activity |
 | ACP baseline：Cursor、Kimi、Grok | 同一标准 ACP terminal ToolCall；run-level fallback 不补造 Tool | 只接纳标准 terminal `content.type=diff`，私有扩展或 Runtime 名不作为来源 | 协议准入；没有标准 Diff 时不显示文件 Activity |
-| Claude Code | assistant `tool_use` + user `tool_result` | 当前公开 Tool input 只放行 Bash command，Edit/Write 没有终态 `path + diff` 投影 | 不显示文件 Activity |
+| Claude Code | 完整 assistant `tool_use(name=Edit)` + matching 非错误 user `tool_result` | `file_path/old_string/new_string` 是一次 `exact_mutation`；不含真实文件行号或完整文件 before/after | 准入 Edit；显示单文件“修改 xxx”行，展开只显示 `−/+` 片段，不生成 `@@` |
 | Antigravity | `step_update` 到 `DONE / SUCCESS` 等终态 | 能识别 edit/write Tool 名，但公共 payload 没有可靠 `path + diff` | 不显示文件 Activity |
 
 因此 Renderer 只消费归一后的、已通过终态准入的 Evidence，不写 `if runtime === ...` 的猜测逻辑。未来某个
@@ -111,8 +111,10 @@ Adapter 补齐可靠证据时，遵循相同投影规则：一个可靠 single-f
 事件的多条 row 仍共享一条 Canonical Activity。在此之前不增加占位、`unavailable` 或推测提示。
 
 生产实现已在 Core 侧建立 terminal gate：Codex add/delete 完整内容先规范化为 unified diff；十个 ACP adapter
-共享标准 terminal Diff 累计通路；Claude/Antigravity fail closed。Renderer 只接收 Canonical typed projection，
-忽略 `file.change.updated` presentation，并把一个 Activity 的 entries 扁平显示为同级单文件 rows。
+共享标准 terminal Diff 累计通路；Claude 只接纳原生 Edit 的 matching exact mutation，其他 Tool 与 Antigravity
+fail closed。Renderer 只接收 Canonical typed projection，忽略 `file.change.updated` presentation，并把一个
+Activity 的 entries 扁平显示为同级单文件 rows。Claude exact mutation 不显示行号或 hunk；同文件连续 Edit 仍是
+多个 Tool 行。
 
 ### 5. 执行台两种承载位置
 
@@ -162,7 +164,8 @@ checkpoint 浏览器或新的全局一级页面。
 - 不在会话区为 Evidence 卡片增加连接线、事件圆点或独立时间线轨道；
 - 不在执行台增加“共享工作区观察”，也不把 Run card 分成 observation / Tool 两栏；
 - 不把 terminal file change 与 Workspace Diff 合并、去重或用当前工作区文件补全；
-- 不解析或展示 `apply_patch`，不消费 Codex `patchUpdated`，不根据 Tool 名或 shell 输出推测文件修改；
+- 不解析 Codex `apply_patch`、Codex `patchUpdated` 或 shell 输出；Claude 仅解析原生 Edit 的冻结字段，并要求 matching
+  非错误 result，Write/NotebookEdit/ApplyPatch 不作为 Diff 数据源；
 - 不为缺少可靠 terminal Evidence 的 Runtime 显示入口、占位、`unavailable` 或猜测结果；
 - 不添加“编辑了 N 个文件”聚合层，不把 presentation row 误建成新的 Canonical Activity；
 - 不创建 Operation Diff Review，不让单文件行跳转文件或 Workspace Review；

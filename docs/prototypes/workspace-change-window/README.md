@@ -9,7 +9,8 @@ last_updated: 2026-08-27
 
 这是 v1.29 terminal file-change presentation rows 与最终 `Workspace Diff` 的高还原度 HTML 设计评审稿。
 修订稿采用最新结论：Runtime 文件变更只来自可靠终态 Evidence；一条 FileChange Evidence / Canonical
-Activity 的 `changes[]` 直接扁平渲染为多条单文件行，不显示 `apply_patch`，也没有“编辑了 N 个文件”聚合层。
+Activity 的 `changes[]` 直接扁平渲染为多条单文件行，不显示 Codex `apply_patch`，也没有“编辑了 N 个文件”聚合层。
+Claude 原生 Edit 的成功 matching result 使用同一行形态，但展开只显示 exact old/new 片段，不显示推测行号或 hunk。
 完整 Diff Review 只属于 Workspace Change Window。原型以当前 Camp Workspace、默认底部执行台、条件式
 310px Inspector、Execution Drawer、Porcelain Day / Steel Night 和既有 evidence/diff token 为母版。
 
@@ -35,8 +36,8 @@ http://127.0.0.1:4173/docs/prototypes/workspace-change-window/
 - 在“会话历史 / Workspace Evidence”之间切换；
 - 在执行台“底部 / 右侧”两种既有承载位置之间切换；两处 Tool list 都占满 Run card 横向空间，且没有
   “共享工作区观察”；
-- 切换“Codex 终态 / 无可靠终态”：前者把同一 Activity 的两个 change 直接显示为两条“修改 xxx”文件行，
-  后者将两条 presentation rows 一并移除；
+- 切换“Codex 终态 / Claude Edit / 无可靠终态”：Codex 把同一 Activity 的两个 change 直接显示为两条“修改 xxx”文件行，
+  Claude Edit 显示一条无行号的 exact mutation；无可靠终态会移除全部文件 presentation rows；
 - 同时查看旧卡片 A 与新卡片 B；两张卡片都只显示 `Files Changed`、统计、顶格静态文件行和中性“View”按钮，
   没有时间、“已保存”或底部运行说明；
 - 在第一张 Workspace Evidence 卡片内展开第四个文件；

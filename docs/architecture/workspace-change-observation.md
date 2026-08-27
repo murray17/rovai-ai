@@ -48,10 +48,12 @@ first admitted Run for WindowKey
 - 路径只能相对 Run 冻结的 canonical execution root 解析。规范化和越界检查不获得文件读取权，也不以当前文件
   内容补足 Runtime 的局部数据。
 
-当前只有两种来源完成准入：Codex app-server 的 terminal `fileChange`，以及 ACP v1 terminal ToolCall 的标准
-`ToolCallContent::Diff` 累计内容。Codex add/delete 的完整文件内容在 Core 规范化为 unified diff；ACP collection
-update 按协议 replace 语义缓存到 terminal。Claude/Antigravity 没有等价终态完整内容，不解析 Edit/Write input、
-Tool 名或 shell 文本补造 diff。
+当前有三种来源完成准入：Codex app-server 的 terminal `fileChange`、ACP v1 terminal ToolCall 的标准
+`ToolCallContent::Diff` 累计内容，以及 Claude stream-json 中完整 `assistant.tool_use(name=Edit)` 与相同
+`tool_use_id` 的非错误 `user.tool_result` 配对。Codex add/delete 的完整文件内容在 Core 规范化为 unified diff；
+ACP collection update 按协议 replace 语义缓存到 terminal；Claude 只保存 `file_path/old_string/new_string` 所证明的
+`exact_mutation` 片段，不读取文件定位、不生成 hunk 行号，`replace_all` 与其他 Tool 均 fail closed。Antigravity
+仍没有等价可靠内容，不按 Tool 名或 shell 文本补造 diff。
 
 ### Window Coordinator
 
@@ -138,6 +140,8 @@ Rovai 不主动对用户仓库执行 prune。成功删除 ref 只撤销 Rovai �
   outcome 推断，也不形成可独立排序或写入的 Activity；
 - Renderer 把一条 available Activity 的 entries 扁平投影为同级 `修改 xxx` 行。每行只展开自己的 inline diff；
   不展示 `apply_patch`、文件数聚合父行或 Operation Review；
+- `exact_mutation` 只显示 `− oldText / + newText` 片段，不显示文件行号或 `@@`；同一文件的多个 Edit 保留各自
+  Tool identity 和时序，不合并为 Command 层净变化；
 - Workspace `complete` Evidence 在 Camp 会话时间线追加一张 `Files Changed` 卡片，`View` 读取不可变 blob。
   `no_changes | unavailable` 与非 Git execution root 不新增卡片，执行台不新增共享工作区观察；
 - 卡片与 View 不指定修改作者，也不显示 participant audit。结果可能包含用户编辑器、外部程序或其他并行运行；

@@ -65,24 +65,30 @@ last_updated: 2026-08-27
 
 ## 5. Command Diff 与 Canonical Activity
 
-- [x] 为 Codex app-server terminal fileChange 与全部十个 ACP v1 adapter 建立协议语义 allowlist；Claude/Antigravity fail closed；
+- [x] 为 Codex app-server terminal fileChange、全部十个 ACP v1 adapter 与 Claude 原生 Edit matching
+  tool-use/result exact mutation 建立协议语义 allowlist；Claude 其他 Tool 与 Antigravity fail closed；
 - [x] 在 Codex/ACP public normalizer 中保留内部候选，并更新 Runtime Activity Registry 与 terminal fixtures；
 - [x] 把 terminal diff 写为 append-only Evidence，在既有 Canonical Activity 上确定性归约 typed `diffProjection`；
 - [x] 验证 projection lineage、相同结论 replay 与冲突 fail-closed；
 - [x] 路径纯词法规范化、root escape/`.git`/size 拒绝不读取工作区；旧 Evidence 不做推测性回填；
+- [x] Claude Edit 只暂存字段完整且 `replace_all != true` 的 `file_path/old_string/new_string`；matching 非错误
+  `tool_result` 才发布 Evidence，失败/缺失/取消/其他 Tool 不生成 Diff，同文件连续 Edit 不合并；
+- [x] Claude Code `2.1.220` 真实 smoke 已验证 native Edit matching terminal Evidence、同 Activity available
+  projection、无 `@@` exact fragment 与实际文件更新；
 - [ ] 对支持 Runtime 逐个执行真实 terminal file-diff smoke，冻结实测版本与 wire artifact。
 
 ## 6. Presentation handoff 与验收
 
 - [x] 按 Rovai 现有视觉系统确认 HTML 设计稿、文件行、`Files Changed` 卡片与只读 View；
 - [x] presentation 复用既有 Activity identity；多个 change 只是同级 rows，不建立第二套 phase/outcome；
+- [x] `exact_mutation` 文件行只展开 `−/+` 片段，不生成 `@@` 或旧/新文件行号；
 - [x] Window presentation 只读 immutable Evidence，不归因；`no_changes/unavailable` 不生成卡片；
 - [x] 执行台不增加 Workspace observation，现有 Camp rail、placement 与 Tool list 宽度保持不变；
 - [ ] 完成 Linux/macOS/Windows Git fixture：SHA-1 与支持时的 SHA-256、linked worktree、sparse checkout、symlink、
   executable、ignored transition、nested repo、submodule、ref tamper、并发 join/close、crash/restart 与严格超限；
-- [x] 通过 `cargo test --workspace`：Rust lib 328 项、CLI 25 项、Core bin 162 项（另有 4 项手动 Runtime
+- [x] 通过 `cargo test --workspace`：Rust lib 332 项、CLI 25 项、Core bin 165 项（另有 4 项手动 Runtime
   smoke ignored）；
-- [x] 通过 TypeScript typecheck、完整 Renderer 533 项、`pnpm test`、Desktop production build、文档测试与
+- [x] 通过 TypeScript typecheck、完整 Renderer 534 项、`pnpm test`、Desktop production build、文档测试与
   diff-aware 文档门禁；
 - [x] 在 HTML 评审稿完成 Porcelain Day / Steel Night、底部/右侧执行台、文件行展开、无可靠终态隐藏与
   `View` 入口的浏览器视觉检查；

@@ -257,6 +257,11 @@ Evidence 才进入文件变更呈现。一条 Canonical Activity 的多个 chang
 也不为逐文件行创建新的 Activity identity。没有可靠终态内容时保留普通 Tool Activity，或在只剩
 `apply_patch` 实现细节时不渲染该实现行。
 
+Claude Code `Edit` 的 `exact_mutation` 沿用同一文件行，但展开内容只显示 `− oldText / + newText` 片段，不显示
+旧/新文件行号、`@@` hunk 或推测上下文；行的 `+A −D` 只统计该 mutation 的 new/old 片段行数。同一文件连续
+Edit 按各自 Tool 行和时序分别显示，不合并。Write、NotebookEdit、ApplyPatch、失败/缺失 result 与
+`replace_all=true` 继续显示普通 Tool Activity，不出现空 Diff disclosure。
+
 Git Workspace Change Window 的完成 Evidence 按 `capturedAt` 进入既有会话时间线并保留连接轨道。卡片主标题固定
 为 `Files Changed`，显示总文件数与 `+ / −`、顶格且无行分隔的完整相对路径；右侧唯一动作是黑色文字、低强调
 边框的 `View`。卡片不显示时间、“已保存”、参与运行、独立工作区或底部 metadata。每个完成 Window 生成独立

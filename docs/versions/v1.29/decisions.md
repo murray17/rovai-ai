@@ -110,7 +110,9 @@ workspace writer lease 可以强化隔离和归因，但会显著增加 v1 的�
 1. Codex 只从 `item/completed + fileChange + completed` 接纳最终 `changes[]`；不消费 started、patchUpdated、
    turn diff 或 `apply_patch` input。Codex add/delete 完整内容在 Core 规范化为 unified diff；
 2. 全部 ACP adapter 只从 terminal `tool_call_update` 的标准 `ToolCallContent::Diff` 累计内容接纳完整
-   before/after。Claude Code 与 Antigravity 没有等价终态内容，保持普通 Tool Activity；
+   before/after。Claude Code 只从完整 `assistant.tool_use(name=Edit)` 与 matching 非错误 `user.tool_result`
+   接纳 `file_path/old_string/new_string` 的 `exact_mutation`；不读文件、不生成 hunk 行号，`replace_all` 与其他 Tool
+   保持普通 Tool Activity。Antigravity 没有等价可靠内容，保持普通 Tool Activity；
 3. 一条 FileChange Evidence 与一条 Canonical Activity 可以投影多条同级 `修改 <basename> +A −D` 行；每行
    独立展开 inline diff。删除 `apply_patch` 父行和“编辑了 N 个文件”聚合层，不创建逐文件权威 Activity；
 4. 完整 Review 只从 `WorkspaceDiffCompleted → diffBlobId` 打开。会话卡片标题固定 `Files Changed`，右侧只放
@@ -120,6 +122,7 @@ workspace writer lease 可以强化隔离和归因，但会显著增加 v1 的�
 ### 后果
 
 - 非 Git 项目仍可显示 Runtime 可靠终态的 `修改 xxx` 行；Workspace 卡片仍只在 Git Window `complete` 时出现；
+- Claude 同一文件连续 Edit 保留各自 Tool identity 和片段 Diff，不被错误归并成最终净变化；
 - 一个 Runtime 没有可靠 terminal file content 时，UI 不显示占位或推测摘要；
 - 后续 Window 不覆盖旧卡片，Git refs/objects 或当前 workspace 不再参与历史读取；
 - Renderer 只消费 Canonical typed projection，不维护 Runtime-specific 分支或第二套 Activity。

@@ -446,6 +446,67 @@ mod tests {
     }
 
     #[test]
+    fn claude_edit_diff_upgrades_the_existing_tool_activity_instead_of_creating_another_one() {
+        let started = classify_evidence(
+            "run-claude",
+            1,
+            "evidence-started",
+            "runtime.action",
+            "tool_call",
+            "updated",
+            &json!({
+                "toolCallId": "toolu_edit_1",
+                "toolName": "Edit",
+                "kind": "edit",
+                "status": "in_progress"
+            }),
+        );
+        let completed = classify_evidence(
+            "run-claude",
+            1,
+            "evidence-completed",
+            "runtime.action",
+            "tool_result",
+            "completed",
+            &json!({
+                "toolCallId": "toolu_edit_1",
+                "toolName": "Edit",
+                "kind": "edit",
+                "status": "completed",
+                "runtimeDiff": {
+                    "schemaVersion": 1,
+                    "source": "runtime_reported",
+                    "status": "available",
+                    "semanticKind": "exact_mutation",
+                    "entries": [{
+                        "semantics": "exact_mutation",
+                        "path": "src/app.ts",
+                        "oldText": "false",
+                        "newText": "true"
+                    }]
+                }
+            }),
+        );
+
+        assert_eq!(started.operation_id, completed.operation_id);
+        let projection = new_projection(started, "evidence-started", 1).unwrap();
+        let projection = merge_projection(projection, completed, "evidence-completed", 2);
+        assert_eq!(projection.activity_domain, "file");
+        assert_eq!(projection.semantic_kind.as_deref(), Some("file.write"));
+        assert_eq!(projection.tool_name.as_deref(), Some("Edit"));
+        assert_eq!(projection.phase, "terminal");
+        assert_eq!(projection.outcome, "succeeded");
+        assert_eq!(
+            projection
+                .diff_projection
+                .as_ref()
+                .and_then(|diff| diff.semantic_kind.as_deref()),
+            Some("exact_mutation")
+        );
+        assert_eq!(projection.source_evidence_ids.len(), 2);
+    }
+
+    #[test]
     fn codex_command_presentation_hint_survives_completion_merge() {
         let started = classify_evidence(
             "run-1",

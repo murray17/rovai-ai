@@ -688,6 +688,9 @@ fn normalize_runtime_diff_evidence(
     let Some(candidate) = payload.get("runtimeDiff").cloned() else {
         return;
     };
+    if candidate.is_null() {
+        return;
+    }
     let execution_root = workspace_json
         .and_then(|workspace| serde_json::from_str::<Value>(workspace).ok())
         .and_then(|workspace| {
@@ -706,14 +709,16 @@ fn normalize_runtime_diff_evidence(
         "sourceEventKind": candidate.get("sourceEventKind"),
     });
     payload["runtimeDiff"] = match admitted {
-        Some(Ok(admitted)) => serde_json::json!({
-            "schemaVersion": COMMAND_DIFF_SCHEMA_VERSION,
-            "source": "runtime_reported",
-            "status": "available",
-            "semanticKind": admitted.semantic_kind,
-            "entries": admitted.entries,
-            "sourceMetadata": source,
-        }),
+        Some(Ok(admitted)) => {
+            serde_json::json!({
+                "schemaVersion": COMMAND_DIFF_SCHEMA_VERSION,
+                "source": "runtime_reported",
+                "status": "available",
+                "semanticKind": admitted.semantic_kind,
+                "entries": admitted.evidence_entries,
+                "sourceMetadata": source,
+            })
+        }
         Some(Err(reason)) => serde_json::json!({
             "schemaVersion": COMMAND_DIFF_SCHEMA_VERSION,
             "source": "runtime_reported",
@@ -1171,6 +1176,82 @@ mod tests {
             activity_kind(&json!({"item": {"type": "mcpToolCall"}})),
             "tool_call"
         );
+    }
+
+    #[test]
+    fn claude_exact_mutation_remains_append_only_evidence_and_projects_without_line_numbers() {
+        let mut started_payload = normalize_public_payload(
+            "runtime.action",
+            &json!({
+                "toolCallId": "toolu_edit_1",
+                "toolName": "Edit",
+                "status": "in_progress",
+                "kind": "edit"
+            }),
+        );
+        normalize_runtime_diff_evidence(
+            &mut started_payload,
+            Some(r#"{"executionRoot":"/repo"}"#),
+            Some("claude-code-cli"),
+            Some("1.0.100"),
+        );
+        assert!(
+            runtime_diff::projection_from_evidence(&started_payload, "evidence-edit-started")
+                .is_none(),
+            "a null started candidate must not become an unavailable terminal snapshot"
+        );
+
+        let mut payload = normalize_public_payload(
+            "runtime.action",
+            &json!({
+                "toolCallId": "toolu_edit_1",
+                "toolName": "Edit",
+                "status": "completed",
+                "kind": "edit",
+                "runtimeDiff": {
+                    "adapterKind": "claude-code-cli",
+                    "protocolFamily": "claude-stream-json",
+                    "sourceEventKind": "assistant.tool_use.Edit+user.tool_result.completed",
+                    "semanticKind": "exact_mutation",
+                    "entries": [{
+                        "semantics": "exact_mutation",
+                        "path": "/repo/src/CampWorkspace.tsx",
+                        "oldText": "const enabled = false",
+                        "newText": "const enabled = true"
+                    }]
+                }
+            }),
+        );
+        normalize_runtime_diff_evidence(
+            &mut payload,
+            Some(r#"{"executionRoot":"/repo"}"#),
+            Some("claude-code-cli"),
+            Some("1.0.100"),
+        );
+
+        assert_eq!(payload["runtimeDiff"]["status"], "available");
+        assert_eq!(payload["runtimeDiff"]["semanticKind"], "exact_mutation");
+        assert_eq!(
+            payload.pointer("/runtimeDiff/entries/0"),
+            Some(&json!({
+                "semantics": "exact_mutation",
+                "path": "src/CampWorkspace.tsx",
+                "oldText": "const enabled = false",
+                "newText": "const enabled = true"
+            }))
+        );
+        assert!(payload.pointer("/runtimeDiff/entries/0/diff").is_none());
+
+        let projection = runtime_diff::projection_from_evidence(&payload, "evidence-edit-1")
+            .expect("normalized exact mutation should project");
+        assert_eq!(projection.semantic_kind.as_deref(), Some("exact_mutation"));
+        let entry = &projection.entries.as_ref().unwrap()[0];
+        assert_eq!((entry.additions, entry.deletions), (1, 1));
+        assert_eq!(
+            entry.diff,
+            "-const enabled = false\n+const enabled = true\n"
+        );
+        assert!(!entry.diff.contains("@@"));
     }
 
     #[test]

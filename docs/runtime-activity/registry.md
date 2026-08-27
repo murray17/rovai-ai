@@ -22,7 +22,7 @@ last_updated: 2026-08-27
 | `cursor-agent` | Cursor Agent | ACP v1 | `run_level` | 仅采用 ACP 标准 Session/Prompt 终态；`cursor/update_todos`、`cursor/task`、`cursor/generate_image` 保持私有且不生成 Activity，未知 Cursor 扩展 fail closed；认证和结构化工具事件尚未完成真实 admission | 私有 request 路由、私有 notification 隔离与 Runtime-level unknown fallback fixture 已建立 | `2026.08.11-e8db854` 隔离探测通过 initialize；authenticate 超时且未取得 authenticated Session，因此无 completion/tool smoke，不声明细粒度 coverage |
 | `kimi-code-cli` | Kimi Code | ACP v1 | `run_level` | 标准 ACP Shell update 保留稳定 Tool ID、公开 command/output 与 terminal；普通 `agent_message_chunk` 原样进入 agent text Evidence，不按 provider 或 `<think>` 标签清洗；缺少结构化事件时不补造细粒度 Activity | Kimi run-level mapping、Tool chronology、generic agent-text 与 Runtime-level fallback fixture 已建立 | `kimi 0.32.0` + MiniMax M3 真实 prompt、Shell allow/deny、固定 `printf` output、cancel、cleanup 与完整十五项 Built-in CLI matrix 通过；`run_level` 只表示缺少结构化事件时不补造细粒度 Activity，不否定 Built-in transport 资格 |
 | `grok-build` | Grok Build | ACP v1 | `run_level` | 标准 ACP tool update 按既有安全归一；`_x.ai/*` notification 保持 metadata，普通 assistant text 原样进入 agent text Evidence；缺少结构化 Tool 事件时不补造细粒度 Activity | Grok run-level mapping、官方 config、generic agent-text 与 Missing-Send fixture 已建立 | macOS arm64 与 Windows x64 已分别用 `grok 1.0.5` + MiniMax-M3 通过真实 Deep Probe、AgentRun 与 cold resume；`0.2.118` 原始矩阵保留为历史证据，macOS x64 待补；Usage/Cost 不从 vendor metadata 推断 |
-| `claude-code-cli` | Claude Code | Claude stream-json + bounded stderr fallback | `fine_grained` | `tool_use.id` 是 lifecycle identity；Bash/Read/Edit/Write 等原生名称映射到既有 kind；仅 Bash 的公开 `input.command` 进入 started 与 terminal input，仅 Bash tool result 的公开 stdout/stderr 进入 output；公开 `text_delta` 进入 narration；session-bound `system/api_retry` 只投影固定 code/status、次数和等待秒数，不产生 Tool | partial + complete message 去重、started→terminal command 自包含、空输出 Bash、narration/fallback、stdout 未结束前 structured retry diagnostic 与 provider error/UUID/Session/raw stderr 不泄露 fixture 通过 | 既有 Skill turn 与 MCP projection 通过；`2.1.220` 原生 Bash command-output、公开 narration、Session continuation 与实际 `system/api_retry` 429 重试流已实证；完整展示 post-fix smoke 待运行 |
+| `claude-code-cli` | Claude Code | Claude stream-json + bounded stderr fallback | `fine_grained` | `tool_use.id` 是 lifecycle identity；Bash/Read/Edit/Write 等原生名称映射到既有 kind；仅 Bash 的公开 `input.command` 进入 started 与 terminal input，仅 Bash tool result 的公开 stdout/stderr 进入 output；完整 assistant `Edit` 暂存 `file_path/old_string/new_string`，只在 matching 非错误 user `tool_result` 时形成同 Activity 的 `exact_mutation`；公开 `text_delta` 进入 narration；session-bound `system/api_retry` 只投影固定 code/status、次数和等待秒数，不产生 Tool | partial + complete message 去重、started→terminal command 自包含、空输出 Bash、Edit success/failure/missing fields/replace-all/non-Edit、连续同文件 Edit、narration/fallback、structured retry 与私有字段不泄露 fixture 通过 | 既有 Skill turn 与 MCP projection 通过；`2.1.220` 原生 Bash command-output、公开 narration、Session continuation、实际 `system/api_retry` 429 重试流，以及单次 Edit 的 matching terminal Evidence、无 hunk exact projection 与真实文件更新均已实证 |
 | `antigravity-app` | Antigravity | Antigravity stream-json / legacy text | `run_level` | capability-gated stream-json 使用 `conversation_id + step_index` 作为结构化 tool identity；仅 Shell 工具公开 `tool_info.parameters.CommandLine` 为 `input.command`，terminal 缺失 parameters 时按相同 identity 补齐；`toolName` 保留原生 ID 但不作为标题；旧版 text 保持 run-level，私有日志不产生工具 Evidence | stream-json command/lifecycle/output、非 Shell 输入排除与 legacy fallback fixture 通过 | 既有 manual completion + Skill turn 通过；`agy 1.1.13` 原生 `run_command` output、Session continuation 与 AGY→Codex handoff smoke 通过 |
 
 Coverage 只描述 Core 实际能看到的粒度，不是产品支持等级。若某次运行没有报告结构化 tool event，
@@ -37,12 +37,13 @@ Adapter 能消费协议标准事件；某次真实运行没有发送 Diff 时仍
 | --- | --- | --- | --- |
 | Codex app-server（`codex-cli`） | Codex `item/completed`，`item.type=fileChange`、`status=completed` | `changes[] { path, kind, diff }`；update 为 unified diff，add/delete 为完整新/旧内容 | 支持；Core 统一规范化后逐 change 显示 `修改 xxx` |
 | ACP v1（`opencode-cli`、`copilot-cli`、`kiro-cli`、`qoder-cli`、`codebuddy-cli`、`qwen-code`、`trae-cn-cli`、`cursor-agent`、`kimi-code-cli`、`grok-build`） | ACP `session/update.tool_call_update`；私有 Cursor/Kimi/Grok extension 与 run-level fallback 不补造 diff | terminal 累计 `content.type=diff { path, oldText?, newText }`；只接纳标准 ACP terminal Diff | protocol-supported；某次运行没有标准 Diff 时保持原 Tool row |
-| Claude stream-json（`claude-code-cli`） | assistant `tool_use` + user `tool_result` | Edit/Write input/result 没有可证明完整的 terminal before/after | 不支持；不解析 input、不猜 patch |
+| Claude stream-json（`claude-code-cli`） | 完整 assistant `tool_use(name=Edit)` + 相同 ID 的非错误 user `tool_result` | `file_path/old_string/new_string` 证明单次 `exact_mutation`，不证明文件行号或完整文件 before/after | 支持 Edit 片段行；不读文件、不生成 `@@`，失败/缺失/取消/`replace_all` 与其他 Tool 不准入 |
 | Antigravity stream-json（`antigravity-app`） | `step_update` terminal state | step/tool 名与公开 payload 没有可证明完整的 terminal patch | 不支持；不按 edit/write 名称推测 |
 
 Codex `item/started`、`item/fileChange/patchUpdated`、`turn/diff/updated` 和原始 Tool 名 `apply_patch` 均不进入
 Command Diff。ACP `content` collection 按协议 update 的 replace 语义累计；只有成功 terminal Tool 状态才把标准
-Diff blocks 送入 append-only Evidence。Renderer 只消费 Canonical `diffProjection`，不含 Runtime 分支。
+Diff blocks 送入 append-only Evidence。Claude 不解析 Bash/shell、Write、NotebookEdit 或 ApplyPatch 输入；Edit 的
+exact mutation 也只在 matching result 后发布。Renderer 只消费 Canonical `diffProjection`，不含 Runtime 分支。
 
 ## 2026-08-24 TRAE command display 真实 smoke 记录
 
@@ -147,7 +148,15 @@ Terminal 不可用，因此不会读取 `terminalId` 或从私有 terminal 猜�
 `tool.call`。只允许 Bash `tool_use.input.command` 进入公开 input，并按 tool-use ID 同时放入 started 与 terminal
 Evidence，使没有 stdout/stderr或只加载 terminal 的命令仍可检查；
 只允许 Bash tool result 的公开 stdout/stderr 或标准公开 text result 进入 output。其它工具输入、文件内容和
-provider metadata 不公开。公开 `text_delta` 以 message/block-scoped item ID 投影为
+provider metadata 不进入普通 Tool input/output。
+
+唯一例外是内部 Command Diff 通道：完整 assistant `tool_use` 的名称精确为 `Edit`、`file_path/old_string/new_string`
+类型完整且 `replace_all` 缺失或为 false 时，Adapter 按 tool-use ID 暂存 exact mutation；matching user
+`tool_result` 明确非错误后，终态 `runtime.action` 才携带该 mutation。Evidence 保存相对 execution root 规范化后的
+`semantics/path/oldText/newText`，Canonical projection 派生 `−/+` 片段；不搜索当前文件，不输出文件行号或 hunk。
+缺 result、失败、取消、字段不完整、no-op、`replace_all=true`、Write、NotebookEdit 与 ApplyPatch 都不产生 Diff。
+
+公开 `text_delta` 以 message/block-scoped item ID 投影为
 `agent.text.delta`；只有整次 Run 没有 text delta 时，才把已经公开的 success `result` 作为 narration
 fallback。`thinking_delta`、失败 result 和 provider metadata 不进入公开 Evidence；最终 Camp Message、
 Usage 与 Session 校验维持独立边界。

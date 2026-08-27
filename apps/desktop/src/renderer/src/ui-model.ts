@@ -1,6 +1,7 @@
 import type {
   AgentRunExecutionEvidenceView,
   AgentRunView,
+  CanonicalRuntimeDiffProjectionView,
   CanonicalRuntimeActivityView,
   CoreEvent,
   NavigationCampItem,
@@ -108,6 +109,7 @@ export type ExecutionStep = {
     deletions: number
     diff: string
   }>
+  fileChangeSemantics?: CanonicalRuntimeDiffProjectionView['semanticKind']
 }
 
 export type RuntimeDiagnostic = {
@@ -418,6 +420,7 @@ export function buildLiveExecutionProgress(
       const title = executionActivityTitle(canonical, payload)
       const status = canonicalActivityStatus(canonical, activityStatus(nativeStatus, event.eventType))
       const fileChanges = canonicalFileChanges(canonical)
+      const fileChangeSemantics = fileChanges ? canonical?.diffProjection?.semanticKind : undefined
       if (nativeType === 'fileChange' && !fileChanges) continue
       if (!fileChanges && isApplyPatchPresentation(canonical, payload)) continue
       const command = stringField(item, 'command')
@@ -447,7 +450,8 @@ export function buildLiveExecutionProgress(
         activityDomain: canonical?.activityDomain ?? 'unknown',
         toolName: canonical?.toolName ?? null,
         credibility: canonical?.credibility ?? 'unknown',
-        fileChanges
+        fileChanges,
+        fileChangeSemantics
       })
       continue
     }
@@ -461,6 +465,7 @@ export function buildLiveExecutionProgress(
       const nativeStatus = stringField(payload, 'status')
       const status = canonicalActivityStatus(canonical, activityStatus(nativeStatus, event.eventType))
       const fileChanges = canonicalFileChanges(canonical)
+      const fileChangeSemantics = fileChanges ? canonical?.diffProjection?.semanticKind : undefined
       if (!fileChanges && isApplyPatchPresentation(canonical, payload)) continue
       if (shouldDeferUnresolvedShellActivity(canonical, title, status)) continue
       upsertStep({
@@ -471,7 +476,8 @@ export function buildLiveExecutionProgress(
         activityDomain: canonical?.activityDomain ?? 'unknown',
         toolName: canonical?.toolName ?? null,
         credibility: canonical?.credibility ?? 'unknown',
-        fileChanges
+        fileChanges,
+        fileChangeSemantics
       })
       continue
     }

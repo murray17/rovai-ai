@@ -12,7 +12,8 @@ last_updated: 2026-08-27
 # Rovai-ai v1.29：Command Diff 与 Workspace Change Window
 
 > 当前状态：产品、安全与 UI 边界已确认，Core/Renderer 主路径已实现并通过定向回归，跨平台 Git fixture、
-> 真实 Runtime file-diff smoke 与删除/恢复长尾仍待补齐。本版本只声明两层变更观察：Runtime 对单个
+> Codex/ACP 真实 Runtime file-diff smoke 与删除/恢复长尾仍待补齐；Claude Code `2.1.220` 原生 Edit smoke 已通过。
+> 本版本只声明两层变更观察：Runtime 对单个
 > Operation 明确报告的 Command Diff，以及当前 Camp、精确 execution root 内一组重叠 Run 之间的
 > Workspace Change Window Diff。后者是 Git 工作区的有界净变化观察，不是对 Agent 的因果归因。
 
@@ -49,7 +50,7 @@ last_updated: 2026-08-27
 - Git 观察始终 fail-open：baseline 或 final 失败、超时、仓库身份变化、ref 缺失/漂移或超限时将 Window 标记为
   `unavailable`，普通文件工作继续，且不事后重新扫描猜测旧边界；
 - 非 Git execution root 不创建 Window，也不伪造 not-applicable 持久对象。
-- Codex 与 ACP 的可靠终态文件 Evidence 扁平显示为同级 `修改 xxx` 行；完整 Review 只属于会话中的
+- Codex、ACP 与 Claude Edit 的可靠终态文件 Evidence 扁平显示为同级 `修改 xxx` 行；完整 Review 只属于会话中的
   `Files Changed` 历史卡片。
 
 ## 明确不做
@@ -79,8 +80,8 @@ last_updated: 2026-08-27
 - `Files Changed` 卡片只读完成 Evidence，后续 Window、当前 workspace 或临时 ref 清理不改变旧卡片；
 - presentation 不把 Window 结果归因给单个 Run/Agent；`externalWriterObserved` 只表示 Core 观察到的其他 Rovai
   运行发生物理范围重叠，不声称探测所有外部写入者；
-- Codex terminal fileChange 与十个 ACP adapter 的标准 Diff 通路有 fixture；Claude/Antigravity 因缺少等价终态内容
-  明确 fail closed。
+- Codex terminal fileChange、十个 ACP adapter 的标准 Diff 通路，以及 Claude 原生 Edit 的 matching
+  tool-use/result `exact_mutation` 均有 fixture；Claude 其他 Tool 与 Antigravity 因缺少等价可靠内容明确 fail closed。
 
 ## 跨版本文档影响
 
@@ -91,8 +92,8 @@ last_updated: 2026-08-27
 | Contracts | 已更新 | [Workspace Change Observation v1](../../contracts/workspace-change-observation-v1.md)定义 Command Diff projection、Window 字段、状态、授权、捕获、ref 和读取语义。 |
 | Architecture | 已更新 | [Workspace Change Observation](../../architecture/workspace-change-observation.md)定义 Evidence、Window Coordinator、Git capture、Managed Blob 与授权读取的职责组合；[基础架构不变量](../../architecture/foundational-invariants.md#camp-workspace)补充长期边界。 |
 | UI | 已更新 | HTML 评审稿、Canonical Activity presentation rows、`Files Changed` 卡片与只读 View 已按现有 Camp/Execution 样式实现；其他布局不变。 |
-| Runtime Activity | 已更新 | Registry 记录 Codex terminal fileChange、ACP terminal standard Diff 和 Claude/Antigravity fail-closed 边界。 |
-| Runtime compatibility | 已更新 | 13 个 adapter 均已按实际协议族归类；当前代码 fixture 覆盖 Codex、十个 ACP adapter 与两个不支持的 stream-json adapter，真实 file-diff smoke 仍待补。 |
+| Runtime Activity | 已更新 | Registry 记录 Codex terminal fileChange、ACP terminal standard Diff、Claude Edit exact mutation 和 Antigravity fail-closed 边界。 |
+| Runtime compatibility | 已更新 | 13 个 adapter 均已按实际协议族归类；当前代码 fixture 覆盖 Codex、十个 ACP adapter、Claude Edit 与 Antigravity negative gate；Claude Code `2.1.220` Edit 已完成真实 smoke，Codex/ACP 真实 file-diff smoke 仍待补。 |
 | Documentation routing | 已更新 | 文档总导航、Architecture/Contract 索引与当前决定导航已增加本版本的当前入口。 |
 | Root README | 确认无需更新 | 当前仍为 in-progress，且不改变项目定位或已交付的常青能力声明。 |
 

@@ -528,6 +528,8 @@
     .file-change-diff-line.remove > span:first-child { color: var(--diff-remove); font-weight: 760; }
     .file-change-diff-line.hunk { display: block; min-width: 570px; min-height: 23px; padding: 4px 8px; color: var(--evidence-muted); background: var(--diff-hunk-soft); }
     .file-change-diff-line.hunk code { padding: 0; }
+    .file-change-code.exact-mutation .file-change-diff-line { min-width: 360px; grid-template-columns: 18px minmax(0, 1fr); }
+    .file-change-code.exact-mutation .file-change-diff-line code { border-left: 1px solid color-mix(in srgb, var(--evidence-line) 55%, transparent); }
     .plus { color: var(--diff-add); }
     .minus { color: var(--diff-remove); }
     .run-processing { display: flex; align-items: center; gap: 7px; margin-top: 7px; color: var(--muted); font-size: 9px; }
@@ -703,6 +705,7 @@
         <span>Runtime 事件</span>
         <select id="fileEventSelect" class="prototype-select" aria-label="Runtime 文件事件样例">
           <option value="codex_terminal">Codex 终态</option>
+          <option value="claude_edit">Claude Edit</option>
           <option value="none">无可靠终态</option>
         </select>
       </div>
@@ -1149,6 +1152,22 @@
       ]
     };
 
+    const claudeEditFileChange = {
+      evidenceId: 'evidence claude-edit 6f31…',
+      canonicalActivityId: 'activity toolu-edit-6f31…',
+      sourceMethod: 'assistant.tool_use.Edit+user.tool_result',
+      toolName: 'Edit',
+      resultStatus: 'completed',
+      semantics: 'exact_mutation',
+      changes: [{
+        path: 'apps/desktop/src/renderer/src/CampWorkspace.tsx', kind: 'M', additions: 1, deletions: 1,
+        lines: [
+          { kind: 'remove', text: 'const enabled = false' },
+          { kind: 'add', text: 'const enabled = true' }
+        ]
+      }]
+    };
+
     const sceneButtons = [...document.querySelectorAll('[data-view]')];
     const themeButtons = [...document.querySelectorAll('[data-theme-value]')];
     const placementButtons = [...document.querySelectorAll('[data-placement]')];
@@ -1189,12 +1208,21 @@
         const isReliableCodexTerminal = event?.sourceMethod === 'item/completed'
           && event?.itemType === 'fileChange'
           && event?.itemStatus === 'completed';
-        if (!isReliableCodexTerminal || !event.changes?.length) return;
+        const isReliableClaudeEdit = event?.sourceMethod === 'assistant.tool_use.Edit+user.tool_result'
+          && event?.toolName === 'Edit'
+          && event?.resultStatus === 'completed'
+          && event?.semantics === 'exact_mutation';
+        if ((!isReliableCodexTerminal && !isReliableClaudeEdit) || !event.changes?.length) return;
 
         const rows = event.changes.map((file, index) => {
           const pathParts = file.path.split('/');
           const base = pathParts.pop();
           const diffLines = file.lines.map((line) => {
+            if (isReliableClaudeEdit) {
+              const sign = line.kind === 'add' ? '+' : '-';
+              const spokenKind = line.kind === 'add' ? '新增片段' : '删除片段';
+              return `<div class="file-change-diff-line ${escapeHtml(line.kind)}" aria-label="${spokenKind}：${escapeHtml(line.text)}"><span aria-hidden="true">${sign}</span><code>${escapeHtml(line.text || ' ')}</code></div>`;
+            }
             if (line.kind === 'hunk') {
               return `<div class="file-change-diff-line hunk"><code>${escapeHtml(line.text)}</code></div>`;
             }
@@ -1204,7 +1232,9 @@
             return `<div class="file-change-diff-line ${escapeHtml(line.kind)}" aria-label="${escapeHtml(ariaLabel)}"><span aria-hidden="true">${sign}</span><span aria-hidden="true">${escapeHtml(line.old)}</span><span aria-hidden="true">${escapeHtml(line.next)}</span><code>${escapeHtml(line.text || ' ')}</code></div>`;
           }).join('');
           const summaryLabel = `修改 ${file.path}，新增 ${file.additions} 行，删除 ${file.deletions} 行`;
-          return `<details class="file-change-row" data-evidence-id="${escapeHtml(event.evidenceId)}" data-canonical-activity-id="${escapeHtml(event.canonicalActivityId)}" data-change-index="${index}"><summary class="file-change-row-summary" aria-label="${escapeHtml(summaryLabel)}"><span class="file-change-icon" aria-hidden="true"><svg viewBox="0 0 16 16" focusable="false"><path d="M4 1.75h5.1L12.5 5v9.25H4z"/><path d="M9 1.9V5h3.2M6 8h4.4M6 10.5h3.3"/></svg></span><span class="file-change-title" title="${escapeHtml(file.path)}">修改 <code>${escapeHtml(base)}</code></span><span class="file-change-file-stats"><span class="plus">+${file.additions}</span><span class="minus">−${file.deletions}</span></span><span class="file-change-disclosure" aria-hidden="true"><svg class="icon" viewBox="0 0 24 24"><path d="m7 10 5 5 5-5"/></svg></span></summary><div class="file-change-row-body"><div class="file-change-code" tabindex="0" aria-label="${escapeHtml(file.path)} 的终态差异">${diffLines}</div></div></details>`;
+          const diffClass = isReliableClaudeEdit ? 'file-change-code exact-mutation' : 'file-change-code';
+          const diffLabel = isReliableClaudeEdit ? `${file.path} 的修改片段` : `${file.path} 的终态差异`;
+          return `<details class="file-change-row" data-evidence-id="${escapeHtml(event.evidenceId)}" data-canonical-activity-id="${escapeHtml(event.canonicalActivityId)}" data-change-index="${index}"><summary class="file-change-row-summary" aria-label="${escapeHtml(summaryLabel)}"><span class="file-change-icon" aria-hidden="true"><svg viewBox="0 0 16 16" focusable="false"><path d="M4 1.75h5.1L12.5 5v9.25H4z"/><path d="M9 1.9V5h3.2M6 8h4.4M6 10.5h3.3"/></svg></span><span class="file-change-title" title="${escapeHtml(file.path)}">修改 <code>${escapeHtml(base)}</code></span><span class="file-change-file-stats"><span class="plus">+${file.additions}</span><span class="minus">−${file.deletions}</span></span><span class="file-change-disclosure" aria-hidden="true"><svg class="icon" viewBox="0 0 24 24"><path d="m7 10 5 5 5-5"/></svg></span></summary><div class="file-change-row-body"><div class="${diffClass}" tabindex="0" aria-label="${escapeHtml(diffLabel)}">${diffLines}</div></div></details>`;
         }).join('');
         host.innerHTML = rows;
       });
@@ -1363,7 +1393,11 @@
 
     function render() {
       renderContext();
-      renderTerminalFileChange(fileEventMode === 'codex_terminal' ? codexTerminalFileChange : null);
+      renderTerminalFileChange(fileEventMode === 'codex_terminal'
+        ? codexTerminalFileChange
+        : fileEventMode === 'claude_edit'
+          ? claudeEditFileChange
+          : null);
       renderReview();
     }
 

@@ -1203,7 +1203,7 @@ export interface CanonicalRuntimeDiffProjectionView {
   revision: number
   sourceEvidenceIds: string[]
   status: 'available' | 'unavailable' | 'conflict'
-  semanticKind?: 'unified_diff_snapshot' | 'complete_before_after'
+  semanticKind?: 'unified_diff_snapshot' | 'complete_patch_snapshot' | 'exact_mutation' | 'complete_before_after'
   entries?: CanonicalRuntimeDiffEntryView[]
   safeReasonCode?: string
 }

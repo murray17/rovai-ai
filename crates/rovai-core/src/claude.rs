@@ -808,6 +808,7 @@ struct ClaudeCodeStreamState {
     started_tools: HashSet<String>,
     terminal_tools: HashSet<String>,
     tool_inputs: HashMap<String, Value>,
+    exact_edit_mutations: HashMap<String, Value>,
     api_retry_attempts: HashSet<(u64, u64)>,
 }
 
@@ -1091,6 +1092,13 @@ fn normalize_claude_runtime_events(
                 if let Some(input) = public_claude_tool_input(&tool_name, block.get("input")) {
                     state.tool_inputs.insert(tool_use_id.clone(), input);
                 }
+                if let Some(mutation) = claude_exact_edit_mutation(&tool_name, block.get("input")) {
+                    state
+                        .exact_edit_mutations
+                        .insert(tool_use_id.clone(), mutation);
+                } else {
+                    state.exact_edit_mutations.remove(&tool_use_id);
+                }
                 if let Some(event) = claude_tool_started(state, tool_use_id, tool_name) {
                     normalized.push(event);
                 }
@@ -1126,6 +1134,7 @@ fn normalize_claude_runtime_events(
                         .pointer("/tool_use_result/is_error")
                         .and_then(Value::as_bool)
                         == Some(true);
+                let reliably_non_error = claude_tool_result_is_reliably_non_error(event, block);
                 let output = tool_name
                     .as_deref()
                     .filter(|name| name.eq_ignore_ascii_case("bash"))
@@ -1133,17 +1142,28 @@ fn normalize_claude_runtime_events(
                 let input = state.tool_inputs.get(&tool_use_id).cloned();
                 let kind = tool_name.as_deref().map(claude_tool_kind).unwrap_or("tool");
                 let title = tool_name.clone();
+                let exact_mutation = state.exact_edit_mutations.remove(&tool_use_id);
+                let mut payload = serde_json::json!({
+                    "toolCallId": tool_use_id,
+                    "toolName": tool_name,
+                    "status": if failed { "failed" } else { "completed" },
+                    "kind": kind,
+                    "title": title,
+                    "input": input,
+                    "output": output,
+                });
+                if reliably_non_error && let Some(exact_mutation) = exact_mutation {
+                    payload["runtimeDiff"] = serde_json::json!({
+                        "adapterKind": "claude-code-cli",
+                        "protocolFamily": "claude-stream-json",
+                        "sourceEventKind": "assistant.tool_use.Edit+user.tool_result.completed",
+                        "semanticKind": "exact_mutation",
+                        "entries": [exact_mutation],
+                    });
+                }
                 normalized.push(ClaudeCodeRuntimeEvent {
                     event_type: "runtime.action",
-                    payload: serde_json::json!({
-                        "toolCallId": tool_use_id,
-                        "toolName": tool_name,
-                        "status": if failed { "failed" } else { "completed" },
-                        "kind": kind,
-                        "title": title,
-                        "input": input,
-                        "output": output,
-                    }),
+                    payload,
                 });
             }
         }
@@ -1213,6 +1233,32 @@ fn public_claude_tool_input(tool_name: &str, input: Option<&Value>) -> Option<Va
         .and_then(Value::as_str)
         .filter(|command| !command.trim().is_empty())
         .map(|command| Value::String(command.to_string()))
+}
+
+fn claude_exact_edit_mutation(tool_name: &str, input: Option<&Value>) -> Option<Value> {
+    if tool_name != "Edit" {
+        return None;
+    }
+    let input = input?.as_object()?;
+    let path = input
+        .get("file_path")?
+        .as_str()
+        .filter(|path| !path.trim().is_empty())?;
+    let old_text = input.get("old_string")?.as_str()?;
+    let new_text = input.get("new_string")?.as_str()?;
+    if old_text == new_text {
+        return None;
+    }
+    match input.get("replace_all") {
+        None | Some(Value::Bool(false)) => {}
+        Some(Value::Bool(true)) | Some(_) => return None,
+    }
+    Some(serde_json::json!({
+        "semantics": "exact_mutation",
+        "path": path,
+        "oldText": old_text,
+        "newText": new_text,
+    }))
 }
 
 fn claude_tool_kind(tool_name: &str) -> &'static str {
@@ -1287,6 +1333,15 @@ fn public_claude_tool_result_text(value: Option<&Value>) -> Option<String> {
         }
         _ => None,
     }
+}
+
+fn claude_tool_result_is_reliably_non_error(event: &Value, tool_result: &Value) -> bool {
+    [
+        tool_result.get("is_error"),
+        event.pointer("/tool_use_result/is_error"),
+    ]
+    .into_iter()
+    .all(|value| matches!(value, None | Some(Value::Bool(false))))
 }
 
 fn nonempty_string(value: Option<&Value>) -> Option<String> {
@@ -2095,6 +2150,266 @@ exit 1
             .is_err(),
             "another Session must be fenced"
         );
+    }
+
+    #[test]
+    fn successful_native_edit_result_emits_one_exact_mutation_on_the_existing_tool_activity() {
+        let session_id = "0bdd2166-d420-40c6-94be-70b93eb290c5";
+        let mut state = ClaudeCodeStreamState::default();
+        let started = normalize_claude_runtime_events(
+            &json!({
+                "type": "assistant",
+                "session_id": session_id,
+                "message": {"content": [{
+                    "type": "tool_use",
+                    "id": "toolu_edit_1",
+                    "name": "Edit",
+                    "input": {
+                        "file_path": "/repo/src/CampWorkspace.tsx",
+                        "old_string": "const enabled = false",
+                        "new_string": "const enabled = true",
+                        "provider_private": "must-not-leak"
+                    }
+                }]}
+            }),
+            session_id,
+            &mut state,
+        )
+        .expect("assistant Edit should normalize");
+        assert_eq!(started.len(), 1);
+        assert_eq!(started[0].payload["toolCallId"], "toolu_edit_1");
+        assert_eq!(started[0].payload["status"], "in_progress");
+        assert!(started[0].payload["input"].is_null());
+        assert!(started[0].payload.get("runtimeDiff").is_none());
+
+        let completed = normalize_claude_runtime_events(
+            &json!({
+                "type": "user",
+                "session_id": session_id,
+                "message": {"content": [{
+                    "type": "tool_result",
+                    "tool_use_id": "toolu_edit_1",
+                    "content": "updated"
+                }]}
+            }),
+            session_id,
+            &mut state,
+        )
+        .expect("successful Edit result should normalize");
+        assert_eq!(completed.len(), 1);
+        let payload = &completed[0].payload;
+        assert_eq!(payload["toolCallId"], "toolu_edit_1");
+        assert_eq!(payload["status"], "completed");
+        assert_eq!(payload["toolName"], "Edit");
+        assert_eq!(
+            payload.pointer("/runtimeDiff/semanticKind"),
+            Some(&json!("exact_mutation"))
+        );
+        assert_eq!(
+            payload.pointer("/runtimeDiff/entries/0/path"),
+            Some(&json!("/repo/src/CampWorkspace.tsx"))
+        );
+        assert_eq!(
+            payload.pointer("/runtimeDiff/entries/0/oldText"),
+            Some(&json!("const enabled = false"))
+        );
+        let encoded = serde_json::to_string(payload).expect("payload should serialize");
+        assert!(!encoded.contains("provider_private"));
+        assert!(!encoded.contains("must-not-leak"));
+    }
+
+    #[test]
+    fn failed_incomplete_replace_all_and_non_edit_tools_never_emit_exact_mutation() {
+        let session_id = "0bdd2166-d420-40c6-94be-70b93eb290c5";
+        let cases = [
+            (
+                "toolu_failed",
+                "Edit",
+                json!({
+                    "file_path": "/repo/src/app.ts",
+                    "old_string": "before",
+                    "new_string": "after"
+                }),
+                true,
+            ),
+            (
+                "toolu_replace_all",
+                "Edit",
+                json!({
+                    "file_path": "/repo/src/app.ts",
+                    "old_string": "before",
+                    "new_string": "after",
+                    "replace_all": true
+                }),
+                false,
+            ),
+            (
+                "toolu_incomplete",
+                "Edit",
+                json!({
+                    "file_path": "/repo/src/app.ts",
+                    "new_string": "after"
+                }),
+                false,
+            ),
+            (
+                "toolu_write",
+                "Write",
+                json!({
+                    "file_path": "/repo/src/app.ts",
+                    "content": "complete new file"
+                }),
+                false,
+            ),
+            (
+                "toolu_notebook",
+                "NotebookEdit",
+                json!({
+                    "notebook_path": "/repo/notebook.ipynb",
+                    "new_source": "print('updated')"
+                }),
+                false,
+            ),
+            (
+                "toolu_apply_patch",
+                "ApplyPatch",
+                json!({"patch": "*** Begin Patch\nprivate patch\n*** End Patch"}),
+                false,
+            ),
+        ];
+
+        for (tool_use_id, tool_name, input, failed) in cases {
+            let mut state = ClaudeCodeStreamState::default();
+            normalize_claude_runtime_events(
+                &json!({
+                    "type": "assistant",
+                    "session_id": session_id,
+                    "message": {"content": [{
+                        "type": "tool_use",
+                        "id": tool_use_id,
+                        "name": tool_name,
+                        "input": input
+                    }]}
+                }),
+                session_id,
+                &mut state,
+            )
+            .expect("Tool start should normalize");
+            let completed = normalize_claude_runtime_events(
+                &json!({
+                    "type": "user",
+                    "session_id": session_id,
+                    "message": {"content": [{
+                        "type": "tool_result",
+                        "tool_use_id": tool_use_id,
+                        "is_error": failed,
+                        "content": if failed { "cancelled" } else { "completed" }
+                    }]}
+                }),
+                session_id,
+                &mut state,
+            )
+            .expect("Tool result should normalize");
+            assert_eq!(completed.len(), 1, "{tool_use_id}");
+            assert!(
+                completed[0].payload.get("runtimeDiff").is_none(),
+                "{tool_use_id} must remain an ordinary Tool Activity"
+            );
+        }
+
+        let mut malformed_result_state = ClaudeCodeStreamState::default();
+        normalize_claude_runtime_events(
+            &json!({
+                "type": "assistant",
+                "session_id": session_id,
+                "message": {"content": [{
+                    "type": "tool_use",
+                    "id": "toolu_malformed_result",
+                    "name": "Edit",
+                    "input": {
+                        "file_path": "/repo/src/app.ts",
+                        "old_string": "before",
+                        "new_string": "after"
+                    }
+                }]}
+            }),
+            session_id,
+            &mut malformed_result_state,
+        )
+        .unwrap();
+        let malformed_result = normalize_claude_runtime_events(
+            &json!({
+                "type": "user",
+                "session_id": session_id,
+                "message": {"content": [{
+                    "type": "tool_result",
+                    "tool_use_id": "toolu_malformed_result",
+                    "is_error": "false",
+                    "content": "ambiguous"
+                }]}
+            }),
+            session_id,
+            &mut malformed_result_state,
+        )
+        .unwrap();
+        assert!(malformed_result[0].payload.get("runtimeDiff").is_none());
+    }
+
+    #[test]
+    fn consecutive_edits_of_one_file_keep_distinct_tool_identities() {
+        let session_id = "0bdd2166-d420-40c6-94be-70b93eb290c5";
+        let mut state = ClaudeCodeStreamState::default();
+        let mut completed_ids = Vec::new();
+        for (tool_use_id, old_text, new_text) in [
+            ("toolu_edit_first", "false", "true"),
+            ("toolu_edit_second", "true", "enabled"),
+        ] {
+            normalize_claude_runtime_events(
+                &json!({
+                    "type": "assistant",
+                    "session_id": session_id,
+                    "message": {"content": [{
+                        "type": "tool_use",
+                        "id": tool_use_id,
+                        "name": "Edit",
+                        "input": {
+                            "file_path": "/repo/src/app.ts",
+                            "old_string": old_text,
+                            "new_string": new_text
+                        }
+                    }]}
+                }),
+                session_id,
+                &mut state,
+            )
+            .expect("Edit start should normalize");
+            let completed = normalize_claude_runtime_events(
+                &json!({
+                    "type": "user",
+                    "session_id": session_id,
+                    "message": {"content": [{
+                        "type": "tool_result",
+                        "tool_use_id": tool_use_id,
+                        "content": "updated"
+                    }]}
+                }),
+                session_id,
+                &mut state,
+            )
+            .expect("Edit result should normalize");
+            assert_eq!(completed.len(), 1);
+            assert_eq!(
+                completed[0].payload.pointer("/runtimeDiff/entries/0/path"),
+                Some(&json!("/repo/src/app.ts"))
+            );
+            completed_ids.push(
+                completed[0].payload["toolCallId"]
+                    .as_str()
+                    .unwrap()
+                    .to_string(),
+            );
+        }
+        assert_eq!(completed_ids, ["toolu_edit_first", "toolu_edit_second"]);
     }
 
     #[tokio::test]

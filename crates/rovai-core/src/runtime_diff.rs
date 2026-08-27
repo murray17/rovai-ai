@@ -40,6 +40,16 @@ pub struct CommandDiffProjection {
 pub struct AdmittedCommandDiff {
     pub semantic_kind: String,
     pub entries: Vec<NormalizedDiffEntry>,
+    pub evidence_entries: Value,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+struct ExactMutationEvidenceEntry {
+    semantics: String,
+    path: String,
+    old_text: String,
+    new_text: String,
 }
 
 pub fn admit_runtime_diff(
@@ -93,6 +103,11 @@ fn admit_candidate(
                 && source_event_kind == "session/update.tool_call_update.completed"
                 && semantic_kind == "complete_before_after"
         }
+        AdapterKind::ClaudeCodeCli => {
+            protocol_family == "claude-stream-json"
+                && source_event_kind == "assistant.tool_use.Edit+user.tool_result.completed"
+                && semantic_kind == "exact_mutation"
+        }
         _ => false,
     };
     if !admitted_source {
@@ -105,6 +120,9 @@ fn admit_candidate(
         .ok_or("runtime_diff_entries_invalid")?;
     if raw_entries.is_empty() || raw_entries.len() > MAX_DIFF_FILES {
         return Err("runtime_diff_file_limit");
+    }
+    if semantic_kind == "exact_mutation" {
+        return admit_exact_mutations(raw_entries, execution_root);
     }
     let mut total_bytes = 0_usize;
     let mut entries = Vec::with_capacity(raw_entries.len());
@@ -186,6 +204,8 @@ fn admit_candidate(
             diff,
         });
     }
+    let evidence_entries =
+        serde_json::to_value(&entries).map_err(|_| "runtime_diff_entries_invalid")?;
     Ok(AdmittedCommandDiff {
         semantic_kind: if semantic_kind == "codex_file_change_snapshot" {
             "unified_diff_snapshot".to_string()
@@ -193,6 +213,82 @@ fn admit_candidate(
             semantic_kind.to_string()
         },
         entries,
+        evidence_entries,
+    })
+}
+
+fn admit_exact_mutations(
+    raw_entries: &[Value],
+    execution_root: &Path,
+) -> Result<AdmittedCommandDiff, &'static str> {
+    let mut total_bytes = 0_usize;
+    let mut evidence_entries = Vec::with_capacity(raw_entries.len());
+    let mut projection_entries = Vec::with_capacity(raw_entries.len());
+    for raw in raw_entries {
+        if raw.get("semantics").and_then(Value::as_str) != Some("exact_mutation") {
+            return Err("runtime_diff_semantics_invalid");
+        }
+        for replace_all in [raw.get("replace_all"), raw.get("replaceAll")] {
+            match replace_all {
+                None | Some(Value::Bool(false)) => {}
+                Some(Value::Bool(true)) | Some(_) => {
+                    return Err("runtime_diff_replace_all_unsupported");
+                }
+            }
+        }
+        let raw_path = raw
+            .get("path")
+            .and_then(Value::as_str)
+            .ok_or("runtime_diff_path_invalid")?;
+        let path = normalize_reported_path(execution_root, raw_path)
+            .ok_or("runtime_diff_path_outside_root")?;
+        let old_text = raw
+            .get("oldText")
+            .and_then(Value::as_str)
+            .ok_or("runtime_diff_content_invalid")?;
+        let new_text = raw
+            .get("newText")
+            .and_then(Value::as_str)
+            .ok_or("runtime_diff_content_invalid")?;
+        if old_text == new_text {
+            return Err("runtime_diff_no_changes");
+        }
+        let source_bytes = old_text
+            .len()
+            .checked_add(new_text.len())
+            .ok_or("runtime_diff_size_limit")?;
+        if source_bytes > MAX_SINGLE_DIFF_BYTES {
+            return Err("runtime_diff_item_limit");
+        }
+        total_bytes = total_bytes
+            .checked_add(source_bytes)
+            .ok_or("runtime_diff_size_limit")?;
+        if total_bytes > MAX_DIFF_BYTES {
+            return Err("runtime_diff_size_limit");
+        }
+        let diff = exact_mutation_fragment(old_text, new_text);
+        if diff.len() > MAX_SINGLE_DIFF_BYTES {
+            return Err("runtime_diff_item_limit");
+        }
+        evidence_entries.push(ExactMutationEvidenceEntry {
+            semantics: "exact_mutation".to_string(),
+            path: path.clone(),
+            old_text: old_text.to_string(),
+            new_text: new_text.to_string(),
+        });
+        projection_entries.push(NormalizedDiffEntry {
+            path,
+            change_kind: "update".to_string(),
+            additions: fragment_line_count(new_text),
+            deletions: fragment_line_count(old_text),
+            diff,
+        });
+    }
+    Ok(AdmittedCommandDiff {
+        semantic_kind: "exact_mutation".to_string(),
+        entries: projection_entries,
+        evidence_entries: serde_json::to_value(evidence_entries)
+            .map_err(|_| "runtime_diff_entries_invalid")?,
     })
 }
 
@@ -350,6 +446,36 @@ fn append_unified_line(output: &mut String, prefix: char, line: &str) {
     }
 }
 
+fn fragment_line_count(value: &str) -> u64 {
+    if value.is_empty() {
+        0
+    } else {
+        u64::try_from(value.split_inclusive('\n').count()).unwrap_or(u64::MAX)
+    }
+}
+
+fn exact_mutation_fragment(old_text: &str, new_text: &str) -> String {
+    let mut output = String::with_capacity(
+        old_text
+            .len()
+            .saturating_add(new_text.len())
+            .saturating_add(fragment_line_count(old_text) as usize)
+            .saturating_add(fragment_line_count(new_text) as usize),
+    );
+    append_exact_fragment_lines(&mut output, '-', old_text);
+    append_exact_fragment_lines(&mut output, '+', new_text);
+    output
+}
+
+fn append_exact_fragment_lines(output: &mut String, prefix: char, text: &str) {
+    for line in text.split_inclusive('\n') {
+        output.push(prefix);
+        let content = line.strip_suffix('\n').unwrap_or(line);
+        output.push_str(content.strip_suffix('\r').unwrap_or(content));
+        output.push('\n');
+    }
+}
+
 pub fn projection_from_admitted(
     admitted: AdmittedCommandDiff,
     evidence_id: &str,
@@ -379,12 +505,32 @@ pub fn projection_from_evidence(
     match diff.get("status").and_then(Value::as_str) {
         Some("available") => {
             let semantic_kind = diff.get("semanticKind")?.as_str()?.to_string();
-            let entries =
+            let entries = if semantic_kind == "exact_mutation" {
+                let evidence_entries = serde_json::from_value::<Vec<ExactMutationEvidenceEntry>>(
+                    diff.get("entries")?.clone(),
+                )
+                .ok()?;
+                evidence_entries
+                    .into_iter()
+                    .map(|entry| {
+                        (entry.semantics == "exact_mutation" && entry.old_text != entry.new_text)
+                            .then(|| NormalizedDiffEntry {
+                                path: entry.path,
+                                change_kind: "update".to_string(),
+                                additions: fragment_line_count(&entry.new_text),
+                                deletions: fragment_line_count(&entry.old_text),
+                                diff: exact_mutation_fragment(&entry.old_text, &entry.new_text),
+                            })
+                    })
+                    .collect::<Option<Vec<_>>>()?
+            } else {
                 serde_json::from_value::<Vec<NormalizedDiffEntry>>(diff.get("entries")?.clone())
-                    .ok()?;
+                    .ok()?
+            };
             Some(projection_from_admitted(
                 AdmittedCommandDiff {
                     semantic_kind,
+                    evidence_entries: diff.get("entries")?.clone(),
                     entries,
                 },
                 evidence_id,
@@ -622,23 +768,121 @@ mod tests {
     }
 
     #[test]
-    fn stream_json_runtimes_cannot_promote_tool_inputs_into_diff_evidence() {
-        for adapter in [AdapterKind::ClaudeCodeCli, AdapterKind::AntigravityApp] {
+    fn claude_successful_edit_is_admitted_as_an_exact_mutation_without_fake_hunks() {
+        let payload = json!({
+            "runtimeDiff": {
+                "adapterKind": "claude-code-cli",
+                "protocolFamily": "claude-stream-json",
+                "sourceEventKind": "assistant.tool_use.Edit+user.tool_result.completed",
+                "semanticKind": "exact_mutation",
+                "entries": [{
+                    "semantics": "exact_mutation",
+                    "path": "/repo/src/app.ts",
+                    "oldText": "const enabled = false",
+                    "newText": "const enabled = true"
+                }]
+            }
+        });
+        let admitted = admit_runtime_diff(&payload, Path::new("/repo"), Some("claude-code-cli"))
+            .expect("candidate should be present")
+            .expect("Claude Edit exact mutation should be admitted");
+
+        assert_eq!(admitted.semantic_kind, "exact_mutation");
+        assert_eq!(admitted.entries[0].path, "src/app.ts");
+        assert_eq!(
+            (admitted.entries[0].additions, admitted.entries[0].deletions),
+            (1, 1)
+        );
+        assert_eq!(
+            admitted.entries[0].diff,
+            "-const enabled = false\n+const enabled = true\n"
+        );
+        assert!(!admitted.entries[0].diff.contains("@@"));
+        assert_eq!(
+            admitted.evidence_entries.pointer("/0/semantics"),
+            Some(&json!("exact_mutation"))
+        );
+        assert_eq!(
+            admitted.evidence_entries.pointer("/0/oldText"),
+            Some(&json!("const enabled = false"))
+        );
+
+        let projection = projection_from_evidence(
+            &json!({
+                "runtimeDiff": {
+                    "schemaVersion": 1,
+                    "source": "runtime_reported",
+                    "status": "available",
+                    "semanticKind": "exact_mutation",
+                    "entries": admitted.evidence_entries
+                }
+            }),
+            "evidence-claude-edit",
+        )
+        .expect("exact mutation Evidence should produce a projection");
+        assert_eq!(projection.semantic_kind.as_deref(), Some("exact_mutation"));
+        assert_eq!(
+            projection.entries.as_ref().unwrap()[0].diff,
+            "-const enabled = false\n+const enabled = true\n"
+        );
+    }
+
+    #[test]
+    fn claude_exact_mutation_rejects_replace_all_and_incomplete_content() {
+        for entry in [
+            json!({
+                "semantics": "exact_mutation",
+                "path": "src/app.ts",
+                "oldText": "before",
+                "newText": "after",
+                "replace_all": true
+            }),
+            json!({
+                "semantics": "exact_mutation",
+                "path": "src/app.ts",
+                "oldText": "before",
+                "newText": "after",
+                "replaceAll": "false"
+            }),
+            json!({
+                "semantics": "exact_mutation",
+                "path": "src/app.ts",
+                "oldText": "before"
+            }),
+        ] {
             let payload = json!({
                 "runtimeDiff": {
-                    "adapterKind": adapter.as_str(),
-                    "protocolFamily": "stream-json",
-                    "sourceEventKind": "tool/result.completed",
-                    "semanticKind": "complete_before_after",
-                    "entries": [{"path": "src/app.ts", "oldText": "before", "newText": "after"}]
+                    "adapterKind": "claude-code-cli",
+                    "protocolFamily": "claude-stream-json",
+                    "sourceEventKind": "assistant.tool_use.Edit+user.tool_result.completed",
+                    "semanticKind": "exact_mutation",
+                    "entries": [entry]
                 }
             });
-            assert_eq!(
-                admit_runtime_diff(&payload, Path::new("/repo"), Some(adapter.as_str()))
-                    .expect("candidate should be present"),
-                Err("runtime_diff_source_not_allowlisted")
+            assert!(
+                admit_runtime_diff(&payload, Path::new("/repo"), Some("claude-code-cli"))
+                    .expect("candidate should be present")
+                    .is_err()
             );
         }
+    }
+
+    #[test]
+    fn antigravity_stream_json_cannot_promote_tool_inputs_into_diff_evidence() {
+        let payload = json!({
+            "runtimeDiff": {
+                "adapterKind": "antigravity-app",
+                "protocolFamily": "stream-json",
+                "sourceEventKind": "tool/result.completed",
+                "semanticKind": "complete_before_after",
+                "entries": [{"path": "src/app.ts", "oldText": "before", "newText": "after"}]
+            }
+        });
+        assert_eq!(
+            admit_runtime_diff(&payload, Path::new("/repo"), Some("antigravity-app"))
+                .expect("candidate should be present"),
+            Err("runtime_diff_source_not_allowlisted")
+        );
     }
 
     #[test]
@@ -652,6 +896,7 @@ mod tests {
                 deletions: 1,
                 diff: "@@ -1 +1 @@\n-old\n+new\n".to_string(),
             }],
+            evidence_entries: Value::Null,
         };
         let first = projection_from_admitted(admitted.clone(), "evidence-1");
         let replayed = merge_projection(
@@ -673,6 +918,7 @@ mod tests {
                         deletions: 1,
                         diff: "@@ -1 +1 @@\n-old\n+different\n".to_string(),
                     }],
+                    evidence_entries: Value::Null,
                 },
                 "evidence-3",
             ),

@@ -1,4 +1,4 @@
-import { access, mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises'
+import { access, mkdtemp, mkdir, readFile, realpath, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { spawn } from 'node:child_process'
@@ -11,7 +11,7 @@ import {
 } from './lib/runtime-camp-files-root.mjs'
 
 const root = resolve(import.meta.dirname, '..')
-const fixtureRoot = await mkdtemp(join(tmpdir(), 'rovai-claude-runtime-smoke-'))
+const fixtureRoot = await realpath(await mkdtemp(join(tmpdir(), 'rovai-claude-runtime-smoke-')))
 const projectRoot = join(fixtureRoot, 'project')
 const dataDir = join(fixtureRoot, 'data')
 let core = null
@@ -19,10 +19,14 @@ let core = null
 try {
   await mkdir(projectRoot)
   await writeFile(join(projectRoot, 'README.md'), '# Claude Code Runtime fixture\n')
+  await writeFile(
+    join(projectRoot, 'CLAUDE_EDIT_FIXTURE.ts'),
+    'export const enabled = false\n'
+  )
   await run('git', ['init', '-b', 'main'], projectRoot)
   await run('git', ['config', 'user.name', 'Rovai-ai Claude Runtime Smoke'], projectRoot)
   await run('git', ['config', 'user.email', 'claude-runtime@rovai.local'], projectRoot)
-  await run('git', ['add', 'README.md'], projectRoot)
+  await run('git', ['add', 'README.md', 'CLAUDE_EDIT_FIXTURE.ts'], projectRoot)
   await run('git', ['commit', '-m', 'fixture'], projectRoot)
 
   core = startCore(dataDir)
@@ -228,6 +232,66 @@ try {
     })}`)
   }
 
+  const editRequest = await sendCampMessage(
+    core.request,
+    campId,
+    'Use the Edit tool exactly once on CLAUDE_EDIT_FIXTURE.ts. Replace the exact text `export const enabled = false` with `export const enabled = true`. Do not call Read, Write, Bash, NotebookEdit, ApplyPatch, or any other tool. Then immediately reply exactly ROVAI_CLAUDE_EDIT_OK.',
+    {
+      taskId: null,
+      purpose: 'Verify Claude Code native Edit exact-mutation Evidence.',
+      completionRole: 'required'
+    }
+  )
+  const editRunId = editRequest.commandResult?.payload?.agentRunIds?.[0]
+  if (editRequest.commandResult?.status !== 'accepted' || !editRunId) {
+    throw new Error(`Claude Code Edit intake failed: ${JSON.stringify(editRequest)}`)
+  }
+  camp = await waitFor(async () => {
+    const value = await core.request('camps.snapshot', { campId })
+    const editRun = value.agentRuns.find((agentRun) => agentRun.id === editRunId)
+    if (editRun?.status === 'failed' || editRun?.status === 'cancelled') {
+      throw new Error(`Claude Code Edit AgentRun entered ${editRun.status}: ${JSON.stringify({
+        editRun,
+        actions: value.actions.filter((action) => action.agentRunId === editRunId),
+        events: core.events.filter((event) => event.params?.agentRunId === editRunId).slice(-30)
+      })}`)
+    }
+    return editRun?.status === 'succeeded' ? value : null
+  }, 'Claude Code Edit AgentRun')
+  const editTerminalEvents = core.events.filter((event) =>
+    event.method === 'runtime.action'
+      && event.params?.agentRunId === editRunId
+      && event.params?.payload?.toolName === 'Edit'
+      && event.params?.payload?.status === 'completed'
+  )
+  const exactEditEvent = editTerminalEvents.find((event) =>
+    event.params?.payload?.runtimeDiff?.status === 'available'
+      && event.params?.payload?.runtimeDiff?.semanticKind === 'exact_mutation'
+  )
+  const exactEditEvidence = exactEditEvent?.params?.payload?.runtimeDiff?.entries?.[0]
+  const exactEditProjection = exactEditEvent?.params?.canonical?.diffProjection
+  const exactEditProjectionEntry = exactEditProjection?.entries?.[0]
+  const editedFixture = await readFile(join(projectRoot, 'CLAUDE_EDIT_FIXTURE.ts'), 'utf8')
+  if (editTerminalEvents.length !== 1
+      || !exactEditEvent
+      || exactEditEvidence?.semantics !== 'exact_mutation'
+      || exactEditEvidence?.path !== 'CLAUDE_EDIT_FIXTURE.ts'
+      || exactEditEvidence?.oldText !== 'export const enabled = false'
+      || exactEditEvidence?.newText !== 'export const enabled = true'
+      || Object.hasOwn(exactEditEvidence, 'diff')
+      || exactEditProjection?.semanticKind !== 'exact_mutation'
+      || exactEditProjectionEntry?.path !== 'CLAUDE_EDIT_FIXTURE.ts'
+      || exactEditProjectionEntry?.diff !== '-export const enabled = false\n+export const enabled = true\n'
+      || exactEditProjectionEntry.diff.includes('@@')
+      || editedFixture !== 'export const enabled = true\n') {
+    throw new Error(`Claude Code Edit exact mutation was not preserved: ${JSON.stringify({
+      editTerminalEvents,
+      exactEditEvidence,
+      exactEditProjection,
+      editedFixture
+    })}`)
+  }
+
   const cancellationPath = join(projectRoot, 'CLAUDE_CANCEL_SHOULD_NOT_EXIST.txt')
   const cancellationScriptName = process.platform === 'win32'
     ? 'rovai-cancel-probe.ps1'
@@ -334,6 +398,13 @@ try {
       input: commandInputEvent.params.payload.input,
       toolName: commandOutputEvent.params.payload.toolName,
       toolCallId: commandOutputEvent.params.payload.toolCallId
+    },
+    exactEditMutation: {
+      path: exactEditEvidence.path,
+      oldText: exactEditEvidence.oldText,
+      newText: exactEditEvidence.newText,
+      diff: exactEditProjectionEntry.diff,
+      hasSyntheticHunkHeader: exactEditProjectionEntry.diff.includes('@@')
     },
     cancellation: {
       status: camp.agentRuns.find((agentRun) => agentRun.id === cancellationRunId)?.status,
