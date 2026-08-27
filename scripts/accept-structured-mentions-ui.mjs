@@ -12,6 +12,7 @@ import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { spawn } from 'node:child_process'
 import { seedCompletedOnboardingForAcceptance } from './lib/dev-desktop.mjs'
+import { removeEphemeralRuntimeCampFilesRoot } from './lib/runtime-camp-files-root.mjs'
 
 const root = resolve(import.meta.dirname, '..')
 const cliArguments = process.argv.slice(2)
@@ -39,6 +40,7 @@ const debugPort = Number(process.env.ROVAI_STRUCTURED_MENTIONS_ACCEPT_DEBUG_PORT
 const skillPickerOnly = cliArguments.includes('--skill-picker-only')
 const skillContextSmoke = cliArguments.includes('--skill-context-smoke')
 const imeNewlineOnly = cliArguments.includes('--ime-newline-only')
+const cutOnly = cliArguments.includes('--cut-only')
 const continuationOnly = cliArguments.includes('--continuation-only')
 const replyBackspaceOnly = cliArguments.includes('--reply-backspace-only')
 const databasePath = join(dataDir, 'rovai.sqlite')
@@ -161,7 +163,7 @@ try {
   assert(
     targetMemberIds.every((id) => configuredAgents.some((agent) =>
       agent.agentId === id
-      && agent.runtimeReadiness.status === 'ready'
+      && ['ready', 'light_ready'].includes(agent.runtimeReadiness.status)
       && agent.runtimeConfiguration?.adapterKind === 'codex-cli')),
     `Acceptance Runtime is not ready for every target: ${JSON.stringify(configuredAgents)}`
   )
@@ -214,8 +216,8 @@ try {
     return button?.getAttribute('aria-pressed') === 'true' && !timeline?.hidden
   })()`)
   const initialSnapshot = await request(running.cdp, 'camps.snapshot', { campId })
-  assert(initialSnapshot.schemaVersion === 32,
-    `Camp snapshot schema is not v32: ${initialSnapshot.schemaVersion}`)
+  assert(initialSnapshot.schemaVersion === 33,
+    `Camp snapshot schema is not v33: ${initialSnapshot.schemaVersion}`)
   assert(
     deepEqual(initialSnapshot.members.map((member) => member.agentId), targetMemberIds),
     `Camp does not contain exactly the three target members: ${JSON.stringify(initialSnapshot.members)}`
@@ -224,6 +226,20 @@ try {
   await waitForSelector(running.cdp, '#camp-message.structured-mention-editor')
   await waitForExpression(running.cdp,
     `document.querySelector('#camp-message')?.getAttribute('contenteditable') === 'true'`)
+  if (cutOnly) {
+    clipboardTouched = true
+    const composerCutInspection = await acceptComposerCutRegression(running.cdp, campId)
+    result = {
+      acceptance: 'composer-cut-ui',
+      appPath,
+      campId,
+      ...composerCutInspection,
+      clipboardItemCountBeforeTest: clipboardArchive.length,
+      clipboardRestored: false,
+      isolatedUserDataRemoved: false
+    }
+    break acceptance
+  }
   if (imeNewlineOnly) {
     const imeNewlineInspection = await acceptImeNewlineRegression(running.cdp, campId)
     result = {
@@ -237,6 +253,8 @@ try {
     }
     break acceptance
   }
+  clipboardTouched = true
+  await acceptComposerCutRegression(running.cdp, campId)
   await focusEditorAtEnd(running.cdp)
   await running.cdp.send('Input.insertText', { text: '/' })
   await waitForExpression(running.cdp, `(() => {
@@ -1922,6 +1940,10 @@ if (testFailure || cleanupFailure) {
 }
 
 if (!suppliedFixtureRoot) {
+  await removeEphemeralRuntimeCampFilesRoot(dataDir, {
+    homeDirectory: acceptanceHome,
+    temporaryDirectory: tmpdir()
+  })
   await removeDirectoryWithRetry(fixtureRoot)
 }
 if (!suppliedRuntimeTempDir) {
@@ -2249,6 +2271,147 @@ async function acceptImeNewlineRegression(cdp, campId) {
     (value) => deepEqual(value.content, []), 10_000)
 
   return { trailingNewlineInspection, postNewlineInputInspection, draft }
+}
+
+async function acceptComposerCutRegression(cdp, campId) {
+  await selectWholeEditor(cdp)
+  await pressKey(cdp, {
+    key: 'Backspace', code: 'Backspace', windowsVirtualKeyCode: 8, nativeVirtualKeyCode: 51
+  })
+  await waitForValue(async () => request(cdp, 'camp.composerDraft.get', { campId }),
+    (draft) => deepEqual(draft.content, []) && draft.body === '', 10_000)
+
+  await focusEditorAtEnd(cdp)
+  await cdp.send('Input.insertText', { text: '123' })
+  await waitForValue(async () => request(cdp, 'camp.composerDraft.get', { campId }),
+    (draft) => deepEqual(draft.content, [{ kind: 'text', text: '123' }])
+      && draft.body === '123', 10_000)
+  await evaluate(cdp, `(() => {
+    window.__composerCutEditor = document.querySelector('#camp-message')
+    window.__composerCutShell = document.querySelector('.app-shell')
+    window.__composerCutWorkspace = document.querySelector('.camp-workspace')
+    window.__composerCutErrors = []
+    window.addEventListener('error', (event) => {
+      window.__composerCutErrors.push({
+        message: event.message,
+        stack: event.error instanceof Error ? event.error.stack : null
+      })
+    })
+  })()`)
+
+  await selectWholeEditor(cdp)
+  await cutSelectionWithMetaX(cdp)
+  const clipboardText = await waitForValue(
+    () => runProcess('/usr/bin/pbpaste', []),
+    (text) => text === '123',
+    3_000
+  )
+  const emptyDraft = await waitForValue(
+    () => request(cdp, 'camp.composerDraft.get', { campId }),
+    (draft) => deepEqual(draft.content, []) && draft.body === '',
+    10_000
+  )
+  await evaluate(cdp,
+    `new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))`, true)
+  const afterCut = await evaluate(cdp, `(() => {
+    const editor = document.querySelector('#camp-message')
+    return {
+      appShellStayedMounted: document.querySelector('.app-shell') === window.__composerCutShell,
+      workspaceStayedMounted: document.querySelector('.camp-workspace') === window.__composerCutWorkspace,
+      editorStayedMounted: editor === window.__composerCutEditor,
+      editorFocused: document.activeElement === editor,
+      editorText: editor?.textContent ?? null,
+      editorHtml: editor?.innerHTML ?? null,
+      emptyBreakCount: editor?.querySelectorAll('[data-editor-empty-break="true"]').length ?? -1,
+      lineBreakCount: editor?.querySelectorAll('[data-editor-line-break="true"]').length ?? -1,
+      errors: window.__composerCutErrors ?? []
+    }
+  })()`)
+  assert(
+    afterCut.appShellStayedMounted
+      && afterCut.workspaceStayedMounted
+      && afterCut.editorStayedMounted
+      && afterCut.editorFocused
+      && afterCut.editorText === ''
+      && afterCut.emptyBreakCount === 1
+      && afterCut.lineBreakCount === 0
+      && afterCut.errors.length === 0,
+    `Command+X did not leave one stable empty Composer: ${JSON.stringify(afterCut)}`
+  )
+
+  await cdp.send('Input.insertText', { text: '7' })
+  const nextDraft = await waitForValue(
+    () => request(cdp, 'camp.composerDraft.get', { campId }),
+    (draft) => deepEqual(draft.content, [{ kind: 'text', text: '7' }]) && draft.body === '7',
+    10_000
+  )
+  await evaluate(cdp,
+    `new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))`, true)
+  const afterSingleInput = await evaluate(cdp, `(() => {
+    const editor = document.querySelector('#camp-message')
+    return {
+      appShellStayedMounted: document.querySelector('.app-shell') === window.__composerCutShell,
+      workspaceStayedMounted: document.querySelector('.camp-workspace') === window.__composerCutWorkspace,
+      editorStayedMounted: editor === window.__composerCutEditor,
+      editorFocused: document.activeElement === editor,
+      editorText: editor?.textContent ?? null,
+      errors: window.__composerCutErrors ?? []
+    }
+  })()`)
+  assert(
+    afterSingleInput.appShellStayedMounted
+      && afterSingleInput.workspaceStayedMounted
+      && afterSingleInput.editorStayedMounted
+      && afterSingleInput.editorFocused
+      && afterSingleInput.editorText === '7'
+      && afterSingleInput.errors.length === 0,
+    `One post-cut digit did not stay one digit: ${JSON.stringify(afterSingleInput)}`
+  )
+
+  await selectWholeEditor(cdp)
+  const nativeDeleteApplied = await evaluate(cdp, `document.execCommand('delete')`)
+  assert(nativeDeleteApplied, 'Chromium did not apply the native delete command')
+  const afterNativeEmptyDraft = await waitForValue(
+    () => request(cdp, 'camp.composerDraft.get', { campId }),
+    (draft) => deepEqual(draft.content, []) && draft.body === '',
+    10_000
+  )
+  await evaluate(cdp,
+    `new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))`, true)
+  const afterNativeEmpty = await evaluate(cdp, `(() => {
+    const editor = document.querySelector('#camp-message')
+    return {
+      appShellStayedMounted: document.querySelector('.app-shell') === window.__composerCutShell,
+      workspaceStayedMounted: document.querySelector('.camp-workspace') === window.__composerCutWorkspace,
+      editorFocused: document.activeElement === editor,
+      editorText: editor?.textContent ?? null,
+      editorHtml: editor?.innerHTML ?? null,
+      emptyBreakCount: editor?.querySelectorAll('[data-editor-empty-break="true"]').length ?? -1,
+      lineBreakCount: editor?.querySelectorAll('[data-editor-line-break="true"]').length ?? -1,
+      errors: window.__composerCutErrors ?? []
+    }
+  })()`)
+  assert(
+    afterNativeEmpty.appShellStayedMounted
+      && afterNativeEmpty.workspaceStayedMounted
+      && afterNativeEmpty.editorFocused
+      && afterNativeEmpty.editorText === ''
+      && afterNativeEmpty.emptyBreakCount === 1
+      && afterNativeEmpty.lineBreakCount === 0
+      && afterNativeEmpty.errors.length === 0,
+    `A native empty filler became semantic content: ${JSON.stringify(afterNativeEmpty)}`
+  )
+
+  return {
+    clipboardText,
+    emptyDraft,
+    afterCut,
+    nextDraft,
+    afterSingleInput,
+    nativeDeleteApplied,
+    afterNativeEmptyDraft,
+    afterNativeEmpty
+  }
 }
 
 async function focusEditorAtEnd(cdp) {
@@ -2677,6 +2840,26 @@ async function copySelectionWithMetaC(cdp) {
   await cdp.send('Input.dispatchKeyEvent', {
     type: 'keyUp', key: 'c', code: 'KeyC', modifiers: 4,
     windowsVirtualKeyCode: 67, nativeVirtualKeyCode: 8
+  })
+  await cdp.send('Input.dispatchKeyEvent', {
+    type: 'keyUp', key: 'Meta', code: 'MetaLeft', modifiers: 0,
+    windowsVirtualKeyCode: 91, nativeVirtualKeyCode: 55
+  })
+}
+
+async function cutSelectionWithMetaX(cdp) {
+  await cdp.send('Input.dispatchKeyEvent', {
+    type: 'rawKeyDown', key: 'Meta', code: 'MetaLeft', modifiers: 4,
+    windowsVirtualKeyCode: 91, nativeVirtualKeyCode: 55
+  })
+  await cdp.send('Input.dispatchKeyEvent', {
+    type: 'rawKeyDown', key: 'x', code: 'KeyX', modifiers: 4,
+    windowsVirtualKeyCode: 88, nativeVirtualKeyCode: 7,
+    commands: ['Cut']
+  })
+  await cdp.send('Input.dispatchKeyEvent', {
+    type: 'keyUp', key: 'x', code: 'KeyX', modifiers: 4,
+    windowsVirtualKeyCode: 88, nativeVirtualKeyCode: 7
   })
   await cdp.send('Input.dispatchKeyEvent', {
     type: 'keyUp', key: 'Meta', code: 'MetaLeft', modifiers: 0,
