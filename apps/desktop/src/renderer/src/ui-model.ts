@@ -7,6 +7,7 @@ import type {
   NavigationCampItem,
   NavigationSnapshot
 } from '@contracts'
+import { safeMarkdownHasRenderableContent } from './safe-markdown-model'
 
 export const RAIL_COLLAPSED_WIDTH = 52
 export const RAIL_EXPANDED_WIDTH = 176
@@ -502,7 +503,9 @@ export function buildLiveExecutionProgress(
     if (key.startsWith('narration:')) {
       const itemId = key.slice('narration:'.length)
       const body = (narrationByItem.get(itemId) ?? '').trim().slice(-4_000)
-      return body ? [{ key, kind: 'narration', body }] : []
+      return safeMarkdownHasRenderableContent(body)
+        ? [{ key, kind: 'narration', body }]
+        : []
     }
     if (key.startsWith('diagnostic:')) {
       const diagnostic = diagnosticsById.get(key.slice('diagnostic:'.length))

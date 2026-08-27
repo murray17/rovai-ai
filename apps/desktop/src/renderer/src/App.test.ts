@@ -4201,6 +4201,20 @@ describe('task event projections', () => {
     expect(progress.items[2]).toMatchObject({ body: '第二段说明。' })
   })
 
+  it('omits a renderless Runtime narration fragment after a Tool', () => {
+    const progress = buildLiveExecutionProgress([{
+      id: 'tool-1', agentRunId: 'run-renderless-narration', eventType: 'runtime.action',
+      payload: { toolCallId: 'tool-1', title: 'Edit', status: 'completed' },
+      createdAt: '2026-08-27T10:45:16Z'
+    }, {
+      id: 'thought-close', agentRunId: 'run-renderless-narration', eventType: 'agent.text.delta',
+      payload: { itemId: null, delta: '</think>\n\n' },
+      createdAt: '2026-08-27T10:45:17Z'
+    }], 'run-renderless-narration')
+
+    expect(progress.items.map((item) => item.kind)).toEqual(['tool'])
+  })
+
   it('shows the latest Claude API retry while the AgentRun is still running', () => {
     const retryEvents = [1, 2].map((attempt) => liveRuntimeEventFromCore({
       method: 'runtime.diagnostic',
