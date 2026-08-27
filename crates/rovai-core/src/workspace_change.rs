@@ -1746,12 +1746,10 @@ fn read_link_bytes(root: &Path, relative: &Path) -> Result<Vec<u8>> {
 }
 
 #[cfg(unix)]
-fn captured_regular_mode(metadata: &fs::Metadata, index_mode: &str) -> String {
+fn captured_regular_mode(metadata: &fs::Metadata, _index_mode: &str) -> String {
     use std::os::unix::fs::PermissionsExt;
     if metadata.permissions().mode() & 0o111 != 0 {
         "100755".to_string()
-    } else if index_mode == "100755" && !metadata.permissions().readonly() {
-        "100644".to_string()
     } else {
         "100644".to_string()
     }

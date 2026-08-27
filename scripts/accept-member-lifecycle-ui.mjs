@@ -92,6 +92,8 @@ let campTitle = null
 let projectCampId = null
 let projectCampTitle = null
 let projectCampPath = null
+let membershipCampId = null
+let membershipCampTitle = null
 const captures = {}
 
 try {
@@ -110,6 +112,10 @@ try {
   assert(
     await migrationApplied(join(freshDataDir, 'rovai.sqlite'), 41),
     'Fresh database did not record schema Migration v41'
+  )
+  assert(
+    await migrationApplied(join(freshDataDir, 'rovai.sqlite'), 110),
+    'Fresh database did not record dynamic Camp membership Migration v110'
   )
 
   await openNewConversation(running.cdp)
@@ -142,7 +148,7 @@ try {
   await pressKey(running.cdp, 'Escape')
   await waitForExpression(running.cdp, `!document.querySelector('.new-camp-dialog')`)
 
-  await mouseClick(running.cdp, '.unified-sidebar button[aria-label="设置"]')
+  await mouseClick(running.cdp, '.unified-sidebar button[aria-label^="设置"]')
   await waitForSelector(running.cdp, '.settings-sidebar-menu')
   const settingsDestinations = await evaluate(running.cdp,
     `[...document.querySelectorAll('.settings-sidebar-menu strong')].map((node) => node.textContent)`)
@@ -484,7 +490,7 @@ try {
     '叮叮',
     outputDir
   ))
-  await mouseClick(running.cdp, '.unified-sidebar button[aria-label="设置"]')
+  await mouseClick(running.cdp, '.unified-sidebar button[aria-label^="设置"]')
   await waitForSelector(running.cdp, '.settings-sidebar-menu')
   await mouseClick(running.cdp, '.settings-sidebar-menu button', 'Agent 运行时', true)
   await waitForSelector(running.cdp, '.runtime-installations')
@@ -513,7 +519,7 @@ try {
     }
   })()`)
   assert(
-    runtimeSettingsState.rowCount === 12
+    runtimeSettingsState.rowCount === 13
       && runtimeSettingsState.labels.includes('Codex CLI')
       && runtimeSettingsState.labels.includes('Antigravity')
       && runtimeSettingsState.labels.includes('TRAE CLI')
@@ -523,14 +529,14 @@ try {
       && !runtimeSettingsState.hasAdvancedDiagnostics
       && !runtimeSettingsState.explainsShell
       && !runtimeSettingsState.exposesMemberPathPicker,
-    `Runtime settings did not preserve eleven managed products plus one pending preview: ${JSON.stringify(runtimeSettingsState)}`
+    `Runtime settings did not preserve twelve managed products plus one pending preview: ${JSON.stringify(runtimeSettingsState)}`
   )
   await setViewport(running.cdp, 1040, 700)
   await setTheme(running.cdp, 'night')
   await assertNoHorizontalOverflow(running.cdp, 'Runtime settings at 1040×700 Night')
   captures.runtimeSettings = join(
     outputDir,
-    'runtime-settings-eleven-products-one-preview-night-1040x700.png'
+    'runtime-settings-twelve-products-one-preview-night-1040x700.png'
   )
   await capture(running.cdp, captures.runtimeSettings)
   const discoveredCodex = (await request(running.cdp, 'runtime.installations.list'))
@@ -582,6 +588,21 @@ try {
     createdProjectCamp.status === 'applied' && projectCampId,
     `Could not create project-return acceptance Camp through Core: ${JSON.stringify(createdProjectCamp)}`
   )
+  membershipCampTitle = 'Camp 动态队员验收'
+  const createdMembershipCamp = await request(running.cdp, 'camps.create', {
+    commandId: randomUUID(),
+    name: membershipCampTitle,
+    workspace: null,
+    memberAgentIds: ['agent_1'],
+    defaultLeadAgentId: 'agent_1',
+    collaborationMode: 'peer',
+    activationState: 'active'
+  })
+  membershipCampId = createdMembershipCamp.payload?.campId
+  assert(
+    createdMembershipCamp.status === 'applied' && membershipCampId,
+    `Could not create dynamic membership acceptance Camp: ${JSON.stringify(createdMembershipCamp)}`
+  )
   await closeApp(running)
   running = null
 
@@ -600,6 +621,197 @@ try {
       && configuredPreflight.presentMembers.length === 4,
     `Configured Runtime did not select the first present Profile for a new Camp: ${JSON.stringify(configuredPreflight)}`
   )
+
+  const membershipCandidate = freshProfiles.find((profile) => profile.agentId === 'agent_2')
+  const membershipLead = freshProfiles.find((profile) => profile.agentId === 'agent_1')
+  assert(membershipCandidate && membershipLead,
+    `Dynamic membership fixture profiles are missing: ${JSON.stringify(freshProfiles)}`)
+  await openCamp(running.cdp, membershipCampTitle)
+  await mouseClick(running.cdp, '.activity-tabs [role="tab"]', '队员', true)
+  await waitForExpression(running.cdp,
+    `document.querySelector('.camp-members-panel')?.getAttribute('data-state') === 'active'`)
+
+  const memberActionPresentation = await evaluate(running.cdp, `(() => {
+    const trigger = document.querySelector(
+      '.camp-member-action-button[aria-label=${JSON.stringify(`${membershipLead.displayName}的队员操作`)}]'
+    )
+    if (!(trigger instanceof HTMLElement)) return null
+    const rect = trigger.getBoundingClientRect()
+    const style = getComputedStyle(trigger)
+    return {
+      width: Math.round(rect.width),
+      height: Math.round(rect.height),
+      borderTopWidth: style.borderTopWidth,
+      dotPositions: [...trigger.querySelectorAll('circle')]
+        .map((circle) => circle.getAttribute('cx'))
+        .join(',')
+    }
+  })()`)
+  assert(
+    memberActionPresentation?.width === 28
+      && memberActionPresentation?.height === 28
+      && memberActionPresentation?.borderTopWidth === '0px'
+      && memberActionPresentation?.dotPositions === '3,8,13',
+    `Member action trigger is unexpected: ${JSON.stringify(memberActionPresentation)}`
+  )
+
+  await focusElement(
+    running.cdp,
+    `.camp-member-action-button[aria-label=${JSON.stringify(`${membershipLead.displayName}的队员操作`)}]`
+  )
+  await pressKey(running.cdp, 'Enter')
+  await waitForSelector(running.cdp, '.camp-member-menu')
+  const lastMemberMenu = await evaluate(running.cdp, `(() => {
+    const items = [...document.querySelectorAll('.camp-member-menu-item')]
+    const model = items.find((item) => item.textContent?.includes('查看模型信息'))
+    const remove = items.find((item) => item.textContent?.includes('移出当前会话'))
+    return {
+      modelEnabled: Boolean(model && !model.hasAttribute('data-disabled')),
+      modelCopy: model?.textContent?.trim(),
+      removeDisabled: Boolean(remove?.hasAttribute('data-disabled')),
+      removeCopy: remove?.textContent?.trim()
+    }
+  })()`)
+  assert(
+    lastMemberMenu.modelEnabled
+      && lastMemberMenu.modelCopy?.includes('Codex')
+      && lastMemberMenu.modelCopy?.includes('可用')
+      && lastMemberMenu.removeDisabled
+      && lastMemberMenu.removeCopy?.includes('会话至少保留 1 位队员'),
+    `Single-member overflow menu is unexpected: ${JSON.stringify(lastMemberMenu)}`
+  )
+  captures.campMembershipLastMemberMenu = join(
+    outputDir,
+    'camp-membership-last-member-menu-day-1040x700.png'
+  )
+  await capture(running.cdp, captures.campMembershipLastMemberMenu)
+  await focusElement(running.cdp, '.camp-member-menu-item', '查看模型信息', true)
+  await pressKey(running.cdp, 'Enter')
+  await waitForExpression(running.cdp, `(() => {
+    const detail = document.querySelector('.camp-inspector-runtime-detail')
+    return detail?.textContent?.includes('Agent 运行时默认')
+      && detail?.textContent?.includes('跟随 Agent 运行时默认')
+      && detail?.getAttribute('aria-label') === ${JSON.stringify(`${membershipLead.displayName}的当前模型配置`)}
+  })()`)
+
+  await mouseClick(running.cdp, '.camp-add-member-button', '添加', true)
+  await waitForSelector(running.cdp, '.camp-member-dialog')
+  await waitForExpression(running.cdp,
+    `document.activeElement === document.querySelector('.camp-member-search-field input')`)
+  const addDialogState = await evaluate(running.cdp, `(() => ({
+    title: document.querySelector('.camp-member-dialog h2')?.textContent?.trim(),
+    candidateCount: document.querySelectorAll('.camp-member-candidate-row').length,
+    hasRejoinCopy: /重新加入|已离开成员/.test(document.querySelector('.camp-member-dialog')?.textContent ?? '')
+  }))()`)
+  assert(
+    addDialogState.title === '添加队员'
+      && addDialogState.candidateCount === 3
+      && !addDialogState.hasRejoinCopy,
+    `Add-member dialog is unexpected: ${JSON.stringify(addDialogState)}`
+  )
+  await selectCampMemberCandidate(running.cdp, membershipCandidate.displayName)
+  await evaluate(running.cdp,
+    `document.querySelector('.camp-member-dialog .primary-button')?.click()`)
+  try {
+    await waitForExpression(running.cdp,
+      `document.querySelectorAll('.camp-inspector-member-row').length === 2
+        && !document.querySelector('.camp-member-dialog')`, 30_000)
+  } catch (error) {
+    const addFailureState = await evaluate(running.cdp, `(() => ({
+      rows: document.querySelectorAll('.camp-inspector-member-row').length,
+      checked: [...document.querySelectorAll('.camp-member-candidate-row input')]
+        .filter((input) => input.checked).length,
+      buttonText: document.querySelector('.camp-member-dialog .primary-button')?.textContent?.trim(),
+      buttonDisabled: document.querySelector('.camp-member-dialog .primary-button')?.disabled,
+      alert: document.querySelector('.camp-member-dialog-alert')?.textContent?.trim(),
+      candidateError: document.querySelector('.camp-member-candidate-error')?.textContent?.trim()
+    }))()`)
+    throw new Error(`Add-member submission did not settle: ${JSON.stringify(addFailureState)}`, {
+      cause: error
+    })
+  }
+  await waitForText(running.cdp, '.app-toast', '已添加 1 位队员')
+
+  await focusElement(
+    running.cdp,
+    `.camp-member-action-button[aria-label=${JSON.stringify(`${membershipCandidate.displayName}的队员操作`)}]`
+  )
+  await pressKey(running.cdp, 'Enter')
+  await waitForSelector(running.cdp, '.camp-member-menu')
+  const removalEnabled = await evaluate(running.cdp, `(() => {
+    const item = [...document.querySelectorAll('.camp-member-menu-item')]
+      .find((candidate) => candidate.textContent?.includes('移出当前会话'))
+    return Boolean(item && !item.hasAttribute('data-disabled'))
+  })()`)
+  assert(removalEnabled, 'A non-final member could not be removed from the overflow menu')
+  await pressKey(running.cdp, 'ArrowDown')
+  await waitForExpression(running.cdp,
+    `document.activeElement?.textContent?.includes('移出当前会话') === true`)
+  await mouseClick(running.cdp, '.camp-member-menu-item', '移出当前会话', true)
+  await waitForSelector(running.cdp, '.camp-member-removal-dialog')
+  await waitForExpression(running.cdp,
+    `Boolean(document.querySelector('.camp-member-removal-dialog .danger-button:not(:disabled)'))`,
+    30_000)
+  const removalPreview = await evaluate(running.cdp, `(() => {
+    const dialog = document.querySelector('.camp-member-removal-dialog')
+    return {
+      title: dialog?.querySelector('h2')?.textContent?.trim(),
+      description: dialog?.querySelector('.app-dialog-description')?.textContent?.trim(),
+      hasBody: Boolean(dialog?.querySelector('.app-dialog-body')),
+      hasImpactList: Boolean(dialog?.querySelector('.app-dialog-impact-list')),
+      hasPlaceholderImpactCopy: /没有需要收拢|没有需要释放|没有待结算/.test(dialog?.textContent ?? ''),
+      keepsHistory: dialog?.textContent?.includes('历史消息、执行证据与审计记录不会删除'),
+      immediateFence: dialog?.textContent?.includes('立即阻止该队员的新消息与工具写入')
+    }
+  })()`)
+  assert(
+    removalPreview.title === `移出${membershipCandidate.displayName}？`
+      && removalPreview.description?.includes(`${membershipCandidate.displayName}将不再接收这里的新工作`)
+      && !removalPreview.hasBody
+      && !removalPreview.hasImpactList
+      && !removalPreview.hasPlaceholderImpactCopy
+      && !removalPreview.keepsHistory
+      && removalPreview.immediateFence,
+    `Removal preview is unexpected: ${JSON.stringify(removalPreview)}`
+  )
+  await setTheme(running.cdp, 'night')
+  await assertNoHorizontalOverflow(running.cdp, 'Dynamic membership removal at 1040×700 Night')
+  captures.campMembershipRemoval = join(
+    outputDir,
+    'camp-membership-removal-night-1040x700.png'
+  )
+  await capture(running.cdp, captures.campMembershipRemoval)
+  await mouseClick(running.cdp, '.camp-member-removal-dialog .danger-button', '移出当前会话')
+  await waitForExpression(running.cdp,
+    `document.querySelectorAll('.camp-inspector-member-row').length === 1
+      && !document.querySelector('.camp-member-removal-dialog')`, 30_000)
+  await waitForText(running.cdp, '.app-toast', `已将${membershipCandidate.displayName}移出当前会话`)
+
+  await mouseClick(running.cdp, '.camp-add-member-button', '添加', true)
+  await waitForSelector(running.cdp, '.camp-member-dialog')
+  const ordinaryAddCopy = await evaluate(running.cdp,
+    `document.querySelector('.camp-member-dialog')?.textContent ?? ''`)
+  assert(
+    ordinaryAddCopy.includes(membershipCandidate.displayName)
+      && !/重新加入|恢复旧工作|已离开成员/.test(ordinaryAddCopy),
+    `A previous membership was exposed as a product-level rejoin: ${ordinaryAddCopy}`
+  )
+  await selectCampMemberCandidate(running.cdp, membershipCandidate.displayName)
+  await mouseClick(running.cdp, '.camp-member-dialog .primary-button', '添加队员', true)
+  await waitForExpression(running.cdp,
+    `document.querySelectorAll('.camp-inspector-member-row').length === 2
+      && !document.querySelector('.camp-member-dialog')`, 30_000)
+  await waitForText(running.cdp, '.app-toast', '已添加 1 位队员')
+  const membershipSnapshot = await request(running.cdp, 'camps.snapshot', {
+    campId: membershipCampId
+  })
+  assert(
+    membershipSnapshot.membershipReconciliations.length === 0
+      && membershipSnapshot.camp.membershipGeneration === 4
+      && membershipSnapshot.members.find((member) => member.agentId === 'agent_2')?.version === 3,
+    `Dynamic membership revisions did not remain monotonic: ${JSON.stringify(membershipSnapshot.camp)}`
+  )
+  await setTheme(running.cdp, 'day')
 
   await openMembers(running.cdp)
   await selectMember(running.cdp, '咕咕')
@@ -939,7 +1151,8 @@ try {
       && quickChatRosterState.rosterWidth === 236,
     `Member content roster did not coexist with global navigation: ${JSON.stringify(quickChatRosterState)}`
   )
-  await mouseClick(running.cdp, '.unified-sidebar button[aria-label="设置"]')
+  await evaluate(running.cdp,
+    `document.querySelector('.unified-sidebar button[aria-label^="设置"]')?.click()`)
   await waitForSelector(running.cdp, '.settings-sidebar-menu', 30_000)
   await mouseClick(running.cdp, '.settings-sidebar-back', '返回 App', true)
   await waitForSelector(running.cdp, '.members-view', 30_000)
@@ -1167,6 +1380,7 @@ try {
     reportPath: join(outputDir, 'member-lifecycle-acceptance.json'),
     verified: {
       freshSchemaV41: true,
+      freshSchemaV110DynamicCampMembership: true,
       v14MemberRuntimeResetOnSchemaV41: true,
       mentionComposerUsesMemberName: true,
       contextSettingsDestinationRemoved: true,
@@ -1203,7 +1417,13 @@ try {
       memberOrderLeadInheritance: 'agent_2',
       restartPersistence: true,
       dayAndNightWideCompactMatrix: true,
-      runtimeSettingsElevenProductsAndPendingPreviewBoundary: true,
+      runtimeSettingsTwelveProductsAndPendingPreviewBoundary: true,
+      campLastMemberRemovalVisibleAndDisabled: true,
+      campRuntimeDetailsExpandableFromOverflowMenu: true,
+      campAddRemoveAndOrdinaryReadd: true,
+      campMemberActionUsesFramelessHorizontalOverflow: true,
+      campRemovalPreviewShowsOnlyActualImpact: true,
+      campMembershipGenerationAndLifetimeMonotonic: true,
       horizontalOverflow: false
     },
     captures
@@ -1633,6 +1853,18 @@ async function focusElement(cdp, selector, text = null, includes = false) {
   assert(focused, `Could not focus ${selector}${text ? ` containing ${text}` : ''}`)
 }
 
+async function selectCampMemberCandidate(cdp, displayName) {
+  const selected = await evaluate(cdp, `(() => {
+    const row = [...document.querySelectorAll('.camp-member-candidate-row')]
+      .find((candidate) => candidate.textContent?.includes(${JSON.stringify(displayName)}))
+    const input = row?.querySelector('input[type="checkbox"]')
+    if (!input || input.disabled) return false
+    if (!input.checked) input.click()
+    return input.checked
+  })()`)
+  assert(selected, `Could not select Camp member candidate ${displayName}`)
+}
+
 async function mouseClick(cdp, selector, text = null, includes = false) {
   const point = await evaluate(cdp, `(() => {
     const candidates = [...document.querySelectorAll(${JSON.stringify(selector)})]
@@ -1664,8 +1896,16 @@ async function mouseClick(cdp, selector, text = null, includes = false) {
 }
 
 async function pressKey(cdp, key, { meta = false } = {}) {
-  const code = key === 'a' ? 'KeyA' : key
-  const virtualKey = key === 'Enter' ? 13 : key === 'Escape' ? 27 : key.toUpperCase().charCodeAt(0)
+  const code = key === 'a' ? 'KeyA' : key === ' ' ? 'Space' : key
+  const virtualKey = ({
+    Enter: 13,
+    Escape: 27,
+    ArrowDown: 40,
+    ArrowUp: 38,
+    Home: 36,
+    End: 35,
+    ' ': 32
+  })[key] ?? key.toUpperCase().charCodeAt(0)
   const params = {
     key,
     code,
@@ -1781,9 +2021,13 @@ async function reloadRenderer(cdp) {
 
 async function launchApp(dataDir, port, width, height) {
   const stderr = []
+  const acceptanceOnlyFlags = process.env.ROVAI_MEMBER_LIFECYCLE_ACCEPT_NO_SANDBOX === '1'
+    ? ['--no-sandbox']
+    : []
   const child = spawn(join(appPath, 'Contents', 'MacOS', 'Rovai AI'), [
     `--remote-debugging-port=${port}`,
-    `--user-data-dir=${dataDir}`
+    `--user-data-dir=${dataDir}`,
+    ...acceptanceOnlyFlags
   ], {
     cwd: root,
     env: { ...process.env, ROVAI_ALLOW_ISOLATED_INSTANCE: '1' },
@@ -1793,7 +2037,7 @@ async function launchApp(dataDir, port, width, height) {
   let cdp = null
   try {
     const target = await waitForTarget(port, stderr)
-    cdp = await connectCdp(target.webSocketDebuggerUrl)
+    cdp = await connectCdp(target.webSocketDebuggerUrl, stderr)
     await cdp.send('Page.enable')
     await cdp.send('Page.bringToFront')
     await setViewport(cdp, width, height)
@@ -1822,7 +2066,8 @@ async function launchApp(dataDir, port, width, height) {
 
 async function closeApp(app) {
   try {
-    await Promise.race([app.cdp.send('Browser.close'), wait(1_000)])
+    const closeRequest = app.cdp.send('Browser.close').catch(() => undefined)
+    await Promise.race([closeRequest, wait(1_000)])
   } catch {
     // The isolated App may already have exited.
   }
@@ -1949,7 +2194,7 @@ async function waitForTarget(port, stderr) {
   throw new Error(`Electron DevTools target did not appear. ${stderr.join('')}`)
 }
 
-async function connectCdp(url) {
+async function connectCdp(url, stderr = []) {
   const socket = new WebSocket(url)
   const pending = new Map()
   let nextId = 1
@@ -1967,8 +2212,11 @@ async function connectCdp(url) {
     else request.resolve(message)
   })
   socket.addEventListener('close', () => {
+    const processDetail = stderr.join('').trim()
     for (const request of pending.values()) {
-      request.reject(new Error('CDP connection closed'))
+      request.reject(new Error(
+        `CDP connection closed${processDetail ? `. Electron stderr: ${processDetail}` : ''}`
+      ))
     }
     pending.clear()
   })

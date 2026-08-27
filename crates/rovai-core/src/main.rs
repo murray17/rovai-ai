@@ -44,14 +44,15 @@ use rovai_core::{
         RecordActionResultCommand, RecordObservedActionCommand, ResolveActionApprovalCommand,
     },
     agent_profile::{
-        AdapterInstallationView, AdapterKind, AdapterProbeAttempt, AgentProfileService,
-        ClearMemberRuntimeConfigurationCommand, CreateAdapterInstallationCommand,
-        CreateAgentProfileCommand, DiscoveredManagedInstallation, FrozenAgentRuntimeConfig,
-        InstallationClass, InstallationSource, ManagedProbeFailure,
+        AdapterCapabilitySnapshot, AdapterInstallationView, AdapterKind, AdapterProbeAttempt,
+        AgentProfileService, ClearMemberRuntimeConfigurationCommand,
+        CreateAdapterInstallationCommand, CreateAgentProfileCommand, DiscoveredManagedInstallation,
+        FrozenAgentRuntimeConfig, InstallationClass, InstallationSource, ManagedProbeFailure,
         RecordAdapterCapabilitySnapshotCommand, RemoveMemberCommand, ReorderAgentProfilesCommand,
-        RuntimeModelCatalogCacheStatus, RuntimeReadinessStatus, SetAgentProfileAvatarCommand,
-        SetMemberPresenceCommand, SetMemberRuntimeConfigurationCommand,
-        UpdateAdapterInstallationCommand, UpdateAgentProfileCommand, VerifiedManagedInstallation,
+        RuntimeEntrypointLocatorIdentity, RuntimeModelCatalogCacheStatus, RuntimeReadinessStatus,
+        SetAgentProfileAvatarCommand, SetMemberPresenceCommand,
+        SetMemberRuntimeConfigurationCommand, UpdateAdapterInstallationCommand,
+        UpdateAgentProfileCommand, VerifiedManagedInstallation,
     },
     agent_runtime_adapter::{
         AcpProbeObservation, AgentRuntimeAdapterRegistry, AntigravityProbeObservation,
@@ -70,13 +71,9 @@ use rovai_core::{
         builtin_tool_catalog_digest, builtin_tool_description, recovery_for_error_code,
     },
     camp_attachment::{CampAttachmentStore, CampComposerReplyRecipient},
-    camp_attachment_publication::{
-        AuthorityAttachment, database_has_unresolved_writer_intent, frozen_sources_are_owned,
-        unresolved_publication_camp_ids,
-    },
+    camp_attachment_publication::{AuthorityAttachment, unresolved_publication_camp_ids},
     camp_attachment_view::{
-        CampAttachmentRuntimeAuthorization, CampAttachmentViewStore, CampAttachmentVisibilityMode,
-        PreparedCampAttachmentCleanup,
+        CampAttachmentRuntimeAuthorization, CampAttachmentViewStore, PreparedCampAttachmentCleanup,
     },
     camp_content::StructuredCampMessageContent,
     camp_history::{
@@ -87,9 +84,10 @@ use rovai_core::{
     camp_id::CampId,
     camp_open::CampOpenService,
     collaboration::{
-        CampActivationState, CampCollaborationMode, ChangeDefaultLeadCommand, CollaborationService,
-        CreateCampCommand, CreateTaskCommand, DeleteCampCommand, DiscardPendingCampCommand,
-        ExecutionRequest, ProjectBindingKind, ReconcileDefaultLeadCommand, RenameCampCommand,
+        AddCampMemberCommand, CampActivationState, CampCollaborationMode, ChangeDefaultLeadCommand,
+        CollaborationService, CreateCampCommand, CreateTaskCommand, DeleteCampCommand,
+        DiscardPendingCampCommand, ExecutionRequest, ProjectBindingKind,
+        ReconcileDefaultLeadCommand, RemoveCampMemberCommand, RenameCampCommand,
         SendUserAutomationCampMessageCommand, SendUserCampDraftCommand,
         TaskAcceptanceCriteriaUpdate, TaskAssigneeFilter, TaskAssigneeUpdate, TaskListQuery,
         TaskStatus, UpdateTaskCommand,
@@ -124,6 +122,7 @@ use rovai_core::{
         RUNTIME_EVIDENCE_DELTA_BATCH_MAX_BYTES, RecordedExecutionEvidence,
     },
     git,
+    managed_attachment::ManagedAttachmentStore,
     managed_blob::ManagedBlobStore,
     mcp::{
         CommitMcpImportParams, CreateMcpServerParams, DeleteMcpServerParams,
@@ -184,9 +183,10 @@ use rovai_core::{
         RestartNativeSessionCommand, SucceedAgentRunCommand,
     },
     runtime_discovery::{
-        RuntimeDiscoveryObservation, RuntimeDiscoveryStatus, RuntimeLaunchPurpose,
-        RuntimeSearchEnvironment, catalog_entries, discover_runtime_path, discover_runtime_version,
-        is_executable_file, runtime_launch_allowed, runtime_visible_path,
+        RuntimeDiscoveryObservation, RuntimeDiscoveryStatus, RuntimeExecutableCandidate,
+        RuntimeLaunchPurpose, RuntimeSearchEnvironment, catalog_entries, discover_runtime_path,
+        discover_runtime_path_with_manual_candidates, discover_runtime_version,
+        is_runtime_entrypoint_file, runtime_launch_allowed, runtime_visible_path,
         with_runtime_search_environment,
     },
     runtime_failure::{
@@ -237,32 +237,17 @@ const RUNTIME_EVIDENCE_DELTA_BATCH_MAX_ITEMS: usize = 32;
 const CAMP_ATTACHMENT_VIEW_MUTATION_DEADLINE: Duration = Duration::from_secs(55);
 const CAMP_ATTACHMENT_VIEW_QUIESCENCE_POLL_INTERVAL: Duration = Duration::from_millis(100);
 
-async fn claim_agent_run_under_attachment_admission<F, Fut, T>(
-    camp_id: String,
-    gate: Arc<RwLock<()>>,
-    claim: F,
-) -> (CampAttachmentReadAdmission, T)
-where
-    F: FnOnce() -> Fut,
-    Fut: Future<Output = T>,
-{
-    let guard = gate.read_owned().await;
-    let claim = claim().await;
-    (
-        CampAttachmentReadAdmission {
-            camp_id,
-            _guard: guard,
-        },
-        claim,
-    )
-}
-
 struct CampAttachmentReadAdmission {
     camp_id: String,
-    _guard: tokio::sync::OwnedRwLockReadGuard<()>,
 }
 
 impl CampAttachmentReadAdmission {
+    fn for_camp(camp_id: &str) -> Self {
+        Self {
+            camp_id: camp_id.to_string(),
+        }
+    }
+
     fn prove(&self, camp_id: &str) -> Result<()> {
         if self.camp_id != camp_id {
             anyhow::bail!("Camp Attachment read admission does not match the AgentRun Camp");
@@ -545,6 +530,13 @@ struct CampIdParams {
 struct WorkspaceChangeWindowDiffParams {
     camp_id: CampId,
     window_id: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct CampMemberRemovalPreviewParams {
+    camp_id: CampId,
+    agent_id: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -1020,6 +1012,23 @@ const RUNTIME_CHECK_MAX_CONCURRENCY: usize = 2;
 const RUNTIME_PROBE_UPDATE_RETRY_DELAY: Duration = Duration::from_millis(300);
 const RUNTIME_PROBE_MAX_EXECUTIONS: usize = 2;
 const RUNTIME_CHECK_EXECUTION_COOLDOWN: Duration = Duration::from_secs(3);
+
+fn apply_entrypoint_locator_compatibility(
+    snapshot: &mut AdapterCapabilitySnapshot,
+    identity: Option<&RuntimeEntrypointLocatorIdentity>,
+) {
+    let Some(identity) = identity else {
+        return;
+    };
+    let base = snapshot
+        .native_session_compatibility_key
+        .take()
+        .unwrap_or_else(|| "runtime-entrypoint".to_string());
+    snapshot.native_session_compatibility_key = Some(format!(
+        "{base}:windows-resolved-command-shim-v1:{}",
+        identity.compatibility_fingerprint
+    ));
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum RuntimeCheckOutcome {
@@ -1704,6 +1713,23 @@ impl Core {
         Ok((guard, deadline))
     }
 
+    async fn verified_camp_attachment_admission(
+        &self,
+        camp_id: &str,
+        workspace: &Path,
+    ) -> Result<(
+        CampAttachmentReadAdmission,
+        CampAttachmentRuntimeAuthorization,
+    )> {
+        let authorization = self
+            .verified_camp_runtime_authorization(camp_id, workspace)
+            .await?;
+        Ok((
+            CampAttachmentReadAdmission::for_camp(camp_id),
+            authorization,
+        ))
+    }
+
     async fn wait_for_camp_attachment_quiescence(
         &self,
         camp_id: &str,
@@ -1879,15 +1905,30 @@ impl Core {
         self.runtime_product_diagnostics.write().await.clear();
         let managed_installations = {
             let database = self.database.lock().await;
-            match AgentProfileService::default().list_installations(&database) {
-                Ok(installations) => installations
-                    .into_iter()
-                    .filter(|installation| {
+            let service = AgentProfileService::default();
+            match service.list_installations(&database) {
+                Ok(installations) => {
+                    let mut managed = HashMap::new();
+                    for installation in installations.into_iter().filter(|installation| {
                         installation.installation_class == InstallationClass::ManagedDefault
                             && installation.auth_scope == "default"
-                    })
-                    .map(|installation| (installation.adapter_kind, installation))
-                    .collect::<HashMap<_, _>>(),
+                    }) {
+                        let locator = match service
+                            .runtime_entrypoint_locator_identity(&database, &installation.id)
+                        {
+                            Ok(locator) => locator,
+                            Err(error) => {
+                                eprintln!(
+                                    "failed to load Runtime entrypoint locator for {}: {error:#}",
+                                    installation.adapter_kind.as_str()
+                                );
+                                continue;
+                            }
+                        };
+                        managed.insert(installation.adapter_kind, (installation, locator));
+                    }
+                    managed
+                }
                 Err(error) => {
                     eprintln!("failed to load managed Runtime discovery fallbacks: {error:#}");
                     HashMap::new()
@@ -1914,14 +1955,46 @@ impl Core {
             let search = search.clone();
             let managed_installation = managed_installations.get(&kind).cloned();
             let handle = path_tasks.spawn_blocking(move || {
-                let mut observation = discover_runtime_path(kind, &search);
+                let explicit_saved_path = managed_installation
+                    .as_ref()
+                    .filter(|(installation, _)| {
+                        matches!(
+                            installation.source,
+                            InstallationSource::Manual | InstallationSource::Custom
+                        )
+                    })
+                    .map(|(installation, locator)| {
+                        locator
+                            .as_ref()
+                            .map(|identity| PathBuf::from(&identity.canonical_shim_path))
+                            .unwrap_or_else(|| PathBuf::from(&installation.executable_path))
+                    });
+                let mut observation = if let Some(saved_path) = explicit_saved_path {
+                    let mut observation =
+                        discover_runtime_path_with_manual_candidates(kind, &search, [saved_path]);
+                    if observation.discovery_status == RuntimeDiscoveryStatus::Found {
+                        observation.source = managed_installation
+                            .as_ref()
+                            .map(|(installation, _)| installation.source);
+                    }
+                    observation
+                } else {
+                    discover_runtime_path(kind, &search)
+                };
                 let mut missing_managed_installation = None;
                 if observation.discovery_status == RuntimeDiscoveryStatus::Missing
-                    && let Some(installation) = managed_installation
+                    && let Some((installation, locator)) = managed_installation
                 {
-                    let saved_path = PathBuf::from(&installation.executable_path);
-                    if is_executable_file(&saved_path) {
-                        let canonical = canonical_runtime_path(&saved_path);
+                    let saved_path = locator
+                        .as_ref()
+                        .map(|identity| PathBuf::from(&identity.canonical_shim_path))
+                        .unwrap_or_else(|| PathBuf::from(&installation.executable_path));
+                    let saved_candidate = search
+                        .candidates(kind, [saved_path])
+                        .into_iter()
+                        .find(|candidate| is_runtime_entrypoint_file(&candidate.path));
+                    if let Some(candidate) = saved_candidate {
+                        let canonical = canonical_runtime_path(&candidate.path);
                         match fingerprint_executable(&canonical) {
                             Ok(fingerprint) => {
                                 observation.discovery_status = RuntimeDiscoveryStatus::Found;
@@ -1929,6 +2002,14 @@ impl Core {
                                     Some(canonical.to_string_lossy().to_string());
                                 observation.source = Some(installation.source);
                                 observation.executable_fingerprint = Some(fingerprint);
+                                observation.search_path_source = candidate.search_path_source;
+                                observation.entrypoint_kind = Some(candidate.entrypoint_kind);
+                                observation.candidate_extension =
+                                    Some(candidate.candidate_extension);
+                                observation.resolved_native_target =
+                                    candidate.resolved_native_target;
+                                observation.entrypoint_locator_identity =
+                                    candidate.entrypoint_locator_identity;
                                 observation.diagnostic_code = None;
                             }
                             Err(_) => {
@@ -2108,7 +2189,7 @@ impl Core {
             .source
             .context("light Runtime discovery did not include source")?;
         let registry = AgentRuntimeAdapterRegistry::default();
-        let snapshot =
+        let mut snapshot =
             if observation.reported_version.is_some() && observation.diagnostic_code.is_none() {
                 registry.light_ready_snapshot(
                     observation.runtime_kind,
@@ -2128,6 +2209,10 @@ impl Core {
                         .unwrap_or_else(|| "runtime_light_probe_incomplete".to_string()),
                 )?
             };
+        apply_entrypoint_locator_compatibility(
+            &mut snapshot,
+            observation.entrypoint_locator_identity.as_ref(),
+        );
         let mut database = self.database.lock().await;
         AgentProfileService::default().commit_discovered_managed_installation(
             &mut database,
@@ -2138,6 +2223,7 @@ impl Core {
                 source,
                 auth_scope: "default".to_string(),
                 snapshot,
+                entrypoint_locator_identity: observation.entrypoint_locator_identity.clone(),
             },
         )?;
         Ok(())
@@ -2149,15 +2235,20 @@ impl Core {
         executable_path: &Path,
         executable_fingerprint: &str,
         source: InstallationSource,
+        candidate: &RuntimeExecutableCandidate,
         search_generation: u64,
     ) -> Result<()> {
         let observed_at = chrono::Utc::now().to_rfc3339();
-        let snapshot = AgentRuntimeAdapterRegistry::default().light_ready_snapshot(
+        let mut snapshot = AgentRuntimeAdapterRegistry::default().light_ready_snapshot(
             kind,
             None,
             executable_fingerprint.to_string(),
             observed_at.clone(),
         )?;
+        apply_entrypoint_locator_compatibility(
+            &mut snapshot,
+            candidate.entrypoint_locator_identity.as_ref(),
+        );
         {
             let mut database = self.database.lock().await;
             AgentProfileService::default().commit_discovered_managed_installation(
@@ -2169,6 +2260,7 @@ impl Core {
                     source,
                     auth_scope: "default".to_string(),
                     snapshot,
+                    entrypoint_locator_identity: candidate.entrypoint_locator_identity.clone(),
                 },
             )?;
         }
@@ -2180,9 +2272,15 @@ impl Core {
             source: Some(source),
             reported_version: None,
             executable_fingerprint: Some(executable_fingerprint.to_string()),
+            search_path_source: candidate.search_path_source,
+            entrypoint_kind: Some(candidate.entrypoint_kind),
+            candidate_extension: Some(candidate.candidate_extension),
+            resolved_native_target: candidate.resolved_native_target,
+            version_probe_succeeded: None,
             search_generation,
             observed_at,
             diagnostic_code: None,
+            entrypoint_locator_identity: candidate.entrypoint_locator_identity.clone(),
         })
         .await;
         Ok(())
@@ -2775,10 +2873,20 @@ impl Core {
         purpose: RuntimeLaunchPurpose,
         deadline: tokio::time::Instant,
     ) -> Result<RuntimeCheckOutcome> {
-        let (existing, search) = {
+        let (existing, existing_entrypoint_locator, search) = {
             let database = self.database.lock().await;
+            let service = AgentProfileService::default();
+            let existing = service.managed_installation(&database, kind, "default")?;
+            let existing_entrypoint_locator = existing
+                .as_ref()
+                .map(|installation| {
+                    service.runtime_entrypoint_locator_identity(&database, &installation.id)
+                })
+                .transpose()?
+                .flatten();
             (
-                AgentProfileService::default().managed_installation(&database, kind, "default")?,
+                existing,
+                existing_entrypoint_locator,
                 self.runtime_search_environment.read().await.clone(),
             )
         };
@@ -2786,21 +2894,20 @@ impl Core {
             .as_ref()
             .map(|installation| canonical_runtime_path(Path::new(&installation.executable_path)));
         let mut unresolved_diagnostic = None;
-        let mut candidates = Vec::new();
-        if let Some(installation) = existing.as_ref() {
-            candidates.push((
-                PathBuf::from(&installation.executable_path),
+        let candidates = if let Some(installation) = existing.as_ref().filter(|installation| {
+            matches!(
                 installation.source,
-            ));
-        }
-        candidates.extend(
-            search
-                .candidates(kind, std::iter::empty())
-                .into_iter()
-                .map(|candidate| (candidate.path, candidate.source)),
-        );
-        let mut dedupe = BTreeSet::new();
-        candidates.retain(|(path, _)| dedupe.insert(path.clone()));
+                InstallationSource::Manual | InstallationSource::Custom
+            )
+        }) {
+            let explicit_path = existing_entrypoint_locator
+                .as_ref()
+                .map(|identity| PathBuf::from(&identity.canonical_shim_path))
+                .unwrap_or_else(|| PathBuf::from(&installation.executable_path));
+            search.candidates(kind, [explicit_path])
+        } else {
+            search.candidates(kind, std::iter::empty())
+        };
 
         if candidates.is_empty() {
             let mut database = self.database.lock().await;
@@ -2847,8 +2954,10 @@ impl Core {
             return Ok(RuntimeCheckOutcome::StableFailure);
         }
 
-        'candidate: for (path, source) in candidates {
-            if !is_executable_file(&path) {
+        'candidate: for candidate in candidates {
+            let path = &candidate.path;
+            let source = candidate.source;
+            if !is_runtime_entrypoint_file(path) {
                 note_product_runtime_diagnostic(
                     &mut unresolved_diagnostic,
                     "path_missing",
@@ -2885,7 +2994,7 @@ impl Core {
                 }
                 continue;
             }
-            let mut canonical = canonical_runtime_path(&path);
+            let mut canonical = canonical_runtime_path(path);
             let mut candidate_fingerprint = match fingerprint_executable(&canonical) {
                 Ok(fingerprint) => fingerprint,
                 Err(error) => {
@@ -2927,18 +3036,27 @@ impl Core {
                 }
             };
             let targets_current_installation = existing_canonical_path.as_ref() == Some(&canonical);
-            let mut identity_changed = targets_current_installation
-                && existing
+            let executable_identity_changed = existing
+                .as_ref()
+                .and_then(|installation| installation.snapshot.as_ref())
+                .and_then(|snapshot| snapshot.executable_fingerprint.as_deref())
+                != Some(candidate_fingerprint.as_str());
+            let locator_identity_changed = existing_entrypoint_locator
+                .as_ref()
+                .map(|identity| identity.compatibility_fingerprint.as_str())
+                != candidate
+                    .entrypoint_locator_identity
                     .as_ref()
-                    .and_then(|installation| installation.snapshot.as_ref())
-                    .and_then(|snapshot| snapshot.executable_fingerprint.as_deref())
-                    != Some(candidate_fingerprint.as_str());
+                    .map(|identity| identity.compatibility_fingerprint.as_str());
+            let mut identity_changed = targets_current_installation
+                && (executable_identity_changed || locator_identity_changed);
             if identity_changed {
                 self.commit_rebound_runtime_candidate(
                     kind,
                     &canonical,
                     &candidate_fingerprint,
                     source,
+                    &candidate,
                     search.generation(),
                 )
                 .await?;
@@ -3031,8 +3149,8 @@ impl Core {
                         {
                             return Ok(RuntimeCheckOutcome::Superseded);
                         }
-                        if !is_executable_file(&path) {
-                            let rebound_path = canonical_runtime_path(&path);
+                        if !is_runtime_entrypoint_file(path) {
+                            let rebound_path = canonical_runtime_path(path);
                             let mut database = self.database.lock().await;
                             AgentProfileService::default().record_managed_probe_failure(
                                 &mut database,
@@ -3064,7 +3182,7 @@ impl Core {
                             );
                             continue 'candidate;
                         }
-                        canonical = canonical_runtime_path(&path);
+                        canonical = canonical_runtime_path(path);
                         candidate_fingerprint = match fingerprint_executable(&canonical) {
                             Ok(fingerprint) => fingerprint,
                             Err(error) => {
@@ -3117,6 +3235,7 @@ impl Core {
                                 &canonical,
                                 &candidate_fingerprint,
                                 source,
+                                &candidate,
                                 search.generation(),
                             )
                             .await?;
@@ -3125,7 +3244,17 @@ impl Core {
                     }
                 }
             };
-            let RuntimeDeepProbeResult { snapshot, failure } = deep_probe;
+            let RuntimeDeepProbeResult {
+                mut snapshot,
+                failure,
+            } = deep_probe;
+            if !candidate.entrypoint_locator_identity_is_current() {
+                return Ok(RuntimeCheckOutcome::Superseded);
+            }
+            apply_entrypoint_locator_compatibility(
+                &mut snapshot,
+                candidate.entrypoint_locator_identity.as_ref(),
+            );
             if !self
                 .runtime_probe_identity_is_current(
                     kind,
@@ -3149,6 +3278,7 @@ impl Core {
                         source,
                         auth_scope: "default".to_string(),
                         snapshot: snapshot.clone(),
+                        entrypoint_locator_identity: candidate.entrypoint_locator_identity.clone(),
                     },
                 )?;
                 drop(database);
@@ -3159,9 +3289,15 @@ impl Core {
                     source: Some(source),
                     reported_version: snapshot.reported_version,
                     executable_fingerprint: snapshot.executable_fingerprint,
+                    search_path_source: candidate.search_path_source,
+                    entrypoint_kind: Some(candidate.entrypoint_kind),
+                    candidate_extension: Some(candidate.candidate_extension),
+                    resolved_native_target: candidate.resolved_native_target,
+                    version_probe_succeeded: Some(true),
                     search_generation: search.generation(),
                     observed_at: chrono::Utc::now().to_rfc3339(),
                     diagnostic_code: None,
+                    entrypoint_locator_identity: candidate.entrypoint_locator_identity.clone(),
                 })
                 .await;
                 self.runtime_product_diagnostics.write().await.remove(&kind);
@@ -3596,7 +3732,7 @@ impl Core {
                     }
                 }
                 let mut frozen_files = Vec::<AuthorityAttachment>::new();
-                let mut attachment_camp_id = None::<String>;
+                let mut managed_attachment_ingest_intent_id = None::<String>;
                 if operation == CAMP_MESSAGE_SEND_TOOL_NAME {
                     let send_input =
                         match serde_json::from_value::<CampMessageSendInput>(input.clone()) {
@@ -3614,18 +3750,24 @@ impl Core {
                         &authorized.agent_run_id,
                         &format!("builtin-cli:{request_id}"),
                     );
-                    let domain_command_id = TeamToolService::default().binding_command_id(
+                    let domain_command_id = match TeamToolService::default().binding_command_id(
                         &authorized.native_binding.native_binding_id,
                         &authorized.native_binding.binding_credential,
                         &scoped_tool_call_id,
-                    );
-                    let domain_recorded = if let Ok(command_id) = domain_command_id {
+                    ) {
+                        Ok(command_id) => command_id,
+                        Err(error) => {
+                            return BuiltinToolIpcResponse::ipc_error(
+                                "builtin_tool.internal_error",
+                                format!("Could not derive attachment ingest identity: {error:#}"),
+                            );
+                        }
+                    };
+                    let domain_recorded = {
                         let database = self.database.lock().await;
                         TeamToolService::default()
-                            .recorded_binding_command_exists(&database, &command_id)
+                            .recorded_binding_command_exists(&database, &domain_command_id)
                             .unwrap_or(false)
-                    } else {
-                        false
                     };
                     if !send_input.files.is_empty() && !domain_recorded {
                         let scope = {
@@ -3645,14 +3787,41 @@ impl Core {
                                 );
                             }
                         };
-                        let data_dir = self.data_dir.clone();
+                        let (managed_store, ingest_plan) = {
+                            let mut database = self.database.lock().await;
+                            let managed_store = ManagedAttachmentStore::for_database(&database);
+                            let plan = match managed_store.begin_agent_ingest(
+                                &mut database,
+                                &camp_id,
+                                &domain_command_id,
+                                send_input.files.len(),
+                            ) {
+                                Ok(Some(plan)) => plan,
+                                Ok(None) => {
+                                    return BuiltinToolIpcResponse::ipc_error(
+                                        "builtin_tool.internal_error",
+                                        "Managed Attachment ingest unexpectedly had no files",
+                                    );
+                                }
+                                Err(error) => {
+                                    return builtin_tool_rejection(
+                                        &operation,
+                                        &request_id,
+                                        "builtin_tool.invalid_input",
+                                        &format!("Attachment ingest was rejected: {error:#}"),
+                                    );
+                                }
+                            };
+                            (managed_store, plan)
+                        };
                         let run_tmp = authorized.run_tmp.clone();
                         let files = send_input.files.clone();
-                        let freeze_camp_id = camp_id.clone();
+                        let materializer = managed_store.clone();
+                        let materialization_plan = ingest_plan.clone();
                         drop(invocation_guard);
-                        frozen_files = match tokio::task::spawn_blocking(move || {
-                            CampAttachmentStore::new(&data_dir).freeze_agent_sources(
-                                &freeze_camp_id,
+                        let prepared = match tokio::task::spawn_blocking(move || {
+                            materializer.materialize_agent(
+                                &materialization_plan,
                                 &files,
                                 workspace.path(),
                                 &run_tmp,
@@ -3660,8 +3829,14 @@ impl Core {
                         })
                         .await
                         {
-                            Ok(Ok(frozen)) => frozen,
+                            Ok(Ok(prepared)) => prepared,
                             Ok(Err(error)) => {
+                                let mut database = self.database.lock().await;
+                                let _ = managed_store.abandon(
+                                    &mut database,
+                                    ingest_plan.intent_id(),
+                                    "copy_failed",
+                                );
                                 return builtin_tool_rejection(
                                     &operation,
                                     &request_id,
@@ -3670,13 +3845,36 @@ impl Core {
                                 );
                             }
                             Err(error) => {
+                                let mut database = self.database.lock().await;
+                                let _ = managed_store.abandon(
+                                    &mut database,
+                                    ingest_plan.intent_id(),
+                                    "copy_failed",
+                                );
                                 return BuiltinToolIpcResponse::ipc_error(
                                     "builtin_tool.internal_error",
-                                    format!("Attachment freeze task failed: {error}"),
+                                    format!("Attachment ingest task failed: {error}"),
                                 );
                             }
                         };
-                        attachment_camp_id = Some(camp_id);
+                        if let Err(error) = {
+                            let mut database = self.database.lock().await;
+                            managed_store.record_promoted(&mut database, &prepared)
+                        } {
+                            let mut database = self.database.lock().await;
+                            let _ = managed_store.abandon(
+                                &mut database,
+                                prepared.intent_id(),
+                                "promote_failed",
+                            );
+                            return BuiltinToolIpcResponse::ipc_error(
+                                "builtin_tool.internal_error",
+                                format!("Attachment promote receipt could not be saved: {error:#}"),
+                            );
+                        }
+                        frozen_files = prepared.attachments();
+                        managed_attachment_ingest_intent_id =
+                            Some(prepared.intent_id().to_string());
                         let reauthorized = self.builtin_tool_leases.authenticate(&auth).await;
                         if !matches!(
                             reauthorized,
@@ -3687,9 +3885,11 @@ impl Core {
                                         == authorized.native_binding.native_binding_id
                                     && current.run_tmp == authorized.run_tmp
                         ) {
-                            CampAttachmentStore::new(&self.data_dir).cleanup_unowned_agent_sources(
-                                attachment_camp_id.as_deref().unwrap_or_default(),
-                                &frozen_files,
+                            let mut database = self.database.lock().await;
+                            let _ = managed_store.abandon(
+                                &mut database,
+                                prepared.intent_id(),
+                                "source_invalid",
                             );
                             return BuiltinToolIpcResponse::ipc_error(
                                 "builtin_tool.run_not_bound",
@@ -3717,18 +3917,20 @@ impl Core {
                         Some((authorized.agent_run_id, authorized.execution_epoch)),
                         Some(request_id.clone()),
                         frozen_files.clone(),
+                        managed_attachment_ingest_intent_id.clone(),
                     )
                     .await;
-                let mut attachments_adopted = false;
-                if !frozen_files.is_empty() {
-                    attachments_adopted = {
-                        let database = self.database.lock().await;
-                        frozen_sources_are_owned(&database, &frozen_files).unwrap_or(false)
-                    };
-                    if !attachments_adopted {
-                        CampAttachmentStore::new(&self.data_dir).cleanup_unowned_agent_sources(
-                            attachment_camp_id.as_deref().unwrap_or_default(),
-                            &frozen_files,
+                if let Some(intent_id) = managed_attachment_ingest_intent_id.as_deref() {
+                    let mut database = self.database.lock().await;
+                    let managed_store = ManagedAttachmentStore::for_database(&database);
+                    let adopted = managed_store
+                        .intent_is_committed(&database, intent_id)
+                        .unwrap_or(false);
+                    if !adopted {
+                        let _ = managed_store.abandon(
+                            &mut database,
+                            intent_id,
+                            "message_commit_failed",
                         );
                     }
                 }
@@ -3782,9 +3984,6 @@ impl Core {
                     .await
                 {
                     return BuiltinToolIpcResponse::ipc_error(error.code, error.message);
-                }
-                if attachments_adopted && let Some(camp_id) = attachment_camp_id.as_deref() {
-                    self.request_camp_attachment_projection(camp_id);
                 }
                 BuiltinToolIpcResponse::Envelope { envelope }
             }
@@ -3864,6 +4063,7 @@ impl Core {
         attested_run: Option<(String, i64)>,
         evidence_request_id: Option<String>,
         frozen_files: Vec<AuthorityAttachment>,
+        managed_attachment_ingest_intent_id: Option<String>,
     ) -> TeamToolIpcResponse {
         let evidence_tool_name = request.tool_name.clone();
         let evidence_input = request.input.clone();
@@ -3963,6 +4163,7 @@ impl Core {
                         runtime_tool_call_id: request.runtime_tool_call_id,
                         input,
                         frozen_files,
+                        managed_attachment_ingest_intent_id,
                     };
                     let execution =
                         if let Some((agent_run_id, execution_epoch)) = attested_run.as_ref() {
@@ -5111,6 +5312,49 @@ impl Core {
                 )?;
                 Ok(serde_json::to_value(execution.result)?)
             }
+            "camps.members.add" => {
+                let params: UserCommandParams<AddCampMemberCommand> =
+                    serde_json::from_value(request.params.clone())?;
+                let camp_id = params.command.camp_id.clone();
+                let mut database = self.database.lock().await;
+                let execution = CollaborationService::default().add_camp_member(
+                    &mut database,
+                    &user_camp_command_envelope(params.command_id, camp_id, params.command),
+                )?;
+                Ok(serde_json::to_value(execution.result)?)
+            }
+            "camps.members.removalPreview" => {
+                let params: CampMemberRemovalPreviewParams =
+                    serde_json::from_value(request.params.clone())?;
+                let database = self.database.lock().await;
+                Ok(serde_json::to_value(
+                    CollaborationService::default().camp_member_removal_preview(
+                        &database,
+                        params.camp_id.as_str(),
+                        &params.agent_id,
+                    )?,
+                )?)
+            }
+            "camps.members.remove" => {
+                let params: UserCommandParams<RemoveCampMemberCommand> =
+                    serde_json::from_value(request.params.clone())?;
+                let camp_id = params.command.camp_id.clone();
+                let mut database = self.database.lock().await;
+                let execution = CollaborationService::default().remove_camp_member(
+                    &mut database,
+                    &user_camp_command_envelope(params.command_id, camp_id, params.command),
+                )?;
+                let should_dispatch_cancellation = execution.result.status
+                    != CommandResultStatus::Rejected
+                    && execution.result.payload["cancelRequestedRunCount"]
+                        .as_u64()
+                        .is_some_and(|count| count > 0);
+                drop(database);
+                if should_dispatch_cancellation {
+                    self.agent_run_cancellation_notify.notify_one();
+                }
+                Ok(serde_json::to_value(execution.result)?)
+            }
             "camps.changeDefaultLead" => {
                 let params: UserCommandParams<ChangeDefaultLeadCommand> =
                     serde_json::from_value(request.params.clone())?;
@@ -6038,12 +6282,93 @@ impl Core {
             }));
         }
 
-        let execution = {
+        let (managed_store, ingest_plan) = {
             let mut database = self.database.lock().await;
-            CollaborationService::default().send_user_camp_draft(&mut database, &envelope)?
+            let managed_store = ManagedAttachmentStore::for_database(&database);
+            let plan = managed_store.begin_current_composer_ingest(
+                &mut database,
+                params.camp_id.as_str(),
+                &params.command_id,
+                params.draft_revision,
+            )?;
+            (managed_store, plan)
         };
-        if execution.result.status != CommandResultStatus::Rejected {
-            self.request_camp_attachment_projection(params.camp_id.as_str());
+        let prepared_ingest = if let Some(plan) = ingest_plan {
+            let materializer = managed_store.clone();
+            let authority_store = CampAttachmentStore::new(&self.data_dir);
+            let materialization_plan = plan.clone();
+            let prepared = match tokio::task::spawn_blocking(move || {
+                materializer.materialize_composer(&authority_store, &materialization_plan)
+            })
+            .await
+            .context("Managed Attachment Composer ingest task failed")?
+            {
+                Ok(prepared) => prepared,
+                Err(error) => {
+                    let mut database = self.database.lock().await;
+                    let _ = managed_store.abandon(&mut database, plan.intent_id(), "copy_failed");
+                    return Err(error);
+                }
+            };
+            if let Err(error) = {
+                let mut database = self.database.lock().await;
+                managed_store.record_promoted(&mut database, &prepared)
+            } {
+                let mut database = self.database.lock().await;
+                let _ =
+                    managed_store.abandon(&mut database, prepared.intent_id(), "promote_failed");
+                return Err(error);
+            }
+            Some(prepared)
+        } else {
+            None
+        };
+        let execution_result = {
+            let mut database = self.database.lock().await;
+            CollaborationService::default().send_user_camp_draft_with_managed_ingest(
+                &mut database,
+                &envelope,
+                prepared_ingest
+                    .as_ref()
+                    .map(|prepared| prepared.intent_id()),
+            )
+        };
+        let execution = match execution_result {
+            Ok(execution) if execution.result.status != CommandResultStatus::Rejected => execution,
+            Ok(execution) => {
+                if let Some(prepared) = prepared_ingest.as_ref() {
+                    let mut database = self.database.lock().await;
+                    let _ = managed_store.abandon(
+                        &mut database,
+                        prepared.intent_id(),
+                        "message_commit_failed",
+                    );
+                }
+                execution
+            }
+            Err(error) => {
+                if let Some(prepared) = prepared_ingest.as_ref() {
+                    let mut database = self.database.lock().await;
+                    let _ = managed_store.abandon(
+                        &mut database,
+                        prepared.intent_id(),
+                        "message_commit_failed",
+                    );
+                }
+                return Err(error);
+            }
+        };
+        if let Some(prepared) = prepared_ingest {
+            let cleanup_store = managed_store.clone();
+            let authority_store = CampAttachmentStore::new(&self.data_dir);
+            if let Err(error) = tokio::task::spawn_blocking(move || {
+                cleanup_store.cleanup_committed_composer_sources(&authority_store, &prepared)
+            })
+            .await
+            .context("Managed Attachment Composer source cleanup task failed")?
+            {
+                eprintln!("Committed Composer source cleanup was deferred: {error:#}");
+            }
         }
         Ok(json!({
             "commandResult": execution.result,
@@ -6488,46 +6813,52 @@ impl Core {
             }
         }
         let starting_git_observation = Some(git::observe_git(&workspace_path).await);
+        let (attachment_view_admission, attachment_authorization) = match self
+            .verified_camp_attachment_admission(&candidate.camp_id, &workspace_path)
+            .await
+        {
+            Ok(admission) => admission,
+            Err(error) => {
+                self.reject_agent_run_dispatch(
+                    &candidate,
+                    "camp_attachment_view_unavailable",
+                    &error,
+                )
+                .await;
+                return;
+            }
+        };
         let workspace_change_guard = self.workspace_change_gate.lock().await;
         let workspace_change_admission = self
             .prepare_workspace_change_admission(&candidate.camp_id, &workspace_path)
             .await;
-        let attachment_view_gate = self.attachment_view_gate(&candidate.camp_id).await;
-        let (attachment_view_admission, claim) = claim_agent_run_under_attachment_admission(
-            candidate.camp_id.clone(),
-            attachment_view_gate,
-            || async {
-                let mut database = self.database.lock().await;
-                if database_has_unresolved_writer_intent(&database, &candidate.camp_id)? {
-                    anyhow::bail!("camp_attachment_view_not_ready");
-                }
-                ExecutionRuntimeService::default().claim_agent_run(
-                    &mut database,
-                    &CommandEnvelope {
-                        command_id: uuid::Uuid::new_v4().to_string(),
-                        actor: ActorRef::System {
-                            component_id: "agent-run-scheduler".to_string(),
-                        },
-                        camp_id: Some(candidate.camp_id.clone()),
-                        expected_versions: Vec::new(),
-                        execution_epoch: None,
-                        payload: ClaimAgentRunCommand {
-                            agent_run_id: candidate.agent_run_id.clone(),
-                            expected_version: candidate.version,
-                            lease_owner: format!(
-                                "codex:{}:{}",
-                                candidate.agent_run_id,
-                                uuid::Uuid::new_v4()
-                            ),
-                            lease_seconds: 120,
-                            workspace: Some(workspace),
-                            starting_git_observation,
-                        },
+        let claim = {
+            let mut database = self.database.lock().await;
+            ExecutionRuntimeService::default().claim_agent_run(
+                &mut database,
+                &CommandEnvelope {
+                    command_id: uuid::Uuid::new_v4().to_string(),
+                    actor: ActorRef::System {
+                        component_id: "agent-run-scheduler".to_string(),
                     },
-                )
-            },
-        )
-        .await;
+                    camp_id: Some(candidate.camp_id.clone()),
+                    expected_versions: Vec::new(),
+                    execution_epoch: None,
+                    payload: ClaimAgentRunCommand {
+                        agent_run_id: candidate.agent_run_id.clone(),
+                        expected_version: candidate.version,
+                        lease_owner: format!(
+                            "codex:{}:{}",
+                            candidate.agent_run_id,
+                            uuid::Uuid::new_v4()
+                        ),
+                        lease_seconds: 120,
+                        workspace: Some(workspace),
+                        starting_git_observation,
+                    },
+                },
+            )
+        };
         let claim = match claim {
             Ok(claim) if claim.result.status == CommandResultStatus::Accepted => claim,
             Ok(_) => {
@@ -6677,14 +7008,13 @@ impl Core {
                 .launch_agent_run(
                     &execution,
                     &attachment_view_admission,
+                    &attachment_authorization,
                     &output,
                     &mut launch_permit,
                 )
                 .await;
-            // Agent-authored attachment publication cannot take the Camp write admission
-            // while this Run owns its lifecycle read admission. Release first, then wake the
-            // persistent projection intent so a prior write timeout does not strand it until
-            // the next process restart.
+            // New Runs carry only a Camp-scoped root proof. Their terminal path may wake legacy
+            // recovery work, but no legacy View admission is held across the Run lifecycle.
             if !release_agent_run_attachment_admission(
                 attachment_view_admission,
                 &core.attachment_projection_requests,
@@ -8633,29 +8963,17 @@ impl Core {
         &self,
         camp_id: &str,
         workspace: &Path,
-        visibility_mode: CampAttachmentVisibilityMode,
     ) -> Result<CampAttachmentRuntimeAuthorization> {
-        let verification = {
-            let database = self.database.lock().await;
-            self.attachment_views.prepare_camp_runtime_authorization(
-                &database,
-                camp_id,
-                Some(workspace),
-                visibility_mode,
-            )?
-        };
-        let verified = tokio::task::spawn_blocking(move || verification.verify())
-            .await
-            .context("Camp Attachment View verification task failed")??;
         let database = self.database.lock().await;
         self.attachment_views
-            .complete_verified_camp_runtime_authorization(&database, verified)
+            .camp_root_runtime_authorization(&database, camp_id, Some(workspace))
     }
 
     async fn launch_agent_run(
         self: &Arc<Self>,
         execution: &AgentRunExecution,
         attachment_admission: &CampAttachmentReadAdmission,
+        attachment_authorization: &CampAttachmentRuntimeAuthorization,
         output: &mpsc::UnboundedSender<String>,
         launch_permit: &mut ExecutionLaunchPermit,
     ) -> Result<()> {
@@ -8671,19 +8989,9 @@ impl Core {
             .prepare_agent_run_mcp_projection(execution)
             .await
             .context("failed to prepare AgentRun MCP projection")?;
-        // No Adapter is promoted to live-append compatibility until a persisted,
-        // artifact-bound positive probe proves the required warm-host behavior.
-        let visibility_mode = CampAttachmentVisibilityMode::GenerationFencedV1;
-        let attachment_authorization = self
-            .verified_camp_runtime_authorization(
-                &execution.camp_id,
-                Path::new(&execution.workspace.execution_root),
-                visibility_mode,
-            )
-            .await?;
         let attachment_access = CampAttachmentRunAccess {
             admission: attachment_admission,
-            authorization: &attachment_authorization,
+            authorization: attachment_authorization,
         };
         let attachment_access_root = attachment_authorization.attachment_root.clone();
         let resume_disposition = {
@@ -8713,7 +9021,7 @@ impl Core {
                     skill_exposure: &skill_exposure,
                     mcp_projection: &mcp_projection,
                     attachment_admission,
-                    attachment_authorization: &attachment_authorization,
+                    attachment_authorization,
                     output,
                     launch_permit,
                 })
@@ -8727,7 +9035,7 @@ impl Core {
                     skill_exposure: &skill_exposure,
                     mcp_projection: &mcp_projection,
                     attachment_admission,
-                    attachment_authorization: &attachment_authorization,
+                    attachment_authorization,
                     output,
                     launch_permit,
                 })
@@ -8741,7 +9049,7 @@ impl Core {
                     skill_exposure: &skill_exposure,
                     mcp_projection: &mcp_projection,
                     attachment_admission,
-                    attachment_authorization: &attachment_authorization,
+                    attachment_authorization,
                     output,
                     launch_permit,
                 })
@@ -8764,7 +9072,7 @@ impl Core {
         let runtime_compatibility_digest = codex::runtime_compatibility_digest(
             &execution.runtime,
             &execution_root,
-            &attachment_authorization,
+            attachment_authorization,
         )?;
         self.persist_runtime_compatibility_digest(execution, &runtime_compatibility_digest)
             .await?;
@@ -11122,6 +11430,13 @@ async fn run_core(
     }
     let attachment_store = CampAttachmentStore::new(&data_dir);
     attachment_store.cleanup_expired(&mut database)?;
+    let recovered_managed_ingests =
+        ManagedAttachmentStore::for_database(&database).reconcile(&mut database)?;
+    if recovered_managed_ingests != 0 {
+        eprintln!(
+            "Managed Attachment startup recovery reconciled {recovered_managed_ingests} ingest intent(s)"
+        );
+    }
     let discarded_pending_camps =
         CollaborationService::default().discard_empty_pending_camps_on_startup(&mut database)?;
     for camp_id in &discarded_pending_camps {
@@ -11888,8 +12203,6 @@ fn codex_delta_batch_identity(incoming: &CodexIncoming) -> Option<(&str, &str, i
         "item/agentMessage/delta"
             | "item/reasoning/summaryTextDelta"
             | "item/plan/delta"
-            | "item/commandExecution/outputDelta"
-            | "command/exec/outputDelta"
             | "item/fileChange/patchUpdated"
     )
     .then_some((
@@ -11897,6 +12210,19 @@ fn codex_delta_batch_identity(incoming: &CodexIncoming) -> Option<(&str, &str, i
         agent_run_id.as_str(),
         *execution_epoch,
     ))
+}
+
+fn is_codex_command_output_delta_notification(message: &Value) -> bool {
+    message.get("id").is_none()
+        && message
+            .get("method")
+            .and_then(Value::as_str)
+            .is_some_and(|method| {
+                matches!(
+                    method,
+                    "item/commandExecution/outputDelta" | "command/exec/outputDelta"
+                )
+            })
 }
 
 fn acp_delta_batch_identity(
@@ -12058,6 +12384,11 @@ async fn process_codex_events(
                 _ = &mut shutdown => break,
             },
         };
+        if let CodexIncoming::Message { message, .. } = &incoming
+            && is_codex_command_output_delta_notification(message)
+        {
+            continue;
+        }
         let Some(mut runtime_route_permit) = core.planned_shutdown.enter_runtime_route().await
         else {
             break;
@@ -12959,13 +13290,14 @@ async fn process_agent_run_acp_message(
                 eprintln!(
                     "failed to persist Runtime Evidence for AgentRun {agent_run_id}: {error:#}"
                 );
-                if ExecutionEvidenceService::is_runtime_evidence_event(event_type) {
+                if ExecutionEvidenceService::is_durable_runtime_evidence_event(event_type) {
                     return;
                 }
                 None
             }
         };
-    if ExecutionEvidenceService::is_runtime_evidence_event(event_type) && evidence.is_none() {
+    if ExecutionEvidenceService::is_durable_runtime_evidence_event(event_type) && evidence.is_none()
+    {
         return;
     }
     let evidence_id = evidence.as_ref().map(|evidence| evidence.id.as_str());
@@ -13362,7 +13694,7 @@ async fn persist_runtime_evidence(
     event_type: &str,
     payload: &Value,
 ) -> Result<Option<AgentRunExecutionEvidence>> {
-    if !ExecutionEvidenceService::is_runtime_evidence_event(event_type) {
+    if !ExecutionEvidenceService::is_durable_runtime_evidence_event(event_type) {
         return Ok(None);
     }
     let mut database = core.database.lock().await;
@@ -14434,6 +14766,60 @@ async fn process_agent_run_codex_delta_batch(
     }
 }
 
+async fn persist_interrupted_codex_activities(
+    core: &Core,
+    output: &mpsc::UnboundedSender<String>,
+    runtime: &CodexRuntime,
+    agent_run_id: &str,
+    execution_epoch: i64,
+) -> Result<usize> {
+    let mut inserted = 0_usize;
+    for mut item in runtime.open_action_items().await {
+        let Some(item_fields) = item.as_object_mut() else {
+            continue;
+        };
+        item_fields.insert(
+            "status".to_string(),
+            Value::String("interrupted".to_string()),
+        );
+        if item_fields.get("type").and_then(Value::as_str) == Some("commandExecution") {
+            item_fields.insert("aggregatedOutput".to_string(), Value::Null);
+        }
+        let payload = json!({
+            "reasonCode": "runtime_interrupted",
+            "item": item,
+        });
+        let recorded = {
+            let mut database = core.database.lock().await;
+            ExecutionEvidenceService.record_interrupted_runtime_activity(
+                &mut database,
+                &ManagedBlobStore::new(&core.data_dir),
+                agent_run_id,
+                execution_epoch,
+                &payload,
+            )?
+        };
+        let Some(recorded) = recorded else {
+            continue;
+        };
+        inserted += usize::from(recorded.inserted);
+        let evidence = recorded.into_evidence();
+        emit(
+            output,
+            &evidence.event_type,
+            json!({
+                "agentRunId": agent_run_id,
+                "executionEpoch": execution_epoch,
+                "nativeMethod": "turn/completed",
+                "evidenceId": evidence.id,
+                "payload": evidence.payload,
+                "canonical": evidence.canonical,
+            }),
+        );
+    }
+    Ok(inserted)
+}
+
 async fn process_agent_run_codex_message(
     core: &Arc<Core>,
     output: &mpsc::UnboundedSender<String>,
@@ -14443,6 +14829,9 @@ async fn process_agent_run_codex_message(
     message: Value,
     runtime_route_permit: &mut rovai_core::planned_shutdown::RuntimeRoutePermit,
 ) {
+    if is_codex_command_output_delta_notification(&message) {
+        return;
+    }
     let Some(runtime) = core
         .codex_cli
         .get_agent_run_on_host(host_instance_id, agent_run_id, execution_epoch)
@@ -14505,11 +14894,11 @@ async fn process_agent_run_codex_message(
     {
         eprintln!("failed to persist Codex Usage for AgentRun {agent_run_id}: {error:#}");
     }
-    runtime.observe_agent_message(&method, &params).await;
     if method == "thread/tokenUsage/updated" {
         return;
     }
     let (event_type, payload) = codex::normalize_event(&method, &params);
+    runtime.observe_agent_message(&method, &params).await;
     let evidence =
         match persist_runtime_evidence(core, agent_run_id, execution_epoch, event_type, &payload)
             .await
@@ -14519,13 +14908,14 @@ async fn process_agent_run_codex_message(
                 eprintln!(
                     "failed to persist Runtime Evidence for AgentRun {agent_run_id}: {error:#}"
                 );
-                if ExecutionEvidenceService::is_runtime_evidence_event(event_type) {
+                if ExecutionEvidenceService::is_durable_runtime_evidence_event(event_type) {
                     return;
                 }
                 None
             }
         };
-    if ExecutionEvidenceService::is_runtime_evidence_event(event_type) && evidence.is_none() {
+    if ExecutionEvidenceService::is_durable_runtime_evidence_event(event_type) && evidence.is_none()
+    {
         return;
     }
     let evidence_id = evidence.as_ref().map(|evidence| evidence.id.as_str());
@@ -14631,6 +15021,20 @@ async fn process_agent_run_codex_message(
         eprintln!("ignored fenced native Turn completion for AgentRun {agent_run_id}");
         return;
     }
+    if completed.status == "interrupted"
+        && let Err(error) = persist_interrupted_codex_activities(
+            core,
+            output,
+            &runtime,
+            agent_run_id,
+            execution_epoch,
+        )
+        .await
+    {
+        eprintln!(
+            "failed to persist interrupted Runtime Activities for AgentRun {agent_run_id}: {error:#}"
+        );
+    }
     if let Err(error) =
         flush_runtime_monitoring_run(core, agent_run_id, execution_epoch, "terminal_flush").await
     {
@@ -14645,8 +15049,10 @@ async fn process_agent_run_codex_message(
     };
     let planned_outcome = if completed.status == "completed" && final_agent_message.is_some() {
         RuntimeTerminalOutcome::Succeeded
-    } else if matches!(completed.status.as_str(), "cancelled" | "interrupted") {
+    } else if completed.status == "cancelled" {
         RuntimeTerminalOutcome::Cancelled
+    } else if completed.status == "interrupted" {
+        RuntimeTerminalOutcome::Interrupted
     } else {
         RuntimeTerminalOutcome::Failed
     };
@@ -14685,10 +15091,10 @@ async fn process_agent_run_codex_message(
                 .flatten()
                 .map(|execution| execution.workspace.execution_root)
         };
-        let error_code = if completed.status == "completed" {
-            "runtime_missing_final_output".to_string()
-        } else {
-            format!("runtime_turn_{}", completed.status)
+        let error_code = match completed.status.as_str() {
+            "completed" => "runtime_missing_final_output".to_string(),
+            "interrupted" => "runtime_interrupted".to_string(),
+            status => format!("runtime_turn_{status}"),
         };
         let error_detail = Some(match &completed.error {
             Some(error) => format!(
@@ -14845,7 +15251,11 @@ async fn process_agent_run_codex_message(
                         agent_run_id: agent_run_id.to_string(),
                         expected_version: execution.version,
                         execution_epoch,
-                        error_code: format!("runtime_turn_{}", completed.status),
+                        error_code: if completed.status == "interrupted" {
+                            "runtime_interrupted".to_string()
+                        } else {
+                            format!("runtime_turn_{}", completed.status)
+                        },
                         error_detail: Some(match &completed.error {
                             Some(error) => format!(
                                 "Codex Native Turn {} ended as {}: {}",
@@ -16417,10 +16827,16 @@ mod tests {
     fn runtime_resolution_test_core(root: &Path) -> Result<Core> {
         let data_dir = root.join("data");
         let skill_library_root = root.join("skills");
+        let runtime_camp_files_root = root.join("runtime-files");
         std::fs::create_dir_all(&data_dir)?;
         std::fs::create_dir_all(&skill_library_root)?;
-        let database = Database::open(&data_dir)?;
-        let attachment_views = CampAttachmentViewStore::for_test(&database)?;
+        let attachment_views =
+            CampAttachmentViewStore::for_isolated_test_root(&runtime_camp_files_root)?;
+        let database = Database::open_with_runtime_camp_files_root(
+            &data_dir,
+            attachment_views.root(),
+            attachment_views.root_identity_digest(),
+        )?;
         let skill_library = SkillLibraryService::new(skill_library_root)?;
         let mcp_config = McpConfigStore::new(root.join("mcp.json"));
         let mcp_projection = McpProjectionService::new(&data_dir);
@@ -16587,6 +17003,7 @@ mod tests {
                     source: InstallationSource::Manual,
                     auth_scope: "default".to_string(),
                     snapshot,
+                    entrypoint_locator_identity: None,
                 },
             )
             .unwrap();
@@ -16925,50 +17342,175 @@ while IFS= read -r _ignored; do :; done
         ));
     }
 
+    #[cfg(all(target_os = "macos", feature = "slow-tests"))]
     #[tokio::test]
-    async fn agent_run_claim_waits_for_attachment_read_admission_and_retains_it() {
-        let gate = Arc::new(RwLock::new(()));
-        let writer = gate.clone().write_owned().await;
-        let claim_started = Arc::new(std::sync::atomic::AtomicBool::new(false));
-        let claim_started_in_task = claim_started.clone();
-        let claim_task = tokio::spawn(claim_agent_run_under_attachment_admission(
-            "rvcamp_test".to_string(),
-            gate.clone(),
-            move || async move {
-                claim_started_in_task.store(true, std::sync::atomic::Ordering::Release);
-                "claimed"
-            },
-        ));
+    async fn v2_dispatch_admission_ignores_broken_legacy_view_and_managed_payload() {
+        use std::os::unix::fs::PermissionsExt;
 
-        tokio::task::yield_now().await;
-        assert!(
-            !claim_started.load(std::sync::atomic::Ordering::Acquire),
-            "Claim must remain queued while publication owns the write gate"
-        );
-        drop(writer);
-        let (admission, claim) = tokio::time::timeout(Duration::from_secs(1), claim_task)
+        let root = std::env::temp_dir().join(format!(
+            "rovai-dispatch-attachment-degradation-test-{}",
+            uuid::Uuid::new_v4()
+        ));
+        fs::create_dir_all(&root).unwrap();
+        let root = root.canonicalize().unwrap();
+        let workspace = root.join("workspace");
+        fs::create_dir_all(&workspace).unwrap();
+        let core = runtime_resolution_test_core(&root).unwrap();
+        let source = root.join("published.txt");
+        fs::write(&source, b"published before authority loss").unwrap();
+
+        let camp_id = {
+            let mut database = core.database.lock().await;
+            let agent_id = AgentProfileService::default()
+                .list_profiles(&database)
+                .unwrap()
+                .into_iter()
+                .next()
+                .expect("the startup database should include a default member")
+                .agent_id;
+            let created = CollaborationService::default()
+                .create_camp(
+                    &mut database,
+                    &CommandEnvelope {
+                        command_id: uuid::Uuid::new_v4().to_string(),
+                        actor: ActorRef::User {
+                            user_id: "test-user".to_string(),
+                        },
+                        camp_id: None,
+                        expected_versions: Vec::new(),
+                        execution_epoch: None,
+                        payload: CreateCampCommand {
+                            name: None,
+                            project_binding_kind: ProjectBindingKind::Directory,
+                            project_path: workspace.display().to_string(),
+                            member_agent_ids: vec![agent_id.clone()],
+                            default_lead_agent_id: agent_id,
+                            collaboration_mode: CampCollaborationMode::Peer,
+                            activation_state: CampActivationState::Active,
+                        },
+                    },
+                )
+                .unwrap();
+            let camp_id = created.result.payload["campId"]
+                .as_str()
+                .unwrap()
+                .to_string();
+            core.attachment_views
+                .ensure_empty_camp_ready(&mut database, &camp_id)
+                .unwrap();
+            CampAttachmentStore::new(&core.data_dir)
+                .save_body(&mut database, &camp_id, "Use the published attachment")
+                .unwrap();
+            camp_id
+        };
+        let prepared = prepare_composer_attachment_from_path(
+            &core.database,
+            &core.data_dir,
+            PrepareAttachmentFromPathParams {
+                camp_id: CampId::parse(&camp_id).unwrap(),
+                expected_revision: 1,
+                source_path: source.display().to_string(),
+                display_name: "published.txt".to_string(),
+            },
+        )
+        .await
+        .unwrap();
+        let draft_revision = prepared["revision"].as_i64().unwrap();
+        let attachment_id = prepared["attachments"][0]["id"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        core.send_test_camp_message_request(SendCampMessageParams {
+            command_id: uuid::Uuid::new_v4().to_string(),
+            camp_id: CampId::parse(&camp_id).unwrap(),
+            draft_revision,
+            execution: None,
+        })
+        .await
+        .unwrap();
+        let attachment_store = CampAttachmentStore::new(&core.data_dir);
+        let managed_candidate = {
+            let database = core.database.lock().await;
+            attachment_store
+                .desktop_open_candidate(&database, &camp_id, &attachment_id)
+                .unwrap()
+                .unwrap()
+        };
+        let managed_path = attachment_store
+            .verify_desktop_open_candidate(managed_candidate)
+            .unwrap()
+            .path;
+        let initial_authorization = core
+            .verified_camp_runtime_authorization(&camp_id, &workspace)
             .await
-            .expect("Claim should proceed after publication releases the gate")
             .unwrap();
-        assert_eq!(claim, "claimed");
+        assert!(managed_path.starts_with(&initial_authorization.attachment_root));
+        assert!(managed_path.is_file());
+
+        let payload_container = managed_path.parent().unwrap();
+        fs::set_permissions(payload_container, fs::Permissions::from_mode(0o700)).unwrap();
+        fs::remove_file(&managed_path).unwrap();
+        fs::set_permissions(payload_container, fs::Permissions::from_mode(0o500)).unwrap();
+        {
+            let mut database = core.database.lock().await;
+            core.attachment_views
+                .mark_legacy_view_broken_for_test(&mut database, &camp_id)
+                .unwrap();
+        }
+
+        let (admission, authorization) = core
+            .verified_camp_attachment_admission(&camp_id, &workspace)
+            .await
+            .expect("dispatch admission should omit the invalid attachment and keep Camp runnable");
+        admission.prove(&camp_id).unwrap();
+        assert_eq!(authorization.camp_id, camp_id);
+        assert!(authorization.attachment_root.is_dir());
+        {
+            let database = core.database.lock().await;
+            assert!(
+                core.attachment_views
+                    .verify_camp_ready(&database, &camp_id)
+                    .is_err()
+            );
+        }
+
+        let view_attachment_root = authorization.attachment_root.clone();
+        drop(admission);
+        fs::set_permissions(payload_container, fs::Permissions::from_mode(0o700)).unwrap();
+        fs::set_permissions(
+            payload_container.parent().unwrap(),
+            fs::Permissions::from_mode(0o700),
+        )
+        .unwrap();
+        CampAttachmentStore::new(&core.data_dir)
+            .remove_camp(&camp_id)
+            .unwrap();
+        drop(core);
+        fs::set_permissions(&view_attachment_root, fs::Permissions::from_mode(0o700)).unwrap();
+        fs::set_permissions(
+            view_attachment_root.parent().unwrap(),
+            fs::Permissions::from_mode(0o700),
+        )
+        .unwrap();
+        fs::set_permissions(
+            view_attachment_root.parent().unwrap().parent().unwrap(),
+            fs::Permissions::from_mode(0o700),
+        )
+        .unwrap();
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn agent_run_attachment_admission_is_camp_scoped_without_a_generation_gate() {
+        let admission = CampAttachmentReadAdmission::for_camp("rvcamp_test");
         admission.prove("rvcamp_test").unwrap();
         assert!(admission.prove("rvcamp_other").is_err());
-
-        assert!(
-            tokio::time::timeout(Duration::from_millis(20), gate.clone().write_owned())
-                .await
-                .is_err(),
-            "the returned admission must cover the claimed Run lifecycle"
-        );
         let (projection_tx, mut projection_rx) = mpsc::unbounded_channel();
         assert!(release_agent_run_attachment_admission(
             admission,
             &projection_tx
         ));
-        assert_eq!(projection_rx.recv().await.as_deref(), Some("rvcamp_test"));
-        tokio::time::timeout(Duration::from_secs(1), gate.write_owned())
-            .await
-            .expect("the write gate should reopen before projection is reawakened");
+        assert_eq!(projection_rx.try_recv().as_deref(), Ok("rvcamp_test"));
     }
 
     #[test]
@@ -17037,6 +17579,51 @@ while IFS= read -r _ignored; do :; done
         }
         let codex_terminal = codex_message("codex-host", "run-1", 2, "item/completed");
         assert!(codex_delta_batch_identity(&codex_terminal).is_none());
+        let command_output_delta = CodexIncoming::Message {
+            host_instance_id: "codex-host".to_string(),
+            agent_run_id: "run-1".to_string(),
+            execution_epoch: 2,
+            message: json!({
+                "method": "item/commandExecution/outputDelta",
+                "params": {
+                    "threadId": "thread-1",
+                    "turnId": "turn-1",
+                    "itemId": "command-1",
+                    "delta": "line one\n",
+                }
+            }),
+        };
+        assert!(codex_delta_batch_identity(&command_output_delta).is_none());
+        let CodexIncoming::Message {
+            message: command_output_message,
+            ..
+        } = command_output_delta
+        else {
+            unreachable!()
+        };
+        assert!(is_codex_command_output_delta_notification(
+            &command_output_message
+        ));
+        let legacy_output_delta = json!({
+            "method": "command/exec/outputDelta",
+            "params": {"itemId": "command-1", "delta": "legacy"}
+        });
+        assert!(is_codex_command_output_delta_notification(
+            &legacy_output_delta
+        ));
+        let id_bearing_output_delta = json!({
+            "id": 7,
+            "method": "item/commandExecution/outputDelta",
+            "params": {"threadId": "thread-1", "turnId": "turn-1", "itemId": "command-1", "delta": "request"}
+        });
+        assert!(!is_codex_command_output_delta_notification(
+            &id_bearing_output_delta
+        ));
+        assert!(
+            prepare_codex_delta_batch(std::slice::from_ref(&command_output_message))
+                .unwrap()
+                .is_none()
+        );
 
         let acp_delta = acp_message(
             (
@@ -18244,6 +18831,42 @@ while IFS= read -r _ignored; do :; done
             assert_eq!(payload["output"], expected_output, "{adapter_kind}");
             assert!(!serialized.contains(secret), "{adapter_kind}");
             assert!(payload["rawOutputDigest"].is_string(), "{adapter_kind}");
+        }
+    }
+
+    #[test]
+    fn every_acp_adapter_uses_terminal_runtime_action_output_not_command_delta() {
+        let acp_adapters = AdapterKind::ALL
+            .into_iter()
+            .filter(|adapter_kind| adapter_kind.uses_acp())
+            .collect::<Vec<_>>();
+        assert_eq!(acp_adapters.len(), 10);
+        for adapter_kind in acp_adapters {
+            let expected_output = format!("{} terminal output", adapter_kind.as_str());
+            let (event_type, payload) = normalize_acp_event(
+                adapter_kind,
+                "session/update",
+                &json!({
+                    "update": {
+                        "sessionUpdate": "tool_call_update",
+                        "toolCallId": format!("{}-command", adapter_kind.as_str()),
+                        "status": "completed",
+                        "kind": "execute",
+                        "content": [{"type": "text", "text": expected_output}],
+                    }
+                }),
+            );
+            assert_eq!(event_type, "runtime.action", "{adapter_kind:?}");
+            assert_eq!(payload["status"], "completed", "{adapter_kind:?}");
+            assert_eq!(payload["output"], expected_output, "{adapter_kind:?}");
+            assert!(
+                ExecutionEvidenceService::is_durable_runtime_evidence_event(event_type),
+                "{adapter_kind:?}"
+            );
+            assert!(
+                !ExecutionEvidenceService::is_transient_command_output_event(event_type),
+                "{adapter_kind:?}"
+            );
         }
     }
 

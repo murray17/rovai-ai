@@ -1,7 +1,7 @@
 ---
 document_type: development-guide
 authority: local-development-troubleshooting
-last_updated: 2026-08-13
+last_updated: 2026-08-26
 ---
 
 # 常见问题排查
@@ -158,8 +158,10 @@ codesign --verify --deep --strict "dist/mac-arm64/Rovai AI.app"
 codesign -dv --verbose=4 "dist/mac-arm64/Rovai AI.app"
 ```
 
-本地 `package:mac` 是 ad-hoc 签名，不会产生 Notarization 票据。正式证书或公证问题按
-[打包文档](packaging.md)单独处理。
+本地 `package:mac` 是仅供隔离验收的 ad-hoc 签名，不会产生 Notarization 票据，也不得替换日常
+`/Applications`。日常安装构建使用 `pnpm package:mac:daily`；它同样使用 ad-hoc 签名，但会在打包后验证
+App、Core、CLI 的签名、架构和 Bundle ID，再由 `install:mac:daily` 完成受控替换。GitHub Release 的固定
+证书导入、指纹校验和正式产物验证是独立路径；正式证书或公证问题按[打包文档](packaging.md)单独处理。
 
 ## SQLite 被占用或验收修改了日常数据
 

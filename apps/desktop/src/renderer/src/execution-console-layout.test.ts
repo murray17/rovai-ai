@@ -17,4 +17,20 @@ describe('execution console layout', () => {
     expect(styleBlock('.run-pulse-inspector .run-pulse-chip-copy') ?? '')
       .not.toMatch(/margin(?:-inline-start)?:/)
   })
+
+  it('keeps the Tool group operation count visible in the right sidecar', () => {
+    expect(styles).not.toMatch(
+      /\.execution-drawer-inspector \.tool-group-count\s*\{[^}]*display:\s*none/
+    )
+  })
+
+  it('places the Tool group icon and copy on one shared 16px center line', () => {
+    expect(styleBlock('.tool-group-icon')).toMatch(/height:\s*16px/)
+    expect(styleBlock('.tool-group-icon')).toMatch(/align-self:\s*center/)
+    expect(styleBlock('.tool-group-copy')).toMatch(/display:\s*flex/)
+    expect(styleBlock('.tool-group-copy')).toMatch(/min-height:\s*16px/)
+    expect(styleBlock('.tool-group-copy')).toMatch(/align-items:\s*center/)
+    expect(styleBlock('.tool-group-line')).toMatch(/align-items:\s*center/)
+    expect(styleBlock('.tool-group-line')).toMatch(/line-height:\s*16px/)
+  })
 })

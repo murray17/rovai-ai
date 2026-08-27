@@ -53,6 +53,7 @@ const requiredTokens = [
   '--focus',
   '--overlay',
   '--inline-code-canvas',
+  '--code-block-canvas',
   '--evidence-canvas',
   '--evidence-surface',
   '--evidence-ink',
@@ -101,6 +102,7 @@ function expectTextContrast(tokens: Record<string, string>): void {
     ['--info', '--info-soft'],
     ['--neutral', '--neutral-soft'],
     ['--evidence-ink', '--inline-code-canvas'],
+    ['--evidence-ink', '--code-block-canvas'],
     ['--evidence-ink', '--evidence-surface'],
     ['--evidence-muted', '--evidence-surface'],
     ['--diff-add', '--diff-add-soft'],
@@ -170,6 +172,7 @@ describe('Porcelain Day + Steel Night theme tokens', () => {
     expect(day['--rail-logo']).toBe('#526f88')
     expect(day['--mention-ink']).toBe('#2f61c8')
     expect(day['--inline-code-canvas']).toBe('#eef2f5')
+    expect(day['--code-block-canvas']).toBe('#eef2f5')
     expect(contrast(day['--mention-ink'], day['--surface'])).toBeGreaterThanOrEqual(4.5)
     expect(css).toContain('.camp-workspace { background: var(--conversation-surface); }')
     expect(css).toContain('border-left: 1px solid var(--conversation-inspector-line)')
@@ -195,6 +198,7 @@ describe('Porcelain Day + Steel Night theme tokens', () => {
     expect(night['--brand-soft']).toBe('#22303a')
     expect(night['--mention-ink']).toBe('#9cc7e2')
     expect(night['--inline-code-canvas']).toBe('#1d252b')
+    expect(night['--code-block-canvas']).toBe('#1d252b')
     expect(night['--success']).not.toBe(night['--brand'])
     expect(night['--attention']).not.toBe(night['--brand'])
     expect(night['--danger']).not.toBe(night['--brand'])
@@ -273,14 +277,14 @@ describe('Porcelain Day + Steel Night theme tokens', () => {
     expect(css).toMatch(/\.message-body\s*\{[^}]*position: relative[^}]*padding-right: 76px/)
     expect(css).toMatch(/\.message-surface\s*\{[^}]*position: static/)
     expect(css).toMatch(/\.safe-markdown code\s*\{[^}]*padding:\s*0 2px[^}]*border-radius:\s*3px[^}]*background:\s*var\(--inline-code-canvas\)/)
-    expect(css).toMatch(/\.safe-markdown pre\s*\{[^}]*background:\s*var\(--evidence-canvas\)/)
+    expect(css).toMatch(/\.safe-markdown pre\s*\{[^}]*background:\s*var\(--code-block-canvas\)/)
     expect(css).toMatch(/\.safe-markdown pre code\s*\{[^}]*padding:\s*0[^}]*background:\s*transparent/)
     expect(css).toContain('.conversation-bubble:hover .message-copy-button')
     expect(css).toContain('.conversation-bubble:hover .message-reply-button')
     expect(css).toContain('.composer-box:focus-within')
     expect(css).toContain('.composer.suppress-pointer-focus-ring .composer-box:focus-within')
     expect(css).toMatch(/\.structured-mention-editor:focus-visible\s*\{[^}]*outline:\s*0/)
-    expect(css).toMatch(/\.structured-mention-editor:not\(:empty\) \+ \.structured-mention-placeholder\s*\{[^}]*visibility:\s*hidden/)
+    expect(css).toMatch(/\.structured-mention-editor:not\(:has\(> \[data-editor-empty="true"\]:only-child > \[data-editor-empty-break="true"\]:only-child\)\) \+ \.structured-mention-placeholder\s*\{[^}]*visibility:\s*hidden/)
     expect(css).not.toContain('.composer.suppress-reply-focus-ring')
     expect(css).toMatch(/\.composer-continuation\s*\{[^}]*background:\s*transparent|\.composer-continuation\s*\{[^}]*color:/)
     expect(css).toContain('--conversation-wide-width: 1040px;')

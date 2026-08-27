@@ -61,7 +61,8 @@ Windows 或 Grok 分支，因此 macOS 与其他 Runtime 同时覆盖；既有 W
 predicate。最终实现改为 per-Camp single-flight：在途期间的失效合并为 dirty，并在当前读取后执行至多一次
 trailing refresh，避免丢失 read transaction 开始后才落库的终态。Renderer 回归同时覆盖通知接收、精确
 `camps.open` 请求、`succeeded` 权威投影返回，以及 Camp 页面从“执行中”收敛到“已完成”；burst 回归证明
-多个连续 invalidation 只产生一个在途读取和一个 trailing 读取。
+多个连续 invalidation 只产生一个在途读取和一个 trailing 读取。completion-boundary 回归进一步证明：旧读取
+settle 后、coordinator cleanup 前到达的 invalidation 不会加入即将退出的旧 completion，而会启动后继读取。
 
 ## 2026-08-24 原始 `0.2.118` 基本结论（历史证据）
 
@@ -156,8 +157,8 @@ ROVAI_GROK_PERMISSION_MODE=bypassPermissions \
 node scripts/smoke-acp-runtime.mjs
 ```
 
-最终分支的确定性门禁计数：`pnpm test` 通过 76 个 Vitest 文件（528 passed / 3 skipped）与 218 个选定
-Node 测试；`pnpm test:rust:pr` 通过 library 321（另 7 ignored）、CLI 27、slow 238 个测试；
+最终分支的确定性门禁计数：`pnpm test` 通过 76 个 Vitest 文件（532 passed）与 198 个 Node 测试；
+`pnpm test:rust:pr` 通过 library 321（另 7 ignored）、CLI 27、slow 238 个测试；
 `pnpm test:rust:core` 通过 80 个测试，另有 2 个明确标记的 manual ignored 测试。`cargo fmt --all --check`、
 workspace/all-target Clippy `-D warnings`、TypeScript typecheck、Desktop build、CI 模式文档治理与 Grok 平台准入
 定向测试均通过。

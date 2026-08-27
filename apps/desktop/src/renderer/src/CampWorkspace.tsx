@@ -17,6 +17,7 @@ import type {
   CampMessageAroundSnapshot,
   CampMessageFindSnapshot,
   CampMessageView,
+  CampMemberRemovalPreview,
   CampOpenCollectionCoverage,
   CampOpenMessageCoverage,
   CampOpenProjection,
@@ -65,6 +66,14 @@ import { identityColorToken } from './theme'
 import { availableComposerSkillsForLead } from './composer-skill-picker'
 import { createStructuredMessageClipboardData } from './structured-message-clipboard'
 import { CampWorldMap } from './CampWorldMap'
+import {
+  AppDialogBody,
+  AppDialogContent,
+  AppDialogFooter,
+  AppDialogHeader,
+  AppDialogImpact,
+  AppDialogImpactList
+} from './AppDialog'
 import { projectCampWorldMap } from './camp-world-map-model'
 import {
   CAMP_TIMELINE_READING_POSITIONS_STORAGE_KEY,
@@ -85,6 +94,12 @@ import {
   nextConversationFindIndex,
   pendingConversationFindStatus
 } from './camp-conversation-find'
+import {
+  groupConsecutiveToolItems,
+  toolActivityGroupHasActiveTool,
+  toolActivityGroupPresentation,
+  type ToolProgressItem
+} from './execution-tool-grouping'
 
 const NON_TERMINAL_RUNS = new Set(['queued', 'running', 'waiting'])
 const EXECUTION_EVIDENCE_PAGE_LIMIT = 1_000
@@ -134,6 +149,16 @@ export type CampConversationView = 'conversation' | 'world'
 export interface FirstRunCampContext {
   memberAgentId: string
   memberRole: BuiltinMemberAvatarRole
+}
+export interface CampMemberAddOutcome {
+  addedAgentIds: string[]
+  unchangedAgentIds: string[]
+  failures: Array<{ agentId: string; message: string }>
+}
+export interface CampMemberRemoveOutcome {
+  status: 'removed' | 'conflict' | 'failed'
+  message?: string
+  reconciliationStatus?: 'reconciling' | 'settled'
 }
 type CampInspectorSurfaceTab = CampInspectorTab | 'execution'
 type AttachmentKind = 'file' | 'directory'
@@ -497,9 +522,13 @@ export function attachmentDropIsBlocked({
 export function agentRunTerminalNote(
   run: Pick<AgentRunView, 'terminalReasonCode'>
 ): string | null {
-  return run.terminalReasonCode === 'planned_shutdown_cancelled'
-    ? '因 Rovai 计划关闭，执行引擎已确认取消本次执行。'
-    : null
+  if (run.terminalReasonCode === 'planned_shutdown_cancelled') {
+    return '因 Rovai 计划关闭，执行引擎已确认取消本次执行。'
+  }
+  if (run.terminalReasonCode === 'runtime_interrupted') {
+    return '执行连续性已中断，最终结果无法确认；本次执行未被记为已取消。'
+  }
+  return null
 }
 
 export function agentRunShowsUnsettledWarning(
@@ -1111,6 +1140,9 @@ export function CampWorkspace({
   onPendingDraftPersisted,
   onPendingCampLeave,
   onChangeLead,
+  onAddMembers,
+  onPreviewMemberRemoval,
+  onRemoveMember,
   onTasksChanged,
   onResolveApproval,
   onResolveRecoveryBlocker = async () => undefined,
@@ -1150,6 +1182,9 @@ export function CampWorkspace({
   onPendingDraftPersisted?(): void
   onPendingCampLeave?(draft: CampComposerDraftView): Promise<void>
   onChangeLead(agentId: string): Promise<void>
+  onAddMembers?(agentIds: string[]): Promise<CampMemberAddOutcome>
+  onPreviewMemberRemoval?(agentId: string): Promise<CampMemberRemovalPreview>
+  onRemoveMember?(preview: CampMemberRemovalPreview): Promise<CampMemberRemoveOutcome>
   onTasksChanged(): Promise<void>
   onResolveApproval(approval: ActionApprovalView, optionId: string): void
   onResolveRecoveryBlocker?(run: AgentRunView): Promise<void>
@@ -3971,6 +4006,10 @@ export function CampWorkspace({
                 installations={installations}
                 busy={busy}
                 onChangeLead={onChangeLead}
+                onAddMembers={onAddMembers}
+                onPreviewMemberRemoval={onPreviewMemberRemoval}
+                onRemoveMember={onRemoveMember}
+                onNotify={onNotify}
               />
             </Tabs.Content>
           </Tabs.Root>
@@ -5586,21 +5625,179 @@ function CampMembersPanel({
   profileById,
   installations,
   busy,
-  onChangeLead
+  onChangeLead,
+  onAddMembers,
+  onPreviewMemberRemoval,
+  onRemoveMember,
+  onNotify
 }: {
   snapshot: CampSnapshot
   profileById: Map<string, AgentProfile>
   installations: AdapterInstallation[]
   busy: boolean
   onChangeLead(agentId: string): Promise<void>
+  onAddMembers?(agentIds: string[]): Promise<CampMemberAddOutcome>
+  onPreviewMemberRemoval?(agentId: string): Promise<CampMemberRemovalPreview>
+  onRemoveMember?(preview: CampMemberRemovalPreview): Promise<CampMemberRemoveOutcome>
+  onNotify(message: string): void
 }): JSX.Element {
   const members = campInspectorMembers(snapshot.members)
   const defaultLead = members.find((member) => member.isDefaultLead) ?? null
   const presentCount = members.filter(campMemberIsLeadEligible).length
   const awayCount = members.length - presentCount
+  const activeAgentIds = useMemo(
+    () => new Set(members.map((member) => member.agentId)),
+    [members]
+  )
+  const candidateProfiles = useMemo(
+    () => [...profileById.values()]
+      .filter((profile) => profile.presence === 'present' && !activeAgentIds.has(profile.agentId))
+      .sort((left, right) => left.memberOrder - right.memberOrder || left.agentId.localeCompare(right.agentId)),
+    [activeAgentIds, profileById]
+  )
   const [expandedRuntimeAgentIds, setExpandedRuntimeAgentIds] = useState<Set<string>>(
     () => new Set()
   )
+  const [addDialogOpen, setAddDialogOpen] = useState(false)
+  const [addSearch, setAddSearch] = useState('')
+  const [selectedCandidateIds, setSelectedCandidateIds] = useState<Set<string>>(() => new Set())
+  const [addSubmitting, setAddSubmitting] = useState(false)
+  const [addResult, setAddResult] = useState<{
+    tone: 'success' | 'attention' | 'danger'
+    message: string
+    failures: Map<string, string>
+  } | null>(null)
+  const [removalTarget, setRemovalTarget] = useState<CampSnapshot['members'][number] | null>(null)
+  const [removalPreviewState, setRemovalPreviewState] = useState<
+    | { status: 'idle' | 'loading' }
+    | { status: 'ready'; preview: CampMemberRemovalPreview }
+    | { status: 'conflict' | 'error'; message: string }
+  >({ status: 'idle' })
+  const [removeSubmitting, setRemoveSubmitting] = useState(false)
+
+  const filteredCandidates = useMemo(() => {
+    const needle = addSearch.trim().toLocaleLowerCase()
+    if (!needle) return candidateProfiles
+    return candidateProfiles.filter((profile) =>
+      `${profile.displayName} ${profile.teamRole}`.toLocaleLowerCase().includes(needle)
+    )
+  }, [addSearch, candidateProfiles])
+
+  const openAddDialog = (): void => {
+    setAddSearch('')
+    setSelectedCandidateIds(new Set())
+    setAddResult(null)
+    setAddDialogOpen(true)
+  }
+
+  const closeAddDialog = (): void => {
+    if (addSubmitting) return
+    setAddDialogOpen(false)
+    setAddResult(null)
+  }
+
+  const toggleCandidate = (agentId: string): void => {
+    setSelectedCandidateIds((current) => {
+      const next = new Set(current)
+      if (next.has(agentId)) next.delete(agentId)
+      else next.add(agentId)
+      return next
+    })
+  }
+
+  const submitAddMembers = async (): Promise<void> => {
+    if (!onAddMembers || selectedCandidateIds.size === 0 || addSubmitting) return
+    const requestedAgentIds = [...selectedCandidateIds]
+    setAddSubmitting(true)
+    setAddResult(null)
+    try {
+      const outcome = await onAddMembers(requestedAgentIds)
+      const succeeded = [...outcome.addedAgentIds, ...outcome.unchangedAgentIds]
+      if (outcome.failures.length === 0) {
+        setAddDialogOpen(false)
+        setSelectedCandidateIds(new Set())
+        onNotify(outcome.addedAgentIds.length === 1
+          ? '已添加 1 位队员；将在之后新建的执行中生效'
+          : `已添加 ${outcome.addedAgentIds.length} 位队员；将在之后新建的执行中生效`)
+        return
+      }
+      setSelectedCandidateIds(new Set(outcome.failures.map((failure) => failure.agentId)))
+      setAddResult({
+        tone: succeeded.length > 0 ? 'attention' : 'danger',
+        message: succeeded.length > 0
+          ? `已加入 ${succeeded.length} 位；另有 ${outcome.failures.length} 位未加入，可直接重试。`
+          : `${outcome.failures.length} 位队员均未加入，请检查后重试。`,
+        failures: new Map(outcome.failures.map((failure) => [failure.agentId, failure.message]))
+      })
+    } catch (error) {
+      setAddResult({
+        tone: 'danger',
+        message: error instanceof Error ? error.message : '添加队员失败，请重试。',
+        failures: new Map()
+      })
+    } finally {
+      setAddSubmitting(false)
+    }
+  }
+
+  const loadRemovalPreview = useCallback(async (agentId: string): Promise<void> => {
+    if (!onPreviewMemberRemoval) {
+      setRemovalPreviewState({ status: 'error', message: '当前版本无法读取移出影响。' })
+      return
+    }
+    setRemovalPreviewState({ status: 'loading' })
+    try {
+      const preview = await onPreviewMemberRemoval(agentId)
+      setRemovalPreviewState({ status: 'ready', preview })
+    } catch (error) {
+      setRemovalPreviewState({
+        status: 'error',
+        message: error instanceof Error ? error.message : '无法读取 Core 权威影响，请重试。'
+      })
+    }
+  }, [onPreviewMemberRemoval])
+
+  const openRemovalDialog = (member: CampSnapshot['members'][number]): void => {
+    if (members.length <= 1 || !onRemoveMember) return
+    setRemovalTarget(member)
+    void loadRemovalPreview(member.agentId)
+  }
+
+  const closeRemovalDialog = (): void => {
+    if (removeSubmitting) return
+    setRemovalTarget(null)
+    setRemovalPreviewState({ status: 'idle' })
+  }
+
+  const submitRemoveMember = async (): Promise<void> => {
+    if (!onRemoveMember || removalPreviewState.status !== 'ready' || removeSubmitting) return
+    setRemoveSubmitting(true)
+    try {
+      const outcome = await onRemoveMember(removalPreviewState.preview)
+      if (outcome.status === 'removed') {
+        const displayName = removalPreviewState.preview.displayName
+        setRemovalTarget(null)
+        setRemovalPreviewState({ status: 'idle' })
+        onNotify(outcome.reconciliationStatus === 'reconciling'
+          ? `已将${displayName}移出当前会话；正在收拢已开始的工作`
+          : `已将${displayName}移出当前会话`)
+        return
+      }
+      setRemovalPreviewState({
+        status: outcome.status === 'conflict' ? 'conflict' : 'error',
+        message: outcome.message ?? (outcome.status === 'conflict'
+          ? '名册已发生变化。请重新读取影响后再确认，本次没有移出任何队员。'
+          : '移出未完成，请重试。')
+      })
+    } catch (error) {
+      setRemovalPreviewState({
+        status: 'error',
+        message: error instanceof Error ? error.message : '移出未完成，请重试。'
+      })
+    } finally {
+      setRemoveSubmitting(false)
+    }
+  }
 
   const toggleRuntimeDetails = (agentId: string): void => {
     setExpandedRuntimeAgentIds((current) => {
@@ -5611,6 +5808,24 @@ function CampMembersPanel({
     })
   }
 
+  const removalPreview = removalPreviewState.status === 'ready'
+    ? removalPreviewState.preview
+    : null
+  const removalDeliveryCount = removalPreview
+    ? removalPreview.pendingDeliveryCount + removalPreview.runningDeliveryCount
+    : 0
+  const removalMessageGatherCount = removalPreview
+    ? removalDeliveryCount + removalPreview.openGatherItemCount
+    : 0
+  const removalHasActualImpact = Boolean(removalPreview && (
+    removalPreview.nonTerminalAgentRunCount > 0
+    || removalPreview.openAssignedTaskCount > 0
+    || removalMessageGatherCount > 0
+    || removalPreview.isDefaultLead
+  ))
+  const showRemovalDialogBody = removalPreviewState.status !== 'ready'
+    || Boolean(removalPreview && (!removalPreview.removable || removalHasActualImpact))
+
   return (
     <section aria-label="当前会话队员">
       <div className="camp-members-summary">
@@ -5619,7 +5834,17 @@ function CampMembersPanel({
             <strong>协作队员</strong>
             <small>{presentCount} 位在队 · {awayCount} 位暂离</small>
           </div>
-          <span className="camp-members-scope">当前会话</span>
+          <div className="camp-members-summary-actions">
+            <span className="camp-members-scope">当前会话</span>
+            <button
+              className="camp-add-member-button"
+              type="button"
+              disabled={busy || !onAddMembers}
+              onClick={openAddDialog}
+            >
+              <span aria-hidden="true">＋</span> 添加
+            </button>
+          </div>
         </div>
         <DropdownMenu.Root>
           <DropdownMenu.Trigger asChild>
@@ -5684,6 +5909,19 @@ function CampMembersPanel({
         </DropdownMenu.Root>
       </div>
 
+      {snapshot.membershipReconciliations.map((reconciliation) => {
+        const displayName = profileById.get(reconciliation.agentId)?.displayName ?? '已移出队员'
+        return (
+          <div className="camp-members-reconciliation" role="status" key={reconciliation.id}>
+            <span className="camp-members-reconciliation-mark" aria-hidden="true">↻</span>
+            <span>
+              <strong>正在收拢{displayName}的已开始工作</strong>
+              <small>{reconciliation.settledRunCount}/{reconciliation.targetRunCount} 个执行已结束；新消息和工具写入已停止。</small>
+            </span>
+          </div>
+        )
+      })}
+
       <div className="camp-inspector-member-list" role="list" aria-label="会话队员列表">
         {members.map((member) => {
           const profile = profileById.get(member.agentId) ?? null
@@ -5722,24 +5960,55 @@ function CampMembersPanel({
               </span>
               <span className={`camp-inspector-member-state ${present ? '' : 'is-away'}`}>
                 <strong>{presenceLabel}</strong>
-                {runtimeConfiguration
-                  ? (
-                      <button
-                        className={`camp-inspector-runtime-toggle runtime-${runtimeTone}`}
-                        type="button"
-                        aria-expanded={runtimeDetailsOpen}
-                        aria-controls={runtimeDetailsId}
-                        aria-label={`${runtimeLabel}；${runtimeDetailsOpen ? '收起' : '展开'}模型信息`}
-                        onClick={() => toggleRuntimeDetails(member.agentId)}
-                      >
-                        <span>{runtimeLabel}</span>
-                        <svg aria-hidden="true" viewBox="0 0 16 16">
-                          <path d="m6 3.5 4.5 4.5L6 12.5" />
-                        </svg>
-                      </button>
-                    )
-                  : <small className={`runtime-${runtimeTone}`}>{runtimeLabel}</small>}
+                <small className={`runtime-${runtimeTone}`}>{runtimeLabel}</small>
               </span>
+              <DropdownMenu.Root>
+                <DropdownMenu.Trigger asChild>
+                  <button
+                    className="camp-member-action-button"
+                    type="button"
+                    aria-label={`${member.displayName}的队员操作`}
+                    disabled={busy}
+                  >
+                    <svg viewBox="0 0 16 16" aria-hidden="true">
+                      <circle cx="3" cy="8" r="1.35" />
+                      <circle cx="8" cy="8" r="1.35" />
+                      <circle cx="13" cy="8" r="1.35" />
+                    </svg>
+                  </button>
+                </DropdownMenu.Trigger>
+                <DropdownMenu.Portal>
+                  <DropdownMenu.Content
+                    className="camp-member-menu"
+                    align="end"
+                    sideOffset={5}
+                    collisionPadding={10}
+                    aria-label={`${member.displayName}的队员操作`}
+                  >
+                    <DropdownMenu.Item
+                      className="camp-member-menu-item"
+                      disabled={!runtimeConfiguration}
+                      onSelect={() => runtimeConfiguration && toggleRuntimeDetails(member.agentId)}
+                    >
+                      <strong>{runtimeConfiguration
+                        ? runtimeDetailsOpen ? '收起模型信息' : '查看模型信息'
+                        : '没有可查看的模型信息'}</strong>
+                      <small>{runtimeConfiguration ? runtimeLabel : '请先配置 Agent 运行时'}</small>
+                    </DropdownMenu.Item>
+                    <DropdownMenu.Separator className="camp-member-menu-separator" />
+                    <DropdownMenu.Item
+                      className="camp-member-menu-item is-danger"
+                      disabled={members.length <= 1 || !onRemoveMember}
+                      onSelect={() => openRemovalDialog(member)}
+                    >
+                      <strong>移出当前会话</strong>
+                      <small>{members.length <= 1
+                        ? '会话至少保留 1 位队员'
+                        : '不会永久移除这位队员'}</small>
+                    </DropdownMenu.Item>
+                  </DropdownMenu.Content>
+                </DropdownMenu.Portal>
+              </DropdownMenu.Root>
               {runtimeConfiguration && runtimeDetailsOpen && (
                 <dl
                   className="camp-inspector-runtime-detail"
@@ -5761,6 +6030,167 @@ function CampMembersPanel({
         })}
         {members.length === 0 && <EmptyInline text="当前会话没有可显示的队员。" />}
       </div>
+
+      <Dialog.Root open={addDialogOpen} onOpenChange={(open) => !open && closeAddDialog()}>
+        <Dialog.Portal>
+          <Dialog.Overlay className="dialog-overlay app-dialog-overlay" />
+          <AppDialogContent className="camp-member-dialog" width="wide" aria-describedby="camp-add-member-description">
+            <AppDialogHeader
+              title="添加队员"
+              description="选择要加入这次讨论的队员。"
+              descriptionId="camp-add-member-description"
+              icon="user"
+              kicker="当前会话"
+              closeDisabled={addSubmitting}
+            />
+            <AppDialogBody className="camp-member-dialog-body">
+              {addResult && (
+                <div className={`camp-member-dialog-alert is-${addResult.tone}`} role="status">{addResult.message}</div>
+              )}
+              <label className="camp-member-search-field">
+                <svg aria-hidden="true" viewBox="0 0 20 20"><circle cx="8.5" cy="8.5" r="5.5" /><path d="m13 13 4 4" /></svg>
+                <input
+                  type="search"
+                  placeholder="搜索队员…"
+                  value={addSearch}
+                  data-dialog-autofocus
+                  autoComplete="off"
+                  onChange={(event) => setAddSearch(event.target.value)}
+                />
+              </label>
+              <div className="camp-member-candidate-caption">
+                <strong>可添加队员</strong>
+                <span>{filteredCandidates.length} 位</span>
+              </div>
+              <div className="camp-member-candidate-list" role="group" aria-label="可添加队员">
+                {filteredCandidates.map((profile) => {
+                  const failure = addResult?.failures.get(profile.agentId) ?? null
+                  const checked = selectedCandidateIds.has(profile.agentId)
+                  return (
+                    <div className="camp-member-candidate-entry" key={profile.agentId}>
+                      <label className="camp-member-candidate-row">
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          disabled={addSubmitting}
+                          onChange={() => toggleCandidate(profile.agentId)}
+                        />
+                        <MemberAvatar agentId={profile.agentId} avatarRef={profile.avatarRef} displayName={profile.displayName} size="list" decorative />
+                        <span className="camp-member-candidate-copy">
+                          <strong>{profile.displayName}<small>{profile.teamRole || '团队角色未设置'}</small></strong>
+                          <small>{profile.professionalResponsibilities || '职责尚未填写'}</small>
+                        </span>
+                        <span className={`camp-member-candidate-runtime ${profile.runtimeReadiness.status === 'ready' ? 'is-ready' : 'is-attention'}`}>
+                          <i aria-hidden="true" />{mentionRuntimeLabel(profile)}
+                        </span>
+                      </label>
+                      {failure && <div className="camp-member-candidate-error" role="alert">{failure}</div>}
+                    </div>
+                  )
+                })}
+                {filteredCandidates.length === 0 && (
+                  <div className="camp-member-candidate-empty">
+                    <strong>{candidateProfiles.length === 0 ? '没有可添加的队员' : '没有匹配的队员'}</strong>
+                    <p>{candidateProfiles.length === 0
+                      ? '所有当前在队的队员都已加入本会话。'
+                      : '换一个姓名或角色关键词试试。'}</p>
+                  </div>
+                )}
+              </div>
+            </AppDialogBody>
+            <AppDialogFooter note="仅显示当前在队、尚未加入本会话的队员。">
+              <Dialog.Close asChild><button className="quiet-button" type="button" disabled={addSubmitting}>取消</button></Dialog.Close>
+              <button
+                className="primary-button"
+                type="button"
+                disabled={selectedCandidateIds.size === 0 || addSubmitting}
+                onClick={() => void submitAddMembers()}
+              >{addSubmitting ? '正在添加…' : `添加队员${selectedCandidateIds.size > 0 ? ` · ${selectedCandidateIds.size}` : ''}`}</button>
+            </AppDialogFooter>
+          </AppDialogContent>
+        </Dialog.Portal>
+      </Dialog.Root>
+
+      <Dialog.Root open={removalTarget !== null} onOpenChange={(open) => !open && closeRemovalDialog()}>
+        <Dialog.Portal>
+          <Dialog.Overlay className="dialog-overlay app-dialog-overlay" />
+          <AppDialogContent
+            className="camp-member-removal-dialog"
+            tone="danger"
+            aria-describedby="camp-remove-member-description"
+          >
+            <AppDialogHeader
+              title={`移出${removalTarget?.displayName ?? '这位队员'}？`}
+              description={`只影响当前会话：移出后，${removalTarget?.displayName ?? '这位队员'}将不再接收这里的新工作。`}
+              descriptionId="camp-remove-member-description"
+              icon="user"
+              kicker="当前会话"
+              closeDisabled={removeSubmitting}
+            />
+            {showRemovalDialogBody && (
+              <AppDialogBody>
+                {(removalPreviewState.status === 'loading' || removalPreviewState.status === 'idle') && (
+                  <div className="camp-member-preview-loading" aria-label="正在读取移出影响">
+                    <span /><span /><span className="is-short" />
+                  </div>
+                )}
+                {(removalPreviewState.status === 'conflict' || removalPreviewState.status === 'error') && (
+                  <div className={`camp-member-dialog-alert ${removalPreviewState.status === 'conflict' ? 'is-attention' : 'is-danger'}`} role="alert">
+                    {removalPreviewState.message}
+                  </div>
+                )}
+                {removalPreview && (
+                  <>
+                    {!removalPreview.removable && (
+                      <div className="camp-member-dialog-alert is-danger" role="alert">
+                        会话至少保留 1 位队员，本次没有移出任何队员。
+                      </div>
+                    )}
+                    {removalHasActualImpact && (
+                      <AppDialogImpactList>
+                        {removalPreview.nonTerminalAgentRunCount > 0 && (
+                          <AppDialogImpact tone="warning" icon="bolt" label="已开始的执行">
+                            {removalPreview.nonTerminalAgentRunCount} 个执行将停止接收新写入，并在后台收拢。
+                          </AppDialogImpact>
+                        )}
+                        {removalPreview.openAssignedTaskCount > 0 && (
+                          <AppDialogImpact tone="warning" icon="keep" label="未完成任务">
+                            {removalPreview.openAssignedTaskCount} 个任务将释放负责人，回到待分配状态。
+                          </AppDialogImpact>
+                        )}
+                        {removalMessageGatherCount > 0 && (
+                          <AppDialogImpact tone="warning" icon="info" label="消息与 Gather">
+                            {removalDeliveryCount} 个投递、{removalPreview.openGatherItemCount} 个 Gather 项将正式结算。
+                          </AppDialogImpact>
+                        )}
+                        {removalPreview.isDefaultLead && (
+                          <AppDialogImpact tone="warning" icon="user" label="队长职责">
+                            {removalPreview.nextDefaultLeadAgentId
+                              ? `将交给${profileById.get(removalPreview.nextDefaultLeadAgentId)?.displayName ?? '另一位在队队员'}。`
+                              : '剩余队员都处于暂离状态，会话将暂时没有队长；有人归队后自动恢复。'}
+                          </AppDialogImpact>
+                        )}
+                      </AppDialogImpactList>
+                    )}
+                  </>
+                )}
+              </AppDialogBody>
+            )}
+            <AppDialogFooter note={removalPreviewState.status === 'ready' ? '提交后立即阻止该队员的新消息与工具写入。' : '请先读取 Core 权威影响。'}>
+              <Dialog.Close asChild><button className="quiet-button" type="button" disabled={removeSubmitting}>取消</button></Dialog.Close>
+              {(removalPreviewState.status === 'conflict' || removalPreviewState.status === 'error') && removalTarget && (
+                <button className="quiet-button" type="button" disabled={removeSubmitting} onClick={() => void loadRemovalPreview(removalTarget.agentId)}>重新读取影响</button>
+              )}
+              <button
+                className="danger-button"
+                type="button"
+                disabled={removeSubmitting || removalPreviewState.status !== 'ready' || !removalPreviewState.preview.removable}
+                onClick={() => void submitRemoveMember()}
+              >{removeSubmitting ? '正在移出…' : '移出当前会话'}</button>
+            </AppDialogFooter>
+          </AppDialogContent>
+        </Dialog.Portal>
+      </Dialog.Root>
     </section>
   )
 }
@@ -7424,9 +7854,10 @@ function ToolCallRow({
   completeEvidence?: PresentableExecutionEvidence
 }): JSX.Element {
   const [expanded, setExpanded] = useState(false)
+  const [activated, setActivated] = useState(false)
   const summaryRef = useRef<HTMLElement>(null)
   const status = activityStatusForAgentRun(step.status, runStatus)
-  const hasDetail = Boolean(step.detail)
+  const hasDetail = Boolean(step.detail) || completeEvidence !== undefined
   const summary = (
     <>
       <ToolCallIcon activityDomain={step.activityDomain} />
@@ -7460,18 +7891,120 @@ function ToolCallRow({
     <details
       className={`process-action tool-call-disclosure status-${status}`}
       data-activity-domain={step.activityDomain}
-      onToggle={(event) => setExpanded(event.currentTarget.open)}
+      onToggle={(event) => {
+        const nextExpanded = event.currentTarget.open
+        setExpanded(nextExpanded)
+        if (nextExpanded) setActivated(true)
+      }}
     >
       <summary ref={summaryRef} className="tool-call-summary">{summary}</summary>
-      <ToolCallDetail
-        campId={campId}
-        detail={step.detail}
-        completeEvidence={completeEvidence}
-        expanded={expanded}
-        resultKey={`${runId}:${step.id}`}
-        title={step.title}
-        summaryRef={summaryRef}
-      />
+      {activated && (
+        <ToolCallDetail
+          campId={campId}
+          detail={step.detail}
+          completeEvidence={completeEvidence}
+          expanded={expanded}
+          resultKey={`${runId}:${step.id}`}
+          title={step.title}
+          summaryRef={summaryRef}
+        />
+      )}
+    </details>
+  )
+}
+
+function ToolActivityGroupIcon(): JSX.Element {
+  return (
+    <span className="tool-group-icon" aria-hidden="true">
+      <svg viewBox="0 0 16 16" focusable="false">
+        <circle cx="2.25" cy="4" r="0.65" />
+        <circle cx="2.25" cy="8" r="0.65" />
+        <circle cx="2.25" cy="12" r="0.65" />
+        <path d="M5 4h8M5 8h8M5 12h8" />
+      </svg>
+    </span>
+  )
+}
+
+function ToolActivityGroupState({ status, label }: { status: string; label: string }): JSX.Element {
+  return (
+    <span
+      className={`tool-group-state status-${status}`}
+      role="img"
+      aria-label={label}
+      title={label}
+    />
+  )
+}
+
+function ToolActivityGroup({
+  campId,
+  items,
+  liveTail,
+  runId,
+  runStatus,
+  completeEvidence
+}: {
+  campId: string
+  items: ToolProgressItem[]
+  liveTail: boolean
+  runId: string
+  runStatus: AgentRunView['status']
+  completeEvidence: {
+    byToolId: Map<string, PresentableExecutionEvidence>
+  }
+}): JSX.Element {
+  const presentation = toolActivityGroupPresentation(items, runStatus, liveTail)
+  return (
+    <details className={`tool-activity-group status-${presentation.status}`}>
+      <summary
+        className="tool-group-summary"
+        aria-label={presentation.accessibleLabel}
+        aria-live="polite"
+        aria-atomic="true"
+      >
+        <ToolActivityGroupIcon />
+        <span className="tool-group-copy" aria-hidden="true">
+          <span className="tool-group-line">
+            <strong>{presentation.primary}</strong>
+            {presentation.currentTitle && (
+              <>
+                <span className="tool-group-separator">·</span>
+                <span className="tool-group-current" title={presentation.currentTitle}>
+                  {presentation.currentTitle}
+                </span>
+              </>
+            )}
+            {presentation.countLabel && (
+              <>
+                <span className="tool-group-separator">·</span>
+                <span className="tool-group-count">{presentation.countLabel}</span>
+              </>
+            )}
+          </span>
+        </span>
+        <ToolActivityGroupState status={presentation.status} label={presentation.statusLabel} />
+        <span className="tool-group-disclosure" aria-hidden="true">
+          <svg viewBox="0 0 16 16" focusable="false">
+            <path d="m4.75 6.25 3.25 3.5 3.25-3.5" />
+          </svg>
+        </span>
+      </summary>
+      <div className="tool-group-items">
+        {items.map((item) => {
+          const step = item.step
+          return (
+            <ToolCallRow
+              key={item.key}
+              campId={campId}
+              step={step}
+              runId={runId}
+              runStatus={runStatus}
+              completeEvidence={completeEvidence.byToolId.get(step.id)}
+            />
+          )
+        })}
+      </div>
     </details>
   )
 }
@@ -7550,9 +8083,24 @@ export function RunExecutionDisclosure({
     .filter(isPresentableExecutionEvidence)
   const effectiveProgress = historicalProgress ?? progress
   const finalKey = finalBody ? comparableMessageText(finalBody) : null
-  const processItems = (effectiveProgress?.items ?? []).filter((item) =>
+  const processItems = useMemo(() => (effectiveProgress?.items ?? []).filter((item) =>
     item.kind !== 'narration' || !finalKey || comparableMessageText(item.body) !== finalKey
+  ), [effectiveProgress?.items, finalKey])
+  const groupedProcessItems = useMemo(
+    () => groupConsecutiveToolItems(processItems),
+    [processItems]
   )
+  const activeToolItems = useMemo(
+    () => processItems.filter((item): item is ToolProgressItem => item.kind === 'tool'),
+    [processItems]
+  )
+  const hasActiveTool = toolActivityGroupHasActiveTool(activeToolItems, run.status)
+  const trailingProcessItem = groupedProcessItems[groupedProcessItems.length - 1]
+  const liveTailToolGroupKey = run.status === 'running'
+    && !cancelling
+    && trailingProcessItem?.kind === 'toolGroup'
+    ? trailingProcessItem.key
+    : null
   const activeRetryDiagnostic = nonTerminal
     ? processItems.reduce<RuntimeDiagnostic | null>((latest, item) =>
         item.kind === 'diagnostic' ? item.diagnostic : latest, null)
@@ -7591,7 +8139,20 @@ export function RunExecutionDisclosure({
           仍有外部效果待确认
         </p>
       )}
-      {processItems.map((item) => {
+      {groupedProcessItems.map((item) => {
+        if (item.kind === 'toolGroup') {
+          return (
+            <ToolActivityGroup
+              key={item.key}
+              campId={campId}
+              items={item.items}
+              liveTail={item.key === liveTailToolGroupKey}
+              runId={run.id}
+              runStatus={run.status}
+              completeEvidence={completeEvidence}
+            />
+          )
+        }
         if (item.kind === 'diagnostic') {
           return nonTerminal
             ? <RuntimeRetryNotice diagnostic={item.diagnostic} key={item.key} />
@@ -7677,18 +8238,23 @@ export function RunExecutionDisclosure({
           </button>
         </div>
       )}
-      {nonTerminal && !cancelling && run.waitReason !== 'recovery_blocked' && (
-        <div className="process-action current" role="status">
-          <span className="process-spinner" aria-hidden="true" />
-          <span>{run.status === 'waiting'
-            ? agentRunWaitDetail(run.waitReason) ?? '等待继续'
-            : run.status === 'queued'
-              ? '等待开始'
-              : activeRetryDiagnostic
-                ? `等待 Claude Code 自动重试（${activeRetryDiagnostic.attempt}/${activeRetryDiagnostic.maxAttempts}）`
-                : '正在处理'}</span>
-        </div>
-      )}
+      {nonTerminal
+        && !cancelling
+        && run.waitReason !== 'recovery_blocked'
+        && !hasActiveTool
+        && liveTailToolGroupKey === null
+        && (
+          <div className="process-action current" role="status">
+            <span className="process-spinner" aria-hidden="true" />
+            <span>{run.status === 'waiting'
+              ? agentRunWaitDetail(run.waitReason) ?? '等待继续'
+              : run.status === 'queued'
+                ? '等待开始'
+                : activeRetryDiagnostic
+                  ? `等待 Claude Code 自动重试（${activeRetryDiagnostic.attempt}/${activeRetryDiagnostic.maxAttempts}）`
+                  : '正在处理'}</span>
+          </div>
+        )}
       {cancelling && nonTerminal && (
         <div className="process-action cancelling" role="status">
           停止请求已发送，正在等待 Agent 运行时退出。

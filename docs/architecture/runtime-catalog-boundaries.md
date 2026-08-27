@@ -322,8 +322,10 @@ adapter-scoped qualification evidence；macOS x64 仍保持
 
 ## 队员最高权限默认
 
-Runtime Host compatibility 还绑定 Camp Attachment View contract 3。Scheduler 在 Camp read admission 内、Claim
-之前检查持久 publication writer intent；存在 pending/recovery operation 时 Run 保持 queued。一次 dispatch 的
+Runtime Host compatibility 还绑定 Camp Attachment View contract 4。Scheduler 在 Camp read admission 内完成
+full verification；校验失败时释放 read admission，在 bounded write admission 内做一次 Authority rebuild/附件局部
+降级并重试。Claim 之前仍检查持久 publication writer intent；存在 unresolved pending/recovery operation 时 Run
+保持 queued，已成功 resolved 附件的当前 `recovery_required` 只省略该附件。一次 dispatch 的
 Context freeze、Runtime authorization、Host acquire/resume 和 input delivery 复用同一 admission 与 verified
 authorization，不能在公平 writer 排队后再次申请 read gate，也不能对同一 View 重复全量扫描。
 

@@ -35,6 +35,5 @@ attachment; a new public Send is required. Cancel remains explicit and preserves
 ## References
 
 - [Message Delivery v4](message-delivery-v4.md)
-- [Camp Published Attachment View v3](camp-published-attachment-view-v3.md)
+- [Camp Published Attachment View v4](camp-published-attachment-view-v4.md)
 - [Public A2A architecture](../architecture/public-a2a-message-delivery.md)
-

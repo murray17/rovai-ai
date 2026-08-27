@@ -14,7 +14,7 @@ viewport `>= 1800px` 时独立扩展到 `1440px`。
 
 ## 打开与渐进历史
 
-Camp 的首个 meaningful paint 只依赖 [Camp Open Projection v6](../../contracts/camp-open-projection-v6.md)：
+Camp 的首个 meaningful paint 只依赖 [Camp Open Projection v7](../../contracts/camp-open-projection-v7.md)：
 Camp/成员、最近消息、当前运行摘要、pending Approval 和 Composer 可用即完成。项目导航恢复、侧栏刷新
 与可见来源确认在首屏后执行，失败不能撤销已打开会话。只显示“正在打开对话”的 Shell 不算完成。
 
@@ -44,6 +44,30 @@ Pending Camp Draft 保持 Pending，并以“草稿”呈现，不能把恢复�
 自己的内容区域读取，
 不能继续占用全屏“正在恢复上次位置”。失败留在局部 surface 重试；仅明确 `camps.exists === false` 的已删除
 Camp 可以回到 Quick Chat。Notification navigation、恢复位置写入和已读确认要等权威 route commit。
+
+## Camp 队员管理
+
+“当前会话”摘要行在标题右侧提供紧凑“添加”按钮。它打开可搜索的多选 Dialog，候选只包含当前
+`present` 且不在 active Camp members 中的 AgentProfile；曾离开的成员若再次出现，仍按普通候选与“添加队员”
+文案处理，不显示“重新加入”或历史离队分组。提交按权威 membership generation 顺序执行；多选出现局部失败
+时保留失败项和明确原因，已成功项立即从候选移除，不伪装为整批回滚。
+
+成员行保持头像、身份、Runtime 名称与静态“可用/不可用”状态。模型信息展开与“移出当前会话”统一收进
+行尾单个水平三点菜单，避免并排按钮破坏层级。入口保留 `28×28px` 命中区，静止态无边框、无底色，
+仅在悬停、键盘聚焦或菜单打开时显示低强调度底色。菜单项必须有文本动作名、键盘焦点、Esc/外部点击关闭和
+`aria-expanded`；模型项只控制既有详情 disclosure，不改变 Runtime 配置。
+
+Camp 只有一位 active member 时，“移出当前会话”仍可见但禁用，并直接解释“Camp 至少需要一位队员”。
+其他成员选择移除后，先打开读取
+[Camp Membership v1](../../contracts/camp-membership-v1.md)权威 preview 的确认 Dialog；读取期间显示骨架，失败
+原位重试。Dialog 只展示实际存在的影响：会被停止的 Run、被释放的 Task、等待/运行 Delivery 与 Gather Item，
+对应计数为零时整行不出现；没有任何实际影响时正文区整体折叠，不用“没有需要处理”或“继续保留”补齐版面。
+每项图标与标题首行基线对齐。Default Lead 必须先选择有效 successor。确认提交 exact membership
+generation/version，冲突后不自动重放，必须刷新 preview。
+
+移除提交成功即关闭 Dialog 并刷新 Camp。仍有运行责任在正式结算时，当前会话区域显示低强调度“正在收口”
+及已结算/目标 Run 数，不阻断阅读、Composer 或其他成员操作；完成后随权威 refresh 消失。UI 不把这一状态
+写入公共消息、模型 Context 或 Toast 成功叙事，也不声称 Runtime 已经退出。
 
 ## 常规会话与世界地图
 
@@ -224,6 +248,25 @@ Task related execution、停止结果和世界地图入口在右侧承载时必�
 Core 公共 `result/error` 形成同一 Tool 行的详情，`camp.read/search` 不因顶层 `input/output` 为空而退化为
 静态行；Envelope、request/receipt 和 canonical input 不进入详情或剪贴板。
 
+同一 Run 内最大连续的 Tool items 默认收成一条可展开组摘要；narration、plan 与 diagnostic 都会截断
+分组，不能跨 Run 或跨队员合并。有 running/waiting 操作时，活动组只显示“执行中/等待审批 · 当前操作”，
+不再同时追加累计数。当前 Tool 已结算但尾组尚未收口时，继续显示“执行中 · <最近一条指令>”，不回退为
+“已执行/已汇总 N 项操作”；成功、失败、停止和仅记录仍只在展开后的精确 Tool 行表达。终态同样只保留
+一段主文案。
+
+当已投影的最后一个 process item 是 Tool 组且父 Run 仍为 running 时，该尾组在当前 Tool 已结算后继续保持
+provisional 活动态，显示“执行中 · <最近一条指令>”，也不在下方重复“正在处理”。这里“执行中”表达父 Run
+仍在运行，不改写上一条 Tool 的真实终态；下一条连续 Tool 到达后只在同一组原位替换为新指令。
+narration、plan、diagnostic、waiting/cancelling 或 Run 终态才构成真实收口边界。该规则按 process/Run 事实
+判断，不使用时间防抖。
+组内只要有一项成功，真正收口后的组使用绿色实心圆点；只有全部失败才使用红色失败菱形，其他无成功的
+混合结果使用中性状态。绿色只表示“含成功操作”，不表示全部成功；完整状态仍由辅助名称和展开后的每条
+Tool 行表达。组 summary 的左侧 16px 图标与摘要文字共享 16px 中心线，底部和窄 Inspector 使用同一结构。
+
+用户展开后保持展开，新 Tool 与组终态只原位更新，不自动收起或抢焦点。展开组只显示全部 Tool summary，
+完整结果仍须再展开精确 Tool；结果 region 在首次展开前不进入 DOM，Managed Blob 也不提前读取。收起组时
+其后代不参与布局，底部与 Inspector 移动同一 Drawer DOM 时保留组、Tool 与已经读取的结果状态。
+
 Tool 行优先显示 Core 的精确工具名或有意义的 Runtime 标题。Codex `commandExecution` 只有在结构化
 `commandActions` 全部证明 read/list/search 时继续显示“读取 / 列出 / 搜索 / 检索项目文件”等中文语义；
 除此以外，Codex、Claude Code、TRAE 与其他 ACP Shell 行只要同一公开 payload 有 command，就使用完整脱敏
@@ -246,7 +289,7 @@ disclosure 继续在原位渲染完整公开结果，不再截断，不再提供
 `role=region` 中，超出后内部滚动；Arrow、Page Up/Down、Space、Home/End 可滚动，Escape 只返回
 对应 summary。底部和 Inspector 复用同一行为。仍不显示 standalone raw Evidence、Envelope JSON 或独立
 “查看完整工具调用”。精确合同见
-[Run Process Detail Surface v19](../../contracts/run-process-detail-surface-v19.md)。
+[Run Process Detail Surface v23](../../contracts/run-process-detail-surface-v23.md)。
 
 ### Runtime 终态文件变更与 Workspace Change Window
 
@@ -279,7 +322,7 @@ Inspector 复用同一语义。刷新不得自动打开执行台、改变 Run se
 当权威 AgentRun 已取消时，该 Run 中仍为 running 的 Tool Call 停止所有运行动画，并以中性图形和
 “已停止”作为主状态。该展示只表达父 Run 已失去继续执行权，不改写子活动的 Canonical phase/outcome，
 也不隐藏独立的外部效果待确认提示；明确 canonical cancelled 的 Tool Call 同样显示“已停止”。精确合同见
-[Run Process Detail Surface v19](../../contracts/run-process-detail-surface-v19.md)。
+[Run Process Detail Surface v23](../../contracts/run-process-detail-surface-v23.md)。
 
 当前非终态 Claude Code Run 收到安全 `runtime_api_retrying` Evidence 时，在精确 Run 过程内显示 attention
 notice：“Claude Code API 暂时不可用”，并显示最新重试次数、等待秒数和“本次执行尚未结束，可继续等待或
@@ -287,7 +330,7 @@ notice：“Claude Code API 暂时不可用”，并显示最新重试次数、�
 该状态仍是 running，不产生 Tool、Toast、消息或终态 failure；Run 终态后隐藏旧 notice，真实失败继续使用
 下述 Runtime failure 边界。Renderer 只接受固定 code/status 与有界数字，不展示 raw stderr、API body、
 凭证、用户名或绝对路径。精确合同见
-[Run Process Detail Surface v19](../../contracts/run-process-detail-surface-v19.md)。
+[Run Process Detail Surface v23](../../contracts/run-process-detail-surface-v23.md)。
 
 failed Claude Code 或 Antigravity Run 的公开 `failure` 必须在对应 Run stage 显示 Runtime 名称、安全
 summary 与可选 detail；即使没有任何 Execution Evidence 也默认展开，不能被空详情逻辑隐藏。标题按
@@ -315,7 +358,7 @@ Composer 中的 CampTurn Stop 继续是唯一整轮停止入口并 fence 当前�
 Header、Task 卡、时间线和 Composer 不增加 Run-local 入口。`recovery_blocked` 继续只显示“结束此运行”，
 不与普通 Stop 同时出现。Run-local 请求不创建 Camp 时间线消息；Turn-level 终态用户取消仍以一条“你已在
 {耗时} 后停止”进入时间线。精确资格、required/optional 后果与不确定态见
-[Run Process Detail Surface v19](../../contracts/run-process-detail-surface-v19.md)。
+[Run Process Detail Surface v23](../../contracts/run-process-detail-surface-v23.md)。
 
 ## Camp Composer
 

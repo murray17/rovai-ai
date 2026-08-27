@@ -15,6 +15,10 @@ import { release, tmpdir } from 'node:os'
 import { basename, join, relative, resolve } from 'node:path'
 import { createInterface } from 'node:readline'
 import { parse as parseYaml } from 'yaml'
+import {
+  assertUpdateInfoReleaseNotes,
+  configuredReleaseNotesFile
+} from './lib/release-notes.mjs'
 import { inspectPortableExecutable } from './lib/windows-pe.mjs'
 import { coreDataDirectoryArguments } from './lib/runtime-camp-files-root.mjs'
 
@@ -38,6 +42,8 @@ const installer = join(
 )
 const installerBlockmap = `${installer}.blockmap`
 const updateInfoPath = join(dist, 'latest.yml')
+const installerIncludePath = join(root, 'build', 'installer.nsh')
+const installerCoordinatorPath = join(root, 'build', 'installer-process-coordinator.ps1')
 const reportPath = join(dist, 'windows-verification-report.txt')
 const manifestPath = join(dist, 'windows-release-manifest.json')
 const report = ['Rovai AI Windows x64 verification']
@@ -110,6 +116,13 @@ async function verifyUpdateArtifacts() {
   if (!updateInfo || updateInfo.version !== packageMetadata.version) {
     throw new Error('latest.yml has the wrong version')
   }
+  const releaseNotesPath = join(root, configuredReleaseNotesFile(packageMetadata))
+  assertUpdateInfoReleaseNotes({
+    updateInfo,
+    releaseNotes: await readFile(releaseNotesPath, 'utf8'),
+    version: packageMetadata.version,
+    manifestName: 'latest.yml'
+  })
   const installerName = basename(installer)
   const installerEntry = Array.isArray(updateInfo.files)
     ? updateInfo.files.find((entry) => entry?.url === installerName)
@@ -122,7 +135,7 @@ async function verifyUpdateArtifacts() {
   }
   const blockmapSize = (await stat(installerBlockmap)).size
   if (blockmapSize <= 0) throw new Error('NSIS updater blockmap is empty')
-  report.push('latest.yml: version, sha512 and size passed')
+  report.push('latest.yml: version, release notes, sha512 and size passed')
   report.push(`NSIS updater blockmap: ${relative(root, installerBlockmap)}`)
   return {
     updateInfo: {
@@ -188,27 +201,82 @@ function verifySignature(label, path) {
   return signature
 }
 
-function verifyInstallerConfiguration() {
+async function verifyInstallerConfiguration() {
   const nsis = packageMetadata.build?.nsis
   const expected = {
     oneClick: false,
     perMachine: false,
     allowElevation: false,
     packElevateHelper: false,
-    allowToChangeInstallationDirectory: true
+    allowToChangeInstallationDirectory: true,
+    include: 'build/installer.nsh'
   }
   for (const [key, value] of Object.entries(expected)) {
     if (nsis?.[key] !== value) {
       throw new Error(`NSIS ${key} must be ${value} for the selectable per-user installer`)
     }
   }
-  report.push('NSIS configuration: assisted per-user install with selectable destination passed')
+  const [installerInclude, coordinator] = await Promise.all([
+    readFile(installerIncludePath, 'utf8'),
+    readFile(installerCoordinatorPath, 'utf8')
+  ])
+  const pollMs = nsisDefineNumber(installerInclude, 'ROVAI_SHUTDOWN_POLL_MS')
+  const gracefulMs = nsisDefineNumber(installerInclude, 'ROVAI_GRACEFUL_SHUTDOWN_MS')
+  const forceMs = nsisDefineNumber(installerInclude, 'ROVAI_FORCE_SHUTDOWN_MS')
+  const gracefulTicks = nsisDefineNumber(installerInclude, 'ROVAI_GRACEFUL_SHUTDOWN_TICKS')
+  const forceTicks = nsisDefineNumber(installerInclude, 'ROVAI_FORCE_SHUTDOWN_TICKS')
+  if (gracefulMs !== 20_000
+      || forceMs !== 5_000
+      || pollMs * gracefulTicks !== gracefulMs
+      || pollMs * forceTicks !== forceMs) {
+    throw new Error('NSIS running-App shutdown budgets must remain 20s graceful plus 5s forced')
+  }
+  for (const required of [
+    '!macro customCheckAppRunning',
+    'ROVAI_REQUEST_GRACEFUL_CLOSE',
+    'ROVAI_WAIT_FOR_QUIESCENCE ${ROVAI_GRACEFUL_SHUTDOWN_MS} ${ROVAI_GRACEFUL_SHUTDOWN_TICKS}',
+    'Refusing to force-close a process whose installation path could not be verified',
+    '!macro customUnInstallCheck'
+  ]) {
+    if (!installerInclude.includes(required)) {
+      throw new Error(`NSIS running-App coordinator is missing ${required}`)
+    }
+  }
+  if (installerInclude.includes('!insertmacro KILL_PROCESS')) {
+    throw new Error('NSIS running-App fallback must not force-close a path-unverified process')
+  }
+  for (const required of [
+    "[ValidateSet('Status', 'RequestClose', 'WaitForExit', 'ForceClose')]",
+    '[System.Diagnostics.Stopwatch]::StartNew()',
+    '.CloseMainWindow()',
+    'Stop-Process -Id $processId -Force',
+    'Test-ManagedProcessIdentity -ProcessInfo $current',
+    '[System.StringComparison]::OrdinalIgnoreCase'
+  ]) {
+    if (!coordinator.includes(required)) {
+      throw new Error(`installer process coordinator is missing ${required}`)
+    }
+  }
+
+  report.push('NSIS configuration: assisted per-user install, selectable destination, 20s controlled shutdown and bounded force close passed')
   return {
     assisted: true,
     perMachine: false,
     allowElevation: false,
-    selectableInstallationDirectory: true
+    selectableInstallationDirectory: true,
+    runningAppUpgrade: {
+      gracefulShutdownMs: gracefulMs,
+      forceCloseWaitMs: forceMs,
+      exactInstallTree: true,
+      oldUninstallerFailureSeparated: true
+    }
   }
+}
+
+function nsisDefineNumber(source, name) {
+  const match = source.match(new RegExp(`^!define ${name} (\\d+)$`, 'mu'))
+  if (!match) throw new Error(`NSIS include is missing numeric define ${name}`)
+  return Number(match[1])
 }
 
 async function verifyBinary(label, path) {
@@ -304,7 +372,7 @@ function startCore(executable, dataDirectory) {
 }
 
 try {
-  const installerConfiguration = verifyInstallerConfiguration()
+  const installerConfiguration = await verifyInstallerConfiguration()
   const updaterArtifacts = await verifyUpdateArtifacts()
   const binaries = {
     app: await verifyBinary('App', appExecutable),

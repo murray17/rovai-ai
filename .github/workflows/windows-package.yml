@@ -1,18 +1,6 @@
 name: Windows x64 package
 
 on:
-  pull_request:
-    paths:
-      - "apps/desktop/**"
-      - "build/**"
-      - "crates/rovai-core/**"
-      - "resources/**"
-      - "scripts/**"
-      - "Cargo.lock"
-      - "Cargo.toml"
-      - "package.json"
-      - "pnpm-lock.yaml"
-      - ".github/workflows/windows-package.yml"
   push:
     branches:
       - main
@@ -39,7 +27,7 @@ concurrency:
 jobs:
   unsigned-package:
     name: Windows x64 unsigned package
-    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    if: github.ref == 'refs/heads/main'
     runs-on: windows-2022
     timeout-minutes: 120
     steps:
@@ -68,7 +56,6 @@ jobs:
         run: pnpm dist:windows:x64
 
       - name: Upload unsigned package evidence
-        if: github.event_name != 'pull_request'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: rovai-windows-x64-unsigned-${{ github.sha }}

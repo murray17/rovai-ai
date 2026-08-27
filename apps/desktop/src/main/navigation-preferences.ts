@@ -126,6 +126,30 @@ export class NavigationPreferencesStore {
     })
   }
 
+  reinstateRemovedProject(
+    project: RemovedNavigationProject
+  ): Promise<NavigationPreferencesSnapshot> {
+    if (!isProjectTargetKey(project.targetKey) || !isTimestamp(project.removedAt)) {
+      return Promise.reject(new Error('Removed Project rollback record is invalid'))
+    }
+    return this.#enqueue(async () => {
+      const next = sanitizeSnapshot({
+        ...this.#snapshot,
+        pins: this.#snapshot.pins.filter((pin) => !(
+          pin.kind === 'project' && pin.targetKey === project.targetKey
+        )),
+        removedProjects: [
+          ...this.#snapshot.removedProjects.filter(
+            (candidate) => candidate.targetKey !== project.targetKey
+          ),
+          project
+        ]
+      })
+      await this.#commit(next)
+      return this.get()
+    })
+  }
+
   async #commit(next: NavigationPreferencesSnapshot): Promise<void> {
     if (JSON.stringify(next) === JSON.stringify(this.#snapshot)) return
     await writePrivateJson(this.#filePath, next)

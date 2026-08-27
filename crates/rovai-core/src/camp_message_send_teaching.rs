@@ -2,6 +2,8 @@ pub const CAMP_MESSAGE_SEND_SUMMARY: &str = "Publish one public Camp message. Re
 
 pub const CAMP_MESSAGE_SEND_FILE_HELP: &str = "Attach a local file to this Camp message as an immutable Camp attachment; repeat as needed.\n\nAt least one file is a complete payload, so --body may be omitted for an attachment-only message. Files appear after any message body in flag order. No separate upload command is required.";
 
+pub const CAMP_MESSAGE_SEND_BODY_HELP: &str = "For multiline Markdown, pass real newline characters.\nDirect --body values are literal: \\n inside ordinary shell quotes is text, not a line break.\nJSON stdin/heredoc and JSON --input-file decode \\n escapes.";
+
 pub const CAMP_MESSAGE_SEND_PUBLIC_ONLY_SCHEMA_DESCRIPTION: &str = "Guarantee that this public Camp message addresses no Agent. When true, explicit Agent recipients and taskId are invalid, restricted inline Agent addressing is not parsed, Agent-like @text remains ordinary text, effectiveRecipients and deliveryIds are empty, and no Agent is woken. This may be combined with mentionUser because Principal attention is not Agent routing.";
 
 pub const CAMP_MESSAGE_SEND_TO_PRINCIPAL_SCHEMA_DESCRIPTION: &str = "Mention the Principal and create an Inbox notification. Ordinary public Camp messages are already visible to the Principal. Use this only when the message creates a new unresolved decision, answer, or action for the Principal, or when the Principal explicitly requested notification of an important result. It creates no Agent Delivery, does not represent approval, and may be combined with publicOnly. Principal attention is message-local and is never inherited.";

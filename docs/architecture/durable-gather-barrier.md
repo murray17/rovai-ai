@@ -3,15 +3,15 @@ document_type: architecture
 architecture: durable-gather-barrier
 authority: gather-component-boundaries
 status: accepted
-last_updated: 2026-08-18
+last_updated: 2026-08-27
 ---
 
 # 持久 Gather Barrier 架构
 
 本架构组合 [Gather 不变量](foundational-invariants.md#collaboration-gather)、
 [Gather 不变量](foundational-invariants.md#collaboration-gather)、
-[ContextManifest 与 Run Facts 不变量](foundational-invariants.md#context-manifest-run-facts)、[Gather v3](../contracts/gather-v3.md)
-与 [Message Delivery v5](../contracts/message-delivery-v5.md)。
+[ContextManifest 与 Run Facts 不变量](foundational-invariants.md#context-manifest-run-facts)、[Gather v4](../contracts/gather-v4.md)
+与 [Message Delivery v8](../contracts/message-delivery-v8.md)。
 
 ## 组件与权威
 
@@ -75,9 +75,14 @@ history selection may include the same messages, but duplicates do not change sn
 Context bytes; it never re-runs the Barrier or reselects results. Migration 93 removes incompatible frozen Context and
 nonterminal Gather technical state; there is no v1/v2 Completion Input reader after the clean break.
 
-## Cancellation and read projection
+## Cancellation, membership cutover and read projection
 
 CampTurn Stop, Camp close and initiator leave mark collecting/ready/completing Gather cancelled and cancel pending
 completion within the same lifecycle transaction. A Default Lead change is intentionally ignored. Read Side exposes
 Delivery/Run discriminants for diagnostics and avoids adding completion to public request recipients. V3 has no Gather
 card or private result surface.
+
+Gather acceptance freezes the initiator membership version. Membership cutover cancels its Gather, open Items and
+pending Completion Delivery, and requests exact active target Runs to stop; it never re-routes completion to a successor.
+The associated membership reconciliation advances only through formal Item/Delivery/Run terminal settlement. A later
+ordinary add creates a new lifetime and cannot revive the cancelled aggregate or its completion.

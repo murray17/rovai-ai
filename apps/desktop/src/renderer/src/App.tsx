@@ -5,6 +5,7 @@ import type {
   AgentProfile,
   AgentRunView,
   ActionApprovalView,
+  AppUpdatePrompt as AppUpdatePromptValue,
   AppearanceSnapshot,
   CampActivationState,
   CampCreationPreflight,
@@ -12,6 +13,7 @@ import type {
   CampMessagePage,
   CampMessageAroundSnapshot,
   CampMessageView,
+  CampMemberRemovalPreview,
   CampOpenProjection,
   CampSnapshot,
   CreateCampRequest,
@@ -54,6 +56,8 @@ import {
   QuickChatWorkspace,
   composerHasSendablePayload,
   type CampMessageSendReceipt,
+  type CampMemberAddOutcome,
+  type CampMemberRemoveOutcome,
   type CampInspectorTab,
   type CampRuntimeRecovery,
   type NotificationFocusTarget,
@@ -68,6 +72,8 @@ import { openRuntimeModelCatalog } from './runtime-check'
 import { PanelToggleIcon } from './PanelToggleIcon'
 import { AppearanceSettings } from './AppearanceSettings'
 import { AboutUpdatesSettings } from './AboutUpdatesSettings'
+import { AppUpdatePrompt } from './AppUpdatePrompt'
+import { useAppUpdates, type AppUpdatesController } from './useAppUpdates'
 import {
   NotificationAttentionController,
   type NotificationNavigationResult
@@ -102,11 +108,12 @@ import {
 } from './OnboardingFlow'
 import { provisionFirstRun } from './onboarding-provisioning'
 import {
+  currentProjectAccessDecision,
   currentProjectForCamp,
   currentProjectGroup,
   currentProjectWorkspace,
   navigationIncludingCurrentWorkspace,
-  navigationWithoutRemovedProjects,
+  navigationWithProjectAuthority,
   persistCurrentProject,
   projectTargetKey,
   readCurrentProject,
@@ -125,6 +132,11 @@ export function appendLiveRuntimeEvent(
 }
 
 const ACTIVE_CAMP_INVALIDATION_EVENTS = new Set([
+  'camp.member_added',
+  'camp.member_removed',
+  'camp.membership_reconciliation_started',
+  'camp.membership_reconciliation_completed',
+  'camp.default_lead_reconciled',
   'agent_run.cancelled',
   'agent_run.recovery_blocker_resolved',
   'agent_run.runtime_model_observed',
@@ -171,20 +183,21 @@ export function createActiveCampRefreshCoordinator(
       activeRefreshes.set(campId, entry)
       entry.completion = Promise.resolve()
         .then(async () => {
-          let lastError: unknown = null
-          do {
-            entry.dirty = false
-            try {
-              await refreshOnce(campId)
-              lastError = null
-            } catch (nextError) {
-              lastError = nextError
-            }
-          } while (entry.dirty)
-          if (lastError !== null) throw lastError
-        })
-        .finally(() => {
-          if (activeRefreshes.get(campId) === entry) activeRefreshes.delete(campId)
+          try {
+            let lastError: unknown = null
+            do {
+              entry.dirty = false
+              try {
+                await refreshOnce(campId)
+                lastError = null
+              } catch (nextError) {
+                lastError = nextError
+              }
+            } while (entry.dirty)
+            if (lastError !== null) throw lastError
+          } finally {
+            if (activeRefreshes.get(campId) === entry) activeRefreshes.delete(campId)
+          }
         })
       return entry.completion
     }
@@ -322,6 +335,7 @@ export function campOpenProjectionAsSnapshot(
     throughGlobalSequence: projection.throughGlobalSequence,
     camp: projection.camp,
     members: projection.members,
+    membershipReconciliations: projection.membershipReconciliations,
     tasks: projection.tasks,
     messages,
     messageDeliveries: projection.messageDeliveries,
@@ -518,6 +532,7 @@ export function App(): React.JSX.Element {
   const [appearance, setAppearance] = useState<AppearanceSnapshot>(
     () => initialAppearanceSnapshot(document.documentElement)
   )
+  const appUpdates = useAppUpdates()
   const [health, setHealth] = useState<HealthStatus | null>(null)
   const [healthLoading, setHealthLoading] = useState(false)
   const [healthAttempted, setHealthAttempted] = useState(false)
@@ -526,6 +541,7 @@ export function App(): React.JSX.Element {
   const [navigation, setNavigation] = useState<NavigationSnapshot | null>(null)
   const [navigationPins, setNavigationPins] = useState<NavigationPin[]>([])
   const [removedProjectKeys, setRemovedProjectKeys] = useState<Set<string>>(() => new Set())
+  const [removedProjectAuthorityReady, setRemovedProjectAuthorityReady] = useState(false)
   const [pinnedCampItems, setPinnedCampItems] = useState<NavigationCampItem[]>([])
   const [pendingMemoryCount, setPendingMemoryCount] = useState(0)
   const [memoryReviewNotice, setMemoryReviewNotice] = useState(false)
@@ -550,6 +566,7 @@ export function App(): React.JSX.Element {
   const [confirmingRunIds, setConfirmingRunIds] = useState<Set<string>>(() => new Set())
   const [state, setState] = useState<LoadState>('loading')
   const [shuttingDown, setShuttingDown] = useState(false)
+  const [notificationHeadsUpVisible, setNotificationHeadsUpVisible] = useState(false)
   const [startupSnapshot, setStartupSnapshot] = useState<DesktopStartupSnapshot | null>(null)
   const [startupRouteTarget, setStartupRouteTarget] = useState<RestorableLocation | null>(null)
   const [startupStatus, setStartupStatus] = useState<StartupStatus>('loading')
@@ -804,6 +821,7 @@ export function App(): React.JSX.Element {
         setRemovedProjectKeys(new Set(
           resolvedNavigationPreferences.removedProjects.map((project) => project.targetKey)
         ))
+        setRemovedProjectAuthorityReady(true)
         setPinnedCampItems(resolvedPins.camps)
         await Promise.all([
           nextAgentsPromise,
@@ -887,24 +905,17 @@ export function App(): React.JSX.Element {
     setRemovedProjectKeys(new Set(
       snapshot.removedProjects.map((project) => project.targetKey)
     ))
+    setRemovedProjectAuthorityReady(true)
   }, [])
 
   const restoreNavigationProject = useCallback(async (projectPath: string): Promise<void> => {
     const targetKey = projectTargetKey(projectPath)
-    setRemovedProjectKeys((current) => {
-      if (!current.has(targetKey)) return current
-      const next = new Set(current)
-      next.delete(targetKey)
-      return next
-    })
     try {
       const snapshot = await window.rovai.navigationPreferences.restoreProject(targetKey)
       applyNavigationPreferences(snapshot)
     } catch (nextError) {
-      // A local navigation preference must never block opening or creating the
-      // Core-owned Camp. Keep the Project visible for this session and surface
-      // that only its cross-restart restoration could not be saved.
-      setError(`项目已重新显示，但侧栏恢复状态未能保存：${errorMessage(nextError)}`)
+      setError(`项目访问状态未能恢复，已停止后续目录检查：${errorMessage(nextError)}`)
+      throw nextError
     }
   }, [applyNavigationPreferences])
 
@@ -1044,10 +1055,6 @@ export function App(): React.JSX.Element {
         + `elapsed_ms=${(performance.now() - startedAt).toFixed(1)}`
       )
       void (async () => {
-        if (snapshot.camp.projectBindingKind === 'directory') {
-          await restoreNavigationProject(snapshot.camp.projectPath)
-          if (selectionGeneration !== campSelectionGeneration.current) return
-        }
         await loadNavigation()
         if (selectionGeneration !== campSelectionGeneration.current) return
         console.info(
@@ -1074,7 +1081,7 @@ export function App(): React.JSX.Element {
       }
       return false
     }
-  }, [clearCampOpenFeedback, loadNavigation, requestCampProjection, restoreNavigationProject, setCampSnapshot])
+  }, [clearCampOpenFeedback, loadNavigation, requestCampProjection, setCampSnapshot])
 
   useEffect(() => window.rovai.userAutomation.onOpenCamp(({ campId }) => {
     void activateCamp(campId, { reconcileDefaultLead: false })
@@ -1229,31 +1236,36 @@ export function App(): React.JSX.Element {
     ? currentProject.projectPath
     : null
   const visibleNavigation = useMemo(
-    () => navigationWithoutRemovedProjects(navigation, removedProjectKeys),
-    [navigation, removedProjectKeys]
+    () => navigationWithProjectAuthority(
+      navigation,
+      removedProjectKeys,
+      removedProjectAuthorityReady
+    ),
+    [navigation, removedProjectAuthorityReady, removedProjectKeys]
   )
-  const authoritativeCurrentProjectPath = currentProjectGroup(
-    visibleNavigation,
-    currentProject
-  )?.projectPath ?? null
+  const currentProjectAccess = currentProjectAccessDecision({
+    currentProject,
+    currentWorkspaceHint,
+    navigation: visibleNavigation,
+    removedProjectKeys,
+    removedProjectAuthorityReady
+  })
 
   useEffect(() => {
-    if (!visibleNavigation) return undefined
-    if (
-      currentProject.kind === 'directory'
-      && removedProjectKeys.has(projectTargetKey(currentProject.projectPath))
-    ) {
+    if (currentProjectAccess === 'wait') return undefined
+    if (currentProjectAccess === 'fallback') {
       const fallback: CurrentProject = { kind: 'quick_chat' }
       setCurrentProject(fallback)
       setCurrentWorkspaceHint(null)
       persistCurrentProject(fallback)
       return undefined
     }
-    if (currentProject.kind === 'quick_chat' || authoritativeCurrentProjectPath) {
+    if (currentProjectAccess === 'clear_hint') {
       setCurrentWorkspaceHint(null)
       return undefined
     }
-    if (currentWorkspaceHint?.projectPath === currentProject.projectPath) return undefined
+    if (currentProjectAccess === 'keep_hint') return undefined
+    if (currentProject.kind !== 'directory') return undefined
 
     let cancelled = false
     void window.rovai.request<WorkspaceInspection>('workspaces.inspect', {
@@ -1269,12 +1281,10 @@ export function App(): React.JSX.Element {
     })
     return () => { cancelled = true }
   }, [
-    authoritativeCurrentProjectPath,
+    currentProjectAccess,
     currentProject.kind,
     currentProjectPath,
-    currentWorkspaceHint?.projectPath,
-    removedProjectKeys,
-    visibleNavigation !== null
+    currentWorkspaceHint?.projectPath
   ])
 
   useEffect(() => {
@@ -1398,10 +1408,6 @@ export function App(): React.JSX.Element {
           + `elapsed_ms=${(performance.now() - startedAt).toFixed(1)}`
         )
         void (async () => {
-          if (snapshot.camp.projectBindingKind === 'directory') {
-            await restoreNavigationProject(snapshot.camp.projectPath)
-            if (cancelled || selectionGeneration !== campSelectionGeneration.current) return
-          }
           await loadNavigation()
           if (cancelled || selectionGeneration !== campSelectionGeneration.current) return
           console.info(
@@ -1434,7 +1440,6 @@ export function App(): React.JSX.Element {
     loadNavigation,
     loadOverview,
     requestCampProjection,
-    restoreNavigationProject,
     setCampSnapshot,
     startupSnapshot
   ])
@@ -1801,6 +1806,7 @@ export function App(): React.JSX.Element {
   }
 
   const openProject = async (): Promise<void> => {
+    if (!removedProjectAuthorityReady) return
     setError(null)
     try {
       await selectProjectDirectory(
@@ -1876,8 +1882,70 @@ export function App(): React.JSX.Element {
   const chooseSettingsSection = (section: SettingsSection): void => {
     setSettingsSection(section)
     void window.rovai.generalPreferences.setLastSettingsSection(section)
+      .then(setGeneralPreferences)
       .catch((nextError) => setError(errorMessage(nextError)))
   }
+
+  const commitSettingsSurface = (section: SettingsSection): void => {
+    cancelPendingCampActivation()
+    setNotificationFocus(null)
+    setSettingsSection(section)
+    setView('settings')
+  }
+
+  const openSettings = (): void => {
+    const rememberedSection = generalPreferences?.lastSettingsSection ?? 'general'
+    void requestMemberTransition(() => commitSettingsSurface(rememberedSection))
+  }
+
+  const openUpdateSettings = async (
+    prompt: AppUpdatePromptValue | null = appUpdates.snapshot?.pendingPrompt ?? null
+  ): Promise<boolean> => {
+    const expectedVersion = prompt?.version ?? appUpdates.snapshot?.availableRelease?.version
+    if (!expectedVersion) return false
+    try {
+      const transitioned = await requestMemberTransition(() => commitSettingsSurface('about'))
+      if (!transitioned) return false
+      await afterNextPaint()
+      const releaseSection = document.querySelector<HTMLElement>('.about-release-section')
+      if (releaseSection?.dataset.appUpdateReleaseVersion !== expectedVersion) return false
+      const heading = document.querySelector<HTMLElement>('#about-release-notes-heading')
+      heading?.focus({ preventScroll: true })
+      releaseSection.scrollIntoView({ block: 'start' })
+      return Boolean(heading)
+    } catch (nextError) {
+      setError(`无法打开更新内容：${errorMessage(nextError)}`)
+      return false
+    }
+  }
+
+  useEffect(() => {
+    const prompt = appUpdates.snapshot?.pendingPrompt
+    const release = appUpdates.snapshot?.availableRelease
+    if (view !== 'settings'
+        || settingsSection !== 'about'
+        || !prompt
+        || release?.version !== prompt.version) return undefined
+    let secondFrame = 0
+    const firstFrame = window.requestAnimationFrame(() => {
+      secondFrame = window.requestAnimationFrame(() => {
+        const releaseSection = document.querySelector<HTMLElement>('.about-release-section')
+        if (releaseSection?.dataset.appUpdateReleaseVersion === prompt.version) {
+          void appUpdates.dismissPrompt(prompt.id)
+        }
+      })
+    })
+    return () => {
+      window.cancelAnimationFrame(firstFrame)
+      if (secondFrame) window.cancelAnimationFrame(secondFrame)
+    }
+  }, [
+    appUpdates.dismissPrompt,
+    appUpdates.snapshot?.availableRelease,
+    appUpdates.snapshot?.pendingPrompt,
+    settingsSection,
+    view
+  ])
 
   const commitMemoryLocation = useCallback((): void => {
     if (!startupResolvedSessionId.current || viewRef.current !== 'memory') return
@@ -2340,6 +2408,135 @@ export function App(): React.JSX.Element {
     }
   }
 
+  const addCampMembers = async (agentIds: string[]): Promise<CampMemberAddOutcome> => {
+    const campId = activeCampIdRef.current
+    const currentSnapshot = campSnapshotRef.current
+    if (!campId || currentSnapshot?.camp.id !== campId) {
+      throw new Error('当前会话尚未准备好。')
+    }
+    setBusy('camp-membership')
+    setError(null)
+    const outcome: CampMemberAddOutcome = {
+      addedAgentIds: [],
+      unchangedAgentIds: [],
+      failures: []
+    }
+    let membershipGeneration = currentSnapshot.camp.membershipGeneration
+    try {
+      for (let index = 0; index < agentIds.length; index += 1) {
+        const agentId = agentIds[index]
+        try {
+          const result = await window.rovai.request<StoredCommandResult>('camps.members.add', {
+            commandId: crypto.randomUUID(),
+            command: {
+              campId,
+              agentId,
+              expectedMembershipGeneration: membershipGeneration
+            }
+          })
+          if (result.status === 'rejected') {
+            const message = commandFailureMessage(result)
+            outcome.failures.push({ agentId, message })
+            if (membershipConflictCode(result.code)) {
+              for (const remainingAgentId of agentIds.slice(index + 1)) {
+                outcome.failures.push({
+                  agentId: remainingAgentId,
+                  message: '名册已发生变化，请在刷新后重试。'
+                })
+              }
+              break
+            }
+            continue
+          }
+          const payload = asRecord(result.payload)
+          if (typeof payload.membershipGeneration === 'number') {
+            membershipGeneration = payload.membershipGeneration
+          }
+          if (payload.changed === false) outcome.unchangedAgentIds.push(agentId)
+          else outcome.addedAgentIds.push(agentId)
+        } catch (error) {
+          outcome.failures.push({ agentId, message: errorMessage(error) })
+        }
+      }
+      try {
+        await Promise.all([
+          refreshActiveCampSnapshot(campId),
+          loadNavigation()
+        ])
+      } catch {
+        // The per-command outcomes are authoritative; normal event refresh will converge the surface.
+      }
+      return outcome
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  const previewCampMemberRemoval = async (agentId: string): Promise<CampMemberRemovalPreview> => {
+    const campId = activeCampIdRef.current
+    if (!campId || campSnapshotRef.current?.camp.id !== campId) {
+      throw new Error('当前会话尚未准备好。')
+    }
+    const preview = await window.rovai.request<CampMemberRemovalPreview | null>(
+      'camps.members.removalPreview',
+      { campId, agentId }
+    )
+    if (!preview) throw new Error('这位队员已不在当前会话中。')
+    return preview
+  }
+
+  const removeCampMember = async (
+    preview: CampMemberRemovalPreview
+  ): Promise<CampMemberRemoveOutcome> => {
+    const campId = activeCampIdRef.current
+    if (!campId || preview.campId !== campId || campSnapshotRef.current?.camp.id !== campId) {
+      return { status: 'conflict', message: '当前会话已发生变化，请重新读取影响。' }
+    }
+    setBusy('camp-membership')
+    setError(null)
+    try {
+      const result = await window.rovai.request<StoredCommandResult>('camps.members.remove', {
+        commandId: crypto.randomUUID(),
+        command: {
+          campId,
+          agentId: preview.agentId,
+          expectedMembershipGeneration: preview.membershipGeneration,
+          expectedMembershipVersion: preview.membershipVersion,
+          replacementDefaultLeadAgentId: preview.nextDefaultLeadAgentId,
+          reason: 'removed_from_camp'
+        }
+      })
+      if (result.status === 'rejected') {
+        try {
+          await refreshActiveCampSnapshot(campId)
+        } catch {
+          // Keep the deterministic command result when the follow-up projection is unavailable.
+        }
+        return {
+          status: membershipConflictCode(result.code) ? 'conflict' : 'failed',
+          message: commandFailureMessage(result)
+        }
+      }
+      try {
+        await Promise.all([
+          refreshActiveCampSnapshot(campId),
+          loadNavigation()
+        ])
+      } catch {
+        // The accepted cutover is authoritative; reconciliation events will refresh the surface.
+      }
+      const reconciliationStatus = stringField(asRecord(result.payload), 'reconciliationStatus')
+      return {
+        status: 'removed',
+        reconciliationStatus: reconciliationStatus === 'reconciling' ? 'reconciling' : 'settled'
+      }
+    } catch (error) {
+      return { status: 'failed', message: errorMessage(error) }
+    } finally {
+      setBusy(null)
+    }
+  }
+
   async function createCamp(
     draft: Omit<CreateCampRequest, 'commandId'>
   ): Promise<void> {
@@ -2756,6 +2953,7 @@ export function App(): React.JSX.Element {
         pins={navigationPins}
         pinnedCampItems={pinnedCampItems}
         settingsSection={settingsSection}
+        updateSnapshot={appUpdates.snapshot}
         onNewConversation={beginNewConversation}
         onMembers={() => chooseView('members')}
         onMemory={() => {
@@ -2763,7 +2961,8 @@ export function App(): React.JSX.Element {
           chooseView('memory')
         }}
         pendingMemoryCount={pendingMemoryCount}
-        onSettings={() => chooseView('settings')}
+        onSettings={openSettings}
+        onOpenUpdates={() => void openUpdateSettings()}
         onSettingsSectionChange={chooseSettingsSection}
         onSettingsBack={closeSettings}
         onOpenProject={() => void openProject()}
@@ -2848,11 +3047,14 @@ export function App(): React.JSX.Element {
             agents={agents}
             installations={installations}
             liveRuntimeEvents={liveRuntimeEvents}
-            busy={busy === 'camp-message' || busy === 'change-default-lead' || busy?.startsWith('action-approval-') === true}
+            busy={busy === 'camp-message' || busy === 'change-default-lead' || busy === 'camp-membership' || busy?.startsWith('action-approval-') === true}
             onSend={sendCampMessage}
             onPendingDraftPersisted={refreshPendingCampNavigation}
             onPendingCampLeave={settlePendingCampOnLeave}
             onChangeLead={changeDefaultLead}
+            onAddMembers={addCampMembers}
+            onPreviewMemberRemoval={previewCampMemberRemoval}
+            onRemoveMember={removeCampMember}
             onTasksChanged={() => activateCamp(activeCampId).then(() => undefined)}
             onResolveApproval={(approval, decision) => {
               void resolveActionApproval(approval, decision)
@@ -2916,6 +3118,7 @@ export function App(): React.JSX.Element {
             installations={installations}
             busy={busy}
             section={settingsSection}
+            updates={appUpdates}
             onDiagnosticsNavigate={(section) => chooseSettingsSection(section)}
             onReload={async () => {
               await Promise.all([loadOverview(), loadHealth()])
@@ -2984,6 +3187,7 @@ export function App(): React.JSX.Element {
         preflight={campCreationPreflight}
         agents={agents}
         busy={busy === 'create-camp' || busy === 'open-project'}
+        projectAccessReady={removedProjectAuthorityReady}
         returnFocusElement={newConversationReturnFocus.current}
         onOpenChange={setNewConversationOpen}
         onChooseWorkspaceDirectory={chooseWorkspaceDirectory}
@@ -3007,6 +3211,18 @@ export function App(): React.JSX.Element {
         onRefreshVisibleCamp={refreshVisibleNotificationCamp}
         onError={setToast}
         visibleSources={visibleNotificationSources}
+        onHeadsUpVisibleChange={setNotificationHeadsUpVisible}
+      />
+      <AppUpdatePrompt
+        snapshot={appUpdates.snapshot}
+        campComposerVisible={view === 'camp'}
+        blocked={notificationHeadsUpVisible
+          || newConversationOpen
+          || shuttingDown
+          || (view === 'settings' && settingsSection === 'about')}
+        onDismiss={appUpdates.dismissPrompt}
+        onOpenDetails={openUpdateSettings}
+        onDownload={appUpdates.download}
       />
       {shuttingDown && <ControlledShutdownOverlay />}
     </div>
@@ -3154,6 +3370,7 @@ export function SettingsView({
   installations,
   busy,
   section,
+  updates,
   onDiagnosticsNavigate,
   onReload,
   onThemeChange
@@ -3168,6 +3385,7 @@ export function SettingsView({
   installations: AdapterInstallation[]
   busy: string | null
   section: SettingsSection
+  updates: AppUpdatesController
   onDiagnosticsNavigate(section: 'mcp' | 'runtime', runtimeKind?: AdapterKind): void
   onReload(): Promise<void>
   onThemeChange(preference: ThemePreference): void
@@ -3212,7 +3430,7 @@ export function SettingsView({
           <DiagnosticsCenter onNavigate={onDiagnosticsNavigate} platform={platform} />
         )}
         {section === 'about' && (
-          <AboutUpdatesSettings />
+          <AboutUpdatesSettings updates={updates} />
         )}
       </div>
     </div>
@@ -3467,7 +3685,20 @@ export function commandFailureMessage(result: StoredCommandResult): string {
   if (result.code === 'agent_run.runtime_not_ready') {
     return '目标队员的 Agent 运行时暂不可用。'
   }
+  if (result.code === 'camp.last_member_required') {
+    return '会话至少保留 1 位队员。'
+  }
+  if (membershipConflictCode(result.code)) {
+    return '名册已发生变化。请重新读取最新状态后再试。'
+  }
   return localizeExecutionEngineTerms(stringField(result.payload, 'message') ?? `操作未完成：${result.code}`)
+}
+
+function membershipConflictCode(code: string): boolean {
+  return code === 'camp.membership_generation_conflict'
+    || code === 'camp.membership_version_conflict'
+    || code === 'camp.member_not_found'
+    || code === 'camp.member_not_active'
 }
 
 export function campDeleteCommand(

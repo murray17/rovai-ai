@@ -259,6 +259,11 @@ function readyAvailability(): ProductRuntimeAvailability {
       source: 'inherited_path',
       reportedVersion: '1.0.0',
       executableFingerprint: 'fingerprint',
+      searchPathSource: 'inherited_path',
+      entrypointKind: 'native_executable',
+      candidateExtension: 'native',
+      resolvedNativeTarget: false,
+      versionProbeSucceeded: true,
       searchGeneration: 1,
       observedAt: '2026-08-17T00:00:00.000Z',
       diagnosticCode: null

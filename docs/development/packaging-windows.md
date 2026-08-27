@@ -3,7 +3,7 @@ document_type: development-guide
 authority: windows-desktop-build-packaging-routing
 status: implemented-pending-release-qualification
 source_version: v1.15
-last_updated: 2026-08-24
+last_updated: 2026-08-26
 ---
 
 # Windows x64 构建、打包与发布
@@ -47,9 +47,18 @@ App/Core/CLI 的 PE32+ 架构、icon/version/manifest、hash、CLI contract 与�
 `ROVAI_WINDOWS_SIGNER_SHA256` allowlist；缺少任一发布条件时 verifier 必须失败。
 
 NSIS Release 还必须同版本上传 installer、`.exe.blockmap` 与 `latest.yml`。verifier 会检查 packaged
-`app-update.yml` 指向官方 GitHub 通道，并核对 `latest.yml` 中 installer 的版本、sha512 和大小；缺少
-任一更新文件时不得发布应用内升级。初始安装仍使用 assisted installer，应用内“安装并重启”使用
-silent upgrade，不再次展示安装向导。
+`app-update.yml` 指向官方 GitHub 通道，并核对 `latest.yml` 中 installer 的版本、sha512 和大小。它还从
+[`build/release-notes.md`](../../build/release-notes.md) 读取与 `package.json.version` 绑定的共用 Markdown，
+要求 `latest.yml.releaseNotes` 存在且与源文件完全相同；缺少、为空、版本标题陈旧、内容漂移或缺少任一
+更新文件时不得发布应用内升级。初始安装仍使用 assisted installer，应用内“安装并重启”使用 silent
+upgrade，不再次展示安装向导。verifier 还冻结运行中升级协调器：先向安装目录内旧 Electron 主窗口发送
+标准关闭请求，完整等待 20 秒 Planned Shutdown，再进入最多 5 秒的精确安装树强制回收；不得恢复
+electron-builder 默认的 1 秒等待或仅按相同路径前缀批量结束进程。
+
+正式打包 App 主动检查该发布集合，但不自动下载；用户显式“下载更新”后才进入一轮互斥下载，并在
+`ready_to_install` 再确认“安装并重启”。Updater 必须先同步 stage/启动 silent installer，Main 随后在其
+`before-quit` 中完成同一 Planned Shutdown；同步 stage 失败时 App/Core 保持运行并允许重试。检查来源、
+提示代次、状态与 fallback 由 [App Update v1](../contracts/app-update-v1.md)统一约束。
 
 ## Target-isolated staging
 
@@ -76,10 +85,37 @@ verifier 版本，不能与正式签名发布混用，也不能用 Windows Serve
 ## 安装、升级与卸载
 
 - clean install：新用户安装、启动、Core ready、v20 Built-in roundtrip 与现有 Onboarding gate 通过；
-- upgrade：先要求正在运行的 App 正常关闭，等待 Planned Shutdown 完成，再替换被锁定的 sidecar；新旧 Core 不并行；
+- upgrade：安装器先请求正在运行的 App 正常关闭，并给 Planned Shutdown 20 秒完整预算；交互安装超时后由
+  用户选择再等待、仅强制关闭已证明属于精确安装目录的进程树，或取消。silent upgrade 只在该预算耗尽后
+  进入有界强制回收；若 PowerShell 被策略禁用、无法证明进程路径，安装器只允许手动关闭或安全停止，
+  不按映像名强杀；新旧 Core 不并行；
 - downgrade：检测 schema incompatibility 后在启动前阻断，显示当前/目标版本和安全下一步；
 - uninstall：默认保留 `%LOCALAPPDATA%\Rovai AI` 数据；删除数据是未默认选中的显式选项，并二次确认精确范围；
-- failure：安装/升级失败保留可审阅日志和回滚结果，不把半替换状态报告为成功。
+- failure：安装/升级失败保留可审阅日志和回滚结果，不把半替换状态报告为成功；“进程未退出”和“旧版
+  卸载程序失败”必须分别记录，不能把后者误报成 App 留在后台。
+
+`accept:windows:installer` 默认验证“当前 installer clean install → 运行已安装 App → 同版本 silent upgrade”，
+并要求升级由自然 Planned Shutdown 完成、原 App/Core/Helper 进程树全部退出。需要验证已发布旧版本时，传入
+精确 baseline installer；脚本仍先确认机器上没有既有 Rovai 安装：
+
+```powershell
+$env:ROVAI_WINDOWS_UPGRADE_BASE_INSTALLER = 'C:\acceptance\Rovai-AI-0.0.1-x64.exe'
+pnpm accept:windows:installer
+```
+
+如果开发机已经安装日常版、不能安全运行完整安装验收，可以先对隔离的
+`dist/win-unpacked` 运行安装器关闭协调验收；它不写安装注册表，也不会匹配其他安装目录：
+
+```powershell
+pnpm accept:windows:installer-shutdown
+```
+
+该验收必须看到 App、Core 与 Electron 子进程全部退出，并从 Desktop 日志读到
+`forcedSignal: null` 与 `report.status: completed`。它不能替代带旧版安装器的完整升级验收，
+但可以在日常开发机上证明安装器使用的 `WM_CLOSE` 路径确实进入 Planned Shutdown。
+
+报告中的 `crossVersionUpgrade`、`baselineVersion` 和 `runningAppUpgrade` 是跨版本结论的必要证据；
+未传 baseline 时不得把同版本结果表述为 0.0.1→0.0.3 已实测。
 
 所有 Smoke/acceptance 使用独立 data root，不能指向日常 App；私有目录布局和创建时 DACL 由
 [Windows Private Storage v2](../contracts/windows-private-storage-v2.md)决定。

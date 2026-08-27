@@ -134,11 +134,18 @@ pub(crate) struct CodexHost {
     stdin: Mutex<ManagedChildStdin>,
     pending: Mutex<HashMap<u64, PendingRpc>>,
     next_id: AtomicU64,
-    routes: RwLock<HashMap<String, CodexThreadRoute>>,
+    routes: CodexThreadRoutes,
     incoming: mpsc::UnboundedSender<CodexIncoming>,
     alive: AtomicBool,
     executable_path: PathBuf,
     builtin_tools: Option<BuiltinToolProcessConfig>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CodexIngressDisposition {
+    Forward,
+    DropCurrentDelta,
+    DropRejectedDelta,
 }
 
 #[derive(Debug, Clone)]
@@ -153,6 +160,181 @@ impl CodexThreadRoute {
             None
         } else {
             Some(self.owner.clone())
+        }
+    }
+}
+
+#[derive(Default)]
+struct CodexThreadRoutes {
+    inner: RwLock<HashMap<String, CodexThreadRoute>>,
+}
+
+impl CodexThreadRoutes {
+    async fn bind_thread(&self, thread_id: &str, owner: &CodexRuntimeOwner) -> Result<()> {
+        let mut routes = self.inner.write().await;
+        if let Some(existing) = routes.get(thread_id)
+            && &existing.owner != owner
+        {
+            bail!("Codex Native Thread is already bound to another logical runtime");
+        }
+        routes.insert(
+            thread_id.to_string(),
+            CodexThreadRoute {
+                owner: owner.clone(),
+                active_turn_id: None,
+            },
+        );
+        Ok(())
+    }
+
+    async fn activate_turn(
+        &self,
+        thread_id: &str,
+        owner: &CodexRuntimeOwner,
+        turn_id: &str,
+    ) -> Result<()> {
+        let mut routes = self.inner.write().await;
+        let route = routes
+            .get_mut(thread_id)
+            .context("Codex Native Thread has no logical runtime binding")?;
+        if &route.owner != owner
+            || route
+                .active_turn_id
+                .as_deref()
+                .is_some_and(|active| active != turn_id)
+        {
+            bail!("Codex Native Turn failed Host/Thread/Run fencing");
+        }
+        route.active_turn_id = Some(turn_id.to_string());
+        Ok(())
+    }
+
+    async fn deactivate_turn(
+        &self,
+        thread_id: &str,
+        owner: &CodexRuntimeOwner,
+        completed_turn_id: Option<&str>,
+    ) {
+        let mut routes = self.inner.write().await;
+        let Some(route) = routes.get_mut(thread_id) else {
+            return;
+        };
+        if &route.owner == owner
+            && (completed_turn_id.is_none() || route.active_turn_id.as_deref() == completed_turn_id)
+        {
+            route.active_turn_id = None;
+        }
+    }
+
+    async fn active_turn(&self, thread_id: &str, owner: &CodexRuntimeOwner) -> Option<String> {
+        self.inner
+            .read()
+            .await
+            .get(thread_id)
+            .filter(|route| &route.owner == owner)
+            .and_then(|route| route.active_turn_id.clone())
+    }
+
+    async fn unbind_thread(&self, thread_id: &str, owner: &CodexRuntimeOwner) {
+        let mut routes = self.inner.write().await;
+        if routes.get(thread_id).map(|route| &route.owner) == Some(owner) {
+            routes.remove(thread_id);
+        }
+    }
+
+    async fn owners(&self) -> HashSet<CodexRuntimeOwner> {
+        self.inner
+            .read()
+            .await
+            .values()
+            .map(|route| route.owner.clone())
+            .collect()
+    }
+
+    async fn is_empty(&self) -> bool {
+        self.inner.read().await.is_empty()
+    }
+
+    async fn ingress_route(
+        &self,
+        message: &Value,
+    ) -> (CodexIngressDisposition, Option<CodexRuntimeOwner>) {
+        let routes = self.inner.read().await;
+        let disposition = codex_ingress_disposition(message, &routes);
+        if disposition != CodexIngressDisposition::Forward {
+            return (disposition, None);
+        }
+        let thread_id = message
+            .pointer("/params/threadId")
+            .and_then(Value::as_str)
+            .or_else(|| message.pointer("/params/thread/id").and_then(Value::as_str));
+        let turn_id = message
+            .pointer("/params/turnId")
+            .and_then(Value::as_str)
+            .or_else(|| message.pointer("/params/turn/id").and_then(Value::as_str));
+        let owner = thread_id
+            .and_then(|thread_id| routes.get(thread_id))
+            .and_then(|route| route.owner_for_message(turn_id));
+        (disposition, owner)
+    }
+}
+
+fn codex_ingress_disposition(
+    message: &Value,
+    routes: &HashMap<String, CodexThreadRoute>,
+) -> CodexIngressDisposition {
+    if message.get("id").is_some() {
+        return CodexIngressDisposition::Forward;
+    }
+    match message.get("method").and_then(Value::as_str) {
+        Some("command/exec/outputDelta") => CodexIngressDisposition::DropRejectedDelta,
+        Some("item/commandExecution/outputDelta") => {
+            let Some(thread_id) = message.pointer("/params/threadId").and_then(Value::as_str)
+            else {
+                return CodexIngressDisposition::DropRejectedDelta;
+            };
+            let Some(turn_id) = message.pointer("/params/turnId").and_then(Value::as_str) else {
+                return CodexIngressDisposition::DropRejectedDelta;
+            };
+            if !message
+                .pointer("/params/itemId")
+                .and_then(Value::as_str)
+                .is_some_and(|item_id| !item_id.trim().is_empty())
+            {
+                return CodexIngressDisposition::DropRejectedDelta;
+            }
+            if routes
+                .get(thread_id)
+                .is_some_and(|route| route.active_turn_id.as_deref() == Some(turn_id))
+            {
+                CodexIngressDisposition::DropCurrentDelta
+            } else {
+                CodexIngressDisposition::DropRejectedDelta
+            }
+        }
+        _ => CodexIngressDisposition::Forward,
+    }
+}
+
+async fn route_codex_stdout_ingress(
+    host_instance_id: &str,
+    routes: &CodexThreadRoutes,
+    incoming: &mpsc::UnboundedSender<CodexIncoming>,
+    message: Value,
+) -> (CodexIngressDisposition, Option<Value>) {
+    let request_id = message.get("id").cloned();
+    let (disposition, owner) = routes.ingress_route(&message).await;
+    match disposition {
+        CodexIngressDisposition::DropCurrentDelta | CodexIngressDisposition::DropRejectedDelta => {
+            (disposition, None)
+        }
+        CodexIngressDisposition::Forward => {
+            if let Some(owner) = owner {
+                let _ = incoming.send(owner.message(host_instance_id, message));
+                (disposition, None)
+            } else {
+                (disposition, request_id)
+            }
         }
     }
 }
@@ -201,7 +383,7 @@ impl CodexHost {
             stdin: Mutex::new(stdin),
             pending: Mutex::new(HashMap::new()),
             next_id: AtomicU64::new(1),
-            routes: RwLock::new(HashMap::new()),
+            routes: CodexThreadRoutes::default(),
             incoming,
             alive: AtomicBool::new(true),
             executable_path: codex_path.to_path_buf(),
@@ -286,29 +468,19 @@ impl CodexHost {
                             }
                             continue;
                         }
-                        let thread_id = message
-                            .pointer("/params/threadId")
-                            .and_then(Value::as_str)
-                            .or_else(|| {
-                                message.pointer("/params/thread/id").and_then(Value::as_str)
-                            });
-                        let route = if let Some(thread_id) = thread_id {
-                            host.routes.read().await.get(thread_id).cloned()
-                        } else {
-                            None
-                        };
-                        let message_turn_id = message
-                            .pointer("/params/turnId")
-                            .and_then(Value::as_str)
-                            .or_else(|| message.pointer("/params/turn/id").and_then(Value::as_str));
-                        let owner =
-                            route.and_then(|route| route.owner_for_message(message_turn_id));
-                        if let Some(owner) = owner {
-                            let _ = host
-                                .incoming
-                                .send(owner.message(&host.host_instance_id, message));
-                        } else if message.get("id").is_some() {
-                            let id = message.get("id").cloned().unwrap_or(Value::Null);
+                        let (disposition, unrouted_request_id) = route_codex_stdout_ingress(
+                            &host.host_instance_id,
+                            &host.routes,
+                            &host.incoming,
+                            message,
+                        )
+                        .await;
+                        match disposition {
+                            CodexIngressDisposition::DropCurrentDelta
+                            | CodexIngressDisposition::DropRejectedDelta => continue,
+                            CodexIngressDisposition::Forward => {}
+                        }
+                        if let Some(id) = unrouted_request_id {
                             let _ = host
                                 .send(json!({
                                     "id": id,
@@ -354,20 +526,7 @@ impl CodexHost {
     }
 
     async fn bind_thread(&self, thread_id: &str, owner: &CodexRuntimeOwner) -> Result<()> {
-        let mut routes = self.routes.write().await;
-        if let Some(existing) = routes.get(thread_id)
-            && &existing.owner != owner
-        {
-            bail!("Codex Native Thread is already bound to another logical runtime");
-        }
-        routes.insert(
-            thread_id.to_string(),
-            CodexThreadRoute {
-                owner: owner.clone(),
-                active_turn_id: None,
-            },
-        );
-        Ok(())
+        self.routes.bind_thread(thread_id, owner).await
     }
 
     async fn activate_turn(
@@ -376,20 +535,7 @@ impl CodexHost {
         owner: &CodexRuntimeOwner,
         turn_id: &str,
     ) -> Result<()> {
-        let mut routes = self.routes.write().await;
-        let route = routes
-            .get_mut(thread_id)
-            .context("Codex Native Thread has no logical runtime binding")?;
-        if &route.owner != owner
-            || route
-                .active_turn_id
-                .as_deref()
-                .is_some_and(|active| active != turn_id)
-        {
-            bail!("Codex Native Turn failed Host/Thread/Run fencing");
-        }
-        route.active_turn_id = Some(turn_id.to_string());
-        Ok(())
+        self.routes.activate_turn(thread_id, owner, turn_id).await
     }
 
     async fn deactivate_turn(
@@ -398,40 +544,21 @@ impl CodexHost {
         owner: &CodexRuntimeOwner,
         completed_turn_id: Option<&str>,
     ) {
-        let mut routes = self.routes.write().await;
-        let Some(route) = routes.get_mut(thread_id) else {
-            return;
-        };
-        if &route.owner == owner
-            && (completed_turn_id.is_none() || route.active_turn_id.as_deref() == completed_turn_id)
-        {
-            route.active_turn_id = None;
-        }
+        self.routes
+            .deactivate_turn(thread_id, owner, completed_turn_id)
+            .await;
     }
 
     async fn active_turn(&self, thread_id: &str, owner: &CodexRuntimeOwner) -> Option<String> {
-        self.routes
-            .read()
-            .await
-            .get(thread_id)
-            .filter(|route| &route.owner == owner)
-            .and_then(|route| route.active_turn_id.clone())
+        self.routes.active_turn(thread_id, owner).await
     }
 
     async fn unbind_thread(&self, thread_id: &str, owner: &CodexRuntimeOwner) {
-        let mut routes = self.routes.write().await;
-        if routes.get(thread_id).map(|route| &route.owner) == Some(owner) {
-            routes.remove(thread_id);
-        }
+        self.routes.unbind_thread(thread_id, owner).await;
     }
 
     async fn owners(&self) -> HashSet<CodexRuntimeOwner> {
-        self.routes
-            .read()
-            .await
-            .values()
-            .map(|route| route.owner.clone())
-            .collect()
+        self.routes.owners().await
     }
 
     async fn broadcast_stderr(&self, text: String) {
@@ -467,9 +594,7 @@ impl CodexHost {
     }
 
     pub(crate) async fn is_quiescent(&self) -> bool {
-        self.is_alive()
-            && self.pending.lock().await.is_empty()
-            && self.routes.read().await.is_empty()
+        self.is_alive() && self.pending.lock().await.is_empty() && self.routes.is_empty().await
     }
 
     pub(crate) async fn shutdown_and_reap(&self) {
@@ -844,13 +969,15 @@ impl CodexRuntime {
                     self.streamed_agent_text.lock().await.push_str(delta);
                 }
             }
-            "item/completed"
-                if params.pointer("/item/type").and_then(Value::as_str) == Some("agentMessage") =>
-            {
-                if let Some(text) = params.pointer("/item/text").and_then(Value::as_str)
-                    && !text.trim().is_empty()
-                {
-                    *self.completed_agent_message.write().await = Some(text.to_string());
+            "item/completed" => {
+                if params.pointer("/item/type").and_then(Value::as_str) == Some("agentMessage") {
+                    if let Some(text) = params.pointer("/item/text").and_then(Value::as_str)
+                        && !text.trim().is_empty()
+                    {
+                        *self.completed_agent_message.write().await = Some(text.to_string());
+                    }
+                } else if let Some(item_id) = params.pointer("/item/id").and_then(Value::as_str) {
+                    self.action_items.lock().await.remove(item_id);
                 }
             }
             _ => {}
@@ -859,6 +986,22 @@ impl CodexRuntime {
 
     pub async fn action_item(&self, item_id: &str) -> Option<Value> {
         self.action_items.lock().await.get(item_id).cloned()
+    }
+
+    pub async fn open_action_items(&self) -> Vec<Value> {
+        let mut items = self
+            .action_items
+            .lock()
+            .await
+            .values()
+            .cloned()
+            .collect::<Vec<_>>();
+        items.sort_by(|left, right| {
+            left.get("id")
+                .and_then(Value::as_str)
+                .cmp(&right.get("id").and_then(Value::as_str))
+        });
+        items
     }
 
     pub async fn final_agent_message(&self) -> Option<String> {
@@ -2356,22 +2499,170 @@ while IFS= read -r ignored; do :; done
         assert!(result.is_err());
     }
 
-    #[test]
-    fn shared_host_route_rejects_events_from_an_old_native_turn() {
-        let route = CodexThreadRoute {
-            owner: CodexRuntimeOwner::AgentRun {
-                agent_run_id: "run-current".to_string(),
-                execution_epoch: 4,
-            },
-            active_turn_id: Some("turn-current".to_string()),
+    #[tokio::test]
+    async fn stdout_ingress_drops_command_output_flood_and_preserves_terminal_events() {
+        let owner = CodexRuntimeOwner::AgentRun {
+            agent_run_id: "run-current".to_string(),
+            execution_epoch: 4,
         };
-        assert!(route.owner_for_message(Some("turn-old")).is_none());
+        let routes = CodexThreadRoutes::default();
+        routes.bind_thread("thread-current", &owner).await.unwrap();
+        routes
+            .activate_turn("thread-current", &owner, "turn-current")
+            .await
+            .unwrap();
+        let (incoming, mut receiver) = mpsc::unbounded_channel();
+        let output_delta = json!({
+            "method": "item/commandExecution/outputDelta",
+            "params": {
+                "threadId": "thread-current",
+                "turnId": "turn-current",
+                "itemId": "command-1",
+                "delta": "line one\n",
+            }
+        });
+
+        for _ in 0..100_000 {
+            let (disposition, unrouted_request_id) = route_codex_stdout_ingress(
+                "host-current",
+                &routes,
+                &incoming,
+                output_delta.clone(),
+            )
+            .await;
+            assert_eq!(disposition, CodexIngressDisposition::DropCurrentDelta);
+            assert!(unrouted_request_id.is_none());
+        }
         assert!(matches!(
-            route.owner_for_message(Some("turn-current")),
-            Some(CodexRuntimeOwner::AgentRun {
-                ref agent_run_id,
-                execution_epoch: 4,
-            }) if agent_run_id == "run-current"
+            receiver.try_recv(),
+            Err(mpsc::error::TryRecvError::Empty)
+        ));
+
+        let item_completed = json!({
+            "method": "item/completed",
+            "params": {
+                "threadId": "thread-current",
+                "turnId": "turn-current",
+                "item": {
+                    "id": "command-1",
+                    "type": "commandExecution",
+                    "command": "cargo test",
+                    "status": "completed",
+                    "exitCode": 0,
+                    "aggregatedOutput": "terminal output",
+                }
+            }
+        });
+        let turn_completed = json!({
+            "method": "turn/completed",
+            "params": {
+                "threadId": "thread-current",
+                "turn": {"id": "turn-current", "status": "completed"}
+            }
+        });
+        for message in [item_completed, turn_completed] {
+            let (disposition, unrouted_request_id) =
+                route_codex_stdout_ingress("host-current", &routes, &incoming, message).await;
+            assert_eq!(disposition, CodexIngressDisposition::Forward);
+            assert!(unrouted_request_id.is_none());
+        }
+        let CodexIncoming::Message {
+            agent_run_id,
+            execution_epoch,
+            message,
+            ..
+        } = receiver.try_recv().unwrap()
+        else {
+            panic!("item/completed must remain a semantic Message");
+        };
+        assert_eq!(agent_run_id, "run-current");
+        assert_eq!(execution_epoch, 4);
+        assert_eq!(message["method"], "item/completed");
+        assert_eq!(
+            message["params"]["item"]["aggregatedOutput"],
+            "terminal output"
+        );
+        let CodexIncoming::Message { message, .. } = receiver.try_recv().unwrap() else {
+            panic!("turn/completed must remain a terminal Message");
+        };
+        assert_eq!(message["method"], "turn/completed");
+        assert!(matches!(
+            receiver.try_recv(),
+            Err(mpsc::error::TryRecvError::Empty)
+        ));
+
+        let old_turn_delta = json!({
+            "method": "item/commandExecution/outputDelta",
+            "params": {
+                "threadId": "thread-current",
+                "turnId": "turn-old",
+                "itemId": "command-1",
+                "delta": "late",
+            }
+        });
+        let rejected_deltas = [
+            old_turn_delta,
+            json!({
+                "method": "item/commandExecution/outputDelta",
+                "params": {"turnId": "turn-current", "itemId": "command-1", "delta": "late"}
+            }),
+            json!({
+                "method": "item/commandExecution/outputDelta",
+                "params": {"threadId": "thread-current", "itemId": "command-1", "delta": "late"}
+            }),
+            json!({
+                "method": "item/commandExecution/outputDelta",
+                "params": {"threadId": "thread-current", "turnId": "turn-current", "delta": "late"}
+            }),
+            json!({
+                "method": "item/commandExecution/outputDelta",
+                "params": {"threadId": "thread-current", "turnId": "turn-current", "itemId": "  ", "delta": "late"}
+            }),
+            json!({
+                "method": "command/exec/outputDelta",
+                "params": {"itemId": "command-1", "delta": "legacy"}
+            }),
+        ];
+        for message in rejected_deltas {
+            let (disposition, unrouted_request_id) =
+                route_codex_stdout_ingress("host-current", &routes, &incoming, message).await;
+            assert_eq!(disposition, CodexIngressDisposition::DropRejectedDelta);
+            assert!(unrouted_request_id.is_none());
+        }
+        assert!(matches!(
+            receiver.try_recv(),
+            Err(mpsc::error::TryRecvError::Empty)
+        ));
+
+        let mut server_request = output_delta.clone();
+        server_request["id"] = json!(91);
+        let (disposition, unrouted_request_id) =
+            route_codex_stdout_ingress("host-current", &routes, &incoming, server_request).await;
+        assert_eq!(disposition, CodexIngressDisposition::Forward);
+        assert!(unrouted_request_id.is_none());
+        let CodexIncoming::Message { message, .. } = receiver.try_recv().unwrap() else {
+            panic!("an id-bearing outputDelta method must reach request routing");
+        };
+        assert_eq!(message["id"], 91);
+
+        routes
+            .deactivate_turn("thread-current", &owner, Some("turn-current"))
+            .await;
+        let (disposition, _) =
+            route_codex_stdout_ingress("host-current", &routes, &incoming, output_delta.clone())
+                .await;
+        assert_eq!(disposition, CodexIngressDisposition::DropRejectedDelta);
+        routes
+            .activate_turn("thread-current", &owner, "turn-current")
+            .await
+            .unwrap();
+        routes.unbind_thread("thread-current", &owner).await;
+        let (disposition, _) =
+            route_codex_stdout_ingress("host-current", &routes, &incoming, output_delta).await;
+        assert_eq!(disposition, CodexIngressDisposition::DropRejectedDelta);
+        assert!(matches!(
+            receiver.try_recv(),
+            Err(mpsc::error::TryRecvError::Empty)
         ));
     }
 
@@ -2511,30 +2802,47 @@ while IFS= read -r ignored; do :; done
 
     #[test]
     fn completed_command_is_normalized_without_persisting_raw_output() {
-        let completed = completed_intercepted_action(
-            &json!({
-                "threadId": "thread-1",
-                "turnId": "turn-1",
-                "item": {
-                    "id": "item-1",
-                    "type": "commandExecution",
-                    "status": "completed",
-                    "exitCode": 0,
-                    "durationMs": 42,
-                    "aggregatedOutput": "secret output"
-                }
-            }),
-            "thread-1",
-            "turn-1",
-        )
-        .expect("valid completion should normalize")
-        .expect("command is an intercepted Action type");
+        let terminal_params = json!({
+            "threadId": "thread-1",
+            "turnId": "turn-1",
+            "item": {
+                "id": "item-1",
+                "type": "commandExecution",
+                "status": "completed",
+                "exitCode": 0,
+                "durationMs": 42,
+                "aggregatedOutput": "secret output"
+            }
+        });
+        let completed = completed_intercepted_action(&terminal_params, "thread-1", "turn-1")
+            .expect("valid completion should normalize")
+            .expect("command is an intercepted Action type");
         assert_eq!(completed.native_item_id, "item-1");
         assert!(matches!(completed.outcome, ActionResultOutcome::Succeeded));
         assert_eq!(completed.effect_disposition, "complete");
         assert_eq!(completed.result_data["exitCode"], 0);
         assert!(completed.result_data["outputDigest"].is_string());
         assert!(!completed.result_data.to_string().contains("secret output"));
+
+        let (delta_event_type, _) = normalize_event(
+            "item/commandExecution/outputDelta",
+            &json!({
+                "threadId": "thread-1",
+                "turnId": "turn-1",
+                "itemId": "item-1",
+                "delta": "secret",
+            }),
+        );
+        assert_eq!(delta_event_type, "command.output.delta");
+        let (terminal_event_type, terminal_payload) =
+            normalize_event("item/completed", &terminal_params);
+        assert_eq!(terminal_event_type, "activity.completed");
+        assert_eq!(terminal_payload["item"]["status"], "completed");
+        assert_eq!(terminal_payload["item"]["exitCode"], 0);
+        assert_eq!(
+            terminal_payload["item"]["aggregatedOutput"],
+            "secret output"
+        );
     }
 
     #[test]

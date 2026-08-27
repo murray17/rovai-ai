@@ -304,6 +304,7 @@ export interface MemberRemovalPreview {
   currentCampMembershipCount: number
   openAssignedTaskCount: number
   defaultLeadCampCount: number
+  soleMemberCampCount: number
   removable: boolean
 }
 
@@ -344,6 +345,21 @@ export interface CommandHealth {
 
 export type RuntimeDiscoveryStatus = 'detecting' | 'found' | 'missing'
 
+export type RuntimeSearchPathSource =
+  | 'inherited_path'
+  | 'user_registry_path'
+  | 'machine_registry_path'
+  | 'login_shell'
+  | 'known_location'
+
+export type RuntimeDiscoveryEntrypointKind =
+  | 'native_executable'
+  | 'npm_cmd_shim'
+  | 'pnpm_cmd_shim'
+  | 'windows_command_shim'
+
+export type RuntimeCandidateExtension = 'native' | 'exe' | 'cmd' | 'bat'
+
 export interface RuntimeDiscoveryObservation {
   runtimeKind: AdapterKind
   discoveryStatus: RuntimeDiscoveryStatus
@@ -351,6 +367,11 @@ export interface RuntimeDiscoveryObservation {
   source: Exclude<InstallationSource, 'custom'> | null
   reportedVersion: string | null
   executableFingerprint: string | null
+  searchPathSource: RuntimeSearchPathSource | null
+  entrypointKind: RuntimeDiscoveryEntrypointKind | null
+  candidateExtension: RuntimeCandidateExtension | null
+  resolvedNativeTarget: boolean
+  versionProbeSucceeded: boolean | null
   searchGeneration: number
   observedAt: string
   diagnosticCode: string | null
@@ -837,6 +858,51 @@ export interface CampMemberView {
   version: number
 }
 
+export interface CampMembershipReconciliationView {
+  id: string
+  agentId: string
+  membershipVersion: number
+  status: 'reconciling'
+  reasonCode: string
+  targetRunCount: number
+  settledRunCount: number
+  createdAt: string
+  updatedAt: string
+}
+
+export interface AddCampMemberCommand {
+  campId: string
+  agentId: string
+  expectedMembershipGeneration: number
+  capabilityOverrides?: Record<string, unknown>
+}
+
+export interface RemoveCampMemberCommand {
+  campId: string
+  agentId: string
+  expectedMembershipGeneration: number
+  expectedMembershipVersion: number
+  replacementDefaultLeadAgentId?: string | null
+  reason?: string | null
+}
+
+export interface CampMemberRemovalPreview {
+  campId: string
+  agentId: string
+  displayName: string
+  membershipGeneration: number
+  membershipVersion: number
+  isDefaultLead: boolean
+  nextDefaultLeadAgentId: string | null
+  nonTerminalAgentRunCount: number
+  openAssignedTaskCount: number
+  pendingDeliveryCount: number
+  runningDeliveryCount: number
+  openGatherItemCount: number
+  removable: boolean
+  blockerCode: 'camp.member_not_active' | 'camp.last_member_required' | null
+}
+
 export interface TaskView {
   taskId: string
   campId: string
@@ -1105,6 +1171,7 @@ export interface AgentRunView {
     | 'planned_shutdown_completed'
     | 'planned_shutdown_failed'
     | 'planned_shutdown_cancelled'
+    | 'runtime_interrupted'
     | null
   failure: RuntimeFailureView | null
   runtimeModel: { modelId: string | null } | null
@@ -1511,11 +1578,13 @@ export interface CampSnapshot {
     projectBindingKind: ProjectBindingKind
     projectPath: string
     defaultLeadAgentId: string | null
+    membershipGeneration: number
     version: number
     createdAt: string
     updatedAt: string
   }
   members: CampMemberView[]
+  membershipReconciliations: CampMembershipReconciliationView[]
   tasks: TaskView[]
   messages: CampMessageView[]
   messageDeliveries: MessageDeliveryView[]
@@ -1547,6 +1616,7 @@ export interface CampOpenProjection {
   throughGlobalSequence: number
   camp: CampSnapshot['camp']
   members: CampMemberView[]
+  membershipReconciliations: CampMembershipReconciliationView[]
   tasks: TaskView[]
   messages: CampMessageView[]
   messageDeliveries: MessageDeliveryView[]
@@ -1623,6 +1693,7 @@ interface MessageDeliveryBaseView {
   campTurnId: string
   taskId: string | null
   recipientAgentId: string
+  recipientMembershipVersionAtAdmission: number | null
   status: 'pending' | 'running' | 'settled' | 'failed' | 'cancelled' | 'interrupted_before_dispatch' | string
   dispatchPhase: 'never_attempted' | 'attempting' | 'attempted_waiting' | 'materialized' | 'terminal' | string
   waitCondition: 'target_busy' | 'runtime_unavailable' | 'capacity_unavailable' | null
@@ -1841,6 +1912,7 @@ export interface AppearanceApi {
 export type AppUpdateStatus =
   | 'idle'
   | 'checking'
+  | 'available'
   | 'up_to_date'
   | 'downloading'
   | 'ready_to_install'
@@ -1856,22 +1928,41 @@ export type AppUpdateFailureReason =
   | 'download_failed'
   | 'install_failed'
 
+export type AppUpdateCheckSource = 'startup' | 'interval' | 'manual'
+
+export interface AppUpdateRelease {
+  version: string
+  releaseName: string | null
+  releaseDate: string | null
+  releaseNotes: string | null
+}
+
+export interface AppUpdatePrompt {
+  id: string
+  version: string
+}
+
 export interface AppUpdateSnapshot {
   currentVersion: string
   status: AppUpdateStatus
-  latestVersion: string | null
+  availableRelease: AppUpdateRelease | null
+  lastCheckSource: AppUpdateCheckSource | null
   checkedAt: string | null
+  lastSuccessfulCheckAt: string | null
   downloadPercent: number | null
   transferredBytes: number | null
   totalBytes: number | null
   bytesPerSecond: number | null
   failureReason: AppUpdateFailureReason | null
+  pendingPrompt: AppUpdatePrompt | null
 }
 
 export interface AppUpdatesApi {
   get(): Promise<AppUpdateSnapshot>
   check(): Promise<AppUpdateSnapshot>
+  download(): Promise<AppUpdateSnapshot>
   install(): Promise<boolean>
+  dismissPrompt(promptId: string): Promise<boolean>
   onChanged(listener: (snapshot: AppUpdateSnapshot) => void): () => void
 }
 
@@ -2579,6 +2670,9 @@ export type CoreMethod =
   | 'camps.create'
   | 'camps.discardPending'
   | 'camps.rename'
+  | 'camps.members.add'
+  | 'camps.members.removalPreview'
+  | 'camps.members.remove'
   | 'camps.changeDefaultLead'
   | 'camps.reconcileDefaultLead'
   | 'camps.exists'

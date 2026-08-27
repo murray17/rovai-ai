@@ -10,6 +10,7 @@ import {
   skillQueryAfterNativeTextInput,
   skillQueryAfterTypedText,
   shouldHandleStructuredComposerBackspaceAtStart,
+  shouldReconcileStructuredComposerComposition,
   shouldSubmitStructuredComposerOnEnter,
   structuredMentionOptions,
   structuredSkillOptions
@@ -51,7 +52,24 @@ describe('StructuredMentionComposer', () => {
       onSubmit: () => undefined
     }))
 
+    expect(markup).toContain('data-editor-segment="text" data-editor-empty="true"')
+    expect(markup).toContain('<br data-editor-empty-break="true"/>')
     expect(markup).toContain('</div><span class="structured-mention-placeholder"')
+  })
+
+  it('renders model newlines as native line boxes with a trailing caret host', () => {
+    const markup = renderToStaticMarkup(createElement(StructuredMentionComposer, {
+      id: 'multiline-composer',
+      value: [{ kind: 'text', text: '前\n后\n' }],
+      members,
+      ariaLabel: '写消息',
+      onChange: () => undefined,
+      onSubmit: () => undefined
+    }))
+
+    expect(markup).toContain(
+      '前<br data-editor-line-break="true"/>后<br data-editor-line-break="true"/><span data-editor-caret-host="true">\u200B</span>'
+    )
   })
 
   it('renders repeated member occurrences and one all-members occurrence as atomic tokens', () => {
@@ -255,6 +273,33 @@ describe('StructuredMentionComposer', () => {
       isComposing: false,
       suggestionMenuOpen: false
     })).toBe(true)
+  })
+
+  it('reconciles only the composition generation that still owns the same idle editor', () => {
+    expect(shouldReconcileStructuredComposerComposition({
+      scheduledGeneration: 3,
+      currentGeneration: 3,
+      isComposing: false,
+      sameEditor: true
+    })).toBe(true)
+    expect(shouldReconcileStructuredComposerComposition({
+      scheduledGeneration: 3,
+      currentGeneration: 4,
+      isComposing: false,
+      sameEditor: true
+    })).toBe(false)
+    expect(shouldReconcileStructuredComposerComposition({
+      scheduledGeneration: 3,
+      currentGeneration: 3,
+      isComposing: true,
+      sameEditor: true
+    })).toBe(false)
+    expect(shouldReconcileStructuredComposerComposition({
+      scheduledGeneration: 3,
+      currentGeneration: 3,
+      isComposing: false,
+      sameEditor: false
+    })).toBe(false)
   })
 
   it('allows Enter to submit ordinary @ text when there is no selectable candidate', () => {

@@ -32,6 +32,7 @@ pub mod execution_budget;
 pub mod execution_evidence;
 pub mod gather;
 pub mod git;
+pub mod managed_attachment;
 pub mod managed_blob;
 pub mod managed_process;
 pub mod mcp;
@@ -54,6 +55,8 @@ pub mod runtime_activity_mapping;
 pub mod runtime_basis;
 pub mod runtime_diff;
 pub mod runtime_discovery;
+#[cfg(windows)]
+mod runtime_discovery_windows;
 pub mod runtime_failure;
 pub mod runtime_platform_admission;
 pub mod runtime_probe_process;
@@ -62,6 +65,8 @@ pub mod skill;
 pub mod skill_projection;
 pub mod team_tool;
 pub mod team_tool_catalog;
+#[cfg(windows)]
+mod windows_runtime_entrypoint;
 pub mod workspace_change;
 
 mod runtime_pricing;

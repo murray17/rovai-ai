@@ -3,7 +3,7 @@ document_type: implementation-plan
 version: v1.28
 authority: implementation-and-acceptance-status
 status: in_progress
-last_updated: 2026-08-25
+last_updated: 2026-08-26
 ---
 
 # v1.28 实施计划
@@ -52,10 +52,56 @@ Checklist 仍拥有完整通用步骤，本页只记录本版本的具体状态�
   volume UUID，schema-1 marker 在已准入私有实例根内原子 rekey，旧物理 receipt 由受控 rebuild 收敛；
 - [x] 以历史 `message_attachment` 保留但 Authority 目录缺失的真实输入修复 startup 全局退出；只有已完整
   rollback、`integrity_failed` 且没有 active/nonterminal operation 的 Camp-local rebuild failure 可被隔离，
-  受影响 Camp 继续拒绝 Runtime，其他 Camp 与 Core 正常启动；
+  先按 D08 让受影响 Camp 拒绝 Runtime、其他 Camp 与 Core 正常启动；该临时边界随后由下方 D10 附件局部降级取代；
 - [x] 修复零附件 Camp 在 root rekey 后的空集 controlled rebuild：只为 controlled rebuild 接受零 Entry completion，
   同一 View 提交写回当前 root identity、空 catalog receipt 并推进 physical generation；
+- [x] 把已成功 resolved 附件的后置 Authority/digest 故障收窄为附件局部 `recovery_required`：startup 与
+  pre-dispatch reconciliation 省略异常项、重建健康 catalog 并保持 Camp `ready`；新 Context 不投影 stale path，
+  exact Authority 恢复后自动复活，unresolved writer intent 与 root/containment 安全错误继续 fail closed；
+- [x] 把同一 Run 内最大连续 Tool 收成 Renderer-only 摘要，保留 chronology 与 identity，活动态显示最后一条
+  非终态操作且不同时追加累计数，尾组间隙继续显示最近一条具体指令，终态不追加结果文字；组内有成功即使用绿色
+  状态、仅全部失败使用红色；精确 Tool 首次展开前不挂载完整结果，并覆盖失败、停止、仅记录、双主题、
+  Inspector 与换位性能；
+- [x] running Run 的尾 Tool 组在操作间隙保持活动摘要和稳定高度，直到 narration/plan/diagnostic 或 Run 状态
+  形成真实边界才收口；移除组后瞬时 Loading 往返，并让 16px 组图标与摘要文字共享中心线；
+- [x] 补齐 Windows Runtime rescan 的 HKCU/HKLM PATH hydration、Codex installer known location、
+  `.exe/.cmd/.bat` closed discovery、npm/pnpm native target resolution、受控 command-shim launch/identity、
+  resolved locator evidence 持久化与 snapshot/Host fencing、PATH 传播、Job cleanup 与 Windows 回归；`.ps1`
+  保持关闭；
 - [x] 运行 Impeccable detector，整理 worktree 交接，并通过 PR 交付 `main`。
+
+## Command output 持久化优化
+
+- [x] 逐项核验 13 个 Adapter：仅 Codex 产生 `command.output.delta`；十个 ACP Adapter、Claude Code 与
+  Antigravity 都已有完整 terminal semantic output，当前无需 spool；
+- [x] 对未来 Codex delta 在 Host stdout ingress 完成三态 method/route 分类并直接丢弃：精确当前 route 与
+  stale/malformed/legacy 都不构造 `CodexIncoming`；下游漏网 guard 早于 shutdown route permit、batching、
+  Runtime lookup 与数据库读取，停止 Evidence、Canonical、Managed Blob 与 Renderer live-state 写入；历史
+  Evidence/Blob 保持原样；
+- [x] 保留 terminal Command 的 command/status/exitCode/aggregatedOutput，大输出继续进入精确 Tool 的 Managed Blob；
+- [x] 将 Runtime interruption 投影为 terminal/unsettled + `runtime_interrupted`，Renderer 显示
+  stopped/interrupted，不伪造 cancelled；
+- [x] 覆盖真实 Host ingress 连续 100,000 delta 零 `CodexIncoming`、零 DB/Renderer 项，current/old/deactivate/
+  unbind/malformed/legacy 分类、带 `id` request 保留、flood 后 terminal 顺序、terminal aggregate/blob、interruption
+  与 PR #63 Tool chronology/grouping/lazy disclosure 回归。
+
+## Desktop 主动更新
+
+- [x] 以独立 worktree 实现 Main-owned App Update v1 snapshot：`availableRelease`、检查来源/时间、内存
+  prompt 代次和 exact dismiss；updater 初始化失败只降级，不阻断启动；
+- [x] 首个窗口加载 5 秒后检查，并从每轮完成安排下一次 6 小时检查；手动/自动参与者合并，自动参与
+  不丢提示语义，退出取消 timer；
+- [x] 设置 `autoDownload=false`，增加显式下载 IPC、download mutex、progress、event/reject 单结算和直接
+  重试；`ready_to_install` 只有用户确认才安装；
+- [x] 抽取幂等 Main quit coordinator，按 updater-first → native `before-quit` → 唯一 Core drain →
+  `app.exit(0)` 收口；同步安装失败保留 App/Core；
+- [x] 增加不抢焦点的右下角更新提醒、普通设置旁独立状态徽标、About 行徽标和全状态 About 页面；
+  深链遵守成员草稿 guard，不覆盖 `lastSettingsSection`，确认同版本日志渲染后才 dismiss；
+- [x] 使用 SafeMarkdown 展示有界更新日志，覆盖空/长/不可信内容；fallback 只在 updater unavailable 或
+  download failure 出现；
+- [x] 完成 Main 并发/失败、退出协调、Renderer 页面/徽标矩阵、类型检查、文档治理、Impeccable detector、
+  Day/Night 及 `1440×920` / `1040×700` / 200% 等效布局 packaged UI 验收；签名 macOS arm64/x64 与
+  Windows x64 的真实跨版本安装继续作为 Release qualification 边界。
 
 ## 验收原则
 

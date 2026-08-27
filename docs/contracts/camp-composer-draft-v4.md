@@ -27,5 +27,4 @@ paths for failed attachments. A failed item is not silently retried under the sa
 
 - [Camp Composer Draft v3](camp-composer-draft-v3.md)
 - [Camp Attachment v3](camp-attachment-v3.md)
-- [Camp Published Attachment View v3](camp-published-attachment-view-v3.md)
-
+- [Camp Published Attachment View v4](camp-published-attachment-view-v4.md)

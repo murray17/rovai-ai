@@ -68,11 +68,13 @@ function renderAgentMessage(
       projectBindingKind: 'quick_chat',
       projectPath: '/quick-chat',
       defaultLeadAgentId: 'agent_author',
+      membershipGeneration: 1,
       version: 1,
       createdAt: '2026-08-13T00:00:00Z',
       updatedAt: '2026-08-13T00:00:00Z'
     },
     members,
+    membershipReconciliations: [],
     tasks: [],
     messages: [message],
     messageDeliveries: [],

@@ -133,6 +133,7 @@ pub struct CampView {
     pub project_binding_kind: String,
     pub project_path: String,
     pub default_lead_agent_id: Option<String>,
+    pub membership_generation: i64,
     pub version: i64,
     pub created_at: String,
     pub updated_at: String,
@@ -152,6 +153,20 @@ pub struct CampMemberView {
     pub member_order: i64,
     pub is_default_lead: bool,
     pub version: i64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CampMembershipReconciliationView {
+    pub id: String,
+    pub agent_id: String,
+    pub membership_version: i64,
+    pub status: String,
+    pub reason_code: String,
+    pub target_run_count: i64,
+    pub settled_run_count: i64,
+    pub created_at: String,
+    pub updated_at: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -631,6 +646,7 @@ pub struct CampSnapshot {
     pub through_global_sequence: i64,
     pub camp: CampView,
     pub members: Vec<CampMemberView>,
+    pub membership_reconciliations: Vec<CampMembershipReconciliationView>,
     pub tasks: Vec<TaskView>,
     pub messages: Vec<CampMessageView>,
     pub message_deliveries: Vec<MessageDeliveryView>,
@@ -685,6 +701,7 @@ pub struct CampOpenProjection {
     pub through_global_sequence: i64,
     pub camp: CampView,
     pub members: Vec<CampMemberView>,
+    pub membership_reconciliations: Vec<CampMembershipReconciliationView>,
     pub tasks: Vec<TaskView>,
     pub messages: Vec<CampMessageView>,
     pub message_deliveries: Vec<MessageDeliveryView>,
@@ -750,6 +767,7 @@ pub struct MessageDeliveryView {
     pub camp_turn_id: String,
     pub task_id: Option<String>,
     pub recipient_agent_id: String,
+    pub recipient_membership_version_at_admission: Option<i64>,
     pub status: String,
     pub dispatch_phase: String,
     pub wait_condition: Option<String>,
@@ -960,6 +978,7 @@ impl ReadModelService {
         let through_global_sequence = current_global_sequence(&transaction)?;
         let camp = load_camp(&transaction, camp_id)?.context("Camp does not exist")?;
         let members = load_members(&transaction, camp_id, camp.default_lead_agent_id.as_deref())?;
+        let membership_reconciliations = load_membership_reconciliations(&transaction, camp_id)?;
         let tasks = load_tasks(&transaction, camp_id, None)?;
         let messages = load_messages(&transaction, camp_id, 1_000)?;
         let message_deliveries = load_message_deliveries(&transaction, camp_id, None)?;
@@ -991,6 +1010,7 @@ impl ReadModelService {
             through_global_sequence,
             camp,
             members,
+            membership_reconciliations,
             tasks,
             messages,
             message_deliveries,
@@ -1014,6 +1034,7 @@ impl ReadModelService {
         let through_global_sequence = current_global_sequence(&transaction)?;
         let camp = load_camp(&transaction, camp_id)?.context("Camp does not exist")?;
         let members = load_members(&transaction, camp_id, camp.default_lead_agent_id.as_deref())?;
+        let membership_reconciliations = load_membership_reconciliations(&transaction, camp_id)?;
         let counts = load_camp_open_counts(&transaction, camp_id)?;
         let tasks = load_tasks(&transaction, camp_id, Some(CAMP_OPEN_TASK_LIMIT))?;
         let messages = load_messages(&transaction, camp_id, CAMP_OPEN_MESSAGE_LIMIT)?;
@@ -1057,6 +1078,7 @@ impl ReadModelService {
             through_global_sequence,
             camp,
             members,
+            membership_reconciliations,
             tasks,
             messages,
             message_deliveries,
@@ -1872,7 +1894,7 @@ fn load_camp(transaction: &Transaction<'_>, camp_id: &str) -> Result<Option<Camp
         .query_row(
             r#"
             SELECT id, title, activation_state, project_binding_kind, project_path,
-                   default_lead_agent_id,
+                   default_lead_agent_id, membership_generation,
                    version, created_at, updated_at
             FROM camp WHERE id = ?1
             "#,
@@ -1885,9 +1907,10 @@ fn load_camp(transaction: &Transaction<'_>, camp_id: &str) -> Result<Option<Camp
                     project_binding_kind: row.get(3)?,
                     project_path: row.get(4)?,
                     default_lead_agent_id: row.get(5)?,
-                    version: row.get(6)?,
-                    created_at: row.get(7)?,
-                    updated_at: row.get(8)?,
+                    membership_generation: row.get(6)?,
+                    version: row.get(7)?,
+                    created_at: row.get(8)?,
+                    updated_at: row.get(9)?,
                 })
             },
         )
@@ -1932,6 +1955,37 @@ fn load_members(
         })?
         .collect::<rusqlite::Result<Vec<_>>>()
         .context("failed to load Camp members")
+}
+
+fn load_membership_reconciliations(
+    transaction: &Transaction<'_>,
+    camp_id: &str,
+) -> Result<Vec<CampMembershipReconciliationView>> {
+    let mut statement = transaction.prepare(
+        r#"
+        SELECT id, agent_id, membership_version, status, reason_code,
+               target_run_count, settled_run_count, created_at, updated_at
+        FROM camp_membership_reconciliation
+        WHERE camp_id = ?1 AND status = 'reconciling'
+        ORDER BY created_at, id
+        "#,
+    )?;
+    statement
+        .query_map([camp_id], |row| {
+            Ok(CampMembershipReconciliationView {
+                id: row.get(0)?,
+                agent_id: row.get(1)?,
+                membership_version: row.get(2)?,
+                status: row.get(3)?,
+                reason_code: row.get(4)?,
+                target_run_count: row.get(5)?,
+                settled_run_count: row.get(6)?,
+                created_at: row.get(7)?,
+                updated_at: row.get(8)?,
+            })
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .context("failed to load Camp membership reconciliations")
 }
 
 fn load_tasks(
@@ -2230,14 +2284,34 @@ fn hydrate_message_views(
             SELECT CAST(value AS TEXT) AS camp_message_id
             FROM json_each(?1)
         )
-        SELECT attachment.camp_message_id,
-               attachment.id, attachment.display_name, attachment.media_type,
-               attachment.byte_size, attachment.preview_kind, attachment.storage_path,
-               attachment.runtime_projection_state
-        FROM requested
-        JOIN message_attachment AS attachment
-          ON attachment.camp_message_id = requested.camp_message_id
-        ORDER BY attachment.camp_message_id, attachment.position, attachment.id
+        SELECT attachment.camp_message_id, attachment.id, attachment.display_name,
+               attachment.media_type, attachment.byte_size, attachment.preview_kind,
+               attachment.storage_path, attachment.runtime_projection_state,
+               attachment.kind, attachment.file_count, attachment.storage_model
+        FROM (
+            SELECT legacy.camp_message_id, legacy.id, legacy.display_name,
+                   legacy.media_type, legacy.byte_size, legacy.preview_kind,
+                   legacy.storage_path, legacy.runtime_projection_state,
+                   NULL AS kind, NULL AS file_count,
+                   'legacy_v1' AS storage_model, legacy.position AS ordinal
+            FROM requested
+            JOIN message_attachment AS legacy
+              ON legacy.camp_message_id = requested.camp_message_id
+            UNION ALL
+            SELECT reference.camp_message_id, managed.id,
+                   reference.display_name_snapshot, managed.media_type,
+                   managed.byte_size, managed.preview_kind,
+                   managed.root_relative_payload_path, managed.state,
+                   managed.kind, managed.file_count,
+                   'managed_v2', reference.ordinal
+            FROM requested
+            JOIN camp_message_attachment_ref AS reference
+              ON reference.camp_message_id = requested.camp_message_id
+            JOIN managed_attachment AS managed
+              ON managed.camp_id = reference.camp_id
+             AND managed.id = reference.attachment_id
+        ) AS attachment
+        ORDER BY attachment.camp_message_id, attachment.ordinal, attachment.id
         "#,
     )?;
     let attachment_rows = attachment_statement
@@ -2251,6 +2325,9 @@ fn hydrate_message_views(
                 row.get::<_, String>(5)?,
                 row.get::<_, String>(6)?,
                 row.get::<_, String>(7)?,
+                row.get::<_, Option<String>>(8)?,
+                row.get::<_, Option<i64>>(9)?,
+                row.get::<_, String>(10)?,
             ))
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
@@ -2264,9 +2341,20 @@ fn hydrate_message_views(
         preview_kind,
         storage_path,
         runtime_projection_state,
+        persisted_kind,
+        persisted_file_count,
+        storage_model,
     ) in attachment_rows
     {
-        let (kind, file_count) = if runtime_projection_state == "available" {
+        let (kind, file_count) = if storage_model == "managed_v2" {
+            (
+                persisted_kind.context("Managed Attachment has no persisted kind")?,
+                u64::try_from(
+                    persisted_file_count
+                        .context("Managed Attachment has no persisted file count")?,
+                )?,
+            )
+        } else if runtime_projection_state == "available" {
             let summary = managed_attachment_summary(Path::new(&storage_path), &media_type)?;
             (summary.kind, summary.file_count)
         } else if media_type == DIRECTORY_MEDIA_TYPE {
@@ -2530,7 +2618,8 @@ fn load_message_deliveries(
                gather_id, gather_dispatch_delivery_id,
                recipient_canonical_position, edge_kind,
                target_parent_agent_run_id, return_to_agent_run_id,
-               target_conversation_id
+               target_conversation_id,
+               recipient_membership_version_at_admission
         FROM message_delivery
         WHERE camp_id = ?1
         ORDER BY
@@ -2606,6 +2695,7 @@ fn load_message_deliveries(
                 camp_turn_id: row.get(2)?,
                 task_id: row.get(3)?,
                 recipient_agent_id: row.get(4)?,
+                recipient_membership_version_at_admission: row.get(28)?,
                 status: row.get(5)?,
                 dispatch_phase: row.get(6)?,
                 wait_condition: row.get(7)?,
@@ -4498,7 +4588,9 @@ mod slow_tests {
                     AddCampMemberCommand {
                         camp_id: camp_id.clone(),
                         agent_id: "agent_1".to_string(),
+                        expected_membership_generation: 1,
                         capability_overrides: json!({}),
+                        source: None,
                     },
                 ),
             )
@@ -4768,7 +4860,9 @@ mod slow_tests {
                     AddCampMemberCommand {
                         camp_id: camp_id.clone(),
                         agent_id: "agent_2".to_string(),
+                        expected_membership_generation: 1,
                         capability_overrides: json!({}),
+                        source: None,
                     },
                 ),
             )

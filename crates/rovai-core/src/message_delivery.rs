@@ -9,7 +9,7 @@ use uuid::Uuid;
 use crate::{
     agent_identity::parse_agent_id,
     agent_profile::resolve_frozen_runtime,
-    camp_attachment_publication::{AuthorityAttachment, CampAttachmentPublicationCoordinator},
+    camp_attachment_publication::AuthorityAttachment,
     camp_content::{
         StructuredCampMessageSegment, canonical_content_digest, normalize_content,
         render_current_plain_text,
@@ -34,6 +34,9 @@ use crate::{
         persist_gather_item, persist_gather_record, reopen_item_for_retry, resolve_gather_capture,
         settle_completion_for_agent_run, settle_item_from_agent_run_terminal,
         settle_item_from_delivery_terminal, validate_completion_retry,
+    },
+    managed_attachment::{
+        CommitManagedAttachmentIngest, ManagedAttachmentIngestSource, ManagedAttachmentService,
     },
     runtime::AgentRunWorkspace,
     runtime_basis::capture_run_runtime_basis,
@@ -113,7 +116,10 @@ impl MessageDeliveryService {
                 .query_row(
                     r#"
                     SELECT camp_id, status, version, retry_generation,
-                           delivery_kind, gather_id, failure_code
+                           delivery_kind, gather_id, failure_code,
+                           recipient_agent_id,
+                           recipient_membership_version_at_admission,
+                           source_agent_run_id
                     FROM message_delivery WHERE id = ?1
                     "#,
                     [&envelope.payload.delivery_id],
@@ -126,6 +132,9 @@ impl MessageDeliveryService {
                             row.get::<_, String>(4)?,
                             row.get::<_, Option<String>>(5)?,
                             row.get::<_, Option<String>>(6)?,
+                            row.get::<_, String>(7)?,
+                            row.get::<_, Option<i64>>(8)?,
+                            row.get::<_, String>(9)?,
                         ))
                     },
                 )
@@ -138,6 +147,9 @@ impl MessageDeliveryService {
                 delivery_kind,
                 gather_id,
                 failure_code,
+                recipient_agent_id,
+                recipient_membership_version_at_admission,
+                source_agent_run_id,
             )) = target
             else {
                 return Ok(rejected(
@@ -167,6 +179,29 @@ impl MessageDeliveryService {
                 return Ok(rejected(
                     "message_delivery.retry_not_allowed",
                     "The message attachment projection failed permanently",
+                ));
+            }
+            let membership_matches = match recipient_membership_version_at_admission {
+                Some(version) => recipient_membership_matches(
+                    transaction,
+                    &camp_id,
+                    &recipient_agent_id,
+                    version,
+                )?,
+                None => false,
+            };
+            if !membership_matches {
+                return Ok(rejected(
+                    "message_delivery.recipient_membership_changed",
+                    "The recipient membership changed after this Delivery was admitted",
+                ));
+            }
+            if delivery_requires_source_membership_fence(&delivery_kind, gather_id.as_deref())
+                && !source_run_membership_matches(transaction, &camp_id, &source_agent_run_id)?
+            {
+                return Ok(rejected(
+                    "message_delivery.source_membership_changed",
+                    "The source membership changed after this Delivery was admitted",
                 ));
             }
             if delivery_kind == "gather_completion"
@@ -299,79 +334,65 @@ impl MessageDeliveryService {
             let target = transaction
                 .query_row(
                     r#"
-                    SELECT camp_id, camp_turn_id, status, dispatch_phase, version,
-                           delivery_kind
+                    SELECT id, camp_id, camp_turn_id, status, dispatch_phase,
+                           dispatch_attempt_count, active_dispatch_attempt_id,
+                           version, delivery_kind
                     FROM message_delivery WHERE id = ?1
                     "#,
                     [&envelope.payload.delivery_id],
                     |row| {
-                        Ok((
-                            row.get::<_, String>(0)?,
-                            row.get::<_, String>(1)?,
-                            row.get::<_, String>(2)?,
-                            row.get::<_, String>(3)?,
-                            row.get::<_, i64>(4)?,
-                            row.get::<_, String>(5)?,
-                        ))
+                        Ok(DeliveryCancellationTarget {
+                            id: row.get(0)?,
+                            camp_id: row.get(1)?,
+                            camp_turn_id: row.get(2)?,
+                            status: row.get(3)?,
+                            dispatch_phase: row.get(4)?,
+                            dispatch_attempt_count: row.get(5)?,
+                            active_dispatch_attempt_id: row.get(6)?,
+                            version: row.get(7)?,
+                            delivery_kind: row.get(8)?,
+                        })
                     },
                 )
                 .optional()?;
-            let Some((camp_id, camp_turn_id, status, phase, version, delivery_kind)) = target
-            else {
+            let Some(target) = target else {
                 return Ok(rejected(
                     "message_delivery.not_found",
                     "Message Delivery does not exist",
                 ));
             };
-            if envelope.camp_id.as_deref().is_some_and(|id| id != camp_id) {
+            if envelope
+                .camp_id
+                .as_deref()
+                .is_some_and(|id| id != target.camp_id)
+            {
                 return Ok(rejected(
                     "message_delivery.camp_mismatch",
                     "Message Delivery is outside the Camp",
                 ));
             }
-            if version != envelope.payload.expected_version {
+            if target.version != envelope.payload.expected_version {
                 return Ok(rejected(
                     "message_delivery.version_conflict",
                     "Message Delivery version is stale",
                 ));
             }
-            if status != "interrupted_before_dispatch"
-                && !(status == "pending" && phase == "attempted_waiting")
-            {
+            if target.status != "interrupted_before_dispatch" && target.status != "pending" {
                 return Ok(rejected(
                     "message_delivery.cancel_not_allowed",
-                    "Only waiting or interrupted-before-dispatch Deliveries may be cancelled",
+                    "Only pending or interrupted-before-dispatch Deliveries may be cancelled",
                 ));
             }
             let now = chrono::Utc::now().to_rfc3339();
-            transaction.execute(
-                r#"
-                UPDATE message_delivery
-                SET status = 'cancelled', dispatch_phase = 'terminal',
-                    wait_condition = NULL, manual_intervention_required = 0,
-                    failure_code = 'explicit_cancelled',
-                    version = version + 1, updated_at = ?2, ended_at = ?2
-                WHERE id = ?1 AND version = ?3
-                "#,
-                params![
-                    envelope.payload.delivery_id,
-                    now,
-                    envelope.payload.expected_version
-                ],
-            )?;
-            append_domain_event(
+            transition_message_delivery_to_cancelled(
                 transaction,
-                "message_delivery.cancelled",
-                Some(&camp_id),
-                Some(("message_delivery", &envelope.payload.delivery_id)),
+                &target,
+                "explicit_cancelled",
                 &envelope.actor,
                 None,
-                &json!({
-                    "deliveryId": envelope.payload.delivery_id,
-                    "failureCode": "explicit_cancelled",
-                }),
+                &now,
             )?;
-            if delivery_kind == "gather_completion" {
+            if target.delivery_kind == "gather_completion" {
                 cancel_gather_for_delivery(
                     transaction,
                     &envelope.payload.delivery_id,
@@ -392,8 +413,8 @@ impl MessageDeliveryService {
             )?;
             crate::runtime::recompute_camp_turn(
                 transaction,
-                &camp_id,
-                &camp_turn_id,
+                &target.camp_id,
+                &target.camp_turn_id,
                 &envelope.actor,
                 None,
                 &now,
@@ -487,6 +508,7 @@ struct DispatchDelivery {
     message_id: String,
     camp_message_boundary_sequence: i64,
     recipient_agent_id: String,
+    recipient_membership_version_at_admission: i64,
     task_id: Option<String>,
     task_version_at_admission: Option<i64>,
     assignee_agent_id_at_admission: Option<String>,
@@ -534,6 +556,7 @@ pub struct SendPublicA2aMessage<'a> {
     pub mention_user: bool,
     pub task_id: Option<&'a str>,
     pub attachments: &'a [AuthorityAttachment],
+    pub managed_attachment_ingest_intent_id: Option<&'a str>,
     pub operation: PublicA2aOperation<'a>,
 }
 
@@ -1133,49 +1156,31 @@ pub fn persist_public_a2a_message(
             },
         ],
     )?;
-    let attachment_publication = CampAttachmentPublicationCoordinator.commit_agent_intent(
-        transaction,
-        request.camp_id,
-        &message_id,
-        request.command_id,
-        request.attachments,
-    )?;
-    for (position, attachment) in request.attachments.iter().enumerate() {
-        let publication = attachment_publication
-            .as_ref()
-            .context("Agent attachment publication aggregate is missing")?;
-        transaction.execute(
-            r#"
-            INSERT INTO message_attachment(
-                id, camp_id, camp_message_id, conversation_message_id,
-                position, display_name, media_type, byte_size,
-                content_digest, storage_path, preview_kind,
-                created_by_type, created_by_id, created_at,
-                runtime_projection_state, publication_operation_id,
-                publication_semantic_revision
-            ) VALUES (
-                ?1, ?2, ?3, NULL, ?4, ?5, ?6, ?7,
-                ?8, ?9, ?10, 'agent', ?11, ?12,
-                'pending', ?13, ?14
-            )
-            "#,
-            params![
-                attachment.attachment_id,
-                request.camp_id,
-                message_id,
-                position as i64,
-                attachment.display_name,
-                attachment.media_type,
-                attachment.byte_size as i64,
-                attachment.content_digest,
-                attachment.storage_path.to_string_lossy(),
-                attachment.preview_kind,
-                request.author_agent_id,
-                now,
-                publication.operation_id,
-                publication.semantic_revision,
-            ],
+    if request.attachments.is_empty() != request.managed_attachment_ingest_intent_id.is_none() {
+        anyhow::bail!("Agent attachment ingest identity does not match the frozen files");
+    }
+    if let Some(intent_id) = request.managed_attachment_ingest_intent_id {
+        let committed_attachment_ids = ManagedAttachmentService.commit_ingest(
+            transaction,
+            CommitManagedAttachmentIngest {
+                intent_id,
+                camp_id: request.camp_id,
+                camp_message_id: &message_id,
+                expected_source: ManagedAttachmentIngestSource::AgentWorkspace,
+                created_by_type: "agent",
+                created_by_id: request.author_agent_id,
+                now: &now,
+            },
         )?;
+        if committed_attachment_ids
+            != request
+                .attachments
+                .iter()
+                .map(|attachment| attachment.attachment_id.clone())
+                .collect::<Vec<_>>()
+        {
+            anyhow::bail!("Agent attachment ingest plan changed before CampMessage commit");
+        }
     }
     index_camp_message(
         transaction,
@@ -1224,6 +1229,9 @@ pub fn persist_public_a2a_message(
     };
     let mut delivery_ids = Vec::with_capacity(effective_recipients.len());
     for (position, recipient_agent_id) in effective_recipients.iter().enumerate() {
+        let recipient_membership_version =
+            current_recipient_membership_version(transaction, request.camp_id, recipient_agent_id)?
+                .context("accepted recipient has no active Camp membership version")?;
         let lineage = if !is_gather
             && let Some(caller) = immediate_caller
                 .as_ref()
@@ -1305,6 +1313,7 @@ pub fn persist_public_a2a_message(
             "campId": request.camp_id,
             "campTurnId": request.camp_turn_id,
             "recipientAgentId": recipient_agent_id,
+            "recipientMembershipVersionAtAdmission": recipient_membership_version,
             "recipientCanonicalPosition": position,
             "recipientDigest": recipient_digest,
             "messageBodyDigest": content_digest,
@@ -1341,7 +1350,8 @@ pub fn persist_public_a2a_message(
                 scheduler_correlation_id, context_manifest_id,
                 target_agent_run_id, retry_generation,
                 manual_intervention_required, failure_code, failure_detail_json,
-                version, created_at, updated_at, ended_at
+                version, created_at, updated_at, ended_at,
+                recipient_membership_version_at_admission
             ) VALUES (
                 ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8,
                 ?9, ?10, ?23, ?24, ?11, ?12, ?13, ?14, ?15, ?16,
@@ -1349,7 +1359,7 @@ pub fn persist_public_a2a_message(
                 'public_a2a', ?25, ?26, ?27, ?28, NULL, ?20, ?21,
                 ?29, ?30, NULL,
                 0, NULL, NULL, NULL, NULL, 0, 0, NULL, NULL,
-                1, ?22, ?22, ?31
+                1, ?22, ?22, ?31, ?32
             )
             "#,
             params![
@@ -1386,6 +1396,7 @@ pub fn persist_public_a2a_message(
                 initial_status,
                 initial_phase,
                 capture.map(|_| now.as_str()),
+                recipient_membership_version,
             ],
         )?;
         if is_gather {
@@ -1423,13 +1434,6 @@ pub fn persist_public_a2a_message(
             }),
         )?;
         delivery_ids.push(delivery_id);
-    }
-    if let Some(publication) = attachment_publication.as_ref() {
-        CampAttachmentPublicationCoordinator.gate_deliveries(
-            transaction,
-            &delivery_ids,
-            &publication.operation_id,
-        )?;
     }
     crate::collaboration::append_domain_event(
         transaction,
@@ -1989,6 +1993,95 @@ fn delivery_terminal_semantics(
     })
 }
 
+#[derive(Debug)]
+struct DeliveryCancellationTarget {
+    id: String,
+    camp_id: String,
+    camp_turn_id: String,
+    status: String,
+    dispatch_phase: String,
+    dispatch_attempt_count: i64,
+    active_dispatch_attempt_id: Option<String>,
+    version: i64,
+    delivery_kind: String,
+}
+
+fn transition_message_delivery_to_cancelled(
+    transaction: &Transaction<'_>,
+    target: &DeliveryCancellationTarget,
+    failure_code: &str,
+    actor: &ActorRef,
+    execution_epoch: Option<i64>,
+    now: &str,
+) -> Result<()> {
+    if let Some(attempt_id) = target.active_dispatch_attempt_id.as_deref() {
+        let changed = transaction.execute(
+            r#"
+            UPDATE message_delivery_attempt
+            SET status = 'cancelled', wait_condition = NULL,
+                failure_code = ?3, failure_detail_json = NULL, ended_at = ?4
+            WHERE id = ?1 AND delivery_id = ?2 AND status = 'attempting'
+            "#,
+            params![attempt_id, target.id, failure_code, now],
+        )?;
+        if changed != 1 {
+            anyhow::bail!("active Message Delivery attempt changed before cancellation");
+        }
+    } else if target.dispatch_phase == "attempted_waiting" {
+        let changed = transaction.execute(
+            r#"
+            UPDATE message_delivery_attempt
+            SET status = 'cancelled', wait_condition = NULL,
+                failure_code = ?3, failure_detail_json = NULL, ended_at = ?4
+            WHERE delivery_id = ?1 AND ordinal = ?2 AND status = 'waiting'
+            "#,
+            params![target.id, target.dispatch_attempt_count, failure_code, now],
+        )?;
+        if changed != 1 {
+            anyhow::bail!("waiting Message Delivery attempt changed before cancellation");
+        }
+    }
+
+    let changed = transaction.execute(
+        r#"
+        UPDATE message_delivery
+        SET status = 'cancelled', dispatch_phase = 'terminal',
+            wait_condition = NULL, active_dispatch_attempt_id = NULL,
+            pre_dispatch_gate = NULL, projection_operation_id = NULL,
+            manual_intervention_required = 0,
+            failure_code = ?5, failure_detail_json = NULL,
+            version = version + 1, updated_at = ?6, ended_at = ?6
+        WHERE id = ?1 AND status = ?2 AND dispatch_phase = ?3 AND version = ?4
+        "#,
+        params![
+            target.id,
+            target.status,
+            target.dispatch_phase,
+            target.version,
+            failure_code,
+            now,
+        ],
+    )?;
+    if changed != 1 {
+        anyhow::bail!("Message Delivery changed before cancellation");
+    }
+    append_domain_event(
+        transaction,
+        "message_delivery.cancelled",
+        Some(&target.camp_id),
+        Some(("message_delivery", &target.id)),
+        actor,
+        execution_epoch,
+        &json!({
+            "deliveryId": target.id,
+            "failureCode": failure_code,
+            "campTurnId": target.camp_turn_id,
+            "dispatchAttemptCount": target.dispatch_attempt_count,
+        }),
+    )?;
+    Ok(())
+}
+
 pub(crate) fn cancel_pending_turn_deliveries(
     transaction: &Transaction<'_>,
     camp_turn_id: &str,
@@ -1997,6 +2090,43 @@ pub(crate) fn cancel_pending_turn_deliveries(
     execution_epoch: Option<i64>,
     now: &str,
 ) -> Result<usize> {
+    let deliveries = {
+        let mut statement = transaction.prepare(
+            r#"
+            SELECT id, camp_id, camp_turn_id, status, dispatch_phase,
+                   dispatch_attempt_count, active_dispatch_attempt_id,
+                   version, delivery_kind
+            FROM message_delivery
+            WHERE camp_turn_id = ?1 AND status = 'pending'
+            ORDER BY created_at, id
+            "#,
+        )?;
+        statement
+            .query_map([camp_turn_id], |row| {
+                Ok(DeliveryCancellationTarget {
+                    id: row.get(0)?,
+                    camp_id: row.get(1)?,
+                    camp_turn_id: row.get(2)?,
+                    status: row.get(3)?,
+                    dispatch_phase: row.get(4)?,
+                    dispatch_attempt_count: row.get(5)?,
+                    active_dispatch_attempt_id: row.get(6)?,
+                    version: row.get(7)?,
+                    delivery_kind: row.get(8)?,
+                })
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?
+    };
+    for target in &deliveries {
+        transition_message_delivery_to_cancelled(
+            transaction,
+            target,
+            failure_code,
+            actor,
+            execution_epoch,
+            now,
+        )?;
+    }
     cancel_gathers_for_turn(
         transaction,
         camp_turn_id,
@@ -2005,61 +2135,6 @@ pub(crate) fn cancel_pending_turn_deliveries(
         execution_epoch,
         now,
     )?;
-    let deliveries = {
-        let mut statement = transaction.prepare(
-            r#"
-            SELECT id, camp_id, active_dispatch_attempt_id
-            FROM message_delivery
-            WHERE camp_turn_id = ?1 AND status = 'pending'
-            ORDER BY created_at, id
-            "#,
-        )?;
-        statement
-            .query_map([camp_turn_id], |row| {
-                Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, String>(1)?,
-                    row.get::<_, Option<String>>(2)?,
-                ))
-            })?
-            .collect::<rusqlite::Result<Vec<_>>>()?
-    };
-    for (delivery_id, camp_id, active_attempt_id) in &deliveries {
-        if let Some(attempt_id) = active_attempt_id {
-            transaction.execute(
-                r#"
-                UPDATE message_delivery_attempt
-                SET status = 'cancelled', failure_code = ?3, ended_at = ?4
-                WHERE id = ?1 AND delivery_id = ?2 AND status = 'attempting'
-                "#,
-                params![attempt_id, delivery_id, failure_code, now],
-            )?;
-        }
-        transaction.execute(
-            r#"
-            UPDATE message_delivery
-            SET status = 'cancelled', dispatch_phase = 'terminal',
-                wait_condition = NULL, active_dispatch_attempt_id = NULL,
-                manual_intervention_required = 0, failure_code = ?2,
-                version = version + 1, updated_at = ?3, ended_at = ?3
-            WHERE id = ?1 AND status = 'pending'
-            "#,
-            params![delivery_id, failure_code, now],
-        )?;
-        append_domain_event(
-            transaction,
-            "message_delivery.cancelled",
-            Some(camp_id),
-            Some(("message_delivery", delivery_id)),
-            actor,
-            execution_epoch,
-            &json!({
-                "deliveryId": delivery_id,
-                "failureCode": failure_code,
-                "campTurnId": camp_turn_id,
-            }),
-        )?;
-    }
     Ok(deliveries.len())
 }
 
@@ -2227,17 +2302,18 @@ fn process_dispatch_attempt(
         return Ok(outcome);
     }
 
-    if !recipient_is_eligible(
+    if !recipient_membership_matches(
         &transaction,
         &delivery.camp_id,
         &delivery.recipient_agent_id,
+        delivery.recipient_membership_version_at_admission,
     )? {
         let outcome = terminal_dispatch(
             &transaction,
             &delivery,
             attempt_id,
             "failed",
-            "recipient_no_longer_eligible",
+            "recipient_membership_changed",
             &actor,
             &now,
         )?;
@@ -2251,6 +2327,26 @@ fn process_dispatch_attempt(
                 &now,
             )?;
         }
+        transaction.commit()?;
+        return Ok(outcome);
+    }
+    if delivery_requires_source_membership_fence(
+        &delivery.delivery_kind,
+        delivery.gather_id.as_deref(),
+    ) && !source_run_membership_matches(
+        &transaction,
+        &delivery.camp_id,
+        &delivery.source_agent_run_id,
+    )? {
+        let outcome = terminal_dispatch(
+            &transaction,
+            &delivery,
+            attempt_id,
+            "failed",
+            "source_membership_changed",
+            &actor,
+            &now,
+        )?;
         transaction.commit()?;
         return Ok(outcome);
     }
@@ -2696,7 +2792,8 @@ fn load_dispatch_delivery(
                    delivery.target_parent_agent_run_id,
                    delivery.return_to_agent_run_id,
                    delivery.a2a_root_agent_run_id,
-                   delivery.a2a_depth, delivery.retry_generation
+                   delivery.a2a_depth, delivery.retry_generation,
+                   delivery.recipient_membership_version_at_admission
             FROM message_delivery AS delivery
             WHERE delivery.id = ?1 AND delivery.status = 'pending'
               AND delivery.dispatch_phase = 'attempting'
@@ -2725,6 +2822,7 @@ fn load_dispatch_delivery(
                     a2a_root_agent_run_id: row.get(17)?,
                     a2a_depth: row.get(18)?,
                     retry_generation: row.get(19)?,
+                    recipient_membership_version_at_admission: row.get(20)?,
                 })
             },
         )
@@ -2880,26 +2978,78 @@ fn terminal_dispatch(
     })
 }
 
-fn recipient_is_eligible(
+pub(crate) fn current_recipient_membership_version(
     transaction: &Transaction<'_>,
     camp_id: &str,
     agent_id: &str,
+) -> Result<Option<i64>> {
+    transaction
+        .query_row(
+            r#"
+            SELECT camp_member.version
+            FROM camp_member
+            JOIN agent_profile ON agent_profile.id = camp_member.agent_id
+            WHERE camp_member.camp_id = ?1
+              AND camp_member.agent_id = ?2
+              AND camp_member.status = 'active'
+              AND camp_member.leave_requested_at IS NULL
+              AND agent_profile.profile_status = 'present'
+            "#,
+            params![camp_id, agent_id],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(Into::into)
+}
+
+fn recipient_membership_matches(
+    transaction: &Transaction<'_>,
+    camp_id: &str,
+    agent_id: &str,
+    membership_version: i64,
+) -> Result<bool> {
+    Ok(
+        current_recipient_membership_version(transaction, camp_id, agent_id)?
+            == Some(membership_version),
+    )
+}
+
+fn delivery_requires_source_membership_fence(delivery_kind: &str, gather_id: Option<&str>) -> bool {
+    delivery_kind == "public_a2a" && gather_id.is_none()
+}
+
+fn source_run_membership_matches(
+    transaction: &Transaction<'_>,
+    camp_id: &str,
+    source_agent_run_id: &str,
 ) -> Result<bool> {
     transaction
         .query_row(
             r#"
             SELECT EXISTS(
                 SELECT 1
-                FROM camp_member
-                JOIN agent_profile ON agent_profile.id = camp_member.agent_id
-                WHERE camp_member.camp_id = ?1
-                  AND camp_member.agent_id = ?2
-                  AND camp_member.status = 'active'
-                  AND camp_member.leave_requested_at IS NULL
-                  AND agent_profile.profile_status = 'present'
+                FROM agent_run AS source_run
+                JOIN camp_turn AS source_turn
+                  ON source_turn.id = source_run.camp_turn_id
+                JOIN conversation AS source_conversation
+                  ON source_conversation.id = source_run.conversation_id
+                JOIN camp_member AS source_member
+                  ON source_member.camp_id = source_turn.camp_id
+                 AND source_member.agent_id = source_conversation.agent_id
+                WHERE source_run.id = ?1
+                  AND source_turn.camp_id = ?2
+                  AND source_conversation.camp_id = ?2
+                  AND source_member.status = 'active'
+                  AND source_member.leave_requested_at IS NULL
+                  AND source_member.version = CAST(
+                      json_extract(
+                          source_run.effective_config_json,
+                          '$.campMemberVersion'
+                      ) AS INTEGER
+                  )
             )
             "#,
-            params![camp_id, agent_id],
+            params![source_agent_run_id, camp_id],
             |row| row.get(0),
         )
         .map_err(Into::into)

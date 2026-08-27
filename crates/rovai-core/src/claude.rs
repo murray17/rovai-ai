@@ -19,7 +19,7 @@ use rovai_core::{
     },
     mcp::McpServerDefinition,
     runtime::{AgentRunWorkspace, PermissionSemantics},
-    runtime_discovery::{configure_active_runtime_command, is_executable_file},
+    runtime_discovery::{configure_active_runtime_command, is_runtime_entrypoint_file},
     runtime_failure::{
         RuntimeFailureError, RuntimeFailureOrigin, RuntimeFailurePhase, RuntimeFailureView,
         public_runtime_failure_from_output,
@@ -231,7 +231,7 @@ impl ClaudeCodeCliRuntimeAdapter {
             return Err(internal.context(RuntimeFailureError::new(failure)));
         }
         let executable = Path::new(&request.runtime.executable_path);
-        if !is_executable_file(executable) {
+        if !is_runtime_entrypoint_file(executable) {
             let internal = anyhow::anyhow!(
                 "Claude Code executable is missing or not executable: {}",
                 executable.display()

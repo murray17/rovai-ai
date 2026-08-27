@@ -5638,7 +5638,7 @@ fn public_acp_file_changes(content: Option<&Value>) -> Option<Value> {
             }))
         })
         .collect::<Vec<_>>();
-    (!changes.is_empty()).then(|| Value::Array(changes))
+    (!changes.is_empty()).then_some(Value::Array(changes))
 }
 
 fn acp_effect_disposition(succeeded: bool, native_kind: &str) -> &'static str {
