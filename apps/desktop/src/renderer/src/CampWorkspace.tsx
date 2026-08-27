@@ -5647,8 +5647,8 @@ function CampMembersPanel({
         setAddDialogOpen(false)
         setSelectedCandidateIds(new Set())
         onNotify(outcome.addedAgentIds.length === 1
-          ? '已添加 1 位队员；将在之后新建的执行中生效'
-          : `已添加 ${outcome.addedAgentIds.length} 位队员；将在之后新建的执行中生效`)
+          ? '1 位队员已加入；将在之后新建的执行中生效'
+          : `${outcome.addedAgentIds.length} 位队员已加入；将在之后新建的执行中生效`)
         return
       }
       setSelectedCandidateIds(new Set(outcome.failures.map((failure) => failure.agentId)))
@@ -5662,7 +5662,7 @@ function CampMembersPanel({
     } catch (error) {
       setAddResult({
         tone: 'danger',
-        message: error instanceof Error ? error.message : '添加队员失败，请重试。',
+        message: error instanceof Error ? error.message : '邀请队员失败，请重试。',
         failures: new Map()
       })
     } finally {
@@ -5772,7 +5772,7 @@ function CampMembersPanel({
               disabled={busy || !onAddMembers}
               onClick={openAddDialog}
             >
-              <span aria-hidden="true">＋</span> 添加
+              <span aria-hidden="true">＋</span> 邀请
             </button>
           </div>
         </div>
@@ -5966,7 +5966,7 @@ function CampMembersPanel({
           <Dialog.Overlay className="dialog-overlay app-dialog-overlay" />
           <AppDialogContent className="camp-member-dialog" width="wide" aria-describedby="camp-add-member-description">
             <AppDialogHeader
-              title="添加队员"
+              title="邀请队员"
               description="选择要加入这次讨论的队员。"
               descriptionId="camp-add-member-description"
               icon="user"
@@ -5989,10 +5989,10 @@ function CampMembersPanel({
                 />
               </label>
               <div className="camp-member-candidate-caption">
-                <strong>可添加队员</strong>
+                <strong>可邀请队员</strong>
                 <span>{filteredCandidates.length} 位</span>
               </div>
-              <div className="camp-member-candidate-list" role="group" aria-label="可添加队员">
+              <div className="camp-member-candidate-list" role="group" aria-label="可邀请队员">
                 {filteredCandidates.map((profile) => {
                   const failure = addResult?.failures.get(profile.agentId) ?? null
                   const checked = selectedCandidateIds.has(profile.agentId)
@@ -6020,7 +6020,7 @@ function CampMembersPanel({
                 })}
                 {filteredCandidates.length === 0 && (
                   <div className="camp-member-candidate-empty">
-                    <strong>{candidateProfiles.length === 0 ? '没有可添加的队员' : '没有匹配的队员'}</strong>
+                    <strong>{candidateProfiles.length === 0 ? '没有可邀请的队员' : '没有匹配的队员'}</strong>
                     <p>{candidateProfiles.length === 0
                       ? '所有当前在队的队员都已加入本会话。'
                       : '换一个姓名或角色关键词试试。'}</p>
@@ -6035,7 +6035,7 @@ function CampMembersPanel({
                 type="button"
                 disabled={selectedCandidateIds.size === 0 || addSubmitting}
                 onClick={() => void submitAddMembers()}
-              >{addSubmitting ? '正在添加…' : `添加队员${selectedCandidateIds.size > 0 ? ` · ${selectedCandidateIds.size}` : ''}`}</button>
+              >{addSubmitting ? '正在邀请…' : `邀请队员${selectedCandidateIds.size > 0 ? ` · ${selectedCandidateIds.size}` : ''}`}</button>
             </AppDialogFooter>
           </AppDialogContent>
         </Dialog.Portal>
@@ -6330,26 +6330,17 @@ function EmptyCampWelcome({
 
   return (
     <section className="empty-camp-welcome" aria-labelledby="empty-camp-title">
-      <svg className="empty-camp-mark" viewBox="0 0 88 66" aria-hidden="true">
-        <defs>
-          <linearGradient id="empty-camp-horizon" x1="0" y1="0" x2="1" y2="0">
-            <stop offset="0" stopColor="var(--aurora)" />
-            <stop offset=".52" stopColor="var(--brand)" />
-            <stop offset="1" stopColor="var(--violet)" />
-          </linearGradient>
-        </defs>
-        <path d="M44 5l2.1 9.4 9.4 2.1-9.4 2.1L44 28l-2.1-9.4-9.4-2.1 9.4-2.1L44 5z" fill="var(--brand)" />
-        <path d="M10 48c9-11 19-16 30-15 9 .8 14 7 22 7 6 0 11-2 16-6" fill="none" stroke="url(#empty-camp-horizon)" strokeLinecap="round" strokeWidth="3" />
-        <path d="M14 54h60" fill="none" stroke="var(--line-strong)" strokeLinecap="round" />
-        <circle cx="69" cy="25" r="3" fill="var(--ember)" />
+      <svg
+        className="empty-camp-mark"
+        data-brand-mark="horizon"
+        data-brand-layout="separated"
+        viewBox="0 0 72 56"
+        aria-hidden="true"
+      >
+        <path d="M36 4 L39.6 16.7 L53.9 20.4 L39.6 24.1 L36 36.8 L32.4 24.1 L18.1 20.4 L32.4 16.7 Z" fill="currentColor" />
+        <path d="M8 49.5 Q36 37.5 64 49.5" stroke="currentColor" strokeWidth="5" fill="none" strokeLinecap="round" />
       </svg>
-      <p className="empty-camp-eyebrow">{snapshot.camp.activationState === 'pending' ? '新对话草稿' : '新对话'}</p>
       <h2 id="empty-camp-title">{snapshot.camp.activationState === 'pending' ? '开始一段新对话' : '开始这段协作'}</h2>
-      <p className="empty-camp-description">
-        {snapshot.camp.activationState === 'pending'
-          ? '当前只是一份草稿。输入内容后会自动保留；发送第一条消息时才会正式创建对话。'
-          : '这里已经保留当前工作区、队员和默认负责人。发送第一条消息后，公共讨论、执行过程和最终结论会依次展开。'}
-      </p>
 
       <div className="empty-camp-context" aria-label="当前协作配置">
         <span><i aria-hidden="true">⌂</i><strong>{projectLabel}</strong></span>

@@ -33,8 +33,8 @@ reconciliation 完成已接受工作的正式结算。
   refs 与 durable ingest intent；新附件不再进入 legacy publication gate，不等待或 fence 活跃 AgentRun；
 - 新增 `camps.members.add`、`camps.members.removalPreview`、`camps.members.remove` Desktop API；增加使用
   exact membership generation/version 的添加、预览和移除命令；
-- 添加不创建 Conversation，也不修改已冻结 AgentRun 的 Collaboration State；曾离开的 Agent 再次添加仍是一次
-  普通“添加队员”，产品不暴露 rejoined 状态；对 active member（包括 away）的相同 overrides 为 no-op，不同
+- 添加不创建 Conversation，也不修改已冻结 AgentRun 的 Collaboration State；曾离开的 Agent 再次添加时，
+  产品界面仍按普通“邀请队员”处理，不暴露 rejoined 状态；对 active member（包括 away）的相同 overrides 为 no-op，不同
   overrides 返回 capability conflict，不由 add 静默修改能力或旋转 lifetime；受信 source 的 accepted no-op
   正常推进自身 reconciliation generation；
 - Camp 始终至少保留一位 active member。移除 Default Lead 时优先使用有效 successor；若剩余成员全部暂离，
@@ -51,7 +51,7 @@ reconciliation 完成已接受工作的正式结算。
   但不能在离队后发布内容；
 - 外部成员同步仅是提示：只有 System allowlist、已绑定的 source namespace/binding 和严格递增的 reconciliation
   generation 可以提交正式领域命令；
-- Camp 会话“当前会话”区域增加添加入口；成员行只保留一个 `•••` 菜单，收纳模型信息展开与移除。最后一位
+- Camp 会话“当前会话”区域增加“邀请”入口；成员行只保留一个 `•••` 菜单，收纳模型信息展开与移除。最后一位
   成员的移除操作可见但禁用，并解释“Camp 至少需要一位队员”；
 - 移除确认先读取权威影响预览，展示 Run、Task、Delivery、Gather 影响；冲突可刷新重试，正在 reconciliation
   的成员在会话区显示非阻塞状态。

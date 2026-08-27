@@ -1480,20 +1480,12 @@ button.camp-world-map-live-caption { cursor: pointer; font: inherit; }
   padding: 36px 0 56px;
   text-align: center;
 }
-.empty-camp-mark { width: 88px; height: 66px; margin-bottom: 16px; }
-.empty-camp-eyebrow {
-  margin: 0;
-  color: var(--faint);
-  font: 700 9.5px/1.3 ui-monospace, SFMono-Regular, Menlo, monospace;
-  letter-spacing: .08em;
-  text-transform: uppercase;
-}
+.empty-camp-mark { width: 96px; height: 66px; margin-bottom: 14px; color: var(--rail-logo); }
 .empty-camp-welcome h2 {
-  margin: 8px 0 7px;
+  margin: 0;
   font: 700 clamp(23px, 2.4vw, 30px)/1.2 -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif;
   letter-spacing: -.035em;
 }
-.empty-camp-description { max-width: 560px; margin: 0; color: var(--muted); font-size: 12.5px; line-height: 1.65; }
 .empty-camp-context {
   display: flex;
   flex-wrap: wrap;
