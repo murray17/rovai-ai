@@ -47,8 +47,8 @@ Delivery 的准入。为保证所有活跃 Runtime 看到同一 View，系统牺
 引入 Managed Attachment v2：新 Composer/Agent 文件经 durable ingest intent、私有 staging、一次
 copy、opaque final promote 和最终 SQLite 事务成为独立不可变资源；CampMessage 只保存有序引用，
 Delivery 直接进入普通 Dispatch Pump，不再创建 legacy publication operation 或 projection gate。
-Fast Rust CI 已通过，且回归测试证明源 Run 保持 `running` 时，4 个共 14 MiB 的附件已提交，目标
-Delivery 在源 Run 终结前开始 attempt。
+针对该实现 commit 的 Fast Rust CI 已通过，且回归测试证明源 Run 保持 `running` 时，4 个共
+14 MiB 的附件已提交，目标 Delivery 在源 Run 终结前开始 attempt。
 
 截至本复盘发布时，修复仍不能标记为 closed。PR #88 仍为 Draft，其正文明确保留一个 P0：v2-only
 Context 和 Runtime dispatch 仍无条件取得 legacy Camp Attachment View receipt/read admission，并在
@@ -79,13 +79,14 @@ Run”的主链已实现，不等于完整隔离、合并或部署已经完成�
 
 - 旧实现基线：`origin/main` commit
   [`f588c773`](https://github.com/murray17/rovai-ai/commit/f588c773c2652a9e78887a31d17de8ed37524bb0)。
-- 修复实现：PR #88 head commit
+- 修复实现基线：PR #88 implementation commit
   [`5a0fff63`](https://github.com/murray17/rovai-ai/commit/5a0fff638276625ea513dcda65369b094f2b2998)。
 - 运行需求证据：当前 Camp sequence 68–73，包含用户给出的最小 v2 目标、源码核查结论，以及对三张
   窄持久化表边界的确认。
 - 代码证据：legacy semantic publication、View mutation/quiescence、AgentRun lifecycle read admission、
   Delivery FIFO；以及 v2 Migration 112、ingest、send transaction、Context SQL union 和回归测试。
-- 自动化证据：PR #88 的 `Rust fast tests` 与 `Windows x64 compile gate` 通过；同一 head 的
+- 自动化证据：implementation commit `5a0fff63` 的 `Rust fast tests` 与 `Windows x64 compile gate`
+  通过；同一 code head 的
   `Rust database smoke`、`Rust fmt and clippy`、`docs-governance` 未通过。
 - 未知项：没有保留某次真实 blocked Delivery 的完整数据库、日志、截图或开始/恢复时间；因此本文不
   声称具体事故持续时长、用户数量或数据规模。等待关系和 FIFO 放大来自可达的确定性控制流，不是对
@@ -171,7 +172,7 @@ Deliveries、Draft 消费和 committed intent。Replay 复用 command result，�
 | 2026-08-27 00:00 | 源码核查确认 current main 的 Delivery gate、Camp-wide write admission 与 active Runtime quiescence 依赖。 |
 | 2026-08-27 00:03 | 进一步确认源 Run 超过 deadline 或 Camp 持续活跃时会表现为长期 A2A 不推进，并冻结三张窄持久化表边界。 |
 | 2026-08-27 02:34 | Commit [`5a0fff63`](https://github.com/murray17/rovai-ai/commit/5a0fff638276625ea513dcda65369b094f2b2998) 实现 Managed Attachment v2 主链。 |
-| 2026-08-27，PR 建立后 | PR #88 的 Rust fast tests 与 Windows compile 通过；database smoke、Clippy 与 docs-governance 未通过，PR 保持 Draft，并明确记录 v2-only Run 的 legacy admission P0。 |
+| 2026-08-27，PR 建立后 | PR #88 implementation commit `5a0fff63` 的 Rust fast tests 与 Windows compile 通过；database smoke、Clippy 与 docs-governance 未通过，PR 保持 Draft，并明确记录 v2-only Run 的 legacy admission P0。 |
 
 ## 技术根因
 
