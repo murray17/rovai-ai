@@ -16,6 +16,7 @@ const SETTINGS_SECTIONS = new Set<SettingsSection>([
   'skills',
   'mcp',
   'runtime',
+  'channels',
   'appearance',
   'notifications',
   'monitoring',

@@ -87,6 +87,7 @@ import {
   type DesktopAutoUpdater
 } from './app-updates'
 import { AppQuitCoordinator } from './app-quit-coordinator'
+import { ChannelSettingsService } from './channel-settings'
 
 const mainStartupStartedAt = performance.now()
 console.info('[startup] stage=main_module_loaded elapsed_ms=0.0')
@@ -247,6 +248,7 @@ const projectAccessTransactions = new ProjectAccessTransactionCoordinator()
 let userAutomation: UserAutomationServer | null = null
 const desktopSessions = new DesktopSessionRegistry()
 const memberAvatars = new MemberAvatarAssetService(coreDataPath)
+const channelSettings = new ChannelSettingsService()
 
 async function initializeAppUpdates(): Promise<void> {
   // electron-updater eagerly touches Electron's native autoUpdater while the
@@ -670,6 +672,11 @@ ipcMain.handle('rovai:general-preferences-set-one-click-new-conversation', (_eve
 
 ipcMain.handle('rovai:general-preferences-invalidate-new-conversation-defaults', () => {
   return requireGeneralPreferences().invalidateNewConversationDefaults()
+})
+
+ipcMain.handle('rovai:channels-get', (event) => {
+  requireMainWindow(event.sender)
+  return channelSettings.get()
 })
 
 ipcMain.handle('rovai:onboarding-get', () => requireOnboarding().get())

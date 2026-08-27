@@ -57,6 +57,18 @@ describe('general preferences', () => {
       oneClickNewConversationEnabled: false
     })
     expect(parseGeneralPreferences({
+      schemaVersion: 3,
+      startupLocationMode: 'last_location',
+      lastSettingsSection: 'channels',
+      executionConsolePlacement: 'bottom',
+      newConversationDefaults: null,
+      newConversationDefaultsRequireConfirmation: false,
+      oneClickNewConversationEnabled: false
+    })).toEqual({
+      ...DEFAULT_GENERAL_PREFERENCES,
+      lastSettingsSection: 'channels'
+    })
+    expect(parseGeneralPreferences({
       schemaVersion: 2,
       startupLocationMode: 'quick_chat',
       lastSettingsSection: 'diagnostics',

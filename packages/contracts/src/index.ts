@@ -1927,11 +1927,52 @@ export type SettingsSection =
   | 'skills'
   | 'mcp'
   | 'runtime'
+  | 'channels'
   | 'appearance'
   | 'notifications'
   | 'monitoring'
   | 'diagnostics'
   | 'about'
+
+export type ChannelKind = 'feishu'
+
+export type ChannelHostStatus = 'unavailable' | 'ready'
+
+export type ChannelConnectionStatus = 'not_connected' | 'connected' | 'session_expired'
+
+export interface ChannelAccountView {
+  accountId: string
+  displayName: string
+  tenantName: string
+}
+
+export interface ChannelConnectionView {
+  status: ChannelConnectionStatus
+  account: ChannelAccountView | null
+}
+
+export interface ChannelMemberBotView {
+  agentId: string
+  publicationStatus: 'unpublished' | 'published'
+  botDisplayName: string | null
+}
+
+export interface ChannelProviderView {
+  kind: ChannelKind
+  displayName: string
+  hostStatus: ChannelHostStatus
+  connection: ChannelConnectionView
+  memberBots: ChannelMemberBotView[]
+}
+
+export interface ChannelSettingsSnapshot {
+  schemaVersion: 1
+  channels: ChannelProviderView[]
+}
+
+export interface ChannelsApi {
+  get(): Promise<ChannelSettingsSnapshot>
+}
 
 export type MemberWorkspaceLocationTab = 'identity' | 'runtime'
 
@@ -2678,6 +2719,7 @@ export interface RovaiApi {
   appUpdates: AppUpdatesApi
   desktopSession: DesktopSessionApi
   generalPreferences: GeneralPreferencesApi
+  channels: ChannelsApi
   onboarding: OnboardingApi
   windowControls: WindowControlsApi
   navigationPreferences: NavigationPreferencesApi

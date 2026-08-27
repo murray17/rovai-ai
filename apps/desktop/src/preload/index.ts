@@ -2,6 +2,7 @@ import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import type {
   AppearanceSnapshot,
   AppUpdateSnapshot,
+  ChannelSettingsSnapshot,
   CoreEvent,
   CoreMethod,
   ExecutionConsolePlacement,
@@ -103,6 +104,11 @@ const api: RovaiApi = {
     },
     invalidateNewConversationDefaults() {
       return ipcRenderer.invoke('rovai:general-preferences-invalidate-new-conversation-defaults')
+    }
+  },
+  channels: {
+    get() {
+      return ipcRenderer.invoke('rovai:channels-get') as Promise<ChannelSettingsSnapshot>
     }
   },
   onboarding: {

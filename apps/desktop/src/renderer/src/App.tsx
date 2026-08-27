@@ -85,6 +85,7 @@ import {
 import { NotificationSettings } from './NotificationSettings'
 import { SkillSettings } from './SkillSettings'
 import { McpSettings } from './McpSettings'
+import { ChannelSettings } from './ChannelSettings'
 import { SettingsPageHeader } from './SettingsPageHeader'
 import { GeneralSettings } from './GeneralSettings'
 import { MemoryLibrary } from './MemoryLibrary'
@@ -3404,6 +3405,7 @@ export function SettingsView({
         {section === 'runtime' && (
           <RuntimeInstallationsPanel health={health} installations={installations} onReload={onReload} />
         )}
+        {section === 'channels' && <ChannelSettings agents={agents} />}
         {section === 'appearance' && (
           <>
             <SettingsPageHeader

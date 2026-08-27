@@ -2297,11 +2297,14 @@ describe('task event projections', () => {
     expect(capabilitiesGroup).toContain('<strong>Skills</strong>')
     expect(capabilitiesGroup).toContain('<strong>MCP</strong>')
     expect(capabilitiesGroup).toContain('<strong>Agent 运行时</strong>')
+    expect(capabilitiesGroup).toContain('<strong>渠道</strong>')
     expect(capabilitiesGroup).toContain('data-navigation-icon="sparkles"')
     expect(capabilitiesGroup).toContain('data-navigation-icon="blocks"')
     expect(capabilitiesGroup).toContain('data-navigation-icon="cpu"')
+    expect(capabilitiesGroup).toContain('data-navigation-icon="radio-tower"')
     expect(capabilitiesGroup.indexOf('<strong>Skills</strong>')).toBeLessThan(capabilitiesGroup.indexOf('<strong>MCP</strong>'))
     expect(capabilitiesGroup.indexOf('<strong>MCP</strong>')).toBeLessThan(capabilitiesGroup.indexOf('<strong>Agent 运行时</strong>'))
+    expect(capabilitiesGroup.indexOf('<strong>Agent 运行时</strong>')).toBeLessThan(capabilitiesGroup.indexOf('<strong>渠道</strong>'))
     expect(supportGroup).toContain('<strong>诊断与修复</strong>')
     expect(supportGroup).toContain('<strong>运行监控</strong>')
     expect(supportGroup).toContain('<strong>关于与更新</strong>')
@@ -2334,6 +2337,7 @@ describe('task event projections', () => {
       skills: 'Skills',
       mcp: 'MCP',
       runtime: 'Agent 运行时',
+      channels: '渠道',
       appearance: '外观',
       notifications: '提醒',
       monitoring: '运行监控',
