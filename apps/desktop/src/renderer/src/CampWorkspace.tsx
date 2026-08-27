@@ -5946,7 +5946,7 @@ function CampMembersPanel({
           <AppDialogContent className="camp-member-dialog" width="wide" aria-describedby="camp-add-member-description">
             <AppDialogHeader
               title="添加队员"
-              description={`加入「${snapshot.camp.title}」；不会改变队员的长期配置。`}
+              description="选择要加入这次讨论的队员。"
               descriptionId="camp-add-member-description"
               icon="user"
               kicker="当前会话"
