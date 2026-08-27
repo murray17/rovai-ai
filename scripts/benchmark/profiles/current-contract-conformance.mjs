@@ -48,7 +48,7 @@ const criteria = [
       test('crates/rovai-core/src/db.rs', 'v105_adds_kimi_catalog_and_delivery_without_expanding_custom_skills'),
       test('crates/rovai-core/src/db.rs', 'v111_upgrades_current_main_v110_and_keeps_zero_attempt_cancellation_terminal'),
       test('crates/rovai-core/src/db.rs', 'v112_upgrades_v111_and_installs_managed_attachment_v2_idempotently'),
-      test('crates/rovai-core/src/db.rs', 'v114_upgrades_v112_preserves_evidence_and_installs_developer_session_contract')
+      test('crates/rovai-core/src/db.rs', 'v115_upgrades_v112_preserves_evidence_and_installs_developer_session_contract')
     ]
   ),
   criterion('CCC-012', 'CampSnapshot schema is 33', [
