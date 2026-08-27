@@ -109,7 +109,11 @@ try {
   let dayCapture = null
   let nightCapture = null
   let zoomCapture = null
-  await waitForExpression(firstApp.cdp, `Boolean(document.querySelector('.shutdown-scrim'))`, 3_000, 20)
+  await waitForExpression(firstApp.cdp,
+    `Boolean(document.querySelector('.shutdown-scrim.is-visible'))`, 3_000, 20)
+  const shutdownFeedbackElapsedMs = Date.now() - shutdownStartedAt
+  assert(shutdownFeedbackElapsedMs >= 350,
+    `Safe-exit feedback appeared before the anti-flash window: ${shutdownFeedbackElapsedMs}ms`)
 
   dayOverlay = await collectShutdownOverlay(firstApp.cdp, 'day', 1040, 700, 1)
   dayCapture = join(outputDir, 'planned-shutdown-day-1040x700.png')
@@ -246,6 +250,7 @@ try {
     },
     shutdown: {
       elapsedMs: shutdownElapsedMs,
+      feedbackElapsedMs: shutdownFeedbackElapsedMs,
       recoveredElapsedMs: recoveredShutdownElapsedMs,
       naturalExit: true,
       forcedSignal: firstShutdownResult.forcedSignal,
@@ -437,8 +442,11 @@ async function collectShutdownOverlay(cdp, theme, viewportWidth, viewportHeight,
     const progressStyle = progress ? getComputedStyle(progress) : null
     return scrim && card && cardRect ? {
       theme: document.documentElement.dataset.theme,
+      visible: scrim.classList.contains('is-visible'),
       role: scrim.getAttribute('role'),
       modal: scrim.getAttribute('aria-modal'),
+      live: scrim.getAttribute('aria-live'),
+      busy: scrim.getAttribute('aria-busy'),
       labelledBy: scrim.getAttribute('aria-labelledby'),
       describedBy: scrim.getAttribute('aria-describedby'),
       title: scrim.querySelector('h2')?.textContent?.trim() ?? null,
@@ -469,12 +477,16 @@ async function collectShutdownOverlay(cdp, theme, viewportWidth, viewportHeight,
   })()`)
   assert(overlay
     && overlay.theme === theme
+    && overlay.visible === true
     && overlay.role === 'dialog'
     && overlay.modal === 'true'
+    && overlay.live === 'polite'
+    && overlay.busy === 'true'
     && overlay.labelledBy === 'controlled-shutdown-title'
     && overlay.describedBy === 'controlled-shutdown-description controlled-shutdown-evidence'
-    && overlay.title === '正在取消所有 AgentRun'
-    && overlay.description.includes('完成本地收口，然后退出')
+    && overlay.title === '正在安全退出'
+    && overlay.description.includes('保存本地状态并关闭后台服务')
+    && overlay.evidence.includes('若有尚未完成的 AgentRun，将一并取消')
     && overlay.evidence.includes('未确认的文件、命令或工具效果')
     && overlay.evidence.includes('待核对记录')
     && overlay.actionCount === 0

@@ -29,6 +29,7 @@ last_updated: 2026-08-27
   dispatch/retry 双重 fence；
 - [x] 完成 Desktop typed IPC、Camp open projection 与 event invalidation；
 - [x] 完成添加多选、成员 `•••` 菜单、权威移除预览、最后成员禁用和 reconciliation 状态；
+- [x] 完成安全退出交互：立即阻止新界面操作，400ms 内完成不闪现等待面，慢退出显示中性 busy modal；
 - [x] 完成 Rust、TypeScript、Renderer 与 Migration 定向回归；
 - [x] 运行完整自动化、文档治理和格式/Clippy 门禁；
 - [x] 使用隔离 userData 在真实 App 验收日/夜主题、键盘、添加、移除、冲突和恢复；
@@ -74,4 +75,7 @@ last_updated: 2026-08-27
   与打包 App 通过，覆盖最后成员禁用、模型详情、添加、移出预览、普通再次添加、日/夜主题、键盘、无横向
   溢出、重启持久化和旧库迁移；当前受限执行环境不允许 macOS/Chromium sandbox 初始化，因此仅该验收进程
   使用 `ROVAI_MEMBER_LIFECYCLE_ACCEPT_NO_SANDBOX=1`，产品默认启动参数未改变；
+- `pnpm package:mac` 与 `pnpm accept:planned-shutdown` 通过；隔离打包 App 在真实 Runtime 活跃时满足 5 秒
+  关闭目标，并验证 400ms 防闪、“正在安全退出”日/夜主题、200% zoom、reduced motion、无操作按钮、
+  Run-local 取消审计、未知效果保留、自然退出和完整进程树回收；
 - 本次 `pnpm test:rust:pr` 三个分组全部通过，无忽略或失败测试。

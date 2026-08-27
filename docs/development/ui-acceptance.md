@@ -156,8 +156,8 @@ App 退出。macOS 验收按该隔离 App 的精确 PID 通过 `NSRunningApplica
 
 验收必须证明：
 
-- `before-quit` 显示无操作控件的 accessible modal；Day/Night、`1040×700`、200% zoom 与 reduced
-  motion 下标题、unknown 说明和卡片边界均完整；
+- `before-quit` 立即阻止新界面交互，前 400ms 不显示关闭反馈；慢退出显示无操作控件的 accessible busy
+  modal，Day/Night、`1040×700`、200% zoom 与 reduced motion 下标题、条件取消说明和卡片边界均完整；
 - Desktop 等待 Core 自行完成 drain 和子进程真实退出，App 以 `exit 0` 自然结束；只有验收清理失败
   分支才可对明确记录的隔离进程树发送信号；
 - one-shot Runtime 进程中断不产生 Runtime cancellation acknowledgement：AgentRun 与

@@ -23,6 +23,7 @@ import {
   AppHeader,
   CAMP_OPEN_FEEDBACK_DELAY_MS,
   ControlledShutdownOverlay,
+  SHUTDOWN_FEEDBACK_DELAY_MS,
   STARTUP_FEEDBACK_DELAY_MS,
   WindowDragStrip,
   allNavigationCamps,
@@ -847,18 +848,33 @@ describe('task event projections', () => {
     })).toBe(true)
   })
 
-  it('renders controlled shutdown as a focused non-cancellable cancel-all dialog', () => {
+  it('delays safe-exit feedback while keeping the shutdown surface non-interactive', () => {
+    expect(SHUTDOWN_FEEDBACK_DELAY_MS).toBe(400)
+
+    const pendingMarkup = renderToStaticMarkup(createElement(ControlledShutdownOverlay, {
+      visible: false
+    }))
+    expect(pendingMarkup).toContain('shutdown-scrim is-pending')
+    expect(pendingMarkup).toContain('aria-hidden="true"')
+    expect(pendingMarkup).not.toContain('role="dialog"')
+    expect(pendingMarkup).not.toContain('正在安全退出')
+
     const markup = renderToStaticMarkup(createElement(ControlledShutdownOverlay))
+    expect(markup).toContain('shutdown-scrim is-visible')
     expect(markup).toContain('role="dialog"')
     expect(markup).toContain('aria-modal="true"')
-    expect(markup).toContain('aria-live="assertive"')
+    expect(markup).toContain('aria-live="polite"')
+    expect(markup).toContain('aria-busy="true"')
     expect(markup).toContain('aria-labelledby="controlled-shutdown-title"')
     expect(markup).toContain('aria-describedby="controlled-shutdown-description controlled-shutdown-evidence"')
     expect(markup).toContain('tabindex="-1"')
-    expect(markup).toContain('正在取消所有 AgentRun')
-    expect(markup).toContain('完成本地收口，然后退出')
+    expect(markup).toContain('shutdown-safe-mark')
+    expect(markup).toContain('正在安全退出')
+    expect(markup).toContain('保存本地状态并关闭后台服务')
+    expect(markup).toContain('若有尚未完成的 AgentRun，将一并取消')
     expect(markup).toContain('未确认的文件、命令或工具效果')
     expect(markup).toContain('待核对记录')
+    expect(markup).not.toContain('shutdown-stop-mark')
     expect(markup).not.toContain('<button')
   })
 

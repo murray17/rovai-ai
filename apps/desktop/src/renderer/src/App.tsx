@@ -224,6 +224,7 @@ export function requestAuthoritativeCampOpenProjection(
 type LoadState = 'loading' | 'ready' | 'error'
 export type StartupStatus = 'loading' | 'waiting' | 'resolved'
 export const STARTUP_FEEDBACK_DELAY_MS = 400
+export const SHUTDOWN_FEEDBACK_DELAY_MS = 400
 export type View = 'compose' | 'camp' | 'members' | 'memory' | 'settings'
 export type SettingsSection = NavigationSettingsSection
 export type WindowDragStripPage = Extract<View, 'compose' | 'members' | 'memory' | 'settings'>
@@ -510,43 +511,68 @@ export function shouldLoadRuntimeHealth(
     )
 }
 
-export function ControlledShutdownOverlay(): React.JSX.Element {
+export function ControlledShutdownOverlay({
+  visible = true
+}: {
+  visible?: boolean
+}): React.JSX.Element {
   const dialogRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
+    if (!visible) return
     dialogRef.current?.focus({ preventScroll: true })
-  }, [])
+  }, [visible])
+
+  useEffect(() => {
+    if (visible) return undefined
+    const preventPendingInteraction = (event: KeyboardEvent): void => {
+      event.preventDefault()
+      event.stopImmediatePropagation()
+    }
+    window.addEventListener('keydown', preventPendingInteraction, true)
+    return () => window.removeEventListener('keydown', preventPendingInteraction, true)
+  }, [visible])
 
   return (
     <div
       ref={dialogRef}
-      className="shutdown-scrim"
-      role="dialog"
-      aria-modal="true"
-      aria-live="assertive"
-      aria-labelledby="controlled-shutdown-title"
-      aria-describedby="controlled-shutdown-description controlled-shutdown-evidence"
-      tabIndex={-1}
+      className={`shutdown-scrim ${visible ? 'is-visible' : 'is-pending'}`}
+      role={visible ? 'dialog' : undefined}
+      aria-modal={visible ? true : undefined}
+      aria-live={visible ? 'polite' : undefined}
+      aria-busy={visible ? true : undefined}
+      aria-hidden={visible ? undefined : true}
+      aria-labelledby={visible ? 'controlled-shutdown-title' : undefined}
+      aria-describedby={visible
+        ? 'controlled-shutdown-description controlled-shutdown-evidence'
+        : undefined}
+      tabIndex={visible ? -1 : undefined}
       onKeyDown={(event) => {
-        if (event.key !== 'Tab') return
+        if (!visible || event.key !== 'Tab') return
         event.preventDefault()
         dialogRef.current?.focus({ preventScroll: true })
       }}
     >
-      <section className="shutdown-card">
-        <span className="shutdown-stop-mark" aria-hidden="true" />
-        <div className="shutdown-card-content">
-          <p className="shutdown-kicker">正在退出</p>
-          <h2 id="controlled-shutdown-title">正在取消所有 AgentRun</h2>
-          <p id="controlled-shutdown-description">Rovai 会停止所有运行并完成本地收口，然后退出。</p>
-          <span className="shutdown-progress-track" role="progressbar" aria-label="正在完成退出收口">
-            <i />
+      {visible && (
+        <section className="shutdown-card">
+          <span className="shutdown-safe-mark" aria-hidden="true">
+            <svg viewBox="0 0 20 20" focusable="false">
+              <path d="M10 2.75 4.75 5.1v4.05c0 3.55 1.97 6.23 5.25 8.1 3.28-1.87 5.25-4.55 5.25-8.1V5.1L10 2.75Z" />
+            </svg>
           </span>
-          <p className="shutdown-evidence-note" id="controlled-shutdown-evidence">
-            未确认的文件、命令或工具效果会保留为待核对记录。
-          </p>
-        </div>
-      </section>
+          <div className="shutdown-card-content">
+            <p className="shutdown-kicker">正在退出</p>
+            <h2 id="controlled-shutdown-title">正在安全退出</h2>
+            <p id="controlled-shutdown-description">Rovai 正在保存本地状态并关闭后台服务。</p>
+            <span className="shutdown-progress-track" role="progressbar" aria-label="正在完成安全退出">
+              <i />
+            </span>
+            <p className="shutdown-evidence-note" id="controlled-shutdown-evidence">
+              若有尚未完成的 AgentRun，将一并取消；未确认的文件、命令或工具效果会保留为待核对记录。
+            </p>
+          </div>
+        </section>
+      )}
     </div>
   )
 }
@@ -589,6 +615,7 @@ export function App(): React.JSX.Element {
   const [confirmingRunIds, setConfirmingRunIds] = useState<Set<string>>(() => new Set())
   const [state, setState] = useState<LoadState>('loading')
   const [shuttingDown, setShuttingDown] = useState(false)
+  const [shutdownFeedbackVisible, setShutdownFeedbackVisible] = useState(false)
   const [notificationHeadsUpVisible, setNotificationHeadsUpVisible] = useState(false)
   const [startupSnapshot, setStartupSnapshot] = useState<DesktopStartupSnapshot | null>(null)
   const [startupRouteTarget, setStartupRouteTarget] = useState<RestorableLocation | null>(null)
@@ -1244,6 +1271,18 @@ export function App(): React.JSX.Element {
     const timer = window.setTimeout(() => setStartupFeedbackDelayElapsed(true), remaining)
     return () => window.clearTimeout(timer)
   }, [])
+
+  useEffect(() => {
+    if (!shuttingDown) {
+      setShutdownFeedbackVisible(false)
+      return undefined
+    }
+    const timer = window.setTimeout(
+      () => setShutdownFeedbackVisible(true),
+      SHUTDOWN_FEEDBACK_DELAY_MS
+    )
+    return () => window.clearTimeout(timer)
+  }, [shuttingDown])
 
   useEffect(() => {
     void loadOnboarding()
@@ -2941,7 +2980,7 @@ export function App(): React.JSX.Element {
             )}
           </section>
         )}
-        {shuttingDown && <ControlledShutdownOverlay />}
+        {shuttingDown && <ControlledShutdownOverlay visible={shutdownFeedbackVisible} />}
       </div>
     )
   }
@@ -2992,7 +3031,7 @@ export function App(): React.JSX.Element {
           )}
           onComplete={() => void completeOnboarding()}
         />
-        {shuttingDown && <ControlledShutdownOverlay />}
+        {shuttingDown && <ControlledShutdownOverlay visible={shutdownFeedbackVisible} />}
       </div>
     )
   }
@@ -3286,7 +3325,7 @@ export function App(): React.JSX.Element {
         onOpenDetails={openUpdateSettings}
         onDownload={appUpdates.download}
       />
-      {shuttingDown && <ControlledShutdownOverlay />}
+      {shuttingDown && <ControlledShutdownOverlay visible={shutdownFeedbackVisible} />}
     </div>
   )
 }

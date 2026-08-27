@@ -13,7 +13,7 @@ last_updated: 2026-08-27
 
 > 当前状态：动态 Camp membership 的 Core、Desktop IPC、Renderer、自动化门禁与隔离真实 App 验收均已完成；
 > 后继 Message Delivery zero-attempt cancellation hotfix 与 Managed Attachment v2 无 Run 等待写路径已完成实现
-> 和自动化验证；退出即取消全部 AgentRun、400ms 冷启动反馈与局部关闭等待面也已完成。
+> 和自动化验证；退出即取消全部 AgentRun、400ms 启停防闪反馈与安全退出等待面也已完成。
 
 前置版本：[v1.28 Grok Build + MiniMax M3](../v1.28/README.md)已按冻结时事实转为 historical。
 
@@ -60,7 +60,7 @@ reconciliation 完成已接受工作的正式结算。
 - 退出、重启与更新统一取消全部非终态 AgentRun；稳定快照后立即关闭 terminal/route 准入，短时请求 Runtime
   中断，再完成 Run 取消审计、未知效果保留与本地收口；
 - 冷启动在前 400ms 保持目标页面稳定，超过门槛才显示局部“正在打开”反馈；队员页与记忆页保持既有结构，
-  关闭等待面明确当前正在取消全部 AgentRun。
+  关闭也使用 400ms 防闪门槛，慢退出才显示“正在安全退出”。
 
 ## 模型上下文边界
 
