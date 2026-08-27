@@ -48,7 +48,10 @@ class FakeBrowserWindow extends EventEmitter {
 
   async loadURL(url: string): Promise<void> {
     loadUrlCount += 1
-    if (url.startsWith('https://open.feishu.cn/page/cli?')) {
+    if (
+      url.startsWith('https://open.feishu.cn/page/cli?')
+      || url.startsWith('https://open.feishu.cn/page/launcher?')
+    ) {
       currentUrl = url
       return
     }
@@ -139,6 +142,21 @@ describe('Feishu developer session login', () => {
     })
 
     expect(currentUrl).toBe('https://open.feishu.cn/page/cli?user_code=public-fixture')
+    page.close()
+    await expect(page.closed).resolves.toBe('closed')
+  })
+
+  it('opens the live Feishu app-registration launcher returned by the begin endpoint', async () => {
+    const { ElectronFeishuDeveloperSessionService } = await import('./feishu-developer-session')
+    const root = mkdtempSync(join(tmpdir(), 'rovai-feishu-session-'))
+    temporaryRoots.push(root)
+    const service = new ElectronFeishuDeveloperSessionService(root)
+
+    const page = await service.showRegistrationConfirmation({
+      url: 'https://open.feishu.cn/page/launcher?user_code=public-fixture'
+    })
+
+    expect(currentUrl).toBe('https://open.feishu.cn/page/launcher?user_code=public-fixture')
     page.close()
     await expect(page.closed).resolves.toBe('closed')
   })

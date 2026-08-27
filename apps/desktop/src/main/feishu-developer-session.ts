@@ -617,9 +617,9 @@ function requireRegistrationUrl(value: string): string {
   } catch {
     throw sessionError('feishu_registration_url_rejected')
   }
-  const isOfficialCliConfirmation = (
+  const isOfficialRegistrationConfirmation = (
     (url.hostname === 'open.feishu.cn' || url.hostname === 'open.larksuite.com')
-    && url.pathname === '/page/cli'
+    && (url.pathname === '/page/launcher' || url.pathname === '/page/cli')
     && Boolean(normalizedRequired(url.searchParams.get('user_code')))
   )
   const isLegacyAccountConfirmation = (
@@ -632,7 +632,7 @@ function requireRegistrationUrl(value: string): string {
     || url.username !== ''
     || url.password !== ''
     || url.port !== ''
-    || (!isOfficialCliConfirmation && !isLegacyAccountConfirmation)
+    || (!isOfficialRegistrationConfirmation && !isLegacyAccountConfirmation)
   ) throw sessionError('feishu_registration_url_rejected')
   return url.toString()
 }

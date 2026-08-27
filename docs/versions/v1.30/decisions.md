@@ -180,9 +180,9 @@ Main/Core/Renderer 的秘密和 Outbox 分工。当前规范见 [飞书渠道架
 普通发布由 `FeishuMemberBotProvisioner` 复核原始 user/tenant，调用官方应用注册 begin/poll 协议，并把官方确认 URL
 加载到同一已登录 Session。正常路径不调用 SDK `registerApp`、不向 Renderer 产生二维码；若页面跳回登录或身份
 漂移则 fail closed。SDK `registerApp` 只保留为主人明确选择的逐队员兼容扫码流程，不得成为静默 fallback。
-官方当前确认入口是 `open.feishu.cn | open.larksuite.com` 的精确 `/page/cli` 路径，而不是 accounts 登录路径；Main
-以 exact origin/path 和非空 `user_code` 做导航准入。本地 URL 拒绝发生在确认和创建之前，必须保持可重试，不能
-触发未知远端状态锁。
+官方当前 begin 确认入口是 `open.feishu.cn | open.larksuite.com` 的精确 `/page/launcher` 路径，官方 CLI 另有
+`/page/cli` 兼容入口；二者都不是 accounts 登录路径。Main 以 exact origin/path 和非空 `user_code` 做导航准入。
+本地 URL 拒绝发生在确认和创建之前，必须保持可重试，不能触发未知远端状态锁。
 
 每次创建前写持久 `MemberBotPublicationIntent`；远端结果未知时锁定自动重试，已冻结 App ID/credential ref 不可换成
 第二个 App。当前规范见[飞书渠道架构](../../architecture/feishu-channel.md#开发者会话与队员发布)、
