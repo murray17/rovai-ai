@@ -179,6 +179,7 @@ struct CurrentMigrationState {
     v110: bool,
     v111: bool,
     v112: bool,
+    v113: bool,
 }
 
 impl CurrentMigrationState {
@@ -1264,7 +1265,9 @@ fn connection_has_current_data_contract(connection: &Connection) -> rusqlite::Re
     }
     connection.query_row(
         r#"
-        SELECT contract_version = ?1 AND projection_schema_version = ?2
+        SELECT contract_version = ?1
+               AND projection_schema_version = ?2
+               AND EXISTS(SELECT 1 FROM schema_migration WHERE version = 113)
         FROM rovai_data_contract
         WHERE singleton = 1
         "#,
@@ -1323,7 +1326,8 @@ fn load_current_migration_state(
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 109),
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 110),
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 111),
-               EXISTS(SELECT 1 FROM schema_migration WHERE version = 112)
+               EXISTS(SELECT 1 FROM schema_migration WHERE version = 112),
+               EXISTS(SELECT 1 FROM schema_migration WHERE version = 113)
         "#,
         [],
         |row| {
@@ -1371,6 +1375,7 @@ fn load_current_migration_state(
                 v110: row.get(40)?,
                 v111: row.get(41)?,
                 v112: row.get(42)?,
+                v113: row.get(43)?,
             })
         },
     )
@@ -2834,6 +2839,9 @@ impl Database {
             if !self.schema_migration_applied(112)? {
                 self.migrate_managed_attachment_v2_v112()?;
             }
+            if !self.schema_migration_applied(113)? {
+                self.migrate_planned_shutdown_protocol_v3_v113()?;
+            }
             if let Err(error) =
                 crate::notification::maintain_notification_episode_retention(self.connection())
             {
@@ -3219,6 +3227,9 @@ impl Database {
         }
         if !self.schema_migration_applied(112)? {
             self.migrate_managed_attachment_v2_v112()?;
+        }
+        if !self.schema_migration_applied(113)? {
+            self.migrate_planned_shutdown_protocol_v3_v113()?;
         }
         if let Err(error) =
             crate::notification::maintain_notification_episode_retention(self.connection())
@@ -15984,6 +15995,60 @@ impl Database {
         Ok(())
     }
 
+    fn migrate_planned_shutdown_protocol_v3_v113(&mut self) -> Result<()> {
+        let transaction = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        transaction.execute_batch(
+            r#"
+            CREATE TABLE planned_shutdown_cycle_v113 (
+                core_generation TEXT PRIMARY KEY
+                    CHECK(length(trim(core_generation)) > 0),
+                protocol_version INTEGER NOT NULL
+                    CHECK(protocol_version IN (2, 3)),
+                requested_at TEXT NOT NULL,
+                settled_at TEXT,
+                fenced_agent_run_count INTEGER
+                    CHECK(fenced_agent_run_count IS NULL OR fenced_agent_run_count >= 0),
+                unsettled_effect_agent_run_count INTEGER
+                    CHECK(
+                        unsettled_effect_agent_run_count IS NULL
+                        OR unsettled_effect_agent_run_count >= 0
+                    ),
+                CHECK (
+                    (settled_at IS NULL
+                        AND fenced_agent_run_count IS NULL
+                        AND unsettled_effect_agent_run_count IS NULL)
+                    OR
+                    (settled_at IS NOT NULL
+                        AND fenced_agent_run_count IS NOT NULL
+                        AND unsettled_effect_agent_run_count IS NOT NULL)
+                )
+            );
+
+            INSERT INTO planned_shutdown_cycle_v113(
+                core_generation, protocol_version, requested_at, settled_at,
+                fenced_agent_run_count, unsettled_effect_agent_run_count
+            )
+            SELECT core_generation, protocol_version, requested_at, settled_at,
+                   fenced_agent_run_count, unsettled_effect_agent_run_count
+            FROM planned_shutdown_cycle;
+
+            DROP TABLE planned_shutdown_cycle;
+            ALTER TABLE planned_shutdown_cycle_v113 RENAME TO planned_shutdown_cycle;
+
+            CREATE INDEX planned_shutdown_cycle_pending_idx
+                ON planned_shutdown_cycle(requested_at, core_generation)
+                WHERE settled_at IS NULL;
+
+            INSERT INTO schema_migration(version, applied_at)
+            VALUES (113, datetime('now'));
+            "#,
+        )?;
+        transaction.commit()?;
+        Ok(())
+    }
+
     fn migrate_runtime_entrypoint_locator_identity_v109(&mut self) -> Result<()> {
         let transaction = self
             .connection
@@ -20416,7 +20481,67 @@ impl Database {
 }
 
 #[cfg(test)]
+fn downgrade_current_schema_to_v112_source_for_test(connection: &Connection) {
+    let has_v113: bool = connection
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM schema_migration WHERE version = 113)",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    if !has_v113 {
+        return;
+    }
+    connection
+        .execute_batch(
+            r#"
+            BEGIN IMMEDIATE;
+            CREATE TABLE planned_shutdown_cycle_v112 (
+                core_generation TEXT PRIMARY KEY
+                    CHECK(length(trim(core_generation)) > 0),
+                protocol_version INTEGER NOT NULL
+                    CHECK(protocol_version = 2),
+                requested_at TEXT NOT NULL,
+                settled_at TEXT,
+                fenced_agent_run_count INTEGER
+                    CHECK(fenced_agent_run_count IS NULL OR fenced_agent_run_count >= 0),
+                unsettled_effect_agent_run_count INTEGER
+                    CHECK(
+                        unsettled_effect_agent_run_count IS NULL
+                        OR unsettled_effect_agent_run_count >= 0
+                    ),
+                CHECK (
+                    (settled_at IS NULL
+                        AND fenced_agent_run_count IS NULL
+                        AND unsettled_effect_agent_run_count IS NULL)
+                    OR
+                    (settled_at IS NOT NULL
+                        AND fenced_agent_run_count IS NOT NULL
+                        AND unsettled_effect_agent_run_count IS NOT NULL)
+                )
+            );
+            INSERT INTO planned_shutdown_cycle_v112(
+                core_generation, protocol_version, requested_at, settled_at,
+                fenced_agent_run_count, unsettled_effect_agent_run_count
+            )
+            SELECT core_generation, protocol_version, requested_at, settled_at,
+                   fenced_agent_run_count, unsettled_effect_agent_run_count
+            FROM planned_shutdown_cycle;
+            DROP TABLE planned_shutdown_cycle;
+            ALTER TABLE planned_shutdown_cycle_v112 RENAME TO planned_shutdown_cycle;
+            CREATE INDEX planned_shutdown_cycle_pending_idx
+                ON planned_shutdown_cycle(requested_at, core_generation)
+                WHERE settled_at IS NULL;
+            DELETE FROM schema_migration WHERE version = 113;
+            COMMIT;
+            "#,
+        )
+        .unwrap();
+}
+
+#[cfg(test)]
 fn downgrade_current_schema_to_v111_source_for_test(connection: &Connection) {
+    downgrade_current_schema_to_v112_source_for_test(connection);
     let has_v112: bool = connection
         .query_row(
             "SELECT EXISTS(SELECT 1 FROM schema_migration WHERE version = 112)",
@@ -21284,6 +21409,7 @@ mod tests {
             v110: version >= 110,
             v111: version >= 111,
             v112: version >= 112,
+            v113: version >= 113,
         }
     }
 
@@ -21532,7 +21658,7 @@ mod tests {
             );
         }
 
-        let current = migration_state_through(112);
+        let current = migration_state_through(113);
         let v092_source = migration_state_through(91);
         let mut missing_intermediate = current;
         missing_intermediate.v84 = false;
@@ -21602,7 +21728,7 @@ mod tests {
             )
             .expect("current contract marker should load");
 
-        assert_eq!(state, migration_state_through(112));
+        assert_eq!(state, migration_state_through(113));
         assert!(state.admits(&contract, schema));
         assert!(has_admissible_data_contract(
             &directory.join("rovai.sqlite")
@@ -23907,6 +24033,77 @@ mod tests {
                 .unwrap(),
             ("v1.25".to_string(), 66, 1)
         );
+        drop(restarted);
+        std::fs::remove_dir_all(directory).expect("temporary database should be removable");
+    }
+
+    #[test]
+    fn v113_admits_shutdown_protocol_v3_and_preserves_pending_v2_cycles() {
+        let (database, directory) = crate::test_support::seeded_runtime_database();
+        database
+            .connection()
+            .execute(
+                r#"
+                INSERT INTO planned_shutdown_cycle(
+                    core_generation, protocol_version, requested_at
+                ) VALUES ('pending-v2-generation', 2, datetime('now'))
+                "#,
+                [],
+            )
+            .unwrap();
+        downgrade_current_schema_to_v112_source_for_test(database.connection());
+        assert!(connection_has_admissible_data_contract(database.connection()).unwrap());
+        assert!(!connection_has_current_data_contract(database.connection()).unwrap());
+        drop(database);
+
+        let upgraded = Database::open(&directory).expect("v112 source should migrate to v113");
+        let marker: (i64, i64, i64) = upgraded
+            .connection()
+            .query_row(
+                r#"
+                SELECT
+                    (SELECT COUNT(*) FROM schema_migration WHERE version = 113),
+                    (SELECT COUNT(*) FROM planned_shutdown_cycle
+                     WHERE core_generation = 'pending-v2-generation'
+                       AND protocol_version = 2),
+                    (SELECT COUNT(*) FROM pragma_foreign_key_check)
+                "#,
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(marker, (1, 1, 0));
+        let cycle_schema: String = upgraded
+            .connection()
+            .query_row(
+                "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'planned_shutdown_cycle'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(cycle_schema.contains("protocol_version IN (2, 3)"));
+        upgraded
+            .connection()
+            .execute(
+                r#"
+                INSERT INTO planned_shutdown_cycle(
+                    core_generation, protocol_version, requested_at
+                ) VALUES ('new-v3-generation', 3, datetime('now'))
+                "#,
+                [],
+            )
+            .unwrap();
+        drop(upgraded);
+
+        let restarted = Database::open(&directory).expect("v113 restart should be idempotent");
+        let cycles: i64 = restarted
+            .connection()
+            .query_row("SELECT COUNT(*) FROM planned_shutdown_cycle", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(cycles, 2);
+        assert!(connection_has_current_data_contract(restarted.connection()).unwrap());
         drop(restarted);
         std::fs::remove_dir_all(directory).expect("temporary database should be removable");
     }

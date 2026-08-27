@@ -106,7 +106,8 @@ export function MemoryLibrary({
   reviewDrawerSignal = 0,
   onReviewDrawerSignalConsumed,
   onPendingCountChange,
-  onReady
+  onReady,
+  startupFeedbackVisible = true
 }: {
   agents: AgentProfile[]
   topNotices?: ReactNode
@@ -116,6 +117,7 @@ export function MemoryLibrary({
   onReviewDrawerSignalConsumed?(): void
   onPendingCountChange?(count: number): void
   onReady?(): void
+  startupFeedbackVisible?: boolean
 }): React.JSX.Element {
   const [library, setLibrary] = useState<MemoryLibraryView | null>(null)
   const [reviewItems, setReviewItems] = useState<HearthReviewItem[]>([])
@@ -133,6 +135,7 @@ export function MemoryLibrary({
   const [busy, setBusy] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [feedback, setFeedback] = useState<string | null>(null)
+  const startupContentVisible = startupFeedbackVisible || Boolean(error)
 
   const loadMemoryLibrary = useCallback(async (): Promise<MemoryLibraryView> => {
     const nextLibrary = await window.rovai.request<MemoryLibraryView>('memory.list')
@@ -575,9 +578,10 @@ export function MemoryLibrary({
 
   return (
     <section
-      className="memory-library"
+      className={`memory-library${startupContentVisible ? '' : ' startup-feedback-suppressed'}`}
       aria-labelledby="memory-library-title"
       aria-busy={loading}
+      aria-hidden={startupContentVisible ? undefined : true}
       data-startup-route="memory"
       data-startup-status={loading ? 'loading' : error && !library ? 'waiting' : 'ready'}
     >

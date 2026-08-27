@@ -223,13 +223,15 @@ use tokio::{
 
 const RUNTIME_CANCELLATION_INTERRUPT_TIMEOUT: Duration = Duration::from_secs(2);
 const RUNTIME_CANCELLATION_FENCE_TIMEOUT: Duration = Duration::from_secs(1);
-const PLANNED_SHUTDOWN_PROTOCOL_VERSION: u32 = 2;
+const PLANNED_SHUTDOWN_PROTOCOL_VERSION: u32 = 3;
 const PLANNED_SHUTDOWN_MIN_DEADLINE_MS: u64 = 100;
 const PLANNED_SHUTDOWN_MAX_DEADLINE_MS: u64 = 30_000;
 const PLANNED_SHUTDOWN_CLEANUP_RESERVE: Duration = Duration::from_secs(2);
 const PLANNED_SHUTDOWN_OUTPUT_RESERVE: Duration = Duration::from_millis(250);
 const PLANNED_SHUTDOWN_GUARD_GRACE: Duration = Duration::from_millis(250);
 const PLANNED_SHUTDOWN_FENCE_SETTLEMENT_RESERVE: Duration = Duration::from_secs(1);
+const PLANNED_SHUTDOWN_INTERRUPT_GRACE: Duration = Duration::from_millis(600);
+const PLANNED_SHUTDOWN_RUNTIME_REAP_GRACE: Duration = Duration::from_secs(2);
 const RUNTIME_USAGE_FLUSH_INTERVAL: Duration = Duration::from_secs(4);
 const RUNTIME_EVIDENCE_DELTA_BATCH_WINDOW: Duration = Duration::from_millis(25);
 const RUNTIME_EVIDENCE_DELTA_BATCH_MAX_ITEMS: usize = 32;
@@ -280,7 +282,7 @@ struct PlannedShutdownReport {
     active_executions_observed: usize,
     stop_requests_issued: usize,
     terminal_executions_settled: usize,
-    fenced_agent_runs_settled: usize,
+    cancelled_agent_runs_settled: usize,
     unsettled_effect_agent_runs: usize,
     controlled_shutdown_cycle_persisted: bool,
     unresolved_executions: usize,
@@ -294,7 +296,10 @@ fn parse_planned_shutdown_params(value: Value) -> Result<PlannedShutdownParams> 
     let params = serde_json::from_value::<PlannedShutdownParams>(value)
         .context("planned shutdown params are invalid")?;
     if params.protocol_version != PLANNED_SHUTDOWN_PROTOCOL_VERSION {
-        anyhow::bail!("planned shutdown protocolVersion must be 2");
+        anyhow::bail!(
+            "planned shutdown protocolVersion must be {}",
+            PLANNED_SHUTDOWN_PROTOCOL_VERSION
+        );
     }
     if !(PLANNED_SHUTDOWN_MIN_DEADLINE_MS..=PLANNED_SHUTDOWN_MAX_DEADLINE_MS)
         .contains(&params.deadline_ms)
@@ -412,24 +417,28 @@ fn enqueue_response(output: &mpsc::UnboundedSender<String>, response: &Response)
 
 async fn join_or_abort_until(
     handle: &mut tokio::task::JoinHandle<impl Send>,
-    deadline: tokio::time::Instant,
+    graceful_deadline: tokio::time::Instant,
+    abort_deadline: tokio::time::Instant,
 ) -> bool {
-    if tokio::time::timeout_at(deadline, &mut *handle)
+    if tokio::time::timeout_at(graceful_deadline, &mut *handle)
         .await
         .is_ok()
     {
         true
     } else {
         handle.abort();
-        false
+        tokio::time::timeout_at(abort_deadline, &mut *handle)
+            .await
+            .is_ok()
     }
 }
 
 async fn drain_join_set_until<T: 'static>(
     tasks: &mut tokio::task::JoinSet<T>,
-    deadline: tokio::time::Instant,
+    graceful_deadline: tokio::time::Instant,
+    abort_deadline: tokio::time::Instant,
 ) -> bool {
-    if tokio::time::timeout_at(deadline, async {
+    if tokio::time::timeout_at(graceful_deadline, async {
         while tasks.join_next().await.is_some() {}
     })
     .await
@@ -438,7 +447,11 @@ async fn drain_join_set_until<T: 'static>(
         true
     } else {
         tasks.abort_all();
-        false
+        tokio::time::timeout_at(abort_deadline, async {
+            while tasks.join_next().await.is_some() {}
+        })
+        .await
+        .is_ok()
     }
 }
 
@@ -11586,18 +11599,28 @@ async fn run_core(
         let _ = fleet_sweeper_shutdown_tx.send(());
         runtime_discovery_handle.abort();
 
+        let launch_grace_deadline = std::cmp::min(
+            settlement_deadline,
+            tokio::time::Instant::now() + PLANNED_SHUTDOWN_INTERRUPT_GRACE,
+        );
         let mut launch_quiesced = core
             .planned_shutdown
-            .finish_launch_closure_until(settlement_deadline)
+            .finish_launch_closure_until(launch_grace_deadline)
             .await;
         if !launch_quiesced {
-            eprintln!("planned shutdown deadline reached while launch handoff was draining");
+            eprintln!("planned shutdown launch handoff exceeded the prompt cancellation grace");
             deadline_expired = true;
             scheduler_handle.abort();
-            let _ = core.abort_agent_run_tasks_until(settlement_deadline).await;
+            let launch_abort_deadline = std::cmp::min(
+                fence_settlement_deadline,
+                tokio::time::Instant::now() + PLANNED_SHUTDOWN_GUARD_GRACE,
+            );
+            let _ = core
+                .abort_agent_run_tasks_until(launch_abort_deadline)
+                .await;
             launch_quiesced = core
                 .planned_shutdown
-                .finish_launch_closure_until(settlement_deadline)
+                .finish_launch_closure_until(launch_abort_deadline)
                 .await;
         }
 
@@ -11606,7 +11629,10 @@ async fn run_core(
         // later fencing leaves any accepted input unresolved for startup recovery.
         let active = if launch_quiesced {
             match tokio::time::timeout_at(
-                settlement_deadline,
+                std::cmp::min(
+                    fence_settlement_deadline,
+                    tokio::time::Instant::now() + PLANNED_SHUTDOWN_GUARD_GRACE,
+                ),
                 core.planned_shutdown.active_snapshots(),
             )
             .await
@@ -11621,6 +11647,17 @@ async fn run_core(
             Vec::new()
         };
         let mut active_executions_observed = active.len();
+
+        // Exit is the product-level cancellation linearization point. Once the
+        // stable active snapshot exists, no new Runtime terminal or callback may
+        // win over cancel-all settlement. Native interruption remains best effort
+        // and is followed by bounded process reap rather than terminal waiting.
+        core.planned_shutdown
+            .close_terminal_and_runtime_route_admission();
+        let interrupt_deadline = std::cmp::min(
+            settlement_deadline,
+            tokio::time::Instant::now() + PLANNED_SHUTDOWN_INTERRUPT_GRACE,
+        );
         let mut stop_tasks = tokio::task::JoinSet::new();
         for execution in active {
             let core = core.clone();
@@ -11636,38 +11673,60 @@ async fn run_core(
                 }
             }
         };
-        let stop_wait_completed = tokio::time::timeout_at(settlement_deadline, stop_wait)
+        let stop_tasks_quiesced = if tokio::time::timeout_at(interrupt_deadline, stop_wait)
             .await
-            .is_ok();
-        if !stop_wait_completed {
+            .is_ok()
+        {
+            true
+        } else {
             stop_tasks.abort_all();
-            deadline_expired = true;
-        }
+            tokio::time::timeout_at(fence_settlement_deadline, async {
+                while stop_tasks.join_next().await.is_some() {}
+            })
+            .await
+            .is_ok()
+        };
 
-        let background_requests_quiesced =
-            drain_join_set_until(&mut background_requests, settlement_deadline).await;
-        let scheduler_quiesced =
-            join_or_abort_until(&mut scheduler_handle, settlement_deadline).await;
-        let attachment_projection_quiesced =
-            join_or_abort_until(&mut attachment_projection_handle, settlement_deadline).await;
-        let runtime_checks_quiesced =
-            join_or_abort_until(&mut runtime_check_handle, settlement_deadline).await;
-        let fleet_sweeper_quiesced =
-            join_or_abort_until(&mut fleet_sweeper_handle, settlement_deadline).await;
-        let runtime_discovery_quiesced =
-            join_or_abort_until(&mut runtime_discovery_handle, settlement_deadline).await;
+        let background_requests_quiesced = drain_join_set_until(
+            &mut background_requests,
+            interrupt_deadline,
+            fence_settlement_deadline,
+        )
+        .await;
+        let scheduler_quiesced = join_or_abort_until(
+            &mut scheduler_handle,
+            interrupt_deadline,
+            fence_settlement_deadline,
+        )
+        .await;
+        let attachment_projection_quiesced = join_or_abort_until(
+            &mut attachment_projection_handle,
+            interrupt_deadline,
+            fence_settlement_deadline,
+        )
+        .await;
+        let runtime_checks_quiesced = join_or_abort_until(
+            &mut runtime_check_handle,
+            interrupt_deadline,
+            fence_settlement_deadline,
+        )
+        .await;
+        let fleet_sweeper_quiesced = join_or_abort_until(
+            &mut fleet_sweeper_handle,
+            interrupt_deadline,
+            fence_settlement_deadline,
+        )
+        .await;
+        let runtime_discovery_quiesced = join_or_abort_until(
+            &mut runtime_discovery_handle,
+            interrupt_deadline,
+            fence_settlement_deadline,
+        )
+        .await;
 
-        let all_settled = launch_quiesced
-            && core
-                .planned_shutdown
-                .wait_for_no_active_until(settlement_deadline)
-                .await;
-
-        // Fence both admissions at the settlement cutoff, then abort their
-        // tracked owners before spending the reserved cleanup budget draining
-        // the correctness-critical guards.
-        core.planned_shutdown
-            .close_terminal_and_runtime_route_admission();
+        // Admissions are already closed at the cancel-all cutoff. Abort their
+        // tracked owners, drain any guard admitted before the cutoff, then make
+        // the durable cancellation terminal authoritative.
         let _ = event_shutdown_tx.send(());
         let _ = acp_shutdown_tx.send(());
         let _ = builtin_tool_shutdown_tx.send(());
@@ -11686,8 +11745,16 @@ async fn run_core(
         if !terminal_drained || !routes_drained {
             deadline_expired = true;
         }
-        let builtin_tool_quiesced =
-            join_or_abort_until(&mut builtin_tool_handle, fence_settlement_deadline).await;
+        let guard_grace_deadline = std::cmp::min(
+            fence_settlement_deadline,
+            tokio::time::Instant::now() + PLANNED_SHUTDOWN_GUARD_GRACE,
+        );
+        let builtin_tool_quiesced = join_or_abort_until(
+            &mut builtin_tool_handle,
+            guard_grace_deadline,
+            fence_settlement_deadline,
+        )
+        .await;
         let builtin_tools_fenced = core
             .builtin_tool_leases
             .fence_all_until(fence_settlement_deadline)
@@ -11697,13 +11764,25 @@ async fn run_core(
             && core
                 .drain_agent_run_tasks_until(fence_settlement_deadline)
                 .await;
-        let event_quiesced =
-            join_or_abort_until(&mut event_handle, fence_settlement_deadline).await;
-        let acp_event_quiesced =
-            join_or_abort_until(&mut acp_event_handle, fence_settlement_deadline).await;
+        let event_quiesced = join_or_abort_until(
+            &mut event_handle,
+            tokio::time::Instant::now(),
+            fence_settlement_deadline,
+        )
+        .await;
+        let acp_event_quiesced = join_or_abort_until(
+            &mut acp_event_handle,
+            tokio::time::Instant::now(),
+            fence_settlement_deadline,
+        )
+        .await;
         let _ = runtime_usage_shutdown_tx.send(());
-        let runtime_usage_quiesced =
-            join_or_abort_until(&mut runtime_usage_handle, fence_settlement_deadline).await;
+        let runtime_usage_quiesced = join_or_abort_until(
+            &mut runtime_usage_handle,
+            guard_grace_deadline,
+            fence_settlement_deadline,
+        )
+        .await;
 
         let unresolved_executions_before_fence = match tokio::time::timeout_at(
             fence_settlement_deadline,
@@ -11755,7 +11834,7 @@ async fn run_core(
             deadline_expired = true;
             None
         };
-        let (fenced_agent_runs_settled, unsettled_effect_agent_runs) =
+        let (cancelled_agent_runs_settled, unsettled_effect_agent_runs) =
             match controlled_fence_settlement {
                 Some(Ok(Ok(settlement))) => {
                     let unsettled = settlement
@@ -11795,7 +11874,13 @@ async fn run_core(
                 unresolved_executions_before_fence
             }
         };
-        let runtimes_quiesced = core.shutdown_all_runtimes_until(output_deadline).await;
+        let runtime_reap_deadline = std::cmp::min(
+            output_deadline,
+            tokio::time::Instant::now() + PLANNED_SHUTDOWN_RUNTIME_REAP_GRACE,
+        );
+        let runtimes_quiesced = core
+            .shutdown_all_runtimes_until(runtime_reap_deadline)
+            .await;
 
         deadline_expired |= tokio::time::Instant::now() >= deadline
             || !launch_quiesced
@@ -11807,8 +11892,7 @@ async fn run_core(
             || !attachment_projection_quiesced
             || !runtime_checks_quiesced
             || !fleet_sweeper_quiesced
-            || !stop_wait_completed
-            || !all_settled
+            || !stop_tasks_quiesced
             || !builtin_tool_quiesced
             || !builtin_tools_fenced
             || !agent_tasks_quiesced
@@ -11824,7 +11908,7 @@ async fn run_core(
             active_executions_observed,
             stop_requests_issued,
             terminal_executions_settled,
-            fenced_agent_runs_settled,
+            cancelled_agent_runs_settled,
             unsettled_effect_agent_runs,
             controlled_shutdown_cycle_persisted,
             unresolved_executions,
@@ -17540,14 +17624,14 @@ while IFS= read -r _ignored; do :; done
     #[test]
     fn planned_shutdown_request_is_closed_versioned_and_bounded() {
         let valid = parse_planned_shutdown_params(json!({
-            "protocolVersion": 2,
+            "protocolVersion": 3,
             "deadlineMs": 10_000,
         }))
         .unwrap();
         assert_eq!(valid.deadline_ms, 10_000);
         assert!(
             parse_planned_shutdown_params(json!({
-                "protocolVersion": 1,
+                "protocolVersion": 2,
                 "deadlineMs": 10_000,
             }))
             .unwrap_err()
@@ -17556,7 +17640,7 @@ while IFS= read -r _ignored; do :; done
         );
         assert!(
             parse_planned_shutdown_params(json!({
-                "protocolVersion": 2,
+                "protocolVersion": 3,
                 "deadlineMs": 99,
             }))
             .unwrap_err()
@@ -17565,7 +17649,7 @@ while IFS= read -r _ignored; do :; done
         );
         assert!(
             parse_planned_shutdown_params(json!({
-                "protocolVersion": 2,
+                "protocolVersion": 3,
                 "deadlineMs": 10_000,
                 "rendererAuthority": true,
             }))
