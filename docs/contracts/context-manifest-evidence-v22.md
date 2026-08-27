@@ -26,9 +26,9 @@ Gather Completion Input = 3
 Camp Attachment View Contract = 2
 Camp Attachment View Receipt = 2
 Runtime Attachment Auth Receipt = 1
-Data Contract = v1.25
-Projection Schema = 66
-Latest Migration = 112
+Data Contract = v1.26
+Projection Schema = 67
+Latest Migration = 113
 ```
 
 New-write ContextManifest pairing is closed:
@@ -120,7 +120,7 @@ an ExternalPrincipal source or ExternalQuote necessarily changes the selected Ca
 
 ## Migration and compatibility
 
-Migration 112 preserves historical Manifest rows and extends the closed table constraints to pairing 22/22. The new-write
+Migration 113 preserves historical Manifest rows and extends the closed table constraints to pairing 22/22. The new-write
 trigger rejects any new ContextManifest not using version 22. Historical terminal v19-v21 evidence remains readable and is
 not rewritten; an already frozen v21 Runtime input remains its original evidence rather than being relabeled v22.
 

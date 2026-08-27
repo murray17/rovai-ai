@@ -2,7 +2,7 @@
 document_type: version-decisions
 version: v1.29
 lifecycle: historical
-last_updated: 2026-08-26
+last_updated: 2026-08-27
 ---
 
 # v1.29 决策记录
@@ -167,3 +167,57 @@ compatibility reconciler、Runtime permission evidence 或其他附件存储重�
 - 只给批量 Stop 增加特判：显式取消、attempt cleanup 与 projection cleanup 继续漂移；
 - 让迟到 projection completion 重开 Delivery：违反 terminal monotonicity，并可能在用户停止后唤醒 Agent；
 - 把本 hotfix 绑定到 Managed Attachment v2：扩大故障恢复时间，并让独立取消正确性依赖未交付 Schema。
+
+<a id="v1-29-d06"></a>
+## V1.29-D06：新附件使用独立 Managed v2，Context 保持 DB-only
+
+### 背景
+
+旧附件发送先把语义提交为 legacy publication intent，再等待 Camp Published View write admission。活跃 AgentRun
+在整个生命周期持有同 Camp read admission，因此 A 运行中发送附件给 B 会形成 `projection_blocked + attempt=0`，
+直到 A 结束才可能复制、释放 gate 并开始 B 的 dispatch。零 attempt cancellation hotfix 只修复取消 CHECK，不能
+消除这一等待关系。
+
+### 决定
+
+Migration 112 从 `v1.24 / schema 65` 升到 Data Contract `v1.25 / schema 66`，新增
+`managed_attachment`、`camp_message_attachment_ref`、`managed_attachment_ingest_intent` 与简单 Camp attachment
+revision。Composer/Agent 的所有新附件在 Send 时经私有 staging 复制一次到既有 Camp Runtime root 的 opaque
+`.managed-v2` identity；最终事务原子提交 available resource、Message refs、CampMessage、Deliveries、Draft
+消费与 intent。相同 Camp v2 identity 再引用只新增 ref。
+
+Managed v2 永不取得 legacy View write admission、等待 quiescence/活跃 Run、推进 generation、停止/fence Run 或
+创建 projection gate。新 Delivery 直接走普通 Dispatch Pump。历史 `message_attachment` 与 Authority/View 不迁移、
+不双写，只保留旧读取和未完成 operation 收口。
+
+Context、Camp Open 与 Camp History 对 v2 只读 SQLite metadata 并构造路径，不在每次 materialization 中
+`stat/open/read_dir/digest` payload。路径真正不可读时由 Runtime/Tool 原生失败处理；不新增 unavailable
+descriptor、伪造正文或 Run Fact，也不因一次 Runtime 权限/读取错误改写附件全局状态。Runtime 继续获得现有
+Camp-scoped `attachments` root，不建立 per-Run copy、Inline、Host broker 或通用权限证据平台。
+
+新 Context 只为成功解析的 legacy v1 引用冻结 legacy receipt；无成功 legacy 引用时使用 no-legacy sentinel，
+不得读取或验证 `camp_attachment_view`。legacy locator/View 解析失败只产生安全诊断并省略该引用。新 Run 直接验证
+稳定 Camp root，使用 `live_append_v1` compatibility；Scheduler 不再取得 legacy read admission、检查 unresolved
+writer intent 或在 dispatch 前重建 View。旧 publication gate/generation 仅收口升级前遗留 operation。
+
+当前规范见 [Camp Attachments](../../architecture/camp-published-attachment-view.md)、
+[Camp Attachment v6](../../contracts/camp-attachment-v6.md)、
+[Camp Composer Draft v5](../../contracts/camp-composer-draft-v5.md)、
+[Camp Message Send v13](../../contracts/camp-message-send-v13.md)和
+[Message Delivery v8](../../contracts/message-delivery-v8.md)。
+
+### 后果
+
+- A 保持 running 时，其附件可完成 v2 commit，B 的 attempt 可在 A 结束前开始；
+- v2 没有第二份 Authority，Runtime 同 UID 强隔离不再是产品保证；
+- Context 热路径不会因历史文件缺失增加逐附件磁盘 I/O；
+- 坏掉或未完成的 legacy View 不再阻断不引用成功 legacy 路径的 Context、Runtime Input Delivery 或 v2-only Run；
+- 0.01/0.02/0.03 等旧库按顺序升级，legacy Camp 无需转换历史附件即可继续对话并写入 v2；
+- 显式 preview/open 仍执行动作时完整校验，不把该成本转移到每次 Context。
+
+### 被拒绝方案
+
+- 继续修补 generation fencing 或等待活跃 Run：保留了导致 A2A 延迟的根因；
+- per-Run copy、Inline 或 Host broker：建立额外 Authority/权限兼容平台，超出性能修复范围；
+- 启动时批量迁移或 v1/v2 双写：扩大升级风险且不解决新写路径锁依赖；
+- Context 每次探测本地文件并生成 unavailable descriptor：把文件系统扫描放回热路径，并替 Runtime 猜测失败。

@@ -25,7 +25,7 @@ last_updated: 2026-08-27
 
 ## 交付范围
 
-- Migration 112 建立 `Data Contract v1.25 / projection schema 66`，新增 ProjectBinding、ExternalPrincipal、
+- Migration 113 建立 `Data Contract v1.26 / projection schema 67`，新增 ProjectBinding、ExternalPrincipal、
   channel conversation/binding、Feishu account/member Bot、group roster、inbound aggregate、ChannelTurnRequest 和
   ChannelDelivery，并允许 ExternalPrincipal CampMessage author 与 ContextManifest/Formatter 22；
 - ProjectBinding 使用 opaque ID、显示名、kind、canonical path、status/version，只有 `local_user` 能维护或绑定；
@@ -72,7 +72,7 @@ ExternalQuote 的确定性 agent projection。Bootstrap、Session Charter、sect
 
 ## 验收
 
-实施与证据由[实施计划](implementation-plan.md)维护。仓库内完成门槛已通过，包括 v111→v112 升级、owner-only/未绑定负向、
+实施与证据由[实施计划](implementation-plan.md)维护。仓库内完成门槛已通过，包括 v112→v113 升级、owner-only/未绑定负向、
 multi-Bot fail-closed、FIFO promotion、普通群/话题 roster、ExternalQuote/Context bytes、safeStorage/Renderer
 秘密隔离、Host 恢复、双主题和完整 Rust/TypeScript/文档/构建门禁。真实飞书租户扫码、应用创建和收发仍需要拥有
 可用企业权限的主人在发布环境执行，自动化不伪造外部成功。

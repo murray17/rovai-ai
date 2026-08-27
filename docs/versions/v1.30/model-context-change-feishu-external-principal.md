@@ -199,7 +199,7 @@ Closed pairing 增加：
 ContextManifest 22 + Formatter 22 + Run Facts 2 + View Receipt 2
 ```
 
-Migration 112 保留历史 pairing 19/20、20/21、21/21，只把新 write trigger 切到 22。
+Migration 113 保留历史 pairing 19/20、20/21、21/21，只把新 write trigger 切到 22。
 
 ## 明确不变
 
@@ -242,4 +242,4 @@ ExternalQuote 投影文本或改变 Profile/预算/section order 的方案都必
 - ContextManifest 保存 source/projected/exact payload digest，Runtime Input Delivery bytes 与 prepared payload一致；
 - negative：Host override、ExternalPrincipal raw identity、external message ID、被引消息单独 CampMessage、历史 reply
   projection 和 Formatter 21 new write 均不存在；
-- Migration 112 从 v1.24/schema 65 保留历史 Manifest/消息并安装 22/22 pairing、schema 66 与外键完整性。
+- Migration 113 从 v1.25/schema 66 保留历史 Manifest/消息并安装 22/22 pairing、schema 67 与外键完整性。

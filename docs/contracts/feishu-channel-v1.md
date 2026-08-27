@@ -247,7 +247,7 @@ aggregate；Host tick 终结超时 aggregate、投影 request output、完成 te
 
 ## 9. Data Contract
 
-Migration 112 从 `Data Contract v1.24 / projection schema 65` 升到 `v1.25 / schema 66`，增加本合同的 Core 表、
+Migration 113 从 `Data Contract v1.25 / projection schema 66` 升到 `v1.26 / schema 67`，增加本合同的 Core 表、
 `external_principal` CampMessage author、ContextManifest 22 pairing 和 Formatter 22 new-write trigger。它逐字保留
 既有 Camp、消息、Manifest 和 terminal evidence，不把历史飞书消息回填为渠道事实。
 

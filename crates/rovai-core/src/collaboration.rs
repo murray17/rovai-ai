@@ -14,7 +14,9 @@ const TRUSTED_MEMBERSHIP_SYSTEM_COMPONENTS: &[&str] = &["channel-membership-sync
 
 use crate::{
     agent_profile::{FrozenAgentRuntimeConfig, resolve_frozen_runtime},
-    camp_attachment::consume_prepared_attachments,
+    camp_attachment::{
+        consume_prepared_attachments, consume_prepared_attachments_for_managed_ingest,
+    },
     camp_attachment_publication::CampAttachmentPublicationCoordinator,
     camp_attachment_view::commit_publication_in_message_transaction,
     camp_content::{
@@ -36,6 +38,9 @@ use crate::{
     },
     gather::{
         GatherInitiatorLifetime, cancel_gathers_for_initiator, settle_item_from_delivery_terminal,
+    },
+    managed_attachment::{
+        CommitManagedAttachmentIngest, ManagedAttachmentIngestSource, ManagedAttachmentService,
     },
     message_delivery::cancel_pending_turn_deliveries,
     runtime::AgentRunWorkspace,
@@ -2503,6 +2508,7 @@ impl CollaborationService {
             }))
     }
 
+    #[cfg(test)]
     pub fn send_user_camp_draft(
         &self,
         database: &mut Database,
@@ -2511,6 +2517,32 @@ impl CollaborationService {
         self.send_user_camp_draft_with_publication(database, envelope, None)
     }
 
+    pub fn send_user_camp_draft_with_managed_ingest(
+        &self,
+        database: &mut Database,
+        envelope: &CommandEnvelope<SendUserCampDraftCommand>,
+        managed_attachment_ingest_intent_id: Option<&str>,
+    ) -> Result<CommandExecution> {
+        self.execute_user_camp_message(
+            database,
+            envelope,
+            &envelope.payload,
+            UserCampMessageAttachmentCommit {
+                legacy_publication_operation_id: None,
+                managed_ingest_intent_id: managed_attachment_ingest_intent_id,
+                consume_composer_draft: true,
+            },
+            |transaction| {
+                load_structured_draft_submission(
+                    transaction,
+                    &envelope.payload.camp_id,
+                    envelope.payload.draft_revision,
+                )
+            },
+        )
+    }
+
+    #[cfg(test)]
     pub fn send_user_camp_draft_with_publication(
         &self,
         database: &mut Database,
@@ -2521,8 +2553,11 @@ impl CollaborationService {
             database,
             envelope,
             &envelope.payload,
-            attachment_publication_operation_id,
-            true,
+            UserCampMessageAttachmentCommit {
+                legacy_publication_operation_id: attachment_publication_operation_id,
+                managed_ingest_intent_id: None,
+                consume_composer_draft: true,
+            },
             |transaction| {
                 load_structured_draft_submission(
                     transaction,
@@ -2566,8 +2601,11 @@ impl CollaborationService {
             database,
             envelope,
             &command,
-            None,
-            false,
+            UserCampMessageAttachmentCommit {
+                legacy_publication_operation_id: None,
+                managed_ingest_intent_id: None,
+                consume_composer_draft: false,
+            },
             move |transaction| {
                 let camp_exists = transaction
                     .query_row("SELECT 1 FROM camp WHERE id = ?1", [&camp_id], |row| {
@@ -2757,6 +2795,7 @@ impl CollaborationService {
                 body: &input.body,
                 structured_content: &input.structured_content,
                 prepared_attachment_ids: &[],
+                managed_attachment_ingest_intent_id: None,
                 legacy_attachment_publication_operation_id: None,
                 consume_composer_draft: false,
                 draft_revision: 1,
@@ -2793,8 +2832,7 @@ impl CollaborationService {
         database: &mut Database,
         envelope: &CommandEnvelope<C>,
         command: &SendUserCampDraftCommand,
-        attachment_publication_operation_id: Option<&str>,
-        consume_composer_draft: bool,
+        attachment_commit: UserCampMessageAttachmentCommit<'_>,
         prepare: Prepare,
     ) -> Result<CommandExecution>
     where
@@ -2946,9 +2984,11 @@ impl CollaborationService {
                             body: &submission.body,
                             structured_content: &submission.structured_content,
                             prepared_attachment_ids: &submission.prepared_attachment_ids,
-                            legacy_attachment_publication_operation_id:
-                                attachment_publication_operation_id,
-                            consume_composer_draft,
+                            legacy_attachment_publication_operation_id: attachment_commit
+                                .legacy_publication_operation_id,
+                            managed_attachment_ingest_intent_id: attachment_commit
+                                .managed_ingest_intent_id,
+                            consume_composer_draft: attachment_commit.consume_composer_draft,
                             draft_revision: command.draft_revision,
                             address_mode: submission.address.mode(),
                             reply_to_camp_message_id: submission
@@ -3042,6 +3082,13 @@ struct CampMessageAuthor<'a> {
 struct PreparedAgentRunConfig {
     effective_config: Value,
     runtime: FrozenAgentRuntimeConfig,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct UserCampMessageAttachmentCommit<'a> {
+    legacy_publication_operation_id: Option<&'a str>,
+    managed_ingest_intent_id: Option<&'a str>,
+    consume_composer_draft: bool,
 }
 
 struct CampMessageSubmission {
@@ -3288,6 +3335,7 @@ struct QueueCampMessageInput<'a> {
     structured_content: &'a [StructuredCampMessageSegment],
     prepared_attachment_ids: &'a [String],
     legacy_attachment_publication_operation_id: Option<&'a str>,
+    managed_attachment_ingest_intent_id: Option<&'a str>,
     consume_composer_draft: bool,
     draft_revision: i64,
     address_mode: &'a str,
@@ -3455,12 +3503,19 @@ fn queue_camp_message_and_runs(
     )?;
     if !input.consume_composer_draft
         && (!input.prepared_attachment_ids.is_empty()
-            || input.legacy_attachment_publication_operation_id.is_some())
+            || input.legacy_attachment_publication_operation_id.is_some()
+            || input.managed_attachment_ingest_intent_id.is_some())
     {
         anyhow::bail!("Non-Composer Camp message cannot consume Composer attachments");
     }
+    if input.legacy_attachment_publication_operation_id.is_some()
+        && input.managed_attachment_ingest_intent_id.is_some()
+    {
+        anyhow::bail!("Camp message cannot commit legacy and Managed attachments together");
+    }
     let attachment_publication = if input.consume_composer_draft
         && input.legacy_attachment_publication_operation_id.is_none()
+        && input.managed_attachment_ingest_intent_id.is_none()
     {
         CampAttachmentPublicationCoordinator.commit_composer_intent(
             transaction,
@@ -3473,7 +3528,25 @@ fn queue_camp_message_and_runs(
     } else {
         None
     };
-    if input.consume_composer_draft {
+    if let Some(intent_id) = input.managed_attachment_ingest_intent_id {
+        ManagedAttachmentService.commit_ingest(
+            transaction,
+            CommitManagedAttachmentIngest {
+                intent_id,
+                camp_id: input.camp_id,
+                camp_message_id: input.camp_message_id,
+                expected_source: ManagedAttachmentIngestSource::Composer,
+                created_by_type: author_type,
+                created_by_id: author_id,
+                now: input.now,
+            },
+        )?;
+        consume_prepared_attachments_for_managed_ingest(
+            transaction,
+            input.camp_id,
+            input.prepared_attachment_ids,
+        )?;
+    } else if input.consume_composer_draft {
         consume_prepared_attachments(
             transaction,
             input.camp_id,

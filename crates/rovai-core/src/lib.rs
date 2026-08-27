@@ -33,6 +33,7 @@ pub mod execution_budget;
 pub mod execution_evidence;
 pub mod gather;
 pub mod git;
+pub mod managed_attachment;
 pub mod managed_blob;
 pub mod managed_process;
 pub mod mcp;

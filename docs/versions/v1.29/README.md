@@ -6,13 +6,14 @@ authority: version-scope-and-status
 design_status: confirmed
 implementation_status: completed
 model_context_change: false
-last_updated: 2026-08-26
+last_updated: 2026-08-27
 ---
 
 # Rovai-ai v1.29：Camp 动态队员管理
 
 > 当前状态：动态 Camp membership 的 Core、Desktop IPC、Renderer、自动化门禁与隔离真实 App 验收均已完成；
-> 后继 Message Delivery zero-attempt cancellation hotfix 已完成实现与自动化验证，不替换当前 App。
+> 后继 Message Delivery zero-attempt cancellation hotfix 与 Managed Attachment v2 无 Run 等待写路径已完成实现
+> 和自动化验证，不替换当前 App。
 
 前置版本：[v1.28 Grok Build + MiniMax M3](../v1.28/README.md)已按冻结时事实转为 historical。
 
@@ -28,6 +29,8 @@ reconciliation 完成已接受工作的正式结算。
   reconciliation、外部来源绑定和 Delivery admission membership version；旧非终态技术工作 clean break；
 - Migration 111 将当前 Data Contract 升为 `v1.24 / projection schema 65`，只放宽 Message Delivery 的零 attempt
   cancelled terminal；显式/批量取消共用同一转换，迟到 projection completion 和 restart 不能复活终态；
+- Migration 112 将当前 Data Contract 升为 `v1.25 / projection schema 66`，新增 Managed Attachment v2、CampMessage
+  refs 与 durable ingest intent；新附件不再进入 legacy publication gate，不等待或 fence 活跃 AgentRun；
 - 新增 `camps.members.add`、`camps.members.removalPreview`、`camps.members.remove` Desktop API；增加使用
   exact membership generation/version 的添加、预览和移除命令；
 - 添加不创建 Conversation，也不修改已冻结 AgentRun 的 Collaboration State；曾离开的 Agent 再次添加仍是一次
@@ -64,18 +67,19 @@ reconciliation 完成已接受工作的正式结算。
 
 验收状态由[实施计划](implementation-plan.md)维护。交付必须覆盖 add/remove 幂等和冲突、最后成员、Lead
 替换、所有业务工具 exact-run fence、Delivery/Gather/terminal publication、Migration clean break、双主题与键盘
-交互，以及从 current-main Migration 110 数据库执行 Migration 111 的零 attempt 取消与重启幂等回归。
+交互，从 current-main Migration 110 数据库执行 Migration 111 的零 attempt 取消与重启幂等回归，以及从 Migration
+111 升级 112、活跃 source Run 下 14 MiB 附件直接 dispatch、ref-only 复用与 DB-only Context path 回归。
 
 ## 跨版本文档影响
 
 | 范围 | 结论 | 证据或理由 |
 | --- | --- | --- |
 | Version lifecycle | 已更新 | 本概览、[实施计划](implementation-plan.md)、[决定](decisions.md)与[版本索引](../README.md)共同切换 `current_version`。 |
-| Decisions | 已更新 | [v1.29 决定](decisions.md)冻结 cutover/reconciliation、exact membership lifetime、稳定模型投影、受信外部来源边界及零 attempt 取消的独立后继迁移。 |
-| Contracts | 已更新 | 新增 [Camp Membership v1](../../contracts/camp-membership-v1.md)，并升级 [Camp Open Projection v7](../../contracts/camp-open-projection-v7.md)、[Message Delivery v7](../../contracts/message-delivery-v7.md)、[Gather v4](../../contracts/gather-v4.md)及[Missing-Send Recovery Publication v2](../../contracts/missing-send-recovery-publication-v2.md)。 |
-| Architecture | 已更新 | 新增[动态 Camp 队员关系](../../architecture/dynamic-camp-membership.md)，并同步 Camp open、A2A、Gather、Built-in 与基础不变量。 |
+| Decisions | 已更新 | [v1.29 决定](decisions.md)冻结 cutover/reconciliation、exact membership lifetime、稳定模型投影、受信外部来源、零 attempt 取消及 Managed v2 无 Run 等待写路径。 |
+| Contracts | 已更新 | 新增 [Camp Membership v1](../../contracts/camp-membership-v1.md)，并升级 [Camp Open Projection v7](../../contracts/camp-open-projection-v7.md)、[Camp Attachment v6](../../contracts/camp-attachment-v6.md)、[Camp Composer Draft v5](../../contracts/camp-composer-draft-v5.md)、[Camp Message Send v13](../../contracts/camp-message-send-v13.md)、[Message Delivery v8](../../contracts/message-delivery-v8.md)、[Gather v4](../../contracts/gather-v4.md)及[Missing-Send Recovery Publication v2](../../contracts/missing-send-recovery-publication-v2.md)。 |
+| Architecture | 已更新 | 新增[动态 Camp 队员关系](../../architecture/dynamic-camp-membership.md)，并将[附件架构](../../architecture/camp-published-attachment-view.md)切换为 Managed v2 当前写入与 legacy v1 只读兼容，同时同步 A2A 与基础不变量。 |
 | UI | 已更新 | [Camp 会话工作区](../../ui/components/conversation-workspace.md)冻结添加入口、成员菜单、移除预览、最后成员和 reconciliation 状态。 |
 | Runtime Activity | 确认无需更新 | 成员变化使用 Core 领域事件与既有 Run/Delivery terminal activity，不新增 Runtime activity kind。 |
-| Runtime compatibility | 确认无需更新 | 不改变 Adapter、Runtime 启动协议、模型或宿主平台资格。 |
+| Runtime compatibility | 确认无需更新 | 继续传既有 Camp-scoped attachment root，不改变 Adapter wire、Runtime 启动协议、模型或宿主平台资格。 |
 | Documentation routing | 已更新 | [文档导航](../../README.md)、Contracts、Architecture 与 Decisions 当前入口均加入动态 membership 路由。 |
 | Root README | 确认无需更新 | 本次扩展既有 Camp 管理能力，不改变项目定位或长期支持声明。 |

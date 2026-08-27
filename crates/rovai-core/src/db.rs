@@ -50,8 +50,10 @@ pub struct Database {
     runtime_camp_files_root_identity_digest: String,
 }
 
-const CURRENT_DATA_CONTRACT_VERSION: &str = "v1.25";
-const CURRENT_PROJECTION_SCHEMA_VERSION: i64 = 66;
+const CURRENT_DATA_CONTRACT_VERSION: &str = "v1.26";
+const CURRENT_PROJECTION_SCHEMA_VERSION: i64 = 67;
+const V113_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.25";
+const V113_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION: i64 = 66;
 const V112_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.24";
 const V112_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION: i64 = 65;
 const V111_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.23";
@@ -179,6 +181,7 @@ struct CurrentMigrationState {
     v110: bool,
     v111: bool,
     v112: bool,
+    v113: bool,
 }
 
 impl CurrentMigrationState {
@@ -188,6 +191,53 @@ impl CurrentMigrationState {
             return false;
         }
         if contract == CURRENT_DATA_CONTRACT_VERSION && schema == CURRENT_PROJECTION_SCHEMA_VERSION
+        {
+            return self.v70
+                && self.v71
+                && self.v76
+                && self.v77
+                && self.v78
+                && self.v79
+                && self.v80
+                && self.v81
+                && self.v82
+                && self.v83
+                && self.v84
+                && self.v85
+                && self.v86
+                && self.v87
+                && self.v88
+                && self.v89
+                && self.v90
+                && self.v91
+                && self.v92
+                && self.v93
+                && self.v94
+                && self.v95
+                && self.v96
+                && self.v97
+                && self.v98
+                && self.v99
+                && self.v100
+                && self.v101
+                && self.v102
+                && self.v103
+                && self.v104
+                && self.v105
+                && self.v106
+                && self.v107
+                && self.v108
+                && self.v109
+                && self.v110
+                && self.v111
+                && self.v112
+                && self.v113;
+        }
+        if self.v113 {
+            return false;
+        }
+        if contract == V113_MIGRATION_SOURCE_DATA_CONTRACT_VERSION
+            && schema == V113_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION
         {
             return self.v70
                 && self.v71
@@ -1323,7 +1373,8 @@ fn load_current_migration_state(
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 109),
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 110),
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 111),
-               EXISTS(SELECT 1 FROM schema_migration WHERE version = 112)
+               EXISTS(SELECT 1 FROM schema_migration WHERE version = 112),
+               EXISTS(SELECT 1 FROM schema_migration WHERE version = 113)
         "#,
         [],
         |row| {
@@ -1371,6 +1422,7 @@ fn load_current_migration_state(
                 v110: row.get(40)?,
                 v111: row.get(41)?,
                 v112: row.get(42)?,
+                v113: row.get(43)?,
             })
         },
     )
@@ -2832,7 +2884,10 @@ impl Database {
                 self.migrate_message_delivery_zero_attempt_cancellation_v111()?;
             }
             if !self.schema_migration_applied(112)? {
-                self.migrate_channel_platform_v112()?;
+                self.migrate_managed_attachment_v2_v112()?;
+            }
+            if !self.schema_migration_applied(113)? {
+                self.migrate_channel_platform_v113()?;
             }
             if let Err(error) =
                 crate::notification::maintain_notification_episode_retention(self.connection())
@@ -3218,7 +3273,10 @@ impl Database {
             self.migrate_message_delivery_zero_attempt_cancellation_v111()?;
         }
         if !self.schema_migration_applied(112)? {
-            self.migrate_channel_platform_v112()?;
+            self.migrate_managed_attachment_v2_v112()?;
+        }
+        if !self.schema_migration_applied(113)? {
+            self.migrate_channel_platform_v113()?;
         }
         if let Err(error) =
             crate::notification::maintain_notification_episode_retention(self.connection())
@@ -15852,7 +15910,7 @@ impl Database {
         Ok(())
     }
 
-    fn migrate_channel_platform_v112(&mut self) -> Result<()> {
+    fn migrate_channel_platform_v113(&mut self) -> Result<()> {
         self.connection
             .execute_batch("PRAGMA foreign_keys = OFF;")?;
         let migration_result = (|| -> Result<()> {
@@ -15867,29 +15925,29 @@ impl Database {
             let renamed_schema = if current_schema.contains("CREATE TABLE \"camp_message\"") {
                 current_schema.replacen(
                     "CREATE TABLE \"camp_message\"",
-                    "CREATE TABLE camp_message_v112",
+                    "CREATE TABLE camp_message_v113",
                     1,
                 )
             } else {
                 current_schema.replacen(
                     "CREATE TABLE camp_message",
-                    "CREATE TABLE camp_message_v112",
+                    "CREATE TABLE camp_message_v113",
                     1,
                 )
             };
             let author_constraint = "CHECK(author_type IN ('user', 'agent', 'system'))";
             let expanded_author_constraint =
                 "CHECK(author_type IN ('user', 'agent', 'system', 'external_principal'))";
-            let message_v112 = renamed_schema
+            let message_v113 = renamed_schema
                 .replace(
                     "REFERENCES camp_message(id)",
-                    "REFERENCES camp_message_v112(id)",
+                    "REFERENCES camp_message_v113(id)",
                 )
                 .replacen(author_constraint, expanded_author_constraint, 1);
-            if !message_v112.contains("CREATE TABLE camp_message_v112")
-                || !message_v112.contains(expanded_author_constraint)
+            if !message_v113.contains("CREATE TABLE camp_message_v113")
+                || !message_v113.contains(expanded_author_constraint)
             {
-                anyhow::bail!("v112 could not admit External Principal CampMessage authors");
+                anyhow::bail!("v113 could not admit External Principal CampMessage authors");
             }
             let message_columns = table_columns(&transaction, "camp_message")?
                 .into_iter()
@@ -15912,12 +15970,12 @@ impl Database {
                     .collect::<rusqlite::Result<Vec<_>>>()?
             };
 
-            transaction.execute_batch(&message_v112)?;
+            transaction.execute_batch(&message_v113)?;
             transaction.execute_batch(&format!(
-                "INSERT INTO camp_message_v112({message_columns}) \
+                "INSERT INTO camp_message_v113({message_columns}) \
                  SELECT {message_columns} FROM camp_message;\n\
                  DROP TABLE camp_message;\n\
-                 ALTER TABLE camp_message_v112 RENAME TO camp_message;"
+                 ALTER TABLE camp_message_v113 RENAME TO camp_message;"
             ))?;
             for schema in dependent_schema {
                 transaction.execute_batch(&schema)?;
@@ -15932,17 +15990,17 @@ impl Database {
             {
                 manifest_schema.replacen(
                     "CREATE TABLE \"context_manifest\"",
-                    "CREATE TABLE context_manifest_v112",
+                    "CREATE TABLE context_manifest_v113",
                     1,
                 )
             } else {
                 manifest_schema.replacen(
                     "CREATE TABLE context_manifest",
-                    "CREATE TABLE context_manifest_v112",
+                    "CREATE TABLE context_manifest_v113",
                     1,
                 )
             };
-            let mut manifest_v112 = renamed_manifest
+            let mut manifest_v113 = renamed_manifest
                 .replacen(
                     "CHECK(formatter_version IN (20, 21))",
                     "CHECK(formatter_version IN (20, 21, 22))",
@@ -15953,16 +16011,16 @@ impl Database {
                     "CHECK(context_manifest_version IN (19, 20, 21, 22))",
                     1,
                 );
-            let pairing_start = manifest_v112
+            let pairing_start = manifest_v113
                 .find("                    CHECK(\n                        (context_manifest_version = 19")
-                .context("v112 could not locate the ContextManifest version pairing")?;
-            let pairing_end = manifest_v112[pairing_start..]
+                .context("v113 could not locate the ContextManifest version pairing")?;
+            let pairing_end = manifest_v113[pairing_start..]
                 .find(
                     "                    CHECK(\n                        previous_accepted_public_boundary_sequence",
                 )
                 .map(|offset| pairing_start + offset)
-                .context("v112 could not locate the ContextManifest pairing boundary")?;
-            manifest_v112.replace_range(
+                .context("v113 could not locate the ContextManifest pairing boundary")?;
+            manifest_v113.replace_range(
                 pairing_start..pairing_end,
                 r#"                    CHECK(
                         (context_manifest_version = 19
@@ -15995,13 +16053,13 @@ impl Database {
                     ),
 "#,
             );
-            if !manifest_v112.contains("CREATE TABLE context_manifest_v112")
-                || !manifest_v112.contains("CHECK(formatter_version IN (20, 21, 22))")
-                || !manifest_v112.contains("context_manifest_version IN (19, 20, 21, 22)")
-                || !manifest_v112.contains("context_manifest_version = 22")
-                || !manifest_v112.contains("formatter_version = 22")
+            if !manifest_v113.contains("CREATE TABLE context_manifest_v113")
+                || !manifest_v113.contains("CHECK(formatter_version IN (20, 21, 22))")
+                || !manifest_v113.contains("context_manifest_version IN (19, 20, 21, 22)")
+                || !manifest_v113.contains("context_manifest_version = 22")
+                || !manifest_v113.contains("formatter_version = 22")
             {
-                anyhow::bail!("v112 could not admit External Principal context formatter v22");
+                anyhow::bail!("v113 could not admit External Principal context formatter v22");
             }
             let manifest_columns = table_columns(&transaction, "context_manifest")?
                 .into_iter()
@@ -16023,12 +16081,12 @@ impl Database {
                     .query_map([], |row| row.get::<_, String>(0))?
                     .collect::<rusqlite::Result<Vec<_>>>()?
             };
-            transaction.execute_batch(&manifest_v112)?;
+            transaction.execute_batch(&manifest_v113)?;
             transaction.execute_batch(&format!(
-                "INSERT INTO context_manifest_v112({manifest_columns}) \
+                "INSERT INTO context_manifest_v113({manifest_columns}) \
                  SELECT {manifest_columns} FROM context_manifest;\n\
                  DROP TABLE context_manifest;\n\
-                 ALTER TABLE context_manifest_v112 RENAME TO context_manifest;"
+                 ALTER TABLE context_manifest_v113 RENAME TO context_manifest;"
             ))?;
             for schema in manifest_dependent_schema {
                 let schema = schema
@@ -16314,12 +16372,12 @@ impl Database {
                     ON channel_delivery(request_id, status, delivery_kind, id);
 
                 UPDATE rovai_data_contract
-                SET contract_version = 'v1.25', projection_schema_version = 66,
+                SET contract_version = 'v1.26', projection_schema_version = 67,
                     reset_reason = NULL, updated_at = datetime('now')
                 WHERE singleton = 1;
 
                 INSERT INTO schema_migration(version, applied_at)
-                VALUES (112, datetime('now'));
+                VALUES (113, datetime('now'));
                 "#,
             )?;
             transaction.commit()?;
@@ -16335,8 +16393,140 @@ impl Database {
             })
             .optional()?
         {
-            anyhow::bail!("v112 migration left a foreign-key violation in {table} row {row_id}");
+            anyhow::bail!("v113 migration left a foreign-key violation in {table} row {row_id}");
         }
+        Ok(())
+    }
+
+    fn migrate_managed_attachment_v2_v112(&mut self) -> Result<()> {
+        let transaction = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        transaction.execute_batch(
+            r#"
+            ALTER TABLE camp ADD COLUMN attachment_revision INTEGER NOT NULL DEFAULT 0
+                CHECK(attachment_revision >= 0);
+
+            CREATE UNIQUE INDEX camp_message_camp_identity_unique
+                ON camp_message(camp_id, id);
+
+            CREATE TABLE managed_attachment (
+                camp_id TEXT NOT NULL REFERENCES camp(id) ON DELETE CASCADE,
+                id TEXT NOT NULL UNIQUE,
+                kind TEXT NOT NULL CHECK(kind IN ('file', 'directory')),
+                root_relative_payload_path TEXT NOT NULL UNIQUE,
+                media_type TEXT NOT NULL,
+                byte_size INTEGER NOT NULL CHECK(byte_size >= 0),
+                file_count INTEGER NOT NULL CHECK(file_count >= 0),
+                directory_count INTEGER NOT NULL CHECK(directory_count >= 0),
+                node_count INTEGER NOT NULL CHECK(node_count >= 1),
+                content_digest TEXT NOT NULL,
+                preview_kind TEXT NOT NULL CHECK(preview_kind IN ('image', 'none')),
+                origin TEXT NOT NULL CHECK(origin IN (
+                    'composer', 'agent_workspace', 'legacy_reingest'
+                )),
+                state TEXT NOT NULL CHECK(state IN (
+                    'available', 'missing', 'corrupted', 'pending_delete'
+                )),
+                safe_reason_code TEXT,
+                available_revision INTEGER NOT NULL CHECK(available_revision >= 1),
+                created_by_type TEXT NOT NULL CHECK(created_by_type IN (
+                    'user', 'agent', 'system'
+                )),
+                created_by_id TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                PRIMARY KEY(camp_id, id),
+                CHECK(
+                    (state = 'available' AND safe_reason_code IS NULL)
+                    OR (state <> 'available' AND safe_reason_code IS NOT NULL)
+                )
+            );
+            CREATE INDEX managed_attachment_camp_revision_idx
+                ON managed_attachment(camp_id, available_revision, id);
+            CREATE INDEX managed_attachment_gc_idx
+                ON managed_attachment(state, camp_id, id)
+                WHERE state = 'pending_delete';
+
+            CREATE TABLE camp_message_attachment_ref (
+                camp_id TEXT NOT NULL,
+                camp_message_id TEXT NOT NULL,
+                ordinal INTEGER NOT NULL CHECK(ordinal >= 0),
+                attachment_id TEXT NOT NULL,
+                display_name_snapshot TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                PRIMARY KEY(camp_id, camp_message_id, ordinal),
+                UNIQUE(camp_message_id, attachment_id),
+                FOREIGN KEY(camp_id, camp_message_id)
+                    REFERENCES camp_message(camp_id, id) ON DELETE CASCADE,
+                FOREIGN KEY(camp_id, attachment_id)
+                    REFERENCES managed_attachment(camp_id, id)
+            );
+            CREATE INDEX camp_message_attachment_ref_attachment_idx
+                ON camp_message_attachment_ref(camp_id, attachment_id, camp_message_id);
+
+            CREATE TABLE managed_attachment_ingest_intent (
+                id TEXT PRIMARY KEY,
+                camp_id TEXT NOT NULL REFERENCES camp(id) ON DELETE CASCADE,
+                command_id TEXT NOT NULL,
+                source_kind TEXT NOT NULL CHECK(source_kind IN ('composer', 'agent_workspace')),
+                draft_revision INTEGER CHECK(draft_revision IS NULL OR draft_revision >= 0),
+                state TEXT NOT NULL CHECK(state IN ('pending', 'committed', 'abandoned')),
+                reserved_bytes INTEGER NOT NULL CHECK(reserved_bytes >= 0),
+                plan_json TEXT NOT NULL CHECK(json_valid(plan_json)),
+                cleanup_state TEXT NOT NULL CHECK(cleanup_state IN (
+                    'none', 'pending', 'completed'
+                )),
+                committed_camp_message_id TEXT REFERENCES camp_message(id),
+                failure_code TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                promoted_at TEXT,
+                completed_at TEXT,
+                UNIQUE(camp_id, command_id, source_kind),
+                CHECK(
+                    (state = 'pending' AND committed_camp_message_id IS NULL
+                     AND completed_at IS NULL)
+                    OR (state = 'committed' AND committed_camp_message_id IS NOT NULL
+                        AND completed_at IS NOT NULL)
+                    OR (state = 'abandoned' AND committed_camp_message_id IS NULL
+                        AND completed_at IS NOT NULL)
+                )
+            );
+            CREATE INDEX managed_attachment_ingest_recovery_idx
+                ON managed_attachment_ingest_intent(state, cleanup_state, created_at);
+
+            CREATE TRIGGER managed_attachment_identity_immutable
+            BEFORE UPDATE ON managed_attachment
+            WHEN OLD.camp_id <> NEW.camp_id
+              OR OLD.id <> NEW.id
+              OR OLD.kind <> NEW.kind
+              OR OLD.root_relative_payload_path <> NEW.root_relative_payload_path
+              OR OLD.media_type <> NEW.media_type
+              OR OLD.byte_size <> NEW.byte_size
+              OR OLD.file_count <> NEW.file_count
+              OR OLD.directory_count <> NEW.directory_count
+              OR OLD.node_count <> NEW.node_count
+              OR OLD.content_digest <> NEW.content_digest
+              OR OLD.preview_kind <> NEW.preview_kind
+              OR OLD.origin <> NEW.origin
+              OR OLD.available_revision <> NEW.available_revision
+              OR OLD.created_by_type <> NEW.created_by_type
+              OR OLD.created_by_id <> NEW.created_by_id
+              OR OLD.created_at <> NEW.created_at
+            BEGIN
+                SELECT RAISE(ABORT, 'managed_attachment immutable identity changed');
+            END;
+
+            UPDATE rovai_data_contract
+            SET contract_version = 'v1.25', projection_schema_version = 66,
+                reset_reason = NULL, updated_at = datetime('now')
+            WHERE singleton = 1;
+
+            INSERT INTO schema_migration(version, applied_at)
+            VALUES (112, datetime('now'));
+            "#,
+        )?;
+        transaction.commit()?;
         Ok(())
     }
 
@@ -20772,15 +20962,15 @@ impl Database {
 }
 
 #[cfg(test)]
-fn downgrade_current_schema_to_v111_source_for_test(connection: &Connection) {
-    let has_v112: bool = connection
+fn downgrade_current_schema_to_v112_source_for_test(connection: &Connection) {
+    let has_v113: bool = connection
         .query_row(
-            "SELECT EXISTS(SELECT 1 FROM schema_migration WHERE version = 112)",
+            "SELECT EXISTS(SELECT 1 FROM schema_migration WHERE version = 113)",
             [],
             |row| row.get(0),
         )
         .unwrap();
-    if !has_v112 {
+    if !has_v113 {
         return;
     }
     connection
@@ -20996,9 +21186,9 @@ fn downgrade_current_schema_to_v111_source_for_test(connection: &Connection) {
             DROP TABLE external_principal;
             DROP TABLE project_binding;
             UPDATE rovai_data_contract
-            SET contract_version = 'v1.24', projection_schema_version = 65
+            SET contract_version = 'v1.25', projection_schema_version = 66
             WHERE singleton = 1;
-            DELETE FROM schema_migration WHERE version = 112;
+            DELETE FROM schema_migration WHERE version = 113;
             PRAGMA foreign_keys = ON;
             "#,
         )
@@ -21011,6 +21201,39 @@ fn downgrade_current_schema_to_v111_source_for_test(connection: &Connection) {
             .unwrap(),
         0
     );
+}
+
+#[cfg(test)]
+fn downgrade_current_schema_to_v111_source_for_test(connection: &Connection) {
+    downgrade_current_schema_to_v112_source_for_test(connection);
+    let has_v112: bool = connection
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM schema_migration WHERE version = 112)",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    if !has_v112 {
+        return;
+    }
+    connection
+        .execute_batch(
+            r#"
+            PRAGMA foreign_keys = OFF;
+            DROP TRIGGER managed_attachment_identity_immutable;
+            DROP TABLE camp_message_attachment_ref;
+            DROP TABLE managed_attachment_ingest_intent;
+            DROP TABLE managed_attachment;
+            DROP INDEX camp_message_camp_identity_unique;
+            ALTER TABLE camp DROP COLUMN attachment_revision;
+            UPDATE rovai_data_contract
+            SET contract_version = 'v1.24', projection_schema_version = 65
+            WHERE singleton = 1;
+            DELETE FROM schema_migration WHERE version = 112;
+            PRAGMA foreign_keys = ON;
+            "#,
+        )
+        .unwrap();
 }
 
 #[cfg(test)]
@@ -21853,6 +22076,7 @@ mod tests {
             v110: version >= 110,
             v111: version >= 111,
             v112: version >= 112,
+            v113: version >= 113,
         }
     }
 
@@ -21863,10 +22087,16 @@ mod tests {
                 "current",
                 CURRENT_DATA_CONTRACT_VERSION,
                 CURRENT_PROJECTION_SCHEMA_VERSION,
+                113,
+            ),
+            (
+                "v1.25/schema-66 after managed attachment v2",
+                V113_MIGRATION_SOURCE_DATA_CONTRACT_VERSION,
+                V113_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION,
                 112,
             ),
             (
-                "v112 source",
+                "v1.24/schema-65 after zero-attempt cancellation",
                 V112_MIGRATION_SOURCE_DATA_CONTRACT_VERSION,
                 V112_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION,
                 111,
@@ -22171,7 +22401,7 @@ mod tests {
             )
             .expect("current contract marker should load");
 
-        assert_eq!(state, migration_state_through(112));
+        assert_eq!(state, migration_state_through(113));
         assert!(state.admits(&contract, schema));
         assert!(has_admissible_data_contract(
             &directory.join("rovai.sqlite")
@@ -24390,9 +24620,113 @@ mod tests {
     }
 
     #[test]
-    fn v112_upgrades_v111_preserves_existing_evidence_and_installs_channel_contract() {
+    fn v112_upgrades_v111_and_installs_managed_attachment_v2_idempotently() {
         let (database, directory) = crate::test_support::seeded_runtime_database();
         downgrade_current_schema_to_v111_source_for_test(database.connection());
+        let source_marker: (String, i64, i64, i64) = database
+            .connection()
+            .query_row(
+                r#"
+                SELECT contract_version, projection_schema_version,
+                       (SELECT COUNT(*) FROM schema_migration WHERE version = 111),
+                       (SELECT COUNT(*) FROM schema_migration WHERE version = 112)
+                FROM rovai_data_contract WHERE singleton = 1
+                "#,
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )
+            .unwrap();
+        assert_eq!(source_marker, ("v1.24".to_string(), 65, 1, 0));
+        assert_schema_objects(
+            database.connection(),
+            "table",
+            &[
+                "managed_attachment",
+                "camp_message_attachment_ref",
+                "managed_attachment_ingest_intent",
+            ],
+            false,
+        );
+        drop(database);
+
+        let upgraded = Database::open(&directory).expect("v111 source should migrate to v112");
+        let upgraded_marker: (String, i64, i64, i64, i64) = upgraded
+            .connection()
+            .query_row(
+                r#"
+                SELECT contract_version, projection_schema_version,
+                       (SELECT COUNT(*) FROM schema_migration WHERE version = 111),
+                       (SELECT COUNT(*) FROM schema_migration WHERE version = 112),
+                       (SELECT COUNT(*) FROM pragma_foreign_key_check)
+                FROM rovai_data_contract WHERE singleton = 1
+                "#,
+                [],
+                |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                    ))
+                },
+            )
+            .unwrap();
+        assert_eq!(
+            upgraded_marker,
+            (
+                CURRENT_DATA_CONTRACT_VERSION.to_string(),
+                CURRENT_PROJECTION_SCHEMA_VERSION,
+                1,
+                1,
+                0,
+            )
+        );
+        assert_table_columns(upgraded.connection(), "camp", &["attachment_revision"], &[]);
+        assert_schema_objects(
+            upgraded.connection(),
+            "table",
+            &[
+                "managed_attachment",
+                "camp_message_attachment_ref",
+                "managed_attachment_ingest_intent",
+            ],
+            true,
+        );
+        drop(upgraded);
+
+        let restarted = Database::open(&directory).expect("v112 restart should be idempotent");
+        assert_eq!(
+            restarted
+                .connection()
+                .query_row(
+                    r#"
+                    SELECT contract_version, projection_schema_version,
+                           (SELECT COUNT(*) FROM schema_migration WHERE version = 112)
+                    FROM rovai_data_contract WHERE singleton = 1
+                    "#,
+                    [],
+                    |row| Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, i64>(1)?,
+                        row.get::<_, i64>(2)?,
+                    )),
+                )
+                .unwrap(),
+            (
+                CURRENT_DATA_CONTRACT_VERSION.to_string(),
+                CURRENT_PROJECTION_SCHEMA_VERSION,
+                1,
+            )
+        );
+        drop(restarted);
+        std::fs::remove_dir_all(directory).expect("temporary database should be removable");
+    }
+
+    #[test]
+    fn v113_upgrades_v112_preserves_existing_evidence_and_installs_channel_contract() {
+        let (database, directory) = crate::test_support::seeded_runtime_database();
+        downgrade_current_schema_to_v112_source_for_test(database.connection());
         let source_counts: (i64, i64) = database
             .connection()
             .query_row(
@@ -24411,7 +24745,7 @@ mod tests {
                 .query_row(
                     r#"
                     SELECT contract_version, projection_schema_version,
-                           (SELECT COUNT(*) FROM schema_migration WHERE version = 112)
+                           (SELECT COUNT(*) FROM schema_migration WHERE version = 113)
                     FROM rovai_data_contract WHERE singleton = 1
                     "#,
                     [],
@@ -24422,18 +24756,18 @@ mod tests {
                     )),
                 )
                 .unwrap(),
-            ("v1.24".to_string(), 65, 0)
+            ("v1.25".to_string(), 66, 0)
         );
         drop(database);
 
-        let upgraded = Database::open(&directory).expect("v111 source should migrate to v112");
+        let upgraded = Database::open(&directory).expect("v112 source should migrate to v113");
         assert_eq!(
             upgraded
                 .connection()
                 .query_row(
                     r#"
                     SELECT contract_version, projection_schema_version,
-                           (SELECT COUNT(*) FROM schema_migration WHERE version = 112),
+                           (SELECT COUNT(*) FROM schema_migration WHERE version = 113),
                            (SELECT COUNT(*) FROM pragma_foreign_key_check)
                     FROM rovai_data_contract WHERE singleton = 1
                     "#,
@@ -24501,12 +24835,12 @@ mod tests {
         assert!(manifest_schema.contains("formatter_version = 22"));
         drop(upgraded);
 
-        let restarted = Database::open(&directory).expect("v112 restart should be idempotent");
+        let restarted = Database::open(&directory).expect("v113 restart should be idempotent");
         assert_eq!(
             restarted
                 .connection()
                 .query_row(
-                    "SELECT COUNT(*) FROM schema_migration WHERE version = 112",
+                    "SELECT COUNT(*) FROM schema_migration WHERE version = 113",
                     [],
                     |row| row.get::<_, i64>(0),
                 )

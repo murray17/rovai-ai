@@ -68,6 +68,20 @@ export function structuredMentionContentLength(
   )
 }
 
+export function selectedStructuredMentionContent(
+  state: StructuredMentionEditorState
+): StructuredMentionContent {
+  const content = normalizeStructuredMentionContent(state.content)
+  const length = structuredMentionContentLength(content)
+  const anchor = clampOffset(state.selection.anchor, length)
+  const focus = clampOffset(state.selection.focus, length)
+  return sliceStructuredMentionContent(
+    content,
+    Math.min(anchor, focus),
+    Math.max(anchor, focus)
+  )
+}
+
 export function replaceStructuredSelection(
   state: StructuredMentionEditorState,
   replacement: readonly StructuredMentionSegment[]

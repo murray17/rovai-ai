@@ -13,7 +13,7 @@ last_updated: 2026-08-27
 [Built-in Tool Agent Output Projection v1](../contracts/builtin-tool-agent-output-projection-v1.md)、
 [Camp History Retrieval v4](../contracts/camp-history-v4.md)、
 [Durable Task v3](../contracts/durable-task-v3.md) 和
-[Camp Message Send v12](../contracts/camp-message-send-v12.md)、
+[Camp Message Send v13](../contracts/camp-message-send-v13.md)、
 [Gather v4](../contracts/gather-v4.md)、
 [Current User Attention v4](../contracts/current-user-attention-v4.md)与
 [Missing-Send Recovery Publication v2](../contracts/missing-send-recovery-publication-v2.md) 为准；v19 及更早 Transport 只保留

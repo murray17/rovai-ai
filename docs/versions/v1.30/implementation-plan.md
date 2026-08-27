@@ -12,7 +12,7 @@ last_updated: 2026-08-27
 
 - [x] 从固定 revision `f588c773c2652a9e78887a31d17de8ed37524bb0` 建立独立 worktree，并先提交 Rovai
   风格的渠道设置 foundation；
-- [x] 完成 Migration 112、Data Contract v1.25/schema 66、ExternalPrincipal author 与 Context 22 pairing；
+- [x] 完成 Migration 113、Data Contract v1.26/schema 67、ExternalPrincipal author 与 Context 22 pairing；
 - [x] 完成 owner-only ProjectBinding、会话 bind/switch、Camp workspace freeze 与未绑定 resend 边界；
 - [x] 完成 Feishu account/member Bot、safeStorage credential、官方二维码 attempt、多 WebSocket Host 和启动恢复；
 - [x] 完成 p2p/group/topic identity、显式 mention gate、多 Bot collecting/finalize/timeout/mismatch；
@@ -46,7 +46,7 @@ last_updated: 2026-08-27
 - `cargo test -p rovai-core --lib`：331 passed；
 - `cargo test -p rovai-core --bin rovai`：25 passed；
 - `cargo test -p rovai-core --bin rovai-core`：161 passed、4 个显式 manual Runtime smoke ignored；
-- Migration 112 upgrade、Channel 状态机、ExternalQuote、Context bytes 与 Secret projection 定向测试全部通过；
+- Migration 113 upgrade、Channel 状态机、ExternalQuote、Context bytes 与 Secret projection 定向测试全部通过；
 - `pnpm typecheck`；
 - `pnpm test`：Vitest 84 files / 593 tests passed，Node suite 219 passed / 1 platform-specific skipped，文档与
   Skill governance 同步通过；

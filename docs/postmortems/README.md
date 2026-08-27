@@ -41,3 +41,4 @@ last_updated: 2026-08-27
 | 2026-08-26 | [Windows Codex Runtime 发现与验收隔离缺口](2026-08-26-windows-codex-runtime-discovery-and-acceptance-isolation.md) | 已关闭；继续跟踪后续措施 |
 | 2026-08-26 | [Gather 完成投递缺少公开因果展示，导致 A2A 调度误判](2026-08-26-gather-completion-causal-handoff-not-visible.md) | 事实调查已关闭；展示改进待跟踪 |
 | 2026-08-26 | [Camp Composer 行尾换行破坏中文输入法首字符组合](2026-08-26-composer-ime-trailing-newline-caret-host.md) | 已关闭；继续跟踪自动化覆盖 |
+| 2026-08-27 | [Camp 附件发布等待活跃 AgentRun，阻断带附件 A2A](2026-08-27-camp-attachment-publication-blocked-a2a.md) | 主链修复已实现；完整隔离与合并门禁仍在收口 |

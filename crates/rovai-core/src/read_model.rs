@@ -2276,14 +2276,34 @@ fn hydrate_message_views(
             SELECT CAST(value AS TEXT) AS camp_message_id
             FROM json_each(?1)
         )
-        SELECT attachment.camp_message_id,
-               attachment.id, attachment.display_name, attachment.media_type,
-               attachment.byte_size, attachment.preview_kind, attachment.storage_path,
-               attachment.runtime_projection_state
-        FROM requested
-        JOIN message_attachment AS attachment
-          ON attachment.camp_message_id = requested.camp_message_id
-        ORDER BY attachment.camp_message_id, attachment.position, attachment.id
+        SELECT attachment.camp_message_id, attachment.id, attachment.display_name,
+               attachment.media_type, attachment.byte_size, attachment.preview_kind,
+               attachment.storage_path, attachment.runtime_projection_state,
+               attachment.kind, attachment.file_count, attachment.storage_model
+        FROM (
+            SELECT legacy.camp_message_id, legacy.id, legacy.display_name,
+                   legacy.media_type, legacy.byte_size, legacy.preview_kind,
+                   legacy.storage_path, legacy.runtime_projection_state,
+                   NULL AS kind, NULL AS file_count,
+                   'legacy_v1' AS storage_model, legacy.position AS ordinal
+            FROM requested
+            JOIN message_attachment AS legacy
+              ON legacy.camp_message_id = requested.camp_message_id
+            UNION ALL
+            SELECT reference.camp_message_id, managed.id,
+                   reference.display_name_snapshot, managed.media_type,
+                   managed.byte_size, managed.preview_kind,
+                   managed.root_relative_payload_path, managed.state,
+                   managed.kind, managed.file_count,
+                   'managed_v2', reference.ordinal
+            FROM requested
+            JOIN camp_message_attachment_ref AS reference
+              ON reference.camp_message_id = requested.camp_message_id
+            JOIN managed_attachment AS managed
+              ON managed.camp_id = reference.camp_id
+             AND managed.id = reference.attachment_id
+        ) AS attachment
+        ORDER BY attachment.camp_message_id, attachment.ordinal, attachment.id
         "#,
     )?;
     let attachment_rows = attachment_statement
@@ -2297,6 +2317,9 @@ fn hydrate_message_views(
                 row.get::<_, String>(5)?,
                 row.get::<_, String>(6)?,
                 row.get::<_, String>(7)?,
+                row.get::<_, Option<String>>(8)?,
+                row.get::<_, Option<i64>>(9)?,
+                row.get::<_, String>(10)?,
             ))
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
@@ -2310,9 +2333,20 @@ fn hydrate_message_views(
         preview_kind,
         storage_path,
         runtime_projection_state,
+        persisted_kind,
+        persisted_file_count,
+        storage_model,
     ) in attachment_rows
     {
-        let (kind, file_count) = if runtime_projection_state == "available" {
+        let (kind, file_count) = if storage_model == "managed_v2" {
+            (
+                persisted_kind.context("Managed Attachment has no persisted kind")?,
+                u64::try_from(
+                    persisted_file_count
+                        .context("Managed Attachment has no persisted file count")?,
+                )?,
+            )
+        } else if runtime_projection_state == "available" {
             let summary = managed_attachment_summary(Path::new(&storage_path), &media_type)?;
             (summary.kind, summary.file_count)
         } else if media_type == DIRECTORY_MEDIA_TYPE {

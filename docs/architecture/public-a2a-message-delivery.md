@@ -3,15 +3,15 @@ document_type: architecture
 architecture: public-a2a-message-delivery
 authority: public-message-and-delivery-boundaries
 status: accepted
-last_updated: 2026-08-26
+last_updated: 2026-08-27
 ---
 
 # Public A2A Message 与 Message Delivery 架构
 
 本文件定义 v0.45 以后 Agent-to-Agent 协作的长期组件边界。字段级输入、错误和状态合同
-分别见 [Camp Message Send v12](../contracts/camp-message-send-v12.md)、
+分别见 [Camp Message Send v13](../contracts/camp-message-send-v13.md)、
 [Current User Attention v4](../contracts/current-user-attention-v4.md)、
-[Message Delivery v7](../contracts/message-delivery-v7.md)、
+[Message Delivery v8](../contracts/message-delivery-v8.md)、
 [Missing-Send Recovery Publication v2](../contracts/missing-send-recovery-publication-v2.md)、
 [Camp History Retrieval v2](../contracts/camp-history-v2.md)；决策理由见
 [Message Delivery 不变量](foundational-invariants.md#collaboration-delivery)、
@@ -101,7 +101,7 @@ Message Delivery Dispatch Pump 是投递、排队和物化的唯一权威。它�
 recipient、message、Task、`forward | return` edge、target lineage 和 presentation snapshot，不重新
 解析正文或扩大目标。
 
-Message Delivery v7 以 `deliveryKind`、`dispatchDisposition`、`completionRole`、可选 pre-dispatch gate 和冻结的
+Message Delivery v8 以 `deliveryKind`、`dispatchDisposition`、`completionRole`、可选 pre-dispatch gate 和冻结的
 `recipientMembershipVersionAtAdmission` 形成 closed union。普通
 public A2A 继续拥有 message/edge/lineage；Gather 的精确 return 可以作为 `gather_captured` 直接 settled，
 但其 CampMessage 始终公开；Barrier 创建的 `gather_completion` 没有公开 recipient/edge lineage，却继续进入
@@ -144,20 +144,13 @@ recipient/Camp 的直接相关事件调用 `dispatchPending(agentId)`；没有�
 
 ## 4. Context gate 与 AgentRun 物化顺序
 
-带附件的 public A2A 在普通 dispatch attempt 前有一层持久 projection gate：
+新 Managed Attachment v2 在 CampMessage 事务前已经完成一次 copy/promote，并与 Message refs 一起提交。它不创建
+projection gate：Delivery 从 `never_attempted` 直接进入普通 Dispatch Pump，且不会等待 source 或同 Camp 其他
+AgentRun 释放 legacy View admission。`projection_blocked` 只保留给升级前已经存在的 legacy v1 publication
+operation；只有匹配的旧 completion/recovery 可以收口该 gate，且不能关联或延迟 v2 Message。
 
-```text
-accepted CampMessage + real Delivery IDs
-  → Delivery projection_blocked（占据 recipient FIFO；attempt count = 0）
-  → attachment projection available
-     → CAS never_attempted + explicit Dispatch Pump trigger
-  → terminal projection failure
-     → failed / attachment_projection_failed（无 AgentRun）
-```
-
-`projection_blocked` 不是 waitCondition 或 `interrupted_before_dispatch`；普通 Camp/Run/容量事件不得越过或隐式
-释放它。只有 operation completion/recovery 拥有 gate transition。同一消息的 terminal failed attachment 保留
-公共事实，但 Delivery 不向收件人制造缺失 Runtime path。
+Context 从 SQLite metadata 组合 v2 路径，不在 materialization 时读取、枚举或 hash 本地 payload。路径后来不可读
+时由 Runtime 原生工具报告；Core 不在 Context 中补 unavailable descriptor 或 Run Fact。
 
 Delivery 被选中尝试后，Core 先按
 [Context Delivery Profile v4](../contracts/context-delivery-profile-v4.md)完成选择与预算 gate，再由
