@@ -1,0 +1,1524 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="day">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Rovai AI · 队员操作入口与移出确认交互稿</title>
+  <style>
+    :root {
+      color-scheme: light;
+      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif;
+      font-synthesis: none;
+      text-rendering: optimizeLegibility;
+      --canvas: #eceeef;
+      --surface: #fbfbfa;
+      --surface-raised: #ffffff;
+      --surface-subtle: #f0f2f4;
+      --surface-muted: #e7eaed;
+      --surface-hover: #e8eaea;
+      --surface-sunken: #e4e8eb;
+      --conversation-surface: #ffffff;
+      --inspector-surface: #ffffff;
+      --topbar: #fbfbfa;
+      --input: #ffffff;
+      --ink: #171b20;
+      --muted: #616a73;
+      --faint: #6e7382;
+      --line: #dfe4e8;
+      --line-strong: #c7cfd6;
+      --control-line: #8b9389;
+      --rail: #f3f4f4;
+      --rail-ink: #626b72;
+      --rail-line: #dadde0;
+      --rail-logo: #526f88;
+      --brand: #526f88;
+      --brand-hover: #3d5874;
+      --brand-contrast: #ffffff;
+      --brand-soft: #e9eef3;
+      --brand-ink: #405f7e;
+      --success: #3e775c;
+      --success-soft: #e7f1ea;
+      --attention: #8a6226;
+      --attention-soft: #f8edda;
+      --danger: #a24c46;
+      --danger-soft: #f7e6e3;
+      --info: #416c86;
+      --info-soft: #e5eef3;
+      --neutral: #5f6678;
+      --neutral-soft: #ecefe9;
+      --focus: #526f88;
+      --focus-soft: rgba(82, 111, 136, 0.16);
+      --overlay: rgba(28, 32, 43, 0.42);
+      --shadow-float: 0 18px 56px rgba(38, 45, 58, 0.14);
+      --identity-1: #a65f4a;
+      --identity-2: #39777a;
+      --identity-3: #74628f;
+      --identity-4: #9a6a32;
+      --identity-5: #4f729b;
+      --identity-6: #8a5c75;
+      --identity-7: #547245;
+      --identity-8: #8c6146;
+      --rail-width: 270px;
+      --inspector-width: 310px;
+    }
+
+    :root[data-theme="night"] {
+      color-scheme: dark;
+      --canvas: #0d1114;
+      --surface: #151a1e;
+      --surface-raised: #1b2227;
+      --surface-subtle: #1a2024;
+      --surface-muted: #242d33;
+      --surface-hover: #1d252b;
+      --surface-sunken: #10161a;
+      --conversation-surface: #181d21;
+      --inspector-surface: #171d21;
+      --topbar: #151a1e;
+      --input: #1b2227;
+      --ink: #e7ecef;
+      --muted: #abb5bc;
+      --faint: #919da6;
+      --line: #333e46;
+      --line-strong: #53616b;
+      --control-line: #687b88;
+      --rail: #11161a;
+      --rail-ink: #a6b1b8;
+      --rail-line: #313b43;
+      --rail-logo: #b1c8d8;
+      --brand: #7897ae;
+      --brand-hover: #b1c8d8;
+      --brand-contrast: #091116;
+      --brand-soft: #22303a;
+      --brand-ink: #c0d4e1;
+      --success: #82b695;
+      --success-soft: #1a2b22;
+      --attention: #d2ac70;
+      --attention-soft: #302719;
+      --danger: #d6857f;
+      --danger-soft: #321e1d;
+      --info: #83afc9;
+      --info-soft: #182832;
+      --neutral: #abb5bc;
+      --neutral-soft: #242d33;
+      --focus: #8fb3cb;
+      --focus-soft: rgba(143, 179, 203, 0.18);
+      --overlay: rgba(0, 0, 0, 0.58);
+      --shadow-float: 0 22px 64px rgba(0, 0, 0, 0.42);
+      --identity-1: #c98572;
+      --identity-2: #70b0ae;
+      --identity-3: #a89ac8;
+      --identity-4: #d0a46c;
+      --identity-5: #80abd1;
+      --identity-6: #b37d9a;
+      --identity-7: #89a878;
+      --identity-8: #b58b68;
+    }
+
+    * { box-sizing: border-box; }
+    html, body { min-width: 0; min-height: 100%; margin: 0; }
+    body { padding: 18px; overflow-x: hidden; color: var(--ink); background: var(--canvas); }
+    button, input, textarea { color: inherit; font: inherit; }
+    button { border: 0; }
+    button:not(:disabled) { cursor: pointer; }
+    button:disabled { opacity: .52; cursor: default; }
+    button:active:not(:disabled) { transform: translateY(1px); }
+    :where(button, input, textarea, [role="tab"]):focus-visible {
+      outline: 2px solid var(--focus);
+      outline-offset: 2px;
+    }
+    ::selection { color: var(--ink); background: var(--brand-soft); }
+
+    .prototype-shell { width: min(1360px, 100%); margin: 0 auto; }
+    .prototype-heading {
+      display: flex;
+      align-items: flex-end;
+      justify-content: space-between;
+      gap: 24px;
+      margin: 0 2px 12px;
+    }
+    .prototype-kicker {
+      margin: 0 0 4px;
+      color: var(--brand-ink);
+      font: 720 9.5px/1.3 ui-monospace, SFMono-Regular, Menlo, monospace;
+      letter-spacing: .1em;
+      text-transform: uppercase;
+    }
+    .prototype-heading h1 { margin: 0; font-size: clamp(20px, 2.4vw, 28px); line-height: 1.15; letter-spacing: -.035em; }
+    .prototype-heading p:last-child { max-width: 720px; margin: 6px 0 0; color: var(--muted); font-size: 11.5px; line-height: 1.55; }
+    .review-actions { display: flex; flex: 0 0 auto; gap: 6px; }
+    .review-button,
+    .scenario-button {
+      min-height: 32px;
+      padding: 6px 9px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      color: var(--muted);
+      background: var(--surface);
+      font-size: 10.5px;
+    }
+    .review-button:hover,
+    .scenario-button:hover { color: var(--ink); background: var(--surface-hover); }
+
+    .scenario-bar {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      margin-bottom: 10px;
+      padding: 5px;
+      overflow-x: auto;
+      border: 1px solid var(--line);
+      border-radius: 9px;
+      background: var(--surface);
+      scrollbar-width: thin;
+    }
+    .scenario-label {
+      flex: 0 0 auto;
+      padding: 0 6px 0 3px;
+      color: var(--faint);
+      font: 700 9px/1.3 ui-monospace, SFMono-Regular, Menlo, monospace;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+    }
+    .scenario-button { flex: 0 0 auto; border-color: transparent; background: transparent; }
+    .scenario-button[aria-pressed="true"] { border-color: var(--line); color: var(--brand-ink); background: var(--brand-soft); font-weight: 700; }
+
+    .variant-bar {
+      display: grid;
+      grid-template-columns: auto minmax(0, 1fr) minmax(240px, 360px);
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 10px;
+      padding: 7px 9px;
+      border: 1px solid var(--line);
+      border-radius: 9px;
+      background: var(--surface);
+    }
+    .variant-label {
+      color: var(--faint);
+      font: 700 9px/1.3 ui-monospace, SFMono-Regular, Menlo, monospace;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+      white-space: nowrap;
+    }
+    .variant-options { display: flex; min-width: 0; gap: 5px; }
+    .variant-choice {
+      display: grid;
+      min-width: 0;
+      min-height: 38px;
+      flex: 1 1 0;
+      grid-template-columns: 28px minmax(0, 1fr);
+      align-items: center;
+      gap: 7px;
+      padding: 4px 7px;
+      border: 1px solid transparent;
+      border-radius: 7px;
+      color: var(--muted);
+      background: transparent;
+      text-align: left;
+    }
+    .variant-choice:hover { color: var(--ink); background: var(--surface-hover); }
+    .variant-choice[aria-pressed="true"] { border-color: var(--line-strong); color: var(--ink); background: var(--brand-soft); }
+    .variant-choice-glyph { display: grid; width: 28px; height: 28px; place-items: center; border-radius: 6px; color: var(--faint); }
+    .variant-choice[aria-pressed="true"] .variant-choice-glyph { color: var(--brand-ink); }
+    .variant-choice-glyph svg { width: 16px; height: 16px; fill: currentColor; }
+    .variant-choice-copy { display: grid; min-width: 0; gap: 1px; }
+    .variant-choice-copy strong { overflow: hidden; font-size: 9.5px; text-overflow: ellipsis; white-space: nowrap; }
+    .variant-choice-copy small { overflow: hidden; color: var(--faint); font-size: 8px; text-overflow: ellipsis; white-space: nowrap; }
+    .variant-note { margin: 0; color: var(--muted); font-size: 9px; line-height: 1.45; }
+    .variant-note strong { color: var(--brand-ink); }
+
+    .app-window {
+      display: grid;
+      height: min(720px, calc(100vh - 165px));
+      min-height: 590px;
+      grid-template-columns: var(--rail-width) minmax(0, 1fr);
+      overflow: hidden;
+      border: 1px solid var(--line-strong);
+      border-radius: 12px;
+      background: var(--surface);
+      box-shadow: 0 12px 36px rgba(35, 44, 51, .08);
+    }
+    :root[data-theme="night"] .app-window { box-shadow: 0 18px 48px rgba(0, 0, 0, .34); }
+
+    .app-rail {
+      display: grid;
+      min-width: 0;
+      grid-template-rows: auto auto minmax(0, 1fr) auto;
+      padding: 14px 10px 10px;
+      overflow: hidden;
+      border-right: 1px solid var(--rail-line);
+      color: var(--rail-ink);
+      background: var(--rail);
+    }
+    .brand-lockup { display: flex; align-items: center; gap: 10px; padding: 2px 8px 16px; color: var(--ink); }
+    .brand-lockup strong { font-size: 12px; letter-spacing: -.01em; }
+    .brand-mark { position: relative; width: 26px; height: 26px; flex: 0 0 26px; color: var(--rail-logo); }
+    .brand-mark::before {
+      position: absolute;
+      top: 2px;
+      left: 9px;
+      width: 8px;
+      height: 8px;
+      background: currentColor;
+      clip-path: polygon(50% 0, 62% 37%, 100% 50%, 62% 63%, 50% 100%, 38% 63%, 0 50%, 38% 37%);
+      content: "";
+    }
+    .brand-mark::after {
+      position: absolute;
+      right: 2px;
+      bottom: 3px;
+      left: 2px;
+      height: 9px;
+      border-top: 2px solid currentColor;
+      border-radius: 50% 50% 0 0;
+      content: "";
+    }
+    .rail-primary { display: grid; gap: 3px; padding-bottom: 12px; border-bottom: 1px solid var(--rail-line); }
+    .rail-item {
+      display: grid;
+      width: 100%;
+      min-height: 34px;
+      grid-template-columns: 22px minmax(0, 1fr) auto;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 8px;
+      border-radius: 6px;
+      color: inherit;
+      background: transparent;
+      text-align: left;
+      font-size: 11px;
+    }
+    .rail-item:hover { color: var(--ink); background: var(--surface-hover); }
+    .rail-item.selected { color: var(--brand-ink); background: var(--brand-soft); font-weight: 680; }
+    .rail-icon { display: grid; width: 20px; height: 20px; place-items: center; color: var(--faint); font-size: 14px; }
+    .rail-projects { min-height: 0; padding: 13px 0 0; overflow: hidden; }
+    .rail-section-heading { display: flex; align-items: center; justify-content: space-between; padding: 0 8px 7px; color: var(--faint); font-size: 9.5px; font-weight: 720; letter-spacing: .04em; }
+    .rail-camp { position: relative; padding-left: 27px; }
+    .rail-camp::before { position: absolute; top: 8px; bottom: 8px; left: 12px; width: 2px; border-radius: 2px; background: var(--brand); content: ""; }
+    .rail-footer { display: flex; align-items: center; gap: 8px; padding: 9px 8px 2px; border-top: 1px solid var(--rail-line); color: var(--faint); font-size: 9px; }
+
+    .camp-shell { display: grid; min-width: 0; min-height: 0; grid-template-rows: 50px minmax(0, 1fr); }
+    .camp-header {
+      display: flex;
+      min-width: 0;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 0 14px 0 18px;
+      border-bottom: 1px solid var(--line);
+      background: var(--topbar);
+    }
+    .camp-title { display: grid; min-width: 0; gap: 1px; }
+    .camp-title strong { overflow: hidden; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+    .camp-title small { color: var(--faint); font-size: 9px; }
+    .camp-header-actions { display: flex; align-items: center; gap: 6px; }
+    .approval-summary { display: flex; min-height: 28px; align-items: center; gap: 6px; padding: 4px 8px; border-radius: 6px; color: var(--faint); background: transparent; font-size: 9.5px; }
+    .approval-summary i { width: 6px; height: 6px; border-radius: 50%; background: var(--neutral); }
+    .icon-button {
+      display: grid;
+      width: 30px;
+      height: 30px;
+      flex: 0 0 30px;
+      place-items: center;
+      border-radius: 6px;
+      color: var(--muted);
+      background: transparent;
+      font-size: 15px;
+    }
+    .icon-button:hover { color: var(--ink); background: var(--surface-hover); }
+
+    .camp-body { display: grid; min-width: 0; min-height: 0; grid-template-columns: minmax(0, 1fr) var(--inspector-width); }
+    .conversation {
+      display: grid;
+      min-width: 0;
+      min-height: 0;
+      grid-template-rows: minmax(0, 1fr) auto;
+      background: var(--conversation-surface);
+    }
+    .timeline { min-height: 0; overflow: auto; padding: 22px clamp(22px, 4vw, 52px) 16px; }
+    .message { position: relative; max-width: 76ch; margin: 0 auto; padding: 15px 0 17px 42px; border-bottom: 1px solid var(--line); }
+    .message:last-child { border-bottom: 0; }
+    .message-avatar { position: absolute; top: 15px; left: 0; }
+    .message-meta { display: flex; align-items: baseline; gap: 7px; margin-bottom: 5px; }
+    .message-meta strong { font-size: 11px; }
+    .message-meta time { color: var(--faint); font: 500 8.5px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; }
+    .message p { margin: 0; color: var(--muted); font-size: 11.5px; line-height: 1.72; }
+    .message p + p { margin-top: 7px; }
+    .message-route { display: inline-flex; align-items: center; gap: 4px; margin-top: 8px; color: var(--faint); font-size: 9px; }
+
+    .composer { padding: 0 clamp(18px, 3.4vw, 42px) 14px; background: var(--conversation-surface); }
+    .composer-route {
+      display: flex;
+      width: min(1040px, 100%);
+      min-height: 31px;
+      align-items: center;
+      gap: 7px;
+      margin: 0 auto 4px;
+      padding: 0 3px;
+      color: var(--faint);
+      font-size: 9.5px;
+    }
+    .composer-route::before { width: 2px; height: 15px; flex: 0 0 2px; border-radius: 3px; background: var(--brand); content: ""; }
+    .composer-route.is-empty { color: var(--attention); }
+    .composer-route.is-empty::before { background: var(--attention); }
+    .composer-route button { margin-left: auto; padding: 3px 0; color: var(--brand-ink); background: transparent; font-size: 9.5px; font-weight: 680; }
+    .composer-box {
+      display: grid;
+      width: min(1040px, 100%);
+      min-height: 82px;
+      grid-template-rows: minmax(0, 1fr) auto;
+      gap: 4px;
+      margin: 0 auto;
+      padding: 9px;
+      border: 1px solid var(--control-line);
+      border-radius: 8px;
+      background: var(--input);
+    }
+    .composer-box:focus-within { border-color: var(--brand); box-shadow: 0 0 0 3px var(--focus-soft); }
+    .composer-box textarea { width: 100%; min-height: 38px; resize: none; border: 0; outline: 0; color: var(--ink); background: transparent; font-size: 11.5px; line-height: 1.55; }
+    .composer-box textarea::placeholder { color: var(--faint); }
+    .composer-footer { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+    .composer-tools { display: flex; gap: 3px; }
+    .composer-tools button { width: 28px; height: 28px; border-radius: 5px; color: var(--faint); background: transparent; }
+    .send-button { min-width: 62px; min-height: 30px; padding: 5px 10px; border-radius: 6px; color: var(--brand-contrast); background: var(--brand); font-size: 10.5px; font-weight: 700; }
+    .send-button:hover:not(:disabled) { background: var(--brand-hover); }
+
+    .inspector {
+      display: grid;
+      min-width: 0;
+      min-height: 0;
+      grid-template-rows: 43px minmax(0, 1fr);
+      border-left: 1px solid var(--line-strong);
+      background: var(--inspector-surface);
+    }
+    .inspector-tabs { display: flex; align-items: end; gap: 2px; padding: 0 10px; border-bottom: 1px solid var(--line); }
+    .inspector-tab {
+      position: relative;
+      display: inline-flex;
+      min-width: 70px;
+      min-height: 39px;
+      align-items: center;
+      justify-content: center;
+      gap: 5px;
+      color: var(--faint);
+      background: transparent;
+      font-size: 10.5px;
+    }
+    .inspector-tab[aria-selected="true"] { color: var(--ink); font-weight: 700; }
+    .inspector-tab[aria-selected="true"]::after { position: absolute; right: 8px; bottom: -1px; left: 8px; height: 2px; border-radius: 2px 2px 0 0; background: var(--brand); content: ""; }
+    .inspector-tab small { color: var(--faint); font-size: 8.5px; }
+    .inspector-panel { min-height: 0; overflow: auto; }
+    .tasks-placeholder { display: grid; height: 100%; place-content: center; gap: 6px; padding: 24px; color: var(--faint); text-align: center; }
+    .tasks-placeholder strong { color: var(--muted); font-size: 11.5px; }
+    .tasks-placeholder span { max-width: 220px; font-size: 9.5px; line-height: 1.5; }
+
+    .members-summary {
+      position: sticky;
+      z-index: 5;
+      top: 0;
+      padding: 12px;
+      border-bottom: 1px solid var(--line);
+      background: color-mix(in srgb, var(--surface-subtle) 96%, transparent);
+      backdrop-filter: blur(10px);
+    }
+    .members-summary-line { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; gap: 8px; margin-bottom: 8px; }
+    .members-summary-title { display: grid; min-width: 0; gap: 2px; }
+    .members-summary-title strong { font-size: 12px; }
+    .members-summary-title small { color: var(--faint); font-size: 9.5px; }
+    .members-summary-actions { display: flex; align-items: center; gap: 5px; }
+    .scope-label { padding: 3px 6px; border-radius: 999px; color: var(--brand-ink); background: var(--brand-soft); font-size: 7.5px; font-weight: 780; white-space: nowrap; }
+    .add-member-button {
+      display: inline-flex;
+      min-height: 28px;
+      align-items: center;
+      gap: 4px;
+      padding: 4px 7px;
+      border: 1px solid color-mix(in srgb, var(--brand) 38%, var(--line));
+      border-radius: 6px;
+      color: var(--brand-ink);
+      background: var(--surface);
+      font-size: 9px;
+      font-weight: 720;
+      white-space: nowrap;
+    }
+    .add-member-button:hover { border-color: var(--brand); background: var(--brand-soft); }
+
+    .lead-picker-wrap { position: relative; }
+    .lead-picker {
+      display: grid;
+      width: 100%;
+      min-height: 44px;
+      grid-template-columns: 28px minmax(0, 1fr) 14px;
+      align-items: center;
+      gap: 8px;
+      padding: 7px 8px;
+      border: 1px solid color-mix(in srgb, var(--brand) 34%, var(--line));
+      border-radius: 7px;
+      color: var(--ink);
+      background: var(--surface);
+      text-align: left;
+    }
+    .lead-picker:hover:not(:disabled), .lead-picker[aria-expanded="true"] { border-color: var(--brand); background: var(--brand-soft); }
+    .lead-copy { display: grid; min-width: 0; gap: 2px; }
+    .lead-copy strong, .lead-copy small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .lead-copy strong { font-size: 10.5px; }
+    .lead-copy small { color: var(--faint); font-size: 8.5px; }
+    .chevron { width: 10px; height: 10px; color: var(--faint); transition: transform 140ms ease; }
+    [aria-expanded="true"] > .chevron { transform: rotate(180deg); }
+    .lead-menu,
+    .member-menu {
+      position: absolute;
+      z-index: 15;
+      display: none;
+      padding: 4px;
+      border: 1px solid var(--line-strong);
+      border-radius: 7px;
+      color: var(--ink);
+      background: var(--surface-raised);
+      box-shadow: var(--shadow-float);
+    }
+    .lead-menu.open, .member-menu.open { display: grid; }
+    .lead-menu { top: calc(100% + 5px); right: 0; left: 0; }
+    .lead-menu-label { padding: 5px 7px 7px; border-bottom: 1px solid var(--line); color: var(--faint); font-size: 8.5px; font-weight: 750; }
+    .lead-option { display: grid; min-height: 40px; grid-template-columns: 28px minmax(0, 1fr) 16px; align-items: center; gap: 7px; padding: 5px 7px; border-radius: 5px; background: transparent; text-align: left; }
+    .lead-option:hover, .lead-option.selected { color: var(--brand-ink); background: var(--brand-soft); }
+    .lead-option-copy { display: grid; min-width: 0; gap: 2px; }
+    .lead-option-copy strong, .lead-option-copy small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .lead-option-copy strong { font-size: 10px; }
+    .lead-option-copy small { color: var(--faint); font-size: 8px; }
+    .lead-check { color: var(--brand); font-size: 10px; font-weight: 800; }
+
+    .reconciliation {
+      display: grid;
+      grid-template-columns: 18px minmax(0, 1fr) auto;
+      gap: 7px;
+      margin: 9px 12px 3px;
+      padding: 8px 9px;
+      border-left: 3px solid var(--info);
+      color: var(--info);
+      background: var(--info-soft);
+    }
+    .reconciliation.attention { border-left-color: var(--attention); color: var(--attention); background: var(--attention-soft); }
+    .reconciliation.success { border-left-color: var(--success); color: var(--success); background: var(--success-soft); }
+    .reconciliation-mark { font-size: 13px; line-height: 1.3; }
+    .reconciliation-copy { display: grid; min-width: 0; gap: 2px; }
+    .reconciliation-copy strong { font-size: 9.5px; }
+    .reconciliation-copy span { color: color-mix(in srgb, currentColor 82%, var(--ink)); font-size: 8.5px; line-height: 1.45; }
+    .reconciliation button { align-self: start; padding: 2px 0; color: currentColor; background: transparent; font-size: 8.5px; font-weight: 700; white-space: nowrap; }
+    .reconciliation-detail { grid-column: 2 / -1; padding-top: 5px; border-top: 1px solid color-mix(in srgb, currentColor 28%, transparent); color: color-mix(in srgb, currentColor 85%, var(--ink)); font-size: 8.5px; line-height: 1.5; }
+
+    .member-list { padding: 4px 12px 22px; }
+    .member-row {
+      position: relative;
+      display: grid;
+      min-width: 0;
+      grid-template-columns: 34px minmax(0, 1fr) auto 28px;
+      align-items: center;
+      gap: 8px;
+      padding: 10px 0;
+      border-bottom: 1px solid var(--line);
+    }
+    .member-avatar-wrap { position: relative; display: block; width: 32px; height: 32px; }
+    .avatar {
+      display: grid;
+      width: 32px;
+      height: 32px;
+      place-items: center;
+      border: 2px solid var(--avatar-color, var(--identity-1));
+      border-radius: 50%;
+      color: var(--avatar-color, var(--identity-1));
+      background: color-mix(in srgb, var(--avatar-color, var(--identity-1)) 10%, var(--surface));
+      font-size: 10px;
+      font-weight: 760;
+    }
+    .avatar.small { width: 28px; height: 28px; font-size: 9px; }
+    .presence-dot { position: absolute; right: -2px; bottom: -2px; width: 9px; height: 9px; border: 2px solid var(--inspector-surface); border-radius: 50%; background: var(--success); }
+    .presence-dot.away { background: var(--neutral); }
+    .member-copy { display: grid; min-width: 0; gap: 3px; }
+    .member-name { display: flex; min-width: 0; align-items: center; gap: 5px; }
+    .member-name strong { overflow: hidden; font-size: 10.5px; text-overflow: ellipsis; white-space: nowrap; }
+    .lead-badge { flex: 0 0 auto; padding: 2px 5px; border-radius: 999px; color: var(--brand-ink); background: var(--brand-soft); font-size: 7px; font-weight: 800; }
+    .member-copy > small { overflow: hidden; color: var(--faint); font-size: 8.5px; text-overflow: ellipsis; white-space: nowrap; }
+    .member-state { display: grid; min-width: 0; justify-items: end; gap: 3px; }
+    .member-state strong { color: var(--success); font-size: 8.5px; }
+    .member-state.away strong { color: var(--faint); }
+    .runtime-label { max-width: 112px; overflow: hidden; color: var(--faint); font-size: 8px; text-overflow: ellipsis; white-space: nowrap; }
+    .runtime-label.ready { color: var(--success); }
+    .runtime-label.attention { color: var(--attention); }
+    .runtime-detail {
+      display: grid;
+      min-width: 0;
+      grid-column: 2 / -1;
+      grid-template-columns: minmax(0, 1fr);
+      gap: 5px;
+      margin: 1px 0 2px;
+      padding: 8px 9px;
+      border-left: 2px solid var(--line-strong);
+      color: var(--muted);
+      background: var(--surface-subtle);
+    }
+    .runtime-detail > div { display: grid; min-width: 0; grid-template-columns: 58px minmax(0, 1fr); gap: 7px; }
+    .runtime-detail dt, .runtime-detail dd { min-width: 0; margin: 0; font-size: 8.5px; line-height: 1.4; }
+    .runtime-detail dt { color: var(--faint); }
+    .runtime-detail dd { overflow-wrap: anywhere; color: var(--ink); font-weight: 650; }
+    .member-menu-wrap { position: relative; }
+    .member-action { display: grid; width: 28px; height: 28px; place-items: center; padding: 0; border: 0; border-radius: 6px; color: var(--faint); background: transparent; }
+    .member-action svg { width: 16px; height: 16px; fill: currentColor; }
+    .member-action:hover, .member-action[aria-expanded="true"] { color: var(--ink); background: var(--surface-hover); }
+    body[data-action-style="hover"] .member-action { opacity: .24; transition: opacity 140ms ease, color 140ms ease, background 140ms ease; }
+    body[data-action-style="hover"] .member-row:hover .member-action,
+    body[data-action-style="hover"] .member-row:focus-within .member-action,
+    body[data-action-style="hover"] .member-action[aria-expanded="true"] { opacity: 1; }
+    .member-menu { top: 30px; right: 0; width: 168px; }
+    .member-menu button { display: grid; min-height: 34px; gap: 2px; padding: 7px 8px; border-radius: 5px; color: var(--ink); background: transparent; text-align: left; font-size: 9.5px; }
+    .member-menu button:hover:not([aria-disabled="true"]) { background: var(--surface-hover); }
+    .member-menu button[data-remove-id] { color: var(--danger); }
+    .member-menu button[data-remove-id]:hover { color: var(--danger); background: var(--danger-soft); }
+    .member-menu button[aria-disabled="true"] { color: var(--faint); cursor: default; }
+    .member-menu button small { color: currentColor; font-size: 8px; font-weight: 500; line-height: 1.4; }
+    .member-menu-separator { height: 1px; margin: 4px; background: var(--line); }
+    .roster-invariant-error { margin: 12px; padding: 10px; border-left: 3px solid var(--danger); color: var(--danger); background: var(--danger-soft); font-size: 9px; line-height: 1.5; }
+    .primary-button,
+    .danger-button,
+    .quiet-button {
+      min-height: 32px;
+      padding: 6px 11px;
+      border-radius: 6px;
+      font-size: 10.5px;
+      font-weight: 700;
+    }
+    .primary-button { color: var(--brand-contrast); background: var(--brand); }
+    .primary-button:hover:not(:disabled) { background: var(--brand-hover); }
+    .danger-button { color: #fff; background: var(--danger); }
+    :root[data-theme="night"] .danger-button { color: #160d0c; }
+    .danger-button:hover:not(:disabled) { filter: brightness(.92); }
+    .quiet-button { border: 1px solid var(--line-strong); color: var(--muted); background: var(--surface); }
+    .quiet-button:hover:not(:disabled) { color: var(--ink); background: var(--surface-hover); }
+
+    dialog {
+      max-width: none;
+      max-height: none;
+      padding: 0;
+      border: 0;
+      color: var(--ink);
+      background: transparent;
+    }
+    dialog::backdrop { background: var(--overlay); backdrop-filter: blur(2px); }
+    .dialog-card {
+      display: grid;
+      width: min(560px, calc(100vw - 40px));
+      max-height: min(690px, calc(100vh - 40px));
+      grid-template-rows: auto minmax(0, 1fr) auto;
+      overflow: hidden;
+      border: 1px solid var(--line-strong);
+      border-top: 3px solid var(--brand);
+      border-radius: 12px;
+      background: var(--surface-raised);
+      box-shadow: var(--shadow-float);
+    }
+    .dialog-card.danger { width: min(520px, calc(100vw - 40px)); border-top-color: var(--danger); }
+    .dialog-header { display: grid; grid-template-columns: minmax(0, 1fr) 30px; gap: 14px; padding: 17px 18px 14px; border-bottom: 1px solid var(--line); }
+    .dialog-eyebrow { margin: 0 0 4px; color: var(--brand-ink); font: 720 8.5px/1.3 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: .1em; }
+    .danger .dialog-eyebrow { color: var(--danger); }
+    .dialog-header h2 { margin: 0; font-size: 17px; line-height: 1.25; letter-spacing: -.025em; }
+    .dialog-header p:last-child { margin: 5px 0 0; color: var(--muted); font-size: 10.5px; line-height: 1.5; }
+    .dialog-close { width: 30px; height: 30px; border-radius: 6px; color: var(--faint); background: transparent; font-size: 17px; }
+    .dialog-close:hover { color: var(--ink); background: var(--surface-hover); }
+    .dialog-body { min-height: 0; padding: 14px 18px 16px; overflow: auto; }
+    .dialog-footer { display: flex; min-height: 58px; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 18px; border-top: 1px solid var(--line); background: var(--surface-subtle); }
+    .dialog-footer-copy { color: var(--faint); font-size: 9.5px; line-height: 1.4; }
+    .dialog-footer-actions { display: flex; gap: 7px; margin-left: auto; }
+
+    .search-field { position: relative; display: grid; grid-template-columns: 18px minmax(0, 1fr); align-items: center; gap: 6px; margin-bottom: 10px; padding: 0 9px; border: 1px solid var(--control-line); border-radius: 7px; background: var(--input); }
+    .search-field:focus-within { border-color: var(--brand); box-shadow: 0 0 0 2px var(--focus-soft); }
+    .search-field span { color: var(--faint); font-size: 13px; }
+    .search-field input { height: 36px; min-width: 0; border: 0; outline: 0; background: transparent; font-size: 11px; }
+    .candidate-caption { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 0 3px 7px; color: var(--faint); font-size: 9px; }
+    .candidate-caption strong { color: var(--muted); font-weight: 680; }
+    .candidate-list { border-top: 1px solid var(--line); }
+    .candidate-entry { border-bottom: 1px solid var(--line); }
+    .candidate-row {
+      display: grid;
+      min-height: 58px;
+      grid-template-columns: 18px 34px minmax(0, 1fr) auto;
+      align-items: center;
+      gap: 9px;
+      padding: 7px 5px;
+      border-radius: 0;
+    }
+    .candidate-row:hover { background: var(--surface-hover); }
+    .candidate-row input { width: 16px; height: 16px; margin: 0; accent-color: var(--brand); }
+    .candidate-copy { display: grid; min-width: 0; gap: 3px; }
+    .candidate-copy strong { display: flex; min-width: 0; align-items: baseline; gap: 7px; font-size: 11px; }
+    .candidate-copy strong small { overflow: hidden; color: var(--muted); font-size: 9px; font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
+    .candidate-copy > small { overflow: hidden; color: var(--faint); font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
+    .runtime-state { display: inline-flex; align-items: center; gap: 5px; color: var(--attention); font-size: 8.5px; white-space: nowrap; }
+    .runtime-state.ready { color: var(--success); }
+    .runtime-state i { width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+    .candidate-error { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: -2px 5px 7px 66px; color: var(--danger); font-size: 8.5px; }
+    .candidate-error button { padding: 2px 0; color: var(--danger); background: transparent; font-weight: 720; }
+    .dialog-alert { margin-bottom: 10px; padding: 8px 10px; border-left: 3px solid var(--attention); color: var(--attention); background: var(--attention-soft); font-size: 9.5px; line-height: 1.5; }
+    .dialog-alert.danger-alert { border-left-color: var(--danger); color: var(--danger); background: var(--danger-soft); }
+    .candidate-empty { display: grid; min-height: 190px; place-content: center; justify-items: center; gap: 7px; padding: 24px; text-align: center; }
+    .candidate-empty strong { font-size: 11.5px; }
+    .candidate-empty p { max-width: 340px; margin: 0; color: var(--faint); font-size: 9.5px; line-height: 1.5; }
+    .candidate-empty button { margin-top: 3px; padding: 4px 0; color: var(--brand-ink); background: transparent; font-size: 9.5px; font-weight: 700; }
+
+    .preview-loading { display: grid; gap: 9px; padding: 4px 0; }
+    .skeleton { height: 36px; border-radius: 6px; background: var(--surface-muted); animation: skeleton 1.2s ease-in-out infinite alternate; }
+    .skeleton.short { width: 72%; }
+    @keyframes skeleton { to { opacity: .55; } }
+    .impact-list { display: grid; margin: 0; padding: 0; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); list-style: none; }
+    .impact-item { display: grid; min-height: 48px; grid-template-columns: 18px minmax(0, 1fr); align-items: start; column-gap: 10px; padding: 10px 2px; border-bottom: 1px solid var(--line); }
+    .impact-item:last-child { border-bottom: 0; }
+    .impact-mark { display: flex; width: 18px; height: 18px; align-items: center; justify-content: center; margin: 0; color: var(--attention); }
+    .impact-mark.neutral { color: var(--brand-ink); }
+    .impact-mark svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.7; }
+    .impact-copy { display: grid; gap: 2px; }
+    .impact-copy strong { font-size: 10.5px; line-height: 18px; }
+    .impact-copy span { color: var(--faint); font-size: 9.5px; line-height: 1.5; }
+    .dialog-footer-copy:empty { display: none; }
+
+    .toast {
+      position: fixed;
+      z-index: 100;
+      right: 20px;
+      bottom: 20px;
+      display: flex;
+      min-width: 230px;
+      max-width: min(360px, calc(100vw - 40px));
+      align-items: center;
+      gap: 8px;
+      padding: 10px 12px;
+      border: 1px solid var(--line-strong);
+      border-left: 3px solid var(--success);
+      border-radius: 8px;
+      color: var(--ink);
+      background: var(--surface-raised);
+      box-shadow: var(--shadow-float);
+      font-size: 10px;
+      opacity: 0;
+      transform: translateY(8px);
+      pointer-events: none;
+      transition: opacity 150ms ease, transform 150ms ease;
+    }
+    .toast.visible { opacity: 1; transform: translateY(0); }
+    .toast i { color: var(--success); font-style: normal; font-weight: 800; }
+
+    .visually-hidden { position: absolute !important; width: 1px !important; height: 1px !important; padding: 0 !important; overflow: hidden !important; clip: rect(0, 0, 0, 0) !important; white-space: nowrap !important; border: 0 !important; }
+    [hidden] { display: none !important; }
+
+    @media (max-width: 1180px) {
+      :root { --inspector-width: 260px; }
+      .member-row { grid-template-columns: 32px minmax(0, 1fr) 28px; }
+      .member-state { grid-column: 2; grid-row: 2; display: flex; align-items: center; justify-content: space-between; gap: 7px; }
+      .member-menu-wrap { grid-column: 3; grid-row: 1 / span 2; }
+      .members-summary-actions { align-items: flex-end; flex-direction: column; }
+    }
+
+    @media (max-width: 1100px) {
+      body { padding: 0; }
+      .prototype-heading { display: none; }
+      .variant-bar { margin: 0; border-width: 0 0 1px; border-radius: 0; }
+      .scenario-bar { margin: 0; border-width: 0 0 1px; border-radius: 0; }
+      .app-window { height: calc(100vh - 100px); min-height: 540px; border-width: 0; border-radius: 0; }
+    }
+
+    @media (max-width: 860px) {
+      .app-window { grid-template-columns: minmax(0, 1fr); }
+      .app-rail, .conversation { display: none; }
+      .camp-body { grid-template-columns: minmax(0, 1fr); }
+      .inspector { border-left: 0; }
+      .members-summary-actions { align-items: center; flex-direction: row; }
+    }
+
+    @media (max-width: 560px) {
+      .variant-bar { grid-template-columns: minmax(0, 1fr); gap: 6px; }
+      .variant-label { display: none; }
+      .variant-note { padding: 0 3px; }
+      .variant-choice { min-height: 34px; padding: 3px 5px; }
+      .variant-choice-copy small { display: none; }
+      .scenario-label { display: none; }
+      .scenario-button { min-height: 30px; padding: 5px 7px; }
+      .dialog-card, .dialog-card.danger { width: calc(100vw - 16px); max-height: calc(100vh - 16px); }
+      .dialog-header, .dialog-body, .dialog-footer { padding-right: 12px; padding-left: 12px; }
+      .dialog-footer { align-items: flex-start; flex-direction: column; }
+      .dialog-footer-actions { width: 100%; margin-left: 0; }
+      .dialog-footer-actions button { flex: 1 1 0; }
+      .candidate-row { grid-template-columns: 18px 32px minmax(0, 1fr); }
+      .runtime-state { grid-column: 3; justify-self: start; }
+      .candidate-error { margin-left: 59px; }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
+    }
+    @media (hover: none) {
+      body[data-action-style="hover"] .member-action { opacity: .74; }
+    }
+  </style>
+</head>
+<body data-action-style="horizontal">
+  <main class="prototype-shell">
+    <header class="prototype-heading">
+      <div>
+        <p class="prototype-kicker">Camp roster · interaction review</p>
+        <h1>队员操作入口与移出确认</h1>
+        <p>本轮只比较成员行操作入口，并验证“有影响才显示”的移出确认信息。</p>
+      </div>
+      <div class="review-actions">
+        <button class="review-button" id="theme-toggle" type="button">切换 Steel Night</button>
+        <button class="review-button" id="reset-prototype" type="button">重置原型</button>
+      </div>
+    </header>
+
+    <section class="variant-bar" aria-label="成员操作入口方案">
+      <span class="variant-label">入口方案</span>
+      <div class="variant-options">
+        <button class="variant-choice" type="button" data-variant="horizontal" aria-pressed="true">
+          <span class="variant-choice-glyph" aria-hidden="true"><svg viewBox="0 0 16 16"><circle cx="3" cy="8" r="1.35"/><circle cx="8" cy="8" r="1.35"/><circle cx="13" cy="8" r="1.35"/></svg></span>
+          <span class="variant-choice-copy"><strong>A · 横向常显</strong><small>无框，最接近现有习惯</small></span>
+        </button>
+        <button class="variant-choice" type="button" data-variant="vertical" aria-pressed="false">
+          <span class="variant-choice-glyph" aria-hidden="true"><svg viewBox="0 0 16 16"><circle cx="8" cy="3" r="1.35"/><circle cx="8" cy="8" r="1.35"/><circle cx="8" cy="13" r="1.35"/></svg></span>
+          <span class="variant-choice-copy"><strong>B · 竖向常显</strong><small>更窄，偏表格操作语义</small></span>
+        </button>
+        <button class="variant-choice" type="button" data-variant="hover" aria-pressed="false">
+          <span class="variant-choice-glyph" aria-hidden="true"><svg viewBox="0 0 16 16"><circle cx="3" cy="8" r="1.35"/><circle cx="8" cy="8" r="1.35"/><circle cx="13" cy="8" r="1.35"/></svg></span>
+          <span class="variant-choice-copy"><strong>C · 行内渐显</strong><small>最安静，悬停或聚焦时显现</small></span>
+        </button>
+      </div>
+      <p class="variant-note" id="variant-note"><strong>推荐 A：</strong>常态没有边框，只有 hover、键盘聚焦或菜单展开时出现轻底色；可发现性与安静程度最平衡。</p>
+    </section>
+
+    <nav class="scenario-bar" aria-label="原型场景">
+      <span class="scenario-label">场景</span>
+      <button class="scenario-button" type="button" data-scenario="normal" aria-pressed="true">正常名册</button>
+      <button class="scenario-button" type="button" data-scenario="add" aria-pressed="false">添加多人</button>
+      <button class="scenario-button" type="button" data-scenario="partial" aria-pressed="false">部分失败</button>
+      <button class="scenario-button" type="button" data-scenario="remove-lead" aria-pressed="false">移出队长</button>
+      <button class="scenario-button" type="button" data-scenario="remove-clean" aria-pressed="false">移出无在途</button>
+      <button class="scenario-button" type="button" data-scenario="conflict" aria-pressed="false">版本冲突</button>
+      <button class="scenario-button" type="button" data-scenario="reconciling" aria-pressed="false">收敛中</button>
+      <button class="scenario-button" type="button" data-scenario="no-candidates" aria-pressed="false">无候选</button>
+      <button class="scenario-button" type="button" data-scenario="last-member" aria-pressed="false">仅一位队员</button>
+    </nav>
+
+    <section class="app-window" aria-label="Rovai AI Camp 队员管理原型">
+      <aside class="app-rail" aria-label="应用导航">
+        <div class="brand-lockup"><span class="brand-mark" aria-hidden="true"></span><strong>Rovai AI</strong></div>
+        <nav class="rail-primary" aria-label="主要页面">
+          <button class="rail-item" type="button"><span class="rail-icon">✦</span><span>快速对话</span></button>
+          <button class="rail-item" type="button"><span class="rail-icon">♙</span><span>队员</span></button>
+          <button class="rail-item" type="button"><span class="rail-icon">◇</span><span>记忆</span></button>
+        </nav>
+        <div class="rail-projects">
+          <div class="rail-section-heading"><span>项目</span><span>＋</span></div>
+          <button class="rail-item" type="button"><span class="rail-icon">⌘</span><span>rovai-ai</span><span>⌄</span></button>
+          <button class="rail-item rail-camp selected" type="button"><span></span><span>动态名册方案</span></button>
+          <button class="rail-item rail-camp" type="button"><span></span><span>Runtime 调试记录</span></button>
+        </div>
+        <div class="rail-footer"><span>●</span><span>Core 已连接 · 本地</span></div>
+      </aside>
+
+      <section class="camp-shell">
+        <header class="camp-header">
+          <div class="camp-title"><strong>动态名册方案</strong><small>Quick Chat · 当前会话</small></div>
+          <div class="camp-header-actions">
+            <button class="approval-summary" type="button"><i aria-hidden="true"></i><span>暂无待审批</span></button>
+            <button class="icon-button" type="button" aria-label="隐藏 Inspector">◫</button>
+          </div>
+        </header>
+
+        <div class="camp-body">
+          <main class="conversation">
+            <div class="timeline" aria-label="Camp 消息">
+              <article class="message">
+                <span class="message-avatar avatar small" style="--avatar-color: var(--identity-4)" aria-hidden="true">你</span>
+                <div class="message-meta"><strong>你</strong><time>10:24</time></div>
+                <p>看看这个方案里 Camp 动态增减队员的交互应该怎么做，先保持现有工作区的视觉语言。</p>
+              </article>
+              <article class="message">
+                <span class="message-avatar avatar small" style="--avatar-color: var(--identity-1)" aria-hidden="true">爱</span>
+                <div class="message-meta"><strong>爱丽丝</strong><time>10:26</time></div>
+                <p>我会把当前名册放在 Inspector 内处理：添加是普通结构操作；移出则先展示 Core 权威影响，再区分名册 cutover 和后续可靠收敛。</p>
+                <p>普通用户只看到“添加队员”，不需要理解底层是否复用了历史 membership。</p>
+                <span class="message-route">发送给 @奥黛丽</span>
+              </article>
+              <article class="message">
+                <span class="message-avatar avatar small" style="--avatar-color: var(--identity-6)" aria-hidden="true">奥</span>
+                <div class="message-meta"><strong>奥黛丽</strong><time>10:29</time></div>
+                <p>交互稿会保留现有队长选择器与 Runtime 摘要；查看模型信息和移出会话统一收进成员操作菜单。</p>
+              </article>
+            </div>
+            <section class="composer" aria-label="消息编辑器">
+              <div class="composer-route" id="composer-route"><span id="composer-route-copy">默认由队长 · 爱丽丝接收</span></div>
+              <div class="composer-box">
+                <label class="visually-hidden" for="composer-input">发送消息</label>
+                <textarea id="composer-input" placeholder="发送消息，使用 @ 指定队员…"></textarea>
+                <div class="composer-footer">
+                  <div class="composer-tools"><button type="button" aria-label="添加附件">＋</button><button type="button" aria-label="添加 Mention">＠</button></div>
+                  <button class="send-button" id="send-button" type="button">发送</button>
+                </div>
+              </div>
+            </section>
+          </main>
+
+          <aside class="inspector" aria-label="Camp Inspector">
+            <div class="inspector-tabs" role="tablist" aria-label="Inspector 页面">
+              <button class="inspector-tab" id="tasks-tab" type="button" role="tab" tabindex="-1" aria-selected="false" aria-controls="tasks-panel">任务 <small>2</small></button>
+              <button class="inspector-tab" id="members-tab" type="button" role="tab" tabindex="0" aria-selected="true" aria-controls="members-panel">队员 <small id="member-tab-count">3</small></button>
+            </div>
+            <section class="inspector-panel" id="tasks-panel" role="tabpanel" aria-labelledby="tasks-tab" hidden>
+              <div class="tasks-placeholder"><strong>任务责任面</strong><span>本原型只评审队员名册；任务页保持现有结构。</span></div>
+            </section>
+            <section class="inspector-panel" id="members-panel" role="tabpanel" aria-labelledby="members-tab">
+              <div class="members-summary">
+                <div class="members-summary-line">
+                  <div class="members-summary-title"><strong>协作队员</strong><small id="member-summary-count">3 位在队</small></div>
+                  <div class="members-summary-actions"><span class="scope-label">当前会话</span><button class="add-member-button" id="open-add-dialog" type="button"><span aria-hidden="true">＋</span> 添加</button></div>
+                </div>
+                <div class="lead-picker-wrap">
+                  <button class="lead-picker" id="lead-picker" type="button" aria-haspopup="menu" aria-expanded="false">
+                    <span id="lead-avatar"></span>
+                    <span class="lead-copy"><strong id="lead-name">队长 · 爱丽丝</strong><small id="lead-role">五号街卖花女</small></span>
+                    <svg class="chevron" aria-hidden="true" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><path d="m4 6 4 4 4-4"/></svg>
+                  </button>
+                  <div class="lead-menu" id="lead-menu" role="menu" aria-label="更换队长"></div>
+                </div>
+              </div>
+              <div id="reconciliation-host"></div>
+              <div id="member-content"></div>
+            </section>
+          </aside>
+        </div>
+      </section>
+    </section>
+  </main>
+
+  <dialog id="add-dialog" aria-labelledby="add-dialog-title">
+    <div class="dialog-card">
+      <header class="dialog-header">
+        <div><p class="dialog-eyebrow">CAMP ROSTER</p><h2 id="add-dialog-title">添加队员</h2><p id="add-dialog-description">加入「动态名册方案」；不会改变队员的长期配置。</p></div>
+        <button class="dialog-close" id="close-add-dialog" type="button" aria-label="关闭添加队员">×</button>
+      </header>
+      <div class="dialog-body">
+        <div class="dialog-alert" id="add-result-summary" role="status" hidden></div>
+        <label class="search-field"><span aria-hidden="true">⌕</span><input id="candidate-search" type="search" placeholder="搜索队员…" autocomplete="off"></label>
+        <div class="candidate-caption"><strong id="candidate-mode-label">可添加队员</strong><span id="candidate-count"></span></div>
+        <div class="candidate-list" id="candidate-list"></div>
+      </div>
+      <footer class="dialog-footer">
+        <span class="dialog-footer-copy" id="add-footer-copy">仅显示当前在队、尚未加入本会话的队员</span>
+        <div class="dialog-footer-actions"><button class="quiet-button" id="cancel-add" type="button">取消</button><button class="primary-button" id="confirm-add" type="button" disabled>添加队员</button></div>
+      </footer>
+    </div>
+  </dialog>
+
+  <dialog id="remove-dialog" aria-labelledby="remove-dialog-title">
+    <div class="dialog-card danger">
+      <header class="dialog-header">
+        <div><p class="dialog-eyebrow">CURRENT CAMP</p><h2 id="remove-dialog-title">移出当前会话？</h2><p id="remove-dialog-description">只影响当前会话，不会永久移除这位队员。</p></div>
+        <button class="dialog-close" id="close-remove-dialog" type="button" aria-label="关闭移出确认">×</button>
+      </header>
+      <div class="dialog-body" id="remove-dialog-body">
+        <div class="dialog-alert danger-alert" id="remove-conflict" role="alert" hidden>名册已发生变化。请刷新权威影响后再确认，本次没有移出任何队员。</div>
+        <div class="preview-loading" id="preview-loading" aria-label="正在读取移出影响"><div class="skeleton"></div><div class="skeleton"></div><div class="skeleton short"></div></div>
+        <div id="preview-content" hidden><ul class="impact-list" id="impact-list"></ul></div>
+      </div>
+      <footer class="dialog-footer">
+        <span class="dialog-footer-copy" id="remove-footer-copy">正在读取 Core 权威影响…</span>
+        <div class="dialog-footer-actions"><button class="quiet-button" id="cancel-remove" type="button">取消</button><button class="danger-button" id="confirm-remove" type="button" disabled>移出当前会话</button></div>
+      </footer>
+    </div>
+  </dialog>
+
+  <div class="toast" id="toast" role="status" aria-live="polite"><i>✓</i><span id="toast-copy"></span></div>
+
+  <script>
+    const profiles = [
+      { id: 'agent_6', name: '爱丽丝', initial: '爱', role: '五号街卖花女', presence: 'present', runtime: 'Codex · 可用', runtimeTone: 'ready', runtimeDetails: { model: 'gpt-5.3-codex', effortLabel: '推理强度', effort: '高', strategy: '固定模型' }, color: 'var(--identity-1)', tasks: 2, runs: 1, deliveries: 1, gathers: 1, unknown: true },
+      { id: 'agent_7', name: '雾切响子', initial: '雾', role: '超高校级的侦探', presence: 'present', runtime: 'Codex · 可用', runtimeTone: 'ready', runtimeDetails: { model: 'gpt-5.3-codex', effortLabel: '推理强度', effort: '高', strategy: '固定模型' }, color: 'var(--identity-2)', tasks: 3, runs: 1, deliveries: 2, gathers: 0, unknown: false },
+      { id: 'agent_8', name: '药师寺惠', initial: '惠', role: '机兵驾驶员 · 咲良高校学生', presence: 'away', runtime: 'Codex · 可用', runtimeTone: 'ready', runtimeDetails: { model: 'gpt-5.3-codex', effortLabel: '推理强度', effort: '中', strategy: '固定模型' }, color: 'var(--identity-3)', tasks: 0, runs: 0, deliveries: 0, gathers: 0, unknown: false },
+      { id: 'agent_9', name: '奥黛丽', initial: '奥', role: '正义小姐 · 观众途径', presence: 'present', runtime: 'Codex · 可用', runtimeTone: 'ready', runtimeDetails: { model: 'gpt-5.3-codex', effortLabel: '推理强度', effort: '高', strategy: '固定模型' }, color: 'var(--identity-6)', tasks: 0, runs: 0, deliveries: 0, gathers: 0, unknown: false },
+      { id: 'agent_10', name: '克莱恩', initial: '克', role: '愚者', presence: 'present', runtime: 'Claude · 可用', runtimeTone: 'ready', runtimeDetails: { model: 'claude-opus-4-1', effortLabel: '思考强度', effort: '高', strategy: '固定模型' }, color: 'var(--identity-4)', tasks: 0, runs: 0, deliveries: 0, gathers: 0, unknown: false },
+      { id: 'agent_11', name: '苏茜', initial: '苏', role: '心理学研究员', presence: 'present', runtime: 'Agent 运行时需配置', runtimeTone: 'attention', runtimeDetails: null, color: 'var(--identity-7)', tasks: 0, runs: 0, deliveries: 0, gathers: 0, unknown: false }
+    ];
+
+    const initialMemberIds = ['agent_6', 'agent_7', 'agent_8'];
+    let memberIds = [...initialMemberIds];
+    let leadId = 'agent_6';
+    let addSelection = new Set();
+    let candidateErrors = new Map();
+    let addBusy = false;
+    let nextAddOutcome = 'success';
+    let removeTargetId = null;
+    let removeBusy = false;
+    let removeOutcome = 'success';
+    let conflictVisible = false;
+    let reconciliation = null;
+    let reconciliationExpanded = false;
+    let reconciliationTimer = null;
+    let previewTimer = null;
+    let toastTimer = null;
+    let expandedRuntimeIds = new Set();
+    let activeScenario = 'normal';
+    let actionVariant = 'horizontal';
+
+    const actionVariantCopy = {
+      horizontal: '<strong>推荐 A：</strong>常态没有边框，只有 hover、键盘聚焦或菜单展开时出现轻底色；可发现性与安静程度最平衡。',
+      vertical: '<strong>方案 B：</strong>同样无框，竖向三点更窄、更像表格行操作；优点是利落，风险是会让列表稍偏管理后台。',
+      hover: '<strong>方案 C：</strong>横向三点在行内低强度渐显，视觉最安静；触控设备会保持可见，但桌面初次使用的可发现性略弱。'
+    };
+
+    const byId = (id) => profiles.find(profile => profile.id === id);
+    const activeProfiles = () => memberIds.map(byId).filter(Boolean);
+    const eligibleProfiles = () => profiles.filter(profile => profile.presence === 'present' && !memberIds.includes(profile.id));
+    const presentMembers = () => activeProfiles().filter(profile => profile.presence === 'present');
+    const avatar = (profile, small = false) => `<span class="avatar${small ? ' small' : ''}" style="--avatar-color: ${profile.color}" aria-hidden="true">${profile.initial}</span>`;
+    const delay = (milliseconds) => new Promise(resolve => setTimeout(resolve, milliseconds));
+
+    function moreGlyph(variant = actionVariant) {
+      if (variant === 'vertical') {
+        return '<svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="3" r="1.35"/><circle cx="8" cy="8" r="1.35"/><circle cx="8" cy="13" r="1.35"/></svg>';
+      }
+      return '<svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="3" cy="8" r="1.35"/><circle cx="8" cy="8" r="1.35"/><circle cx="13" cy="8" r="1.35"/></svg>';
+    }
+
+    function setActionVariant(variant) {
+      actionVariant = variant;
+      document.body.dataset.actionStyle = variant;
+      document.querySelectorAll('[data-variant]').forEach(button => {
+        button.setAttribute('aria-pressed', String(button.dataset.variant === variant));
+      });
+      document.getElementById('variant-note').innerHTML = actionVariantCopy[variant];
+      closeMemberMenus();
+      renderMembers();
+    }
+
+    function impactGlyph(name) {
+      const paths = {
+        run: '<path d="m9.6 1.8-5.2 7h3.5l-.8 6.1 5.2-7H8.8Z"/>',
+        task: '<rect x="2.2" y="2.2" width="11.6" height="11.6" rx="2"/><path d="m4.8 8 2 2 4.4-4.5"/>',
+        message: '<path d="M2.2 3.2h11.6v8H7.5l-3.3 2.6v-2.6h-2Z"/><path d="M5 6.2h6M5 8.5h4"/>',
+        lead: '<circle cx="8" cy="5" r="2.5"/><path d="M3.2 13.8c.5-2.8 2.1-4.2 4.8-4.2s4.3 1.4 4.8 4.2"/>'
+      };
+      return `<svg viewBox="0 0 16 16" aria-hidden="true">${paths[name]}</svg>`;
+    }
+
+    function setScenario(name) {
+      activeScenario = name;
+      document.querySelectorAll('.scenario-button').forEach(button => {
+        button.setAttribute('aria-pressed', String(button.dataset.scenario === name));
+      });
+    }
+
+    function closeAllOverlays() {
+      clearTimeout(previewTimer);
+      document.getElementById('lead-menu').classList.remove('open');
+      document.getElementById('lead-picker').setAttribute('aria-expanded', 'false');
+      document.querySelectorAll('.member-menu.open').forEach(menu => menu.classList.remove('open'));
+      document.querySelectorAll('.member-action[aria-expanded="true"]').forEach(button => button.setAttribute('aria-expanded', 'false'));
+      ['add-dialog', 'remove-dialog'].forEach(id => {
+        const dialog = document.getElementById(id);
+        if (dialog.open) dialog.close();
+      });
+    }
+
+    function resetState({ keepScenario = false } = {}) {
+      closeAllOverlays();
+      clearTimeout(reconciliationTimer);
+      memberIds = [...initialMemberIds];
+      leadId = 'agent_6';
+      addSelection = new Set();
+      candidateErrors = new Map();
+      addBusy = false;
+      nextAddOutcome = 'success';
+      removeTargetId = null;
+      removeBusy = false;
+      removeOutcome = 'success';
+      conflictVisible = false;
+      reconciliation = null;
+      reconciliationExpanded = false;
+      expandedRuntimeIds = new Set();
+      if (!keepScenario) setScenario('normal');
+      renderAll();
+    }
+
+    function renderAll() {
+      renderMembers();
+      renderLead();
+      renderComposer();
+      renderReconciliation();
+    }
+
+    function renderLead() {
+      const picker = document.getElementById('lead-picker');
+      const lead = byId(leadId);
+      const eligible = presentMembers();
+      picker.disabled = eligible.length < 2;
+      document.getElementById('lead-avatar').innerHTML = lead ? avatar(lead, true) : '<span class="avatar small" aria-hidden="true">—</span>';
+      document.getElementById('lead-name').textContent = `队长 · ${lead?.name ?? '未设置'}`;
+      document.getElementById('lead-role').textContent = lead?.role ?? '名册状态暂不可用';
+      const menu = document.getElementById('lead-menu');
+      menu.innerHTML = `<div class="lead-menu-label">选择队长</div>${eligible.map(profile => `
+        <button class="lead-option${profile.id === leadId ? ' selected' : ''}" type="button" role="menuitemradio" aria-checked="${profile.id === leadId}" data-lead-id="${profile.id}">
+          ${avatar(profile, true)}
+          <span class="lead-option-copy"><strong>${profile.name}</strong><small>${profile.role} · 在队</small></span>
+          <span class="lead-check">${profile.id === leadId ? '✓' : ''}</span>
+        </button>`).join('')}`;
+      menu.querySelectorAll('[data-lead-id]').forEach(button => button.addEventListener('click', () => {
+        leadId = button.dataset.leadId;
+        menu.classList.remove('open');
+        picker.setAttribute('aria-expanded', 'false');
+        renderAll();
+        showToast(`已将队长更换为${byId(leadId).name}`);
+      }));
+    }
+
+    function renderMembers() {
+      const members = activeProfiles();
+      const presentCount = members.filter(profile => profile.presence === 'present').length;
+      const awayCount = members.length - presentCount;
+      document.getElementById('member-tab-count').textContent = String(members.length);
+      document.getElementById('member-summary-count').textContent = `${presentCount} 位在队${awayCount ? ` · ${awayCount} 位暂离` : ''}`;
+      const host = document.getElementById('member-content');
+      if (members.length === 0) {
+        host.innerHTML = '<p class="roster-invariant-error" role="alert">名册状态暂不可用：当前会话必须至少保留一位队员。请刷新后重试。</p>';
+        return;
+      }
+      host.innerHTML = `<div class="member-list" role="list" aria-label="会话队员列表">${members.map(profile => {
+        const present = profile.presence === 'present';
+        const runtimeOpen = expandedRuntimeIds.has(profile.id);
+        const runtimeDetailsId = `member-runtime-${profile.id}`;
+        const lastMember = members.length === 1;
+        return `
+          <article class="member-row" role="listitem">
+            <span class="member-avatar-wrap">${avatar(profile)}<i class="presence-dot${present ? '' : ' away'}" aria-hidden="true"></i></span>
+            <span class="member-copy">
+              <span class="member-name"><strong>${profile.name}</strong>${profile.id === leadId ? '<small class="lead-badge">队长</small>' : ''}</span>
+              <small>${profile.role}</small>
+            </span>
+            <span class="member-state${present ? '' : ' away'}"><strong>${present ? '在队' : '暂离'}</strong><small class="runtime-label ${profile.runtimeTone}">${profile.runtime}</small></span>
+            <span class="member-menu-wrap">
+              <button class="member-action" type="button" aria-label="${profile.name}的当前会话操作" aria-haspopup="menu" aria-expanded="false" data-member-action="${profile.id}">${moreGlyph()}</button>
+              <span class="member-menu" id="member-menu-${profile.id}" role="menu">${profile.runtimeDetails
+                ? `<button type="button" role="menuitem" data-runtime-menu="${profile.id}">${runtimeOpen ? '收起模型信息' : '查看模型信息'}</button><span class="member-menu-separator" role="separator"></span>`
+                : ''}${lastMember
+                ? `<button type="button" role="menuitem" aria-disabled="true" data-remove-disabled="${profile.id}"><span>移出当前会话</span><small>会话至少保留 1 位队员</small></button>`
+                : `<button type="button" role="menuitem" data-remove-id="${profile.id}">移出当前会话</button>`}</span>
+            </span>
+            ${profile.runtimeDetails && runtimeOpen ? `<dl class="runtime-detail" id="${runtimeDetailsId}" aria-label="${profile.name}的当前模型配置"><div><dt>模型</dt><dd>${profile.runtimeDetails.model}</dd></div><div><dt>${profile.runtimeDetails.effortLabel}</dt><dd>${profile.runtimeDetails.effort}</dd></div><div><dt>模型策略</dt><dd>${profile.runtimeDetails.strategy}</dd></div></dl>` : ''}
+          </article>`;
+      }).join('')}</div>`;
+      host.querySelectorAll('[data-runtime-menu]').forEach(button => button.addEventListener('click', () => {
+        const id = button.dataset.runtimeMenu;
+        if (expandedRuntimeIds.has(id)) expandedRuntimeIds.delete(id);
+        else expandedRuntimeIds.add(id);
+        renderMembers();
+        requestAnimationFrame(() => host.querySelector(`[data-member-action="${id}"]`)?.focus());
+      }));
+      host.querySelectorAll('[data-member-action]').forEach(button => button.addEventListener('click', event => {
+        event.stopPropagation();
+        const targetMenu = document.getElementById(`member-menu-${button.dataset.memberAction}`);
+        const opening = !targetMenu.classList.contains('open');
+        document.querySelectorAll('.member-menu.open').forEach(menu => menu.classList.remove('open'));
+        document.querySelectorAll('.member-action[aria-expanded="true"]').forEach(item => item.setAttribute('aria-expanded', 'false'));
+        targetMenu.classList.toggle('open', opening);
+        button.setAttribute('aria-expanded', String(opening));
+      }));
+      host.querySelectorAll('[data-remove-id]').forEach(button => button.addEventListener('click', () => openRemoveDialog(button.dataset.removeId)));
+      host.querySelectorAll('[data-remove-disabled]').forEach(button => button.addEventListener('click', () => showToast('当前会话至少保留 1 位队员')));
+    }
+
+    function renderComposer() {
+      const routeCopy = document.getElementById('composer-route-copy');
+      const input = document.getElementById('composer-input');
+      const send = document.getElementById('send-button');
+      routeCopy.textContent = leadId ? `默认由队长 · ${byId(leadId).name}接收` : '名册状态暂不可用';
+      input.disabled = !leadId;
+      input.placeholder = leadId ? '发送消息，使用 @ 指定队员…' : '请刷新名册状态后重试…';
+      send.disabled = !leadId;
+    }
+
+    function renderReconciliation() {
+      const host = document.getElementById('reconciliation-host');
+      if (!reconciliation) {
+        host.innerHTML = '';
+        return;
+      }
+      const state = reconciliation.state;
+      const tone = reconciliation.unknown ? 'attention' : state === 'settled' ? 'success' : '';
+      const title = state === 'settled' ? `${reconciliation.name}的移出操作已收敛` : '名册已更新，后台仍在收敛';
+      const copy = state === 'settled'
+        ? '相关运行与投递已取得可靠终态。'
+        : `${reconciliation.runs} 个运行正在停止 · ${reconciliation.deliveries} 个投递正在终态化`;
+      host.innerHTML = `
+        <section class="reconciliation ${tone}" role="status" aria-label="移出操作状态">
+          <span class="reconciliation-mark" aria-hidden="true">${state === 'settled' ? '✓' : '↻'}</span>
+          <span class="reconciliation-copy"><strong>${title}</strong><span>${copy}</span></span>
+          <button type="button" id="toggle-reconciliation" aria-expanded="${reconciliationExpanded}">${reconciliationExpanded ? '收起' : '查看影响'}</button>
+          ${reconciliationExpanded ? `<span class="reconciliation-detail">${reconciliation.unknown ? '部分外部操作可能已经发生，当前仍需确认。' : '公开消息、运行证据和历史均已保留；旧工作不会因再次添加而恢复。'}</span>` : ''}
+        </section>`;
+      document.getElementById('toggle-reconciliation').addEventListener('click', () => {
+        reconciliationExpanded = !reconciliationExpanded;
+        renderReconciliation();
+      });
+    }
+
+    function openAddDialog() {
+      closeMemberMenus();
+      addSelection = new Set();
+      candidateErrors = new Map();
+      addBusy = false;
+      document.getElementById('candidate-search').value = '';
+      document.getElementById('add-result-summary').hidden = true;
+      renderCandidateList();
+      document.getElementById('add-dialog').showModal();
+      requestAnimationFrame(() => document.getElementById('candidate-search').focus());
+    }
+
+    function renderCandidateList() {
+      const query = document.getElementById('candidate-search').value.trim().toLocaleLowerCase('zh-CN');
+      const candidates = eligibleProfiles();
+      const filtered = candidates.filter(profile => `${profile.name} ${profile.role} ${profile.runtime}`.toLocaleLowerCase('zh-CN').includes(query));
+      document.getElementById('add-dialog-title').textContent = '添加队员';
+      document.getElementById('add-dialog-description').textContent = '加入「动态名册方案」；不会改变队员的长期配置。';
+      document.getElementById('candidate-mode-label').textContent = '可添加队员';
+      document.getElementById('candidate-count').textContent = `${candidates.length} 位可选`;
+      const list = document.getElementById('candidate-list');
+      if (candidates.length === 0) {
+        list.innerHTML = `<div class="candidate-empty"><strong>所有在队队员都已加入当前会话</strong><p>暂离或永久移除的队员不会出现在这里。</p><button type="button" id="go-to-members">前往队员页</button></div>`;
+        document.getElementById('go-to-members').addEventListener('click', () => showToast('原型：将导航到全局队员页'));
+      } else if (filtered.length === 0) {
+        list.innerHTML = `<div class="candidate-empty"><strong>没有匹配的队员</strong><p>换一个名称、角色或 Agent 运行时关键词试试。</p></div>`;
+      } else {
+        list.innerHTML = filtered.map(profile => `
+          <div class="candidate-entry">
+            <label class="candidate-row">
+              <input type="checkbox" name="candidate" value="${profile.id}" ${addSelection.has(profile.id) ? 'checked' : ''} ${addBusy ? 'disabled' : ''}>
+              ${avatar(profile)}
+              <span class="candidate-copy"><strong>${profile.name}<small>${profile.role}</small></strong><small>${profile.runtime}</small></span>
+              <span class="runtime-state ${profile.runtimeTone}"><i aria-hidden="true"></i>${profile.runtimeTone === 'ready' ? '可用' : '需配置'}</span>
+            </label>
+            ${candidateErrors.has(profile.id) ? `<div class="candidate-error"><span>${candidateErrors.get(profile.id)}</span><button type="button" data-retry-candidate="${profile.id}">重试</button></div>` : ''}
+          </div>`).join('');
+        list.querySelectorAll('input[name="candidate"]').forEach(input => input.addEventListener('change', () => {
+          if (input.checked) addSelection.add(input.value);
+          else addSelection.delete(input.value);
+          candidateErrors.delete(input.value);
+          renderCandidateList();
+        }));
+        list.querySelectorAll('[data-retry-candidate]').forEach(button => button.addEventListener('click', event => {
+          event.preventDefault();
+          addSelection.add(button.dataset.retryCandidate);
+          candidateErrors.delete(button.dataset.retryCandidate);
+          nextAddOutcome = 'success';
+          renderCandidateList();
+        }));
+      }
+      const confirm = document.getElementById('confirm-add');
+      confirm.disabled = addBusy || addSelection.size === 0;
+      confirm.textContent = addBusy ? confirm.textContent : addSelection.size > 0 ? `添加 ${addSelection.size} 位队员` : '添加队员';
+      document.getElementById('add-footer-copy').textContent = '仅显示当前在队、尚未加入本会话的队员';
+    }
+
+    async function submitAdd() {
+      if (addBusy || addSelection.size === 0) return;
+      addBusy = true;
+      const selected = [...addSelection].filter(id => eligibleProfiles().some(profile => profile.id === id));
+      const failures = [];
+      let accepted = 0;
+      for (let index = 0; index < selected.length; index += 1) {
+        const confirm = document.getElementById('confirm-add');
+        confirm.textContent = `正在添加 ${index + 1} / ${selected.length}…`;
+        renderCandidateList();
+        await delay(430);
+        const id = selected[index];
+        const shouldFail = nextAddOutcome === 'partial' && index === selected.length - 1;
+        if (shouldFail) {
+          failures.push(id);
+          candidateErrors.set(id, '名册版本已变化，请使用新请求重试。');
+        } else {
+          memberIds.push(id);
+          addSelection.delete(id);
+          accepted += 1;
+          renderAll();
+        }
+      }
+      addBusy = false;
+      nextAddOutcome = 'success';
+      if (failures.length === 0) {
+        document.getElementById('add-dialog').close();
+        requestAnimationFrame(() => document.getElementById('open-add-dialog').focus());
+        showToast(`已添加 ${accepted} 位队员`);
+      } else {
+        addSelection = new Set(failures);
+        const summary = document.getElementById('add-result-summary');
+        summary.textContent = `已添加 ${accepted} 位，${failures.length} 位未添加。成功结果已保留。`;
+        summary.hidden = false;
+        renderCandidateList();
+      }
+    }
+
+    function openRemoveDialog(id, forcedOutcome = null) {
+      closeMemberMenus();
+      if (memberIds.length <= 1) {
+        showToast('当前会话至少保留 1 位队员');
+        return;
+      }
+      clearTimeout(previewTimer);
+      removeTargetId = id;
+      removeBusy = false;
+      conflictVisible = false;
+      if (forcedOutcome) removeOutcome = forcedOutcome;
+      const profile = byId(id);
+      document.getElementById('remove-dialog-title').textContent = `移出「${profile.name}」？`;
+      document.getElementById('remove-dialog-description').textContent = `只影响当前会话：移出后，${profile.name}将不再接收这里的新工作。`;
+      const conflict = document.getElementById('remove-conflict');
+      conflict.textContent = '名册已发生变化。请刷新权威影响后再确认，本次没有移出任何队员。';
+      conflict.hidden = true;
+      document.getElementById('remove-dialog-body').hidden = false;
+      document.getElementById('preview-loading').hidden = false;
+      document.getElementById('preview-content').hidden = true;
+      document.getElementById('remove-footer-copy').textContent = '正在读取 Core 权威影响…';
+      const confirm = document.getElementById('confirm-remove');
+      confirm.disabled = true;
+      confirm.textContent = '移出当前会话';
+      document.getElementById('remove-dialog').showModal();
+      previewTimer = setTimeout(() => renderRemovePreview(profile), 520);
+    }
+
+    function renderRemovePreview(profile) {
+      const others = presentMembers().filter(member => member.id !== profile.id);
+      const successor = others[0] ?? null;
+      const impacts = [];
+      if (profile.runs > 0) {
+        impacts.push({ icon: 'run', title: '已开始的执行', detail: `${profile.runs} 个执行将停止接收新写入，并在后台收拢。` });
+      }
+      if (profile.tasks > 0) {
+        impacts.push({ icon: 'task', title: '未完成任务', detail: `${profile.tasks} 个任务将释放负责人，回到待分配状态。` });
+      }
+      if (profile.deliveries + profile.gathers > 0) {
+        impacts.push({ icon: 'message', title: '消息与 Gather', detail: `${profile.deliveries} 个投递、${profile.gathers} 个 Gather 项将正式结算。` });
+      }
+      if (profile.id === leadId) {
+        impacts.push({ icon: 'lead', title: '队长职责', detail: successor ? `将交给${successor.name}。` : '剩余队员都处于暂离状态，会话将暂时没有队长。', tone: 'neutral' });
+      }
+      document.getElementById('impact-list').innerHTML = impacts.map(impact => `
+        <li class="impact-item"><span class="impact-mark ${impact.tone ?? ''}">${impactGlyph(impact.icon)}</span><span class="impact-copy"><strong>${impact.title}</strong><span>${impact.detail}</span></span></li>`).join('');
+      document.getElementById('preview-loading').hidden = true;
+      document.getElementById('preview-content').hidden = impacts.length === 0;
+      document.getElementById('remove-dialog-body').hidden = impacts.length === 0;
+      document.getElementById('remove-footer-copy').textContent = '提交后立即阻止该队员的新消息与工具写入。';
+      const confirm = document.getElementById('confirm-remove');
+      confirm.classList.remove('primary-button');
+      confirm.classList.add('danger-button');
+      confirm.disabled = profile.id === leadId && !successor;
+      if (confirm.disabled) document.getElementById('remove-footer-copy').textContent = '需要先指定一位可接任的在队成员';
+    }
+
+    async function submitRemove() {
+      if (removeBusy || !removeTargetId) return;
+      if (memberIds.length <= 1) {
+        document.getElementById('remove-dialog-body').hidden = false;
+        document.getElementById('remove-conflict').textContent = '名册已发生变化。当前会话至少保留 1 位队员，本次没有移出任何人。';
+        document.getElementById('remove-conflict').hidden = false;
+        document.getElementById('confirm-remove').disabled = true;
+        document.getElementById('remove-footer-copy').textContent = '请关闭并核对当前名册';
+        return;
+      }
+      if (removeOutcome === 'conflict' && !conflictVisible) {
+        conflictVisible = true;
+        document.getElementById('remove-dialog-body').hidden = false;
+        document.getElementById('remove-conflict').hidden = false;
+        const confirm = document.getElementById('confirm-remove');
+        confirm.classList.remove('danger-button');
+        confirm.classList.add('primary-button');
+        confirm.textContent = '刷新影响';
+        document.getElementById('remove-footer-copy').textContent = '本次没有移出任何队员';
+        return;
+      }
+      if (conflictVisible) {
+        conflictVisible = false;
+        removeOutcome = 'success';
+        document.getElementById('remove-dialog-body').hidden = false;
+        document.getElementById('remove-conflict').hidden = true;
+        document.getElementById('preview-loading').hidden = false;
+        document.getElementById('preview-content').hidden = true;
+        document.getElementById('confirm-remove').disabled = true;
+        document.getElementById('confirm-remove').textContent = '移出当前会话';
+        document.getElementById('remove-footer-copy').textContent = '正在刷新 Core 权威影响…';
+        previewTimer = setTimeout(() => renderRemovePreview(byId(removeTargetId)), 520);
+        return;
+      }
+      removeBusy = true;
+      const confirm = document.getElementById('confirm-remove');
+      confirm.disabled = true;
+      confirm.textContent = '正在移出…';
+      document.getElementById('cancel-remove').disabled = true;
+      document.getElementById('close-remove-dialog').disabled = true;
+      await delay(720);
+      if (memberIds.length <= 1) {
+        removeBusy = false;
+        document.getElementById('remove-dialog-body').hidden = false;
+        document.getElementById('cancel-remove').disabled = false;
+        document.getElementById('close-remove-dialog').disabled = false;
+        document.getElementById('remove-conflict').textContent = '名册已发生变化。当前会话至少保留 1 位队员，本次没有移出任何人。';
+        document.getElementById('remove-conflict').hidden = false;
+        document.getElementById('remove-footer-copy').textContent = '请关闭并核对当前名册';
+        return;
+      }
+      const profile = byId(removeTargetId);
+      memberIds = memberIds.filter(id => id !== removeTargetId);
+      expandedRuntimeIds.delete(removeTargetId);
+      if (leadId === removeTargetId) leadId = presentMembers()[0]?.id ?? null;
+      const hasPending = profile.runs > 0 || profile.deliveries > 0 || profile.gathers > 0;
+      reconciliation = hasPending ? { name: profile.name, runs: profile.runs, deliveries: profile.deliveries, unknown: profile.unknown, state: 'pending', hold: false } : null;
+      reconciliationExpanded = false;
+      removeTargetId = null;
+      removeBusy = false;
+      document.getElementById('cancel-remove').disabled = false;
+      document.getElementById('close-remove-dialog').disabled = false;
+      document.getElementById('remove-dialog').close();
+      renderAll();
+      requestAnimationFrame(() => document.getElementById('open-add-dialog').focus());
+      if (hasPending) startReconciliationTimer();
+      else showToast(`已从当前会话移出${profile.name}`);
+    }
+
+    function startReconciliationTimer() {
+      clearTimeout(reconciliationTimer);
+      if (!reconciliation || reconciliation.hold || reconciliation.unknown) return;
+      reconciliationTimer = setTimeout(() => {
+        if (!reconciliation) return;
+        reconciliation.state = 'settled';
+        renderReconciliation();
+        showToast(`${reconciliation.name}的移出操作已完成`);
+      }, 3600);
+    }
+
+    function closeMemberMenus() {
+      document.querySelectorAll('.member-menu.open').forEach(menu => menu.classList.remove('open'));
+      document.querySelectorAll('.member-action[aria-expanded="true"]').forEach(button => button.setAttribute('aria-expanded', 'false'));
+    }
+
+    function showToast(message) {
+      clearTimeout(toastTimer);
+      document.getElementById('toast-copy').textContent = message;
+      const toast = document.getElementById('toast');
+      toast.classList.add('visible');
+      toastTimer = setTimeout(() => toast.classList.remove('visible'), 2600);
+    }
+
+    function runScenario(name) {
+      resetState({ keepScenario: true });
+      setScenario(name);
+      if (name === 'normal') return;
+      if (name === 'add' || name === 'partial') {
+        nextAddOutcome = name === 'partial' ? 'partial' : 'success';
+        openAddDialog();
+        addSelection = new Set(['agent_9', 'agent_10']);
+        renderCandidateList();
+        return;
+      }
+      if (name === 'remove-lead' || name === 'conflict') {
+        removeOutcome = name === 'conflict' ? 'conflict' : 'success';
+        openRemoveDialog('agent_6');
+        return;
+      }
+      if (name === 'remove-clean') {
+        openRemoveDialog('agent_8');
+        return;
+      }
+      if (name === 'reconciling') {
+        memberIds = memberIds.filter(id => id !== 'agent_7');
+        reconciliation = { name: '雾切响子', runs: 1, deliveries: 2, unknown: false, state: 'pending', hold: true };
+        renderAll();
+        return;
+      }
+      if (name === 'no-candidates') {
+        memberIds = profiles.map(profile => profile.id);
+        leadId = 'agent_6';
+        renderAll();
+        openAddDialog();
+        return;
+      }
+      if (name === 'last-member') {
+        memberIds = ['agent_6'];
+        leadId = 'agent_6';
+        expandedRuntimeIds = new Set();
+        renderAll();
+        requestAnimationFrame(() => {
+          const action = document.querySelector('[data-member-action="agent_6"]');
+          action?.click();
+          action?.focus();
+        });
+      }
+    }
+
+    document.getElementById('theme-toggle').addEventListener('click', () => {
+      const next = document.documentElement.dataset.theme === 'night' ? 'day' : 'night';
+      document.documentElement.dataset.theme = next;
+      document.getElementById('theme-toggle').textContent = next === 'night' ? '切换 Porcelain Day' : '切换 Steel Night';
+    });
+    document.getElementById('reset-prototype').addEventListener('click', () => resetState());
+    document.querySelectorAll('[data-variant]').forEach(button => button.addEventListener('click', () => setActionVariant(button.dataset.variant)));
+    document.querySelectorAll('.scenario-button').forEach(button => button.addEventListener('click', () => runScenario(button.dataset.scenario)));
+    document.getElementById('open-add-dialog').addEventListener('click', openAddDialog);
+    document.getElementById('candidate-search').addEventListener('input', renderCandidateList);
+    document.getElementById('confirm-add').addEventListener('click', submitAdd);
+    document.getElementById('cancel-add').addEventListener('click', () => !addBusy && document.getElementById('add-dialog').close());
+    document.getElementById('close-add-dialog').addEventListener('click', () => !addBusy && document.getElementById('add-dialog').close());
+    document.getElementById('confirm-remove').addEventListener('click', submitRemove);
+    document.getElementById('cancel-remove').addEventListener('click', () => !removeBusy && document.getElementById('remove-dialog').close());
+    document.getElementById('close-remove-dialog').addEventListener('click', () => !removeBusy && document.getElementById('remove-dialog').close());
+    document.getElementById('lead-picker').addEventListener('click', event => {
+      event.stopPropagation();
+      const menu = document.getElementById('lead-menu');
+      const opening = !menu.classList.contains('open');
+      menu.classList.toggle('open', opening);
+      event.currentTarget.setAttribute('aria-expanded', String(opening));
+    });
+    function selectInspectorTab(name, focus = false) {
+      const tasksSelected = name === 'tasks';
+      const tasksTab = document.getElementById('tasks-tab');
+      const membersTab = document.getElementById('members-tab');
+      tasksTab.setAttribute('aria-selected', String(tasksSelected));
+      membersTab.setAttribute('aria-selected', String(!tasksSelected));
+      tasksTab.tabIndex = tasksSelected ? 0 : -1;
+      membersTab.tabIndex = tasksSelected ? -1 : 0;
+      document.getElementById('tasks-panel').hidden = !tasksSelected;
+      document.getElementById('members-panel').hidden = tasksSelected;
+      if (focus) (tasksSelected ? tasksTab : membersTab).focus();
+    }
+    document.getElementById('tasks-tab').addEventListener('click', () => selectInspectorTab('tasks'));
+    document.getElementById('members-tab').addEventListener('click', () => selectInspectorTab('members'));
+    document.querySelector('.inspector-tabs').addEventListener('keydown', event => {
+      if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+      event.preventDefault();
+      const goToTasks = event.key === 'ArrowLeft' || event.key === 'Home';
+      selectInspectorTab(goToTasks ? 'tasks' : 'members', true);
+    });
+    document.addEventListener('click', event => {
+      if (!event.target.closest('.member-menu-wrap')) closeMemberMenus();
+      if (!event.target.closest('.lead-picker-wrap')) {
+        document.getElementById('lead-menu').classList.remove('open');
+        document.getElementById('lead-picker').setAttribute('aria-expanded', 'false');
+      }
+    });
+    document.addEventListener('keydown', event => {
+      if (event.key === 'Escape') {
+        closeMemberMenus();
+        document.getElementById('lead-menu').classList.remove('open');
+        document.getElementById('lead-picker').setAttribute('aria-expanded', 'false');
+      }
+    });
+    ['add-dialog', 'remove-dialog'].forEach(id => document.getElementById(id).addEventListener('cancel', event => {
+      if ((id === 'add-dialog' && addBusy) || (id === 'remove-dialog' && removeBusy)) event.preventDefault();
+    }));
+
+    renderAll();
+  </script>
+</body>
+</html>
