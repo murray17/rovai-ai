@@ -1533,19 +1533,34 @@ pub fn dispatch_accepted_deliveries(
         .collect()
 }
 
-/// A clean startup boundary only closes Delivery rows for which no durable attempt
-/// fence exists. It deliberately does not enqueue or dispatch anything.
+/// A clean startup boundary closes Delivery rows that cannot still be owned by a
+/// live dispatch worker from a previous process. The interrupted rows themselves
+/// never restart implicitly; recovering them may release later FIFO successors.
 pub fn mark_unstarted_deliveries_interrupted_before_dispatch(
     database: &mut Database,
 ) -> Result<usize> {
+    struct StartupDelivery {
+        id: String,
+        camp_id: String,
+        recipient_agent_id: String,
+    }
+
+    struct OrphanAttemptDelivery {
+        id: String,
+        camp_id: String,
+        recipient_agent_id: String,
+        active_attempt_id: Option<String>,
+    }
+
+    let mut wake_recipients = BTreeSet::new();
     let transaction = database
         .connection_mut()
         .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
     let now = chrono::Utc::now().to_rfc3339();
-    let delivery_ids = {
+    let deliveries = {
         let mut statement = transaction.prepare(
             r#"
-            SELECT id
+            SELECT id, camp_id, recipient_agent_id
             FROM message_delivery
             WHERE status = 'pending'
               AND dispatch_phase = 'never_attempted'
@@ -1554,10 +1569,16 @@ pub fn mark_unstarted_deliveries_interrupted_before_dispatch(
             "#,
         )?;
         statement
-            .query_map([], |row| row.get::<_, String>(0))?
+            .query_map([], |row| {
+                Ok(StartupDelivery {
+                    id: row.get(0)?,
+                    camp_id: row.get(1)?,
+                    recipient_agent_id: row.get(2)?,
+                })
+            })?
             .collect::<rusqlite::Result<Vec<_>>>()?
     };
-    for delivery_id in &delivery_ids {
+    for delivery in &deliveries {
         transaction.execute(
             r#"
             UPDATE message_delivery
@@ -1571,7 +1592,7 @@ pub fn mark_unstarted_deliveries_interrupted_before_dispatch(
               AND dispatch_attempt_count = 0
             "#,
             params![
-                delivery_id,
+                delivery.id,
                 serde_json::to_string(&json!({
                     "manualInterventionRequired": true,
                     "message": "该协作因上次运行中断而未开始",
@@ -1585,24 +1606,28 @@ pub fn mark_unstarted_deliveries_interrupted_before_dispatch(
         append_domain_event(
             &transaction,
             "message_delivery.interrupted_before_dispatch",
-            None,
-            Some(("message_delivery", delivery_id)),
+            Some(&delivery.camp_id),
+            Some(("message_delivery", &delivery.id)),
             &actor,
             None,
             &json!({
-                "deliveryId": delivery_id,
+                "deliveryId": delivery.id,
                 "manualInterventionRequired": true,
             }),
         )?;
         settle_item_from_delivery_terminal(
             &transaction,
-            delivery_id,
+            &delivery.id,
             "interrupted_before_dispatch",
             Some("interrupted_before_dispatch"),
             &actor,
             None,
             &now,
         )?;
+        wake_recipients.insert((
+            delivery.camp_id.clone(),
+            delivery.recipient_agent_id.clone(),
+        ));
     }
     let barrier_completion_ids = {
         let mut statement = transaction.prepare(
@@ -1643,8 +1668,116 @@ pub fn mark_unstarted_deliveries_interrupted_before_dispatch(
             ],
         )?;
     }
+    let orphan_attempt_deliveries = {
+        let mut statement = transaction.prepare(
+            r#"
+            SELECT delivery.id, delivery.camp_id, delivery.recipient_agent_id,
+                   delivery.active_dispatch_attempt_id
+            FROM message_delivery AS delivery
+            LEFT JOIN message_delivery_attempt AS attempt
+              ON attempt.id = delivery.active_dispatch_attempt_id
+             AND attempt.delivery_id = delivery.id
+            WHERE delivery.status = 'pending'
+              AND delivery.dispatch_phase = 'attempting'
+              AND delivery.dispatch_attempt_count > 0
+              AND delivery.target_agent_run_id IS NULL
+              AND (
+                  attempt.id IS NULL
+                  OR (attempt.status <> 'materialized'
+                      AND attempt.target_agent_run_id IS NULL)
+              )
+            ORDER BY delivery.created_at, delivery.id
+            "#,
+        )?;
+        statement
+            .query_map([], |row| {
+                Ok(OrphanAttemptDelivery {
+                    id: row.get(0)?,
+                    camp_id: row.get(1)?,
+                    recipient_agent_id: row.get(2)?,
+                    active_attempt_id: row.get(3)?,
+                })
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?
+    };
+    let orphan_failure_detail = serde_json::to_string(&json!({
+        "manualInterventionRequired": true,
+        "message": "该协作在调度 attempt 建立后、AgentRun 创建前被上次运行中断",
+    }))?;
+    for delivery in &orphan_attempt_deliveries {
+        if let Some(attempt_id) = delivery.active_attempt_id.as_deref() {
+            transaction.execute(
+                r#"
+                UPDATE message_delivery_attempt
+                SET status = 'failed', wait_condition = NULL,
+                    failure_code = 'dispatch_interrupted_before_materialization',
+                    failure_detail_json = ?3, ended_at = ?4
+                WHERE id = ?1 AND delivery_id = ?2
+                  AND status IN ('attempting', 'waiting')
+                "#,
+                params![attempt_id, delivery.id, orphan_failure_detail, now],
+            )?;
+        }
+        let updated = transaction.execute(
+            r#"
+            UPDATE message_delivery
+            SET status = 'failed', dispatch_phase = 'terminal',
+                wait_condition = NULL, active_dispatch_attempt_id = NULL,
+                manual_intervention_required = 1,
+                failure_code = 'dispatch_interrupted_before_materialization',
+                failure_detail_json = ?2,
+                version = version + 1, updated_at = ?3, ended_at = ?3
+            WHERE id = ?1 AND status = 'pending'
+              AND dispatch_phase = 'attempting'
+              AND dispatch_attempt_count > 0
+              AND target_agent_run_id IS NULL
+            "#,
+            params![delivery.id, orphan_failure_detail, now],
+        )?;
+        if updated != 1 {
+            anyhow::bail!("Message Delivery changed before startup attempt recovery");
+        }
+        let actor = ActorRef::System {
+            component_id: "message-delivery-startup-recovery".to_string(),
+        };
+        append_domain_event(
+            &transaction,
+            "message_delivery.failed",
+            Some(&delivery.camp_id),
+            Some(("message_delivery", &delivery.id)),
+            &actor,
+            None,
+            &json!({
+                "deliveryId": delivery.id,
+                "failureCode": "dispatch_interrupted_before_materialization",
+                "manualInterventionRequired": true,
+            }),
+        )?;
+        settle_item_from_delivery_terminal(
+            &transaction,
+            &delivery.id,
+            "failed",
+            Some("dispatch_interrupted_before_materialization"),
+            &actor,
+            None,
+            &now,
+        )?;
+        wake_recipients.insert((
+            delivery.camp_id.clone(),
+            delivery.recipient_agent_id.clone(),
+        ));
+    }
     transaction.commit()?;
-    Ok(delivery_ids.len() + barrier_completion_ids.len())
+    for (camp_id, recipient_agent_id) in wake_recipients {
+        let _ = dispatch_pending_for_recipient(
+            database,
+            &camp_id,
+            &recipient_agent_id,
+            DeliveryDispatchTrigger::TargetRunEnded,
+            true,
+        )?;
+    }
+    Ok(deliveries.len() + barrier_completion_ids.len() + orphan_attempt_deliveries.len())
 }
 
 pub(crate) fn settle_attachment_projection_failure(
@@ -3467,6 +3600,26 @@ fn rejected_with_details(code: &str, message: &str, details: Value) -> CommandHa
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{
+        collaboration::{
+            CollaborationService, CreateCampCommand, ExecutionRequest, TestCampMessageAddress,
+            TestCampMessageCommand,
+        },
+        command::CommandResultStatus,
+    };
+
+    fn user_envelope<P>(command_id: &str, camp_id: Option<&str>, payload: P) -> CommandEnvelope<P> {
+        CommandEnvelope {
+            command_id: command_id.to_string(),
+            actor: ActorRef::User {
+                user_id: "local_user".to_string(),
+            },
+            camp_id: camp_id.map(str::to_string),
+            expected_versions: Vec::new(),
+            execution_epoch: None,
+            payload,
+        }
+    }
 
     #[test]
     fn strict_inline_parser_ignores_literal_regions_and_preserves_source_order() {
@@ -3657,5 +3810,211 @@ https://example.test/@agent_7
             ("cancelled", Some("target_agent_run_cancelled"), 0)
         );
         assert!(delivery_terminal_semantics("running", None).is_err());
+    }
+
+    #[test]
+    fn startup_recovery_closes_orphan_attempts_and_releases_recipient_fifo() {
+        let (mut database, directory) = crate::test_support::seeded_runtime_database_fast();
+        let workspace = directory.join("workspace");
+        std::fs::create_dir_all(&workspace).unwrap();
+        let collaboration = CollaborationService::default();
+        let camp = collaboration
+            .create_camp(
+                &mut database,
+                &user_envelope(
+                    "orphan-delivery-create-camp",
+                    None,
+                    CreateCampCommand::for_test_with_members(
+                        workspace.to_string_lossy().to_string(),
+                        &["agent_2", "agent_1"],
+                        "agent_2",
+                    ),
+                ),
+            )
+            .unwrap();
+        let camp_id = camp.result.payload["campId"].as_str().unwrap().to_string();
+        let root = collaboration
+            .send_test_camp_message(
+                &mut database,
+                &user_envelope(
+                    "orphan-delivery-root",
+                    Some(&camp_id),
+                    TestCampMessageCommand {
+                        camp_id: camp_id.clone(),
+                        draft_revision: None,
+                        body: "请先启动负责人。".to_string(),
+                        prepared_attachment_ids: Vec::new(),
+                        address: TestCampMessageAddress::Explicit {
+                            agent_ids: vec!["agent_2".to_string()],
+                        },
+                        reply_to_camp_message_id: None,
+                        execution: Some(ExecutionRequest {
+                            task_id: None,
+                            purpose: "建立 A2A 源 Run".to_string(),
+                            completion_role: "required".to_string(),
+                            budget: None,
+                        }),
+                    },
+                ),
+            )
+            .unwrap();
+        assert_eq!(root.result.status, CommandResultStatus::Accepted);
+        let camp_turn_id = root.result.payload["campTurnId"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let source_run_id = root.result.payload["agentRunIds"][0]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let workspace_json = serde_json::to_string(&AgentRunWorkspace::runtime_managed_path(
+            workspace.to_string_lossy().to_string(),
+        ))
+        .unwrap();
+        database
+            .connection()
+            .execute(
+                "UPDATE agent_run SET workspace_json = ?2 WHERE id = ?1",
+                params![source_run_id, workspace_json],
+            )
+            .unwrap();
+
+        let first_delivery_id = {
+            let transaction = database.connection_mut().transaction().unwrap();
+            let result = persist_public_a2a_message(
+                &transaction,
+                &SendPublicA2aMessage {
+                    command_id: "orphan-delivery-first",
+                    camp_id: &camp_id,
+                    camp_turn_id: &camp_turn_id,
+                    source_agent_run_id: &source_run_id,
+                    author_agent_id: "agent_2",
+                    execution_epoch: 0,
+                    current_a2a_root_agent_run_id: None,
+                    current_a2a_depth: 0,
+                    body: "@agent_1 第一条会在 attempt fence 后中断。",
+                    explicit_recipients: &[],
+                    agent_addressing_mode: AgentAddressingMode::Automatic,
+                    mention_user: false,
+                    task_id: None,
+                    attachments: &[],
+                    managed_attachment_ingest_intent_id: None,
+                    operation: PublicA2aOperation::Send,
+                },
+            )
+            .unwrap();
+            transaction.commit().unwrap();
+            result.payload["deliveryIds"][0]
+                .as_str()
+                .unwrap()
+                .to_string()
+        };
+        establish_dispatch_attempt(
+            &mut database,
+            &first_delivery_id,
+            DeliveryDispatchTrigger::Accepted,
+        )
+        .unwrap()
+        .expect("first delivery should enter attempting");
+
+        let second_delivery_id = {
+            let transaction = database.connection_mut().transaction().unwrap();
+            let result = persist_public_a2a_message(
+                &transaction,
+                &SendPublicA2aMessage {
+                    command_id: "orphan-delivery-second",
+                    camp_id: &camp_id,
+                    camp_turn_id: &camp_turn_id,
+                    source_agent_run_id: &source_run_id,
+                    author_agent_id: "agent_2",
+                    execution_epoch: 0,
+                    current_a2a_root_agent_run_id: None,
+                    current_a2a_depth: 0,
+                    body: "@agent_1 第二条不能被队头永久卡住。",
+                    explicit_recipients: &[],
+                    agent_addressing_mode: AgentAddressingMode::Automatic,
+                    mention_user: false,
+                    task_id: None,
+                    attachments: &[],
+                    managed_attachment_ingest_intent_id: None,
+                    operation: PublicA2aOperation::Send,
+                },
+            )
+            .unwrap();
+            transaction.commit().unwrap();
+            result.payload["deliveryIds"][0]
+                .as_str()
+                .unwrap()
+                .to_string()
+        };
+        assert_eq!(
+            dispatch_delivery(
+                &mut database,
+                &second_delivery_id,
+                DeliveryDispatchTrigger::Accepted,
+                true,
+            )
+            .unwrap(),
+            DeliveryDispatchOutcome::Waiting {
+                condition: "target_busy".to_string()
+            }
+        );
+
+        let recovered = mark_unstarted_deliveries_interrupted_before_dispatch(&mut database)
+            .expect("startup recovery should classify interrupted Delivery attempts");
+        assert_eq!(recovered, 1);
+        assert_eq!(
+            database
+                .connection()
+                .query_row(
+                    r#"
+                    SELECT delivery.status, delivery.dispatch_phase,
+                           delivery.active_dispatch_attempt_id,
+                           attempt.status, delivery.failure_code
+                    FROM message_delivery AS delivery
+                    JOIN message_delivery_attempt AS attempt
+                      ON attempt.delivery_id = delivery.id
+                    WHERE delivery.id = ?1
+                    "#,
+                    [&first_delivery_id],
+                    |row| {
+                        Ok((
+                            row.get::<_, String>(0)?,
+                            row.get::<_, String>(1)?,
+                            row.get::<_, Option<String>>(2)?,
+                            row.get::<_, String>(3)?,
+                            row.get::<_, String>(4)?,
+                        ))
+                    },
+                )
+                .unwrap(),
+            (
+                "failed".to_string(),
+                "terminal".to_string(),
+                None,
+                "failed".to_string(),
+                "dispatch_interrupted_before_materialization".to_string(),
+            )
+        );
+        let second_state = database
+            .connection()
+            .query_row(
+                "SELECT status, dispatch_phase, target_agent_run_id FROM message_delivery WHERE id = ?1",
+                [&second_delivery_id],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, Option<String>>(2)?,
+                    ))
+                },
+            )
+            .unwrap();
+        assert_eq!(second_state.0, "running");
+        assert_eq!(second_state.1, "materialized");
+        assert!(second_state.2.is_some());
+
+        drop(database);
+        std::fs::remove_dir_all(directory).unwrap();
     }
 }

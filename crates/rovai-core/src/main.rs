@@ -11223,7 +11223,7 @@ async fn run_core(
         mark_unstarted_deliveries_interrupted_before_dispatch(&mut database)?;
     if interrupted_deliveries != 0 {
         eprintln!(
-            "Message Delivery startup recovery marked {interrupted_deliveries} unstarted Delivery rows as interrupted_before_dispatch"
+            "Message Delivery startup recovery terminalized {interrupted_deliveries} interrupted Delivery row(s)"
         );
     }
     if v2_recovery.runs_waiting_for_recovery != 0
