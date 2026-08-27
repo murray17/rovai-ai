@@ -997,6 +997,15 @@ export function structuredCampContentPlainText(
     if (segment.kind === 'all_members_mention') return '@所有队员'
     if (segment.kind === 'current_user_mention') return '@你'
     if (segment.kind === 'skill_mention') return `/${segment.nameAtSend}`
+    if (segment.kind === 'external_quote') {
+      const attachments = segment.attachmentSummaries
+        .map((attachment) => `\n> [附件] ${attachment.name}${attachment.mediaType ? ` (${attachment.mediaType})` : ''}`)
+        .join('')
+      const body = segment.body.length > 0
+        ? segment.body.replaceAll('\n', '\n> ')
+        : '（无文本）'
+      return `引用 ${segment.senderDisplayName}：\n> ${body}${attachments}`
+    }
     return `@${names.get(segment.agentId) ?? '不可用队员'}`
   }).join('')
   return content[0]?.kind === 'current_user_mention' && content.length > 1
@@ -1025,6 +1034,9 @@ export function projectLeadingCurrentUserMentionMarkdownBody(
     }
     if (segment.kind === 'skill_mention') {
       return escapeMarkdownLiteral(`/${segment.nameAtSend}`)
+    }
+    if (segment.kind === 'external_quote') {
+      return escapeMarkdownLiteral(`引用 ${segment.senderDisplayName}：${segment.body}`)
     }
     return ''
   }).join('')
@@ -3631,7 +3643,9 @@ export function CampWorkspace({
                   const member = memberById.get(campMessage.authorId)
                   const author = campMessage.authorType === 'user'
                     ? '你'
-                    : member?.displayName ?? (campMessage.authorType === 'system' ? '系统' : campMessage.authorId)
+                    : campMessage.authorType === 'external_principal'
+                      ? campMessage.authorDisplayName ?? '飞书成员'
+                      : member?.displayName ?? (campMessage.authorType === 'system' ? '系统' : campMessage.authorId)
                   const authorProfile = profileById.get(campMessage.authorId) ?? null
                   const authorProfileAvailable = Boolean(
                     campMessage.authorType === 'agent'
@@ -3644,7 +3658,9 @@ export function CampWorkspace({
                     ? runById.get(campMessage.sourceAgentRunId) ?? null
                     : null
                   const displayBody = campMessage.body
-                  const messageAuthorKey = campMessage.authorType === 'user' || campMessage.authorType === 'agent'
+                  const messageAuthorKey = campMessage.authorType === 'user'
+                    || campMessage.authorType === 'agent'
+                    || campMessage.authorType === 'external_principal'
                     ? `${campMessage.authorType}:${campMessage.authorId}`
                     : null
                   const followsSameAuthor = messageAuthorKey !== null
@@ -3698,7 +3714,12 @@ export function CampWorkspace({
                       {campMessage.authorType === 'user' && (
                         <span className="local-message-avatar" aria-hidden="true">你</span>
                       )}
-                      {(campMessage.authorType === 'user' || campMessage.authorType === 'agent')
+                      {campMessage.authorType === 'external_principal' && (
+                        <span className="external-message-avatar" aria-hidden="true">飞</span>
+                      )}
+                      {(campMessage.authorType === 'user'
+                        || campMessage.authorType === 'agent'
+                        || campMessage.authorType === 'external_principal')
                         ? (
                             <div className="message-body">
                               <div className="bubble-meta">
@@ -6456,6 +6477,9 @@ function campMessageAuthorLabel(
 ): string {
   if (message.authorType === 'user') return '你'
   if (message.authorType === 'system') return '系统'
+  if (message.authorType === 'external_principal') {
+    return message.authorDisplayName ?? '飞书成员'
+  }
   return members.find((member) => member.agentId === message.authorId)?.displayName
     ?? message.authorId
 }
@@ -6593,6 +6617,23 @@ function StructuredMessageBody({
               key={`skill-${index}-${segment.skillId}`}
             >
               /{segment.nameAtSend}
+            </span>
+          )
+        }
+        if (segment.kind === 'external_quote') {
+          return (
+            <span className="external-quote-segment" key={`external-quote-${index}`}>
+              <span className="external-quote-label">引用 {segment.senderDisplayName}</span>
+              <span className="external-quote-body">{segment.body || '（无文本）'}</span>
+              {segment.attachmentSummaries.length > 0 && (
+                <span className="external-quote-attachments">
+                  {segment.attachmentSummaries.map((attachment, attachmentIndex) => (
+                    <span key={`${attachment.name}-${attachmentIndex}`}>
+                      附件 · {attachment.name}
+                    </span>
+                  ))}
+                </span>
+              )}
             </span>
           )
         }

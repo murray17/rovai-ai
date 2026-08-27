@@ -120,10 +120,12 @@
     "verify:windows": "node scripts/verify-windows-release.mjs"
   },
   "dependencies": {
+    "@larksuiteoapi/node-sdk": "1.73.0",
     "@radix-ui/react-dialog": "1.1.19",
     "@radix-ui/react-dropdown-menu": "2.1.20",
     "@radix-ui/react-tabs": "1.1.17",
     "electron-updater": "6.8.9",
+    "qrcode": "1.5.4",
     "react": "19.2.7",
     "react-dom": "19.2.7",
     "react-markdown": "^10.1.0",
@@ -131,6 +133,7 @@
   },
   "devDependencies": {
     "@types/node": "26.1.1",
+    "@types/qrcode": "1.5.6",
     "@types/react": "19.2.17",
     "@types/react-dom": "19.2.3",
     "@vitejs/plugin-react": "5.2.0",

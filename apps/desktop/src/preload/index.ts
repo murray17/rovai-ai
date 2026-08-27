@@ -109,6 +109,47 @@ const api: RovaiApi = {
   channels: {
     get() {
       return ipcRenderer.invoke('rovai:channels-get') as Promise<ChannelSettingsSnapshot>
+    },
+    connect() {
+      return ipcRenderer.invoke('rovai:channels-connect')
+    },
+    disconnect() {
+      return ipcRenderer.invoke('rovai:channels-disconnect')
+    },
+    publishMemberBot(agentId) {
+      return ipcRenderer.invoke('rovai:channels-publish-member-bot', agentId)
+    },
+    retryMemberBot(agentId) {
+      return ipcRenderer.invoke('rovai:channels-retry-member-bot', agentId)
+    },
+    disableMemberBot(agentId) {
+      return ipcRenderer.invoke('rovai:channels-disable-member-bot', agentId)
+    },
+    cancelQrAttempt(attemptId) {
+      return ipcRenderer.invoke('rovai:channels-cancel-qr', attemptId)
+    },
+    createProjectBinding(input) {
+      return ipcRenderer.invoke('rovai:channels-create-project-binding', input)
+    },
+    updateProjectBinding(input) {
+      return ipcRenderer.invoke('rovai:channels-update-project-binding', input)
+    },
+    archiveProjectBinding(input) {
+      return ipcRenderer.invoke('rovai:channels-archive-project-binding', input)
+    },
+    bindConversation(input) {
+      return ipcRenderer.invoke('rovai:channels-bind-conversation', input)
+    },
+    selectProjectDirectory() {
+      return ipcRenderer.invoke('rovai:channels-select-project-directory')
+    },
+    onChanged(listener) {
+      const handler = (
+        _event: Electron.IpcRendererEvent,
+        value: ChannelSettingsSnapshot
+      ): void => listener(value)
+      ipcRenderer.on('rovai:channels-changed', handler)
+      return () => ipcRenderer.removeListener('rovai:channels-changed', handler)
     }
   },
   onboarding: {

@@ -959,6 +959,13 @@ export type StructuredCampMessageSegment =
   | { kind: 'all_members_mention' }
   | { kind: 'current_user_mention'; userId: 'local_user' }
   | { kind: 'skill_mention'; skillId: string; nameAtSend: string }
+  | {
+      kind: 'external_quote'
+      senderDisplayName: string
+      body: string
+      attachmentSummaries: Array<{ name: string; mediaType: string | null }>
+      contentDigest: `sha256:${string}`
+    }
 
 export type StructuredCampMessageContent = StructuredCampMessageSegment[]
 
@@ -1019,8 +1026,9 @@ export interface CampMessageView {
   id: string
   sequence: number
   timelineGlobalSequence: number | null
-  authorType: 'user' | 'agent' | 'system'
+  authorType: 'user' | 'agent' | 'system' | 'external_principal'
   authorId: string
+  authorDisplayName?: string | null
   sourceAgentRunId: string | null
   body: string
   content: StructuredCampMessageContent
@@ -1447,7 +1455,7 @@ export interface ContextManifestView {
   mcpProjectionDigest: string
   selfActiveTaskEvidence: unknown
   selfActiveTaskEvidenceDigest: string
-  formatterVersion: 20
+  formatterVersion: 22
   renderedPayloadDigest: string
   delivery: RuntimeInputDeliveryView | null
   createdAt: string
@@ -1940,6 +1948,55 @@ export type ChannelHostStatus = 'unavailable' | 'ready'
 
 export type ChannelConnectionStatus = 'not_connected' | 'connected' | 'session_expired'
 
+export type ChannelPublicationStatus =
+  | 'unpublished'
+  | 'provisioning'
+  | 'published'
+  | 'failed'
+  | 'disabled'
+
+export type ChannelConversationKind = 'p2p' | 'group' | 'topic'
+
+export interface ProjectBindingView {
+  projectBindingId: string
+  displayName: string
+  bindingKind: ProjectBindingKind
+  canonicalPath: string
+  status: 'active' | 'archived'
+  version: number
+}
+
+export interface UnboundChannelConversationView {
+  channelConversationId: string
+  provider: ChannelKind
+  conversationKind: ChannelConversationKind
+  displayName: string
+  lastSenderDisplayName: string
+  firstSeenAt: string
+  lastSeenAt: string
+  version: number
+}
+
+export interface ChannelConversationBindingView {
+  channelConversationId: string
+  displayName: string
+  conversationKind: ChannelConversationKind
+  projectBindingId: string
+  campId: string | null
+  status: 'active'
+  version: number
+}
+
+export interface ChannelQrAttemptView {
+  attemptId: string
+  purpose: 'connect' | 'publish'
+  agentId: string | null
+  stage: 'preparing' | 'awaiting_scan' | 'authorizing' | 'connecting' | 'failed'
+  qrDataUrl: string | null
+  expiresAt: string | null
+  detail: string
+}
+
 export interface ChannelAccountView {
   accountId: string
   displayName: string
@@ -1953,8 +2010,10 @@ export interface ChannelConnectionView {
 
 export interface ChannelMemberBotView {
   agentId: string
-  publicationStatus: 'unpublished' | 'published'
+  publicationStatus: ChannelPublicationStatus
   botDisplayName: string | null
+  appId: string | null
+  failureCode: string | null
 }
 
 export interface ChannelProviderView {
@@ -1966,12 +2025,47 @@ export interface ChannelProviderView {
 }
 
 export interface ChannelSettingsSnapshot {
-  schemaVersion: 1
+  schemaVersion: 2
   channels: ChannelProviderView[]
+  projectBindings: ProjectBindingView[]
+  unboundConversations: UnboundChannelConversationView[]
+  conversationBindings: ChannelConversationBindingView[]
+  activeQrAttempt: ChannelQrAttemptView | null
 }
 
 export interface ChannelsApi {
   get(): Promise<ChannelSettingsSnapshot>
+  connect(): Promise<ChannelSettingsSnapshot>
+  disconnect(): Promise<ChannelSettingsSnapshot>
+  publishMemberBot(agentId: string): Promise<ChannelSettingsSnapshot>
+  retryMemberBot(agentId: string): Promise<ChannelSettingsSnapshot>
+  disableMemberBot(agentId: string): Promise<ChannelSettingsSnapshot>
+  cancelQrAttempt(attemptId: string): Promise<ChannelSettingsSnapshot>
+  createProjectBinding(input: {
+    commandId: string
+    displayName: string
+    bindingKind: ProjectBindingKind
+    canonicalPath: string
+  }): Promise<ChannelSettingsSnapshot>
+  updateProjectBinding(input: {
+    commandId: string
+    projectBindingId: string
+    displayName: string
+    expectedVersion: number
+  }): Promise<ChannelSettingsSnapshot>
+  archiveProjectBinding(input: {
+    commandId: string
+    projectBindingId: string
+    expectedVersion: number
+  }): Promise<ChannelSettingsSnapshot>
+  bindConversation(input: {
+    commandId: string
+    channelConversationId: string
+    projectBindingId: string
+    expectedConversationVersion: number
+  }): Promise<ChannelSettingsSnapshot>
+  selectProjectDirectory(): Promise<string | null>
+  onChanged(listener: (snapshot: ChannelSettingsSnapshot) => void): () => void
 }
 
 export type MemberWorkspaceLocationTab = 'identity' | 'runtime'
@@ -2653,6 +2747,23 @@ export type CoreMethod =
   | 'mcp.import.scan'
   | 'mcp.import.commit'
   | 'conversations.restartNativeSession'
+  | 'projectBindings.list'
+  | 'projectBindings.create'
+  | 'projectBindings.update'
+  | 'projectBindings.archive'
+  | 'channels.feishu.snapshot'
+  | 'channels.feishu.account.upsert'
+  | 'channels.feishu.account.disconnect'
+  | 'channels.feishu.memberBot.upsert'
+  | 'channels.feishu.memberBot.disable'
+  | 'channels.conversations.bind'
+  | 'channels.membership.add'
+  | 'channels.membership.remove'
+  | 'channels.inbound.observe'
+  | 'channels.roster.reconcile'
+  | 'channels.inbound.finalize'
+  | 'channels.host.tick'
+  | 'channels.deliveries.settle'
   | 'app.info'
   | 'camps.creationPreflight'
   | 'workspaces.validate'

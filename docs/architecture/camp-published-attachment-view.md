@@ -1,7 +1,7 @@
 ---
 document_type: architecture
 authority: camp-published-attachment-view-composition
-last_updated: 2026-08-25
+last_updated: 2026-08-27
 ---
 
 # Camp Published Attachment View
@@ -181,7 +181,7 @@ SQLite/Authority reconciliation。
 
 - [Camp Published Attachment View v4](../contracts/camp-published-attachment-view-v4.md)
 - [Camp Attachment v5](../contracts/camp-attachment-v5.md)
-- [ContextManifest Evidence v21](../contracts/context-manifest-evidence-v21.md)
+- [ContextManifest Evidence v22](../contracts/context-manifest-evidence-v22.md)
 - [Runtime Launch and Verification v20](../contracts/runtime-launch-and-verification-v20.md)
 - [V1.19-D01](../versions/v1.19/decisions.md#v1-19-d01)
 - [V1.20-D01](../versions/v1.20/decisions.md#v1-20-d01)

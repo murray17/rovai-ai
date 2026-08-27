@@ -4042,8 +4042,8 @@ fn load_originating_public_user_message<R: ContextReadConnection>(
     if row.8.is_some() {
         return Ok(None);
     }
-    if row.2 != "user" {
-        anyhow::bail!("Originating public message is not authored by a user");
+    if !matches!(row.2.as_str(), "user" | "external_principal") {
+        anyhow::bail!("Originating public message is not authored by a human principal");
     }
     let (body, mentions_current_user) =
         projected_historical_camp_message(database.context_connection(), row.5, row.6)?;
@@ -4288,6 +4288,7 @@ struct TriggerCampMessage {
     structured_content_json: Option<String>,
     content_digest: String,
     author_display_name: Option<String>,
+    author_provider: Option<String>,
 }
 
 fn load_trigger_camp_message<R: ContextReadConnection>(
@@ -4303,9 +4304,14 @@ fn load_trigger_camp_message<R: ContextReadConnection>(
                    message.author_type, message.author_id,
                    message.source_agent_run_id,
                    message.body, message.structured_content_json,
-                   message.content_digest, profile.display_name
+                   message.content_digest,
+                   COALESCE(profile.display_name, principal.display_name),
+                   principal.provider
             FROM camp_message AS message
             LEFT JOIN agent_profile AS profile ON profile.id = message.author_id
+            LEFT JOIN external_principal AS principal
+              ON principal.id = message.author_id
+             AND message.author_type = 'external_principal'
             WHERE message.id = ?1 AND message.camp_id = ?2
               AND message.sequence <= ?3
               AND message.tombstoned_at IS NULL
@@ -4326,6 +4332,7 @@ fn load_trigger_camp_message<R: ContextReadConnection>(
                     structured_content_json: row.get(6)?,
                     content_digest: row.get(7)?,
                     author_display_name: row.get(8)?,
+                    author_provider: row.get(9)?,
                 })
             },
         )
@@ -4420,8 +4427,10 @@ fn project_camp_current_input_source<R: ContextReadConnection>(
 ) -> Result<Value> {
     match snapshot.invocation_kind.as_str() {
         "direct" => {
-            if camp_message.author_type != "user"
-                || camp_message.source_agent_run_id.is_some()
+            if !matches!(
+                camp_message.author_type.as_str(),
+                "user" | "external_principal"
+            ) || camp_message.source_agent_run_id.is_some()
                 || snapshot.trigger_message_delivery_id.is_some()
                 || snapshot.a2a_parent_agent_run_id.is_some()
                 || snapshot.a2a_root_agent_run_id.is_some()
@@ -4429,7 +4438,11 @@ fn project_camp_current_input_source<R: ContextReadConnection>(
             {
                 anyhow::bail!("Direct Current Input trigger identity is inconsistent");
             }
-            Ok(json!({ "type": "user" }))
+            project_direct_current_input_source(
+                &camp_message.author_type,
+                camp_message.author_display_name.as_deref(),
+                camp_message.author_provider.as_deref(),
+            )
         }
         "a2a" => {
             let source_agent_run_id = camp_message
@@ -4461,6 +4474,30 @@ fn project_camp_current_input_source<R: ContextReadConnection>(
             }))
         }
         _ => anyhow::bail!("AgentRun invocation kind is unsupported for Current Input"),
+    }
+}
+
+fn project_direct_current_input_source(
+    author_type: &str,
+    author_display_name: Option<&str>,
+    author_provider: Option<&str>,
+) -> Result<Value> {
+    match author_type {
+        "user" => Ok(json!({ "type": "user" })),
+        "external_principal" => {
+            let display_name = author_display_name
+                .filter(|value| !value.trim().is_empty())
+                .context("External Principal display name is unavailable")?;
+            let provider = author_provider
+                .filter(|value| !value.trim().is_empty())
+                .context("External Principal provider is unavailable")?;
+            Ok(json!({
+                "type": "external_principal",
+                "provider": provider,
+                "displayName": display_name,
+            }))
+        }
+        _ => anyhow::bail!("Direct Current Input source is not a human principal"),
     }
 }
 
@@ -6208,6 +6245,35 @@ mod tests {
             };
             assert_eq!(charter_delivery_mode_for_adapter(adapter_kind), expected);
         }
+    }
+
+    #[test]
+    fn direct_current_input_projects_external_principal_without_raw_identity() {
+        assert_eq!(
+            project_direct_current_input_source("user", None, None).unwrap(),
+            json!({ "type": "user" })
+        );
+        assert_eq!(
+            project_direct_current_input_source(
+                "external_principal",
+                Some("Alice"),
+                Some("feishu")
+            )
+            .unwrap(),
+            json!({
+                "type": "external_principal",
+                "provider": "feishu",
+                "displayName": "Alice",
+            })
+        );
+        assert!(
+            project_direct_current_input_source("external_principal", None, Some("feishu"))
+                .is_err()
+        );
+        assert!(
+            project_direct_current_input_source("external_principal", Some("Alice"), None).is_err()
+        );
+        assert!(project_direct_current_input_source("system", None, None).is_err());
     }
 }
 
@@ -8225,7 +8291,7 @@ mod slow_tests {
             .unwrap();
         assert!(manifest_schema.contains("run_fact_payload_json"));
         assert!(!manifest_schema.contains("run_notice_"));
-        assert!(manifest_schema.contains("formatter_version IN (20, 21)"));
+        assert!(manifest_schema.contains("formatter_version IN (20, 21, 22)"));
         assert!(manifest_schema.contains("message_projection_audience TEXT NOT NULL"));
         assert!(manifest_schema.contains("a2a_guidance_evidence_json TEXT NOT NULL"));
         let contract: (String, i64, i64) = reopened
@@ -8240,7 +8306,7 @@ mod slow_tests {
                 |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
             )
             .unwrap();
-        assert_eq!(contract, ("v1.24".to_string(), 65, 1));
+        assert_eq!(contract, ("v1.25".to_string(), 66, 1));
         drop(reopened);
         std::fs::remove_dir_all(directory).unwrap();
     }

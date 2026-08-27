@@ -1,7 +1,7 @@
 ---
 document_type: current-decision-navigation
 authority: current-authority-and-rationale-routing
-last_updated: 2026-08-26
+last_updated: 2026-08-27
 ---
 
 # 当前规范与决定理由导航
@@ -19,6 +19,11 @@ last_updated: 2026-08-26
 
 - 当前规范：[Camp/Composer 基础不变量](../architecture/foundational-invariants.md#camp-lifecycle)、[Camp Identity](../architecture/camp-identity.md)、[Camp Identity v1](../contracts/camp-identity-v1.md)、[动态 Camp 队员关系](../architecture/dynamic-camp-membership.md)、[Camp Membership v1](../contracts/camp-membership-v1.md)、[Camp Activation](../architecture/camp-activation-lifecycle.md)、[Composer Draft](../architecture/camp-composer-draft.md)、[Camp Composer Draft v4](../contracts/camp-composer-draft-v4.md)、[Camp Open](../architecture/camp-open-read-path.md)、[Camp Open Projection v7](../contracts/camp-open-projection-v7.md)、[Camp Published Attachment View](../architecture/camp-published-attachment-view.md)、[Camp Attachment v5](../contracts/camp-attachment-v5.md)、[Camp Published Attachment View v4](../contracts/camp-published-attachment-view-v4.md)、[Camp Permanent Deletion v2](../contracts/camp-permanent-deletion-v2.md)、[First-run](../architecture/first-run-onboarding.md)及[First-run Onboarding v2](../contracts/first-run-onboarding-v2.md)。
 - 理由来源：[v0.22](../versions/v0.22/decisions.md)、[v0.23](../versions/v0.23/decisions.md)、[v0.25](../versions/v0.25/decisions.md)、[v0.43](../versions/v0.43/decisions.md)、[v0.77](../versions/v0.77/decisions.md)、[v0.80](../versions/v0.80/decisions.md)、[v0.97](../versions/v0.97/decisions.md)、[v1.00](../versions/v1.00/decisions.md)、[v1.10](../versions/v1.10/decisions.md)、[V1.15-D01](../versions/v1.15/decisions.md#v1-15-d01)、[V1.15-D04](../versions/v1.15/decisions.md#v1-15-d04)、[V1.15-D06](../versions/v1.15/decisions.md#v1-15-d06)、[V1.16-D01](../versions/v1.16/decisions.md#v1-16-d01)、[V1.17-D01](../versions/v1.17/decisions.md#v1-17-d01)、[V1.19-D01](../versions/v1.19/decisions.md#v1-19-d01)、[V1.19-D02](../versions/v1.19/decisions.md#v1-19-d02)、[V1.20-D01](../versions/v1.20/decisions.md#v1-20-d01)、[V1.27-D08](../versions/v1.27/decisions.md#v1-27-d08)、[V1.28-D10](../versions/v1.28/decisions.md#v1-28-d10)、[V1.29-D01](../versions/v1.29/decisions.md#v1-29-d01)、[V1.29-D04](../versions/v1.29/decisions.md#v1-29-d04)。
+
+## Channels 与 External Principals
+
+- 当前规范：[飞书渠道架构](../architecture/feishu-channel.md)、[Feishu Channel v1](../contracts/feishu-channel-v1.md)、[Camp Membership v1](../contracts/camp-membership-v1.md)、[ContextManifest Evidence v22](../contracts/context-manifest-evidence-v22.md)和[渠道设置](../ui/components/channel-settings.md)。
+- 理由来源：[V1.30-D01](../versions/v1.30/decisions.md#v1-30-d01)、[V1.30-D02](../versions/v1.30/decisions.md#v1-30-d02)、[V1.30-D03](../versions/v1.30/decisions.md#v1-30-d03)、[V1.30-D04](../versions/v1.30/decisions.md#v1-30-d04)和[V1.30-D05](../versions/v1.30/decisions.md#v1-30-d05)。
 
 ## Member identity
 
@@ -45,7 +50,7 @@ last_updated: 2026-08-26
 
 ## Session、Context 与 Bootstrap
 
-- 当前规范：[Context 基础不变量](../architecture/foundational-invariants.md#context-session-bootstrap)、[Native Session Bootstrap Redelivery](../architecture/native-session-bootstrap-redelivery.md)、[Structured Skill Links](../architecture/structured-current-input-skill-links.md)、[ContextManifest Evidence v21](../contracts/context-manifest-evidence-v21.md)、[Context Delivery Profile v4](../contracts/context-delivery-profile-v4.md)、[Run Facts v2](../contracts/run-facts-v2.md)和[Current Input Skill Links v1](../contracts/current-input-skill-links-v1.md)。
+- 当前规范：[Context 基础不变量](../architecture/foundational-invariants.md#context-session-bootstrap)、[Native Session Bootstrap Redelivery](../architecture/native-session-bootstrap-redelivery.md)、[Structured Skill Links](../architecture/structured-current-input-skill-links.md)、[ContextManifest Evidence v22](../contracts/context-manifest-evidence-v22.md)、[Context Delivery Profile v4](../contracts/context-delivery-profile-v4.md)、[Run Facts v2](../contracts/run-facts-v2.md)和[Current Input Skill Links v1](../contracts/current-input-skill-links-v1.md)。
 - 理由来源：[v0.21](../versions/v0.21/decisions.md)、[v0.35](../versions/v0.35/decisions.md)、[v0.44](../versions/v0.44/decisions.md)、[v0.48](../versions/v0.48/decisions.md)、[v0.50](../versions/v0.50/decisions.md)、[v0.52](../versions/v0.52/decisions.md)、[v0.54](../versions/v0.54/decisions.md)、[v0.89](../versions/v0.89/decisions.md)、[v0.90](../versions/v0.90/decisions.md)、[v0.94](../versions/v0.94/decisions.md)、[v0.98](../versions/v0.98/decisions.md)、[v1.07](../versions/v1.07/decisions.md)、[V1.15-D03](../versions/v1.15/decisions.md#v1-15-d03)、[V1.15-D04](../versions/v1.15/decisions.md#v1-15-d04)、[V1.15-D06](../versions/v1.15/decisions.md#v1-15-d06)、[V1.28-D05](../versions/v1.28/decisions.md#v1-28-d05)。
 
 ## Memory

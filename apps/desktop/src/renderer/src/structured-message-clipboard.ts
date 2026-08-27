@@ -124,6 +124,15 @@ export function createStructuredMessageClipboardData(
       // ordinary slash text and can never be reverse-parsed into a selection.
       return { kind: 'text', text: `/${segment.nameAtSend}` }
     }
+    if (segment.kind === 'external_quote') {
+      const attachments = segment.attachmentSummaries
+        .map((attachment) => `\n[附件] ${attachment.name}${attachment.mediaType ? ` (${attachment.mediaType})` : ''}`)
+        .join('')
+      return {
+        kind: 'text',
+        text: `[外部引用]\n${segment.senderDisplayName}：\n${segment.body}${attachments}`
+      }
+    }
     return {
       kind: 'member_mention',
       agentId: segment.agentId,

@@ -3,7 +3,7 @@ document_type: architecture
 architecture: builtin-tool-runtime
 authority: builtin-tool-component-boundaries
 status: accepted
-last_updated: 2026-08-26
+last_updated: 2026-08-27
 ---
 
 # Built-in Tool Runtime Architecture
@@ -36,7 +36,7 @@ Runtime Input Delivery Evidence 与 Profile/Formatter/Manifest 权责见
 omission 的 bounded aggregate 边界见
 [公共上下文不变量](foundational-invariants.md#context-public-history)和
 [ContextManifest 与 Run Facts 不变量](foundational-invariants.md#context-manifest-run-facts)、
-[ContextManifest Evidence v21](../contracts/context-manifest-evidence-v21.md)及
+[ContextManifest Evidence v22](../contracts/context-manifest-evidence-v22.md)及
 [Run Facts v2](../contracts/run-facts-v2.md)。Task authority 与
 self-active awareness 见
 [ContextManifest 与 Run Facts 不变量](foundational-invariants.md#context-manifest-run-facts)；真实空集合

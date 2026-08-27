@@ -1,7 +1,7 @@
 ---
 document_type: architecture
 authority: current-foundational-invariants
-last_updated: 2026-08-26
+last_updated: 2026-08-27
 ---
 
 # 当前基础架构不变量
@@ -131,6 +131,7 @@ last_updated: 2026-08-26
 - Camp、CampMember、Default Lead、Conversation、CampMessage、CampTurn、AgentRun 和 Task 由 Core 作为同一协作边界协调。Presence、Camp membership、Runtime readiness、Capability、权限、预算和 fencing 是相互独立的准入轴，不能由其中一项推导其余项。
 - CampMember 只表达 Camp 内关系，不复制全局 Presence。成员顺序使用稳定、不复用的关系序列；Default Lead 必须是当前有效关系且符合领导资格，Camp 至少保留一位 active member。动态关系命令使用 generation/version CAS，Lead successor 与影响预览由 Core 验证，不由 Renderer 自选替代。
 - Camp 只冻结 workspace binding 和成员关系，Git/Project 是可重观测投影而不是新聚合。新 Camp 不预创建 Conversation 或 Run；原子 Execution Admission 为精确目标惰性创建 Conversation、公共消息、Turn 与 queued Run，多目标保持 all-or-none。Workspace、Git、Runtime 与可执行文件检查属于后续 Scheduler dispatch 边界。永久删除默认要求 quiescent，force 只能在用户明确确认和持久停止/隔离边界后执行。
+- 外部渠道不得直接写 CampMessage、CampTurn 或 AgentRun；完成 transport dedup/聚合和 live binding recheck 后，必须复用同一原子 Execution Admission。尚未绑定或仍在渠道 FIFO 中的消息不是公共消息，也不进入 History、Context 或执行。`ExternalPrincipal` 只表达作者、上下文来源和回复目标，不继承 `local_user` 的项目、绑定或本机管理能力。
 - Renderer 可以先本地显示待确认的用户消息，但不得把它当成 CampMessage。Core 接受发送时原子持久公共消息、Turn、目标 Run 和冻结配置；Scheduler 在执行边界完成 workspace、Runtime、Git、当前 exact membership lifetime/permission/fence 检查。所有 Agent 业务工具也必须匹配 Run 冻结的 membership version；再次添加同一 Agent 不恢复旧 Run 权限。失败产生诚实 Run 终态，不撤销已接受消息；ending Git observation 属于终态审计而不是发送准入。
 - 一次 CampTurn 的 root Run 与 A2A 后代共享冻结 execution budget。Core 以一个事务检查与消费总 AgentRun、accepted A2A、depth、fanout 和相关 allowance，并对重放返回同一结果；客户端、Runtime 或多条 Delivery 不能拆分请求绕过预算。
 - CampMessage/CampTurn/AgentRun/Conversation 与 Domain Event 的创建、开始、更新和结束字段使用调用时 UTC wall clock；`AgentRun.created_at` 属于输入接受边界，`started_at` 属于实际 claim 边界。Execution Budget 另用非倒退 observation，取 wall clock、进程 awake elapsed anchor 和上次 observation 的最大值，使系统休眠计入 deadline、wall clock 回拨不延长预算；Budget observation 不得写入业务审计时间。
@@ -262,6 +263,7 @@ last_updated: 2026-08-26
 - 引用链闭包使用独立的有界 Profile：只补齐理解当前公开消息所需的 exact public ancestors，有固定深度/数量/字符优先级，并保留来源、裁剪和遗漏证据。每个祖先在投影时重做 live authorization；闭包不绕过 History scope、不把私有 Conversation 公开，也不把引用的附件自动展开为模型输入。
 - Whole-history omission 必须区分“候选真实为空”“候选存在但预算全部排除”“只投影部分”。当 exact ID 列表本身超过 evidence budget 时，Manifest 保留 total omitted count、可证明的 bounded digest/range 而不声称列出全部 ID。空 section 和整段省略有不同、显式、可测试证据。
 - Agent 与 Human Principal 的 body/snippet/search offset 使用分开、版本化投影。Agent-facing 视图不默认获得 Human 原文或未脱敏字段；History、Search、Context 和 Gather 必须选择与受众一致的投影并保留结构化 Principal 线索。
+- 外部渠道 reply 作为当前唯一触发 CampMessage 的受校验 Structured Content 引用段进入标准 body/Context 投影；被引消息不因此单独公开，transport message ID 不成为 Camp reply identity。Channel Host 不能用 prompt override 绕过 CampMessage、ContextManifest 或 Runtime Input Delivery Evidence。
 
 <a id="context-manifest-run-facts"></a>
 
@@ -447,6 +449,7 @@ last_updated: 2026-08-26
 - Conversation Header 的 Inspector 显隐是 Renderer 本地偏好，不产生领域命令。Stop 是时间线中的 CampTurn 终态投影；Copy 属于具体消息内容，Shared top bar 不取代页面自己的标题和动作。
 - 执行过程以 Agent 为稳定聚合单位：同一 Camp 中一个 Agent 的 Run chronology 形成一个过程入口，状态必须由证据和 Run authority 归约，不能按最后一条文本或动画猜测。
 - 普通 Camp Inspector 只有聚焦上下文和已定义的执行/详情入口；Approval 使用唯一 surface，不能在多个面板复制可操作控件或产生竞争决策。
+- 渠道账号、队员 Bot、ProjectBinding 与会话绑定只在主人本机设置 surface 可操作。Renderer 只得到脱敏投影；App Secret、Cookie/CSRF、原始外部身份和 Host 恢复游标留在 Main/Core 对应权威，不进入 DOM、Renderer state 或 Agent Context。
 - Agent execution console 在一个已挂载 Camp workspace 内只有一个 Renderer-owned surface；其 `bottom | inspector`
   placement 是 Main-owned 的本机安装级展示偏好，最后一次成功的显式位置选择跨 Camp、页面切换和应用重启
   生效，但不进入 Camp/Core/SQLite 或云同步。旧偏好没有该字段时只补 `bottom`，不从历史 workspace、

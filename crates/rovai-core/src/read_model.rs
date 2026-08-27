@@ -202,6 +202,7 @@ pub struct CampMessageView {
     pub timeline_global_sequence: Option<i64>,
     pub author_type: String,
     pub author_id: String,
+    pub author_display_name: Option<String>,
     pub source_agent_run_id: Option<String>,
     pub body: String,
     pub content: StructuredCampMessageContent,
@@ -1201,7 +1202,7 @@ impl ReadModelService {
             FROM camp_message
             WHERE camp_id = ?1
               AND tombstoned_at IS NULL
-              AND author_type IN ('user', 'agent')
+              AND author_type IN ('user', 'agent', 'external_principal')
             ORDER BY sequence ASC, id ASC
             "#,
         )?;
@@ -1606,7 +1607,7 @@ fn load_navigation_camps(transaction: &Transaction<'_>) -> Result<Vec<Navigation
                 MAX(CASE
                     WHEN (
                         {publication_predicate}
-                        AND camp_message.author_type IN ('user', 'agent')
+                        AND camp_message.author_type IN ('user', 'agent', 'external_principal')
                     ) OR event_log.event_type IN (
                         'agent_run.succeeded',
                         'agent_run.failed',
@@ -2348,12 +2349,24 @@ fn hydrate_message_views(
             let attachments = attachments_by_message_id
                 .remove(&row.id)
                 .unwrap_or_default();
+            let author_display_name = if row.author_type == "external_principal" {
+                transaction
+                    .query_row(
+                        "SELECT display_name FROM external_principal WHERE id = ?1",
+                        [&row.author_id],
+                        |row| row.get::<_, String>(0),
+                    )
+                    .optional()?
+            } else {
+                None
+            };
             Ok(CampMessageView {
                 id: row.id,
                 sequence: row.sequence,
                 timeline_global_sequence: row.timeline_global_sequence,
                 author_type: row.author_type,
                 author_id: row.author_id,
+                author_display_name,
                 source_agent_run_id: row.source_agent_run_id,
                 body,
                 content,

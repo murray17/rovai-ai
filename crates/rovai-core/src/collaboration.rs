@@ -19,8 +19,8 @@ use crate::{
     camp_attachment_view::commit_publication_in_message_transaction,
     camp_content::{
         StructuredCampMessageContent, StructuredCampMessageSegment, canonical_content_digest,
-        has_all_members_mention, member_mention_ids, normalize_content, render_plain_text,
-        validate_user_authored_content,
+        has_all_members_mention, member_mention_ids, mentions_current_user, normalize_content,
+        render_plain_text, validate_content, validate_user_authored_content,
     },
     camp_id::CampId,
     command::{
@@ -2619,6 +2619,175 @@ impl CollaborationService {
         )
     }
 
+    /// Shared atomic execution admission used by trusted channel ingress.
+    ///
+    /// The channel layer owns transport aggregation, deduplication and serial
+    /// queueing. Once it has one finalized request, this seam performs the same
+    /// authoritative address resolution, Conversation creation, Runtime config
+    /// freeze, CampMessage/CampTurn creation and AgentRun materialization as the
+    /// local user path. The System actor authorizes the trusted adapter only;
+    /// the persisted public author remains the External Principal.
+    pub(crate) fn admit_external_channel_message(
+        &self,
+        transaction: &Transaction<'_>,
+        mut input: ExternalChannelAdmissionInput,
+    ) -> Result<std::result::Result<ExternalChannelAdmissionResult, CommandHandlerResult>> {
+        input.structured_content = normalize_content(input.structured_content);
+        validate_content(&input.structured_content)?;
+        if mentions_current_user(&input.structured_content)
+            || input
+                .structured_content
+                .iter()
+                .any(|segment| matches!(segment, StructuredCampMessageSegment::SkillMention { .. }))
+        {
+            return Ok(Err(rejected(
+                "channel.message.invalid_content",
+                "External channel input cannot author local-user or Skill selection segments",
+            )));
+        }
+        let mentioned_agent_ids = member_mention_ids(&input.structured_content);
+        if mentioned_agent_ids != input.addressed_agent_ids || mentioned_agent_ids.is_empty() {
+            return Ok(Err(rejected(
+                "channel.message.invalid_targets",
+                "External channel targets must exactly match canonical Member Mentions",
+            )));
+        }
+        let principal_exists = transaction
+            .query_row(
+                "SELECT 1 FROM external_principal WHERE id = ?1",
+                [&input.external_principal_id],
+                |row| row.get::<_, i64>(0),
+            )
+            .optional()?
+            .is_some();
+        if !principal_exists {
+            return Ok(Err(rejected(
+                "channel.external_principal_not_found",
+                "External Principal does not exist",
+            )));
+        }
+        let camp_exists = transaction
+            .query_row(
+                "SELECT 1 FROM camp WHERE id = ?1",
+                [&input.camp_id],
+                |row| row.get::<_, i64>(0),
+            )
+            .optional()?
+            .is_some();
+        if !camp_exists {
+            return Ok(Err(rejected("camp.not_found", "Camp does not exist")));
+        }
+        let address = CampMessageAddress::Explicit {
+            agent_ids: input.addressed_agent_ids.clone(),
+        };
+        let system_actor = ActorRef::System {
+            component_id: "channel-admission".to_string(),
+        };
+        let mut resolution =
+            match resolve_address(transaction, &input.camp_id, &address, &system_actor)? {
+                AddressingOutcome::Resolved(resolution) => resolution,
+                AddressingOutcome::Rejected(result) => return Ok(Err(result)),
+            };
+        if resolution.targets.is_empty() {
+            return Ok(Err(rejected(
+                "camp_message.no_addressable_member",
+                "Execution request requires at least one addressable Agent",
+            )));
+        }
+        let mut member_names = BTreeMap::new();
+        for target in &resolution.targets {
+            let display_name = transaction.query_row(
+                "SELECT display_name FROM agent_profile WHERE id = ?1",
+                [&target.agent_id],
+                |row| row.get::<_, String>(0),
+            )?;
+            member_names.insert(target.agent_id.clone(), display_name);
+        }
+        input.body = render_plain_text(&input.structured_content, |agent_id| {
+            member_names.get(agent_id).cloned()
+        })?;
+        if input.body.trim().is_empty() {
+            return Ok(Err(rejected(
+                "camp_message.empty_body",
+                "External channel message must contain a visible body",
+            )));
+        }
+        let created_conversation_ids = ensure_resolution_conversations(
+            transaction,
+            &input.camp_id,
+            &mut resolution,
+            &input.now,
+        )?;
+        let effective_configs = match prepare_agent_run_configs(transaction, &resolution)? {
+            Ok(configs) => configs,
+            Err(rejection) => {
+                delete_new_conversations(transaction, &created_conversation_ids)?;
+                return Ok(Err(rejection));
+            }
+        };
+        let execution = ExecutionRequest {
+            task_id: None,
+            purpose: "Respond to the finalized external channel message".to_string(),
+            completion_role: required_completion_role(),
+            budget: None,
+        };
+        let frozen_execution_budget = match freeze_camp_turn_execution_budget(
+            None,
+            chrono::DateTime::parse_from_rfc3339(&input.now)?.with_timezone(&chrono::Utc),
+            i64::try_from(resolution.targets.len())
+                .context("root AgentRun responsibility count overflow")?,
+        ) {
+            Ok(budget) => budget,
+            Err(error) => {
+                delete_new_conversations(transaction, &created_conversation_ids)?;
+                return Ok(Err(rejected(
+                    "camp_turn.execution_budget_invalid",
+                    &error.to_string(),
+                )));
+            }
+        };
+        let camp_message_id = Uuid::new_v4().to_string();
+        let camp_turn_id = Uuid::new_v4().to_string();
+        let queued = queue_camp_message_and_runs(
+            transaction,
+            QueueCampMessageInput {
+                camp_message_id: &camp_message_id,
+                camp_turn_id: Some(&camp_turn_id),
+                camp_id: &input.camp_id,
+                body: &input.body,
+                structured_content: &input.structured_content,
+                prepared_attachment_ids: &[],
+                legacy_attachment_publication_operation_id: None,
+                consume_composer_draft: false,
+                draft_revision: 1,
+                address_mode: address.mode(),
+                reply_to_camp_message_id: None,
+                resolution: &resolution,
+                execution: Some(&execution),
+                task_admission: None,
+                frozen_execution_budget: Some(&frozen_execution_budget),
+                effective_configs: Some(&effective_configs),
+                workspace: None,
+                actor: &system_actor,
+                message_author: Some(CampMessageAuthor {
+                    author_type: "external_principal",
+                    author_id: &input.external_principal_id,
+                    source_agent_run_id: None,
+                }),
+                execution_epoch: None,
+                command_id: &input.command_id,
+                now: &input.now,
+                generated_camp_name: None,
+            },
+        )?;
+        Ok(Ok(ExternalChannelAdmissionResult {
+            camp_message_id,
+            camp_turn_id,
+            camp_sequence: queued.camp_sequence,
+            agent_run_ids: queued.agent_run_ids,
+        }))
+    }
+
     fn execute_user_camp_message<C, Prepare>(
         &self,
         database: &mut Database,
@@ -2792,6 +2961,7 @@ impl CollaborationService {
                             effective_configs: effective_configs.as_ref(),
                             workspace: None,
                             actor: &envelope.actor,
+                            message_author: None,
                             execution_epoch: envelope.execution_epoch,
                             command_id: &envelope.command_id,
                             now: &now,
@@ -2841,6 +3011,32 @@ impl CollaborationService {
 struct QueuedCampMessage {
     camp_sequence: i64,
     agent_run_ids: Vec<String>,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct ExternalChannelAdmissionInput {
+    pub camp_id: String,
+    pub external_principal_id: String,
+    pub body: String,
+    pub structured_content: StructuredCampMessageContent,
+    pub addressed_agent_ids: Vec<String>,
+    pub command_id: String,
+    pub now: String,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct ExternalChannelAdmissionResult {
+    pub camp_message_id: String,
+    pub camp_turn_id: String,
+    pub camp_sequence: i64,
+    pub agent_run_ids: Vec<String>,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct CampMessageAuthor<'a> {
+    author_type: &'a str,
+    author_id: &'a str,
+    source_agent_run_id: Option<&'a str>,
 }
 
 struct PreparedAgentRunConfig {
@@ -3103,6 +3299,7 @@ struct QueueCampMessageInput<'a> {
     effective_configs: Option<&'a BTreeMap<String, PreparedAgentRunConfig>>,
     workspace: Option<&'a AgentRunWorkspace>,
     actor: &'a ActorRef,
+    message_author: Option<CampMessageAuthor<'a>>,
     execution_epoch: Option<i64>,
     command_id: &'a str,
     now: &'a str,
@@ -3207,7 +3404,15 @@ fn queue_camp_message_and_runs(
         )?;
     }
 
-    let (author_type, author_id, source_agent_run_id) = actor_parts(input.actor);
+    let actor_author = actor_parts(input.actor);
+    let (author_type, author_id, source_agent_run_id) =
+        input.message_author.map_or(actor_author, |author| {
+            (
+                author.author_type,
+                author.author_id,
+                author.source_agent_run_id,
+            )
+        });
     let addressed_agent_ids = input
         .resolution
         .targets

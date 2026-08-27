@@ -50,8 +50,10 @@ pub struct Database {
     runtime_camp_files_root_identity_digest: String,
 }
 
-const CURRENT_DATA_CONTRACT_VERSION: &str = "v1.24";
-const CURRENT_PROJECTION_SCHEMA_VERSION: i64 = 65;
+const CURRENT_DATA_CONTRACT_VERSION: &str = "v1.25";
+const CURRENT_PROJECTION_SCHEMA_VERSION: i64 = 66;
+const V112_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.24";
+const V112_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION: i64 = 65;
 const V111_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.23";
 const V111_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION: i64 = 64;
 const V110_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.22";
@@ -176,6 +178,7 @@ struct CurrentMigrationState {
     v109: bool,
     v110: bool,
     v111: bool,
+    v112: bool,
 }
 
 impl CurrentMigrationState {
@@ -185,6 +188,52 @@ impl CurrentMigrationState {
             return false;
         }
         if contract == CURRENT_DATA_CONTRACT_VERSION && schema == CURRENT_PROJECTION_SCHEMA_VERSION
+        {
+            return self.v70
+                && self.v71
+                && self.v76
+                && self.v77
+                && self.v78
+                && self.v79
+                && self.v80
+                && self.v81
+                && self.v82
+                && self.v83
+                && self.v84
+                && self.v85
+                && self.v86
+                && self.v87
+                && self.v88
+                && self.v89
+                && self.v90
+                && self.v91
+                && self.v92
+                && self.v93
+                && self.v94
+                && self.v95
+                && self.v96
+                && self.v97
+                && self.v98
+                && self.v99
+                && self.v100
+                && self.v101
+                && self.v102
+                && self.v103
+                && self.v104
+                && self.v105
+                && self.v106
+                && self.v107
+                && self.v108
+                && self.v109
+                && self.v110
+                && self.v111
+                && self.v112;
+        }
+        if self.v112 {
+            return false;
+        }
+        if contract == V112_MIGRATION_SOURCE_DATA_CONTRACT_VERSION
+            && schema == V112_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION
         {
             return self.v70
                 && self.v71
@@ -1273,7 +1322,8 @@ fn load_current_migration_state(
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 108),
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 109),
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 110),
-               EXISTS(SELECT 1 FROM schema_migration WHERE version = 111)
+               EXISTS(SELECT 1 FROM schema_migration WHERE version = 111),
+               EXISTS(SELECT 1 FROM schema_migration WHERE version = 112)
         "#,
         [],
         |row| {
@@ -1320,6 +1370,7 @@ fn load_current_migration_state(
                 v109: row.get(39)?,
                 v110: row.get(40)?,
                 v111: row.get(41)?,
+                v112: row.get(42)?,
             })
         },
     )
@@ -2780,6 +2831,9 @@ impl Database {
             if !self.schema_migration_applied(111)? {
                 self.migrate_message_delivery_zero_attempt_cancellation_v111()?;
             }
+            if !self.schema_migration_applied(112)? {
+                self.migrate_channel_platform_v112()?;
+            }
             if let Err(error) =
                 crate::notification::maintain_notification_episode_retention(self.connection())
             {
@@ -3162,6 +3216,9 @@ impl Database {
         }
         if !self.schema_migration_applied(111)? {
             self.migrate_message_delivery_zero_attempt_cancellation_v111()?;
+        }
+        if !self.schema_migration_applied(112)? {
+            self.migrate_channel_platform_v112()?;
         }
         if let Err(error) =
             crate::notification::maintain_notification_episode_retention(self.connection())
@@ -15795,6 +15852,494 @@ impl Database {
         Ok(())
     }
 
+    fn migrate_channel_platform_v112(&mut self) -> Result<()> {
+        self.connection
+            .execute_batch("PRAGMA foreign_keys = OFF;")?;
+        let migration_result = (|| -> Result<()> {
+            let transaction = self
+                .connection
+                .transaction_with_behavior(TransactionBehavior::Immediate)?;
+            let current_schema: String = transaction.query_row(
+                "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'camp_message'",
+                [],
+                |row| row.get(0),
+            )?;
+            let renamed_schema = if current_schema.contains("CREATE TABLE \"camp_message\"") {
+                current_schema.replacen(
+                    "CREATE TABLE \"camp_message\"",
+                    "CREATE TABLE camp_message_v112",
+                    1,
+                )
+            } else {
+                current_schema.replacen(
+                    "CREATE TABLE camp_message",
+                    "CREATE TABLE camp_message_v112",
+                    1,
+                )
+            };
+            let author_constraint = "CHECK(author_type IN ('user', 'agent', 'system'))";
+            let expanded_author_constraint =
+                "CHECK(author_type IN ('user', 'agent', 'system', 'external_principal'))";
+            let message_v112 = renamed_schema
+                .replace(
+                    "REFERENCES camp_message(id)",
+                    "REFERENCES camp_message_v112(id)",
+                )
+                .replacen(author_constraint, expanded_author_constraint, 1);
+            if !message_v112.contains("CREATE TABLE camp_message_v112")
+                || !message_v112.contains(expanded_author_constraint)
+            {
+                anyhow::bail!("v112 could not admit External Principal CampMessage authors");
+            }
+            let message_columns = table_columns(&transaction, "camp_message")?
+                .into_iter()
+                .map(|column| format!("\"{}\"", column.replace('"', "\"\"")))
+                .collect::<Vec<_>>()
+                .join(", ");
+            let dependent_schema = {
+                let mut statement = transaction.prepare(
+                    r#"
+                    SELECT sql
+                    FROM sqlite_master
+                    WHERE tbl_name = 'camp_message'
+                      AND type IN ('index', 'trigger')
+                      AND sql IS NOT NULL
+                    ORDER BY CASE type WHEN 'index' THEN 0 ELSE 1 END, name
+                    "#,
+                )?;
+                statement
+                    .query_map([], |row| row.get::<_, String>(0))?
+                    .collect::<rusqlite::Result<Vec<_>>>()?
+            };
+
+            transaction.execute_batch(&message_v112)?;
+            transaction.execute_batch(&format!(
+                "INSERT INTO camp_message_v112({message_columns}) \
+                 SELECT {message_columns} FROM camp_message;\n\
+                 DROP TABLE camp_message;\n\
+                 ALTER TABLE camp_message_v112 RENAME TO camp_message;"
+            ))?;
+            for schema in dependent_schema {
+                transaction.execute_batch(&schema)?;
+            }
+
+            let manifest_schema: String = transaction.query_row(
+                "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'context_manifest'",
+                [],
+                |row| row.get(0),
+            )?;
+            let renamed_manifest = if manifest_schema.contains("CREATE TABLE \"context_manifest\"")
+            {
+                manifest_schema.replacen(
+                    "CREATE TABLE \"context_manifest\"",
+                    "CREATE TABLE context_manifest_v112",
+                    1,
+                )
+            } else {
+                manifest_schema.replacen(
+                    "CREATE TABLE context_manifest",
+                    "CREATE TABLE context_manifest_v112",
+                    1,
+                )
+            };
+            let mut manifest_v112 = renamed_manifest
+                .replacen(
+                    "CHECK(formatter_version IN (20, 21))",
+                    "CHECK(formatter_version IN (20, 21, 22))",
+                    1,
+                )
+                .replacen(
+                    "CHECK(context_manifest_version IN (19, 20, 21))",
+                    "CHECK(context_manifest_version IN (19, 20, 21, 22))",
+                    1,
+                );
+            let pairing_start = manifest_v112
+                .find("                    CHECK(\n                        (context_manifest_version = 19")
+                .context("v112 could not locate the ContextManifest version pairing")?;
+            let pairing_end = manifest_v112[pairing_start..]
+                .find(
+                    "                    CHECK(\n                        previous_accepted_public_boundary_sequence",
+                )
+                .map(|offset| pairing_start + offset)
+                .context("v112 could not locate the ContextManifest pairing boundary")?;
+            manifest_v112.replace_range(
+                pairing_start..pairing_end,
+                r#"                    CHECK(
+                        (context_manifest_version = 19
+                         AND formatter_version = 20
+                         AND run_facts_schema_version = 1
+                         AND camp_attachment_view_receipt_version IS NULL
+                         AND camp_attachment_view_receipt_json IS NULL
+                         AND camp_attachment_view_receipt_digest IS NULL)
+                        OR
+                        (context_manifest_version = 20
+                         AND formatter_version = 21
+                         AND run_facts_schema_version = 2
+                         AND camp_attachment_view_receipt_version = 1
+                         AND camp_attachment_view_receipt_json IS NOT NULL
+                         AND camp_attachment_view_receipt_digest IS NOT NULL)
+                        OR
+                        (context_manifest_version = 21
+                         AND formatter_version = 21
+                         AND run_facts_schema_version = 2
+                         AND camp_attachment_view_receipt_version = 2
+                         AND camp_attachment_view_receipt_json IS NOT NULL
+                         AND camp_attachment_view_receipt_digest IS NOT NULL)
+                        OR
+                        (context_manifest_version = 22
+                         AND formatter_version = 22
+                         AND run_facts_schema_version = 2
+                         AND camp_attachment_view_receipt_version = 2
+                         AND camp_attachment_view_receipt_json IS NOT NULL
+                         AND camp_attachment_view_receipt_digest IS NOT NULL)
+                    ),
+"#,
+            );
+            if !manifest_v112.contains("CREATE TABLE context_manifest_v112")
+                || !manifest_v112.contains("CHECK(formatter_version IN (20, 21, 22))")
+                || !manifest_v112.contains("context_manifest_version IN (19, 20, 21, 22)")
+                || !manifest_v112.contains("context_manifest_version = 22")
+                || !manifest_v112.contains("formatter_version = 22")
+            {
+                anyhow::bail!("v112 could not admit External Principal context formatter v22");
+            }
+            let manifest_columns = table_columns(&transaction, "context_manifest")?
+                .into_iter()
+                .map(|column| format!("\"{}\"", column.replace('"', "\"\"")))
+                .collect::<Vec<_>>()
+                .join(", ");
+            let manifest_dependent_schema = {
+                let mut statement = transaction.prepare(
+                    r#"
+                    SELECT sql
+                    FROM sqlite_master
+                    WHERE tbl_name = 'context_manifest'
+                      AND type IN ('index', 'trigger')
+                      AND sql IS NOT NULL
+                    ORDER BY CASE type WHEN 'index' THEN 0 ELSE 1 END, name
+                    "#,
+                )?;
+                statement
+                    .query_map([], |row| row.get::<_, String>(0))?
+                    .collect::<rusqlite::Result<Vec<_>>>()?
+            };
+            transaction.execute_batch(&manifest_v112)?;
+            transaction.execute_batch(&format!(
+                "INSERT INTO context_manifest_v112({manifest_columns}) \
+                 SELECT {manifest_columns} FROM context_manifest;\n\
+                 DROP TABLE context_manifest;\n\
+                 ALTER TABLE context_manifest_v112 RENAME TO context_manifest;"
+            ))?;
+            for schema in manifest_dependent_schema {
+                let schema = schema
+                    .replacen(
+                        "context_manifest_v21_only_insert",
+                        "context_manifest_v22_only_insert",
+                        1,
+                    )
+                    .replacen(
+                        "NEW.context_manifest_version <> 21",
+                        "NEW.context_manifest_version <> 22",
+                        1,
+                    )
+                    .replacen(
+                        "new ContextManifest must use v21",
+                        "new ContextManifest must use v22",
+                        1,
+                    );
+                transaction.execute_batch(&schema)?;
+            }
+
+            transaction.execute_batch(
+                r#"
+                CREATE TABLE project_binding (
+                    id TEXT PRIMARY KEY,
+                    display_name TEXT NOT NULL CHECK(length(trim(display_name)) > 0),
+                    binding_kind TEXT NOT NULL CHECK(binding_kind IN ('quick_chat', 'directory')),
+                    canonical_path TEXT NOT NULL CHECK(length(trim(canonical_path)) > 0),
+                    status TEXT NOT NULL CHECK(status IN ('active', 'archived')),
+                    version INTEGER NOT NULL DEFAULT 1 CHECK(version >= 1),
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    archived_at TEXT,
+                    UNIQUE(canonical_path),
+                    CHECK(
+                        (status = 'active' AND archived_at IS NULL)
+                        OR (status = 'archived' AND archived_at IS NOT NULL)
+                    )
+                );
+                CREATE INDEX project_binding_status_idx
+                    ON project_binding(status, updated_at DESC, id);
+
+                CREATE TABLE external_principal (
+                    id TEXT PRIMARY KEY,
+                    provider TEXT NOT NULL CHECK(length(trim(provider)) > 0),
+                    tenant_key TEXT NOT NULL CHECK(length(trim(tenant_key)) > 0),
+                    external_user_id TEXT NOT NULL CHECK(length(trim(external_user_id)) > 0),
+                    display_name TEXT NOT NULL CHECK(length(trim(display_name)) > 0),
+                    version INTEGER NOT NULL DEFAULT 1 CHECK(version >= 1),
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    UNIQUE(provider, tenant_key, external_user_id)
+                );
+
+                CREATE TABLE external_principal_app_identity (
+                    principal_id TEXT NOT NULL REFERENCES external_principal(id) ON DELETE CASCADE,
+                    provider TEXT NOT NULL CHECK(length(trim(provider)) > 0),
+                    app_id TEXT NOT NULL CHECK(length(trim(app_id)) > 0),
+                    identity_kind TEXT NOT NULL CHECK(identity_kind IN ('open_id', 'user_id', 'union_id')),
+                    external_id TEXT NOT NULL CHECK(length(trim(external_id)) > 0),
+                    updated_at TEXT NOT NULL,
+                    PRIMARY KEY(principal_id, provider, app_id, identity_kind),
+                    UNIQUE(provider, app_id, identity_kind, external_id)
+                );
+                CREATE INDEX external_principal_app_identity_lookup_idx
+                    ON external_principal_app_identity(provider, app_id, principal_id, identity_kind);
+
+                CREATE TABLE channel_conversation (
+                    id TEXT PRIMARY KEY,
+                    provider TEXT NOT NULL CHECK(length(trim(provider)) > 0),
+                    tenant_key TEXT NOT NULL CHECK(length(trim(tenant_key)) > 0),
+                    chat_id TEXT NOT NULL CHECK(length(trim(chat_id)) > 0),
+                    topic_key TEXT NOT NULL DEFAULT '',
+                    bot_scope_app_id TEXT NOT NULL DEFAULT '',
+                    conversation_kind TEXT NOT NULL CHECK(conversation_kind IN ('p2p', 'group', 'topic')),
+                    display_name TEXT NOT NULL CHECK(length(trim(display_name)) > 0),
+                    last_sender_display_name TEXT NOT NULL CHECK(length(trim(last_sender_display_name)) > 0),
+                    last_sender_principal_id TEXT REFERENCES external_principal(id),
+                    first_seen_at TEXT NOT NULL,
+                    last_seen_at TEXT NOT NULL,
+                    version INTEGER NOT NULL DEFAULT 1 CHECK(version >= 1),
+                    UNIQUE(provider, tenant_key, chat_id, topic_key, bot_scope_app_id),
+                    CHECK(
+                        (conversation_kind = 'topic' AND length(topic_key) > 0
+                            AND bot_scope_app_id = '')
+                        OR (conversation_kind = 'group' AND topic_key = ''
+                            AND bot_scope_app_id = '')
+                        OR (conversation_kind = 'p2p' AND topic_key = ''
+                            AND length(bot_scope_app_id) > 0)
+                    )
+                );
+                CREATE INDEX channel_conversation_last_seen_idx
+                    ON channel_conversation(last_seen_at DESC, id);
+
+                CREATE TABLE channel_conversation_binding (
+                    id TEXT PRIMARY KEY,
+                    channel_conversation_id TEXT NOT NULL UNIQUE
+                        REFERENCES channel_conversation(id) ON DELETE CASCADE,
+                    project_binding_id TEXT NOT NULL REFERENCES project_binding(id),
+                    camp_id TEXT UNIQUE REFERENCES camp(id),
+                    status TEXT NOT NULL CHECK(status = 'active'),
+                    version INTEGER NOT NULL DEFAULT 1 CHECK(version >= 1),
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
+                CREATE INDEX channel_conversation_binding_project_idx
+                    ON channel_conversation_binding(project_binding_id, updated_at DESC, id);
+
+                CREATE TABLE feishu_account (
+                    id TEXT PRIMARY KEY,
+                    identity_digest TEXT NOT NULL CHECK(length(identity_digest) > 0),
+                    display_name TEXT NOT NULL CHECK(length(trim(display_name)) > 0),
+                    tenant_name TEXT NOT NULL CHECK(length(trim(tenant_name)) > 0),
+                    status TEXT NOT NULL CHECK(status IN ('connected', 'disconnected', 'session_expired')),
+                    version INTEGER NOT NULL DEFAULT 1 CHECK(version >= 1),
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    disconnected_at TEXT
+                );
+                CREATE UNIQUE INDEX feishu_account_single_connected_idx
+                    ON feishu_account(status) WHERE status = 'connected';
+
+                CREATE TABLE feishu_member_bot (
+                    agent_id TEXT PRIMARY KEY REFERENCES agent_profile(id),
+                    account_id TEXT NOT NULL REFERENCES feishu_account(id),
+                    app_id TEXT NOT NULL UNIQUE,
+                    bot_open_id TEXT,
+                    bot_display_name TEXT NOT NULL CHECK(length(trim(bot_display_name)) > 0),
+                    credential_ref TEXT NOT NULL UNIQUE CHECK(length(trim(credential_ref)) > 0),
+                    status TEXT NOT NULL CHECK(status IN (
+                        'provisioning', 'published', 'failed', 'disabled'
+                    )),
+                    failure_code TEXT,
+                    version INTEGER NOT NULL DEFAULT 1 CHECK(version >= 1),
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    published_at TEXT,
+                    CHECK(
+                        (status = 'published' AND published_at IS NOT NULL AND failure_code IS NULL)
+                        OR status <> 'published'
+                    )
+                );
+                CREATE INDEX feishu_member_bot_status_idx
+                    ON feishu_member_bot(status, updated_at DESC, agent_id);
+
+                CREATE TABLE external_group_bot_roster_state (
+                    provider TEXT NOT NULL CHECK(length(trim(provider)) > 0),
+                    tenant_key TEXT NOT NULL CHECK(length(trim(tenant_key)) > 0),
+                    chat_id TEXT NOT NULL CHECK(length(trim(chat_id)) > 0),
+                    generation INTEGER NOT NULL DEFAULT 1 CHECK(generation >= 1),
+                    observed_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    PRIMARY KEY(provider, tenant_key, chat_id)
+                );
+
+                CREATE TABLE external_group_bot_roster (
+                    provider TEXT NOT NULL,
+                    tenant_key TEXT NOT NULL,
+                    chat_id TEXT NOT NULL,
+                    app_id TEXT NOT NULL CHECK(length(trim(app_id)) > 0),
+                    agent_id TEXT NOT NULL REFERENCES agent_profile(id),
+                    status TEXT NOT NULL CHECK(status IN ('present', 'absent')),
+                    version INTEGER NOT NULL DEFAULT 1 CHECK(version >= 1),
+                    observed_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    PRIMARY KEY(provider, tenant_key, chat_id, app_id),
+                    FOREIGN KEY(provider, tenant_key, chat_id)
+                        REFERENCES external_group_bot_roster_state(provider, tenant_key, chat_id)
+                        ON DELETE CASCADE
+                );
+                CREATE INDEX external_group_bot_roster_status_idx
+                    ON external_group_bot_roster(
+                        provider, tenant_key, chat_id, status, agent_id
+                    );
+
+                CREATE TABLE channel_inbound_aggregate (
+                    id TEXT PRIMARY KEY,
+                    provider TEXT NOT NULL CHECK(length(trim(provider)) > 0),
+                    tenant_key TEXT NOT NULL CHECK(length(trim(tenant_key)) > 0),
+                    chat_id TEXT NOT NULL CHECK(length(trim(chat_id)) > 0),
+                    topic_key TEXT NOT NULL DEFAULT '',
+                    external_message_digest TEXT NOT NULL CHECK(length(external_message_digest) > 0),
+                    payload_digest TEXT NOT NULL CHECK(length(payload_digest) > 0),
+                    status TEXT NOT NULL CHECK(status IN ('collecting', 'finalized', 'failed')),
+                    canonical_mentions_complete INTEGER NOT NULL CHECK(canonical_mentions_complete IN (0, 1)),
+                    expected_app_ids_json TEXT NOT NULL,
+                    observed_app_ids_json TEXT NOT NULL,
+                    frozen_payload_json TEXT NOT NULL,
+                    deadline_at TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    finalized_at TEXT,
+                    failure_code TEXT,
+                    UNIQUE(provider, tenant_key, external_message_digest),
+                    CHECK(
+                        (status = 'collecting' AND finalized_at IS NULL AND failure_code IS NULL)
+                        OR (status = 'finalized' AND finalized_at IS NOT NULL AND failure_code IS NULL)
+                        OR (status = 'failed' AND finalized_at IS NOT NULL AND failure_code IS NOT NULL)
+                    )
+                );
+                CREATE INDEX channel_inbound_aggregate_collecting_idx
+                    ON channel_inbound_aggregate(status, deadline_at, id);
+
+                CREATE TABLE channel_inbound_observation (
+                    aggregate_id TEXT NOT NULL
+                        REFERENCES channel_inbound_aggregate(id) ON DELETE CASCADE,
+                    app_id TEXT NOT NULL,
+                    observation_digest TEXT NOT NULL,
+                    observed_at TEXT NOT NULL,
+                    PRIMARY KEY(aggregate_id, app_id)
+                );
+
+                CREATE TABLE channel_turn_request (
+                    id TEXT PRIMARY KEY,
+                    binding_id TEXT NOT NULL REFERENCES channel_conversation_binding(id),
+                    aggregate_id TEXT NOT NULL UNIQUE
+                        REFERENCES channel_inbound_aggregate(id) ON DELETE CASCADE,
+                    external_principal_id TEXT NOT NULL REFERENCES external_principal(id),
+                    ack_app_id TEXT NOT NULL,
+                    structured_content_json TEXT NOT NULL,
+                    addressed_agent_ids_json TEXT NOT NULL,
+                    status TEXT NOT NULL CHECK(status IN (
+                        'queued', 'admitted', 'completed', 'failed'
+                    )),
+                    queue_position INTEGER NOT NULL CHECK(queue_position >= 0),
+                    camp_id TEXT REFERENCES camp(id),
+                    camp_message_id TEXT UNIQUE REFERENCES camp_message(id),
+                    camp_turn_id TEXT UNIQUE REFERENCES camp_turn(id),
+                    trigger_camp_sequence INTEGER,
+                    failure_code TEXT,
+                    version INTEGER NOT NULL DEFAULT 1 CHECK(version >= 1),
+                    created_at TEXT NOT NULL,
+                    admitted_at TEXT,
+                    completed_at TEXT,
+                    updated_at TEXT NOT NULL,
+                    CHECK(
+                        (status = 'queued' AND admitted_at IS NULL AND completed_at IS NULL
+                            AND camp_message_id IS NULL AND camp_turn_id IS NULL)
+                        OR (status = 'admitted' AND admitted_at IS NOT NULL AND completed_at IS NULL
+                            AND camp_message_id IS NOT NULL AND camp_turn_id IS NOT NULL)
+                        OR (status IN ('completed', 'failed') AND completed_at IS NOT NULL)
+                    )
+                );
+                CREATE UNIQUE INDEX channel_turn_request_active_binding_idx
+                    ON channel_turn_request(binding_id)
+                    WHERE status = 'admitted';
+                CREATE INDEX channel_turn_request_queue_idx
+                    ON channel_turn_request(binding_id, status, queue_position, created_at, id);
+
+                CREATE TABLE channel_delivery (
+                    id TEXT PRIMARY KEY,
+                    request_id TEXT NOT NULL REFERENCES channel_turn_request(id) ON DELETE CASCADE,
+                    dedupe_key TEXT NOT NULL UNIQUE,
+                    delivery_kind TEXT NOT NULL CHECK(delivery_kind IN (
+                        'queue_ack', 'agent_status', 'agent_output', 'completion', 'attention'
+                    )),
+                    target_app_id TEXT NOT NULL,
+                    source_agent_id TEXT,
+                    source_camp_message_id TEXT REFERENCES camp_message(id),
+                    payload_json TEXT NOT NULL,
+                    status TEXT NOT NULL CHECK(status IN ('pending', 'attempting', 'sent', 'failed')),
+                    attempt_count INTEGER NOT NULL DEFAULT 0 CHECK(attempt_count >= 0),
+                    available_at TEXT NOT NULL,
+                    lease_owner TEXT,
+                    lease_expires_at TEXT,
+                    external_delivery_message_id TEXT,
+                    failure_code TEXT,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    ended_at TEXT,
+                    CHECK(
+                        (status IN ('pending', 'attempting') AND ended_at IS NULL)
+                        OR (status IN ('sent', 'failed') AND ended_at IS NOT NULL)
+                    ),
+                    CHECK(
+                        (status = 'attempting' AND lease_owner IS NOT NULL AND lease_expires_at IS NOT NULL)
+                        OR (status <> 'attempting' AND lease_owner IS NULL AND lease_expires_at IS NULL)
+                    )
+                );
+                CREATE INDEX channel_delivery_claim_idx
+                    ON channel_delivery(status, available_at, created_at, id);
+                CREATE INDEX channel_delivery_request_idx
+                    ON channel_delivery(request_id, status, delivery_kind, id);
+
+                UPDATE rovai_data_contract
+                SET contract_version = 'v1.25', projection_schema_version = 66,
+                    reset_reason = NULL, updated_at = datetime('now')
+                WHERE singleton = 1;
+
+                INSERT INTO schema_migration(version, applied_at)
+                VALUES (112, datetime('now'));
+                "#,
+            )?;
+            transaction.commit()?;
+            Ok(())
+        })();
+        let foreign_keys_result = self.connection.execute_batch("PRAGMA foreign_keys = ON;");
+        migration_result?;
+        foreign_keys_result?;
+        if let Some((table, row_id)) = self
+            .connection
+            .query_row("PRAGMA foreign_key_check", [], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+            })
+            .optional()?
+        {
+            anyhow::bail!("v112 migration left a foreign-key violation in {table} row {row_id}");
+        }
+        Ok(())
+    }
+
     fn migrate_runtime_entrypoint_locator_identity_v109(&mut self) -> Result<()> {
         let transaction = self
             .connection
@@ -20227,7 +20772,250 @@ impl Database {
 }
 
 #[cfg(test)]
+fn downgrade_current_schema_to_v111_source_for_test(connection: &Connection) {
+    let has_v112: bool = connection
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM schema_migration WHERE version = 112)",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    if !has_v112 {
+        return;
+    }
+    connection
+        .execute_batch("PRAGMA foreign_keys = OFF;")
+        .unwrap();
+
+    let current_message_schema: String = connection
+        .query_row(
+            "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'camp_message'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    let renamed_message_schema = if current_message_schema.contains("CREATE TABLE \"camp_message\"")
+    {
+        current_message_schema.replacen(
+            "CREATE TABLE \"camp_message\"",
+            "CREATE TABLE camp_message_v111_source",
+            1,
+        )
+    } else {
+        current_message_schema.replacen(
+            "CREATE TABLE camp_message",
+            "CREATE TABLE camp_message_v111_source",
+            1,
+        )
+    };
+    let message_schema = renamed_message_schema
+        .replace(
+            "REFERENCES camp_message(id)",
+            "REFERENCES camp_message_v111_source(id)",
+        )
+        .replacen(
+            "CHECK(author_type IN ('user', 'agent', 'system', 'external_principal'))",
+            "CHECK(author_type IN ('user', 'agent', 'system'))",
+            1,
+        );
+    let message_columns = table_columns(connection, "camp_message")
+        .unwrap()
+        .into_iter()
+        .map(|column| format!("\"{}\"", column.replace('"', "\"\"")))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let message_dependent_schema = connection
+        .prepare(
+            r#"
+            SELECT sql FROM sqlite_master
+            WHERE tbl_name = 'camp_message'
+              AND type IN ('index', 'trigger') AND sql IS NOT NULL
+            ORDER BY CASE type WHEN 'index' THEN 0 ELSE 1 END, name
+            "#,
+        )
+        .unwrap()
+        .query_map([], |row| row.get::<_, String>(0))
+        .unwrap()
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .unwrap();
+    connection.execute_batch(&message_schema).unwrap();
+    connection
+        .execute_batch(&format!(
+            "INSERT INTO camp_message_v111_source({message_columns}) \
+             SELECT {message_columns} FROM camp_message \
+             WHERE author_type <> 'external_principal';\n\
+             DROP TABLE camp_message;\n\
+             ALTER TABLE camp_message_v111_source RENAME TO camp_message;"
+        ))
+        .unwrap();
+    for schema in message_dependent_schema {
+        connection.execute_batch(&schema).unwrap();
+    }
+
+    let current_manifest_schema: String = connection
+        .query_row(
+            "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'context_manifest'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    let renamed_manifest_schema =
+        if current_manifest_schema.contains("CREATE TABLE \"context_manifest\"") {
+            current_manifest_schema.replacen(
+                "CREATE TABLE \"context_manifest\"",
+                "CREATE TABLE context_manifest_v111_source",
+                1,
+            )
+        } else {
+            current_manifest_schema.replacen(
+                "CREATE TABLE context_manifest",
+                "CREATE TABLE context_manifest_v111_source",
+                1,
+            )
+        };
+    let mut manifest_schema = renamed_manifest_schema
+        .replacen(
+            "CHECK(formatter_version IN (20, 21, 22))",
+            "CHECK(formatter_version IN (20, 21))",
+            1,
+        )
+        .replacen(
+            "CHECK(context_manifest_version IN (19, 20, 21, 22))",
+            "CHECK(context_manifest_version IN (19, 20, 21))",
+            1,
+        );
+    let pairing_start = manifest_schema
+        .find("                    CHECK(\n                        (context_manifest_version = 19")
+        .unwrap();
+    let pairing_end = manifest_schema[pairing_start..]
+        .find(
+            "                    CHECK(\n                        previous_accepted_public_boundary_sequence",
+        )
+        .map(|offset| pairing_start + offset)
+        .unwrap();
+    manifest_schema.replace_range(
+        pairing_start..pairing_end,
+        r#"                    CHECK(
+                        (context_manifest_version = 19
+                         AND formatter_version = 20
+                         AND run_facts_schema_version = 1
+                         AND camp_attachment_view_receipt_version IS NULL
+                         AND camp_attachment_view_receipt_json IS NULL
+                         AND camp_attachment_view_receipt_digest IS NULL)
+                        OR
+                        (context_manifest_version = 20
+                         AND formatter_version = 21
+                         AND run_facts_schema_version = 2
+                         AND camp_attachment_view_receipt_version = 1
+                         AND camp_attachment_view_receipt_json IS NOT NULL
+                         AND camp_attachment_view_receipt_digest IS NOT NULL)
+                        OR
+                        (context_manifest_version = 21
+                         AND formatter_version = 21
+                         AND run_facts_schema_version = 2
+                         AND camp_attachment_view_receipt_version = 2
+                         AND camp_attachment_view_receipt_json IS NOT NULL
+                         AND camp_attachment_view_receipt_digest IS NOT NULL)
+                    ),
+"#,
+    );
+    let manifest_columns = table_columns(connection, "context_manifest")
+        .unwrap()
+        .into_iter()
+        .map(|column| format!("\"{}\"", column.replace('"', "\"\"")))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let manifest_dependent_schema = connection
+        .prepare(
+            r#"
+            SELECT sql FROM sqlite_master
+            WHERE tbl_name = 'context_manifest'
+              AND type IN ('index', 'trigger') AND sql IS NOT NULL
+            ORDER BY CASE type WHEN 'index' THEN 0 ELSE 1 END, name
+            "#,
+        )
+        .unwrap()
+        .query_map([], |row| row.get::<_, String>(0))
+        .unwrap()
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .unwrap();
+    connection
+        .execute_batch(
+            r#"
+            DROP TRIGGER context_manifest_v22_only_insert;
+            DROP TRIGGER IF EXISTS context_manifest_version_immutable;
+            UPDATE context_manifest
+            SET context_manifest_version = 21, formatter_version = 21
+            WHERE context_manifest_version = 22;
+            "#,
+        )
+        .unwrap();
+    connection.execute_batch(&manifest_schema).unwrap();
+    connection
+        .execute_batch(&format!(
+            "INSERT INTO context_manifest_v111_source({manifest_columns}) \
+             SELECT {manifest_columns} FROM context_manifest;\n\
+             DROP TABLE context_manifest;\n\
+             ALTER TABLE context_manifest_v111_source RENAME TO context_manifest;"
+        ))
+        .unwrap();
+    for schema in manifest_dependent_schema {
+        let schema = schema
+            .replacen(
+                "context_manifest_v22_only_insert",
+                "context_manifest_v21_only_insert",
+                1,
+            )
+            .replacen(
+                "NEW.context_manifest_version <> 22",
+                "NEW.context_manifest_version <> 21",
+                1,
+            )
+            .replacen(
+                "new ContextManifest must use v22",
+                "new ContextManifest must use v21",
+                1,
+            );
+        connection.execute_batch(&schema).unwrap();
+    }
+
+    connection
+        .execute_batch(
+            r#"
+            DROP TABLE channel_delivery;
+            DROP TABLE channel_turn_request;
+            DROP TABLE channel_inbound_observation;
+            DROP TABLE channel_inbound_aggregate;
+            DROP TABLE external_group_bot_roster;
+            DROP TABLE external_group_bot_roster_state;
+            DROP TABLE feishu_member_bot;
+            DROP TABLE feishu_account;
+            DROP TABLE channel_conversation_binding;
+            DROP TABLE channel_conversation;
+            DROP TABLE external_principal_app_identity;
+            DROP TABLE external_principal;
+            DROP TABLE project_binding;
+            UPDATE rovai_data_contract
+            SET contract_version = 'v1.24', projection_schema_version = 65
+            WHERE singleton = 1;
+            DELETE FROM schema_migration WHERE version = 112;
+            PRAGMA foreign_keys = ON;
+            "#,
+        )
+        .unwrap();
+    assert_eq!(
+        connection
+            .query_row("SELECT COUNT(*) FROM pragma_foreign_key_check", [], |row| {
+                row.get::<_, i64>(0)
+            })
+            .unwrap(),
+        0
+    );
+}
+
+#[cfg(test)]
 fn downgrade_current_schema_to_v110_source_for_test(connection: &Connection) {
+    downgrade_current_schema_to_v111_source_for_test(connection);
     let has_v111: bool = connection
         .query_row(
             "SELECT EXISTS(SELECT 1 FROM schema_migration WHERE version = 111)",
@@ -20681,10 +21469,13 @@ pub(crate) fn downgrade_current_schema_to_v98_source_for_test(connection: &Conne
         )
         .unwrap();
     if has_v100 {
-        // v98 had neither semantic attachment receipts nor explicit ContextManifest
-        // versions. Preserve current v21 fixture rows long enough for the v98 table
-        // rebuild to strip those columns instead of letting the intermediate v99
-        // downgrade discard evidence that v99's schema cannot represent.
+        // First remove the current v112-only pairing so the preservation rewrite
+        // runs against the historical v111 schema. v98 had neither semantic
+        // attachment receipts nor explicit ContextManifest versions; preserve the
+        // fixture rows long enough for the v98 table rebuild to strip those columns
+        // instead of letting the intermediate v99 downgrade discard evidence that
+        // v99's schema cannot represent.
+        downgrade_current_schema_to_v111_source_for_test(connection);
         connection
             .execute_batch(
                 r#"
@@ -21061,6 +21852,7 @@ mod tests {
             v109: version >= 109,
             v110: version >= 110,
             v111: version >= 111,
+            v112: version >= 112,
         }
     }
 
@@ -21071,6 +21863,12 @@ mod tests {
                 "current",
                 CURRENT_DATA_CONTRACT_VERSION,
                 CURRENT_PROJECTION_SCHEMA_VERSION,
+                112,
+            ),
+            (
+                "v112 source",
+                V112_MIGRATION_SOURCE_DATA_CONTRACT_VERSION,
+                V112_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION,
                 111,
             ),
             (
@@ -21303,7 +22101,7 @@ mod tests {
             );
         }
 
-        let current = migration_state_through(111);
+        let current = migration_state_through(112);
         let v092_source = migration_state_through(91);
         let mut missing_intermediate = current;
         missing_intermediate.v84 = false;
@@ -21373,7 +22171,7 @@ mod tests {
             )
             .expect("current contract marker should load");
 
-        assert_eq!(state, migration_state_through(111));
+        assert_eq!(state, migration_state_through(112));
         assert!(state.admits(&contract, schema));
         assert!(has_admissible_data_contract(
             &directory.join("rovai.sqlite")
@@ -21661,7 +22459,7 @@ mod tests {
                 |row| row.get(0),
             )
             .unwrap();
-        assert!(manifest_schema.contains("CHECK(formatter_version IN (20, 21))"));
+        assert!(manifest_schema.contains("CHECK(formatter_version IN (20, 21, 22))"));
         let conversation: (Option<String>, Option<String>, i64, i64) = reopened
             .connection()
             .query_row(
@@ -21985,7 +22783,7 @@ mod tests {
                 |row| row.get(0),
             )
             .unwrap();
-        assert!(manifest_schema.contains("CHECK(formatter_version IN (20, 21))"));
+        assert!(manifest_schema.contains("CHECK(formatter_version IN (20, 21, 22))"));
         assert!(manifest_schema.contains("CHECK(context_delivery_profile_version = 4)"));
         assert!(!manifest_schema.contains("CHECK(context_delivery_profile_version = 3)"));
         let run: (String, Option<String>) = reopened
@@ -23592,6 +24390,134 @@ mod tests {
     }
 
     #[test]
+    fn v112_upgrades_v111_preserves_existing_evidence_and_installs_channel_contract() {
+        let (database, directory) = crate::test_support::seeded_runtime_database();
+        downgrade_current_schema_to_v111_source_for_test(database.connection());
+        let source_counts: (i64, i64) = database
+            .connection()
+            .query_row(
+                r#"
+                SELECT
+                    (SELECT COUNT(*) FROM camp_message),
+                    (SELECT COUNT(*) FROM context_manifest)
+                "#,
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(
+            database
+                .connection()
+                .query_row(
+                    r#"
+                    SELECT contract_version, projection_schema_version,
+                           (SELECT COUNT(*) FROM schema_migration WHERE version = 112)
+                    FROM rovai_data_contract WHERE singleton = 1
+                    "#,
+                    [],
+                    |row| Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, i64>(1)?,
+                        row.get::<_, i64>(2)?,
+                    )),
+                )
+                .unwrap(),
+            ("v1.24".to_string(), 65, 0)
+        );
+        drop(database);
+
+        let upgraded = Database::open(&directory).expect("v111 source should migrate to v112");
+        assert_eq!(
+            upgraded
+                .connection()
+                .query_row(
+                    r#"
+                    SELECT contract_version, projection_schema_version,
+                           (SELECT COUNT(*) FROM schema_migration WHERE version = 112),
+                           (SELECT COUNT(*) FROM pragma_foreign_key_check)
+                    FROM rovai_data_contract WHERE singleton = 1
+                    "#,
+                    [],
+                    |row| Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, i64>(1)?,
+                        row.get::<_, i64>(2)?,
+                        row.get::<_, i64>(3)?,
+                    )),
+                )
+                .unwrap(),
+            (
+                CURRENT_DATA_CONTRACT_VERSION.to_string(),
+                CURRENT_PROJECTION_SCHEMA_VERSION,
+                1,
+                0,
+            )
+        );
+        assert_eq!(
+            upgraded
+                .connection()
+                .query_row(
+                    r#"
+                    SELECT
+                        (SELECT COUNT(*) FROM camp_message),
+                        (SELECT COUNT(*) FROM context_manifest)
+                    "#,
+                    [],
+                    |row| Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?)),
+                )
+                .unwrap(),
+            source_counts
+        );
+        assert_schema_objects(
+            upgraded.connection(),
+            "table",
+            &[
+                "project_binding",
+                "external_principal",
+                "channel_conversation",
+                "channel_turn_request",
+                "channel_delivery",
+            ],
+            true,
+        );
+        let message_schema: String = upgraded
+            .connection()
+            .query_row(
+                "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'camp_message'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(message_schema.contains("'external_principal'"));
+        let manifest_schema: String = upgraded
+            .connection()
+            .query_row(
+                "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'context_manifest'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(manifest_schema.contains("context_manifest_version = 22"));
+        assert!(manifest_schema.contains("formatter_version = 22"));
+        drop(upgraded);
+
+        let restarted = Database::open(&directory).expect("v112 restart should be idempotent");
+        assert_eq!(
+            restarted
+                .connection()
+                .query_row(
+                    "SELECT COUNT(*) FROM schema_migration WHERE version = 112",
+                    [],
+                    |row| row.get::<_, i64>(0),
+                )
+                .unwrap(),
+            1
+        );
+        drop(restarted);
+        std::fs::remove_dir_all(directory).expect("temporary database should be removable");
+    }
+
+    #[test]
     fn v111_upgrades_current_main_v110_and_keeps_zero_attempt_cancellation_terminal() {
         let (mut database, directory) = crate::test_support::seeded_runtime_database();
         let workspace = directory.join("v111-workspace");
@@ -23755,7 +24681,16 @@ mod tests {
                 },
             )
             .unwrap();
-        assert_eq!(upgraded_marker, ("v1.24".to_string(), 65, 1, 1, 0));
+        assert_eq!(
+            upgraded_marker,
+            (
+                CURRENT_DATA_CONTRACT_VERSION.to_string(),
+                CURRENT_PROJECTION_SCHEMA_VERSION,
+                1,
+                1,
+                0,
+            )
+        );
         assert_table_columns(
             upgraded.connection(),
             "message_delivery",
@@ -23815,8 +24750,8 @@ mod tests {
                 "terminal".to_string(),
                 0,
                 1,
-                "v1.24".to_string(),
-                65,
+                CURRENT_DATA_CONTRACT_VERSION.to_string(),
+                CURRENT_PROJECTION_SCHEMA_VERSION,
             )
         );
         drop(restarted);
@@ -23926,7 +24861,13 @@ mod tests {
                     )),
                 )
                 .unwrap(),
-            ("v1.24".to_string(), 65, 1, 1, 1)
+            (
+                CURRENT_DATA_CONTRACT_VERSION.to_string(),
+                CURRENT_PROJECTION_SCHEMA_VERSION,
+                1,
+                1,
+                1,
+            )
         );
         assert_eq!(
             reopened
@@ -29687,7 +30628,7 @@ mod tests {
             connection,
             "trigger",
             &[
-                "context_manifest_v21_only_insert",
+                "context_manifest_v22_only_insert",
                 "context_manifest_version_immutable",
                 "runtime_input_delivery_attachment_auth_insert",
                 "camp_attachment_view_camp_insert",
@@ -29697,7 +30638,10 @@ mod tests {
         assert_schema_objects(
             connection,
             "trigger",
-            &["context_manifest_v20_only_insert"],
+            &[
+                "context_manifest_v20_only_insert",
+                "context_manifest_v21_only_insert",
+            ],
             false,
         );
 

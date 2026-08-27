@@ -88,6 +88,7 @@ import {
 } from './app-updates'
 import { AppQuitCoordinator } from './app-quit-coordinator'
 import { ChannelSettingsService } from './channel-settings'
+import { SafeStorageChannelCredentialStore } from './channel-credential-store'
 
 const mainStartupStartedAt = performance.now()
 console.info('[startup] stage=main_module_loaded elapsed_ms=0.0')
@@ -248,7 +249,14 @@ const projectAccessTransactions = new ProjectAccessTransactionCoordinator()
 let userAutomation: UserAutomationServer | null = null
 const desktopSessions = new DesktopSessionRegistry()
 const memberAvatars = new MemberAvatarAssetService(coreDataPath)
-const channelSettings = new ChannelSettingsService()
+const channelSettings = new ChannelSettingsService({
+  core,
+  credentialStore: new SafeStorageChannelCredentialStore(coreDataPath)
+})
+channelSettings.onChanged((snapshot) => {
+  if (!mainWindow || mainWindow.isDestroyed() || mainWindow.webContents.isDestroyed()) return
+  mainWindow.webContents.send('rovai:channels-changed', snapshot)
+})
 
 async function initializeAppUpdates(): Promise<void> {
   // electron-updater eagerly touches Electron's native autoUpdater while the
@@ -527,6 +535,9 @@ if (primaryInstance) void app.whenReady().then(async () => {
       process.platform
     ) ?? undefined
   })
+  void channelSettings.start().catch((error) => {
+    console.warn('[rovai] Feishu Channel Host startup failed; the App will remain available.', error)
+  })
   userAutomation = await startUserAutomationOptional(
     () => new UserAutomationServer(
       userAutomationRoot(app.getPath('appData'), userDataPath, hasExplicitUserDataDirectory),
@@ -677,6 +688,82 @@ ipcMain.handle('rovai:general-preferences-invalidate-new-conversation-defaults',
 ipcMain.handle('rovai:channels-get', (event) => {
   requireMainWindow(event.sender)
   return channelSettings.get()
+})
+
+ipcMain.handle('rovai:channels-connect', (event) => {
+  requireMainWindow(event.sender)
+  return channelSettings.connect()
+})
+
+ipcMain.handle('rovai:channels-disconnect', (event) => {
+  requireMainWindow(event.sender)
+  return channelSettings.disconnect()
+})
+
+ipcMain.handle('rovai:channels-publish-member-bot', (event, agentId: unknown) => {
+  requireMainWindow(event.sender)
+  if (typeof agentId !== 'string' || !agentId) throw new Error('Invalid Agent ID')
+  return channelSettings.publishMemberBot(agentId)
+})
+
+ipcMain.handle('rovai:channels-retry-member-bot', (event, agentId: unknown) => {
+  requireMainWindow(event.sender)
+  if (typeof agentId !== 'string' || !agentId) throw new Error('Invalid Agent ID')
+  return channelSettings.retryMemberBot(agentId)
+})
+
+ipcMain.handle('rovai:channels-disable-member-bot', (event, agentId: unknown) => {
+  requireMainWindow(event.sender)
+  if (typeof agentId !== 'string' || !agentId) throw new Error('Invalid Agent ID')
+  return channelSettings.disableMemberBot(agentId)
+})
+
+ipcMain.handle('rovai:channels-cancel-qr', (event, attemptId: unknown) => {
+  requireMainWindow(event.sender)
+  if (typeof attemptId !== 'string' || !attemptId) throw new Error('Invalid QR attempt ID')
+  return channelSettings.cancelQrAttempt(attemptId)
+})
+
+ipcMain.handle('rovai:channels-create-project-binding', (event, input: unknown) => {
+  requireMainWindow(event.sender)
+  return channelSettings.createProjectBinding(requireObject(input) as Parameters<
+    typeof channelSettings.createProjectBinding
+  >[0])
+})
+
+ipcMain.handle('rovai:channels-update-project-binding', (event, input: unknown) => {
+  requireMainWindow(event.sender)
+  return channelSettings.updateProjectBinding(requireObject(input) as Parameters<
+    typeof channelSettings.updateProjectBinding
+  >[0])
+})
+
+ipcMain.handle('rovai:channels-archive-project-binding', (event, input: unknown) => {
+  requireMainWindow(event.sender)
+  return channelSettings.archiveProjectBinding(requireObject(input) as Parameters<
+    typeof channelSettings.archiveProjectBinding
+  >[0])
+})
+
+ipcMain.handle('rovai:channels-bind-conversation', (event, input: unknown) => {
+  requireMainWindow(event.sender)
+  return channelSettings.bindConversation(requireObject(input) as Parameters<
+    typeof channelSettings.bindConversation
+  >[0])
+})
+
+ipcMain.handle('rovai:channels-select-project-directory', async (event) => {
+  const window = requireMainWindow(event.sender)
+  const result = await dialog.showOpenDialog(window, {
+    title: '选择可绑定的项目目录',
+    buttonLabel: '选择项目',
+    properties: ['openDirectory']
+  })
+  if (result.canceled || !result.filePaths[0]) return null
+  const selection = await core.request<{ projectPath: string }>('workspaces.validate', {
+    path: result.filePaths[0]
+  })
+  return selection.projectPath
 })
 
 ipcMain.handle('rovai:onboarding-get', () => requireOnboarding().get())
@@ -1180,7 +1267,7 @@ const appQuitCoordinator = new AppQuitCoordinator({
     const stopAutomation = userAutomation?.stop() ?? Promise.resolve()
     userAutomation = null
     try {
-      await stopAutomation
+      await Promise.all([stopAutomation, channelSettings.stop()])
     } catch (error) {
       console.error('Rovai User Automation shutdown failed', error)
     }
@@ -1226,4 +1313,11 @@ function requireMainWindow(webContents: Electron.WebContents): BrowserWindow {
     throw new Error('Main window is unavailable')
   }
   return window
+}
+
+function requireObject(value: unknown): Record<string, unknown> {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    throw new Error('Invalid channel settings request')
+  }
+  return value as Record<string, unknown>
 }
