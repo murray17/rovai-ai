@@ -1297,6 +1297,7 @@ export function CampWorkspace({
   const workspaceChangeReviewRequest = useRef(0)
   const [workspaceChangeReview, setWorkspaceChangeReview] = useState<{
     window: WorkspaceChangeWindowView
+    initialFileIndex: number
     status: 'loading' | 'ready' | 'error'
     result: WorkspaceChangeWindowDiffView | null
     error: string | null
@@ -1306,11 +1307,17 @@ export function CampWorkspace({
     setWorkspaceChangeReview(null)
   }, [snapshot.camp.id])
   const openWorkspaceChangeReview = useCallback(async (
-    workspaceWindow: WorkspaceChangeWindowView
+    workspaceWindow: WorkspaceChangeWindowView,
+    requestedFileIndex = 0
   ): Promise<void> => {
     const requestId = ++workspaceChangeReviewRequest.current
+    const initialFileIndex = Math.max(
+      0,
+      Math.min(requestedFileIndex, Math.max(0, workspaceWindow.files.length - 1))
+    )
     setWorkspaceChangeReview({
       window: workspaceWindow,
+      initialFileIndex,
       status: 'loading',
       result: null,
       error: null
@@ -1327,6 +1334,7 @@ export function CampWorkspace({
       ) return
       setWorkspaceChangeReview({
         window: result.window,
+        initialFileIndex: Math.min(initialFileIndex, Math.max(0, result.window.files.length - 1)),
         status: 'ready',
         result,
         error: null
@@ -1335,6 +1343,7 @@ export function CampWorkspace({
       if (requestId !== workspaceChangeReviewRequest.current) return
       setWorkspaceChangeReview({
         window: workspaceWindow,
+        initialFileIndex,
         status: 'error',
         result: null,
         error: error instanceof Error ? error.message : '文件变更暂时无法打开。'
@@ -3690,7 +3699,7 @@ export function CampWorkspace({
                       <WorkspaceChangeTimelineCard
                         key={timelineItem.id}
                         window={timelineItem.window}
-                        onView={() => void openWorkspaceChangeReview(timelineItem.window)}
+                        onView={(fileIndex) => void openWorkspaceChangeReview(timelineItem.window, fileIndex)}
                       />
                     )
                     continue
@@ -4394,7 +4403,10 @@ export function CampWorkspace({
         <WorkspaceChangeReview
           state={workspaceChangeReview}
           onBack={closeWorkspaceChangeReview}
-          onRetry={() => void openWorkspaceChangeReview(workspaceChangeReview.window)}
+          onRetry={() => void openWorkspaceChangeReview(
+            workspaceChangeReview.window,
+            workspaceChangeReview.initialFileIndex
+          )}
         />
       )}
       {mentionPopover && (
@@ -6511,19 +6523,24 @@ function FirstRunCampWelcome({
   )
 }
 
-function WorkspaceChangeTimelineCard({
+export function WorkspaceChangeTimelineCard({
   window: workspaceWindow,
   onView
 }: {
   window: WorkspaceChangeWindowView
-  onView(): void
+  onView(fileIndex: number): void
 }): JSX.Element {
   const [showAllFiles, setShowAllFiles] = useState(false)
   const visibleFiles = showAllFiles ? workspaceWindow.files : workspaceWindow.files.slice(0, 3)
   const hiddenFileCount = Math.max(0, workspaceWindow.files.length - visibleFiles.length)
   return (
     <article className="timeline-node workspace-change-card">
-      <header className="workspace-change-card-header">
+      <button
+        type="button"
+        className="workspace-change-card-header"
+        aria-label={`查看 Files Changed：${workspaceWindow.fileCount} 个文件`}
+        onClick={() => onView(0)}
+      >
         <span className="workspace-change-card-icon" aria-hidden="true">
           <svg viewBox="0 0 24 24">
             <path d="M7 3.5h7l3 3V18a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V5.5a2 2 0 0 1 2-2Z" />
@@ -6538,24 +6555,29 @@ function WorkspaceChangeTimelineCard({
             <span className="workspace-change-stat deletion">−{workspaceWindow.deletions}</span>
           </span>
         </span>
-        <button
-          type="button"
-          className="workspace-change-view-button"
-          aria-label={`查看 Files Changed：${workspaceWindow.fileCount} 个文件`}
-          onClick={onView}
-        >
+        <span className="workspace-change-view-affordance" aria-hidden="true">
           View
-        </button>
-      </header>
+          <svg viewBox="0 0 16 16"><path d="m6 3.5 4.25 4.5L6 12.5" /></svg>
+        </span>
+      </button>
       <div className="workspace-change-card-files" aria-label="变更文件">
-        {visibleFiles.map((file) => (
-          <div className="workspace-change-card-file" key={file.path}>
+        {visibleFiles.map((file, index) => (
+          <button
+            type="button"
+            className="workspace-change-card-file"
+            aria-label={`查看 ${file.path} 的文件差异，新增 ${file.additions} 行，删除 ${file.deletions} 行`}
+            key={`${index}:${file.path}`}
+            onClick={() => onView(index)}
+          >
             <code title={file.path}>{file.path}</code>
-            <span aria-label={`新增 ${file.additions} 行，删除 ${file.deletions} 行`}>
+            <span aria-hidden="true">
               {file.additions > 0 && <i className="addition">+{file.additions}</i>}
               {file.deletions > 0 && <i className="deletion">−{file.deletions}</i>}
             </span>
-          </div>
+            <svg className="workspace-change-card-file-arrow" viewBox="0 0 16 16" aria-hidden="true">
+              <path d="m6 3.5 4.25 4.5L6 12.5" />
+            </svg>
+          </button>
         ))}
         {hiddenFileCount > 0 && (
           <button
@@ -6579,13 +6601,27 @@ function workspaceDiffSections(diff: string): string[] {
   return starts.map((start, index) => diff.slice(start, starts[index + 1] ?? diff.length))
 }
 
-function WorkspaceChangeReview({
+function workspaceChangeFilePath(path: string): { directory: string; fileName: string } {
+  const segments = path.split('/').filter(Boolean)
+  const fileName = segments.pop() ?? path
+  return {
+    directory: segments.length > 0 ? `${segments.join('/')}/` : '',
+    fileName
+  }
+}
+
+function workspaceChangeKindMark(kind: WorkspaceChangeWindowView['files'][number]['changeKind']): string {
+  return kind === 'add' ? 'A' : kind === 'delete' ? 'D' : 'M'
+}
+
+export function WorkspaceChangeReview({
   state,
   onBack,
   onRetry
 }: {
   state: {
     window: WorkspaceChangeWindowView
+    initialFileIndex: number
     status: 'loading' | 'ready' | 'error'
     result: WorkspaceChangeWindowDiffView | null
     error: string | null
@@ -6593,8 +6629,11 @@ function WorkspaceChangeReview({
   onBack(): void
   onRetry(): void
 }): JSX.Element {
-  const [selectedFileIndex, setSelectedFileIndex] = useState(0)
-  useEffect(() => setSelectedFileIndex(0), [state.window.windowId])
+  const [selectedFileIndex, setSelectedFileIndex] = useState(state.initialFileIndex)
+  useEffect(
+    () => setSelectedFileIndex(state.initialFileIndex),
+    [state.initialFileIndex, state.window.windowId]
+  )
   const sections = useMemo(
     () => workspaceDiffSections(state.result?.diff ?? ''),
     [state.result?.diff]
@@ -6605,9 +6644,14 @@ function WorkspaceChangeReview({
   return (
     <section className="workspace-change-review" aria-label="Files Changed">
       <header className="workspace-change-review-header">
-        <button className="workspace-change-review-back" type="button" onClick={onBack}>
+        <button
+          className="workspace-change-review-back"
+          type="button"
+          aria-label="返回会话"
+          title="返回会话"
+          onClick={onBack}
+        >
           <svg viewBox="0 0 16 16" aria-hidden="true"><path d="m9.75 3.5-4.5 4.5 4.5 4.5" /></svg>
-          返回会话
         </button>
         <div className="workspace-change-review-heading">
           <h2>Files Changed</h2>
@@ -6616,6 +6660,25 @@ function WorkspaceChangeReview({
             <i className="addition">+{state.window.additions}</i>
             <i className="deletion">−{state.window.deletions}</i>
           </span>
+        </div>
+        <div className="workspace-change-review-navigation" aria-label="文件差异导航">
+          <button
+            type="button"
+            disabled={selectedFileIndex <= 0}
+            onClick={() => setSelectedFileIndex((index) => Math.max(0, index - 1))}
+          >
+            上一文件
+          </button>
+          <button
+            type="button"
+            disabled={selectedFileIndex >= state.window.files.length - 1}
+            onClick={() => setSelectedFileIndex((index) => Math.max(
+              0,
+              Math.min(state.window.files.length - 1, index + 1)
+            ))}
+          >
+            下一文件
+          </button>
         </div>
       </header>
       {state.status === 'loading' && (
@@ -6634,25 +6697,45 @@ function WorkspaceChangeReview({
       {state.status === 'ready' && (
         <div className="workspace-change-review-content">
           <nav className="workspace-change-review-files" aria-label="变更文件列表">
-            {state.window.files.map((file, index) => (
-              <button
-                type="button"
-                className={index === selectedFileIndex ? 'selected' : ''}
-                aria-current={index === selectedFileIndex ? 'true' : undefined}
-                key={`${index}:${file.path}`}
-                onClick={() => setSelectedFileIndex(index)}
-              >
-                <code title={file.path}>{file.path}</code>
-                <span>
-                  {file.additions > 0 && <i className="addition">+{file.additions}</i>}
-                  {file.deletions > 0 && <i className="deletion">−{file.deletions}</i>}
-                </span>
-              </button>
-            ))}
+            <header>
+              <strong>变更文件</strong>
+              <span>{state.window.fileCount} files</span>
+            </header>
+            {state.window.files.map((file, index) => {
+              const path = workspaceChangeFilePath(file.path)
+              return (
+                <button
+                  type="button"
+                  className={index === selectedFileIndex ? 'selected' : ''}
+                  aria-current={index === selectedFileIndex ? 'true' : undefined}
+                  aria-label={`${workspaceChangeKindMark(file.changeKind)} ${file.path}，新增 ${file.additions} 行，删除 ${file.deletions} 行`}
+                  key={`${index}:${file.path}`}
+                  onClick={() => setSelectedFileIndex(index)}
+                >
+                  <span className="workspace-change-review-file-kind" aria-hidden="true">
+                    {workspaceChangeKindMark(file.changeKind)}
+                  </span>
+                  <span className="workspace-change-review-file-copy">
+                    <strong title={file.path}>{path.fileName}</strong>
+                    {path.directory && <small>{path.directory}</small>}
+                  </span>
+                  <span className="workspace-change-review-file-stats" aria-hidden="true">
+                    {file.additions > 0 && <i className="addition">+{file.additions}</i>}
+                    {file.deletions > 0 && <i className="deletion">−{file.deletions}</i>}
+                  </span>
+                </button>
+              )
+            })}
           </nav>
           <section className="workspace-change-review-diff" aria-label={selectedFile ? `${selectedFile.path} 的差异` : '文件差异'}>
             <header>
               <code>{selectedFile?.path ?? state.window.executionRootLabel}</code>
+              {selectedFile && (
+                <span className="workspace-change-review-file-stats" aria-hidden="true">
+                  {selectedFile.additions > 0 && <i className="addition">+{selectedFile.additions}</i>}
+                  {selectedFile.deletions > 0 && <i className="deletion">−{selectedFile.deletions}</i>}
+                </span>
+              )}
             </header>
             <div className="workspace-change-review-code" tabIndex={0}>
               {lines.map((line, index) => line.kind === 'hunk' || line.kind === 'metadata'
@@ -7982,8 +8065,17 @@ function ToolActivityGroup({
         </span>
       </summary>
       <div className="tool-group-items">
-        {items.map((item) => {
+        {items.flatMap((item) => {
           const step = item.step
+          if (step.fileChanges?.length) {
+            return step.fileChanges.map((change, index) => (
+              <ModifiedFileRow
+                change={change}
+                key={`${item.key}:file:${index}:${change.path}`}
+                semanticKind={step.fileChangeSemantics}
+              />
+            ))
+          }
           return (
             <ToolCallRow
               key={item.key}

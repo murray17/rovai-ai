@@ -62,16 +62,16 @@
       --identity-2: #39777a;
       --identity-3: #74628f;
       --identity-4: #9a6a32;
-      --evidence-canvas: #f4f6f3;
+      --evidence-canvas: #ffffff;
       --evidence-surface: #ffffff;
-      --evidence-ink: #252a36;
-      --evidence-muted: #5f6678;
-      --evidence-line: #d5dad3;
-      --diff-add: #2f694d;
-      --diff-add-soft: #e4f0e8;
-      --diff-remove: #8f3f3a;
-      --diff-remove-soft: #f5e4e1;
-      --diff-hunk-soft: #e5eceb;
+      --evidence-ink: #1f2328;
+      --evidence-muted: #687078;
+      --evidence-line: #dfe3e6;
+      --diff-add: #137333;
+      --diff-add-soft: #e6f4ea;
+      --diff-remove: #b3261e;
+      --diff-remove-soft: #fce8e6;
+      --diff-hunk-soft: #f3f4f4;
       --shadow-float: 0 18px 56px rgba(38, 45, 58, .14);
       --rail-width: 270px;
       --inspector-width: 310px;
@@ -421,19 +421,25 @@
     .inline-code { padding: 0 3px; border-radius: 3px; color: var(--evidence-ink); background: var(--surface-subtle); font: 10.5px/1.5 var(--mono); }
     .agent-note { margin-top: 9px; padding: 9px 10px; border-left: 2px solid var(--brand); color: var(--muted); background: var(--surface-subtle); font-size: 10.5px; line-height: 1.55; }
     .workspace-evidence-event { margin: 2px 0 18px 41px; }
-    .resource-card { min-width: 0; overflow: hidden; border: 1px solid var(--evidence-line); border-radius: 9px; background: var(--evidence-surface); }
-    .resource-header { display: grid; width: 100%; min-width: 0; min-height: 52px; grid-template-columns: 32px minmax(0, 1fr) auto; align-items: center; gap: 9px; padding: 8px 10px; color: var(--evidence-ink); background: transparent; }
-    .resource-icon { display: grid; width: 32px; height: 32px; place-items: center; border-radius: 7px; color: var(--workspace-steel-ink); background: var(--workspace-surface-selected); }
+    .resource-card { min-width: 0; overflow: hidden; border: 1px solid var(--line); border-radius: 9px; background: var(--evidence-surface); transition: border-color 120ms ease, background 120ms ease; }
+    .resource-card:hover, .resource-card:focus-within { border-color: var(--line-strong); }
+    .resource-header { display: grid; width: 100%; min-width: 0; min-height: 52px; grid-template-columns: 32px minmax(0, 1fr) auto; align-items: center; gap: 9px; padding: 8px 10px; border: 0; color: var(--evidence-ink); background: transparent; text-align: left; cursor: pointer; }
+    .resource-header:hover { background: color-mix(in srgb, var(--surface-hover) 58%, transparent); }
+    .resource-icon { display: grid; width: 32px; height: 32px; place-items: center; border-radius: 7px; color: var(--muted); background: var(--surface-muted); }
     .resource-icon svg { width: 16px; height: 16px; }
     .resource-copy { display: grid; min-width: 0; gap: 1px; }
     .resource-copy strong { overflow: hidden; font-size: 11.5px; text-overflow: ellipsis; white-space: nowrap; }
     .resource-subtitle { min-height: 14px; color: var(--evidence-muted); font-size: 9px; line-height: 1.45; }
-    .resource-view-button { min-width: 48px; min-height: 28px; padding: 0 10px; border: 1px solid color-mix(in srgb, var(--control-line) 42%, var(--line)); border-radius: 6px; color: var(--ink); background: var(--surface-raised); cursor: pointer; font-size: 9.5px; font-weight: 700; }
-    .resource-view-button:hover { color: var(--ink); background: var(--surface-hover); }
-    .resource-files { border-top: 1px solid var(--evidence-line); }
-    .resource-file-row, .resource-more { display: flex; width: 100%; min-width: 0; min-height: 34px; align-items: center; gap: 8px; padding: 4px 10px; border: 0; color: var(--evidence-ink); background: color-mix(in srgb, var(--evidence-surface) 72%, transparent); text-align: left; }
+    .resource-view-affordance { display: inline-flex; min-width: 48px; min-height: 28px; align-items: center; justify-content: flex-end; gap: 3px; padding: 0 4px 0 8px; border-radius: 5px; color: var(--ink); font-size: 9.5px; font-weight: 680; }
+    .resource-view-affordance svg { width: 12px; height: 12px; color: var(--faint); }
+    .resource-header:hover .resource-view-affordance { background: var(--surface-muted); }
+    .resource-files { display: grid; gap: 1px; padding: 0 6px 6px; }
+    .resource-file-row, .resource-more { display: flex; width: 100%; min-width: 0; min-height: 32px; align-items: center; gap: 8px; padding: 4px 6px; border: 0; border-radius: 6px; color: var(--evidence-ink); background: transparent; text-align: left; }
+    .resource-file-row { cursor: pointer; }
+    .resource-file-row::after { flex: 0 0 auto; color: var(--faint); content: "›"; font-size: 14px; line-height: 1; opacity: 0; transform: translateX(-2px); transition: opacity 120ms ease, transform 120ms ease; }
+    .resource-file-row:hover, .resource-more:hover { background: var(--surface-hover); }
+    .resource-file-row:hover::after, .resource-file-row:focus-visible::after { opacity: 1; transform: translateX(0); }
     .resource-more { cursor: pointer; }
-    .resource-more:hover { background: var(--surface-hover); }
     .resource-path { display: flex; min-width: 0; flex: 1 1 auto; align-items: center; overflow: hidden; font: 8.5px/1.4 var(--mono); white-space: nowrap; }
     .resource-path-dir { overflow: hidden; color: var(--evidence-muted); text-overflow: ellipsis; }
     .resource-path-base { flex: 0 0 auto; color: var(--evidence-ink); }
@@ -493,12 +499,32 @@
     .run-meta { display: flex; flex-wrap: wrap; gap: 4px 7px; margin-top: 4px; color: var(--faint); font-size: 8px; }
     .run-meta code { color: var(--evidence-muted); font: 8px/1.3 var(--mono); }
     .tool-list { display: grid; gap: 3px; margin-top: 9px; padding-top: 7px; border-top: 1px solid var(--line); }
-    .tool-row { display: grid; min-height: 26px; grid-template-columns: 16px minmax(0, 1fr) 16px 18px; align-items: center; gap: 6px; padding: 1px 2px; color: var(--muted); }
+    .tool-activity-group { min-width: 0; }
+    .tool-activity-group > summary { list-style: none; cursor: pointer; user-select: none; }
+    .tool-activity-group > summary::-webkit-details-marker { display: none; }
+    .tool-activity-group > summary::marker { display: none; content: ""; }
+    .tool-group-summary { display: grid; min-height: 28px; grid-template-columns: 16px minmax(0, 1fr) 16px 18px; align-items: center; gap: 6px; padding: 0 2px; border-radius: 6px; color: var(--muted); }
+    .tool-group-summary:hover { color: var(--ink); background: var(--surface-hover); }
+    .tool-group-icon { display: grid; width: 16px; height: 28px; place-items: center; align-self: center; color: var(--muted); }
+    .tool-group-icon svg { display: block; width: 16px; height: 16px; }
+    .tool-group-copy { display: flex; min-width: 0; height: 28px; align-items: center; overflow: hidden; color: var(--ink); font-size: 9.5px; line-height: 1; text-overflow: ellipsis; white-space: nowrap; }
+    .tool-group-copy strong { font-weight: 680; }
+    .tool-group-state { display: grid; width: 16px; height: 28px; place-items: center; align-self: center; }
+    .tool-group-state::before { width: 6px; height: 6px; border-radius: 50%; background: var(--success); content: ""; }
+    .tool-group-disclosure { display: grid; width: 18px; height: 28px; place-items: center; align-self: center; border-radius: 5px; color: var(--faint); }
+    .tool-group-disclosure svg { display: block; width: 13px; height: 13px; transition: transform 120ms ease; }
+    .tool-activity-group[open] > summary .tool-group-disclosure svg { transform: rotate(180deg); }
+    .tool-group-items { display: grid; min-width: 0; gap: 1px; margin: 3px 0 4px; padding: 3px 0; }
+    .tool-row { display: grid; min-height: 28px; grid-template-columns: 16px minmax(0, 1fr) 16px 18px; align-items: center; gap: 6px; padding: 0 2px; color: var(--muted); }
     .tool-row:hover { color: var(--ink); background: var(--surface-hover); }
-    .tool-row svg { width: 14px; height: 14px; }
-    .tool-row strong { overflow: hidden; font: 500 9.5px/1.35 var(--mono); text-overflow: ellipsis; white-space: nowrap; }
-    .tool-row .state-dot { width: 6px; height: 6px; justify-self: center; }
-    .chevron { color: var(--faint); font-size: 10px; text-align: center; }
+    .tool-row-icon, .tool-row-state, .tool-row-disclosure { display: grid; height: 28px; place-items: center; align-self: center; }
+    .tool-row-icon { width: 16px; color: var(--muted); }
+    .tool-row-icon svg { display: block; width: 14px; height: 14px; }
+    .tool-row strong { display: flex; min-width: 0; height: 28px; align-items: center; overflow: hidden; font: 500 9.5px/1 var(--mono); text-overflow: ellipsis; white-space: nowrap; }
+    .tool-row-state { width: 16px; }
+    .tool-row-state .state-dot { width: 6px; height: 6px; }
+    .tool-row-disclosure { width: 18px; border-radius: 5px; color: var(--faint); }
+    .tool-row-disclosure svg { display: block; width: 13px; height: 13px; }
     .file-change-activity-host { display: contents; }
     .file-change-row { min-width: 0; }
     .file-change-row > summary { list-style: none; }
@@ -516,7 +542,7 @@
     .file-change-disclosure svg { width: 13px; height: 13px; transition: transform 120ms ease; }
     .file-change-row-summary:hover .file-change-disclosure { color: var(--ink); background: var(--surface-muted); }
     .file-change-row[open] > .file-change-row-summary .file-change-disclosure svg { transform: rotate(180deg); }
-    .file-change-row-body { min-width: 0; margin: 2px 0 7px 22px; overflow: hidden; border: 1px solid var(--evidence-line); border-radius: 6px; background: var(--evidence-canvas); }
+    .file-change-row-body { min-width: 0; margin: 2px 0 7px; overflow: hidden; border: 1px solid var(--evidence-line); border-radius: 6px; background: var(--evidence-canvas); }
     .file-change-code { max-height: min(170px, 24vh); overflow: auto; overscroll-behavior: contain; color: var(--evidence-ink); background: var(--evidence-canvas); font: 8.5px/1.45 var(--mono); scrollbar-color: var(--control-line) transparent; scrollbar-width: thin; }
     .file-change-diff-line { display: grid; min-width: 570px; min-height: 18px; grid-template-columns: 18px 30px 30px minmax(0, 1fr); }
     .file-change-diff-line > span { display: grid; place-items: center; color: var(--evidence-muted); user-select: none; }
@@ -571,30 +597,30 @@
     .execution-inspector .inspector-scroll { display: flex; flex-direction: column; }
     .execution-inspector .execution-detail-host { min-height: 280px; }
 
-    .review-workspace { display: flex; width: 100%; height: 100%; min-width: 0; min-height: 0; flex-direction: column; background: var(--surface); }
-    .review-header { display: flex; min-height: 68px; flex: 0 0 auto; align-items: center; justify-content: space-between; gap: 16px; padding: 10px 18px; border-bottom: 1px solid var(--line-strong); background: var(--surface); }
+    .review-workspace { display: flex; width: 100%; height: 100%; min-width: 0; min-height: 0; flex-direction: column; background: var(--evidence-surface); }
+    .review-header { display: grid; min-height: 58px; flex: 0 0 auto; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 12px; padding: 8px 14px; border-bottom: 1px solid var(--evidence-line); background: var(--evidence-surface); }
     .review-heading { display: flex; min-width: 0; align-items: center; gap: 11px; }
-    .back-button { display: grid; width: 30px; height: 30px; flex: 0 0 30px; place-items: center; border: 1px solid var(--line); border-radius: 6px; color: var(--muted); background: var(--surface-raised); cursor: pointer; }
-    .back-button:hover { color: var(--ink); border-color: var(--control-line); }
+    .back-button { display: grid; width: 30px; height: 30px; flex: 0 0 30px; place-items: center; border: 0; border-radius: 6px; color: var(--muted); background: transparent; cursor: pointer; }
+    .back-button:hover { color: var(--ink); background: var(--surface-hover); }
     .back-button svg { width: 15px; height: 15px; }
     .review-mark { display: grid; width: 34px; height: 34px; flex: 0 0 34px; place-items: center; border-radius: 9px; color: var(--workspace-steel-ink); background: var(--workspace-surface-selected); }
     .review-mark svg { width: 18px; height: 18px; }
-    .review-heading-copy { display: grid; min-width: 0; gap: 1px; }
+    .review-heading-copy { display: grid; min-width: 0; gap: 2px; }
     .review-eyebrow { color: var(--workspace-steel-ink); font-size: 8.5px; font-weight: 760; letter-spacing: .08em; text-transform: uppercase; }
     .review-title-line { display: flex; min-width: 0; align-items: center; flex-wrap: wrap; gap: 6px 9px; }
-    .review-title-line h1 { overflow: hidden; margin: 0; font-size: 15px; letter-spacing: -.01em; text-overflow: ellipsis; white-space: nowrap; }
+    .review-title-line h1 { overflow: hidden; margin: 0; font-size: 15px; font-weight: 690; letter-spacing: -.01em; text-overflow: ellipsis; white-space: nowrap; }
     .review-status { padding: 2px 7px; border-radius: 999px; color: var(--success); background: var(--success-soft); font-size: 8px; font-weight: 780; }
     .review-status.tone-info { color: var(--info); background: var(--info-soft); }
     .review-status.tone-attention { color: var(--attention); background: var(--attention-soft); }
     .review-status.tone-danger { color: var(--danger); background: var(--danger-soft); }
-    .review-meta { display: flex; min-width: 0; align-items: center; flex-wrap: wrap; gap: 4px 9px; color: var(--faint); font-size: 9px; }
-    .review-meta code { color: var(--evidence-muted); font: 9px/1.35 var(--mono); }
+    .review-meta { display: flex; min-width: 0; align-items: center; flex-wrap: wrap; gap: 4px 8px; color: var(--evidence-muted); font-size: 9px; }
+    .review-meta .plus, .review-meta .minus { font: 680 9px/1.35 var(--mono); }
     .review-tools { display: flex; flex: 0 0 auto; align-items: center; gap: 5px; }
-    .review-tools button { min-height: 30px; padding: 0 9px; border: 1px solid var(--line); border-radius: 6px; color: var(--muted); background: var(--surface-raised); cursor: pointer; font-size: 9px; }
-    .review-tools button:hover:not(:disabled) { color: var(--ink); border-color: var(--control-line); }
+    .review-tools button { min-height: 30px; padding: 0 8px; border: 1px solid transparent; border-radius: 6px; color: var(--muted); background: transparent; cursor: pointer; font-size: 9px; }
+    .review-tools button:hover:not(:disabled) { color: var(--ink); background: var(--surface-hover); }
     .review-tools button:disabled { cursor: default; opacity: .45; }
-    .review-scroll { min-height: 0; flex: 1 1 auto; overflow: auto; padding: 12px 16px 16px; }
-    .review-frame { display: flex; width: min(1180px, 100%); min-height: 100%; margin: 0 auto; flex-direction: column; gap: 9px; }
+    .review-scroll { min-height: 0; flex: 1 1 auto; overflow: hidden; padding: 0; }
+    .review-frame { display: flex; width: 100%; height: 100%; min-height: 0; margin: 0; flex-direction: column; gap: 0; }
     .saved-evidence-banner, .truth-banner { display: grid; min-height: 48px; grid-template-columns: 24px minmax(0, 1fr); align-items: center; gap: 9px; padding: 8px 11px; border-radius: 8px; }
     .saved-evidence-banner { color: var(--workspace-steel-ink); background: var(--workspace-surface-selected); }
     .truth-banner { color: var(--muted); background: var(--workspace-surface-subtle); }
@@ -610,22 +636,23 @@
     .summary-stat strong { margin-top: 1px; font: 750 12px/1.35 var(--mono); }
     .summary-stat strong.add { color: var(--diff-add); }
     .summary-stat strong.remove { color: var(--diff-remove); }
-    .review-content { display: grid; min-height: 440px; flex: 1 1 auto; grid-template-columns: 228px minmax(0, 1fr); overflow: hidden; border: 1px solid var(--evidence-line); border-radius: 9px; background: var(--evidence-surface); }
-    .file-sidebar { display: flex; min-width: 0; min-height: 0; flex-direction: column; border-right: 1px solid var(--evidence-line); background: var(--surface); }
+    .review-content { display: grid; min-height: 0; flex: 1 1 auto; grid-template-columns: 228px minmax(0, 1fr); overflow: hidden; border: 0; border-radius: 0; background: var(--evidence-surface); }
+    .file-sidebar { display: flex; min-width: 0; min-height: 0; flex-direction: column; border-right: 1px solid var(--evidence-line); background: var(--evidence-surface); }
     .file-sidebar-head { display: flex; min-height: 40px; align-items: center; justify-content: space-between; padding: 0 10px; border-bottom: 1px solid var(--evidence-line); }
     .file-sidebar-head strong { font-size: 10px; }
     .file-sidebar-head span { color: var(--faint); font: 8.5px/1.35 var(--mono); }
     .file-list { min-height: 0; flex: 1 1 auto; overflow: auto; padding: 5px; }
-    .file-row { display: grid; width: 100%; min-width: 0; min-height: 42px; grid-template-columns: 18px minmax(0, 1fr); align-items: center; gap: 7px; padding: 5px 6px; border: 0; border-radius: 6px; color: var(--evidence-ink); background: transparent; text-align: left; cursor: pointer; }
+    .file-row { display: grid; width: 100%; min-width: 0; min-height: 38px; grid-template-columns: 18px minmax(0, 1fr) auto; align-items: center; gap: 7px; padding: 4px 6px; border: 0; border-radius: 6px; color: var(--evidence-ink); background: transparent; text-align: left; cursor: pointer; }
     .file-row:hover { background: var(--surface-hover); }
-    .file-row.selected { background: var(--surface-selected); }
-    .file-kind { display: grid; width: 18px; height: 18px; place-items: center; border-radius: 4px; color: var(--info); background: var(--info-soft); font: 750 8px/1 var(--mono); }
+    .file-row.selected { background: var(--surface-selected); box-shadow: inset 2px 0 0 var(--ink); }
+    .file-kind { display: grid; width: 18px; height: 18px; place-items: center; border-radius: 4px; color: var(--evidence-muted); background: var(--surface-muted); font: 750 8px/1 var(--mono); }
     .file-kind.added { color: var(--success); background: var(--success-soft); }
     .file-kind.deleted { color: var(--danger); background: var(--danger-soft); }
     .file-copy { display: grid; min-width: 0; gap: 2px; }
     .file-copy strong, .file-copy small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .file-copy strong { font: 550 9px/1.35 var(--mono); }
     .file-copy small { color: var(--evidence-muted); font: 8px/1.35 var(--mono); }
+    .file-row-stats { display: inline-flex; flex: 0 0 auto; gap: 5px; font: 8px/1.35 var(--mono); }
     .file-sidebar-foot { display: grid; gap: 5px; padding: 9px 10px; border-top: 1px solid var(--evidence-line); color: var(--muted); font-size: 8.5px; }
     .file-sidebar-foot strong { color: var(--ink); font-size: 9px; }
     .participant-list { display: flex; flex-wrap: wrap; gap: 4px; }
@@ -638,7 +665,7 @@
     .diff-path code { overflow: hidden; color: var(--evidence-ink); font: 9px/1.35 var(--mono); text-overflow: ellipsis; white-space: nowrap; }
     .diff-stats { display: flex; flex: 0 0 auto; align-items: center; gap: 7px; font: 8.5px/1.35 var(--mono); }
     .diff-scroll { min-width: 0; min-height: 0; flex: 1 1 auto; overflow: auto; overscroll-behavior: contain; background: var(--evidence-canvas); }
-    .diff-code { width: max(100%, 720px); padding: 7px 0 14px; color: var(--evidence-ink); font: 9.5px/1.55 var(--mono); tab-size: 2; }
+    .diff-code { width: max(100%, 720px); padding: 6px 0 14px; color: var(--evidence-ink); font: 9.5px/1.55 var(--mono); tab-size: 2; }
     .diff-line { display: grid; min-height: 20px; grid-template-columns: 22px 38px 38px minmax(0, 1fr); align-items: stretch; }
     .diff-line > span { display: grid; place-items: center; color: var(--evidence-muted); user-select: none; }
     .diff-line > span:nth-child(2), .diff-line > span:nth-child(3) { border-left: 1px solid color-mix(in srgb, var(--evidence-line) 55%, transparent); font-size: 8px; }
@@ -805,19 +832,19 @@
                 </article>
                 <article class="workspace-evidence-event" id="evidenceCardA">
                   <div class="resource-card">
-                    <div class="resource-header">
+                    <button class="resource-header workspace-evidence-open" data-evidence-index="0" type="button" aria-label="打开 Files Changed Review：4 个文件">
                       <span class="resource-icon"><svg class="icon" viewBox="0 0 24 24"><path d="M4 7h6l2 2h8v10H4Z" /><path d="M8 13h8M12 11v4" /></svg></span>
                       <span class="resource-copy">
                         <strong>Files Changed</strong>
                         <span class="resource-subtitle">4 个文件 · <span class="plus">+42</span> <span class="minus">−13</span></span>
                       </span>
-                      <button class="resource-view-button workspace-evidence-open" data-evidence-index="0" type="button" aria-label="View Files Changed：4 个文件">View</button>
-                    </div>
+                      <span class="resource-view-affordance" aria-hidden="true">View<svg class="icon" viewBox="0 0 24 24"><path d="m9 6 6 6-6 6" /></svg></span>
+                    </button>
                     <div class="resource-files">
-                      <div class="resource-file-row"><span class="resource-path"><span class="resource-path-dir">apps/desktop/src/renderer/src/</span><span class="resource-path-base">CampWorkspace.tsx</span></span><span class="resource-file-stats"><span class="plus">+24</span><span class="minus">−7</span></span></div>
-                      <div class="resource-file-row"><span class="resource-path"><span class="resource-path-dir">apps/desktop/src/renderer/src/</span><span class="resource-path-base">styles.css</span></span><span class="resource-file-stats"><span class="plus">+12</span><span class="minus">−3</span></span></div>
-                      <div class="resource-file-row"><span class="resource-path"><span class="resource-path-dir">crates/rovai-core/src/</span><span class="resource-path-base">workspace_change.rs</span></span><span class="resource-file-stats"><span class="plus">+6</span></span></div>
-                      <div class="resource-file-row" id="evidenceAExtra" hidden><span class="resource-path"><span class="resource-path-dir">docs/contracts/</span><span class="resource-path-base">workspace-change-observation-v1.md</span></span><span class="resource-file-stats"><span class="minus">−3</span></span></div>
+                      <button class="resource-file-row workspace-evidence-file-open" data-evidence-index="0" data-file-index="0" type="button"><span class="resource-path"><span class="resource-path-dir">apps/desktop/src/renderer/src/</span><span class="resource-path-base">CampWorkspace.tsx</span></span><span class="resource-file-stats"><span class="plus">+24</span><span class="minus">−7</span></span></button>
+                      <button class="resource-file-row workspace-evidence-file-open" data-evidence-index="0" data-file-index="1" type="button"><span class="resource-path"><span class="resource-path-dir">apps/desktop/src/renderer/src/</span><span class="resource-path-base">styles.css</span></span><span class="resource-file-stats"><span class="plus">+12</span><span class="minus">−3</span></span></button>
+                      <button class="resource-file-row workspace-evidence-file-open" data-evidence-index="0" data-file-index="2" type="button"><span class="resource-path"><span class="resource-path-dir">crates/rovai-core/src/</span><span class="resource-path-base">workspace_change.rs</span></span><span class="resource-file-stats"><span class="plus">+6</span></span></button>
+                      <button class="resource-file-row workspace-evidence-file-open" data-evidence-index="0" data-file-index="3" id="evidenceAExtra" hidden type="button"><span class="resource-path"><span class="resource-path-dir">docs/contracts/</span><span class="resource-path-base">workspace-change-observation-v1.md</span></span><span class="resource-file-stats"><span class="minus">−3</span></span></button>
                       <button class="resource-more" data-resource-more="evidenceAExtra" type="button" aria-expanded="false"><span>再显示 1 个文件</span><svg class="icon" viewBox="0 0 24 24"><path d="m7 10 5 5 5-5" /></svg></button>
                     </div>
                   </div>
@@ -831,17 +858,17 @@
                 </article>
                 <article class="workspace-evidence-event" id="evidenceCardB">
                   <div class="resource-card">
-                    <div class="resource-header">
+                    <button class="resource-header workspace-evidence-open" data-evidence-index="1" type="button" aria-label="打开 Files Changed Review：2 个文件">
                       <span class="resource-icon"><svg class="icon" viewBox="0 0 24 24"><path d="M4 7h6l2 2h8v10H4Z" /><path d="M8 13h8M12 11v4" /></svg></span>
                       <span class="resource-copy">
                         <strong>Files Changed</strong>
                         <span class="resource-subtitle">2 个文件 · <span class="plus">+8</span> <span class="minus">−3</span></span>
                       </span>
-                      <button class="resource-view-button workspace-evidence-open" data-evidence-index="1" type="button" aria-label="View Files Changed：2 个文件">View</button>
-                    </div>
+                      <span class="resource-view-affordance" aria-hidden="true">View<svg class="icon" viewBox="0 0 24 24"><path d="m9 6 6 6-6 6" /></svg></span>
+                    </button>
                     <div class="resource-files">
-                      <div class="resource-file-row"><span class="resource-path"><span class="resource-path-dir">apps/desktop/src/renderer/src/components/</span><span class="resource-path-base">WorkspaceEvidenceCard.tsx</span></span><span class="resource-file-stats"><span class="plus">+6</span><span class="minus">−2</span></span></div>
-                      <div class="resource-file-row"><span class="resource-path"><span class="resource-path-dir">apps/desktop/src/renderer/src/</span><span class="resource-path-base">styles.css</span></span><span class="resource-file-stats"><span class="plus">+2</span><span class="minus">−1</span></span></div>
+                      <button class="resource-file-row workspace-evidence-file-open" data-evidence-index="1" data-file-index="0" type="button"><span class="resource-path"><span class="resource-path-dir">apps/desktop/src/renderer/src/components/</span><span class="resource-path-base">WorkspaceEvidenceCard.tsx</span></span><span class="resource-file-stats"><span class="plus">+6</span><span class="minus">−2</span></span></button>
+                      <button class="resource-file-row workspace-evidence-file-open" data-evidence-index="1" data-file-index="1" type="button"><span class="resource-path"><span class="resource-path-dir">apps/desktop/src/renderer/src/</span><span class="resource-path-base">styles.css</span></span><span class="resource-file-stats"><span class="plus">+2</span><span class="minus">−1</span></span></button>
                     </div>
                   </div>
                 </article>
@@ -870,8 +897,18 @@
                         <div class="run-stage-head"><time>20:11–现在</time><span>执行中</span><span class="current-badge">当前执行</span></div>
                         <div class="run-meta"><span>执行 <code>7a31…</code></span><span>直接执行</span><span>模型 <code>gpt-5-codex</code></span></div>
                         <div class="tool-list">
-                          <div class="file-change-activity-host" data-file-change-activity></div>
-                          <div class="tool-row"><svg class="icon" viewBox="0 0 24 24"><path d="m5 7 4 4-4 4M11 16h8" /></svg><strong>pnpm test --filter renderer</strong><span class="state-dot info"></span><span class="chevron">⌄</span></div>
+                          <details class="tool-activity-group" open>
+                            <summary class="tool-group-summary" aria-label="已执行 2 项操作">
+                              <span class="tool-group-icon" aria-hidden="true"><svg class="icon" viewBox="0 0 16 16"><circle cx="2.25" cy="4" r=".65" /><circle cx="2.25" cy="8" r=".65" /><circle cx="2.25" cy="12" r=".65" /><path d="M5 4h8M5 8h8M5 12h8" /></svg></span>
+                              <span class="tool-group-copy"><strong id="toolGroupPrimary">已执行 2 项操作</strong></span>
+                              <span class="tool-group-state" role="img" aria-label="含成功操作"></span>
+                              <span class="tool-group-disclosure" aria-hidden="true"><svg class="icon" viewBox="0 0 24 24"><path d="m7 10 5 5 5-5" /></svg></span>
+                            </summary>
+                            <div class="tool-group-items">
+                              <div class="file-change-activity-host" data-file-change-activity></div>
+                              <div class="tool-row"><span class="tool-row-icon" aria-hidden="true"><svg class="icon" viewBox="0 0 24 24"><path d="m5 7 4 4-4 4M11 16h8" /></svg></span><strong>pnpm test --filter renderer</strong><span class="tool-row-state" role="img" aria-label="执行中"><span class="state-dot info"></span></span><span class="tool-row-disclosure" aria-hidden="true"><svg class="icon" viewBox="0 0 24 24"><path d="m7 10 5 5 5-5" /></svg></span></div>
+                            </div>
+                          </details>
                         </div>
                         <div class="run-processing"><span class="spinner" aria-hidden="true"></span><span>正在等待测试结果</span></div>
                       </article>
@@ -945,14 +982,10 @@
 
         <section class="review-workspace" id="reviewView" hidden aria-label="差异 Review">
           <header class="review-header">
-            <div class="review-heading">
-              <button class="back-button" id="backButton" type="button" aria-label="返回会话"><svg class="icon" viewBox="0 0 24 24"><path d="m15 18-6-6 6-6" /></svg></button>
-              <span class="review-mark" id="reviewMark"><svg class="icon" viewBox="0 0 24 24"><path d="M4 7h6l2 2h8v10H4Z" /><path d="M8 13h8M12 11v4" /></svg></span>
-              <div class="review-heading-copy">
-                <span class="review-eyebrow" id="reviewEyebrow">WorkspaceDiffCompleted Evidence</span>
-                <div class="review-title-line"><h1 id="reviewTitle">运行期间工作区变化</h1><span class="review-status" id="reviewStatus">已保存</span></div>
-                <div class="review-meta" id="reviewMeta"><span>rovai-ai</span><span>2 个运行</span><code>evidence b903…</code></div>
-              </div>
+            <button class="back-button" id="backButton" type="button" aria-label="返回会话"><svg class="icon" viewBox="0 0 24 24"><path d="m15 18-6-6 6-6" /></svg></button>
+            <div class="review-heading-copy">
+              <div class="review-title-line"><h1 id="reviewTitle">Files Changed</h1></div>
+              <div class="review-meta" id="reviewMeta"><span id="reviewFileCount">2 个文件</span><span class="plus" id="reviewAdditions">+8</span><span class="minus" id="reviewDeletions">−3</span></div>
             </div>
             <div class="review-tools">
               <button type="button" id="previousFileButton">上一文件</button>
@@ -962,30 +995,10 @@
 
           <div class="review-scroll">
             <div class="review-frame">
-              <div class="saved-evidence-banner" id="savedEvidenceBanner">
-                <span><svg class="icon" viewBox="0 0 24 24"><path d="M5 9h14v11H5Z" /><path d="M8 9V6a4 4 0 0 1 8 0v3" /></svg></span>
-                <p id="savedEvidenceCopy"><strong>这是完成时保存的只读差异。</strong> 打开旧卡片不会重新执行 Git diff，也不会读取当前工作区。</p>
-              </div>
-              <div class="truth-banner" id="truthBanner">
-                <span><svg class="icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" /><path d="M12 11v5M12 8h.01" /></svg></span>
-                <p id="truthCopy"><strong>这是该 Window 完成时保存的工作区最终净变化。</strong> 不归因于单个队员、Run 或 Tool；结果可能包含用户编辑器、外部程序或其他并行运行的修改。</p>
-              </div>
-              <div class="review-summary" id="reviewSummary">
-                <div class="summary-primary"><small id="summaryPrimaryLabel">观察范围</small><strong id="summaryPrimaryValue">rovai-ai</strong></div>
-                <div class="summary-stat"><small>文件</small><strong id="summaryFileCount">4</strong></div>
-                <div class="summary-stat"><small>新增行</small><strong class="add" id="summaryAdditions">+8</strong></div>
-                <div class="summary-stat"><small>删除行</small><strong class="remove" id="summaryDeletions">−3</strong></div>
-              </div>
-
               <div class="review-content" id="reviewContent">
                 <aside class="file-sidebar" aria-label="变更文件">
                   <div class="file-sidebar-head"><strong>变更文件</strong><span id="fileCountLabel">4 files</span></div>
                   <div class="file-list" id="fileList"></div>
-                  <div class="file-sidebar-foot" id="sidebarFoot">
-                    <strong>参与执行</strong>
-                    <div class="participant-list"><code>run 7a31…</code><code>run 91fd…</code></div>
-                    <em>参与，不代表修改作者</em>
-                  </div>
                 </aside>
                 <section class="diff-pane" aria-label="当前文件差异">
                   <header class="diff-head">
@@ -1179,7 +1192,6 @@
     const contextView = document.getElementById('contextView');
     const reviewView = document.getElementById('reviewView');
     const reviewContent = document.getElementById('reviewContent');
-    const reviewSummary = document.getElementById('reviewSummary');
     const ordinaryInspector = document.getElementById('ordinaryInspector');
     const executionInspector = document.getElementById('executionInspector');
     const bottomExecutionDock = document.getElementById('bottomExecutionDock');
@@ -1212,7 +1224,12 @@
           && event?.toolName === 'Edit'
           && event?.resultStatus === 'completed'
           && event?.semantics === 'exact_mutation';
-        if ((!isReliableCodexTerminal && !isReliableClaudeEdit) || !event.changes?.length) return;
+        const hasReliableFileChange = (isReliableCodexTerminal || isReliableClaudeEdit) && Boolean(event.changes?.length);
+        const groupPrimary = document.getElementById('toolGroupPrimary');
+        const groupSummary = groupPrimary?.closest('summary');
+        if (groupPrimary) groupPrimary.textContent = hasReliableFileChange ? '已执行 2 项操作' : '已执行 1 项操作';
+        if (groupSummary) groupSummary.setAttribute('aria-label', hasReliableFileChange ? '已执行 2 项操作' : '已执行 1 项操作');
+        if (!hasReliableFileChange) return;
 
         const rows = event.changes.map((file, index) => {
           const pathParts = file.path.split('/');
@@ -1277,7 +1294,7 @@
       stateSelect.value = windowState;
     }
 
-    function setView(view) {
+    function setView(view, initialFile = 0) {
       currentView = view;
       sceneButtons.forEach((button) => button.setAttribute('aria-pressed', String(button.dataset.view === view)));
       contextView.hidden = view !== 'context';
@@ -1285,7 +1302,7 @@
       placementField.hidden = view !== 'context';
       fileEventField.hidden = view !== 'context';
       updateStateOptions(view);
-      selectedFile = 0;
+      selectedFile = initialFile;
       render();
       if (view !== 'context') document.getElementById('backButton').focus();
     }
@@ -1309,7 +1326,8 @@
         button.type = 'button';
         button.className = `file-row${index === selectedFile ? ' selected' : ''}`;
         button.setAttribute('aria-current', index === selectedFile ? 'true' : 'false');
-        button.innerHTML = `<span class="file-kind ${kindClass}">${file.kind}</span><span class="file-copy"><strong>${file.path.split('/').pop()}</strong><small><span class="plus">+${file.additions}</span> · <span class="minus">−${file.deletions}</span> · ${file.path}</small></span>`;
+        const directory = file.path.includes('/') ? `${file.path.slice(0, file.path.lastIndexOf('/'))}/` : '';
+        button.innerHTML = `<span class="file-kind ${kindClass}">${file.kind}</span><span class="file-copy"><strong>${file.path.split('/').pop()}</strong><small>${directory}</small></span><span class="file-row-stats"><span class="plus">+${file.additions}</span><span class="minus">−${file.deletions}</span></span>`;
         button.addEventListener('click', () => { selectedFile = index; renderReview(); });
         fileList.appendChild(button);
       });
@@ -1349,44 +1367,14 @@
       if (currentView === 'context') return;
       const evidence = workspaceEvidences[selectedWorkspaceEvidence];
       const files = evidence.files;
-      const reviewMark = document.getElementById('reviewMark');
-      const eyebrow = document.getElementById('reviewEyebrow');
-      const status = document.getElementById('reviewStatus');
-      const savedEvidenceCopy = document.getElementById('savedEvidenceCopy');
-      const truthBanner = document.getElementById('truthBanner');
-      const truthCopy = document.getElementById('truthCopy');
-      const sidebarFoot = document.getElementById('sidebarFoot');
-      const label = document.getElementById('summaryPrimaryLabel');
-      const value = document.getElementById('summaryPrimaryValue');
-
-      reviewMark.className = 'review-mark';
-      reviewMark.innerHTML = icons.window;
-      eyebrow.className = 'review-eyebrow';
-      eyebrow.textContent = 'WorkspaceDiffCompleted Evidence';
-      document.getElementById('reviewTitle').textContent = '运行期间工作区变化';
-      document.getElementById('reviewMeta').innerHTML = `<span>rovai-ai</span><span>${evidence.participants.length} 个运行</span><span>捕获于 ${evidence.capturedAt}</span><code>evidence ${evidence.id}</code>`;
-
-      status.className = 'review-status';
-      status.textContent = '已保存';
-
-      savedEvidenceCopy.innerHTML = '<strong>这是完成时保存的只读差异。</strong> 打开旧卡片不会重新执行 Git diff，也不会读取当前工作区。';
-      truthBanner.className = 'truth-banner';
-      truthBanner.querySelector('span').innerHTML = '<svg class="icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/></svg>';
-      truthCopy.innerHTML = '<strong>这是该 Window 完成时保存的工作区最终净变化。</strong> 不归因于单个队员、Run 或 Tool；结果可能包含用户编辑器、外部程序或其他并行运行的修改。';
-
-      reviewContent.hidden = false;
-      reviewSummary.hidden = false;
+      if (selectedFile >= files.length) selectedFile = 0;
+      document.getElementById('reviewTitle').textContent = 'Files Changed';
+      document.getElementById('reviewFileCount').textContent = `${files.length} 个文件`;
+      document.getElementById('reviewAdditions').textContent = `+${evidence.additions}`;
+      document.getElementById('reviewDeletions').textContent = `−${evidence.deletions}`;
       document.getElementById('previousFileButton').disabled = selectedFile === 0;
       document.getElementById('nextFileButton').disabled = selectedFile === files.length - 1;
-
-      label.textContent = '观察范围';
-      value.textContent = 'rovai-ai';
-      document.getElementById('summaryFileCount').textContent = String(files.length);
-      document.getElementById('summaryAdditions').textContent = `+${evidence.additions}`;
-      document.getElementById('summaryDeletions').textContent = `−${evidence.deletions}`;
       document.getElementById('fileCountLabel').textContent = `${files.length} files`;
-      sidebarFoot.innerHTML = `<strong>参与运行</strong><div class="participant-list">${evidence.participants.map((participant) => `<code>${participant}</code>`).join('')}</div><em>参与，不代表修改作者</em>`;
-      if (selectedFile >= files.length) selectedFile = 0;
       renderFileList(files);
       renderDiff(files[selectedFile]);
     }
@@ -1422,7 +1410,11 @@
     });
     document.querySelectorAll('.workspace-evidence-open').forEach((button) => button.addEventListener('click', () => {
       selectedWorkspaceEvidence = Number(button.dataset.evidenceIndex);
-      setView('window');
+      setView('window', 0);
+    }));
+    document.querySelectorAll('.workspace-evidence-file-open').forEach((button) => button.addEventListener('click', () => {
+      selectedWorkspaceEvidence = Number(button.dataset.evidenceIndex);
+      setView('window', Number(button.dataset.fileIndex));
     }));
     document.querySelectorAll('[data-resource-more]').forEach((button) => button.addEventListener('click', () => {
       const target = document.getElementById(button.dataset.resourceMore);

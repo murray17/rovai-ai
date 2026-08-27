@@ -35,11 +35,6 @@ export function groupConsecutiveToolItems(
 
   for (const item of items) {
     if (item.kind === 'tool') {
-      if (item.step.fileChanges?.length) {
-        currentGroup = null
-        grouped.push(item)
-        continue
-      }
       if (currentGroup === null) {
         currentGroup = {
           key: `tool-group:${item.key}`,

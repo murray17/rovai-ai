@@ -384,11 +384,15 @@ v1 presentation 冻结为：
   `修改 <basename>  +A −D` presentation row，独立展开当前文件 inline diff，不跳转文件、不打开独立 Review；
 - `exact_mutation` 展开只显示 `oldText/newText` 片段的 `− / +` 行，不展示文件行号、hunk header、上下文定位或任何
   从当前 workspace 推测出的内容；同一文件连续 Edit 仍按各自 Tool identity 显示为多行，不合并净变化；
-- 多个文件 row 仍共享一条 Evidence 与一条 Canonical Activity，不获得独立 phase/outcome/排序身份；
-- Workspace 层只有 `complete` 在会话时间线追加 `Files Changed` 卡片。卡片右侧唯一动作为中性黑字、弱边框
-  `View`；文件名顶格、行间无分隔，不显示时间、已保存、参与运行或底部归因 footer；
-- `View` 读取历史 Evidence/blob 并在现有 Camp surface 内展示文件列表和完整 diff。执行台不增加共享工作区观察；
-  会话 rail、执行台 placement、Tool 列表宽度与其他现有结构不因本功能改变；
+- 多个文件 row 仍共享一条 Evidence 与一条 Canonical Activity，不获得独立 phase/outcome/排序身份；文件 row
+  放在现有“已执行 N 项操作”集合内，集合计数按 Canonical Activity 而非 presentation row 计算；Tool 列表顶格，
+  inline diff 使用现有整行宽度；
+- Workspace 层只有 `complete` 在会话时间线追加 `Files Changed` 卡片。卡片上半区整体可点击并以无边框、中性
+  黑字 `View` 作为低强调 affordance；文件名顶格、行间无分隔，每个文件行独立可点击并选择 Review 中的该文件；
+  卡片不显示时间、已保存、参与运行或底部归因 footer；
+- 卡片上半区与文件行读取同一历史 Evidence/blob，在现有 Camp surface 内展示文件列表和完整 diff，差别仅是
+  初始文件 selection。执行台不增加共享工作区观察；会话 rail、执行台 placement、Tool 列表宽度与其他现有结构
+  不因本功能改变；
 - `no_changes`、`unavailable`、pending 和非 Git root 不生成卡片。Window 结果不归因给单个 Agent/Run，可能包含
   用户编辑器、外部程序或其他并行运行修改；`externalWriterObserved` 不泄露对方 identity。
 

@@ -42,10 +42,13 @@ WorkspaceDiffCompleted Evidence + managed diff blob
 ### 1. 完成 Window 进入会话时间线
 
 只有 `complete` 生成一张 `Files Changed` Evidence 卡片。卡片只保留 32px 中性文件图标、主标题、文件数与
-增删统计、无缩进且无行间分隔线的静态文件行，以及右侧唯一的中性“View”按钮。多文件默认最多显示三行，再用“更多文件”原位
-展开。卡片不显示捕获时间、“已保存”、参与运行数量、归因解释或底部 metadata footer。
-`View` 与英文主标题形成同一套词汇，按钮文字使用主题 `--ink`，不使用品牌蓝色；边框弱于普通强边界，
-夜间主题对应中性浅色。
+增删统计，以及无缩进、无行间分隔线的文件行。多文件默认最多显示三行，再用“更多文件”原位展开。卡片
+不显示捕获时间、“已保存”、参与运行数量、归因解释或底部 metadata footer。
+
+卡片使用互不嵌套的两个交互层：上半区整体是打开 Review 默认文件的原生 Button；每条文件行各自是打开
+同一 Review 并选中对应文件的原生 Button。“View”只是上半区内的无边框方向提示，不是卡片里第二个强按钮；
+它使用主题 `--ink`、轻量 hover surface 与箭头，不使用品牌蓝色或常驻描边。这样既让整张卡片都可点击，
+又避免 Button 嵌套、重复 Tab stop 和冒泡冲突。
 
 Evidence 卡片与普通消息正文左轴对齐，不为它增加 timeline rail、连接线或事件圆点；会话页继续使用当前
 生产结构，而不是为 Workspace Window 发明新的时间线语法。
@@ -73,11 +76,15 @@ Tool 名称；Adapter 不解析其输入、不读取当前文件，也不把 Too
 pnpm test …                         ← 另一个真实 Tool Activity
 ```
 
-这里没有 `apply_patch` 行，也没有“编辑了 N 个文件”的聚合 disclosure。每个单文件行独立控制自己的 inline
-diff，行与行之间没有父子关系；点击只展开当前文件，不跳转文件、不进入 Workspace Review，也不打开专用
-Operation Diff View。presentation row 复用现有 Command View 的文件图标与“修改 xxx”文案，并沿用 Activity
-行的密度与 disclosure 语法；展开内容才
-进入 evidence surface。
+这里没有 `apply_patch` 行，也没有“编辑了 N 个文件”的专用聚合 disclosure。文件变更 Activity 与相邻 Tool
+Activity 一样进入现有“已执行 N 项操作”集合；该集合仍按权威 Activity/Tool item 计数，不按 presentation row
+数量改写数据语义。展开集合后，每个单文件行独立控制自己的 inline diff，行与行之间没有父子关系；点击
+只展开当前文件，不跳转文件、不进入 Workspace Review，也不打开专用 Operation Diff View。
+
+集合内 Tool 行、文件行和展开 diff 统一顶格，移除旧 `.tool-group-items` 的左侧连接线、左 margin 与 inline diff
+的二次缩进。层级由外层 disclosure、行 hover/focus 和垂直间距表达，不以牺牲代码宽度换取缩进。presentation
+row 继续复用现有 Command View 的文件图标、“修改 xxx”文案、密度与 disclosure 语法；展开内容才进入
+evidence surface。
 
 多行不代表多条权威 Activity。每条行都携带同一个 `evidenceId / canonicalActivityId`，并通过 change index
 定位同一 `changes[]` 中的元素；选择、历史和审计仍以 FileChange Evidence / Canonical Activity 为单位。
@@ -131,7 +138,10 @@ Activity 的 entries 扁平显示为同级单文件 rows。Claude exact mutation
 打开时不会重新读取当前工作区或执行 Git diff”；随后再说明共享 Window 的非归因与外部写入可能性。
 
 Review 使用一个开放 evidence surface：左侧文件目录，右侧当前文件差异；不用浮层、Dialog、嵌套卡墙、
-checkpoint 浏览器或新的全局一级页面。
+checkpoint 浏览器或新的全局一级页面。Porcelain Day 的代码上下文保持白色，新增与删除分别使用语义化的
+浅绿/浅红行底和对比合格的深绿/深红文字；hunk 与选中状态保持中性灰，不用 Steel/Info 蓝染色 diff。
+Steel Night 映射相同语义 token，但不强制反色或另建组件树。卡片统计与 Command inline diff 复用同一组
+`--diff-add* / --diff-remove*` token，颜色以外仍保留 `+ / −`、行号和文本结构。
 
 ## 状态矩阵
 
@@ -151,8 +161,8 @@ checkpoint 浏览器或新的全局一级页面。
 - `1040–1179px` 的 ordinary Inspector 收敛到既有 260px；底部详情与 Tool list 保持整宽并在自己的区域滚动；
 - Review 文件栏缩至 206px，diff 自身横向滚动，整 App 不滚动；
 - 状态使用文字、图标/形状与固定位置，不只依赖颜色；
-- 历史卡片、终态单文件 presentation row、文件 disclosure、场景切换、返回、状态和主题均可键盘操作，可见焦点使用
-  `--focus`；
+- 历史卡片上半区、每条文件行、终态单文件 presentation row、文件 disclosure、场景切换、返回、状态和主题均可
+  键盘操作，可见焦点使用 `--focus`，Tab 顺序与视觉顺序一致；
 - Diff 同时提供 `+ / −`、旧/新行号和 `aria-label`，不是只有红绿背景；
 - `prefers-reduced-motion` 下 spinner 改为静态状态环。
 
@@ -168,6 +178,8 @@ checkpoint 浏览器或新的全局一级页面。
   非错误 result，Write/NotebookEdit/ApplyPatch 不作为 Diff 数据源；
 - 不为缺少可靠 terminal Evidence 的 Runtime 显示入口、占位、`unavailable` 或猜测结果；
 - 不添加“编辑了 N 个文件”聚合层，不把 presentation row 误建成新的 Canonical Activity；
+- 不把文件 Activity 放在“已执行 N 项操作”集合之外，也不让组内左侧缩进压缩 inline diff；
+- 不在一个整卡 Button 内嵌套文件 Button；卡片上半区和文件行必须是同级、边界清晰的交互区域；
 - 不创建 Operation Diff Review，不让单文件行跳转文件或 Workspace Review；
 - 不同时挂两套执行台；底部与右侧只改变同一详情的宿主，不复制 Evidence 或 selection；
 - 不展示 raw repository path、Git ref/OID、Managed Blob identity、checkpoint chain 或 Undo；

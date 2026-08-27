@@ -38,28 +38,33 @@ http://127.0.0.1:4173/docs/prototypes/workspace-change-window/
   “共享工作区观察”；
 - 切换“Codex 终态 / Claude Edit / 无可靠终态”：Codex 把同一 Activity 的两个 change 直接显示为两条“修改 xxx”文件行，
   Claude Edit 显示一条无行号的 exact mutation；无可靠终态会移除全部文件 presentation rows；
-- 同时查看旧卡片 A 与新卡片 B；两张卡片都只显示 `Files Changed`、统计、顶格静态文件行和中性“View”按钮，
-  没有时间、“已保存”或底部运行说明；
+- 同时查看旧卡片 A 与新卡片 B；两张卡片都只显示 `Files Changed`、统计、顶格文件行和无边框的中性
+  “View”方向提示，没有时间、“已保存”或底部运行说明；点击卡片上半区打开默认文件，点击文件行直接在
+  同一 Review 中选中该文件；
 - 在第一张 Workspace Evidence 卡片内展开第四个文件；
 - 切换当前 Window 的 `complete / no_changes / unavailable / pending`，观察只有 `complete` 才新增会话卡片，
   其余状态不在执行台新增共享观察 UI；
-- 分别展开两条“修改 xxx”文件行查看各自的 inline patch；没有 `apply_patch` 父行、文件数汇总、文件跳转或
-  Operation Diff Review；相邻的 `pnpm test` 仍是独立 Tool Activity；
+- 展开现有“已执行 N 项操作”集合，再分别展开两条“修改 xxx”文件行查看各自的 inline patch；没有
+  `apply_patch` 父行、文件数汇总、文件跳转或 Operation Diff Review；文件 Activity 与相邻 `pnpm test`
+  都在同一通用集合内，组内行与 diff 顶格使用完整宽度；
 - 切换 Porcelain Day / Steel Night；
-- 选择文件并查看带 `+ / −`、双行号和结构标签的差异；
+- 选择文件并查看以白色上下文、浅绿新增、浅红删除为主的差异；仍带 `+ / −`、双行号和结构标签；
 - 使用键盘完成场景、历史卡片、文件、状态和主题切换。
 
 ## 评审重点
 
-1. `Files Changed` 卡片是否足够简洁，且中性“View”是否成为唯一明确的 Review 入口；
+1. `Files Changed` 卡片是否足够简洁；无边框“View”是否只作为方向提示，同时让上半区和每条文件行都成为
+   清晰、无嵌套冲突的 Review 入口；
 2. B 出现后 A 是否仍明显可打开，且 UI 没有重新读取当前工作区或依赖 Git ref 的暗示；
 3. `no_changes / unavailable / pending` 是否真正不生成卡片，也不向执行台添加共享观察组件；
 4. Workspace Evidence 是否始终表达共享 Window 的净变化，而不是“某位 Agent 的修改”；
 5. `apply_patch` 与“编辑了 N 个文件”是否都已消失，`changes[]` 是否直接成为同级单文件 rows；
-6. 每条“修改 xxx”文件行是否能独立展开 inline patch，且视觉上没有暗示它们是多条权威 Activity；没有可靠
-   terminal Evidence 时是否真正不渲染入口、占位或推测结果；
+6. 每条“修改 xxx”文件行是否进入现有“已执行 N 项操作”集合并能独立展开 inline patch；组内顶格布局是否
+   明显改善 diff 可读宽度，同时不暗示 presentation rows 是多条权威 Activity；没有可靠 terminal Evidence
+   时是否真正不渲染入口、占位或推测结果；
 7. 默认底部执行台与右侧承载是否都保持同一 Run / Tool 语义，并让 Tool list 使用完整横向空间；
-8. 全宽 Review 是否只由 Workspace Evidence 卡片进入，并在临时收起 Inspector 后提供足够的 diff 空间。
+8. 全宽 Review 是否只由 Workspace Evidence 卡片进入，并在临时收起 Inspector 后提供足够的 diff 空间；
+   红/绿/白 Evidence 配色是否接近 Codex 的清爽阅读感，但仍属于 Rovai 的 token 与组件世界。
 
 ## 文件
 

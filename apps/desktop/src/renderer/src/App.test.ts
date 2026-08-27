@@ -17,7 +17,9 @@ import type {
   HealthStatus,
   MessageDeliveryView,
   NotificationActionView,
-  RovaiApi
+  RovaiApi,
+  WorkspaceChangeWindowDiffView,
+  WorkspaceChangeWindowView
 } from '@contracts'
 import {
   AppHeader,
@@ -73,6 +75,8 @@ import {
   QuickChatWorkspace,
   RunExecutionDisclosure,
   TaskPanel,
+  WorkspaceChangeReview,
+  WorkspaceChangeTimelineCard,
   agentExecutionProcesses,
   agentRunTerminalNote,
   agentRunCountsAsExecuting,
@@ -1073,6 +1077,93 @@ describe('task event projections', () => {
       { id: 'workspace-change:window-a', kind: 'workspace_change', window: { windowId: 'window-a' } },
       { id: 'workspace-change:window-b', kind: 'workspace_change', window: { windowId: 'window-b' } }
     ])
+  })
+
+  it('makes the Files Changed card header and each file row direct Review entry points', () => {
+    const workspaceWindow = {
+      schemaVersion: 1,
+      windowId: 'window-card',
+      captureStatus: 'complete',
+      executionRootLabel: 'rovai-ai',
+      files: [{
+        path: 'src/app.ts', changeKind: 'update', additions: 4, deletions: 1
+      }, {
+        path: 'src/styles.css', changeKind: 'update', additions: 2, deletions: 2
+      }],
+      fileCount: 2,
+      additions: 6,
+      deletions: 3,
+      capturedAt: '2026-08-27T00:00:00Z',
+      hasDiffContent: true
+    } satisfies WorkspaceChangeWindowView
+
+    const markup = renderToStaticMarkup(createElement(WorkspaceChangeTimelineCard, {
+      window: workspaceWindow,
+      onView: vi.fn()
+    }))
+
+    expect(markup).toContain('<button type="button" class="workspace-change-card-header"')
+    expect(markup.match(/class="workspace-change-card-file"/g)).toHaveLength(2)
+    expect(markup).toContain('查看 src/app.ts 的文件差异')
+    expect(markup).toContain('查看 src/styles.css 的文件差异')
+    expect(markup).toContain('workspace-change-view-affordance')
+    expect(markup).not.toContain('workspace-change-view-button')
+  })
+
+  it('opens Workspace Change Review on the file selected from the card', () => {
+    const workspaceWindow = {
+      schemaVersion: 1,
+      windowId: 'window-review',
+      captureStatus: 'complete',
+      executionRootLabel: 'rovai-ai',
+      files: [{
+        path: 'src/app.ts', changeKind: 'update', additions: 1, deletions: 1
+      }, {
+        path: 'src/styles.css', changeKind: 'update', additions: 1, deletions: 1
+      }],
+      fileCount: 2,
+      additions: 2,
+      deletions: 2,
+      capturedAt: '2026-08-27T00:00:00Z',
+      hasDiffContent: true
+    } satisfies WorkspaceChangeWindowView
+    const result = {
+      schemaVersion: 1,
+      window: workspaceWindow,
+      diff: [
+        'diff --git a/src/app.ts b/src/app.ts',
+        '--- a/src/app.ts',
+        '+++ b/src/app.ts',
+        '@@ -1 +1 @@',
+        '-old app',
+        '+new app',
+        'diff --git a/src/styles.css b/src/styles.css',
+        '--- a/src/styles.css',
+        '+++ b/src/styles.css',
+        '@@ -1 +1 @@',
+        '-red',
+        '+green',
+        ''
+      ].join('\n')
+    } satisfies WorkspaceChangeWindowDiffView
+
+    const markup = renderToStaticMarkup(createElement(WorkspaceChangeReview, {
+      state: {
+        window: workspaceWindow,
+        initialFileIndex: 1,
+        status: 'ready',
+        result,
+        error: null
+      },
+      onBack: vi.fn(),
+      onRetry: vi.fn()
+    }))
+
+    expect(markup).toMatch(/class="selected" aria-current="true" aria-label="M src\/styles\.css，新增 1 行，删除 1 行"/)
+    expect(markup).toContain('<code>src/styles.css</code>')
+    expect(markup).toContain('>red</code>')
+    expect(markup).toContain('>green</code>')
+    expect(markup).not.toContain('>old app</code>')
   })
 
   it('keeps ordinary directories quiet and presents Git detection metadata and warnings', () => {
@@ -4778,7 +4869,7 @@ describe('task event projections', () => {
     ])
   })
 
-  it('flattens one reliable terminal FileChange Activity into sibling modified-file rows', () => {
+  it('renders one reliable terminal FileChange Activity as sibling rows inside the Tool group', () => {
     const progress = buildLiveExecutionProgress([{
       id: 'raw-apply-patch', agentRunId: 'run-files', eventType: 'runtime.action',
       payload: { toolCallId: 'apply-1', status: 'completed', toolName: 'apply_patch' },
@@ -4843,6 +4934,8 @@ describe('task event projections', () => {
       run, progress, campId: 'camp-1', focused: true
     }))
     expect(markup.match(/class="process-action modified-file-row"/g)).toHaveLength(2)
+    expect(markup.match(/class="tool-activity-group status-completed"/g)).toHaveLength(1)
+    expect(markup).toContain('aria-label="已执行 1 项操作；状态：全部成功"')
     expect(markup).toContain('修改 app.ts')
     expect(markup).toContain('修改 styles.css')
     expect(markup).toContain('app.ts 的文件差异')
@@ -4922,6 +5015,8 @@ describe('task event projections', () => {
     }))
     expect(markup.match(/class="process-action modified-file-row"/g)).toHaveLength(2)
     expect(markup.match(/modified-file-diff is-exact-mutation/g)).toHaveLength(2)
+    expect(markup.match(/class="tool-activity-group status-completed"/g)).toHaveLength(1)
+    expect(markup).toContain('aria-label="已执行 2 项操作；状态：全部成功"')
     expect(markup).toContain('CampWorkspace.tsx 的修改片段')
     expect(markup).toContain('const enabled = false')
     expect(markup).toContain('const enabled = ready')

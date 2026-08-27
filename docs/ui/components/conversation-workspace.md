@@ -299,7 +299,9 @@ Evidence 才进入文件变更呈现。一条 Canonical Activity 的多个 chang
 `修改 <basename> +A −D` 行；每行复用现有 File Tool 图标并独立展开 inline unified diff。Renderer 不显示
 `apply_patch` 父行或“编辑了 N 个文件”聚合层，不从 started/incremental patch、Tool input、路径或命令文本推测修改，
 也不为逐文件行创建新的 Activity identity。没有可靠终态内容时保留普通 Tool Activity，或在只剩
-`apply_patch` 实现细节时不渲染该实现行。
+`apply_patch` 实现细节时不渲染该实现行。文件行留在现有“已执行 N 项操作”集合内；集合计数仍按权威
+Canonical Activity 计算，不按逐文件 presentation row 扩增。展开后的 Tool 列表顶格使用现有整行宽度，
+文件 inline diff 不再增加一层结构缩进。
 
 Claude Code `Edit` 的 `exact_mutation` 沿用同一文件行，但展开内容只显示 `− oldText / + newText` 片段，不显示
 旧/新文件行号、`@@` hunk 或推测上下文；行的 `+A −D` 只统计该 mutation 的 new/old 片段行数。同一文件连续
@@ -307,12 +309,15 @@ Edit 按各自 Tool 行和时序分别显示，不合并。Write、NotebookEdit�
 `replace_all=true` 继续显示普通 Tool Activity，不出现空 Diff disclosure。
 
 Git Workspace Change Window 的完成 Evidence 按 `capturedAt` 进入既有会话时间线并保留连接轨道。卡片主标题固定
-为 `Files Changed`，显示总文件数与 `+ / −`、顶格且无行分隔的完整相对路径；右侧唯一动作是黑色文字、低强调
-边框的 `View`。卡片不显示时间、“已保存”、参与运行、独立工作区或底部 metadata。每个完成 Window 生成独立
-历史卡片，后续 Window 不覆盖旧卡；`no_changes`、`unavailable` 与非 Git root 不生成卡片。
+为 `Files Changed`，显示总文件数与 `+ / −`、顶格且无行分隔的完整相对路径。卡片上半区整体是进入 Review
+的原生按钮，右侧 `View` 只是无边框、黑色的低强调 affordance；每个文件行也是独立原生按钮，进入同一 Review
+并直接选择该文件。卡片各点击分区覆盖完整表面，不嵌套交互控件。卡片不显示时间、“已保存”、参与运行、
+独立工作区或底部 metadata。每个完成 Window 生成独立历史卡片，后续 Window 不覆盖旧卡；`no_changes`、
+`unavailable` 与非 Git root 不生成卡片。
 
 `View` 在当前 Camp workspace 内打开只读完整 diff，读取不可变 `WorkspaceDiffCompleted` Evidence 与 Managed Blob，
-不重新执行 Git diff、不读取当前 workspace，也不跳转单个文件。关闭后返回原会话；执行台不增加 Workspace
+不重新执行 Git diff、不读取当前 workspace。卡片上半区从首个文件打开，文件行从所选文件打开；这只是同一
+Review 内的初始 selection，不跳转文件、不新增独立 Review。关闭后返回原会话；执行台不增加 Workspace
 observation，底部/右侧 placement、会话连接轨与 Tool list 整行宽度保持原有结构。
 
 使用“Agent 运行时默认”的 Run 在既有 `.execution-run-meta` 中保持一个模型字段：尚无可信观测时显示

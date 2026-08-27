@@ -126,9 +126,9 @@ Light. `color-scheme: light`.
 | `--evidence-ink` | `#252a36` |
 | `--evidence-muted` | `#5f6678` |
 | `--evidence-line` | `#d5dad3` |
-| `--diff-add` / `--diff-add-soft` | `#2f694d` / `#e4f0e8` |
-| `--diff-remove` / `--diff-remove-soft` | `#8f3f3a` / `#f5e4e1` |
-| `--diff-hunk-soft` | `#e5eceb` |
+| `--diff-add` / `--diff-add-soft` | `#137333` / `#e6f4ea` |
+| `--diff-remove` / `--diff-remove-soft` | `#b3261e` / `#fce8e6` |
+| `--diff-hunk-soft` | `#f3f4f4` |
 
 ### Overlay and lightbox
 
