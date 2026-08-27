@@ -232,10 +232,12 @@ Runtime 返回 `disabled` 或 `local_bridged`：只有后者才同时在 initial
 
 Bridge 只在当前 AgentRun owner、execution epoch、Session 与 Active Prompt fence 内创建本地进程。进程从已
 admitted Runtime Host 的 ManagedProcess launch snapshot 派生，继承其 workspace、provider/Built-in 环境、
-macOS protected-tree deny 和平台进程树所有权；cwd 经 canonical/symlink 检查后不得逃逸 workspace。Run cancel、
-detach、Host EOF/shutdown 与 fleet reap 回收遗留 Terminal，未清空的 Host 不得进入 warm reuse。stdout/stderr
-使用有界私有 buffer，Terminal wire、output 与 error 不进入 Camp message 或 durable Evidence。字段与幂等合同见
-[ACP Client Terminal v1](../contracts/acp-client-terminal-v1.md)。
+macOS protected-tree deny 和平台进程树所有权。省略 cwd 时使用 execution root；显式 cwd 只要求为已存在的绝对
+目录，不做 execution-root containment。Runtime 的 sandbox/permission mode 与操作系统拥有 Shell/文件权限，Core
+不再通过 `scoped_path()` 建立第二层 Terminal cwd allowlist。Run cancel、detach、Host EOF/shutdown 与 fleet reap
+回收遗留 Terminal，未清空的 Host 不得进入 warm reuse。stdout/stderr 使用有界私有 buffer，Terminal wire、
+output 与 error 不进入 Camp message 或 durable Evidence。字段与幂等合同见
+[ACP Client Terminal v2](../contracts/acp-client-terminal-v2.md)。
 
 ## Kimi Code 当前边界
 
@@ -249,8 +251,8 @@ Kimi Code 的 ACP compatibility policy 使用通用 Client Terminal `local_bridg
 `clientCapabilities.terminal=true`，Shell 子进程由上述本地 Bridge 执行；这不是 Kimi 私有 Shell 协议，也不改变
 其他 Runtime 的 Shell 路径。实际 `@moonshot-ai/kimi-code@0.38.0` 发布包的只读复核确认其 exact
 create/output/wait/kill/release、4 MiB output limit 与 capability-unavailable 分支；一次性隔离 Home initialize
-也返回 0.38.0 且接受 `terminal=true`。确定性 Host fixture 覆盖完整 wire、Run cancellation 与 workspace
-escape。macOS arm64 本机随后通过 Homebrew 升级到 0.38.0；隔离开发 App 的 Deep Probe 返回 authenticated/ready，
+也返回 0.38.0 且接受 `terminal=true`。确定性 Host fixture 覆盖完整 wire、Run cancellation 与 cwd
+校验。macOS arm64 本机随后通过 Homebrew 升级到 0.38.0；隔离开发 App 的 Deep Probe 返回 authenticated/ready，
 真实 Camp AgentRun 经两次 Bash 调用读取 workspace cwd 与固定 marker 后成功结束，且未遗留 Kimi/Terminal 子进程。
 
 Kimi 正式 AgentRun 不设置通用 `HOME` 或 `KIMI_CODE_HOME`：父进程已有 `KIMI_CODE_HOME` 时原样继承，未设置时

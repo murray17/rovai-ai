@@ -47,7 +47,8 @@ Architecture 解释组件如何组成，Version 概览记录交付范围；它�
 | [Tool Interaction Measurement v2（当前）](tool-interaction-measurement-v2.md) | v1 的 opportunity/Judge 边界加 runtime catalog/projection 兼容门禁、Memory v3/readback、History Search、Task adapter 与 reply/task Process Evidence |
 | [Tool Interaction Measurement v1（历史）](tool-interaction-measurement-v1.md) | Opportunity-based Camp/Memory/A2A trace、确定性 oracle/coverage 与独立 Tool-Use Judge 初版边界 |
 | [Paired Collaboration Experiment v1（当前）](paired-collaboration-experiment-v1.md) | Team/Solo pre-registration、fresh arms、typed resources 与 outcome-conditioned paired comparison |
-| [ACP Client Terminal v1（当前）](acp-client-terminal-v1.md) | Runtime-specific `disabled/local_bridged` policy、标准 ACP Terminal wire、本地 ManagedProcess 派生、workspace/Run fencing、有界输出与 cancellation/release cleanup |
+| [ACP Client Terminal v2（当前）](acp-client-terminal-v2.md) | v1 capability/wire/lifecycle 不变；显式绝对 cwd 只校验存在目录，不做 execution-root containment，权限由 Runtime/OS 拥有 |
+| [ACP Client Terminal v1（历史）](acp-client-terminal-v1.md) | Runtime-specific `disabled/local_bridged` policy、标准 ACP Terminal wire、本地 ManagedProcess 派生、旧 workspace-contained cwd、Run fencing、有界输出与 cancellation/release cleanup |
 | [Runtime Launch and Verification v28（当前）](runtime-launch-and-verification-v28.md) | v27 边界不变；ACP Client FS 成为无 execution-root containment、无一次性 token 的 Runtime-owned 文件执行代理；自动/绕过模式的合格 permission request 只作协议兼容 allow |
 | [Runtime Launch and Verification v27（历史）](runtime-launch-and-verification-v27.md) | v26 边界不变；Grok Build 三端最低版本统一为 `>= 1.0.0`，Ready 要求标准 ACP resume，cold continuation 从 load-only HistoryRestore 切到 `session/resume`，creation-only rules 不在恢复时重注入 |
 | [Runtime Launch and Verification v26（历史）](runtime-launch-and-verification-v26.md) | v25 launch/权限/Cursor 边界不变；增加 TRAE 专属 `rawInput.Command`、ACP error/activity/failure 与时间域规则，并补充 Grok Build 的官方配置、load-only continuation、原生 rules、compaction、Plugin MCP 和 generic agent-text 边界 |

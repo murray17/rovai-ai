@@ -169,7 +169,7 @@ Camp 动态队员管理、Managed Attachment v2 与 ACP Client FS 权限收敛�
   `View` 入口的浏览器视觉检查；
 - [ ] 完成真实 App 双主题、键盘/焦点与实际 Runtime file-diff acceptance，并把证据写回本计划。
 
-## 7. ACP Client FS 权限收敛
+## 7. ACP Client FS/Terminal 权限收敛
 
 - [x] 删除 `authorized_file_writes`、`authorize_file_write()`、one-time matching error，以及 Runtime Delivery
   中把 Approval scope 映射成单次文件 token 的桥；
@@ -187,6 +187,17 @@ Camp 动态队员管理、Managed Attachment v2 与 ACP Client FS 权限收敛�
 - [x] `pnpm test:rust:staged` 通过 workspace all-target check 与 Core bin 169/169（另 4 项 manual smoke ignored）；
   `cargo clippy -p rovai-core --bin rovai-core -- -D warnings`、`cargo fmt --all -- --check`、ACP smoke 脚本语法、
   `pnpm docs:test`、`pnpm docs:check` 与精确 merge-base 的 `docs:check:ci` 均通过。
+- [x] `terminal_working_directory()` 不再调用 `scoped_path()`；显式 cwd 只保留 absolute + existing directory
+  校验，execution root 外目录和 symlink 目录不再由 Core 拒绝，省略 cwd 仍使用 execution root；
+- [x] Terminal 的 command/env、Run/epoch/Session/Prompt、process tree、output bound、kill/release、cancel/detach 与
+  cleanup 路径未改变；
+- [x] 扩展既有 Terminal lifecycle 与 cwd validation owner，覆盖 root 外绝对 cwd、相对 cwd、省略 cwd 和不存在的
+  绝对 cwd；旧 workspace/symlink escape rejection 随旧合同退出；
+- [x] [ACP Client Terminal v2](../../contracts/acp-client-terminal-v2.md)替代 v1，并同步 Architecture、当前决定与
+  文档路由；无 schema、Migration、Renderer 或 Runtime Activity 变化；
+- [x] `cargo fmt --all -- --check`、Terminal 定向 5 项、Core bin 169/169（另 4 项 manual smoke ignored）、
+  `cargo clippy -p rovai-core --bin rovai-core -- -D warnings`、`pnpm test:rust:staged`、`pnpm docs:test`、
+  `pnpm docs:check` 与精确 merge-base 的 `docs:check:ci` 均通过。
 
 ## 交付阻断条件
 

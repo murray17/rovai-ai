@@ -86,6 +86,8 @@ reconciliation 完成已接受工作的正式结算。
   相对路径以 execution root 为解析基准，不做 Core containment、Workspace access 或一次性 token 鉴权；
   Runtime 全自动/绕过模式的合格 `session/request_permission` 直接回复 native allow，交互模式仍保留 Approval，
   两者都不控制 Client FS 执行资格。
+- ACP `terminal/create` 省略 cwd 时仍使用 execution root；显式 cwd 只校验为已存在的绝对目录，不调用
+  `scoped_path()` 或限制在 execution root 内。Terminal 的 Run/epoch/Session/Prompt fence、进程树与清理保持不变。
 
 ## 明确不做
 
@@ -133,19 +135,21 @@ Activity 与 Renderer，不追加模型上下文。
   复用与 DB-only Context path 回归；
 - ACP Client FS 回归覆盖 `read_only` metadata、execution root 外绝对路径、未预授权首写、同路径连续第二次写和
   readback；十种 ACP Adapter 的全自动/交互模式使用同一表驱动 owner 验证 compatibility allow 分类。
+- ACP Client Terminal 回归覆盖 execution root 外绝对 cwd 成功、相对 cwd 拒绝、省略 cwd 使用 execution root、
+  不存在的绝对 cwd 拒绝，并继续验证 output/wait/release 与 Run session cleanup。
 
 ## 跨版本文档影响
 
 | 范围 | 结论 | 证据或理由 |
 | --- | --- | --- |
 | Version lifecycle | 已更新 | v1.28 按冻结时事实转为 historical；本概览、[实施计划](implementation-plan.md)、[决定](decisions.md)与[版本索引](../README.md)建立唯一 current v1.29。 |
-| Decisions | 已更新 | [V1.29-D01–D06](decisions.md#v1-29-d01)冻结 membership cutover、exact lifetime、受信外部同步、零 attempt 取消与 Managed Attachment v2；[V1.29-D07](decisions.md#v1-29-d07)冻结两层 diff 与既有 Canonical Activity 权威；[V1.29-D08](decisions.md#v1-29-d08)冻结 Camp/exact-root Window、受控 Git checkpoint 和 fail-open Coordinator；[V1.29-D09](decisions.md#v1-29-d09)冻结终态文件行与历史卡片交互；[V1.29-D10](decisions.md#v1-29-d10)冻结 ACP Client FS 的 Runtime-owned 权限与无二次授权代理。 |
-| Contracts | 已更新 | 新增 [Camp Membership v1](../../contracts/camp-membership-v1.md)与 [Workspace Change Observation v1](../../contracts/workspace-change-observation-v1.md)，升级 Camp Open、Attachment、Composer、Message Delivery、Gather 与 Missing-Send Recovery 等相关合同；[Runtime Launch and Verification v28](../../contracts/runtime-launch-and-verification-v28.md)替代 v27，收口 ACP Client FS 与 permission compatibility response。 |
-| Architecture | 已更新 | 新增[动态 Camp 队员关系](../../architecture/dynamic-camp-membership.md)与 [Workspace Change Observation](../../architecture/workspace-change-observation.md)；附件架构切换为 Managed v2 当前写入与 legacy v1 只读兼容；[基础架构不变量](../../architecture/foundational-invariants.md#runtime-platform-security)与 [Runtime Catalog Boundaries](../../architecture/runtime-catalog-boundaries.md)同步 Runtime-owned ACP 文件权限。 |
+| Decisions | 已更新 | [V1.29-D01–D06](decisions.md#v1-29-d01)冻结 membership cutover、exact lifetime、受信外部同步、零 attempt 取消与 Managed Attachment v2；[V1.29-D07](decisions.md#v1-29-d07)冻结两层 diff 与既有 Canonical Activity 权威；[V1.29-D08](decisions.md#v1-29-d08)冻结 Camp/exact-root Window、受控 Git checkpoint 和 fail-open Coordinator；[V1.29-D09](decisions.md#v1-29-d09)冻结终态文件行与历史卡片交互；[V1.29-D10](decisions.md#v1-29-d10)冻结 ACP Client FS/Terminal 的 Runtime-owned 权限与无二次授权代理。 |
+| Contracts | 已更新 | 新增 [Camp Membership v1](../../contracts/camp-membership-v1.md)与 [Workspace Change Observation v1](../../contracts/workspace-change-observation-v1.md)，升级 Camp Open、Attachment、Composer、Message Delivery、Gather 与 Missing-Send Recovery 等相关合同；[Runtime Launch and Verification v28](../../contracts/runtime-launch-and-verification-v28.md)替代 v27，收口 ACP Client FS 与 permission compatibility response；[ACP Client Terminal v2](../../contracts/acp-client-terminal-v2.md)替代 v1，取消显式 cwd 的 execution-root containment。 |
+| Architecture | 已更新 | 新增[动态 Camp 队员关系](../../architecture/dynamic-camp-membership.md)与 [Workspace Change Observation](../../architecture/workspace-change-observation.md)；附件架构切换为 Managed v2 当前写入与 legacy v1 只读兼容；[基础架构不变量](../../architecture/foundational-invariants.md#runtime-platform-security)与 [Runtime Catalog Boundaries](../../architecture/runtime-catalog-boundaries.md)同步 Runtime-owned ACP 文件与 Shell 权限。 |
 | UI | 已更新 | [Camp 会话工作区](../../ui/components/conversation-workspace.md)冻结成员管理、Canonical Activity presentation rows、`Files Changed` 卡片与只读 View；其他布局不变。 |
 | Runtime Activity | 已更新 | Registry 记录 Codex terminal fileChange、ACP terminal standard Diff、Claude Edit exact mutation 和 Antigravity fail-closed 边界。 |
 | Runtime compatibility | 已更新 | 13 个 adapter 均已按实际协议族归类；当前代码 fixture 覆盖 Codex、十个 ACP adapter、Claude Edit 与 Antigravity negative gate；Claude Code `2.1.220` Edit 已完成真实 smoke，Codex/ACP 真实 file-diff smoke 仍待补。 |
-| Documentation routing | 已更新 | 文档总导航、Architecture/Contract 索引与当前决定导航已增加动态 membership、Managed Attachment v2 与 Workspace Change Observation 入口。 |
+| Documentation routing | 已更新 | 文档总导航、Architecture/Contract 索引与当前决定导航已增加动态 membership、Managed Attachment v2、Workspace Change Observation 与 ACP Client Terminal v2 入口。 |
 | Root README | 确认无需更新 | 当前仍为 in-progress，且不改变项目定位或已交付的常青能力声明。 |
 
 ## References

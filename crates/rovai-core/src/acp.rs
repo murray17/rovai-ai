@@ -1041,7 +1041,7 @@ fn terminal_working_directory(execution_root: &Path, params: &Value) -> Result<P
     if !Path::new(cwd).is_absolute() {
         bail!("terminal/create cwd must be absolute");
     }
-    let cwd = scoped_path(execution_root, cwd)?;
+    let cwd = PathBuf::from(cwd);
     if !cwd.is_dir() {
         bail!("terminal/create cwd is not an existing directory");
     }
@@ -6531,8 +6531,12 @@ while IFS= read -r ignored; do :; done
             "rovai-acp-client-terminal-lifecycle-{}",
             uuid::Uuid::new_v4()
         ));
-        let child_cwd = root.join("child");
-        std::fs::create_dir_all(&child_cwd).unwrap();
+        let external_cwd = std::env::temp_dir().join(format!(
+            "rovai-acp-client-terminal-external-cwd-{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::create_dir_all(&external_cwd).unwrap();
         let bridge = terminal_bridge(&root);
         let owner = terminal_owner();
         let created = bridge
@@ -6547,7 +6551,7 @@ while IFS= read -r ignored; do :; done
                         "printf 'stdout:%s:%s:%s' \"$PWD\" \"$ROVAI_TERMINAL_BASE\" \"$TERMINAL_OVERRIDE\"; printf ':stderr' >&2; exit 7"
                     ],
                     "env": [{"name": "TERMINAL_OVERRIDE", "value": "request-environment"}],
-                    "cwd": child_cwd,
+                    "cwd": external_cwd,
                     "outputByteLimit": 65536,
                 }),
             )
@@ -6573,7 +6577,7 @@ while IFS= read -r ignored; do :; done
         let text = output["output"].as_str().unwrap();
         assert!(text.contains(&format!(
             "stdout:{}",
-            child_cwd.canonicalize().unwrap().display()
+            external_cwd.canonicalize().unwrap().display()
         )));
         assert!(text.contains("base-environment"));
         assert!(text.contains("request-environment"));
@@ -6594,8 +6598,39 @@ while IFS= read -r ignored; do :; done
                 .await
                 .is_err()
         );
+
+        let default_cwd = bridge
+            .create(
+                "session-terminal",
+                &owner,
+                &json!({
+                    "sessionId": "session-terminal",
+                    "command": "/bin/sh",
+                    "args": ["-c", "printf '%s' \"$PWD\""],
+                }),
+            )
+            .await
+            .unwrap();
+        let default_cwd_terminal_id = default_cwd["terminalId"].as_str().unwrap();
+        bridge
+            .wait_for_exit("session-terminal", &owner, default_cwd_terminal_id)
+            .await
+            .unwrap();
+        let default_cwd_output = bridge
+            .output("session-terminal", &owner, default_cwd_terminal_id)
+            .await
+            .unwrap();
+        assert_eq!(
+            default_cwd_output["output"],
+            root.canonicalize().unwrap().display().to_string()
+        );
+        bridge
+            .release("session-terminal", &owner, default_cwd_terminal_id)
+            .await
+            .unwrap();
         assert!(bridge.is_empty().await);
         std::fs::remove_dir_all(root).unwrap();
+        std::fs::remove_dir_all(external_cwd).unwrap();
     }
 
     #[tokio::test]
@@ -6709,22 +6744,19 @@ while IFS= read -r ignored; do :; done
     }
 
     #[tokio::test]
-    async fn client_terminal_rejects_workspace_escape_and_cleans_a_run_session() {
+    async fn client_terminal_rejects_invalid_cwd_and_cleans_a_run_session() {
         let root = std::env::temp_dir().join(format!(
             "rovai-acp-client-terminal-scope-{}",
             uuid::Uuid::new_v4()
         ));
-        let outside = std::env::temp_dir().join(format!(
-            "rovai-acp-client-terminal-outside-{}",
+        let missing = std::env::temp_dir().join(format!(
+            "rovai-acp-client-terminal-missing-{}",
             uuid::Uuid::new_v4()
         ));
         std::fs::create_dir_all(&root).unwrap();
-        std::fs::create_dir_all(&outside).unwrap();
-        let symlink_escape = root.join("symlink-escape");
-        std::os::unix::fs::symlink(&outside, &symlink_escape).unwrap();
         let bridge = terminal_bridge(&root);
         let owner = terminal_owner();
-        let escaped = bridge
+        let relative = bridge
             .create(
                 "session-scope",
                 &owner,
@@ -6732,17 +6764,13 @@ while IFS= read -r ignored; do :; done
                     "sessionId": "session-scope",
                     "command": "/bin/sh",
                     "args": ["-c", "exit 0"],
-                    "cwd": outside,
+                    "cwd": "relative",
                 }),
             )
             .await
-            .expect_err("workspace escape must fail closed");
-        assert!(
-            escaped
-                .to_string()
-                .contains("outside the AgentRun execution root")
-        );
-        let symlink_escaped = bridge
+            .expect_err("relative cwd must be rejected");
+        assert!(relative.to_string().contains("cwd must be absolute"));
+        let nonexistent = bridge
             .create(
                 "session-scope",
                 &owner,
@@ -6750,15 +6778,15 @@ while IFS= read -r ignored; do :; done
                     "sessionId": "session-scope",
                     "command": "/bin/sh",
                     "args": ["-c", "exit 0"],
-                    "cwd": symlink_escape,
+                    "cwd": missing,
                 }),
             )
             .await
-            .expect_err("cwd symlink escape must fail closed");
+            .expect_err("nonexistent absolute cwd must be rejected");
         assert!(
-            symlink_escaped
+            nonexistent
                 .to_string()
-                .contains("outside the AgentRun execution root")
+                .contains("cwd is not an existing directory")
         );
 
         let created = bridge
@@ -6784,7 +6812,6 @@ while IFS= read -r ignored; do :; done
                 .is_err()
         );
         std::fs::remove_dir_all(root).unwrap();
-        std::fs::remove_dir_all(outside).unwrap();
     }
 
     #[tokio::test]
