@@ -177,6 +177,12 @@ pub(crate) struct RuntimeAttachmentCopyReceipt {
     pub content_digest: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct StagedAgentAttachment {
+    pub attachment: crate::camp_attachment_publication::AuthorityAttachment,
+    pub receipt: RuntimeAttachmentCopyReceipt,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct ManagedAttachmentMetadata {
@@ -262,6 +268,8 @@ pub struct AttachmentPreviewCandidate {
     byte_size: u64,
     content_digest: String,
     path: PathBuf,
+    storage_model: AttachmentStorageModel,
+    scope_root: PathBuf,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -273,6 +281,14 @@ pub struct DesktopAttachmentOpenCandidate {
     byte_size: u64,
     content_digest: String,
     path: PathBuf,
+    storage_model: AttachmentStorageModel,
+    scope_root: PathBuf,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AttachmentStorageModel {
+    AuthorityV1,
+    ManagedV2,
 }
 
 #[derive(Debug)]
@@ -1344,14 +1360,27 @@ impl CampAttachmentStore {
             .query_row(
                 r#"
                 SELECT camp_id, display_name, storage_path, media_type, byte_size,
-                       preview_kind, content_digest
+                       preview_kind, content_digest, 'authority_v1'
                 FROM prepared_attachment
                 WHERE id = ?1
                 UNION ALL
                 SELECT camp_id, display_name, storage_path, media_type, byte_size,
-                       preview_kind, content_digest
+                       preview_kind, content_digest, 'authority_v1'
                 FROM message_attachment
                 WHERE id = ?1
+                UNION ALL
+                SELECT managed.camp_id,
+                       (SELECT reference.display_name_snapshot
+                        FROM camp_message_attachment_ref AS reference
+                        WHERE reference.camp_id = managed.camp_id
+                          AND reference.attachment_id = managed.id
+                        ORDER BY reference.created_at, reference.camp_message_id
+                        LIMIT 1),
+                       managed.root_relative_payload_path,
+                       managed.media_type, managed.byte_size,
+                       managed.preview_kind, managed.content_digest, 'managed_v2'
+                FROM managed_attachment AS managed
+                WHERE managed.id = ?1 AND managed.state = 'available'
                 LIMIT 1
                 "#,
                 [attachment_id],
@@ -1364,6 +1393,7 @@ impl CampAttachmentStore {
                         row.get::<_, i64>(4)?,
                         row.get::<_, String>(5)?,
                         row.get::<_, String>(6)?,
+                        row.get::<_, String>(7)?,
                     ))
                 },
             )
@@ -1376,6 +1406,7 @@ impl CampAttachmentStore {
             byte_size,
             preview_kind,
             content_digest,
+            storage_model,
         )) = row
         else {
             return Ok(None);
@@ -1383,6 +1414,21 @@ impl CampAttachmentStore {
         if preview_kind != "image" || byte_size < 0 || byte_size as u64 > MAX_PREVIEW_BYTES {
             return Ok(None);
         }
+        let storage_model = match storage_model.as_str() {
+            "authority_v1" => AttachmentStorageModel::AuthorityV1,
+            "managed_v2" => AttachmentStorageModel::ManagedV2,
+            _ => anyhow::bail!("Attachment storage model is invalid"),
+        };
+        let scope_root = if storage_model == AttachmentStorageModel::ManagedV2 {
+            database.runtime_camp_files_root().to_path_buf()
+        } else {
+            self.root.clone()
+        };
+        let path = if storage_model == AttachmentStorageModel::ManagedV2 {
+            scope_root.join(validate_managed_runtime_locator(&path)?)
+        } else {
+            PathBuf::from(path)
+        };
         Ok(Some(AttachmentPreviewCandidate {
             attachment_id: attachment_id.to_string(),
             camp_id,
@@ -1390,7 +1436,9 @@ impl CampAttachmentStore {
             media_type,
             byte_size: byte_size as u64,
             content_digest,
-            path: PathBuf::from(path),
+            path,
+            storage_model,
+            scope_root,
         }))
     }
 
@@ -1405,21 +1453,43 @@ impl CampAttachmentStore {
         if normalized_name != candidate.display_name {
             anyhow::bail!("Attachment preview display name is not canonical");
         }
-        let expected_path = self
-            .root
-            .join(camp_id.as_str())
-            .join(&candidate.attachment_id)
-            .join(&candidate.display_name);
+        let expected_path = match candidate.storage_model {
+            AttachmentStorageModel::AuthorityV1 => self
+                .root
+                .join(camp_id.as_str())
+                .join(&candidate.attachment_id)
+                .join(&candidate.display_name),
+            AttachmentStorageModel::ManagedV2 => candidate
+                .scope_root
+                .join("camps")
+                .join(camp_id.as_str())
+                .join("attachments")
+                .join(".managed-v2")
+                .join(&candidate.attachment_id)
+                .join("payload")
+                .join(&candidate.display_name),
+        };
         if candidate.path != expected_path {
             anyhow::bail!("Attachment preview path does not match its managed identity");
         }
-        reject_symlink_path(&self.root, &candidate.path)?;
-        let verified = self.verify_authority_attachment_for_runtime(
-            &candidate.path,
-            &candidate.media_type,
-            candidate.byte_size,
-            &candidate.content_digest,
-        )?;
+        reject_symlink_path(&candidate.scope_root, &candidate.path)?;
+        let verified = if candidate.storage_model == AttachmentStorageModel::ManagedV2 {
+            let inspected = inspect_runtime_attachment_copy(&candidate.path)?;
+            if inspected.byte_size != candidate.byte_size
+                || inspected.content_digest != candidate.content_digest
+                || (candidate.media_type == DIRECTORY_MEDIA_TYPE) != (inspected.kind == "directory")
+            {
+                anyhow::bail!("Managed Attachment preview receipt changed");
+            }
+            inspected
+        } else {
+            self.verify_authority_attachment_for_runtime(
+                &candidate.path,
+                &candidate.media_type,
+                candidate.byte_size,
+                &candidate.content_digest,
+            )?
+        };
         if verified.kind != "file" {
             anyhow::bail!("Attachment preview target is not a file");
         }
@@ -1442,9 +1512,23 @@ impl CampAttachmentStore {
             .connection()
             .query_row(
                 r#"
-                SELECT display_name, media_type, byte_size, content_digest, storage_path
+                SELECT display_name, media_type, byte_size, content_digest,
+                       storage_path, 'authority_v1'
                 FROM message_attachment
                 WHERE camp_id = ?1 AND id = ?2
+                UNION ALL
+                SELECT (SELECT reference.display_name_snapshot
+                        FROM camp_message_attachment_ref AS reference
+                        WHERE reference.camp_id = managed.camp_id
+                          AND reference.attachment_id = managed.id
+                        ORDER BY reference.created_at, reference.camp_message_id
+                        LIMIT 1),
+                       managed.media_type, managed.byte_size, managed.content_digest,
+                       managed.root_relative_payload_path, 'managed_v2'
+                FROM managed_attachment AS managed
+                WHERE managed.camp_id = ?1 AND managed.id = ?2
+                  AND managed.state = 'available'
+                LIMIT 1
                 "#,
                 params![camp_id.as_str(), attachment_id],
                 |row| {
@@ -1454,16 +1538,40 @@ impl CampAttachmentStore {
                         row.get::<_, i64>(2)?,
                         row.get::<_, String>(3)?,
                         row.get::<_, String>(4)?,
+                        row.get::<_, String>(5)?,
                     ))
                 },
             )
             .optional()?;
-        let Some((display_name, media_type, byte_size, content_digest, storage_path)) = row else {
+        let Some((
+            display_name,
+            media_type,
+            byte_size,
+            content_digest,
+            storage_path,
+            storage_model,
+        )) = row
+        else {
             return Ok(None);
         };
         if byte_size < 0 {
             anyhow::bail!("Published Attachment byte size is invalid");
         }
+        let storage_model = match storage_model.as_str() {
+            "authority_v1" => AttachmentStorageModel::AuthorityV1,
+            "managed_v2" => AttachmentStorageModel::ManagedV2,
+            _ => anyhow::bail!("Attachment storage model is invalid"),
+        };
+        let scope_root = if storage_model == AttachmentStorageModel::ManagedV2 {
+            database.runtime_camp_files_root().to_path_buf()
+        } else {
+            self.root.clone()
+        };
+        let path = if storage_model == AttachmentStorageModel::ManagedV2 {
+            scope_root.join(validate_managed_runtime_locator(&storage_path)?)
+        } else {
+            PathBuf::from(storage_path)
+        };
         Ok(Some(DesktopAttachmentOpenCandidate {
             attachment_id: attachment_id.to_string(),
             camp_id: camp_id.to_string(),
@@ -1471,7 +1579,9 @@ impl CampAttachmentStore {
             media_type,
             byte_size: byte_size as u64,
             content_digest,
-            path: PathBuf::from(storage_path),
+            path,
+            storage_model,
+            scope_root,
         }))
     }
 
@@ -1485,21 +1595,43 @@ impl CampAttachmentStore {
         if normalized_name != candidate.display_name {
             anyhow::bail!("Published Attachment display name is not canonical");
         }
-        let expected_path = self
-            .root
-            .join(&candidate.camp_id)
-            .join(&candidate.attachment_id)
-            .join(&candidate.display_name);
+        let expected_path = match candidate.storage_model {
+            AttachmentStorageModel::AuthorityV1 => self
+                .root
+                .join(&candidate.camp_id)
+                .join(&candidate.attachment_id)
+                .join(&candidate.display_name),
+            AttachmentStorageModel::ManagedV2 => candidate
+                .scope_root
+                .join("camps")
+                .join(&candidate.camp_id)
+                .join("attachments")
+                .join(".managed-v2")
+                .join(&candidate.attachment_id)
+                .join("payload")
+                .join(&candidate.display_name),
+        };
         if candidate.path != expected_path {
             anyhow::bail!("Published Attachment path does not match its managed identity");
         }
-        reject_symlink_path(&self.root, &candidate.path)?;
-        let verified = self.verify_authority_attachment_for_runtime(
-            &candidate.path,
-            &candidate.media_type,
-            candidate.byte_size,
-            &candidate.content_digest,
-        )?;
+        reject_symlink_path(&candidate.scope_root, &candidate.path)?;
+        let verified = if candidate.storage_model == AttachmentStorageModel::ManagedV2 {
+            let inspected = inspect_runtime_attachment_copy(&candidate.path)?;
+            if inspected.byte_size != candidate.byte_size
+                || inspected.content_digest != candidate.content_digest
+                || (candidate.media_type == DIRECTORY_MEDIA_TYPE) != (inspected.kind == "directory")
+            {
+                anyhow::bail!("Managed Attachment open receipt changed");
+            }
+            inspected
+        } else {
+            self.verify_authority_attachment_for_runtime(
+                &candidate.path,
+                &candidate.media_type,
+                candidate.byte_size,
+                &candidate.content_digest,
+            )?
+        };
         let expected_directory = candidate.media_type == DIRECTORY_MEDIA_TYPE;
         if (verified.kind == "directory") != expected_directory {
             anyhow::bail!("Published Attachment kind does not match its persisted media type");
@@ -1625,6 +1757,148 @@ impl CampAttachmentStore {
         }
         Ok(camps.len())
     }
+}
+
+pub(crate) fn copy_agent_sources_to_managed_staging(
+    requested_paths: &[String],
+    attachment_ids: &[String],
+    execution_workspace: &Path,
+    run_tmp: &Path,
+    staging_root: &Path,
+) -> Result<Vec<StagedAgentAttachment>> {
+    if requested_paths.len() != attachment_ids.len() {
+        anyhow::bail!("Managed Attachment plan does not match requested Agent files");
+    }
+    if requested_paths.len() > MAX_PREPARED_ATTACHMENTS {
+        anyhow::bail!("At most 10 files may be attached to one message");
+    }
+    let workspace_root = fs::canonicalize(execution_workspace)
+        .context("AgentRun execution workspace is unavailable")?;
+    let run_tmp_root = fs::canonicalize(run_tmp).context("ROVAI_RUN_TMP is unavailable")?;
+    ensure_directory(staging_root)?;
+    let copied = (|| -> Result<Vec<StagedAgentAttachment>> {
+        let mut staged = Vec::with_capacity(requested_paths.len());
+        let mut total_bytes = 0_u64;
+        for (requested, attachment_id) in requested_paths.iter().zip(attachment_ids) {
+            validate_component(attachment_id, "Managed Attachment")?;
+            let requested = Path::new(requested);
+            let source = if requested.is_absolute() {
+                requested.to_path_buf()
+            } else {
+                workspace_root.join(requested)
+            };
+            if source.components().any(|component| {
+                matches!(
+                    component,
+                    std::path::Component::ParentDir | std::path::Component::CurDir
+                )
+            }) {
+                anyhow::bail!("Attachment source contains an unsafe path component");
+            }
+            let canonical_source = fs::canonicalize(&source)
+                .with_context(|| format!("Attachment source is unavailable: {requested:?}"))?;
+            let (admitted_root, checked_source) = if canonical_source.starts_with(&workspace_root) {
+                let relative = if requested.is_absolute() {
+                    source
+                        .strip_prefix(execution_workspace)
+                        .or_else(|_| source.strip_prefix(&workspace_root))
+                        .context("Attachment source uses an unsafe workspace root alias")?
+                } else {
+                    requested
+                };
+                (&workspace_root, workspace_root.join(relative))
+            } else if canonical_source.starts_with(&run_tmp_root) {
+                let relative = source
+                    .strip_prefix(run_tmp)
+                    .or_else(|_| source.strip_prefix(&run_tmp_root))
+                    .context("Attachment source uses an unsafe ROVAI_RUN_TMP root alias")?;
+                (&run_tmp_root, run_tmp_root.join(relative))
+            } else {
+                anyhow::bail!(
+                    "Attachment source is outside the AgentRun workspace and ROVAI_RUN_TMP"
+                );
+            };
+            reject_symlink_path(admitted_root, &checked_source)?;
+            let source_name = canonical_source
+                .file_name()
+                .and_then(|name| name.to_str())
+                .context("Attachment source has no UTF-8 display name")?;
+            let display_name = normalize_display_name(source_name)?;
+            let attachment_root = staging_root.join(attachment_id);
+            let payload_root = attachment_root.join("payload");
+            ensure_directory(&payload_root)?;
+            let destination = payload_root.join(&display_name);
+            let prepared = copy_and_inspect(&canonical_source, &destination)?;
+            total_bytes = total_bytes
+                .checked_add(prepared.byte_size)
+                .context("Agent attachment byte total overflow")?;
+            if total_bytes > MAX_DRAFT_ATTACHMENT_BYTES {
+                anyhow::bail!("Attachments exceed the 64 MiB aggregate limit");
+            }
+            set_directory_read_only(&payload_root)?;
+            set_directory_read_only(&attachment_root)?;
+            staged.push(StagedAgentAttachment {
+                attachment: crate::camp_attachment_publication::AuthorityAttachment {
+                    attachment_id: attachment_id.clone(),
+                    display_name: display_name.clone(),
+                    media_type: prepared.media_type,
+                    byte_size: prepared.byte_size,
+                    content_digest: prepared.content_digest.clone(),
+                    storage_path: prepared.path,
+                    preview_kind: prepared.preview_kind,
+                },
+                receipt: RuntimeAttachmentCopyReceipt {
+                    authority_safe_leaf: display_name,
+                    kind: prepared.kind,
+                    file_count: prepared.file_count,
+                    directory_count: prepared.directory_count,
+                    node_count: prepared.node_count,
+                    byte_size: prepared.byte_size,
+                    content_digest: prepared.content_digest,
+                },
+            });
+        }
+        Ok(staged)
+    })();
+    match copied {
+        Ok(staged) => Ok(staged),
+        Err(error) => {
+            let _ = remove_attachment_directory(staging_root);
+            Err(error)
+        }
+    }
+}
+
+pub(crate) fn harden_managed_attachment_tree(path: &Path) -> Result<()> {
+    let metadata = fs::symlink_metadata(path)?;
+    if metadata.file_type().is_symlink() {
+        anyhow::bail!("Managed Attachment contains a symlink");
+    }
+    if metadata.is_dir() {
+        for child in fs::read_dir(path)?.collect::<std::io::Result<Vec<_>>>()? {
+            harden_managed_attachment_tree(&child.path())?;
+        }
+        return set_directory_read_only(path);
+    }
+    if metadata.is_file() {
+        return set_read_only(path);
+    }
+    anyhow::bail!("Managed Attachment contains an unsupported node")
+}
+
+pub(crate) fn remove_managed_attachment_tree(path: &Path) -> Result<()> {
+    remove_attachment_directory(path)
+}
+
+pub(crate) fn cleanup_consumed_prepared_attachment_paths(
+    store: &CampAttachmentStore,
+    camp_id: &str,
+    paths: &[PathBuf],
+) -> Result<()> {
+    store.cleanup_detached_attachments(CampAttachmentCleanupPlan {
+        camp_id: camp_id.to_string(),
+        attachment_paths: paths.to_vec(),
+    })
 }
 
 fn reject_symlink_path(admitted_root: &Path, requested_source: &Path) -> Result<()> {
@@ -2328,6 +2602,27 @@ pub fn consume_prepared_attachments(
                 now,
             ],
         )?;
+    }
+    transaction.execute(
+        "DELETE FROM camp_composer_draft WHERE camp_id = ?1",
+        [camp_id],
+    )?;
+    Ok(())
+}
+
+pub fn consume_prepared_attachments_for_managed_ingest(
+    transaction: &Transaction<'_>,
+    camp_id: &str,
+    prepared_attachment_ids: &[String],
+) -> Result<()> {
+    let rows = load_prepared_rows_tx(transaction, camp_id)?;
+    let stored_ids = rows.iter().map(|row| row.id.as_str()).collect::<Vec<_>>();
+    let requested_ids = prepared_attachment_ids
+        .iter()
+        .map(String::as_str)
+        .collect::<Vec<_>>();
+    if stored_ids != requested_ids {
+        anyhow::bail!("Camp Composer Draft attachments changed before commit");
     }
     transaction.execute(
         "DELETE FROM camp_composer_draft WHERE camp_id = ?1",
@@ -3698,6 +3993,18 @@ fn validate_managed_attachment_id(value: &str) -> Result<()> {
     Ok(())
 }
 
+fn validate_managed_runtime_locator(value: &str) -> Result<PathBuf> {
+    let path = Path::new(value);
+    if path.is_absolute()
+        || path
+            .components()
+            .any(|component| !matches!(component, std::path::Component::Normal(_)))
+    {
+        anyhow::bail!("Managed Attachment locator is unsafe");
+    }
+    Ok(path.to_path_buf())
+}
+
 fn validate_runtime_safe_leaf(value: &str) -> Result<()> {
     if value.is_empty()
         || value == "."
@@ -3913,6 +4220,28 @@ fn sync_parent(_path: &Path) -> Result<()> {
     // directory-fsync primitive. Files are flushed before MOVEFILE_WRITE_THROUGH
     // commits their same-directory rename in commit_temporary.
     Ok(())
+}
+
+#[cfg(any(test, feature = "slow-tests"))]
+#[doc(hidden)]
+pub fn insert_test_camp(database: &Database, camp_id: &str) {
+    database
+        .connection()
+        .execute(
+            r#"
+        INSERT INTO camp(
+            id, title, name_origin, collaboration_mode,
+            project_binding_kind, project_path,
+            last_message_sequence, version, created_at, updated_at
+        ) VALUES (
+            ?1, 'Draft test', 'user', 'peer',
+            'quick_chat', '/quick-chat-draft-test',
+            0, 1, '2026-08-03T00:00:00Z', '2026-08-03T00:00:00Z'
+        )
+        "#,
+            [camp_id],
+        )
+        .unwrap();
 }
 
 #[cfg(test)]
@@ -4168,28 +4497,6 @@ mod windows_attachment_tests {
         }
         fs::remove_dir_all(fixture).unwrap();
     }
-}
-
-#[cfg(feature = "slow-tests")]
-#[doc(hidden)]
-pub fn insert_test_camp(database: &Database, camp_id: &str) {
-    database
-        .connection()
-        .execute(
-            r#"
-        INSERT INTO camp(
-            id, title, name_origin, collaboration_mode,
-            project_binding_kind, project_path,
-            last_message_sequence, version, created_at, updated_at
-        ) VALUES (
-            ?1, 'Draft test', 'user', 'peer',
-            'quick_chat', '/quick-chat-draft-test',
-            0, 1, '2026-08-03T00:00:00Z', '2026-08-03T00:00:00Z'
-        )
-        "#,
-            [camp_id],
-        )
-        .unwrap();
 }
 
 #[cfg(all(test, feature = "slow-tests"))]

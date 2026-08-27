@@ -71,13 +71,9 @@ use rovai_core::{
         builtin_tool_catalog_digest, builtin_tool_description, recovery_for_error_code,
     },
     camp_attachment::{CampAttachmentStore, CampComposerReplyRecipient},
-    camp_attachment_publication::{
-        AuthorityAttachment, database_has_unresolved_writer_intent, frozen_sources_are_owned,
-        unresolved_publication_camp_ids,
-    },
+    camp_attachment_publication::{AuthorityAttachment, unresolved_publication_camp_ids},
     camp_attachment_view::{
-        CampAttachmentRuntimeAuthorization, CampAttachmentViewStore, CampAttachmentVisibilityMode,
-        PreparedCampAttachmentCleanup,
+        CampAttachmentRuntimeAuthorization, CampAttachmentViewStore, PreparedCampAttachmentCleanup,
     },
     camp_content::StructuredCampMessageContent,
     camp_history::{
@@ -126,6 +122,7 @@ use rovai_core::{
         RUNTIME_EVIDENCE_DELTA_BATCH_MAX_BYTES, RecordedExecutionEvidence,
     },
     git,
+    managed_attachment::ManagedAttachmentStore,
     managed_blob::ManagedBlobStore,
     mcp::{
         CommitMcpImportParams, CreateMcpServerParams, DeleteMcpServerParams,
@@ -239,32 +236,17 @@ const RUNTIME_EVIDENCE_DELTA_BATCH_MAX_ITEMS: usize = 32;
 const CAMP_ATTACHMENT_VIEW_MUTATION_DEADLINE: Duration = Duration::from_secs(55);
 const CAMP_ATTACHMENT_VIEW_QUIESCENCE_POLL_INTERVAL: Duration = Duration::from_millis(100);
 
-async fn run_under_attachment_read_admission<F, Fut, T>(
-    camp_id: String,
-    gate: Arc<RwLock<()>>,
-    claim: F,
-) -> (CampAttachmentReadAdmission, T)
-where
-    F: FnOnce() -> Fut,
-    Fut: Future<Output = T>,
-{
-    let guard = gate.read_owned().await;
-    let claim = claim().await;
-    (
-        CampAttachmentReadAdmission {
-            camp_id,
-            _guard: guard,
-        },
-        claim,
-    )
-}
-
 struct CampAttachmentReadAdmission {
     camp_id: String,
-    _guard: tokio::sync::OwnedRwLockReadGuard<()>,
 }
 
 impl CampAttachmentReadAdmission {
+    fn for_camp(camp_id: &str) -> Self {
+        Self {
+            camp_id: camp_id.to_string(),
+        }
+    }
+
     fn prove(&self, camp_id: &str) -> Result<()> {
         if self.camp_id != camp_id {
             anyhow::bail!("Camp Attachment read admission does not match the AgentRun Camp");
@@ -1730,44 +1712,13 @@ impl Core {
         CampAttachmentReadAdmission,
         CampAttachmentRuntimeAuthorization,
     )> {
-        let gate = self.attachment_view_gate(camp_id).await;
-        for attempt in 0..2 {
-            let (admission, authorization) =
-                run_under_attachment_read_admission(camp_id.to_string(), gate.clone(), || {
-                    self.verified_camp_runtime_authorization(
-                        camp_id,
-                        workspace,
-                        CampAttachmentVisibilityMode::GenerationFencedV1,
-                    )
-                })
-                .await;
-            match authorization {
-                Ok(authorization) => return Ok((admission, authorization)),
-                Err(_) if attempt == 0 => {
-                    drop(admission);
-                    self.reconcile_camp_attachment_view_for_dispatch(camp_id)
-                        .await?;
-                }
-                Err(error) => {
-                    return Err(error).context(
-                        "Camp Attachment View remained unavailable after attachment-local reconciliation",
-                    );
-                }
-            }
-        }
-        unreachable!("the two-attempt attachment verification loop always returns")
-    }
-
-    async fn reconcile_camp_attachment_view_for_dispatch(&self, camp_id: &str) -> Result<()> {
-        let (_mutation, deadline) = self.acquire_camp_attachment_mutation(camp_id).await?;
-        self.wait_for_camp_attachment_quiescence(camp_id, deadline)
+        let authorization = self
+            .verified_camp_runtime_authorization(camp_id, workspace)
             .await?;
-        let mut database = self.database.lock().await;
-        self.attachment_views.reconcile_camp(
-            &mut database,
-            &CampAttachmentStore::new(&self.data_dir),
-            camp_id,
-        )
+        Ok((
+            CampAttachmentReadAdmission::for_camp(camp_id),
+            authorization,
+        ))
     }
 
     async fn wait_for_camp_attachment_quiescence(
@@ -3772,7 +3723,7 @@ impl Core {
                     }
                 }
                 let mut frozen_files = Vec::<AuthorityAttachment>::new();
-                let mut attachment_camp_id = None::<String>;
+                let mut managed_attachment_ingest_intent_id = None::<String>;
                 if operation == CAMP_MESSAGE_SEND_TOOL_NAME {
                     let send_input =
                         match serde_json::from_value::<CampMessageSendInput>(input.clone()) {
@@ -3790,18 +3741,24 @@ impl Core {
                         &authorized.agent_run_id,
                         &format!("builtin-cli:{request_id}"),
                     );
-                    let domain_command_id = TeamToolService::default().binding_command_id(
+                    let domain_command_id = match TeamToolService::default().binding_command_id(
                         &authorized.native_binding.native_binding_id,
                         &authorized.native_binding.binding_credential,
                         &scoped_tool_call_id,
-                    );
-                    let domain_recorded = if let Ok(command_id) = domain_command_id {
+                    ) {
+                        Ok(command_id) => command_id,
+                        Err(error) => {
+                            return BuiltinToolIpcResponse::ipc_error(
+                                "builtin_tool.internal_error",
+                                format!("Could not derive attachment ingest identity: {error:#}"),
+                            );
+                        }
+                    };
+                    let domain_recorded = {
                         let database = self.database.lock().await;
                         TeamToolService::default()
-                            .recorded_binding_command_exists(&database, &command_id)
+                            .recorded_binding_command_exists(&database, &domain_command_id)
                             .unwrap_or(false)
-                    } else {
-                        false
                     };
                     if !send_input.files.is_empty() && !domain_recorded {
                         let scope = {
@@ -3821,14 +3778,41 @@ impl Core {
                                 );
                             }
                         };
-                        let data_dir = self.data_dir.clone();
+                        let (managed_store, ingest_plan) = {
+                            let mut database = self.database.lock().await;
+                            let managed_store = ManagedAttachmentStore::for_database(&database);
+                            let plan = match managed_store.begin_agent_ingest(
+                                &mut database,
+                                &camp_id,
+                                &domain_command_id,
+                                send_input.files.len(),
+                            ) {
+                                Ok(Some(plan)) => plan,
+                                Ok(None) => {
+                                    return BuiltinToolIpcResponse::ipc_error(
+                                        "builtin_tool.internal_error",
+                                        "Managed Attachment ingest unexpectedly had no files",
+                                    );
+                                }
+                                Err(error) => {
+                                    return builtin_tool_rejection(
+                                        &operation,
+                                        &request_id,
+                                        "builtin_tool.invalid_input",
+                                        &format!("Attachment ingest was rejected: {error:#}"),
+                                    );
+                                }
+                            };
+                            (managed_store, plan)
+                        };
                         let run_tmp = authorized.run_tmp.clone();
                         let files = send_input.files.clone();
-                        let freeze_camp_id = camp_id.clone();
+                        let materializer = managed_store.clone();
+                        let materialization_plan = ingest_plan.clone();
                         drop(invocation_guard);
-                        frozen_files = match tokio::task::spawn_blocking(move || {
-                            CampAttachmentStore::new(&data_dir).freeze_agent_sources(
-                                &freeze_camp_id,
+                        let prepared = match tokio::task::spawn_blocking(move || {
+                            materializer.materialize_agent(
+                                &materialization_plan,
                                 &files,
                                 workspace.path(),
                                 &run_tmp,
@@ -3836,8 +3820,14 @@ impl Core {
                         })
                         .await
                         {
-                            Ok(Ok(frozen)) => frozen,
+                            Ok(Ok(prepared)) => prepared,
                             Ok(Err(error)) => {
+                                let mut database = self.database.lock().await;
+                                let _ = managed_store.abandon(
+                                    &mut database,
+                                    ingest_plan.intent_id(),
+                                    "copy_failed",
+                                );
                                 return builtin_tool_rejection(
                                     &operation,
                                     &request_id,
@@ -3846,13 +3836,36 @@ impl Core {
                                 );
                             }
                             Err(error) => {
+                                let mut database = self.database.lock().await;
+                                let _ = managed_store.abandon(
+                                    &mut database,
+                                    ingest_plan.intent_id(),
+                                    "copy_failed",
+                                );
                                 return BuiltinToolIpcResponse::ipc_error(
                                     "builtin_tool.internal_error",
-                                    format!("Attachment freeze task failed: {error}"),
+                                    format!("Attachment ingest task failed: {error}"),
                                 );
                             }
                         };
-                        attachment_camp_id = Some(camp_id);
+                        if let Err(error) = {
+                            let mut database = self.database.lock().await;
+                            managed_store.record_promoted(&mut database, &prepared)
+                        } {
+                            let mut database = self.database.lock().await;
+                            let _ = managed_store.abandon(
+                                &mut database,
+                                prepared.intent_id(),
+                                "promote_failed",
+                            );
+                            return BuiltinToolIpcResponse::ipc_error(
+                                "builtin_tool.internal_error",
+                                format!("Attachment promote receipt could not be saved: {error:#}"),
+                            );
+                        }
+                        frozen_files = prepared.attachments();
+                        managed_attachment_ingest_intent_id =
+                            Some(prepared.intent_id().to_string());
                         let reauthorized = self.builtin_tool_leases.authenticate(&auth).await;
                         if !matches!(
                             reauthorized,
@@ -3863,9 +3876,11 @@ impl Core {
                                         == authorized.native_binding.native_binding_id
                                     && current.run_tmp == authorized.run_tmp
                         ) {
-                            CampAttachmentStore::new(&self.data_dir).cleanup_unowned_agent_sources(
-                                attachment_camp_id.as_deref().unwrap_or_default(),
-                                &frozen_files,
+                            let mut database = self.database.lock().await;
+                            let _ = managed_store.abandon(
+                                &mut database,
+                                prepared.intent_id(),
+                                "source_invalid",
                             );
                             return BuiltinToolIpcResponse::ipc_error(
                                 "builtin_tool.run_not_bound",
@@ -3893,18 +3908,20 @@ impl Core {
                         Some((authorized.agent_run_id, authorized.execution_epoch)),
                         Some(request_id.clone()),
                         frozen_files.clone(),
+                        managed_attachment_ingest_intent_id.clone(),
                     )
                     .await;
-                let mut attachments_adopted = false;
-                if !frozen_files.is_empty() {
-                    attachments_adopted = {
-                        let database = self.database.lock().await;
-                        frozen_sources_are_owned(&database, &frozen_files).unwrap_or(false)
-                    };
-                    if !attachments_adopted {
-                        CampAttachmentStore::new(&self.data_dir).cleanup_unowned_agent_sources(
-                            attachment_camp_id.as_deref().unwrap_or_default(),
-                            &frozen_files,
+                if let Some(intent_id) = managed_attachment_ingest_intent_id.as_deref() {
+                    let mut database = self.database.lock().await;
+                    let managed_store = ManagedAttachmentStore::for_database(&database);
+                    let adopted = managed_store
+                        .intent_is_committed(&database, intent_id)
+                        .unwrap_or(false);
+                    if !adopted {
+                        let _ = managed_store.abandon(
+                            &mut database,
+                            intent_id,
+                            "message_commit_failed",
                         );
                     }
                 }
@@ -3958,9 +3975,6 @@ impl Core {
                     .await
                 {
                     return BuiltinToolIpcResponse::ipc_error(error.code, error.message);
-                }
-                if attachments_adopted && let Some(camp_id) = attachment_camp_id.as_deref() {
-                    self.request_camp_attachment_projection(camp_id);
                 }
                 BuiltinToolIpcResponse::Envelope { envelope }
             }
@@ -4040,6 +4054,7 @@ impl Core {
         attested_run: Option<(String, i64)>,
         evidence_request_id: Option<String>,
         frozen_files: Vec<AuthorityAttachment>,
+        managed_attachment_ingest_intent_id: Option<String>,
     ) -> TeamToolIpcResponse {
         let evidence_tool_name = request.tool_name.clone();
         let evidence_input = request.input.clone();
@@ -4139,6 +4154,7 @@ impl Core {
                         runtime_tool_call_id: request.runtime_tool_call_id,
                         input,
                         frozen_files,
+                        managed_attachment_ingest_intent_id,
                     };
                     let execution =
                         if let Some((agent_run_id, execution_epoch)) = attested_run.as_ref() {
@@ -6246,12 +6262,93 @@ impl Core {
             }));
         }
 
-        let execution = {
+        let (managed_store, ingest_plan) = {
             let mut database = self.database.lock().await;
-            CollaborationService::default().send_user_camp_draft(&mut database, &envelope)?
+            let managed_store = ManagedAttachmentStore::for_database(&database);
+            let plan = managed_store.begin_current_composer_ingest(
+                &mut database,
+                params.camp_id.as_str(),
+                &params.command_id,
+                params.draft_revision,
+            )?;
+            (managed_store, plan)
         };
-        if execution.result.status != CommandResultStatus::Rejected {
-            self.request_camp_attachment_projection(params.camp_id.as_str());
+        let prepared_ingest = if let Some(plan) = ingest_plan {
+            let materializer = managed_store.clone();
+            let authority_store = CampAttachmentStore::new(&self.data_dir);
+            let materialization_plan = plan.clone();
+            let prepared = match tokio::task::spawn_blocking(move || {
+                materializer.materialize_composer(&authority_store, &materialization_plan)
+            })
+            .await
+            .context("Managed Attachment Composer ingest task failed")?
+            {
+                Ok(prepared) => prepared,
+                Err(error) => {
+                    let mut database = self.database.lock().await;
+                    let _ = managed_store.abandon(&mut database, plan.intent_id(), "copy_failed");
+                    return Err(error);
+                }
+            };
+            if let Err(error) = {
+                let mut database = self.database.lock().await;
+                managed_store.record_promoted(&mut database, &prepared)
+            } {
+                let mut database = self.database.lock().await;
+                let _ =
+                    managed_store.abandon(&mut database, prepared.intent_id(), "promote_failed");
+                return Err(error);
+            }
+            Some(prepared)
+        } else {
+            None
+        };
+        let execution_result = {
+            let mut database = self.database.lock().await;
+            CollaborationService::default().send_user_camp_draft_with_managed_ingest(
+                &mut database,
+                &envelope,
+                prepared_ingest
+                    .as_ref()
+                    .map(|prepared| prepared.intent_id()),
+            )
+        };
+        let execution = match execution_result {
+            Ok(execution) if execution.result.status != CommandResultStatus::Rejected => execution,
+            Ok(execution) => {
+                if let Some(prepared) = prepared_ingest.as_ref() {
+                    let mut database = self.database.lock().await;
+                    let _ = managed_store.abandon(
+                        &mut database,
+                        prepared.intent_id(),
+                        "message_commit_failed",
+                    );
+                }
+                execution
+            }
+            Err(error) => {
+                if let Some(prepared) = prepared_ingest.as_ref() {
+                    let mut database = self.database.lock().await;
+                    let _ = managed_store.abandon(
+                        &mut database,
+                        prepared.intent_id(),
+                        "message_commit_failed",
+                    );
+                }
+                return Err(error);
+            }
+        };
+        if let Some(prepared) = prepared_ingest {
+            let cleanup_store = managed_store.clone();
+            let authority_store = CampAttachmentStore::new(&self.data_dir);
+            if let Err(error) = tokio::task::spawn_blocking(move || {
+                cleanup_store.cleanup_committed_composer_sources(&authority_store, &prepared)
+            })
+            .await
+            .context("Managed Attachment Composer source cleanup task failed")?
+            {
+                eprintln!("Committed Composer source cleanup was deferred: {error:#}");
+            }
         }
         Ok(json!({
             "commandResult": execution.result,
@@ -6713,35 +6810,30 @@ impl Core {
         };
         let claim = {
             let mut database = self.database.lock().await;
-            (|| {
-                if database_has_unresolved_writer_intent(&database, &candidate.camp_id)? {
-                    anyhow::bail!("camp_attachment_view_not_ready");
-                }
-                ExecutionRuntimeService::default().claim_agent_run(
-                    &mut database,
-                    &CommandEnvelope {
-                        command_id: uuid::Uuid::new_v4().to_string(),
-                        actor: ActorRef::System {
-                            component_id: "agent-run-scheduler".to_string(),
-                        },
-                        camp_id: Some(candidate.camp_id.clone()),
-                        expected_versions: Vec::new(),
-                        execution_epoch: None,
-                        payload: ClaimAgentRunCommand {
-                            agent_run_id: candidate.agent_run_id.clone(),
-                            expected_version: candidate.version,
-                            lease_owner: format!(
-                                "codex:{}:{}",
-                                candidate.agent_run_id,
-                                uuid::Uuid::new_v4()
-                            ),
-                            lease_seconds: 120,
-                            workspace: Some(workspace),
-                            starting_git_observation,
-                        },
+            ExecutionRuntimeService::default().claim_agent_run(
+                &mut database,
+                &CommandEnvelope {
+                    command_id: uuid::Uuid::new_v4().to_string(),
+                    actor: ActorRef::System {
+                        component_id: "agent-run-scheduler".to_string(),
                     },
-                )
-            })()
+                    camp_id: Some(candidate.camp_id.clone()),
+                    expected_versions: Vec::new(),
+                    execution_epoch: None,
+                    payload: ClaimAgentRunCommand {
+                        agent_run_id: candidate.agent_run_id.clone(),
+                        expected_version: candidate.version,
+                        lease_owner: format!(
+                            "codex:{}:{}",
+                            candidate.agent_run_id,
+                            uuid::Uuid::new_v4()
+                        ),
+                        lease_seconds: 120,
+                        workspace: Some(workspace),
+                        starting_git_observation,
+                    },
+                },
+            )
         };
         let claim = match claim {
             Ok(claim) if claim.result.status == CommandResultStatus::Accepted => claim,
@@ -6842,10 +6934,8 @@ impl Core {
                     &mut launch_permit,
                 )
                 .await;
-            // Agent-authored attachment publication cannot take the Camp write admission
-            // while this Run owns its lifecycle read admission. Release first, then wake the
-            // persistent projection intent so a prior write timeout does not strand it until
-            // the next process restart.
+            // New Runs carry only a Camp-scoped root proof. Their terminal path may wake legacy
+            // recovery work, but no legacy View admission is held across the Run lifecycle.
             if !release_agent_run_attachment_admission(
                 attachment_view_admission,
                 &core.attachment_projection_requests,
@@ -8794,23 +8884,10 @@ impl Core {
         &self,
         camp_id: &str,
         workspace: &Path,
-        visibility_mode: CampAttachmentVisibilityMode,
     ) -> Result<CampAttachmentRuntimeAuthorization> {
-        let verification = {
-            let database = self.database.lock().await;
-            self.attachment_views.prepare_camp_runtime_authorization(
-                &database,
-                camp_id,
-                Some(workspace),
-                visibility_mode,
-            )?
-        };
-        let verified = tokio::task::spawn_blocking(move || verification.verify())
-            .await
-            .context("Camp Attachment View verification task failed")??;
         let database = self.database.lock().await;
         self.attachment_views
-            .complete_verified_camp_runtime_authorization(&database, verified)
+            .camp_root_runtime_authorization(&database, camp_id, Some(workspace))
     }
 
     async fn launch_agent_run(
@@ -11070,6 +11147,13 @@ async fn run_core(
     }
     let attachment_store = CampAttachmentStore::new(&data_dir);
     attachment_store.cleanup_expired(&mut database)?;
+    let recovered_managed_ingests =
+        ManagedAttachmentStore::for_database(&database).reconcile(&mut database)?;
+    if recovered_managed_ingests != 0 {
+        eprintln!(
+            "Managed Attachment startup recovery reconciled {recovered_managed_ingests} ingest intent(s)"
+        );
+    }
     let discarded_pending_camps =
         CollaborationService::default().discard_empty_pending_camps_on_startup(&mut database)?;
     for camp_id in &discarded_pending_camps {
@@ -16950,7 +17034,7 @@ while IFS= read -r _ignored; do :; done
 
     #[cfg(all(target_os = "macos", feature = "slow-tests"))]
     #[tokio::test]
-    async fn dispatch_attachment_admission_degrades_invalid_content_before_claim() {
+    async fn v2_dispatch_admission_ignores_broken_legacy_view_and_managed_payload() {
         use std::os::unix::fs::PermissionsExt;
 
         let root = std::env::temp_dir().join(format!(
@@ -17034,43 +17118,35 @@ while IFS= read -r _ignored; do :; done
         })
         .await
         .unwrap();
-        core.drive_camp_attachment_publications(&camp_id)
-            .await
-            .unwrap();
-
         let attachment_store = CampAttachmentStore::new(&core.data_dir);
-        let authority_candidate = {
+        let managed_candidate = {
             let database = core.database.lock().await;
             attachment_store
                 .desktop_open_candidate(&database, &camp_id, &attachment_id)
                 .unwrap()
                 .unwrap()
         };
-        let authority_path = attachment_store
-            .verify_desktop_open_candidate(authority_candidate)
+        let managed_path = attachment_store
+            .verify_desktop_open_candidate(managed_candidate)
             .unwrap()
             .path;
         let initial_authorization = core
-            .verified_camp_runtime_authorization(
-                &camp_id,
-                &workspace,
-                CampAttachmentVisibilityMode::GenerationFencedV1,
-            )
+            .verified_camp_runtime_authorization(&camp_id, &workspace)
             .await
             .unwrap();
-        let projected_path = initial_authorization
-            .attachment_root
-            .join(&attachment_id)
-            .join("payload")
-            .join("published.txt");
-        assert!(projected_path.is_file());
+        assert!(managed_path.starts_with(&initial_authorization.attachment_root));
+        assert!(managed_path.is_file());
 
-        fs::set_permissions(&projected_path, fs::Permissions::from_mode(0o600)).unwrap();
-        fs::write(&projected_path, b"corrupted projected bytes").unwrap();
-        let authority_container = authority_path.parent().unwrap();
-        fs::set_permissions(authority_container, fs::Permissions::from_mode(0o700)).unwrap();
-        fs::remove_file(&authority_path).unwrap();
-        fs::set_permissions(authority_container, fs::Permissions::from_mode(0o500)).unwrap();
+        let payload_container = managed_path.parent().unwrap();
+        fs::set_permissions(payload_container, fs::Permissions::from_mode(0o700)).unwrap();
+        fs::remove_file(&managed_path).unwrap();
+        fs::set_permissions(payload_container, fs::Permissions::from_mode(0o500)).unwrap();
+        {
+            let mut database = core.database.lock().await;
+            core.attachment_views
+                .mark_legacy_view_broken_for_test(&mut database, &camp_id)
+                .unwrap();
+        }
 
         let (admission, authorization) = core
             .verified_camp_attachment_admission(&camp_id, &workspace)
@@ -17079,22 +17155,23 @@ while IFS= read -r _ignored; do :; done
         admission.prove(&camp_id).unwrap();
         assert_eq!(authorization.camp_id, camp_id);
         assert!(authorization.attachment_root.is_dir());
-        assert!(
-            fs::read_dir(&authorization.attachment_root)
-                .unwrap()
-                .next()
-                .is_none()
-        );
         {
             let database = core.database.lock().await;
-            core.attachment_views
-                .verify_camp_ready(&database, &camp_id)
-                .unwrap();
+            assert!(
+                core.attachment_views
+                    .verify_camp_ready(&database, &camp_id)
+                    .is_err()
+            );
         }
 
         let view_attachment_root = authorization.attachment_root.clone();
         drop(admission);
-        fs::set_permissions(authority_container, fs::Permissions::from_mode(0o700)).unwrap();
+        fs::set_permissions(payload_container, fs::Permissions::from_mode(0o700)).unwrap();
+        fs::set_permissions(
+            payload_container.parent().unwrap(),
+            fs::Permissions::from_mode(0o700),
+        )
+        .unwrap();
         CampAttachmentStore::new(&core.data_dir)
             .remove_camp(&camp_id)
             .unwrap();
@@ -17113,50 +17190,17 @@ while IFS= read -r _ignored; do :; done
         fs::remove_dir_all(root).unwrap();
     }
 
-    #[tokio::test]
-    async fn agent_run_claim_waits_for_attachment_read_admission_and_retains_it() {
-        let gate = Arc::new(RwLock::new(()));
-        let writer = gate.clone().write_owned().await;
-        let claim_started = Arc::new(std::sync::atomic::AtomicBool::new(false));
-        let claim_started_in_task = claim_started.clone();
-        let claim_task = tokio::spawn(run_under_attachment_read_admission(
-            "rvcamp_test".to_string(),
-            gate.clone(),
-            move || async move {
-                claim_started_in_task.store(true, std::sync::atomic::Ordering::Release);
-                "claimed"
-            },
-        ));
-
-        tokio::task::yield_now().await;
-        assert!(
-            !claim_started.load(std::sync::atomic::Ordering::Acquire),
-            "Claim must remain queued while publication owns the write gate"
-        );
-        drop(writer);
-        let (admission, claim) = tokio::time::timeout(Duration::from_secs(1), claim_task)
-            .await
-            .expect("Claim should proceed after publication releases the gate")
-            .unwrap();
-        assert_eq!(claim, "claimed");
+    #[test]
+    fn agent_run_attachment_admission_is_camp_scoped_without_a_generation_gate() {
+        let admission = CampAttachmentReadAdmission::for_camp("rvcamp_test");
         admission.prove("rvcamp_test").unwrap();
         assert!(admission.prove("rvcamp_other").is_err());
-
-        assert!(
-            tokio::time::timeout(Duration::from_millis(20), gate.clone().write_owned())
-                .await
-                .is_err(),
-            "the returned admission must cover the claimed Run lifecycle"
-        );
         let (projection_tx, mut projection_rx) = mpsc::unbounded_channel();
         assert!(release_agent_run_attachment_admission(
             admission,
             &projection_tx
         ));
-        assert_eq!(projection_rx.recv().await.as_deref(), Some("rvcamp_test"));
-        tokio::time::timeout(Duration::from_secs(1), gate.write_owned())
-            .await
-            .expect("the write gate should reopen before projection is reawakened");
+        assert_eq!(projection_rx.try_recv().as_deref(), Ok("rvcamp_test"));
     }
 
     #[test]

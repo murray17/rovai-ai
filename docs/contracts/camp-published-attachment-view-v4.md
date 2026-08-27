@@ -79,18 +79,19 @@ unavailable even if they are locally readable.
 
 Attachment-local degradation does not weaken instance or containment security. Root marker/identity mismatch, foreign or
 unknown root entries, symlink/reparse traversal, containment escape, unsafe database state, unresolved journals and any
-rebuild that cannot safely replace the derived View remain fail closed. A corrupt View payload is never exposed: Core may
-continue only after safely rebuilding it from verified Authority or omitting its invalid Authority attachment under the
-rules above.
+rebuild that cannot safely replace the derived View remain fail closed for legacy publication mutation/recovery itself. A
+corrupt legacy payload is never exposed. These failures do not gate a new Context or Runtime authorization that has no
+successfully resolved legacy reference; that path is owned by Camp Attachment v6 and uses the admitted Camp root directly.
 
 Publication copy failure before immutable resolution continues to follow v3 recovery/terminal semantics. v4 does not
 reinterpret an unresolved publication as a successful empty catalog.
 
 ## Admission and compatibility
 
-`CAMP_ATTACHMENT_VIEW_CONTRACT_VERSION = 4`. Runtime Host compatibility binds v4 in addition to Camp, Agent, exact root,
-visibility mode and required generation; a v3 Host cannot be reused. The semantic receipt wire remains schema 2, and the
-Runtime Attachment Auth Receipt remains schema 1.
+`CAMP_ATTACHMENT_VIEW_CONTRACT_VERSION = 4`. New Runtime Host compatibility still binds v4 in addition to Camp, Agent,
+exact root and `live_append_v1`, but it does not bind a legacy generation or require View readiness. Legacy publication
+operations retain their own generation and mutation admission internally. The semantic receipt wire remains schema 2,
+including the no-legacy sentinel defined by Camp Attachment v6, and Runtime Attachment Auth Receipt remains schema 1.
 
 No Data Contract migration is required. Existing `runtime_projection_state`, operation resolution, semantic catalog and
 View receipt fields already represent the two axes. Startup reconciliation deterministically converts only incidents it

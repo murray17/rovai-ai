@@ -2,8 +2,8 @@ import { defineBenchmarkProfile } from '../execution/suite.mjs'
 import { digestJson } from '../protocol/canonical.mjs'
 
 export const CURRENT_CONTRACT_DATA_STORE = Object.freeze({
-  version: 'v1.19',
-  projectionSchemaVersion: 60
+  version: 'v1.25',
+  projectionSchemaVersion: 66
 })
 
 const criteria = [
@@ -45,10 +45,12 @@ const criteria = [
       test('crates/rovai-core/src/db.rs', 'current_migration_state_admission_matrix'),
       test('crates/rovai-core/src/db.rs', 'current_schema_contains_required_contract_objects'),
       test('crates/rovai-core/src/db.rs', 'v104_adds_cursor_catalog_and_delivery_without_expanding_custom_skills'),
-      test('crates/rovai-core/src/db.rs', 'v105_adds_kimi_catalog_and_delivery_without_expanding_custom_skills')
+      test('crates/rovai-core/src/db.rs', 'v105_adds_kimi_catalog_and_delivery_without_expanding_custom_skills'),
+      test('crates/rovai-core/src/db.rs', 'v111_upgrades_current_main_v110_and_keeps_zero_attempt_cancellation_terminal'),
+      test('crates/rovai-core/src/db.rs', 'v112_upgrades_v111_and_installs_managed_attachment_v2_idempotently')
     ]
   ),
-  criterion('CCC-012', 'CampSnapshot schema is 32', [
+  criterion('CCC-012', 'CampSnapshot schema is 33', [
     test('crates/rovai-core/src/read_model.rs', 'snapshot_projects_current_names_from_structured_mentions')
   ]),
   criterion('CCC-013', 'Production admission accepts only the exact current contract and quarantines incompatible managed state', [
@@ -61,14 +63,14 @@ const criteria = [
   criterion('CCC-015', 'Self-authored recent messages are excluded before the top-15 and omission aggregate', [
     test('crates/rovai-core/src/context.rs', 'recent_public_messages_filter_self_before_limit_and_omission_aggregation')
   ]),
-  criterion('CCC-016', 'Attachment publication commits semantics before asynchronous projection, gates Delivery on resolution, and terminally settles failed source projection', [
-    test('crates/rovai-core/src/camp_attachment_view.rs', 'rollback_append_only_validation_and_controlled_rebuild_preserve_committed_entries'),
-    test('crates/rovai-core/src/camp_attachment_view.rs', 'publication_copy_phase_releases_the_shared_database_mutex'),
-    test('crates/rovai-core/src/camp_attachment_view.rs', 'semantic_publication_success_commits_a_verified_resolution_ledger'),
-    test('crates/rovai-core/src/camp_attachment_view.rs', 'terminal_projection_failure_tombstones_public_attachment_and_releases_intent'),
-    test('crates/rovai-core/src/team_tool.rs', 'attachment_send_returns_real_ids_and_terminal_projection_failure_settles_without_attempt'),
-    test('crates/rovai-core/src/db.rs', 'v100_backfills_stable_catalog_and_terminalizes_old_nonterminal_runs'),
-    test('crates/rovai-core/src/main.rs', 'agent_run_claim_waits_for_attachment_read_admission_and_retains_it')
+  criterion('CCC-016', 'Managed v2 ingests immutable attachments once, commits Message refs without a legacy projection gate, and recovers incomplete ingest intents', [
+    test('crates/rovai-core/src/managed_attachment.rs', 'composer_ingest_promotes_once_and_commits_only_v2_rows'),
+    test('crates/rovai-core/src/managed_attachment.rs', 'startup_reconcile_abandons_staging_and_promoted_precommit_intents'),
+    test('crates/rovai-core/src/team_tool.rs', 'attachment_send_commits_managed_v2_and_dispatches_without_projection_gate'),
+    test('crates/rovai-core/src/team_tool.rs', 'running_source_sends_fourteen_mib_without_waiting_for_camp_publication'),
+    test('crates/rovai-core/src/camp_attachment_view.rs', 'legacy_rebuild_target_preserves_managed_v2_resources'),
+    test('crates/rovai-core/src/context.rs', 'unavailable_legacy_locator_is_omitted_without_filesystem_fallback'),
+    test('crates/rovai-core/src/main.rs', 'v2_dispatch_admission_ignores_broken_legacy_view_and_managed_payload')
   ])
 ]
 
@@ -91,7 +93,7 @@ export const CURRENT_CONTRACT_CRITERIA = Object.freeze(criteria)
 
 export const CURRENT_CONTRACT_PROFILE = defineBenchmarkProfile({
   id: 'current-contract-conformance',
-  version: '1.19.0',
+  version: '1.25.0',
   lane: 'contract-conformance',
   hardOutcomeDefinition: {
     validity: 'deterministic_source_and_harness_valid',
@@ -109,8 +111,8 @@ export const CURRENT_CONTRACT_PROFILE = defineBenchmarkProfile({
     compositeScore: false
   },
   suite: {
-    id: 'rovai-v1.19-current-contract',
-    version: '1.19.0',
+    id: 'rovai-v1.25-current-contract',
+    version: '1.25.0',
     shuffle: false,
     rounds: [{ id: 'deterministic', ordinal: 1 }],
     cases: criteria.map((entry) => ({

@@ -9,7 +9,7 @@ use uuid::Uuid;
 use crate::{
     agent_identity::parse_agent_id,
     agent_profile::resolve_frozen_runtime,
-    camp_attachment_publication::{AuthorityAttachment, CampAttachmentPublicationCoordinator},
+    camp_attachment_publication::AuthorityAttachment,
     camp_content::{
         StructuredCampMessageSegment, canonical_content_digest, normalize_content,
         render_current_plain_text,
@@ -34,6 +34,9 @@ use crate::{
         persist_gather_item, persist_gather_record, reopen_item_for_retry, resolve_gather_capture,
         settle_completion_for_agent_run, settle_item_from_agent_run_terminal,
         settle_item_from_delivery_terminal, validate_completion_retry,
+    },
+    managed_attachment::{
+        CommitManagedAttachmentIngest, ManagedAttachmentIngestSource, ManagedAttachmentService,
     },
     runtime::AgentRunWorkspace,
     runtime_basis::capture_run_runtime_basis,
@@ -553,6 +556,7 @@ pub struct SendPublicA2aMessage<'a> {
     pub mention_user: bool,
     pub task_id: Option<&'a str>,
     pub attachments: &'a [AuthorityAttachment],
+    pub managed_attachment_ingest_intent_id: Option<&'a str>,
     pub operation: PublicA2aOperation<'a>,
 }
 
@@ -1152,49 +1156,31 @@ pub fn persist_public_a2a_message(
             },
         ],
     )?;
-    let attachment_publication = CampAttachmentPublicationCoordinator.commit_agent_intent(
-        transaction,
-        request.camp_id,
-        &message_id,
-        request.command_id,
-        request.attachments,
-    )?;
-    for (position, attachment) in request.attachments.iter().enumerate() {
-        let publication = attachment_publication
-            .as_ref()
-            .context("Agent attachment publication aggregate is missing")?;
-        transaction.execute(
-            r#"
-            INSERT INTO message_attachment(
-                id, camp_id, camp_message_id, conversation_message_id,
-                position, display_name, media_type, byte_size,
-                content_digest, storage_path, preview_kind,
-                created_by_type, created_by_id, created_at,
-                runtime_projection_state, publication_operation_id,
-                publication_semantic_revision
-            ) VALUES (
-                ?1, ?2, ?3, NULL, ?4, ?5, ?6, ?7,
-                ?8, ?9, ?10, 'agent', ?11, ?12,
-                'pending', ?13, ?14
-            )
-            "#,
-            params![
-                attachment.attachment_id,
-                request.camp_id,
-                message_id,
-                position as i64,
-                attachment.display_name,
-                attachment.media_type,
-                attachment.byte_size as i64,
-                attachment.content_digest,
-                attachment.storage_path.to_string_lossy(),
-                attachment.preview_kind,
-                request.author_agent_id,
-                now,
-                publication.operation_id,
-                publication.semantic_revision,
-            ],
+    if request.attachments.is_empty() != request.managed_attachment_ingest_intent_id.is_none() {
+        anyhow::bail!("Agent attachment ingest identity does not match the frozen files");
+    }
+    if let Some(intent_id) = request.managed_attachment_ingest_intent_id {
+        let committed_attachment_ids = ManagedAttachmentService.commit_ingest(
+            transaction,
+            CommitManagedAttachmentIngest {
+                intent_id,
+                camp_id: request.camp_id,
+                camp_message_id: &message_id,
+                expected_source: ManagedAttachmentIngestSource::AgentWorkspace,
+                created_by_type: "agent",
+                created_by_id: request.author_agent_id,
+                now: &now,
+            },
         )?;
+        if committed_attachment_ids
+            != request
+                .attachments
+                .iter()
+                .map(|attachment| attachment.attachment_id.clone())
+                .collect::<Vec<_>>()
+        {
+            anyhow::bail!("Agent attachment ingest plan changed before CampMessage commit");
+        }
     }
     index_camp_message(
         transaction,
@@ -1448,13 +1434,6 @@ pub fn persist_public_a2a_message(
             }),
         )?;
         delivery_ids.push(delivery_id);
-    }
-    if let Some(publication) = attachment_publication.as_ref() {
-        CampAttachmentPublicationCoordinator.gate_deliveries(
-            transaction,
-            &delivery_ids,
-            &publication.operation_id,
-        )?;
     }
     crate::collaboration::append_domain_event(
         transaction,

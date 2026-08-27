@@ -35,9 +35,11 @@ pub const MAX_CONCURRENT_STAGING_OPERATIONS: i64 = 8;
 
 const ROOT_MARKER: &str = ".runtime-camp-files-root.json";
 const ROOT_LOCK: &str = ".runtime-camp-files.lock";
+const MANAGED_V2_DIRECTORY: &str = ".managed-v2";
 const LEGACY_ROOT_MARKER_SCHEMA_VERSION: i64 = 1;
 const ROOT_MARKER_SCHEMA_VERSION: i64 = 2;
 const INSTANCE_KEY_DOMAIN: &[u8] = b"rovai-runtime-camp-files-instance-v1\0";
+const LEGACY_VIEW_NOT_REQUIRED_REVISION: i64 = -1;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -347,6 +349,25 @@ impl CampAttachmentViewStore {
             instance_key: "test-instance".to_string(),
             lock_file,
         })
+    }
+
+    #[cfg(any(test, feature = "slow-tests"))]
+    #[doc(hidden)]
+    pub fn mark_legacy_view_broken_for_test(
+        &self,
+        database: &mut Database,
+        camp_id: &str,
+    ) -> Result<()> {
+        CampId::parse(camp_id)?;
+        database.connection().execute(
+            r#"
+            UPDATE camp_attachment_view
+            SET state = 'integrity_failed', last_error_code = 'legacy_fixture_broken'
+            WHERE camp_id = ?1
+            "#,
+            [camp_id],
+        )?;
+        Ok(())
     }
 
     pub fn admit(root: &Path, data_dir: &Path, other_managed_roots: &[PathBuf]) -> Result<Self> {
@@ -1532,6 +1553,36 @@ impl CampAttachmentViewStore {
         self.complete_verified_camp_runtime_authorization(database, verified)
     }
 
+    pub fn camp_root_runtime_authorization(
+        &self,
+        database: &Database,
+        camp_id: &str,
+        workspace: Option<&Path>,
+    ) -> Result<CampAttachmentRuntimeAuthorization> {
+        CampId::parse(camp_id)?;
+        if database.runtime_camp_files_root_identity_digest() != self.root_identity_digest {
+            anyhow::bail!("runtime_camp_files_root_invalid: admitted root identity changed");
+        }
+        if directory_identity_digest(&self.root)? != self.root_identity_digest {
+            anyhow::bail!("runtime_camp_files_root_invalid: current root identity changed");
+        }
+        if let Some(workspace) = workspace {
+            let canonical_workspace = fs::canonicalize(workspace)
+                .context("AgentRun workspace cannot be canonicalized")?;
+            reject_overlap(&self.root, &canonical_workspace)?;
+        }
+        let attachment_root = self.camp_attachment_root(camp_id)?;
+        validate_camp_root_authorization(&attachment_root)?;
+        Ok(CampAttachmentRuntimeAuthorization {
+            camp_id: camp_id.to_string(),
+            attachment_root,
+            root_identity_digest: self.root_identity_digest.clone(),
+            generation: 0,
+            catalog_digest: camp_root_authorization_digest(camp_id, &self.root_identity_digest)?,
+            visibility_mode: CampAttachmentVisibilityMode::LiveAppendV1,
+        })
+    }
+
     pub fn verify_camp_ready(&self, database: &Database, camp_id: &str) -> Result<()> {
         if has_unresolved_publication(database.connection(), camp_id)? {
             anyhow::bail!("camp_attachment_view_not_ready");
@@ -2487,8 +2538,11 @@ impl CampAttachmentViewStore {
                 validate_managed_directory(&attachment_root, None)?;
                 let existing = read_typed_attachment_directory_ids(&attachment_root)?;
                 if replace_existing {
-                    remove_managed_tree(&attachment_root)?;
-                    ensure_private_directory(&attachment_root)?;
+                    set_directory_mode(&attachment_root, 0o700)?;
+                    for attachment_id in existing {
+                        remove_managed_tree(&attachment_root.join(attachment_id))?;
+                    }
+                    sync_directory(&attachment_root)?;
                 } else if !existing.is_empty() {
                     anyhow::bail!(
                         "camp_attachment_view_recovery_required: initial View target is not empty"
@@ -3403,6 +3457,20 @@ pub fn load_camp_attachment_view_receipt(
     CampId::parse(camp_id)?;
     referenced_attachment_ids.sort_by(|left, right| left.as_bytes().cmp(right.as_bytes()));
     referenced_attachment_ids.dedup();
+    if referenced_attachment_ids.is_empty() {
+        let receipt = CampAttachmentViewReceiptV2 {
+            schema_version: CAMP_ATTACHMENT_VIEW_RECEIPT_VERSION,
+            camp_id: camp_id.to_string(),
+            attachment_root_relative_path: camp_attachment_root_relative(camp_id),
+            catalog_revision: LEGACY_VIEW_NOT_REQUIRED_REVISION,
+            catalog_entry_count: 0,
+            semantic_catalog_digest: canonical_json_digest(&Value::Array(Vec::new()))?,
+            referenced_entries: Vec::new(),
+            referenced_entries_digest: canonical_json_digest(&Value::Array(Vec::new()))?,
+        };
+        let digest = canonical_json_digest(&serde_json::to_value(&receipt)?)?;
+        return Ok((receipt, digest));
+    }
     let mut referenced_entries = Vec::with_capacity(referenced_attachment_ids.len());
     for attachment_id in &referenced_attachment_ids {
         validate_attachment_id(attachment_id)?;
@@ -3516,6 +3584,15 @@ pub fn resolve_published_attachment_path(
         .into_owned())
 }
 
+pub fn resolve_camp_attachment_root(connection: &Connection, camp_id: &str) -> Result<String> {
+    CampId::parse(camp_id)?;
+    Ok(
+        resolve_root_relative_runtime_path(connection, &camp_attachment_root_relative(camp_id))?
+            .to_string_lossy()
+            .into_owned(),
+    )
+}
+
 pub fn resolve_published_attachment_root(connection: &Connection, camp_id: &str) -> Result<String> {
     CampId::parse(camp_id)?;
     let relative: String = connection
@@ -3593,14 +3670,50 @@ pub fn runtime_attachment_auth_receipt(
     Ok((auth, digest))
 }
 
-pub fn validate_append_only_view_receipt(
+pub fn runtime_camp_root_attachment_auth_receipt(
     connection: &Connection,
+    camp_id: &str,
+    manifest_view_receipt_digest: &str,
+) -> Result<(RuntimeAttachmentAuthReceiptV1, String)> {
+    CampId::parse(camp_id)?;
+    let root_identity_digest = connection
+        .query_row(
+            "SELECT rovai_runtime_camp_files_root_identity_digest()",
+            [],
+            |row| row.get::<_, String>(0),
+        )
+        .context("runtime_camp_files_root_invalid: connection has no admitted root identity")?;
+    let auth = RuntimeAttachmentAuthReceiptV1 {
+        schema_version: RUNTIME_ATTACHMENT_AUTH_RECEIPT_VERSION,
+        camp_id: camp_id.to_string(),
+        published_attachment_root: resolve_camp_attachment_root(connection, camp_id)?,
+        root_identity_digest: root_identity_digest.clone(),
+        dispatch_generation: 0,
+        catalog_digest_at_dispatch: camp_root_authorization_digest(camp_id, &root_identity_digest)?,
+        visibility_mode: CampAttachmentVisibilityMode::LiveAppendV1
+            .as_str()
+            .to_string(),
+        compatibility_generation: None,
+        manifest_view_receipt_digest: manifest_view_receipt_digest.to_string(),
+    };
+    let digest = canonical_json_digest(&serde_json::to_value(&auth)?)?;
+    Ok((auth, digest))
+}
+
+fn camp_root_authorization_digest(camp_id: &str, root_identity_digest: &str) -> Result<String> {
+    canonical_json_digest(&json!({
+        "schemaVersion": 1,
+        "campId": camp_id,
+        "rootIdentityDigest": root_identity_digest,
+        "scope": "camp_attachment_root",
+    }))
+}
+
+pub fn validate_frozen_camp_attachment_view_receipt(
     receipt: &CampAttachmentViewReceiptV2,
 ) -> Result<()> {
     CampId::parse(&receipt.camp_id)?;
     if receipt.schema_version != CAMP_ATTACHMENT_VIEW_RECEIPT_VERSION
-        || receipt.catalog_revision < 0
-        || receipt.catalog_entry_count < 0
         || receipt.attachment_root_relative_path != camp_attachment_root_relative(&receipt.camp_id)
     {
         anyhow::bail!("camp_attachment_view_generation_mismatch: receipt version or counters");
@@ -3616,6 +3729,35 @@ pub fn validate_append_only_view_receipt(
         || canonical_json_digest(&json!(referenced))? != receipt.referenced_entries_digest
     {
         anyhow::bail!("camp_attachment_view_generation_mismatch: referenced attachment set digest");
+    }
+    for entry in &receipt.referenced_entries {
+        validate_attachment_id(&entry.attachment_id)?;
+        validate_root_relative_path(Path::new(&entry.root_relative_payload_path))?;
+    }
+    if receipt.catalog_revision == LEGACY_VIEW_NOT_REQUIRED_REVISION {
+        if receipt.catalog_entry_count != 0
+            || !receipt.referenced_entries.is_empty()
+            || receipt.semantic_catalog_digest != canonical_json_digest(&Value::Array(Vec::new()))?
+        {
+            anyhow::bail!(
+                "camp_attachment_view_generation_mismatch: no-legacy receipt is inconsistent"
+            );
+        }
+        return Ok(());
+    }
+    if receipt.catalog_revision < 0 || receipt.catalog_entry_count < 0 {
+        anyhow::bail!("camp_attachment_view_generation_mismatch: receipt version or counters");
+    }
+    Ok(())
+}
+
+pub fn validate_append_only_view_receipt(
+    connection: &Connection,
+    receipt: &CampAttachmentViewReceiptV2,
+) -> Result<()> {
+    validate_frozen_camp_attachment_view_receipt(receipt)?;
+    if receipt.catalog_revision == LEGACY_VIEW_NOT_REQUIRED_REVISION {
+        return Ok(());
     }
     let current = connection
         .query_row(
@@ -3645,8 +3787,6 @@ pub fn validate_append_only_view_receipt(
         );
     }
     for expected in &receipt.referenced_entries {
-        validate_attachment_id(&expected.attachment_id)?;
-        validate_root_relative_path(Path::new(&expected.root_relative_payload_path))?;
         let actual = connection
             .query_row(
                 r#"
@@ -4621,6 +4761,7 @@ fn verify_committed_view_entry_receipt(camp_id: &str, entry: &CommittedViewEntry
 fn read_typed_attachment_directory_ids(path: &Path) -> Result<std::collections::BTreeSet<String>> {
     read_exact_utf8_names(path)?
         .into_iter()
+        .filter(|name| name != MANAGED_V2_DIRECTORY)
         .map(|name| {
             validate_attachment_id(&name)?;
             Ok(name)
@@ -5516,6 +5657,22 @@ fn validate_runtime_attachment_root(path: &Path) -> Result<()> {
     Ok(())
 }
 
+fn validate_camp_root_authorization(path: &Path) -> Result<()> {
+    let metadata = fs::symlink_metadata(path)?;
+    if metadata.file_type().is_symlink() || !metadata.is_dir() {
+        anyhow::bail!("runtime_camp_files_root_invalid: Camp Attachment root is unsafe");
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = metadata.permissions().mode() & 0o777;
+        if !matches!(mode, 0o500 | 0o700) {
+            anyhow::bail!("runtime_camp_files_root_invalid: Camp Attachment root is not private");
+        }
+    }
+    Ok(())
+}
+
 fn harden_runtime_entry(path: &Path) -> Result<()> {
     let metadata = fs::symlink_metadata(path)?;
     if metadata.file_type().is_symlink() {
@@ -5776,6 +5933,48 @@ mod tests {
         view.ensure_empty_camp_ready(&mut database, &camp_id)
             .unwrap();
         (database, data_dir, camp_id, view)
+    }
+
+    #[test]
+    fn no_legacy_references_need_no_legacy_view_row_or_state() {
+        let connection = Connection::open_in_memory().unwrap();
+        let camp_id = "rvcamp_01h47kvsy5fk1shh6w1g60eecf";
+        let (receipt, digest) =
+            load_camp_attachment_view_receipt(&connection, camp_id, Vec::new()).unwrap();
+
+        assert_eq!(receipt.catalog_revision, LEGACY_VIEW_NOT_REQUIRED_REVISION);
+        assert_eq!(receipt.catalog_entry_count, 0);
+        assert!(receipt.referenced_entries.is_empty());
+        assert_eq!(
+            canonical_json_digest(&serde_json::to_value(&receipt).unwrap()).unwrap(),
+            digest
+        );
+        validate_append_only_view_receipt(&connection, &receipt).unwrap();
+    }
+
+    #[test]
+    fn legacy_rebuild_target_preserves_managed_v2_resources() {
+        let (_database, _data_dir, camp_id, view) = fixture();
+        let attachment_root = view.camp_attachment_root(&camp_id).unwrap();
+        set_directory_mode(&attachment_root, 0o700).unwrap();
+        let managed_root = attachment_root.join(MANAGED_V2_DIRECTORY);
+        ensure_private_directory(&managed_root).unwrap();
+        fs::write(managed_root.join("sentinel"), b"managed-v2").unwrap();
+        let legacy_id = Uuid::new_v4().to_string();
+        let legacy_root = attachment_root.join(&legacy_id);
+        ensure_private_directory(&legacy_root).unwrap();
+        fs::write(legacy_root.join("legacy"), b"legacy-v1").unwrap();
+        set_directory_mode(&attachment_root, 0o500).unwrap();
+
+        assert_eq!(
+            view.prepare_backfill_target(&camp_id, true).unwrap(),
+            attachment_root
+        );
+        assert_eq!(
+            fs::read(managed_root.join("sentinel")).unwrap(),
+            b"managed-v2"
+        );
+        assert!(!legacy_root.exists());
     }
 
     fn publish_current_draft(
