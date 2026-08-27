@@ -2543,7 +2543,7 @@ describe('task event projections', () => {
       contextManifests: [], executionEvidence: [], workspaceChangeWindows: [],
       approvals: [], actions: [], timeline: []
     }
-    const markup = renderToStaticMarkup(createElement(CampWorkspace, {
+    const workspaceProps: Parameters<typeof CampWorkspace>[0] = {
       snapshot,
       projectName: null,
       agents: [unreadyProfile],
@@ -2564,6 +2564,14 @@ describe('task event projections', () => {
       },
       onConfigureRuntime: () => undefined,
       onDismissRuntimeRecovery: () => undefined
+    }
+    const markup = renderToStaticMarkup(createElement(CampWorkspace, workspaceProps))
+    const pendingMarkup = renderToStaticMarkup(createElement(CampWorkspace, {
+      ...workspaceProps,
+      snapshot: {
+        ...snapshot,
+        camp: { ...snapshot.camp, activationState: 'pending' }
+      }
     }))
 
     expect(markup).toContain('给 洛可 发消息')
@@ -2571,6 +2579,15 @@ describe('task event projections', () => {
     expect(markup).not.toContain('和队伍继续前行：补充线索、调整方向或布置新任务…')
     expect(markup).not.toContain('默认由 Lead · 洛可接收')
     expect(markup).toContain('开始这段协作')
+    expect(markup).toContain('class="empty-camp-mark" data-brand-mark="horizon" data-brand-layout="separated"')
+    expect(markup).not.toContain('data-brand-point="rendezvous"')
+    expect(markup).not.toContain('linearGradient')
+    expect(markup).not.toContain('empty-camp-eyebrow')
+    expect(markup).not.toContain('empty-camp-description')
+    expect(markup).not.toContain('这里已经保留当前工作区、队员和默认负责人。')
+    expect(pendingMarkup).toContain('开始一段新对话')
+    expect(pendingMarkup).not.toContain('新对话草稿')
+    expect(pendingMarkup).not.toContain('当前只是一份草稿。')
     expect(markup).toContain('快速对话')
     expect(markup).toContain('负责人 · 洛可')
     expect(markup).toContain('1 位队员已在队')
