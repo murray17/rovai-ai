@@ -568,4 +568,99 @@ describe('channel settings service', () => {
       remoteAppId: 'cli-unknown'
     })
   })
+
+  it('reconciles the frozen remote app on an explicit retry without creating another app', async () => {
+    const owner = identity()
+    const credentialStore = memoryCredentialStore()
+    const create = vi.fn()
+    const reconcile = vi.fn(async () => ({
+      appId: 'cli-published-remotely',
+      appSecret: 'recovered-secret',
+      botDisplayName: '审阅员',
+      publishedVersionId: 'version_1'
+    }))
+    let publicationIntent: Record<string, unknown> = {
+      publicationIntentId: 'intent-unknown',
+      agentId: 'agent-a',
+      accountId: connectedAccount(owner).accountId,
+      expectedUserIdDigest: connectedAccount(owner).userIdDigest,
+      expectedTenantId: owner.tenantId,
+      requestedAppName: '审阅员',
+      provisioningMode: 'developer_session',
+      state: 'failed_unknown_remote_state',
+      remoteAppId: 'cli-published-remotely',
+      credentialRef: null,
+      lastCompletedStep: null,
+      failureCode: 'feishu_console_release_version_http_400',
+      version: 4,
+      createdAt: '2026-08-27T00:00:00Z',
+      updatedAt: '2026-08-27T00:01:00Z'
+    }
+    let memberBots: Record<string, unknown>[] = []
+    let intentCreates = 0
+    const memberBotProvisioner = { create, reconcile } as FeishuMemberBotProvisioner
+    const service = new ChannelSettingsService({
+      credentialStore,
+      developerSession: developerSession(owner),
+      memberBotProvisioner,
+      createChannel: fakeCreateChannel(),
+      core: channelCore((method, rawParams) => {
+        if (method === 'channels.feishu.snapshot') {
+          return coreSnapshot({
+            account: connectedAccount(owner),
+            memberBots,
+            publicationIntents: [publicationIntent]
+          })
+        }
+        if (method === 'members.get') return presentAgent()
+        const params = rawParams as { command?: Record<string, unknown> }
+        if (method === 'channels.feishu.publicationIntent.create') intentCreates += 1
+        if (method === 'channels.feishu.publicationIntent.advance') {
+          publicationIntent = {
+            ...publicationIntent,
+            ...params.command,
+            version: Number(publicationIntent.version) + 1,
+            updatedAt: '2026-08-27T00:02:00Z'
+          }
+        }
+        if (method === 'channels.feishu.memberBot.upsert') {
+          memberBots = [{
+            agentId: 'agent-a',
+            accountId: connectedAccount(owner).accountId,
+            appId: 'cli-published-remotely',
+            botDisplayName: '审阅员',
+            credentialRef: 'feishu-member-agent-a',
+            status: 'published',
+            failureCode: null,
+            version: 1
+          }]
+        }
+        return { status: 'applied' }
+      })
+    })
+
+    const recovered = await service.publishMemberBot('agent-a')
+
+    expect(create).not.toHaveBeenCalled()
+    expect(reconcile).toHaveBeenCalledWith(expect.objectContaining({
+      publicationIntentId: 'intent-unknown',
+      remoteAppId: 'cli-published-remotely',
+      expectedDeveloperIdentity: { userId: owner.userId, tenantId: owner.tenantId }
+    }))
+    expect(intentCreates).toBe(0)
+    const storedCredential = [...credentialStore.values.entries()][0]
+    expect(storedCredential?.[1]).toEqual({
+      appId: 'cli-published-remotely',
+      appSecret: 'recovered-secret'
+    })
+    expect(publicationIntent).toMatchObject({
+      state: 'completed',
+      remoteAppId: 'cli-published-remotely',
+      credentialRef: storedCredential?.[0]
+    })
+    expect(recovered.activeProvisioning).toMatchObject({
+      stage: 'completed',
+      remoteAppId: 'cli-published-remotely'
+    })
+  })
 })

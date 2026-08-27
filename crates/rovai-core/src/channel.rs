@@ -1506,6 +1506,15 @@ impl ChannelService {
                     "Publication intent transition is not allowed",
                 ));
             }
+            if current_state == "failed_unknown_remote_state"
+                && envelope.payload.state == "credentials_read"
+                && current_app_id.is_none()
+            {
+                return Ok(rejected(
+                    "feishu_publication_intent.reconciliation_remote_app_required",
+                    "Unknown publication recovery requires an already frozen remote App",
+                ));
+            }
             if current_app_id.is_some()
                 && envelope.payload.remote_app_id.is_some()
                 && current_app_id != envelope.payload.remote_app_id
@@ -4087,8 +4096,11 @@ fn publication_intent_transition_allowed(current: &str, next: &str) -> bool {
     if current == next {
         return true;
     }
-    if matches!(current, "completed" | "failed_unknown_remote_state") {
+    if current == "completed" {
         return false;
+    }
+    if current == "failed_unknown_remote_state" {
+        return next == "credentials_read";
     }
     if matches!(next, "failed_recoverable" | "failed_unknown_remote_state") {
         return true;
@@ -4520,7 +4532,8 @@ mod tests {
                             publication_intent_id: "intent_1".to_string(),
                             expected_version: version,
                             state: state.to_string(),
-                            remote_app_id: None,
+                            remote_app_id: (state == "failed_unknown_remote_state")
+                                .then(|| "cli_unknown".to_string()),
                             credential_ref: None,
                             last_completed_step: (state == "session_verified")
                                 .then(|| state.to_string()),
@@ -4562,6 +4575,54 @@ mod tests {
         assert_eq!(
             duplicate.result.code,
             "feishu_publication_intent.active_conflict"
+        );
+
+        let wrong_app = service
+            .advance_member_bot_publication_intent(
+                &mut database,
+                &host_envelope(
+                    "publication-reconcile-wrong-app",
+                    AdvanceMemberBotPublicationIntentCommand {
+                        publication_intent_id: "intent_1".to_string(),
+                        expected_version: 3,
+                        state: "credentials_read".to_string(),
+                        remote_app_id: Some("cli_other".to_string()),
+                        credential_ref: Some("feishu-member-agent_1".to_string()),
+                        last_completed_step: Some("credentials_read".to_string()),
+                        failure_code: None,
+                    },
+                ),
+            )
+            .unwrap();
+        assert_eq!(wrong_app.result.status, CommandResultStatus::Rejected);
+        assert_eq!(
+            wrong_app.result.code,
+            "feishu_publication_intent.remote_app_conflict"
+        );
+
+        let reconciled = service
+            .advance_member_bot_publication_intent(
+                &mut database,
+                &host_envelope(
+                    "publication-reconcile",
+                    AdvanceMemberBotPublicationIntentCommand {
+                        publication_intent_id: "intent_1".to_string(),
+                        expected_version: 3,
+                        state: "credentials_read".to_string(),
+                        remote_app_id: Some("cli_unknown".to_string()),
+                        credential_ref: Some("feishu-member-agent_1".to_string()),
+                        last_completed_step: Some("credentials_read".to_string()),
+                        failure_code: None,
+                    },
+                ),
+            )
+            .unwrap();
+        assert_eq!(reconciled.result.status, CommandResultStatus::Applied);
+        let recovered = service.snapshot(&database).unwrap();
+        assert_eq!(recovered.publication_intents[0].state, "credentials_read");
+        assert_eq!(
+            recovered.publication_intents[0].remote_app_id.as_deref(),
+            Some("cli_unknown")
         );
     }
 

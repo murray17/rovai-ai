@@ -165,6 +165,31 @@ describe('OpenPlatformApiClient', () => {
     expect(releaseRequests).toBe(1)
   })
 
+  it('finds an existing published version without creating or publishing a new one', async () => {
+    const paths: string[] = []
+    const session = fakeSession(async (rawUrl) => {
+      const url = new URL(rawUrl)
+      paths.push(url.pathname)
+      if (url.pathname.includes('/app_version/list/')) {
+        return apiResponse({
+          versions: [{ versionId: 'version_1', appVersion: '1.0.0' }]
+        })
+      }
+      if (url.pathname.includes('/app_version/detail/')) {
+        return apiResponse({ status: 2 })
+      }
+      throw new Error(`unexpected request: ${url.pathname}`)
+    })
+
+    await expect(new OpenPlatformApiClient(session).findPublishedVersion(
+      'cli_dingding'
+    )).resolves.toEqual({ versionId: 'version_1', status: 2 })
+    expect(paths).toEqual([
+      '/developers/v1/app_version/list/cli_dingding',
+      '/developers/v1/app_version/detail/cli_dingding/version_1'
+    ])
+  })
+
   it('marks a lost create response as an unknown remote outcome', async () => {
     const session = fakeSession(async () => {
       throw new Error('network response lost')

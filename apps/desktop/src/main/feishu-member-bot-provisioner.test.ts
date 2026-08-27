@@ -77,6 +77,48 @@ describe('Feishu Web Session member Bot provisioner', () => {
     expect(portal.persist).toHaveBeenCalledTimes(1)
   })
 
+  it('reconciles an existing published app without creating or releasing anything', async () => {
+    const progress: string[] = []
+    const operations: string[] = []
+    const portal = fakePortal()
+    const client = fakeOpenPlatformClient(operations)
+
+    const result = await new FeishuWebSessionMemberBotProvisioner(portal, {
+      createClient: () => client
+    }).reconcile({
+      publicationIntentId: 'intent-unknown',
+      agentId: 'agent-a',
+      remoteAppId: 'cli_dingding',
+      appName: '叮叮',
+      expectedDeveloperIdentity: { userId: 'owner-user', tenantId: 'tenant-1' },
+      onProgress: (step) => progress.push(step)
+    })
+
+    expect(result).toEqual({
+      appId: 'cli_dingding',
+      appSecret: 'secret-dingding',
+      botDisplayName: '叮叮',
+      publishedVersionId: 'version_1'
+    })
+    expect(operations).toEqual([
+      'read_secret',
+      'find_published_version',
+      'verify'
+    ])
+    expect(progress).toEqual([
+      'session_verified',
+      'app_created',
+      'bot_configured',
+      'permissions_events_configured',
+      'version_published'
+    ])
+    expect(client.uploadAppIcon).not.toHaveBeenCalled()
+    expect(client.createApp).not.toHaveBeenCalled()
+    expect(client.createVersion).not.toHaveBeenCalled()
+    expect(client.publishVersion).not.toHaveBeenCalled()
+    expect(portal.showRegistrationConfirmation).not.toHaveBeenCalled()
+  })
+
   it('fails before opening the console when the expected identity cannot be proven', async () => {
     const portal = fakePortal()
     vi.mocked(portal.requireExpectedIdentity)
@@ -287,6 +329,10 @@ function fakeOpenPlatformClient(operations: string[]) {
     }),
     publishVersion: vi.fn(async () => {
       operations.push('publish_version')
+      return { versionId: 'version_1', status: 2 }
+    }),
+    findPublishedVersion: vi.fn(async () => {
+      operations.push('find_published_version')
       return { versionId: 'version_1', status: 2 }
     }),
     verifyMemberBot: vi.fn(async () => { operations.push('verify') })

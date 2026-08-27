@@ -46,6 +46,10 @@ registration 确认窗口，并在 Session 失效时要求该队员单独扫码/
 立即创建”页或其他平台确认窗口。Session 失效/身份漂移时显示“重新连接飞书”，不自动打开兼容流程。显式“兼容
 扫码发布”必须说明每名队员可能要再次扫码/确认，并作为次级入口。
 
+若上次发布已冻结 App ID 但落入“远端状态待核对”，主人再次点击普通“发布”沿用同一 Dialog 与进度语言，后台只核对
+并接管该 App；不显示新的创建确认、不调用创建/发布 mutation，也不生成第二个 App。核对成功后进入“正在验证连接…”
+与“发布完成”；失败则继续显示待核对及原 App ID。
+
 ## 队员 Bot
 
 只列出 `presence=present` 的 AgentProfile。状态文案固定对应：
@@ -55,7 +59,7 @@ registration 确认窗口，并在 Session 失效时要求该队员单独扫码/
 | unpublished | 未发布 | 发布 |
 | provisioning | 发布中 | 禁用当前行 |
 | published | 已发布 | 管理 |
-| failed | 发布失败 | 重试 |
+| failed | 发布失败 / 远端状态待核对 | 重试或核对同一 App |
 | disabled | 已停用 | 重新发布 |
 
 管理 Dialog 显示队员身份、Bot 名称和 App ID，并提供停用。停用不声称删除飞书开放平台应用或历史消息。Agent

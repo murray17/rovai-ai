@@ -87,6 +87,12 @@ exact origin/path、严格响应结构、秘密不出 Main、创建后 read-back
 `failed_unknown_remote_state`，自动重试被锁住，避免重复创建 App。Main 启动时只从持久 intent 判断可恢复/待人工核对，
 不从 Renderer 状态推断。
 
+当该未知 intent 已冻结 `remoteAppId` 时，主人再次点击普通“发布”是显式 reconciliation，而不是新的 create attempt。
+Host 复核同一 Developer Identity，只对冻结 App 执行 Secret 读取、版本列表/detail 与 manifest 回读；不得上传图标、创建
+App、创建版本、再次 commit/release 或进入兼容流程。只有 read-back 证明已发布且配置完整后，才保存 credential、验证
+WebSocket，并让同一 intent 从 `failed_unknown_remote_state` 进入 `credentials_read` 后继续完成；Core 拒绝更换 App ID。
+缺少冻结 App ID 或核对失败时仍保持未知状态，不允许创建第二个 App。
+
 ## 项目与会话
 
 `ProjectBinding` 是 Core-owned 本机目录目录，保存不透明 ID、显示名、`quick_chat | directory`、规范路径、

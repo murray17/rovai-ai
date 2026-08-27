@@ -8,6 +8,11 @@ export interface FeishuMemberBotConsoleConfiguration {
   tenantEvents: readonly string[]
 }
 
+export interface FeishuMemberBotVerificationRequirements {
+  tenantScopes: readonly string[]
+  tenantEvents: readonly string[]
+}
+
 export interface FeishuPublishedVersion {
   versionId: string
   status: number
@@ -281,21 +286,23 @@ export class OpenPlatformApiClient {
     const directVersionId = firstString(record, ['versionId', 'version_id', 'id'])
     if (directVersionId && isResourceId(directVersionId)) return directVersionId
 
-    const listData = await this.#request(
-      'list_versions',
-      `/developers/v1/app_version/list/${encodeURIComponent(appId)}`,
-      { body: {}, signal: input.signal }
-    )
-    const list = requireRecord(listData, 'feishu_console_version_response_invalid')
-    const versions = Array.isArray(list.versions) ? list.versions : []
-    for (const candidate of versions) {
-      const version = optionalRecord(candidate)
-      const versionId = firstString(version, ['versionId', 'version_id', 'id'])
-      if (versionId && isResourceId(versionId) && version.appVersion === '1.0.0') {
-        return versionId
-      }
-    }
+    const versions = await this.#listVersions(appId, input.signal)
+    const created = versions.find((version) => version.appVersion === '1.0.0')
+    if (created) return created.versionId
     throw apiError('feishu_console_version_response_invalid', true)
+  }
+
+  async findPublishedVersion(
+    appId: string,
+    signal?: AbortSignal
+  ): Promise<FeishuPublishedVersion> {
+    const normalizedAppId = requireResourceId(appId, 'feishu_console_app_id_invalid')
+    const versions = await this.#listVersions(normalizedAppId, signal)
+    for (const candidate of versions.filter((version) => version.appVersion === '1.0.0')) {
+      const version = await this.readVersion(normalizedAppId, candidate.versionId, signal)
+      if (version.status === PUBLISHED_VERSION_STATUS) return version
+    }
+    throw apiError('feishu_console_published_version_not_found', false)
   }
 
   async publishVersion(
@@ -356,7 +363,7 @@ export class OpenPlatformApiClient {
   async verifyMemberBot(input: {
     appId: string
     versionId: string
-    configuration: FeishuMemberBotConsoleConfiguration
+    configuration: FeishuMemberBotVerificationRequirements
     signal?: AbortSignal
   }): Promise<void> {
     const manifest = await this.readManifest(input.appId, input.signal)
@@ -431,6 +438,29 @@ export class OpenPlatformApiClient {
     const status = numericValue(record.status ?? record.versionStatus)
     if (status === null) throw apiError('feishu_console_version_detail_invalid', false)
     return { versionId: normalizedVersionId, status }
+  }
+
+  async #listVersions(
+    appId: string,
+    signal?: AbortSignal
+  ): Promise<Array<{ versionId: string; appVersion: string | null }>> {
+    const normalizedAppId = requireResourceId(appId, 'feishu_console_app_id_invalid')
+    const data = await this.#request(
+      'list_versions',
+      `/developers/v1/app_version/list/${encodeURIComponent(normalizedAppId)}`,
+      { body: {}, signal }
+    )
+    const list = requireRecord(data, 'feishu_console_version_response_invalid')
+    const versions = Array.isArray(list.versions) ? list.versions : []
+    return versions.flatMap((candidate) => {
+      const version = optionalRecord(candidate)
+      const versionId = firstString(version, ['versionId', 'version_id', 'id'])
+      if (!versionId || !isResourceId(versionId)) return []
+      return [{
+        versionId,
+        appVersion: firstString(version, ['appVersion', 'app_version', 'version']) ?? null
+      }]
+    })
   }
 
   async #updateManifest(

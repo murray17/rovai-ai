@@ -39,7 +39,8 @@ last_updated: 2026-08-27
   bootstrap，经 `OpenPlatformApiClient` 创建应用、读取 Secret、启用 Bot、配置 scopes/events/callback WebSocket、
   创建/发布版本并回读验证。旧 registration/确认/poll 只在显式兼容模式使用。Session Cookie 与独立 App credential
   分开加密，账号切换/断开不迁移、停用或删除已发布 Bot，单连接故障隔离，重启恢复 published Bot 与 publication
-  intent；
+  intent；release 错误后继续以 version detail 收敛，含冻结 App ID 的 unknown intent 支持主人显式核对并接管同一 App，
+  不创建或发布第二次；
 - 私聊按 receiving App 隔离；普通群一个 Camp；话题按 canonical topic 一个 Camp。群/话题只有显式 mention
   published managed Bot 才进入 Core；
 - 同一 external message 的第一条 observation 只进入 collecting；canonical mentions 完整或全部预期 App 到齐后

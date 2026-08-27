@@ -19,7 +19,7 @@ last_updated: 2026-08-27
   identity drift/expiry fail-closed 与断开不删除 Bot credential；
 - [x] 完成 Web Session MemberBotProvisioner、Session cookie/CSRF console bootstrap、OpenPlatformApiClient 创建/
   配置/发布/回读、普通发布无 Renderer QR/飞书确认页、独立 Compat Provisioner、持久 publication intent、
-  unknown remote 防重复和多 WebSocket Host/启动恢复；
+  release 错误后的 published read-back、unknown remote 防重复、冻结 App 显式核对接管和多 WebSocket Host/启动恢复；
 - [x] 完成 p2p/group/topic identity、显式 mention gate、多 Bot collecting/finalize/timeout/mismatch；
 - [x] 完成 ChannelTurnRequest 单根 FIFO、统一原子 admission、永久失败/Runtime deferred 与 queue card 更新；
 - [x] 完成 ExternalQuote structured segment、`replyTo=null`、ExternalPrincipal source 与 CURRENT_INPUT v22；

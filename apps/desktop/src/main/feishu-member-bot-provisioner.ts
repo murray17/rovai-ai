@@ -34,6 +34,19 @@ export interface ProvisionedMemberBot {
   publishedVersionId: string | null
 }
 
+export interface ReconcileMemberBotInput {
+  publicationIntentId: string
+  agentId: string
+  remoteAppId: string
+  appName: string
+  expectedDeveloperIdentity: {
+    userId: string
+    tenantId: string
+  }
+  signal?: AbortSignal
+  onProgress?(step: MemberBotProvisioningStep, remoteAppId?: string): void
+}
+
 export interface FeishuMemberBotProvisioner {
   create(input: {
     publicationIntentId: string
@@ -48,6 +61,7 @@ export interface FeishuMemberBotProvisioner {
     signal?: AbortSignal
     onProgress?(step: MemberBotProvisioningStep, remoteAppId?: string): void
   }): Promise<ProvisionedMemberBot>
+  reconcile?(input: ReconcileMemberBotInput): Promise<ProvisionedMemberBot>
 }
 
 export const FEISHU_MEMBER_BOT_ADDONS = {
@@ -105,6 +119,7 @@ OpenPlatformApiClient,
   | 'configureCallbacksAndWebSocket'
   | 'createVersion'
   | 'publishVersion'
+  | 'findPublishedVersion'
   | 'verifyMemberBot'
 >
 
@@ -220,6 +235,64 @@ export class FeishuWebSessionMemberBotProvisioner implements FeishuMemberBotProv
         ? 'unknown'
         : 'none'
       throw provisioningError(code, remoteState)
+    } finally {
+      if (platformSessionOpened && !sessionPersisted) {
+        await this.#developerSession.persist().catch(() => undefined)
+      }
+    }
+  }
+
+  async reconcile(input: ReconcileMemberBotInput): Promise<ProvisionedMemberBot> {
+    if (input.signal?.aborted) throw provisioningError('feishu_provisioning_cancelled', 'none')
+    const identity = await this.#developerSession.requireExpectedIdentity(
+      input.expectedDeveloperIdentity
+    )
+    input.onProgress?.('session_verified', input.remoteAppId)
+
+    let platformSessionOpened = false
+    let sessionPersisted = false
+    try {
+      const platformSession = await this.#developerSession.openPlatformSession({
+        expectedIdentity: input.expectedDeveloperIdentity,
+        signal: input.signal
+      })
+      platformSessionOpened = true
+      if (platformSession.brand !== identity.brand) {
+        throw provisioningError('feishu_developer_identity_changed', 'none')
+      }
+      const client = this.#createClient(platformSession)
+      input.onProgress?.('app_created', input.remoteAppId)
+      const appSecret = await client.readAppSecret(input.remoteAppId, input.signal)
+      input.onProgress?.('bot_configured', input.remoteAppId)
+      input.onProgress?.('permissions_events_configured', input.remoteAppId)
+      const publishedVersion = await client.findPublishedVersion(
+        input.remoteAppId,
+        input.signal
+      )
+      input.onProgress?.('version_published', input.remoteAppId)
+      await client.verifyMemberBot({
+        appId: input.remoteAppId,
+        versionId: publishedVersion.versionId,
+        configuration: {
+          tenantScopes: FEISHU_MEMBER_BOT_ADDONS.scopes.tenant,
+          tenantEvents: FEISHU_MEMBER_BOT_ADDONS.events.items.tenant
+        },
+        signal: input.signal
+      })
+      await this.#developerSession.persist()
+      sessionPersisted = true
+      return {
+        appId: input.remoteAppId,
+        appSecret,
+        botDisplayName: input.appName,
+        publishedVersionId: publishedVersion.versionId
+      }
+    } catch (error) {
+      if (isProvisioningError(error)) throw error
+      throw provisioningError(
+        provisioningErrorCode(error, 'feishu_console_reconciliation_failed'),
+        'unknown'
+      )
     } finally {
       if (platformSessionOpened && !sessionPersisted) {
         await this.#developerSession.persist().catch(() => undefined)

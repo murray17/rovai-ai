@@ -198,6 +198,10 @@ fallback。
 [Feishu Channel v1](../../contracts/feishu-channel-v1.md#3-飞书账号与队员-bot)和
 [渠道设置](../../ui/components/channel-settings.md#渠道连接与二维码)。
 
+锁定的是自动创建和第二个 App，不是对同一冻结 App 的主人显式核对。未知 intent 已有 `remoteAppId` 时，再次普通发布
+只允许回读该 App 的 Secret、manifest 与已发布版本，并在验证成功后继续同一 intent；不得重发任何创建或发布 mutation。
+Core 继续以冻结 App ID 和 exact version 阻止身份替换，缺少 App ID 的未知结果仍不可恢复。
+
 ### 后果
 
 - 一次账号登录可服务多个队员发布；连接与发布是两个独立生命周期；

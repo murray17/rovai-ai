@@ -156,6 +156,12 @@ Version。任何回读的 published 立即收敛成功，rejected 立即失败�
 创建成功时，写 `failed_unknown_remote_state + failureCode` 并锁住自动再创建；持久 credential 已存在时才允许
 `failed_recoverable` 继续验证同一 App。Main 重启按这些事实收敛，不从 UI 临时进度推断。
 
+主人对含冻结 `remoteAppId` 的 `failed_unknown_remote_state` 再次执行普通发布时，必须进入同一 intent 的显式
+reconciliation，不得创建新 intent 或调用 upload/create/configure/create-version/commit/release。它先复核 exact Developer
+Identity，再只对冻结 App 读取 Secret、版本列表/detail 与 manifest；published status 和完整 Bot/scopes/events/WebSocket
+配置同时成立后，才写 credential 并允许 Core 以 exact version 从 `failed_unknown_remote_state -> credentials_read` 继续。
+该转换不得补写或更换 `remoteAppId`；核对失败继续保持 unknown，缺少冻结 App ID 时仍禁止重试。
+
 普通发布由 Main 向 console image endpoint 上传打包内受控 Rovai App icon；本机成员头像仍只作 Rovai 身份展示，
 Renderer 不宣称已把成员头像上传到飞书。兼容模式的 avatar preset 仍只能使用确认页可访问的 URL。
 

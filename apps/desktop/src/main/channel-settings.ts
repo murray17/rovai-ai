@@ -475,7 +475,9 @@ export class ChannelSettingsService {
     if (!account) throw new Error('飞书登录已过期，请先重新连接账号。')
     const previousIntent = latestPublicationIntent(snapshot, agentId)
     if (previousIntent?.state === 'failed_unknown_remote_state') {
-      throw new Error('上次创建结果无法确认。为避免重复创建应用，请先在飞书开放平台核对。')
+      if (mode !== 'developer_session' || !previousIntent.remoteAppId) {
+        throw new Error('上次创建结果无法确认。为避免重复创建应用，请先在飞书开放平台核对。')
+      }
     }
     if (
       previousIntent
@@ -504,6 +506,9 @@ export class ChannelSettingsService {
     }
     const agent = await this.#dependencies!.core.request<AgentProfile>('members.get', { agentId })
     if (!agent || agent.presence !== 'present') throw new Error('该队员当前不可发布。')
+    if (previousIntent?.state === 'failed_unknown_remote_state') {
+      return this.#reconcileUnknownMemberBot(account, identity, agent, previousIntent)
+    }
 
     const publicationIntentId = `rvfpi_${randomUUID().replaceAll('-', '')}`
     await this.#command('channels.feishu.publicationIntent.create', {
@@ -680,6 +685,149 @@ export class ChannelSettingsService {
         detail: unknownRemoteState
           ? '无法确认远端应用是否已经创建；已停止自动重试。'
           : '发布没有完成，可以在排除问题后重试。',
+        remoteAppId,
+        failureCode
+      }
+      await this.#emit()
+      throw error
+    } finally {
+      if (this.#activeProvisioningAbort === abort) this.#activeProvisioningAbort = null
+    }
+  }
+
+  async #reconcileUnknownMemberBot(
+    account: NonNullable<CoreChannelSnapshot['account']>,
+    identity: FeishuDeveloperIdentity,
+    agent: AgentProfile,
+    intent: CoreChannelSnapshot['publicationIntents'][number]
+  ): Promise<ChannelSettingsSnapshot> {
+    const remoteAppId = intent.remoteAppId
+    if (!remoteAppId || !this.#memberBotProvisioner.reconcile) {
+      throw new Error('当前版本无法核对已创建的飞书应用；为避免重复创建应用，不会自动重试。')
+    }
+    const credentialRef = memberCredentialRef(agent.agentId)
+    const abort = new AbortController()
+    this.#activeProvisioningAbort = abort
+    this.#activeProvisioning = {
+      publicationIntentId: intent.publicationIntentId,
+      agentId: agent.agentId,
+      stage: 'verifying_session',
+      detail: '正在核对当前开发者会话与已创建应用。',
+      remoteAppId,
+      failureCode: null
+    }
+    await this.#emit()
+
+    let intentVersion = intent.version
+    let credentialWritten = false
+    const advanceIntent = async (
+      payload: {
+        state: CoreChannelSnapshot['publicationIntents'][number]['state']
+        remoteAppId: string
+        credentialRef: string | null
+        lastCompletedStep: string | null
+        failureCode: string | null
+      }
+    ): Promise<void> => {
+      await this.#advancePublicationIntent(intent.publicationIntentId, intentVersion, payload)
+      intentVersion += 1
+    }
+
+    try {
+      const provisioned = await this.#memberBotProvisioner.reconcile({
+        publicationIntentId: intent.publicationIntentId,
+        agentId: agent.agentId,
+        remoteAppId,
+        appName: agent.displayName,
+        expectedDeveloperIdentity: {
+          userId: identity.userId,
+          tenantId: identity.tenantId
+        },
+        signal: abort.signal,
+        onProgress: (step, appId) => this.#handleProvisioningProgress(step, appId)
+      })
+      if (provisioned.appId !== remoteAppId || !provisioned.publishedVersionId) {
+        throw new Error('feishu_console_reconciliation_identity_mismatch')
+      }
+      const credential = {
+        appId: remoteAppId,
+        appSecret: provisioned.appSecret
+      }
+      await this.#dependencies!.credentialStore.write(credentialRef, credential)
+      credentialWritten = true
+      await advanceIntent({
+        state: 'credentials_read',
+        remoteAppId,
+        credentialRef,
+        lastCompletedStep: 'credentials_read',
+        failureCode: null
+      })
+      await advanceIntent({
+        state: 'bot_configured',
+        remoteAppId,
+        credentialRef,
+        lastCompletedStep: 'bot_configured',
+        failureCode: null
+      })
+      await advanceIntent({
+        state: 'version_published',
+        remoteAppId,
+        credentialRef,
+        lastCompletedStep: 'version_published',
+        failureCode: null
+      })
+      this.#setProvisioningProgress(
+        'verifying_connection',
+        '正在验证 Bot 长连接…',
+        remoteAppId
+      )
+      await this.#publishCredential(
+        account.accountId,
+        { ...agent, displayName: provisioned.botDisplayName },
+        credentialRef,
+        credential
+      )
+      await advanceIntent({
+        state: 'connection_verified',
+        remoteAppId,
+        credentialRef,
+        lastCompletedStep: 'connection_verified',
+        failureCode: null
+      })
+      await advanceIntent({
+        state: 'completed',
+        remoteAppId,
+        credentialRef,
+        lastCompletedStep: 'completed',
+        failureCode: null
+      })
+      this.#publicationFailures.delete(agent.agentId)
+      this.#activeProvisioning = {
+        publicationIntentId: intent.publicationIntentId,
+        agentId: agent.agentId,
+        stage: 'completed',
+        detail: '发布完成。',
+        remoteAppId,
+        failureCode: null
+      }
+      return this.#emit()
+    } catch (error) {
+      const failureCode = channelFailureCode(error)
+      await this.#advancePublicationIntent(intent.publicationIntentId, intentVersion, {
+        state: credentialWritten ? 'failed_recoverable' : 'failed_unknown_remote_state',
+        remoteAppId,
+        credentialRef: credentialWritten ? credentialRef : null,
+        lastCompletedStep: null,
+        failureCode
+      }).catch(() => undefined)
+      this.#publicationFailures.set(agent.agentId, failureCode)
+      this.#activeProvisioning = {
+        publicationIntentId: intent.publicationIntentId,
+        agentId: agent.agentId,
+        stage: credentialWritten ? 'failed' : 'unknown_remote_state',
+        detail: credentialWritten
+          ? '已保存应用凭据，但 Bot 连接尚未完成；可以安全重试。'
+          : '无法核对已创建应用的凭据或发布状态；不会创建第二个应用。',
         remoteAppId,
         failureCode
       }
