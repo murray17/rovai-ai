@@ -128,7 +128,8 @@ Electron Main 是唯一 shutdown caller。第一次 `before-quit` 保留 Rendere
 Renderer 只消费 `runtime.state = shutting_down`。它立即建立覆盖当前页面的交互 guard；若关闭在 400ms 内
 完成则不显示反馈，超过门槛才显示可聚焦、无操作按钮的 busy modal：“正在安全退出”。modal 说明 Rovai
 正在保存本地状态并关闭后台服务；若有尚未完成的 AgentRun，将一并取消，未确认的文件、命令或工具效果
-保留为待核对记录。Renderer 不拥有 shutdown request、deadline、进程信号或取消计数。
+保留为待核对记录。进入该状态后 Renderer 停止页面投影刷新，并抑制由关闭拒绝产生的晚到错误横幅与 Toast；
+Renderer 不拥有 shutdown request、deadline、进程信号或取消计数。
 
 应用内更新复用同一个 Main 协调器：只有更新动作已经成功进入可退出阶段后才触发 v3；失败时 App/Core
 保持运行并允许重试。关闭协调器最终只完成一次 child-exit wait，不再次发起 native quit 协商。

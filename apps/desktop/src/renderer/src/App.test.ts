@@ -253,6 +253,13 @@ describe('active Camp event invalidation', () => {
     }, null)).toBe(false)
   })
 
+  it('does not start a projection refresh after shutdown begins', () => {
+    expect(shouldRefreshActiveCampForCoreEvent({
+      method: 'agent_run.cancelled',
+      params: { campId: 'camp-1', agentRunId: 'run-1' }
+    }, 'camp-1', true)).toBe(false)
+  })
+
   it('coalesces an invalidation burst into one in-flight read and one trailing read', async () => {
     let releaseFirstRead!: () => void
     const firstRead = new Promise<void>((resolve) => {

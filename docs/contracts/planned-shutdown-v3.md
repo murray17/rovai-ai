@@ -113,7 +113,8 @@ Renderer 收到 `runtime.state = shutting_down` 后立即阻止新的界面交�
 在门槛内完成收口则直接退出，不闪现等待面。超过门槛后显示无操作按钮的 modal：标题为“正在安全退出”，
 说明 Rovai 正在保存本地状态并关闭后台服务；若有尚未完成的 AgentRun，将一并取消，未确认的文件、命令或
 工具效果会保留为待核对记录。modal 必须可聚焦、标记为 busy modal dialog，并在 reduced-motion 下停用
-indeterminate motion。
+indeterminate motion。`shutting_down` 之后 Renderer 不再发起页面投影刷新，也不把取消结算产生的晚到请求
+拒绝显示为错误横幅或 Toast；安全退出 modal 是该阶段唯一的操作状态反馈。
 
 ## 6. Report 与 deadline
 

@@ -145,9 +145,12 @@ const ACTIVE_CAMP_INVALIDATION_EVENTS = new Set([
 
 export function shouldRefreshActiveCampForCoreEvent(
   event: CoreEvent,
-  activeCampId: string | null
+  activeCampId: string | null,
+  shuttingDown = false
 ): boolean {
-  if (!activeCampId || !ACTIVE_CAMP_INVALIDATION_EVENTS.has(event.method)) return false
+  if (shuttingDown || !activeCampId || !ACTIVE_CAMP_INVALIDATION_EVENTS.has(event.method)) {
+    return false
+  }
   const eventCampId = stringField(asRecord(event.params), 'campId')
   if (event.method === 'agent_run.runtime_model_observed') {
     return eventCampId === activeCampId
@@ -206,9 +209,10 @@ export function createActiveCampRefreshCoordinator(
 export function refreshActiveCampForCoreEvent(
   event: CoreEvent,
   activeCampId: string | null,
-  coordinator: ActiveCampRefreshCoordinator
+  coordinator: ActiveCampRefreshCoordinator,
+  shuttingDown = false
 ): Promise<void> | null {
-  return shouldRefreshActiveCampForCoreEvent(event, activeCampId) && activeCampId
+  return shouldRefreshActiveCampForCoreEvent(event, activeCampId, shuttingDown) && activeCampId
     ? coordinator.refresh(activeCampId)
     : null
 }
@@ -561,7 +565,6 @@ export function ControlledShutdownOverlay({
             </svg>
           </span>
           <div className="shutdown-card-content">
-            <p className="shutdown-kicker">正在退出</p>
             <h2 id="controlled-shutdown-title">正在安全退出</h2>
             <p id="controlled-shutdown-description">Rovai 正在保存本地状态并关闭后台服务。</p>
             <span className="shutdown-progress-track" role="progressbar" aria-label="正在完成安全退出">
@@ -615,6 +618,7 @@ export function App(): React.JSX.Element {
   const [confirmingRunIds, setConfirmingRunIds] = useState<Set<string>>(() => new Set())
   const [state, setState] = useState<LoadState>('loading')
   const [shuttingDown, setShuttingDown] = useState(false)
+  const shuttingDownRef = useRef(false)
   const [shutdownFeedbackVisible, setShutdownFeedbackVisible] = useState(false)
   const [notificationHeadsUpVisible, setNotificationHeadsUpVisible] = useState(false)
   const [startupSnapshot, setStartupSnapshot] = useState<DesktopStartupSnapshot | null>(null)
@@ -1649,6 +1653,7 @@ export function App(): React.JSX.Element {
   useEffect(() => {
     return window.rovai.onEvent((event: CoreEvent) => {
       const params = asRecord(event.params)
+      if (shuttingDownRef.current) return
       const liveEvent = liveRuntimeEventFromCore(
         event,
         `live-${++liveRuntimeEventSequence.current}`
@@ -1659,7 +1664,11 @@ export function App(): React.JSX.Element {
       if (event.method === 'runtime.state') {
         const runtimeStatus = stringField(params, 'status')
         if (runtimeStatus === 'shutting_down') {
+          shuttingDownRef.current = true
           setShuttingDown(true)
+          setError(null)
+          setLocationSaveError(null)
+          setToast(null)
         } else if (runtimeStatus === 'crashed') {
           setState('error')
           setError(stringField(params, 'message') ?? '后台服务已停止。')
@@ -1686,7 +1695,8 @@ export function App(): React.JSX.Element {
       const refresh = refreshActiveCampForCoreEvent(
         event,
         campId,
-        activeCampRefreshCoordinator
+        activeCampRefreshCoordinator,
+        shuttingDownRef.current
       )
       if (refresh && campId) {
         void refresh.catch((nextError) => {
@@ -2924,7 +2934,9 @@ export function App(): React.JSX.Element {
   const startupRoutePending = !startupGateVisible && startupStatus !== 'resolved'
     ? startupRouteTarget
     : null
-  const inlineNotices = memoryReviewNotice || memoryAutoNotice.count > 0 || error || locationSaveError
+  const inlineNotices = memoryReviewNotice
+    || memoryAutoNotice.count > 0
+    || (!shuttingDown && (error || locationSaveError))
     ? (
         <>
           {memoryReviewNotice && (
@@ -2939,14 +2951,14 @@ export function App(): React.JSX.Element {
               <div><button className="quiet-button compact" type="button" onClick={openAutomaticMemory}>查看</button><button className="icon-button" type="button" aria-label="关闭自动形成提示" onClick={() => setMemoryAutoNotice({ count: 0, memoryId: null, scope: null })}>×</button></div>
             </div>
           )}
-          {error && (
+          {!shuttingDown && error && (
             <div className="error-banner" role="alert">
               <span className="error-icon" aria-hidden="true">!</span>
               <div><strong>操作未完成</strong><span>{error}</span><small>项目文件和已经写入的审计记录不会因此丢失。</small></div>
               <div className="error-actions"><button className="quiet-button" onClick={() => void loadOverview()}>刷新状态</button><button className="icon-button" aria-label="关闭错误" onClick={() => setError(null)}>×</button></div>
             </div>
           )}
-          {locationSaveError && (
+          {!shuttingDown && locationSaveError && (
             <div className="error-banner" role="alert">
               <span className="error-icon" aria-hidden="true">!</span>
               <div><strong>当前页面已打开，但下次启动位置未保存</strong><span>{locationSaveError}</span></div>
@@ -3111,7 +3123,7 @@ export function App(): React.JSX.Element {
           />
         )}
         {!startupGateVisible && view !== 'members' && view !== 'memory' && inlineNotices}
-        {!startupGateVisible && toast && (
+        {!startupGateVisible && !shuttingDown && toast && (
           <div className="app-toast" role="status" aria-live="polite">
             <span>{toast}</span>
             <button className="icon-button" type="button" aria-label="关闭提示" onClick={() => setToast(null)}>×</button>

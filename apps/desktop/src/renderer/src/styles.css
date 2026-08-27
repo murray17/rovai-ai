@@ -927,7 +927,6 @@ html[data-rovai-platform="win32"] .unified-sidebar-drag {
 .shutdown-safe-mark { display: grid; width: 38px; height: 38px; place-items: center; border: 1px solid color-mix(in srgb, var(--info) 28%, var(--line)); border-radius: 9px; color: var(--info); background: var(--info-soft); }
 .shutdown-safe-mark svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.55; }
 .shutdown-card-content { display: grid; min-width: 0; gap: 0; }
-.shutdown-kicker { margin: 1px 0 7px; color: var(--brand-ink); font-size: 9px; font-weight: 720; letter-spacing: .12em; }
 .shutdown-card h2 { margin: 0 0 8px; font-size: 18px; font-weight: 690; letter-spacing: -.018em; }
 .shutdown-card #controlled-shutdown-description { margin: 0; color: var(--muted); font-size: 11.5px; line-height: 1.6; }
 .shutdown-progress-track { position: relative; display: block; height: 3px; overflow: hidden; margin: 19px 0 16px; border-radius: 999px; background: color-mix(in srgb, var(--info) 15%, var(--surface-muted)); }
