@@ -23,6 +23,7 @@ import {
   AppHeader,
   CAMP_OPEN_FEEDBACK_DELAY_MS,
   ControlledShutdownOverlay,
+  STARTUP_FEEDBACK_DELAY_MS,
   WindowDragStrip,
   allNavigationCamps,
   appendLiveRuntimeEvent,
@@ -57,6 +58,7 @@ import {
   shouldRefreshActiveCampForCoreEvent,
   StartupRouteLoading,
   shouldLoadRuntimeHealth,
+  startupFeedbackShouldBeVisible,
   startupGateShouldBeVisible,
   windowDragStripPage
 } from './App'
@@ -503,6 +505,11 @@ describe('AgentRun Runtime model presentation', () => {
 
 describe('cold startup route presentation', () => {
   it('removes the global gate as soon as Main Window Session returns a target', () => {
+    expect(STARTUP_FEEDBACK_DELAY_MS).toBe(400)
+    expect(startupFeedbackShouldBeVisible('loading', false)).toBe(false)
+    expect(startupFeedbackShouldBeVisible('loading', true)).toBe(true)
+    expect(startupFeedbackShouldBeVisible('waiting', false)).toBe(true)
+    expect(startupFeedbackShouldBeVisible('resolved', true)).toBe(false)
     expect(startupGateShouldBeVisible(null)).toBe(true)
     expect(startupGateShouldBeVisible({
       schemaVersion: 1,
@@ -514,7 +521,7 @@ describe('cold startup route presentation', () => {
     })).toBe(false)
   })
 
-  it('renders Camp recovery as a local content state with an inline retry', () => {
+  it('renders delayed Camp opening as a local content state with an inline retry', () => {
     const loading = renderToStaticMarkup(createElement(StartupRouteLoading, {
       kind: 'camp',
       waiting: false,
@@ -528,7 +535,8 @@ describe('cold startup route presentation', () => {
       onRetry: () => undefined
     }))
     expect(loading).toContain('data-startup-route="camp"')
-    expect(loading).toContain('正在恢复对话')
+    expect(loading).toContain('正在打开对话')
+    expect(loading).toContain('最近内容即将就绪')
     expect(loading).not.toContain('startup-gate')
     expect(waiting).toContain('Core unavailable')
     expect(waiting).toContain('重试')
@@ -839,17 +847,18 @@ describe('task event projections', () => {
     })).toBe(true)
   })
 
-  it('renders controlled shutdown as an assertive non-cancellable dialog with honest unknown copy', () => {
+  it('renders controlled shutdown as a focused non-cancellable cancel-all dialog', () => {
     const markup = renderToStaticMarkup(createElement(ControlledShutdownOverlay))
     expect(markup).toContain('role="dialog"')
     expect(markup).toContain('aria-modal="true"')
     expect(markup).toContain('aria-live="assertive"')
     expect(markup).toContain('aria-labelledby="controlled-shutdown-title"')
-    expect(markup).toContain('aria-describedby="controlled-shutdown-description"')
-    expect(markup).toContain('正在停止运行并关闭 Rovai')
-    expect(markup).toContain('执行引擎返回可靠终态')
-    expect(markup).toContain('无法确认的执行也会停止')
-    expect(markup).toContain('保留外部效果现场')
+    expect(markup).toContain('aria-describedby="controlled-shutdown-description controlled-shutdown-evidence"')
+    expect(markup).toContain('tabindex="-1"')
+    expect(markup).toContain('正在取消所有 AgentRun')
+    expect(markup).toContain('完成本地收口，然后退出')
+    expect(markup).toContain('未确认的文件、命令或工具效果')
+    expect(markup).toContain('待核对记录')
     expect(markup).not.toContain('<button')
   })
 
@@ -5246,6 +5255,13 @@ describe('task event projections', () => {
     expect(markup).not.toContain('未确认')
     expect(markup).not.toContain('provisional')
     expect(markup).not.toContain('user_confirmed')
+
+    const suppressedMarkup = renderToStaticMarkup(createElement(MemoryLibrary, {
+      agents: [],
+      startupFeedbackVisible: false
+    }))
+    expect(suppressedMarkup).toContain('startup-feedback-suppressed')
+    expect(suppressedMarkup).toContain('aria-hidden="true"')
   })
 
   it('detects duplicate member names independently from hidden handles', () => {

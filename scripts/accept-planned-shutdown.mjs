@@ -28,8 +28,8 @@ const databasePath = join(coreDataDir, 'rovai.sqlite')
 const runtimeTempDir = process.env.ROVAI_PLANNED_SHUTDOWN_ACCEPT_RUNTIME_TMP ?? tmpdir()
 const agentId = 'agent_1'
 const runtimeKind = process.env.ROVAI_PLANNED_SHUTDOWN_RUNTIME_KIND?.trim() || 'claude-code-cli'
-const shutdownWithPreparedInput = runtimeKind === 'grok-build'
 const shutdownDeadlineMs = 10_000
+const promptCancellationTargetMs = 5_000
 const reportPath = join(outputDir, 'planned-shutdown-acceptance.json')
 
 let firstApp = null
@@ -90,10 +90,10 @@ try {
     const delivery = snapshot.contextManifests
       .find((manifest) => manifest.agentRunId === agentRunId)?.delivery
     return run?.status === 'running'
-      && delivery?.status === (shutdownWithPreparedInput ? 'prepared' : 'accepted')
+      && ['prepared', 'accepted'].includes(delivery?.status)
       ? snapshot
       : null
-  }, shutdownWithPreparedInput ? 'real Runtime prepared input' : 'real Runtime input acceptance', 180_000, 40)
+  }, 'real Runtime input handoff', 180_000, 40)
   await openCamp(firstApp.cdp, campId)
 
   const liveDescendantPids = await descendantProcessIds(firstApp.child.pid)
@@ -109,35 +109,33 @@ try {
   let dayCapture = null
   let nightCapture = null
   let zoomCapture = null
-  if (!shutdownWithPreparedInput) {
-    await waitForExpression(firstApp.cdp, `Boolean(document.querySelector('.shutdown-scrim'))`, 3_000, 20)
+  await waitForExpression(firstApp.cdp, `Boolean(document.querySelector('.shutdown-scrim'))`, 3_000, 20)
 
-    dayOverlay = await collectShutdownOverlay(firstApp.cdp, 'day', 1040, 700, 1)
-    dayCapture = join(outputDir, 'planned-shutdown-day-1040x700.png')
-    await capture(firstApp.cdp, dayCapture)
+  dayOverlay = await collectShutdownOverlay(firstApp.cdp, 'day', 1040, 700, 1)
+  dayCapture = join(outputDir, 'planned-shutdown-day-1040x700.png')
+  await capture(firstApp.cdp, dayCapture)
 
-    await evaluate(firstApp.cdp, `window.rovai.appearance.setPreference('night')`, true)
-    await waitForExpression(firstApp.cdp, `document.documentElement.dataset.theme === 'night'`, 2_000, 20)
-    nightOverlay = await collectShutdownOverlay(firstApp.cdp, 'night', 1040, 700, 1)
-    nightCapture = join(outputDir, 'planned-shutdown-night-1040x700.png')
-    await capture(firstApp.cdp, nightCapture)
+  await evaluate(firstApp.cdp, `window.rovai.appearance.setPreference('night')`, true)
+  await waitForExpression(firstApp.cdp, `document.documentElement.dataset.theme === 'night'`, 2_000, 20)
+  nightOverlay = await collectShutdownOverlay(firstApp.cdp, 'night', 1040, 700, 1)
+  nightCapture = join(outputDir, 'planned-shutdown-night-1040x700.png')
+  await capture(firstApp.cdp, nightCapture)
 
-    await firstApp.cdp.send('Emulation.setDeviceMetricsOverride', {
-      width: 520,
-      height: 350,
-      deviceScaleFactor: 2,
-      mobile: false,
-      screenWidth: 1040,
-      screenHeight: 700
-    })
-    await waitForExpression(firstApp.cdp,
-      `innerWidth === 520 && innerHeight === 350 && Math.abs(devicePixelRatio - 2) < 0.01`,
-      2_000,
-      20)
-    zoomOverlay = await collectShutdownOverlay(firstApp.cdp, 'night', 520, 350, 2)
-    zoomCapture = join(outputDir, 'planned-shutdown-night-1040x700-zoom-200.png')
-    await capture(firstApp.cdp, zoomCapture)
-  }
+  await firstApp.cdp.send('Emulation.setDeviceMetricsOverride', {
+    width: 520,
+    height: 350,
+    deviceScaleFactor: 2,
+    mobile: false,
+    screenWidth: 1040,
+    screenHeight: 700
+  })
+  await waitForExpression(firstApp.cdp,
+    `innerWidth === 520 && innerHeight === 350 && Math.abs(devicePixelRatio - 2) < 0.01`,
+    2_000,
+    20)
+  zoomOverlay = await collectShutdownOverlay(firstApp.cdp, 'night', 520, 350, 2)
+  zoomCapture = join(outputDir, 'planned-shutdown-night-1040x700-zoom-200.png')
+  await capture(firstApp.cdp, zoomCapture)
 
   const firstExit = await waitForChildExit(firstApp.child, 18_000)
   trace(`packaged App exited: ${JSON.stringify(firstExit)}`)
@@ -150,38 +148,35 @@ try {
     `Packaged App did not exit naturally after controlled shutdown: ${JSON.stringify(firstExit)}`)
   assert(firstShutdownResult?.forcedSignal === null && firstShutdownResult?.report?.status === 'completed',
     `Desktop did not observe a natural Core shutdown report: ${JSON.stringify(firstShutdownResult)}`)
-  const grokReliableTerminal = shutdownWithPreparedInput
-    && firstShutdownResult.report.activeExecutionsObserved >= 1
-    && firstShutdownResult.report.stopRequestsIssued >= 1
-    && firstShutdownResult.report.terminalExecutionsSettled >= 1
-    && firstShutdownResult.report.fencedAgentRunsSettled === 0
-    && firstShutdownResult.report.unsettledEffectAgentRuns === 0
-  const durableFenceTerminal = !shutdownWithPreparedInput
-    && firstShutdownResult.report.fencedAgentRunsSettled >= 1
+  const cancelAllTerminal = firstShutdownResult.report.cancelledAgentRunsSettled >= 1
     && firstShutdownResult.report.unsettledEffectAgentRuns >= 1
-  assert(firstShutdownResult.report.protocolVersion === 2
+  assert(firstShutdownResult.report.protocolVersion === 3
     && firstShutdownResult.report.controlledShutdownCyclePersisted === true
     && firstShutdownResult.report.unresolvedExecutions === 0
-    && (grokReliableTerminal || durableFenceTerminal),
+    && cancelAllTerminal,
   `Controlled shutdown did not fence its unresolved AgentRun: ${JSON.stringify(firstShutdownResult.report)}`)
-  assert(shutdownElapsedMs <= shutdownDeadlineMs + 3_000 && shutdownElapsedMs < 18_000,
-    `Controlled shutdown did not honor its bounded Core deadline: ${shutdownElapsedMs}ms`)
+  assert(shutdownElapsedMs <= promptCancellationTargetMs
+    && shutdownElapsedMs <= shutdownDeadlineMs
+    && shutdownElapsedMs < 18_000,
+  `Controlled shutdown did not honor its prompt cancellation target: ${shutdownElapsedMs}ms`)
   await assertProcessesExited(liveDescendantPids)
 
   const afterShutdown = await readRunFacts(agentRunId)
   assert(afterShutdown.run
     && afterShutdown.run.status === 'cancelled'
-    && afterShutdown.run.cancel_requested_at === null
+    && afterShutdown.run.cancel_requested_at !== null
+    && afterShutdown.run.cancel_reason_code === 'app_shutdown_cancel_all'
+    && afterShutdown.run.cancel_acknowledged_at !== null
     && afterShutdown.run.ended_at !== null
-    && (shutdownWithPreparedInput
-      ? afterShutdown.run.terminal_resolution_source === 'runtime_terminal'
-        && afterShutdown.run.terminal_reason_code === 'planned_shutdown_cancelled'
-        && afterShutdown.run.last_error_code === 'runtime_prompt_cancelled'
-      : afterShutdown.run.terminal_resolution_source === null
-        && afterShutdown.run.terminal_reason_code === null
-        && afterShutdown.run.last_error_code === 'planned_shutdown_outcome_unknown'),
+    && afterShutdown.run.terminal_resolution_source === null
+    && afterShutdown.run.terminal_reason_code === null
+    && afterShutdown.run.last_error_code === 'planned_shutdown_outcome_unknown',
   `Controlled shutdown did not terminalize the unresolved AgentRun honestly: ${JSON.stringify(afterShutdown.run)}`)
-  assert(afterShutdown.delivery?.status === 'accepted',
+  const inputStatusBeforeShutdown = shutdownReadySnapshot.contextManifests
+    .find((manifest) => manifest.agentRunId === agentRunId)?.delivery?.status ?? null
+  assert(afterShutdown.delivery?.status === (inputStatusBeforeShutdown === 'prepared'
+    ? 'delivery_unknown'
+    : 'accepted'),
     `Controlled shutdown recorded the wrong input-delivery boundary: ${JSON.stringify(afterShutdown.delivery)}`)
   assert(afterShutdown.turn?.cancel_requested_at === null
     && afterShutdown.turn?.status === 'failed'
@@ -194,28 +189,21 @@ try {
     const snapshot = await recoveredRequest('camps.snapshot', { campId })
     const run = snapshot.agentRuns.find((candidate) => candidate.id === agentRunId)
     return run?.status === 'cancelled'
-      && run.hasUnsettledExternalEffects === !shutdownWithPreparedInput
+      && run.hasUnsettledExternalEffects === true
       ? snapshot
       : null
   }, 'controlled-shutdown terminal after restart', 45_000, 100)
   const recoveredRun = recoveredSnapshot.agentRuns.find((candidate) => candidate.id === agentRunId)
   assert(recoveredRun?.executionEpoch === 1
     && recoveredRun.waitReason === null
-    && (shutdownWithPreparedInput
-      ? recoveredRun.terminalResolutionSource === 'runtime_terminal'
-        && recoveredRun.terminalReasonCode === 'planned_shutdown_cancelled'
-      : recoveredRun.terminalResolutionSource === null
-        && recoveredRun.terminalReasonCode === null),
+    && recoveredRun.terminalResolutionSource === null
+    && recoveredRun.terminalReasonCode === null,
   `Restart changed the fenced execution identity or fabricated Runtime terminal proof: ${JSON.stringify(recoveredRun)}`)
-  let terminal = null
-  let terminalCapture = null
-  if (!shutdownWithPreparedInput) {
-    await openCamp(recoveredApp.cdp, campId)
-    await openAgentProcess(recoveredApp.cdp, agentId)
-    terminal = await collectFencedTerminal(recoveredApp.cdp)
-    terminalCapture = join(outputDir, 'planned-shutdown-fenced-terminal.png')
-    await capture(recoveredApp.cdp, terminalCapture)
-  }
+  await openCamp(recoveredApp.cdp, campId)
+  await openAgentProcess(recoveredApp.cdp, agentId)
+  const terminal = await collectFencedTerminal(recoveredApp.cdp)
+  const terminalCapture = join(outputDir, 'planned-shutdown-fenced-terminal.png')
+  await capture(recoveredApp.cdp, terminalCapture)
 
   const recoveredDescendantPids = await descendantProcessIds(recoveredApp.child.pid)
   const recoveredShutdownStartedAt = Date.now()
@@ -238,14 +226,12 @@ try {
   const finalFacts = await readRunFacts(agentRunId)
   assert(finalFacts.run?.status === 'cancelled'
     && finalFacts.run.wait_reason === null
-    && finalFacts.run.cancel_requested_at === null
-    && (shutdownWithPreparedInput
-      ? finalFacts.run.last_error_code === 'runtime_prompt_cancelled'
-        && finalFacts.run.terminal_resolution_source === 'runtime_terminal'
-        && finalFacts.run.terminal_reason_code === 'planned_shutdown_cancelled'
-      : finalFacts.run.last_error_code === 'planned_shutdown_outcome_unknown'
-        && finalFacts.run.terminal_resolution_source === null
-        && finalFacts.run.terminal_reason_code === null),
+    && finalFacts.run.cancel_requested_at !== null
+    && finalFacts.run.cancel_reason_code === 'app_shutdown_cancel_all'
+    && finalFacts.run.cancel_acknowledged_at !== null
+    && finalFacts.run.last_error_code === 'planned_shutdown_outcome_unknown'
+    && finalFacts.run.terminal_resolution_source === null
+    && finalFacts.run.terminal_reason_code === null,
   `Restart did not preserve the controlled-shutdown terminal: ${JSON.stringify(finalFacts.run)}`)
 
   const report = {
@@ -256,8 +242,7 @@ try {
       adapterKind: runtimeKind,
       reportedVersion: installation.snapshot?.reportedVersion ?? null,
       agentRunId,
-      inputStatusBeforeShutdown: shutdownReadySnapshot.contextManifests
-        .find((manifest) => manifest.agentRunId === agentRunId)?.delivery?.status ?? null
+      inputStatusBeforeShutdown
     },
     shutdown: {
       elapsedMs: shutdownElapsedMs,
@@ -269,9 +254,10 @@ try {
       recoveredReport: recoveredShutdownResult.report,
       observedDescendantProcesses: liveDescendantPids.length,
       runtimeTerminalFabricated: false,
-      runtimeTerminalSettled: shutdownWithPreparedInput,
-      executionFencedTerminal: !shutdownWithPreparedInput,
-      campTurnCancellationWritten: false
+      runtimeTerminalSettled: false,
+      executionFencedTerminal: true,
+      campTurnCancellationWritten: false,
+      agentRunCancellationWritten: true
     },
     recovery: {
       status: recoveredRun.status,
@@ -446,7 +432,7 @@ async function collectShutdownOverlay(cdp, theme, viewportWidth, viewportHeight,
   const overlay = await evaluate(cdp, `(() => {
     const scrim = document.querySelector('.shutdown-scrim')
     const card = scrim?.querySelector('.shutdown-card')
-    const progress = scrim?.querySelector('.shutdown-progress i')
+    const progress = scrim?.querySelector('.shutdown-progress-track i')
     const cardRect = card?.getBoundingClientRect()
     const progressStyle = progress ? getComputedStyle(progress) : null
     return scrim && card && cardRect ? {
@@ -457,6 +443,7 @@ async function collectShutdownOverlay(cdp, theme, viewportWidth, viewportHeight,
       describedBy: scrim.getAttribute('aria-describedby'),
       title: scrim.querySelector('h2')?.textContent?.trim() ?? null,
       description: scrim.querySelector('#controlled-shutdown-description')?.textContent?.trim() ?? null,
+      evidence: scrim.querySelector('#controlled-shutdown-evidence')?.textContent?.trim() ?? null,
       actionCount: scrim.querySelectorAll('button, a, input, select, textarea').length,
       card: { left: cardRect.left, top: cardRect.top, right: cardRect.right, bottom: cardRect.bottom },
       viewport: { width: innerWidth, height: innerHeight, deviceScaleFactor: devicePixelRatio },
@@ -485,11 +472,11 @@ async function collectShutdownOverlay(cdp, theme, viewportWidth, viewportHeight,
     && overlay.role === 'dialog'
     && overlay.modal === 'true'
     && overlay.labelledBy === 'controlled-shutdown-title'
-    && overlay.describedBy === 'controlled-shutdown-description'
-    && overlay.title === '正在停止运行并关闭 Rovai…'
-    && overlay.description.includes('执行引擎返回可靠终态')
-    && overlay.description.includes('无法确认的执行也会停止')
-    && overlay.description.includes('保留外部效果现场')
+    && overlay.describedBy === 'controlled-shutdown-description controlled-shutdown-evidence'
+    && overlay.title === '正在取消所有 AgentRun'
+    && overlay.description.includes('完成本地收口，然后退出')
+    && overlay.evidence.includes('未确认的文件、命令或工具效果')
+    && overlay.evidence.includes('待核对记录')
     && overlay.actionCount === 0
     && overlay.viewport.width === viewportWidth
     && overlay.viewport.height === viewportHeight
@@ -525,7 +512,8 @@ async function collectFencedTerminal(cdp) {
 
 async function readRunFacts(agentRunId) {
   const run = (await runSqlJson(`
-    SELECT id, status, wait_reason, cancel_requested_at, terminal_resolution_source,
+    SELECT id, status, wait_reason, cancel_requested_at, cancel_reason_code,
+           cancel_acknowledged_at, terminal_resolution_source,
            terminal_reason_code, last_error_code, execution_epoch, ended_at
     FROM agent_run WHERE id = ${sqlLiteral(agentRunId)};
   `))[0] ?? null

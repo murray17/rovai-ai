@@ -223,7 +223,8 @@ export function requestAuthoritativeCampOpenProjection(
 }
 
 type LoadState = 'loading' | 'ready' | 'error'
-type StartupStatus = 'loading' | 'waiting' | 'resolved'
+export type StartupStatus = 'loading' | 'waiting' | 'resolved'
+export const STARTUP_FEEDBACK_DELAY_MS = 400
 export type View = 'compose' | 'camp' | 'members' | 'memory' | 'settings'
 export type SettingsSection = NavigationSettingsSection
 export type WindowDragStripPage = Extract<View, 'compose' | 'members' | 'memory' | 'settings'>
@@ -241,6 +242,13 @@ export function startupGateShouldBeVisible(
   snapshot: DesktopStartupSnapshot | null
 ): boolean {
   return snapshot === null
+}
+
+export function startupFeedbackShouldBeVisible(
+  status: StartupStatus,
+  delayElapsed: boolean
+): boolean {
+  return status === 'waiting' || (status === 'loading' && delayElapsed)
 }
 
 export function campViewIsVisibleForReadAcknowledgement(
@@ -504,22 +512,39 @@ export function shouldLoadRuntimeHealth(
 }
 
 export function ControlledShutdownOverlay(): React.JSX.Element {
+  const dialogRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    dialogRef.current?.focus({ preventScroll: true })
+  }, [])
+
   return (
     <div
+      ref={dialogRef}
       className="shutdown-scrim"
       role="dialog"
       aria-modal="true"
       aria-live="assertive"
       aria-labelledby="controlled-shutdown-title"
-      aria-describedby="controlled-shutdown-description"
+      aria-describedby="controlled-shutdown-description controlled-shutdown-evidence"
+      tabIndex={-1}
+      onKeyDown={(event) => {
+        if (event.key !== 'Tab') return
+        event.preventDefault()
+        dialogRef.current?.focus({ preventScroll: true })
+      }}
     >
       <section className="shutdown-card">
-        <span className="shutdown-progress" aria-hidden="true"><i /></span>
-        <div>
-          <p className="settings-page-eyebrow">CONTROLLED SHUTDOWN</p>
-          <h2 id="controlled-shutdown-title">正在停止运行并关闭 Rovai…</h2>
-          <p id="controlled-shutdown-description">
-            正在等待执行引擎返回可靠终态；无法确认的执行也会停止，并保留外部效果现场供下次核对。
+        <span className="shutdown-stop-mark" aria-hidden="true" />
+        <div className="shutdown-card-content">
+          <p className="shutdown-kicker">正在退出</p>
+          <h2 id="controlled-shutdown-title">正在取消所有 AgentRun</h2>
+          <p id="controlled-shutdown-description">Rovai 会停止所有运行并完成本地收口，然后退出。</p>
+          <span className="shutdown-progress-track" role="progressbar" aria-label="正在完成退出收口">
+            <i />
+          </span>
+          <p className="shutdown-evidence-note" id="controlled-shutdown-evidence">
+            未确认的文件、命令或工具效果会保留为待核对记录。
           </p>
         </div>
       </section>
@@ -569,6 +594,7 @@ export function App(): React.JSX.Element {
   const [startupSnapshot, setStartupSnapshot] = useState<DesktopStartupSnapshot | null>(null)
   const [startupRouteTarget, setStartupRouteTarget] = useState<RestorableLocation | null>(null)
   const [startupStatus, setStartupStatus] = useState<StartupStatus>('loading')
+  const [startupFeedbackDelayElapsed, setStartupFeedbackDelayElapsed] = useState(false)
   const [startupError, setStartupError] = useState<string | null>(null)
   const [onboardingSnapshot, setOnboardingSnapshot] = useState<OnboardingSnapshot | null>(null)
   const [onboardingRuntimePhase, setOnboardingRuntimePhase] = useState<OnboardingRuntimePhase>('idle')
@@ -972,6 +998,13 @@ export function App(): React.JSX.Element {
     return request
   }, [cancelPendingCampActivation, setCampSnapshot])
 
+  const completeStartup = useCallback((sessionId: string): void => {
+    startupResolvedSessionId.current = sessionId
+    setStartupStatus('resolved')
+    setStartupError(null)
+    setStartupRouteTarget(null)
+  }, [])
+
   const commitRestorableLocation = useCallback(async (
     location: RestorableLocation
   ): Promise<void> => {
@@ -1207,6 +1240,13 @@ export function App(): React.JSX.Element {
   }, [loadStartupSnapshot])
 
   useEffect(() => {
+    const elapsed = performance.now() - startupStartedAt.current
+    const remaining = Math.max(0, STARTUP_FEEDBACK_DELAY_MS - elapsed)
+    const timer = window.setTimeout(() => setStartupFeedbackDelayElapsed(true), remaining)
+    return () => window.clearTimeout(timer)
+  }, [])
+
+  useEffect(() => {
     void loadOnboarding()
   }, [loadOnboarding])
 
@@ -1320,13 +1360,6 @@ export function App(): React.JSX.Element {
       return true
     }
 
-    const complete = (): void => {
-      startupResolvedSessionId.current = startupSnapshot.sessionId
-      setStartupStatus('resolved')
-      setStartupError(null)
-      setStartupRouteTarget(null)
-    }
-
     const logRouteContentPaint = async (target: RestorableLocation['kind']): Promise<void> => {
       await afterNextPaint()
       if (cancelled) return
@@ -1342,12 +1375,11 @@ export function App(): React.JSX.Element {
       if (target.kind === 'quick_chat') {
         showQuickChat()
         scheduleOverview()
-        complete()
+        completeStartup(startupSnapshot.sessionId)
         await logRouteContentPaint(target.kind)
         return
       } else if (target.kind === 'memory') {
         scheduleOverview()
-        complete()
         return
       } else if (target.kind === 'members') {
         const agentsRequest = loadAgents()
@@ -1355,7 +1387,7 @@ export function App(): React.JSX.Element {
         const nextAgents = await agentsRequest
         if (cancelled) return
         setSelectedMemberId(restoredMemberId(target.agentId, nextAgents))
-        complete()
+        completeStartup(startupSnapshot.sessionId)
         await logRouteContentPaint(target.kind)
         return
       } else {
@@ -1376,7 +1408,7 @@ export function App(): React.JSX.Element {
           if (cancelled) return
           if (!exists) {
             showQuickChat()
-            complete()
+            completeStartup(startupSnapshot.sessionId)
             await logRouteContentPaint('quick_chat')
             return
           }
@@ -1395,7 +1427,7 @@ export function App(): React.JSX.Element {
         setNotificationFocus(null)
         lastMainView.current = 'camp'
         setView('camp')
-        complete()
+        completeStartup(startupSnapshot.sessionId)
         await afterNextPaint()
         if (cancelled || selectionGeneration !== campSelectionGeneration.current) return
         console.info(
@@ -1435,6 +1467,7 @@ export function App(): React.JSX.Element {
     }
   }, [
     cancelPendingCampActivation,
+    completeStartup,
     loadAgents,
     loadNavigation,
     loadOverview,
@@ -1472,6 +1505,15 @@ export function App(): React.JSX.Element {
       tab: memberTab
     })
   }, [agents, commitRestorableLocation, memberTab, selectedMemberId, startupStatus, view])
+
+  useEffect(() => {
+    if (
+      !startupSnapshot
+      || startupRouteTarget?.kind !== 'memory'
+      || view === 'memory'
+    ) return
+    completeStartup(startupSnapshot.sessionId)
+  }, [completeStartup, startupRouteTarget, startupSnapshot, view])
 
   useEffect(() => {
     let active = true
@@ -1947,9 +1989,22 @@ export function App(): React.JSX.Element {
   ])
 
   const commitMemoryLocation = useCallback((): void => {
+    if (
+      startupSnapshot
+      && startupRouteTarget?.kind === 'memory'
+      && startupResolvedSessionId.current !== startupSnapshot.sessionId
+    ) {
+      completeStartup(startupSnapshot.sessionId)
+      void afterNextPaint().then(() => {
+        console.info(
+          `[startup] trace=${startupTraceId.current} stage=renderer_route_content_paint `
+          + `target=memory elapsed_ms=${(performance.now() - startupStartedAt.current).toFixed(1)}`
+        )
+      })
+    }
     if (!startupResolvedSessionId.current || viewRef.current !== 'memory') return
     void commitRestorableLocation({ kind: 'memory' })
-  }, [commitRestorableLocation])
+  }, [completeStartup, commitRestorableLocation, startupRouteTarget, startupSnapshot])
 
   const retryStartup = (): void => {
     setStartupStatus('loading')
@@ -2824,6 +2879,10 @@ export function App(): React.JSX.Element {
     settings: 'settings-content'
   }
   const startupGateVisible = startupGateShouldBeVisible(startupSnapshot)
+  const startupFeedbackVisible = startupFeedbackShouldBeVisible(
+    startupStatus,
+    startupFeedbackDelayElapsed
+  )
   const startupRoutePending = !startupGateVisible && startupStatus !== 'resolved'
     ? startupRouteTarget
     : null
@@ -2869,18 +2928,20 @@ export function App(): React.JSX.Element {
   if (onboardingSnapshot === null) {
     return (
       <div className="app-shell onboarding-app-shell">
-        <section className="startup-gate onboarding-admission-gate" aria-busy={!onboardingError} aria-live="polite">
-          <span className="startup-gate-mark" aria-hidden="true">✦</span>
-          <p className="settings-page-eyebrow">ROVAI FIRST START</p>
-          <h1>{onboardingError ? '暂时无法读取首次训练状态' : '正在准备 Rovai'}</h1>
-          <p>{onboardingError
-            ? '已保存的进度不会被清除。重试后会继续打开同一个未完成页面。'
-            : '正在读取本机的首次训练进度。'}</p>
-          {onboardingError && <small role="alert">{onboardingError}</small>}
-          {onboardingError && (
-            <button className="quiet-button" type="button" onClick={retryStartup}>重试</button>
-          )}
-        </section>
+        {(startupFeedbackDelayElapsed || onboardingError) && (
+          <section className="startup-gate onboarding-admission-gate" aria-busy={!onboardingError} aria-live="polite">
+            <span className="startup-gate-mark" aria-hidden="true">✦</span>
+            <p className="settings-page-eyebrow">ROVAI FIRST START</p>
+            <h1>{onboardingError ? '暂时无法读取首次训练状态' : '正在准备 Rovai'}</h1>
+            <p>{onboardingError
+              ? '已保存的进度不会被清除。重试后会继续打开同一个未完成页面。'
+              : '正在读取本机的首次训练进度。'}</p>
+            {onboardingError && <small role="alert">{onboardingError}</small>}
+            {onboardingError && (
+              <button className="quiet-button" type="button" onClick={retryStartup}>重试</button>
+            )}
+          </section>
+        )}
         {shuttingDown && <ControlledShutdownOverlay />}
       </div>
     )
@@ -3004,7 +3065,7 @@ export function App(): React.JSX.Element {
       {windowDragPage && <WindowDragStrip page={windowDragPage} />}
 
       <main className={`content ${pageContentClassName[view]}`}>
-        {startupGateVisible && (
+        {startupGateVisible && startupFeedbackVisible && (
           <StartupGate
             waiting={startupStatus === 'waiting'}
             error={startupError}
@@ -3019,7 +3080,7 @@ export function App(): React.JSX.Element {
           </div>
         )}
 
-        {!startupGateVisible && startupRoutePending?.kind === 'camp' && view === 'camp' && (
+        {!startupGateVisible && startupFeedbackVisible && startupRoutePending?.kind === 'camp' && view === 'camp' && (
           <StartupRouteLoading
             kind="camp"
             waiting={startupStatus === 'waiting'}
@@ -3102,6 +3163,7 @@ export function App(): React.JSX.Element {
             onReviewDrawerSignalConsumed={() => setMemoryReviewDrawerSignal(0)}
             onPendingCountChange={setPendingMemoryCount}
             onReady={commitMemoryLocation}
+            startupFeedbackVisible={startupRoutePending?.kind !== 'memory' || startupFeedbackVisible}
           />
         )}
 
@@ -3128,7 +3190,8 @@ export function App(): React.JSX.Element {
 
         {!startupGateVisible && view === 'members' && (
           startupRoutePending?.kind === 'members'
-            ? (
+            ? startupFeedbackVisible
+              ? (
                 <StartupRouteLoading
                   kind="members"
                   waiting={startupStatus === 'waiting'}
@@ -3136,6 +3199,7 @@ export function App(): React.JSX.Element {
                   onRetry={retryStartup}
                 />
               )
+              : null
             : (
                 <div className="members-workspace">
                   <MemberSidebar
@@ -3246,15 +3310,30 @@ export function StartupGate({
   onRetry(): void
 }): React.JSX.Element {
   return (
-    <section className="startup-gate" aria-busy={!waiting} aria-live="polite">
-      <span className="startup-gate-mark" aria-hidden="true">✦</span>
-      <p className="settings-page-eyebrow">MAIN WINDOW SESSION</p>
-      <h1>{waiting ? '暂时无法恢复上次位置' : '正在恢复上次位置'}</h1>
-      <p>{waiting
-        ? 'Rovai AI 会保留这次窗口冻结的恢复目标。后台服务恢复后将继续验证同一位置，不会清除或改走其他启动路线。'
-        : '正在读取窗口偏好，并通过本地数据验证最近的稳定页面。'}</p>
-      {error && <small role="alert">{error}</small>}
-      {waiting && <button className="quiet-button" type="button" onClick={onRetry}>重试恢复</button>}
+    <section
+      className="startup-route-loading startup-route-loading-location"
+      aria-busy={!waiting}
+      aria-live="polite"
+      data-startup-route="location"
+      data-startup-status={waiting ? 'waiting' : 'loading'}
+    >
+      <header className="startup-route-status">
+        <span className="startup-route-progress" aria-hidden="true" />
+        <div>
+          <h1>{waiting ? '暂时无法打开上次位置' : '正在打开上次位置'}</h1>
+          <p>{waiting
+            ? '上次位置仍保留在本机，可以在本地服务恢复后重试。'
+            : '页面框架已经就绪，最近内容即将就绪。'}</p>
+        </div>
+        {waiting && <button className="quiet-button" type="button" onClick={onRetry}>重试打开</button>}
+      </header>
+      {error && <p className="startup-route-error" role="alert">{error}</p>}
+      <div className="startup-route-skeleton" aria-hidden="true">
+        <span />
+        <span />
+        <span />
+        <span />
+      </div>
     </section>
   )
 }
@@ -3282,10 +3361,10 @@ export function StartupRouteLoading({
       <header className="startup-route-status">
         <span className="startup-route-progress" aria-hidden="true" />
         <div>
-          <h2>{waiting ? `${label}暂时无法恢复` : `正在恢复${label}`}</h2>
+          <h2>{waiting ? `${label}暂时无法打开` : `正在打开${label}`}</h2>
           <p>{waiting
-            ? '恢复目标仍被保留，可以在本地服务恢复后重试。'
-            : `页面框架已经就绪，正在读取${label}的权威本地数据。`}</p>
+            ? '上次位置仍保留在本机，可以在本地服务恢复后重试。'
+            : '页面框架已经就绪，最近内容即将就绪。'}</p>
         </div>
         {waiting && (
           <button className="quiet-button" type="button" onClick={onRetry}>重试</button>

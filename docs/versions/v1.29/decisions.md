@@ -221,3 +221,45 @@ writer intent 或在 dispatch 前重建 View。旧 publication gate/generation �
 - per-Run copy、Inline 或 Host broker：建立额外 Authority/权限兼容平台，超出性能修复范围；
 - 启动时批量迁移或 v1/v2 双写：扩大升级风险且不解决新写路径锁依赖；
 - Context 每次探测本地文件并生成 unavailable descriptor：把文件系统扫描放回热路径，并替 Runtime 猜测失败。
+
+<a id="v1-29-d07"></a>
+## V1.29-D07：退出 Rovai 等于取消所有 AgentRun
+
+### 背景
+
+此前主动退出先请求 Runtime 收敛，并优先等待可靠终态。直接退出会把这段等待放在关闭路径中；用户先手动
+取消 AgentRun 时，等待已提前发生，因此随后关闭明显更快。两条路径对用户的最终意图一致，却有不同的耗时
+与反馈。
+
+冷启动的全局恢复提示也会在目标数据很快就绪时短暂闪现，让正常打开看起来像一次恢复操作。队员页和记忆页
+已经有稳定页面结构，不需要为短等待替换整页。
+
+### 决定
+
+主动退出、重启与更新统一表示取消全部非终态 AgentRun。Core 持久化 shutdown cycle、关闭新 launch 并完成
+稳定快照后，立即关闭 terminal/route 准入；随后只给 Runtime 600ms best-effort 中断窗口，在同一产品事务中
+写入 Run-local 取消请求、`app_shutdown_cancel_all` 原因和确认时间，再把 Run 结算为 `cancelled`。Runtime route
+回收最多等待 2 秒，Desktop 保留 10 秒硬 deadline。
+
+Migration 113 保持当前 Data Contract 与 projection schema marker，只把 `planned_shutdown_cycle` 的协议约束从
+仅 v2 扩为 v2/v3。已有 row 原样复制，历史 pending v2 cycle 继续可辨识，新退出只持久化 v3。
+
+退出不伪造 Runtime terminal，也不抹除已存在的 unknown-effect 证据。该动作不写 CampTurn 取消意图；依赖被
+取消 Run 的 CampTurn 按既有 required-run 规则结算。升级前已持久化的 v2 cycle 继续按历史语义补偿。
+
+冷启动立即开始读取 Main Window Session 与目标数据。前 400ms 不显示加载反馈；超过门槛后只在目标内容区
+显示局部反馈，错误仍立即显示。队员页和记忆页保持既有结构，关闭等待面明确当前正在取消全部 AgentRun。
+
+### 后果
+
+- 直接退出与先手动取消再退出使用同一产品语义，正常活跃 Run 的关闭验收目标为 5 秒内完成；
+- 关闭延迟不再由 Runtime 是否及时给出可靠 terminal 决定，迟到 terminal 也不能越过已关闭准入改写产品终态；
+- 每个被退出取消的 Run 都有可审计的取消请求、原因和确认时间，未知外部效果仍可单独展示；
+- 快速冷启动不再闪现恢复提示，慢启动仍提供与目标页面一致的进度反馈。
+
+### 被拒绝方案
+
+- 保留可靠终态优先等待并只美化弹窗：不消除直接退出与手动取消后退出的耗时差异；
+- 在 Renderer 中先逐个发起取消再关闭 Core：增加多入口竞态，且不能提供单一稳定快照与原子结算；
+- 启动时立即显示全局恢复页：短加载持续闪现，并遮蔽用户上次使用的位置；
+- 完全不显示启动反馈：慢磁盘、迁移或数据错误时缺少可理解的状态。

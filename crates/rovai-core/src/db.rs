@@ -52,10 +52,10 @@ pub struct Database {
 
 const CURRENT_DATA_CONTRACT_VERSION: &str = "v1.27";
 const CURRENT_PROJECTION_SCHEMA_VERSION: i64 = 68;
-const V114_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.26";
-const V114_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION: i64 = 67;
-const V113_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.25";
-const V113_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION: i64 = 66;
+const V115_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.26";
+const V115_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION: i64 = 67;
+const V114_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.25";
+const V114_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION: i64 = 66;
 const V112_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.24";
 const V112_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION: i64 = 65;
 const V111_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.23";
@@ -185,6 +185,7 @@ struct CurrentMigrationState {
     v112: bool,
     v113: bool,
     v114: bool,
+    v115: bool,
 }
 
 impl CurrentMigrationState {
@@ -235,13 +236,14 @@ impl CurrentMigrationState {
                 && self.v111
                 && self.v112
                 && self.v113
-                && self.v114;
+                && self.v114
+                && self.v115;
         }
-        if self.v114 {
+        if self.v115 {
             return false;
         }
-        if contract == V114_MIGRATION_SOURCE_DATA_CONTRACT_VERSION
-            && schema == V114_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION
+        if contract == V115_MIGRATION_SOURCE_DATA_CONTRACT_VERSION
+            && schema == V115_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION
         {
             return self.v70
                 && self.v71
@@ -282,13 +284,14 @@ impl CurrentMigrationState {
                 && self.v110
                 && self.v111
                 && self.v112
-                && self.v113;
+                && self.v113
+                && self.v114;
         }
-        if self.v113 {
+        if self.v114 {
             return false;
         }
-        if contract == V113_MIGRATION_SOURCE_DATA_CONTRACT_VERSION
-            && schema == V113_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION
+        if contract == V114_MIGRATION_SOURCE_DATA_CONTRACT_VERSION
+            && schema == V114_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION
         {
             return self.v70
                 && self.v71
@@ -1365,7 +1368,9 @@ fn connection_has_current_data_contract(connection: &Connection) -> rusqlite::Re
     }
     connection.query_row(
         r#"
-        SELECT contract_version = ?1 AND projection_schema_version = ?2
+        SELECT contract_version = ?1
+               AND projection_schema_version = ?2
+               AND EXISTS(SELECT 1 FROM schema_migration WHERE version = 115)
         FROM rovai_data_contract
         WHERE singleton = 1
         "#,
@@ -1426,7 +1431,8 @@ fn load_current_migration_state(
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 111),
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 112),
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 113),
-               EXISTS(SELECT 1 FROM schema_migration WHERE version = 114)
+               EXISTS(SELECT 1 FROM schema_migration WHERE version = 114),
+               EXISTS(SELECT 1 FROM schema_migration WHERE version = 115)
         "#,
         [],
         |row| {
@@ -1476,6 +1482,7 @@ fn load_current_migration_state(
                 v112: row.get(42)?,
                 v113: row.get(43)?,
                 v114: row.get(44)?,
+                v115: row.get(45)?,
             })
         },
     )
@@ -2940,10 +2947,13 @@ impl Database {
                 self.migrate_managed_attachment_v2_v112()?;
             }
             if !self.schema_migration_applied(113)? {
-                self.migrate_channel_platform_v113()?;
+                self.migrate_planned_shutdown_protocol_v3_v113()?;
             }
             if !self.schema_migration_applied(114)? {
-                self.migrate_feishu_developer_session_v114()?;
+                self.migrate_channel_platform_v114()?;
+            }
+            if !self.schema_migration_applied(115)? {
+                self.migrate_feishu_developer_session_v115()?;
             }
             if let Err(error) =
                 crate::notification::maintain_notification_episode_retention(self.connection())
@@ -3332,10 +3342,13 @@ impl Database {
             self.migrate_managed_attachment_v2_v112()?;
         }
         if !self.schema_migration_applied(113)? {
-            self.migrate_channel_platform_v113()?;
+            self.migrate_planned_shutdown_protocol_v3_v113()?;
         }
         if !self.schema_migration_applied(114)? {
-            self.migrate_feishu_developer_session_v114()?;
+            self.migrate_channel_platform_v114()?;
+        }
+        if !self.schema_migration_applied(115)? {
+            self.migrate_feishu_developer_session_v115()?;
         }
         if let Err(error) =
             crate::notification::maintain_notification_episode_retention(self.connection())
@@ -15969,7 +15982,7 @@ impl Database {
         Ok(())
     }
 
-    fn migrate_channel_platform_v113(&mut self) -> Result<()> {
+    fn migrate_channel_platform_v114(&mut self) -> Result<()> {
         self.connection
             .execute_batch("PRAGMA foreign_keys = OFF;")?;
         let migration_result = (|| -> Result<()> {
@@ -16436,7 +16449,7 @@ impl Database {
                 WHERE singleton = 1;
 
                 INSERT INTO schema_migration(version, applied_at)
-                VALUES (113, datetime('now'));
+                VALUES (114, datetime('now'));
                 "#,
             )?;
             transaction.commit()?;
@@ -16457,7 +16470,7 @@ impl Database {
         Ok(())
     }
 
-    fn migrate_feishu_developer_session_v114(&mut self) -> Result<()> {
+    fn migrate_feishu_developer_session_v115(&mut self) -> Result<()> {
         let transaction = self
             .connection
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
@@ -16519,7 +16532,7 @@ impl Database {
             WHERE singleton = 1;
 
             INSERT INTO schema_migration(version, applied_at)
-            VALUES (114, datetime('now'));
+            VALUES (115, datetime('now'));
             "#,
         )?;
         transaction.commit()?;
@@ -16652,6 +16665,60 @@ impl Database {
 
             INSERT INTO schema_migration(version, applied_at)
             VALUES (112, datetime('now'));
+            "#,
+        )?;
+        transaction.commit()?;
+        Ok(())
+    }
+
+    fn migrate_planned_shutdown_protocol_v3_v113(&mut self) -> Result<()> {
+        let transaction = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        transaction.execute_batch(
+            r#"
+            CREATE TABLE planned_shutdown_cycle_v113 (
+                core_generation TEXT PRIMARY KEY
+                    CHECK(length(trim(core_generation)) > 0),
+                protocol_version INTEGER NOT NULL
+                    CHECK(protocol_version IN (2, 3)),
+                requested_at TEXT NOT NULL,
+                settled_at TEXT,
+                fenced_agent_run_count INTEGER
+                    CHECK(fenced_agent_run_count IS NULL OR fenced_agent_run_count >= 0),
+                unsettled_effect_agent_run_count INTEGER
+                    CHECK(
+                        unsettled_effect_agent_run_count IS NULL
+                        OR unsettled_effect_agent_run_count >= 0
+                    ),
+                CHECK (
+                    (settled_at IS NULL
+                        AND fenced_agent_run_count IS NULL
+                        AND unsettled_effect_agent_run_count IS NULL)
+                    OR
+                    (settled_at IS NOT NULL
+                        AND fenced_agent_run_count IS NOT NULL
+                        AND unsettled_effect_agent_run_count IS NOT NULL)
+                )
+            );
+
+            INSERT INTO planned_shutdown_cycle_v113(
+                core_generation, protocol_version, requested_at, settled_at,
+                fenced_agent_run_count, unsettled_effect_agent_run_count
+            )
+            SELECT core_generation, protocol_version, requested_at, settled_at,
+                   fenced_agent_run_count, unsettled_effect_agent_run_count
+            FROM planned_shutdown_cycle;
+
+            DROP TABLE planned_shutdown_cycle;
+            ALTER TABLE planned_shutdown_cycle_v113 RENAME TO planned_shutdown_cycle;
+
+            CREATE INDEX planned_shutdown_cycle_pending_idx
+                ON planned_shutdown_cycle(requested_at, core_generation)
+                WHERE settled_at IS NULL;
+
+            INSERT INTO schema_migration(version, applied_at)
+            VALUES (113, datetime('now'));
             "#,
         )?;
         transaction.commit()?;
@@ -21317,8 +21384,8 @@ fn downgrade_current_schema_to_v112_source_for_test(connection: &Connection) {
             UPDATE rovai_data_contract
             SET contract_version = 'v1.25', projection_schema_version = 66
             WHERE singleton = 1;
-            DELETE FROM schema_migration WHERE version = 113;
             DELETE FROM schema_migration WHERE version = 114;
+            DELETE FROM schema_migration WHERE version = 115;
             PRAGMA foreign_keys = ON;
             "#,
         )
@@ -21331,6 +21398,51 @@ fn downgrade_current_schema_to_v112_source_for_test(connection: &Connection) {
             .unwrap(),
         0
     );
+    connection
+        .execute_batch(
+            r#"
+            BEGIN IMMEDIATE;
+            CREATE TABLE planned_shutdown_cycle_v112 (
+                core_generation TEXT PRIMARY KEY
+                    CHECK(length(trim(core_generation)) > 0),
+                protocol_version INTEGER NOT NULL
+                    CHECK(protocol_version = 2),
+                requested_at TEXT NOT NULL,
+                settled_at TEXT,
+                fenced_agent_run_count INTEGER
+                    CHECK(fenced_agent_run_count IS NULL OR fenced_agent_run_count >= 0),
+                unsettled_effect_agent_run_count INTEGER
+                    CHECK(
+                        unsettled_effect_agent_run_count IS NULL
+                        OR unsettled_effect_agent_run_count >= 0
+                    ),
+                CHECK (
+                    (settled_at IS NULL
+                        AND fenced_agent_run_count IS NULL
+                        AND unsettled_effect_agent_run_count IS NULL)
+                    OR
+                    (settled_at IS NOT NULL
+                        AND fenced_agent_run_count IS NOT NULL
+                        AND unsettled_effect_agent_run_count IS NOT NULL)
+                )
+            );
+            INSERT INTO planned_shutdown_cycle_v112(
+                core_generation, protocol_version, requested_at, settled_at,
+                fenced_agent_run_count, unsettled_effect_agent_run_count
+            )
+            SELECT core_generation, protocol_version, requested_at, settled_at,
+                   fenced_agent_run_count, unsettled_effect_agent_run_count
+            FROM planned_shutdown_cycle;
+            DROP TABLE planned_shutdown_cycle;
+            ALTER TABLE planned_shutdown_cycle_v112 RENAME TO planned_shutdown_cycle;
+            CREATE INDEX planned_shutdown_cycle_pending_idx
+                ON planned_shutdown_cycle(requested_at, core_generation)
+                WHERE settled_at IS NULL;
+            DELETE FROM schema_migration WHERE version = 113;
+            COMMIT;
+            "#,
+        )
+        .unwrap();
 }
 
 #[cfg(test)]
@@ -22208,6 +22320,7 @@ mod tests {
             v112: version >= 112,
             v113: version >= 113,
             v114: version >= 114,
+            v115: version >= 115,
         }
     }
 
@@ -22218,18 +22331,24 @@ mod tests {
                 "current",
                 CURRENT_DATA_CONTRACT_VERSION,
                 CURRENT_PROJECTION_SCHEMA_VERSION,
-                114,
+                115,
             ),
             (
                 "v1.26/schema-67 after Feishu channel platform",
+                V115_MIGRATION_SOURCE_DATA_CONTRACT_VERSION,
+                V115_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION,
+                114,
+            ),
+            (
+                "v1.25/schema-66 after planned shutdown protocol v3",
                 V114_MIGRATION_SOURCE_DATA_CONTRACT_VERSION,
                 V114_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION,
                 113,
             ),
             (
                 "v1.25/schema-66 after managed attachment v2",
-                V113_MIGRATION_SOURCE_DATA_CONTRACT_VERSION,
-                V113_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION,
+                V114_MIGRATION_SOURCE_DATA_CONTRACT_VERSION,
+                V114_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION,
                 112,
             ),
             (
@@ -22468,7 +22587,7 @@ mod tests {
             );
         }
 
-        let current = migration_state_through(112);
+        let current = migration_state_through(115);
         let v092_source = migration_state_through(91);
         let mut missing_intermediate = current;
         missing_intermediate.v84 = false;
@@ -22538,7 +22657,7 @@ mod tests {
             )
             .expect("current contract marker should load");
 
-        assert_eq!(state, migration_state_through(114));
+        assert_eq!(state, migration_state_through(115));
         assert!(state.admits(&contract, schema));
         assert!(has_admissible_data_contract(
             &directory.join("rovai.sqlite")
@@ -24861,7 +24980,7 @@ mod tests {
     }
 
     #[test]
-    fn v114_upgrades_v112_preserves_evidence_and_installs_developer_session_contract() {
+    fn v115_upgrades_v112_preserves_evidence_and_installs_developer_session_contract() {
         let (database, directory) = crate::test_support::seeded_runtime_database();
         downgrade_current_schema_to_v112_source_for_test(database.connection());
         let source_counts: (i64, i64) = database
@@ -24882,7 +25001,7 @@ mod tests {
                 .query_row(
                     r#"
                     SELECT contract_version, projection_schema_version,
-                           (SELECT COUNT(*) FROM schema_migration WHERE version = 113)
+                           (SELECT COUNT(*) FROM schema_migration WHERE version IN (113, 114, 115))
                     FROM rovai_data_contract WHERE singleton = 1
                     "#,
                     [],
@@ -24897,7 +25016,7 @@ mod tests {
         );
         drop(database);
 
-        let upgraded = Database::open(&directory).expect("v112 source should migrate to v113");
+        let upgraded = Database::open(&directory).expect("v112 source should migrate to v115");
         assert_eq!(
             upgraded
                 .connection()
@@ -24906,6 +25025,7 @@ mod tests {
                     SELECT contract_version, projection_schema_version,
                            (SELECT COUNT(*) FROM schema_migration WHERE version = 113),
                            (SELECT COUNT(*) FROM schema_migration WHERE version = 114),
+                           (SELECT COUNT(*) FROM schema_migration WHERE version = 115),
                            (SELECT COUNT(*) FROM pragma_foreign_key_check)
                     FROM rovai_data_contract WHERE singleton = 1
                     "#,
@@ -24916,12 +25036,14 @@ mod tests {
                         row.get::<_, i64>(2)?,
                         row.get::<_, i64>(3)?,
                         row.get::<_, i64>(4)?,
+                        row.get::<_, i64>(5)?,
                     )),
                 )
                 .unwrap(),
             (
                 CURRENT_DATA_CONTRACT_VERSION.to_string(),
                 CURRENT_PROJECTION_SCHEMA_VERSION,
+                1,
                 1,
                 1,
                 0,
@@ -24987,23 +25109,94 @@ mod tests {
                 table_columns(upgraded.connection(), "feishu_account")
                     .unwrap()
                     .contains(&column.to_string()),
-                "Migration 114 should install feishu_account.{column}"
+                "Migration 115 should install feishu_account.{column}"
             );
         }
         drop(upgraded);
 
-        let restarted = Database::open(&directory).expect("v113 restart should be idempotent");
+        let restarted = Database::open(&directory).expect("v115 restart should be idempotent");
         assert_eq!(
             restarted
                 .connection()
                 .query_row(
-                    "SELECT COUNT(*) FROM schema_migration WHERE version IN (113, 114)",
+                    "SELECT COUNT(*) FROM schema_migration WHERE version IN (113, 114, 115)",
                     [],
                     |row| row.get::<_, i64>(0),
                 )
                 .unwrap(),
-            2
+            3
         );
+        drop(restarted);
+        std::fs::remove_dir_all(directory).expect("temporary database should be removable");
+    }
+
+    #[test]
+    fn v113_admits_shutdown_protocol_v3_and_preserves_pending_v2_cycles() {
+        let (database, directory) = crate::test_support::seeded_runtime_database();
+        database
+            .connection()
+            .execute(
+                r#"
+                INSERT INTO planned_shutdown_cycle(
+                    core_generation, protocol_version, requested_at
+                ) VALUES ('pending-v2-generation', 2, datetime('now'))
+                "#,
+                [],
+            )
+            .unwrap();
+        downgrade_current_schema_to_v112_source_for_test(database.connection());
+        assert!(connection_has_admissible_data_contract(database.connection()).unwrap());
+        assert!(!connection_has_current_data_contract(database.connection()).unwrap());
+        drop(database);
+
+        let upgraded = Database::open(&directory).expect("v112 source should migrate to v113");
+        let marker: (i64, i64, i64) = upgraded
+            .connection()
+            .query_row(
+                r#"
+                SELECT
+                    (SELECT COUNT(*) FROM schema_migration WHERE version = 113),
+                    (SELECT COUNT(*) FROM planned_shutdown_cycle
+                     WHERE core_generation = 'pending-v2-generation'
+                       AND protocol_version = 2),
+                    (SELECT COUNT(*) FROM pragma_foreign_key_check)
+                "#,
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(marker, (1, 1, 0));
+        let cycle_schema: String = upgraded
+            .connection()
+            .query_row(
+                "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'planned_shutdown_cycle'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(cycle_schema.contains("protocol_version IN (2, 3)"));
+        upgraded
+            .connection()
+            .execute(
+                r#"
+                INSERT INTO planned_shutdown_cycle(
+                    core_generation, protocol_version, requested_at
+                ) VALUES ('new-v3-generation', 3, datetime('now'))
+                "#,
+                [],
+            )
+            .unwrap();
+        drop(upgraded);
+
+        let restarted = Database::open(&directory).expect("v113 restart should be idempotent");
+        let cycles: i64 = restarted
+            .connection()
+            .query_row("SELECT COUNT(*) FROM planned_shutdown_cycle", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(cycles, 2);
+        assert!(connection_has_current_data_contract(restarted.connection()).unwrap());
         drop(restarted);
         std::fs::remove_dir_all(directory).expect("temporary database should be removable");
     }

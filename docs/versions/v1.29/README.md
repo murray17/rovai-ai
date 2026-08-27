@@ -13,7 +13,7 @@ last_updated: 2026-08-27
 
 > 当前状态：动态 Camp membership 的 Core、Desktop IPC、Renderer、自动化门禁与隔离真实 App 验收均已完成；
 > 后继 Message Delivery zero-attempt cancellation hotfix 与 Managed Attachment v2 无 Run 等待写路径已完成实现
-> 和自动化验证，不替换当前 App。
+> 和自动化验证；退出即取消全部 AgentRun、400ms 冷启动反馈与局部关闭等待面也已完成。
 
 前置版本：[v1.28 Grok Build + MiniMax M3](../v1.28/README.md)已按冻结时事实转为 historical。
 
@@ -31,6 +31,8 @@ reconciliation 完成已接受工作的正式结算。
   cancelled terminal；显式/批量取消共用同一转换，迟到 projection completion 和 restart 不能复活终态；
 - Migration 112 将当前 Data Contract 升为 `v1.25 / projection schema 66`，新增 Managed Attachment v2、CampMessage
   refs 与 durable ingest intent；新附件不再进入 legacy publication gate，不等待或 fence 活跃 AgentRun；
+- Migration 113 保留 `v1.25 / projection schema 66`，只把 durable shutdown cycle 的协议约束扩为 v2/v3，
+  原样保留历史 pending v2 cycle；
 - 新增 `camps.members.add`、`camps.members.removalPreview`、`camps.members.remove` Desktop API；增加使用
   exact membership generation/version 的添加、预览和移除命令；
 - 添加不创建 Conversation，也不修改已冻结 AgentRun 的 Collaboration State；曾离开的 Agent 再次添加时，
@@ -55,6 +57,10 @@ reconciliation 完成已接受工作的正式结算。
   成员的移除操作可见但禁用，并解释“Camp 至少需要一位队员”；
 - 移除确认先读取权威影响预览，展示 Run、Task、Delivery、Gather 影响；冲突可刷新重试，正在 reconciliation
   的成员在会话区显示非阻塞状态。
+- 退出、重启与更新统一取消全部非终态 AgentRun；稳定快照后立即关闭 terminal/route 准入，短时请求 Runtime
+  中断，再完成 Run 取消审计、未知效果保留与本地收口；
+- 冷启动在前 400ms 保持目标页面稳定，超过门槛才显示局部“正在打开”反馈；队员页与记忆页保持既有结构，
+  关闭等待面明确当前正在取消全部 AgentRun。
 
 ## 模型上下文边界
 
@@ -75,10 +81,10 @@ reconciliation 完成已接受工作的正式结算。
 | 范围 | 结论 | 证据或理由 |
 | --- | --- | --- |
 | Version lifecycle | 已更新 | 本概览、[实施计划](implementation-plan.md)、[决定](decisions.md)与[版本索引](../README.md)共同切换 `current_version`。 |
-| Decisions | 已更新 | [v1.29 决定](decisions.md)冻结 cutover/reconciliation、exact membership lifetime、稳定模型投影、受信外部来源、零 attempt 取消及 Managed v2 无 Run 等待写路径。 |
-| Contracts | 已更新 | 新增 [Camp Membership v1](../../contracts/camp-membership-v1.md)，并升级 [Camp Open Projection v7](../../contracts/camp-open-projection-v7.md)、[Camp Attachment v6](../../contracts/camp-attachment-v6.md)、[Camp Composer Draft v5](../../contracts/camp-composer-draft-v5.md)、[Camp Message Send v13](../../contracts/camp-message-send-v13.md)、[Message Delivery v8](../../contracts/message-delivery-v8.md)、[Gather v4](../../contracts/gather-v4.md)及[Missing-Send Recovery Publication v2](../../contracts/missing-send-recovery-publication-v2.md)。 |
-| Architecture | 已更新 | 新增[动态 Camp 队员关系](../../architecture/dynamic-camp-membership.md)，并将[附件架构](../../architecture/camp-published-attachment-view.md)切换为 Managed v2 当前写入与 legacy v1 只读兼容，同时同步 A2A 与基础不变量。 |
-| UI | 已更新 | [Camp 会话工作区](../../ui/components/conversation-workspace.md)冻结添加入口、成员菜单、移除预览、最后成员和 reconciliation 状态。 |
+| Decisions | 已更新 | [v1.29 决定](decisions.md)冻结 cutover/reconciliation、exact membership lifetime、稳定模型投影、受信外部来源、零 attempt 取消、Managed v2 无 Run 等待写路径及退出取消全部 AgentRun。 |
+| Contracts | 已更新 | 新增 [Camp Membership v1](../../contracts/camp-membership-v1.md)与[Planned Shutdown v3](../../contracts/planned-shutdown-v3.md)，并升级 [Camp Open Projection v7](../../contracts/camp-open-projection-v7.md)、[Camp Attachment v6](../../contracts/camp-attachment-v6.md)、[Camp Composer Draft v5](../../contracts/camp-composer-draft-v5.md)、[Camp Message Send v13](../../contracts/camp-message-send-v13.md)、[Message Delivery v8](../../contracts/message-delivery-v8.md)、[Gather v4](../../contracts/gather-v4.md)及[Missing-Send Recovery Publication v2](../../contracts/missing-send-recovery-publication-v2.md)。 |
+| Architecture | 已更新 | 新增[动态 Camp 队员关系](../../architecture/dynamic-camp-membership.md)，将[附件架构](../../architecture/camp-published-attachment-view.md)切换为 Managed v2 当前写入与 legacy v1 只读兼容，并把[计划关闭](../../architecture/planned-shutdown.md)切换为退出取消全部 AgentRun。 |
+| UI | 已更新 | [Camp 会话工作区](../../ui/components/conversation-workspace.md)冻结添加入口、成员菜单、移除预览、最后成员、reconciliation 状态及关闭等待面；[App Shell](../../ui/components/app-shell-navigation.md)冻结 400ms 冷启动反馈。 |
 | Runtime Activity | 确认无需更新 | 成员变化使用 Core 领域事件与既有 Run/Delivery terminal activity，不新增 Runtime activity kind。 |
 | Runtime compatibility | 确认无需更新 | 继续传既有 Camp-scoped attachment root，不改变 Adapter wire、Runtime 启动协议、模型或宿主平台资格。 |
 | Documentation routing | 已更新 | [文档导航](../../README.md)、Contracts、Architecture 与 Decisions 当前入口均加入动态 membership 路由。 |

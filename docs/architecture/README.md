@@ -26,7 +26,7 @@ last_updated: 2026-08-27
 | [Native Session Bootstrap Redelivery](native-session-bootstrap-redelivery.md) | compaction detector、Session Observer、Bootstrap/Member Identity 重投递、Redelivery v2、Dynamic Context 与 accepted-input 水位 |
 | [Notification Episode](notification-episodes.md) | Occurrence/Disposition/Episode/Change Journal 原子投影、可见来源精确确认、read hydration、并发边界与保留 |
 | [Online Memory Capture](online-memory-capture.md) | best-effort Skill discovery、complete exact-Scope View、copyable target、active body aggregate quota、durable rejection、Agent Memory Facade、原子 Supersession、隔离 Hearth Review、formal publication、clean break 与 Forget 闭包 |
-| [Planned Shutdown](planned-shutdown.md) | Core execution/terminal 双准入、durable shutdown cycle、可靠 Runtime terminal 优先、product fence 启动补偿、统一 deadline、route reap 与 Desktop child-exit 边界 |
+| [Planned Shutdown](planned-shutdown.md) | Core execution/terminal 双准入、durable shutdown cycle、退出时 AgentRun 全量取消、product fence 启动补偿、分层 deadline、route reap 与 Desktop child-exit 边界 |
 | [Public A2A Message 与 Message Delivery](public-a2a-message-delivery.md) | 公共 Structured Message、统一历史 publication seam、canonical/line-leading display-name addressing、正交 Current User Attention、forward/caller-return Delivery、原子通知、Context gate 与 UI projection 边界 |
 | [Camp Activation Lifecycle](camp-activation-lifecycle.md) | 一键 Pending、Composer Draft、Navigation、Restorable Location、首消息原子激活与启动清理的组件权威 |
 | [Camp Composer Draft](camp-composer-draft.md) | Structured Content、附件、持久 reply/continuation、显式接收者修复、发送物化、exact-revision user send 与 timeline projection 的组件权威 |
