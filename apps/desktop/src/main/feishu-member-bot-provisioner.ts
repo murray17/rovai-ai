@@ -151,7 +151,9 @@ export class FeishuWebSessionMemberBotProvisioner implements FeishuMemberBotProv
         throw provisioningError('feishu_provisioning_cancelled', 'none')
       }
       const code = registrationErrorCode(error)
-      const remoteState = code === 'access_denied' ? 'none' : 'unknown'
+      const remoteState = code === 'access_denied' || registrationPage === null
+        ? 'none'
+        : 'unknown'
       throw provisioningError(code, remoteState)
     } finally {
       input.signal?.removeEventListener('abort', onAbort)

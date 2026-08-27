@@ -611,14 +611,29 @@ function portalUrlForBrand(brand: 'feishu' | 'lark'): string {
 }
 
 function requireRegistrationUrl(value: string): string {
-  const url = new URL(value)
-  if (
-    url.protocol !== 'https:'
-    || (url.hostname !== 'accounts.feishu.cn' && url.hostname !== 'accounts.larksuite.com')
-    || url.pathname !== '/accounts/page/login'
-  ) {
+  let url: URL
+  try {
+    url = new URL(value)
+  } catch {
     throw sessionError('feishu_registration_url_rejected')
   }
+  const isOfficialCliConfirmation = (
+    (url.hostname === 'open.feishu.cn' || url.hostname === 'open.larksuite.com')
+    && url.pathname === '/page/cli'
+    && Boolean(normalizedRequired(url.searchParams.get('user_code')))
+  )
+  const isLegacyAccountConfirmation = (
+    (url.hostname === 'accounts.feishu.cn' || url.hostname === 'accounts.larksuite.com')
+    && url.pathname === '/accounts/page/login'
+    && Boolean(normalizedRequired(url.searchParams.get('device_code')))
+  )
+  if (
+    url.protocol !== 'https:'
+    || url.username !== ''
+    || url.password !== ''
+    || url.port !== ''
+    || (!isOfficialCliConfirmation && !isLegacyAccountConfirmation)
+  ) throw sessionError('feishu_registration_url_rejected')
   return url.toString()
 }
 

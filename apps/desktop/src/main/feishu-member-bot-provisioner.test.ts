@@ -24,7 +24,7 @@ describe('Feishu Web Session member Bot provisioner', () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(jsonResponse({
         device_code: 'device-1',
-        verification_uri_complete: 'https://accounts.feishu.cn/accounts/page/login?device_code=device-1',
+        verification_uri_complete: 'https://open.feishu.cn/page/cli?user_code=public-fixture',
         interval: 0,
         expires_in: 30
       }))
@@ -97,7 +97,7 @@ describe('Feishu Web Session member Bot provisioner', () => {
     })
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse({
       device_code: 'device-1',
-      verification_uri_complete: 'https://accounts.feishu.cn/accounts/page/login?device_code=device-1',
+      verification_uri_complete: 'https://open.feishu.cn/page/cli?user_code=public-fixture',
       interval: 5,
       expires_in: 30
     })))
@@ -117,7 +117,7 @@ describe('Feishu Web Session member Bot provisioner', () => {
     vi.stubGlobal('fetch', vi.fn()
       .mockResolvedValueOnce(jsonResponse({
         device_code: 'device-1',
-        verification_uri_complete: 'https://accounts.feishu.cn/accounts/page/login?device_code=device-1',
+        verification_uri_complete: 'https://open.feishu.cn/page/cli?user_code=public-fixture',
         interval: 0,
         expires_in: 30
       }))
@@ -138,6 +138,34 @@ describe('Feishu Web Session member Bot provisioner', () => {
 
     expect(error).toBeInstanceOf(Error)
     expect(isUnknownRemoteProvisioningError(error)).toBe(true)
+  })
+
+  it('does not claim unknown remote state when the confirmation URL is rejected locally', async () => {
+    const portal = fakePortal({
+      async showRegistrationConfirmation() {
+        throw new Error('feishu_registration_url_rejected')
+      }
+    })
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse({
+      device_code: 'device-1',
+      verification_uri_complete: 'https://open.feishu.cn/page/cli?user_code=public-fixture',
+      interval: 5,
+      expires_in: 30
+    })))
+
+    const error = await new FeishuWebSessionMemberBotProvisioner(portal).create({
+      publicationIntentId: 'intent-1',
+      agentId: 'agent-a',
+      appName: '审阅员',
+      appDescription: 'Rovai AI 队员 · 代码审阅',
+      expectedDeveloperIdentity: { userId: 'owner-user', tenantId: 'tenant-1' }
+    }).catch((reason: unknown): unknown => reason)
+
+    expect(error).toMatchObject({
+      code: 'feishu_registration_url_rejected',
+      remoteState: 'none'
+    })
+    expect(isUnknownRemoteProvisioningError(error)).toBe(false)
   })
 })
 

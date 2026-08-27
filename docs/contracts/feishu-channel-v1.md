@@ -126,6 +126,11 @@ Intent 冻结 `agentId + accountId + expectedUserIdDigest + expectedTenantId + r
 `registerApp` 只用于主人显式选择 `compat_registration`；其 QR purpose 是
 `member_bot_compat_registration`，每名队员单独扫码，且结果不覆盖 Developer Identity。
 
+官方确认 URL 的 admitted 入口为 `https://open.feishu.cn/page/cli?user_code=...` 或
+`https://open.larksuite.com/page/cli?user_code=...`；允许追加经过 URL 编码的官方 preset/addons 参数，但不得放宽到
+相似域、任意飞书路径、HTTP、显式端口或 URL userinfo。URL 在窗口导航前被本地拒绝时，尚未进入远端创建阶段，
+Intent 必须进入 `failed_recoverable`，不得进入 `failed_unknown_remote_state`。
+
 一旦 intent 持有 `remoteAppId`，后续状态不得改成另一个 App。App Secret 写入失败，或网络中断导致无法证明远端是否
 创建成功时，写 `failed_unknown_remote_state + failureCode` 并锁住自动再创建；持久 credential 已存在时才允许
 `failed_recoverable` 继续验证同一 App。Main 重启按这些事实收敛，不从 UI 临时进度推断。

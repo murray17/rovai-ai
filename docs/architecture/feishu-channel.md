@@ -59,6 +59,10 @@ Keychain 命名空间；摘要不暴露原始路径，非隔离 App 继续使用
 中打开官方确认页；因此正常路径不向 Renderer 产生二维码。平台确认成功后，官方 preset/addons 一次提交 Bot、
 最小权限与事件，Main 保存独立 credential、验证 WebSocket，再完成 intent。确认页若跳回登录、身份漂移或 Session
 失效，流程 fail closed，并要求主人重新连接。
+确认页入口只接受官方精确 origin 上的 CLI 注册路径：飞书为 `https://open.feishu.cn/page/cli`，Lark 为
+`https://open.larksuite.com/page/cli`，并要求非空 `user_code`；相似域名、非 HTTPS、用户信息、端口和其他路径均在
+导航前拒绝。该本地拒绝发生在主人确认和远端 App 创建之前，因此只记为 recoverable local failure，不能误报
+`failed_unknown_remote_state`。
 
 SDK `registerApp` 只由主人显式选择“兼容扫码发布”时调用；正常失败不得静默切换。兼容流程不覆盖 Developer
 Identity。创建结果不确定、或已取得远端 App ID 但凭据尚未安全提交时，intent 进入
