@@ -20,6 +20,8 @@ last_updated: 2026-08-27
 - [x] 完成 Web Session MemberBotProvisioner、Session cookie/CSRF console bootstrap、OpenPlatformApiClient 创建/
   配置/发布/回读、普通发布无 Renderer QR/飞书确认页、独立 Compat Provisioner、持久 publication intent、
   release 错误后的 published read-back、unknown remote 防重复、冻结 App 显式核对接管和多 WebSocket Host/启动恢复；
+- [x] 普通发布解析并上传 exact 队员受控头像；无引用才回退 Rovai icon，冻结 `1.0.0` App 可在显式核对中发布幂等
+  `1.0.1` 头像修复版本且不创建第二个 App；
 - [x] 完成 p2p/group/topic identity、显式 mention gate、多 Bot collecting/finalize/timeout/mismatch；
 - [x] 完成 ChannelTurnRequest 单根 FIFO、统一原子 admission、永久失败/Runtime deferred 与 queue card 更新；
 - [x] 完成 ExternalQuote structured segment、`replyTo=null`、ExternalPrincipal source 与 CURRENT_INPUT v22；
@@ -56,7 +58,7 @@ last_updated: 2026-08-27
 - `cargo test -p rovai-core --bin rovai`；
 - `cargo test -p rovai-core --bin rovai-core`；
 - Migration 114 upgrade、Developer Identity/publication intent、Channel 状态机、ExternalQuote、Context bytes 与
-  Secret projection 定向测试全部通过；
+  Secret projection、内置/managed 头像解析、正常发布头像传递与冻结 App 头像修复定向测试全部通过；
 - `pnpm typecheck`；
 - `pnpm test`；
 - `pnpm build:desktop`；

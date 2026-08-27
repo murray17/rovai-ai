@@ -199,8 +199,8 @@ fallback。
 [渠道设置](../../ui/components/channel-settings.md#渠道连接与二维码)。
 
 锁定的是自动创建和第二个 App，不是对同一冻结 App 的主人显式核对。未知 intent 已有 `remoteAppId` 时，再次普通发布
-只允许回读该 App 的 Secret、manifest 与已发布版本，并在验证成功后继续同一 intent；不得重发任何创建或发布 mutation。
-Core 继续以冻结 App ID 和 exact version 阻止身份替换，缺少 App ID 的未知结果仍不可恢复。
+继续使用同一 intent 和冻结 App ID，缺少 App ID 的未知结果仍不可恢复。队员头像来源与同 App 头像修复 mutation 的
+后续修正见 [V1.30-D07](#v1-30-d07)。
 
 ### 后果
 
@@ -218,3 +218,40 @@ Core 继续以冻结 App ID 和 exact version 阻止身份替换，缺少 App ID
 - **把 console endpoint 散落在 ChannelSettings/Renderer：** 扩大 Cookie/CSRF 暴露面，且无法统一做同源准入、响应校验
   和回读；
 - **用占位 identity 标记 connected：** 无法证明发布发生在预期 user/tenant。
+
+<a id="v1-30-d07"></a>
+## V1.30-D07：飞书 Bot 复用队员受控头像，并允许冻结 App 做同身份修复
+
+### 背景
+
+初版普通发布统一上传 Rovai App icon，理由是本机头像不是公网 URL，兼容 registration 也只能接受 URL preset。但正常
+console 路径本来就能上传 PNG bytes，Main 也已经拥有内置素材和 managed avatar 的完整性校验边界。继续使用统一 icon
+会让飞书里的独立 Bot 丢失最重要的队员身份；在远端版本已经发布、Rovai intent 仍为 unknown 时只读接管，又会把这个
+错误永久固化到当前 App。
+
+### 决定
+
+普通发布使用 `AgentProfile.avatarRef` 对应的 exact icon rendition：内置头像来自打包素材，managed 头像只通过 Main
+受管存储校验后读取；路径和任意文件输入都不进入发布接口。只有 `avatarRef=null` 才回退 Rovai App icon，非空引用
+无法读取时在远端 mutation 前 fail closed。上传 URL 同时写入创建请求与 manifest，并纳入 read-back verification。
+
+主人显式重试一个已经冻结 `remoteAppId` 的 unknown intent 时仍不得创建第二个 App。若其 latest published 是初始
+`1.0.0`，允许在同一 App 上传当前队员头像、重放幂等配置并创建或复用 `1.0.1` 修复版本；`1.0.1` 已 published 时只读
+验证，避免重复发布。兼容 registration 仍不接收本机 bytes。当前规范见
+[飞书渠道架构](../../architecture/feishu-channel.md#开发者会话与队员发布)、
+[Feishu Channel v1](../../contracts/feishu-channel-v1.md#3-飞书账号与队员-bot)和
+[渠道设置](../../ui/components/channel-settings.md#队员-bot)。
+
+### 后果
+
+- Rovai 与飞书显示同一名队员的同一受控头像；
+- managed 文件损坏不会悄悄退化成另一身份，且本地路径仍不出 Main；
+- 当前错误 App 可原地修复，不需要删除、重建或产生第二份 Secret；
+- 头像修复会产生一次新的飞书版本，真实租户仍需验证平台对 manifest avatar 的最终展示。
+
+### 被拒绝方案
+
+- **所有 Bot 继续使用 Rovai icon：** 独立 Bot 只有名称不同，无法保持队员视觉身份；
+- **把本机文件路径或 data URL 交给 Renderer/registration：** 破坏受控头像与本地路径边界；
+- **停用并新建 App：** 会产生第二个远端身份、Secret 和潜在群成员漂移；
+- **unknown reconciliation 永远只读：** 能接管错误发布，但无法修复已知由本地错误输入造成的头像。

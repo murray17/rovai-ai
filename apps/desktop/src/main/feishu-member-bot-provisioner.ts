@@ -39,6 +39,8 @@ export interface ReconcileMemberBotInput {
   agentId: string
   remoteAppId: string
   appName: string
+  appDescription: string
+  avatarSource?: MemberBotAvatarSource
   expectedDeveloperIdentity: {
     userId: string
     tenantId: string
@@ -263,22 +265,63 @@ export class FeishuWebSessionMemberBotProvisioner implements FeishuMemberBotProv
       const client = this.#createClient(platformSession)
       input.onProgress?.('app_created', input.remoteAppId)
       const appSecret = await client.readAppSecret(input.remoteAppId, input.signal)
-      input.onProgress?.('bot_configured', input.remoteAppId)
-      input.onProgress?.('permissions_events_configured', input.remoteAppId)
-      const publishedVersion = await client.findPublishedVersion(
+      let publishedVersion = await client.findPublishedVersion(
         input.remoteAppId,
         input.signal
       )
-      input.onProgress?.('version_published', input.remoteAppId)
-      await client.verifyMemberBot({
-        appId: input.remoteAppId,
-        versionId: publishedVersion.versionId,
-        configuration: {
+      if (input.avatarSource?.pngBytes && publishedVersion.appVersion === '1.0.0') {
+        const avatar = requireAvatarSource(input.avatarSource)
+        const avatarUrl = await client.uploadAppIcon({ ...avatar, signal: input.signal })
+        const configuration: FeishuMemberBotConsoleConfiguration = {
+          appName: consoleAppName(input.appName),
+          appDescription: input.appDescription,
+          avatarUrl,
           tenantScopes: FEISHU_MEMBER_BOT_ADDONS.scopes.tenant,
           tenantEvents: FEISHU_MEMBER_BOT_ADDONS.events.items.tenant
-        },
-        signal: input.signal
-      })
+        }
+        await client.enableBot(input.remoteAppId, input.signal)
+        input.onProgress?.('bot_configured', input.remoteAppId)
+        await client.configureScopes(input.remoteAppId, configuration, input.signal)
+        await client.configureEvents(input.remoteAppId, configuration, input.signal)
+        await client.configureCallbacksAndWebSocket(
+          input.remoteAppId,
+          configuration,
+          input.signal
+        )
+        input.onProgress?.('permissions_events_configured', input.remoteAppId)
+        const repairVersionId = await client.createVersion({
+          appId: input.remoteAppId,
+          ownerUserId: identity.userId,
+          appVersion: '1.0.1',
+          remark: '同步 Rovai 队员头像',
+          changeLog: '使用当前 Rovai 队员头像修正飞书 Bot 身份。',
+          reuseExisting: true,
+          signal: input.signal
+        })
+        publishedVersion = {
+          ...(await client.publishVersion(input.remoteAppId, repairVersionId, input.signal)),
+          appVersion: '1.0.1'
+        }
+        await client.verifyMemberBot({
+          appId: input.remoteAppId,
+          versionId: publishedVersion.versionId,
+          configuration,
+          signal: input.signal
+        })
+      } else {
+        input.onProgress?.('bot_configured', input.remoteAppId)
+        input.onProgress?.('permissions_events_configured', input.remoteAppId)
+        await client.verifyMemberBot({
+          appId: input.remoteAppId,
+          versionId: publishedVersion.versionId,
+          configuration: {
+            tenantScopes: FEISHU_MEMBER_BOT_ADDONS.scopes.tenant,
+            tenantEvents: FEISHU_MEMBER_BOT_ADDONS.events.items.tenant
+          },
+          signal: input.signal
+        })
+      }
+      input.onProgress?.('version_published', input.remoteAppId)
       await this.#developerSession.persist()
       sessionPersisted = true
       return {

@@ -37,10 +37,10 @@ last_updated: 2026-08-27
   不回放旧消息，发送者必须重新发送；
 - Feishu Host 用独立 Web Session 登录并展示真实 user/tenant；普通队员发布从同一 Electron Session 取得 console
   bootstrap，经 `OpenPlatformApiClient` 创建应用、读取 Secret、启用 Bot、配置 scopes/events/callback WebSocket、
-  创建/发布版本并回读验证。旧 registration/确认/poll 只在显式兼容模式使用。Session Cookie 与独立 App credential
+  上传当前队员受控头像、创建/发布版本并回读验证。旧 registration/确认/poll 只在显式兼容模式使用。Session Cookie 与独立 App credential
   分开加密，账号切换/断开不迁移、停用或删除已发布 Bot，单连接故障隔离，重启恢复 published Bot 与 publication
   intent；release 错误后继续以 version detail 收敛，含冻结 App ID 的 unknown intent 支持主人显式核对并接管同一 App，
-  不创建或发布第二次；
+  初始版本头像错误时在同一 App 发布幂等 `1.0.1` 修复版本，不创建第二个 App；
 - 私聊按 receiving App 隔离；普通群一个 Camp；话题按 canonical topic 一个 Camp。群/话题只有显式 mention
   published managed Bot 才进入 Core；
 - 同一 external message 的第一条 observation 只进入 collecting；canonical mentions 完整或全部预期 App 到齐后
@@ -66,8 +66,8 @@ last_updated: 2026-08-27
 - 不自动删除飞书开放平台应用；停用只关闭 Rovai 绑定与本地 credential；
 - 不把开放平台 console API 声称为公开稳定合同；页面 bootstrap 或 endpoint 变化必须在隔离 client 中 fail closed，
   不得静默回退到确认页或第二条创建路径；
-- 普通发布只上传打包内受控 Rovai App icon，不声称把本机成员头像上传到飞书；兼容 avatar preset 仍只接受确认页
-  可访问的 URL；
+- 普通发布上传 `AgentProfile.avatarRef` 对应的受控 icon rendition；只有无头像引用时使用 Rovai App icon。非空引用无法
+  安全读取时 fail closed，不把路径交给 Renderer 或飞书；兼容 avatar preset 仍只接受确认页可访问的 URL；
 - 当前消息附件一期只冻结名称/类型摘要，不下载为 Camp Attachment；公开输出附件也不回传图片/文件，Outbox
   只发送状态卡、文本和卡片；
 - Core 没有权威公开 delta 时，飞书只显示处理中与最终已提交 CampMessage，不转发 Runtime 原始 stdout/推理。

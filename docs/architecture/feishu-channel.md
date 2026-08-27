@@ -62,12 +62,17 @@ Keychain 命名空间；摘要不暴露原始路径，非隔离 App 继续使用
 返回 Cookie header。`apiOrigin` 必须精确匹配当前 brand 的 `https://open.feishu.cn | https://open.larksuite.com`，API
 路径只允许 `/developers/`，相似域、跨源 URL 和页面身份漂移均在创建前拒绝。
 
-`OpenPlatformApiClient` 按顺序上传受控 App icon、创建自建应用、读取 App Secret、启用 Bot、配置 tenant scopes、
+`OpenPlatformApiClient` 按顺序上传受控队员头像、创建自建应用、读取 App Secret、启用 Bot、配置 tenant scopes、
 receive/roster events、callback 与 event WebSocket mode，创建并发布 `1.0.0` 版本，再回读 manifest 与 version status。
 scopes、events 和 callbacks 使用开放平台当前 manifest console API 分步写入；每一步保留服务端已有字段并在最终回读中
-证明必需集合、Bot enable、两类 WebSocket mode 与 published status。完成后 Main 才把独立 credential 写入
+证明目标 `avatar_url`、必需集合、Bot enable、两类 WebSocket mode 与 published status。完成后 Main 才把独立 credential 写入
 safeStorage、验证 Bot WebSocket 并完成 intent。普通流程始终保持隐藏窗口，不打开飞书“创建飞书智能体应用 /
 立即创建”确认页，也不向 Renderer 产生二维码。
+
+头像来源与 `AgentProfile.avatarRef` 使用同一受控身份：内置引用由 Main 读取打包内对应 `icon-192.png`，managed 引用
+通过既有 `MemberAvatarAssetService` 校验 manifest、大小、尺寸和 SHA-256 后读取 icon rendition。Main 不接收 Renderer
+路径，也不把绝对路径传给飞书。`avatarRef=null` 才使用打包内 Rovai App icon 作为明确 fallback；非空引用未知、缺失或
+损坏时在任何 console mutation 前失败，不能静默把一名已有头像的队员发布成 Rovai 公共图标。
 
 版本发布以 detail read-back 为最终 authority，而不是 commit/release 的单次 HTTP 结果。release 一旦发出便不得在同一
 attempt 重复提交；除取消和 Developer Session 失效外，即使该请求返回 HTTP/rejected/transport failure，也继续在原
@@ -88,10 +93,12 @@ exact origin/path、严格响应结构、秘密不出 Main、创建后 read-back
 不从 Renderer 状态推断。
 
 当该未知 intent 已冻结 `remoteAppId` 时，主人再次点击普通“发布”是显式 reconciliation，而不是新的 create attempt。
-Host 复核同一 Developer Identity，只对冻结 App 执行 Secret 读取、版本列表/detail 与 manifest 回读；不得上传图标、创建
-App、创建版本、再次 commit/release 或进入兼容流程。只有 read-back 证明已发布且配置完整后，才保存 credential、验证
-WebSocket，并让同一 intent 从 `failed_unknown_remote_state` 进入 `credentials_read` 后继续完成；Core 拒绝更换 App ID。
-缺少冻结 App ID 或核对失败时仍保持未知状态，不允许创建第二个 App。
+Host 复核同一 Developer Identity，先对冻结 App 读取 Secret、版本列表/detail 与 manifest；不得创建 App、改变 App ID 或
+进入兼容流程。若最新 published 仍为初始 `1.0.0` 且队员有可用受控头像，reconciliation 会把同一头像上传到同一 App、
+重放幂等 manifest 配置，并创建或复用 `1.0.1` 头像修复版本后发布与回读。若 `1.0.1` 已 published，则只回读验证，
+不重复上传或发布。完成证明后才保存 credential、验证 WebSocket，并让同一 intent 从
+`failed_unknown_remote_state` 进入 `credentials_read` 后继续完成；Core 拒绝更换 App ID。缺少冻结 App ID、头像读取失败
+或远端核对失败时仍保持未知状态，不允许创建第二个 App。
 
 ## 项目与会话
 

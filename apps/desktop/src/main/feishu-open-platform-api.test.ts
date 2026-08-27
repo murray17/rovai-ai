@@ -107,6 +107,7 @@ describe('OpenPlatformApiClient', () => {
     const configuredManifest = JSON.parse(manifest) as Record<string, unknown>
     expect(configuredManifest).toMatchObject({
       manifest_schema_version: '0.0.1',
+      avatar_url: configuration.avatarUrl,
       bot: { enable: true, menu_enable: false },
       scopes: { tenant: configuration.tenantScopes },
       events: {
@@ -165,14 +166,17 @@ describe('OpenPlatformApiClient', () => {
     expect(releaseRequests).toBe(1)
   })
 
-  it('finds an existing published version without creating or publishing a new one', async () => {
+  it('finds the newest existing published version without creating or publishing a new one', async () => {
     const paths: string[] = []
     const session = fakeSession(async (rawUrl) => {
       const url = new URL(rawUrl)
       paths.push(url.pathname)
       if (url.pathname.includes('/app_version/list/')) {
         return apiResponse({
-          versions: [{ versionId: 'version_1', appVersion: '1.0.0' }]
+          versions: [
+            { versionId: 'version_1', appVersion: '1.0.0' },
+            { versionId: 'version_2', appVersion: '1.0.1' }
+          ]
         })
       }
       if (url.pathname.includes('/app_version/detail/')) {
@@ -183,11 +187,33 @@ describe('OpenPlatformApiClient', () => {
 
     await expect(new OpenPlatformApiClient(session).findPublishedVersion(
       'cli_dingding'
-    )).resolves.toEqual({ versionId: 'version_1', status: 2 })
+    )).resolves.toEqual({ versionId: 'version_2', status: 2, appVersion: '1.0.1' })
     expect(paths).toEqual([
       '/developers/v1/app_version/list/cli_dingding',
-      '/developers/v1/app_version/detail/cli_dingding/version_1'
+      '/developers/v1/app_version/detail/cli_dingding/version_2'
     ])
+  })
+
+  it('reuses an existing avatar repair version instead of creating a duplicate', async () => {
+    const paths: string[] = []
+    const session = fakeSession(async (rawUrl) => {
+      const url = new URL(rawUrl)
+      paths.push(url.pathname)
+      if (url.pathname.includes('/app_version/list/')) {
+        return apiResponse({
+          versions: [{ versionId: 'version_avatar', appVersion: '1.0.1' }]
+        })
+      }
+      throw new Error(`unexpected request: ${url.pathname}`)
+    })
+
+    await expect(new OpenPlatformApiClient(session).createVersion({
+      appId: 'cli_dingding',
+      ownerUserId: 'owner-user',
+      appVersion: '1.0.1',
+      reuseExisting: true
+    })).resolves.toBe('version_avatar')
+    expect(paths).toEqual(['/developers/v1/app_version/list/cli_dingding'])
   })
 
   it('marks a lost create response as an unknown remote outcome', async () => {

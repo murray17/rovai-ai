@@ -23,7 +23,7 @@ last_updated: 2026-08-27
 ## Channels 与 External Principals
 
 - 当前规范：[飞书渠道架构](../architecture/feishu-channel.md)、[Feishu Channel v1](../contracts/feishu-channel-v1.md)、[Camp Membership v1](../contracts/camp-membership-v1.md)、[ContextManifest Evidence v22](../contracts/context-manifest-evidence-v22.md)和[渠道设置](../ui/components/channel-settings.md)。
-- 理由来源：[V1.30-D01](../versions/v1.30/decisions.md#v1-30-d01)、[V1.30-D02](../versions/v1.30/decisions.md#v1-30-d02)、[V1.30-D03](../versions/v1.30/decisions.md#v1-30-d03)、[V1.30-D04](../versions/v1.30/decisions.md#v1-30-d04)、[V1.30-D05](../versions/v1.30/decisions.md#v1-30-d05)和[V1.30-D06](../versions/v1.30/decisions.md#v1-30-d06)。
+- 理由来源：[V1.30-D01](../versions/v1.30/decisions.md#v1-30-d01)、[V1.30-D02](../versions/v1.30/decisions.md#v1-30-d02)、[V1.30-D03](../versions/v1.30/decisions.md#v1-30-d03)、[V1.30-D04](../versions/v1.30/decisions.md#v1-30-d04)、[V1.30-D05](../versions/v1.30/decisions.md#v1-30-d05)、[V1.30-D06](../versions/v1.30/decisions.md#v1-30-d06)和[V1.30-D07](../versions/v1.30/decisions.md#v1-30-d07)。
 
 ## Member identity
 

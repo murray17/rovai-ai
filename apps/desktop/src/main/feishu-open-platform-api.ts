@@ -9,6 +9,7 @@ export interface FeishuMemberBotConsoleConfiguration {
 }
 
 export interface FeishuMemberBotVerificationRequirements {
+  avatarUrl?: string
   tenantScopes: readonly string[]
   tenantEvents: readonly string[]
 }
@@ -16,6 +17,10 @@ export interface FeishuMemberBotVerificationRequirements {
 export interface FeishuPublishedVersion {
   versionId: string
   status: number
+}
+
+export interface FeishuPublishedVersionSummary extends FeishuPublishedVersion {
+  appVersion: string
 }
 
 export class FeishuOpenPlatformApiError extends Error {
@@ -246,6 +251,10 @@ export class OpenPlatformApiClient {
   async createVersion(input: {
     appId: string
     ownerUserId: string
+    appVersion?: string
+    remark?: string
+    changeLog?: string
+    reuseExisting?: boolean
     signal?: AbortSignal
   }): Promise<string> {
     const appId = requireResourceId(input.appId, 'feishu_console_app_id_invalid')
@@ -253,15 +262,21 @@ export class OpenPlatformApiClient {
       input.ownerUserId,
       'feishu_console_owner_user_id_invalid'
     )
+    const appVersion = requireAppVersion(input.appVersion ?? '1.0.0')
+    if (input.reuseExisting) {
+      const existing = (await this.#listVersions(appId, input.signal))
+        .find((version) => version.appVersion === appVersion)
+      if (existing) return existing.versionId
+    }
     const data = await this.#request(
       'create_version',
       `/developers/v1/app_version/create/${encodeURIComponent(appId)}`,
       {
         body: {
           autoPublish: false,
-          remark: 'Rovai AI 队员 Bot 首次发布',
-          changeLog: '由 Rovai AI 配置 Bot、权限、事件与长连接。',
-          appVersion: '1.0.0',
+          remark: input.remark ?? 'Rovai AI 队员 Bot 首次发布',
+          changeLog: input.changeLog ?? '由 Rovai AI 配置 Bot、权限、事件与长连接。',
+          appVersion,
           visibleSuggest: {
             departments: [],
             members: [ownerUserId],
@@ -287,7 +302,7 @@ export class OpenPlatformApiClient {
     if (directVersionId && isResourceId(directVersionId)) return directVersionId
 
     const versions = await this.#listVersions(appId, input.signal)
-    const created = versions.find((version) => version.appVersion === '1.0.0')
+    const created = versions.find((version) => version.appVersion === appVersion)
     if (created) return created.versionId
     throw apiError('feishu_console_version_response_invalid', true)
   }
@@ -295,12 +310,18 @@ export class OpenPlatformApiClient {
   async findPublishedVersion(
     appId: string,
     signal?: AbortSignal
-  ): Promise<FeishuPublishedVersion> {
+  ): Promise<FeishuPublishedVersionSummary> {
     const normalizedAppId = requireResourceId(appId, 'feishu_console_app_id_invalid')
-    const versions = await this.#listVersions(normalizedAppId, signal)
-    for (const candidate of versions.filter((version) => version.appVersion === '1.0.0')) {
+    const versions = (await this.#listVersions(normalizedAppId, signal))
+      .filter((version): version is { versionId: string; appVersion: string } => (
+        version.appVersion !== null && isAppVersion(version.appVersion)
+      ))
+      .sort((left, right) => compareAppVersions(right.appVersion, left.appVersion))
+    for (const candidate of versions) {
       const version = await this.readVersion(normalizedAppId, candidate.versionId, signal)
-      if (version.status === PUBLISHED_VERSION_STATUS) return version
+      if (version.status === PUBLISHED_VERSION_STATUS) {
+        return { ...version, appVersion: candidate.appVersion }
+      }
     }
     throw apiError('feishu_console_published_version_not_found', false)
   }
@@ -376,6 +397,10 @@ export class OpenPlatformApiClient {
     const events = recordAt(manifest, 'events')
     const eventItems = recordAt(events, 'items')
     const callbacks = recordAt(manifest, 'callbacks')
+    if (
+      input.configuration.avatarUrl
+      && manifest.avatar_url !== input.configuration.avatarUrl
+    ) throw apiError('feishu_console_avatar_verification_failed', true)
     if (bot.enable !== true) throw apiError('feishu_console_bot_verification_failed', true)
     if (!includesEvery(scopes.tenant, input.configuration.tenantScopes)) {
       throw apiError('feishu_console_scope_verification_failed', true)
@@ -643,6 +668,26 @@ function isResourceId(value: string): boolean {
 
 function isImageDimension(value: number): boolean {
   return Number.isInteger(value) && value >= 1 && value <= 4096
+}
+
+function requireAppVersion(value: string): string {
+  const normalized = value.trim()
+  if (!isAppVersion(normalized)) throw apiError('feishu_console_app_version_invalid', false)
+  return normalized
+}
+
+function isAppVersion(value: string): boolean {
+  return /^(?:0|[1-9]\d{0,3})\.(?:0|[1-9]\d{0,3})\.(?:0|[1-9]\d{0,3})$/.test(value)
+}
+
+function compareAppVersions(left: string, right: string): number {
+  const leftParts = left.split('.').map(Number)
+  const rightParts = right.split('.').map(Number)
+  for (let index = 0; index < 3; index += 1) {
+    const difference = (leftParts[index] ?? 0) - (rightParts[index] ?? 0)
+    if (difference !== 0) return difference
+  }
+  return 0
 }
 
 function requireResourceId(value: string, code: string): string {

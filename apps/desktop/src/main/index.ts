@@ -94,6 +94,7 @@ import {
   FeishuCompatMemberBotProvisioner,
   FeishuWebSessionMemberBotProvisioner
 } from './feishu-member-bot-provisioner'
+import { ControlledMemberBotAvatarSourceResolver } from './member-bot-avatar-source'
 import { isolatedSafeStorageApplicationName } from './safe-storage-application-name'
 
 const mainStartupStartedAt = performance.now()
@@ -258,6 +259,7 @@ const projectAccessTransactions = new ProjectAccessTransactionCoordinator()
 let userAutomation: UserAutomationServer | null = null
 const desktopSessions = new DesktopSessionRegistry()
 const memberAvatars = new MemberAvatarAssetService(coreDataPath)
+const memberBotAvatarSource = new ControlledMemberBotAvatarSourceResolver(memberAvatars)
 const feishuDeveloperSession = new ElectronFeishuDeveloperSessionService(
   coreDataPath,
   () => mainWindow
@@ -267,7 +269,8 @@ const channelSettings = new ChannelSettingsService({
   credentialStore: new SafeStorageChannelCredentialStore(coreDataPath),
   developerSession: feishuDeveloperSession,
   memberBotProvisioner: new FeishuWebSessionMemberBotProvisioner(feishuDeveloperSession),
-  compatMemberBotProvisioner: new FeishuCompatMemberBotProvisioner(feishuDeveloperSession)
+  compatMemberBotProvisioner: new FeishuCompatMemberBotProvisioner(feishuDeveloperSession),
+  memberBotAvatarSource
 })
 channelSettings.onChanged((snapshot) => {
   if (!mainWindow || mainWindow.isDestroyed() || mainWindow.webContents.isDestroyed()) return

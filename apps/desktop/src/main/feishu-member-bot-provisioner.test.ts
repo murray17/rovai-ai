@@ -21,21 +21,24 @@ describe('Feishu Web Session member Bot provisioner', () => {
     const operations: string[] = []
     const portal = fakePortal()
     const client = fakeOpenPlatformClient(operations)
+    const readDefaultAvatar = vi.fn(async () => ({
+      pngBytes: new Uint8Array([0x89, 0x50, 0x4e, 0x47]),
+      width: 192,
+      height: 192
+    }))
+    const memberAvatar = new Uint8Array([1, 2, 3, 4])
     const globalFetch = vi.fn()
     vi.stubGlobal('fetch', globalFetch)
 
     const result = await new FeishuWebSessionMemberBotProvisioner(portal, {
       createClient: () => client,
-      readDefaultAvatar: async () => ({
-        pngBytes: new Uint8Array([0x89, 0x50, 0x4e, 0x47]),
-        width: 192,
-        height: 192
-      })
+      readDefaultAvatar
     }).create({
       publicationIntentId: 'intent-1',
       agentId: 'agent-a',
       appName: '叮叮',
       appDescription: 'Rovai AI 队员 · 游学者',
+      avatarSource: { pngBytes: memberAvatar, width: 192, height: 192 },
       expectedDeveloperIdentity: { userId: 'owner-user', tenantId: 'tenant-1' },
       onProgress: (step) => progress.push(step)
     })
@@ -73,11 +76,17 @@ describe('Feishu Web Session member Bot provisioner', () => {
       expectedIdentity: { userId: 'owner-user', tenantId: 'tenant-1' }
     }))
     expect(portal.showRegistrationConfirmation).not.toHaveBeenCalled()
+    expect(client.uploadAppIcon).toHaveBeenCalledWith(expect.objectContaining({
+      pngBytes: memberAvatar,
+      width: 192,
+      height: 192
+    }))
+    expect(readDefaultAvatar).not.toHaveBeenCalled()
     expect(globalFetch).not.toHaveBeenCalled()
     expect(portal.persist).toHaveBeenCalledTimes(1)
   })
 
-  it('reconciles an existing published app without creating or releasing anything', async () => {
+  it('repairs the member avatar on the frozen published app without creating another app', async () => {
     const progress: string[] = []
     const operations: string[] = []
     const portal = fakePortal()
@@ -90,6 +99,12 @@ describe('Feishu Web Session member Bot provisioner', () => {
       agentId: 'agent-a',
       remoteAppId: 'cli_dingding',
       appName: '叮叮',
+      appDescription: 'Rovai AI 队员 · 游学者',
+      avatarSource: {
+        pngBytes: new Uint8Array([9, 8, 7]),
+        width: 192,
+        height: 192
+      },
       expectedDeveloperIdentity: { userId: 'owner-user', tenantId: 'tenant-1' },
       onProgress: (step) => progress.push(step)
     })
@@ -103,6 +118,13 @@ describe('Feishu Web Session member Bot provisioner', () => {
     expect(operations).toEqual([
       'read_secret',
       'find_published_version',
+      'upload_avatar',
+      'enable_bot',
+      'configure_scopes',
+      'configure_events',
+      'configure_callbacks',
+      'create_version',
+      'publish_version',
       'verify'
     ])
     expect(progress).toEqual([
@@ -112,11 +134,45 @@ describe('Feishu Web Session member Bot provisioner', () => {
       'permissions_events_configured',
       'version_published'
     ])
-    expect(client.uploadAppIcon).not.toHaveBeenCalled()
     expect(client.createApp).not.toHaveBeenCalled()
+    expect(client.createVersion).toHaveBeenCalledWith(expect.objectContaining({
+      appId: 'cli_dingding',
+      appVersion: '1.0.1',
+      reuseExisting: true
+    }))
+    expect(portal.showRegistrationConfirmation).not.toHaveBeenCalled()
+  })
+
+  it('keeps reconciliation idempotent after the avatar repair version is published', async () => {
+    const operations: string[] = []
+    const portal = fakePortal()
+    const client = fakeOpenPlatformClient(operations)
+    client.findPublishedVersion.mockImplementation(async () => {
+      operations.push('find_published_version')
+      return { versionId: 'version_2', status: 2, appVersion: '1.0.1' }
+    })
+
+    const result = await new FeishuWebSessionMemberBotProvisioner(portal, {
+      createClient: () => client
+    }).reconcile({
+      publicationIntentId: 'intent-unknown',
+      agentId: 'agent-a',
+      remoteAppId: 'cli_dingding',
+      appName: '叮叮',
+      appDescription: 'Rovai AI 队员 · 游学者',
+      avatarSource: {
+        pngBytes: new Uint8Array([9, 8, 7]),
+        width: 192,
+        height: 192
+      },
+      expectedDeveloperIdentity: { userId: 'owner-user', tenantId: 'tenant-1' }
+    })
+
+    expect(result.publishedVersionId).toBe('version_2')
+    expect(operations).toEqual(['read_secret', 'find_published_version', 'verify'])
+    expect(client.uploadAppIcon).not.toHaveBeenCalled()
     expect(client.createVersion).not.toHaveBeenCalled()
     expect(client.publishVersion).not.toHaveBeenCalled()
-    expect(portal.showRegistrationConfirmation).not.toHaveBeenCalled()
   })
 
   it('fails before opening the console when the expected identity cannot be proven', async () => {
@@ -333,7 +389,7 @@ function fakeOpenPlatformClient(operations: string[]) {
     }),
     findPublishedVersion: vi.fn(async () => {
       operations.push('find_published_version')
-      return { versionId: 'version_1', status: 2 }
+      return { versionId: 'version_1', status: 2, appVersion: '1.0.0' }
     }),
     verifyMemberBot: vi.fn(async () => { operations.push('verify') })
   }

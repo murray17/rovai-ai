@@ -93,7 +93,10 @@ function developerSession(value = identity()): NonNullable<ChannelHostDependenci
   }
 }
 
-function presentAgent(agentId = 'agent-a'): Record<string, unknown> {
+function presentAgent(
+  agentId = 'agent-a',
+  overrides: Record<string, unknown> = {}
+): Record<string, unknown> {
   return {
     agentId,
     displayName: '审阅员',
@@ -112,7 +115,8 @@ function presentAgent(agentId = 'agent-a'): Record<string, unknown> {
     version: 1,
     createdAt: '2026-08-27T00:00:00Z',
     updatedAt: '2026-08-27T00:00:00Z',
-    removedAt: null
+    removedAt: null,
+    ...overrides
   }
 }
 
@@ -260,17 +264,26 @@ describe('channel settings service', () => {
       botDisplayName: '审阅员',
       publishedVersionId: null
     }))
+    const avatarSource = {
+      pngBytes: new Uint8Array([1, 2, 3]),
+      width: 192,
+      height: 192
+    }
+    const resolveAvatar = vi.fn(async () => avatarSource)
     const service = new ChannelSettingsService({
       credentialStore,
       developerSession: developerSession(owner),
       memberBotProvisioner: { create: provision },
       compatMemberBotProvisioner: { create: compatProvision },
+      memberBotAvatarSource: { resolve: resolveAvatar },
       createChannel: fakeCreateChannel(),
       core: channelCore((method) => {
         if (method === 'channels.feishu.snapshot') {
           return coreSnapshot({ account: connectedAccount(owner) })
         }
-        if (method === 'members.get') return presentAgent()
+        if (method === 'members.get') return presentAgent('agent-a', {
+          avatarRef: 'rovai://member-avatar/builtin/luoke/v1'
+        })
         return { status: 'applied' }
       })
     })
@@ -279,8 +292,10 @@ describe('channel settings service', () => {
 
     expect(provision).toHaveBeenCalledTimes(1)
     expect(provision).toHaveBeenCalledWith(expect.objectContaining({
-      expectedDeveloperIdentity: { userId: owner.userId, tenantId: owner.tenantId }
+      expectedDeveloperIdentity: { userId: owner.userId, tenantId: owner.tenantId },
+      avatarSource
     }))
+    expect(resolveAvatar).toHaveBeenCalledWith('rovai://member-avatar/builtin/luoke/v1')
     expect(compatProvision).not.toHaveBeenCalled()
     expect(normal.activeQrAttempt).toBeNull()
     expect(normal.activeProvisioning).toMatchObject({
@@ -297,6 +312,33 @@ describe('channel settings service', () => {
 
     expect(compatProvision).toHaveBeenCalledTimes(1)
     expect(provision).toHaveBeenCalledTimes(1)
+  })
+
+  it('fails before creating an intent when an assigned avatar has no safe Main resolver', async () => {
+    const owner = identity()
+    const provision = vi.fn()
+    const commands: string[] = []
+    const service = new ChannelSettingsService({
+      credentialStore: memoryCredentialStore(),
+      developerSession: developerSession(owner),
+      memberBotProvisioner: { create: provision },
+      core: channelCore((method) => {
+        commands.push(method)
+        if (method === 'channels.feishu.snapshot') {
+          return coreSnapshot({ account: connectedAccount(owner) })
+        }
+        if (method === 'members.get') return presentAgent('agent-a', {
+          avatarRef: 'rovai://member-avatar/builtin/luoke/v1'
+        })
+        return { status: 'applied' }
+      })
+    })
+
+    await expect(service.publishMemberBot('agent-a'))
+      .rejects.toThrow('feishu_member_bot_avatar_unavailable')
+
+    expect(provision).not.toHaveBeenCalled()
+    expect(commands).not.toContain('channels.feishu.publicationIntent.create')
   })
 
   it('fails closed on developer identity drift without creating or compat-registering an app', async () => {
@@ -599,10 +641,16 @@ describe('channel settings service', () => {
     let memberBots: Record<string, unknown>[] = []
     let intentCreates = 0
     const memberBotProvisioner = { create, reconcile } as FeishuMemberBotProvisioner
+    const avatarSource = {
+      pngBytes: new Uint8Array([4, 5, 6]),
+      width: 192,
+      height: 192
+    }
     const service = new ChannelSettingsService({
       credentialStore,
       developerSession: developerSession(owner),
       memberBotProvisioner,
+      memberBotAvatarSource: { resolve: vi.fn(async () => avatarSource) },
       createChannel: fakeCreateChannel(),
       core: channelCore((method, rawParams) => {
         if (method === 'channels.feishu.snapshot') {
@@ -612,7 +660,9 @@ describe('channel settings service', () => {
             publicationIntents: [publicationIntent]
           })
         }
-        if (method === 'members.get') return presentAgent()
+        if (method === 'members.get') return presentAgent('agent-a', {
+          avatarRef: 'rovai://member-avatar/builtin/luoke/v1'
+        })
         const params = rawParams as { command?: Record<string, unknown> }
         if (method === 'channels.feishu.publicationIntent.create') intentCreates += 1
         if (method === 'channels.feishu.publicationIntent.advance') {
@@ -645,7 +695,9 @@ describe('channel settings service', () => {
     expect(reconcile).toHaveBeenCalledWith(expect.objectContaining({
       publicationIntentId: 'intent-unknown',
       remoteAppId: 'cli-published-remotely',
-      expectedDeveloperIdentity: { userId: owner.userId, tenantId: owner.tenantId }
+      expectedDeveloperIdentity: { userId: owner.userId, tenantId: owner.tenantId },
+      appDescription: 'Rovai AI 队员 · 代码审阅',
+      avatarSource
     }))
     expect(intentCreates).toBe(0)
     const storedCredential = [...credentialStore.values.entries()][0]

@@ -29,8 +29,10 @@ import {
   UnavailableFeishuMemberBotProvisioner,
   isUnknownRemoteProvisioningError,
   type FeishuMemberBotProvisioner,
+  type MemberBotAvatarSource,
   type MemberBotProvisioningStep
 } from './feishu-member-bot-provisioner'
+import type { MemberBotAvatarSourceResolver } from './member-bot-avatar-source'
 
 type CoreChannelSnapshot = {
   schemaVersion: 1
@@ -130,6 +132,7 @@ export interface ChannelHostDependencies {
   developerSession?: FeishuDeveloperSessionService
   memberBotProvisioner?: FeishuMemberBotProvisioner
   compatMemberBotProvisioner?: FeishuMemberBotProvisioner
+  memberBotAvatarSource?: MemberBotAvatarSourceResolver
   createChannel?: CreateChannel
   now?: () => number
   setInterval?: typeof globalThis.setInterval
@@ -164,11 +167,18 @@ type RawInboundEvent = {
 const HOST_WORKER_ID = `desktop-${randomUUID()}`
 const ROSTER_CACHE_MS = 20_000
 const ROSTER_SWEEP_MS = 30_000
+const unavailableMemberBotAvatarSource: MemberBotAvatarSourceResolver = {
+  async resolve(avatarRef) {
+    if (avatarRef === null) return undefined
+    throw new Error('feishu_member_bot_avatar_unavailable')
+  }
+}
 export class ChannelSettingsService {
   readonly #dependencies: ChannelHostDependencies | null
   readonly #developerSession: FeishuDeveloperSessionService
   readonly #memberBotProvisioner: FeishuMemberBotProvisioner
   readonly #compatMemberBotProvisioner: FeishuMemberBotProvisioner
+  readonly #memberBotAvatarSource: MemberBotAvatarSourceResolver
   readonly #createChannel: CreateChannel
   readonly #now: () => number
   readonly #listeners = new Set<(snapshot: ChannelSettingsSnapshot) => void>()
@@ -197,6 +207,8 @@ export class ChannelSettingsService {
       ?? new UnavailableFeishuMemberBotProvisioner()
     this.#compatMemberBotProvisioner = dependencies?.compatMemberBotProvisioner
       ?? new UnavailableFeishuMemberBotProvisioner()
+    this.#memberBotAvatarSource = dependencies?.memberBotAvatarSource
+      ?? unavailableMemberBotAvatarSource
     this.#createChannel = dependencies?.createChannel ?? createLarkChannel
     this.#now = dependencies?.now ?? Date.now
   }
@@ -506,8 +518,19 @@ export class ChannelSettingsService {
     }
     const agent = await this.#dependencies!.core.request<AgentProfile>('members.get', { agentId })
     if (!agent || agent.presence !== 'present') throw new Error('该队员当前不可发布。')
+    const appDescription = `Rovai AI 队员 · ${agent.teamRole || '协作者'}`
+    const avatarSource = mode === 'developer_session'
+      ? await this.#memberBotAvatarSource.resolve(agent.avatarRef)
+      : undefined
     if (previousIntent?.state === 'failed_unknown_remote_state') {
-      return this.#reconcileUnknownMemberBot(account, identity, agent, previousIntent)
+      return this.#reconcileUnknownMemberBot(
+        account,
+        identity,
+        agent,
+        previousIntent,
+        appDescription,
+        avatarSource
+      )
     }
 
     const publicationIntentId = `rvfpi_${randomUUID().replaceAll('-', '')}`
@@ -562,7 +585,8 @@ export class ChannelSettingsService {
           publicationIntentId,
           agentId,
           appName: agent.displayName,
-          appDescription: `Rovai AI 队员 · ${agent.teamRole || '协作者'}`,
+          appDescription,
+          avatarSource,
           expectedDeveloperIdentity: {
             userId: identity.userId,
             tenantId: identity.tenantId
@@ -585,7 +609,7 @@ export class ChannelSettingsService {
           publicationIntentId,
           agentId,
           appName: agent.displayName,
-          appDescription: `Rovai AI 队员 · ${agent.teamRole || '协作者'}`,
+          appDescription,
           expectedDeveloperIdentity: {
             userId: identity.userId,
             tenantId: identity.tenantId
@@ -699,7 +723,9 @@ export class ChannelSettingsService {
     account: NonNullable<CoreChannelSnapshot['account']>,
     identity: FeishuDeveloperIdentity,
     agent: AgentProfile,
-    intent: CoreChannelSnapshot['publicationIntents'][number]
+    intent: CoreChannelSnapshot['publicationIntents'][number],
+    appDescription: string,
+    avatarSource: MemberBotAvatarSource | undefined
   ): Promise<ChannelSettingsSnapshot> {
     const remoteAppId = intent.remoteAppId
     if (!remoteAppId || !this.#memberBotProvisioner.reconcile) {
@@ -739,6 +765,8 @@ export class ChannelSettingsService {
         agentId: agent.agentId,
         remoteAppId,
         appName: agent.displayName,
+        appDescription,
+        avatarSource,
         expectedDeveloperIdentity: {
           userId: identity.userId,
           tenantId: identity.tenantId

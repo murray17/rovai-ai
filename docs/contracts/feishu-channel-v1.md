@@ -157,13 +157,18 @@ Version。任何回读的 published 立即收敛成功，rejected 立即失败�
 `failed_recoverable` 继续验证同一 App。Main 重启按这些事实收敛，不从 UI 临时进度推断。
 
 主人对含冻结 `remoteAppId` 的 `failed_unknown_remote_state` 再次执行普通发布时，必须进入同一 intent 的显式
-reconciliation，不得创建新 intent 或调用 upload/create/configure/create-version/commit/release。它先复核 exact Developer
-Identity，再只对冻结 App 读取 Secret、版本列表/detail 与 manifest；published status 和完整 Bot/scopes/events/WebSocket
-配置同时成立后，才写 credential 并允许 Core 以 exact version 从 `failed_unknown_remote_state -> credentials_read` 继续。
-该转换不得补写或更换 `remoteAppId`；核对失败继续保持 unknown，缺少冻结 App ID 时仍禁止重试。
+reconciliation，不得创建新 intent、新 App、更换 `remoteAppId` 或进入兼容模式。它先复核 exact Developer Identity，
+再读取冻结 App 的 Secret、版本列表/detail 与 manifest。最新 published 为 `1.0.0` 且当前队员头像可用时，允许且只允许
+针对同一 App 执行头像修复：upload 当前受控 icon、重放幂等 manifest 配置、创建或复用 `1.0.1`、commit/release 并回读。
+`1.0.1` 已 published 时不得重复 upload/configure/create-version/commit/release。published status、目标头像、完整
+Bot/scopes/events/WebSocket 配置同时成立后，才写 credential 并允许 Core 以 exact version 从
+`failed_unknown_remote_state -> credentials_read` 继续。核对失败继续保持 unknown，缺少冻结 App ID 时仍禁止重试。
 
-普通发布由 Main 向 console image endpoint 上传打包内受控 Rovai App icon；本机成员头像仍只作 Rovai 身份展示，
-Renderer 不宣称已把成员头像上传到飞书。兼容模式的 avatar preset 仍只能使用确认页可访问的 URL。
+普通发布在创建 intent 和任何 console mutation 前解析 `AgentProfile.avatarRef`。内置引用读取 exact 打包
+`icon-192.png`；managed 引用必须经 Main 受管头像存储的 manifest、尺寸、长度与 SHA-256 校验后读取 icon rendition。
+非空引用未知、缺失或损坏返回 `feishu_member_bot_avatar_ref_invalid | feishu_member_bot_avatar_unavailable`，不得回退成
+其他身份。只有 `avatarRef=null` 使用打包内受控 Rovai App icon。上传后的 URL 必须写入 manifest `avatar_url` 并纳入
+发布回读验证；Renderer 与 Core 都不接收本地路径。兼容模式的 avatar preset 仍只能使用确认页可访问的 URL。
 
 Bot 只有 WebSocket 首次握手与 identity 回读成功、credential 已写入 safeStorage 且 Core upsert 成功后才成为
 `published`。Main 启动时为所有 published Bot 读取 exact credential 并独立恢复长连接；单连接失败只改变该 Bot
