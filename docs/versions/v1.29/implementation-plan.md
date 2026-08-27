@@ -18,6 +18,8 @@ last_updated: 2026-08-27
   Data Contract v1.24/schema 65，显式/批量取消复用转换并清除 wait/attempt/projection association；
 - [x] 完成 Migration 112 Managed Attachment v2：新 Composer/Agent 文件经 durable intent 一次 ingest，最终
   Message/ref/Delivery 事务绕过 legacy View gate，历史 v1 保持只读兼容；
+- [x] 完成 Migration 113 planned shutdown protocol 扩展：保留历史 pending v2 cycle，并允许新 v3 cancel-all
+  intent 持久化与重启补偿；
 - [x] 保持 Context DB-only：v2 payload 缺失时仍投影持久路径，不增加 unavailable descriptor 或 Run Fact；
 - [x] 解除新 Run 对 legacy View readiness 的隐式依赖：no-legacy receipt 不查 View，失败 legacy locator 安全省略，
   dispatch 使用稳定 Camp root 且不取得 read admission、不检查 unresolved writer intent、不触发 rebuild；
@@ -47,15 +49,16 @@ last_updated: 2026-08-27
 
 ## 验证证据
 
-- `pnpm test`：82 个 Vitest 文件、584 个 Renderer/TypeScript 测试通过；Node 协议测试 219 个通过、
+- `pnpm test`：82 个 Vitest 文件、585 个 Renderer/TypeScript 测试通过；Node 协议测试 219 个通过、
   1 个既有用例按环境条件跳过；
 - `pnpm typecheck`、`cargo check --workspace --all-targets`、
   `cargo clippy --workspace --all-targets --all-features -- -D warnings` 通过；
-- `cargo test -p rovai-core --all-targets`：Core library 324/324、CLI 25/25、Host 161/161 通过，4 个显式
+- `cargo test -p rovai-core --all-targets`：Core library 326/326、CLI 25/25、Host 161/161 通过，4 个显式
   manual Runtime smoke 保持 ignored；其中 Migration 111 回归从 current-main 的
   `v1.23 / schema 64 / migration 110` 数据库复现 SQLite 275，再升级到 `v1.24 / schema 65`，验证
   zero-attempt cancellation 可写、Migration 111 重启幂等且 terminal Delivery 不复活；Migration 112 再从
-  `v1.24 / schema 65 / migration 111` 升级到 `v1.25 / schema 66` 并验证重启幂等；
+  `v1.24 / schema 65 / migration 111` 升级到 `v1.25 / schema 66` 并验证重启幂等；Migration 113 保持该
+  contract/schema marker，验证 pending v2 cycle 不丢失、新 v3 cycle 可写且重启幂等；
 - Managed v2 回归覆盖源 Run 仍为 `running` 时发送 4 个共 14 MiB 文件、Delivery 在源 Run 结束前开始、零
   legacy publication operation/gate、同一 attachmentId 多 Message ref 不二次复制、Context 在 payload 被删后
   仍只按数据库投影稳定路径、legacy rebuild 不删除 v2 resource，以及 staging/promote 两个 commit 前 crash

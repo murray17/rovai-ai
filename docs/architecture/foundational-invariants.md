@@ -225,7 +225,7 @@ last_updated: 2026-08-27
 - Runtime accepted input 只有在能证明原 Native Turn 的 identity、接受状态和可重连终态时才能恢复。证据不足进入 `recovery_blocked` 或 continuity-lost，不能重发可能已经产生外部效果的输入。
 - 新输入的恢复验证冻结 Manifest attachment receipt 的 closed shape/digest，再独立验证 admitted Runtime Files Root identity、精确 Camp root containment 与当前 Camp-root Auth Receipt；不要求 legacy View ready、append-only successor 或 generation 匹配。路径和历史 payload 不重新解析、探测或改写。Migration 99/100 的旧非终态输入按 delivery/action evidence 诚实终结，历史 Manifest/Blob/Auth Receipt/ACK 保留但不可再 dispatch。
 - Cancellation 有“已请求”和“Runtime 已终结”两个阶段。Run-local 请求提交即 fence 该 Run 的新 Camp/Task/Tool/A2A 写入，但不代表 Runtime 已退出；发送中断失败、进程失联或超时不能被投影为确定取消，Run、Activity 和 UI 必须保留 unknown/unsettled。
-- 计划关闭先持久化 shutdown cycle 和 product execution fence，阻止新 launch/terminal admission，再请求 Runtime 收敛并优先等待可靠终态。达到统一 deadline 后可以停止产品，但不能伪造 Runtime outcome。
+- 计划关闭先持久化 shutdown cycle 并关闭新 launch；完成稳定快照后立即关闭 terminal/route 准入，再 best-effort 请求 Runtime 中断，并在同一产品事务中把全部非终态 AgentRun 结算为已取消。未知外部效果继续保留，且不得伪造 Runtime outcome。
 - Diagnostics 是严格只读、最小化数据的 Core view；修复必须是用户显式选择的独立动作。导出集中脱敏，不能把 secret、完整路径、模型输入或 Runtime 原始输出作为便利诊断数据。
 
 <a id="runtime-platform-security"></a>

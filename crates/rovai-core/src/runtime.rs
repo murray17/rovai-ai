@@ -3908,8 +3908,8 @@ impl ExecutionRuntimeService {
         if core_generation.trim().is_empty() {
             anyhow::bail!("controlled shutdown core generation must not be empty");
         }
-        if protocol_version != 2 {
-            anyhow::bail!("controlled shutdown cycle requires protocol version 2");
+        if !matches!(protocol_version, 2 | 3) {
+            anyhow::bail!("controlled shutdown cycle requires protocol version 2 or 3");
         }
         let transaction = database
             .connection_mut()
@@ -3985,16 +3985,22 @@ impl ExecutionRuntimeService {
         let cycle = transaction
             .query_row(
                 r#"
-                SELECT protocol_version, settled_at
+                SELECT protocol_version, settled_at, requested_at
                 FROM planned_shutdown_cycle
                 WHERE core_generation = ?1
                 "#,
                 [core_generation],
-                |row| Ok((row.get::<_, i64>(0)?, row.get::<_, Option<String>>(1)?)),
+                |row| {
+                    Ok((
+                        row.get::<_, i64>(0)?,
+                        row.get::<_, Option<String>>(1)?,
+                        row.get::<_, String>(2)?,
+                    ))
+                },
             )
             .optional()?
             .context("controlled shutdown cycle does not exist")?;
-        if cycle.0 != 2 {
+        if !matches!(cycle.0, 2 | 3) {
             anyhow::bail!("controlled shutdown cycle protocol is unsupported");
         }
         if cycle.1.is_some() {
@@ -4005,12 +4011,15 @@ impl ExecutionRuntimeService {
                 already_settled: true,
             });
         }
+        let cancel_all_agent_runs = cycle.0 == 3;
+        let shutdown_requested_at = cycle.2;
 
         let targets = {
             let mut statement = transaction.prepare(
                 r#"
                 SELECT agent_run.id, camp_turn.camp_id, agent_run.camp_turn_id,
-                       agent_run.execution_epoch, agent_run.cancel_reason_code,
+                       agent_run.execution_epoch, agent_run.cancel_requested_at,
+                       agent_run.cancel_reason_code,
                        COALESCE(
                            json_extract(agent_run.workspace_json, '$.executionRoot'),
                            camp.project_path
@@ -4030,7 +4039,8 @@ impl ExecutionRuntimeService {
                         row.get::<_, String>(2)?,
                         row.get::<_, i64>(3)?,
                         row.get::<_, Option<String>>(4)?,
-                        row.get::<_, String>(5)?,
+                        row.get::<_, Option<String>>(5)?,
+                        row.get::<_, String>(6)?,
                     ))
                 })?
                 .collect::<rusqlite::Result<Vec<_>>>()?
@@ -4047,6 +4057,7 @@ impl ExecutionRuntimeService {
             camp_id,
             camp_turn_id,
             execution_epoch,
+            cancel_requested_at,
             cancel_reason_code,
             execution_root,
         ) in targets
@@ -4082,10 +4093,19 @@ impl ExecutionRuntimeService {
             };
             let reason_code = cancel_reason_code
                 .as_deref()
-                .unwrap_or("planned_shutdown_cancelled");
+                .unwrap_or(if cancel_all_agent_runs {
+                    "app_shutdown_cancel_all"
+                } else {
+                    "planned_shutdown_cancelled"
+                });
             let error_details_ref = json!({
                 "reason": "controlled_app_shutdown",
                 "coreGeneration": core_generation,
+                "cancellationSemantics": if cancel_all_agent_runs {
+                    "cancel_all_agent_runs"
+                } else {
+                    "product_fence"
+                },
                 "hasUnsettledExternalEffects": has_unsettled_external_effects,
             })
             .to_string();
@@ -4098,8 +4118,16 @@ impl ExecutionRuntimeService {
                     terminal_resolution_source = NULL, terminal_reason_code = NULL,
                     last_error_code = ?2, last_error_details_ref = ?3,
                     manual_retry_allowed = 0,
+                    cancel_requested_at = CASE
+                        WHEN ?6 = 1 THEN COALESCE(cancel_requested_at, ?7)
+                        ELSE cancel_requested_at
+                    END,
+                    cancel_reason_code = CASE
+                        WHEN ?6 = 1 THEN COALESCE(cancel_reason_code, 'app_shutdown_cancel_all')
+                        ELSE cancel_reason_code
+                    END,
                     cancel_acknowledged_at = CASE
-                        WHEN cancel_requested_at IS NOT NULL
+                        WHEN ?6 = 1 OR cancel_requested_at IS NOT NULL
                         THEN COALESCE(cancel_acknowledged_at, ?4)
                         ELSE cancel_acknowledged_at
                     END,
@@ -4113,10 +4141,27 @@ impl ExecutionRuntimeService {
                     error_details_ref,
                     now,
                     execution_epoch,
+                    i64::from(cancel_all_agent_runs),
+                    shutdown_requested_at,
                 ],
             )?;
             if updated != 1 {
                 anyhow::bail!("AgentRun changed inside controlled shutdown fence settlement");
+            }
+            if cancel_all_agent_runs && cancel_requested_at.is_none() {
+                append_domain_event(
+                    &transaction,
+                    "agent_run.cancel_requested",
+                    &camp_id,
+                    ("agent_run", &agent_run_id),
+                    &actor,
+                    Some(execution_epoch),
+                    &json!({
+                        "campTurnId": camp_turn_id,
+                        "reasonCode": "app_shutdown_cancel_all",
+                        "coreGeneration": core_generation,
+                    }),
+                )?;
             }
             append_domain_event(
                 &transaction,
@@ -6634,6 +6679,9 @@ mod tests {
         struct ControlledShutdownState {
             run_status: String,
             wait_reason: Option<String>,
+            cancel_requested_at: Option<String>,
+            cancel_reason_code: Option<String>,
+            cancel_acknowledged_at: Option<String>,
             terminal_resolution_source: Option<String>,
             terminal_reason_code: Option<String>,
             last_error_code: String,
@@ -6646,7 +6694,7 @@ mod tests {
         insert_test_runtime_input(&database, &agent_run_id, execution_epoch, "accepted");
         let service = ExecutionRuntimeService::default();
         service
-            .record_controlled_shutdown_cycle(&mut database, "generation-accepted", 2)
+            .record_controlled_shutdown_cycle(&mut database, "generation-accepted", 3)
             .unwrap();
         let settlement = service
             .settle_controlled_shutdown_cycle(&mut database, "generation-accepted")
@@ -6660,6 +6708,9 @@ mod tests {
             .query_row(
                 r#"
                 SELECT agent_run.status, agent_run.wait_reason,
+                       agent_run.cancel_requested_at,
+                       agent_run.cancel_reason_code,
+                       agent_run.cancel_acknowledged_at,
                        agent_run.terminal_resolution_source,
                        agent_run.terminal_reason_code,
                        agent_run.last_error_code,
@@ -6676,16 +6727,25 @@ mod tests {
                     Ok(ControlledShutdownState {
                         run_status: row.get(0)?,
                         wait_reason: row.get(1)?,
-                        terminal_resolution_source: row.get(2)?,
-                        terminal_reason_code: row.get(3)?,
-                        last_error_code: row.get(4)?,
-                        input_delivery_status: row.get(5)?,
-                        aggregate_reason_code: row.get(6)?,
+                        cancel_requested_at: row.get(2)?,
+                        cancel_reason_code: row.get(3)?,
+                        cancel_acknowledged_at: row.get(4)?,
+                        terminal_resolution_source: row.get(5)?,
+                        terminal_reason_code: row.get(6)?,
+                        last_error_code: row.get(7)?,
+                        input_delivery_status: row.get(8)?,
+                        aggregate_reason_code: row.get(9)?,
                     })
                 },
             )
             .unwrap();
         assert_eq!(state.run_status, "cancelled");
+        assert!(state.cancel_requested_at.is_some());
+        assert_eq!(
+            state.cancel_reason_code.as_deref(),
+            Some("app_shutdown_cancel_all")
+        );
+        assert!(state.cancel_acknowledged_at.is_some());
         assert!(
             state.wait_reason.is_none()
                 && state.terminal_resolution_source.is_none()
@@ -6782,12 +6842,22 @@ mod tests {
 
     #[test]
     fn controlled_shutdown_startup_recovery_converges_prepared_input_to_terminal_unknown() {
+        struct StartupRecoveryState {
+            run_status: String,
+            last_error_code: String,
+            input_delivery_status: String,
+            input_resolved_at: Option<String>,
+            cancel_requested_at: Option<String>,
+            cancel_reason_code: Option<String>,
+            cancel_acknowledged_at: Option<String>,
+        }
+
         let (directory, mut database, _camp_id, _camp_turn_id, agent_run_id, execution_epoch) =
             claimed_run_for_planned_shutdown("required");
         insert_test_runtime_input(&database, &agent_run_id, execution_epoch, "prepared");
         let service = ExecutionRuntimeService::default();
         service
-            .record_controlled_shutdown_cycle(&mut database, "generation-interrupted", 2)
+            .record_controlled_shutdown_cycle(&mut database, "generation-interrupted", 3)
             .unwrap();
 
         let recovery = service
@@ -6796,26 +6866,45 @@ mod tests {
         assert_eq!(recovery.cycles_settled, 1);
         assert_eq!(recovery.fenced_agent_runs.len(), 1);
         assert!(recovery.fenced_agent_runs[0].has_unsettled_external_effects);
-        let state: (String, String, String, Option<String>) = database
+        let state: StartupRecoveryState = database
             .connection()
             .query_row(
                 r#"
                 SELECT agent_run.status, agent_run.last_error_code,
                        runtime_input_delivery.status,
-                       runtime_input_delivery.resolved_at
+                       runtime_input_delivery.resolved_at,
+                       agent_run.cancel_requested_at,
+                       agent_run.cancel_reason_code,
+                       agent_run.cancel_acknowledged_at
                 FROM agent_run
                 JOIN runtime_input_delivery
                   ON runtime_input_delivery.agent_run_id = agent_run.id
                 WHERE agent_run.id = ?1
                 "#,
                 [&agent_run_id],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+                |row| {
+                    Ok(StartupRecoveryState {
+                        run_status: row.get(0)?,
+                        last_error_code: row.get(1)?,
+                        input_delivery_status: row.get(2)?,
+                        input_resolved_at: row.get(3)?,
+                        cancel_requested_at: row.get(4)?,
+                        cancel_reason_code: row.get(5)?,
+                        cancel_acknowledged_at: row.get(6)?,
+                    })
+                },
             )
             .unwrap();
-        assert_eq!(state.0, "cancelled");
-        assert_eq!(state.1, "planned_shutdown_outcome_unknown");
-        assert_eq!(state.2, "delivery_unknown");
-        assert!(state.3.is_none());
+        assert_eq!(state.run_status, "cancelled");
+        assert_eq!(state.last_error_code, "planned_shutdown_outcome_unknown");
+        assert_eq!(state.input_delivery_status, "delivery_unknown");
+        assert!(state.input_resolved_at.is_none());
+        assert!(state.cancel_requested_at.is_some());
+        assert_eq!(
+            state.cancel_reason_code.as_deref(),
+            Some("app_shutdown_cancel_all")
+        );
+        assert!(state.cancel_acknowledged_at.is_some());
 
         let replay = service
             .recover_interrupted_controlled_shutdowns(&mut database)
