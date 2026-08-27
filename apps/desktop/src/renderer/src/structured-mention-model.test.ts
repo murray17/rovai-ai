@@ -11,6 +11,7 @@ import {
   normalizeStructuredMentionContent,
   pasteStructuredPlainText,
   replaceStructuredSelection,
+  selectedStructuredMentionContent,
   structuredMentionContentLength,
   type StructuredMentionEditorState
 } from './structured-mention-model'
@@ -211,6 +212,26 @@ describe('structured mention editing model', () => {
       content: [{ kind: 'text', text: '前后' }],
       selection: { anchor: 1, focus: 1 }
     })
+  })
+
+  it('returns the visible structured selection without splitting atomic tokens', () => {
+    expect(selectedStructuredMentionContent({
+      content: [
+        { kind: 'text', text: '前文' },
+        member('agent-a'),
+        { kind: 'text', text: '中段' },
+        skill('skill-review', 'review-pr'),
+        allMembers(),
+        { kind: 'text', text: '后文' }
+      ],
+      selection: { anchor: 7, focus: 1 }
+    })).toEqual([
+      { kind: 'text', text: '文' },
+      member('agent-a'),
+      { kind: 'text', text: '中段' },
+      skill('skill-review', 'review-pr'),
+      allMembers()
+    ])
   })
 
   it('pastes @ and slash text without upgrading either to structured tokens', () => {

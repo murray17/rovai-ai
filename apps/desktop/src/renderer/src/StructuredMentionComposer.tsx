@@ -27,6 +27,7 @@ import {
   normalizeStructuredMentionContent,
   pasteStructuredPlainText,
   replaceStructuredSelection,
+  selectedStructuredMentionContent,
   structuredMentionContentLength,
   type StructuredMentionContent,
   type StructuredMentionEditorState,
@@ -35,7 +36,10 @@ import {
 import { MemberAvatar } from './MemberAvatar'
 import { SkillIdentityMark } from './SkillIdentityMark'
 import type { ComposerSkillOption } from './composer-skill-picker'
-import { readStructuredMessageClipboardContent } from './structured-message-clipboard'
+import {
+  createStructuredMessageClipboardData,
+  readStructuredMessageClipboardContent
+} from './structured-message-clipboard'
 
 export interface StructuredMentionMember {
   agentId: string
@@ -659,6 +663,32 @@ export function StructuredMentionComposer({
       : pasteStructuredPlainText(editorState(), plainText))
   }
 
+  const handleCut = (event: ClipboardEvent<HTMLDivElement>): void => {
+    if (disabled || isComposingRef.current) {
+      event.preventDefault()
+      return
+    }
+    const selection = currentSelection()
+    if (selection.anchor === selection.focus) return
+    // Own Cut before Chromium mutates the contenteditable subtree. Waiting for
+    // deleteByCut leaves a native filler BR that can be mistaken for a newline.
+    event.preventDefault()
+    const state = editorState(selection)
+    const selectedContent = selectedStructuredMentionContent(state)
+    const structuredClipboard = createStructuredMessageClipboardData(selectedContent, members)
+    if (structuredClipboard) {
+      event.clipboardData.setData('text/plain', structuredClipboard.text)
+      event.clipboardData.setData('text/html', structuredClipboard.html)
+    } else {
+      event.clipboardData.setData(
+        'text/plain',
+        selectedContent.map((segment) => segment.kind === 'text' ? segment.text : '').join('')
+      )
+    }
+    setQuery(null)
+    emitState(replaceStructuredSelection(state, []))
+  }
+
   const handleCompositionStart = (_event: CompositionEvent<HTMLDivElement>): void => {
     isComposingRef.current = true
     compositionGenerationRef.current += 1
@@ -735,6 +765,7 @@ export function StructuredMentionComposer({
           }
         }}
         onPaste={handlePaste}
+        onCut={handleCut}
         onCompositionStart={handleCompositionStart}
         onCompositionEnd={handleCompositionEnd}
         onPointerDown={handlePointerDown}
@@ -1010,6 +1041,7 @@ function authorableStructuredContent(
 }
 
 function readStructuredContent(editor: HTMLDivElement): StructuredMentionContent {
+  if (isNativeEmptyEditorFiller(editor)) return []
   const content: StructuredMentionContent = []
   for (const node of editor.childNodes) {
     if (node.nodeType === Node.ELEMENT_NODE) {
@@ -1042,6 +1074,36 @@ function readStructuredContent(editor: HTMLDivElement): StructuredMentionContent
     if (text) content.push({ kind: 'text', text })
   }
   return normalizeStructuredMentionContent(content)
+}
+
+function isNativeEmptyEditorFiller(editor: HTMLDivElement): boolean {
+  // Chromium represents an emptied contenteditable with one untagged BR.
+  // Tagged line breaks remain semantic and must never be collapsed here.
+  let bareBreakCount = 0
+  let semanticContentFound = false
+  const visit = (node: Node): void => {
+    if (semanticContentFound) return
+    if (node.nodeType === Node.TEXT_NODE) {
+      if ((node.textContent ?? '').length > 0) {
+        semanticContentFound = true
+      }
+      return
+    }
+    if (node.nodeType !== Node.ELEMENT_NODE) return
+    const element = node as HTMLElement
+    if (element.dataset.tokenKind || element.dataset.editorLineBreak === 'true') {
+      semanticContentFound = true
+      return
+    }
+    if (isEditorCaretHost(element)) return
+    if (element.tagName === 'BR') {
+      if (!isEditorCaretBreak(element)) bareBreakCount += 1
+      return
+    }
+    for (const child of element.childNodes) visit(child)
+  }
+  for (const child of editor.childNodes) visit(child)
+  return !semanticContentFound && bareBreakCount <= 1
 }
 
 function renderEditorText(text: string): ReactNode[] {
