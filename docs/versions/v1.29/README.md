@@ -50,7 +50,7 @@ reconciliation 完成已接受工作的正式结算。
   再次添加得到新的 lifetime，旧工作不能恢复授权；
 - 外部成员同步只作受信提示；System allowlist、source binding 与递增 reconciliation generation 通过后仍由 Core
   正式命令提交权威状态；
-- Camp 会话增加添加入口、成员菜单、权威移除影响预览、最后成员禁用说明与非阻塞 reconciliation 状态；
+- Camp 会话增加“邀请”入口、成员菜单、权威移除影响预览、最后成员禁用说明与非阻塞 reconciliation 状态；
 - 新附件使用 Managed Attachment v2、CampMessage refs 与 durable ingest intent，不再进入 legacy publication gate，
   不等待或 fence 活跃 AgentRun；Context 继续使用 DB-only descriptor，legacy v1 只读兼容；
 - 在 append-only Execution Evidence 之上为既有 Canonical Activity 增加 typed `diffProjection`；

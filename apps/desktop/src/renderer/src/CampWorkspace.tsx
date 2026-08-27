@@ -5717,8 +5717,8 @@ function CampMembersPanel({
         setAddDialogOpen(false)
         setSelectedCandidateIds(new Set())
         onNotify(outcome.addedAgentIds.length === 1
-          ? '已添加 1 位队员；将在之后新建的执行中生效'
-          : `已添加 ${outcome.addedAgentIds.length} 位队员；将在之后新建的执行中生效`)
+          ? '1 位队员已加入；将在之后新建的执行中生效'
+          : `${outcome.addedAgentIds.length} 位队员已加入；将在之后新建的执行中生效`)
         return
       }
       setSelectedCandidateIds(new Set(outcome.failures.map((failure) => failure.agentId)))
@@ -5732,7 +5732,7 @@ function CampMembersPanel({
     } catch (error) {
       setAddResult({
         tone: 'danger',
-        message: error instanceof Error ? error.message : '添加队员失败，请重试。',
+        message: error instanceof Error ? error.message : '邀请队员失败，请重试。',
         failures: new Map()
       })
     } finally {
@@ -5842,7 +5842,7 @@ function CampMembersPanel({
               disabled={busy || !onAddMembers}
               onClick={openAddDialog}
             >
-              <span aria-hidden="true">＋</span> 添加
+              <span aria-hidden="true">＋</span> 邀请
             </button>
           </div>
         </div>
@@ -6036,7 +6036,7 @@ function CampMembersPanel({
           <Dialog.Overlay className="dialog-overlay app-dialog-overlay" />
           <AppDialogContent className="camp-member-dialog" width="wide" aria-describedby="camp-add-member-description">
             <AppDialogHeader
-              title="添加队员"
+              title="邀请队员"
               description="选择要加入这次讨论的队员。"
               descriptionId="camp-add-member-description"
               icon="user"
@@ -6059,10 +6059,10 @@ function CampMembersPanel({
                 />
               </label>
               <div className="camp-member-candidate-caption">
-                <strong>可添加队员</strong>
+                <strong>可邀请队员</strong>
                 <span>{filteredCandidates.length} 位</span>
               </div>
-              <div className="camp-member-candidate-list" role="group" aria-label="可添加队员">
+              <div className="camp-member-candidate-list" role="group" aria-label="可邀请队员">
                 {filteredCandidates.map((profile) => {
                   const failure = addResult?.failures.get(profile.agentId) ?? null
                   const checked = selectedCandidateIds.has(profile.agentId)
@@ -6090,7 +6090,7 @@ function CampMembersPanel({
                 })}
                 {filteredCandidates.length === 0 && (
                   <div className="camp-member-candidate-empty">
-                    <strong>{candidateProfiles.length === 0 ? '没有可添加的队员' : '没有匹配的队员'}</strong>
+                    <strong>{candidateProfiles.length === 0 ? '没有可邀请的队员' : '没有匹配的队员'}</strong>
                     <p>{candidateProfiles.length === 0
                       ? '所有当前在队的队员都已加入本会话。'
                       : '换一个姓名或角色关键词试试。'}</p>
@@ -6105,7 +6105,7 @@ function CampMembersPanel({
                 type="button"
                 disabled={selectedCandidateIds.size === 0 || addSubmitting}
                 onClick={() => void submitAddMembers()}
-              >{addSubmitting ? '正在添加…' : `添加队员${selectedCandidateIds.size > 0 ? ` · ${selectedCandidateIds.size}` : ''}`}</button>
+              >{addSubmitting ? '正在邀请…' : `邀请队员${selectedCandidateIds.size > 0 ? ` · ${selectedCandidateIds.size}` : ''}`}</button>
             </AppDialogFooter>
           </AppDialogContent>
         </Dialog.Portal>

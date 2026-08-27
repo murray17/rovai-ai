@@ -15,7 +15,7 @@ last_updated: 2026-08-26
 
 - `Camp.membershipGeneration >= 1`，每次真实成员集合变化恰好加一；幂等 no-op 不推进；
 - 每个 Agent 在一个 Camp 只有一行 `CampMember`。再次添加 left 行会把它变为 active、推进该行 `version`，
-  产品仍只称“添加队员”，不暴露 rejoined 状态；
+  产品界面仍只称“邀请队员”，不暴露 rejoined 状态；
 - Camp 始终至少一位 active member；Default Lead 若存在必须是 active member；
 - add 不创建 Conversation、CampTurn 或 AgentRun。只有以后新接受的执行按当时 active 名册冻结 Context。
 

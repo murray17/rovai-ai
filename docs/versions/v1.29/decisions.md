@@ -62,7 +62,7 @@ version。
 
 ### 后果
 
-- 再次添加在产品上仍是普通添加，但在授权上是新的 lifetime；
+- 再次添加在产品界面仍按普通“邀请队员”处理，但在授权上是新的 lifetime；
 - 所有 Agent 业务工具共用统一 exact-run fence，不依赖各 handler 自行记得补检查；
 - 已接受的普通 outbound A2A 不能在 source lifetime 结束后新建或重试下游 Run；
 - Missing-Send 和普通公开输出不会成为绕过离队 cutover 的旁路。

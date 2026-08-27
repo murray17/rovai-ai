@@ -47,8 +47,9 @@ Camp 可以回到 Quick Chat。Notification navigation、恢复位置写入和�
 
 ## Camp 队员管理
 
-“当前会话”摘要行在标题右侧提供紧凑“添加”按钮。它打开可搜索的多选 Dialog，候选只包含当前
-`present` 且不在 active Camp members 中的 AgentProfile；曾离开的成员若再次出现，仍按普通候选与“添加队员”
+“当前会话”摘要行在标题右侧提供紧凑“邀请”按钮。它打开可搜索的多选 Dialog，说明固定为
+“选择要加入这次讨论的队员。”；候选只包含当前 `present` 且不在 active Camp members 中的 AgentProfile；
+曾离开的成员若再次出现，仍按普通候选与“邀请队员”
 文案处理，不显示“重新加入”或历史离队分组。提交按权威 membership generation 顺序执行；多选出现局部失败
 时保留失败项和明确原因，已成功项立即从候选移除，不伪装为整批回滚。
 
