@@ -90,26 +90,32 @@ class FakeBrowserWindow extends EventEmitter {
   show(): void {}
 }
 
-const browserSession = {
-  clearStorageData: vi.fn(async () => undefined),
-  cookies: {
-    get: vi.fn(async () => [{
-      name: 'session',
-      value: 'private-cookie-fixture',
-      domain: '.feishu.cn',
-      path: '/',
-      secure: true,
-      httpOnly: true,
-      sameSite: 'lax',
-      session: true
-    }]),
-    set: vi.fn(async () => undefined)
-  },
-  fetch: vi.fn(async () => new Response(JSON.stringify({ code: 0, data: {} }), {
-    status: 200,
-    headers: { 'content-type': 'application/json' }
-  }))
+function fakeBrowserSession() {
+  return {
+    clearStorageData: vi.fn(async () => undefined),
+    cookies: {
+      get: vi.fn(async () => [{
+        name: 'session',
+        value: 'private-cookie-fixture',
+        domain: '.feishu.cn',
+        path: '/',
+        secure: true,
+        httpOnly: true,
+        sameSite: 'lax',
+        session: true
+      }]),
+      set: vi.fn(async () => undefined)
+    },
+    fetch: vi.fn(async () => new Response(JSON.stringify({ code: 0, data: {} }), {
+      status: 200,
+      headers: { 'content-type': 'application/json' }
+    }))
+  }
 }
+
+const browserSession = fakeBrowserSession()
+const partitionSessions = new Map<string, ReturnType<typeof fakeBrowserSession>>()
+let isolateSessionPartitions = false
 
 const temporaryRoots: string[] = []
 
@@ -133,7 +139,14 @@ beforeEach(() => {
       })
     },
     session: {
-      fromPartition: () => browserSession
+      fromPartition: (partition: string) => {
+        if (!isolateSessionPartitions) return browserSession
+        const existing = partitionSessions.get(partition)
+        if (existing) return existing
+        const created = fakeBrowserSession()
+        partitionSessions.set(partition, created)
+        return created
+      }
     }
   }))
   currentUrl = 'about:blank'
@@ -142,6 +155,8 @@ beforeEach(() => {
   encryptionCheckCount = 0
   portalLoadsAuthenticated = false
   portalApiOrigin = 'https://open.feishu.cn'
+  isolateSessionPartitions = false
+  partitionSessions.clear()
   portalIdentity = {
     id: 'developer-user-1',
     name: 'Murray',
@@ -212,6 +227,116 @@ describe('Feishu developer session login', () => {
       email: 'murray@example.com',
       tenantId: 'tenant-1',
       tenantName: '星海科技'
+    })
+  })
+
+  it('keeps the current developer session when a fresh account switch is cancelled', async () => {
+    isolateSessionPartitions = true
+    const { ElectronFeishuDeveloperSessionService } = await import('./feishu-developer-session')
+    const root = mkdtempSync(join(tmpdir(), 'rovai-feishu-session-'))
+    temporaryRoots.push(root)
+    const service = new ElectronFeishuDeveloperSessionService(root)
+    await connectDeveloperSession(service)
+    const [currentSession] = [...partitionSessions.values()]
+    const abort = new AbortController()
+
+    const switching = service.beginLogin({ forceFresh: true, signal: abort.signal })
+    await vi.waitFor(() => expect(partitionSessions.size).toBe(2))
+    const replacementSession = [...partitionSessions.values()][1]
+    abort.abort()
+
+    await expect(switching).rejects.toThrow('feishu_login_cancelled')
+    expect(currentSession?.clearStorageData).not.toHaveBeenCalled()
+    expect(replacementSession?.clearStorageData).toHaveBeenCalledTimes(1)
+
+    portalLoadsAuthenticated = true
+    await expect(service.inspect()).resolves.toMatchObject({
+      userId: 'developer-user-1',
+      tenantId: 'tenant-1'
+    })
+  })
+
+  it('replaces the current developer session only after a fresh login succeeds', async () => {
+    isolateSessionPartitions = true
+    const { ElectronFeishuDeveloperSessionService } = await import('./feishu-developer-session')
+    const root = mkdtempSync(join(tmpdir(), 'rovai-feishu-session-'))
+    temporaryRoots.push(root)
+    const service = new ElectronFeishuDeveloperSessionService(root)
+    await connectDeveloperSession(service)
+    const [currentSession] = [...partitionSessions.values()]
+
+    const switching = service.beginLogin({ forceFresh: true })
+    await vi.waitFor(() => expect(partitionSessions.size).toBe(2))
+    const replacementSession = [...partitionSessions.values()][1]
+    portalIdentity = {
+      id: 'developer-user-2',
+      name: 'Ada',
+      email: 'ada@example.com',
+      tenantId: 'tenant-2',
+      tenantName: '新企业'
+    }
+    currentUrl = 'https://open.feishu.cn/app?lang=zh-CN'
+    await vi.advanceTimersByTimeAsync(501)
+
+    await expect(switching).resolves.toMatchObject({
+      userId: 'developer-user-2',
+      tenantId: 'tenant-2'
+    })
+    expect(currentSession?.clearStorageData).not.toHaveBeenCalled()
+    expect(replacementSession?.clearStorageData).not.toHaveBeenCalled()
+
+    await service.confirmLogin()
+    expect(currentSession?.clearStorageData).toHaveBeenCalledTimes(1)
+    expect(replacementSession?.clearStorageData).not.toHaveBeenCalled()
+
+    portalLoadsAuthenticated = true
+    const platform = await service.openPlatformSession({
+      expectedIdentity: { userId: 'developer-user-2', tenantId: 'tenant-2' }
+    })
+    await platform.fetch('https://open.feishu.cn/developers/v1/app/create')
+    expect(replacementSession?.fetch).toHaveBeenCalledTimes(1)
+    expect(currentSession?.fetch).not.toHaveBeenCalled()
+  })
+
+  it('can roll a successful fresh login back before the account switch is committed', async () => {
+    isolateSessionPartitions = true
+    const { ElectronFeishuDeveloperSessionService } = await import('./feishu-developer-session')
+    const root = mkdtempSync(join(tmpdir(), 'rovai-feishu-session-'))
+    temporaryRoots.push(root)
+    const service = new ElectronFeishuDeveloperSessionService(root)
+    await connectDeveloperSession(service)
+    const [currentSession] = [...partitionSessions.values()]
+
+    const switching = service.beginLogin({ forceFresh: true })
+    await vi.waitFor(() => expect(partitionSessions.size).toBe(2))
+    const replacementSession = [...partitionSessions.values()][1]
+    portalIdentity = {
+      id: 'developer-user-2',
+      name: 'Ada',
+      email: 'ada@example.com',
+      tenantId: 'tenant-2',
+      tenantName: '新企业'
+    }
+    currentUrl = 'https://open.feishu.cn/app?lang=zh-CN'
+    await vi.advanceTimersByTimeAsync(501)
+    await switching
+
+    const restored = await service.rollbackLogin()
+
+    expect(restored).toMatchObject({ userId: 'developer-user-1', tenantId: 'tenant-1' })
+    expect(currentSession?.clearStorageData).not.toHaveBeenCalled()
+    expect(replacementSession?.clearStorageData).toHaveBeenCalledTimes(1)
+    portalIdentity = {
+      id: 'developer-user-1',
+      name: 'Murray',
+      email: 'murray@example.com',
+      tenantId: 'tenant-1',
+      tenantName: '星海科技'
+    }
+    portalLoadsAuthenticated = true
+    await expect(service.inspect()).resolves.toMatchObject({
+      userId: 'developer-user-1',
+      tenantId: 'tenant-1'
     })
   })
 

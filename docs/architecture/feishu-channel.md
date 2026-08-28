@@ -58,6 +58,12 @@ Secret、原始 `userId`、Session Cookie、Host 恢复游标或内部路由事�
 ready 前把应用名切换为 `Rovai AI Isolated <userData 摘要>`，从而与日常 App 和其他验收目录使用不同的 macOS
 Keychain 命名空间；摘要不暴露原始路径，非隔离 App 继续使用原应用名以保持既有密文可读。
 
+切换账号采用 staged Session：Main 为新二维码建立一次性非持久 partition，当前活动 Session 与 safeStorage 文件继续
+服务旧账号。临时 Session 得到完整 Developer Identity 且新 Cookie jar 原子写入后，只建立可回滚 replacement；Core
+account upsert 成功才 confirm 并清理旧内存存储。取消、超时、导航失败、加密失败或 Core commit 失败都会恢复旧 Cookie
+store/活动 Session 并清理临时 partition，Core 中的当前账号不失效。显式“断开”仍
+直接清除当前 Session。该切换只替换以后发布所用的 Developer Identity，不迁移或停止任何已发布 Bot。
+
 普通队员发布先创建持久 `MemberBotPublicationIntent`，再要求当前 Web Session 仍属于 intent 冻结的
 `userId + tenantId`。`FeishuWebSessionMemberBotProvisioner` 从同一 Electron Session 的 Cookie jar 加载开放平台页，
 只在 Main 中读取 `csrfToken + apiOrigin`；后续请求使用该 Session 的 Chromium 网络栈和 Cookie policy，不组装、记录或

@@ -17,7 +17,7 @@ last_updated: 2026-08-28
 - [x] 以 existing directory Camp 投影 Project Catalog，删除 Channel 人工 ProjectBinding/bind/switch；完成 DM Quick Chat
   generation、私聊限定 `/new`、群/话题 immutable project Camp 与 frozen pending-message FIFO；
 - [x] 删除 controller App 账号模型；完成 Developer Web Session、真实 user/tenant 回读、safeStorage Cookie jar、
-  identity drift/expiry fail-closed 与断开不删除 Bot credential；
+  identity drift/expiry fail-closed、切换账号的临时 Session/成功后替换/失败保留旧登录态，以及断开不删除 Bot credential；
 - [x] 完成 Web Session MemberBotProvisioner、Session cookie/CSRF console bootstrap、OpenPlatformApiClient 创建/
   配置/发布/回读、发布无 Renderer QR/飞书确认页、旧 registration Provisioner/确认窗口/API 全量退役、持久 publication intent、
   release 错误后的 published read-back、unknown remote 防重复、冻结 App 显式核对接管和多 WebSocket Host/启动恢复；

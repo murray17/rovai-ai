@@ -293,6 +293,7 @@ export class ChannelSettingsService {
     if (this.#activeQrAttempt) throw new Error('已有一个飞书二维码流程正在进行。')
     this.#activeProvisioningAbort?.abort()
     const previous = (await this.#coreSnapshot()).account
+    let replacementIdentityReady = false
     const attemptId = randomUUID()
     const abort = new AbortController()
     this.#activeQrAbort = abort
@@ -326,9 +327,21 @@ export class ChannelSettingsService {
       if (this.#activeQrAttempt?.attemptId !== attemptId) {
         throw new Error('feishu_login_cancelled')
       }
+      replacementIdentityReady = true
       await this.#upsertAccount(identity)
+      await this.#developerSession.confirmLogin?.()
     } catch (error) {
-      if (previous?.status === 'connected') {
+      let rollbackFailed = false
+      if (this.#developerSession.rollbackLogin) {
+        try {
+          await this.#developerSession.rollbackLogin()
+        } catch {
+          rollbackFailed = true
+        }
+      } else if (replacementIdentityReady) {
+        rollbackFailed = true
+      }
+      if (rollbackFailed && previous?.status === 'connected') {
         await this.#expireAccount(previous).catch(() => undefined)
       }
       this.#failQr(error)

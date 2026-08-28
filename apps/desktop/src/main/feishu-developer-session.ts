@@ -37,6 +37,8 @@ export interface FeishuDeveloperSessionService {
     onQrReady?(qr: { payload: string; expiresAt: string }): void
     onStatus?(status: FeishuLoginStage): void
   }): Promise<FeishuDeveloperIdentity>
+  confirmLogin?(): Promise<void>
+  rollbackLogin?(): Promise<FeishuDeveloperIdentity | null>
   inspect(): Promise<FeishuDeveloperIdentity | null>
   requireExpectedIdentity(expected: {
     userId: string
@@ -103,6 +105,11 @@ export class ElectronFeishuDeveloperSessionService implements FeishuDeveloperPor
   #restored = false
   #activeLoginWindow: BrowserWindow | null = null
   #activeOpenPlatformWindows = new Set<BrowserWindow>()
+  #pendingLoginReplacement: {
+    previousSession: Session | null
+    previousStored: StoredDeveloperSession | null
+    replacementSession: Session
+  } | null = null
 
   constructor(userDataPath: string, getParentWindow: () => BrowserWindow | null = () => null) {
     this.#store = new SafeStorageFeishuDeveloperSessionStore(userDataPath)
@@ -119,14 +126,17 @@ export class ElectronFeishuDeveloperSessionService implements FeishuDeveloperPor
     options.onStatus?.('checking_secure_storage')
     await this.#store.requireAvailable()
     await this.#ensureRestored()
-    if (options.forceFresh) {
-      await this.#session.clearStorageData()
-      await this.#store.delete()
-    }
+    if (this.#pendingLoginReplacement) await this.rollbackLogin()
     if (options.signal?.aborted) throw sessionError('feishu_login_cancelled')
 
+    const previousSession = options.forceFresh ? this.#browserSession : null
+    const previousStored = options.forceFresh ? await this.#store.read() : null
+    const loginSession = options.forceFresh
+      ? electronSession.fromPartition(`${SESSION_PARTITION}-login-${randomUUID()}`, { cache: false })
+      : this.#session
+    let replacementCommitted = !options.forceFresh
     options.onStatus?.('preparing')
-    const window = this.#createWindow(false)
+    const window = this.#createWindow(false, null, loginSession)
     this.#activeLoginWindow = window
     let terminal = false
     let lastQrDataUrl = ''
@@ -193,7 +203,17 @@ export class ElectronFeishuDeveloperSessionService implements FeishuDeveloperPor
                 return
               }
               emitStage('securing_session')
-              await this.#persist(identity)
+              await this.#persist(identity, loginSession)
+              if (options.forceFresh) {
+                this.#browserSession = loginSession
+                this.#restored = true
+                replacementCommitted = true
+                this.#pendingLoginReplacement = {
+                  previousSession,
+                  previousStored,
+                  replacementSession: loginSession
+                }
+              }
               emitStage('connected')
               finish(identity)
               return
@@ -238,7 +258,31 @@ export class ElectronFeishuDeveloperSessionService implements FeishuDeveloperPor
     } finally {
       if (this.#activeLoginWindow === window) this.#activeLoginWindow = null
       if (!window.isDestroyed()) window.destroy()
+      if (options.forceFresh && !replacementCommitted) {
+        await loginSession.clearStorageData().catch(() => undefined)
+      }
     }
+  }
+
+  async confirmLogin(): Promise<void> {
+    const pending = this.#pendingLoginReplacement
+    if (!pending) return
+    this.#pendingLoginReplacement = null
+    if (pending.previousSession && pending.previousSession !== pending.replacementSession) {
+      await pending.previousSession.clearStorageData().catch(() => undefined)
+    }
+  }
+
+  async rollbackLogin(): Promise<FeishuDeveloperIdentity | null> {
+    const pending = this.#pendingLoginReplacement
+    if (!pending) return null
+    if (pending.previousStored) await this.#store.write(pending.previousStored)
+    else await this.#store.delete()
+    this.#pendingLoginReplacement = null
+    this.#browserSession = pending.previousSession
+    this.#restored = pending.previousSession !== null || pending.previousStored === null
+    await pending.replacementSession.clearStorageData().catch(() => undefined)
+    return pending.previousStored?.identity ?? null
   }
 
   async inspect(): Promise<FeishuDeveloperIdentity | null> {
@@ -275,6 +319,7 @@ export class ElectronFeishuDeveloperSessionService implements FeishuDeveloperPor
 
   async disconnect(): Promise<void> {
     this.#closeActiveLogin()
+    await this.rollbackLogin().catch(() => undefined)
     for (const window of this.#activeOpenPlatformWindows) {
       if (!window.isDestroyed()) window.destroy()
     }
@@ -357,7 +402,11 @@ export class ElectronFeishuDeveloperSessionService implements FeishuDeveloperPor
     await this.#persist(stored.identity)
   }
 
-  #createWindow(show: boolean, parent: BrowserWindow | null = null): BrowserWindow {
+  #createWindow(
+    show: boolean,
+    parent: BrowserWindow | null = null,
+    browserSession: Session = this.#session
+  ): BrowserWindow {
     const window = new BrowserWindow({
       show,
       parent: parent && !parent.isDestroyed() ? parent : undefined,
@@ -369,7 +418,7 @@ export class ElectronFeishuDeveloperSessionService implements FeishuDeveloperPor
       title: 'Rovai · 飞书开放平台',
       autoHideMenuBar: true,
       webPreferences: {
-        session: this.#session,
+        session: browserSession,
         sandbox: true,
         contextIsolation: true,
         nodeIntegration: false,
@@ -407,8 +456,11 @@ export class ElectronFeishuDeveloperSessionService implements FeishuDeveloperPor
     }
   }
 
-  async #persist(identity: FeishuDeveloperIdentity): Promise<void> {
-    const cookies = await this.#session.cookies.get({})
+  async #persist(
+    identity: FeishuDeveloperIdentity,
+    browserSession: Session = this.#session
+  ): Promise<void> {
+    const cookies = await browserSession.cookies.get({})
     await this.#store.write({
       schemaVersion: 1,
       identity,

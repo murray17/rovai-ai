@@ -337,6 +337,7 @@ describe('channel settings service', () => {
   it('connects a real developer identity without registering an app or storing a controller secret', async () => {
     const credentialStore = memoryCredentialStore()
     const provision = vi.fn()
+    const confirmLogin = vi.fn(async () => undefined)
     const beginLogin = vi.fn(async () => ({
       brand: 'feishu' as const,
       userId: 'owner-user-id',
@@ -351,6 +352,7 @@ describe('channel settings service', () => {
       memberBotProvisioner: { create: provision },
       developerSession: {
         beginLogin,
+        confirmLogin,
         async inspect() { return null },
         async requireExpectedIdentity() { throw new Error('not_used') },
         async disconnect() {}
@@ -365,6 +367,7 @@ describe('channel settings service', () => {
     await service.connect()
 
     expect(beginLogin).toHaveBeenCalledWith(expect.objectContaining({ forceFresh: true }))
+    expect(confirmLogin).toHaveBeenCalledTimes(1)
     expect(provision).not.toHaveBeenCalled()
     expect(credentialStore.values.size).toBe(0)
     const upsert = commands.find((entry) => entry.method === 'channels.feishu.account.upsert')
@@ -669,6 +672,60 @@ describe('channel settings service', () => {
       stage: 'failed',
       detail: '无法访问系统安全存储。macOS 上请在钥匙串提示中选择“允许”，然后重试。'
     })
+  })
+
+  it('keeps the connected account active when an account switch is cancelled', async () => {
+    const account = connectedAccount()
+    const commands: string[] = []
+    const service = new ChannelSettingsService({
+      credentialStore: memoryCredentialStore(),
+      developerSession: {
+        async beginLogin() { throw new Error('feishu_login_cancelled') },
+        async inspect() { return identity() },
+        async requireExpectedIdentity() { return identity() },
+        async disconnect() {}
+      },
+      core: channelCore((method) => {
+        commands.push(method)
+        if (method === 'channels.feishu.snapshot') return coreSnapshot({ account })
+        return { status: 'applied' }
+      })
+    })
+
+    await expect(service.connect()).rejects.toThrow('feishu_login_cancelled')
+
+    expect(commands).not.toContain('channels.feishu.account.expire')
+    expect((await service.get()).channels[0].connection.status).toBe('connected')
+  })
+
+  it('rolls the staged developer session back when the Core account switch cannot commit', async () => {
+    const account = connectedAccount()
+    const confirmLogin = vi.fn(async () => undefined)
+    const rollbackLogin = vi.fn(async () => identity())
+    const commands: string[] = []
+    const service = new ChannelSettingsService({
+      credentialStore: memoryCredentialStore(),
+      developerSession: {
+        async beginLogin() { return identity({ userId: 'replacement-owner' }) },
+        confirmLogin,
+        rollbackLogin,
+        async inspect() { return identity() },
+        async requireExpectedIdentity() { return identity() },
+        async disconnect() {}
+      },
+      core: channelCore((method) => {
+        commands.push(method)
+        if (method === 'channels.feishu.snapshot') return coreSnapshot({ account })
+        if (method === 'channels.feishu.account.upsert') throw new Error('core_switch_failed')
+        return { status: 'applied' }
+      })
+    })
+
+    await expect(service.connect()).rejects.toThrow('core_switch_failed')
+
+    expect(rollbackLogin).toHaveBeenCalledTimes(1)
+    expect(confirmLogin).not.toHaveBeenCalled()
+    expect(commands).not.toContain('channels.feishu.account.expire')
   })
 
   it('fails before provisioning when the developer session has expired', async () => {

@@ -128,9 +128,13 @@ checking_secure_storage -> preparing -> awaiting_scan -> scan_confirmed
 ```
 
 二维码 attempt 的 purpose 是 `account_login`，只登录开放平台并保存 Developer Session，不创建 App、Secret 或
-WebSocket。只有最新 exact `attemptId` 可以更新 UI；取消/切换会 abort 旧窗口并废弃迟到回调。新 identity upsert
-在同一 Core 事务把此前 connected account 变为 disconnected。显式 disconnect 只删除 Developer Session 并断开
-当前 account；已有 Bot credential、映射和 WebSocket 不删除、不迁移、不停用。
+WebSocket。只有最新 exact `attemptId` 可以更新 UI；取消/切换会 abort 旧窗口并废弃迟到回调。已连接状态下的账号切换
+必须在新的非持久 Electron Session 中打开二维码，旧 Session 与加密 Cookie store 在新身份完整读取并安全保存前保持
+不变。新 Cookie jar 安全写入后先成为可回滚 staged replacement；只有新 identity upsert 在 Core 成功，才确认替换并
+清理旧内存 Session。取消、超时、页面失败、安全存储失败或 Core upsert 失败都会丢弃/回滚 staged replacement，当前
+账号继续 connected；成功的 Core 事务把此前 connected account 变为 disconnected。显式
+disconnect 才直接删除当前 Developer Session 并断开 current account；已有 Bot credential、映射和 WebSocket 不删除、
+不迁移、不停用。
 开放平台已经到达但连续 20 秒仍不能产生完整必需身份时，attempt 必须以
 `feishu_developer_identity_incomplete` 失败；轮询不得重入，也不能一直保留在 identity inspection。
 

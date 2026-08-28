@@ -29,7 +29,8 @@ Dialog、状态点和间距复用现有组件语法。
 
 未连接时主动作是“登录开放平台”；已连接时为“切换账号”，并提供次级“断开”。连接行只展示真实 `userName`、
 `tenantName`、可选 email 与 Feishu/Lark brand，不显示 controller App 或“飞书主人/飞书企业”占位值。说明必须明确：
-连接只决定以后发布的目标，切换不会迁移或停用已发布 Bot。
+连接只决定以后发布的目标，切换不会迁移或停用已发布 Bot。点击“切换账号”后，当前账号在新二维码成功完成前继续
+有效；取消或失败关闭 Dialog 后仍显示原账号，不得降级为“登录已过期”。只有切换成功才展示新账号。
 
 账号二维码使用 modal Dialog，标题“登录飞书开放平台”，并明确“本次不会创建应用、读取 App Secret 或发布 Bot”。
 它展示 preparing、awaiting scan、scan confirmed、identity inspection、过期/错误和取消；关闭必须取消 exact attempt，

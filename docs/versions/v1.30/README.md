@@ -50,7 +50,8 @@ last_updated: 2026-08-28
   120 秒 bounded convergence，配置有变化才发布下一 patch。Manifest 不再自证运行时 readiness；最终分别核验在线
   Bot/Scope/Event/Callback/version；`card.action.trigger` 和 callback mode 4 是必需发布条件。之后保存 credential、Core
   upsert 与建立 WebSocket。旧 registration/确认/poll 实现及其 typed API/IPC/Renderer 入口已删除。Session Cookie 与独立 App credential
-  分开加密，账号切换/断开不迁移、关闭或删除已发布 Bot，单连接故障隔离，重启恢复 published Bot 与 publication
+  分开加密；账号切换使用临时隔离 Session，成功前保留当前登录态，取消或失败不让当前账号失效。切换/断开不迁移、
+  关闭或删除已发布 Bot，单连接故障隔离，重启恢复 published Bot 与 publication
   intent；release 错误后继续以 version detail 收敛。每名队员的首个 App ID 由 Core 状态机永久冻结；只有无可信 App
   ID 的 create outcome unknown 锁住重建，冻结后的 Event/Scope/Version/credential/连接失败均可恢复同一 App。完成、历史 disabled 恢复、凭据
   丢失和历史 unknown recovery 都只核对并恢复同一 App，不存在换绑或第二次创建；初始版本头像错误时在同一 App 发布幂等
