@@ -385,6 +385,10 @@ describe('channel settings service', () => {
   })
 
   it('uses only the developer session for publishing', async () => {
+    const diagnosticLines: string[] = []
+    const info = vi.spyOn(console, 'info').mockImplementation((line) => {
+      diagnosticLines.push(String(line))
+    })
     const owner = identity()
     const credentialStore = memoryCredentialStore()
     const memberBotUpserts: Record<string, unknown>[] = []
@@ -457,6 +461,17 @@ describe('channel settings service', () => {
     ])
 
     expect(provision).toHaveBeenCalledTimes(1)
+    const timingLines = diagnosticLines.filter((line) => (
+      line.startsWith('[feishu.provision.timing] ')
+    ))
+    expect(timingLines.map((line) => JSON.parse(
+      line.slice('[feishu.provision.timing] '.length)
+    )).map((sample: { phase: string }) => sample.phase)).toEqual([
+      'websocket_handshake_ms',
+      'total_ms'
+    ])
+    expect(timingLines.join('\n')).not.toMatch(/cli-normal|normal-secret|ou_owner_normal/)
+    info.mockRestore()
   })
 
   it('keeps fresh activation copy distinct after the new App ID is frozen', async () => {

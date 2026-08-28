@@ -53,9 +53,10 @@ last_updated: 2026-08-28
 - Feishu Host 用独立 Web Session 登录并展示真实 user/tenant；普通队员发布从同一 Electron Session 取得 console
   bootstrap，经 `OpenPlatformApiClient` 优先从固定模板创建应用，只有明确 non-creation rejection 才 fallback 一次
   self-build；App ID 在读取 Secret 或任何后续 mutation 前持久冻结。随后读取 Secret、启用 Bot 并先发布 `1.0.0`
-  activation；Scope 名称经在线 catalog 映射为 App identity ID，Event/Callback 通过独立在线 API 切换长连接并共享
-  120 秒 bounded convergence，配置有变化才发布下一 patch。Manifest 不再自证运行时 readiness；最终分别核验在线
-  Bot/Scope/Event/Callback/version；`card.action.trigger` 和 callback mode 4 是必需发布条件。之后保存 credential、Core
+  activation；Scope/Event/Callback/Manifest 初始状态并行读取，所需 mutation 按确定顺序一次提交，Manifest 最多读写一次；
+  三类在线状态在一个 120 秒 deadline 中逐轮并行回读，配置有变化才发布下一 patch。Manifest 不再自证运行时 readiness；
+  同次 final verify 复用 convergence evidence，并继续在线核验 Bot/version/头像，恢复时无可信 state 则完整回读。
+  `card.action.trigger` 和 callback mode 4 是必需发布条件。之后保存 credential、Core
   upsert 与建立 WebSocket。旧 registration/确认/poll 实现及其 typed API/IPC/Renderer 入口已删除。Session Cookie 与独立 App credential
   分开加密；账号切换使用临时隔离 Session，成功前保留当前登录态，取消或失败不让当前账号失效。切换/断开不迁移、
   关闭或删除已发布 Bot，单连接故障隔离，重启恢复 published Bot 与 publication
@@ -80,7 +81,8 @@ last_updated: 2026-08-28
   后召回。实际作者 Bot 把正式 CampMessage 作为新的无标题 Markdown 永久发送，Managed Attachment v2 图片/文件按正文后
   ordinal 原生投递且各自重试；attention、lease、终态和重启恢复保持 durable。飞书失败不回滚已提交 CampMessage；
 - Main 记录脱敏的 Bot 长连接、SDK policy、message normalized 与 handler accepted/rejected 分层诊断；不记录消息正文、
-  Secret、Cookie 或完整外部 identity，当前 SDK 无 raw hook 时不虚构 raw-event 层；
+  Secret、Cookie 或完整外部 identity，当前 SDK 无 raw hook 时不虚构 raw-event 层；发布链路另记录成功/失败阶段与总耗时，
+  App 只用 digest，Secret/Cookie/CSRF/Owner OpenID 不进入 timing；
 - 设置页按 Rovai 现有 Porcelain/Steel 视觉只保留连接、队员 Bot、账号二维码、绑定诊断和错误状态；Owner identity
   只作为入站内部安全边界，首条可靠消息自动建立 App-scoped 映射，不展示需要 Owner 处理的核验状态；
   删除项目目录与会话绑定操作。已发布 Bot 只提供按绑定 brand 生成的官方应用详情链接，不再提供 Rovai 管理/停用入口；

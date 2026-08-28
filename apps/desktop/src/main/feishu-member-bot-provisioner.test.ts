@@ -98,9 +98,7 @@ describe('Feishu Web Session member Bot provisioner', () => {
       'request_event',
       'create_version',
       'publish_version',
-      'configure_scopes',
-      'configure_events',
-      'configure_callbacks',
+      'configure_member_bot',
       'create_version',
       'publish_version',
       'verify',
@@ -135,19 +133,24 @@ describe('Feishu Web Session member Bot provisioner', () => {
       changeLog: '启用 Bot 并请求长连接事件模式。',
       reuseExisting: true
     }))
-    expect(client.configureScopes).toHaveBeenCalledWith(
+    expect(client.configureMemberBot).toHaveBeenCalledWith(
       'cli_dingding',
       expect.objectContaining({
         tenantScopes: expect.arrayContaining(['application:application:self_manage'])
       }),
-      undefined
+      undefined,
+      expect.any(Function)
     )
-    expect(client.configureScopes).toHaveBeenCalledWith(
+    expect(client.verifyMemberBot).toHaveBeenCalledWith(expect.objectContaining({
+      verifiedConfiguration: expect.objectContaining({ appId: 'cli_dingding' })
+    }))
+    expect(client.configureMemberBot).toHaveBeenCalledWith(
       'cli_dingding',
       expect.objectContaining({
         tenantScopes: expect.not.arrayContaining(['contact:contact.base:readonly'])
       }),
-      undefined
+      undefined,
+      expect.any(Function)
     )
     expect(createOwnerIdentityClient).toHaveBeenCalledWith({
       brand: 'feishu',
@@ -216,7 +219,7 @@ describe('Feishu Web Session member Bot provisioner', () => {
 
     expect(client.readAppSecret).not.toHaveBeenCalled()
     expect(client.enableBot).not.toHaveBeenCalled()
-    expect(client.configureScopes).not.toHaveBeenCalled()
+    expect(client.configureMemberBot).not.toHaveBeenCalled()
     expect(client.createVersion).not.toHaveBeenCalled()
   })
 
@@ -224,17 +227,10 @@ describe('Feishu Web Session member Bot provisioner', () => {
     const progress: string[] = []
     const operations: string[] = []
     const client = fakeOpenPlatformClient(operations)
-    client.configureScopes.mockImplementation(async () => {
-      operations.push('configure_scopes')
-      return { changed: false }
-    })
-    client.configureEvents.mockImplementation(async () => {
-      operations.push('configure_events')
-      return { changed: false }
-    })
-    client.configureCallbacksAndWebSocket.mockImplementation(async () => {
-      operations.push('configure_callbacks')
-      return { changed: false }
+    client.configureMemberBot.mockImplementation(async (_appId, _configuration, _signal, onSubmitted) => {
+      operations.push('configure_member_bot')
+      onSubmitted?.()
+      return fakeConfigurationResult(false)
     })
 
     const result = await provisioner(fakePortal(), {
@@ -272,7 +268,7 @@ describe('Feishu Web Session member Bot provisioner', () => {
 
   it('keeps an Event convergence failure recoverable after durable freeze', async () => {
     const client = fakeOpenPlatformClient([])
-    client.configureEvents.mockRejectedValue(new FeishuOpenPlatformApiError(
+    client.configureMemberBot.mockRejectedValue(new FeishuOpenPlatformApiError(
       'feishu_console_event_verification_failed',
       true
     ))
@@ -368,9 +364,7 @@ describe('Feishu Web Session member Bot provisioner', () => {
       'find_published_version',
       'upload_avatar',
       'enable_bot',
-      'configure_scopes',
-      'configure_events',
-      'configure_callbacks',
+      'configure_member_bot',
       'create_version',
       'publish_version',
       'verify'
@@ -424,8 +418,7 @@ describe('Feishu Web Session member Bot provisioner', () => {
       'read_secret',
       'find_published_version',
       'verify',
-      'find_version',
-      'verify'
+      'find_version'
     ])
     expect(client.uploadAppIcon).not.toHaveBeenCalled()
     expect(client.createVersion).not.toHaveBeenCalled()
@@ -513,9 +506,7 @@ describe('Feishu Web Session member Bot provisioner', () => {
       'verify',
       'upload_avatar',
       'enable_bot',
-      'configure_scopes',
-      'configure_events',
-      'configure_callbacks',
+      'configure_member_bot',
       'create_version',
       'publish_version',
       'verify'
@@ -660,17 +651,15 @@ function fakeOpenPlatformClient(operations: string[]) {
       operations.push('request_event')
       return { changed: true }
     }),
-    configureScopes: vi.fn(async () => {
-      operations.push('configure_scopes')
-      return { changed: true }
-    }),
-    configureEvents: vi.fn(async () => {
-      operations.push('configure_events')
-      return { changed: true }
-    }),
-    configureCallbacksAndWebSocket: vi.fn(async () => {
-      operations.push('configure_callbacks')
-      return { changed: true }
+    configureMemberBot: vi.fn(async (
+      _appId: string,
+      _configuration: unknown,
+      _signal?: AbortSignal,
+      onMutationsSubmitted?: () => void
+    ) => {
+      operations.push('configure_member_bot')
+      onMutationsSubmitted?.()
+      return fakeConfigurationResult(true)
     }),
     createVersion: vi.fn(async (input: { appVersion?: string }) => {
       operations.push('create_version')
@@ -690,6 +679,29 @@ function fakeOpenPlatformClient(operations: string[]) {
       return null
     }),
     verifyMemberBot: vi.fn(async () => { operations.push('verify') })
+  }
+}
+
+function fakeConfigurationResult(changed: boolean) {
+  return {
+    changed,
+    mutations: {
+      scopesChanged: changed,
+      eventModeChanged: changed,
+      eventsChanged: changed,
+      callbackModeChanged: changed,
+      manifestChanged: changed
+    },
+    verified: {
+      appId: 'cli_dingding',
+      requirementsDigest: 'sha256:test' as const,
+      observedAtMonotonicMs: 1,
+      enabledTenantScopes: [],
+      eventMode: 4,
+      appEvents: [],
+      callbackMode: 4,
+      callbacks: ['card.action.trigger']
+    }
   }
 }
 

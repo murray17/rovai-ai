@@ -181,7 +181,9 @@ requireExpectedIdentity
   -> await Core durable App-ID freeze
   -> read secret -> enable Bot -> request eventMode=4
   -> create/reuse and publish activation version 1.0.0
-  -> configure scopes -> configure events -> configure callbacks/WebSocket
+  -> parallel read Scope + Event + Callback + Manifest
+  -> submit ordered Scope/Event/Manifest/Callback mutations without intermediate polling
+  -> parallel readback under one shared configuration deadline
   -> if configuration mutated, create/reuse and publish next patch version
   -> verify online configuration -> return credential
   -> persist credential -> upsert frozen Bot -> establish WebSocket
@@ -207,7 +209,7 @@ ID 才是可信恢复身份。
 durable freeze 后，Provisioner 读取 Secret、启用 Bot、请求 `eventMode=4`，创建或复用 `1.0.0` activation version 并
 确认 published。activation 只证明应用已经启用和首次发布，不声称业务权限、事件或 callback 已经收敛。随后才通过
 开放平台在线 Scope、Event
-和 Callback API 配置运行时能力。Manifest 只可保存名称、头像和兼容元数据，不能作为 scopes、事件订阅或长连接模式
+和 Callback API 配置运行时能力。Manifest 可保存名称、头像与 Scope/Event/Callback 兼容投影，但不能作为 scopes、事件订阅或长连接模式
 已经生效的 authority。普通模式的 `publishedVersionId` 不得为空。普通流程不得调用 `/oauth/v1/app/registration`、不得调用
 `showRegistrationConfirmation`，也不得打开飞书“创建飞书智能体应用 / 立即创建”页面。
 
@@ -224,11 +226,26 @@ Event 必须通过 `/developers/v1/event/:appId` 回读，以 `/developers/v1/ev
 再由 `/developers/v1/event/update/:appId` 写入 App events。最终在线状态必须包含
 `im.message.receive_v1`、`im.chat.member.bot.added_v1`、`im.chat.member.bot.deleted_v1` 且 `eventMode=4`。
 项目选择依赖 interactive card，所有队员 Bot 必须在线订阅 `card.action.trigger`，并经 callback switch 与回读证明
-`callbackMode=4`。返回前还必须回读在线 Bot enable、上述 scopes/events、该 callback、双 mode 4 和 published version
-status。任一 mutation 的 HTTP/envelope 成功都不能替代最终回读。
+`callbackMode=4`。配置入口先并行读取 Scope、Event、Callback 与 Manifest，一次计算全部差异，再按
+`scope/update -> event/switch -> event/update -> manifest/upsert -> callback/switch` 的稳定顺序提交所需 mutation；
+mutation 之间不得等待控制面传播。每次配置最多一次 `manifest/get` 和一次 `manifest/upsert`，且不得覆盖无关 Manifest 字段。
 
-Scope、Event 与 Callback 配置分别返回是否发生远端或 Manifest mutation。Event mode 和 App events 共享一份
-120 秒收敛预算，默认每秒回读一次；该预算是平台最终一致性的安全网，不得缩短成 10 秒，也不得用重复创建替代等待。
+全部 mutation 提交后，Scope、Event 与 Callback 共享一份 120 秒 deadline，默认每秒在同一轮并行回读三类在线状态。
+单项只读瞬态失败只丢弃该轮该项结果；其他成功状态保留，下一轮继续并行读取，绝不重放 mutation。三个维度同时 ready
+后才生成仅在本次 Provisioner 操作内有效的 `VerifiedConfigurationState`；它冻结 exact App ID、规范化 requirements digest
+及最后一次在线状态。App、requirements 或后续配置 mutation 任一变化都会使它失效。该预算是平台最终一致性的安全网，
+不得拆成多个串行 120 秒窗口、缩短成 10 秒或用重复创建替代等待。
+
+同次 convergence 后的 final verify 可以复用 exact `VerifiedConfigurationState`，不立即重复读取 Scope、Event 与 Callback；
+仍必须在线回读 Bot enable、published version 和需要核验的头像/Manifest。进程重启、恢复路径没有可信 state，或 App/
+requirements 不匹配时，final verify 必须重新完整读取三类在线配置。任一 mutation 的 HTTP/envelope 成功都不能替代这些
+在线证据。
+
+Main 必须用单调时钟为 Session 打开、头像上传、模板创建、activation、Scope 提交、Event/Callback/整体 convergence、
+Manifest reconcile、final publish/verify、Owner identity、WebSocket handshake 和 total 记录结构化耗时；成功与失败样本
+都要保留。日志只允许 publication intent、Agent、creation/recovery/mutation 分类和 App ID digest，不得记录 App Secret、
+Developer Cookie、CSRF、Owner OpenID 或完整 App ID。
+
 任一配置发生变化时，从当前 published semantic version 递增 patch，创建或复用 exact 下一版本并发布；全部无变化时
 复用当前 published version。crash 后发现同一 patch 已存在时继续读取或发布它，不创建重复版本。
 

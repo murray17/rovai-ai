@@ -31,6 +31,7 @@ import {
   type MemberBotProvisioningStep
 } from './feishu-member-bot-provisioner'
 import type { MemberBotAvatarSourceResolver } from './member-bot-avatar-source'
+import { ProvisioningTimingRecorder } from './feishu-provisioning-timing'
 import {
   executionConsoleCard,
   type ExecutionConsoleSnapshot
@@ -580,6 +581,11 @@ export class ChannelSettingsService {
     }
 
     const publicationIntentId = `rvfpi_${randomUUID().replaceAll('-', '')}`
+    const timing = new ProvisioningTimingRecorder({
+      publicationIntentId,
+      agentId,
+      recovering: false
+    })
     await this.#command('channels.feishu.publicationIntent.create', {
       publicationIntentId,
       accountId: account.accountId,
@@ -636,6 +642,7 @@ export class ChannelSettingsService {
           userId: identity.userId,
           tenantId: identity.tenantId
         },
+        timing,
         signal: abort.signal,
         onRemoteAppCreated: async ({ appId }) => {
           remoteAppId = appId
@@ -691,7 +698,8 @@ export class ChannelSettingsService {
         { ...agent, displayName: botDisplayName },
         credentialRef,
         credential,
-        provisioned.ownerOpenId
+        provisioned.ownerOpenId,
+        timing
       )
       await advanceIntent({
         state: 'connection_verified',
@@ -716,9 +724,11 @@ export class ChannelSettingsService {
         remoteAppId,
         failureCode: null
       }
+      timing.recordTotal('ok')
       this.#finishQr()
       return this.#emit()
     } catch (error) {
+      timing.recordTotal('failed', error)
       const failureCode = channelFailureCode(error)
       const unknownRemoteState = isUnknownRemoteProvisioningError(error)
       let failureStatePersisted = false
@@ -766,6 +776,12 @@ export class ChannelSettingsService {
       throw new Error('当前版本无法核对已创建的飞书应用；为避免重复创建应用，不会自动重试。')
     }
     const credentialRef = intent.credentialRef ?? memberCredentialRef(agent.agentId)
+    const timing = new ProvisioningTimingRecorder({
+      publicationIntentId: intent.publicationIntentId,
+      agentId: agent.agentId,
+      appId: remoteAppId,
+      recovering: true
+    })
     const abort = new AbortController()
     this.#activeProvisioningAbort = abort
     this.#activeProvisioning = {
@@ -817,6 +833,7 @@ export class ChannelSettingsService {
           userId: identity.userId,
           tenantId: identity.tenantId
         },
+        timing,
         signal: abort.signal,
         onProgress: (step, appId) => this.#handleProvisioningProgress(step, appId, true)
       })
@@ -869,7 +886,8 @@ export class ChannelSettingsService {
         { ...agent, displayName: provisioned.botDisplayName },
         credentialRef,
         credential,
-        provisioned.ownerOpenId
+        provisioned.ownerOpenId,
+        timing
       )
       await advanceIntent({
         state: 'connection_verified',
@@ -894,8 +912,10 @@ export class ChannelSettingsService {
         remoteAppId,
         failureCode: null
       }
+      timing.recordTotal('ok')
       return this.#emit()
     } catch (error) {
+      timing.recordTotal('failed', error)
       const failureCode = channelFailureCode(error)
       await this.#advancePublicationIntent(intent.publicationIntentId, intentVersion, {
         state: 'failed_recoverable',
@@ -1002,11 +1022,11 @@ export class ChannelSettingsService {
       },
       activation_published: {
         stage: 'configuring_permissions',
-        detail: '正在补齐消息权限、事件订阅和长连接配置。'
+        detail: '正在读取当前配置并提交所需权限、事件与回调变更。'
       },
       configuration_started: {
         stage: 'configuring_permissions',
-        detail: '正在补齐消息权限、事件订阅和长连接配置。'
+        detail: '正在读取当前配置并提交所需权限、事件与回调变更。'
       },
       configuration_waiting: {
         stage: 'waiting_configuration',
@@ -1018,7 +1038,7 @@ export class ChannelSettingsService {
       },
       version_published: {
         stage: 'verifying_configuration',
-        detail: '正在确认 Bot、权限、消息事件、长连接模式和发布版本均已生效。'
+        detail: '正在确认 Bot、发布版本及应用资料均已生效。'
       },
       online_verified: {
         stage: 'connecting_bot',
@@ -1080,7 +1100,8 @@ export class ChannelSettingsService {
     agent: AgentProfile,
     credentialRef: string,
     credential: FeishuAppCredential,
-    ownerOpenId: string
+    ownerOpenId: string,
+    timing?: ProvisioningTimingRecorder
   ): Promise<void> {
     await this.#command('channels.feishu.memberBot.upsert', {
       accountId,
@@ -1091,7 +1112,7 @@ export class ChannelSettingsService {
       botDisplayName: agent.displayName,
       credentialRef
     })
-    const managed = await this.#connectBot(agent.agentId, credentialRef, credential)
+    const managed = await this.#connectBot(agent.agentId, credentialRef, credential, timing)
     try {
       await this.#command('channels.feishu.memberBot.upsert', {
         accountId,
@@ -1134,7 +1155,8 @@ export class ChannelSettingsService {
   async #connectBot(
     agentId: string,
     credentialRef: string,
-    credential: FeishuAppCredential
+    credential: FeishuAppCredential,
+    timing?: ProvisioningTimingRecorder
   ): Promise<ManagedChannel> {
     const channel = this.#createChannel({
       appId: credential.appId,
@@ -1204,7 +1226,12 @@ export class ChannelSettingsService {
         appIdDigest: digest(managed.appId),
         agentId: managed.agentId
       })
-      await channel.connect()
+      const connectionTiming = timing ?? new ProvisioningTimingRecorder({
+        agentId,
+        appId: credential.appId,
+        recovering: true
+      })
+      await connectionTiming.measure('websocket_handshake_ms', () => channel.connect())
       logFeishuBotDiagnostic('ws.connected', {
         appIdDigest: digest(managed.appId),
         agentId: managed.agentId

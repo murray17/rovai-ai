@@ -77,14 +77,18 @@ timeout、408/409/429/5xx、缺少 ClientID、Session 失效或任何 commit 结
 barrier 完成前不能读取 Secret、启用 Bot、配置能力或创建版本。
 
 App ID 冻结后，client 读取 App Secret、启用 Bot、请求 event WebSocket mode，并创建或复用 `1.0.0` activation
-version，先确认它 published。之后才配置 tenant scopes、receive/roster events 与 `card.action.trigger` callback。Event mode 与事件条目共享
-120 秒、每秒一次的 bounded convergence budget；Scope/Event/Callback 各自报告是否发生远端或 Manifest mutation。
+version，先确认它 published。之后统一配置 tenant scopes、receive/roster events 与 `card.action.trigger` callback：先并行
+读取 Scope/Event/Callback/Manifest，一次计算差异，按确定顺序提交所有必要 mutation，Manifest 最多读写一次；mutation
+之间不做传播等待。全部写入完成后，三类在线状态共享一个 120 秒 deadline，每轮并行回读，单项瞬态读取失败不会重放写入。
 任一配置发生变化时，从当前 published version 递增 patch，创建或复用 exact 下一版本并发布；全部无变化时复用现有
 版本。头像与兼容元数据可以继续写 manifest；Scope 使用在线 catalog 把名称映射为 App identity ID，再经 scope update
-写入；在线 `callbackMode=4` 与 `card.action.trigger` 都是必需条件。最终回读以 robot、scope、event、callback 和 version
-detail API 为运行时 authority，manifest 中的 scope/event/WebSocket 字段不能自证配置完成。在线配置验证通过后，
+写入；在线 `callbackMode=4` 与 `card.action.trigger` 都是必需条件。最后一次共享 convergence 生成仅限同一 Provisioner
+操作使用的可信配置状态；没有后续配置 mutation 时，final verify 复用它并只回读 robot、version 和需要核验的头像/
+Manifest。重启恢复或 App/requirements 不匹配时仍完整回读 scope/event/callback。Manifest 字段不能自证配置完成。在线配置验证通过后，
 Main 依次把独立 credential 写入 safeStorage、Core upsert exact frozen Bot、建立并回读 Bot WebSocket identity，最后
 完成 intent。普通流程始终保持隐藏窗口，不打开飞书“创建飞书智能体应用 / 立即创建”确认页，也不向 Renderer 产生二维码。
+Provisioner 与 Channel Host 共用单调时钟计时上下文，记录从 Session、创建、配置、发布、核验、Owner 解析到真实
+WebSocket handshake 的阶段与总耗时；日志只含白名单分类和 App digest，失败也记录，秘密与原始外部身份不进入样本。
 
 队员与飞书 App 的一对一身份不是 Renderer 按钮约定，而是 Core publication 状态机不变量。首次远端创建取得 App ID
 后，intent 永久冻结 `agentId + accountId + remoteAppId`，并在首次写入后冻结 `credentialRef`；新 intent 不能越过已有冻结身份，Bot 写入只能

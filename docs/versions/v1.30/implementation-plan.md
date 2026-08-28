@@ -23,8 +23,9 @@ last_updated: 2026-08-28
   release 错误后的 published read-back、unknown remote 防重复、冻结 App 显式核对接管和多 WebSocket Host/启动恢复；
 - [x] 把首次创建收敛为固定模板优先、仅明确 non-creation rejection 才 self-build fallback；以
   `publicationIntentId` correlation，并在任何后续 mutation 前 await Core App-ID durable barrier；
-- [x] 先启用 Bot 并发布/复用 `1.0.0` activation，再配置 Scope/Event/Callback；保留 Event 120 秒共享收敛预算，按真实
-  mutation 决定是否发布下一 patch，并在 crash/retry 中复用已存在版本；
+- [x] 先启用 Bot 并发布/复用 `1.0.0` activation，再由唯一配置入口并行读取 Scope/Event/Callback/Manifest、按确定顺序
+  提交全部 mutation，并在一个 120 秒 deadline 中逐轮并行回读；Manifest 最多读写一次，同次 final verify 复用可信
+  convergence state，按真实 mutation 决定是否发布下一 patch，并在 crash/retry 中复用已存在版本；
 - [x] 只有无可信 App ID 的 create outcome unknown 进入 `failed_unknown_remote_state`；冻结 App 的 Event/Scope/Version/
   credential/连接失败进入 `failed_recoverable`，在线配置核验与真正 WebSocket connect 分离为八阶段进度；
 - [x] 普通发布解析并上传 exact 队员受控头像；无引用才回退 Rovai icon，冻结 `1.0.0` App 可在显式核对中发布幂等

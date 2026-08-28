@@ -1,4 +1,7 @@
+import { createHash } from 'node:crypto'
+import { performance } from 'node:perf_hooks'
 import type { FeishuOpenPlatformSession } from './feishu-developer-session'
+import type { ProvisioningTimingRecorder } from './feishu-provisioning-timing'
 
 export interface FeishuMemberBotConsoleConfiguration {
   appName: string
@@ -33,6 +36,31 @@ export interface FeishuCreatedMemberBotApp {
 
 export interface FeishuConfigurationMutationResult {
   changed: boolean
+}
+
+export interface FeishuMemberBotConfigurationMutations {
+  scopesChanged: boolean
+  eventModeChanged: boolean
+  eventsChanged: boolean
+  callbackModeChanged: boolean
+  manifestChanged: boolean
+}
+
+export interface FeishuVerifiedConfigurationState {
+  appId: string
+  requirementsDigest: `sha256:${string}`
+  observedAtMonotonicMs: number
+  enabledTenantScopes: string[]
+  eventMode: number
+  appEvents: string[]
+  callbackMode: number
+  callbacks: string[]
+}
+
+export interface FeishuMemberBotConfigurationResult {
+  changed: boolean
+  mutations: FeishuMemberBotConfigurationMutations
+  verified: FeishuVerifiedConfigurationState
 }
 
 export interface FeishuOpenPlatformEventState {
@@ -93,6 +121,8 @@ type ClientOptions = {
   configurationPollIntervalMs?: number
   configurationTimeoutMs?: number
   delay?: (milliseconds: number, signal?: AbortSignal) => Promise<void>
+  now?: () => number
+  timing?: ProvisioningTimingRecorder
 }
 
 const MANIFEST_SCHEMA_VERSION = '0.0.1'
@@ -115,8 +145,11 @@ export class OpenPlatformApiClient {
   readonly #publishPollIntervalMs: number
   readonly #publishTimeoutMs: number
   readonly #configurationPollIntervalMs: number
+  readonly #configurationTimeoutMs: number
   readonly #configurationPollAttempts: number
   readonly #delay: (milliseconds: number, signal?: AbortSignal) => Promise<void>
+  readonly #now: () => number
+  readonly #timing?: ProvisioningTimingRecorder
 
   constructor(session: FeishuOpenPlatformSession, options: ClientOptions = {}) {
     this.#session = session
@@ -127,14 +160,17 @@ export class OpenPlatformApiClient {
       1,
       options.configurationPollIntervalMs ?? DEFAULT_CONFIGURATION_POLL_INTERVAL_MS
     )
+    this.#configurationTimeoutMs = Math.max(
+      1,
+      options.configurationTimeoutMs ?? DEFAULT_CONFIGURATION_TIMEOUT_MS
+    )
     this.#configurationPollAttempts = Math.max(
       1,
-      Math.ceil(
-        (options.configurationTimeoutMs ?? DEFAULT_CONFIGURATION_TIMEOUT_MS)
-        / this.#configurationPollIntervalMs
-      )
+      Math.ceil(this.#configurationTimeoutMs / this.#configurationPollIntervalMs) + 1
     )
     this.#delay = options.delay ?? abortableDelay
+    this.#now = options.now ?? (() => performance.now())
+    this.#timing = options.timing
   }
 
   async uploadAppIcon(input: {
@@ -244,63 +280,6 @@ export class OpenPlatformApiClient {
     )
   }
 
-  async configureScopes(
-    appId: string,
-    configuration: FeishuMemberBotConsoleConfiguration,
-    signal?: AbortSignal
-  ): Promise<FeishuConfigurationMutationResult> {
-    const id = requireResourceId(appId, 'feishu_console_app_id_invalid')
-    const current = await this.readScopeCatalog(id, signal)
-    const required = resolveRequiredAppScopes(current, configuration.tenantScopes)
-    const disabled = required.filter((scope) => scope.appStatus === FEISHU_SCOPE_STATUS_DISABLED)
-    let changed = false
-    if (disabled.length > 0) {
-      await this.#request(
-        'configure_scopes',
-        `/developers/v1/scope/update/${encodeURIComponent(id)}`,
-        {
-          body: {
-            clientId: id,
-            appScopeIDs: disabled.map((scope) => scope.id),
-            userScopeIDs: [],
-            scopeIds: [],
-            operation: 'add'
-          },
-          mutation: true,
-          signal
-        }
-      )
-      changed = true
-    }
-    const updated = resolveRequiredAppScopes(
-      await this.readScopeCatalog(id, signal),
-      configuration.tenantScopes
-    )
-    if (updated.some((scope) => (
-      scope.appStatus === null || scope.appStatus === FEISHU_SCOPE_STATUS_DISABLED
-    ))) {
-      throw apiError('feishu_console_scope_update_verification_failed', true)
-    }
-    const manifestChanged = await this.#updateManifest(
-      'configure_scope_manifest',
-      id,
-      configuration,
-      (manifest) => {
-        const scopes = recordAt(manifest, 'scopes')
-        return {
-          ...manifest,
-          scopes: {
-            ...scopes,
-            tenant: unionStrings(scopes.tenant, configuration.tenantScopes),
-            user: stringArray(scopes.user)
-          }
-        }
-      },
-      signal
-    )
-    return { changed: changed || manifestChanged }
-  }
-
   async requestEventLongConnection(
     appId: string,
     signal?: AbortSignal
@@ -318,157 +297,439 @@ export class OpenPlatformApiClient {
     return { changed: true }
   }
 
-  async configureEvents(
+  async reconcileMemberBotManifest(
     appId: string,
+    currentManifest: Record<string, unknown>,
     configuration: FeishuMemberBotConsoleConfiguration,
     signal?: AbortSignal
   ): Promise<FeishuConfigurationMutationResult> {
     const id = requireResourceId(appId, 'feishu_console_app_id_invalid')
-    const readbackBudget = { remainingAttempts: this.#configurationPollAttempts }
-    let changed = false
-    let state = await this.readEventState(id, signal)
-    if (state.eventMode !== FEISHU_LONG_CONNECTION_MODE) {
-      await this.#request(
-        'switch_event',
-        `/developers/v1/event/switch/${encodeURIComponent(id)}`,
-        {
-          body: { clientId: id, eventMode: FEISHU_LONG_CONNECTION_MODE },
-          mutation: true,
-          signal
-        }
-      )
-      changed = true
-      const switched = await this.#readEventStateUntil(
-        id,
-        (candidate) => candidate.eventMode === FEISHU_LONG_CONNECTION_MODE,
-        readbackBudget,
+    const desiredManifest = desiredMemberBotManifest(currentManifest, configuration)
+    if (structuredValueEqual(currentManifest, desiredManifest)) return { changed: false }
+    await this.#request(
+      'configure_member_bot_manifest',
+      '/developers/v1/manifest/upsert',
+      {
+        body: {
+          clientID: id,
+          appManifest: JSON.stringify(desiredManifest),
+          HTTPHead: {}
+        },
+        mutation: true,
         signal
-      )
-      if (!switched) {
-        throw apiError('feishu_console_event_verification_failed', true)
       }
-      state = switched
-    }
-    const existing = new Set(state.appEvents)
-    const missing = configuration.tenantEvents.filter((event) => !existing.has(event))
-    if (missing.length > 0) {
-      await this.#request(
-        'configure_events',
-        `/developers/v1/event/update/${encodeURIComponent(id)}`,
-        {
-          body: {
-            clientId: id,
-            operation: 'add',
-            events: [],
-            appEvents: missing,
-            userEvents: [],
-            eventMode: FEISHU_LONG_CONNECTION_MODE
-          },
-          mutation: true,
-          signal
-        }
-      )
-      changed = true
-    }
-    const configured = await this.#readEventStateUntil(
-      id,
-      (candidate) => (
-        candidate.eventMode === FEISHU_LONG_CONNECTION_MODE
-        && includesEvery(candidate.appEvents, configuration.tenantEvents)
-      ),
-      readbackBudget,
-      signal
     )
-    if (!configured) throw apiError('feishu_console_event_verification_failed', true)
-    const manifestChanged = await this.#updateManifest(
-      'configure_event_manifest',
-      id,
-      configuration,
-      (manifest) => {
-        const events = recordAt(manifest, 'events')
-        const items = recordAt(events, 'items')
-        return {
-          ...manifest,
-          events: {
-            ...events,
-            items: {
-              ...items,
-              tenant: unionStrings(items.tenant, configuration.tenantEvents),
-              user: stringArray(items.user)
-            },
-            subscription_type: 'websocket'
-          }
-        }
-      },
-      signal
-    )
-    return { changed: changed || manifestChanged }
+    return { changed: true }
   }
 
-  async configureCallbacksAndWebSocket(
+  async configureMemberBot(
     appId: string,
     configuration: FeishuMemberBotConsoleConfiguration,
-    signal?: AbortSignal
-  ): Promise<FeishuConfigurationMutationResult> {
+    signal?: AbortSignal,
+    onMutationsSubmitted?: () => void
+  ): Promise<FeishuMemberBotConfigurationResult> {
     const id = requireResourceId(appId, 'feishu_console_app_id_invalid')
-    const callbackItemBudget = { remainingAttempts: this.#configurationPollAttempts }
-    const initialState = await this.readCallbackState(id, signal)
-    const manifestChanged = await this.#updateManifest(
-      'configure_callback_manifest',
-      id,
-      configuration,
-      (manifest) => {
-        const callbacks = recordAt(manifest, 'callbacks')
+    const initialStartedAt = this.#now()
+    const observe = async <T>(action: () => Promise<T>): Promise<ObservedRead<T>> => {
+      const startedAt = this.#now()
+      try {
         return {
-          ...manifest,
-          callbacks: {
-            ...callbacks,
-            items: unionStrings(callbacks.items, [FEISHU_PROJECT_SELECTION_CALLBACK]),
-            subscription_type: 'websocket'
-          }
+          status: 'fulfilled',
+          value: await action(),
+          durationMs: this.#now() - startedAt
         }
-      },
-      signal
-    )
-    let state = initialState.callbacks.includes(FEISHU_PROJECT_SELECTION_CALLBACK)
-      ? initialState
-      : await this.#readCallbackStateUntil(
-        id,
-        (candidate) => candidate.callbacks.includes(FEISHU_PROJECT_SELECTION_CALLBACK),
-        callbackItemBudget,
-        signal
-      )
-    if (!state) throw apiError('feishu_console_callback_verification_failed', true)
-
-    let changed = manifestChanged
-    if (state.callbackMode !== FEISHU_LONG_CONNECTION_MODE) {
-      await this.#request(
-        'switch_callback',
-        `/developers/v1/callback/switch/${encodeURIComponent(id)}`,
-        {
-          body: { clientId: id, callbackMode: FEISHU_LONG_CONNECTION_MODE },
-          mutation: true,
-          signal
+      } catch (reason) {
+        return {
+          status: 'rejected',
+          reason,
+          durationMs: this.#now() - startedAt
         }
-      )
-      changed = true
-      const callbackModeBudget = { remainingAttempts: this.#configurationPollAttempts }
-      state = await this.#readCallbackStateUntil(
-        id,
-        (candidate) => (
-          candidate.callbackMode === FEISHU_LONG_CONNECTION_MODE
-          && candidate.callbacks.includes(FEISHU_PROJECT_SELECTION_CALLBACK)
-        ),
-        callbackModeBudget,
-        signal
-      )
+      }
     }
-    if (
-      !state
-      || state.callbackMode !== FEISHU_LONG_CONNECTION_MODE
-      || !state.callbacks.includes(FEISHU_PROJECT_SELECTION_CALLBACK)
-    ) throw apiError('feishu_console_callback_verification_failed', true)
-    return { changed }
+    const [scopeRead, eventRead, callbackRead, manifestRead] = await Promise.all([
+      observe(() => this.readScopeCatalog(id, signal)),
+      observe(() => this.readEventState(id, signal)),
+      observe(() => this.readCallbackState(id, signal)),
+      observe(() => this.readManifest(id, signal))
+    ])
+    const initialFailure = firstRejectedRead([
+      scopeRead,
+      eventRead,
+      callbackRead,
+      manifestRead
+    ])
+    if (initialFailure) {
+      if (scopeRead.status === 'rejected') {
+        this.#timing?.record(
+          'scope_config_ms',
+          scopeRead.durationMs,
+          'failed',
+          { failureCode: failureCode(scopeRead.reason) }
+        )
+      }
+      if (eventRead.status === 'rejected') {
+        this.#timing?.record(
+          'event_convergence_ms',
+          eventRead.durationMs,
+          'failed',
+          { failureCode: failureCode(eventRead.reason) }
+        )
+      }
+      if (callbackRead.status === 'rejected') {
+        this.#timing?.record(
+          'callback_convergence_ms',
+          callbackRead.durationMs,
+          'failed',
+          { failureCode: failureCode(callbackRead.reason) }
+        )
+      }
+      if (manifestRead.status === 'rejected') {
+        this.#timing?.record(
+          'manifest_reconcile_ms',
+          manifestRead.durationMs,
+          'failed',
+          { failureCode: failureCode(manifestRead.reason) }
+        )
+      }
+      this.#timing?.record(
+        'configuration_convergence_ms',
+        this.#now() - initialStartedAt,
+        'failed',
+        { failureCode: failureCode(initialFailure.reason) }
+      )
+      throw initialFailure.reason
+    }
+
+    const initialScopes = fulfilledRead(scopeRead)
+    const initialEvent = fulfilledRead(eventRead)
+    const initialCallback = fulfilledRead(callbackRead)
+    const initialManifest = fulfilledRead(manifestRead)
+    let requiredScopes: FeishuOpenPlatformScope[]
+    try {
+      requiredScopes = resolveRequiredAppScopes(
+        initialScopes,
+        configuration.tenantScopes
+      )
+    } catch (error) {
+      this.#timing?.record(
+        'scope_config_ms',
+        scopeRead.durationMs,
+        'failed',
+        { failureCode: failureCode(error) }
+      )
+      this.#timing?.record(
+        'configuration_convergence_ms',
+        this.#now() - initialStartedAt,
+        'failed',
+        { failureCode: failureCode(error), missingDimensions: ['scope'] }
+      )
+      throw error
+    }
+    const disabledScopes = requiredScopes.filter(
+      (scope) => scope.appStatus === FEISHU_SCOPE_STATUS_DISABLED
+    )
+    const missingEvents = configuration.tenantEvents.filter(
+      (event) => !initialEvent.appEvents.includes(event)
+    )
+    const desiredManifest = desiredMemberBotManifest(initialManifest, configuration)
+    const mutations: FeishuMemberBotConfigurationMutations = {
+      scopesChanged: disabledScopes.length > 0,
+      eventModeChanged: initialEvent.eventMode !== FEISHU_LONG_CONNECTION_MODE,
+      eventsChanged: missingEvents.length > 0,
+      callbackModeChanged: initialCallback.callbackMode !== FEISHU_LONG_CONNECTION_MODE,
+      manifestChanged: !structuredValueEqual(initialManifest, desiredManifest)
+    }
+    const changed = Object.values(mutations).some(Boolean)
+    this.#timing?.setMutations({
+      scopesChanged: mutations.scopesChanged,
+      eventsChanged: mutations.eventModeChanged || mutations.eventsChanged,
+      callbacksChanged: mutations.callbackModeChanged || (
+        mutations.manifestChanged
+        && !initialCallback.callbacks.includes(FEISHU_PROJECT_SELECTION_CALLBACK)
+      ),
+      manifestChanged: mutations.manifestChanged
+    })
+
+    let scopeTimingRecorded = false
+    let manifestTimingRecorded = false
+    let eventTimingRecorded = false
+    let callbackTimingRecorded = false
+    let configurationTimingRecorded = false
+    let eventConvergenceStartedAt = initialStartedAt
+    let callbackConvergenceStartedAt = initialStartedAt
+    try {
+      let scopeMutationDurationMs = 0
+      if (mutations.scopesChanged) {
+        const startedAt = this.#now()
+        try {
+          await this.#request(
+            'configure_scopes',
+            `/developers/v1/scope/update/${encodeURIComponent(id)}`,
+            {
+              body: {
+                clientId: id,
+                appScopeIDs: disabledScopes.map((scope) => scope.id),
+                userScopeIDs: [],
+                scopeIds: [],
+                operation: 'add'
+              },
+              mutation: true,
+              signal
+            }
+          )
+        } catch (error) {
+          this.#timing?.record(
+            'scope_config_ms',
+            scopeRead.durationMs + this.#now() - startedAt,
+            'failed',
+            { failureCode: failureCode(error) }
+          )
+          scopeTimingRecorded = true
+          throw error
+        }
+        scopeMutationDurationMs = this.#now() - startedAt
+      }
+      this.#timing?.record(
+        'scope_config_ms',
+        scopeRead.durationMs + scopeMutationDurationMs,
+        'ok'
+      )
+      scopeTimingRecorded = true
+
+      if (mutations.eventModeChanged) {
+        await this.#request(
+          'switch_event',
+          `/developers/v1/event/switch/${encodeURIComponent(id)}`,
+          {
+            body: { clientId: id, eventMode: FEISHU_LONG_CONNECTION_MODE },
+            mutation: true,
+            signal
+          }
+        )
+      }
+      if (mutations.eventsChanged) {
+        await this.#request(
+          'configure_events',
+          `/developers/v1/event/update/${encodeURIComponent(id)}`,
+          {
+            body: {
+              clientId: id,
+              operation: 'add',
+              events: [],
+              appEvents: missingEvents,
+              userEvents: [],
+              eventMode: FEISHU_LONG_CONNECTION_MODE
+            },
+            mutation: true,
+            signal
+          }
+        )
+      }
+      eventConvergenceStartedAt = this.#now()
+
+      let manifestMutationDurationMs = 0
+      if (mutations.manifestChanged) {
+        const startedAt = this.#now()
+        try {
+          await this.reconcileMemberBotManifest(
+            id,
+            initialManifest,
+            configuration,
+            signal
+          )
+        } catch (error) {
+          this.#timing?.record(
+            'manifest_reconcile_ms',
+            manifestRead.durationMs + this.#now() - startedAt,
+            'failed',
+            { failureCode: failureCode(error) }
+          )
+          manifestTimingRecorded = true
+          throw error
+        }
+        manifestMutationDurationMs = this.#now() - startedAt
+      }
+      this.#timing?.record(
+        'manifest_reconcile_ms',
+        manifestRead.durationMs + manifestMutationDurationMs,
+        'ok'
+      )
+      manifestTimingRecorded = true
+
+      if (mutations.callbackModeChanged) {
+        await this.#request(
+          'switch_callback',
+          `/developers/v1/callback/switch/${encodeURIComponent(id)}`,
+          {
+            body: { clientId: id, callbackMode: FEISHU_LONG_CONNECTION_MODE },
+            mutation: true,
+            signal
+          }
+        )
+      }
+      callbackConvergenceStartedAt = this.#now()
+      const configurationConvergenceStartedAt = this.#now()
+      onMutationsSubmitted?.()
+
+      let latestScopes: FeishuOpenPlatformScope[] | null = changed ? null : initialScopes
+      let latestEvent: FeishuOpenPlatformEventState | null = changed ? null : initialEvent
+      let latestCallback: FeishuOpenPlatformCallbackState | null = changed
+        ? null
+        : initialCallback
+      let scopeReady = latestScopes ? scopesReady(latestScopes, configuration) : false
+      let eventReady = latestEvent ? eventStateReady(latestEvent, configuration) : false
+      let callbackReady = latestCallback ? callbackStateReady(latestCallback) : false
+
+      if (!changed) {
+        if (eventReady) {
+          this.#timing?.record('event_convergence_ms', eventRead.durationMs, 'ok')
+          eventTimingRecorded = true
+        }
+        if (callbackReady) {
+          this.#timing?.record('callback_convergence_ms', callbackRead.durationMs, 'ok')
+          callbackTimingRecorded = true
+        }
+      }
+
+      const deadline = configurationConvergenceStartedAt + this.#configurationTimeoutMs
+      let attempts = 0
+      while (!(scopeReady && eventReady && callbackReady)) {
+        if (signal?.aborted) throw apiError('feishu_provisioning_cancelled', false)
+        if (attempts >= this.#configurationPollAttempts || this.#now() > deadline) break
+        attempts += 1
+        const [scopeResult, eventResult, callbackResult] = await Promise.allSettled([
+          this.readScopeCatalog(id, signal),
+          this.readEventState(id, signal),
+          this.readCallbackState(id, signal)
+        ])
+        if (scopeResult.status === 'fulfilled') latestScopes = scopeResult.value
+        if (eventResult.status === 'fulfilled') latestEvent = eventResult.value
+        if (callbackResult.status === 'fulfilled') latestCallback = callbackResult.value
+        scopeReady = latestScopes ? scopesReady(latestScopes, configuration) : false
+        eventReady = latestEvent ? eventStateReady(latestEvent, configuration) : false
+        callbackReady = latestCallback ? callbackStateReady(latestCallback) : false
+        const observedAt = this.#now()
+        if (eventReady && !eventTimingRecorded) {
+          this.#timing?.record(
+            'event_convergence_ms',
+            observedAt - eventConvergenceStartedAt,
+            'ok'
+          )
+          eventTimingRecorded = true
+        }
+        if (callbackReady && !callbackTimingRecorded) {
+          this.#timing?.record(
+            'callback_convergence_ms',
+            observedAt - callbackConvergenceStartedAt,
+            'ok'
+          )
+          callbackTimingRecorded = true
+        }
+        if (scopeReady && eventReady && callbackReady) break
+        const remainingMs = deadline - this.#now()
+        if (remainingMs <= 0 || attempts >= this.#configurationPollAttempts) break
+        await this.#delay(Math.min(this.#configurationPollIntervalMs, remainingMs), signal)
+      }
+
+      if (!scopeReady || !eventReady || !callbackReady || !latestScopes || !latestEvent || !latestCallback) {
+        const missingDimensions = configurationMissingDimensions({
+          scopeReady,
+          eventReady,
+          callbackReady
+        })
+        const error = apiError(configurationFailureCode(missingDimensions), true)
+        const failedAt = this.#now()
+        if (!eventReady && !eventTimingRecorded) {
+          this.#timing?.record(
+            'event_convergence_ms',
+            failedAt - eventConvergenceStartedAt,
+            'failed',
+            { failureCode: error.code, missingDimensions }
+          )
+          eventTimingRecorded = true
+        }
+        if (!callbackReady && !callbackTimingRecorded) {
+          this.#timing?.record(
+            'callback_convergence_ms',
+            failedAt - callbackConvergenceStartedAt,
+            'failed',
+            { failureCode: error.code, missingDimensions }
+          )
+          callbackTimingRecorded = true
+        }
+        this.#timing?.record(
+          'configuration_convergence_ms',
+          failedAt - configurationConvergenceStartedAt,
+          'failed',
+          { failureCode: error.code, missingDimensions }
+        )
+        configurationTimingRecorded = true
+        throw error
+      }
+
+      const completedAt = this.#now()
+      if (!eventTimingRecorded) {
+        this.#timing?.record(
+          'event_convergence_ms',
+          completedAt - eventConvergenceStartedAt,
+          'ok'
+        )
+      }
+      if (!callbackTimingRecorded) {
+        this.#timing?.record(
+          'callback_convergence_ms',
+          completedAt - callbackConvergenceStartedAt,
+          'ok'
+        )
+      }
+      this.#timing?.record(
+        'configuration_convergence_ms',
+        changed
+          ? completedAt - configurationConvergenceStartedAt
+          : completedAt - initialStartedAt,
+        'ok'
+      )
+      configurationTimingRecorded = true
+      return {
+        changed,
+        mutations,
+        verified: verifiedConfigurationState(
+          id,
+          configuration,
+          latestScopes,
+          latestEvent,
+          latestCallback,
+          completedAt
+        )
+      }
+    } catch (error) {
+      const failedAt = this.#now()
+      if (!scopeTimingRecorded && scopeRead.status === 'fulfilled') {
+        this.#timing?.record(
+          'scope_config_ms',
+          failedAt - initialStartedAt,
+          'failed',
+          { failureCode: failureCode(error) }
+        )
+      }
+      if (!manifestTimingRecorded && manifestRead.status === 'fulfilled') {
+        this.#timing?.record(
+          'manifest_reconcile_ms',
+          failedAt - initialStartedAt,
+          'failed',
+          { failureCode: failureCode(error) }
+        )
+      }
+      if (!configurationTimingRecorded) {
+        this.#timing?.record(
+          'configuration_convergence_ms',
+          failedAt - initialStartedAt,
+          'failed',
+          { failureCode: failureCode(error) }
+        )
+      }
+      throw error
+    }
   }
 
   async readScopeCatalog(
@@ -736,24 +997,34 @@ export class OpenPlatformApiClient {
     appId: string
     versionId: string
     configuration: FeishuMemberBotVerificationRequirements
+    verifiedConfiguration?: FeishuVerifiedConfigurationState
     signal?: AbortSignal
   }): Promise<void> {
-    const [
-      manifest,
-      botEnabled,
-      scopeCatalog,
-      eventState,
-      callbackState,
-      version
-    ] = await Promise.all([
+    const reusableConfiguration = reusableVerifiedConfiguration(
+      input.verifiedConfiguration,
+      input.appId,
+      input.configuration
+    )
+    const [manifest, botEnabled, version, onlineConfiguration] = await Promise.all([
       input.configuration.avatarUrl
         ? this.readManifest(input.appId, input.signal)
         : Promise.resolve({} as Record<string, unknown>),
       this.readBotEnabled(input.appId, input.signal),
-      this.readScopeCatalog(input.appId, input.signal),
-      this.readEventState(input.appId, input.signal),
-      this.readCallbackState(input.appId, input.signal),
-      this.readVersion(input.appId, input.versionId, input.signal)
+      this.readVersion(input.appId, input.versionId, input.signal),
+      reusableConfiguration
+        ? Promise.resolve(reusableConfiguration)
+        : Promise.all([
+          this.readScopeCatalog(input.appId, input.signal),
+          this.readEventState(input.appId, input.signal),
+          this.readCallbackState(input.appId, input.signal)
+        ]).then(([scopes, event, callback]) => verifiedConfigurationState(
+          input.appId,
+          input.configuration,
+          scopes,
+          event,
+          callback,
+          this.#now()
+        ))
     ])
     if (version.status !== PUBLISHED_VERSION_STATUS) {
       throw apiError('feishu_console_version_not_published', true)
@@ -763,20 +1034,19 @@ export class OpenPlatformApiClient {
       && manifest.avatar_url !== input.configuration.avatarUrl
     ) throw apiError('feishu_console_avatar_verification_failed', true)
     if (!botEnabled) throw apiError('feishu_console_bot_verification_failed', true)
-    const requiredScopes = resolveRequiredAppScopes(
-      scopeCatalog,
+    if (!includesEvery(
+      onlineConfiguration.enabledTenantScopes,
       input.configuration.tenantScopes
-    )
-    if (requiredScopes.some((scope) => scope.appStatus !== FEISHU_SCOPE_STATUS_ENABLED)) {
+    )) {
       throw apiError('feishu_console_scope_verification_failed', true)
     }
     if (
-      eventState.eventMode !== FEISHU_LONG_CONNECTION_MODE
-      || !includesEvery(eventState.appEvents, input.configuration.tenantEvents)
+      onlineConfiguration.eventMode !== FEISHU_LONG_CONNECTION_MODE
+      || !includesEvery(onlineConfiguration.appEvents, input.configuration.tenantEvents)
     ) throw apiError('feishu_console_event_verification_failed', true)
     if (
-      callbackState.callbackMode !== FEISHU_LONG_CONNECTION_MODE
-      || !callbackState.callbacks.includes(FEISHU_PROJECT_SELECTION_CALLBACK)
+      onlineConfiguration.callbackMode !== FEISHU_LONG_CONNECTION_MODE
+      || !onlineConfiguration.callbacks.includes(FEISHU_PROJECT_SELECTION_CALLBACK)
     ) {
       throw apiError('feishu_console_callback_verification_failed', true)
     }
@@ -854,63 +1124,6 @@ export class OpenPlatformApiClient {
         appVersion: firstString(version, ['appVersion', 'app_version', 'version']) ?? null
       }]
     })
-  }
-
-  async #readEventStateUntil(
-    appId: string,
-    ready: (state: FeishuOpenPlatformEventState) => boolean,
-    budget: { remainingAttempts: number },
-    signal?: AbortSignal
-  ): Promise<FeishuOpenPlatformEventState | null> {
-    while (budget.remainingAttempts > 0) {
-      budget.remainingAttempts -= 1
-      const state = await this.readEventState(appId, signal)
-      if (ready(state)) return state
-      if (budget.remainingAttempts > 0) {
-        await this.#delay(this.#configurationPollIntervalMs, signal)
-      }
-    }
-    return null
-  }
-
-  async #readCallbackStateUntil(
-    appId: string,
-    ready: (state: FeishuOpenPlatformCallbackState) => boolean,
-    budget: { remainingAttempts: number },
-    signal?: AbortSignal
-  ): Promise<FeishuOpenPlatformCallbackState | null> {
-    while (budget.remainingAttempts > 0) {
-      budget.remainingAttempts -= 1
-      const state = await this.readCallbackState(appId, signal)
-      if (ready(state)) return state
-      if (budget.remainingAttempts > 0) {
-        await this.#delay(this.#configurationPollIntervalMs, signal)
-      }
-    }
-    return null
-  }
-
-  async #updateManifest(
-    operation: string,
-    appId: string,
-    configuration: FeishuMemberBotConsoleConfiguration,
-    update: (manifest: Record<string, unknown>) => Record<string, unknown>,
-    signal?: AbortSignal
-  ): Promise<boolean> {
-    const id = requireResourceId(appId, 'feishu_console_app_id_invalid')
-    const current = await this.readManifest(id, signal)
-    const manifest = update(mergeMemberBotManifestBase(current, configuration))
-    if (structuredValueEqual(current, manifest)) return false
-    await this.#request(operation, '/developers/v1/manifest/upsert', {
-      body: {
-        clientID: id,
-        appManifest: JSON.stringify(manifest),
-        HTTPHead: {}
-      },
-      mutation: true,
-      signal
-    })
-    return true
   }
 
   async #request(operation: string, path: string, options: RequestOptions): Promise<unknown> {
@@ -1001,6 +1214,174 @@ export class OpenPlatformApiClient {
     }
     return envelope.data
   }
+}
+
+type ObservedRead<T> = {
+  status: 'fulfilled'
+  value: T
+  durationMs: number
+} | {
+  status: 'rejected'
+  reason: unknown
+  durationMs: number
+}
+
+type RejectedObservedRead = Extract<ObservedRead<unknown>, { status: 'rejected' }>
+
+function firstRejectedRead(
+  reads: readonly ObservedRead<unknown>[]
+): RejectedObservedRead | null {
+  return reads.find((read): read is RejectedObservedRead => read.status === 'rejected') ?? null
+}
+
+function fulfilledRead<T>(read: ObservedRead<T>): T {
+  if (read.status === 'fulfilled') return read.value
+  throw read.reason
+}
+
+export function desiredMemberBotManifest(
+  current: Record<string, unknown>,
+  configuration: FeishuMemberBotConsoleConfiguration
+): Record<string, unknown> {
+  const manifest = mergeMemberBotManifestBase(current, configuration)
+  const scopes = recordAt(manifest, 'scopes')
+  const events = recordAt(manifest, 'events')
+  const eventItems = recordAt(events, 'items')
+  const callbacks = recordAt(manifest, 'callbacks')
+  return {
+    ...manifest,
+    scopes: {
+      ...scopes,
+      tenant: unionStrings(scopes.tenant, configuration.tenantScopes),
+      user: stringArray(scopes.user)
+    },
+    events: {
+      ...events,
+      items: {
+        ...eventItems,
+        tenant: unionStrings(eventItems.tenant, configuration.tenantEvents),
+        user: stringArray(eventItems.user)
+      },
+      subscription_type: 'websocket'
+    },
+    callbacks: {
+      ...callbacks,
+      items: unionStrings(callbacks.items, [FEISHU_PROJECT_SELECTION_CALLBACK]),
+      subscription_type: 'websocket'
+    }
+  }
+}
+
+function scopesReady(
+  scopes: readonly FeishuOpenPlatformScope[],
+  configuration: FeishuMemberBotVerificationRequirements
+): boolean {
+  try {
+    return resolveRequiredAppScopes(scopes, configuration.tenantScopes)
+      .every((scope) => scope.appStatus === FEISHU_SCOPE_STATUS_ENABLED)
+  } catch {
+    return false
+  }
+}
+
+function eventStateReady(
+  state: FeishuOpenPlatformEventState,
+  configuration: FeishuMemberBotVerificationRequirements
+): boolean {
+  return state.eventMode === FEISHU_LONG_CONNECTION_MODE
+    && includesEvery(state.appEvents, configuration.tenantEvents)
+}
+
+function callbackStateReady(state: FeishuOpenPlatformCallbackState): boolean {
+  return state.callbackMode === FEISHU_LONG_CONNECTION_MODE
+    && state.callbacks.includes(FEISHU_PROJECT_SELECTION_CALLBACK)
+}
+
+function verifiedConfigurationState(
+  appId: string,
+  configuration: FeishuMemberBotVerificationRequirements,
+  scopes: readonly FeishuOpenPlatformScope[],
+  event: FeishuOpenPlatformEventState,
+  callback: FeishuOpenPlatformCallbackState,
+  observedAtMonotonicMs: number
+): FeishuVerifiedConfigurationState {
+  const requiredScopes = resolveRequiredAppScopes(scopes, configuration.tenantScopes)
+  if (requiredScopes.some((scope) => scope.appStatus !== FEISHU_SCOPE_STATUS_ENABLED)) {
+    throw apiError('feishu_console_scope_verification_failed', true)
+  }
+  if (!eventStateReady(event, configuration)) {
+    throw apiError('feishu_console_event_verification_failed', true)
+  }
+  if (!callbackStateReady(callback)) {
+    throw apiError('feishu_console_callback_verification_failed', true)
+  }
+  return {
+    appId,
+    requirementsDigest: configurationRequirementsDigest(configuration),
+    observedAtMonotonicMs,
+    enabledTenantScopes: sortedUniqueStrings(requiredScopes.map((scope) => scope.name)),
+    eventMode: FEISHU_LONG_CONNECTION_MODE,
+    appEvents: sortedUniqueStrings(event.appEvents),
+    callbackMode: FEISHU_LONG_CONNECTION_MODE,
+    callbacks: sortedUniqueStrings(callback.callbacks)
+  }
+}
+
+function reusableVerifiedConfiguration(
+  state: FeishuVerifiedConfigurationState | undefined,
+  appId: string,
+  configuration: FeishuMemberBotVerificationRequirements
+): FeishuVerifiedConfigurationState | null {
+  if (!state) return null
+  const normalizedAppId = requireResourceId(appId, 'feishu_console_app_id_invalid')
+  return state.appId === normalizedAppId
+    && state.requirementsDigest === configurationRequirementsDigest(configuration)
+    ? state
+    : null
+}
+
+function configurationRequirementsDigest(
+  configuration: FeishuMemberBotVerificationRequirements
+): `sha256:${string}` {
+  const requirements = JSON.stringify({
+    tenantScopes: sortedUniqueStrings(configuration.tenantScopes),
+    tenantEvents: sortedUniqueStrings(configuration.tenantEvents),
+    callbacks: [FEISHU_PROJECT_SELECTION_CALLBACK],
+    connectionMode: FEISHU_LONG_CONNECTION_MODE
+  })
+  return `sha256:${createHash('sha256').update(requirements).digest('hex')}`
+}
+
+function sortedUniqueStrings(values: readonly string[]): string[] {
+  return [...new Set(values)].sort((left, right) => left.localeCompare(right, 'en'))
+}
+
+function configurationMissingDimensions(input: {
+  scopeReady: boolean
+  eventReady: boolean
+  callbackReady: boolean
+}): Array<'scope' | 'event' | 'callback'> {
+  return [
+    ...(input.scopeReady ? [] : ['scope' as const]),
+    ...(input.eventReady ? [] : ['event' as const]),
+    ...(input.callbackReady ? [] : ['callback' as const])
+  ]
+}
+
+function configurationFailureCode(
+  missingDimensions: readonly ('scope' | 'event' | 'callback')[]
+): string {
+  if (missingDimensions.includes('scope')) return 'feishu_console_scope_verification_failed'
+  if (missingDimensions.includes('event')) return 'feishu_console_event_verification_failed'
+  return 'feishu_console_callback_verification_failed'
+}
+
+function failureCode(error: unknown): string {
+  if (error && typeof error === 'object' && 'code' in error) {
+    const code = (error as { code?: unknown }).code
+    if (typeof code === 'string') return code
+  }
+  return error instanceof Error ? error.message : 'unknown'
 }
 
 function mergeMemberBotManifestBase(
