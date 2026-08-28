@@ -36,8 +36,8 @@ last_updated: 2026-08-28
 - [x] Core publication 状态机永久冻结每名队员的 App ID；完成后重复发布拒绝，历史 disabled 与凭据恢复只重开同一 intent、
   核对同一 App，不存在换绑或第二次创建；
 - [x] 完成 p2p/group/topic identity、显式 mention gate、多 Bot collecting/finalize/timeout/mismatch；
-- [x] 完成 Owner verify/per-App identity gate、non-owner 零业务事实、canonical-first acknowledgement App、单张 Owner
-  私聊项目卡和 callback envelope/nonce/version/CAS 重放防护；
+- [x] 完成 Owner verify/per-App identity 自动映射 gate、non-owner 零业务事实、canonical-first acknowledgement App、单张
+  Owner 私聊项目卡和 callback envelope/nonce/version/CAS 重放防护；该内部映射不投影为主人待处理的 Renderer 状态；
 - [x] 完成 ChannelTurnRequest 单根 FIFO、统一原子 admission、永久失败/Runtime deferred 与 queue card 更新；
 - [x] 完成 ExternalQuote structured segment、`replyTo=null`、ExternalPrincipal source 与 CURRENT_INPUT v22；
 - [x] 完成父群 authoritative roster、普通群完整 membership、话题按需 membership 与 remove reconciliation；

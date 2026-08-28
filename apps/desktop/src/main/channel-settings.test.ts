@@ -298,7 +298,7 @@ describe('channel settings service', () => {
     expect(serialized).toContain('审阅员')
     expect(snapshot.channels[0].memberBots[0]?.managementUrl)
       .toBe('https://open.feishu.cn/app/cli_a/baseinfo')
-    expect(serialized).not.toMatch(/credentialRef|super-secret|tenant-private|chat-private|aggregate-private/)
+    expect(serialized).not.toMatch(/credentialRef|ownerIdentityStatus|super-secret|tenant-private|chat-private|aggregate-private/)
   })
 
   it('projects the bound account brand into the exact Lark app management page', async () => {
@@ -1109,8 +1109,7 @@ describe('channel settings service', () => {
       botDisplayName: '审阅员',
       appId: 'cli-frozen',
       managementUrl: 'https://open.feishu.cn/app/cli-frozen/baseinfo',
-      failureCode: 'feishu_console_event_verification_failed',
-      ownerIdentityStatus: 'unverified'
+      failureCode: 'feishu_console_event_verification_failed'
     })
   })
 

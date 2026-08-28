@@ -2001,7 +2001,6 @@ export interface ChannelMemberBotView {
   appId: string | null
   managementUrl: string | null
   failureCode: string | null
-  ownerIdentityStatus: 'verified' | 'unverified'
 }
 
 export interface MemberBotProvisioningView {

@@ -72,7 +72,8 @@ last_updated: 2026-08-28
   重启恢复。飞书失败不回滚已提交 CampMessage；
 - Main 记录脱敏的 Bot 长连接、SDK policy、message normalized 与 handler accepted/rejected 分层诊断；不记录消息正文、
   Secret、Cookie 或完整外部 identity，当前 SDK 无 raw hook 时不虚构 raw-event 层；
-- 设置页按 Rovai 现有 Porcelain/Steel 视觉只保留连接、队员 Bot、账号二维码、Owner identity/绑定诊断和错误状态；
+- 设置页按 Rovai 现有 Porcelain/Steel 视觉只保留连接、队员 Bot、账号二维码、绑定诊断和错误状态；Owner identity
+  只作为入站内部安全边界，首条可靠消息自动建立 App-scoped 映射，不展示需要主人处理的核验状态；
   删除项目目录与会话绑定操作。已发布 Bot 只提供按绑定 brand 生成的官方应用详情链接，不再提供 Rovai 管理/停用入口；
   Renderer 不接触 Secret、路径或 Host-only transport facts。
 

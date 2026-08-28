@@ -71,16 +71,14 @@ describe('Channel settings', () => {
           botDisplayName: '审阅员芝士',
           appId: 'cli_agent_a',
           managementUrl: 'https://open.feishu.cn/app/cli_agent_a/baseinfo',
-          failureCode: null,
-          ownerIdentityStatus: 'unverified'
+          failureCode: null
         }, {
           agentId: 'agent-b',
           publicationStatus: 'disabled',
           botDisplayName: '资料员石墨',
           appId: 'cli_agent_b',
           managementUrl: 'https://open.feishu.cn/app/cli_agent_b/baseinfo',
-          failureCode: null,
-          ownerIdentityStatus: 'verified'
+          failureCode: null
         }]
       }],
       pendingBindingCount: 2,
@@ -108,7 +106,7 @@ describe('Channel settings', () => {
     expect(markup).toContain('rel="noreferrer noopener"')
     expect(markup).toContain('>飞书管理</a>')
     expect(markup).toContain('>重新发布</button>')
-    expect(markup).toContain('主人身份待核验')
+    expect(markup).not.toContain('主人身份待核验')
     expect(markup).toContain('2 个待选择')
     expect(markup).toContain('绑定完成后不可换绑')
     expect(markup).not.toContain('>管理</button>')

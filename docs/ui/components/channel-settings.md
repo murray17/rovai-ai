@@ -19,7 +19,7 @@ Renderer 不提供 Channel 项目目录或会话绑定操作。
 1. `Settings / Channels` eyebrow、标题“渠道”、主人本机说明；
 2. 渠道 Provider 卡，当前只显示飞书；
 3. 渠道连接，展示真实开发者用户名、企业与可选 email，提供登录、切换和断开；
-4. 队员 Bot 列表，按成员稳定顺序显示头像、名称、角色、发布状态、Owner identity 状态和单行动作；
+4. 队员 Bot 列表，按成员稳定顺序显示头像、名称、角色、发布状态和单行动作；
 5. 只有存在 pending binding 或 binding error 时，显示安静的诊断计数，不提供正常操作入口。
 
 窄窗口保持同一内容顺序，表格式行折为纵向信息，不产生横向滚动。共享色彩只使用现有语义 Token；头像、按钮、
@@ -85,9 +85,10 @@ Dialog、状态点和间距复用现有组件语法。
 
 ## Owner identity 与绑定诊断
 
-已发布 Bot 的 Owner identity 未核验时，行内显示“主人身份待核验”，并明确该 Bot 会 fail closed，不把任意飞书用户
-当成主人。收到可靠 Owner envelope 后状态随 Snapshot 刷新为已核验；用户名、群管理员身份或卡片 payload 不能驱动
-该状态。
+Owner identity 是入站安全边界，不是主人需要处理的产品状态。Renderer 不展示“主人身份待核验”、核验按钮或任何
+per-App identity 状态。已连接 Developer Identity 已确定 canonical Owner；首条携带匹配 tenant user identity 的可靠
+message/callback envelope 会在同一入站流程自动记录 App-scoped identity 并继续处理。映射缺失或冲突时由 Host/Core
+内部 fail closed，不能把用户名、群管理员身份或卡片 payload 当成 Owner 证据。
 
 页面可在 Provider 卡底部显示 `待处理项目选择 N` 与 `绑定异常 N` 两个低强调诊断值；零值可省略。它们只帮助主人
 理解当前渠道状态，不展开项目列表、路径、会话 picker 或 resolve 操作。正常流程是 Owner 私聊自动 Quick Chat，或群/

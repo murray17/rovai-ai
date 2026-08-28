@@ -128,9 +128,10 @@ manifest 头像元数据；不得创建 App 或改变 App ID。
 
 ## Owner-only 入站与会话执行范围
 
-连接开发者账号时 Core 建立 canonical Feishu Owner；每个已发布 App 通过实际 message/callback envelope 逐步建立
-per-App open/user/union identity。Main 收到消息后先调用 Core verify，只有 `union_id -> tenant user_id -> verified
-open_id` 能证明 Owner 才继续。Owner 仍以 ExternalPrincipal 写入；non-owner 私聊只允许一次节流提示，群/话题静默
+连接开发者账号时 Core 建立 canonical Feishu Owner；每个已发布 App 通过实际 message/callback envelope 自动建立
+per-App open/user/union identity。Main 收到消息后先调用 Core verify；首条 envelope 的 tenant user identity 与已连接
+Developer Identity 一致时，同一入站流程会记录 App-scoped identity 并继续，不存在主人手工核验步骤或 Renderer 状态。
+后续只有 `union_id -> tenant user_id -> verified open_id` 能证明 Owner 才继续。Owner 仍以 ExternalPrincipal 写入；non-owner 私聊只允许一次节流提示，群/话题静默
 停止，并且都不能留下 conversation、aggregate、Principal、pending binding、Camp 或 Run。
 
 Core 不再拥有主人手工维护的 Channel ProjectBinding 目录。它从 Rovai 已存在的 directory Camp 事实投影 stable

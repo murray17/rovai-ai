@@ -426,9 +426,6 @@ function ChannelMemberBotTable({
               </div>
               <span className={`channel-publication-status is-${status}`} role="cell">
                 <span>{publicationLabel(status)}</span>
-                {published && bot?.ownerIdentityStatus === 'unverified' && (
-                  <small>主人身份待核验</small>
-                )}
               </span>
               <div className="channel-member-action" role="cell">
                 {published && bot?.managementUrl ? (

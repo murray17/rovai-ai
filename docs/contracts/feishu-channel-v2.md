@@ -39,8 +39,10 @@ Developer Identity 的摘要/显示字段和每 Bot `credentialRef`；Renderer/A
 ## 2. Owner-only Camp 与项目选择
 
 连接账号后 Core 为其建立 `FeishuOwnerIdentity`，并为每个已发布 App 维护经过消息或 callback envelope 验证的
-per-App identity。普通入站按 `union_id -> tenant user_id -> current-App open_id` 分类；缺少可靠映射时 Bot 状态为
-`owner_identity_unverified`，所有人类消息 fail closed。顺序固定为 transport dedup、sender 解析、Owner 校验、会话类型、
+per-App identity。普通入站按 `union_id -> tenant user_id -> current-App open_id` 分类；首条可靠 envelope 若携带与已连接
+Developer Identity 一致的 tenant user identity，Core 必须在同一入站流程自动记录 App-scoped identity 并继续处理，不得
+要求主人执行额外核验。缺少可靠映射或出现冲突时，当前消息在内部 fail closed；这不是 Bot lifecycle 或 Renderer 状态。
+顺序固定为 transport dedup、sender 解析、Owner 校验、会话类型、
 群/话题显式 mention、multi-Bot observe。Non-owner 私聊最多收到每 App/身份 24 小时一次提示，群/话题静默忽略；两者
 都不得创建 ExternalPrincipal、ChannelConversation、aggregate、PendingCampBinding、Camp 或 Run。
 
@@ -398,11 +400,11 @@ identity 和 Core transport aggregation阻止再次触发。
 
 ## 8. Snapshot 与恢复
 
-Core Host snapshot schema 2 包含 Developer Identity account、带绑定账号 brand/Owner verification 的 member bots、
+Core Host snapshot schema 2 包含 Developer Identity account、带绑定账号 brand/内部 Owner verification 的 member bots、
 publication intents、pending/bound diagnostic counts，以及仅供 Main 的 `transportConversations` 与
-`pendingAggregates`。Main 对 Renderer 投影 schema 4，只保留账号显示字段、每 Bot 状态、Owner identity 状态、当前
+`pendingAggregates`。Main 对 Renderer 投影 schema 4，只保留账号显示字段、每 Bot 发布状态、当前
 provisioning 进度、静默诊断计数，以及由绑定 brand 和冻结 App ID 生成的 `managementUrl`。不存在项目目录或会话绑定
-操作投影。该 URL 只能是 `https://open.feishu.cn/app/{encodedAppId}/baseinfo` 或
+操作投影，也不投影 per-App Owner identity 状态。该 URL 只能是 `https://open.feishu.cn/app/{encodedAppId}/baseinfo` 或
 `https://open.larksuite.com/app/{encodedAppId}/baseinfo`；Renderer 不接收任意管理 URL。投影必须删除 Host-only 后两项、
 原始 userId 与所有 credential refs。
 

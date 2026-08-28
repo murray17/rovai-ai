@@ -1723,8 +1723,7 @@ export class ChannelSettingsService {
         botDisplayName: bot.botDisplayName,
         appId: bot.appId,
         managementUrl: memberBotManagementUrl(bot.brand, bot.appId),
-        failureCode: this.#publicationFailures.get(bot.agentId) ?? bot.failureCode,
-        ownerIdentityStatus: bot.ownerIdentityStatus
+        failureCode: this.#publicationFailures.get(bot.agentId) ?? bot.failureCode
       })
     }
     for (const intent of snapshot.publicationIntents) {
@@ -1743,8 +1742,7 @@ export class ChannelSettingsService {
         managementUrl: brand && intent.remoteAppId
           ? memberBotManagementUrl(brand, intent.remoteAppId)
           : null,
-        failureCode: this.#publicationFailures.get(intent.agentId) ?? intent.failureCode,
-        ownerIdentityStatus: 'unverified'
+        failureCode: this.#publicationFailures.get(intent.agentId) ?? intent.failureCode
       })
     }
     if (this.#activeProvisioning) {
@@ -1760,8 +1758,7 @@ export class ChannelSettingsService {
         botDisplayName: existing?.botDisplayName ?? null,
         appId: remoteAppId ?? existing?.appId ?? null,
         managementUrl: existing?.managementUrl ?? null,
-        failureCode,
-        ownerIdentityStatus: existing?.ownerIdentityStatus ?? 'unverified'
+        failureCode
       })
     }
     for (const [agentId, failureCode] of this.#publicationFailures) {
@@ -1772,8 +1769,7 @@ export class ChannelSettingsService {
         botDisplayName: bot?.botDisplayName ?? null,
         appId: bot?.appId ?? null,
         managementUrl: bot?.managementUrl ?? null,
-        failureCode,
-        ownerIdentityStatus: bot?.ownerIdentityStatus ?? 'unverified'
+        failureCode
       })
     }
     return {
