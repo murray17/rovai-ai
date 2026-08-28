@@ -24,13 +24,14 @@ const SETTINGS_SECTIONS = new Set<SettingsSection>([
 ])
 
 export const DEFAULT_GENERAL_PREFERENCES: GeneralPreferencesSnapshot = {
-  schemaVersion: 3,
+  schemaVersion: 4,
   startupLocationMode: 'last_location',
   lastSettingsSection: 'general',
   executionConsolePlacement: 'bottom',
   newConversationDefaults: null,
   newConversationDefaultsRequireConfirmation: false,
-  oneClickNewConversationEnabled: false
+  oneClickNewConversationEnabled: false,
+  worldMapEnabled: true
 }
 
 export function isStartupLocationMode(value: unknown): value is StartupLocationMode {
@@ -76,23 +77,28 @@ export function parseGeneralPreferences(value: unknown): GeneralPreferencesSnaps
     'oneClickNewConversationEnabled'
   ]
   const v3Keys = [...v2Keys, 'executionConsolePlacement']
-  if (!hasExactKeys(value, v2Keys) && !hasExactKeys(value, v3Keys)) return null
-  if (value.schemaVersion !== 2 && value.schemaVersion !== 3) return null
+  const v4Keys = [...v3Keys, 'worldMapEnabled']
+  if (!hasExactKeys(value, v2Keys)
+    && !hasExactKeys(value, v3Keys)
+    && !hasExactKeys(value, v4Keys)) return null
+  if (value.schemaVersion !== 2 && value.schemaVersion !== 3 && value.schemaVersion !== 4) return null
   if (value.schemaVersion === 2 && !hasExactKeys(value, v2Keys)) return null
   if (value.schemaVersion === 3
     && !hasExactKeys(value, v2Keys)
     && !hasExactKeys(value, v3Keys)) return null
+  if (value.schemaVersion === 4 && !hasExactKeys(value, v4Keys)) return null
   if (!isStartupLocationMode(value.startupLocationMode)) return null
   if (!isSettingsSection(value.lastSettingsSection)) return null
   if (value.newConversationDefaults !== null && !isNewConversationDefaults(value.newConversationDefaults)) return null
   if (typeof value.newConversationDefaultsRequireConfirmation !== 'boolean') return null
   if (typeof value.oneClickNewConversationEnabled !== 'boolean') return null
+  if (value.schemaVersion === 4 && typeof value.worldMapEnabled !== 'boolean') return null
   if (value.newConversationDefaults === null && (
     value.newConversationDefaultsRequireConfirmation
     || value.oneClickNewConversationEnabled
   )) return null
   return {
-    schemaVersion: 3,
+    schemaVersion: 4,
     startupLocationMode: value.startupLocationMode,
     lastSettingsSection: value.lastSettingsSection,
     executionConsolePlacement: isExecutionConsolePlacement(value.executionConsolePlacement)
@@ -102,7 +108,10 @@ export function parseGeneralPreferences(value: unknown): GeneralPreferencesSnaps
       ? structuredClone(value.newConversationDefaults)
       : null,
     newConversationDefaultsRequireConfirmation: value.newConversationDefaultsRequireConfirmation,
-    oneClickNewConversationEnabled: value.oneClickNewConversationEnabled
+    oneClickNewConversationEnabled: value.oneClickNewConversationEnabled,
+    worldMapEnabled: value.schemaVersion === 4 && typeof value.worldMapEnabled === 'boolean'
+      ? value.worldMapEnabled
+      : true
   }
 }
 
@@ -205,6 +214,18 @@ export class GeneralPreferencesStore {
         throw new Error('Default new conversation configuration requires confirmation')
       }
       const next = { ...this.#snapshot, oneClickNewConversationEnabled: enabled }
+      await writePrivateJson(this.#filePath, next)
+      this.#snapshot = next
+      return this.get()
+    })
+  }
+
+  setWorldMapEnabled(enabled: boolean): Promise<GeneralPreferencesSnapshot> {
+    if (typeof enabled !== 'boolean') {
+      return Promise.reject(new Error('Invalid world map preference'))
+    }
+    return this.#enqueue(async () => {
+      const next = { ...this.#snapshot, worldMapEnabled: enabled }
       await writePrivateJson(this.#filePath, next)
       this.#snapshot = next
       return this.get()

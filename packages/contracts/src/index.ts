@@ -2015,13 +2015,14 @@ export interface NewConversationDefaults {
 }
 
 export interface GeneralPreferencesSnapshot {
-  schemaVersion: 3
+  schemaVersion: 4
   startupLocationMode: StartupLocationMode
   lastSettingsSection: SettingsSection
   executionConsolePlacement: ExecutionConsolePlacement
   newConversationDefaults: NewConversationDefaults | null
   newConversationDefaultsRequireConfirmation: boolean
   oneClickNewConversationEnabled: boolean
+  worldMapEnabled: boolean
 }
 
 export interface DesktopStartupSnapshot {
@@ -2055,6 +2056,7 @@ export interface GeneralPreferencesApi {
   setExecutionConsolePlacement(placement: ExecutionConsolePlacement): Promise<GeneralPreferencesSnapshot>
   setNewConversationDefaults(defaults: NewConversationDefaults): Promise<GeneralPreferencesSnapshot>
   setOneClickNewConversationEnabled(enabled: boolean): Promise<GeneralPreferencesSnapshot>
+  setWorldMapEnabled(enabled: boolean): Promise<GeneralPreferencesSnapshot>
   invalidateNewConversationDefaults(): Promise<GeneralPreferencesSnapshot>
 }
 

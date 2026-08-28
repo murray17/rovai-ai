@@ -31,6 +31,13 @@ describe('General settings', () => {
     expect(markup).not.toContain('general-help-button')
     expect(markup).toContain('使用入口对应的项目')
     expect(markup).toContain('请先保存默认队员与默认队长')
+    expect(markup).toContain('<h2 id="general-conversation-heading">会话</h2>')
+    expect(markup).toMatch(/aria-label="启用世界地图"[^>]*checked=""/)
+    expect(markup).not.toContain('默认开启')
+    expect(markup.indexOf('general-new-conversation-heading'))
+      .toBeLessThan(markup.indexOf('general-conversation-heading'))
+    expect(markup.indexOf('general-conversation-heading'))
+      .toBeLessThan(markup.indexOf('general-window-heading'))
     expect(markup).toContain('重置窗口大小与位置')
     expect(markup).not.toContain('记住窗口位置')
     expect(markup).not.toContain('隐藏启动')
@@ -53,7 +60,7 @@ describe('General settings', () => {
     const agents = [profile('agent-a', '洛可'), profile('agent-b', '沐瓦')]
     agents[1].runtimeReadiness.status = 'needs_attention'
     const preferences: GeneralPreferencesSnapshot = {
-      schemaVersion: 3,
+      schemaVersion: 4,
       startupLocationMode: 'last_location',
       lastSettingsSection: 'general',
       executionConsolePlacement: 'bottom',
@@ -62,7 +69,8 @@ describe('General settings', () => {
         defaultLeadAgentId: 'agent-a'
       },
       newConversationDefaultsRequireConfirmation: false,
-      oneClickNewConversationEnabled: true
+      oneClickNewConversationEnabled: true,
+      worldMapEnabled: true
     }
     const markup = renderToStaticMarkup(createElement(GeneralSettings, {
       agents,

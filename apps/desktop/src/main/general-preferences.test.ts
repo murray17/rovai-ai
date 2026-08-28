@@ -32,29 +32,32 @@ describe('general preferences', () => {
 
   it('accepts only the exact schema and finite enums', () => {
     expect(parseGeneralPreferences({
-      schemaVersion: 3,
+      schemaVersion: 4,
       startupLocationMode: 'last_location',
       lastSettingsSection: 'about',
       executionConsolePlacement: 'bottom',
       newConversationDefaults: null,
       newConversationDefaultsRequireConfirmation: false,
-      oneClickNewConversationEnabled: false
+      oneClickNewConversationEnabled: false,
+      worldMapEnabled: false
     })).toEqual({
       ...DEFAULT_GENERAL_PREFERENCES,
-      lastSettingsSection: 'about'
+      lastSettingsSection: 'about',
+      worldMapEnabled: false
     })
     expect(parseGeneralPreferences({
       schemaVersion: 1,
       startupLocationMode: 'quick_chat',
       lastSettingsSection: 'diagnostics'
     })).toEqual({
-      schemaVersion: 3,
+      schemaVersion: 4,
       startupLocationMode: 'quick_chat',
       lastSettingsSection: 'diagnostics',
       executionConsolePlacement: 'bottom',
       newConversationDefaults: null,
       newConversationDefaultsRequireConfirmation: false,
-      oneClickNewConversationEnabled: false
+      oneClickNewConversationEnabled: false,
+      worldMapEnabled: true
     })
     expect(parseGeneralPreferences({
       schemaVersion: 2,
@@ -67,7 +70,7 @@ describe('general preferences', () => {
       newConversationDefaultsRequireConfirmation: true,
       oneClickNewConversationEnabled: true
     })).toEqual({
-      schemaVersion: 3,
+      schemaVersion: 4,
       startupLocationMode: 'quick_chat',
       lastSettingsSection: 'diagnostics',
       executionConsolePlacement: 'bottom',
@@ -76,7 +79,8 @@ describe('general preferences', () => {
         defaultLeadAgentId: 'agent-a'
       },
       newConversationDefaultsRequireConfirmation: true,
-      oneClickNewConversationEnabled: true
+      oneClickNewConversationEnabled: true,
+      worldMapEnabled: true
     })
     expect(parseGeneralPreferences({
       schemaVersion: 3,
@@ -143,17 +147,19 @@ describe('general preferences', () => {
       store.setStartupLocationMode('quick_chat'),
       store.setLastSettingsSection('runtime'),
       store.setExecutionConsolePlacement('inspector'),
+      store.setWorldMapEnabled(false),
       store.setStartupLocationMode('last_location')
     ])
 
     expect(store.get()).toEqual({
-      schemaVersion: 3,
+      schemaVersion: 4,
       startupLocationMode: 'last_location',
       lastSettingsSection: 'runtime',
       executionConsolePlacement: 'inspector',
       newConversationDefaults: null,
       newConversationDefaultsRequireConfirmation: false,
-      oneClickNewConversationEnabled: false
+      oneClickNewConversationEnabled: false,
+      worldMapEnabled: false
     })
     expect(JSON.parse(await readFile(filePath, 'utf8'))).toEqual(store.get())
     if (process.platform !== 'win32') {
