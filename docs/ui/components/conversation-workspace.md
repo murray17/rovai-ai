@@ -2,7 +2,7 @@
 document_type: ui-component-contract
 authority: renderer-camp-workspace
 status: accepted
-last_updated: 2026-08-27
+last_updated: 2026-08-28
 ---
 
 # Camp 会话工作区
@@ -294,10 +294,14 @@ disclosure 继续在原位渲染完整公开结果，不再截断，不再提供
 
 ### Runtime 终态文件变更与 AgentRun 文件变化
 
-只有 [Runtime File Change Observation v1](../../contracts/runtime-file-change-observation-v1.md)准入的可靠终态
+只有 [Runtime File Change Observation v2](../../contracts/runtime-file-change-observation-v2.md)准入的可靠终态
 Evidence 才进入文件变化呈现。成功 Edit/Write 的可靠单路径足以把原 Tool 行呈现为 `修改 <basename>`；没有
 可靠内容时不显示 `+A −D` 或空 disclosure。有完整 before/after、unified snapshot 或 exact mutation 时，每个
 文件作为同一 Canonical Activity 的 presentation row 独立展开。
+
+当前 Runtime Host 的精确 `ROVAI_RUN_TMP` 是 Rovai 可重置的临时交付区，不是用户文件面。其目录内的 HTML、
+图片或其他中间产物不显示为 `修改 <basename>`，也不进入 `Files Changed`；mixed 事件只展示其余普通文件。
+已经持久化的历史卡片不重算。临时文件经 `rovai send --file` 发布后，附件由独立的 Camp Attachment UI 呈现。
 
 Renderer 不显示 `apply_patch` 父行或“编辑了 N 个文件”聚合层，不从 Tool 显示名、output、命令文本或当前文件
 推测变化，也不为逐文件行创建新的 Activity identity。文件行留在现有“已执行 N 项操作”集合内，集合计数仍按

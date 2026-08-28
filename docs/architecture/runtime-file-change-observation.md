@@ -3,12 +3,12 @@ document_type: architecture
 architecture: runtime-file-change-observation
 authority: command-and-agent-run-file-change-boundaries
 status: accepted
-last_updated: 2026-08-27
+last_updated: 2026-08-28
 ---
 
 # Runtime File Change Observation 架构
 
-字段、归约与授权接口见 [Runtime File Change Observation v1](../contracts/runtime-file-change-observation-v1.md)。
+字段、归约与授权接口见 [Runtime File Change Observation v2](../contracts/runtime-file-change-observation-v2.md)。
 本架构只消费 Runtime 明确报告的文件变化，不读取当前文件、不扫描工作区，也不依赖 Git。
 
 ## 产品模型
@@ -16,6 +16,7 @@ last_updated: 2026-08-27
 ```text
 Runtime terminal file event
   -> Adapter-specific public normalizer
+  -> exact managed-output-root exclusion
   -> append-only Execution Evidence
        -> Canonical Activity projector
             -> Command View `修改 <file>`
@@ -42,6 +43,11 @@ checkpoint ref 或 filesystem capture；Git 与非 Git execution root 使用相�
 - 路径按 Run 冻结的 execution root 做纯词法规范化，该 root 也是 display root。root 内转换为相对路径；root 外
   保留规范化绝对路径。相对 `..` 可解析到 root 外，但不能越过文件系统根；其他 URI scheme、Git metadata 路径和
   不明确多路径 fail closed；
+- Core 同时向 normalizer 传入当前 Built-in Tool Process 的 typed `run_tmp`。解析后的 path 等于该 root 或位于其下
+  时只写安全 unavailable 诊断，不形成文件 path 或 Diff；这是逐 component 的精确排除，不扩大到 data dir、
+  process root、其他进程目录或 `run-tmp-copy`；
+- mixed Diff 逐 entry 保留普通文件；Codex whole-turn snapshot 在 durable ingress 前逐 `diff --git` section 执行
+  同一过滤。全部 section 被排除时保存权威空 snapshot，startup recovery 不会从更早 operation 重新引入；
 - 规范化不打开文件、不解析 shell 命令，也不从 Tool 显示名、stdout/stderr 或当前磁盘补全缺失事实；
 - Evidence 保留来源语义和原始 old/new 或 diff 内容。Renderer 所需 unified diff 是 projection，不反向改写
   Evidence。
@@ -53,7 +59,9 @@ checkpoint ref 或 filesystem capture；Git 与非 Git execution root 使用相�
   伪造计数或空 diff；
 - Activity identity、phase、outcome、排序和 operation count 继续由既有 Canonical Activity 拥有。逐文件行只是
   presentation rows；
-- `apply_patch` 等 Runtime 原始 Tool 名不作为 Diff 数据源，也不形成父级聚合行。
+- `apply_patch` 等 Runtime 原始 Tool 名不作为 Diff 数据源，也不形成父级聚合行；
+- managed output 的 unavailable projection 只保留内部诊断，不形成带 path 的文件行或 inline Diff；原 Tool
+  Activity 仍可按可靠 Runtime kind 保持普通 file/tool 分类与通用 presentation。
 
 ### AgentRun file-change projector
 
@@ -91,7 +99,8 @@ checkpoint ref 或 filesystem capture；Git 与非 Git execution root 使用相�
   完整净差异显示 unified diff；exact mutation 显示没有虚假 hunk/行号的片段块；operation history 保留全部
   operation 的时序、计数和原始序号，但不为 operation-only 记录渲染空白占位块；operation-only 文件显示诚实空态；
 - 卡片和 Review 都只消费 typed projection 与受管 detail blob，不读取当前 workspace 或执行 Git；
-- 没有可靠文件 Evidence 时不显示卡片，不显示 unavailable 占位，也不读取当前 workspace 重建。
+- 没有可靠文件 Evidence 时不显示卡片，不显示 unavailable 占位，也不读取当前 workspace 重建；
+- 历史 v1 Evidence 与既有 projection 不 backfill、不重写；exclusion 只作用于新 ingress，Renderer/read wire 不变。
 
 ## Runtime 边界
 
@@ -101,6 +110,7 @@ checkpoint ref 或 filesystem capture；Git 与非 Git execution root 使用相�
 - Run card 优先使用当前 turn 最新 `turn/diff/updated`，但只在匹配的 `turn/completed` 后以
   `runtime.file_changes.snapshot` Evidence 发布。空 snapshot 是 display root 内的权威 no-change；显式 root 外
   terminal file evidence 不被它吞掉；
+- snapshot 发布前过滤当前 exact `ROVAI_RUN_TMP` sections；普通 root 外用户文件仍保留，全部过滤后保持权威空值；
 - 没有可解析 snapshot 时使用 terminal fileChange Evidence fallback。`item/fileChange/patchUpdated` 和
   `apply_patch` input 不接入。
 
@@ -112,7 +122,9 @@ checkpoint ref 或 filesystem capture；Git 与非 Git execution root 使用相�
 - `rawInput` 的 `file_path | filePath | filepath` 只用于稳定路径，`old_string | oldString` 与
   `new_string | newString` 字段完整且 `replace_all != true` 时形成 FullBeforeAfter；
 - failed/cancelled terminal 不发布。Kiro 的 `file:` URI、绝对路径、相对路径与已知 rooted-relative Diff 只按
-  同 ToolCall 的唯一 location 做严格对齐，不做 suffix 猜测；合法 root 外绝对路径仍可作为展示路径。
+  同 ToolCall 的唯一 location 做严格对齐，不做 suffix 猜测；合法 root 外绝对路径仍可作为展示路径；
+- ToolCall 的唯一 location 命中当前 managed output root 时，path-only 与绑定的单 entry Diff 都 fail closed；
+  其他 ToolCall 和普通 root 外路径不受影响。
 
 ### Claude Code 与 Antigravity
 
@@ -127,11 +139,14 @@ checkpoint ref 或 filesystem capture；Git 与非 Git execution root 使用相�
 - 文件变化是附加观察能力；Evidence 归一化、投影或 detail blob 失败不能反向改变 Run 终态；
 - 失败只记录安全诊断并允许启动恢复重试，不扫描文件系统补偿；
 - Managed Blob 由 projection row 作为 GC root。Camp 删除遵循既有 Run/Evidence/Blob 引用闭包；
+- `ROVAI_RUN_TMP` 是可重置的临时交付区；通过 `rovai send --file` 成功发布后的 Managed Attachment 属于独立资源
+  合同，临时源路径不因此成为文件变化；
 - 文件变化 Evidence 不进入模型上下文、Runtime Bootstrap、Camp public message 或 Agent built-in 读取面。
 
 ## 相关规范
 
-- [Runtime File Change Observation v1](../contracts/runtime-file-change-observation-v1.md)
+- [Runtime File Change Observation v2](../contracts/runtime-file-change-observation-v2.md)
 - [Execution Evidence 与 Canonical Activity 不变量](foundational-invariants.md#evidence-canonical-activity)
 - [Camp 会话工作区](../ui/components/conversation-workspace.md)
 - [v1.29 决定](../versions/v1.29/decisions.md#v1-29-d08)
+- [V1.29-D13 managed output exclusion](../versions/v1.29/decisions.md#v1-29-d13)

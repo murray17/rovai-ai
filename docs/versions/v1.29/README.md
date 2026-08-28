@@ -58,7 +58,8 @@ last_updated: 2026-08-28
 - Runtime 文件 Evidence 保留四种语义：`full_before_after`、`unified_diff_snapshot`、`exact_mutation`、
   `operation_only`；只有 Adapter 能从可靠终态证明的数据才能准入；
 - execution root 同时作为 display root：root 内文件显示相对路径，Runtime 明确报告的 root 外文件显示规范化绝对
-  路径并继续进入该 Run 卡片；
+  路径并继续进入该 Run 卡片；当前 Built-in Tool Process 的精确 `ROVAI_RUN_TMP` 及后代除外，它们在 Evidence
+  ingress 前按 path component 排除；
 - Codex Command View 使用 terminal completed `fileChange`；Run card 优先使用 matching turn completed 后发布的
   最新 `turn/diff/updated` snapshot，空 snapshot 表示 display root 内 no-change；显式 root 外 terminal fileChange
   仍补入卡片，缺失或不可解析时回退全部 terminal fileChange；
@@ -70,6 +71,8 @@ last_updated: 2026-08-28
   operation-only 保留时序与计数但不参与 Diff 统计；只有每个文件都有可靠统计时才显示全局 `+A −D`；
 - 会话每 Run 最多显示一张 `Files Changed` 卡片，默认显示三行并可原位展开文件清单；header `View` 与文件行进入
   同一独立 Review。Command View 仍扁平显示 `修改 xxx`，没有 `apply_patch` 父行或“编辑了 N 个文件”聚合层；
+- managed output 与普通文件混合时只展示普通文件；全 managed Run snapshot 成为权威空结果。历史 Evidence 与
+  卡片不迁移、不重新投影，通过临时区发布的附件继续由 Camp Attachment 独立展示；
 - Camp Open Snapshot 升为 schema 34、Open schema 5；detail 只允许
   `campId + agentRunId + executionEpoch` 授权读取，受管 detail blob 不进入模型上下文。
 - Desktop Navigation 使用一个全局 refresh coordinator：Core 在影响投影的提交后发失效提示，Renderer 以
@@ -80,6 +83,7 @@ last_updated: 2026-08-28
 
 - 不创建 Git synthetic tree、baseline/final capture、checkpoint ref、Window coordinator 或 workspace scanner；
 - 不把用户编辑器、shell、其他 Run 或外部进程未被 Runtime 报告的写入加入卡片；
+- 不把当前 `ROVAI_RUN_TMP` 内的临时交付文件加入 Command 或 Run 卡片，也不把排除范围扩大到整个 data dir；
 - 不跨 Run、Camp 或 execution epoch 合并文件变化；
 - 不读取当前文件补齐 partial mutation，不从 Tool title、自由文本、output 或命令推断 diff；
 - 不把 operation-only 或 exact mutation 包装为完整文件净差异；
@@ -99,6 +103,8 @@ generation、reconciliation 与文件变化 projection 都不进入模型上下�
 - terminal ingress flush 后才投影；failed/cancelled Run 可包含此前成功变化，failed/cancelled Operation 不进入；
 - 三个并行 Run 产生三张独立卡片，不互相等待；非 Git目录与 Git目录得到同一行为；
 - Codex 最新 matching turn snapshot 权威，空 snapshot 抑制 fallback；没有 snapshot 时 terminal fileChange 可回退；
+- exact `ROVAI_RUN_TMP` 在 macOS/Linux/Windows 均于 ingress 排除；mixed Evidence 保留普通文件，
+  `run-tmp-copy` 与普通 root 外用户路径不误伤，旧 projection 不回写；
 - ACP sparse terminal 能使用同 ToolCall 缓存的可靠字段；Kiro `file:` URI、绝对/相对路径严格规范化，root 外
   文件保留绝对展示路径；Kimi/Qoder path-only 生成 `修改 xxx` 与 operation-only 记录，同文件后续可靠 Diff
   仍可生成内容与增删统计；
@@ -117,8 +123,8 @@ generation、reconciliation 与文件变化 projection 都不进入模型上下�
 | 范围 | 结论 | 证据或理由 |
 | --- | --- | --- |
 | Version lifecycle | 已更新 | v1.28 按冻结时事实转为 historical；本概览、[实施计划](implementation-plan.md)、[决定](decisions.md)与[版本索引](../README.md)建立唯一 current v1.29。 |
-| Decisions | 已更新 | [V1.29-D01–D06](decisions.md#v1-29-d01)冻结 membership、Delivery 与 Attachment；[D07](decisions.md#v1-29-d07)冻结安全退出；[D08](decisions.md#v1-29-d08)冻结共享 Evidence/独立 projector；[D09](decisions.md#v1-29-d09)彻底放弃 Workspace capture；[D10](decisions.md#v1-29-d10)冻结 Command inline 与 Run Review presentation；[D11](decisions.md#v1-29-d11)冻结 ACP FS/Terminal Runtime-owned 权限；[D12](decisions.md#v1-29-d12)冻结 Navigation 提交后失效与 generation drain。 |
-| Contracts | 已更新 | 新增 [Camp Membership v1](../../contracts/camp-membership-v1.md)、[Planned Shutdown v3](../../contracts/planned-shutdown-v3.md)与 [Runtime File Change Observation v1](../../contracts/runtime-file-change-observation-v1.md)；Runtime Launch v28 与 ACP Client Terminal v2 收口代理权限。 |
+| Decisions | 已更新 | [V1.29-D01–D06](decisions.md#v1-29-d01)冻结 membership、Delivery 与 Attachment；[D07](decisions.md#v1-29-d07)冻结安全退出；[D08](decisions.md#v1-29-d08)冻结共享 Evidence/独立 projector；[D09](decisions.md#v1-29-d09)彻底放弃 Workspace capture；[D10](decisions.md#v1-29-d10)冻结 Command inline 与 Run Review presentation；[D11](decisions.md#v1-29-d11)冻结 ACP FS/Terminal Runtime-owned 权限；[D12](decisions.md#v1-29-d12)冻结 Navigation 提交后失效与 generation drain；[D13](decisions.md#v1-29-d13)冻结 managed run output exclusion 与无历史迁移边界。 |
+| Contracts | 已更新 | 新增 [Camp Membership v1](../../contracts/camp-membership-v1.md)、[Planned Shutdown v3](../../contracts/planned-shutdown-v3.md)，并以 [Runtime File Change Observation v2](../../contracts/runtime-file-change-observation-v2.md)替代 v1 作为当前入口；Runtime Launch v28 与 ACP Client Terminal v2 收口代理权限。 |
 | Architecture | 已更新 | 新增[动态 Camp 队员关系](../../architecture/dynamic-camp-membership.md)、[Runtime File Change Observation](../../architecture/runtime-file-change-observation.md)与[Desktop Navigation Refresh](../../architecture/desktop-navigation-refresh.md)；[计划关闭](../../architecture/planned-shutdown.md)切换为退出取消全部 AgentRun；基础不变量同步无 Git/无扫描的每 Run Evidence projection。 |
 | UI | 已更新 | [Camp 会话工作区](../../ui/components/conversation-workspace.md)冻结 `修改 xxx` rows、每 Run 卡片、Files Changed Review 与关闭等待面；[App Shell](../../ui/components/app-shell-navigation.md)冻结 400ms 冷启动反馈与事件驱动 Navigation 新鲜度；其他布局不变。 |
 | Runtime Activity | 已更新 | Registry 继续拥有每 Adapter 的 terminal 文件操作与 Command Diff mapping；Run snapshot 是独立 Evidence event。 |
@@ -131,7 +137,7 @@ generation、reconciliation 与文件变化 projection 都不进入模型上下�
 - [实施与验收计划](implementation-plan.md)
 - [版本决定](decisions.md)
 - [Runtime File Change Observation 架构](../../architecture/runtime-file-change-observation.md)
-- [Runtime File Change Observation v1 合同](../../contracts/runtime-file-change-observation-v1.md)
+- [Runtime File Change Observation v2 合同](../../contracts/runtime-file-change-observation-v2.md)
 - [Runtime Launch and Verification v28](../../contracts/runtime-launch-and-verification-v28.md)
 - [ACP Client Terminal v2](../../contracts/acp-client-terminal-v2.md)
 - [Desktop Navigation Refresh](../../architecture/desktop-navigation-refresh.md)
