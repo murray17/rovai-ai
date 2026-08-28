@@ -736,6 +736,30 @@ describe('OpenPlatformApiClient', () => {
     expect(paths).toEqual(['/developers/v1/app_version/list/cli_dingding'])
   })
 
+  it('accepts the appID field returned by the current Feishu console', async () => {
+    const session = fakeSession(async (rawUrl) => {
+      const url = new URL(rawUrl)
+      if (url.pathname === '/developers/v1/manifest/upsert_by_template') {
+        return apiResponse({
+          appID: 'cli_gugu',
+          avatar: configuration.avatarUrl
+        })
+      }
+      throw new Error(`unexpected request: ${url.pathname}`)
+    })
+
+    await expect(new OpenPlatformApiClient(session).createApp({
+      appName: configuration.appName,
+      appDescription: configuration.appDescription,
+      avatarUrl: configuration.avatarUrl,
+      correlationId: 'rvfpi_intent1'
+    })).resolves.toEqual({
+      appId: 'cli_gugu',
+      avatarUrl: configuration.avatarUrl,
+      creationMode: 'template'
+    })
+  })
+
   it('falls back to self-build exactly once after a definite template rejection', async () => {
     const paths: string[] = []
     const session = fakeSession(async (rawUrl) => {

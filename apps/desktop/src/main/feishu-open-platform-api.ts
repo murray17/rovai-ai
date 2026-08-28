@@ -1065,7 +1065,15 @@ function createdMemberBotApp(
     optionalRecord(record.appInfo)
   ]
   const appId = candidates
-    .map((candidate) => firstString(candidate, ['ClientID', 'clientId', 'client_id', 'appId']))
+    .map((candidate) => firstString(candidate, [
+      'ClientID',
+      'clientID',
+      'clientId',
+      'client_id',
+      'appID',
+      'appId',
+      'app_id'
+    ]))
     .find(Boolean)
   if (!appId || !isResourceId(appId)) {
     throw apiError('feishu_console_create_response_invalid', true)
