@@ -19,7 +19,7 @@ use crate::{
     camp_id::CampId,
     collaboration::{
         AddCampMemberCommand, CampMembershipMutationSource, CollaborationService,
-        ExternalChannelAdmissionInput, RemoveCampMemberCommand,
+        ExternalChannelAdmissionInput, RemoveCampMemberCommand, append_domain_event,
     },
     command::{
         ActorRef, CommandEnvelope, CommandExecution, CommandHandlerResult, CommandResultStatus,
@@ -1721,6 +1721,7 @@ impl ChannelService {
                     "conversationId": conversation_id,
                     "bindingId": binding_id,
                     "campId": camp_id,
+                    "campCreated": true,
                     "generation": generation,
                 }),
                 Some(EntityReference {
@@ -2300,6 +2301,7 @@ impl ChannelService {
                 GroupRosterReadiness::Ready(agent_ids) => agent_ids,
             };
 
+            let mut camp_created = false;
             let mut binding = if let Some(observed_binding_id) =
                 frozen.binding_id_at_observation.as_deref()
             {
@@ -2356,6 +2358,7 @@ impl ChannelService {
                         &quick_chat_path,
                         &now_text,
                     )?);
+                    camp_created = true;
                 } else {
                     if !aggregate.canonical_mentions_complete {
                         mark_aggregate_failed(
@@ -2412,6 +2415,7 @@ impl ChannelService {
                     initial_members,
                     &now_text,
                 )?);
+                camp_created = true;
             }
             let camp_id = binding
                 .camp_id
@@ -2488,6 +2492,7 @@ impl ChannelService {
                     "aggregateId": aggregate.id,
                     "requestId": request_id,
                     "campId": camp_id,
+                    "campCreated": camp_created,
                     "queuePosition": queue_position,
                     "status": request_status,
                 }),
@@ -2849,6 +2854,7 @@ impl ChannelService {
                     "projectDisplayName": project_display_name,
                     "bindingId": binding_id,
                     "campId": camp_id,
+                    "campCreated": true,
                     "promotedMessageCount": queued.len(),
                     "version": pending.version + 2,
                 }),
@@ -2906,6 +2912,7 @@ impl ChannelService {
                 "#,
                 [&now_text],
             )?;
+            decline_unattended_channel_retries(transaction, &envelope.actor, &now_text)?;
             project_active_request_deliveries(transaction, &now_text)?;
             settle_terminal_requests(transaction, &now_text)?;
             promote_ready_requests(transaction, &now_text, &envelope.command_id)?;
@@ -4875,6 +4882,82 @@ fn insert_delivery(
     Ok(())
 }
 
+fn decline_unattended_channel_retries(
+    transaction: &Transaction<'_>,
+    actor: &ActorRef,
+    now: &str,
+) -> Result<()> {
+    let candidates = query_rows(
+        transaction,
+        r#"
+        SELECT run.id, request.camp_id, request.camp_turn_id, run.execution_epoch
+        FROM channel_turn_request AS request
+        JOIN camp_turn AS turn ON turn.id = request.camp_turn_id
+        JOIN agent_run AS run ON run.camp_turn_id = request.camp_turn_id
+        WHERE request.status = 'admitted'
+          AND turn.status = 'waiting'
+          AND run.completion_role = 'required'
+          AND run.status = 'failed'
+          AND run.manual_retry_allowed = 1
+          AND run.retry_declined_at IS NULL
+          AND NOT EXISTS (
+              SELECT 1 FROM agent_run AS successor
+              WHERE successor.predecessor_agent_run_id = run.id
+          )
+        ORDER BY request.created_at, run.created_at, run.id
+        "#,
+        [],
+        |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, i64>(3)?,
+            ))
+        },
+    )?;
+    let mut affected_turns = BTreeMap::new();
+    for (agent_run_id, camp_id, camp_turn_id, execution_epoch) in candidates {
+        let updated = transaction.execute(
+            r#"
+            UPDATE agent_run
+            SET retry_declined_at = ?2, version = version + 1, updated_at = ?2
+            WHERE id = ?1 AND status = 'failed'
+              AND manual_retry_allowed = 1 AND retry_declined_at IS NULL
+              AND NOT EXISTS (
+                  SELECT 1 FROM agent_run AS successor
+                  WHERE successor.predecessor_agent_run_id = agent_run.id
+              )
+            "#,
+            params![agent_run_id, now],
+        )?;
+        if updated == 0 {
+            continue;
+        }
+        append_domain_event(
+            transaction,
+            "agent_run.retry_declined",
+            Some(&camp_id),
+            Some(("agent_run", &agent_run_id)),
+            actor,
+            Some(execution_epoch),
+            &json!({ "reasonCode": "channel_unattended_retry_unavailable" }),
+        )?;
+        affected_turns.insert(camp_turn_id, camp_id);
+    }
+    for (camp_turn_id, camp_id) in affected_turns {
+        crate::runtime::recompute_camp_turn(
+            transaction,
+            &camp_id,
+            &camp_turn_id,
+            actor,
+            None,
+            now,
+        )?;
+    }
+    Ok(())
+}
+
 fn project_active_request_deliveries(transaction: &Transaction<'_>, now: &str) -> Result<()> {
     let active = query_rows(
         transaction,
@@ -4899,23 +4982,36 @@ fn project_active_request_deliveries(transaction: &Transaction<'_>, now: &str) -
         let run_states = query_rows(
             transaction,
             r#"
-            SELECT run.id, conversation.agent_id, run.status, run.version
+            SELECT run.id, conversation.agent_id, run.status, run.version,
+                   EXISTS(
+                       SELECT 1 FROM camp_message AS output
+                       WHERE output.camp_turn_id = run.camp_turn_id
+                         AND output.sequence > ?2
+                         AND output.author_type = 'agent'
+                         AND output.author_id = conversation.agent_id
+                         AND output.tombstoned_at IS NULL
+                   ) AS has_public_output
             FROM agent_run AS run
             JOIN conversation ON conversation.id = run.conversation_id
             WHERE run.camp_turn_id = ?1
             ORDER BY run.created_at, run.id
             "#,
-            [&camp_turn_id],
+            params![camp_turn_id, trigger_sequence],
             |row| {
                 Ok((
                     row.get::<_, String>(0)?,
                     row.get::<_, String>(1)?,
                     row.get::<_, String>(2)?,
                     row.get::<_, i64>(3)?,
+                    row.get::<_, bool>(4)?,
                 ))
             },
         )?;
-        for (run_id, agent_id, status, version) in run_states {
+        for (run_id, agent_id, status, version, has_public_output) in run_states {
+            if has_public_output && matches!(status.as_str(), "succeeded" | "failed" | "cancelled")
+            {
+                continue;
+            }
             insert_delivery(
                 transaction,
                 &request_id,
@@ -6475,6 +6571,8 @@ mod tests {
             .unwrap();
         assert_eq!(first_generation.result.payload["generation"], 1);
         assert_eq!(second_generation.result.payload["generation"], 2);
+        assert_eq!(first_generation.result.payload["campCreated"], true);
+        assert_eq!(second_generation.result.payload["campCreated"], true);
         for table in ["camp_message", "camp_turn", "agent_run"] {
             let count: i64 = database
                 .connection()
@@ -6523,6 +6621,7 @@ mod tests {
             )
             .unwrap();
         assert_eq!(finalized.result.code, "channel.turn.admitted");
+        assert_eq!(finalized.result.payload["campCreated"], false);
         assert_eq!(
             database
                 .connection()
@@ -6549,6 +6648,137 @@ mod tests {
             )
             .unwrap();
         assert_eq!(busy.result.code, "channel.dm.busy");
+
+        let (camp_id, camp_turn_id, agent_run_id): (String, String, String) = database
+            .connection()
+            .query_row(
+                r#"
+                SELECT request.camp_id, request.camp_turn_id, run.id
+                FROM channel_turn_request AS request
+                JOIN agent_run AS run ON run.camp_turn_id = request.camp_turn_id
+                WHERE request.status = 'admitted'
+                "#,
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        let failed_at = Utc::now().to_rfc3339();
+        let output_content = vec![StructuredCampMessageSegment::Text {
+            text: "partial channel output".to_string(),
+        }];
+        let output_content_json = serde_json::to_string(&output_content).unwrap();
+        let output_digest = canonical_content_digest(&output_content).unwrap();
+        database
+            .connection()
+            .execute(
+                "UPDATE camp SET last_message_sequence = last_message_sequence + 1 WHERE id = ?1",
+                [&camp_id],
+            )
+            .unwrap();
+        let output_sequence: i64 = database
+            .connection()
+            .query_row(
+                "SELECT last_message_sequence FROM camp WHERE id = ?1",
+                [&camp_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        database
+            .connection()
+            .execute(
+                r#"
+                INSERT INTO camp_message(
+                    id, camp_id, sequence, author_type, author_id,
+                    source_agent_run_id, body, structured_content_json, content_digest,
+                    address_mode, addressed_agent_ids_json, reply_to_camp_message_id,
+                    camp_turn_id, agent_run_id, tombstoned_at, version,
+                    created_at, updated_at, effective_recipient_ids_json,
+                    recipient_set_digest, recipient_presentation_json, source_operation_id
+                ) VALUES (
+                    'channel-output', ?1, ?2, 'agent', 'agent_1',
+                    ?3, 'partial channel output', ?4, ?5,
+                    'default', '[]', NULL, ?6, ?3, NULL, 1,
+                    ?7, ?7, '[]', NULL, '{}', NULL
+                )
+                "#,
+                params![
+                    camp_id,
+                    output_sequence,
+                    agent_run_id,
+                    output_content_json,
+                    output_digest,
+                    camp_turn_id,
+                    failed_at,
+                ],
+            )
+            .unwrap();
+        database
+            .connection()
+            .execute(
+                r#"
+                UPDATE agent_run
+                SET status = 'failed', last_error_code = 'runtime_failed',
+                    manual_retry_allowed = 1, ended_at = ?2,
+                    version = version + 1, updated_at = ?2
+                WHERE id = ?1
+                "#,
+                params![agent_run_id, failed_at],
+            )
+            .unwrap();
+        database
+            .connection()
+            .execute(
+                "UPDATE camp_turn SET status = 'waiting', updated_at = ?2 WHERE id = ?1",
+                params![camp_turn_id, failed_at],
+            )
+            .unwrap();
+
+        let tick = service
+            .host_tick(
+                &mut database,
+                &host_envelope(
+                    "host-tick-decline-channel-retry",
+                    ChannelHostTickCommand {
+                        worker_id: "channel-test-worker".to_string(),
+                        limit: 20,
+                    },
+                ),
+            )
+            .unwrap();
+        let claimed = tick.result.payload["deliveries"].as_array().unwrap();
+        assert!(claimed.iter().any(|delivery| {
+            delivery["deliveryKind"] == "agent_output"
+                && delivery["payload"]["body"] == "partial channel output"
+        }));
+        assert!(
+            claimed.iter().all(|delivery| {
+                delivery["deliveryKind"] != "agent_status"
+                    || delivery["payload"]["status"] != "failed"
+            }),
+            "a terminal status card must not overwrite an already-published Agent reply"
+        );
+
+        let retry_declined_at: Option<String> = database
+            .connection()
+            .query_row(
+                "SELECT retry_declined_at FROM agent_run WHERE id = ?1",
+                [&agent_run_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(
+            retry_declined_at.is_some(),
+            "a Channel request cannot wait for a local-only retry decision"
+        );
+        let turn_status: String = database
+            .connection()
+            .query_row(
+                "SELECT status FROM camp_turn WHERE id = ?1 AND camp_id = ?2",
+                params![camp_turn_id, camp_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(turn_status, "failed");
     }
 
     #[test]

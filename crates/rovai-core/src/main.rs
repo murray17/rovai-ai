@@ -1855,6 +1855,24 @@ impl Core {
             .clone()
     }
 
+    fn ensure_new_channel_camp_attachment_ready(
+        &self,
+        database: &mut Database,
+        execution: &CommandExecution,
+    ) -> Result<()> {
+        if execution.replayed
+            || execution.result.status == CommandResultStatus::Rejected
+            || execution.result.payload["campCreated"].as_bool() != Some(true)
+        {
+            return Ok(());
+        }
+        let camp_id = execution.result.payload["campId"]
+            .as_str()
+            .context("new Channel Camp result omitted campId")?;
+        self.attachment_views
+            .ensure_empty_camp_ready(database, camp_id)
+    }
+
     async fn acquire_camp_attachment_mutation(
         &self,
         camp_id: &str,
@@ -4830,6 +4848,7 @@ impl Core {
                         params.command,
                     ),
                 )?;
+                self.ensure_new_channel_camp_attachment_ready(&mut database, &execution)?;
                 Ok(serde_json::to_value(execution.result)?)
             }
             "channels.feishu.pendingBinding.resolve" => {
@@ -4845,6 +4864,7 @@ impl Core {
                         params.command,
                     ),
                 )?;
+                self.ensure_new_channel_camp_attachment_ready(&mut database, &execution)?;
                 Ok(serde_json::to_value(execution.result)?)
             }
             "channels.membership.add" => {
@@ -4930,6 +4950,7 @@ impl Core {
                         params.command,
                     ),
                 )?;
+                self.ensure_new_channel_camp_attachment_ready(&mut database, &execution)?;
                 Ok(serde_json::to_value(execution.result)?)
             }
             "channels.host.tick" => {
@@ -17688,6 +17709,86 @@ while IFS= read -r _ignored; do :; done
         assert!(!runtime_check_writes_diagnostic(
             RuntimeCheckFinalization::CleanupOnly
         ));
+    }
+
+    #[cfg(all(target_os = "macos", feature = "slow-tests"))]
+    #[tokio::test]
+    async fn new_channel_camp_is_materialized_before_runtime_dispatch() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let root = std::env::temp_dir().join(format!(
+            "rovai-channel-attachment-root-test-{}",
+            uuid::Uuid::new_v4()
+        ));
+        fs::create_dir_all(&root).unwrap();
+        let root = root.canonicalize().unwrap();
+        let workspace = root.join("data/quick-chat");
+        fs::create_dir_all(&workspace).unwrap();
+        let core = runtime_resolution_test_core(&root).unwrap();
+
+        let (camp_id, execution) = {
+            let mut database = core.database.lock().await;
+            let agent_id = AgentProfileService::default()
+                .list_profiles(&database)
+                .unwrap()
+                .into_iter()
+                .next()
+                .expect("the startup database should include a default member")
+                .agent_id;
+            let mut execution = CollaborationService::default()
+                .create_camp(
+                    &mut database,
+                    &CommandEnvelope {
+                        command_id: uuid::Uuid::new_v4().to_string(),
+                        actor: ActorRef::User {
+                            user_id: "test-user".to_string(),
+                        },
+                        camp_id: None,
+                        expected_versions: Vec::new(),
+                        execution_epoch: None,
+                        payload: CreateCampCommand {
+                            name: Some("Feishu DM".to_string()),
+                            project_binding_kind: ProjectBindingKind::QuickChat,
+                            project_path: workspace.display().to_string(),
+                            member_agent_ids: vec![agent_id.clone()],
+                            default_lead_agent_id: agent_id,
+                            collaboration_mode: CampCollaborationMode::Peer,
+                            activation_state: CampActivationState::Active,
+                        },
+                    },
+                )
+                .unwrap();
+            execution.result.payload["campCreated"] = Value::Bool(true);
+            let camp_id = execution.result.payload["campId"]
+                .as_str()
+                .unwrap()
+                .to_string();
+            core.ensure_new_channel_camp_attachment_ready(&mut database, &execution)
+                .unwrap();
+            (camp_id, execution)
+        };
+
+        assert!(!execution.replayed);
+        let authorization = core
+            .verified_camp_runtime_authorization(&camp_id, &workspace)
+            .await
+            .expect("a newly-created Channel Camp must be dispatchable immediately");
+        assert_eq!(authorization.camp_id, camp_id);
+
+        let attachment_root = authorization.attachment_root;
+        drop(core);
+        fs::set_permissions(&attachment_root, fs::Permissions::from_mode(0o700)).unwrap();
+        fs::set_permissions(
+            attachment_root.parent().unwrap(),
+            fs::Permissions::from_mode(0o700),
+        )
+        .unwrap();
+        fs::set_permissions(
+            attachment_root.parent().unwrap().parent().unwrap(),
+            fs::Permissions::from_mode(0o700),
+        )
+        .unwrap();
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[cfg(all(target_os = "macos", feature = "slow-tests"))]

@@ -199,7 +199,9 @@ Finalize 先重查 Owner、exact binding、项目、已发布 Bot 和群 roster�
 `ChannelTurnRequest`；未绑定 group/topic 只写 PendingCampBinding FIFO。绑定完成后，每个 Binding 同时最多一个 admitted
 请求，其余 queued 且不进入 Camp conversation、Context 或 AgentRun。提升复用与本地用户发送相同的
 `CollaborationService` 原子 admission，一次性创建唯一触发 CampMessage、一个根 CampTurn 与全部初始 AgentRun。只有
-Runtime 暂未 ready 属于可重试排队 blocker；永久目标或授权错误终结请求并产生 attention delivery。
+Runtime 暂未 ready 属于可重试排队 blocker；永久目标或授权错误终结请求并产生 attention delivery。任何 Channel 命令
+新建 Camp 时，Main 必须在释放数据库锁并让 Scheduler 看见 AgentRun 前先 materialize 空的 Published Attachment View，
+避免首次执行与 Camp 文件视图创建竞态。
 
 ## 外部引用与模型输入
 
@@ -231,6 +233,9 @@ nonce/version；重启、重试和后续 pending 消息都复用同一 dedupe id
 Core 只从已提交公开 CampMessage 和请求状态生成 `ChannelDelivery`。Outbox 使用 lease、attempt、退避和稳定
 dedupe key；Main 发送成功后回写外部消息 ID，网络错误不会回滚 CampMessage。队列卡从“等待”原位更新为“开始”，
 Agent 输出使用实际作者 Agent 的已发布 Bot；作者 Bot 不可用时不冒充其他队员，而是生成 attention 状态。
+飞书没有本地 AgentRun retry/decline 操作面，因此 required Run 失败且只剩人工重试决定时，Channel Host 确定性 decline
+该重试并让 Turn/Request 收口，再继续同一 Binding 的 FIFO。公开 Agent 输出一旦存在，后续 terminal `agent_status` 不再
+覆盖该回复卡；最终 Turn 状态由独立 completion delivery 表达。
 `CurrentUserMention` 在群/话题投影为飞书原生 `<at>`，不靠普通 `@名称` 字符串猜身份。
 
 Core Snapshot 保存 pending aggregate、transport conversation 和 delivery 恢复事实，Main 启动后恢复所有 published
