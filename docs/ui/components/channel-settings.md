@@ -8,7 +8,7 @@ last_updated: 2026-08-28
 
 # 渠道设置
 
-渠道设置是主人在 Rovai 本机维护渠道连接与队员 Bot 的 Renderer surface。项目选择发生在 Owner 的飞书私聊卡片中；
+渠道设置是 Owner 在 Rovai 本机维护渠道连接与队员 Bot 的 Renderer surface。项目选择发生在 Owner 的飞书私聊卡片中；
 Renderer 不提供 Channel 项目目录或会话绑定操作。
 领域状态和错误见 [Feishu Channel v2](../../contracts/feishu-channel-v2.md)；本页只拥有信息层级、交互与可访问性。
 
@@ -16,7 +16,7 @@ Renderer 不提供 Channel 项目目录或会话绑定操作。
 
 页面沿用设置工作区的 Porcelain Day / Steel Night 世界和现有 `SettingsPageHeader`：
 
-1. `Settings / Channels` eyebrow、标题“渠道”、主人本机说明；
+1. `Settings / Channels` eyebrow、标题“渠道”、Owner 本机说明；
 2. 渠道 Provider 卡，当前只显示飞书；
 3. 渠道连接，展示真实开发者用户名、企业与可选 email，提供登录、切换和断开；
 4. 队员 Bot 列表，按成员稳定顺序显示头像、名称、角色、发布状态和单行动作；
@@ -28,7 +28,7 @@ Dialog、状态点和间距复用现有组件语法。
 ## 渠道连接与二维码
 
 未连接时主动作是“登录开放平台”；已连接时为“切换账号”，并提供次级“断开”。连接行只展示真实 `userName`、
-`tenantName`、可选 email 与 Feishu/Lark brand，不显示 controller App 或“飞书主人/飞书企业”占位值。说明必须明确：
+`tenantName`、可选 email 与 Feishu/Lark brand，不显示 controller App 或“飞书 Owner/飞书企业”占位值。说明必须明确：
 连接只决定以后发布的目标，切换不会迁移或停用已发布 Bot。点击“切换账号”后，当前账号在新二维码成功完成前继续
 有效；取消或失败关闭 Dialog 后仍显示原账号，不得降级为“登录已过期”。只有切换成功才展示新账号。
 
@@ -55,7 +55,7 @@ Dialog、状态点和间距复用现有组件语法。
 同一阶段。若配置没有 mutation，可以跳过第 6 阶段，但不得伪造一次最终版本发布。普通发布不得打开飞书“创建飞书智能体应用 /
 立即创建”页或其他平台确认窗口。Session 失效/身份漂移时显示“重新连接飞书”并停止发布，不存在其他发布流程。
 
-若上次发布已冻结 App ID 并失败，主人再次点击“继续核对”沿用同一 Dialog 与进度语言，后台核对
+若上次发布已冻结 App ID 并失败，Owner 再次点击“继续核对”沿用同一 Dialog 与进度语言，后台核对
 并接管该 App；不显示新的创建确认，也不生成第二个 App。初始版本已发布但头像仍是旧 Rovai icon 时，同一流程可以显示
 配置与发布阶段，把当前队员头像作为 `1.0.1` 修复版本发布到原 App；修复版本已 published 时只核对而不重复 mutation。
 成功后依次进入在线配置核验、长连接与完成；失败继续显示原 App ID、可恢复说明和“继续核对”。只有 create 结果不明且
@@ -86,12 +86,12 @@ Dialog、状态点和间距复用现有组件语法。
 
 ## Owner identity 与绑定诊断
 
-Owner identity 是入站安全边界，不是主人需要处理的产品状态。Renderer 不展示“主人身份待核验”、核验按钮或任何
+Owner identity 是入站安全边界，不是 Owner 需要处理的产品状态。Renderer 不展示“Owner 身份待核验”、核验按钮或任何
 per-App identity 状态。已连接 Developer Identity 已确定 canonical Owner；首条携带匹配 tenant user identity 的可靠
 message/callback envelope 会在同一入站流程自动记录 App-scoped identity 并继续处理。映射缺失或冲突时由 Host/Core
 内部 fail closed，不能把用户名、群管理员身份或卡片 payload 当成 Owner 证据。
 
-页面可在 Provider 卡底部显示 `待处理项目选择 N` 与 `绑定异常 N` 两个低强调诊断值；零值可省略。它们只帮助主人
+页面可在 Provider 卡底部显示 `待处理项目选择 N` 与 `绑定异常 N` 两个低强调诊断值；零值可省略。它们只帮助 Owner
 理解当前渠道状态，不展开项目列表、路径、会话 picker 或 resolve 操作。正常流程是 Owner 私聊自动 Quick Chat，或群/
 话题第一次有效 mention 后在飞书私聊卡片中选择项目。
 

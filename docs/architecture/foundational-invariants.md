@@ -451,7 +451,7 @@ last_updated: 2026-08-28
 - Conversation Header 的 Inspector 显隐是 Renderer 本地偏好，不产生领域命令。Stop 是时间线中的 CampTurn 终态投影；Copy 属于具体消息内容，Shared top bar 不取代页面自己的标题和动作。
 - 执行过程以 Agent 为稳定聚合单位：同一 Camp 中一个 Agent 的 Run chronology 形成一个过程入口，状态必须由证据和 Run authority 归约，不能按最后一条文本或动画猜测。
 - 普通 Camp Inspector 只有聚焦上下文和已定义的执行/详情入口；Approval 使用唯一 surface，不能在多个面板复制可操作控件或产生竞争决策。
-- 渠道账号与队员 Bot 只在主人本机设置 surface 可操作；渠道页不维护第二套项目目录或会话绑定。飞书只接受已验证 Owner，私聊自动 Quick Chat，群/话题首次项目选择只通过 Owner 私聊卡片完成。Renderer 只得到脱敏投影；App Secret、Cookie/CSRF、本机路径、原始外部身份和 Host 恢复游标留在 Main/Core 对应权威，不进入 DOM、Renderer state 或 Agent Context。
+- 渠道账号与队员 Bot 只在 Owner 本机设置 surface 可操作；渠道页不维护第二套项目目录或会话绑定。飞书只接受已验证 Owner，私聊自动 Quick Chat，群/话题首次项目选择只通过 Owner 私聊卡片完成。Renderer 只得到脱敏投影；App Secret、Cookie/CSRF、本机路径、原始外部身份和 Host 恢复游标留在 Main/Core 对应权威，不进入 DOM、Renderer state 或 Agent Context。
 - Agent execution console 在一个已挂载 Camp workspace 内只有一个 Renderer-owned surface；其 `bottom | inspector`
   placement 是 Main-owned 的本机安装级展示偏好，最后一次成功的显式位置选择跨 Camp、页面切换和应用重启
   生效，但不进入 Camp/Core/SQLite 或云同步。旧偏好没有该字段时只补 `bottom`，不从历史 workspace、

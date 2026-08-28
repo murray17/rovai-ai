@@ -20,7 +20,7 @@ ChannelTurnRequest、群 roster 和 ChannelDelivery 的字段与状态语义。C
 | --- | --- |
 | ProjectBinding create/update/archive | `local_user` |
 | 渠道会话 bind/switch | `local_user` |
-| 连接/断开账号、发布队员 Bot | 本机主人经 typed Desktop API |
+| 连接/断开账号、发布队员 Bot | 本机 Owner 经 typed Desktop API |
 | inbound observe/finalize、roster、Host tick、delivery settle | `feishu-channel-host` System component |
 | Camp membership source mutation | `channel-membership-sync` + exact `feishu` source binding/generation |
 
@@ -128,7 +128,7 @@ remoteAppId` 成为不可换绑身份，`credentialRef` 在首次写入后同样
 `unpublished -> published`；Rovai 不提供管理、停用、关闭、删除或换绑命令。历史数据库中的 `disabled` 仍可读取，且
 只允许使用原 completed intent 进入 `session_verified -> app_created -> ... -> completed` 恢复为 `published`，其中
 `app_created` 表示已核对原 App 身份，不表示新建。恢复要求当前 Developer Session 仍是原 `accountId`，通过普通
-console reconciliation 读取同一 App Secret、配置、版本并验证连接。远端应用生命周期由主人在官方开放平台管理。
+console reconciliation 读取同一 App Secret、配置、版本并验证连接。远端应用生命周期由 Owner 在官方开放平台管理。
 
 Intent 冻结 `agentId + accountId + expectedUserIdDigest + expectedTenantId + requestedAppName + provisioningMode`，所有
 推进带 exact version。唯一的 `developer_session` 模式必须执行以下顺序：
@@ -179,7 +179,7 @@ console 失败都不得要求队员再次扫码、打开平台创建确认页或
 创建成功时，写 `failed_unknown_remote_state + failureCode` 并锁住自动再创建；持久 credential 已存在时才允许
 `failed_recoverable` 继续验证同一 App。Main 重启按这些事实收敛，不从 UI 临时进度推断。
 
-主人对含冻结 `remoteAppId` 的 `failed_unknown_remote_state` 再次执行普通发布时，必须进入同一 intent 的显式
+Owner 对含冻结 `remoteAppId` 的 `failed_unknown_remote_state` 再次执行普通发布时，必须进入同一 intent 的显式
 reconciliation，不得创建新 intent、新 App 或更换 `remoteAppId`。它先复核 exact Developer Identity，
 再读取冻结 App 的 Secret、版本列表/detail、在线 Bot/Scope/Event/Callback 状态与 manifest 头像元数据。最新 published 为 `1.0.0` 且当前队员头像可用时，允许且只允许
 针对同一 App 执行头像修复：upload 当前受控 icon、重放幂等 manifest 配置、创建或复用 `1.0.1`、commit/release 并回读。

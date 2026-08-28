@@ -3472,14 +3472,16 @@ fn classify_and_record_feishu_owner(
     let identity = transaction
         .query_row(
             r#"
-            SELECT bot.account_id, owner.tenant_id,
-                   owner.canonical_owner_principal_id,
+            SELECT bot.account_id, owner.canonical_owner_principal_id,
                    owner.user_id_digest, owner.union_id_digest,
-                   app.open_id_digest, app.user_id_digest, app.union_id_digest
+                   app.open_id_digest, app.user_id_digest, app.union_id_digest,
+                   principal.tenant_key
             FROM feishu_member_bot AS bot
             JOIN feishu_owner_identity AS owner ON owner.account_id = bot.account_id
             LEFT JOIN feishu_owner_app_identity AS app
               ON app.account_id = owner.account_id AND app.app_id = bot.app_id
+            LEFT JOIN external_principal AS principal
+              ON principal.id = owner.canonical_owner_principal_id
             WHERE bot.app_id = ?1 AND bot.status = 'published'
             "#,
             [app_id],
@@ -3488,7 +3490,7 @@ fn classify_and_record_feishu_owner(
                     row.get::<_, String>(0)?,
                     row.get::<_, String>(1)?,
                     row.get::<_, String>(2)?,
-                    row.get::<_, String>(3)?,
+                    row.get::<_, Option<String>>(3)?,
                     row.get::<_, Option<String>>(4)?,
                     row.get::<_, Option<String>>(5)?,
                     row.get::<_, Option<String>>(6)?,
@@ -3499,18 +3501,21 @@ fn classify_and_record_feishu_owner(
         .optional()?;
     let Some((
         account_id,
-        expected_tenant_id,
         principal_id,
         canonical_user_digest,
         canonical_union_digest,
         app_open_digest,
         app_user_digest,
         app_union_digest,
+        frozen_tenant_key,
     )) = identity
     else {
         return Ok(FeishuOwnerClassification::Unverified);
     };
-    if tenant_key != expected_tenant_id {
+    if frozen_tenant_key
+        .as_deref()
+        .is_some_and(|expected| tenant_key != expected)
+    {
         return Ok(FeishuOwnerClassification::Unverified);
     }
     let open_digest = open_id.map(|value| opaque_digest("feishu-open", value));
@@ -3677,7 +3682,7 @@ fn load_verified_owner_for_app(
             JOIN external_principal AS principal
               ON principal.id = owner.canonical_owner_principal_id
             WHERE bot.app_id = ?1 AND bot.status = 'published'
-              AND owner.tenant_id = ?2
+              AND principal.tenant_key = ?2
             "#,
             params![app_id, tenant_key],
             |row| Ok((row.get(0)?, row.get(1)?)),
@@ -5607,7 +5612,7 @@ mod tests {
                         account_id: "account_1".to_string(),
                         user_id_digest: owner_user_digest(),
                         tenant_id: "tenant_1".to_string(),
-                        user_name: "主人".to_string(),
+                        user_name: "Owner".to_string(),
                         email: Some("owner@example.com".to_string()),
                         tenant_name: "测试租户".to_string(),
                         brand: "feishu".to_string(),
@@ -5888,7 +5893,7 @@ mod tests {
         assert_eq!(first.account_id, "account_1");
         assert_eq!(first.user_id_digest, owner_user_digest());
         assert_eq!(first.tenant_id, "tenant_1");
-        assert_eq!(first.user_name, "主人");
+        assert_eq!(first.user_name, "Owner");
         assert_eq!(first.email.as_deref(), Some("owner@example.com"));
         assert_eq!(first.brand, "feishu");
 
@@ -6285,6 +6290,56 @@ mod tests {
     }
 
     #[test]
+    fn owner_identity_does_not_conflate_developer_tenant_id_with_event_tenant_key() {
+        let mut database = seeded_runtime_database_owned();
+        let service = ChannelService::default();
+        connect_account(&service, &mut database);
+        publish_bot(&service, &mut database, "agent_1", "cli_app_1");
+
+        let verified = service
+            .verify_feishu_owner(
+                &mut database,
+                &host_envelope(
+                    "verify-owner-distinct-tenant-key",
+                    VerifyFeishuOwnerCommand {
+                        provider: FEISHU_PROVIDER.to_string(),
+                        app_id: "cli_app_1".to_string(),
+                        tenant_key: "event_tenant_key_1".to_string(),
+                        sender_open_id: Some("ou_user".to_string()),
+                        sender_user_id: Some("user_1".to_string()),
+                        sender_union_id: Some("union_user".to_string()),
+                        sender_display_name: "Owner".to_string(),
+                    },
+                ),
+            )
+            .unwrap();
+
+        assert_eq!(verified.result.payload["classification"], "owner");
+
+        let conflicting_tenant_key = service
+            .verify_feishu_owner(
+                &mut database,
+                &host_envelope(
+                    "verify-owner-conflicting-tenant-key",
+                    VerifyFeishuOwnerCommand {
+                        provider: FEISHU_PROVIDER.to_string(),
+                        app_id: "cli_app_1".to_string(),
+                        tenant_key: "event_tenant_key_2".to_string(),
+                        sender_open_id: Some("ou_user".to_string()),
+                        sender_user_id: Some("user_1".to_string()),
+                        sender_union_id: Some("union_user".to_string()),
+                        sender_display_name: "Owner".to_string(),
+                    },
+                ),
+            )
+            .unwrap();
+        assert_eq!(
+            conflicting_tenant_key.result.payload["classification"],
+            "unverified"
+        );
+    }
+
+    #[test]
     fn owner_dm_uses_quick_chat_and_new_rotates_only_without_active_work() {
         let mut database = seeded_runtime_database_owned();
         let service = ChannelService::default();
@@ -6303,7 +6358,7 @@ mod tests {
                         sender_open_id: Some("ou_user".to_string()),
                         sender_user_id: Some("user_1".to_string()),
                         sender_union_id: Some("union_user".to_string()),
-                        sender_display_name: "主人".to_string(),
+                        sender_display_name: "Owner".to_string(),
                     },
                 ),
             )
@@ -6314,7 +6369,7 @@ mod tests {
             app_id: "cli_app_1".to_string(),
             tenant_key: "tenant_1".to_string(),
             chat_id: "oc_1".to_string(),
-            conversation_display_name: "主人私聊".to_string(),
+            conversation_display_name: "Owner 私聊".to_string(),
             target_agent_id: "agent_1".to_string(),
         };
         let first_generation = service

@@ -40,11 +40,11 @@ Renderer 渠道设置
 
 Rust Core 是 Owner identity、项目目录投影、渠道会话/执行范围、Camp、消息、Turn、Run、成员关系、排队和 Outbox 的
 唯一持久权威。
-Electron Main 只拥有需要网络和本机秘密的 Feishu Host；Renderer 只获得设置投影与主人操作，不获得 App
+Electron Main 只拥有需要网络和本机秘密的 Feishu Host；Renderer 只获得设置投影与 Owner 操作，不获得 App
 Secret、原始 `userId`、Session Cookie、Host 恢复游标或内部路由事实。
 
 `ExternalPrincipal` 表达消息作者、上下文来源和回复目标。即使它代表已验证 Feishu Owner，也不是 `local_user`，不能
-连接账号、发布 Bot、维护路径或执行任何主人命令。项目卡 callback 只有 exact pending binding 的窄批准能力。非 Owner
+连接账号、发布 Bot、维护路径或执行任何 Owner 命令。项目卡 callback 只有 exact pending binding 的窄批准能力。非 Owner
 没有消息入口；不会因私聊、群管理员身份或显式 `@` 获得 Camp、项目或本机权限。
 
 ## 开发者会话与队员发布
@@ -92,7 +92,7 @@ Main 依次把独立 credential 写入 safeStorage、Core upsert exact frozen Bo
 Core 写路径只更新连接回读、显示字段和 lifecycle status，不更新 App、账号或 credential identity，也不存在换绑命令。
 
 Rovai 不提供 Bot 管理、停用、关闭、删除或换绑命令。已发布行只提供官方开放平台应用详情入口；远端应用的停用、
-删除和其他治理由主人在飞书/Lark 开放平台完成。历史数据库中的 `disabled` 仅作为历史读取状态保留：主人连接原开发者
+删除和其他治理由 Owner 在飞书/Lark 开放平台完成。历史数据库中的 `disabled` 仅作为历史读取状态保留：Owner 连接原开发者
 账号后，可以把同一 completed intent 重新推进到 `session_verified`，由 console reconciliation 核对原 App、重读
 Secret、配置并验证后回到 `completed`；状态机中的 `app_created` 在这条路径表示原 App 已确认。新 intent 和第二次
 create App 均不可用于恢复。发布状态为 `published` 时再次调用普通 publish 直接拒绝；凭据丢失的显式 retry 也只核对
@@ -121,7 +121,7 @@ exact origin/path、严格响应结构、秘密不出 Main、创建后 read-back
 或 WebSocket 失败都进入 `failed_recoverable`，即使 credential 尚未写入；Main 启动时只从持久 intent 判断可恢复/待人工
 核对，不从 Renderer 状态推断。
 
-当 `failed_recoverable` 或历史 unknown intent 已冻结 `remoteAppId` 时，主人再次点击普通“发布”是显式
+当 `failed_recoverable` 或历史 unknown intent 已冻结 `remoteAppId` 时，Owner 再次点击普通“发布”是显式
 reconciliation，而不是新的 create attempt。
 Host 复核同一 Developer Identity，先对冻结 App 读取 Secret、版本列表/detail、在线 Bot/Scope/Event/Callback 状态与
 manifest 头像元数据；不得创建 App 或改变 App ID。
@@ -136,11 +136,14 @@ manifest 头像元数据；不得创建 App 或改变 App ID。
 
 连接开发者账号时 Core 建立 canonical Feishu Owner；每个已发布 App 通过实际 message/callback envelope 自动建立
 per-App open/user/union identity。Main 收到消息后先调用 Core verify；首条 envelope 的 tenant user identity 与已连接
-Developer Identity 一致时，同一入站流程会记录 App-scoped identity 并继续，不存在主人手工核验步骤或 Renderer 状态。
+Developer Identity 一致时，同一入站流程会记录 App-scoped identity 并继续，不存在 Owner 手工核验步骤或 Renderer 状态。
+开放平台 Developer Identity 的 `tenantId` 与消息 envelope 的 `tenant_key` 是不同命名空间，不能互相做相等校验。首条
+消息由 frozen App 下的 canonical tenant `user_id` 建立信任后，Core 把事件 `tenant_key` 冻结在 canonical
+ExternalPrincipal；后续 App/identity/tenant key 任一冲突都 fail closed。
 后续只有 `union_id -> tenant user_id -> verified open_id` 能证明 Owner 才继续。Owner 仍以 ExternalPrincipal 写入；non-owner 私聊只允许一次节流提示，群/话题静默
 停止，并且都不能留下 conversation、aggregate、Principal、pending binding、Camp 或 Run。
 
-Core 不再拥有主人手工维护的 Channel ProjectBinding 目录。它从 Rovai 已存在的 directory Camp 事实投影 stable
+Core 不再拥有 Owner 手工维护的 Channel ProjectBinding 目录。它从 Rovai 已存在的 directory Camp 事实投影 stable
 Project Catalog：卡片只得到 opaque project ID 和 display name，canonical path 始终留在 Core。目录失效或项目退出
 当前事实源会标记 unavailable/archived；旧卡点击必须 fail closed。Camp 一旦创建即冻结当时的
 `project_binding_kind + project_path`，项目目录变化不能自动改派。

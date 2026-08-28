@@ -19,11 +19,11 @@ ExternalPrincipal、多 Bot 聚合、串行 ChannelTurnRequest、群 roster 和 
 
 | 能力 | 合格 Actor |
 | --- | --- |
-| 连接/断开账号、发布队员 Bot | 本机主人经 typed Desktop API |
+| 连接/断开账号、发布队员 Bot | 本机 Owner 经 typed Desktop API |
 | Owner identity verify、inbound observe/finalize、DM `/new`、项目卡 resolve、roster、Host tick、delivery settle | `feishu-channel-host` System component |
 | Camp membership source mutation | `channel-membership-sync` + exact `feishu` source binding/generation |
 
-`ExternalPrincipal` 没有任何本机主人能力。不存在 authorized user、sender allowlist、渠道侧人工项目目录、会话换绑或
+`ExternalPrincipal` 没有任何本机 Owner 能力。不存在 authorized user、sender allowlist、渠道侧人工项目目录、会话换绑或
 外部成员项目申请。只有已验证 Feishu Owner 可以触发消息；Owner 仍投影为 ExternalPrincipal，不能借渠道消息调用
 `local_user` 命令。项目卡 resolve 是窄的 `ChannelBindingApproval`：只能为 exact pending binding 选择一个现存 active
 project 或取消/刷新，不能创建项目、改路径、改 Agent 或发布 Bot。
@@ -41,7 +41,10 @@ Developer Identity 的摘要/显示字段和每 Bot `credentialRef`；Renderer/A
 连接账号后 Core 为其建立 `FeishuOwnerIdentity`，并为每个已发布 App 维护经过消息或 callback envelope 验证的
 per-App identity。普通入站按 `union_id -> tenant user_id -> current-App open_id` 分类；首条可靠 envelope 若携带与已连接
 Developer Identity 一致的 tenant user identity，Core 必须在同一入站流程自动记录 App-scoped identity 并继续处理，不得
-要求主人执行额外核验。缺少可靠映射或出现冲突时，当前消息在内部 fail closed；这不是 Bot lifecycle 或 Renderer 状态。
+要求 Owner 执行额外核验。缺少可靠映射或出现冲突时，当前消息在内部 fail closed；这不是 Bot lifecycle 或 Renderer 状态。
+Developer Session 的 `tenantId` 属于开放平台账号身份，消息 envelope 的 `tenant_key` 属于事件路由身份，两者不得直接
+比较。首条消息必须先由 frozen App 下与 canonical Developer Identity 一致的 tenant `user_id` 证明 Owner，再把该
+`tenant_key` 冻结到 canonical ExternalPrincipal；后续 tenant key 漂移必须 fail closed。
 顺序固定为 transport dedup、sender 解析、Owner 校验、会话类型、
 群/话题显式 mention、multi-Bot observe。Non-owner 私聊最多收到每 App/身份 24 小时一次提示，群/话题静默忽略；两者
 都不得创建 ExternalPrincipal、ChannelConversation、aggregate、PendingCampBinding、Camp 或 Run。
@@ -157,7 +160,7 @@ remoteAppId` 成为不可换绑身份，`credentialRef` 在首次写入后同样
 `unpublished -> published`；Rovai 不提供管理、停用、关闭、删除或换绑命令。历史数据库中的 `disabled` 仍可读取，且
 只允许使用原 completed intent 进入 `session_verified -> app_created -> ... -> completed` 恢复为 `published`，其中
 `app_created` 表示已核对原 App 身份，不表示新建。恢复要求当前 Developer Session 仍是原 `accountId`，通过普通
-console reconciliation 读取同一 App Secret、配置、版本并验证连接。远端应用生命周期由主人在官方开放平台管理。
+console reconciliation 读取同一 App Secret、配置、版本并验证连接。远端应用生命周期由 Owner 在官方开放平台管理。
 
 Intent 冻结 `agentId + accountId + expectedUserIdDigest + expectedTenantId + requestedAppName + provisioningMode`，所有
 推进带 exact version。唯一的 `developer_session` 模式必须执行以下顺序：
@@ -235,7 +238,7 @@ Scope、Event、Callback、Version、credential 写入、Core upsert 或 WebSock
 credential 尚未保存。Main 重启按持久 intent 收敛，不从 UI 临时进度推断；历史
 `failed_unknown_remote_state + remoteAppId` 可先重分类为 `failed_recoverable`，但无 App ID 的真正 unknown 仍锁住再创建。
 
-主人对含冻结 `remoteAppId` 的 `failed_recoverable` 或历史 `failed_unknown_remote_state` 再次执行普通发布时，必须进入同一 intent 的显式
+Owner 对含冻结 `remoteAppId` 的 `failed_recoverable` 或历史 `failed_unknown_remote_state` 再次执行普通发布时，必须进入同一 intent 的显式
 reconciliation，不得创建新 intent、新 App 或更换 `remoteAppId`。它先复核 exact Developer Identity，
 再读取冻结 App 的 Secret、版本列表/detail、在线 Bot/Scope/Event/Callback 状态与 manifest 头像元数据。最新 published 为 `1.0.0` 且当前队员头像可用时，允许且只允许
 针对同一 App 执行头像修复：upload 当前受控 icon、重放幂等 manifest 配置、创建或复用 `1.0.1`、commit/release 并回读。

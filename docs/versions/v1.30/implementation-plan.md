@@ -37,7 +37,8 @@ last_updated: 2026-08-28
   核对同一 App，不存在换绑或第二次创建；
 - [x] 完成 p2p/group/topic identity、显式 mention gate、多 Bot collecting/finalize/timeout/mismatch；
 - [x] 完成 Owner verify/per-App identity 自动映射 gate、non-owner 零业务事实、canonical-first acknowledgement App、单张
-  Owner 私聊项目卡和 callback envelope/nonce/version/CAS 重放防护；该内部映射不投影为主人待处理的 Renderer 状态；
+  Owner 私聊项目卡和 callback envelope/nonce/version/CAS 重放防护；Developer Session `tenantId` 与 event `tenant_key`
+  分开处理，首条 canonical tenant `user_id` 验证后冻结 event tenant key；该内部映射不投影为 Owner 待处理的 Renderer 状态；
 - [x] 完成 ChannelTurnRequest 单根 FIFO、统一原子 admission、永久失败/Runtime deferred 与 queue card 更新；
 - [x] 完成 ExternalQuote structured segment、`replyTo=null`、ExternalPrincipal source 与 CURRENT_INPUT v22；
 - [x] 完成父群 authoritative roster、普通群完整 membership、话题按需 membership 与 remove reconciliation；
@@ -101,6 +102,6 @@ last_updated: 2026-08-28
 真实飞书租户的“连接前后 App 数量不变、发布只展示八阶段 Rovai 进度且不出现飞书创建确认页、首次 activation 后
 Event 能在 120 秒窗口内收敛、连续发布两名队员均不
 重新扫码、已发布行跳转绑定 App 的官方详情页、Session 失效不建未知 App、切换账号后旧 Bot 继续运行，以及私聊进入
-`channel.on('message')` 后按未绑定/已绑定路径响应”属于发布环境验收，仍需主人持有可用
+`channel.on('message')` 后按未绑定/已绑定路径响应”属于发布环境验收，仍需 Owner 持有可用
 企业权限；还需实测 Owner 私聊自动 Quick Chat、私聊 `/new`、non-owner gate、群/话题单张私聊项目卡及 callback
 promotion。本地自动化没有把这些外部效果伪造为通过。

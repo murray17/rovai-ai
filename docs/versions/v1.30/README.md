@@ -36,7 +36,8 @@ last_updated: 2026-08-28
   channel conversation/binding、Feishu account/member Bot、group roster、inbound aggregate、ChannelTurnRequest 和
   ChannelDelivery，并允许 ExternalPrincipal CampMessage author 与 ContextManifest/Formatter 22；
 - 只有已连接开发者身份对应的 Owner 能触发；per-App identity 无法证明时 fail closed。Owner 消息仍是
-  ExternalPrincipal，不获得 `local_user` 权限；non-owner 在 observation 前结束且不留下业务事实；
+  ExternalPrincipal，不获得 `local_user` 权限；Developer Session `tenantId` 与 event `tenant_key` 分属不同命名空间，
+  首条 canonical tenant `user_id` 验证后冻结 event tenant key，后续漂移 fail closed；non-owner 在 observation 前结束且不留下业务事实；
 - 删除 Channel 人工 ProjectBinding/会话绑定。Core 从既有 directory Camp 投影 active Project Catalog；卡片只携带 opaque
   ID/显示名，canonical path 只在 Core，并在 Camp 创建时冻结；
 - Owner 私聊第一条消息自动创建 Quick Chat generation/Camp；精确 `/new` 只支持私聊、保留旧 Camp、创建新 Camp，
@@ -74,7 +75,7 @@ last_updated: 2026-08-28
 - Main 记录脱敏的 Bot 长连接、SDK policy、message normalized 与 handler accepted/rejected 分层诊断；不记录消息正文、
   Secret、Cookie 或完整外部 identity，当前 SDK 无 raw hook 时不虚构 raw-event 层；
 - 设置页按 Rovai 现有 Porcelain/Steel 视觉只保留连接、队员 Bot、账号二维码、绑定诊断和错误状态；Owner identity
-  只作为入站内部安全边界，首条可靠消息自动建立 App-scoped 映射，不展示需要主人处理的核验状态；
+  只作为入站内部安全边界，首条可靠消息自动建立 App-scoped 映射，不展示需要 Owner 处理的核验状态；
   删除项目目录与会话绑定操作。已发布 Bot 只提供按绑定 brand 生成的官方应用详情链接，不再提供 Rovai 管理/停用入口；
   Renderer 不接触 Secret、路径或 Host-only transport facts。
 
@@ -83,7 +84,7 @@ last_updated: 2026-08-28
 - 不接入钉钉、Telegram 等其他渠道；
 - 不让同一 Camp 多个根 CampTurn 并行，不从自由文本/普通 reply 推断 continuation；
 - 不同步未 mention 群历史，不让 Bot 回推触发 A2A；
-- 不在 Rovai 内提供远端应用关闭、停用或删除；主人通过官方开放平台应用详情页治理；
+- 不在 Rovai 内提供远端应用关闭、停用或删除；Owner 通过官方开放平台应用详情页治理；
 - 不把开放平台 console API 声称为公开稳定合同；页面 bootstrap 或 endpoint 变化必须在隔离 client 中 fail closed，
   不得静默回退到确认页或第二条创建路径；
 - 普通发布上传 `AgentProfile.avatarRef` 对应的受控 icon rendition；只有无头像引用时使用 Rovai App icon。非空引用无法
@@ -107,7 +108,7 @@ publication intent、template-first fallback 分类、App-ID durable barrier、a
 identity drift/create outcome unknown fail-closed、frozen Event timeout recoverable、owner/non-owner gate、DM `/new`、
 PendingCampBinding replay/CAS、多 Bot 单卡与 fail-closed、FIFO promotion、普通群/话题 roster、ExternalQuote/Context bytes、safeStorage/Renderer
 秘密隔离、Host 恢复、双主题和完整 Rust/TypeScript/文档/构建门禁。真实飞书租户登录、应用创建、无平台确认发布
-和收发仍需要拥有可用企业权限的主人在发布环境执行，自动化不伪造外部成功。
+和收发仍需要拥有可用企业权限的 Owner 在发布环境执行，自动化不伪造外部成功。
 
 ## 跨版本文档影响
 

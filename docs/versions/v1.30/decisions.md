@@ -10,7 +10,7 @@ last_updated: 2026-08-28
 本文件只记录本版本满足准入门槛的重要取舍；当前规范由链接的 Architecture、Contract、UI 与 Context 说明拥有。
 
 <a id="v1-30-d01"></a>
-## V1.30-D01：项目绑定是主人本机目录，不把外部成员提升为本地用户
+## V1.30-D01：项目绑定是 Owner 本机目录，不把外部成员提升为本地用户
 
 > 当前产品语义已由 [V1.30-D09](#v1-30-d09)取代；本节保留早期方案的取舍记录。
 
@@ -23,9 +23,9 @@ last_updated: 2026-08-28
 
 Core 建立 owner-only `ProjectBinding` 目录；只有 `local_user` 可以维护路径和绑定/切换渠道会话。飞书只使用不透明
 Binding ID。绑定后任意会话成员可通过私聊或显式 mention 使用 Agent；`ExternalPrincipal` 只表达作者、上下文来源
-和回复目标，不获得任何主人能力。
+和回复目标，不获得任何 Owner 能力。
 
-未绑定消息只记录待绑定会话，不建立 Principal、Camp 或执行；主人绑定后发送者必须重发。当前规范见
+未绑定消息只记录待绑定会话，不建立 Principal、Camp 或执行；Owner 绑定后发送者必须重发。当前规范见
 [飞书渠道架构](../../architecture/feishu-channel.md#owner-only-入站与会话执行范围)和
 [Feishu Channel v2](../../contracts/feishu-channel-v2.md#2-owner-only-camp-与项目选择)。
 
@@ -38,7 +38,7 @@ Binding ID。绑定后任意会话成员可通过私聊或显式 mention 使用 
 ### 被拒绝方案
 
 - **sender allowlist / 已授权用户：** 混淆消息准入与本机项目管理，并产生持续名册治理；
-- **飞书项目 picker 或申请卡：** 会暴露本机目录和主人操作面；
+- **飞书项目 picker 或申请卡：** 会暴露本机目录和 Owner 操作面；
 - **绑定后自动回放首条消息：** 不能证明用户仍希望执行，也跨越 observation 时的授权事实。
 
 <a id="v1-30-d02"></a>
@@ -208,7 +208,7 @@ fallback。
 [Feishu Channel v2](../../contracts/feishu-channel-v2.md#3-飞书账号与队员-bot)和
 [渠道设置](../../ui/components/channel-settings.md#渠道连接与二维码)。
 
-锁定的是任何第二个 App 和换绑，不是对同一冻结 App 的主人显式核对。未知 intent 已有 `remoteAppId` 时，再次普通发布
+锁定的是任何第二个 App 和换绑，不是对同一冻结 App 的 Owner 显式核对。未知 intent 已有 `remoteAppId` 时，再次普通发布
 继续使用同一 intent 和冻结 App ID；在线 readiness 不完整时只允许在同一 App 配置并发布下一 patch 版本，缺少 App ID
 的未知结果仍不可恢复。队员头像来源与同 App 头像修复 mutation 的
 后续修正见 [V1.30-D07](#v1-30-d07)。
@@ -219,7 +219,7 @@ fallback。
 - 真实 identity 能在切换/失效时做 exact user/tenant 检查，Renderer 不再显示假 owner/tenant；
 - 正常发布只展示 Rovai 的账号校验、创建、启用、配置、等待、发布、在线核验、长连接和完成进度，不出现飞书创建确认页；
 - WebSocket 握手与 Manifest 都不是消息可达证明；只有在线 Scope/Event/Callback 状态和 published version 联合通过才完成发布；
-- Rovai 不再提供 Bot 管理/停用命令；已发布 Bot 只按绑定 brand 和冻结 App ID 跳转官方应用详情页，远端生命周期由主人
+- Rovai 不再提供 Bot 管理/停用命令；已发布 Bot 只按绑定 brand 和冻结 App ID 跳转官方应用详情页，远端生命周期由 Owner
   在开放平台治理；
 - Web 页面身份/bootstrap 与 console API 是版本敏感的可替换 Adapter，真实租户效果必须独立验收，不能由本地测试
   声明成功。
@@ -252,7 +252,7 @@ console 路径本来就能上传 PNG bytes，Main 也已经拥有内置素材和
 受管存储校验后读取；路径和任意文件输入都不进入发布接口。只有 `avatarRef=null` 才回退 Rovai App icon，非空引用
 无法读取时在远端 mutation 前 fail closed。上传 URL 同时写入创建请求与 manifest，并纳入 read-back verification。
 
-主人显式重试一个已经冻结 `remoteAppId` 的 unknown intent 时仍不得创建第二个 App。若其 latest published 是初始
+Owner 显式重试一个已经冻结 `remoteAppId` 的 unknown intent 时仍不得创建第二个 App。若其 latest published 是初始
 `1.0.0`，允许在同一 App 上传当前队员头像、重放幂等在线配置并创建或复用 `1.0.1` 修复版本；头像及在线 readiness
 已经完整时只读
 验证，避免重复发布。当前规范见
@@ -330,7 +330,7 @@ Renderer 使用八个进行中阶段，并把固定 failure code 降为次级诊
 
 ### 背景
 
-V1.30-D01 允许绑定会话中的任意飞书成员触发 Agent，并让主人在渠道设置页维护第二套 ProjectBinding 目录与会话
+V1.30-D01 允许绑定会话中的任意飞书成员触发 Agent，并让 Owner 在渠道设置页维护第二套 ProjectBinding 目录与会话
 绑定。该模型同时引入外部成员准入、桌面端手工目录、未绑定消息重发和项目切换四套长期状态，却没有提升一期的核心
 体验。群内公开项目列表还会泄露本机工作范围，多 Bot 各自抢先回卡则会重复暴露选择入口。
 
@@ -339,6 +339,9 @@ V1.30-D01 允许绑定会话中的任意飞书成员触发 Agent，并让主人�
 飞书一期只有连接开发者账号所确认的 Owner 能触发人类根消息；每个 App 通过 `union_id -> tenant user_id -> verified
 open_id` fail closed 识别。Owner 的渠道消息仍是 `ExternalPrincipal`，不映射为 `local_user`。非 Owner 私聊最多收到
 节流提示，群/话题静默忽略，且都在 observation 前终止，不产生 Principal、conversation、pending binding、Camp 或 Run。
+Developer Session 的开放平台 `tenantId` 与消息 envelope 的 `tenant_key` 属于不同命名空间，禁止直接比较。首条消息
+必须由 frozen App 下匹配 canonical Developer Identity 的 tenant `user_id` 建立 Owner，并把 event `tenant_key` 冻结到
+canonical ExternalPrincipal；后续漂移 fail closed。
 
 删除渠道侧人工 ProjectBinding 与会话绑定操作。Core 从 Rovai 既有 directory Camp 事实投影 Project Catalog；飞书只
 接收 opaque `projectId + displayName`。Owner 私聊自动使用当前 Quick Chat Camp；精确 `/new` 只在私聊关闭当前 generation、

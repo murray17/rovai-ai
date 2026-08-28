@@ -1405,7 +1405,7 @@ export class ChannelSettingsService {
     if (lastSentAt !== undefined && this.#now() - lastSentAt < NON_OWNER_DM_HINT_THROTTLE_MS) return
     this.#nonOwnerDmHints.set(key, this.#now())
     await managed.channel.send(message.chatId, {
-      text: '该 Bot 当前仅供 Rovai 主人使用。'
+      text: '该 Bot 当前仅供 Rovai Owner 使用。'
     }).catch((error) => {
       logFeishuBotDiagnostic('non_owner_hint.failed', {
         ...messageDiagnostic(managed, message),
@@ -2261,7 +2261,7 @@ function projectBindingResultCard(
     })
   }
   if (result.code === 'channel.binding.owner_required') {
-    return terminalProjectCard('无法操作项目卡片', '只有 Rovai 主人可以选择项目。', 'red')
+    return terminalProjectCard('无法操作项目卡片', '只有 Rovai Owner 可以选择项目。', 'red')
   }
   return terminalProjectCard('项目绑定未完成', '请回到原飞书会话稍后重试。', 'orange')
 }

@@ -180,8 +180,8 @@ export function ChannelSettingsView({
       <SettingsPageHeader
         eyebrow="Settings / Channels"
         title="渠道"
-        description="在本机连接飞书并逐一发布队员 Bot。只有 Rovai 主人可以从飞书触发队员；群聊和话题的项目在首次使用时私密选择。"
-        aside={<span className="settings-page-note">主人本机</span>}
+        description="在本机连接飞书并逐一发布队员 Bot。只有 Rovai Owner 可以从飞书触发队员；群聊和话题的项目在首次使用时私密选择。"
+        aside={<span className="settings-page-note">Owner 本机</span>}
       />
 
       {loading && !snapshot && <ChannelSettingsState label="正在读取渠道状态…" />}
@@ -237,7 +237,7 @@ export function ChannelSettingsView({
             />
             <p className="channel-owner-note">
               <OwnerShieldIcon />
-              <span>飞书中的主人消息仍是外部消息身份，不获得本机管理权限。项目绝对路径不会发送到飞书。</span>
+              <span>飞书中的 Owner 消息仍是外部消息身份，不获得本机管理权限。项目绝对路径不会发送到飞书。</span>
             </p>
           </section>
 
@@ -261,7 +261,7 @@ export function ChannelSettingsView({
             <ChannelSectionHeading
               id="channel-binding-diagnostics-heading"
               title="会话接入"
-              description="私聊自动进入 Quick Chat；群聊和话题首次由主人 @ 后，在飞书私密卡片中选择一次项目。"
+              description="私聊自动进入 Quick Chat；群聊和话题首次由 Owner @ 后，在飞书私密卡片中选择一次项目。"
               summary={`${snapshot.pendingBindingCount} 个待选择`}
             />
             <div className="channel-binding-diagnostics" role="status">

@@ -1430,7 +1430,7 @@ describe('channel settings service', () => {
     await messageHandler({ ...outsider, messageId: 'om_outsider_again' })
     expect(commands.filter(({ method }) => method === 'channels.inbound.observe')).toHaveLength(0)
     expect(harness.send.mock.calls.filter(([, input]) => (
-      (input as { text?: string }).text === '该 Bot 当前仅供 Rovai 主人使用。'
+      (input as { text?: string }).text === '该 Bot 当前仅供 Rovai Owner 使用。'
     ))).toHaveLength(1)
 
     await messageHandler(normalizedMessage({
