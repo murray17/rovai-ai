@@ -119,6 +119,9 @@ pub enum AcpIncoming {
         source_event_digest: String,
         observed_at: String,
     },
+    IngressBarrier {
+        completion: oneshot::Sender<()>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -539,6 +542,7 @@ struct ObservedToolMetadata {
     // the matching structured update in active-process memory only; durable
     // events and Action records continue to store digests, never this payload.
     raw_input: Option<Value>,
+    stable_meta: Option<Value>,
     locations: Option<Value>,
     // ACP v1 ToolCallUpdate.content replaces the previous content collection.
     // Keep only validated standard Diff blocks until the matching terminal update.
@@ -575,6 +579,7 @@ struct AcpPreparedPrompt {
 pub struct ObservedAcpToolContext {
     native_kind: Option<String>,
     raw_input: Option<Value>,
+    stable_meta: Option<Value>,
     locations: Option<Value>,
 }
 
@@ -1164,6 +1169,7 @@ pub(crate) struct AcpHost {
     next_compaction_observation_sequence: AtomicU64,
     grok_acceptance_auto_compact_armed: AtomicBool,
     routes: RwLock<HashMap<String, AcpSessionRoute>>,
+    ingress_fence: Mutex<()>,
     compaction_observers: RwLock<HashMap<String, AcpCompactionObserverRoute>>,
     known_sessions: RwLock<HashSet<String>>,
     session_results: RwLock<HashMap<String, Value>>,
@@ -1313,6 +1319,7 @@ impl AcpHost {
             next_compaction_observation_sequence: AtomicU64::new(1),
             grok_acceptance_auto_compact_armed: AtomicBool::new(false),
             routes: RwLock::new(HashMap::new()),
+            ingress_fence: Mutex::new(()),
             compaction_observers: RwLock::new(HashMap::new()),
             known_sessions: RwLock::new(HashSet::new()),
             session_results: RwLock::new(HashMap::new()),
@@ -1456,6 +1463,10 @@ impl AcpHost {
                                 continue;
                             }
                         };
+                        // Serialize routing + queue insertion with cancellation's
+                        // unbind + ingress barrier so a terminal file event cannot
+                        // be stranded behind the barrier that freezes its Run card.
+                        let _ingress_fence = host.ingress_fence.lock().await;
                         if message.get("method").is_none()
                             && let Some(id) = message.get("id").and_then(Value::as_u64)
                         {
@@ -2253,17 +2264,38 @@ impl AcpHost {
 
     async fn unbind_session(&self, session_id: &str, owner: &AcpRuntimeOwner) {
         let mut routes = self.routes.write().await;
-        let removed = if routes.get(session_id).map(|route| &route.owner) == Some(owner) {
+        if routes.get(session_id).map(|route| &route.owner) == Some(owner) {
             routes.remove(session_id);
-            true
-        } else {
-            false
-        };
-        drop(routes);
-        if removed {
-            self.release_client_terminals_for_session(session_id, owner)
-                .await;
         }
+        drop(routes);
+        // Session terminal cleanup is idempotent and must still run when a
+        // cancellation ingress fence removed the route immediately before the
+        // ordinary Runtime detach path.
+        self.release_client_terminals_for_session(session_id, owner)
+            .await;
+    }
+
+    async fn unbind_session_and_flush_ingress(
+        &self,
+        session_id: Option<&str>,
+        owner: &AcpRuntimeOwner,
+    ) -> bool {
+        let (flushed, barrier_sent) = {
+            let _ingress_fence = self.ingress_fence.lock().await;
+            if let Some(session_id) = session_id {
+                let mut routes = self.routes.write().await;
+                if routes.get(session_id).map(|route| &route.owner) == Some(owner) {
+                    routes.remove(session_id);
+                }
+            }
+            let (completion, flushed) = oneshot::channel();
+            let barrier_sent = self
+                .incoming
+                .send(AcpIncoming::IngressBarrier { completion })
+                .is_ok();
+            (flushed, barrier_sent)
+        };
+        barrier_sent && flushed.await.is_ok()
     }
 
     async fn active_prompt(&self, session_id: &str, owner: &AcpRuntimeOwner) -> Option<String> {
@@ -3355,6 +3387,13 @@ impl AcpRuntime {
         if let Some(raw_input) = update.get("rawInput").filter(|value| !value.is_null()) {
             observed.raw_input = Some(raw_input.clone());
         }
+        if let Some(meta) = update
+            .get("_meta")
+            .or_else(|| update.get("meta"))
+            .filter(|value| !value.is_null())
+        {
+            observed.stable_meta = Some(meta.clone());
+        }
         if let Some(locations) = update
             .get("locations")
             .filter(|value| !value.is_null())
@@ -3373,6 +3412,7 @@ impl AcpRuntime {
                 "nativeItemId": native_item_id,
                 "nativeKind": observed.native_kind.as_deref(),
                 "rawInput": update.get("rawInput"),
+                "meta": update.get("_meta").or_else(|| update.get("meta")),
                 "locations": update.get("locations"),
             }))?);
         }
@@ -3464,6 +3504,7 @@ impl AcpRuntime {
             .map(|observed| ObservedAcpToolContext {
                 native_kind: observed.native_kind.clone(),
                 raw_input: observed.raw_input.clone(),
+                stable_meta: observed.stable_meta.clone(),
                 locations: observed.locations.clone(),
             })
     }
@@ -3522,6 +3563,14 @@ impl AcpRuntime {
         if let Some(session_id) = self.session_id().await {
             self.host.unbind_session(&session_id, &self.owner).await;
         }
+    }
+
+    pub(crate) async fn detach_and_flush_ingress(&self) -> bool {
+        *self.active_observation.lock().await = None;
+        let session_id = self.session_id().await;
+        self.host
+            .unbind_session_and_flush_ingress(session_id.as_deref(), &self.owner)
+            .await
     }
 }
 
@@ -5123,6 +5172,14 @@ pub fn intercepted_action_request(
             object.insert("rawInput".to_string(), raw_input.clone());
         }
         if object
+            .get("_meta")
+            .or_else(|| object.get("meta"))
+            .is_none_or(Value::is_null)
+            && let Some(meta) = observed.stable_meta.as_ref()
+        {
+            object.insert("_meta".to_string(), meta.clone());
+        }
+        if object
             .get("locations")
             .is_none_or(|value| value.is_null() || value.as_array().is_some_and(Vec::is_empty))
             && let Some(locations) = observed.locations.as_ref()
@@ -5305,13 +5362,13 @@ fn effective_action_kind<'a>(
         return "execute";
     }
 
-    // OpenCode's ACP bridge currently reports an external-directory permission
-    // request as `other`, even when the request belongs to a file-edit tool call.
-    // The stable file target remains present in rawInput. Classify that narrow
-    // shape as a write so it receives Rovai-ai's normal path and approval checks.
-    if ["filepath", "filePath", "file_path"]
-        .iter()
-        .any(|key| raw_input.get(key).and_then(Value::as_str).is_some())
+    // Some ACP bridges report a file-edit tool as `other` while preserving the
+    // stable target in rawInput. Classify only that ambiguous shape as an edit;
+    // an explicit `read` with the same path fields must remain a read.
+    if reported_kind == "other"
+        && ["filepath", "filePath", "file_path"]
+            .iter()
+            .any(|key| raw_input.get(key).and_then(Value::as_str).is_some())
     {
         return "edit";
     }
@@ -5589,6 +5646,8 @@ fn reconcile_completed_action(
     mut completion: CompletedAcpAction,
 ) -> Result<CompletedAcpAction> {
     let observed_file_operation_path = single_public_acp_location_path(observed.locations.as_ref());
+    let observed_raw_input_path = single_public_acp_raw_input_path(observed.raw_input.as_ref());
+    let observed_meta_path = single_public_acp_metadata_path(observed.stable_meta.as_ref());
     let observed_raw_input_digest = observed
         .raw_input
         .as_ref()
@@ -5632,8 +5691,18 @@ fn reconcile_completed_action(
                 .public_file_operation_path
                 .clone()
                 .or(observed_file_operation_path)
+                .or(observed_raw_input_path)
+                .or(observed_meta_path)
         })
         .flatten();
+    if matches!(completion.outcome, ActionResultOutcome::Succeeded)
+        && completion.public_file_changes.is_none()
+        && completion.native_kind == "edit"
+        && let Some(path) = completion.public_file_operation_path.as_deref()
+    {
+        completion.public_file_changes =
+            public_acp_raw_input_file_change(observed.raw_input.as_ref(), path);
+    }
     if let Some(result_data) = completion.result_data.as_object_mut() {
         result_data.insert(
             "kind".to_string(),
@@ -5690,6 +5759,58 @@ fn single_public_acp_location_path(locations: Option<&Value>) -> Option<String> 
         [path] => Some(path.clone()),
         _ => None,
     }
+}
+
+fn single_public_acp_raw_input_path(raw_input: Option<&Value>) -> Option<String> {
+    let raw_input = raw_input?.as_object()?;
+    let paths = ["filepath", "filePath", "file_path"]
+        .into_iter()
+        .filter_map(|key| raw_input.get(key).and_then(Value::as_str))
+        .map(str::trim)
+        .filter(|path| !path.is_empty())
+        .map(str::to_string)
+        .collect::<std::collections::BTreeSet<_>>();
+    (paths.len() == 1)
+        .then(|| paths.into_iter().next())
+        .flatten()
+}
+
+fn single_public_acp_metadata_path(meta: Option<&Value>) -> Option<String> {
+    let meta = meta?.as_object()?;
+    let paths = ["filepath", "filePath", "file_path"]
+        .into_iter()
+        .filter_map(|key| meta.get(key).and_then(Value::as_str))
+        .map(str::trim)
+        .filter(|path| !path.is_empty())
+        .map(str::to_string)
+        .collect::<std::collections::BTreeSet<_>>();
+    (paths.len() == 1)
+        .then(|| paths.into_iter().next())
+        .flatten()
+}
+
+fn public_acp_raw_input_file_change(raw_input: Option<&Value>, path: &str) -> Option<Value> {
+    let raw_input = raw_input?.as_object()?;
+    if ["replaceAll", "replace_all"]
+        .into_iter()
+        .filter_map(|key| raw_input.get(key))
+        .any(|value| value != &Value::Bool(false))
+    {
+        return None;
+    }
+    let old_text = ["oldString", "old_string"]
+        .into_iter()
+        .find_map(|key| raw_input.get(key).and_then(Value::as_str))?;
+    let new_text = ["newString", "new_string"]
+        .into_iter()
+        .find_map(|key| raw_input.get(key).and_then(Value::as_str))?;
+    (old_text != new_text).then(|| {
+        json!([{
+            "path": path,
+            "oldText": old_text,
+            "newText": new_text,
+        }])
+    })
 }
 
 fn acp_effect_disposition(succeeded: bool, native_kind: &str) -> &'static str {
@@ -5960,6 +6081,18 @@ mod route_policy_tests {
                 &request["toolCall"]["rawInput"],
             ),
             "edit"
+        );
+    }
+
+    #[test]
+    fn qoder_read_with_a_file_path_remains_a_read() {
+        assert_eq!(
+            effective_action_kind(
+                AdapterKind::QoderCli,
+                "read",
+                &json!({"file_path": "/tmp/qoder-read.txt"}),
+            ),
+            "read"
         );
     }
 
@@ -9977,6 +10110,7 @@ while IFS= read -r ignored; do :; done
                 "Command": command,
                 "Description": "Read the approved fixture",
             })),
+            stable_meta: None,
             locations: Some(json!([{"path": target}])),
         };
         let context = InterceptedAcpActionContext {
@@ -10060,6 +10194,7 @@ while IFS= read -r ignored; do :; done
                 native_kind: Some("execute".to_string()),
                 observation_digest: Some("observed-digest".to_string()),
                 raw_input: Some(observed_raw_input),
+                stable_meta: None,
                 locations: None,
                 public_file_changes: None,
             },
@@ -10220,6 +10355,7 @@ while IFS= read -r ignored; do :; done
                 native_kind: Some("edit".to_string()),
                 observation_digest: None,
                 raw_input: None,
+                stable_meta: None,
                 locations: Some(json!([{"path": "/repo/src/app.ts"}])),
                 public_file_changes: None,
             },
@@ -10244,6 +10380,7 @@ while IFS= read -r ignored; do :; done
                 native_kind: Some("read".to_string()),
                 observation_digest: None,
                 raw_input: None,
+                stable_meta: None,
                 locations: Some(json!([{"path": "/repo/src/app.ts"}])),
                 public_file_changes: None,
             },
@@ -10252,5 +10389,123 @@ while IFS= read -r ignored; do :; done
         .unwrap();
         assert_eq!(reconciled_read.native_kind, "read");
         assert!(reconciled_read.public_file_operation_path.is_none());
+    }
+
+    #[test]
+    fn sparse_terminal_edit_uses_opening_aliases_for_full_before_after_evidence() {
+        let terminal = json!({
+            "sessionUpdate": "tool_call_update",
+            "toolCallId": "tool-qoder-edit",
+            "status": "completed"
+        });
+        let completion =
+            completed_action(AdapterKind::QoderCli, &json!({"update": terminal.clone()}))
+                .unwrap()
+                .expect("sparse terminal ACP edit should complete");
+        let reconciled = reconcile_completed_action(
+            AdapterKind::QoderCli,
+            &terminal,
+            ObservedToolMetadata {
+                native_kind: Some("edit".to_string()),
+                observation_digest: Some("opening-observation".to_string()),
+                raw_input: Some(json!({
+                    "filePath": "/repo/src/app.ts",
+                    "oldString": "before\n",
+                    "newString": "after\n"
+                })),
+                stable_meta: Some(json!({"providerItemId": "stable-opening-item"})),
+                locations: None,
+                public_file_changes: None,
+            },
+            completion,
+        )
+        .unwrap();
+
+        assert_eq!(reconciled.native_kind, "edit");
+        assert_eq!(
+            reconciled.public_file_operation_path.as_deref(),
+            Some("/repo/src/app.ts")
+        );
+        assert_eq!(
+            reconciled.public_file_changes,
+            Some(json!([{
+                "path": "/repo/src/app.ts",
+                "oldText": "before\n",
+                "newText": "after\n"
+            }]))
+        );
+    }
+
+    #[test]
+    fn stable_opening_meta_supplies_the_path_but_replace_all_degrades_to_operation_only() {
+        let terminal = json!({
+            "sessionUpdate": "tool_call_update",
+            "toolCallId": "tool-kimi-edit",
+            "status": "completed"
+        });
+        let completion = completed_action(
+            AdapterKind::KimiCodeCli,
+            &json!({"update": terminal.clone()}),
+        )
+        .unwrap()
+        .expect("sparse terminal ACP edit should complete");
+        let reconciled = reconcile_completed_action(
+            AdapterKind::KimiCodeCli,
+            &terminal,
+            ObservedToolMetadata {
+                native_kind: Some("edit".to_string()),
+                observation_digest: None,
+                raw_input: Some(json!({
+                    "old_string": "before",
+                    "new_string": "after",
+                    "replace_all": true
+                })),
+                stable_meta: Some(json!({"file_path": "/repo/src/app.ts"})),
+                locations: None,
+                public_file_changes: None,
+            },
+            completion,
+        )
+        .unwrap();
+
+        assert_eq!(
+            reconciled.public_file_operation_path.as_deref(),
+            Some("/repo/src/app.ts")
+        );
+        assert!(reconciled.public_file_changes.is_none());
+    }
+
+    #[test]
+    fn failed_sparse_edit_never_promotes_opening_file_metadata() {
+        let terminal = json!({
+            "sessionUpdate": "tool_call_update",
+            "toolCallId": "tool-failed-edit",
+            "status": "failed"
+        });
+        let completion =
+            completed_action(AdapterKind::QoderCli, &json!({"update": terminal.clone()}))
+                .unwrap()
+                .expect("failed terminal ACP edit should complete its audit Action");
+        let reconciled = reconcile_completed_action(
+            AdapterKind::QoderCli,
+            &terminal,
+            ObservedToolMetadata {
+                native_kind: Some("edit".to_string()),
+                observation_digest: None,
+                raw_input: Some(json!({
+                    "file_path": "/repo/src/app.ts",
+                    "old_string": "before",
+                    "new_string": "after"
+                })),
+                stable_meta: None,
+                locations: None,
+                public_file_changes: None,
+            },
+            completion,
+        )
+        .unwrap();
+
+        assert!(reconciled.public_file_operation_path.is_none());
+        assert!(reconciled.public_file_changes.is_none());
     }
 }

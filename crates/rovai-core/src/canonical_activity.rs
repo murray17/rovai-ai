@@ -114,6 +114,7 @@ pub fn classify_evidence(
                 | "runtime.plan"
                 | "runtime.plan.delta"
                 | "runtime.diagnostic"
+                | "runtime.file_changes.snapshot"
         );
     let (mut activity_domain, mut semantic_kind, runtime_classification_is_structured) =
         runtime_activity_mapping::classify_with_structure(item_type, kind, payload);

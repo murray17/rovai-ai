@@ -245,14 +245,8 @@ impl ManagedBlobStore {
                       WHERE agent_run_execution_evidence.content_blob_id = managed_blob.id
                   )
                   AND NOT EXISTS (
-                      SELECT 1 FROM workspace_change_window
-                      WHERE workspace_change_window.baseline_manifest_blob_id = managed_blob.id
-                         OR workspace_change_window.final_manifest_blob_id = managed_blob.id
-                         OR workspace_change_window.diff_blob_id = managed_blob.id
-                  )
-                  AND NOT EXISTS (
-                      SELECT 1 FROM workspace_change_completed_evidence
-                      WHERE workspace_change_completed_evidence.diff_blob_id = managed_blob.id
+                      SELECT 1 FROM agent_run_file_change_projection
+                      WHERE agent_run_file_change_projection.details_blob_id = managed_blob.id
                   )
                 ORDER BY managed_blob.id
                 "#,
@@ -285,14 +279,8 @@ impl ManagedBlobStore {
                       WHERE content_blob_id = ?1
                   )
                   AND NOT EXISTS (
-                      SELECT 1 FROM workspace_change_window
-                      WHERE baseline_manifest_blob_id = ?1
-                         OR final_manifest_blob_id = ?1
-                         OR diff_blob_id = ?1
-                  )
-                  AND NOT EXISTS (
-                      SELECT 1 FROM workspace_change_completed_evidence
-                      WHERE diff_blob_id = ?1
+                      SELECT 1 FROM agent_run_file_change_projection
+                      WHERE details_blob_id = ?1
                   )
                 "#,
                 [&blob_id],

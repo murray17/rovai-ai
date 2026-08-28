@@ -1,6 +1,7 @@
 pub mod action;
 pub mod agent_identity;
 pub mod agent_profile;
+pub mod agent_run_file_change;
 pub mod agent_runtime_adapter;
 pub mod brand;
 pub mod builtin_tool_cli_output;
@@ -68,7 +69,6 @@ pub mod team_tool;
 pub mod team_tool_catalog;
 #[cfg(windows)]
 mod windows_runtime_entrypoint;
-pub mod workspace_change;
 
 mod runtime_pricing;
 

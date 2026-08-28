@@ -93,6 +93,7 @@ impl ExecutionEvidenceService {
                 | "runtime.plan.delta"
                 | "runtime.diagnostic"
                 | "file.change.updated"
+                | "runtime.file_changes.snapshot"
                 | "runtime.action"
                 | "activity.started"
                 | "activity.completed"
@@ -357,6 +358,34 @@ impl ExecutionEvidenceService {
         )
     }
 
+    pub fn record_terminal_run_diff_snapshot(
+        &self,
+        database: &mut Database,
+        blob_store: &ManagedBlobStore,
+        agent_run_id: &str,
+        execution_epoch: i64,
+        payload: &Value,
+    ) -> Result<Option<RecordedExecutionEvidence>> {
+        let run_diff = payload
+            .get("runtimeRunDiff")
+            .context("terminal Run diff Evidence has no runtimeRunDiff")?;
+        if run_diff.get("status").and_then(Value::as_str) != Some("available")
+            || run_diff.get("semanticKind").and_then(Value::as_str) != Some("unified_diff_snapshot")
+            || run_diff.get("diff").and_then(Value::as_str).is_none()
+        {
+            anyhow::bail!("terminal Run diff Evidence is incomplete");
+        }
+        self.record_runtime_event_with_fence_policy(
+            database,
+            blob_store,
+            agent_run_id,
+            execution_epoch,
+            "runtime.file_changes.snapshot",
+            payload,
+            true,
+        )
+    }
+
     pub fn record_builtin_tool_started(
         &self,
         database: &mut Database,
@@ -453,7 +482,20 @@ impl ExecutionEvidenceService {
         let encoded = serde_json::to_vec(&payload)?;
         let (preview, content_blob_id, is_truncated) = if encoded.len() > INLINE_PAYLOAD_LIMIT_BYTES
         {
-            let blob = blob_store.put_bytes(database, &encoded, "application/json", "normal")?;
+            let privacy = if payload
+                .pointer("/runtimeDiff/status")
+                .and_then(Value::as_str)
+                == Some("available")
+                || payload
+                    .pointer("/runtimeRunDiff/status")
+                    .and_then(Value::as_str)
+                    == Some("available")
+            {
+                "sensitive"
+            } else {
+                "normal"
+            };
+            let blob = blob_store.put_bytes(database, &encoded, "application/json", privacy)?;
             (bounded_preview(&payload), Some(blob.id), true)
         } else {
             (payload.clone(), None, false)
@@ -622,6 +664,7 @@ fn evidence_classification(
         "runtime.plan" | "runtime.plan.delta" => Some(("plan", "updated")),
         "runtime.diagnostic" => Some(("step", "updated")),
         "file.change.updated" => Some(("file_change", "updated")),
+        "runtime.file_changes.snapshot" => Some(("file_change", "completed")),
         "runtime.action" => Some((
             if payload
                 .get("status")
@@ -673,6 +716,10 @@ fn normalize_public_payload(event_type: &str, payload: &Value) -> Value {
         "file.change.updated" => serde_json::json!({
             "itemId": payload.get("itemId"),
             "patch": payload.get("patch").or_else(|| payload.get("delta")),
+        }),
+        "runtime.file_changes.snapshot" => serde_json::json!({
+            "eventId": payload.get("eventId"),
+            "runtimeRunDiff": payload.get("runtimeRunDiff"),
         }),
         "runtime.action" => {
             let mut normalized = serde_json::json!({

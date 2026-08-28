@@ -31,7 +31,8 @@ Architecture 解释组件如何组成，Version 概览记录交付范围；它�
 | [First-run Onboarding v2（当前）](first-run-onboarding-v2.md) | v1 admission/provisioning 不变；schema 2 增加无可用 Runtime 时无产品副作用的 `runtime_deferred` 终态 |
 | [First-run Onboarding v1（历史）](first-run-onboarding-v1.md) | Desktop 首次安装判定、三页 mandatory 状态、幂等 provisioning、`初次集结` 与第四页 Draft-only 入口；不允许无 Runtime 完成 |
 | [Camp Membership v1（当前）](camp-membership-v1.md) | 动态添加/移除、至少一位成员、generation/version、atomic cutover、durable reconciliation、exact lifetime fence 与受信外部来源 |
-| [Camp Open Projection v7（当前）](camp-open-projection-v7.md) | v6 read/attachment state 不变；Snapshot 33/Open 4 增加 membership generation 与活动 reconciliation |
+| [Camp Open Projection v8（当前）](camp-open-projection-v8.md) | v7 read/membership state 不变；Snapshot 34/Open 5 增加每 AgentRun/epoch 文件变化 summary |
+| [Camp Open Projection v7（历史）](camp-open-projection-v7.md) | v6 read/attachment state 不变；Snapshot 33/Open 4 增加 membership generation 与活动 reconciliation |
 | [Camp Open Projection v6（历史）](camp-open-projection-v6.md) | v5 read/evidence 不变；Message Attachment 增加 Runtime projection state，Renderer 诚实展示 pending/recovery/failed |
 | [Camp Open Projection v5（历史）](camp-open-projection-v5.md) | v4 activation-aware enter 与 wire 不变；Camp open 完整返回所有 non-terminal Run Evidence，Renderer live event 不做最后 N 项裁剪 |
 | [Camp Open Projection v4（历史）](camp-open-projection-v4.md) | v3 wire/window/模型事实不变；`camps.enter` 对 Pending 直接读投影、对 Active 保持 reconcile-before-read；non-terminal Evidence 仍为最近 80 条 |
@@ -41,7 +42,7 @@ Architecture 解释组件如何组成，Version 概览记录交付范围；它�
 | [Camp Conversation Find v1（当前）](camp-conversation-find-v1.md) | Desktop 当前 Camp 公开 user/agent 正文的 exact count、单命中 traversal、Unicode scalar offset 与有界 around-window 定位 |
 | [Camp Permanent Deletion v2（当前）](camp-permanent-deletion-v2.md) | v1 删除合同不变；增加 Camp Published Attachment View journal cleanup，并规定先 fence Runtime、再取得 View write gate |
 | [Camp Permanent Deletion v1（历史）](camp-permanent-deletion-v1.md) | `camps.delete` force 字段、兼容 blocker、单事务物理删除、Runtime cleanup 与 Renderer 确认边界；不含 Published View cleanup |
-| [Workspace Change Observation v1（当前）](workspace-change-observation-v1.md) | Runtime 终态 Command Diff projection；Camp/exact-root Window identity、状态、稳定 synthetic tree、临时 Git refs、不可变完成 Evidence、Managed Blob 与授权读取 |
+| [Runtime File Change Observation v1（当前）](runtime-file-change-observation-v1.md) | Runtime 终态文件操作与 Command Diff；每 AgentRun/epoch 文件变化归约、Managed Blob、恢复、读取授权与 inline presentation |
 | [Benchmark Protocol v3（当前）](benchmark-protocol-v3.md) | 版本化 Run 信封、Product/Environment fingerprint、五层 Evidence、Adapter/derived projection、逐轴比较资格与 disclosure |
 | [Semantic Judge Views v1（当前）](semantic-judge-views-v1.md) | Process/Blinded Outcome 双视图、模型可见 evidence allowlist、本地 Evidence ID、双 Replica、逐项 reconciliation 与 Hard Outcome non-interference |
 | [Tool Interaction Measurement v2（当前）](tool-interaction-measurement-v2.md) | v1 的 opportunity/Judge 边界加 runtime catalog/projection 兼容门禁、Memory v3/readback、History Search、Task adapter 与 reply/task Process Evidence |

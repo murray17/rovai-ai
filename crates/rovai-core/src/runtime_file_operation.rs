@@ -2,7 +2,7 @@ use std::path::Path;
 
 use serde_json::Value;
 
-use crate::{agent_profile::AdapterKind, runtime_diff::normalize_reported_path};
+use crate::{agent_profile::AdapterKind, runtime_diff::normalize_reported_path_for_display};
 
 pub const FILE_OPERATION_SCHEMA_VERSION: u32 = 1;
 
@@ -58,8 +58,8 @@ fn admit_candidate(
         .get("path")
         .and_then(Value::as_str)
         .ok_or("runtime_file_operation_path_invalid")?;
-    let path = normalize_reported_path(execution_root, raw_path)
-        .ok_or("runtime_file_operation_path_outside_root")?;
+    let path = normalize_reported_path_for_display(execution_root, raw_path)
+        .ok_or("runtime_file_operation_path_invalid")?;
     Ok(AdmittedRuntimeFileOperation {
         operation_kind: operation_kind.to_string(),
         path,
@@ -102,12 +102,32 @@ mod tests {
     }
 
     #[test]
-    fn rejects_unscoped_or_non_write_file_operation_candidates() {
+    fn cross_root_write_is_admitted_with_an_absolute_display_path() {
+        let result = admit_runtime_file_operation(
+            &json!({
+                "runtimeFileOperation": {
+                    "adapterKind": "qoder-cli",
+                    "protocolFamily": "acp-v1",
+                    "sourceEventKind": "session/update.tool_call_update.completed",
+                    "operationKind": "write",
+                    "path": "../outside.txt"
+                }
+            }),
+            Path::new("/repo"),
+            Some("qoder-cli"),
+        )
+        .expect("candidate should exist")
+        .expect("cross-root writes should remain visible");
+        assert_eq!(result.path, "/outside.txt");
+    }
+
+    #[test]
+    fn rejects_invalid_paths_or_non_write_file_operation_candidates() {
         for (operation_kind, path, reason) in [
             (
                 "write",
-                "../outside.txt",
-                "runtime_file_operation_path_outside_root",
+                "https://example.com/outside.txt",
+                "runtime_file_operation_path_invalid",
             ),
             ("read", "src/app.ts", "runtime_file_operation_kind_invalid"),
         ] {

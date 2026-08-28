@@ -54,6 +54,7 @@ use rovai_core::{
         SetMemberRuntimeConfigurationCommand, UpdateAdapterInstallationCommand,
         UpdateAgentProfileCommand, VerifiedManagedInstallation,
     },
+    agent_run_file_change::{self, AgentRunFileChangeProjector},
     agent_runtime_adapter::{
         AcpProbeObservation, AgentRuntimeAdapterRegistry, AntigravityProbeObservation,
         ClaudeCodeProbeObservation, CodexProbeObservation, ExecutableIntegrityStatus,
@@ -211,7 +212,6 @@ use rovai_core::{
         TeamToolService, TeamUpdateTaskInput,
     },
     team_tool_catalog::validate_builtin_tool_input,
-    workspace_change::{self, WindowAdmission},
 };
 use runtime_fleet::{AgentRuntimeFleetConfig, AgentRuntimeFleetManager};
 use serde::{Deserialize, Serialize};
@@ -224,6 +224,7 @@ use tokio::{
 
 const RUNTIME_CANCELLATION_INTERRUPT_TIMEOUT: Duration = Duration::from_secs(2);
 const RUNTIME_CANCELLATION_FENCE_TIMEOUT: Duration = Duration::from_secs(1);
+const RUNTIME_CANCELLATION_INGRESS_FLUSH_TIMEOUT: Duration = Duration::from_secs(5);
 const PLANNED_SHUTDOWN_PROTOCOL_VERSION: u32 = 3;
 const PLANNED_SHUTDOWN_MIN_DEADLINE_MS: u64 = 100;
 const PLANNED_SHUTDOWN_MAX_DEADLINE_MS: u64 = 30_000;
@@ -240,8 +241,8 @@ const CAMP_ATTACHMENT_VIEW_MUTATION_DEADLINE: Duration = Duration::from_secs(55)
 const CAMP_ATTACHMENT_VIEW_QUIESCENCE_POLL_INTERVAL: Duration = Duration::from_millis(100);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum RuntimeCancellationQuiescence {
-    Proven,
+enum RuntimeCancellationIngressFence {
+    Flushed,
     Unproven,
 }
 
@@ -546,9 +547,10 @@ struct CampIdParams {
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct WorkspaceChangeWindowDiffParams {
+struct AgentRunFileChangesParams {
     camp_id: CampId,
-    window_id: String,
+    agent_run_id: String,
+    execution_epoch: i64,
 }
 
 #[derive(Debug, Deserialize)]
@@ -1331,7 +1333,6 @@ struct Core {
     compaction_detector_policies: DesiredCompactionDetectorPolicies,
     agent_run_cancellation_notify: Notify,
     pending_execution_recovery: Mutex<()>,
-    workspace_change_coordinator: workspace_change::WorkspaceChangeCoordinator,
     skill_library: SkillLibraryService,
     mcp_config: McpConfigStore,
     mcp_projection: McpProjectionService,
@@ -1698,6 +1699,13 @@ impl AgentRunRuntime {
         match self {
             Self::Codex(runtime) => runtime.interrupt().await,
             Self::Acp(runtime) => runtime.cancel().await,
+        }
+    }
+
+    async fn detach_and_flush_ingress(&self) -> bool {
+        match self {
+            Self::Codex(runtime) => runtime.detach_and_flush_ingress().await,
+            Self::Acp(runtime) => runtime.detach_and_flush_ingress().await,
         }
     }
 }
@@ -5641,16 +5649,19 @@ impl Core {
                     ReadModelService.camp_snapshot(&mut database, params.camp_id.as_str())?,
                 )?)
             }
-            "workspaceChangeWindows.getDiff" => {
-                let params: WorkspaceChangeWindowDiffParams =
+            "agentRunFileChanges.get" => {
+                let params: AgentRunFileChangesParams =
                     serde_json::from_value(request.params.clone())?;
                 let database = self.database.lock().await;
-                Ok(serde_json::to_value(workspace_change::read_window_diff(
-                    &database,
-                    &ManagedBlobStore::new(&self.data_dir),
-                    params.camp_id.as_str(),
-                    &params.window_id,
-                )?)?)
+                Ok(serde_json::to_value(
+                    agent_run_file_change::read_run_file_changes(
+                        &database,
+                        &ManagedBlobStore::new(&self.data_dir),
+                        params.camp_id.as_str(),
+                        &params.agent_run_id,
+                        params.execution_epoch,
+                    )?,
+                )?)
             }
             "camp.messages.page" => {
                 let params: CampMessagePageParams = serde_json::from_value(request.params.clone())?;
@@ -6838,20 +6849,6 @@ impl Core {
                 return;
             }
         };
-        let workspace_change_identity = self
-            .discover_workspace_change_identity(&workspace_path)
-            .await;
-        let workspace_change_guard = if let Some(identity) = workspace_change_identity.as_ref() {
-            Some(self.workspace_change_coordinator.acquire(identity).await)
-        } else {
-            None
-        };
-        let workspace_change_admission = if let Some(identity) = workspace_change_identity {
-            self.prepare_workspace_change_admission(&candidate.camp_id, identity)
-                .await
-        } else {
-            None
-        };
         let claim = {
             let mut database = self.database.lock().await;
             ExecutionRuntimeService::default().claim_agent_run(
@@ -6881,30 +6878,12 @@ impl Core {
         };
         let claim = match claim {
             Ok(claim) if claim.result.status == CommandResultStatus::Accepted => claim,
-            Ok(_) => {
-                if let Some(admission) = workspace_change_admission.as_ref() {
-                    let mut database = self.database.lock().await;
-                    let _ = workspace_change::abort_unjoined_window(
-                        &mut database,
-                        &self.data_dir,
-                        admission,
-                    );
-                }
-                return;
-            }
+            Ok(_) => return,
             Err(error) => {
                 eprintln!(
                     "failed to claim AgentRun {}: {error:#}",
                     candidate.agent_run_id
                 );
-                if let Some(admission) = workspace_change_admission.as_ref() {
-                    let mut database = self.database.lock().await;
-                    let _ = workspace_change::abort_unjoined_window(
-                        &mut database,
-                        &self.data_dir,
-                        admission,
-                    );
-                }
                 return;
             }
         };
@@ -6913,40 +6892,8 @@ impl Core {
                 "AgentRun claim {} did not return executionEpoch",
                 candidate.agent_run_id
             );
-            if let Some(admission) = workspace_change_admission.as_ref() {
-                let mut database = self.database.lock().await;
-                let _ = workspace_change::abort_unjoined_window(
-                    &mut database,
-                    &self.data_dir,
-                    admission,
-                );
-            }
             return;
         };
-        if let Some(admission) = workspace_change_admission.as_ref() {
-            let joined = {
-                let mut database = self.database.lock().await;
-                workspace_change::join_window_participant(
-                    &mut database,
-                    &admission.window_id,
-                    &candidate.agent_run_id,
-                    execution_epoch,
-                )
-            };
-            if let Err(error) = joined {
-                eprintln!(
-                    "Workspace Change Window participant join failed open for AgentRun {}: {error:#}",
-                    candidate.agent_run_id
-                );
-                let mut database = self.database.lock().await;
-                let _ = workspace_change::abort_unjoined_window(
-                    &mut database,
-                    &self.data_dir,
-                    admission,
-                );
-            }
-        }
-        drop(workspace_change_guard);
         let execution = {
             let database = self.database.lock().await;
             ExecutionRuntimeService::default().load_agent_run_execution(
@@ -6962,7 +6909,7 @@ impl Core {
                     "claimed AgentRun {} was fenced before dispatch",
                     candidate.agent_run_id
                 );
-                self.settle_workspace_change_after_quiescence(
+                self.project_agent_run_file_changes_after_terminal(
                     &candidate.agent_run_id,
                     execution_epoch,
                 )
@@ -7217,6 +7164,7 @@ impl Core {
                             core.finish_claimed_agent_run_failure(
                                 &execution,
                                 failure_persisted,
+                                true,
                             )
                             .await;
                         }
@@ -7328,12 +7276,12 @@ impl Core {
         for candidate in candidates {
             let core = self.clone();
             interrupt_tasks.spawn(async move {
-                let quiescence = core.interrupt_cancelled_agent_run(&candidate).await;
-                (candidate, quiescence)
+                let ingress_fence = core.interrupt_cancelled_agent_run(&candidate).await;
+                (candidate, ingress_fence)
             });
         }
         while let Some(result) = interrupt_tasks.join_next().await {
-            let (candidate, quiescence) = match result {
+            let (candidate, ingress_fence) = match result {
                 Ok(result) => result,
                 Err(error) => {
                     eprintln!("AgentRun cancellation interrupt worker failed: {error}");
@@ -7392,21 +7340,17 @@ impl Core {
                             candidate.execution_epoch,
                         ))
                         .await;
-                    match quiescence {
-                        RuntimeCancellationQuiescence::Proven => {
-                            self.settle_workspace_change_after_quiescence(
-                                &candidate.agent_run_id,
-                                candidate.execution_epoch,
-                            )
-                            .await;
-                        }
-                        RuntimeCancellationQuiescence::Unproven => {
-                            self.fail_workspace_change_after_unproven_cancellation(
-                                &candidate.agent_run_id,
-                                candidate.execution_epoch,
-                            )
-                            .await;
-                        }
+                    if ingress_fence == RuntimeCancellationIngressFence::Flushed {
+                        self.project_agent_run_file_changes_after_terminal(
+                            &candidate.agent_run_id,
+                            candidate.execution_epoch,
+                        )
+                        .await;
+                    } else {
+                        eprintln!(
+                            "AgentRun {} cancellation ingress did not flush; file-change projection remains recoverable instead of freezing no_changes",
+                            candidate.agent_run_id
+                        );
                     }
                     if !accepted_input_outcome_unknown {
                         let core = self.clone();
@@ -7475,9 +7419,9 @@ impl Core {
     async fn interrupt_cancelled_agent_run(
         &self,
         candidate: &AgentRunCancellationCandidate,
-    ) -> RuntimeCancellationQuiescence {
+    ) -> RuntimeCancellationIngressFence {
         if candidate.status == "queued" {
-            return RuntimeCancellationQuiescence::Proven;
+            return RuntimeCancellationIngressFence::Flushed;
         }
         if candidate.adapter_kind == "antigravity-app" {
             if run_with_cancellation_deadline(
@@ -7502,9 +7446,9 @@ impl Core {
                 )
                 .await
             {
-                RuntimeCancellationQuiescence::Proven
+                RuntimeCancellationIngressFence::Flushed
             } else {
-                RuntimeCancellationQuiescence::Unproven
+                RuntimeCancellationIngressFence::Unproven
             };
         }
         if candidate.adapter_kind == "claude-code-cli" {
@@ -7530,16 +7474,16 @@ impl Core {
                 )
                 .await
             {
-                RuntimeCancellationQuiescence::Proven
+                RuntimeCancellationIngressFence::Flushed
             } else {
-                RuntimeCancellationQuiescence::Unproven
+                RuntimeCancellationIngressFence::Unproven
             };
         }
         let Some(runtime) = self
             .agent_run_runtime(&candidate.agent_run_id, candidate.execution_epoch)
             .await
         else {
-            return RuntimeCancellationQuiescence::Unproven;
+            return RuntimeCancellationIngressFence::Unproven;
         };
         match run_with_cancellation_deadline(
             RUNTIME_CANCELLATION_INTERRUPT_TIMEOUT,
@@ -7561,8 +7505,19 @@ impl Core {
                 );
             }
         }
+        let ingress_flushed = run_with_cancellation_deadline(
+            RUNTIME_CANCELLATION_INGRESS_FLUSH_TIMEOUT,
+            runtime.detach_and_flush_ingress(),
+        )
+        .await;
+        if ingress_flushed != Some(true) {
+            eprintln!(
+                "Runtime ingress flush timed out for AgentRun {}; file-change projection will remain recoverable",
+                candidate.agent_run_id
+            );
+        }
         let adapter_kind = runtime.adapter_kind();
-        let fenced = run_with_cancellation_deadline(RUNTIME_CANCELLATION_FENCE_TIMEOUT, async {
+        let stopped = run_with_cancellation_deadline(RUNTIME_CANCELLATION_FENCE_TIMEOUT, async {
             match adapter_kind {
                 rovai_core::agent_profile::AdapterKind::CodexCli => {
                     self.codex_cli
@@ -7592,16 +7547,16 @@ impl Core {
             }
         })
         .await;
-        if fenced != Some(true) {
+        if stopped != Some(true) {
             eprintln!(
                 "Runtime detach timed out for AgentRun {}; persisted cancellation fence remains authoritative",
                 candidate.agent_run_id
             );
         }
-        if fenced == Some(true) {
-            RuntimeCancellationQuiescence::Proven
+        if ingress_flushed == Some(true) {
+            RuntimeCancellationIngressFence::Flushed
         } else {
-            RuntimeCancellationQuiescence::Unproven
+            RuntimeCancellationIngressFence::Unproven
         }
     }
 
@@ -9846,7 +9801,7 @@ impl Core {
                     &current.workspace.execution_root,
                 )
                 .await;
-                self.settle_workspace_change_after_quiescence(
+                self.project_agent_run_file_changes_after_terminal(
                     &current.agent_run_id,
                     current.execution_epoch,
                 )
@@ -10578,6 +10533,20 @@ impl Core {
         runtime_terminal_observed: bool,
         public_failure: Option<RuntimeFailureView>,
     ) {
+        let file_change_ingress_flushed = match self
+            .agent_run_runtime(&execution.agent_run_id, execution.execution_epoch)
+            .await
+        {
+            Some(runtime) => run_with_cancellation_deadline(
+                RUNTIME_CANCELLATION_INGRESS_FLUSH_TIMEOUT,
+                runtime.detach_and_flush_ingress(),
+            )
+            .await
+            .is_some_and(|flushed| flushed),
+            // A failure before the Adapter registered a Runtime cannot have a
+            // routed Runtime file event waiting in Core's ingress queue.
+            None => true,
+        };
         if let Err(flush_error) = flush_runtime_monitoring_run(
             self,
             &execution.agent_run_id,
@@ -10612,8 +10581,12 @@ impl Core {
                 ending_git_observation,
             )
             .await;
-        self.finish_claimed_agent_run_failure(execution, failure_persisted)
-            .await;
+        self.finish_claimed_agent_run_failure(
+            execution,
+            failure_persisted,
+            file_change_ingress_flushed,
+        )
+        .await;
     }
 
     async fn persist_claimed_agent_run_failure(
@@ -10673,6 +10646,7 @@ impl Core {
         &self,
         execution: &AgentRunExecution,
         failure_persisted: bool,
+        file_change_ingress_flushed: bool,
     ) {
         if failure_persisted {
             self.reconcile_skill_projection_after_run_terminal(&execution.workspace.execution_root)
@@ -10713,12 +10687,17 @@ impl Core {
                     .await;
             }
         }
-        if failure_persisted {
-            self.settle_workspace_change_after_quiescence(
+        if failure_persisted && file_change_ingress_flushed {
+            self.project_agent_run_file_changes_after_terminal(
                 &execution.agent_run_id,
                 execution.execution_epoch,
             )
             .await;
+        } else if failure_persisted {
+            eprintln!(
+                "AgentRun {} failure ingress did not flush; file-change projection remains recoverable instead of freezing no_changes",
+                execution.agent_run_id
+            );
         }
     }
 
@@ -10772,8 +10751,11 @@ impl Core {
                 &candidate.execution_workspace().execution_root,
             )
             .await;
-            self.settle_workspace_change_after_quiescence(&candidate.agent_run_id, execution_epoch)
-                .await;
+            self.project_agent_run_file_changes_after_terminal(
+                &candidate.agent_run_id,
+                execution_epoch,
+            )
+            .await;
         }
     }
 
@@ -10793,259 +10775,42 @@ impl Core {
         .map(|inspection| inspection.git_observation)
     }
 
-    async fn discover_workspace_change_identity(
-        &self,
-        execution_root: &Path,
-    ) -> Option<workspace_change::RepositoryWorktreeIdentity> {
-        let root = execution_root.to_path_buf();
-        match tokio::task::spawn_blocking(move || workspace_change::discover_repository(&root))
-            .await
-        {
-            Ok(Ok(identity)) => identity,
-            Ok(Err(error)) => {
-                eprintln!("Workspace Change Window Git discovery failed: {error:#}");
-                None
-            }
-            Err(error) => {
-                eprintln!("Workspace Change Window Git discovery worker failed: {error}");
-                None
-            }
-        }
-    }
-
-    async fn prepare_workspace_change_admission(
-        &self,
-        camp_id: &str,
-        identity: workspace_change::RepositoryWorktreeIdentity,
-    ) -> Option<WindowAdmission> {
-        let admission = {
-            let mut database = self.database.lock().await;
-            match workspace_change::begin_or_join_window(&mut database, camp_id, &identity) {
-                Ok(admission) => admission,
-                Err(error) => {
-                    eprintln!("Workspace Change Window admission failed open: {error:#}");
-                    return None;
-                }
-            }
-        };
-        if !admission.needs_baseline {
-            return Some(admission);
-        }
-        let capture_identity = admission.identity.clone();
-        let capture = tokio::task::spawn_blocking(move || {
-            workspace_change::stable_capture(&capture_identity, &[])
-        })
-        .await;
-        match capture {
-            Ok(Ok(capture)) => {
-                let publication = {
-                    let mut database = self.database.lock().await;
-                    workspace_change::publish_baseline(
-                        &mut database,
-                        &ManagedBlobStore::new(&self.data_dir),
-                        &self.data_dir,
-                        &admission,
-                        &capture,
-                    )
-                };
-                if let Err(error) = publication {
-                    eprintln!("Workspace Change Window baseline publication failed: {error:#}");
-                    let mut database = self.database.lock().await;
-                    let _ = workspace_change::fail_baseline(
-                        &mut database,
-                        &self.data_dir,
-                        &admission,
-                        Some(&capture.tree_oid),
-                        &workspace_change_reason(&error, "workspace_change_baseline_unavailable"),
-                    );
-                }
-            }
-            Ok(Err(error)) => {
-                eprintln!("Workspace Change Window baseline capture failed: {error:#}");
-                let mut database = self.database.lock().await;
-                let _ = workspace_change::fail_baseline(
-                    &mut database,
-                    &self.data_dir,
-                    &admission,
-                    None,
-                    &workspace_change_reason(&error, "workspace_change_baseline_unavailable"),
-                );
-            }
-            Err(error) => {
-                eprintln!("Workspace Change Window baseline worker failed: {error}");
-                let mut database = self.database.lock().await;
-                let _ = workspace_change::fail_baseline(
-                    &mut database,
-                    &self.data_dir,
-                    &admission,
-                    None,
-                    "workspace_change_capture_worker_failed",
-                );
-            }
-        }
-        Some(admission)
-    }
-
-    async fn fail_workspace_change_after_unproven_cancellation(
+    async fn project_agent_run_file_changes_after_terminal(
         &self,
         agent_run_id: &str,
         execution_epoch: i64,
-    ) {
-        let participant_identity = {
-            let database = self.database.lock().await;
-            match workspace_change::participant_repository_identity(
-                &database,
-                agent_run_id,
-                execution_epoch,
-            ) {
-                Ok(identity) => identity,
-                Err(error) => {
-                    eprintln!(
-                        "Workspace Change cancellation participant identity failed: {error:#}"
-                    );
-                    return;
-                }
-            }
-        };
-        let Some(participant_identity) = participant_identity else {
-            return;
-        };
-        let _gate = self
-            .workspace_change_coordinator
-            .acquire(&participant_identity)
-            .await;
-        let result = {
+    ) -> Option<agent_run_file_change::AgentRunFileChangesView> {
+        let projection = {
             let mut database = self.database.lock().await;
-            workspace_change::fail_window_participant_after_unproven_quiescence(
-                &mut database,
-                &self.data_dir,
-                agent_run_id,
-                execution_epoch,
-                "workspace_change_cancellation_quiescence_unproven",
-            )
-        };
-        if let Err(error) = result {
-            eprintln!("Workspace Change cancellation terminal fence failed: {error:#}");
-        }
-    }
-
-    async fn settle_workspace_change_after_quiescence(
-        &self,
-        agent_run_id: &str,
-        execution_epoch: i64,
-    ) -> Option<workspace_change::WorkspaceChangeWindowView> {
-        let participant_identity = {
-            let database = self.database.lock().await;
-            match workspace_change::participant_repository_identity(
-                &database,
-                agent_run_id,
-                execution_epoch,
-            ) {
-                Ok(identity) => identity,
-                Err(error) => {
-                    eprintln!("Workspace Change Window participant identity failed: {error:#}");
-                    return None;
-                }
-            }
-        };
-        let participant_identity = participant_identity?;
-        let _gate = self
-            .workspace_change_coordinator
-            .acquire(&participant_identity)
-            .await;
-        let close = {
-            let mut database = self.database.lock().await;
-            workspace_change::release_window_participant(
+            AgentRunFileChangeProjector.project_terminal_run(
                 &mut database,
                 &ManagedBlobStore::new(&self.data_dir),
                 agent_run_id,
                 execution_epoch,
             )
         };
-        let close = match close {
-            Ok(Some(close)) => close,
-            Ok(None) => return None,
-            Err(error) => {
-                eprintln!("Workspace Change Window participant release failed: {error:#}");
-                return None;
-            }
-        };
-        let identity = close.identity.clone();
-        let sticky = close.baseline_manifest.entries.clone();
-        let capture = tokio::task::spawn_blocking(move || {
-            workspace_change::stable_capture(&identity, &sticky)
-        })
-        .await;
-        match capture {
-            Ok(Ok(capture)) => {
-                let publication = {
-                    let mut database = self.database.lock().await;
-                    workspace_change::publish_final(
-                        &mut database,
-                        &ManagedBlobStore::new(&self.data_dir),
-                        &self.data_dir,
-                        &close,
-                        &capture,
-                    )
-                };
-                match publication {
-                    Ok(view) => {
-                        emit(
-                            &self.output,
-                            "workspace_change_window.completed",
-                            serde_json::to_value(&view)
-                                .unwrap_or_else(|_| json!({ "windowId": view.window_id })),
-                        );
-                        Some(view)
-                    }
-                    Err(error) => {
-                        eprintln!("Workspace Change Window final publication failed: {error:#}");
-                        let mut database = self.database.lock().await;
-                        let _ = workspace_change::fail_close(
-                            &mut database,
-                            &self.data_dir,
-                            &close,
-                            &workspace_change_reason(&error, "workspace_change_final_unavailable"),
-                        );
-                        None
-                    }
-                }
-            }
-            Ok(Err(error)) => {
-                eprintln!("Workspace Change Window final capture failed: {error:#}");
-                let mut database = self.database.lock().await;
-                let _ = workspace_change::fail_close(
-                    &mut database,
-                    &self.data_dir,
-                    &close,
-                    &workspace_change_reason(&error, "workspace_change_final_unavailable"),
+        match projection {
+            Ok(Some(view)) => {
+                emit(
+                    &self.output,
+                    "agent_run.file_changes_completed",
+                    serde_json::to_value(&view).unwrap_or_else(|_| {
+                        json!({
+                            "agentRunId": agent_run_id,
+                            "executionEpoch": execution_epoch,
+                        })
+                    }),
                 );
-                None
+                Some(view)
             }
+            Ok(None) => None,
             Err(error) => {
-                eprintln!("Workspace Change Window final worker failed: {error}");
-                let mut database = self.database.lock().await;
-                let _ = workspace_change::fail_close(
-                    &mut database,
-                    &self.data_dir,
-                    &close,
-                    "workspace_change_capture_worker_failed",
+                eprintln!(
+                    "AgentRun file-change projection failed for {agent_run_id}/{execution_epoch}: {error:#}"
                 );
                 None
             }
         }
-    }
-}
-
-fn workspace_change_reason(error: &anyhow::Error, fallback: &str) -> String {
-    let message = error.to_string();
-    let code = message
-        .split_once(':')
-        .map_or(message.as_str(), |(code, _)| code);
-    if code.starts_with("workspace_change_") {
-        code.to_string()
-    } else {
-        fallback.to_string()
     }
 }
 
@@ -11588,11 +11353,11 @@ async fn run_core(
             serde_json::to_string(&v2_recovery)?
         );
     }
-    let recovered_workspace_windows =
-        workspace_change::recover_interrupted_windows(&mut database, &data_dir)?;
-    if recovered_workspace_windows != 0 {
+    let recovered_run_file_changes = AgentRunFileChangeProjector
+        .recover_terminal_runs(&mut database, &ManagedBlobStore::new(&data_dir))?;
+    if recovered_run_file_changes != 0 {
         eprintln!(
-            "Workspace Change startup recovery marked {recovered_workspace_windows} interrupted Windows unavailable"
+            "AgentRun file-change startup recovery projected {recovered_run_file_changes} terminal Runs"
         );
     }
     let (codex_tx, codex_rx) = mpsc::unbounded_channel();
@@ -11639,7 +11404,6 @@ async fn run_core(
         compaction_detector_policies: compaction_detector_policies.clone(),
         agent_run_cancellation_notify: Notify::new(),
         pending_execution_recovery: Mutex::new(()),
-        workspace_change_coordinator: workspace_change::WorkspaceChangeCoordinator::default(),
         skill_library,
         mcp_config,
         mcp_projection,
@@ -12519,6 +12283,13 @@ async fn process_codex_events(
                 _ = &mut shutdown => break,
             },
         };
+        let incoming = match incoming {
+            CodexIncoming::IngressBarrier { completion } => {
+                let _ = completion.send(());
+                continue;
+            }
+            incoming => incoming,
+        };
         if let CodexIncoming::Message { message, .. } = &incoming
             && is_codex_command_output_delta_notification(message)
         {
@@ -12648,6 +12419,9 @@ async fn process_codex_events(
                 )
                 .await;
             }
+            CodexIncoming::IngressBarrier { .. } => {
+                unreachable!("Codex ingress barriers are handled before Runtime routing")
+            }
         }
     }
 }
@@ -12669,6 +12443,13 @@ async fn process_acp_events(
                 },
                 _ = &mut shutdown => break,
             },
+        };
+        let incoming = match incoming {
+            AcpIncoming::IngressBarrier { completion } => {
+                let _ = completion.send(());
+                continue;
+            }
+            incoming => incoming,
         };
         let Some(mut runtime_route_permit) = core.planned_shutdown.enter_runtime_route().await
         else {
@@ -12971,6 +12752,9 @@ async fn process_acp_events(
                         adapter_kind.as_str()
                     ),
                 }
+            }
+            AcpIncoming::IngressBarrier { .. } => {
+                unreachable!("ACP ingress barriers are handled before Runtime routing")
             }
         }
     }
@@ -14440,7 +14224,7 @@ async fn persist_acp_prompt_completion(
                 .complete_agent_run(agent_run_id, execution_epoch)
                 .await;
         }
-        core.settle_workspace_change_after_quiescence(agent_run_id, execution_epoch)
+        core.project_agent_run_file_changes_after_terminal(agent_run_id, execution_epoch)
             .await;
         return Ok(());
     }
@@ -14568,7 +14352,7 @@ async fn persist_acp_prompt_completion(
                         .complete_agent_run(agent_run_id, execution_epoch)
                         .await;
                 }
-                core.settle_workspace_change_after_quiescence(agent_run_id, execution_epoch)
+                core.project_agent_run_file_changes_after_terminal(agent_run_id, execution_epoch)
                     .await;
                 return Ok(());
             }
@@ -15187,6 +14971,44 @@ async fn process_agent_run_codex_message(
         eprintln!("ignored fenced native Turn completion for AgentRun {agent_run_id}");
         return;
     }
+    if let Some(diff) = runtime.take_turn_diff(&completed.turn_id).await {
+        const MAX_CODEX_RUN_DIFF_BYTES: usize = 8 * 1024 * 1024;
+        if diff.len() <= MAX_CODEX_RUN_DIFF_BYTES {
+            let payload = json!({
+                "eventId": format!("codex-turn-diff:{}", completed.turn_id),
+                "runtimeRunDiff": {
+                    "schemaVersion": 1,
+                    "source": "runtime_reported",
+                    "status": "available",
+                    "semanticKind": "unified_diff_snapshot",
+                    "diff": diff,
+                    "sourceMetadata": {
+                        "adapterKind": "codex-cli",
+                        "protocolFamily": "codex-app-server",
+                        "sourceEventKind": "turn/diff/updated+turn/completed",
+                        "nativeTurnId": completed.turn_id,
+                    }
+                }
+            });
+            let persisted = {
+                let mut database = core.database.lock().await;
+                ExecutionEvidenceService.record_terminal_run_diff_snapshot(
+                    &mut database,
+                    &ManagedBlobStore::new(&core.data_dir),
+                    agent_run_id,
+                    execution_epoch,
+                    &payload,
+                )
+            };
+            if let Err(error) = persisted {
+                eprintln!(
+                    "failed to persist Codex Turn diff snapshot for AgentRun {agent_run_id}: {error:#}"
+                );
+            }
+        } else {
+            eprintln!("ignored oversized Codex Turn diff snapshot for AgentRun {agent_run_id}");
+        }
+    }
     if completed.status == "interrupted"
         && let Err(error) = persist_interrupted_codex_activities(
             core,
@@ -15313,7 +15135,7 @@ async fn process_agent_run_codex_message(
                 core.codex_cli
                     .complete_agent_run(agent_run_id, execution_epoch)
                     .await;
-                core.settle_workspace_change_after_quiescence(agent_run_id, execution_epoch)
+                core.project_agent_run_file_changes_after_terminal(agent_run_id, execution_epoch)
                     .await;
             }
             Err(error) => eprintln!(
@@ -15500,7 +15322,7 @@ async fn process_agent_run_codex_message(
     core.codex_cli
         .complete_agent_run(agent_run_id, execution_epoch)
         .await;
-    core.settle_workspace_change_after_quiescence(agent_run_id, execution_epoch)
+    core.project_agent_run_file_changes_after_terminal(agent_run_id, execution_epoch)
         .await;
 }
 
@@ -17036,7 +16858,6 @@ mod tests {
             compaction_detector_policies: compaction_detector_policies.clone(),
             agent_run_cancellation_notify: Notify::new(),
             pending_execution_recovery: Mutex::new(()),
-            workspace_change_coordinator: workspace_change::WorkspaceChangeCoordinator::default(),
             skill_library,
             mcp_config,
             mcp_projection,

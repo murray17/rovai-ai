@@ -63,6 +63,6 @@ authority 可以报告可靠终态与外部效果不确定性，但不能调用�
 
 ## Read side 与 Renderer
 
-[Camp Open Projection v7](../contracts/camp-open-projection-v7.md)投影当前 generation、成员 version 与 active
+[Camp Open Projection v8](../contracts/camp-open-projection-v8.md)投影当前 generation、成员 version 与 active
 reconciliation。Renderer 使用权威 removal preview 解释影响，以 exact values 提交；成功后重读 Camp，不在本地
 模拟关系。最后成员操作保持可发现但禁用，添加候选来自当前存在且不在 active set 的 AgentProfile。

@@ -1542,34 +1542,54 @@ export interface DomainEventView {
   createdAt: string
 }
 
-export interface WorkspaceChangedFileView {
+export type AgentRunFileChangePresentationKind =
+  | 'full_net_diff'
+  | 'exact_mutations'
+  | 'operation_only'
+  | 'operation_history'
+
+export interface AgentRunChangedFileSummaryView {
   path: string
   changeKind: string
-  additions: number
-  deletions: number
+  presentationKind: AgentRunFileChangePresentationKind
+  operationCount: number
+  additions?: number
+  deletions?: number
 }
 
-export interface WorkspaceChangeWindowView {
+export interface AgentRunFileChangesView {
   schemaVersion: 1
-  windowId: string
-  captureStatus: 'complete' | 'no_changes' | 'unavailable'
-  executionRootLabel: string
-  files: WorkspaceChangedFileView[]
+  agentRunId: string
+  executionEpoch: number
+  files: AgentRunChangedFileSummaryView[]
   fileCount: number
-  additions: number
-  deletions: number
-  capturedAt: string
-  hasDiffContent: boolean
+  operationCount: number
+  additions?: number
+  deletions?: number
+  completedAt: string
 }
 
-export interface WorkspaceChangeWindowDiffView {
+export interface AgentRunFileChangeBlockView {
+  sequence: number
+  semantics: 'full_net_diff' | 'full_before_after' | 'unified_diff_snapshot' | 'exact_mutation' | 'operation_only'
+  changeKind: string
+  additions?: number
+  deletions?: number
+  diff?: string
+}
+
+export interface AgentRunChangedFileDetailView extends AgentRunChangedFileSummaryView {
+  blocks: AgentRunFileChangeBlockView[]
+}
+
+export interface AgentRunFileChangesDetailView {
   schemaVersion: 1
-  window: WorkspaceChangeWindowView
-  diff: string
+  card: AgentRunFileChangesView
+  files: AgentRunChangedFileDetailView[]
 }
 
 export interface CampSnapshot {
-  schemaVersion: 33
+  schemaVersion: 34
   throughGlobalSequence: number
   camp: {
     id: string
@@ -1591,7 +1611,7 @@ export interface CampSnapshot {
   turns: CampTurnView[]
   agentRuns: AgentRunView[]
   executionEvidence: AgentRunExecutionEvidenceView[]
-  workspaceChangeWindows: WorkspaceChangeWindowView[]
+  agentRunFileChanges: AgentRunFileChangesView[]
   contextManifests: ContextManifestView[]
   approvals: ActionApprovalView[]
   actions: ActionView[]
@@ -1612,7 +1632,7 @@ export interface CampOpenMessageCoverage extends CampOpenCollectionCoverage {
 }
 
 export interface CampOpenProjection {
-  schemaVersion: 4
+  schemaVersion: 5
   throughGlobalSequence: number
   camp: CampSnapshot['camp']
   members: CampMemberView[]
@@ -1623,7 +1643,7 @@ export interface CampOpenProjection {
   turns: CampTurnView[]
   agentRuns: AgentRunView[]
   executionEvidence: AgentRunExecutionEvidenceView[]
-  workspaceChangeWindows: WorkspaceChangeWindowView[]
+  agentRunFileChanges: AgentRunFileChangesView[]
   approvals: ActionApprovalView[]
   timeline: DomainEventView[]
   coverage: {
@@ -2684,7 +2704,7 @@ export type CoreMethod =
   | 'agentRuns.diagnostic.get'
   | 'agentRuns.resolveRecoveryBlocker'
   | 'camps.snapshot'
-  | 'workspaceChangeWindows.getDiff'
+  | 'agentRunFileChanges.get'
   | 'camp.messages.page'
   | 'camp.messages.around'
   | 'camp.messages.find'

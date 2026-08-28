@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::{
+    agent_run_file_change::{AgentRunFileChangesView, list_completed_run_file_changes},
     camp_attachment::{DIRECTORY_MEDIA_TYPE, managed_attachment_summary},
     camp_content::{StructuredCampMessageContent, normalize_content, render_current_plain_text},
     camp_message_publication::{
@@ -19,16 +20,15 @@ use crate::{
     mcp_projection::McpExposureSnapshot,
     runtime_failure::RuntimeFailureView,
     skill_projection::SkillExposureSnapshot,
-    workspace_change::{self, WorkspaceChangeWindowView},
 };
 
-pub const READ_MODEL_SCHEMA_VERSION: i64 = 33;
+pub const READ_MODEL_SCHEMA_VERSION: i64 = 34;
 pub const EVENT_BATCH_SCHEMA_VERSION: i64 = 9;
 pub const NAVIGATION_SCHEMA_VERSION: i64 = 3;
 pub const EXECUTION_EVIDENCE_PAGE_SCHEMA_VERSION: i64 = 1;
 pub const CAMP_MESSAGE_AROUND_SCHEMA_VERSION: i64 = 1;
 pub const CAMP_MESSAGE_FIND_SCHEMA_VERSION: i64 = 1;
-pub const CAMP_OPEN_SCHEMA_VERSION: i64 = 4;
+pub const CAMP_OPEN_SCHEMA_VERSION: i64 = 5;
 pub const CAMP_MESSAGE_PAGE_SCHEMA_VERSION: i64 = 1;
 pub const AGENT_RUN_DIAGNOSTIC_SCHEMA_VERSION: i64 = 1;
 pub const NAVIGATION_RECENT_CAMP_LIMIT: usize = 5;
@@ -653,7 +653,7 @@ pub struct CampSnapshot {
     pub turns: Vec<CampTurnView>,
     pub agent_runs: Vec<AgentRunView>,
     pub execution_evidence: Vec<AgentRunExecutionEvidenceView>,
-    pub workspace_change_windows: Vec<WorkspaceChangeWindowView>,
+    pub agent_run_file_changes: Vec<AgentRunFileChangesView>,
     pub context_manifests: Vec<ContextManifestView>,
     pub approvals: Vec<ApprovalView>,
     pub actions: Vec<ActionView>,
@@ -708,7 +708,7 @@ pub struct CampOpenProjection {
     pub turns: Vec<CampTurnView>,
     pub agent_runs: Vec<AgentRunView>,
     pub execution_evidence: Vec<AgentRunExecutionEvidenceView>,
-    pub workspace_change_windows: Vec<WorkspaceChangeWindowView>,
+    pub agent_run_file_changes: Vec<AgentRunFileChangesView>,
     pub approvals: Vec<ApprovalView>,
     pub timeline: Vec<DomainEventView>,
     pub coverage: CampOpenCoverage,
@@ -990,8 +990,7 @@ impl ReadModelService {
             Some(EXECUTION_EVIDENCE_SNAPSHOT_LIMIT),
             false,
         )?;
-        let workspace_change_windows =
-            workspace_change::list_completed_windows(&transaction, camp_id)?;
+        let agent_run_file_changes = list_completed_run_file_changes(&transaction, camp_id)?;
         let context_manifests = load_context_manifests(&transaction, camp_id)?;
         let approvals = load_approvals(&transaction, camp_id, false, None)?;
         let actions = load_actions(&transaction, camp_id)?;
@@ -1017,7 +1016,7 @@ impl ReadModelService {
             turns,
             agent_runs,
             execution_evidence,
-            workspace_change_windows,
+            agent_run_file_changes,
             context_manifests,
             approvals,
             actions,
@@ -1043,8 +1042,7 @@ impl ReadModelService {
         let turns = load_turns(&transaction, camp_id, Some(CAMP_OPEN_TURN_LIMIT))?;
         let agent_runs = load_agent_runs(&transaction, camp_id, Some(CAMP_OPEN_AGENT_RUN_LIMIT))?;
         let execution_evidence = load_execution_evidence(&transaction, camp_id, None, true)?;
-        let workspace_change_windows =
-            workspace_change::list_completed_windows(&transaction, camp_id)?;
+        let agent_run_file_changes = list_completed_run_file_changes(&transaction, camp_id)?;
         let approvals =
             load_approvals(&transaction, camp_id, true, Some(CAMP_OPEN_APPROVAL_LIMIT))?;
         let timeline = load_events(
@@ -1085,7 +1083,7 @@ impl ReadModelService {
             turns,
             agent_runs,
             execution_evidence,
-            workspace_change_windows,
+            agent_run_file_changes,
             approvals,
             timeline,
             coverage,

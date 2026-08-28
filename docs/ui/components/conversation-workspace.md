@@ -14,7 +14,7 @@ viewport `>= 1800px` 时独立扩展到 `1440px`。
 
 ## 打开与渐进历史
 
-Camp 的首个 meaningful paint 只依赖 [Camp Open Projection v7](../../contracts/camp-open-projection-v7.md)：
+Camp 的首个 meaningful paint 只依赖 [Camp Open Projection v8](../../contracts/camp-open-projection-v8.md)：
 Camp/成员、最近消息、当前运行摘要、pending Approval 和 Composer 可用即完成。项目导航恢复、侧栏刷新
 与可见来源确认在首屏后执行，失败不能撤销已打开会话。只显示“正在打开对话”的 Shell 不算完成。
 
@@ -292,36 +292,45 @@ disclosure 继续在原位渲染完整公开结果，不再截断，不再提供
 “查看完整工具调用”。精确合同见
 [Run Process Detail Surface v23](../../contracts/run-process-detail-surface-v23.md)。
 
-### Runtime 终态文件变更与 Workspace Change Window
+### Runtime 终态文件变更与 AgentRun 文件变化
 
-只有 [Workspace Change Observation v1](../../contracts/workspace-change-observation-v1.md)准入的可靠终态文件
-Evidence 才进入文件变更呈现。成功 Edit/Write 的结构化 kind 与同 ToolCall 唯一标准 path 足以把原 Tool 行呈现为
-`修改 <basename>`；它不证明 old/new，因此没有可靠内容时不显示 `+A −D`、不提供空 inline diff。另有已准入
-Command Diff 时，一条 Canonical Activity 的多个 change 才直接成为对应 Run stage 中的同级
-`修改 <basename> +A −D` 行；每行复用现有 File Tool 图标并独立展开 inline unified diff。
+只有 [Runtime File Change Observation v1](../../contracts/runtime-file-change-observation-v1.md)准入的可靠终态
+Evidence 才进入文件变化呈现。成功 Edit/Write 的可靠单路径足以把原 Tool 行呈现为 `修改 <basename>`；没有
+可靠内容时不显示 `+A −D` 或空 disclosure。有完整 before/after、unified snapshot 或 exact mutation 时，每个
+文件作为同一 Canonical Activity 的 presentation row 独立展开。
 
-Renderer 不显示 `apply_patch` 父行或“编辑了 N 个文件”聚合层，不从 Tool 显示名、raw input、output、命令文本或
-当前文件推测修改/diff，也不为逐文件行创建新的 Activity identity。路径缺失、多个候选、失败或 kind 冲突时保留
-普通 Tool Activity；只剩 `apply_patch` 实现细节时不渲染该实现行。文件行留在现有“已执行 N 项操作”集合内；集合计数仍按权威
-Canonical Activity 计算，不按逐文件 presentation row 扩增。展开后的 Tool 列表顶格使用现有整行宽度，
-文件 inline diff 不再增加一层结构缩进。
+Renderer 不显示 `apply_patch` 父行或“编辑了 N 个文件”聚合层，不从 Tool 显示名、output、命令文本或当前文件
+推测变化，也不为逐文件行创建新的 Activity identity。文件行留在现有“已执行 N 项操作”集合内，集合计数仍按
+Canonical Activity 计算。每行复用既有 File Tool 图标，顶格占满现有 Tool list 横条，不增加结构缩进。
 
-Claude Code `Edit` 的 `exact_mutation` 沿用同一文件行，但展开内容只显示 `− oldText / + newText` 片段，不显示
-旧/新文件行号、`@@` hunk 或推测上下文；行的 `+A −D` 只统计该 mutation 的 new/old 片段行数。同一文件连续
-Edit 按各自 Tool 行和时序分别显示，不合并。Write、NotebookEdit、ApplyPatch、失败/缺失 result 与
-`replace_all=true` 继续显示普通 Tool Activity，不出现空 Diff disclosure。
+Claude Code `Edit` 的 exact mutation 展开只显示 `− oldText / + newText` 片段，不显示 `@@`、旧/新文件行号或
+推测上下文。同一文件连续 Edit 在 Command View 中仍按各 Tool 时序分别显示；Write、NotebookEdit、ApplyPatch、
+失败/缺失 result 与 `replace_all=true` 保持普通 Tool Activity。
 
-Git Workspace Change Window 的完成 Evidence 按 `capturedAt` 进入既有会话时间线并保留连接轨道。卡片主标题固定
-为 `Files Changed`，显示总文件数与 `+ / −`、顶格且无行分隔的完整相对路径。卡片上半区整体是进入 Review
-的原生按钮，右侧 `View` 只是无边框、黑色的低强调 affordance；每个文件行也是独立原生按钮，进入同一 Review
-并直接选择该文件。卡片各点击分区覆盖完整表面，不嵌套交互控件。卡片不显示时间、“已保存”、参与运行、
-独立工作区或底部 metadata。每个完成 Window 生成独立历史卡片，后续 Window 不覆盖旧卡；`no_changes`、
-`unavailable` 与非 Git root 不生成卡片。
+每个 terminal `agentRunId + executionEpoch` 可以在对应 Run 的会话位置追加一张独立卡片，标题固定为
+`Files Changed`。卡片紧跟来源 Run 的最后一条公开消息；没有公开消息时才以完成时间定位。并行 Run 分别产生卡片，
+不共享、不覆盖，也不会因相邻完成而视觉归属到其他队员。移除明确的 `runtime_diff_no_changes` 后，每个文件只要
+仍有一个或多个可靠 Diff，就按既有归约显示逐文件 `+A −D`；同文件的 path-only operation 只保留在时序和
+operation count 中，不阻止可靠 Diff 参与统计。只有所有文件都有可靠统计时，卡片显示
+`N 个文件 · +A −D`；任一文件只有 operation-only 时，整张卡片回退为 `N 个文件 · M 次修改`。
 
-`View` 在当前 Camp workspace 内打开只读完整 diff，读取不可变 `WorkspaceDiffCompleted` Evidence 与 Managed Blob，
-不重新执行 Git diff、不读取当前 workspace。卡片上半区从首个文件打开，文件行从所选文件打开；这只是同一
-Review 内的初始 selection，不跳转文件、不新增独立 Review。关闭后返回原会话；执行台不增加 Workspace
-observation，底部/右侧 placement、会话连接轨与 Tool list 整行宽度保持原有结构。
+文件名顶格排列且不使用横线分隔。display root 内文件显示相对路径，Runtime 明确报告的 root 外文件显示规范化
+绝对路径。卡片默认显示三行，更多文件由“再显示 N 个文件 / 收起文件”在原位切换；不增加行间分隔。
+header 右侧是浅边框、非品牌色且没有箭头的 `View`，hover/focus 使用轻微底色。点击 header、`View` 或任一文件行
+进入独立 `Files Changed` 页面；从文件行进入时预选该文件。卡片不显示时间、“已保存”、Git 状态、参与运行或
+底部 metadata。
+
+Review 保留 App 侧栏和顶部上下文，隐藏会话/Inspector 工作区，内部使用左侧文件列表与右侧 Evidence 阅读面。
+完整净差异显示 unified diff 及可靠 hunk、旧/新行号；exact mutation 不显示 hunk、行号或推测上下文；history
+保留全部 operation 的时序与计数，但只渲染有可靠 diff 的代码块，并将可见代码块从“修改 1”连续编号，不为
+operation-only 记录生成空白占位块。exact mutation 与 history 不显示额外解释提示；operation-only 文件仍可选择，
+右侧显示“没有可审查的差异内容”。返回后恢复原会话，
+不跳转系统编辑器或独立文件 Review。
+
+卡片只读取不可变 AgentRun projection 与受管 detail blob，不读取当前 workspace 或重新执行 Git。`no_changes` 和
+没有可靠 Evidence 的 Run 不生成卡片；Review 也只读取同一 projection/detail，不补造行号或 diff。Git 与非 Git
+项目行为一致。执行台不增加共享 workspace observation，
+底部/右侧 placement、会话连接轨、Tool list 宽度和其他既有视觉结构保持不变。
 
 使用“Agent 运行时默认”的 Run 在既有 `.execution-run-meta` 中保持一个模型字段：尚无可信观测时显示
 “模型 Agent 运行时默认”，首次 Runtime-native 观测到达后原位收敛为“模型 {modelId} · 默认”。固定模型

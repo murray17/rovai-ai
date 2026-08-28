@@ -9,116 +9,124 @@ model_context_change: false
 last_updated: 2026-08-27
 ---
 
-# Rovai-ai v1.29：Camp 动态队员管理与 Workspace Change Observation
+# Rovai-ai v1.29：Camp 动态队员管理与 Runtime 文件变化
 
-> 当前状态：动态 Camp membership 的 Core、Desktop IPC、Renderer、自动化门禁与隔离真实 App 验收均已完成；
-> 后继 Message Delivery zero-attempt cancellation hotfix 与 Managed Attachment v2 无 Run 等待写路径已完成实现
-> 和自动化验证；退出即取消全部 AgentRun、400ms 启停防闪反馈与安全退出等待面也已完成。
+> 当前状态：动态 Camp membership、Message Delivery zero-attempt cancellation、Managed Attachment v2、安全退出、
+> ACP Client FS/Terminal 权限收敛，以及 Runtime Evidence 驱动的 Command Diff / AgentRun 文件变化主路径已经实现并
+> 通过定向回归。真实打包 App 的多 Runtime 文件变化复测仍待完成。
+>
+> 本版本未发布，因此文件变化能力采用 clean break：完全删除 Git tree、Workspace Change Window、baseline/final
+> filesystem capture、checkpoint ref、Window RPC/Read Model 与旧 Workspace Window Review，不保留兼容 reader 或
+> 旧 schema 数据迁移。新的 Files Changed Review 只读取每 Run 的 typed projection 与 detail blob。
 
 前置版本：[v1.28 Grok Build + MiniMax M3](../v1.28/README.md)已按冻结时事实转为 historical。
 
 ## 版本目标
 
-本版本先允许用户在已创建的 Camp 中继续增加或移除队员，并保证成员关系变化不会复活旧 Run、Delivery、Gather
-或业务工具授权；新增只影响之后冻结的 AgentRun，移除以原子 cutover 立即停止新业务效果，再由持久
-reconciliation 完成已接受工作的正式结算。
+本版本允许用户在既有 Camp 中继续增加或移除队员，并保证成员变化不会复活旧 Run、Delivery、Gather 或业务工具
+授权；新增只影响未来冻结的 Run，移除以原子 cutover 立即停止新业务效果，再由持久 reconciliation 完成结算。
 
-同时，在不引入专用 worktree 或 workspace writer lease 的前提下，让用户可以检查：
+文件变化能力只回答 Runtime 能证明的两类问题：
 
-1. Runtime 对具体 Tool / Command Operation 明确报告了哪些修改；
-2. 同一 Camp、同一精确 execution root 的一组重叠运行，在两个稳定 Git 捕获点之间留下了哪些工作区净变化。
+1. `Command Diff`：这一次成功 Operation 明确报告了哪个文件以及哪些可靠内容；
+2. `AgentRun File Changes`：这一个 `agentRunId + executionEpoch` 在 terminal 前累计报告了哪些成功文件变化。
 
-两层结果都必须保留来源、可用性与不确定性。产品不得把 Workspace Window 误称为单个 Agent 的修改，也不得
-把路径、局部片段或语义不明的 Runtime 字段包装成完整文件差异。
+两者共享 append-only Execution Evidence，但使用独立 projector。Core 不扫描工作区、不读取当前文件、不解析 shell
+命令，也不使用 Git；因此 Git 与非 Git Camp 行为一致，并行 Run 各自产生自己的卡片。
 
 ## 交付范围
 
-- Migration 110 建立 `v1.23 / projection schema 64`，增加 Camp membership generation、membership
-  reconciliation、外部来源绑定和 Delivery admission membership version；旧非终态技术工作 clean break；
-- Migration 111 将当前 Data Contract 升为 `v1.24 / projection schema 65`，只放宽 Message Delivery 的零 attempt
-  cancelled terminal；显式/批量取消共用同一转换，迟到 projection completion 和 restart 不能复活终态；
-- Migration 112 将当前 Data Contract 升为 `v1.25 / projection schema 66`，新增 Managed Attachment v2、CampMessage
-  refs 与 durable ingest intent；新附件不再进入 legacy publication gate，不等待或 fence 活跃 AgentRun；
-- Migration 113 保留 `v1.25 / projection schema 66`，只把 durable shutdown cycle 的协议约束扩为 v2/v3，
-  原样保留历史 pending v2 cycle；
-- 新增 `camps.members.add`、`camps.members.removalPreview`、`camps.members.remove` Desktop API；增加使用
-  exact membership generation/version 的添加、预览和移除命令；
-- 添加不创建 Conversation，也不修改已冻结 AgentRun 的 Collaboration State；曾离开的 Agent 再次添加时，
-  产品界面仍按普通“邀请队员”处理，不暴露 rejoined 状态；对 active member（包括 away）的相同 overrides 为 no-op，不同
-  overrides 返回 capability conflict，不由 add 静默修改能力或旋转 lifetime；受信 source 的 accepted no-op
-  正常推进自身 reconciliation generation；
-- Camp 始终至少保留一位 active member。移除 Default Lead 时优先使用有效 successor；若剩余成员全部暂离，
-  允许暂时没有 Lead，待有人归队后由既有 reconciliation 恢复。非 Lead 不接受无意义的 replacement；
-- 移除在同一提交中结束 membership、推进 generation、切换 Lead、取消目标 Run/Gather/Delivery 并释放未终态
-  Task；普通 pending outbound A2A 同步终态化，已 materialized 下游 Run 纳入持久 reconciliation，后者只通过
-  正式 Run/Delivery terminal settlement 推进；
-- 每个 Agent 业务工具都绑定 exact Run membership version；Delivery 和 Gather completion 冻结接收者/发起者
-  membership version，普通 outbound Delivery 另校验 source Run lifetime。离开后重新添加得到新的 membership
-  lifetime，不会恢复旧授权；
-- 旧 Run 的冻结 peers 不是 strict target roster；其新 send 可寻址后来加入的当前 active member，但 accepted
-  Delivery 不能越过 source membership cutover；
-- 普通公开输出与 Missing-Send Recovery 统一经过 publication fence；窄 terminal evidence 可以结算旧工作，
-  但不能在离队后发布内容；
-- 外部成员同步仅是提示：只有 System allowlist、已绑定的 source namespace/binding 和严格递增的 reconciliation
-  generation 可以提交正式领域命令；
-- Camp 会话“当前会话”区域增加“邀请”入口；成员行只保留一个 `•••` 菜单，收纳模型信息展开与移除。最后一位
-  成员的移除操作可见但禁用，并解释“Camp 至少需要一位队员”；
-- 移除确认先读取权威影响预览，展示 Run、Task、Delivery、Gather 影响；冲突可刷新重试，正在 reconciliation
-  的成员在会话区显示非阻塞状态。
-- 退出、重启与更新统一取消全部非终态 AgentRun；稳定快照后立即关闭 terminal/route 准入，短时请求 Runtime
-  中断，再完成 Run 取消审计、未知效果保留与本地收口；
-- 冷启动在前 400ms 保持目标页面稳定，超过门槛才显示局部“正在打开”反馈；队员页与记忆页保持既有结构，
-  关闭也使用 400ms 防闪门槛，慢退出才显示“正在安全退出”。
+- Migration 109 建立 Windows Runtime command-shim identity；Migration 110 建立动态 Camp membership；Migration
+  111 接受 Message Delivery zero-attempt cancelled terminal；Migration 112 建立 Managed Attachment v2；
+- Migration 113 保留 `v1.25 / projection schema 66`，把 durable shutdown cycle 扩为 v2/v3；Migration 114 只为
+  既有 Canonical Activity 增加 typed Command Diff projection；Migration 115 建立
+  `agent_run_file_change_projection` 与 `complete | no_changes` 幂等 checkpoint，并把当前 Data Contract 升为
+  `v1.28 / projection schema 69`；
+- 不创建或迁移任何 Workspace Window、participant、coordinator、baseline/final、manifest、OID 或 ref cleanup
+  表；使用过未发布中间 schema 的本地数据按 current Data Contract clean break 处理；
+- 新增 `camps.members.add`、`camps.members.removalPreview`、`camps.members.remove`；Camp 至少保留一位 active
+  member，移除采用 generation/version CAS 与 durable reconciliation；
+- 每个 Agent 业务工具、Delivery、Gather completion 与 publication 都绑定 exact membership lifetime；重新添加
+  同一 Agent 得到新 lifetime，旧工作不能恢复授权；
+- 新附件使用 Managed Attachment v2、CampMessage refs 与 durable ingest intent，不等待或 fence 活跃 AgentRun；
+  Context 继续使用 DB-only descriptor，legacy v1 只读兼容；
+- 退出、重启与更新统一取消全部非终态 AgentRun；稳定快照后关闭 terminal/route 准入，短时请求 Runtime 中断，
+  再完成 Run 取消审计、未知效果保留与本地收口；冷启动与关闭均使用 400ms 防闪反馈；
+- ACP Client FS 与 Terminal 只作 fenced 执行代理。文件与 Shell 权限由 Runtime/OS 拥有；execution root 是默认
+  cwd 和相对路径基准，不是 sandbox；
+- Runtime 文件 Evidence 保留四种语义：`full_before_after`、`unified_diff_snapshot`、`exact_mutation`、
+  `operation_only`；只有 Adapter 能从可靠终态证明的数据才能准入；
+- execution root 同时作为 display root：root 内文件显示相对路径，Runtime 明确报告的 root 外文件显示规范化绝对
+  路径并继续进入该 Run 卡片；
+- Codex Command View 使用 terminal completed `fileChange`；Run card 优先使用 matching turn completed 后发布的
+  最新 `turn/diff/updated` snapshot，空 snapshot 表示 display root 内 no-change；显式 root 外 terminal fileChange
+  仍补入卡片，缺失或不可解析时回退全部 terminal fileChange；
+- ACP 累计同 ToolCall 的标准 Diff、location、stable meta 与 adapter 允许的 rawInput aliases；完整 old/new 形成
+  FullBeforeAfter，可靠单路径形成 OperationOnly，失败/取消不发布；
+- Claude Code 只从成功配对的原生 `Edit` 生成 ExactMutation；`replace_all=true`、Write、NotebookEdit、
+  ApplyPatch 与 Antigravity 不补猜；
+- 一个 Run 的连续完整状态链归约为首态到末态；roundtrip 文件消失；链断裂只降级该文件；exact mutation 保留时序；
+  operation-only 保留时序与计数但不参与 Diff 统计；只有每个文件都有可靠统计时才显示全局 `+A −D`；
+- 会话每 Run 最多显示一张 `Files Changed` 卡片，默认显示三行并可原位展开文件清单；header `View` 与文件行进入
+  同一独立 Review。Command View 仍扁平显示 `修改 xxx`，没有 `apply_patch` 父行或“编辑了 N 个文件”聚合层；
+- Camp Open Snapshot 升为 schema 34、Open schema 5；detail 只允许
+  `campId + agentRunId + executionEpoch` 授权读取，受管 detail blob 不进入模型上下文。
+
+## 明确不做
+
+- 不创建 Git synthetic tree、baseline/final capture、checkpoint ref、Window coordinator 或 workspace scanner；
+- 不把用户编辑器、shell、其他 Run 或外部进程未被 Runtime 报告的写入加入卡片；
+- 不跨 Run、Camp 或 execution epoch 合并文件变化；
+- 不读取当前文件补齐 partial mutation，不从 Tool title、自由文本、output 或命令推断 diff；
+- 不把 operation-only 或 exact mutation 包装为完整文件净差异；
+- 不建立第二套 Activity，不为逐文件 presentation row 分配独立 phase/outcome；
+- 不从 Review 跳转编辑器、读取当前 workspace 或补造缺失 diff；不在执行台增加共享 workspace observation；
+- 不借本功能修改会话 rail、底部/右侧执行台 placement、Tool list 整行宽度或其他既有视觉结构。
 
 ## 模型上下文边界
 
-`Collaboration State` 保持 schema v2，既有选择与冻结规则不变。每个新 AgentRun 在冻结时读取当下 active peers；
-已冻结 Run 不被原位补丁修改。模型不会收到 `rosterVersion`、membership generation、成员变化 delta 或“某某本轮已离队”
-之类额外叙事，授权与对账状态只属于 Core。因此动态 membership 没有 Formatter/Profile/Manifest 或模型输入合同变更；
-只是既有 v2 投影开始消费用户新近改变的权威成员数据。Workspace Change Observation 同样只进入 Evidence、Canonical
-Activity 与 Renderer，不追加模型上下文。
+`Collaboration State` 保持 schema v2。每个新 AgentRun 冻结当下 active peers；既有 Run 不被原位修改。membership
+generation、reconciliation 与文件变化 projection 都不进入模型上下文。Runtime File Change Evidence、卡片 summary
+与 detail blob 只属于 Core audit/read side，不追加到 Context、Bootstrap、Camp public message 或 Agent built-in。
 
 ## 核心验收口径
 
-- 同 key 的重叠 Run 只加入一个 Window；不同 Camp 或 execution root 不共享对象、参与者或文件活动；
-- 新 Run join 与最后参与者关闭互斥；同一 physical execution root 的 closing 窗口只造成有截止时间的短暂 bind 等待；
-- baseline 在首个 Runtime 获准写入前已落库为 `baseline_ready` 或明确 `unavailable`；Window 不可用不阻止 Run；
-- ref 以 create-if-absent CAS 创建，以 expected-OID compare-and-delete 清理；diff 前 ref 必须仍精确指向 DB OID；
-- cleanup 失败不丢失 expected OID，closed Window 仍可重试；ref 已不存在按幂等成功处理，target 改写则保留诊断；
-- 同一物理 workspace 的捕获边界互斥，无关 workspace 并行；Git child 超时或输出超限后必须 kill/reap 并释放 gate；
-- 取消 ACK 后只有 quiescent proven 才可 final；无法证明时 participant 必须释放且 Window 只能 unavailable；
-- synthetic tree 的路径集合、symlink、executable bit、sparse-checkout、nested repository/submodule 和稳定捕获规则
-  由跨平台 fixture 验证；
-- Window 的 `lifecycle` 与 `captureStatus` 独立，`no_changes` 与 `unavailable` 不混淆；
-- Command Diff 只来自 adapter/version allowlist，replay 后 `revision`、`sourceEvidenceIds` 和 conflict/availability
-  结果确定；
-- ACP 成功 terminal Edit/Write 的唯一标准 location 在同一 Canonical Activity 上生成 `修改 xxx`；路径缺失、多个
-  location、失败或 kind 冲突保持普通 Tool，且 path-only 不生成 `diffProjection`；
-- `Files Changed` 卡片只读完成 Evidence，后续 Window、当前 workspace 或临时 ref 清理不改变旧卡片；
-- presentation 不把 Window 结果归因给单个 Run/Agent；`externalWriterObserved` 只表示 Core 观察到的其他 Rovai
-  运行发生物理范围重叠，不声称探测所有外部写入者；
-- Codex terminal fileChange、十个 ACP adapter 的成功 Edit/Write path-only 通路与标准 Diff 通路，以及 Claude 原生
-  Edit 的 matching tool-use/result `exact_mutation` 均有 fixture；Kiro rooted-relative Diff 只按同 ToolCall 唯一
-  location 精确对齐，Claude 其他 Tool 与 Antigravity 因缺少等价可靠内容明确 fail closed；
-- 动态 membership 覆盖 add/remove 幂等与冲突、最后成员、Lead 替换、所有业务工具 exact-run fence、
-  Delivery/Gather/terminal publication、Migration clean break、双主题与键盘交互；
-- Managed Attachment v2 覆盖从 Migration 111 升级 112、活跃 source Run 下 14 MiB 附件直接 dispatch、ref-only
-  复用与 DB-only Context path 回归；
-- ACP Client FS 回归覆盖 `read_only` metadata、execution root 外绝对路径、未预授权首写、同路径连续第二次写和
-  readback；十种 ACP Adapter 的全自动/交互模式使用同一表驱动 owner 验证 compatibility allow 分类。
-- ACP Client Terminal 回归覆盖 execution root 外绝对 cwd 成功、相对 cwd 拒绝、省略 cwd 使用 execution root、
-  不存在的绝对 cwd 拒绝，并继续验证 output/wait/release 与 Run session cleanup。
+- 每个 `agentRunId + executionEpoch` 至多一个 `complete | no_changes` projection；startup recovery 重放确定且幂等；
+- terminal ingress flush 后才投影；failed/cancelled Run 可包含此前成功变化，failed/cancelled Operation 不进入；
+- 三个并行 Run 产生三张独立卡片，不互相等待；非 Git目录与 Git目录得到同一行为；
+- Codex 最新 matching turn snapshot 权威，空 snapshot 抑制 fallback；没有 snapshot 时 terminal fileChange 可回退；
+- ACP sparse terminal 能使用同 ToolCall 缓存的可靠字段；Kiro `file:` URI、绝对/相对路径严格规范化，root 外
+  文件保留绝对展示路径；Kimi/Qoder path-only 生成 `修改 xxx` 与 operation-only 记录，同文件后续可靠 Diff
+  仍可生成内容与增删统计；
+- Claude ExactMutation 没有虚假 `@@`/行号；连续 Edit 保留顺序；完整 A→B、B→C 收敛 A→C，A→B、B→A 不显示；
+- `runtime_diff_no_changes` 不进入卡片；同文件剩余可靠 Diff 可继续归约 `+A −D`，path-only operation 只计入时序
+  与操作数；任一纯 operation-only 文件仍使整张卡片回退为修改次数；
+- detail 读取强制 Camp 归属、Run、epoch 与 blob identity；Managed Blob GC 保留 active projection root；
+- 当前数据库不存在 workspace change tables，Core 启动、Run claim/cancel/terminal 不执行 Git capture；
+- Renderer 保留现有会话连接轨、执行台形态和 Tool 横条，仅增加明确的 Command rows 与 Run timeline card；
+- 动态 membership、Managed Attachment v2 与 ACP Client FS/Terminal 既有验收继续通过；
+- 修复后的 Kimi Code `0.38.0`、Qoder `1.1.28`、Kiro `2.18.1`、Codex、Claude 及其他可用 Runtime 真实 App
+  file-change smoke 完成前，不把 fixture 表述成真实 Runtime 交付证据。
 
 ## 跨版本文档影响
 
 | 范围 | 结论 | 证据或理由 |
 | --- | --- | --- |
-| Version lifecycle | 已更新 | 本概览、[实施计划](implementation-plan.md)、[决定](decisions.md)与[版本索引](../README.md)共同切换 `current_version`。 |
-| Decisions | 已更新 | [v1.29 决定](decisions.md)冻结 cutover/reconciliation、exact membership lifetime、稳定模型投影、受信外部来源、零 attempt 取消、Managed v2 无 Run 等待写路径及退出取消全部 AgentRun。 |
-| Contracts | 已更新 | 新增 [Camp Membership v1](../../contracts/camp-membership-v1.md)与[Planned Shutdown v3](../../contracts/planned-shutdown-v3.md)，并升级 [Camp Open Projection v7](../../contracts/camp-open-projection-v7.md)、[Camp Attachment v6](../../contracts/camp-attachment-v6.md)、[Camp Composer Draft v5](../../contracts/camp-composer-draft-v5.md)、[Camp Message Send v13](../../contracts/camp-message-send-v13.md)、[Message Delivery v8](../../contracts/message-delivery-v8.md)、[Gather v4](../../contracts/gather-v4.md)及[Missing-Send Recovery Publication v2](../../contracts/missing-send-recovery-publication-v2.md)。 |
-| Architecture | 已更新 | 新增[动态 Camp 队员关系](../../architecture/dynamic-camp-membership.md)，将[附件架构](../../architecture/camp-published-attachment-view.md)切换为 Managed v2 当前写入与 legacy v1 只读兼容，并把[计划关闭](../../architecture/planned-shutdown.md)切换为退出取消全部 AgentRun。 |
-| UI | 已更新 | [Camp 会话工作区](../../ui/components/conversation-workspace.md)冻结添加入口、成员菜单、移除预览、最后成员、reconciliation 状态及关闭等待面；[App Shell](../../ui/components/app-shell-navigation.md)冻结 400ms 冷启动反馈。 |
-| Runtime Activity | 确认无需更新 | 成员变化使用 Core 领域事件与既有 Run/Delivery terminal activity，不新增 Runtime activity kind。 |
-| Runtime compatibility | 确认无需更新 | 继续传既有 Camp-scoped attachment root，不改变 Adapter wire、Runtime 启动协议、模型或宿主平台资格。 |
-| Documentation routing | 已更新 | [文档导航](../../README.md)、Contracts、Architecture 与 Decisions 当前入口均加入动态 membership 路由。 |
-| Root README | 确认无需更新 | 本次扩展既有 Camp 管理能力，不改变项目定位或长期支持声明。 |
+| Version lifecycle | 已更新 | v1.28 按冻结时事实转为 historical；本概览、[实施计划](implementation-plan.md)、[决定](decisions.md)与[版本索引](../README.md)建立唯一 current v1.29。 |
+| Decisions | 已更新 | [V1.29-D01–D06](decisions.md#v1-29-d01)冻结 membership、Delivery 与 Attachment；[D07](decisions.md#v1-29-d07)冻结安全退出；[D08](decisions.md#v1-29-d08)冻结共享 Evidence/独立 projector；[D09](decisions.md#v1-29-d09)彻底放弃 Workspace capture；[D10](decisions.md#v1-29-d10)冻结 Command inline 与 Run Review presentation；[D11](decisions.md#v1-29-d11)冻结 ACP FS/Terminal Runtime-owned 权限。 |
+| Contracts | 已更新 | 新增 [Camp Membership v1](../../contracts/camp-membership-v1.md)、[Planned Shutdown v3](../../contracts/planned-shutdown-v3.md)与 [Runtime File Change Observation v1](../../contracts/runtime-file-change-observation-v1.md)；Runtime Launch v28 与 ACP Client Terminal v2 收口代理权限。 |
+| Architecture | 已更新 | 新增[动态 Camp 队员关系](../../architecture/dynamic-camp-membership.md)与 [Runtime File Change Observation](../../architecture/runtime-file-change-observation.md)；[计划关闭](../../architecture/planned-shutdown.md)切换为退出取消全部 AgentRun；基础不变量同步无 Git/无扫描的每 Run Evidence projection。 |
+| UI | 已更新 | [Camp 会话工作区](../../ui/components/conversation-workspace.md)冻结 `修改 xxx` rows、每 Run 卡片、Files Changed Review 与关闭等待面；[App Shell](../../ui/components/app-shell-navigation.md)冻结 400ms 冷启动反馈；其他布局不变。 |
+| Runtime Activity | 已更新 | Registry 继续拥有每 Adapter 的 terminal 文件操作与 Command Diff mapping；Run snapshot 是独立 Evidence event。 |
+| Runtime compatibility | 已更新 | 13 个 adapter 按实际协议族归类；当前 fixture 覆盖 Codex、ACP、Claude 与 Antigravity negative gate，修复后真实 App 复测仍待完成。 |
+| Documentation routing | 已更新 | 文档总导航、Architecture/Contract 索引与当前决定导航切换到 Runtime File Change Observation，不保留 Window 当前入口。 |
+| Root README | 确认无需更新 | 当前仍为 in-progress，且不改变项目定位或已交付的常青能力声明。 |
+
+## References
+
+- [实施与验收计划](implementation-plan.md)
+- [版本决定](decisions.md)
+- [Runtime File Change Observation 架构](../../architecture/runtime-file-change-observation.md)
+- [Runtime File Change Observation v1 合同](../../contracts/runtime-file-change-observation-v1.md)
+- [Runtime Launch and Verification v28](../../contracts/runtime-launch-and-verification-v28.md)
+- [ACP Client Terminal v2](../../contracts/acp-client-terminal-v2.md)

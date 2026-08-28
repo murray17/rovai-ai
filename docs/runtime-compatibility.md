@@ -40,12 +40,13 @@ Probe、成员选择、诊断或 AgentRun 语义。
 | Runtime | 真实终态观测 | pre-fix 缺口 | 当前代码边界 |
 | --- | --- | --- | --- |
 | Kimi Code `0.38.0` | 成功 `edit` terminal，`locationCount=1`，没有标准 ACP Diff | 普通 `Edit` 行没有收敛为文件操作 presentation | 同 terminal 唯一标准 location 生成 `修改 kimi-code-cli.txt`；没有 `+ / −` 或 inline diff |
-| Qoder `1.1.28` | 成功 Edit 的 started update 有唯一 location，terminal 稀疏省略 location 且没有标准 Diff；另一个 Read 的 terminal 错报 `edit` | 稀疏 terminal 丢失路径，且冲突 kind 可能把 Read 误分类 | 同 ToolCall 累计先前 location；首次可信结构化 kind 优先，Read 不伪造成写；真实 Edit 生成 path-only `修改 qoder-cli.txt` |
+| Qoder `1.1.28` | 成功 Write 可只有可靠 path；后续成功 Edit 可提供完整 old/new，但没有标准 ACP Diff；另一个 Read 的 terminal 曾错报 `edit` | 稀疏 terminal 丢失路径，且冲突 kind 可能把 Read 误分类 | 同 ToolCall 累计先前 location；首次可信结构化 kind 优先，Read 不伪造成写；path-only Write 保留操作计数但不渲染空 Diff，同文件可靠 Edit 正常显示内容并参与 `+ / −` 聚合 |
 | Kiro `2.18.1` | 成功 `edit` terminal 同时有唯一标准 location 和标准 ACP Diff | Diff 被归一化为 `runtime_diff_path_outside_root`；持久 Evidence 没有保留被拒绝的原始 path | 对 Kiro 已知 rooted-relative wire shape，单 entry Diff 仅在去根锚路径与同 ToolCall location 完全相等时对齐，随后同 Activity 同时具有文件操作行和 inline Diff |
 
 上述观测冻结的是修复前真实 wire 的能力与失败点；当前代码已建立定向 fixture，但修复后的打包 App 真实复测尚未
-执行，不能把 fixture 写成 post-fix Runtime smoke。Workspace `Files Changed` 卡片仍只由 Git baseline→final Window
-产生，与这三条 Runtime 文件操作/Diff 通路独立。
+执行，不能把 fixture 写成 post-fix Runtime smoke。当前每 Run 文件变化卡片只归约该 AgentRun 已落库的可靠
+Runtime Evidence，不使用 Git 或工作区扫描；因此 path-only、标准 Diff 与 exact mutation 的实际覆盖直接决定卡片
+细节，未被 Runtime 报告的 shell 或外部写入不进入卡片。
 
 ### 2026-08-24 Kimi Code macOS x64 准入晋升
 

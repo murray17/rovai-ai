@@ -50,12 +50,12 @@ pub struct Database {
     runtime_camp_files_root_identity_digest: String,
 }
 
-const CURRENT_DATA_CONTRACT_VERSION: &str = "v1.27";
-const CURRENT_PROJECTION_SCHEMA_VERSION: i64 = 68;
-const V114_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.26";
-const V114_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION: i64 = 67;
-const V113_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.25";
-const V113_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION: i64 = 66;
+const CURRENT_DATA_CONTRACT_VERSION: &str = "v1.28";
+const CURRENT_PROJECTION_SCHEMA_VERSION: i64 = 69;
+const V115_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.26";
+const V115_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION: i64 = 67;
+const V114_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.25";
+const V114_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION: i64 = 66;
 const V112_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.24";
 const V112_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION: i64 = 65;
 const V111_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.23";
@@ -184,6 +184,8 @@ struct CurrentMigrationState {
     v111: bool,
     v112: bool,
     v113: bool,
+    v114: bool,
+    v115: bool,
 }
 
 impl CurrentMigrationState {
@@ -234,13 +236,14 @@ impl CurrentMigrationState {
                 && self.v111
                 && self.v112
                 && self.v113
-                && self.v114;
+                && self.v114
+                && self.v115;
         }
-        if self.v114 {
+        if self.v115 {
             return false;
         }
-        if contract == V114_MIGRATION_SOURCE_DATA_CONTRACT_VERSION
-            && schema == V114_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION
+        if contract == V115_MIGRATION_SOURCE_DATA_CONTRACT_VERSION
+            && schema == V115_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION
         {
             return self.v70
                 && self.v71
@@ -281,13 +284,14 @@ impl CurrentMigrationState {
                 && self.v110
                 && self.v111
                 && self.v112
-                && self.v113;
+                && self.v113
+                && self.v114;
         }
-        if self.v113 {
+        if self.v114 {
             return false;
         }
-        if contract == V113_MIGRATION_SOURCE_DATA_CONTRACT_VERSION
-            && schema == V113_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION
+        if contract == V114_MIGRATION_SOURCE_DATA_CONTRACT_VERSION
+            && schema == V114_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION
         {
             return self.v70
                 && self.v71
@@ -1366,7 +1370,7 @@ fn connection_has_current_data_contract(connection: &Connection) -> rusqlite::Re
         r#"
         SELECT contract_version = ?1
                AND projection_schema_version = ?2
-               AND EXISTS(SELECT 1 FROM schema_migration WHERE version = 113)
+               AND EXISTS(SELECT 1 FROM schema_migration WHERE version = 115)
         FROM rovai_data_contract
         WHERE singleton = 1
         "#,
@@ -1426,7 +1430,9 @@ fn load_current_migration_state(
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 110),
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 111),
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 112),
-               EXISTS(SELECT 1 FROM schema_migration WHERE version = 113)
+               EXISTS(SELECT 1 FROM schema_migration WHERE version = 113),
+               EXISTS(SELECT 1 FROM schema_migration WHERE version = 114),
+               EXISTS(SELECT 1 FROM schema_migration WHERE version = 115)
         "#,
         [],
         |row| {
@@ -1475,6 +1481,8 @@ fn load_current_migration_state(
                 v111: row.get(41)?,
                 v112: row.get(42)?,
                 v113: row.get(43)?,
+                v114: row.get(44)?,
+                v115: row.get(45)?,
             })
         },
     )
@@ -2941,6 +2949,12 @@ impl Database {
             if !self.schema_migration_applied(113)? {
                 self.migrate_planned_shutdown_protocol_v3_v113()?;
             }
+            if !self.schema_migration_applied(114)? {
+                self.migrate_command_diff_projection_v114()?;
+            }
+            if !self.schema_migration_applied(115)? {
+                self.migrate_agent_run_file_changes_v115()?;
+            }
             if let Err(error) =
                 crate::notification::maintain_notification_episode_retention(self.connection())
             {
@@ -3329,6 +3343,12 @@ impl Database {
         }
         if !self.schema_migration_applied(113)? {
             self.migrate_planned_shutdown_protocol_v3_v113()?;
+        }
+        if !self.schema_migration_applied(114)? {
+            self.migrate_command_diff_projection_v114()?;
+        }
+        if !self.schema_migration_applied(115)? {
+            self.migrate_agent_run_file_changes_v115()?;
         }
         if let Err(error) =
             crate::notification::maintain_notification_episode_retention(self.connection())
@@ -16178,7 +16198,7 @@ impl Database {
         Ok(())
     }
 
-    fn migrate_workspace_change_observation_v113(&mut self) -> Result<()> {
+    fn migrate_command_diff_projection_v114(&mut self) -> Result<()> {
         let transaction = self
             .connection
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
@@ -16187,162 +16207,59 @@ impl Database {
             ALTER TABLE canonical_runtime_activity
                 ADD COLUMN diff_projection_json TEXT;
 
-            CREATE TABLE workspace_change_window (
-                id TEXT PRIMARY KEY,
-                camp_id TEXT NOT NULL REFERENCES camp(id) ON DELETE CASCADE,
-                canonical_execution_root TEXT NOT NULL,
-                repository_identity_digest TEXT NOT NULL,
-                repository_root TEXT NOT NULL,
-                worktree_git_dir TEXT NOT NULL,
-                git_common_dir TEXT NOT NULL,
-                object_format TEXT NOT NULL CHECK(object_format IN ('sha1', 'sha256')),
-                object_database_dir TEXT NOT NULL,
-                object_alternates_digest TEXT,
-                ref_token TEXT NOT NULL UNIQUE,
-                lifecycle TEXT NOT NULL CHECK(lifecycle IN ('opening', 'active', 'closing', 'closed')),
-                capture_status TEXT NOT NULL CHECK(capture_status IN ('pending', 'baseline_ready', 'complete', 'no_changes', 'unavailable')),
-                capture_profile_version INTEGER NOT NULL,
-                baseline_candidate_oid TEXT,
-                baseline_oid TEXT,
-                final_candidate_oid TEXT,
-                final_oid TEXT,
-                baseline_manifest_blob_id TEXT REFERENCES managed_blob(id),
-                final_manifest_blob_id TEXT REFERENCES managed_blob(id),
-                diff_blob_id TEXT REFERENCES managed_blob(id),
-                baseline_capture_started_at TEXT,
-                baseline_captured_at TEXT,
-                final_capture_started_at TEXT,
-                final_captured_at TEXT,
-                unavailable_reason_code TEXT,
-                external_writer_observed INTEGER NOT NULL DEFAULT 0 CHECK(external_writer_observed IN (0, 1)),
-                files_json TEXT,
-                file_count INTEGER,
-                additions INTEGER,
-                deletions INTEGER,
-                cleanup_error_code TEXT,
-                created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL,
-                CHECK (
-                    (lifecycle = 'opening' AND capture_status = 'pending')
-                    OR (lifecycle = 'active' AND capture_status IN ('baseline_ready', 'unavailable'))
-                    OR (lifecycle = 'closing' AND capture_status IN ('baseline_ready', 'unavailable'))
-                    OR (lifecycle = 'closed' AND capture_status IN ('complete', 'no_changes', 'unavailable'))
-                )
-            );
-            CREATE UNIQUE INDEX workspace_change_window_active_key_unique
-                ON workspace_change_window(
-                    camp_id, canonical_execution_root, repository_identity_digest
-                )
-                WHERE lifecycle IN ('opening', 'active', 'closing');
-            CREATE INDEX workspace_change_window_camp_history_idx
-                ON workspace_change_window(camp_id, final_captured_at, created_at, id);
-
-            CREATE TABLE workspace_change_window_participant (
-                window_id TEXT NOT NULL REFERENCES workspace_change_window(id) ON DELETE CASCADE,
-                agent_run_id TEXT NOT NULL REFERENCES agent_run(id) ON DELETE CASCADE,
-                execution_epoch INTEGER NOT NULL CHECK(execution_epoch >= 1),
-                joined_at TEXT NOT NULL,
-                released_at TEXT,
-                PRIMARY KEY(window_id, agent_run_id, execution_epoch),
-                UNIQUE(agent_run_id, execution_epoch)
-            );
-            CREATE INDEX workspace_change_window_participant_active_idx
-                ON workspace_change_window_participant(window_id, released_at);
-
-            CREATE TABLE workspace_change_completed_evidence (
-                id TEXT PRIMARY KEY,
-                evidence_type TEXT NOT NULL DEFAULT 'WorkspaceDiffCompleted'
-                    CHECK(evidence_type = 'WorkspaceDiffCompleted'),
-                window_id TEXT NOT NULL UNIQUE
-                    REFERENCES workspace_change_window(id) ON DELETE CASCADE,
-                camp_id TEXT NOT NULL REFERENCES camp(id) ON DELETE CASCADE,
-                canonical_execution_root TEXT NOT NULL,
-                participant_runs_json TEXT NOT NULL,
-                files_json TEXT NOT NULL,
-                file_count INTEGER NOT NULL CHECK(file_count > 0),
-                additions INTEGER NOT NULL CHECK(additions >= 0),
-                deletions INTEGER NOT NULL CHECK(deletions >= 0),
-                diff_blob_id TEXT NOT NULL REFERENCES managed_blob(id),
-                baseline_oid TEXT NOT NULL,
-                final_oid TEXT NOT NULL,
-                captured_at TEXT NOT NULL,
-                created_at TEXT NOT NULL
-            );
-            CREATE INDEX workspace_change_completed_evidence_camp_history_idx
-                ON workspace_change_completed_evidence(camp_id, captured_at, id);
-
             UPDATE rovai_data_contract
             SET contract_version = 'v1.26', projection_schema_version = 67,
                 reset_reason = NULL, updated_at = datetime('now')
             WHERE singleton = 1;
 
             INSERT INTO schema_migration(version, applied_at)
-            VALUES (113, datetime('now'));
+            VALUES (114, datetime('now'));
             "#,
         )?;
         transaction.commit()?;
         Ok(())
     }
 
-    fn migrate_workspace_change_ref_cleanup_v114(&mut self) -> Result<()> {
+    fn migrate_agent_run_file_changes_v115(&mut self) -> Result<()> {
         let transaction = self
             .connection
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
         transaction.execute_batch(
             r#"
-            CREATE TABLE workspace_change_ref_cleanup (
-                window_id TEXT PRIMARY KEY
-                    REFERENCES workspace_change_window(id) ON DELETE CASCADE,
-                baseline_oid TEXT,
-                final_oid TEXT,
-                error_code TEXT,
-                attempt_count INTEGER NOT NULL DEFAULT 0 CHECK(attempt_count >= 0),
-                updated_at TEXT NOT NULL,
-                CHECK(baseline_oid IS NOT NULL OR final_oid IS NOT NULL)
+            CREATE TABLE agent_run_file_change_projection (
+                agent_run_id TEXT NOT NULL REFERENCES agent_run(id) ON DELETE CASCADE,
+                execution_epoch INTEGER NOT NULL CHECK(execution_epoch >= 1),
+                schema_version INTEGER NOT NULL CHECK(schema_version >= 1),
+                status TEXT NOT NULL CHECK(status IN ('complete', 'no_changes')),
+                file_count INTEGER NOT NULL CHECK(file_count >= 0),
+                operation_count INTEGER NOT NULL CHECK(operation_count >= 0),
+                additions INTEGER CHECK(additions IS NULL OR additions >= 0),
+                deletions INTEGER CHECK(deletions IS NULL OR deletions >= 0),
+                files_summary_json TEXT NOT NULL,
+                details_blob_id TEXT REFERENCES managed_blob(id),
+                source_evidence_ids_json TEXT NOT NULL,
+                completed_at TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                PRIMARY KEY(agent_run_id, execution_epoch),
+                CHECK (
+                    (status = 'complete' AND file_count > 0 AND operation_count > 0
+                        AND details_blob_id IS NOT NULL)
+                    OR
+                    (status = 'no_changes' AND file_count = 0 AND operation_count = 0
+                        AND additions IS NULL AND deletions IS NULL
+                        AND details_blob_id IS NULL)
+                )
             );
-
-            INSERT INTO workspace_change_ref_cleanup(
-                window_id, baseline_oid, final_oid, error_code,
-                attempt_count, updated_at
-            )
-            SELECT id,
-                   COALESCE(baseline_oid, baseline_candidate_oid),
-                   COALESCE(final_oid, final_candidate_oid),
-                   COALESCE(cleanup_error_code, 'workspace_change_ref_cleanup_pending'),
-                   0, datetime('now')
-            FROM workspace_change_window
-            WHERE lifecycle = 'closed'
-              AND (
-                  cleanup_error_code IS NOT NULL
-                  OR final_candidate_oid IS NOT NULL
-                  OR baseline_candidate_oid IS NOT NULL
-              )
-              AND COALESCE(
-                  baseline_oid, baseline_candidate_oid,
-                  final_oid, final_candidate_oid
-              ) IS NOT NULL;
-
-            UPDATE workspace_change_window
-            SET baseline_candidate_oid = NULL,
-                final_candidate_oid = NULL,
-                final_manifest_blob_id = CASE
-                    WHEN capture_status = 'unavailable' THEN NULL
-                    ELSE final_manifest_blob_id
-                END,
-                cleanup_error_code = CASE
-                    WHEN id IN (SELECT window_id FROM workspace_change_ref_cleanup)
-                    THEN COALESCE(cleanup_error_code, 'workspace_change_ref_cleanup_pending')
-                    ELSE cleanup_error_code
-                END
-            WHERE lifecycle = 'closed';
+            CREATE INDEX agent_run_file_change_projection_completed_idx
+                ON agent_run_file_change_projection(completed_at, agent_run_id, execution_epoch);
 
             UPDATE rovai_data_contract
-            SET contract_version = 'v1.27', projection_schema_version = 68,
+            SET contract_version = 'v1.28', projection_schema_version = 69,
                 reset_reason = NULL, updated_at = datetime('now')
             WHERE singleton = 1;
 
             INSERT INTO schema_migration(version, applied_at)
-            VALUES (114, datetime('now'));
+            VALUES (115, datetime('now'));
             "#,
         )?;
         transaction.commit()?;
@@ -20751,7 +20668,61 @@ impl Database {
 }
 
 #[cfg(test)]
+fn downgrade_current_schema_to_v114_source_for_test(connection: &Connection) {
+    let has_v115: bool = connection
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM schema_migration WHERE version = 115)",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    if !has_v115 {
+        return;
+    }
+    connection
+        .execute_batch(
+            r#"
+            DROP TABLE agent_run_file_change_projection;
+            UPDATE rovai_data_contract
+            SET contract_version = 'v1.26', projection_schema_version = 67
+            WHERE singleton = 1;
+            DELETE FROM schema_migration WHERE version = 115;
+            "#,
+        )
+        .unwrap();
+}
+
+#[cfg(test)]
+fn downgrade_current_schema_to_v113_source_for_test(connection: &Connection) {
+    downgrade_current_schema_to_v114_source_for_test(connection);
+    let has_v114: bool = connection
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM schema_migration WHERE version = 114)",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    if !has_v114 {
+        return;
+    }
+    connection
+        .execute_batch(
+            r#"
+            PRAGMA foreign_keys = OFF;
+            ALTER TABLE canonical_runtime_activity DROP COLUMN diff_projection_json;
+            UPDATE rovai_data_contract
+            SET contract_version = 'v1.25', projection_schema_version = 66
+            WHERE singleton = 1;
+            DELETE FROM schema_migration WHERE version = 114;
+            PRAGMA foreign_keys = ON;
+            "#,
+        )
+        .unwrap();
+}
+
+#[cfg(test)]
 fn downgrade_current_schema_to_v112_source_for_test(connection: &Connection) {
+    downgrade_current_schema_to_v113_source_for_test(connection);
     let has_v113: bool = connection
         .query_row(
             "SELECT EXISTS(SELECT 1 FROM schema_migration WHERE version = 113)",
@@ -21679,6 +21650,8 @@ mod tests {
             v111: version >= 111,
             v112: version >= 112,
             v113: version >= 113,
+            v114: version >= 114,
+            v115: version >= 115,
         }
     }
 
@@ -21689,18 +21662,24 @@ mod tests {
                 "current",
                 CURRENT_DATA_CONTRACT_VERSION,
                 CURRENT_PROJECTION_SCHEMA_VERSION,
+                115,
+            ),
+            (
+                "v1.26/schema-67 after Runtime diff projection",
+                V115_MIGRATION_SOURCE_DATA_CONTRACT_VERSION,
+                V115_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION,
                 114,
             ),
             (
-                "v1.26/schema-67 after Workspace Change Observation",
+                "v1.25/schema-66 after planned shutdown v3",
                 V114_MIGRATION_SOURCE_DATA_CONTRACT_VERSION,
                 V114_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION,
                 113,
             ),
             (
                 "v1.25/schema-66 after managed attachments",
-                V113_MIGRATION_SOURCE_DATA_CONTRACT_VERSION,
-                V113_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION,
+                V114_MIGRATION_SOURCE_DATA_CONTRACT_VERSION,
+                V114_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION,
                 112,
             ),
             (
@@ -21939,7 +21918,7 @@ mod tests {
             );
         }
 
-        let current = migration_state_through(113);
+        let current = migration_state_through(115);
         let v092_source = migration_state_through(91);
         let mut missing_intermediate = current;
         missing_intermediate.v84 = false;
@@ -22009,7 +21988,7 @@ mod tests {
             )
             .expect("current contract marker should load");
 
-        assert_eq!(state, migration_state_through(113));
+        assert_eq!(state, migration_state_through(115));
         assert!(state.admits(&contract, schema));
         assert!(has_admissible_data_contract(
             &directory.join("rovai.sqlite")
@@ -23994,36 +23973,26 @@ mod tests {
     }
 
     #[test]
-    fn v113_adds_runtime_diff_projection_and_workspace_change_window_storage() {
-        let directory = std::env::temp_dir().join(format!("rovai-db-v113-test-{}", Uuid::new_v4()));
+    fn v114_adds_runtime_diff_projection_without_workspace_capture_storage() {
+        let directory = std::env::temp_dir().join(format!("rovai-db-v114-test-{}", Uuid::new_v4()));
         let mut database = crate::test_support::fresh_schema_database_fast_at(&directory);
-        downgrade_current_schema_to_v112_source_for_test(database.connection());
+        downgrade_current_schema_to_v113_source_for_test(database.connection());
 
-        database
-            .migrate_workspace_change_observation_v113()
-            .unwrap();
+        database.migrate_command_diff_projection_v114().unwrap();
 
         assert!(
             table_columns(database.connection(), "canonical_runtime_activity")
                 .unwrap()
                 .contains(&"diff_projection_json".to_string())
         );
-        for table in [
-            "workspace_change_window",
-            "workspace_change_window_participant",
-            "workspace_change_completed_evidence",
-        ] {
-            assert!(
-                database
-                    .connection()
-                    .query_row(
-                        "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?1)",
-                        [table],
-                        |row| row.get::<_, bool>(0),
-                    )
-                    .unwrap()
-            );
-        }
+        assert!(!database
+            .connection()
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name LIKE 'workspace_change_%')",
+                [],
+                |row| row.get::<_, bool>(0),
+            )
+            .unwrap());
         assert_eq!(
             database
                 .connection()
@@ -24050,84 +24019,30 @@ mod tests {
     }
 
     #[test]
-    fn v114_adds_durable_workspace_ref_cleanup_and_migrates_closed_candidates() {
-        let directory = std::env::temp_dir().join(format!("rovai-db-v114-test-{}", Uuid::new_v4()));
+    fn v115_adds_agent_run_file_change_projection_without_git_windows() {
+        let directory = std::env::temp_dir().join(format!("rovai-db-v115-test-{}", Uuid::new_v4()));
         let mut database = crate::test_support::fresh_schema_database_fast_at(&directory);
-        downgrade_current_schema_to_v113_source_for_test(database.connection());
-        database
-            .connection()
-            .execute_batch(
-                r#"
-                INSERT INTO camp(
-                    id, title, project_binding_kind, project_path,
-                    last_message_sequence, version, created_at, updated_at
-                ) VALUES (
-                    'camp-v114', 'v114 cleanup', 'directory', '/tmp/v114',
-                    0, 1, '2026-08-27T00:00:00Z', '2026-08-27T00:00:00Z'
-                );
-                INSERT INTO workspace_change_window(
-                    id, camp_id, canonical_execution_root,
-                    repository_identity_digest, repository_root,
-                    worktree_git_dir, git_common_dir, object_format,
-                    object_database_dir, ref_token, lifecycle, capture_status,
-                    capture_profile_version, baseline_oid, final_candidate_oid,
-                    baseline_capture_started_at, baseline_captured_at,
-                    final_capture_started_at, unavailable_reason_code,
-                    created_at, updated_at
-                ) VALUES (
-                    'window-v114', 'camp-v114', '/tmp/v114',
-                    'identity-v114', '/tmp/v114', '/tmp/v114/.git',
-                    '/tmp/v114/.git', 'sha1', '/tmp/v114/.git/objects',
-                    'token-v114', 'closed', 'unavailable', 1,
-                    '1111111111111111111111111111111111111111',
-                    '2222222222222222222222222222222222222222',
-                    '2026-08-27T00:00:00Z', '2026-08-27T00:00:01Z',
-                    '2026-08-27T00:00:02Z', 'workspace_change_diff_size_limit',
-                    '2026-08-27T00:00:00Z', '2026-08-27T00:00:03Z'
-                );
-                "#,
-            )
-            .unwrap();
-
-        database
-            .migrate_workspace_change_ref_cleanup_v114()
-            .unwrap();
+        downgrade_current_schema_to_v114_source_for_test(database.connection());
+        database.migrate_agent_run_file_changes_v115().unwrap();
 
         assert!(
             database
                 .connection()
                 .query_row(
-                    "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'workspace_change_ref_cleanup')",
+                    "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'agent_run_file_change_projection')",
                     [],
                     |row| row.get::<_, bool>(0),
                 )
                 .unwrap()
         );
-        let cleanup = database
+        assert!(!database
             .connection()
             .query_row(
-                r#"
-                SELECT baseline_oid, final_oid
-                FROM workspace_change_ref_cleanup
-                WHERE window_id = 'window-v114'
-                "#,
+                "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name LIKE 'workspace_change_%')",
                 [],
-                |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+                |row| row.get::<_, bool>(0),
             )
-            .unwrap();
-        assert_eq!(cleanup.0, "1111111111111111111111111111111111111111");
-        assert_eq!(cleanup.1, "2222222222222222222222222222222222222222");
-        assert_eq!(
-            database
-                .connection()
-                .query_row(
-                    "SELECT final_candidate_oid FROM workspace_change_window WHERE id = 'window-v114'",
-                    [],
-                    |row| row.get::<_, Option<String>>(0),
-                )
-                .unwrap(),
-            None
-        );
+            .unwrap());
         assert_eq!(
             database
                 .connection()
@@ -24137,7 +24052,7 @@ mod tests {
                     |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)),
                 )
                 .unwrap(),
-            ("v1.27".to_string(), 68)
+            ("v1.28".to_string(), 69)
         );
         assert_eq!(
             database
@@ -24440,7 +24355,7 @@ mod tests {
                 },
             )
             .unwrap();
-        assert_eq!(upgraded_marker, ("v1.27".to_string(), 68, 1, 1, 0));
+        assert_eq!(upgraded_marker, ("v1.28".to_string(), 69, 1, 1, 0));
         assert_table_columns(upgraded.connection(), "camp", &["attachment_revision"], &[]);
         assert_schema_objects(
             upgraded.connection(),
@@ -24472,7 +24387,7 @@ mod tests {
                     )),
                 )
                 .unwrap(),
-            ("v1.27".to_string(), 68, 1)
+            ("v1.28".to_string(), 69, 1)
         );
         drop(restarted);
         std::fs::remove_dir_all(directory).expect("temporary database should be removable");
@@ -24713,7 +24628,7 @@ mod tests {
                 },
             )
             .unwrap();
-        assert_eq!(upgraded_marker, ("v1.27".to_string(), 68, 1, 1, 0));
+        assert_eq!(upgraded_marker, ("v1.28".to_string(), 69, 1, 1, 0));
         assert_table_columns(
             upgraded.connection(),
             "message_delivery",
@@ -24773,8 +24688,8 @@ mod tests {
                 "terminal".to_string(),
                 0,
                 1,
-                "v1.27".to_string(),
-                68,
+                "v1.28".to_string(),
+                69,
             )
         );
         drop(restarted);
@@ -24884,7 +24799,7 @@ mod tests {
                     )),
                 )
                 .unwrap(),
-            ("v1.27".to_string(), 68, 1, 1, 1)
+            ("v1.28".to_string(), 69, 1, 1, 1)
         );
         assert_eq!(
             reopened

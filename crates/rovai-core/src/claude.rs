@@ -194,7 +194,12 @@ impl ClaudeCodeCliRuntimeAdapter {
         let key = (agent_run_id.to_string(), execution_epoch);
         let deadline = Instant::now() + timeout;
         loop {
-            if !self.active.lock().await.contains_key(&key) {
+            if !self
+                .active
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .contains_key(&key)
+            {
                 return true;
             }
             if Instant::now() >= deadline {

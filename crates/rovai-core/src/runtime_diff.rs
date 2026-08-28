@@ -2,6 +2,7 @@ use std::path::{Component, Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use url::Url;
 
 use crate::agent_profile::AdapterKind;
 
@@ -50,6 +51,25 @@ struct ExactMutationEvidenceEntry {
     path: String,
     old_text: String,
     new_text: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+struct FullBeforeAfterEvidenceEntry {
+    semantics: String,
+    path: String,
+    change_kind: String,
+    before: Option<String>,
+    after: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+struct UnifiedDiffEvidenceEntry {
+    semantics: String,
+    path: String,
+    change_kind: String,
+    diff: String,
 }
 
 pub fn admit_runtime_diff(
@@ -137,33 +157,32 @@ fn admit_candidate(
     }
     let mut total_bytes = 0_usize;
     let mut entries = Vec::with_capacity(raw_entries.len());
+    let mut evidence_entries = Vec::with_capacity(raw_entries.len());
     for raw in raw_entries {
         let raw_path = raw
             .get("path")
             .and_then(Value::as_str)
             .ok_or("runtime_diff_path_invalid")?;
-        let source_path = normalize_reported_path(execution_root, raw_path)
-            .or_else(|| {
-                (adapter == AdapterKind::KiroCli && raw_entries.len() == 1)
-                    .then(|| reconcile_kiro_rooted_diff_path(raw_path, file_operation_path))
-                    .flatten()
-            })
-            .ok_or("runtime_diff_path_outside_root")?;
+        let source_path = (adapter == AdapterKind::KiroCli && raw_entries.len() == 1)
+            .then(|| reconcile_kiro_rooted_diff_path(raw_path, file_operation_path))
+            .flatten()
+            .or_else(|| normalize_reported_path_for_display(execution_root, raw_path))
+            .ok_or("runtime_diff_path_invalid")?;
         let change_kind = normalized_change_kind(raw, semantic_kind)?;
         let path = if adapter == AdapterKind::CodexCli && change_kind == "update" {
             raw.pointer("/kind/movePath")
                 .or_else(|| raw.pointer("/kind/move_path"))
                 .and_then(Value::as_str)
                 .map(|move_path| {
-                    normalize_reported_path(execution_root, move_path)
-                        .ok_or("runtime_diff_path_outside_root")
+                    normalize_reported_path_for_display(execution_root, move_path)
+                        .ok_or("runtime_diff_path_invalid")
                 })
                 .transpose()?
                 .unwrap_or_else(|| source_path.clone())
         } else {
             source_path.clone()
         };
-        let diff = match semantic_kind {
+        let (diff, evidence_entry) = match semantic_kind {
             "codex_file_change_snapshot" => {
                 let content = raw
                     .get("diff")
@@ -173,9 +192,38 @@ fn admit_candidate(
                     return Err("runtime_diff_item_limit");
                 }
                 match change_kind.as_str() {
-                    "add" => unified_diff_from_before_after(&path, None, content),
-                    "delete" => unified_diff_for_delete(&source_path, content),
-                    "update" if !content.is_empty() => content.to_string(),
+                    "add" => (
+                        unified_diff_from_before_after(&path, None, content),
+                        serde_json::to_value(FullBeforeAfterEvidenceEntry {
+                            semantics: "full_before_after".to_string(),
+                            path: path.clone(),
+                            change_kind: change_kind.clone(),
+                            before: None,
+                            after: Some(content.to_string()),
+                        })
+                        .map_err(|_| "runtime_diff_entries_invalid")?,
+                    ),
+                    "delete" => (
+                        unified_diff_for_delete(&source_path, content),
+                        serde_json::to_value(FullBeforeAfterEvidenceEntry {
+                            semantics: "full_before_after".to_string(),
+                            path: source_path.clone(),
+                            change_kind: change_kind.clone(),
+                            before: Some(content.to_string()),
+                            after: None,
+                        })
+                        .map_err(|_| "runtime_diff_entries_invalid")?,
+                    ),
+                    "update" if !content.is_empty() => (
+                        content.to_string(),
+                        serde_json::to_value(UnifiedDiffEvidenceEntry {
+                            semantics: "unified_diff_snapshot".to_string(),
+                            path: path.clone(),
+                            change_kind: change_kind.clone(),
+                            diff: content.to_string(),
+                        })
+                        .map_err(|_| "runtime_diff_entries_invalid")?,
+                    ),
                     "update" => return Err("runtime_diff_content_invalid"),
                     _ => return Err("runtime_diff_change_kind_invalid"),
                 }
@@ -198,7 +246,17 @@ fn admit_candidate(
                 {
                     return Err("runtime_diff_item_limit");
                 }
-                unified_diff_from_before_after(&path, old_text, new_text)
+                (
+                    unified_diff_from_before_after(&path, old_text, new_text),
+                    serde_json::to_value(FullBeforeAfterEvidenceEntry {
+                        semantics: "full_before_after".to_string(),
+                        path: path.clone(),
+                        change_kind: change_kind.clone(),
+                        before: old_text.map(str::to_string),
+                        after: Some(new_text.to_string()),
+                    })
+                    .map_err(|_| "runtime_diff_entries_invalid")?,
+                )
             }
             _ => return Err("runtime_diff_semantics_invalid"),
         };
@@ -219,9 +277,8 @@ fn admit_candidate(
             deletions,
             diff,
         });
+        evidence_entries.push(evidence_entry);
     }
-    let evidence_entries =
-        serde_json::to_value(&entries).map_err(|_| "runtime_diff_entries_invalid")?;
     Ok(AdmittedCommandDiff {
         semantic_kind: if semantic_kind == "codex_file_change_snapshot" {
             "unified_diff_snapshot".to_string()
@@ -229,7 +286,7 @@ fn admit_candidate(
             semantic_kind.to_string()
         },
         entries,
-        evidence_entries,
+        evidence_entries: Value::Array(evidence_entries),
     })
 }
 
@@ -256,8 +313,8 @@ fn admit_exact_mutations(
             .get("path")
             .and_then(Value::as_str)
             .ok_or("runtime_diff_path_invalid")?;
-        let path = normalize_reported_path(execution_root, raw_path)
-            .ok_or("runtime_diff_path_outside_root")?;
+        let path = normalize_reported_path_for_display(execution_root, raw_path)
+            .ok_or("runtime_diff_path_invalid")?;
         let old_text = raw
             .get("oldText")
             .and_then(Value::as_str)
@@ -331,33 +388,72 @@ fn normalized_change_kind(raw: &Value, semantic_kind: &str) -> Result<String, &'
     .to_string())
 }
 
-pub(crate) fn normalize_reported_path(execution_root: &Path, reported: &str) -> Option<String> {
+pub(crate) fn normalize_reported_path_for_display(
+    display_root: &Path,
+    reported: &str,
+) -> Option<String> {
     if reported.trim().is_empty() || reported.contains('\0') {
         return None;
     }
-    let reported_path = Path::new(reported);
-    let relative = if reported_path.is_absolute() {
-        reported_path.strip_prefix(execution_root).ok()?
-    } else {
-        reported_path
-    };
-    let mut clean = PathBuf::new();
-    for component in relative.components() {
-        match component {
-            Component::Normal(value) => {
-                if value.to_string_lossy().eq_ignore_ascii_case(".git") {
-                    return None;
-                }
-                clean.push(value);
-            }
-            Component::CurDir => {}
-            Component::ParentDir | Component::RootDir | Component::Prefix(_) => return None,
+    let file_url_path;
+    let reported_path = if reported.starts_with("file:") {
+        let url = Url::parse(reported).ok()?;
+        if url.scheme() != "file" {
+            return None;
         }
-    }
-    if clean.as_os_str().is_empty() {
+        file_url_path = url.to_file_path().ok()?;
+        file_url_path.as_path()
+    } else if reported.contains("://") {
+        return None;
+    } else {
+        Path::new(reported)
+    };
+    let display_root = normalize_absolute_path(display_root)?;
+    let resolved = if reported_path.is_absolute() {
+        normalize_absolute_path(reported_path)?
+    } else {
+        normalize_absolute_path(&display_root.join(reported_path))?
+    };
+    if resolved == display_root {
         return None;
     }
-    Some(clean.to_string_lossy().replace('\\', "/"))
+    let display_path = resolved
+        .strip_prefix(&display_root)
+        .ok()
+        .filter(|relative| !relative.as_os_str().is_empty())
+        .map(Path::to_path_buf)
+        .unwrap_or(resolved);
+    if display_path.components().any(|component| {
+        matches!(component, Component::Normal(value) if value.to_string_lossy().eq_ignore_ascii_case(".git"))
+    }) {
+        return None;
+    }
+    Some(display_path.to_string_lossy().replace('\\', "/"))
+}
+
+fn normalize_absolute_path(path: &Path) -> Option<PathBuf> {
+    if !path.is_absolute() {
+        return None;
+    }
+    let mut clean = PathBuf::new();
+    let mut normal_components = 0_usize;
+    for component in path.components() {
+        match component {
+            Component::Normal(value) => {
+                clean.push(value);
+                normal_components = normal_components.saturating_add(1);
+            }
+            Component::CurDir => {}
+            Component::ParentDir => {
+                if normal_components == 0 || !clean.pop() {
+                    return None;
+                }
+                normal_components -= 1;
+            }
+            Component::RootDir | Component::Prefix(_) => clean.push(component.as_os_str()),
+        }
+    }
+    clean.is_absolute().then_some(clean)
 }
 
 fn reconcile_kiro_rooted_diff_path(
@@ -383,6 +479,9 @@ fn reconcile_kiro_rooted_diff_path(
     }
     let rooted_relative = rooted_relative.to_string_lossy().replace('\\', "/");
     let normalized_file_operation_path = normalized_file_operation_path?;
+    if Path::new(normalized_file_operation_path).is_absolute() {
+        return None;
+    }
     (rooted_relative == normalized_file_operation_path)
         .then(|| normalized_file_operation_path.to_string())
 }
@@ -435,10 +534,11 @@ pub fn unified_diff_from_before_after(
     let old_header = if old_text.is_none() {
         "/dev/null".to_string()
     } else {
-        format!("a/{path}")
+        unified_diff_display_path(path, "a")
     };
+    let new_header = unified_diff_display_path(path, "b");
     let mut output = format!(
-        "--- {old_header}\n+++ b/{path}\n@@ -{},{} +{},{} @@\n",
+        "--- {old_header}\n+++ {new_header}\n@@ -{},{} +{},{} @@\n",
         if old_count == 0 { 0 } else { old_start + 1 },
         old_count,
         if new_count == 0 { 0 } else { new_start + 1 },
@@ -461,8 +561,9 @@ pub fn unified_diff_from_before_after(
 
 fn unified_diff_for_delete(path: &str, old_text: &str) -> String {
     let old_lines = split_preserving_line_endings(old_text);
+    let old_header = unified_diff_display_path(path, "a");
     let mut output = format!(
-        "--- a/{path}\n+++ /dev/null\n@@ -{},{} +0,0 @@\n",
+        "--- {old_header}\n+++ /dev/null\n@@ -{},{} +0,0 @@\n",
         if old_lines.is_empty() { 0 } else { 1 },
         old_lines.len(),
     );
@@ -470,6 +571,14 @@ fn unified_diff_for_delete(path: &str, old_text: &str) -> String {
         append_unified_line(&mut output, '-', line);
     }
     output
+}
+
+fn unified_diff_display_path(path: &str, side: &str) -> String {
+    if Path::new(path).is_absolute() {
+        path.to_string()
+    } else {
+        format!("{side}/{path}")
+    }
 }
 
 fn split_preserving_line_endings(value: &str) -> Vec<&str> {
@@ -497,7 +606,7 @@ fn fragment_line_count(value: &str) -> u64 {
     }
 }
 
-fn exact_mutation_fragment(old_text: &str, new_text: &str) -> String {
+pub(crate) fn exact_mutation_fragment(old_text: &str, new_text: &str) -> String {
     let mut output = String::with_capacity(
         old_text
             .len()
@@ -508,6 +617,21 @@ fn exact_mutation_fragment(old_text: &str, new_text: &str) -> String {
     append_exact_fragment_lines(&mut output, '-', old_text);
     append_exact_fragment_lines(&mut output, '+', new_text);
     output
+}
+
+pub(crate) fn unified_diff_from_complete_states(
+    path: &str,
+    before: Option<&str>,
+    after: Option<&str>,
+) -> Option<String> {
+    if before == after {
+        return None;
+    }
+    match (before, after) {
+        (_, Some(after)) => Some(unified_diff_from_before_after(path, before, after)),
+        (Some(before), None) => Some(unified_diff_for_delete(path, before)),
+        (None, None) => None,
+    }
 }
 
 fn append_exact_fragment_lines(output: &mut String, prefix: char, text: &str) {
@@ -548,28 +672,11 @@ pub fn projection_from_evidence(
     match diff.get("status").and_then(Value::as_str) {
         Some("available") => {
             let semantic_kind = diff.get("semanticKind")?.as_str()?.to_string();
-            let entries = if semantic_kind == "exact_mutation" {
-                let evidence_entries = serde_json::from_value::<Vec<ExactMutationEvidenceEntry>>(
-                    diff.get("entries")?.clone(),
-                )
-                .ok()?;
-                evidence_entries
-                    .into_iter()
-                    .map(|entry| {
-                        (entry.semantics == "exact_mutation" && entry.old_text != entry.new_text)
-                            .then(|| NormalizedDiffEntry {
-                                path: entry.path,
-                                change_kind: "update".to_string(),
-                                additions: fragment_line_count(&entry.new_text),
-                                deletions: fragment_line_count(&entry.old_text),
-                                diff: exact_mutation_fragment(&entry.old_text, &entry.new_text),
-                            })
-                    })
-                    .collect::<Option<Vec<_>>>()?
-            } else {
-                serde_json::from_value::<Vec<NormalizedDiffEntry>>(diff.get("entries")?.clone())
-                    .ok()?
-            };
+            let raw_entries = diff.get("entries")?.as_array()?;
+            let entries = raw_entries
+                .iter()
+                .map(command_diff_entry_from_evidence)
+                .collect::<Option<Vec<_>>>()?;
             Some(projection_from_admitted(
                 AdmittedCommandDiff {
                     semantic_kind,
@@ -585,6 +692,50 @@ pub fn projection_from_evidence(
                 .unwrap_or("runtime_diff_unavailable"),
             evidence_id,
         )),
+        _ => None,
+    }
+}
+
+fn command_diff_entry_from_evidence(entry: &Value) -> Option<NormalizedDiffEntry> {
+    match entry.get("semantics")?.as_str()? {
+        "exact_mutation" => {
+            let entry = serde_json::from_value::<ExactMutationEvidenceEntry>(entry.clone()).ok()?;
+            (entry.old_text != entry.new_text).then(|| NormalizedDiffEntry {
+                path: entry.path,
+                change_kind: "update".to_string(),
+                additions: fragment_line_count(&entry.new_text),
+                deletions: fragment_line_count(&entry.old_text),
+                diff: exact_mutation_fragment(&entry.old_text, &entry.new_text),
+            })
+        }
+        "full_before_after" => {
+            let entry =
+                serde_json::from_value::<FullBeforeAfterEvidenceEntry>(entry.clone()).ok()?;
+            let patch = unified_diff_from_complete_states(
+                &entry.path,
+                entry.before.as_deref(),
+                entry.after.as_deref(),
+            )?;
+            let (additions, deletions) = unified_diff_counts(&patch);
+            Some(NormalizedDiffEntry {
+                path: entry.path,
+                change_kind: entry.change_kind,
+                additions,
+                deletions,
+                diff: patch,
+            })
+        }
+        "unified_diff_snapshot" => {
+            let entry = serde_json::from_value::<UnifiedDiffEvidenceEntry>(entry.clone()).ok()?;
+            let (additions, deletions) = unified_diff_counts(&entry.diff);
+            Some(NormalizedDiffEntry {
+                path: entry.path,
+                change_kind: entry.change_kind,
+                additions,
+                deletions,
+                diff: entry.diff,
+            })
+        }
         _ => None,
     }
 }
@@ -710,7 +861,7 @@ mod tests {
     }
 
     #[test]
-    fn paths_outside_the_execution_root_are_rejected_without_reading_files() {
+    fn paths_outside_the_display_root_are_admitted_as_absolute_without_reading_files() {
         let result = admit_runtime_diff(
             &json!({
                 "runtimeDiff": {
@@ -724,8 +875,38 @@ mod tests {
             Path::new("/repo"),
             Some("codex-cli"),
         )
-        .expect("candidate should be present");
-        assert_eq!(result, Err("runtime_diff_path_outside_root"));
+        .expect("candidate should be present")
+        .expect("an explicit cross-root Runtime path should be admitted");
+        assert_eq!(result.entries[0].path, "/secret");
+    }
+
+    #[test]
+    fn file_uris_and_paths_use_relative_inside_and_absolute_outside_display_root() {
+        assert_eq!(
+            normalize_reported_path_for_display(
+                Path::new("/repo with space"),
+                "file:///repo%20with%20space/src/app.ts"
+            )
+            .as_deref(),
+            Some("src/app.ts")
+        );
+        assert_eq!(
+            normalize_reported_path_for_display(Path::new("/repo"), "file:///outside/app.ts")
+                .as_deref(),
+            Some("/outside/app.ts")
+        );
+        assert_eq!(
+            normalize_reported_path_for_display(Path::new("/repo"), "../outside/app.ts").as_deref(),
+            Some("/outside/app.ts")
+        );
+        assert!(
+            normalize_reported_path_for_display(Path::new("/repo"), "https://example.com/app.ts")
+                .is_none()
+        );
+        assert!(
+            normalize_reported_path_for_display(Path::new("/repo"), "/outside/.git/config")
+                .is_none()
+        );
     }
 
     #[test]
@@ -771,8 +952,9 @@ mod tests {
             Some("kiro-cli"),
             Some("src/app.ts"),
         )
-        .expect("candidate should be present");
-        assert_eq!(mismatched_kiro, Err("runtime_diff_path_outside_root"));
+        .expect("candidate should be present")
+        .expect("a real absolute cross-root Kiro path should remain absolute");
+        assert_eq!(mismatched_kiro.entries[0].path, "/src/other.ts");
 
         let qoder = admit_runtime_diff_with_file_operation_path(
             &json!({
@@ -792,8 +974,18 @@ mod tests {
             Some("qoder-cli"),
             Some("src/app.ts"),
         )
-        .expect("candidate should be present");
-        assert_eq!(qoder, Err("runtime_diff_path_outside_root"));
+        .expect("candidate should be present")
+        .expect("ACP adapters should retain an absolute path outside the display root");
+        assert_eq!(qoder.entries[0].path, "/src/app.ts");
+    }
+
+    #[test]
+    fn generated_unified_diff_uses_absolute_headers_for_cross_root_files() {
+        let patch =
+            unified_diff_from_complete_states("/outside/app.ts", Some("before\n"), Some("after\n"))
+                .expect("different complete states should produce a patch");
+        assert!(patch.starts_with("--- /outside/app.ts\n+++ /outside/app.ts\n"));
+        assert!(!patch.contains("a//outside"));
     }
 
     #[test]
@@ -805,6 +997,56 @@ mod tests {
         );
         assert!(patch.contains("-two\n+changed"));
         assert_eq!(unified_diff_counts(&patch), (1, 1));
+    }
+
+    #[test]
+    fn full_before_after_evidence_preserves_source_states_and_rebuilds_command_diff() {
+        let admitted = admit_runtime_diff(
+            &json!({
+                "runtimeDiff": {
+                    "adapterKind": "qoder-cli",
+                    "protocolFamily": "acp-v1",
+                    "sourceEventKind": "session/update.tool_call_update.completed",
+                    "semanticKind": "complete_before_after",
+                    "entries": [{
+                        "path": "src/app.ts",
+                        "oldText": "before\n",
+                        "newText": "after\n"
+                    }]
+                }
+            }),
+            Path::new("/repo"),
+            Some("qoder-cli"),
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(
+            admitted.evidence_entries.pointer("/0/semantics"),
+            Some(&json!("full_before_after"))
+        );
+        assert_eq!(
+            admitted.evidence_entries.pointer("/0/before"),
+            Some(&json!("before\n"))
+        );
+        assert!(admitted.evidence_entries.pointer("/0/diff").is_none());
+
+        let projection = projection_from_evidence(
+            &json!({
+                "runtimeDiff": {
+                    "schemaVersion": COMMAND_DIFF_SCHEMA_VERSION,
+                    "status": "available",
+                    "semanticKind": "complete_before_after",
+                    "entries": admitted.evidence_entries
+                }
+            }),
+            "full-state-evidence",
+        )
+        .expect("full state Evidence should derive a Command Diff projection");
+        assert!(
+            projection.entries.unwrap()[0]
+                .diff
+                .contains("-before\n+after")
+        );
     }
 
     #[test]
