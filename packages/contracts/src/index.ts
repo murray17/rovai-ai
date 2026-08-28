@@ -1336,6 +1336,30 @@ export interface AgentRunExecutionEvidencePage {
   evidence: AgentRunExecutionEvidenceView[]
 }
 
+export type ExecutionConsoleDisplayMode = 'live' | 'collapsed' | 'expanded'
+
+export interface ExecutionConsoleViewState {
+  mode: ExecutionConsoleDisplayMode
+  pageIndex: number
+  viewVersion: number
+  nonce: string
+}
+
+export interface ExecutionConsoleTerminalSummary {
+  visibleOperationCount: number
+  completedOperationCount: number
+  failedOperationCount: number
+  waitingOperationCount: number
+  durationMs: number | null
+  failureSummary: string | null
+}
+
+export interface ExecutionConsolePage {
+  pageIndex: number
+  pageCount: number
+  body: string
+}
+
 export interface RuntimeInputDeliveryView {
   id: string
   executionEpoch: number
@@ -2814,6 +2838,7 @@ export type CoreMethod =
   | 'channels.inbound.finalize'
   | 'channels.host.tick'
   | 'channels.executionConsole.source'
+  | 'channels.executionConsole.view.update'
   | 'channels.deliveries.settle'
   | 'camp.attachments.desktopOpenTarget'
   | 'app.info'

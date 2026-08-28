@@ -50,8 +50,10 @@ pub struct Database {
     runtime_camp_files_root_identity_digest: String,
 }
 
-const CURRENT_DATA_CONTRACT_VERSION: &str = "v1.32";
-const CURRENT_PROJECTION_SCHEMA_VERSION: i64 = 73;
+const CURRENT_DATA_CONTRACT_VERSION: &str = "v1.33";
+const CURRENT_PROJECTION_SCHEMA_VERSION: i64 = 74;
+const V120_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.32";
+const V120_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION: i64 = 73;
 const V119_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.31";
 const V119_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION: i64 = 72;
 const V118_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.30";
@@ -198,6 +200,7 @@ struct CurrentMigrationState {
     v117: bool,
     v118: bool,
     v119: bool,
+    v120: bool,
 }
 
 impl CurrentMigrationState {
@@ -248,6 +251,21 @@ impl CurrentMigrationState {
             && self.v112
             && self.v113;
         if contract == CURRENT_DATA_CONTRACT_VERSION && schema == CURRENT_PROJECTION_SCHEMA_VERSION
+        {
+            return through_v113
+                && self.v114
+                && self.v115
+                && self.v116
+                && self.v117
+                && self.v118
+                && self.v119
+                && self.v120;
+        }
+        if self.v120 {
+            return false;
+        }
+        if contract == V120_MIGRATION_SOURCE_DATA_CONTRACT_VERSION
+            && schema == V120_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION
         {
             return through_v113
                 && self.v114
@@ -1533,7 +1551,7 @@ fn connection_has_current_data_contract(connection: &Connection) -> rusqlite::Re
         r#"
         SELECT contract_version = ?1
                AND projection_schema_version = ?2
-               AND EXISTS(SELECT 1 FROM schema_migration WHERE version = 119)
+               AND EXISTS(SELECT 1 FROM schema_migration WHERE version = 120)
         FROM rovai_data_contract
         WHERE singleton = 1
         "#,
@@ -1599,7 +1617,8 @@ fn load_current_migration_state(
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 116),
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 117),
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 118),
-               EXISTS(SELECT 1 FROM schema_migration WHERE version = 119)
+               EXISTS(SELECT 1 FROM schema_migration WHERE version = 119),
+               EXISTS(SELECT 1 FROM schema_migration WHERE version = 120)
         "#,
         [],
         |row| {
@@ -1654,6 +1673,7 @@ fn load_current_migration_state(
                 v117: row.get(47)?,
                 v118: row.get(48)?,
                 v119: row.get(49)?,
+                v120: row.get(50)?,
             })
         },
     )
@@ -3188,6 +3208,9 @@ impl Database {
             if !self.schema_migration_applied(119)? {
                 self.migrate_feishu_channel_execution_console_v119()?;
             }
+            if !self.schema_migration_applied(120)? {
+                self.migrate_feishu_execution_console_view_state_v120()?;
+            }
             if let Err(error) =
                 crate::notification::maintain_notification_episode_retention(self.connection())
             {
@@ -3594,6 +3617,9 @@ impl Database {
         }
         if !self.schema_migration_applied(119)? {
             self.migrate_feishu_channel_execution_console_v119()?;
+        }
+        if !self.schema_migration_applied(120)? {
+            self.migrate_feishu_execution_console_view_state_v120()?;
         }
         if let Err(error) =
             crate::notification::maintain_notification_episode_retention(self.connection())
@@ -17314,6 +17340,42 @@ impl Database {
         Ok(())
     }
 
+    fn migrate_feishu_execution_console_view_state_v120(&mut self) -> Result<()> {
+        let transaction = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        transaction.execute_batch(
+            r#"
+            ALTER TABLE channel_execution_console
+            ADD COLUMN display_mode TEXT NOT NULL DEFAULT 'live'
+                CHECK(display_mode IN ('live', 'collapsed', 'expanded'));
+            ALTER TABLE channel_execution_console
+            ADD COLUMN page_index INTEGER NOT NULL DEFAULT 0 CHECK(page_index >= 0);
+            ALTER TABLE channel_execution_console
+            ADD COLUMN view_version INTEGER NOT NULL DEFAULT 1 CHECK(view_version >= 1);
+
+            UPDATE channel_execution_console
+            SET display_mode = CASE
+                    WHEN state IN ('terminal', 'recall_pending', 'recalled', 'recall_failed')
+                        THEN 'collapsed'
+                    ELSE 'live'
+                END,
+                page_index = 0,
+                view_version = 1;
+
+            UPDATE rovai_data_contract
+            SET contract_version = 'v1.33', projection_schema_version = 74,
+                reset_reason = NULL, updated_at = datetime('now')
+            WHERE singleton = 1;
+
+            INSERT INTO schema_migration(version, applied_at)
+            VALUES (120, datetime('now'));
+            "#,
+        )?;
+        transaction.commit()?;
+        Ok(())
+    }
+
     fn migrate_managed_attachment_v2_v112(&mut self) -> Result<()> {
         let transaction = self
             .connection
@@ -21981,7 +22043,37 @@ impl Database {
 }
 
 #[cfg(test)]
+fn downgrade_current_schema_to_v119_source_for_test(connection: &Connection) {
+    let has_v120: bool = connection
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM schema_migration WHERE version = 120)",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    if !has_v120 {
+        return;
+    }
+    connection
+        .execute_batch(
+            r#"
+            BEGIN IMMEDIATE;
+            ALTER TABLE channel_execution_console DROP COLUMN view_version;
+            ALTER TABLE channel_execution_console DROP COLUMN page_index;
+            ALTER TABLE channel_execution_console DROP COLUMN display_mode;
+            UPDATE rovai_data_contract
+            SET contract_version = 'v1.32', projection_schema_version = 73
+            WHERE singleton = 1;
+            DELETE FROM schema_migration WHERE version = 120;
+            COMMIT;
+            "#,
+        )
+        .unwrap();
+}
+
+#[cfg(test)]
 fn downgrade_current_schema_to_v118_source_for_test(connection: &Connection) {
+    downgrade_current_schema_to_v119_source_for_test(connection);
     let has_v119: bool = connection
         .query_row(
             "SELECT EXISTS(SELECT 1 FROM schema_migration WHERE version = 119)",
@@ -23544,6 +23636,7 @@ mod tests {
             v117: version >= 117,
             v118: version >= 118,
             v119: version >= 119,
+            v120: version >= 120,
         }
     }
 
@@ -23554,6 +23647,12 @@ mod tests {
                 "current",
                 CURRENT_DATA_CONTRACT_VERSION,
                 CURRENT_PROJECTION_SCHEMA_VERSION,
+                120,
+            ),
+            (
+                "v1.32/schema-73 after Feishu execution console",
+                V120_MIGRATION_SOURCE_DATA_CONTRACT_VERSION,
+                V120_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION,
                 119,
             ),
             (
@@ -23834,7 +23933,7 @@ mod tests {
             );
         }
 
-        let current = migration_state_through(118);
+        let current = migration_state_through(120);
         let v092_source = migration_state_through(91);
         let mut missing_intermediate = current;
         missing_intermediate.v84 = false;
@@ -23904,7 +24003,7 @@ mod tests {
             )
             .expect("current contract marker should load");
 
-        assert_eq!(state, migration_state_through(119));
+        assert_eq!(state, migration_state_through(120));
         assert!(state.admits(&contract, schema));
         assert!(has_admissible_data_contract(
             &directory.join("rovai.sqlite")
@@ -26561,6 +26660,66 @@ mod tests {
                 .connection()
                 .query_row(
                     "SELECT COUNT(*) FROM schema_migration WHERE version = 119",
+                    [],
+                    |row| row.get::<_, i64>(0),
+                )
+                .unwrap(),
+            1
+        );
+        drop(restarted);
+        std::fs::remove_dir_all(directory).expect("temporary database should be removable");
+    }
+
+    #[test]
+    fn v120_adds_persistent_execution_console_view_state() {
+        let (database, directory) = crate::test_support::seeded_runtime_database();
+        downgrade_current_schema_to_v119_source_for_test(database.connection());
+        assert_eq!(
+            database
+                .connection()
+                .query_row(
+                    r#"
+                    SELECT contract_version, projection_schema_version,
+                           (SELECT COUNT(*) FROM schema_migration WHERE version = 120)
+                    FROM rovai_data_contract WHERE singleton = 1
+                    "#,
+                    [],
+                    |row| Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, i64>(1)?,
+                        row.get::<_, i64>(2)?,
+                    )),
+                )
+                .unwrap(),
+            ("v1.32".to_string(), 73, 0)
+        );
+        for column in ["display_mode", "page_index", "view_version"] {
+            assert!(
+                !table_columns(database.connection(), "channel_execution_console")
+                    .unwrap()
+                    .contains(&column.to_string())
+            );
+        }
+        drop(database);
+
+        let upgraded = Database::open(&directory).expect("v119 source should migrate to v120");
+        assert!(connection_has_current_data_contract(upgraded.connection()).unwrap());
+        for column in ["display_mode", "page_index", "view_version"] {
+            assert!(
+                table_columns(upgraded.connection(), "channel_execution_console")
+                    .unwrap()
+                    .contains(&column.to_string()),
+                "Migration 120 must add channel_execution_console.{column}"
+            );
+        }
+        drop(upgraded);
+
+        let restarted = Database::open(&directory).expect("v120 restart should be idempotent");
+        assert_eq!(
+            restarted
+                .connection()
+                .query_row(
+                    "SELECT COUNT(*) FROM schema_migration WHERE version = 120",
                     [],
                     |row| row.get::<_, i64>(0),
                 )

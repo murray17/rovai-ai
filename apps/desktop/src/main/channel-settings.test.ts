@@ -1452,6 +1452,17 @@ describe('channel settings service', () => {
   it('gates non-owner input, keeps /new private-only, and trusts callback operator envelopes', async () => {
     const harness = controlledChannels({ cli_a: { openId: 'ou_bot_a', name: '审阅员' } })
     const commands: Array<{ method: string; command: Record<string, unknown> }> = []
+    let executionView: {
+      mode: 'collapsed' | 'expanded'
+      pageIndex: number
+      viewVersion: number
+      nonce: string
+    } = {
+      mode: 'collapsed',
+      pageIndex: 0,
+      viewVersion: 3,
+      nonce: 'console-nonce-3'
+    }
     const service = new ChannelSettingsService({
       credentialStore: memoryCredentialStore({
         'feishu-member-a': { appId: 'cli_a', appSecret: 'secret-a' }
@@ -1502,6 +1513,52 @@ describe('channel settings service', () => {
             status: 'accepted',
             code: 'channel.binding.resolved',
             payload: { projectDisplayName: 'Rovai 项目' }
+          }
+        }
+        if (method === 'channels.executionConsole.source') {
+          return {
+            sequence: 7,
+            agentRunId: 'run-console',
+            agentDisplayName: '审阅员',
+            run: { status: 'succeeded', waitReason: null, terminalReasonCode: null },
+            evidence: [],
+            publicOutput: '执行台输出',
+            startedAt: '2026-08-28T00:00:00Z',
+            terminalAt: '2026-08-28T00:00:05Z',
+            targetAppId: 'cli_a',
+            externalMessageId: 'om_console',
+            view: executionView
+          }
+        }
+        if (method === 'channels.executionConsole.view.update') {
+          if (command.operatorUserId !== 'owner-user-id') {
+            return {
+              status: 'rejected',
+              code: 'channel.execution_console.owner_required',
+              payload: {}
+            }
+          }
+          if (command.expectedViewVersion !== executionView.viewVersion
+            || command.nonce !== executionView.nonce) {
+            return {
+              status: 'rejected',
+              code: 'channel.execution_console.stale_card',
+              payload: {}
+            }
+          }
+          executionView = {
+            mode: command.action === 'execution_console_collapse' ? 'collapsed' : 'expanded',
+            pageIndex: 0,
+            viewVersion: executionView.viewVersion + 1,
+            nonce: `console-nonce-${executionView.viewVersion + 1}`
+          }
+          return {
+            status: 'applied',
+            code: 'channel.execution_console.view_updated',
+            payload: {
+              snapshotSequence: 7,
+              viewUpdateQueued: true
+            }
           }
         }
         if (method === 'channels.host.tick') {
@@ -1638,6 +1695,116 @@ describe('channel settings service', () => {
     expect(failedResult).toEqual({
       toast: { type: 'error', content: '创建失败，请重试' }
     })
+
+    const expandedResult = await cardHandler({
+      messageId: 'om_console',
+      chatId: 'oc_group',
+      operator: { openId: 'ou_owner', userId: 'owner-user-id' },
+      action: {
+        tag: 'button',
+        value: {
+          action: 'execution_console_expand',
+          agentRunId: 'run-console',
+          expectedViewVersion: 3,
+          expectedSnapshotSequence: 7,
+          nonce: 'console-nonce-3',
+          operatorUserId: 'spoofed-user'
+        }
+      },
+      raw: {
+        operator: {
+          open_id: 'ou_owner',
+          user_id: 'owner-user-id',
+          union_id: 'on_owner'
+        }
+      }
+    })
+    const executionCallback = commands.find(({ method }) => (
+      method === 'channels.executionConsole.view.update'
+    ))?.command
+    expect(executionCallback).toMatchObject({
+      appId: 'cli_a',
+      externalMessageId: 'om_console',
+      agentRunId: 'run-console',
+      expectedViewVersion: 3,
+      expectedSnapshotSequence: 7,
+      pageCount: 1,
+      operatorOpenId: 'ou_owner',
+      operatorUserId: 'owner-user-id',
+      operatorUnionId: 'on_owner'
+    })
+    expect(JSON.stringify(executionCallback)).not.toContain('spoofed-user')
+    expect(expandedResult).toEqual({
+      toast: { type: 'success', content: '已展开执行过程' }
+    })
+    expect(harness.updateCard).toHaveBeenCalledTimes(1)
+    expect(harness.updateCard).toHaveBeenCalledWith(
+      'om_console',
+      expect.objectContaining({
+        header: expect.objectContaining({
+          title: { tag: 'plain_text', content: '审阅员 · 执行过程' }
+        })
+      })
+    )
+
+    const outsiderExecutionResult = await cardHandler({
+      messageId: 'om_console',
+      chatId: 'oc_group',
+      operator: { openId: 'ou_other', userId: 'other-user-id' },
+      action: {
+        tag: 'button',
+        value: {
+          action: 'execution_console_collapse',
+          agentRunId: 'run-console',
+          expectedViewVersion: 4,
+          expectedSnapshotSequence: 7,
+          nonce: 'console-nonce-4'
+        }
+      },
+      raw: {
+        operator: {
+          open_id: 'ou_other',
+          user_id: 'other-user-id',
+          union_id: 'on_other'
+        }
+      }
+    })
+    expect(outsiderExecutionResult).toEqual({
+      toast: { type: 'warning', content: '仅 Rovai Owner 可以操作执行记录' }
+    })
+    expect(harness.updateCard).toHaveBeenCalledTimes(1)
+
+    const collapsedResult = await cardHandler({
+      messageId: 'om_console',
+      chatId: 'oc_group',
+      operator: { openId: 'ou_owner', userId: 'owner-user-id' },
+      action: {
+        tag: 'button',
+        value: {
+          action: 'execution_console_collapse',
+          agentRunId: 'run-console',
+          expectedViewVersion: 4,
+          expectedSnapshotSequence: 7,
+          nonce: 'console-nonce-4'
+        }
+      },
+      raw: {
+        operator: {
+          open_id: 'ou_owner',
+          user_id: 'owner-user-id',
+          union_id: 'on_owner'
+        }
+      }
+    })
+    expect(collapsedResult).toEqual({
+      toast: { type: 'success', content: '已收起执行过程' }
+    })
+    expect(harness.updateCard).toHaveBeenCalledTimes(2)
+    expect(harness.send).not.toHaveBeenCalledWith(
+      'oc_group',
+      expect.objectContaining({ card: expect.anything() }),
+      expect.anything()
+    )
     await service.stop()
   })
 
@@ -2014,7 +2181,12 @@ describe('channel settings service', () => {
             agentDisplayName: '芝士',
             run: { status: 'running', waitReason: null, terminalReasonCode: null },
             evidence: [],
-            publicOutput: null
+            publicOutput: null,
+            startedAt: '2026-08-28T00:00:00Z',
+            terminalAt: null,
+            targetAppId: 'cli_a',
+            externalMessageId: null,
+            view: { mode: 'live', pageIndex: 0, viewVersion: 1, nonce: 'nonce-1' }
           }
         }
         if (method === 'channels.deliveries.settle') {

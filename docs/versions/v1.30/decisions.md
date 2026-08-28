@@ -422,6 +422,9 @@ Session 中，因此该值就是 App-scoped `ownerOpenId`。可信 Main Host 把
 <a id="v1-30-d11"></a>
 ## V1.30-D11：执行过程使用临时控制台，公开正文与附件保持永久且独立
 
+> D11 的临时控制台、永久正文与附件生命周期边界继续有效；终态卡片的展示与交互已由
+> [V1.30-D13](#v1-30-d13)细化。
+
 ### 背景
 
 早期 ChannelDelivery 用 `agent_status`、`agent_output` 和 `completion` 反复更新状态卡。同一飞书消息同时承担执行过程、
@@ -510,3 +513,43 @@ kind，以 `operation = send | update | recall` 表达外部生命周期，不�
 - **从 action payload 判断 Owner：** 卡片 payload 可被重放或构造，不能成为身份来源；
 - **新增独立 recall delivery kind：** 现有 `project_selection` authority 与外部 message ID 已足以表达同一生命周期，扩大闭集和
   Migration 没有收益。
+
+<a id="v1-30-d13"></a>
+## V1.30-D13：终态执行台在原卡持久收起，Owner 以 CAS 展开完整过程
+
+### 背景
+
+D11 让每个 AgentRun 拥有独立临时控制台，但终态仍把 narration、输出和失败项铺在消息流中，并把连续成功工具替换成
+不可继续展开的“已执行 N 项操作”。前者让已完成的多 Agent 会话持续占据屏幕，后者又无法在需要审计时看到具体操作。
+飞书卡片没有适合手机端的可靠多层折叠；只在 Main 内存保存展开状态也无法支撑重启后的旧卡 callback、乱序点击和分页。
+
+### 决定
+
+非终态控制台保持完整 `live`，不提供收起动作。Run 首次终结时，同一张 Card 2.0 自动切到 `collapsed`，只显示状态、由
+公共 execution presentation 计算的操作统计、稳定开始/结束时间和安全失败摘要；无工具时不伪造零项统计。Owner 点击后
+在同一 external message 切到 `expanded`，按真实顺序展示 narration、plan、diagnostic、执行台 Agent output 和每一项
+具体工具操作。连续工具只加视觉组标题，不产生第二层 disclosure；过长详情按语义 block 在原卡分页。
+
+Core execution-console projection 持久保存 mode、page index 与单调 view version。外部 action 只携带 Run、预期 snapshot/
+view version 和 version-bound nonce；真实 operator identity 只取 callback envelope。Core 同时校验 Owner、冻结 App、exact
+external message、terminal state、snapshot/version/nonce 和动作适用性，再以 CAS 更新投影、旋转版本并排 durable upsert。
+Main 重新读取最新 Core snapshot 后更新原卡，不使用 callback 正文。终态 snapshot reconciliation 递增 view version；页码
+越界由可信 Host 通过同一 CAS seam 钳制。下一条 root admission 仍无条件 recall 旧控制台，与其当前 mode/page 无关。
+
+当前规范见[飞书渠道架构](../../architecture/feishu-channel.md#输出恢复与秘密)和
+[Feishu Channel v2](../../contracts/feishu-channel-v2.md#7-channeldelivery)。
+
+### 后果
+
+- 已完成的多 Agent 会话默认保持安静，需要时仍能查看完整公共执行证据；
+- 卡片双击、旧按钮、重放、错误 App 与 non-owner 不会回滚或覆盖更新后的视图；
+- `collapsed/expanded/pageIndex` 跨 Core/Main 重启恢复，外部更新失败仍由 Outbox 重试原消息；
+- Migration 120 将 Data Contract 推进到 `v1.33 / projection schema 74`，不改变 AgentRun、CampMessage、永久输出或附件。
+
+### 被拒绝方案
+
+- **外层收起后再按工具组二次展开：** 手机端层级过深，且要持久化多个 panel 状态；
+- **终态只保留不可点击的工具汇总：** 降低消息噪音，却丢失用户需要复核的具体操作；
+- **展开时另发详情消息或打开 Web 页面：** 增加第二份生命周期和清理目标，破坏原卡 recall 边界；
+- **只在 Main 内存保存 mode/page：** 重启后旧卡无法恢复，乱序 callback 可覆盖新 snapshot；
+- **只信 action payload 的 Owner 或版本：** payload 不是身份 authority，也不能证明点击的是冻结 App 的当前原卡。

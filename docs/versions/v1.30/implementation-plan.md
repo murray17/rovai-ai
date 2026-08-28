@@ -51,7 +51,9 @@ last_updated: 2026-08-29
 - [x] 完成父群 authoritative roster、普通群完整 membership、话题按需 membership 与 remove reconciliation；
 - [x] 完成 ChannelDelivery Outbox、实际作者 Bot、原生 Principal mention、lease/retry/attention 和恢复；
 - [x] 用 Core-owned per-AgentRun execution console 替换用户可见 `agent_status/completion`；Main 与 Renderer 共享公开
-  Evidence presentation，下一条 root admission 由原 App durable recall 旧控制台；
+  Evidence presentation。运行态完整展开，终态自动收起为摘要；Owner 可在同一原卡展开全部工具项、收起和语义分页。
+  Core 持久化 mode/page/view version，以 envelope Owner、frozen App、exact message、snapshot/version/nonce CAS 防重放，
+  重启恢复当前页，下一条 root admission 仍由原 App durable recall 旧控制台；
 - [x] 把正式 Agent 输出改为无标题永久 Markdown，并将公开 CampMessage 的 Managed Attachment v2 图片/文件按正文后
   ordinal 原生投递、独立重试和失败 attention 收口；
 - [x] 完成 Preload/Renderer typed API、真实账号投影、唯一账号 QR、Provisioning Dialog、按绑定 brand 的官方应用详情
@@ -73,8 +75,9 @@ last_updated: 2026-08-29
 - 飞书 reply 只形成当前消息的 ExternalQuote，不产生内部 reply 或第二条 CampMessage；
 - 普通群 roster 与话题按需扩张都复用 Camp Membership v1 exact source generation；
 - Secret 与 raw Feishu identity 不进入 Renderer/Agent；公开输出只来自 Core 已提交内容；
-- 执行控制台不含 reasoning/thought，不能覆盖正式正文；永久正文与附件各有稳定 dedupe，单个附件失败不得重发正文或
-  已成功附件；
+- 执行控制台不含 reasoning/thought，不能覆盖正式正文；运行态不提供收起，终态摘要不平铺过程，展开后每个工具项可见且
+  只在同卡语义分页。只有 Owner 能以最新 CAS 操作，重启恢复并在下一根 Turn admission 后无条件召回；永久正文与附件各有
+  稳定 dedupe，单个附件失败不得重发正文或已成功附件；
 - 连接不调用任何 App 创建接口或写入 App credential；发布不产生 QR/飞书确认页，registration 协议没有实现、API 或
   交互入口；
 - identity 漂移、Session 失效、完成后重复发布、历史 disabled 恢复与未知远端状态全部 fail closed 或复用冻结 App，不能静默创建第二个 App；
@@ -96,16 +99,16 @@ last_updated: 2026-08-29
 - `cargo test -p rovai-core --lib`；
 - `cargo test -p rovai-core --bin rovai`；
 - `cargo test -p rovai-core --bin rovai-core`；
-- Migration 116/119 upgrade、v118→v119 独立兼容、Developer Identity/publication intent、队员 App 身份冻结/历史 disabled 同 App reactivation、Owner-only Channel 状态机、发布期 App-scoped Owner prebinding、DM `/new`、PendingCampBinding、ExternalQuote、Context bytes 与
+- Migration 116/119/120 upgrade、v118→v120 与 v119→v120 独立兼容、Developer Identity/publication intent、队员 App 身份冻结/历史 disabled 同 App reactivation、Owner-only Channel 状态机、发布期 App-scoped Owner prebinding、DM `/new`、PendingCampBinding、ExternalQuote、Context bytes 与
   Secret projection、内置/managed 头像解析、正常发布头像传递、冻结 App 头像/readiness 修复、Manifest 假阳性、P2P
   Scope ID 映射、template-first fallback matrix、durable barrier、activation-first、dynamic patch reuse、Event timeout
   recoverable、Event/Callback mode fail-closed、原会话 project picker/Non-owner toast/authoritative message ID/旧 private
-  picker 恢复/durable recall、execution console 更新/消息身份、永久 Markdown、附件顺序/独立失败
+  picker 恢复/durable recall、execution console 运行/摘要/展开/分页/Owner-CAS/重启恢复/消息身份、永久 Markdown、附件顺序/独立失败
   定向测试全部通过；
 - `pnpm typecheck`；
 - `pnpm test`；
 - `pnpm build:desktop`；
-- `DOCS_BASE_REF=fbd07e6a958a1d9a8d508413b4bbd548939bbd7d pnpm docs:check:ci`（本次原会话项目卡基线）。
+- `DOCS_BASE_REF=fbd07e6a958a1d9a8d508413b4bbd548939bbd7d pnpm docs:check:ci`（本次执行台收起/展开基线）。
 
 隔离 Desktop 验收使用独立临时 userData 和 `pnpm dev`：
 

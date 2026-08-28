@@ -89,7 +89,8 @@ use rovai_core::{
         CreateMemberBotPublicationIntentCommand, DisconnectFeishuAccountCommand,
         ExpireFeishuAccountCommand, FinalizeChannelInboundCommand, ObserveChannelInboundCommand,
         ReconcileFeishuGroupRosterCommand, ResolvePendingCampBindingCommand,
-        SettleChannelDeliveryCommand, StartNewFeishuDmCommand, UpsertFeishuAccountCommand,
+        SettleChannelDeliveryCommand, StartNewFeishuDmCommand,
+        UpdateChannelExecutionConsoleViewCommand, UpsertFeishuAccountCommand,
         UpsertFeishuMemberBotCommand, VerifyFeishuOwnerCommand,
     },
     collaboration::{
@@ -5000,6 +5001,21 @@ impl Core {
                         params.expected_sequence,
                     )?,
                 )?)
+            }
+            "channels.executionConsole.view.update" => {
+                let params: UserCommandParams<UpdateChannelExecutionConsoleViewCommand> =
+                    serde_json::from_value(request.params.clone())?;
+                let mut database = self.database.lock().await;
+                let execution = ChannelService::default().update_execution_console_view(
+                    &mut database,
+                    &system_command_envelope(
+                        params.command_id,
+                        "feishu-channel-host",
+                        None,
+                        params.command,
+                    ),
+                )?;
+                Ok(serde_json::to_value(execution.result)?)
             }
             "channels.deliveries.settle" => {
                 let params: UserCommandParams<SettleChannelDeliveryCommand> =

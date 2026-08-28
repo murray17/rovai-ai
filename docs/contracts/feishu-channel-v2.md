@@ -20,7 +20,7 @@ ExternalPrincipal、多 Bot 聚合、串行 ChannelTurnRequest、群 roster 和 
 | 能力 | 合格 Actor |
 | --- | --- |
 | 连接/断开账号、发布队员 Bot | 本机 Owner 经 typed Desktop API |
-| Owner identity verify、inbound observe/finalize、DM `/new`、项目卡 resolve、roster、Host tick、delivery settle | `feishu-channel-host` System component |
+| Owner identity verify、inbound observe/finalize、DM `/new`、项目卡 resolve、execution-console view update/reconcile、roster、Host tick、delivery settle | `feishu-channel-host` System component |
 | Camp membership source mutation | `channel-membership-sync` + exact `feishu` source binding/generation |
 
 `ExternalPrincipal` 没有任何本机 Owner 能力。不存在 authorized user、sender allowlist、渠道侧人工项目目录、会话换绑或
@@ -453,14 +453,37 @@ CampTurn、Agent、目标 App 与外部 message ID，使用单调 snapshot seque
 type ChannelExecutionConsoleState =
   | 'opening' | 'active' | 'terminal'
   | 'recall_pending' | 'recalled' | 'recall_failed'
+
+type ChannelExecutionConsoleDisplayMode = 'live' | 'collapsed' | 'expanded'
 ```
 
-Core 从公开 Execution Evidence、AgentRun 状态和已提交公开输出生成可合并的 `execution_console_upsert`；Main 与 Renderer
-复用同一纯 presentation 模块，隐藏 `agent.reasoning.summary.delta`、`agent.thought.delta`，保留公开 narration、plan、
-tool/activity 与 public output。活跃工具展开；终态连续成功/已记录工具折叠，失败、等待和停止工具保持展开。Main 只由
-该 Agent 的冻结 App 创建或更新 Card 2.0；同一 App 不能修改其他 Bot 的控制台。下一条 root request admission 把该
-ChannelConversation 中更早 Turn 的控制台转为 `recall_pending`，等待其在途 upsert 结束后由原 App recall；不存在或已被
-飞书撤回的消息按幂等成功收口。
+投影同时持久保存 `displayMode`、非负 `pageIndex` 和单调 `viewVersion`。非终态强制 `live`；Run 第一次进入
+`succeeded | failed | cancelled` 时自动切到 `collapsed/page 0`。终态后由 Owner 卡片 action 在
+`collapsed <-> expanded` 间切换，重启不得丢失 mode/page/version。终态 snapshot sequence 增长时保留当前 mode，
+递增 `viewVersion` 使旧按钮失效；若重新分页后页码越界，可信 Host 使用同一 CAS 命令把它钳制到最后一页。
+
+Core 从公开 Execution Evidence、AgentRun 状态、稳定 `startedAt/endedAt` 和已提交公开输出生成可合并的
+`execution_console_upsert`；Main 与 Renderer 复用同一纯 presentation 模块，隐藏
+`agent.reasoning.summary.delta`、`agent.thought.delta`，保留公开 narration、plan、diagnostic、tool/activity 与
+execution-console Agent output。`live` 始终完整展开且没有收起按钮。终态默认只显示状态、公开 presentation 计算出的
+操作统计、稳定用时和安全失败摘要；没有操作时不得显示零项。`expanded` 按真实顺序展示全部公开 block，连续工具只可加
+“操作组”视觉标题，组内每项都必须平铺，禁止用不可继续展开的“已执行 N 项操作”替代。
+
+详情超过单卡预算时只按 narration、plan、diagnostic、工具项/组和 Agent output 等语义 block 分页；不得切开单个工具、
+文件变化列表或 Markdown code block。每页仍更新同一 external message，提供适用的上一页、下一页和收起动作。Card action
+闭集为 `execution_console_expand | execution_console_collapse | execution_console_prev_page |
+execution_console_next_page`，value 只含 action、`agentRunId`、`expectedViewVersion`、
+`expectedSnapshotSequence` 和 version-bound nonce，不含正文或身份声明。
+
+`channels.executionConsole.view.update` 是 Host-only Core 命令。外部 action 必须同时证明 callback envelope 的真实
+operator 是 Owner、receiving App 等于冻结 target App、clicked message ID 等于 authoritative external message、Run/
+projection 仍为 terminal、snapshot sequence/view version/nonce 全部匹配且动作适用于当前页；旧卡、双击、重放、错误
+App 与 non-owner 都 fail closed。成功 mutation 递增 view version、旋转 version-bound nonce，并 durable coalesce 一条
+原卡 upsert；Main 重新读取最新 Core snapshot 后调用 `updateCard(externalMessageId)`，不新增消息，也不使用 callback 缓存
+正文。Main 只由该 Agent 的冻结 App 创建或更新 Card 2.0；同一 App 不能修改其他 Bot 的控制台。
+
+下一条 root request admission 把该 ChannelConversation 中更早 Turn 的控制台转为 `recall_pending`，无论旧卡处于
+collapsed、expanded 或任意页，都等待其在途 upsert 结束后由原 App recall；不存在或已被飞书撤回的消息按幂等成功收口。
 
 `agent_output` 是实际作者 Bot 发送的永久、无标题 Markdown 消息，永远不复用/更新控制台、queue ack 或更早输出。
 作者不可用时生成 attention，不由 ack Bot 冒充。group/topic 中结构化 `CurrentUserMention` 只有找到原始
@@ -515,13 +538,15 @@ generation-aware conversation binding、PendingCampBinding/FIFO message 和 proj
 `channel_execution_console`，给 ChannelDelivery 增加 console identity、priority 与 attachment ordinal，并把 kind
 闭集替换为本节当前集合；旧 `agent_status/completion` transport 行不迁移，既有 project selection、queue ack、Agent
 output 与 attention 保留。原会话 picker 复用现有 `project_selection` kind、external message ID 和 additive payload
-operation，因此 Data Contract 仍为 v1.32/schema 73、无需新 Migration；Host tick 负责让旧 private picker 失权、撤回和
-重发。迁移保留既有 Camp、消息、Manifest、Bot credential reference、Attachment authority 与 terminal evidence，不删除
-或新建任何远端 App。
+operation。Migration 120 升到 `Data Contract v1.33 / projection schema 74`，为既有
+`channel_execution_console` 增加 `display_mode/page_index/view_version`；活跃旧行规范化为 `live`，terminal/recall 旧行
+规范化为 `collapsed/page 0/version 1`。Host tick 继续负责让旧 private picker 失权、撤回和重发。迁移保留既有 Camp、
+消息、Manifest、Bot credential reference、Attachment authority、terminal evidence 与 execution-console external message
+identity，不删除或新建任何远端 App。
 
 ## References
 
 - [飞书渠道架构](../architecture/feishu-channel.md)
 - [Camp Membership v1](camp-membership-v1.md)
 - [ContextManifest Evidence v22](context-manifest-evidence-v22.md)
-- [v1.30 决策记录](../versions/v1.30/decisions.md#v1-30-d12)
+- [v1.30 决策记录](../versions/v1.30/decisions.md#v1-30-d13)

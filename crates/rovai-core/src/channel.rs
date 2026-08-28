@@ -186,6 +186,27 @@ impl DomainCommand for ResolvePendingCampBindingCommand {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct UpdateChannelExecutionConsoleViewCommand {
+    pub agent_run_id: String,
+    pub app_id: String,
+    pub external_message_id: String,
+    pub expected_view_version: i64,
+    pub expected_snapshot_sequence: i64,
+    pub nonce: String,
+    pub action: String,
+    pub page_count: i64,
+    pub operator_open_id: Option<String>,
+    pub operator_user_id: Option<String>,
+    pub operator_union_id: Option<String>,
+}
+
+impl sealed::Sealed for UpdateChannelExecutionConsoleViewCommand {}
+impl DomainCommand for UpdateChannelExecutionConsoleViewCommand {
+    const TYPE: &'static str = "channel_execution_console.view.update";
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ChannelAttachmentSummaryInput {
     pub name: String,
     pub media_type: Option<String>,
@@ -409,6 +430,15 @@ pub struct ChannelExecutionConsoleRunView {
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct ChannelExecutionConsoleViewState {
+    pub mode: String,
+    pub page_index: i64,
+    pub view_version: i64,
+    pub nonce: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ChannelExecutionConsoleSourceView {
     pub sequence: i64,
     pub agent_run_id: String,
@@ -416,6 +446,11 @@ pub struct ChannelExecutionConsoleSourceView {
     pub run: ChannelExecutionConsoleRunView,
     pub evidence: Vec<AgentRunExecutionEvidenceView>,
     pub public_output: Option<String>,
+    pub started_at: Option<String>,
+    pub terminal_at: Option<String>,
+    pub target_app_id: String,
+    pub external_message_id: Option<String>,
+    pub view: ChannelExecutionConsoleViewState,
 }
 
 #[derive(Debug, Default)]
@@ -439,7 +474,10 @@ impl ChannelService {
             .query_row(
                 r#"
                 SELECT console.latest_sequence, run.id, profile.display_name,
-                       run.status, run.wait_reason, run.terminal_reason_code
+                       run.status, run.wait_reason, run.terminal_reason_code,
+                       run.started_at, run.ended_at,
+                       console.target_app_id, console.external_message_id,
+                       console.display_mode, console.page_index, console.view_version
                 FROM channel_execution_console AS console
                 JOIN agent_run AS run ON run.id = console.agent_run_id
                 JOIN agent_profile AS profile ON profile.id = console.agent_id
@@ -456,6 +494,13 @@ impl ChannelService {
                         row.get::<_, String>(3)?,
                         row.get::<_, Option<String>>(4)?,
                         row.get::<_, Option<String>>(5)?,
+                        row.get::<_, Option<String>>(6)?,
+                        row.get::<_, Option<String>>(7)?,
+                        row.get::<_, String>(8)?,
+                        row.get::<_, Option<String>>(9)?,
+                        row.get::<_, String>(10)?,
+                        row.get::<_, i64>(11)?,
+                        row.get::<_, i64>(12)?,
                     ))
                 },
             )
@@ -467,6 +512,13 @@ impl ChannelService {
             status,
             wait_reason,
             terminal_reason_code,
+            started_at,
+            terminal_at,
+            target_app_id,
+            external_message_id,
+            display_mode,
+            page_index,
+            view_version,
         )) = source
         else {
             transaction.commit()?;
@@ -486,6 +538,7 @@ impl ChannelService {
                 |row| row.get::<_, String>(0),
             )
             .optional()?;
+        let nonce = execution_console_view_nonce(&agent_run_id, view_version, sequence);
         transaction.commit()?;
         Ok(Some(ChannelExecutionConsoleSourceView {
             sequence,
@@ -498,6 +551,16 @@ impl ChannelService {
             },
             evidence,
             public_output,
+            started_at,
+            terminal_at,
+            target_app_id,
+            external_message_id,
+            view: ChannelExecutionConsoleViewState {
+                mode: display_mode,
+                page_index,
+                view_version,
+                nonce,
+            },
         }))
     }
 
@@ -3018,6 +3081,238 @@ impl ChannelService {
         })
     }
 
+    pub fn update_execution_console_view(
+        &self,
+        database: &mut Database,
+        envelope: &CommandEnvelope<UpdateChannelExecutionConsoleViewCommand>,
+    ) -> Result<CommandExecution> {
+        validate_nonempty(&envelope.payload.agent_run_id, "agentRunId")?;
+        validate_nonempty(&envelope.payload.app_id, "appId")?;
+        validate_nonempty(&envelope.payload.external_message_id, "externalMessageId")?;
+        validate_nonempty(&envelope.payload.nonce, "nonce")?;
+        if envelope.payload.expected_view_version < 1 {
+            anyhow::bail!("expectedViewVersion must be positive");
+        }
+        if envelope.payload.expected_snapshot_sequence < 1 {
+            anyhow::bail!("expectedSnapshotSequence must be positive");
+        }
+        if !(1..=10_000).contains(&envelope.payload.page_count) {
+            anyhow::bail!("pageCount must be between 1 and 10000");
+        }
+        if !matches!(
+            envelope.payload.action.as_str(),
+            "execution_console_expand"
+                | "execution_console_collapse"
+                | "execution_console_prev_page"
+                | "execution_console_next_page"
+                | "execution_console_reconcile"
+        ) {
+            anyhow::bail!("unsupported execution console action");
+        }
+        let system_reconcile = envelope.payload.action == "execution_console_reconcile";
+        if !system_reconcile {
+            validate_owner_identity_input(
+                FEISHU_PROVIDER,
+                &envelope.payload.app_id,
+                "callback",
+                envelope.payload.operator_open_id.as_deref(),
+                envelope.payload.operator_user_id.as_deref(),
+                envelope.payload.operator_union_id.as_deref(),
+            )?;
+        }
+        self.gateway.execute(database, envelope, |transaction| {
+            if !is_channel_host(&envelope.actor) {
+                return Ok(rejected(
+                    "channel.host_required",
+                    "Only the trusted Feishu Channel Host can update an execution console card",
+                ));
+            }
+            let projection = transaction
+                .query_row(
+                    r#"
+                    SELECT console.id, console.request_id, console.agent_id,
+                           console.target_app_id, console.external_message_id,
+                           console.latest_sequence, console.display_mode,
+                           console.page_index, console.view_version, console.state,
+                           owner.canonical_owner_principal_id
+                    FROM channel_execution_console AS console
+                    LEFT JOIN feishu_member_bot AS bot
+                      ON bot.app_id = console.target_app_id AND bot.status = 'published'
+                    LEFT JOIN feishu_owner_identity AS owner
+                      ON owner.account_id = bot.account_id
+                    WHERE console.agent_run_id = ?1
+                    "#,
+                    [&envelope.payload.agent_run_id],
+                    |row| {
+                        Ok(ExecutionConsoleViewProjection {
+                            id: row.get(0)?,
+                            request_id: row.get(1)?,
+                            agent_id: row.get(2)?,
+                            target_app_id: row.get(3)?,
+                            external_message_id: row.get(4)?,
+                            latest_sequence: row.get(5)?,
+                            display_mode: row.get(6)?,
+                            page_index: row.get(7)?,
+                            view_version: row.get(8)?,
+                            state: row.get(9)?,
+                            owner_principal_id: row.get(10)?,
+                        })
+                    },
+                )
+                .optional()?;
+            let Some(projection) = projection else {
+                return Ok(rejected(
+                    "channel.execution_console.not_found",
+                    "Execution console does not exist",
+                ));
+            };
+            if projection.target_app_id != envelope.payload.app_id {
+                return Ok(rejected(
+                    "channel.execution_console.callback_app_mismatch",
+                    "The callback did not arrive through the execution console Bot",
+                ));
+            }
+            if projection.external_message_id.as_deref()
+                != Some(envelope.payload.external_message_id.as_str())
+            {
+                return Ok(rejected(
+                    "channel.execution_console.stale_card",
+                    "This execution console card is no longer authoritative",
+                ));
+            }
+            let now = Utc::now().to_rfc3339();
+            if !system_reconcile {
+                let Some(owner_principal_id) = projection.owner_principal_id.as_deref() else {
+                    return Ok(rejected(
+                        "channel.execution_console.owner_required",
+                        "Only the verified Rovai Owner can operate this execution console card",
+                    ));
+                };
+                if !operator_matches_feishu_owner(
+                    transaction,
+                    &envelope.payload.app_id,
+                    owner_principal_id,
+                    envelope.payload.operator_open_id.as_deref(),
+                    envelope.payload.operator_user_id.as_deref(),
+                    envelope.payload.operator_union_id.as_deref(),
+                    &now,
+                )? {
+                    return Ok(rejected(
+                        "channel.execution_console.owner_required",
+                        "Only the verified Rovai Owner can operate this execution console card",
+                    ));
+                }
+            }
+            if projection.state != "terminal"
+                || projection.view_version != envelope.payload.expected_view_version
+                || projection.latest_sequence != envelope.payload.expected_snapshot_sequence
+                || execution_console_view_nonce(
+                    &envelope.payload.agent_run_id,
+                    projection.view_version,
+                    projection.latest_sequence,
+                ) != envelope.payload.nonce
+            {
+                return Ok(CommandHandlerResult::rejected(
+                    "channel.execution_console.stale_card",
+                    json!({
+                        "message": "Execution console state has changed",
+                        "currentViewVersion": projection.view_version,
+                        "currentSnapshotSequence": projection.latest_sequence,
+                    }),
+                ));
+            }
+            let transition = match envelope.payload.action.as_str() {
+                "execution_console_expand" if projection.display_mode == "collapsed" => {
+                    Some(("expanded", 0))
+                }
+                "execution_console_collapse" if projection.display_mode == "expanded" => {
+                    Some(("collapsed", 0))
+                }
+                "execution_console_prev_page"
+                    if projection.display_mode == "expanded" && projection.page_index > 0 =>
+                {
+                    Some(("expanded", projection.page_index - 1))
+                }
+                "execution_console_next_page"
+                    if projection.display_mode == "expanded"
+                        && projection.page_index + 1 < envelope.payload.page_count =>
+                {
+                    Some(("expanded", projection.page_index + 1))
+                }
+                "execution_console_reconcile"
+                    if projection.display_mode == "expanded"
+                        && projection.page_index >= envelope.payload.page_count =>
+                {
+                    Some(("expanded", envelope.payload.page_count - 1))
+                }
+                _ => None,
+            };
+            let Some((display_mode, page_index)) = transition else {
+                return Ok(rejected(
+                    "channel.execution_console.stale_card",
+                    "This execution console action no longer applies",
+                ));
+            };
+            let next_view_version = projection.view_version + 1;
+            let changed = transaction.execute(
+                r#"
+                UPDATE channel_execution_console
+                SET display_mode = ?2, page_index = ?3,
+                    view_version = ?4, updated_at = ?5
+                WHERE id = ?1 AND state = 'terminal'
+                  AND target_app_id = ?6 AND external_message_id = ?7
+                  AND latest_sequence = ?8 AND view_version = ?9
+                "#,
+                params![
+                    projection.id,
+                    display_mode,
+                    page_index,
+                    next_view_version,
+                    now,
+                    envelope.payload.app_id,
+                    envelope.payload.external_message_id,
+                    projection.latest_sequence,
+                    projection.view_version,
+                ],
+            )?;
+            if changed != 1 {
+                return Ok(rejected(
+                    "channel.execution_console.stale_card",
+                    "Execution console state changed before the view update",
+                ));
+            }
+            queue_execution_console_upsert(
+                transaction,
+                &projection.request_id,
+                &projection.id,
+                &envelope.payload.agent_run_id,
+                &projection.agent_id,
+                &projection.target_app_id,
+                projection.latest_sequence,
+                next_view_version,
+                &now,
+            )?;
+            Ok(CommandHandlerResult::applied(
+                "channel.execution_console.view_updated",
+                json!({
+                    "agentRunId": envelope.payload.agent_run_id,
+                    "displayMode": display_mode,
+                    "pageIndex": page_index,
+                    "viewVersion": next_view_version,
+                    "snapshotSequence": projection.latest_sequence,
+                    "nonce": execution_console_view_nonce(
+                        &envelope.payload.agent_run_id,
+                        next_view_version,
+                        projection.latest_sequence,
+                    ),
+                    "externalMessageId": envelope.payload.external_message_id,
+                    "viewUpdateQueued": true,
+                }),
+                None,
+            ))
+        })
+    }
+
     pub fn host_tick(
         &self,
         database: &mut Database,
@@ -3607,6 +3902,21 @@ struct PendingBindingResolution {
 }
 
 #[derive(Debug)]
+struct ExecutionConsoleViewProjection {
+    id: String,
+    request_id: String,
+    agent_id: String,
+    target_app_id: String,
+    external_message_id: Option<String>,
+    latest_sequence: i64,
+    display_mode: String,
+    page_index: i64,
+    view_version: i64,
+    state: String,
+    owner_principal_id: Option<String>,
+}
+
+#[derive(Debug)]
 struct PendingMessageRecord {
     aggregate_id: String,
     external_principal_id: String,
@@ -3762,6 +4072,17 @@ fn opaque_digest(namespace: &str, value: &str) -> String {
     hasher.update([0]);
     hasher.update(value.as_bytes());
     format!("sha256:{:x}", hasher.finalize())
+}
+
+fn execution_console_view_nonce(
+    agent_run_id: &str,
+    view_version: i64,
+    snapshot_sequence: i64,
+) -> String {
+    opaque_digest(
+        "execution-console-view",
+        &format!("{agent_run_id}\0{view_version}\0{snapshot_sequence}"),
+    )
 }
 
 fn validate_owner_identity_input(
@@ -5905,7 +6226,8 @@ fn materialize_execution_console(
     let existing = transaction
         .query_row(
             r#"
-            SELECT id, latest_sequence, latest_snapshot_digest, state
+            SELECT id, latest_sequence, latest_snapshot_digest, state,
+                   display_mode, page_index, view_version
             FROM channel_execution_console WHERE agent_run_id = ?1
             "#,
             [agent_run_id],
@@ -5915,6 +6237,9 @@ fn materialize_execution_console(
                     row.get::<_, i64>(1)?,
                     row.get::<_, String>(2)?,
                     row.get::<_, String>(3)?,
+                    row.get::<_, String>(4)?,
+                    row.get::<_, i64>(5)?,
+                    row.get::<_, i64>(6)?,
                 ))
             },
         )
@@ -5927,8 +6252,16 @@ fn materialize_execution_console(
     } else {
         "active"
     };
-    let (console_id, latest_sequence, changed) = match existing {
-        Some((console_id, latest_sequence, previous_digest, previous_state)) => {
+    let (console_id, latest_sequence, view_version, changed) = match existing {
+        Some((
+            console_id,
+            latest_sequence,
+            previous_digest,
+            previous_state,
+            previous_display_mode,
+            previous_page_index,
+            previous_view_version,
+        )) => {
             if matches!(
                 previous_state.as_str(),
                 "recall_pending" | "recalled" | "recall_failed"
@@ -5936,20 +6269,48 @@ fn materialize_execution_console(
                 return Ok(());
             }
             if previous_digest == digest {
-                (console_id, latest_sequence, false)
+                (console_id, latest_sequence, previous_view_version, false)
             } else {
                 let next_sequence = latest_sequence + 1;
+                let terminal_transition = terminal && previous_state != "terminal";
+                let display_mode = if terminal_transition {
+                    "collapsed"
+                } else if terminal {
+                    previous_display_mode.as_str()
+                } else {
+                    "live"
+                };
+                let page_index = if display_mode == "expanded" {
+                    previous_page_index
+                } else {
+                    0
+                };
+                let next_view_version = if terminal || previous_display_mode != display_mode {
+                    previous_view_version + 1
+                } else {
+                    previous_view_version
+                };
                 transaction.execute(
                     r#"
                     UPDATE channel_execution_console
                     SET latest_sequence = ?2, latest_snapshot_digest = ?3,
-                        state = ?4, updated_at = ?5
+                        state = ?4, display_mode = ?5, page_index = ?6,
+                        view_version = ?7, updated_at = ?8
                     WHERE id = ?1
                       AND state IN ('opening', 'active', 'terminal')
                     "#,
-                    params![console_id, next_sequence, digest, state, now],
+                    params![
+                        console_id,
+                        next_sequence,
+                        digest,
+                        state,
+                        display_mode,
+                        page_index,
+                        next_view_version,
+                        now,
+                    ],
                 )?;
-                (console_id, next_sequence, true)
+                (console_id, next_sequence, next_view_version, true)
             }
         }
         None => {
@@ -5960,10 +6321,12 @@ fn materialize_execution_console(
                     id, agent_run_id, request_id, channel_conversation_id,
                     camp_turn_id, agent_id, target_app_id, external_message_id,
                     latest_sequence, delivered_sequence, latest_snapshot_digest,
-                    state, failure_code, created_at, updated_at, recalled_at
+                    state, failure_code, created_at, updated_at, recalled_at,
+                    display_mode, page_index, view_version
                 ) VALUES (
                     ?1, ?2, ?3, ?4, ?5, ?6, ?7, NULL,
-                    1, 0, ?8, ?9, NULL, ?10, ?10, NULL
+                    1, 0, ?8, ?9, NULL, ?10, ?10, NULL,
+                    ?11, 0, 1
                 )
                 "#,
                 params![
@@ -5977,19 +6340,47 @@ fn materialize_execution_console(
                     digest,
                     state,
                     now,
+                    if terminal { "collapsed" } else { "live" },
                 ],
             )?;
-            (console_id, 1, true)
+            (console_id, 1, 1, true)
         }
     };
     if !changed {
         return Ok(());
     }
+    queue_execution_console_upsert(
+        transaction,
+        request_id,
+        &console_id,
+        agent_run_id,
+        agent_id,
+        target_app_id,
+        latest_sequence,
+        view_version,
+        now,
+    )?;
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn queue_execution_console_upsert(
+    transaction: &Transaction<'_>,
+    request_id: &str,
+    console_id: &str,
+    agent_run_id: &str,
+    agent_id: &str,
+    target_app_id: &str,
+    latest_sequence: i64,
+    view_version: i64,
+    now: &str,
+) -> Result<()> {
     let payload = json!({
         "kind": "execution_console_upsert",
         "executionConsoleId": console_id,
         "agentRunId": agent_run_id,
         "expectedSequence": latest_sequence,
+        "expectedViewVersion": view_version,
     });
     let coalesced = transaction.execute(
         r#"
@@ -6004,8 +6395,8 @@ fn materialize_execution_console(
         insert_console_delivery(
             transaction,
             request_id,
-            &console_id,
-            &format!("execution_console_upsert:{console_id}:{latest_sequence}"),
+            console_id,
+            &format!("execution_console_upsert:{console_id}:{latest_sequence}:{view_version}"),
             "execution_console_upsert",
             target_app_id,
             Some(agent_id),
@@ -6824,6 +7215,29 @@ mod tests {
         let path = database.path().parent().unwrap().join("quick-chat");
         std::fs::create_dir_all(&path).unwrap();
         path
+    }
+
+    fn execution_console_view_command(
+        source: &ChannelExecutionConsoleSourceView,
+        app_id: &str,
+        external_message_id: &str,
+        action: &str,
+        page_count: i64,
+        owner: bool,
+    ) -> UpdateChannelExecutionConsoleViewCommand {
+        UpdateChannelExecutionConsoleViewCommand {
+            agent_run_id: source.agent_run_id.clone(),
+            app_id: app_id.to_string(),
+            external_message_id: external_message_id.to_string(),
+            expected_view_version: source.view.view_version,
+            expected_snapshot_sequence: source.sequence,
+            nonce: source.view.nonce.clone(),
+            action: action.to_string(),
+            page_count,
+            operator_open_id: Some(if owner { "ou_user" } else { "ou_other" }.to_string()),
+            operator_user_id: Some(if owner { "user_1" } else { "user_other" }.to_string()),
+            operator_union_id: Some(if owner { "union_user" } else { "union_other" }.to_string()),
+        }
     }
 
     fn publish_bot(
@@ -7792,6 +8206,8 @@ mod tests {
             .unwrap()
             .expect("the claimed console source must be readable");
         assert_eq!(console_source.run.status, "queued");
+        assert_eq!(console_source.view.mode, "live");
+        assert_eq!(console_source.view.page_index, 0);
         service
             .settle_delivery(
                 &mut database,
@@ -7972,6 +8388,221 @@ mod tests {
             .find(|delivery| delivery["deliveryKind"] == "execution_console_upsert")
             .expect("the terminal snapshot must update the existing execution console");
         assert_eq!(terminal_console["updateMessageId"], "om-console-1");
+        let terminal_source = service
+            .execution_console_source(
+                &mut database,
+                &agent_run_id,
+                terminal_console["payload"]["expectedSequence"]
+                    .as_i64()
+                    .unwrap(),
+            )
+            .unwrap()
+            .expect("the terminal execution console remains readable");
+        assert_eq!(terminal_source.run.status, "failed");
+        assert_eq!(terminal_source.view.mode, "collapsed");
+        assert_eq!(
+            terminal_source.external_message_id.as_deref(),
+            Some("om-console-1")
+        );
+
+        let wrong_app = service
+            .update_execution_console_view(
+                &mut database,
+                &host_envelope(
+                    "execution-console-wrong-app",
+                    execution_console_view_command(
+                        &terminal_source,
+                        "cli_other",
+                        "om-console-1",
+                        "execution_console_expand",
+                        2,
+                        true,
+                    ),
+                ),
+            )
+            .unwrap();
+        assert_eq!(wrong_app.result.status, CommandResultStatus::Rejected);
+        assert_eq!(
+            wrong_app.result.code,
+            "channel.execution_console.callback_app_mismatch"
+        );
+        let non_owner = service
+            .update_execution_console_view(
+                &mut database,
+                &host_envelope(
+                    "execution-console-non-owner",
+                    execution_console_view_command(
+                        &terminal_source,
+                        "cli_app_1",
+                        "om-console-1",
+                        "execution_console_expand",
+                        2,
+                        false,
+                    ),
+                ),
+            )
+            .unwrap();
+        assert_eq!(non_owner.result.status, CommandResultStatus::Rejected);
+        assert_eq!(
+            non_owner.result.code,
+            "channel.execution_console.owner_required"
+        );
+        let expanded = service
+            .update_execution_console_view(
+                &mut database,
+                &host_envelope(
+                    "execution-console-expand",
+                    execution_console_view_command(
+                        &terminal_source,
+                        "cli_app_1",
+                        "om-console-1",
+                        "execution_console_expand",
+                        2,
+                        true,
+                    ),
+                ),
+            )
+            .unwrap();
+        assert_eq!(expanded.result.status, CommandResultStatus::Applied);
+        assert_eq!(expanded.result.payload["displayMode"], "expanded");
+        assert_eq!(
+            expanded.result.payload["viewVersion"].as_i64().unwrap(),
+            terminal_source.view.view_version + 1
+        );
+        let replay = service
+            .update_execution_console_view(
+                &mut database,
+                &host_envelope(
+                    "execution-console-replay",
+                    execution_console_view_command(
+                        &terminal_source,
+                        "cli_app_1",
+                        "om-console-1",
+                        "execution_console_expand",
+                        2,
+                        true,
+                    ),
+                ),
+            )
+            .unwrap();
+        assert_eq!(replay.result.status, CommandResultStatus::Rejected);
+        assert_eq!(replay.result.code, "channel.execution_console.stale_card");
+        let expanded_source = service
+            .execution_console_source(&mut database, &agent_run_id, terminal_source.sequence)
+            .unwrap()
+            .unwrap();
+        assert_eq!(expanded_source.view.mode, "expanded");
+        let next_page = service
+            .update_execution_console_view(
+                &mut database,
+                &host_envelope(
+                    "execution-console-next-page",
+                    execution_console_view_command(
+                        &expanded_source,
+                        "cli_app_1",
+                        "om-console-1",
+                        "execution_console_next_page",
+                        2,
+                        true,
+                    ),
+                ),
+            )
+            .unwrap();
+        assert_eq!(next_page.result.status, CommandResultStatus::Applied);
+        assert_eq!(next_page.result.payload["pageIndex"], 1);
+        let page_two_source = service
+            .execution_console_source(&mut database, &agent_run_id, terminal_source.sequence)
+            .unwrap()
+            .unwrap();
+        let reconciled_page = service
+            .update_execution_console_view(
+                &mut database,
+                &host_envelope(
+                    "execution-console-reconcile-page",
+                    UpdateChannelExecutionConsoleViewCommand {
+                        operator_open_id: None,
+                        operator_user_id: None,
+                        operator_union_id: None,
+                        ..execution_console_view_command(
+                            &page_two_source,
+                            "cli_app_1",
+                            "om-console-1",
+                            "execution_console_reconcile",
+                            1,
+                            true,
+                        )
+                    },
+                ),
+            )
+            .unwrap();
+        assert_eq!(reconciled_page.result.status, CommandResultStatus::Applied);
+        assert_eq!(reconciled_page.result.payload["pageIndex"], 0);
+        let reconciled_source = service
+            .execution_console_source(&mut database, &agent_run_id, terminal_source.sequence)
+            .unwrap()
+            .unwrap();
+        let collapsed = service
+            .update_execution_console_view(
+                &mut database,
+                &host_envelope(
+                    "execution-console-collapse",
+                    execution_console_view_command(
+                        &reconciled_source,
+                        "cli_app_1",
+                        "om-console-1",
+                        "execution_console_collapse",
+                        2,
+                        true,
+                    ),
+                ),
+            )
+            .unwrap();
+        assert_eq!(collapsed.result.status, CommandResultStatus::Applied);
+        assert_eq!(collapsed.result.payload["displayMode"], "collapsed");
+        assert_eq!(collapsed.result.payload["pageIndex"], 0);
+        let collapsed_source = service
+            .execution_console_source(&mut database, &agent_run_id, terminal_source.sequence)
+            .unwrap()
+            .unwrap();
+        let expanded_again = service
+            .update_execution_console_view(
+                &mut database,
+                &host_envelope(
+                    "execution-console-expand-again",
+                    execution_console_view_command(
+                        &collapsed_source,
+                        "cli_app_1",
+                        "om-console-1",
+                        "execution_console_expand",
+                        2,
+                        true,
+                    ),
+                ),
+            )
+            .unwrap();
+        assert_eq!(expanded_again.result.status, CommandResultStatus::Applied);
+        let expanded_again_source = service
+            .execution_console_source(&mut database, &agent_run_id, terminal_source.sequence)
+            .unwrap()
+            .unwrap();
+        let next_page_again = service
+            .update_execution_console_view(
+                &mut database,
+                &host_envelope(
+                    "execution-console-next-page-again",
+                    execution_console_view_command(
+                        &expanded_again_source,
+                        "cli_app_1",
+                        "om-console-1",
+                        "execution_console_next_page",
+                        2,
+                        true,
+                    ),
+                ),
+            )
+            .unwrap();
+        assert_eq!(next_page_again.result.status, CommandResultStatus::Applied);
+        assert_eq!(next_page_again.result.payload["pageIndex"], 1);
         assert!(
             claimed
                 .iter()
@@ -8090,6 +8721,17 @@ mod tests {
             )
             .unwrap();
         assert_eq!(turn_status, "failed");
+
+        let data_directory = database.directory().to_path_buf();
+        database.close();
+        let mut restarted = Database::open(&data_directory).unwrap();
+        let restored = service
+            .execution_console_source(&mut restarted, &agent_run_id, terminal_source.sequence)
+            .unwrap()
+            .expect("execution console view state must survive restart");
+        assert_eq!(restored.view.mode, "expanded");
+        assert_eq!(restored.view.page_index, 1);
+        assert!(restored.view.view_version > terminal_source.view.view_version);
     }
 
     #[test]

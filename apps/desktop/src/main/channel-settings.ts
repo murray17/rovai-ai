@@ -13,6 +13,7 @@ import type {
   ChannelMemberBotView,
   ChannelQrAttemptView,
   ChannelSettingsSnapshot,
+  ExecutionConsoleViewState,
   StoredCommandResult
 } from '@contracts'
 import type { CoreClient } from './core-client'
@@ -34,6 +35,7 @@ import type { MemberBotAvatarSourceResolver } from './member-bot-avatar-source'
 import { ProvisioningTimingRecorder } from './feishu-provisioning-timing'
 import {
   executionConsoleCard,
+  executionConsolePageCount,
   type ExecutionConsoleSnapshot
 } from '../shared/execution-presentation/feishu-card'
 
@@ -144,6 +146,12 @@ type DesktopAttachmentTarget = {
   mediaType: string
   path: string
   openRisk: 'normal' | 'confirm'
+}
+
+type ExecutionConsoleSource = ExecutionConsoleSnapshot & {
+  targetAppId: string
+  externalMessageId: string | null
+  view: ExecutionConsoleViewState
 }
 
 export interface ChannelHostDependencies {
@@ -1488,12 +1496,16 @@ export class ChannelSettingsService {
     event: CardActionEvent
   ): Promise<FeishuCardActionResponse | void> {
     if (this.#stopped) return
-    const action = projectCardAction(event.action.value)
-    if (!action) {
+    const executionAction = executionConsoleCardAction(event.action.value)
+    if (executionAction) {
+      return this.#handleExecutionConsoleCardAction(managed, event, executionAction)
+    }
+    const projectAction = projectCardAction(event.action.value)
+    if (!projectAction) {
       logFeishuBotDiagnostic('card.rejected', {
         appIdDigest: digest(managed.appId),
         agentId: managed.agentId,
-        reason: 'invalid_project_card_action'
+        reason: 'invalid_card_action'
       })
       return
     }
@@ -1504,13 +1516,13 @@ export class ChannelSettingsService {
         'channels.feishu.pendingBinding.resolve',
         randomUUID(),
         {
-          pendingBindingId: action.pendingBindingId,
+          pendingBindingId: projectAction.pendingBindingId,
           appId: managed.appId,
           externalPickerMessageId: event.messageId,
-          expectedVersion: action.expectedVersion,
-          nonce: action.nonce,
-          action: action.action,
-          projectId: action.projectId,
+          expectedVersion: projectAction.expectedVersion,
+          nonce: projectAction.nonce,
+          action: projectAction.action,
+          projectId: projectAction.projectId,
           operatorOpenId: raw.operator?.open_id ?? event.operator.openId ?? null,
           operatorUserId: raw.operator?.user_id ?? event.operator.userId ?? null,
           operatorUnionId: raw.operator?.union_id ?? null
@@ -1543,6 +1555,74 @@ export class ChannelSettingsService {
       })
     })
     return projectCardActionResponse(result)
+  }
+
+  async #handleExecutionConsoleCardAction(
+    managed: ManagedChannel,
+    event: CardActionEvent,
+    action: ExecutionConsoleCardAction
+  ): Promise<FeishuCardActionResponse> {
+    const raw = (event.raw ?? {}) as RawCardActionEvent
+    let updateQueued = false
+    try {
+      const current = await this.#dependencies!.core.request<ExecutionConsoleSource | null>(
+        'channels.executionConsole.source',
+        {
+          agentRunId: action.agentRunId,
+          expectedSequence: action.expectedSnapshotSequence
+        }
+      )
+      if (!current) return executionConsoleCardActionResponse('stale')
+      const result = await this.#commandWithId(
+        'channels.executionConsole.view.update',
+        randomUUID(),
+        {
+          agentRunId: action.agentRunId,
+          appId: managed.appId,
+          externalMessageId: event.messageId,
+          expectedViewVersion: action.expectedViewVersion,
+          expectedSnapshotSequence: action.expectedSnapshotSequence,
+          nonce: action.nonce,
+          action: action.action,
+          pageCount: executionConsolePageCount(current),
+          operatorOpenId: raw.operator?.open_id ?? event.operator.openId ?? null,
+          operatorUserId: raw.operator?.user_id ?? event.operator.userId ?? null,
+          operatorUnionId: raw.operator?.union_id ?? null
+        },
+        false
+      )
+      if (result.status === 'rejected') {
+        return executionConsoleCardActionResponse(result.code)
+      }
+      updateQueued = result.payload.viewUpdateQueued === true
+      if (updateQueued) void this.#pump()
+      const latest = await this.#dependencies!.core.request<ExecutionConsoleSource | null>(
+        'channels.executionConsole.source',
+        {
+          agentRunId: action.agentRunId,
+          expectedSequence: Number(result.payload.snapshotSequence)
+        }
+      )
+      if (!latest
+        || latest.targetAppId !== managed.appId
+        || latest.externalMessageId !== event.messageId) {
+        return executionConsoleCardActionResponse('stale')
+      }
+      await managed.channel.updateCard(
+        event.messageId,
+        executionConsoleCard(latest, latest.view)
+      )
+      return executionConsoleCardActionResponse(action.action)
+    } catch (error) {
+      if (updateQueued) void this.#pump()
+      logFeishuBotDiagnostic('execution_console.card_update_failed', {
+        appIdDigest: digest(managed.appId),
+        agentId: managed.agentId,
+        messageIdDigest: digest(event.messageId),
+        reason: channelFailureCode(error)
+      })
+      return { toast: { type: 'error', content: '执行记录更新失败，请重试' } }
+    }
   }
 
   async #finalizeAggregate(
@@ -1814,7 +1894,7 @@ export class ChannelSettingsService {
         messageId = delivery.updateMessageId ?? null
         if (messageId) await managed.channel.recallMessage(messageId)
       } else if (delivery.deliveryKind === 'execution_console_upsert') {
-        const source = await this.#dependencies!.core.request<ExecutionConsoleSnapshot | null>(
+        let source = await this.#dependencies!.core.request<ExecutionConsoleSource | null>(
           'channels.executionConsole.source',
           {
             agentRunId: requiredPayloadString(delivery.payload, 'agentRunId'),
@@ -1822,7 +1902,44 @@ export class ChannelSettingsService {
           }
         )
         if (source) {
-          const card = executionConsoleCard(source)
+          if (source.targetAppId !== delivery.targetAppId) {
+            throw new Error('execution_console_target_app_mismatch')
+          }
+          const pageCount = executionConsolePageCount(source)
+          if (source.view.mode === 'expanded'
+            && source.view.pageIndex >= pageCount
+            && source.externalMessageId) {
+            const reconciled = await this.#commandWithId(
+              'channels.executionConsole.view.update',
+              randomUUID(),
+              {
+                agentRunId: source.agentRunId,
+                appId: managed.appId,
+                externalMessageId: source.externalMessageId,
+                expectedViewVersion: source.view.viewVersion,
+                expectedSnapshotSequence: source.sequence,
+                nonce: source.view.nonce,
+                action: 'execution_console_reconcile',
+                pageCount,
+                operatorOpenId: null,
+                operatorUserId: null,
+                operatorUnionId: null
+              },
+              false
+            )
+            if (reconciled.status === 'rejected') {
+              throw new Error('execution_console_page_reconcile_stale')
+            }
+            source = await this.#dependencies!.core.request<ExecutionConsoleSource | null>(
+              'channels.executionConsole.source',
+              {
+                agentRunId: source.agentRunId,
+                expectedSequence: source.sequence
+              }
+            )
+            if (!source) throw new Error('execution_console_source_missing_after_reconcile')
+          }
+          const card = executionConsoleCard(source, source.view)
           messageId = delivery.updateMessageId ?? null
           if (messageId) {
             await managed.channel.updateCard(messageId, card)
@@ -2331,6 +2448,20 @@ type ProjectCardAction = {
   projectId: string | null
 }
 
+type ExecutionConsoleCardActionName =
+  | 'execution_console_expand'
+  | 'execution_console_collapse'
+  | 'execution_console_prev_page'
+  | 'execution_console_next_page'
+
+type ExecutionConsoleCardAction = {
+  action: ExecutionConsoleCardActionName
+  agentRunId: string
+  expectedViewVersion: number
+  expectedSnapshotSequence: number
+  nonce: string
+}
+
 type ProjectCardOption = {
   projectId: string
   displayName: string
@@ -2365,6 +2496,30 @@ function projectCardActionResponse(result: StoredCommandResult): FeishuCardActio
   return { toast: { type: 'error', content: '创建失败，请重试' } }
 }
 
+function executionConsoleCardActionResponse(
+  result: string | ExecutionConsoleCardActionName
+): FeishuCardActionResponse {
+  if (result === 'channel.execution_console.owner_required') {
+    return { toast: { type: 'warning', content: '仅 Rovai Owner 可以操作执行记录' } }
+  }
+  if (result === 'execution_console_expand') {
+    return { toast: { type: 'success', content: '已展开执行过程' } }
+  }
+  if (result === 'execution_console_collapse') {
+    return { toast: { type: 'success', content: '已收起执行过程' } }
+  }
+  if (result === 'execution_console_prev_page' || result === 'execution_console_next_page') {
+    return { toast: { type: 'info', content: '执行记录页面已更新' } }
+  }
+  if (result === 'stale'
+    || result === 'channel.execution_console.not_found'
+    || result === 'channel.execution_console.stale_card'
+    || result === 'channel.execution_console.callback_app_mismatch') {
+    return { toast: { type: 'info', content: '执行记录状态已更新，请重新操作' } }
+  }
+  return { toast: { type: 'error', content: '执行记录更新失败，请重试' } }
+}
+
 function projectSelectionOperation(payload: Record<string, unknown>): ProjectSelectionOperation {
   return payload.operation === 'update'
     ? 'update'
@@ -2396,6 +2551,37 @@ function projectCardAction(value: unknown): ProjectCardAction | null {
     nonce: value.nonce,
     action,
     projectId
+  }
+}
+
+function executionConsoleCardAction(value: unknown): ExecutionConsoleCardAction | null {
+  if (!isRecord(value)) return null
+  const action = typeof value.action === 'string'
+    && [
+      'execution_console_expand',
+      'execution_console_collapse',
+      'execution_console_prev_page',
+      'execution_console_next_page'
+    ].includes(value.action)
+      ? value.action as ExecutionConsoleCardActionName
+      : null
+  if (!action
+    || typeof value.agentRunId !== 'string'
+    || value.agentRunId.trim().length === 0
+    || typeof value.nonce !== 'string'
+    || value.nonce.trim().length === 0
+    || typeof value.expectedViewVersion !== 'number'
+    || !Number.isSafeInteger(value.expectedViewVersion)
+    || value.expectedViewVersion < 1
+    || typeof value.expectedSnapshotSequence !== 'number'
+    || !Number.isSafeInteger(value.expectedSnapshotSequence)
+    || value.expectedSnapshotSequence < 1) return null
+  return {
+    action,
+    agentRunId: value.agentRunId,
+    expectedViewVersion: value.expectedViewVersion,
+    expectedSnapshotSequence: value.expectedSnapshotSequence,
+    nonce: value.nonce
   }
 }
 

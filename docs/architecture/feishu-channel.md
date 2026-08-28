@@ -246,10 +246,20 @@ Agent 永久输出使用实际作者 Agent 的已发布 Bot；作者 Bot 不可�
 该重试并让 Turn/Request 收口，再继续同一 Binding 的 FIFO。
 
 每个 AgentRun 有一个 Core-owned execution console identity。Core 把可公开 Execution Evidence、Run 状态和公开输出
-coalesce 为同一 Card 2.0 snapshot；Main 与 Renderer 共享一套纯 presentation 规则，始终滤掉 reasoning/thought，活跃
-工具展开，终态连续成功/已记录工具折叠。控制台只能由该 Agent 的冻结 App 创建、更新和撤回；下一条 root request
-admission 召回同 ChannelConversation 中更早 Turn 的控制台，recall 等待在途 upsert 并把飞书 target revoked 当作幂等
-成功。控制台是临时执行 presentation，不是 CampMessage，也不参与请求业务 settlement。
+coalesce 为同一 Card 2.0 snapshot；Main 与 Renderer 共享一套纯 presentation 规则，始终滤掉 reasoning/thought。非终态
+保持完整 `live` 卡且没有收起动作；终态自动变成只含状态、公开操作统计、稳定用时和安全失败摘要的 `collapsed` 卡。
+Owner 可在同一卡片切换 `expanded` 并按语义 block 翻页；展开态保留 narration、plan、diagnostic、执行台 Agent output 和
+每一项具体工具操作，连续工具组只做视觉分段，不成为第二层折叠。
+
+mode、page index 与 view version 由 Core execution-console projection 持久保存。Main 从 callback envelope 取真实 operator，
+把 frozen App、authoritative external message ID、snapshot sequence、view version、version-bound nonce 和页数交给 Core
+CAS；Core 只允许 Owner 操作 terminal projection，成功后递增 version 并排 durable 原卡 upsert。Main 随后重读最新
+snapshot 并 `updateCard` 原消息；旧卡、双击、重放、错误 App 与 non-owner 都不会改变投影。终态 reconciliation 增长
+snapshot 时使旧按钮失效；重新分页越界由可信 Host 通过同一 CAS seam 钳制。
+
+控制台只能由该 Agent 的冻结 App 创建、更新和撤回；下一条 root request admission 无论旧卡当前收起、展开或位于哪一页，
+都召回同 ChannelConversation 中更早 Turn 的控制台，recall 等待在途 upsert 并把飞书 target revoked 当作幂等成功。控制台
+是临时执行 presentation，不是 CampMessage，也不参与请求业务 settlement。
 
 公开 Agent 正文永远新建无标题 Markdown 消息，不覆盖控制台、queue ack 或其他正文。`CurrentUserMention` 在群/话题
 通过 SDK structured mention 投影为飞书原生 mention，不靠普通 `@名称` 或手写标签猜身份。公开 CampMessage 的 available
