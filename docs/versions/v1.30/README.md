@@ -14,34 +14,42 @@ last_updated: 2026-08-28
 > 当前状态：Core、Migration、Electron Host、Renderer 与本地自动化已完成账号/发布生命周期纠偏。连接只建立
 > Developer Web Session；发布经同一 Session 以 template-first、App-ID durable freeze 和 activation-first 顺序直连
 > 开放平台 console API，不显示二维码或飞书创建确认页；旧
-> application registration 协议及其 API/交互已经退役。真实飞书租户的“连接不增 App、发布不弹确认页”仍是发布
+> application registration 协议及其 API/交互已经退役。飞书消息入口已收敛为 Owner-only：私聊自动 Quick Chat，群/
+> 话题首次有效 mention 通过一张 Owner 私聊卡冻结项目。真实飞书租户的“连接不增 App、发布不弹确认页”仍是发布
 > 环境验收项，不由本地自动化代替。
 
 前置版本：[v1.29 Camp 动态队员管理](../v1.29/README.md)已按完成事实转为 historical。
 
 ## 版本目标
 
-把每名 Rovai 队员发布为独立飞书 Bot，并让私聊、普通群和话题群的显式消息进入现有 Camp/Agent 执行链。只有
-主人能在本机维护项目路径和会话绑定；外部成员只作为消息 Principal。多 Bot 入站先完整聚合，同一 Camp 的根
+把每名 Rovai 队员发布为独立飞书 Bot，并让已验证 Owner 的私聊、普通群和话题群显式消息进入现有 Camp/Agent 执行链。
+私聊自动创建 Quick Chat；群/话题从 Rovai 既有项目中首次选择一次并冻结到 Camp，外部成员不触发。多 Bot 入站先完整聚合，同一 Camp 的根
 请求严格串行，公开结果通过可靠 Outbox 返回原会话。
 
 ## 交付范围
 
-- Migration 113 建立基础渠道与 Context 22；Migration 114 把当前合同推进到
-  `Data Contract v1.27 / projection schema 68`，新增真实 Developer Identity 字段与持久 publication intent；
-  Migration 113 新增 ProjectBinding、ExternalPrincipal、
+- Migration 113 建立基础渠道与 Context 22；Migration 114 新增真实 Developer Identity 与持久 publication intent，
+  Migration 115 收紧队员 App 唯一状态机；Migration 116 把当前合同推进到
+  `Data Contract v1.28 / projection schema 69`，新增 Owner identity/per-App mapping、Project Catalog、generation-aware
+  conversation binding、PendingCampBinding/FIFO message 与 private project-selection delivery。Migration 113 早期新增
+  ProjectBinding、ExternalPrincipal、
   channel conversation/binding、Feishu account/member Bot、group roster、inbound aggregate、ChannelTurnRequest 和
   ChannelDelivery，并允许 ExternalPrincipal CampMessage author 与 ContextManifest/Formatter 22；
-- ProjectBinding 使用 opaque ID、显示名、kind、canonical path、status/version，只有 `local_user` 能维护或绑定；
-  Camp 创建时解析并冻结既有 workspace kind/path；
-- 未绑定消息只记录本地待绑定会话与 TTL transport facts，不建立 Principal、CampMessage、CampTurn 或 Run；绑定
-  不回放旧消息，发送者必须重新发送；
+- 只有已连接开发者身份对应的 Owner 能触发；per-App identity 无法证明时 fail closed。Owner 消息仍是
+  ExternalPrincipal，不获得 `local_user` 权限；non-owner 在 observation 前结束且不留下业务事实；
+- 删除 Channel 人工 ProjectBinding/会话绑定。Core 从既有 directory Camp 投影 active Project Catalog；卡片只携带 opaque
+  ID/显示名，canonical path 只在 Core，并在 Camp 创建时冻结；
+- Owner 私聊第一条消息自动创建 Quick Chat generation/Camp；精确 `/new` 只支持私聊、保留旧 Camp、创建新 Camp，
+  不产生 CampMessage/Turn/Run，活动根请求期间拒绝；
+- 普通群一个长期 Camp、每个话题一个 Camp。首次 Owner mention finalize 后建立 PendingCampBinding 并冻结原消息；
+  canonical mention 顺序第一个受管 Bot 私聊 Owner 一张项目卡，选择后按 FIFO 通过统一 admission 自动处理，不能换绑；
 - Feishu Host 用独立 Web Session 登录并展示真实 user/tenant；普通队员发布从同一 Electron Session 取得 console
   bootstrap，经 `OpenPlatformApiClient` 优先从固定模板创建应用，只有明确 non-creation rejection 才 fallback 一次
   self-build；App ID 在读取 Secret 或任何后续 mutation 前持久冻结。随后读取 Secret、启用 Bot 并先发布 `1.0.0`
   activation；Scope 名称经在线 catalog 映射为 App identity ID，Event/Callback 通过独立在线 API 切换长连接并共享
   120 秒 bounded convergence，配置有变化才发布下一 patch。Manifest 不再自证运行时 readiness；最终分别核验在线
-  Bot/Scope/Event/Callback/version，再保存 credential、Core upsert 与建立 WebSocket。旧 registration/确认/poll 实现及其 typed API/IPC/Renderer 入口已删除。Session Cookie 与独立 App credential
+  Bot/Scope/Event/Callback/version；`card.action.trigger` 和 callback mode 4 是必需发布条件。之后保存 credential、Core
+  upsert 与建立 WebSocket。旧 registration/确认/poll 实现及其 typed API/IPC/Renderer 入口已删除。Session Cookie 与独立 App credential
   分开加密，账号切换/断开不迁移、关闭或删除已发布 Bot，单连接故障隔离，重启恢复 published Bot 与 publication
   intent；release 错误后继续以 version detail 收敛。每名队员的首个 App ID 由 Core 状态机永久冻结；只有无可信 App
   ID 的 create outcome unknown 锁住重建，冻结后的 Event/Scope/Version/credential/连接失败均可恢复同一 App。完成、历史 disabled 恢复、凭据
@@ -51,11 +59,12 @@ last_updated: 2026-08-28
   published managed Bot 才进入 Core；
 - 同一 external message 的第一条 observation 只进入 collecting；canonical mentions 完整或全部预期 App 到齐后
   才能独立 finalize，payload mismatch/timeout fail closed；
-- Finalize 创建持久 ChannelTurnRequest；每个 Binding 只有一个 admitted root，queued 请求不进入 Timeline、
-  History、SHARED_CONVERSATION 或 AgentRun。提升复用本地用户路径的同一原子 admission；
+- 已绑定或 p2p finalize 创建持久 ChannelTurnRequest；未绑定 group/topic 只冻结 pending message。每个 Binding 只有一个
+  admitted root，queued 请求不进入 Timeline、History、SHARED_CONVERSATION 或 AgentRun。提升复用本地用户路径的同一
+  原子 admission；
 - 任意飞书 reply 统一冻结为当前触发 CampMessage 的 Structured Content `ExternalQuote`，`replyTo=null`；不维护
   external-message reply projection，不提供 prompt override；
-- ExternalPrincipal 归并多 App identity，只投影 provider/displayName；原始飞书 ID 不进入 Agent。结构化
+- Owner ExternalPrincipal 归并多 App identity，只投影 provider/displayName；原始飞书 ID 不进入 Agent。结构化
   CurrentUserMention 在群/话题输出为原生 mention；
 - 父群 Bot roster 使用完整 `isInChat` 快照。普通群复用 v1.29 `camp.member.add/remove` 全量同步；话题只按 mention
   和 A2A exact need 加入，不污染历史话题；
@@ -63,9 +72,9 @@ last_updated: 2026-08-28
   重启恢复。飞书失败不回滚已提交 CampMessage；
 - Main 记录脱敏的 Bot 长连接、SDK policy、message normalized 与 handler accepted/rejected 分层诊断；不记录消息正文、
   Secret、Cookie 或完整外部 identity，当前 SDK 无 raw hook 时不虚构 raw-event 层；
-- 设置页按 Rovai 现有 Porcelain/Steel 视觉实现连接、队员 Bot、项目绑定、待绑定/已绑定会话、账号二维码和错误
-  状态；已发布 Bot 只提供按绑定 brand 生成的官方应用详情链接，不再提供 Rovai 管理/停用入口；Renderer 不接触
-  Secret 或 Host-only transport facts。
+- 设置页按 Rovai 现有 Porcelain/Steel 视觉只保留连接、队员 Bot、账号二维码、Owner identity/绑定诊断和错误状态；
+  删除项目目录与会话绑定操作。已发布 Bot 只提供按绑定 brand 生成的官方应用详情链接，不再提供 Rovai 管理/停用入口；
+  Renderer 不接触 Secret、路径或 Host-only transport facts。
 
 ## 非目标与诚实边界
 
@@ -90,11 +99,11 @@ ExternalQuote 的确定性 agent projection。Bootstrap、Session Charter、sect
 
 ## 验收
 
-实施与证据由[实施计划](implementation-plan.md)维护。仓库内完成门槛包括 v112→v114 升级、Developer Identity/
+实施与证据由[实施计划](implementation-plan.md)维护。仓库内完成门槛包括 v112→v116 升级、Developer Identity/
 publication intent、template-first fallback 分类、App-ID durable barrier、activation-first、队员 App 身份冻结/历史 disabled
 同 App 恢复、连接不注册 App、发布不产生 QR/飞书确认页、在线 Scope/Event/Callback 配置与回读、Manifest 假阳性回归、
-identity drift/create outcome unknown fail-closed、frozen Event timeout recoverable、owner-only/未绑定负向、
-multi-Bot fail-closed、FIFO promotion、普通群/话题 roster、ExternalQuote/Context bytes、safeStorage/Renderer
+identity drift/create outcome unknown fail-closed、frozen Event timeout recoverable、owner/non-owner gate、DM `/new`、
+PendingCampBinding replay/CAS、多 Bot 单卡与 fail-closed、FIFO promotion、普通群/话题 roster、ExternalQuote/Context bytes、safeStorage/Renderer
 秘密隔离、Host 恢复、双主题和完整 Rust/TypeScript/文档/构建门禁。真实飞书租户登录、应用创建、无平台确认发布
 和收发仍需要拥有可用企业权限的主人在发布环境执行，自动化不伪造外部成功。
 
@@ -103,7 +112,7 @@ multi-Bot fail-closed、FIFO promotion、普通群/话题 roster、ExternalQuote
 | 范围 | 结论 | 证据或理由 |
 | --- | --- | --- |
 | Version lifecycle | 已更新 | 本概览、[实施计划](implementation-plan.md)、[决定](decisions.md)与[版本索引](../README.md)共同切换 `current_version`。 |
-| Decisions | 已更新 | [v1.30 决定](decisions.md)冻结 owner-only Binding、聚合/统一 admission、ExternalQuote、roster、Main/Outbox，以及 template/activation-first Provisioner 边界。 |
+| Decisions | 已更新 | [v1.30 决定](decisions.md#v1-30-d09)冻结 Owner-only Camp、Quick Chat、私聊项目卡、聚合/统一 admission、ExternalQuote、roster、Main/Outbox，以及 template/activation-first Provisioner 边界。 |
 | Contracts | 已更新 | [Feishu Channel v2](../../contracts/feishu-channel-v2.md)成为当前渠道入口，v1 转为历史；[ContextManifest Evidence v22](../../contracts/context-manifest-evidence-v22.md)继续拥有 AgentRun 输入。 |
 | Architecture | 已更新 | 新增[飞书渠道架构](../../architecture/feishu-channel.md)，连接 Renderer、Main Host、Core admission、Camp membership 与 Outbox 权威。 |
 | UI | 已更新 | 新增[渠道设置](../../ui/components/channel-settings.md)，并更新 UI/component 索引；视觉继续使用现有 Porcelain Day / Steel Night。 |

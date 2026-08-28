@@ -8,7 +8,8 @@ last_updated: 2026-08-28
 
 # 渠道设置
 
-渠道设置是主人在 Rovai 本机维护渠道连接、队员 Bot、ProjectBinding 与待绑定会话的唯一 Renderer surface。
+渠道设置是主人在 Rovai 本机维护渠道连接与队员 Bot 的 Renderer surface。项目选择发生在 Owner 的飞书私聊卡片中；
+Renderer 不提供 Channel 项目目录或会话绑定操作。
 领域状态和错误见 [Feishu Channel v2](../../contracts/feishu-channel-v2.md)；本页只拥有信息层级、交互与可访问性。
 
 ## 页面结构
@@ -18,9 +19,8 @@ last_updated: 2026-08-28
 1. `Settings / Channels` eyebrow、标题“渠道”、主人本机说明；
 2. 渠道 Provider 卡，当前只显示飞书；
 3. 渠道连接，展示真实开发者用户名、企业与可选 email，提供登录、切换和断开；
-4. 队员 Bot 列表，按成员稳定顺序显示头像、名称、角色、发布状态和单行动作；
-5. 项目绑定，展示主人登记的显示名、kind 与安全路径，提供新建、重命名和未使用项归档；
-6. 会话绑定，先显示待绑定会话，再显示已经绑定的会话与 Camp 状态。
+4. 队员 Bot 列表，按成员稳定顺序显示头像、名称、角色、发布状态、Owner identity 状态和单行动作；
+5. 只有存在 pending binding 或 binding error 时，显示安静的诊断计数，不提供正常操作入口。
 
 窄窗口保持同一内容顺序，表格式行折为纵向信息，不产生横向滚动。共享色彩只使用现有语义 Token；头像、按钮、
 Dialog、状态点和间距复用现有组件语法。
@@ -83,30 +83,23 @@ Dialog、状态点和间距复用现有组件语法。
 头像只从现有 `MemberAvatar` 读取；发布时 Main 独立解析同一个受控 `avatarRef` 并上传 exact icon rendition，渠道页不
 解析或接收本机头像路径。非空头像引用无法安全读取时，发布失败而不是展示或上传另一身份。
 
-## ProjectBinding
+## Owner identity 与绑定诊断
 
-“登记项目”Dialog 先选择 Quick Chat 或普通目录。普通目录必须通过 Main 的系统目录选择器取得；Renderer 不接收
-任意路径文本。提交显示名、kind 和 canonical path，由 Core 返回新 Snapshot。重命名/归档使用 exact version；
-冲突与 in-use 错误显示在页面级 inline alert，不乐观改行。
+已发布 Bot 的 Owner identity 未核验时，行内显示“主人身份待核验”，并明确该 Bot 会 fail closed，不把任意飞书用户
+当成主人。收到可靠 Owner envelope 后状态随 Snapshot 刷新为已核验；用户名、群管理员身份或卡片 payload 不能驱动
+该状态。
 
-路径只对主人本机可见。飞书用户、二维码、卡片和渠道消息都不展示项目列表或路径。
-
-## 会话绑定
-
-待绑定行显示会话类型、显示名、最后发送者和最近出现时间；每行只提供一个本机 ProjectBinding picker 和“绑定”。
-没有 active ProjectBinding 时显示空状态并引导主人先登记，不提供飞书用户申请入口。绑定成功不展示“正在执行旧消息”；
-辅助文案明确要求发送者重新发送。
-
-已绑定行显示会话、ProjectBinding 显示名与 `等待首条消息 | Camp 已建立`。切换 picker 属于主人主动切换，busy
-错误保持原值。外部成员、sender allowlist 或授权用户列表不出现在任何状态。
+页面可在 Provider 卡底部显示 `待处理项目选择 N` 与 `绑定异常 N` 两个低强调诊断值；零值可省略。它们只帮助主人
+理解当前渠道状态，不展开项目列表、路径、会话 picker 或 resolve 操作。正常流程是 Owner 私聊自动 Quick Chat，或群/
+话题第一次有效 mention 后在飞书私聊卡片中选择项目。
 
 ## 状态、错误与键盘
 
 - 首次读取使用页面内 status；无 Snapshot 时提供重试；已有 Snapshot 刷新失败保留旧内容并显示 alert；
 - 所有异步操作使用稳定 busy key，防止双击；失败后恢复原动作；
-- Dialog 使用 Radix focus trap、Escape/关闭、可见 label、描述和 footer actions；危险归档与普通主动作分层；
+- Dialog 使用 Radix focus trap、Escape/关闭、可见 label、描述和 footer actions；
 - 状态不仅靠颜色，始终有文本；loading/failed 通过 `role=status/alert` 公布；
-- Tab 顺序按页面视觉顺序，列表按钮和 select 均可键盘操作，焦点不因 Snapshot 更新跳到页面起点。
+- Tab 顺序按页面视觉顺序，链接和按钮均可键盘操作，焦点不因 Snapshot 更新跳到页面起点。
 
 ## References
 

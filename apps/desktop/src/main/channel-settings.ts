@@ -3,19 +3,16 @@ import {
   createLarkChannel,
   LarkChannelError,
   type BotAddedEvent,
+  type CardActionEvent,
   type LarkChannel,
   type NormalizedMessage
 } from '@larksuiteoapi/node-sdk'
 import type {
   AgentProfile,
-  ChannelConversationBindingView,
   ChannelMemberBotView,
   ChannelQrAttemptView,
   ChannelSettingsSnapshot,
-  ProjectBindingKind,
-  ProjectBindingView,
-  StoredCommandResult,
-  UnboundChannelConversationView
+  StoredCommandResult
 } from '@contracts'
 import type { CoreClient } from './core-client'
 import type { ChannelCredentialStore, FeishuAppCredential } from './channel-credential-store'
@@ -35,7 +32,7 @@ import {
 import type { MemberBotAvatarSourceResolver } from './member-bot-avatar-source'
 
 type CoreChannelSnapshot = {
-  schemaVersion: 1
+  schemaVersion: 2
   account: {
     accountId: string
     userIdDigest: string
@@ -59,6 +56,7 @@ type CoreChannelSnapshot = {
     status: 'published' | 'disabled'
     failureCode: string | null
     version: number
+    ownerIdentityStatus: 'verified' | 'unverified'
   }>
   publicationIntents: Array<{
     publicationIntentId: string
@@ -87,9 +85,8 @@ type CoreChannelSnapshot = {
     createdAt: string
     updatedAt: string
   }>
-  projectBindings: ProjectBindingView[]
-  unboundConversations: UnboundChannelConversationView[]
-  conversationBindings: ChannelConversationBindingView[]
+  pendingBindingCount: number
+  bindingIssueCount: number
   transportConversations: Array<{
     channelConversationId: string
     bindingId: string | null
@@ -112,8 +109,14 @@ type CoreChannelSnapshot = {
 
 type ClaimedChannelDelivery = {
   deliveryId: string
-  requestId: string
-  deliveryKind: 'queue_ack' | 'agent_status' | 'agent_output' | 'completion' | 'attention'
+  requestId: string | null
+  deliveryKind:
+    | 'project_selection'
+    | 'queue_ack'
+    | 'agent_status'
+    | 'agent_output'
+    | 'completion'
+    | 'attention'
   targetAppId: string
   credentialRef: string
   chatId: string
@@ -164,9 +167,18 @@ type RawInboundEvent = {
   }
 }
 
+type RawCardActionEvent = {
+  operator?: {
+    open_id?: string
+    user_id?: string
+    union_id?: string
+  }
+}
+
 const HOST_WORKER_ID = `desktop-${randomUUID()}`
 const ROSTER_CACHE_MS = 20_000
 const ROSTER_SWEEP_MS = 30_000
+const NON_OWNER_DM_HINT_THROTTLE_MS = 24 * 60 * 60_000
 const unavailableMemberBotAvatarSource: MemberBotAvatarSourceResolver = {
   async resolve(avatarRef) {
     if (avatarRef === null) return undefined
@@ -187,6 +199,7 @@ export class ChannelSettingsService {
   readonly #chatNameCache = new Map<string, string>()
   readonly #rosterReconciledAt = new Map<string, number>()
   readonly #rosterReconciliations = new Map<string, Promise<boolean>>()
+  readonly #nonOwnerDmHints = new Map<string, number>()
   #activeQrAttempt: ChannelQrAttemptView | null = null
   #activeQrAbort: AbortController | null = null
   #activeProvisioning: ChannelSettingsSnapshot['activeProvisioning'] = null
@@ -462,60 +475,6 @@ export class ChannelSettingsService {
       this.#activeQrAbort?.abort()
       this.#finishQr()
     }
-    return this.#emit()
-  }
-
-  async createProjectBinding(input: {
-    commandId: string
-    displayName: string
-    bindingKind: ProjectBindingKind
-    canonicalPath: string
-  }): Promise<ChannelSettingsSnapshot> {
-    await this.#commandWithId('projectBindings.create', input.commandId, {
-      displayName: input.displayName,
-      bindingKind: input.bindingKind,
-      canonicalPath: input.canonicalPath
-    })
-    return this.#emit()
-  }
-
-  async updateProjectBinding(input: {
-    commandId: string
-    projectBindingId: string
-    displayName: string
-    expectedVersion: number
-  }): Promise<ChannelSettingsSnapshot> {
-    await this.#commandWithId('projectBindings.update', input.commandId, {
-      projectBindingId: input.projectBindingId,
-      displayName: input.displayName,
-      expectedVersion: input.expectedVersion
-    })
-    return this.#emit()
-  }
-
-  async archiveProjectBinding(input: {
-    commandId: string
-    projectBindingId: string
-    expectedVersion: number
-  }): Promise<ChannelSettingsSnapshot> {
-    await this.#commandWithId('projectBindings.archive', input.commandId, {
-      projectBindingId: input.projectBindingId,
-      expectedVersion: input.expectedVersion
-    })
-    return this.#emit()
-  }
-
-  async bindConversation(input: {
-    commandId: string
-    channelConversationId: string
-    projectBindingId: string
-    expectedConversationVersion: number
-  }): Promise<ChannelSettingsSnapshot> {
-    await this.#commandWithId('channels.conversations.bind', input.commandId, {
-      channelConversationId: input.channelConversationId,
-      projectBindingId: input.projectBindingId,
-      expectedConversationVersion: input.expectedConversationVersion
-    })
     return this.#emit()
   }
 
@@ -1165,6 +1124,9 @@ export class ChannelSettingsService {
       logFeishuBotDiagnostic('message.normalized', messageDiagnostic(managed, message))
       return this.#handleMessage(managed, message)
     }))
+    managed.unsubscribers.push(channel.on('cardAction', (event) => (
+      this.#handleCardAction(managed, event)
+    )))
     managed.unsubscribers.push(channel.on('reject', (event) => {
       logFeishuBotDiagnostic('message.rejected', {
         appIdDigest: digest(managed.appId),
@@ -1235,15 +1197,44 @@ export class ChannelSettingsService {
     }
     const raw = (message.raw ?? {}) as RawInboundEvent
     const coreSnapshot = await this.#coreSnapshot()
-    const tenantKey = raw.sender?.tenant_key || raw.tenant_key || coreSnapshot.account?.accountId
+    const tenantKey = raw.sender?.tenant_key || raw.tenant_key
     if (!tenantKey) {
       reject('tenant_key_missing')
       return
     }
+    const senderOpenId = raw.sender?.sender_id?.open_id ?? null
+    const senderUserId = raw.sender?.sender_id?.user_id ?? null
+    const senderUnionId = raw.sender?.sender_id?.union_id ?? null
     const senderExternalUserId = raw.sender?.sender_id?.union_id
       || raw.sender?.sender_id?.user_id
       || raw.sender?.sender_id?.open_id
       || message.senderId
+    const owner = await this.#commandWithId(
+      'channels.feishu.owner.verify',
+      stableCommandId('owner', managed.appId, tenantKey, message.messageId),
+      {
+        provider: 'feishu',
+        appId: managed.appId,
+        tenantKey,
+        senderOpenId,
+        senderUserId,
+        senderUnionId,
+        senderDisplayName: message.senderName || '飞书成员'
+      },
+      false
+    )
+    if (owner.payload.classification !== 'owner') {
+      reject(
+        owner.payload.classification === 'unverified'
+          ? 'owner_identity_unverified'
+          : 'non_owner'
+      )
+      if (message.chatType === 'p2p') {
+        await this.#sendNonOwnerDmHint(managed, message, senderExternalUserId)
+      }
+      await this.#emit()
+      return
+    }
     const conversationKind = await this.#conversationKind(managed.channel, message)
     if (conversationKind !== 'p2p' && !message.mentionedBot) {
       reject('bot_not_mentioned', conversationKind)
@@ -1309,10 +1300,39 @@ export class ChannelSettingsService {
         .map((bot) => bot.botDisplayName)
     )
     if (managed.channel.botIdentity?.name) expectedBotNames.add(managed.channel.botIdentity.name)
+    const body = canonicalInboundBody(raw, message, expectedBotNames)
+    const conversationDisplayName = await this.#conversationDisplayName(managed.channel, message)
+    if (body === '/new') {
+      if (conversationKind !== 'p2p') {
+        reject('control_command_dm_only', conversationKind)
+        return
+      }
+      const started = await this.#commandWithId(
+        'channels.feishu.dm.startNew',
+        stableCommandId('dm-new', managed.appId, tenantKey, message.messageId),
+        {
+          provider: 'feishu',
+          appId: managed.appId,
+          tenantKey,
+          chatId: message.chatId,
+          conversationDisplayName,
+          targetAgentId: managed.agentId
+        },
+        false
+      )
+      await managed.channel.send(message.chatId, {
+        text: started.status === 'rejected'
+          ? started.code === 'channel.dm.busy'
+            ? '当前回复尚未结束，请等待完成后再发送 /new。'
+            : '暂时无法开始新的快速对话，请稍后重试。'
+          : '已开始新的快速对话。'
+      })
+      await this.#emit()
+      return
+    }
     const quote = message.replyToMessageId
       ? await this.#readExternalQuote(managed.channel, message.replyToMessageId)
       : null
-    const conversationDisplayName = await this.#conversationDisplayName(managed.channel, message)
     const observation = await this.#commandWithId('channels.inbound.observe', stableCommandId(
       'observe', managed.appId, tenantKey, message.messageId
     ), {
@@ -1325,11 +1345,11 @@ export class ChannelSettingsService {
       conversationKind,
       conversationDisplayName,
       senderExternalUserId,
-      senderOpenId: raw.sender?.sender_id?.open_id ?? null,
-      senderUserId: raw.sender?.sender_id?.user_id ?? null,
-      senderUnionId: raw.sender?.sender_id?.union_id ?? null,
+      senderOpenId,
+      senderUserId,
+      senderUnionId,
       senderDisplayName: message.senderName || '飞书成员',
-      body: canonicalInboundBody(raw, message, expectedBotNames),
+      body,
       attachmentSummaries: message.resources.map((resource) => ({
         name: resource.fileName || resource.type,
         mediaType: resource.type
@@ -1358,6 +1378,68 @@ export class ChannelSettingsService {
         conversationKind,
         aggregateId
       )
+    }
+    await this.#emit()
+  }
+
+  async #sendNonOwnerDmHint(
+    managed: ManagedChannel,
+    message: NormalizedMessage,
+    senderExternalUserId: string
+  ): Promise<void> {
+    const key = `${managed.appId}\0${senderExternalUserId}`
+    const lastSentAt = this.#nonOwnerDmHints.get(key)
+    if (lastSentAt !== undefined && this.#now() - lastSentAt < NON_OWNER_DM_HINT_THROTTLE_MS) return
+    this.#nonOwnerDmHints.set(key, this.#now())
+    await managed.channel.send(message.chatId, {
+      text: '该 Bot 当前仅供 Rovai 主人使用。'
+    }).catch((error) => {
+      logFeishuBotDiagnostic('non_owner_hint.failed', {
+        ...messageDiagnostic(managed, message),
+        reason: channelFailureCode(error)
+      })
+    })
+  }
+
+  async #handleCardAction(managed: ManagedChannel, event: CardActionEvent): Promise<void> {
+    if (this.#stopped) return
+    const action = projectCardAction(event.action.value)
+    if (!action) {
+      logFeishuBotDiagnostic('card.rejected', {
+        appIdDigest: digest(managed.appId),
+        agentId: managed.agentId,
+        reason: 'invalid_project_card_action'
+      })
+      return
+    }
+    const raw = (event.raw ?? {}) as RawCardActionEvent
+    const result = await this.#commandWithId(
+      'channels.feishu.pendingBinding.resolve',
+      randomUUID(),
+      {
+        pendingBindingId: action.pendingBindingId,
+        appId: managed.appId,
+        expectedVersion: action.expectedVersion,
+        nonce: action.nonce,
+        action: action.action,
+        projectId: action.projectId,
+        operatorOpenId: raw.operator?.open_id ?? event.operator.openId ?? null,
+        operatorUserId: raw.operator?.user_id ?? event.operator.userId ?? null,
+        operatorUnionId: raw.operator?.union_id ?? null
+      },
+      false
+    )
+    try {
+      await managed.channel.updateCard(
+        event.messageId,
+        projectBindingResultCard(result, action)
+      )
+    } catch (error) {
+      logFeishuBotDiagnostic('card.update_failed', {
+        appIdDigest: digest(managed.appId),
+        agentId: managed.agentId,
+        reason: channelFailureCode(error)
+      })
     }
     await this.#emit()
   }
@@ -1401,11 +1483,7 @@ export class ChannelSettingsService {
         aggregateId
       }, false)
     }
-    if (finalized.code === 'channel.inbound.unbound' && managed) {
-      await managed.channel.send(chatId, {
-        text: '这个飞书会话尚未绑定 Rovai 项目，请联系主人在 Rovai 本机完成设置；绑定后请重新发送消息。'
-      }, topicKey ? { replyTo: topicKey, replyInThread: true } : undefined)
-    }
+    void managed
   }
 
   async #recoverPendingAggregates(): Promise<void> {
@@ -1589,10 +1667,16 @@ export class ChannelSettingsService {
       if (messageId) {
         await managed.channel.updateCard(messageId, card)
       } else {
+        const privateProjectCard = delivery.deliveryKind === 'project_selection'
+        if (privateProjectCard && !delivery.recipientOpenId) {
+          throw new Error('owner_identity_unverified')
+        }
         const sent = await managed.channel.send(
-          delivery.chatId,
+          privateProjectCard ? delivery.recipientOpenId! : delivery.chatId,
           { card },
-          delivery.topicKey ? { replyTo: delivery.topicKey, replyInThread: true } : undefined
+          !privateProjectCard && delivery.topicKey
+            ? { replyTo: delivery.topicKey, replyInThread: true }
+            : undefined
         )
         messageId = sent.messageId
       }
@@ -1625,7 +1709,7 @@ export class ChannelSettingsService {
     const snapshot = await this.#dependencies!.core.request<CoreChannelSnapshot>(
       'channels.feishu.snapshot'
     )
-    if (snapshot.schemaVersion !== 1) throw new Error('Unsupported Core channel snapshot')
+    if (snapshot.schemaVersion !== 2) throw new Error('Unsupported Core channel snapshot')
     return snapshot
   }
 
@@ -1639,7 +1723,8 @@ export class ChannelSettingsService {
         botDisplayName: bot.botDisplayName,
         appId: bot.appId,
         managementUrl: memberBotManagementUrl(bot.brand, bot.appId),
-        failureCode: this.#publicationFailures.get(bot.agentId) ?? bot.failureCode
+        failureCode: this.#publicationFailures.get(bot.agentId) ?? bot.failureCode,
+        ownerIdentityStatus: bot.ownerIdentityStatus
       })
     }
     for (const intent of snapshot.publicationIntents) {
@@ -1658,7 +1743,8 @@ export class ChannelSettingsService {
         managementUrl: brand && intent.remoteAppId
           ? memberBotManagementUrl(brand, intent.remoteAppId)
           : null,
-        failureCode: this.#publicationFailures.get(intent.agentId) ?? intent.failureCode
+        failureCode: this.#publicationFailures.get(intent.agentId) ?? intent.failureCode,
+        ownerIdentityStatus: 'unverified'
       })
     }
     if (this.#activeProvisioning) {
@@ -1674,7 +1760,8 @@ export class ChannelSettingsService {
         botDisplayName: existing?.botDisplayName ?? null,
         appId: remoteAppId ?? existing?.appId ?? null,
         managementUrl: existing?.managementUrl ?? null,
-        failureCode
+        failureCode,
+        ownerIdentityStatus: existing?.ownerIdentityStatus ?? 'unverified'
       })
     }
     for (const [agentId, failureCode] of this.#publicationFailures) {
@@ -1685,11 +1772,12 @@ export class ChannelSettingsService {
         botDisplayName: bot?.botDisplayName ?? null,
         appId: bot?.appId ?? null,
         managementUrl: bot?.managementUrl ?? null,
-        failureCode
+        failureCode,
+        ownerIdentityStatus: bot?.ownerIdentityStatus ?? 'unverified'
       })
     }
     return {
-      schemaVersion: 3,
+      schemaVersion: 4,
       channels: [{
         kind: 'feishu',
         displayName: '飞书',
@@ -1712,9 +1800,8 @@ export class ChannelSettingsService {
         },
         memberBots: [...bots.values()].sort((left, right) => left.agentId.localeCompare(right.agentId))
       }],
-      projectBindings: snapshot.projectBindings,
-      unboundConversations: snapshot.unboundConversations,
-      conversationBindings: snapshot.conversationBindings,
+      pendingBindingCount: snapshot.pendingBindingCount,
+      bindingIssueCount: snapshot.bindingIssueCount,
       activeQrAttempt: this.#activeQrAttempt ? structuredClone(this.#activeQrAttempt) : null,
       activeProvisioning: this.#activeProvisioning
         ? structuredClone(this.#activeProvisioning)
@@ -1773,7 +1860,7 @@ export class ChannelSettingsService {
 
 function unavailableSnapshot(): ChannelSettingsSnapshot {
   return {
-    schemaVersion: 3,
+    schemaVersion: 4,
     channels: [{
       kind: 'feishu',
       displayName: '飞书',
@@ -1781,9 +1868,8 @@ function unavailableSnapshot(): ChannelSettingsSnapshot {
       connection: { status: 'not_connected', account: null },
       memberBots: []
     }],
-    projectBindings: [],
-    unboundConversations: [],
-    conversationBindings: [],
+    pendingBindingCount: 0,
+    bindingIssueCount: 0,
     activeQrAttempt: null,
     activeProvisioning: null
   }
@@ -1995,7 +2081,192 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
+type ProjectCardAction = {
+  pendingBindingId: string
+  expectedVersion: number
+  nonce: string
+  action: 'bind' | 'cancel' | 'refresh'
+  projectId: string | null
+}
+
+type ProjectCardOption = {
+  projectId: string
+  displayName: string
+}
+
+function projectCardAction(value: unknown): ProjectCardAction | null {
+  if (!isRecord(value)) return null
+  const action = value.rovaiAction === 'bind_project'
+    ? 'bind'
+    : value.rovaiAction === 'cancel_binding'
+      ? 'cancel'
+      : value.rovaiAction === 'refresh_projects'
+        ? 'refresh'
+        : null
+  if (!action
+    || typeof value.pendingBindingId !== 'string'
+    || typeof value.nonce !== 'string'
+    || typeof value.expectedVersion !== 'number'
+    || !Number.isSafeInteger(value.expectedVersion)
+    || value.expectedVersion < 1) return null
+  const projectId = typeof value.projectId === 'string' ? value.projectId : null
+  if (action === 'bind' && !projectId) return null
+  return {
+    pendingBindingId: value.pendingBindingId,
+    expectedVersion: value.expectedVersion,
+    nonce: value.nonce,
+    action,
+    projectId
+  }
+}
+
+function projectCardOptions(value: unknown): ProjectCardOption[] {
+  if (!Array.isArray(value)) return []
+  return value.flatMap((item) => {
+    if (!isRecord(item)
+      || typeof item.projectId !== 'string'
+      || typeof item.displayName !== 'string') return []
+    return [{ projectId: item.projectId, displayName: item.displayName }]
+  })
+}
+
+function feishuMarkdownText(value: string): string {
+  return value.replace(/[\\`*_{}\[\]()<>#+.!|~-]/gu, '\\$&')
+}
+
+function projectSelectionCard(input: {
+  pendingBindingId: string
+  conversationDisplayName: string
+  expectedVersion: number
+  nonce: string
+  projectOptions: ProjectCardOption[]
+  notice?: string
+}): Record<string, unknown> {
+  const actionValue = (rovaiAction: string, projectId?: string): Record<string, unknown> => ({
+    rovaiAction,
+    pendingBindingId: input.pendingBindingId,
+    expectedVersion: input.expectedVersion,
+    nonce: input.nonce,
+    ...(projectId ? { projectId } : {})
+  })
+  const projectButtons = input.projectOptions.map((project) => ({
+    tag: 'button',
+    text: { tag: 'plain_text', content: `绑定并处理 · ${project.displayName}` },
+    type: 'primary',
+    value: actionValue('bind_project', project.projectId)
+  }))
+  return {
+    schema: '2.0',
+    config: { update_multi: true, wide_screen_mode: true },
+    header: {
+      title: { tag: 'plain_text', content: '选择 Rovai 项目' },
+      template: input.notice ? 'orange' : 'blue'
+    },
+    body: {
+      elements: [
+        {
+          tag: 'markdown',
+          content: [
+            input.notice,
+            `为「${feishuMarkdownText(input.conversationDisplayName)}」选择执行项目。`,
+            '项目路径只保留在 Rovai 本机，不会发送到飞书。',
+            input.projectOptions.length === 0
+              ? '当前没有可用项目。请先在 Rovai 创建或打开一个项目，然后点击刷新。'
+              : null
+          ].filter(Boolean).join('\n\n')
+        },
+        ...projectButtons,
+        {
+          tag: 'action',
+          actions: [
+            {
+              tag: 'button',
+              text: { tag: 'plain_text', content: '刷新项目' },
+              type: 'default',
+              value: actionValue('refresh_projects')
+            },
+            {
+              tag: 'button',
+              text: { tag: 'plain_text', content: '取消' },
+              type: 'default',
+              value: actionValue('cancel_binding')
+            }
+          ]
+        }
+      ]
+    }
+  }
+}
+
+function terminalProjectCard(
+  title: string,
+  text: string,
+  template: 'green' | 'grey' | 'orange' | 'red'
+): Record<string, unknown> {
+  return {
+    schema: '2.0',
+    config: { update_multi: true, wide_screen_mode: true },
+    header: { title: { tag: 'plain_text', content: title }, template },
+    body: { elements: [{ tag: 'markdown', content: text }] }
+  }
+}
+
+function projectBindingResultCard(
+  result: StoredCommandResult,
+  action: ProjectCardAction
+): Record<string, unknown> {
+  if (result.code === 'channel.binding.resolved') {
+    const name = typeof result.payload.projectDisplayName === 'string'
+      ? result.payload.projectDisplayName
+      : '所选项目'
+    return terminalProjectCard(
+      'Rovai 项目已绑定',
+      `已绑定「${feishuMarkdownText(name)}」，正在处理原始消息。`,
+      'green'
+    )
+  }
+  if (result.code === 'channel.binding.cancelled') {
+    return terminalProjectCard('已取消项目绑定', '原始消息没有进入 Camp，也不会启动队员。', 'grey')
+  }
+  if (result.code === 'channel.binding.expired') {
+    return terminalProjectCard('项目选择已过期', '请在原飞书会话中重新 @ 队员。', 'grey')
+  }
+  if (result.code === 'channel.binding.stale_card'
+    || result.code === 'channel.binding.already_resolved') {
+    return terminalProjectCard('这张卡片已处理', '旧卡片不会再次创建 Camp。', 'grey')
+  }
+  const options = projectCardOptions(result.payload.projectOptions)
+  if (result.code === 'channel.binding.refreshed'
+    || result.code === 'channel.project_unavailable') {
+    return projectSelectionCard({
+      pendingBindingId: action.pendingBindingId,
+      conversationDisplayName: '当前飞书会话',
+      expectedVersion: typeof result.payload.expectedVersion === 'number'
+        ? result.payload.expectedVersion
+        : action.expectedVersion,
+      nonce: action.nonce,
+      projectOptions: options,
+      ...(result.code === 'channel.project_unavailable'
+        ? { notice: '刚才选择的项目已不可用，请重新选择。' }
+        : {})
+    })
+  }
+  if (result.code === 'channel.binding.owner_required') {
+    return terminalProjectCard('无法操作项目卡片', '只有 Rovai 主人可以选择项目。', 'red')
+  }
+  return terminalProjectCard('项目绑定未完成', '请回到原飞书会话稍后重试。', 'orange')
+}
+
 function deliveryCard(delivery: ClaimedChannelDelivery): Record<string, unknown> {
+  if (delivery.deliveryKind === 'project_selection') {
+    return projectSelectionCard({
+      pendingBindingId: String(delivery.payload.pendingBindingId ?? ''),
+      conversationDisplayName: String(delivery.payload.conversationDisplayName ?? '飞书会话'),
+      expectedVersion: Number(delivery.payload.expectedVersion ?? 1),
+      nonce: String(delivery.payload.nonce ?? ''),
+      projectOptions: projectCardOptions(delivery.payload.projectOptions)
+    })
+  }
   const text = typeof delivery.payload.text === 'string' ? delivery.payload.text : ''
   const body = typeof delivery.payload.body === 'string' ? delivery.payload.body : ''
   const mentionPrincipal = delivery.payload.mentionPrincipal === true

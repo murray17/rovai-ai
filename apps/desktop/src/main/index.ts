@@ -733,48 +733,6 @@ ipcMain.handle('rovai:channels-cancel-qr', (event, attemptId: unknown) => {
   return channelSettings.cancelQrAttempt(attemptId)
 })
 
-ipcMain.handle('rovai:channels-create-project-binding', (event, input: unknown) => {
-  requireMainWindow(event.sender)
-  return channelSettings.createProjectBinding(requireObject(input) as Parameters<
-    typeof channelSettings.createProjectBinding
-  >[0])
-})
-
-ipcMain.handle('rovai:channels-update-project-binding', (event, input: unknown) => {
-  requireMainWindow(event.sender)
-  return channelSettings.updateProjectBinding(requireObject(input) as Parameters<
-    typeof channelSettings.updateProjectBinding
-  >[0])
-})
-
-ipcMain.handle('rovai:channels-archive-project-binding', (event, input: unknown) => {
-  requireMainWindow(event.sender)
-  return channelSettings.archiveProjectBinding(requireObject(input) as Parameters<
-    typeof channelSettings.archiveProjectBinding
-  >[0])
-})
-
-ipcMain.handle('rovai:channels-bind-conversation', (event, input: unknown) => {
-  requireMainWindow(event.sender)
-  return channelSettings.bindConversation(requireObject(input) as Parameters<
-    typeof channelSettings.bindConversation
-  >[0])
-})
-
-ipcMain.handle('rovai:channels-select-project-directory', async (event) => {
-  const window = requireMainWindow(event.sender)
-  const result = await dialog.showOpenDialog(window, {
-    title: '选择可绑定的项目目录',
-    buttonLabel: '选择项目',
-    properties: ['openDirectory']
-  })
-  if (result.canceled || !result.filePaths[0]) return null
-  const selection = await core.request<{ projectPath: string }>('workspaces.validate', {
-    path: result.filePaths[0]
-  })
-  return selection.projectPath
-})
-
 ipcMain.handle('rovai:onboarding-get', () => requireOnboarding().get())
 
 ipcMain.handle('rovai:onboarding-show-welcome', () => requireOnboarding().showWelcome())

@@ -29,20 +29,23 @@ Renderer 渠道设置
                          ▼
                     Rust Core
           ├─ Developer Identity / Publication Intent
-          ├─ ProjectBinding / conversation binding
-          ├─ ExternalPrincipal / App identity
+          ├─ Feishu Owner / per-App identity
+          ├─ Project Catalog / conversation binding generation
+          ├─ PendingCampBinding / frozen message FIFO
+          ├─ ExternalPrincipal
           ├─ multi-Bot aggregate / ChannelTurnRequest
           ├─ Camp、membership 与统一 admission
           └─ durable ChannelDelivery outbox
 ```
 
-Rust Core 是项目绑定、渠道会话、Camp、消息、Turn、Run、成员关系、排队和 Outbox 的唯一持久权威。
+Rust Core 是 Owner identity、项目目录投影、渠道会话/执行范围、Camp、消息、Turn、Run、成员关系、排队和 Outbox 的
+唯一持久权威。
 Electron Main 只拥有需要网络和本机秘密的 Feishu Host；Renderer 只获得设置投影与主人操作，不获得 App
 Secret、原始 `userId`、Session Cookie、Host 恢复游标或内部路由事实。
 
-`ExternalPrincipal` 表达消息作者、上下文来源和回复目标。它不是 `local_user`，不能连接账号、发布 Bot、维护
-`ProjectBinding`、绑定会话或执行任何主人命令。绑定后的群成员只因显式 `@` 受管 Bot 而获得一次消息入口，
-不会因此得到 Camp、项目或本机管理权限。
+`ExternalPrincipal` 表达消息作者、上下文来源和回复目标。即使它代表已验证 Feishu Owner，也不是 `local_user`，不能
+连接账号、发布 Bot、维护路径或执行任何主人命令。项目卡 callback 只有 exact pending binding 的窄批准能力。非 Owner
+没有消息入口；不会因私聊、群管理员身份或显式 `@` 获得 Camp、项目或本机权限。
 
 ## 开发者会话与队员发布
 
@@ -68,11 +71,11 @@ timeout、408/409/429/5xx、缺少 ClientID、Session 失效或任何 commit 结
 barrier 完成前不能读取 Secret、启用 Bot、配置能力或创建版本。
 
 App ID 冻结后，client 读取 App Secret、启用 Bot、请求 event WebSocket mode，并创建或复用 `1.0.0` activation
-version，先确认它 published。之后才配置 tenant scopes、receive/roster events 与 callback。Event mode 与事件条目共享
+version，先确认它 published。之后才配置 tenant scopes、receive/roster events 与 `card.action.trigger` callback。Event mode 与事件条目共享
 120 秒、每秒一次的 bounded convergence budget；Scope/Event/Callback 各自报告是否发生远端或 Manifest mutation。
 任一配置发生变化时，从当前 published version 递增 patch，创建或复用 exact 下一版本并发布；全部无变化时复用现有
 版本。头像与兼容元数据可以继续写 manifest；Scope 使用在线 catalog 把名称映射为 App identity ID，再经 scope update
-写入；只有存在 callback items 时才要求在线 `callbackMode=4`。最终回读以 robot、scope、event、callback 和 version
+写入；在线 `callbackMode=4` 与 `card.action.trigger` 都是必需条件。最终回读以 robot、scope、event、callback 和 version
 detail API 为运行时 authority，manifest 中的 scope/event/WebSocket 字段不能自证配置完成。在线配置验证通过后，
 Main 依次把独立 credential 写入 safeStorage、Core upsert exact frozen Bot、建立并回读 Bot WebSocket identity，最后
 完成 intent。普通流程始终保持隐藏窗口，不打开飞书“创建飞书智能体应用 / 立即创建”确认页，也不向 Renderer 产生二维码。
@@ -123,30 +126,38 @@ manifest 头像元数据；不得创建 App 或改变 App ID。
 `failed_recoverable | failed_unknown_remote_state` 进入 `credentials_read` 后继续完成；Core 拒绝更换 App ID。头像读取、
 远端核对或连接失败时保持 `failed_recoverable`；只有缺少可信 App ID 的 create outcome unknown 继续锁住，不允许创建第二个 App。
 
-## 项目与会话
+## Owner-only 入站与会话执行范围
 
-`ProjectBinding` 是 Core-owned 本机目录目录，保存不透明 ID、显示名、`quick_chat | directory`、规范路径、
-状态和版本。只有主人可以创建、重命名、归档或把渠道会话切换到一个 Binding。飞书消息和 Card Action 都不携带
-本机路径，也没有项目列表、申请绑定或自动选择入口。
+连接开发者账号时 Core 建立 canonical Feishu Owner；每个已发布 App 通过实际 message/callback envelope 逐步建立
+per-App open/user/union identity。Main 收到消息后先调用 Core verify，只有 `union_id -> tenant user_id -> verified
+open_id` 能证明 Owner 才继续。Owner 仍以 ExternalPrincipal 写入；non-owner 私聊只允许一次节流提示，群/话题静默
+停止，并且都不能留下 conversation、aggregate、Principal、pending binding、Camp 或 Run。
+
+Core 不再拥有主人手工维护的 Channel ProjectBinding 目录。它从 Rovai 已存在的 directory Camp 事实投影 stable
+Project Catalog：卡片只得到 opaque project ID 和 display name，canonical path 始终留在 Core。目录失效或项目退出
+当前事实源会标记 unavailable/archived；旧卡点击必须 fail closed。Camp 一旦创建即冻结当时的
+`project_binding_kind + project_path`，项目目录变化不能自动改派。
 
 渠道会话 identity 按场景冻结：
 
-- 私聊：`provider + tenant + chat + receiving app`，不同队员 Bot 私聊不会合并；
-- 普通群：`provider + tenant + chat`；
-- 话题：`provider + tenant + chat + canonical topic`。
+- 私聊：`provider + tenant + chat + receiving app`；首次 Owner 消息自动创建 Quick Chat binding generation/Camp；
+- 普通群：`provider + tenant + chat`；首次 Owner 显式 mention 选择一次项目，此后一个长期 Camp；
+- 话题：`provider + tenant + chat + canonical topic`；每个话题各选择一次项目并拥有独立 Camp。
 
-未绑定消息只更新 `ChannelConversation` 与有 TTL 的传输聚合。它不创建 ExternalPrincipal、Camp、
-ChannelTurnRequest、CampMessage、CampTurn 或 AgentRun。主人之后在本机绑定只改变未来 admission；已观察消息
-冻结的 binding 仍为空，必须由发送者重新发送。
+精确 `/new` 只在 Owner 私聊中是控制命令。它要求当前没有 collecting aggregate 或 queued/admitted request，关闭 active
+generation，保留旧 Camp，并立即创建新 Quick Chat Camp；控制文本不进入 CampMessage、Turn、Run 或模型。群和话题
+不解释 `/new`，也没有 rebind/change-project 命令。
 
-首次合格消息需要 Camp 时，Core 在同一准入流程解析 active `ProjectBinding`，把现有
-`project_binding_kind + project_path` 冻结到 Camp。后续重命名 Binding 不改 Camp；切换会话先要求旧 Binding 没有
-queued/admitted 请求，并让下一条消息创建新的 Camp，旧 Camp 历史保持独立。
+普通群/话题首次 finalize 时创建 `PendingCampBinding`，把原始 Structured Content、targets 和 canonical-first
+acknowledgement App 冻结到 FIFO；此时没有 CampMessage/Turn/Run。同一会话后续 Owner mention 复用同一 pending row，
+不重复发卡。Core 通过 frozen Bot 私聊 Owner 一张项目卡；callback 只信 envelope 的 operator union/open identity，并以
+nonce、version、expiry、frozen App 和 CAS 防双击/重放。所有 roster/project 前置检查通过后，同一事务创建 immutable
+binding/Camp，再把 frozen messages 按 FIFO 提升到统一 admission。
 
 ## 入站、聚合与串行准入
 
-Host 只转交私聊，或普通群/话题中显式 `@` 一个以上已发布受管 Bot 的用户消息。echo、未 mention 群消息、
-未知 Bot 和不完整 topic identity 在 Host 边界停止。多个 App 可能收到同一飞书消息，因此 Core 先写
+Host 只转交已验证 Owner 的私聊，或 Owner 在普通群/话题中显式 `@` 一个以上已发布受管 Bot 的消息。echo、non-owner、
+未 mention 群消息、未知 Bot、群内 `/new` 和不完整 topic identity 在 observation 前停止。多个 App 可能收到同一飞书消息，因此 Core 先写
 `collecting` aggregate：
 
 ```text
@@ -161,15 +172,16 @@ observation N ─┘
                   finalize
 ```
 
-第一条 observation 永远不直接创建业务事实；finalize 是独立命令。不同 App 对同一 canonical message 的冻结
+第一条 observation 永远不触发 admission、PendingCampBinding 或卡片；finalize 是独立命令。只有完整 canonical mention
+映射才能按顺序冻结第一个受管 Bot 为 `acknowledgementAppId`。不同 App 对同一 canonical message 的冻结
 payload 不一致时失败，缺少完整映射或预期 observation 时在三秒窗口后 fail closed。聚合只服务 transport
 dedup/aggregation，并在终态七天后清理；external message ID 不成为 Camp History 或 reply identity。
 
-Finalize 先重查 observation 时冻结的 exact active binding、项目、已发布 Bot 和群 roster，再创建一个
-`ChannelTurnRequest`。每个 Binding 同时最多一个 admitted 请求；其余保持 queued，且不进入 Camp conversation、
-Context 或 AgentRun。提升复用与本地用户发送相同的 `CollaborationService` 原子 admission，一次性创建唯一触发
-CampMessage、一个根 CampTurn 与全部初始 AgentRun。只有 Runtime 暂未 ready 属于可重试排队 blocker；永久目标或
-授权错误终结请求并产生 attention delivery。
+Finalize 先重查 Owner、exact binding、项目、已发布 Bot 和群 roster。p2p 自动建立/复用 Quick Chat 后创建
+`ChannelTurnRequest`；未绑定 group/topic 只写 PendingCampBinding FIFO。绑定完成后，每个 Binding 同时最多一个 admitted
+请求，其余 queued 且不进入 Camp conversation、Context 或 AgentRun。提升复用与本地用户发送相同的
+`CollaborationService` 原子 admission，一次性创建唯一触发 CampMessage、一个根 CampTurn 与全部初始 AgentRun。只有
+Runtime 暂未 ready 属于可重试排队 blocker；永久目标或授权错误终结请求并产生 attention delivery。
 
 ## 外部引用与模型输入
 
@@ -193,6 +205,10 @@ target 需要一个尚未加入的队员时，Core 只有在该队员 Bot 仍 pu
 membership source 加入该话题 Camp。群 roster 不完整时 admission fail closed。
 
 ## 输出、恢复与秘密
+
+`project_selection` 是唯一不依赖 ChannelTurnRequest 的 delivery：它关联 exact PendingCampBinding，使用冻结的
+acknowledgement App 直接发送到 Owner open ID，不公开到原群/话题。payload 只有会话显示名、opaque 项目选项和
+nonce/version；重启、重试和后续 pending 消息都复用同一 dedupe identity 与 Bot。
 
 Core 只从已提交公开 CampMessage 和请求状态生成 `ChannelDelivery`。Outbox 使用 lease、attempt、退避和稳定
 dedupe key；Main 发送成功后回写外部消息 ID，网络错误不会回滚 CampMessage。队列卡从“等待”原位更新为“开始”，

@@ -50,8 +50,10 @@ pub struct Database {
     runtime_camp_files_root_identity_digest: String,
 }
 
-const CURRENT_DATA_CONTRACT_VERSION: &str = "v1.27";
-const CURRENT_PROJECTION_SCHEMA_VERSION: i64 = 68;
+const CURRENT_DATA_CONTRACT_VERSION: &str = "v1.28";
+const CURRENT_PROJECTION_SCHEMA_VERSION: i64 = 69;
+const V116_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.27";
+const V116_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION: i64 = 68;
 const V115_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.26";
 const V115_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION: i64 = 67;
 const V114_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.25";
@@ -186,6 +188,7 @@ struct CurrentMigrationState {
     v113: bool,
     v114: bool,
     v115: bool,
+    v116: bool,
 }
 
 impl CurrentMigrationState {
@@ -195,6 +198,56 @@ impl CurrentMigrationState {
             return false;
         }
         if contract == CURRENT_DATA_CONTRACT_VERSION && schema == CURRENT_PROJECTION_SCHEMA_VERSION
+        {
+            return self.v70
+                && self.v71
+                && self.v76
+                && self.v77
+                && self.v78
+                && self.v79
+                && self.v80
+                && self.v81
+                && self.v82
+                && self.v83
+                && self.v84
+                && self.v85
+                && self.v86
+                && self.v87
+                && self.v88
+                && self.v89
+                && self.v90
+                && self.v91
+                && self.v92
+                && self.v93
+                && self.v94
+                && self.v95
+                && self.v96
+                && self.v97
+                && self.v98
+                && self.v99
+                && self.v100
+                && self.v101
+                && self.v102
+                && self.v103
+                && self.v104
+                && self.v105
+                && self.v106
+                && self.v107
+                && self.v108
+                && self.v109
+                && self.v110
+                && self.v111
+                && self.v112
+                && self.v113
+                && self.v114
+                && self.v115
+                && self.v116;
+        }
+        if self.v116 {
+            return false;
+        }
+        if contract == V116_MIGRATION_SOURCE_DATA_CONTRACT_VERSION
+            && schema == V116_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION
         {
             return self.v70
                 && self.v71
@@ -1387,8 +1440,8 @@ fn connection_has_legacy_feishu_migration_collision(
         .optional()?;
     if marker
         != Some((
-            CURRENT_DATA_CONTRACT_VERSION.to_string(),
-            CURRENT_PROJECTION_SCHEMA_VERSION,
+            V116_MIGRATION_SOURCE_DATA_CONTRACT_VERSION.to_string(),
+            V116_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION,
             V043_CLASSIFIER_VERSION.to_string(),
         ))
     {
@@ -1483,7 +1536,7 @@ fn connection_has_current_data_contract(connection: &Connection) -> rusqlite::Re
         r#"
         SELECT contract_version = ?1
                AND projection_schema_version = ?2
-               AND EXISTS(SELECT 1 FROM schema_migration WHERE version = 115)
+               AND EXISTS(SELECT 1 FROM schema_migration WHERE version = 116)
         FROM rovai_data_contract
         WHERE singleton = 1
         "#,
@@ -1545,7 +1598,8 @@ fn load_current_migration_state(
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 112),
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 113),
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 114),
-               EXISTS(SELECT 1 FROM schema_migration WHERE version = 115)
+               EXISTS(SELECT 1 FROM schema_migration WHERE version = 115),
+               EXISTS(SELECT 1 FROM schema_migration WHERE version = 116)
         "#,
         [],
         |row| {
@@ -1596,6 +1650,7 @@ fn load_current_migration_state(
                 v113: row.get(43)?,
                 v114: row.get(44)?,
                 v115: row.get(45)?,
+                v116: row.get(46)?,
             })
         },
     )
@@ -3118,6 +3173,9 @@ impl Database {
             if !self.schema_migration_applied(115)? {
                 self.migrate_feishu_developer_session_v115()?;
             }
+            if !self.schema_migration_applied(116)? {
+                self.migrate_feishu_owner_camp_binding_v116()?;
+            }
             if let Err(error) =
                 crate::notification::maintain_notification_episode_retention(self.connection())
             {
@@ -3512,6 +3570,9 @@ impl Database {
         }
         if !self.schema_migration_applied(115)? {
             self.migrate_feishu_developer_session_v115()?;
+        }
+        if !self.schema_migration_applied(116)? {
+            self.migrate_feishu_owner_camp_binding_v116()?;
         }
         if let Err(error) =
             crate::notification::maintain_notification_episode_retention(self.connection())
@@ -16702,6 +16763,367 @@ impl Database {
         Ok(())
     }
 
+    fn migrate_feishu_owner_camp_binding_v116(&mut self) -> Result<()> {
+        self.connection
+            .execute_batch("PRAGMA foreign_keys = OFF; PRAGMA legacy_alter_table = ON;")?;
+        let migration_result = (|| -> Result<()> {
+            let transaction = self
+                .connection
+                .transaction_with_behavior(TransactionBehavior::Immediate)?;
+            transaction.execute_batch(
+                r#"
+                CREATE TABLE project_catalog_item (
+                    id TEXT PRIMARY KEY,
+                    canonical_path TEXT NOT NULL UNIQUE
+                        CHECK(length(trim(canonical_path)) > 0),
+                    display_name TEXT NOT NULL CHECK(length(trim(display_name)) > 0),
+                    status TEXT NOT NULL CHECK(status IN ('active', 'unavailable', 'archived')),
+                    last_opened_at TEXT,
+                    version INTEGER NOT NULL DEFAULT 1 CHECK(version >= 1),
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
+                CREATE INDEX project_catalog_item_status_idx
+                    ON project_catalog_item(status, last_opened_at DESC, id);
+
+                INSERT INTO project_catalog_item(
+                    id, canonical_path, display_name, status, last_opened_at,
+                    version, created_at, updated_at
+                )
+                SELECT 'rvproj_' || lower(hex(randomblob(16))),
+                       project.canonical_path, project.display_name,
+                       CASE project.status WHEN 'active' THEN 'active' ELSE 'archived' END,
+                       project.updated_at, project.version,
+                       project.created_at, project.updated_at
+                FROM project_binding AS project
+                WHERE project.binding_kind = 'directory';
+
+                INSERT INTO project_catalog_item(
+                    id, canonical_path, display_name, status, last_opened_at,
+                    version, created_at, updated_at
+                )
+                SELECT 'rvproj_' || lower(hex(randomblob(16))),
+                       camp.project_path, camp.project_path, 'active',
+                       MAX(camp.updated_at), 1, MIN(camp.created_at), MAX(camp.updated_at)
+                FROM camp
+                WHERE camp.project_binding_kind = 'directory'
+                GROUP BY camp.project_path
+                ON CONFLICT(canonical_path) DO UPDATE SET
+                    last_opened_at = excluded.last_opened_at,
+                    updated_at = excluded.updated_at;
+
+                CREATE TABLE feishu_owner_identity (
+                    account_id TEXT PRIMARY KEY REFERENCES feishu_account(id) ON DELETE CASCADE,
+                    tenant_id TEXT NOT NULL CHECK(length(trim(tenant_id)) > 0),
+                    canonical_owner_principal_id TEXT NOT NULL UNIQUE,
+                    user_id_digest TEXT NOT NULL CHECK(length(trim(user_id_digest)) > 0),
+                    union_id_digest TEXT,
+                    verified_at TEXT NOT NULL,
+                    version INTEGER NOT NULL DEFAULT 1 CHECK(version >= 1),
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
+
+                INSERT INTO feishu_owner_identity(
+                    account_id, tenant_id, canonical_owner_principal_id,
+                    user_id_digest, union_id_digest, verified_at,
+                    version, created_at, updated_at
+                )
+                SELECT account.id, account.tenant_id,
+                       'rvep_' || lower(hex(randomblob(16))),
+                       account.user_id_digest, NULL,
+                       account.last_verified_at, 1,
+                       account.connected_at, account.last_verified_at
+                FROM feishu_account AS account
+                WHERE account.tenant_id IS NOT NULL
+                  AND account.user_id_digest IS NOT NULL
+                  AND account.connected_at IS NOT NULL
+                  AND account.last_verified_at IS NOT NULL;
+
+                CREATE TABLE feishu_owner_app_identity (
+                    account_id TEXT NOT NULL
+                        REFERENCES feishu_owner_identity(account_id) ON DELETE CASCADE,
+                    app_id TEXT NOT NULL CHECK(length(trim(app_id)) > 0),
+                    open_id_digest TEXT,
+                    user_id_digest TEXT,
+                    union_id_digest TEXT,
+                    verified_at TEXT NOT NULL,
+                    version INTEGER NOT NULL DEFAULT 1 CHECK(version >= 1),
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    PRIMARY KEY(account_id, app_id),
+                    CHECK(
+                        open_id_digest IS NOT NULL
+                        OR user_id_digest IS NOT NULL
+                        OR union_id_digest IS NOT NULL
+                    )
+                );
+                CREATE INDEX feishu_owner_app_identity_app_idx
+                    ON feishu_owner_app_identity(app_id, account_id);
+
+                ALTER TABLE channel_delivery RENAME TO channel_delivery_v115;
+                ALTER TABLE channel_turn_request RENAME TO channel_turn_request_v115;
+                ALTER TABLE channel_conversation_binding
+                    RENAME TO channel_conversation_binding_v115;
+                DROP INDEX channel_delivery_claim_idx;
+                DROP INDEX channel_delivery_request_idx;
+                DROP INDEX channel_turn_request_active_binding_idx;
+                DROP INDEX channel_turn_request_queue_idx;
+                DROP INDEX channel_conversation_binding_project_idx;
+
+                CREATE TABLE channel_conversation_binding (
+                    id TEXT PRIMARY KEY,
+                    channel_conversation_id TEXT NOT NULL
+                        REFERENCES channel_conversation(id) ON DELETE CASCADE,
+                    execution_scope_kind TEXT NOT NULL
+                        CHECK(execution_scope_kind IN ('quick_chat', 'project')),
+                    project_id TEXT REFERENCES project_catalog_item(id),
+                    camp_id TEXT UNIQUE REFERENCES camp(id),
+                    status TEXT NOT NULL CHECK(status IN ('active', 'closed')),
+                    generation INTEGER NOT NULL CHECK(generation >= 1),
+                    version INTEGER NOT NULL DEFAULT 1 CHECK(version >= 1),
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    closed_at TEXT,
+                    CHECK(
+                        (execution_scope_kind = 'quick_chat' AND project_id IS NULL)
+                        OR (execution_scope_kind = 'project' AND project_id IS NOT NULL)
+                    ),
+                    CHECK(
+                        (status = 'active' AND closed_at IS NULL)
+                        OR (status = 'closed' AND closed_at IS NOT NULL)
+                    )
+                );
+                CREATE UNIQUE INDEX channel_conversation_binding_active_idx
+                    ON channel_conversation_binding(channel_conversation_id)
+                    WHERE status = 'active';
+                CREATE UNIQUE INDEX channel_conversation_binding_generation_idx
+                    ON channel_conversation_binding(channel_conversation_id, generation);
+                CREATE INDEX channel_conversation_binding_project_idx
+                    ON channel_conversation_binding(project_id, updated_at DESC, id);
+
+                INSERT INTO channel_conversation_binding(
+                    id, channel_conversation_id, execution_scope_kind,
+                    project_id, camp_id, status, generation, version,
+                    created_at, updated_at, closed_at
+                )
+                SELECT binding.id, binding.channel_conversation_id,
+                       CASE project.binding_kind
+                           WHEN 'quick_chat' THEN 'quick_chat'
+                           ELSE 'project'
+                       END,
+                       CASE project.binding_kind
+                           WHEN 'quick_chat' THEN NULL
+                           ELSE catalog.id
+                       END,
+                       binding.camp_id, 'active', 1, binding.version,
+                       binding.created_at, binding.updated_at, NULL
+                FROM channel_conversation_binding_v115 AS binding
+                JOIN project_binding AS project
+                  ON project.id = binding.project_binding_id
+                LEFT JOIN project_catalog_item AS catalog
+                  ON catalog.canonical_path = project.canonical_path;
+
+                CREATE TABLE channel_turn_request (
+                    id TEXT PRIMARY KEY,
+                    binding_id TEXT NOT NULL REFERENCES channel_conversation_binding(id),
+                    aggregate_id TEXT NOT NULL UNIQUE
+                        REFERENCES channel_inbound_aggregate(id) ON DELETE CASCADE,
+                    external_principal_id TEXT NOT NULL REFERENCES external_principal(id),
+                    ack_app_id TEXT NOT NULL,
+                    structured_content_json TEXT NOT NULL,
+                    addressed_agent_ids_json TEXT NOT NULL,
+                    status TEXT NOT NULL CHECK(status IN (
+                        'queued', 'admitted', 'completed', 'failed'
+                    )),
+                    queue_position INTEGER NOT NULL CHECK(queue_position >= 0),
+                    camp_id TEXT REFERENCES camp(id),
+                    camp_message_id TEXT UNIQUE REFERENCES camp_message(id),
+                    camp_turn_id TEXT UNIQUE REFERENCES camp_turn(id),
+                    trigger_camp_sequence INTEGER,
+                    failure_code TEXT,
+                    version INTEGER NOT NULL DEFAULT 1 CHECK(version >= 1),
+                    created_at TEXT NOT NULL,
+                    admitted_at TEXT,
+                    completed_at TEXT,
+                    updated_at TEXT NOT NULL,
+                    CHECK(
+                        (status = 'queued' AND admitted_at IS NULL AND completed_at IS NULL
+                            AND camp_message_id IS NULL AND camp_turn_id IS NULL)
+                        OR (status = 'admitted' AND admitted_at IS NOT NULL
+                            AND completed_at IS NULL
+                            AND camp_message_id IS NOT NULL AND camp_turn_id IS NOT NULL)
+                        OR (status IN ('completed', 'failed') AND completed_at IS NOT NULL)
+                    )
+                );
+                CREATE UNIQUE INDEX channel_turn_request_active_binding_idx
+                    ON channel_turn_request(binding_id) WHERE status = 'admitted';
+                CREATE INDEX channel_turn_request_queue_idx
+                    ON channel_turn_request(binding_id, status, queue_position, created_at, id);
+
+                INSERT INTO channel_turn_request(
+                    id, binding_id, aggregate_id, external_principal_id,
+                    ack_app_id, structured_content_json, addressed_agent_ids_json,
+                    status, queue_position, camp_id, camp_message_id, camp_turn_id,
+                    trigger_camp_sequence, failure_code, version,
+                    created_at, admitted_at, completed_at, updated_at
+                )
+                SELECT id, binding_id, aggregate_id, external_principal_id,
+                       ack_app_id, structured_content_json, addressed_agent_ids_json,
+                       status, queue_position, camp_id, camp_message_id, camp_turn_id,
+                       trigger_camp_sequence, failure_code, version,
+                       created_at, admitted_at, completed_at, updated_at
+                FROM channel_turn_request_v115;
+
+                CREATE TABLE pending_camp_binding (
+                    id TEXT PRIMARY KEY,
+                    channel_conversation_id TEXT NOT NULL
+                        REFERENCES channel_conversation(id) ON DELETE CASCADE,
+                    owner_principal_id TEXT NOT NULL REFERENCES external_principal(id),
+                    acknowledgement_app_id TEXT NOT NULL CHECK(length(trim(acknowledgement_app_id)) > 0),
+                    status TEXT NOT NULL CHECK(status IN (
+                        'pending', 'resolving', 'resolved', 'cancelled', 'expired'
+                    )),
+                    version INTEGER NOT NULL DEFAULT 1 CHECK(version >= 1),
+                    nonce_digest TEXT NOT NULL CHECK(length(trim(nonce_digest)) > 0),
+                    expires_at TEXT NOT NULL,
+                    project_id TEXT REFERENCES project_catalog_item(id),
+                    binding_id TEXT UNIQUE REFERENCES channel_conversation_binding(id),
+                    camp_id TEXT UNIQUE REFERENCES camp(id),
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    resolved_at TEXT,
+                    CHECK(
+                        (status IN ('pending', 'resolving')
+                            AND project_id IS NULL AND binding_id IS NULL
+                            AND camp_id IS NULL AND resolved_at IS NULL)
+                        OR (status = 'resolved'
+                            AND project_id IS NOT NULL AND binding_id IS NOT NULL
+                            AND camp_id IS NOT NULL AND resolved_at IS NOT NULL)
+                        OR (status IN ('cancelled', 'expired')
+                            AND project_id IS NULL AND binding_id IS NULL
+                            AND camp_id IS NULL AND resolved_at IS NOT NULL)
+                    )
+                );
+                CREATE UNIQUE INDEX pending_camp_binding_open_conversation_idx
+                    ON pending_camp_binding(channel_conversation_id)
+                    WHERE status IN ('pending', 'resolving');
+                CREATE INDEX pending_camp_binding_status_idx
+                    ON pending_camp_binding(status, expires_at, created_at, id);
+
+                CREATE TABLE pending_camp_message (
+                    pending_binding_id TEXT NOT NULL
+                        REFERENCES pending_camp_binding(id) ON DELETE CASCADE,
+                    aggregate_id TEXT NOT NULL UNIQUE
+                        REFERENCES channel_inbound_aggregate(id) ON DELETE CASCADE,
+                    external_principal_id TEXT NOT NULL REFERENCES external_principal(id),
+                    ack_app_id TEXT NOT NULL CHECK(length(trim(ack_app_id)) > 0),
+                    structured_content_json TEXT NOT NULL,
+                    addressed_agent_ids_json TEXT NOT NULL,
+                    queue_position INTEGER NOT NULL CHECK(queue_position >= 1),
+                    created_at TEXT NOT NULL,
+                    PRIMARY KEY(pending_binding_id, queue_position)
+                );
+                CREATE INDEX pending_camp_message_fifo_idx
+                    ON pending_camp_message(pending_binding_id, queue_position, created_at, aggregate_id);
+
+                CREATE TABLE channel_delivery (
+                    id TEXT PRIMARY KEY,
+                    request_id TEXT REFERENCES channel_turn_request(id) ON DELETE CASCADE,
+                    pending_binding_id TEXT REFERENCES pending_camp_binding(id) ON DELETE CASCADE,
+                    dedupe_key TEXT NOT NULL UNIQUE,
+                    delivery_kind TEXT NOT NULL CHECK(delivery_kind IN (
+                        'project_selection', 'queue_ack', 'agent_status',
+                        'agent_output', 'completion', 'attention'
+                    )),
+                    target_app_id TEXT NOT NULL,
+                    source_agent_id TEXT,
+                    source_camp_message_id TEXT REFERENCES camp_message(id),
+                    payload_json TEXT NOT NULL,
+                    status TEXT NOT NULL CHECK(status IN ('pending', 'attempting', 'sent', 'failed')),
+                    attempt_count INTEGER NOT NULL DEFAULT 0 CHECK(attempt_count >= 0),
+                    available_at TEXT NOT NULL,
+                    lease_owner TEXT,
+                    lease_expires_at TEXT,
+                    external_delivery_message_id TEXT,
+                    failure_code TEXT,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    ended_at TEXT,
+                    CHECK(
+                        (request_id IS NOT NULL AND pending_binding_id IS NULL
+                            AND delivery_kind <> 'project_selection')
+                        OR (request_id IS NULL AND pending_binding_id IS NOT NULL
+                            AND delivery_kind = 'project_selection')
+                    ),
+                    CHECK(
+                        (status IN ('pending', 'attempting') AND ended_at IS NULL)
+                        OR (status IN ('sent', 'failed') AND ended_at IS NOT NULL)
+                    ),
+                    CHECK(
+                        (status = 'attempting' AND lease_owner IS NOT NULL
+                            AND lease_expires_at IS NOT NULL)
+                        OR (status <> 'attempting' AND lease_owner IS NULL
+                            AND lease_expires_at IS NULL)
+                    )
+                );
+                CREATE INDEX channel_delivery_claim_idx
+                    ON channel_delivery(status, available_at, created_at, id);
+                CREATE INDEX channel_delivery_request_idx
+                    ON channel_delivery(request_id, status, delivery_kind, id)
+                    WHERE request_id IS NOT NULL;
+                CREATE INDEX channel_delivery_pending_binding_idx
+                    ON channel_delivery(pending_binding_id, status, delivery_kind, id)
+                    WHERE pending_binding_id IS NOT NULL;
+
+                INSERT INTO channel_delivery(
+                    id, request_id, pending_binding_id, dedupe_key, delivery_kind,
+                    target_app_id, source_agent_id, source_camp_message_id,
+                    payload_json, status, attempt_count, available_at,
+                    lease_owner, lease_expires_at, external_delivery_message_id,
+                    failure_code, created_at, updated_at, ended_at
+                )
+                SELECT id, request_id, NULL, dedupe_key, delivery_kind,
+                       target_app_id, source_agent_id, source_camp_message_id,
+                       payload_json, status, attempt_count, available_at,
+                       lease_owner, lease_expires_at, external_delivery_message_id,
+                       failure_code, created_at, updated_at, ended_at
+                FROM channel_delivery_v115;
+
+                DROP TABLE channel_delivery_v115;
+                DROP TABLE channel_turn_request_v115;
+                DROP TABLE channel_conversation_binding_v115;
+                DROP TABLE project_binding;
+
+                UPDATE rovai_data_contract
+                SET contract_version = 'v1.28', projection_schema_version = 69,
+                    reset_reason = NULL, updated_at = datetime('now')
+                WHERE singleton = 1;
+
+                INSERT INTO schema_migration(version, applied_at)
+                VALUES (116, datetime('now'));
+                "#,
+            )?;
+            transaction.commit()?;
+            Ok(())
+        })();
+        let pragma_result = self
+            .connection
+            .execute_batch("PRAGMA legacy_alter_table = OFF; PRAGMA foreign_keys = ON;");
+        migration_result?;
+        pragma_result?;
+        if let Some((table, row_id)) = self
+            .connection
+            .query_row("PRAGMA foreign_key_check", [], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+            })
+            .optional()?
+        {
+            anyhow::bail!("v116 migration left a foreign-key violation in {table} row {row_id}");
+        }
+        Ok(())
+    }
+
     fn migrate_managed_attachment_v2_v112(&mut self) -> Result<()> {
         let transaction = self
             .connection
@@ -21301,7 +21723,172 @@ impl Database {
 }
 
 #[cfg(test)]
+fn downgrade_current_schema_to_v115_source_for_test(connection: &Connection) {
+    let has_v116: bool = connection
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM schema_migration WHERE version = 116)",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    if !has_v116 {
+        return;
+    }
+    for table in [
+        "pending_camp_message",
+        "pending_camp_binding",
+        "channel_delivery",
+        "channel_turn_request",
+        "channel_conversation_binding",
+    ] {
+        let count: i64 = connection
+            .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(count, 0, "test downgrade requires empty {table}");
+    }
+    connection
+        .execute_batch(
+            r#"
+            PRAGMA foreign_keys = OFF;
+            BEGIN IMMEDIATE;
+            DROP TABLE channel_delivery;
+            DROP TABLE channel_turn_request;
+            DROP TABLE pending_camp_message;
+            DROP TABLE pending_camp_binding;
+            DROP TABLE channel_conversation_binding;
+            DROP TABLE feishu_owner_app_identity;
+            DROP TABLE feishu_owner_identity;
+
+            CREATE TABLE project_binding (
+                id TEXT PRIMARY KEY,
+                display_name TEXT NOT NULL CHECK(length(trim(display_name)) > 0),
+                binding_kind TEXT NOT NULL CHECK(binding_kind IN ('quick_chat', 'directory')),
+                canonical_path TEXT NOT NULL CHECK(length(trim(canonical_path)) > 0),
+                status TEXT NOT NULL CHECK(status IN ('active', 'archived')),
+                version INTEGER NOT NULL DEFAULT 1 CHECK(version >= 1),
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                archived_at TEXT,
+                UNIQUE(canonical_path),
+                CHECK(
+                    (status = 'active' AND archived_at IS NULL)
+                    OR (status = 'archived' AND archived_at IS NOT NULL)
+                )
+            );
+            CREATE INDEX project_binding_status_idx
+                ON project_binding(status, updated_at DESC, id);
+            INSERT INTO project_binding(
+                id, display_name, binding_kind, canonical_path, status,
+                version, created_at, updated_at, archived_at
+            )
+            SELECT 'rvpb_' || lower(hex(randomblob(16))), display_name, 'directory',
+                   canonical_path,
+                   CASE status WHEN 'active' THEN 'active' ELSE 'archived' END,
+                   version, created_at, updated_at,
+                   CASE status WHEN 'active' THEN NULL ELSE updated_at END
+            FROM project_catalog_item;
+            DROP TABLE project_catalog_item;
+
+            CREATE TABLE channel_conversation_binding (
+                id TEXT PRIMARY KEY,
+                channel_conversation_id TEXT NOT NULL UNIQUE
+                    REFERENCES channel_conversation(id) ON DELETE CASCADE,
+                project_binding_id TEXT NOT NULL REFERENCES project_binding(id),
+                camp_id TEXT UNIQUE REFERENCES camp(id),
+                status TEXT NOT NULL CHECK(status = 'active'),
+                version INTEGER NOT NULL DEFAULT 1 CHECK(version >= 1),
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            CREATE INDEX channel_conversation_binding_project_idx
+                ON channel_conversation_binding(project_binding_id, updated_at DESC, id);
+
+            CREATE TABLE channel_turn_request (
+                id TEXT PRIMARY KEY,
+                binding_id TEXT NOT NULL REFERENCES channel_conversation_binding(id),
+                aggregate_id TEXT NOT NULL UNIQUE
+                    REFERENCES channel_inbound_aggregate(id) ON DELETE CASCADE,
+                external_principal_id TEXT NOT NULL REFERENCES external_principal(id),
+                ack_app_id TEXT NOT NULL,
+                structured_content_json TEXT NOT NULL,
+                addressed_agent_ids_json TEXT NOT NULL,
+                status TEXT NOT NULL CHECK(status IN ('queued', 'admitted', 'completed', 'failed')),
+                queue_position INTEGER NOT NULL CHECK(queue_position >= 0),
+                camp_id TEXT REFERENCES camp(id),
+                camp_message_id TEXT UNIQUE REFERENCES camp_message(id),
+                camp_turn_id TEXT UNIQUE REFERENCES camp_turn(id),
+                trigger_camp_sequence INTEGER,
+                failure_code TEXT,
+                version INTEGER NOT NULL DEFAULT 1 CHECK(version >= 1),
+                created_at TEXT NOT NULL,
+                admitted_at TEXT,
+                completed_at TEXT,
+                updated_at TEXT NOT NULL,
+                CHECK(
+                    (status = 'queued' AND admitted_at IS NULL AND completed_at IS NULL
+                        AND camp_message_id IS NULL AND camp_turn_id IS NULL)
+                    OR (status = 'admitted' AND admitted_at IS NOT NULL AND completed_at IS NULL
+                        AND camp_message_id IS NOT NULL AND camp_turn_id IS NOT NULL)
+                    OR (status IN ('completed', 'failed') AND completed_at IS NOT NULL)
+                )
+            );
+            CREATE UNIQUE INDEX channel_turn_request_active_binding_idx
+                ON channel_turn_request(binding_id) WHERE status = 'admitted';
+            CREATE INDEX channel_turn_request_queue_idx
+                ON channel_turn_request(binding_id, status, queue_position, created_at, id);
+
+            CREATE TABLE channel_delivery (
+                id TEXT PRIMARY KEY,
+                request_id TEXT NOT NULL REFERENCES channel_turn_request(id) ON DELETE CASCADE,
+                dedupe_key TEXT NOT NULL UNIQUE,
+                delivery_kind TEXT NOT NULL CHECK(delivery_kind IN (
+                    'queue_ack', 'agent_status', 'agent_output', 'completion', 'attention'
+                )),
+                target_app_id TEXT NOT NULL,
+                source_agent_id TEXT,
+                source_camp_message_id TEXT REFERENCES camp_message(id),
+                payload_json TEXT NOT NULL,
+                status TEXT NOT NULL CHECK(status IN ('pending', 'attempting', 'sent', 'failed')),
+                attempt_count INTEGER NOT NULL DEFAULT 0 CHECK(attempt_count >= 0),
+                available_at TEXT NOT NULL,
+                lease_owner TEXT,
+                lease_expires_at TEXT,
+                external_delivery_message_id TEXT,
+                failure_code TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                ended_at TEXT,
+                CHECK(
+                    (status IN ('pending', 'attempting') AND ended_at IS NULL)
+                    OR (status IN ('sent', 'failed') AND ended_at IS NOT NULL)
+                ),
+                CHECK(
+                    (status = 'attempting' AND lease_owner IS NOT NULL AND lease_expires_at IS NOT NULL)
+                    OR (status <> 'attempting' AND lease_owner IS NULL AND lease_expires_at IS NULL)
+                )
+            );
+            CREATE INDEX channel_delivery_claim_idx
+                ON channel_delivery(status, available_at, created_at, id);
+            CREATE INDEX channel_delivery_request_idx
+                ON channel_delivery(request_id, status, delivery_kind, id);
+
+            UPDATE rovai_data_contract
+            SET contract_version = 'v1.27', projection_schema_version = 68,
+                reset_reason = NULL, updated_at = datetime('now')
+            WHERE singleton = 1;
+            DELETE FROM schema_migration WHERE version = 116;
+            COMMIT;
+            PRAGMA foreign_keys = ON;
+            "#,
+        )
+        .unwrap();
+}
+
+#[cfg(test)]
 fn downgrade_current_schema_to_v112_source_for_test(connection: &Connection) {
+    downgrade_current_schema_to_v115_source_for_test(connection);
     let has_v113: bool = connection
         .query_row(
             "SELECT EXISTS(SELECT 1 FROM schema_migration WHERE version = 113)",
@@ -21591,6 +22178,7 @@ fn downgrade_current_schema_to_v112_source_for_test(connection: &Connection) {
 
 #[cfg(test)]
 fn downgrade_current_schema_to_legacy_feishu_collision_for_test(connection: &Connection) {
+    downgrade_current_schema_to_v115_source_for_test(connection);
     connection
         .execute_batch(
             r#"
@@ -22537,6 +23125,7 @@ mod tests {
             v113: version >= 113,
             v114: version >= 114,
             v115: version >= 115,
+            v116: version >= 116,
         }
     }
 
@@ -22547,6 +23136,12 @@ mod tests {
                 "current",
                 CURRENT_DATA_CONTRACT_VERSION,
                 CURRENT_PROJECTION_SCHEMA_VERSION,
+                116,
+            ),
+            (
+                "v1.27/schema-68 after Feishu developer session",
+                V116_MIGRATION_SOURCE_DATA_CONTRACT_VERSION,
+                V116_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION,
                 115,
             ),
             (
@@ -22803,7 +23398,7 @@ mod tests {
             );
         }
 
-        let current = migration_state_through(115);
+        let current = migration_state_through(116);
         let v092_source = migration_state_through(91);
         let mut missing_intermediate = current;
         missing_intermediate.v84 = false;
@@ -22873,7 +23468,7 @@ mod tests {
             )
             .expect("current contract marker should load");
 
-        assert_eq!(state, migration_state_through(115));
+        assert_eq!(state, migration_state_through(116));
         assert!(state.admits(&contract, schema));
         assert!(has_admissible_data_contract(
             &directory.join("rovai.sqlite")
@@ -25196,7 +25791,7 @@ mod tests {
     }
 
     #[test]
-    fn v115_upgrades_v112_preserves_evidence_and_installs_developer_session_contract() {
+    fn v116_upgrades_v112_preserves_evidence_and_installs_owner_binding_contract() {
         let (database, directory) = crate::test_support::seeded_runtime_database();
         downgrade_current_schema_to_v112_source_for_test(database.connection());
         let source_counts: (i64, i64) = database
@@ -25217,7 +25812,7 @@ mod tests {
                 .query_row(
                     r#"
                     SELECT contract_version, projection_schema_version,
-                           (SELECT COUNT(*) FROM schema_migration WHERE version IN (113, 114, 115))
+                           (SELECT COUNT(*) FROM schema_migration WHERE version IN (113, 114, 115, 116))
                     FROM rovai_data_contract WHERE singleton = 1
                     "#,
                     [],
@@ -25232,7 +25827,7 @@ mod tests {
         );
         drop(database);
 
-        let upgraded = Database::open(&directory).expect("v112 source should migrate to v115");
+        let upgraded = Database::open(&directory).expect("v112 source should migrate to v116");
         assert_eq!(
             upgraded
                 .connection()
@@ -25242,6 +25837,7 @@ mod tests {
                            (SELECT COUNT(*) FROM schema_migration WHERE version = 113),
                            (SELECT COUNT(*) FROM schema_migration WHERE version = 114),
                            (SELECT COUNT(*) FROM schema_migration WHERE version = 115),
+                           (SELECT COUNT(*) FROM schema_migration WHERE version = 116),
                            (SELECT COUNT(*) FROM pragma_foreign_key_check)
                     FROM rovai_data_contract WHERE singleton = 1
                     "#,
@@ -25253,12 +25849,14 @@ mod tests {
                         row.get::<_, i64>(3)?,
                         row.get::<_, i64>(4)?,
                         row.get::<_, i64>(5)?,
+                        row.get::<_, i64>(6)?,
                     )),
                 )
                 .unwrap(),
             (
                 CURRENT_DATA_CONTRACT_VERSION.to_string(),
                 CURRENT_PROJECTION_SCHEMA_VERSION,
+                1,
                 1,
                 1,
                 1,
@@ -25284,9 +25882,13 @@ mod tests {
             upgraded.connection(),
             "table",
             &[
-                "project_binding",
+                "project_catalog_item",
+                "feishu_owner_identity",
+                "feishu_owner_app_identity",
                 "external_principal",
                 "channel_conversation",
+                "pending_camp_binding",
+                "pending_camp_message",
                 "channel_turn_request",
                 "channel_delivery",
                 "feishu_member_bot_publication_intent",
@@ -25325,22 +25927,22 @@ mod tests {
                 table_columns(upgraded.connection(), "feishu_account")
                     .unwrap()
                     .contains(&column.to_string()),
-                "Migration 115 should install feishu_account.{column}"
+                "Migration 115 should retain feishu_account.{column}"
             );
         }
         drop(upgraded);
 
-        let restarted = Database::open(&directory).expect("v115 restart should be idempotent");
+        let restarted = Database::open(&directory).expect("v116 restart should be idempotent");
         assert_eq!(
             restarted
                 .connection()
                 .query_row(
-                    "SELECT COUNT(*) FROM schema_migration WHERE version IN (113, 114, 115)",
+                    "SELECT COUNT(*) FROM schema_migration WHERE version IN (113, 114, 115, 116)",
                     [],
                     |row| row.get::<_, i64>(0),
                 )
                 .unwrap(),
-            3
+            4
         );
         drop(restarted);
         std::fs::remove_dir_all(directory).expect("temporary database should be removable");
@@ -25384,7 +25986,7 @@ mod tests {
                 .query_row(
                     r#"
                     SELECT
-                        (SELECT COUNT(*) FROM schema_migration WHERE version IN (113, 114, 115)),
+                        (SELECT COUNT(*) FROM schema_migration WHERE version IN (113, 114, 115, 116)),
                         (SELECT COUNT(*) FROM feishu_account
                          WHERE id = 'legacy-feishu-account'
                            AND user_id_digest = 'legacy-user-digest'
@@ -25409,7 +26011,7 @@ mod tests {
                     },
                 )
                 .unwrap(),
-            (3, 1, 1, 1, 0)
+            (4, 1, 1, 1, 0)
         );
         let cycle_schema: String = reopened
             .connection()

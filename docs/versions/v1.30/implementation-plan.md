@@ -12,9 +12,10 @@ last_updated: 2026-08-28
 
 - [x] 从固定 revision `f588c773c2652a9e78887a31d17de8ed37524bb0` 建立独立 worktree，并先提交 Rovai
   风格的渠道设置 foundation；
-- [x] 完成 Migration 113 与 ExternalPrincipal author/Context 22 pairing；完成 Migration 114、Data Contract
-  v1.27/schema 68、真实 Developer Identity 和 publication intent；
-- [x] 完成 owner-only ProjectBinding、会话 bind/switch、Camp workspace freeze 与未绑定 resend 边界；
+- [x] 完成 Migration 113 与 ExternalPrincipal author/Context 22 pairing；完成 Migration 114/115，以及 Migration 116、
+  Data Contract v1.28/schema 69、真实 Developer Identity、publication intent、Owner identity 与 PendingCampBinding；
+- [x] 以 existing directory Camp 投影 Project Catalog，删除 Channel 人工 ProjectBinding/bind/switch；完成 DM Quick Chat
+  generation、私聊限定 `/new`、群/话题 immutable project Camp 与 frozen pending-message FIFO；
 - [x] 删除 controller App 账号模型；完成 Developer Web Session、真实 user/tenant 回读、safeStorage Cookie jar、
   identity drift/expiry fail-closed 与断开不删除 Bot credential；
 - [x] 完成 Web Session MemberBotProvisioner、Session cookie/CSRF console bootstrap、OpenPlatformApiClient 创建/
@@ -35,12 +36,14 @@ last_updated: 2026-08-28
 - [x] Core publication 状态机永久冻结每名队员的 App ID；完成后重复发布拒绝，历史 disabled 与凭据恢复只重开同一 intent、
   核对同一 App，不存在换绑或第二次创建；
 - [x] 完成 p2p/group/topic identity、显式 mention gate、多 Bot collecting/finalize/timeout/mismatch；
+- [x] 完成 Owner verify/per-App identity gate、non-owner 零业务事实、canonical-first acknowledgement App、单张 Owner
+  私聊项目卡和 callback envelope/nonce/version/CAS 重放防护；
 - [x] 完成 ChannelTurnRequest 单根 FIFO、统一原子 admission、永久失败/Runtime deferred 与 queue card 更新；
 - [x] 完成 ExternalQuote structured segment、`replyTo=null`、ExternalPrincipal source 与 CURRENT_INPUT v22；
 - [x] 完成父群 authoritative roster、普通群完整 membership、话题按需 membership 与 remove reconciliation；
 - [x] 完成 ChannelDelivery Outbox、实际作者 Bot、原生 Principal mention、lease/retry/attention 和恢复；
 - [x] 完成 Preload/Renderer typed API、真实账号投影、唯一账号 QR、Provisioning Dialog、按绑定 brand 的官方应用详情
-  链接与 Rovai 双主题 Bot/Project/Conversation surface；移除本机管理/停用命令；
+  链接与 Rovai 双主题 Bot surface；移除 Project/Conversation、管理和停用命令，只保留安静诊断计数；
 - [x] 完成当前 Architecture、Contracts、UI、Version Decision、Context change 与导航；
 - [x] 运行完整 Rust、TypeScript、文档、Clippy、Desktop build 与 Migration 门禁；
 - [x] 使用隔离 userData 验收渠道设置日/夜主题、键盘、窄窗口和秘密不进入 Renderer；
@@ -48,8 +51,11 @@ last_updated: 2026-08-28
 
 ## 验收原则
 
-- ExternalPrincipal 永远不等于 local owner；只有主人能创建 ProjectBinding 和 bind/switch；
-- 未绑定、未 mention、聚合不完整或 roster 不完整都没有 CampMessage/Turn/Run 副作用；
+- Feishu Owner 的 ExternalPrincipal 永远不等于 local owner；non-owner 在 observation 前停止且没有业务事实；
+- DM 自动 Quick Chat，`/new` 只支持 Owner 私聊且不进入模型；未绑定群/话题、未 mention、聚合不完整或 roster 不完整
+  都没有 CampMessage/Turn/Run 副作用；
+- 项目卡只私聊 Owner、只含 opaque project ID，并由完整 canonical mention 顺序中的第一个 Bot 唯一投递；callback 只信
+  envelope identity，旧卡/双击/重放不能创建第二个 Camp；
 - 同一 Camp queued 请求在前一根 Turn 真正终结前不可进入公共会话；
 - 飞书 reply 只形成当前消息的 ExternalQuote，不产生内部 reply 或第二条 CampMessage；
 - 普通群 roster 与话题按需扩张都复用 Camp Membership v1 exact source generation；
@@ -75,7 +81,7 @@ last_updated: 2026-08-28
 - `cargo test -p rovai-core --lib`；
 - `cargo test -p rovai-core --bin rovai`；
 - `cargo test -p rovai-core --bin rovai-core`；
-- Migration 114 upgrade、Developer Identity/publication intent、队员 App 身份冻结/历史 disabled 同 App reactivation、Channel 状态机、ExternalQuote、Context bytes 与
+- Migration 116 upgrade、Developer Identity/publication intent、队员 App 身份冻结/历史 disabled 同 App reactivation、Owner-only Channel 状态机、DM `/new`、PendingCampBinding、ExternalQuote、Context bytes 与
   Secret projection、内置/managed 头像解析、正常发布头像传递、冻结 App 头像/readiness 修复、Manifest 假阳性、P2P
   Scope ID 映射、template-first fallback matrix、durable barrier、activation-first、dynamic patch reuse、Event timeout
   recoverable 和 Event/Callback mode fail-closed 定向测试全部通过；
@@ -88,14 +94,13 @@ last_updated: 2026-08-28
 
 - 1440、860、720 三档宽度均无横向溢出；720 下连接区与队员表按既有响应式规则折行；
 - Porcelain Day 与 Steel Night 的层级、颜色、边界、头像和不可用状态均与当前 Rovai 设置页一致；
-- 键盘焦点从“登录开放平台”按 Tab 依次经过可用的“飞书管理”链接并跳过不可用 Bot/重复 Quick Chat，进入“添加项目目录”“重命名”“归档”，
-  Shift+Tab 可逆；
-- Quick Chat 首次登记生成一个 ProjectBinding；重复入口变为 `Quick Chat 已添加` disabled 状态，Core 唯一约束仍
-  保持 fail closed；
+- 键盘焦点从“登录开放平台”按 Tab 依次经过可用的发布/继续核对/“飞书管理”动作，Shift+Tab 可逆；
+- 页面没有项目目录、会话绑定、Quick Chat 添加、重命名或归档入口；有异常时只显示 pending/error 诊断计数；
 - Renderer snapshot 与 Preload 不包含 Secret、credential ref、transport conversation 或 pending aggregate。
 
 真实飞书租户的“连接前后 App 数量不变、发布只展示八阶段 Rovai 进度且不出现飞书创建确认页、首次 activation 后
 Event 能在 120 秒窗口内收敛、连续发布两名队员均不
 重新扫码、已发布行跳转绑定 App 的官方详情页、Session 失效不建未知 App、切换账号后旧 Bot 继续运行，以及私聊进入
 `channel.on('message')` 后按未绑定/已绑定路径响应”属于发布环境验收，仍需主人持有可用
-企业权限；本地自动化没有把这些外部效果伪造为通过。
+企业权限；还需实测 Owner 私聊自动 Quick Chat、私聊 `/new`、non-owner gate、群/话题单张私聊项目卡及 callback
+promotion。本地自动化没有把这些外部效果伪造为通过。

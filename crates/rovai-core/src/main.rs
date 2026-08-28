@@ -84,13 +84,12 @@ use rovai_core::{
     camp_id::CampId,
     camp_open::CampOpenService,
     channel::{
-        AdvanceMemberBotPublicationIntentCommand, ArchiveProjectBindingCommand,
-        BindChannelConversationCommand, ChannelHostTickCommand, ChannelService,
-        CreateMemberBotPublicationIntentCommand, CreateProjectBindingCommand,
-        DisconnectFeishuAccountCommand, ExpireFeishuAccountCommand, FinalizeChannelInboundCommand,
-        ObserveChannelInboundCommand, ReconcileFeishuGroupRosterCommand,
-        SettleChannelDeliveryCommand, UpdateProjectBindingCommand, UpsertFeishuAccountCommand,
-        UpsertFeishuMemberBotCommand,
+        AdvanceMemberBotPublicationIntentCommand, ChannelHostTickCommand, ChannelService,
+        CreateMemberBotPublicationIntentCommand, DisconnectFeishuAccountCommand,
+        ExpireFeishuAccountCommand, FinalizeChannelInboundCommand, ObserveChannelInboundCommand,
+        ReconcileFeishuGroupRosterCommand, ResolvePendingCampBindingCommand,
+        SettleChannelDeliveryCommand, StartNewFeishuDmCommand, UpsertFeishuAccountCommand,
+        UpsertFeishuMemberBotCommand, VerifyFeishuOwnerCommand,
     },
     collaboration::{
         AddCampMemberCommand, CampActivationState, CampCollaborationMode, ChangeDefaultLeadCommand,
@@ -4562,63 +4561,10 @@ impl Core {
     async fn handle(&self, request: &Request) -> Result<Value> {
         let _ = &request.params;
         match request.method.as_str() {
-            "projectBindings.list" => {
-                let database = self.database.lock().await;
-                Ok(serde_json::to_value(
-                    ChannelService::default()
-                        .snapshot(&database)?
-                        .project_bindings,
-                )?)
-            }
-            "projectBindings.create" => {
-                let mut params: UserCommandParams<CreateProjectBindingCommand> =
-                    serde_json::from_value(request.params.clone())?;
-                let managed_quick_chat = params.command.binding_kind == "quick_chat";
-                if managed_quick_chat {
-                    let expected = self.data_dir.join("quick-chat");
-                    std::fs::create_dir_all(&expected).with_context(|| {
-                        format!("failed to prepare Quick Chat at {}", expected.display())
-                    })?;
-                    params.command.canonical_path = expected.to_string_lossy().to_string();
-                }
-                let inspection = git::inspect_workspace(
-                    Path::new(&params.command.canonical_path),
-                    &self.data_dir,
-                    managed_quick_chat,
-                )
-                .await?;
-                params.command.canonical_path = inspection.project_path;
-                let mut database = self.database.lock().await;
-                let execution = ChannelService::default().create_project_binding(
-                    &mut database,
-                    &user_command_envelope(params.command_id, params.command),
-                )?;
-                Ok(serde_json::to_value(execution.result)?)
-            }
-            "projectBindings.update" => {
-                let params: UserCommandParams<UpdateProjectBindingCommand> =
-                    serde_json::from_value(request.params.clone())?;
-                let mut database = self.database.lock().await;
-                let execution = ChannelService::default().update_project_binding(
-                    &mut database,
-                    &user_command_envelope(params.command_id, params.command),
-                )?;
-                Ok(serde_json::to_value(execution.result)?)
-            }
-            "projectBindings.archive" => {
-                let params: UserCommandParams<ArchiveProjectBindingCommand> =
-                    serde_json::from_value(request.params.clone())?;
-                let mut database = self.database.lock().await;
-                let execution = ChannelService::default().archive_project_binding(
-                    &mut database,
-                    &user_command_envelope(params.command_id, params.command),
-                )?;
-                Ok(serde_json::to_value(execution.result)?)
-            }
             "channels.feishu.snapshot" => {
-                let database = self.database.lock().await;
+                let mut database = self.database.lock().await;
                 Ok(serde_json::to_value(
-                    ChannelService::default().snapshot(&database)?,
+                    ChannelService::default().snapshot(&mut database)?,
                 )?)
             }
             "channels.feishu.account.upsert" => {
@@ -4706,13 +4652,56 @@ impl Core {
                 )?;
                 Ok(serde_json::to_value(execution.result)?)
             }
-            "channels.conversations.bind" => {
-                let params: UserCommandParams<BindChannelConversationCommand> =
+            "channels.feishu.owner.verify" => {
+                let params: UserCommandParams<VerifyFeishuOwnerCommand> =
                     serde_json::from_value(request.params.clone())?;
                 let mut database = self.database.lock().await;
-                let execution = ChannelService::default().bind_conversation(
+                let execution = ChannelService::default().verify_feishu_owner(
                     &mut database,
-                    &user_command_envelope(params.command_id, params.command),
+                    &system_command_envelope(
+                        params.command_id,
+                        "feishu-channel-host",
+                        None,
+                        params.command,
+                    ),
+                )?;
+                Ok(serde_json::to_value(execution.result)?)
+            }
+            "channels.feishu.dm.startNew" => {
+                let params: UserCommandParams<StartNewFeishuDmCommand> =
+                    serde_json::from_value(request.params.clone())?;
+                let quick_chat_path = self.data_dir.join("quick-chat");
+                std::fs::create_dir_all(&quick_chat_path).with_context(|| {
+                    format!(
+                        "failed to prepare Quick Chat at {}",
+                        quick_chat_path.display()
+                    )
+                })?;
+                let mut database = self.database.lock().await;
+                let execution = ChannelService::default().start_new_feishu_dm(
+                    &mut database,
+                    &quick_chat_path,
+                    &system_command_envelope(
+                        params.command_id,
+                        "feishu-channel-host",
+                        None,
+                        params.command,
+                    ),
+                )?;
+                Ok(serde_json::to_value(execution.result)?)
+            }
+            "channels.feishu.pendingBinding.resolve" => {
+                let params: UserCommandParams<ResolvePendingCampBindingCommand> =
+                    serde_json::from_value(request.params.clone())?;
+                let mut database = self.database.lock().await;
+                let execution = ChannelService::default().resolve_pending_camp_binding(
+                    &mut database,
+                    &system_command_envelope(
+                        params.command_id,
+                        "feishu-channel-host",
+                        None,
+                        params.command,
+                    ),
                 )?;
                 Ok(serde_json::to_value(execution.result)?)
             }
@@ -4781,9 +4770,17 @@ impl Core {
             "channels.inbound.finalize" => {
                 let params: UserCommandParams<FinalizeChannelInboundCommand> =
                     serde_json::from_value(request.params.clone())?;
+                let quick_chat_path = self.data_dir.join("quick-chat");
+                std::fs::create_dir_all(&quick_chat_path).with_context(|| {
+                    format!(
+                        "failed to prepare Quick Chat at {}",
+                        quick_chat_path.display()
+                    )
+                })?;
                 let mut database = self.database.lock().await;
                 let execution = ChannelService::default().finalize_inbound(
                     &mut database,
+                    &quick_chat_path,
                     &system_command_envelope(
                         params.command_id,
                         "feishu-channel-host",

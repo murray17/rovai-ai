@@ -125,21 +125,6 @@ const api: RovaiApi = {
     cancelQrAttempt(attemptId) {
       return ipcRenderer.invoke('rovai:channels-cancel-qr', attemptId)
     },
-    createProjectBinding(input) {
-      return ipcRenderer.invoke('rovai:channels-create-project-binding', input)
-    },
-    updateProjectBinding(input) {
-      return ipcRenderer.invoke('rovai:channels-update-project-binding', input)
-    },
-    archiveProjectBinding(input) {
-      return ipcRenderer.invoke('rovai:channels-archive-project-binding', input)
-    },
-    bindConversation(input) {
-      return ipcRenderer.invoke('rovai:channels-bind-conversation', input)
-    },
-    selectProjectDirectory() {
-      return ipcRenderer.invoke('rovai:channels-select-project-directory')
-    },
     onChanged(listener) {
       const handler = (
         _event: Electron.IpcRendererEvent,

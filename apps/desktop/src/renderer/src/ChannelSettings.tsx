@@ -6,8 +6,7 @@ import type {
   ChannelMemberBotView,
   ChannelProviderView,
   ChannelSettingsSnapshot,
-  MemberBotProvisioningView,
-  ProjectBindingView
+  MemberBotProvisioningView
 } from '@contracts'
 import {
   AppDialogBody,
@@ -31,7 +30,6 @@ export function ChannelSettings({ agents }: { agents: AgentProfile[] }): React.J
   const [busy, setBusy] = useState<string | null>(null)
   const [publishAgentId, setPublishAgentId] = useState<string | null>(null)
   const [publishBoundAppId, setPublishBoundAppId] = useState<string | null>(null)
-  const [editingBinding, setEditingBinding] = useState<ProjectBindingView | null>(null)
 
   const load = useCallback(async (): Promise<void> => {
     setLoading(true)
@@ -110,33 +108,6 @@ export function ChannelSettings({ agents }: { agents: AgentProfile[] }): React.J
           `retry:${agent.agentId}`,
           () => window.rovai.channels.retryMemberBot(agent.agentId)
         )}
-        onCreateBinding={(displayName, bindingKind, canonicalPath) => void run(
-          'create-binding',
-          () => window.rovai.channels.createProjectBinding({
-            commandId: crypto.randomUUID(),
-            displayName,
-            bindingKind,
-            canonicalPath
-          })
-        )}
-        onEditBinding={setEditingBinding}
-        onArchiveBinding={(binding) => void run(
-          `archive:${binding.projectBindingId}`,
-          () => window.rovai.channels.archiveProjectBinding({
-            commandId: crypto.randomUUID(),
-            projectBindingId: binding.projectBindingId,
-            expectedVersion: binding.version
-          })
-        )}
-        onBindConversation={(channelConversationId, projectBindingId, version) => void run(
-          `bind:${channelConversationId}`,
-          () => window.rovai.channels.bindConversation({
-            commandId: crypto.randomUUID(),
-            channelConversationId,
-            projectBindingId,
-            expectedConversationVersion: version
-          })
-        )}
       />
 
       <QrDialog
@@ -174,19 +145,6 @@ export function ChannelSettings({ agents }: { agents: AgentProfile[] }): React.J
         }}
       />
 
-      <RenameBindingDialog
-        binding={editingBinding}
-        busy={busy !== null}
-        onClose={() => setEditingBinding(null)}
-        onSave={(binding, displayName) => {
-          void run(`rename:${binding.projectBindingId}`, () => window.rovai.channels.updateProjectBinding({
-            commandId: crypto.randomUUID(),
-            projectBindingId: binding.projectBindingId,
-            displayName,
-            expectedVersion: binding.version
-          })).then(() => setEditingBinding(null))
-        }}
-      />
     </>
   )
 }
@@ -201,11 +159,7 @@ export function ChannelSettingsView({
   onConnect,
   onDisconnect,
   onPublish,
-  onRetryPublish,
-  onCreateBinding,
-  onEditBinding,
-  onArchiveBinding,
-  onBindConversation
+  onRetryPublish
 }: {
   agents: AgentProfile[]
   snapshot: ChannelSettingsSnapshot | null
@@ -217,10 +171,6 @@ export function ChannelSettingsView({
   onDisconnect?(channel: ChannelProviderView): void
   onPublish?(channel: ChannelProviderView, agent: AgentProfile): void
   onRetryPublish?(channel: ChannelProviderView, agent: AgentProfile): void
-  onCreateBinding?(displayName: string, bindingKind: 'quick_chat' | 'directory', path: string): void
-  onEditBinding?(binding: ProjectBindingView): void
-  onArchiveBinding?(binding: ProjectBindingView): void
-  onBindConversation?(conversationId: string, projectBindingId: string, version: number): void
 }): React.JSX.Element {
   const members = useMemo(() => visibleChannelMembers(agents), [agents])
   const channel = snapshot?.channels.find((candidate) => candidate.kind === 'feishu') ?? null
@@ -230,7 +180,7 @@ export function ChannelSettingsView({
       <SettingsPageHeader
         eyebrow="Settings / Channels"
         title="渠道"
-        description="由主人在本机连接渠道、登记项目，并逐一为队员发布独立 Bot。会话成员只负责发消息，不获得任何本地配置权限。"
+        description="在本机连接飞书并逐一发布队员 Bot。只有 Rovai 主人可以从飞书触发队员；群聊和话题的项目在首次使用时私密选择。"
         aside={<span className="settings-page-note">主人本机</span>}
       />
 
@@ -287,7 +237,7 @@ export function ChannelSettingsView({
             />
             <p className="channel-owner-note">
               <OwnerShieldIcon />
-              <span>项目路径、绑定、切换和 Bot 发布只能由主人在 Rovai 本机完成。飞书消息作者仅作为上下文来源和回复目标。</span>
+              <span>飞书中的主人消息仍是外部消息身份，不获得本机管理权限。项目绝对路径不会发送到飞书。</span>
             </p>
           </section>
 
@@ -307,201 +257,24 @@ export function ChannelSettingsView({
             />
           </section>
 
-          <ProjectBindingSection
-            bindings={snapshot.projectBindings}
-            busy={busy}
-            onCreate={onCreateBinding}
-            onEdit={onEditBinding}
-            onArchive={onArchiveBinding}
-          />
-
-          <ConversationBindingSection
-            snapshot={snapshot}
-            busy={busy}
-            onBind={onBindConversation}
-          />
+          <section className="channel-settings-section" aria-labelledby="channel-binding-diagnostics-heading">
+            <ChannelSectionHeading
+              id="channel-binding-diagnostics-heading"
+              title="会话接入"
+              description="私聊自动进入 Quick Chat；群聊和话题首次由主人 @ 后，在飞书私密卡片中选择一次项目。"
+              summary={`${snapshot.pendingBindingCount} 个待选择`}
+            />
+            <div className="channel-binding-diagnostics" role="status">
+              <span><strong>{snapshot.pendingBindingCount}</strong><small>待处理绑定</small></span>
+              <span className={snapshot.bindingIssueCount > 0 ? 'is-warning' : undefined}>
+                <strong>{snapshot.bindingIssueCount}</strong><small>绑定异常</small>
+              </span>
+              <p>项目绑定完成后不可换绑；需要另一个项目时，请新建飞书群或话题。</p>
+            </div>
+          </section>
         </div>
       )}
     </div>
-  )
-}
-
-function ProjectBindingSection({
-  bindings,
-  busy,
-  onCreate,
-  onEdit,
-  onArchive
-}: {
-  bindings: ProjectBindingView[]
-  busy: string | null
-  onCreate?: (displayName: string, bindingKind: 'quick_chat' | 'directory', path: string) => void
-  onEdit?: (binding: ProjectBindingView) => void
-  onArchive?: (binding: ProjectBindingView) => void
-}): React.JSX.Element {
-  const active = bindings.filter((binding) => binding.status === 'active')
-  const hasQuickChat = active.some((binding) => binding.bindingKind === 'quick_chat')
-  const [draft, setDraft] = useState<{ name: string; path: string } | null>(null)
-
-  const chooseDirectory = async (): Promise<void> => {
-    const path = await window.rovai.channels.selectProjectDirectory()
-    if (!path) return
-    setDraft({ name: projectName(path), path })
-  }
-
-  return (
-    <section className="channel-settings-section" aria-labelledby="channel-project-bindings-heading">
-      <ChannelSectionHeading
-        id="channel-project-bindings-heading"
-        title="项目目录"
-        description="先把安全的项目名登记到 Core。飞书只会拿到不透明的 Project Binding ID，不会看到本机路径。"
-        summary={`${active.length} 个可用项目`}
-      />
-      <div className="channel-project-toolbar">
-        <button
-          className="quiet-button compact"
-          type="button"
-          disabled={busy !== null || !onCreate || hasQuickChat}
-          title={hasQuickChat ? 'Quick Chat 已登记' : undefined}
-          onClick={() => onCreate?.('Quick Chat', 'quick_chat', '')}
-        >
-          {hasQuickChat ? 'Quick Chat 已添加' : '添加 Quick Chat'}
-        </button>
-        <button
-          className="primary-button compact"
-          type="button"
-          disabled={busy !== null || !onCreate}
-          onClick={() => void chooseDirectory()}
-        >
-          添加项目目录
-        </button>
-      </div>
-
-      {active.length === 0 ? (
-        <div className="channel-empty-row">还没有可绑定项目。添加后，未绑定的飞书会话会出现在下方。</div>
-      ) : (
-        <div className="channel-project-list">
-          {active.map((binding) => (
-            <div className="channel-project-row" key={binding.projectBindingId}>
-              <span className="channel-project-glyph" aria-hidden="true">{binding.bindingKind === 'quick_chat' ? 'Q' : '⌁'}</span>
-              <span className="channel-project-copy">
-                <strong>{binding.displayName}</strong>
-                <small>{binding.bindingKind === 'quick_chat' ? 'Rovai 托管目录' : binding.canonicalPath}</small>
-              </span>
-              <span className="channel-project-kind">{binding.bindingKind === 'quick_chat' ? 'Quick Chat' : 'Directory'}</span>
-              <button className="channel-row-action" type="button" disabled={busy !== null || !onEdit} onClick={() => onEdit?.(binding)}>重命名</button>
-              <button className="channel-row-action is-danger" type="button" disabled={busy !== null || !onArchive} onClick={() => onArchive?.(binding)}>归档</button>
-            </div>
-          ))}
-        </div>
-      )}
-
-      <CreateBindingDialog
-        draft={draft}
-        busy={busy !== null}
-        onClose={() => setDraft(null)}
-        onCreate={(name, path) => {
-          onCreate?.(name, 'directory', path)
-          setDraft(null)
-        }}
-      />
-    </section>
-  )
-}
-
-function ConversationBindingSection({
-  snapshot,
-  busy,
-  onBind
-}: {
-  snapshot: ChannelSettingsSnapshot
-  busy: string | null
-  onBind?: (conversationId: string, projectBindingId: string, version: number) => void
-}): React.JSX.Element {
-  const projects = snapshot.projectBindings.filter((binding) => binding.status === 'active')
-  const [selections, setSelections] = useState<Record<string, string>>({})
-  const total = snapshot.unboundConversations.length + snapshot.conversationBindings.length
-
-  return (
-    <section className="channel-settings-section" aria-labelledby="channel-conversations-heading">
-      <ChannelSectionHeading
-        id="channel-conversations-heading"
-        title="会话绑定"
-        description="未绑定消息不会创建 Camp、CampMessage、CampTurn 或 AgentRun。主人完成绑定后，发送者需要重新发送。"
-        summary={`${snapshot.unboundConversations.length} 个待绑定 · ${snapshot.conversationBindings.length} 个已绑定`}
-      />
-      {total === 0 ? (
-        <div className="channel-empty-row">收到第一条有效私聊或显式 @ 消息后，会话会显示在这里。</div>
-      ) : (
-        <div className="channel-conversation-list">
-          {snapshot.unboundConversations.map((conversation) => {
-            const selected = selections[conversation.channelConversationId] ?? projects[0]?.projectBindingId ?? ''
-            return (
-              <div className="channel-conversation-row is-unbound" key={conversation.channelConversationId}>
-                <span className="channel-conversation-state" aria-hidden="true" />
-                <span className="channel-project-copy">
-                  <strong>{conversation.displayName}</strong>
-                  <small>{conversationKindLabel(conversation.conversationKind)} · 最近由 {conversation.lastSenderDisplayName} 发起</small>
-                </span>
-                <span className="channel-binding-state">待绑定</span>
-                <select
-                  aria-label={`为 ${conversation.displayName} 选择项目`}
-                  value={selected}
-                  disabled={projects.length === 0 || busy !== null}
-                  onChange={(event) => setSelections({
-                    ...selections,
-                    [conversation.channelConversationId]: event.target.value
-                  })}
-                >
-                  {projects.length === 0 && <option value="">先添加项目</option>}
-                  {projects.map((project) => <option value={project.projectBindingId} key={project.projectBindingId}>{project.displayName}</option>)}
-                </select>
-                <button
-                  className="primary-button compact"
-                  type="button"
-                  disabled={!selected || busy !== null || !onBind}
-                  onClick={() => onBind?.(conversation.channelConversationId, selected, conversation.version)}
-                >
-                  绑定
-                </button>
-              </div>
-            )
-          })}
-          {snapshot.conversationBindings.map((conversation) => {
-            const selected = selections[conversation.channelConversationId] ?? conversation.projectBindingId
-            return (
-              <div className="channel-conversation-row" key={conversation.channelConversationId}>
-                <span className="channel-conversation-state is-bound" aria-hidden="true" />
-                <span className="channel-project-copy">
-                  <strong>{conversation.displayName}</strong>
-                  <small>{conversationKindLabel(conversation.conversationKind)}{conversation.campId ? ' · Camp 已建立' : ' · 等待下一条消息建立 Camp'}</small>
-                </span>
-                <span className="channel-binding-state is-bound">已绑定</span>
-                <select
-                  aria-label={`切换 ${conversation.displayName} 的项目`}
-                  value={selected}
-                  disabled={projects.length === 0 || busy !== null}
-                  onChange={(event) => setSelections({
-                    ...selections,
-                    [conversation.channelConversationId]: event.target.value
-                  })}
-                >
-                  {projects.map((project) => <option value={project.projectBindingId} key={project.projectBindingId}>{project.displayName}</option>)}
-                </select>
-                <button
-                  className="quiet-button compact"
-                  type="button"
-                  disabled={selected === conversation.projectBindingId || busy !== null || !onBind}
-                  onClick={() => onBind?.(conversation.channelConversationId, selected, conversation.version)}
-                >
-                  切换
-                </button>
-              </div>
-            )
-          })}
-        </div>
-      )}
-    </section>
   )
 }
 
@@ -652,7 +425,10 @@ function ChannelMemberBotTable({
                   : <span>名称沿用队员；应用图标由 Rovai 配置</span>}
               </div>
               <span className={`channel-publication-status is-${status}`} role="cell">
-                {publicationLabel(status)}
+                <span>{publicationLabel(status)}</span>
+                {published && bot?.ownerIdentityStatus === 'unverified' && (
+                  <small>主人身份待核验</small>
+                )}
               </span>
               <div className="channel-member-action" role="cell">
                 {published && bot?.managementUrl ? (
@@ -857,73 +633,6 @@ function PublishBotDialog({
   )
 }
 
-function CreateBindingDialog({
-  draft,
-  busy,
-  onClose,
-  onCreate
-}: {
-  draft: { name: string; path: string } | null
-  busy: boolean
-  onClose: () => void
-  onCreate: (name: string, path: string) => void
-}): React.JSX.Element {
-  const [name, setName] = useState('')
-  useEffect(() => setName(draft?.name ?? ''), [draft])
-  if (!draft) return <></>
-  return (
-    <Dialog.Root open onOpenChange={(open) => { if (!open && !busy) onClose() }}>
-      <Dialog.Portal>
-        <Dialog.Overlay className="dialog-overlay app-dialog-overlay" />
-        <AppDialogContent>
-          <AppDialogHeader title="添加项目目录" description="这个名称会用于本机绑定选择；绝对路径不会发送到飞书。" icon="folder" closeDisabled={busy} />
-          <AppDialogBody>
-            <label className="channel-dialog-field"><span>项目名称</span><input data-dialog-autofocus value={name} onChange={(event) => setName(event.target.value)} /></label>
-            <div className="channel-dialog-path"><span>本机路径</span><code>{draft.path}</code></div>
-          </AppDialogBody>
-          <AppDialogFooter>
-            <button className="quiet-button" type="button" disabled={busy} onClick={onClose}>取消</button>
-            <button className="primary-button" type="button" disabled={busy || !name.trim()} onClick={() => onCreate(name.trim(), draft.path)}>添加项目</button>
-          </AppDialogFooter>
-        </AppDialogContent>
-      </Dialog.Portal>
-    </Dialog.Root>
-  )
-}
-
-function RenameBindingDialog({
-  binding,
-  busy,
-  onClose,
-  onSave
-}: {
-  binding: ProjectBindingView | null
-  busy: boolean
-  onClose: () => void
-  onSave: (binding: ProjectBindingView, name: string) => void
-}): React.JSX.Element {
-  const [name, setName] = useState('')
-  useEffect(() => setName(binding?.displayName ?? ''), [binding])
-  if (!binding) return <></>
-  return (
-    <Dialog.Root open onOpenChange={(open) => { if (!open && !busy) onClose() }}>
-      <Dialog.Portal>
-        <Dialog.Overlay className="dialog-overlay app-dialog-overlay" />
-        <AppDialogContent>
-          <AppDialogHeader title="重命名项目" description="只修改安全显示名，不改变冻结到已有 Camp 的项目路径。" icon="pencil" closeDisabled={busy} />
-          <AppDialogBody>
-            <label className="channel-dialog-field"><span>项目名称</span><input data-dialog-autofocus value={name} onChange={(event) => setName(event.target.value)} /></label>
-          </AppDialogBody>
-          <AppDialogFooter>
-            <button className="quiet-button" type="button" disabled={busy} onClick={onClose}>取消</button>
-            <button className="primary-button" type="button" disabled={busy || !name.trim()} onClick={() => onSave(binding, name.trim())}>保存</button>
-          </AppDialogFooter>
-        </AppDialogContent>
-      </Dialog.Portal>
-    </Dialog.Root>
-  )
-}
-
 function ChannelMark(): React.JSX.Element {
   return <span className="channel-mark channel-mark-feishu" aria-hidden="true">飞</span>
 }
@@ -973,16 +682,6 @@ function provisioningLabel(
   }
 }
 
-function conversationKindLabel(kind: 'p2p' | 'group' | 'topic'): string {
-  if (kind === 'p2p') return '私聊'
-  if (kind === 'topic') return '话题'
-  return '群聊'
-}
-
-function projectName(path: string): string {
-  return path.split(/[\\/]/).filter(Boolean).at(-1) ?? '项目'
-}
-
 function firstGrapheme(value: string): string {
   return Array.from(value.trim())[0] ?? '飞'
 }
@@ -994,11 +693,10 @@ function formatLocalTime(value: string): string {
 
 function assertChannelSettingsSnapshot(value: ChannelSettingsSnapshot): ChannelSettingsSnapshot {
   if (
-    value.schemaVersion !== 3
+    value.schemaVersion !== 4
     || !Array.isArray(value.channels)
-    || !Array.isArray(value.projectBindings)
-    || !Array.isArray(value.unboundConversations)
-    || !Array.isArray(value.conversationBindings)
+    || !Number.isInteger(value.pendingBindingCount)
+    || !Number.isInteger(value.bindingIssueCount)
   ) throw new Error('渠道状态数据版本不兼容。')
   return value
 }
@@ -1008,9 +706,6 @@ export function channelErrorMessage(error: unknown): string {
   const message = raw
     .replace(/^Error invoking remote method '[^']+': Error:\s*/, '')
     .trim()
-  if (message === 'This canonical path already has a Project Binding') {
-    return '这个项目已经登记，无需重复添加。'
-  }
   if (message === 'feishu_console_remote_app_unavailable') {
     return '原飞书应用已删除或当前账号无权访问，无法按原 App ID 重试。'
   }

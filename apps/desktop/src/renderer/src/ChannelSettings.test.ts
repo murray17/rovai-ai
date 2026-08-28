@@ -32,8 +32,9 @@ describe('Channel settings', () => {
     expect(markup).toContain('<strong>飞书</strong>')
     expect(markup).not.toContain('钉钉')
     expect(markup).not.toContain('Telegram')
-    expect(markup).toContain('项目路径、绑定、切换和 Bot 发布只能由主人在 Rovai 本机完成')
-    expect(markup).toContain('飞书消息作者仅作为上下文来源和回复目标')
+    expect(markup).toContain('只有 Rovai 主人可以从飞书触发队员')
+    expect(markup).toContain('飞书中的主人消息仍是外部消息身份')
+    expect(markup).toContain('项目绝对路径不会发送到飞书')
     expect(markup).not.toContain('已授权用户')
     expect(markup).not.toContain('allowlist')
     expect(markup.match(/class="channel-member-bot-grid channel-member-bot-row"/g)).toHaveLength(2)
@@ -47,7 +48,7 @@ describe('Channel settings', () => {
 
   it('renders connected account and published Bot facts without exposing credentials', () => {
     const snapshot: ChannelSettingsSnapshot = {
-      schemaVersion: 3,
+      schemaVersion: 4,
       channels: [{
         kind: 'feishu',
         displayName: '飞书',
@@ -70,19 +71,20 @@ describe('Channel settings', () => {
           botDisplayName: '审阅员芝士',
           appId: 'cli_agent_a',
           managementUrl: 'https://open.feishu.cn/app/cli_agent_a/baseinfo',
-          failureCode: null
+          failureCode: null,
+          ownerIdentityStatus: 'unverified'
         }, {
           agentId: 'agent-b',
           publicationStatus: 'disabled',
           botDisplayName: '资料员石墨',
           appId: 'cli_agent_b',
           managementUrl: 'https://open.feishu.cn/app/cli_agent_b/baseinfo',
-          failureCode: null
+          failureCode: null,
+          ownerIdentityStatus: 'verified'
         }]
       }],
-      projectBindings: [],
-      unboundConversations: [],
-      conversationBindings: [],
+      pendingBindingCount: 2,
+      bindingIssueCount: 1,
       activeQrAttempt: null,
       activeProvisioning: null
     }
@@ -106,34 +108,28 @@ describe('Channel settings', () => {
     expect(markup).toContain('rel="noreferrer noopener"')
     expect(markup).toContain('>飞书管理</a>')
     expect(markup).toContain('>重新发布</button>')
+    expect(markup).toContain('主人身份待核验')
+    expect(markup).toContain('2 个待选择')
+    expect(markup).toContain('绑定完成后不可换绑')
     expect(markup).not.toContain('>管理</button>')
     expect(markup).not.toContain('停用 Bot')
     expect(markup).not.toContain('兼容扫码发布')
     expect(markup).not.toMatch(/app secret|cookie|csrf|token/i)
   })
 
-  it('prevents a duplicate Quick Chat binding and keeps the Core conflict user-facing', () => {
+  it('keeps project paths and manual binding controls off the local settings surface', () => {
     const snapshot = unavailableSnapshot()
-    snapshot.projectBindings = [{
-      projectBindingId: 'binding-quick-chat',
-      displayName: 'Quick Chat',
-      bindingKind: 'quick_chat',
-      canonicalPath: '/private/quick-chat',
-      status: 'active',
-      version: 1
-    }]
+    snapshot.pendingBindingCount = 1
     const markup = renderToStaticMarkup(createElement(ChannelSettingsView, {
       agents: [agent('agent-a', 0)],
-      snapshot,
-      onCreateBinding: () => undefined
+      snapshot
     }))
 
-    expect(markup).toContain('disabled="" title="Quick Chat 已登记"')
-    expect(markup).toContain('>Quick Chat 已添加</button>')
-    expect(markup).not.toContain('>添加 Quick Chat</button>')
-    expect(channelErrorMessage(new Error(
-      "Error invoking remote method 'rovai:channels-create-project-binding': Error: This canonical path already has a Project Binding"
-    ))).toBe('这个项目已经登记，无需重复添加。')
+    expect(markup).toContain('私聊自动进入 Quick Chat')
+    expect(markup).toContain('1 个待选择')
+    expect(markup).not.toContain('/private/quick-chat')
+    expect(markup).not.toContain('添加项目')
+    expect(markup).not.toContain('绑定会话')
     expect(channelErrorMessage(new Error(
       "Error invoking remote method 'rovai:channels-retry-member-bot': Error: feishu_console_remote_app_unavailable"
     ))).toBe('原飞书应用已删除或当前账号无权访问，无法按原 App ID 重试。')
@@ -161,7 +157,7 @@ describe('Channel settings', () => {
 
 function unavailableSnapshot(): ChannelSettingsSnapshot {
   return {
-    schemaVersion: 3,
+    schemaVersion: 4,
     channels: [{
       kind: 'feishu',
       displayName: '飞书',
@@ -169,9 +165,8 @@ function unavailableSnapshot(): ChannelSettingsSnapshot {
       connection: { status: 'not_connected', account: null },
       memberBots: []
     }],
-    projectBindings: [],
-    unboundConversations: [],
-    conversationBindings: [],
+    pendingBindingCount: 0,
+    bindingIssueCount: 0,
     activeQrAttempt: null,
     activeProvisioning: null
   }

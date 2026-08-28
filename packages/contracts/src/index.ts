@@ -1957,36 +1957,6 @@ export type ChannelPublicationStatus =
 
 export type ChannelConversationKind = 'p2p' | 'group' | 'topic'
 
-export interface ProjectBindingView {
-  projectBindingId: string
-  displayName: string
-  bindingKind: ProjectBindingKind
-  canonicalPath: string
-  status: 'active' | 'archived'
-  version: number
-}
-
-export interface UnboundChannelConversationView {
-  channelConversationId: string
-  provider: ChannelKind
-  conversationKind: ChannelConversationKind
-  displayName: string
-  lastSenderDisplayName: string
-  firstSeenAt: string
-  lastSeenAt: string
-  version: number
-}
-
-export interface ChannelConversationBindingView {
-  channelConversationId: string
-  displayName: string
-  conversationKind: ChannelConversationKind
-  projectBindingId: string
-  campId: string | null
-  status: 'active'
-  version: number
-}
-
 export type ChannelQrAttemptPurpose = 'account_login'
 
 export interface ChannelQrAttemptView {
@@ -2031,6 +2001,7 @@ export interface ChannelMemberBotView {
   appId: string | null
   managementUrl: string | null
   failureCode: string | null
+  ownerIdentityStatus: 'verified' | 'unverified'
 }
 
 export interface MemberBotProvisioningView {
@@ -2062,11 +2033,10 @@ export interface ChannelProviderView {
 }
 
 export interface ChannelSettingsSnapshot {
-  schemaVersion: 3
+  schemaVersion: 4
   channels: ChannelProviderView[]
-  projectBindings: ProjectBindingView[]
-  unboundConversations: UnboundChannelConversationView[]
-  conversationBindings: ChannelConversationBindingView[]
+  pendingBindingCount: number
+  bindingIssueCount: number
   activeQrAttempt: ChannelQrAttemptView | null
   activeProvisioning: MemberBotProvisioningView | null
 }
@@ -2078,30 +2048,6 @@ export interface ChannelsApi {
   publishMemberBot(agentId: string): Promise<ChannelSettingsSnapshot>
   retryMemberBot(agentId: string): Promise<ChannelSettingsSnapshot>
   cancelQrAttempt(attemptId: string): Promise<ChannelSettingsSnapshot>
-  createProjectBinding(input: {
-    commandId: string
-    displayName: string
-    bindingKind: ProjectBindingKind
-    canonicalPath: string
-  }): Promise<ChannelSettingsSnapshot>
-  updateProjectBinding(input: {
-    commandId: string
-    projectBindingId: string
-    displayName: string
-    expectedVersion: number
-  }): Promise<ChannelSettingsSnapshot>
-  archiveProjectBinding(input: {
-    commandId: string
-    projectBindingId: string
-    expectedVersion: number
-  }): Promise<ChannelSettingsSnapshot>
-  bindConversation(input: {
-    commandId: string
-    channelConversationId: string
-    projectBindingId: string
-    expectedConversationVersion: number
-  }): Promise<ChannelSettingsSnapshot>
-  selectProjectDirectory(): Promise<string | null>
   onChanged(listener: (snapshot: ChannelSettingsSnapshot) => void): () => void
 }
 
@@ -2784,10 +2730,6 @@ export type CoreMethod =
   | 'mcp.import.scan'
   | 'mcp.import.commit'
   | 'conversations.restartNativeSession'
-  | 'projectBindings.list'
-  | 'projectBindings.create'
-  | 'projectBindings.update'
-  | 'projectBindings.archive'
   | 'channels.feishu.snapshot'
   | 'channels.feishu.account.upsert'
   | 'channels.feishu.account.disconnect'
@@ -2795,7 +2737,9 @@ export type CoreMethod =
   | 'channels.feishu.publicationIntent.create'
   | 'channels.feishu.publicationIntent.advance'
   | 'channels.feishu.memberBot.upsert'
-  | 'channels.conversations.bind'
+  | 'channels.feishu.owner.verify'
+  | 'channels.feishu.dm.startNew'
+  | 'channels.feishu.pendingBinding.resolve'
   | 'channels.membership.add'
   | 'channels.membership.remove'
   | 'channels.inbound.observe'

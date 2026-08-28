@@ -98,6 +98,7 @@ type ClientOptions = {
 const MANIFEST_SCHEMA_VERSION = '0.0.1'
 export const FEISHU_MEMBER_BOT_TEMPLATE_ID = 'developer_console'
 export const FEISHU_LONG_CONNECTION_MODE = 4
+export const FEISHU_PROJECT_SELECTION_CALLBACK = 'card.action.trigger'
 const FEISHU_SCOPE_STATUS_DISABLED = 0
 const FEISHU_SCOPE_STATUS_ENABLED = 5
 const FEISHU_APP_SCOPE_IDENTITY_TYPE = 2
@@ -410,24 +411,8 @@ export class OpenPlatformApiClient {
     signal?: AbortSignal
   ): Promise<FeishuConfigurationMutationResult> {
     const id = requireResourceId(appId, 'feishu_console_app_id_invalid')
-    let changed = false
-    let state = await this.readCallbackState(id, signal)
-    if (state.callbacks.length > 0 && state.callbackMode !== FEISHU_LONG_CONNECTION_MODE) {
-      await this.#request(
-        'switch_callback',
-        `/developers/v1/callback/switch/${encodeURIComponent(id)}`,
-        {
-          body: { clientId: id, callbackMode: FEISHU_LONG_CONNECTION_MODE },
-          mutation: true,
-          signal
-        }
-      )
-      changed = true
-      state = await this.readCallbackState(id, signal)
-      if (state.callbackMode !== FEISHU_LONG_CONNECTION_MODE) {
-        throw apiError('feishu_console_callback_verification_failed', true)
-      }
-    }
+    const callbackItemBudget = { remainingAttempts: this.#configurationPollAttempts }
+    const initialState = await this.readCallbackState(id, signal)
     const manifestChanged = await this.#updateManifest(
       'configure_callback_manifest',
       id,
@@ -438,13 +423,52 @@ export class OpenPlatformApiClient {
           ...manifest,
           callbacks: {
             ...callbacks,
-            items: stringArray(callbacks.items)
+            items: unionStrings(callbacks.items, [FEISHU_PROJECT_SELECTION_CALLBACK]),
+            subscription_type: 'websocket'
           }
         }
       },
       signal
     )
-    return { changed: changed || manifestChanged }
+    let state = initialState.callbacks.includes(FEISHU_PROJECT_SELECTION_CALLBACK)
+      ? initialState
+      : await this.#readCallbackStateUntil(
+        id,
+        (candidate) => candidate.callbacks.includes(FEISHU_PROJECT_SELECTION_CALLBACK),
+        callbackItemBudget,
+        signal
+      )
+    if (!state) throw apiError('feishu_console_callback_verification_failed', true)
+
+    let changed = manifestChanged
+    if (state.callbackMode !== FEISHU_LONG_CONNECTION_MODE) {
+      await this.#request(
+        'switch_callback',
+        `/developers/v1/callback/switch/${encodeURIComponent(id)}`,
+        {
+          body: { clientId: id, callbackMode: FEISHU_LONG_CONNECTION_MODE },
+          mutation: true,
+          signal
+        }
+      )
+      changed = true
+      const callbackModeBudget = { remainingAttempts: this.#configurationPollAttempts }
+      state = await this.#readCallbackStateUntil(
+        id,
+        (candidate) => (
+          candidate.callbackMode === FEISHU_LONG_CONNECTION_MODE
+          && candidate.callbacks.includes(FEISHU_PROJECT_SELECTION_CALLBACK)
+        ),
+        callbackModeBudget,
+        signal
+      )
+    }
+    if (
+      !state
+      || state.callbackMode !== FEISHU_LONG_CONNECTION_MODE
+      || !state.callbacks.includes(FEISHU_PROJECT_SELECTION_CALLBACK)
+    ) throw apiError('feishu_console_callback_verification_failed', true)
+    return { changed }
   }
 
   async readScopeCatalog(
@@ -751,8 +775,8 @@ export class OpenPlatformApiClient {
       || !includesEvery(eventState.appEvents, input.configuration.tenantEvents)
     ) throw apiError('feishu_console_event_verification_failed', true)
     if (
-      callbackState.callbacks.length > 0
-      && callbackState.callbackMode !== FEISHU_LONG_CONNECTION_MODE
+      callbackState.callbackMode !== FEISHU_LONG_CONNECTION_MODE
+      || !callbackState.callbacks.includes(FEISHU_PROJECT_SELECTION_CALLBACK)
     ) {
       throw apiError('feishu_console_callback_verification_failed', true)
     }
@@ -841,6 +865,23 @@ export class OpenPlatformApiClient {
     while (budget.remainingAttempts > 0) {
       budget.remainingAttempts -= 1
       const state = await this.readEventState(appId, signal)
+      if (ready(state)) return state
+      if (budget.remainingAttempts > 0) {
+        await this.#delay(this.#configurationPollIntervalMs, signal)
+      }
+    }
+    return null
+  }
+
+  async #readCallbackStateUntil(
+    appId: string,
+    ready: (state: FeishuOpenPlatformCallbackState) => boolean,
+    budget: { remainingAttempts: number },
+    signal?: AbortSignal
+  ): Promise<FeishuOpenPlatformCallbackState | null> {
+    while (budget.remainingAttempts > 0) {
+      budget.remainingAttempts -= 1
+      const state = await this.readCallbackState(appId, signal)
       if (ready(state)) return state
       if (budget.remainingAttempts > 0) {
         await this.#delay(this.#configurationPollIntervalMs, signal)

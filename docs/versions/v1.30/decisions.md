@@ -12,6 +12,8 @@ last_updated: 2026-08-28
 <a id="v1-30-d01"></a>
 ## V1.30-D01：项目绑定是主人本机目录，不把外部成员提升为本地用户
 
+> 当前产品语义已由 [V1.30-D09](#v1-30-d09)取代；本节保留早期方案的取舍记录。
+
 ### 背景
 
 飞书群成员需要使用 Agent，但本机项目路径可以暴露源码、凭据和文件权限。authorized users、sender allowlist 或
@@ -24,8 +26,8 @@ Binding ID。绑定后任意会话成员可通过私聊或显式 mention 使用 
 和回复目标，不获得任何主人能力。
 
 未绑定消息只记录待绑定会话，不建立 Principal、Camp 或执行；主人绑定后发送者必须重发。当前规范见
-[飞书渠道架构](../../architecture/feishu-channel.md#项目与会话)和
-[Feishu Channel v2](../../contracts/feishu-channel-v2.md#2-projectbinding-与渠道会话)。
+[飞书渠道架构](../../architecture/feishu-channel.md#owner-only-入站与会话执行范围)和
+[Feishu Channel v2](../../contracts/feishu-channel-v2.md#2-owner-only-camp-与项目选择)。
 
 ### 后果
 
@@ -322,3 +324,48 @@ Renderer 使用八个进行中阶段，并把固定 failure code 降为次级诊
 - **首次发布前等待完整业务配置：** 把最终一致性等待放在应用尚未 activation 的阶段，重复触发 Event 假失败；
 - **所有后续失败继续标成 unknown：** 混淆“创建是否发生”和“已知 App 是否配置完成”，阻断安全 reconciliation；
 - **固定总是发布 `1.0.1`：** 重试或 crash recovery 会重复版本，无法表达配置实际是否发生 mutation。
+
+<a id="v1-30-d09"></a>
+## V1.30-D09：飞书一期收敛为 Owner-only Camp，群与话题首次在私聊冻结项目
+
+### 背景
+
+V1.30-D01 允许绑定会话中的任意飞书成员触发 Agent，并让主人在渠道设置页维护第二套 ProjectBinding 目录与会话
+绑定。该模型同时引入外部成员准入、桌面端手工目录、未绑定消息重发和项目切换四套长期状态，却没有提升一期的核心
+体验。群内公开项目列表还会泄露本机工作范围，多 Bot 各自抢先回卡则会重复暴露选择入口。
+
+### 决定
+
+飞书一期只有连接开发者账号所确认的 Owner 能触发人类根消息；每个 App 通过 `union_id -> tenant user_id -> verified
+open_id` fail closed 识别。Owner 的渠道消息仍是 `ExternalPrincipal`，不映射为 `local_user`。非 Owner 私聊最多收到
+节流提示，群/话题静默忽略，且都在 observation 前终止，不产生 Principal、conversation、pending binding、Camp 或 Run。
+
+删除渠道侧人工 ProjectBinding 与会话绑定操作。Core 从 Rovai 既有 directory Camp 事实投影 Project Catalog；飞书只
+接收 opaque `projectId + displayName`。Owner 私聊自动使用当前 Quick Chat Camp；精确 `/new` 只在私聊关闭当前 generation、
+创建新 Quick Chat Camp，且不产生 CampMessage/Turn/Run。活动根请求期间 fail closed。
+
+普通群一个长期 Camp，话题按 canonical topic 各有一个 Camp。首次合格 Owner mention 在完整 multi-Bot aggregate finalize
+后建立 `PendingCampBinding`，冻结原始消息并私聊 Owner 一张项目卡；canonical mention 顺序中的第一个受管 Bot 被冻结为
+`acknowledgementAppId`，重试、恢复和后续 pending 消息不能换 Bot 或重复发卡。Card callback 只信 envelope operator，
+使用 nonce/version/CAS 校验；选择 active 项目后原子创建不可换绑的 Camp，并把冻结消息按 FIFO 送入既有统一 admission。
+
+当前规范见[飞书渠道架构](../../architecture/feishu-channel.md#owner-only-入站与会话执行范围)、
+[Feishu Channel v2](../../contracts/feishu-channel-v2.md#2-owner-only-camp-与项目选择)和
+[渠道设置](../../ui/components/channel-settings.md#页面结构)。
+
+### 后果
+
+- 一期没有飞书成员授权、渠道项目管理或会话换绑状态；
+- 私聊即时可用，`/new` 只轮换 Quick Chat 历史，不把控制指令送入模型；
+- 群/话题只选择一次项目，Camp 冻结路径后不可换绑；
+- 项目列表只发送给 Owner，多 Bot 同一消息只有一张可恢复卡；
+- `card.action.trigger`、callback mode 4 与在线回读成为每个队员 Bot 的发布必需能力。
+
+### 被拒绝方案
+
+- **继续允许绑定后的任意成员触发：** 扩大一期身份与滥用面，并需要额外的项目可见性和治理规则；
+- **保留渠道页手工项目目录/会话绑定：** 重复 Rovai 既有项目事实源，造成路径和生命周期漂移；
+- **未绑定消息要求重发：** 丢失 Owner 已明确表达的首条请求，且无法提供连续群聊体验；
+- **每个被 mention Bot 都发项目卡：** 重复展示项目并产生 callback 竞态；
+- **在公共群展示项目选择：** 泄露本机项目名称和工作范围；
+- **允许群内 `/new` 或项目换绑：** 破坏一个群/话题、一个 Camp、一个冻结执行范围的不变量。

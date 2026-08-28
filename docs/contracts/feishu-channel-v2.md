@@ -9,8 +9,8 @@ last_updated: 2026-08-28
 
 # Feishu Channel v2 Contract
 
-本合同继承 v1 的 Actor、ProjectBinding、渠道会话、ExternalPrincipal、多 Bot 聚合、串行
-ChannelTurnRequest、群 roster 和 ChannelDelivery 的字段与状态语义。Camp membership 仍由
+本合同拥有 Owner-only 入站、Quick Chat generation、Core Project Catalog、PendingCampBinding、渠道会话、
+ExternalPrincipal、多 Bot 聚合、串行 ChannelTurnRequest、群 roster 和 ChannelDelivery 的字段与状态语义。Camp membership 仍由
 [Camp Membership v1](camp-membership-v1.md)拥有，模型输入由
 [ContextManifest Evidence v22](context-manifest-evidence-v22.md)拥有。v2 替换队员 Bot 的创建、首次发布、
 配置收敛、远端失败分类、恢复和 Renderer 进度合同；v1 成为历史合同。
@@ -19,14 +19,14 @@ ChannelTurnRequest、群 roster 和 ChannelDelivery 的字段与状态语义。C
 
 | 能力 | 合格 Actor |
 | --- | --- |
-| ProjectBinding create/update/archive | `local_user` |
-| 渠道会话 bind/switch | `local_user` |
 | 连接/断开账号、发布队员 Bot | 本机主人经 typed Desktop API |
-| inbound observe/finalize、roster、Host tick、delivery settle | `feishu-channel-host` System component |
+| Owner identity verify、inbound observe/finalize、DM `/new`、项目卡 resolve、roster、Host tick、delivery settle | `feishu-channel-host` System component |
 | Camp membership source mutation | `channel-membership-sync` + exact `feishu` source binding/generation |
 
-`ExternalPrincipal` 没有上述管理能力。不存在 authorized user、sender allowlist、项目申请或飞书侧项目选择。
-绑定会话中的任意成员可发送私聊消息，或在群/话题显式 mention 已发布 Bot。
+`ExternalPrincipal` 没有任何本机主人能力。不存在 authorized user、sender allowlist、渠道侧人工项目目录、会话换绑或
+外部成员项目申请。只有已验证 Feishu Owner 可以触发消息；Owner 仍投影为 ExternalPrincipal，不能借渠道消息调用
+`local_user` 命令。项目卡 resolve 是窄的 `ChannelBindingApproval`：只能为 exact pending binding 选择一个现存 active
+project 或取消/刷新，不能创建项目、改路径、改 Agent 或发布 Bot。
 
 Developer Session Cookie jar 与 App Secret 只存于 Electron Main，并以 OS `safeStorage` 加密；页面 bootstrap 取得的
 CSRF 只在一次 Main 发布流程内存活。Core 仅持久化
@@ -36,57 +36,79 @@ Developer Identity 的摘要/显示字段和每 Bot `credentialRef`；Renderer/A
 安全存储预检；显式隔离验收实例使用由其 `userData` 目录摘要派生的独立应用名作为 safeStorage 命名空间，目录原文
 不得进入命名空间或日志。
 
-## 2. ProjectBinding 与渠道会话
+## 2. Owner-only Camp 与项目选择
+
+连接账号后 Core 为其建立 `FeishuOwnerIdentity`，并为每个已发布 App 维护经过消息或 callback envelope 验证的
+per-App identity。普通入站按 `union_id -> tenant user_id -> current-App open_id` 分类；缺少可靠映射时 Bot 状态为
+`owner_identity_unverified`，所有人类消息 fail closed。顺序固定为 transport dedup、sender 解析、Owner 校验、会话类型、
+群/话题显式 mention、multi-Bot observe。Non-owner 私聊最多收到每 App/身份 24 小时一次提示，群/话题静默忽略；两者
+都不得创建 ExternalPrincipal、ChannelConversation、aggregate、PendingCampBinding、Camp 或 Run。
+
+Core 从现有 directory-backed Camp 的 canonical project path 投影 Project Catalog，而不是让 Channel 维护第二套目录：
 
 ```ts
-type ProjectBinding = {
-  projectBindingId: `rvpb_${string}`
+type ChannelProjectCatalogItem = {
+  projectId: `rvproj_${string}`
   displayName: string
-  bindingKind: 'quick_chat' | 'directory'
-  canonicalPath: string
-  status: 'active' | 'archived'
+  status: 'active' | 'unavailable' | 'archived'
+  lastOpenedAt: string | null
   version: number
+  // canonicalPath 只在 Core 内部持久化
 }
 ```
 
-创建前 Main 复用 workspace inspection，Core 再验证显示名、kind 和规范路径。`canonicalPath` 唯一。update 只改
-显示名；archive 要求 exact version、active 且没有渠道会话引用。所有命令幂等并使用 User Actor。
+卡片只包含 active 项的 `projectId + displayName`。路径缺失时项目变为 unavailable，已经不在当前项目事实源的项变为
+archived；旧卡 resolve 必须重新回读状态和目录可用性，不能静默选择其他路径。Camp 创建后冻结 existing
+`project_binding_kind + project_path`，Project Catalog 后续变化不改写 Camp。
 
 ```ts
-type ChannelConversation = {
+type ChannelConversationBinding = {
+  bindingId: string
   channelConversationId: string
-  provider: 'feishu'
-  tenantKey: string
-  chatId: string
-  topicKey: string
-  botScopeAppId: string
-  conversationKind: 'p2p' | 'group' | 'topic'
-  displayName: string
-  lastSenderDisplayName: string
-  lastSenderPrincipalId: string | null
+  executionScopeKind: 'quick_chat' | 'project'
+  projectId: string | null
+  campId: string | null
+  status: 'active' | 'closed'
+  generation: number
   version: number
 }
 ```
 
-Identity 必须满足：
+会话 identity 保持：p2p 为 `tenant + receiving app + chat`；普通群为 `tenant + chat`；话题为
+`tenant + chat + canonical topic`。私聊第一条 Owner 消息自动创建 `quick_chat` active generation 和 Camp，并立即走统一
+admission；不展示项目卡。精确 `/new` 只在 Owner p2p 生效：要求没有 collecting aggregate、queued/admitted request，
+关闭当前 generation，立即创建新 Quick Chat Camp，并回复“已开始新的快速对话”。该控制命令不创建 aggregate、
+CampMessage、CampTurn 或 AgentRun；群/话题中的 `/new` 静默不生效。
 
-- `p2p`: `topicKey=''` 且 `botScopeAppId=receivingAppId`；
-- `group`: `topicKey=''` 且 `botScopeAppId=''`；
-- `topic`: `topicKey` 非空且 `botScopeAppId=''`。
+普通群一个不可换绑的 project Camp；每个 topic identity 各有一个不可换绑 project Camp。首次合格 Owner mention 在
+aggregate finalize 时创建或复用：
 
-一个会话至多一个 active `ChannelConversationBinding`。bind 输入为
-`channelConversationId + projectBindingId + expectedConversationVersion`。相同 Binding 是成功 no-op；switch 要求
-没有 `queued | admitted` 请求，并把 `campId` 清空。下一次合格消息才基于新 Binding 创建 Camp。
-
-首次未绑定消息只允许创建或更新 `ChannelConversation` 和临时 transport aggregate。它不得创建
-ExternalPrincipal、ChannelTurnRequest、Camp、CampMessage、CampTurn 或 AgentRun。observation 冻结
-`bindingIdAtObservation`；空值或 finalize 时不再匹配 exact active Binding 时返回：
-
-```json
-{"code":"channel.inbound.unbound","payload":{"status":"unbound","requiresResend":true}}
+```ts
+type PendingCampBinding = {
+  pendingBindingId: string
+  channelConversationId: string
+  ownerPrincipalId: string
+  acknowledgementAppId: string
+  status: 'pending' | 'resolving' | 'resolved' | 'cancelled' | 'expired'
+  version: number
+  nonceDigest: string
+  expiresAt: string
+  projectId: string | null
+  bindingId: string | null
+  campId: string | null
+}
 ```
 
-之后完成 bind 不回放该消息。
+原始 Structured Content、target Agents 与 ack App 进入 `PendingCampMessage` FIFO；此时没有 ChannelTurnRequest、Camp、
+CampMessage、CampTurn 或 AgentRun。同一 conversation 的后续合格消息复用 pending row，不重复发卡。唯一
+`project_selection` delivery 由完整 canonical mention 顺序中的第一个受管 Bot 私聊 Owner；它的
+`acknowledgementAppId` 对重试、恢复和后续 pending messages 保持冻结。
+
+Card action 只携带 `pendingBindingId + projectId? + expectedVersion + nonce + action`。Host 只从 callback envelope 读取
+operator identity，Core 对 frozen App、Owner 的 `union_id/open_id`、nonce、version、expiry 与 project availability
+重新校验。bind 使用 `pending -> resolving -> resolved` CAS，在同一事务创建 immutable binding/Camp，并把全部 frozen
+messages 按 FIFO 转为 ChannelTurnRequest 后调用统一 admission；所有 roster/project 前置条件必须在 CAS 前通过。双击、
+旧卡、重放和错误 App 均不能创建第二个 Camp。
 
 ## 3. 飞书账号与队员 Bot
 
@@ -181,9 +203,9 @@ Scope 必须先通过 `/developers/v1/scope/all/:appId` 把当前 catalog 中的
 Event 必须通过 `/developers/v1/event/:appId` 回读，以 `/developers/v1/event/switch/:appId` 把 `eventMode` 设置为 `4`，
 再由 `/developers/v1/event/update/:appId` 写入 App events。最终在线状态必须包含
 `im.message.receive_v1`、`im.chat.member.bot.added_v1`、`im.chat.member.bot.deleted_v1` 且 `eventMode=4`。
-如果在线 callback 集合非空，`callbackMode` 同样必须经 callback switch 与回读证明为 `4`；当前没有 interactive callback
-items 时不要求虚构 callback 配置。返回前还必须回读在线 Bot enable、上述 scopes/events/callback 条件和 published
-version status。任一 mutation 的 HTTP/envelope 成功都不能替代最终回读。
+项目选择依赖 interactive card，所有队员 Bot 必须在线订阅 `card.action.trigger`，并经 callback switch 与回读证明
+`callbackMode=4`。返回前还必须回读在线 Bot enable、上述 scopes/events、该 callback、双 mode 4 和 published version
+status。任一 mutation 的 HTTP/envelope 成功都不能替代最终回读。
 
 Scope、Event 与 Callback 配置分别返回是否发生远端或 Manifest mutation。Event mode 和 App events 共享一份
 120 秒收敛预算，默认每秒回读一次；该预算是平台最终一致性的安全网，不得缩短成 10 秒，也不得用重复创建替代等待。
@@ -235,9 +257,9 @@ event hook，因此不得把 `message.normalized` 冒充 `raw_event.received`。
 
 ## 4. ExternalPrincipal 与 Structured Content
 
-绑定消息按以下优先级归并同一真人的 App identity：`union_id`、tenant `user_id`、App-scoped `open_id`；最终
-ExternalPrincipal key 是 `provider + tenant + canonical external user identity`。Core 可以持久化 App identity
-映射以找到同一 principal 的接收 open ID，但 Agent-facing 投影只含 provider 和 display name。
+只有已通过 Owner gate 的消息才建立 ExternalPrincipal。Owner 按 `union_id`、tenant `user_id`、App-scoped `open_id`
+归并为同一个 canonical principal；最终 key 是 `provider + tenant + canonical external user identity`。Core 可以持久化
+per-App identity 以找回私聊接收 open ID，但 Agent-facing 投影只含 provider 和 display name，Actor 仍不是 local user。
 
 当前触发消息的 Structured Content 为：
 
@@ -289,8 +311,9 @@ type ObserveChannelInbound = {
 }
 ```
 
-Host 在 observe 前执行有效消息门：p2p 接受；group/topic 要求显式 mention 一个以上 published managed Bot；
-echo、未 mention 和缺失 canonical topic 忽略。Core 重验所有 target Agent 与 App 映射。
+Host 在 observe 前先调用 Core Owner verify；只有 classification=owner 才继续。p2p 接受普通消息，精确 `/new` 在这里
+分流为控制命令；group/topic 要求显式 mention 一个以上 published managed Bot。echo、non-owner、未 mention、群内
+`/new` 和缺失 canonical topic 都在 observation 前停止。Core 在 observe/finalize 再验 Owner、target Agent 与 App 映射。
 
 当前消息的资源一期只把 SDK 提供的名称和类型冻结为 Structured Content 文本摘要，不下载或绑定
 `message_attachment`。ChannelDelivery 一期只发送状态卡、文本和卡片，不发送 Camp 图片/文件；资源传输需要
@@ -305,14 +328,18 @@ Aggregate identity 是 `provider + tenant + digest(externalMessageId)`，observa
 `failed/aggregation_timeout`。Host tick 对过期 collecting aggregate执行同一 fail-closed 终态。finalize 和失败
 均幂等；终态 transport rows 七天后且无开放请求时可清理。
 
-`acknowledgementAppId` 按 canonical mention 顺序冻结，保证同一消息只有一个 Bot 发送状态卡。expected Apps 的
-持久集合排序不改变该选择。
+`acknowledgementAppId` 只能在 canonical mentions 已完整映射后按其顺序选择第一个受管 Bot；第一条 observation 不得
+抢先定卡片发送者。expected Apps 的持久集合可以稳定排序，但不得改变该选择。即使所有 expected App observations
+已经到齐，尚无 active binding 的 group/topic 若仍不能证明 canonical 顺序，也必须以
+`acknowledgement_app_unresolved` fail closed，不能发项目卡。
 
 ## 6. Camp 创建、roster 与 admission
 
-Finalize 必须重查 observation 时的 exact active Binding/ProjectBinding。首次创建 Camp 时冻结
-`bindingKind + canonicalPath`：普通群初始成员是父群 roster 中全部 present/published Bot；p2p 和话题初始成员只
-是当前 targets。默认 Lead 使用稳定 Agent ID order；Camp 同时建立 `feishu` membership source binding。
+Finalize 必须重查 Owner、observation 时冻结的 exact binding 与 project/roster readiness。p2p 没有 binding 时自动建立
+Quick Chat generation/Camp；普通群或话题没有 binding 时只追加 PendingCampBinding FIFO 并终结 aggregate，不创建
+ChannelTurnRequest 或业务消息。项目卡 resolve 后创建 Camp：普通群初始成员是父群 roster 中全部 present/published
+Bot；p2p 和话题初始成员只含当前 targets。默认 Lead 使用稳定 Agent ID order；Camp 同时建立 `feishu` membership
+source binding。
 
 父群 roster 输入必须是 Host 对所有 published Bot 完成的 authoritative `presentAppIds` 快照。每个快照推进
 roster generation；未知 App 拒绝。普通群对 desired/current 差异调用 Camp Membership v1 正式 add/remove。
@@ -342,6 +369,7 @@ active root Turn 的 Run、A2A、Gather 和 required Delivery 全部正式终结
 
 ```ts
 type ChannelDeliveryKind =
+  | 'project_selection'
   | 'queue_ack'
   | 'agent_status'
   | 'agent_output'
@@ -351,9 +379,14 @@ type ChannelDeliveryKind =
 type ChannelDeliveryStatus = 'pending' | 'attempting' | 'sent' | 'failed'
 ```
 
-每项 delivery 有唯一 `dedupeKey`、target App、可选 source Agent/CampMessage、payload、attempt count、available
-time 和外部 message ID。claim 使用 30 秒 lease；过期 attempting 可以被新 worker 领取。retryable error 使用有界
-指数退避，最多五次；terminal sent/failed 单调。成功 CampMessage 不因飞书发送失败回滚。
+普通 delivery 关联 exact request；`project_selection` 只关联 exact pending binding。每项 delivery 有唯一
+`dedupeKey`、target App、可选 source Agent/CampMessage、payload、attempt count、available time 和外部 message ID。
+claim 使用 30 秒 lease；过期 attempting 可以被新 worker 领取。retryable error 使用有界指数退避，最多五次；terminal
+sent/failed 单调。成功 CampMessage 不因飞书发送失败回滚。
+
+project selection 必须由 frozen acknowledgement App 直接发送到 Owner open ID，不投递到原群/话题；payload 只有
+conversation display name、opaque project options、nonce/version，没有 path 或 operator identity。refresh 更新原卡，
+bind/cancel/stale/expired 使用 terminal card 收口。
 
 queue ack 首次发送后保存 external message ID，admission 原位更新为“已开始”；失败/attention 同样优先更新既有
 状态卡。Agent output 选择实际作者 Agent 的 published Bot；作者不可用时生成 attention，不由 ack Bot 冒充。
@@ -365,10 +398,11 @@ identity 和 Core transport aggregation阻止再次触发。
 
 ## 8. Snapshot 与恢复
 
-Core Host snapshot schema 1 包含 Developer Identity account、带绑定账号 brand 的 member bots、publication intents、ProjectBindings、
-unbound/bound conversations，以及仅供 Main 的 `transportConversations` 与 `pendingAggregates`。Main 对 Renderer
-投影 schema 3，只保留账号显示字段、每 Bot 状态、当前 provisioning 进度，以及由绑定 brand 和冻结 App ID 生成的
-`managementUrl`。该 URL 只能是 `https://open.feishu.cn/app/{encodedAppId}/baseinfo` 或
+Core Host snapshot schema 2 包含 Developer Identity account、带绑定账号 brand/Owner verification 的 member bots、
+publication intents、pending/bound diagnostic counts，以及仅供 Main 的 `transportConversations` 与
+`pendingAggregates`。Main 对 Renderer 投影 schema 4，只保留账号显示字段、每 Bot 状态、Owner identity 状态、当前
+provisioning 进度、静默诊断计数，以及由绑定 brand 和冻结 App ID 生成的 `managementUrl`。不存在项目目录或会话绑定
+操作投影。该 URL 只能是 `https://open.feishu.cn/app/{encodedAppId}/baseinfo` 或
 `https://open.larksuite.com/app/{encodedAppId}/baseinfo`；Renderer 不接收任意管理 URL。投影必须删除 Host-only 后两项、
 原始 userId 与所有 credential refs。
 
@@ -388,12 +422,15 @@ Migration 113 从 `Data Contract v1.25 / projection schema 66` 升到 `v1.26 / s
 `external_principal` CampMessage author、ContextManifest 22 pairing 和 Formatter 22 new-write trigger。Migration 114
 再升到 `Data Contract v1.27 / projection schema 68`，给 `feishu_account` 增加真实 Developer Identity/Session 时间字段，
 并增加持久 publication intent。旧 controller account 记录全部退出 connected；没有 Bot 引用的错误记录删除，有已发布
-Bot 引用的旧记录仅作历史外键保留，不能再投影为当前账号。两次迁移均保留既有 Camp、消息、Manifest、Bot credential
-reference 与 terminal evidence，不自动删除远端测试 App。
+Bot 引用的旧记录仅作历史外键保留，不能再投影为当前账号。Migration 115 收紧队员 App identity 唯一状态机；Migration
+116 升到 `Data Contract v1.28 / projection schema 69`，以 Core Project Catalog、Feishu Owner identity/per-App mapping、
+generation-aware conversation binding、PendingCampBinding/FIFO message 和 private project-selection delivery 替换旧的
+人工 ProjectBinding 正常路径。迁移保留既有 Camp、消息、Manifest、Bot credential reference 与 terminal evidence，
+不会删除或新建任何远端 App。
 
 ## References
 
 - [飞书渠道架构](../architecture/feishu-channel.md)
 - [Camp Membership v1](camp-membership-v1.md)
 - [ContextManifest Evidence v22](context-manifest-evidence-v22.md)
-- [v1.30 决策记录](../versions/v1.30/decisions.md#v1-30-d08)
+- [v1.30 决策记录](../versions/v1.30/decisions.md#v1-30-d09)

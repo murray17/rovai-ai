@@ -8,6 +8,7 @@ use chrono::{Duration, Utc};
 use rusqlite::{OptionalExtension, Transaction, params};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
+use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
 use crate::{
@@ -35,57 +36,7 @@ const AGGREGATION_WINDOW_SECONDS: i64 = 3;
 const DELIVERY_LEASE_SECONDS: i64 = 30;
 const CHANNEL_TRANSPORT_RETENTION_DAYS: i64 = 7;
 const MAX_DELIVERY_ATTEMPTS: i64 = 5;
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct CreateProjectBindingCommand {
-    pub display_name: String,
-    pub binding_kind: String,
-    pub canonical_path: String,
-}
-
-impl sealed::Sealed for CreateProjectBindingCommand {}
-impl DomainCommand for CreateProjectBindingCommand {
-    const TYPE: &'static str = "project_binding.create";
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct UpdateProjectBindingCommand {
-    pub project_binding_id: String,
-    pub display_name: String,
-    pub expected_version: i64,
-}
-
-impl sealed::Sealed for UpdateProjectBindingCommand {}
-impl DomainCommand for UpdateProjectBindingCommand {
-    const TYPE: &'static str = "project_binding.update";
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ArchiveProjectBindingCommand {
-    pub project_binding_id: String,
-    pub expected_version: i64,
-}
-
-impl sealed::Sealed for ArchiveProjectBindingCommand {}
-impl DomainCommand for ArchiveProjectBindingCommand {
-    const TYPE: &'static str = "project_binding.archive";
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct BindChannelConversationCommand {
-    pub channel_conversation_id: String,
-    pub project_binding_id: String,
-    pub expected_conversation_version: i64,
-}
-
-impl sealed::Sealed for BindChannelConversationCommand {}
-impl DomainCommand for BindChannelConversationCommand {
-    const TYPE: &'static str = "channel_conversation.bind";
-}
+const PENDING_BINDING_LIFETIME_HOURS: i64 = 24;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -176,6 +127,58 @@ pub struct UpsertFeishuMemberBotCommand {
 impl sealed::Sealed for UpsertFeishuMemberBotCommand {}
 impl DomainCommand for UpsertFeishuMemberBotCommand {
     const TYPE: &'static str = "feishu_member_bot.upsert";
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VerifyFeishuOwnerCommand {
+    pub provider: String,
+    pub app_id: String,
+    pub tenant_key: String,
+    pub sender_open_id: Option<String>,
+    pub sender_user_id: Option<String>,
+    pub sender_union_id: Option<String>,
+    pub sender_display_name: String,
+}
+
+impl sealed::Sealed for VerifyFeishuOwnerCommand {}
+impl DomainCommand for VerifyFeishuOwnerCommand {
+    const TYPE: &'static str = "feishu_owner.verify";
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StartNewFeishuDmCommand {
+    pub provider: String,
+    pub app_id: String,
+    pub tenant_key: String,
+    pub chat_id: String,
+    pub conversation_display_name: String,
+    pub target_agent_id: String,
+}
+
+impl sealed::Sealed for StartNewFeishuDmCommand {}
+impl DomainCommand for StartNewFeishuDmCommand {
+    const TYPE: &'static str = "channel_dm.start_new";
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ResolvePendingCampBindingCommand {
+    pub pending_binding_id: String,
+    pub app_id: String,
+    pub expected_version: i64,
+    pub nonce: String,
+    pub action: String,
+    pub project_id: Option<String>,
+    pub operator_open_id: Option<String>,
+    pub operator_user_id: Option<String>,
+    pub operator_union_id: Option<String>,
+}
+
+impl sealed::Sealed for ResolvePendingCampBindingCommand {}
+impl DomainCommand for ResolvePendingCampBindingCommand {
+    const TYPE: &'static str = "pending_camp_binding.resolve";
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -288,42 +291,6 @@ impl DomainCommand for SettleChannelDeliveryCommand {
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct ProjectBindingView {
-    pub project_binding_id: String,
-    pub display_name: String,
-    pub binding_kind: String,
-    pub canonical_path: String,
-    pub status: String,
-    pub version: i64,
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct UnboundChannelConversationView {
-    pub channel_conversation_id: String,
-    pub provider: String,
-    pub conversation_kind: String,
-    pub display_name: String,
-    pub last_sender_display_name: String,
-    pub first_seen_at: String,
-    pub last_seen_at: String,
-    pub version: i64,
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ChannelConversationBindingView {
-    pub channel_conversation_id: String,
-    pub display_name: String,
-    pub conversation_kind: String,
-    pub project_binding_id: String,
-    pub camp_id: Option<String>,
-    pub status: String,
-    pub version: i64,
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
 pub struct ChannelTransportConversationView {
     pub channel_conversation_id: String,
     pub binding_id: Option<String>,
@@ -394,6 +361,7 @@ pub struct FeishuMemberBotView {
     pub status: String,
     pub failure_code: Option<String>,
     pub version: i64,
+    pub owner_identity_status: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -403,9 +371,8 @@ pub struct FeishuChannelSnapshot {
     pub account: Option<FeishuAccountView>,
     pub member_bots: Vec<FeishuMemberBotView>,
     pub publication_intents: Vec<MemberBotPublicationIntentView>,
-    pub project_bindings: Vec<ProjectBindingView>,
-    pub unbound_conversations: Vec<UnboundChannelConversationView>,
-    pub conversation_bindings: Vec<ChannelConversationBindingView>,
+    pub pending_binding_count: i64,
+    pub binding_issue_count: i64,
     /// Host-only routing facts. Desktop strips these before exposing settings
     /// state to the Renderer.
     pub transport_conversations: Vec<ChannelTransportConversationView>,
@@ -416,7 +383,7 @@ pub struct FeishuChannelSnapshot {
 #[serde(rename_all = "camelCase")]
 pub struct ClaimedChannelDelivery {
     pub delivery_id: String,
-    pub request_id: String,
+    pub request_id: Option<String>,
     pub delivery_kind: String,
     pub target_app_id: String,
     pub credential_ref: String,
@@ -533,7 +500,8 @@ impl ChannelService {
         Ok(())
     }
 
-    pub fn snapshot(&self, database: &Database) -> Result<FeishuChannelSnapshot> {
+    pub fn snapshot(&self, database: &mut Database) -> Result<FeishuChannelSnapshot> {
+        refresh_project_catalog(database)?;
         let connection = database.connection();
         let account = connection
             .query_row(
@@ -575,7 +543,12 @@ impl ChannelService {
             r#"
             SELECT bot.agent_id, bot.account_id, COALESCE(account.brand, 'feishu'),
                    bot.app_id, bot.bot_display_name, bot.credential_ref,
-                   bot.status, bot.failure_code, bot.version
+                   bot.status, bot.failure_code, bot.version,
+                   EXISTS(
+                       SELECT 1 FROM feishu_owner_app_identity AS identity
+                       WHERE identity.account_id = bot.account_id
+                         AND identity.app_id = bot.app_id
+                   )
             FROM feishu_member_bot AS bot
             JOIN feishu_account AS account ON account.id = bot.account_id
             ORDER BY bot.agent_id
@@ -592,6 +565,11 @@ impl ChannelService {
                     status: row.get(6)?,
                     failure_code: row.get(7)?,
                     version: row.get(8)?,
+                    owner_identity_status: if row.get::<_, bool>(9)? {
+                        "verified".to_string()
+                    } else {
+                        "unverified".to_string()
+                    },
                 })
             },
         )?;
@@ -623,78 +601,6 @@ impl ChannelService {
                     version: row.get(12)?,
                     created_at: row.get(13)?,
                     updated_at: row.get(14)?,
-                })
-            },
-        )?;
-        let project_bindings = query_rows(
-            connection,
-            r#"
-            SELECT id, display_name, binding_kind, canonical_path, status, version
-            FROM project_binding
-            ORDER BY CASE status WHEN 'active' THEN 0 ELSE 1 END,
-                     updated_at DESC, id
-            "#,
-            [],
-            |row| {
-                Ok(ProjectBindingView {
-                    project_binding_id: row.get(0)?,
-                    display_name: row.get(1)?,
-                    binding_kind: row.get(2)?,
-                    canonical_path: row.get(3)?,
-                    status: row.get(4)?,
-                    version: row.get(5)?,
-                })
-            },
-        )?;
-        let unbound_conversations = query_rows(
-            connection,
-            r#"
-            SELECT conversation.id, conversation.provider,
-                   conversation.conversation_kind, conversation.display_name,
-                   conversation.last_sender_display_name,
-                   conversation.first_seen_at, conversation.last_seen_at,
-                   conversation.version
-            FROM channel_conversation AS conversation
-            LEFT JOIN channel_conversation_binding AS binding
-              ON binding.channel_conversation_id = conversation.id
-            WHERE binding.id IS NULL
-            ORDER BY conversation.last_seen_at DESC, conversation.id
-            "#,
-            [],
-            |row| {
-                Ok(UnboundChannelConversationView {
-                    channel_conversation_id: row.get(0)?,
-                    provider: row.get(1)?,
-                    conversation_kind: row.get(2)?,
-                    display_name: row.get(3)?,
-                    last_sender_display_name: row.get(4)?,
-                    first_seen_at: row.get(5)?,
-                    last_seen_at: row.get(6)?,
-                    version: row.get(7)?,
-                })
-            },
-        )?;
-        let conversation_bindings = query_rows(
-            connection,
-            r#"
-            SELECT conversation.id, conversation.display_name,
-                   conversation.conversation_kind, binding.project_binding_id,
-                   binding.camp_id, binding.status, conversation.version
-            FROM channel_conversation_binding AS binding
-            JOIN channel_conversation AS conversation
-              ON conversation.id = binding.channel_conversation_id
-            ORDER BY conversation.last_seen_at DESC, conversation.id
-            "#,
-            [],
-            |row| {
-                Ok(ChannelConversationBindingView {
-                    channel_conversation_id: row.get(0)?,
-                    display_name: row.get(1)?,
-                    conversation_kind: row.get(2)?,
-                    project_binding_id: row.get(3)?,
-                    camp_id: row.get(4)?,
-                    status: row.get(5)?,
-                    version: row.get(6)?,
                 })
             },
         )?;
@@ -764,355 +670,32 @@ impl ChannelService {
                 })
             },
         )?;
+        let pending_binding_count = connection.query_row(
+            "SELECT COUNT(*) FROM pending_camp_binding WHERE status IN ('pending', 'resolving')",
+            [],
+            |row| row.get(0),
+        )?;
+        let binding_issue_count = connection.query_row(
+            r#"
+            SELECT COUNT(*)
+            FROM channel_conversation_binding AS binding
+            LEFT JOIN project_catalog_item AS project ON project.id = binding.project_id
+            WHERE binding.status = 'active'
+              AND binding.execution_scope_kind = 'project'
+              AND (project.id IS NULL OR project.status <> 'active')
+            "#,
+            [],
+            |row| row.get(0),
+        )?;
         Ok(FeishuChannelSnapshot {
-            schema_version: 1,
+            schema_version: 2,
             account,
             member_bots,
             publication_intents,
-            project_bindings,
-            unbound_conversations,
-            conversation_bindings,
+            pending_binding_count,
+            binding_issue_count,
             transport_conversations,
             pending_aggregates,
-        })
-    }
-
-    pub fn create_project_binding(
-        &self,
-        database: &mut Database,
-        envelope: &CommandEnvelope<CreateProjectBindingCommand>,
-    ) -> Result<CommandExecution> {
-        let display_name = normalize_display_name(&envelope.payload.display_name)?;
-        validate_binding_path(
-            &envelope.payload.binding_kind,
-            &envelope.payload.canonical_path,
-        )?;
-        let binding_id = format!("rvpb_{}", Uuid::new_v4().simple());
-        self.gateway.execute(database, envelope, |transaction| {
-            if !is_owner(&envelope.actor) {
-                return Ok(rejected(
-                    "project_binding.owner_required",
-                    "Only the local owner can configure project paths",
-                ));
-            }
-            let now = Utc::now().to_rfc3339();
-            let inserted = transaction.execute(
-                r#"
-                INSERT INTO project_binding(
-                    id, display_name, binding_kind, canonical_path,
-                    status, version, created_at, updated_at, archived_at
-                ) VALUES (?1, ?2, ?3, ?4, 'active', 1, ?5, ?5, NULL)
-                ON CONFLICT(canonical_path) DO NOTHING
-                "#,
-                params![
-                    binding_id,
-                    display_name,
-                    envelope.payload.binding_kind,
-                    envelope.payload.canonical_path,
-                    now,
-                ],
-            )?;
-            if inserted == 0 {
-                return Ok(rejected(
-                    "project_binding.path_conflict",
-                    "This canonical path already has a Project Binding",
-                ));
-            }
-            Ok(CommandHandlerResult::applied(
-                "project_binding.created",
-                json!({ "projectBindingId": binding_id, "version": 1 }),
-                Some(EntityReference {
-                    entity_type: "project_binding".to_string(),
-                    entity_id: binding_id.clone(),
-                }),
-            ))
-        })
-    }
-
-    pub fn update_project_binding(
-        &self,
-        database: &mut Database,
-        envelope: &CommandEnvelope<UpdateProjectBindingCommand>,
-    ) -> Result<CommandExecution> {
-        let display_name = normalize_display_name(&envelope.payload.display_name)?;
-        self.gateway.execute(database, envelope, |transaction| {
-            if !is_owner(&envelope.actor) {
-                return Ok(rejected(
-                    "project_binding.owner_required",
-                    "Only the local owner can maintain Project Bindings",
-                ));
-            }
-            let state = transaction
-                .query_row(
-                    "SELECT status, version FROM project_binding WHERE id = ?1",
-                    [&envelope.payload.project_binding_id],
-                    |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)),
-                )
-                .optional()?;
-            let Some((status, version)) = state else {
-                return Ok(rejected(
-                    "project_binding.not_found",
-                    "Project Binding does not exist",
-                ));
-            };
-            if status != "active" {
-                return Ok(rejected(
-                    "project_binding.archived",
-                    "Archived Project Binding cannot be edited",
-                ));
-            }
-            if version != envelope.payload.expected_version {
-                return Ok(version_conflict(version));
-            }
-            let now = Utc::now().to_rfc3339();
-            transaction.execute(
-                r#"
-                UPDATE project_binding
-                SET display_name = ?2, version = version + 1, updated_at = ?3
-                WHERE id = ?1 AND version = ?4
-                "#,
-                params![
-                    envelope.payload.project_binding_id,
-                    display_name,
-                    now,
-                    version,
-                ],
-            )?;
-            Ok(CommandHandlerResult::applied(
-                "project_binding.updated",
-                json!({
-                    "projectBindingId": envelope.payload.project_binding_id,
-                    "version": version + 1,
-                }),
-                Some(EntityReference {
-                    entity_type: "project_binding".to_string(),
-                    entity_id: envelope.payload.project_binding_id.clone(),
-                }),
-            ))
-        })
-    }
-
-    pub fn archive_project_binding(
-        &self,
-        database: &mut Database,
-        envelope: &CommandEnvelope<ArchiveProjectBindingCommand>,
-    ) -> Result<CommandExecution> {
-        self.gateway.execute(database, envelope, |transaction| {
-            if !is_owner(&envelope.actor) {
-                return Ok(rejected(
-                    "project_binding.owner_required",
-                    "Only the local owner can maintain Project Bindings",
-                ));
-            }
-            let version = transaction
-                .query_row(
-                    "SELECT version FROM project_binding WHERE id = ?1 AND status = 'active'",
-                    [&envelope.payload.project_binding_id],
-                    |row| row.get::<_, i64>(0),
-                )
-                .optional()?;
-            let Some(version) = version else {
-                return Ok(rejected(
-                    "project_binding.not_found",
-                    "Active Project Binding does not exist",
-                ));
-            };
-            if version != envelope.payload.expected_version {
-                return Ok(version_conflict(version));
-            }
-            let in_use: bool = transaction.query_row(
-                "SELECT EXISTS(SELECT 1 FROM channel_conversation_binding WHERE project_binding_id = ?1)",
-                [&envelope.payload.project_binding_id],
-                |row| row.get(0),
-            )?;
-            if in_use {
-                return Ok(rejected(
-                    "project_binding.in_use",
-                    "Unbind or switch every channel conversation before archiving",
-                ));
-            }
-            let now = Utc::now().to_rfc3339();
-            transaction.execute(
-                r#"
-                UPDATE project_binding
-                SET status = 'archived', archived_at = ?2,
-                    version = version + 1, updated_at = ?2
-                WHERE id = ?1 AND version = ?3
-                "#,
-                params![envelope.payload.project_binding_id, now, version],
-            )?;
-            Ok(CommandHandlerResult::applied(
-                "project_binding.archived",
-                json!({
-                    "projectBindingId": envelope.payload.project_binding_id,
-                    "version": version + 1,
-                }),
-                None,
-            ))
-        })
-    }
-
-    pub fn bind_conversation(
-        &self,
-        database: &mut Database,
-        envelope: &CommandEnvelope<BindChannelConversationCommand>,
-    ) -> Result<CommandExecution> {
-        self.gateway.execute(database, envelope, |transaction| {
-            if !is_owner(&envelope.actor) {
-                return Ok(rejected(
-                    "channel_binding.owner_required",
-                    "Only the local owner can bind channel conversations",
-                ));
-            }
-            let conversation_version = transaction
-                .query_row(
-                    "SELECT version FROM channel_conversation WHERE id = ?1",
-                    [&envelope.payload.channel_conversation_id],
-                    |row| row.get::<_, i64>(0),
-                )
-                .optional()?;
-            let Some(conversation_version) = conversation_version else {
-                return Ok(rejected(
-                    "channel_conversation.not_found",
-                    "Channel conversation does not exist",
-                ));
-            };
-            if conversation_version != envelope.payload.expected_conversation_version {
-                return Ok(CommandHandlerResult::rejected(
-                    "channel_conversation.version_conflict",
-                    json!({ "currentVersion": conversation_version }),
-                ));
-            }
-            let binding_active: bool = transaction.query_row(
-                "SELECT EXISTS(SELECT 1 FROM project_binding WHERE id = ?1 AND status = 'active')",
-                [&envelope.payload.project_binding_id],
-                |row| row.get(0),
-            )?;
-            if !binding_active {
-                return Ok(rejected(
-                    "project_binding.not_found",
-                    "Active Project Binding does not exist",
-                ));
-            }
-            let existing_binding = transaction
-                .query_row(
-                    r#"
-                    SELECT id, project_binding_id, version
-                    FROM channel_conversation_binding
-                    WHERE channel_conversation_id = ?1
-                    "#,
-                    [&envelope.payload.channel_conversation_id],
-                    |row| {
-                        Ok((
-                            row.get::<_, String>(0)?,
-                            row.get::<_, String>(1)?,
-                            row.get::<_, i64>(2)?,
-                        ))
-                    },
-                )
-                .optional()?;
-            if let Some((binding_id, project_binding_id, binding_version)) = existing_binding {
-                if project_binding_id == envelope.payload.project_binding_id {
-                    return Ok(CommandHandlerResult::applied(
-                        "channel_binding.unchanged",
-                        json!({
-                            "bindingId": binding_id,
-                            "version": binding_version,
-                            "changed": false,
-                        }),
-                        Some(EntityReference {
-                            entity_type: "channel_conversation_binding".to_string(),
-                            entity_id: binding_id,
-                        }),
-                    ));
-                }
-                let has_open_requests: bool = transaction.query_row(
-                    r#"
-                    SELECT EXISTS(
-                        SELECT 1 FROM channel_turn_request
-                        WHERE binding_id = ?1 AND status IN ('queued', 'admitted')
-                    )
-                    "#,
-                    [&binding_id],
-                    |row| row.get(0),
-                )?;
-                if has_open_requests {
-                    return Ok(rejected(
-                        "channel_binding.busy",
-                        "Wait for queued channel turns before switching the project",
-                    ));
-                }
-                let now = Utc::now().to_rfc3339();
-                transaction.execute(
-                    r#"
-                    UPDATE channel_conversation_binding
-                    SET project_binding_id = ?2, camp_id = NULL,
-                        version = version + 1, updated_at = ?3
-                    WHERE id = ?1
-                    "#,
-                    params![binding_id, envelope.payload.project_binding_id, now],
-                )?;
-                transaction.execute(
-                    r#"
-                    UPDATE channel_conversation
-                    SET version = version + 1, last_seen_at = ?2
-                    WHERE id = ?1 AND version = ?3
-                    "#,
-                    params![
-                        envelope.payload.channel_conversation_id,
-                        now,
-                        conversation_version,
-                    ],
-                )?;
-                return Ok(CommandHandlerResult::applied(
-                    "channel_binding.switched",
-                    json!({
-                        "bindingId": binding_id,
-                        "version": binding_version + 1,
-                        "changed": true,
-                    }),
-                    Some(EntityReference {
-                        entity_type: "channel_conversation_binding".to_string(),
-                        entity_id: binding_id,
-                    }),
-                ));
-            }
-            let binding_id = format!("rvcb_{}", Uuid::new_v4().simple());
-            let now = Utc::now().to_rfc3339();
-            transaction.execute(
-                r#"
-                INSERT INTO channel_conversation_binding(
-                    id, channel_conversation_id, project_binding_id,
-                    camp_id, status, version, created_at, updated_at
-                ) VALUES (?1, ?2, ?3, NULL, 'active', 1, ?4, ?4)
-                "#,
-                params![
-                    binding_id,
-                    envelope.payload.channel_conversation_id,
-                    envelope.payload.project_binding_id,
-                    now,
-                ],
-            )?;
-            transaction.execute(
-                r#"
-                UPDATE channel_conversation
-                SET version = version + 1, last_seen_at = ?2
-                WHERE id = ?1 AND version = ?3
-                "#,
-                params![
-                    envelope.payload.channel_conversation_id,
-                    now,
-                    conversation_version,
-                ],
-            )?;
-            Ok(CommandHandlerResult::applied(
-                "channel_binding.created",
-                json!({ "bindingId": binding_id, "version": 1, "changed": true }),
-                Some(EntityReference {
-                    entity_type: "channel_conversation_binding".to_string(),
-                    entity_id: binding_id.clone(),
-                }),
-            ))
         })
     }
 
@@ -1202,6 +785,28 @@ impl ChannelService {
                     envelope.payload.tenant_id,
                     email,
                     envelope.payload.brand,
+                    now,
+                ],
+            )?;
+            transaction.execute(
+                r#"
+                INSERT INTO feishu_owner_identity(
+                    account_id, tenant_id, canonical_owner_principal_id,
+                    user_id_digest, union_id_digest, verified_at,
+                    version, created_at, updated_at
+                ) VALUES (?1, ?2, ?3, ?4, NULL, ?5, 1, ?5, ?5)
+                ON CONFLICT(account_id) DO UPDATE SET
+                    tenant_id = excluded.tenant_id,
+                    user_id_digest = excluded.user_id_digest,
+                    verified_at = excluded.verified_at,
+                    version = feishu_owner_identity.version + 1,
+                    updated_at = excluded.updated_at
+                "#,
+                params![
+                    envelope.payload.account_id,
+                    envelope.payload.tenant_id,
+                    format!("rvep_{}", Uuid::new_v4().simple()),
+                    envelope.payload.user_id_digest,
                     now,
                 ],
             )?;
@@ -1821,6 +1426,257 @@ impl ChannelService {
         })
     }
 
+    pub fn verify_feishu_owner(
+        &self,
+        database: &mut Database,
+        envelope: &CommandEnvelope<VerifyFeishuOwnerCommand>,
+    ) -> Result<CommandExecution> {
+        validate_owner_identity_input(
+            &envelope.payload.provider,
+            &envelope.payload.app_id,
+            &envelope.payload.tenant_key,
+            envelope.payload.sender_open_id.as_deref(),
+            envelope.payload.sender_user_id.as_deref(),
+            envelope.payload.sender_union_id.as_deref(),
+        )?;
+        let display_name = normalize_display_name(&envelope.payload.sender_display_name)?;
+        self.gateway.execute(database, envelope, |transaction| {
+            if !is_channel_host(&envelope.actor) {
+                return Ok(rejected(
+                    "channel.host_required",
+                    "Only the trusted Feishu Channel Host can verify sender identity",
+                ));
+            }
+            let now = Utc::now().to_rfc3339();
+            match classify_and_record_feishu_owner(
+                transaction,
+                &envelope.payload.provider,
+                &envelope.payload.app_id,
+                &envelope.payload.tenant_key,
+                envelope.payload.sender_open_id.as_deref(),
+                envelope.payload.sender_user_id.as_deref(),
+                envelope.payload.sender_union_id.as_deref(),
+                &display_name,
+                &now,
+            )? {
+                FeishuOwnerClassification::Owner { principal_id } => {
+                    Ok(CommandHandlerResult::applied(
+                        "channel.owner.verified",
+                        json!({
+                            "classification": "owner",
+                            "ownerPrincipalId": principal_id,
+                        }),
+                        Some(EntityReference {
+                            entity_type: "external_principal".to_string(),
+                            entity_id: principal_id,
+                        }),
+                    ))
+                }
+                FeishuOwnerClassification::NonOwner => Ok(CommandHandlerResult::applied(
+                    "channel.owner.non_owner",
+                    json!({ "classification": "non_owner" }),
+                    None,
+                )),
+                FeishuOwnerClassification::Unverified => Ok(CommandHandlerResult::applied(
+                    "channel.owner.unverified",
+                    json!({ "classification": "unverified" }),
+                    None,
+                )),
+            }
+        })
+    }
+
+    pub fn start_new_feishu_dm(
+        &self,
+        database: &mut Database,
+        quick_chat_path: &Path,
+        envelope: &CommandEnvelope<StartNewFeishuDmCommand>,
+    ) -> Result<CommandExecution> {
+        validate_nonempty(&envelope.payload.app_id, "appId")?;
+        validate_nonempty(&envelope.payload.tenant_key, "tenantKey")?;
+        validate_nonempty(&envelope.payload.chat_id, "chatId")?;
+        validate_nonempty(&envelope.payload.target_agent_id, "targetAgentId")?;
+        if envelope.payload.provider != FEISHU_PROVIDER {
+            anyhow::bail!("provider must be feishu");
+        }
+        if !quick_chat_path.is_dir() {
+            anyhow::bail!("managed Quick Chat path is unavailable");
+        }
+        let conversation_display_name =
+            normalize_display_name(&envelope.payload.conversation_display_name)?;
+        let canonical_path = quick_chat_path.to_string_lossy().to_string();
+        self.gateway.execute(database, envelope, |transaction| {
+            if !is_channel_host(&envelope.actor) {
+                return Ok(rejected(
+                    "channel.host_required",
+                    "Only the trusted Feishu Channel Host can rotate a DM Camp",
+                ));
+            }
+            let owner = load_verified_owner_for_app(
+                transaction,
+                &envelope.payload.app_id,
+                &envelope.payload.tenant_key,
+            )?;
+            let Some((owner_principal_id, owner_display_name)) = owner else {
+                return Ok(rejected(
+                    "owner_identity_unverified",
+                    "This Bot cannot prove the connected Rovai owner identity",
+                ));
+            };
+            let app_targets_agent: bool = transaction.query_row(
+                r#"
+                SELECT EXISTS(
+                    SELECT 1 FROM feishu_member_bot
+                    WHERE app_id = ?1 AND agent_id = ?2 AND status = 'published'
+                )
+                "#,
+                params![envelope.payload.app_id, envelope.payload.target_agent_id],
+                |row| row.get(0),
+            )?;
+            if !app_targets_agent {
+                return Ok(rejected(
+                    "channel.target_bot_unpublished",
+                    "The DM target Bot is not a published managed Agent",
+                ));
+            }
+            let conversation_id = stable_channel_conversation_id(
+                FEISHU_PROVIDER,
+                &envelope.payload.tenant_key,
+                &envelope.payload.chat_id,
+                "",
+                &envelope.payload.app_id,
+            )?;
+            let now = Utc::now().to_rfc3339();
+            upsert_channel_conversation(
+                transaction,
+                &conversation_id,
+                FEISHU_PROVIDER,
+                &envelope.payload.tenant_key,
+                &envelope.payload.chat_id,
+                "",
+                &envelope.payload.app_id,
+                "p2p",
+                &conversation_display_name,
+                &owner_display_name,
+                Some(&owner_principal_id),
+                &now,
+            )?;
+            let current = transaction
+                .query_row(
+                    r#"
+                    SELECT id, camp_id
+                    FROM channel_conversation_binding
+                    WHERE channel_conversation_id = ?1 AND status = 'active'
+                    "#,
+                    [&conversation_id],
+                    |row| Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?)),
+                )
+                .optional()?;
+            if current.is_none() {
+                let collecting: bool = transaction.query_row(
+                    r#"
+                    SELECT EXISTS(
+                        SELECT 1 FROM channel_inbound_aggregate
+                        WHERE status = 'collecting'
+                          AND json_extract(frozen_payload_json, '$.conversationId') = ?1
+                    )
+                    "#,
+                    [&conversation_id],
+                    |row| row.get(0),
+                )?;
+                if collecting {
+                    return Ok(rejected(
+                        "channel.dm.busy",
+                        "Wait for the current message to finish admission before starting a new Quick Chat",
+                    ));
+                }
+            }
+            if let Some((current_binding_id, _)) = &current {
+                let busy: bool = transaction.query_row(
+                    r#"
+                    SELECT
+                        EXISTS(
+                            SELECT 1 FROM channel_turn_request
+                            WHERE binding_id = ?1 AND status IN ('queued', 'admitted')
+                        )
+                        OR EXISTS(
+                            SELECT 1 FROM channel_inbound_aggregate
+                            WHERE status = 'collecting'
+                              AND json_extract(frozen_payload_json, '$.conversationId') = ?2
+                        )
+                    "#,
+                    params![current_binding_id, conversation_id],
+                    |row| row.get(0),
+                )?;
+                if busy {
+                    return Ok(rejected(
+                        "channel.dm.busy",
+                        "Wait for the current reply to finish before starting a new Quick Chat",
+                    ));
+                }
+                transaction.execute(
+                    r#"
+                    UPDATE channel_conversation_binding
+                    SET status = 'closed', closed_at = ?2,
+                        version = version + 1, updated_at = ?2
+                    WHERE id = ?1 AND status = 'active'
+                    "#,
+                    params![current_binding_id, now],
+                )?;
+            }
+            let generation: i64 = transaction.query_row(
+                r#"
+                SELECT COALESCE(MAX(generation), 0) + 1
+                FROM channel_conversation_binding
+                WHERE channel_conversation_id = ?1
+                "#,
+                [&conversation_id],
+                |row| row.get(0),
+            )?;
+            let binding_id = format!("rvcb_{}", Uuid::new_v4().simple());
+            transaction.execute(
+                r#"
+                INSERT INTO channel_conversation_binding(
+                    id, channel_conversation_id, execution_scope_kind,
+                    project_id, camp_id, status, generation, version,
+                    created_at, updated_at, closed_at
+                ) VALUES (?1, ?2, 'quick_chat', NULL, NULL, 'active', ?3, 1, ?4, ?4, NULL)
+                "#,
+                params![binding_id, conversation_id, generation, now],
+            )?;
+            let mut binding = ChannelBindingAdmission {
+                binding_id: binding_id.clone(),
+                camp_id: None,
+                project_display_name: "快速对话".to_string(),
+                binding_kind: "quick_chat".to_string(),
+                canonical_path,
+                project_status: None,
+                conversation_display_name,
+                conversation_kind: "p2p".to_string(),
+            };
+            let camp_id = create_channel_camp(
+                transaction,
+                &binding,
+                std::slice::from_ref(&envelope.payload.target_agent_id),
+                &now,
+            )?;
+            binding.camp_id = Some(camp_id.clone());
+            Ok(CommandHandlerResult::applied(
+                "channel.dm.started_new",
+                json!({
+                    "conversationId": conversation_id,
+                    "bindingId": binding_id,
+                    "campId": camp_id,
+                    "generation": generation,
+                }),
+                Some(EntityReference {
+                    entity_type: "channel_conversation_binding".to_string(),
+                    entity_id: binding_id,
+                }),
+            ))
+        })
+    }
+
     pub fn reconcile_feishu_group_roster(
         &self,
         database: &mut Database,
@@ -1999,11 +1855,6 @@ impl ChannelService {
                 "externalMessageId": envelope.payload.external_message_id,
             }))?
         );
-        let proposed_principal_id = stable_external_principal_id(
-            &envelope.payload.provider,
-            &envelope.payload.tenant_key,
-            &envelope.payload.sender_external_user_id,
-        )?;
         let conversation_id = stable_channel_conversation_id(
             &envelope.payload.provider,
             &envelope.payload.tenant_key,
@@ -2022,14 +1873,30 @@ impl ChannelService {
                     "Only the trusted Feishu Channel Host can observe inbound events",
                 ));
             }
+            let sender_display_name =
+                normalize_display_name(&envelope.payload.sender_display_name)?;
+            let now = Utc::now();
+            let now_text = now.to_rfc3339();
+            let owner = classify_and_record_feishu_owner(
+                transaction,
+                &envelope.payload.provider,
+                &envelope.payload.app_id,
+                &envelope.payload.tenant_key,
+                envelope.payload.sender_open_id.as_deref(),
+                envelope.payload.sender_user_id.as_deref(),
+                envelope.payload.sender_union_id.as_deref(),
+                &sender_display_name,
+                &now_text,
+            )?;
+            let FeishuOwnerClassification::Owner { principal_id } = owner else {
+                return Ok(rejected(
+                    "channel.owner_required",
+                    "Only the verified Rovai owner can trigger a Feishu human message",
+                ));
+            };
             let target_agent_ids = resolve_observation_targets(transaction, &envelope.payload)?;
             let structured_content = build_external_content(&envelope.payload, &target_agent_ids)?;
             validate_content(&structured_content)?;
-            let principal_id = resolve_external_principal_id(
-                transaction,
-                &envelope.payload,
-                &proposed_principal_id,
-            )?;
             let observed_binding_id = transaction
                 .query_row(
                     r#"
@@ -2057,97 +1924,24 @@ impl ChannelService {
                     "bindingIdAtObservation": observed_binding_id,
                 }))?
             );
-            let now = Utc::now();
-            let now_text = now.to_rfc3339();
-            let sender_display_name = normalize_display_name(&envelope.payload.sender_display_name)?;
-            if observed_binding_id.is_some() {
-                transaction.execute(
-                    r#"
-                    INSERT INTO external_principal(
-                        id, provider, tenant_key, external_user_id, display_name,
-                        version, created_at, updated_at
-                    ) VALUES (?1, ?2, ?3, ?4, ?5, 1, ?6, ?6)
-                    ON CONFLICT(provider, tenant_key, external_user_id) DO UPDATE SET
-                        display_name = excluded.display_name,
-                        version = CASE
-                            WHEN external_principal.display_name IS excluded.display_name
-                            THEN external_principal.version
-                            ELSE external_principal.version + 1
-                        END,
-                        updated_at = excluded.updated_at
-                    "#,
-                    params![
-                        principal_id,
-                        envelope.payload.provider,
-                        envelope.payload.tenant_key,
-                        envelope.payload.sender_external_user_id,
-                        sender_display_name,
-                        now_text,
-                    ],
-                )?;
-                for (identity_kind, external_id) in [
-                    ("open_id", envelope.payload.sender_open_id.as_deref()),
-                    ("user_id", envelope.payload.sender_user_id.as_deref()),
-                    ("union_id", envelope.payload.sender_union_id.as_deref()),
-                ] {
-                    let Some(external_id) = external_id else {
-                        continue;
-                    };
-                    transaction.execute(
-                        r#"
-                        INSERT INTO external_principal_app_identity(
-                            principal_id, provider, app_id, identity_kind,
-                            external_id, updated_at
-                        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6)
-                        ON CONFLICT(principal_id, provider, app_id, identity_kind) DO UPDATE SET
-                            external_id = excluded.external_id,
-                            updated_at = excluded.updated_at
-                        "#,
-                        params![
-                            principal_id,
-                            envelope.payload.provider,
-                            envelope.payload.app_id,
-                            identity_kind,
-                            external_id,
-                            now_text,
-                        ],
-                    )?;
-                }
-            }
             let bot_scope_app_id = if envelope.payload.conversation_kind == "p2p" {
                 envelope.payload.app_id.as_str()
             } else {
                 ""
             };
-            transaction.execute(
-                r#"
-                INSERT INTO channel_conversation(
-                    id, provider, tenant_key, chat_id, topic_key, bot_scope_app_id,
-                    conversation_kind, display_name, last_sender_display_name,
-                    last_sender_principal_id,
-                    first_seen_at, last_seen_at, version
-                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?11, 1)
-                ON CONFLICT(provider, tenant_key, chat_id, topic_key, bot_scope_app_id) DO UPDATE SET
-                    conversation_kind = excluded.conversation_kind,
-                    display_name = excluded.display_name,
-                    last_sender_display_name = excluded.last_sender_display_name,
-                    last_sender_principal_id = excluded.last_sender_principal_id,
-                    last_seen_at = excluded.last_seen_at,
-                    version = channel_conversation.version + 1
-                "#,
-                params![
-                    conversation_id,
-                    envelope.payload.provider,
-                    envelope.payload.tenant_key,
-                    envelope.payload.chat_id,
-                    envelope.payload.topic_key,
-                    bot_scope_app_id,
-                    envelope.payload.conversation_kind,
-                    normalize_display_name(&envelope.payload.conversation_display_name)?,
-                    sender_display_name,
-                    observed_binding_id.as_ref().map(|_| principal_id.as_str()),
-                    now_text,
-                ],
+            upsert_channel_conversation(
+                transaction,
+                &conversation_id,
+                &envelope.payload.provider,
+                &envelope.payload.tenant_key,
+                &envelope.payload.chat_id,
+                &envelope.payload.topic_key,
+                bot_scope_app_id,
+                &envelope.payload.conversation_kind,
+                &normalize_display_name(&envelope.payload.conversation_display_name)?,
+                &sender_display_name,
+                Some(&principal_id),
+                &now_text,
             )?;
             let existing = transaction
                 .query_row(
@@ -2273,7 +2067,7 @@ impl ChannelService {
             let observed = BTreeSet::from([envelope.payload.app_id.clone()]);
             let frozen_payload = json!({
                 "conversationId": conversation_id,
-                "principalId": observed_binding_id.as_ref().map(|_| principal_id.as_str()),
+                "principalId": principal_id,
                 "bindingIdAtObservation": observed_binding_id,
                 "structuredContent": structured_content,
                 "targetAgentIds": target_agent_ids,
@@ -2345,8 +2139,14 @@ impl ChannelService {
     pub fn finalize_inbound(
         &self,
         database: &mut Database,
+        quick_chat_path: &Path,
         envelope: &CommandEnvelope<FinalizeChannelInboundCommand>,
     ) -> Result<CommandExecution> {
+        refresh_project_catalog(database)?;
+        if !quick_chat_path.is_dir() {
+            anyhow::bail!("managed Quick Chat path is unavailable");
+        }
+        let quick_chat_path = quick_chat_path.to_string_lossy().to_string();
         self.gateway.execute(database, envelope, |transaction| {
             if !is_channel_host(&envelope.actor) {
                 return Ok(rejected(
@@ -2394,14 +2194,11 @@ impl ChannelService {
                         "Canonical mentions or all expected App observations are still incomplete",
                     ));
                 }
-                transaction.execute(
-                    r#"
-                    UPDATE channel_inbound_aggregate
-                    SET status = 'failed', failure_code = 'aggregation_timeout',
-                        finalized_at = ?2, updated_at = ?2
-                    WHERE id = ?1 AND status = 'collecting'
-                    "#,
-                    params![aggregate.id, now_text],
+                mark_aggregate_failed(
+                    transaction,
+                    &aggregate.id,
+                    "aggregation_timeout",
+                    &now_text,
                 )?;
                 return Ok(CommandHandlerResult::applied(
                     "channel.inbound.failed",
@@ -2415,135 +2212,141 @@ impl ChannelService {
             }
             let frozen: FrozenInboundPayload = serde_json::from_str(&aggregate.frozen_payload_json)
                 .context("channel inbound frozen payload is invalid")?;
-            let binding = if let Some(binding_id_at_observation) =
-                frozen.binding_id_at_observation.as_deref()
-            {
-                transaction
-                    .query_row(
-                    r#"
-                    SELECT binding.id, binding.project_binding_id, binding.camp_id,
-                           project.display_name, project.binding_kind,
-                           project.canonical_path, conversation.display_name,
-                           conversation.tenant_key, conversation.chat_id,
-                           conversation.conversation_kind
-                    FROM channel_conversation AS conversation
-                    JOIN channel_conversation_binding AS binding
-                      ON binding.channel_conversation_id = conversation.id
-                    JOIN project_binding AS project
-                      ON project.id = binding.project_binding_id
-                     AND project.status = 'active'
-                    WHERE conversation.id = ?1 AND binding.id = ?2
-                      AND binding.status = 'active'
-                    "#,
-                    params![frozen.conversation_id, binding_id_at_observation],
-                    |row| {
-                        Ok(ChannelBindingAdmission {
-                            binding_id: row.get(0)?,
-                            project_binding_id: row.get(1)?,
-                            camp_id: row.get(2)?,
-                            project_display_name: row.get(3)?,
-                            binding_kind: row.get(4)?,
-                            canonical_path: row.get(5)?,
-                            conversation_display_name: row.get(6)?,
-                            tenant_key: row.get(7)?,
-                            chat_id: row.get(8)?,
-                            conversation_kind: row.get(9)?,
-                        })
-                    },
-                    )
-                    .optional()?
-            } else {
-                None
-            };
-            let Some(mut binding) = binding else {
-                transaction.execute(
-                    r#"
-                    UPDATE channel_inbound_aggregate
-                    SET status = 'finalized', finalized_at = ?2, updated_at = ?2
-                    WHERE id = ?1 AND status = 'collecting'
-                    "#,
-                    params![aggregate.id, now_text],
-                )?;
-                return Ok(CommandHandlerResult::applied(
-                    "channel.inbound.unbound",
-                    json!({
-                        "aggregateId": aggregate.id,
-                        "status": "unbound",
-                        "requiresResend": true,
-                    }),
-                    None,
-                ));
-            };
-            let roster_agent_ids = if matches!(
-                binding.conversation_kind.as_str(),
-                "group" | "topic"
-            ) {
-                let roster_state_exists: bool = transaction.query_row(
-                    r#"
-                    SELECT EXISTS(
-                        SELECT 1 FROM external_group_bot_roster_state
-                        WHERE provider = 'feishu' AND tenant_key = ?1 AND chat_id = ?2
-                    )
-                    "#,
-                    params![binding.tenant_key, binding.chat_id],
-                    |row| row.get(0),
-                )?;
-                if !roster_state_exists {
+            let conversation = load_channel_conversation(
+                transaction,
+                &frozen.conversation_id,
+            )?.context("channel inbound conversation is missing")?;
+            let roster_agent_ids = match group_roster_readiness(
+                transaction,
+                &conversation,
+                &expected,
+            )? {
+                GroupRosterReadiness::NotRequired => Vec::new(),
+                GroupRosterReadiness::MissingState => {
                     return Ok(CommandHandlerResult::rejected(
                         "channel.roster_sync_required",
                         json!({
                             "message": "The Feishu group Bot roster must be reconciled before admission",
-                            "tenantKey": binding.tenant_key,
-                            "chatId": binding.chat_id,
+                            "tenantKey": conversation.tenant_key,
+                            "chatId": conversation.chat_id,
                         }),
                     ));
                 }
-                let present_app_ids = query_rows(
-                    transaction,
-                    r#"
-                    SELECT app_id FROM external_group_bot_roster
-                    WHERE provider = 'feishu' AND tenant_key = ?1 AND chat_id = ?2
-                      AND status = 'present'
-                    ORDER BY app_id
-                    "#,
-                    params![binding.tenant_key, binding.chat_id],
-                    |row| row.get::<_, String>(0),
-                )?
-                .into_iter()
-                .collect::<BTreeSet<_>>();
-                let missing_apps = expected
-                    .difference(&present_app_ids)
-                    .cloned()
-                    .collect::<Vec<_>>();
-                if !missing_apps.is_empty() {
+                GroupRosterReadiness::MissingApps(app_ids) => {
                     return Ok(CommandHandlerResult::rejected(
                         "channel.bot_not_in_roster",
                         json!({
                             "message": "A mentioned member Bot is no longer in this Feishu group",
-                            "tenantKey": binding.tenant_key,
-                            "chatId": binding.chat_id,
-                            "appIds": missing_apps,
+                            "tenantKey": conversation.tenant_key,
+                            "chatId": conversation.chat_id,
+                            "appIds": app_ids,
                         }),
                     ));
                 }
-                query_rows(
-                    transaction,
-                    r#"
-                    SELECT roster.agent_id
-                    FROM external_group_bot_roster AS roster
-                    JOIN feishu_member_bot AS bot
-                      ON bot.app_id = roster.app_id AND bot.agent_id = roster.agent_id
-                    WHERE roster.provider = 'feishu'
-                      AND roster.tenant_key = ?1 AND roster.chat_id = ?2
-                      AND roster.status = 'present' AND bot.status = 'published'
-                    ORDER BY roster.agent_id
-                    "#,
-                    params![binding.tenant_key, binding.chat_id],
-                    |row| row.get::<_, String>(0),
-                )?
-            } else {
-                Vec::new()
+                GroupRosterReadiness::Ready(agent_ids) => agent_ids,
             };
+
+            let mut binding = if let Some(observed_binding_id) =
+                frozen.binding_id_at_observation.as_deref()
+            {
+                let exact = load_active_channel_binding(
+                    transaction,
+                    &frozen.conversation_id,
+                    Some(observed_binding_id),
+                    &quick_chat_path,
+                )?;
+                if exact.is_none() {
+                    mark_aggregate_failed(
+                        transaction,
+                        &aggregate.id,
+                        "binding_generation_changed",
+                        &now_text,
+                    )?;
+                    return Ok(CommandHandlerResult::applied(
+                        "channel.inbound.failed",
+                        json!({
+                            "aggregateId": aggregate.id,
+                            "status": "failed",
+                            "failureCode": "binding_generation_changed",
+                        }),
+                        None,
+                    ));
+                }
+                exact
+            } else {
+                load_active_channel_binding(
+                    transaction,
+                    &frozen.conversation_id,
+                    None,
+                    &quick_chat_path,
+                )?
+            };
+
+            if let Some(current) = binding.as_ref() {
+                if current.binding_kind == "directory"
+                    && (current.project_status.as_deref() != Some("active")
+                        || !Path::new(&current.canonical_path).is_dir())
+                {
+                    return Ok(rejected(
+                        "channel.project_unavailable",
+                        "The Camp project is no longer available",
+                    ));
+                }
+            }
+
+            if binding.is_none() {
+                if conversation.conversation_kind == "p2p" {
+                    binding = Some(create_quick_chat_binding(
+                        transaction,
+                        &conversation,
+                        &frozen.target_agent_ids,
+                        &quick_chat_path,
+                        &now_text,
+                    )?);
+                } else {
+                    if !aggregate.canonical_mentions_complete {
+                        mark_aggregate_failed(
+                            transaction,
+                            &aggregate.id,
+                            "acknowledgement_app_unresolved",
+                            &now_text,
+                        )?;
+                        return Ok(CommandHandlerResult::applied(
+                            "channel.inbound.failed",
+                            json!({
+                                "aggregateId": aggregate.id,
+                                "status": "failed",
+                                "failureCode": "acknowledgement_app_unresolved",
+                            }),
+                            None,
+                        ));
+                    }
+                    let pending = append_pending_camp_binding(
+                        transaction,
+                        &aggregate.id,
+                        &frozen,
+                        &conversation,
+                        &now,
+                    )?;
+                    mark_aggregate_finalized(transaction, &aggregate.id, &now_text)?;
+                    return Ok(CommandHandlerResult::applied(
+                        "channel.binding.pending",
+                        json!({
+                            "aggregateId": aggregate.id,
+                            "pendingBindingId": pending.pending_binding_id,
+                            "pendingMessagePosition": pending.queue_position,
+                            "projectCardQueued": pending.created,
+                            "acknowledgementAppId": pending.acknowledgement_app_id,
+                        }),
+                        Some(EntityReference {
+                            entity_type: "pending_camp_binding".to_string(),
+                            entity_id: pending.pending_binding_id,
+                        }),
+                    ));
+                }
+            }
+
+            let mut binding = binding.context("channel binding creation failed")?;
             if binding.camp_id.is_none() {
                 let initial_members = if binding.conversation_kind == "group" {
                     &roster_agent_ids
@@ -2561,10 +2364,6 @@ impl ChannelService {
                 .camp_id
                 .clone()
                 .context("channel binding Camp creation did not persist an identity")?;
-            let principal_id = frozen
-                .principal_id
-                .clone()
-                .context("bound channel observation omitted its External Principal")?;
             let missing_members =
                 missing_active_members(transaction, &camp_id, &frozen.target_agent_ids)?;
             if !missing_members.is_empty() {
@@ -2594,51 +2393,18 @@ impl ChannelService {
                     }),
                 ));
             }
-            let request_id = format!("rvctr_{}", Uuid::new_v4().simple());
-            let queue_position: i64 = transaction.query_row(
-                r#"
-                SELECT COUNT(*) + 1
-                FROM channel_turn_request
-                WHERE binding_id = ?1 AND status IN ('queued', 'admitted')
-                "#,
-                [&binding.binding_id],
-                |row| row.get(0),
+            let (request_id, queue_position) = insert_channel_turn_request(
+                transaction,
+                &binding.binding_id,
+                &camp_id,
+                &aggregate.id,
+                &frozen.principal_id,
+                &frozen.acknowledgement_app_id,
+                &frozen.structured_content,
+                &frozen.target_agent_ids,
+                &now_text,
             )?;
-            let ack_app_id = frozen.acknowledgement_app_id.clone();
-            transaction.execute(
-                r#"
-                INSERT INTO channel_turn_request(
-                    id, binding_id, aggregate_id, external_principal_id,
-                    ack_app_id, structured_content_json, addressed_agent_ids_json,
-                    status, queue_position, camp_id, camp_message_id, camp_turn_id,
-                    trigger_camp_sequence, failure_code, version,
-                    created_at, admitted_at, completed_at, updated_at
-                ) VALUES (
-                    ?1, ?2, ?3, ?4, ?5, ?6, ?7, 'queued', ?8, ?9,
-                    NULL, NULL, NULL, NULL, 1, ?10, NULL, NULL, ?10
-                )
-                "#,
-                params![
-                    request_id,
-                    binding.binding_id,
-                    aggregate.id,
-                    principal_id,
-                    ack_app_id,
-                    serde_json::to_string(&frozen.structured_content)?,
-                    serde_json::to_string(&frozen.target_agent_ids)?,
-                    queue_position,
-                    camp_id,
-                    now_text,
-                ],
-            )?;
-            transaction.execute(
-                r#"
-                UPDATE channel_inbound_aggregate
-                SET status = 'finalized', finalized_at = ?2, updated_at = ?2
-                WHERE id = ?1 AND status = 'collecting'
-                "#,
-                params![aggregate.id, now_text],
-            )?;
+            mark_aggregate_finalized(transaction, &aggregate.id, &now_text)?;
             let admission = if queue_position == 1 {
                 try_admit_request(transaction, &request_id, &now_text, &envelope.command_id)?
             } else {
@@ -2648,7 +2414,7 @@ impl ChannelService {
                 insert_queue_ack_delivery(
                     transaction,
                     &request_id,
-                    &ack_app_id,
+                    &frozen.acknowledgement_app_id,
                     queue_position,
                     admission == AdmissionAttempt::Admitted,
                     &now_text,
@@ -2674,7 +2440,368 @@ impl ChannelService {
                 }),
                 Some(EntityReference {
                     entity_type: "channel_turn_request".to_string(),
-                    entity_id: request_id.clone(),
+                    entity_id: request_id,
+                }),
+            ))
+        })
+    }
+
+    pub fn resolve_pending_camp_binding(
+        &self,
+        database: &mut Database,
+        envelope: &CommandEnvelope<ResolvePendingCampBindingCommand>,
+    ) -> Result<CommandExecution> {
+        validate_nonempty(&envelope.payload.pending_binding_id, "pendingBindingId")?;
+        validate_nonempty(&envelope.payload.app_id, "appId")?;
+        validate_nonempty(&envelope.payload.nonce, "nonce")?;
+        if envelope.payload.expected_version < 1 {
+            anyhow::bail!("expectedVersion must be positive");
+        }
+        if !matches!(
+            envelope.payload.action.as_str(),
+            "bind" | "cancel" | "refresh"
+        ) {
+            anyhow::bail!("action must be bind, cancel, or refresh");
+        }
+        if envelope.payload.action == "bind" && envelope.payload.project_id.is_none() {
+            anyhow::bail!("bind action requires projectId");
+        }
+        validate_owner_identity_input(
+            FEISHU_PROVIDER,
+            &envelope.payload.app_id,
+            "callback",
+            envelope.payload.operator_open_id.as_deref(),
+            envelope.payload.operator_user_id.as_deref(),
+            envelope.payload.operator_union_id.as_deref(),
+        )?;
+        refresh_project_catalog(database)?;
+        self.gateway.execute(database, envelope, |transaction| {
+            if !is_channel_host(&envelope.actor) {
+                return Ok(rejected(
+                    "channel.host_required",
+                    "Only the trusted Feishu Channel Host can resolve a project card",
+                ));
+            }
+            let pending =
+                load_pending_binding_resolution(transaction, &envelope.payload.pending_binding_id)?;
+            let Some(pending) = pending else {
+                return Ok(rejected(
+                    "channel.binding.not_found",
+                    "Pending Camp binding does not exist",
+                ));
+            };
+            if pending.acknowledgement_app_id != envelope.payload.app_id {
+                return Ok(rejected(
+                    "channel.binding.callback_app_mismatch",
+                    "The callback did not arrive through the frozen acknowledgement Bot",
+                ));
+            }
+            let now = Utc::now();
+            let now_text = now.to_rfc3339();
+            if !operator_matches_feishu_owner(
+                transaction,
+                &envelope.payload.app_id,
+                &pending.owner_principal_id,
+                envelope.payload.operator_open_id.as_deref(),
+                envelope.payload.operator_user_id.as_deref(),
+                envelope.payload.operator_union_id.as_deref(),
+                &now_text,
+            )? {
+                return Ok(rejected(
+                    "channel.binding.owner_required",
+                    "Only the verified Rovai owner can operate this project card",
+                ));
+            }
+            if pending.status != "pending" {
+                return Ok(CommandHandlerResult::rejected(
+                    "channel.binding.stale_card",
+                    json!({
+                        "message": "This project card has already been handled",
+                        "status": pending.status,
+                        "currentVersion": pending.version,
+                    }),
+                ));
+            }
+            if pending.version != envelope.payload.expected_version {
+                return Ok(CommandHandlerResult::rejected(
+                    "channel.binding.stale_card",
+                    json!({
+                        "message": "This project card version is stale",
+                        "currentVersion": pending.version,
+                    }),
+                ));
+            }
+            if pending.nonce_digest
+                != opaque_digest("pending-binding-nonce", &envelope.payload.nonce)
+            {
+                return Ok(rejected(
+                    "channel.binding.invalid_nonce",
+                    "Project card nonce is invalid",
+                ));
+            }
+            if now >= chrono::DateTime::parse_from_rfc3339(&pending.expires_at)?.with_timezone(&Utc)
+            {
+                transaction.execute(
+                    r#"
+                    UPDATE pending_camp_binding
+                    SET status = 'expired', resolved_at = ?2,
+                        version = version + 1, updated_at = ?2
+                    WHERE id = ?1 AND status = 'pending' AND version = ?3
+                    "#,
+                    params![pending.id, now_text, pending.version],
+                )?;
+                return Ok(CommandHandlerResult::applied(
+                    "channel.binding.expired",
+                    json!({ "pendingBindingId": pending.id }),
+                    None,
+                ));
+            }
+            if envelope.payload.action == "refresh" {
+                return Ok(CommandHandlerResult::applied(
+                    "channel.binding.refreshed",
+                    json!({
+                        "pendingBindingId": pending.id,
+                        "expectedVersion": pending.version,
+                        "projectOptions": active_project_card_items(transaction)?,
+                    }),
+                    None,
+                ));
+            }
+            if envelope.payload.action == "cancel" {
+                let changed = transaction.execute(
+                    r#"
+                    UPDATE pending_camp_binding
+                    SET status = 'cancelled', resolved_at = ?2,
+                        version = version + 1, updated_at = ?2
+                    WHERE id = ?1 AND status = 'pending' AND version = ?3
+                    "#,
+                    params![pending.id, now_text, pending.version],
+                )?;
+                if changed != 1 {
+                    return Ok(rejected(
+                        "channel.binding.stale_card",
+                        "Pending Camp binding changed before cancellation",
+                    ));
+                }
+                return Ok(CommandHandlerResult::applied(
+                    "channel.binding.cancelled",
+                    json!({
+                        "pendingBindingId": pending.id,
+                        "version": pending.version + 1,
+                    }),
+                    None,
+                ));
+            }
+
+            let project_id = envelope
+                .payload
+                .project_id
+                .as_deref()
+                .context("bind action omitted projectId")?;
+            let project = transaction
+                .query_row(
+                    r#"
+                    SELECT id, display_name, canonical_path
+                    FROM project_catalog_item
+                    WHERE id = ?1 AND status = 'active'
+                    "#,
+                    [project_id],
+                    |row| {
+                        Ok((
+                            row.get::<_, String>(0)?,
+                            row.get::<_, String>(1)?,
+                            row.get::<_, String>(2)?,
+                        ))
+                    },
+                )
+                .optional()?;
+            let Some((project_id, project_display_name, canonical_path)) = project else {
+                return Ok(CommandHandlerResult::rejected(
+                    "channel.project_unavailable",
+                    json!({
+                        "message": "The selected Rovai project is no longer available",
+                        "pendingBindingId": pending.id,
+                        "expectedVersion": pending.version,
+                        "projectOptions": active_project_card_items(transaction)?,
+                    }),
+                ));
+            };
+            if !Path::new(&canonical_path).is_dir() {
+                return Ok(CommandHandlerResult::rejected(
+                    "channel.project_unavailable",
+                    json!({
+                        "message": "The selected Rovai project directory is unavailable",
+                        "pendingBindingId": pending.id,
+                        "expectedVersion": pending.version,
+                        "projectOptions": active_project_card_items(transaction)?,
+                    }),
+                ));
+            }
+            let active_binding_exists: bool = transaction.query_row(
+                r#"
+                SELECT EXISTS(
+                    SELECT 1 FROM channel_conversation_binding
+                    WHERE channel_conversation_id = ?1 AND status = 'active'
+                )
+                "#,
+                [&pending.conversation.id],
+                |row| row.get(0),
+            )?;
+            if active_binding_exists {
+                return Ok(rejected(
+                    "channel.binding.already_resolved",
+                    "This Feishu conversation already has an immutable Camp binding",
+                ));
+            }
+            let messages = load_pending_messages(transaction, &pending.id)?;
+            if messages.is_empty() {
+                anyhow::bail!("pending Camp binding has no frozen messages");
+            }
+            let mut all_targets = BTreeSet::new();
+            for message in &messages {
+                all_targets.extend(message.target_agent_ids.iter().cloned());
+            }
+            let expected_apps = app_ids_for_agents(transaction, &all_targets)?;
+            let roster_agent_ids =
+                match group_roster_readiness(transaction, &pending.conversation, &expected_apps)? {
+                    GroupRosterReadiness::Ready(agent_ids) => agent_ids,
+                    GroupRosterReadiness::MissingState => {
+                        return Ok(rejected(
+                            "channel.roster_sync_required",
+                            "The Feishu group Bot roster must be reconciled before binding",
+                        ));
+                    }
+                    GroupRosterReadiness::MissingApps(_) => {
+                        return Ok(rejected(
+                            "channel.bot_not_in_roster",
+                            "A selected message target Bot is no longer in the Feishu group",
+                        ));
+                    }
+                    GroupRosterReadiness::NotRequired => Vec::new(),
+                };
+            let changed = transaction.execute(
+                r#"
+                UPDATE pending_camp_binding
+                SET status = 'resolving', version = version + 1, updated_at = ?2
+                WHERE id = ?1 AND status = 'pending' AND version = ?3
+                "#,
+                params![pending.id, now_text, pending.version],
+            )?;
+            if changed != 1 {
+                return Ok(rejected(
+                    "channel.binding.stale_card",
+                    "Pending Camp binding changed before resolution",
+                ));
+            }
+            let generation: i64 = transaction.query_row(
+                r#"
+                SELECT COALESCE(MAX(generation), 0) + 1
+                FROM channel_conversation_binding
+                WHERE channel_conversation_id = ?1
+                "#,
+                [&pending.conversation.id],
+                |row| row.get(0),
+            )?;
+            let binding_id = format!("rvcb_{}", Uuid::new_v4().simple());
+            transaction.execute(
+                r#"
+                INSERT INTO channel_conversation_binding(
+                    id, channel_conversation_id, execution_scope_kind,
+                    project_id, camp_id, status, generation, version,
+                    created_at, updated_at, closed_at
+                ) VALUES (?1, ?2, 'project', ?3, NULL, 'active', ?4, 1, ?5, ?5, NULL)
+                "#,
+                params![
+                    binding_id,
+                    pending.conversation.id,
+                    project_id,
+                    generation,
+                    now_text
+                ],
+            )?;
+            let mut binding = ChannelBindingAdmission {
+                binding_id: binding_id.clone(),
+                camp_id: None,
+                project_display_name: project_display_name.clone(),
+                binding_kind: "directory".to_string(),
+                canonical_path,
+                project_status: Some("active".to_string()),
+                conversation_display_name: pending.conversation.display_name.clone(),
+                conversation_kind: pending.conversation.conversation_kind.clone(),
+            };
+            let initial_members = if binding.conversation_kind == "group" {
+                roster_agent_ids
+            } else {
+                all_targets.iter().cloned().collect()
+            };
+            let camp_id = create_channel_camp(transaction, &binding, &initial_members, &now_text)?;
+            binding.camp_id = Some(camp_id.clone());
+            let mut queued = Vec::new();
+            for message in &messages {
+                let (request_id, queue_position) = insert_channel_turn_request(
+                    transaction,
+                    &binding_id,
+                    &camp_id,
+                    &message.aggregate_id,
+                    &message.external_principal_id,
+                    &message.ack_app_id,
+                    &message.structured_content,
+                    &message.target_agent_ids,
+                    &now_text,
+                )?;
+                queued.push((request_id, queue_position, message.ack_app_id.clone()));
+            }
+            for (index, (request_id, queue_position, ack_app_id)) in queued.iter().enumerate() {
+                let admission = if index == 0 {
+                    try_admit_request(transaction, request_id, &now_text, &envelope.command_id)?
+                } else {
+                    AdmissionAttempt::Deferred
+                };
+                if !matches!(admission, AdmissionAttempt::Failed(_)) {
+                    insert_queue_ack_delivery(
+                        transaction,
+                        request_id,
+                        ack_app_id,
+                        *queue_position,
+                        admission == AdmissionAttempt::Admitted,
+                        &now_text,
+                    )?;
+                }
+            }
+            let resolved = transaction.execute(
+                r#"
+                UPDATE pending_camp_binding
+                SET status = 'resolved', project_id = ?2, binding_id = ?3,
+                    camp_id = ?4, resolved_at = ?5,
+                    version = version + 1, updated_at = ?5
+                WHERE id = ?1 AND status = 'resolving' AND version = ?6
+                "#,
+                params![
+                    pending.id,
+                    project_id,
+                    binding_id,
+                    camp_id,
+                    now_text,
+                    pending.version + 1,
+                ],
+            )?;
+            if resolved != 1 {
+                anyhow::bail!("pending Camp binding resolution lost its atomic state");
+            }
+            Ok(CommandHandlerResult::accepted(
+                "channel.binding.resolved",
+                json!({
+                    "pendingBindingId": pending.id,
+                    "projectId": project_id,
+                    "projectDisplayName": project_display_name,
+                    "bindingId": binding_id,
+                    "campId": camp_id,
+                    "promotedMessageCount": queued.len(),
+                    "version": pending.version + 2,
+                }),
+                Some(EntityReference {
+                    entity_type: "channel_conversation_binding".to_string(),
+                    entity_id: binding_id,
                 }),
             ))
         })
@@ -2717,6 +2844,15 @@ impl ChannelService {
                 "#,
                 [&now_text],
             )?;
+            transaction.execute(
+                r#"
+                UPDATE pending_camp_binding
+                SET status = 'expired', resolved_at = ?1,
+                    version = version + 1, updated_at = ?1
+                WHERE status = 'pending' AND expires_at <= ?1
+                "#,
+                [&now_text],
+            )?;
             project_active_request_deliveries(transaction, &now_text)?;
             settle_terminal_requests(transaction, &now_text)?;
             promote_ready_requests(transaction, &now_text, &envelope.command_id)?;
@@ -2736,6 +2872,10 @@ impl ChannelService {
                       SELECT 1 FROM channel_turn_request
                       WHERE aggregate_id = channel_inbound_aggregate.id
                         AND status IN ('queued', 'admitted')
+                  )
+                  AND NOT EXISTS (
+                      SELECT 1 FROM pending_camp_message
+                      WHERE aggregate_id = channel_inbound_aggregate.id
                   )
                 "#,
                 [&retention_boundary],
@@ -3073,7 +3213,7 @@ struct CollectingAggregate {
 #[serde(rename_all = "camelCase")]
 struct FrozenInboundPayload {
     conversation_id: String,
-    principal_id: Option<String>,
+    principal_id: String,
     binding_id_at_observation: Option<String>,
     structured_content: StructuredCampMessageContent,
     target_agent_ids: Vec<String>,
@@ -3083,16 +3223,73 @@ struct FrozenInboundPayload {
 #[derive(Debug)]
 struct ChannelBindingAdmission {
     binding_id: String,
-    #[allow(dead_code)]
-    project_binding_id: String,
     camp_id: Option<String>,
     project_display_name: String,
     binding_kind: String,
     canonical_path: String,
+    project_status: Option<String>,
     conversation_display_name: String,
+    conversation_kind: String,
+}
+
+#[derive(Debug, Clone)]
+struct ChannelConversationAdmission {
+    id: String,
+    display_name: String,
     tenant_key: String,
     chat_id: String,
     conversation_kind: String,
+}
+
+#[derive(Debug)]
+enum GroupRosterReadiness {
+    NotRequired,
+    MissingState,
+    MissingApps(Vec<String>),
+    Ready(Vec<String>),
+}
+
+#[derive(Debug)]
+struct PendingBindingAppend {
+    pending_binding_id: String,
+    queue_position: i64,
+    acknowledgement_app_id: String,
+    created: bool,
+}
+
+#[derive(Debug)]
+struct PendingBindingResolution {
+    id: String,
+    owner_principal_id: String,
+    acknowledgement_app_id: String,
+    status: String,
+    version: i64,
+    nonce_digest: String,
+    expires_at: String,
+    conversation: ChannelConversationAdmission,
+}
+
+#[derive(Debug)]
+struct PendingMessageRecord {
+    aggregate_id: String,
+    external_principal_id: String,
+    ack_app_id: String,
+    structured_content: StructuredCampMessageContent,
+    target_agent_ids: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ProjectCardItem {
+    project_id: String,
+    display_name: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum FeishuOwnerClassification {
+    Owner { principal_id: String },
+    NonOwner,
+    Unverified,
 }
 
 fn load_collecting_aggregate(
@@ -3121,6 +3318,1071 @@ fn load_collecting_aggregate(
         )
         .optional()
         .map_err(Into::into)
+}
+
+fn refresh_project_catalog(database: &mut Database) -> Result<()> {
+    let projects = query_rows(
+        database.connection(),
+        r#"
+        SELECT project_path, MAX(updated_at)
+        FROM camp
+        WHERE project_binding_kind = 'directory'
+        GROUP BY project_path
+        ORDER BY MAX(updated_at) DESC, project_path
+        "#,
+        [],
+        |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+    )?;
+    let transaction = database
+        .connection_mut()
+        .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+    let now = Utc::now().to_rfc3339();
+    let current_paths_json =
+        serde_json::to_string(&projects.iter().map(|(path, _)| path).collect::<Vec<_>>())?;
+    transaction.execute(
+        r#"
+        UPDATE project_catalog_item
+        SET status = 'archived', version = version + 1, updated_at = ?1
+        WHERE status <> 'archived'
+          AND canonical_path NOT IN (SELECT value FROM json_each(?2))
+        "#,
+        params![now, current_paths_json],
+    )?;
+    for (canonical_path, last_opened_at) in projects {
+        let path = Path::new(&canonical_path);
+        let display_name = path
+            .file_name()
+            .and_then(|value| value.to_str())
+            .filter(|value| !value.trim().is_empty())
+            .unwrap_or("未命名项目")
+            .to_string();
+        let status = if path.is_dir() {
+            "active"
+        } else {
+            "unavailable"
+        };
+        transaction.execute(
+            r#"
+            INSERT INTO project_catalog_item(
+                id, canonical_path, display_name, status, last_opened_at,
+                version, created_at, updated_at
+            ) VALUES (?1, ?2, ?3, ?4, ?5, 1, ?6, ?6)
+            ON CONFLICT(canonical_path) DO UPDATE SET
+                display_name = excluded.display_name,
+                status = excluded.status,
+                last_opened_at = excluded.last_opened_at,
+                version = CASE
+                    WHEN project_catalog_item.display_name IS excluded.display_name
+                     AND project_catalog_item.status IS excluded.status
+                     AND project_catalog_item.last_opened_at IS excluded.last_opened_at
+                    THEN project_catalog_item.version
+                    ELSE project_catalog_item.version + 1
+                END,
+                updated_at = CASE
+                    WHEN project_catalog_item.display_name IS excluded.display_name
+                     AND project_catalog_item.status IS excluded.status
+                     AND project_catalog_item.last_opened_at IS excluded.last_opened_at
+                    THEN project_catalog_item.updated_at
+                    ELSE excluded.updated_at
+                END
+            "#,
+            params![
+                format!("rvproj_{}", Uuid::new_v4().simple()),
+                canonical_path,
+                display_name,
+                status,
+                last_opened_at,
+                now,
+            ],
+        )?;
+    }
+    transaction.commit()?;
+    Ok(())
+}
+
+fn active_project_card_items(transaction: &Transaction<'_>) -> Result<Vec<ProjectCardItem>> {
+    query_rows(
+        transaction,
+        r#"
+        SELECT id, display_name
+        FROM project_catalog_item
+        WHERE status = 'active'
+        ORDER BY last_opened_at DESC, display_name, id
+        "#,
+        [],
+        |row| {
+            Ok(ProjectCardItem {
+                project_id: row.get(0)?,
+                display_name: row.get(1)?,
+            })
+        },
+    )
+}
+
+fn opaque_digest(namespace: &str, value: &str) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(namespace.as_bytes());
+    hasher.update([0]);
+    hasher.update(value.as_bytes());
+    format!("sha256:{:x}", hasher.finalize())
+}
+
+fn validate_owner_identity_input(
+    provider: &str,
+    app_id: &str,
+    tenant_key: &str,
+    open_id: Option<&str>,
+    user_id: Option<&str>,
+    union_id: Option<&str>,
+) -> Result<()> {
+    if provider != FEISHU_PROVIDER {
+        anyhow::bail!("provider must be feishu");
+    }
+    validate_nonempty(app_id, "appId")?;
+    validate_nonempty(tenant_key, "tenantKey")?;
+    if open_id.is_none() && user_id.is_none() && union_id.is_none() {
+        anyhow::bail!("a Feishu sender identity is required");
+    }
+    for (value, field) in [
+        (open_id, "openId"),
+        (user_id, "userId"),
+        (union_id, "unionId"),
+    ] {
+        if let Some(value) = value {
+            validate_nonempty(value, field)?;
+            if value.len() > 512 {
+                anyhow::bail!("{field} is too long");
+            }
+        }
+    }
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn classify_and_record_feishu_owner(
+    transaction: &Transaction<'_>,
+    provider: &str,
+    app_id: &str,
+    tenant_key: &str,
+    open_id: Option<&str>,
+    user_id: Option<&str>,
+    union_id: Option<&str>,
+    display_name: &str,
+    now: &str,
+) -> Result<FeishuOwnerClassification> {
+    let identity = transaction
+        .query_row(
+            r#"
+            SELECT bot.account_id, owner.tenant_id,
+                   owner.canonical_owner_principal_id,
+                   owner.user_id_digest, owner.union_id_digest,
+                   app.open_id_digest, app.user_id_digest, app.union_id_digest
+            FROM feishu_member_bot AS bot
+            JOIN feishu_owner_identity AS owner ON owner.account_id = bot.account_id
+            LEFT JOIN feishu_owner_app_identity AS app
+              ON app.account_id = owner.account_id AND app.app_id = bot.app_id
+            WHERE bot.app_id = ?1 AND bot.status = 'published'
+            "#,
+            [app_id],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?,
+                    row.get::<_, Option<String>>(4)?,
+                    row.get::<_, Option<String>>(5)?,
+                    row.get::<_, Option<String>>(6)?,
+                    row.get::<_, Option<String>>(7)?,
+                ))
+            },
+        )
+        .optional()?;
+    let Some((
+        account_id,
+        expected_tenant_id,
+        principal_id,
+        canonical_user_digest,
+        canonical_union_digest,
+        app_open_digest,
+        app_user_digest,
+        app_union_digest,
+    )) = identity
+    else {
+        return Ok(FeishuOwnerClassification::Unverified);
+    };
+    if tenant_key != expected_tenant_id {
+        return Ok(FeishuOwnerClassification::Unverified);
+    }
+    let open_digest = open_id.map(|value| opaque_digest("feishu-open", value));
+    let user_digest = user_id.map(|value| opaque_digest("feishu-user", value));
+    let union_digest = union_id.map(|value| opaque_digest("feishu-union", value));
+    let matches = user_digest.as_deref() == Some(canonical_user_digest.as_str())
+        || union_digest.as_deref().is_some_and(|digest| {
+            canonical_union_digest.as_deref() == Some(digest)
+                || app_union_digest.as_deref() == Some(digest)
+        })
+        || open_digest
+            .as_deref()
+            .is_some_and(|digest| app_open_digest.as_deref() == Some(digest))
+        || user_digest
+            .as_deref()
+            .is_some_and(|digest| app_user_digest.as_deref() == Some(digest));
+    if !matches {
+        return Ok(FeishuOwnerClassification::NonOwner);
+    }
+    let conflicts = canonical_union_digest
+        .as_deref()
+        .zip(union_digest.as_deref())
+        .is_some_and(|(expected, actual)| expected != actual)
+        || app_open_digest
+            .as_deref()
+            .zip(open_digest.as_deref())
+            .is_some_and(|(expected, actual)| expected != actual)
+        || app_user_digest
+            .as_deref()
+            .zip(user_digest.as_deref())
+            .is_some_and(|(expected, actual)| expected != actual)
+        || app_union_digest
+            .as_deref()
+            .zip(union_digest.as_deref())
+            .is_some_and(|(expected, actual)| expected != actual);
+    if conflicts {
+        return Ok(FeishuOwnerClassification::Unverified);
+    }
+    transaction.execute(
+        r#"
+        UPDATE feishu_owner_identity
+        SET union_id_digest = COALESCE(union_id_digest, ?2),
+            verified_at = ?3, version = version + 1, updated_at = ?3
+        WHERE account_id = ?1
+        "#,
+        params![account_id, union_digest, now],
+    )?;
+    transaction.execute(
+        r#"
+        INSERT INTO feishu_owner_app_identity(
+            account_id, app_id, open_id_digest, user_id_digest,
+            union_id_digest, verified_at, version, created_at, updated_at
+        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, 1, ?6, ?6)
+        ON CONFLICT(account_id, app_id) DO UPDATE SET
+            open_id_digest = COALESCE(excluded.open_id_digest, open_id_digest),
+            user_id_digest = COALESCE(excluded.user_id_digest, user_id_digest),
+            union_id_digest = COALESCE(excluded.union_id_digest, union_id_digest),
+            verified_at = excluded.verified_at,
+            version = feishu_owner_app_identity.version + 1,
+            updated_at = excluded.updated_at
+        "#,
+        params![
+            account_id,
+            app_id,
+            open_digest,
+            user_digest,
+            union_digest,
+            now
+        ],
+    )?;
+    let canonical_external_user_id = format!("owner:{account_id}");
+    transaction.execute(
+        r#"
+        INSERT INTO external_principal(
+            id, provider, tenant_key, external_user_id, display_name,
+            version, created_at, updated_at
+        ) VALUES (?1, ?2, ?3, ?4, ?5, 1, ?6, ?6)
+        ON CONFLICT(id) DO UPDATE SET
+            display_name = excluded.display_name,
+            version = CASE
+                WHEN external_principal.display_name IS excluded.display_name
+                THEN external_principal.version
+                ELSE external_principal.version + 1
+            END,
+            updated_at = excluded.updated_at
+        "#,
+        params![
+            principal_id,
+            provider,
+            tenant_key,
+            canonical_external_user_id,
+            display_name,
+            now,
+        ],
+    )?;
+    persist_external_principal_identities(
+        transaction,
+        &principal_id,
+        provider,
+        app_id,
+        open_id,
+        user_id,
+        union_id,
+        now,
+    )?;
+    Ok(FeishuOwnerClassification::Owner { principal_id })
+}
+
+#[allow(clippy::too_many_arguments)]
+fn persist_external_principal_identities(
+    transaction: &Transaction<'_>,
+    principal_id: &str,
+    provider: &str,
+    app_id: &str,
+    open_id: Option<&str>,
+    user_id: Option<&str>,
+    union_id: Option<&str>,
+    now: &str,
+) -> Result<()> {
+    for (identity_kind, external_id) in [
+        ("open_id", open_id),
+        ("user_id", user_id),
+        ("union_id", union_id),
+    ] {
+        let Some(external_id) = external_id else {
+            continue;
+        };
+        transaction.execute(
+            r#"
+            INSERT INTO external_principal_app_identity(
+                principal_id, provider, app_id, identity_kind,
+                external_id, updated_at
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+            ON CONFLICT(principal_id, provider, app_id, identity_kind) DO UPDATE SET
+                external_id = excluded.external_id,
+                updated_at = excluded.updated_at
+            "#,
+            params![
+                principal_id,
+                provider,
+                app_id,
+                identity_kind,
+                external_id,
+                now
+            ],
+        )?;
+    }
+    Ok(())
+}
+
+fn load_verified_owner_for_app(
+    transaction: &Transaction<'_>,
+    app_id: &str,
+    tenant_key: &str,
+) -> Result<Option<(String, String)>> {
+    transaction
+        .query_row(
+            r#"
+            SELECT owner.canonical_owner_principal_id, principal.display_name
+            FROM feishu_member_bot AS bot
+            JOIN feishu_owner_identity AS owner ON owner.account_id = bot.account_id
+            JOIN feishu_owner_app_identity AS app
+              ON app.account_id = owner.account_id AND app.app_id = bot.app_id
+            JOIN external_principal AS principal
+              ON principal.id = owner.canonical_owner_principal_id
+            WHERE bot.app_id = ?1 AND bot.status = 'published'
+              AND owner.tenant_id = ?2
+            "#,
+            params![app_id, tenant_key],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .optional()
+        .map_err(Into::into)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn operator_matches_feishu_owner(
+    transaction: &Transaction<'_>,
+    app_id: &str,
+    expected_principal_id: &str,
+    open_id: Option<&str>,
+    _user_id: Option<&str>,
+    union_id: Option<&str>,
+    now: &str,
+) -> Result<bool> {
+    let identity = transaction
+        .query_row(
+            r#"
+            SELECT owner.account_id, owner.union_id_digest,
+                   app.open_id_digest, app.union_id_digest
+            FROM feishu_member_bot AS bot
+            JOIN feishu_owner_identity AS owner ON owner.account_id = bot.account_id
+            JOIN feishu_owner_app_identity AS app
+              ON app.account_id = owner.account_id AND app.app_id = bot.app_id
+            WHERE bot.app_id = ?1 AND bot.status = 'published'
+              AND owner.canonical_owner_principal_id = ?2
+            "#,
+            params![app_id, expected_principal_id],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, Option<String>>(1)?,
+                    row.get::<_, Option<String>>(2)?,
+                    row.get::<_, Option<String>>(3)?,
+                ))
+            },
+        )
+        .optional()?;
+    let Some((account_id, owner_union_digest, app_open_digest, app_union_digest)) = identity else {
+        return Ok(false);
+    };
+    let open_digest = open_id.map(|value| opaque_digest("feishu-open", value));
+    let union_digest = union_id.map(|value| opaque_digest("feishu-union", value));
+    let matches = union_digest.as_deref().is_some_and(|digest| {
+        owner_union_digest.as_deref() == Some(digest) || app_union_digest.as_deref() == Some(digest)
+    }) || open_digest
+        .as_deref()
+        .is_some_and(|digest| app_open_digest.as_deref() == Some(digest));
+    if !matches {
+        return Ok(false);
+    }
+    if owner_union_digest
+        .as_deref()
+        .zip(union_digest.as_deref())
+        .is_some_and(|(expected, actual)| expected != actual)
+        || app_open_digest
+            .as_deref()
+            .zip(open_digest.as_deref())
+            .is_some_and(|(expected, actual)| expected != actual)
+        || app_union_digest
+            .as_deref()
+            .zip(union_digest.as_deref())
+            .is_some_and(|(expected, actual)| expected != actual)
+    {
+        return Ok(false);
+    }
+    transaction.execute(
+        r#"
+        UPDATE feishu_owner_identity
+        SET union_id_digest = COALESCE(union_id_digest, ?2),
+            verified_at = ?3, version = version + 1, updated_at = ?3
+        WHERE account_id = ?1
+        "#,
+        params![account_id, union_digest, now],
+    )?;
+    transaction.execute(
+        r#"
+        UPDATE feishu_owner_app_identity
+        SET open_id_digest = COALESCE(open_id_digest, ?3),
+            union_id_digest = COALESCE(union_id_digest, ?4),
+            verified_at = ?5, version = version + 1, updated_at = ?5
+        WHERE account_id = ?1 AND app_id = ?2
+        "#,
+        params![account_id, app_id, open_digest, union_digest, now],
+    )?;
+    persist_external_principal_identities(
+        transaction,
+        expected_principal_id,
+        FEISHU_PROVIDER,
+        app_id,
+        open_id,
+        None,
+        union_id,
+        now,
+    )?;
+    Ok(true)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn upsert_channel_conversation(
+    transaction: &Transaction<'_>,
+    conversation_id: &str,
+    provider: &str,
+    tenant_key: &str,
+    chat_id: &str,
+    topic_key: &str,
+    bot_scope_app_id: &str,
+    conversation_kind: &str,
+    display_name: &str,
+    sender_display_name: &str,
+    sender_principal_id: Option<&str>,
+    now: &str,
+) -> Result<()> {
+    transaction.execute(
+        r#"
+        INSERT INTO channel_conversation(
+            id, provider, tenant_key, chat_id, topic_key, bot_scope_app_id,
+            conversation_kind, display_name, last_sender_display_name,
+            last_sender_principal_id,
+            first_seen_at, last_seen_at, version
+        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?11, 1)
+        ON CONFLICT(provider, tenant_key, chat_id, topic_key, bot_scope_app_id) DO UPDATE SET
+            conversation_kind = excluded.conversation_kind,
+            display_name = excluded.display_name,
+            last_sender_display_name = excluded.last_sender_display_name,
+            last_sender_principal_id = excluded.last_sender_principal_id,
+            last_seen_at = excluded.last_seen_at,
+            version = channel_conversation.version + 1
+        "#,
+        params![
+            conversation_id,
+            provider,
+            tenant_key,
+            chat_id,
+            topic_key,
+            bot_scope_app_id,
+            conversation_kind,
+            display_name,
+            sender_display_name,
+            sender_principal_id,
+            now,
+        ],
+    )?;
+    Ok(())
+}
+
+fn load_channel_conversation(
+    transaction: &Transaction<'_>,
+    conversation_id: &str,
+) -> Result<Option<ChannelConversationAdmission>> {
+    transaction
+        .query_row(
+            r#"
+            SELECT id, display_name, tenant_key, chat_id, conversation_kind
+            FROM channel_conversation
+            WHERE id = ?1
+            "#,
+            [conversation_id],
+            |row| {
+                Ok(ChannelConversationAdmission {
+                    id: row.get(0)?,
+                    display_name: row.get(1)?,
+                    tenant_key: row.get(2)?,
+                    chat_id: row.get(3)?,
+                    conversation_kind: row.get(4)?,
+                })
+            },
+        )
+        .optional()
+        .map_err(Into::into)
+}
+
+fn group_roster_readiness(
+    transaction: &Transaction<'_>,
+    conversation: &ChannelConversationAdmission,
+    expected_app_ids: &BTreeSet<String>,
+) -> Result<GroupRosterReadiness> {
+    if !matches!(conversation.conversation_kind.as_str(), "group" | "topic") {
+        return Ok(GroupRosterReadiness::NotRequired);
+    }
+    let roster_state_exists: bool = transaction.query_row(
+        r#"
+        SELECT EXISTS(
+            SELECT 1 FROM external_group_bot_roster_state
+            WHERE provider = 'feishu' AND tenant_key = ?1 AND chat_id = ?2
+        )
+        "#,
+        params![conversation.tenant_key, conversation.chat_id],
+        |row| row.get(0),
+    )?;
+    if !roster_state_exists {
+        return Ok(GroupRosterReadiness::MissingState);
+    }
+    let present_app_ids = query_rows(
+        transaction,
+        r#"
+        SELECT app_id FROM external_group_bot_roster
+        WHERE provider = 'feishu' AND tenant_key = ?1 AND chat_id = ?2
+          AND status = 'present'
+        ORDER BY app_id
+        "#,
+        params![conversation.tenant_key, conversation.chat_id],
+        |row| row.get::<_, String>(0),
+    )?
+    .into_iter()
+    .collect::<BTreeSet<_>>();
+    let missing_apps = expected_app_ids
+        .difference(&present_app_ids)
+        .cloned()
+        .collect::<Vec<_>>();
+    if !missing_apps.is_empty() {
+        return Ok(GroupRosterReadiness::MissingApps(missing_apps));
+    }
+    let present_agents = query_rows(
+        transaction,
+        r#"
+        SELECT roster.agent_id
+        FROM external_group_bot_roster AS roster
+        JOIN feishu_member_bot AS bot
+          ON bot.app_id = roster.app_id AND bot.agent_id = roster.agent_id
+        WHERE roster.provider = 'feishu'
+          AND roster.tenant_key = ?1 AND roster.chat_id = ?2
+          AND roster.status = 'present' AND bot.status = 'published'
+        ORDER BY roster.agent_id
+        "#,
+        params![conversation.tenant_key, conversation.chat_id],
+        |row| row.get::<_, String>(0),
+    )?;
+    Ok(GroupRosterReadiness::Ready(present_agents))
+}
+
+fn load_active_channel_binding(
+    transaction: &Transaction<'_>,
+    conversation_id: &str,
+    exact_binding_id: Option<&str>,
+    quick_chat_path: &str,
+) -> Result<Option<ChannelBindingAdmission>> {
+    transaction
+        .query_row(
+            r#"
+            SELECT binding.id, binding.camp_id,
+                   CASE binding.execution_scope_kind
+                       WHEN 'quick_chat' THEN '快速对话'
+                       ELSE project.display_name
+                   END,
+                   CASE binding.execution_scope_kind
+                       WHEN 'quick_chat' THEN 'quick_chat'
+                       ELSE 'directory'
+                   END,
+                   CASE binding.execution_scope_kind
+                       WHEN 'quick_chat' THEN ?3
+                       ELSE project.canonical_path
+                   END,
+                   project.status,
+                   conversation.display_name, conversation.conversation_kind
+            FROM channel_conversation_binding AS binding
+            JOIN channel_conversation AS conversation
+              ON conversation.id = binding.channel_conversation_id
+            LEFT JOIN project_catalog_item AS project ON project.id = binding.project_id
+            WHERE binding.channel_conversation_id = ?1
+              AND binding.status = 'active'
+              AND (?2 IS NULL OR binding.id = ?2)
+            "#,
+            params![conversation_id, exact_binding_id, quick_chat_path],
+            |row| {
+                Ok(ChannelBindingAdmission {
+                    binding_id: row.get(0)?,
+                    camp_id: row.get(1)?,
+                    project_display_name: row.get(2)?,
+                    binding_kind: row.get(3)?,
+                    canonical_path: row.get(4)?,
+                    project_status: row.get(5)?,
+                    conversation_display_name: row.get(6)?,
+                    conversation_kind: row.get(7)?,
+                })
+            },
+        )
+        .optional()
+        .map_err(Into::into)
+}
+
+fn create_quick_chat_binding(
+    transaction: &Transaction<'_>,
+    conversation: &ChannelConversationAdmission,
+    target_agent_ids: &[String],
+    quick_chat_path: &str,
+    now: &str,
+) -> Result<ChannelBindingAdmission> {
+    let generation: i64 = transaction.query_row(
+        r#"
+        SELECT COALESCE(MAX(generation), 0) + 1
+        FROM channel_conversation_binding
+        WHERE channel_conversation_id = ?1
+        "#,
+        [&conversation.id],
+        |row| row.get(0),
+    )?;
+    let binding_id = format!("rvcb_{}", Uuid::new_v4().simple());
+    transaction.execute(
+        r#"
+        INSERT INTO channel_conversation_binding(
+            id, channel_conversation_id, execution_scope_kind,
+            project_id, camp_id, status, generation, version,
+            created_at, updated_at, closed_at
+        ) VALUES (?1, ?2, 'quick_chat', NULL, NULL, 'active', ?3, 1, ?4, ?4, NULL)
+        "#,
+        params![binding_id, conversation.id, generation, now],
+    )?;
+    let mut binding = ChannelBindingAdmission {
+        binding_id,
+        camp_id: None,
+        project_display_name: "快速对话".to_string(),
+        binding_kind: "quick_chat".to_string(),
+        canonical_path: quick_chat_path.to_string(),
+        project_status: None,
+        conversation_display_name: conversation.display_name.clone(),
+        conversation_kind: conversation.conversation_kind.clone(),
+    };
+    binding.camp_id = Some(create_channel_camp(
+        transaction,
+        &binding,
+        target_agent_ids,
+        now,
+    )?);
+    Ok(binding)
+}
+
+fn append_pending_camp_binding(
+    transaction: &Transaction<'_>,
+    aggregate_id: &str,
+    frozen: &FrozenInboundPayload,
+    conversation: &ChannelConversationAdmission,
+    now: &chrono::DateTime<Utc>,
+) -> Result<PendingBindingAppend> {
+    let now_text = now.to_rfc3339();
+    if let Some((expired_id, expires_at)) = transaction
+        .query_row(
+            r#"
+            SELECT id, expires_at
+            FROM pending_camp_binding
+            WHERE channel_conversation_id = ?1 AND status = 'pending'
+            "#,
+            [&conversation.id],
+            |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+        )
+        .optional()?
+        .filter(|(_, expires_at)| {
+            chrono::DateTime::parse_from_rfc3339(expires_at)
+                .map(|deadline| now >= &deadline.with_timezone(&Utc))
+                .unwrap_or(true)
+        })
+    {
+        let _ = expires_at;
+        transaction.execute(
+            r#"
+            UPDATE pending_camp_binding
+            SET status = 'expired', resolved_at = ?2,
+                version = version + 1, updated_at = ?2
+            WHERE id = ?1 AND status = 'pending'
+            "#,
+            params![expired_id, now_text],
+        )?;
+    }
+    let existing = transaction
+        .query_row(
+            r#"
+            SELECT id, owner_principal_id, acknowledgement_app_id
+            FROM pending_camp_binding
+            WHERE channel_conversation_id = ?1 AND status = 'pending'
+            "#,
+            [&conversation.id],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                ))
+            },
+        )
+        .optional()?;
+    let (pending_binding_id, acknowledgement_app_id, created) =
+        if let Some((pending_id, owner_principal_id, acknowledgement_app_id)) = existing {
+            if owner_principal_id != frozen.principal_id {
+                anyhow::bail!("pending Camp binding owner identity changed");
+            }
+            (pending_id, acknowledgement_app_id, false)
+        } else {
+            let pending_id = format!("rvpcb_{}", Uuid::new_v4().simple());
+            let nonce = Uuid::new_v4().simple().to_string();
+            let expires_at = (*now + Duration::hours(PENDING_BINDING_LIFETIME_HOURS)).to_rfc3339();
+            transaction.execute(
+                r#"
+                INSERT INTO pending_camp_binding(
+                    id, channel_conversation_id, owner_principal_id,
+                    acknowledgement_app_id, status, version, nonce_digest,
+                    expires_at, project_id, binding_id, camp_id,
+                    created_at, updated_at, resolved_at
+                ) VALUES (
+                    ?1, ?2, ?3, ?4, 'pending', 1, ?5, ?6,
+                    NULL, NULL, NULL, ?7, ?7, NULL
+                )
+                "#,
+                params![
+                    pending_id,
+                    conversation.id,
+                    frozen.principal_id,
+                    frozen.acknowledgement_app_id,
+                    opaque_digest("pending-binding-nonce", &nonce),
+                    expires_at,
+                    now_text,
+                ],
+            )?;
+            insert_pending_project_delivery(
+                transaction,
+                &pending_id,
+                &frozen.acknowledgement_app_id,
+                conversation,
+                &nonce,
+                1,
+                &now_text,
+            )?;
+            (pending_id, frozen.acknowledgement_app_id.clone(), true)
+        };
+    let queue_position: i64 = transaction.query_row(
+        r#"
+        SELECT COALESCE(MAX(queue_position), 0) + 1
+        FROM pending_camp_message
+        WHERE pending_binding_id = ?1
+        "#,
+        [&pending_binding_id],
+        |row| row.get(0),
+    )?;
+    transaction.execute(
+        r#"
+        INSERT INTO pending_camp_message(
+            pending_binding_id, aggregate_id, external_principal_id,
+            ack_app_id, structured_content_json, addressed_agent_ids_json,
+            queue_position, created_at
+        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+        ON CONFLICT(aggregate_id) DO NOTHING
+        "#,
+        params![
+            pending_binding_id,
+            aggregate_id,
+            frozen.principal_id,
+            frozen.acknowledgement_app_id,
+            serde_json::to_string(&frozen.structured_content)?,
+            serde_json::to_string(&frozen.target_agent_ids)?,
+            queue_position,
+            now_text,
+        ],
+    )?;
+    let persisted_position: i64 = transaction.query_row(
+        "SELECT queue_position FROM pending_camp_message WHERE aggregate_id = ?1",
+        [aggregate_id],
+        |row| row.get(0),
+    )?;
+    Ok(PendingBindingAppend {
+        pending_binding_id,
+        queue_position: persisted_position,
+        acknowledgement_app_id,
+        created,
+    })
+}
+
+fn insert_pending_project_delivery(
+    transaction: &Transaction<'_>,
+    pending_binding_id: &str,
+    app_id: &str,
+    conversation: &ChannelConversationAdmission,
+    nonce: &str,
+    expected_version: i64,
+    now: &str,
+) -> Result<()> {
+    let payload = json!({
+        "kind": "project_selection",
+        "pendingBindingId": pending_binding_id,
+        "conversationDisplayName": conversation.display_name,
+        "conversationKind": conversation.conversation_kind,
+        "expectedVersion": expected_version,
+        "nonce": nonce,
+        "projectOptions": active_project_card_items(transaction)?,
+    });
+    transaction.execute(
+        r#"
+        INSERT INTO channel_delivery(
+            id, request_id, pending_binding_id, dedupe_key, delivery_kind,
+            target_app_id, source_agent_id, source_camp_message_id,
+            payload_json, status, attempt_count, available_at,
+            lease_owner, lease_expires_at, external_delivery_message_id,
+            failure_code, created_at, updated_at, ended_at
+        ) VALUES (
+            ?1, NULL, ?2, ?3, 'project_selection', ?4,
+            NULL, NULL, ?5, 'pending', 0, ?6,
+            NULL, NULL, NULL, NULL, ?6, ?6, NULL
+        )
+        ON CONFLICT(dedupe_key) DO NOTHING
+        "#,
+        params![
+            format!("rvcd_{}", Uuid::new_v4().simple()),
+            pending_binding_id,
+            format!("project_selection:{pending_binding_id}"),
+            app_id,
+            serde_json::to_string(&payload)?,
+            now,
+        ],
+    )?;
+    Ok(())
+}
+
+fn mark_aggregate_finalized(
+    transaction: &Transaction<'_>,
+    aggregate_id: &str,
+    now: &str,
+) -> Result<()> {
+    transaction.execute(
+        r#"
+        UPDATE channel_inbound_aggregate
+        SET status = 'finalized', finalized_at = ?2, updated_at = ?2
+        WHERE id = ?1 AND status = 'collecting'
+        "#,
+        params![aggregate_id, now],
+    )?;
+    Ok(())
+}
+
+fn mark_aggregate_failed(
+    transaction: &Transaction<'_>,
+    aggregate_id: &str,
+    failure_code: &str,
+    now: &str,
+) -> Result<()> {
+    transaction.execute(
+        r#"
+        UPDATE channel_inbound_aggregate
+        SET status = 'failed', failure_code = ?2,
+            finalized_at = ?3, updated_at = ?3
+        WHERE id = ?1 AND status = 'collecting'
+        "#,
+        params![aggregate_id, failure_code, now],
+    )?;
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn insert_channel_turn_request(
+    transaction: &Transaction<'_>,
+    binding_id: &str,
+    camp_id: &str,
+    aggregate_id: &str,
+    principal_id: &str,
+    ack_app_id: &str,
+    structured_content: &StructuredCampMessageContent,
+    target_agent_ids: &[String],
+    now: &str,
+) -> Result<(String, i64)> {
+    let request_id = format!("rvctr_{}", Uuid::new_v4().simple());
+    let queue_position: i64 = transaction.query_row(
+        r#"
+        SELECT COUNT(*) + 1
+        FROM channel_turn_request
+        WHERE binding_id = ?1 AND status IN ('queued', 'admitted')
+        "#,
+        [binding_id],
+        |row| row.get(0),
+    )?;
+    transaction.execute(
+        r#"
+        INSERT INTO channel_turn_request(
+            id, binding_id, aggregate_id, external_principal_id,
+            ack_app_id, structured_content_json, addressed_agent_ids_json,
+            status, queue_position, camp_id, camp_message_id, camp_turn_id,
+            trigger_camp_sequence, failure_code, version,
+            created_at, admitted_at, completed_at, updated_at
+        ) VALUES (
+            ?1, ?2, ?3, ?4, ?5, ?6, ?7, 'queued', ?8, ?9,
+            NULL, NULL, NULL, NULL, 1, ?10, NULL, NULL, ?10
+        )
+        "#,
+        params![
+            request_id,
+            binding_id,
+            aggregate_id,
+            principal_id,
+            ack_app_id,
+            serde_json::to_string(structured_content)?,
+            serde_json::to_string(target_agent_ids)?,
+            queue_position,
+            camp_id,
+            now,
+        ],
+    )?;
+    Ok((request_id, queue_position))
+}
+
+fn load_pending_binding_resolution(
+    transaction: &Transaction<'_>,
+    pending_binding_id: &str,
+) -> Result<Option<PendingBindingResolution>> {
+    transaction
+        .query_row(
+            r#"
+            SELECT pending.id, pending.owner_principal_id,
+                   pending.acknowledgement_app_id, pending.status,
+                   pending.version, pending.nonce_digest, pending.expires_at,
+                   conversation.id, conversation.display_name,
+                   conversation.tenant_key, conversation.chat_id,
+                   conversation.conversation_kind
+            FROM pending_camp_binding AS pending
+            JOIN channel_conversation AS conversation
+              ON conversation.id = pending.channel_conversation_id
+            WHERE pending.id = ?1
+            "#,
+            [pending_binding_id],
+            |row| {
+                Ok(PendingBindingResolution {
+                    id: row.get(0)?,
+                    owner_principal_id: row.get(1)?,
+                    acknowledgement_app_id: row.get(2)?,
+                    status: row.get(3)?,
+                    version: row.get(4)?,
+                    nonce_digest: row.get(5)?,
+                    expires_at: row.get(6)?,
+                    conversation: ChannelConversationAdmission {
+                        id: row.get(7)?,
+                        display_name: row.get(8)?,
+                        tenant_key: row.get(9)?,
+                        chat_id: row.get(10)?,
+                        conversation_kind: row.get(11)?,
+                    },
+                })
+            },
+        )
+        .optional()
+        .map_err(Into::into)
+}
+
+fn load_pending_messages(
+    transaction: &Transaction<'_>,
+    pending_binding_id: &str,
+) -> Result<Vec<PendingMessageRecord>> {
+    query_rows(
+        transaction,
+        r#"
+        SELECT aggregate_id, external_principal_id, ack_app_id,
+               structured_content_json, addressed_agent_ids_json
+        FROM pending_camp_message
+        WHERE pending_binding_id = ?1
+        ORDER BY queue_position, created_at, aggregate_id
+        "#,
+        [pending_binding_id],
+        |row| {
+            let content_json = row.get::<_, String>(3)?;
+            let targets_json = row.get::<_, String>(4)?;
+            let structured_content = serde_json::from_str(&content_json).map_err(|error| {
+                rusqlite::Error::FromSqlConversionFailure(
+                    3,
+                    rusqlite::types::Type::Text,
+                    Box::new(error),
+                )
+            })?;
+            let target_agent_ids = serde_json::from_str(&targets_json).map_err(|error| {
+                rusqlite::Error::FromSqlConversionFailure(
+                    4,
+                    rusqlite::types::Type::Text,
+                    Box::new(error),
+                )
+            })?;
+            Ok(PendingMessageRecord {
+                aggregate_id: row.get(0)?,
+                external_principal_id: row.get(1)?,
+                ack_app_id: row.get(2)?,
+                structured_content,
+                target_agent_ids,
+            })
+        },
+    )
+}
+
+fn app_ids_for_agents(
+    transaction: &Transaction<'_>,
+    agent_ids: &BTreeSet<String>,
+) -> Result<BTreeSet<String>> {
+    let mut app_ids = BTreeSet::new();
+    for agent_id in agent_ids {
+        let app_id = transaction
+            .query_row(
+                r#"
+                SELECT app_id FROM feishu_member_bot
+                WHERE agent_id = ?1 AND status = 'published'
+                "#,
+                [agent_id],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()?;
+        let Some(app_id) = app_id else {
+            anyhow::bail!("pending target Agent has no published Feishu Bot");
+        };
+        app_ids.insert(app_id);
+    }
+    Ok(app_ids)
 }
 
 fn create_channel_camp(
@@ -3834,8 +5096,13 @@ fn claim_deliveries(
             r#"
             SELECT delivery.id, delivery.request_id, delivery.delivery_kind,
                    delivery.target_app_id, COALESCE(bot.credential_ref, ''),
-                   conversation.chat_id, conversation.topic_key,
-                   conversation.conversation_kind, delivery.payload_json,
+                   COALESCE(request_conversation.chat_id, pending_conversation.chat_id),
+                   COALESCE(request_conversation.topic_key, pending_conversation.topic_key),
+                   COALESCE(
+                       request_conversation.conversation_kind,
+                       pending_conversation.conversation_kind
+                   ),
+                   delivery.payload_json,
                    delivery.attempt_count,
                    (
                        SELECT previous.external_delivery_message_id
@@ -3858,17 +5125,24 @@ fn claim_deliveries(
                    ,(
                        SELECT identity.external_id
                        FROM external_principal_app_identity AS identity
-                       WHERE identity.principal_id = request.external_principal_id
+                       WHERE identity.principal_id = COALESCE(
+                                 request.external_principal_id,
+                                 pending.owner_principal_id
+                             )
                          AND identity.provider = 'feishu'
                          AND identity.app_id = delivery.target_app_id
                          AND identity.identity_kind = 'open_id'
                        LIMIT 1
                    ) AS recipient_open_id
             FROM channel_delivery AS delivery
-            JOIN channel_turn_request AS request ON request.id = delivery.request_id
-            JOIN channel_conversation_binding AS binding ON binding.id = request.binding_id
-            JOIN channel_conversation AS conversation
-              ON conversation.id = binding.channel_conversation_id
+            LEFT JOIN channel_turn_request AS request ON request.id = delivery.request_id
+            LEFT JOIN channel_conversation_binding AS binding ON binding.id = request.binding_id
+            LEFT JOIN channel_conversation AS request_conversation
+              ON request_conversation.id = binding.channel_conversation_id
+            LEFT JOIN pending_camp_binding AS pending
+              ON pending.id = delivery.pending_binding_id
+            LEFT JOIN channel_conversation AS pending_conversation
+              ON pending_conversation.id = pending.channel_conversation_id
             LEFT JOIN feishu_member_bot AS bot
               ON bot.app_id = delivery.target_app_id
             WHERE delivery.id = ?1
@@ -4046,15 +5320,14 @@ fn validate_observation_input(command: &ObserveChannelInboundCommand) -> Result<
     ] {
         validate_nonempty(value, field)?;
     }
-    for (value, field) in [
-        (command.sender_open_id.as_deref(), "senderOpenId"),
-        (command.sender_user_id.as_deref(), "senderUserId"),
-        (command.sender_union_id.as_deref(), "senderUnionId"),
-    ] {
-        if let Some(value) = value {
-            validate_nonempty(value, field)?;
-        }
-    }
+    validate_owner_identity_input(
+        &command.provider,
+        &command.app_id,
+        &command.tenant_key,
+        command.sender_open_id.as_deref(),
+        command.sender_user_id.as_deref(),
+        command.sender_union_id.as_deref(),
+    )?;
     if !matches!(
         command.conversation_kind.as_str(),
         "p2p" | "group" | "topic"
@@ -4084,21 +5357,6 @@ fn validate_observation_input(command: &ObserveChannelInboundCommand) -> Result<
     }
     if command.attachment_summaries.len() > 20 {
         anyhow::bail!("channel message has too many attachment summaries");
-    }
-    Ok(())
-}
-
-fn validate_binding_path(binding_kind: &str, canonical_path: &str) -> Result<()> {
-    if !matches!(binding_kind, "quick_chat" | "directory") {
-        anyhow::bail!("bindingKind must be quick_chat or directory");
-    }
-    let path = Path::new(canonical_path);
-    if canonical_path.trim() != canonical_path
-        || canonical_path.is_empty()
-        || !path.is_absolute()
-        || path.parent().is_none()
-    {
-        anyhow::bail!("canonicalPath must be a safe absolute non-root path");
     }
     Ok(())
 }
@@ -4207,56 +5465,6 @@ fn validate_digest(value: &str, field: &str) -> Result<()> {
         anyhow::bail!("{field} must be a canonical SHA-256 digest");
     }
     Ok(())
-}
-
-fn stable_external_principal_id(provider: &str, tenant: &str, user_id: &str) -> Result<String> {
-    let digest = canonical_json_digest(&json!([provider, tenant, user_id]))?;
-    Ok(format!("rvxp_{}", &digest[..32]))
-}
-
-fn resolve_external_principal_id(
-    transaction: &Transaction<'_>,
-    command: &ObserveChannelInboundCommand,
-    fallback_id: &str,
-) -> Result<String> {
-    for (identity_kind, external_id, app_scoped) in [
-        ("union_id", command.sender_union_id.as_deref(), false),
-        ("user_id", command.sender_user_id.as_deref(), false),
-        ("open_id", command.sender_open_id.as_deref(), true),
-    ] {
-        let Some(external_id) = external_id else {
-            continue;
-        };
-        let existing = transaction
-            .query_row(
-                r#"
-                SELECT identity.principal_id
-                FROM external_principal_app_identity AS identity
-                JOIN external_principal AS principal ON principal.id = identity.principal_id
-                WHERE identity.provider = ?1
-                  AND principal.tenant_key = ?2
-                  AND identity.identity_kind = ?3
-                  AND identity.external_id = ?4
-                  AND (?5 = 0 OR identity.app_id = ?6)
-                ORDER BY identity.updated_at DESC, identity.principal_id
-                LIMIT 1
-                "#,
-                params![
-                    command.provider,
-                    command.tenant_key,
-                    identity_kind,
-                    external_id,
-                    app_scoped,
-                    command.app_id,
-                ],
-                |row| row.get::<_, String>(0),
-            )
-            .optional()?;
-        if let Some(principal_id) = existing {
-            return Ok(principal_id);
-        }
-    }
-    Ok(fallback_id.to_string())
 }
 
 fn stable_channel_conversation_id(
@@ -4369,19 +5577,6 @@ mod tests {
     use super::*;
     use crate::{command::CommandResultStatus, test_support::seeded_runtime_database_owned};
 
-    fn owner_envelope<P>(command_id: &str, payload: P) -> CommandEnvelope<P> {
-        CommandEnvelope {
-            command_id: command_id.to_string(),
-            actor: ActorRef::User {
-                user_id: CURRENT_USER_ID.to_string(),
-            },
-            camp_id: None,
-            expected_versions: Vec::new(),
-            execution_epoch: None,
-            payload,
-        }
-    }
-
     fn host_envelope<P>(command_id: &str, payload: P) -> CommandEnvelope<P> {
         CommandEnvelope {
             command_id: command_id.to_string(),
@@ -4411,7 +5606,7 @@ mod tests {
                     command_id,
                     UpsertFeishuAccountCommand {
                         account_id: "account_1".to_string(),
-                        user_id_digest: format!("sha256:{}", "a".repeat(64)),
+                        user_id_digest: owner_user_digest(),
                         tenant_id: "tenant_1".to_string(),
                         user_name: "主人".to_string(),
                         email: Some("owner@example.com".to_string()),
@@ -4421,6 +5616,16 @@ mod tests {
                 ),
             )
             .unwrap();
+    }
+
+    fn owner_user_digest() -> String {
+        opaque_digest("feishu-user", "user_1")
+    }
+
+    fn quick_chat_path(database: &Database) -> std::path::PathBuf {
+        let path = database.path().parent().unwrap().join("quick-chat");
+        std::fs::create_dir_all(&path).unwrap();
+        path
     }
 
     fn publish_bot(
@@ -4440,7 +5645,7 @@ mod tests {
                         publication_intent_id: publication_intent_id.clone(),
                         account_id: "account_1".to_string(),
                         agent_id: agent_id.to_string(),
-                        expected_user_id_digest: format!("sha256:{}", "a".repeat(64)),
+                        expected_user_id_digest: owner_user_digest(),
                         expected_tenant_id: "tenant_1".to_string(),
                         requested_app_name: agent_id.to_string(),
                         provisioning_mode: "developer_session".to_string(),
@@ -4556,80 +5761,123 @@ mod tests {
         }
     }
 
-    fn create_binding(
+    fn seed_project(database: &Database, suffix: &str) -> std::path::PathBuf {
+        let path = database
+            .path()
+            .parent()
+            .unwrap()
+            .join(format!("channel-project-{suffix}"));
+        std::fs::create_dir_all(&path).unwrap();
+        let now = Utc::now().to_rfc3339();
+        database
+            .connection()
+            .execute(
+                r#"
+                INSERT INTO camp(
+                    id, title, name_origin, collaboration_mode,
+                    project_binding_kind, project_path,
+                    default_lead_agent_id, activation_state, last_message_sequence,
+                    membership_generation, version, created_at, updated_at
+                ) VALUES (?1, ?2, 'user', 'peer', 'directory', ?3,
+                          'agent_1', 'active', 0, 1, 1, ?4, ?4)
+                "#,
+                params![
+                    format!("seed-project-{suffix}"),
+                    format!("项目 {suffix}"),
+                    path.to_string_lossy(),
+                    now
+                ],
+            )
+            .unwrap();
+        path
+    }
+
+    fn resolve_pending(
         service: &ChannelService,
         database: &mut Database,
-        conversation_id: &str,
-        conversation_version: i64,
-    ) -> String {
-        let path = database.path().parent().unwrap().join("channel-project");
-        std::fs::create_dir_all(&path).unwrap();
-        let created = service
-            .create_project_binding(
-                database,
-                &owner_envelope(
-                    &format!("create-binding-{conversation_id}"),
-                    CreateProjectBindingCommand {
-                        display_name: "渠道项目".to_string(),
-                        binding_kind: "directory".to_string(),
-                        canonical_path: path.to_string_lossy().to_string(),
-                    },
-                ),
+        pending_binding_id: &str,
+        command_id: &str,
+    ) -> CommandExecution {
+        let (app_id, payload_json): (String, String) = database
+            .connection()
+            .query_row(
+                r#"
+                SELECT target_app_id, payload_json
+                FROM channel_delivery
+                WHERE pending_binding_id = ?1 AND delivery_kind = 'project_selection'
+                "#,
+                [pending_binding_id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .unwrap();
-        let project_binding_id = created.result.payload["projectBindingId"]
-            .as_str()
-            .unwrap()
-            .to_string();
+        let payload: serde_json::Value = serde_json::from_str(&payload_json).unwrap();
+        let project_id: String = database
+            .connection()
+            .query_row(
+                "SELECT id FROM project_catalog_item WHERE status = 'active' ORDER BY last_opened_at DESC LIMIT 1",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
         service
-            .bind_conversation(
+            .resolve_pending_camp_binding(
                 database,
-                &owner_envelope(
-                    &format!("bind-{conversation_id}"),
-                    BindChannelConversationCommand {
-                        channel_conversation_id: conversation_id.to_string(),
-                        project_binding_id,
-                        expected_conversation_version: conversation_version,
+                &host_envelope(
+                    command_id,
+                    ResolvePendingCampBindingCommand {
+                        pending_binding_id: pending_binding_id.to_string(),
+                        app_id,
+                        action: "bind".to_string(),
+                        project_id: Some(project_id),
+                        expected_version: payload["expectedVersion"].as_i64().unwrap(),
+                        nonce: payload["nonce"].as_str().unwrap().to_string(),
+                        operator_open_id: Some("ou_user".to_string()),
+                        operator_user_id: Some("ignored-envelope-user".to_string()),
+                        operator_union_id: Some("union_user".to_string()),
                     },
                 ),
             )
-            .unwrap();
-        created.result.payload["projectBindingId"]
-            .as_str()
             .unwrap()
-            .to_string()
     }
 
     #[test]
-    fn only_owner_can_create_project_bindings() {
+    fn non_owner_is_rejected_before_any_channel_business_fact() {
         let mut database = seeded_runtime_database_owned();
         let service = ChannelService::default();
-        let path = database.path().parent().unwrap().join("channel-project");
-        std::fs::create_dir_all(&path).unwrap();
-        let mut envelope = owner_envelope(
-            "project-binding-owner",
-            CreateProjectBindingCommand {
-                display_name: "渠道项目".to_string(),
-                binding_kind: "directory".to_string(),
-                canonical_path: path.to_string_lossy().to_string(),
-            },
+        connect_account(&service, &mut database);
+        publish_bot(&service, &mut database, "agent_1", "cli_app_1");
+        let mut command = observation_command(
+            "cli_app_1",
+            "om_non_owner",
+            "oc_private_non_owner",
+            "",
+            "p2p",
+            "尝试触发",
+            &[("agent_1", "cli_app_1")],
+            true,
         );
-        envelope.actor = ActorRef::System {
-            component_id: FEISHU_CHANNEL_HOST_COMPONENT.to_string(),
-        };
+        command.sender_external_user_id = "other_union".to_string();
+        command.sender_open_id = Some("ou_other".to_string());
+        command.sender_user_id = Some("user_other".to_string());
+        command.sender_union_id = Some("other_union".to_string());
         let rejected = service
-            .create_project_binding(&mut database, &envelope)
+            .observe_inbound(&mut database, &host_envelope("observe-non-owner", command))
             .unwrap();
         assert_eq!(rejected.result.status, CommandResultStatus::Rejected);
-        assert_eq!(rejected.result.code, "project_binding.owner_required");
-        assert_eq!(
-            database
+        assert_eq!(rejected.result.code, "channel.owner_required");
+        for table in [
+            "external_principal",
+            "channel_conversation",
+            "channel_inbound_aggregate",
+        ] {
+            let count: i64 = database
                 .connection()
-                .query_row("SELECT COUNT(*) FROM project_binding", [], |row| row
-                    .get::<_, i64>(0))
-                .unwrap(),
-            0
-        );
+                .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| {
+                    row.get(0)
+                })
+                .unwrap();
+            assert_eq!(count, 0, "{table} must not be created for a non-owner");
+        }
     }
 
     #[test]
@@ -4637,16 +5885,16 @@ mod tests {
         let mut database = seeded_runtime_database_owned();
         let service = ChannelService::default();
         connect_account(&service, &mut database);
-        let first = service.snapshot(&database).unwrap().account.unwrap();
+        let first = service.snapshot(&mut database).unwrap().account.unwrap();
         assert_eq!(first.account_id, "account_1");
-        assert_eq!(first.user_id_digest, format!("sha256:{}", "a".repeat(64)));
+        assert_eq!(first.user_id_digest, owner_user_digest());
         assert_eq!(first.tenant_id, "tenant_1");
         assert_eq!(first.user_name, "主人");
         assert_eq!(first.email.as_deref(), Some("owner@example.com"));
         assert_eq!(first.brand, "feishu");
 
         connect_account_with_command_id(&service, &mut database, "account-verify");
-        let verified = service.snapshot(&database).unwrap().account.unwrap();
+        let verified = service.snapshot(&mut database).unwrap().account.unwrap();
         assert_eq!(verified.connected_at, first.connected_at);
         assert!(verified.version > first.version);
 
@@ -4659,7 +5907,7 @@ mod tests {
                         publication_intent_id: "intent_1".to_string(),
                         account_id: "account_1".to_string(),
                         agent_id: "agent_1".to_string(),
-                        expected_user_id_digest: format!("sha256:{}", "a".repeat(64)),
+                        expected_user_id_digest: owner_user_digest(),
                         expected_tenant_id: "tenant_1".to_string(),
                         requested_app_name: "木瓦".to_string(),
                         provisioning_mode: "developer_session".to_string(),
@@ -4692,7 +5940,7 @@ mod tests {
                 .unwrap();
             assert_eq!(advanced.result.status, CommandResultStatus::Applied);
         }
-        let snapshot = service.snapshot(&database).unwrap();
+        let snapshot = service.snapshot(&mut database).unwrap();
         assert_eq!(
             snapshot.publication_intents[0].state,
             "failed_unknown_remote_state"
@@ -4711,7 +5959,7 @@ mod tests {
                         publication_intent_id: "intent_2".to_string(),
                         account_id: "account_1".to_string(),
                         agent_id: "agent_1".to_string(),
-                        expected_user_id_digest: format!("sha256:{}", "a".repeat(64)),
+                        expected_user_id_digest: owner_user_digest(),
                         expected_tenant_id: "tenant_1".to_string(),
                         requested_app_name: "木瓦".to_string(),
                         provisioning_mode: "developer_session".to_string(),
@@ -4785,7 +6033,7 @@ mod tests {
             )
             .unwrap();
         assert_eq!(reconciled.result.status, CommandResultStatus::Applied);
-        let recovered = service.snapshot(&database).unwrap();
+        let recovered = service.snapshot(&mut database).unwrap();
         assert_eq!(recovered.publication_intents[0].state, "credentials_read");
         assert_eq!(
             recovered.publication_intents[0].remote_app_id.as_deref(),
@@ -4801,7 +6049,7 @@ mod tests {
                         publication_intent_id: "intent_no_app".to_string(),
                         account_id: "account_1".to_string(),
                         agent_id: "agent_2".to_string(),
-                        expected_user_id_digest: format!("sha256:{}", "a".repeat(64)),
+                        expected_user_id_digest: owner_user_digest(),
                         expected_tenant_id: "tenant_1".to_string(),
                         requested_app_name: "岩兰".to_string(),
                         provisioning_mode: "developer_session".to_string(),
@@ -4873,7 +6121,7 @@ mod tests {
                         publication_intent_id: "intent-replacement".to_string(),
                         account_id: "account_1".to_string(),
                         agent_id: "agent_1".to_string(),
-                        expected_user_id_digest: format!("sha256:{}", "a".repeat(64)),
+                        expected_user_id_digest: owner_user_digest(),
                         expected_tenant_id: "tenant_1".to_string(),
                         requested_app_name: "木瓦".to_string(),
                         provisioning_mode: "developer_session".to_string(),
@@ -5032,60 +6280,84 @@ mod tests {
             )
             .unwrap();
         assert_eq!(binding, ("cli_app_1".to_string(), "published".to_string()));
-        let snapshot = service.snapshot(&database).unwrap();
+        let snapshot = service.snapshot(&mut database).unwrap();
         assert_eq!(snapshot.member_bots[0].brand, "feishu");
         assert_eq!(snapshot.publication_intents[0].state, "completed");
     }
 
     #[test]
-    fn first_observation_only_collects_and_unbound_finalize_creates_no_execution() {
+    fn owner_dm_uses_quick_chat_and_new_rotates_only_without_active_work() {
         let mut database = seeded_runtime_database_owned();
         let service = ChannelService::default();
-        service
-            .upsert_feishu_account(
+        connect_account(&service, &mut database);
+        publish_bot(&service, &mut database, "agent_1", "cli_app_1");
+        let quick_chat_path = quick_chat_path(&database);
+        let verified = service
+            .verify_feishu_owner(
                 &mut database,
                 &host_envelope(
-                    "account",
-                    UpsertFeishuAccountCommand {
-                        account_id: "account_1".to_string(),
-                        user_id_digest: format!("sha256:{}", "a".repeat(64)),
-                        tenant_id: "tenant_1".to_string(),
-                        user_name: "主人".to_string(),
-                        email: Some("owner@example.com".to_string()),
-                        tenant_name: "测试租户".to_string(),
-                        brand: "feishu".to_string(),
+                    "verify-owner-dm",
+                    VerifyFeishuOwnerCommand {
+                        provider: FEISHU_PROVIDER.to_string(),
+                        app_id: "cli_app_1".to_string(),
+                        tenant_key: "tenant_1".to_string(),
+                        sender_open_id: Some("ou_user".to_string()),
+                        sender_user_id: Some("user_1".to_string()),
+                        sender_union_id: Some("union_user".to_string()),
+                        sender_display_name: "主人".to_string(),
                     },
                 ),
             )
             .unwrap();
-        publish_bot(&service, &mut database, "agent_1", "cli_app_1");
+        assert_eq!(verified.result.payload["classification"], "owner");
+        let new_command = || StartNewFeishuDmCommand {
+            provider: FEISHU_PROVIDER.to_string(),
+            app_id: "cli_app_1".to_string(),
+            tenant_key: "tenant_1".to_string(),
+            chat_id: "oc_1".to_string(),
+            conversation_display_name: "主人私聊".to_string(),
+            target_agent_id: "agent_1".to_string(),
+        };
+        let first_generation = service
+            .start_new_feishu_dm(
+                &mut database,
+                &quick_chat_path,
+                &host_envelope("dm-new-first", new_command()),
+            )
+            .unwrap();
+        let second_generation = service
+            .start_new_feishu_dm(
+                &mut database,
+                &quick_chat_path,
+                &host_envelope("dm-new-second", new_command()),
+            )
+            .unwrap();
+        assert_eq!(first_generation.result.payload["generation"], 1);
+        assert_eq!(second_generation.result.payload["generation"], 2);
+        for table in ["camp_message", "camp_turn", "agent_run"] {
+            let count: i64 = database
+                .connection()
+                .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| {
+                    row.get(0)
+                })
+                .unwrap();
+            assert_eq!(count, 0, "/new must not create {table}");
+        }
         let observation = service
             .observe_inbound(
                 &mut database,
                 &host_envelope(
                     "observe-1",
-                    ObserveChannelInboundCommand {
-                        provider: FEISHU_PROVIDER.to_string(),
-                        app_id: "cli_app_1".to_string(),
-                        external_message_id: "om_1".to_string(),
-                        tenant_key: "tenant_1".to_string(),
-                        chat_id: "oc_1".to_string(),
-                        topic_key: String::new(),
-                        conversation_kind: "p2p".to_string(),
-                        conversation_display_name: "小明".to_string(),
-                        sender_external_user_id: "ou_user".to_string(),
-                        sender_open_id: Some("ou_user".to_string()),
-                        sender_user_id: None,
-                        sender_union_id: None,
-                        sender_display_name: "小明".to_string(),
-                        body: "帮我检查".to_string(),
-                        attachment_summaries: Vec::new(),
-                        quote: None,
-                        canonical_agent_ids: vec!["agent_1".to_string()],
-                        canonical_mentions_complete: true,
-                        expected_app_ids: vec!["cli_app_1".to_string()],
-                        acknowledgement_app_id: "cli_app_1".to_string(),
-                    },
+                    observation_command(
+                        "cli_app_1",
+                        "om_1",
+                        "oc_1",
+                        "",
+                        "p2p",
+                        "帮我检查",
+                        &[("agent_1", "cli_app_1")],
+                        true,
+                    ),
                 ),
             )
             .unwrap();
@@ -5105,18 +6377,19 @@ mod tests {
         let finalized = service
             .finalize_inbound(
                 &mut database,
+                &quick_chat_path,
                 &host_envelope("finalize-1", FinalizeChannelInboundCommand { aggregate_id }),
             )
             .unwrap();
-        assert_eq!(finalized.result.code, "channel.inbound.unbound");
+        assert_eq!(finalized.result.code, "channel.turn.admitted");
         assert_eq!(
             database
                 .connection()
                 .query_row("SELECT COUNT(*) FROM external_principal", [], |row| row
                     .get::<_, i64>(0))
                 .unwrap(),
-            0,
-            "an unbound transport observation must not create a Principal"
+            1,
+            "the owner must remain an ExternalPrincipal"
         );
         for table in ["camp_message", "camp_turn", "agent_run"] {
             let count: i64 = database
@@ -5125,8 +6398,16 @@ mod tests {
                     row.get(0)
                 })
                 .unwrap();
-            assert_eq!(count, 0, "{table} must stay empty");
+            assert_eq!(count, 1, "{table} must be admitted atomically");
         }
+        let busy = service
+            .start_new_feishu_dm(
+                &mut database,
+                &quick_chat_path,
+                &host_envelope("dm-new-busy", new_command()),
+            )
+            .unwrap();
+        assert_eq!(busy.result.code, "channel.dm.busy");
     }
 
     #[test]
@@ -5175,45 +6456,55 @@ mod tests {
     }
 
     #[test]
-    fn binding_never_replays_the_old_message_and_resend_uses_atomic_admission() {
+    fn group_binding_freezes_messages_sends_one_card_and_promotes_fifo_atomically() {
         let mut database = seeded_runtime_database_owned();
         let service = ChannelService::default();
         connect_account(&service, &mut database);
         publish_bot(&service, &mut database, "agent_1", "cli_app_1");
+        publish_bot(&service, &mut database, "agent_2", "cli_app_2");
+        let project_path = seed_project(&database, "binding");
+        let quick_chat_path = quick_chat_path(&database);
+        service
+            .reconcile_feishu_group_roster(
+                &mut database,
+                &host_envelope(
+                    "binding-roster",
+                    ReconcileFeishuGroupRosterCommand {
+                        provider: FEISHU_PROVIDER.to_string(),
+                        tenant_key: "tenant_1".to_string(),
+                        chat_id: "oc_group_binding".to_string(),
+                        present_app_ids: vec!["cli_app_1".to_string(), "cli_app_2".to_string()],
+                    },
+                ),
+            )
+            .unwrap();
 
-        let old_observation = service
+        let first_observation = service
             .observe_inbound(
                 &mut database,
                 &host_envelope(
-                    "observe-before-binding",
+                    "observe-pending-first",
                     observation_command(
-                        "cli_app_1",
-                        "om_before_binding",
-                        "oc_private_1",
+                        "cli_app_2",
+                        "om_pending_first",
+                        "oc_group_binding",
                         "",
-                        "p2p",
-                        "旧消息不能补跑",
-                        &[("agent_1", "cli_app_1")],
+                        "group",
+                        "先由二号确认项目",
+                        &[("agent_2", "cli_app_2"), ("agent_1", "cli_app_1")],
                         true,
                     ),
                 ),
             )
             .unwrap();
-        let snapshot = service.snapshot(&database).unwrap();
-        let unbound = snapshot.unbound_conversations.first().unwrap();
-        let project_binding_id = create_binding(
-            &service,
-            &mut database,
-            &unbound.channel_conversation_id,
-            unbound.version,
-        );
-        let old_finalized = service
+        let first_pending = service
             .finalize_inbound(
                 &mut database,
+                &quick_chat_path,
                 &host_envelope(
-                    "finalize-before-binding",
+                    "finalize-pending-first",
                     FinalizeChannelInboundCommand {
-                        aggregate_id: old_observation.result.payload["aggregateId"]
+                        aggregate_id: first_observation.result.payload["aggregateId"]
                             .as_str()
                             .unwrap()
                             .to_string(),
@@ -5221,41 +6512,43 @@ mod tests {
                 ),
             )
             .unwrap();
-        assert_eq!(old_finalized.result.code, "channel.inbound.unbound");
+        assert_eq!(first_pending.result.code, "channel.binding.pending");
+        assert_eq!(first_pending.result.payload["projectCardQueued"], true);
         assert_eq!(
-            database
-                .connection()
-                .query_row("SELECT COUNT(*) FROM camp_message", [], |row| row
-                    .get::<_, i64>(0))
-                .unwrap(),
-            0
+            first_pending.result.payload["acknowledgementAppId"],
+            "cli_app_2"
         );
+        let pending_binding_id = first_pending.result.payload["pendingBindingId"]
+            .as_str()
+            .unwrap()
+            .to_string();
 
-        let resend = service
+        let second_observation = service
             .observe_inbound(
                 &mut database,
                 &host_envelope(
-                    "observe-after-binding",
+                    "observe-pending-second",
                     observation_command(
                         "cli_app_1",
-                        "om_after_binding",
-                        "oc_private_1",
+                        "om_pending_second",
+                        "oc_group_binding",
                         "",
-                        "p2p",
-                        "重新发送后执行",
+                        "group",
+                        "第二条一起排队",
                         &[("agent_1", "cli_app_1")],
                         true,
                     ),
                 ),
             )
             .unwrap();
-        let admitted = service
+        let second_pending = service
             .finalize_inbound(
                 &mut database,
+                &quick_chat_path,
                 &host_envelope(
-                    "finalize-after-binding",
+                    "finalize-pending-second",
                     FinalizeChannelInboundCommand {
-                        aggregate_id: resend.result.payload["aggregateId"]
+                        aggregate_id: second_observation.result.payload["aggregateId"]
                             .as_str()
                             .unwrap()
                             .to_string(),
@@ -5263,7 +6556,21 @@ mod tests {
                 ),
             )
             .unwrap();
-        assert_eq!(admitted.result.code, "channel.turn.admitted");
+        assert_eq!(second_pending.result.code, "channel.binding.pending");
+        assert_eq!(second_pending.result.payload["projectCardQueued"], false);
+        assert_eq!(
+            second_pending.result.payload["pendingBindingId"],
+            pending_binding_id
+        );
+        assert_eq!(
+            database.connection().query_row(
+                "SELECT COUNT(*) FROM channel_delivery WHERE delivery_kind = 'project_selection'",
+                [],
+                |row| row.get::<_, i64>(0),
+            ).unwrap(),
+            1,
+            "one frozen acknowledgement Bot must send exactly one project card",
+        );
         for table in ["camp_message", "camp_turn", "agent_run"] {
             let count: i64 = database
                 .connection()
@@ -5271,74 +6578,107 @@ mod tests {
                     row.get(0)
                 })
                 .unwrap();
-            assert_eq!(count, 1, "{table} should be atomically admitted once");
+            assert_eq!(
+                count, 0,
+                "pending project selection must not create {table}"
+            );
         }
-        let (author_type, reply_to, camp_path, binding_path): (
-            String,
-            Option<String>,
-            String,
-            String,
-        ) = database
-            .connection()
-            .query_row(
-                r#"
-                SELECT message.author_type, message.reply_to_camp_message_id,
-                       camp.project_path, binding.canonical_path
-                FROM camp_message AS message
-                JOIN camp ON camp.id = message.camp_id
-                JOIN project_binding AS binding ON binding.id = ?1
-                WHERE message.author_type = 'external_principal'
-                "#,
-                [&project_binding_id],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
-            )
-            .unwrap();
-        assert_eq!(author_type, "external_principal");
-        assert_eq!(reply_to, None);
-        assert_eq!(camp_path, binding_path, "Camp must freeze the Core path");
 
-        let second = service
-            .observe_inbound(
+        service
+            .reconcile_feishu_group_roster(
                 &mut database,
                 &host_envelope(
-                    "observe-while-active",
-                    observation_command(
-                        "cli_app_1",
-                        "om_while_active",
-                        "oc_private_1",
-                        "",
-                        "p2p",
-                        "第二轮先排队",
-                        &[("agent_1", "cli_app_1")],
-                        true,
-                    ),
-                ),
-            )
-            .unwrap();
-        let queued = service
-            .finalize_inbound(
-                &mut database,
-                &host_envelope(
-                    "finalize-while-active",
-                    FinalizeChannelInboundCommand {
-                        aggregate_id: second.result.payload["aggregateId"]
-                            .as_str()
-                            .unwrap()
-                            .to_string(),
+                    "binding-roster-missing",
+                    ReconcileFeishuGroupRosterCommand {
+                        provider: FEISHU_PROVIDER.to_string(),
+                        tenant_key: "tenant_1".to_string(),
+                        chat_id: "oc_group_binding".to_string(),
+                        present_app_ids: vec!["cli_app_1".to_string()],
                     },
                 ),
             )
             .unwrap();
-        assert_eq!(queued.result.code, "channel.turn.queued");
+        let rejected = resolve_pending(
+            &service,
+            &mut database,
+            &pending_binding_id,
+            "resolve-missing-roster",
+        );
+        assert_eq!(rejected.result.code, "channel.bot_not_in_roster");
         assert_eq!(
             database
                 .connection()
-                .query_row("SELECT COUNT(*) FROM camp_message", [], |row| row
-                    .get::<_, i64>(0))
+                .query_row(
+                    "SELECT status FROM pending_camp_binding WHERE id = ?1",
+                    [&pending_binding_id],
+                    |row| row.get::<_, String>(0),
+                )
                 .unwrap(),
-            1,
-            "queued channel input must stay outside Camp conversation"
+            "pending",
+            "a failed precondition must not leave a resolving half-state",
         );
+        service
+            .reconcile_feishu_group_roster(
+                &mut database,
+                &host_envelope(
+                    "binding-roster-restored",
+                    ReconcileFeishuGroupRosterCommand {
+                        provider: FEISHU_PROVIDER.to_string(),
+                        tenant_key: "tenant_1".to_string(),
+                        chat_id: "oc_group_binding".to_string(),
+                        present_app_ids: vec!["cli_app_1".to_string(), "cli_app_2".to_string()],
+                    },
+                ),
+            )
+            .unwrap();
+        let resolved = resolve_pending(
+            &service,
+            &mut database,
+            &pending_binding_id,
+            "resolve-restored-roster",
+        );
+        assert_eq!(resolved.result.code, "channel.binding.resolved");
+        assert_eq!(resolved.result.payload["promotedMessageCount"], 2);
+        for (table, expected) in [("camp_message", 1), ("camp_turn", 1), ("agent_run", 2)] {
+            let count: i64 = database
+                .connection()
+                .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| {
+                    row.get(0)
+                })
+                .unwrap();
+            assert_eq!(
+                count, expected,
+                "only the FIFO head should cross atomic admission"
+            );
+        }
+        assert_eq!(
+            database
+                .connection()
+                .query_row(
+                    "SELECT COUNT(*) FROM channel_turn_request WHERE binding_id = ?1",
+                    [resolved.result.payload["bindingId"].as_str().unwrap()],
+                    |row| row.get::<_, i64>(0),
+                )
+                .unwrap(),
+            2,
+        );
+        let (author_type, reply_to, camp_path): (String, Option<String>, String) = database
+            .connection()
+            .query_row(
+                r#"
+                SELECT message.author_type, message.reply_to_camp_message_id,
+                       camp.project_path
+                FROM camp_message AS message
+                JOIN camp ON camp.id = message.camp_id
+                WHERE message.author_type = 'external_principal'
+                "#,
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(author_type, "external_principal");
+        assert_eq!(reply_to, None);
+        assert_eq!(camp_path, project_path.to_string_lossy());
     }
 
     #[test]
@@ -5348,7 +6688,22 @@ mod tests {
         connect_account(&service, &mut database);
         publish_bot(&service, &mut database, "agent_1", "cli_app_1");
         publish_bot(&service, &mut database, "agent_2", "cli_app_2");
+        let quick_chat_path = quick_chat_path(&database);
         let targets = [("agent_1", "cli_app_1"), ("agent_2", "cli_app_2")];
+        service
+            .reconcile_feishu_group_roster(
+                &mut database,
+                &host_envelope(
+                    "aggregate-roster",
+                    ReconcileFeishuGroupRosterCommand {
+                        provider: FEISHU_PROVIDER.to_string(),
+                        tenant_key: "tenant_1".to_string(),
+                        chat_id: "oc_multi".to_string(),
+                        present_app_ids: vec!["cli_app_1".to_string(), "cli_app_2".to_string()],
+                    },
+                ),
+            )
+            .unwrap();
 
         let first = service
             .observe_inbound(
@@ -5398,6 +6753,37 @@ mod tests {
                 .unwrap(),
             0,
             "observations alone must never cross admission"
+        );
+        let unresolved_ack = service
+            .finalize_inbound(
+                &mut database,
+                &quick_chat_path,
+                &host_envelope(
+                    "aggregate-finalize-without-canonical-order",
+                    FinalizeChannelInboundCommand {
+                        aggregate_id: second.result.payload["aggregateId"]
+                            .as_str()
+                            .unwrap()
+                            .to_string(),
+                    },
+                ),
+            )
+            .unwrap();
+        assert_eq!(unresolved_ack.result.code, "channel.inbound.failed");
+        assert_eq!(
+            unresolved_ack.result.payload["failureCode"],
+            "acknowledgement_app_unresolved"
+        );
+        assert_eq!(
+            database
+                .connection()
+                .query_row("SELECT COUNT(*) FROM pending_camp_binding", [], |row| row
+                    .get::<_, i64>(
+                    0
+                ),)
+                .unwrap(),
+            0,
+            "an unresolved canonical mention order must not choose a project-card Bot"
         );
 
         service
@@ -5470,6 +6856,7 @@ mod tests {
         let finalized = service
             .finalize_inbound(
                 &mut database,
+                &quick_chat_path,
                 &host_envelope(
                     "timeout-finalize",
                     FinalizeChannelInboundCommand {
@@ -5491,52 +6878,8 @@ mod tests {
         connect_account(&service, &mut database);
         publish_bot(&service, &mut database, "agent_1", "cli_app_1");
         publish_bot(&service, &mut database, "agent_2", "cli_app_2");
-
-        let discovery = service
-            .observe_inbound(
-                &mut database,
-                &host_envelope(
-                    "group-discovery",
-                    observation_command(
-                        "cli_app_1",
-                        "om_group_discovery",
-                        "oc_group",
-                        "",
-                        "group",
-                        "发现群聊",
-                        &[("agent_1", "cli_app_1")],
-                        true,
-                    ),
-                ),
-            )
-            .unwrap();
-        service
-            .finalize_inbound(
-                &mut database,
-                &host_envelope(
-                    "group-discovery-finalize",
-                    FinalizeChannelInboundCommand {
-                        aggregate_id: discovery.result.payload["aggregateId"]
-                            .as_str()
-                            .unwrap()
-                            .to_string(),
-                    },
-                ),
-            )
-            .unwrap();
-        let unbound = service
-            .snapshot(&database)
-            .unwrap()
-            .unbound_conversations
-            .into_iter()
-            .find(|conversation| conversation.conversation_kind == "group")
-            .unwrap();
-        create_binding(
-            &service,
-            &mut database,
-            &unbound.channel_conversation_id,
-            unbound.version,
-        );
+        seed_project(&database, "group-roster");
+        let quick_chat_path = quick_chat_path(&database);
         service
             .reconcile_feishu_group_roster(
                 &mut database,
@@ -5551,14 +6894,14 @@ mod tests {
                 ),
             )
             .unwrap();
-        let trigger = service
+        let observation = service
             .observe_inbound(
                 &mut database,
                 &host_envelope(
-                    "group-trigger",
+                    "group-pending",
                     observation_command(
                         "cli_app_1",
-                        "om_group_trigger",
+                        "om_group_pending",
                         "oc_group",
                         "",
                         "group",
@@ -5569,13 +6912,14 @@ mod tests {
                 ),
             )
             .unwrap();
-        let admitted = service
+        let pending = service
             .finalize_inbound(
                 &mut database,
+                &quick_chat_path,
                 &host_envelope(
-                    "group-trigger-finalize",
+                    "group-pending-finalize",
                     FinalizeChannelInboundCommand {
-                        aggregate_id: trigger.result.payload["aggregateId"]
+                        aggregate_id: observation.result.payload["aggregateId"]
                             .as_str()
                             .unwrap()
                             .to_string(),
@@ -5583,8 +6927,11 @@ mod tests {
                 ),
             )
             .unwrap();
-        assert_eq!(admitted.result.code, "channel.turn.admitted");
-        let camp_id = admitted.result.payload["campId"].as_str().unwrap();
+        assert_eq!(pending.result.code, "channel.binding.pending");
+        let pending_id = pending.result.payload["pendingBindingId"].as_str().unwrap();
+        let resolved = resolve_pending(&service, &mut database, pending_id, "group-resolve");
+        assert_eq!(resolved.result.code, "channel.binding.resolved");
+        let camp_id = resolved.result.payload["campId"].as_str().unwrap();
         assert_eq!(
             database
                 .connection()
@@ -5635,51 +6982,8 @@ mod tests {
         connect_account(&service, &mut database);
         publish_bot(&service, &mut database, "agent_1", "cli_app_1");
         publish_bot(&service, &mut database, "agent_2", "cli_app_2");
-        let discovery = service
-            .observe_inbound(
-                &mut database,
-                &host_envelope(
-                    "topic-discovery",
-                    observation_command(
-                        "cli_app_1",
-                        "om_topic_discovery",
-                        "oc_topic_group",
-                        "omt_root",
-                        "topic",
-                        "发现话题",
-                        &[("agent_1", "cli_app_1")],
-                        true,
-                    ),
-                ),
-            )
-            .unwrap();
-        service
-            .finalize_inbound(
-                &mut database,
-                &host_envelope(
-                    "topic-discovery-finalize",
-                    FinalizeChannelInboundCommand {
-                        aggregate_id: discovery.result.payload["aggregateId"]
-                            .as_str()
-                            .unwrap()
-                            .to_string(),
-                    },
-                ),
-            )
-            .unwrap();
-        let unbound = service
-            .snapshot(&database)
-            .unwrap()
-            .unbound_conversations
-            .into_iter()
-            .find(|conversation| conversation.conversation_kind == "topic")
-            .unwrap();
-        create_binding(
-            &service,
-            &mut database,
-            &unbound.channel_conversation_id,
-            unbound.version,
-        );
+        seed_project(&database, "topic-roster");
+        let quick_chat_path = quick_chat_path(&database);
         service
             .reconcile_feishu_group_roster(
                 &mut database,
@@ -5694,14 +6998,14 @@ mod tests {
                 ),
             )
             .unwrap();
-        let trigger = service
+        let observation = service
             .observe_inbound(
                 &mut database,
                 &host_envelope(
-                    "topic-trigger",
+                    "topic-pending",
                     observation_command(
                         "cli_app_1",
-                        "om_topic_trigger",
+                        "om_topic_pending",
                         "oc_topic_group",
                         "omt_root",
                         "topic",
@@ -5712,13 +7016,14 @@ mod tests {
                 ),
             )
             .unwrap();
-        let admitted = service
+        let pending = service
             .finalize_inbound(
                 &mut database,
+                &quick_chat_path,
                 &host_envelope(
-                    "topic-trigger-finalize",
+                    "topic-pending-finalize",
                     FinalizeChannelInboundCommand {
-                        aggregate_id: trigger.result.payload["aggregateId"]
+                        aggregate_id: observation.result.payload["aggregateId"]
                             .as_str()
                             .unwrap()
                             .to_string(),
@@ -5726,7 +7031,10 @@ mod tests {
                 ),
             )
             .unwrap();
-        let camp_id = admitted.result.payload["campId"].as_str().unwrap();
+        assert_eq!(pending.result.code, "channel.binding.pending");
+        let pending_id = pending.result.payload["pendingBindingId"].as_str().unwrap();
+        let resolved = resolve_pending(&service, &mut database, pending_id, "topic-resolve");
+        let camp_id = resolved.result.payload["campId"].as_str().unwrap();
         assert_eq!(
             database
                 .connection()
