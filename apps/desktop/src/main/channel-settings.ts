@@ -1618,6 +1618,25 @@ export class ChannelSettingsService {
         failureCode: this.#publicationFailures.get(bot.agentId) ?? bot.failureCode
       })
     }
+    for (const intent of snapshot.publicationIntents) {
+      if (
+        bots.has(intent.agentId)
+        || !['failed_recoverable', 'failed_unknown_remote_state'].includes(intent.state)
+      ) continue
+      const brand = snapshot.account?.accountId === intent.accountId
+        ? snapshot.account.brand
+        : null
+      bots.set(intent.agentId, {
+        agentId: intent.agentId,
+        publicationStatus: 'failed',
+        botDisplayName: intent.requestedAppName,
+        appId: intent.remoteAppId,
+        managementUrl: brand && intent.remoteAppId
+          ? memberBotManagementUrl(brand, intent.remoteAppId)
+          : null,
+        failureCode: this.#publicationFailures.get(intent.agentId) ?? intent.failureCode
+      })
+    }
     if (this.#activeProvisioning) {
       const { agentId, stage, remoteAppId, failureCode } = this.#activeProvisioning
       const existing = bots.get(agentId)

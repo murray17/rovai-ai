@@ -70,6 +70,8 @@ type ApiEnvelope = {
 type ClientOptions = {
   publishPollIntervalMs?: number
   publishTimeoutMs?: number
+  configurationPollIntervalMs?: number
+  configurationTimeoutMs?: number
   delay?: (milliseconds: number, signal?: AbortSignal) => Promise<void>
 }
 
@@ -83,11 +85,15 @@ const WAIT_PUBLISH_VERSION_STATUS = 5
 const REJECTED_VERSION_STATUS = 3
 const DEFAULT_PUBLISH_POLL_INTERVAL_MS = 1_000
 const DEFAULT_PUBLISH_TIMEOUT_MS = 120_000
+const DEFAULT_CONFIGURATION_POLL_INTERVAL_MS = 500
+const DEFAULT_CONFIGURATION_TIMEOUT_MS = 10_000
 
 export class OpenPlatformApiClient {
   readonly #session: FeishuOpenPlatformSession
   readonly #publishPollIntervalMs: number
   readonly #publishTimeoutMs: number
+  readonly #configurationPollIntervalMs: number
+  readonly #configurationPollAttempts: number
   readonly #delay: (milliseconds: number, signal?: AbortSignal) => Promise<void>
 
   constructor(session: FeishuOpenPlatformSession, options: ClientOptions = {}) {
@@ -95,6 +101,17 @@ export class OpenPlatformApiClient {
     this.#publishPollIntervalMs = options.publishPollIntervalMs
       ?? DEFAULT_PUBLISH_POLL_INTERVAL_MS
     this.#publishTimeoutMs = options.publishTimeoutMs ?? DEFAULT_PUBLISH_TIMEOUT_MS
+    this.#configurationPollIntervalMs = Math.max(
+      1,
+      options.configurationPollIntervalMs ?? DEFAULT_CONFIGURATION_POLL_INTERVAL_MS
+    )
+    this.#configurationPollAttempts = Math.max(
+      1,
+      Math.ceil(
+        (options.configurationTimeoutMs ?? DEFAULT_CONFIGURATION_TIMEOUT_MS)
+        / this.#configurationPollIntervalMs
+      )
+    )
     this.#delay = options.delay ?? abortableDelay
   }
 
@@ -265,10 +282,15 @@ export class OpenPlatformApiClient {
           signal
         }
       )
-      state = await this.readEventState(id, signal)
-      if (state.eventMode !== FEISHU_LONG_CONNECTION_MODE) {
+      const switched = await this.#readEventStateUntil(
+        id,
+        (candidate) => candidate.eventMode === FEISHU_LONG_CONNECTION_MODE,
+        signal
+      )
+      if (!switched) {
         throw apiError('feishu_console_event_verification_failed', true)
       }
+      state = switched
     }
     const existing = new Set(state.appEvents)
     const missing = configuration.tenantEvents.filter((event) => !existing.has(event))
@@ -290,11 +312,15 @@ export class OpenPlatformApiClient {
         }
       )
     }
-    state = await this.readEventState(id, signal)
-    if (
-      state.eventMode !== FEISHU_LONG_CONNECTION_MODE
-      || !includesEvery(state.appEvents, configuration.tenantEvents)
-    ) throw apiError('feishu_console_event_verification_failed', true)
+    const configured = await this.#readEventStateUntil(
+      id,
+      (candidate) => (
+        candidate.eventMode === FEISHU_LONG_CONNECTION_MODE
+        && includesEvery(candidate.appEvents, configuration.tenantEvents)
+      ),
+      signal
+    )
+    if (!configured) throw apiError('feishu_console_event_verification_failed', true)
     await this.#updateManifest(
       'configure_event_manifest',
       id,
@@ -721,6 +747,21 @@ export class OpenPlatformApiClient {
         appVersion: firstString(version, ['appVersion', 'app_version', 'version']) ?? null
       }]
     })
+  }
+
+  async #readEventStateUntil(
+    appId: string,
+    ready: (state: FeishuOpenPlatformEventState) => boolean,
+    signal?: AbortSignal
+  ): Promise<FeishuOpenPlatformEventState | null> {
+    for (let attempt = 0; attempt < this.#configurationPollAttempts; attempt += 1) {
+      const state = await this.readEventState(appId, signal)
+      if (ready(state)) return state
+      if (attempt + 1 < this.#configurationPollAttempts) {
+        await this.#delay(this.#configurationPollIntervalMs, signal)
+      }
+    }
+    return null
   }
 
   async #updateManifest(

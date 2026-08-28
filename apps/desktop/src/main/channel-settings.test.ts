@@ -741,6 +741,49 @@ describe('channel settings service', () => {
     })
   })
 
+  it('projects a frozen failed publication intent after a Desktop restart', async () => {
+    const account = connectedAccount()
+    const service = new ChannelSettingsService({
+      credentialStore: memoryCredentialStore(),
+      core: channelCore((method) => {
+        if (method === 'channels.feishu.snapshot') {
+          return coreSnapshot({
+            account,
+            publicationIntents: [{
+              publicationIntentId: 'intent-unknown',
+              agentId: 'agent-a',
+              accountId: account.accountId,
+              expectedUserIdDigest: account.userIdDigest,
+              expectedTenantId: account.tenantId,
+              requestedAppName: '审阅员',
+              provisioningMode: 'developer_session',
+              state: 'failed_unknown_remote_state',
+              remoteAppId: 'cli-frozen',
+              credentialRef: null,
+              lastCompletedStep: 'session_verified',
+              failureCode: 'feishu_console_event_verification_failed',
+              version: 3,
+              createdAt: '2026-08-27T00:00:00Z',
+              updatedAt: '2026-08-27T00:01:00Z'
+            }]
+          })
+        }
+        throw new Error(`unexpected method: ${method}`)
+      })
+    })
+
+    const snapshot = await service.get()
+
+    expect(snapshot.channels[0].memberBots).toContainEqual({
+      agentId: 'agent-a',
+      publicationStatus: 'failed',
+      botDisplayName: '审阅员',
+      appId: 'cli-frozen',
+      managementUrl: 'https://open.feishu.cn/app/cli-frozen/baseinfo',
+      failureCode: 'feishu_console_event_verification_failed'
+    })
+  })
+
   it('reconciles the frozen remote app on an explicit retry without creating another app', async () => {
     const owner = identity()
     const credentialStore = memoryCredentialStore()
