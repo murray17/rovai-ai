@@ -223,197 +223,46 @@ writer intent 或在 dispatch 前重建 View。旧 publication gate/generation �
 - Context 每次探测本地文件并生成 unavailable descriptor：把文件系统扫描放回热路径，并替 Runtime 猜测失败。
 
 <a id="v1-29-d07"></a>
-## V1.29-D07：两层 diff 共存，但不建立第二套 Activity 权威
+## V1.29-D07：退出 Rovai 等于取消所有 AgentRun
 
 ### 背景
 
-Runtime 有时会在一个 Operation 的结构化事件中明确报告 patch 或完整 before/after；另一方面，用户最终关心的
-是一组可能重叠的运行期间工作区留下了什么净变化。前者接近 Operation，后者只能观察工作区边界，二者的来源、
-完整性和归因能力不同。若把二者合并为一个“Agent 修改”，会让 Runtime 声明、文件系统观察和因果归因互相替代。
+此前主动退出先请求 Runtime 收敛，并优先等待可靠终态。直接退出会把这段等待放在关闭路径中；用户先手动
+取消 AgentRun 时，等待已提前发生，因此随后关闭明显更快。两条路径对用户的最终意图一致，却有不同的耗时
+与反馈。
+
+冷启动的全局恢复提示也会在目标数据很快就绪时短暂闪现，让正常打开看起来像一次恢复操作。队员页和记忆页
+已经有稳定页面结构，不需要为短等待替换整页。
 
 ### 决定
 
-1. 产品固定保留两层：`Command Diff` 是 Runtime 对具体 Operation 的结构化报告；
-   `Workspace Change Window Diff` 是当前 Camp、exact execution root 内一组重叠 Run 的 Git 工作区净变化；
-2. Command Diff 继续写 append-only Evidence，并归约到既有 Canonical Activity 的 typed `diffProjection`；
-   不创建 `OperationDiffActivity`，也不复制 `phase`、`outcome` 或 Activity identity；
-3. projection 保留单调 `revision`、全部 `sourceEvidenceIds` 和明确的 availability/conflict 状态；
-4. 只有 Adapter/version 明确声明语义的数据可进入 projection。局部片段、仅路径或语义不明的 `diff` / `patch`
-   字段不得包装为完整文件差异；
-5. `diffProjection` 不是可独立排序或写入的新 Activity。旧 Evidence 不做无法证明正确的回填；v1 presentation
-   由 [V1.29-D09](#v1-29-d09)冻结。
+主动退出、重启与更新统一表示取消全部非终态 AgentRun。Core 持久化 shutdown cycle、关闭新 launch 并完成
+稳定快照后，立即关闭 terminal/route 准入；随后只给 Runtime 600ms best-effort 中断窗口，在同一产品事务中
+写入 Run-local 取消请求、`app_shutdown_cancel_all` 原因和确认时间，再把 Run 结算为 `cancelled`。Runtime route
+回收最多等待 2 秒，Desktop 保留 10 秒硬 deadline。
 
-当前规范见 [Workspace Change Observation](../../architecture/workspace-change-observation.md)与
-[Workspace Change Observation v1](../../contracts/workspace-change-observation-v1.md)。
+Migration 113 保持当前 Data Contract 与 projection schema marker，只把 `planned_shutdown_cycle` 的协议约束从
+仅 v2 扩为 v2/v3。已有 row 原样复制，历史 pending v2 cycle 继续可辨识，新退出只持久化 v3。
 
-### 后果
+退出不伪造 Runtime terminal，也不抹除已存在的 unknown-effect 证据。该动作不写 CampTurn 取消意图；依赖被
+取消 Run 的 CampTurn 按既有 required-run 规则结算。升级前已持久化的 v2 cycle 继续按历史语义补偿。
 
-- Runtime 声明与 Git 观察保留独立来源和不确定性，可由后续 UI 方案分别呈现；
-- replay 仍从 append-only Evidence 确定性重建，不增加可独立写入的活动聚合；
-- 每个 Adapter/version 必须先完成 public normalizer、Registry、fixture 和语义证明，接入成本高于字段名猜测；
-- Command Diff 不自动证明文件最终状态，也不替代 Workspace Window。
-
-### 被拒绝方案
-
-- **为 diff 新建第二类活动：** 会复制现有 Tool/Command 的 phase、outcome 与排序权威；
-- **按字段名自动识别 `diff` / `patch`：** 无法区分局部片段、增量事件与完整快照；
-- **读取当前文件补全 Runtime 片段：** 会扩大文件读取授权，并把晚到工作区状态伪装成 Operation 证据；
-- **把 Git 最终差异附到每个 Run：** 重叠写入下无法证明单 Run 因果归属。
-
-<a id="v1-29-d08"></a>
-## V1.29-D08：Camp/exact-root Window 使用受控 Git checkpoint，Coordinator 有界 fail-open
-
-### 背景
-
-临时 index 不能完全隔离用户仓库；Git object 写入本身会进入用户 object database。专用 worktree 或
-workspace writer lease 可以强化隔离和归因，但会显著增加 v1 的调度、磁盘与用户工作流成本。与此同时，按 Run
-各自拍快照会在重叠运行时产生互相覆盖、重复投影和不真实归因。
-
-### 决定
-
-1. 唯一持久对象是 `WorkspaceChangeWindow`，key 为
-   `campId + canonicalExecutionRoot + observedRepositoryWorktreeIdentity`；身份至少冻结
-   `repositoryRoot + worktreeGitDir + gitCommonDir + objectFormat`；
-2. 同 key 重叠 Run 共享 baseline；最后一个参与 Run 的 lease 已 fence/unbind，且属于它的 Runtime、CLI、Tool
-   后代已证明 quiescent 后捕获 final。IdleWarm Host 不参与该判定；取消在期限内无法证明 quiescent 时直接把旧
-   Window 收敛为 unavailable 并释放观察 participant，不等待未知回调，也不声称 Runtime 已停止；
-3. Core DB 的 Window row 是 active coordination、OID、恢复与清理权威；完成时追加的不可变
-   `WorkspaceDiffCompleted + diffBlobId` 是历史卡片/读取权威。随机 `windowId` 至少含 128-bit 熵；
-   `refs/rovai/w/<window-token>/b|f` 只以 CAS 方式临时保护计算材料；expected baseline/final OID 另存于不受
-   lifecycle 过滤的持久 cleanup ledger，失败关闭先清 candidate/manifest root，再允许 closed Window 重试；
-4. snapshot 只写 raw blob/tree，不经过 index、`git add`、clean filter、LFS clean、textconv 或 external diff；
-   不修改 staged 状态、普通 branch/ref，也不主动执行 prune；
-5. synthetic tree 只覆盖 exact execution root，并遵守 ignored/untracked、symlink、executable bit、sparse-checkout、
-   nested repository/submodule 与稳定双捕获边界；
-6. 新 Run join 与 `active -> closing` 原子互斥；同一 physical execution root 在 closing 时只允许有严格截止时间的
-   bind 等待；捕获 mutex 按 `canonicalExecutionRoot + observedRepositoryWorktreeIdentity` 分片且不含 Camp，避免
-   一个仓库阻塞无关工作区，同时维持同一物理工作区的跨 Camp 边界互斥；每个 Git 子进程使用有界输出、绝对
-   deadline 与进程树 kill/reap。任何 baseline/final/ref/身份/限制故障都使观察 `unavailable`，但 Run 和普通文件
-   工作继续；
-7. 读取必须以 `campId + windowId` 授权。其他 Camp/scope 的重叠 Rovai Run 只设置布尔观察，不暴露其 Camp、Run
-   或文件活动。用户编辑器与任意外部程序始终只通过通用免责声明表达，不能假称被完整探测。
-
-当前规范见 [Workspace Change Observation](../../architecture/workspace-change-observation.md)与
-[Workspace Change Observation v1](../../contracts/workspace-change-observation-v1.md)。
+冷启动立即开始读取 Main Window Session 与目标数据。前 400ms 不显示加载反馈；超过门槛后只在目标内容区
+显示局部反馈，错误仍立即显示。队员页和记忆页保持既有结构。关闭时立即阻止新的界面交互，前 400ms 不显示
+反馈；超过门槛后以“正在安全退出”说明本地状态保存与后台服务关闭，并条件说明尚未完成的 AgentRun 会取消。
+进入关闭状态后不再发起页面投影刷新，取消结算产生的晚到请求拒绝不作为新的操作错误展示。
 
 ### 后果
 
-- v1 不需要改造所有 Runtime 的 workspace 模型，也不承诺单写者或因果归因；
-- 用户仓库会收到 Rovai raw objects 和短期专用 refs；删除 ref 后 object bytes 何时消失仍由 Git 自身 GC 决定；
-- DB OID 与 ref 一旦不一致就不可用，不允许通过事后扫描掩盖边界丢失；
-- 同一 repository 的不同 Camp/execution root 保持授权隔离，但物理写入仍可能互相影响，任何未来 presentation
-  必须保留该不确定性；
-- 严格上限或持续变化可能牺牲 diff 可用性，以换取 Scheduler 不被 checkpoint 永久阻塞。
+- 直接退出与先手动取消再退出使用同一产品语义，正常活跃 Run 的关闭验收目标为 5 秒内完成；
+- 关闭延迟不再由 Runtime 是否及时给出可靠 terminal 决定，迟到 terminal 也不能越过已关闭准入改写产品终态；
+- 每个被退出取消的 Run 都有可审计的取消请求、原因和确认时间，未知外部效果仍可单独展示；
+- 快速冷启动和快速退出都不再闪现等待提示，慢操作仍提供与当前阶段一致的进度反馈。
 
 ### 被拒绝方案
 
-- **临时 index 并声称完全隔离：** 仍可能触发 filter/LFS，且 object database 不是隔离存储；
-- **专用 worktree：** v1 的生命周期、磁盘和用户预期成本过高；
-- **workspace writer lease：** 会改变并行执行产品语义，超出观察能力的范围；
-- **跨 Camp 或跨 execution root 共享 Window：** 破坏授权边界并暴露参与者信息；
-- **ref 作为长期权威：** 用户或工具可移动/删除 ref，且无法承载 Camp 授权与生命周期；
-- **失败后重新扫描补 final：** 无法恢复原来的时间边界，会把后续用户修改混入结果。
-
-<a id="v1-29-d09"></a>
-## V1.29-D09：终态文件变更扁平呈现，完整 Review 只属于 Window Evidence
-
-### 背景
-
-把 `apply_patch`、文件数汇总和逐文件 diff 嵌套成三层，会重复 Runtime 的实现名并制造第二个 Activity 层级；
-同时，把 Workspace Window 状态塞进执行台会改变现有会话/执行布局，也会暗示它属于某个 Run。不同 Runtime 的
-文件事件名并不一致，必须区分“成功文件操作的结构化 path”和“可展开的可靠内容”，而不是按 Tool 显示名统一。
-
-### 决定
-
-1. Codex 只从 `item/completed + fileChange + completed` 接纳最终 `changes[]`；不消费 started、patchUpdated、
-   turn diff 或 `apply_patch` input。Codex add/delete 完整内容在 Core 规范化为 unified diff；
-2. 全部 ACP adapter 对成功 terminal `edit | write`，只从同一 ToolCall 的标准累计 `locations[].path` 接纳唯一
-   文件操作 presentation；terminal 省略或清空 location 时可以复用该 ToolCall 先前已报告的非空 location。
-   不解析 raw input、title、output 或文件内容，kind 冲突、路径缺失/多值或失败时不生成文件操作行；
-3. ACP 只从 terminal `tool_call_update` 的标准 `ToolCallContent::Diff` 累计内容接纳完整
-   before/after。Kiro 的单 entry rooted-relative path 只有与同 ToolCall 唯一 location 完全对应时才归一化；其他
-   ACP adapter 及不匹配路径继续 fail closed。Claude Code 只从完整 `assistant.tool_use(name=Edit)` 与 matching 非错误 `user.tool_result`
-   接纳 `file_path/old_string/new_string` 的 `exact_mutation`；不读文件、不生成 hunk 行号，`replace_all` 与其他 Tool
-   保持普通 Tool Activity。Antigravity 没有等价可靠内容，保持普通 Tool Activity；
-4. 一条 FileChange Evidence 与一条 Canonical Activity 可以投影文件操作 presentation 和可选 Diff。只有唯一
-   可靠路径时显示普通 `修改 <basename>` 行；另有可靠内容时才显示 `+A −D` 并展开 inline diff。删除
-   `apply_patch` 父行和“编辑了 N 个文件”聚合层，不创建逐文件权威 Activity；
-5. 完整 Review 只从 `WorkspaceDiffCompleted → diffBlobId` 打开。会话卡片标题固定 `Files Changed`，右侧只放
-   中性 `View`；文件行顶格且无分隔，不显示时间、已保存、参与运行或底部 metadata；
-6. 执行台不增加共享工作区观察，不改变会话 rail、底部/右侧 placement、Tool list 整行宽度或其他既有样式。
-
-### 后果
-
-- Kimi Code、Qoder 等只提供成功 Edit/Write 与标准唯一 path 的 ACP Runtime 也能显示 `修改 xxx`，但没有可靠
-  old/new 时不显示计数或空 Diff；
-- 非 Git 项目仍可显示 Runtime 可靠终态的 `修改 xxx` 行；Workspace 卡片仍只在 Git Window `complete` 时出现；
-- Claude 同一文件连续 Edit 保留各自 Tool identity 和片段 Diff，不被错误归并成最终净变化；
-- 一个 Runtime 没有可靠 terminal file content 时仍可显示已证明的单文件操作，但不显示占位 Diff 或推测摘要；
-- 后续 Window 不覆盖旧卡片，Git refs/objects 或当前 workspace 不再参与历史读取；
-- Renderer 只消费 Canonical typed projection，不维护 Runtime-specific 分支或第二套 Activity。
-
-### 被拒绝方案
-
-- **展示 `apply_patch → 编辑了 N 个文件 → files`：** 重复层级且把 Runtime 实现名误当产品语义；
-- **只展示“编辑了 N 个文件”文字：** 无法直接定位和独立展开单文件变化；
-- **在执行台展示 Window observation：** 混淆 Operation Evidence 与共享净变化，并破坏现有执行布局；
-- **把可靠路径当成 diff：** 路径只足以命名成功文件操作，不能证明 old/new、增删计数或 inline 内容；
-- **从 Tool 显示名、raw input、output 或 shell 命令猜文件操作/diff：** 无法证明完整性，异常退出时尤其会产生伪结果。
-
-<a id="v1-29-d10"></a>
-## V1.29-D10：ACP Client FS/Terminal 仅作执行代理，文件与 Shell 权限由 Runtime 单独拥有
-
-### 背景
-
-ACP Runtime 已经通过自己的 sandbox、permission/approval mode 与原生用户交互决定文件和 Shell 权限，但 Core 曾在
-`fs/write_text_file` 上再维护一份 `authorized_file_writes`：只有 matching permission response 生成的一次性路径
-token 才能写，并且 read/write 都通过 `scoped_path()` 限制在 execution root。Qwen Code、CodeBuddy、Kimi 和
-Grok 等全自动模式可以合法地不发送 permission request，却仍使用 ACP Client FS 完成写入，于是第二层 token
-无法产生，Runtime 已允许的操作反而被 Core 以 `file write has no matching one-time Rovai-ai authorization`
-拒绝。Client Terminal 的显式 cwd 还继续调用相同 `scoped_path()`，使 Runtime 已允许的 root 外目录无法作为
-Shell 工作目录。两种机制都不能代表 Runtime 的真实权限，并把 execution root 错当成 sandbox。
-
-### 决定
-
-1. 文件、Shell、网络权限只由冻结的 Adapter Permission Configuration、原生 Runtime sandbox/permission mode
-   与操作系统拥有。Core 不建立可与它们分歧的通用文件权限层；
-2. `fs/read_text_file` / `fs/write_text_file` 成为 fenced ACP Client Filesystem Proxy：绝对路径按 Runtime 请求
-   执行，相对路径以 execution root 为解析基准，但不 containment；不读取 Workspace access，不调用
-   `scoped_path()`，不 canonicalize 后拒绝 root escape；
-3. `terminal/create` 省略 cwd 时仍使用 execution root；显式 cwd 仍必须为已存在的绝对目录，但不调用
-   `scoped_path()`、不做 execution-root containment。Core 只代理创建受管进程，不把 cwd admission 变成 Shell
-   权限判断；
-4. 删除 `authorized_file_writes`、`authorize_file_write()`、one-time matching error，以及 Runtime Delivery 把
-   Approval 映射为文件 token/scope validation 的桥；同一 Run 可以连续多次写同一或不同路径；
-5. `session/request_permission` 继续校验 current Run/epoch/Session/Prompt、request identity 和 native option。
-   冻结配置处于 Adapter 已验证的全自动/绕过交互模式时，Core 直接选择 native non-persistent allow 作为 ACP
-   兼容响应，不创建 Approval/Action；交互模式继续保存 exact native request、用户决定和 response delivery；
-6. permission response 与 Client FS/Terminal 执行资格完全解耦。它不 mint、consume 或 revoke 文件或 Shell
-   权限；stale
-   Session、cancel/detach、非法参数、未知 method 和 OS I/O failure 仍由 Core 正常 fail closed；
-7. Rovai 自有 blob、附件 Authority、私有配置、凭据、IPC、Built-in Tool lease 与领域命令继续按自然产品边界
-   保护；Terminal 的进程树、输出上限、kill/release、cleanup 和 Run/epoch/Session/Prompt fence 也保持。它们不是
-   Runtime 已知任意路径的第二份 filesystem/Shell allowlist。
-
-当前字段级规范见 [Runtime Launch and Verification v28](../../contracts/runtime-launch-and-verification-v28.md)与
-[ACP Client Terminal v2](../../contracts/acp-client-terminal-v2.md)。
-
-### 后果
-
-- ACP Runtime 的权限配置成为单一文件与 Shell 权限解释；execution root 继续是默认工作目录和相对路径基准，
-  不再冒充 sandbox；
-- 全自动 Runtime 无需先制造虚假的 permission request，连续 Client FS 写入不再因 token 被消费而失败；
-- 选择较窄模式的用户仍可收到 Runtime 原生 Approval；该 UI/审计事实不承诺 Core 拦截 Runtime 的每种文件 I/O；
-- 与 Runtime 同 UID 且知道某个路径时，Core Client FS/Terminal 不提供额外隔离保证；隔离必须由 Runtime
-  sandbox、permission mode 或操作系统承担；
-- 旧 `CoreEnforcedV1` 只为既有非终态 Run 的非 FS Action recovery 保留，不再参与 Client FS read/write。
-
-### 被拒绝方案
-
-- **修补 one-time token 的数量或有效期：** 仍要求 Runtime 权限事件和 FS callback 一一对应，无法覆盖自动模式、
-  多次写入或 Runtime 内部授权；
-- **把 execution root 改成可申请扩展的 Core sandbox：** 建立第二套路径 capability、symlink/canonicalization 与
-  生命周期模型，继续可能和 Runtime 决策冲突；
-- **解析 shell/tool input 预授权路径：** 无法证明实际副作用，且会把启发式猜测升级成安全权威；
-- **所有 permission request 都静默 allow：** 会覆盖用户选择的交互式 Runtime 模式；只有已冻结的全自动/绕过模式
-  使用兼容 allow，其余仍走原生 Approval。
+- 保留可靠终态优先等待并只美化弹窗：不消除直接退出与手动取消后退出的耗时差异；
+- 在 Renderer 中先逐个发起取消再关闭 Core：增加多入口竞态，且不能提供单一稳定快照与原子结算；
+- 启动时立即显示全局恢复页：短加载持续闪现，并遮蔽用户上次使用的位置；
+- 退出时立即显示取消全部 AgentRun：零 Run 或快速收口时会闪现与实际工作量不匹配的反馈；
+- 完全不显示启动反馈：慢磁盘、迁移或数据错误时缺少可理解的状态。

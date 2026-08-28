@@ -146,9 +146,12 @@ const ACTIVE_CAMP_INVALIDATION_EVENTS = new Set([
 
 export function shouldRefreshActiveCampForCoreEvent(
   event: CoreEvent,
-  activeCampId: string | null
+  activeCampId: string | null,
+  shuttingDown = false
 ): boolean {
-  if (!activeCampId || !ACTIVE_CAMP_INVALIDATION_EVENTS.has(event.method)) return false
+  if (shuttingDown || !activeCampId || !ACTIVE_CAMP_INVALIDATION_EVENTS.has(event.method)) {
+    return false
+  }
   const eventCampId = stringField(asRecord(event.params), 'campId')
   if (event.method === 'agent_run.runtime_model_observed') {
     return eventCampId === activeCampId
@@ -207,9 +210,10 @@ export function createActiveCampRefreshCoordinator(
 export function refreshActiveCampForCoreEvent(
   event: CoreEvent,
   activeCampId: string | null,
-  coordinator: ActiveCampRefreshCoordinator
+  coordinator: ActiveCampRefreshCoordinator,
+  shuttingDown = false
 ): Promise<void> | null {
-  return shouldRefreshActiveCampForCoreEvent(event, activeCampId) && activeCampId
+  return shouldRefreshActiveCampForCoreEvent(event, activeCampId, shuttingDown) && activeCampId
     ? coordinator.refresh(activeCampId)
     : null
 }
@@ -223,7 +227,9 @@ export function requestAuthoritativeCampOpenProjection(
 }
 
 type LoadState = 'loading' | 'ready' | 'error'
-type StartupStatus = 'loading' | 'waiting' | 'resolved'
+export type StartupStatus = 'loading' | 'waiting' | 'resolved'
+export const STARTUP_FEEDBACK_DELAY_MS = 400
+export const SHUTDOWN_FEEDBACK_DELAY_MS = 400
 export type View = 'compose' | 'camp' | 'members' | 'memory' | 'settings'
 export type SettingsSection = NavigationSettingsSection
 export type WindowDragStripPage = Extract<View, 'compose' | 'members' | 'memory' | 'settings'>
@@ -241,6 +247,13 @@ export function startupGateShouldBeVisible(
   snapshot: DesktopStartupSnapshot | null
 ): boolean {
   return snapshot === null
+}
+
+export function startupFeedbackShouldBeVisible(
+  status: StartupStatus,
+  delayElapsed: boolean
+): boolean {
+  return status === 'waiting' || (status === 'loading' && delayElapsed)
 }
 
 export function campViewIsVisibleForReadAcknowledgement(
@@ -504,26 +517,67 @@ export function shouldLoadRuntimeHealth(
     )
 }
 
-export function ControlledShutdownOverlay(): React.JSX.Element {
+export function ControlledShutdownOverlay({
+  visible = true
+}: {
+  visible?: boolean
+}): React.JSX.Element {
+  const dialogRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!visible) return
+    dialogRef.current?.focus({ preventScroll: true })
+  }, [visible])
+
+  useEffect(() => {
+    if (visible) return undefined
+    const preventPendingInteraction = (event: KeyboardEvent): void => {
+      event.preventDefault()
+      event.stopImmediatePropagation()
+    }
+    window.addEventListener('keydown', preventPendingInteraction, true)
+    return () => window.removeEventListener('keydown', preventPendingInteraction, true)
+  }, [visible])
+
   return (
     <div
-      className="shutdown-scrim"
-      role="dialog"
-      aria-modal="true"
-      aria-live="assertive"
-      aria-labelledby="controlled-shutdown-title"
-      aria-describedby="controlled-shutdown-description"
+      ref={dialogRef}
+      className={`shutdown-scrim ${visible ? 'is-visible' : 'is-pending'}`}
+      role={visible ? 'dialog' : undefined}
+      aria-modal={visible ? true : undefined}
+      aria-live={visible ? 'polite' : undefined}
+      aria-busy={visible ? true : undefined}
+      aria-hidden={visible ? undefined : true}
+      aria-labelledby={visible ? 'controlled-shutdown-title' : undefined}
+      aria-describedby={visible
+        ? 'controlled-shutdown-description controlled-shutdown-evidence'
+        : undefined}
+      tabIndex={visible ? -1 : undefined}
+      onKeyDown={(event) => {
+        if (!visible || event.key !== 'Tab') return
+        event.preventDefault()
+        dialogRef.current?.focus({ preventScroll: true })
+      }}
     >
-      <section className="shutdown-card">
-        <span className="shutdown-progress" aria-hidden="true"><i /></span>
-        <div>
-          <p className="settings-page-eyebrow">CONTROLLED SHUTDOWN</p>
-          <h2 id="controlled-shutdown-title">正在停止运行并关闭 Rovai…</h2>
-          <p id="controlled-shutdown-description">
-            正在等待执行引擎返回可靠终态；无法确认的执行也会停止，并保留外部效果现场供下次核对。
-          </p>
-        </div>
-      </section>
+      {visible && (
+        <section className="shutdown-card">
+          <span className="shutdown-safe-mark" aria-hidden="true">
+            <svg viewBox="0 0 20 20" focusable="false">
+              <path d="M10 2.75 4.75 5.1v4.05c0 3.55 1.97 6.23 5.25 8.1 3.28-1.87 5.25-4.55 5.25-8.1V5.1L10 2.75Z" />
+            </svg>
+          </span>
+          <div className="shutdown-card-content">
+            <h2 id="controlled-shutdown-title">正在安全退出</h2>
+            <p id="controlled-shutdown-description">Rovai 正在保存本地状态并关闭后台服务。</p>
+            <span className="shutdown-progress-track" role="progressbar" aria-label="正在完成安全退出">
+              <i />
+            </span>
+            <p className="shutdown-evidence-note" id="controlled-shutdown-evidence">
+              若有尚未完成的 AgentRun，将一并取消；未确认的文件、命令或工具效果会保留为待核对记录。
+            </p>
+          </div>
+        </section>
+      )}
     </div>
   )
 }
@@ -566,10 +620,13 @@ export function App(): React.JSX.Element {
   const [confirmingRunIds, setConfirmingRunIds] = useState<Set<string>>(() => new Set())
   const [state, setState] = useState<LoadState>('loading')
   const [shuttingDown, setShuttingDown] = useState(false)
+  const shuttingDownRef = useRef(false)
+  const [shutdownFeedbackVisible, setShutdownFeedbackVisible] = useState(false)
   const [notificationHeadsUpVisible, setNotificationHeadsUpVisible] = useState(false)
   const [startupSnapshot, setStartupSnapshot] = useState<DesktopStartupSnapshot | null>(null)
   const [startupRouteTarget, setStartupRouteTarget] = useState<RestorableLocation | null>(null)
   const [startupStatus, setStartupStatus] = useState<StartupStatus>('loading')
+  const [startupFeedbackDelayElapsed, setStartupFeedbackDelayElapsed] = useState(false)
   const [startupError, setStartupError] = useState<string | null>(null)
   const [onboardingSnapshot, setOnboardingSnapshot] = useState<OnboardingSnapshot | null>(null)
   const [onboardingRuntimePhase, setOnboardingRuntimePhase] = useState<OnboardingRuntimePhase>('idle')
@@ -973,6 +1030,13 @@ export function App(): React.JSX.Element {
     return request
   }, [cancelPendingCampActivation, setCampSnapshot])
 
+  const completeStartup = useCallback((sessionId: string): void => {
+    startupResolvedSessionId.current = sessionId
+    setStartupStatus('resolved')
+    setStartupError(null)
+    setStartupRouteTarget(null)
+  }, [])
+
   const commitRestorableLocation = useCallback(async (
     location: RestorableLocation
   ): Promise<void> => {
@@ -1208,6 +1272,25 @@ export function App(): React.JSX.Element {
   }, [loadStartupSnapshot])
 
   useEffect(() => {
+    const elapsed = performance.now() - startupStartedAt.current
+    const remaining = Math.max(0, STARTUP_FEEDBACK_DELAY_MS - elapsed)
+    const timer = window.setTimeout(() => setStartupFeedbackDelayElapsed(true), remaining)
+    return () => window.clearTimeout(timer)
+  }, [])
+
+  useEffect(() => {
+    if (!shuttingDown) {
+      setShutdownFeedbackVisible(false)
+      return undefined
+    }
+    const timer = window.setTimeout(
+      () => setShutdownFeedbackVisible(true),
+      SHUTDOWN_FEEDBACK_DELAY_MS
+    )
+    return () => window.clearTimeout(timer)
+  }, [shuttingDown])
+
+  useEffect(() => {
     void loadOnboarding()
   }, [loadOnboarding])
 
@@ -1321,13 +1404,6 @@ export function App(): React.JSX.Element {
       return true
     }
 
-    const complete = (): void => {
-      startupResolvedSessionId.current = startupSnapshot.sessionId
-      setStartupStatus('resolved')
-      setStartupError(null)
-      setStartupRouteTarget(null)
-    }
-
     const logRouteContentPaint = async (target: RestorableLocation['kind']): Promise<void> => {
       await afterNextPaint()
       if (cancelled) return
@@ -1343,12 +1419,11 @@ export function App(): React.JSX.Element {
       if (target.kind === 'quick_chat') {
         showQuickChat()
         scheduleOverview()
-        complete()
+        completeStartup(startupSnapshot.sessionId)
         await logRouteContentPaint(target.kind)
         return
       } else if (target.kind === 'memory') {
         scheduleOverview()
-        complete()
         return
       } else if (target.kind === 'members') {
         const agentsRequest = loadAgents()
@@ -1356,7 +1431,7 @@ export function App(): React.JSX.Element {
         const nextAgents = await agentsRequest
         if (cancelled) return
         setSelectedMemberId(restoredMemberId(target.agentId, nextAgents))
-        complete()
+        completeStartup(startupSnapshot.sessionId)
         await logRouteContentPaint(target.kind)
         return
       } else {
@@ -1377,7 +1452,7 @@ export function App(): React.JSX.Element {
           if (cancelled) return
           if (!exists) {
             showQuickChat()
-            complete()
+            completeStartup(startupSnapshot.sessionId)
             await logRouteContentPaint('quick_chat')
             return
           }
@@ -1396,7 +1471,7 @@ export function App(): React.JSX.Element {
         setNotificationFocus(null)
         lastMainView.current = 'camp'
         setView('camp')
-        complete()
+        completeStartup(startupSnapshot.sessionId)
         await afterNextPaint()
         if (cancelled || selectionGeneration !== campSelectionGeneration.current) return
         console.info(
@@ -1436,6 +1511,7 @@ export function App(): React.JSX.Element {
     }
   }, [
     cancelPendingCampActivation,
+    completeStartup,
     loadAgents,
     loadNavigation,
     loadOverview,
@@ -1473,6 +1549,15 @@ export function App(): React.JSX.Element {
       tab: memberTab
     })
   }, [agents, commitRestorableLocation, memberTab, selectedMemberId, startupStatus, view])
+
+  useEffect(() => {
+    if (
+      !startupSnapshot
+      || startupRouteTarget?.kind !== 'memory'
+      || view === 'memory'
+    ) return
+    completeStartup(startupSnapshot.sessionId)
+  }, [completeStartup, startupRouteTarget, startupSnapshot, view])
 
   useEffect(() => {
     let active = true
@@ -1570,6 +1655,7 @@ export function App(): React.JSX.Element {
   useEffect(() => {
     return window.rovai.onEvent((event: CoreEvent) => {
       const params = asRecord(event.params)
+      if (shuttingDownRef.current) return
       const liveEvent = liveRuntimeEventFromCore(
         event,
         `live-${++liveRuntimeEventSequence.current}`
@@ -1580,7 +1666,11 @@ export function App(): React.JSX.Element {
       if (event.method === 'runtime.state') {
         const runtimeStatus = stringField(params, 'status')
         if (runtimeStatus === 'shutting_down') {
+          shuttingDownRef.current = true
           setShuttingDown(true)
+          setError(null)
+          setLocationSaveError(null)
+          setToast(null)
         } else if (runtimeStatus === 'crashed') {
           setState('error')
           setError(stringField(params, 'message') ?? '后台服务已停止。')
@@ -1607,7 +1697,8 @@ export function App(): React.JSX.Element {
       const refresh = refreshActiveCampForCoreEvent(
         event,
         campId,
-        activeCampRefreshCoordinator
+        activeCampRefreshCoordinator,
+        shuttingDownRef.current
       )
       if (refresh && campId) {
         void refresh.catch((nextError) => {
@@ -1948,9 +2039,22 @@ export function App(): React.JSX.Element {
   ])
 
   const commitMemoryLocation = useCallback((): void => {
+    if (
+      startupSnapshot
+      && startupRouteTarget?.kind === 'memory'
+      && startupResolvedSessionId.current !== startupSnapshot.sessionId
+    ) {
+      completeStartup(startupSnapshot.sessionId)
+      void afterNextPaint().then(() => {
+        console.info(
+          `[startup] trace=${startupTraceId.current} stage=renderer_route_content_paint `
+          + `target=memory elapsed_ms=${(performance.now() - startupStartedAt.current).toFixed(1)}`
+        )
+      })
+    }
     if (!startupResolvedSessionId.current || viewRef.current !== 'memory') return
     void commitRestorableLocation({ kind: 'memory' })
-  }, [commitRestorableLocation])
+  }, [completeStartup, commitRestorableLocation, startupRouteTarget, startupSnapshot])
 
   const retryStartup = (): void => {
     setStartupStatus('loading')
@@ -2825,10 +2929,16 @@ export function App(): React.JSX.Element {
     settings: 'settings-content'
   }
   const startupGateVisible = startupGateShouldBeVisible(startupSnapshot)
+  const startupFeedbackVisible = startupFeedbackShouldBeVisible(
+    startupStatus,
+    startupFeedbackDelayElapsed
+  )
   const startupRoutePending = !startupGateVisible && startupStatus !== 'resolved'
     ? startupRouteTarget
     : null
-  const inlineNotices = memoryReviewNotice || memoryAutoNotice.count > 0 || error || locationSaveError
+  const inlineNotices = memoryReviewNotice
+    || memoryAutoNotice.count > 0
+    || (!shuttingDown && (error || locationSaveError))
     ? (
         <>
           {memoryReviewNotice && (
@@ -2843,14 +2953,14 @@ export function App(): React.JSX.Element {
               <div><button className="quiet-button compact" type="button" onClick={openAutomaticMemory}>查看</button><button className="icon-button" type="button" aria-label="关闭自动形成提示" onClick={() => setMemoryAutoNotice({ count: 0, memoryId: null, scope: null })}>×</button></div>
             </div>
           )}
-          {error && (
+          {!shuttingDown && error && (
             <div className="error-banner" role="alert">
               <span className="error-icon" aria-hidden="true">!</span>
               <div><strong>操作未完成</strong><span>{error}</span><small>项目文件和已经写入的审计记录不会因此丢失。</small></div>
               <div className="error-actions"><button className="quiet-button" onClick={() => void loadOverview()}>刷新状态</button><button className="icon-button" aria-label="关闭错误" onClick={() => setError(null)}>×</button></div>
             </div>
           )}
-          {locationSaveError && (
+          {!shuttingDown && locationSaveError && (
             <div className="error-banner" role="alert">
               <span className="error-icon" aria-hidden="true">!</span>
               <div><strong>当前页面已打开，但下次启动位置未保存</strong><span>{locationSaveError}</span></div>
@@ -2870,19 +2980,21 @@ export function App(): React.JSX.Element {
   if (onboardingSnapshot === null) {
     return (
       <div className="app-shell onboarding-app-shell">
-        <section className="startup-gate onboarding-admission-gate" aria-busy={!onboardingError} aria-live="polite">
-          <span className="startup-gate-mark" aria-hidden="true">✦</span>
-          <p className="settings-page-eyebrow">ROVAI FIRST START</p>
-          <h1>{onboardingError ? '暂时无法读取首次训练状态' : '正在准备 Rovai'}</h1>
-          <p>{onboardingError
-            ? '已保存的进度不会被清除。重试后会继续打开同一个未完成页面。'
-            : '正在读取本机的首次训练进度。'}</p>
-          {onboardingError && <small role="alert">{onboardingError}</small>}
-          {onboardingError && (
-            <button className="quiet-button" type="button" onClick={retryStartup}>重试</button>
-          )}
-        </section>
-        {shuttingDown && <ControlledShutdownOverlay />}
+        {(startupFeedbackDelayElapsed || onboardingError) && (
+          <section className="startup-gate onboarding-admission-gate" aria-busy={!onboardingError} aria-live="polite">
+            <span className="startup-gate-mark" aria-hidden="true">✦</span>
+            <p className="settings-page-eyebrow">ROVAI FIRST START</p>
+            <h1>{onboardingError ? '暂时无法读取首次训练状态' : '正在准备 Rovai'}</h1>
+            <p>{onboardingError
+              ? '已保存的进度不会被清除。重试后会继续打开同一个未完成页面。'
+              : '正在读取本机的首次训练进度。'}</p>
+            {onboardingError && <small role="alert">{onboardingError}</small>}
+            {onboardingError && (
+              <button className="quiet-button" type="button" onClick={retryStartup}>重试</button>
+            )}
+          </section>
+        )}
+        {shuttingDown && <ControlledShutdownOverlay visible={shutdownFeedbackVisible} />}
       </div>
     )
   }
@@ -2933,7 +3045,7 @@ export function App(): React.JSX.Element {
           )}
           onComplete={() => void completeOnboarding()}
         />
-        {shuttingDown && <ControlledShutdownOverlay />}
+        {shuttingDown && <ControlledShutdownOverlay visible={shutdownFeedbackVisible} />}
       </div>
     )
   }
@@ -3005,7 +3117,7 @@ export function App(): React.JSX.Element {
       {windowDragPage && <WindowDragStrip page={windowDragPage} />}
 
       <main className={`content ${pageContentClassName[view]}`}>
-        {startupGateVisible && (
+        {startupGateVisible && startupFeedbackVisible && (
           <StartupGate
             waiting={startupStatus === 'waiting'}
             error={startupError}
@@ -3013,14 +3125,14 @@ export function App(): React.JSX.Element {
           />
         )}
         {!startupGateVisible && view !== 'members' && view !== 'memory' && inlineNotices}
-        {!startupGateVisible && toast && (
+        {!startupGateVisible && !shuttingDown && toast && (
           <div className="app-toast" role="status" aria-live="polite">
             <span>{toast}</span>
             <button className="icon-button" type="button" aria-label="关闭提示" onClick={() => setToast(null)}>×</button>
           </div>
         )}
 
-        {!startupGateVisible && startupRoutePending?.kind === 'camp' && view === 'camp' && (
+        {!startupGateVisible && startupFeedbackVisible && startupRoutePending?.kind === 'camp' && view === 'camp' && (
           <StartupRouteLoading
             kind="camp"
             waiting={startupStatus === 'waiting'}
@@ -3103,6 +3215,7 @@ export function App(): React.JSX.Element {
             onReviewDrawerSignalConsumed={() => setMemoryReviewDrawerSignal(0)}
             onPendingCountChange={setPendingMemoryCount}
             onReady={commitMemoryLocation}
+            startupFeedbackVisible={startupRoutePending?.kind !== 'memory' || startupFeedbackVisible}
           />
         )}
 
@@ -3129,7 +3242,8 @@ export function App(): React.JSX.Element {
 
         {!startupGateVisible && view === 'members' && (
           startupRoutePending?.kind === 'members'
-            ? (
+            ? startupFeedbackVisible
+              ? (
                 <StartupRouteLoading
                   kind="members"
                   waiting={startupStatus === 'waiting'}
@@ -3137,6 +3251,7 @@ export function App(): React.JSX.Element {
                   onRetry={retryStartup}
                 />
               )
+              : null
             : (
                 <div className="members-workspace">
                   <MemberSidebar
@@ -3224,7 +3339,7 @@ export function App(): React.JSX.Element {
         onOpenDetails={openUpdateSettings}
         onDownload={appUpdates.download}
       />
-      {shuttingDown && <ControlledShutdownOverlay />}
+      {shuttingDown && <ControlledShutdownOverlay visible={shutdownFeedbackVisible} />}
     </div>
   )
 }
@@ -3247,15 +3362,30 @@ export function StartupGate({
   onRetry(): void
 }): React.JSX.Element {
   return (
-    <section className="startup-gate" aria-busy={!waiting} aria-live="polite">
-      <span className="startup-gate-mark" aria-hidden="true">✦</span>
-      <p className="settings-page-eyebrow">MAIN WINDOW SESSION</p>
-      <h1>{waiting ? '暂时无法恢复上次位置' : '正在恢复上次位置'}</h1>
-      <p>{waiting
-        ? 'Rovai AI 会保留这次窗口冻结的恢复目标。后台服务恢复后将继续验证同一位置，不会清除或改走其他启动路线。'
-        : '正在读取窗口偏好，并通过本地数据验证最近的稳定页面。'}</p>
-      {error && <small role="alert">{error}</small>}
-      {waiting && <button className="quiet-button" type="button" onClick={onRetry}>重试恢复</button>}
+    <section
+      className="startup-route-loading startup-route-loading-location"
+      aria-busy={!waiting}
+      aria-live="polite"
+      data-startup-route="location"
+      data-startup-status={waiting ? 'waiting' : 'loading'}
+    >
+      <header className="startup-route-status">
+        <span className="startup-route-progress" aria-hidden="true" />
+        <div>
+          <h1>{waiting ? '暂时无法打开上次位置' : '正在打开上次位置'}</h1>
+          <p>{waiting
+            ? '上次位置仍保留在本机，可以在本地服务恢复后重试。'
+            : '页面框架已经就绪，最近内容即将就绪。'}</p>
+        </div>
+        {waiting && <button className="quiet-button" type="button" onClick={onRetry}>重试打开</button>}
+      </header>
+      {error && <p className="startup-route-error" role="alert">{error}</p>}
+      <div className="startup-route-skeleton" aria-hidden="true">
+        <span />
+        <span />
+        <span />
+        <span />
+      </div>
     </section>
   )
 }
@@ -3283,10 +3413,10 @@ export function StartupRouteLoading({
       <header className="startup-route-status">
         <span className="startup-route-progress" aria-hidden="true" />
         <div>
-          <h2>{waiting ? `${label}暂时无法恢复` : `正在恢复${label}`}</h2>
+          <h2>{waiting ? `${label}暂时无法打开` : `正在打开${label}`}</h2>
           <p>{waiting
-            ? '恢复目标仍被保留，可以在本地服务恢复后重试。'
-            : `页面框架已经就绪，正在读取${label}的权威本地数据。`}</p>
+            ? '上次位置仍保留在本机，可以在本地服务恢复后重试。'
+            : '页面框架已经就绪，最近内容即将就绪。'}</p>
         </div>
         {waiting && (
           <button className="quiet-button" type="button" onClick={onRetry}>重试</button>

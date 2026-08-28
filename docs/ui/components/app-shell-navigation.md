@@ -2,7 +2,7 @@
 document_type: ui-component-contract
 authority: renderer-app-shell-navigation
 status: accepted
-last_updated: 2026-08-22
+last_updated: 2026-08-27
 ---
 
 # App Shell 与统一侧栏
@@ -39,6 +39,15 @@ Project 领域实体。它没有 Project 菜单；其 Camp 行与目录 Project 
 Quick Chat 首页不提供 Composer。普通“新对话”先原子创建 Active Camp；一键入口先取得
 Core-owned Pending Camp 并进入同一 Composer，第一条消息成功后再原子激活。界面不得用静态
 演示数据伪造日期、阶段或创建结果。
+
+## 冷启动反馈
+
+App 启动后立即读取 Main Window Session 与目标页面数据，不用提示面阻断读取。前 400ms 不显示
+“正在打开”反馈；读取在门槛内完成时直接呈现目标页面。超过 400ms 时只在目标页面内容区显示局部
+反馈，rail 与顶行保持稳定，不使用覆盖整个 App 的通用恢复页。
+
+Camp 与队员页使用与目标一致的“正在打开”文案；记忆页保留自身内容骨架。错误不等待 400ms，立即
+在原目标上下文中提供重试。队员页与记忆页的结构、导航和已加载内容不因反馈门槛改变。
 
 ## 设置与返回
 

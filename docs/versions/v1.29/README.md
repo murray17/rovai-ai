@@ -11,15 +11,9 @@ last_updated: 2026-08-27
 
 # Rovai-ai v1.29：Camp 动态队员管理与 Workspace Change Observation
 
-> 当前状态：动态 Camp membership、Message Delivery zero-attempt cancellation 与 Managed Attachment v2 已完成；
-> Workspace Change Observation 的产品、安全与 UI 边界已确认，Core/Renderer 主路径已实现并通过定向回归；
-> ACP 成功 Edit/Write 的可靠单文件路径现可独立生成 `修改 xxx`，标准 Diff 只负责可选 inline 内容；
-> ACP Client FS 已收敛为 Runtime-owned 权限下的无二次授权执行代理，
-> 跨平台 Git fixture、Codex/ACP 真实 Runtime file-diff smoke 与删除/恢复长尾仍待补齐；Claude Code `2.1.220`
-> 原生 Edit smoke 已通过。
-> 本版本只声明两层变更观察：Runtime 对单个
-> Operation 明确报告的 Command Diff，以及当前 Camp、精确 execution root 内一组重叠 Run 之间的
-> Workspace Change Window Diff。后者是 Git 工作区的有界净变化观察，不是对 Agent 的因果归因。
+> 当前状态：动态 Camp membership 的 Core、Desktop IPC、Renderer、自动化门禁与隔离真实 App 验收均已完成；
+> 后继 Message Delivery zero-attempt cancellation hotfix 与 Managed Attachment v2 无 Run 等待写路径已完成实现
+> 和自动化验证；退出即取消全部 AgentRun、400ms 启停防闪反馈与安全退出等待面也已完成。
 
 前置版本：[v1.28 Grok Build + MiniMax M3](../v1.28/README.md)已按冻结时事实转为 historical。
 
@@ -39,71 +33,42 @@ reconciliation 完成已接受工作的正式结算。
 
 ## 交付范围
 
-- Migration 109 建立 Windows Runtime command-shim entrypoint identity；Migration 110 建立
-  `v1.23 / projection schema 64` 的动态 Camp membership；Migration 111 升为 `v1.24 / schema 65`，允许
-  Message Delivery 零 attempt cancelled terminal；Migration 112 升为 `v1.25 / schema 66`，建立 Managed
-  Attachment v2；Migration 113 升为 `v1.26 / schema 67`，建立 Runtime diff projection 与 Workspace
-  Change Window 存储；Migration 114 升为 `v1.27 / schema 68`，建立 lifecycle 独立的 Workspace ref cleanup
-  ledger，并迁移已关闭 Window 遗留的 candidate/ref 清理责任；
-- 新增 `camps.members.add`、`camps.members.removalPreview`、`camps.members.remove` Desktop API；添加不创建
-  Conversation，也不修改已冻结 AgentRun 的 Collaboration State；
-- Camp 始终至少保留一位 active member。移除以 generation/version CAS 原子结束 membership、修复 Default Lead、
-  取消目标 Run/Gather/Delivery 并释放未终态 Task；仍需终态结算的工作进入持久 reconciliation；
-- 每个 Agent 业务工具、Delivery、Gather completion 与 publication 都绑定对应 exact membership lifetime；离开后
-  再次添加得到新的 lifetime，旧工作不能恢复授权；
-- 外部成员同步只作受信提示；System allowlist、source binding 与递增 reconciliation generation 通过后仍由 Core
-  正式命令提交权威状态；
-- Camp 会话增加“邀请”入口、成员菜单、权威移除影响预览、最后成员禁用说明与非阻塞 reconciliation 状态；
-- 新附件使用 Managed Attachment v2、CampMessage refs 与 durable ingest intent，不再进入 legacy publication gate，
-  不等待或 fence 活跃 AgentRun；Context 继续使用 DB-only descriptor，legacy v1 只读兼容；
-- 在 append-only Execution Evidence 之上为既有 Canonical Activity 增加 typed file-operation presentation 与可选
-  `diffProjection`；成功 Edit/Write 的唯一协议路径足以生成 `修改 <basename>`，但不获得增删计数或 inline diff；
-  `phase`、`outcome` 和活动 identity 继续由现有 Canonical Activity 拥有，不建立第二套活动权威；
-- 仅接纳 Adapter/version 明确声明为 unified diff snapshot、complete patch snapshot、exact mutation 或完整
-  before/after 的 Runtime 数据；路径必须相对冻结 execution root 规范化并做越界检查，但该检查不授予额外文件读取权；
-- 建立唯一持久的 `WorkspaceChangeWindow`，以
-  `campId + canonicalExecutionRoot + observedRepositoryWorktreeIdentity` 为 key；同一 repository 的不同 Camp 或
-  execution root 不共享 Window；
-- 由 Core DB 持久化 Window、baseline/final tree OID、生命周期与捕获状态；完成时以不可变
-  `WorkspaceDiffCompleted Evidence + diff blob` 保存历史卡片权威；
-  `refs/rovai/w/<window-token>/b|f` 只是用户 Git object database 中 checkpoint object 的临时 GC pin；
-- synthetic tree 只覆盖 exact execution root 下的 tracked 文件、捕获时非 ignored 的 untracked 文件，以及
-  baseline 已纳入且 final 时即使变为 ignored 仍需观察的路径；
-- baseline 与 final 都只有在连续两次 synthetic tree OID 相同时才接受，并受严格时间、文件数和总字节上限；
-  产品语义是两个稳定捕获点之间的净变化，不声称原子文件系统快照；
-- Window Coordinator 原子协调 Run join 与 `active -> closing`；最后一个 Run 的 lease 已 fence/unbind 且其
-  Runtime、CLI、Tool 后代已证明 quiescent 后才开始 final capture，IdleWarm Host 不阻止结算；取消在期限内无法
-  证明 quiescent 时关闭旧 Window 为 unavailable 并释放观察 participant，不等待未知 terminal callback；
-- Window 持久 key 继续包含 Camp；捕获 mutex 按 `canonicalExecutionRoot + repository worktree identity` 分片且
-  不含 Camp，使无关物理工作区并行、同一物理工作区的跨 Camp 捕获边界仍互斥；
-- Git 观察始终 fail-open：baseline 或 final 失败、超时、仓库身份变化、ref 缺失/漂移或超限时将 Window 标记为
-  `unavailable`，普通文件工作继续，且不事后重新扫描猜测旧边界；Git 子进程按剩余绝对 deadline 执行，以有界
-  stdout/stderr streaming 和进程树 kill/reap 保证慢 Git 与大输出不能无限占用 coordinator；
-- final publication 或 ref cleanup 失败时，在关闭事务中清除 final candidate/manifest root，并把 expected
-  baseline/final OID 留在持久 cleanup ledger；closed Window 也可在启动维护中安全重试，且从不删除已改写 target；
-- 非 Git execution root 不创建 Window，也不伪造 not-applicable 持久对象。
-- Codex、ACP 与 Claude Edit 的可靠终态文件 Evidence 扁平显示为同级 `修改 xxx` 行；Kimi/Qoder 等 ACP Runtime
-  即使没有标准 Diff，只要成功 terminal Edit/Write 具有同 ToolCall 唯一标准 location，也保留该文件操作行；
-  可靠 old/new 或标准 Diff 才附加 `+ / −` 与 inline 内容，完整 Review 只属于会话中的 `Files Changed` 历史卡片；
-- ACP `fs/read_text_file` / `fs/write_text_file` 只作 fenced 文件执行代理：绝对路径按 Runtime 请求执行，
-  相对路径以 execution root 为解析基准，不做 Core containment、Workspace access 或一次性 token 鉴权；
-  Runtime 全自动/绕过模式的合格 `session/request_permission` 直接回复 native allow，交互模式仍保留 Approval，
-  两者都不控制 Client FS 执行资格。
-- ACP `terminal/create` 省略 cwd 时仍使用 execution root；显式 cwd 只校验为已存在的绝对目录，不调用
-  `scoped_path()` 或限制在 execution root 内。Terminal 的 Run/epoch/Session/Prompt fence、进程树与清理保持不变。
-
-## 明确不做
-
-- 不创建专用 worktree，不引入 workspace writer lease，也不阻止用户编辑器或外部程序写入；
-- 不把 Workspace Window Diff 归因给单个 Run、Agent、Tool 或 Camp 外写入者；
-- 不跨 Camp、跨精确 execution root 或跨 repository worktree identity 合并 Window；
-- 不修改用户真实 index、staged 状态、普通 branch/ref，不执行 `git add`、clean filter、LFS clean、textconv 或
-  external diff；
-- 不递归进入 nested repository 或 submodule，不跟随 symlink，不把 sparse-checkout 未物化文件视为删除；
-- 不允许 public client、Runtime 或知道 ref/OID/Run ID 的调用者绕过 `campId + windowId` 读取；
-- 不为旧 Evidence 做无法证明正确的 diff 回填；
-- 不展示 `apply_patch` 父行、“编辑了 N 个文件”聚合层、Operation 专用 Review 或执行台 Workspace observation；
-- 不借本功能修改现有会话 rail、底部/右侧执行台 placement、Tool list 宽度或其他视觉结构。
+- Migration 110 建立 `v1.23 / projection schema 64`，增加 Camp membership generation、membership
+  reconciliation、外部来源绑定和 Delivery admission membership version；旧非终态技术工作 clean break；
+- Migration 111 将当前 Data Contract 升为 `v1.24 / projection schema 65`，只放宽 Message Delivery 的零 attempt
+  cancelled terminal；显式/批量取消共用同一转换，迟到 projection completion 和 restart 不能复活终态；
+- Migration 112 将当前 Data Contract 升为 `v1.25 / projection schema 66`，新增 Managed Attachment v2、CampMessage
+  refs 与 durable ingest intent；新附件不再进入 legacy publication gate，不等待或 fence 活跃 AgentRun；
+- Migration 113 保留 `v1.25 / projection schema 66`，只把 durable shutdown cycle 的协议约束扩为 v2/v3，
+  原样保留历史 pending v2 cycle；
+- 新增 `camps.members.add`、`camps.members.removalPreview`、`camps.members.remove` Desktop API；增加使用
+  exact membership generation/version 的添加、预览和移除命令；
+- 添加不创建 Conversation，也不修改已冻结 AgentRun 的 Collaboration State；曾离开的 Agent 再次添加时，
+  产品界面仍按普通“邀请队员”处理，不暴露 rejoined 状态；对 active member（包括 away）的相同 overrides 为 no-op，不同
+  overrides 返回 capability conflict，不由 add 静默修改能力或旋转 lifetime；受信 source 的 accepted no-op
+  正常推进自身 reconciliation generation；
+- Camp 始终至少保留一位 active member。移除 Default Lead 时优先使用有效 successor；若剩余成员全部暂离，
+  允许暂时没有 Lead，待有人归队后由既有 reconciliation 恢复。非 Lead 不接受无意义的 replacement；
+- 移除在同一提交中结束 membership、推进 generation、切换 Lead、取消目标 Run/Gather/Delivery 并释放未终态
+  Task；普通 pending outbound A2A 同步终态化，已 materialized 下游 Run 纳入持久 reconciliation，后者只通过
+  正式 Run/Delivery terminal settlement 推进；
+- 每个 Agent 业务工具都绑定 exact Run membership version；Delivery 和 Gather completion 冻结接收者/发起者
+  membership version，普通 outbound Delivery 另校验 source Run lifetime。离开后重新添加得到新的 membership
+  lifetime，不会恢复旧授权；
+- 旧 Run 的冻结 peers 不是 strict target roster；其新 send 可寻址后来加入的当前 active member，但 accepted
+  Delivery 不能越过 source membership cutover；
+- 普通公开输出与 Missing-Send Recovery 统一经过 publication fence；窄 terminal evidence 可以结算旧工作，
+  但不能在离队后发布内容；
+- 外部成员同步仅是提示：只有 System allowlist、已绑定的 source namespace/binding 和严格递增的 reconciliation
+  generation 可以提交正式领域命令；
+- Camp 会话“当前会话”区域增加“邀请”入口；成员行只保留一个 `•••` 菜单，收纳模型信息展开与移除。最后一位
+  成员的移除操作可见但禁用，并解释“Camp 至少需要一位队员”；
+- 移除确认先读取权威影响预览，展示 Run、Task、Delivery、Gather 影响；冲突可刷新重试，正在 reconciliation
+  的成员在会话区显示非阻塞状态。
+- 退出、重启与更新统一取消全部非终态 AgentRun；稳定快照后立即关闭 terminal/route 准入，短时请求 Runtime
+  中断，再完成 Run 取消审计、未知效果保留与本地收口；
+- 冷启动在前 400ms 保持目标页面稳定，超过门槛才显示局部“正在打开”反馈；队员页与记忆页保持既有结构，
+  关闭也使用 400ms 防闪门槛，慢退出才显示“正在安全退出”。
 
 ## 模型上下文边界
 
@@ -148,20 +113,12 @@ Activity 与 Renderer，不追加模型上下文。
 
 | 范围 | 结论 | 证据或理由 |
 | --- | --- | --- |
-| Version lifecycle | 已更新 | v1.28 按冻结时事实转为 historical；本概览、[实施计划](implementation-plan.md)、[决定](decisions.md)与[版本索引](../README.md)建立唯一 current v1.29。 |
-| Decisions | 已更新 | [V1.29-D01–D06](decisions.md#v1-29-d01)冻结 membership cutover、exact lifetime、受信外部同步、零 attempt 取消与 Managed Attachment v2；[V1.29-D07](decisions.md#v1-29-d07)冻结两层 diff 与既有 Canonical Activity 权威；[V1.29-D08](decisions.md#v1-29-d08)冻结 Camp/exact-root Window、受控 Git checkpoint 和 fail-open Coordinator；[V1.29-D09](decisions.md#v1-29-d09)冻结终态文件行与历史卡片交互；[V1.29-D10](decisions.md#v1-29-d10)冻结 ACP Client FS/Terminal 的 Runtime-owned 权限与无二次授权代理。 |
-| Contracts | 已更新 | 新增 [Camp Membership v1](../../contracts/camp-membership-v1.md)与 [Workspace Change Observation v1](../../contracts/workspace-change-observation-v1.md)，升级 Camp Open、Attachment、Composer、Message Delivery、Gather 与 Missing-Send Recovery 等相关合同；[Runtime Launch and Verification v28](../../contracts/runtime-launch-and-verification-v28.md)替代 v27，收口 ACP Client FS 与 permission compatibility response；[ACP Client Terminal v2](../../contracts/acp-client-terminal-v2.md)替代 v1，取消显式 cwd 的 execution-root containment。 |
-| Architecture | 已更新 | 新增[动态 Camp 队员关系](../../architecture/dynamic-camp-membership.md)与 [Workspace Change Observation](../../architecture/workspace-change-observation.md)；附件架构切换为 Managed v2 当前写入与 legacy v1 只读兼容；[基础架构不变量](../../architecture/foundational-invariants.md#runtime-platform-security)与 [Runtime Catalog Boundaries](../../architecture/runtime-catalog-boundaries.md)同步 Runtime-owned ACP 文件与 Shell 权限。 |
-| UI | 已更新 | [Camp 会话工作区](../../ui/components/conversation-workspace.md)冻结成员管理、Canonical Activity presentation rows、`Files Changed` 卡片与只读 View；其他布局不变。 |
-| Runtime Activity | 已更新 | Registry 记录 Codex terminal fileChange、ACP terminal Edit/Write 唯一路径、ACP standard Diff、Claude Edit exact mutation 和 Antigravity fail-closed 边界。 |
-| Runtime compatibility | 已更新 | 13 个 adapter 均已按实际协议族归类；当前代码 fixture 覆盖 Codex、十个 ACP adapter 的 path-only/standard Diff、Claude Edit 与 Antigravity negative gate；Kimi `0.38.0`、Qoder `1.1.28` 和 Kiro `2.18.1` 的 pre-fix 真实 wire 已核验，修复后真实 App 复测仍待补。 |
-| Documentation routing | 已更新 | 文档总导航、Architecture/Contract 索引与当前决定导航已增加动态 membership、Managed Attachment v2、Workspace Change Observation 与 ACP Client Terminal v2 入口。 |
-| Root README | 确认无需更新 | 当前仍为 in-progress，且不改变项目定位或已交付的常青能力声明。 |
-
-## References
-
-- [实施与验收计划](implementation-plan.md)
-- [版本决定](decisions.md)
-- [Workspace Change Observation 架构](../../architecture/workspace-change-observation.md)
-- [Workspace Change Observation v1 合同](../../contracts/workspace-change-observation-v1.md)
-- [Runtime Launch and Verification v28](../../contracts/runtime-launch-and-verification-v28.md)
+| Version lifecycle | 已更新 | 本概览、[实施计划](implementation-plan.md)、[决定](decisions.md)与[版本索引](../README.md)共同切换 `current_version`。 |
+| Decisions | 已更新 | [v1.29 决定](decisions.md)冻结 cutover/reconciliation、exact membership lifetime、稳定模型投影、受信外部来源、零 attempt 取消、Managed v2 无 Run 等待写路径及退出取消全部 AgentRun。 |
+| Contracts | 已更新 | 新增 [Camp Membership v1](../../contracts/camp-membership-v1.md)与[Planned Shutdown v3](../../contracts/planned-shutdown-v3.md)，并升级 [Camp Open Projection v7](../../contracts/camp-open-projection-v7.md)、[Camp Attachment v6](../../contracts/camp-attachment-v6.md)、[Camp Composer Draft v5](../../contracts/camp-composer-draft-v5.md)、[Camp Message Send v13](../../contracts/camp-message-send-v13.md)、[Message Delivery v8](../../contracts/message-delivery-v8.md)、[Gather v4](../../contracts/gather-v4.md)及[Missing-Send Recovery Publication v2](../../contracts/missing-send-recovery-publication-v2.md)。 |
+| Architecture | 已更新 | 新增[动态 Camp 队员关系](../../architecture/dynamic-camp-membership.md)，将[附件架构](../../architecture/camp-published-attachment-view.md)切换为 Managed v2 当前写入与 legacy v1 只读兼容，并把[计划关闭](../../architecture/planned-shutdown.md)切换为退出取消全部 AgentRun。 |
+| UI | 已更新 | [Camp 会话工作区](../../ui/components/conversation-workspace.md)冻结添加入口、成员菜单、移除预览、最后成员、reconciliation 状态及关闭等待面；[App Shell](../../ui/components/app-shell-navigation.md)冻结 400ms 冷启动反馈。 |
+| Runtime Activity | 确认无需更新 | 成员变化使用 Core 领域事件与既有 Run/Delivery terminal activity，不新增 Runtime activity kind。 |
+| Runtime compatibility | 确认无需更新 | 继续传既有 Camp-scoped attachment root，不改变 Adapter wire、Runtime 启动协议、模型或宿主平台资格。 |
+| Documentation routing | 已更新 | [文档导航](../../README.md)、Contracts、Architecture 与 Decisions 当前入口均加入动态 membership 路由。 |
+| Root README | 确认无需更新 | 本次扩展既有 Camp 管理能力，不改变项目定位或长期支持声明。 |

@@ -4,7 +4,7 @@ use std::{
     fmt,
     path::{Path, PathBuf},
     sync::{
-        Arc,
+        Arc, Mutex as StdMutex,
         atomic::{AtomicBool, Ordering},
     },
 };
@@ -31,7 +31,7 @@ use sha2::{Digest, Sha256};
 use tokio::{
     io::{AsyncRead, AsyncReadExt, AsyncWriteExt},
     process::Command,
-    sync::{Mutex, mpsc, oneshot},
+    sync::{Mutex as AsyncMutex, mpsc, oneshot},
     time::{Duration, Instant},
 };
 
@@ -102,12 +102,26 @@ impl StdError for ClaudeCodeDeliveredFailure {}
 
 #[derive(Debug)]
 struct ClaudeCodeProcessControl {
-    interrupt: Mutex<Option<oneshot::Sender<()>>>,
+    interrupt: AsyncMutex<Option<oneshot::Sender<()>>>,
+}
+
+struct ActiveProcessRegistration<'a> {
+    active: &'a StdMutex<HashMap<(String, i64), Arc<ClaudeCodeProcessControl>>>,
+    key: (String, i64),
+}
+
+impl Drop for ActiveProcessRegistration<'_> {
+    fn drop(&mut self) {
+        self.active
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .remove(&self.key);
+    }
 }
 
 #[derive(Debug)]
 pub struct ClaudeCodeCliRuntimeAdapter {
-    active: Mutex<HashMap<(String, i64), Arc<ClaudeCodeProcessControl>>>,
+    active: StdMutex<HashMap<(String, i64), Arc<ClaudeCodeProcessControl>>>,
     private_runtime_dir: PathBuf,
 }
 
@@ -123,7 +137,7 @@ impl ClaudeCodeCliRuntimeAdapter {
         restrict_directory_permissions(&private_runtime_dir)?;
         remove_stale_mcp_configs(&private_runtime_dir)?;
         Ok(Self {
-            active: Mutex::new(HashMap::new()),
+            active: StdMutex::new(HashMap::new()),
             private_runtime_dir,
         })
     }
@@ -132,28 +146,32 @@ impl ClaudeCodeCliRuntimeAdapter {
         let key = (request.agent_run_id.clone(), request.execution_epoch);
         let (interrupt, interrupted) = oneshot::channel();
         let control = Arc::new(ClaudeCodeProcessControl {
-            interrupt: Mutex::new(Some(interrupt)),
+            interrupt: AsyncMutex::new(Some(interrupt)),
         });
         {
-            let mut active = self.active.lock().await;
+            let mut active = self
+                .active
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
             if active.contains_key(&key) {
                 anyhow::bail!("Claude Code process already exists for this AgentRun epoch");
             }
             active.insert(key.clone(), control);
         }
+        let _registration = ActiveProcessRegistration {
+            active: &self.active,
+            key,
+        };
         let launch_handoff = request.launch_handoff.take();
-        let result = self
-            .run_process(&request, interrupted, launch_handoff)
-            .await;
-        self.active.lock().await.remove(&key);
-        result
+        self.run_process(&request, interrupted, launch_handoff)
+            .await
     }
 
     pub async fn interrupt(&self, agent_run_id: &str, execution_epoch: i64) -> bool {
         let control = self
             .active
             .lock()
-            .await
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
             .get(&(agent_run_id.to_string(), execution_epoch))
             .cloned();
         let Some(control) = control else {
@@ -190,7 +208,7 @@ impl ClaudeCodeCliRuntimeAdapter {
         let controls = self
             .active
             .lock()
-            .await
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
             .values()
             .cloned()
             .collect::<Vec<_>>();
@@ -200,10 +218,19 @@ impl ClaudeCodeCliRuntimeAdapter {
             }
         }
         let deadline = Instant::now() + Duration::from_secs(3);
-        while !self.active.lock().await.is_empty() && Instant::now() < deadline {
+        while !self
+            .active
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .is_empty()
+            && Instant::now() < deadline
+        {
             tokio::time::sleep(Duration::from_millis(25)).await;
         }
-        self.active.lock().await.clear();
+        self.active
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clear();
     }
 
     async fn run_process(
@@ -1892,6 +1919,67 @@ mod tests {
             .downcast_ref::<ClaudeCodeDeliveredFailure>()
             .expect("the incompatible terminal still proves the requested one-shot turn ended");
         assert_eq!(proof.failure.origin, RuntimeFailureOrigin::Compatibility);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn aborted_one_shot_does_not_hold_shutdown_open() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let root = std::env::temp_dir().join(format!(
+            "rovai-aborted-one-shot-test-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let workspace = root.join("workspace");
+        std::fs::create_dir_all(&workspace).expect("workspace should be created");
+        let executable = root.join("fake-runtime");
+        std::fs::write(&executable, "#!/bin/sh\ncat >/dev/null\nexec sleep 30\n")
+            .expect("fake executable should be written");
+        std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o700))
+            .expect("fake executable should be executable");
+        let adapter =
+            Arc::new(ClaudeCodeCliRuntimeAdapter::new(&root).expect("Adapter should initialize"));
+        let run_id = uuid::Uuid::new_v4().to_string();
+        let request = fake_claude_request(
+            &workspace,
+            &executable,
+            run_id,
+            "0bdd2166-d420-40c6-94be-70b93eb290c5",
+        );
+        let running_adapter = adapter.clone();
+        let task = tokio::spawn(async move { running_adapter.run(request).await });
+        let registration_deadline = Instant::now() + Duration::from_secs(2);
+        while adapter
+            .active
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .is_empty()
+            && Instant::now() < registration_deadline
+        {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        assert!(
+            !adapter
+                .active
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .is_empty()
+        );
+
+        task.abort();
+        assert!(
+            task.await
+                .expect_err("run task should be aborted")
+                .is_cancelled()
+        );
+        let shutdown =
+            tokio::time::timeout(Duration::from_millis(250), adapter.shutdown_all()).await;
+        let _ = std::fs::remove_dir_all(&root);
+
+        assert!(
+            shutdown.is_ok(),
+            "shutdown retained an aborted one-shot registration"
+        );
     }
 
     #[cfg(unix)]
