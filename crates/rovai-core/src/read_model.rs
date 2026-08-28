@@ -834,6 +834,19 @@ impl ReadModelService {
             .context("failed to check Camp existence")
     }
 
+    pub fn camp_is_pending(&self, database: &Database, camp_id: &str) -> Result<bool> {
+        database
+            .connection()
+            .query_row(
+                "SELECT activation_state = 'pending' FROM camp WHERE id = ?1",
+                [camp_id],
+                |row| row.get(0),
+            )
+            .optional()
+            .map(|pending| pending.unwrap_or(false))
+            .context("failed to check Camp activation state")
+    }
+
     pub fn list_camps(&self, database: &Database) -> Result<Vec<CampListItem>> {
         let mut statement = database.connection().prepare(
             r#"

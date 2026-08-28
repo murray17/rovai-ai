@@ -56,6 +56,7 @@ import {
   runtimeRecoveryFromCommandResult,
   selectProjectDirectory,
   SettingsView,
+  shouldRefreshNavigationForCoreEvent,
   shouldRefreshActiveCampForCoreEvent,
   StartupRouteLoading,
   shouldLoadRuntimeHealth,
@@ -435,6 +436,30 @@ describe('active Camp event invalidation', () => {
     expect(refreshedMarkup).not.toContain('state-running')
     expect(refreshedMarkup).not.toContain('execution-disclosure is-running')
     expect(snapshot.agentRuns[0]?.status).toBe('succeeded')
+  })
+})
+
+describe('navigation event invalidation', () => {
+  it('refreshes only for the generic Core invalidation', () => {
+    expect(shouldRefreshNavigationForCoreEvent({
+      method: 'navigation.invalidated',
+      params: { reason: 'agent_run.terminal', campId: 'camp-1' }
+    })).toBe(true)
+    expect(shouldRefreshNavigationForCoreEvent({
+      method: 'agent_run.terminal',
+      params: { agentRunId: 'run-1' }
+    })).toBe(false)
+  })
+
+  it('ignores unrelated events and all invalidations during shutdown', () => {
+    expect(shouldRefreshNavigationForCoreEvent({
+      method: 'runtime.discovery.updated',
+      params: {}
+    })).toBe(false)
+    expect(shouldRefreshNavigationForCoreEvent({
+      method: 'navigation.invalidated',
+      params: {}
+    }, true)).toBe(false)
   })
 })
 

@@ -2,7 +2,7 @@
 document_type: version-decisions
 version: v1.29
 lifecycle: current
-last_updated: 2026-08-27
+last_updated: 2026-08-28
 ---
 
 # v1.29 决策记录
@@ -266,3 +266,40 @@ Migration 113 保持当前 Data Contract 与 projection schema marker，只把 `
 - 启动时立即显示全局恢复页：短加载持续闪现，并遮蔽用户上次使用的位置；
 - 退出时立即显示取消全部 AgentRun：零 Run 或快速收口时会闪现与实际工作量不匹配的反馈；
 - 完全不显示启动反馈：慢磁盘、迁移或数据错误时缺少可理解的状态。
+
+<a id="v1-29-d08"></a>
+## V1.29-D08：Navigation 采用提交后失效与全局 generation drain
+
+### 背景
+
+Desktop 原先每 1.8 秒读取一次完整 Navigation Snapshot，并以 Overview 的全局 `ready` 状态作为轮询门禁。
+单次读取在途时，后续 `loadNavigation()` 只复用旧 Promise，不保证读取开始后提交的终态会有 trailing read。
+因此附属模块一次失败可以永久关闭轮询，Run 终态又只刷新当前打开 Camp，后台 Camp 的侧栏 spinner 可能一直
+保留到 Renderer 重载。继续提高轮询频率会增加 SQLite 读取，却不能消除完成边界竞态。
+
+### 决定
+
+Core 在影响 Navigation 投影的权威事务完成后统一发 `navigation.invalidated`；事件只作提示，Renderer 仍读取
+完整 Snapshot。Renderer 使用一个 App-global generation coordinator：普通事件 80ms debounce，同一时刻只允许
+一个读取，读取期间新增 generation 由共享 Promise 继续 trailing drain 到安静点。失败保留 generation，并按
+1/2/5/10 秒上限退避；普通事件不抢跑，focus 与用户显式重试可以立即尝试。
+
+前台安全刷新降为约 20 秒并在每次完成后重新调度，App 隐藏时暂停、focus 后立即刷新。Navigation 的状态和
+恢复不再依赖 Members、Runtime Installation、Memory Review 或本机 Navigation preference 的共同 Overview
+结果。当前规范见 [Desktop Navigation Refresh](../../architecture/desktop-navigation-refresh.md) 和
+[App Shell 与统一侧栏](../../ui/components/app-shell-navigation.md)。
+
+### 后果
+
+- 多个 Camp 同时终态通常合并为一次读取，必要时只补 trailing read；
+- `refresh()` resolve 表示调用期间的失效已 drain 到一个安静点，trailing failure 不会变成无人观察的 Promise；
+- 后台 Camp 的 spinner 由提交后事件快速清除，20 秒读取只承担漏事件恢复；
+- 空闲期完整 Navigation Snapshot 频率显著下降，且不存在 per-Camp timer；
+- Core 暂时不可用时按上限退避，不形成无间隔热循环。
+
+### 被拒绝方案
+
+- **继续 1.8 秒全局轮询：** 空闲读取成本高，仍受 Overview error 门禁和读取完成边界影响；
+- **每个 Camp 单独轮询：** 任务数与 Camp 数量一起增长，并重复读取同一全局投影；
+- **只在 `.finally()` 里无人等待地补一次刷新：** 原调用者提前 resolve，trailing rejection 可能无人观察；
+- **从 terminal event payload 局部改 marker：** 事件缺失、乱序或 payload 不完整时会建立第二状态真源。
