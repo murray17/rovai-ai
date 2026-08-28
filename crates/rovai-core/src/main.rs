@@ -401,11 +401,20 @@ fn request_runs_outside_main_queue(method: &str) -> bool {
 
 async fn response_for_request(core: &Core, request: &Request) -> Response {
     match core.handle(request).await {
-        Ok(result) => Response {
-            id: request.id.clone(),
-            result: Some(result),
-            error: None,
-        },
+        Ok(result) => {
+            if request_did_invalidate_navigation(core, request, &result).await {
+                emit_navigation_invalidated(
+                    &core.output,
+                    &request.method,
+                    navigation_request_camp_id(&request.params),
+                );
+            }
+            Response {
+                id: request.id.clone(),
+                result: Some(result),
+                error: None,
+            }
+        }
         Err(error) => Response {
             id: request.id.clone(),
             result: None,
@@ -415,6 +424,131 @@ async fn response_for_request(core: &Core, request: &Request) -> Response {
             }),
         },
     }
+}
+
+fn request_invalidates_navigation(method: &str) -> bool {
+    matches!(
+        method,
+        "members.update"
+            | "members.remove"
+            | "navigation.campViewed"
+            | "camps.create"
+            | "camps.discardPending"
+            | "camps.rename"
+            | "camps.members.add"
+            | "camps.members.remove"
+            | "camps.changeDefaultLead"
+            | "camps.reconcileDefaultLead"
+            | "camps.enter"
+            | "camps.delete"
+            | "camp.composerDraft.save"
+            | "camp.composerDraft.startReply"
+            | "camp.composerDraft.cancelReply"
+            | "camp.composerDraft.resolveReplyRecipient"
+            | "camp.composerDraft.dismissContinuation"
+            | "camp.composerDraft.resolveContinuationRecipient"
+            | "camp.composerDraft.removeAttachment"
+            | "camp.composerDraft.discard"
+            | "camp.attachments.prepareFromPath"
+            | "camp.messages.send"
+            | "userAutomation.camp.send"
+            | "campTurns.cancel"
+            | "agentRuns.cancel"
+            | "agentRuns.resolveRecoveryBlocker"
+    )
+}
+
+fn navigation_invalidation_emitted_at_commit_boundary(method: &str) -> bool {
+    matches!(
+        method,
+        "camps.create"
+            | "camps.discardPending"
+            | "camp.composerDraft.removeAttachment"
+            | "camp.composerDraft.discard"
+            | "camp.attachments.prepareFromPath"
+            | "camp.messages.send"
+    )
+}
+
+fn navigation_invalidation_requires_pending_camp(method: &str) -> bool {
+    matches!(
+        method,
+        "camp.composerDraft.save"
+            | "camp.composerDraft.startReply"
+            | "camp.composerDraft.cancelReply"
+            | "camp.composerDraft.resolveReplyRecipient"
+            | "camp.composerDraft.dismissContinuation"
+            | "camp.composerDraft.resolveContinuationRecipient"
+            | "camp.composerDraft.removeAttachment"
+            | "camp.composerDraft.discard"
+            | "camp.attachments.prepareFromPath"
+    )
+}
+
+async fn request_did_invalidate_navigation(core: &Core, request: &Request, result: &Value) -> bool {
+    if !request_invalidates_navigation(&request.method)
+        || navigation_invalidation_emitted_at_commit_boundary(&request.method)
+        || navigation_mutation_was_rejected(result)
+    {
+        return false;
+    }
+    if !navigation_invalidation_requires_pending_camp(&request.method) {
+        return true;
+    }
+    let Some(camp_id) = navigation_request_camp_id(&request.params) else {
+        return true;
+    };
+    let database = core.database.lock().await;
+    match ReadModelService.camp_is_pending(&database, camp_id) {
+        Ok(pending) => pending,
+        Err(error) => {
+            eprintln!(
+                "failed to scope Navigation invalidation for Camp {camp_id}; invalidating conservatively: {error:#}"
+            );
+            true
+        }
+    }
+}
+
+async fn emit_navigation_invalidated_for_pending_camp(
+    database: &Mutex<Database>,
+    output: &mpsc::UnboundedSender<String>,
+    reason: &str,
+    camp_id: &str,
+) {
+    let should_emit = {
+        let database = database.lock().await;
+        match ReadModelService.camp_is_pending(&database, camp_id) {
+            Ok(pending) => pending,
+            Err(error) => {
+                eprintln!(
+                    "failed to scope Navigation invalidation for Camp {camp_id}; invalidating conservatively: {error:#}"
+                );
+                true
+            }
+        }
+    };
+    if should_emit {
+        emit_navigation_invalidated(output, reason, Some(camp_id));
+    }
+}
+
+fn navigation_mutation_was_rejected(result: &Value) -> bool {
+    result.get("status").and_then(Value::as_str) == Some("rejected")
+        || result
+            .get("commandResult")
+            .and_then(|command_result| command_result.get("status"))
+            .and_then(Value::as_str)
+            == Some("rejected")
+}
+
+fn navigation_request_camp_id(params: &Value) -> Option<&str> {
+    params.get("campId").and_then(Value::as_str).or_else(|| {
+        params
+            .get("command")
+            .and_then(|command| command.get("campId"))
+            .and_then(Value::as_str)
+    })
 }
 
 fn enqueue_response(output: &mpsc::UnboundedSender<String>, response: &Response) -> Result<()> {
@@ -865,6 +999,7 @@ struct PrepareAttachmentFromPathParams {
 
 async fn prepare_composer_attachment_from_path(
     database: &Mutex<Database>,
+    output: &mpsc::UnboundedSender<String>,
     data_dir: &Path,
     params: PrepareAttachmentFromPathParams,
 ) -> Result<Value> {
@@ -900,6 +1035,13 @@ async fn prepare_composer_attachment_from_path(
         }
         return Err(error);
     }
+    emit_navigation_invalidated_for_pending_camp(
+        database,
+        output,
+        "camp.attachments.prepareFromPath",
+        params.camp_id.as_str(),
+    )
+    .await;
 
     let draft = {
         let database = database.lock().await;
@@ -5314,6 +5456,7 @@ impl Core {
                 if execution.result.status == CommandResultStatus::Applied
                     && let Some(camp_id) = execution.result.payload["campId"].as_str()
                 {
+                    emit_navigation_invalidated(&self.output, "camps.create", Some(camp_id));
                     self.attachment_views
                         .ensure_empty_camp_ready(&mut database, camp_id)?;
                 }
@@ -5591,6 +5734,13 @@ impl Core {
                         .cancel_camp_delete_cleanup(&mut database, cleanup)?;
                 }
                 drop(database);
+                if discarded {
+                    emit_navigation_invalidated(
+                        &self.output,
+                        "camps.discardPending",
+                        discarded_camp_id.as_deref(),
+                    );
+                }
                 if discarded && let Some(camp_id) = discarded_camp_id {
                     self.finish_camp_attachment_cleanup(cleanup.as_ref())
                         .await?;
@@ -5901,6 +6051,13 @@ impl Core {
                         &params.attachment_id,
                     )?
                 };
+                emit_navigation_invalidated_for_pending_camp(
+                    &self.database,
+                    &self.output,
+                    "camp.composerDraft.removeAttachment",
+                    params.camp_id.as_str(),
+                )
+                .await;
                 let cleanup_store = store.clone();
                 if let Err(error) = tokio::task::spawn_blocking(move || {
                     cleanup_store.cleanup_detached_attachments(cleanup)
@@ -5923,6 +6080,13 @@ impl Core {
                     let mut database = self.database.lock().await;
                     store.discard_draft_from_database(&mut database, params.camp_id.as_str())?
                 };
+                emit_navigation_invalidated_for_pending_camp(
+                    &self.database,
+                    &self.output,
+                    "camp.composerDraft.discard",
+                    params.camp_id.as_str(),
+                )
+                .await;
                 tokio::task::spawn_blocking(move || store.cleanup_detached_attachments(cleanup))
                     .await
                     .context("Camp Composer Draft cleanup task failed")??;
@@ -5931,7 +6095,13 @@ impl Core {
             "camp.attachments.prepareFromPath" => {
                 let params: PrepareAttachmentFromPathParams =
                     serde_json::from_value(request.params.clone())?;
-                prepare_composer_attachment_from_path(&self.database, &self.data_dir, params).await
+                prepare_composer_attachment_from_path(
+                    &self.database,
+                    &self.output,
+                    &self.data_dir,
+                    params,
+                )
+                .await
             }
             "camp.attachments.previewSource" => {
                 let params: AttachmentPreviewSourceParams =
@@ -6379,6 +6549,13 @@ impl Core {
                 return Err(error);
             }
         };
+        if execution.result.status != CommandResultStatus::Rejected {
+            emit_navigation_invalidated(
+                &self.output,
+                "camp.messages.send",
+                Some(params.camp_id.as_str()),
+            );
+        }
         if let Some(prepared) = prepared_ingest {
             let cleanup_store = managed_store.clone();
             let authority_store = CampAttachmentStore::new(&self.data_dir);
@@ -6803,16 +6980,26 @@ impl Core {
         let workspace_path = match self.validate_dispatch_workspace(&candidate).await {
             Ok(path) => path,
             Err(error) => {
-                self.reject_agent_run_dispatch(&candidate, "workspace_unavailable", &error)
-                    .await;
+                self.reject_agent_run_dispatch(
+                    &output,
+                    &candidate,
+                    "workspace_unavailable",
+                    &error,
+                )
+                .await;
                 return;
             }
         };
         let runtime = match candidate.frozen_runtime() {
             Ok(runtime) => runtime,
             Err(error) => {
-                self.reject_agent_run_dispatch(&candidate, "runtime_configuration_invalid", &error)
-                    .await;
+                self.reject_agent_run_dispatch(
+                    &output,
+                    &candidate,
+                    "runtime_configuration_invalid",
+                    &error,
+                )
+                .await;
                 return;
             }
         };
@@ -6828,7 +7015,7 @@ impl Core {
                 if let Some(effective_version) = failure.effective_version {
                     candidate.version = effective_version;
                 }
-                self.reject_agent_run_dispatch(&candidate, &failure.code, &failure.error)
+                self.reject_agent_run_dispatch(&output, &candidate, &failure.code, &failure.error)
                     .await;
                 return;
             }
@@ -6841,6 +7028,7 @@ impl Core {
             Ok(admission) => admission,
             Err(error) => {
                 self.reject_agent_run_dispatch(
+                    &output,
                     &candidate,
                     "camp_attachment_view_unavailable",
                     &error,
@@ -6921,7 +7109,7 @@ impl Core {
                     "failed to materialize AgentRun {} input: {error:#}",
                     candidate.agent_run_id
                 );
-                self.fail_unmaterialized_agent_run(&candidate, execution_epoch, &error)
+                self.fail_unmaterialized_agent_run(&output, &candidate, execution_epoch, &error)
                     .await;
                 return;
             }
@@ -6957,6 +7145,7 @@ impl Core {
                 "AgentRun execution could not enter the generation-local active registry"
             );
             self.fail_claimed_agent_run(
+                &output,
                 &execution,
                 "runtime_launch_admission_failed",
                 &error,
@@ -7124,9 +7313,9 @@ impl Core {
                                     core.planned_shutdown.remove_active(&active_key).await;
                                     terminal_admission.complete_settlement();
                                     runtime_route_permit.complete_callback();
-                                    emit(
+                                    emit_agent_run_terminal(
                                         &output,
-                                        "agent_run.terminal",
+                                        Some(&execution.camp_id),
                                         json!({
                                             "agentRunId": execution.agent_run_id,
                                             "executionEpoch": execution.execution_epoch,
@@ -7157,6 +7346,18 @@ impl Core {
                                 )
                                 .await;
                             if failure_persisted {
+                                emit_agent_run_terminal(
+                                    &output,
+                                    Some(&execution.camp_id),
+                                    json!({
+                                        "campId": execution.camp_id,
+                                        "campTurnId": execution.camp_turn_id,
+                                        "agentRunId": execution.agent_run_id,
+                                        "executionEpoch": execution.execution_epoch,
+                                        "adapterKind": execution.runtime.adapter_kind,
+                                        "reasonCode": delivered_error_code,
+                                    }),
+                                );
                                 core.planned_shutdown.remove_active(&active_key).await;
                             }
                             terminal_admission.complete_settlement();
@@ -7183,6 +7384,7 @@ impl Core {
                     return;
                 }
                 core.fail_claimed_agent_run(
+                    &output,
                     &execution,
                     &error_code,
                     &error,
@@ -7218,6 +7420,7 @@ impl Core {
 
     async fn reject_agent_run_dispatch(
         &self,
+        output: &mpsc::UnboundedSender<String>,
         candidate: &rovai_core::runtime::QueuedAgentRunCandidate,
         error_code: &str,
         error: &anyhow::Error,
@@ -7247,7 +7450,20 @@ impl Core {
             )
         };
         match rejection {
-            Ok(execution) if execution.result.status != CommandResultStatus::Rejected => {}
+            Ok(execution) if execution.result.status != CommandResultStatus::Rejected => {
+                emit_agent_run_terminal(
+                    output,
+                    Some(&candidate.camp_id),
+                    json!({
+                        "campId": candidate.camp_id,
+                        "campTurnId": candidate.camp_turn_id,
+                        "agentRunId": candidate.agent_run_id,
+                        "reasonCode": error_code,
+                        "result": execution.result,
+                        "replayed": execution.replayed,
+                    }),
+                );
+            }
             Ok(_) => {}
             Err(rejection_error) => {
                 eprintln!(
@@ -7331,6 +7547,15 @@ impl Core {
                             "result": execution.result,
                             "replayed": execution.replayed,
                         }),
+                    );
+                    emit_navigation_invalidated(
+                        output,
+                        if accepted_input_outcome_unknown {
+                            "agent_run.recovery_blocker_resolved"
+                        } else {
+                            "agent_run.cancelled"
+                        },
+                        Some(&candidate.camp_id),
                     );
                     self.reconcile_skill_projection_after_run_terminal(&candidate.execution_root)
                         .await;
@@ -9260,6 +9485,7 @@ impl Core {
                 "nativeTurnId": native_turn_id,
             }),
         );
+        emit_navigation_invalidated(output, "agent_run.started", Some(&execution.camp_id));
         record_available_runtime_model(
             self,
             output,
@@ -9384,6 +9610,7 @@ impl Core {
                 "nativeTurnId": native_turn_id,
             }),
         );
+        emit_navigation_invalidated(output, "agent_run.started", Some(&execution.camp_id));
         let prompt = prepared_context.rendered_payload.clone();
         let builtin_tools = self.prepare_builtin_tool_process_config()?;
         self.bind_builtin_tool_runtime(&builtin_tools, execution, &binding_credential)
@@ -9786,9 +10013,9 @@ impl Core {
                     .await;
                 terminal_admission.complete_settlement();
                 runtime_route_permit.complete_callback();
-                emit(
+                emit_agent_run_terminal(
                     output,
-                    "agent_run.terminal",
+                    Some(&current.camp_id),
                     json!({
                         "agentRunId": execution.agent_run_id,
                         "executionEpoch": execution.execution_epoch,
@@ -9926,6 +10153,7 @@ impl Core {
                 "nativeTurnId": native_turn_id,
             }),
         );
+        emit_navigation_invalidated(output, "agent_run.started", Some(&execution.camp_id));
         let builtin_tools = self.prepare_builtin_tool_process_config()?;
         self.bind_builtin_tool_runtime(&builtin_tools, execution, &binding_credential)
             .await?;
@@ -10512,6 +10740,7 @@ impl Core {
                 "nativeTurnId": native_prompt_id,
             }),
         );
+        emit_navigation_invalidated(output, "agent_run.started", Some(&execution.camp_id));
         record_available_runtime_model(
             self,
             output,
@@ -10527,6 +10756,7 @@ impl Core {
 
     async fn fail_claimed_agent_run(
         &self,
+        output: &mpsc::UnboundedSender<String>,
         execution: &AgentRunExecution,
         error_code: &str,
         error: &anyhow::Error,
@@ -10581,6 +10811,20 @@ impl Core {
                 ending_git_observation,
             )
             .await;
+        if failure_persisted {
+            emit_agent_run_terminal(
+                output,
+                Some(&execution.camp_id),
+                json!({
+                    "campId": execution.camp_id,
+                    "campTurnId": execution.camp_turn_id,
+                    "agentRunId": execution.agent_run_id,
+                    "executionEpoch": execution.execution_epoch,
+                    "adapterKind": execution.runtime.adapter_kind,
+                    "reasonCode": error_code,
+                }),
+            );
+        }
         self.finish_claimed_agent_run_failure(
             execution,
             failure_persisted,
@@ -10630,7 +10874,7 @@ impl Core {
             }
         };
         match failure {
-            Ok(execution) if execution.result.status != CommandResultStatus::Rejected => true,
+            Ok(terminal) if terminal.result.status != CommandResultStatus::Rejected => true,
             Ok(_) => false,
             Err(failure_error) => {
                 eprintln!(
@@ -10703,6 +10947,7 @@ impl Core {
 
     async fn fail_unmaterialized_agent_run(
         &self,
+        output: &mpsc::UnboundedSender<String>,
         candidate: &rovai_core::runtime::QueuedAgentRunCandidate,
         execution_epoch: i64,
         error: &anyhow::Error,
@@ -10747,6 +10992,17 @@ impl Core {
             }
         };
         if failure_persisted {
+            emit_agent_run_terminal(
+                output,
+                Some(&candidate.camp_id),
+                json!({
+                    "campId": candidate.camp_id,
+                    "campTurnId": candidate.camp_turn_id,
+                    "agentRunId": candidate.agent_run_id,
+                    "executionEpoch": execution_epoch,
+                    "reasonCode": "runtime_configuration_invalid",
+                }),
+            );
             self.reconcile_skill_projection_after_run_terminal(
                 &candidate.execution_workspace().execution_root,
             )
@@ -13254,8 +13510,15 @@ async fn process_agent_run_acp_message(
             )
         };
         if let Ok(Some(execution)) = execution {
-            core.fail_claimed_agent_run(&execution, "action_audit_failed", &error, false, None)
-                .await;
+            core.fail_claimed_agent_run(
+                output,
+                &execution,
+                "action_audit_failed",
+                &error,
+                false,
+                None,
+            )
+            .await;
         }
         return;
     }
@@ -14205,9 +14468,9 @@ async fn persist_acp_prompt_completion(
             .await;
         terminal_admission.complete_settlement();
         runtime_route_permit.complete_callback();
-        emit(
+        emit_agent_run_terminal(
             output,
-            "agent_run.terminal",
+            None,
             json!({
                 "agentRunId": agent_run_id,
                 "executionEpoch": execution_epoch,
@@ -14332,9 +14595,9 @@ async fn persist_acp_prompt_completion(
                     .await;
                 terminal_admission.complete_settlement();
                 runtime_route_permit.complete_callback();
-                emit(
+                emit_agent_run_terminal(
                     output,
-                    "agent_run.terminal",
+                    Some(&execution.camp_id),
                     json!({
                         "agentRunId": agent_run_id,
                         "executionEpoch": execution_epoch,
@@ -15118,9 +15381,9 @@ async fn process_agent_run_codex_message(
                     .await;
                 terminal_admission.complete_settlement();
                 runtime_route_permit.complete_callback();
-                emit(
+                emit_agent_run_terminal(
                     output,
-                    "agent_run.terminal",
+                    None,
                     json!({
                         "agentRunId": agent_run_id,
                         "executionEpoch": execution_epoch,
@@ -15268,9 +15531,9 @@ async fn process_agent_run_codex_message(
                     .await;
                 terminal_admission.complete_settlement();
                 runtime_route_permit.complete_callback();
-                emit(
+                emit_agent_run_terminal(
                     output,
-                    "agent_run.terminal",
+                    Some(&execution.camp_id),
                     json!({
                         "agentRunId": agent_run_id,
                         "executionEpoch": execution_epoch,
@@ -16167,6 +16430,30 @@ fn emit(output: &mpsc::UnboundedSender<String>, method: &str, params: Value) {
     }
 }
 
+fn emit_navigation_invalidated(
+    output: &mpsc::UnboundedSender<String>,
+    reason: &str,
+    camp_id: Option<&str>,
+) {
+    emit(
+        output,
+        "navigation.invalidated",
+        match camp_id {
+            Some(camp_id) => json!({ "reason": reason, "campId": camp_id }),
+            None => json!({ "reason": reason }),
+        },
+    );
+}
+
+fn emit_agent_run_terminal(
+    output: &mpsc::UnboundedSender<String>,
+    camp_id: Option<&str>,
+    params: Value,
+) {
+    emit(output, "agent_run.terminal", params);
+    emit_navigation_invalidated(output, "agent_run.terminal", camp_id);
+}
+
 async fn write_output(
     mut receiver: mpsc::UnboundedReceiver<String>,
     mut control: mpsc::Receiver<OutputControl>,
@@ -16673,8 +16960,10 @@ mod tests {
 
         let pause =
             rovai_core::camp_attachment::install_composer_prepare_test_pause(&data_dir, camp_id);
+        let (output, _receiver) = mpsc::unbounded_channel();
         let prepare = prepare_composer_attachment_from_path(
             &database,
+            &output,
             &data_dir,
             PrepareAttachmentFromPathParams {
                 camp_id: CampId::parse(camp_id).unwrap(),
@@ -17392,6 +17681,7 @@ while IFS= read -r _ignored; do :; done
         };
         let prepared = prepare_composer_attachment_from_path(
             &core.database,
+            &core.output,
             &core.data_dir,
             PrepareAttachmentFromPathParams {
                 camp_id: CampId::parse(&camp_id).unwrap(),
@@ -18636,6 +18926,86 @@ while IFS= read -r _ignored; do :; done
         assert!(request_runs_outside_main_queue(
             "runtime.pendingExecution.cancel"
         ));
+    }
+
+    #[test]
+    fn navigation_invalidation_covers_projection_writes_but_not_reads() {
+        for method in [
+            "members.update",
+            "members.remove",
+            "navigation.campViewed",
+            "camps.create",
+            "camps.rename",
+            "camps.enter",
+            "camps.delete",
+            "camp.composerDraft.save",
+            "camp.attachments.prepareFromPath",
+            "camp.messages.send",
+            "userAutomation.camp.send",
+            "campTurns.cancel",
+            "agentRuns.cancel",
+            "agentRuns.resolveRecoveryBlocker",
+        ] {
+            assert!(request_invalidates_navigation(method), "{method}");
+        }
+        for method in [
+            "navigation.snapshot",
+            "navigation.groupCamps",
+            "camps.open",
+            "camp.messages.page",
+            "health.check",
+        ] {
+            assert!(!request_invalidates_navigation(method), "{method}");
+        }
+        for method in [
+            "camps.create",
+            "camps.discardPending",
+            "camp.composerDraft.removeAttachment",
+            "camp.composerDraft.discard",
+            "camp.attachments.prepareFromPath",
+            "camp.messages.send",
+        ] {
+            assert!(
+                navigation_invalidation_emitted_at_commit_boundary(method),
+                "{method}"
+            );
+        }
+        assert!(!navigation_invalidation_emitted_at_commit_boundary(
+            "camps.rename"
+        ));
+    }
+
+    #[test]
+    fn navigation_invalidation_skips_rejected_commands_and_preserves_camp_scope() {
+        assert!(navigation_mutation_was_rejected(
+            &json!({ "status": "rejected" })
+        ));
+        assert!(navigation_mutation_was_rejected(&json!({
+            "commandResult": { "status": "rejected" }
+        })));
+        assert!(!navigation_mutation_was_rejected(
+            &json!({ "status": "applied" })
+        ));
+        assert_eq!(
+            navigation_request_camp_id(&json!({
+                "command": { "campId": "rvcamp_test" }
+            })),
+            Some("rvcamp_test")
+        );
+
+        let (output, mut receiver) = mpsc::unbounded_channel();
+        emit_agent_run_terminal(
+            &output,
+            Some("rvcamp_test"),
+            json!({ "agentRunId": "run-test" }),
+        );
+        let terminal: Value = serde_json::from_str(&receiver.try_recv().unwrap()).unwrap();
+        assert_eq!(terminal["method"], "agent_run.terminal");
+        assert_eq!(terminal["params"]["agentRunId"], "run-test");
+        let invalidation: Value = serde_json::from_str(&receiver.try_recv().unwrap()).unwrap();
+        assert_eq!(invalidation["method"], "navigation.invalidated");
+        assert_eq!(invalidation["params"]["reason"], "agent_run.terminal");
+        assert_eq!(invalidation["params"]["campId"], "rvcamp_test");
     }
 
     #[tokio::test]

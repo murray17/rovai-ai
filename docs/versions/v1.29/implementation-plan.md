@@ -3,7 +3,7 @@ document_type: implementation-plan
 version: v1.29
 authority: implementation-and-acceptance-status
 status: in_progress
-last_updated: 2026-08-27
+last_updated: 2026-08-28
 ---
 
 # v1.29 Camp 动态队员管理与 Runtime 文件变化实施计划
@@ -22,6 +22,8 @@ last_updated: 2026-08-27
 - [x] 完成 Migration 113 planned shutdown v3：保留历史 pending v2 cycle，退出、重启与更新统一取消全部非终态
   AgentRun，并以 400ms 门槛抑制快速启停反馈闪现；
 - [x] 完成 Desktop typed IPC、Camp Open projection、Renderer 权威预览与定向/完整门禁；
+- [x] 将 Desktop Navigation 收敛为 Core post-commit invalidation 与 App-global generation coordinator，覆盖
+  single-flight trailing drain、失败退避、Overview 状态解耦、隐藏暂停、focus 刷新与 20 秒安全轮询；
 - [x] 当前模型上下文保持 Collaboration State v2，只在新 Run 冻结当前 peers。
 
 ## 2. 已完成：ACP Client FS/Terminal 权限
@@ -99,6 +101,8 @@ last_updated: 2026-08-27
 - [x] Rust 定向回归覆盖 Evidence 保存、Command Diff reconstruction、路径/URI、Codex snapshot、ACP sparse
   terminal、projector 归约/恢复与 Migration 115；
 - [x] TypeScript typecheck 通过；
+- [x] Navigation coordinator 8/8 与 App event routing 2/2 回归通过；隔离 App 已验证 post-commit invalidation、
+  后台 Run marker 收敛、隐藏暂停、focus 补读与 20 秒安全轮询；
 - [ ] `cargo test -p rovai-core` 全量通过；
 - [ ] Renderer/Vitest 全量通过；
 - [ ] `pnpm docs:test`、`pnpm docs:check` 与精确 merge-base `docs:check:ci` 通过；
