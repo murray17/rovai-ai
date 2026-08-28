@@ -7,6 +7,7 @@ use url::Url;
 use crate::agent_profile::AdapterKind;
 
 pub const COMMAND_DIFF_SCHEMA_VERSION: u32 = 1;
+pub(crate) const RUNTIME_DIFF_MANAGED_OUTPUT_ROOT: &str = "runtime_diff_managed_output_root";
 const MAX_DIFF_FILES: usize = 256;
 const MAX_DIFF_BYTES: usize = 8 * 1024 * 1024;
 const MAX_SINGLE_DIFF_BYTES: usize = 2 * 1024 * 1024;
@@ -77,7 +78,13 @@ pub fn admit_runtime_diff(
     execution_root: &Path,
     frozen_adapter_kind: Option<&str>,
 ) -> Option<Result<AdmittedCommandDiff, &'static str>> {
-    admit_runtime_diff_with_file_operation_path(payload, execution_root, frozen_adapter_kind, None)
+    admit_runtime_diff_with_file_operation_path_and_managed_output_root(
+        payload,
+        execution_root,
+        frozen_adapter_kind,
+        None,
+        None,
+    )
 }
 
 pub fn admit_runtime_diff_with_file_operation_path(
@@ -86,12 +93,29 @@ pub fn admit_runtime_diff_with_file_operation_path(
     frozen_adapter_kind: Option<&str>,
     file_operation_path: Option<&str>,
 ) -> Option<Result<AdmittedCommandDiff, &'static str>> {
+    admit_runtime_diff_with_file_operation_path_and_managed_output_root(
+        payload,
+        execution_root,
+        frozen_adapter_kind,
+        file_operation_path,
+        None,
+    )
+}
+
+pub fn admit_runtime_diff_with_file_operation_path_and_managed_output_root(
+    payload: &Value,
+    execution_root: &Path,
+    frozen_adapter_kind: Option<&str>,
+    file_operation_path: Option<&str>,
+    managed_output_root: Option<&Path>,
+) -> Option<Result<AdmittedCommandDiff, &'static str>> {
     let candidate = payload.get("runtimeDiff")?;
     Some(admit_candidate(
         candidate,
         execution_root,
         frozen_adapter_kind,
         file_operation_path,
+        managed_output_root,
     ))
 }
 
@@ -100,6 +124,7 @@ fn admit_candidate(
     execution_root: &Path,
     frozen_adapter_kind: Option<&str>,
     file_operation_path: Option<&str>,
+    managed_output_root: Option<&Path>,
 ) -> Result<AdmittedCommandDiff, &'static str> {
     let adapter_kind = candidate
         .get("adapterKind")
@@ -153,16 +178,29 @@ fn admit_candidate(
         return Err("runtime_diff_file_limit");
     }
     if semantic_kind == "exact_mutation" {
-        return admit_exact_mutations(raw_entries, execution_root);
+        return admit_exact_mutations(raw_entries, execution_root, managed_output_root);
     }
     let mut total_bytes = 0_usize;
     let mut entries = Vec::with_capacity(raw_entries.len());
     let mut evidence_entries = Vec::with_capacity(raw_entries.len());
+    let mut excluded_managed_output = false;
     for raw in raw_entries {
         let raw_path = raw
             .get("path")
             .and_then(Value::as_str)
             .ok_or("runtime_diff_path_invalid")?;
+        let move_path = raw
+            .pointer("/kind/movePath")
+            .or_else(|| raw.pointer("/kind/move_path"))
+            .and_then(Value::as_str);
+        if managed_output_root.is_some_and(|root| {
+            reported_path_is_within_root(execution_root, raw_path, root)
+                || move_path
+                    .is_some_and(|path| reported_path_is_within_root(execution_root, path, root))
+        }) {
+            excluded_managed_output = true;
+            continue;
+        }
         let source_path = (adapter == AdapterKind::KiroCli && raw_entries.len() == 1)
             .then(|| reconcile_kiro_rooted_diff_path(raw_path, file_operation_path))
             .flatten()
@@ -170,9 +208,7 @@ fn admit_candidate(
             .ok_or("runtime_diff_path_invalid")?;
         let change_kind = normalized_change_kind(raw, semantic_kind)?;
         let path = if adapter == AdapterKind::CodexCli && change_kind == "update" {
-            raw.pointer("/kind/movePath")
-                .or_else(|| raw.pointer("/kind/move_path"))
-                .and_then(Value::as_str)
+            move_path
                 .map(|move_path| {
                     normalize_reported_path_for_display(execution_root, move_path)
                         .ok_or("runtime_diff_path_invalid")
@@ -279,6 +315,9 @@ fn admit_candidate(
         });
         evidence_entries.push(evidence_entry);
     }
+    if entries.is_empty() && excluded_managed_output {
+        return Err(RUNTIME_DIFF_MANAGED_OUTPUT_ROOT);
+    }
     Ok(AdmittedCommandDiff {
         semantic_kind: if semantic_kind == "codex_file_change_snapshot" {
             "unified_diff_snapshot".to_string()
@@ -293,10 +332,12 @@ fn admit_candidate(
 fn admit_exact_mutations(
     raw_entries: &[Value],
     execution_root: &Path,
+    managed_output_root: Option<&Path>,
 ) -> Result<AdmittedCommandDiff, &'static str> {
     let mut total_bytes = 0_usize;
     let mut evidence_entries = Vec::with_capacity(raw_entries.len());
     let mut projection_entries = Vec::with_capacity(raw_entries.len());
+    let mut excluded_managed_output = false;
     for raw in raw_entries {
         if raw.get("semantics").and_then(Value::as_str) != Some("exact_mutation") {
             return Err("runtime_diff_semantics_invalid");
@@ -313,6 +354,12 @@ fn admit_exact_mutations(
             .get("path")
             .and_then(Value::as_str)
             .ok_or("runtime_diff_path_invalid")?;
+        if managed_output_root
+            .is_some_and(|root| reported_path_is_within_root(execution_root, raw_path, root))
+        {
+            excluded_managed_output = true;
+            continue;
+        }
         let path = normalize_reported_path_for_display(execution_root, raw_path)
             .ok_or("runtime_diff_path_invalid")?;
         let old_text = raw
@@ -357,6 +404,9 @@ fn admit_exact_mutations(
             diff,
         });
     }
+    if projection_entries.is_empty() && excluded_managed_output {
+        return Err(RUNTIME_DIFF_MANAGED_OUTPUT_ROOT);
+    }
     Ok(AdmittedCommandDiff {
         semantic_kind: "exact_mutation".to_string(),
         entries: projection_entries,
@@ -392,6 +442,44 @@ pub(crate) fn normalize_reported_path_for_display(
     display_root: &Path,
     reported: &str,
 ) -> Option<String> {
+    let display_root = normalize_absolute_path(display_root)?;
+    let resolved = resolve_reported_absolute_path(&display_root, reported)?;
+    display_path_from_resolved(&display_root, resolved)
+}
+
+pub(crate) fn reported_path_is_within_root(
+    display_root: &Path,
+    reported: &str,
+    root: &Path,
+) -> bool {
+    let Some(display_root) = normalize_absolute_path(display_root) else {
+        return false;
+    };
+    let Some(resolved) = resolve_reported_absolute_path(&display_root, reported) else {
+        return false;
+    };
+    let Some(root) = normalize_absolute_path(root) else {
+        return false;
+    };
+    path_starts_with(&resolved, &root)
+}
+
+fn path_starts_with(path: &Path, root: &Path) -> bool {
+    if cfg!(windows) {
+        let mut path_components = path.components();
+        root.components().all(|root_component| {
+            path_components.next().is_some_and(|path_component| {
+                path_component
+                    .as_os_str()
+                    .eq_ignore_ascii_case(root_component.as_os_str())
+            })
+        })
+    } else {
+        path.starts_with(root)
+    }
+}
+
+fn resolve_reported_absolute_path(display_root: &Path, reported: &str) -> Option<PathBuf> {
     if reported.trim().is_empty() || reported.contains('\0') {
         return None;
     }
@@ -408,17 +496,19 @@ pub(crate) fn normalize_reported_path_for_display(
     } else {
         Path::new(reported)
     };
-    let display_root = normalize_absolute_path(display_root)?;
-    let resolved = if reported_path.is_absolute() {
+    Some(if reported_path.is_absolute() {
         normalize_absolute_path(reported_path)?
     } else {
         normalize_absolute_path(&display_root.join(reported_path))?
-    };
+    })
+}
+
+fn display_path_from_resolved(display_root: &Path, resolved: PathBuf) -> Option<String> {
     if resolved == display_root {
         return None;
     }
     let display_path = resolved
-        .strip_prefix(&display_root)
+        .strip_prefix(display_root)
         .ok()
         .filter(|relative| !relative.as_os_str().is_empty())
         .map(Path::to_path_buf)
@@ -429,6 +519,74 @@ pub(crate) fn normalize_reported_path_for_display(
         return None;
     }
     Some(display_path.to_string_lossy().replace('\\', "/"))
+}
+
+pub(crate) fn filter_unified_diff_snapshot_outside_root(
+    diff: &str,
+    display_root: &Path,
+    excluded_root: &Path,
+) -> Option<String> {
+    if diff.trim().is_empty() {
+        return Some(diff.to_string());
+    }
+    let sections = split_unified_diff_sections(diff);
+    if sections.is_empty() {
+        return None;
+    }
+    let mut retained = String::new();
+    for section in sections {
+        let (source_path, destination_path) = unified_diff_section_paths(&section)?;
+        if !reported_path_is_within_root(display_root, &source_path, excluded_root)
+            && !reported_path_is_within_root(display_root, &destination_path, excluded_root)
+        {
+            retained.push_str(&section);
+        }
+    }
+    Some(retained)
+}
+
+pub(crate) fn split_unified_diff_sections(diff: &str) -> Vec<String> {
+    let starts = diff
+        .match_indices("diff --git ")
+        .filter(|(index, _)| *index == 0 || diff.as_bytes().get(index - 1) == Some(&b'\n'))
+        .map(|(index, _)| index)
+        .collect::<Vec<_>>();
+    starts
+        .iter()
+        .enumerate()
+        .map(|(index, start)| {
+            diff[*start..starts.get(index + 1).copied().unwrap_or(diff.len())].to_string()
+        })
+        .collect()
+}
+
+pub(crate) fn unified_diff_section_identity(section: &str) -> Option<(String, String)> {
+    let (_, path) = unified_diff_section_paths(section)?;
+    let change_kind = if section
+        .lines()
+        .any(|line| line.starts_with("new file mode "))
+    {
+        "add"
+    } else if section
+        .lines()
+        .any(|line| line.starts_with("deleted file mode "))
+    {
+        "delete"
+    } else {
+        "update"
+    };
+    Some((path, change_kind.to_string()))
+}
+
+fn unified_diff_section_paths(section: &str) -> Option<(String, String)> {
+    let header = section.lines().next()?;
+    let marker = header
+        .rfind(" b/")
+        .filter(|_| header.starts_with("diff --git a/"))?;
+    Some((
+        header["diff --git a/".len()..marker].trim().to_string(),
+        header[marker + 3..].trim().to_string(),
+    ))
 }
 
 fn normalize_absolute_path(path: &Path) -> Option<PathBuf> {
@@ -861,23 +1019,92 @@ mod tests {
     }
 
     #[test]
-    fn paths_outside_the_display_root_are_admitted_as_absolute_without_reading_files() {
-        let result = admit_runtime_diff(
+    fn cross_root_diffs_keep_user_files_and_exclude_managed_run_output() {
+        let managed_output_root = Path::new("/rovai/runtime/builtin-tools/process/run-tmp");
+        let result = admit_runtime_diff_with_file_operation_path_and_managed_output_root(
             &json!({
                 "runtimeDiff": {
                     "adapterKind": "codex-cli",
                     "protocolFamily": "codex-app-server",
                     "sourceEventKind": "item/completed.fileChange.completed",
                     "semanticKind": "codex_file_change_snapshot",
-                    "entries": [{"path": "../secret", "kind": {"type": "update"}, "diff": "+x"}]
+                    "entries": [
+                        {"path": "../secret", "kind": {"type": "update"}, "diff": "+x"},
+                        {
+                            "path": "/rovai/runtime/builtin-tools/process/run-tmp/report.html",
+                            "kind": {"type": "add"},
+                            "diff": "temporary\n"
+                        }
+                    ]
                 }
             }),
             Path::new("/repo"),
             Some("codex-cli"),
+            None,
+            Some(managed_output_root),
         )
         .expect("candidate should be present")
         .expect("an explicit cross-root Runtime path should be admitted");
+        assert_eq!(result.entries.len(), 1);
         assert_eq!(result.entries[0].path, "/secret");
+
+        let managed_only = admit_runtime_diff_with_file_operation_path_and_managed_output_root(
+            &json!({
+                "runtimeDiff": {
+                    "adapterKind": "codex-cli",
+                    "protocolFamily": "codex-app-server",
+                    "sourceEventKind": "item/completed.fileChange.completed",
+                    "semanticKind": "codex_file_change_snapshot",
+                    "entries": [{
+                        "path": "/rovai/runtime/builtin-tools/process/run-tmp/report.html",
+                        "kind": {"type": "add"},
+                        "diff": "temporary\n"
+                    }]
+                }
+            }),
+            Path::new("/repo"),
+            Some("codex-cli"),
+            None,
+            Some(managed_output_root),
+        )
+        .expect("candidate should be present");
+        assert_eq!(managed_only, Err(RUNTIME_DIFF_MANAGED_OUTPUT_ROOT));
+
+        let managed_snapshot = concat!(
+            "diff --git a//rovai/runtime/builtin-tools/process/run-tmp/report.html ",
+            "b//rovai/runtime/builtin-tools/process/run-tmp/report.html\n",
+            "new file mode 100644\n--- /dev/null\n",
+            "+++ b//rovai/runtime/builtin-tools/process/run-tmp/report.html\n@@ -0,0 +1 @@\n+x\n",
+        );
+        let managed_source_snapshot = concat!(
+            "diff --git a//rovai/runtime/builtin-tools/process/run-tmp/source.html ",
+            "b/src/published.html\n",
+            "similarity index 100%\n",
+            "rename from /rovai/runtime/builtin-tools/process/run-tmp/source.html\n",
+            "rename to src/published.html\n",
+        );
+        let snapshot = format!(
+            "diff --git a/src/app.ts b/src/app.ts\n\
+             --- a/src/app.ts\n+++ b/src/app.ts\n@@ -1 +1 @@\n-old\n+new\n{managed_snapshot}{managed_source_snapshot}"
+        );
+        let filtered = filter_unified_diff_snapshot_outside_root(
+            &snapshot,
+            Path::new("/repo"),
+            managed_output_root,
+        )
+        .expect("a structured snapshot should be filterable");
+        assert!(filtered.contains("src/app.ts"));
+        assert!(!filtered.contains("run-tmp/report.html"));
+        assert!(!filtered.contains("src/published.html"));
+        assert_eq!(
+            filter_unified_diff_snapshot_outside_root(
+                managed_snapshot,
+                Path::new("/repo"),
+                managed_output_root,
+            )
+            .as_deref(),
+            Some("")
+        );
     }
 
     #[test]
@@ -907,6 +1134,25 @@ mod tests {
             normalize_reported_path_for_display(Path::new("/repo"), "/outside/.git/config")
                 .is_none()
         );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_managed_output_exclusion_uses_exact_path_components() {
+        let execution_root = Path::new(r"C:\workspace");
+        let managed_output_root = Path::new(
+            r"C:\Users\murray\AppData\Local\Rovai AI\Core\runtime\builtin-tools\process\run-tmp",
+        );
+        assert!(reported_path_is_within_root(
+            execution_root,
+            r"c:/Users/murray/AppData/Local/ROVAI AI/Core/runtime/builtin-tools/process/run-tmp/report.html",
+            managed_output_root,
+        ));
+        assert!(!reported_path_is_within_root(
+            execution_root,
+            r"C:\Users\murray\AppData\Local\Rovai AI\Core\runtime\builtin-tools\process\run-tmp-copy\report.html",
+            managed_output_root,
+        ));
     }
 
     #[test]

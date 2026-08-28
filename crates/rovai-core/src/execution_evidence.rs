@@ -11,10 +11,15 @@ use crate::{
     db::Database,
     managed_blob::ManagedBlobStore,
     runtime_diff::{self, COMMAND_DIFF_SCHEMA_VERSION},
-    runtime_file_operation::{self, FILE_OPERATION_SCHEMA_VERSION},
+    runtime_file_operation::{
+        self, FILE_OPERATION_SCHEMA_VERSION, RUNTIME_FILE_OPERATION_MANAGED_OUTPUT_ROOT,
+    },
 };
 
 const INLINE_PAYLOAD_LIMIT_BYTES: usize = 16 * 1024;
+const RUNTIME_RUN_DIFF_EXECUTION_ROOT_MISSING: &str = "runtime_run_diff_execution_root_missing";
+const RUNTIME_RUN_DIFF_MANAGED_OUTPUT_FILTER_UNSAFE: &str =
+    "runtime_run_diff_managed_output_filter_unsafe";
 const PREVIEW_STRING_LIMIT_CHARS: usize = 4_000;
 const PREVIEW_ARRAY_LIMIT: usize = 24;
 pub const RUNTIME_EVIDENCE_DELTA_BATCH_MAX_BYTES: usize = 64 * 1024;
@@ -276,6 +281,28 @@ impl ExecutionEvidenceService {
         event_type: &str,
         payload: &Value,
     ) -> Result<Option<RecordedExecutionEvidence>> {
+        self.record_runtime_event_with_managed_output_root(
+            database,
+            blob_store,
+            agent_run_id,
+            execution_epoch,
+            event_type,
+            payload,
+            None,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn record_runtime_event_with_managed_output_root(
+        &self,
+        database: &mut Database,
+        blob_store: &ManagedBlobStore,
+        agent_run_id: &str,
+        execution_epoch: i64,
+        event_type: &str,
+        payload: &Value,
+        managed_output_root: Option<&Path>,
+    ) -> Result<Option<RecordedExecutionEvidence>> {
         self.record_runtime_event_with_fence_policy(
             database,
             blob_store,
@@ -284,6 +311,7 @@ impl ExecutionEvidenceService {
             event_type,
             payload,
             false,
+            managed_output_root,
         )
     }
 
@@ -310,6 +338,7 @@ impl ExecutionEvidenceService {
             "runtime.action",
             payload,
             true,
+            None,
         )
     }
 
@@ -355,6 +384,7 @@ impl ExecutionEvidenceService {
             "activity.completed",
             payload,
             true,
+            None,
         )
     }
 
@@ -365,6 +395,25 @@ impl ExecutionEvidenceService {
         agent_run_id: &str,
         execution_epoch: i64,
         payload: &Value,
+    ) -> Result<Option<RecordedExecutionEvidence>> {
+        self.record_terminal_run_diff_snapshot_with_managed_output_root(
+            database,
+            blob_store,
+            agent_run_id,
+            execution_epoch,
+            payload,
+            None,
+        )
+    }
+
+    pub fn record_terminal_run_diff_snapshot_with_managed_output_root(
+        &self,
+        database: &mut Database,
+        blob_store: &ManagedBlobStore,
+        agent_run_id: &str,
+        execution_epoch: i64,
+        payload: &Value,
+        managed_output_root: Option<&Path>,
     ) -> Result<Option<RecordedExecutionEvidence>> {
         let run_diff = payload
             .get("runtimeRunDiff")
@@ -383,6 +432,7 @@ impl ExecutionEvidenceService {
             "runtime.file_changes.snapshot",
             payload,
             true,
+            managed_output_root,
         )
     }
 
@@ -405,6 +455,7 @@ impl ExecutionEvidenceService {
             "runtime.action",
             payload,
             false,
+            None,
         )
     }
 
@@ -418,6 +469,7 @@ impl ExecutionEvidenceService {
         event_type: &str,
         payload: &Value,
         allow_fenced_terminal_tool_result: bool,
+        managed_output_root: Option<&Path>,
     ) -> Result<Option<RecordedExecutionEvidence>> {
         let Some((kind, phase)) = evidence_classification(event_type, payload) else {
             return Ok(None);
@@ -472,12 +524,19 @@ impl ExecutionEvidenceService {
             workspace_json.as_deref(),
             runtime_adapter_kind.as_deref(),
             runtime_reported_version.as_deref(),
+            managed_output_root,
         );
         normalize_runtime_diff_evidence(
             &mut payload,
             workspace_json.as_deref(),
             runtime_adapter_kind.as_deref(),
             runtime_reported_version.as_deref(),
+            managed_output_root,
+        );
+        normalize_runtime_run_diff_evidence(
+            &mut payload,
+            workspace_json.as_deref(),
+            managed_output_root,
         );
         let encoded = serde_json::to_vec(&payload)?;
         let (preview, content_blob_id, is_truncated) = if encoded.len() > INLINE_PAYLOAD_LIMIT_BYTES
@@ -782,6 +841,7 @@ fn normalize_runtime_diff_evidence(
     workspace_json: Option<&str>,
     frozen_adapter_kind: Option<&str>,
     observed_runtime_version: Option<&str>,
+    managed_output_root: Option<&Path>,
 ) {
     let Some(candidate) = payload.get("runtimeDiff").cloned() else {
         return;
@@ -799,12 +859,24 @@ fn normalize_runtime_diff_evidence(
         });
     let file_operation_path =
         runtime_file_operation::path_from_evidence(payload).map(str::to_string);
+    let file_operation_was_managed = payload
+        .pointer("/runtimeFileOperation/safeReasonCode")
+        .and_then(Value::as_str)
+        == Some(RUNTIME_FILE_OPERATION_MANAGED_OUTPUT_ROOT);
+    let single_diff_entry = candidate
+        .get("entries")
+        .and_then(Value::as_array)
+        .is_some_and(|entries| entries.len() == 1);
     let admitted = execution_root.as_deref().map(Path::new).map(|root| {
-        runtime_diff::admit_runtime_diff_with_file_operation_path(
+        if file_operation_was_managed && single_diff_entry {
+            return Err(runtime_diff::RUNTIME_DIFF_MANAGED_OUTPUT_ROOT);
+        }
+        runtime_diff::admit_runtime_diff_with_file_operation_path_and_managed_output_root(
             payload,
             root,
             frozen_adapter_kind,
             file_operation_path.as_deref(),
+            managed_output_root,
         )
         .unwrap_or(Err("runtime_diff_candidate_missing"))
     });
@@ -846,6 +918,7 @@ fn normalize_runtime_file_operation_evidence(
     workspace_json: Option<&str>,
     frozen_adapter_kind: Option<&str>,
     observed_runtime_version: Option<&str>,
+    managed_output_root: Option<&Path>,
 ) {
     let Some(candidate) = payload.get("runtimeFileOperation").cloned() else {
         return;
@@ -862,8 +935,13 @@ fn normalize_runtime_file_operation_evidence(
                 .map(str::to_string)
         });
     let admitted = execution_root.as_deref().map(Path::new).map(|root| {
-        runtime_file_operation::admit_runtime_file_operation(payload, root, frozen_adapter_kind)
-            .unwrap_or(Err("runtime_file_operation_candidate_missing"))
+        runtime_file_operation::admit_runtime_file_operation_with_managed_output_root(
+            payload,
+            root,
+            frozen_adapter_kind,
+            managed_output_root,
+        )
+        .unwrap_or(Err("runtime_file_operation_candidate_missing"))
     });
     let source = serde_json::json!({
         "adapterKind": candidate.get("adapterKind"),
@@ -894,6 +972,62 @@ fn normalize_runtime_file_operation_evidence(
             "sourceMetadata": source,
         }),
     };
+}
+
+fn normalize_runtime_run_diff_evidence(
+    payload: &mut Value,
+    workspace_json: Option<&str>,
+    managed_output_root: Option<&Path>,
+) {
+    let Some(managed_output_root) = managed_output_root else {
+        return;
+    };
+    let Some(diff) = payload
+        .pointer("/runtimeRunDiff/diff")
+        .and_then(Value::as_str)
+    else {
+        return;
+    };
+    let Some(execution_root) = workspace_json
+        .and_then(|workspace| serde_json::from_str::<Value>(workspace).ok())
+        .and_then(|workspace| {
+            workspace
+                .get("executionRoot")
+                .and_then(Value::as_str)
+                .map(str::to_string)
+        })
+    else {
+        set_runtime_run_diff_unavailable(payload, RUNTIME_RUN_DIFF_EXECUTION_ROOT_MISSING);
+        return;
+    };
+    let filtered = runtime_diff::filter_unified_diff_snapshot_outside_root(
+        diff,
+        Path::new(&execution_root),
+        managed_output_root,
+    );
+    match filtered {
+        Some(filtered) => payload["runtimeRunDiff"]["diff"] = Value::String(filtered),
+        None => {
+            set_runtime_run_diff_unavailable(
+                payload,
+                RUNTIME_RUN_DIFF_MANAGED_OUTPUT_FILTER_UNSAFE,
+            );
+        }
+    }
+}
+
+fn set_runtime_run_diff_unavailable(payload: &mut Value, safe_reason_code: &'static str) {
+    let source_metadata = payload["runtimeRunDiff"]
+        .get("sourceMetadata")
+        .cloned()
+        .unwrap_or(Value::Null);
+    payload["runtimeRunDiff"] = serde_json::json!({
+        "schemaVersion": 1,
+        "source": "runtime_reported",
+        "status": "unavailable",
+        "safeReasonCode": safe_reason_code,
+        "sourceMetadata": source_metadata,
+    });
 }
 
 fn public_command_actions(item: &Value) -> Value {
@@ -1354,6 +1488,7 @@ mod tests {
             Some(r#"{"executionRoot":"/repo"}"#),
             Some("claude-code-cli"),
             Some("1.0.100"),
+            None,
         );
         assert!(
             runtime_diff::projection_from_evidence(&started_payload, "evidence-edit-started")
@@ -1387,6 +1522,7 @@ mod tests {
             Some(r#"{"executionRoot":"/repo"}"#),
             Some("claude-code-cli"),
             Some("1.0.100"),
+            None,
         );
 
         assert_eq!(payload["runtimeDiff"]["status"], "available");
@@ -1436,12 +1572,14 @@ mod tests {
             Some(r#"{"executionRoot":"/repo"}"#),
             Some("qoder-cli"),
             Some("1.1.28"),
+            None,
         );
         normalize_runtime_diff_evidence(
             &mut payload,
             Some(r#"{"executionRoot":"/repo"}"#),
             Some("qoder-cli"),
             Some("1.1.28"),
+            None,
         );
 
         assert_eq!(payload["runtimeFileOperation"]["status"], "available");
@@ -1451,6 +1589,37 @@ mod tests {
         );
         assert!(payload["runtimeDiff"].is_null());
         assert!(runtime_diff::projection_from_evidence(&payload, "evidence-qoder").is_none());
+
+        let mut managed_payload = normalize_public_payload(
+            "runtime.action",
+            &json!({
+                "toolCallId": "qoder-managed-output",
+                "status": "completed",
+                "kind": "edit",
+                "runtimeFileOperation": {
+                    "adapterKind": "qoder-cli",
+                    "protocolFamily": "acp-v1",
+                    "sourceEventKind": "session/update.tool_call_update.completed",
+                    "operationKind": "write",
+                    "path": "/rovai/runtime/builtin-tools/process/run-tmp/report.html"
+                }
+            }),
+        );
+        normalize_runtime_file_operation_evidence(
+            &mut managed_payload,
+            Some(r#"{"executionRoot":"/repo"}"#),
+            Some("qoder-cli"),
+            Some("1.1.28"),
+            Some(Path::new("/rovai/runtime/builtin-tools/process/run-tmp")),
+        );
+        assert_eq!(
+            managed_payload["runtimeFileOperation"]["safeReasonCode"],
+            RUNTIME_FILE_OPERATION_MANAGED_OUTPUT_ROOT
+        );
+        assert!(
+            runtime_file_operation::path_from_evidence(&managed_payload).is_none(),
+            "managed output must not create a Command file row or Run-card path"
+        );
     }
 
     #[test]
@@ -1487,12 +1656,14 @@ mod tests {
             Some(r#"{"executionRoot":"/repo"}"#),
             Some("kiro-cli"),
             Some("kiro-cli 2.18.1"),
+            None,
         );
         normalize_runtime_diff_evidence(
             &mut payload,
             Some(r#"{"executionRoot":"/repo"}"#),
             Some("kiro-cli"),
             Some("kiro-cli 2.18.1"),
+            None,
         );
 
         assert_eq!(payload["runtimeDiff"]["status"], "available");
@@ -1505,6 +1676,121 @@ mod tests {
         assert_eq!(
             projection.entries.as_ref().unwrap()[0].path,
             "rovai-runtime-validation/kiro-cli.txt"
+        );
+
+        let mut managed_payload = normalize_public_payload(
+            "runtime.action",
+            &json!({
+                "toolCallId": "kiro-managed-edit",
+                "status": "completed",
+                "kind": "edit",
+                "runtimeFileOperation": {
+                    "adapterKind": "kiro-cli",
+                    "protocolFamily": "acp-v1",
+                    "sourceEventKind": "session/update.tool_call_update.completed",
+                    "operationKind": "write",
+                    "path": "/rovai/runtime/builtin-tools/process/run-tmp/report.html"
+                },
+                "runtimeDiff": {
+                    "adapterKind": "kiro-cli",
+                    "protocolFamily": "acp-v1",
+                    "sourceEventKind": "session/update.tool_call_update.completed",
+                    "semanticKind": "complete_before_after",
+                    "entries": [{
+                        "path": "/report.html",
+                        "oldText": "before\n",
+                        "newText": "after\n"
+                    }]
+                }
+            }),
+        );
+        let managed_output_root = Path::new("/rovai/runtime/builtin-tools/process/run-tmp");
+        normalize_runtime_file_operation_evidence(
+            &mut managed_payload,
+            Some(r#"{"executionRoot":"/repo"}"#),
+            Some("kiro-cli"),
+            Some("kiro-cli 2.18.1"),
+            Some(managed_output_root),
+        );
+        normalize_runtime_diff_evidence(
+            &mut managed_payload,
+            Some(r#"{"executionRoot":"/repo"}"#),
+            Some("kiro-cli"),
+            Some("kiro-cli 2.18.1"),
+            Some(managed_output_root),
+        );
+        assert_eq!(
+            managed_payload["runtimeDiff"]["safeReasonCode"],
+            runtime_diff::RUNTIME_DIFF_MANAGED_OUTPUT_ROOT
+        );
+        let managed_projection =
+            runtime_diff::projection_from_evidence(&managed_payload, "evidence-kiro-managed")
+                .expect("unavailable runtime diffs retain their safe diagnostic projection");
+        assert_eq!(managed_projection.status, "unavailable");
+        assert!(managed_projection.entries.is_none());
+        assert_eq!(
+            managed_projection.safe_reason_code.as_deref(),
+            Some(runtime_diff::RUNTIME_DIFF_MANAGED_OUTPUT_ROOT)
+        );
+    }
+
+    #[test]
+    fn terminal_run_snapshot_drops_managed_output_before_it_becomes_durable_evidence() {
+        let managed_output_root = Path::new("/rovai/runtime/builtin-tools/process/run-tmp");
+        let mut payload = normalize_public_payload(
+            "runtime.file_changes.snapshot",
+            &json!({
+                "eventId": "codex-turn-diff",
+                "runtimeRunDiff": {
+                    "status": "available",
+                    "semanticKind": "unified_diff_snapshot",
+                    "diff": concat!(
+                        "diff --git a/src/app.ts b/src/app.ts\n",
+                        "--- a/src/app.ts\n+++ b/src/app.ts\n@@ -1 +1 @@\n-old\n+new\n",
+                        "diff --git a//rovai/runtime/builtin-tools/process/run-tmp/report.html ",
+                        "b//rovai/runtime/builtin-tools/process/run-tmp/report.html\n",
+                        "new file mode 100644\n--- /dev/null\n",
+                        "+++ b//rovai/runtime/builtin-tools/process/run-tmp/report.html\n",
+                        "@@ -0,0 +1 @@\n+temporary\n"
+                    )
+                }
+            }),
+        );
+        normalize_runtime_run_diff_evidence(
+            &mut payload,
+            Some(r#"{"executionRoot":"/repo"}"#),
+            Some(managed_output_root),
+        );
+        let diff = payload["runtimeRunDiff"]["diff"].as_str().unwrap();
+        assert!(diff.contains("src/app.ts"));
+        assert!(!diff.contains("run-tmp/report.html"));
+
+        payload["runtimeRunDiff"] = json!({
+            "status": "available",
+            "semanticKind": "unified_diff_snapshot",
+            "diff": "not a structured diff /rovai/runtime/builtin-tools/process/run-tmp/report.html"
+        });
+        normalize_runtime_run_diff_evidence(
+            &mut payload,
+            Some(r#"{"executionRoot":"/repo"}"#),
+            Some(managed_output_root),
+        );
+        assert_eq!(payload["runtimeRunDiff"]["status"], "unavailable");
+        assert_eq!(
+            payload["runtimeRunDiff"]["safeReasonCode"],
+            RUNTIME_RUN_DIFF_MANAGED_OUTPUT_FILTER_UNSAFE
+        );
+        assert!(payload["runtimeRunDiff"].get("diff").is_none());
+
+        payload["runtimeRunDiff"] = json!({
+            "status": "available",
+            "semanticKind": "unified_diff_snapshot",
+            "diff": "diff --git a/src/app.ts b/src/app.ts\n"
+        });
+        normalize_runtime_run_diff_evidence(&mut payload, None, Some(managed_output_root));
+        assert_eq!(
+            payload["runtimeRunDiff"]["safeReasonCode"],
+            RUNTIME_RUN_DIFF_EXECUTION_ROOT_MISSING
         );
     }
 
