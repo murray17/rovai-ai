@@ -4,7 +4,7 @@ authority: renderer-theme
 status: accepted
 theme_id: steel-night
 mode: dark
-last_updated: 2026-08-25
+last_updated: 2026-08-28
 ---
 
 # Steel Night
@@ -126,8 +126,8 @@ Dark. `color-scheme: dark`.
 | `--evidence-ink` | `#dce4e9` |
 | `--evidence-muted` | `#9eabb3` |
 | `--evidence-line` | `#35424a` |
-| `--diff-add` / `--diff-add-soft` | `#92c7a5` / `#1a2b22` |
-| `--diff-remove` / `--diff-remove-soft` | `#e09a94` / `#321e1d` |
+| `--diff-add` / `--diff-add-soft` | `#92c7a5` / `#21412e` |
+| `--diff-remove` / `--diff-remove-soft` | `#e09a94` / `#4c2221` |
 | `--diff-hunk-soft` | `#1b272a` |
 
 ### Overlay and lightbox
