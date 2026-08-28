@@ -17,8 +17,18 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
+function provisioner(
+  portal: FeishuDeveloperPortalSession,
+  options: ConstructorParameters<typeof FeishuWebSessionMemberBotProvisioner>[1]
+): FeishuWebSessionMemberBotProvisioner {
+  return new FeishuWebSessionMemberBotProvisioner(portal, {
+    resolveOwnerOpenId: async () => 'ou_owner_for_app',
+    ...options
+  })
+}
+
 describe('Feishu Web Session member Bot provisioner', () => {
-  it('uses only Open Platform console APIs for normal publishing', async () => {
+  it('publishes through the console and resolves Owner from the App creator', async () => {
     const progress: string[] = []
     const operations: string[] = []
     const portal = fakePortal()
@@ -29,12 +39,32 @@ describe('Feishu Web Session member Bot provisioner', () => {
       height: 192
     }))
     const memberAvatar = new Uint8Array([1, 2, 3, 4])
+    const applicationGet = vi.fn(async () => {
+      operations.push('resolve_owner')
+      return {
+        code: 0,
+        data: {
+          app: {
+            app_id: 'cli_dingding',
+            creator_id: 'ou_owner_for_app'
+          }
+        }
+      }
+    })
+    const createOwnerIdentityClient = vi.fn(() => ({
+      application: {
+        v6: {
+          application: { get: applicationGet }
+        }
+      }
+    }))
     const globalFetch = vi.fn()
     vi.stubGlobal('fetch', globalFetch)
 
     const result = await new FeishuWebSessionMemberBotProvisioner(portal, {
       createClient: () => client,
-      readDefaultAvatar
+      readDefaultAvatar,
+      createOwnerIdentityClient
     }).create({
       publicationIntentId: 'intent-1',
       agentId: 'agent-a',
@@ -55,6 +85,7 @@ describe('Feishu Web Session member Bot provisioner', () => {
     expect(result).toEqual({
       appId: 'cli_dingding',
       appSecret: 'secret-dingding',
+      ownerOpenId: 'ou_owner_for_app',
       botDisplayName: '叮叮',
       publishedVersionId: 'version_2'
     })
@@ -72,7 +103,8 @@ describe('Feishu Web Session member Bot provisioner', () => {
       'configure_callbacks',
       'create_version',
       'publish_version',
-      'verify'
+      'verify',
+      'resolve_owner'
     ])
     expect(progress).toEqual([
       'session_verified',
@@ -103,6 +135,29 @@ describe('Feishu Web Session member Bot provisioner', () => {
       changeLog: '启用 Bot 并请求长连接事件模式。',
       reuseExisting: true
     }))
+    expect(client.configureScopes).toHaveBeenCalledWith(
+      'cli_dingding',
+      expect.objectContaining({
+        tenantScopes: expect.arrayContaining(['application:application:self_manage'])
+      }),
+      undefined
+    )
+    expect(client.configureScopes).toHaveBeenCalledWith(
+      'cli_dingding',
+      expect.objectContaining({
+        tenantScopes: expect.not.arrayContaining(['contact:contact.base:readonly'])
+      }),
+      undefined
+    )
+    expect(createOwnerIdentityClient).toHaveBeenCalledWith({
+      brand: 'feishu',
+      appId: 'cli_dingding',
+      appSecret: 'secret-dingding'
+    })
+    expect(applicationGet).toHaveBeenCalledWith({
+      path: { app_id: 'cli_dingding' },
+      params: { lang: 'zh_cn', user_id_type: 'open_id' }
+    })
     expect(readDefaultAvatar).not.toHaveBeenCalled()
     expect(globalFetch).not.toHaveBeenCalled()
     expect(portal.persist).toHaveBeenCalledTimes(1)
@@ -114,7 +169,7 @@ describe('Feishu Web Session member Bot provisioner', () => {
     let releaseBarrier: (() => void) | undefined
     const barrier = new Promise<void>((resolve) => { releaseBarrier = resolve })
 
-    const provisioning = new FeishuWebSessionMemberBotProvisioner(fakePortal(), {
+    const provisioning = provisioner(fakePortal(), {
       createClient: () => client,
       readDefaultAvatar: async () => ({
         pngBytes: new Uint8Array([1]),
@@ -140,7 +195,7 @@ describe('Feishu Web Session member Bot provisioner', () => {
   it('stops every later remote mutation when the durable App-ID barrier rejects', async () => {
     const client = fakeOpenPlatformClient([])
 
-    await expect(new FeishuWebSessionMemberBotProvisioner(fakePortal(), {
+    await expect(provisioner(fakePortal(), {
       createClient: () => client,
       readDefaultAvatar: async () => ({
         pngBytes: new Uint8Array([1]),
@@ -182,7 +237,7 @@ describe('Feishu Web Session member Bot provisioner', () => {
       return { changed: false }
     })
 
-    const result = await new FeishuWebSessionMemberBotProvisioner(fakePortal(), {
+    const result = await provisioner(fakePortal(), {
       createClient: () => client,
       readDefaultAvatar: async () => ({
         pngBytes: new Uint8Array([1]),
@@ -222,7 +277,7 @@ describe('Feishu Web Session member Bot provisioner', () => {
       true
     ))
 
-    const error = await new FeishuWebSessionMemberBotProvisioner(fakePortal(), {
+    const error = await provisioner(fakePortal(), {
       createClient: () => client,
       readDefaultAvatar: async () => ({
         pngBytes: new Uint8Array([1]),
@@ -246,13 +301,45 @@ describe('Feishu Web Session member Bot provisioner', () => {
     expect(client.verifyMemberBot).not.toHaveBeenCalled()
   })
 
+  it('keeps the frozen app recoverable when its App-scoped Owner identity cannot resolve', async () => {
+    const client = fakeOpenPlatformClient([])
+    const progress: string[] = []
+
+    const error = await provisioner(fakePortal(), {
+      createClient: () => client,
+      resolveOwnerOpenId: async () => {
+        throw new Error('feishu_connection_error')
+      },
+      readDefaultAvatar: async () => ({
+        pngBytes: new Uint8Array([1]),
+        width: 1,
+        height: 1
+      })
+    }).create({
+      publicationIntentId: 'intent-owner-resolution',
+      agentId: 'agent-a',
+      appName: '叮叮',
+      appDescription: 'Rovai AI 队员 · 游学者',
+      expectedDeveloperIdentity: { userId: 'owner-user', tenantId: 'tenant-1' },
+      onRemoteAppCreated: async () => undefined,
+      onProgress: (step) => progress.push(step)
+    }).catch((reason: unknown): unknown => reason)
+
+    expect(error).toMatchObject({
+      code: 'feishu_connection_error',
+      remoteState: 'known_frozen'
+    })
+    expect(client.verifyMemberBot).toHaveBeenCalledTimes(1)
+    expect(progress).not.toContain('online_verified')
+  })
+
   it('repairs the member avatar on the frozen published app without creating another app', async () => {
     const progress: string[] = []
     const operations: string[] = []
     const portal = fakePortal()
     const client = fakeOpenPlatformClient(operations)
 
-    const result = await new FeishuWebSessionMemberBotProvisioner(portal, {
+    const result = await provisioner(portal, {
       createClient: () => client
     }).reconcile({
       publicationIntentId: 'intent-unknown',
@@ -272,6 +359,7 @@ describe('Feishu Web Session member Bot provisioner', () => {
     expect(result).toEqual({
       appId: 'cli_dingding',
       appSecret: 'secret-dingding',
+      ownerOpenId: 'ou_owner_for_app',
       botDisplayName: '叮叮',
       publishedVersionId: 'version_2'
     })
@@ -315,7 +403,7 @@ describe('Feishu Web Session member Bot provisioner', () => {
       return { versionId: 'version_2', status: 2, appVersion: '1.0.1' }
     })
 
-    const result = await new FeishuWebSessionMemberBotProvisioner(portal, {
+    const result = await provisioner(portal, {
       createClient: () => client
     }).reconcile({
       publicationIntentId: 'intent-unknown',
@@ -356,7 +444,7 @@ describe('Feishu Web Session member Bot provisioner', () => {
       return { versionId: 'version_pending', status: 5, appVersion: '1.0.2' }
     })
 
-    const result = await new FeishuWebSessionMemberBotProvisioner(fakePortal(), {
+    const result = await provisioner(fakePortal(), {
       createClient: () => client
     }).reconcile({
       publicationIntentId: 'intent-interrupted',
@@ -402,7 +490,7 @@ describe('Feishu Web Session member Bot provisioner', () => {
       })
       .mockImplementationOnce(async () => { operations.push('verify') })
 
-    const result = await new FeishuWebSessionMemberBotProvisioner(portal, {
+    const result = await provisioner(portal, {
       createClient: () => client
     }).reconcile({
       publicationIntentId: 'intent-existing',
@@ -446,7 +534,7 @@ describe('Feishu Web Session member Bot provisioner', () => {
       .mockRejectedValue(new Error('feishu_developer_identity_changed'))
     const createClient = vi.fn()
 
-    await expect(new FeishuWebSessionMemberBotProvisioner(portal, {
+    await expect(provisioner(portal, {
       createClient,
       readDefaultAvatar: async () => ({
         pngBytes: new Uint8Array([1]),
@@ -472,7 +560,7 @@ describe('Feishu Web Session member Bot provisioner', () => {
       'feishu_console_create_app_transport_failed',
       true
     ))
-    const error = await new FeishuWebSessionMemberBotProvisioner(portal, {
+    const error = await provisioner(portal, {
       createClient: () => client,
       readDefaultAvatar: async () => ({
         pngBytes: new Uint8Array([1]),
@@ -502,7 +590,7 @@ describe('Feishu Web Session member Bot provisioner', () => {
       false
     ))
     let remoteAppId: string | undefined
-    const error = await new FeishuWebSessionMemberBotProvisioner(portal, {
+    const error = await provisioner(portal, {
       createClient: () => client,
       readDefaultAvatar: async () => ({
         pngBytes: new Uint8Array([1]),

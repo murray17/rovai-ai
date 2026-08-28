@@ -119,6 +119,7 @@ pub struct UpsertFeishuMemberBotCommand {
     pub account_id: String,
     pub agent_id: String,
     pub app_id: String,
+    pub owner_open_id: String,
     pub bot_open_id: Option<String>,
     pub bot_display_name: String,
     pub credential_ref: String,
@@ -1306,9 +1307,13 @@ impl ChannelService {
             (&envelope.payload.account_id, "accountId"),
             (&envelope.payload.agent_id, "agentId"),
             (&envelope.payload.app_id, "appId"),
+            (&envelope.payload.owner_open_id, "ownerOpenId"),
             (&envelope.payload.credential_ref, "credentialRef"),
         ] {
             validate_nonempty(value, field)?;
+        }
+        if envelope.payload.owner_open_id.len() > 512 {
+            anyhow::bail!("ownerOpenId is too long");
         }
         let display_name = normalize_display_name(&envelope.payload.bot_display_name)?;
         self.gateway.execute(database, envelope, |transaction| {
@@ -1384,6 +1389,32 @@ impl ChannelService {
                     ));
                 }
             }
+            let owner_open_id_digest =
+                opaque_digest("feishu-open", &envelope.payload.owner_open_id);
+            let owner_identity_conflict: bool = transaction.query_row(
+                r#"
+                SELECT EXISTS(
+                    SELECT 1 FROM feishu_owner_app_identity
+                    WHERE app_id = ?1
+                      AND (
+                        account_id <> ?2
+                        OR (open_id_digest IS NOT NULL AND open_id_digest <> ?3)
+                      )
+                )
+                "#,
+                params![
+                    envelope.payload.app_id,
+                    envelope.payload.account_id,
+                    owner_open_id_digest,
+                ],
+                |row| row.get(0),
+            )?;
+            if owner_identity_conflict {
+                return Ok(rejected(
+                    "feishu_owner_identity.conflict",
+                    "The frozen App-scoped Owner identity cannot be rebound",
+                ));
+            }
             let now = Utc::now().to_rfc3339();
             transaction.execute(
                 r#"
@@ -1407,6 +1438,29 @@ impl ChannelService {
                     envelope.payload.bot_open_id,
                     display_name,
                     envelope.payload.credential_ref,
+                    now,
+                ],
+            )?;
+            transaction.execute(
+                r#"
+                INSERT INTO feishu_owner_app_identity(
+                    account_id, app_id, open_id_digest, user_id_digest,
+                    union_id_digest, verified_at, version, created_at, updated_at
+                ) VALUES (?1, ?2, ?3, NULL, NULL, ?4, 1, ?4, ?4)
+                ON CONFLICT(account_id, app_id) DO UPDATE SET
+                    open_id_digest = excluded.open_id_digest,
+                    verified_at = excluded.verified_at,
+                    version = CASE
+                        WHEN feishu_owner_app_identity.open_id_digest = excluded.open_id_digest
+                        THEN feishu_owner_app_identity.version
+                        ELSE feishu_owner_app_identity.version + 1
+                    END,
+                    updated_at = excluded.updated_at
+                "#,
+                params![
+                    envelope.payload.account_id,
+                    envelope.payload.app_id,
+                    owner_open_id_digest,
                     now,
                 ],
             )?;
@@ -5696,6 +5750,7 @@ mod tests {
                         account_id: "account_1".to_string(),
                         agent_id: agent_id.to_string(),
                         app_id: app_id.to_string(),
+                        owner_open_id: "ou_user".to_string(),
                         bot_open_id: Some(format!("ou_bot_{agent_id}")),
                         bot_display_name: agent_id.to_string(),
                         credential_ref: credential_ref.clone(),
@@ -6151,6 +6206,7 @@ mod tests {
                         account_id: "account_1".to_string(),
                         agent_id: "agent_1".to_string(),
                         app_id: "cli_app_2".to_string(),
+                        owner_open_id: "ou_user_replacement".to_string(),
                         bot_open_id: Some("ou_replacement".to_string()),
                         bot_display_name: "木瓦".to_string(),
                         credential_ref: "feishu/member/agent_1".to_string(),
@@ -6199,6 +6255,7 @@ mod tests {
                         account_id: "account_1".to_string(),
                         agent_id: "agent_1".to_string(),
                         app_id: "cli_app_1".to_string(),
+                        owner_open_id: "ou_user".to_string(),
                         bot_open_id: Some("ou_bot_agent_1".to_string()),
                         bot_display_name: "木瓦".to_string(),
                         credential_ref: "feishu/member/agent_1".to_string(),
@@ -6248,6 +6305,7 @@ mod tests {
                         account_id: "account_1".to_string(),
                         agent_id: "agent_1".to_string(),
                         app_id: "cli_app_1".to_string(),
+                        owner_open_id: "ou_user".to_string(),
                         bot_open_id: Some("ou_bot_agent_1".to_string()),
                         bot_display_name: "木瓦".to_string(),
                         credential_ref: "feishu/member/agent_1".to_string(),
@@ -6306,7 +6364,7 @@ mod tests {
                         app_id: "cli_app_1".to_string(),
                         tenant_key: "event_tenant_key_1".to_string(),
                         sender_open_id: Some("ou_user".to_string()),
-                        sender_user_id: Some("user_1".to_string()),
+                        sender_user_id: None,
                         sender_union_id: Some("union_user".to_string()),
                         sender_display_name: "Owner".to_string(),
                     },
@@ -6337,6 +6395,35 @@ mod tests {
             conflicting_tenant_key.result.payload["classification"],
             "unverified"
         );
+    }
+
+    #[test]
+    fn published_bot_rejects_owner_open_id_rebinding() {
+        let mut database = seeded_runtime_database_owned();
+        let service = ChannelService::default();
+        connect_account(&service, &mut database);
+        publish_bot(&service, &mut database, "agent_1", "cli_app_1");
+
+        let rejected = service
+            .upsert_feishu_member_bot(
+                &mut database,
+                &host_envelope(
+                    "rebind-owner-open-id",
+                    UpsertFeishuMemberBotCommand {
+                        account_id: "account_1".to_string(),
+                        agent_id: "agent_1".to_string(),
+                        app_id: "cli_app_1".to_string(),
+                        owner_open_id: "ou_different_owner".to_string(),
+                        bot_open_id: Some("ou_bot_agent_1".to_string()),
+                        bot_display_name: "木瓦".to_string(),
+                        credential_ref: "feishu/member/agent_1".to_string(),
+                    },
+                ),
+            )
+            .unwrap();
+
+        assert_eq!(rejected.result.status, CommandResultStatus::Rejected);
+        assert_eq!(rejected.result.code, "feishu_owner_identity.conflict");
     }
 
     #[test]

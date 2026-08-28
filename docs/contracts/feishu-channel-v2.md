@@ -38,12 +38,20 @@ Developer Identity 的摘要/显示字段和每 Bot `credentialRef`；Renderer/A
 
 ## 2. Owner-only Camp 与项目选择
 
-连接账号后 Core 为其建立 `FeishuOwnerIdentity`，并为每个已发布 App 维护经过消息或 callback envelope 验证的
-per-App identity。普通入站按 `union_id -> tenant user_id -> current-App open_id` 分类；首条可靠 envelope 若携带与已连接
-Developer Identity 一致的 tenant user identity，Core 必须在同一入站流程自动记录 App-scoped identity 并继续处理，不得
-要求 Owner 执行额外核验。缺少可靠映射或出现冲突时，当前消息在内部 fail closed；这不是 Bot lifecycle 或 Renderer 状态。
+连接账号后 Core 为其建立 `FeishuOwnerIdentity`。每个 Bot 发布或同 App reconciliation 在完成 Scope、Event、
+Callback/WebSocket 与版本在线核验后，必须先再次证明 publication intent 对应的 Developer Identity，再用该 App
+credential 调用 Application v6 get，并以 `user_id_type=open_id` 读取响应中不可变的 `creator_id`。App 创建与 durable
+freeze 均发生在该已证明 Session 中，因此该值就是 App 作用域的 `ownerOpenId`。可信 Main Host 随
+`channels.feishu.memberBot.upsert` 把 `(account_id, app_id, owner_open_id digest)` 与 Bot binding 在同一 Core
+事务冻结；现有非空 digest 不同则拒绝，禁止换绑。解析失败时发布不得进入 completed，已创建 App 仍由原
+publication intent 冻结并只允许原地 reconciliation。
+
+稳定入站只以本地 `(app_id, open_id)` 证明当前 App 的 Owner，不做 exact-message 回读，也不依赖逐消息远程
+Contact 请求。`union_id` 和 tenant `user_id` 只用于补充映射、跨 App 归并和冲突检查。个人版事件即使只携带
+`open_id + union_id` 也可直接通过已冻结映射；不得把首个发送者提升为 Owner。缺少冻结映射或出现冲突时，
+当前消息按 identity unverified/连接异常 fail closed，不得误报 non-owner；这不是 Renderer 待处理状态。
 Developer Session 的 `tenantId` 属于开放平台账号身份，消息 envelope 的 `tenant_key` 属于事件路由身份，两者不得直接
-比较。首条消息必须先由 frozen App 下与 canonical Developer Identity 一致的 tenant `user_id` 证明 Owner，再把该
+比较。首条消息必须先由 frozen App 下的 `(app_id, open_id)` 证明 Owner，再把该
 `tenant_key` 冻结到 canonical ExternalPrincipal；后续 tenant key 漂移必须 fail closed。
 顺序固定为 transport dedup、sender 解析、Owner 校验、会话类型、
 群/话题显式 mention、multi-Bot observe。Non-owner 私聊最多收到每 App/身份 24 小时一次提示，群/话题静默忽略；两者
@@ -205,8 +213,11 @@ durable freeze 后，Provisioner 读取 Secret、启用 Bot、请求 `eventMode=
 
 Scope 必须先通过 `/developers/v1/scope/all/:appId` 把当前 catalog 中的名称映射为 App identity scope ID，再用
 `/developers/v1/scope/update/:appId` 提交；catalog 缺失或发布后在线状态不是 enabled 都 fail closed。消息入口至少要求
-`im:message`、`im:message.p2p_msg:readonly`、`im:message.group_at_msg:readonly` 与
-`im:message:send_as_bot`。当前目标租户 catalog 使用 `im:chat:readonly`，不得把未经 catalog 证明的
+`im:message`、`im:message.p2p_msg:readonly`、`im:message.group_at_msg:readonly`、
+`im:message:send_as_bot` 与 `application:application:self_manage`。最后一项只允许成员 App 在发布期读取自身
+Application 信息，以 `user_id_type=open_id` 取得创建者 ID；该流程不得要求 Contact scope、不得读取通讯录，也只
+持久化 `open_id` 摘要。当前目标租户 catalog 使用
+`im:chat:readonly`，不得把未经 catalog 证明的
 `im:chat:read` 写成固定名称；roster 读取还要求 `im:chat.members:read`。
 
 Event 必须通过 `/developers/v1/event/:appId` 回读，以 `/developers/v1/event/switch/:appId` 把 `eventMode` 设置为 `4`，

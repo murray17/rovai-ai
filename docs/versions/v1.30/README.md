@@ -37,7 +37,10 @@ last_updated: 2026-08-28
   ChannelDelivery，并允许 ExternalPrincipal CampMessage author 与 ContextManifest/Formatter 22；
 - 只有已连接开发者身份对应的 Owner 能触发；per-App identity 无法证明时 fail closed。Owner 消息仍是
   ExternalPrincipal，不获得 `local_user` 权限；Developer Session `tenantId` 与 event `tenant_key` 分属不同命名空间，
-  首条 canonical tenant `user_id` 验证后冻结 event tenant key，后续漂移 fail closed；non-owner 在 observation 前结束且不留下业务事实；
+  发布/同 App reconciliation 在复核同一 Developer Identity 后，用各 App credential 读取自身不可变 `creator_id` 的
+  App-scoped `open_id`，作为 `ownerOpenId` 随 Bot binding 原子冻结；入站只以本地 `(app_id, open_id)` 判断。个人版事件缺少
+  `user_id` 不影响判断；解析未完成或映射冲突显示连接异常，不把首个发送者绑为 Owner，也不误报
+  non-owner。首条 Owner 事件再冻结 event tenant key；后续身份或 tenant key 漂移 fail closed；non-owner 在 observation 前结束且不留下业务事实；
 - 删除 Channel 人工 ProjectBinding/会话绑定。Core 从既有 directory Camp 投影 active Project Catalog；卡片只携带 opaque
   ID/显示名，canonical path 只在 Core，并在 Camp 创建时冻结；
 - Owner 私聊第一条消息自动创建 Quick Chat generation/Camp；精确 `/new` 只支持私聊、保留旧 Camp、创建新 Camp，
@@ -105,7 +108,7 @@ ExternalQuote 的确定性 agent projection。Bootstrap、Session Charter、sect
 实施与证据由[实施计划](implementation-plan.md)维护。仓库内完成门槛包括 v112→v116 升级、Developer Identity/
 publication intent、template-first fallback 分类、App-ID durable barrier、activation-first、队员 App 身份冻结/历史 disabled
 同 App 恢复、连接不注册 App、发布不产生 QR/飞书确认页、在线 Scope/Event/Callback 配置与回读、Manifest 假阳性回归、
-identity drift/create outcome unknown fail-closed、frozen Event timeout recoverable、owner/non-owner gate、DM `/new`、
+identity drift/create outcome unknown fail-closed、frozen Event timeout recoverable、发布期 App-scoped Owner prebinding、owner/non-owner gate、DM `/new`、
 PendingCampBinding replay/CAS、多 Bot 单卡与 fail-closed、FIFO promotion、普通群/话题 roster、ExternalQuote/Context bytes、safeStorage/Renderer
 秘密隔离、Host 恢复、双主题和完整 Rust/TypeScript/文档/构建门禁。真实飞书租户登录、应用创建、无平台确认发布
 和收发仍需要拥有可用企业权限的 Owner 在发布环境执行，自动化不伪造外部成功。
@@ -115,7 +118,7 @@ PendingCampBinding replay/CAS、多 Bot 单卡与 fail-closed、FIFO promotion�
 | 范围 | 结论 | 证据或理由 |
 | --- | --- | --- |
 | Version lifecycle | 已更新 | 本概览、[实施计划](implementation-plan.md)、[决定](decisions.md)与[版本索引](../README.md)共同切换 `current_version`。 |
-| Decisions | 已更新 | [v1.30 决定](decisions.md#v1-30-d09)冻结 Owner-only Camp、Quick Chat、私聊项目卡、聚合/统一 admission、ExternalQuote、roster、Main/Outbox，以及 template/activation-first Provisioner 边界。 |
+| Decisions | 已更新 | [v1.30 决定](decisions.md#v1-30-d10)冻结 Owner-only Camp、Quick Chat、私聊项目卡、聚合/统一 admission、ExternalQuote、roster、Main/Outbox、template/activation-first Provisioner 与发布期 App-scoped Owner prebinding 边界。 |
 | Contracts | 已更新 | [Feishu Channel v2](../../contracts/feishu-channel-v2.md)成为当前渠道入口，v1 转为历史；[ContextManifest Evidence v22](../../contracts/context-manifest-evidence-v22.md)继续拥有 AgentRun 输入。 |
 | Architecture | 已更新 | 新增[飞书渠道架构](../../architecture/feishu-channel.md)，连接 Renderer、Main Host、Core admission、Camp membership 与 Outbox 权威。 |
 | UI | 已更新 | 新增[渠道设置](../../ui/components/channel-settings.md)，并更新 UI/component 索引；视觉继续使用现有 Porcelain Day / Steel Night。 |

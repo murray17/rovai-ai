@@ -134,14 +134,22 @@ manifest 头像元数据；不得创建 App 或改变 App ID。
 
 ## Owner-only 入站与会话执行范围
 
-连接开发者账号时 Core 建立 canonical Feishu Owner；每个已发布 App 通过实际 message/callback envelope 自动建立
-per-App open/user/union identity。Main 收到消息后先调用 Core verify；首条 envelope 的 tenant user identity 与已连接
-Developer Identity 一致时，同一入站流程会记录 App-scoped identity 并继续，不存在 Owner 手工核验步骤或 Renderer 状态。
+连接开发者账号时 Core 建立 canonical Feishu Owner。每个 Bot 发布或同 App reconciliation 完成在线配置后，
+Provisioner 在再次证明同一 Developer Identity 后，用该 App credential 调用 Application v6 get，并以
+`user_id_type=open_id` 读取不可变 `creator_id`。由于 App 创建与 durable freeze 都发生在已证明的 Developer Session
+中，该 `creator_id` 就是当前 App 作用域的 `ownerOpenId`；可信 Main Host 在 Bot upsert 的同一 Core 事务冻结
+`(account_id, app_id, owner_open_id digest)`。
+Owner 解析失败时发布不完成；已创建 App 保持冻结，只能原地 reconciliation，不得创建第二个 App。
+
+稳定入站只以本地 `(app_id, open_id)` 证明 Owner，不依赖每条消息的远程身份请求。事件携带的 `user_id` 与
+`union_id` 只用于补充 identity、跨 App 归并和冲突检查，不得把首个发送者提升为 Owner，也不存在 Owner
+手工核验步骤或 Renderer 状态。Core 无冻结映射或发现冲突时按连接异常 fail closed。
 开放平台 Developer Identity 的 `tenantId` 与消息 envelope 的 `tenant_key` 是不同命名空间，不能互相做相等校验。首条
-消息由 frozen App 下的 canonical tenant `user_id` 建立信任后，Core 把事件 `tenant_key` 冻结在 canonical
+消息由 frozen App 下的 `(app_id, open_id)` 建立信任后，Core 把事件 `tenant_key` 冻结在 canonical
 ExternalPrincipal；后续 App/identity/tenant key 任一冲突都 fail closed。
-后续只有 `union_id -> tenant user_id -> verified open_id` 能证明 Owner 才继续。Owner 仍以 ExternalPrincipal 写入；non-owner 私聊只允许一次节流提示，群/话题静默
-停止，并且都不能留下 conversation、aggregate、Principal、pending binding、Camp 或 Run。
+后续事件即使携带 `union_id` 或 tenant `user_id`，也只能用于补充归并和冲突检查，不能替代已冻结的
+`(app_id, open_id)`。Owner 仍以 ExternalPrincipal 写入；non-owner 私聊只允许一次节流提示，群/话题静默停止，
+并且都不能留下 conversation、aggregate、Principal、pending binding、Camp 或 Run。
 
 Core 不再拥有 Owner 手工维护的 Channel ProjectBinding 目录。它从 Rovai 已存在的 directory Camp 事实投影 stable
 Project Catalog：卡片只得到 opaque project ID 和 display name，canonical path 始终留在 Core。目录失效或项目退出

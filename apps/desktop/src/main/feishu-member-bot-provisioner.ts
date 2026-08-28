@@ -1,4 +1,10 @@
 import { readFile } from 'node:fs/promises'
+import {
+  AppType,
+  Client,
+  Domain,
+  LoggerLevel
+} from '@larksuiteoapi/node-sdk'
 import rovaiMemberBotIconPath from '../../../../build/icon.png?asset'
 import type {
   FeishuDeveloperPortalSession,
@@ -34,6 +40,7 @@ export interface MemberBotAvatarSource {
 export interface ProvisionedMemberBot {
   appId: string
   appSecret: string
+  ownerOpenId: string
   botOpenId?: string
   botDisplayName: string
   publishedVersionId: string | null
@@ -82,6 +89,7 @@ const MEMBER_BOT_MANIFEST_REQUIREMENTS = {
       'im:message.p2p_msg:readonly',
       'im:message.group_at_msg:readonly',
       'im:message:send_as_bot',
+      'application:application:self_manage',
       'im:chat:readonly',
       'im:chat.members:read'
     ]
@@ -122,13 +130,50 @@ OpenPlatformApiClient,
 
 type WebSessionProvisionerOptions = {
   createClient?: (session: FeishuOpenPlatformSession) => OpenPlatformClient
+  createOwnerIdentityClient?: (input: {
+    brand: 'feishu' | 'lark'
+    appId: string
+    appSecret: string
+  }) => OwnerIdentityClient
   readDefaultAvatar?: () => Promise<AvatarPng>
+  resolveOwnerOpenId?: (input: {
+    brand: 'feishu' | 'lark'
+    appId: string
+    appSecret: string
+    signal?: AbortSignal
+  }) => Promise<string>
 }
+
+type OwnerIdentityClient = {
+  application: {
+    v6: {
+      application: {
+        get(input: {
+          path: { app_id: string }
+          params: { lang: 'zh_cn'; user_id_type: 'open_id' }
+        }): Promise<{
+          code?: number
+          data?: {
+            app?: {
+              app_id?: string
+              creator_id?: string
+            }
+          }
+        }>
+      }
+    }
+  }
+}
+
+type OwnerIdentityClientFactory = NonNullable<
+WebSessionProvisionerOptions['createOwnerIdentityClient']
+>
 
 export class FeishuWebSessionMemberBotProvisioner implements FeishuMemberBotProvisioner {
   readonly #developerSession: FeishuDeveloperPortalSession
   readonly #createClient: (session: FeishuOpenPlatformSession) => OpenPlatformClient
   readonly #readDefaultAvatar: () => Promise<AvatarPng>
+  readonly #resolveOwnerOpenId: NonNullable<WebSessionProvisionerOptions['resolveOwnerOpenId']>
 
   constructor(
     developerSession: FeishuDeveloperPortalSession,
@@ -137,6 +182,10 @@ export class FeishuWebSessionMemberBotProvisioner implements FeishuMemberBotProv
     this.#developerSession = developerSession
     this.#createClient = options.createClient ?? ((session) => new OpenPlatformApiClient(session))
     this.#readDefaultAvatar = options.readDefaultAvatar ?? readDefaultAvatar
+    this.#resolveOwnerOpenId = options.resolveOwnerOpenId ?? ((input) => resolveOwnerOpenId(
+      input,
+      options.createOwnerIdentityClient
+    ))
   }
 
   async create(input: Parameters<FeishuMemberBotProvisioner['create']>[0]): Promise<ProvisionedMemberBot> {
@@ -263,12 +312,19 @@ export class FeishuWebSessionMemberBotProvisioner implements FeishuMemberBotProv
         configuration,
         signal: input.signal
       })
+      const ownerOpenId = await this.#resolveOwnerOpenId({
+        brand: identity.brand,
+        appId: remoteAppId,
+        appSecret,
+        signal: input.signal
+      })
       input.onProgress?.('online_verified', remoteAppId)
       await this.#developerSession.persist()
       sessionPersisted = true
       return {
         appId: remoteAppId,
         appSecret,
+        ownerOpenId,
         botDisplayName: input.appName,
         publishedVersionId: publishedVersion.versionId
       }
@@ -445,12 +501,19 @@ export class FeishuWebSessionMemberBotProvisioner implements FeishuMemberBotProv
         configuration: finalVerification,
         signal: input.signal
       })
+      const ownerOpenId = await this.#resolveOwnerOpenId({
+        brand: identity.brand,
+        appId: input.remoteAppId,
+        appSecret,
+        signal: input.signal
+      })
       input.onProgress?.('online_verified', input.remoteAppId)
       await this.#developerSession.persist()
       sessionPersisted = true
       return {
         appId: input.remoteAppId,
         appSecret,
+        ownerOpenId,
         botDisplayName: input.appName,
         publishedVersionId: publishedVersion.versionId
       }
@@ -490,6 +553,70 @@ export class UnavailableFeishuDeveloperSessionService implements FeishuDeveloper
   }
 
   async disconnect(): Promise<void> {}
+}
+
+async function resolveOwnerOpenId(
+  input: {
+    brand: 'feishu' | 'lark'
+    appId: string
+    appSecret: string
+    signal?: AbortSignal
+  },
+  createClient: OwnerIdentityClientFactory = createOwnerIdentityClient
+): Promise<string> {
+  if (input.signal?.aborted) {
+    throw new Error('feishu_provisioning_cancelled')
+  }
+  try {
+    const client = createClient({
+      brand: input.brand,
+      appId: input.appId,
+      appSecret: input.appSecret
+    })
+    const response = await client.application.v6.application.get({
+      path: { app_id: input.appId },
+      params: { lang: 'zh_cn', user_id_type: 'open_id' }
+    })
+    if (input.signal?.aborted) {
+      throw new Error('feishu_provisioning_cancelled')
+    }
+    if (response.code !== undefined && response.code !== 0) {
+      throw new Error('feishu_connection_error')
+    }
+    const resolvedAppId = response.data?.app?.app_id?.trim()
+    const ownerOpenId = response.data?.app?.creator_id?.trim() ?? ''
+    if (
+      !ownerOpenId
+      || ownerOpenId.length > 512
+      || resolvedAppId !== input.appId
+    ) {
+      throw new Error('feishu_connection_error')
+    }
+    return ownerOpenId
+  } catch (error) {
+    if (
+      error instanceof Error
+      && [
+        'feishu_provisioning_cancelled',
+        'feishu_connection_error'
+      ].includes(error.message)
+    ) throw error
+    throw new Error('feishu_connection_error')
+  }
+}
+
+function createOwnerIdentityClient(input: {
+  brand: 'feishu' | 'lark'
+  appId: string
+  appSecret: string
+}): OwnerIdentityClient {
+  return new Client({
+    appId: input.appId,
+    appSecret: input.appSecret,
+    appType: AppType.SelfBuild,
+    domain: input.brand === 'lark' ? Domain.Lark : Domain.Feishu,
+    loggerLevel: LoggerLevel.error
+  })
 }
 
 export function isUnknownRemoteProvisioningError(error: unknown): boolean {

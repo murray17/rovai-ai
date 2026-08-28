@@ -38,7 +38,12 @@ last_updated: 2026-08-28
 - [x] 完成 p2p/group/topic identity、显式 mention gate、多 Bot collecting/finalize/timeout/mismatch；
 - [x] 完成 Owner verify/per-App identity 自动映射 gate、non-owner 零业务事实、canonical-first acknowledgement App、单张
   Owner 私聊项目卡和 callback envelope/nonce/version/CAS 重放防护；Developer Session `tenantId` 与 event `tenant_key`
-  分开处理，首条 canonical tenant `user_id` 验证后冻结 event tenant key；该内部映射不投影为 Owner 待处理的 Renderer 状态；
+  分开处理，发布期先冻结 `(app_id, owner_open_id digest)`，首条匹配的 Owner 事件再冻结 event tenant key；
+  该内部映射不投影为 Owner 待处理的 Renderer 状态；
+- [x] 实测确认飞书个人版入站可只携带 `open_id + union_id`；发布/同 App reconciliation 用各 App credential
+  调用 Application v6 get，以 `user_id_type=open_id` 读取当前 App 不可变 `creator_id`，作为该 App 的
+  `ownerOpenId` 随 Bot binding 原子冻结并以 `(app_id, open_id)` 稳定判断；复用 App 自管理权限而不要求
+  Contact scope 或通讯录读取，只持久化摘要；解析失败不完成发布，入站显示连接异常而非 non-owner；
 - [x] 完成 ChannelTurnRequest 单根 FIFO、统一原子 admission、永久失败/Runtime deferred 与 queue card 更新；
 - [x] 完成 ExternalQuote structured segment、`replyTo=null`、ExternalPrincipal source 与 CURRENT_INPUT v22；
 - [x] 完成父群 authoritative roster、普通群完整 membership、话题按需 membership 与 remove reconciliation；
@@ -82,7 +87,7 @@ last_updated: 2026-08-28
 - `cargo test -p rovai-core --lib`；
 - `cargo test -p rovai-core --bin rovai`；
 - `cargo test -p rovai-core --bin rovai-core`；
-- Migration 116 upgrade、Developer Identity/publication intent、队员 App 身份冻结/历史 disabled 同 App reactivation、Owner-only Channel 状态机、DM `/new`、PendingCampBinding、ExternalQuote、Context bytes 与
+- Migration 116 upgrade、Developer Identity/publication intent、队员 App 身份冻结/历史 disabled 同 App reactivation、Owner-only Channel 状态机、发布期 App-scoped Owner prebinding、DM `/new`、PendingCampBinding、ExternalQuote、Context bytes 与
   Secret projection、内置/managed 头像解析、正常发布头像传递、冻结 App 头像/readiness 修复、Manifest 假阳性、P2P
   Scope ID 映射、template-first fallback matrix、durable barrier、activation-first、dynamic patch reuse、Event timeout
   recoverable 和 Event/Callback mode fail-closed 定向测试全部通过；

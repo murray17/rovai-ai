@@ -372,3 +372,46 @@ canonical ExternalPrincipal；后续漂移 fail closed。
 - **每个被 mention Bot 都发项目卡：** 重复展示项目并产生 callback 竞态；
 - **在公共群展示项目选择：** 泄露本机项目名称和工作范围；
 - **允许群内 `/new` 或项目换绑：** 破坏一个群/话题、一个 Camp、一个冻结执行范围的不变量。
+
+<a id="v1-30-d10"></a>
+## V1.30-D10：发布期解析并冻结每个 App 的 Owner open ID
+
+### 背景
+
+真实飞书个人版的 `im.message.receive_v1` 可只携带 `open_id + union_id`，不携带 tenant `user_id`。
+开放平台 Developer Session 能稳定证明当前 Rovai Owner 账号，但没有可直接跨 App 使用的 `union_id`；`open_id` 又是 App-scoped，叮叮与
+咕咕即使属于同一 Owner，也会得到不同 `open_id`。直接信任第一个发送者不构成身份证明，每条消息远程查身份
+又会把稳定准入变成高延迟网络依赖。
+
+### 决定
+
+每个冻结 App 的稳定 Owner identity 是 `(app_id, open_id)`。发布或同 App reconciliation 完成在线配置后，
+Provisioner 先再次证明 publication intent 对应的 Developer Identity，再使用该 App 的 `appId + appSecret` 调用
+Application v6 get，以 `user_id_type=open_id` 读取不可变 `creator_id`。App 创建与 durable freeze 均发生在该已证明
+Session 中，因此该值就是 App-scoped `ownerOpenId`。可信 Main Host 把它随 Bot upsert 交给 Core；Core 在同一事务
+冻结 Bot binding 与 `(account_id, app_id, owner_open_id digest)`，已有不同 digest 时拒绝，禁止换绑。Owner 解析属于
+发布完成条件；失败后保留原 App，只能原地重试。
+
+发布与同 App reconciliation 只要求 App 自身资源管理权限，不要求 Contact scope，也不读取通讯录；Rovai 只读取
+当前 App 的创建者 Open ID 并持久化其摘要。
+入站不再回读消息或远程查 Contact，直接以本地 `(app_id, open_id)` 证明；`union_id/user_id` 只做补充归并与
+冲突检查。缺少冻结映射或冲突都按连接异常 fail closed，不得误报 non-owner。
+
+当前规范见[飞书渠道架构](../../architecture/feishu-channel.md#owner-only-入站与会话执行范围)和
+[Feishu Channel v2](../../contracts/feishu-channel-v2.md#2-owner-only-camp-与项目选择)。
+
+### 后果
+
+- 个人版 Owner 首条消息不需要手工核验，也不会因 envelope 缺少 `user_id` 被当成 non-owner；
+- 每次发布/对账只解析该 App 的已知 Owner；稳定消息路径始终是本地 Core gate；
+- 切换 Developer Session 不迁移、换绑或重发已有 App；旧 Bot 继续使用原账号的 App ID 与 credential。
+
+### 被拒绝方案
+
+- **把首个发送者的 open ID 直接冻结为 Owner：** 群成员可在真正 Owner 之前触发，不能构成身份证明；
+- **首条消息回读 tenant user ID：** 把发布完整性留到线上消息路径，增加首消息延迟与平台故障面；
+- **用 Contact v3 按 tenant user ID 转换：** 额外要求用户 ID/通讯录权限，且把 App 自身身份问题错误扩展为联系人读取；
+- **读取可转移的当前应用 Owner：** 远端转移会诱发身份换绑；不可变创建者才符合 no-rebind 状态机；
+- **只按裸 `open_id` 判断：** `open_id` 是 App-scoped，缺少 `app_id` 会错误合并不同 App 的身份；
+- **按 `union_id` 读取通讯录详情：** 不能替代 App-scoped `open_id`，也扩大跨 App 身份依赖；
+- **切换开发者账号后自动重建 Bot：** 会打破每队员唯一 App 与 no-rebind 状态机。

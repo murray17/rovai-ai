@@ -160,9 +160,6 @@ function controlledChannels(identities: Record<string, { openId: string; name: s
       im: { v1: {
         chatMembers: {
           isInChat: vi.fn(async () => ({ code: 0, data: { is_in_chat: true } }))
-        },
-        message: {
-          get: vi.fn(async () => ({ code: 0, data: { items: [] } }))
         }
       } }
     }
@@ -184,6 +181,7 @@ function normalizedMessage(input: {
   senderUserId: string
   senderOpenId?: string
   senderUnionId?: string
+  omitSenderUserId?: boolean
   content: string
   mentions?: Array<{ key: string; openId?: string; name?: string; isBot?: boolean }>
 }): Record<string, unknown> {
@@ -207,7 +205,7 @@ function normalizedMessage(input: {
         tenant_key: 'tenant-1',
         sender_id: {
           open_id: input.senderOpenId ?? `ou_${input.senderUserId}`,
-          user_id: input.senderUserId,
+          ...(input.omitSenderUserId ? {} : { user_id: input.senderUserId }),
           union_id: input.senderUnionId ?? `on_${input.senderUserId}`
         }
       },
@@ -382,9 +380,11 @@ describe('channel settings service', () => {
   it('uses only the developer session for publishing', async () => {
     const owner = identity()
     const credentialStore = memoryCredentialStore()
+    const memberBotUpserts: Record<string, unknown>[] = []
     const provision = vi.fn(async () => ({
       appId: 'cli-normal',
       appSecret: 'normal-secret',
+      ownerOpenId: 'ou_owner_normal',
       botOpenId: 'bot-open-id',
       botDisplayName: '审阅员',
       publishedVersionId: null
@@ -401,13 +401,18 @@ describe('channel settings service', () => {
       memberBotProvisioner: { create: provision },
       memberBotAvatarSource: { resolve: resolveAvatar },
       createChannel: fakeCreateChannel(),
-      core: channelCore((method) => {
+      core: channelCore((method, rawParams) => {
         if (method === 'channels.feishu.snapshot') {
           return coreSnapshot({ account: connectedAccount(owner) })
         }
         if (method === 'members.get') return presentAgent('agent-a', {
           avatarRef: 'rovai://member-avatar/builtin/luoke/v1'
         })
+        if (method === 'channels.feishu.memberBot.upsert') {
+          memberBotUpserts.push(
+            (rawParams as { command: Record<string, unknown> }).command
+          )
+        }
         return { status: 'applied' }
       })
     })
@@ -430,6 +435,19 @@ describe('channel settings service', () => {
       appId: 'cli-normal',
       appSecret: 'normal-secret'
     })
+    expect(memberBotUpserts).toHaveLength(2)
+    expect(memberBotUpserts).toEqual([
+      expect.objectContaining({
+        appId: 'cli-normal',
+        ownerOpenId: 'ou_owner_normal',
+        botOpenId: null
+      }),
+      expect.objectContaining({
+        appId: 'cli-normal',
+        ownerOpenId: 'ou_owner_normal',
+        botOpenId: 'bot-open-id'
+      })
+    ])
 
     expect(provision).toHaveBeenCalledTimes(1)
   })
@@ -450,6 +468,7 @@ describe('channel settings service', () => {
       return {
         appId: 'cli-fresh-activation',
         appSecret: 'fresh-secret',
+        ownerOpenId: 'ou_owner_fresh',
         botDisplayName: '审阅员',
         publishedVersionId: 'version_2'
       }
@@ -481,6 +500,7 @@ describe('channel settings service', () => {
     const reconcile = vi.fn(async () => ({
       appId: 'cli-frozen',
       appSecret: 'recovered-secret',
+      ownerOpenId: 'ou_owner_frozen',
       botDisplayName: '审阅员',
       publishedVersionId: 'version-existing'
     }))
@@ -800,6 +820,7 @@ describe('channel settings service', () => {
           return {
             appId: 'cli-retry',
             appSecret: 'retry-secret',
+            ownerOpenId: 'ou_owner_retry',
             botDisplayName: '审阅员',
             publishedVersionId: null
           }
@@ -836,6 +857,7 @@ describe('channel settings service', () => {
             updatedAt: '2026-08-27T00:01:00Z'
           }
         } else if (method === 'channels.feishu.memberBot.upsert') {
+          expect(params.command).toMatchObject({ ownerOpenId: 'ou_owner_retry' })
           memberBots = [{
             agentId: 'agent-a',
             accountId: connectedAccount(owner).accountId,
@@ -844,7 +866,8 @@ describe('channel settings service', () => {
             credentialRef: params.command?.credentialRef,
             status: 'published',
             failureCode: null,
-            version: 1
+            version: 1,
+            ownerIdentityStatus: 'verified'
           }]
         }
         return { status: 'applied' }
@@ -1045,6 +1068,7 @@ describe('channel settings service', () => {
     const reconcile = vi.fn(async () => ({
       appId: 'cli-event-timeout',
       appSecret: 'event-timeout-secret',
+      ownerOpenId: 'ou_owner_event_timeout',
       botDisplayName: '审阅员',
       publishedVersionId: 'version_2'
     }))
@@ -1177,6 +1201,7 @@ describe('channel settings service', () => {
     const reconcile = vi.fn(async () => ({
       appId: 'cli-published-remotely',
       appSecret: 'recovered-secret',
+      ownerOpenId: 'ou_owner_published_remotely',
       botDisplayName: '审阅员',
       publishedVersionId: 'version_1'
     }))
@@ -1285,6 +1310,7 @@ describe('channel settings service', () => {
     const reconcile = vi.fn(async () => ({
       appId: 'cli-frozen',
       appSecret: 'existing-secret',
+      ownerOpenId: 'ou_owner_frozen',
       botDisplayName: '审阅员',
       publishedVersionId: 'version_2'
     }))
@@ -1486,6 +1512,148 @@ describe('channel settings service', () => {
     })
     expect(JSON.stringify(callback)).not.toContain('ou_spoofed')
     expect(harness.updateCard).toHaveBeenCalledTimes(1)
+    await service.stop()
+  })
+
+  it('accepts the frozen App-scoped Owner open_id when an event omits user_id', async () => {
+    const harness = controlledChannels({ cli_a: { openId: 'ou_bot_a', name: '审阅员' } })
+    const commands: Array<{ method: string; command: Record<string, unknown> }> = []
+    const owner = identity()
+    const service = new ChannelSettingsService({
+      credentialStore: memoryCredentialStore({
+        'feishu-member-a': { appId: 'cli_a', appSecret: 'secret-a' }
+      }),
+      createChannel: harness.createChannel,
+      ...inertInterval(),
+      core: channelCore((method, rawParams) => {
+        const command = ((rawParams as { command?: Record<string, unknown> } | undefined)?.command ?? {})
+        commands.push({ method, command })
+        if (method === 'channels.feishu.snapshot') {
+          return coreSnapshot({
+            account: connectedAccount(owner),
+            memberBots: [{
+              agentId: 'agent-a',
+              accountId: 'account-1',
+              brand: 'feishu',
+              appId: 'cli_a',
+              botDisplayName: '审阅员',
+              credentialRef: 'feishu-member-a',
+              status: 'published',
+              failureCode: null,
+              version: 1,
+              ownerIdentityStatus: 'verified'
+            }]
+          })
+        }
+        if (method === 'channels.feishu.owner.verify') {
+          const isOwner = command.senderOpenId === 'ou_owner_for_cli_a'
+          return {
+            status: 'applied',
+            code: isOwner ? 'channel.owner.verified' : 'channel.owner.non_owner',
+            payload: { classification: isOwner ? 'owner' : 'non_owner' }
+          }
+        }
+        if (method === 'channels.inbound.observe') {
+          return {
+            status: 'accepted',
+            code: 'channel.inbound.accepted',
+            payload: { aggregateId: 'rvcia_owner', readyToFinalize: false }
+          }
+        }
+        if (method === 'channels.host.tick') {
+          return { status: 'applied', code: 'channels.host.ticked', payload: { deliveries: [] } }
+        }
+        return { status: 'applied', code: `${method}.applied`, payload: {} }
+      })
+    })
+    await service.start()
+
+    await harness.handlers.get('cli_a:message')!(normalizedMessage({
+      messageId: 'om_owner_without_user_id',
+      senderUserId: owner.userId,
+      senderOpenId: 'ou_owner_for_cli_a',
+      senderUnionId: 'on_owner',
+      omitSenderUserId: true,
+      content: '你好'
+    }))
+
+    expect(commands.find(({ method }) => method === 'channels.feishu.owner.verify')?.command)
+      .toMatchObject({
+        appId: 'cli_a',
+        senderOpenId: 'ou_owner_for_cli_a',
+        senderUserId: null,
+        senderUnionId: 'on_owner'
+      })
+    expect(commands.filter(({ method }) => method === 'channels.inbound.observe')).toHaveLength(1)
+    expect(harness.send).not.toHaveBeenCalledWith(expect.anything(), expect.objectContaining({
+      text: '该 Bot 当前仅供 Rovai Owner 使用。'
+    }))
+    await service.stop()
+  })
+
+  it('reports a connection error when Core has no frozen App-scoped Owner identity', async () => {
+    const harness = controlledChannels({ cli_a: { openId: 'ou_bot_a', name: '审阅员' } })
+    const commands: Array<{ method: string; command: Record<string, unknown> }> = []
+    const service = new ChannelSettingsService({
+      credentialStore: memoryCredentialStore({
+        'feishu-member-a': { appId: 'cli_a', appSecret: 'secret-a' }
+      }),
+      createChannel: harness.createChannel,
+      ...inertInterval(),
+      core: channelCore((method, rawParams) => {
+        const command = ((rawParams as { command?: Record<string, unknown> } | undefined)?.command ?? {})
+        commands.push({ method, command })
+        if (method === 'channels.feishu.snapshot') {
+          return coreSnapshot({
+            account: connectedAccount(),
+            memberBots: [{
+              agentId: 'agent-a',
+              accountId: 'account-1',
+              brand: 'feishu',
+              appId: 'cli_a',
+              botDisplayName: '审阅员',
+              credentialRef: 'feishu-member-a',
+              status: 'published',
+              failureCode: null,
+              version: 1,
+              ownerIdentityStatus: 'unverified'
+            }]
+          })
+        }
+        if (method === 'channels.host.tick') {
+          return { status: 'applied', code: 'channels.host.ticked', payload: { deliveries: [] } }
+        }
+        if (method === 'channels.feishu.owner.verify') {
+          return {
+            status: 'applied',
+            code: 'channel.owner.unverified',
+            payload: { classification: 'unverified' }
+          }
+        }
+        return { status: 'applied', code: `${method}.applied`, payload: {} }
+      })
+    })
+    await service.start()
+
+    await harness.handlers.get('cli_a:message')!(normalizedMessage({
+      messageId: 'om_owner_resolution_unavailable',
+      senderUserId: 'owner-user-id',
+      senderOpenId: 'ou_owner',
+      senderUnionId: 'on_owner',
+      omitSenderUserId: true,
+      content: '你好'
+    }))
+
+    expect(commands.filter(({ method }) => method === 'channels.feishu.owner.verify'))
+      .toHaveLength(1)
+    expect(commands.filter(({ method }) => method === 'channels.inbound.observe'))
+      .toHaveLength(0)
+    expect(harness.send).toHaveBeenCalledWith('oc_test', {
+      text: '飞书连接异常，请稍后重试。'
+    })
+    expect(harness.send).not.toHaveBeenCalledWith(expect.anything(), expect.objectContaining({
+      text: '该 Bot 当前仅供 Rovai Owner 使用。'
+    }))
     await service.stop()
   })
 

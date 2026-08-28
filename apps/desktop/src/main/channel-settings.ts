@@ -199,7 +199,7 @@ export class ChannelSettingsService {
   readonly #chatNameCache = new Map<string, string>()
   readonly #rosterReconciledAt = new Map<string, number>()
   readonly #rosterReconciliations = new Map<string, Promise<boolean>>()
-  readonly #nonOwnerDmHints = new Map<string, number>()
+  readonly #dmHints = new Map<string, number>()
   #activeQrAttempt: ChannelQrAttemptView | null = null
   #activeQrAbort: AbortController | null = null
   #activeProvisioning: ChannelSettingsSnapshot['activeProvisioning'] = null
@@ -388,18 +388,7 @@ export class ChannelSettingsService {
       && intent.remoteAppId === credential.appId
       && intent.credentialRef === credentialRef
     if (canResumeInitialConnection) {
-      if (snapshot.account?.status !== 'connected' || snapshot.account.accountId !== intent.accountId) {
-        throw new Error('请先连接最初发布该队员应用的飞书账号。')
-      }
-      await this.#advancePublicationIntent(intent.publicationIntentId, intent.version, {
-        state: 'version_published',
-        remoteAppId: credential.appId,
-        credentialRef,
-        lastCompletedStep: 'version_published',
-        failureCode: null
-      })
-      retryIntentVersion = intent.version + 1
-      retryLastCompletedStep = 'version_published'
+      return this.#publishNewMemberBot(agentId, 'retry')
     }
     if (
       (!bot && !canResumeInitialConnection)
@@ -411,6 +400,9 @@ export class ChannelSettingsService {
     }
     if (bot && credential.appId !== bot.appId) {
       throw new Error('本机凭据与该队员冻结的飞书应用不一致；为避免换绑，已停止重试。')
+    }
+    if (bot?.ownerIdentityStatus === 'unverified') {
+      return this.#publishNewMemberBot(agentId, 'retry')
     }
     if (
       bot?.status === 'published'
@@ -451,7 +443,7 @@ export class ChannelSettingsService {
       retryLastCompletedStep = lastCompletedStep
     }
     try {
-      await this.#publishCredential(bindingAccountId, agent, credentialRef, credential)
+      await this.#connectPublishedCredential(agent, credentialRef, credential)
       await advanceRetryIntent('connection_verified', 'connection_verified')
       await advanceRetryIntent('completed', 'completed')
     } catch (error) {
@@ -683,7 +675,8 @@ export class ChannelSettingsService {
         account.accountId,
         { ...agent, displayName: botDisplayName },
         credentialRef,
-        credential
+        credential,
+        provisioned.ownerOpenId
       )
       await advanceIntent({
         state: 'connection_verified',
@@ -860,7 +853,8 @@ export class ChannelSettingsService {
         account.accountId,
         { ...agent, displayName: provisioned.botDisplayName },
         credentialRef,
-        credential
+        credential,
+        provisioned.ownerOpenId
       )
       await advanceIntent({
         state: 'connection_verified',
@@ -1070,12 +1064,14 @@ export class ChannelSettingsService {
     accountId: string,
     agent: AgentProfile,
     credentialRef: string,
-    credential: FeishuAppCredential
+    credential: FeishuAppCredential,
+    ownerOpenId: string
   ): Promise<void> {
     await this.#command('channels.feishu.memberBot.upsert', {
       accountId,
       agentId: agent.agentId,
       appId: credential.appId,
+      ownerOpenId,
       botOpenId: null,
       botDisplayName: agent.displayName,
       credentialRef
@@ -1086,6 +1082,7 @@ export class ChannelSettingsService {
         accountId,
         agentId: agent.agentId,
         appId: credential.appId,
+        ownerOpenId,
         botOpenId: managed.channel.botIdentity?.openId ?? null,
         botDisplayName: managed.channel.botIdentity?.name || agent.displayName,
         credentialRef
@@ -1094,6 +1091,19 @@ export class ChannelSettingsService {
       await this.#disconnectManaged(managed)
       throw error
     }
+    await this.#activateManagedChannel(managed)
+  }
+
+  async #connectPublishedCredential(
+    agent: AgentProfile,
+    credentialRef: string,
+    credential: FeishuAppCredential
+  ): Promise<void> {
+    const managed = await this.#connectBot(agent.agentId, credentialRef, credential)
+    await this.#activateManagedChannel(managed)
+  }
+
+  async #activateManagedChannel(managed: ManagedChannel): Promise<void> {
     const previous = this.#managedChannels.get(managed.appId)
     if (previous) await this.#disconnectManaged(previous)
     this.#managedChannels.set(managed.appId, managed)
@@ -1243,7 +1253,15 @@ export class ChannelSettingsService {
           : 'non_owner'
       )
       if (message.chatType === 'p2p') {
-        await this.#sendNonOwnerDmHint(managed, message, senderExternalUserId)
+        await this.#sendDmHint(
+          managed,
+          message,
+          senderExternalUserId,
+          owner.payload.classification === 'unverified' ? 'connection' : 'non_owner',
+          owner.payload.classification === 'unverified'
+            ? '飞书连接异常，请稍后重试。'
+            : '该 Bot 当前仅供 Rovai Owner 使用。'
+        )
       }
       await this.#emit()
       return
@@ -1395,19 +1413,21 @@ export class ChannelSettingsService {
     await this.#emit()
   }
 
-  async #sendNonOwnerDmHint(
+  async #sendDmHint(
     managed: ManagedChannel,
     message: NormalizedMessage,
-    senderExternalUserId: string
+    senderExternalUserId: string,
+    kind: 'connection' | 'non_owner',
+    text: string
   ): Promise<void> {
-    const key = `${managed.appId}\0${senderExternalUserId}`
-    const lastSentAt = this.#nonOwnerDmHints.get(key)
+    const key = `${kind}\0${managed.appId}\0${senderExternalUserId}`
+    const lastSentAt = this.#dmHints.get(key)
     if (lastSentAt !== undefined && this.#now() - lastSentAt < NON_OWNER_DM_HINT_THROTTLE_MS) return
-    this.#nonOwnerDmHints.set(key, this.#now())
+    this.#dmHints.set(key, this.#now())
     await managed.channel.send(message.chatId, {
-      text: '该 Bot 当前仅供 Rovai Owner 使用。'
+      text
     }).catch((error) => {
-      logFeishuBotDiagnostic('non_owner_hint.failed', {
+      logFeishuBotDiagnostic(`${kind}_hint.failed`, {
         ...messageDiagnostic(managed, message),
         reason: channelFailureCode(error)
       })
