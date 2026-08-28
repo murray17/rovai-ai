@@ -1,4 +1,8 @@
 import { createHash } from 'node:crypto'
+import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { LarkChannelError } from '@larksuiteoapi/node-sdk'
 import { describe, expect, it, vi } from 'vitest'
 import {
   ChannelSettingsService,
@@ -140,10 +144,12 @@ function controlledChannels(identities: Record<string, { openId: string; name: s
   handlers: Map<string, (event: unknown) => void | Promise<void>>
   send: ReturnType<typeof vi.fn>
   updateCard: ReturnType<typeof vi.fn>
+  recallMessage: ReturnType<typeof vi.fn>
 } {
   const handlers = new Map<string, (event: unknown) => void | Promise<void>>()
   const send = vi.fn(async () => ({ messageId: 'om_sent' }))
   const updateCard = vi.fn(async () => undefined)
+  const recallMessage = vi.fn(async () => undefined)
   const createChannel = vi.fn((options: { appId: string }) => ({
     botIdentity: identities[options.appId],
     on: (event: string, handler: (value: unknown) => void | Promise<void>) => {
@@ -154,6 +160,7 @@ function controlledChannels(identities: Record<string, { openId: string; name: s
     disconnect: vi.fn(async () => undefined),
     send,
     updateCard,
+    recallMessage,
     getChatMode: vi.fn(async () => 'group'),
     getChatInfo: vi.fn(async () => ({ name: '测试群' })),
     rawClient: {
@@ -164,7 +171,7 @@ function controlledChannels(identities: Record<string, { openId: string; name: s
       } }
     }
   })) as unknown as NonNullable<ChannelHostDependencies['createChannel']>
-  return { createChannel, handlers, send, updateCard }
+  return { createChannel, handlers, send, updateCard, recallMessage }
 }
 
 function inertInterval(): Pick<ChannelHostDependencies, 'setInterval' | 'clearInterval'> {
@@ -1738,5 +1745,223 @@ describe('channel settings service', () => {
       canonicalMentionsComplete: true
     })
     await service.stop()
+  })
+
+  it('sends execution consoles as cards and permanent Agent output as unheaded Markdown', async () => {
+    const harness = controlledChannels({ cli_a: { openId: 'ou_bot_a', name: '芝士' } })
+    const settlements: Array<Record<string, unknown>> = []
+    let delivered = false
+    const service = new ChannelSettingsService({
+      credentialStore: memoryCredentialStore({
+        'feishu-member-a': { appId: 'cli_a', appSecret: 'secret-a' }
+      }),
+      createChannel: harness.createChannel,
+      ...inertInterval(),
+      core: channelCore((method, rawParams) => {
+        const command = ((rawParams as { command?: Record<string, unknown> } | undefined)?.command ?? {})
+        if (method === 'channels.feishu.snapshot') {
+          return coreSnapshot({
+            memberBots: [{
+              agentId: 'agent-a', accountId: 'account-1', brand: 'feishu', appId: 'cli_a',
+              botDisplayName: '芝士', credentialRef: 'feishu-member-a', status: 'published',
+              failureCode: null, version: 1, ownerIdentityStatus: 'verified'
+            }]
+          })
+        }
+        if (method === 'channels.host.tick') {
+          if (delivered) return { status: 'applied', payload: { deliveries: [] } }
+          delivered = true
+          return {
+            status: 'applied',
+            payload: {
+              deliveries: [{
+                deliveryId: 'delivery-console', requestId: 'request-1',
+                deliveryKind: 'execution_console_upsert', targetAppId: 'cli_a',
+                credentialRef: 'feishu-member-a', chatId: 'oc_group', topicKey: '',
+                conversationKind: 'group', attemptCount: 1, updateMessageId: null,
+                recipientOpenId: 'ou_owner',
+                payload: {
+                  kind: 'execution_console_upsert', executionConsoleId: 'console-1',
+                  agentRunId: 'run-1', expectedSequence: 1
+                }
+              }, {
+                deliveryId: 'delivery-output', requestId: 'request-1',
+                deliveryKind: 'agent_output', targetAppId: 'cli_a',
+                credentialRef: 'feishu-member-a', chatId: 'oc_group', topicKey: '',
+                conversationKind: 'group', attemptCount: 1, updateMessageId: null,
+                recipientOpenId: 'ou_owner',
+                payload: { kind: 'agent_output', body: '这是永久正文。', mentionPrincipal: true }
+              }]
+            }
+          }
+        }
+        if (method === 'channels.executionConsole.source') {
+          return {
+            sequence: 1,
+            agentRunId: 'run-1',
+            agentDisplayName: '芝士',
+            run: { status: 'running', waitReason: null, terminalReasonCode: null },
+            evidence: [],
+            publicOutput: null
+          }
+        }
+        if (method === 'channels.deliveries.settle') {
+          settlements.push(command)
+          return { status: 'applied', payload: {} }
+        }
+        return { status: 'applied', payload: {} }
+      })
+    })
+
+    await service.start()
+    await vi.waitFor(() => expect(settlements).toHaveLength(2))
+
+    expect(harness.send).toHaveBeenCalledWith(
+      'oc_group',
+      { card: expect.objectContaining({
+        header: expect.objectContaining({ title: { tag: 'plain_text', content: '芝士 · 执行中' } })
+      }) },
+      undefined
+    )
+    expect(harness.send).toHaveBeenCalledWith(
+      'oc_group',
+      { markdown: '这是永久正文。' },
+      { mentions: [{ key: 'request_author', openId: 'ou_owner', name: 'Owner' }] }
+    )
+    expect(JSON.stringify(harness.send.mock.calls)).not.toContain('Rovai 队员回复')
+    expect(settlements.every((command) => command.outcome === 'sent')).toBe(true)
+    await service.stop()
+  })
+
+  it('treats an already-revoked execution console as a successful recall', async () => {
+    const harness = controlledChannels({ cli_a: { openId: 'ou_bot_a', name: '芝士' } })
+    harness.recallMessage.mockRejectedValueOnce({ response: { status: 404, data: { code: 230020 } } })
+    const settlements: Array<Record<string, unknown>> = []
+    let delivered = false
+    const service = new ChannelSettingsService({
+      credentialStore: memoryCredentialStore({
+        'feishu-member-a': { appId: 'cli_a', appSecret: 'secret-a' }
+      }),
+      createChannel: harness.createChannel,
+      ...inertInterval(),
+      core: channelCore((method, rawParams) => {
+        const command = ((rawParams as { command?: Record<string, unknown> } | undefined)?.command ?? {})
+        if (method === 'channels.feishu.snapshot') {
+          return coreSnapshot({ memberBots: [{
+            agentId: 'agent-a', accountId: 'account-1', brand: 'feishu', appId: 'cli_a',
+            botDisplayName: '芝士', credentialRef: 'feishu-member-a', status: 'published',
+            failureCode: null, version: 1, ownerIdentityStatus: 'verified'
+          }] })
+        }
+        if (method === 'channels.host.tick') {
+          if (delivered) return { status: 'applied', payload: { deliveries: [] } }
+          delivered = true
+          return { status: 'applied', payload: { deliveries: [{
+            deliveryId: 'delivery-recall', requestId: 'request-1',
+            deliveryKind: 'execution_console_recall', targetAppId: 'cli_a',
+            credentialRef: 'feishu-member-a', chatId: 'oc_group', topicKey: '',
+            conversationKind: 'group', attemptCount: 1, updateMessageId: 'om_console',
+            recipientOpenId: null,
+            payload: { kind: 'execution_console_recall', executionConsoleId: 'console-1' }
+          }] } }
+        }
+        if (method === 'channels.deliveries.settle') {
+          settlements.push(command)
+          return { status: 'applied', payload: {} }
+        }
+        return { status: 'applied', payload: {} }
+      })
+    })
+
+    await service.start()
+    await vi.waitFor(() => expect(settlements).toHaveLength(1))
+
+    expect(harness.recallMessage).toHaveBeenCalledWith('om_console')
+    expect(settlements[0]).toMatchObject({
+      outcome: 'sent', externalDeliveryMessageId: 'om_console', failureCode: null
+    })
+    await service.stop()
+  })
+
+  it('settles an attachment upload independently without resending its body', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'rovai-channel-attachment-'))
+    const path = join(directory, 'result.png')
+    const bytes = Buffer.from('verified image bytes')
+    await writeFile(path, bytes)
+    const contentDigest = `sha256:${createHash('sha256').update(bytes).digest('hex')}`
+    const harness = controlledChannels({ cli_a: { openId: 'ou_bot_a', name: '芝士' } })
+    harness.send.mockImplementation(async (_to, input) => {
+      if ('image' in input) throw new LarkChannelError('upload_failed', 'upload failed')
+      return { messageId: 'om_body' }
+    })
+    const settlements: Array<Record<string, unknown>> = []
+    let delivered = false
+    const service = new ChannelSettingsService({
+      credentialStore: memoryCredentialStore({
+        'feishu-member-a': { appId: 'cli_a', appSecret: 'secret-a' }
+      }),
+      createChannel: harness.createChannel,
+      ...inertInterval(),
+      core: channelCore((method, rawParams) => {
+        const command = ((rawParams as { command?: Record<string, unknown> } | undefined)?.command ?? {})
+        if (method === 'channels.feishu.snapshot') {
+          return coreSnapshot({ memberBots: [{
+            agentId: 'agent-a', accountId: 'account-1', brand: 'feishu', appId: 'cli_a',
+            botDisplayName: '芝士', credentialRef: 'feishu-member-a', status: 'published',
+            failureCode: null, version: 1, ownerIdentityStatus: 'verified'
+          }] })
+        }
+        if (method === 'channels.host.tick') {
+          if (delivered) return { status: 'applied', payload: { deliveries: [] } }
+          delivered = true
+          return { status: 'applied', payload: { deliveries: [{
+            deliveryId: 'delivery-body', requestId: 'request-1', deliveryKind: 'agent_output',
+            targetAppId: 'cli_a', credentialRef: 'feishu-member-a', chatId: 'oc_group',
+            topicKey: '', conversationKind: 'group', attemptCount: 1, updateMessageId: null,
+            recipientOpenId: null,
+            payload: { kind: 'agent_output', body: '先发送正文。', mentionPrincipal: false }
+          }, {
+            deliveryId: 'delivery-image', requestId: 'request-1', deliveryKind: 'agent_attachment',
+            targetAppId: 'cli_a', credentialRef: 'feishu-member-a', chatId: 'oc_group',
+            topicKey: '', conversationKind: 'group', attemptCount: 1, updateMessageId: null,
+            recipientOpenId: null,
+            payload: {
+              kind: 'agent_attachment', campId: 'camp-1', attachmentId: 'attachment-1',
+              attachmentKind: 'image', fileName: 'result.png', size: bytes.byteLength,
+              contentDigest, requiresBodyDelivery: true, ordinal: 0
+            }
+          }] } }
+        }
+        if (method === 'camp.attachments.desktopOpenTarget') {
+          return {
+            attachmentId: 'attachment-1', displayName: 'result.png', kind: 'file',
+            mediaType: 'image/png', path, openRisk: 'normal'
+          }
+        }
+        if (method === 'channels.deliveries.settle') {
+          settlements.push(command)
+          return { status: 'applied', payload: {} }
+        }
+        return { status: 'applied', payload: {} }
+      })
+    })
+
+    try {
+      await service.start()
+      await vi.waitFor(() => expect(settlements).toHaveLength(2))
+
+      expect(harness.send.mock.calls.filter(([, input]) => 'markdown' in input)).toHaveLength(1)
+      expect(harness.send.mock.calls.filter(([, input]) => 'image' in input)).toHaveLength(1)
+      expect(settlements).toEqual(expect.arrayContaining([
+        expect.objectContaining({ deliveryId: 'delivery-body', outcome: 'sent' }),
+        expect.objectContaining({
+          deliveryId: 'delivery-image', outcome: 'failed',
+          failureCode: 'upload_failed', retryable: true
+        })
+      ]))
+    } finally {
+      await service.stop()
+      await rm(directory, { recursive: true, force: true })
+    }
   })
 })

@@ -335,9 +335,10 @@ Host 在 observe 前先调用 Core Owner verify；只有 classification=owner �
 分流为控制命令；group/topic 要求显式 mention 一个以上 published managed Bot。echo、non-owner、未 mention、群内
 `/new` 和缺失 canonical topic 都在 observation 前停止。Core 在 observe/finalize 再验 Owner、target Agent 与 App 映射。
 
-当前消息的资源一期只把 SDK 提供的名称和类型冻结为 Structured Content 文本摘要，不下载或绑定
-`message_attachment`。ChannelDelivery 一期只发送状态卡、文本和卡片，不发送 Camp 图片/文件；资源传输需要
-后续独立合同补齐大小、病毒扫描、存储、publication 与 retry identity 后再接入。
+入站消息资源仍只把 SDK 提供的名称和类型冻结为 Structured Content 文本摘要，不下载或绑定为 Camp Attachment。
+出站方向不同：Agent 已通过 [Camp Attachment v6](camp-attachment-v6.md)正式发布并由 Managed Attachment v2 authority
+持有的图片/文件，可以按第 7 节作为原生飞书资源发送；不得把入站摘要、Runtime 临时路径或未经发布的 workspace 文件
+提升为出站附件。
 
 Aggregate identity 是 `provider + tenant + digest(externalMessageId)`，observation identity 是
 `aggregate + receivingAppId`。第一条 observation 必须只建立 `collecting`，不能创建业务对象。所有 observation
@@ -381,7 +382,9 @@ Search、SHARED_CONVERSATION 或 CURRENT_INPUT。队首通过
 - 全部 canonical target 的初始 AgentRun；
 - request 的 admitted identity 与 queue acknowledgement 更新。
 
-active root Turn 的 Run、A2A、Gather 和 required Delivery 全部正式终结后，请求 completed，下一队首才能提升。
+active root Turn 的 Run、A2A 与 Gather 全部正式终结，且本次请求的永久正文、附件和 attention delivery 全部进入终态后，
+请求才可 completed/failed，下一队首才能提升。执行控制台和 queue acknowledgement 是临时 presentation，不阻塞该
+内部 settlement。
 只有 `agent_run.runtime_not_ready` 可以留在 queued 并重试；目标 Bot 未发布/不在 roster 或其他永久 admission
 错误写 failed 与 attention delivery，不静默改派。
 
@@ -391,16 +394,18 @@ active root Turn 的 Run、A2A、Gather 和 required Delivery 全部正式终结
 type ChannelDeliveryKind =
   | 'project_selection'
   | 'queue_ack'
-  | 'agent_status'
+  | 'execution_console_upsert'
+  | 'execution_console_recall'
   | 'agent_output'
-  | 'completion'
+  | 'agent_attachment'
   | 'attention'
 
 type ChannelDeliveryStatus = 'pending' | 'attempting' | 'sent' | 'failed'
 ```
 
 普通 delivery 关联 exact request；`project_selection` 只关联 exact pending binding。每项 delivery 有唯一
-`dedupeKey`、target App、可选 source Agent/CampMessage、payload、attempt count、available time 和外部 message ID。
+`dedupeKey`、priority、target App、可选 source Agent/CampMessage/ExecutionConsole、payload、attempt count、available
+time 和外部 message ID。
 claim 使用 30 秒 lease；过期 attempting 可以被新 worker 领取。retryable error 使用有界指数退避，最多五次；terminal
 sent/failed 单调。成功 CampMessage 不因飞书发送失败回滚。
 
@@ -408,10 +413,39 @@ project selection 必须由 frozen acknowledgement App 直接发送到 Owner ope
 conversation display name、opaque project options、nonce/version，没有 path 或 operator identity。refresh 更新原卡，
 bind/cancel/stale/expired 使用 terminal card 收口。
 
-queue ack 首次发送后保存 external message ID，admission 原位更新为“已开始”；失败/attention 同样优先更新既有
-状态卡。Agent output 选择实际作者 Agent 的 published Bot；作者不可用时生成 attention，不由 ack Bot 冒充。
-group/topic 中结构化 `CurrentUserMention` 只有找到原始 ExternalPrincipal 在目标 App 下的有效 open ID 才投影原生
-`<at>`；p2p 不重复 mention。
+`queue_ack` 只在请求确实留在 queued 时创建；admission 删除尚未发送的 ack，或在已发送/正在发送时追加 recall
+delivery。它不更新成“已开始”，也不承担最终状态。`attention` 是独立永久卡片，不覆盖 queue ack 或 Agent 输出。
+
+每个 AgentRun（包括 A2A/Gather 派生 Run）拥有一个 Core-owned `ChannelExecutionConsole`，冻结 request、conversation、
+CampTurn、Agent、目标 App 与外部 message ID，使用单调 snapshot sequence 和以下状态：
+
+```ts
+type ChannelExecutionConsoleState =
+  | 'opening' | 'active' | 'terminal'
+  | 'recall_pending' | 'recalled' | 'recall_failed'
+```
+
+Core 从公开 Execution Evidence、AgentRun 状态和已提交公开输出生成可合并的 `execution_console_upsert`；Main 与 Renderer
+复用同一纯 presentation 模块，隐藏 `agent.reasoning.summary.delta`、`agent.thought.delta`，保留公开 narration、plan、
+tool/activity 与 public output。活跃工具展开；终态连续成功/已记录工具折叠，失败、等待和停止工具保持展开。Main 只由
+该 Agent 的冻结 App 创建或更新 Card 2.0；同一 App 不能修改其他 Bot 的控制台。下一条 root request admission 把该
+ChannelConversation 中更早 Turn 的控制台转为 `recall_pending`，等待其在途 upsert 结束后由原 App recall；不存在或已被
+飞书撤回的消息按幂等成功收口。
+
+`agent_output` 是实际作者 Bot 发送的永久、无标题 Markdown 消息，永远不复用/更新控制台、queue ack 或更早输出。
+作者不可用时生成 attention，不由 ack Bot 冒充。group/topic 中结构化 `CurrentUserMention` 只有找到原始
+ExternalPrincipal 在目标 App 下的有效 open ID 才通过 SDK structured mention 投影；p2p 不重复 mention，不手写
+`<at>` 字符串。
+
+公开 CampMessage 引用的每个 available Managed Attachment v2 文件各生成一个 `agent_attachment` delivery，payload
+只携带 `(campId, attachmentId)` authority identity、source message/Agent、ordinal、显示名、媒体类型、字节数与内容
+摘要。Main 在发送时通过 Core 再解析并验证 authority path，读取后复核字节数和 digest；图片使用飞书原生 image，其他
+文件使用原生 file。正文 delivery 必须先进入终态，附件再按 ordinal 依次领取；每个附件有独立 dedupe/retry/终态，
+单个上传失败只追加一次 attention，不重发正文或其他已成功附件。
+
+ChannelTurnRequest settlement 只等待 terminal CampTurn 与 `agent_output | agent_attachment | attention` 永久 delivery
+终态；任一永久 delivery failed 或 Turn 非 completed 时 request failed。临时控制台、recall 和 queue ack 的迟到、失败或
+清理不改变已提交业务结果。
 
 Main 发送到原 p2p/group/topic；topic 使用 canonical root/thread reply。回推事件由 SDK per-App dedup、出站 Bot
 identity 和 Core transport aggregation阻止再次触发。
@@ -433,7 +467,8 @@ configuring_permissions | waiting_configuration | publishing_version | verifying
 “继续核对”，true unknown 且无 App ID 时不提供重建入口；原始固定错误码只作为次级诊断信息展示。
 
 启动恢复依次：恢复所有 published Bot 长连接；周期性重取已知父群 roster；finalize 已 ready 的 collecting
-aggregate；Host tick 终结超时 aggregate、投影 request output、完成 terminal request、提升 FIFO 并领取 Outbox。
+aggregate；Host tick 终结超时 aggregate、投影/coalesce execution console、永久正文与附件、结算 terminal request、
+提升 FIFO、建立旧控制台 recall 并按 priority 领取 Outbox。
 所有步骤依赖持久 Core facts，不能从 Renderer 状态或飞书最近历史重建。
 
 ## 9. Data Contract
@@ -445,12 +480,16 @@ Migration 113 从 `Data Contract v1.25 / projection schema 66` 升到 `v1.26 / s
 Bot 引用的旧记录仅作历史外键保留，不能再投影为当前账号。Migration 115 收紧队员 App identity 唯一状态机；Migration
 116 升到 `Data Contract v1.28 / projection schema 69`，以 Core Project Catalog、Feishu Owner identity/per-App mapping、
 generation-aware conversation binding、PendingCampBinding/FIFO message 和 private project-selection delivery 替换旧的
-人工 ProjectBinding 正常路径。迁移保留既有 Camp、消息、Manifest、Bot credential reference 与 terminal evidence，
-不会删除或新建任何远端 App。
+人工 ProjectBinding 正常路径。Migration 117/118 将 Developer Session、发布状态与 Owner-only Camp binding 合同推进到
+`Data Contract v1.31 / projection schema 72`。Migration 119 升到 `Data Contract v1.32 / projection schema 73`，新增
+`channel_execution_console`，给 ChannelDelivery 增加 console identity、priority 与 attachment ordinal，并把 kind
+闭集替换为本节当前集合；旧 `agent_status/completion` transport 行不迁移，既有 project selection、queue ack、Agent
+output 与 attention 保留。迁移保留既有 Camp、消息、Manifest、Bot credential reference、Attachment authority 与
+terminal evidence，不删除或新建任何远端 App。
 
 ## References
 
 - [飞书渠道架构](../architecture/feishu-channel.md)
 - [Camp Membership v1](camp-membership-v1.md)
 - [ContextManifest Evidence v22](context-manifest-evidence-v22.md)
-- [v1.30 决策记录](../versions/v1.30/decisions.md#v1-30-d09)
+- [v1.30 决策记录](../versions/v1.30/decisions.md#v1-30-d11)

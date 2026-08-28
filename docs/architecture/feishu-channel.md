@@ -230,13 +230,24 @@ membership source 加入该话题 Camp。群 roster 不完整时 admission fail 
 acknowledgement App 直接发送到 Owner open ID，不公开到原群/话题。payload 只有会话显示名、opaque 项目选项和
 nonce/version；重启、重试和后续 pending 消息都复用同一 dedupe identity 与 Bot。
 
-Core 只从已提交公开 CampMessage 和请求状态生成 `ChannelDelivery`。Outbox 使用 lease、attempt、退避和稳定
-dedupe key；Main 发送成功后回写外部消息 ID，网络错误不会回滚 CampMessage。队列卡从“等待”原位更新为“开始”，
-Agent 输出使用实际作者 Agent 的已发布 Bot；作者 Bot 不可用时不冒充其他队员，而是生成 attention 状态。
+Core 只从已提交公开 CampMessage、Managed Attachment authority、AgentRun 公共 Evidence 和请求状态生成
+`ChannelDelivery`。Outbox 使用 priority、lease、attempt、退避和稳定 dedupe key；Main 发送成功后回写外部消息 ID，
+网络错误不会回滚 CampMessage。queue ack 只在真正排队时出现，admission 后删除或 recall，不再更新成“已开始”。
+Agent 永久输出使用实际作者 Agent 的已发布 Bot；作者 Bot 不可用时不冒充其他队员，而是生成独立 attention。
 飞书没有本地 AgentRun retry/decline 操作面，因此 required Run 失败且只剩人工重试决定时，Channel Host 确定性 decline
-该重试并让 Turn/Request 收口，再继续同一 Binding 的 FIFO。公开 Agent 输出一旦存在，后续 terminal `agent_status` 不再
-覆盖该回复卡；最终 Turn 状态由独立 completion delivery 表达。
-`CurrentUserMention` 在群/话题投影为飞书原生 `<at>`，不靠普通 `@名称` 字符串猜身份。
+该重试并让 Turn/Request 收口，再继续同一 Binding 的 FIFO。
+
+每个 AgentRun 有一个 Core-owned execution console identity。Core 把可公开 Execution Evidence、Run 状态和公开输出
+coalesce 为同一 Card 2.0 snapshot；Main 与 Renderer 共享一套纯 presentation 规则，始终滤掉 reasoning/thought，活跃
+工具展开，终态连续成功/已记录工具折叠。控制台只能由该 Agent 的冻结 App 创建、更新和撤回；下一条 root request
+admission 召回同 ChannelConversation 中更早 Turn 的控制台，recall 等待在途 upsert 并把飞书 target revoked 当作幂等
+成功。控制台是临时执行 presentation，不是 CampMessage，也不参与请求业务 settlement。
+
+公开 Agent 正文永远新建无标题 Markdown 消息，不覆盖控制台、queue ack 或其他正文。`CurrentUserMention` 在群/话题
+通过 SDK structured mention 投影为飞书原生 mention，不靠普通 `@名称` 或手写标签猜身份。公开 CampMessage 的 available
+Managed Attachment v2 引用逐个生成原生 image/file delivery：Main 发送前经 Core 重新解析 authority，并在读取后复核
+字节数与 digest；正文先终态，附件按 ordinal 依次发送且独立重试。单个附件最终失败只追加 attention，不重放正文或
+已成功附件。请求 settlement 只等待 terminal Turn 与永久正文、附件、attention；queue ack、控制台及 recall 不阻塞 FIFO。
 
 Core Snapshot 保存 pending aggregate、transport conversation 和 delivery 恢复事实，Main 启动后恢复所有 published
 Bot 长连接、过期 lease、collecting finalize 与 Outbox。Renderer snapshot 在 Main 中剥离这些 Host-only 字段。

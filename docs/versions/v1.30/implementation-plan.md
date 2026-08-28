@@ -48,6 +48,10 @@ last_updated: 2026-08-28
 - [x] 完成 ExternalQuote structured segment、`replyTo=null`、ExternalPrincipal source 与 CURRENT_INPUT v22；
 - [x] 完成父群 authoritative roster、普通群完整 membership、话题按需 membership 与 remove reconciliation；
 - [x] 完成 ChannelDelivery Outbox、实际作者 Bot、原生 Principal mention、lease/retry/attention 和恢复；
+- [x] 用 Core-owned per-AgentRun execution console 替换用户可见 `agent_status/completion`；Main 与 Renderer 共享公开
+  Evidence presentation，下一条 root admission 由原 App durable recall 旧控制台；
+- [x] 把正式 Agent 输出改为无标题永久 Markdown，并将公开 CampMessage 的 Managed Attachment v2 图片/文件按正文后
+  ordinal 原生投递、独立重试和失败 attention 收口；
 - [x] 完成 Preload/Renderer typed API、真实账号投影、唯一账号 QR、Provisioning Dialog、按绑定 brand 的官方应用详情
   链接与 Rovai 双主题 Bot surface；移除 Project/Conversation、管理和停用命令，只保留安静诊断计数；
 - [x] 完成当前 Architecture、Contracts、UI、Version Decision、Context change 与导航；
@@ -66,6 +70,8 @@ last_updated: 2026-08-28
 - 飞书 reply 只形成当前消息的 ExternalQuote，不产生内部 reply 或第二条 CampMessage；
 - 普通群 roster 与话题按需扩张都复用 Camp Membership v1 exact source generation；
 - Secret 与 raw Feishu identity 不进入 Renderer/Agent；公开输出只来自 Core 已提交内容；
+- 执行控制台不含 reasoning/thought，不能覆盖正式正文；永久正文与附件各有稳定 dedupe，单个附件失败不得重发正文或
+  已成功附件；
 - 连接不调用任何 App 创建接口或写入 App credential；发布不产生 QR/飞书确认页，registration 协议没有实现、API 或
   交互入口；
 - identity 漂移、Session 失效、完成后重复发布、历史 disabled 恢复与未知远端状态全部 fail closed 或复用冻结 App，不能静默创建第二个 App；
@@ -87,10 +93,11 @@ last_updated: 2026-08-28
 - `cargo test -p rovai-core --lib`；
 - `cargo test -p rovai-core --bin rovai`；
 - `cargo test -p rovai-core --bin rovai-core`；
-- Migration 116 upgrade、Developer Identity/publication intent、队员 App 身份冻结/历史 disabled 同 App reactivation、Owner-only Channel 状态机、发布期 App-scoped Owner prebinding、DM `/new`、PendingCampBinding、ExternalQuote、Context bytes 与
+- Migration 116/119 upgrade、v118→v119 独立兼容、Developer Identity/publication intent、队员 App 身份冻结/历史 disabled 同 App reactivation、Owner-only Channel 状态机、发布期 App-scoped Owner prebinding、DM `/new`、PendingCampBinding、ExternalQuote、Context bytes 与
   Secret projection、内置/managed 头像解析、正常发布头像传递、冻结 App 头像/readiness 修复、Manifest 假阳性、P2P
   Scope ID 映射、template-first fallback matrix、durable barrier、activation-first、dynamic patch reuse、Event timeout
-  recoverable 和 Event/Callback mode fail-closed 定向测试全部通过；
+  recoverable、Event/Callback mode fail-closed、execution console 更新/消息身份、永久 Markdown、附件顺序/独立失败
+  定向测试全部通过；
 - `pnpm typecheck`；
 - `pnpm test`；
 - `pnpm build:desktop`；

@@ -50,8 +50,10 @@ pub struct Database {
     runtime_camp_files_root_identity_digest: String,
 }
 
-const CURRENT_DATA_CONTRACT_VERSION: &str = "v1.31";
-const CURRENT_PROJECTION_SCHEMA_VERSION: i64 = 72;
+const CURRENT_DATA_CONTRACT_VERSION: &str = "v1.32";
+const CURRENT_PROJECTION_SCHEMA_VERSION: i64 = 73;
+const V119_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.31";
+const V119_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION: i64 = 72;
 const V118_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.30";
 const V118_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION: i64 = 71;
 const V117_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.29";
@@ -195,6 +197,7 @@ struct CurrentMigrationState {
     v116: bool,
     v117: bool,
     v118: bool,
+    v119: bool,
 }
 
 impl CurrentMigrationState {
@@ -245,6 +248,20 @@ impl CurrentMigrationState {
             && self.v112
             && self.v113;
         if contract == CURRENT_DATA_CONTRACT_VERSION && schema == CURRENT_PROJECTION_SCHEMA_VERSION
+        {
+            return through_v113
+                && self.v114
+                && self.v115
+                && self.v116
+                && self.v117
+                && self.v118
+                && self.v119;
+        }
+        if self.v119 {
+            return false;
+        }
+        if contract == V119_MIGRATION_SOURCE_DATA_CONTRACT_VERSION
+            && schema == V119_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION
         {
             return through_v113 && self.v114 && self.v115 && self.v116 && self.v117 && self.v118;
         }
@@ -1516,7 +1533,7 @@ fn connection_has_current_data_contract(connection: &Connection) -> rusqlite::Re
         r#"
         SELECT contract_version = ?1
                AND projection_schema_version = ?2
-               AND EXISTS(SELECT 1 FROM schema_migration WHERE version = 118)
+               AND EXISTS(SELECT 1 FROM schema_migration WHERE version = 119)
         FROM rovai_data_contract
         WHERE singleton = 1
         "#,
@@ -1581,7 +1598,8 @@ fn load_current_migration_state(
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 115),
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 116),
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 117),
-               EXISTS(SELECT 1 FROM schema_migration WHERE version = 118)
+               EXISTS(SELECT 1 FROM schema_migration WHERE version = 118),
+               EXISTS(SELECT 1 FROM schema_migration WHERE version = 119)
         "#,
         [],
         |row| {
@@ -1635,6 +1653,7 @@ fn load_current_migration_state(
                 v116: row.get(46)?,
                 v117: row.get(47)?,
                 v118: row.get(48)?,
+                v119: row.get(49)?,
             })
         },
     )
@@ -3166,6 +3185,9 @@ impl Database {
             if !self.schema_migration_applied(118)? {
                 self.migrate_feishu_owner_camp_binding_v118()?;
             }
+            if !self.schema_migration_applied(119)? {
+                self.migrate_feishu_channel_execution_console_v119()?;
+            }
             if let Err(error) =
                 crate::notification::maintain_notification_episode_retention(self.connection())
             {
@@ -3569,6 +3591,9 @@ impl Database {
         }
         if !self.schema_migration_applied(118)? {
             self.migrate_feishu_owner_camp_binding_v118()?;
+        }
+        if !self.schema_migration_applied(119)? {
+            self.migrate_feishu_channel_execution_console_v119()?;
         }
         if let Err(error) =
             crate::notification::maintain_notification_episode_retention(self.connection())
@@ -17120,6 +17145,175 @@ impl Database {
         Ok(())
     }
 
+    fn migrate_feishu_channel_execution_console_v119(&mut self) -> Result<()> {
+        let transaction = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        transaction.execute_batch(
+            r#"
+            CREATE TABLE channel_execution_console (
+                id TEXT PRIMARY KEY,
+                agent_run_id TEXT NOT NULL UNIQUE
+                    REFERENCES agent_run(id) ON DELETE CASCADE,
+                request_id TEXT NOT NULL
+                    REFERENCES channel_turn_request(id) ON DELETE CASCADE,
+                channel_conversation_id TEXT NOT NULL
+                    REFERENCES channel_conversation(id) ON DELETE CASCADE,
+                camp_turn_id TEXT NOT NULL REFERENCES camp_turn(id) ON DELETE CASCADE,
+                agent_id TEXT NOT NULL REFERENCES agent_profile(id),
+                target_app_id TEXT NOT NULL CHECK(length(trim(target_app_id)) > 0),
+                external_message_id TEXT,
+                latest_sequence INTEGER NOT NULL DEFAULT 1 CHECK(latest_sequence >= 1),
+                delivered_sequence INTEGER NOT NULL DEFAULT 0
+                    CHECK(delivered_sequence >= 0 AND delivered_sequence <= latest_sequence),
+                latest_snapshot_digest TEXT NOT NULL
+                    CHECK(length(trim(latest_snapshot_digest)) > 0),
+                state TEXT NOT NULL CHECK(state IN (
+                    'opening', 'active', 'terminal', 'recall_pending',
+                    'recalled', 'recall_failed'
+                )),
+                failure_code TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                recalled_at TEXT,
+                CHECK(
+                    (state IN ('opening', 'active', 'terminal', 'recall_pending')
+                        AND recalled_at IS NULL)
+                    OR (state IN ('recalled', 'recall_failed') AND recalled_at IS NOT NULL)
+                )
+            );
+            CREATE INDEX channel_execution_console_conversation_idx
+                ON channel_execution_console(
+                    channel_conversation_id, state, created_at, agent_run_id
+                );
+            CREATE INDEX channel_execution_console_request_idx
+                ON channel_execution_console(request_id, state, agent_run_id);
+            CREATE TRIGGER channel_execution_console_identity_immutable
+            BEFORE UPDATE ON channel_execution_console
+            FOR EACH ROW
+            WHEN OLD.agent_run_id <> NEW.agent_run_id
+              OR OLD.request_id <> NEW.request_id
+              OR OLD.channel_conversation_id <> NEW.channel_conversation_id
+              OR OLD.camp_turn_id <> NEW.camp_turn_id
+              OR OLD.agent_id <> NEW.agent_id
+              OR OLD.target_app_id <> NEW.target_app_id
+            BEGIN
+                SELECT RAISE(ABORT, 'channel execution console identity is immutable');
+            END;
+
+            ALTER TABLE channel_delivery RENAME TO channel_delivery_v118;
+            DROP INDEX channel_delivery_claim_idx;
+            DROP INDEX channel_delivery_request_idx;
+            DROP INDEX channel_delivery_pending_binding_idx;
+
+            CREATE TABLE channel_delivery (
+                id TEXT PRIMARY KEY,
+                request_id TEXT REFERENCES channel_turn_request(id) ON DELETE CASCADE,
+                pending_binding_id TEXT REFERENCES pending_camp_binding(id) ON DELETE CASCADE,
+                console_id TEXT REFERENCES channel_execution_console(id) ON DELETE CASCADE,
+                dedupe_key TEXT NOT NULL UNIQUE,
+                delivery_kind TEXT NOT NULL CHECK(delivery_kind IN (
+                    'project_selection', 'queue_ack', 'execution_console_upsert',
+                    'execution_console_recall', 'agent_output',
+                    'agent_attachment', 'attention'
+                )),
+                priority INTEGER NOT NULL DEFAULT 60 CHECK(priority BETWEEN 0 AND 100),
+                target_app_id TEXT NOT NULL,
+                source_agent_id TEXT,
+                source_camp_message_id TEXT REFERENCES camp_message(id),
+                attachment_ordinal INTEGER CHECK(attachment_ordinal >= 0),
+                payload_json TEXT NOT NULL,
+                status TEXT NOT NULL CHECK(status IN ('pending', 'attempting', 'sent', 'failed')),
+                attempt_count INTEGER NOT NULL DEFAULT 0 CHECK(attempt_count >= 0),
+                available_at TEXT NOT NULL,
+                lease_owner TEXT,
+                lease_expires_at TEXT,
+                external_delivery_message_id TEXT,
+                failure_code TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                ended_at TEXT,
+                CHECK(
+                    (request_id IS NOT NULL AND pending_binding_id IS NULL
+                        AND delivery_kind <> 'project_selection')
+                    OR (request_id IS NULL AND pending_binding_id IS NOT NULL
+                        AND delivery_kind = 'project_selection')
+                ),
+                CHECK(
+                    (delivery_kind IN ('execution_console_upsert', 'execution_console_recall')
+                        AND console_id IS NOT NULL)
+                    OR (delivery_kind NOT IN ('execution_console_upsert', 'execution_console_recall')
+                        AND console_id IS NULL)
+                ),
+                CHECK(
+                    (delivery_kind = 'agent_attachment'
+                        AND source_camp_message_id IS NOT NULL
+                        AND attachment_ordinal IS NOT NULL)
+                    OR (delivery_kind <> 'agent_attachment' AND attachment_ordinal IS NULL)
+                ),
+                CHECK(
+                    (status IN ('pending', 'attempting') AND ended_at IS NULL)
+                    OR (status IN ('sent', 'failed') AND ended_at IS NOT NULL)
+                ),
+                CHECK(
+                    (status = 'attempting' AND lease_owner IS NOT NULL
+                        AND lease_expires_at IS NOT NULL)
+                    OR (status <> 'attempting' AND lease_owner IS NULL
+                        AND lease_expires_at IS NULL)
+                )
+            );
+            CREATE INDEX channel_delivery_claim_idx
+                ON channel_delivery(status, available_at, priority, created_at, id);
+            CREATE INDEX channel_delivery_request_idx
+                ON channel_delivery(request_id, status, delivery_kind, priority, id)
+                WHERE request_id IS NOT NULL;
+            CREATE INDEX channel_delivery_pending_binding_idx
+                ON channel_delivery(pending_binding_id, status, delivery_kind, id)
+                WHERE pending_binding_id IS NOT NULL;
+            CREATE INDEX channel_delivery_console_idx
+                ON channel_delivery(console_id, status, delivery_kind, id)
+                WHERE console_id IS NOT NULL;
+
+            INSERT INTO channel_delivery(
+                id, request_id, pending_binding_id, console_id,
+                dedupe_key, delivery_kind, priority, target_app_id,
+                source_agent_id, source_camp_message_id, attachment_ordinal,
+                payload_json, status, attempt_count, available_at,
+                lease_owner, lease_expires_at, external_delivery_message_id,
+                failure_code, created_at, updated_at, ended_at
+            )
+            SELECT id, request_id, pending_binding_id, NULL,
+                   dedupe_key, delivery_kind,
+                   CASE delivery_kind
+                       WHEN 'project_selection' THEN 5
+                       WHEN 'queue_ack' THEN 20
+                       WHEN 'agent_output' THEN 40
+                       ELSE 60
+                   END,
+                   target_app_id, source_agent_id, source_camp_message_id, NULL,
+                   payload_json, status, attempt_count, available_at,
+                   lease_owner, lease_expires_at, external_delivery_message_id,
+                   failure_code, created_at, updated_at, ended_at
+            FROM channel_delivery_v118
+            WHERE delivery_kind IN (
+                'project_selection', 'queue_ack', 'agent_output', 'attention'
+            );
+
+            DROP TABLE channel_delivery_v118;
+
+            UPDATE rovai_data_contract
+            SET contract_version = 'v1.32', projection_schema_version = 73,
+                reset_reason = NULL, updated_at = datetime('now')
+            WHERE singleton = 1;
+
+            INSERT INTO schema_migration(version, applied_at)
+            VALUES (119, datetime('now'));
+            "#,
+        )?;
+        transaction.commit()?;
+        Ok(())
+    }
+
     fn migrate_managed_attachment_v2_v112(&mut self) -> Result<()> {
         let transaction = self
             .connection
@@ -21787,7 +21981,96 @@ impl Database {
 }
 
 #[cfg(test)]
+fn downgrade_current_schema_to_v118_source_for_test(connection: &Connection) {
+    let has_v119: bool = connection
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM schema_migration WHERE version = 119)",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    if !has_v119 {
+        return;
+    }
+    for table in ["channel_execution_console", "channel_delivery"] {
+        let count: i64 = connection
+            .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(count, 0, "test downgrade requires empty {table}");
+    }
+    connection
+        .execute_batch(
+            r#"
+            PRAGMA foreign_keys = OFF;
+            BEGIN IMMEDIATE;
+            DROP TABLE channel_delivery;
+            DROP TABLE channel_execution_console;
+
+            CREATE TABLE channel_delivery (
+                id TEXT PRIMARY KEY,
+                request_id TEXT REFERENCES channel_turn_request(id) ON DELETE CASCADE,
+                pending_binding_id TEXT REFERENCES pending_camp_binding(id) ON DELETE CASCADE,
+                dedupe_key TEXT NOT NULL UNIQUE,
+                delivery_kind TEXT NOT NULL CHECK(delivery_kind IN (
+                    'project_selection', 'queue_ack', 'agent_status',
+                    'agent_output', 'completion', 'attention'
+                )),
+                target_app_id TEXT NOT NULL,
+                source_agent_id TEXT,
+                source_camp_message_id TEXT REFERENCES camp_message(id),
+                payload_json TEXT NOT NULL,
+                status TEXT NOT NULL CHECK(status IN ('pending', 'attempting', 'sent', 'failed')),
+                attempt_count INTEGER NOT NULL DEFAULT 0 CHECK(attempt_count >= 0),
+                available_at TEXT NOT NULL,
+                lease_owner TEXT,
+                lease_expires_at TEXT,
+                external_delivery_message_id TEXT,
+                failure_code TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                ended_at TEXT,
+                CHECK(
+                    (request_id IS NOT NULL AND pending_binding_id IS NULL
+                        AND delivery_kind <> 'project_selection')
+                    OR (request_id IS NULL AND pending_binding_id IS NOT NULL
+                        AND delivery_kind = 'project_selection')
+                ),
+                CHECK(
+                    (status IN ('pending', 'attempting') AND ended_at IS NULL)
+                    OR (status IN ('sent', 'failed') AND ended_at IS NOT NULL)
+                ),
+                CHECK(
+                    (status = 'attempting' AND lease_owner IS NOT NULL
+                        AND lease_expires_at IS NOT NULL)
+                    OR (status <> 'attempting' AND lease_owner IS NULL
+                        AND lease_expires_at IS NULL)
+                )
+            );
+            CREATE INDEX channel_delivery_claim_idx
+                ON channel_delivery(status, available_at, created_at, id);
+            CREATE INDEX channel_delivery_request_idx
+                ON channel_delivery(request_id, status, delivery_kind, id)
+                WHERE request_id IS NOT NULL;
+            CREATE INDEX channel_delivery_pending_binding_idx
+                ON channel_delivery(pending_binding_id, status, delivery_kind, id)
+                WHERE pending_binding_id IS NOT NULL;
+
+            UPDATE rovai_data_contract
+            SET contract_version = 'v1.31', projection_schema_version = 72
+            WHERE singleton = 1;
+            DELETE FROM schema_migration WHERE version = 119;
+            COMMIT;
+            PRAGMA foreign_keys = ON;
+            "#,
+        )
+        .unwrap();
+}
+
+#[cfg(test)]
 fn downgrade_current_schema_to_v117_source_for_test(connection: &Connection) {
+    downgrade_current_schema_to_v118_source_for_test(connection);
     let has_v118: bool = connection
         .query_row(
             "SELECT EXISTS(SELECT 1 FROM schema_migration WHERE version = 118)",
@@ -23260,6 +23543,7 @@ mod tests {
             v116: version >= 116,
             v117: version >= 117,
             v118: version >= 118,
+            v119: version >= 119,
         }
     }
 
@@ -23270,6 +23554,12 @@ mod tests {
                 "current",
                 CURRENT_DATA_CONTRACT_VERSION,
                 CURRENT_PROJECTION_SCHEMA_VERSION,
+                119,
+            ),
+            (
+                "v1.31/schema-72 after Owner Camp binding",
+                V119_MIGRATION_SOURCE_DATA_CONTRACT_VERSION,
+                V119_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION,
                 118,
             ),
             (
@@ -23614,7 +23904,7 @@ mod tests {
             )
             .expect("current contract marker should load");
 
-        assert_eq!(state, migration_state_through(118));
+        assert_eq!(state, migration_state_through(119));
         assert!(state.admits(&contract, schema));
         assert!(has_admissible_data_contract(
             &directory.join("rovai.sqlite")
@@ -26033,7 +26323,7 @@ mod tests {
     }
 
     #[test]
-    fn v118_upgrades_v112_preserves_evidence_and_installs_owner_binding_contract() {
+    fn v119_upgrades_v112_preserves_evidence_and_installs_channel_contracts() {
         let (database, directory) = crate::test_support::seeded_runtime_database();
         downgrade_current_schema_to_v112_source_for_test(database.connection());
         let source_counts: (i64, i64) = database
@@ -26082,6 +26372,7 @@ mod tests {
                            (SELECT COUNT(*) FROM schema_migration WHERE version = 116),
                            (SELECT COUNT(*) FROM schema_migration WHERE version = 117),
                            (SELECT COUNT(*) FROM schema_migration WHERE version = 118),
+                           (SELECT COUNT(*) FROM schema_migration WHERE version = 119),
                            (SELECT COUNT(*) FROM pragma_foreign_key_check)
                     FROM rovai_data_contract WHERE singleton = 1
                     "#,
@@ -26096,12 +26387,14 @@ mod tests {
                         row.get::<_, i64>(6)?,
                         row.get::<_, i64>(7)?,
                         row.get::<_, i64>(8)?,
+                        row.get::<_, i64>(9)?,
                     )),
                 )
                 .unwrap(),
             (
                 CURRENT_DATA_CONTRACT_VERSION.to_string(),
                 CURRENT_PROJECTION_SCHEMA_VERSION,
+                1,
                 1,
                 1,
                 1,
@@ -26139,6 +26432,7 @@ mod tests {
                 "pending_camp_message",
                 "channel_turn_request",
                 "channel_delivery",
+                "channel_execution_console",
                 "feishu_member_bot_publication_intent",
             ],
             true,
@@ -26180,17 +26474,98 @@ mod tests {
         }
         drop(upgraded);
 
-        let restarted = Database::open(&directory).expect("v118 restart should be idempotent");
+        let restarted = Database::open(&directory).expect("v119 restart should be idempotent");
         assert_eq!(
             restarted
                 .connection()
                 .query_row(
-                    "SELECT COUNT(*) FROM schema_migration WHERE version BETWEEN 113 AND 118",
+                    "SELECT COUNT(*) FROM schema_migration WHERE version BETWEEN 113 AND 119",
                     [],
                     |row| row.get::<_, i64>(0),
                 )
                 .unwrap(),
-            6
+            7
+        );
+        drop(restarted);
+        std::fs::remove_dir_all(directory).expect("temporary database should be removable");
+    }
+
+    #[test]
+    fn v119_upgrades_v118_source_and_installs_execution_console_delivery_contract() {
+        let (database, directory) = crate::test_support::seeded_runtime_database();
+        downgrade_current_schema_to_v118_source_for_test(database.connection());
+        assert_eq!(
+            database
+                .connection()
+                .query_row(
+                    r#"
+                    SELECT contract_version, projection_schema_version,
+                           (SELECT COUNT(*) FROM schema_migration WHERE version = 119),
+                           (SELECT COUNT(*) FROM sqlite_master
+                            WHERE type = 'table' AND name = 'channel_execution_console')
+                    FROM rovai_data_contract WHERE singleton = 1
+                    "#,
+                    [],
+                    |row| Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, i64>(1)?,
+                        row.get::<_, i64>(2)?,
+                        row.get::<_, i64>(3)?,
+                    )),
+                )
+                .unwrap(),
+            ("v1.31".to_string(), 72, 0, 0)
+        );
+        let source_delivery_schema: String = database
+            .connection()
+            .query_row(
+                "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'channel_delivery'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(source_delivery_schema.contains("'agent_status'"));
+        assert!(source_delivery_schema.contains("'completion'"));
+        drop(database);
+
+        let upgraded = Database::open(&directory).expect("v118 source should migrate to v119");
+        assert!(connection_has_current_data_contract(upgraded.connection()).unwrap());
+        let delivery_schema: String = upgraded
+            .connection()
+            .query_row(
+                "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'channel_delivery'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        for delivery_kind in [
+            "execution_console_upsert",
+            "execution_console_recall",
+            "agent_attachment",
+        ] {
+            assert!(delivery_schema.contains(delivery_kind));
+        }
+        assert!(!delivery_schema.contains("'agent_status'"));
+        assert!(!delivery_schema.contains("'completion'"));
+        assert_schema_objects(
+            upgraded.connection(),
+            "table",
+            &["channel_execution_console", "channel_delivery"],
+            true,
+        );
+        drop(upgraded);
+
+        let restarted = Database::open(&directory).expect("v119 restart should be idempotent");
+        assert_eq!(
+            restarted
+                .connection()
+                .query_row(
+                    "SELECT COUNT(*) FROM schema_migration WHERE version = 119",
+                    [],
+                    |row| row.get::<_, i64>(0),
+                )
+                .unwrap(),
+            1
         );
         drop(restarted);
         std::fs::remove_dir_all(directory).expect("temporary database should be removable");

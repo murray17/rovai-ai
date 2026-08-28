@@ -2823,7 +2823,6 @@ impl CollaborationService {
             camp_message_id,
             camp_turn_id,
             camp_sequence: queued.camp_sequence,
-            agent_run_ids: queued.agent_run_ids,
         }))
     }
 
@@ -3069,7 +3068,6 @@ pub(crate) struct ExternalChannelAdmissionResult {
     pub camp_message_id: String,
     pub camp_turn_id: String,
     pub camp_sequence: i64,
-    pub agent_run_ids: Vec<String>,
 }
 
 #[derive(Debug, Clone, Copy)]

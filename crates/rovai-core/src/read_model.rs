@@ -3032,6 +3032,34 @@ fn load_execution_evidence(
     Ok(evidence)
 }
 
+pub(crate) fn public_execution_evidence_for_agent_run(
+    transaction: &Transaction<'_>,
+    agent_run_id: &str,
+) -> Result<Vec<AgentRunExecutionEvidenceView>> {
+    let mut statement = transaction.prepare(
+        r#"
+        SELECT evidence.id, evidence.agent_run_id, evidence.execution_epoch,
+               evidence.sequence, evidence.event_type, evidence.kind,
+               evidence.phase, evidence.payload_preview_json,
+               evidence.content_blob_id, evidence.content_byte_count,
+               evidence.is_truncated, evidence.occurred_at
+        FROM agent_run_execution_evidence AS evidence
+        WHERE evidence.agent_run_id = ?1
+          AND evidence.event_type NOT IN (
+              'agent.reasoning.summary.delta', 'agent.thought.delta'
+          )
+        ORDER BY evidence.sequence
+        "#,
+    )?;
+    let mut evidence = statement
+        .query_map([agent_run_id], execution_evidence_row)?
+        .map(|row| execution_evidence_view(row?))
+        .collect::<Result<Vec<_>>>()?;
+    drop(statement);
+    attach_canonical_activity(transaction, &mut evidence)?;
+    Ok(evidence)
+}
+
 type ExecutionEvidenceRow = (
     String,
     String,

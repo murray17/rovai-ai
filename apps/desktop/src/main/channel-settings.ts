@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto'
+import { readFile } from 'node:fs/promises'
 import {
   createLarkChannel,
   LarkChannelError,
@@ -30,6 +31,10 @@ import {
   type MemberBotProvisioningStep
 } from './feishu-member-bot-provisioner'
 import type { MemberBotAvatarSourceResolver } from './member-bot-avatar-source'
+import {
+  executionConsoleCard,
+  type ExecutionConsoleSnapshot
+} from '../shared/execution-presentation/feishu-card'
 
 type CoreChannelSnapshot = {
   schemaVersion: 2
@@ -113,9 +118,10 @@ type ClaimedChannelDelivery = {
   deliveryKind:
     | 'project_selection'
     | 'queue_ack'
-    | 'agent_status'
+    | 'execution_console_upsert'
+    | 'execution_console_recall'
     | 'agent_output'
-    | 'completion'
+    | 'agent_attachment'
     | 'attention'
   targetAppId: string
   credentialRef: string
@@ -129,6 +135,15 @@ type ClaimedChannelDelivery = {
 }
 
 type CreateChannel = typeof createLarkChannel
+
+type DesktopAttachmentTarget = {
+  attachmentId: string
+  displayName: string
+  kind: 'file'
+  mediaType: string
+  path: string
+  openRisk: 'normal' | 'confirm'
+}
 
 export interface ChannelHostDependencies {
   core: Pick<CoreClient, 'request'>
@@ -1695,26 +1710,97 @@ export class ChannelSettingsService {
       return
     }
     try {
-      const card = deliveryCard(delivery)
-      let messageId = delivery.updateMessageId ?? null
-      if (messageId) {
-        await managed.channel.updateCard(messageId, card)
-      } else {
-        const privateProjectCard = delivery.deliveryKind === 'project_selection'
-        if (privateProjectCard && !delivery.recipientOpenId) {
-          throw new Error('owner_identity_unverified')
-        }
+      let messageId: string | null = null
+      const replyOptions = delivery.topicKey
+        ? { replyTo: delivery.topicKey, replyInThread: true }
+        : undefined
+      if (delivery.deliveryKind === 'project_selection') {
+        if (!delivery.recipientOpenId) throw new Error('owner_identity_unverified')
         const sent = await managed.channel.send(
-          privateProjectCard ? delivery.recipientOpenId! : delivery.chatId,
-          { card },
-          !privateProjectCard && delivery.topicKey
-            ? { replyTo: delivery.topicKey, replyInThread: true }
+          delivery.recipientOpenId,
+          { card: deliveryCard(delivery) }
+        )
+        messageId = sent.messageId
+      } else if (delivery.deliveryKind === 'queue_ack'
+        && delivery.payload.action === 'recall') {
+        messageId = delivery.updateMessageId ?? null
+        if (messageId) await managed.channel.recallMessage(messageId)
+      } else if (delivery.deliveryKind === 'execution_console_recall') {
+        messageId = delivery.updateMessageId ?? null
+        if (messageId) await managed.channel.recallMessage(messageId)
+      } else if (delivery.deliveryKind === 'execution_console_upsert') {
+        const source = await this.#dependencies!.core.request<ExecutionConsoleSnapshot | null>(
+          'channels.executionConsole.source',
+          {
+            agentRunId: requiredPayloadString(delivery.payload, 'agentRunId'),
+            expectedSequence: requiredPayloadNumber(delivery.payload, 'expectedSequence')
+          }
+        )
+        if (source) {
+          const card = executionConsoleCard(source)
+          messageId = delivery.updateMessageId ?? null
+          if (messageId) {
+            await managed.channel.updateCard(messageId, card)
+          } else {
+            const sent = await managed.channel.send(delivery.chatId, { card }, replyOptions)
+            messageId = sent.messageId
+          }
+        } else {
+          messageId = delivery.updateMessageId ?? null
+        }
+      } else if (delivery.deliveryKind === 'agent_output') {
+        const body = requiredPayloadString(delivery.payload, 'body').trim()
+        if (!body) throw new Error('channel_output_empty')
+        const mentions = delivery.payload.mentionPrincipal === true
+          && delivery.conversationKind !== 'p2p'
+          && validOpenId(delivery.recipientOpenId)
+            ? [{ key: 'request_author', openId: delivery.recipientOpenId!, name: 'Owner' }]
             : undefined
+        const sent = await managed.channel.send(
+          delivery.chatId,
+          { markdown: body },
+          { ...replyOptions, ...(mentions ? { mentions } : {}) }
+        )
+        messageId = sent.messageId
+      } else if (delivery.deliveryKind === 'agent_attachment') {
+        const campId = requiredPayloadString(delivery.payload, 'campId')
+        const attachmentId = requiredPayloadString(delivery.payload, 'attachmentId')
+        const target = await this.#dependencies!.core.request<DesktopAttachmentTarget | null>(
+          'camp.attachments.desktopOpenTarget',
+          { campId, attachmentId }
+        )
+        if (!target || target.kind !== 'file' || target.attachmentId !== attachmentId) {
+          throw new Error('channel_attachment_unavailable')
+        }
+        const bytes = await readFile(target.path)
+        verifyAttachmentBytes(delivery.payload, bytes)
+        const sent = delivery.payload.attachmentKind === 'image'
+          ? await managed.channel.send(delivery.chatId, { image: { source: bytes } }, replyOptions)
+          : await managed.channel.send(delivery.chatId, {
+              file: {
+                source: bytes,
+                fileName: requiredPayloadString(delivery.payload, 'fileName')
+              }
+            }, replyOptions)
+        messageId = sent.messageId
+      } else {
+        const sent = await managed.channel.send(
+          delivery.chatId,
+          { card: deliveryCard(delivery) },
+          replyOptions
         )
         messageId = sent.messageId
       }
       await this.#settleDelivery(delivery, messageId, null)
     } catch (error) {
+      if (
+        (delivery.deliveryKind === 'execution_console_recall'
+          || (delivery.deliveryKind === 'queue_ack' && delivery.payload.action === 'recall'))
+        && isRecallTargetRevoked(error)
+      ) {
+        await this.#settleDelivery(delivery, delivery.updateMessageId ?? null, null)
+        return
+      }
       await this.#settleDelivery(delivery, null, error)
     }
   }
@@ -1726,8 +1812,8 @@ export class ChannelSettingsService {
   ): Promise<void> {
     const failureCode = error ? channelFailureCode(error) : null
     const retryable = error instanceof LarkChannelError
-      ? ['rate_limited', 'send_timeout', 'not_connected', 'unknown'].includes(error.code)
-      : failureCode === 'target_bot_not_connected'
+      ? ['rate_limited', 'send_timeout', 'not_connected', 'unknown', 'upload_failed'].includes(error.code)
+      : ['target_bot_not_connected', 'send_timeout', 'upload_failed'].includes(failureCode ?? '')
     await this.#commandWithId('channels.deliveries.settle', randomUUID(), {
       deliveryId: delivery.deliveryId,
       workerId: HOST_WORKER_ID,
@@ -2061,6 +2147,46 @@ function numberPayload(result: StoredCommandResult, key: string): number {
   return value
 }
 
+function requiredPayloadString(payload: Record<string, unknown>, key: string): string {
+  const value = payload[key]
+  if (typeof value !== 'string' || value.length === 0) {
+    throw new Error(`channel_delivery_${key}_invalid`)
+  }
+  return value
+}
+
+function requiredPayloadNumber(payload: Record<string, unknown>, key: string): number {
+  const value = payload[key]
+  if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 0) {
+    throw new Error(`channel_delivery_${key}_invalid`)
+  }
+  return value
+}
+
+function validOpenId(value: string | null | undefined): value is string {
+  return typeof value === 'string' && /^[A-Za-z0-9_-]{1,256}$/u.test(value)
+}
+
+function verifyAttachmentBytes(payload: Record<string, unknown>, bytes: Buffer): void {
+  const expectedSize = requiredPayloadNumber(payload, 'size')
+  const expectedDigest = requiredPayloadString(payload, 'contentDigest')
+  const actualDigest = `sha256:${createHash('sha256').update(bytes).digest('hex')}`
+  if (bytes.byteLength !== expectedSize || actualDigest !== expectedDigest) {
+    throw new Error('channel_attachment_integrity_mismatch')
+  }
+}
+
+function isRecallTargetRevoked(error: unknown): boolean {
+  if (error instanceof LarkChannelError) return error.code === 'target_revoked'
+  if (!isRecord(error)) return false
+  const response = isRecord(error.response) ? error.response : null
+  const responseData = response && isRecord(response.data) ? response.data : null
+  const directData = isRecord(error.data) ? error.data : null
+  const status = response?.status ?? error.status
+  const code = responseData?.code ?? directData?.code ?? error.code
+  return status === 404 || code === 230020 || code === 230017
+}
+
 function arrayPayload(result: StoredCommandResult, key: string): string[] {
   const value = result.payload[key]
   if (!Array.isArray(value) || !value.every((item) => typeof item === 'string')) {
@@ -2297,35 +2423,23 @@ function deliveryCard(delivery: ClaimedChannelDelivery): Record<string, unknown>
     })
   }
   const text = typeof delivery.payload.text === 'string' ? delivery.payload.text : ''
-  const body = typeof delivery.payload.body === 'string' ? delivery.payload.body : ''
-  const mentionPrincipal = delivery.payload.mentionPrincipal === true
-    && delivery.conversationKind !== 'p2p'
-    && typeof delivery.recipientOpenId === 'string'
-    && /^[A-Za-z0-9_-]{1,256}$/u.test(delivery.recipientOpenId)
-      ? `<at id=${delivery.recipientOpenId}></at>\n`
-      : ''
-  const title = delivery.deliveryKind === 'agent_output'
-    ? 'Rovai 队员回复'
-    : delivery.deliveryKind === 'attention'
-      ? 'Rovai 需要你确认'
-    : delivery.deliveryKind === 'completion'
-      ? 'Rovai 协作状态'
-      : delivery.deliveryKind === 'queue_ack'
-        ? 'Rovai 已接收'
-        : 'Rovai 正在处理'
+  if (!['queue_ack', 'attention'].includes(delivery.deliveryKind)) {
+    throw new Error('channel_delivery_card_kind_invalid')
+  }
+  const title = delivery.deliveryKind === 'attention'
+    ? 'Rovai 需要你确认'
+    : 'Rovai 已接收'
   return {
     schema: '2.0',
     config: { update_multi: true, wide_screen_mode: true },
     header: {
       title: { tag: 'plain_text', content: title },
-      template: delivery.deliveryKind === 'completion'
-        ? 'green'
-        : delivery.deliveryKind === 'attention'
+      template: delivery.deliveryKind === 'attention'
           ? 'orange'
           : 'blue'
     },
     body: {
-      elements: [{ tag: 'markdown', content: `${mentionPrincipal}${body || text || '状态已更新'}` }]
+      elements: [{ tag: 'markdown', content: text || '状态已更新' }]
     }
   }
 }

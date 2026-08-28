@@ -812,6 +812,13 @@ struct AgentRunDiagnosticParams {
     agent_run_id: String,
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct ChannelExecutionConsoleSourceParams {
+    agent_run_id: String,
+    expected_sequence: i64,
+}
+
 fn default_execution_evidence_page_limit() -> i64 {
     500
 }
@@ -4981,6 +4988,18 @@ impl Core {
                     ),
                 )?;
                 Ok(serde_json::to_value(execution.result)?)
+            }
+            "channels.executionConsole.source" => {
+                let params: ChannelExecutionConsoleSourceParams =
+                    serde_json::from_value(request.params.clone())?;
+                let mut database = self.database.lock().await;
+                Ok(serde_json::to_value(
+                    ChannelService::default().execution_console_source(
+                        &mut database,
+                        &params.agent_run_id,
+                        params.expected_sequence,
+                    )?,
+                )?)
             }
             "channels.deliveries.settle" => {
                 let params: UserCommandParams<SettleChannelDeliveryCommand> =

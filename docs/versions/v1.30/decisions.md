@@ -415,3 +415,45 @@ Session 中，因此该值就是 App-scoped `ownerOpenId`。可信 Main Host 把
 - **只按裸 `open_id` 判断：** `open_id` 是 App-scoped，缺少 `app_id` 会错误合并不同 App 的身份；
 - **按 `union_id` 读取通讯录详情：** 不能替代 App-scoped `open_id`，也扩大跨 App 身份依赖；
 - **切换开发者账号后自动重建 Bot：** 会打破每队员唯一 App 与 no-rebind 状态机。
+
+<a id="v1-30-d11"></a>
+## V1.30-D11：执行过程使用临时控制台，公开正文与附件保持永久且独立
+
+### 背景
+
+早期 ChannelDelivery 用 `agent_status`、`agent_output` 和 `completion` 反复更新状态卡。同一飞书消息同时承担执行过程、
+公开回复和最终状态，导致正文可能被终态覆盖，也无法表达多 Agent 各自的工具进度。Renderer 已有可信的公共
+Execution Evidence presentation，Main 若另写一套又会产生本地/飞书语义漂移。Camp 已有 Managed Attachment v2 正式
+发布 authority，继续把公开图片/文件降级为文本也会丢失 Agent 的实际交付物。
+
+### 决定
+
+每个 AgentRun 建立一个 Core-owned execution console identity，由实际作者 Bot 把公开 Evidence、Run 状态和公开输出
+投影为同一 Card 2.0 并 durable upsert；Main 和 Renderer 复用同一纯 presentation 模块。reasoning/thought 永不进入该
+surface，活跃工具展开，终态连续成功/已记录工具折叠。下一条 root request admission 由原 Bot recall 同一
+ChannelConversation 中更早 Turn 的控制台；在途 upsert 先结束，已撤回/不存在按幂等成功。
+
+Agent 的正式公开正文改为每条 CampMessage 一个新的无标题 Markdown 消息，永不更新任何状态卡或其他正文。
+CampMessage 的 available Managed Attachment v2 引用按 ordinal 生成独立原生 image/file delivery；发送时重新验证
+`campId + attachmentId` authority、字节数和 digest。正文先终态，附件逐个独立重试；一个附件最终失败只追加一条
+attention，不重发正文或其他附件。
+
+`queue_ack` 只为真实 queued 请求创建，admission 后删除或 recall。`agent_status` 与 `completion` 退出用户可见协议。
+ChannelTurnRequest settlement 只等待 terminal Turn 与永久 `agent_output | agent_attachment | attention`，不等待临时
+控制台、recall 或 queue ack。当前规范见[飞书渠道架构](../../architecture/feishu-channel.md#输出恢复与秘密)和
+[Feishu Channel v2](../../contracts/feishu-channel-v2.md#7-channeldelivery)。
+
+### 后果
+
+- 多 Agent/A2A 各有一个可持续更新、可恢复且作者身份准确的执行控制台；
+- 飞书永久正文与本地公开 CampMessage 一一对应，不再出现“回复卡”标题或终态覆盖；
+- 图片/文件复用现有 Attachment authority，上传失败范围收敛到单一附件；
+- 旧 schema 的状态/完成 transport 行在 Migration 119 clean break 中退出，既有业务消息和附件 authority 保留。
+
+### 被拒绝方案
+
+- **继续用一张卡覆盖状态、正文和完成：** presentation 与业务消息生命周期混在一起，终态会破坏永久输出；
+- **直接转发 Runtime stream：** 会泄漏 reasoning、stdout 或未形成公共 authority 的过程数据；
+- **Main 单独实现执行过程格式：** 本地与飞书会随事件分类和工具分组规则演化而漂移；
+- **把所有附件绑成一次发送：** 任一上传失败都会迫使正文或已成功附件重复；
+- **用路径作为附件 identity：** 绕过 Managed Attachment 的 Camp scope、digest 与 symlink/可读性验证。
