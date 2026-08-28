@@ -1,11 +1,13 @@
 import type {
   AgentRunExecutionEvidenceView,
   AgentRunView,
+  CanonicalRuntimeDiffProjectionView,
   CanonicalRuntimeActivityView,
   CoreEvent,
   NavigationCampItem,
   NavigationSnapshot
 } from '@contracts'
+import { safeMarkdownHasRenderableContent } from './safe-markdown-model'
 
 export const RAIL_COLLAPSED_WIDTH = 52
 export const RAIL_EXPANDED_WIDTH = 176
@@ -101,6 +103,14 @@ export type ExecutionStep = {
   activityDomain: string
   toolName: string | null
   credibility: string
+  fileChanges?: Array<{
+    path: string
+    changeKind: 'add' | 'delete' | 'update'
+    additions: number
+    deletions: number
+    diff: string
+  }>
+  fileChangeSemantics?: CanonicalRuntimeDiffProjectionView['semanticKind']
 }
 
 export type RuntimeDiagnostic = {
@@ -415,6 +425,10 @@ export function buildLiveExecutionProgress(
       const nativeStatus = stringField(item, 'status')
       const title = executionActivityTitle(canonical, payload)
       const status = canonicalActivityStatus(canonical, activityStatus(nativeStatus, event.eventType))
+      const fileChanges = canonicalFileChanges(canonical)
+      const fileChangeSemantics = fileChanges ? canonical?.diffProjection?.semanticKind : undefined
+      if (nativeType === 'fileChange' && !fileChanges) continue
+      if (!fileChanges && isApplyPatchPresentation(canonical, payload)) continue
       const command = stringField(item, 'command')
       const rawOutput = stringField(item, 'aggregatedOutput')
         ?? stringField(item, 'output')
@@ -441,7 +455,9 @@ export function buildLiveExecutionProgress(
         status,
         activityDomain: canonical?.activityDomain ?? 'unknown',
         toolName: canonical?.toolName ?? null,
-        credibility: canonical?.credibility ?? 'unknown'
+        credibility: canonical?.credibility ?? 'unknown',
+        fileChanges,
+        fileChangeSemantics
       })
       continue
     }
@@ -454,6 +470,9 @@ export function buildLiveExecutionProgress(
       const title = executionActivityTitle(canonical, payload)
       const nativeStatus = stringField(payload, 'status')
       const status = canonicalActivityStatus(canonical, activityStatus(nativeStatus, event.eventType))
+      const fileChanges = canonicalFileChanges(canonical)
+      const fileChangeSemantics = fileChanges ? canonical?.diffProjection?.semanticKind : undefined
+      if (!fileChanges && isApplyPatchPresentation(canonical, payload)) continue
       if (shouldDeferUnresolvedShellActivity(canonical, title, status)) continue
       upsertStep({
         id: itemId,
@@ -462,26 +481,15 @@ export function buildLiveExecutionProgress(
         status,
         activityDomain: canonical?.activityDomain ?? 'unknown',
         toolName: canonical?.toolName ?? null,
-        credibility: canonical?.credibility ?? 'unknown'
+        credibility: canonical?.credibility ?? 'unknown',
+        fileChanges,
+        fileChangeSemantics
       })
       continue
     }
 
-    if (event.eventType === 'file.change.updated') {
-      finishNarrationStream()
-      const canonical = event.canonical
-      const itemId = canonical?.operationId ?? event.id
-      rememberItem(`tool:${itemId}`)
-      upsertStep({
-        id: itemId,
-        title: executionActivityTitle(canonical, payload),
-        detail: 'Patch 内容已更新',
-        status: canonicalActivityStatus(canonical, 'running'),
-        activityDomain: canonical?.activityDomain ?? 'unknown',
-        toolName: canonical?.toolName ?? null,
-        credibility: canonical?.credibility ?? 'unknown'
-      })
-    }
+    // Incremental patch notifications are deliberately not presented. Only a
+    // reliable terminal Runtime diff projection can produce modified-file rows.
   }
 
   const stepById = new Map(steps.map((step) => [step.id, step]))
@@ -495,7 +503,9 @@ export function buildLiveExecutionProgress(
     if (key.startsWith('narration:')) {
       const itemId = key.slice('narration:'.length)
       const body = (narrationByItem.get(itemId) ?? '').trim().slice(-4_000)
-      return body ? [{ key, kind: 'narration', body }] : []
+      return safeMarkdownHasRenderableContent(body)
+        ? [{ key, kind: 'narration', body }]
+        : []
     }
     if (key.startsWith('diagnostic:')) {
       const diagnostic = diagnosticsById.get(key.slice('diagnostic:'.length))
@@ -510,6 +520,28 @@ export function buildLiveExecutionProgress(
   return {
     items
   }
+}
+
+function canonicalFileChanges(
+  canonical: CanonicalRuntimeActivityView | null | undefined
+): ExecutionStep['fileChanges'] {
+  const projection = canonical?.diffProjection
+  return projection?.status === 'available' && Array.isArray(projection.entries)
+    ? projection.entries
+    : undefined
+}
+
+function isApplyPatchPresentation(
+  canonical: CanonicalRuntimeActivityView | null | undefined,
+  payload: Record<string, unknown>
+): boolean {
+  const item = asRecord(payload.item)
+  return [
+    canonical?.toolName,
+    stringField(item, 'tool'),
+    stringField(payload, 'tool'),
+    stringField(payload, 'title')
+  ].some((value) => value?.trim().toLowerCase() === 'apply_patch')
 }
 
 const TOOL_EVIDENCE_KINDS = new Set<AgentRunExecutionEvidenceView['kind']>([
@@ -763,6 +795,7 @@ export function executionActivityTitle(
     if (canonical?.toolName && !genericShellTitle(canonical.toolName)) return canonical.toolName
     if (presentationHint && !genericShellTitle(presentationHint)) return presentationHint
   } else {
+    if (canonical?.activityDomain === 'file' && presentationHint) return presentationHint
     if (canonical?.toolName) return canonical.toolName
     if (presentationHint) return presentationHint
   }

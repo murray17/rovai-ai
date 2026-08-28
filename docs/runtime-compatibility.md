@@ -1,7 +1,7 @@
 ---
 document_type: runtime-compatibility-register
 authority: runtime-validation-evidence
-last_updated: 2026-08-25
+last_updated: 2026-08-27
 ---
 
 # Agent Runtime 兼容性清单
@@ -31,6 +31,22 @@ Cursor identity 仅保留内部兼容与历史读取，默认不进入 discovery
 目录不展示该项。设置页的
 DeepSeek Harness “待支持”行是 Renderer-only Preview，不在这个目录中，也没有 Installation、
 Probe、成员选择、诊断或 AgentRun 语义。
+
+### 2026-08-27 ACP 文件操作与 Diff pre-fix 真实观测
+
+对日常 App 最近三个隔离 Camp 的 append-only Execution Evidence 做只读核验，确认问题不是三个 Runtime 都没有
+文件修改事件：
+
+| Runtime | 真实终态观测 | pre-fix 缺口 | 当前代码边界 |
+| --- | --- | --- | --- |
+| Kimi Code `0.38.0` | 成功 `edit` terminal，`locationCount=1`，没有标准 ACP Diff | 普通 `Edit` 行没有收敛为文件操作 presentation | 同 terminal 唯一标准 location 生成 `修改 kimi-code-cli.txt`；没有 `+ / −` 或 inline diff |
+| Qoder `1.1.28` | 成功 Write 可只有可靠 path；后续成功 Edit 可提供完整 old/new，但没有标准 ACP Diff；另一个 Read 的 terminal 曾错报 `edit` | 稀疏 terminal 丢失路径，且冲突 kind 可能把 Read 误分类 | 同 ToolCall 累计先前 location；首次可信结构化 kind 优先，Read 不伪造成写；path-only Write 保留操作计数但不渲染空 Diff，同文件可靠 Edit 正常显示内容并参与 `+ / −` 聚合 |
+| Kiro `2.18.1` | 成功 `edit` terminal 同时有唯一标准 location 和标准 ACP Diff | Diff 被归一化为 `runtime_diff_path_outside_root`；持久 Evidence 没有保留被拒绝的原始 path | 对 Kiro 已知 rooted-relative wire shape，单 entry Diff 仅在去根锚路径与同 ToolCall location 完全相等时对齐，随后同 Activity 同时具有文件操作行和 inline Diff |
+
+上述观测冻结的是修复前真实 wire 的能力与失败点；当前代码已建立定向 fixture，但修复后的打包 App 真实复测尚未
+执行，不能把 fixture 写成 post-fix Runtime smoke。当前每 Run 文件变化卡片只归约该 AgentRun 已落库的可靠
+Runtime Evidence，不使用 Git 或工作区扫描；因此 path-only、标准 Diff 与 exact mutation 的实际覆盖直接决定卡片
+细节，未被 Runtime 报告的 shell 或外部写入不进入卡片。
 
 ### 2026-08-24 Kimi Code macOS x64 准入晋升
 
@@ -75,7 +91,7 @@ Evidence、terminal final 与 Missing-Send candidate。
 | Provider / model | 私有配置注入 `MiniMax-M3`、`openai` provider、国内 endpoint；真实 Prompt `end_turn` 成功 | 六个 `KIMI_MODEL_*` 键严格 allowlist；Unix group/other 可访问、未知/重复/缺失键均 fail closed |
 | Prompt / final | 隔离 ACP 和项目级 Core AgentRun 都返回固定答案；v1.28 generic fixture 证明 `<think>` text 原样保留 | Kimi streamed text 走普通 `agent.text.delta`；terminal 与 Missing-Send candidate 不做 provider 清洗 |
 | Tool / permission | 显式 `permission_mode=default` 的 Shell allow-once、deny 与六类 terminal output 矩阵通过；另一个真实 smoke 直接读取 Core `memberRuntimeDefaults` 得到 `permission_mode=yolo`，固定 Prompt、Shell command 和文件写入均成功且产生 0 次交互式 Approval | 新队员默认原生最高权限 `yolo`，descriptor recommendation 保持 `default`，已有保存值不自动扩权，read-only effective mode 强制 `plan`；最高 Runtime 权限不绕过 Core 自有路径、凭据、Binding 与 execution fence |
-| Deny / filesystem | 独立 Camp 中真实 deny Approval 返回 `rovai_approval_denied`，Tool 为 `failed/not_executed`，目标文件不存在 | ACP Client fs write 没有匹配 one-time authorization 时由 Core 拒绝；Runtime Tool 前预拒绝仍可单独如实记录 |
+| Deny / filesystem | 独立 Camp 中真实 deny Approval 返回 `rovai_approval_denied`，Tool 为 `failed/not_executed`，目标文件不存在；旧 Core 曾另以 one-time authorization 拒绝 Client FS 写入 | 当前 Client FS/Terminal 权限由 Runtime 拥有，Core 不再把 permission response 映射为文件 token，也不做 execution-root containment；Runtime Tool 前的原生预拒绝仍可单独如实记录 |
 | Cancel / cleanup | `sleep 30` 获准后发送 `session/cancel`，约 6 ms 返回 `cancelled`，无目标残留进程 | cancel、terminal、planned shutdown、Camp 删除与 App shutdown 都停止私有 Host/进程树 |
 | Session / Home | 同 Host 同 Session 多轮精确回忆通过；同 Host 两个 Session 的 marker 无串话；新进程复用同一 `KIMI_CODE_HOME` 时，`session/resume` 与 `session/load` 都保持精确 Session ID 并回忆 marker；换用隔离 Home 后 resume 返回 `-32602 Unknown sessionId`；用户原生 Home 的真实 Core smoke 证明固定 command、allow 写入与 deny 三个连续兼容 Run 复用同一 Host/Session，显式停止后新 Host exact resume 且 Session ID 不变 | 正式 AgentRun 不设置 `HOME` / `KIMI_CODE_HOME`，继承用户原生状态根；Deep Probe 使用一次性临时 Home。含 AgentRun identity 的 Run-local MCP projection/evidence digest 不进入 Host compatibility，完整 Server 定义仍进入；停止或淘汰后新 Host 优先 exact resume，load-only 时进入 replay quarantine；v22 旧私有 Home 不自动迁移或删除 |
 | Catalog | `session/new.configOptions` 报告 synthetic env model、thinking `on/off` 与四种 mode；Idle `available_commands_update` 报告内建 command 和 Skill command | Runtime advertisement 为 Verified；Host 安全路由为私有 async metadata。当前产品不消费该 catalog，不建立产品 snapshot，也不列为遗留问题 |

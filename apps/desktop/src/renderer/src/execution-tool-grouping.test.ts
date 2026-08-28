@@ -54,6 +54,40 @@ describe('execution Tool grouping', () => {
     expect(groupConsecutiveToolItems([tool('one')])[0].key).toBe(grouped[0].key)
   })
 
+  it('keeps FileChange Activities inside the Tool group without counting presentation rows as operations', () => {
+    const fileChange = tool('files')
+    fileChange.step.fileChanges = [{
+      path: 'src/app.ts',
+      changeKind: 'update',
+      additions: 2,
+      deletions: 1,
+      diff: '@@ -1 +1,2 @@\n-old\n+new\n+next\n'
+    }, {
+      path: 'src/styles.css',
+      changeKind: 'update',
+      additions: 1,
+      deletions: 1,
+      diff: '@@ -1 +1 @@\n-red\n+green\n'
+    }]
+
+    const grouped = groupConsecutiveToolItems([fileChange, tool('verify')])
+
+    expect(grouped).toMatchObject([{
+      kind: 'toolGroup',
+      items: [
+        { step: { id: 'files', fileChanges: [{ path: 'src/app.ts' }, { path: 'src/styles.css' }] } },
+        { step: { id: 'verify' } }
+      ]
+    }])
+    expect(toolActivityGroupPresentation(
+      grouped[0].kind === 'toolGroup' ? grouped[0].items : [],
+      'succeeded'
+    )).toMatchObject({
+      primary: '已执行 2 项操作',
+      accessibleLabel: '已执行 2 项操作；状态：全部成功'
+    })
+  })
+
   it('shows only the last active Tool while an operation is in progress', () => {
     const presentation = toolActivityGroupPresentation([
       tool('one'),

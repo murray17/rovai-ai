@@ -38,4 +38,5 @@ last_updated: 2026-08-28
 | [Structured Current Input Skill Links](structured-current-input-skill-links.md) | Picker SkillMention、per-Run send snapshot、start-time desired state、verified Exposure、只读 Resolver、`CURRENT_INPUT.skills` 与 unchanged Adapter transport |
 | [User Automation](user-automation.md) | 一个 `rovai` binary 下隔离的 Agent/User transport、Main-owned 本机 IPC、封闭 dispatch、Camp navigation、CLI-owned Diagnostic Trial、双 cursor 与安全导出边界 |
 | [Windows Desktop Platform](windows-desktop-platform.md) | Windows x64 host envelope、平台 seam、原子 Job 启动、Transport v14、私有 local storage、hidden title strip + top-level menu projection + native controls、NSIS 与真实 Windows 验收组合 |
+| [Runtime File Change Observation](runtime-file-change-observation.md) | Runtime 终态文件操作、Command Diff、每 AgentRun 文件变化归约、Managed Blob、恢复与授权读取边界；不扫描工作区或依赖 Git |
 <!-- architecture-index:end -->

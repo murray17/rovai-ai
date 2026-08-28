@@ -1,4 +1,4 @@
-use std::ops::Deref;
+use std::{ops::Deref, path::Path};
 
 use anyhow::{Context, Result};
 use rusqlite::{OptionalExtension, TransactionBehavior, params};
@@ -10,6 +10,8 @@ use crate::{
     canonical_activity::{self, CanonicalRuntimeActivity, EvidenceActivityFacts},
     db::Database,
     managed_blob::ManagedBlobStore,
+    runtime_diff::{self, COMMAND_DIFF_SCHEMA_VERSION},
+    runtime_file_operation::{self, FILE_OPERATION_SCHEMA_VERSION},
 };
 
 const INLINE_PAYLOAD_LIMIT_BYTES: usize = 16 * 1024;
@@ -91,6 +93,7 @@ impl ExecutionEvidenceService {
                 | "runtime.plan.delta"
                 | "runtime.diagnostic"
                 | "file.change.updated"
+                | "runtime.file_changes.snapshot"
                 | "runtime.action"
                 | "activity.started"
                 | "activity.completed"
@@ -355,6 +358,34 @@ impl ExecutionEvidenceService {
         )
     }
 
+    pub fn record_terminal_run_diff_snapshot(
+        &self,
+        database: &mut Database,
+        blob_store: &ManagedBlobStore,
+        agent_run_id: &str,
+        execution_epoch: i64,
+        payload: &Value,
+    ) -> Result<Option<RecordedExecutionEvidence>> {
+        let run_diff = payload
+            .get("runtimeRunDiff")
+            .context("terminal Run diff Evidence has no runtimeRunDiff")?;
+        if run_diff.get("status").and_then(Value::as_str) != Some("available")
+            || run_diff.get("semanticKind").and_then(Value::as_str) != Some("unified_diff_snapshot")
+            || run_diff.get("diff").and_then(Value::as_str).is_none()
+        {
+            anyhow::bail!("terminal Run diff Evidence is incomplete");
+        }
+        self.record_runtime_event_with_fence_policy(
+            database,
+            blob_store,
+            agent_run_id,
+            execution_epoch,
+            "runtime.file_changes.snapshot",
+            payload,
+            true,
+        )
+    }
+
     pub fn record_builtin_tool_started(
         &self,
         database: &mut Database,
@@ -395,7 +426,9 @@ impl ExecutionEvidenceService {
             .connection()
             .query_row(
                 r#"
-                SELECT status, execution_epoch, cancel_requested_at
+                SELECT status, execution_epoch, cancel_requested_at,
+                       workspace_json, runtime_adapter_kind,
+                       runtime_reported_version
                 FROM agent_run
                 WHERE id = ?1
                 "#,
@@ -405,11 +438,22 @@ impl ExecutionEvidenceService {
                         row.get::<_, String>(0)?,
                         row.get::<_, i64>(1)?,
                         row.get::<_, Option<String>>(2)?,
+                        row.get::<_, Option<String>>(3)?,
+                        row.get::<_, Option<String>>(4)?,
+                        row.get::<_, Option<String>>(5)?,
                     ))
                 },
             )
             .optional()?;
-        let Some((status, current_epoch, cancel_requested_at)) = current else {
+        let Some((
+            status,
+            current_epoch,
+            cancel_requested_at,
+            workspace_json,
+            runtime_adapter_kind,
+            runtime_reported_version,
+        )) = current
+        else {
             return Ok(None);
         };
         if current_epoch != execution_epoch
@@ -422,14 +466,39 @@ impl ExecutionEvidenceService {
         }
 
         let source_event_key = source_event_key(event_type, payload);
-        let payload = normalize_public_payload(event_type, payload);
+        let mut payload = normalize_public_payload(event_type, payload);
+        normalize_runtime_file_operation_evidence(
+            &mut payload,
+            workspace_json.as_deref(),
+            runtime_adapter_kind.as_deref(),
+            runtime_reported_version.as_deref(),
+        );
+        normalize_runtime_diff_evidence(
+            &mut payload,
+            workspace_json.as_deref(),
+            runtime_adapter_kind.as_deref(),
+            runtime_reported_version.as_deref(),
+        );
         let encoded = serde_json::to_vec(&payload)?;
         let (preview, content_blob_id, is_truncated) = if encoded.len() > INLINE_PAYLOAD_LIMIT_BYTES
         {
-            let blob = blob_store.put_bytes(database, &encoded, "application/json", "normal")?;
+            let privacy = if payload
+                .pointer("/runtimeDiff/status")
+                .and_then(Value::as_str)
+                == Some("available")
+                || payload
+                    .pointer("/runtimeRunDiff/status")
+                    .and_then(Value::as_str)
+                    == Some("available")
+            {
+                "sensitive"
+            } else {
+                "normal"
+            };
+            let blob = blob_store.put_bytes(database, &encoded, "application/json", privacy)?;
             (bounded_preview(&payload), Some(blob.id), true)
         } else {
-            (payload, None, false)
+            (payload.clone(), None, false)
         };
         let preview_json = serde_json::to_string(&preview)?;
         let occurred_at = chrono::Utc::now().to_rfc3339();
@@ -521,7 +590,7 @@ impl ExecutionEvidenceService {
             event_type,
             kind,
             phase,
-            &preview,
+            &payload,
         );
         let canonical = upsert_canonical_activity(
             &transaction,
@@ -595,6 +664,7 @@ fn evidence_classification(
         "runtime.plan" | "runtime.plan.delta" => Some(("plan", "updated")),
         "runtime.diagnostic" => Some(("step", "updated")),
         "file.change.updated" => Some(("file_change", "updated")),
+        "runtime.file_changes.snapshot" => Some(("file_change", "completed")),
         "runtime.action" => Some((
             if payload
                 .get("status")
@@ -647,6 +717,10 @@ fn normalize_public_payload(event_type: &str, payload: &Value) -> Value {
             "itemId": payload.get("itemId"),
             "patch": payload.get("patch").or_else(|| payload.get("delta")),
         }),
+        "runtime.file_changes.snapshot" => serde_json::json!({
+            "eventId": payload.get("eventId"),
+            "runtimeRunDiff": payload.get("runtimeRunDiff"),
+        }),
         "runtime.action" => {
             let mut normalized = serde_json::json!({
                 "toolCallId": payload.get("toolCallId"),
@@ -666,6 +740,8 @@ fn normalize_public_payload(event_type: &str, payload: &Value) -> Value {
                 "idempotentReplay": payload.get("idempotentReplay"),
                 "receiptId": payload.get("receiptId"),
                 "operationProjection": payload.get("operationProjection"),
+                "runtimeFileOperation": payload.get("runtimeFileOperation"),
+                "runtimeDiff": payload.get("runtimeDiff"),
             });
             if let Some(core_envelope) = payload.get("coreEnvelope") {
                 normalized["coreEnvelope"] = core_envelope.clone();
@@ -675,6 +751,7 @@ fn normalize_public_payload(event_type: &str, payload: &Value) -> Value {
         "activity.started" | "activity.completed" => {
             let item = payload.get("item").unwrap_or(&Value::Null);
             serde_json::json!({
+                "runtimeDiff": payload.get("runtimeDiff"),
                 "reasonCode": payload.get("reasonCode"),
                 "item": {
                     "id": item.get("id"),
@@ -698,6 +775,125 @@ fn normalize_public_payload(event_type: &str, payload: &Value) -> Value {
         }
         _ => Value::Null,
     }
+}
+
+fn normalize_runtime_diff_evidence(
+    payload: &mut Value,
+    workspace_json: Option<&str>,
+    frozen_adapter_kind: Option<&str>,
+    observed_runtime_version: Option<&str>,
+) {
+    let Some(candidate) = payload.get("runtimeDiff").cloned() else {
+        return;
+    };
+    if candidate.is_null() {
+        return;
+    }
+    let execution_root = workspace_json
+        .and_then(|workspace| serde_json::from_str::<Value>(workspace).ok())
+        .and_then(|workspace| {
+            workspace
+                .get("executionRoot")
+                .and_then(Value::as_str)
+                .map(str::to_string)
+        });
+    let file_operation_path =
+        runtime_file_operation::path_from_evidence(payload).map(str::to_string);
+    let admitted = execution_root.as_deref().map(Path::new).map(|root| {
+        runtime_diff::admit_runtime_diff_with_file_operation_path(
+            payload,
+            root,
+            frozen_adapter_kind,
+            file_operation_path.as_deref(),
+        )
+        .unwrap_or(Err("runtime_diff_candidate_missing"))
+    });
+    let source = serde_json::json!({
+        "adapterKind": candidate.get("adapterKind"),
+        "observedRuntimeVersion": observed_runtime_version,
+        "sourceEventKind": candidate.get("sourceEventKind"),
+    });
+    payload["runtimeDiff"] = match admitted {
+        Some(Ok(admitted)) => {
+            serde_json::json!({
+                "schemaVersion": COMMAND_DIFF_SCHEMA_VERSION,
+                "source": "runtime_reported",
+                "status": "available",
+                "semanticKind": admitted.semantic_kind,
+                "entries": admitted.evidence_entries,
+                "sourceMetadata": source,
+            })
+        }
+        Some(Err(reason)) => serde_json::json!({
+            "schemaVersion": COMMAND_DIFF_SCHEMA_VERSION,
+            "source": "runtime_reported",
+            "status": "unavailable",
+            "safeReasonCode": reason,
+            "sourceMetadata": source,
+        }),
+        None => serde_json::json!({
+            "schemaVersion": COMMAND_DIFF_SCHEMA_VERSION,
+            "source": "runtime_reported",
+            "status": "unavailable",
+            "safeReasonCode": "runtime_diff_execution_root_unavailable",
+            "sourceMetadata": source,
+        }),
+    };
+}
+
+fn normalize_runtime_file_operation_evidence(
+    payload: &mut Value,
+    workspace_json: Option<&str>,
+    frozen_adapter_kind: Option<&str>,
+    observed_runtime_version: Option<&str>,
+) {
+    let Some(candidate) = payload.get("runtimeFileOperation").cloned() else {
+        return;
+    };
+    if candidate.is_null() {
+        return;
+    }
+    let execution_root = workspace_json
+        .and_then(|workspace| serde_json::from_str::<Value>(workspace).ok())
+        .and_then(|workspace| {
+            workspace
+                .get("executionRoot")
+                .and_then(Value::as_str)
+                .map(str::to_string)
+        });
+    let admitted = execution_root.as_deref().map(Path::new).map(|root| {
+        runtime_file_operation::admit_runtime_file_operation(payload, root, frozen_adapter_kind)
+            .unwrap_or(Err("runtime_file_operation_candidate_missing"))
+    });
+    let source = serde_json::json!({
+        "adapterKind": candidate.get("adapterKind"),
+        "observedRuntimeVersion": observed_runtime_version,
+        "sourceEventKind": candidate.get("sourceEventKind"),
+    });
+    payload["runtimeFileOperation"] = match admitted {
+        Some(Ok(admitted)) => serde_json::json!({
+            "schemaVersion": FILE_OPERATION_SCHEMA_VERSION,
+            "source": "runtime_reported",
+            "status": "available",
+            "operationKind": admitted.operation_kind,
+            "path": admitted.path,
+            "sourceMetadata": source,
+        }),
+        Some(Err(reason)) => serde_json::json!({
+            "schemaVersion": FILE_OPERATION_SCHEMA_VERSION,
+            "source": "runtime_reported",
+            "status": "unavailable",
+            "safeReasonCode": reason,
+            "sourceMetadata": source,
+        }),
+        None => serde_json::json!({
+            "schemaVersion": FILE_OPERATION_SCHEMA_VERSION,
+            "source": "runtime_reported",
+            "status": "unavailable",
+            "safeReasonCode": "runtime_file_operation_execution_root_missing",
+            "sourceMetadata": source,
+        }),
+    };
 }
 
 fn public_command_actions(item: &Value) -> Value {
@@ -894,7 +1090,8 @@ fn upsert_canonical_activity(
         .query_row(
             r#"
             SELECT operation_id, classifier_version, activity_domain,
-                   semantic_kind, tool_name, presentation_hint, phase, outcome,
+                   semantic_kind, tool_name, presentation_hint,
+                   diff_projection_json, phase, outcome,
                    credibility, coverage_level, source_authority,
                    source_evidence_ids_json, first_evidence_sequence,
                    last_evidence_sequence, revision
@@ -928,13 +1125,13 @@ fn upsert_canonical_activity(
         INSERT INTO canonical_runtime_activity(
             agent_run_id, execution_epoch, operation_id, classifier_version,
             activity_domain, semantic_kind, tool_name, presentation_hint,
-            phase, outcome, credibility, coverage_level, source_authority,
+            diff_projection_json, phase, outcome, credibility, coverage_level, source_authority,
             source_evidence_ids_json, first_evidence_sequence,
             last_evidence_sequence, revision, created_at, updated_at,
             started_at, terminal_at
         ) VALUES (
             ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13,
-            ?14, ?15, ?16, ?17, ?18, ?18, ?19, ?20
+            ?14, ?15, ?16, ?17, ?18, ?19, ?19, ?20, ?21
         )
         ON CONFLICT(agent_run_id, execution_epoch, operation_id, classifier_version)
         DO UPDATE SET
@@ -942,6 +1139,7 @@ fn upsert_canonical_activity(
             semantic_kind = excluded.semantic_kind,
             tool_name = excluded.tool_name,
             presentation_hint = excluded.presentation_hint,
+            diff_projection_json = excluded.diff_projection_json,
             phase = excluded.phase,
             outcome = excluded.outcome,
             credibility = excluded.credibility,
@@ -967,6 +1165,11 @@ fn upsert_canonical_activity(
             projection.semantic_kind,
             projection.tool_name,
             projection.presentation_hint,
+            projection
+                .diff_projection
+                .as_ref()
+                .map(serde_json::to_string)
+                .transpose()?,
             projection.phase,
             projection.outcome,
             projection.credibility,
@@ -994,6 +1197,7 @@ fn load_canonical_for_evidence(
             SELECT activity.operation_id, activity.classifier_version,
                    activity.activity_domain, activity.semantic_kind,
                    activity.tool_name, activity.presentation_hint,
+                   activity.diff_projection_json,
                    activity.phase, activity.outcome, activity.credibility,
                    activity.coverage_level, activity.source_authority,
                    activity.source_evidence_ids_json,
@@ -1020,7 +1224,8 @@ fn load_canonical_for_evidence(
 }
 
 fn canonical_activity_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<CanonicalRuntimeActivity> {
-    let source_evidence_ids: String = row.get(11)?;
+    let diff_projection: Option<String> = row.get(6)?;
+    let source_evidence_ids: String = row.get(12)?;
     Ok(CanonicalRuntimeActivity {
         operation_id: row.get(0)?,
         classifier_version: row.get(1)?,
@@ -1028,21 +1233,31 @@ fn canonical_activity_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Canonical
         semantic_kind: row.get(3)?,
         tool_name: row.get(4)?,
         presentation_hint: row.get(5)?,
-        phase: row.get(6)?,
-        outcome: row.get(7)?,
-        credibility: row.get(8)?,
-        coverage_level: row.get(9)?,
-        source_authority: row.get(10)?,
+        diff_projection: diff_projection
+            .map(|value| serde_json::from_str(&value))
+            .transpose()
+            .map_err(|error| {
+                rusqlite::Error::FromSqlConversionFailure(
+                    6,
+                    rusqlite::types::Type::Text,
+                    Box::new(error),
+                )
+            })?,
+        phase: row.get(7)?,
+        outcome: row.get(8)?,
+        credibility: row.get(9)?,
+        coverage_level: row.get(10)?,
+        source_authority: row.get(11)?,
         source_evidence_ids: serde_json::from_str(&source_evidence_ids).map_err(|error| {
             rusqlite::Error::FromSqlConversionFailure(
-                11,
+                12,
                 rusqlite::types::Type::Text,
                 Box::new(error),
             )
         })?,
-        first_evidence_sequence: row.get(12)?,
-        last_evidence_sequence: row.get(13)?,
-        revision: row.get(14)?,
+        first_evidence_sequence: row.get(13)?,
+        last_evidence_sequence: row.get(14)?,
+        revision: row.get(15)?,
     })
 }
 #[cfg(test)]
@@ -1120,6 +1335,176 @@ mod tests {
         assert_eq!(
             activity_kind(&json!({"item": {"type": "mcpToolCall"}})),
             "tool_call"
+        );
+    }
+
+    #[test]
+    fn claude_exact_mutation_remains_append_only_evidence_and_projects_without_line_numbers() {
+        let mut started_payload = normalize_public_payload(
+            "runtime.action",
+            &json!({
+                "toolCallId": "toolu_edit_1",
+                "toolName": "Edit",
+                "status": "in_progress",
+                "kind": "edit"
+            }),
+        );
+        normalize_runtime_diff_evidence(
+            &mut started_payload,
+            Some(r#"{"executionRoot":"/repo"}"#),
+            Some("claude-code-cli"),
+            Some("1.0.100"),
+        );
+        assert!(
+            runtime_diff::projection_from_evidence(&started_payload, "evidence-edit-started")
+                .is_none(),
+            "a null started candidate must not become an unavailable terminal snapshot"
+        );
+
+        let mut payload = normalize_public_payload(
+            "runtime.action",
+            &json!({
+                "toolCallId": "toolu_edit_1",
+                "toolName": "Edit",
+                "status": "completed",
+                "kind": "edit",
+                "runtimeDiff": {
+                    "adapterKind": "claude-code-cli",
+                    "protocolFamily": "claude-stream-json",
+                    "sourceEventKind": "assistant.tool_use.Edit+user.tool_result.completed",
+                    "semanticKind": "exact_mutation",
+                    "entries": [{
+                        "semantics": "exact_mutation",
+                        "path": "/repo/src/CampWorkspace.tsx",
+                        "oldText": "const enabled = false",
+                        "newText": "const enabled = true"
+                    }]
+                }
+            }),
+        );
+        normalize_runtime_diff_evidence(
+            &mut payload,
+            Some(r#"{"executionRoot":"/repo"}"#),
+            Some("claude-code-cli"),
+            Some("1.0.100"),
+        );
+
+        assert_eq!(payload["runtimeDiff"]["status"], "available");
+        assert_eq!(payload["runtimeDiff"]["semanticKind"], "exact_mutation");
+        assert_eq!(
+            payload.pointer("/runtimeDiff/entries/0"),
+            Some(&json!({
+                "semantics": "exact_mutation",
+                "path": "src/CampWorkspace.tsx",
+                "oldText": "const enabled = false",
+                "newText": "const enabled = true"
+            }))
+        );
+        assert!(payload.pointer("/runtimeDiff/entries/0/diff").is_none());
+
+        let projection = runtime_diff::projection_from_evidence(&payload, "evidence-edit-1")
+            .expect("normalized exact mutation should project");
+        assert_eq!(projection.semantic_kind.as_deref(), Some("exact_mutation"));
+        let entry = &projection.entries.as_ref().unwrap()[0];
+        assert_eq!((entry.additions, entry.deletions), (1, 1));
+        assert_eq!(
+            entry.diff,
+            "-const enabled = false\n+const enabled = true\n"
+        );
+        assert!(!entry.diff.contains("@@"));
+    }
+
+    #[test]
+    fn acp_file_operation_path_is_durable_without_fabricating_a_diff_projection() {
+        let mut payload = normalize_public_payload(
+            "runtime.action",
+            &json!({
+                "toolCallId": "qoder-edit",
+                "status": "completed",
+                "kind": "edit",
+                "runtimeFileOperation": {
+                    "adapterKind": "qoder-cli",
+                    "protocolFamily": "acp-v1",
+                    "sourceEventKind": "session/update.tool_call_update.completed",
+                    "operationKind": "write",
+                    "path": "/repo/rovai-runtime-validation/qoder-cli.txt"
+                }
+            }),
+        );
+        normalize_runtime_file_operation_evidence(
+            &mut payload,
+            Some(r#"{"executionRoot":"/repo"}"#),
+            Some("qoder-cli"),
+            Some("1.1.28"),
+        );
+        normalize_runtime_diff_evidence(
+            &mut payload,
+            Some(r#"{"executionRoot":"/repo"}"#),
+            Some("qoder-cli"),
+            Some("1.1.28"),
+        );
+
+        assert_eq!(payload["runtimeFileOperation"]["status"], "available");
+        assert_eq!(
+            payload["runtimeFileOperation"]["path"],
+            "rovai-runtime-validation/qoder-cli.txt"
+        );
+        assert!(payload["runtimeDiff"].is_null());
+        assert!(runtime_diff::projection_from_evidence(&payload, "evidence-qoder").is_none());
+    }
+
+    #[test]
+    fn kiro_single_diff_uses_the_same_tool_calls_normalized_location_when_diff_path_is_rooted_wrong()
+     {
+        let mut payload = normalize_public_payload(
+            "runtime.action",
+            &json!({
+                "toolCallId": "kiro-edit",
+                "status": "completed",
+                "kind": "edit",
+                "runtimeFileOperation": {
+                    "adapterKind": "kiro-cli",
+                    "protocolFamily": "acp-v1",
+                    "sourceEventKind": "session/update.tool_call_update.completed",
+                    "operationKind": "write",
+                    "path": "/repo/rovai-runtime-validation/kiro-cli.txt"
+                },
+                "runtimeDiff": {
+                    "adapterKind": "kiro-cli",
+                    "protocolFamily": "acp-v1",
+                    "sourceEventKind": "session/update.tool_call_update.completed",
+                    "semanticKind": "complete_before_after",
+                    "entries": [{
+                        "path": "/rovai-runtime-validation/kiro-cli.txt",
+                        "oldText": "state=before\n",
+                        "newText": "state=after\n"
+                    }]
+                }
+            }),
+        );
+        normalize_runtime_file_operation_evidence(
+            &mut payload,
+            Some(r#"{"executionRoot":"/repo"}"#),
+            Some("kiro-cli"),
+            Some("kiro-cli 2.18.1"),
+        );
+        normalize_runtime_diff_evidence(
+            &mut payload,
+            Some(r#"{"executionRoot":"/repo"}"#),
+            Some("kiro-cli"),
+            Some("kiro-cli 2.18.1"),
+        );
+
+        assert_eq!(payload["runtimeDiff"]["status"], "available");
+        assert_eq!(
+            payload["runtimeDiff"]["entries"][0]["path"],
+            "rovai-runtime-validation/kiro-cli.txt"
+        );
+        let projection = runtime_diff::projection_from_evidence(&payload, "evidence-kiro")
+            .expect("Kiro diff should project after structured path reconciliation");
+        assert_eq!(
+            projection.entries.as_ref().unwrap()[0].path,
+            "rovai-runtime-validation/kiro-cli.txt"
         );
     }
 

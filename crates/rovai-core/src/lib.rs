@@ -1,6 +1,7 @@
 pub mod action;
 pub mod agent_identity;
 pub mod agent_profile;
+pub mod agent_run_file_change;
 pub mod agent_runtime_adapter;
 pub mod brand;
 pub mod builtin_tool_cli_output;
@@ -53,10 +54,12 @@ pub mod read_model;
 pub mod runtime;
 pub mod runtime_activity_mapping;
 pub mod runtime_basis;
+pub mod runtime_diff;
 pub mod runtime_discovery;
 #[cfg(windows)]
 mod runtime_discovery_windows;
 pub mod runtime_failure;
+pub mod runtime_file_operation;
 pub mod runtime_platform_admission;
 pub mod runtime_probe_process;
 pub mod runtime_resolution;

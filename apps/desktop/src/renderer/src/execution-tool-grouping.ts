@@ -15,6 +15,7 @@ export type ToolActivityGroup = {
 
 export type GroupedExecutionProgressItem =
   | Exclude<ExecutionProgressItem, { kind: 'tool' }>
+  | ToolProgressItem
   | ToolActivityGroup
 
 export type ToolActivityGroupPresentation = {

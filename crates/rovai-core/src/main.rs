@@ -54,6 +54,7 @@ use rovai_core::{
         SetMemberRuntimeConfigurationCommand, UpdateAdapterInstallationCommand,
         UpdateAgentProfileCommand, VerifiedManagedInstallation,
     },
+    agent_run_file_change::{self, AgentRunFileChangeProjector},
     agent_runtime_adapter::{
         AcpProbeObservation, AgentRuntimeAdapterRegistry, AntigravityProbeObservation,
         ClaudeCodeProbeObservation, CodexProbeObservation, ExecutableIntegrityStatus,
@@ -223,6 +224,7 @@ use tokio::{
 
 const RUNTIME_CANCELLATION_INTERRUPT_TIMEOUT: Duration = Duration::from_secs(2);
 const RUNTIME_CANCELLATION_FENCE_TIMEOUT: Duration = Duration::from_secs(1);
+const RUNTIME_CANCELLATION_INGRESS_FLUSH_TIMEOUT: Duration = Duration::from_secs(5);
 const PLANNED_SHUTDOWN_PROTOCOL_VERSION: u32 = 3;
 const PLANNED_SHUTDOWN_MIN_DEADLINE_MS: u64 = 100;
 const PLANNED_SHUTDOWN_MAX_DEADLINE_MS: u64 = 30_000;
@@ -237,6 +239,12 @@ const RUNTIME_EVIDENCE_DELTA_BATCH_WINDOW: Duration = Duration::from_millis(25);
 const RUNTIME_EVIDENCE_DELTA_BATCH_MAX_ITEMS: usize = 32;
 const CAMP_ATTACHMENT_VIEW_MUTATION_DEADLINE: Duration = Duration::from_secs(55);
 const CAMP_ATTACHMENT_VIEW_QUIESCENCE_POLL_INTERVAL: Duration = Duration::from_millis(100);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RuntimeCancellationIngressFence {
+    Flushed,
+    Unproven,
+}
 
 struct CampAttachmentReadAdmission {
     camp_id: String,
@@ -669,6 +677,14 @@ struct CampCreationMember {
 #[serde(rename_all = "camelCase")]
 struct CampIdParams {
     camp_id: CampId,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct AgentRunFileChangesParams {
+    camp_id: CampId,
+    agent_run_id: String,
+    execution_epoch: i64,
 }
 
 #[derive(Debug, Deserialize)]
@@ -1821,19 +1837,17 @@ impl AgentRunRuntime {
         }
     }
 
-    async fn authorize_file_write(&self, action_kind: &str, request: &Value) -> Result<()> {
-        if let Self::Acp(runtime) = self
-            && action_kind == "file_write"
-        {
-            runtime.authorize_file_write(request).await?;
-        }
-        Ok(())
-    }
-
     async fn cancel(&self) -> Result<()> {
         match self {
             Self::Codex(runtime) => runtime.interrupt().await,
             Self::Acp(runtime) => runtime.cancel().await,
+        }
+    }
+
+    async fn detach_and_flush_ingress(&self) -> bool {
+        match self {
+            Self::Codex(runtime) => runtime.detach_and_flush_ingress().await,
+            Self::Acp(runtime) => runtime.detach_and_flush_ingress().await,
         }
     }
 }
@@ -5785,6 +5799,20 @@ impl Core {
                     ReadModelService.camp_snapshot(&mut database, params.camp_id.as_str())?,
                 )?)
             }
+            "agentRunFileChanges.get" => {
+                let params: AgentRunFileChangesParams =
+                    serde_json::from_value(request.params.clone())?;
+                let database = self.database.lock().await;
+                Ok(serde_json::to_value(
+                    agent_run_file_change::read_run_file_changes(
+                        &database,
+                        &ManagedBlobStore::new(&self.data_dir),
+                        params.camp_id.as_str(),
+                        &params.agent_run_id,
+                        params.execution_epoch,
+                    )?,
+                )?)
+            }
             "camp.messages.page" => {
                 let params: CampMessagePageParams = serde_json::from_value(request.params.clone())?;
                 let mut database = self.database.lock().await;
@@ -7069,6 +7097,11 @@ impl Core {
                     "claimed AgentRun {} was fenced before dispatch",
                     candidate.agent_run_id
                 );
+                self.project_agent_run_file_changes_after_terminal(
+                    &candidate.agent_run_id,
+                    execution_epoch,
+                )
+                .await;
                 return;
             }
             Err(error) => {
@@ -7332,6 +7365,7 @@ impl Core {
                             core.finish_claimed_agent_run_failure(
                                 &execution,
                                 failure_persisted,
+                                true,
                             )
                             .await;
                         }
@@ -7458,13 +7492,13 @@ impl Core {
         for candidate in candidates {
             let core = self.clone();
             interrupt_tasks.spawn(async move {
-                core.interrupt_cancelled_agent_run(&candidate).await;
-                candidate
+                let ingress_fence = core.interrupt_cancelled_agent_run(&candidate).await;
+                (candidate, ingress_fence)
             });
         }
         while let Some(result) = interrupt_tasks.join_next().await {
-            let candidate = match result {
-                Ok(candidate) => candidate,
+            let (candidate, ingress_fence) = match result {
+                Ok(result) => result,
                 Err(error) => {
                     eprintln!("AgentRun cancellation interrupt worker failed: {error}");
                     continue;
@@ -7531,6 +7565,18 @@ impl Core {
                             candidate.execution_epoch,
                         ))
                         .await;
+                    if ingress_fence == RuntimeCancellationIngressFence::Flushed {
+                        self.project_agent_run_file_changes_after_terminal(
+                            &candidate.agent_run_id,
+                            candidate.execution_epoch,
+                        )
+                        .await;
+                    } else {
+                        eprintln!(
+                            "AgentRun {} cancellation ingress did not flush; file-change projection remains recoverable instead of freezing no_changes",
+                            candidate.agent_run_id
+                        );
+                    }
                     if !accepted_input_outcome_unknown {
                         let core = self.clone();
                         tokio::spawn(async move {
@@ -7595,9 +7641,12 @@ impl Core {
         }
     }
 
-    async fn interrupt_cancelled_agent_run(&self, candidate: &AgentRunCancellationCandidate) {
+    async fn interrupt_cancelled_agent_run(
+        &self,
+        candidate: &AgentRunCancellationCandidate,
+    ) -> RuntimeCancellationIngressFence {
         if candidate.status == "queued" {
-            return;
+            return RuntimeCancellationIngressFence::Flushed;
         }
         if candidate.adapter_kind == "antigravity-app" {
             if run_with_cancellation_deadline(
@@ -7613,7 +7662,19 @@ impl Core {
                     candidate.agent_run_id
                 );
             }
-            return;
+            return if self
+                .antigravity_app
+                .wait_for_agent_run_quiescence(
+                    &candidate.agent_run_id,
+                    candidate.execution_epoch,
+                    RUNTIME_CANCELLATION_FENCE_TIMEOUT,
+                )
+                .await
+            {
+                RuntimeCancellationIngressFence::Flushed
+            } else {
+                RuntimeCancellationIngressFence::Unproven
+            };
         }
         if candidate.adapter_kind == "claude-code-cli" {
             if run_with_cancellation_deadline(
@@ -7629,13 +7690,25 @@ impl Core {
                     candidate.agent_run_id
                 );
             }
-            return;
+            return if self
+                .claude_code_cli
+                .wait_for_agent_run_quiescence(
+                    &candidate.agent_run_id,
+                    candidate.execution_epoch,
+                    RUNTIME_CANCELLATION_FENCE_TIMEOUT,
+                )
+                .await
+            {
+                RuntimeCancellationIngressFence::Flushed
+            } else {
+                RuntimeCancellationIngressFence::Unproven
+            };
         }
         let Some(runtime) = self
             .agent_run_runtime(&candidate.agent_run_id, candidate.execution_epoch)
             .await
         else {
-            return;
+            return RuntimeCancellationIngressFence::Unproven;
         };
         match run_with_cancellation_deadline(
             RUNTIME_CANCELLATION_INTERRUPT_TIMEOUT,
@@ -7657,13 +7730,24 @@ impl Core {
                 );
             }
         }
+        let ingress_flushed = run_with_cancellation_deadline(
+            RUNTIME_CANCELLATION_INGRESS_FLUSH_TIMEOUT,
+            runtime.detach_and_flush_ingress(),
+        )
+        .await;
+        if ingress_flushed != Some(true) {
+            eprintln!(
+                "Runtime ingress flush timed out for AgentRun {}; file-change projection will remain recoverable",
+                candidate.agent_run_id
+            );
+        }
         let adapter_kind = runtime.adapter_kind();
-        let fenced = run_with_cancellation_deadline(RUNTIME_CANCELLATION_FENCE_TIMEOUT, async {
+        let stopped = run_with_cancellation_deadline(RUNTIME_CANCELLATION_FENCE_TIMEOUT, async {
             match adapter_kind {
                 rovai_core::agent_profile::AdapterKind::CodexCli => {
                     self.codex_cli
                         .forget_agent_run(&candidate.agent_run_id, candidate.execution_epoch)
-                        .await;
+                        .await
                 }
                 kind @ (rovai_core::agent_profile::AdapterKind::OpencodeCli
                 | rovai_core::agent_profile::AdapterKind::CopilotCli
@@ -7678,7 +7762,9 @@ impl Core {
                     if let Some(adapter) = self.acp_adapter(kind) {
                         adapter
                             .forget_agent_run(&candidate.agent_run_id, candidate.execution_epoch)
-                            .await;
+                            .await
+                    } else {
+                        false
                     }
                 }
                 rovai_core::agent_profile::AdapterKind::AntigravityApp => unreachable!(),
@@ -7686,11 +7772,16 @@ impl Core {
             }
         })
         .await;
-        if fenced.is_none() {
+        if stopped != Some(true) {
             eprintln!(
                 "Runtime detach timed out for AgentRun {}; persisted cancellation fence remains authoritative",
                 candidate.agent_run_id
             );
+        }
+        if ingress_flushed == Some(true) {
+            RuntimeCancellationIngressFence::Flushed
+        } else {
+            RuntimeCancellationIngressFence::Unproven
         }
     }
 
@@ -7939,86 +8030,15 @@ impl Core {
                 active_attempt = Some((attempt_id, action_execution_epoch));
             }
 
-            let mut response_approved = approved;
-            // Grok mediates the native decision itself, then delegates the
-            // approved write through ACP `fs/write_text_file`. Mirror the
-            // durable approval into that one-shot filesystem gate.
-            if approved
-                && (!runtime_managed || runtime.adapter_kind() == AdapterKind::GrokBuild)
-                && let Err(error) = runtime
-                    .authorize_file_write(&candidate.action_kind, &candidate.response_context)
-                    .await
-            {
-                response_approved = false;
-                if let Some((attempt_id, action_execution_epoch)) = active_attempt.clone() {
-                    let result = {
-                        let mut database = self.database.lock().await;
-                        ActionSafetyService::default().record_result(
-                            &mut database,
-                            &CommandEnvelope {
-                                command_id: format!(
-                                    "runtime-action-authorization-rejected:{}:{attempt_id}",
-                                    candidate.action_id
-                                ),
-                                actor: ActorRef::System {
-                                    component_id: component_id.clone(),
-                                },
-                                camp_id: Some(candidate.camp_id.clone()),
-                                expected_versions: Vec::new(),
-                                execution_epoch: None,
-                                payload: RecordActionResultCommand {
-                                    action_id: candidate.action_id.clone(),
-                                    attempt_id,
-                                    action_execution_epoch,
-                                    outcome: ActionResultOutcome::Failed,
-                                    result_code: "runtime_scope_validation_failed".to_string(),
-                                    result_summary:
-                                        "Rovai-ai rejected the approved action because its concrete scope was unsafe"
-                                            .to_string(),
-                                    result_data: json!({"error": format!("{error:#}")}),
-                                    effect_disposition: "none".to_string(),
-                                },
-                            },
-                        )
-                    };
-                    if let Err(record_error) = result {
-                        self.fail_leased_runtime_delivery(
-                            &candidate,
-                            &payload_digest,
-                            &lease_owner,
-                            &format!(
-                                "Runtime write authorization and result recording failed: {error:#}; {record_error:#}"
-                            ),
-                        )
-                        .await;
-                        continue;
-                    }
-                    active_attempt = None;
-                }
-                emit(
-                    output,
-                    "action.scope_rejected",
-                    json!({
-                        "agentRunId": candidate.agent_run_id,
-                        "executionEpoch": candidate.target_execution_epoch,
-                        "actionId": candidate.action_id,
-                        "error": format!("{error:#}"),
-                    }),
-                );
-            }
             let response = if let Some(response) = frozen_runtime_response {
                 Ok(response)
             } else if candidate.native_method == "session/request_permission" {
-                acp::legacy_approval_result(&candidate.response_context, response_approved)
+                acp::legacy_approval_result(&candidate.response_context, approved)
             } else {
                 codex::approval_result(
                     &candidate.native_method,
                     &candidate.response_context,
-                    if response_approved {
-                        "accept"
-                    } else {
-                        "decline"
-                    },
+                    if approved { "accept" } else { "decline" },
                 )
             };
             let delivery_result = match response {
@@ -10008,6 +10028,11 @@ impl Core {
                     &current.workspace.execution_root,
                 )
                 .await;
+                self.project_agent_run_file_changes_after_terminal(
+                    &current.agent_run_id,
+                    current.execution_epoch,
+                )
+                .await;
                 return Ok(());
             }
             if attempt < 79
@@ -10738,6 +10763,20 @@ impl Core {
         runtime_terminal_observed: bool,
         public_failure: Option<RuntimeFailureView>,
     ) {
+        let file_change_ingress_flushed = match self
+            .agent_run_runtime(&execution.agent_run_id, execution.execution_epoch)
+            .await
+        {
+            Some(runtime) => run_with_cancellation_deadline(
+                RUNTIME_CANCELLATION_INGRESS_FLUSH_TIMEOUT,
+                runtime.detach_and_flush_ingress(),
+            )
+            .await
+            .is_some_and(|flushed| flushed),
+            // A failure before the Adapter registered a Runtime cannot have a
+            // routed Runtime file event waiting in Core's ingress queue.
+            None => true,
+        };
         if let Err(flush_error) = flush_runtime_monitoring_run(
             self,
             &execution.agent_run_id,
@@ -10786,8 +10825,12 @@ impl Core {
                 }),
             );
         }
-        self.finish_claimed_agent_run_failure(execution, failure_persisted)
-            .await;
+        self.finish_claimed_agent_run_failure(
+            execution,
+            failure_persisted,
+            file_change_ingress_flushed,
+        )
+        .await;
     }
 
     async fn persist_claimed_agent_run_failure(
@@ -10847,6 +10890,7 @@ impl Core {
         &self,
         execution: &AgentRunExecution,
         failure_persisted: bool,
+        file_change_ingress_flushed: bool,
     ) {
         if failure_persisted {
             self.reconcile_skill_projection_after_run_terminal(&execution.workspace.execution_root)
@@ -10886,6 +10930,18 @@ impl Core {
                     .interrupt(&execution.agent_run_id, execution.execution_epoch)
                     .await;
             }
+        }
+        if failure_persisted && file_change_ingress_flushed {
+            self.project_agent_run_file_changes_after_terminal(
+                &execution.agent_run_id,
+                execution.execution_epoch,
+            )
+            .await;
+        } else if failure_persisted {
+            eprintln!(
+                "AgentRun {} failure ingress did not flush; file-change projection remains recoverable instead of freezing no_changes",
+                execution.agent_run_id
+            );
         }
     }
 
@@ -10951,6 +11007,11 @@ impl Core {
                 &candidate.execution_workspace().execution_root,
             )
             .await;
+            self.project_agent_run_file_changes_after_terminal(
+                &candidate.agent_run_id,
+                execution_epoch,
+            )
+            .await;
         }
     }
 
@@ -10968,6 +11029,44 @@ impl Core {
         .ok()
         .filter(|inspection| inspection.project_path == project_path)
         .map(|inspection| inspection.git_observation)
+    }
+
+    async fn project_agent_run_file_changes_after_terminal(
+        &self,
+        agent_run_id: &str,
+        execution_epoch: i64,
+    ) -> Option<agent_run_file_change::AgentRunFileChangesView> {
+        let projection = {
+            let mut database = self.database.lock().await;
+            AgentRunFileChangeProjector.project_terminal_run(
+                &mut database,
+                &ManagedBlobStore::new(&self.data_dir),
+                agent_run_id,
+                execution_epoch,
+            )
+        };
+        match projection {
+            Ok(Some(view)) => {
+                emit(
+                    &self.output,
+                    "agent_run.file_changes_completed",
+                    serde_json::to_value(&view).unwrap_or_else(|_| {
+                        json!({
+                            "agentRunId": agent_run_id,
+                            "executionEpoch": execution_epoch,
+                        })
+                    }),
+                );
+                Some(view)
+            }
+            Ok(None) => None,
+            Err(error) => {
+                eprintln!(
+                    "AgentRun file-change projection failed for {agent_run_id}/{execution_epoch}: {error:#}"
+                );
+                None
+            }
+        }
     }
 }
 
@@ -11508,6 +11607,13 @@ async fn run_core(
         eprintln!(
             "v0.02 recovery prepared: {}",
             serde_json::to_string(&v2_recovery)?
+        );
+    }
+    let recovered_run_file_changes = AgentRunFileChangeProjector
+        .recover_terminal_runs(&mut database, &ManagedBlobStore::new(&data_dir))?;
+    if recovered_run_file_changes != 0 {
+        eprintln!(
+            "AgentRun file-change startup recovery projected {recovered_run_file_changes} terminal Runs"
         );
     }
     let (codex_tx, codex_rx) = mpsc::unbounded_channel();
@@ -12433,6 +12539,13 @@ async fn process_codex_events(
                 _ = &mut shutdown => break,
             },
         };
+        let incoming = match incoming {
+            CodexIncoming::IngressBarrier { completion } => {
+                let _ = completion.send(());
+                continue;
+            }
+            incoming => incoming,
+        };
         if let CodexIncoming::Message { message, .. } = &incoming
             && is_codex_command_output_delta_notification(message)
         {
@@ -12562,6 +12675,9 @@ async fn process_codex_events(
                 )
                 .await;
             }
+            CodexIncoming::IngressBarrier { .. } => {
+                unreachable!("Codex ingress barriers are handled before Runtime routing")
+            }
         }
     }
 }
@@ -12583,6 +12699,13 @@ async fn process_acp_events(
                 },
                 _ = &mut shutdown => break,
             },
+        };
+        let incoming = match incoming {
+            AcpIncoming::IngressBarrier { completion } => {
+                let _ = completion.send(());
+                continue;
+            }
+            incoming => incoming,
         };
         let Some(mut runtime_route_permit) = core.planned_shutdown.enter_runtime_route().await
         else {
@@ -12885,6 +13008,9 @@ async fn process_acp_events(
                         adapter_kind.as_str()
                     ),
                 }
+            }
+            AcpIncoming::IngressBarrier { .. } => {
+                unreachable!("ACP ingress barriers are handled before Runtime routing")
             }
         }
     }
@@ -13227,11 +13353,7 @@ async fn process_agent_run_acp_message(
                 Ok(result) => runtime.respond(id, result).await,
                 Err(error) => {
                     runtime
-                        .respond_error(
-                            id,
-                            -32000,
-                            &format!("Rovai-ai file read rejected: {error:#}"),
-                        )
+                        .respond_error(id, -32000, &format!("Rovai-ai file read failed: {error:#}"))
                         .await
                 }
             },
@@ -13242,7 +13364,7 @@ async fn process_agent_run_acp_message(
                         .respond_error(
                             id,
                             -32000,
-                            &format!("Rovai-ai file write rejected: {error:#}"),
+                            &format!("Rovai-ai file write failed: {error:#}"),
                         )
                         .await
                 }
@@ -13493,9 +13615,7 @@ fn normalize_acp_event_with_completion(
                         public_kind.as_deref().unwrap_or("other"),
                     )
                 });
-            (
-                "runtime.action",
-                json!({
+            let mut payload = json!({
                 "sessionUpdate": update.get("sessionUpdate"),
                 "toolCallId": update.get("toolCallId"),
                 "toolName": update.get("toolName"),
@@ -13518,8 +13638,32 @@ fn normalize_acp_event_with_completion(
                 "rawOutputDigest": update
                     .get("rawOutput")
                     .and_then(|value| canonical_json_digest(value).ok()),
-                }),
-            )
+            });
+            if public_status == "completed"
+                && let Some(path) =
+                    completion.and_then(|value| value.public_file_operation_path.as_ref())
+            {
+                payload["runtimeFileOperation"] = json!({
+                    "adapterKind": adapter_kind.as_str(),
+                    "protocolFamily": "acp-v1",
+                    "sourceEventKind": "session/update.tool_call_update.completed",
+                    "operationKind": "write",
+                    "path": path,
+                });
+            }
+            if public_status == "completed"
+                && let Some(changes) =
+                    completion.and_then(|value| value.public_file_changes.as_ref())
+            {
+                payload["runtimeDiff"] = json!({
+                    "adapterKind": adapter_kind.as_str(),
+                    "protocolFamily": "acp-v1",
+                    "sourceEventKind": "session/update.tool_call_update.completed",
+                    "semanticKind": "complete_before_after",
+                    "entries": changes,
+                });
+            }
+            ("runtime.action", payload)
         }
         Some("plan") => ("runtime.plan", update),
         Some("usage_update") => ("runtime.usage", update),
@@ -13871,6 +14015,29 @@ async fn process_agent_run_acp_approval_request(
             return Ok(());
         }
     };
+    if execution.permission_semantics == PermissionSemantics::RuntimeManagedV2
+        && acp::automatically_allows_permission_requests(
+            execution.runtime.adapter_kind,
+            &execution.runtime.permissions.values,
+        )
+    {
+        match acp::legacy_approval_result(params, true) {
+            Ok(response) => runtime.respond(request_id, response).await?,
+            Err(error) => {
+                reject_acp_request(
+                    output,
+                    runtime,
+                    agent_run_id,
+                    execution_epoch,
+                    request_id,
+                    params,
+                    &format!("ACP automatic permission response was rejected: {error}"),
+                )
+                .await?;
+            }
+        }
+        return Ok(());
+    }
     if execution.permission_semantics == PermissionSemantics::CoreEnforcedV1
         && execution.workspace.access == "read_only"
         && matches!(
@@ -14320,6 +14487,8 @@ async fn persist_acp_prompt_completion(
                 .complete_agent_run(agent_run_id, execution_epoch)
                 .await;
         }
+        core.project_agent_run_file_changes_after_terminal(agent_run_id, execution_epoch)
+            .await;
         return Ok(());
     }
     for attempt in 0..80 {
@@ -14446,6 +14615,8 @@ async fn persist_acp_prompt_completion(
                         .complete_agent_run(agent_run_id, execution_epoch)
                         .await;
                 }
+                core.project_agent_run_file_changes_after_terminal(agent_run_id, execution_epoch)
+                    .await;
                 return Ok(());
             }
             Ok(terminal)
@@ -15063,6 +15234,44 @@ async fn process_agent_run_codex_message(
         eprintln!("ignored fenced native Turn completion for AgentRun {agent_run_id}");
         return;
     }
+    if let Some(diff) = runtime.take_turn_diff(&completed.turn_id).await {
+        const MAX_CODEX_RUN_DIFF_BYTES: usize = 8 * 1024 * 1024;
+        if diff.len() <= MAX_CODEX_RUN_DIFF_BYTES {
+            let payload = json!({
+                "eventId": format!("codex-turn-diff:{}", completed.turn_id),
+                "runtimeRunDiff": {
+                    "schemaVersion": 1,
+                    "source": "runtime_reported",
+                    "status": "available",
+                    "semanticKind": "unified_diff_snapshot",
+                    "diff": diff,
+                    "sourceMetadata": {
+                        "adapterKind": "codex-cli",
+                        "protocolFamily": "codex-app-server",
+                        "sourceEventKind": "turn/diff/updated+turn/completed",
+                        "nativeTurnId": completed.turn_id,
+                    }
+                }
+            });
+            let persisted = {
+                let mut database = core.database.lock().await;
+                ExecutionEvidenceService.record_terminal_run_diff_snapshot(
+                    &mut database,
+                    &ManagedBlobStore::new(&core.data_dir),
+                    agent_run_id,
+                    execution_epoch,
+                    &payload,
+                )
+            };
+            if let Err(error) = persisted {
+                eprintln!(
+                    "failed to persist Codex Turn diff snapshot for AgentRun {agent_run_id}: {error:#}"
+                );
+            }
+        } else {
+            eprintln!("ignored oversized Codex Turn diff snapshot for AgentRun {agent_run_id}");
+        }
+    }
     if completed.status == "interrupted"
         && let Err(error) = persist_interrupted_codex_activities(
             core,
@@ -15188,6 +15397,8 @@ async fn process_agent_run_codex_message(
                 runtime.clear_turn(Some(&completed.turn_id)).await;
                 core.codex_cli
                     .complete_agent_run(agent_run_id, execution_epoch)
+                    .await;
+                core.project_agent_run_file_changes_after_terminal(agent_run_id, execution_epoch)
                     .await;
             }
             Err(error) => eprintln!(
@@ -15373,6 +15584,8 @@ async fn process_agent_run_codex_message(
     runtime.clear_turn(Some(&completed.turn_id)).await;
     core.codex_cli
         .complete_agent_run(agent_run_id, execution_epoch)
+        .await;
+    core.project_agent_run_file_changes_after_terminal(agent_run_id, execution_epoch)
         .await;
 }
 
@@ -19038,6 +19251,80 @@ while IFS= read -r _ignored; do :; done
                 .expect("payload should serialize")
                 .contains("terminal-secret-identity")
         );
+    }
+
+    #[test]
+    fn successful_terminal_acp_diff_content_uses_the_internal_runtime_diff_channel() {
+        let params = json!({
+            "update": {
+                "sessionUpdate": "tool_call_update",
+                "toolCallId": "edit-file",
+                "status": "completed",
+                "kind": "edit",
+                "content": [{
+                    "type": "diff",
+                    "path": "/repo/src/app.ts",
+                    "oldText": "before\n",
+                    "newText": "after\n"
+                }]
+            }
+        });
+        let completion = acp::completed_action(AdapterKind::OpencodeCli, &params)
+            .unwrap()
+            .expect("terminal ACP edit should complete");
+        let (_, payload) = normalize_acp_event_with_completion(
+            AdapterKind::OpencodeCli,
+            "session/update",
+            &params,
+            Some(&completion),
+        );
+
+        assert!(payload["output"].is_null());
+        assert_eq!(
+            payload.pointer("/runtimeDiff/sourceEventKind"),
+            Some(&json!("session/update.tool_call_update.completed"))
+        );
+        assert_eq!(
+            payload.pointer("/runtimeDiff/entries/0/path"),
+            Some(&json!("/repo/src/app.ts"))
+        );
+
+        let (_, without_completion) =
+            normalize_acp_event(AdapterKind::OpencodeCli, "session/update", &params);
+        assert!(without_completion.get("runtimeDiff").is_none());
+    }
+
+    #[test]
+    fn successful_terminal_acp_write_location_uses_an_independent_file_operation_channel() {
+        let params = json!({
+            "update": {
+                "sessionUpdate": "tool_call_update",
+                "toolCallId": "edit-file",
+                "status": "completed",
+                "kind": "edit",
+                "locations": [{"path": "/repo/src/app.ts"}],
+                "content": [{"type": "content", "content": {"type": "text", "text": "updated"}}]
+            }
+        });
+        let completion = acp::completed_action(AdapterKind::QoderCli, &params)
+            .unwrap()
+            .expect("terminal ACP edit should complete");
+        let (_, payload) = normalize_acp_event_with_completion(
+            AdapterKind::QoderCli,
+            "session/update",
+            &params,
+            Some(&completion),
+        );
+
+        assert_eq!(
+            payload.pointer("/runtimeFileOperation/path"),
+            Some(&json!("/repo/src/app.ts"))
+        );
+        assert_eq!(
+            payload.pointer("/runtimeFileOperation/operationKind"),
+            Some(&json!("write"))
+        );
+        assert!(payload.get("runtimeDiff").is_none());
     }
 
     #[test]

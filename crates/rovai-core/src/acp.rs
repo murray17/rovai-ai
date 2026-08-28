@@ -119,6 +119,9 @@ pub enum AcpIncoming {
         source_event_digest: String,
         observed_at: String,
     },
+    IngressBarrier {
+        completion: oneshot::Sender<()>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -539,7 +542,11 @@ struct ObservedToolMetadata {
     // the matching structured update in active-process memory only; durable
     // events and Action records continue to store digests, never this payload.
     raw_input: Option<Value>,
+    stable_meta: Option<Value>,
     locations: Option<Value>,
+    // ACP v1 ToolCallUpdate.content replaces the previous content collection.
+    // Keep only validated standard Diff blocks until the matching terminal update.
+    public_file_changes: Option<Value>,
 }
 
 #[derive(Debug)]
@@ -572,6 +579,7 @@ struct AcpPreparedPrompt {
 pub struct ObservedAcpToolContext {
     native_kind: Option<String>,
     raw_input: Option<Value>,
+    stable_meta: Option<Value>,
     locations: Option<Value>,
 }
 
@@ -1038,7 +1046,7 @@ fn terminal_working_directory(execution_root: &Path, params: &Value) -> Result<P
     if !Path::new(cwd).is_absolute() {
         bail!("terminal/create cwd must be absolute");
     }
-    let cwd = scoped_path(execution_root, cwd)?;
+    let cwd = PathBuf::from(cwd);
     if !cwd.is_dir() {
         bail!("terminal/create cwd is not an existing directory");
     }
@@ -1161,6 +1169,7 @@ pub(crate) struct AcpHost {
     next_compaction_observation_sequence: AtomicU64,
     grok_acceptance_auto_compact_armed: AtomicBool,
     routes: RwLock<HashMap<String, AcpSessionRoute>>,
+    ingress_fence: Mutex<()>,
     compaction_observers: RwLock<HashMap<String, AcpCompactionObserverRoute>>,
     known_sessions: RwLock<HashSet<String>>,
     session_results: RwLock<HashMap<String, Value>>,
@@ -1310,6 +1319,7 @@ impl AcpHost {
             next_compaction_observation_sequence: AtomicU64::new(1),
             grok_acceptance_auto_compact_armed: AtomicBool::new(false),
             routes: RwLock::new(HashMap::new()),
+            ingress_fence: Mutex::new(()),
             compaction_observers: RwLock::new(HashMap::new()),
             known_sessions: RwLock::new(HashSet::new()),
             session_results: RwLock::new(HashMap::new()),
@@ -1453,6 +1463,10 @@ impl AcpHost {
                                 continue;
                             }
                         };
+                        // Serialize routing + queue insertion with cancellation's
+                        // unbind + ingress barrier so a terminal file event cannot
+                        // be stranded behind the barrier that freezes its Run card.
+                        let _ingress_fence = host.ingress_fence.lock().await;
                         if message.get("method").is_none()
                             && let Some(id) = message.get("id").and_then(Value::as_u64)
                         {
@@ -2250,17 +2264,38 @@ impl AcpHost {
 
     async fn unbind_session(&self, session_id: &str, owner: &AcpRuntimeOwner) {
         let mut routes = self.routes.write().await;
-        let removed = if routes.get(session_id).map(|route| &route.owner) == Some(owner) {
+        if routes.get(session_id).map(|route| &route.owner) == Some(owner) {
             routes.remove(session_id);
-            true
-        } else {
-            false
-        };
-        drop(routes);
-        if removed {
-            self.release_client_terminals_for_session(session_id, owner)
-                .await;
         }
+        drop(routes);
+        // Session terminal cleanup is idempotent and must still run when a
+        // cancellation ingress fence removed the route immediately before the
+        // ordinary Runtime detach path.
+        self.release_client_terminals_for_session(session_id, owner)
+            .await;
+    }
+
+    async fn unbind_session_and_flush_ingress(
+        &self,
+        session_id: Option<&str>,
+        owner: &AcpRuntimeOwner,
+    ) -> bool {
+        let (flushed, barrier_sent) = {
+            let _ingress_fence = self.ingress_fence.lock().await;
+            if let Some(session_id) = session_id {
+                let mut routes = self.routes.write().await;
+                if routes.get(session_id).map(|route| &route.owner) == Some(owner) {
+                    routes.remove(session_id);
+                }
+            }
+            let (completion, flushed) = oneshot::channel();
+            let barrier_sent = self
+                .incoming
+                .send(AcpIncoming::IngressBarrier { completion })
+                .is_ok();
+            (flushed, barrier_sent)
+        };
+        barrier_sent && flushed.await.is_ok()
     }
 
     async fn active_prompt(&self, session_id: &str, owner: &AcpRuntimeOwner) -> Option<String> {
@@ -2708,7 +2743,6 @@ pub struct AcpRuntime {
     attachment_access_root: Option<PathBuf>,
     workspace_access: String,
     active_observation: Mutex<Option<AcpPromptObservation>>,
-    authorized_file_writes: Mutex<HashSet<PathBuf>>,
 }
 
 #[derive(Debug)]
@@ -2856,7 +2890,6 @@ impl AcpRuntime {
             attachment_access_root,
             workspace_access,
             active_observation: Mutex::new(None),
-            authorized_file_writes: Mutex::new(HashSet::new()),
         })
     }
 
@@ -3338,10 +3371,15 @@ impl AcpRuntime {
             .or_default();
         if let Some(reported_kind) = update.get("kind").and_then(Value::as_str) {
             let raw_input = update.get("rawInput").cloned().unwrap_or_else(|| json!({}));
-            observed.native_kind = Some(
-                effective_action_kind(self.host.adapter_kind, reported_kind, &raw_input)
-                    .to_string(),
-            );
+            let incoming_kind =
+                effective_action_kind(self.host.adapter_kind, reported_kind, &raw_input);
+            if observed
+                .native_kind
+                .as_deref()
+                .is_none_or(|existing| existing == "other")
+            {
+                observed.native_kind = Some(incoming_kind.to_string());
+            }
         } else if public_acp_shell_command(self.host.adapter_kind, update.get("rawInput")).is_some()
         {
             observed.native_kind = Some("execute".to_string());
@@ -3349,14 +3387,32 @@ impl AcpRuntime {
         if let Some(raw_input) = update.get("rawInput").filter(|value| !value.is_null()) {
             observed.raw_input = Some(raw_input.clone());
         }
-        if let Some(locations) = update.get("locations").filter(|value| !value.is_null()) {
+        if let Some(meta) = update
+            .get("_meta")
+            .or_else(|| update.get("meta"))
+            .filter(|value| !value.is_null())
+        {
+            observed.stable_meta = Some(meta.clone());
+        }
+        if let Some(locations) = update
+            .get("locations")
+            .filter(|value| !value.is_null())
+            .filter(|value| value.as_array().is_none_or(|items| !items.is_empty()))
+        {
+            // Several ACP runtimes omit (or explicitly empty) locations in the
+            // terminal update after reporting the exact target on the started
+            // update. Keep that same-ToolCall location as cumulative evidence.
             observed.locations = Some(locations.clone());
+        }
+        if update.get("content").is_some() {
+            observed.public_file_changes = public_acp_file_changes(update.get("content"));
         }
         if update.get("rawInput").is_some() || update.get("locations").is_some() {
             observed.observation_digest = Some(canonical_json_digest(&json!({
                 "nativeItemId": native_item_id,
                 "nativeKind": observed.native_kind.as_deref(),
                 "rawInput": update.get("rawInput"),
+                "meta": update.get("_meta").or_else(|| update.get("meta")),
                 "locations": update.get("locations"),
             }))?);
         }
@@ -3448,6 +3504,7 @@ impl AcpRuntime {
             .map(|observed| ObservedAcpToolContext {
                 native_kind: observed.native_kind.clone(),
                 raw_input: observed.raw_input.clone(),
+                stable_meta: observed.stable_meta.clone(),
                 locations: observed.locations.clone(),
             })
     }
@@ -3472,32 +3529,18 @@ impl AcpRuntime {
         self.owner.execution_epoch
     }
 
-    pub async fn authorize_file_write(&self, request: &Value) -> Result<()> {
-        if self.workspace_access == "read_only" {
-            bail!("read-only AgentRun cannot authorize file writes");
-        }
-        for path in acp_tool_paths(request) {
-            let scoped = scoped_path(&self.execution_root, &path)?;
-            self.authorized_file_writes.lock().await.insert(scoped);
-        }
-        Ok(())
-    }
-
     pub async fn read_text_file(&self, params: &Value) -> Result<Value> {
         let path = params
             .get("path")
             .and_then(Value::as_str)
             .context("fs/read_text_file has no path")?;
-        let path = scoped_path(&self.execution_root, path)?;
+        let path = client_filesystem_path(&self.execution_root, path);
         let content = std::fs::read_to_string(&path)
             .with_context(|| format!("failed to read {}", path.display()))?;
         Ok(json!({"content": content}))
     }
 
     pub async fn write_text_file(&self, params: &Value) -> Result<Value> {
-        if self.workspace_access == "read_only" {
-            bail!("read-only AgentRun cannot write files");
-        }
         let path = params
             .get("path")
             .and_then(Value::as_str)
@@ -3506,10 +3549,7 @@ impl AcpRuntime {
             .get("content")
             .and_then(Value::as_str)
             .context("fs/write_text_file has no content")?;
-        let path = scoped_path(&self.execution_root, path)?;
-        if !self.authorized_file_writes.lock().await.remove(&path) {
-            bail!("file write has no matching one-time Rovai-ai authorization");
-        }
+        let path = client_filesystem_path(&self.execution_root, path);
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
         }
@@ -3523,6 +3563,14 @@ impl AcpRuntime {
         if let Some(session_id) = self.session_id().await {
             self.host.unbind_session(&session_id, &self.owner).await;
         }
+    }
+
+    pub(crate) async fn detach_and_flush_ingress(&self) -> bool {
+        *self.active_observation.lock().await = None;
+        let session_id = self.session_id().await;
+        self.host
+            .unbind_session_and_flush_ingress(session_id.as_deref(), &self.owner)
+            .await
     }
 }
 
@@ -3691,7 +3739,7 @@ impl AcpCliRuntimeAdapter {
             .cloned()
     }
 
-    pub async fn forget_agent_run(&self, agent_run_id: &str, execution_epoch: i64) {
+    pub async fn forget_agent_run(&self, agent_run_id: &str, execution_epoch: i64) -> bool {
         let runtime = {
             let mut runtimes = self.runtimes.lock().await;
             if runtimes
@@ -3708,7 +3756,7 @@ impl AcpCliRuntimeAdapter {
         }
         self.fleet
             .release(agent_run_id, execution_epoch, FleetReleaseDisposition::Stop)
-            .await;
+            .await
     }
 
     pub async fn complete_agent_run(&self, agent_run_id: &str, execution_epoch: i64) {
@@ -5124,6 +5172,14 @@ pub fn intercepted_action_request(
             object.insert("rawInput".to_string(), raw_input.clone());
         }
         if object
+            .get("_meta")
+            .or_else(|| object.get("meta"))
+            .is_none_or(Value::is_null)
+            && let Some(meta) = observed.stable_meta.as_ref()
+        {
+            object.insert("_meta".to_string(), meta.clone());
+        }
+        if object
             .get("locations")
             .is_none_or(|value| value.is_null() || value.as_array().is_some_and(Vec::is_empty))
             && let Some(locations) = observed.locations.as_ref()
@@ -5269,12 +5325,36 @@ fn requested_path(context: &InterceptedAcpActionContext<'_>, value: &str) -> Res
     })
 }
 
+pub fn automatically_allows_permission_requests(
+    adapter_kind: AdapterKind,
+    permissions: &Value,
+) -> bool {
+    match adapter_kind {
+        AdapterKind::OpencodeCli => permissions["permission"] == "allow",
+        AdapterKind::CopilotCli => permissions["allow_all"] == "on",
+        AdapterKind::KiroCli => permissions["trust_all_tools"] == "on",
+        AdapterKind::QoderCli | AdapterKind::TraeCnCli => {
+            permissions["permission_mode"] == "bypass_permissions"
+        }
+        AdapterKind::CodebuddyCli | AdapterKind::GrokBuild => {
+            permissions["permission_mode"] == "bypassPermissions"
+        }
+        AdapterKind::QwenCode => permissions["approval_mode"] == "yolo",
+        AdapterKind::CursorAgent => permissions["approval_policy"] == "force",
+        AdapterKind::KimiCodeCli => permissions["permission_mode"] == "yolo",
+        AdapterKind::CodexCli | AdapterKind::ClaudeCodeCli | AdapterKind::AntigravityApp => false,
+    }
+}
+
 fn effective_action_kind<'a>(
     adapter_kind: AdapterKind,
     reported_kind: &'a str,
     raw_input: &Value,
 ) -> &'a str {
-    if matches!(reported_kind, "edit" | "move" | "delete" | "execute") {
+    if matches!(
+        reported_kind,
+        "edit" | "write" | "move" | "delete" | "execute"
+    ) {
         return reported_kind;
     }
 
@@ -5282,13 +5362,13 @@ fn effective_action_kind<'a>(
         return "execute";
     }
 
-    // OpenCode's ACP bridge currently reports an external-directory permission
-    // request as `other`, even when the request belongs to a file-edit tool call.
-    // The stable file target remains present in rawInput. Classify that narrow
-    // shape as a write so it receives Rovai-ai's normal path and approval checks.
-    if ["filepath", "filePath", "file_path"]
-        .iter()
-        .any(|key| raw_input.get(key).and_then(Value::as_str).is_some())
+    // Some ACP bridges report a file-edit tool as `other` while preserving the
+    // stable target in rawInput. Classify only that ambiguous shape as an edit;
+    // an explicit `read` with the same path fields must remain a read.
+    if reported_kind == "other"
+        && ["filepath", "filePath", "file_path"]
+            .iter()
+            .any(|key| raw_input.get(key).and_then(Value::as_str).is_some())
     {
         return "edit";
     }
@@ -5448,6 +5528,8 @@ pub struct CompletedAcpAction {
     pub native_item_id: String,
     pub native_kind: String,
     pub public_command: Option<String>,
+    pub public_file_operation_path: Option<String>,
+    pub public_file_changes: Option<Value>,
     pub observation_digest: String,
     pub outcome: ActionResultOutcome,
     pub result_code: String,
@@ -5509,10 +5591,19 @@ pub fn completed_action(
         "locations": update.get("locations"),
     }))?;
     let effect_disposition = acp_effect_disposition(succeeded, &native_kind);
+    let public_file_changes = succeeded
+        .then(|| public_acp_file_changes(update.get("content")))
+        .flatten();
+    let public_file_operation_path = (succeeded
+        && matches!(native_kind.as_str(), "edit" | "write"))
+    .then(|| single_public_acp_location_path(update.get("locations")))
+    .flatten();
     Ok(Some(CompletedAcpAction {
         native_item_id: native_item_id.clone(),
         native_kind,
         public_command,
+        public_file_operation_path,
+        public_file_changes,
         observation_digest,
         outcome: if succeeded {
             ActionResultOutcome::Succeeded
@@ -5554,6 +5645,9 @@ fn reconcile_completed_action(
     observed: ObservedToolMetadata,
     mut completion: CompletedAcpAction,
 ) -> Result<CompletedAcpAction> {
+    let observed_file_operation_path = single_public_acp_location_path(observed.locations.as_ref());
+    let observed_raw_input_path = single_public_acp_raw_input_path(observed.raw_input.as_ref());
+    let observed_meta_path = single_public_acp_metadata_path(observed.stable_meta.as_ref());
     let observed_raw_input_digest = observed
         .raw_input
         .as_ref()
@@ -5562,6 +5656,11 @@ fn reconcile_completed_action(
     if completion.public_command.is_none() {
         completion.public_command =
             public_acp_shell_command(adapter_kind, observed.raw_input.as_ref());
+    }
+    if matches!(completion.outcome, ActionResultOutcome::Succeeded)
+        && completion.public_file_changes.is_none()
+    {
+        completion.public_file_changes = observed.public_file_changes;
     }
     if let Some(native_kind) = observed.native_kind {
         completion.native_kind = native_kind;
@@ -5584,6 +5683,26 @@ fn reconcile_completed_action(
         &completion.native_kind,
     )
     .to_string();
+    completion.public_file_operation_path =
+        (matches!(completion.outcome, ActionResultOutcome::Succeeded)
+            && matches!(completion.native_kind.as_str(), "edit" | "write"))
+        .then(|| {
+            completion
+                .public_file_operation_path
+                .clone()
+                .or(observed_file_operation_path)
+                .or(observed_raw_input_path)
+                .or(observed_meta_path)
+        })
+        .flatten();
+    if matches!(completion.outcome, ActionResultOutcome::Succeeded)
+        && completion.public_file_changes.is_none()
+        && completion.native_kind == "edit"
+        && let Some(path) = completion.public_file_operation_path.as_deref()
+    {
+        completion.public_file_changes =
+            public_acp_raw_input_file_change(observed.raw_input.as_ref(), path);
+    }
     if let Some(result_data) = completion.result_data.as_object_mut() {
         result_data.insert(
             "kind".to_string(),
@@ -5602,6 +5721,98 @@ fn reconcile_completed_action(
     Ok(completion)
 }
 
+fn public_acp_file_changes(content: Option<&Value>) -> Option<Value> {
+    let blocks = content?.as_array()?;
+    let changes = blocks
+        .iter()
+        .filter(|block| block.get("type").and_then(Value::as_str) == Some("diff"))
+        .filter_map(|block| {
+            let path = block.get("path")?.as_str()?;
+            let new_text = block.get("newText")?.as_str()?;
+            let old_text = match block.get("oldText") {
+                Some(Value::String(value)) => Value::String(value.clone()),
+                Some(Value::Null) | None => Value::Null,
+                _ => return None,
+            };
+            Some(json!({
+                "path": path,
+                "oldText": old_text,
+                "newText": new_text,
+            }))
+        })
+        .collect::<Vec<_>>();
+    (!changes.is_empty()).then_some(Value::Array(changes))
+}
+
+fn single_public_acp_location_path(locations: Option<&Value>) -> Option<String> {
+    let mut paths = locations?
+        .as_array()?
+        .iter()
+        .filter_map(|location| location.get("path").and_then(Value::as_str))
+        .map(str::trim)
+        .filter(|path| !path.is_empty())
+        .map(str::to_string)
+        .collect::<Vec<_>>();
+    paths.sort();
+    paths.dedup();
+    match paths.as_slice() {
+        [path] => Some(path.clone()),
+        _ => None,
+    }
+}
+
+fn single_public_acp_raw_input_path(raw_input: Option<&Value>) -> Option<String> {
+    let raw_input = raw_input?.as_object()?;
+    let paths = ["filepath", "filePath", "file_path"]
+        .into_iter()
+        .filter_map(|key| raw_input.get(key).and_then(Value::as_str))
+        .map(str::trim)
+        .filter(|path| !path.is_empty())
+        .map(str::to_string)
+        .collect::<std::collections::BTreeSet<_>>();
+    (paths.len() == 1)
+        .then(|| paths.into_iter().next())
+        .flatten()
+}
+
+fn single_public_acp_metadata_path(meta: Option<&Value>) -> Option<String> {
+    let meta = meta?.as_object()?;
+    let paths = ["filepath", "filePath", "file_path"]
+        .into_iter()
+        .filter_map(|key| meta.get(key).and_then(Value::as_str))
+        .map(str::trim)
+        .filter(|path| !path.is_empty())
+        .map(str::to_string)
+        .collect::<std::collections::BTreeSet<_>>();
+    (paths.len() == 1)
+        .then(|| paths.into_iter().next())
+        .flatten()
+}
+
+fn public_acp_raw_input_file_change(raw_input: Option<&Value>, path: &str) -> Option<Value> {
+    let raw_input = raw_input?.as_object()?;
+    if ["replaceAll", "replace_all"]
+        .into_iter()
+        .filter_map(|key| raw_input.get(key))
+        .any(|value| value != &Value::Bool(false))
+    {
+        return None;
+    }
+    let old_text = ["oldString", "old_string"]
+        .into_iter()
+        .find_map(|key| raw_input.get(key).and_then(Value::as_str))?;
+    let new_text = ["newString", "new_string"]
+        .into_iter()
+        .find_map(|key| raw_input.get(key).and_then(Value::as_str))?;
+    (old_text != new_text).then(|| {
+        json!([{
+            "path": path,
+            "oldText": old_text,
+            "newText": new_text,
+        }])
+    })
+}
+
 fn acp_effect_disposition(succeeded: bool, native_kind: &str) -> &'static str {
     if succeeded {
         "complete"
@@ -5609,7 +5820,7 @@ fn acp_effect_disposition(succeeded: bool, native_kind: &str) -> &'static str {
         // A failed process may still have changed external state before it
         // returned a non-successful result.
         "unknown"
-    } else if matches!(native_kind, "edit" | "move" | "delete") {
+    } else if matches!(native_kind, "edit" | "write" | "move" | "delete") {
         // A failed filesystem operation may have applied only part of its
         // requested change.
         "partial"
@@ -5675,7 +5886,7 @@ fn acp_tool_exit_code(update: &Value) -> Option<i64> {
 }
 
 pub fn is_potential_side_effect(kind: &str) -> bool {
-    matches!(kind, "edit" | "move" | "delete" | "execute")
+    matches!(kind, "edit" | "write" | "move" | "delete" | "execute")
 }
 
 fn acp_tool_paths(request: &Value) -> Vec<String> {
@@ -5727,6 +5938,15 @@ fn scoped_path(root: &Path, value: &str) -> Result<PathBuf> {
         bail!("file path resolves outside the AgentRun execution root");
     }
     Ok(canonical)
+}
+
+fn client_filesystem_path(execution_root: &Path, value: &str) -> PathBuf {
+    let path = Path::new(value);
+    if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        execution_root.join(path)
+    }
 }
 
 fn canonicalize_allow_missing(path: &Path) -> Result<PathBuf> {
@@ -5861,6 +6081,18 @@ mod route_policy_tests {
                 &request["toolCall"]["rawInput"],
             ),
             "edit"
+        );
+    }
+
+    #[test]
+    fn qoder_read_with_a_file_path_remains_a_read() {
+        assert_eq!(
+            effective_action_kind(
+                AdapterKind::QoderCli,
+                "read",
+                &json!({"file_path": "/tmp/qoder-read.txt"}),
+            ),
+            "read"
         );
     }
 
@@ -6221,6 +6453,81 @@ while IFS= read -r ignored; do :; done
     }
 
     #[tokio::test]
+    async fn client_filesystem_proxies_runtime_paths_without_core_file_authorization() {
+        let root =
+            std::env::temp_dir().join(format!("rovai-acp-client-fs-root-{}", uuid::Uuid::new_v4()));
+        let outside = std::env::temp_dir().join(format!(
+            "rovai-acp-client-fs-outside-{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::create_dir_all(&outside).unwrap();
+        let executable = root.join("traecli");
+        make_executable(
+            &executable,
+            r#"#!/bin/sh
+IFS= read -r initialize || exit 1
+printf '%s\n' '{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":1,"agentCapabilities":{}}}'
+while IFS= read -r ignored; do :; done
+"#,
+        );
+        let frozen = frozen_trae_runtime(&executable);
+        let workspace = AgentRunWorkspace::runtime_managed_path(root.to_string_lossy().to_string());
+        let (incoming, _receiver) = mpsc::unbounded_channel();
+        let host = AcpHost::spawn(
+            &root,
+            &workspace,
+            PermissionSemantics::RuntimeManagedV2,
+            &frozen,
+            incoming,
+            Some(exact_builtin_tools(&root)),
+            CompactionDetectorPolicy::Disabled,
+            true,
+            &BTreeMap::new(),
+            &root.join("private"),
+            None,
+        )
+        .await
+        .unwrap();
+        let runtime = AcpRuntime::from_host(
+            AcpRuntimeOwner {
+                agent_run_id: "run-client-fs-proxy".to_string(),
+                execution_epoch: 1,
+            },
+            host.clone(),
+            "sha256:compatibility".to_string(),
+            "sha256:mcp".to_string(),
+            root.clone(),
+            Some(exact_attachment_root(&root)),
+            "read_only".to_string(),
+        );
+        let target = outside.join("runtime-owned.txt");
+        let first_write = runtime
+            .write_text_file(&json!({"path": target, "content": "first"}))
+            .await;
+        let second_write = runtime
+            .write_text_file(&json!({"path": target, "content": "second"}))
+            .await;
+        let read = runtime.read_text_file(&json!({"path": target})).await;
+
+        host.shutdown().await;
+        let persisted = std::fs::read_to_string(&target).ok();
+        std::fs::remove_dir_all(&root).unwrap();
+        std::fs::remove_dir_all(&outside).unwrap();
+
+        assert!(
+            first_write.is_ok(),
+            "Core must not require a separate ACP file-write authorization: {first_write:?}"
+        );
+        assert!(
+            second_write.is_ok(),
+            "ACP Client FS writes must not consume one-time Core authorization: {second_write:?}"
+        );
+        assert_eq!(read.unwrap()["content"], "second");
+        assert_eq!(persisted.as_deref(), Some("second"));
+    }
+
+    #[tokio::test]
     async fn kimi_038_fixture_uses_the_standard_terminal_wire_lifecycle() {
         let root = std::env::temp_dir().join(format!(
             "rovai-acp-client-terminal-kimi-038-wire-{}",
@@ -6406,8 +6713,12 @@ while IFS= read -r ignored; do :; done
             "rovai-acp-client-terminal-lifecycle-{}",
             uuid::Uuid::new_v4()
         ));
-        let child_cwd = root.join("child");
-        std::fs::create_dir_all(&child_cwd).unwrap();
+        let external_cwd = std::env::temp_dir().join(format!(
+            "rovai-acp-client-terminal-external-cwd-{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::create_dir_all(&external_cwd).unwrap();
         let bridge = terminal_bridge(&root);
         let owner = terminal_owner();
         let created = bridge
@@ -6422,7 +6733,7 @@ while IFS= read -r ignored; do :; done
                         "printf 'stdout:%s:%s:%s' \"$PWD\" \"$ROVAI_TERMINAL_BASE\" \"$TERMINAL_OVERRIDE\"; printf ':stderr' >&2; exit 7"
                     ],
                     "env": [{"name": "TERMINAL_OVERRIDE", "value": "request-environment"}],
-                    "cwd": child_cwd,
+                    "cwd": external_cwd,
                     "outputByteLimit": 65536,
                 }),
             )
@@ -6448,7 +6759,7 @@ while IFS= read -r ignored; do :; done
         let text = output["output"].as_str().unwrap();
         assert!(text.contains(&format!(
             "stdout:{}",
-            child_cwd.canonicalize().unwrap().display()
+            external_cwd.canonicalize().unwrap().display()
         )));
         assert!(text.contains("base-environment"));
         assert!(text.contains("request-environment"));
@@ -6469,8 +6780,39 @@ while IFS= read -r ignored; do :; done
                 .await
                 .is_err()
         );
+
+        let default_cwd = bridge
+            .create(
+                "session-terminal",
+                &owner,
+                &json!({
+                    "sessionId": "session-terminal",
+                    "command": "/bin/sh",
+                    "args": ["-c", "printf '%s' \"$PWD\""],
+                }),
+            )
+            .await
+            .unwrap();
+        let default_cwd_terminal_id = default_cwd["terminalId"].as_str().unwrap();
+        bridge
+            .wait_for_exit("session-terminal", &owner, default_cwd_terminal_id)
+            .await
+            .unwrap();
+        let default_cwd_output = bridge
+            .output("session-terminal", &owner, default_cwd_terminal_id)
+            .await
+            .unwrap();
+        assert_eq!(
+            default_cwd_output["output"],
+            root.canonicalize().unwrap().display().to_string()
+        );
+        bridge
+            .release("session-terminal", &owner, default_cwd_terminal_id)
+            .await
+            .unwrap();
         assert!(bridge.is_empty().await);
         std::fs::remove_dir_all(root).unwrap();
+        std::fs::remove_dir_all(external_cwd).unwrap();
     }
 
     #[tokio::test]
@@ -6584,22 +6926,19 @@ while IFS= read -r ignored; do :; done
     }
 
     #[tokio::test]
-    async fn client_terminal_rejects_workspace_escape_and_cleans_a_run_session() {
+    async fn client_terminal_rejects_invalid_cwd_and_cleans_a_run_session() {
         let root = std::env::temp_dir().join(format!(
             "rovai-acp-client-terminal-scope-{}",
             uuid::Uuid::new_v4()
         ));
-        let outside = std::env::temp_dir().join(format!(
-            "rovai-acp-client-terminal-outside-{}",
+        let missing = std::env::temp_dir().join(format!(
+            "rovai-acp-client-terminal-missing-{}",
             uuid::Uuid::new_v4()
         ));
         std::fs::create_dir_all(&root).unwrap();
-        std::fs::create_dir_all(&outside).unwrap();
-        let symlink_escape = root.join("symlink-escape");
-        std::os::unix::fs::symlink(&outside, &symlink_escape).unwrap();
         let bridge = terminal_bridge(&root);
         let owner = terminal_owner();
-        let escaped = bridge
+        let relative = bridge
             .create(
                 "session-scope",
                 &owner,
@@ -6607,17 +6946,13 @@ while IFS= read -r ignored; do :; done
                     "sessionId": "session-scope",
                     "command": "/bin/sh",
                     "args": ["-c", "exit 0"],
-                    "cwd": outside,
+                    "cwd": "relative",
                 }),
             )
             .await
-            .expect_err("workspace escape must fail closed");
-        assert!(
-            escaped
-                .to_string()
-                .contains("outside the AgentRun execution root")
-        );
-        let symlink_escaped = bridge
+            .expect_err("relative cwd must be rejected");
+        assert!(relative.to_string().contains("cwd must be absolute"));
+        let nonexistent = bridge
             .create(
                 "session-scope",
                 &owner,
@@ -6625,15 +6960,15 @@ while IFS= read -r ignored; do :; done
                     "sessionId": "session-scope",
                     "command": "/bin/sh",
                     "args": ["-c", "exit 0"],
-                    "cwd": symlink_escape,
+                    "cwd": missing,
                 }),
             )
             .await
-            .expect_err("cwd symlink escape must fail closed");
+            .expect_err("nonexistent absolute cwd must be rejected");
         assert!(
-            symlink_escaped
+            nonexistent
                 .to_string()
-                .contains("outside the AgentRun execution root")
+                .contains("cwd is not an existing directory")
         );
 
         let created = bridge
@@ -6659,7 +6994,6 @@ while IFS= read -r ignored; do :; done
                 .is_err()
         );
         std::fs::remove_dir_all(root).unwrap();
-        std::fs::remove_dir_all(outside).unwrap();
     }
 
     #[tokio::test]
@@ -9600,6 +9934,79 @@ while IFS= read -r ignored; do :; done
     }
 
     #[test]
+    fn acp_bypass_modes_auto_allow_protocol_permission_requests() {
+        let automatic = [
+            (AdapterKind::OpencodeCli, json!({"permission": "allow"})),
+            (AdapterKind::CopilotCli, json!({"allow_all": "on"})),
+            (AdapterKind::KiroCli, json!({"trust_all_tools": "on"})),
+            (
+                AdapterKind::QoderCli,
+                json!({"permission_mode": "bypass_permissions"}),
+            ),
+            (
+                AdapterKind::CodebuddyCli,
+                json!({"permission_mode": "bypassPermissions"}),
+            ),
+            (AdapterKind::QwenCode, json!({"approval_mode": "yolo"})),
+            (
+                AdapterKind::TraeCnCli,
+                json!({"permission_mode": "bypass_permissions"}),
+            ),
+            (
+                AdapterKind::CursorAgent,
+                json!({"execution_mode": "agent", "approval_policy": "force"}),
+            ),
+            (AdapterKind::KimiCodeCli, json!({"permission_mode": "yolo"})),
+            (
+                AdapterKind::GrokBuild,
+                json!({"permission_mode": "bypassPermissions"}),
+            ),
+        ];
+        for (adapter_kind, permissions) in automatic {
+            assert!(
+                automatically_allows_permission_requests(adapter_kind, &permissions),
+                "{} bypass mode must not create a second Core authorization",
+                adapter_kind.as_str()
+            );
+        }
+
+        let interactive = [
+            (AdapterKind::OpencodeCli, json!({"permission": "ask"})),
+            (AdapterKind::CopilotCli, json!({"allow_all": "off"})),
+            (AdapterKind::KiroCli, json!({"trust_all_tools": "off"})),
+            (AdapterKind::QoderCli, json!({"permission_mode": "default"})),
+            (
+                AdapterKind::CodebuddyCli,
+                json!({"permission_mode": "default"}),
+            ),
+            (AdapterKind::QwenCode, json!({"approval_mode": "default"})),
+            (
+                AdapterKind::TraeCnCli,
+                json!({"permission_mode": "default"}),
+            ),
+            (
+                AdapterKind::CursorAgent,
+                json!({"execution_mode": "agent", "approval_policy": "default"}),
+            ),
+            (
+                AdapterKind::KimiCodeCli,
+                json!({"permission_mode": "default"}),
+            ),
+            (
+                AdapterKind::GrokBuild,
+                json!({"permission_mode": "default"}),
+            ),
+        ];
+        for (adapter_kind, permissions) in interactive {
+            assert!(
+                !automatically_allows_permission_requests(adapter_kind, &permissions),
+                "{} interactive mode must preserve its ACP permission request",
+                adapter_kind.as_str()
+            );
+        }
+    }
+
+    #[test]
     fn acp_edit_request_becomes_a_stable_file_action() {
         let root = std::env::temp_dir().join(format!("rovai-acp-action-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&root).expect("temporary action root should exist");
@@ -9703,6 +10110,7 @@ while IFS= read -r ignored; do :; done
                 "Command": command,
                 "Description": "Read the approved fixture",
             })),
+            stable_meta: None,
             locations: Some(json!([{"path": target}])),
         };
         let context = InterceptedAcpActionContext {
@@ -9786,7 +10194,9 @@ while IFS= read -r ignored; do :; done
                 native_kind: Some("execute".to_string()),
                 observation_digest: Some("observed-digest".to_string()),
                 raw_input: Some(observed_raw_input),
+                stable_meta: None,
                 locations: None,
+                public_file_changes: None,
             },
             sparse,
         )
@@ -9840,5 +10250,262 @@ while IFS= read -r ignored; do :; done
 
         assert_eq!(execute.effect_disposition, "unknown");
         assert_eq!(edit.effect_disposition, "partial");
+    }
+
+    #[test]
+    fn successful_terminal_acp_diff_content_is_kept_for_evidence_projection_only() {
+        let completion = completed_action(
+            AdapterKind::CursorAgent,
+            &json!({
+                "update": {
+                    "sessionUpdate": "tool_call_update",
+                    "toolCallId": "tool-edit",
+                    "status": "completed",
+                    "kind": "edit",
+                    "content": [{
+                        "type": "diff",
+                        "path": "src/app.ts",
+                        "oldText": "before\n",
+                        "newText": "after\n"
+                    }]
+                }
+            }),
+        )
+        .unwrap()
+        .expect("terminal ACP edit should complete");
+
+        assert_eq!(
+            completion.public_file_changes,
+            Some(json!([{
+                "path": "src/app.ts",
+                "oldText": "before\n",
+                "newText": "after\n"
+            }]))
+        );
+        assert!(!completion.result_data.to_string().contains("before"));
+        assert!(!completion.result_data.to_string().contains("after"));
+
+        let failed = completed_action(
+            AdapterKind::CursorAgent,
+            &json!({
+                "update": {
+                    "sessionUpdate": "tool_call_update",
+                    "toolCallId": "tool-edit-failed",
+                    "status": "failed",
+                    "kind": "edit",
+                    "content": [{
+                        "type": "diff",
+                        "path": "src/app.ts",
+                        "oldText": "before\n",
+                        "newText": "partial\n"
+                    }]
+                }
+            }),
+        )
+        .unwrap()
+        .expect("failed ACP edit should still complete its audit action");
+        assert!(failed.public_file_changes.is_none());
+    }
+
+    #[test]
+    fn successful_terminal_acp_write_keeps_one_structured_location_without_inventing_a_diff() {
+        let completion = completed_action(
+            AdapterKind::KimiCodeCli,
+            &json!({
+                "update": {
+                    "sessionUpdate": "tool_call_update",
+                    "toolCallId": "tool-edit",
+                    "status": "completed",
+                    "kind": "edit",
+                    "locations": [{"path": "/repo/src/app.ts"}],
+                    "content": [{"type": "content", "content": {"type": "text", "text": "updated"}}]
+                }
+            }),
+        )
+        .unwrap()
+        .expect("terminal ACP edit should complete");
+
+        assert_eq!(
+            completion.public_file_operation_path.as_deref(),
+            Some("/repo/src/app.ts")
+        );
+        assert!(completion.public_file_changes.is_none());
+    }
+
+    #[test]
+    fn sparse_terminal_write_reuses_the_started_location_but_kind_conflicts_do_not_fabricate_writes()
+     {
+        let terminal_edit = json!({
+            "sessionUpdate": "tool_call_update",
+            "toolCallId": "tool-edit",
+            "status": "completed",
+            "kind": "edit",
+            "locations": []
+        });
+        let completion = completed_action(
+            AdapterKind::QoderCli,
+            &json!({"update": terminal_edit.clone()}),
+        )
+        .unwrap()
+        .expect("terminal ACP edit should complete");
+        let reconciled = reconcile_completed_action(
+            AdapterKind::QoderCli,
+            &terminal_edit,
+            ObservedToolMetadata {
+                native_kind: Some("edit".to_string()),
+                observation_digest: None,
+                raw_input: None,
+                stable_meta: None,
+                locations: Some(json!([{"path": "/repo/src/app.ts"}])),
+                public_file_changes: None,
+            },
+            completion,
+        )
+        .unwrap();
+        assert_eq!(
+            reconciled.public_file_operation_path.as_deref(),
+            Some("/repo/src/app.ts")
+        );
+
+        let read_completion = completed_action(
+            AdapterKind::QoderCli,
+            &json!({"update": terminal_edit.clone()}),
+        )
+        .unwrap()
+        .expect("terminal ACP result should complete");
+        let reconciled_read = reconcile_completed_action(
+            AdapterKind::QoderCli,
+            &terminal_edit,
+            ObservedToolMetadata {
+                native_kind: Some("read".to_string()),
+                observation_digest: None,
+                raw_input: None,
+                stable_meta: None,
+                locations: Some(json!([{"path": "/repo/src/app.ts"}])),
+                public_file_changes: None,
+            },
+            read_completion,
+        )
+        .unwrap();
+        assert_eq!(reconciled_read.native_kind, "read");
+        assert!(reconciled_read.public_file_operation_path.is_none());
+    }
+
+    #[test]
+    fn sparse_terminal_edit_uses_opening_aliases_for_full_before_after_evidence() {
+        let terminal = json!({
+            "sessionUpdate": "tool_call_update",
+            "toolCallId": "tool-qoder-edit",
+            "status": "completed"
+        });
+        let completion =
+            completed_action(AdapterKind::QoderCli, &json!({"update": terminal.clone()}))
+                .unwrap()
+                .expect("sparse terminal ACP edit should complete");
+        let reconciled = reconcile_completed_action(
+            AdapterKind::QoderCli,
+            &terminal,
+            ObservedToolMetadata {
+                native_kind: Some("edit".to_string()),
+                observation_digest: Some("opening-observation".to_string()),
+                raw_input: Some(json!({
+                    "filePath": "/repo/src/app.ts",
+                    "oldString": "before\n",
+                    "newString": "after\n"
+                })),
+                stable_meta: Some(json!({"providerItemId": "stable-opening-item"})),
+                locations: None,
+                public_file_changes: None,
+            },
+            completion,
+        )
+        .unwrap();
+
+        assert_eq!(reconciled.native_kind, "edit");
+        assert_eq!(
+            reconciled.public_file_operation_path.as_deref(),
+            Some("/repo/src/app.ts")
+        );
+        assert_eq!(
+            reconciled.public_file_changes,
+            Some(json!([{
+                "path": "/repo/src/app.ts",
+                "oldText": "before\n",
+                "newText": "after\n"
+            }]))
+        );
+    }
+
+    #[test]
+    fn stable_opening_meta_supplies_the_path_but_replace_all_degrades_to_operation_only() {
+        let terminal = json!({
+            "sessionUpdate": "tool_call_update",
+            "toolCallId": "tool-kimi-edit",
+            "status": "completed"
+        });
+        let completion = completed_action(
+            AdapterKind::KimiCodeCli,
+            &json!({"update": terminal.clone()}),
+        )
+        .unwrap()
+        .expect("sparse terminal ACP edit should complete");
+        let reconciled = reconcile_completed_action(
+            AdapterKind::KimiCodeCli,
+            &terminal,
+            ObservedToolMetadata {
+                native_kind: Some("edit".to_string()),
+                observation_digest: None,
+                raw_input: Some(json!({
+                    "old_string": "before",
+                    "new_string": "after",
+                    "replace_all": true
+                })),
+                stable_meta: Some(json!({"file_path": "/repo/src/app.ts"})),
+                locations: None,
+                public_file_changes: None,
+            },
+            completion,
+        )
+        .unwrap();
+
+        assert_eq!(
+            reconciled.public_file_operation_path.as_deref(),
+            Some("/repo/src/app.ts")
+        );
+        assert!(reconciled.public_file_changes.is_none());
+    }
+
+    #[test]
+    fn failed_sparse_edit_never_promotes_opening_file_metadata() {
+        let terminal = json!({
+            "sessionUpdate": "tool_call_update",
+            "toolCallId": "tool-failed-edit",
+            "status": "failed"
+        });
+        let completion =
+            completed_action(AdapterKind::QoderCli, &json!({"update": terminal.clone()}))
+                .unwrap()
+                .expect("failed terminal ACP edit should complete its audit Action");
+        let reconciled = reconcile_completed_action(
+            AdapterKind::QoderCli,
+            &terminal,
+            ObservedToolMetadata {
+                native_kind: Some("edit".to_string()),
+                observation_digest: None,
+                raw_input: Some(json!({
+                    "file_path": "/repo/src/app.ts",
+                    "old_string": "before",
+                    "new_string": "after"
+                })),
+                stable_meta: None,
+                locations: None,
+                public_file_changes: None,
+            },
+            completion,
+        )
+        .unwrap();
+
+        assert!(reconciled.public_file_operation_path.is_none());
+        assert!(reconciled.public_file_changes.is_none());
     }
 }

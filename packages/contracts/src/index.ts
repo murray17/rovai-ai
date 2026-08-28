@@ -1256,12 +1256,32 @@ export interface AgentRunDiagnosticGitObservation {
   observedAt: string
 }
 
+export interface CanonicalRuntimeDiffEntryView {
+  path: string
+  changeKind: 'add' | 'delete' | 'update'
+  additions: number
+  deletions: number
+  diff: string
+}
+
+export interface CanonicalRuntimeDiffProjectionView {
+  schemaVersion: 1
+  source: 'runtime_reported'
+  revision: number
+  sourceEvidenceIds: string[]
+  status: 'available' | 'unavailable' | 'conflict'
+  semanticKind?: 'unified_diff_snapshot' | 'complete_patch_snapshot' | 'exact_mutation' | 'complete_before_after'
+  entries?: CanonicalRuntimeDiffEntryView[]
+  safeReasonCode?: string
+}
+
 export interface CanonicalRuntimeActivityView {
   operationId: string
   activityDomain: string
   semanticKind: string | null
   toolName: string | null
   presentationHint: string | null
+  diffProjection?: CanonicalRuntimeDiffProjectionView | null
   phase: 'started' | 'progress' | 'terminal'
   outcome: 'succeeded' | 'failed' | 'denied' | 'cancelled' | 'not_executed' | 'unsettled' | 'unknown'
   credibility: 'core_verified' | 'runtime_structured' | 'runtime_reported' | 'unknown' | string
@@ -1522,8 +1542,54 @@ export interface DomainEventView {
   createdAt: string
 }
 
+export type AgentRunFileChangePresentationKind =
+  | 'full_net_diff'
+  | 'exact_mutations'
+  | 'operation_only'
+  | 'operation_history'
+
+export interface AgentRunChangedFileSummaryView {
+  path: string
+  changeKind: string
+  presentationKind: AgentRunFileChangePresentationKind
+  operationCount: number
+  additions?: number
+  deletions?: number
+}
+
+export interface AgentRunFileChangesView {
+  schemaVersion: 1
+  agentRunId: string
+  executionEpoch: number
+  files: AgentRunChangedFileSummaryView[]
+  fileCount: number
+  operationCount: number
+  additions?: number
+  deletions?: number
+  completedAt: string
+}
+
+export interface AgentRunFileChangeBlockView {
+  sequence: number
+  semantics: 'full_net_diff' | 'full_before_after' | 'unified_diff_snapshot' | 'exact_mutation' | 'operation_only'
+  changeKind: string
+  additions?: number
+  deletions?: number
+  diff?: string
+}
+
+export interface AgentRunChangedFileDetailView extends AgentRunChangedFileSummaryView {
+  blocks: AgentRunFileChangeBlockView[]
+}
+
+export interface AgentRunFileChangesDetailView {
+  schemaVersion: 1
+  card: AgentRunFileChangesView
+  files: AgentRunChangedFileDetailView[]
+}
+
 export interface CampSnapshot {
-  schemaVersion: 33
+  schemaVersion: 34
   throughGlobalSequence: number
   camp: {
     id: string
@@ -1545,6 +1611,7 @@ export interface CampSnapshot {
   turns: CampTurnView[]
   agentRuns: AgentRunView[]
   executionEvidence: AgentRunExecutionEvidenceView[]
+  agentRunFileChanges: AgentRunFileChangesView[]
   contextManifests: ContextManifestView[]
   approvals: ActionApprovalView[]
   actions: ActionView[]
@@ -1565,7 +1632,7 @@ export interface CampOpenMessageCoverage extends CampOpenCollectionCoverage {
 }
 
 export interface CampOpenProjection {
-  schemaVersion: 4
+  schemaVersion: 5
   throughGlobalSequence: number
   camp: CampSnapshot['camp']
   members: CampMemberView[]
@@ -1576,6 +1643,7 @@ export interface CampOpenProjection {
   turns: CampTurnView[]
   agentRuns: AgentRunView[]
   executionEvidence: AgentRunExecutionEvidenceView[]
+  agentRunFileChanges: AgentRunFileChangesView[]
   approvals: ActionApprovalView[]
   timeline: DomainEventView[]
   coverage: {
@@ -2636,6 +2704,7 @@ export type CoreMethod =
   | 'agentRuns.diagnostic.get'
   | 'agentRuns.resolveRecoveryBlocker'
   | 'camps.snapshot'
+  | 'agentRunFileChanges.get'
   | 'camp.messages.page'
   | 'camp.messages.around'
   | 'camp.messages.find'
