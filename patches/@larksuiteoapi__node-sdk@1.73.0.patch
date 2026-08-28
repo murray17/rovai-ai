@@ -1,0 +1,91 @@
+diff --git a/es/index.js b/es/index.js
+index c5d5c57488d414e3078f19a235e4db7afebeda80..50104bb01830e65006e4ec85805c719865d33586 100644
+--- a/es/index.js
++++ b/es/index.js
+@@ -105469,7 +105469,7 @@ class SafetyPipeline {
+             const task = () => __awaiter(this, void 0, void 0, function* () {
+                 var _e, _f;
+                 try {
+-                    yield handler();
++                    return yield handler();
+                 }
+                 catch (e) {
+                     (_f = (_e = this.logger).error) === null || _f === void 0 ? void 0 : _f.call(_e, `safety: action handler threw`, e);
+@@ -105483,10 +105483,10 @@ class SafetyPipeline {
+                 }
+             });
+             if (this.queueEnabled) {
+-                yield this.manager.run(queueScope, task);
++                return yield this.manager.run(queueScope, task);
+             }
+             else {
+-                yield task();
++                return yield task();
+             }
+         });
+     }
+@@ -106830,10 +106830,10 @@ class LarkChannel {
+                 if (!evt)
+                     return;
+                 const actionId = cardActionId(evt.action);
+-                yield this.safety.pushAction(`card:${evt.messageId}:${evt.operator.openId}:${actionId}`, evt.chatId, () => __awaiter(this, void 0, void 0, function* () {
++                return yield this.safety.pushAction(`card:${evt.messageId}:${evt.operator.openId}:${actionId}`, evt.chatId, () => __awaiter(this, void 0, void 0, function* () {
+                     const h = this.handlers.cardAction;
+                     if (h)
+-                        yield h(evt);
++                        return yield h(evt);
+                 }));
+             }),
+             // Reactions — dedup only
+diff --git a/lib/index.js b/lib/index.js
+index 0728b1d97ddac688b17642924e359c152dd52fd5..390ed309bf37802265b78c2c20920450261ed98f 100644
+--- a/lib/index.js
++++ b/lib/index.js
+@@ -105487,7 +105487,7 @@ class SafetyPipeline {
+             const task = () => __awaiter(this, void 0, void 0, function* () {
+                 var _e, _f;
+                 try {
+-                    yield handler();
++                    return yield handler();
+                 }
+                 catch (e) {
+                     (_f = (_e = this.logger).error) === null || _f === void 0 ? void 0 : _f.call(_e, `safety: action handler threw`, e);
+@@ -105501,10 +105501,10 @@ class SafetyPipeline {
+                 }
+             });
+             if (this.queueEnabled) {
+-                yield this.manager.run(queueScope, task);
++                return yield this.manager.run(queueScope, task);
+             }
+             else {
+-                yield task();
++                return yield task();
+             }
+         });
+     }
+@@ -106848,10 +106848,10 @@ class LarkChannel {
+                 if (!evt)
+                     return;
+                 const actionId = cardActionId(evt.action);
+-                yield this.safety.pushAction(`card:${evt.messageId}:${evt.operator.openId}:${actionId}`, evt.chatId, () => __awaiter(this, void 0, void 0, function* () {
++                return yield this.safety.pushAction(`card:${evt.messageId}:${evt.operator.openId}:${actionId}`, evt.chatId, () => __awaiter(this, void 0, void 0, function* () {
+                     const h = this.handlers.cardAction;
+                     if (h)
+-                        yield h(evt);
++                        return yield h(evt);
+                 }));
+             }),
+             // Reactions — dedup only
+diff --git a/types/index.d.ts b/types/index.d.ts
+index 1741e0c90073ec038590131c09952a23c222575d..2cef8a1c7d19dab21a3b8ef09d7ff17e5cd84b85 100644
+--- a/types/index.d.ts
++++ b/types/index.d.ts
+@@ -322076,7 +322076,7 @@ interface CardStreamController {
+ interface EventMap {
+     message: (msg: NormalizedMessage) => void | Promise<void>;
+     reject: (evt: RejectEvent) => void;
+-    cardAction: (evt: CardActionEvent) => void | Promise<void>;
++    cardAction: (evt: CardActionEvent) => void | object | Promise<void | object>;
+     reaction: (evt: ReactionEvent) => void;
+     botAdded: (evt: BotAddedEvent) => void;
+     comment: (evt: CommentEvent) => void | Promise<void>;

@@ -6,7 +6,7 @@ authority: version-scope-and-status
 design_status: confirmed
 implementation_status: completed
 model_context_change: true
-last_updated: 2026-08-28
+last_updated: 2026-08-29
 ---
 
 # Rovai-ai v1.30：飞书队员 Bot 与 Camp 渠道
@@ -15,7 +15,7 @@ last_updated: 2026-08-28
 > Developer Web Session；发布经同一 Session 以 template-first、App-ID durable freeze 和 activation-first 顺序直连
 > 开放平台 console API，不显示二维码或飞书创建确认页；旧
 > application registration 协议及其 API/交互已经退役。飞书消息入口已收敛为 Owner-only：私聊自动 Quick Chat，群/
-> 话题首次有效 mention 通过一张 Owner 私聊卡冻结项目。公开执行过程按 AgentRun 显示临时控制台，正式正文保持无标题
+> 话题首次有效 mention 通过原群或原 Topic 中的一张 Owner-only 卡冻结项目，成功后异步撤回。公开执行过程按 AgentRun 显示临时控制台，正式正文保持无标题
 > Markdown，已发布图片/文件按原生附件独立投递。真实飞书租户的“连接不增 App、发布不弹确认页”仍是发布
 > 环境验收项，不由本地自动化代替。
 
@@ -32,9 +32,10 @@ last_updated: 2026-08-28
 - Migration 113 建立基础渠道与 Context 22；Migration 114 新增真实 Developer Identity 与持久 publication intent，
   Migration 115 收紧队员 App 唯一状态机；Migration 116 把当前合同推进到
   `Data Contract v1.28 / projection schema 69`，新增 Owner identity/per-App mapping、Project Catalog、generation-aware
-  conversation binding、PendingCampBinding/FIFO message 与 private project-selection delivery；Migration 117/118 继续
+  conversation binding、PendingCampBinding/FIFO message 与 project-selection delivery；Migration 117/118 继续
   推进 Developer Session 与 Owner-only binding，Migration 119 升到 `Data Contract v1.32 / projection schema 73`，新增
-  execution console identity、delivery priority 和原生附件 outbox。Migration 113 早期新增
+  execution console identity、delivery priority 和原生附件 outbox。原会话 picker 复用既有 delivery kind 与 additive
+  `send | update | recall` payload，无需新增 Migration。Migration 113 早期新增
   ProjectBinding、ExternalPrincipal、
   channel conversation/binding、Feishu account/member Bot、group roster、inbound aggregate、ChannelTurnRequest 和
   ChannelDelivery，并允许 ExternalPrincipal CampMessage author 与 ContextManifest/Formatter 22；
@@ -49,7 +50,8 @@ last_updated: 2026-08-28
 - Owner 私聊第一条消息自动创建 Quick Chat generation/Camp；精确 `/new` 只支持私聊、保留旧 Camp、创建新 Camp，
   不产生 CampMessage/Turn/Run，活动根请求期间拒绝；
 - 普通群一个长期 Camp、每个话题一个 Camp。首次 Owner mention finalize 后建立 PendingCampBinding 并冻结原消息；
-  canonical mention 顺序第一个受管 Bot 私聊 Owner 一张项目卡，选择后按 FIFO 通过统一 admission 自动处理，不能换绑；
+  canonical mention 顺序第一个受管 Bot 在原群/原 Topic 发送一张项目卡。只有 callback envelope 证明为 Owner 且 App、
+  external message ID、version 与 nonce 全部匹配时才能消费；选择后按 FIFO 通过统一 admission 自动处理并异步撤回，不能换绑；
 - Feishu Host 用独立 Web Session 登录并展示真实 user/tenant；普通队员发布从同一 Electron Session 取得 console
   bootstrap，经 `OpenPlatformApiClient` 优先从固定模板创建应用，只有明确 non-creation rejection 才 fallback 一次
   self-build；App ID 在读取 Secret 或任何后续 mutation 前持久冻结。随后读取 Secret、启用 Bot 并先发布 `1.0.0`
@@ -115,7 +117,7 @@ ExternalQuote 的确定性 agent projection。Bootstrap、Session Charter、sect
 publication intent、template-first fallback 分类、App-ID durable barrier、activation-first、队员 App 身份冻结/历史 disabled
 同 App 恢复、连接不注册 App、发布不产生 QR/飞书确认页、在线 Scope/Event/Callback 配置与回读、Manifest 假阳性回归、
 identity drift/create outcome unknown fail-closed、frozen Event timeout recoverable、发布期 App-scoped Owner prebinding、owner/non-owner gate、DM `/new`、
-PendingCampBinding replay/CAS、多 Bot 单卡与 fail-closed、FIFO promotion、普通群/话题 roster、ExternalQuote/Context bytes、safeStorage/Renderer
+PendingCampBinding authoritative picker/replay/CAS、原会话投递与 durable recall、旧 private picker 恢复、多 Bot 单卡与 fail-closed、FIFO promotion、普通群/话题 roster、ExternalQuote/Context bytes、safeStorage/Renderer
 秘密隔离、execution console 更新/召回、永久 Markdown、原生附件顺序/独立失败、Host 恢复、双主题和完整
 Rust/TypeScript/文档/构建门禁。真实飞书租户登录、应用创建、无平台确认发布
 和收发仍需要拥有可用企业权限的 Owner 在发布环境执行，自动化不伪造外部成功。
@@ -125,7 +127,7 @@ Rust/TypeScript/文档/构建门禁。真实飞书租户登录、应用创建、
 | 范围 | 结论 | 证据或理由 |
 | --- | --- | --- |
 | Version lifecycle | 已更新 | 本概览、[实施计划](implementation-plan.md)、[决定](decisions.md)与[版本索引](../README.md)共同切换 `current_version`。 |
-| Decisions | 已更新 | [v1.30 决定](decisions.md#v1-30-d11)冻结 Owner-only Camp、Quick Chat、私聊项目卡、聚合/统一 admission、ExternalQuote、roster、template/activation-first Provisioner、App-scoped Owner prebinding，以及临时执行控制台/永久输出/原生附件边界。 |
+| Decisions | 已更新 | [v1.30 决定](decisions.md#v1-30-d12)冻结 Owner-only Camp、Quick Chat、原会话项目卡/异步撤回、聚合/统一 admission、ExternalQuote、roster、template/activation-first Provisioner、App-scoped Owner prebinding，以及临时执行控制台/永久输出/原生附件边界。 |
 | Contracts | 已更新 | [Feishu Channel v2](../../contracts/feishu-channel-v2.md)成为当前渠道入口，v1 转为历史；[ContextManifest Evidence v22](../../contracts/context-manifest-evidence-v22.md)继续拥有 AgentRun 输入。 |
 | Architecture | 已更新 | 新增[飞书渠道架构](../../architecture/feishu-channel.md)，连接 Renderer、Main Host、Core admission、Camp membership 与 Outbox 权威。 |
 | UI | 已更新 | 新增[渠道设置](../../ui/components/channel-settings.md)，并更新 UI/component 索引；视觉继续使用现有 Porcelain Day / Steel Night。 |

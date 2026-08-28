@@ -3,7 +3,7 @@ document_type: implementation-plan
 version: v1.30
 authority: implementation-and-acceptance-status
 status: completed
-last_updated: 2026-08-28
+last_updated: 2026-08-29
 ---
 
 # v1.30 实施计划
@@ -38,7 +38,8 @@ last_updated: 2026-08-28
   核对同一 App，不存在换绑或第二次创建；
 - [x] 完成 p2p/group/topic identity、显式 mention gate、多 Bot collecting/finalize/timeout/mismatch；
 - [x] 完成 Owner verify/per-App identity 自动映射 gate、non-owner 零业务事实、canonical-first acknowledgement App、单张
-  Owner 私聊项目卡和 callback envelope/nonce/version/CAS 重放防护；Developer Session `tenantId` 与 event `tenant_key`
+  原会话项目卡和 callback envelope/external message ID/nonce/version/CAS 重放防护；Non-owner 只收到私有 toast，成功后
+  Core 先消费再 durable recall，项目失效轮换卡片 authority，旧 private picker 在 Host tick 中失权、撤回并重发；Developer Session `tenantId` 与 event `tenant_key`
   分开处理，发布期先冻结 `(app_id, owner_open_id digest)`，首条匹配的 Owner 事件再冻结 event tenant key；
   该内部映射不投影为 Owner 待处理的 Renderer 状态；
 - [x] 实测确认飞书个人版入站可只携带 `open_id + union_id`；发布/同 App reconciliation 用各 App credential
@@ -65,8 +66,9 @@ last_updated: 2026-08-28
 - Feishu Owner 的 ExternalPrincipal 永远不等于 local owner；non-owner 在 observation 前停止且没有业务事实；
 - DM 自动 Quick Chat，`/new` 只支持 Owner 私聊且不进入模型；未绑定群/话题、未 mention、聚合不完整或 roster 不完整
   都没有 CampMessage/Turn/Run 副作用；
-- 项目卡只私聊 Owner、只含 opaque project ID，并由完整 canonical mention 顺序中的第一个 Bot 唯一投递；callback 只信
-  envelope identity，旧卡/双击/重放不能创建第二个 Camp；
+- 项目卡只含 opaque project ID/可控显示名，并由完整 canonical mention 顺序中的第一个 Bot 唯一投递到原群或原 Topic；
+  callback 只信 envelope identity 与 clicked message ID，Non-owner、旧卡、双击/重放不能改变 pending 或创建第二个 Camp；
+  成功后 Core authority 先失效再异步撤回，项目失效只刷新卡片，不能消费 pending；
 - 同一 Camp queued 请求在前一根 Turn 真正终结前不可进入公共会话；
 - 飞书 reply 只形成当前消息的 ExternalQuote，不产生内部 reply 或第二条 CampMessage；
 - 普通群 roster 与话题按需扩张都复用 Camp Membership v1 exact source generation；
@@ -97,12 +99,13 @@ last_updated: 2026-08-28
 - Migration 116/119 upgrade、v118→v119 独立兼容、Developer Identity/publication intent、队员 App 身份冻结/历史 disabled 同 App reactivation、Owner-only Channel 状态机、发布期 App-scoped Owner prebinding、DM `/new`、PendingCampBinding、ExternalQuote、Context bytes 与
   Secret projection、内置/managed 头像解析、正常发布头像传递、冻结 App 头像/readiness 修复、Manifest 假阳性、P2P
   Scope ID 映射、template-first fallback matrix、durable barrier、activation-first、dynamic patch reuse、Event timeout
-  recoverable、Event/Callback mode fail-closed、execution console 更新/消息身份、永久 Markdown、附件顺序/独立失败
+  recoverable、Event/Callback mode fail-closed、原会话 project picker/Non-owner toast/authoritative message ID/旧 private
+  picker 恢复/durable recall、execution console 更新/消息身份、永久 Markdown、附件顺序/独立失败
   定向测试全部通过；
 - `pnpm typecheck`；
 - `pnpm test`；
 - `pnpm build:desktop`；
-- `DOCS_BASE_REF=f1d48a55af2431cbfd9f6a5a136489f49b7a8c90 pnpm docs:check:ci`（本次发布链路重排基线）。
+- `DOCS_BASE_REF=fbd07e6a958a1d9a8d508413b4bbd548939bbd7d pnpm docs:check:ci`（本次原会话项目卡基线）。
 
 隔离 Desktop 验收使用独立临时 userData 和 `pnpm dev`：
 
@@ -116,5 +119,5 @@ last_updated: 2026-08-28
 Event 能在 120 秒窗口内收敛、连续发布两名队员均不
 重新扫码、已发布行跳转绑定 App 的官方详情页、Session 失效不建未知 App、切换账号后旧 Bot 继续运行，以及私聊进入
 `channel.on('message')` 后按未绑定/已绑定路径响应”属于发布环境验收，仍需 Owner 持有可用
-企业权限；还需实测 Owner 私聊自动 Quick Chat、私聊 `/new`、non-owner gate、群/话题单张私聊项目卡及 callback
-promotion。本地自动化没有把这些外部效果伪造为通过。
+企业权限；还需实测 Owner 私聊自动 Quick Chat、私聊 `/new`、non-owner gate、群/话题原会话单张项目卡、callback
+promotion 与成功撤回。本地自动化没有把这些外部效果伪造为通过。

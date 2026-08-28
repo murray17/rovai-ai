@@ -169,6 +169,7 @@ impl DomainCommand for StartNewFeishuDmCommand {
 pub struct ResolvePendingCampBindingCommand {
     pub pending_binding_id: String,
     pub app_id: String,
+    pub external_picker_message_id: String,
     pub expected_version: i64,
     pub nonce: String,
     pub action: String,
@@ -2607,6 +2608,10 @@ impl ChannelService {
     ) -> Result<CommandExecution> {
         validate_nonempty(&envelope.payload.pending_binding_id, "pendingBindingId")?;
         validate_nonempty(&envelope.payload.app_id, "appId")?;
+        validate_nonempty(
+            &envelope.payload.external_picker_message_id,
+            "externalPickerMessageId",
+        )?;
         validate_nonempty(&envelope.payload.nonce, "nonce")?;
         if envelope.payload.expected_version < 1 {
             anyhow::bail!("expectedVersion must be positive");
@@ -2676,6 +2681,17 @@ impl ChannelService {
                     }),
                 ));
             }
+            if pending.authoritative_picker_message_id.as_deref()
+                != Some(envelope.payload.external_picker_message_id.as_str())
+            {
+                return Ok(CommandHandlerResult::rejected(
+                    "channel.binding.stale_card",
+                    json!({
+                        "message": "This project card is not authoritative",
+                        "currentVersion": pending.version,
+                    }),
+                ));
+            }
             if pending.version != envelope.payload.expected_version {
                 return Ok(CommandHandlerResult::rejected(
                     "channel.binding.stale_card",
@@ -2695,6 +2711,14 @@ impl ChannelService {
             }
             if now >= chrono::DateTime::parse_from_rfc3339(&pending.expires_at)?.with_timezone(&Utc)
             {
+                insert_project_picker_recall_delivery(
+                    transaction,
+                    &pending.id,
+                    &pending.acknowledgement_app_id,
+                    &envelope.payload.external_picker_message_id,
+                    pending.version,
+                    &now_text,
+                )?;
                 transaction.execute(
                     r#"
                     UPDATE pending_camp_binding
@@ -2711,12 +2735,15 @@ impl ChannelService {
                 ));
             }
             if envelope.payload.action == "refresh" {
+                let (next_version, project_options) =
+                    rotate_pending_project_picker(transaction, &pending, None, &now_text)?;
                 return Ok(CommandHandlerResult::applied(
                     "channel.binding.refreshed",
                     json!({
                         "pendingBindingId": pending.id,
-                        "expectedVersion": pending.version,
-                        "projectOptions": active_project_card_items(transaction)?,
+                        "expectedVersion": next_version,
+                        "projectOptions": project_options,
+                        "pickerRefreshQueued": true,
                     }),
                     None,
                 ));
@@ -2737,6 +2764,14 @@ impl ChannelService {
                         "Pending Camp binding changed before cancellation",
                     ));
                 }
+                insert_project_picker_recall_delivery(
+                    transaction,
+                    &pending.id,
+                    &pending.acknowledgement_app_id,
+                    &envelope.payload.external_picker_message_id,
+                    pending.version,
+                    &now_text,
+                )?;
                 return Ok(CommandHandlerResult::applied(
                     "channel.binding.cancelled",
                     json!({
@@ -2770,24 +2805,38 @@ impl ChannelService {
                 )
                 .optional()?;
             let Some((project_id, project_display_name, canonical_path)) = project else {
+                let (next_version, project_options) = rotate_pending_project_picker(
+                    transaction,
+                    &pending,
+                    Some("project_unavailable"),
+                    &now_text,
+                )?;
                 return Ok(CommandHandlerResult::rejected(
                     "channel.project_unavailable",
                     json!({
                         "message": "The selected Rovai project is no longer available",
                         "pendingBindingId": pending.id,
-                        "expectedVersion": pending.version,
-                        "projectOptions": active_project_card_items(transaction)?,
+                        "expectedVersion": next_version,
+                        "projectOptions": project_options,
+                        "pickerRefreshQueued": true,
                     }),
                 ));
             };
             if !Path::new(&canonical_path).is_dir() {
+                let (next_version, project_options) = rotate_pending_project_picker(
+                    transaction,
+                    &pending,
+                    Some("project_unavailable"),
+                    &now_text,
+                )?;
                 return Ok(CommandHandlerResult::rejected(
                     "channel.project_unavailable",
                     json!({
                         "message": "The selected Rovai project directory is unavailable",
                         "pendingBindingId": pending.id,
-                        "expectedVersion": pending.version,
-                        "projectOptions": active_project_card_items(transaction)?,
+                        "expectedVersion": next_version,
+                        "projectOptions": project_options,
+                        "pickerRefreshQueued": true,
                     }),
                 ));
             }
@@ -2941,6 +2990,14 @@ impl ChannelService {
             if resolved != 1 {
                 anyhow::bail!("pending Camp binding resolution lost its atomic state");
             }
+            insert_project_picker_recall_delivery(
+                transaction,
+                &pending.id,
+                &pending.acknowledgement_app_id,
+                &envelope.payload.external_picker_message_id,
+                pending.version,
+                &now_text,
+            )?;
             Ok(CommandHandlerResult::accepted(
                 "channel.binding.resolved",
                 json!({
@@ -2998,15 +3055,8 @@ impl ChannelService {
                 "#,
                 [&now_text],
             )?;
-            transaction.execute(
-                r#"
-                UPDATE pending_camp_binding
-                SET status = 'expired', resolved_at = ?1,
-                    version = version + 1, updated_at = ?1
-                WHERE status = 'pending' AND expires_at <= ?1
-                "#,
-                [&now_text],
-            )?;
+            reconcile_pending_project_picker_placement(transaction, &now_text)?;
+            expire_pending_project_pickers(transaction, &now_text)?;
             decline_unattended_channel_retries(transaction, &envelope.actor, &now_text)?;
             project_active_request_deliveries(transaction, &now_text)?;
             settle_terminal_requests(transaction, &now_text)?;
@@ -3548,6 +3598,7 @@ struct PendingBindingResolution {
     id: String,
     owner_principal_id: String,
     acknowledgement_app_id: String,
+    authoritative_picker_message_id: Option<String>,
     status: String,
     version: i64,
     nonce_digest: String,
@@ -4387,12 +4438,16 @@ fn append_pending_camp_binding(
             )?;
             insert_pending_project_delivery(
                 transaction,
-                &pending_id,
-                &frozen.acknowledgement_app_id,
-                conversation,
-                &nonce,
-                1,
-                &now_text,
+                PendingProjectPickerDelivery {
+                    pending_binding_id: &pending_id,
+                    app_id: &frozen.acknowledgement_app_id,
+                    conversation,
+                    nonce: &nonce,
+                    expected_version: 1,
+                    operation: PendingProjectPickerOperation::Send,
+                    notice: None,
+                    now: &now_text,
+                },
             )?;
             (pending_id, frozen.acknowledgement_app_id.clone(), true)
         };
@@ -4438,23 +4493,44 @@ fn append_pending_camp_binding(
     })
 }
 
+enum PendingProjectPickerOperation<'a> {
+    Send,
+    Update { external_message_id: &'a str },
+}
+
+struct PendingProjectPickerDelivery<'a> {
+    pending_binding_id: &'a str,
+    app_id: &'a str,
+    conversation: &'a ChannelConversationAdmission,
+    nonce: &'a str,
+    expected_version: i64,
+    operation: PendingProjectPickerOperation<'a>,
+    notice: Option<&'a str>,
+    now: &'a str,
+}
+
 fn insert_pending_project_delivery(
     transaction: &Transaction<'_>,
-    pending_binding_id: &str,
-    app_id: &str,
-    conversation: &ChannelConversationAdmission,
-    nonce: &str,
-    expected_version: i64,
-    now: &str,
+    input: PendingProjectPickerDelivery<'_>,
 ) -> Result<()> {
+    let (operation, external_picker_message_id) = match input.operation {
+        PendingProjectPickerOperation::Send => ("send", None),
+        PendingProjectPickerOperation::Update {
+            external_message_id,
+        } => ("update", Some(external_message_id)),
+    };
     let payload = json!({
         "kind": "project_selection",
-        "pendingBindingId": pending_binding_id,
-        "conversationDisplayName": conversation.display_name,
-        "conversationKind": conversation.conversation_kind,
-        "expectedVersion": expected_version,
-        "nonce": nonce,
+        "placement": "conversation",
+        "operation": operation,
+        "pendingBindingId": input.pending_binding_id,
+        "conversationDisplayName": input.conversation.display_name,
+        "conversationKind": input.conversation.conversation_kind,
+        "expectedVersion": input.expected_version,
+        "nonce": input.nonce,
         "projectOptions": active_project_card_items(transaction)?,
+        "externalPickerMessageId": external_picker_message_id,
+        "notice": input.notice,
     });
     transaction.execute(
         r#"
@@ -4473,13 +4549,294 @@ fn insert_pending_project_delivery(
         "#,
         params![
             format!("rvcd_{}", Uuid::new_v4().simple()),
+            input.pending_binding_id,
+            format!(
+                "project_selection:{}:{}:{operation}",
+                input.pending_binding_id, input.expected_version
+            ),
+            input.app_id,
+            serde_json::to_string(&payload)?,
+            input.now,
+        ],
+    )?;
+    Ok(())
+}
+
+fn insert_project_picker_recall_delivery(
+    transaction: &Transaction<'_>,
+    pending_binding_id: &str,
+    app_id: &str,
+    external_picker_message_id: &str,
+    expected_version: i64,
+    now: &str,
+) -> Result<()> {
+    let payload = json!({
+        "kind": "project_selection_recall",
+        "placement": "conversation",
+        "operation": "recall",
+        "pendingBindingId": pending_binding_id,
+        "expectedVersion": expected_version,
+        "externalPickerMessageId": external_picker_message_id,
+    });
+    transaction.execute(
+        r#"
+        INSERT INTO channel_delivery(
+            id, request_id, pending_binding_id, dedupe_key, delivery_kind,
+            priority, target_app_id, source_agent_id, source_camp_message_id,
+            payload_json, status, attempt_count, available_at,
+            lease_owner, lease_expires_at, external_delivery_message_id,
+            failure_code, created_at, updated_at, ended_at
+        ) VALUES (
+            ?1, NULL, ?2, ?3, 'project_selection', 6, ?4,
+            NULL, NULL, ?5, 'pending', 0, ?6,
+            NULL, NULL, NULL, NULL, ?6, ?6, NULL
+        )
+        ON CONFLICT(dedupe_key) DO NOTHING
+        "#,
+        params![
+            format!("rvcd_{}", Uuid::new_v4().simple()),
             pending_binding_id,
-            format!("project_selection:{pending_binding_id}"),
+            format!(
+                "project_selection_recall:{pending_binding_id}:{expected_version}:{}",
+                opaque_digest("project-picker-message", external_picker_message_id)
+            ),
             app_id,
             serde_json::to_string(&payload)?,
             now,
         ],
     )?;
+    Ok(())
+}
+
+fn rotate_pending_project_picker(
+    transaction: &Transaction<'_>,
+    pending: &PendingBindingResolution,
+    notice: Option<&str>,
+    now: &str,
+) -> Result<(i64, Vec<ProjectCardItem>)> {
+    let picker_message_id = pending
+        .authoritative_picker_message_id
+        .as_deref()
+        .context("pending Camp binding has no authoritative project picker")?;
+    let nonce = Uuid::new_v4().simple().to_string();
+    let next_version = pending.version + 1;
+    let changed = transaction.execute(
+        r#"
+        UPDATE pending_camp_binding
+        SET version = ?2, nonce_digest = ?3, updated_at = ?4
+        WHERE id = ?1 AND status = 'pending' AND version = ?5
+        "#,
+        params![
+            pending.id,
+            next_version,
+            opaque_digest("pending-binding-nonce", &nonce),
+            now,
+            pending.version,
+        ],
+    )?;
+    if changed != 1 {
+        anyhow::bail!("pending Camp binding changed before picker refresh");
+    }
+    insert_pending_project_delivery(
+        transaction,
+        PendingProjectPickerDelivery {
+            pending_binding_id: &pending.id,
+            app_id: &pending.acknowledgement_app_id,
+            conversation: &pending.conversation,
+            nonce: &nonce,
+            expected_version: next_version,
+            operation: PendingProjectPickerOperation::Update {
+                external_message_id: picker_message_id,
+            },
+            notice,
+            now,
+        },
+    )?;
+    Ok((next_version, active_project_card_items(transaction)?))
+}
+
+fn reconcile_pending_project_picker_placement(
+    transaction: &Transaction<'_>,
+    now: &str,
+) -> Result<()> {
+    let pending = query_rows(
+        transaction,
+        r#"
+        SELECT pending.id, pending.acknowledgement_app_id, pending.version,
+               conversation.id, conversation.display_name,
+               conversation.tenant_key, conversation.chat_id,
+               conversation.conversation_kind
+        FROM pending_camp_binding AS pending
+        JOIN channel_conversation AS conversation
+          ON conversation.id = pending.channel_conversation_id
+        WHERE pending.status = 'pending' AND pending.expires_at > ?1
+          AND NOT EXISTS (
+              SELECT 1 FROM channel_delivery AS delivery
+              WHERE delivery.pending_binding_id = pending.id
+                AND delivery.delivery_kind = 'project_selection'
+                AND json_extract(delivery.payload_json, '$.placement') = 'conversation'
+                AND COALESCE(
+                    json_extract(delivery.payload_json, '$.operation'),
+                    'send'
+                ) IN ('send', 'update')
+                AND CAST(
+                    json_extract(delivery.payload_json, '$.expectedVersion') AS INTEGER
+                ) = pending.version
+          )
+        ORDER BY pending.created_at, pending.id
+        "#,
+        [now],
+        |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, i64>(2)?,
+                ChannelConversationAdmission {
+                    id: row.get(3)?,
+                    display_name: row.get(4)?,
+                    tenant_key: row.get(5)?,
+                    chat_id: row.get(6)?,
+                    conversation_kind: row.get(7)?,
+                },
+            ))
+        },
+    )?;
+    for (pending_id, app_id, version, conversation) in pending {
+        let legacy_message_ids = query_rows(
+            transaction,
+            r#"
+            SELECT external_delivery_message_id
+            FROM channel_delivery
+            WHERE pending_binding_id = ?1 AND delivery_kind = 'project_selection'
+              AND status = 'sent' AND external_delivery_message_id IS NOT NULL
+              AND COALESCE(json_extract(payload_json, '$.placement'), '') <> 'conversation'
+            ORDER BY ended_at, id
+            "#,
+            [&pending_id],
+            |row| row.get::<_, String>(0),
+        )?;
+        let nonce = Uuid::new_v4().simple().to_string();
+        let next_version = version + 1;
+        let changed = transaction.execute(
+            r#"
+            UPDATE pending_camp_binding
+            SET version = ?2, nonce_digest = ?3, updated_at = ?4
+            WHERE id = ?1 AND status = 'pending' AND version = ?5
+            "#,
+            params![
+                pending_id,
+                next_version,
+                opaque_digest("pending-binding-nonce", &nonce),
+                now,
+                version,
+            ],
+        )?;
+        if changed != 1 {
+            continue;
+        }
+        for legacy_message_id in legacy_message_ids {
+            insert_project_picker_recall_delivery(
+                transaction,
+                &pending_id,
+                &app_id,
+                &legacy_message_id,
+                version,
+                now,
+            )?;
+        }
+        transaction.execute(
+            r#"
+            UPDATE channel_delivery
+            SET status = 'failed', failure_code = 'legacy_private_picker_replaced',
+                lease_owner = NULL, lease_expires_at = NULL,
+                ended_at = ?2, updated_at = ?2
+            WHERE pending_binding_id = ?1 AND delivery_kind = 'project_selection'
+              AND COALESCE(json_extract(payload_json, '$.placement'), '') <> 'conversation'
+              AND status IN ('pending', 'attempting')
+            "#,
+            params![pending_id, now],
+        )?;
+        insert_pending_project_delivery(
+            transaction,
+            PendingProjectPickerDelivery {
+                pending_binding_id: &pending_id,
+                app_id: &app_id,
+                conversation: &conversation,
+                nonce: &nonce,
+                expected_version: next_version,
+                operation: PendingProjectPickerOperation::Send,
+                notice: Some("moved_to_conversation"),
+                now,
+            },
+        )?;
+    }
+    Ok(())
+}
+
+fn expire_pending_project_pickers(transaction: &Transaction<'_>, now: &str) -> Result<()> {
+    let expiring = query_rows(
+        transaction,
+        r#"
+        SELECT id, acknowledgement_app_id, version
+        FROM pending_camp_binding
+        WHERE status = 'pending' AND expires_at <= ?1
+        ORDER BY created_at, id
+        "#,
+        [now],
+        |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, i64>(2)?,
+            ))
+        },
+    )?;
+    for (pending_id, app_id, version) in expiring {
+        let message_ids = query_rows(
+            transaction,
+            r#"
+            SELECT DISTINCT external_delivery_message_id
+            FROM channel_delivery
+            WHERE pending_binding_id = ?1 AND delivery_kind = 'project_selection'
+              AND status = 'sent' AND external_delivery_message_id IS NOT NULL
+              AND COALESCE(json_extract(payload_json, '$.operation'), 'send') <> 'recall'
+            ORDER BY external_delivery_message_id
+            "#,
+            [&pending_id],
+            |row| row.get::<_, String>(0),
+        )?;
+        for message_id in message_ids {
+            insert_project_picker_recall_delivery(
+                transaction,
+                &pending_id,
+                &app_id,
+                &message_id,
+                version,
+                now,
+            )?;
+        }
+        transaction.execute(
+            r#"
+            UPDATE channel_delivery
+            SET status = 'failed', failure_code = 'pending_binding_expired',
+                lease_owner = NULL, lease_expires_at = NULL,
+                ended_at = ?2, updated_at = ?2
+            WHERE pending_binding_id = ?1 AND delivery_kind = 'project_selection'
+              AND COALESCE(json_extract(payload_json, '$.operation'), 'send') <> 'recall'
+              AND status IN ('pending', 'attempting')
+            "#,
+            params![pending_id, now],
+        )?;
+        transaction.execute(
+            r#"
+            UPDATE pending_camp_binding
+            SET status = 'expired', resolved_at = ?2,
+                version = version + 1, updated_at = ?2
+            WHERE id = ?1 AND status = 'pending' AND version = ?3
+            "#,
+            params![pending_id, now, version],
+        )?;
+    }
     Ok(())
 }
 
@@ -4576,8 +4933,27 @@ fn load_pending_binding_resolution(
         .query_row(
             r#"
             SELECT pending.id, pending.owner_principal_id,
-                   pending.acknowledgement_app_id, pending.status,
-                   pending.version, pending.nonce_digest, pending.expires_at,
+                   pending.acknowledgement_app_id,
+                   (
+                       SELECT delivery.external_delivery_message_id
+                       FROM channel_delivery AS delivery
+                       WHERE delivery.pending_binding_id = pending.id
+                         AND delivery.delivery_kind = 'project_selection'
+                         AND delivery.status = 'sent'
+                         AND delivery.external_delivery_message_id IS NOT NULL
+                         AND json_extract(delivery.payload_json, '$.placement') = 'conversation'
+                         AND COALESCE(
+                             json_extract(delivery.payload_json, '$.operation'),
+                             'send'
+                         ) IN ('send', 'update')
+                         AND CAST(
+                             json_extract(delivery.payload_json, '$.expectedVersion') AS INTEGER
+                         ) = pending.version
+                       ORDER BY delivery.ended_at DESC, delivery.id DESC
+                       LIMIT 1
+                   ),
+                   pending.status, pending.version,
+                   pending.nonce_digest, pending.expires_at,
                    conversation.id, conversation.display_name,
                    conversation.tenant_key, conversation.chat_id,
                    conversation.conversation_kind
@@ -4592,16 +4968,17 @@ fn load_pending_binding_resolution(
                     id: row.get(0)?,
                     owner_principal_id: row.get(1)?,
                     acknowledgement_app_id: row.get(2)?,
-                    status: row.get(3)?,
-                    version: row.get(4)?,
-                    nonce_digest: row.get(5)?,
-                    expires_at: row.get(6)?,
+                    authoritative_picker_message_id: row.get(3)?,
+                    status: row.get(4)?,
+                    version: row.get(5)?,
+                    nonce_digest: row.get(6)?,
+                    expires_at: row.get(7)?,
                     conversation: ChannelConversationAdmission {
-                        id: row.get(7)?,
-                        display_name: row.get(8)?,
-                        tenant_key: row.get(9)?,
-                        chat_id: row.get(10)?,
-                        conversation_kind: row.get(11)?,
+                        id: row.get(8)?,
+                        display_name: row.get(9)?,
+                        tenant_key: row.get(10)?,
+                        chat_id: row.get(11)?,
+                        conversation_kind: row.get(12)?,
                     },
                 })
             },
@@ -5839,6 +6216,10 @@ fn claim_deliveries(
         FROM channel_delivery AS delivery
         WHERE delivery.status = 'pending' AND delivery.available_at <= ?1
           AND (
+              delivery.delivery_kind <> 'project_selection'
+              OR json_extract(delivery.payload_json, '$.placement') = 'conversation'
+          )
+          AND (
               delivery.delivery_kind <> 'execution_console_recall'
               OR NOT EXISTS (
                   SELECT 1 FROM channel_delivery AS pending_console_update
@@ -5925,6 +6306,14 @@ fn claim_deliveries(
                        WHEN delivery.delivery_kind IN (
                            'execution_console_upsert', 'execution_console_recall'
                        ) THEN console.external_message_id
+                       WHEN delivery.delivery_kind = 'project_selection'
+                        AND json_extract(delivery.payload_json, '$.operation') IN (
+                            'update', 'recall'
+                        )
+                       THEN json_extract(
+                           delivery.payload_json,
+                           '$.externalPickerMessageId'
+                       )
                        WHEN delivery.delivery_kind = 'queue_ack'
                         AND json_extract(delivery.payload_json, '$.action') = 'recall'
                        THEN (
@@ -6608,19 +6997,87 @@ mod tests {
         pending_binding_id: &str,
         command_id: &str,
     ) -> CommandExecution {
-        let (app_id, payload_json): (String, String) = database
+        let existing_picker = database
             .connection()
             .query_row(
                 r#"
-                SELECT target_app_id, payload_json
-                FROM channel_delivery
-                WHERE pending_binding_id = ?1 AND delivery_kind = 'project_selection'
+                SELECT delivery.target_app_id, delivery.payload_json,
+                       delivery.external_delivery_message_id
+                FROM channel_delivery AS delivery
+                JOIN pending_camp_binding AS pending
+                  ON pending.id = delivery.pending_binding_id
+                WHERE pending.id = ?1 AND delivery.delivery_kind = 'project_selection'
+                  AND delivery.status = 'sent'
+                  AND delivery.external_delivery_message_id IS NOT NULL
+                  AND json_extract(delivery.payload_json, '$.placement') = 'conversation'
+                  AND COALESCE(
+                      json_extract(delivery.payload_json, '$.operation'), 'send'
+                  ) IN ('send', 'update')
+                  AND CAST(
+                      json_extract(delivery.payload_json, '$.expectedVersion') AS INTEGER
+                  ) = pending.version
+                ORDER BY delivery.ended_at DESC, delivery.id DESC
+                LIMIT 1
                 "#,
                 [pending_binding_id],
-                |row| Ok((row.get(0)?, row.get(1)?)),
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?,
+                    ))
+                },
             )
+            .optional()
             .unwrap();
-        let payload: serde_json::Value = serde_json::from_str(&payload_json).unwrap();
+        let (app_id, payload, picker_message_id) =
+            if let Some((app_id, payload, message_id)) = existing_picker {
+                (app_id, serde_json::from_str(&payload).unwrap(), message_id)
+            } else {
+                let picker_message_id = format!("om_picker_{pending_binding_id}");
+                let worker_id = format!("{command_id}-picker-worker");
+                let tick = service
+                    .host_tick(
+                        database,
+                        &host_envelope(
+                            &format!("{command_id}-picker-tick"),
+                            ChannelHostTickCommand {
+                                worker_id: worker_id.clone(),
+                                limit: 20,
+                            },
+                        ),
+                    )
+                    .unwrap();
+                let picker = tick.result.payload["deliveries"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .find(|delivery| {
+                        delivery["deliveryKind"] == "project_selection"
+                            && delivery["payload"]["operation"] != "recall"
+                    })
+                    .unwrap();
+                let delivery_id = picker["deliveryId"].as_str().unwrap().to_string();
+                let app_id = picker["targetAppId"].as_str().unwrap().to_string();
+                let payload = picker["payload"].clone();
+                service
+                    .settle_delivery(
+                        database,
+                        &host_envelope(
+                            &format!("{command_id}-picker-sent"),
+                            SettleChannelDeliveryCommand {
+                                delivery_id,
+                                worker_id,
+                                outcome: "sent".to_string(),
+                                external_delivery_message_id: Some(picker_message_id.clone()),
+                                failure_code: None,
+                                retryable: false,
+                            },
+                        ),
+                    )
+                    .unwrap();
+                (app_id, payload, picker_message_id)
+            };
         let project_id: String = database
             .connection()
             .query_row(
@@ -6637,6 +7094,7 @@ mod tests {
                     ResolvePendingCampBindingCommand {
                         pending_binding_id: pending_binding_id.to_string(),
                         app_id,
+                        external_picker_message_id: picker_message_id,
                         action: "bind".to_string(),
                         project_id: Some(project_id),
                         expected_version: payload["expectedVersion"].as_i64().unwrap(),
@@ -7829,6 +8287,129 @@ mod tests {
             "resolve-missing-roster",
         );
         assert_eq!(rejected.result.code, "channel.bot_not_in_roster");
+        let (picker_app_id, picker_payload_json, picker_message_id): (String, String, String) =
+            database
+                .connection()
+                .query_row(
+                    r#"
+                    SELECT target_app_id, payload_json, external_delivery_message_id
+                    FROM channel_delivery
+                    WHERE pending_binding_id = ?1 AND delivery_kind = 'project_selection'
+                      AND status = 'sent'
+                      AND json_extract(payload_json, '$.placement') = 'conversation'
+                      AND json_extract(payload_json, '$.operation') = 'send'
+                    "#,
+                    [&pending_binding_id],
+                    |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+                )
+                .unwrap();
+        let picker_payload: Value = serde_json::from_str(&picker_payload_json).unwrap();
+        assert_eq!(picker_payload["conversationKind"], "group");
+        assert_eq!(picker_payload["placement"], "conversation");
+        assert!(picker_payload.get("canonicalPath").is_none());
+        let selected_project_id = picker_payload["projectOptions"][0]["projectId"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let stale_message = service
+            .resolve_pending_camp_binding(
+                &mut database,
+                &host_envelope(
+                    "resolve-stale-picker-message",
+                    ResolvePendingCampBindingCommand {
+                        pending_binding_id: pending_binding_id.clone(),
+                        app_id: picker_app_id.clone(),
+                        external_picker_message_id: "om_not_authoritative".to_string(),
+                        expected_version: picker_payload["expectedVersion"].as_i64().unwrap(),
+                        nonce: picker_payload["nonce"].as_str().unwrap().to_string(),
+                        action: "bind".to_string(),
+                        project_id: Some(selected_project_id.clone()),
+                        operator_open_id: Some("ou_user".to_string()),
+                        operator_user_id: Some("user_1".to_string()),
+                        operator_union_id: Some("union_user".to_string()),
+                    },
+                ),
+            )
+            .unwrap();
+        assert_eq!(stale_message.result.code, "channel.binding.stale_card");
+        let non_owner = service
+            .resolve_pending_camp_binding(
+                &mut database,
+                &host_envelope(
+                    "resolve-picker-non-owner",
+                    ResolvePendingCampBindingCommand {
+                        pending_binding_id: pending_binding_id.clone(),
+                        app_id: picker_app_id.clone(),
+                        external_picker_message_id: picker_message_id.clone(),
+                        expected_version: picker_payload["expectedVersion"].as_i64().unwrap(),
+                        nonce: picker_payload["nonce"].as_str().unwrap().to_string(),
+                        action: "bind".to_string(),
+                        project_id: Some(selected_project_id),
+                        operator_open_id: Some("ou_other".to_string()),
+                        operator_user_id: Some("user_other".to_string()),
+                        operator_union_id: Some("union_other".to_string()),
+                    },
+                ),
+            )
+            .unwrap();
+        assert_eq!(non_owner.result.code, "channel.binding.owner_required");
+        let unchanged_pending: (String, i64, String) = database
+            .connection()
+            .query_row(
+                "SELECT status, version, nonce_digest FROM pending_camp_binding WHERE id = ?1",
+                [&pending_binding_id],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(unchanged_pending.0, "pending");
+        assert_eq!(
+            unchanged_pending.1,
+            picker_payload["expectedVersion"].as_i64().unwrap()
+        );
+        assert_eq!(
+            unchanged_pending.2,
+            opaque_digest(
+                "pending-binding-nonce",
+                picker_payload["nonce"].as_str().unwrap()
+            )
+        );
+        let unavailable = service
+            .resolve_pending_camp_binding(
+                &mut database,
+                &host_envelope(
+                    "resolve-picker-project-became-unavailable",
+                    ResolvePendingCampBindingCommand {
+                        pending_binding_id: pending_binding_id.clone(),
+                        app_id: picker_app_id.clone(),
+                        external_picker_message_id: picker_message_id.clone(),
+                        expected_version: picker_payload["expectedVersion"].as_i64().unwrap(),
+                        nonce: picker_payload["nonce"].as_str().unwrap().to_string(),
+                        action: "bind".to_string(),
+                        project_id: Some("rvproj_missing".to_string()),
+                        operator_open_id: Some("ou_user".to_string()),
+                        operator_user_id: Some("user_1".to_string()),
+                        operator_union_id: Some("union_user".to_string()),
+                    },
+                ),
+            )
+            .unwrap();
+        assert_eq!(unavailable.result.code, "channel.project_unavailable");
+        assert_eq!(unavailable.result.payload["pickerRefreshQueued"], true);
+        assert_eq!(
+            unavailable.result.payload["expectedVersion"]
+                .as_i64()
+                .unwrap(),
+            unchanged_pending.1 + 1
+        );
+        let refreshed_nonce_digest: String = database
+            .connection()
+            .query_row(
+                "SELECT nonce_digest FROM pending_camp_binding WHERE id = ?1",
+                [&pending_binding_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_ne!(refreshed_nonce_digest, unchanged_pending.2);
         assert_eq!(
             database
                 .connection()
@@ -7927,6 +8508,206 @@ mod tests {
             "only the request that actually remained queued may emit a queue acknowledgement"
         );
         assert_eq!(queue_acknowledgements[0]["payload"]["status"], "queued");
+        let picker_recalls = outbox.result.payload["deliveries"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|delivery| {
+                delivery["deliveryKind"] == "project_selection"
+                    && delivery["payload"]["operation"] == "recall"
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(picker_recalls.len(), 1);
+        assert_eq!(picker_recalls[0]["targetAppId"], "cli_app_2");
+        assert_eq!(picker_recalls[0]["updateMessageId"], picker_message_id);
+
+        let replay = service
+            .resolve_pending_camp_binding(
+                &mut database,
+                &host_envelope(
+                    "resolve-picker-replay-after-commit",
+                    ResolvePendingCampBindingCommand {
+                        pending_binding_id: pending_binding_id.clone(),
+                        app_id: picker_app_id,
+                        external_picker_message_id: picker_message_id,
+                        expected_version: picker_payload["expectedVersion"].as_i64().unwrap(),
+                        nonce: picker_payload["nonce"].as_str().unwrap().to_string(),
+                        action: "bind".to_string(),
+                        project_id: picker_payload["projectOptions"][0]["projectId"]
+                            .as_str()
+                            .map(ToString::to_string),
+                        operator_open_id: Some("ou_user".to_string()),
+                        operator_user_id: Some("user_1".to_string()),
+                        operator_union_id: Some("union_user".to_string()),
+                    },
+                ),
+            )
+            .unwrap();
+        assert_eq!(replay.result.code, "channel.binding.stale_card");
+    }
+
+    #[test]
+    fn legacy_private_picker_is_recalled_and_reissued_in_the_original_conversation() {
+        let mut database = seeded_runtime_database_owned();
+        let service = ChannelService::default();
+        connect_account(&service, &mut database);
+        publish_bot(&service, &mut database, "agent_1", "cli_app_1");
+        seed_project(&database, "legacy-picker");
+        let quick_chat_path = quick_chat_path(&database);
+        service
+            .reconcile_feishu_group_roster(
+                &mut database,
+                &host_envelope(
+                    "legacy-picker-roster",
+                    ReconcileFeishuGroupRosterCommand {
+                        provider: FEISHU_PROVIDER.to_string(),
+                        tenant_key: "tenant_1".to_string(),
+                        chat_id: "oc_legacy_picker".to_string(),
+                        present_app_ids: vec!["cli_app_1".to_string()],
+                    },
+                ),
+            )
+            .unwrap();
+        let observation = service
+            .observe_inbound(
+                &mut database,
+                &host_envelope(
+                    "observe-legacy-picker",
+                    observation_command(
+                        "cli_app_1",
+                        "om_legacy_request",
+                        "oc_legacy_picker",
+                        "",
+                        "group",
+                        "请检查",
+                        &[("agent_1", "cli_app_1")],
+                        true,
+                    ),
+                ),
+            )
+            .unwrap();
+        let pending = service
+            .finalize_inbound(
+                &mut database,
+                &quick_chat_path,
+                &host_envelope(
+                    "finalize-legacy-picker",
+                    FinalizeChannelInboundCommand {
+                        aggregate_id: observation.result.payload["aggregateId"]
+                            .as_str()
+                            .unwrap()
+                            .to_string(),
+                    },
+                ),
+            )
+            .unwrap();
+        let pending_binding_id = pending.result.payload["pendingBindingId"].as_str().unwrap();
+        let (legacy_payload_json, original_version, original_nonce_digest): (String, i64, String) =
+            database
+                .connection()
+                .query_row(
+                    r#"
+                    SELECT delivery.payload_json, pending.version, pending.nonce_digest
+                    FROM channel_delivery AS delivery
+                    JOIN pending_camp_binding AS pending
+                      ON pending.id = delivery.pending_binding_id
+                    WHERE pending.id = ?1 AND delivery.delivery_kind = 'project_selection'
+                    "#,
+                    [pending_binding_id],
+                    |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+                )
+                .unwrap();
+        let legacy_payload: Value = serde_json::from_str(&legacy_payload_json).unwrap();
+        let now = Utc::now().to_rfc3339();
+        database
+            .connection()
+            .execute(
+                r#"
+                UPDATE channel_delivery
+                SET payload_json = json_remove(payload_json, '$.placement'),
+                    status = 'sent', external_delivery_message_id = 'om_legacy_private',
+                    updated_at = ?2, ended_at = ?2
+                WHERE pending_binding_id = ?1 AND delivery_kind = 'project_selection'
+                "#,
+                params![pending_binding_id, now],
+            )
+            .unwrap();
+
+        let tick = service
+            .host_tick(
+                &mut database,
+                &host_envelope(
+                    "reconcile-legacy-private-picker",
+                    ChannelHostTickCommand {
+                        worker_id: "legacy-picker-worker".to_string(),
+                        limit: 20,
+                    },
+                ),
+            )
+            .unwrap();
+        let deliveries = tick.result.payload["deliveries"].as_array().unwrap();
+        let recall = deliveries
+            .iter()
+            .find(|delivery| delivery["payload"]["operation"] == "recall")
+            .expect("the legacy private picker must be recalled");
+        assert_eq!(recall["targetAppId"], "cli_app_1");
+        assert_eq!(recall["updateMessageId"], "om_legacy_private");
+        let replacement = deliveries
+            .iter()
+            .find(|delivery| delivery["payload"]["operation"] == "send")
+            .expect("a replacement picker must be sent in the original conversation");
+        assert_eq!(replacement["chatId"], "oc_legacy_picker");
+        assert_eq!(replacement["payload"]["placement"], "conversation");
+        assert_eq!(replacement["payload"]["notice"], "moved_to_conversation");
+        assert_eq!(
+            replacement["payload"]["expectedVersion"],
+            original_version + 1
+        );
+        assert!(
+            deliveries
+                .iter()
+                .position(|delivery| delivery["payload"]["operation"] == "send")
+                .unwrap()
+                < deliveries
+                    .iter()
+                    .position(|delivery| delivery["payload"]["operation"] == "recall")
+                    .unwrap(),
+            "the replacement must be attempted before best-effort legacy recall"
+        );
+        let (next_version, next_nonce_digest): (i64, String) = database
+            .connection()
+            .query_row(
+                "SELECT version, nonce_digest FROM pending_camp_binding WHERE id = ?1",
+                [pending_binding_id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(next_version, original_version + 1);
+        assert_ne!(next_nonce_digest, original_nonce_digest);
+
+        let stale = service
+            .resolve_pending_camp_binding(
+                &mut database,
+                &host_envelope(
+                    "reject-legacy-private-picker",
+                    ResolvePendingCampBindingCommand {
+                        pending_binding_id: pending_binding_id.to_string(),
+                        app_id: "cli_app_1".to_string(),
+                        external_picker_message_id: "om_legacy_private".to_string(),
+                        expected_version: legacy_payload["expectedVersion"].as_i64().unwrap(),
+                        nonce: legacy_payload["nonce"].as_str().unwrap().to_string(),
+                        action: "bind".to_string(),
+                        project_id: legacy_payload["projectOptions"][0]["projectId"]
+                            .as_str()
+                            .map(ToString::to_string),
+                        operator_open_id: Some("ou_user".to_string()),
+                        operator_user_id: Some("user_1".to_string()),
+                        operator_union_id: Some("union_user".to_string()),
+                    },
+                ),
+            )
+            .unwrap();
+        assert_eq!(stale.result.code, "channel.binding.stale_card");
     }
 
     #[test]

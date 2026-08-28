@@ -3,13 +3,13 @@ document_type: ui-component
 component: channel-settings
 authority: channel-settings-presentation-and-interaction
 status: accepted
-last_updated: 2026-08-28
+last_updated: 2026-08-29
 ---
 
 # 渠道设置
 
-渠道设置是 Owner 在 Rovai 本机维护渠道连接与队员 Bot 的 Renderer surface。项目选择发生在 Owner 的飞书私聊卡片中；
-Renderer 不提供 Channel 项目目录或会话绑定操作。
+渠道设置是 Owner 在 Rovai 本机维护渠道连接与队员 Bot 的 Renderer surface。群/话题首次项目选择发生在原飞书会话的
+Owner-only 卡片中；Renderer 不提供 Channel 项目目录或会话绑定操作。
 领域状态和错误见 [Feishu Channel v2](../../contracts/feishu-channel-v2.md)；本页只拥有信息层级、交互与可访问性。
 
 ## 页面结构
@@ -94,7 +94,15 @@ message/callback envelope 会在同一入站流程自动记录 App-scoped identi
 
 页面可在 Provider 卡底部显示 `待处理项目选择 N` 与 `绑定异常 N` 两个低强调诊断值；零值可省略。它们只帮助 Owner
 理解当前渠道状态，不展开项目列表、路径、会话 picker 或 resolve 操作。正常流程是 Owner 私聊自动 Quick Chat，或群/
-话题第一次有效 mention 后在飞书私聊卡片中选择项目。
+话题第一次有效 mention 后在原群/原 Topic 的飞书卡片中选择项目。
+
+项目卡沿用 Rovai 克制、信息先行的表达：标题为“选择 Rovai 项目”，正文按普通群/Topic 明确选择作用域，并说明
+项目路径只保留在本机；选项只显示 bounded project display name，主动作使用“绑定并处理 · 项目名”，提供“刷新项目”
+而不提供换绑/取消入口。卡片不得显示 canonical path、外部 identity、credential 或内部错误。
+
+只有 Owner 点击会消费卡片；Non-owner 只看到“仅 Rovai Owner 可以选择项目”私有 toast，公共卡不变化。项目失效时显示
+“该项目已不可用，请重新选择”并刷新原卡；旧卡/双击显示“该项目选择已完成或卡片已过期”。成功只显示短暂
+“项目已绑定，正在处理消息”反馈，Core 随后异步撤回卡片，不留下永久完成卡。
 
 ## 状态、错误与键盘
 

@@ -2,7 +2,7 @@
 document_type: version-decisions
 version: v1.30
 lifecycle: current
-last_updated: 2026-08-28
+last_updated: 2026-08-29
 ---
 
 # v1.30 决策记录
@@ -328,6 +328,9 @@ Renderer 使用八个进行中阶段，并把固定 failure code 降为次级诊
 <a id="v1-30-d09"></a>
 ## V1.30-D09：飞书一期收敛为 Owner-only Camp，群与话题首次在私聊冻结项目
 
+> Owner-only、Quick Chat、不可换绑与统一 admission 仍有效；项目卡投递位置和完成态已由
+> [V1.30-D12](#v1-30-d12)取代。本节保留此前私聊方案的取舍记录。
+
 ### 背景
 
 V1.30-D01 允许绑定会话中的任意飞书成员触发 Agent，并让 Owner 在渠道设置页维护第二套 ProjectBinding 目录与会话
@@ -457,3 +460,53 @@ ChannelTurnRequest settlement 只等待 terminal Turn 与永久 `agent_output | 
 - **Main 单独实现执行过程格式：** 本地与飞书会随事件分类和工具分组规则演化而漂移；
 - **把所有附件绑成一次发送：** 任一上传失败都会迫使正文或已成功附件重复；
 - **用路径作为附件 identity：** 绕过 Managed Attachment 的 Camp scope、digest 与 symlink/可读性验证。
+
+<a id="v1-30-d12"></a>
+## V1.30-D12：项目选择回到原会话，Core 先失权再异步撤回
+
+### 背景
+
+D09 把未绑定群与话题的项目卡私聊给 Owner，以避免公开本机项目路径。但这会让 Owner 离开正在工作的上下文，无法直观看出
+选择作用于哪个群或话题，也让 Topic 的首次使用体验断裂。当前 Project Catalog 已能把飞书卡片限制为 opaque project ID
+与可控显示名，canonical path 始终留在 Core；因此无需用私聊位置承担路径保密。与此同时，公共卡片会被群成员看到，必须把
+“谁能点击”“哪张卡仍有效”“成功后如何消失”收敛为 Core 可恢复的安全状态，而不能依赖飞书 UI 是否及时更新。
+
+### 决定
+
+普通群的 `project_selection` 发送到原 `chatId`，Topic 的卡片发送到原父群并使用该 Topic 的稳定 reply anchor；不再以
+Owner open ID 作为正常投递目标。卡片只展示 bounded conversation/project display name 和 opaque `projectId`，禁止
+canonical path、operator identity 或本机凭据。multi-Bot 仍只由冻结的 `acknowledgementAppId` 发一张卡。
+
+Core 以 exact PendingCampBinding、frozen App、callback envelope 中的 Owner identity、当前已发送卡片的 external
+message ID、version、nonce 与 expiry 共同判定权威卡。action payload 中的身份字段不可信。Non-owner 点击不改变 pending、
+version 或 nonce，只通过 card-action ACK 收到“仅 Rovai Owner 可以选择项目”；旧卡、双击与重放返回过期提示。
+
+Owner bind 成功时，Core 在同一事务完成 `pending -> resolving -> resolved`、immutable binding/Camp 创建、冻结消息 FIFO
+promotion 与统一 admission，然后追加 durable recall；外部撤回成功与否不影响卡片已经失权。项目刚好 unavailable/archived
+时 pending 不被消费，Core 轮换 version/nonce 并以 durable update 刷新原卡。`project_selection` 继续是一个封闭 delivery
+kind，以 `operation = send | update | recall` 表达外部生命周期，不新增数据库 kind 或 schema。
+
+启动恢复发现旧 private picker 时，Core 先轮换 version/nonce 使旧卡失权，再为已发送旧卡排 durable recall，并在原群/Topic
+创建 replacement picker。成功后不把原卡 patch 成永久“已绑定”结果；公共卡只在选择期间存在。
+
+当前规范见[飞书渠道架构](../../architecture/feishu-channel.md#owner-only-入站与会话执行范围)、
+[Feishu Channel v2](../../contracts/feishu-channel-v2.md#2-owner-only-camp-与项目选择)和
+[渠道设置](../../ui/components/channel-settings.md#owner-identity-与绑定诊断)。
+
+### 后果
+
+- Owner 在原群或原 Topic 完成选择，不再跨到私聊确认作用域；
+- 项目显示名在选择期间对当前会话可见，路径和本机 authority 仍不出 Core；
+- Non-owner 的点击只得到私有 toast，不修改公共卡片或任何业务事实；
+- Core commit 是安全失效点，飞书 recall 是可重试的 presentation 清理；
+- 既有 private picker 可在重启/Host tick 后自动迁移，不要求 Owner 重发首次请求。
+
+### 被拒绝方案
+
+- **继续私聊 Owner：** 保密了已经可控的显示名，却持续制造上下文切换和 Topic 归属歧义；
+- **成功后 patch 为永久结果卡：** 在公共会话留下无后续价值的状态噪音，并把 presentation 成功误当作安全提交；
+- **先同步撤回、再提交 Core：** 网络超时会让业务提交依赖外部 UI，且无法证明是否需要重做；
+- **只信 nonce/version：** replacement 或残留旧卡仍可能携带合法旧控制值，缺少 exact external message identity；
+- **从 action payload 判断 Owner：** 卡片 payload 可被重放或构造，不能成为身份来源；
+- **新增独立 recall delivery kind：** 现有 `project_selection` authority 与外部 message ID 已足以表达同一生命周期，扩大闭集和
+  Migration 没有收益。

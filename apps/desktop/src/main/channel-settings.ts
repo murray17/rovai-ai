@@ -191,6 +191,13 @@ type RawCardActionEvent = {
   }
 }
 
+type FeishuCardActionResponse = {
+  toast: {
+    type: 'info' | 'success' | 'warning' | 'error'
+    content: string
+  }
+}
+
 const HOST_WORKER_ID = `desktop-${randomUUID()}`
 const ROSTER_CACHE_MS = 20_000
 const ROSTER_SWEEP_MS = 30_000
@@ -1476,7 +1483,10 @@ export class ChannelSettingsService {
     })
   }
 
-  async #handleCardAction(managed: ManagedChannel, event: CardActionEvent): Promise<void> {
+  async #handleCardAction(
+    managed: ManagedChannel,
+    event: CardActionEvent
+  ): Promise<FeishuCardActionResponse | void> {
     if (this.#stopped) return
     const action = projectCardAction(event.action.value)
     if (!action) {
@@ -1488,35 +1498,51 @@ export class ChannelSettingsService {
       return
     }
     const raw = (event.raw ?? {}) as RawCardActionEvent
-    const result = await this.#commandWithId(
-      'channels.feishu.pendingBinding.resolve',
-      randomUUID(),
-      {
-        pendingBindingId: action.pendingBindingId,
-        appId: managed.appId,
-        expectedVersion: action.expectedVersion,
-        nonce: action.nonce,
-        action: action.action,
-        projectId: action.projectId,
-        operatorOpenId: raw.operator?.open_id ?? event.operator.openId ?? null,
-        operatorUserId: raw.operator?.user_id ?? event.operator.userId ?? null,
-        operatorUnionId: raw.operator?.union_id ?? null
-      },
-      false
-    )
+    let result: StoredCommandResult
     try {
-      await managed.channel.updateCard(
-        event.messageId,
-        projectBindingResultCard(result, action)
+      result = await this.#commandWithId(
+        'channels.feishu.pendingBinding.resolve',
+        randomUUID(),
+        {
+          pendingBindingId: action.pendingBindingId,
+          appId: managed.appId,
+          externalPickerMessageId: event.messageId,
+          expectedVersion: action.expectedVersion,
+          nonce: action.nonce,
+          action: action.action,
+          projectId: action.projectId,
+          operatorOpenId: raw.operator?.open_id ?? event.operator.openId ?? null,
+          operatorUserId: raw.operator?.user_id ?? event.operator.userId ?? null,
+          operatorUnionId: raw.operator?.union_id ?? null
+        },
+        false
       )
     } catch (error) {
-      logFeishuBotDiagnostic('card.update_failed', {
+      logFeishuBotDiagnostic('card.resolve_failed', {
         appIdDigest: digest(managed.appId),
         agentId: managed.agentId,
         reason: channelFailureCode(error)
       })
+      return { toast: { type: 'error', content: '创建失败，请重试' } }
     }
-    await this.#emit()
+    if (result.code === 'channel.binding.owner_required') {
+      logFeishuBotDiagnostic('card.rejected', {
+        appIdDigest: digest(managed.appId),
+        agentId: managed.agentId,
+        reason: 'owner_required'
+      })
+    }
+    if (result.status !== 'rejected' || result.payload.pickerRefreshQueued === true) {
+      void this.#pump()
+    }
+    void this.#emit().catch((error) => {
+      logFeishuBotDiagnostic('card.snapshot_failed', {
+        appIdDigest: digest(managed.appId),
+        agentId: managed.agentId,
+        reason: channelFailureCode(error)
+      })
+    })
+    return projectCardActionResponse(result)
   }
 
   async #finalizeAggregate(
@@ -1742,12 +1768,44 @@ export class ChannelSettingsService {
         ? { replyTo: delivery.topicKey, replyInThread: true }
         : undefined
       if (delivery.deliveryKind === 'project_selection') {
-        if (!delivery.recipientOpenId) throw new Error('owner_identity_unverified')
-        const sent = await managed.channel.send(
-          delivery.recipientOpenId,
-          { card: deliveryCard(delivery) }
-        )
-        messageId = sent.messageId
+        const operation = projectSelectionOperation(delivery.payload)
+        if (delivery.payload.placement !== 'conversation') {
+          throw new Error('legacy_private_project_picker_retired')
+        }
+        if (operation === 'recall') {
+          messageId = delivery.updateMessageId ?? null
+          if (!messageId) throw new Error('project_picker_message_missing')
+          await managed.channel.recallMessage(messageId)
+        } else if (operation === 'update') {
+          messageId = delivery.updateMessageId ?? null
+          if (messageId) {
+            try {
+              await managed.channel.updateCard(messageId, deliveryCard(delivery))
+            } catch (error) {
+              if (!isRecallTargetRevoked(error)) throw error
+              const sent = await managed.channel.send(
+                delivery.chatId,
+                { card: deliveryCard(delivery) },
+                replyOptions
+              )
+              messageId = sent.messageId
+            }
+          } else {
+            const sent = await managed.channel.send(
+              delivery.chatId,
+              { card: deliveryCard(delivery) },
+              replyOptions
+            )
+            messageId = sent.messageId
+          }
+        } else {
+          const sent = await managed.channel.send(
+            delivery.chatId,
+            { card: deliveryCard(delivery) },
+            replyOptions
+          )
+          messageId = sent.messageId
+        }
       } else if (delivery.deliveryKind === 'queue_ack'
         && delivery.payload.action === 'recall') {
         messageId = delivery.updateMessageId ?? null
@@ -1822,6 +1880,8 @@ export class ChannelSettingsService {
     } catch (error) {
       if (
         (delivery.deliveryKind === 'execution_console_recall'
+          || (delivery.deliveryKind === 'project_selection'
+            && projectSelectionOperation(delivery.payload) === 'recall')
           || (delivery.deliveryKind === 'queue_ack' && delivery.payload.action === 'recall'))
         && isRecallTargetRevoked(error)
       ) {
@@ -2276,6 +2336,43 @@ type ProjectCardOption = {
   displayName: string
 }
 
+type ProjectSelectionOperation = 'send' | 'update' | 'recall'
+
+function projectCardActionResponse(result: StoredCommandResult): FeishuCardActionResponse {
+  if (result.code === 'channel.binding.owner_required') {
+    return { toast: { type: 'warning', content: '仅 Rovai Owner 可以选择项目' } }
+  }
+  if (result.code === 'channel.project_unavailable') {
+    return { toast: { type: 'warning', content: '该项目已不可用，请重新选择' } }
+  }
+  if (result.code === 'channel.binding.refreshed') {
+    return { toast: { type: 'info', content: '项目列表已更新' } }
+  }
+  if (result.code === 'channel.binding.cancelled') {
+    return { toast: { type: 'info', content: '已取消项目选择' } }
+  }
+  if (result.code === 'channel.binding.resolved') {
+    return { toast: { type: 'success', content: '项目已绑定，正在处理消息' } }
+  }
+  if (result.code === 'channel.binding.expired'
+    || result.code === 'channel.binding.not_found'
+    || result.code === 'channel.binding.stale_card'
+    || result.code === 'channel.binding.invalid_nonce'
+    || result.code === 'channel.binding.callback_app_mismatch'
+    || result.code === 'channel.binding.already_resolved') {
+    return { toast: { type: 'info', content: '该项目选择已完成或卡片已过期' } }
+  }
+  return { toast: { type: 'error', content: '创建失败，请重试' } }
+}
+
+function projectSelectionOperation(payload: Record<string, unknown>): ProjectSelectionOperation {
+  return payload.operation === 'update'
+    ? 'update'
+    : payload.operation === 'recall'
+      ? 'recall'
+      : 'send'
+}
+
 function projectCardAction(value: unknown): ProjectCardAction | null {
   if (!isRecord(value)) return null
   const action = value.rovaiAction === 'bind_project'
@@ -2312,17 +2409,13 @@ function projectCardOptions(value: unknown): ProjectCardOption[] {
   })
 }
 
-function feishuMarkdownText(value: string): string {
-  return value.replace(/[\\`*_{}\[\]()<>#+.!|~-]/gu, '\\$&')
-}
-
 function projectSelectionCard(input: {
   pendingBindingId: string
-  conversationDisplayName: string
+  conversationKind: 'group' | 'topic'
   expectedVersion: number
   nonce: string
   projectOptions: ProjectCardOption[]
-  notice?: string
+  notice?: 'project_unavailable' | 'moved_to_conversation'
 }): Record<string, unknown> {
   const actionValue = (rovaiAction: string, projectId?: string): Record<string, unknown> => ({
     rovaiAction,
@@ -2333,10 +2426,27 @@ function projectSelectionCard(input: {
   })
   const projectButtons = input.projectOptions.map((project) => ({
     tag: 'button',
-    text: { tag: 'plain_text', content: `绑定并处理 · ${project.displayName}` },
+    text: {
+      tag: 'plain_text',
+      content: `绑定并处理 · ${boundedPlainText(project.displayName, 48)}`
+    },
     type: 'primary',
     value: actionValue('bind_project', project.projectId)
   }))
+  const scopeCopy = input.conversationKind === 'topic'
+    ? [
+        '首次使用这个话题，需要先确定 Camp 的项目。',
+        '选择后，这个话题之后都会使用该项目。'
+      ]
+    : [
+        '首次使用这个会话，需要先确定 Camp 的项目。',
+        '选择后会立即处理刚才的消息。'
+      ]
+  const notice = input.notice === 'project_unavailable'
+    ? '刚才选择的项目已不可用，项目列表已经更新。'
+    : input.notice === 'moved_to_conversation'
+      ? '项目选择已移至当前会话，请在这里继续。'
+      : null
   return {
     schema: '2.0',
     config: { update_multi: true, wide_screen_mode: true },
@@ -2349,8 +2459,8 @@ function projectSelectionCard(input: {
         {
           tag: 'markdown',
           content: [
-            input.notice,
-            `为「${feishuMarkdownText(input.conversationDisplayName)}」选择执行项目。`,
+            notice,
+            ...scopeCopy,
             '项目路径只保留在 Rovai 本机，不会发送到飞书。',
             input.projectOptions.length === 0
               ? '当前没有可用项目。请先在 Rovai 创建或打开一个项目，然后点击刷新。'
@@ -2366,12 +2476,6 @@ function projectSelectionCard(input: {
               text: { tag: 'plain_text', content: '刷新项目' },
               type: 'default',
               value: actionValue('refresh_projects')
-            },
-            {
-              tag: 'button',
-              text: { tag: 'plain_text', content: '取消' },
-              type: 'default',
-              value: actionValue('cancel_binding')
             }
           ]
         }
@@ -2380,73 +2484,27 @@ function projectSelectionCard(input: {
   }
 }
 
-function terminalProjectCard(
-  title: string,
-  text: string,
-  template: 'green' | 'grey' | 'orange' | 'red'
-): Record<string, unknown> {
-  return {
-    schema: '2.0',
-    config: { update_multi: true, wide_screen_mode: true },
-    header: { title: { tag: 'plain_text', content: title }, template },
-    body: { elements: [{ tag: 'markdown', content: text }] }
-  }
-}
-
-function projectBindingResultCard(
-  result: StoredCommandResult,
-  action: ProjectCardAction
-): Record<string, unknown> {
-  if (result.code === 'channel.binding.resolved') {
-    const name = typeof result.payload.projectDisplayName === 'string'
-      ? result.payload.projectDisplayName
-      : '所选项目'
-    return terminalProjectCard(
-      'Rovai 项目已绑定',
-      `已绑定「${feishuMarkdownText(name)}」，正在处理原始消息。`,
-      'green'
-    )
-  }
-  if (result.code === 'channel.binding.cancelled') {
-    return terminalProjectCard('已取消项目绑定', '原始消息没有进入 Camp，也不会启动队员。', 'grey')
-  }
-  if (result.code === 'channel.binding.expired') {
-    return terminalProjectCard('项目选择已过期', '请在原飞书会话中重新 @ 队员。', 'grey')
-  }
-  if (result.code === 'channel.binding.stale_card'
-    || result.code === 'channel.binding.already_resolved') {
-    return terminalProjectCard('这张卡片已处理', '旧卡片不会再次创建 Camp。', 'grey')
-  }
-  const options = projectCardOptions(result.payload.projectOptions)
-  if (result.code === 'channel.binding.refreshed'
-    || result.code === 'channel.project_unavailable') {
-    return projectSelectionCard({
-      pendingBindingId: action.pendingBindingId,
-      conversationDisplayName: '当前飞书会话',
-      expectedVersion: typeof result.payload.expectedVersion === 'number'
-        ? result.payload.expectedVersion
-        : action.expectedVersion,
-      nonce: action.nonce,
-      projectOptions: options,
-      ...(result.code === 'channel.project_unavailable'
-        ? { notice: '刚才选择的项目已不可用，请重新选择。' }
-        : {})
-    })
-  }
-  if (result.code === 'channel.binding.owner_required') {
-    return terminalProjectCard('无法操作项目卡片', '只有 Rovai Owner 可以选择项目。', 'red')
-  }
-  return terminalProjectCard('项目绑定未完成', '请回到原飞书会话稍后重试。', 'orange')
+function boundedPlainText(value: string, maxCharacters: number): string {
+  const characters = Array.from(value.trim())
+  return characters.length <= maxCharacters
+    ? characters.join('')
+    : `${characters.slice(0, maxCharacters - 1).join('')}…`
 }
 
 function deliveryCard(delivery: ClaimedChannelDelivery): Record<string, unknown> {
   if (delivery.deliveryKind === 'project_selection') {
+    const conversationKind = delivery.payload.conversationKind === 'topic' ? 'topic' : 'group'
+    const notice = delivery.payload.notice === 'project_unavailable'
+      || delivery.payload.notice === 'moved_to_conversation'
+        ? delivery.payload.notice
+        : undefined
     return projectSelectionCard({
       pendingBindingId: String(delivery.payload.pendingBindingId ?? ''),
-      conversationDisplayName: String(delivery.payload.conversationDisplayName ?? '飞书会话'),
+      conversationKind,
       expectedVersion: Number(delivery.payload.expectedVersion ?? 1),
       nonce: String(delivery.payload.nonce ?? ''),
-      projectOptions: projectCardOptions(delivery.payload.projectOptions)
+      projectOptions: projectCardOptions(delivery.payload.projectOptions),
+      ...(notice ? { notice } : {})
     })
   }
   const text = typeof delivery.payload.text === 'string' ? delivery.payload.text : ''

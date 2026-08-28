@@ -4,7 +4,7 @@ contract: feishu-channel-v2
 authority: feishu-channel-project-binding-admission-delivery
 status: accepted
 version: 2
-last_updated: 2026-08-28
+last_updated: 2026-08-29
 ---
 
 # Feishu Channel v2 Contract
@@ -114,14 +114,21 @@ type PendingCampBinding = {
 
 原始 Structured Content、target Agents 与 ack App 进入 `PendingCampMessage` FIFO；此时没有 ChannelTurnRequest、Camp、
 CampMessage、CampTurn 或 AgentRun。同一 conversation 的后续合格消息复用 pending row，不重复发卡。唯一
-`project_selection` delivery 由完整 canonical mention 顺序中的第一个受管 Bot 私聊 Owner；它的
-`acknowledgementAppId` 对重试、恢复和后续 pending messages 保持冻结。
+`project_selection` delivery 由完整 canonical mention 顺序中的第一个受管 Bot 发送到原 conversation：普通群直接使用
+原 `chatId`，Topic 使用父群 `chatId + canonical topic reply anchor`。它的 `acknowledgementAppId` 对重试、恢复和后续
+pending messages 保持冻结。卡片可对会话成员可见，但只包含 bounded conversation/project display name 与 opaque
+project ID；不得包含 canonical path、operator identity 或本机权限事实。
 
 Card action 只携带 `pendingBindingId + projectId? + expectedVersion + nonce + action`。Host 只从 callback envelope 读取
-operator identity，Core 对 frozen App、Owner 的 `union_id/open_id`、nonce、version、expiry 与 project availability
-重新校验。bind 使用 `pending -> resolving -> resolved` CAS，在同一事务创建 immutable binding/Camp，并把全部 frozen
-messages 按 FIFO 转为 ChannelTurnRequest 后调用统一 admission；所有 roster/project 前置条件必须在 CAS 前通过。双击、
-旧卡、重放和错误 App 均不能创建第二个 Camp。
+operator identity 和 clicked `messageId`，再把后者作为 `externalPickerMessageId` 交给 Core；action payload 中的身份字段一律
+不可信。Core 对 frozen App、App-scoped Owner open ID、当前 sent `project_selection` delivery 的 exact external message
+ID、nonce、version、expiry 与 project availability 重新校验；`union_id/user_id` 只做补充归并与冲突检查。Non-owner
+点击不得改变 pending、version 或 nonce，只返回私有 toast；旧卡、双击、重放、错误 App 或非权威 message ID 都 fail closed。
+
+bind 使用 `pending -> resolving -> resolved` CAS，在同一事务创建 immutable binding/Camp，并把全部 frozen messages 按
+FIFO 转为 ChannelTurnRequest 后调用统一 admission；所有 roster/project 前置条件必须在 CAS 前通过。事务提交后 Core
+追加 durable recall，卡片的安全失效不依赖 recall 成功。项目在点击时 unavailable/archived 或目录不可用则保持 pending，
+轮换 version/nonce 并 durable update 原卡的 active options。刷新同样轮换 version/nonce。任何失败都不能创建第二个 Camp。
 
 ## 3. 飞书账号与队员 Bot
 
@@ -426,9 +433,15 @@ time 和外部 message ID。
 claim 使用 30 秒 lease；过期 attempting 可以被新 worker 领取。retryable error 使用有界指数退避，最多五次；terminal
 sent/failed 单调。成功 CampMessage 不因飞书发送失败回滚。
 
-project selection 必须由 frozen acknowledgement App 直接发送到 Owner open ID，不投递到原群/话题；payload 只有
-conversation display name、opaque project options、nonce/version，没有 path 或 operator identity。refresh 更新原卡，
-bind/cancel/stale/expired 使用 terminal card 收口。
+project selection 必须由 frozen acknowledgement App 投递到原群或原 Topic，不以 Owner open ID 作为正常目标。payload
+只有 `placement=conversation`、conversation kind/display name、opaque project options、nonce/version 和闭集
+`operation = send | update | recall`，没有 path 或 operator identity。`sent` 的 send/update 行所持 external message ID
+与当前 pending version 共同定义 authoritative picker；recall 行只引用该 exact message ID，不重新推断目标。
+
+refresh 或项目失效先在 Core 轮换 version/nonce，再 durable update 原卡；bind/cancel/expiry 先使 pending 单调离开可操作
+状态，再 durable recall。Main 将“消息已不存在”视为 recall/update 的幂等终态；网络与限流继续按 Outbox lease/retry
+处理。成功后不 patch 永久结果卡。旧 private picker 不再可领取；Host tick 发现仍 pending 的 legacy row 时先轮换
+version/nonce，排入旧 external message ID 的 recall，再向原 conversation 发送 replacement picker。
 
 `queue_ack` 只在请求确实留在 queued 时创建；admission 删除尚未发送的 ack，或在已发送/正在发送时追加 recall
 delivery。它不更新成“已开始”，也不承担最终状态。`attention` 是独立永久卡片，不覆盖 queue ack 或 Agent 输出。
@@ -484,8 +497,8 @@ configuring_permissions | waiting_configuration | publishing_version | verifying
 “继续核对”，true unknown 且无 App ID 时不提供重建入口；原始固定错误码只作为次级诊断信息展示。
 
 启动恢复依次：恢复所有 published Bot 长连接；周期性重取已知父群 roster；finalize 已 ready 的 collecting
-aggregate；Host tick 终结超时 aggregate、投影/coalesce execution console、永久正文与附件、结算 terminal request、
-提升 FIFO、建立旧控制台 recall 并按 priority 领取 Outbox。
+aggregate；Host tick 迁移旧 private picker、终结超时 pending picker/aggregate、投影/coalesce execution console、永久
+正文与附件、结算 terminal request、提升 FIFO、建立旧控制台 recall 并按 priority 领取 Outbox。
 所有步骤依赖持久 Core facts，不能从 Renderer 状态或飞书最近历史重建。
 
 ## 9. Data Contract
@@ -496,17 +509,19 @@ Migration 113 从 `Data Contract v1.25 / projection schema 66` 升到 `v1.26 / s
 并增加持久 publication intent。旧 controller account 记录全部退出 connected；没有 Bot 引用的错误记录删除，有已发布
 Bot 引用的旧记录仅作历史外键保留，不能再投影为当前账号。Migration 115 收紧队员 App identity 唯一状态机；Migration
 116 升到 `Data Contract v1.28 / projection schema 69`，以 Core Project Catalog、Feishu Owner identity/per-App mapping、
-generation-aware conversation binding、PendingCampBinding/FIFO message 和 private project-selection delivery 替换旧的
+generation-aware conversation binding、PendingCampBinding/FIFO message 和 project-selection delivery 替换旧的
 人工 ProjectBinding 正常路径。Migration 117/118 将 Developer Session、发布状态与 Owner-only Camp binding 合同推进到
 `Data Contract v1.31 / projection schema 72`。Migration 119 升到 `Data Contract v1.32 / projection schema 73`，新增
 `channel_execution_console`，给 ChannelDelivery 增加 console identity、priority 与 attachment ordinal，并把 kind
 闭集替换为本节当前集合；旧 `agent_status/completion` transport 行不迁移，既有 project selection、queue ack、Agent
-output 与 attention 保留。迁移保留既有 Camp、消息、Manifest、Bot credential reference、Attachment authority 与
-terminal evidence，不删除或新建任何远端 App。
+output 与 attention 保留。原会话 picker 复用现有 `project_selection` kind、external message ID 和 additive payload
+operation，因此 Data Contract 仍为 v1.32/schema 73、无需新 Migration；Host tick 负责让旧 private picker 失权、撤回和
+重发。迁移保留既有 Camp、消息、Manifest、Bot credential reference、Attachment authority 与 terminal evidence，不删除
+或新建任何远端 App。
 
 ## References
 
 - [飞书渠道架构](../architecture/feishu-channel.md)
 - [Camp Membership v1](camp-membership-v1.md)
 - [ContextManifest Evidence v22](context-manifest-evidence-v22.md)
-- [v1.30 决策记录](../versions/v1.30/decisions.md#v1-30-d11)
+- [v1.30 决策记录](../versions/v1.30/decisions.md#v1-30-d12)

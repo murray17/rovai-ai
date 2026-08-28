@@ -3,7 +3,7 @@ document_type: architecture
 architecture: feishu-channel
 authority: feishu-channel-component-and-authority-boundaries
 status: accepted
-last_updated: 2026-08-28
+last_updated: 2026-08-29
 ---
 
 # 飞书渠道架构
@@ -172,9 +172,11 @@ generation，保留旧 Camp，并立即创建新 Quick Chat Camp；控制文本�
 
 普通群/话题首次 finalize 时创建 `PendingCampBinding`，把原始 Structured Content、targets 和 canonical-first
 acknowledgement App 冻结到 FIFO；此时没有 CampMessage/Turn/Run。同一会话后续 Owner mention 复用同一 pending row，
-不重复发卡。Core 通过 frozen Bot 私聊 Owner 一张项目卡；callback 只信 envelope 的 operator union/open identity，并以
-nonce、version、expiry、frozen App 和 CAS 防双击/重放。所有 roster/project 前置检查通过后，同一事务创建 immutable
-binding/Camp，再把 frozen messages 按 FIFO 提升到统一 admission。
+不重复发卡。frozen Bot 把唯一项目卡发回原群或原 Topic；卡片只公开可控的项目显示名，不公开 canonical path。
+callback 只信 envelope 的 operator identity 与 clicked message ID，并以 App-scoped Owner open ID、authoritative picker
+message ID、nonce、version、expiry、frozen App 和 CAS 防 non-owner、双击与重放。所有 roster/project 前置检查通过后，
+同一事务创建 immutable binding/Camp、消费 pending，再把 frozen messages 按 FIFO 提升到统一 admission；随后才通过
+durable delivery 异步撤回卡片。项目失效时 Core 保留 pending、轮换 nonce/version 并更新原卡。
 
 ## 入站、聚合与串行准入
 
@@ -231,8 +233,10 @@ membership source 加入该话题 Camp。群 roster 不完整时 admission fail 
 ## 输出、恢复与秘密
 
 `project_selection` 是唯一不依赖 ChannelTurnRequest 的 delivery：它关联 exact PendingCampBinding，使用冻结的
-acknowledgement App 直接发送到 Owner open ID，不公开到原群/话题。payload 只有会话显示名、opaque 项目选项和
-nonce/version；重启、重试和后续 pending 消息都复用同一 dedupe identity 与 Bot。
+acknowledgement App 直接发送到原群或原 Topic。payload 只有会话显示名、opaque 项目选项、nonce/version 与
+`send | update | recall` operation；重启、重试和后续 pending 消息都复用同一 pending authority 与 Bot。当前 pending
+version 对应 sent send/update 行的 external message ID 是唯一权威卡；Core 提交后即失权，recall 失败不会重新开放。Host
+tick 会把旧 private picker 先失权并排入 recall，再在原 conversation 生成 replacement picker。
 
 Core 只从已提交公开 CampMessage、Managed Attachment authority、AgentRun 公共 Evidence 和请求状态生成
 `ChannelDelivery`。Outbox 使用 priority、lease、attempt、退避和稳定 dedupe key；Main 发送成功后回写外部消息 ID，

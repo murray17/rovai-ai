@@ -2,7 +2,11 @@ import { createHash } from 'node:crypto'
 import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { LarkChannelError } from '@larksuiteoapi/node-sdk'
+import {
+  createLarkChannel,
+  LarkChannelError,
+  LoggerLevel
+} from '@larksuiteoapi/node-sdk'
 import { describe, expect, it, vi } from 'vitest'
 import {
   ChannelSettingsService,
@@ -141,18 +145,18 @@ function fakeCreateChannel(): NonNullable<ChannelHostDependencies['createChannel
 
 function controlledChannels(identities: Record<string, { openId: string; name: string }>): {
   createChannel: NonNullable<ChannelHostDependencies['createChannel']>
-  handlers: Map<string, (event: unknown) => void | Promise<void>>
+  handlers: Map<string, (event: unknown) => unknown | Promise<unknown>>
   send: ReturnType<typeof vi.fn>
   updateCard: ReturnType<typeof vi.fn>
   recallMessage: ReturnType<typeof vi.fn>
 } {
-  const handlers = new Map<string, (event: unknown) => void | Promise<void>>()
+  const handlers = new Map<string, (event: unknown) => unknown | Promise<unknown>>()
   const send = vi.fn(async () => ({ messageId: 'om_sent' }))
   const updateCard = vi.fn(async () => undefined)
   const recallMessage = vi.fn(async () => undefined)
   const createChannel = vi.fn((options: { appId: string }) => ({
     botIdentity: identities[options.appId],
-    on: (event: string, handler: (value: unknown) => void | Promise<void>) => {
+    on: (event: string, handler: (value: unknown) => unknown | Promise<unknown>) => {
       handlers.set(`${options.appId}:${event}`, handler)
       return () => handlers.delete(`${options.appId}:${event}`)
     },
@@ -230,6 +234,38 @@ function normalizedMessage(input: {
 }
 
 describe('channel settings service', () => {
+  it('propagates card-action acknowledgements through the installed Lark SDK', async () => {
+    const channel = createLarkChannel({
+      appId: 'cli_card_ack_test',
+      appSecret: 'secret-card-ack-test',
+      transport: 'websocket',
+      includeRawEvent: true,
+      loggerLevel: LoggerLevel.error
+    })
+    const internals = channel as unknown as {
+      registerDispatcherHandlers: () => void
+      dispatcher: {
+        invoke: (event: unknown, options: { needCheck: false }) => Promise<unknown>
+      }
+    }
+    internals.registerDispatcherHandlers()
+    channel.on('cardAction', async () => ({
+      toast: { type: 'warning', content: '仅 Rovai Owner 可以选择项目' }
+    }))
+
+    await expect(internals.dispatcher.invoke({
+      schema: '2.0',
+      header: { event_type: 'card.action.trigger' },
+      event: {
+        context: { open_message_id: 'om_card_ack', open_chat_id: 'oc_card_ack' },
+        operator: { open_id: 'ou_card_ack' },
+        action: { tag: 'button', value: { rovaiAction: 'bind_project' } }
+      }
+    }, { needCheck: false })).resolves.toEqual({
+      toast: { type: 'warning', content: '仅 Rovai Owner 可以选择项目' }
+    })
+  })
+
   it('projects only public Feishu setup facts while the host is unavailable', async () => {
     const snapshot = await new ChannelSettingsService().get()
 
@@ -1454,6 +1490,14 @@ describe('channel settings service', () => {
           return { status: 'applied', code: 'channel.dm.started_new', payload: {} }
         }
         if (method === 'channels.feishu.pendingBinding.resolve') {
+          if (command.pendingBindingId === 'rvpcb_fail') throw new Error('core_unavailable')
+          if (command.operatorUserId !== 'owner-user-id') {
+            return {
+              status: 'rejected',
+              code: 'channel.binding.owner_required',
+              payload: {}
+            }
+          }
           return {
             status: 'accepted',
             code: 'channel.binding.resolved',
@@ -1500,9 +1544,9 @@ describe('channel settings service', () => {
     expect(commands.filter(({ method }) => method === 'channels.feishu.dm.startNew')).toHaveLength(1)
 
     const cardHandler = harness.handlers.get('cli_a:cardAction')!
-    await cardHandler({
+    const ownerResult = await cardHandler({
       messageId: 'om_card',
-      chatId: 'oc_owner_dm',
+      chatId: 'oc_group',
       operator: { openId: 'ou_owner', userId: 'owner-user-id' },
       action: {
         tag: 'button',
@@ -1528,12 +1572,165 @@ describe('channel settings service', () => {
     ))?.command
     expect(callback).toMatchObject({
       appId: 'cli_a',
+      externalPickerMessageId: 'om_card',
       operatorOpenId: 'ou_owner',
       operatorUserId: 'owner-user-id',
       operatorUnionId: 'on_owner'
     })
     expect(JSON.stringify(callback)).not.toContain('ou_spoofed')
-    expect(harness.updateCard).toHaveBeenCalledTimes(1)
+    expect(ownerResult).toEqual({
+      toast: { type: 'success', content: '项目已绑定，正在处理消息' }
+    })
+    expect(harness.updateCard).not.toHaveBeenCalled()
+
+    const nonOwnerResult = await cardHandler({
+      messageId: 'om_card',
+      chatId: 'oc_group',
+      operator: { openId: 'ou_other', userId: 'other-user-id' },
+      action: {
+        tag: 'button',
+        value: {
+          rovaiAction: 'bind_project',
+          pendingBindingId: 'rvpcb_1',
+          projectId: 'rvproj_1',
+          expectedVersion: 1,
+          nonce: 'nonce-1'
+        }
+      },
+      raw: {
+        operator: {
+          open_id: 'ou_other',
+          user_id: 'other-user-id',
+          union_id: 'on_other'
+        }
+      }
+    })
+    expect(nonOwnerResult).toEqual({
+      toast: { type: 'warning', content: '仅 Rovai Owner 可以选择项目' }
+    })
+    expect(commands.filter(({ method }) => (
+      method === 'channels.feishu.pendingBinding.resolve'
+    ))).toHaveLength(2)
+    expect(harness.updateCard).not.toHaveBeenCalled()
+
+    const failedResult = await cardHandler({
+      messageId: 'om_card_fail',
+      chatId: 'oc_group',
+      operator: { openId: 'ou_owner', userId: 'owner-user-id' },
+      action: {
+        tag: 'button',
+        value: {
+          rovaiAction: 'bind_project',
+          pendingBindingId: 'rvpcb_fail',
+          projectId: 'rvproj_1',
+          expectedVersion: 1,
+          nonce: 'nonce-1'
+        }
+      },
+      raw: {
+        operator: {
+          open_id: 'ou_owner',
+          user_id: 'owner-user-id',
+          union_id: 'on_owner'
+        }
+      }
+    })
+    expect(failedResult).toEqual({
+      toast: { type: 'error', content: '创建失败，请重试' }
+    })
+    await service.stop()
+  })
+
+  it('delivers project pickers in the original group or topic and recalls them durably', async () => {
+    const harness = controlledChannels({ cli_a: { openId: 'ou_bot_a', name: '审阅员' } })
+    const settlements: Array<Record<string, unknown>> = []
+    let delivered = false
+    const projectPayload = (conversationKind: 'group' | 'topic') => ({
+      kind: 'project_selection',
+      placement: 'conversation',
+      operation: 'send',
+      pendingBindingId: `rvpcb_${conversationKind}`,
+      conversationKind,
+      expectedVersion: 1,
+      nonce: `nonce-${conversationKind}`,
+      projectOptions: [{ projectId: 'project-safe', displayName: 'Rovai AI' }]
+    })
+    const service = new ChannelSettingsService({
+      credentialStore: memoryCredentialStore({
+        'feishu-member-a': { appId: 'cli_a', appSecret: 'secret-a' }
+      }),
+      createChannel: harness.createChannel,
+      ...inertInterval(),
+      core: channelCore((method, rawParams) => {
+        const command = ((rawParams as { command?: Record<string, unknown> } | undefined)?.command ?? {})
+        if (method === 'channels.feishu.snapshot') {
+          return coreSnapshot({ memberBots: [{
+            agentId: 'agent-a', accountId: 'account-1', brand: 'feishu', appId: 'cli_a',
+            botDisplayName: '审阅员', credentialRef: 'feishu-member-a', status: 'published',
+            failureCode: null, version: 1, ownerIdentityStatus: 'verified'
+          }] })
+        }
+        if (method === 'channels.host.tick') {
+          if (delivered) return { status: 'applied', payload: { deliveries: [] } }
+          delivered = true
+          return { status: 'applied', payload: { deliveries: [{
+            deliveryId: 'picker-group', requestId: null, deliveryKind: 'project_selection',
+            targetAppId: 'cli_a', credentialRef: 'feishu-member-a', chatId: 'oc_group',
+            topicKey: '', conversationKind: 'group', attemptCount: 1,
+            updateMessageId: null, recipientOpenId: 'ou_owner', payload: projectPayload('group')
+          }, {
+            deliveryId: 'picker-topic', requestId: null, deliveryKind: 'project_selection',
+            targetAppId: 'cli_a', credentialRef: 'feishu-member-a', chatId: 'oc_topic_group',
+            topicKey: 'om_topic_root', conversationKind: 'topic', attemptCount: 1,
+            updateMessageId: null, recipientOpenId: 'ou_owner', payload: projectPayload('topic')
+          }, {
+            deliveryId: 'picker-update', requestId: null, deliveryKind: 'project_selection',
+            targetAppId: 'cli_a', credentialRef: 'feishu-member-a', chatId: 'oc_group',
+            topicKey: '', conversationKind: 'group', attemptCount: 1,
+            updateMessageId: 'om_picker_group', recipientOpenId: 'ou_owner',
+            payload: { ...projectPayload('group'), operation: 'update', expectedVersion: 2 }
+          }, {
+            deliveryId: 'picker-recall', requestId: null, deliveryKind: 'project_selection',
+            targetAppId: 'cli_a', credentialRef: 'feishu-member-a', chatId: 'oc_group',
+            topicKey: '', conversationKind: 'group', attemptCount: 1,
+            updateMessageId: 'om_picker_group', recipientOpenId: 'ou_owner',
+            payload: {
+              kind: 'project_selection_recall', placement: 'conversation', operation: 'recall',
+              pendingBindingId: 'rvpcb_group', expectedVersion: 2,
+              externalPickerMessageId: 'om_picker_group'
+            }
+          }] } }
+        }
+        if (method === 'channels.deliveries.settle') {
+          settlements.push(command)
+          return { status: 'applied', payload: {} }
+        }
+        return { status: 'applied', payload: {} }
+      })
+    })
+
+    await service.start()
+    await vi.waitFor(() => expect(settlements).toHaveLength(4))
+
+    expect(harness.send).toHaveBeenCalledWith(
+      'oc_group',
+      { card: expect.objectContaining({
+        header: expect.objectContaining({
+          title: { tag: 'plain_text', content: '选择 Rovai 项目' }
+        })
+      }) },
+      undefined
+    )
+    expect(harness.send).toHaveBeenCalledWith(
+      'oc_topic_group',
+      { card: expect.any(Object) },
+      { replyTo: 'om_topic_root', replyInThread: true }
+    )
+    expect(harness.send.mock.calls.map(([target]) => target)).not.toContain('ou_owner')
+    expect(JSON.stringify(harness.send.mock.calls)).toContain('首次使用这个话题')
+    expect(JSON.stringify(harness.send.mock.calls)).not.toContain('canonicalPath')
+    expect(harness.updateCard).toHaveBeenCalledWith('om_picker_group', expect.any(Object))
+    expect(harness.recallMessage).toHaveBeenCalledWith('om_picker_group')
     await service.stop()
   })
 
