@@ -4,7 +4,7 @@ authority: renderer-theme
 status: accepted
 theme_id: porcelain-day
 mode: light
-last_updated: 2026-08-25
+last_updated: 2026-08-28
 ---
 
 # Porcelain Day
@@ -126,8 +126,8 @@ Light. `color-scheme: light`.
 | `--evidence-ink` | `#252a36` |
 | `--evidence-muted` | `#5f6678` |
 | `--evidence-line` | `#d5dad3` |
-| `--diff-add` / `--diff-add-soft` | `#137333` / `#e6f4ea` |
-| `--diff-remove` / `--diff-remove-soft` | `#b3261e` / `#fce8e6` |
+| `--diff-add` / `--diff-add-soft` | `#137333` / `#d9f1e2` |
+| `--diff-remove` / `--diff-remove-soft` | `#b3261e` / `#f5dede` |
 | `--diff-hunk-soft` | `#f3f4f4` |
 
 ### Overlay and lightbox
