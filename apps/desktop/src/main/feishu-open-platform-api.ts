@@ -85,8 +85,8 @@ const WAIT_PUBLISH_VERSION_STATUS = 5
 const REJECTED_VERSION_STATUS = 3
 const DEFAULT_PUBLISH_POLL_INTERVAL_MS = 1_000
 const DEFAULT_PUBLISH_TIMEOUT_MS = 120_000
-const DEFAULT_CONFIGURATION_POLL_INTERVAL_MS = 500
-const DEFAULT_CONFIGURATION_TIMEOUT_MS = 10_000
+const DEFAULT_CONFIGURATION_POLL_INTERVAL_MS = 1_000
+const DEFAULT_CONFIGURATION_TIMEOUT_MS = 120_000
 
 export class OpenPlatformApiClient {
   readonly #session: FeishuOpenPlatformSession
@@ -271,6 +271,7 @@ export class OpenPlatformApiClient {
     signal?: AbortSignal
   ): Promise<void> {
     const id = requireResourceId(appId, 'feishu_console_app_id_invalid')
+    const readbackBudget = { remainingAttempts: this.#configurationPollAttempts }
     let state = await this.readEventState(id, signal)
     if (state.eventMode !== FEISHU_LONG_CONNECTION_MODE) {
       await this.#request(
@@ -285,6 +286,7 @@ export class OpenPlatformApiClient {
       const switched = await this.#readEventStateUntil(
         id,
         (candidate) => candidate.eventMode === FEISHU_LONG_CONNECTION_MODE,
+        readbackBudget,
         signal
       )
       if (!switched) {
@@ -318,6 +320,7 @@ export class OpenPlatformApiClient {
         candidate.eventMode === FEISHU_LONG_CONNECTION_MODE
         && includesEvery(candidate.appEvents, configuration.tenantEvents)
       ),
+      readbackBudget,
       signal
     )
     if (!configured) throw apiError('feishu_console_event_verification_failed', true)
@@ -752,12 +755,14 @@ export class OpenPlatformApiClient {
   async #readEventStateUntil(
     appId: string,
     ready: (state: FeishuOpenPlatformEventState) => boolean,
+    budget: { remainingAttempts: number },
     signal?: AbortSignal
   ): Promise<FeishuOpenPlatformEventState | null> {
-    for (let attempt = 0; attempt < this.#configurationPollAttempts; attempt += 1) {
+    while (budget.remainingAttempts > 0) {
+      budget.remainingAttempts -= 1
       const state = await this.readEventState(appId, signal)
       if (ready(state)) return state
-      if (attempt + 1 < this.#configurationPollAttempts) {
+      if (budget.remainingAttempts > 0) {
         await this.#delay(this.#configurationPollIntervalMs, signal)
       }
     }

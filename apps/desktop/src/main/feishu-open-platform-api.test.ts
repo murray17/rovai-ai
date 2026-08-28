@@ -407,6 +407,50 @@ describe('OpenPlatformApiClient', () => {
     expect(delay).toHaveBeenCalledTimes(2)
   })
 
+  it('allows the Feishu event control plane to converge beyond ten seconds', async () => {
+    let manifest = '{}'
+    let switched = false
+    let configured = false
+    let readsAfterSwitch = 0
+    let readsAfterConfigure = 0
+    const delay = vi.fn(async () => undefined)
+    const session = fakeSession(async (rawUrl, init) => {
+      const url = new URL(rawUrl)
+      if (url.pathname === '/developers/v1/event/cli_dingding') {
+        if (switched) readsAfterSwitch += 1
+        if (configured) readsAfterConfigure += 1
+        return apiResponse({
+          eventMode: switched && readsAfterSwitch >= 25 ? 4 : 0,
+          appEvents: configured && readsAfterConfigure >= 25
+            ? configuration.tenantEvents
+            : []
+        })
+      }
+      if (url.pathname === '/developers/v1/event/switch/cli_dingding') {
+        switched = true
+        return apiResponse({})
+      }
+      if (url.pathname === '/developers/v1/event/update/cli_dingding') {
+        configured = true
+        return apiResponse({})
+      }
+      if (url.pathname === '/developers/v1/manifest/get/cli_dingding') {
+        return apiResponse({ appManifest: manifest })
+      }
+      if (url.pathname === '/developers/v1/manifest/upsert') {
+        manifest = String(jsonBody(init).appManifest)
+        return apiResponse({})
+      }
+      throw new Error(`unexpected request: ${url.pathname}`)
+    })
+
+    await expect(new OpenPlatformApiClient(session, { delay }).configureEvents(
+      'cli_dingding',
+      configuration
+    )).resolves.toBeUndefined()
+    expect(delay).toHaveBeenCalledTimes(48)
+  })
+
   it('fails before mutation when a critical P2P scope is absent from the catalog', async () => {
     const paths: string[] = []
     const session = fakeSession(async (rawUrl) => {
