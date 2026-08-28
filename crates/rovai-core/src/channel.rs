@@ -2282,16 +2282,15 @@ impl ChannelService {
                 )?
             };
 
-            if let Some(current) = binding.as_ref() {
-                if current.binding_kind == "directory"
-                    && (current.project_status.as_deref() != Some("active")
-                        || !Path::new(&current.canonical_path).is_dir())
-                {
-                    return Ok(rejected(
-                        "channel.project_unavailable",
-                        "The Camp project is no longer available",
-                    ));
-                }
+            if let Some(current) = binding.as_ref()
+                && current.binding_kind == "directory"
+                && (current.project_status.as_deref() != Some("active")
+                    || !Path::new(&current.canonical_path).is_dir())
+            {
+                return Ok(rejected(
+                    "channel.project_unavailable",
+                    "The Camp project is no longer available",
+                ));
             }
 
             if binding.is_none() {
