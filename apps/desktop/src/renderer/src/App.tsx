@@ -121,6 +121,10 @@ import {
   shouldInvalidateNewConversationDefaults,
   type CurrentProject
 } from './new-conversation-preferences'
+import {
+  createNavigationRefreshCoordinator,
+  type NavigationRefreshTrigger
+} from './navigation-refresh-coordinator'
 
 export { allNavigationCamps }
 
@@ -142,6 +146,15 @@ const ACTIVE_CAMP_INVALIDATION_EVENTS = new Set([
   'agent_run.runtime_model_observed',
   'agent_run.terminal'
 ])
+
+export const NAVIGATION_REFRESH_POLL_MS = 20_000
+
+export function shouldRefreshNavigationForCoreEvent(
+  event: CoreEvent,
+  shuttingDown = false
+): boolean {
+  return !shuttingDown && event.method === 'navigation.invalidated'
+}
 
 export function shouldRefreshActiveCampForCoreEvent(
   event: CoreEvent,
@@ -591,6 +604,7 @@ export function App(): React.JSX.Element {
   const [agents, setAgents] = useState<AgentProfile[]>([])
   const [installations, setInstallations] = useState<AdapterInstallation[]>([])
   const [navigation, setNavigation] = useState<NavigationSnapshot | null>(null)
+  const [navigationState, setNavigationState] = useState<LoadState>('loading')
   const [navigationPins, setNavigationPins] = useState<NavigationPin[]>([])
   const [removedProjectKeys, setRemovedProjectKeys] = useState<Set<string>>(() => new Set())
   const [removedProjectAuthorityReady, setRemovedProjectAuthorityReady] = useState(false)
@@ -669,7 +683,7 @@ export function App(): React.JSX.Element {
   const campViewedAcknowledgementKey = useRef<string | null>(null)
   const healthRequest = useRef<Promise<HealthStatus> | null>(null)
   const agentListRequest = useRef<Promise<AgentProfile[]> | null>(null)
-  const navigationRequest = useRef<Promise<NavigationSnapshot> | null>(null)
+  const navigationSnapshotRef = useRef<NavigationSnapshot | null>(null)
   const overviewRequest = useRef<Promise<boolean> | null>(null)
   const startupSnapshotRequest = useRef<Promise<void> | null>(null)
   const onboardingSnapshotRequest = useRef<Promise<void> | null>(null)
@@ -796,19 +810,38 @@ export function App(): React.JSX.Element {
     return request
   }, [])
 
-  const loadNavigation = useCallback((): Promise<NavigationSnapshot> => {
-    if (navigationRequest.current) return navigationRequest.current
-    const request = window.rovai.request<NavigationSnapshot>('navigation.snapshot')
-      .then((nextNavigation) => {
-        setNavigation(nextNavigation)
-        return nextNavigation
-      })
-    navigationRequest.current = request
-    void request.finally(() => {
-      if (navigationRequest.current === request) navigationRequest.current = null
-    }).catch(() => undefined)
-    return request
+  const commitNavigation = useCallback((nextNavigation: NavigationSnapshot): void => {
+    navigationSnapshotRef.current = nextNavigation
+    setNavigation(nextNavigation)
   }, [])
+
+  const readAndCommitNavigation = useCallback(async (): Promise<void> => {
+    if (navigationSnapshotRef.current === null) setNavigationState('loading')
+    try {
+      const nextNavigation = await window.rovai.request<NavigationSnapshot>('navigation.snapshot')
+      commitNavigation(nextNavigation)
+      setNavigationState('ready')
+    } catch (nextError) {
+      setNavigationState('error')
+      throw nextError
+    }
+  }, [commitNavigation])
+
+  const navigationRefreshCoordinator = useMemo(
+    () => createNavigationRefreshCoordinator(readAndCommitNavigation, {
+      initiallyVisible: document.visibilityState !== 'hidden'
+    }),
+    [readAndCommitNavigation]
+  )
+
+  const loadNavigation = useCallback(async (
+    trigger: NavigationRefreshTrigger = 'explicit'
+  ): Promise<NavigationSnapshot> => {
+    await navigationRefreshCoordinator.refresh(trigger)
+    const snapshot = navigationSnapshotRef.current
+    if (!snapshot) throw new Error('会话导航暂时不可用，请重试。')
+    return snapshot
+  }, [navigationRefreshCoordinator])
 
   const loadOnboarding = useCallback((): Promise<void> => {
     if (onboardingSnapshotRequest.current) return onboardingSnapshotRequest.current
@@ -858,36 +891,44 @@ export function App(): React.JSX.Element {
           })
         const nextNavigationPreferencesPromise = window.rovai.navigationPreferences.get()
 
-        const [nextNavigation, nextNavigationPreferences] = await Promise.all([
-          nextNavigationPromise,
-          nextNavigationPreferencesPromise
-        ])
-        const resolvedPins = await resolveNavigationPins(
-          nextNavigation,
-          nextNavigationPreferences.pins
-        )
-        let resolvedNavigationPreferences = nextNavigationPreferences
-        if (resolvedPins.pins.length !== nextNavigationPreferences.pins.length) {
-          resolvedNavigationPreferences = await window.rovai.navigationPreferences.replacePins(
-            resolvedPins.pins
+        const navigationOverviewPromise = (async (): Promise<void> => {
+          const [nextNavigation, nextNavigationPreferences] = await Promise.all([
+            nextNavigationPromise,
+            nextNavigationPreferencesPromise
+          ])
+          const resolvedPins = await resolveNavigationPins(
+            nextNavigation,
+            nextNavigationPreferences.pins
           )
-        }
-        setNavigationPins(resolvedPins.pins)
-        setRemovedProjectKeys(new Set(
-          resolvedNavigationPreferences.removedProjects.map((project) => project.targetKey)
-        ))
-        setRemovedProjectAuthorityReady(true)
-        setPinnedCampItems(resolvedPins.camps)
-        await Promise.all([
+          let resolvedNavigationPreferences = nextNavigationPreferences
+          if (resolvedPins.pins.length !== nextNavigationPreferences.pins.length) {
+            resolvedNavigationPreferences = await window.rovai.navigationPreferences.replacePins(
+              resolvedPins.pins
+            )
+          }
+          setNavigationPins(resolvedPins.pins)
+          setRemovedProjectKeys(new Set(
+            resolvedNavigationPreferences.removedProjects.map((project) => project.targetKey)
+          ))
+          setRemovedProjectAuthorityReady(true)
+          setPinnedCampItems(resolvedPins.camps)
+        })()
+        const results = await Promise.allSettled([
+          navigationOverviewPromise,
           nextAgentsPromise,
           nextInstallationsPromise,
           nextMemoryReviewItemsPromise
         ])
-        setState('ready')
-        return true
+        const firstFailure = results.find(
+          (result): result is PromiseRejectedResult => result.status === 'rejected'
+        )
+        if (firstFailure) setError(errorMessage(firstFailure.reason))
+        const navigationReady = results[0]?.status === 'fulfilled'
+        setState(navigationReady ? 'ready' : 'error')
+        return navigationReady
       } catch (nextError) {
         setError(errorMessage(nextError))
-        setState('error')
+        setState(navigationSnapshotRef.current ? 'ready' : 'error')
         return false
       }
     })()
@@ -1587,12 +1628,48 @@ export function App(): React.JSX.Element {
   }, [health, healthAttempted, loadHealth, settingsSection, startupStatus, view])
 
   useEffect(() => {
-    if (state !== 'ready') return
-    const timer = setInterval(() => {
-      void loadNavigation().catch(() => undefined)
-    }, 1_800)
-    return () => clearInterval(timer)
-  }, [loadNavigation, state])
+    if (startupStatus !== 'resolved' || shuttingDown) return undefined
+    let disposed = false
+    let pollTimer: number | null = null
+
+    const appIsVisible = (): boolean => document.visibilityState !== 'hidden'
+    const clearPoll = (): void => {
+      if (pollTimer !== null) window.clearTimeout(pollTimer)
+      pollTimer = null
+    }
+    const schedulePoll = (): void => {
+      clearPoll()
+      if (disposed || !appIsVisible()) return
+      pollTimer = window.setTimeout(() => {
+        pollTimer = null
+        void loadNavigation('poll')
+          .catch(() => undefined)
+          .finally(schedulePoll)
+      }, NAVIGATION_REFRESH_POLL_MS)
+    }
+    const handleVisibilityChange = (): void => {
+      const visible = appIsVisible()
+      navigationRefreshCoordinator.setVisible(visible)
+      if (visible) schedulePoll()
+      else clearPoll()
+    }
+    const handleFocus = (): void => {
+      if (!appIsVisible()) return
+      void loadNavigation('foreground').catch(() => undefined)
+    }
+
+    navigationRefreshCoordinator.setVisible(appIsVisible())
+    schedulePoll()
+    window.addEventListener('focus', handleFocus)
+    document.addEventListener('visibilitychange', handleVisibilityChange)
+    return () => {
+      disposed = true
+      clearPoll()
+      navigationRefreshCoordinator.setVisible(false)
+      window.removeEventListener('focus', handleFocus)
+      document.removeEventListener('visibilitychange', handleVisibilityChange)
+    }
+  }, [loadNavigation, navigationRefreshCoordinator, shuttingDown, startupStatus])
 
   useEffect(() => {
     if (
@@ -1691,6 +1768,9 @@ export function App(): React.JSX.Element {
           void Promise.all([loadHealth(), loadMemberData()]).catch(() => undefined)
         }, 80)
       }
+      if (shouldRefreshNavigationForCoreEvent(event, shuttingDownRef.current)) {
+        void navigationRefreshCoordinator.refresh('invalidation').catch(() => undefined)
+      }
       const campId = activeCampIdRef.current
       const refresh = refreshActiveCampForCoreEvent(
         event,
@@ -1704,7 +1784,13 @@ export function App(): React.JSX.Element {
         })
       }
     })
-  }, [activeCampRefreshCoordinator, loadHealth, loadMemberData, loadOverview])
+  }, [
+    activeCampRefreshCoordinator,
+    loadHealth,
+    loadMemberData,
+    loadOverview,
+    navigationRefreshCoordinator
+  ])
 
   useEffect(() => {
     if (!campSnapshot) {
@@ -2662,7 +2748,7 @@ export function App(): React.JSX.Element {
   }
 
   const refreshPendingCampNavigation = (): void => {
-    void loadNavigation().catch(() => undefined)
+    void loadNavigation('invalidation').catch(() => undefined)
   }
 
   const settlePendingCampOnLeave = async (draft: CampComposerDraftView): Promise<void> => {
@@ -2853,13 +2939,12 @@ export function App(): React.JSX.Element {
           if (checkpoint.status === 'in_progress') setOnboardingSnapshot(checkpoint)
         }
       )
-      const [nextAgents, nextNavigation, nextInstallations] = await Promise.all([
+      const [nextAgents, , nextInstallations] = await Promise.all([
         window.rovai.request<AgentProfile[]>('members.list'),
-        window.rovai.request<NavigationSnapshot>('navigation.snapshot'),
+        loadNavigation(),
         window.rovai.request<AdapterInstallation[]>('runtime.installations.list')
       ])
       setAgents(nextAgents)
-      setNavigation(nextNavigation)
       setInstallations(nextInstallations)
       setState('ready')
       await activateCamp(result.quickChatCampId, { reconcileDefaultLead: false })
@@ -3053,7 +3138,7 @@ export function App(): React.JSX.Element {
       <CampNavigation
         platform={window.rovai.platform}
         view={view}
-        state={startupGateVisible ? 'loading' : state}
+        state={startupGateVisible ? 'loading' : navigationState}
         navigation={displayNavigation}
         activeCampId={activeCampId}
         openingCampId={openingCampId}

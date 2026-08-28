@@ -3,7 +3,7 @@ document_type: architecture
 architecture: camp-open-read-path
 authority: desktop-camp-enter-and-progressive-read-boundaries
 status: accepted
-last_updated: 2026-08-26
+last_updated: 2026-08-28
 ---
 
 # Camp Open Read Path 架构
@@ -69,6 +69,12 @@ CampMessage 或 Run detail Evidence，也不自动打开执行台或改变当前
 invalidation，因为后一个终态可能在首个 read transaction 开始后才持久化。trailing refresh 期间再次变脏时，
 按同一规则继续到安静点；Camp 切换与 high-water fence 仍负责拒绝旧 Camp 或倒退投影。
 
+当前 Camp 的 `camps.open` coordinator 与全局 Navigation coordinator 是两个用途不同的 seam：前者维护已打开
+会话的完整内容和 high-water，后者只在 Core post-commit invalidation 后重读侧栏 Snapshot。终态事件可以同时
+使二者失效，但不得让当前 Camp refresh 代替后台 Camp marker 收敛，也不得为每个 Camp 建立 Navigation timer。
+全局合并、失败退避、可见性与 20 秒安全刷新见
+[Desktop Navigation Refresh](desktop-navigation-refresh.md)。
+
 缓存只保存最近的 Camp 投影；除完整 non-terminal Evidence 外，其他 collection 保持有界。cache hit 可立即
 恢复阅读面，但仍由 high-water refresh 验证；cache miss 不把
 当前 Snapshot 清空，也不提前切换 route。普通请求在 400 ms 内不呈现 loading，超过预算只在目标导航行
@@ -116,3 +122,4 @@ Memory 分别拥有局部 loading/error；全屏 StartupGate 只允许覆盖 Mai
 - [协作与执行准入不变量](foundational-invariants.md#collaboration-admission)
 - [Camp Open Projection v7](../contracts/camp-open-projection-v7.md)
 - [Camp Conversation Find v1](../contracts/camp-conversation-find-v1.md)
+- [Desktop Navigation Refresh](desktop-navigation-refresh.md)

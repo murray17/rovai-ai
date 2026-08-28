@@ -3,7 +3,7 @@ document_type: implementation-plan
 version: v1.29
 authority: implementation-and-acceptance-status
 status: completed
-last_updated: 2026-08-27
+last_updated: 2026-08-28
 ---
 
 # v1.29 实施计划
@@ -31,6 +31,8 @@ last_updated: 2026-08-27
 - [x] 完成添加多选、成员 `•••` 菜单、权威移除预览、最后成员禁用和 reconciliation 状态；
 - [x] 完成安全退出交互：立即阻止新界面操作，400ms 内完成不闪现等待面，慢退出显示中性 busy modal；
 - [x] 关闭状态停止页面投影刷新，抑制取消结算期间的晚到错误横幅与 Toast；
+- [x] 将 Desktop Navigation 收敛为全局 generation coordinator：Core post-commit invalidation、single-flight
+  trailing drain、失败退避、Overview 状态解耦、隐藏暂停、focus 刷新与 20 秒安全轮询；
 - [x] 完成 Rust、TypeScript、Renderer 与 Migration 定向回归；
 - [x] 运行完整自动化、文档治理和格式/Clippy 门禁；
 - [x] 使用隔离 userData 在真实 App 验收日/夜主题、键盘、添加、移除、冲突和恢复；
@@ -51,11 +53,11 @@ last_updated: 2026-08-27
 
 ## 验证证据
 
-- `pnpm test`：82 个 Vitest 文件、585 个 Renderer/TypeScript 测试通过；Node 协议测试 219 个通过、
+- `pnpm test`：83 个 Vitest 文件、596 个 Renderer/TypeScript 测试通过；Node 协议测试 219 个通过、
   1 个既有用例按环境条件跳过；
 - `pnpm typecheck`、`cargo check --workspace --all-targets`、
   `cargo clippy --workspace --all-targets --all-features -- -D warnings` 通过；
-- `cargo test -p rovai-core --all-targets`：Core library 326/326、CLI 25/25、Host 161/161 通过，4 个显式
+- `cargo test -p rovai-core --all-targets`：Core library 326/326、CLI 25/25、Host 164/164 通过，4 个显式
   manual Runtime smoke 保持 ignored；其中 Migration 111 回归从 current-main 的
   `v1.23 / schema 64 / migration 110` 数据库复现 SQLite 275，再升级到 `v1.24 / schema 65`，验证
   zero-attempt cancellation 可写、Migration 111 重启幂等且 terminal Delivery 不复活；Migration 112 再从
@@ -71,7 +73,7 @@ last_updated: 2026-08-27
   cutover/dispatch/retry fence、exact-run business-tool fence、Delivery/Gather settlement 与 Missing-Send
   Recovery publication fence；
 - `node --test scripts/benchmark/protocol/product-contract.test.mjs`、`pnpm docs:test`、`pnpm docs:check` 通过；
-- `DOCS_BASE_REF=f588c773c2652a9e78887a31d17de8ed37524bb0 pnpm docs:check:ci` 通过；
+- `DOCS_BASE_REF=5bb158a8996e2c9abf5995006535e48a4bc0e904 pnpm docs:check:ci` 通过；
 - `pnpm package:mac:unsigned` 通过；`pnpm accept:member-lifecycle-ui` 使用系统临时目录中的隔离 userData
   与打包 App 通过，覆盖最后成员禁用、模型详情、添加、移出预览、普通再次添加、日/夜主题、键盘、无横向
   溢出、重启持久化和旧库迁移；当前受限执行环境不允许 macOS/Chromium sandbox 初始化，因此仅该验收进程
@@ -79,4 +81,10 @@ last_updated: 2026-08-27
 - `pnpm package:mac` 与 `pnpm accept:planned-shutdown` 通过；隔离打包 App 在真实 Runtime 活跃时满足 5 秒
   关闭目标，并验证 400ms 防闪、“正在安全退出”日/夜主题、200% zoom、reduced motion、无操作按钮、
   无关闭阶段错误横幅、Run-local 取消审计、未知效果保留、自然退出和完整进程树回收；
-- 本次 `pnpm test:rust:pr` 三个分组全部通过，无忽略或失败测试。
+- Navigation 本次新增 coordinator 8/8 与 App event routing 2/2 回归；`pnpm typecheck`、
+  `pnpm build:desktop`、`cargo check -p rovai-core --all-targets`、Core invalidation 定向测试、
+  `cargo fmt --all --check`、Clippy、文档治理及 `git diff --check` 均通过；
+- `pnpm package:mac:unsigned` 的隔离 App 定向验收中，新 Camp 经 post-commit invalidation 在 205ms 内出现，
+  预置 waiting AgentRun 取消后侧栏 spinner 在 106ms 内清除；两者均显著早于 20 秒安全轮询。隐藏窗口不执行
+  周期或事件刷新，恢复前台后由同一 coordinator 补读；
+- 本次 `pnpm test:rust:pr` 三个分组分别为 326/326、25/25、291/291，通过且无失败测试。

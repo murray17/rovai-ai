@@ -2,7 +2,7 @@
 document_type: ui-component-contract
 authority: renderer-app-shell-navigation
 status: accepted
-last_updated: 2026-08-27
+last_updated: 2026-08-28
 ---
 
 # App Shell 与统一侧栏
@@ -48,6 +48,17 @@ App 启动后立即读取 Main Window Session 与目标页面数据，不用提�
 
 Camp 与队员页使用与目标一致的“正在打开”文案；记忆页保留自身内容骨架。错误不等待 400ms，立即
 在原目标上下文中提供重试。队员页与记忆页的结构、导航和已加载内容不因反馈门槛改变。
+
+## 导航投影新鲜度
+
+Camp 运行开始、取消或终态后，侧栏通过 Core 提交后的失效提示重读完整 Navigation Snapshot；不得等用户
+打开该 Camp，也不得要求重载 Renderer 才清除运行 spinner。多个 Camp 的突发事件由一个全局协调器合并，
+不存在每个 Camp 各自的轮询任务。
+
+App 前台可见时使用约 20 秒低频安全刷新修复偶发丢失事件；隐藏时暂停，重新聚焦立即刷新。Navigation
+拥有独立恢复状态，队员、Runtime Installation、Memory Review 或本机 Navigation preference 读取失败不得
+停止侧栏事件刷新和安全刷新。完整并发与失败语义见
+[Desktop Navigation Refresh](../../architecture/desktop-navigation-refresh.md)。
 
 ## 设置与返回
 
