@@ -6,14 +6,15 @@ authority: version-scope-and-status
 design_status: confirmed
 implementation_status: completed
 model_context_change: false
-last_updated: 2026-08-27
+last_updated: 2026-08-28
 ---
 
 # Rovai-ai v1.29：Camp 动态队员管理
 
 > 当前状态：动态 Camp membership 的 Core、Desktop IPC、Renderer、自动化门禁与隔离真实 App 验收均已完成；
 > 后继 Message Delivery zero-attempt cancellation hotfix 与 Managed Attachment v2 无 Run 等待写路径已完成实现
-> 和自动化验证；退出即取消全部 AgentRun、400ms 启停防闪反馈与安全退出等待面也已完成。
+> 和自动化验证；退出即取消全部 AgentRun、400ms 启停防闪反馈与安全退出等待面也已完成；Desktop Navigation
+> 已切换为提交后事件驱动、全局 generation drain 与 20 秒前台安全刷新。
 
 前置版本：[v1.28 Grok Build + MiniMax M3](../v1.28/README.md)已按冻结时事实转为 historical。
 
@@ -61,6 +62,9 @@ reconciliation 完成已接受工作的正式结算。
   中断，再完成 Run 取消审计、未知效果保留与本地收口；
 - 冷启动在前 400ms 保持目标页面稳定，超过门槛才显示局部“正在打开”反馈；队员页与记忆页保持既有结构，
   关闭也使用 400ms 防闪门槛，慢退出才显示“正在安全退出”。
+- Desktop Navigation 使用一个全局 refresh coordinator：Core 在影响投影的提交后发失效提示，Renderer 以
+  80ms debounce、single-flight generation drain、1/2/5/10 秒失败退避与 focus 抢占收敛；隐藏时暂停，前台
+  20 秒安全刷新只作漏事件兜底，Overview 附属模块失败不再关闭侧栏恢复。
 
 ## 模型上下文边界
 
@@ -83,8 +87,8 @@ reconciliation 完成已接受工作的正式结算。
 | Version lifecycle | 已更新 | 本概览、[实施计划](implementation-plan.md)、[决定](decisions.md)与[版本索引](../README.md)共同切换 `current_version`。 |
 | Decisions | 已更新 | [v1.29 决定](decisions.md)冻结 cutover/reconciliation、exact membership lifetime、稳定模型投影、受信外部来源、零 attempt 取消、Managed v2 无 Run 等待写路径及退出取消全部 AgentRun。 |
 | Contracts | 已更新 | 新增 [Camp Membership v1](../../contracts/camp-membership-v1.md)与[Planned Shutdown v3](../../contracts/planned-shutdown-v3.md)，并升级 [Camp Open Projection v7](../../contracts/camp-open-projection-v7.md)、[Camp Attachment v6](../../contracts/camp-attachment-v6.md)、[Camp Composer Draft v5](../../contracts/camp-composer-draft-v5.md)、[Camp Message Send v13](../../contracts/camp-message-send-v13.md)、[Message Delivery v8](../../contracts/message-delivery-v8.md)、[Gather v4](../../contracts/gather-v4.md)及[Missing-Send Recovery Publication v2](../../contracts/missing-send-recovery-publication-v2.md)。 |
-| Architecture | 已更新 | 新增[动态 Camp 队员关系](../../architecture/dynamic-camp-membership.md)，将[附件架构](../../architecture/camp-published-attachment-view.md)切换为 Managed v2 当前写入与 legacy v1 只读兼容，并把[计划关闭](../../architecture/planned-shutdown.md)切换为退出取消全部 AgentRun。 |
-| UI | 已更新 | [Camp 会话工作区](../../ui/components/conversation-workspace.md)冻结添加入口、成员菜单、移除预览、最后成员、reconciliation 状态及关闭等待面；[App Shell](../../ui/components/app-shell-navigation.md)冻结 400ms 冷启动反馈。 |
+| Architecture | 已更新 | 新增[动态 Camp 队员关系](../../architecture/dynamic-camp-membership.md)与[Desktop Navigation Refresh](../../architecture/desktop-navigation-refresh.md)，将[附件架构](../../architecture/camp-published-attachment-view.md)切换为 Managed v2 当前写入与 legacy v1 只读兼容，并把[计划关闭](../../architecture/planned-shutdown.md)切换为退出取消全部 AgentRun。 |
+| UI | 已更新 | [Camp 会话工作区](../../ui/components/conversation-workspace.md)冻结添加入口、成员菜单、移除预览、最后成员、reconciliation 状态及关闭等待面；[App Shell](../../ui/components/app-shell-navigation.md)冻结 400ms 冷启动反馈与事件驱动 Navigation 新鲜度。 |
 | Runtime Activity | 确认无需更新 | 成员变化使用 Core 领域事件与既有 Run/Delivery terminal activity，不新增 Runtime activity kind。 |
 | Runtime compatibility | 确认无需更新 | 继续传既有 Camp-scoped attachment root，不改变 Adapter wire、Runtime 启动协议、模型或宿主平台资格。 |
 | Documentation routing | 已更新 | [文档导航](../../README.md)、Contracts、Architecture 与 Decisions 当前入口均加入动态 membership 路由。 |
