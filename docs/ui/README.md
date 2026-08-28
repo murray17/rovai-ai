@@ -34,6 +34,9 @@ Porcelain Day 与 Steel Night 是同一 Rovai AI 视觉世界的两套生产主�
 首次训练、结构化 Mention、队员身份与图像、渠道设置，以及会话区附件拖放。Task、AgentRun、A2A、Recovery、权限、
 持久化和事务语义仍须读取相关 ADR/Contract，不能从 UI 文档反向推导。
 
+Runtime 终态文件行与会话中的每 Run 文件变化卡片由
+[Camp 会话工作区](components/conversation-workspace.md#runtime-终态文件变更与-agentrun-文件变化)拥有稳定呈现边界。
+
 ## 平台差异
 
 - [Windows Interaction Delta](windows-interaction-delta.md)

@@ -9,7 +9,11 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 
-use crate::{builtin_tool_transport, runtime_activity_mapping};
+use crate::{
+    builtin_tool_transport, runtime_activity_mapping,
+    runtime_diff::{self, CommandDiffProjection},
+    runtime_file_operation,
+};
 
 pub use crate::runtime_activity_mapping::CLASSIFIER_VERSION;
 
@@ -22,6 +26,8 @@ pub struct CanonicalRuntimeActivity {
     pub semantic_kind: Option<String>,
     pub tool_name: Option<String>,
     pub presentation_hint: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub diff_projection: Option<CommandDiffProjection>,
     pub phase: String,
     pub outcome: String,
     pub credibility: String,
@@ -44,6 +50,7 @@ pub struct EvidenceActivityFacts {
     pub tool_name: Option<String>,
     pub presentation_hint: Option<String>,
     pub presentation_hint_is_explicit: bool,
+    pub diff_projection: Option<CommandDiffProjection>,
     pub phase: String,
     pub outcome: String,
     pub credibility: String,
@@ -107,11 +114,24 @@ pub fn classify_evidence(
                 | "runtime.plan"
                 | "runtime.plan.delta"
                 | "runtime.diagnostic"
+                | "runtime.file_changes.snapshot"
         );
-    let (activity_domain, semantic_kind, runtime_classification_is_structured) =
+    let (mut activity_domain, mut semantic_kind, runtime_classification_is_structured) =
         runtime_activity_mapping::classify_with_structure(item_type, kind, payload);
-    let classification_is_structured =
-        runtime_classification_is_structured || validated_core_tool.is_some();
+    let file_operation_path = runtime_file_operation::path_from_evidence(payload);
+    let diff_projection = runtime_diff::projection_from_evidence(payload, evidence_id);
+    if file_operation_path.is_some()
+        || diff_projection
+            .as_ref()
+            .is_some_and(|projection| projection.status == "available")
+    {
+        activity_domain = "file".to_string();
+        semantic_kind = Some("file.write".to_string());
+    }
+    let classification_is_structured = runtime_classification_is_structured
+        || validated_core_tool.is_some()
+        || file_operation_path.is_some()
+        || diff_projection.is_some();
     let phase = canonical_phase(event_type, phase, payload);
     let outcome = canonical_outcome(&phase, payload);
     let tool_name = validated_core_tool.clone().or(runtime_tool_name);
@@ -132,7 +152,9 @@ pub fn classify_evidence(
     } else {
         "fine_grained"
     };
-    let observed_presentation_hint = string_field(payload, "title")
+    let observed_presentation_hint = file_operation_path
+        .and_then(runtime_activity_mapping::file_operation_presentation_hint)
+        .or_else(|| string_field(payload, "title"))
         .or_else(|| string_field(item, "title"))
         .or_else(|| runtime_activity_mapping::structured_presentation_hint(item_type, item));
     let presentation_hint_is_explicit = observed_presentation_hint.is_some();
@@ -152,6 +174,7 @@ pub fn classify_evidence(
         tool_name,
         presentation_hint,
         presentation_hint_is_explicit,
+        diff_projection,
         phase,
         outcome,
         credibility: credibility.to_string(),
@@ -172,6 +195,7 @@ pub fn new_projection(
         semantic_kind: facts.semantic_kind,
         tool_name: facts.tool_name,
         presentation_hint: facts.presentation_hint,
+        diff_projection: facts.diff_projection,
         phase: facts.phase,
         outcome: facts.outcome,
         credibility: facts.credibility,
@@ -198,6 +222,12 @@ pub fn merge_projection(
         &projection.activity_domain,
         projection.semantic_kind.as_deref(),
     );
+    if let Some(incoming) = facts.diff_projection {
+        projection.diff_projection = Some(runtime_diff::merge_projection(
+            projection.diff_projection.take(),
+            incoming,
+        ));
+    }
     if prior_phase == "terminal"
         && facts.phase == "terminal"
         && is_settled_outcome(&prior_outcome)
@@ -420,6 +450,125 @@ mod tests {
             vec!["evidence-1", "evidence-2"]
         );
         assert_eq!(projection.revision, 2);
+    }
+
+    #[test]
+    fn claude_edit_diff_upgrades_the_existing_tool_activity_instead_of_creating_another_one() {
+        let started = classify_evidence(
+            "run-claude",
+            1,
+            "evidence-started",
+            "runtime.action",
+            "tool_call",
+            "updated",
+            &json!({
+                "toolCallId": "toolu_edit_1",
+                "toolName": "Edit",
+                "kind": "edit",
+                "status": "in_progress"
+            }),
+        );
+        let completed = classify_evidence(
+            "run-claude",
+            1,
+            "evidence-completed",
+            "runtime.action",
+            "tool_result",
+            "completed",
+            &json!({
+                "toolCallId": "toolu_edit_1",
+                "toolName": "Edit",
+                "kind": "edit",
+                "status": "completed",
+                "runtimeDiff": {
+                    "schemaVersion": 1,
+                    "source": "runtime_reported",
+                    "status": "available",
+                    "semanticKind": "exact_mutation",
+                    "entries": [{
+                        "semantics": "exact_mutation",
+                        "path": "src/app.ts",
+                        "oldText": "false",
+                        "newText": "true"
+                    }]
+                }
+            }),
+        );
+
+        assert_eq!(started.operation_id, completed.operation_id);
+        let projection = new_projection(started, "evidence-started", 1).unwrap();
+        let projection = merge_projection(projection, completed, "evidence-completed", 2);
+        assert_eq!(projection.activity_domain, "file");
+        assert_eq!(projection.semantic_kind.as_deref(), Some("file.write"));
+        assert_eq!(projection.tool_name.as_deref(), Some("Edit"));
+        assert_eq!(projection.phase, "terminal");
+        assert_eq!(projection.outcome, "succeeded");
+        assert_eq!(
+            projection
+                .diff_projection
+                .as_ref()
+                .and_then(|diff| diff.semantic_kind.as_deref()),
+            Some("exact_mutation")
+        );
+        assert_eq!(projection.source_evidence_ids.len(), 2);
+    }
+
+    #[test]
+    fn terminal_file_operation_path_upgrades_the_existing_tool_without_claiming_a_diff() {
+        let started = classify_evidence(
+            "run-qoder",
+            1,
+            "evidence-started",
+            "runtime.action",
+            "tool_call",
+            "updated",
+            &json!({
+                "toolCallId": "tool-edit",
+                "toolName": "Edit",
+                "kind": "edit",
+                "title": "Edit",
+                "status": "in_progress"
+            }),
+        );
+        let completed = classify_evidence(
+            "run-qoder",
+            1,
+            "evidence-completed",
+            "runtime.action",
+            "tool_result",
+            "completed",
+            &json!({
+                "toolCallId": "tool-edit",
+                "toolName": "Edit",
+                "kind": "edit",
+                "title": null,
+                "status": "completed",
+                "runtimeFileOperation": {
+                    "schemaVersion": 1,
+                    "source": "runtime_reported",
+                    "status": "available",
+                    "operationKind": "write",
+                    "path": "rovai-runtime-validation/qoder-cli.txt"
+                },
+                "runtimeDiff": null
+            }),
+        );
+
+        assert_eq!(started.operation_id, completed.operation_id);
+        assert_eq!(
+            completed.presentation_hint.as_deref(),
+            Some("修改 qoder-cli.txt")
+        );
+        assert!(completed.diff_projection.is_none());
+        let projection = new_projection(started, "evidence-started", 1).unwrap();
+        let projection = merge_projection(projection, completed, "evidence-completed", 2);
+        assert_eq!(projection.activity_domain, "file");
+        assert_eq!(projection.semantic_kind.as_deref(), Some("file.write"));
+        assert_eq!(
+            projection.presentation_hint.as_deref(),
+            Some("修改 qoder-cli.txt")
+        );
+        assert!(projection.diff_projection.is_none());
     }
 
     #[test]

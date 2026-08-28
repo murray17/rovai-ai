@@ -527,7 +527,7 @@ try {
         writeBody,
         {
           taskId: null,
-          purpose: 'Verify ACP permission mediation and one-time file write authorization',
+          purpose: 'Verify Runtime-owned ACP file writes and native permission mediation',
           completionRole: 'required'
         }
       )
@@ -553,7 +553,7 @@ try {
             approvalId: approval.id,
             expectedVersion: approval.version,
             optionId: option.optionId,
-            reason: 'ACP one-time file write smoke test'
+            reason: 'ACP native permission response smoke test'
           })
           if (resolution.status === 'rejected') throw new Error(`ACP approval was rejected: ${JSON.stringify(resolution)}`)
           resolvedApprovals.add(approval.id)

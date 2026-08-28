@@ -24,6 +24,7 @@ last_updated: 2026-08-26
 > 历史 Evidence/Blob 不迁移。全部 13 个 Adapter 的 terminal output 路径已逐项核验，无 Adapter 需要新增 spool。
 
 前置版本：[v1.27 Kimi Code + MiniMax M3](../v1.27/README.md)已按冻结时事实转为 historical。
+后续版本：[v1.29 Command Diff 与 Workspace Change Window](../v1.29/README.md)。
 
 ## 版本目标
 

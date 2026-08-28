@@ -7,6 +7,8 @@ import type {
   ActionApprovalView,
   AdapterInstallation,
   AgentProfile,
+  AgentRunFileChangesDetailView,
+  AgentRunFileChangesView,
   AgentRunExecutionEvidencePage,
   AgentRunExecutionEvidenceView,
   AgentRunView,
@@ -853,6 +855,13 @@ export type CampConversationTimelineItem =
       message: CampMessageView
     }
   | {
+      kind: 'run_file_changes'
+      id: string
+      createdAt: string
+      timelineGlobalSequence: null
+      changes: AgentRunFileChangesView
+    }
+  | {
       kind: 'stop_event'
       id: string
       createdAt: string
@@ -867,7 +876,8 @@ export function campConversationTimeline(
   turns: CampSnapshot['turns'] = [],
   timeline: CampSnapshot['timeline'] = [],
   agentRuns: CampSnapshot['agentRuns'] = [],
-  tasks: CampSnapshot['tasks'] = []
+  tasks: CampSnapshot['tasks'] = [],
+  agentRunFileChanges: CampSnapshot['agentRunFileChanges'] = []
 ): CampConversationTimelineItem[] {
   const taskCreatedSequenceById = new Map(
     timeline
@@ -884,6 +894,13 @@ export function campConversationTimeline(
     createdAt: task.createdAt,
     timelineGlobalSequence: taskCreatedSequenceById.get(task.taskId) ?? null,
     task
+  }))
+  const runFileChangeCards: CampConversationTimelineItem[] = agentRunFileChanges.map((changes) => ({
+    kind: 'run_file_changes',
+    id: `run-file-changes:${changes.agentRunId}:${changes.executionEpoch}`,
+    createdAt: changes.completedAt,
+    timelineGlobalSequence: null,
+    changes
   }))
   const publicMessages: CampConversationTimelineItem[] = messages
     .filter((message) => {
@@ -925,7 +942,10 @@ export function campConversationTimeline(
       hasUnsettledExternalEffects: unsettledTurnIds.has(turn.id)
     }))
 
-  return [...taskCards, ...publicMessages, ...stopEvents].sort((left, right) => {
+  const compareTimelineItems = (
+    left: CampConversationTimelineItem,
+    right: CampConversationTimelineItem
+  ): number => {
     if (left.timelineGlobalSequence !== null && right.timelineGlobalSequence !== null) {
       const sequenceOrder = left.timelineGlobalSequence - right.timelineGlobalSequence
       if (sequenceOrder !== 0) return sequenceOrder
@@ -934,6 +954,31 @@ export function campConversationTimeline(
     if (timeOrder !== 0) return timeOrder
     const kindOrder = left.kind.localeCompare(right.kind)
     return kindOrder !== 0 ? kindOrder : left.id.localeCompare(right.id)
+  }
+  const sortedItems = [...taskCards, ...publicMessages, ...stopEvents, ...runFileChangeCards]
+    .sort(compareTimelineItems)
+  const lastPublicMessageByRunId = new Map<string, CampConversationTimelineItem>()
+  for (const item of publicMessages.slice().sort(compareTimelineItems)) {
+    if (item.kind === 'camp_message' && item.message.sourceAgentRunId) {
+      lastPublicMessageByRunId.set(item.message.sourceAgentRunId, item)
+    }
+  }
+  const anchoredCardIds = new Set<string>()
+  const cardsByAnchorMessageId = new Map<string, CampConversationTimelineItem[]>()
+  for (const card of runFileChangeCards) {
+    if (card.kind !== 'run_file_changes') continue
+    const anchor = lastPublicMessageByRunId.get(card.changes.agentRunId)
+    if (!anchor) continue
+    anchoredCardIds.add(card.id)
+    cardsByAnchorMessageId.set(
+      anchor.id,
+      [...(cardsByAnchorMessageId.get(anchor.id) ?? []), card].sort(compareTimelineItems)
+    )
+  }
+
+  return sortedItems.flatMap((item) => {
+    if (anchoredCardIds.has(item.id)) return []
+    return [item, ...(cardsByAnchorMessageId.get(item.id) ?? [])]
   })
 }
 
@@ -1206,6 +1251,11 @@ export function CampWorkspace({
   onNotify?(message: string): void
 }): JSX.Element {
   const [messageContent, setMessageContent] = useState<StructuredCampMessageContent>([])
+  const [fileChangesReview, setFileChangesReview] = useState<{
+    changes: AgentRunFileChangesView
+    selectedPath: string | null
+  } | null>(null)
+  const fileChangesReviewTriggerRef = useRef<HTMLButtonElement | null>(null)
   const [composerDraft, setComposerDraft] = useState<CampComposerDraftView | null>(null)
   const [preparingAttachments, setPreparingAttachments] = useState<Array<{ id: string; name: string; kind: AttachmentKind }>>([])
   const [failedAttachments, setFailedAttachments] = useState<Array<{ id: string; name: string; kind: AttachmentKind; error: string }>>([])
@@ -1350,6 +1400,9 @@ export function CampWorkspace({
   const [earlierMessageStatus, setEarlierMessageStatus] = useState<
     'idle' | 'loading' | 'error'
   >('idle')
+  useEffect(() => {
+    setFileChangesReview(null)
+  }, [snapshot.camp.id])
   useEffect(() => {
     try {
       window.localStorage.setItem(CAMP_CONVERSATION_VIEW_STORAGE_KEY, conversationView)
@@ -1637,13 +1690,15 @@ export function CampWorkspace({
       snapshot.turns,
       snapshot.timeline,
       snapshot.agentRuns,
-      snapshot.tasks
+      snapshot.tasks,
+      snapshot.agentRunFileChanges
     ),
     [
       snapshot.agentRuns,
       snapshot.tasks,
       snapshot.timeline,
       snapshot.turns,
+      snapshot.agentRunFileChanges,
       visibleCampMessages
     ]
   )
@@ -3408,7 +3463,10 @@ export function CampWorkspace({
 
   return (
     <section className="workspace-shell camp-workspace" aria-label={`会话：${snapshot.camp.title}`}>
-      <div className={`workspace-grid ${inspectorVisible ? '' : 'inspector-collapsed'}`.trim()}>
+      <div
+        className={`workspace-grid ${inspectorVisible ? '' : 'inspector-collapsed'}`.trim()}
+        hidden={fileChangesReview !== null}
+      >
         <section
           className="timeline-pane"
           onDragEnter={enterAttachmentDropSurface}
@@ -3618,6 +3676,23 @@ export function CampWorkspace({
                           setFocusedTaskId(timelineItem.task.taskId)
                           setTaskFocusRequest((request) => request + 1)
                           openInspector('tasks')
+                        }}
+                      />
+                    )
+                    continue
+                  }
+                  if (timelineItem.kind === 'run_file_changes') {
+                    previousMessageAuthorKey = null
+                    items.push(
+                      <AgentRunFileChangesTimelineCard
+                        key={timelineItem.id}
+                        changes={timelineItem.changes}
+                        onOpenReview={(selectedPath, trigger) => {
+                          fileChangesReviewTriggerRef.current = trigger
+                          setFileChangesReview({
+                            changes: timelineItem.changes,
+                            selectedPath: selectedPath ?? timelineItem.changes.files[0]?.path ?? null
+                          })
                         }}
                       />
                     )
@@ -4327,7 +4402,21 @@ export function CampWorkspace({
             : ''}
         </span>
       </div>
-      {mentionPopover && (
+      {fileChangesReview && (
+        <AgentRunFileChangesReviewPage
+          key={`${fileChangesReview.changes.agentRunId}:${fileChangesReview.changes.executionEpoch}`}
+          campId={snapshot.camp.id}
+          changes={fileChangesReview.changes}
+          initialSelectedPath={fileChangesReview.selectedPath}
+          onBack={() => {
+            setFileChangesReview(null)
+            window.requestAnimationFrame(() => {
+              fileChangesReviewTriggerRef.current?.focus({ preventScroll: true })
+            })
+          }}
+        />
+      )}
+      {!fileChangesReview && mentionPopover && (
         <MentionProfilePopover
           request={mentionPopover}
           members={snapshot.members}
@@ -6441,6 +6530,438 @@ function FirstRunCampWelcome({
   )
 }
 
+export function AgentRunFileChangesTimelineCard({
+  changes,
+  onOpenReview
+}: {
+  changes: AgentRunFileChangesView
+  onOpenReview(selectedPath: string | undefined, trigger: HTMLButtonElement): void
+}): JSX.Element {
+  const [showAllFiles, setShowAllFiles] = useState(false)
+  const visibleFiles = showAllFiles ? changes.files : changes.files.slice(0, 3)
+  const additionalFileCount = Math.max(0, changes.files.length - 3)
+  useEffect(() => {
+    setShowAllFiles(false)
+  }, [changes.agentRunId, changes.executionEpoch])
+  return (
+    <article className="timeline-node run-file-changes-card">
+      <button
+        className="run-file-changes-card-header"
+        type="button"
+        aria-label={`查看 Files Changed，${agentRunFileChangesSummaryLabel(changes)}`}
+        onClick={(event) => onOpenReview(undefined, event.currentTarget)}
+      >
+        <span className="run-file-changes-card-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24">
+            <path d="M4 7h6l2 2h8v10H4Z" />
+            <path d="M8 13h8M12 11v4" />
+          </svg>
+        </span>
+        <span className="run-file-changes-card-copy">
+          <strong>Files Changed</strong>
+          <span>{agentRunFileChangesSummaryLabel(changes)}</span>
+        </span>
+        <span className="run-file-changes-card-view" aria-hidden="true">View</span>
+      </button>
+      <div className="run-file-changes-card-files" aria-label="变更文件">
+        {visibleFiles.map((file, index) => (
+          <button
+            key={`${index}:${file.path}`}
+            className="run-file-change-file"
+            type="button"
+            aria-label={`查看 ${file.path} 的文件变化`}
+            onClick={(event) => onOpenReview(file.path, event.currentTarget)}
+          >
+            <code title={file.path}>{file.path}</code>
+            <span className="run-file-change-stats" aria-hidden="true">
+              {file.additions !== undefined && file.deletions !== undefined
+                ? <>
+                    {file.additions > 0 && <i className="addition">+{file.additions}</i>}
+                    {file.deletions > 0 && <i className="deletion">−{file.deletions}</i>}
+                  </>
+                : <i>{file.operationCount} 次修改</i>}
+            </span>
+            <svg className="run-file-change-file-arrow" viewBox="0 0 16 16" aria-hidden="true">
+              <path d="m6.25 3.75 4 4.25-4 4.25" />
+            </svg>
+          </button>
+        ))}
+        {additionalFileCount > 0 && (
+          <button
+            className="run-file-changes-more-files"
+            type="button"
+            aria-expanded={showAllFiles}
+            onClick={() => setShowAllFiles((visible) => !visible)}
+          >
+            <span>{showAllFiles ? '收起文件' : `再显示 ${additionalFileCount} 个文件`}</span>
+            <svg viewBox="0 0 16 16" aria-hidden="true">
+              <path d="m4.75 6.25 3.25 3.5 3.25-3.5" />
+            </svg>
+          </button>
+        )}
+      </div>
+    </article>
+  )
+}
+
+export function agentRunFileChangesSummaryLabel(changes: AgentRunFileChangesView): string {
+  if (changes.additions !== undefined && changes.deletions !== undefined) {
+    return `${changes.fileCount} 个文件 · +${changes.additions} −${changes.deletions}`
+  }
+  return `${changes.fileCount} 个文件 · ${changes.operationCount} 次修改`
+}
+
+function agentRunFileChangeModeLabel(
+  presentationKind: AgentRunFileChangesView['files'][number]['presentationKind']
+): string {
+  if (presentationKind === 'full_net_diff') return '完整差异'
+  if (presentationKind === 'exact_mutations') return '片段差异'
+  if (presentationKind === 'operation_history') return '操作记录'
+  return '仅文件操作'
+}
+
+function agentRunFileChangeKindMark(changeKind: string): string {
+  if (changeKind === 'add' || changeKind === 'create') return 'A'
+  if (changeKind === 'delete' || changeKind === 'remove') return 'D'
+  return 'M'
+}
+
+function agentRunFilePathParts(path: string): { basename: string; directory: string } {
+  const normalized = path.replaceAll('\\', '/')
+  const separator = normalized.lastIndexOf('/')
+  if (separator < 0) return { basename: normalized, directory: '当前目录' }
+  return {
+    basename: normalized.slice(separator + 1) || normalized,
+    directory: normalized.slice(0, separator) || '/'
+  }
+}
+
+function agentRunFilePathIsAbsolute(path: string): boolean {
+  return path.startsWith('/') || path.startsWith('\\\\') || /^[A-Za-z]:[\\/]/.test(path)
+}
+
+type AgentRunFileChangesDetailStatus = 'loading' | 'ready' | 'error'
+
+export function AgentRunFileChangesReviewPage({
+  campId,
+  changes,
+  initialSelectedPath,
+  onBack
+}: {
+  campId: string
+  changes: AgentRunFileChangesView
+  initialSelectedPath: string | null
+  onBack(): void
+}): JSX.Element {
+  const initialPath = changes.files.some((file) => file.path === initialSelectedPath)
+    ? initialSelectedPath
+    : changes.files[0]?.path ?? null
+  const [selectedPath, setSelectedPath] = useState<string | null>(initialPath)
+  const [detail, setDetail] = useState<AgentRunFileChangesDetailView | null>(null)
+  const [detailStatus, setDetailStatus] = useState<AgentRunFileChangesDetailStatus>('loading')
+  const [loadAttempt, setLoadAttempt] = useState(0)
+  const requestId = useRef(0)
+  const headingRef = useRef<HTMLHeadingElement>(null)
+
+  useEffect(() => {
+    headingRef.current?.focus({ preventScroll: true })
+  }, [])
+
+  useEffect(() => {
+    const currentRequest = ++requestId.current
+    setDetail(null)
+    setDetailStatus('loading')
+    void window.rovai.request<AgentRunFileChangesDetailView>(
+      'agentRunFileChanges.get',
+      {
+        campId,
+        agentRunId: changes.agentRunId,
+        executionEpoch: changes.executionEpoch
+      }
+    ).then((result) => {
+      if (currentRequest !== requestId.current) return
+      if (
+        result.schemaVersion !== 1
+        || result.card.agentRunId !== changes.agentRunId
+        || result.card.executionEpoch !== changes.executionEpoch
+      ) {
+        setDetailStatus('error')
+        return
+      }
+      setDetail(result)
+      setDetailStatus('ready')
+    }).catch(() => {
+      if (currentRequest === requestId.current) setDetailStatus('error')
+    })
+    return () => {
+      requestId.current += 1
+    }
+  }, [campId, changes.agentRunId, changes.executionEpoch, loadAttempt])
+
+  return (
+    <AgentRunFileChangesReviewSurface
+      changes={changes}
+      detail={detail}
+      detailStatus={detailStatus}
+      selectedPath={selectedPath}
+      headingRef={headingRef}
+      onSelectPath={setSelectedPath}
+      onBack={onBack}
+      onRetry={() => setLoadAttempt((attempt) => attempt + 1)}
+    />
+  )
+}
+
+export function AgentRunFileChangesReviewSurface({
+  changes,
+  detail,
+  detailStatus,
+  selectedPath,
+  headingRef,
+  onSelectPath,
+  onBack,
+  onRetry
+}: {
+  changes: AgentRunFileChangesView
+  detail: AgentRunFileChangesDetailView | null
+  detailStatus: AgentRunFileChangesDetailStatus
+  selectedPath: string | null
+  headingRef?: RefObject<HTMLHeadingElement | null>
+  onSelectPath(path: string): void
+  onBack(): void
+  onRetry(): void
+}): JSX.Element {
+  const selectedIndex = Math.max(0, changes.files.findIndex((file) => file.path === selectedPath))
+  const selectedFile = changes.files[selectedIndex] ?? null
+  const selectedDetail = selectedFile
+    ? detail?.files.find((file) => file.path === selectedFile.path) ?? null
+    : null
+  const truthNote = selectedFile ? agentRunFileChangeTruthNote(selectedFile.presentationKind) : null
+  return (
+    <section className="agent-run-file-review" aria-label="Files Changed 详情页">
+      <header className="agent-run-file-review-header">
+        <button
+          className="agent-run-file-review-back"
+          type="button"
+          aria-label="返回会话"
+          onClick={onBack}
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 18-6-6 6-6" /></svg>
+        </button>
+        <div className="agent-run-file-review-heading">
+          <h1 ref={headingRef} tabIndex={-1}>Files Changed</h1>
+          <span>{agentRunFileChangesSummaryLabel(changes)}</span>
+        </div>
+        <div className="agent-run-file-review-navigation" aria-label="切换变更文件">
+          <button
+            type="button"
+            disabled={selectedIndex <= 0}
+            onClick={() => onSelectPath(changes.files[selectedIndex - 1]?.path ?? selectedFile?.path ?? '')}
+          >
+            上一文件
+          </button>
+          <button
+            type="button"
+            disabled={selectedIndex < 0 || selectedIndex >= changes.files.length - 1}
+            onClick={() => onSelectPath(changes.files[selectedIndex + 1]?.path ?? selectedFile?.path ?? '')}
+          >
+            下一文件
+          </button>
+        </div>
+      </header>
+
+      <div className="agent-run-file-review-content">
+        <aside className="agent-run-file-review-sidebar" aria-label="变更文件">
+          <header><strong>变更文件</strong><span>{changes.fileCount} files</span></header>
+          <div className="agent-run-file-review-file-list">
+            {changes.files.map((file) => {
+              const pathParts = agentRunFilePathParts(file.path)
+              return (
+                <button
+                  className="agent-run-file-review-file"
+                  type="button"
+                  key={file.path}
+                  aria-current={file.path === selectedFile?.path ? 'true' : undefined}
+                  title={file.path}
+                  onClick={() => onSelectPath(file.path)}
+                >
+                  <span className="agent-run-file-review-kind" aria-hidden="true">
+                    {agentRunFileChangeKindMark(file.changeKind)}
+                  </span>
+                  <span className="agent-run-file-review-file-copy">
+                    <strong>{pathParts.basename}</strong>
+                    <small>{pathParts.directory}</small>
+                  </span>
+                  <span className="agent-run-file-review-file-aside" aria-hidden="true">
+                    <span>
+                      {file.additions !== undefined && file.deletions !== undefined
+                        ? <><i className="addition">+{file.additions}</i><i className="deletion">−{file.deletions}</i></>
+                        : `${file.operationCount} 次`}
+                    </span>
+                    <small className={agentRunFilePathIsAbsolute(file.path) ? 'is-outside' : undefined}>
+                      {agentRunFileChangeModeLabel(file.presentationKind)}
+                    </small>
+                  </span>
+                </button>
+              )
+            })}
+          </div>
+        </aside>
+
+        <section className="agent-run-file-review-pane" aria-label="当前文件变化">
+          {selectedFile
+            ? <>
+                <header className="agent-run-file-review-pane-header">
+                  <div>
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h10l6 6v10H4Z" /><path d="M14 4v6h6" /></svg>
+                    <code title={selectedFile.path}>{selectedFile.path}</code>
+                  </div>
+                  <span className="agent-run-file-review-pane-meta">
+                    <small>{agentRunFileChangeModeLabel(selectedFile.presentationKind)}</small>
+                    <span aria-hidden="true">
+                      {selectedFile.additions !== undefined && selectedFile.deletions !== undefined
+                        ? <><i className="addition">+{selectedFile.additions}</i><i className="deletion">−{selectedFile.deletions}</i></>
+                        : `${selectedFile.operationCount} 次修改`}
+                    </span>
+                  </span>
+                </header>
+                {truthNote && (
+                  <div className="agent-run-file-review-truth-note">
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9" /><path d="M12 11v5M12 8h.01" /></svg>
+                    <span>{truthNote}</span>
+                  </div>
+                )}
+                <div
+                  className="agent-run-file-review-scroll"
+                  key={selectedFile.path}
+                  tabIndex={0}
+                  aria-label={`${selectedFile.path} 的文件变化内容`}
+                >
+                  {detailStatus === 'loading' && (
+                    <div className="agent-run-file-review-state" role="status">
+                      <span className="tool-result-spinner" aria-hidden="true" />
+                      <strong>正在读取文件变化…</strong>
+                    </div>
+                  )}
+                  {detailStatus === 'error' && (
+                    <div className="agent-run-file-review-state is-error" role="alert">
+                      <strong>文件变化暂时无法读取</strong>
+                      <span>历史记录仍然保留，可以重新读取。</span>
+                      <button type="button" onClick={onRetry}>重试</button>
+                    </div>
+                  )}
+                  {detailStatus === 'ready' && selectedDetail && (
+                    <AgentRunFileReviewBlocks file={selectedDetail} />
+                  )}
+                  {detailStatus === 'ready' && !selectedDetail && (
+                    <div className="agent-run-file-review-state is-error" role="alert">
+                      <strong>这个文件的详情不可用</strong>
+                      <span>摘要仍可查看，但没有找到匹配的不可变详情。</span>
+                    </div>
+                  )}
+                </div>
+              </>
+            : (
+                <div className="agent-run-file-review-state">
+                  <strong>没有文件变化</strong>
+                </div>
+              )}
+        </section>
+      </div>
+    </section>
+  )
+}
+
+function agentRunFileChangeTruthNote(
+  presentationKind: AgentRunFileChangesView['files'][number]['presentationKind']
+): string | null {
+  if (presentationKind === 'operation_only') {
+    return 'Runtime 只可靠报告了成功文件操作与路径，没有提供可审查的 old/new 或标准差异。'
+  }
+  return null
+}
+
+function AgentRunFileReviewBlocks({
+  file
+}: {
+  file: AgentRunFileChangesDetailView['files'][number]
+}): JSX.Element {
+  const blocks = file.blocks.slice().sort((left, right) => left.sequence - right.sequence)
+  const reviewableBlocks = blocks.filter((block) => Boolean(block.diff))
+  if (file.presentationKind === 'operation_only' || reviewableBlocks.length === 0) {
+    return (
+      <div className="agent-run-file-review-empty">
+        <span aria-hidden="true">
+          <svg viewBox="0 0 24 24"><path d="M4 4h10l6 6v10H4Z" /><path d="M14 4v6h6M8 14h8" /></svg>
+        </span>
+        <strong>没有可审查的差异内容</strong>
+        <p>这条记录只证明 Runtime 成功操作了该文件；Rovai 不读取当前文件，也不推测修改内容。</p>
+      </div>
+    )
+  }
+  return (
+    <div className="agent-run-file-review-blocks">
+      {reviewableBlocks.map((block, reviewIndex) => (
+        <AgentRunFileReviewBlock
+          key={`${block.sequence}:${reviewIndex}`}
+          block={block}
+          index={reviewIndex}
+          showLabel={file.presentationKind !== 'full_net_diff' || blocks.length > 1}
+        />
+      ))}
+    </div>
+  )
+}
+
+function AgentRunFileReviewBlock({
+  block,
+  index,
+  showLabel
+}: {
+  block: AgentRunFileChangesDetailView['files'][number]['blocks'][number]
+  index: number
+  showLabel: boolean
+}): JSX.Element | null {
+  const exactMutation = block.semantics === 'exact_mutation'
+  if (!block.diff) {
+    return null
+  }
+  const lines = exactMutation ? exactMutationDiffLines(block.diff) : inlineDiffLines(block.diff)
+  return (
+    <section className={`agent-run-file-review-block${exactMutation ? ' is-exact-mutation' : ''}`}>
+      {showLabel && (
+        <header>
+          <strong>修改 {index + 1}</strong>
+          <span>{exactMutation ? '精确替换 · 无行号' : '完整文件差异'}</span>
+        </header>
+      )}
+      <div className="agent-run-file-review-diff-code">
+        {lines.map((line, lineIndex) => exactMutation
+          ? (
+              <div className={`agent-run-file-review-diff-line is-${line.kind}`} key={`${lineIndex}:${line.text}`}>
+                <span aria-hidden="true">{line.kind === 'addition' ? '+' : '−'}</span>
+                <code>{line.text || ' '}</code>
+              </div>
+            )
+          : line.kind === 'hunk' || line.kind === 'metadata'
+          ? (
+              <div className={`agent-run-file-review-diff-line is-${line.kind}`} key={`${lineIndex}:${line.text}`}>
+                <code>{line.text}</code>
+              </div>
+            )
+          : (
+              <div className={`agent-run-file-review-diff-line is-${line.kind}`} key={`${lineIndex}:${line.text}`}>
+                <span aria-hidden="true">{line.kind === 'addition' ? '+' : line.kind === 'deletion' ? '−' : ''}</span>
+                <span aria-hidden="true">{line.oldLine ?? ''}</span>
+                <span aria-hidden="true">{line.newLine ?? ''}</span>
+                <code>{line.text || ' '}</code>
+              </div>
+            ))}
+      </div>
+    </section>
+  )
+}
+
 function StopOutcomeEvent({
   item,
   onOpenDrawer
@@ -7488,6 +8009,133 @@ function ToolCallDetail({
 
 type ToolCallStep = Extract<LiveExecutionProgress['items'][number], { kind: 'tool' }>['step']
 
+type InlineDiffLine = {
+  kind: 'context' | 'addition' | 'deletion' | 'hunk' | 'metadata'
+  text: string
+  oldLine: number | null
+  newLine: number | null
+}
+
+function inlineDiffLines(diff: string): InlineDiffLine[] {
+  const result: InlineDiffLine[] = []
+  let oldLine = 0
+  let newLine = 0
+  let insideHunk = false
+  for (const rawLine of diff.split('\n')) {
+    if (rawLine.startsWith('diff --git ')) {
+      insideHunk = false
+      continue
+    }
+    if (rawLine.startsWith('index ')
+      || rawLine.startsWith('--- ')
+      || rawLine.startsWith('+++ ')) continue
+    if (rawLine.startsWith('@@')) {
+      const match = /^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/.exec(rawLine)
+      if (match) {
+        oldLine = Number(match[1])
+        newLine = Number(match[2])
+      }
+      insideHunk = true
+      result.push({ kind: 'hunk', text: rawLine, oldLine: null, newLine: null })
+      continue
+    }
+    if (!insideHunk || rawLine === '\\ No newline at end of file') {
+      if (rawLine !== '') {
+        result.push({ kind: 'metadata', text: rawLine, oldLine: null, newLine: null })
+      }
+      continue
+    }
+    if (rawLine.startsWith('+')) {
+      result.push({ kind: 'addition', text: rawLine.slice(1), oldLine: null, newLine })
+      newLine += 1
+      continue
+    }
+    if (rawLine.startsWith('-')) {
+      result.push({ kind: 'deletion', text: rawLine.slice(1), oldLine, newLine: null })
+      oldLine += 1
+      continue
+    }
+    if (rawLine === '' && result.length > 0) continue
+    const text = rawLine.startsWith(' ') ? rawLine.slice(1) : rawLine
+    result.push({ kind: 'context', text, oldLine, newLine })
+    oldLine += 1
+    newLine += 1
+  }
+  return result
+}
+
+function exactMutationDiffLines(diff: string): InlineDiffLine[] {
+  return diff.split('\n').flatMap((rawLine): InlineDiffLine[] => {
+    if (rawLine === '') return []
+    if (rawLine.startsWith('+')) {
+      return [{ kind: 'addition', text: rawLine.slice(1), oldLine: null, newLine: null }]
+    }
+    if (rawLine.startsWith('-')) {
+      return [{ kind: 'deletion', text: rawLine.slice(1), oldLine: null, newLine: null }]
+    }
+    return []
+  })
+}
+
+function ModifiedFileRow({ change, semanticKind }: {
+  change: NonNullable<ToolCallStep['fileChanges']>[number]
+  semanticKind: ToolCallStep['fileChangeSemantics']
+}): JSX.Element {
+  const fileName = change.path.split('/').filter(Boolean).at(-1) ?? change.path
+  const exactMutation = semanticKind === 'exact_mutation'
+  const lines = useMemo(
+    () => exactMutation ? exactMutationDiffLines(change.diff) : inlineDiffLines(change.diff),
+    [change.diff, exactMutation]
+  )
+  return (
+    <details className="process-action modified-file-row" data-activity-domain="file">
+      <summary
+        className="modified-file-summary"
+        aria-label={`修改 ${change.path}，新增 ${change.additions} 行，删除 ${change.deletions} 行`}
+      >
+        <ToolCallIcon activityDomain="file" />
+        <span className="modified-file-title" title={change.path}>修改 {fileName}</span>
+        <span className="modified-file-stats" aria-hidden="true">
+          <span className="diff-addition">+{change.additions}</span>
+          <span className="diff-deletion">−{change.deletions}</span>
+        </span>
+        <span className="tool-call-disclosure-slot" aria-hidden="true">
+          <svg viewBox="0 0 16 16" focusable="false">
+            <path d="m4.75 6.25 3.25 3.5 3.25-3.5" />
+          </svg>
+        </span>
+      </summary>
+      <div
+        className={`modified-file-diff${exactMutation ? ' is-exact-mutation' : ''}`}
+        tabIndex={0}
+        aria-label={`${change.path} 的${exactMutation ? '修改片段' : '文件差异'}`}
+      >
+        {lines.map((line, index) => exactMutation
+          ? (
+              <div className={`modified-file-diff-line is-${line.kind}`} key={`${index}:${line.text}`}>
+                <span aria-hidden="true">{line.kind === 'addition' ? '+' : '-'}</span>
+                <code>{line.text || ' '}</code>
+              </div>
+            )
+          : line.kind === 'hunk' || line.kind === 'metadata'
+          ? (
+              <div className={`modified-file-diff-line is-${line.kind}`} key={`${index}:${line.text}`}>
+                <code>{line.text}</code>
+              </div>
+            )
+          : (
+              <div className={`modified-file-diff-line is-${line.kind}`} key={`${index}:${line.text}`}>
+                <span aria-hidden="true">{line.kind === 'addition' ? '+' : line.kind === 'deletion' ? '−' : ''}</span>
+                <span aria-hidden="true">{line.oldLine ?? ''}</span>
+                <span aria-hidden="true">{line.newLine ?? ''}</span>
+                <code>{line.text || ' '}</code>
+              </div>
+            ))}
+      </div>
+    </details>
+  )
+}
+
 function ToolCallRow({
   campId,
   step,
@@ -7639,8 +8287,17 @@ function ToolActivityGroup({
         </span>
       </summary>
       <div className="tool-group-items">
-        {items.map((item) => {
+        {items.flatMap((item) => {
           const step = item.step
+          if (step.fileChanges?.length) {
+            return step.fileChanges.map((change, index) => (
+              <ModifiedFileRow
+                change={change}
+                key={`${item.key}:file:${index}:${change.path}`}
+                semanticKind={step.fileChangeSemantics}
+              />
+            ))
+          }
           return (
             <ToolCallRow
               key={item.key}
@@ -7830,7 +8487,28 @@ export function RunExecutionDisclosure({
             </div>
           )
         }
-        return null
+        if (item.kind !== 'tool') return null
+        const step = item.step
+        if (step.fileChanges?.length) {
+          return step.fileChanges.map((change, index) => (
+            <ModifiedFileRow
+              change={change}
+              key={`${item.key}:file:${index}:${change.path}`}
+              semanticKind={step.fileChangeSemantics}
+            />
+          ))
+        }
+        const fullEvidence = completeEvidence.byToolId.get(step.id)
+        return (
+          <ToolCallRow
+            key={item.key}
+            campId={campId}
+            step={step}
+            runId={run.id}
+            runStatus={run.status}
+            completeEvidence={fullEvidence}
+          />
+        )
       })}
       {historyStatus === 'loading' && (
         <div className="process-action current" role="status">

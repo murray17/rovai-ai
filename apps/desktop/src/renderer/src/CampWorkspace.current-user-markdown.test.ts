@@ -59,7 +59,7 @@ function renderAgentMessage(
     createdAt: '2026-08-13T00:00:00Z'
   }
   const snapshot: CampSnapshot = {
-    schemaVersion: 33,
+    schemaVersion: 34,
     throughGlobalSequence: 1,
     camp: {
       id: 'camp-current-user-markdown',
@@ -81,6 +81,7 @@ function renderAgentMessage(
     turns: [],
     agentRuns: [],
     executionEvidence: [],
+    agentRunFileChanges: [],
     contextManifests: [],
     approvals: [],
     actions: [],

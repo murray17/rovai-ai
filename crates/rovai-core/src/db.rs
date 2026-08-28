@@ -50,10 +50,14 @@ pub struct Database {
     runtime_camp_files_root_identity_digest: String,
 }
 
-const CURRENT_DATA_CONTRACT_VERSION: &str = "v1.28";
-const CURRENT_PROJECTION_SCHEMA_VERSION: i64 = 69;
-const V116_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.27";
-const V116_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION: i64 = 68;
+const CURRENT_DATA_CONTRACT_VERSION: &str = "v1.31";
+const CURRENT_PROJECTION_SCHEMA_VERSION: i64 = 72;
+const V118_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.30";
+const V118_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION: i64 = 71;
+const V117_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.29";
+const V117_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION: i64 = 70;
+const V116_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.28";
+const V116_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION: i64 = 69;
 const V115_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.26";
 const V115_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION: i64 = 67;
 const V114_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.25";
@@ -189,6 +193,8 @@ struct CurrentMigrationState {
     v114: bool,
     v115: bool,
     v116: bool,
+    v117: bool,
+    v118: bool,
 }
 
 impl CurrentMigrationState {
@@ -197,51 +203,66 @@ impl CurrentMigrationState {
         if !through_v69 {
             return false;
         }
+        let through_v113 = through_v69
+            && self.v70
+            && self.v71
+            && self.v76
+            && self.v77
+            && self.v78
+            && self.v79
+            && self.v80
+            && self.v81
+            && self.v82
+            && self.v83
+            && self.v84
+            && self.v85
+            && self.v86
+            && self.v87
+            && self.v88
+            && self.v89
+            && self.v90
+            && self.v91
+            && self.v92
+            && self.v93
+            && self.v94
+            && self.v95
+            && self.v96
+            && self.v97
+            && self.v98
+            && self.v99
+            && self.v100
+            && self.v101
+            && self.v102
+            && self.v103
+            && self.v104
+            && self.v105
+            && self.v106
+            && self.v107
+            && self.v108
+            && self.v109
+            && self.v110
+            && self.v111
+            && self.v112
+            && self.v113;
         if contract == CURRENT_DATA_CONTRACT_VERSION && schema == CURRENT_PROJECTION_SCHEMA_VERSION
         {
-            return self.v70
-                && self.v71
-                && self.v76
-                && self.v77
-                && self.v78
-                && self.v79
-                && self.v80
-                && self.v81
-                && self.v82
-                && self.v83
-                && self.v84
-                && self.v85
-                && self.v86
-                && self.v87
-                && self.v88
-                && self.v89
-                && self.v90
-                && self.v91
-                && self.v92
-                && self.v93
-                && self.v94
-                && self.v95
-                && self.v96
-                && self.v97
-                && self.v98
-                && self.v99
-                && self.v100
-                && self.v101
-                && self.v102
-                && self.v103
-                && self.v104
-                && self.v105
-                && self.v106
-                && self.v107
-                && self.v108
-                && self.v109
-                && self.v110
-                && self.v111
-                && self.v112
-                && self.v113
-                && self.v114
-                && self.v115
-                && self.v116;
+            return through_v113 && self.v114 && self.v115 && self.v116 && self.v117 && self.v118;
+        }
+        if self.v118 {
+            return false;
+        }
+        if contract == V118_MIGRATION_SOURCE_DATA_CONTRACT_VERSION
+            && schema == V118_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION
+        {
+            return through_v113 && self.v114 && self.v115 && self.v116 && self.v117;
+        }
+        if self.v117 {
+            return false;
+        }
+        if contract == V117_MIGRATION_SOURCE_DATA_CONTRACT_VERSION
+            && schema == V117_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION
+        {
+            return through_v113 && self.v114 && self.v115 && self.v116;
         }
         if self.v116 {
             return false;
@@ -249,48 +270,7 @@ impl CurrentMigrationState {
         if contract == V116_MIGRATION_SOURCE_DATA_CONTRACT_VERSION
             && schema == V116_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION
         {
-            return self.v70
-                && self.v71
-                && self.v76
-                && self.v77
-                && self.v78
-                && self.v79
-                && self.v80
-                && self.v81
-                && self.v82
-                && self.v83
-                && self.v84
-                && self.v85
-                && self.v86
-                && self.v87
-                && self.v88
-                && self.v89
-                && self.v90
-                && self.v91
-                && self.v92
-                && self.v93
-                && self.v94
-                && self.v95
-                && self.v96
-                && self.v97
-                && self.v98
-                && self.v99
-                && self.v100
-                && self.v101
-                && self.v102
-                && self.v103
-                && self.v104
-                && self.v105
-                && self.v106
-                && self.v107
-                && self.v108
-                && self.v109
-                && self.v110
-                && self.v111
-                && self.v112
-                && self.v113
-                && self.v114
-                && self.v115;
+            return through_v113 && self.v114 && self.v115;
         }
         if self.v115 {
             return false;
@@ -1440,8 +1420,8 @@ fn connection_has_legacy_feishu_migration_collision(
         .optional()?;
     if marker
         != Some((
-            V116_MIGRATION_SOURCE_DATA_CONTRACT_VERSION.to_string(),
-            V116_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION,
+            V118_MIGRATION_SOURCE_DATA_CONTRACT_VERSION.to_string(),
+            V118_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION,
             V043_CLASSIFIER_VERSION.to_string(),
         ))
     {
@@ -1449,8 +1429,8 @@ fn connection_has_legacy_feishu_migration_collision(
     }
     let migrations = load_current_migration_state(connection)?;
     if !migrations.admits(
-        V115_MIGRATION_SOURCE_DATA_CONTRACT_VERSION,
-        V115_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION,
+        V117_MIGRATION_SOURCE_DATA_CONTRACT_VERSION,
+        V117_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION,
     ) {
         return Ok(false);
     }
@@ -1536,7 +1516,7 @@ fn connection_has_current_data_contract(connection: &Connection) -> rusqlite::Re
         r#"
         SELECT contract_version = ?1
                AND projection_schema_version = ?2
-               AND EXISTS(SELECT 1 FROM schema_migration WHERE version = 116)
+               AND EXISTS(SELECT 1 FROM schema_migration WHERE version = 118)
         FROM rovai_data_contract
         WHERE singleton = 1
         "#,
@@ -1599,7 +1579,9 @@ fn load_current_migration_state(
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 113),
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 114),
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 115),
-               EXISTS(SELECT 1 FROM schema_migration WHERE version = 116)
+               EXISTS(SELECT 1 FROM schema_migration WHERE version = 116),
+               EXISTS(SELECT 1 FROM schema_migration WHERE version = 117),
+               EXISTS(SELECT 1 FROM schema_migration WHERE version = 118)
         "#,
         [],
         |row| {
@@ -1651,6 +1633,8 @@ fn load_current_migration_state(
                 v114: row.get(44)?,
                 v115: row.get(45)?,
                 v116: row.get(46)?,
+                v117: row.get(47)?,
+                v118: row.get(48)?,
             })
         },
     )
@@ -3168,13 +3152,19 @@ impl Database {
                 self.migrate_planned_shutdown_protocol_v3_v113()?;
             }
             if !self.schema_migration_applied(114)? {
-                self.migrate_channel_platform_v114()?;
+                self.migrate_command_diff_projection_v114()?;
             }
             if !self.schema_migration_applied(115)? {
-                self.migrate_feishu_developer_session_v115()?;
+                self.migrate_agent_run_file_changes_v115()?;
             }
             if !self.schema_migration_applied(116)? {
-                self.migrate_feishu_owner_camp_binding_v116()?;
+                self.migrate_channel_platform_v116()?;
+            }
+            if !self.schema_migration_applied(117)? {
+                self.migrate_feishu_developer_session_v117()?;
+            }
+            if !self.schema_migration_applied(118)? {
+                self.migrate_feishu_owner_camp_binding_v118()?;
             }
             if let Err(error) =
                 crate::notification::maintain_notification_episode_retention(self.connection())
@@ -3566,13 +3556,19 @@ impl Database {
             self.migrate_planned_shutdown_protocol_v3_v113()?;
         }
         if !self.schema_migration_applied(114)? {
-            self.migrate_channel_platform_v114()?;
+            self.migrate_command_diff_projection_v114()?;
         }
         if !self.schema_migration_applied(115)? {
-            self.migrate_feishu_developer_session_v115()?;
+            self.migrate_agent_run_file_changes_v115()?;
         }
         if !self.schema_migration_applied(116)? {
-            self.migrate_feishu_owner_camp_binding_v116()?;
+            self.migrate_channel_platform_v116()?;
+        }
+        if !self.schema_migration_applied(117)? {
+            self.migrate_feishu_developer_session_v117()?;
+        }
+        if !self.schema_migration_applied(118)? {
+            self.migrate_feishu_owner_camp_binding_v118()?;
         }
         if let Err(error) =
             crate::notification::maintain_notification_episode_retention(self.connection())
@@ -16206,7 +16202,7 @@ impl Database {
         Ok(())
     }
 
-    fn migrate_channel_platform_v114(&mut self) -> Result<()> {
+    fn migrate_channel_platform_v116(&mut self) -> Result<()> {
         self.connection
             .execute_batch("PRAGMA foreign_keys = OFF;")?;
         let migration_result = (|| -> Result<()> {
@@ -16668,12 +16664,12 @@ impl Database {
                     ON channel_delivery(request_id, status, delivery_kind, id);
 
                 UPDATE rovai_data_contract
-                SET contract_version = 'v1.26', projection_schema_version = 67,
+                SET contract_version = 'v1.29', projection_schema_version = 70,
                     reset_reason = NULL, updated_at = datetime('now')
                 WHERE singleton = 1;
 
                 INSERT INTO schema_migration(version, applied_at)
-                VALUES (114, datetime('now'));
+                VALUES (116, datetime('now'));
                 "#,
             )?;
             transaction.commit()?;
@@ -16689,12 +16685,12 @@ impl Database {
             })
             .optional()?
         {
-            anyhow::bail!("v113 migration left a foreign-key violation in {table} row {row_id}");
+            anyhow::bail!("v116 migration left a foreign-key violation in {table} row {row_id}");
         }
         Ok(())
     }
 
-    fn migrate_feishu_developer_session_v115(&mut self) -> Result<()> {
+    fn migrate_feishu_developer_session_v117(&mut self) -> Result<()> {
         let transaction = self
             .connection
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
@@ -16751,19 +16747,19 @@ impl Database {
                 WHERE state NOT IN ('completed', 'failed_recoverable');
 
             UPDATE rovai_data_contract
-            SET contract_version = 'v1.27', projection_schema_version = 68,
+            SET contract_version = 'v1.30', projection_schema_version = 71,
                 reset_reason = NULL, updated_at = datetime('now')
             WHERE singleton = 1;
 
             INSERT INTO schema_migration(version, applied_at)
-            VALUES (115, datetime('now'));
+            VALUES (117, datetime('now'));
             "#,
         )?;
         transaction.commit()?;
         Ok(())
     }
 
-    fn migrate_feishu_owner_camp_binding_v116(&mut self) -> Result<()> {
+    fn migrate_feishu_owner_camp_binding_v118(&mut self) -> Result<()> {
         self.connection
             .execute_batch("PRAGMA foreign_keys = OFF; PRAGMA legacy_alter_table = ON;")?;
         let migration_result = (|| -> Result<()> {
@@ -16861,10 +16857,10 @@ impl Database {
                 CREATE INDEX feishu_owner_app_identity_app_idx
                     ON feishu_owner_app_identity(app_id, account_id);
 
-                ALTER TABLE channel_delivery RENAME TO channel_delivery_v115;
-                ALTER TABLE channel_turn_request RENAME TO channel_turn_request_v115;
+                ALTER TABLE channel_delivery RENAME TO channel_delivery_v117;
+                ALTER TABLE channel_turn_request RENAME TO channel_turn_request_v117;
                 ALTER TABLE channel_conversation_binding
-                    RENAME TO channel_conversation_binding_v115;
+                    RENAME TO channel_conversation_binding_v117;
                 DROP INDEX channel_delivery_claim_idx;
                 DROP INDEX channel_delivery_request_idx;
                 DROP INDEX channel_turn_request_active_binding_idx;
@@ -16918,7 +16914,7 @@ impl Database {
                        END,
                        binding.camp_id, 'active', 1, binding.version,
                        binding.created_at, binding.updated_at, NULL
-                FROM channel_conversation_binding_v115 AS binding
+                FROM channel_conversation_binding_v117 AS binding
                 JOIN project_binding AS project
                   ON project.id = binding.project_binding_id
                 LEFT JOIN project_catalog_item AS catalog
@@ -16973,7 +16969,7 @@ impl Database {
                        status, queue_position, camp_id, camp_message_id, camp_turn_id,
                        trigger_camp_sequence, failure_code, version,
                        created_at, admitted_at, completed_at, updated_at
-                FROM channel_turn_request_v115;
+                FROM channel_turn_request_v117;
 
                 CREATE TABLE pending_camp_binding (
                     id TEXT PRIMARY KEY,
@@ -17088,20 +17084,20 @@ impl Database {
                        payload_json, status, attempt_count, available_at,
                        lease_owner, lease_expires_at, external_delivery_message_id,
                        failure_code, created_at, updated_at, ended_at
-                FROM channel_delivery_v115;
+                FROM channel_delivery_v117;
 
-                DROP TABLE channel_delivery_v115;
-                DROP TABLE channel_turn_request_v115;
-                DROP TABLE channel_conversation_binding_v115;
+                DROP TABLE channel_delivery_v117;
+                DROP TABLE channel_turn_request_v117;
+                DROP TABLE channel_conversation_binding_v117;
                 DROP TABLE project_binding;
 
                 UPDATE rovai_data_contract
-                SET contract_version = 'v1.28', projection_schema_version = 69,
+                SET contract_version = 'v1.31', projection_schema_version = 72,
                     reset_reason = NULL, updated_at = datetime('now')
                 WHERE singleton = 1;
 
                 INSERT INTO schema_migration(version, applied_at)
-                VALUES (116, datetime('now'));
+                VALUES (118, datetime('now'));
                 "#,
             )?;
             transaction.commit()?;
@@ -17119,7 +17115,7 @@ impl Database {
             })
             .optional()?
         {
-            anyhow::bail!("v116 migration left a foreign-key violation in {table} row {row_id}");
+            anyhow::bail!("v118 migration left a foreign-key violation in {table} row {row_id}");
         }
         Ok(())
     }
@@ -17283,7 +17279,7 @@ impl Database {
         }
         migrate_planned_shutdown_protocol_v3_schema(&transaction)?;
         transaction.execute(
-            "INSERT INTO schema_migration(version, applied_at) VALUES (115, datetime('now'))",
+            "INSERT INTO schema_migration(version, applied_at) VALUES (117, datetime('now'))",
             [],
         )?;
         transaction.commit()?;
@@ -17315,6 +17311,74 @@ impl Database {
 
             INSERT INTO schema_migration(version, applied_at)
             VALUES (109, datetime('now'));
+            "#,
+        )?;
+        transaction.commit()?;
+        Ok(())
+    }
+
+    fn migrate_command_diff_projection_v114(&mut self) -> Result<()> {
+        let transaction = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        transaction.execute_batch(
+            r#"
+            ALTER TABLE canonical_runtime_activity
+                ADD COLUMN diff_projection_json TEXT;
+
+            UPDATE rovai_data_contract
+            SET contract_version = 'v1.26', projection_schema_version = 67,
+                reset_reason = NULL, updated_at = datetime('now')
+            WHERE singleton = 1;
+
+            INSERT INTO schema_migration(version, applied_at)
+            VALUES (114, datetime('now'));
+            "#,
+        )?;
+        transaction.commit()?;
+        Ok(())
+    }
+
+    fn migrate_agent_run_file_changes_v115(&mut self) -> Result<()> {
+        let transaction = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        transaction.execute_batch(
+            r#"
+            CREATE TABLE agent_run_file_change_projection (
+                agent_run_id TEXT NOT NULL REFERENCES agent_run(id) ON DELETE CASCADE,
+                execution_epoch INTEGER NOT NULL CHECK(execution_epoch >= 1),
+                schema_version INTEGER NOT NULL CHECK(schema_version >= 1),
+                status TEXT NOT NULL CHECK(status IN ('complete', 'no_changes')),
+                file_count INTEGER NOT NULL CHECK(file_count >= 0),
+                operation_count INTEGER NOT NULL CHECK(operation_count >= 0),
+                additions INTEGER CHECK(additions IS NULL OR additions >= 0),
+                deletions INTEGER CHECK(deletions IS NULL OR deletions >= 0),
+                files_summary_json TEXT NOT NULL,
+                details_blob_id TEXT REFERENCES managed_blob(id),
+                source_evidence_ids_json TEXT NOT NULL,
+                completed_at TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                PRIMARY KEY(agent_run_id, execution_epoch),
+                CHECK (
+                    (status = 'complete' AND file_count > 0 AND operation_count > 0
+                        AND details_blob_id IS NOT NULL)
+                    OR
+                    (status = 'no_changes' AND file_count = 0 AND operation_count = 0
+                        AND additions IS NULL AND deletions IS NULL
+                        AND details_blob_id IS NULL)
+                )
+            );
+            CREATE INDEX agent_run_file_change_projection_completed_idx
+                ON agent_run_file_change_projection(completed_at, agent_run_id, execution_epoch);
+
+            UPDATE rovai_data_contract
+            SET contract_version = 'v1.28', projection_schema_version = 69,
+                reset_reason = NULL, updated_at = datetime('now')
+            WHERE singleton = 1;
+
+            INSERT INTO schema_migration(version, applied_at)
+            VALUES (115, datetime('now'));
             "#,
         )?;
         transaction.commit()?;
@@ -21723,15 +21787,15 @@ impl Database {
 }
 
 #[cfg(test)]
-fn downgrade_current_schema_to_v115_source_for_test(connection: &Connection) {
-    let has_v116: bool = connection
+fn downgrade_current_schema_to_v117_source_for_test(connection: &Connection) {
+    let has_v118: bool = connection
         .query_row(
-            "SELECT EXISTS(SELECT 1 FROM schema_migration WHERE version = 116)",
+            "SELECT EXISTS(SELECT 1 FROM schema_migration WHERE version = 118)",
             [],
             |row| row.get(0),
         )
         .unwrap();
-    if !has_v116 {
+    if !has_v118 {
         return;
     }
     for table in [
@@ -21875,10 +21939,10 @@ fn downgrade_current_schema_to_v115_source_for_test(connection: &Connection) {
                 ON channel_delivery(request_id, status, delivery_kind, id);
 
             UPDATE rovai_data_contract
-            SET contract_version = 'v1.27', projection_schema_version = 68,
+            SET contract_version = 'v1.30', projection_schema_version = 71,
                 reset_reason = NULL, updated_at = datetime('now')
             WHERE singleton = 1;
-            DELETE FROM schema_migration WHERE version = 116;
+            DELETE FROM schema_migration WHERE version = 118;
             COMMIT;
             PRAGMA foreign_keys = ON;
             "#,
@@ -21887,16 +21951,16 @@ fn downgrade_current_schema_to_v115_source_for_test(connection: &Connection) {
 }
 
 #[cfg(test)]
-fn downgrade_current_schema_to_v112_source_for_test(connection: &Connection) {
-    downgrade_current_schema_to_v115_source_for_test(connection);
-    let has_v113: bool = connection
+fn downgrade_current_schema_to_v115_source_for_test(connection: &Connection) {
+    downgrade_current_schema_to_v117_source_for_test(connection);
+    let has_v116: bool = connection
         .query_row(
-            "SELECT EXISTS(SELECT 1 FROM schema_migration WHERE version = 113)",
+            "SELECT EXISTS(SELECT 1 FROM schema_migration WHERE version = 116)",
             [],
             |row| row.get(0),
         )
         .unwrap();
-    if !has_v113 {
+    if !has_v116 {
         return;
     }
     connection
@@ -22113,10 +22177,10 @@ fn downgrade_current_schema_to_v112_source_for_test(connection: &Connection) {
             DROP TABLE external_principal;
             DROP TABLE project_binding;
             UPDATE rovai_data_contract
-            SET contract_version = 'v1.25', projection_schema_version = 66
+            SET contract_version = 'v1.28', projection_schema_version = 69
             WHERE singleton = 1;
-            DELETE FROM schema_migration WHERE version = 114;
-            DELETE FROM schema_migration WHERE version = 115;
+            DELETE FROM schema_migration WHERE version = 116;
+            DELETE FROM schema_migration WHERE version = 117;
             PRAGMA foreign_keys = ON;
             "#,
         )
@@ -22129,6 +22193,75 @@ fn downgrade_current_schema_to_v112_source_for_test(connection: &Connection) {
             .unwrap(),
         0
     );
+}
+
+#[cfg(test)]
+fn downgrade_current_schema_to_v114_source_for_test(connection: &Connection) {
+    downgrade_current_schema_to_v115_source_for_test(connection);
+    let has_v115: bool = connection
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM schema_migration WHERE version = 115)",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    if !has_v115 {
+        return;
+    }
+    connection
+        .execute_batch(
+            r#"
+            DROP TABLE agent_run_file_change_projection;
+            UPDATE rovai_data_contract
+            SET contract_version = 'v1.26', projection_schema_version = 67
+            WHERE singleton = 1;
+            DELETE FROM schema_migration WHERE version = 115;
+            "#,
+        )
+        .unwrap();
+}
+
+#[cfg(test)]
+fn downgrade_current_schema_to_v113_source_for_test(connection: &Connection) {
+    downgrade_current_schema_to_v114_source_for_test(connection);
+    let has_v114: bool = connection
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM schema_migration WHERE version = 114)",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    if !has_v114 {
+        return;
+    }
+    connection
+        .execute_batch(
+            r#"
+            PRAGMA foreign_keys = OFF;
+            ALTER TABLE canonical_runtime_activity DROP COLUMN diff_projection_json;
+            UPDATE rovai_data_contract
+            SET contract_version = 'v1.25', projection_schema_version = 66
+            WHERE singleton = 1;
+            DELETE FROM schema_migration WHERE version = 114;
+            PRAGMA foreign_keys = ON;
+            "#,
+        )
+        .unwrap();
+}
+
+#[cfg(test)]
+fn downgrade_current_schema_to_v112_source_for_test(connection: &Connection) {
+    downgrade_current_schema_to_v113_source_for_test(connection);
+    let has_v113: bool = connection
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM schema_migration WHERE version = 113)",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    if !has_v113 {
+        return;
+    }
     connection
         .execute_batch(
             r#"
@@ -22178,7 +22311,7 @@ fn downgrade_current_schema_to_v112_source_for_test(connection: &Connection) {
 
 #[cfg(test)]
 fn downgrade_current_schema_to_legacy_feishu_collision_for_test(connection: &Connection) {
-    downgrade_current_schema_to_v115_source_for_test(connection);
+    downgrade_current_schema_to_v117_source_for_test(connection);
     connection
         .execute_batch(
             r#"
@@ -22242,7 +22375,7 @@ fn downgrade_current_schema_to_legacy_feishu_collision_for_test(connection: &Con
             CREATE INDEX planned_shutdown_cycle_pending_idx
                 ON planned_shutdown_cycle(requested_at, core_generation)
                 WHERE settled_at IS NULL;
-            DELETE FROM schema_migration WHERE version = 115;
+            DELETE FROM schema_migration WHERE version = 117;
             COMMIT;
             "#,
         )
@@ -22569,7 +22702,6 @@ fn downgrade_current_schema_to_v102_source_for_test(connection: &Connection) {
             UPDATE rovai_data_contract
             SET contract_version = 'v1.15', projection_schema_version = 56
             WHERE singleton = 1;
-            DELETE FROM schema_migration WHERE version = 109;
             DELETE FROM schema_migration WHERE version = 108;
             DELETE FROM schema_migration WHERE version = 107;
             DELETE FROM schema_migration WHERE version = 106;
@@ -23126,6 +23258,8 @@ mod tests {
             v114: version >= 114,
             v115: version >= 115,
             v116: version >= 116,
+            v117: version >= 117,
+            v118: version >= 118,
         }
     }
 
@@ -23136,16 +23270,28 @@ mod tests {
                 "current",
                 CURRENT_DATA_CONTRACT_VERSION,
                 CURRENT_PROJECTION_SCHEMA_VERSION,
+                118,
+            ),
+            (
+                "v1.30/schema-71 after Feishu developer session",
+                V118_MIGRATION_SOURCE_DATA_CONTRACT_VERSION,
+                V118_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION,
+                117,
+            ),
+            (
+                "v1.29/schema-70 after Feishu channel platform",
+                V117_MIGRATION_SOURCE_DATA_CONTRACT_VERSION,
+                V117_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION,
                 116,
             ),
             (
-                "v1.27/schema-68 after Feishu developer session",
+                "v1.28/schema-69 after agent-run file changes",
                 V116_MIGRATION_SOURCE_DATA_CONTRACT_VERSION,
                 V116_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION,
                 115,
             ),
             (
-                "v1.26/schema-67 after Feishu channel platform",
+                "v1.26/schema-67 after Runtime diff projection",
                 V115_MIGRATION_SOURCE_DATA_CONTRACT_VERSION,
                 V115_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION,
                 114,
@@ -23398,7 +23544,7 @@ mod tests {
             );
         }
 
-        let current = migration_state_through(116);
+        let current = migration_state_through(118);
         let v092_source = migration_state_through(91);
         let mut missing_intermediate = current;
         missing_intermediate.v84 = false;
@@ -23468,7 +23614,7 @@ mod tests {
             )
             .expect("current contract marker should load");
 
-        assert_eq!(state, migration_state_through(116));
+        assert_eq!(state, migration_state_through(118));
         assert!(state.admits(&contract, schema));
         assert!(has_admissible_data_contract(
             &directory.join("rovai.sqlite")
@@ -25453,6 +25599,102 @@ mod tests {
     }
 
     #[test]
+    fn v114_adds_runtime_diff_projection_without_workspace_capture_storage() {
+        let directory = std::env::temp_dir().join(format!("rovai-db-v114-test-{}", Uuid::new_v4()));
+        let mut database = crate::test_support::fresh_schema_database_fast_at(&directory);
+        downgrade_current_schema_to_v113_source_for_test(database.connection());
+
+        database.migrate_command_diff_projection_v114().unwrap();
+
+        assert!(
+            table_columns(database.connection(), "canonical_runtime_activity")
+                .unwrap()
+                .contains(&"diff_projection_json".to_string())
+        );
+        assert!(!database
+            .connection()
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name LIKE 'workspace_change_%')",
+                [],
+                |row| row.get::<_, bool>(0),
+            )
+            .unwrap());
+        assert_eq!(
+            database
+                .connection()
+                .query_row(
+                    "SELECT contract_version, projection_schema_version FROM rovai_data_contract WHERE singleton = 1",
+                    [],
+                    |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)),
+                )
+                .unwrap(),
+            ("v1.26".to_string(), 67)
+        );
+        assert_eq!(
+            database
+                .connection()
+                .query_row("SELECT COUNT(*) FROM pragma_foreign_key_check", [], |row| {
+                    row.get::<_, i64>(0)
+                })
+                .unwrap(),
+            0
+        );
+
+        drop(database);
+        std::fs::remove_dir_all(directory).expect("temporary database should be removable");
+    }
+
+    #[test]
+    fn v115_adds_agent_run_file_change_projection_without_git_windows() {
+        let directory = std::env::temp_dir().join(format!("rovai-db-v115-test-{}", Uuid::new_v4()));
+        let mut database = crate::test_support::fresh_schema_database_fast_at(&directory);
+        downgrade_current_schema_to_v114_source_for_test(database.connection());
+        database.migrate_agent_run_file_changes_v115().unwrap();
+
+        assert!(
+            database
+                .connection()
+                .query_row(
+                    "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'agent_run_file_change_projection')",
+                    [],
+                    |row| row.get::<_, bool>(0),
+                )
+                .unwrap()
+        );
+        assert!(!database
+            .connection()
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name LIKE 'workspace_change_%')",
+                [],
+                |row| row.get::<_, bool>(0),
+            )
+            .unwrap());
+        assert_eq!(
+            database
+                .connection()
+                .query_row(
+                    "SELECT contract_version, projection_schema_version FROM rovai_data_contract WHERE singleton = 1",
+                    [],
+                    |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)),
+                )
+                .unwrap(),
+            ("v1.28".to_string(), 69)
+        );
+        assert_eq!(
+            database
+                .connection()
+                .query_row("SELECT COUNT(*) FROM pragma_foreign_key_check", [], |row| {
+                    row.get::<_, i64>(0)
+                })
+                .unwrap(),
+            0
+        );
+
+        drop(database);
+        std::fs::remove_dir_all(directory).expect("temporary database should be removable");
+    }
+
+    #[test]
     fn v108_adds_grok_compaction_closed_sets_and_preserves_observer_state() {
         let directory = std::env::temp_dir().join(format!("rovai-db-v108-test-{}", Uuid::new_v4()));
         let mut database = crate::test_support::fresh_schema_database_fast_at(&directory);
@@ -25791,7 +26033,7 @@ mod tests {
     }
 
     #[test]
-    fn v116_upgrades_v112_preserves_evidence_and_installs_owner_binding_contract() {
+    fn v118_upgrades_v112_preserves_evidence_and_installs_owner_binding_contract() {
         let (database, directory) = crate::test_support::seeded_runtime_database();
         downgrade_current_schema_to_v112_source_for_test(database.connection());
         let source_counts: (i64, i64) = database
@@ -25812,7 +26054,7 @@ mod tests {
                 .query_row(
                     r#"
                     SELECT contract_version, projection_schema_version,
-                           (SELECT COUNT(*) FROM schema_migration WHERE version IN (113, 114, 115, 116))
+                           (SELECT COUNT(*) FROM schema_migration WHERE version BETWEEN 113 AND 118)
                     FROM rovai_data_contract WHERE singleton = 1
                     "#,
                     [],
@@ -25827,7 +26069,7 @@ mod tests {
         );
         drop(database);
 
-        let upgraded = Database::open(&directory).expect("v112 source should migrate to v116");
+        let upgraded = Database::open(&directory).expect("v112 source should migrate to v118");
         assert_eq!(
             upgraded
                 .connection()
@@ -25838,6 +26080,8 @@ mod tests {
                            (SELECT COUNT(*) FROM schema_migration WHERE version = 114),
                            (SELECT COUNT(*) FROM schema_migration WHERE version = 115),
                            (SELECT COUNT(*) FROM schema_migration WHERE version = 116),
+                           (SELECT COUNT(*) FROM schema_migration WHERE version = 117),
+                           (SELECT COUNT(*) FROM schema_migration WHERE version = 118),
                            (SELECT COUNT(*) FROM pragma_foreign_key_check)
                     FROM rovai_data_contract WHERE singleton = 1
                     "#,
@@ -25850,12 +26094,16 @@ mod tests {
                         row.get::<_, i64>(4)?,
                         row.get::<_, i64>(5)?,
                         row.get::<_, i64>(6)?,
+                        row.get::<_, i64>(7)?,
+                        row.get::<_, i64>(8)?,
                     )),
                 )
                 .unwrap(),
             (
                 CURRENT_DATA_CONTRACT_VERSION.to_string(),
                 CURRENT_PROJECTION_SCHEMA_VERSION,
+                1,
+                1,
                 1,
                 1,
                 1,
@@ -25927,22 +26175,22 @@ mod tests {
                 table_columns(upgraded.connection(), "feishu_account")
                     .unwrap()
                     .contains(&column.to_string()),
-                "Migration 115 should retain feishu_account.{column}"
+                "Migration 117 should retain feishu_account.{column}"
             );
         }
         drop(upgraded);
 
-        let restarted = Database::open(&directory).expect("v116 restart should be idempotent");
+        let restarted = Database::open(&directory).expect("v118 restart should be idempotent");
         assert_eq!(
             restarted
                 .connection()
                 .query_row(
-                    "SELECT COUNT(*) FROM schema_migration WHERE version IN (113, 114, 115, 116)",
+                    "SELECT COUNT(*) FROM schema_migration WHERE version BETWEEN 113 AND 118",
                     [],
                     |row| row.get::<_, i64>(0),
                 )
                 .unwrap(),
-            4
+            6
         );
         drop(restarted);
         std::fs::remove_dir_all(directory).expect("temporary database should be removable");
@@ -25986,7 +26234,7 @@ mod tests {
                 .query_row(
                     r#"
                     SELECT
-                        (SELECT COUNT(*) FROM schema_migration WHERE version IN (113, 114, 115, 116)),
+                        (SELECT COUNT(*) FROM schema_migration WHERE version BETWEEN 113 AND 118),
                         (SELECT COUNT(*) FROM feishu_account
                          WHERE id = 'legacy-feishu-account'
                            AND user_id_digest = 'legacy-user-digest'
@@ -26011,7 +26259,7 @@ mod tests {
                     },
                 )
                 .unwrap(),
-            (4, 1, 1, 1, 0)
+            (6, 1, 1, 1, 0)
         );
         let cycle_schema: String = reopened
             .connection()

@@ -67,6 +67,9 @@ pub enum CodexIncoming {
         agent_run_id: String,
         execution_epoch: i64,
     },
+    IngressBarrier {
+        completion: oneshot::Sender<()>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -135,6 +138,7 @@ pub(crate) struct CodexHost {
     pending: Mutex<HashMap<u64, PendingRpc>>,
     next_id: AtomicU64,
     routes: CodexThreadRoutes,
+    ingress_fence: Mutex<()>,
     incoming: mpsc::UnboundedSender<CodexIncoming>,
     alive: AtomicBool,
     executable_path: PathBuf,
@@ -384,6 +388,7 @@ impl CodexHost {
             pending: Mutex::new(HashMap::new()),
             next_id: AtomicU64::new(1),
             routes: CodexThreadRoutes::default(),
+            ingress_fence: Mutex::new(()),
             incoming,
             alive: AtomicBool::new(true),
             executable_path: codex_path.to_path_buf(),
@@ -434,6 +439,11 @@ impl CodexHost {
                                 continue;
                             }
                         };
+                        // Keep routing and queue insertion atomic with cancellation's
+                        // unbind + ingress barrier. Otherwise cancellation could enqueue
+                        // its barrier after routing selected an owner but before this
+                        // message reached Core's Evidence queue.
+                        let _ingress_fence = host.ingress_fence.lock().await;
                         let is_response = message.get("method").is_none()
                             && message.get("id").and_then(Value::as_u64).is_some();
                         if is_response {
@@ -555,6 +565,29 @@ impl CodexHost {
 
     async fn unbind_thread(&self, thread_id: &str, owner: &CodexRuntimeOwner) {
         self.routes.unbind_thread(thread_id, owner).await;
+    }
+
+    async fn unbind_thread_and_flush_ingress(
+        &self,
+        thread_id: Option<&str>,
+        owner: &CodexRuntimeOwner,
+    ) -> bool {
+        let completion = {
+            let _ingress_fence = self.ingress_fence.lock().await;
+            if let Some(thread_id) = thread_id {
+                self.routes.unbind_thread(thread_id, owner).await;
+            }
+            let (completion, flushed) = oneshot::channel();
+            if self
+                .incoming
+                .send(CodexIncoming::IngressBarrier { completion })
+                .is_err()
+            {
+                return false;
+            }
+            flushed
+        };
+        completion.await.is_ok()
     }
 
     async fn owners(&self) -> HashSet<CodexRuntimeOwner> {
@@ -682,6 +715,13 @@ pub struct CodexRuntime {
     action_items: Mutex<HashMap<String, Value>>,
     streamed_agent_text: Mutex<String>,
     completed_agent_message: RwLock<Option<String>>,
+    latest_turn_diff: RwLock<Option<CodexTurnDiffSnapshot>>,
+}
+
+#[derive(Debug, Clone)]
+struct CodexTurnDiffSnapshot {
+    turn_id: String,
+    diff: String,
 }
 
 #[derive(Debug)]
@@ -738,6 +778,7 @@ impl CodexRuntime {
             action_items: Mutex::new(HashMap::new()),
             streamed_agent_text: Mutex::new(String::new()),
             completed_agent_message: RwLock::new(None),
+            latest_turn_diff: RwLock::new(None),
         })
     }
 
@@ -881,6 +922,7 @@ impl CodexRuntime {
     ) -> Result<String> {
         self.streamed_agent_text.lock().await.clear();
         *self.completed_agent_message.write().await = None;
+        *self.latest_turn_diff.write().await = None;
         let thread_id = self
             .thread_id()
             .await
@@ -980,7 +1022,33 @@ impl CodexRuntime {
                     self.action_items.lock().await.remove(item_id);
                 }
             }
+            "turn/diff/updated" => {
+                let Some(turn_id) = params.get("turnId").and_then(Value::as_str) else {
+                    return;
+                };
+                let Some(diff) = params.get("diff").and_then(Value::as_str) else {
+                    return;
+                };
+                if self.turn_id().await.as_deref() == Some(turn_id) {
+                    *self.latest_turn_diff.write().await = Some(CodexTurnDiffSnapshot {
+                        turn_id: turn_id.to_string(),
+                        diff: diff.to_string(),
+                    });
+                }
+            }
             _ => {}
+        }
+    }
+
+    pub async fn take_turn_diff(&self, completed_turn_id: &str) -> Option<String> {
+        let mut snapshot = self.latest_turn_diff.write().await;
+        if snapshot
+            .as_ref()
+            .is_some_and(|snapshot| snapshot.turn_id == completed_turn_id)
+        {
+            snapshot.take().map(|snapshot| snapshot.diff)
+        } else {
+            None
         }
     }
 
@@ -1020,6 +1088,13 @@ impl CodexRuntime {
         if let Some(thread_id) = self.thread_id().await {
             self.host.unbind_thread(&thread_id, &self.owner).await;
         }
+    }
+
+    pub(crate) async fn detach_and_flush_ingress(&self) -> bool {
+        let thread_id = self.thread_id().await;
+        self.host
+            .unbind_thread_and_flush_ingress(thread_id.as_deref(), &self.owner)
+            .await
     }
 
     pub fn host_instance_id(&self) -> &str {
@@ -1371,7 +1446,7 @@ impl CodexCliRuntimeAdapter {
             .cloned()
     }
 
-    pub async fn forget_agent_run(&self, agent_run_id: &str, execution_epoch: i64) {
+    pub async fn forget_agent_run(&self, agent_run_id: &str, execution_epoch: i64) -> bool {
         let runtime = {
             let mut runtimes = self.agent_run_runtimes.lock().await;
             if runtimes
@@ -1388,7 +1463,7 @@ impl CodexCliRuntimeAdapter {
         }
         self.fleet
             .release(agent_run_id, execution_epoch, FleetReleaseDisposition::Stop)
-            .await;
+            .await
     }
 
     pub async fn complete_agent_run(&self, agent_run_id: &str, execution_epoch: i64) {
@@ -1968,12 +2043,38 @@ pub fn normalize_event(method: &str, params: &Value) -> (&'static str, Value) {
         "thread/status/changed" => ("runtime.state", params.clone()),
         "error" => ("error", params.clone()),
         "item/started" => ("activity.started", params.clone()),
-        "item/completed" => ("activity.completed", params.clone()),
+        "item/completed" => ("activity.completed", completed_activity_payload(params)),
         _ => (
             "runtime.native",
             json!({"method": method, "params": params}),
         ),
     }
+}
+
+fn completed_activity_payload(params: &Value) -> Value {
+    let mut payload = params.clone();
+    let Some(item) = params.get("item") else {
+        return payload;
+    };
+    if item.get("type").and_then(Value::as_str) != Some("fileChange")
+        || item.get("status").and_then(Value::as_str) != Some("completed")
+    {
+        return payload;
+    }
+    let Some(changes) = item.get("changes").and_then(Value::as_array) else {
+        return payload;
+    };
+    if changes.is_empty() {
+        return payload;
+    }
+    payload["runtimeDiff"] = json!({
+        "adapterKind": "codex-cli",
+        "protocolFamily": "codex-app-server",
+        "sourceEventKind": "item/completed.fileChange.completed",
+        "semanticKind": "codex_file_change_snapshot",
+        "entries": changes,
+    });
+    payload
 }
 
 pub struct CompletedTurn {
@@ -2039,6 +2140,42 @@ mod tests {
             config: None,
             runtime_workspace_roots: None,
             ephemeral: false,
+        }
+    }
+
+    #[test]
+    fn only_completed_file_change_items_create_runtime_diff_candidates() {
+        let completed = completed_activity_payload(&json!({
+            "item": {
+                "id": "change-1",
+                "type": "fileChange",
+                "status": "completed",
+                "changes": [{
+                    "path": "src/app.ts",
+                    "kind": {"type": "update"},
+                    "diff": "@@ -1 +1 @@\n-old\n+new\n"
+                }]
+            }
+        }));
+        assert_eq!(
+            completed.pointer("/runtimeDiff/sourceEventKind"),
+            Some(&json!("item/completed.fileChange.completed"))
+        );
+        assert_eq!(
+            completed.pointer("/runtimeDiff/entries/0/path"),
+            Some(&json!("src/app.ts"))
+        );
+
+        for payload in [
+            json!({"item": {"type": "fileChange", "status": "inProgress", "changes": [{"path": "src/app.ts", "diff": "+partial"}]}}),
+            json!({"item": {"type": "commandExecution", "status": "completed", "changes": [{"path": "src/app.ts", "diff": "+guessed"}]}}),
+            json!({"item": {"type": "fileChange", "status": "completed", "changes": []}}),
+        ] {
+            assert!(
+                completed_activity_payload(&payload)
+                    .get("runtimeDiff")
+                    .is_none()
+            );
         }
     }
 

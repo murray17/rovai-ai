@@ -1,0 +1,833 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="day">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Rovai AI · Files Changed 详情页设计稿</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --canvas: #eceeef;
+      --surface: #fbfbfa;
+      --surface-raised: #ffffff;
+      --surface-subtle: #f0f2f4;
+      --surface-muted: #e7eaed;
+      --surface-selected: #e9ecee;
+      --surface-hover: #e8eaea;
+      --ink: #171b20;
+      --muted: #616a73;
+      --faint: #6e7382;
+      --line: #dfe4e8;
+      --line-strong: #c7cfd6;
+      --control-line: #8b9389;
+      --rail: #f3f4f4;
+      --rail-ink: #626b72;
+      --rail-line: #dadde0;
+      --rail-logo: #526f88;
+      --brand: #526f88;
+      --brand-ink: #405f7e;
+      --brand-soft: #e9eef3;
+      --ember: #d3a45f;
+      --focus: #526f88;
+      --focus-soft: rgba(82, 111, 136, .16);
+      --evidence-canvas: #f4f6f3;
+      --evidence-surface: #ffffff;
+      --evidence-ink: #252a36;
+      --evidence-muted: #5f6678;
+      --evidence-line: #d5dad3;
+      --diff-context: var(--evidence-surface);
+      --diff-add: #137333;
+      --diff-add-soft: #e6f4ea;
+      --diff-remove: #b3261e;
+      --diff-remove-soft: #fce8e6;
+      --diff-hunk-soft: #f3f4f4;
+      --shadow-float: 0 18px 56px rgba(38, 45, 58, .14);
+      --sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", "Segoe UI", sans-serif;
+      --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      --rail-width: 270px;
+    }
+
+    :root[data-theme="night"] {
+      color-scheme: dark;
+      --canvas: #0d1114;
+      --surface: #151a1e;
+      --surface-raised: #1b2227;
+      --surface-subtle: #1a2024;
+      --surface-muted: #242d33;
+      --surface-selected: #222c33;
+      --surface-hover: #1d252b;
+      --ink: #e7ecef;
+      --muted: #abb5bc;
+      --faint: #919da6;
+      --line: #333e46;
+      --line-strong: #53616b;
+      --control-line: #687b88;
+      --rail: #11161a;
+      --rail-ink: #a6b1b8;
+      --rail-line: #313b43;
+      --rail-logo: #b1c8d8;
+      --brand: #7897ae;
+      --brand-ink: #c0d4e1;
+      --brand-soft: #22303a;
+      --ember: #d2aa72;
+      --focus: #8fb3cb;
+      --focus-soft: rgba(143, 179, 203, .18);
+      --evidence-canvas: #12191d;
+      --evidence-surface: #171f24;
+      --evidence-ink: #dce4e9;
+      --evidence-muted: #9eabb3;
+      --evidence-line: #35424a;
+      --diff-context: var(--evidence-surface);
+      --diff-add: #92c7a5;
+      --diff-add-soft: #1a2b22;
+      --diff-remove: #e09a94;
+      --diff-remove-soft: #321e1d;
+      --diff-hunk-soft: #1b272a;
+      --shadow-float: 0 22px 64px rgba(0, 0, 0, .42);
+    }
+
+    * { box-sizing: border-box; }
+    [hidden] { display: none !important; }
+    html, body { width: 100%; height: 100%; min-width: 1040px; margin: 0; }
+    body {
+      display: flex;
+      overflow: hidden;
+      flex-direction: column;
+      color: var(--ink);
+      background: var(--canvas);
+      font: 13px/1.6 var(--sans);
+      text-rendering: optimizeLegibility;
+    }
+    button { color: inherit; font: inherit; }
+    button:active:not(:disabled) { transform: translateY(1px); }
+    button:disabled { cursor: default; opacity: .42; }
+    :where(button, [tabindex]):focus-visible {
+      outline: 2px solid var(--focus);
+      outline-offset: 2px;
+    }
+    code { font-family: var(--mono); }
+    * { scrollbar-color: var(--control-line) transparent; scrollbar-width: thin; }
+    ::selection { color: var(--ink); background: var(--focus-soft); }
+    .icon {
+      display: block;
+      width: 100%;
+      height: 100%;
+      fill: none;
+      stroke: currentColor;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+      stroke-width: 1.5;
+      vector-effect: non-scaling-stroke;
+    }
+    .skip-link {
+      position: fixed;
+      top: 8px;
+      left: 8px;
+      z-index: 100;
+      padding: 6px 9px;
+      border-radius: 6px;
+      color: var(--ink);
+      background: var(--surface-raised);
+      transform: translateY(-160%);
+    }
+    .skip-link:focus { transform: translateY(0); }
+
+    .prototype-bar {
+      position: relative;
+      z-index: 20;
+      display: flex;
+      min-height: 58px;
+      flex: 0 0 auto;
+      align-items: center;
+      gap: 16px;
+      padding: 7px 14px;
+      border-bottom: 1px solid var(--line-strong);
+      background: var(--surface-raised);
+    }
+    .prototype-heading { display: grid; min-width: 264px; gap: 1px; }
+    .prototype-heading strong { font-size: 12.5px; letter-spacing: -.01em; }
+    .prototype-heading span { color: var(--faint); font-size: 9.5px; line-height: 1.35; }
+    .prototype-controls { display: flex; min-width: 0; flex: 1; align-items: center; justify-content: flex-end; gap: 9px; }
+    .prototype-field { display: inline-flex; align-items: center; gap: 6px; }
+    .prototype-field > span { color: var(--faint); font-size: 9.5px; }
+    .segments {
+      display: inline-flex;
+      min-height: 30px;
+      align-items: center;
+      gap: 2px;
+      padding: 2px;
+      border: 1px solid var(--line-strong);
+      border-radius: 7px;
+      background: var(--surface-subtle);
+    }
+    .segments button {
+      min-height: 24px;
+      padding: 0 8px;
+      border: 0;
+      border-radius: 5px;
+      color: var(--muted);
+      background: transparent;
+      cursor: pointer;
+      font-size: 10px;
+      font-weight: 680;
+    }
+    .segments button:hover { color: var(--ink); background: var(--surface-hover); }
+    .segments button[aria-pressed="true"] { color: var(--brand-ink); background: var(--surface-raised); }
+
+    .prototype-stage { min-height: 0; flex: 1; padding: 10px; }
+    .app-shell {
+      display: grid;
+      width: min(1520px, 100%);
+      height: 100%;
+      min-width: 0;
+      min-height: 0;
+      margin: 0 auto;
+      overflow: hidden;
+      grid-template-columns: var(--rail-width) minmax(0, 1fr);
+      grid-template-rows: 50px minmax(0, 1fr);
+      border: 1px solid var(--line-strong);
+      border-radius: 10px;
+      background: var(--evidence-surface);
+      box-shadow: var(--shadow-float);
+    }
+
+    .rail {
+      display: flex;
+      min-width: 0;
+      grid-column: 1;
+      grid-row: 1 / -1;
+      flex-direction: column;
+      border-right: 1px solid var(--rail-line);
+      color: var(--rail-ink);
+      background: var(--rail);
+    }
+    .rail-drag { height: 28px; flex: 0 0 28px; }
+    .rail-brand { display: flex; min-height: 40px; align-items: center; gap: 9px; padding: 0 16px; color: var(--ink); font-size: 14px; font-weight: 750; }
+    .brand-mark { position: relative; width: 22px; height: 22px; color: var(--rail-logo); }
+    .brand-star { position: absolute; top: 1px; left: 6px; width: 10px; height: 10px; background: currentColor; clip-path: polygon(50% 0, 62% 38%, 100% 50%, 62% 62%, 50% 100%, 38% 62%, 0 50%, 38% 38%); }
+    .brand-horizon { position: absolute; right: 2px; bottom: 3px; left: 2px; height: 8px; border-top: 1.8px solid currentColor; border-radius: 50% 50% 0 0; }
+    .brand-horizon::after { position: absolute; top: -3px; left: 50%; width: 4px; height: 4px; border-radius: 50%; background: var(--ember); content: ""; transform: translateX(-50%); }
+    .rail-primary { display: grid; gap: 2px; padding: 10px 10px 6px; }
+    .rail-row, .camp-row, .settings-row {
+      display: grid;
+      width: 100%;
+      min-width: 0;
+      min-height: 36px;
+      grid-template-columns: 20px minmax(0, 1fr) auto;
+      align-items: center;
+      gap: 8px;
+      padding: 0 9px;
+      border: 0;
+      border-radius: 7px;
+      color: var(--rail-ink);
+      background: transparent;
+      text-align: left;
+      cursor: pointer;
+      font-size: 12px;
+    }
+    .rail-row:hover, .camp-row:hover, .settings-row:hover { color: var(--ink); background: var(--surface-hover); }
+    .rail-row svg, .settings-row svg { width: 16px; height: 16px; }
+    .jump-box { display: flex; min-height: 34px; align-items: center; justify-content: space-between; margin: 6px 10px 15px; padding: 0 10px; border: 1px solid var(--rail-line); border-radius: 7px; color: var(--faint); background: var(--surface-raised); font-size: 10px; }
+    .jump-box kbd { padding: 1px 5px; border: 1px solid var(--rail-line); border-radius: 4px; background: var(--surface-subtle); font: 9px/1.4 var(--sans); }
+    .rail-section { display: grid; gap: 3px; padding: 0 10px; }
+    .rail-section-title { padding: 0 8px 5px; color: var(--muted); font-size: 10px; font-weight: 750; letter-spacing: .06em; }
+    .project-row { display: grid; min-height: 36px; grid-template-columns: 18px minmax(0, 1fr); align-items: center; gap: 7px; padding: 0 8px; color: var(--ink); font-size: 11.5px; font-weight: 650; }
+    .project-row svg { width: 15px; height: 15px; }
+    .camp-list { display: grid; gap: 1px; padding-left: 4px; }
+    .camp-row { position: relative; min-height: 34px; grid-template-columns: minmax(0, 1fr) auto; padding-left: 21px; font-size: 11.5px; }
+    .camp-row.selected { color: var(--ink); background: var(--surface-selected); font-weight: 650; }
+    .camp-row.selected::before { position: absolute; top: 7px; bottom: 7px; left: 5px; width: 2px; border-radius: 2px; background: var(--brand); content: ""; }
+    .camp-row small { color: var(--faint); font-size: 8px; }
+    .rail-spacer { flex: 1; }
+    .rail-footer { padding: 8px 10px 12px; border-top: 1px solid var(--rail-line); }
+
+    .app-topbar {
+      display: flex;
+      min-width: 0;
+      grid-column: 2;
+      grid-row: 1;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      padding: 0 14px 0 18px;
+      border-bottom: 1px solid var(--line);
+      background: var(--surface);
+    }
+    .breadcrumb { display: flex; min-width: 0; align-items: baseline; gap: 7px; }
+    .breadcrumb span { color: var(--faint); font-size: 11px; }
+    .breadcrumb strong { overflow: hidden; color: var(--ink); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+    .top-actions { display: flex; align-items: center; gap: 5px; }
+    .top-actions button { min-height: 28px; padding: 0 8px; border: 0; border-radius: 6px; color: var(--muted); background: transparent; cursor: pointer; font-size: 10px; }
+    .top-actions button:hover { color: var(--ink); background: var(--surface-hover); }
+
+    .app-main { min-width: 0; min-height: 0; grid-column: 2; grid-row: 2; background: var(--evidence-surface); }
+    .conversation-view { width: 100%; height: 100%; overflow: auto; padding: 28px 36px; background: var(--surface-raised); }
+    .conversation-track { width: min(760px, 100%); margin: 0 auto; }
+    .message { display: grid; grid-template-columns: 30px minmax(0, 1fr); gap: 11px; margin-bottom: 22px; }
+    .avatar { display: grid; width: 30px; height: 30px; place-items: center; border: 1px solid var(--line); border-radius: 50%; color: var(--brand-ink); background: var(--brand-soft); font-size: 10px; font-weight: 760; }
+    .message-head { display: flex; align-items: baseline; gap: 7px; margin-bottom: 4px; }
+    .message-head strong { font-size: 11.5px; }
+    .message-head span { color: var(--faint); font: 9px/1.4 var(--mono); }
+    .message p { margin: 0; font-size: 12.5px; line-height: 1.72; }
+    .card-wrap { margin: 0 0 24px 41px; }
+    .changes-card { overflow: hidden; border: 1px solid var(--line); border-radius: 9px; background: var(--evidence-surface); }
+    .changes-card:hover, .changes-card:focus-within { border-color: var(--line-strong); }
+    .changes-card-head {
+      display: grid;
+      width: 100%;
+      min-height: 54px;
+      grid-template-columns: 32px minmax(0, 1fr) auto;
+      align-items: center;
+      gap: 10px;
+      padding: 9px 11px 7px;
+      border: 0;
+      color: var(--ink);
+      background: transparent;
+      text-align: left;
+      cursor: pointer;
+    }
+    .changes-card-head:hover { background: color-mix(in srgb, var(--surface-hover) 56%, transparent); }
+    .changes-card-head:hover .card-view,
+    .changes-card-head:focus-visible .card-view { background: var(--surface-muted); }
+    .card-icon { display: grid; width: 32px; height: 32px; place-items: center; border-radius: 7px; color: var(--muted); background: var(--surface-muted); }
+    .card-icon svg { width: 17px; height: 17px; }
+    .card-copy { display: grid; min-width: 0; gap: 2px; }
+    .card-copy strong { font-size: 12px; font-weight: 680; }
+    .card-copy span { color: var(--faint); font-size: 10px; }
+    .card-view { display: inline-flex; min-height: 28px; align-items: center; padding: 0 8px; border: 1px solid color-mix(in srgb, var(--control-line) 38%, transparent); border-radius: 6px; color: var(--ink); font-size: 10px; font-weight: 560; }
+    .card-files { display: grid; gap: 1px; padding: 1px 11px 9px; }
+    .card-file {
+      display: grid;
+      width: 100%;
+      min-width: 0;
+      min-height: 29px;
+      grid-template-columns: minmax(0, 1fr) auto 15px;
+      align-items: center;
+      gap: 7px;
+      padding: 0 3px;
+      border: 0;
+      border-radius: 5px;
+      color: var(--muted);
+      background: transparent;
+      text-align: left;
+      cursor: pointer;
+    }
+    .card-file:hover { color: var(--ink); background: var(--surface-hover); }
+    .card-file code { overflow: hidden; font: 500 10px/1.4 var(--mono); text-overflow: ellipsis; white-space: nowrap; }
+    .card-file small { color: var(--faint); font-size: 9px; }
+    .card-file svg { width: 13px; height: 13px; color: var(--faint); }
+    .card-more {
+      display: inline-flex;
+      min-height: 26px;
+      justify-self: start;
+      align-items: center;
+      gap: 4px;
+      padding: 0 3px;
+      border: 0;
+      border-radius: 5px;
+      color: var(--faint);
+      background: transparent;
+      cursor: pointer;
+      font-size: 9.5px;
+    }
+    .card-more:hover { color: var(--ink); background: var(--surface-hover); }
+    .card-more svg { width: 13px; height: 13px; transition: transform 120ms ease; }
+    .card-more[aria-expanded="true"] svg { transform: rotate(180deg); }
+
+    .review-workspace { display: flex; width: 100%; height: 100%; min-width: 0; min-height: 0; flex-direction: column; background: var(--evidence-surface); }
+    .review-header {
+      display: grid;
+      min-height: 62px;
+      flex: 0 0 auto;
+      grid-template-columns: 30px minmax(0, 1fr) auto;
+      align-items: center;
+      gap: 11px;
+      padding: 8px 14px;
+      border-bottom: 1px solid var(--evidence-line);
+      background: var(--evidence-surface);
+    }
+    .back-button { display: grid; width: 30px; height: 30px; place-items: center; border: 0; border-radius: 6px; color: var(--muted); background: transparent; cursor: pointer; }
+    .back-button:hover { color: var(--ink); background: var(--surface-hover); }
+    .back-button svg { width: 15px; height: 15px; }
+    .review-heading { display: grid; min-width: 0; gap: 2px; }
+    .review-heading h1 { overflow: hidden; margin: 0; color: var(--ink); font-size: 15px; font-weight: 690; letter-spacing: -.01em; text-overflow: ellipsis; white-space: nowrap; }
+    .review-meta { display: flex; align-items: center; gap: 8px; color: var(--evidence-muted); font-size: 9.5px; }
+    .review-tools { display: flex; align-items: center; gap: 3px; }
+    .review-tools button { min-height: 30px; padding: 0 8px; border: 1px solid transparent; border-radius: 6px; color: var(--muted); background: transparent; cursor: pointer; font-size: 9.5px; }
+    .review-tools button:hover:not(:disabled) { color: var(--ink); background: var(--surface-hover); }
+    .review-content { display: grid; min-height: 0; flex: 1; grid-template-columns: 244px minmax(0, 1fr); overflow: hidden; }
+
+    .file-sidebar { display: flex; min-width: 0; min-height: 0; flex-direction: column; border-right: 1px solid var(--evidence-line); background: var(--evidence-surface); }
+    .file-sidebar-head { display: flex; min-height: 42px; flex: 0 0 auto; align-items: center; justify-content: space-between; padding: 0 10px; border-bottom: 1px solid var(--evidence-line); }
+    .file-sidebar-head strong { font-size: 10.5px; }
+    .file-sidebar-head span { color: var(--faint); font: 9px/1.35 var(--mono); }
+    .file-list { min-height: 0; flex: 1; overflow: auto; padding: 5px; }
+    .file-row {
+      display: grid;
+      width: 100%;
+      min-width: 0;
+      min-height: 46px;
+      grid-template-columns: 18px minmax(0, 1fr) auto;
+      align-items: center;
+      gap: 7px;
+      padding: 5px 7px;
+      border: 0;
+      border-radius: 6px;
+      color: var(--evidence-ink);
+      background: transparent;
+      text-align: left;
+      cursor: pointer;
+    }
+    .file-row:hover { background: var(--surface-hover); }
+    .file-row[aria-current="true"] { background: var(--surface-selected); box-shadow: inset 2px 0 0 var(--ink); }
+    .file-kind { display: grid; width: 18px; height: 18px; place-items: center; border-radius: 4px; color: var(--evidence-muted); background: var(--surface-muted); font: 750 8px/1 var(--mono); }
+    .file-copy { display: grid; min-width: 0; gap: 2px; }
+    .file-copy strong, .file-copy small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .file-copy strong { font: 550 9.5px/1.35 var(--mono); }
+    .file-copy small { color: var(--evidence-muted); font: 8px/1.35 var(--mono); }
+    .file-aside { display: grid; justify-items: end; gap: 2px; }
+    .file-stat { display: inline-flex; gap: 5px; color: var(--evidence-muted); font: 8px/1.35 var(--mono); white-space: nowrap; }
+    .file-mode { color: var(--faint); font-size: 7.5px; white-space: nowrap; }
+    .file-mode.outside { color: var(--muted); }
+    .plus { color: var(--diff-add); }
+    .minus { color: var(--diff-remove); }
+
+    .diff-pane { display: flex; min-width: 0; min-height: 0; flex-direction: column; background: var(--evidence-surface); }
+    .diff-head { display: grid; min-height: 42px; flex: 0 0 auto; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 12px; padding: 0 11px; border-bottom: 1px solid var(--evidence-line); }
+    .diff-path { display: flex; min-width: 0; align-items: center; gap: 7px; }
+    .diff-path svg { width: 14px; height: 14px; flex: 0 0 14px; color: var(--evidence-muted); }
+    .diff-path code { overflow: hidden; color: var(--evidence-ink); font: 9.5px/1.35 var(--mono); text-overflow: ellipsis; white-space: nowrap; }
+    .diff-head-meta { display: flex; flex: 0 0 auto; align-items: center; gap: 8px; }
+    .evidence-mode { padding: 2px 6px; border-radius: 5px; color: var(--evidence-muted); background: var(--surface-muted); font-size: 8px; font-weight: 680; white-space: nowrap; }
+    .diff-stats { display: flex; gap: 6px; color: var(--evidence-muted); font: 8.5px/1.35 var(--mono); }
+    .truth-note { display: grid; min-height: 38px; flex: 0 0 auto; grid-template-columns: 18px minmax(0, 1fr); align-items: center; gap: 7px; padding: 6px 11px; border-bottom: 1px solid var(--evidence-line); color: var(--evidence-muted); background: var(--surface-subtle); font-size: 9.5px; line-height: 1.45; }
+    .truth-note svg { width: 14px; height: 14px; color: var(--muted); }
+    .diff-scroll { min-width: 0; min-height: 0; flex: 1; overflow: auto; overscroll-behavior: contain; background: var(--evidence-canvas); }
+    .diff-code { width: max(100%, 720px); padding: 7px 0 16px; color: var(--evidence-ink); font: 9.5px/1.55 var(--mono); tab-size: 2; }
+    .diff-line { display: grid; min-height: 20px; grid-template-columns: 22px 38px 38px minmax(0, 1fr); align-items: stretch; background: var(--diff-context); }
+    .diff-line > span { display: grid; place-items: center; color: var(--evidence-muted); user-select: none; }
+    .diff-line > span:nth-child(2), .diff-line > span:nth-child(3) { border-left: 1px solid color-mix(in srgb, var(--evidence-line) 55%, transparent); font-size: 8px; }
+    .diff-line code { display: block; min-width: 0; padding: 2px 10px; white-space: pre; }
+    .diff-line.add { background: var(--diff-add-soft); }
+    .diff-line.add > span:first-child { color: var(--diff-add); font-weight: 760; }
+    .diff-line.remove { background: var(--diff-remove-soft); }
+    .diff-line.remove > span:first-child { color: var(--diff-remove); font-weight: 760; }
+    .diff-line.hunk { display: block; min-height: 26px; padding: 5px 10px; color: var(--evidence-muted); background: var(--diff-hunk-soft); }
+    .diff-line.hunk code { padding: 0; }
+    .mutation-stack { display: grid; gap: 12px; width: 100%; padding: 12px; }
+    .mutation-block { overflow: hidden; border: 1px solid var(--evidence-line); border-radius: 7px; background: var(--diff-context); }
+    .mutation-head { display: flex; min-height: 31px; align-items: center; justify-content: space-between; gap: 12px; padding: 0 9px; border-bottom: 1px solid var(--evidence-line); color: var(--evidence-muted); background: var(--evidence-surface); font-size: 8.5px; }
+    .mutation-head strong { color: var(--evidence-ink); font-size: 9px; }
+    .mutation-line { display: grid; min-height: 22px; grid-template-columns: 24px minmax(0, 1fr); background: var(--diff-context); }
+    .mutation-line > span { display: grid; place-items: center; color: var(--evidence-muted); font-weight: 760; user-select: none; }
+    .mutation-line code { min-width: 0; padding: 3px 10px; border-left: 1px solid color-mix(in srgb, var(--evidence-line) 55%, transparent); white-space: pre; }
+    .mutation-line.add { background: var(--diff-add-soft); }
+    .mutation-line.add > span { color: var(--diff-add); }
+    .mutation-line.remove { background: var(--diff-remove-soft); }
+    .mutation-line.remove > span { color: var(--diff-remove); }
+    .operation-note { display: grid; min-height: 54px; grid-template-columns: 18px minmax(0, 1fr); align-items: center; gap: 8px; padding: 9px; color: var(--evidence-muted); background: var(--evidence-canvas); font: 9px/1.5 var(--sans); }
+    .operation-note svg { width: 14px; height: 14px; }
+    .empty-evidence { display: grid; min-height: 100%; place-items: center; padding: 32px; }
+    .empty-evidence-inner { display: grid; width: min(440px, 100%); justify-items: center; gap: 8px; text-align: center; }
+    .empty-evidence-icon { display: grid; width: 36px; height: 36px; place-items: center; border-radius: 9px; color: var(--evidence-muted); background: var(--surface-muted); }
+    .empty-evidence-icon svg { width: 18px; height: 18px; }
+    .empty-evidence strong { color: var(--evidence-ink); font-size: 11px; }
+    .empty-evidence p { margin: 0; color: var(--evidence-muted); font-size: 9.5px; line-height: 1.55; }
+
+    @media (max-width: 1180px) {
+      .prototype-heading { min-width: 210px; }
+      .prototype-heading span, .prototype-field > span { display: none; }
+      .review-content { grid-template-columns: 214px minmax(0, 1fr); }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { scroll-behavior: auto !important; transition: none !important; }
+    }
+  </style>
+</head>
+<body>
+  <a class="skip-link" href="#reviewMain">跳到文件变化内容</a>
+
+  <header class="prototype-bar" aria-label="设计稿控制条">
+    <div class="prototype-heading">
+      <strong>Files Changed · 详情页 V2</strong>
+      <span>沿用原代码变更页；新增无行号与不完整 Evidence 模式</span>
+    </div>
+    <div class="prototype-controls">
+      <div class="prototype-field">
+        <span>场景</span>
+        <div class="segments" aria-label="场景切换">
+          <button type="button" data-scene="conversation" aria-pressed="false">会话入口</button>
+          <button type="button" data-scene="review" aria-pressed="true">变更页</button>
+        </div>
+      </div>
+      <div class="prototype-field">
+        <span>示例</span>
+        <div class="segments" aria-label="差异示例切换">
+          <button type="button" data-file-shortcut="0" aria-pressed="true">有行号</button>
+          <button type="button" data-file-shortcut="1" aria-pressed="false">无行号</button>
+          <button type="button" data-file-shortcut="2" aria-pressed="false">修改记录</button>
+          <button type="button" data-file-shortcut="3" aria-pressed="false">仅有路径</button>
+        </div>
+      </div>
+      <div class="prototype-field">
+        <span>主题</span>
+        <div class="segments" aria-label="主题切换">
+          <button type="button" data-theme-value="day" aria-pressed="true">Day</button>
+          <button type="button" data-theme-value="night" aria-pressed="false">Night</button>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <main class="prototype-stage">
+    <div class="app-shell">
+      <aside class="rail" aria-label="Rovai 导航">
+        <div class="rail-drag"></div>
+        <div class="rail-brand">
+          <span class="brand-mark" aria-hidden="true"><span class="brand-star"></span><span class="brand-horizon"></span></span>
+          <span>Rovai AI</span>
+        </div>
+        <div class="rail-primary">
+          <button class="rail-row" type="button"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16v14H4z"/><path d="M8 9h8M8 13h5"/></svg><span>快速对话</span></button>
+          <button class="rail-row" type="button"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8"/><path d="m9 12 2 2 4-5"/></svg><span>队员</span></button>
+        </div>
+        <div class="jump-box"><span>跳转到</span><kbd>⌘ K</kbd></div>
+        <section class="rail-section">
+          <div class="rail-section-title">CAMP</div>
+          <div class="project-row"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7h7l2 2h9v10H3z"/></svg><span>doc-cashin</span></div>
+          <div class="camp-list">
+            <button class="camp-row selected" type="button"><span>Runtime 文件变更验证</span><small>4</small></button>
+            <button class="camp-row" type="button"><span>日常开发</span><small></small></button>
+          </div>
+        </section>
+        <div class="rail-spacer"></div>
+        <div class="rail-footer"><button class="settings-row" type="button"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19 12a7 7 0 0 0-.1-1l2-1.6-2-3.4-2.5 1a8 8 0 0 0-1.8-1L14.2 3h-4.4l-.4 3a8 8 0 0 0-1.8 1L5.1 6 3 9.4 5.1 11a7 7 0 0 0 0 2L3 14.6 5.1 18l2.5-1a8 8 0 0 0 1.8 1l.4 3h4.4l.4-3a8 8 0 0 0 1.8-1l2.5 1 2.1-3.4-2.1-1.6a7 7 0 0 0 .1-1z"/></svg><span>设置</span></button></div>
+      </aside>
+
+      <header class="app-topbar">
+        <div class="breadcrumb"><span>doc-cashin</span><strong>Runtime 文件变更验证</strong></div>
+        <div class="top-actions"><button type="button">分享</button><button type="button">···</button></div>
+      </header>
+
+      <section class="app-main">
+        <section class="conversation-view" id="conversationView" hidden aria-label="Camp 会话">
+          <div class="conversation-track">
+            <article class="message">
+              <span class="avatar" aria-hidden="true">叮</span>
+              <div><div class="message-head"><strong>叮叮</strong><span>Codex · 20:42</span></div><p>验证已完成。本次运行捕获了项目内与项目外文件；不同 Runtime 提供的证据完整度不同。</p></div>
+            </article>
+            <article class="card-wrap">
+              <div class="changes-card">
+                <button class="changes-card-head" type="button" data-open-review="0" aria-label="查看本次运行的 Files Changed，4 个文件，6 次修改">
+                  <span class="card-icon" aria-hidden="true"><svg class="icon" viewBox="0 0 24 24"><path d="M4 7h6l2 2h8v10H4Z"/><path d="M8 13h8M12 11v4"/></svg></span>
+                  <span class="card-copy"><strong>Files Changed</strong><span>4 个文件 · 6 次修改</span></span>
+                  <span class="card-view" aria-hidden="true">View</span>
+                </button>
+                <div class="card-files">
+                  <button class="card-file" type="button" data-open-review="0"><code>apps/desktop/src/renderer/src/CampWorkspace.tsx</code><small>+18 −6</small><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 6 6 6-6 6"/></svg></button>
+                  <button class="card-file" type="button" data-open-review="1"><code>crates/rovai-core/src/acp.rs</code><small>2 次修改</small><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 6 6 6-6 6"/></svg></button>
+                  <button class="card-file" type="button" data-open-review="2"><code>/tmp/rovai-runtime-validation/outside-fixture.json</code><small>2 次修改</small><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 6 6 6-6 6"/></svg></button>
+                  <button class="card-file" id="cardExtraFile" type="button" data-open-review="3" hidden><code>docs/runtime-compatibility.md</code><small>1 次修改</small><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 6 6 6-6 6"/></svg></button>
+                  <button class="card-more" id="cardMore" type="button" aria-expanded="false" aria-controls="cardExtraFile"><span>再显示 1 个文件</span><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m7 10 5 5 5-5"/></svg></button>
+                </div>
+              </div>
+            </article>
+            <article class="message">
+              <span class="avatar" aria-hidden="true">你</span>
+              <div><div class="message-head"><strong>你</strong><span>20:45</span></div><p>打开 Files Changed 查看完整记录。</p></div>
+            </article>
+          </div>
+        </section>
+
+        <section class="review-workspace" id="reviewView" aria-label="Files Changed 详情页">
+          <header class="review-header">
+            <button class="back-button" id="backButton" type="button" aria-label="返回会话"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m15 18-6-6 6-6"/></svg></button>
+            <div class="review-heading">
+              <h1>Files Changed</h1>
+              <div class="review-meta"><span>4 个文件</span><span>6 次修改</span></div>
+            </div>
+            <div class="review-tools">
+              <button type="button" id="previousButton">上一文件</button>
+              <button type="button" id="nextButton">下一文件</button>
+            </div>
+          </header>
+
+          <div class="review-content" id="reviewMain">
+            <aside class="file-sidebar" aria-label="变更文件">
+              <div class="file-sidebar-head"><strong>变更文件</strong><span>4 files</span></div>
+              <div class="file-list" id="fileList"></div>
+            </aside>
+
+            <section class="diff-pane" aria-label="当前文件变更">
+              <header class="diff-head">
+                <div class="diff-path"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h10l6 6v10H4Z"/><path d="M14 4v6h6"/></svg><code id="diffPath"></code></div>
+                <div class="diff-head-meta"><span class="evidence-mode" id="evidenceMode"></span><span class="diff-stats" id="diffStats"></span></div>
+              </header>
+              <div class="truth-note" id="truthNote" hidden><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/></svg><span id="truthText"></span></div>
+              <div class="diff-scroll" id="diffScroll" tabindex="0" aria-label="可滚动的文件变更内容"></div>
+            </section>
+          </div>
+        </section>
+      </section>
+    </div>
+  </main>
+
+  <script>
+    const files = [
+      {
+        path: 'apps/desktop/src/renderer/src/CampWorkspace.tsx',
+        kind: 'M',
+        mode: 'full',
+        modeLabel: '完整差异',
+        operationCount: 1,
+        additions: 18,
+        deletions: 6,
+        outside: false,
+        lines: [
+          { kind: 'hunk', text: '@@ -6455,8 +6455,16 @@ function AgentRunFileChangesTimelineCard' },
+          { kind: 'context', old: '6455', next: '6455', text: '  return (' },
+          { kind: 'remove', old: '6456', next: '', text: '    <div className="run-file-changes-card">' },
+          { kind: 'add', old: '', next: '6456', text: '    <button className="run-file-changes-card" onClick={openReview}>' },
+          { kind: 'context', old: '6457', next: '6457', text: '      <FilesChangedIcon aria-hidden="true" />' },
+          { kind: 'add', old: '', next: '6458', text: '      <span>Files Changed</span>' },
+          { kind: 'add', old: '', next: '6459', text: '      <span className="view-affordance">View</span>' },
+          { kind: 'context', old: '6458', next: '6460', text: '    </button>' },
+          { kind: 'hunk', text: '@@ -6508,5 +6516,9 @@ function openAgentRunFileChanges' },
+          { kind: 'remove', old: '6508', next: '', text: '  setExpandedFile(path)' },
+          { kind: 'add', old: '', next: '6516', text: '  setFileChangesReview({' },
+          { kind: 'add', old: '', next: '6517', text: '    agentRunId,' },
+          { kind: 'add', old: '', next: '6518', text: '    executionEpoch,' },
+          { kind: 'add', old: '', next: '6519', text: '    selectedPath: path' },
+          { kind: 'add', old: '', next: '6520', text: '  })' }
+        ]
+      },
+      {
+        path: 'crates/rovai-core/src/acp.rs',
+        kind: 'M',
+        mode: 'exact',
+        modeLabel: '片段差异',
+        operationCount: 2,
+        outside: false,
+        note: null,
+        blocks: [
+          {
+            title: '修改 1',
+            detail: '精确替换 · 无行号',
+            lines: [
+              { kind: 'remove', text: 'let require_authorization = true;' },
+              { kind: 'add', text: 'let require_authorization = false;' }
+            ]
+          },
+          {
+            title: '修改 2',
+            detail: '精确替换 · 无行号',
+            lines: [
+              { kind: 'remove', text: 'scoped_path(execution_root, requested_path)?' },
+              { kind: 'add', text: 'normalize_runtime_path(execution_root, requested_path)?' }
+            ]
+          }
+        ]
+      },
+      {
+        path: '/tmp/rovai-runtime-validation/outside-fixture.json',
+        kind: 'M',
+        mode: 'history',
+        modeLabel: '修改记录',
+        operationCount: 2,
+        outside: true,
+        note: null,
+        blocks: [
+          {
+            title: '修改 1',
+            detail: '精确替换 · 无行号',
+            lines: [
+              { kind: 'remove', text: '"status": "pending"' },
+              { kind: 'add', text: '"status": "verified"' }
+            ]
+          },
+          {
+            title: '修改 2',
+            detail: 'Runtime 仅报告写入成功',
+            operationOnly: true
+          }
+        ]
+      },
+      {
+        path: 'docs/runtime-compatibility.md',
+        kind: 'M',
+        mode: 'operation',
+        modeLabel: '仅记录操作',
+        operationCount: 1,
+        outside: false,
+        note: 'Runtime 可靠地报告了文件路径和成功修改，但没有提供可审查的 old/new 或 unified diff。'
+      }
+    ];
+
+    const fileList = document.getElementById('fileList');
+    const diffPath = document.getElementById('diffPath');
+    const evidenceMode = document.getElementById('evidenceMode');
+    const diffStats = document.getElementById('diffStats');
+    const truthNote = document.getElementById('truthNote');
+    const truthText = document.getElementById('truthText');
+    const diffScroll = document.getElementById('diffScroll');
+    const previousButton = document.getElementById('previousButton');
+    const nextButton = document.getElementById('nextButton');
+    const conversationView = document.getElementById('conversationView');
+    const reviewView = document.getElementById('reviewView');
+    let selectedIndex = 0;
+
+    function escapeHtml(value) {
+      return String(value ?? '')
+        .replaceAll('&', '&amp;')
+        .replaceAll('<', '&lt;')
+        .replaceAll('>', '&gt;')
+        .replaceAll('"', '&quot;')
+        .replaceAll("'", '&#039;');
+    }
+
+    function pathParts(path) {
+      const slash = path.lastIndexOf('/');
+      return slash === -1 ? { base: path, dir: '' } : { base: path.slice(slash + 1), dir: path.slice(0, slash + 1) };
+    }
+
+    function statMarkup(file) {
+      if (file.mode === 'full') return `<span class="plus">+${file.additions}</span><span class="minus">−${file.deletions}</span>`;
+      return `${file.operationCount} 次修改`;
+    }
+
+    function renderFileList() {
+      fileList.replaceChildren();
+      files.forEach((file, index) => {
+        const parts = pathParts(file.path);
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'file-row';
+        button.dataset.fileIndex = String(index);
+        button.setAttribute('aria-current', String(index === selectedIndex));
+        button.setAttribute('aria-label', `${parts.base}，${file.modeLabel}，${file.operationCount} 次修改${file.outside ? '，项目外文件' : ''}`);
+        button.innerHTML = `<span class="file-kind" aria-hidden="true">${escapeHtml(file.kind)}</span><span class="file-copy"><strong>${escapeHtml(parts.base)}</strong><small title="${escapeHtml(file.path)}">${escapeHtml(parts.dir || './')}</small></span><span class="file-aside"><span class="file-stat">${statMarkup(file)}</span><span class="file-mode${file.outside ? ' outside' : ''}">${file.outside ? '项目外 · ' : ''}${escapeHtml(file.modeLabel)}</span></span>`;
+        button.addEventListener('click', () => selectFile(index));
+        button.addEventListener('keydown', (event) => {
+          if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return;
+          event.preventDefault();
+          const nextIndex = event.key === 'ArrowDown' ? Math.min(files.length - 1, index + 1) : Math.max(0, index - 1);
+          selectFile(nextIndex);
+          fileList.querySelector(`[data-file-index="${nextIndex}"]`)?.focus();
+        });
+        fileList.appendChild(button);
+      });
+    }
+
+    function renderFullDiff(file) {
+      const code = document.createElement('div');
+      code.className = 'diff-code';
+      file.lines.forEach((line) => {
+        const row = document.createElement('div');
+        row.className = `diff-line ${line.kind}`;
+        if (line.kind === 'hunk') {
+          row.innerHTML = `<code>${escapeHtml(line.text)}</code>`;
+        } else {
+          const sign = line.kind === 'add' ? '+' : line.kind === 'remove' ? '−' : ' ';
+          const spoken = line.kind === 'add' ? '新增' : line.kind === 'remove' ? '删除' : '上下文';
+          row.setAttribute('aria-label', `${spoken}，旧行 ${line.old || '空'}，新行 ${line.next || '空'}：${line.text}`);
+          row.innerHTML = `<span aria-hidden="true">${sign}</span><span aria-hidden="true">${escapeHtml(line.old)}</span><span aria-hidden="true">${escapeHtml(line.next)}</span><code>${escapeHtml(line.text || ' ')}</code>`;
+        }
+        code.appendChild(row);
+      });
+      diffScroll.appendChild(code);
+    }
+
+    function renderMutationBlocks(file) {
+      const stack = document.createElement('div');
+      stack.className = 'mutation-stack';
+      file.blocks.forEach((block) => {
+        const section = document.createElement('section');
+        section.className = 'mutation-block';
+        section.innerHTML = `<header class="mutation-head"><strong>${escapeHtml(block.title)}</strong><span>${escapeHtml(block.detail)}</span></header>`;
+        if (block.operationOnly) {
+          const note = document.createElement('div');
+          note.className = 'operation-note';
+          note.innerHTML = `<svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/></svg><span>该次操作没有可靠 diff 内容，未读取当前文件补全。</span>`;
+          section.appendChild(note);
+        } else {
+          block.lines.forEach((line) => {
+            const row = document.createElement('div');
+            const sign = line.kind === 'add' ? '+' : '−';
+            row.className = `mutation-line ${line.kind}`;
+            row.setAttribute('aria-label', `${line.kind === 'add' ? '新增片段' : '删除片段'}：${line.text}`);
+            row.innerHTML = `<span aria-hidden="true">${sign}</span><code>${escapeHtml(line.text || ' ')}</code>`;
+            section.appendChild(row);
+          });
+        }
+        stack.appendChild(section);
+      });
+      diffScroll.appendChild(stack);
+    }
+
+    function renderOperationOnly(file) {
+      const empty = document.createElement('div');
+      empty.className = 'empty-evidence';
+      empty.innerHTML = `<div class="empty-evidence-inner"><span class="empty-evidence-icon" aria-hidden="true"><svg class="icon" viewBox="0 0 24 24"><path d="M4 4h10l6 6v10H4Z"/><path d="M14 4v6h6M8 15h8"/></svg></span><strong>没有可审查的差异内容</strong><p>${escapeHtml(file.note)}<br />Rovai 不读取当前文件，也不推测本次修改。</p></div>`;
+      diffScroll.appendChild(empty);
+    }
+
+    function selectFile(index) {
+      selectedIndex = index;
+      const file = files[index];
+      diffPath.textContent = file.path;
+      diffPath.title = file.path;
+      evidenceMode.textContent = file.modeLabel;
+      diffStats.innerHTML = statMarkup(file);
+      previousButton.disabled = index === 0;
+      nextButton.disabled = index === files.length - 1;
+      truthNote.hidden = !file.note || file.mode === 'operation';
+      truthText.textContent = file.note || '';
+      diffScroll.replaceChildren();
+      if (file.mode === 'full') renderFullDiff(file);
+      else if (file.mode === 'exact' || file.mode === 'history') renderMutationBlocks(file);
+      else renderOperationOnly(file);
+      renderFileList();
+      document.querySelectorAll('[data-file-shortcut]').forEach((button) => button.setAttribute('aria-pressed', String(Number(button.dataset.fileShortcut) === index)));
+    }
+
+    function setScene(scene, focusBack = false) {
+      const isReview = scene === 'review';
+      conversationView.hidden = isReview;
+      reviewView.hidden = !isReview;
+      document.querySelectorAll('[data-scene]').forEach((button) => button.setAttribute('aria-pressed', String(button.dataset.scene === scene)));
+      if (focusBack && isReview) document.getElementById('backButton').focus();
+    }
+
+    document.querySelectorAll('[data-scene]').forEach((button) => button.addEventListener('click', () => setScene(button.dataset.scene, button.dataset.scene === 'review')));
+    document.querySelectorAll('[data-theme-value]').forEach((button) => button.addEventListener('click', () => {
+      document.documentElement.dataset.theme = button.dataset.themeValue;
+      document.querySelectorAll('[data-theme-value]').forEach((item) => item.setAttribute('aria-pressed', String(item === button)));
+    }));
+    document.querySelectorAll('[data-file-shortcut]').forEach((button) => button.addEventListener('click', () => {
+      selectFile(Number(button.dataset.fileShortcut));
+      setScene('review');
+    }));
+    document.querySelectorAll('[data-open-review]').forEach((button) => button.addEventListener('click', () => {
+      selectFile(Number(button.dataset.openReview));
+      setScene('review', true);
+    }));
+    document.getElementById('cardMore').addEventListener('click', (event) => {
+      const button = event.currentTarget;
+      const extraFile = document.getElementById('cardExtraFile');
+      const expanded = button.getAttribute('aria-expanded') === 'true';
+      button.setAttribute('aria-expanded', String(!expanded));
+      button.querySelector('span').textContent = expanded ? '再显示 1 个文件' : '收起文件';
+      extraFile.hidden = expanded;
+    });
+    document.getElementById('backButton').addEventListener('click', () => {
+      setScene('conversation');
+      document.querySelector('[data-open-review="0"]')?.focus();
+    });
+    previousButton.addEventListener('click', () => { if (selectedIndex > 0) selectFile(selectedIndex - 1); });
+    nextButton.addEventListener('click', () => { if (selectedIndex < files.length - 1) selectFile(selectedIndex + 1); });
+
+    selectFile(0);
+    setScene('review');
+  </script>
+</body>
+</html>

@@ -180,5 +180,5 @@ last_updated: 2026-08-27
 | v1.26 | `historical` | Cursor Agent Catalog 接入、同名命令防碰撞与保守平台未准入 | [v1.26/README.md](v1.26/README.md) |
 | v1.27 | `historical` | Kimi Code identity、MiniMax M3 私有配置、cold exact resume 与 macOS arm64 准入 | [v1.27/README.md](v1.27/README.md) |
 | v1.28 | `historical` | Grok Build、MiniMax M3、`>= 1.0.0` 与标准 ACP resume；macOS arm64/x64、Windows x64 1.0.5 已分别补证；Published Attachment 后置完整性故障局部降级 | [v1.28/README.md](v1.28/README.md) |
-| v1.29 | `historical` | 已完成的 Camp 动态成员管理、zero-attempt cancellation，以及不等待活跃 Run 的 Managed Attachment v2 写路径 | [v1.29/README.md](v1.29/README.md) |
+| v1.29 | `historical` | Camp 动态成员管理、zero-attempt cancellation、Managed Attachment v2 写路径，以及 Runtime Evidence 驱动的 Command Diff 与每 AgentRun 文件变化卡片 | [v1.29/README.md](v1.29/README.md) |
 | v1.30 | `current` | 飞书 Developer Session 与独立队员 Bot、Owner-only Quick Chat/项目卡、多 Bot 聚合、串行 Camp admission、ExternalQuote 与可靠 Outbox | [v1.30/README.md](v1.30/README.md) |

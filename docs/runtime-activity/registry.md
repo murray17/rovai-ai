@@ -2,7 +2,7 @@
 document_type: runtime-activity-mapping-registry
 authority: runtime-activity-mapping-catalog
 classifier_version: activity-v1
-last_updated: 2026-08-26
+last_updated: 2026-08-27
 ---
 
 # Runtime Activity Mapping Registry
@@ -14,19 +14,38 @@ last_updated: 2026-08-26
 | `codex-cli` | Codex CLI | Codex app-server | `fine_grained` | MCP 使用结构化 `server/tool`；commandActions 全为 read/list/search 时使用中文语义 hint；其他 command 从公开 `command` 生成去 wrapper、保留完整序列并脱敏的 Renderer 标题，展开后分开显示命令与 output | 受控 fixture、Renderer 十 Runtime matrix 与 v1.18 命令/脱敏/详情回归通过 | manual completion/config/process + Skill turn 通过；MCP projection 通过；新版 Core 标题 post-fix smoke 待运行，Renderer fallback 已用真实 Camp Evidence 回归 |
 | `opencode-cli` | OpenCode | ACP v1 | `fine_grained` | 使用 ACP 结构化 `kind`；有 `toolName` 才作为精确名，否则显示 Runtime `title` hint；公开 output 只来自文本 Content block 或 `rawOutput.stdout/stderr/output/text` | 受控 fixture 与固定 `printf` smoke 断言已建立 | manual completion + Skill turn 通过；MCP projection 通过；`1.18.15` 真实 command-output 与完整 allow/deny smoke 通过 |
 | `copilot-cli` | GitHub Copilot | ACP v1 | `fine_grained` | 同 ACP 合同；支持标准 `type: content` 嵌套文本；逻辑 MCP 名称通过 Context 的 `logicalName → runtimeName` 映射提示解析 | 受控 fixture 与固定 `printf` smoke 断言已建立 | manual completion + Skill turn + MCP projection 通过；`1.0.79` 真实 command-output smoke 通过 |
-| `kiro-cli` | Kiro | ACP v1 | `fine_grained` | 同 ACP 合同；Team bridge 使用 Kiro/Bedrock 兼容 input schema，不改变 Core canonical 校验 | 受控 fixture 通过 | ACP session + Skill turn + MCP projection 通过 |
-| `qoder-cli` | Qoder | ACP v1 | `fine_grained` | 同 ACP 合同 | 受控 fixture 通过 | Skill turn 通过 |
+| `kiro-cli` | Kiro | ACP v1 | `fine_grained` | 同 ACP 合同；成功 Edit/Write 的唯一标准 location 可独立命名文件操作；单 entry Diff 的 rooted-relative path 只在与同 ToolCall location 完全对应时纠正；Team bridge 使用 Kiro/Bedrock 兼容 input schema，不改变 Core canonical 校验 | path-only、标准 Diff、精确路径对齐与 mismatch fail-closed fixture 通过 | ACP session + Skill turn + MCP projection 通过；`2.18.1` pre-fix file-change wire 已核验，post-fix App smoke 待补 |
+| `qoder-cli` | Qoder | ACP v1 | `fine_grained` | 同 ACP 合同；成功 Edit/Write 可从同 ToolCall 先前唯一标准 location 生成文件操作行，terminal kind 冲突不覆盖首次可信 kind | path-only、sparse terminal location 与 Read→edit 冲突 fixture 通过 | Skill turn 通过；`1.1.28` pre-fix Edit wire 已核验，post-fix App smoke 待补 |
 | `codebuddy-cli` | CodeBuddy | ACP v1 | `fine_grained` | 同 ACP 合同 | 受控 fixture 通过 | Skill turn 通过 |
 | `qwen-code` | Qwen Code | ACP v1 | `fine_grained` | 同 ACP 合同 | 受控 fixture 通过 | Skill turn 通过 |
 | `trae-cn-cli` | TRAE CLI CN | ACP v1 | `fine_grained` | 同 ACP 合同；标准 `rawInput.command` 与 TRAE Bash 实测 `rawInput.Command` 的非空字符串进入公开 input，`Description` 等相邻字段保持私有；命令结构补全缺失的 execute kind；同 `toolCallId` 的 terminal 自带 command/kind/digest；Terminal content 只作 display anchor | 实测 `Command + Description` started、相邻 raw 字段排除、非 TRAE 大写字段 fail-closed、稀疏 terminal、非零 exit code 与固定 `printf` fixture 已建立 | `traecli 0.120.52` completion/cancel、Approval allow/deny、Missing-Send tool→final 与 MCP Projection 正式 Smoke 通过；六类 command 的 started/terminal 展示通过；正式 full matrix 仍被既有 nonzero status 漂移阻断 |
 | `cursor-agent` | Cursor Agent | ACP v1 | `run_level` | 仅采用 ACP 标准 Session/Prompt 终态；`cursor/update_todos`、`cursor/task`、`cursor/generate_image` 保持私有且不生成 Activity，未知 Cursor 扩展 fail closed；认证和结构化工具事件尚未完成真实 admission | 私有 request 路由、私有 notification 隔离与 Runtime-level unknown fallback fixture 已建立 | `2026.08.11-e8db854` 隔离探测通过 initialize；authenticate 超时且未取得 authenticated Session，因此无 completion/tool smoke，不声明细粒度 coverage |
-| `kimi-code-cli` | Kimi Code | ACP v1 | `run_level` | 标准 ACP Shell update 保留稳定 Tool ID、公开 command/output 与 terminal；普通 `agent_message_chunk` 原样进入 agent text Evidence，不按 provider 或 `<think>` 标签清洗；缺少结构化事件时不补造细粒度 Activity | Kimi run-level mapping、Tool chronology、generic agent-text 与 Runtime-level fallback fixture 已建立 | `kimi 0.32.0` + MiniMax M3 真实 prompt、Shell allow/deny、固定 `printf` output、cancel、cleanup 与完整十五项 Built-in CLI matrix 通过；`run_level` 只表示缺少结构化事件时不补造细粒度 Activity，不否定 Built-in transport 资格 |
+| `kimi-code-cli` | Kimi Code | ACP v1 | `run_level` | 标准 ACP Shell update 保留稳定 Tool ID、公开 command/output 与 terminal；成功 Edit/Write terminal 的唯一标准 location 可独立生成文件操作行；普通 `agent_message_chunk` 原样进入 agent text Evidence，不按 provider 或 `<think>` 标签清洗；缺少结构化事件时不补造细粒度 Activity | Kimi path-only、run-level mapping、Tool chronology、generic agent-text 与 Runtime-level fallback fixture 已建立 | `kimi 0.32.0` + MiniMax M3 真实 prompt、Shell allow/deny、固定 `printf` output、cancel、cleanup 与完整十五项 Built-in CLI matrix 通过；`0.38.0` pre-fix Edit wire 已核验，post-fix App smoke 待补；`run_level` 只表示缺少结构化事件时不补造细粒度 Activity |
 | `grok-build` | Grok Build | ACP v1 | `run_level` | 标准 ACP tool update 按既有安全归一；`_x.ai/*` notification 保持 metadata，普通 assistant text 原样进入 agent text Evidence；缺少结构化 Tool 事件时不补造细粒度 Activity | Grok run-level mapping、官方 config、generic agent-text 与 Missing-Send fixture 已建立 | macOS arm64 与 Windows x64 已分别用 `grok 1.0.5` + MiniMax-M3 通过真实 Deep Probe、AgentRun 与 cold resume；`0.2.118` 原始矩阵保留为历史证据，macOS x64 待补；Usage/Cost 不从 vendor metadata 推断 |
-| `claude-code-cli` | Claude Code | Claude stream-json + bounded stderr fallback | `fine_grained` | `tool_use.id` 是 lifecycle identity；Bash/Read/Edit/Write 等原生名称映射到既有 kind；仅 Bash 的公开 `input.command` 进入 started 与 terminal input，仅 Bash tool result 的公开 stdout/stderr 进入 output；公开 `text_delta` 进入 narration；session-bound `system/api_retry` 只投影固定 code/status、次数和等待秒数，不产生 Tool | partial + complete message 去重、started→terminal command 自包含、空输出 Bash、narration/fallback、stdout 未结束前 structured retry diagnostic 与 provider error/UUID/Session/raw stderr 不泄露 fixture 通过 | 既有 Skill turn 与 MCP projection 通过；`2.1.220` 原生 Bash command-output、公开 narration、Session continuation 与实际 `system/api_retry` 429 重试流已实证；完整展示 post-fix smoke 待运行 |
+| `claude-code-cli` | Claude Code | Claude stream-json + bounded stderr fallback | `fine_grained` | `tool_use.id` 是 lifecycle identity；Bash/Read/Edit/Write 等原生名称映射到既有 kind；仅 Bash 的公开 `input.command` 进入 started 与 terminal input，仅 Bash tool result 的公开 stdout/stderr 进入 output；完整 assistant `Edit` 暂存 `file_path/old_string/new_string`，只在 matching 非错误 user `tool_result` 时形成同 Activity 的 `exact_mutation`；公开 `text_delta` 进入 narration；session-bound `system/api_retry` 只投影固定 code/status、次数和等待秒数，不产生 Tool | partial + complete message 去重、started→terminal command 自包含、空输出 Bash、Edit success/failure/missing fields/replace-all/non-Edit、连续同文件 Edit、narration/fallback、structured retry 与私有字段不泄露 fixture 通过 | 既有 Skill turn 与 MCP projection 通过；`2.1.220` 原生 Bash command-output、公开 narration、Session continuation、实际 `system/api_retry` 429 重试流，以及单次 Edit 的 matching terminal Evidence、无 hunk exact projection 与真实文件更新均已实证 |
 | `antigravity-app` | Antigravity | Antigravity stream-json / legacy text | `run_level` | capability-gated stream-json 使用 `conversation_id + step_index` 作为结构化 tool identity；仅 Shell 工具公开 `tool_info.parameters.CommandLine` 为 `input.command`，terminal 缺失 parameters 时按相同 identity 补齐；`toolName` 保留原生 ID 但不作为标题；旧版 text 保持 run-level，私有日志不产生工具 Evidence | stream-json command/lifecycle/output、非 Shell 输入排除与 legacy fallback fixture 通过 | 既有 manual completion + Skill turn 通过；`agy 1.1.13` 原生 `run_command` output、Session continuation 与 AGY→Codex handoff smoke 通过 |
 
 Coverage 只描述 Core 实际能看到的粒度，不是产品支持等级。若某次运行没有报告结构化 tool event，
 该运行不能因为产品基线为 `fine_grained` 就补写工具调用。
+
+## Terminal file-change Evidence matrix
+
+此矩阵分别描述 v1.29 的“可靠终态文件操作路径”与“可靠终态文件内容”准入，不改变上表的整体 Tool coverage。
+`protocol-supported` 只表示 Adapter 能消费协议标准事件；ACP 运行没有发送 Diff 时仍可显示已证明的单文件操作，
+但不显示增删计数或 inline diff。
+
+| 协议族与适用 Adapter | 过去/当前实际接入事件 | 可靠文件操作 path | 可靠终态内容 | Command file rows |
+| --- | --- | --- | --- | --- |
+| Codex app-server（`codex-cli`） | Codex `item/completed`，`item.type=fileChange`、`status=completed` | `changes[].path` | `changes[] { path, kind, diff }`；update 为 unified diff，add/delete 为完整新/旧内容 | 支持；Core 统一规范化后逐 change 显示 `修改 xxx +A −D` |
+| ACP v1（`opencode-cli`、`copilot-cli`、`kiro-cli`、`qoder-cli`、`codebuddy-cli`、`qwen-code`、`trae-cn-cli`、`cursor-agent`、`kimi-code-cli`、`grok-build`） | ACP `session/update.tool_call_update`；私有 Cursor/Kimi/Grok extension 与 run-level fallback 不补造文件操作或 diff | 成功 terminal `edit | write` + 同 ToolCall 累计唯一标准 `locations[].path`；不读取 rawInput/title/output | terminal 累计 `content.type=diff { path, oldText?, newText }`；只接纳标准 ACP terminal Diff | 有 path 即显示普通 `修改 xxx`；另有 Diff 才显示计数并展开。Kiro 单 entry rooted-relative path 只按同 ToolCall 唯一 location 精确对齐 |
+| Claude stream-json（`claude-code-cli`） | 完整 assistant `tool_use(name=Edit)` + 相同 ID 的非错误 user `tool_result` | 完整 `file_path` | `file_path/old_string/new_string` 证明单次 `exact_mutation`，不证明文件行号或完整文件 before/after | 支持 Edit 片段行；不读文件、不生成 `@@`，失败/缺失/取消/`replace_all` 与其他 Tool 不准入 |
+| Antigravity stream-json（`antigravity-app`） | `step_update` terminal state | 无等价可靠单文件终态 path | step/tool 名与公开 payload 没有可证明完整的 terminal patch | 不支持；不按 edit/write 名称推测 |
+
+Codex `item/started`、`item/fileChange/patchUpdated`、`turn/diff/updated` 和原始 Tool 名 `apply_patch` 均不进入
+Command Diff。ACP `content` collection 按协议 update 的 replace 语义累计；只有成功 terminal Tool 状态才把标准
+Diff blocks 送入 append-only Evidence。ACP file-operation path 与 Diff 是同一 terminal Evidence 的独立子投影；
+Renderer 只消费 Canonical presentation/diffProjection，不含 Runtime 分支。Claude 不解析 Bash/shell、Write、
+NotebookEdit 或 ApplyPatch 输入；Edit 的 exact mutation 也只在 matching result 后发布。
 
 ## 2026-08-24 TRAE command display 真实 smoke 记录
 
@@ -133,9 +152,16 @@ rawInput 字段保持私有并只参与完整 `rawInputDigest`。Runtime 缺失 
 与 digest；不从 title 或 digest 推导。effective execute 的 `exitCode | exit_code` 非零时，公开 terminal status
 与 Action outcome 为 failed，即使 ACP tool lifecycle 报告 completed。
 
+文件操作 presentation 使用更窄的终态合同：只有成功 `completed`、累计 native kind 精确为 `edit | write`，且同一
+`toolCallId` 的标准 `locations[].path` 能确定唯一规范化路径时，才在同一 Canonical Activity 上生成
+`修改 <basename>`。terminal 省略或清空 locations 时保留先前非空累计值；首次可信结构化 kind 不被后续冲突值
+覆盖。该路径不来自 rawInput/title/output，也不自动生成 `diffProjection`。`write_file`、`apply_patch` 等普通分类
+仍可属于 file domain，但不因名称获得这条文件操作 Evidence。
+
 Tool output 先读取 `ToolCallContent.type = content` 包裹的公开 text Content block，并兼容旧 adapter 的
-直接 text block。`diff`、image/audio/resource 与 `type = terminal` 都不被解释为命令输出；Rovai 声明
-Client Terminal 不可用，因此不会读取 `terminalId` 或从私有 terminal 猜测 stdout。只有 Content 没有
+直接 text block。`diff`、image/audio/resource 与 `type = terminal` 都不被解释为命令输出；标准 `diff` 只在
+成功 terminal ToolCall 的独立 v1.29 file-change Evidence 通路中按完整 before/after 处理。Rovai 声明 Client
+Terminal 不可用，因此不会读取 `terminalId` 或从私有 terminal 猜测 stdout。只有 Content 没有
 公开文本时，才从 `rawOutput` 的顶层 `stdout`、`stderr`、`output`、`text` 字符串白名单回退；其他键只
 参与原有 digest，不进入公开 payload。
 
@@ -152,7 +178,15 @@ Client Terminal 不可用，因此不会读取 `terminalId` 或从私有 termina
 `tool.call`。只允许 Bash `tool_use.input.command` 进入公开 input，并按 tool-use ID 同时放入 started 与 terminal
 Evidence，使没有 stdout/stderr或只加载 terminal 的命令仍可检查；
 只允许 Bash tool result 的公开 stdout/stderr 或标准公开 text result 进入 output。其它工具输入、文件内容和
-provider metadata 不公开。公开 `text_delta` 以 message/block-scoped item ID 投影为
+provider metadata 不进入普通 Tool input/output。
+
+唯一例外是内部 Command Diff 通道：完整 assistant `tool_use` 的名称精确为 `Edit`、`file_path/old_string/new_string`
+类型完整且 `replace_all` 缺失或为 false 时，Adapter 按 tool-use ID 暂存 exact mutation；matching user
+`tool_result` 明确非错误后，终态 `runtime.action` 才携带该 mutation。Evidence 保存相对 execution root 规范化后的
+`semantics/path/oldText/newText`，Canonical projection 派生 `−/+` 片段；不搜索当前文件，不输出文件行号或 hunk。
+缺 result、失败、取消、字段不完整、no-op、`replace_all=true`、Write、NotebookEdit 与 ApplyPatch 都不产生 Diff。
+
+公开 `text_delta` 以 message/block-scoped item ID 投影为
 `agent.text.delta`；只有整次 Run 没有 text delta 时，才把已经公开的 success `result` 作为 narration
 fallback。`thinking_delta`、失败 result 和 provider metadata 不进入公开 Evidence；最终 Camp Message、
 Usage 与 Session 校验维持独立边界。
