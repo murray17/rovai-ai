@@ -34,7 +34,7 @@ describe('OpenPlatformApiClient', () => {
       if (url.pathname === '/developers/v1/app/upload/image') {
         return apiResponse({ url: configuration.avatarUrl })
       }
-      if (url.pathname === '/developers/v1/app/create') {
+      if (url.pathname === '/developers/v1/manifest/upsert_by_template') {
         return apiResponse({ ClientID: 'cli_dingding', Avatar: configuration.avatarUrl })
       }
       if (url.pathname === '/developers/v1/secret/cli_dingding') {
@@ -88,7 +88,7 @@ describe('OpenPlatformApiClient', () => {
       }
       if (url.pathname.includes('/app_version/detail/')) {
         detailReads += 1
-        return apiResponse({ status: detailReads === 1 ? 5 : 2 })
+        return apiResponse({ status: detailReads <= 2 ? 5 : 2 })
       }
       return apiResponse({})
     })
@@ -106,7 +106,8 @@ describe('OpenPlatformApiClient', () => {
     const app = await client.createApp({
       appName: configuration.appName,
       appDescription: configuration.appDescription,
-      avatarUrl
+      avatarUrl,
+      correlationId: 'rvfpi_intent1'
     })
     const secret = await client.readAppSecret(app.appId)
     await client.enableBot(app.appId)
@@ -124,7 +125,7 @@ describe('OpenPlatformApiClient', () => {
     expect(published).toEqual({ versionId: 'version_1', status: 2 })
     expect(calls.map(({ url }) => url.pathname)).toEqual([
       '/developers/v1/app/upload/image',
-      '/developers/v1/app/create',
+      '/developers/v1/manifest/upsert_by_template',
       '/developers/v1/secret/cli_dingding',
       '/developers/v1/robot/switch/cli_dingding',
       '/developers/v1/scope/all/cli_dingding',
@@ -143,6 +144,7 @@ describe('OpenPlatformApiClient', () => {
       '/developers/v1/manifest/get/cli_dingding',
       '/developers/v1/manifest/upsert',
       '/developers/v1/app_version/create/cli_dingding',
+      '/developers/v1/app_version/detail/cli_dingding/version_1',
       '/developers/v1/publish/commit/cli_dingding/version_1',
       '/developers/v1/app_version/detail/cli_dingding/version_1',
       '/developers/v1/publish/release/cli_dingding/version_1',
@@ -160,6 +162,24 @@ describe('OpenPlatformApiClient', () => {
     const uploadBody = calls[0].init?.body
     expect(uploadBody).toBeInstanceOf(FormData)
     expect((uploadBody as FormData).get('scale')).toBe('{"width":192,"height":192}')
+    expect(jsonBody(calls.find(({ url }) => (
+      url.pathname === '/developers/v1/manifest/upsert_by_template'
+    ))?.init)).toEqual({
+      appManifestTemplateID: 'developer_console',
+      createAppUserCustomField: {
+        i18n: {
+          zh_cn: {
+            name: configuration.appName,
+            description: configuration.appDescription
+          }
+        },
+        avatar: configuration.avatarUrl,
+        primaryLang: 'zh_cn'
+      },
+      cid: 'rvfpi_intent1',
+      HTTPHead: {}
+    })
+    expect(app.creationMode).toBe('template')
 
     const configuredManifest = JSON.parse(manifest) as Record<string, unknown>
     expect(configuredManifest).toMatchObject({
@@ -403,7 +423,7 @@ describe('OpenPlatformApiClient', () => {
     await expect(new OpenPlatformApiClient(session, { delay }).configureEvents(
       'cli_dingding',
       configuration
-    )).resolves.toBeUndefined()
+    )).resolves.toEqual({ changed: true })
     expect(delay).toHaveBeenCalledTimes(2)
   })
 
@@ -447,7 +467,7 @@ describe('OpenPlatformApiClient', () => {
     await expect(new OpenPlatformApiClient(session, { delay }).configureEvents(
       'cli_dingding',
       configuration
-    )).resolves.toBeUndefined()
+    )).resolves.toEqual({ changed: true })
     expect(delay).toHaveBeenCalledTimes(48)
   })
 
@@ -471,6 +491,51 @@ describe('OpenPlatformApiClient', () => {
       configuration
     )).rejects.toMatchObject({ code: 'feishu_console_scope_catalog_missing' })
     expect(paths).toEqual(['/developers/v1/scope/all/cli_dingding'])
+  })
+
+  it('reports no Scope mutation when online state and manifest are already current', async () => {
+    const paths: string[] = []
+    const manifest = JSON.stringify({
+      manifest_schema_version: '0.0.1',
+      avatar_url: configuration.avatarUrl,
+      primary_language: 'zh_cn',
+      i18ns: {
+        zh_cn: {
+          name: configuration.appName,
+          description: configuration.appDescription
+        }
+      },
+      bot: { enable: true, menu_enable: false },
+      scopes: { tenant: configuration.tenantScopes, user: [] }
+    })
+    const session = fakeSession(async (rawUrl) => {
+      const url = new URL(rawUrl)
+      paths.push(url.pathname)
+      if (url.pathname === '/developers/v1/scope/all/cli_dingding') {
+        return apiResponse({
+          scopes: configuration.tenantScopes.map((name, index) => ({
+            id: `scope_${index}`,
+            name,
+            status: 5,
+            supportScopeIdentityTypes: [2]
+          }))
+        })
+      }
+      if (url.pathname === '/developers/v1/manifest/get/cli_dingding') {
+        return apiResponse({ appManifest: manifest })
+      }
+      throw new Error(`unexpected request: ${url.pathname}`)
+    })
+
+    await expect(new OpenPlatformApiClient(session).configureScopes(
+      'cli_dingding',
+      configuration
+    )).resolves.toEqual({ changed: false })
+    expect(paths).toEqual([
+      '/developers/v1/scope/all/cli_dingding',
+      '/developers/v1/scope/all/cli_dingding',
+      '/developers/v1/manifest/get/cli_dingding'
+    ])
   })
 
   it('switches an enabled callback subscription to long connection and reads it back', async () => {
@@ -500,7 +565,7 @@ describe('OpenPlatformApiClient', () => {
     await expect(new OpenPlatformApiClient(session).configureCallbacksAndWebSocket(
       'cli_dingding',
       configuration
-    )).resolves.toBeUndefined()
+    )).resolves.toEqual({ changed: true })
     expect(jsonBody(calls.find(({ url }) => (
       url.pathname === '/developers/v1/callback/switch/cli_dingding'
     ))?.init)).toEqual({ clientId: 'cli_dingding', callbackMode: 4 })
@@ -513,7 +578,7 @@ describe('OpenPlatformApiClient', () => {
       const url = new URL(rawUrl)
       if (url.pathname.includes('/app_version/detail/')) {
         detailReads += 1
-        return apiResponse({ status: detailReads === 1 ? 5 : 2 })
+        return apiResponse({ status: detailReads <= 2 ? 5 : 2 })
       }
       if (url.pathname.includes('/publish/release/')) {
         releaseRequests += 1
@@ -534,7 +599,7 @@ describe('OpenPlatformApiClient', () => {
       versionId: 'version_1',
       status: 2
     })
-    expect(detailReads).toBe(2)
+    expect(detailReads).toBe(3)
     expect(releaseRequests).toBe(1)
   })
 
@@ -588,6 +653,85 @@ describe('OpenPlatformApiClient', () => {
     expect(paths).toEqual(['/developers/v1/app_version/list/cli_dingding'])
   })
 
+  it('falls back to self-build exactly once after a definite template rejection', async () => {
+    const paths: string[] = []
+    const session = fakeSession(async (rawUrl) => {
+      const url = new URL(rawUrl)
+      paths.push(url.pathname)
+      if (url.pathname === '/developers/v1/manifest/upsert_by_template') {
+        return new Response(JSON.stringify({ code: 10001 }), {
+          status: 400,
+          headers: { 'content-type': 'application/json' }
+        })
+      }
+      if (url.pathname === '/developers/v1/app/create') {
+        return apiResponse({ ClientID: 'cli_fallback', Avatar: configuration.avatarUrl })
+      }
+      throw new Error(`unexpected request: ${url.pathname}`)
+    })
+
+    await expect(new OpenPlatformApiClient(session).createApp({
+      appName: configuration.appName,
+      appDescription: configuration.appDescription,
+      avatarUrl: configuration.avatarUrl,
+      correlationId: 'rvfpi_intent1'
+    })).resolves.toMatchObject({
+      appId: 'cli_fallback',
+      creationMode: 'self_build_fallback'
+    })
+    expect(paths).toEqual([
+      '/developers/v1/manifest/upsert_by_template',
+      '/developers/v1/app/create'
+    ])
+  })
+
+  it.each([
+    ['HTTP 409', () => new Response(null, { status: 409 })],
+    ['HTTP 500', () => new Response(null, { status: 500 })],
+    ['a success envelope without ClientID', () => apiResponse({ Avatar: configuration.avatarUrl })],
+    ['a redirect after the create mutation', () => new Response(null, {
+      status: 302,
+      headers: { location: 'https://open.feishu.cn/app' }
+    })],
+    ['an envelope without a result code', () => new Response(JSON.stringify({
+      data: { ClientID: 'cli_untrusted' }
+    }), {
+      status: 200,
+      headers: { 'content-type': 'application/json' }
+    })]
+  ])('does not self-build after ambiguous template outcome: %s', async (_label, response) => {
+    const paths: string[] = []
+    const session = fakeSession(async (rawUrl) => {
+      const url = new URL(rawUrl)
+      paths.push(url.pathname)
+      return response()
+    })
+
+    await expect(new OpenPlatformApiClient(session).createApp({
+      appName: configuration.appName,
+      appDescription: configuration.appDescription,
+      avatarUrl: configuration.avatarUrl,
+      correlationId: 'rvfpi_intent1'
+    })).rejects.toMatchObject({ outcomeUnknown: true })
+    expect(paths).toEqual(['/developers/v1/manifest/upsert_by_template'])
+  })
+
+  it('does not self-build when the Developer Session expires during template creation', async () => {
+    const paths: string[] = []
+    const session = fakeSession(async (rawUrl) => {
+      paths.push(new URL(rawUrl).pathname)
+      return new Response(null, { status: 401 })
+    })
+
+    await expect(new OpenPlatformApiClient(session).createApp({
+      appName: configuration.appName,
+      appDescription: configuration.appDescription,
+      avatarUrl: configuration.avatarUrl,
+      correlationId: 'rvfpi_intent1'
+    })).rejects.toMatchObject({ code: 'feishu_developer_session_expired' })
+    expect(paths).toEqual(['/developers/v1/manifest/upsert_by_template'])
+  })
+
   it('marks a lost create response as an unknown remote outcome', async () => {
     const session = fakeSession(async () => {
       throw new Error('network response lost')
@@ -596,11 +740,12 @@ describe('OpenPlatformApiClient', () => {
     const error = await new OpenPlatformApiClient(session).createApp({
       appName: configuration.appName,
       appDescription: configuration.appDescription,
-      avatarUrl: configuration.avatarUrl
+      avatarUrl: configuration.avatarUrl,
+      correlationId: 'rvfpi_intent1'
     }).catch((reason: unknown): unknown => reason)
 
     expect(error).toMatchObject({
-      code: 'feishu_console_create_app_transport_failed',
+      code: 'feishu_console_create_app_from_template_transport_failed',
       outcomeUnknown: true
     })
   })

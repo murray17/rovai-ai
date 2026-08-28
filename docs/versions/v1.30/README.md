@@ -12,7 +12,8 @@ last_updated: 2026-08-28
 # Rovai-ai v1.30：飞书队员 Bot 与 Camp 渠道
 
 > 当前状态：Core、Migration、Electron Host、Renderer 与本地自动化已完成账号/发布生命周期纠偏。连接只建立
-> Developer Web Session；发布经同一 Session 直连开放平台 console API，不显示二维码或飞书创建确认页；旧
+> Developer Web Session；发布经同一 Session 以 template-first、App-ID durable freeze 和 activation-first 顺序直连
+> 开放平台 console API，不显示二维码或飞书创建确认页；旧
 > application registration 协议及其 API/交互已经退役。真实飞书租户的“连接不增 App、发布不弹确认页”仍是发布
 > 环境验收项，不由本地自动化代替。
 
@@ -36,12 +37,15 @@ last_updated: 2026-08-28
 - 未绑定消息只记录本地待绑定会话与 TTL transport facts，不建立 Principal、CampMessage、CampTurn 或 Run；绑定
   不回放旧消息，发送者必须重新发送；
 - Feishu Host 用独立 Web Session 登录并展示真实 user/tenant；普通队员发布从同一 Electron Session 取得 console
-  bootstrap，经 `OpenPlatformApiClient` 创建应用、读取 Secret、启用 Bot；Scope 名称经在线 catalog 映射为 App identity
-  ID，Event/Callback 通过独立在线 API 切换长连接并回读，Manifest 不再自证运行时 readiness；上传当前队员受控头像、
-  创建/发布版本并联合验证在线 Bot、Scope、Event、Callback 与 version。旧 registration/确认/poll 实现及其 typed API/IPC/Renderer 入口已删除。Session Cookie 与独立 App credential
+  bootstrap，经 `OpenPlatformApiClient` 优先从固定模板创建应用，只有明确 non-creation rejection 才 fallback 一次
+  self-build；App ID 在读取 Secret 或任何后续 mutation 前持久冻结。随后读取 Secret、启用 Bot 并先发布 `1.0.0`
+  activation；Scope 名称经在线 catalog 映射为 App identity ID，Event/Callback 通过独立在线 API 切换长连接并共享
+  120 秒 bounded convergence，配置有变化才发布下一 patch。Manifest 不再自证运行时 readiness；最终分别核验在线
+  Bot/Scope/Event/Callback/version，再保存 credential、Core upsert 与建立 WebSocket。旧 registration/确认/poll 实现及其 typed API/IPC/Renderer 入口已删除。Session Cookie 与独立 App credential
   分开加密，账号切换/断开不迁移、关闭或删除已发布 Bot，单连接故障隔离，重启恢复 published Bot 与 publication
-  intent；release 错误后继续以 version detail 收敛。每名队员的首个 App ID 由 Core 状态机永久冻结，完成、历史 disabled 恢复、凭据
-  丢失和 unknown recovery 都只核对并恢复同一 App，不存在换绑或第二次创建；初始版本头像错误时在同一 App 发布幂等
+  intent；release 错误后继续以 version detail 收敛。每名队员的首个 App ID 由 Core 状态机永久冻结；只有无可信 App
+  ID 的 create outcome unknown 锁住重建，冻结后的 Event/Scope/Version/credential/连接失败均可恢复同一 App。完成、历史 disabled 恢复、凭据
+  丢失和历史 unknown recovery 都只核对并恢复同一 App，不存在换绑或第二次创建；初始版本头像错误时在同一 App 发布幂等
   `1.0.1` 修复版本；已冻结 App 的在线接收配置不完整时只在原 App 发布下一 patch 修复版本；
 - 私聊按 receiving App 隔离；普通群一个 Camp；话题按 canonical topic 一个 Camp。群/话题只有显式 mention
   published managed Bot 才进入 Core；
@@ -87,8 +91,9 @@ ExternalQuote 的确定性 agent projection。Bootstrap、Session Charter、sect
 ## 验收
 
 实施与证据由[实施计划](implementation-plan.md)维护。仓库内完成门槛包括 v112→v114 升级、Developer Identity/
-publication intent、队员 App 身份冻结/历史 disabled 同 App 恢复、连接不注册 App、发布不产生 QR/飞书确认页、在线
-Scope/Event/Callback 配置与回读、Manifest 假阳性回归、identity drift/unknown remote fail-closed、owner-only/未绑定负向、
+publication intent、template-first fallback 分类、App-ID durable barrier、activation-first、队员 App 身份冻结/历史 disabled
+同 App 恢复、连接不注册 App、发布不产生 QR/飞书确认页、在线 Scope/Event/Callback 配置与回读、Manifest 假阳性回归、
+identity drift/create outcome unknown fail-closed、frozen Event timeout recoverable、owner-only/未绑定负向、
 multi-Bot fail-closed、FIFO promotion、普通群/话题 roster、ExternalQuote/Context bytes、safeStorage/Renderer
 秘密隔离、Host 恢复、双主题和完整 Rust/TypeScript/文档/构建门禁。真实飞书租户登录、应用创建、无平台确认发布
 和收发仍需要拥有可用企业权限的主人在发布环境执行，自动化不伪造外部成功。
@@ -98,8 +103,8 @@ multi-Bot fail-closed、FIFO promotion、普通群/话题 roster、ExternalQuote
 | 范围 | 结论 | 证据或理由 |
 | --- | --- | --- |
 | Version lifecycle | 已更新 | 本概览、[实施计划](implementation-plan.md)、[决定](decisions.md)与[版本索引](../README.md)共同切换 `current_version`。 |
-| Decisions | 已更新 | [v1.30 决定](decisions.md)冻结 owner-only Binding、聚合/统一 admission、ExternalQuote、roster、Main/Outbox 与 Developer Session/Provisioner 边界。 |
-| Contracts | 已更新 | 新增 [Feishu Channel v1](../../contracts/feishu-channel-v1.md)，并把 [ContextManifest Evidence v22](../../contracts/context-manifest-evidence-v22.md)设为新 AgentRun 当前入口。 |
+| Decisions | 已更新 | [v1.30 决定](decisions.md)冻结 owner-only Binding、聚合/统一 admission、ExternalQuote、roster、Main/Outbox，以及 template/activation-first Provisioner 边界。 |
+| Contracts | 已更新 | [Feishu Channel v2](../../contracts/feishu-channel-v2.md)成为当前渠道入口，v1 转为历史；[ContextManifest Evidence v22](../../contracts/context-manifest-evidence-v22.md)继续拥有 AgentRun 输入。 |
 | Architecture | 已更新 | 新增[飞书渠道架构](../../architecture/feishu-channel.md)，连接 Renderer、Main Host、Core admission、Camp membership 与 Outbox 权威。 |
 | UI | 已更新 | 新增[渠道设置](../../ui/components/channel-settings.md)，并更新 UI/component 索引；视觉继续使用现有 Porcelain Day / Steel Night。 |
 | Runtime Activity | 确认无需更新 | 渠道只消费既有 AgentRun/Delivery/CampMessage 终态，不新增 Runtime activity kind 或 Adapter mapping。 |

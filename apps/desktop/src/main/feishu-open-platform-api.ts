@@ -23,6 +23,18 @@ export interface FeishuPublishedVersionSummary extends FeishuPublishedVersion {
   appVersion: string
 }
 
+export type FeishuMemberBotAppCreationMode = 'template' | 'self_build_fallback'
+
+export interface FeishuCreatedMemberBotApp {
+  appId: string
+  avatarUrl: string
+  creationMode: FeishuMemberBotAppCreationMode
+}
+
+export interface FeishuConfigurationMutationResult {
+  changed: boolean
+}
+
 export interface FeishuOpenPlatformEventState {
   eventMode: number | null
   events: string[]
@@ -45,12 +57,20 @@ export interface FeishuOpenPlatformScope {
 export class FeishuOpenPlatformApiError extends Error {
   readonly code: string
   readonly outcomeUnknown: boolean
+  readonly httpStatus: number | null
+  readonly remoteCode: string | null
 
-  constructor(code: string, outcomeUnknown: boolean) {
+  constructor(
+    code: string,
+    outcomeUnknown: boolean,
+    details: { httpStatus?: number; remoteCode?: string } = {}
+  ) {
     super(code)
     this.name = 'FeishuOpenPlatformApiError'
     this.code = code
     this.outcomeUnknown = outcomeUnknown
+    this.httpStatus = details.httpStatus ?? null
+    this.remoteCode = details.remoteCode ?? null
   }
 }
 
@@ -76,6 +96,7 @@ type ClientOptions = {
 }
 
 const MANIFEST_SCHEMA_VERSION = '0.0.1'
+export const FEISHU_MEMBER_BOT_TEMPLATE_ID = 'developer_console'
 export const FEISHU_LONG_CONNECTION_MODE = 4
 const FEISHU_SCOPE_STATUS_DISABLED = 0
 const FEISHU_SCOPE_STATUS_ENABLED = 5
@@ -154,11 +175,28 @@ export class OpenPlatformApiClient {
     appName: string
     appDescription: string
     avatarUrl: string
+    correlationId: string
     signal?: AbortSignal
-  }): Promise<{ appId: string; avatarUrl: string }> {
+  }): Promise<FeishuCreatedMemberBotApp> {
     requireLength(input.appName, 2, 64, 'feishu_console_app_name_invalid')
     requireLength(input.appDescription, 1, 240, 'feishu_console_app_description_invalid')
     if (!isHttpsUrl(input.avatarUrl)) throw apiError('feishu_console_avatar_url_invalid', false)
+    requireResourceId(input.correlationId, 'feishu_console_correlation_id_invalid')
+    try {
+      const data = await this.#request(
+        'create_app_from_template',
+        '/developers/v1/manifest/upsert_by_template',
+        {
+          mutation: true,
+          signal: input.signal,
+          body: buildMemberBotTemplateCreatePayload(input)
+        }
+      )
+      return createdMemberBotApp(data, input.avatarUrl, 'template')
+    } catch (error) {
+      if (!isDefiniteTemplateCreationRejection(error)) throw error
+    }
+
     const data = await this.#request('create_app', '/developers/v1/app/create', {
       mutation: true,
       signal: input.signal,
@@ -176,13 +214,7 @@ export class OpenPlatformApiClient {
         primaryLang: 'zh_cn'
       }
     })
-    const record = requireRecord(data, 'feishu_console_create_response_invalid')
-    const appId = firstString(record, ['ClientID', 'clientId', 'client_id', 'appId'])
-    if (!appId || !isResourceId(appId)) {
-      throw apiError('feishu_console_create_response_invalid', true)
-    }
-    const avatarUrl = firstString(record, ['Avatar', 'avatar']) ?? input.avatarUrl
-    return { appId, avatarUrl }
+    return createdMemberBotApp(data, input.avatarUrl, 'self_build_fallback')
   }
 
   async readAppSecret(appId: string, signal?: AbortSignal): Promise<string> {
@@ -215,11 +247,12 @@ export class OpenPlatformApiClient {
     appId: string,
     configuration: FeishuMemberBotConsoleConfiguration,
     signal?: AbortSignal
-  ): Promise<void> {
+  ): Promise<FeishuConfigurationMutationResult> {
     const id = requireResourceId(appId, 'feishu_console_app_id_invalid')
     const current = await this.readScopeCatalog(id, signal)
     const required = resolveRequiredAppScopes(current, configuration.tenantScopes)
     const disabled = required.filter((scope) => scope.appStatus === FEISHU_SCOPE_STATUS_DISABLED)
+    let changed = false
     if (disabled.length > 0) {
       await this.#request(
         'configure_scopes',
@@ -236,6 +269,7 @@ export class OpenPlatformApiClient {
           signal
         }
       )
+      changed = true
     }
     const updated = resolveRequiredAppScopes(
       await this.readScopeCatalog(id, signal),
@@ -246,7 +280,7 @@ export class OpenPlatformApiClient {
     ))) {
       throw apiError('feishu_console_scope_update_verification_failed', true)
     }
-    await this.#updateManifest(
+    const manifestChanged = await this.#updateManifest(
       'configure_scope_manifest',
       id,
       configuration,
@@ -263,15 +297,34 @@ export class OpenPlatformApiClient {
       },
       signal
     )
+    return { changed: changed || manifestChanged }
+  }
+
+  async requestEventLongConnection(
+    appId: string,
+    signal?: AbortSignal
+  ): Promise<FeishuConfigurationMutationResult> {
+    const id = requireResourceId(appId, 'feishu_console_app_id_invalid')
+    await this.#request(
+      'switch_event',
+      `/developers/v1/event/switch/${encodeURIComponent(id)}`,
+      {
+        body: { clientId: id, eventMode: FEISHU_LONG_CONNECTION_MODE },
+        mutation: true,
+        signal
+      }
+    )
+    return { changed: true }
   }
 
   async configureEvents(
     appId: string,
     configuration: FeishuMemberBotConsoleConfiguration,
     signal?: AbortSignal
-  ): Promise<void> {
+  ): Promise<FeishuConfigurationMutationResult> {
     const id = requireResourceId(appId, 'feishu_console_app_id_invalid')
     const readbackBudget = { remainingAttempts: this.#configurationPollAttempts }
+    let changed = false
     let state = await this.readEventState(id, signal)
     if (state.eventMode !== FEISHU_LONG_CONNECTION_MODE) {
       await this.#request(
@@ -283,6 +336,7 @@ export class OpenPlatformApiClient {
           signal
         }
       )
+      changed = true
       const switched = await this.#readEventStateUntil(
         id,
         (candidate) => candidate.eventMode === FEISHU_LONG_CONNECTION_MODE,
@@ -313,6 +367,7 @@ export class OpenPlatformApiClient {
           signal
         }
       )
+      changed = true
     }
     const configured = await this.#readEventStateUntil(
       id,
@@ -324,7 +379,7 @@ export class OpenPlatformApiClient {
       signal
     )
     if (!configured) throw apiError('feishu_console_event_verification_failed', true)
-    await this.#updateManifest(
+    const manifestChanged = await this.#updateManifest(
       'configure_event_manifest',
       id,
       configuration,
@@ -346,14 +401,16 @@ export class OpenPlatformApiClient {
       },
       signal
     )
+    return { changed: changed || manifestChanged }
   }
 
   async configureCallbacksAndWebSocket(
     appId: string,
     configuration: FeishuMemberBotConsoleConfiguration,
     signal?: AbortSignal
-  ): Promise<void> {
+  ): Promise<FeishuConfigurationMutationResult> {
     const id = requireResourceId(appId, 'feishu_console_app_id_invalid')
+    let changed = false
     let state = await this.readCallbackState(id, signal)
     if (state.callbacks.length > 0 && state.callbackMode !== FEISHU_LONG_CONNECTION_MODE) {
       await this.#request(
@@ -365,12 +422,13 @@ export class OpenPlatformApiClient {
           signal
         }
       )
+      changed = true
       state = await this.readCallbackState(id, signal)
       if (state.callbackMode !== FEISHU_LONG_CONNECTION_MODE) {
         throw apiError('feishu_console_callback_verification_failed', true)
       }
     }
-    await this.#updateManifest(
+    const manifestChanged = await this.#updateManifest(
       'configure_callback_manifest',
       id,
       configuration,
@@ -386,6 +444,7 @@ export class OpenPlatformApiClient {
       },
       signal
     )
+    return { changed: changed || manifestChanged }
   }
 
   async readScopeCatalog(
@@ -573,6 +632,22 @@ export class OpenPlatformApiClient {
     throw apiError('feishu_console_published_version_not_found', false)
   }
 
+  async findVersion(
+    appId: string,
+    appVersion: string,
+    signal?: AbortSignal
+  ): Promise<FeishuPublishedVersionSummary | null> {
+    const normalizedAppId = requireResourceId(appId, 'feishu_console_app_id_invalid')
+    const normalizedAppVersion = requireAppVersion(appVersion)
+    const candidate = (await this.#listVersions(normalizedAppId, signal))
+      .find((version) => version.appVersion === normalizedAppVersion)
+    if (!candidate) return null
+    return {
+      ...(await this.readVersion(normalizedAppId, candidate.versionId, signal)),
+      appVersion: normalizedAppVersion
+    }
+  }
+
   async publishVersion(
     appId: string,
     versionId: string,
@@ -583,6 +658,11 @@ export class OpenPlatformApiClient {
       versionId,
       'feishu_console_version_id_invalid'
     )
+    const current = await this.readVersion(normalizedAppId, normalizedVersionId, signal)
+    if (current.status === PUBLISHED_VERSION_STATUS) return current
+    if (current.status === REJECTED_VERSION_STATUS) {
+      throw apiError('feishu_console_version_rejected', false)
+    }
     await this.#request(
       'commit_version',
       `/developers/v1/publish/commit/${encodeURIComponent(normalizedAppId)}/${encodeURIComponent(normalizedVersionId)}`,
@@ -775,10 +855,11 @@ export class OpenPlatformApiClient {
     configuration: FeishuMemberBotConsoleConfiguration,
     update: (manifest: Record<string, unknown>) => Record<string, unknown>,
     signal?: AbortSignal
-  ): Promise<void> {
+  ): Promise<boolean> {
     const id = requireResourceId(appId, 'feishu_console_app_id_invalid')
     const current = await this.readManifest(id, signal)
     const manifest = update(mergeMemberBotManifestBase(current, configuration))
+    if (structuredValueEqual(current, manifest)) return false
     await this.#request(operation, '/developers/v1/manifest/upsert', {
       body: {
         clientID: id,
@@ -788,6 +869,7 @@ export class OpenPlatformApiClient {
       mutation: true,
       signal
     })
+    return true
   }
 
   async #request(operation: string, path: string, options: RequestOptions): Promise<unknown> {
@@ -844,13 +926,18 @@ export class OpenPlatformApiClient {
         && target.pathname === '/app'
         && operation !== 'upload_avatar'
         && operation !== 'create_app'
+        && operation !== 'create_app_from_template'
       ) throw apiError('feishu_console_remote_app_unavailable', false)
-      throw apiError(`feishu_console_${operation}_redirect_${response.status}`, false)
+      throw apiError(
+        `feishu_console_${operation}_redirect_${response.status}`,
+        Boolean(options.mutation)
+      )
     }
     if (!response.ok) {
       throw apiError(
         `feishu_console_${operation}_http_${response.status}`,
-        Boolean(options.mutation && response.status >= 500)
+        Boolean(options.mutation && isAmbiguousMutationStatus(response.status)),
+        { httpStatus: response.status }
       )
     }
 
@@ -865,7 +952,11 @@ export class OpenPlatformApiClient {
     }
     if (!envelope || (envelope.code !== 0 && envelope.code !== '0')) {
       const code = normalizedApiCode(envelope?.code)
-      throw apiError(`feishu_console_${operation}_rejected_${code}`, false)
+      throw apiError(
+        `feishu_console_${operation}_rejected_${code}`,
+        Boolean(options.mutation && code === 'unknown'),
+        { remoteCode: code }
+      )
     }
     return envelope.data
   }
@@ -895,6 +986,73 @@ function mergeMemberBotManifestBase(
       menu_enable: false
     }
   }
+}
+
+function buildMemberBotTemplateCreatePayload(input: {
+  appName: string
+  appDescription: string
+  avatarUrl: string
+  correlationId: string
+}): Record<string, unknown> {
+  return {
+    appManifestTemplateID: FEISHU_MEMBER_BOT_TEMPLATE_ID,
+    createAppUserCustomField: {
+      i18n: {
+        zh_cn: {
+          name: input.appName,
+          description: input.appDescription
+        }
+      },
+      avatar: input.avatarUrl,
+      primaryLang: 'zh_cn'
+    },
+    cid: input.correlationId,
+    HTTPHead: {}
+  }
+}
+
+function createdMemberBotApp(
+  data: unknown,
+  fallbackAvatarUrl: string,
+  creationMode: FeishuMemberBotAppCreationMode
+): FeishuCreatedMemberBotApp {
+  const record = requireRecord(data, 'feishu_console_create_response_invalid')
+  const candidates = [
+    record,
+    optionalRecord(record.app),
+    optionalRecord(record.application),
+    optionalRecord(record.appInfo)
+  ]
+  const appId = candidates
+    .map((candidate) => firstString(candidate, ['ClientID', 'clientId', 'client_id', 'appId']))
+    .find(Boolean)
+  if (!appId || !isResourceId(appId)) {
+    throw apiError('feishu_console_create_response_invalid', true)
+  }
+  const avatarUrl = candidates
+    .map((candidate) => firstString(candidate, ['Avatar', 'avatar']))
+    .find(Boolean) ?? fallbackAvatarUrl
+  return { appId, avatarUrl, creationMode }
+}
+
+function isDefiniteTemplateCreationRejection(error: unknown): boolean {
+  if (!(error instanceof FeishuOpenPlatformApiError) || error.outcomeUnknown) return false
+  if (error.httpStatus !== null) {
+    return error.httpStatus >= 400
+      && error.httpStatus < 500
+      && ![401, 403, 408, 409, 425, 429].includes(error.httpStatus)
+  }
+  if (error.remoteCode !== null) {
+    return ![
+      '10003',
+      '99991663',
+      '99991664',
+      '99991668',
+      '99991671',
+      'unknown'
+    ].includes(error.remoteCode)
+  }
+  return false
 }
 
 function requireRecord(value: unknown, code: string): Record<string, unknown> {
@@ -1035,6 +1193,29 @@ function compareAppVersions(left: string, right: string): number {
   return 0
 }
 
+function structuredValueEqual(left: unknown, right: unknown): boolean {
+  if (Object.is(left, right)) return true
+  if (Array.isArray(left) || Array.isArray(right)) {
+    return Array.isArray(left)
+      && Array.isArray(right)
+      && left.length === right.length
+      && left.every((value, index) => structuredValueEqual(value, right[index]))
+  }
+  if (
+    !left || typeof left !== 'object'
+    || !right || typeof right !== 'object'
+  ) return false
+  const leftRecord = optionalRecord(left)
+  const rightRecord = optionalRecord(right)
+  const leftKeys = Object.keys(leftRecord).sort()
+  const rightKeys = Object.keys(rightRecord).sort()
+  return leftKeys.length === rightKeys.length
+    && leftKeys.every((key, index) => (
+      key === rightKeys[index]
+      && structuredValueEqual(leftRecord[key], rightRecord[key])
+    ))
+}
+
 function requireResourceId(value: string, code: string): string {
   const normalized = value.trim()
   if (!isResourceId(normalized)) throw apiError(code, false)
@@ -1052,6 +1233,10 @@ function normalizedApiCode(value: unknown): string {
     ? String(value).replace(/[^A-Za-z0-9_-]/g, '').slice(0, 48)
     : ''
   return normalized || 'unknown'
+}
+
+function isAmbiguousMutationStatus(status: number): boolean {
+  return status === 408 || status === 409 || status === 425 || status === 429 || status >= 500
 }
 
 function isRedirectStatus(status: number): boolean {
@@ -1094,6 +1279,10 @@ function abortableDelay(milliseconds: number, signal?: AbortSignal): Promise<voi
   })
 }
 
-function apiError(code: string, outcomeUnknown: boolean): FeishuOpenPlatformApiError {
-  return new FeishuOpenPlatformApiError(code, outcomeUnknown)
+function apiError(
+  code: string,
+  outcomeUnknown: boolean,
+  details: { httpStatus?: number; remoteCode?: string } = {}
+): FeishuOpenPlatformApiError {
+  return new FeishuOpenPlatformApiError(code, outcomeUnknown, details)
 }

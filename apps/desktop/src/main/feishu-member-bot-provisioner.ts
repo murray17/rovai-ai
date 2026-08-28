@@ -8,15 +8,22 @@ import type {
 import {
   FeishuOpenPlatformApiError,
   OpenPlatformApiClient,
-  type FeishuMemberBotConsoleConfiguration
+  type FeishuMemberBotAppCreationMode,
+  type FeishuMemberBotConsoleConfiguration,
+  type FeishuMemberBotVerificationRequirements,
+  type FeishuPublishedVersionSummary
 } from './feishu-open-platform-api'
 
 export type MemberBotProvisioningStep =
   | 'session_verified'
   | 'app_created'
-  | 'bot_configured'
-  | 'permissions_events_configured'
+  | 'activation_started'
+  | 'activation_published'
+  | 'configuration_started'
+  | 'configuration_waiting'
+  | 'configuration_verified'
   | 'version_published'
+  | 'online_verified'
 
 export interface MemberBotAvatarSource {
   pngBytes?: Uint8Array
@@ -60,6 +67,10 @@ export interface FeishuMemberBotProvisioner {
     }
     signal?: AbortSignal
     onProgress?(step: MemberBotProvisioningStep, remoteAppId?: string): void
+    onRemoteAppCreated?(input: {
+      appId: string
+      creationMode: FeishuMemberBotAppCreationMode
+    }): Promise<void>
   }): Promise<ProvisionedMemberBot>
   reconcile?(input: ReconcileMemberBotInput): Promise<ProvisionedMemberBot>
 }
@@ -98,12 +109,14 @@ OpenPlatformApiClient,
   | 'createApp'
   | 'readAppSecret'
   | 'enableBot'
+  | 'requestEventLongConnection'
   | 'configureScopes'
   | 'configureEvents'
   | 'configureCallbacksAndWebSocket'
   | 'createVersion'
   | 'publishVersion'
   | 'findPublishedVersion'
+  | 'findVersion'
   | 'verifyMemberBot'
 >
 
@@ -134,6 +147,7 @@ export class FeishuWebSessionMemberBotProvisioner implements FeishuMemberBotProv
     input.onProgress?.('session_verified')
 
     let remoteAppId: string | null = null
+    let remoteAppFrozen = false
     let platformSessionOpened = false
     let sessionPersisted = false
     try {
@@ -155,14 +169,51 @@ export class FeishuWebSessionMemberBotProvisioner implements FeishuMemberBotProv
         appName,
         appDescription: input.appDescription,
         avatarUrl,
+        correlationId: input.publicationIntentId,
         signal: input.signal
       })
       remoteAppId = created.appId
+      try {
+        if (!input.onRemoteAppCreated) {
+          throw new Error('feishu_publication_app_freeze_unavailable')
+        }
+        await input.onRemoteAppCreated({
+          appId: remoteAppId,
+          creationMode: created.creationMode
+        })
+      } catch (error) {
+        throw provisioningError(
+          provisioningErrorCode(error, 'feishu_publication_app_freeze_failed'),
+          'create_outcome_unknown'
+        )
+      }
+      remoteAppFrozen = true
       input.onProgress?.('app_created', remoteAppId)
 
       const appSecret = await client.readAppSecret(remoteAppId, input.signal)
+      input.onProgress?.('activation_started', remoteAppId)
       await client.enableBot(remoteAppId, input.signal)
-      input.onProgress?.('bot_configured', remoteAppId)
+      await client.requestEventLongConnection(remoteAppId, input.signal)
+
+      const activationVersionId = await client.createVersion({
+        appId: remoteAppId,
+        ownerUserId: identity.userId,
+        appVersion: '1.0.0',
+        remark: '启用飞书队员 Bot',
+        changeLog: '启用 Bot 并请求长连接事件模式。',
+        reuseExisting: true,
+        signal: input.signal
+      })
+      const activationPublished = await client.publishVersion(
+        remoteAppId,
+        activationVersionId,
+        input.signal
+      )
+      let publishedVersion: FeishuPublishedVersionSummary = {
+        ...activationPublished,
+        appVersion: '1.0.0'
+      }
+      input.onProgress?.('activation_published', remoteAppId)
 
       const configuration: FeishuMemberBotConsoleConfiguration = {
         appName,
@@ -171,51 +222,64 @@ export class FeishuWebSessionMemberBotProvisioner implements FeishuMemberBotProv
         tenantScopes: MEMBER_BOT_MANIFEST_REQUIREMENTS.scopes.tenant,
         tenantEvents: MEMBER_BOT_MANIFEST_REQUIREMENTS.events.items.tenant
       }
-      await client.configureScopes(
+      input.onProgress?.('configuration_started', remoteAppId)
+      const scopes = await client.configureScopes(
         remoteAppId,
         configuration,
         input.signal
       )
-      await client.configureEvents(
+      input.onProgress?.('configuration_waiting', remoteAppId)
+      const events = await client.configureEvents(
         remoteAppId,
         configuration,
         input.signal
       )
-      await client.configureCallbacksAndWebSocket(
+      const callbacks = await client.configureCallbacksAndWebSocket(
         remoteAppId,
         configuration,
         input.signal
       )
-      input.onProgress?.('permissions_events_configured', remoteAppId)
-
-      const versionId = await client.createVersion({
-        appId: remoteAppId,
-        ownerUserId: identity.userId,
-        signal: input.signal
-      })
-      await client.publishVersion(remoteAppId, versionId, input.signal)
+      if (scopes.changed || events.changed || callbacks.changed) {
+        input.onProgress?.('configuration_verified', remoteAppId)
+        const finalAppVersion = incrementPatchVersion(publishedVersion.appVersion)
+        const finalVersionId = await client.createVersion({
+          appId: remoteAppId,
+          ownerUserId: identity.userId,
+          appVersion: finalAppVersion,
+          remark: '发布飞书 Bot 最终配置',
+          changeLog: '发布已生效的消息权限、事件订阅与长连接配置。',
+          reuseExisting: true,
+          signal: input.signal
+        })
+        publishedVersion = {
+          ...(await client.publishVersion(remoteAppId, finalVersionId, input.signal)),
+          appVersion: finalAppVersion
+        }
+      }
       input.onProgress?.('version_published', remoteAppId)
       await client.verifyMemberBot({
         appId: remoteAppId,
-        versionId,
+        versionId: publishedVersion.versionId,
         configuration,
         signal: input.signal
       })
+      input.onProgress?.('online_verified', remoteAppId)
       await this.#developerSession.persist()
       sessionPersisted = true
       return {
         appId: remoteAppId,
         appSecret,
         botDisplayName: input.appName,
-        publishedVersionId: versionId
+        publishedVersionId: publishedVersion.versionId
       }
     } catch (error) {
       if (isProvisioningError(error)) throw error
       const code = provisioningErrorCode(error, 'feishu_console_provisioning_failed')
-      const remoteState = remoteAppId !== null
-        || (error instanceof FeishuOpenPlatformApiError && error.outcomeUnknown)
-        ? 'unknown'
-        : 'none'
+      const remoteState: ProvisioningRemoteState = remoteAppFrozen
+        ? 'known_frozen'
+        : error instanceof FeishuOpenPlatformApiError && error.outcomeUnknown
+          ? 'create_outcome_unknown'
+          : 'none'
       throw provisioningError(code, remoteState)
     } finally {
       if (platformSessionOpened && !sessionPersisted) {
@@ -225,7 +289,9 @@ export class FeishuWebSessionMemberBotProvisioner implements FeishuMemberBotProv
   }
 
   async reconcile(input: ReconcileMemberBotInput): Promise<ProvisionedMemberBot> {
-    if (input.signal?.aborted) throw provisioningError('feishu_provisioning_cancelled', 'none')
+    if (input.signal?.aborted) {
+      throw provisioningError('feishu_provisioning_cancelled', 'known_frozen')
+    }
     const identity = await this.#developerSession.requireExpectedIdentity(
       input.expectedDeveloperIdentity
     )
@@ -245,23 +311,51 @@ export class FeishuWebSessionMemberBotProvisioner implements FeishuMemberBotProv
       const client = this.#createClient(platformSession)
       input.onProgress?.('app_created', input.remoteAppId)
       const appSecret = await client.readAppSecret(input.remoteAppId, input.signal)
-      let publishedVersion = await client.findPublishedVersion(
-        input.remoteAppId,
-        input.signal
-      )
+      input.onProgress?.('activation_started', input.remoteAppId)
+      let publishedVersion: FeishuPublishedVersionSummary
+      try {
+        publishedVersion = await client.findPublishedVersion(
+          input.remoteAppId,
+          input.signal
+        )
+      } catch (error) {
+        if (!isPublishedVersionMissingError(error)) throw error
+        await client.enableBot(input.remoteAppId, input.signal)
+        await client.requestEventLongConnection(input.remoteAppId, input.signal)
+        const activationVersionId = await client.createVersion({
+          appId: input.remoteAppId,
+          ownerUserId: identity.userId,
+          appVersion: '1.0.0',
+          remark: '启用飞书队员 Bot',
+          changeLog: '启用 Bot 并请求长连接事件模式。',
+          reuseExisting: true,
+          signal: input.signal
+        })
+        publishedVersion = {
+          ...(await client.publishVersion(
+            input.remoteAppId,
+            activationVersionId,
+            input.signal
+          )),
+          appVersion: '1.0.0'
+        }
+      }
+      input.onProgress?.('activation_published', input.remoteAppId)
+
       const needsAvatarRepair = Boolean(
         input.avatarSource?.pngBytes && publishedVersion.appVersion === '1.0.0'
       )
       let needsReadinessRepair = false
+      const verificationRequirements = {
+        tenantScopes: MEMBER_BOT_MANIFEST_REQUIREMENTS.scopes.tenant,
+        tenantEvents: MEMBER_BOT_MANIFEST_REQUIREMENTS.events.items.tenant
+      }
       if (!needsAvatarRepair) {
         try {
           await client.verifyMemberBot({
             appId: input.remoteAppId,
             versionId: publishedVersion.versionId,
-            configuration: {
-              tenantScopes: MEMBER_BOT_MANIFEST_REQUIREMENTS.scopes.tenant,
-              tenantEvents: MEMBER_BOT_MANIFEST_REQUIREMENTS.events.items.tenant
-            },
+            configuration: verificationRequirements,
             signal: input.signal
           })
         } catch (error) {
@@ -269,6 +363,7 @@ export class FeishuWebSessionMemberBotProvisioner implements FeishuMemberBotProv
           needsReadinessRepair = true
         }
       }
+      let finalVerification: FeishuMemberBotVerificationRequirements = verificationRequirements
       if (needsAvatarRepair || needsReadinessRepair) {
         const avatar = input.avatarSource?.pngBytes
           ? requireAvatarSource(input.avatarSource)
@@ -282,42 +377,75 @@ export class FeishuWebSessionMemberBotProvisioner implements FeishuMemberBotProv
           tenantEvents: MEMBER_BOT_MANIFEST_REQUIREMENTS.events.items.tenant
         }
         await client.enableBot(input.remoteAppId, input.signal)
-        input.onProgress?.('bot_configured', input.remoteAppId)
-        await client.configureScopes(input.remoteAppId, configuration, input.signal)
-        await client.configureEvents(input.remoteAppId, configuration, input.signal)
-        await client.configureCallbacksAndWebSocket(
+        input.onProgress?.('configuration_started', input.remoteAppId)
+        const scopes = await client.configureScopes(
           input.remoteAppId,
           configuration,
           input.signal
         )
-        input.onProgress?.('permissions_events_configured', input.remoteAppId)
-        const repairVersion = incrementPatchVersion(publishedVersion.appVersion)
-        const repairVersionId = await client.createVersion({
-          appId: input.remoteAppId,
-          ownerUserId: identity.userId,
-          appVersion: repairVersion,
-          remark: needsReadinessRepair ? '修复飞书 Bot 接收配置' : '同步 Rovai 队员头像',
-          changeLog: needsReadinessRepair
-            ? '补全消息权限、事件订阅与长连接在线配置。'
-            : '使用当前 Rovai 队员头像修正飞书 Bot 身份。',
-          reuseExisting: true,
-          signal: input.signal
-        })
-        publishedVersion = {
-          ...(await client.publishVersion(input.remoteAppId, repairVersionId, input.signal)),
-          appVersion: repairVersion
-        }
-        await client.verifyMemberBot({
-          appId: input.remoteAppId,
-          versionId: publishedVersion.versionId,
+        input.onProgress?.('configuration_waiting', input.remoteAppId)
+        const events = await client.configureEvents(
+          input.remoteAppId,
           configuration,
-          signal: input.signal
-        })
+          input.signal
+        )
+        const callbacks = await client.configureCallbacksAndWebSocket(
+          input.remoteAppId,
+          configuration,
+          input.signal
+        )
+        if (
+          needsAvatarRepair
+          || scopes.changed
+          || events.changed
+          || callbacks.changed
+        ) {
+          input.onProgress?.('configuration_verified', input.remoteAppId)
+          const repairVersion = incrementPatchVersion(publishedVersion.appVersion)
+          const repairVersionId = await client.createVersion({
+            appId: input.remoteAppId,
+            ownerUserId: identity.userId,
+            appVersion: repairVersion,
+            remark: needsReadinessRepair ? '修复飞书 Bot 接收配置' : '同步 Rovai 队员头像',
+            changeLog: needsReadinessRepair
+              ? '补全消息权限、事件订阅与长连接在线配置。'
+              : '使用当前 Rovai 队员头像修正飞书 Bot 身份。',
+            reuseExisting: true,
+            signal: input.signal
+          })
+          publishedVersion = {
+            ...(await client.publishVersion(input.remoteAppId, repairVersionId, input.signal)),
+            appVersion: repairVersion
+          }
+        }
+        finalVerification = configuration
       } else {
-        input.onProgress?.('bot_configured', input.remoteAppId)
-        input.onProgress?.('permissions_events_configured', input.remoteAppId)
+        const pendingAppVersion = incrementPatchVersion(publishedVersion.appVersion)
+        const pendingVersion = await client.findVersion(
+          input.remoteAppId,
+          pendingAppVersion,
+          input.signal
+        )
+        if (pendingVersion && pendingVersion.status !== 2) {
+          input.onProgress?.('configuration_verified', input.remoteAppId)
+          publishedVersion = {
+            ...(await client.publishVersion(
+              input.remoteAppId,
+              pendingVersion.versionId,
+              input.signal
+            )),
+            appVersion: pendingAppVersion
+          }
+        }
       }
       input.onProgress?.('version_published', input.remoteAppId)
+      await client.verifyMemberBot({
+        appId: input.remoteAppId,
+        versionId: publishedVersion.versionId,
+        configuration: finalVerification,
+        signal: input.signal
+      })
+      input.onProgress?.('online_verified', input.remoteAppId)
       await this.#developerSession.persist()
       sessionPersisted = true
       return {
@@ -327,10 +455,12 @@ export class FeishuWebSessionMemberBotProvisioner implements FeishuMemberBotProv
         publishedVersionId: publishedVersion.versionId
       }
     } catch (error) {
-      if (isProvisioningError(error)) throw error
+      if (isProvisioningError(error)) {
+        throw provisioningError(error.code, 'known_frozen')
+      }
       throw provisioningError(
         provisioningErrorCode(error, 'feishu_console_reconciliation_failed'),
-        'unknown'
+        'known_frozen'
       )
     } finally {
       if (platformSessionOpened && !sessionPersisted) {
@@ -363,12 +493,20 @@ export class UnavailableFeishuDeveloperSessionService implements FeishuDeveloper
 }
 
 export function isUnknownRemoteProvisioningError(error: unknown): boolean {
-  return isProvisioningError(error) && error.remoteState === 'unknown'
+  return isProvisioningError(error) && error.remoteState === 'create_outcome_unknown'
 }
 
-type ProvisioningError = Error & { code: string; remoteState: 'none' | 'unknown' }
+export type ProvisioningRemoteState =
+  | 'none'
+  | 'known_frozen'
+  | 'create_outcome_unknown'
 
-function provisioningError(code: string, remoteState: 'none' | 'unknown'): ProvisioningError {
+type ProvisioningError = Error & { code: string; remoteState: ProvisioningRemoteState }
+
+function provisioningError(
+  code: string,
+  remoteState: ProvisioningRemoteState
+): ProvisioningError {
   const error = new Error(code) as ProvisioningError
   error.code = code
   error.remoteState = remoteState
@@ -378,8 +516,9 @@ function provisioningError(code: string, remoteState: 'none' | 'unknown'): Provi
 function isProvisioningError(error: unknown): error is ProvisioningError {
   return error instanceof Error
     && typeof (error as Partial<ProvisioningError>).code === 'string'
-    && ((error as Partial<ProvisioningError>).remoteState === 'none'
-      || (error as Partial<ProvisioningError>).remoteState === 'unknown')
+    && ['none', 'known_frozen', 'create_outcome_unknown'].includes(
+      (error as Partial<ProvisioningError>).remoteState ?? ''
+    )
 }
 
 function provisioningErrorCode(error: unknown, fallback: string): string {
@@ -401,12 +540,17 @@ function isRepairableMemberBotVerificationError(error: unknown): boolean {
   ].includes(error.code)
 }
 
+function isPublishedVersionMissingError(error: unknown): boolean {
+  return error instanceof FeishuOpenPlatformApiError
+    && error.code === 'feishu_console_published_version_not_found'
+}
+
 function incrementPatchVersion(version: string): string {
   const match = /^(\d{1,4})\.(\d{1,4})\.(\d{1,4})$/.exec(version)
-  if (!match) throw provisioningError('feishu_console_app_version_invalid', 'unknown')
+  if (!match) throw provisioningError('feishu_console_app_version_invalid', 'known_frozen')
   const patch = Number(match[3]) + 1
   if (patch > 9_999) {
-    throw provisioningError('feishu_console_app_version_invalid', 'unknown')
+    throw provisioningError('feishu_console_app_version_invalid', 'known_frozen')
   }
   return `${match[1]}.${match[2]}.${patch}`
 }

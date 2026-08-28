@@ -140,6 +140,12 @@ describe('Channel settings', () => {
     expect(channelErrorMessage(new Error(
       "Error invoking remote method 'rovai:channels-retry-member-bot': Error: feishu_connection_error"
     ))).toBe('飞书连接异常，请稍后重试。')
+    expect(channelErrorMessage(new Error(
+      "Error invoking remote method 'rovai:channels-retry-member-bot': Error: feishu_console_event_verification_failed"
+    ))).toBe('飞书事件与长连接配置尚未确认生效；原应用已保留，可以稍后继续核对。')
+    expect(channelErrorMessage(new Error(
+      "Error invoking remote method 'rovai:channels-publish-member-bot': Error: feishu_console_create_app_from_template_http_500"
+    ))).toBe('飞书开放平台操作尚未完成；请查看下方状态，排除问题后重试。')
   })
 
   it('keeps only present members in deterministic roster order', () => {

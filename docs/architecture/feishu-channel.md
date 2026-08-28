@@ -8,7 +8,7 @@ last_updated: 2026-08-28
 
 # 飞书渠道架构
 
-字段、状态和恢复合同见 [Feishu Channel v1](../contracts/feishu-channel-v1.md)，模型输入证据见
+字段、状态和恢复合同见 [Feishu Channel v2](../contracts/feishu-channel-v2.md)，模型输入证据见
 [ContextManifest Evidence v22](../contracts/context-manifest-evidence-v22.md)，取舍理由见
 [v1.30 决策记录](../versions/v1.30/decisions.md)。
 
@@ -61,14 +61,21 @@ Keychain 命名空间；摘要不暴露原始路径，非隔离 App 继续使用
 返回 Cookie header。`apiOrigin` 必须精确匹配当前 brand 的 `https://open.feishu.cn | https://open.larksuite.com`，API
 路径只允许 `/developers/`，相似域、跨源 URL 和页面身份漂移均在创建前拒绝。
 
-`OpenPlatformApiClient` 按顺序上传受控队员头像、创建自建应用、读取 App Secret、启用 Bot、配置 tenant scopes、
-receive/roster events、callback 与 event WebSocket mode，创建并发布 `1.0.0` 版本，再回读在线配置与 version status。
-头像与兼容元数据可以继续写 manifest；Scope 使用在线 catalog 把名称映射为 App identity ID，再经 scope update 写入；
-Event 独立切到 `eventMode=4` 并写入 receive/roster App events；只有存在 callback items 时才要求在线
-`callbackMode=4`。最终回读以 robot、scope、event、callback 和 version detail API 为运行时 authority，manifest 中的
-scope/event/WebSocket 字段不能自证配置完成。完成后 Main 才把独立 credential 写入
-safeStorage、验证 Bot WebSocket 并完成 intent。普通流程始终保持隐藏窗口，不打开飞书“创建飞书智能体应用 /
-立即创建”确认页，也不向 Renderer 产生二维码。
+`OpenPlatformApiClient` 先上传受控队员头像，再以固定 `developer_console` 模板和 publication intent correlation 调用
+`manifest/upsert_by_template`。只有上游明确拒绝模板且能够证明没有创建应用，才调用一次 self-build create；transport、
+timeout、408/409/429/5xx、缺少 ClientID、Session 失效或任何 commit 结果不明都 fail closed，不能 fallback 再创建。
+模板或受限 fallback 返回 App ID 后，Provisioner 必须 await Main 把 exact ID 持久推进为 `app_created`；该 durable
+barrier 完成前不能读取 Secret、启用 Bot、配置能力或创建版本。
+
+App ID 冻结后，client 读取 App Secret、启用 Bot、请求 event WebSocket mode，并创建或复用 `1.0.0` activation
+version，先确认它 published。之后才配置 tenant scopes、receive/roster events 与 callback。Event mode 与事件条目共享
+120 秒、每秒一次的 bounded convergence budget；Scope/Event/Callback 各自报告是否发生远端或 Manifest mutation。
+任一配置发生变化时，从当前 published version 递增 patch，创建或复用 exact 下一版本并发布；全部无变化时复用现有
+版本。头像与兼容元数据可以继续写 manifest；Scope 使用在线 catalog 把名称映射为 App identity ID，再经 scope update
+写入；只有存在 callback items 时才要求在线 `callbackMode=4`。最终回读以 robot、scope、event、callback 和 version
+detail API 为运行时 authority，manifest 中的 scope/event/WebSocket 字段不能自证配置完成。在线配置验证通过后，
+Main 依次把独立 credential 写入 safeStorage、Core upsert exact frozen Bot、建立并回读 Bot WebSocket identity，最后
+完成 intent。普通流程始终保持隐藏窗口，不打开飞书“创建飞书智能体应用 / 立即创建”确认页，也不向 Renderer 产生二维码。
 
 队员与飞书 App 的一对一身份不是 Renderer 按钮约定，而是 Core publication 状态机不变量。首次远端创建取得 App ID
 后，intent 永久冻结 `agentId + accountId + remoteAppId`，并在首次写入后冻结 `credentialRef`；新 intent 不能越过已有冻结身份，Bot 写入只能
@@ -94,25 +101,27 @@ deadline 内回读同一 App 与 Version。回读为 published 时收敛成功�
 
 开放平台 console API 和页面 bootstrap 是版本敏感、未公开稳定合同的 Adapter 边界。它被限制在独立 client 中，使用
 exact origin/path、严格响应结构、秘密不出 Main、创建后 read-back verification 和 fail-closed error mapping；页面或
-协议变化不得降级为确认页、SDK 注册或另一条静默创建路径。真实租户仍须回归“连接不增 App、普通发布不弹平台确认、
+协议变化不得降级为确认页或 SDK 注册。模板到 self-build 的唯一 fallback 只接受已分类的明确 non-creation rejection；
+创建结果不明时绝不进入第二条 mutation。真实租户仍须回归“连接不增 App、普通发布不弹平台确认、
 在线 Scope/Event 状态完整且能建立长连接并实际收到消息”。
 
 旧的 `/oauth/v1/app/registration + verification_uri_complete + showRegistrationConfirmation + pollRegistration`
 兼容协议已经从 Provisioner、Developer Session、typed API、IPC 与 Renderer 全部移除。console 发布失败只返回可诊断
-错误，不得打开注册确认页、要求队员再次扫码，或进入另一条创建路径。创建结果不确定、或已取得远端 App ID 但凭据
-尚未安全提交时，intent 进入
-`failed_unknown_remote_state`，自动重试被锁住，避免重复创建 App。Main 启动时只从持久 intent 判断可恢复/待人工核对，
-不从 Renderer 状态推断。
+错误，不得打开注册确认页或要求队员再次扫码。只有 create mutation 结果不确定且没有可信冻结 App ID 时，intent 进入
+`failed_unknown_remote_state`，自动重建被锁住。App ID 已 durable freeze 后，Secret、配置、版本、credential、upsert
+或 WebSocket 失败都进入 `failed_recoverable`，即使 credential 尚未写入；Main 启动时只从持久 intent 判断可恢复/待人工
+核对，不从 Renderer 状态推断。
 
-当该未知 intent 已冻结 `remoteAppId` 时，主人再次点击普通“发布”是显式 reconciliation，而不是新的 create attempt。
+当 `failed_recoverable` 或历史 unknown intent 已冻结 `remoteAppId` 时，主人再次点击普通“发布”是显式
+reconciliation，而不是新的 create attempt。
 Host 复核同一 Developer Identity，先对冻结 App 读取 Secret、版本列表/detail、在线 Bot/Scope/Event/Callback 状态与
 manifest 头像元数据；不得创建 App 或改变 App ID。
 若最新 published 仍为初始 `1.0.0` 且队员有可用受控头像，reconciliation 会把同一头像上传到同一 App、
 重放幂等 manifest 配置，并创建或复用 `1.0.1` 头像修复版本后发布与回读。若 `1.0.1` 已 published，则只回读验证，
 不重复上传或发布。头像已正确但在线消息权限、事件或模式不完整时，reconciliation 在同一 App 配置后使用下一 patch
-版本发布；readiness 已完整时保持只读。完成证明后才保存 credential、验证 WebSocket，并让同一 intent 从
-`failed_unknown_remote_state` 进入 `credentials_read` 后继续完成；Core 拒绝更换 App ID。缺少冻结 App ID、头像读取失败
-或远端核对失败时仍保持未知状态，不允许创建第二个 App。
+版本发布；readiness 已完整时保持只读。完成证明后才保存 credential、Core upsert 并验证 WebSocket，让同一 intent 从
+`failed_recoverable | failed_unknown_remote_state` 进入 `credentials_read` 后继续完成；Core 拒绝更换 App ID。头像读取、
+远端核对或连接失败时保持 `failed_recoverable`；只有缺少可信 App ID 的 create outcome unknown 继续锁住，不允许创建第二个 App。
 
 ## 项目与会话
 

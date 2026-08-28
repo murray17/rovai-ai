@@ -3,13 +3,13 @@ document_type: ui-component
 component: channel-settings
 authority: channel-settings-presentation-and-interaction
 status: accepted
-last_updated: 2026-08-27
+last_updated: 2026-08-28
 ---
 
 # 渠道设置
 
 渠道设置是主人在 Rovai 本机维护渠道连接、队员 Bot、ProjectBinding 与待绑定会话的唯一 Renderer surface。
-领域状态和错误见 [Feishu Channel v1](../../contracts/feishu-channel-v1.md)；本页只拥有信息层级、交互与可访问性。
+领域状态和错误见 [Feishu Channel v2](../../contracts/feishu-channel-v2.md)；本页只拥有信息层级、交互与可访问性。
 
 ## 页面结构
 
@@ -39,15 +39,27 @@ Dialog、状态点和间距复用现有组件语法。
 或原始异常文本。
 
 普通发布不得进入 QR Dialog。点击列表“发布”先打开独立确认 Dialog，展示现有 `MemberAvatar`、队员名称/职责、
-应用说明、当前开发者账号和租户；“确认发布”后在同一 Dialog 逐步展示账号校验、创建应用、配置 Bot、权限/事件、
-发布版本、验证连接与完成。阶段主文案固定为“正在校验飞书账号… / 正在创建应用… / 正在配置 Bot… /
-正在配置权限和事件… / 正在发布版本… / 正在验证连接… / 发布完成”。普通发布不得打开飞书“创建飞书智能体应用 /
+应用说明、当前开发者账号和租户；“确认发布”后在同一 Dialog 逐步展示八个进行中阶段。主文案固定为：
+
+1. “正在校验发布账号…”；
+2. 首次发布“正在创建独立应用…”，恢复时“正在核对已绑定应用…”；
+3. “正在启用应用…”；
+4. “正在配置权限和事件…”；
+5. “正在等待配置生效…”；
+6. “正在发布最终配置…”；
+7. “正在核对在线配置…”；
+8. “正在建立 Bot 长连接…”；
+
+完成文案为“发布完成”。等待阶段须说明飞书控制面可能需要几十秒；在线配置核验与真正 WebSocket connect 不得合并成
+同一阶段。若配置没有 mutation，可以跳过第 6 阶段，但不得伪造一次最终版本发布。普通发布不得打开飞书“创建飞书智能体应用 /
 立即创建”页或其他平台确认窗口。Session 失效/身份漂移时显示“重新连接飞书”并停止发布，不存在其他发布流程。
 
-若上次发布已冻结 App ID 但落入“远端状态待核对”，主人再次点击普通“发布”沿用同一 Dialog 与进度语言，后台核对
+若上次发布已冻结 App ID 并失败，主人再次点击“继续核对”沿用同一 Dialog 与进度语言，后台核对
 并接管该 App；不显示新的创建确认，也不生成第二个 App。初始版本已发布但头像仍是旧 Rovai icon 时，同一流程可以显示
 配置与发布阶段，把当前队员头像作为 `1.0.1` 修复版本发布到原 App；修复版本已 published 时只核对而不重复 mutation。
-成功后进入“正在验证连接…”与“发布完成”；失败则继续显示待核对及原 App ID。
+成功后依次进入在线配置核验、长连接与完成；失败继续显示原 App ID、可恢复说明和“继续核对”。只有 create 结果不明且
+没有可信 App ID 时显示“远端创建结果待核对”，并隐藏重建入口。人类可行动说明是主要错误文案，固定 failure code 只在
+终态作为次级诊断信息展示。
 
 ## 队员 Bot
 
@@ -58,7 +70,8 @@ Dialog、状态点和间距复用现有组件语法。
 | unpublished | 未发布 | 发布 |
 | provisioning | 发布中 | 禁用当前行 |
 | published | 已发布 | 飞书管理（官方应用详情链接） |
-| failed | 发布失败 / 远端状态待核对 | 重试或核对同一 App |
+| failed，已有 App ID | 需处理 | 继续核对同一 App |
+| failed，无 App ID | 需处理 / 远端创建结果待核对 | 安全失败可重试；true unknown 不提供重建入口 |
 | disabled（历史数据状态） | 已停用 | 重新发布同一 App |
 
 已发布行不打开 Rovai 管理 Dialog，也不提供停用命令。“飞书管理”是带可访问名称的外部链接，使用 Main 从该 Bot
@@ -66,7 +79,7 @@ Dialog、状态点和间距复用现有组件语法。
 浏览器打开。链接不依赖当前 Developer Session 的连接状态；Renderer 不拼接或接受任意 URL。关闭、停用、删除等
 远端应用治理只在官方开放平台完成。
 
-重新发布 Dialog 必须显示已经冻结的 App ID，明确“不会创建或换绑其他应用”；进度中的创建阶段改为“正在核对应用…”。Renderer
+重新发布 Dialog 必须显示已经冻结的 App ID，明确“不会创建或换绑其他应用”；进度中的创建阶段改为“正在核对已绑定应用…”。Renderer
 头像只从现有 `MemberAvatar` 读取；发布时 Main 独立解析同一个受控 `avatarRef` 并上传 exact icon rendition，渠道页不
 解析或接收本机头像路径。非空头像引用无法安全读取时，发布失败而不是展示或上传另一身份。
 
@@ -99,5 +112,5 @@ Dialog、状态点和间距复用现有组件语法。
 
 - [全局设计系统](../../../DESIGN.md)
 - [设置工作区 brief](../../../apps/desktop/.impeccable/surfaces/settings-workspace.md)
-- [Feishu Channel v1](../../contracts/feishu-channel-v1.md)
+- [Feishu Channel v2](../../contracts/feishu-channel-v2.md)
 - [飞书渠道架构](../../architecture/feishu-channel.md)

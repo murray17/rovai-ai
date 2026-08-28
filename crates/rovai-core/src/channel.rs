@@ -1571,7 +1571,10 @@ impl ChannelService {
                 }
             }
             if current_state == "failed_unknown_remote_state"
-                && envelope.payload.state == "credentials_read"
+                && matches!(
+                    envelope.payload.state.as_str(),
+                    "credentials_read" | "failed_recoverable"
+                )
                 && current_app_id.is_none()
             {
                 return Ok(rejected(
@@ -4154,7 +4157,7 @@ fn publication_intent_transition_allowed(current: &str, next: &str) -> bool {
         return next == "session_verified";
     }
     if current == "failed_unknown_remote_state" {
-        return next == "credentials_read";
+        return matches!(next, "credentials_read" | "failed_recoverable");
     }
     if matches!(next, "failed_recoverable" | "failed_unknown_remote_state") {
         return true;
@@ -4722,6 +4725,25 @@ mod tests {
             "feishu_publication_intent.active_conflict"
         );
 
+        let reclassified = service
+            .advance_member_bot_publication_intent(
+                &mut database,
+                &host_envelope(
+                    "publication-known-app-recoverable",
+                    AdvanceMemberBotPublicationIntentCommand {
+                        publication_intent_id: "intent_1".to_string(),
+                        expected_version: 3,
+                        state: "failed_recoverable".to_string(),
+                        remote_app_id: Some("cli_unknown".to_string()),
+                        credential_ref: None,
+                        last_completed_step: Some("session_verified".to_string()),
+                        failure_code: Some("feishu_console_event_verification_failed".to_string()),
+                    },
+                ),
+            )
+            .unwrap();
+        assert_eq!(reclassified.result.status, CommandResultStatus::Applied);
+
         let wrong_app = service
             .advance_member_bot_publication_intent(
                 &mut database,
@@ -4729,7 +4751,7 @@ mod tests {
                     "publication-reconcile-wrong-app",
                     AdvanceMemberBotPublicationIntentCommand {
                         publication_intent_id: "intent_1".to_string(),
-                        expected_version: 3,
+                        expected_version: 4,
                         state: "credentials_read".to_string(),
                         remote_app_id: Some("cli_other".to_string()),
                         credential_ref: Some("feishu-member-agent_1".to_string()),
@@ -4752,7 +4774,7 @@ mod tests {
                     "publication-reconcile",
                     AdvanceMemberBotPublicationIntentCommand {
                         publication_intent_id: "intent_1".to_string(),
-                        expected_version: 3,
+                        expected_version: 4,
                         state: "credentials_read".to_string(),
                         remote_app_id: Some("cli_unknown".to_string()),
                         credential_ref: Some("feishu-member-agent_1".to_string()),
@@ -4768,6 +4790,70 @@ mod tests {
         assert_eq!(
             recovered.publication_intents[0].remote_app_id.as_deref(),
             Some("cli_unknown")
+        );
+
+        let no_app_created = service
+            .create_member_bot_publication_intent(
+                &mut database,
+                &host_envelope(
+                    "publication-no-app-create",
+                    CreateMemberBotPublicationIntentCommand {
+                        publication_intent_id: "intent_no_app".to_string(),
+                        account_id: "account_1".to_string(),
+                        agent_id: "agent_2".to_string(),
+                        expected_user_id_digest: format!("sha256:{}", "a".repeat(64)),
+                        expected_tenant_id: "tenant_1".to_string(),
+                        requested_app_name: "岩兰".to_string(),
+                        provisioning_mode: "developer_session".to_string(),
+                    },
+                ),
+            )
+            .unwrap();
+        assert_eq!(no_app_created.result.status, CommandResultStatus::Applied);
+        for (expected_version, state) in
+            [(1, "session_verified"), (2, "failed_unknown_remote_state")]
+        {
+            let advanced = service
+                .advance_member_bot_publication_intent(
+                    &mut database,
+                    &host_envelope(
+                        &format!("publication-no-app-{state}"),
+                        AdvanceMemberBotPublicationIntentCommand {
+                            publication_intent_id: "intent_no_app".to_string(),
+                            expected_version,
+                            state: state.to_string(),
+                            remote_app_id: None,
+                            credential_ref: None,
+                            last_completed_step: (state == "session_verified")
+                                .then(|| state.to_string()),
+                            failure_code: (state == "failed_unknown_remote_state")
+                                .then(|| "feishu_console_create_outcome_unknown".to_string()),
+                        },
+                    ),
+                )
+                .unwrap();
+            assert_eq!(advanced.result.status, CommandResultStatus::Applied);
+        }
+        let unsafe_reclassification = service
+            .advance_member_bot_publication_intent(
+                &mut database,
+                &host_envelope(
+                    "publication-no-app-recoverable",
+                    AdvanceMemberBotPublicationIntentCommand {
+                        publication_intent_id: "intent_no_app".to_string(),
+                        expected_version: 3,
+                        state: "failed_recoverable".to_string(),
+                        remote_app_id: None,
+                        credential_ref: None,
+                        last_completed_step: Some("session_verified".to_string()),
+                        failure_code: Some("retry_requested".to_string()),
+                    },
+                ),
+            )
+            .unwrap();
+        assert_eq!(
+            unsafe_reclassification.result.code,
+            "feishu_publication_intent.reconciliation_remote_app_required"
         );
     }
 

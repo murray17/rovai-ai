@@ -7,7 +7,10 @@ import {
   FeishuWebSessionMemberBotProvisioner,
   isUnknownRemoteProvisioningError
 } from './feishu-member-bot-provisioner'
-import { FeishuOpenPlatformApiError } from './feishu-open-platform-api'
+import {
+  FeishuOpenPlatformApiError,
+  type FeishuPublishedVersionSummary
+} from './feishu-open-platform-api'
 
 afterEach(() => {
   vi.useRealTimers()
@@ -39,6 +42,13 @@ describe('Feishu Web Session member Bot provisioner', () => {
       appDescription: 'Rovai AI 队员 · 游学者',
       avatarSource: { pngBytes: memberAvatar, width: 192, height: 192 },
       expectedDeveloperIdentity: { userId: 'owner-user', tenantId: 'tenant-1' },
+      onRemoteAppCreated: async ({ appId, creationMode }) => {
+        operations.push('freeze_app')
+        expect({ appId, creationMode }).toEqual({
+          appId: 'cli_dingding',
+          creationMode: 'template'
+        })
+      },
       onProgress: (step) => progress.push(step)
     })
 
@@ -46,13 +56,17 @@ describe('Feishu Web Session member Bot provisioner', () => {
       appId: 'cli_dingding',
       appSecret: 'secret-dingding',
       botDisplayName: '叮叮',
-      publishedVersionId: 'version_1'
+      publishedVersionId: 'version_2'
     })
     expect(operations).toEqual([
       'upload_avatar',
       'create_app',
+      'freeze_app',
       'read_secret',
       'enable_bot',
+      'request_event',
+      'create_version',
+      'publish_version',
       'configure_scopes',
       'configure_events',
       'configure_callbacks',
@@ -63,9 +77,13 @@ describe('Feishu Web Session member Bot provisioner', () => {
     expect(progress).toEqual([
       'session_verified',
       'app_created',
-      'bot_configured',
-      'permissions_events_configured',
-      'version_published'
+      'activation_started',
+      'activation_published',
+      'configuration_started',
+      'configuration_waiting',
+      'configuration_verified',
+      'version_published',
+      'online_verified'
     ])
     expect(portal.requireExpectedIdentity).toHaveBeenCalledWith({
       userId: 'owner-user',
@@ -79,9 +97,153 @@ describe('Feishu Web Session member Bot provisioner', () => {
       width: 192,
       height: 192
     }))
+    expect(client.createVersion).toHaveBeenNthCalledWith(1, expect.objectContaining({
+      appVersion: '1.0.0',
+      remark: '启用飞书队员 Bot',
+      changeLog: '启用 Bot 并请求长连接事件模式。',
+      reuseExisting: true
+    }))
     expect(readDefaultAvatar).not.toHaveBeenCalled()
     expect(globalFetch).not.toHaveBeenCalled()
     expect(portal.persist).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not read the secret until the durable App-ID barrier resolves', async () => {
+    const operations: string[] = []
+    const client = fakeOpenPlatformClient(operations)
+    let releaseBarrier: (() => void) | undefined
+    const barrier = new Promise<void>((resolve) => { releaseBarrier = resolve })
+
+    const provisioning = new FeishuWebSessionMemberBotProvisioner(fakePortal(), {
+      createClient: () => client,
+      readDefaultAvatar: async () => ({
+        pngBytes: new Uint8Array([1]),
+        width: 1,
+        height: 1
+      })
+    }).create({
+      publicationIntentId: 'intent-barrier',
+      agentId: 'agent-a',
+      appName: '叮叮',
+      appDescription: 'Rovai AI 队员 · 游学者',
+      expectedDeveloperIdentity: { userId: 'owner-user', tenantId: 'tenant-1' },
+      onRemoteAppCreated: async () => barrier
+    })
+
+    await vi.waitFor(() => expect(client.createApp).toHaveBeenCalledTimes(1))
+    expect(client.readAppSecret).not.toHaveBeenCalled()
+    releaseBarrier?.()
+    await provisioning
+    expect(operations.indexOf('read_secret')).toBeGreaterThan(operations.indexOf('create_app'))
+  })
+
+  it('stops every later remote mutation when the durable App-ID barrier rejects', async () => {
+    const client = fakeOpenPlatformClient([])
+
+    await expect(new FeishuWebSessionMemberBotProvisioner(fakePortal(), {
+      createClient: () => client,
+      readDefaultAvatar: async () => ({
+        pngBytes: new Uint8Array([1]),
+        width: 1,
+        height: 1
+      })
+    }).create({
+      publicationIntentId: 'intent-barrier-rejected',
+      agentId: 'agent-a',
+      appName: '叮叮',
+      appDescription: 'Rovai AI 队员 · 游学者',
+      expectedDeveloperIdentity: { userId: 'owner-user', tenantId: 'tenant-1' },
+      onRemoteAppCreated: async () => { throw new Error('core_freeze_failed') }
+    })).rejects.toMatchObject({
+      code: 'core_freeze_failed',
+      remoteState: 'create_outcome_unknown'
+    })
+
+    expect(client.readAppSecret).not.toHaveBeenCalled()
+    expect(client.enableBot).not.toHaveBeenCalled()
+    expect(client.configureScopes).not.toHaveBeenCalled()
+    expect(client.createVersion).not.toHaveBeenCalled()
+  })
+
+  it('skips the final patch version when post-activation configuration is already current', async () => {
+    const progress: string[] = []
+    const operations: string[] = []
+    const client = fakeOpenPlatformClient(operations)
+    client.configureScopes.mockImplementation(async () => {
+      operations.push('configure_scopes')
+      return { changed: false }
+    })
+    client.configureEvents.mockImplementation(async () => {
+      operations.push('configure_events')
+      return { changed: false }
+    })
+    client.configureCallbacksAndWebSocket.mockImplementation(async () => {
+      operations.push('configure_callbacks')
+      return { changed: false }
+    })
+
+    const result = await new FeishuWebSessionMemberBotProvisioner(fakePortal(), {
+      createClient: () => client,
+      readDefaultAvatar: async () => ({
+        pngBytes: new Uint8Array([1]),
+        width: 1,
+        height: 1
+      })
+    }).create({
+      publicationIntentId: 'intent-current',
+      agentId: 'agent-a',
+      appName: '叮叮',
+      appDescription: 'Rovai AI 队员 · 游学者',
+      expectedDeveloperIdentity: { userId: 'owner-user', tenantId: 'tenant-1' },
+      onRemoteAppCreated: async () => undefined,
+      onProgress: (step) => progress.push(step)
+    })
+
+    expect(result.publishedVersionId).toBe('version_1')
+    expect(client.createVersion).toHaveBeenCalledTimes(1)
+    expect(client.publishVersion).toHaveBeenCalledTimes(1)
+    expect(progress).not.toContain('configuration_verified')
+    expect(progress).toEqual([
+      'session_verified',
+      'app_created',
+      'activation_started',
+      'activation_published',
+      'configuration_started',
+      'configuration_waiting',
+      'version_published',
+      'online_verified'
+    ])
+  })
+
+  it('keeps an Event convergence failure recoverable after durable freeze', async () => {
+    const client = fakeOpenPlatformClient([])
+    client.configureEvents.mockRejectedValue(new FeishuOpenPlatformApiError(
+      'feishu_console_event_verification_failed',
+      true
+    ))
+
+    const error = await new FeishuWebSessionMemberBotProvisioner(fakePortal(), {
+      createClient: () => client,
+      readDefaultAvatar: async () => ({
+        pngBytes: new Uint8Array([1]),
+        width: 1,
+        height: 1
+      })
+    }).create({
+      publicationIntentId: 'intent-event-timeout',
+      agentId: 'agent-a',
+      appName: '叮叮',
+      appDescription: 'Rovai AI 队员 · 游学者',
+      expectedDeveloperIdentity: { userId: 'owner-user', tenantId: 'tenant-1' },
+      onRemoteAppCreated: async () => undefined
+    }).catch((reason: unknown): unknown => reason)
+
+    expect(error).toMatchObject({
+      code: 'feishu_console_event_verification_failed',
+      remoteState: 'known_frozen'
+    })
+    expect(client.createApp).toHaveBeenCalledTimes(1)
+    expect(client.verifyMemberBot).not.toHaveBeenCalled()
   })
 
   it('repairs the member avatar on the frozen published app without creating another app', async () => {
@@ -111,7 +273,7 @@ describe('Feishu Web Session member Bot provisioner', () => {
       appId: 'cli_dingding',
       appSecret: 'secret-dingding',
       botDisplayName: '叮叮',
-      publishedVersionId: 'version_1'
+      publishedVersionId: 'version_2'
     })
     expect(operations).toEqual([
       'read_secret',
@@ -128,9 +290,13 @@ describe('Feishu Web Session member Bot provisioner', () => {
     expect(progress).toEqual([
       'session_verified',
       'app_created',
-      'bot_configured',
-      'permissions_events_configured',
-      'version_published'
+      'activation_started',
+      'activation_published',
+      'configuration_started',
+      'configuration_waiting',
+      'configuration_verified',
+      'version_published',
+      'online_verified'
     ])
     expect(client.createApp).not.toHaveBeenCalled()
     expect(client.createVersion).toHaveBeenCalledWith(expect.objectContaining({
@@ -166,10 +332,56 @@ describe('Feishu Web Session member Bot provisioner', () => {
     })
 
     expect(result.publishedVersionId).toBe('version_2')
-    expect(operations).toEqual(['read_secret', 'find_published_version', 'verify'])
+    expect(operations).toEqual([
+      'read_secret',
+      'find_published_version',
+      'verify',
+      'find_version',
+      'verify'
+    ])
     expect(client.uploadAppIcon).not.toHaveBeenCalled()
     expect(client.createVersion).not.toHaveBeenCalled()
     expect(client.publishVersion).not.toHaveBeenCalled()
+  })
+
+  it('reuses and publishes a pending configuration patch left by an interrupted attempt', async () => {
+    const operations: string[] = []
+    const client = fakeOpenPlatformClient(operations)
+    client.findPublishedVersion.mockImplementation(async () => {
+      operations.push('find_published_version')
+      return { versionId: 'version_2', status: 2, appVersion: '1.0.1' }
+    })
+    client.findVersion.mockImplementation(async () => {
+      operations.push('find_version')
+      return { versionId: 'version_pending', status: 5, appVersion: '1.0.2' }
+    })
+
+    const result = await new FeishuWebSessionMemberBotProvisioner(fakePortal(), {
+      createClient: () => client
+    }).reconcile({
+      publicationIntentId: 'intent-interrupted',
+      agentId: 'agent-a',
+      remoteAppId: 'cli_dingding',
+      appName: '叮叮',
+      appDescription: 'Rovai AI 队员 · 游学者',
+      expectedDeveloperIdentity: { userId: 'owner-user', tenantId: 'tenant-1' }
+    })
+
+    expect(result.publishedVersionId).toBe('version_pending')
+    expect(client.createVersion).not.toHaveBeenCalled()
+    expect(client.publishVersion).toHaveBeenCalledWith(
+      'cli_dingding',
+      'version_pending',
+      undefined
+    )
+    expect(operations).toEqual([
+      'read_secret',
+      'find_published_version',
+      'verify',
+      'find_version',
+      'publish_version',
+      'verify'
+    ])
   })
 
   it('repairs missing online message readiness on the frozen app with the next version', async () => {
@@ -277,12 +489,12 @@ describe('Feishu Web Session member Bot provisioner', () => {
 
     expect(error).toMatchObject({
       code: 'feishu_console_create_app_transport_failed',
-      remoteState: 'unknown'
+      remoteState: 'create_outcome_unknown'
     })
     expect(isUnknownRemoteProvisioningError(error)).toBe(true)
   })
 
-  it('marks a failure after app creation as unknown and exposes its app id through progress', async () => {
+  it('marks a failure after durable app freeze as recoverable on the same app', async () => {
     const portal = fakePortal()
     const client = fakeOpenPlatformClient([])
     client.readAppSecret.mockRejectedValue(new FeishuOpenPlatformApiError(
@@ -303,11 +515,13 @@ describe('Feishu Web Session member Bot provisioner', () => {
       appName: '叮叮',
       appDescription: 'Rovai AI 队员 · 游学者',
       expectedDeveloperIdentity: { userId: 'owner-user', tenantId: 'tenant-1' },
+      onRemoteAppCreated: async ({ appId }) => { remoteAppId = appId },
       onProgress: (_step, appId) => { remoteAppId = appId ?? remoteAppId }
     }).catch((reason: unknown): unknown => reason)
 
     expect(remoteAppId).toBe('cli_dingding')
-    expect(isUnknownRemoteProvisioningError(error)).toBe(true)
+    expect(error).toMatchObject({ remoteState: 'known_frozen' })
+    expect(isUnknownRemoteProvisioningError(error)).toBe(false)
   })
 })
 
@@ -345,7 +559,8 @@ function fakeOpenPlatformClient(operations: string[]) {
       operations.push('create_app')
       return {
         appId: 'cli_dingding',
-        avatarUrl: 'https://sf3-cn.feishucdn.com/obj/avatar.png'
+        avatarUrl: 'https://sf3-cn.feishucdn.com/obj/avatar.png',
+        creationMode: 'template' as const
       }
     }),
     readAppSecret: vi.fn(async () => {
@@ -353,22 +568,38 @@ function fakeOpenPlatformClient(operations: string[]) {
       return 'secret-dingding'
     }),
     enableBot: vi.fn(async () => { operations.push('enable_bot') }),
-    configureScopes: vi.fn(async () => { operations.push('configure_scopes') }),
-    configureEvents: vi.fn(async () => { operations.push('configure_events') }),
+    requestEventLongConnection: vi.fn(async () => {
+      operations.push('request_event')
+      return { changed: true }
+    }),
+    configureScopes: vi.fn(async () => {
+      operations.push('configure_scopes')
+      return { changed: true }
+    }),
+    configureEvents: vi.fn(async () => {
+      operations.push('configure_events')
+      return { changed: true }
+    }),
     configureCallbacksAndWebSocket: vi.fn(async () => {
       operations.push('configure_callbacks')
+      return { changed: true }
     }),
-    createVersion: vi.fn(async () => {
+    createVersion: vi.fn(async (input: { appVersion?: string }) => {
       operations.push('create_version')
-      return 'version_1'
+      const patch = Number(input.appVersion?.split('.')[2] ?? 0)
+      return `version_${patch + 1}`
     }),
-    publishVersion: vi.fn(async () => {
+    publishVersion: vi.fn(async (_appId: string, versionId: string) => {
       operations.push('publish_version')
-      return { versionId: 'version_1', status: 2 }
+      return { versionId, status: 2 }
     }),
     findPublishedVersion: vi.fn(async () => {
       operations.push('find_published_version')
       return { versionId: 'version_1', status: 2, appVersion: '1.0.0' }
+    }),
+    findVersion: vi.fn(async (): Promise<FeishuPublishedVersionSummary | null> => {
+      operations.push('find_version')
+      return null
     }),
     verifyMemberBot: vi.fn(async () => { operations.push('verify') })
   }

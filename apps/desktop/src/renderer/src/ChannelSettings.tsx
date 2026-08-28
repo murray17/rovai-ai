@@ -677,7 +677,7 @@ function ChannelMemberBotTable({
                       : published
                         ? '管理不可用'
                         : failed
-                          ? '重试'
+                          ? bot?.appId ? '继续核对' : '重试'
                           : connected
                             ? disabled ? '重新发布' : '发布'
                             : '等待连接'}
@@ -761,7 +761,9 @@ function PublishBotDialog({
   const terminal = provisioning
     ? ['completed', 'failed', 'unknown_remote_state'].includes(provisioning.stage)
     : false
+  const effectiveAppId = boundAppId ?? provisioning?.remoteAppId ?? null
   const retryLocked = provisioning?.stage === 'unknown_remote_state'
+    && provisioning.remoteAppId === null
   const connectionFailed = provisioning?.failureCode === 'feishu_connection_error'
   const sessionUnavailable = Boolean(error && /登录已过期|账号已变化|重新连接账号/.test(error))
   return (
@@ -795,7 +797,7 @@ function PublishBotDialog({
             </div>
             <div className="channel-dialog-fact"><span>发布账号</span><strong>{account.userName}</strong></div>
             <div className="channel-dialog-fact"><span>所属租户</span><strong>{account.tenantName}</strong></div>
-            {boundAppId && <div className="channel-dialog-fact"><span>绑定应用</span><code>{boundAppId}</code></div>}
+            {effectiveAppId && <div className="channel-dialog-fact"><span>绑定应用</span><code>{effectiveAppId}</code></div>}
             <div className="channel-dialog-fact"><span>应用说明</span><strong>Rovai AI 队员 · {agent.teamRole || '协作者'}</strong></div>
             {error && <div className="channel-dialog-error" role="alert">{error}</div>}
             {provisioning ? (
@@ -804,11 +806,13 @@ function PublishBotDialog({
                 <span>
                   <strong>{provisioningLabel(
                     provisioning.stage,
-                    Boolean(boundAppId),
-                    provisioning.failureCode
+                    Boolean(effectiveAppId)
                   )}</strong>
                   <small>{provisioning.detail}</small>
                   {provisioning.remoteAppId && <code>{provisioning.remoteAppId}</code>}
+                  {terminal && provisioning.failureCode && (
+                    <code>{provisioning.failureCode}</code>
+                  )}
                 </span>
               </div>
             ) : (
@@ -820,10 +824,12 @@ function PublishBotDialog({
             )}
           </AppDialogBody>
           <AppDialogFooter note={connectionFailed
-            ? '已保留原应用绑定；关闭后可以稍后重试。'
+            ? effectiveAppId
+              ? '已保留原应用绑定；关闭后可以稍后重试。'
+              : '飞书连接异常；关闭后可以稍后重试。'
             : retryLocked
-              ? '远端结果无法确认。请先在飞书开放平台核对，避免重复创建应用。'
-            : boundAppId
+              ? '创建结果无法确认。Rovai 已锁定再次创建，避免产生重复应用。'
+            : effectiveAppId
               ? '重新发布始终复用已绑定应用，不提供换绑入口。'
               : '发布只使用当前开发者会话，不会打开平台创建确认页。'}>
             <button className="quiet-button" type="button" disabled={busy && !terminal} onClick={onClose}>取消</button>
@@ -834,8 +840,14 @@ function PublishBotDialog({
             ) : !retryLocked && (
               <button className="primary-button" type="button" disabled={busy} onClick={() => onPublish(agent.agentId)}>
                 {busy
-                  ? boundAppId ? '恢复中…' : '发布中…'
-                  : boundAppId ? '确认重新发布' : provisioning?.stage === 'failed' ? '重新发布' : '确认发布'}
+                  ? effectiveAppId ? '核对中…' : '发布中…'
+                  : provisioning?.stage === 'failed' && effectiveAppId
+                    ? '继续核对'
+                    : boundAppId
+                      ? '确认重新发布'
+                      : provisioning?.stage === 'failed'
+                        ? '重新发布'
+                        : '确认发布'}
               </button>
             )}
           </AppDialogFooter>
@@ -944,20 +956,20 @@ function publicationLabel(status: ChannelMemberBotView['publicationStatus'] | 'u
 
 function provisioningLabel(
   stage: MemberBotProvisioningView['stage'],
-  recoveringFrozenApp = false,
-  failureCode: string | null = null
+  recoveringFrozenApp = false
 ): string {
-  if (failureCode === 'feishu_connection_error') return '飞书连接异常'
   switch (stage) {
-    case 'verifying_session': return '正在校验飞书账号…'
-    case 'creating_app': return recoveringFrozenApp ? '正在核对应用…' : '正在创建应用…'
-    case 'configuring_bot': return '正在配置 Bot…'
+    case 'verifying_session': return '正在校验发布账号…'
+    case 'creating_app': return recoveringFrozenApp ? '正在核对已绑定应用…' : '正在创建独立应用…'
+    case 'activating_app': return '正在启用应用…'
     case 'configuring_permissions': return '正在配置权限和事件…'
-    case 'publishing_version': return '正在发布版本…'
-    case 'verifying_connection': return '正在验证连接…'
+    case 'waiting_configuration': return '正在等待配置生效…'
+    case 'publishing_version': return '正在发布最终配置…'
+    case 'verifying_configuration': return '正在核对在线配置…'
+    case 'connecting_bot': return '正在建立 Bot 长连接…'
     case 'completed': return '发布完成'
-    case 'unknown_remote_state': return '远端状态待核对'
-    default: return '发布未完成'
+    case 'unknown_remote_state': return '远端创建结果待核对'
+    default: return '发布尚未完成'
   }
 }
 
@@ -1004,6 +1016,22 @@ export function channelErrorMessage(error: unknown): string {
   }
   if (message === 'feishu_connection_error') {
     return '飞书连接异常，请稍后重试。'
+  }
+  const provisioningFailures: Record<string, string> = {
+    feishu_console_event_verification_failed:
+      '飞书事件与长连接配置尚未确认生效；原应用已保留，可以稍后继续核对。',
+    feishu_console_scope_update_verification_failed:
+      '飞书消息权限尚未确认生效；原应用已保留，可以稍后继续核对。',
+    feishu_console_scope_verification_failed:
+      '飞书消息权限尚未确认生效；原应用已保留，可以稍后继续核对。',
+    feishu_console_callback_verification_failed:
+      '飞书回调与长连接配置尚未确认生效；原应用已保留，可以稍后继续核对。',
+    feishu_console_version_not_published:
+      '飞书应用版本尚未确认发布；原应用已保留，可以稍后继续核对。'
+  }
+  if (provisioningFailures[message]) return provisioningFailures[message]
+  if (/^feishu_console_/u.test(message)) {
+    return '飞书开放平台操作尚未完成；请查看下方状态，排除问题后重试。'
   }
   return message || '渠道操作失败。'
 }

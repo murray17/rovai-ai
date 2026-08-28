@@ -25,7 +25,7 @@ Binding ID。绑定后任意会话成员可通过私聊或显式 mention 使用 
 
 未绑定消息只记录待绑定会话，不建立 Principal、Camp 或执行；主人绑定后发送者必须重发。当前规范见
 [飞书渠道架构](../../architecture/feishu-channel.md#项目与会话)和
-[Feishu Channel v1](../../contracts/feishu-channel-v1.md#2-projectbinding-与渠道会话)。
+[Feishu Channel v2](../../contracts/feishu-channel-v2.md#2-projectbinding-与渠道会话)。
 
 ### 后果
 
@@ -56,7 +56,7 @@ Binding ID。绑定后任意会话成员可通过私聊或显式 mention 使用 
 真正提升调用 `CollaborationService.admit_external_channel_message`，复用本地用户发送的同一原子 admission，一次性
 创建触发 CampMessage、CampTurn 和全部目标 Run。当前规范见
 [飞书渠道架构](../../architecture/feishu-channel.md#入站聚合与串行准入)和
-[Feishu Channel v1](../../contracts/feishu-channel-v1.md#5-多-bot-入站聚合)。
+[Feishu Channel v2](../../contracts/feishu-channel-v2.md#5-多-bot-入站聚合)。
 
 ### 后果
 
@@ -88,7 +88,7 @@ Binding ID。绑定后任意会话成员可通过私聊或显式 mention 使用 
 
 当前规范见 [ContextManifest Evidence v22](../../contracts/context-manifest-evidence-v22.md)、
 [模型上下文变更说明](model-context-change-feishu-external-principal.md)和
-[Feishu Channel v1](../../contracts/feishu-channel-v1.md#4-externalprincipal-与-structured-content)。
+[Feishu Channel v2](../../contracts/feishu-channel-v2.md#4-externalprincipal-与-structured-content)。
 
 ### 后果
 
@@ -117,7 +117,7 @@ Host 只提交所有 published Bot 的完整 `isInChat` 快照。普通群首次
 只有话题内显式目标或 A2A exact target 且其 Bot 仍在父群时，才按需调用同一 add。移出统一走既有 remove。
 
 当前规范见 [飞书渠道架构](../../architecture/feishu-channel.md#bot-roster-与-camp-membership)、
-[Feishu Channel v1](../../contracts/feishu-channel-v1.md#6-camp-创建roster-与-admission)和
+[Feishu Channel v2](../../contracts/feishu-channel-v2.md#6-camp-创建roster-与-admission)和
 [Camp Membership v1](../../contracts/camp-membership-v1.md)。
 
 ### 后果
@@ -150,7 +150,7 @@ credential ref 和业务身份。公开输出和状态先由 Core 从
 
 Developer Session 与 App provisioning 的进一步边界由 [V1.30-D06](#v1-30-d06)修正；本决定继续拥有
 Main/Core/Renderer 的秘密和 Outbox 分工。当前规范见 [飞书渠道架构](../../architecture/feishu-channel.md#输出恢复与秘密)和
-[Feishu Channel v1](../../contracts/feishu-channel-v1.md#7-channeldelivery)。
+[Feishu Channel v2](../../contracts/feishu-channel-v2.md#7-channeldelivery)。
 
 ### 后果
 
@@ -181,26 +181,29 @@ Manifest 可以保存应用元数据，但它不是飞书运行时权限、事�
 `safeStorage` 加密 Cookie jar；不创建 App、Secret 或 Bot。Core account 使用本地不透明 identity ID 与 digest。
 
 普通发布由 `FeishuWebSessionMemberBotProvisioner` 先复核原始 user/tenant，再从同一 Electron Session 读取 Cookie
-jar、加载开放平台页取得 CSRF 与 exact API origin。`OpenPlatformApiClient` 使用该 Session 的 Chromium fetch，依次
-创建 App、读取 Secret、启用 Bot、通过独立在线 API 配置 scopes/events/callback WebSocket、创建并发布版本，最后回读
-robot、scope catalog、event/callback state 与 version status。Manifest 只保留头像和兼容元数据，不参与运行时 readiness
+jar、加载开放平台页取得 CSRF 与 exact API origin。`OpenPlatformApiClient` 使用该 Session 的 Chromium fetch，通过
+console API 创建并 durable freeze App、读取 Secret、启用 Bot、配置 scopes/events/callback WebSocket、发布版本，最后
+回读 robot、scope catalog、event/callback state 与 version status。具体 template-first、activation-first 与恢复顺序由
+[V1.30-D08](#v1-30-d08)进一步收敛。Manifest 只保留头像和兼容元数据，不参与运行时 readiness
 判定。Cookie、CSRF、Secret 不离开 Main；origin/path、响应 shape 与 read-back verification 全部 fail
 closed。正常路径不调用 application registration endpoint，不打开飞书确认页，也不向 Renderer 产生二维码。
 
 该 console Adapter 明确接受上游内部协议可能变化的代价：实现集中在一个 typed client，只有精确 Feishu/Lark
-origin 与 `/developers/` 路径可达，协议变化只产生可诊断失败；不得静默降级为另一条创建路径。真实租户回归负责证明
+origin 与 `/developers/` 路径可达，协议变化只产生可诊断失败；不得静默降级为 registration、确认页或结果不明时的
+第二次创建。真实租户回归负责证明
 当前上游页面与 API 仍兼容，仓库测试只证明本地请求顺序、秘密边界、回读和恢复状态机。
 
 旧的 `/oauth/v1/app/registration + verification_uri_complete + showRegistrationConfirmation + pollRegistration`
 实现整体退出产品；对应 Provisioner、Developer Session 确认窗口、typed API、IPC 与 Renderer 入口一并删除。console
-发布失败保持可诊断失败，不要求队员单独扫码，不打开平台创建确认页，也不存在手动或自动 fallback。
+发布失败保持可诊断失败，不要求队员单独扫码，不打开平台创建确认页，也不存在向 registration/确认页的手动或自动
+fallback。
 
 首次创建前写持久 `MemberBotPublicationIntent`；第一次取得 App ID 后，状态机永久冻结该队员的
 `agentId + accountId + remoteAppId`，并在首次写入后冻结 `credentialRef`。失败、完成、历史 `disabled` 恢复和重新发布都不能新建 intent 或把 Bot 记录换成
 第二个 App；`completed` 后只允许在 exact Bot 绑定仍存在且原账号已连接时重开同一 intent，核对并恢复原 App。Core
 在 intent create、Bot 首次写入、连接完成和重复 upsert 各状态边界交叉验证这份身份，不以 Renderer 隐藏按钮代替唯一性。
 当前规范见[飞书渠道架构](../../architecture/feishu-channel.md#开发者会话与队员发布)、
-[Feishu Channel v1](../../contracts/feishu-channel-v1.md#3-飞书账号与队员-bot)和
+[Feishu Channel v2](../../contracts/feishu-channel-v2.md#3-飞书账号与队员-bot)和
 [渠道设置](../../ui/components/channel-settings.md#渠道连接与二维码)。
 
 锁定的是任何第二个 App 和换绑，不是对同一冻结 App 的主人显式核对。未知 intent 已有 `remoteAppId` 时，再次普通发布
@@ -212,7 +215,7 @@ origin 与 `/developers/` 路径可达，协议变化只产生可诊断失败；
 
 - 一次账号登录可服务多个队员发布；连接与发布是两个独立生命周期；
 - 真实 identity 能在切换/失效时做 exact user/tenant 检查，Renderer 不再显示假 owner/tenant；
-- 正常发布只展示 Rovai 的账号校验、创建、配置、发布、验证和完成进度，不出现飞书创建确认页；
+- 正常发布只展示 Rovai 的账号校验、创建、启用、配置、等待、发布、在线核验、长连接和完成进度，不出现飞书创建确认页；
 - WebSocket 握手与 Manifest 都不是消息可达证明；只有在线 Scope/Event/Callback 状态和 published version 联合通过才完成发布；
 - Rovai 不再提供 Bot 管理/停用命令；已发布 Bot 只按绑定 brand 和冻结 App ID 跳转官方应用详情页，远端生命周期由主人
   在开放平台治理；
@@ -252,7 +255,7 @@ console 路径本来就能上传 PNG bytes，Main 也已经拥有内置素材和
 已经完整时只读
 验证，避免重复发布。当前规范见
 [飞书渠道架构](../../architecture/feishu-channel.md#开发者会话与队员发布)、
-[Feishu Channel v1](../../contracts/feishu-channel-v1.md#3-飞书账号与队员-bot)和
+[Feishu Channel v2](../../contracts/feishu-channel-v2.md#3-飞书账号与队员-bot)和
 [渠道设置](../../ui/components/channel-settings.md#队员-bot)。
 
 ### 后果
@@ -268,3 +271,54 @@ console 路径本来就能上传 PNG bytes，Main 也已经拥有内置素材和
 - **把本机文件路径或 data URL 交给 Renderer/网络请求：** 破坏受控头像与本地路径边界；
 - **删除并新建 App：** 会产生第二个远端身份、Secret 和潜在群成员漂移；
 - **unknown reconciliation 永远只读：** 能接管错误发布，但无法修复已知由本地错误输入造成的头像。
+
+<a id="v1-30-d08"></a>
+## V1.30-D08：队员 App 采用 template-first、durable freeze 与 activation-first 收敛
+
+### 背景
+
+开放平台新应用在第一次发布前立即配置完整 Scope、Event 和 Callback 时，在线控制面可能长时间不返回目标状态，连续
+出现 `feishu_console_event_verification_failed`。单纯延长轮询不能修正创建与发布顺序；同时，取得 App ID 后若只更新
+Renderer 进度、等整个 Provisioner 返回才写 Core，会留下“远端 App 已创建、本机没有冻结 ID”的重复创建窗口。旧错误
+分类还把所有“已有 App ID、credential 尚未写入”的失败视为 unknown，导致本来能安全核对同一 App 的配置失败被锁死。
+
+飞书同时提供模板创建和 self-build 创建：永远只用其中一条会牺牲兼容性，但在结果不明时自动尝试另一条又可能产生两个
+App。因此创建 fallback 必须以“服务器明确未创建”为边界，而不是以普通错误为边界。
+
+### 决定
+
+首次创建优先调用固定 `developer_console` 模板，并以 `publicationIntentId` 作为 correlation。只有模板请求被明确拒绝且
+能够证明没有创建时，才调用一次 self-build create；transport、timeout、HTTP 408/409/429/5xx、成功响应缺少 App ID、
+Session 失效或其他 commit 结果不明都 fail closed，不进入第二次创建。
+
+取得 App ID 后，Provisioner 必须 await Main 的 durable barrier，把 exact `remoteAppId` 持久推进到 `app_created`；该
+写入成功前不允许读取 Secret、启用 Bot、配置或创建版本。随后先启用 Bot、请求长连接事件模式，并创建或复用
+`1.0.0` activation version 直到 published；完整 Scope/Event/Callback 配置移到 activation 之后。Event mode 与事件条目
+继续共享 120 秒、每秒一次的 bounded convergence。配置方法报告真实 mutation：有变化时发布当前版本的下一 patch，
+无变化时复用现有 published version，crash recovery 复用已经存在的 exact patch。
+
+远端失败分类收敛为 `none | known_frozen | create_outcome_unknown`。只有创建结果不明且没有可信冻结 App ID 才进入
+`failed_unknown_remote_state`；App ID 已冻结后的 Secret、配置、版本、credential、upsert 或 WebSocket 失败一律
+`failed_recoverable`，再次操作只核对同一 App。在线 `verifyMemberBot()` 与真正 WebSocket connect 分成两个进度阶段；
+Renderer 使用八个进行中阶段，并把固定 failure code 降为次级诊断。
+
+当前规范见[飞书渠道架构](../../architecture/feishu-channel.md#开发者会话与队员发布)、
+[Feishu Channel v2](../../contracts/feishu-channel-v2.md#3-飞书账号与队员-bot)和
+[渠道设置](../../ui/components/channel-settings.md#渠道连接与二维码)。
+
+### 后果
+
+- 新 App 先获得可发布的 activation 基线，再等待完整在线能力收敛；120 秒预算保留但不再承担修正创建顺序的职责；
+- App ID 在任何后续 mutation 前成为 Core durable fact，配置失败、进程退出和重试都不会创建第二个 App；
+- template 与 self-build 兼容性被限制在一个可审计 fallback，结果不明时以唯一性优先；
+- 已冻结 App 的事件等待超时显示可恢复说明和“继续核对”，只有真正 create outcome unknown 锁住重建；
+- 最终版本只在配置发生变化时递增，在线验证和长连接分别给出诚实进度。
+
+### 被拒绝方案
+
+- **继续 self-build-first：** 与平台标准模板初始化路径偏离，放大首次发布前控制面不完整的窗口；
+- **模板失败一律 fallback：** transport 或响应丢失后可能再次创建，破坏每名队员唯一 App 身份；
+- **拿到 App ID 后只发 progress、最终再持久化：** crash 会丢失唯一恢复锚点；
+- **首次发布前等待完整业务配置：** 把最终一致性等待放在应用尚未 activation 的阶段，重复触发 Event 假失败；
+- **所有后续失败继续标成 unknown：** 混淆“创建是否发生”和“已知 App 是否配置完成”，阻断安全 reconciliation；
+- **固定总是发布 `1.0.1`：** 重试或 crash recovery 会重复版本，无法表达配置实际是否发生 mutation。

@@ -337,6 +337,45 @@ describe('channel settings service', () => {
     expect(provision).toHaveBeenCalledTimes(1)
   })
 
+  it('keeps fresh activation copy distinct after the new App ID is frozen', async () => {
+    const owner = identity()
+    let activationDetail: string | null = null
+    let service!: ChannelSettingsService
+    const create = vi.fn(async (
+      input: Parameters<FeishuMemberBotProvisioner['create']>[0]
+    ) => {
+      await input.onRemoteAppCreated?.({
+        appId: 'cli-fresh-activation',
+        creationMode: 'template'
+      })
+      input.onProgress?.('app_created', 'cli-fresh-activation')
+      activationDetail = (await service.get()).activeProvisioning?.detail ?? null
+      return {
+        appId: 'cli-fresh-activation',
+        appSecret: 'fresh-secret',
+        botDisplayName: '审阅员',
+        publishedVersionId: 'version_2'
+      }
+    })
+    service = new ChannelSettingsService({
+      credentialStore: memoryCredentialStore(),
+      developerSession: developerSession(owner),
+      memberBotProvisioner: { create },
+      createChannel: fakeCreateChannel(),
+      core: channelCore((method) => {
+        if (method === 'channels.feishu.snapshot') {
+          return coreSnapshot({ account: connectedAccount(owner) })
+        }
+        if (method === 'members.get') return presentAgent()
+        return { status: 'applied' }
+      })
+    })
+
+    await service.publishMemberBot('agent-a')
+
+    expect(activationDetail).toBe('正在启用 Bot 并完成首次应用发布。')
+  })
+
   it('keeps one frozen app binding and reactivates a disabled Bot without creating another app', async () => {
     const owner = identity()
     const account = connectedAccount(owner)
@@ -602,7 +641,11 @@ describe('channel settings service', () => {
       credentialStore,
       developerSession: developerSession(owner),
       memberBotProvisioner: {
-        async create() {
+        async create(input) {
+          await input.onRemoteAppCreated?.({
+            appId: 'cli-retry',
+            creationMode: 'template'
+          })
           return {
             appId: 'cli-retry',
             appSecret: 'retry-secret',
@@ -647,7 +690,7 @@ describe('channel settings service', () => {
             accountId: connectedAccount(owner).accountId,
             appId: 'cli-retry',
             botDisplayName: '审阅员',
-            credentialRef: 'feishu-member-agent-a',
+            credentialRef: params.command?.credentialRef,
             status: 'published',
             failureCode: null,
             version: 1
@@ -658,6 +701,17 @@ describe('channel settings service', () => {
     })
 
     await expect(service.publishMemberBot('agent-a')).rejects.toThrow('handshake_failed')
+    expect(await service.get()).toMatchObject({
+      channels: [{ memberBots: [expect.objectContaining({
+        agentId: 'agent-a',
+        appId: 'cli-retry',
+        publicationStatus: 'failed'
+      })] }]
+    })
+    expect([...credentialStore.values.values()]).toContainEqual({
+      appId: 'cli-retry',
+      appSecret: 'retry-secret'
+    })
     await expect(service.retryMemberBot('agent-a')).rejects.toThrow('handshake_failed')
     expect(publicationIntent).toMatchObject({
       state: 'failed_recoverable',
@@ -682,12 +736,11 @@ describe('channel settings service', () => {
     const owner = identity()
     const unknownError = Object.assign(new Error('provisioning_transport_lost'), {
       code: 'provisioning_transport_lost',
-      remoteState: 'unknown' as const
+      remoteState: 'create_outcome_unknown' as const
     })
     const provision = vi.fn(async (
-      input: Parameters<FeishuMemberBotProvisioner['create']>[0]
+      _input: Parameters<FeishuMemberBotProvisioner['create']>[0]
     ) => {
-      input.onProgress?.('app_created', 'cli-unknown')
       throw unknownError
     })
     let publicationIntent: Record<string, unknown> | null = null
@@ -737,7 +790,189 @@ describe('channel settings service', () => {
     expect(createCount).toBe(1)
     expect(publicationIntent).toMatchObject({
       state: 'failed_unknown_remote_state',
-      remoteAppId: 'cli-unknown'
+      remoteAppId: null
+    })
+  })
+
+  it('does not expose an in-memory App ID when the durable freeze also fails', async () => {
+    const owner = identity()
+    let publicationIntent: Record<string, unknown> | null = null
+    let advanceCalls = 0
+    const create = vi.fn(async (
+      input: Parameters<FeishuMemberBotProvisioner['create']>[0]
+    ) => {
+      try {
+        await input.onRemoteAppCreated?.({
+          appId: 'cli-not-frozen',
+          creationMode: 'template'
+        })
+      } catch {
+        throw Object.assign(new Error('core_freeze_failed'), {
+          code: 'core_freeze_failed',
+          remoteState: 'create_outcome_unknown' as const
+        })
+      }
+      throw new Error('expected durable freeze to fail')
+    })
+    const service = new ChannelSettingsService({
+      credentialStore: memoryCredentialStore(),
+      developerSession: developerSession(owner),
+      memberBotProvisioner: { create },
+      createChannel: fakeCreateChannel(),
+      core: channelCore((method, rawParams) => {
+        if (method === 'channels.feishu.snapshot') {
+          return coreSnapshot({
+            account: connectedAccount(owner),
+            publicationIntents: publicationIntent ? [publicationIntent] : []
+          })
+        }
+        if (method === 'members.get') return presentAgent()
+        const params = rawParams as { command?: Record<string, unknown> }
+        if (method === 'channels.feishu.publicationIntent.create') {
+          publicationIntent = {
+            ...params.command,
+            state: 'created',
+            remoteAppId: null,
+            credentialRef: null,
+            lastCompletedStep: null,
+            failureCode: null,
+            version: 1,
+            createdAt: '2026-08-27T00:00:00Z',
+            updatedAt: '2026-08-27T00:00:00Z'
+          }
+          return { status: 'applied' }
+        }
+        if (method === 'channels.feishu.publicationIntent.advance') {
+          advanceCalls += 1
+          if (advanceCalls === 1 && publicationIntent) {
+            publicationIntent = {
+              ...publicationIntent,
+              ...params.command,
+              version: 2,
+              updatedAt: '2026-08-27T00:01:00Z'
+            }
+            return { status: 'applied' }
+          }
+          throw new Error('core_publication_write_unavailable')
+        }
+        return { status: 'applied' }
+      })
+    })
+
+    await expect(service.publishMemberBot('agent-a')).rejects.toThrow('core_freeze_failed')
+
+    expect((await service.get()).activeProvisioning).toMatchObject({
+      stage: 'unknown_remote_state',
+      remoteAppId: null
+    })
+    expect(publicationIntent).toMatchObject({
+      state: 'session_verified',
+      remoteAppId: null
+    })
+  })
+
+  it('keeps an Event timeout recoverable after App-ID freeze and reconciles the same app', async () => {
+    const owner = identity()
+    const credentialStore = memoryCredentialStore()
+    let publicationIntent: Record<string, unknown> | null = null
+    let memberBots: Record<string, unknown>[] = []
+    let intentCreates = 0
+    const eventError = Object.assign(new Error('feishu_console_event_verification_failed'), {
+      code: 'feishu_console_event_verification_failed',
+      remoteState: 'known_frozen' as const
+    })
+    const create = vi.fn(async (
+      input: Parameters<FeishuMemberBotProvisioner['create']>[0]
+    ) => {
+      await input.onRemoteAppCreated?.({
+        appId: 'cli-event-timeout',
+        creationMode: 'template'
+      })
+      input.onProgress?.('configuration_waiting', 'cli-event-timeout')
+      throw eventError
+    })
+    const reconcile = vi.fn(async () => ({
+      appId: 'cli-event-timeout',
+      appSecret: 'event-timeout-secret',
+      botDisplayName: '审阅员',
+      publishedVersionId: 'version_2'
+    }))
+    const service = new ChannelSettingsService({
+      credentialStore,
+      developerSession: developerSession(owner),
+      memberBotProvisioner: { create, reconcile },
+      createChannel: fakeCreateChannel(),
+      core: channelCore((method, rawParams) => {
+        if (method === 'channels.feishu.snapshot') {
+          return coreSnapshot({
+            account: connectedAccount(owner),
+            memberBots,
+            publicationIntents: publicationIntent ? [publicationIntent] : []
+          })
+        }
+        if (method === 'members.get') return presentAgent()
+        const params = rawParams as { command?: Record<string, unknown> }
+        if (method === 'channels.feishu.publicationIntent.create') {
+          intentCreates += 1
+          publicationIntent = {
+            ...params.command,
+            state: 'created',
+            remoteAppId: null,
+            credentialRef: null,
+            lastCompletedStep: null,
+            failureCode: null,
+            version: 1,
+            createdAt: '2026-08-27T00:00:00Z',
+            updatedAt: '2026-08-27T00:00:00Z'
+          }
+        } else if (method === 'channels.feishu.publicationIntent.advance' && publicationIntent) {
+          publicationIntent = {
+            ...publicationIntent,
+            ...params.command,
+            version: Number(publicationIntent.version) + 1,
+            updatedAt: '2026-08-27T00:01:00Z'
+          }
+        } else if (method === 'channels.feishu.memberBot.upsert') {
+          memberBots = [{
+            agentId: 'agent-a',
+            accountId: connectedAccount(owner).accountId,
+            appId: params.command?.appId,
+            botDisplayName: params.command?.botDisplayName,
+            credentialRef: params.command?.credentialRef,
+            status: 'published',
+            failureCode: null,
+            version: 1
+          }]
+        }
+        return { status: 'applied' }
+      })
+    })
+
+    await expect(service.publishMemberBot('agent-a'))
+      .rejects.toThrow('feishu_console_event_verification_failed')
+    expect(publicationIntent).toMatchObject({
+      state: 'failed_recoverable',
+      remoteAppId: 'cli-event-timeout',
+      lastCompletedStep: 'app_created'
+    })
+    expect((await service.get()).activeProvisioning).toMatchObject({
+      stage: 'failed',
+      remoteAppId: 'cli-event-timeout',
+      detail: expect.stringContaining('原应用已保留')
+    })
+
+    await expect(service.retryMemberBot('agent-a')).resolves.toMatchObject({
+      activeProvisioning: { stage: 'completed', remoteAppId: 'cli-event-timeout' }
+    })
+    expect(create).toHaveBeenCalledTimes(1)
+    expect(reconcile).toHaveBeenCalledTimes(1)
+    expect(reconcile).toHaveBeenCalledWith(expect.objectContaining({
+      remoteAppId: 'cli-event-timeout'
+    }))
+    expect(intentCreates).toBe(1)
+    expect(publicationIntent).toMatchObject({
+      state: 'completed',
+      remoteAppId: 'cli-event-timeout'
     })
   })
 

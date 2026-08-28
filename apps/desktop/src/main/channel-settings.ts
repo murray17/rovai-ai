@@ -449,7 +449,7 @@ export class ChannelSettingsService {
       this.#activeProvisioning = {
         ...this.#activeProvisioning,
         stage: 'completed',
-        detail: '发布完成。',
+        detail: 'Bot 已发布并建立长连接。',
         remoteAppId: credential.appId,
         failureCode: null
       }
@@ -634,7 +634,7 @@ export class ChannelSettingsService {
       publicationIntentId,
       agentId,
       stage: 'verifying_session',
-      detail: '正在确认当前开发者会话与发布账号一致。',
+      detail: '正在确认当前开发者会话、账号和租户与发布目标一致。',
       remoteAppId: null,
       failureCode: null
     }
@@ -658,9 +658,19 @@ export class ChannelSettingsService {
           tenantId: identity.tenantId
         },
         signal: abort.signal,
+        onRemoteAppCreated: async ({ appId }) => {
+          remoteAppId = appId
+          await advanceIntent({
+            state: 'app_created',
+            remoteAppId: appId,
+            credentialRef: null,
+            lastCompletedStep: 'app_created',
+            failureCode: null
+          })
+        },
         onProgress: (step, appId) => {
           if (appId) remoteAppId = appId
-          this.#handleProvisioningProgress(step, appId)
+          this.#handleProvisioningProgress(step, appId, false)
         }
       })
       remoteAppId = provisioned.appId
@@ -669,13 +679,6 @@ export class ChannelSettingsService {
         appId: provisioned.appId,
         appSecret: provisioned.appSecret
       }
-      await advanceIntent({
-        state: 'app_created',
-        remoteAppId,
-        credentialRef: null,
-        lastCompletedStep: 'app_created',
-        failureCode: null
-      })
       await this.#dependencies!.credentialStore.write(credentialRef, credential)
       credentialWritten = true
       await advanceIntent({
@@ -700,8 +703,8 @@ export class ChannelSettingsService {
         failureCode: null
       })
       this.#setProvisioningProgress(
-        'verifying_connection',
-        '正在验证 Bot 长连接…',
+        'connecting_bot',
+        '在线配置已确认，正在使用该队员的独立凭据建立消息长连接。',
         remoteAppId
       )
       await this.#publishCredential(
@@ -729,7 +732,7 @@ export class ChannelSettingsService {
         publicationIntentId,
         agentId,
         stage: 'completed',
-        detail: '发布完成。',
+        detail: 'Bot 已发布并建立长连接。',
         remoteAppId,
         failureCode: null
       }
@@ -737,28 +740,29 @@ export class ChannelSettingsService {
       return this.#emit()
     } catch (error) {
       const failureCode = channelFailureCode(error)
-      const connectionFailed = failureCode === 'feishu_connection_error'
       const unknownRemoteState = isUnknownRemoteProvisioningError(error)
-        || (remoteAppId !== null && !credentialWritten)
-      await this.#advancePublicationIntent(publicationIntentId, intentVersion, {
-        state: unknownRemoteState ? 'failed_unknown_remote_state' : 'failed_recoverable',
-        remoteAppId,
-        credentialRef: credentialWritten ? credentialRef : null,
-        lastCompletedStep,
-        failureCode
-      }).catch(() => undefined)
+      let failureStatePersisted = false
+      try {
+        await this.#advancePublicationIntent(publicationIntentId, intentVersion, {
+          state: unknownRemoteState ? 'failed_unknown_remote_state' : 'failed_recoverable',
+          remoteAppId,
+          credentialRef: credentialWritten ? credentialRef : null,
+          lastCompletedStep,
+          failureCode
+        })
+        failureStatePersisted = true
+      } catch {
+        // Keep the original failure. An in-memory App ID is not a recovery identity.
+      }
+      if (unknownRemoteState && !failureStatePersisted) remoteAppId = null
       this.#publicationFailures.set(agentId, failureCode)
       this.#activeProvisioning = {
         publicationIntentId,
         agentId,
         stage: unknownRemoteState ? 'unknown_remote_state' : 'failed',
-        detail: connectionFailed
-          ? remoteAppId
-            ? '飞书连接异常；已保留当前应用状态，可以稍后重试。'
-            : '飞书连接异常，可以稍后重试。'
-          : unknownRemoteState
-            ? '无法确认远端应用是否已经创建；已停止自动重试。'
-            : '发布没有完成，可以在排除问题后重试。',
+        detail: unknownRemoteState
+          ? '无法确认本次创建请求是否已在飞书落地。为避免重复应用，Rovai 不会自动再次创建。'
+          : recoverableProvisioningDetail(failureCode, remoteAppId !== null),
         remoteAppId,
         failureCode
       }
@@ -788,7 +792,7 @@ export class ChannelSettingsService {
       publicationIntentId: intent.publicationIntentId,
       agentId: agent.agentId,
       stage: 'verifying_session',
-      detail: '正在核对当前开发者会话与已创建应用。',
+      detail: '正在确认当前开发者会话仍有权管理已绑定应用。',
       remoteAppId,
       failureCode: null
     }
@@ -796,6 +800,7 @@ export class ChannelSettingsService {
 
     let intentVersion = intent.version
     let credentialWritten = false
+    let lastCompletedStep = intent.lastCompletedStep
     const advanceIntent = async (
       payload: {
         state: CoreChannelSnapshot['publicationIntents'][number]['state']
@@ -807,6 +812,7 @@ export class ChannelSettingsService {
     ): Promise<void> => {
       await this.#advancePublicationIntent(intent.publicationIntentId, intentVersion, payload)
       intentVersion += 1
+      lastCompletedStep = payload.lastCompletedStep
     }
 
     try {
@@ -832,7 +838,7 @@ export class ChannelSettingsService {
           tenantId: identity.tenantId
         },
         signal: abort.signal,
-        onProgress: (step, appId) => this.#handleProvisioningProgress(step, appId)
+        onProgress: (step, appId) => this.#handleProvisioningProgress(step, appId, true)
       })
       if (provisioned.appId !== remoteAppId || !provisioned.publishedVersionId) {
         throw new Error('feishu_console_reconciliation_identity_mismatch')
@@ -874,8 +880,8 @@ export class ChannelSettingsService {
         failureCode: null
       })
       this.#setProvisioningProgress(
-        'verifying_connection',
-        '正在验证 Bot 长连接…',
+        'connecting_bot',
+        '在线配置已确认，正在使用该队员的独立凭据建立消息长连接。',
         remoteAppId
       )
       await this.#publishCredential(
@@ -903,31 +909,26 @@ export class ChannelSettingsService {
         publicationIntentId: intent.publicationIntentId,
         agentId: agent.agentId,
         stage: 'completed',
-        detail: '发布完成。',
+        detail: 'Bot 已发布并建立长连接。',
         remoteAppId,
         failureCode: null
       }
       return this.#emit()
     } catch (error) {
       const failureCode = channelFailureCode(error)
-      const connectionFailed = failureCode === 'feishu_connection_error'
       await this.#advancePublicationIntent(intent.publicationIntentId, intentVersion, {
-        state: credentialWritten ? 'failed_recoverable' : 'failed_unknown_remote_state',
+        state: 'failed_recoverable',
         remoteAppId,
-        credentialRef: credentialWritten ? credentialRef : null,
-        lastCompletedStep: null,
+        credentialRef: credentialWritten ? credentialRef : intent.credentialRef,
+        lastCompletedStep,
         failureCode
       }).catch(() => undefined)
       this.#publicationFailures.set(agent.agentId, failureCode)
       this.#activeProvisioning = {
         publicationIntentId: intent.publicationIntentId,
         agentId: agent.agentId,
-        stage: credentialWritten ? 'failed' : 'unknown_remote_state',
-        detail: connectionFailed
-          ? '飞书连接异常；已保留原应用绑定，可以稍后重试。'
-          : credentialWritten
-            ? '已保存应用凭据，但 Bot 连接尚未完成；可以安全重试。'
-            : '无法核对已创建应用的凭据或发布状态；不会创建第二个应用。',
+        stage: 'failed',
+        detail: recoverableProvisioningDetail(failureCode, true),
         remoteAppId,
         failureCode
       }
@@ -991,10 +992,11 @@ export class ChannelSettingsService {
     void this.#emit()
   }
 
-  #handleProvisioningProgress(step: MemberBotProvisioningStep, remoteAppId?: string): void {
-    const recoveringFrozenApp = Boolean(
-      remoteAppId ?? this.#activeProvisioning?.remoteAppId
-    )
+  #handleProvisioningProgress(
+    step: MemberBotProvisioningStep,
+    remoteAppId: string | undefined,
+    recoveringFrozenApp: boolean
+  ): void {
     const progress: Record<MemberBotProvisioningStep, {
       stage: NonNullable<ChannelSettingsSnapshot['activeProvisioning']>['stage']
       detail: string
@@ -1002,26 +1004,44 @@ export class ChannelSettingsService {
       session_verified: {
         stage: 'creating_app',
         detail: recoveringFrozenApp
-          ? '账号校验完成，正在核对已绑定应用。'
-          : '账号校验完成，正在创建独立应用。'
+          ? '正在读取已冻结 App 的当前远端状态，不会创建第二个应用。'
+          : '正在创建并冻结这名队员唯一的飞书应用身份。'
       },
       app_created: {
-        stage: 'configuring_bot',
+        stage: 'activating_app',
         detail: recoveringFrozenApp
-          ? '已确认原应用，正在核对 Bot 配置…'
-          : '应用已创建，正在启用 Bot…'
+          ? '正在确认 Bot 与已发布版本处于可继续配置状态。'
+          : '正在启用 Bot 并完成首次应用发布。'
       },
-      bot_configured: {
+      activation_started: {
+        stage: 'activating_app',
+        detail: recoveringFrozenApp
+          ? '正在确认 Bot 与已发布版本处于可继续配置状态。'
+          : '正在启用 Bot 并完成首次应用发布。'
+      },
+      activation_published: {
         stage: 'configuring_permissions',
-        detail: 'Bot 已启用，正在配置权限、事件与长连接…'
+        detail: '正在补齐消息权限、事件订阅和长连接配置。'
       },
-      permissions_events_configured: {
+      configuration_started: {
+        stage: 'configuring_permissions',
+        detail: '正在补齐消息权限、事件订阅和长连接配置。'
+      },
+      configuration_waiting: {
+        stage: 'waiting_configuration',
+        detail: '飞书正在同步权限、事件与长连接设置；这个过程可能需要几十秒。'
+      },
+      configuration_verified: {
         stage: 'publishing_version',
-        detail: '权限与事件已配置，正在发布版本…'
+        detail: '配置已生效，正在发布包含最新 Bot 配置的应用版本。'
       },
       version_published: {
-        stage: 'verifying_connection',
-        detail: '版本已发布，正在验证连接…'
+        stage: 'verifying_configuration',
+        detail: '正在确认 Bot、权限、消息事件、长连接模式和发布版本均已生效。'
+      },
+      online_verified: {
+        stage: 'connecting_bot',
+        detail: '在线配置已确认，正在使用该队员的独立凭据建立消息长连接。'
       }
     }
     const next = progress[step]
@@ -1061,11 +1081,7 @@ export class ChannelSettingsService {
       'failed_unknown_remote_state'
     ].includes(intent.state))
     for (const intent of active) {
-      const credential = intent.credentialRef
-        ? await this.#dependencies!.credentialStore.read(intent.credentialRef)
-        : null
-      const safeToRetry = intent.state === 'created'
-        || (Boolean(intent.remoteAppId) && Boolean(intent.credentialRef) && Boolean(credential))
+      const safeToRetry = intent.state === 'created' || Boolean(intent.remoteAppId)
       await this.#advancePublicationIntent(intent.publicationIntentId, intent.version, {
         state: safeToRetry ? 'failed_recoverable' : 'failed_unknown_remote_state',
         remoteAppId: intent.remoteAppId,
@@ -1084,6 +1100,14 @@ export class ChannelSettingsService {
     credentialRef: string,
     credential: FeishuAppCredential
   ): Promise<void> {
+    await this.#command('channels.feishu.memberBot.upsert', {
+      accountId,
+      agentId: agent.agentId,
+      appId: credential.appId,
+      botOpenId: null,
+      botDisplayName: agent.displayName,
+      credentialRef
+    })
     const managed = await this.#connectBot(agent.agentId, credentialRef, credential)
     try {
       await this.#command('channels.feishu.memberBot.upsert', {
@@ -1831,6 +1855,26 @@ function channelFailureCode(error: unknown): string {
   return 'unknown'
 }
 
+function recoverableProvisioningDetail(failureCode: string, hasRemoteApp: boolean): string {
+  if (!hasRemoteApp) {
+    return failureCode === 'feishu_connection_error'
+      ? '飞书连接异常；尚未创建队员应用，可以稍后重试。'
+      : '发布尚未完成；排除问题后可以安全重试。'
+  }
+  if ([
+    'feishu_console_event_verification_failed',
+    'feishu_console_scope_update_verification_failed',
+    'feishu_console_scope_verification_failed',
+    'feishu_console_callback_verification_failed'
+  ].includes(failureCode)) {
+    return '飞书在线配置在本次等待窗口内仍未确认生效；原应用已保留，可以稍后继续核对。'
+  }
+  if (failureCode === 'feishu_connection_error') {
+    return '飞书连接异常；原应用已保留，可以安全重试核对，不会创建第二个应用。'
+  }
+  return '已保留这名队员的原应用；可以安全重试核对和恢复，不会创建第二个应用。'
+}
+
 function channelFailureDetail(error: unknown): string {
   const code = channelFailureCode(error)
   const details: Record<string, string> = {
@@ -1844,6 +1888,16 @@ function channelFailureDetail(error: unknown): string {
     feishu_developer_session_expired: '飞书开发者会话已过期，请重新登录。',
     feishu_developer_identity_changed: '飞书账号或企业身份已变化，请重新连接。',
     feishu_connection_error: '飞书连接异常，请稍后重试。',
+    feishu_console_event_verification_failed:
+      '飞书事件与长连接配置尚未确认生效；原应用已保留，可以稍后继续核对。',
+    feishu_console_scope_update_verification_failed:
+      '飞书消息权限尚未确认生效；原应用已保留，可以稍后继续核对。',
+    feishu_console_scope_verification_failed:
+      '飞书消息权限尚未确认生效；原应用已保留，可以稍后继续核对。',
+    feishu_console_callback_verification_failed:
+      '飞书回调与长连接配置尚未确认生效；原应用已保留，可以稍后继续核对。',
+    feishu_console_version_not_published:
+      '飞书应用版本尚未确认发布；原应用已保留，可以稍后继续核对。',
     feishu_console_remote_app_unavailable:
       '原飞书应用已删除或当前账号无权访问，无法按原 App ID 重试。'
   }
