@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest'
-import { parseFileReference, tokenizeFileReferences } from './file-preview-reference'
+import {
+  isInlineFileReference,
+  parseFileReference,
+  tokenizeFileReferences
+} from './file-preview-reference'
 
 describe('parseFileReference', () => {
   it('parses Unix, Windows, UNC, relative and file URI locations', () => {
@@ -37,6 +41,15 @@ describe('parseFileReference', () => {
     expect(parseFileReference('https://example.com/a.ts')).toBeNull()
     expect(parseFileReference('javascript:alert(1)')).toBeNull()
     expect(parseFileReference('data:text/plain,hello')).toBeNull()
+  })
+})
+
+describe('isInlineFileReference', () => {
+  it('keeps ordinary inline code inert while accepting intentional file references', () => {
+    expect(isInlineFileReference('方案 B')).toBe(false)
+    expect(isInlineFileReference('notes.txt')).toBe(true)
+    expect(isInlineFileReference('./Makefile')).toBe(true)
+    expect(isInlineFileReference('src/app.ts:42')).toBe(true)
   })
 })
 

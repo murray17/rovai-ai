@@ -1,7 +1,11 @@
 import { isValidElement, useEffect, useRef, type JSX, type ReactNode } from 'react'
 import Markdown, { defaultUrlTransform } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import { parseFileReference, tokenizeFileReferences } from '../../file-preview-reference'
+import {
+  isInlineFileReference,
+  parseFileReference,
+  tokenizeFileReferences
+} from '../../file-preview-reference'
 
 type MarkdownTreeNode = {
   type?: string
@@ -52,7 +56,7 @@ function remarkFileReferences(): (tree: MarkdownTreeNode) => void {
           if (
             child.type === 'inlineCode'
             && typeof child.value === 'string'
-            && parseFileReference(child.value)
+            && isInlineFileReference(child.value)
           ) {
             next.push({
               type: 'link',

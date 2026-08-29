@@ -364,7 +364,10 @@ fn message_authorizes_reference(body: &str, raw_reference: &str) -> bool {
     let visible = visible_markdown_without_fences(body);
     for (index, segment) in visible.split('`').enumerate() {
         if index % 2 == 1 {
-            if segment.trim() == raw_reference {
+            if segment.trim() == raw_reference
+                && (known_file_extension(raw_reference)
+                    || high_confidence_bare_reference(raw_reference))
+            {
                 return true;
             }
             continue;
@@ -468,6 +471,7 @@ mod tests {
             "普通文字里提到了 README.md，但没有可点击语法。",
             "README.md"
         ));
+        assert!(!message_authorizes_reference("请采用 `方案 B`。", "方案 B"));
     }
 
     #[test]

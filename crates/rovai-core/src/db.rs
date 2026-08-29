@@ -24598,7 +24598,7 @@ mod tests {
                 },
             )
             .unwrap();
-        assert_eq!(upgraded_marker, ("v1.29".to_string(), 70, 1, 1, 0));
+        assert_eq!(upgraded_marker, ("v1.30".to_string(), 71, 1, 1, 0));
         assert_table_columns(upgraded.connection(), "camp", &["attachment_revision"], &[]);
         assert_schema_objects(
             upgraded.connection(),
@@ -24630,7 +24630,7 @@ mod tests {
                     )),
                 )
                 .unwrap(),
-            ("v1.29".to_string(), 70, 1)
+            ("v1.30".to_string(), 71, 1)
         );
         drop(restarted);
         std::fs::remove_dir_all(directory).expect("temporary database should be removable");
@@ -24871,7 +24871,7 @@ mod tests {
                 },
             )
             .unwrap();
-        assert_eq!(upgraded_marker, ("v1.29".to_string(), 70, 1, 1, 0));
+        assert_eq!(upgraded_marker, ("v1.30".to_string(), 71, 1, 1, 0));
         assert_table_columns(
             upgraded.connection(),
             "message_delivery",
@@ -24931,8 +24931,8 @@ mod tests {
                 "terminal".to_string(),
                 0,
                 1,
-                "v1.29".to_string(),
-                70,
+                "v1.30".to_string(),
+                71,
             )
         );
         drop(restarted);
@@ -25042,7 +25042,7 @@ mod tests {
                     )),
                 )
                 .unwrap(),
-            ("v1.29".to_string(), 70, 1, 1, 1)
+            ("v1.30".to_string(), 71, 1, 1, 1)
         );
         assert_eq!(
             reopened

@@ -193,10 +193,10 @@ describe('Agent Current User Mention Markdown rendering', () => {
     expect(token).not.toContain('role=')
     expect(token).not.toContain('tabindex=')
     expect(token).not.toContain('aria-haspopup=')
-    expect(markup.indexOf(token!)).toBeLessThan(markup.indexOf('<h3>请确认</h3>'))
+    expect(markup.indexOf(token!)).toBeLessThan(markup.indexOf('data-markdown-heading="请确认"'))
     expect(markup).toContain('current-user-mention-prefix')
     expect(markup).toContain('current-user-markdown-content')
-    expect(markup).toContain('<h3>请确认</h3>')
+    expect(markup).toContain('<h3 data-markdown-heading="请确认">请确认</h3>')
     expect(markup).toContain('<ul>')
     expect(markup).toContain('<code>方案 B</code>')
     expect(markup).toContain(

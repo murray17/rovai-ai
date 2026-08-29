@@ -163,6 +163,13 @@ function highConfidenceBareReference(raw: string, parsed: ParsedFileReference): 
   return hasSeparator && (KNOWN_FILE_EXTENSION.test(raw) || parsed.target?.line !== undefined)
 }
 
+export function isInlineFileReference(raw: string): boolean {
+  const parsed = parseFileReference(raw)
+  if (!parsed) return false
+  return highConfidenceBareReference(raw, parsed)
+    || (parsed.pathKind === 'relative' && KNOWN_FILE_EXTENSION.test(raw))
+}
+
 export function tokenizeFileReferences(text: string): FileReferenceToken[] {
   if (!text || text.length > 1_048_576) return []
   const tokens: FileReferenceToken[] = []
