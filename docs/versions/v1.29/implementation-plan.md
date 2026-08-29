@@ -54,6 +54,13 @@ last_updated: 2026-08-28
   bytes；Command projection 需要时确定性构造 unified diff；
 - [x] 路径以 execution root 作为 display root：root 内使用相对路径，root 外使用规范化绝对路径；相对 `..` 可解析
   到 root 外，其他 URI、越过文件系统根的无效路径与 Git metadata 拒绝；
+- [x] Core 把当前 Built-in Tool Process 的 exact `run_tmp` 作为 typed negative root 传给共享 normalizer；
+  path-only、Diff entry、move path 和 Codex whole-turn snapshot section 在 durable ingress 前按 component 排除，
+  mixed payload 保留普通文件；
+- [x] managed-only operation/Diff 写安全 unavailable，managed-only Run snapshot 写权威空值并抑制 fallback；
+  不扩大到 data dir、`run-tmp-copy`、其他进程目录或普通 root 外路径；
+- [x] 不增加 schema/migration，不重写 v1 Evidence、Canonical Activity 或既有 Run projection；exclusion 只作用于
+  部署后新进入 Core 的 Evidence；
 - [x] Codex terminal `item/completed.fileChange.completed` 继续拥有 Command View；缓存最新
   `turn/diff/updated`，只在 matching `turn/completed` 后发布 Run snapshot，空 snapshot 保留为权威 no-change；
 - [x] ACP 同 ToolCall 累计 kind、locations、standard Diff、rawInput、stable `_meta/meta`；稀疏 terminal 可使用
@@ -100,6 +107,9 @@ last_updated: 2026-08-28
 
 - [x] Rust 定向回归覆盖 Evidence 保存、Command Diff reconstruction、路径/URI、Codex snapshot、ACP sparse
   terminal、projector 归约/恢复与 Migration 115；
+- [x] 定向回归覆盖 managed output 的 path-only、Kiro rooted-relative single Diff、mixed/all-managed Codex Diff、
+  whole-turn snapshot ingress、projector `no_changes` 和同名前缀目录；Windows target fixture 覆盖 drive/root ASCII
+  大小写与分隔符语义；
 - [x] TypeScript typecheck 通过；
 - [x] Navigation coordinator 8/8 与 App event routing 2/2 回归通过；隔离 App 已验证 post-commit invalidation、
   后台 Run marker 收敛、隐藏暂停、focus 补读与 20 秒安全轮询；
@@ -124,6 +134,7 @@ last_updated: 2026-08-28
 
 - 任一路径仍创建/读取 Window、baseline/final、synthetic tree、checkpoint ref 或扫描 workspace；
 - Run card 从当前文件、shell 命令、Tool 文案或未准入 raw 字段推测变化；
+- 当前 `ROVAI_RUN_TMP` 仍可形成文件行、inline Diff 或 Run card，或普通 root 外用户路径/`run-tmp-copy` 被误排除；
 - 不同 Run/epoch 被合并，或一个 Run 的 projection 等待另一个 Run；
 - failed/cancelled operation 被当作成功变化，或空权威 snapshot 被 fallback 覆盖；
 - operation-only 被计入 Diff 统计、含纯 operation-only 文件的卡片显示局部 totals，或 exact/history 显示虚假

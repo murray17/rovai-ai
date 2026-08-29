@@ -8,26 +8,28 @@ describe('Main Window Session registry', () => {
     let sequence = 0
     const registry = new DesktopSessionRegistry(() => `session-${++sequence}`)
     const first = registry.create(11, {
-      schemaVersion: 3,
+      schemaVersion: 4,
       startupLocationMode: 'last_location',
       lastSettingsSection: 'runtime',
       executionConsolePlacement: 'inspector',
       newConversationDefaults: null,
       newConversationDefaultsRequireConfirmation: false,
-      oneClickNewConversationEnabled: false
+      oneClickNewConversationEnabled: false,
+      worldMapEnabled: true
     }, {
       status: 'valid',
       location: { kind: 'camp', campId: CAMP_ID }
     })
 
     const second = registry.create(22, {
-      schemaVersion: 3,
+      schemaVersion: 4,
       startupLocationMode: 'quick_chat',
       lastSettingsSection: 'general',
       executionConsolePlacement: 'bottom',
       newConversationDefaults: null,
       newConversationDefaultsRequireConfirmation: false,
-      oneClickNewConversationEnabled: false
+      oneClickNewConversationEnabled: false,
+      worldMapEnabled: false
     }, {
       status: 'valid',
       location: { kind: 'memory' }
@@ -46,22 +48,24 @@ describe('Main Window Session registry', () => {
   it('forgets a closed window without changing another live session', () => {
     const registry = new DesktopSessionRegistry(() => crypto.randomUUID())
     registry.create(11, {
-      schemaVersion: 3,
+      schemaVersion: 4,
       startupLocationMode: 'last_location',
       lastSettingsSection: 'general',
       executionConsolePlacement: 'bottom',
       newConversationDefaults: null,
       newConversationDefaultsRequireConfirmation: false,
-      oneClickNewConversationEnabled: false
+      oneClickNewConversationEnabled: false,
+      worldMapEnabled: true
     }, { status: 'missing', location: null })
     const second = registry.create(22, {
-      schemaVersion: 3,
+      schemaVersion: 4,
       startupLocationMode: 'last_location',
       lastSettingsSection: 'skills',
       executionConsolePlacement: 'inspector',
       newConversationDefaults: null,
       newConversationDefaultsRequireConfirmation: false,
-      oneClickNewConversationEnabled: false
+      oneClickNewConversationEnabled: false,
+      worldMapEnabled: true
     }, { status: 'valid', location: { kind: 'quick_chat' } })
 
     registry.delete(11)

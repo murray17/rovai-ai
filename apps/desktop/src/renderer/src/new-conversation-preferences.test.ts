@@ -170,7 +170,7 @@ describe('new conversation preferences', () => {
 
 function configuredPreferences(): GeneralPreferencesSnapshot {
   return {
-    schemaVersion: 3,
+    schemaVersion: 4,
     startupLocationMode: 'last_location',
     lastSettingsSection: 'general',
     executionConsolePlacement: 'bottom',
@@ -179,7 +179,8 @@ function configuredPreferences(): GeneralPreferencesSnapshot {
       defaultLeadAgentId: 'agent-a'
     },
     newConversationDefaultsRequireConfirmation: false,
-    oneClickNewConversationEnabled: true
+    oneClickNewConversationEnabled: true,
+    worldMapEnabled: true
   }
 }
 

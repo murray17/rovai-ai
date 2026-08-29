@@ -18,5 +18,6 @@ describe('first-run Camp starters', () => {
     expect(initialCampConversationView('conversation', false)).toBe('conversation')
     expect(initialCampConversationView('world', false)).toBe('world')
     expect(initialCampConversationView(null, false)).toBe('world')
+    expect(initialCampConversationView('world', false, false)).toBe('conversation')
   })
 })

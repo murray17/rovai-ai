@@ -44,7 +44,8 @@ Architecture 解释组件如何组成，Version 概览记录交付范围；它�
 | [Camp Conversation Find v1（当前）](camp-conversation-find-v1.md) | Desktop 当前 Camp 公开 user/agent 正文的 exact count、单命中 traversal、Unicode scalar offset 与有界 around-window 定位 |
 | [Camp Permanent Deletion v2（当前）](camp-permanent-deletion-v2.md) | v1 删除合同不变；增加 Camp Published Attachment View journal cleanup，并规定先 fence Runtime、再取得 View write gate |
 | [Camp Permanent Deletion v1（历史）](camp-permanent-deletion-v1.md) | `camps.delete` force 字段、兼容 blocker、单事务物理删除、Runtime cleanup 与 Renderer 确认边界；不含 Published View cleanup |
-| [Runtime File Change Observation v1（当前）](runtime-file-change-observation-v1.md) | Runtime 终态文件操作与 Command Diff；每 AgentRun/epoch 文件变化归约、Managed Blob、恢复、读取授权与 inline presentation |
+| [Runtime File Change Observation v2（当前）](runtime-file-change-observation-v2.md) | v1 Evidence/投影/呈现不变；精确排除当前 `ROVAI_RUN_TMP` 临时交付区，mixed evidence 保留普通文件且不迁移历史数据 |
+| [Runtime File Change Observation v1（历史）](runtime-file-change-observation-v1.md) | Runtime 终态文件操作与 Command Diff；每 AgentRun/epoch 文件变化归约、Managed Blob、恢复、读取授权与 inline presentation；不含 managed output exclusion |
 | [Benchmark Protocol v3（当前）](benchmark-protocol-v3.md) | 版本化 Run 信封、Product/Environment fingerprint、五层 Evidence、Adapter/derived projection、逐轴比较资格与 disclosure |
 | [Semantic Judge Views v1（当前）](semantic-judge-views-v1.md) | Process/Blinded Outcome 双视图、模型可见 evidence allowlist、本地 Evidence ID、双 Replica、逐项 reconciliation 与 Hard Outcome non-interference |
 | [Tool Interaction Measurement v2（当前）](tool-interaction-measurement-v2.md) | v1 的 opportunity/Judge 边界加 runtime catalog/projection 兼容门禁、Memory v3/readback、History Search、Task adapter 与 reply/task Process Evidence |

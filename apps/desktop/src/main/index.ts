@@ -697,6 +697,11 @@ ipcMain.handle('rovai:general-preferences-set-one-click-new-conversation', (_eve
   return requireGeneralPreferences().setOneClickNewConversationEnabled(enabled)
 })
 
+ipcMain.handle('rovai:general-preferences-set-world-map', (_event, enabled: unknown) => {
+  if (typeof enabled !== 'boolean') throw new Error('Invalid world map preference')
+  return requireGeneralPreferences().setWorldMapEnabled(enabled)
+})
+
 ipcMain.handle('rovai:general-preferences-invalidate-new-conversation-defaults', () => {
   return requireGeneralPreferences().invalidateNewConversationDefaults()
 })

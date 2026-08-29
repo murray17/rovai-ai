@@ -291,7 +291,7 @@ Operation identity 与 Run summary 的归约、排序和降级规则不同。
 6. 旧 Evidence 不做无法证明正确的回填；v1 presentation 由 [V1.29-D10](#v1-29-d10)冻结。
 
 当前规范见 [Runtime File Change Observation](../../architecture/runtime-file-change-observation.md)与
-[Runtime File Change Observation v1](../../contracts/runtime-file-change-observation-v1.md)。
+[Runtime File Change Observation v2](../../contracts/runtime-file-change-observation-v2.md)。
 
 ### 后果
 
@@ -329,13 +329,14 @@ Git baseline/final capture 试图观察 Runtime 没有报告的工作区净变�
    则写内部 `no_changes` checkpoint，不显示卡片。Codex/ACP cancellation 必须以 Host ingress fence 串行化最后一次
    route/enqueue 与 unbind 后的 queue barrier；barrier 未确认时允许 Run 生命周期继续终结，但不得提前写
    `no_changes`，缺失 projection 由 startup recovery 重放；
-5. 最新 Runtime Run snapshot 对 display root 内文件是权威来源；不存在时使用 terminal operation Evidence。Runtime
-   明确报告的 root 外文件不属于该 snapshot 的覆盖范围，仍以规范化绝对路径补入同一张卡。完整状态链可以得到净
-   差异，roundtrip 消失；不连续链只让该文件降级为 operation history；
+5. 最新 Runtime Run snapshot 对 display root 内文件是权威来源；不存在时使用 terminal operation Evidence。除
+   当前精确 `ROVAI_RUN_TMP` 临时交付区外，Runtime 明确报告的 root 外文件不属于该 snapshot 的覆盖范围，仍以
+   规范化绝对路径补入同一张卡。完整状态链可以得到净差异，roundtrip 消失；不连续链只让该文件降级为
+   operation history；
 6. 当前 Data Contract 直接升级，旧未发布 Window schema 不提供 dual read、alias 或数据迁移。
 
 当前规范见 [Runtime File Change Observation](../../architecture/runtime-file-change-observation.md)与
-[Runtime File Change Observation v1](../../contracts/runtime-file-change-observation-v1.md)。
+[Runtime File Change Observation v2](../../contracts/runtime-file-change-observation-v2.md)。
 
 ### 后果
 
@@ -496,3 +497,52 @@ Core 在影响 Navigation 投影的权威事务完成后统一发 `navigation.in
 - **每个 Camp 单独轮询：** 任务数与 Camp 数量一起增长，并重复读取同一全局投影；
 - **只在 `.finally()` 里无人等待地补一次刷新：** 原调用者提前 resolve，trailing rejection 可能无人观察；
 - **从 terminal event payload 局部改 marker：** 事件缺失、乱序或 payload 不完整时会建立第二状态真源。
+
+<a id="v1-29-d13"></a>
+## V1.29-D13：`ROVAI_RUN_TMP` 是临时交付区，不进入文件变化 presentation
+
+### 背景
+
+Built-in Tool Process 为 Runtime 注入精确 `ROVAI_RUN_TMP`，供 Agent 先生成 HTML、图片等文件，再通过
+`rovai send --file` 交给 Core ingest。该目录会在 lease 绑定前重置，并可随 unbind 或进程回收删除；真正的
+Published/Managed Attachment 已由独立合同持久化。Runtime File Change v1 又会诚实接纳 execution root 外的绝对
+路径，于是临时源文件也可能形成 `修改 report.html` 和 `Files Changed`，用户点击后看到的是 Rovai 内部临时路径，
+甚至文件已经不存在。这不是用户工作区变化，也不是附件的稳定读取入口。
+
+### 决定
+
+1. 当前 Built-in Tool Process 配置拥有的 exact `run_tmp` 是文件变化 normalizer 的 typed negative root；Core 不从
+   路径前缀、产品 data dir 或 Runtime 文本猜测它；
+2. Runtime-reported path 仍先按 execution root 纯词法解析。解析结果等于该 root 或位于其下时，不准入
+   RuntimeFileOperation、Command Diff entry 或 Run snapshot section；普通 workspace 文件和其他 root 外绝对路径
+   继续沿用 v1；
+3. containment 按 path component 判断。Unix 大小写敏感；Windows 兼容平台分隔符与 ASCII 大小写，且
+   `run-tmp-copy` 不命中。该判断只拥有 presentation admission，不建立新的文件权限或 filesystem sandbox；
+4. mixed Diff/snapshot 只移除 managed entries。全部被移除时写安全 unavailable 或权威空 snapshot，不能让
+   AgentRun fallback 重新引入临时路径；过滤发生在 append-only Evidence ingress，normal terminal 与 startup
+   recovery 使用同一结果；
+5. 通过临时路径成功 ingest 的附件继续由 Camp Attachment 拥有。普通 Tool Activity 可以保留，但不显示
+   `修改 <basename>`、inline diff 或 `Files Changed`；
+6. 不迁移、不重写、不重新投影 v1 历史 Evidence 与卡片。新逻辑只约束部署后新进入 Core 的 Evidence；read wire、
+   schema 与数据库保持不变。
+
+当前规范见 [Runtime File Change Observation v2](../../contracts/runtime-file-change-observation-v2.md)、
+[Built-in Tool Runtime](../../architecture/builtin-tool-runtime.md)与
+[Camp 会话工作区](../../ui/components/conversation-workspace.md)。
+
+### 后果
+
+- Files Changed 只保留 Runtime 报告的稳定用户文件事实，不再把 Rovai 临时交付路径伪装成可审查文件；
+- macOS、Linux 与 Windows 共用 typed root + component containment，不维护平台路径字符串名单；
+- 不会误伤整个应用 data dir、Quick Chat workspace、其他进程目录或普通 root 外文件；
+- 历史 UI 可以继续保留旧卡片，这是明确的数据兼容选择，而不是 migration 漏洞。
+
+### 被拒绝方案
+
+- **只在 Renderer 隐藏路径：** Evidence、Canonical classification 和 recovery 仍会保留错误文件事实，其他 reader
+  也可能重新展示；
+- **排除整个 Rovai data dir：** Quick Chat 或其他合法 execution root 可能位于应用管理目录，会扩大产品边界；
+- **按字符串前缀或统一 lowercase 比较：** 会误伤 `run-tmp-copy`，也不符合 Windows path component 语义；
+- **禁止所有 execution-root-external 路径：** 会丢失 Runtime 明确报告的合法用户文件，与 v1 的 display contract
+  冲突；
+- **迁移或重投影旧数据：** 需要改写已持久 Evidence/卡片且无法恢复当时 exact process root，收益不足以支持风险。

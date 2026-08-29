@@ -323,9 +323,12 @@ export function campConversationViewFromStoredValue(value: string | null): CampC
 
 export function initialCampConversationView(
   storedValue: string | null,
-  showingFirstRunWelcome: boolean
+  showingFirstRunWelcome: boolean,
+  worldMapEnabled = true
 ): CampConversationView {
-  return showingFirstRunWelcome ? 'conversation' : campConversationViewFromStoredValue(storedValue)
+  return showingFirstRunWelcome || !worldMapEnabled
+    ? 'conversation'
+    : campConversationViewFromStoredValue(storedValue)
 }
 
 export function dataTransferContainsFiles(dataTransfer: Pick<DataTransfer, 'types'>): boolean {
@@ -1194,6 +1197,8 @@ export function CampWorkspace({
   onStop,
   executionPlacement = 'bottom',
   onExecutionPlacementChange = async () => undefined,
+  worldMapEnabled = true,
+  onOpenWorldMapSettings,
   workspaceEntrySnapshotReady = true,
   inspectorVisible = true,
   inspectorTab: controlledInspectorTab,
@@ -1236,6 +1241,8 @@ export function CampWorkspace({
   onStop(): void
   executionPlacement?: ExecutionConsolePlacement
   onExecutionPlacementChange?(placement: ExecutionConsolePlacement): Promise<ExecutionConsolePlacement | void>
+  worldMapEnabled?: boolean
+  onOpenWorldMapSettings?(): void
   workspaceEntrySnapshotReady?: boolean
   inspectorVisible?: boolean
   inspectorTab?: CampInspectorTab
@@ -1328,17 +1335,21 @@ export function CampWorkspace({
     && snapshot.agentRuns.length === 0
   const [conversationView, setConversationView] = useState<CampConversationView>(() => {
     if (typeof window === 'undefined') {
-      return initialCampConversationView(null, showingFirstRunWelcome)
+      return initialCampConversationView(null, showingFirstRunWelcome, worldMapEnabled)
     }
     try {
       return initialCampConversationView(
         window.localStorage.getItem(CAMP_CONVERSATION_VIEW_STORAGE_KEY),
-        showingFirstRunWelcome
+        showingFirstRunWelcome,
+        worldMapEnabled
       )
     } catch {
-      return initialCampConversationView(null, showingFirstRunWelcome)
+      return initialCampConversationView(null, showingFirstRunWelcome, worldMapEnabled)
     }
   })
+  const [worldMapUnavailableNoticeOpen, setWorldMapUnavailableNoticeOpen] = useState(false)
+  const worldMapControlsRef = useRef<HTMLDivElement>(null)
+  const worldMapButtonRef = useRef<HTMLButtonElement>(null)
   const firstRunConversationShownForCamp = useRef<string | null>(
     showingFirstRunWelcome ? snapshot.camp.id : null
   )
@@ -1410,6 +1421,36 @@ export function CampWorkspace({
       // A denied storage surface must not block the Camp reading plane.
     }
   }, [conversationView])
+  useEffect(() => {
+    if (worldMapEnabled) {
+      setWorldMapUnavailableNoticeOpen(false)
+      return
+    }
+    if (conversationView === 'world') setConversationView('conversation')
+  }, [conversationView, worldMapEnabled])
+  useEffect(() => {
+    setWorldMapUnavailableNoticeOpen(false)
+  }, [snapshot.camp.id])
+  useEffect(() => {
+    if (!worldMapUnavailableNoticeOpen) return undefined
+    const handlePointerDown = (event: PointerEvent): void => {
+      if (event.target instanceof Node && !worldMapControlsRef.current?.contains(event.target)) {
+        setWorldMapUnavailableNoticeOpen(false)
+      }
+    }
+    const handleKeyDown = (event: KeyboardEvent): void => {
+      if (event.key !== 'Escape') return
+      event.preventDefault()
+      setWorldMapUnavailableNoticeOpen(false)
+      worldMapButtonRef.current?.focus({ preventScroll: true })
+    }
+    document.addEventListener('pointerdown', handlePointerDown)
+    document.addEventListener('keydown', handleKeyDown)
+    return () => {
+      document.removeEventListener('pointerdown', handlePointerDown)
+      document.removeEventListener('keydown', handleKeyDown)
+    }
+  }, [worldMapUnavailableNoticeOpen])
   useLayoutEffect(() => {
     if (!executionDrawerPortal) return
     const host = executionPlacement === 'inspector'
@@ -3574,18 +3615,31 @@ export function CampWorkspace({
                   </span>
                 </div>
               )}
-              <div className="camp-conversation-view-controls" role="group" aria-label="会话区视图">
+              <div className="camp-conversation-view-controls" ref={worldMapControlsRef} role="group" aria-label="会话区视图">
                 <button
                   type="button"
                   aria-pressed={conversationView === 'conversation'}
-                  onClick={() => setConversationView('conversation')}
+                  onClick={() => {
+                    setWorldMapUnavailableNoticeOpen(false)
+                    setConversationView('conversation')
+                  }}
                 >
                   会话
                 </button>
                 <button
+                  ref={worldMapButtonRef}
+                  className={!worldMapEnabled ? 'is-unavailable' : undefined}
                   type="button"
                   aria-pressed={conversationView === 'world'}
+                  aria-disabled={!worldMapEnabled ? true : undefined}
+                  aria-haspopup={!worldMapEnabled ? 'dialog' : undefined}
+                  aria-expanded={!worldMapEnabled ? worldMapUnavailableNoticeOpen : undefined}
+                  title={!worldMapEnabled ? '世界地图已在通用设置中关闭' : undefined}
                   onClick={(event) => {
+                    if (!worldMapEnabled) {
+                      setWorldMapUnavailableNoticeOpen((open) => !open)
+                      return
+                    }
                     const trigger = event.currentTarget
                     const preserveKeyboardFocus = event.detail === 0
                     if (conversationFind.open) closeConversationFind(false)
@@ -3612,6 +3666,31 @@ export function CampWorkspace({
                       <circle cx="19" cy="6" r="1.8" />
                     </svg>
                   </button>
+                )}
+                {!worldMapEnabled && worldMapUnavailableNoticeOpen && (
+                  <div
+                    className="camp-world-map-unavailable-popover"
+                    role="dialog"
+                    aria-labelledby="camp-world-map-unavailable-title"
+                    aria-describedby="camp-world-map-unavailable-description"
+                  >
+                    <strong id="camp-world-map-unavailable-title">世界地图已关闭</strong>
+                    <p id="camp-world-map-unavailable-description">
+                      可在“设置 → 通用 → 会话”中重新开启。当前会话内容不会受到影响。
+                    </p>
+                    {onOpenWorldMapSettings && (
+                      <button
+                        className="camp-world-map-settings-link"
+                        type="button"
+                        onClick={() => {
+                          setWorldMapUnavailableNoticeOpen(false)
+                          onOpenWorldMapSettings()
+                        }}
+                      >
+                        前往通用设置
+                      </button>
+                    )}
+                  </div>
                 )}
               </div>
             </div>
@@ -3907,16 +3986,18 @@ export function CampWorkspace({
               )}
               </div>
             </div>
-            <div className="camp-world-map-panel" hidden={conversationView !== 'world'}>
-              <CampWorldMap
-                campId={snapshot.camp.id}
-                agents={worldMapProjection.agents}
-                rendezvous={worldMapProjection.rendezvous}
-                routesVisible={worldMapRoutesVisible}
-                active={conversationView === 'world'}
-                onOpenExecutionProcess={(agentId, trigger) => openExecutionProcess(agentId, trigger)}
-              />
-            </div>
+            {worldMapEnabled && (
+              <div className="camp-world-map-panel" hidden={conversationView !== 'world'}>
+                <CampWorldMap
+                  campId={snapshot.camp.id}
+                  agents={worldMapProjection.agents}
+                  rendezvous={worldMapProjection.rendezvous}
+                  routesVisible={worldMapRoutesVisible}
+                  active={conversationView === 'world'}
+                  onOpenExecutionProcess={(agentId, trigger) => openExecutionProcess(agentId, trigger)}
+                />
+              </div>
+            )}
           </div>
           {executionPlacement === 'bottom' && (
             <RunPulse

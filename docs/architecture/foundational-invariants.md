@@ -69,8 +69,9 @@ last_updated: 2026-08-28
   Core 不通过 Git tree、baseline/final、checkpoint ref、目录扫描或当前文件读取补充结果，也不跨 Run 合并；因此
   Git 与非 Git workspace 使用相同观测能力，并行 Run 分别形成自己的结果。
 - execution root 是 Runtime path 的规范化基准，不是这项观察的文件权限来源。文件变化路径必须纯词法收敛为该
-  root 内的相对路径，避免把 Runtime 报告的任意绝对路径泄露到 Camp Read Side；该检查不打开文件、不改变 ACP
-  Client FS/Terminal 的 Runtime-owned 权限模型。
+  root 内的相对路径或 root 外的规范化绝对路径。当前 Built-in Tool Process 的精确 `ROVAI_RUN_TMP` 及后代必须在
+  durable Evidence ingress 前排除；该边界不扩大到应用 data dir、其他进程临时目录、同名前缀目录或普通 root 外
+  用户文件，也不打开文件、不改变 ACP Client FS/Terminal 的 Runtime-owned 权限模型。
 - AgentRun 仍冻结 workspace 路径及起止 Git observation 作为既有终态审计事实；这些 per-Run audit facts 不参与
   文件变化卡片归约，也不成为 Project/导航身份。导航继续按规范目录路径分组，不引入 Project 表或 Repository
   Scope。
@@ -403,6 +404,8 @@ last_updated: 2026-08-28
   时序，链断裂或 operation-only 只保留操作历史。只有所有文件都是完整净差异时才能显示全局增删计数。
 - 文件变化观察不执行 Git、filesystem scan 或当前文件读取，不解析 shell 命令，也不跨 Run 合并。失败或取消 Run
   可以展示此前已成功报告的文件变化；failed/cancelled Operation 自身不得进入。没有可靠 Evidence 时不生成卡片。
+- managed `ROVAI_RUN_TMP` exclusion 只作用于新进入 Core 的 Evidence。历史 Evidence、Canonical Activity 与
+  AgentRun projection 不重写、不回填；通过临时区发布出的 Managed Attachment 继续由 Attachment 合同独立拥有。
 - 所有已接入 Runtime 共享同一 Activity contract/schema；Coverage level 只描述 Adapter 能实际观测的 `fine_grained | run_level | unknown`，不降级全局合同，也不表示未观测操作未发生。初始分层和每次升级都必须有真实 Runtime evidence、Registry 变更、fixture 与恢复一致性验证。
 - Shell command 只有在协议的封闭公共字段中出现时才能进入 Evidence：Claude 仅 Bash command，通用 ACP 仅
   `rawInput.command` 字符串，TRAE CLI CN 额外仅允许 `rawInput.Command` 字符串，Antigravity 仅明确 Shell

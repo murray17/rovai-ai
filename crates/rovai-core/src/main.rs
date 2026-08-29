@@ -10030,6 +10030,7 @@ impl Core {
                                 camp_id: &execution.camp_id,
                                 agent_run_id: &execution.agent_run_id,
                                 execution_epoch: execution.execution_epoch,
+                                managed_output_root: Some(builtin_tools.run_tmp()),
                             },
                             runtime_event.event_type,
                             &runtime_event.payload,
@@ -10052,6 +10053,7 @@ impl Core {
                         camp_id: &execution.camp_id,
                         agent_run_id: &execution.agent_run_id,
                         execution_epoch: execution.execution_epoch,
+                        managed_output_root: Some(builtin_tools.run_tmp()),
                     },
                     runtime_event.event_type,
                     &runtime_event.payload,
@@ -10568,6 +10570,7 @@ impl Core {
                                 camp_id: &execution.camp_id,
                                 agent_run_id: &execution.agent_run_id,
                                 execution_epoch: execution.execution_epoch,
+                                managed_output_root: Some(builtin_tools.run_tmp()),
                             },
                             runtime_event.event_type,
                             &runtime_event.payload,
@@ -10590,6 +10593,7 @@ impl Core {
                         camp_id: &execution.camp_id,
                         agent_run_id: &execution.agent_run_id,
                         execution_epoch: execution.execution_epoch,
+                        managed_output_root: Some(builtin_tools.run_tmp()),
                     },
                     runtime_event.event_type,
                     &runtime_event.payload,
@@ -13793,21 +13797,27 @@ async fn process_agent_run_acp_message(
     if event_type == "runtime.usage" {
         return;
     }
-    let evidence =
-        match persist_runtime_evidence(core, agent_run_id, execution_epoch, event_type, &payload)
-            .await
-        {
-            Ok(evidence) => evidence,
-            Err(error) => {
-                eprintln!(
-                    "failed to persist Runtime Evidence for AgentRun {agent_run_id}: {error:#}"
-                );
-                if ExecutionEvidenceService::is_durable_runtime_evidence_event(event_type) {
-                    return;
-                }
-                None
+    let evidence = match persist_runtime_evidence(
+        core,
+        agent_run_id,
+        execution_epoch,
+        runtime
+            .builtin_tool_process_config()
+            .map(BuiltinToolProcessConfig::run_tmp),
+        event_type,
+        &payload,
+    )
+    .await
+    {
+        Ok(evidence) => evidence,
+        Err(error) => {
+            eprintln!("failed to persist Runtime Evidence for AgentRun {agent_run_id}: {error:#}");
+            if ExecutionEvidenceService::is_durable_runtime_evidence_event(event_type) {
+                return;
             }
-        };
+            None
+        }
+    };
     if ExecutionEvidenceService::is_durable_runtime_evidence_event(event_type) && evidence.is_none()
     {
         return;
@@ -14162,6 +14172,7 @@ struct RuntimeEventScope<'a> {
     camp_id: &'a str,
     agent_run_id: &'a str,
     execution_epoch: i64,
+    managed_output_root: Option<&'a Path>,
 }
 
 async fn process_runtime_event(
@@ -14195,6 +14206,7 @@ async fn process_runtime_event(
         core,
         scope.agent_run_id,
         scope.execution_epoch,
+        scope.managed_output_root,
         event_type,
         payload,
     )
@@ -14222,6 +14234,7 @@ async fn persist_runtime_evidence(
     core: &Core,
     agent_run_id: &str,
     execution_epoch: i64,
+    managed_output_root: Option<&Path>,
     event_type: &str,
     payload: &Value,
 ) -> Result<Option<AgentRunExecutionEvidence>> {
@@ -14229,13 +14242,14 @@ async fn persist_runtime_evidence(
         return Ok(None);
     }
     let mut database = core.database.lock().await;
-    let recorded = ExecutionEvidenceService.record_runtime_event(
+    let recorded = ExecutionEvidenceService.record_runtime_event_with_managed_output_root(
         &mut database,
         &ManagedBlobStore::new(&core.data_dir),
         agent_run_id,
         execution_epoch,
         event_type,
         payload,
+        managed_output_root,
     )?;
     Ok(recorded.map(RecordedExecutionEvidence::into_evidence))
 }
@@ -15453,21 +15467,27 @@ async fn process_agent_run_codex_message(
     }
     let (event_type, payload) = codex::normalize_event(&method, &params);
     runtime.observe_agent_message(&method, &params).await;
-    let evidence =
-        match persist_runtime_evidence(core, agent_run_id, execution_epoch, event_type, &payload)
-            .await
-        {
-            Ok(evidence) => evidence,
-            Err(error) => {
-                eprintln!(
-                    "failed to persist Runtime Evidence for AgentRun {agent_run_id}: {error:#}"
-                );
-                if ExecutionEvidenceService::is_durable_runtime_evidence_event(event_type) {
-                    return;
-                }
-                None
+    let evidence = match persist_runtime_evidence(
+        core,
+        agent_run_id,
+        execution_epoch,
+        runtime
+            .builtin_tool_process_config()
+            .map(BuiltinToolProcessConfig::run_tmp),
+        event_type,
+        &payload,
+    )
+    .await
+    {
+        Ok(evidence) => evidence,
+        Err(error) => {
+            eprintln!("failed to persist Runtime Evidence for AgentRun {agent_run_id}: {error:#}");
+            if ExecutionEvidenceService::is_durable_runtime_evidence_event(event_type) {
+                return;
             }
-        };
+            None
+        }
+    };
     if ExecutionEvidenceService::is_durable_runtime_evidence_event(event_type) && evidence.is_none()
     {
         return;
@@ -15596,12 +15616,15 @@ async fn process_agent_run_codex_message(
             });
             let persisted = {
                 let mut database = core.database.lock().await;
-                ExecutionEvidenceService.record_terminal_run_diff_snapshot(
+                ExecutionEvidenceService.record_terminal_run_diff_snapshot_with_managed_output_root(
                     &mut database,
                     &ManagedBlobStore::new(&core.data_dir),
                     agent_run_id,
                     execution_epoch,
                     &payload,
+                    runtime
+                        .builtin_tool_process_config()
+                        .map(BuiltinToolProcessConfig::run_tmp),
                 )
             };
             if let Err(error) = persisted {

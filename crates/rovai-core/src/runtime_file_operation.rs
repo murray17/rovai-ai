@@ -2,9 +2,14 @@ use std::path::Path;
 
 use serde_json::Value;
 
-use crate::{agent_profile::AdapterKind, runtime_diff::normalize_reported_path_for_display};
+use crate::{
+    agent_profile::AdapterKind,
+    runtime_diff::{normalize_reported_path_for_display, reported_path_is_within_root},
+};
 
 pub const FILE_OPERATION_SCHEMA_VERSION: u32 = 1;
+pub(crate) const RUNTIME_FILE_OPERATION_MANAGED_OUTPUT_ROOT: &str =
+    "runtime_file_operation_managed_output_root";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AdmittedRuntimeFileOperation {
@@ -17,11 +22,26 @@ pub fn admit_runtime_file_operation(
     execution_root: &Path,
     frozen_adapter_kind: Option<&str>,
 ) -> Option<Result<AdmittedRuntimeFileOperation, &'static str>> {
+    admit_runtime_file_operation_with_managed_output_root(
+        payload,
+        execution_root,
+        frozen_adapter_kind,
+        None,
+    )
+}
+
+pub fn admit_runtime_file_operation_with_managed_output_root(
+    payload: &Value,
+    execution_root: &Path,
+    frozen_adapter_kind: Option<&str>,
+    managed_output_root: Option<&Path>,
+) -> Option<Result<AdmittedRuntimeFileOperation, &'static str>> {
     let candidate = payload.get("runtimeFileOperation")?;
     Some(admit_candidate(
         candidate,
         execution_root,
         frozen_adapter_kind,
+        managed_output_root,
     ))
 }
 
@@ -29,6 +49,7 @@ fn admit_candidate(
     candidate: &Value,
     execution_root: &Path,
     frozen_adapter_kind: Option<&str>,
+    managed_output_root: Option<&Path>,
 ) -> Result<AdmittedRuntimeFileOperation, &'static str> {
     let adapter_kind = candidate
         .get("adapterKind")
@@ -58,6 +79,11 @@ fn admit_candidate(
         .get("path")
         .and_then(Value::as_str)
         .ok_or("runtime_file_operation_path_invalid")?;
+    if managed_output_root
+        .is_some_and(|root| reported_path_is_within_root(execution_root, raw_path, root))
+    {
+        return Err(RUNTIME_FILE_OPERATION_MANAGED_OUTPUT_ROOT);
+    }
     let path = normalize_reported_path_for_display(execution_root, raw_path)
         .ok_or("runtime_file_operation_path_invalid")?;
     Ok(AdmittedRuntimeFileOperation {
@@ -102,8 +128,8 @@ mod tests {
     }
 
     #[test]
-    fn cross_root_write_is_admitted_with_an_absolute_display_path() {
-        let result = admit_runtime_file_operation(
+    fn cross_root_write_remains_visible_unless_it_is_managed_run_output() {
+        let result = admit_runtime_file_operation_with_managed_output_root(
             &json!({
                 "runtimeFileOperation": {
                     "adapterKind": "qoder-cli",
@@ -115,10 +141,50 @@ mod tests {
             }),
             Path::new("/repo"),
             Some("qoder-cli"),
+            Some(Path::new("/rovai/runtime/builtin-tools/process/run-tmp")),
         )
         .expect("candidate should exist")
         .expect("cross-root writes should remain visible");
         assert_eq!(result.path, "/outside.txt");
+
+        for (path, expected) in [
+            (
+                "/rovai/runtime/builtin-tools/process/run-tmp",
+                Err(RUNTIME_FILE_OPERATION_MANAGED_OUTPUT_ROOT),
+            ),
+            (
+                "/rovai/runtime/builtin-tools/process/run-tmp/report.html",
+                Err(RUNTIME_FILE_OPERATION_MANAGED_OUTPUT_ROOT),
+            ),
+            (
+                "/rovai/runtime/builtin-tools/process/run-tmp-copy/report.html",
+                Ok("/rovai/runtime/builtin-tools/process/run-tmp-copy/report.html"),
+            ),
+        ] {
+            let result = admit_runtime_file_operation_with_managed_output_root(
+                &json!({
+                    "runtimeFileOperation": {
+                        "adapterKind": "qoder-cli",
+                        "protocolFamily": "acp-v1",
+                        "sourceEventKind": "session/update.tool_call_update.completed",
+                        "operationKind": "write",
+                        "path": path
+                    }
+                }),
+                Path::new("/repo"),
+                Some("qoder-cli"),
+                Some(Path::new("/rovai/runtime/builtin-tools/process/run-tmp")),
+            )
+            .expect("candidate should exist")
+            .map(|admitted| admitted.path.as_str().to_string());
+            assert_eq!(
+                result
+                    .as_ref()
+                    .map(String::as_str)
+                    .map_err(|reason| *reason),
+                expected
+            );
+        }
     }
 
     #[test]

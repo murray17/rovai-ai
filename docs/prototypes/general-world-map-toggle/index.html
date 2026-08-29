@@ -1,0 +1,1171 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="day">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <meta name="description" content="Rovai AI 通用设置世界地图开关交互稿">
+  <title>Rovai AI · 通用设置世界地图开关</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --rail-width: 270px;
+      --canvas: #eceeef;
+      --surface: #fbfbfa;
+      --surface-raised: #ffffff;
+      --surface-subtle: #f0f2f4;
+      --surface-muted: #e7eaed;
+      --surface-hover: #e8eaea;
+      --surface-selected: #e9ecee;
+      --workspace-surface-subtle: #f4f5f4;
+      --workspace-surface-raised: #ffffff;
+      --workspace-surface-hover: #eef0ef;
+      --workspace-surface-selected: #e8edef;
+      --workspace-line: #d5dadd;
+      --workspace-line-strong: #bdc6ca;
+      --workspace-steel: #526f88;
+      --workspace-steel-ink: #405f7e;
+      --workspace-attention-soft: #f8edda;
+      --conversation-surface: #ffffff;
+      --input: #ffffff;
+      --ink: #171b20;
+      --muted: #59636c;
+      --faint: #6e7382;
+      --line: #dfe4e8;
+      --line-strong: #c7cfd6;
+      --control-line: #8b9389;
+      --brand: #526f88;
+      --brand-hover: #3d5874;
+      --brand-contrast: #ffffff;
+      --brand-soft: #e9eef3;
+      --brand-ink: #405f7e;
+      --rail: #f3f4f4;
+      --rail-ink: #626b72;
+      --rail-line: #dadde0;
+      --rail-logo: #526f88;
+      --ember: #d3a45f;
+      --success: #3e775c;
+      --success-soft: #e7f1ea;
+      --attention: #8a6226;
+      --attention-soft: #f8edda;
+      --danger: #a24c46;
+      --danger-soft: #f7e6e3;
+      --info: #416c86;
+      --info-soft: #e5eef3;
+      --focus: #526f88;
+      --focus-soft: rgb(82 111 136 / 16%);
+      --overlay: rgb(28 32 43 / 42%);
+      --map-scrim: rgb(17 24 29 / 10%);
+      --shadow-float: 0 18px 56px rgb(38 45 58 / 14%);
+      --shadow-menu: 0 14px 38px rgb(38 45 58 / 16%);
+      --identity-1: #a65f4a;
+      --identity-2: #39777a;
+      --identity-3: #74628f;
+      --identity-4: #9b7337;
+      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", "PingFang SC",
+        "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+      font-size: 13px;
+      font-synthesis: none;
+      text-rendering: optimizeLegibility;
+    }
+
+    :root[data-theme="night"] {
+      color-scheme: dark;
+      --canvas: #0d1114;
+      --surface: #151a1e;
+      --surface-raised: #1b2227;
+      --surface-subtle: #1a2024;
+      --surface-muted: #242d33;
+      --surface-hover: #1d252b;
+      --surface-selected: #222c33;
+      --workspace-surface-subtle: #11171b;
+      --workspace-surface-raised: #1c2328;
+      --workspace-surface-hover: #20292f;
+      --workspace-surface-selected: #24313a;
+      --workspace-line: #2b353b;
+      --workspace-line-strong: #3d4950;
+      --workspace-steel: #7897ae;
+      --workspace-steel-ink: #c0d4e1;
+      --workspace-attention-soft: #302719;
+      --conversation-surface: #181d21;
+      --input: #1b2227;
+      --ink: #e7ecef;
+      --muted: #abb5bc;
+      --faint: #919da6;
+      --line: #333e46;
+      --line-strong: #53616b;
+      --control-line: #687b88;
+      --brand: #7897ae;
+      --brand-hover: #b1c8d8;
+      --brand-contrast: #091116;
+      --brand-soft: #22303a;
+      --brand-ink: #c0d4e1;
+      --rail: #11161a;
+      --rail-ink: #a6b1b8;
+      --rail-line: #313b43;
+      --rail-logo: #b1c8d8;
+      --ember: #d2aa72;
+      --success: #82b695;
+      --success-soft: #1a2b22;
+      --attention: #d2ac70;
+      --attention-soft: #302719;
+      --danger: #d6857f;
+      --danger-soft: #321e1d;
+      --info: #83afc9;
+      --info-soft: #182832;
+      --focus: #8fb3cb;
+      --focus-soft: rgb(143 179 203 / 18%);
+      --overlay: rgb(0 0 0 / 58%);
+      --map-scrim: rgb(5 10 14 / 25%);
+      --shadow-float: 0 22px 64px rgb(0 0 0 / 42%);
+      --shadow-menu: 0 18px 44px rgb(0 0 0 / 46%);
+      --identity-1: #c98572;
+      --identity-2: #70b0ae;
+      --identity-3: #a89ac8;
+      --identity-4: #d2ae6f;
+    }
+
+    * { box-sizing: border-box; }
+    html, body { width: 100%; min-width: 760px; height: 100%; margin: 0; }
+    body { overflow: hidden; color: var(--ink); background: var(--canvas); }
+    button, input, select { color: inherit; font: inherit; }
+    button { -webkit-app-region: no-drag; }
+    button:active:not(:disabled, [aria-disabled="true"]) { transform: translateY(1px); }
+    button:disabled { cursor: default; opacity: .58; }
+    :where(button, input, select, [tabindex]):focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+    ::selection { color: var(--ink); background: var(--focus-soft); }
+    * { scrollbar-color: var(--line-strong) transparent; scrollbar-width: thin; }
+    [hidden] { display: none !important; }
+    .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+    .icon-sprite { position: absolute; width: 0; height: 0; overflow: hidden; }
+    svg.icon { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.7; }
+
+    .prototype-root { display: grid; width: 100vw; height: 100dvh; grid-template-rows: 58px minmax(0, 1fr); overflow: hidden; }
+    .prototype-toolbar {
+      position: relative;
+      z-index: 30;
+      display: grid;
+      min-width: 0;
+      grid-template-columns: minmax(230px, 1fr) auto minmax(230px, 1fr);
+      align-items: center;
+      gap: 14px;
+      padding: 8px 12px 8px 17px;
+      border-bottom: 1px solid var(--line-strong);
+      background: var(--surface-raised);
+    }
+    .prototype-heading { display: grid; min-width: 0; gap: 2px; }
+    .prototype-heading strong { font-size: 12.5px; letter-spacing: -.01em; }
+    .prototype-heading span { overflow: hidden; color: var(--muted); font-size: 10px; line-height: 1.4; text-overflow: ellipsis; white-space: nowrap; }
+    .prototype-tabs { display: flex; gap: 3px; padding: 3px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface-subtle); }
+    .prototype-tabs button,
+    .lab-button {
+      display: inline-flex;
+      min-height: 34px;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      padding: 0 10px;
+      border: 0;
+      border-radius: 6px;
+      color: var(--muted);
+      background: transparent;
+      cursor: pointer;
+      font-size: 10.5px;
+      font-weight: 650;
+    }
+    .prototype-tabs button:hover,
+    .lab-button:hover { color: var(--ink); background: var(--surface-muted); }
+    .prototype-tabs button[aria-selected="true"] { color: var(--brand-ink); background: var(--surface-raised); box-shadow: 0 2px 8px rgb(38 45 58 / 8%); }
+    .prototype-actions { display: flex; min-width: 0; justify-content: flex-end; gap: 3px; }
+    .lab-button svg { width: 15px; height: 15px; }
+
+    .product-frame { position: relative; min-width: 0; min-height: 0; overflow: hidden; background: var(--surface); }
+    .product-screen { position: absolute; inset: 0; min-width: 0; min-height: 0; overflow: hidden; }
+    .app-shell { display: grid; width: 100%; height: 100%; grid-template-columns: var(--rail-width) minmax(0, 1fr); overflow: hidden; }
+    .app-sidebar {
+      position: relative;
+      z-index: 4;
+      display: flex;
+      min-height: 0;
+      flex-direction: column;
+      overflow: hidden;
+      padding: 0 10px 10px;
+      border-right: 1px solid var(--rail-line);
+      color: var(--rail-ink);
+      background: var(--rail);
+    }
+    .sidebar-drag { position: relative; height: 37px; flex: 0 0 37px; -webkit-app-region: drag; }
+    .traffic-lights { position: absolute; top: 11px; left: 4px; display: flex; gap: 8px; }
+    .traffic-lights i { width: 11px; height: 11px; border: 1px solid rgb(0 0 0 / 10%); border-radius: 50%; }
+    .traffic-lights i:nth-child(1) { background: #ff5f57; }
+    .traffic-lights i:nth-child(2) { background: #ffbd2e; }
+    .traffic-lights i:nth-child(3) { background: #28c840; }
+    .brand-row { display: flex; min-height: 38px; align-items: center; gap: 9px; padding: 0 8px 10px; color: var(--ink); }
+    .brand-mark { position: relative; display: grid; width: 22px; height: 24px; flex: 0 0 22px; place-items: center; color: var(--rail-logo); }
+    .brand-mark svg { width: 22px; height: 22px; }
+    .brand-row strong { font-size: 13px; font-weight: 680; }
+    .sidebar-spacer { flex: 1 1 auto; }
+
+    .settings-sidebar-heading { display: grid; gap: 8px; padding: 4px 0 11px; border-bottom: 1px solid var(--line); }
+    .settings-back,
+    .settings-menu button,
+    .app-menu button,
+    .project-row,
+    .sidebar-settings {
+      position: relative;
+      display: grid;
+      width: 100%;
+      min-height: 38px;
+      grid-template-columns: 22px minmax(0, 1fr);
+      align-items: center;
+      gap: 7px;
+      padding: 6px 9px;
+      border: 0;
+      border-radius: 7px;
+      color: var(--rail-ink);
+      background: transparent;
+      cursor: pointer;
+      text-align: left;
+    }
+    .settings-back:hover,
+    .settings-menu button:hover,
+    .app-menu button:hover,
+    .project-row:hover,
+    .sidebar-settings:hover { color: var(--ink); background: var(--surface-muted); }
+    .settings-back svg,
+    .settings-menu svg,
+    .app-menu svg,
+    .project-row svg,
+    .sidebar-settings svg { width: 16px; height: 16px; }
+    .settings-back strong,
+    .settings-menu strong,
+    .app-menu strong,
+    .project-row strong,
+    .sidebar-settings strong { overflow: hidden; font-size: 12px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+    .settings-sidebar-title { display: grid; gap: 3px; padding: 0 9px 3px; color: var(--ink); }
+    .settings-sidebar-title strong { font-size: 17px; font-weight: 640; letter-spacing: -.02em; }
+    .settings-sidebar-title span { color: var(--faint); font-size: 10px; }
+    .settings-menu { display: grid; min-height: 0; gap: 19px; padding: 16px 0; overflow: auto; }
+    .settings-group { display: grid; gap: 3px; }
+    .settings-group h2,
+    .project-label { margin: 0; padding: 0 9px 5px; color: var(--faint); font-size: 9px; font-weight: 720; letter-spacing: .11em; text-transform: uppercase; }
+    .settings-menu button.active { color: var(--brand-ink); background: var(--surface-selected); }
+    .settings-menu button.active::before,
+    .project-row.active::before { position: absolute; top: 8px; bottom: 8px; left: 0; width: 2px; border-radius: 2px; background: var(--brand); content: ""; }
+    .settings-menu button.active svg { color: var(--brand-ink); }
+
+    .settings-content { min-width: 0; min-height: 0; overflow: auto; background: var(--surface); }
+    .settings-panel { width: min(1040px, calc(100% - 44px)); margin: 0 auto; padding: 30px 0 48px; }
+    .settings-page-header { display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; padding-bottom: 24px; }
+    .settings-page-copy { min-width: 0; }
+    .eyebrow { margin: 0 0 6px; color: var(--brand-ink); font-size: 9px; font-weight: 750; letter-spacing: .13em; text-transform: uppercase; }
+    .settings-page-header h1 { margin: 0; color: var(--ink); font-size: 25px; font-weight: 620; line-height: 1.15; letter-spacing: -.025em; }
+    .settings-page-header p:last-child { max-width: 680px; margin: 8px 0 0; color: var(--muted); font-size: 11px; line-height: 1.55; }
+    .save-state { display: inline-flex; flex: 0 0 auto; align-items: center; gap: 7px; color: var(--success); font-size: 10.5px; white-space: nowrap; }
+    .save-state::before { width: 7px; height: 7px; border-radius: 50%; background: currentColor; content: ""; }
+    .save-state.is-saving { color: var(--brand-ink); }
+    .save-state.is-dirty { color: var(--attention); }
+    .save-state.is-saving::before { border: 1px solid color-mix(in srgb, currentColor 35%, transparent); border-top-color: currentColor; background: transparent; animation: spin 700ms linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .settings-body { display: grid; }
+    .settings-section { display: grid; grid-template-columns: minmax(98px, 132px) minmax(0, 1fr); align-items: start; gap: clamp(22px, 4vw, 42px); margin: 0; padding: 30px 0; border: 0; }
+    .section-heading h2 { margin: 0; color: var(--ink); font-size: 15px; font-weight: 620; }
+    .section-heading p { margin: 6px 0 0; color: var(--faint); font-size: 10px; line-height: 1.45; }
+    .section-body { min-width: 0; }
+    .startup-options { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin: 0; padding: 0; border: 0; }
+    .startup-options legend { grid-column: 1 / -1; margin-bottom: 2px; color: var(--ink); font-size: 12px; font-weight: 620; }
+    .radio-option { position: relative; display: grid; min-height: 76px; grid-template-columns: 18px minmax(0, 1fr); align-items: start; gap: 9px; padding: 13px; border: 0; border-radius: 10px; background: var(--workspace-surface-raised); cursor: pointer; }
+    .radio-option:hover { background: var(--workspace-surface-hover); }
+    .radio-option:has(input:checked) { color: var(--workspace-steel-ink); background: var(--workspace-surface-selected); }
+    .radio-option input { width: 16px; height: 16px; margin: 2px 0 0; accent-color: var(--brand); }
+    .radio-option span { display: grid; gap: 4px; }
+    .radio-option strong { color: var(--ink); font-size: 12px; font-weight: 650; }
+    .radio-option small { color: var(--muted); font-size: 10.5px; line-height: 1.5; }
+
+    .map-preference { overflow: hidden; border-radius: 10px; background: var(--workspace-surface-raised); }
+    .map-preference-main { display: flex; min-height: 82px; align-items: center; justify-content: space-between; gap: 24px; padding: 14px 16px; }
+    .map-preference-copy { display: grid; min-width: 0; gap: 6px; }
+    .map-preference-title { display: flex; min-width: 0; align-items: center; gap: 8px; }
+    .map-preference-title > svg { width: 17px; height: 17px; color: var(--brand-ink); }
+    .map-preference-title strong { color: var(--ink); font-size: 12.5px; font-weight: 650; }
+    .map-preference-copy > p { max-width: 620px; margin: 0; color: var(--muted); font-size: 10.5px; line-height: 1.55; }
+    .switch-control { position: relative; display: grid; width: 46px; min-height: 44px; flex: 0 0 46px; place-items: center; cursor: pointer; }
+    .switch-control input { position: absolute; width: 1px; height: 1px; opacity: 0; }
+    .switch-track { position: relative; width: 34px; height: 20px; border: 1px solid var(--control-line); border-radius: 999px; background: var(--surface-muted); transition: background-color 140ms ease, border-color 140ms ease; }
+    .switch-track::after { position: absolute; top: 3px; left: 3px; width: 12px; height: 12px; border-radius: 50%; background: var(--muted); content: ""; transition: transform 140ms ease, background-color 140ms ease; }
+    .switch-control input:checked + .switch-track { border-color: var(--brand); background: var(--brand-soft); }
+    .switch-control input:checked + .switch-track::after { background: var(--brand); transform: translateX(14px); }
+    .switch-control input:focus-visible + .switch-track { outline: 2px solid var(--focus); outline-offset: 3px; }
+    .switch-control input:disabled + .switch-track { cursor: wait; opacity: .64; }
+    .quiet-button { display: inline-flex; min-height: 32px; align-items: center; justify-content: center; gap: 6px; padding: 5px 9px; border: 1px solid var(--line-strong); border-radius: 6px; color: var(--ink); background: var(--surface); cursor: pointer; font-size: 10px; font-weight: 620; white-space: nowrap; }
+    .quiet-button:hover { border-color: var(--control-line); background: var(--surface-hover); }
+    .quiet-button svg { width: 14px; height: 14px; }
+
+    .general-configurator { overflow: visible; padding-bottom: 8px; border-radius: 12px; background: var(--workspace-surface-subtle); }
+    .general-config-head { display: flex; min-height: 54px; align-items: center; justify-content: space-between; gap: 14px; padding: 10px 13px; }
+    .general-config-head h3 { margin: 0; color: var(--ink); font-size: 12px; font-weight: 620; }
+    .general-config-head p { margin: 3px 0 0; color: var(--muted); font-size: 10.5px; line-height: 1.45; }
+    .general-config-head > span { flex: 0 0 auto; color: var(--faint); font-size: 10px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+    .general-default-member-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; margin: 0 8px 8px; }
+    .general-default-member { display: grid; min-width: 0; min-height: 56px; grid-template-columns: 16px 28px minmax(0, 1fr); gap: 9px; align-items: center; padding: 7px 9px; border: 0; border-radius: 8px; background: var(--workspace-surface-raised); cursor: pointer; }
+    .general-default-member:hover { background: var(--workspace-surface-hover); }
+    .general-default-member:has(input:checked) { color: var(--workspace-steel-ink); background: var(--workspace-surface-selected); }
+    .general-default-member input { width: 15px; height: 15px; margin: 0; accent-color: var(--brand); }
+    .member-avatar-mini { display: grid; width: 28px; height: 28px; place-items: center; border: 1px solid color-mix(in srgb, var(--member-color) 38%, var(--line)); border-radius: 50%; color: var(--member-color); background: color-mix(in srgb, var(--member-color) 12%, var(--surface-raised)); font-size: 9px; font-style: normal; font-weight: 750; }
+    .general-default-member > span:last-child { display: grid; min-width: 0; gap: 2px; }
+    .general-default-member strong,
+    .general-default-member small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .general-default-member strong { color: var(--ink); font-size: 11px; }
+    .general-default-member small { color: var(--faint); font-size: 9.5px; }
+    .general-default-lead { position: relative; display: grid; grid-template-columns: minmax(0, 1fr) minmax(188px, 236px); gap: 14px; align-items: center; margin: 0 8px 8px; padding: 11px 12px; border-radius: 9px; color: var(--muted); background: var(--workspace-surface-raised); }
+    .general-default-lead.is-open { z-index: 40; }
+    .general-default-lead > span { display: grid; gap: 2px; }
+    .general-default-lead strong { color: var(--ink); font-size: 11px; font-weight: 620; }
+    .general-default-lead small { color: var(--muted); font-size: 10px; font-weight: 400; }
+    .leader-picker { position: relative; min-width: 0; }
+    .leader-trigger { display: grid; width: 100%; min-height: 44px; grid-template-columns: 30px minmax(0, 1fr) 16px; align-items: center; gap: 9px; padding: 5px 9px; border: 1px solid var(--workspace-line-strong); border-radius: 8px; color: var(--ink); background: var(--surface); cursor: pointer; text-align: left; }
+    .leader-trigger:hover:not(:disabled),
+    .leader-trigger[aria-expanded="true"] { border-color: var(--control-line); background: var(--surface-hover); }
+    .leader-trigger:disabled { cursor: not-allowed; }
+    .leader-trigger .member-avatar-mini { width: 30px; height: 30px; }
+    .leader-selection { display: grid; min-width: 0; gap: 2px; }
+    .leader-selection strong,
+    .leader-selection small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .leader-selection small { color: var(--faint); font-size: 9.5px; }
+    .leader-chevron { width: 15px; height: 15px; color: var(--muted); transition: transform 140ms ease; }
+    .leader-trigger[aria-expanded="true"] .leader-chevron { transform: rotate(180deg); }
+    .leader-menu { position: absolute; z-index: 45; top: calc(100% + 6px); right: 0; left: 0; display: grid; gap: 3px; padding: 5px; border: 1px solid var(--workspace-line-strong); border-radius: 9px; background: var(--surface-raised); box-shadow: var(--shadow-menu); }
+    .leader-option { display: grid; min-width: 0; min-height: 46px; grid-template-columns: 30px minmax(0, 1fr) 16px; align-items: center; gap: 9px; padding: 6px 8px; border-radius: 7px; cursor: pointer; }
+    .leader-option:hover,
+    .leader-option.is-active { color: var(--workspace-steel-ink); background: var(--workspace-surface-selected); }
+    .leader-option > span { display: grid; min-width: 0; gap: 2px; }
+    .leader-option strong,
+    .leader-option small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .leader-option small { color: var(--faint); font-size: 9.5px; }
+    .leader-option-check { width: 15px; height: 15px; color: var(--brand-ink); opacity: 0; }
+    .leader-option[aria-selected="true"] .leader-option-check { opacity: 1; }
+    .general-save-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin: 0 8px 4px; padding: 9px 4px 5px; }
+    .general-draft-state { color: var(--muted); font-size: 10.5px; line-height: 1.5; }
+    .primary-button { display: inline-flex; min-height: 32px; align-items: center; justify-content: center; padding: 5px 10px; border: 1px solid var(--brand); border-radius: 6px; color: var(--brand-contrast); background: var(--brand); cursor: pointer; font-size: 10px; font-weight: 650; }
+    .primary-button:hover:not(:disabled) { background: var(--brand-hover); }
+    .primary-button:disabled { border-color: var(--line); color: var(--faint); background: var(--surface-muted); }
+    .general-one-click-setting { display: grid; gap: 8px; margin: 8px 8px 0; padding: 11px 12px; border-radius: 9px; background: var(--workspace-surface-raised); }
+    .general-one-click-row { position: relative; display: flex; min-height: 50px; align-items: center; justify-content: space-between; gap: 18px; }
+    .general-one-click-row > span { display: grid; min-width: 0; gap: 4px; }
+    .general-one-click-title { display: flex; align-items: center; gap: 7px; }
+    .general-one-click-title strong { color: var(--ink); font-size: 12px; }
+    .general-one-click-row > span > small { color: var(--muted); font-size: 10px; line-height: 1.45; }
+    .general-one-click-row > input { position: relative; width: 34px; height: 20px; flex: 0 0 34px; margin: 0; appearance: none; border: 1px solid var(--control-line); border-radius: 999px; background: var(--surface-muted); cursor: pointer; }
+    .general-one-click-row > input::after { position: absolute; top: 3px; left: 3px; width: 12px; height: 12px; border-radius: 50%; background: var(--muted); transition: transform 140ms ease, background-color 140ms ease; content: ""; }
+    .general-one-click-row > input:checked { border-color: var(--brand); background: var(--brand-soft); }
+    .general-one-click-row > input:checked::after { background: var(--brand); transform: translateX(14px); }
+    .general-help-anchor { position: relative; display: inline-grid; place-items: center; }
+    .general-help-mark { display: grid; width: 20px; height: 20px; padding: 0; place-items: center; border: 1px solid var(--line-strong); border-radius: 50%; color: var(--muted); background: var(--surface); cursor: help; }
+    .general-help-mark svg { width: 14px; height: 14px; }
+    .general-help-popover { position: absolute; z-index: 25; top: 28px; left: 0; display: grid; visibility: hidden; width: min(360px, calc(100vw - 360px)); gap: 9px; padding: 13px 14px; border: 1px solid var(--line-strong); border-radius: 8px; color: var(--ink); background: var(--surface-raised); box-shadow: var(--shadow-menu); opacity: 0; pointer-events: none; transform: translateY(-3px); transition: opacity 120ms ease, transform 120ms ease, visibility 120ms; }
+    .general-help-anchor:hover .general-help-popover,
+    .general-help-anchor:focus-within .general-help-popover { visibility: visible; opacity: 1; transform: translateY(0); }
+    .general-help-popover strong { font-size: 12px; }
+    .general-help-popover > span { color: var(--muted); font-size: 10.5px; line-height: 1.55; }
+    .window-row { display: flex; align-items: center; justify-content: space-between; gap: 24px; padding: 15px 17px; border-radius: 10px; background: var(--workspace-surface-raised); }
+    .window-row p { max-width: 540px; margin: 0; color: var(--muted); font-size: 10.5px; line-height: 1.55; }
+
+    .app-menu { display: grid; gap: 3px; padding: 4px 0 16px; }
+    .jump-field { display: flex; min-height: 34px; align-items: center; justify-content: space-between; margin: 0 2px 22px; padding: 0 9px; border: 1px solid var(--line); border-radius: 7px; color: var(--faint); background: var(--surface-raised); font-size: 10px; }
+    .jump-field kbd { padding: 2px 5px; border: 1px solid var(--line); border-radius: 4px; color: var(--muted); background: var(--surface-subtle); font: 600 9px/1.1 ui-monospace, SFMono-Regular, Menlo, monospace; }
+    .project-list { display: grid; gap: 3px; }
+    .project-row { min-height: 34px; padding-left: 9px; }
+    .project-row.child { padding-left: 28px; }
+    .project-row.active { color: var(--brand-ink); background: var(--surface-selected); }
+    .sidebar-settings { margin-top: 8px; border-top: 1px solid var(--line); border-radius: 0; padding-top: 10px; }
+
+    .conversation-main { display: grid; min-width: 0; min-height: 0; grid-template-rows: 50px minmax(0, 1fr); background: var(--conversation-surface); }
+    .conversation-topbar { display: flex; min-width: 0; align-items: center; justify-content: space-between; gap: 16px; padding: 0 18px; border-bottom: 1px solid var(--line); background: var(--surface); }
+    .conversation-title { display: flex; min-width: 0; align-items: center; gap: 7px; }
+    .conversation-title span { color: var(--faint); font-size: 10.5px; }
+    .conversation-title strong { overflow: hidden; color: var(--ink); font-size: 12.5px; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
+    .day-badge { padding: 3px 6px; border-radius: 5px; color: var(--faint); background: var(--surface-muted); font-size: 9px; }
+    .topbar-action { display: grid; width: 32px; height: 32px; place-items: center; border: 0; border-radius: 6px; color: var(--muted); background: transparent; cursor: pointer; }
+    .topbar-action:hover { color: var(--ink); background: var(--surface-muted); }
+
+    .conversation-columns { display: grid; min-width: 0; min-height: 0; grid-template-columns: minmax(0, 1fr) 258px; }
+    .conversation-stage { position: relative; display: grid; min-width: 0; min-height: 0; grid-template-rows: minmax(0, 1fr) auto; overflow: hidden; }
+    .reading-plane { position: relative; min-width: 0; min-height: 0; overflow: hidden; background: var(--conversation-surface); }
+    .timeline { height: 100%; overflow: auto; padding: 30px clamp(28px, 5vw, 72px) 36px; }
+    .timeline-track { width: min(760px, 100%); margin: 0 auto; }
+    .day-divider { display: flex; align-items: center; gap: 12px; margin: 0 0 20px; color: var(--faint); font: 600 9px/1.3 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: .07em; text-transform: uppercase; }
+    .day-divider::before, .day-divider::after { height: 1px; flex: 1; background: var(--line); content: ""; }
+    .message { display: grid; grid-template-columns: 32px minmax(0, 1fr); gap: 10px; margin: 0 0 22px; }
+    .avatar { display: grid; width: 30px; height: 30px; place-items: center; border: 1px solid var(--line-strong); border-radius: 50%; color: var(--identity); background: color-mix(in srgb, var(--identity) 12%, var(--surface-raised)); font-size: 9px; font-weight: 760; }
+    .message-body { min-width: 0; }
+    .message-meta { display: flex; align-items: baseline; gap: 7px; margin-bottom: 5px; }
+    .message-meta strong { color: var(--ink); font-size: 11px; font-weight: 650; }
+    .message-meta span { color: var(--faint); font: 500 9px/1.3 ui-monospace, SFMono-Regular, Menlo, monospace; }
+    .message-body p { max-width: 68ch; margin: 0; color: var(--ink); font-size: 11.5px; line-height: 1.72; }
+    .message-body p + p { margin-top: 7px; }
+
+    .view-tools { position: absolute; z-index: 18; top: 10px; right: 12px; display: flex; align-items: flex-start; gap: 6px; }
+    .view-switcher { display: flex; gap: 2px; padding: 3px; border: 1px solid var(--line-strong); border-radius: 8px; background: color-mix(in srgb, var(--surface-raised) 94%, transparent); box-shadow: var(--shadow-float); }
+    .view-switcher button { display: inline-flex; min-width: 48px; min-height: 30px; align-items: center; justify-content: center; gap: 5px; padding: 0 8px; border: 0; border-radius: 5px; color: var(--muted); background: transparent; cursor: pointer; font-size: 10px; font-weight: 650; }
+    .view-switcher button:hover { color: var(--ink); background: var(--surface-muted); }
+    .view-switcher button[aria-pressed="true"] { color: var(--brand-ink); background: var(--brand-soft); }
+    .view-switcher button[aria-disabled="true"] { color: var(--faint); cursor: not-allowed; opacity: .68; }
+    .view-switcher button[aria-disabled="true"]:hover { color: var(--faint); background: transparent; }
+    .view-switcher button svg { width: 13px; height: 13px; }
+    .map-disabled-popover { position: absolute; top: 42px; right: 0; display: grid; width: 290px; gap: 11px; padding: 13px; border: 1px solid var(--line-strong); border-radius: 9px; color: var(--muted); background: var(--surface-raised); box-shadow: var(--shadow-float); }
+    .map-disabled-popover::before { position: absolute; top: -5px; right: 24px; width: 9px; height: 9px; border-top: 1px solid var(--line-strong); border-left: 1px solid var(--line-strong); background: var(--surface-raised); content: ""; transform: rotate(45deg); }
+    .popover-heading { display: grid; grid-template-columns: 18px minmax(0, 1fr); gap: 8px; }
+    .popover-heading > svg { width: 16px; height: 16px; margin-top: 1px; color: var(--faint); }
+    .popover-heading div { display: grid; gap: 4px; }
+    .popover-heading strong { color: var(--ink); font-size: 11px; font-weight: 650; }
+    .popover-heading p { margin: 0; font-size: 10px; line-height: 1.5; }
+    .popover-actions { display: flex; justify-content: flex-end; }
+
+    .map-plane { position: absolute; inset: 0; overflow: hidden; background: #243a38; }
+    .map-plane::after { position: absolute; inset: 0; background: linear-gradient(180deg, var(--map-scrim), rgb(7 14 18 / 18%)); content: ""; pointer-events: none; }
+    .map-image { width: 100%; height: 100%; object-fit: cover; object-position: center; filter: saturate(.9) contrast(.96); }
+    .map-caption { position: absolute; z-index: 3; right: 10px; bottom: 10px; left: 10px; display: flex; min-height: 30px; align-items: center; gap: 8px; padding: 6px 9px; border: 1px solid rgb(231 236 239 / 30%); border-radius: 7px; color: #f2f5f6; background: rgb(15 22 27 / 78%); font-size: 10px; backdrop-filter: blur(8px); }
+    .map-caption strong { flex: 0 0 auto; color: #cfe0eb; font-weight: 680; }
+    .map-agent { position: absolute; z-index: 5; display: grid; width: 44px; height: 44px; place-items: center; border: 2px solid rgb(255 255 255 / 90%); border-radius: 50%; color: #fff; background: var(--identity); box-shadow: 0 5px 14px rgb(0 0 0 / 28%); font-size: 10px; font-weight: 760; }
+    .map-agent::after { position: absolute; top: 46px; left: 50%; padding: 2px 6px; border: 1px solid rgb(255 255 255 / 28%); border-radius: 5px; color: #fff; background: rgb(15 22 27 / 76%); content: attr(data-name); transform: translateX(-50%); font-size: 9px; font-weight: 650; white-space: nowrap; }
+    .map-agent.a { top: 30%; left: 28%; --identity: var(--identity-1); }
+    .map-agent.b { top: 52%; left: 51%; --identity: var(--identity-2); }
+    .map-agent.c { top: 35%; left: 68%; --identity: var(--identity-3); }
+    .map-agent.d { top: 68%; left: 75%; --identity: var(--identity-4); }
+
+    .composer { display: grid; gap: 6px; padding: 11px 18px 15px; border-top: 1px solid var(--line); background: var(--surface); }
+    .composer-route { width: min(860px, 100%); margin: 0 auto; color: var(--faint); font-size: 9px; }
+    .composer-box { display: flex; width: min(860px, 100%); min-height: 62px; align-items: flex-end; gap: 12px; margin: 0 auto; padding: 10px 10px 9px 12px; border: 1px solid var(--control-line); border-radius: 9px; background: var(--input); }
+    .composer-placeholder { flex: 1 1 auto; align-self: flex-start; color: var(--muted); font-size: 11px; line-height: 1.5; }
+    .send-button { min-width: 48px; min-height: 30px; border: 0; border-radius: 6px; color: var(--brand-contrast); background: var(--brand); cursor: pointer; font-size: 10px; font-weight: 680; }
+
+    .inspector { display: grid; min-width: 0; min-height: 0; grid-template-rows: auto minmax(0, 1fr) auto; border-left: 1px solid var(--line); background: var(--surface); }
+    .inspector-tabs { display: grid; grid-template-columns: 1fr 1fr; min-height: 42px; border-bottom: 1px solid var(--line); }
+    .inspector-tabs button { position: relative; border: 0; color: var(--muted); background: transparent; font-size: 10px; font-weight: 620; }
+    .inspector-tabs button.active { color: var(--ink); }
+    .inspector-tabs button.active::after { position: absolute; right: 8px; bottom: 0; left: 8px; height: 2px; background: var(--brand); content: ""; }
+    .inspector-body { min-height: 0; overflow: auto; padding: 14px 12px; }
+    .inspector-body h2 { margin: 0 0 3px; font-size: 11px; font-weight: 650; }
+    .inspector-body > p { margin: 0 0 12px; color: var(--faint); font-size: 9px; }
+    .member-row { display: grid; grid-template-columns: 28px minmax(0, 1fr) auto; align-items: center; gap: 8px; padding: 10px 0; border-top: 1px solid var(--line); }
+    .member-row:first-of-type { border-top: 0; }
+    .member-row .avatar { width: 27px; height: 27px; }
+    .member-row > span { display: grid; min-width: 0; gap: 2px; }
+    .member-row strong { font-size: 10px; font-weight: 650; }
+    .member-row small, .member-row em { color: var(--faint); font-size: 8.5px; font-style: normal; }
+    .inspector-footer { padding: 8px 12px; border-top: 1px solid var(--line); color: var(--faint); font: 500 8.5px/1.3 ui-monospace, SFMono-Regular, Menlo, monospace; }
+
+    .toast { position: fixed; z-index: 80; right: 18px; bottom: 18px; display: flex; min-height: 38px; align-items: center; gap: 8px; padding: 9px 12px; border: 1px solid var(--line-strong); border-radius: 8px; color: var(--ink); background: var(--surface-raised); box-shadow: var(--shadow-float); font-size: 10.5px; }
+    .toast svg { width: 14px; height: 14px; color: var(--success); }
+
+    @media (max-width: 1180px) {
+      .conversation-columns { grid-template-columns: minmax(0, 1fr); }
+      .inspector { display: none; }
+    }
+    @media (max-width: 1040px) {
+      :root { --rail-width: 238px; }
+      .prototype-toolbar { grid-template-columns: minmax(180px, 1fr) auto auto; }
+      .prototype-heading span { display: none; }
+      .settings-panel { width: calc(100% - 32px); }
+      .map-preference-main { gap: 14px; }
+    }
+    @media (max-width: 860px) {
+      :root { --rail-width: 216px; }
+      .prototype-toolbar { grid-template-columns: auto 1fr auto; }
+      .prototype-heading { display: none; }
+      .prototype-tabs { justify-self: start; }
+      .lab-button span { display: none; }
+      .settings-section { grid-template-columns: minmax(0, 1fr); gap: 13px; padding: 22px 0; }
+      .section-heading p { display: none; }
+      .settings-page-header { align-items: flex-start; flex-direction: column; gap: 12px; }
+      .save-state { align-self: flex-start; }
+      .startup-options { grid-template-columns: minmax(0, 1fr); }
+      .general-default-member-list { grid-template-columns: minmax(0, 1fr); }
+      .general-default-lead { grid-template-columns: minmax(0, 1fr); gap: 8px; }
+      .general-save-row { align-items: stretch; flex-direction: column; }
+      .general-save-row > button { width: fit-content; }
+      .timeline { padding-right: 24px; padding-left: 24px; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
+    }
+    @media (forced-colors: active) {
+      .switch-track, .view-switcher, .map-disabled-popover, .quiet-button, .composer-box, .leader-trigger, .leader-menu { border: 1px solid ButtonText; }
+      .switch-control input:checked + .switch-track { background: Highlight; }
+      .settings-menu button.active::before, .project-row.active::before { background: Highlight; }
+    }
+  </style>
+</head>
+<body>
+  <!-- Standalone design-review artifact. All people, messages and state are synthetic. -->
+  <svg class="icon-sprite" aria-hidden="true">
+    <symbol id="icon-logo" viewBox="0 0 24 24">
+      <path d="m12 2 1.35 5.45L18.8 8.8l-5.45 1.35L12 15.6l-1.35-5.45L5.2 8.8l5.45-1.35Z" />
+      <path d="M4.5 20c2.2-1.7 4.7-2.55 7.5-2.55s5.3.85 7.5 2.55" />
+      <circle cx="12" cy="17.5" r=".8" fill="var(--ember)" stroke="none" />
+    </symbol>
+    <symbol id="icon-back" viewBox="0 0 24 24"><path d="m15 18-6-6 6-6" /></symbol>
+    <symbol id="icon-settings" viewBox="0 0 24 24"><path d="M4 7h10M18 7h2M4 17h2M10 17h10" /><circle cx="16" cy="7" r="2" /><circle cx="8" cy="17" r="2" /></symbol>
+    <symbol id="icon-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4" /><path d="M12 2v2m0 16v2M4.93 4.93l1.42 1.42m11.3 11.3 1.42 1.42M2 12h2m16 0h2M4.93 19.07l1.42-1.42m11.3-11.3 1.42-1.42" /></symbol>
+    <symbol id="icon-moon" viewBox="0 0 24 24"><path d="M21 12.8A9 9 0 1 1 11.2 3 7 7 0 0 0 21 12.8Z" /></symbol>
+    <symbol id="icon-bell" viewBox="0 0 24 24"><path d="M6.5 10.5a5.5 5.5 0 0 1 11 0c0 5 2 5.2 2 6.5h-15c0-1.3 2-1.5 2-6.5Z" /><path d="M9.7 19a2.5 2.5 0 0 0 4.6 0" /></symbol>
+    <symbol id="icon-spark" viewBox="0 0 24 24"><path d="m12 3 1.4 5.6L19 10l-5.6 1.4L12 17l-1.4-5.6L5 10l5.6-1.4Z" /><path d="m19 16 .7 2.3L22 19l-2.3.7L19 22l-.7-2.3L16 19l2.3-.7Z" /></symbol>
+    <symbol id="icon-plug" viewBox="0 0 24 24"><path d="M8 12h8v2a4 4 0 0 1-8 0Zm2-7v7m4-7v7M6 8h12M12 18v3" /></symbol>
+    <symbol id="icon-terminal" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2" /><path d="m7 9 3 3-3 3m6 0h4" /></symbol>
+    <symbol id="icon-chart" viewBox="0 0 24 24"><path d="M4 20V10m5 10V4m6 16v-7m5 7V7" /></symbol>
+    <symbol id="icon-health" viewBox="0 0 24 24"><path d="M3 12h4l2-6 4 12 2-6h6" /></symbol>
+    <symbol id="icon-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" /><path d="M12 11v6m0-10h.01" /></symbol>
+    <symbol id="icon-help" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" /><path d="M9.8 9a2.4 2.4 0 0 1 4.65.8c0 1.8-2.45 2.05-2.45 3.7M12 17h.01" /></symbol>
+    <symbol id="icon-map" viewBox="0 0 24 24"><path d="m3 6 6-3 6 3 6-3v15l-6 3-6-3-6 3Z" /><path d="M9 3v15m6-12v15" /></symbol>
+    <symbol id="icon-chat" viewBox="0 0 24 24"><path d="M4 5h16v11H9l-5 4Z" /></symbol>
+    <symbol id="icon-lock" viewBox="0 0 24 24"><rect x="5" y="10" width="14" height="10" rx="2" /><path d="M8 10V7a4 4 0 0 1 8 0v3" /></symbol>
+    <symbol id="icon-check" viewBox="0 0 24 24"><path d="m5 12 4 4L19 6" /></symbol>
+    <symbol id="icon-chevron-down" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6" /></symbol>
+    <symbol id="icon-arrow" viewBox="0 0 24 24"><path d="M5 12h14m-5-5 5 5-5 5" /></symbol>
+    <symbol id="icon-reset" viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 3-6.7L3 8" /><path d="M3 3v5h5" /></symbol>
+    <symbol id="icon-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14" /></symbol>
+    <symbol id="icon-users" viewBox="0 0 24 24"><circle cx="9" cy="8" r="3" /><path d="M3 20c0-4 2.4-6 6-6s6 2 6 6" /><path d="M16 5.5a3 3 0 0 1 0 5.5m1 3c2.6.3 4 2.1 4 5" /></symbol>
+    <symbol id="icon-memory" viewBox="0 0 24 24"><path d="M7 4h10a2 2 0 0 1 2 2v14H7a3 3 0 0 1-3-3V7a3 3 0 0 1 3-3Z" /><path d="M7 4v16M10 8h5" /></symbol>
+    <symbol id="icon-folder" viewBox="0 0 24 24"><path d="M3 6h7l2 2h9v11H3Z" /></symbol>
+    <symbol id="icon-panel" viewBox="0 0 24 24"><path d="M4 4h16v16H4Z" /><path d="M15 4v16" /></symbol>
+  </svg>
+
+  <div class="prototype-root">
+    <header class="prototype-toolbar">
+      <div class="prototype-heading">
+        <strong>通用设置 · 世界地图开关</strong>
+        <span id="prototype-summary">会话页可切换到地图</span>
+      </div>
+      <div class="prototype-tabs" role="tablist" aria-label="选择评审页面">
+        <button id="tab-settings" type="button" role="tab" aria-selected="true" aria-controls="screen-settings">
+          <svg class="icon" aria-hidden="true"><use href="#icon-settings" /></svg>通用设置
+        </button>
+        <button id="tab-conversation" type="button" role="tab" aria-selected="false" aria-controls="screen-conversation">
+          <svg class="icon" aria-hidden="true"><use href="#icon-chat" /></svg>会话页
+        </button>
+      </div>
+      <div class="prototype-actions">
+        <button class="lab-button" id="theme-toggle" type="button" aria-label="切换到夜间主题">
+          <svg class="icon" aria-hidden="true"><use href="#icon-moon" /></svg><span>夜间</span>
+        </button>
+        <button class="lab-button" id="reset-prototype" type="button" aria-label="重置交互稿">
+          <svg class="icon" aria-hidden="true"><use href="#icon-reset" /></svg><span>重置</span>
+        </button>
+      </div>
+    </header>
+
+    <main class="product-frame">
+      <section class="product-screen" id="screen-settings" role="tabpanel" aria-labelledby="tab-settings">
+        <div class="app-shell">
+          <aside class="app-sidebar" aria-label="设置分类">
+            <div class="sidebar-drag"><div class="traffic-lights" aria-hidden="true"><i></i><i></i><i></i></div></div>
+            <div class="brand-row"><span class="brand-mark"><svg class="icon" aria-hidden="true"><use href="#icon-logo" /></svg></span><strong>Rovai AI</strong></div>
+            <div class="settings-sidebar-heading">
+              <button class="settings-back" id="settings-back" type="button"><svg class="icon" aria-hidden="true"><use href="#icon-back" /></svg><strong>返回 App</strong></button>
+              <div class="settings-sidebar-title"><strong>设置</strong><span>应用级偏好与本机能力</span></div>
+            </div>
+            <nav class="settings-menu" aria-label="设置页面">
+              <section class="settings-group" aria-labelledby="settings-group-app"><h2 id="settings-group-app">应用</h2>
+                <button class="active" type="button" aria-current="page"><svg class="icon" aria-hidden="true"><use href="#icon-settings" /></svg><strong>通用</strong></button>
+                <button type="button"><svg class="icon" aria-hidden="true"><use href="#icon-sun" /></svg><strong>外观</strong></button>
+                <button type="button"><svg class="icon" aria-hidden="true"><use href="#icon-bell" /></svg><strong>提醒</strong></button>
+              </section>
+              <section class="settings-group" aria-labelledby="settings-group-capability"><h2 id="settings-group-capability">能力</h2>
+                <button type="button"><svg class="icon" aria-hidden="true"><use href="#icon-spark" /></svg><strong>Skill</strong></button>
+                <button type="button"><svg class="icon" aria-hidden="true"><use href="#icon-plug" /></svg><strong>MCP</strong></button>
+                <button type="button"><svg class="icon" aria-hidden="true"><use href="#icon-terminal" /></svg><strong>Agent 运行时</strong></button>
+                <button type="button"><svg class="icon" aria-hidden="true"><use href="#icon-chart" /></svg><strong>运行监控</strong></button>
+              </section>
+              <section class="settings-group" aria-labelledby="settings-group-support"><h2 id="settings-group-support">支持</h2>
+                <button type="button"><svg class="icon" aria-hidden="true"><use href="#icon-health" /></svg><strong>诊断与修复</strong></button>
+                <button type="button"><svg class="icon" aria-hidden="true"><use href="#icon-info" /></svg><strong>关于与更新</strong></button>
+              </section>
+            </nav>
+          </aside>
+
+          <div class="settings-content">
+            <div class="settings-panel" id="settings-panel">
+              <header class="settings-page-header">
+                <div class="settings-page-copy">
+                  <p class="eyebrow">Settings / General</p>
+                  <h1>通用</h1>
+                  <p>设置 Rovai AI 的启动位置、新对话与窗口行为。</p>
+                </div>
+                <span class="save-state" id="save-state" role="status">当前设置已保存</span>
+              </header>
+
+              <div class="settings-body">
+                <section class="settings-section" aria-labelledby="startup-heading">
+                  <div class="section-heading"><h2 id="startup-heading">启动</h2><p>稳定位置偏好</p></div>
+                  <div class="section-body">
+                    <fieldset class="startup-options"><legend>启动后打开</legend>
+                      <label class="radio-option"><input type="radio" name="startup" checked><span><strong>上次使用的位置</strong><small>恢复最近打开的对话、队员页或记忆页。</small></span></label>
+                      <label class="radio-option"><input type="radio" name="startup"><span><strong>快速对话</strong><small>每次启动都从快速对话首页开始。</small></span></label>
+                    </fieldset>
+                  </div>
+                </section>
+
+                <section class="settings-section" aria-labelledby="new-conversation-heading">
+                  <div class="section-heading"><h2 id="new-conversation-heading">新对话</h2><p>默认队员与创建方式</p></div>
+                  <div class="section-body">
+                    <div class="general-configurator">
+                      <div class="general-config-head">
+                        <div><h3>默认队员</h3><p>选择创建新对话时默认加入的队员。</p></div>
+                        <span id="selected-member-count">已选 3 位</span>
+                      </div>
+                      <div class="general-default-member-list" role="group" aria-label="默认队员">
+                        <label class="general-default-member" data-member-id="zhi" data-member-name="芝士" data-member-role="鉴定士" style="--member-color: var(--identity-1)"><input class="default-member-checkbox" type="checkbox" checked><i class="member-avatar-mini">芝</i><span><strong>芝士</strong><small>鉴定士</small></span></label>
+                        <label class="general-default-member" data-member-id="ding" data-member-name="叮叮" data-member-role="游学者" style="--member-color: var(--identity-2)"><input class="default-member-checkbox" type="checkbox" checked><i class="member-avatar-mini">叮</i><span><strong>叮叮</strong><small>游学者</small></span></label>
+                        <label class="general-default-member" data-member-id="gu" data-member-name="咕咕" data-member-role="巡夜人" style="--member-color: var(--identity-3)"><input class="default-member-checkbox" type="checkbox" checked><i class="member-avatar-mini">咕</i><span><strong>咕咕</strong><small>巡夜人</small></span></label>
+                        <label class="general-default-member" data-member-id="tu" data-member-name="小兔" data-member-role="绘图师" style="--member-color: var(--identity-4)"><input class="default-member-checkbox" type="checkbox"><i class="member-avatar-mini">兔</i><span><strong>小兔</strong><small>绘图师</small></span></label>
+                      </div>
+                      <div class="general-default-lead" id="default-lead-field">
+                        <span><strong id="default-lead-label">默认队长</strong><small id="default-lead-hint">队长必须是已选择的默认队员。</small></span>
+                        <div class="leader-picker" id="default-lead-picker">
+                          <button class="leader-trigger" id="default-lead" type="button" role="combobox" aria-haspopup="listbox" aria-controls="default-lead-listbox" aria-expanded="false" aria-labelledby="default-lead-label default-lead-name" aria-describedby="default-lead-hint">
+                            <i class="member-avatar-mini" id="default-lead-avatar" style="--member-color: var(--identity-2)">叮</i>
+                            <span class="leader-selection"><strong id="default-lead-name">叮叮</strong><small id="default-lead-role">游学者</small></span>
+                            <svg class="icon leader-chevron" aria-hidden="true"><use href="#icon-chevron-down" /></svg>
+                          </button>
+                          <div class="leader-menu" id="default-lead-listbox" role="listbox" aria-label="可选默认队长" hidden></div>
+                        </div>
+                      </div>
+                      <div class="general-save-row">
+                        <span class="general-draft-state" id="default-draft-state" role="status">默认配置已保存。</span>
+                        <button class="primary-button" id="save-defaults" type="button" disabled>保存默认配置</button>
+                      </div>
+                      <div class="general-one-click-setting">
+                        <div class="general-one-click-row">
+                          <span>
+                            <span class="general-one-click-title">
+                              <strong>一键创建新对话</strong>
+                              <span class="general-help-anchor">
+                                <button class="general-help-mark" type="button" aria-label="了解一键创建如何工作"><svg class="icon" aria-hidden="true"><use href="#icon-help" /></svg></button>
+                                <span class="general-help-popover" role="tooltip"><strong>一键创建如何工作？</strong><span>开启后，新对话入口会立即创建空对话，不再询问项目、队员、队长或名称。</span><span>队员和队长始终使用本页保存的默认配置。</span><span>关闭此开关即可恢复创建弹窗。</span></span>
+                              </span>
+                            </span>
+                            <small>开启后，新对话入口将使用入口对应的项目和已保存的默认配置直接创建。</small>
+                          </span>
+                          <input id="one-click-enabled" type="checkbox" role="switch" aria-label="一键创建新对话">
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </section>
+
+                <section class="settings-section" aria-labelledby="conversation-heading">
+                  <div class="section-heading"><h2 id="conversation-heading">会话</h2><p>阅读面与沉浸视图</p></div>
+                  <div class="section-body">
+                    <div class="map-preference">
+                      <div class="map-preference-main">
+                        <div class="map-preference-copy">
+                          <div class="map-preference-title"><svg class="icon" aria-hidden="true"><use href="#icon-map" /></svg><strong>世界地图</strong></div>
+                          <p id="map-preference-help">在 Camp 会话中显示“地图”视图，可随时在会话时间线与沉浸世界地图之间切换。</p>
+                        </div>
+                        <label class="switch-control" title="启用世界地图">
+                          <input id="map-enabled" type="checkbox" role="switch" aria-label="启用世界地图" aria-describedby="map-preference-help" checked>
+                          <span class="switch-track" aria-hidden="true"></span>
+                        </label>
+                      </div>
+                    </div>
+                  </div>
+                </section>
+
+                <section class="settings-section" aria-labelledby="window-heading">
+                  <div class="section-heading"><h2 id="window-heading">窗口</h2><p>本机显示位置</p></div>
+                  <div class="section-body window-row"><p>Rovai AI 会自动保存窗口大小和位置，并确保下次打开时窗口仍位于可见的显示器区域。</p><button class="quiet-button" type="button">重置窗口大小与位置</button></div>
+                </section>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="product-screen" id="screen-conversation" role="tabpanel" aria-labelledby="tab-conversation" hidden>
+        <div class="app-shell">
+          <aside class="app-sidebar" aria-label="全局导航">
+            <div class="sidebar-drag"><div class="traffic-lights" aria-hidden="true"><i></i><i></i><i></i></div></div>
+            <div class="brand-row"><span class="brand-mark"><svg class="icon" aria-hidden="true"><use href="#icon-logo" /></svg></span><strong>Rovai AI</strong></div>
+            <nav class="app-menu" aria-label="主要页面">
+              <button type="button"><svg class="icon" aria-hidden="true"><use href="#icon-plus" /></svg><strong>新对话</strong></button>
+              <button type="button"><svg class="icon" aria-hidden="true"><use href="#icon-users" /></svg><strong>队员</strong></button>
+              <button type="button"><svg class="icon" aria-hidden="true"><use href="#icon-memory" /></svg><strong>记忆</strong></button>
+            </nav>
+            <div class="jump-field"><span>跳转到对话…</span><kbd>⌘K</kbd></div>
+            <div class="project-label">项目</div>
+            <div class="project-list">
+              <button class="project-row" type="button"><svg class="icon" aria-hidden="true"><use href="#icon-folder" /></svg><strong>rovai-ai</strong></button>
+              <button class="project-row" type="button"><svg class="icon" aria-hidden="true"><use href="#icon-folder" /></svg><strong>快速对话</strong></button>
+              <button class="project-row child" type="button"><span></span><strong>篝火会议</strong></button>
+              <button class="project-row child" type="button"><span></span><strong>双人追问</strong></button>
+              <button class="project-row child active" type="button" aria-current="page"><span></span><strong>初次集结</strong></button>
+            </div>
+            <div class="sidebar-spacer"></div>
+            <button class="sidebar-settings" id="conversation-settings" type="button"><svg class="icon" aria-hidden="true"><use href="#icon-settings" /></svg><strong>设置</strong></button>
+          </aside>
+
+          <div class="conversation-main">
+            <header class="conversation-topbar">
+              <div class="conversation-title"><span>快速对话</span><span>›</span><strong>初次集结</strong><span class="day-badge">第 1 天</span></div>
+              <button class="topbar-action" type="button" aria-label="切换 Inspector"><svg class="icon" aria-hidden="true"><use href="#icon-panel" /></svg></button>
+            </header>
+            <div class="conversation-columns">
+              <div class="conversation-stage">
+                <div class="reading-plane">
+                  <div class="view-tools">
+                    <div class="view-switcher" role="group" aria-label="会话区视图">
+                      <button id="conversation-view-button" type="button" aria-pressed="true"><svg class="icon" aria-hidden="true"><use href="#icon-chat" /></svg>会话</button>
+                      <button id="map-view-button" type="button" aria-pressed="false"><svg class="icon map-button-icon" aria-hidden="true"><use href="#icon-map" /></svg><span>地图</span></button>
+                    </div>
+                    <div class="map-disabled-popover" id="map-disabled-popover" role="dialog" aria-labelledby="map-disabled-title" hidden>
+                      <div class="popover-heading"><svg class="icon" aria-hidden="true"><use href="#icon-lock" /></svg><div><strong id="map-disabled-title">世界地图已关闭</strong><p>可在“设置 → 通用 → 会话”中重新开启。当前会话内容不会受到影响。</p></div></div>
+                      <div class="popover-actions"><button class="quiet-button" id="open-map-settings" type="button">前往通用设置<svg class="icon" aria-hidden="true"><use href="#icon-arrow" /></svg></button></div>
+                    </div>
+                  </div>
+
+                  <div class="timeline" id="timeline-view">
+                    <div class="timeline-track">
+                      <div class="day-divider">8月28日 周五 · Day 1</div>
+                      <article class="message" style="--identity: var(--brand)"><div class="avatar">你</div><div class="message-body"><div class="message-meta"><strong>你</strong><span>16:47</span></div><p><strong>@所有队员</strong> 大家报个到，介绍一下自己。</p></div></article>
+                      <article class="message" style="--identity: var(--identity-1)"><div class="avatar">芝</div><div class="message-body"><div class="message-meta"><strong>芝士</strong><span>Claude Code · 16:47</span></div><p>报到！我是芝士，团队里的鉴定士。</p><p>我负责文档、方案与代码评审，会检查事实准确性、结构完整性、边界条件与潜在风险。</p></div></article>
+                      <article class="message" style="--identity: var(--identity-2)"><div class="avatar">叮</div><div class="message-body"><div class="message-meta"><strong>叮叮</strong><span>Codex CLI · 16:47</span></div><p>我是队里的游学者，负责理解需求、调研项目、梳理方案，并把结果推进到可验证的交付。</p></div></article>
+                      <article class="message" style="--identity: var(--identity-3)"><div class="avatar">咕</div><div class="message-body"><div class="message-meta"><strong>咕咕</strong><span>Antigravity · 16:48</span></div><p>我担任巡夜人，重点检查边界、异常失败路径和可重复验证的结果。</p></div></article>
+                    </div>
+                  </div>
+
+                  <div class="map-plane" id="map-view" aria-label="会话世界地图" hidden>
+                    <img class="map-image" src="../../../apps/desktop/src/renderer/src/assets/world-map/harbor-city-2k.webp" width="2560" height="1440" decoding="async" alt="港湾城市协作世界地图">
+                    <span class="map-agent a" data-name="芝士">芝</span>
+                    <span class="map-agent b" data-name="叮叮">叮</span>
+                    <span class="map-agent c" data-name="咕咕">咕</span>
+                    <span class="map-agent d" data-name="小兔">兔</span>
+                    <div class="map-caption"><strong>环境动态</strong><span>海风沿着港湾城的石阶向北，协作公会的灯刚刚亮起。</span></div>
+                  </div>
+                </div>
+                <div class="composer"><div class="composer-route">默认由 Lead · 叮叮接收</div><div class="composer-box"><span class="composer-placeholder">和队伍继续前行：补充线索、调整方向或布置任务…</span><button class="send-button" type="button">发送</button></div></div>
+              </div>
+
+              <aside class="inspector" aria-label="会话 Inspector">
+                <div class="inspector-tabs"><button class="active" type="button">队员 4</button><button type="button">任务 0</button></div>
+                <div class="inspector-body"><h2>协作队员</h2><p>4 位在队 · 0 位暂停</p>
+                  <div class="member-row"><div class="avatar" style="--identity: var(--identity-1)">芝</div><span><strong>芝士</strong><small>鉴定士</small></span><em>在线</em></div>
+                  <div class="member-row"><div class="avatar" style="--identity: var(--identity-2)">叮</div><span><strong>叮叮</strong><small>游学者 · 队长</small></span><em>在线</em></div>
+                  <div class="member-row"><div class="avatar" style="--identity: var(--identity-3)">咕</div><span><strong>咕咕</strong><small>巡夜人</small></span><em>在线</em></div>
+                  <div class="member-row"><div class="avatar" style="--identity: var(--identity-4)">兔</div><span><strong>小兔</strong><small>绘图师</small></span><em>在线</em></div>
+                </div>
+                <div class="inspector-footer">run — · seq 5688</div>
+              </aside>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <div class="toast" id="toast" role="status" aria-live="polite" hidden><svg class="icon" aria-hidden="true"><use href="#icon-check" /></svg><span></span></div>
+  <div class="sr-only" id="announcement" aria-live="polite"></div>
+
+  <script>
+    const root = document.documentElement
+    const screens = {
+      settings: document.getElementById('screen-settings'),
+      conversation: document.getElementById('screen-conversation')
+    }
+    const tabs = {
+      settings: document.getElementById('tab-settings'),
+      conversation: document.getElementById('tab-conversation')
+    }
+    const mapSwitch = document.getElementById('map-enabled')
+    const settingsPanel = document.getElementById('settings-panel')
+    const saveState = document.getElementById('save-state')
+    const prototypeSummary = document.getElementById('prototype-summary')
+    const defaultMemberCheckboxes = [...document.querySelectorAll('.default-member-checkbox')]
+    const selectedMemberCount = document.getElementById('selected-member-count')
+    const defaultLeadField = document.getElementById('default-lead-field')
+    const defaultLeadPicker = document.getElementById('default-lead-picker')
+    const defaultLead = document.getElementById('default-lead')
+    const defaultLeadListbox = document.getElementById('default-lead-listbox')
+    const defaultLeadAvatar = document.getElementById('default-lead-avatar')
+    const defaultLeadName = document.getElementById('default-lead-name')
+    const defaultLeadRole = document.getElementById('default-lead-role')
+    const defaultDraftState = document.getElementById('default-draft-state')
+    const saveDefaultsButton = document.getElementById('save-defaults')
+    const oneClickSwitch = document.getElementById('one-click-enabled')
+    const conversationButton = document.getElementById('conversation-view-button')
+    const mapButton = document.getElementById('map-view-button')
+    const timelineView = document.getElementById('timeline-view')
+    const mapView = document.getElementById('map-view')
+    const disabledPopover = document.getElementById('map-disabled-popover')
+    const toast = document.getElementById('toast')
+    const announcement = document.getElementById('announcement')
+    const themeToggle = document.getElementById('theme-toggle')
+    const defaultMembers = defaultMemberCheckboxes.map(checkbox => {
+      const item = checkbox.closest('.general-default-member')
+      return {
+        id: item.dataset.memberId,
+        name: item.dataset.memberName,
+        role: item.dataset.memberRole,
+        avatar: item.querySelector('.member-avatar-mini').textContent.trim(),
+        color: item.style.getPropertyValue('--member-color').trim(),
+        checkbox
+      }
+    })
+
+    const state = {
+      productView: 'settings',
+      mapEnabled: true,
+      conversationView: 'conversation',
+      theme: 'day',
+      defaultLeadId: 'ding',
+      leadMenuOpen: false,
+      activeLeadIndex: 0,
+      saveTimer: null,
+      defaultsTimer: null,
+      toastTimer: null
+    }
+
+    function iconUse(name) {
+      return `<svg class="icon map-button-icon" aria-hidden="true"><use href="#icon-${name}" /></svg><span>地图</span>`
+    }
+
+    function setProductView(view, focusTarget) {
+      state.productView = view
+      Object.entries(screens).forEach(([name, screen]) => { screen.hidden = name !== view })
+      Object.entries(tabs).forEach(([name, tab]) => { tab.setAttribute('aria-selected', String(name === view)) })
+      closeMapNotice()
+      if (focusTarget) window.requestAnimationFrame(() => focusTarget.focus({ preventScroll: true }))
+    }
+
+    function setConversationView(view) {
+      if (view === 'world' && !state.mapEnabled) {
+        showMapNotice()
+        return
+      }
+      state.conversationView = view
+      const world = view === 'world'
+      timelineView.hidden = world
+      mapView.hidden = !world
+      conversationButton.setAttribute('aria-pressed', String(!world))
+      mapButton.setAttribute('aria-pressed', String(world))
+      closeMapNotice()
+      announcement.textContent = world ? '已切换到地图视图。' : '已切换到会话视图。'
+    }
+
+    function renderAvailability() {
+      mapSwitch.checked = state.mapEnabled
+      prototypeSummary.textContent = state.mapEnabled
+        ? '会话页可切换到地图'
+        : '会话页无法切换到地图'
+      if (state.mapEnabled) {
+        mapButton.removeAttribute('aria-disabled')
+        mapButton.removeAttribute('aria-haspopup')
+        mapButton.removeAttribute('title')
+        mapButton.innerHTML = iconUse('map')
+      } else {
+        mapButton.setAttribute('aria-disabled', 'true')
+        mapButton.setAttribute('aria-haspopup', 'dialog')
+        mapButton.setAttribute('title', '世界地图已在通用设置中关闭')
+        mapButton.setAttribute('aria-pressed', 'false')
+        mapButton.innerHTML = iconUse('lock')
+      }
+    }
+
+    function saveMapPreference(enabled) {
+      state.mapEnabled = enabled
+      if (!enabled && state.conversationView === 'world') {
+        setConversationView('conversation')
+      }
+      renderAvailability()
+      window.clearTimeout(state.saveTimer)
+      mapSwitch.disabled = true
+      settingsPanel.setAttribute('aria-busy', 'true')
+      saveState.classList.add('is-saving')
+      saveState.textContent = '正在保存…'
+      state.saveTimer = window.setTimeout(() => {
+        mapSwitch.disabled = false
+        settingsPanel.removeAttribute('aria-busy')
+        saveState.classList.remove('is-saving')
+        saveState.textContent = '当前设置已保存'
+        showToast(enabled ? '世界地图已开启。' : '世界地图已关闭，会话将保留在时间线。')
+        announcement.textContent = enabled ? '世界地图设置已开启。' : '世界地图设置已关闭。'
+      }, 520)
+    }
+
+    function showMapNotice() {
+      disabledPopover.hidden = false
+      mapButton.setAttribute('aria-expanded', 'true')
+      announcement.textContent = '世界地图已在通用设置中关闭。'
+    }
+
+    function closeMapNotice() {
+      disabledPopover.hidden = true
+      mapButton.removeAttribute('aria-expanded')
+    }
+
+    function showToast(message) {
+      window.clearTimeout(state.toastTimer)
+      toast.querySelector('span').textContent = message
+      toast.hidden = false
+      state.toastTimer = window.setTimeout(() => { toast.hidden = true }, 2800)
+    }
+
+    function setTheme(theme) {
+      state.theme = theme
+      root.dataset.theme = theme
+      const night = theme === 'night'
+      themeToggle.setAttribute('aria-label', night ? '切换到日间主题' : '切换到夜间主题')
+      themeToggle.innerHTML = `<svg class="icon" aria-hidden="true"><use href="#icon-${night ? 'sun' : 'moon'}" /></svg><span>${night ? '日间' : '夜间'}</span>`
+    }
+
+    function selectedDefaultMembers() {
+      return defaultMembers.filter(member => member.checkbox.checked)
+    }
+
+    function createLeadOption(member) {
+      const option = document.createElement('div')
+      option.className = 'leader-option'
+      option.id = `default-lead-option-${member.id}`
+      option.dataset.memberId = member.id
+      option.setAttribute('role', 'option')
+      option.setAttribute('aria-selected', String(member.id === state.defaultLeadId))
+
+      const avatar = document.createElement('i')
+      avatar.className = 'member-avatar-mini'
+      avatar.style.setProperty('--member-color', member.color)
+      avatar.textContent = member.avatar
+
+      const copy = document.createElement('span')
+      const name = document.createElement('strong')
+      const role = document.createElement('small')
+      name.textContent = member.name
+      role.textContent = member.role
+      copy.append(name, role)
+
+      const check = document.createElementNS('http://www.w3.org/2000/svg', 'svg')
+      const use = document.createElementNS('http://www.w3.org/2000/svg', 'use')
+      check.setAttribute('class', 'icon leader-option-check')
+      check.setAttribute('aria-hidden', 'true')
+      use.setAttribute('href', '#icon-check')
+      check.append(use)
+      option.append(avatar, copy, check)
+      return option
+    }
+
+    function updateLeadTrigger(member) {
+      defaultLead.disabled = !member
+      defaultLeadAvatar.textContent = member ? member.avatar : '—'
+      defaultLeadAvatar.style.setProperty('--member-color', member ? member.color : 'var(--faint)')
+      defaultLeadName.textContent = member ? member.name : '请选择默认队长'
+      defaultLeadRole.textContent = member ? member.role : '先选择默认队员'
+    }
+
+    function leadOptions() {
+      return [...defaultLeadListbox.querySelectorAll('.leader-option')]
+    }
+
+    function setActiveLeadIndex(index) {
+      const options = leadOptions()
+      if (options.length === 0) {
+        defaultLead.removeAttribute('aria-activedescendant')
+        return
+      }
+      const nextIndex = Math.max(0, Math.min(index, options.length - 1))
+      state.activeLeadIndex = nextIndex
+      options.forEach((option, optionIndex) => option.classList.toggle('is-active', optionIndex === nextIndex))
+      defaultLead.setAttribute('aria-activedescendant', options[nextIndex].id)
+      options[nextIndex].scrollIntoView({ block: 'nearest' })
+    }
+
+    function closeLeadMenu(restoreFocus = false) {
+      state.leadMenuOpen = false
+      defaultLeadListbox.hidden = true
+      defaultLeadField.classList.remove('is-open')
+      defaultLead.setAttribute('aria-expanded', 'false')
+      defaultLead.removeAttribute('aria-activedescendant')
+      if (restoreFocus && !defaultLead.disabled) defaultLead.focus({ preventScroll: true })
+    }
+
+    function syncLeadCandidates(announceFallback = false) {
+      const candidates = selectedDefaultMembers()
+      const previousLeadId = state.defaultLeadId
+      if (!candidates.some(member => member.id === state.defaultLeadId)) {
+        state.defaultLeadId = candidates[0]?.id ?? null
+      }
+
+      const selectedLead = candidates.find(member => member.id === state.defaultLeadId) ?? null
+      updateLeadTrigger(selectedLead)
+      defaultLeadListbox.replaceChildren(...candidates.map(createLeadOption))
+
+      if (candidates.length === 0) {
+        closeLeadMenu()
+      } else if (state.leadMenuOpen) {
+        const selectedIndex = candidates.findIndex(member => member.id === state.defaultLeadId)
+        setActiveLeadIndex(Math.max(0, selectedIndex))
+      }
+
+      if (announceFallback && previousLeadId !== state.defaultLeadId) {
+        announcement.textContent = selectedLead
+          ? `当前队长已取消选择，默认队长自动改为${selectedLead.name}。`
+          : '已取消所有默认队员，默认队长暂未设置。'
+      }
+    }
+
+    function openLeadMenu() {
+      const options = leadOptions()
+      if (defaultLead.disabled || options.length === 0) return
+      state.leadMenuOpen = true
+      defaultLeadListbox.hidden = false
+      defaultLeadField.classList.add('is-open')
+      defaultLead.setAttribute('aria-expanded', 'true')
+      const selectedIndex = options.findIndex(option => option.getAttribute('aria-selected') === 'true')
+      setActiveLeadIndex(Math.max(0, selectedIndex))
+    }
+
+    function moveActiveLead(delta) {
+      const options = leadOptions()
+      if (options.length === 0) return
+      const nextIndex = (state.activeLeadIndex + delta + options.length) % options.length
+      setActiveLeadIndex(nextIndex)
+    }
+
+    function selectDefaultLead(memberId) {
+      const member = selectedDefaultMembers().find(candidate => candidate.id === memberId)
+      if (!member) return
+      const changed = state.defaultLeadId !== memberId
+      state.defaultLeadId = memberId
+      syncLeadCandidates()
+      closeLeadMenu(true)
+      if (changed) {
+        markDefaultsDirty()
+        announcement.textContent = `默认队长已改为${member.name}。`
+      }
+    }
+
+    function handleLeadKeydown(event) {
+      if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+        event.preventDefault()
+        if (!state.leadMenuOpen) openLeadMenu()
+        else moveActiveLead(event.key === 'ArrowDown' ? 1 : -1)
+        return
+      }
+      if (state.leadMenuOpen && (event.key === 'Home' || event.key === 'End')) {
+        event.preventDefault()
+        setActiveLeadIndex(event.key === 'Home' ? 0 : leadOptions().length - 1)
+        return
+      }
+      if (event.key === 'Enter' || event.key === ' ') {
+        event.preventDefault()
+        if (state.leadMenuOpen) {
+          const option = leadOptions()[state.activeLeadIndex]
+          if (option) selectDefaultLead(option.dataset.memberId)
+        } else {
+          openLeadMenu()
+        }
+        return
+      }
+      if (event.key === 'Escape' && state.leadMenuOpen) {
+        event.preventDefault()
+        closeLeadMenu(true)
+      } else if (event.key === 'Tab' && state.leadMenuOpen) {
+        closeLeadMenu()
+      }
+    }
+
+    function handleDefaultMemberChange() {
+      syncLeadCandidates(true)
+      markDefaultsDirty()
+    }
+
+    function markDefaultsDirty() {
+      const selectedCount = defaultMemberCheckboxes.filter(checkbox => checkbox.checked).length
+      selectedMemberCount.textContent = selectedCount > 0 ? `已选 ${selectedCount} 位` : '尚未配置'
+      defaultDraftState.textContent = selectedCount > 0 ? '默认配置有未保存的更改。' : '至少选择一位默认队员。'
+      saveDefaultsButton.disabled = selectedCount === 0
+      saveState.classList.add('is-dirty')
+      saveState.textContent = '有未保存的更改'
+    }
+
+    function saveDefaults() {
+      window.clearTimeout(state.defaultsTimer)
+      saveDefaultsButton.disabled = true
+      saveDefaultsButton.textContent = '正在保存…'
+      state.defaultsTimer = window.setTimeout(() => {
+        saveDefaultsButton.textContent = '保存默认配置'
+        defaultDraftState.textContent = '默认配置已保存。'
+        saveState.classList.remove('is-dirty')
+        saveState.textContent = '当前设置已保存'
+        showToast('默认队员与默认队长已保存。')
+      }, 480)
+    }
+
+    function resetPrototype() {
+      window.clearTimeout(state.saveTimer)
+      window.clearTimeout(state.defaultsTimer)
+      state.mapEnabled = true
+      state.conversationView = 'conversation'
+      mapSwitch.disabled = false
+      settingsPanel.removeAttribute('aria-busy')
+      saveState.classList.remove('is-saving')
+      saveState.classList.remove('is-dirty')
+      saveState.textContent = '当前设置已保存'
+      defaultMemberCheckboxes.forEach((checkbox, index) => { checkbox.checked = index < 3 })
+      selectedMemberCount.textContent = '已选 3 位'
+      state.defaultLeadId = 'ding'
+      syncLeadCandidates()
+      defaultDraftState.textContent = '默认配置已保存。'
+      saveDefaultsButton.disabled = true
+      saveDefaultsButton.textContent = '保存默认配置'
+      oneClickSwitch.checked = false
+      setTheme('day')
+      renderAvailability()
+      setConversationView('conversation')
+      setProductView('settings', mapSwitch)
+      showToast('交互稿已重置，世界地图已开启。')
+    }
+
+    tabs.settings.addEventListener('click', () => setProductView('settings'))
+    tabs.conversation.addEventListener('click', () => setProductView('conversation'))
+    document.getElementById('settings-back').addEventListener('click', () => setProductView('conversation'))
+    document.getElementById('conversation-settings').addEventListener('click', () => setProductView('settings'))
+    document.getElementById('open-map-settings').addEventListener('click', () => setProductView('settings', mapSwitch))
+    document.getElementById('reset-prototype').addEventListener('click', resetPrototype)
+    themeToggle.addEventListener('click', () => setTheme(state.theme === 'day' ? 'night' : 'day'))
+    mapSwitch.addEventListener('change', event => saveMapPreference(event.currentTarget.checked))
+    defaultMemberCheckboxes.forEach(checkbox => checkbox.addEventListener('change', handleDefaultMemberChange))
+    defaultLead.addEventListener('click', () => state.leadMenuOpen ? closeLeadMenu() : openLeadMenu())
+    defaultLead.addEventListener('keydown', handleLeadKeydown)
+    defaultLeadListbox.addEventListener('pointermove', event => {
+      const option = event.target.closest('.leader-option')
+      if (option && defaultLeadListbox.contains(option)) setActiveLeadIndex(leadOptions().indexOf(option))
+    })
+    defaultLeadListbox.addEventListener('click', event => {
+      const option = event.target.closest('.leader-option')
+      if (option && defaultLeadListbox.contains(option)) selectDefaultLead(option.dataset.memberId)
+    })
+    saveDefaultsButton.addEventListener('click', saveDefaults)
+    oneClickSwitch.addEventListener('change', () => showToast(oneClickSwitch.checked ? '一键创建新对话已开启。' : '一键创建新对话已关闭。'))
+    conversationButton.addEventListener('click', () => setConversationView('conversation'))
+    mapButton.addEventListener('click', () => setConversationView('world'))
+
+    document.addEventListener('keydown', event => {
+      if (event.key === 'Escape' && state.leadMenuOpen) {
+        closeLeadMenu(true)
+        return
+      }
+      if (event.key === 'Escape' && !disabledPopover.hidden) {
+        closeMapNotice()
+        mapButton.focus({ preventScroll: true })
+      }
+    })
+    document.addEventListener('pointerdown', event => {
+      if (state.leadMenuOpen && !defaultLeadPicker.contains(event.target)) closeLeadMenu()
+      if (!disabledPopover.hidden && !disabledPopover.contains(event.target) && !mapButton.contains(event.target)) closeMapNotice()
+    })
+
+    syncLeadCandidates()
+    renderAvailability()
+    setConversationView('conversation')
+  </script>
+</body>
+</html>

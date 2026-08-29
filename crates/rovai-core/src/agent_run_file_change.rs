@@ -12,8 +12,8 @@ use crate::{
     db::Database,
     managed_blob::ManagedBlobStore,
     runtime_diff::{
-        exact_mutation_fragment, normalize_reported_path_for_display, unified_diff_counts,
-        unified_diff_from_complete_states,
+        exact_mutation_fragment, normalize_reported_path_for_display, split_unified_diff_sections,
+        unified_diff_counts, unified_diff_from_complete_states, unified_diff_section_identity,
     },
 };
 
@@ -1085,43 +1085,6 @@ fn file_details_with_authoritative_snapshot(
     snapshot_files
 }
 
-fn split_unified_diff_sections(diff: &str) -> Vec<String> {
-    let starts = diff
-        .match_indices("diff --git ")
-        .filter(|(index, _)| *index == 0 || diff.as_bytes().get(index - 1) == Some(&b'\n'))
-        .map(|(index, _)| index)
-        .collect::<Vec<_>>();
-    starts
-        .iter()
-        .enumerate()
-        .map(|(index, start)| {
-            diff[*start..starts.get(index + 1).copied().unwrap_or(diff.len())].to_string()
-        })
-        .collect()
-}
-
-fn unified_diff_section_identity(section: &str) -> Option<(String, String)> {
-    let header = section.lines().next()?;
-    let marker = header
-        .rfind(" b/")
-        .filter(|_| header.starts_with("diff --git a/"))?;
-    let path = header[marker + 3..].trim().to_string();
-    let change_kind = if section
-        .lines()
-        .any(|line| line.starts_with("new file mode "))
-    {
-        "add"
-    } else if section
-        .lines()
-        .any(|line| line.starts_with("deleted file mode "))
-    {
-        "delete"
-    } else {
-        "update"
-    };
-    Some((path, change_kind.to_string()))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1323,6 +1286,32 @@ mod tests {
         assert_eq!(file.presentation_kind, "operation_only");
         assert!(file.blocks[0].diff.is_none());
         assert_eq!(projection.details.card.additions, None);
+    }
+
+    #[test]
+    fn managed_output_unavailable_evidence_does_not_create_a_files_changed_card() {
+        assert!(
+            aggregate_evidence(
+                "run-1",
+                1,
+                "2026-08-28T00:00:00Z",
+                Path::new("/repo"),
+                &[evidence(
+                    1,
+                    json!({
+                        "runtimeFileOperation": {
+                            "status": "unavailable",
+                            "safeReasonCode": "runtime_file_operation_managed_output_root"
+                        },
+                        "runtimeDiff": {
+                            "status": "unavailable",
+                            "safeReasonCode": "runtime_diff_managed_output_root"
+                        }
+                    }),
+                )],
+            )
+            .is_none()
+        );
     }
 
     #[test]

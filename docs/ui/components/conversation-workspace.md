@@ -2,7 +2,7 @@
 document_type: ui-component-contract
 authority: renderer-camp-workspace
 status: accepted
-last_updated: 2026-08-27
+last_updated: 2026-08-28
 ---
 
 # Camp 会话工作区
@@ -76,6 +76,11 @@ generation/version，冲突后不自动重放，必须刷新 preview。
 悬浮控件，不占用 Camp Header 或独立工具栏；左侧导航、Inspector、Approval/Recovery Dock、Composer
 与 Agent 执行台保持当前用户选择的承载位置和权威。切换不得清空时间线滚动、Draft、Inspector 选择、Approval、
 执行台焦点或正在接收的真实活动更新。
+
+“设置 → 通用 → 会话”的世界地图 Switch 控制地图可用性；新安装与旧偏好迁移后均为开启。关闭时，
+当前地图立即回到会话时间线，后续 Camp 也不得从本机保存的地图视图恢复。阅读面继续显示“地图”入口，
+但以明确的不可用状态呈现；鼠标或键盘激活只显示关闭原因与“前往通用设置”的恢复动作，不得挂载地图、
+切换阅读面或清空会话状态。重新开启后，用户仍需主动选择地图，不自动离开时间线。
 
 世界地图只消费当前 Camp 中可呈现队员和既有 AgentRun、Runtime activity、A2A/Delivery 事实的有界
 只读投影。固定地点、路线、稳定随机移动、停留、视觉会合和闲时文案都属于 Renderer 瞬时状态；地图
@@ -294,10 +299,14 @@ disclosure 继续在原位渲染完整公开结果，不再截断，不再提供
 
 ### Runtime 终态文件变更与 AgentRun 文件变化
 
-只有 [Runtime File Change Observation v1](../../contracts/runtime-file-change-observation-v1.md)准入的可靠终态
+只有 [Runtime File Change Observation v2](../../contracts/runtime-file-change-observation-v2.md)准入的可靠终态
 Evidence 才进入文件变化呈现。成功 Edit/Write 的可靠单路径足以把原 Tool 行呈现为 `修改 <basename>`；没有
 可靠内容时不显示 `+A −D` 或空 disclosure。有完整 before/after、unified snapshot 或 exact mutation 时，每个
 文件作为同一 Canonical Activity 的 presentation row 独立展开。
+
+当前 Runtime Host 的精确 `ROVAI_RUN_TMP` 是 Rovai 可重置的临时交付区，不是用户文件面。其目录内的 HTML、
+图片或其他中间产物不显示为 `修改 <basename>`，也不进入 `Files Changed`；mixed 事件只展示其余普通文件。
+已经持久化的历史卡片不重算。临时文件经 `rovai send --file` 发布后，附件由独立的 Camp Attachment UI 呈现。
 
 Renderer 不显示 `apply_patch` 父行或“编辑了 N 个文件”聚合层，不从 Tool 显示名、output、命令文本或当前文件
 推测变化，也不为逐文件行创建新的 Activity identity。文件行留在现有“已执行 N 项操作”集合内，集合计数仍按

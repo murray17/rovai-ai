@@ -1397,7 +1397,14 @@ html[data-rovai-platform="win32"] .unified-sidebar-drag {
 .camp-conversation-view-controls button { min-height: 26px; padding: 0 9px; border: 0; border-radius: 6px; color: inherit; background: transparent; cursor: pointer; font-size: 10.5px; font-weight: 680; line-height: 1; }
 .camp-conversation-view-controls button:hover { color: var(--ink); background: var(--surface-hover); }
 .camp-conversation-view-controls button[aria-pressed="true"] { color: var(--brand-ink); background: var(--brand-soft); }
+.camp-conversation-view-controls button.is-unavailable { color: var(--faint); cursor: help; opacity: .64; }
+.camp-conversation-view-controls button.is-unavailable:hover { color: var(--muted); background: var(--surface-hover); opacity: .82; }
 .camp-conversation-view-controls .camp-world-map-route-toggle { display: grid; width: 30px; padding: 0; place-items: center; border-left: 1px solid var(--line); border-radius: 0 6px 6px 0; }
+.camp-world-map-unavailable-popover { position: absolute; z-index: 24; top: calc(100% + 8px); right: 0; display: grid; width: min(286px, calc(100vw - 32px)); gap: 7px; padding: 12px 13px; border: 1px solid var(--line-strong); border-radius: 9px; color: var(--ink); background: var(--surface-raised); box-shadow: var(--shadow-menu); text-align: left; }
+.camp-world-map-unavailable-popover strong { font-size: 11.5px; font-weight: 680; }
+.camp-world-map-unavailable-popover p { margin: 0; color: var(--muted); font-size: 10px; line-height: 1.55; }
+.camp-conversation-view-controls .camp-world-map-settings-link { min-height: 28px; justify-self: start; padding: 0; color: var(--brand-ink); background: transparent; font-size: 10px; font-weight: 700; }
+.camp-conversation-view-controls .camp-world-map-settings-link:hover { color: var(--brand-hover); background: transparent; }
 .camp-world-map-route-toggle svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.7; }
 .camp-world-map-panel { position: absolute; inset: 0; min-width: 0; min-height: 0; overflow: hidden; }
 .camp-world-map { position: absolute; inset: 0; min-width: 0; min-height: 0; overflow: hidden; color: var(--lightbox-ink); background: var(--lightbox-surface); isolation: isolate; }
@@ -3559,7 +3566,18 @@ button.attachment-open:disabled { cursor: wait; opacity: .76; }
 .one-click-confirm-summary strong { margin-bottom: 2px; font-size: 11.5px; }
 .one-click-confirm-summary span { color: var(--muted); font-size: 11px; line-height: 1.45; }
 .one-click-confirm-dialog > p { margin: 14px 0 0; color: var(--muted); font-size: 10.5px; line-height: 1.55; }
-.general-window-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 18px; align-items: center; }
+.general-world-map-setting { display: grid; min-height: 76px; grid-template-columns: minmax(0, 1fr) auto; gap: 18px; align-items: center; padding: 13px 15px; border-radius: 10px; background: var(--workspace-surface-raised); cursor: pointer; }
+.general-world-map-setting:hover { background: var(--workspace-surface-hover); }
+.general-world-map-setting > span { display: grid; min-width: 0; gap: 4px; }
+.general-world-map-setting strong { color: var(--ink); font-size: 12px; font-weight: 620; }
+.general-world-map-setting small { max-width: 660px; color: var(--muted); font-size: 10.5px; line-height: 1.5; }
+.general-world-map-setting > input { position: relative; width: 34px; height: 20px; flex: 0 0 34px; margin: 0; appearance: none; border: 1px solid var(--control-line); border-radius: 999px; background: var(--surface-muted); cursor: pointer; }
+.general-world-map-setting > input::after { position: absolute; top: 3px; left: 3px; width: 12px; height: 12px; border-radius: 50%; background: var(--muted); transition: transform 140ms ease, background-color 140ms ease; content: ""; }
+.general-world-map-setting > input:checked { border-color: var(--brand); background: var(--brand-soft); }
+.general-world-map-setting > input:checked::after { background: var(--brand); transform: translateX(14px); }
+.general-world-map-setting > input:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.general-world-map-setting:has(input:disabled) { cursor: default; opacity: .68; }
+.general-window-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 18px; align-items: center; padding: 15px 17px; border-radius: 10px; background: var(--workspace-surface-raised); }
 .general-window-description { max-width: 720px; margin: 0; color: var(--muted); font-size: 11px; line-height: 1.6; }
 .general-window-row > .general-inline-status { grid-column: 1 / -1; }
 /* First-run onboarding */
