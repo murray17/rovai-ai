@@ -35,7 +35,7 @@ scroll and focus.
 
 ## 通用
 
-General owns stable startup location and window reset. Stable choices commit immediately through the
+General owns stable startup location, world-map availability and window reset. Stable choices commit immediately through the
 narrow Desktop bridge. The App does not expose or enable an OS login-start item on either supported
 platform; packaged macOS startup only makes a best-effort removal of any retired registration, while
 the first Windows release creates no Startup task or Run-key entry. General does not add hidden/background
@@ -44,6 +44,14 @@ launch, default Project, recovery or update policy.
 New-conversation defaults use the user-facing terms 队员 and 队长. Ten or fewer selectable teammates
 remain directly visible in a two-column chooser; only counts above ten collapse behind a searchable
 disclosure whose expanded chooser stays two-column. Narrow layouts reflow the chooser to one column.
+
+World-map availability appears in a 会话 section immediately after 新对话 and before 窗口. It starts
+enabled for new and migrated preferences and commits immediately. The row does not repeat that default
+as a badge, add a current-effective summary or add a conversation-page preview action. Turning it off
+forces Camp reading surfaces back to the timeline. The compact 地图 control remains discoverable but
+unavailable; activating it explains the setting and offers a direct recovery path back to this section
+without entering the map. Preserve the established 启动 and 新对话 composition. The 窗口 reset row uses
+one quiet raised surface, including in Porcelain Day where it reads as a white support card.
 
 ## 外观与提醒
 

@@ -56,6 +56,8 @@ export function GeneralSettings({
   const [defaultsError, setDefaultsError] = useState<string | null>(null)
   const [oneClickBusy, setOneClickBusy] = useState(false)
   const [oneClickConfirmOpen, setOneClickConfirmOpen] = useState(false)
+  const [worldMapBusy, setWorldMapBusy] = useState(false)
+  const [worldMapError, setWorldMapError] = useState<string | null>(null)
   const [resetCapability, setResetCapability] = useState<WindowResetCapability | null>(null)
   const [resetBusy, setResetBusy] = useState(false)
   const [resetError, setResetError] = useState<string | null>(null)
@@ -68,6 +70,7 @@ export function GeneralSettings({
 
   const loadPreferences = useCallback(async (): Promise<void> => {
     setPreferenceError(null)
+    setWorldMapError(null)
     try {
       acceptPreferences(await window.rovai.generalPreferences.get())
     } catch (error) {
@@ -203,6 +206,25 @@ export function GeneralSettings({
     }
   }
 
+  const setWorldMapEnabled = async (enabled: boolean): Promise<void> => {
+    if (!preferences || enabled === preferences.worldMapEnabled || worldMapBusy) return
+    const previous = preferences
+    setPreferences({ ...preferences, worldMapEnabled: enabled })
+    setWorldMapBusy(true)
+    setWorldMapError(null)
+    try {
+      acceptPreferences(await window.rovai.generalPreferences.setWorldMapEnabled(enabled))
+      setFeedback(enabled
+        ? '世界地图已开启。'
+        : '世界地图已关闭，会话将保留在时间线。')
+    } catch (error) {
+      setPreferences(previous)
+      setWorldMapError(errorMessage(error))
+    } finally {
+      setWorldMapBusy(false)
+    }
+  }
+
   const resetWindow = async (): Promise<void> => {
     setResetBusy(true)
     setResetError(null)
@@ -243,6 +265,7 @@ export function GeneralSettings({
       ?? preferences.newConversationDefaults.defaultLeadAgentId
     : null
   const oneClickEnabled = preferences?.oneClickNewConversationEnabled ?? false
+  const worldMapEnabled = preferences?.worldMapEnabled ?? true
   const oneClickCanEnable = Boolean(savedDefaults) && !defaultsDirty && !oneClickBusy
   const shouldCollapseMembers = defaultMemberCandidates.length > DEFAULT_MEMBER_COLLAPSE_THRESHOLD
   const normalizedMemberQuery = defaultMemberQuery.trim().toLocaleLowerCase('zh-CN')
@@ -260,8 +283,8 @@ export function GeneralSettings({
     : selectedMemberNames.length <= 2
       ? selectedMemberNames.join('、')
       : `${selectedMemberNames.slice(0, 2).join('、')}等 ${selectedMemberNames.length} 位`
-  const pageSaveError = Boolean(preferenceError || defaultsError)
-  const pageSaving = preferenceBusy || defaultsBusy || oneClickBusy
+  const pageSaveError = Boolean(preferenceError || defaultsError || worldMapError)
+  const pageSaving = preferenceBusy || defaultsBusy || oneClickBusy || worldMapBusy
   const pageSaveLabel = !preferences
     ? '正在读取设置…'
     : pageSaving
@@ -473,6 +496,36 @@ export function GeneralSettings({
                 )}
               </div>
             </div>
+          </div>
+        </section>
+
+        <section className="section-block general-settings-section" aria-labelledby="general-conversation-heading">
+          <div className="section-heading"><div><h2 id="general-conversation-heading">会话</h2><p>阅读面与沉浸视图</p></div></div>
+          <div className="general-section-body">
+            <label className="general-world-map-setting">
+              <span>
+                <strong>世界地图</strong>
+                <small id="general-world-map-description">
+                  在 Camp 会话中显示“地图”视图，可随时在会话时间线与沉浸世界地图之间切换。
+                </small>
+              </span>
+              <input
+                type="checkbox"
+                role="switch"
+                aria-label="启用世界地图"
+                aria-describedby="general-world-map-description"
+                checked={worldMapEnabled}
+                disabled={!preferences || worldMapBusy}
+                onChange={(event) => void setWorldMapEnabled(event.target.checked)}
+              />
+            </label>
+            {worldMapBusy && <p className="general-inline-status" role="status">正在保存会话偏好…</p>}
+            {worldMapError && (
+              <div className="general-inline-status is-error" role="alert">
+                <span>{worldMapError}</span>
+                <button className="quiet-button compact" type="button" onClick={() => void loadPreferences()}>重新读取</button>
+              </div>
+            )}
           </div>
         </section>
 

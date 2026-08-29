@@ -101,6 +101,9 @@ const api: RovaiApi = {
     setOneClickNewConversationEnabled(enabled: boolean) {
       return ipcRenderer.invoke('rovai:general-preferences-set-one-click-new-conversation', enabled)
     },
+    setWorldMapEnabled(enabled: boolean) {
+      return ipcRenderer.invoke('rovai:general-preferences-set-world-map', enabled)
+    },
     invalidateNewConversationDefaults() {
       return ipcRenderer.invoke('rovai:general-preferences-invalidate-new-conversation-defaults')
     }
