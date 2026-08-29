@@ -37,6 +37,27 @@ index c5d5c57488d414e3078f19a235e4db7afebeda80..50104bb01830e65006e4ec85805c7198
                  }));
              }),
              // Reactions — dedup only
+@@ -106865,5 +106865,20 @@ class LarkChannel {
+                 }
+             },
++            // Bot removed — direct fire, no safety. Feishu sends this event
++            // only to the Bot that was removed, so surface it before its
++            // WebSocket is eventually closed.
++            'im.chat.member.bot.deleted_v1': (raw) => {
++                var _a, _b;
++                const evt = normalizeBotAdded(raw, { includeRaw });
++                if (!evt)
++                    return;
++                try {
++                    (_b = (_a = this.handlers).botRemoved) === null || _b === void 0 ? void 0 : _b.call(_a, evt);
++                }
++                catch (e) {
++                    this.emitError(e);
++                }
++            },
+             // Drive comments — dedup + lock + queue (by fileToken).
+             // The dedup key folds in replyId so thread replies on the same
+             // top-level comment don't collide with each other (or with the
 diff --git a/lib/index.js b/lib/index.js
 index 0728b1d97ddac688b17642924e359c152dd52fd5..390ed309bf37802265b78c2c20920450261ed98f 100644
 --- a/lib/index.js
@@ -76,11 +97,32 @@ index 0728b1d97ddac688b17642924e359c152dd52fd5..390ed309bf37802265b78c2c20920450
                  }));
              }),
              // Reactions — dedup only
+@@ -106883,5 +106883,20 @@ class LarkChannel {
+                 }
+             },
++            // Bot removed — direct fire, no safety. Feishu sends this event
++            // only to the Bot that was removed, so surface it before its
++            // WebSocket is eventually closed.
++            'im.chat.member.bot.deleted_v1': (raw) => {
++                var _a, _b;
++                const evt = normalizeBotAdded(raw, { includeRaw });
++                if (!evt)
++                    return;
++                try {
++                    (_b = (_a = this.handlers).botRemoved) === null || _b === void 0 ? void 0 : _b.call(_a, evt);
++                }
++                catch (e) {
++                    this.emitError(e);
++                }
++            },
+             // Drive comments — dedup + lock + queue (by fileToken).
+             // The dedup key folds in replyId so thread replies on the same
+             // top-level comment don't collide with each other (or with the
 diff --git a/types/index.d.ts b/types/index.d.ts
 index 1741e0c90073ec038590131c09952a23c222575d..2cef8a1c7d19dab21a3b8ef09d7ff17e5cd84b85 100644
 --- a/types/index.d.ts
 +++ b/types/index.d.ts
-@@ -322076,7 +322076,7 @@ interface CardStreamController {
+@@ -322076,7 +322076,8 @@ interface CardStreamController {
  interface EventMap {
      message: (msg: NormalizedMessage) => void | Promise<void>;
      reject: (evt: RejectEvent) => void;
@@ -88,4 +130,5 @@ index 1741e0c90073ec038590131c09952a23c222575d..2cef8a1c7d19dab21a3b8ef09d7ff17e
 +    cardAction: (evt: CardActionEvent) => void | object | Promise<void | object>;
      reaction: (evt: ReactionEvent) => void;
      botAdded: (evt: BotAddedEvent) => void;
++    botRemoved: (evt: BotAddedEvent) => void;
      comment: (evt: CommentEvent) => void | Promise<void>;

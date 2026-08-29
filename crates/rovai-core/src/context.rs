@@ -8396,7 +8396,7 @@ mod slow_tests {
                 |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
             )
             .unwrap();
-        assert_eq!(contract, ("v1.33".to_string(), 74, 1));
+        assert_eq!(contract, ("v1.34".to_string(), 75, 1));
         drop(reopened);
         remove_managed_attachment_tree(&directory).unwrap();
     }

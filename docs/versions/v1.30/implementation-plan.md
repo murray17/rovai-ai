@@ -48,12 +48,14 @@ last_updated: 2026-08-29
   Contact scope 或通讯录读取，只持久化摘要；解析失败不完成发布，入站显示连接异常而非 non-owner；
 - [x] 完成 ChannelTurnRequest 单根 FIFO、统一原子 admission、永久失败/Runtime deferred 与 queue card 更新；
 - [x] 完成 ExternalQuote structured segment、`replyTo=null`、ExternalPrincipal source 与 CURRENT_INPUT v22；
-- [x] 完成父群 authoritative roster、普通群完整 membership、话题按需 membership 与 remove reconciliation；
+- [x] 完成父群 authoritative roster、普通群完整 membership，以及 Topic Camp 动态默认协作池：创建时完整 roster 与首轮
+  mention targets 分离，既有 Topic 在下一 AgentRun 前通过 Host generation 门闩同步 add/remove，已运行 Run 不受影响；
 - [x] 完成 ChannelDelivery Outbox、实际作者 Bot、原生 Principal mention、lease/retry/attention 和恢复；
 - [x] 用 Core-owned per-AgentRun execution console 替换用户可见 `agent_status/completion`；Main 与 Renderer 共享公开
-  Evidence presentation。运行态完整展开，终态自动收起为摘要；Owner 可在同一原卡展开全部工具项、收起和语义分页。
-  Core 持久化 mode/page/view version，以 envelope Owner、frozen App、exact message、snapshot/version/nonce CAS 防重放，
-  重启恢复当前页，下一条 root admission 仍由原 App durable recall 旧控制台；
+  Evidence 的安全 `publicCommand`、时序和状态。运行中与终态均按序平铺 command，不显示计数摘要或展开/收起动作；工具
+  input/output 与 patch body 不进入飞书。Run 终结后经过 900ms quiet window 固化 `terminal_sealed` snapshot，Core 只授权
+  Owner/App/message/exact sequence/page，无状态翻页由 Main 对原卡单次更新，不写 view state、不排 Outbox；下一条 root
+  admission 仍由原 App durable recall 旧控制台；
 - [x] 把正式 Agent 输出改为无标题永久 Markdown，并将公开 CampMessage 的 Managed Attachment v2 图片/文件按正文后
   ordinal 原生投递、独立重试和失败 attention 收口；
 - [x] 完成 Preload/Renderer typed API、真实账号投影、唯一账号 QR、Provisioning Dialog、按绑定 brand 的官方应用详情
@@ -73,10 +75,14 @@ last_updated: 2026-08-29
   成功后 Core authority 先失效再异步撤回，项目失效只刷新卡片，不能消费 pending；
 - 同一 Camp queued 请求在前一根 Turn 真正终结前不可进入公共会话；
 - 飞书 reply 只形成当前消息的 ExternalQuote，不产生内部 reply 或第二条 CampMessage；
-- 普通群 roster 与话题按需扩张都复用 Camp Membership v1 exact source generation；
+- 普通群 roster 与 Topic 动态默认协作池都复用 Camp Membership v1 exact source generation；Topic 创建后完整 roster 不会
+  扩大当前根消息 targets，A2A/Gather/retry/successor 在物化 Run 前必须等待 Host 新 generation。新增 Bot 下一 Run 可用，
+  移出 Bot 下一 Run fail closed，非终态 Run 不被 membership reconciliation 取消；
 - Secret 与 raw Feishu identity 不进入 Renderer/Agent；公开输出只来自 Core 已提交内容；
-- 执行控制台不含 reasoning/thought，不能覆盖正式正文；运行态不提供收起，终态摘要不平铺过程，展开后每个工具项可见且
-  只在同卡语义分页。只有 Owner 能以最新 CAS 操作，重启恢复并在下一根 Turn admission 后无条件召回；永久正文与附件各有
+- 执行控制台不含 reasoning/thought、tool input/output、stdout/stderr 或完整 patch body，不能覆盖正式正文；运行态和 sealed
+  终态都按序展示同源安全 command，保留 flags、参数和路径，不翻译、不截断。超长 sealed 内容只在同卡无状态分页；只有
+  Owner 能操作 exact App/message/snapshot/page，翻页只更新一次且不产生 Outbox。重启保持 sealed，下一根 Turn admission 后
+  无条件召回；永久正文与附件各有
   稳定 dedupe，单个附件失败不得重发正文或已成功附件；
 - 连接不调用任何 App 创建接口或写入 App credential；发布不产生 QR/飞书确认页，registration 协议没有实现、API 或
   交互入口；
@@ -99,16 +105,18 @@ last_updated: 2026-08-29
 - `cargo test -p rovai-core --lib`；
 - `cargo test -p rovai-core --bin rovai`；
 - `cargo test -p rovai-core --bin rovai-core`；
-- Migration 116/119/120 upgrade、v118→v120 与 v119→v120 独立兼容、Developer Identity/publication intent、队员 App 身份冻结/历史 disabled 同 App reactivation、Owner-only Channel 状态机、发布期 App-scoped Owner prebinding、DM `/new`、PendingCampBinding、ExternalQuote、Context bytes 与
+- Migration 116/119/120/121 upgrade、v118→v120、v119→v120 与 v120→v121 独立兼容、Developer Identity/publication intent、队员 App 身份冻结/历史 disabled 同 App reactivation、Owner-only Channel 状态机、发布期 App-scoped Owner prebinding、DM `/new`、PendingCampBinding、ExternalQuote、Context bytes 与
   Secret projection、内置/managed 头像解析、正常发布头像传递、冻结 App 头像/readiness 修复、Manifest 假阳性、P2P
   Scope ID 映射、template-first fallback matrix、durable barrier、activation-first、dynamic patch reuse、Event timeout
   recoverable、Event/Callback mode fail-closed、原会话 project picker/Non-owner toast/authoritative message ID/旧 private
-  picker 与旧 card revision 已发送原位更新/`format_error` 一次性恢复/durable recall、execution console 运行/摘要/展开/分页/Owner-CAS/重启恢复/消息身份、永久 Markdown、附件顺序/独立失败
-  定向测试全部通过；
+  picker 与旧 card revision 已发送原位更新/`format_error` 一次性恢复/durable recall、execution console 完整安全命令/
+  输入输出隔离/terminal pending-sealed/无状态分页/单次 update/Owner 授权/重启恢复/消息身份、永久 Markdown、附件顺序/独立失败
+  、Topic 完整 roster 建 Camp但只启动明确 targets、Host refresh generation 之前不物化内部 Run、Bot 移出后待创建 Run
+  fail closed 且非终态 Run 不取消等定向测试全部通过；
 - `pnpm typecheck`；
 - `pnpm test`；
 - `pnpm build:desktop`；
-- `DOCS_BASE_REF=fbd07e6a958a1d9a8d508413b4bbd548939bbd7d pnpm docs:check:ci`（本次执行台收起/展开基线）。
+- `DOCS_BASE_REF=36f3b53ce1dddfd0e814b91ab1c29417bdc2c681 pnpm docs:check:ci`（本次分支相对 main 基线）。
 
 隔离 Desktop 验收使用独立临时 userData 和 `pnpm dev`：
 

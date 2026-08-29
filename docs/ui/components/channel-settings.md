@@ -33,8 +33,9 @@ Dialog、状态点和间距复用现有组件语法。
 有效；取消或失败关闭 Dialog 后仍显示原账号，不得降级为“登录已过期”。只有切换成功才展示新账号。
 
 账号二维码使用 modal Dialog，标题“登录飞书开放平台”，并明确“本次不会创建应用、读取 App Secret 或发布 Bot”。
-它展示 preparing、awaiting scan、scan confirmed、identity inspection、过期/错误和取消；关闭必须取消 exact attempt，
-迟到状态不再打开或更新 UI。账号登录是产品中唯一的扫码流程；队员发布没有兼容扫码或平台 registration 确认入口。
+它展示 preparing、awaiting scan、scan confirmed、identity inspection 和过期/错误；关闭必须取消 exact attempt，
+迟到状态不再打开或更新 UI。用户取消是成功的 no-op：Dialog 立即关闭，不形成 failed state、页面 alert 或 toast。账号登录
+是产品中唯一的扫码流程；队员发布没有兼容扫码或平台 registration 确认入口。
 账号登录在 preparing 前展示安全存储检查，在 identity inspection 后展示安全保存；两者必须使用不同文案，不能把
 钥匙串等待描述成“读取账号”。安全存储拒绝、身份读取超时和页面失败使用中文可操作提示，不向用户显示 `unknown`
 或原始异常文本。

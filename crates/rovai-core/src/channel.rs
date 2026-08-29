@@ -35,6 +35,7 @@ const FEISHU_CHANNEL_HOST_COMPONENT: &str = "feishu-channel-host";
 const CHANNEL_MEMBERSHIP_SYNC_COMPONENT: &str = "channel-membership-sync";
 const AGGREGATION_WINDOW_SECONDS: i64 = 3;
 const DELIVERY_LEASE_SECONDS: i64 = 30;
+const EXECUTION_CONSOLE_TERMINAL_QUIET_WINDOW_MILLISECONDS: i64 = 900;
 const CHANNEL_TRANSPORT_RETENTION_DAYS: i64 = 7;
 const MAX_DELIVERY_ATTEMPTS: i64 = 5;
 const PENDING_BINDING_LIFETIME_HOURS: i64 = 24;
@@ -187,23 +188,21 @@ impl DomainCommand for ResolvePendingCampBindingCommand {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct UpdateChannelExecutionConsoleViewCommand {
+pub struct AuthorizeChannelExecutionConsolePageCommand {
     pub agent_run_id: String,
     pub app_id: String,
     pub external_message_id: String,
-    pub expected_view_version: i64,
-    pub expected_snapshot_sequence: i64,
-    pub nonce: String,
-    pub action: String,
+    pub snapshot_sequence: i64,
+    pub page_index: i64,
     pub page_count: i64,
     pub operator_open_id: Option<String>,
     pub operator_user_id: Option<String>,
     pub operator_union_id: Option<String>,
 }
 
-impl sealed::Sealed for UpdateChannelExecutionConsoleViewCommand {}
-impl DomainCommand for UpdateChannelExecutionConsoleViewCommand {
-    const TYPE: &'static str = "channel_execution_console.view.update";
+impl sealed::Sealed for AuthorizeChannelExecutionConsolePageCommand {}
+impl DomainCommand for AuthorizeChannelExecutionConsolePageCommand {
+    const TYPE: &'static str = "channel_execution_console.page.authorize";
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -431,15 +430,6 @@ pub struct ChannelExecutionConsoleRunView {
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct ChannelExecutionConsoleViewState {
-    pub mode: String,
-    pub page_index: i64,
-    pub view_version: i64,
-    pub nonce: String,
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
 pub struct ChannelExecutionConsoleSourceView {
     pub sequence: i64,
     pub agent_run_id: String,
@@ -451,7 +441,7 @@ pub struct ChannelExecutionConsoleSourceView {
     pub terminal_at: Option<String>,
     pub target_app_id: String,
     pub external_message_id: Option<String>,
-    pub view: ChannelExecutionConsoleViewState,
+    pub state: String,
 }
 
 #[derive(Debug, Default)]
@@ -478,13 +468,13 @@ impl ChannelService {
                        run.status, run.wait_reason, run.terminal_reason_code,
                        run.started_at, run.ended_at,
                        console.target_app_id, console.external_message_id,
-                       console.display_mode, console.page_index, console.view_version
+                       console.state
                 FROM channel_execution_console AS console
                 JOIN agent_run AS run ON run.id = console.agent_run_id
                 JOIN agent_profile AS profile ON profile.id = console.agent_id
                 WHERE console.agent_run_id = ?1
-                  AND console.latest_sequence >= ?2
-                  AND console.state IN ('opening', 'active', 'terminal')
+                  AND console.latest_sequence = ?2
+                  AND console.state IN ('opening', 'active', 'terminal_sealed')
                 "#,
                 params![agent_run_id, expected_sequence],
                 |row| {
@@ -500,8 +490,6 @@ impl ChannelService {
                         row.get::<_, String>(8)?,
                         row.get::<_, Option<String>>(9)?,
                         row.get::<_, String>(10)?,
-                        row.get::<_, i64>(11)?,
-                        row.get::<_, i64>(12)?,
                     ))
                 },
             )
@@ -517,9 +505,7 @@ impl ChannelService {
             terminal_at,
             target_app_id,
             external_message_id,
-            display_mode,
-            page_index,
-            view_version,
+            state,
         )) = source
         else {
             transaction.commit()?;
@@ -539,7 +525,6 @@ impl ChannelService {
                 |row| row.get::<_, String>(0),
             )
             .optional()?;
-        let nonce = execution_console_view_nonce(&agent_run_id, view_version, sequence);
         transaction.commit()?;
         Ok(Some(ChannelExecutionConsoleSourceView {
             sequence,
@@ -556,19 +541,15 @@ impl ChannelService {
             terminal_at,
             target_app_id,
             external_message_id,
-            view: ChannelExecutionConsoleViewState {
-                mode: display_mode,
-                page_index,
-                view_version,
-                nonce,
-            },
+            state,
         }))
     }
 
-    /// Admits explicitly addressed A2A targets into a Feishu topic Camp when
-    /// their published Bot is still present in the parent group roster.
+    /// Reconciles a Feishu Topic Camp with the latest accepted parent-group
+    /// Bot roster before an internal A2A/Gather admission, then fail-closes
+    /// every explicitly requested target that is no longer present.
     /// Normal Camps and normal Feishu groups are left untouched.
-    pub fn ensure_topic_a2a_members(
+    pub fn ensure_topic_roster_members(
         &self,
         database: &mut Database,
         camp_id: &str,
@@ -597,9 +578,16 @@ impl ChannelService {
                 },
             )
             .optional()?;
-        let Some((binding_id, tenant_key, chat_id)) = topic_binding else {
+        let Some((_binding_id, tenant_key, chat_id)) = topic_binding else {
             return Ok(());
         };
+        reconcile_bound_group_memberships(
+            database,
+            FEISHU_PROVIDER,
+            &tenant_key,
+            &chat_id,
+            parent_command_id,
+        )?;
         for agent_id in requested_agent_ids.iter().cloned().collect::<BTreeSet<_>>() {
             let (active, roster_present): (bool, bool) = database.connection().query_row(
                 r#"
@@ -624,40 +612,15 @@ impl ChannelService {
                 params![camp_id, agent_id, tenant_key, chat_id],
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )?;
-            if active || !roster_present {
-                continue;
+            if !roster_present {
+                anyhow::bail!(
+                    "channel.topic_bot_not_in_roster: requested Agent {agent_id} is not in the current Feishu parent-group Bot roster"
+                );
             }
-            let (membership_generation, reconciliation_generation) =
-                channel_membership_generations(database, camp_id, &binding_id)?;
-            let execution = CollaborationService::default().add_camp_member(
-                database,
-                &CommandEnvelope {
-                    command_id: format!(
-                        "{parent_command_id}:{binding_id}:topic-a2a:{agent_id}:{reconciliation_generation}"
-                    ),
-                    actor: ActorRef::System {
-                        component_id: CHANNEL_MEMBERSHIP_SYNC_COMPONENT.to_string(),
-                    },
-                    camp_id: Some(camp_id.to_string()),
-                    expected_versions: Vec::new(),
-                    execution_epoch: None,
-                    payload: AddCampMemberCommand {
-                        camp_id: camp_id.to_string(),
-                        agent_id,
-                        expected_membership_generation: membership_generation,
-                        capability_overrides: json!({}),
-                        source: Some(CampMembershipMutationSource {
-                            namespace: FEISHU_PROVIDER.to_string(),
-                            binding_id: binding_id.clone(),
-                            reconciliation_generation,
-                        }),
-                    },
-                },
-            )?;
-            if execution.result.status == CommandResultStatus::Rejected {
-                // Preserve the ordinary A2A validation result when membership
-                // admission cannot be completed; never route to another Agent.
-                continue;
+            if !active {
+                anyhow::bail!(
+                    "channel.topic_membership_sync_failed: requested Agent {agent_id} is not an active Topic Camp collaborator after roster reconciliation"
+                );
             }
         }
         Ok(())
@@ -2053,6 +2016,12 @@ impl ChannelService {
                 &envelope.payload.chat_id,
                 &envelope.command_id,
             )?;
+            crate::message_delivery::dispatch_topic_deliveries_waiting_for_roster(
+                database,
+                &envelope.payload.provider,
+                &envelope.payload.tenant_key,
+                &envelope.payload.chat_id,
+            )?;
         }
         Ok(execution)
     }
@@ -2566,7 +2535,10 @@ impl ChannelService {
 
             let mut binding = binding.context("channel binding creation failed")?;
             if binding.camp_id.is_none() {
-                let initial_members = if binding.conversation_kind == "group" {
+                let initial_members = if matches!(
+                    binding.conversation_kind.as_str(),
+                    "group" | "topic"
+                ) {
                     &roster_agent_ids
                 } else {
                     &frozen.target_agent_ids
@@ -2996,7 +2968,8 @@ impl ChannelService {
                 conversation_display_name: pending.conversation.display_name.clone(),
                 conversation_kind: pending.conversation.conversation_kind.clone(),
             };
-            let initial_members = if binding.conversation_kind == "group" {
+            let initial_members = if matches!(binding.conversation_kind.as_str(), "group" | "topic")
+            {
                 roster_agent_ids
             } else {
                 all_targets.iter().cloned().collect()
@@ -3082,59 +3055,45 @@ impl ChannelService {
         })
     }
 
-    pub fn update_execution_console_view(
+    pub fn authorize_execution_console_page(
         &self,
         database: &mut Database,
-        envelope: &CommandEnvelope<UpdateChannelExecutionConsoleViewCommand>,
+        envelope: &CommandEnvelope<AuthorizeChannelExecutionConsolePageCommand>,
     ) -> Result<CommandExecution> {
         validate_nonempty(&envelope.payload.agent_run_id, "agentRunId")?;
         validate_nonempty(&envelope.payload.app_id, "appId")?;
         validate_nonempty(&envelope.payload.external_message_id, "externalMessageId")?;
-        validate_nonempty(&envelope.payload.nonce, "nonce")?;
-        if envelope.payload.expected_view_version < 1 {
-            anyhow::bail!("expectedViewVersion must be positive");
-        }
-        if envelope.payload.expected_snapshot_sequence < 1 {
-            anyhow::bail!("expectedSnapshotSequence must be positive");
+        if envelope.payload.snapshot_sequence < 1 {
+            anyhow::bail!("snapshotSequence must be positive");
         }
         if !(1..=10_000).contains(&envelope.payload.page_count) {
             anyhow::bail!("pageCount must be between 1 and 10000");
         }
-        if !matches!(
-            envelope.payload.action.as_str(),
-            "execution_console_expand"
-                | "execution_console_collapse"
-                | "execution_console_prev_page"
-                | "execution_console_next_page"
-                | "execution_console_reconcile"
-        ) {
-            anyhow::bail!("unsupported execution console action");
+        if envelope.payload.page_index < 0
+            || envelope.payload.page_index >= envelope.payload.page_count
+        {
+            anyhow::bail!("pageIndex must address an available execution console page");
         }
-        let system_reconcile = envelope.payload.action == "execution_console_reconcile";
-        if !system_reconcile {
-            validate_owner_identity_input(
-                FEISHU_PROVIDER,
-                &envelope.payload.app_id,
-                "callback",
-                envelope.payload.operator_open_id.as_deref(),
-                envelope.payload.operator_user_id.as_deref(),
-                envelope.payload.operator_union_id.as_deref(),
-            )?;
-        }
+        validate_owner_identity_input(
+            FEISHU_PROVIDER,
+            &envelope.payload.app_id,
+            "callback",
+            envelope.payload.operator_open_id.as_deref(),
+            envelope.payload.operator_user_id.as_deref(),
+            envelope.payload.operator_union_id.as_deref(),
+        )?;
         self.gateway.execute(database, envelope, |transaction| {
             if !is_channel_host(&envelope.actor) {
                 return Ok(rejected(
                     "channel.host_required",
-                    "Only the trusted Feishu Channel Host can update an execution console card",
+                    "Only the trusted Feishu Channel Host can authorize an execution console page",
                 ));
             }
             let projection = transaction
                 .query_row(
                     r#"
-                    SELECT console.id, console.request_id, console.agent_id,
-                           console.target_app_id, console.external_message_id,
-                           console.latest_sequence, console.display_mode,
-                           console.page_index, console.view_version, console.state,
+                    SELECT console.target_app_id, console.external_message_id,
+                           console.latest_sequence, console.state,
                            owner.canonical_owner_principal_id
                     FROM channel_execution_console AS console
                     LEFT JOIN feishu_member_bot AS bot
@@ -3145,18 +3104,12 @@ impl ChannelService {
                     "#,
                     [&envelope.payload.agent_run_id],
                     |row| {
-                        Ok(ExecutionConsoleViewProjection {
-                            id: row.get(0)?,
-                            request_id: row.get(1)?,
-                            agent_id: row.get(2)?,
-                            target_app_id: row.get(3)?,
-                            external_message_id: row.get(4)?,
-                            latest_sequence: row.get(5)?,
-                            display_mode: row.get(6)?,
-                            page_index: row.get(7)?,
-                            view_version: row.get(8)?,
-                            state: row.get(9)?,
-                            owner_principal_id: row.get(10)?,
+                        Ok(ExecutionConsolePageProjection {
+                            target_app_id: row.get(0)?,
+                            external_message_id: row.get(1)?,
+                            latest_sequence: row.get(2)?,
+                            state: row.get(3)?,
+                            owner_principal_id: row.get(4)?,
                         })
                     },
                 )
@@ -3181,135 +3134,51 @@ impl ChannelService {
                     "This execution console card is no longer authoritative",
                 ));
             }
+            let Some(owner_principal_id) = projection.owner_principal_id.as_deref() else {
+                return Ok(rejected(
+                    "channel.execution_console.owner_required",
+                    "Only the verified Rovai Owner can operate this execution console card",
+                ));
+            };
             let now = Utc::now().to_rfc3339();
-            if !system_reconcile {
-                let Some(owner_principal_id) = projection.owner_principal_id.as_deref() else {
-                    return Ok(rejected(
-                        "channel.execution_console.owner_required",
-                        "Only the verified Rovai Owner can operate this execution console card",
-                    ));
-                };
-                if !operator_matches_feishu_owner(
-                    transaction,
-                    &envelope.payload.app_id,
-                    owner_principal_id,
-                    envelope.payload.operator_open_id.as_deref(),
-                    envelope.payload.operator_user_id.as_deref(),
-                    envelope.payload.operator_union_id.as_deref(),
-                    &now,
-                )? {
-                    return Ok(rejected(
-                        "channel.execution_console.owner_required",
-                        "Only the verified Rovai Owner can operate this execution console card",
-                    ));
-                }
+            if !operator_matches_feishu_owner(
+                transaction,
+                &envelope.payload.app_id,
+                owner_principal_id,
+                envelope.payload.operator_open_id.as_deref(),
+                envelope.payload.operator_user_id.as_deref(),
+                envelope.payload.operator_union_id.as_deref(),
+                &now,
+            )? {
+                return Ok(rejected(
+                    "channel.execution_console.owner_required",
+                    "Only the verified Rovai Owner can operate this execution console card",
+                ));
             }
-            if projection.state != "terminal"
-                || projection.view_version != envelope.payload.expected_view_version
-                || projection.latest_sequence != envelope.payload.expected_snapshot_sequence
-                || execution_console_view_nonce(
-                    &envelope.payload.agent_run_id,
-                    projection.view_version,
-                    projection.latest_sequence,
-                ) != envelope.payload.nonce
+            if projection.state != "terminal_sealed"
+                || projection.latest_sequence != envelope.payload.snapshot_sequence
             {
                 return Ok(CommandHandlerResult::rejected(
                     "channel.execution_console.stale_card",
                     json!({
-                        "message": "Execution console state has changed",
-                        "currentViewVersion": projection.view_version,
+                        "message": "Execution console snapshot has changed or is not sealed",
                         "currentSnapshotSequence": projection.latest_sequence,
                     }),
                 ));
             }
-            let transition = match envelope.payload.action.as_str() {
-                "execution_console_expand" if projection.display_mode == "collapsed" => {
-                    Some(("expanded", 0))
-                }
-                "execution_console_collapse" if projection.display_mode == "expanded" => {
-                    Some(("collapsed", 0))
-                }
-                "execution_console_prev_page"
-                    if projection.display_mode == "expanded" && projection.page_index > 0 =>
-                {
-                    Some(("expanded", projection.page_index - 1))
-                }
-                "execution_console_next_page"
-                    if projection.display_mode == "expanded"
-                        && projection.page_index + 1 < envelope.payload.page_count =>
-                {
-                    Some(("expanded", projection.page_index + 1))
-                }
-                "execution_console_reconcile"
-                    if projection.display_mode == "expanded"
-                        && projection.page_index >= envelope.payload.page_count =>
-                {
-                    Some(("expanded", envelope.payload.page_count - 1))
-                }
-                _ => None,
-            };
-            let Some((display_mode, page_index)) = transition else {
-                return Ok(rejected(
-                    "channel.execution_console.stale_card",
-                    "This execution console action no longer applies",
-                ));
-            };
-            let next_view_version = projection.view_version + 1;
-            let changed = transaction.execute(
-                r#"
-                UPDATE channel_execution_console
-                SET display_mode = ?2, page_index = ?3,
-                    view_version = ?4, updated_at = ?5
-                WHERE id = ?1 AND state = 'terminal'
-                  AND target_app_id = ?6 AND external_message_id = ?7
-                  AND latest_sequence = ?8 AND view_version = ?9
-                "#,
-                params![
-                    projection.id,
-                    display_mode,
-                    page_index,
-                    next_view_version,
-                    now,
-                    envelope.payload.app_id,
-                    envelope.payload.external_message_id,
-                    projection.latest_sequence,
-                    projection.view_version,
-                ],
-            )?;
-            if changed != 1 {
-                return Ok(rejected(
-                    "channel.execution_console.stale_card",
-                    "Execution console state changed before the view update",
-                ));
-            }
-            queue_execution_console_upsert(
-                transaction,
-                &projection.request_id,
-                &projection.id,
-                &envelope.payload.agent_run_id,
-                &projection.agent_id,
-                &projection.target_app_id,
-                projection.latest_sequence,
-                next_view_version,
-                &now,
-            )?;
-            Ok(CommandHandlerResult::applied(
-                "channel.execution_console.view_updated",
+            Ok(CommandHandlerResult::accepted(
+                "channel.execution_console.page_authorized",
                 json!({
                     "agentRunId": envelope.payload.agent_run_id,
-                    "displayMode": display_mode,
-                    "pageIndex": page_index,
-                    "viewVersion": next_view_version,
+                    "pageIndex": envelope.payload.page_index,
+                    "pageCount": envelope.payload.page_count,
                     "snapshotSequence": projection.latest_sequence,
-                    "nonce": execution_console_view_nonce(
-                        &envelope.payload.agent_run_id,
-                        next_view_version,
-                        projection.latest_sequence,
-                    ),
                     "externalMessageId": envelope.payload.external_message_id,
-                    "viewUpdateQueued": true,
                 }),
-                None,
+                Some(EntityReference {
+                    entity_type: "channel_execution_console".to_string(),
+                    entity_id: envelope.payload.agent_run_id.clone(),
+                }),
             ))
         })
     }
@@ -3364,6 +3233,8 @@ impl ChannelService {
                 envelope.payload.limit,
                 &now,
             )?;
+            let roster_refreshes =
+                crate::message_delivery::pending_topic_roster_refreshes(transaction)?;
             let retention_boundary =
                 (now - Duration::days(CHANNEL_TRANSPORT_RETENTION_DAYS)).to_rfc3339();
             transaction.execute(
@@ -3384,7 +3255,10 @@ impl ChannelService {
             )?;
             Ok(CommandHandlerResult::applied(
                 "channel.host.tick_completed",
-                json!({ "deliveries": claims }),
+                json!({
+                    "deliveries": claims,
+                    "rosterRefreshes": roster_refreshes,
+                }),
                 None,
             ))
         })
@@ -3711,42 +3585,40 @@ fn reconcile_bound_group_memberships(
         .into_iter()
         .collect::<BTreeSet<_>>();
 
-        if camp.conversation_kind == "group" {
-            for agent_id in desired_agents.difference(&active_managed_agents) {
-                let (membership_generation, reconciliation_generation) =
-                    channel_membership_generations(database, &camp.camp_id, &camp.binding_id)?;
-                let execution = CollaborationService::default().add_camp_member(
-                    database,
-                    &CommandEnvelope {
-                        command_id: format!(
-                            "{parent_command_id}:{}:add:{agent_id}:{reconciliation_generation}",
-                            camp.binding_id
-                        ),
-                        actor: ActorRef::System {
-                            component_id: CHANNEL_MEMBERSHIP_SYNC_COMPONENT.to_string(),
-                        },
-                        camp_id: Some(camp.camp_id.clone()),
-                        expected_versions: Vec::new(),
-                        execution_epoch: None,
-                        payload: AddCampMemberCommand {
-                            camp_id: camp.camp_id.clone(),
-                            agent_id: agent_id.clone(),
-                            expected_membership_generation: membership_generation,
-                            capability_overrides: json!({}),
-                            source: Some(CampMembershipMutationSource {
-                                namespace: FEISHU_PROVIDER.to_string(),
-                                binding_id: camp.binding_id.clone(),
-                                reconciliation_generation,
-                            }),
-                        },
+        for agent_id in desired_agents.difference(&active_managed_agents) {
+            let (membership_generation, reconciliation_generation) =
+                channel_membership_generations(database, &camp.camp_id, &camp.binding_id)?;
+            let execution = CollaborationService::default().add_camp_member(
+                database,
+                &CommandEnvelope {
+                    command_id: format!(
+                        "{parent_command_id}:{}:add:{agent_id}:{reconciliation_generation}",
+                        camp.binding_id
+                    ),
+                    actor: ActorRef::System {
+                        component_id: CHANNEL_MEMBERSHIP_SYNC_COMPONENT.to_string(),
                     },
-                )?;
-                if execution.result.status == CommandResultStatus::Rejected {
-                    anyhow::bail!(
-                        "Feishu roster member add rejected: {}",
-                        execution.result.code
-                    );
-                }
+                    camp_id: Some(camp.camp_id.clone()),
+                    expected_versions: Vec::new(),
+                    execution_epoch: None,
+                    payload: AddCampMemberCommand {
+                        camp_id: camp.camp_id.clone(),
+                        agent_id: agent_id.clone(),
+                        expected_membership_generation: membership_generation,
+                        capability_overrides: json!({}),
+                        source: Some(CampMembershipMutationSource {
+                            namespace: FEISHU_PROVIDER.to_string(),
+                            binding_id: camp.binding_id.clone(),
+                            reconciliation_generation,
+                        }),
+                    },
+                },
+            )?;
+            if execution.result.status == CommandResultStatus::Rejected {
+                anyhow::bail!(
+                    "Feishu roster member add rejected: {}",
+                    execution.result.code
+                );
             }
         }
 
@@ -3762,6 +3634,13 @@ fn reconcile_bound_group_memberships(
             if !preview.removable
                 || (preview.is_default_lead && preview.next_default_lead_agent_id.is_none())
             {
+                continue;
+            }
+            if camp.conversation_kind == "topic" && preview.non_terminal_agent_run_count > 0 {
+                // A remote roster change controls future admission. It must
+                // never cancel an AgentRun whose execution context was already
+                // frozen. A later reconciliation finalizes the membership once
+                // those Runs have reached terminal state.
                 continue;
             }
             let (_, reconciliation_generation) =
@@ -3904,16 +3783,10 @@ struct PendingBindingResolution {
 }
 
 #[derive(Debug)]
-struct ExecutionConsoleViewProjection {
-    id: String,
-    request_id: String,
-    agent_id: String,
+struct ExecutionConsolePageProjection {
     target_app_id: String,
     external_message_id: Option<String>,
     latest_sequence: i64,
-    display_mode: String,
-    page_index: i64,
-    view_version: i64,
     state: String,
     owner_principal_id: Option<String>,
 }
@@ -4074,17 +3947,6 @@ fn opaque_digest(namespace: &str, value: &str) -> String {
     hasher.update([0]);
     hasher.update(value.as_bytes());
     format!("sha256:{:x}", hasher.finalize())
-}
-
-fn execution_console_view_nonce(
-    agent_run_id: &str,
-    view_version: i64,
-    snapshot_sequence: i64,
-) -> String {
-    opaque_digest(
-        "execution-console-view",
-        &format!("{agent_run_id}\0{view_version}\0{snapshot_sequence}"),
-    )
 }
 
 fn validate_owner_identity_input(
@@ -6350,8 +6212,7 @@ fn materialize_execution_console(
     let existing = transaction
         .query_row(
             r#"
-            SELECT id, latest_sequence, latest_snapshot_digest, state,
-                   display_mode, page_index, view_version
+            SELECT id, latest_sequence, latest_snapshot_digest, state, updated_at
             FROM channel_execution_console WHERE agent_run_id = ?1
             "#,
             [agent_run_id],
@@ -6362,79 +6223,78 @@ fn materialize_execution_console(
                     row.get::<_, String>(2)?,
                     row.get::<_, String>(3)?,
                     row.get::<_, String>(4)?,
-                    row.get::<_, i64>(5)?,
-                    row.get::<_, i64>(6)?,
                 ))
             },
         )
         .optional()?;
     let terminal = matches!(run_status, "succeeded" | "failed" | "cancelled");
-    let state = if terminal {
-        "terminal"
-    } else if run_status == "queued" {
+    let live_state = if run_status == "queued" {
         "opening"
     } else {
         "active"
     };
-    let (console_id, latest_sequence, view_version, changed) = match existing {
+    let (console_id, latest_sequence, queue_upsert) = match existing {
         Some((
             console_id,
             latest_sequence,
             previous_digest,
             previous_state,
-            previous_display_mode,
-            previous_page_index,
-            previous_view_version,
+            previous_updated_at,
         )) => {
             if matches!(
                 previous_state.as_str(),
-                "recall_pending" | "recalled" | "recall_failed"
+                "terminal_sealed" | "recall_pending" | "recalled" | "recall_failed"
             ) {
                 return Ok(());
             }
-            if previous_digest == digest {
-                (console_id, latest_sequence, previous_view_version, false)
+            if terminal {
+                if previous_state != "terminal_pending" || previous_digest != digest {
+                    let next_sequence = latest_sequence + 1;
+                    transaction.execute(
+                        r#"
+                        UPDATE channel_execution_console
+                        SET latest_sequence = ?2, latest_snapshot_digest = ?3,
+                            state = 'terminal_pending', updated_at = ?4
+                        WHERE id = ?1
+                          AND state IN ('opening', 'active', 'terminal_pending')
+                        "#,
+                        params![console_id, next_sequence, digest, now],
+                    )?;
+                    (console_id, next_sequence, false)
+                } else if execution_console_terminal_quiet_window_elapsed(
+                    &previous_updated_at,
+                    now,
+                )? {
+                    let next_sequence = latest_sequence + 1;
+                    transaction.execute(
+                        r#"
+                        UPDATE channel_execution_console
+                        SET latest_sequence = ?2, state = 'terminal_sealed',
+                            updated_at = ?3
+                        WHERE id = ?1 AND state = 'terminal_pending'
+                          AND latest_sequence = ?4 AND latest_snapshot_digest = ?5
+                        "#,
+                        params![console_id, next_sequence, now, latest_sequence, digest],
+                    )?;
+                    (console_id, next_sequence, true)
+                } else {
+                    (console_id, latest_sequence, false)
+                }
+            } else if previous_digest == digest && previous_state == live_state {
+                (console_id, latest_sequence, false)
             } else {
                 let next_sequence = latest_sequence + 1;
-                let terminal_transition = terminal && previous_state != "terminal";
-                let display_mode = if terminal_transition {
-                    "collapsed"
-                } else if terminal {
-                    previous_display_mode.as_str()
-                } else {
-                    "live"
-                };
-                let page_index = if display_mode == "expanded" {
-                    previous_page_index
-                } else {
-                    0
-                };
-                let next_view_version = if terminal || previous_display_mode != display_mode {
-                    previous_view_version + 1
-                } else {
-                    previous_view_version
-                };
                 transaction.execute(
                     r#"
                     UPDATE channel_execution_console
                     SET latest_sequence = ?2, latest_snapshot_digest = ?3,
-                        state = ?4, display_mode = ?5, page_index = ?6,
-                        view_version = ?7, updated_at = ?8
+                        state = ?4, updated_at = ?5
                     WHERE id = ?1
-                      AND state IN ('opening', 'active', 'terminal')
+                      AND state IN ('opening', 'active', 'terminal_pending')
                     "#,
-                    params![
-                        console_id,
-                        next_sequence,
-                        digest,
-                        state,
-                        display_mode,
-                        page_index,
-                        next_view_version,
-                        now,
-                    ],
+                    params![console_id, next_sequence, digest, live_state, now,],
                 )?;
-                (console_id, next_sequence, next_view_version, true)
+                (console_id, next_sequence, true)
             }
         }
         None => {
@@ -6445,12 +6305,10 @@ fn materialize_execution_console(
                     id, agent_run_id, request_id, channel_conversation_id,
                     camp_turn_id, agent_id, target_app_id, external_message_id,
                     latest_sequence, delivered_sequence, latest_snapshot_digest,
-                    state, failure_code, created_at, updated_at, recalled_at,
-                    display_mode, page_index, view_version
+                    state, failure_code, created_at, updated_at, recalled_at
                 ) VALUES (
                     ?1, ?2, ?3, ?4, ?5, ?6, ?7, NULL,
-                    1, 0, ?8, ?9, NULL, ?10, ?10, NULL,
-                    ?11, 0, 1
+                    1, 0, ?8, ?9, NULL, ?10, ?10, NULL
                 )
                 "#,
                 params![
@@ -6462,15 +6320,18 @@ fn materialize_execution_console(
                     agent_id,
                     target_app_id,
                     digest,
-                    state,
+                    if terminal {
+                        "terminal_pending"
+                    } else {
+                        live_state
+                    },
                     now,
-                    if terminal { "collapsed" } else { "live" },
                 ],
             )?;
-            (console_id, 1, 1, true)
+            (console_id, 1, !terminal)
         }
     };
-    if !changed {
+    if !queue_upsert {
         return Ok(());
     }
     queue_execution_console_upsert(
@@ -6481,7 +6342,6 @@ fn materialize_execution_console(
         agent_id,
         target_app_id,
         latest_sequence,
-        view_version,
         now,
     )?;
     Ok(())
@@ -6496,7 +6356,6 @@ fn queue_execution_console_upsert(
     agent_id: &str,
     target_app_id: &str,
     latest_sequence: i64,
-    view_version: i64,
     now: &str,
 ) -> Result<()> {
     let payload = json!({
@@ -6504,7 +6363,6 @@ fn queue_execution_console_upsert(
         "executionConsoleId": console_id,
         "agentRunId": agent_run_id,
         "expectedSequence": latest_sequence,
-        "expectedViewVersion": view_version,
     });
     let coalesced = transaction.execute(
         r#"
@@ -6520,7 +6378,7 @@ fn queue_execution_console_upsert(
             transaction,
             request_id,
             console_id,
-            &format!("execution_console_upsert:{console_id}:{latest_sequence}:{view_version}"),
+            &format!("execution_console_upsert:{console_id}:{latest_sequence}"),
             "execution_console_upsert",
             target_app_id,
             Some(agent_id),
@@ -6529,6 +6387,15 @@ fn queue_execution_console_upsert(
         )?;
     }
     Ok(())
+}
+
+fn execution_console_terminal_quiet_window_elapsed(previous: &str, now: &str) -> Result<bool> {
+    let previous = chrono::DateTime::parse_from_rfc3339(previous)
+        .with_context(|| format!("invalid execution console updated_at {previous}"))?;
+    let now = chrono::DateTime::parse_from_rfc3339(now)
+        .with_context(|| format!("invalid execution console materialization time {now}"))?;
+    Ok(now.signed_duration_since(previous).num_milliseconds()
+        >= EXECUTION_CONSOLE_TERMINAL_QUIET_WINDOW_MILLISECONDS)
 }
 
 struct AgentAttachmentDeliveryContext<'a> {
@@ -7341,22 +7208,171 @@ mod tests {
         path
     }
 
-    fn execution_console_view_command(
+    fn insert_pending_topic_delivery(
+        database: &Database,
+        camp_id: &str,
+        recipient_agent_id: &str,
+    ) -> String {
+        let (camp_turn_id, source_agent_run_id): (String, String) = database
+            .connection()
+            .query_row(
+                r#"
+                SELECT run.camp_turn_id, run.id
+                FROM agent_run AS run
+                JOIN conversation ON conversation.id = run.conversation_id
+                WHERE conversation.camp_id = ?1 AND conversation.agent_id = 'agent_1'
+                LIMIT 1
+                "#,
+                [camp_id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        let recipient_membership_version: i64 = database
+            .connection()
+            .query_row(
+                r#"
+                SELECT version FROM camp_member
+                WHERE camp_id = ?1 AND agent_id = ?2
+                  AND status = 'active' AND leave_requested_at IS NULL
+                "#,
+                params![camp_id, recipient_agent_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let now = Utc::now().to_rfc3339();
+        database
+            .connection()
+            .execute(
+                r#"
+                UPDATE camp
+                SET last_message_sequence = last_message_sequence + 1,
+                    version = version + 1, updated_at = ?2
+                WHERE id = ?1
+                "#,
+                params![camp_id, now],
+            )
+            .unwrap();
+        let camp_sequence: i64 = database
+            .connection()
+            .query_row(
+                "SELECT last_message_sequence FROM camp WHERE id = ?1",
+                [camp_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let message_id = format!("topic-message-{recipient_agent_id}");
+        database
+            .connection()
+            .execute(
+                r#"
+                INSERT INTO camp_message(
+                    id, camp_id, sequence,
+                    author_type, author_id, source_agent_run_id, body,
+                    structured_content_json, content_digest,
+                    address_mode, addressed_agent_ids_json,
+                    camp_turn_id, agent_run_id,
+                    version, created_at, updated_at,
+                    effective_recipient_ids_json, recipient_set_digest,
+                    recipient_presentation_json, source_operation_id,
+                    agent_addressing_mode
+                ) VALUES (
+                    ?1, ?2, ?3,
+                    'agent', 'agent_1', ?4, '调用协作队员',
+                    '[{"kind":"text","text":"调用协作队员"}]', 'message-digest',
+                    'explicit', ?5,
+                    ?6, ?4,
+                    1, ?7, ?7,
+                    ?5, 'recipient-set-digest', '[]', ?1, 'automatic'
+                )
+                "#,
+                params![
+                    message_id,
+                    camp_id,
+                    camp_sequence,
+                    source_agent_run_id,
+                    serde_json::to_string(&vec![recipient_agent_id]).unwrap(),
+                    camp_turn_id,
+                    now,
+                ],
+            )
+            .unwrap();
+        let project_path: String = database
+            .connection()
+            .query_row(
+                "SELECT project_path FROM camp WHERE id = ?1",
+                [camp_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        database
+            .connection()
+            .execute(
+                "UPDATE agent_run SET workspace_json = ?2 WHERE id = ?1",
+                params![
+                    source_agent_run_id,
+                    serde_json::to_string(
+                        &crate::runtime::AgentRunWorkspace::runtime_managed_path(project_path)
+                    )
+                    .unwrap(),
+                ],
+            )
+            .unwrap();
+        let delivery_id = format!("topic-delivery-{recipient_agent_id}");
+        database
+            .connection()
+            .execute(
+                r#"
+                INSERT INTO message_delivery(
+                    id, camp_id, camp_turn_id, message_id,
+                    recipient_agent_id, recipient_canonical_position,
+                    recipient_digest, message_body_digest,
+                    source_agent_run_id, edge_kind,
+                    target_parent_agent_run_id, a2a_root_agent_run_id, a2a_depth,
+                    ancestor_agent_ids_json, recipient_presentation_snapshot_json,
+                    frozen_snapshot_json, delivery_kind, dispatch_disposition,
+                    completion_role, camp_message_boundary_sequence, queue_sequence,
+                    status, dispatch_phase, retry_generation,
+                    created_at, updated_at, recipient_membership_version_at_admission
+                ) VALUES (
+                    ?1, ?2, ?3, ?4, ?5, 0,
+                    'recipient-digest', 'message-digest',
+                    ?6, 'forward', ?6, ?6, 1,
+                    '[]', '{}',
+                    '{"schemaVersion":3,"deliveryKind":"public_a2a","dispatchDisposition":"dispatch","completionRole":"required"}',
+                    'public_a2a', 'dispatch', 'required', ?7, 1,
+                    'pending', 'never_attempted', 0, ?8, ?8, ?9
+                )
+                "#,
+                params![
+                    delivery_id,
+                    camp_id,
+                    camp_turn_id,
+                    message_id,
+                    recipient_agent_id,
+                    source_agent_run_id,
+                    camp_sequence,
+                    now,
+                    recipient_membership_version,
+                ],
+            )
+            .unwrap();
+        delivery_id
+    }
+
+    fn execution_console_page_command(
         source: &ChannelExecutionConsoleSourceView,
         app_id: &str,
         external_message_id: &str,
-        action: &str,
+        page_index: i64,
         page_count: i64,
         owner: bool,
-    ) -> UpdateChannelExecutionConsoleViewCommand {
-        UpdateChannelExecutionConsoleViewCommand {
+    ) -> AuthorizeChannelExecutionConsolePageCommand {
+        AuthorizeChannelExecutionConsolePageCommand {
             agent_run_id: source.agent_run_id.clone(),
             app_id: app_id.to_string(),
             external_message_id: external_message_id.to_string(),
-            expected_view_version: source.view.view_version,
-            expected_snapshot_sequence: source.sequence,
-            nonce: source.view.nonce.clone(),
-            action: action.to_string(),
+            snapshot_sequence: source.sequence,
+            page_index,
             page_count,
             operator_open_id: Some(if owner { "ou_user" } else { "ou_other" }.to_string()),
             operator_user_id: Some(if owner { "user_1" } else { "user_other" }.to_string()),
@@ -8330,8 +8346,7 @@ mod tests {
             .unwrap()
             .expect("the claimed console source must be readable");
         assert_eq!(console_source.run.status, "queued");
-        assert_eq!(console_source.view.mode, "live");
-        assert_eq!(console_source.view.page_index, 0);
+        assert_eq!(console_source.state, "opening");
         service
             .settle_delivery(
                 &mut database,
@@ -8507,10 +8522,48 @@ mod tests {
             delivery["deliveryKind"].as_str(),
             Some("agent_status" | "completion")
         )));
-        let terminal_console = claimed
+        assert!(
+            claimed
+                .iter()
+                .all(|delivery| { delivery["deliveryKind"] != "execution_console_upsert" })
+        );
+        let pending_state: String = database
+            .connection()
+            .query_row(
+                "SELECT state FROM channel_execution_console WHERE agent_run_id = ?1",
+                [&agent_run_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(pending_state, "terminal_pending");
+        database
+            .connection()
+            .execute(
+                "UPDATE channel_execution_console SET updated_at = ?2 WHERE agent_run_id = ?1",
+                params![
+                    agent_run_id,
+                    (Utc::now() - Duration::seconds(2)).to_rfc3339()
+                ],
+            )
+            .unwrap();
+        let sealed_tick = service
+            .host_tick(
+                &mut database,
+                &host_envelope(
+                    "host-tick-seal-channel-console",
+                    ChannelHostTickCommand {
+                        worker_id: "channel-test-worker".to_string(),
+                        limit: 20,
+                    },
+                ),
+            )
+            .unwrap();
+        let terminal_console = sealed_tick.result.payload["deliveries"]
+            .as_array()
+            .unwrap()
             .iter()
             .find(|delivery| delivery["deliveryKind"] == "execution_console_upsert")
-            .expect("the terminal snapshot must update the existing execution console");
+            .expect("the sealed terminal snapshot must update the existing execution console");
         assert_eq!(terminal_console["updateMessageId"], "om-console-1");
         let terminal_source = service
             .execution_console_source(
@@ -8523,22 +8576,33 @@ mod tests {
             .unwrap()
             .expect("the terminal execution console remains readable");
         assert_eq!(terminal_source.run.status, "failed");
-        assert_eq!(terminal_source.view.mode, "collapsed");
+        assert_eq!(terminal_source.state, "terminal_sealed");
         assert_eq!(
             terminal_source.external_message_id.as_deref(),
             Some("om-console-1")
         );
+        assert!(
+            service
+                .execution_console_source(
+                    &mut database,
+                    &agent_run_id,
+                    terminal_source.sequence - 1,
+                )
+                .unwrap()
+                .is_none(),
+            "an obsolete snapshot sequence must not read through to the sealed snapshot"
+        );
 
         let wrong_app = service
-            .update_execution_console_view(
+            .authorize_execution_console_page(
                 &mut database,
                 &host_envelope(
                     "execution-console-wrong-app",
-                    execution_console_view_command(
+                    execution_console_page_command(
                         &terminal_source,
                         "cli_other",
                         "om-console-1",
-                        "execution_console_expand",
+                        0,
                         2,
                         true,
                     ),
@@ -8551,15 +8615,15 @@ mod tests {
             "channel.execution_console.callback_app_mismatch"
         );
         let non_owner = service
-            .update_execution_console_view(
+            .authorize_execution_console_page(
                 &mut database,
                 &host_envelope(
                     "execution-console-non-owner",
-                    execution_console_view_command(
+                    execution_console_page_command(
                         &terminal_source,
                         "cli_app_1",
                         "om-console-1",
-                        "execution_console_expand",
+                        0,
                         2,
                         false,
                     ),
@@ -8571,162 +8635,158 @@ mod tests {
             non_owner.result.code,
             "channel.execution_console.owner_required"
         );
-        let expanded = service
-            .update_execution_console_view(
+        let view_state_before: (String, i64, i64) = database
+            .connection()
+            .query_row(
+                r#"
+                SELECT display_mode, page_index, view_version
+                FROM channel_execution_console WHERE agent_run_id = ?1
+                "#,
+                [&agent_run_id],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        let delivery_count_before: i64 = database
+            .connection()
+            .query_row("SELECT COUNT(*) FROM channel_delivery", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        let page_two = service
+            .authorize_execution_console_page(
                 &mut database,
                 &host_envelope(
-                    "execution-console-expand",
-                    execution_console_view_command(
+                    "execution-console-page-two",
+                    execution_console_page_command(
                         &terminal_source,
                         "cli_app_1",
                         "om-console-1",
-                        "execution_console_expand",
+                        1,
                         2,
                         true,
                     ),
                 ),
             )
             .unwrap();
-        assert_eq!(expanded.result.status, CommandResultStatus::Applied);
-        assert_eq!(expanded.result.payload["displayMode"], "expanded");
-        assert_eq!(
-            expanded.result.payload["viewVersion"].as_i64().unwrap(),
-            terminal_source.view.view_version + 1
-        );
-        let replay = service
-            .update_execution_console_view(
+        assert_eq!(page_two.result.status, CommandResultStatus::Accepted);
+        assert_eq!(page_two.result.payload["pageIndex"], 1);
+        let page_two_again = service
+            .authorize_execution_console_page(
                 &mut database,
                 &host_envelope(
-                    "execution-console-replay",
-                    execution_console_view_command(
+                    "execution-console-page-two-again",
+                    execution_console_page_command(
                         &terminal_source,
                         "cli_app_1",
                         "om-console-1",
-                        "execution_console_expand",
+                        1,
                         2,
                         true,
                     ),
                 ),
             )
             .unwrap();
-        assert_eq!(replay.result.status, CommandResultStatus::Rejected);
-        assert_eq!(replay.result.code, "channel.execution_console.stale_card");
-        let expanded_source = service
-            .execution_console_source(&mut database, &agent_run_id, terminal_source.sequence)
-            .unwrap()
-            .unwrap();
-        assert_eq!(expanded_source.view.mode, "expanded");
-        let next_page = service
-            .update_execution_console_view(
+        assert_eq!(page_two_again.result.status, CommandResultStatus::Accepted);
+        let stale_snapshot = service
+            .authorize_execution_console_page(
                 &mut database,
                 &host_envelope(
-                    "execution-console-next-page",
-                    execution_console_view_command(
-                        &expanded_source,
-                        "cli_app_1",
-                        "om-console-1",
-                        "execution_console_next_page",
-                        2,
-                        true,
-                    ),
-                ),
-            )
-            .unwrap();
-        assert_eq!(next_page.result.status, CommandResultStatus::Applied);
-        assert_eq!(next_page.result.payload["pageIndex"], 1);
-        let page_two_source = service
-            .execution_console_source(&mut database, &agent_run_id, terminal_source.sequence)
-            .unwrap()
-            .unwrap();
-        let reconciled_page = service
-            .update_execution_console_view(
-                &mut database,
-                &host_envelope(
-                    "execution-console-reconcile-page",
-                    UpdateChannelExecutionConsoleViewCommand {
-                        operator_open_id: None,
-                        operator_user_id: None,
-                        operator_union_id: None,
-                        ..execution_console_view_command(
-                            &page_two_source,
+                    "execution-console-stale-snapshot",
+                    AuthorizeChannelExecutionConsolePageCommand {
+                        snapshot_sequence: terminal_source.sequence - 1,
+                        ..execution_console_page_command(
+                            &terminal_source,
                             "cli_app_1",
                             "om-console-1",
-                            "execution_console_reconcile",
-                            1,
+                            0,
+                            2,
                             true,
                         )
                     },
                 ),
             )
             .unwrap();
-        assert_eq!(reconciled_page.result.status, CommandResultStatus::Applied);
-        assert_eq!(reconciled_page.result.payload["pageIndex"], 0);
-        let reconciled_source = service
-            .execution_console_source(&mut database, &agent_run_id, terminal_source.sequence)
-            .unwrap()
-            .unwrap();
-        let collapsed = service
-            .update_execution_console_view(
+        assert_eq!(stale_snapshot.result.status, CommandResultStatus::Rejected);
+        assert_eq!(
+            stale_snapshot.result.code,
+            "channel.execution_console.stale_card"
+        );
+        let wrong_message = service
+            .authorize_execution_console_page(
                 &mut database,
                 &host_envelope(
-                    "execution-console-collapse",
-                    execution_console_view_command(
-                        &reconciled_source,
+                    "execution-console-wrong-message",
+                    execution_console_page_command(
+                        &terminal_source,
                         "cli_app_1",
-                        "om-console-1",
-                        "execution_console_collapse",
+                        "om-console-obsolete",
+                        0,
                         2,
                         true,
                     ),
                 ),
             )
             .unwrap();
-        assert_eq!(collapsed.result.status, CommandResultStatus::Applied);
-        assert_eq!(collapsed.result.payload["displayMode"], "collapsed");
-        assert_eq!(collapsed.result.payload["pageIndex"], 0);
-        let collapsed_source = service
-            .execution_console_source(&mut database, &agent_run_id, terminal_source.sequence)
-            .unwrap()
+        assert_eq!(wrong_message.result.status, CommandResultStatus::Rejected);
+        assert_eq!(
+            wrong_message.result.code,
+            "channel.execution_console.stale_card"
+        );
+        let view_state_after: (String, i64, i64) = database
+            .connection()
+            .query_row(
+                r#"
+                SELECT display_mode, page_index, view_version
+                FROM channel_execution_console WHERE agent_run_id = ?1
+                "#,
+                [&agent_run_id],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
             .unwrap();
-        let expanded_again = service
-            .update_execution_console_view(
+        let delivery_count_after: i64 = database
+            .connection()
+            .query_row("SELECT COUNT(*) FROM channel_delivery", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(view_state_after, view_state_before);
+        assert_eq!(delivery_count_after, delivery_count_before);
+        database
+            .connection()
+            .execute(
+                "UPDATE agent_run SET version = version + 1 WHERE id = ?1",
+                [&agent_run_id],
+            )
+            .unwrap();
+        let after_seal_tick = service
+            .host_tick(
                 &mut database,
                 &host_envelope(
-                    "execution-console-expand-again",
-                    execution_console_view_command(
-                        &collapsed_source,
-                        "cli_app_1",
-                        "om-console-1",
-                        "execution_console_expand",
-                        2,
-                        true,
-                    ),
+                    "host-tick-after-console-sealed",
+                    ChannelHostTickCommand {
+                        worker_id: "channel-test-worker".to_string(),
+                        limit: 20,
+                    },
                 ),
             )
             .unwrap();
-        assert_eq!(expanded_again.result.status, CommandResultStatus::Applied);
-        let expanded_again_source = service
-            .execution_console_source(&mut database, &agent_run_id, terminal_source.sequence)
-            .unwrap()
-            .unwrap();
-        let next_page_again = service
-            .update_execution_console_view(
-                &mut database,
-                &host_envelope(
-                    "execution-console-next-page-again",
-                    execution_console_view_command(
-                        &expanded_again_source,
-                        "cli_app_1",
-                        "om-console-1",
-                        "execution_console_next_page",
-                        2,
-                        true,
-                    ),
-                ),
+        assert!(
+            after_seal_tick.result.payload["deliveries"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .all(|delivery| delivery["deliveryKind"] != "execution_console_upsert"),
+            "a sealed console must ignore later background materialization changes"
+        );
+        let sealed_sequence: i64 = database
+            .connection()
+            .query_row(
+                "SELECT latest_sequence FROM channel_execution_console WHERE agent_run_id = ?1",
+                [&agent_run_id],
+                |row| row.get(0),
             )
             .unwrap();
-        assert_eq!(next_page_again.result.status, CommandResultStatus::Applied);
-        assert_eq!(next_page_again.result.payload["pageIndex"], 1);
+        assert_eq!(sealed_sequence, terminal_source.sequence);
         assert!(
             claimed
                 .iter()
@@ -8852,10 +8912,9 @@ mod tests {
         let restored = service
             .execution_console_source(&mut restarted, &agent_run_id, terminal_source.sequence)
             .unwrap()
-            .expect("execution console view state must survive restart");
-        assert_eq!(restored.view.mode, "expanded");
-        assert_eq!(restored.view.page_index, 1);
-        assert!(restored.view.view_version > terminal_source.view.view_version);
+            .expect("the sealed execution console snapshot must survive restart");
+        assert_eq!(restored.state, "terminal_sealed");
+        assert_eq!(restored.sequence, terminal_source.sequence);
     }
 
     #[test]
@@ -10114,7 +10173,7 @@ mod tests {
     }
 
     #[test]
-    fn topic_membership_is_added_on_a2a_need_not_on_parent_roster_sync() {
+    fn topic_membership_tracks_parent_roster_without_expanding_initial_targets() {
         let mut database = seeded_runtime_database_owned();
         let service = ChannelService::default();
         connect_account(&service, &mut database);
@@ -10182,15 +10241,61 @@ mod tests {
                     |row| row.get::<_, i64>(0),
                 )
                 .unwrap(),
-            1,
-            "parent roster sync must not pollute historical topic Camps"
+            2,
+            "a Topic Camp starts from the full present parent Bot roster"
         );
+        assert_eq!(
+            database
+                .connection()
+                .query_row(
+                    r#"
+                    SELECT COUNT(*)
+                    FROM agent_run
+                    JOIN camp_turn ON camp_turn.id = agent_run.camp_turn_id
+                    WHERE camp_turn.camp_id = ?1
+                    "#,
+                    [camp_id],
+                    |row| row.get::<_, i64>(0),
+                )
+                .unwrap(),
+            1,
+            "only the explicitly mentioned Bot receives the initial AgentRun"
+        );
+        assert_eq!(
+            database
+                .connection()
+                .query_row(
+                    r#"
+                    SELECT conversation.agent_id
+                    FROM agent_run
+                    JOIN conversation ON conversation.id = agent_run.conversation_id
+                    JOIN camp_turn ON camp_turn.id = agent_run.camp_turn_id
+                    WHERE camp_turn.camp_id = ?1
+                    "#,
+                    [camp_id],
+                    |row| row.get::<_, String>(0),
+                )
+                .unwrap(),
+            "agent_1"
+        );
+
+        publish_bot(&service, &mut database, "agent_3", "cli_app_3");
         service
-            .ensure_topic_a2a_members(
+            .reconcile_feishu_group_roster(
                 &mut database,
-                camp_id,
-                &["agent_2".to_string()],
-                "topic-a2a",
+                &host_envelope(
+                    "topic-roster-added-agent-three",
+                    ReconcileFeishuGroupRosterCommand {
+                        provider: FEISHU_PROVIDER.to_string(),
+                        tenant_key: "tenant_1".to_string(),
+                        chat_id: "oc_topic_group".to_string(),
+                        present_app_ids: vec![
+                            "cli_app_1".to_string(),
+                            "cli_app_2".to_string(),
+                            "cli_app_3".to_string(),
+                        ],
+                    },
+                ),
             )
             .unwrap();
         assert_eq!(
@@ -10202,8 +10307,296 @@ mod tests {
                     |row| row.get::<_, i64>(0),
                 )
                 .unwrap(),
-            2,
-            "the first A2A need should reuse camp.member.add"
+            3,
+            "adding a parent-group Bot updates an existing Topic Camp"
+        );
+        assert_eq!(
+            database
+                .connection()
+                .query_row(
+                    r#"
+                    SELECT COUNT(*)
+                    FROM agent_run
+                    JOIN camp_turn ON camp_turn.id = agent_run.camp_turn_id
+                    WHERE camp_turn.camp_id = ?1
+                    "#,
+                    [camp_id],
+                    |row| row.get::<_, i64>(0),
+                )
+                .unwrap(),
+            1,
+            "roster reconciliation never creates an AgentRun"
+        );
+
+        let delivery_id = insert_pending_topic_delivery(&database, camp_id, "agent_3");
+        let generation_before_dispatch: i64 = database
+            .connection()
+            .query_row(
+                r#"
+                SELECT generation FROM external_group_bot_roster_state
+                WHERE provider = 'feishu' AND tenant_key = 'tenant_1'
+                  AND chat_id = 'oc_topic_group'
+                "#,
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            crate::message_delivery::dispatch_delivery(
+                &mut database,
+                &delivery_id,
+                crate::message_delivery::DeliveryDispatchTrigger::Accepted,
+                true,
+            )
+            .unwrap(),
+            crate::message_delivery::DeliveryDispatchOutcome::Waiting {
+                condition: "runtime_unavailable".to_string(),
+            },
+            "an internal Topic delivery must wait for a newer Host roster observation"
+        );
+        let tick = service
+            .host_tick(
+                &mut database,
+                &host_envelope(
+                    "topic-roster-refresh-tick",
+                    ChannelHostTickCommand {
+                        worker_id: "topic-roster-test-host".to_string(),
+                        limit: 20,
+                    },
+                ),
+            )
+            .unwrap();
+        assert_eq!(
+            tick.result.payload["rosterRefreshes"],
+            json!([{
+                "provider": "feishu",
+                "tenantKey": "tenant_1",
+                "chatId": "oc_topic_group",
+                "requiredRosterGeneration": generation_before_dispatch + 1,
+            }]),
+            "the Host pump must receive the exact parent-group refresh request"
+        );
+        assert_eq!(
+            database
+                .connection()
+                .query_row(
+                    "SELECT COUNT(*) FROM agent_run WHERE trigger_message_delivery_id = ?1",
+                    [&delivery_id],
+                    |row| row.get::<_, i64>(0),
+                )
+                .unwrap(),
+            0,
+            "no AgentRun exists before the requested generation is reconciled"
+        );
+        service
+            .reconcile_feishu_group_roster(
+                &mut database,
+                &host_envelope(
+                    "topic-roster-release-delivery",
+                    ReconcileFeishuGroupRosterCommand {
+                        provider: FEISHU_PROVIDER.to_string(),
+                        tenant_key: "tenant_1".to_string(),
+                        chat_id: "oc_topic_group".to_string(),
+                        present_app_ids: vec![
+                            "cli_app_1".to_string(),
+                            "cli_app_2".to_string(),
+                            "cli_app_3".to_string(),
+                        ],
+                    },
+                ),
+            )
+            .unwrap();
+        let (delivery_status, recipient_agent_id): (String, String) = database
+            .connection()
+            .query_row(
+                r#"
+                SELECT delivery.status, conversation.agent_id
+                FROM message_delivery AS delivery
+                JOIN agent_run AS run ON run.id = delivery.target_agent_run_id
+                JOIN conversation ON conversation.id = run.conversation_id
+                WHERE delivery.id = ?1
+                "#,
+                [&delivery_id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(delivery_status, "running");
+        assert_eq!(recipient_agent_id, "agent_3");
+
+        let leaving_delivery_id = insert_pending_topic_delivery(&database, camp_id, "agent_2");
+        assert!(matches!(
+            crate::message_delivery::dispatch_delivery(
+                &mut database,
+                &leaving_delivery_id,
+                crate::message_delivery::DeliveryDispatchTrigger::Accepted,
+                true,
+            )
+            .unwrap(),
+            crate::message_delivery::DeliveryDispatchOutcome::Waiting { .. }
+        ));
+
+        service
+            .reconcile_feishu_group_roster(
+                &mut database,
+                &host_envelope(
+                    "topic-roster-removed-agent-two",
+                    ReconcileFeishuGroupRosterCommand {
+                        provider: FEISHU_PROVIDER.to_string(),
+                        tenant_key: "tenant_1".to_string(),
+                        chat_id: "oc_topic_group".to_string(),
+                        present_app_ids: vec!["cli_app_1".to_string(), "cli_app_3".to_string()],
+                    },
+                ),
+            )
+            .unwrap();
+        let (removed_status, initial_run_cancel_requested_at): (String, Option<String>) = database
+            .connection()
+            .query_row(
+                r#"
+                SELECT removed.status, initial_run.cancel_requested_at
+                FROM camp_member AS removed
+                JOIN camp_turn ON camp_turn.camp_id = removed.camp_id
+                JOIN agent_run AS initial_run ON initial_run.camp_turn_id = camp_turn.id
+                WHERE removed.camp_id = ?1 AND removed.agent_id = 'agent_2'
+                "#,
+                [camp_id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(removed_status, "left");
+        assert_eq!(
+            initial_run_cancel_requested_at, None,
+            "removing another Bot must not disturb the already-created AgentRun"
+        );
+        let (leaving_delivery_status, leaving_target_run_count): (String, i64) = database
+            .connection()
+            .query_row(
+                r#"
+                SELECT delivery.status, COUNT(run.id)
+                FROM message_delivery AS delivery
+                LEFT JOIN agent_run AS run ON run.trigger_message_delivery_id = delivery.id
+                WHERE delivery.id = ?1
+                GROUP BY delivery.id
+                "#,
+                [&leaving_delivery_id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert!(matches!(
+            leaving_delivery_status.as_str(),
+            "failed" | "cancelled"
+        ));
+        assert_eq!(
+            leaving_target_run_count, 0,
+            "a Bot removed by the fresh roster cannot receive the pending next AgentRun"
+        );
+        {
+            let transaction = database.connection_mut().transaction().unwrap();
+            assert!(
+                crate::message_delivery::topic_channel_recipient_is_present(
+                    &transaction,
+                    camp_id,
+                    "agent_3",
+                )
+                .unwrap()
+            );
+            assert!(
+                !crate::message_delivery::topic_channel_recipient_is_present(
+                    &transaction,
+                    camp_id,
+                    "agent_2",
+                )
+                .unwrap(),
+                "A2A/Gather retry materialization must reject a Bot that left the parent group"
+            );
+            transaction.commit().unwrap();
+        }
+        service
+            .ensure_topic_roster_members(
+                &mut database,
+                camp_id,
+                &["agent_3".to_string()],
+                "topic-a2a-present",
+            )
+            .unwrap();
+        let removed_target = service.ensure_topic_roster_members(
+            &mut database,
+            camp_id,
+            &["agent_2".to_string()],
+            "topic-a2a-removed",
+        );
+        assert!(
+            removed_target
+                .unwrap_err()
+                .to_string()
+                .contains("channel.topic_bot_not_in_roster"),
+            "A2A/Gather to a Bot that left the parent group must fail closed"
+        );
+
+        service
+            .reconcile_feishu_group_roster(
+                &mut database,
+                &host_envelope(
+                    "topic-roster-running-agent-left",
+                    ReconcileFeishuGroupRosterCommand {
+                        provider: FEISHU_PROVIDER.to_string(),
+                        tenant_key: "tenant_1".to_string(),
+                        chat_id: "oc_topic_group".to_string(),
+                        present_app_ids: vec!["cli_app_3".to_string()],
+                    },
+                ),
+            )
+            .unwrap();
+        let (running_member_status, running_member_cancel_requested_at): (String, Option<String>) =
+            database
+                .connection()
+                .query_row(
+                    r#"
+                SELECT member.status, run.cancel_requested_at
+                FROM camp_member AS member
+                JOIN camp_turn ON camp_turn.camp_id = member.camp_id
+                JOIN agent_run AS run ON run.camp_turn_id = camp_turn.id
+                JOIN conversation ON conversation.id = run.conversation_id
+                WHERE member.camp_id = ?1 AND member.agent_id = 'agent_1'
+                  AND conversation.agent_id = 'agent_1'
+                "#,
+                    [camp_id],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                )
+                .unwrap();
+        assert_eq!(
+            running_member_status, "active",
+            "membership cutover is deferred while an AgentRun still uses the frozen lifetime"
+        );
+        assert_eq!(
+            running_member_cancel_requested_at, None,
+            "a Bot leaving the parent group must not cancel its already-created AgentRun"
+        );
+        {
+            let transaction = database.connection_mut().transaction().unwrap();
+            assert!(
+                !crate::message_delivery::topic_channel_recipient_is_present(
+                    &transaction,
+                    camp_id,
+                    "agent_1",
+                )
+                .unwrap(),
+                "a deferred membership cutover must still fail-close every new AgentRun"
+            );
+            transaction.commit().unwrap();
+        }
+        let running_removed_target = service.ensure_topic_roster_members(
+            &mut database,
+            camp_id,
+            &["agent_1".to_string()],
+            "topic-a2a-running-removed",
+        );
+        assert!(
+            running_removed_target
+                .unwrap_err()
+                .to_string()
+                .contains("channel.topic_bot_not_in_roster"),
+            "the frozen Run may finish, but no new A2A/Gather may target its removed Bot"
         );
     }
 

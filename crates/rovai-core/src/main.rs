@@ -85,13 +85,12 @@ use rovai_core::{
     camp_id::CampId,
     camp_open::CampOpenService,
     channel::{
-        AdvanceMemberBotPublicationIntentCommand, ChannelHostTickCommand, ChannelService,
-        CreateMemberBotPublicationIntentCommand, DisconnectFeishuAccountCommand,
-        ExpireFeishuAccountCommand, FinalizeChannelInboundCommand, ObserveChannelInboundCommand,
-        ReconcileFeishuGroupRosterCommand, ResolvePendingCampBindingCommand,
-        SettleChannelDeliveryCommand, StartNewFeishuDmCommand,
-        UpdateChannelExecutionConsoleViewCommand, UpsertFeishuAccountCommand,
-        UpsertFeishuMemberBotCommand, VerifyFeishuOwnerCommand,
+        AdvanceMemberBotPublicationIntentCommand, AuthorizeChannelExecutionConsolePageCommand,
+        ChannelHostTickCommand, ChannelService, CreateMemberBotPublicationIntentCommand,
+        DisconnectFeishuAccountCommand, ExpireFeishuAccountCommand, FinalizeChannelInboundCommand,
+        ObserveChannelInboundCommand, ReconcileFeishuGroupRosterCommand,
+        ResolvePendingCampBindingCommand, SettleChannelDeliveryCommand, StartNewFeishuDmCommand,
+        UpsertFeishuAccountCommand, UpsertFeishuMemberBotCommand, VerifyFeishuOwnerCommand,
     },
     collaboration::{
         AddCampMemberCommand, CampActivationState, CampCollaborationMode, ChangeDefaultLeadCommand,
@@ -5002,11 +5001,11 @@ impl Core {
                     )?,
                 )?)
             }
-            "channels.executionConsole.view.update" => {
-                let params: UserCommandParams<UpdateChannelExecutionConsoleViewCommand> =
+            "channels.executionConsole.page.authorize" => {
+                let params: UserCommandParams<AuthorizeChannelExecutionConsolePageCommand> =
                     serde_json::from_value(request.params.clone())?;
                 let mut database = self.database.lock().await;
-                let execution = ChannelService::default().update_execution_console_view(
+                let execution = ChannelService::default().authorize_execution_console_page(
                     &mut database,
                     &system_command_envelope(
                         params.command_id,

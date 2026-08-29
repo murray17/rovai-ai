@@ -159,7 +159,8 @@ WebSocket。只有最新 exact `attemptId` 可以更新 UI；取消/切换会 ab
 必须在新的非持久 Electron Session 中打开二维码，旧 Session 与加密 Cookie store 在新身份完整读取并安全保存前保持
 不变。新 Cookie jar 安全写入后先成为可回滚 staged replacement；只有新 identity upsert 在 Core 成功，才确认替换并
 清理旧内存 Session。取消、超时、页面失败、安全存储失败或 Core upsert 失败都会丢弃/回滚 staged replacement，当前
-账号继续 connected；成功的 Core 事务把此前 connected account 变为 disconnected。显式
+账号继续 connected；其中用户取消是成功 no-op，清除 exact attempt 且不得形成 Renderer 页面 alert、toast 或 failed QR
+presentation。成功的 Core 事务把此前 connected account 变为 disconnected。显式
 disconnect 才直接删除当前 Developer Session 并断开 current account；已有 Bot credential、映射和 WebSocket 不删除、
 不迁移、不停用。
 开放平台已经到达但连续 20 秒仍不能产生完整必需身份时，attempt 必须以
@@ -392,13 +393,28 @@ Aggregate identity 是 `provider + tenant + digest(externalMessageId)`，observa
 Finalize 必须重查 Owner、observation 时冻结的 exact binding 与 project/roster readiness。p2p 没有 binding 时自动建立
 Quick Chat generation/Camp；普通群或话题没有 binding 时只追加 PendingCampBinding FIFO 并终结 aggregate，不创建
 ChannelTurnRequest 或业务消息。项目卡 resolve 后创建 Camp：普通群初始成员是父群 roster 中全部 present/published
-Bot；p2p 和话题初始成员只含当前 targets。默认 Lead 使用稳定 Agent ID order；Camp 同时建立 `feishu` membership
-source binding。
+Bot；话题初始成员同样是父群 roster 中全部 present/published Rovai Bot，p2p 初始成员才只含当前 targets。默认 Lead
+使用稳定 Agent ID order；Camp 同时建立 `feishu` membership source binding。话题首条根消息的初始 AgentRun targets
+必须严格保持为当前 canonical mentions，不能因为 Camp 已含完整 roster 而扩大。
 
 父群 roster 输入必须是 Host 对所有 published Bot 完成的 authoritative `presentAppIds` 快照。每个快照推进
 roster generation；未知 App 拒绝。普通群对 desired/current 差异调用 Camp Membership v1 正式 add/remove。
-话题不因父群新增 Bot自动添加；显式 topic mention 或 A2A exact target 只有在父群 present/published 时按需 add。
-Bot 缺失或 roster 未建立分别拒绝 `channel.bot_not_in_roster` / `channel.roster_sync_required`。
+话题把父群当前 present/published roster 作为动态默认协作队员池：每次完整快照都对该父群所有 active Topic binding
+执行同一 desired/current membership reconciliation。新增 Bot 从同步后的下一次 Run 起可被 Core A2A/Gather 直接使用，
+不要求曾在 Topic 中被 Owner mention；移出 Bot 从同步后的下一次 Run 起不能再创建 AgentRun。历史消息、Run、Camp、
+Topic identity 与冻结项目不得因 roster 变化重建或删除。
+
+Host 至少在新 Topic 建 Camp、既有 Topic 的每条 Owner 根消息及项目卡 resolve 前重读完整快照；Bot add/remove event 和
+周期性 sweep 只作为额外恢复边界，不能替代全量读取。内部 A2A、Gather、Message Delivery retry/successor 在物化新的
+Topic AgentRun 前必须先持久等待一个晚于当前值的 roster generation。`channels.host.tick` 返回去重后的
+`rosterRefreshes[{provider, tenantKey, chatId, requiredRosterGeneration}]`；Host 强制读取并提交新快照后，Core 先完成
+membership reconciliation，再恢复满足 generation 的 Delivery。读取或回写失败时 Delivery 保持等待，不得使用旧 roster
+创建 Run。
+
+移出 Bot 若仍有非终态 AgentRun，membership remove 可以延迟，且不得向既有 Run 写 cancel；但 latest roster 必须立即
+作为 future-admission fence，使任何新的根目标、A2A/Gather target 和 Delivery materialization fail closed。Run 终态后
+后续 reconciliation 完成正式 membership cutover。Bot 缺失或 roster 未建立分别拒绝
+`channel.bot_not_in_roster` / `channel.roster_sync_required`。
 
 一个 finalized aggregate恰好创建一个 `ChannelTurnRequest`：
 
@@ -460,39 +476,54 @@ CampTurn、Agent、目标 App 与外部 message ID，使用单调 snapshot seque
 
 ```ts
 type ChannelExecutionConsoleState =
-  | 'opening' | 'active' | 'terminal'
+  | 'opening' | 'active' | 'terminal_pending' | 'terminal_sealed'
   | 'recall_pending' | 'recalled' | 'recall_failed'
-
-type ChannelExecutionConsoleDisplayMode = 'live' | 'collapsed' | 'expanded'
 ```
 
-投影同时持久保存 `displayMode`、非负 `pageIndex` 和单调 `viewVersion`。非终态强制 `live`；Run 第一次进入
-`succeeded | failed | cancelled` 时自动切到 `collapsed/page 0`。终态后由 Owner 卡片 action 在
-`collapsed <-> expanded` 间切换，重启不得丢失 mode/page/version。终态 snapshot sequence 增长时保留当前 mode，
-递增 `viewVersion` 使旧按钮失效；若重新分页后页码越界，可信 Host 使用同一 CAS 命令把它钳制到最后一页。
+Run 第一次进入 `succeeded | failed | cancelled` 时，控制台转为 `terminal_pending`，记录候选 sequence/digest 和公开
+evidence/output 的最近变化时间，但不发送终态 upsert。连续 900ms quiet window 内候选没有变化后，Core 递增 sequence、转为
+`terminal_sealed` 并只排一条最终 `execution_console_upsert`。sealed 后所有常规 materialization 都是 no-op；重启必须保留
+sealed 状态。下一条 root request 仍可把 sealed 控制台转入 recall 生命周期。
 
 Core 从公开 Execution Evidence、AgentRun 状态、稳定 `startedAt/endedAt` 和已提交公开输出生成可合并的
-`execution_console_upsert`；Main 与 Renderer 复用同一纯 presentation 模块，隐藏
+`execution_console_upsert`；Main 与 Renderer 复用 shared execution presentation 的同一安全 `publicCommand`、时序和状态，隐藏
 `agent.reasoning.summary.delta`、`agent.thought.delta`，保留公开 narration、plan、diagnostic、tool/activity 与
-execution-console Agent output。`live` 始终完整展开且没有收起按钮。终态默认只显示状态、公开 presentation 计算出的
-操作统计、稳定用时和安全失败摘要；没有操作时不得显示零项。`expanded` 按真实顺序展示全部公开 block，连续工具只可加
-“操作组”视觉标题，组内每项都必须平铺，禁止用不可继续展开的“已执行 N 项操作”替代。
+execution-console Agent output。运行中与终态都按真实顺序平铺所有 block；终态增加稳定用时，但不得显示“已执行 N 项”、
+查看/收起动作、终态摘要或工具组折叠。
 
-详情超过单卡预算时只按 narration、plan、diagnostic、工具项/组和 Agent output 等语义 block 分页；不得切开单个工具、
-文件变化列表或 Markdown code block。每页仍更新同一 external message，提供适用的上一页、下一页和收起动作。Card action
-闭集为 `execution_console_expand | execution_console_collapse | execution_console_prev_page |
-execution_console_next_page`，value 只含 action、`agentRunId`、`expectedViewVersion`、
-`expectedSnapshotSequence` 和 version-bound nonce，不含正文或身份声明。
+`publicCommand` 必须由 shared presentation 从可信 Execution Evidence 生成，并同时供 Rovai 本机执行台与飞书消费。它保留
+executable、subcommand、flags、相对/绝对路径和非敏感参数，不翻译、不截断成命令名。自由消息正文、Authorization、Secret、
+Token、Cookie 和环境变量值继续按本机规则脱敏。飞书不得从原始 command payload、`detail` 或 output 二次解析；不得显示
+stdin、stdout、stderr、aggregated output、tool input/output JSON、完整消息 body 或完整 patch body，也不得由 stderr 生成
+失败正文。`apply_patch` 只显示操作名和结构化文件路径、additions/deletions；其他 file changes 同样紧随所属 command。
 
-`channels.executionConsole.view.update` 是 Host-only Core 命令。外部 action 必须同时证明 callback envelope 的真实
-operator 是 Owner、receiving App 等于冻结 target App、clicked message ID 等于 authoritative external message、Run/
-projection 仍为 terminal、snapshot sequence/view version/nonce 全部匹配且动作适用于当前页；旧卡、双击、重放、错误
-App 与 non-owner 都 fail closed。成功 mutation 递增 view version、旋转 version-bound nonce，并 durable coalesce 一条
-原卡 upsert；Main 重新读取最新 Core snapshot 后调用 `updateCard(externalMessageId)`，不新增消息，也不使用 callback 缓存
-正文。Main 只由该 Agent 的冻结 App 创建或更新 Card 2.0；同一 App 不能修改其他 Bot 的控制台。
+sealed 详情超过单卡预算时按 narration、plan、diagnostic、单条 command 连同 file changes、Agent output 等语义 block 依次
+分页；不得合并 command，也不得切开单个 block 或 Markdown code block。每页最多 20 条 command 且总文本约不超过
+10,000 字符。只有多页时显示上一页/页码/下一页；第一页和最后一页分别不提供无效方向按钮。Card action 闭集只有
+`execution_console_page`，value 形状固定为：
 
-下一条 root request admission 把该 ChannelConversation 中更早 Turn 的控制台转为 `recall_pending`，无论旧卡处于
-collapsed、expanded 或任意页，都等待其在途 upsert 结束后由原 App recall；不存在或已被飞书撤回的消息按幂等成功收口。
+```ts
+{
+  action: 'execution_console_page'
+  agentRunId: string
+  snapshotSequence: number
+  pageIndex: number
+}
+```
+
+所有 Card 2.0 action 必须使用 `column_set -> column -> button`，并通过
+`behaviors: [{ type: 'callback', value }]` 触发回调；不得把旧式顶层 `value` 按钮伪装成可操作入口。
+
+`channels.executionConsole.page.authorize` 是 Host-only Core 授权命令，不修改 execution-console projection。外部 action 必须
+同时证明 callback envelope 的真实 operator 是 Owner、receiving App 等于冻结 target App、clicked message ID 等于
+authoritative external message、projection 是 `terminal_sealed`、snapshot sequence 精确匹配且页码在可信 Host 提供的
+page count 内；旧 snapshot、错误 App/message、越界页与 non-owner 都 fail closed。同一 exact action 可重复授权，不依赖
+nonce 或 view version。成功后 Main 从 sealed source 渲染请求页并且只调用一次 `updateCard(externalMessageId)`；翻页不排
+`execution_console_upsert`、不调用 delivery pump、不新增消息，也不使用 callback 缓存正文。同一 App 不能修改其他 Bot 的
+控制台。
+
+下一条 root request admission 把该 ChannelConversation 中更早 Turn 的控制台转为 `recall_pending`，无论 sealed 卡当前
+显示任意页，都等待其在途 upsert 结束后由原 App recall；不存在或已被飞书撤回的消息按幂等成功收口。
 
 `agent_output` 是实际作者 Bot 发送的永久、无标题 Markdown 消息，永远不复用/更新控制台、queue ack 或更早输出。
 作者不可用时生成 attention，不由 ack Bot 冒充。group/topic 中结构化 `CurrentUserMention` 只有找到原始
@@ -529,8 +560,9 @@ configuring_permissions | waiting_configuration | publishing_version | verifying
 “继续核对”，true unknown 且无 App ID 时不提供重建入口；原始固定错误码只作为次级诊断信息展示。
 
 启动恢复依次：恢复所有 published Bot 长连接；周期性重取已知父群 roster；finalize 已 ready 的 collecting
-aggregate；Host tick 迁移旧 private picker、终结超时 pending picker/aggregate、投影/coalesce execution console、永久
-正文与附件、结算 terminal request、提升 FIFO、建立旧控制台 recall 并按 priority 领取 Outbox。
+aggregate；Host tick 返回 Topic Delivery 等待的 exact roster refresh、迁移旧 private picker、终结超时 pending
+picker/aggregate、投影/coalesce execution console、永久正文与附件、结算 terminal request、提升 FIFO、建立旧控制台
+recall 并按 priority 领取 Outbox。Host 必须先处理 roster refresh，再发送本 tick 的普通 ChannelDelivery。
 所有步骤依赖持久 Core facts，不能从 Renderer 状态或飞书最近历史重建。
 
 ## 9. Data Contract
@@ -549,13 +581,19 @@ generation-aware conversation binding、PendingCampBinding/FIFO message 和 proj
 output 与 attention 保留。原会话 picker 复用现有 `project_selection` kind、external message ID 和 additive payload
 operation。Migration 120 升到 `Data Contract v1.33 / projection schema 74`，为既有
 `channel_execution_console` 增加 `display_mode/page_index/view_version`；活跃旧行规范化为 `live`，terminal/recall 旧行
-规范化为 `collapsed/page 0/version 1`。Host tick 继续负责让旧 private picker 失权、撤回和重发。迁移保留既有 Camp、
+规范化为 `collapsed/page 0/version 1`。Migration 121 升到 `Data Contract v1.34 / projection schema 75`，把执行台状态闭集
+改为 `opening | active | terminal_pending | terminal_sealed | recall_pending | recalled | recall_failed`，并将旧 `terminal`
+原位映射为 `terminal_sealed`。旧 `display_mode/page_index/view_version` 列暂时保留以支持后续独立清理，但所有正常读写、
+callback 和恢复路径都停止使用。Host tick 继续负责让旧 private picker 失权、撤回和重发。迁移保留既有 Camp、
 消息、Manifest、Bot credential reference、Attachment authority、terminal evidence 与 execution-console external message
 identity，不删除或新建任何远端 App。
+
+Topic 动态默认协作队员不增加持久表或 Migration：继续使用既有 roster state generation、Camp Membership source binding
+和 Message Delivery 的持久 waiting/failure detail，Host tick 只增加 additive `rosterRefreshes` 输出字段。
 
 ## References
 
 - [飞书渠道架构](../architecture/feishu-channel.md)
 - [Camp Membership v1](camp-membership-v1.md)
 - [ContextManifest Evidence v22](context-manifest-evidence-v22.md)
-- [v1.30 决策记录](../versions/v1.30/decisions.md#v1-30-d13)
+- [v1.30 决策记录](../versions/v1.30/decisions.md#v1-30-d16)

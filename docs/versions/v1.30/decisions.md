@@ -107,6 +107,9 @@ Binding ID。绑定后任意会话成员可通过私聊或显式 mention 使用 
 <a id="v1-30-d04"></a>
 ## V1.30-D04：群 Bot roster 复用 Camp Membership v1，普通群与话题采用不同扩张规则
 
+> D04 关于完整 roster authority、普通群同步和复用 Camp Membership v1 的决定继续有效；“话题仅按 mention/A2A
+> 按需扩张”的部分已由 [V1.30-D15](#v1-30-d15)取代。
+
 ### 背景
 
 普通群直觉上所有在群 Rovai Bot 都属于同一 Camp；话题群若同步父群完整名册，则以后加入的新 Bot 会污染每个
@@ -422,8 +425,8 @@ Session 中，因此该值就是 App-scoped `ownerOpenId`。可信 Main Host 把
 <a id="v1-30-d11"></a>
 ## V1.30-D11：执行过程使用临时控制台，公开正文与附件保持永久且独立
 
-> D11 的临时控制台、永久正文与附件生命周期边界继续有效；终态卡片的展示与交互已由
-> [V1.30-D13](#v1-30-d13)细化。
+> D11 的临时控制台、永久正文与附件生命周期边界继续有效；终态卡片的当前展示、sealing 与分页边界见
+> [V1.30-D16](#v1-30-d16)。
 
 ### 背景
 
@@ -435,7 +438,7 @@ Execution Evidence presentation，Main 若另写一套又会产生本地/飞书�
 ### 决定
 
 每个 AgentRun 建立一个 Core-owned execution console identity，由实际作者 Bot 把公开 Evidence、Run 状态和公开输出
-投影为同一 Card 2.0 并 durable upsert；Main 和 Renderer 复用同一纯 presentation 模块。reasoning/thought 永不进入该
+投影为同一 Card 2.0 并 durable upsert；Main 和 Renderer 共享操作归一化、时序、状态和分组规则。reasoning/thought 永不进入该
 surface，活跃工具展开，终态连续成功/已记录工具折叠。下一条 root request admission 由原 Bot recall 同一
 ChannelConversation 中更早 Turn 的控制台；在途 upsert 先结束，已撤回/不存在按幂等成功。
 
@@ -520,6 +523,9 @@ patch 成永久“已绑定”结果；公共卡只在选择期间存在。
 <a id="v1-30-d13"></a>
 ## V1.30-D13：终态执行台在原卡持久收起，Owner 以 CAS 展开完整过程
 
+> D13 的终态收起、持久 view state、nonce/CAS 与 expand/collapse action 已由
+> [V1.30-D16](#v1-30-d16)取代；per-AgentRun 原卡、同卡分页和下一根请求 recall 边界继续有效。
+
 ### 背景
 
 D11 让每个 AgentRun 拥有独立临时控制台，但终态仍把 narration、输出和失败项铺在消息流中，并把连续成功工具替换成
@@ -531,7 +537,7 @@ D11 让每个 AgentRun 拥有独立临时控制台，但终态仍把 narration�
 非终态控制台保持完整 `live`，不提供收起动作。Run 首次终结时，同一张 Card 2.0 自动切到 `collapsed`，只显示状态、由
 公共 execution presentation 计算的操作统计、稳定开始/结束时间和安全失败摘要；无工具时不伪造零项统计。Owner 点击后
 在同一 external message 切到 `expanded`，按真实顺序展示 narration、plan、diagnostic、执行台 Agent output 和每一项
-具体工具操作。连续工具只加视觉组标题，不产生第二层 disclosure；过长详情按语义 block 在原卡分页。
+安全工具摘要。连续工具只加视觉组标题，不产生第二层 disclosure；过长详情按语义 block 在原卡分页。
 
 Core execution-console projection 持久保存 mode、page index 与单调 view version。外部 action 只携带 Run、预期 snapshot/
 view version 和 version-bound nonce；真实 operator identity 只取 callback envelope。Core 同时校验 Owner、冻结 App、exact
@@ -544,7 +550,7 @@ Main 重新读取最新 Core snapshot 后更新原卡，不使用 callback 正�
 
 ### 后果
 
-- 已完成的多 Agent 会话默认保持安静，需要时仍能查看完整公共执行证据；
+- 已完成的多 Agent 会话默认保持安静，需要时仍能查看公开执行摘要；
 - 卡片双击、旧按钮、重放、错误 App 与 non-owner 不会回滚或覆盖更新后的视图；
 - `collapsed/expanded/pageIndex` 跨 Core/Main 重启恢复，外部更新失败仍由 Outbox 重试原消息；
 - Migration 120 将 Data Contract 推进到 `v1.33 / projection schema 74`，不改变 AgentRun、CampMessage、永久输出或附件。
@@ -556,3 +562,138 @@ Main 重新读取最新 Core snapshot 后更新原卡，不使用 callback 正�
 - **展开时另发详情消息或打开 Web 页面：** 增加第二份生命周期和清理目标，破坏原卡 recall 边界；
 - **只在 Main 内存保存 mode/page：** 重启后旧卡无法恢复，乱序 callback 可覆盖新 snapshot；
 - **只信 action payload 的 Owner 或版本：** payload 不是身份 authority，也不能证明点击的是冻结 App 的当前原卡。
+
+<a id="v1-30-d14"></a>
+## V1.30-D14：飞书执行卡只显示安全操作摘要，命令输入输出留在本机
+
+> D14 关于不展示工具输入输出、Secret 和完整 patch body 的边界继续有效；只显示“执行命令”、expand/collapse 与持久
+> CAS callback 的部分已由 [V1.30-D16](#v1-30-d16)取代。
+
+### 背景
+
+D13 允许 Owner 在飞书原卡展开完整公共过程，但共享 presentation 把本机 Shell command input 和 output 一并复制到外部
+会话。它既增加卡片噪音，也把仅用于本机审计的工作区命令与输出扩大到飞书会话。与此同时，执行卡的按钮仍使用旧式
+直接 `button.value`；卡片声明为 schema 2.0 后，飞书客户端不会为该结构触发受支持的 callback，因此完成态入口看似可点却
+没有行为。
+
+### 决定
+
+Core Evidence 与 Rovai 本机执行历史保持不变。飞书 execution console 只复用操作时序、状态、分组和非命令公开内容；
+Shell/command 项无论 live 还是 expanded 都只显示状态与“执行命令”，不得携带 command input、命令预览、stdout/stderr、
+聚合输出或从这些字段推导的失败正文。文件变化、其他 Tool 摘要、narration、plan、diagnostic 与正式 Agent output 继续
+按当前合同展示。
+
+展开、收起和翻页按钮统一使用 Card 2.0 的 `column_set -> column -> button`，并以
+`behaviors: [{ type: 'callback', value }]` 回传已有 CAS action。Core projection、nonce、Owner/App/message 校验与原卡更新
+流程不变。
+
+### 后果
+
+- 飞书会话仍能判断执行进度与操作数量，但不会获得本机命令正文和输出；
+- 完整命令证据仍可在 Rovai 本机按原有授权查看，Core 不删除或改写 Evidence；
+- 完成态展开、收起和分页会实际产生 `card.action.trigger`，继续复用既有 Owner/CAS 防重放边界；
+- 变更只影响飞书 presentation 与卡片 JSON，不需要 Migration 或新的 Core 状态。
+
+### 被拒绝方案
+
+- **继续复制完整命令详情：** 外部卡片信息过载，并扩大本机执行信息的分发范围；
+- **从 Core 删除命令 Evidence：** 会破坏 Rovai 本机执行历史与审计能力，范围远超渠道展示需求；
+- **保留旧式按钮并只修 Host handler：** 客户端不会可靠发出 V2 callback，服务端修复无法触达；
+- **点击后另发一张详情卡：** 制造第二份生命周期，破坏 D13 的原卡更新与 recall 边界。
+
+当前规范见[飞书渠道架构](../../architecture/feishu-channel.md#输出恢复与秘密)和
+[Feishu Channel v2](../../contracts/feishu-channel-v2.md#7-channeldelivery)。
+
+<a id="v1-30-d15"></a>
+## V1.30-D15：话题群当前 Rovai Bot roster 是 Topic Camp 的动态默认协作队员池
+
+### 背景
+
+D04 为避免污染历史话题，把 Topic Camp membership 冻结为首次 mention，并只在后续显式 mention 或 A2A exact target 时
+按需扩张。这把“当前根消息首先启动谁”和“Camp 内允许谁协作”错误合并成了同一个集合：Owner 只 @ Alice 创建话题后，
+Alice 无法直接 A2A 给同在父话题群的 Bob/Carol；父群加入或移出 Bot 也不能从下一次 Run 起稳定反映到既有 Topic。
+
+### 决定
+
+独立话题群父群中当前 `present + published` 的 Rovai Bot roster 是该父群所有 Topic Camp 的动态默认协作队员池。新 Topic
+Camp 在 admission 首条消息前，以完整 roster 建立 Camp membership；但该根消息的初始 AgentRun targets 仍严格等于
+canonical mentions。完整协作池不得扩大本轮初始 fan-out。
+
+Host 在新 Topic 建 Camp、每条 Owner 根消息和项目卡 resolve 前强制读取全部已发布 Bot 的 `isInChat`，并继续消费 Bot
+add/remove event 与周期性 sweep。每次权威快照推进 roster generation，并通过既有 `feishu` source binding、membership
+generation/version 和 reconciliation generation，把父群所有 active Topic Camp 对齐到 desired roster。
+
+A2A、Gather、Message Delivery retry/successor 等内部路径在物化新的 Topic AgentRun 前，Core 持久建立一个晚于当前值的
+roster generation 门闩。Host tick 返回父群 refresh 请求；Main 完整重读并提交新 generation 后，Core 先完成 membership
+reconciliation，再恢复等待的 Delivery。读取失败、回写失败或目标已移出都 fail closed，不能用旧 roster 创建 Run。
+
+移出 Bot 时不得取消已经运行的 AgentRun。若 membership remove 会影响非终态 Run，正式 cutover 延迟到 Run 终态后的
+reconciliation；但 latest roster 立即成为 future-admission fence，新的根目标、A2A/Gather target、retry/successor 都不能
+再为该 Bot 创建 Run。历史消息、历史 Run、Camp、Topic identity 与一个 Topic 对应的冻结项目全部保留。
+
+### 后果
+
+- Owner 只 @ Alice 时仍只启动 Alice，但 Alice 从首轮开始即可在 Core 内 A2A 给同群 Bob/Carol；
+- 新增 Bot 在下一次权威同步后的新 Run 可用，既有 Topic 无需重建或再次 mention；
+- 移出 Bot 不污染在途执行，但所有下一 Run fail closed，历史证据保持可读；
+- 普通群语义、一个 Topic 一个 Camp/冻结项目、飞书显式 mention 只决定根 targets，以及 A2A 不经过飞书互相 @ 均不改变；
+- 继续复用既有 roster state、Camp Membership 与 Message Delivery waiting facts，不新增 Migration。
+
+### 被拒绝方案
+
+- **继续冻结首次 mentions：** 把首轮路由误当长期协作授权，无法表达父群当前协作队员；
+- **只在 Topic 中再次 mention 后加入：** 要求 Owner 为 Core 内部协作手工预热 membership；
+- **只在 Bot add/remove delta 时同步：** 丢事件、乱序或停机恢复后无法证明当前完整集合；
+- **更新 roster 时取消正在运行的 Run：** 破坏已经冻结的执行上下文和历史可解释性；
+- **只在周期 sweep 同步：** A2A/Gather/retry 可能在下一次 sweep 前按旧 roster 创建 Run。
+
+当前规范见[飞书渠道架构](../../architecture/feishu-channel.md#bot-roster-与-camp-membership)、
+[Feishu Channel v2](../../contracts/feishu-channel-v2.md#6-camp-创建roster-与-admission)和
+[Camp Membership v1](../../contracts/camp-membership-v1.md)。
+
+<a id="v1-30-d16"></a>
+## V1.30-D16：终态执行卡使用 sealed snapshot、同源安全命令与无状态分页
+
+### 背景
+
+D13/D14 的终态展开依赖 Core 持久 view state：callback 先更新 mode/page/version 并排一条 Outbox upsert，Main 又在 callback
+内直接更新原卡。两个 writer 会竞争同一 external message，表现为展开后一闪而过、再次点击因 version/nonce 失效。终态
+摘要也隐藏了用户真正需要核对的命令，而 D14 把命令统一降为“执行命令”，丢失 flags、参数和路径。直接复制原始 tool
+payload 又会泄露 stdin/stdout/stderr、消息正文或 patch body，不能作为替代。
+
+### 决定
+
+运行中和终态执行卡都直接按真实顺序平铺公开 narration、plan、diagnostic、每条 command、结构化 file changes 与最终公开
+输出；终态不再收起，不显示操作计数，也没有查看/收起 action。Runtime/shared execution presentation 生成同一个安全
+`publicCommand`，供 Rovai 本机执行台和飞书共同消费。它保留 executable、subcommand、flags、路径和非敏感参数，不翻译、
+不截断；自由正文、认证信息、Token/Cookie/环境变量值仍统一脱敏。飞书不得从原始 payload 或 `detail` 二次解析，也不显示
+stdin、stdout、stderr、aggregated output、tool input/output JSON 或完整 patch body；`apply_patch` 只显示文件增删行。
+
+AgentRun 终结后，Core 先进入 `terminal_pending`，等待公开 evidence/output 连续 900ms 静默，再产生唯一最终
+`terminal_sealed` snapshot。sealed 后 materializer 不再更新卡片。终态内容按时序分成每页最多 20 条 command、约 10,000
+字符的页面，且不拆开 command 与 file changes。
+
+分页 action 只有 `execution_console_page`，携带 `agentRunId + snapshotSequence + pageIndex`。Core 的
+`channels.executionConsole.page.authorize` 只验证 callback envelope Owner、冻结 App、authoritative message、
+`terminal_sealed` exact sequence 和合法页码，不保存页面状态。Main 直接从 sealed snapshot 渲染目标页并且只更新原卡一次；
+不写 display/page/view state，不轮换 nonce，不排 Outbox，也不触发 delivery pump。相同页可重复点击，下一根 root admission
+仍按既有规则 recall 旧卡。
+
+### 后果
+
+- 终态卡不会被后台 materializer 或第二条 Outbox upsert 覆盖，反复翻页保持稳定；
+- 飞书与本机执行台展示同源安全命令，完整 flags、参数和路径可复核，同时工具输入输出与秘密仍不外发；
+- Migration 121 将 Data Contract 推进到 `v1.34 / projection schema 75`，增加 pending/sealed 状态并把旧 `terminal` 映射为
+  `terminal_sealed`；旧 display/page/view 列暂留但不再进入正常路径；
+- 旧终态卡的 expand/collapse callback 不再受支持；已冻结 external message identity 和下一根请求 recall 生命周期不变。
+
+### 被拒绝方案
+
+- **继续修补 view-version CAS：** 仍保留 callback update 与 Outbox update 的双 writer，无法消除覆盖竞态；
+- **只延长终态 materializer 延迟：** 没有 sealed 状态就不能证明卡片以后不会再次被覆盖；
+- **每次翻页写 Core page state：** 页面不是业务事实，增加重启状态、版本冲突和无收益的 Outbox 写入；
+- **在飞书重新解析原始 Shell 字符串：** 会与本机脱敏规则漂移，也容易恢复出不应外发的 payload；
+- **继续只显示命令名或中文 activity：** 无法核对实际 flags、参数和路径。
+
+当前规范见[飞书渠道架构](../../architecture/feishu-channel.md#输出恢复与秘密)和
+[Feishu Channel v2](../../contracts/feishu-channel-v2.md#7-channeldelivery)。

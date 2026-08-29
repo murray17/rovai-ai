@@ -4730,6 +4730,7 @@ describe('task event projections', () => {
       step: {
         id: 'tool-settled',
         title: 'pnpm test',
+        publicCommand: 'pnpm test',
         detail: 'Tests passed',
         status: 'completed' as const,
         activityDomain: 'shell',
@@ -4921,6 +4922,7 @@ describe('task event projections', () => {
         step: {
           id: `tool-${domain}`,
           title: `${domain} command`,
+          publicCommand: null,
           detail: `${domain} complete result`,
           status: 'completed' as const,
           activityDomain: domain,
@@ -4979,6 +4981,7 @@ describe('task event projections', () => {
       kind: 'tool',
       step: {
         title: "printf '%s\\n' 'ROVAI_CLAUDE_EMPTY_OUTPUT_OK'",
+        publicCommand: "printf '%s\\n' 'ROVAI_CLAUDE_EMPTY_OUTPUT_OK'",
         status: 'completed'
       }
     })
@@ -5027,7 +5030,7 @@ describe('task event projections', () => {
           key: 'tool:failed-command',
           kind: 'tool' as const,
           step: {
-            id: 'failed-command', title: 'pnpm test', detail: 'exit 1',
+            id: 'failed-command', title: 'pnpm test', publicCommand: 'pnpm test', detail: 'exit 1',
             status: 'failed' as const, activityDomain: 'shell', toolName: null,
             credibility: 'runtime_structured'
           }
@@ -5077,6 +5080,7 @@ describe('task event projections', () => {
       kind: 'tool',
       step: {
         title: 'pwd',
+        publicCommand: 'pwd',
         detail: '命令\npwd\n\n输出\n/repo\n',
         status: 'completed'
       }

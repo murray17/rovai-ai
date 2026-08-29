@@ -1,6 +1,7 @@
 import type { AgentRunView } from '@contracts'
 import {
   activityStatusForAgentRun,
+  executionStepPublicTitle,
   type ActivityStatus,
   type ExecutionProgressItem
 } from './index'
@@ -86,7 +87,7 @@ export function toolActivityGroupPresentation(
   if (activeIndex >= 0) {
     const status = statuses[activeIndex]
     const primary = status === 'waiting' ? '等待审批' : '执行中'
-    const currentTitle = items[activeIndex].step.title
+    const currentTitle = executionStepPublicTitle(items[activeIndex].step)
     const statusLabel = status === 'waiting' ? '等待审批' : '执行中'
     return {
       status,
@@ -99,7 +100,7 @@ export function toolActivityGroupPresentation(
   }
 
   if (isLiveTail && runStatus === 'running') {
-    const currentTitle = items[items.length - 1].step.title
+    const currentTitle = executionStepPublicTitle(items[items.length - 1].step)
     return {
       status: 'running',
       statusLabel: '执行中',

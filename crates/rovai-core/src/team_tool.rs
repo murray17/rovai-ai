@@ -1146,7 +1146,7 @@ impl TeamToolService {
             &supplied_credential_digest,
             attested_run,
         )?;
-        ChannelService::default().ensure_topic_a2a_members(
+        ChannelService::default().ensure_topic_roster_members(
             database,
             &sender.camp_id,
             &invocation.input.to,
@@ -1335,7 +1335,7 @@ impl TeamToolService {
             &supplied_credential_digest,
             attested_run,
         )?;
-        ChannelService::default().ensure_topic_a2a_members(
+        ChannelService::default().ensure_topic_roster_members(
             database,
             &sender.camp_id,
             &invocation.input.to,

@@ -47,6 +47,12 @@ pub const CAMP_MESSAGE_SEND_MAX_BODY_BYTES: usize = 32 * 1024;
 pub const CAMP_MESSAGE_SEND_MAX_FANOUT: usize = 16;
 pub const MESSAGE_DELIVERY_MAX_A2A_DEPTH: i64 = 5;
 
+// Message Delivery's persisted wait-condition vocabulary predates Channel
+// roster synchronization. Keep the durable schema stable and distinguish this
+// Host-owned readiness fence by its structured blocker code.
+const TOPIC_ROSTER_WAIT_CONDITION: &str = "runtime_unavailable";
+const TOPIC_ROSTER_SYNC_BLOCKER_CODE: &str = "channel_roster_sync_required";
+
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AgentAddressingMode {
@@ -523,6 +529,16 @@ struct DispatchDelivery {
     a2a_root_agent_run_id: Option<String>,
     a2a_depth: i64,
     retry_generation: i64,
+    failure_detail_json: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct TopicRosterRefreshRequest {
+    pub provider: String,
+    pub tenant_key: String,
+    pub chat_id: String,
+    pub required_roster_generation: i64,
 }
 
 #[derive(Debug, Clone)]
@@ -2475,6 +2491,40 @@ fn process_dispatch_attempt(
         });
     }
 
+    if !topic_roster_is_fresh_for_attempt(&transaction, &delivery, attempt_id, &actor, &now)? {
+        transaction.commit()?;
+        return Ok(DeliveryDispatchOutcome::Waiting {
+            condition: TOPIC_ROSTER_WAIT_CONDITION.to_string(),
+        });
+    }
+    if !topic_channel_recipient_is_present(
+        &transaction,
+        &delivery.camp_id,
+        &delivery.recipient_agent_id,
+    )? {
+        let outcome = terminal_dispatch(
+            &transaction,
+            &delivery,
+            attempt_id,
+            "failed",
+            "recipient_not_in_feishu_roster",
+            &actor,
+            &now,
+        )?;
+        if delivery.delivery_kind == "gather_completion" {
+            cancel_gather_for_delivery(
+                &transaction,
+                &delivery.id,
+                "initiator_no_longer_eligible",
+                &actor,
+                None,
+                &now,
+            )?;
+        }
+        transaction.commit()?;
+        return Ok(outcome);
+    }
+
     let effective_config = build_effective_config(
         &transaction,
         &conversation_id,
@@ -2793,7 +2843,8 @@ fn load_dispatch_delivery(
                    delivery.return_to_agent_run_id,
                    delivery.a2a_root_agent_run_id,
                    delivery.a2a_depth, delivery.retry_generation,
-                   delivery.recipient_membership_version_at_admission
+                   delivery.recipient_membership_version_at_admission,
+                   delivery.failure_detail_json
             FROM message_delivery AS delivery
             WHERE delivery.id = ?1 AND delivery.status = 'pending'
               AND delivery.dispatch_phase = 'attempting'
@@ -2823,6 +2874,7 @@ fn load_dispatch_delivery(
                     a2a_depth: row.get(18)?,
                     retry_generation: row.get(19)?,
                     recipient_membership_version_at_admission: row.get(20)?,
+                    failure_detail_json: row.get(21)?,
                 })
             },
         )
@@ -3012,6 +3064,246 @@ fn recipient_membership_matches(
         current_recipient_membership_version(transaction, camp_id, agent_id)?
             == Some(membership_version),
     )
+}
+
+fn topic_roster_is_fresh_for_attempt(
+    transaction: &Transaction<'_>,
+    delivery: &DispatchDelivery,
+    attempt_id: &str,
+    actor: &ActorRef,
+    now: &str,
+) -> Result<bool> {
+    let Some((provider, tenant_key, chat_id)) =
+        topic_parent_roster_identity(transaction, &delivery.camp_id)?
+    else {
+        return Ok(true);
+    };
+    let current_generation = transaction
+        .query_row(
+            r#"
+            SELECT generation
+            FROM external_group_bot_roster_state
+            WHERE provider = ?1 AND tenant_key = ?2 AND chat_id = ?3
+            "#,
+            params![provider, tenant_key, chat_id],
+            |row| row.get::<_, i64>(0),
+        )
+        .optional()?
+        .unwrap_or(0);
+    let previous_detail = delivery
+        .failure_detail_json
+        .as_deref()
+        .and_then(|raw| serde_json::from_str::<Value>(raw).ok());
+    let previous_required_generation = previous_detail.as_ref().and_then(|detail| {
+        let same_gate = detail.get("blockerCode").and_then(Value::as_str)
+            == Some(TOPIC_ROSTER_SYNC_BLOCKER_CODE)
+            && detail.get("provider").and_then(Value::as_str) == Some(provider.as_str())
+            && detail.get("tenantKey").and_then(Value::as_str) == Some(tenant_key.as_str())
+            && detail.get("chatId").and_then(Value::as_str) == Some(chat_id.as_str())
+            && detail.get("retryGeneration").and_then(Value::as_i64)
+                == Some(delivery.retry_generation);
+        same_gate
+            .then(|| {
+                detail
+                    .get("requiredRosterGeneration")
+                    .and_then(Value::as_i64)
+            })
+            .flatten()
+            .filter(|generation| *generation >= 1)
+    });
+    if previous_required_generation
+        .is_some_and(|required_generation| current_generation >= required_generation)
+    {
+        let updated = transaction.execute(
+            r#"
+            UPDATE message_delivery
+            SET failure_detail_json = NULL
+            WHERE id = ?1 AND active_dispatch_attempt_id = ?2
+              AND status = 'pending' AND dispatch_phase = 'attempting'
+            "#,
+            params![delivery.id, attempt_id],
+        )?;
+        if updated != 1 {
+            anyhow::bail!("Message Delivery changed before Topic roster gate release");
+        }
+        return Ok(true);
+    }
+
+    let required_generation =
+        previous_required_generation.unwrap_or_else(|| current_generation.saturating_add(1));
+    wait_dispatch_attempt_with_detail(
+        transaction,
+        delivery,
+        attempt_id,
+        TOPIC_ROSTER_WAIT_CONDITION,
+        Some(json!({
+            "blockerCode": TOPIC_ROSTER_SYNC_BLOCKER_CODE,
+            "provider": provider,
+            "tenantKey": tenant_key,
+            "chatId": chat_id,
+            "requiredRosterGeneration": required_generation,
+            "retryGeneration": delivery.retry_generation,
+        })),
+        actor,
+        now,
+    )?;
+    Ok(false)
+}
+
+fn topic_parent_roster_identity(
+    transaction: &Transaction<'_>,
+    camp_id: &str,
+) -> Result<Option<(String, String, String)>> {
+    transaction
+        .query_row(
+            r#"
+            SELECT conversation.provider, conversation.tenant_key, conversation.chat_id
+            FROM channel_conversation_binding AS binding
+            JOIN channel_conversation AS conversation
+              ON conversation.id = binding.channel_conversation_id
+            WHERE binding.camp_id = ?1 AND binding.status = 'active'
+              AND conversation.provider = 'feishu'
+              AND conversation.conversation_kind = 'topic'
+            LIMIT 1
+            "#,
+            [camp_id],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )
+        .optional()
+        .map_err(Into::into)
+}
+
+pub(crate) fn topic_channel_recipient_is_present(
+    transaction: &Transaction<'_>,
+    camp_id: &str,
+    agent_id: &str,
+) -> Result<bool> {
+    let Some((provider, tenant_key, chat_id)) = topic_parent_roster_identity(transaction, camp_id)?
+    else {
+        return Ok(true);
+    };
+    transaction
+        .query_row(
+            r#"
+            SELECT EXISTS(
+                SELECT 1
+                FROM external_group_bot_roster AS roster
+                JOIN feishu_member_bot AS bot
+                  ON bot.app_id = roster.app_id AND bot.agent_id = roster.agent_id
+                WHERE roster.provider = ?1
+                  AND roster.tenant_key = ?2 AND roster.chat_id = ?3
+                  AND roster.agent_id = ?4 AND roster.status = 'present'
+                  AND bot.status = 'published'
+            )
+            "#,
+            params![provider, tenant_key, chat_id, agent_id],
+            |row| row.get(0),
+        )
+        .map_err(Into::into)
+}
+
+pub(crate) fn pending_topic_roster_refreshes(
+    transaction: &Transaction<'_>,
+) -> Result<Vec<TopicRosterRefreshRequest>> {
+    let mut statement = transaction.prepare(
+        r#"
+        SELECT conversation.provider, conversation.tenant_key, conversation.chat_id,
+               MAX(CAST(json_extract(
+                   delivery.failure_detail_json,
+                   '$.requiredRosterGeneration'
+               ) AS INTEGER))
+        FROM message_delivery AS delivery
+        JOIN channel_conversation_binding AS binding
+          ON binding.camp_id = delivery.camp_id AND binding.status = 'active'
+        JOIN channel_conversation AS conversation
+          ON conversation.id = binding.channel_conversation_id
+        WHERE delivery.status = 'pending'
+          AND delivery.dispatch_phase = 'attempted_waiting'
+          AND delivery.wait_condition = ?1
+          AND json_extract(delivery.failure_detail_json, '$.blockerCode') = ?2
+          AND conversation.provider = 'feishu'
+          AND conversation.conversation_kind = 'topic'
+        GROUP BY conversation.provider, conversation.tenant_key, conversation.chat_id
+        ORDER BY conversation.provider, conversation.tenant_key, conversation.chat_id
+        "#,
+    )?;
+    Ok(statement
+        .query_map(
+            params![TOPIC_ROSTER_WAIT_CONDITION, TOPIC_ROSTER_SYNC_BLOCKER_CODE],
+            |row| {
+                Ok(TopicRosterRefreshRequest {
+                    provider: row.get(0)?,
+                    tenant_key: row.get(1)?,
+                    chat_id: row.get(2)?,
+                    required_roster_generation: row.get(3)?,
+                })
+            },
+        )?
+        .collect::<rusqlite::Result<Vec<_>>>()?)
+}
+
+pub(crate) fn dispatch_topic_deliveries_waiting_for_roster(
+    database: &mut Database,
+    provider: &str,
+    tenant_key: &str,
+    chat_id: &str,
+) -> Result<usize> {
+    let delivery_ids = {
+        let mut statement = database.connection().prepare(
+            r#"
+            SELECT delivery.id
+            FROM message_delivery AS delivery
+            JOIN channel_conversation_binding AS binding
+              ON binding.camp_id = delivery.camp_id AND binding.status = 'active'
+            JOIN channel_conversation AS conversation
+              ON conversation.id = binding.channel_conversation_id
+            JOIN external_group_bot_roster_state AS roster_state
+              ON roster_state.provider = conversation.provider
+             AND roster_state.tenant_key = conversation.tenant_key
+             AND roster_state.chat_id = conversation.chat_id
+            WHERE delivery.status = 'pending'
+              AND delivery.dispatch_phase = 'attempted_waiting'
+              AND delivery.wait_condition = ?1
+              AND json_extract(delivery.failure_detail_json, '$.blockerCode') = ?2
+              AND CAST(json_extract(
+                    delivery.failure_detail_json,
+                    '$.requiredRosterGeneration'
+                  ) AS INTEGER) <= roster_state.generation
+              AND conversation.provider = ?3
+              AND conversation.tenant_key = ?4
+              AND conversation.chat_id = ?5
+              AND conversation.conversation_kind = 'topic'
+            ORDER BY delivery.camp_id, delivery.queue_sequence, delivery.id
+            "#,
+        )?;
+        statement
+            .query_map(
+                params![
+                    TOPIC_ROSTER_WAIT_CONDITION,
+                    TOPIC_ROSTER_SYNC_BLOCKER_CODE,
+                    provider,
+                    tenant_key,
+                    chat_id,
+                ],
+                |row| row.get::<_, String>(0),
+            )?
+            .collect::<rusqlite::Result<Vec<_>>>()?
+    };
+    let mut dispatched = 0;
+    for delivery_id in delivery_ids {
+        if !matches!(
+            dispatch_delivery(
+                database,
+                &delivery_id,
+                DeliveryDispatchTrigger::RuntimeReady,
+                true,
+            )?,
+            DeliveryDispatchOutcome::NotDispatchable
+        ) {
+            dispatched += 1;
+        }
+    }
+    Ok(dispatched)
 }
 
 fn delivery_requires_source_membership_fence(delivery_kind: &str, gather_id: Option<&str>) -> bool {

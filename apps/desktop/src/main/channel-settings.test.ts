@@ -150,34 +150,40 @@ function controlledChannels(identities: Record<string, { openId: string; name: s
   updateCard: ReturnType<typeof vi.fn>
   recallMessage: ReturnType<typeof vi.fn>
   getChatMode: ReturnType<typeof vi.fn>
+  isInChat: Map<string, ReturnType<typeof vi.fn>>
 } {
   const handlers = new Map<string, (event: unknown) => unknown | Promise<unknown>>()
   const send = vi.fn(async () => ({ messageId: 'om_sent' }))
   const updateCard = vi.fn(async () => undefined)
   const recallMessage = vi.fn(async () => undefined)
   const getChatMode = vi.fn(async (_chatId: string): Promise<'p2p' | 'group' | 'topic'> => 'group')
-  const createChannel = vi.fn((options: { appId: string }) => ({
-    botIdentity: identities[options.appId],
-    on: (event: string, handler: (value: unknown) => unknown | Promise<unknown>) => {
-      handlers.set(`${options.appId}:${event}`, handler)
-      return () => handlers.delete(`${options.appId}:${event}`)
-    },
-    connect: vi.fn(async () => undefined),
-    disconnect: vi.fn(async () => undefined),
-    send,
-    updateCard,
-    recallMessage,
-    getChatMode,
-    getChatInfo: vi.fn(async () => ({ name: '测试群' })),
-    rawClient: {
-      im: { v1: {
-        chatMembers: {
-          isInChat: vi.fn(async () => ({ code: 0, data: { is_in_chat: true } }))
-        }
-      } }
+  const isInChat = new Map<string, ReturnType<typeof vi.fn>>()
+  const createChannel = vi.fn((options: { appId: string }) => {
+    const observeMembership = vi.fn(async () => ({ code: 0, data: { is_in_chat: true } }))
+    isInChat.set(options.appId, observeMembership)
+    return {
+      botIdentity: identities[options.appId],
+      on: (event: string, handler: (value: unknown) => unknown | Promise<unknown>) => {
+        handlers.set(`${options.appId}:${event}`, handler)
+        return () => handlers.delete(`${options.appId}:${event}`)
+      },
+      connect: vi.fn(async () => undefined),
+      disconnect: vi.fn(async () => undefined),
+      send,
+      updateCard,
+      recallMessage,
+      getChatMode,
+      getChatInfo: vi.fn(async () => ({ name: '测试群' })),
+      rawClient: {
+        im: { v1: {
+          chatMembers: {
+            isInChat: observeMembership
+          }
+        } }
+      }
     }
-  })) as unknown as NonNullable<ChannelHostDependencies['createChannel']>
-  return { createChannel, handlers, send, updateCard, recallMessage, getChatMode }
+  }) as unknown as NonNullable<ChannelHostDependencies['createChannel']>
+  return { createChannel, handlers, send, updateCard, recallMessage, getChatMode, isInChat }
 }
 
 function inertInterval(): Pick<ChannelHostDependencies, 'setInterval' | 'clearInterval'> {
@@ -272,6 +278,40 @@ describe('channel settings service', () => {
     }, { needCheck: false })).resolves.toEqual({
       toast: { type: 'warning', content: '仅 Rovai Owner 可以选择项目' }
     })
+  })
+
+  it('surfaces Feishu Bot removal events through the installed Lark SDK', async () => {
+    const channel = createLarkChannel({
+      appId: 'cli_bot_removed_test',
+      appSecret: 'secret-bot-removed-test',
+      transport: 'websocket',
+      includeRawEvent: true,
+      loggerLevel: LoggerLevel.error
+    })
+    const internals = channel as unknown as {
+      registerDispatcherHandlers: () => void
+      dispatcher: {
+        invoke: (event: unknown, options: { needCheck: false }) => Promise<unknown>
+      }
+    }
+    internals.registerDispatcherHandlers()
+    const removed = vi.fn()
+    channel.on('botRemoved', removed)
+
+    await internals.dispatcher.invoke({
+      schema: '2.0',
+      header: { event_type: 'im.chat.member.bot.deleted_v1' },
+      event: {
+        chat_id: 'oc_removed',
+        operator_id: { open_id: 'ou_owner' },
+        name: '审阅员'
+      }
+    }, { needCheck: false })
+
+    expect(removed).toHaveBeenCalledWith(expect.objectContaining({
+      chatId: 'oc_removed',
+      botName: '审阅员'
+    }))
   })
 
   it('projects only public Feishu setup facts while the host is unavailable', async () => {
@@ -760,7 +800,7 @@ describe('channel settings service', () => {
     })
   })
 
-  it('keeps the connected account active when an account switch is cancelled', async () => {
+  it('treats a cancelled account switch as a quiet no-op', async () => {
     const account = connectedAccount()
     const commands: string[] = []
     const service = new ChannelSettingsService({
@@ -778,10 +818,37 @@ describe('channel settings service', () => {
       })
     })
 
-    await expect(service.connect()).rejects.toThrow('feishu_login_cancelled')
+    await expect(service.connect()).resolves.toMatchObject({
+      activeQrAttempt: null,
+      channels: [{ connection: { status: 'connected' } }]
+    })
 
     expect(commands).not.toContain('channels.feishu.account.expire')
     expect((await service.get()).channels[0].connection.status).toBe('connected')
+  })
+
+  it('quietly closes a cancelled first login without creating account state', async () => {
+    const commands: string[] = []
+    const service = new ChannelSettingsService({
+      credentialStore: memoryCredentialStore(),
+      developerSession: {
+        async beginLogin() { throw new Error('feishu_login_cancelled') },
+        async inspect() { return null },
+        async requireExpectedIdentity() { throw new Error('not_used') },
+        async disconnect() {}
+      },
+      core: channelCore((method) => {
+        commands.push(method)
+        return method === 'channels.feishu.snapshot' ? coreSnapshot() : { status: 'applied' }
+      })
+    })
+
+    await expect(service.connect()).resolves.toMatchObject({
+      activeQrAttempt: null,
+      channels: [{ connection: { status: 'not_connected', account: null } }]
+    })
+
+    expect(commands).not.toContain('channels.feishu.account.upsert')
   })
 
   it('rolls the staged developer session back when the Core account switch cannot commit', async () => {
@@ -1460,17 +1527,6 @@ describe('channel settings service', () => {
   it('gates non-owner input, keeps /new private-only, and trusts callback operator envelopes', async () => {
     const harness = controlledChannels({ cli_a: { openId: 'ou_bot_a', name: '审阅员' } })
     const commands: Array<{ method: string; command: Record<string, unknown> }> = []
-    let executionView: {
-      mode: 'collapsed' | 'expanded'
-      pageIndex: number
-      viewVersion: number
-      nonce: string
-    } = {
-      mode: 'collapsed',
-      pageIndex: 0,
-      viewVersion: 3,
-      nonce: 'console-nonce-3'
-    }
     const service = new ChannelSettingsService({
       credentialStore: memoryCredentialStore({
         'feishu-member-a': { appId: 'cli_a', appSecret: 'secret-a' }
@@ -1494,6 +1550,16 @@ describe('channel settings service', () => {
               failureCode: null,
               version: 1,
               ownerIdentityStatus: 'verified'
+            }],
+            transportConversations: [{
+              channelConversationId: 'rvcc_group',
+              bindingId: null,
+              provider: 'feishu',
+              tenantKey: 'tenant-1',
+              chatId: 'oc_group',
+              topicKey: '',
+              conversationKind: 'group',
+              campId: null
             }]
           })
         }
@@ -1535,10 +1601,10 @@ describe('channel settings service', () => {
             terminalAt: '2026-08-28T00:00:05Z',
             targetAppId: 'cli_a',
             externalMessageId: 'om_console',
-            view: executionView
+            state: 'terminal_sealed'
           }
         }
-        if (method === 'channels.executionConsole.view.update') {
+        if (method === 'channels.executionConsole.page.authorize') {
           if (command.operatorUserId !== 'owner-user-id') {
             return {
               status: 'rejected',
@@ -1546,27 +1612,17 @@ describe('channel settings service', () => {
               payload: {}
             }
           }
-          if (command.expectedViewVersion !== executionView.viewVersion
-            || command.nonce !== executionView.nonce) {
+          if (command.snapshotSequence !== 7) {
             return {
               status: 'rejected',
               code: 'channel.execution_console.stale_card',
               payload: {}
             }
           }
-          executionView = {
-            mode: command.action === 'execution_console_collapse' ? 'collapsed' : 'expanded',
-            pageIndex: 0,
-            viewVersion: executionView.viewVersion + 1,
-            nonce: `console-nonce-${executionView.viewVersion + 1}`
-          }
           return {
-            status: 'applied',
-            code: 'channel.execution_console.view_updated',
-            payload: {
-              snapshotSequence: 7,
-              viewUpdateQueued: true
-            }
+            status: 'accepted',
+            code: 'channel.execution_console.page_authorized',
+            payload: { snapshotSequence: 7, pageIndex: command.pageIndex }
           }
         }
         if (method === 'channels.host.tick') {
@@ -1576,6 +1632,7 @@ describe('channel settings service', () => {
       })
     })
     await service.start()
+    await vi.waitFor(() => expect(harness.isInChat.get('cli_a')).toHaveBeenCalled())
     const messageHandler = harness.handlers.get('cli_a:message')!
 
     const outsider = normalizedMessage({
@@ -1643,6 +1700,10 @@ describe('channel settings service', () => {
       operatorUnionId: 'on_owner'
     })
     expect(JSON.stringify(callback)).not.toContain('ou_spoofed')
+    const firstResolveIndex = commands.findIndex(({ method }) => (
+      method === 'channels.feishu.pendingBinding.resolve'
+    ))
+    expect(commands[firstResolveIndex - 1]?.method).toBe('channels.roster.reconcile')
     expect(ownerResult).toEqual({
       toast: { type: 'success', content: '项目已绑定，正在处理消息' }
     })
@@ -1704,18 +1765,20 @@ describe('channel settings service', () => {
       toast: { type: 'error', content: '创建失败，请重试' }
     })
 
-    const expandedResult = await cardHandler({
+    const tickCountBeforePaging = commands.filter(({ method }) => (
+      method === 'channels.host.tick'
+    )).length
+    const pageResult = await cardHandler({
       messageId: 'om_console',
       chatId: 'oc_group',
       operator: { openId: 'ou_owner', userId: 'owner-user-id' },
       action: {
         tag: 'button',
         value: {
-          action: 'execution_console_expand',
+          action: 'execution_console_page',
           agentRunId: 'run-console',
-          expectedViewVersion: 3,
-          expectedSnapshotSequence: 7,
-          nonce: 'console-nonce-3',
+          snapshotSequence: 7,
+          pageIndex: 0,
           operatorUserId: 'spoofed-user'
         }
       },
@@ -1728,29 +1791,29 @@ describe('channel settings service', () => {
       }
     })
     const executionCallback = commands.find(({ method }) => (
-      method === 'channels.executionConsole.view.update'
+      method === 'channels.executionConsole.page.authorize'
     ))?.command
     expect(executionCallback).toMatchObject({
       appId: 'cli_a',
       externalMessageId: 'om_console',
       agentRunId: 'run-console',
-      expectedViewVersion: 3,
-      expectedSnapshotSequence: 7,
+      snapshotSequence: 7,
+      pageIndex: 0,
       pageCount: 1,
       operatorOpenId: 'ou_owner',
       operatorUserId: 'owner-user-id',
       operatorUnionId: 'on_owner'
     })
     expect(JSON.stringify(executionCallback)).not.toContain('spoofed-user')
-    expect(expandedResult).toEqual({
-      toast: { type: 'success', content: '已展开执行过程' }
+    expect(pageResult).toEqual({
+      toast: { type: 'info', content: '执行记录页面已更新' }
     })
     expect(harness.updateCard).toHaveBeenCalledTimes(1)
     expect(harness.updateCard).toHaveBeenCalledWith(
       'om_console',
       expect.objectContaining({
         header: expect.objectContaining({
-          title: { tag: 'plain_text', content: '审阅员 · 执行过程' }
+          title: { tag: 'plain_text', content: '审阅员 · 已完成' }
         })
       })
     )
@@ -1762,11 +1825,10 @@ describe('channel settings service', () => {
       action: {
         tag: 'button',
         value: {
-          action: 'execution_console_collapse',
+          action: 'execution_console_page',
           agentRunId: 'run-console',
-          expectedViewVersion: 4,
-          expectedSnapshotSequence: 7,
-          nonce: 'console-nonce-4'
+          snapshotSequence: 7,
+          pageIndex: 0
         }
       },
       raw: {
@@ -1782,18 +1844,17 @@ describe('channel settings service', () => {
     })
     expect(harness.updateCard).toHaveBeenCalledTimes(1)
 
-    const collapsedResult = await cardHandler({
+    const repeatedPageResult = await cardHandler({
       messageId: 'om_console',
       chatId: 'oc_group',
       operator: { openId: 'ou_owner', userId: 'owner-user-id' },
       action: {
         tag: 'button',
         value: {
-          action: 'execution_console_collapse',
+          action: 'execution_console_page',
           agentRunId: 'run-console',
-          expectedViewVersion: 4,
-          expectedSnapshotSequence: 7,
-          nonce: 'console-nonce-4'
+          snapshotSequence: 7,
+          pageIndex: 0
         }
       },
       raw: {
@@ -1804,10 +1865,14 @@ describe('channel settings service', () => {
         }
       }
     })
-    expect(collapsedResult).toEqual({
-      toast: { type: 'success', content: '已收起执行过程' }
+    expect(repeatedPageResult).toEqual({
+      toast: { type: 'info', content: '执行记录页面已更新' }
     })
     expect(harness.updateCard).toHaveBeenCalledTimes(2)
+    expect(commands.filter(({ method }) => method === 'channels.host.tick')).toHaveLength(
+      tickCountBeforePaging
+    )
+    expect(commands.some(({ method }) => method === 'channels.executionConsole.view.update')).toBe(false)
     expect(harness.send).not.toHaveBeenCalledWith(
       'oc_group',
       expect.objectContaining({ card: expect.anything() }),
@@ -1835,6 +1900,10 @@ describe('channel settings service', () => {
             agentId: 'agent-a', accountId: 'account-1', brand: 'feishu', appId: 'cli_a',
             botDisplayName: '审阅员', credentialRef: 'feishu-member-a', status: 'published',
             failureCode: null, version: 1, ownerIdentityStatus: 'verified'
+          }], transportConversations: [{
+            channelConversationId: 'rvcc_topic', bindingId: null, provider: 'feishu',
+            tenantKey: 'tenant-1', chatId: 'oc_topic_group', topicKey: 'om_topic_root',
+            conversationKind: 'topic', campId: null
           }] })
         }
         if (method === 'channels.feishu.owner.verify') {
@@ -1859,7 +1928,9 @@ describe('channel settings service', () => {
       })
     })
     await service.start()
+    await vi.waitFor(() => expect(harness.isInChat.get('cli_a')).toHaveBeenCalled())
     const messageHandler = harness.handlers.get('cli_a:message')!
+    const initialRosterReads = harness.isInChat.get('cli_a')!.mock.calls.length
     const mention = [{ key: '@_bot', openId: 'ou_bot_a', name: '审阅员', isBot: true }]
 
     await messageHandler(normalizedMessage({
@@ -1909,6 +1980,82 @@ describe('channel settings service', () => {
       topicKey: 'om_second_topic_root',
       conversationDisplayName: '测试群 · 话题'
     })
+    expect(harness.isInChat.get('cli_a')).toHaveBeenCalledTimes(initialRosterReads + 2)
+    await harness.handlers.get('cli_a:botRemoved')!({
+      chatId: 'oc_topic_group',
+      operator: { openId: 'ou_owner' },
+      botName: '审阅员'
+    })
+    expect(harness.isInChat.get('cli_a')).toHaveBeenCalledTimes(initialRosterReads + 3)
+    await service.stop()
+  })
+
+  it('refreshes a Topic parent roster requested by Core before delivery materialization', async () => {
+    const harness = controlledChannels({ cli_a: { openId: 'ou_bot_a', name: '审阅员' } })
+    const calls: Array<{ method: string; command: Record<string, unknown> }> = []
+    let refreshRequested = false
+    const service = new ChannelSettingsService({
+      credentialStore: memoryCredentialStore({
+        'feishu-member-a': { appId: 'cli_a', appSecret: 'secret-a' }
+      }),
+      createChannel: harness.createChannel,
+      ...inertInterval(),
+      core: channelCore((method, rawParams) => {
+        const command = ((rawParams as { command?: Record<string, unknown> } | undefined)?.command
+          ?? {})
+        if (method === 'channels.feishu.snapshot') {
+          return coreSnapshot({
+            memberBots: [{
+              agentId: 'agent-a', accountId: 'account-1', brand: 'feishu', appId: 'cli_a',
+              botDisplayName: '审阅员', credentialRef: 'feishu-member-a', status: 'published',
+              failureCode: null, version: 1, ownerIdentityStatus: 'verified'
+            }]
+          })
+        }
+        if (method === 'channels.host.tick') {
+          calls.push({ method, command })
+          if (refreshRequested) {
+            return { status: 'applied', payload: { deliveries: [], rosterRefreshes: [] } }
+          }
+          refreshRequested = true
+          return {
+            status: 'applied',
+            payload: {
+              deliveries: [],
+              rosterRefreshes: [{
+                provider: 'feishu',
+                tenantKey: 'tenant-1',
+                chatId: 'oc_topic_group',
+                requiredRosterGeneration: 7
+              }]
+            }
+          }
+        }
+        if (method === 'channels.roster.reconcile') {
+          calls.push({ method, command })
+          return { status: 'applied', payload: { generation: 7 } }
+        }
+        return { status: 'applied', payload: {} }
+      })
+    })
+
+    await service.start()
+    await vi.waitFor(() => {
+      expect(calls.some((call) => call.method === 'channels.roster.reconcile')).toBe(true)
+    })
+
+    expect(harness.isInChat.get('cli_a')).toHaveBeenCalledTimes(1)
+    expect(calls.map((call) => call.method).slice(0, 2)).toEqual([
+      'channels.host.tick',
+      'channels.roster.reconcile'
+    ])
+    expect(calls.find((call) => call.method === 'channels.roster.reconcile')?.command)
+      .toMatchObject({
+        provider: 'feishu',
+        tenantKey: 'tenant-1',
+        chatId: 'oc_topic_group',
+        presentAppIds: ['cli_a']
+      })
     await service.stop()
   })
 
@@ -2327,7 +2474,7 @@ describe('channel settings service', () => {
             terminalAt: null,
             targetAppId: 'cli_a',
             externalMessageId: null,
-            view: { mode: 'live', pageIndex: 0, viewVersion: 1, nonce: 'nonce-1' }
+            state: 'active'
           }
         }
         if (method === 'channels.deliveries.settle') {

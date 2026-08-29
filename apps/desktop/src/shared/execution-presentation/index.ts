@@ -98,6 +98,12 @@ export type ExecutionPlanStep = {
 export type ExecutionStep = {
   id: string
   title: string
+  /**
+   * The complete command presentation that is safe to show outside raw
+   * Runtime evidence. It retains non-sensitive flags, arguments and paths,
+   * while applying the same redaction rules as the local execution console.
+   */
+  publicCommand: string | null
   detail: string
   status: ActivityStatus
   activityDomain: string
@@ -111,6 +117,10 @@ export type ExecutionStep = {
     diff: string
   }>
   fileChangeSemantics?: CanonicalRuntimeDiffProjectionView['semanticKind']
+}
+
+export function executionStepPublicTitle(step: ExecutionStep): string {
+  return step.publicCommand ?? step.title
 }
 
 export type RuntimeDiagnostic = {
@@ -327,6 +337,7 @@ export function buildLiveExecutionProgress(
       ...previous,
       ...step,
       title,
+      publicCommand: step.publicCommand ?? previous.publicCommand,
       detail: step.detail || previous.detail
     }
   }
@@ -439,6 +450,11 @@ export function buildLiveExecutionProgress(
       const codexCommand = nativeType === 'commandExecution' && command
         ? shellCommandDetailText(command)
         : null
+      const publicCommand = command
+        ? shellCommandDetailText(command)
+        : canonical?.activityDomain === 'shell'
+          ? publicShellCommandPresentation(payload)
+          : null
       const detail = codexCommand
         ? shellCommandDetail(codexCommand, publicOutput)
         : publicOutput
@@ -451,6 +467,7 @@ export function buildLiveExecutionProgress(
       upsertStep({
         id: itemId,
         title,
+        publicCommand,
         detail,
         status,
         activityDomain: canonical?.activityDomain ?? 'unknown',
@@ -477,6 +494,9 @@ export function buildLiveExecutionProgress(
       upsertStep({
         id: itemId,
         title,
+        publicCommand: canonical?.activityDomain === 'shell'
+          ? publicShellCommandPresentation(payload)
+          : null,
         detail: runtimeActionEvidenceText(payload) ?? '',
         status,
         activityDomain: canonical?.activityDomain ?? 'unknown',
@@ -703,6 +723,11 @@ function runtimeActionShellCommand(payload: Record<string, unknown>): string | n
   return publicShellCommand(payload)
 }
 
+function publicShellCommandPresentation(payload: unknown): string | null {
+  const command = publicShellCommand(payload)
+  return command ? shellCommandDetailText(command) : null
+}
+
 export function executionEvidenceResultText(
   eventType: AgentRunExecutionEvidenceView['eventType'],
   payloadValue: unknown
@@ -860,7 +885,7 @@ function codexStructuredCommandPresentation(payload: unknown): boolean {
 
 const SHELL_WRAPPER_EXECUTABLES = new Set(['bash', 'dash', 'fish', 'ksh', 'sh', 'zsh'])
 const REDACTED_COMMAND_VALUE = '[已隐藏]'
-const SENSITIVE_COMMAND_NAME = /(?:^|[-_])(token|password|passwd|authorization|api[-_]?key|secret|credential)(?:[-_]|$)/iu
+const SENSITIVE_COMMAND_NAME = /(?:^|[-_])(token|password|passwd|authorization|api[-_]?key|secret|credential|cookie)(?:[-_]|$)/iu
 const ROVAI_SEND_VALUE_FLAGS = new Set([
   '--camp-id',
   '--file',
@@ -1047,18 +1072,21 @@ function redactShellPreviewTokens(tokens: ShellPreviewToken[]): ShellPreviewToke
       continue
     }
 
-    if (/^authorization\s*:/iu.test(token.value)) {
-      redactToken(token, `"Authorization: ${REDACTED_COMMAND_VALUE}"`)
+    if (/^(authorization|cookie)\s*:/iu.test(token.value)) {
+      const header = token.value.match(/^([^:]+):/u)?.[1] ?? 'Authorization'
+      redactToken(token, `"${header}: ${REDACTED_COMMAND_VALUE}"`)
       continue
     }
-    if (/^--header=authorization\s*:/iu.test(token.value)) {
-      redactToken(token, `--header="Authorization: ${REDACTED_COMMAND_VALUE}"`)
+    if (/^--header=(authorization|cookie)\s*:/iu.test(token.value)) {
+      const header = token.value.match(/^--header=([^:]+):/u)?.[1] ?? 'Authorization'
+      redactToken(token, `--header="${header}: ${REDACTED_COMMAND_VALUE}"`)
       continue
     }
     if (token.value === '-H' || token.value === '--header') {
       const valueIndex = nextShellValueIndex(redacted, index + 1)
-      if (valueIndex !== null && /^authorization\s*:/iu.test(redacted[valueIndex].value)) {
-        redactToken(redacted[valueIndex], `"Authorization: ${REDACTED_COMMAND_VALUE}"`)
+      if (valueIndex !== null && /^(authorization|cookie)\s*:/iu.test(redacted[valueIndex].value)) {
+        const header = redacted[valueIndex].value.match(/^([^:]+):/u)?.[1] ?? 'Authorization'
+        redactToken(redacted[valueIndex], `"${header}: ${REDACTED_COMMAND_VALUE}"`)
       }
     }
   }

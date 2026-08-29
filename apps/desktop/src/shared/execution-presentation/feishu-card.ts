@@ -1,14 +1,13 @@
 import type {
   AgentRunExecutionEvidenceView,
   AgentRunView,
-  ExecutionConsolePage,
-  ExecutionConsoleTerminalSummary,
-  ExecutionConsoleViewState
+  ExecutionConsolePage
 } from '@contracts'
 import {
   activityStatusForAgentRun,
   agentRunPresentation,
   buildLiveExecutionProgress,
+  executionStepPublicTitle,
   liveRuntimeEventFromExecutionEvidence,
   type ActivityStatus,
   type ExecutionProgressItem
@@ -19,9 +18,8 @@ import {
   type ToolProgressItem
 } from './tool-grouping'
 
-const EXPANDED_PAGE_CHAR_BUDGET = 10_000
-const EXPANDED_PAGE_OPERATION_BUDGET = 25
-const MAX_TOOLS_PER_VISUAL_GROUP = 20
+const TERMINAL_PAGE_CHAR_BUDGET = 10_000
+const TERMINAL_PAGE_OPERATION_BUDGET = 20
 
 export interface ExecutionConsoleSnapshot {
   sequence: number
@@ -41,37 +39,10 @@ type ExecutionCardBlock = {
 
 export function executionConsoleCard(
   snapshot: ExecutionConsoleSnapshot,
-  view: ExecutionConsoleViewState
+  requestedPageIndex = 0
 ): Record<string, unknown> {
   if (!isTerminal(snapshot.run.status)) return renderLiveExecutionCard(snapshot)
-  return view.mode === 'expanded'
-    ? renderExpandedTerminalCard(snapshot, view)
-    : renderCollapsedTerminalCard(snapshot, view)
-}
-
-export function executionConsoleTerminalSummary(
-  snapshot: ExecutionConsoleSnapshot
-): ExecutionConsoleTerminalSummary {
-  const items = progressItems(snapshot)
-  const tools = items.flatMap((item) => item.kind === 'tool' ? [item] : [])
-  const statuses = tools.map((item) => (
-    activityStatusForAgentRun(item.step.status, snapshot.run.status)
-  ))
-  const failedTool = tools.find((item) => (
-    activityStatusForAgentRun(item.step.status, snapshot.run.status) === 'failed'
-  ))
-  return {
-    visibleOperationCount: tools.length,
-    completedOperationCount: statuses.filter((status) => (
-      status === 'completed' || status === 'recorded'
-    )).length,
-    failedOperationCount: statuses.filter((status) => status === 'failed').length,
-    waitingOperationCount: statuses.filter((status) => status === 'waiting').length,
-    durationMs: durationMs(snapshot.startedAt, snapshot.terminalAt),
-    failureSummary: snapshot.run.status === 'failed'
-      ? safeFailureSummary(failedTool, snapshot.run.terminalReasonCode)
-      : null
-  }
+  return renderTerminalExecutionCard(snapshot, requestedPageIndex)
 }
 
 export function executionConsolePages(snapshot: ExecutionConsoleSnapshot): ExecutionConsolePage[] {
@@ -97,60 +68,24 @@ function renderLiveExecutionCard(snapshot: ExecutionConsoleSnapshot): Record<str
   )
 }
 
-function renderCollapsedTerminalCard(
+function renderTerminalExecutionCard(
   snapshot: ExecutionConsoleSnapshot,
-  view: ExecutionConsoleViewState
+  requestedPageIndex: number
 ): Record<string, unknown> {
-  const summary = executionConsoleTerminalSummary(snapshot)
-  const lines = [terminalSummaryLine(snapshot.run.status, summary)]
-  if (summary.failureSummary) lines.push(`失败：${summary.failureSummary}`)
-  if (snapshot.run.status === 'cancelled' && summary.visibleOperationCount > 0) {
-    lines.push('本次执行已停止')
+  const pages = executionConsolePages(snapshot)
+  const pageIndex = Math.min(Math.max(0, requestedPageIndex), pages.length - 1)
+  const page = pages[pageIndex]
+  const elements: Record<string, unknown>[] = []
+  const duration = formatDuration(durationMs(snapshot.startedAt, snapshot.terminalAt))
+  if (duration) elements.push({ tag: 'markdown', content: `用时 ${duration}` })
+  elements.push({ tag: 'markdown', content: page.body })
+  if (page.pageCount > 1) {
+    elements.push(cardPaginationRow(snapshot, pageIndex, page.pageCount))
   }
   return baseCard(
     `${boundedPlainText(snapshot.agentDisplayName, 80)} · ${terminalTitle(snapshot.run)}`,
     cardTemplate(snapshot.run.status, snapshot.run.waitReason),
-    [
-      { tag: 'markdown', content: lines.join('\n\n') },
-      cardButton('查看执行过程', actionValue('execution_console_expand', snapshot, view))
-    ]
-  )
-}
-
-function renderExpandedTerminalCard(
-  snapshot: ExecutionConsoleSnapshot,
-  view: ExecutionConsoleViewState
-): Record<string, unknown> {
-  const pages = executionConsolePages(snapshot)
-  const pageIndex = Math.min(Math.max(0, view.pageIndex), pages.length - 1)
-  const page = pages[pageIndex]
-  const body = page.pageCount > 1
-    ? `第 ${pageIndex + 1} / ${page.pageCount} 页\n\n${page.body}`
-    : page.body
-  const actions: Record<string, unknown>[] = []
-  if (pageIndex > 0) {
-    actions.push(cardButton(
-      '上一页',
-      actionValue('execution_console_prev_page', snapshot, view)
-    ))
-  }
-  if (pageIndex < page.pageCount - 1) {
-    actions.push(cardButton(
-      '下一页',
-      actionValue('execution_console_next_page', snapshot, view)
-    ))
-  }
-  actions.push(cardButton(
-    '收起执行过程',
-    actionValue('execution_console_collapse', snapshot, view)
-  ))
-  return baseCard(
-    `${boundedPlainText(snapshot.agentDisplayName, 80)} · 执行过程`,
-    cardTemplate(snapshot.run.status, snapshot.run.waitReason),
-    [
-      { tag: 'markdown', content: body },
-      ...actions
-    ]
+    elements
   )
 }
 
@@ -169,34 +104,11 @@ function liveExecutionBlocks(snapshot: ExecutionConsoleSnapshot): string[] {
 
 function expandedExecutionBlocks(snapshot: ExecutionConsoleSnapshot): ExecutionCardBlock[] {
   const blocks: ExecutionCardBlock[] = []
-  let groupNumber = 0
-  for (const item of groupConsecutiveToolItems(progressItems(snapshot))) {
-    if (item.kind !== 'toolGroup') {
-      const body = renderNonGroupItem(item, snapshot.run.status)
-      if (body) blocks.push({ body, operationCount: item.kind === 'tool' ? 1 : 0 })
-      continue
-    }
-    for (const segment of splitTerminalToolGroup(item.items, snapshot.run.status)) {
-      if (segment.grouped) {
-        groupNumber += 1
-        for (let index = 0; index < segment.items.length; index += MAX_TOOLS_PER_VISUAL_GROUP) {
-          const chunk = segment.items.slice(index, index + MAX_TOOLS_PER_VISUAL_GROUP)
-          const continuation = index === 0 ? '' : '（续）'
-          blocks.push({
-            body: [
-              `**操作组 ${groupNumber}${continuation} · ${chunk.length} 项**`,
-              ...chunk.map((tool) => renderTool(tool, snapshot.run.status))
-            ].join('\n\n'),
-            operationCount: chunk.length
-          })
-        }
-      } else {
-        blocks.push({
-          body: renderTool(segment.items[0], snapshot.run.status),
-          operationCount: 1
-        })
-      }
-    }
+  for (const item of progressItems(snapshot)) {
+    const body = item.kind === 'tool'
+      ? renderTool(item, snapshot.run.status)
+      : renderNonGroupItem(item, snapshot.run.status)
+    if (body) blocks.push({ body, operationCount: item.kind === 'tool' ? 1 : 0 })
   }
   const publicOutput = snapshot.publicOutput?.trim() ?? ''
   if (publicOutput && !blocks.some((block) => block.body.trim() === publicOutput)) {
@@ -241,29 +153,6 @@ function renderNonGroupItem(
   return renderTool(item, runStatus)
 }
 
-function splitTerminalToolGroup(
-  items: ToolProgressItem[],
-  runStatus: AgentRunView['status']
-): Array<{ grouped: boolean; items: ToolProgressItem[] }> {
-  const segments: Array<{ grouped: boolean; items: ToolProgressItem[] }> = []
-  let grouped: ToolProgressItem[] = []
-  const flush = (): void => {
-    if (grouped.length > 0) segments.push({ grouped: true, items: grouped })
-    grouped = []
-  }
-  for (const item of items) {
-    const status = activityStatusForAgentRun(item.step.status, runStatus)
-    if (status === 'failed' || status === 'waiting' || status === 'stopped') {
-      flush()
-      segments.push({ grouped: false, items: [item] })
-    } else {
-      grouped.push(item)
-    }
-  }
-  flush()
-  return segments
-}
-
 function paginateExecutionBlocks(blocks: ExecutionCardBlock[]): ExecutionCardBlock[][] {
   const pages: ExecutionCardBlock[][] = []
   let page: ExecutionCardBlock[] = []
@@ -278,9 +167,9 @@ function paginateExecutionBlocks(blocks: ExecutionCardBlock[]): ExecutionCardBlo
   for (const block of blocks) {
     const separatorCharacters = page.length > 0 ? 2 : 0
     const exceedsCharacters = page.length > 0
-      && characters + separatorCharacters + block.body.length > EXPANDED_PAGE_CHAR_BUDGET
+      && characters + separatorCharacters + block.body.length > TERMINAL_PAGE_CHAR_BUDGET
     const exceedsOperations = page.length > 0
-      && operations + block.operationCount > EXPANDED_PAGE_OPERATION_BUDGET
+      && operations + block.operationCount > TERMINAL_PAGE_OPERATION_BUDGET
     if (exceedsCharacters || exceedsOperations) flush()
     page.push(block)
     characters += separatorCharacters + block.body.length
@@ -292,54 +181,14 @@ function paginateExecutionBlocks(blocks: ExecutionCardBlock[]): ExecutionCardBlo
 
 function renderTool(item: ToolProgressItem, runStatus: AgentRunView['status']): string {
   const status = activityStatusForAgentRun(item.step.status, runStatus)
-  const lines = [`${statusIcon(status)} ${item.step.title}`]
+  const lines = [`${statusIcon(status)} ${executionStepPublicTitle(item.step)}`]
   if (item.step.fileChanges?.length) {
     for (const change of item.step.fileChanges) {
       const delta = `${change.additions > 0 ? ` +${change.additions}` : ''}${change.deletions > 0 ? ` −${change.deletions}` : ''}`
       lines.push(`\`${change.path}\`${delta}`)
     }
-  } else if (item.step.detail.trim()) {
-    lines.push(item.step.detail.trim())
   }
   return lines.join('\n')
-}
-
-function terminalSummaryLine(
-  status: AgentRunView['status'],
-  summary: ExecutionConsoleTerminalSummary
-): string {
-  const parts: string[] = []
-  if (status === 'succeeded') {
-    parts.push(summary.visibleOperationCount > 0
-      ? `已执行 ${summary.visibleOperationCount} 项操作`
-      : '已完成')
-  } else {
-    if (summary.completedOperationCount > 0) {
-      parts.push(`已完成 ${summary.completedOperationCount} 项操作`)
-    }
-    if (summary.failedOperationCount > 0) {
-      parts.push(`${summary.failedOperationCount} 项失败`)
-    }
-    if (summary.waitingOperationCount > 0) {
-      parts.push(`${summary.waitingOperationCount} 项未完成`)
-    }
-    if (parts.length === 0) parts.push(status === 'cancelled' ? '本次执行已停止' : '执行未完成')
-  }
-  const duration = formatDuration(summary.durationMs)
-  if (duration) parts.push(`用时 ${duration}`)
-  return parts.join(' · ')
-}
-
-function safeFailureSummary(
-  failedTool: ToolProgressItem | undefined,
-  terminalReasonCode: string | null
-): string {
-  if (failedTool) {
-    const detail = failedTool.step.detail.trim().split(/\r?\n/, 1)[0]
-    return boundedPlainText(detail || failedTool.step.title, 120)
-  }
-  if (terminalReasonCode === 'runtime_interrupted') return '运行时连接中断'
-  return '执行未完成'
 }
 
 function durationMs(startedAt: string | null, terminalAt: string | null): number | null {
@@ -370,28 +219,46 @@ function appendPublicOutput(blocks: string[], publicOutput: string | null): void
 }
 
 function actionValue(
-  action: 'execution_console_expand'
-    | 'execution_console_collapse'
-    | 'execution_console_prev_page'
-    | 'execution_console_next_page',
   snapshot: ExecutionConsoleSnapshot,
-  view: ExecutionConsoleViewState
+  pageIndex: number
 ): Record<string, unknown> {
   return {
-    action,
+    action: 'execution_console_page',
     agentRunId: snapshot.agentRunId,
-    expectedViewVersion: view.viewVersion,
-    expectedSnapshotSequence: snapshot.sequence,
-    nonce: view.nonce
+    snapshotSequence: snapshot.sequence,
+    pageIndex
   }
 }
 
-function cardButton(text: string, value: Record<string, unknown>): Record<string, unknown> {
-  return {
+function cardPaginationRow(
+  snapshot: ExecutionConsoleSnapshot,
+  pageIndex: number,
+  pageCount: number
+): Record<string, unknown> {
+  const button = (text: string, targetPageIndex: number): Record<string, unknown> => ({
     tag: 'button',
     text: { tag: 'plain_text', content: text },
     type: 'default',
-    value
+    width: 'fill',
+    behaviors: [{ type: 'callback', value: actionValue(snapshot, targetPageIndex) }]
+  })
+  const placeholder = (): Record<string, unknown> => ({
+    tag: 'markdown',
+    content: ' '
+  })
+  return {
+    tag: 'column_set',
+    horizontal_spacing: '8px',
+    columns: [
+      [pageIndex > 0 ? button('上一页', pageIndex - 1) : placeholder()],
+      [{ tag: 'markdown', content: `第 ${pageIndex + 1} / ${pageCount} 页`, text_align: 'center' }],
+      [pageIndex < pageCount - 1 ? button('下一页', pageIndex + 1) : placeholder()]
+    ].map((elements) => ({
+      tag: 'column',
+      width: 'weighted',
+      weight: 1,
+      elements
+    }))
   }
 }
 

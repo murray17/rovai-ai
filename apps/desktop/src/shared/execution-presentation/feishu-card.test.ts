@@ -1,12 +1,8 @@
 import { describe, expect, it } from 'vitest'
-import type {
-  AgentRunExecutionEvidenceView,
-  ExecutionConsoleViewState
-} from '@contracts'
+import type { AgentRunExecutionEvidenceView } from '@contracts'
 import {
   executionConsoleCard,
   executionConsolePages,
-  executionConsoleTerminalSummary,
   type ExecutionConsoleSnapshot
 } from './feishu-card'
 
@@ -27,13 +23,6 @@ function snapshot(
       : null,
     ...overrides
   }
-}
-
-function view(
-  mode: ExecutionConsoleViewState['mode'],
-  overrides: Partial<ExecutionConsoleViewState> = {}
-): ExecutionConsoleViewState {
-  return { mode, pageIndex: 0, viewVersion: 3, nonce: 'nonce-3', ...overrides }
 }
 
 function evidence(
@@ -63,10 +52,11 @@ function evidence(
 function commandEvidence(
   sequence: number,
   command: string,
-  status: 'completed' | 'failed'
+  status: 'completed' | 'failed',
+  output?: string
 ): AgentRunExecutionEvidenceView {
   return evidence(sequence, 'activity.completed', 'command', status, {
-    item: { type: 'commandExecution', command, status }
+    item: { type: 'commandExecution', command, status, aggregatedOutput: output }
   })
 }
 
@@ -79,24 +69,36 @@ function narrationEvidence(sequence: number, body: string): AgentRunExecutionEvi
 
 function cardBody(card: Record<string, unknown>): string {
   const body = card.body as { elements: Array<{ tag: string; content?: string }> }
-  return body.elements.find((element) => element.tag === 'markdown')?.content ?? ''
+  return body.elements
+    .filter((element) => element.tag === 'markdown')
+    .map((element) => element.content ?? '')
+    .join('\n\n')
 }
 
-function cardActions(card: Record<string, unknown>): Array<Record<string, unknown>> {
-  const body = card.body as {
-    elements: Array<Record<string, unknown>>
+function cardButtons(card: Record<string, unknown>): Array<Record<string, unknown>> {
+  const buttons: Array<Record<string, unknown>> = []
+  const visit = (value: unknown): void => {
+    if (Array.isArray(value)) {
+      value.forEach(visit)
+      return
+    }
+    if (!value || typeof value !== 'object') return
+    const record = value as Record<string, unknown>
+    if (record.tag === 'button') buttons.push(record)
+    Object.values(record).forEach(visit)
   }
-  return body.elements.filter((element) => element.tag === 'button')
+  visit(card.body)
+  return buttons
 }
 
 describe('Feishu execution console card', () => {
-  it('keeps a live console fully expanded without a collapse control', () => {
+  it('keeps a live console expanded and reuses the complete safe command presentation', () => {
     const card = executionConsoleCard(snapshot('running', {
       evidence: [
         narrationEvidence(1, '正在检查项目。'),
-        commandEvidence(2, 'pnpm test', 'completed')
+        commandEvidence(2, "sed -n '5p;15p' .rovai-validation/merge-target.txt", 'completed', '05 echo-v4')
       ]
-    }), view('live'))
+    }))
 
     expect(card).toMatchObject({
       schema: '2.0',
@@ -106,19 +108,21 @@ describe('Feishu execution console card', () => {
       }
     })
     expect(cardBody(card)).toContain('正在检查项目。')
-    expect(cardBody(card)).toContain('pnpm test')
-    expect(cardActions(card)).toEqual([])
+    expect(cardBody(card)).toContain("sed -n '5p;15p' .rovai-validation/merge-target.txt")
+    expect(cardBody(card)).not.toContain('05 echo-v4')
+    expect(cardButtons(card)).toEqual([])
   })
 
-  it('renders a successful terminal console as a quiet summary by default', () => {
+  it('renders every terminal command directly in chronological order', () => {
     const card = executionConsoleCard(snapshot('succeeded', {
       evidence: [
-        narrationEvidence(1, '这段过程默认不应出现。'),
-        commandEvidence(2, 'pnpm typecheck', 'completed'),
-        commandEvidence(3, 'pnpm test', 'completed')
+        narrationEvidence(1, '先运行两项核验。'),
+        commandEvidence(2, 'pnpm typecheck', 'completed', 'type output'),
+        narrationEvidence(3, '类型检查已完成，继续测试。'),
+        commandEvidence(4, 'pnpm test -- channel-settings', 'completed', 'test output')
       ],
       publicOutput: '实现与验证都已完成。'
-    }), view('collapsed'))
+    }))
 
     expect(card).toMatchObject({
       header: {
@@ -126,114 +130,141 @@ describe('Feishu execution console card', () => {
         template: 'green'
       }
     })
-    expect(cardBody(card)).toBe('已执行 2 项操作 · 用时 28 秒')
-    expect(cardBody(card)).not.toContain('pnpm test')
-    expect(cardBody(card)).not.toContain('实现与验证都已完成。')
-    expect(cardActions(card)).toEqual([
-      expect.objectContaining({
-        text: { tag: 'plain_text', content: '查看执行过程' },
-        value: {
-          action: 'execution_console_expand',
-          agentRunId: 'run-1',
-          expectedViewVersion: 3,
-          expectedSnapshotSequence: 1,
-          nonce: 'nonce-3'
-        }
-      })
-    ])
-  })
-
-  it('uses Card 2.0 button elements without legacy action wrappers', () => {
-    const card = executionConsoleCard(snapshot('succeeded'), view('collapsed'))
-    const body = card.body as { elements: Array<Record<string, unknown>> }
-
-    expect(card.config).toEqual({ update_multi: true })
-    expect(body.elements.some((element) => element.tag === 'action')).toBe(false)
-    expect(body.elements).toContainEqual(expect.objectContaining({
-      tag: 'button',
-      text: { tag: 'plain_text', content: '查看执行过程' }
-    }))
-  })
-
-  it('expands every tool operation and retains narration and Agent output', () => {
-    const card = executionConsoleCard(snapshot('succeeded', {
-      evidence: [
-        narrationEvidence(1, '先运行两项核验。'),
-        commandEvidence(2, 'pnpm typecheck', 'completed'),
-        commandEvidence(3, 'pnpm test', 'completed')
-      ],
-      publicOutput: '两项核验都已完成。'
-    }), view('expanded'))
-
-    expect(card).toMatchObject({
-      header: { title: { content: '芝士 · 执行过程' }, template: 'green' }
-    })
+    const body = cardBody(card)
+    expect(body).toContain('用时 28 秒')
     expect(cardBody(card)).toContain('先运行两项核验。')
-    expect(cardBody(card)).toContain('**操作组 1 · 2 项**')
-    expect(cardBody(card)).toContain('pnpm typecheck')
-    expect(cardBody(card)).toContain('pnpm test')
-    expect(cardBody(card)).toContain('两项核验都已完成。')
-    expect(cardBody(card)).not.toContain('✓ 已执行 2 项操作')
-    expect(cardActions(card)).toEqual([
-      expect.objectContaining({ text: expect.objectContaining({ content: '收起执行过程' }) })
-    ])
+    expect(body.indexOf('pnpm typecheck')).toBeLessThan(body.indexOf('类型检查已完成'))
+    expect(body.indexOf('类型检查已完成')).toBeLessThan(body.indexOf('pnpm test -- channel-settings'))
+    expect(body).toContain('实现与验证都已完成。')
+    expect(body).not.toContain('已执行 2 项操作')
+    expect(body).not.toContain('type output')
+    expect(body).not.toContain('test output')
+    expect(cardButtons(card)).toEqual([])
   })
 
-  it('shows a safe failed summary while retaining failed details when expanded', () => {
+  it('shows failed commands without copying stderr or synthesized failure text', () => {
     const failed = snapshot('failed', {
       evidence: [
-        commandEvidence(1, 'pnpm typecheck', 'completed'),
-        commandEvidence(2, 'pnpm test', 'failed')
+        commandEvidence(1, 'pnpm typecheck', 'completed', 'ok'),
+        commandEvidence(2, 'cargo test -p rovai-core channel_execution_console', 'failed', 'secret stderr')
       ],
       terminalAt: '2026-08-28T00:00:31Z'
     })
 
-    const collapsed = executionConsoleCard(failed, view('collapsed'))
-    expect(collapsed).toMatchObject({
+    const card = executionConsoleCard(failed)
+    expect(card).toMatchObject({
       header: { title: { content: '芝士 · 执行失败' }, template: 'red' }
     })
-    expect(cardBody(collapsed)).toContain('已完成 1 项操作 · 1 项失败 · 用时 31 秒')
-    expect(cardBody(collapsed)).toContain('失败：')
-    expect(cardBody(collapsed)).not.toContain('pnpm typecheck')
-
-    const expanded = executionConsoleCard(failed, view('expanded'))
-    expect(cardBody(expanded)).toContain('pnpm typecheck')
-    expect(cardBody(expanded)).toContain('pnpm test')
-    expect(cardBody(expanded)).toContain('✕')
+    expect(cardBody(card)).toContain('✓ pnpm typecheck')
+    expect(cardBody(card)).toContain('✕ cargo test -p rovai-core channel_execution_console')
+    expect(cardBody(card)).not.toContain('secret stderr')
+    expect(cardBody(card)).not.toContain('命令执行失败')
   })
 
-  it('does not report zero operations when a run only has narration', () => {
+  it('paginates at twenty commands without merging operations', () => {
     const run = snapshot('succeeded', {
-      evidence: [narrationEvidence(1, '已完成只读分析。')],
-      terminalAt: '2026-08-28T00:00:03Z'
-    })
-
-    expect(executionConsoleTerminalSummary(run).visibleOperationCount).toBe(0)
-    expect(cardBody(executionConsoleCard(run, view('collapsed')))).toBe('已完成 · 用时 3 秒')
-    expect(cardBody(executionConsoleCard(run, view('expanded')))).toContain('已完成只读分析。')
-  })
-
-  it('paginates only between semantic tool blocks and clamps an obsolete page index', () => {
-    const run = snapshot('succeeded', {
-      evidence: Array.from({ length: 30 }, (_, index) => (
-        commandEvidence(index + 1, `command-${index + 1}`, 'completed')
+      evidence: Array.from({ length: 45 }, (_, index) => (
+        commandEvidence(index + 1, `command-${index + 1} --flag path/${index + 1}`, 'completed')
       ))
     })
     const pages = executionConsolePages(run)
 
-    expect(pages).toHaveLength(2)
-    expect(pages[0].body).toContain('command-1')
-    expect(pages[0].body).toContain('command-20')
-    expect(pages[0].body).not.toContain('command-21')
-    expect(pages[1].body).toContain('command-21')
-    expect(pages[1].body).toContain('command-30')
+    expect(pages).toHaveLength(3)
+    expect(pages[0].body.match(/✓ command-/g)).toHaveLength(20)
+    expect(pages[1].body.match(/✓ command-/g)).toHaveLength(20)
+    expect(pages[2].body.match(/✓ command-/g)).toHaveLength(5)
+    expect(pages.map((page) => page.body).join('\n')).not.toContain('操作组')
 
-    const card = executionConsoleCard(run, view('expanded', { pageIndex: 99 }))
-    expect(cardBody(card)).toContain('第 2 / 2 页')
-    expect(cardBody(card)).toContain('command-30')
-    expect(cardActions(card)).toEqual([
-      expect.objectContaining({ text: expect.objectContaining({ content: '上一页' }) }),
-      expect.objectContaining({ text: expect.objectContaining({ content: '收起执行过程' }) })
+    const card = executionConsoleCard(run, 1)
+    expect(cardBody(card)).toContain('command-21 --flag path/21')
+    expect(cardBody(card)).toContain('command-40 --flag path/40')
+    expect(cardBody(card)).not.toContain('command-20 --flag path/20')
+    expect(cardButtons(card)).toEqual([
+      expect.objectContaining({
+        text: expect.objectContaining({ content: '上一页' }),
+        behaviors: [{ type: 'callback', value: {
+          action: 'execution_console_page', agentRunId: 'run-1', snapshotSequence: 1, pageIndex: 0
+        } }]
+      }),
+      expect.objectContaining({
+        text: expect.objectContaining({ content: '下一页' }),
+        behaviors: [{ type: 'callback', value: {
+          action: 'execution_console_page', agentRunId: 'run-1', snapshotSequence: 1, pageIndex: 2
+        } }]
+      })
     ])
+    expect(JSON.stringify(card.body)).toContain('第 2 / 3 页')
+    expect(JSON.stringify(card.body)).not.toContain('expectedViewVersion')
+    expect(JSON.stringify(card.body)).not.toContain('nonce')
+  })
+
+  it('keeps sensitive command values redacted and omits all tool input and output', () => {
+    const command = "TOKEN=top-secret rovai send --public-only --body 'private message' && curl -H 'Cookie: session=private-cookie' https://example.test"
+    const run = snapshot('succeeded', {
+      evidence: [
+        commandEvidence(1, command, 'completed', 'raw stdout'),
+        evidence(2, 'runtime.action', 'tool_call', 'completed', {
+          kind: 'tool',
+          input: { token: 'private-input' },
+          output: { body: 'private-output' }
+        })
+      ]
+    })
+
+    const body = cardBody(executionConsoleCard(run))
+    expect(body).toContain('TOKEN=[已隐藏] rovai send --public-only --body [已隐藏]')
+    expect(body).not.toContain('top-secret')
+    expect(body).not.toContain('private message')
+    expect(body).toContain('"Cookie: [已隐藏]"')
+    expect(body).not.toContain('private-cookie')
+    expect(body).not.toContain('raw stdout')
+    expect(body).not.toContain('private-input')
+    expect(body).not.toContain('private-output')
+  })
+
+  it('shows apply_patch file deltas but never its patch payload', () => {
+    const patch = evidence(1, 'runtime.action', 'tool_call', 'completed', {
+      kind: 'tool',
+      input: { patch: '*** Begin Patch\n-secret patch body-\n*** End Patch' },
+      output: { status: 'ok' }
+    })
+    patch.canonical = {
+      operationId: 'patch-1',
+      activityDomain: 'file',
+      semanticKind: 'apply_patch',
+      toolName: 'apply_patch',
+      presentationHint: 'apply_patch',
+      phase: 'terminal',
+      outcome: 'succeeded',
+      credibility: 'runtime_structured',
+      coverageLevel: 'fine_grained',
+      sourceAuthority: 'runtime',
+      sourceEvidenceIds: ['evidence-1'],
+      classifierVersion: 'activity-v1',
+      firstEvidenceSequence: 1,
+      lastEvidenceSequence: 1,
+      revision: 1,
+      diffProjection: {
+        schemaVersion: 1,
+        source: 'runtime_reported',
+        revision: 1,
+        sourceEvidenceIds: ['evidence-1'],
+        status: 'available',
+        semanticKind: 'exact_mutation',
+        entries: [{
+          path: 'src/foo.ts',
+          changeKind: 'update',
+          additions: 4,
+          deletions: 2,
+          diff: '@@ -1 +1 @@\n-secret patch body'
+        }]
+      }
+    }
+
+    const body = cardBody(executionConsoleCard(snapshot('succeeded', { evidence: [patch] })))
+    expect(body).toContain('✓ apply_patch')
+    expect(body).toContain('`src/foo.ts` +4 −2')
+    expect(body).not.toContain('secret patch body')
+    expect(body).not.toContain('*** Begin Patch')
   })
 })

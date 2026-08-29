@@ -43,6 +43,7 @@ import {
   agentRunWaitDetail,
   buildLiveExecutionProgress,
   executionEvidenceResultText,
+  executionStepPublicTitle,
   formatByteSize,
   liveRuntimeEventFromExecutionEvidence,
   type LiveExecutionProgress,
@@ -8234,11 +8235,12 @@ function ToolCallRow({
   const [activated, setActivated] = useState(false)
   const summaryRef = useRef<HTMLElement>(null)
   const status = activityStatusForAgentRun(step.status, runStatus)
+  const publicTitle = executionStepPublicTitle(step)
   const hasDetail = Boolean(step.detail) || completeEvidence !== undefined
   const summary = (
     <>
       <ToolCallIcon activityDomain={step.activityDomain} />
-      <span className="tool-call-title" title={step.title}>{step.title}</span>
+      <span className="tool-call-title" title={publicTitle}>{publicTitle}</span>
       <ToolCallState status={status} />
       <span
         className={`tool-call-disclosure-slot${hasDetail ? '' : ' is-placeholder'}`}
@@ -8282,7 +8284,7 @@ function ToolCallRow({
           completeEvidence={completeEvidence}
           expanded={expanded}
           resultKey={`${runId}:${step.id}`}
-          title={step.title}
+          title={publicTitle}
           summaryRef={summaryRef}
         />
       )}

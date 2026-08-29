@@ -13,7 +13,6 @@ import type {
   ChannelMemberBotView,
   ChannelQrAttemptView,
   ChannelSettingsSnapshot,
-  ExecutionConsoleViewState,
   StoredCommandResult
 } from '@contracts'
 import type { CoreClient } from './core-client'
@@ -137,6 +136,13 @@ type ClaimedChannelDelivery = {
   recipientOpenId?: string | null
 }
 
+type TopicRosterRefreshRequest = {
+  provider: 'feishu'
+  tenantKey: string
+  chatId: string
+  requiredRosterGeneration: number
+}
+
 type CreateChannel = typeof createLarkChannel
 
 type DesktopAttachmentTarget = {
@@ -151,7 +157,7 @@ type DesktopAttachmentTarget = {
 type ExecutionConsoleSource = ExecutionConsoleSnapshot & {
   targetAppId: string
   externalMessageId: string | null
-  view: ExecutionConsoleViewState
+  state: 'opening' | 'active' | 'terminal_pending' | 'terminal_sealed'
 }
 
 export interface ChannelHostDependencies {
@@ -362,6 +368,7 @@ export class ChannelSettingsService {
       await this.#upsertAccount(identity)
       await this.#developerSession.confirmLogin?.()
     } catch (error) {
+      const failureCode = channelFailureCode(error)
       let rollbackFailed = false
       if (this.#developerSession.rollbackLogin) {
         try {
@@ -374,6 +381,10 @@ export class ChannelSettingsService {
       }
       if (rollbackFailed && previous?.status === 'connected') {
         await this.#expireAccount(previous).catch(() => undefined)
+      }
+      if (failureCode === 'feishu_login_cancelled') {
+        this.#finishQr()
+        return this.#emit()
       }
       this.#failQr(error)
       throw error
@@ -1212,7 +1223,8 @@ export class ChannelSettingsService {
         reason: `sdk_policy_${event.reason}`
       })
     }))
-    managed.unsubscribers.push(channel.on('botAdded', (event) => this.#handleBotAdded(event)))
+    managed.unsubscribers.push(channel.on('botAdded', (event) => this.#handleBotRosterChanged(event)))
+    managed.unsubscribers.push(channel.on('botRemoved', (event) => this.#handleBotRosterChanged(event)))
     managed.unsubscribers.push(channel.on('error', (error) => {
       logFeishuBotDiagnostic('ws.error', {
         appIdDigest: digest(managed.appId),
@@ -1333,7 +1345,7 @@ export class ChannelSettingsService {
       return
     }
     if (conversationKind !== 'p2p'
-      && !await this.#reconcileChatRoster(message.chatId, tenantKey, false, coreSnapshot)) {
+      && !await this.#reconcileChatRoster(message.chatId, tenantKey, true, coreSnapshot)) {
       reject('roster_reconciliation_failed', conversationKind)
       return
     }
@@ -1525,6 +1537,15 @@ export class ChannelSettingsService {
     const raw = (event.raw ?? {}) as RawCardActionEvent
     let result: StoredCommandResult
     try {
+      if (projectAction.action === 'bind'
+        && !await this.#reconcileCardActionRoster(event.chatId)) {
+        logFeishuBotDiagnostic('card.resolve_failed', {
+          appIdDigest: digest(managed.appId),
+          agentId: managed.agentId,
+          reason: 'roster_reconciliation_failed'
+        })
+        return { toast: { type: 'error', content: '群内 Bot 状态读取失败，请重试' } }
+      }
       result = await this.#commandWithId(
         'channels.feishu.pendingBinding.resolve',
         randomUUID(),
@@ -1576,28 +1597,27 @@ export class ChannelSettingsService {
     action: ExecutionConsoleCardAction
   ): Promise<FeishuCardActionResponse> {
     const raw = (event.raw ?? {}) as RawCardActionEvent
-    let updateQueued = false
     try {
       const current = await this.#dependencies!.core.request<ExecutionConsoleSource | null>(
         'channels.executionConsole.source',
         {
           agentRunId: action.agentRunId,
-          expectedSequence: action.expectedSnapshotSequence
+          expectedSequence: action.snapshotSequence
         }
       )
       if (!current) return executionConsoleCardActionResponse('stale')
+      const pageCount = executionConsolePageCount(current)
+      if (action.pageIndex >= pageCount) return executionConsoleCardActionResponse('stale')
       const result = await this.#commandWithId(
-        'channels.executionConsole.view.update',
+        'channels.executionConsole.page.authorize',
         randomUUID(),
         {
           agentRunId: action.agentRunId,
           appId: managed.appId,
           externalMessageId: event.messageId,
-          expectedViewVersion: action.expectedViewVersion,
-          expectedSnapshotSequence: action.expectedSnapshotSequence,
-          nonce: action.nonce,
-          action: action.action,
-          pageCount: executionConsolePageCount(current),
+          snapshotSequence: action.snapshotSequence,
+          pageIndex: action.pageIndex,
+          pageCount,
           operatorOpenId: raw.operator?.open_id ?? event.operator.openId ?? null,
           operatorUserId: raw.operator?.user_id ?? event.operator.userId ?? null,
           operatorUnionId: raw.operator?.union_id ?? null
@@ -1607,27 +1627,17 @@ export class ChannelSettingsService {
       if (result.status === 'rejected') {
         return executionConsoleCardActionResponse(result.code)
       }
-      updateQueued = result.payload.viewUpdateQueued === true
-      if (updateQueued) void this.#pump()
-      const latest = await this.#dependencies!.core.request<ExecutionConsoleSource | null>(
-        'channels.executionConsole.source',
-        {
-          agentRunId: action.agentRunId,
-          expectedSequence: Number(result.payload.snapshotSequence)
-        }
-      )
-      if (!latest
-        || latest.targetAppId !== managed.appId
-        || latest.externalMessageId !== event.messageId) {
+      if (current.targetAppId !== managed.appId
+        || current.externalMessageId !== event.messageId
+        || current.state !== 'terminal_sealed') {
         return executionConsoleCardActionResponse('stale')
       }
       await managed.channel.updateCard(
         event.messageId,
-        executionConsoleCard(latest, latest.view)
+        executionConsoleCard(current, action.pageIndex)
       )
-      return executionConsoleCardActionResponse(action.action)
+      return executionConsoleCardActionResponse('execution_console_page')
     } catch (error) {
-      if (updateQueued) void this.#pump()
       logFeishuBotDiagnostic('execution_console.card_update_failed', {
         appIdDigest: digest(managed.appId),
         agentId: managed.agentId,
@@ -1692,7 +1702,7 @@ export class ChannelSettingsService {
     )))
   }
 
-  async #handleBotAdded(event: BotAddedEvent): Promise<void> {
+  async #handleBotRosterChanged(event: BotAddedEvent): Promise<void> {
     if (this.#stopped) return
     const snapshot = await this.#coreSnapshot().catch(() => null)
     if (!snapshot) return
@@ -1701,8 +1711,8 @@ export class ChannelSettingsService {
         .filter((conversation) => conversation.chatId === event.chatId)
         .map((conversation) => conversation.tenantKey)
     )
-    if (tenantKeys.size === 0 && snapshot.account?.accountId) {
-      tenantKeys.add(snapshot.account.accountId)
+    if (tenantKeys.size === 0 && snapshot.account?.tenantId) {
+      tenantKeys.add(snapshot.account.tenantId)
     }
     await Promise.allSettled(
       [...tenantKeys].map((tenantKey) => this.#reconcileChatRoster(
@@ -1712,6 +1722,29 @@ export class ChannelSettingsService {
         snapshot
       ))
     )
+  }
+
+  async #reconcileCardActionRoster(chatId: string): Promise<boolean> {
+    const snapshot = await this.#coreSnapshot().catch(() => null)
+    if (!snapshot) return false
+    const tenantKeys = new Set(
+      snapshot.transportConversations
+        .filter((conversation) => conversation.chatId === chatId)
+        .map((conversation) => conversation.tenantKey)
+    )
+    if (tenantKeys.size === 0 && snapshot.account?.tenantId) {
+      tenantKeys.add(snapshot.account.tenantId)
+    }
+    if (tenantKeys.size === 0) return false
+    const outcomes = await Promise.all(
+      [...tenantKeys].map((tenantKey) => this.#reconcileChatRoster(
+        chatId,
+        tenantKey,
+        true,
+        snapshot
+      ))
+    )
+    return outcomes.every(Boolean)
   }
 
   async #reconcileChatRoster(
@@ -1842,6 +1875,18 @@ export class ChannelSettingsService {
         workerId: HOST_WORKER_ID,
         limit: 20
       })
+      const rosterRefreshes = Array.isArray(tick.payload.rosterRefreshes)
+        ? tick.payload.rosterRefreshes as TopicRosterRefreshRequest[]
+        : []
+      await Promise.allSettled(rosterRefreshes.map((refresh) => {
+        if (refresh.provider !== 'feishu'
+          || !refresh.tenantKey
+          || !refresh.chatId
+          || !Number.isSafeInteger(refresh.requiredRosterGeneration)) {
+          return Promise.resolve(false)
+        }
+        return this.#reconcileChatRoster(refresh.chatId, refresh.tenantKey, true)
+      }))
       const deliveries = Array.isArray(tick.payload.deliveries)
         ? tick.payload.deliveries as ClaimedChannelDelivery[]
         : []
@@ -1911,7 +1956,7 @@ export class ChannelSettingsService {
         messageId = delivery.updateMessageId ?? null
         if (messageId) await managed.channel.recallMessage(messageId)
       } else if (delivery.deliveryKind === 'execution_console_upsert') {
-        let source = await this.#dependencies!.core.request<ExecutionConsoleSource | null>(
+        const source = await this.#dependencies!.core.request<ExecutionConsoleSource | null>(
           'channels.executionConsole.source',
           {
             agentRunId: requiredPayloadString(delivery.payload, 'agentRunId'),
@@ -1922,41 +1967,7 @@ export class ChannelSettingsService {
           if (source.targetAppId !== delivery.targetAppId) {
             throw new Error('execution_console_target_app_mismatch')
           }
-          const pageCount = executionConsolePageCount(source)
-          if (source.view.mode === 'expanded'
-            && source.view.pageIndex >= pageCount
-            && source.externalMessageId) {
-            const reconciled = await this.#commandWithId(
-              'channels.executionConsole.view.update',
-              randomUUID(),
-              {
-                agentRunId: source.agentRunId,
-                appId: managed.appId,
-                externalMessageId: source.externalMessageId,
-                expectedViewVersion: source.view.viewVersion,
-                expectedSnapshotSequence: source.sequence,
-                nonce: source.view.nonce,
-                action: 'execution_console_reconcile',
-                pageCount,
-                operatorOpenId: null,
-                operatorUserId: null,
-                operatorUnionId: null
-              },
-              false
-            )
-            if (reconciled.status === 'rejected') {
-              throw new Error('execution_console_page_reconcile_stale')
-            }
-            source = await this.#dependencies!.core.request<ExecutionConsoleSource | null>(
-              'channels.executionConsole.source',
-              {
-                agentRunId: source.agentRunId,
-                expectedSequence: source.sequence
-              }
-            )
-            if (!source) throw new Error('execution_console_source_missing_after_reconcile')
-          }
-          const card = executionConsoleCard(source, source.view)
+          const card = executionConsoleCard(source)
           messageId = delivery.updateMessageId ?? null
           if (messageId) {
             await managed.channel.updateCard(messageId, card)
@@ -2306,7 +2317,6 @@ function channelFailureDetail(error: unknown): string {
       '已登录飞书，但未能读取完整的账号与企业信息。请关闭后重试。',
     feishu_login_failed: '无法打开飞书登录页面，请检查网络后重试。',
     feishu_login_expired: '飞书登录已超时，请关闭后重试。',
-    feishu_login_cancelled: '飞书登录已取消。',
     feishu_developer_session_expired: '飞书开发者会话已过期，请重新登录。',
     feishu_developer_identity_changed: '飞书账号或企业身份已变化，请重新连接。',
     feishu_connection_error: '飞书连接异常，请稍后重试。',
@@ -2465,18 +2475,13 @@ type ProjectCardAction = {
   projectId: string | null
 }
 
-type ExecutionConsoleCardActionName =
-  | 'execution_console_expand'
-  | 'execution_console_collapse'
-  | 'execution_console_prev_page'
-  | 'execution_console_next_page'
+type ExecutionConsoleCardActionName = 'execution_console_page'
 
 type ExecutionConsoleCardAction = {
   action: ExecutionConsoleCardActionName
   agentRunId: string
-  expectedViewVersion: number
-  expectedSnapshotSequence: number
-  nonce: string
+  snapshotSequence: number
+  pageIndex: number
 }
 
 type ProjectCardOption = {
@@ -2519,13 +2524,7 @@ function executionConsoleCardActionResponse(
   if (result === 'channel.execution_console.owner_required') {
     return { toast: { type: 'warning', content: '仅 Rovai Owner 可以操作执行记录' } }
   }
-  if (result === 'execution_console_expand') {
-    return { toast: { type: 'success', content: '已展开执行过程' } }
-  }
-  if (result === 'execution_console_collapse') {
-    return { toast: { type: 'success', content: '已收起执行过程' } }
-  }
-  if (result === 'execution_console_prev_page' || result === 'execution_console_next_page') {
+  if (result === 'execution_console_page') {
     return { toast: { type: 'info', content: '执行记录页面已更新' } }
   }
   if (result === 'stale'
@@ -2577,32 +2576,20 @@ function projectCardAction(value: unknown, selectedOption?: string): ProjectCard
 
 function executionConsoleCardAction(value: unknown): ExecutionConsoleCardAction | null {
   if (!isRecord(value)) return null
-  const action = typeof value.action === 'string'
-    && [
-      'execution_console_expand',
-      'execution_console_collapse',
-      'execution_console_prev_page',
-      'execution_console_next_page'
-    ].includes(value.action)
-      ? value.action as ExecutionConsoleCardActionName
-      : null
-  if (!action
+  if (value.action !== 'execution_console_page'
     || typeof value.agentRunId !== 'string'
     || value.agentRunId.trim().length === 0
-    || typeof value.nonce !== 'string'
-    || value.nonce.trim().length === 0
-    || typeof value.expectedViewVersion !== 'number'
-    || !Number.isSafeInteger(value.expectedViewVersion)
-    || value.expectedViewVersion < 1
-    || typeof value.expectedSnapshotSequence !== 'number'
-    || !Number.isSafeInteger(value.expectedSnapshotSequence)
-    || value.expectedSnapshotSequence < 1) return null
+    || typeof value.snapshotSequence !== 'number'
+    || !Number.isSafeInteger(value.snapshotSequence)
+    || value.snapshotSequence < 1
+    || typeof value.pageIndex !== 'number'
+    || !Number.isSafeInteger(value.pageIndex)
+    || value.pageIndex < 0) return null
   return {
-    action,
+    action: 'execution_console_page',
     agentRunId: value.agentRunId,
-    expectedViewVersion: value.expectedViewVersion,
-    expectedSnapshotSequence: value.expectedSnapshotSequence,
-    nonce: value.nonce
+    snapshotSequence: value.snapshotSequence,
+    pageIndex: value.pageIndex
   }
 }
 

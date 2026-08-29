@@ -140,6 +140,9 @@ describe('Channel settings', () => {
     expect(channelErrorMessage(new Error(
       "Error invoking remote method 'rovai:channels-publish-member-bot': Error: feishu_console_create_app_from_template_http_500"
     ))).toBe('飞书开放平台操作尚未完成；请查看下方状态，排除问题后重试。')
+    expect(channelErrorMessage(new Error(
+      "Error invoking remote method 'rovai:channels-connect': Error: feishu_login_cancelled"
+    ))).toBeNull()
   })
 
   it('keeps only present members in deterministic roster order', () => {

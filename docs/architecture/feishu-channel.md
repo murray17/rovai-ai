@@ -231,9 +231,17 @@ Host 对父群中每个已发布 Bot 调用 `isInChat`，只有完整快照才�
 使用当前全部 present Bot；以后完整快照通过 v1.29 已有 `camp.member.add/remove`、`feishu` source binding 和 exact
 reconciliation generation 同步。Bot 移出群走同一原子 cutover/reconciliation。
 
-话题 Camp 首次只加入当前显式 mention 的队员，父群增加 Bot 不污染既有话题。话题内显式 mention 或 A2A exact
-target 需要一个尚未加入的队员时，Core 只有在该队员 Bot 仍 published 且 present 于父群 roster 时，才先通过同一
-membership source 加入该话题 Camp。群 roster 不完整时 admission fail closed。
+独立话题群的父群 roster 是其全部 Topic Camp 的动态默认协作队员池。新 Topic Camp 首次创建时使用当前全部
+present/published Rovai Bot 建立 membership，但首条消息仍只为明确 mention 的 targets 创建初始 AgentRun；因此“本轮
+初始目标”和“Camp 可协作队员”是两个独立集合。父群新增 Bot 后，完整快照通过同一 membership source 把它加入新旧
+Topic Camp；移出 Bot 后，从下一次 AgentRun 起不得再以它为目标，历史消息、历史 Run、Camp 和冻结项目不变。
+
+Host 在新 Topic 建 Camp、每条 Owner 根消息和项目卡 resolve 前强制重读完整 `isInChat` 快照，并消费 Bot 加入/移出
+事件与周期性全量恢复。A2A、Gather、delivery retry/successor 等内部路径在真正物化 Topic AgentRun 前，由 Core 建立
+所需的下一 roster generation 门闩；Host tick 取得请求、重读父群并提交 generation，Core 完成 membership
+reconciliation 后才恢复物化。若目标已经移出则 fail closed。已经运行的 AgentRun 继续使用创建时冻结的执行上下文；
+为避免 membership remove 取消它，实际离群队员的 membership cutover 可延迟到其非终态 Run 结束，但最新 roster 已立即
+阻止任何新 Run。群 roster 读取不完整时所有这些边界都 fail closed。
 
 ## 输出、恢复与秘密
 
@@ -253,20 +261,26 @@ Agent 永久输出使用实际作者 Agent 的已发布 Bot；作者 Bot 不可�
 该重试并让 Turn/Request 收口，再继续同一 Binding 的 FIFO。
 
 每个 AgentRun 有一个 Core-owned execution console identity。Core 把可公开 Execution Evidence、Run 状态和公开输出
-coalesce 为同一 Card 2.0 snapshot；Main 与 Renderer 共享一套纯 presentation 规则，始终滤掉 reasoning/thought。非终态
-保持完整 `live` 卡且没有收起动作；终态自动变成只含状态、公开操作统计、稳定用时和安全失败摘要的 `collapsed` 卡。
-Owner 可在同一卡片切换 `expanded` 并按语义 block 翻页；展开态保留 narration、plan、diagnostic、执行台 Agent output 和
-每一项具体工具操作，连续工具组只做视觉分段，不成为第二层折叠。
+coalesce 为同一 Card 2.0 snapshot；Main 与 Renderer 共同消费 shared execution presentation 生成的安全 `publicCommand`，
+始终滤掉 reasoning/thought。运行中与终态都按真实时序平铺 narration、plan、diagnostic、每条 command、文件变化和执行台
+Agent output；终态增加稳定用时，但没有摘要收起、“已执行 N 项”、查看/收起动作或第二层工具分组。
 
-mode、page index 与 view version 由 Core execution-console projection 持久保存。Main 从 callback envelope 取真实 operator，
-把 frozen App、authoritative external message ID、snapshot sequence、view version、version-bound nonce 和页数交给 Core
-CAS；Core 只允许 Owner 操作 terminal projection，成功后递增 version 并排 durable 原卡 upsert。Main 随后重读最新
-snapshot 并 `updateCard` 原消息；旧卡、双击、重放、错误 App 与 non-owner 都不会改变投影。终态 reconciliation 增长
-snapshot 时使旧按钮失效；重新分页越界由可信 Host 通过同一 CAS seam 钳制。
+shared presentation 保留命令的 executable、subcommand、flags、路径和非敏感参数，并统一脱敏自由正文、认证头、Token、
+Cookie 与环境变量值。飞书只消费该安全字段，不从原始 payload 或 `detail` 二次解析命令；也不展示 stdin、stdout、stderr、
+aggregated output、tool input/output JSON 或完整 patch body。`apply_patch` 只显示操作名和结构化文件增删行。
 
-控制台只能由该 Agent 的冻结 App 创建、更新和撤回；下一条 root request admission 无论旧卡当前收起、展开或位于哪一页，
-都召回同 ChannelConversation 中更早 Turn 的控制台，recall 等待在途 upsert 并把飞书 target revoked 当作幂等成功。控制台
-是临时执行 presentation，不是 CampMessage，也不参与请求业务 settlement。
+Run 进入终态后，Core 先把控制台置为 `terminal_pending`；公开 evidence/output 连续 900ms 没有变化后才生成最后一次
+`terminal_sealed` snapshot。sealed 后 materializer 不再更新该卡。超出单卡预算的 sealed snapshot 按时序分页，每页最多
+20 条 command 且约 10,000 字符；分页不拆开 command 与其 file changes。
+
+终态分页是无持久视图状态的 Card 2.0 callback。payload 只含 action、AgentRun、sealed snapshot sequence 和目标页；Core
+只授权 callback envelope 中的 Owner、冻结 App、authoritative external message、`terminal_sealed` exact sequence 与合法页码。
+Main 随后按该页直接 `updateCard` 原消息一次，不写 display/page/view state，不创建 Outbox，也不触发 pump。重复点击同一页
+仍可成功；旧 snapshot、错误 App/message、越界页与 non-owner fail closed。
+
+控制台只能由该 Agent 的冻结 App 创建、更新和撤回；下一条 root request admission 无论 sealed 卡当前显示哪一页，都召回
+同 ChannelConversation 中更早 Turn 的控制台，recall 等待在途 upsert 并把飞书 target revoked 当作幂等成功。控制台是临时
+execution presentation，不是 CampMessage，也不参与请求业务 settlement。
 
 公开 Agent 正文永远新建无标题 Markdown 消息，不覆盖控制台、queue ack 或其他正文。`CurrentUserMention` 在群/话题
 通过 SDK structured mention 投影为飞书原生 mention，不靠普通 `@名称` 或手写标签猜身份。公开 CampMessage 的 available

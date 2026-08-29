@@ -698,11 +698,12 @@ function assertChannelSettingsSnapshot(value: ChannelSettingsSnapshot): ChannelS
   return value
 }
 
-export function channelErrorMessage(error: unknown): string {
+export function channelErrorMessage(error: unknown): string | null {
   const raw = error instanceof Error && error.message ? error.message : ''
   const message = raw
     .replace(/^Error invoking remote method '[^']+': Error:\s*/, '')
     .trim()
+  if (message === 'feishu_login_cancelled') return null
   if (message === 'feishu_console_remote_app_unavailable') {
     return '原飞书应用已删除或当前账号无权访问，无法按原 App ID 重试。'
   }

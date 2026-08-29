@@ -17,6 +17,7 @@ function tool(
     step: {
       id,
       title: `指令 ${id}`,
+      publicCommand: null,
       detail: `结果 ${id}`,
       status,
       activityDomain: 'shell',
