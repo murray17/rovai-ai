@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest'
 import type { SkillView, StoredCommandResult } from '@contracts'
 import {
   SkillCard,
+  SkillLibraryColumns,
   SkillSettings,
   deleteSkillConfirmationCopy,
   formatBytes,
@@ -37,10 +38,18 @@ describe('Skill settings', () => {
     expect(markup).toContain('先生成安全预览；确认后复制完整内容')
     expect(markup).toContain('搜索 Skill，调整运行时生效组，或查看来源详情。')
     expect(markup).toContain('class="skill-library-toolbar"')
-    expect(markup).toContain('class="skill-library-legend"')
-    expect(markup).not.toContain('skill-library-columns')
     expect(markup).not.toContain('class="skill-import-help"')
     expect(markup).not.toContain('允许执行')
+  })
+
+  it('names every visible Skill Library column in the same order as its rows', () => {
+    const markup = renderToStaticMarkup(createElement(SkillLibraryColumns))
+
+    expect(markup).toContain('class="skill-library-columns"')
+    expect(markup).toContain('aria-hidden="true"')
+    expect(markup).toContain('<span></span><span>Skill</span>')
+    expect(markup).toContain('<span>生效范围</span><span>状态</span><span>查看</span>')
+    expect(markup).not.toContain('投递范围')
   })
 
   it('keeps system-required Skills out of the settings list and search results', () => {
@@ -138,6 +147,8 @@ describe('Skill settings', () => {
     expect(enabled).toContain('role="switch"')
     expect(enabled).toContain('aria-checked="true"')
     expect(enabled).toContain('aria-label="停用 skill-one"')
+    expect(enabled).toContain('aria-label="skill-one 生效范围，未选择"')
+    expect(enabled).not.toContain('投递范围')
     expect(disabled).toContain('aria-label="启用 skill-one"')
     expect(enabled).not.toContain('已启用')
     expect(disabled).not.toContain('已停用')
@@ -306,6 +317,8 @@ describe('Skill settings', () => {
     expect(importedPrimary).not.toContain('本地文件夹导入')
     expect(importedPrimary).not.toContain('Revision r1')
     expect(importedDetails).toContain('本地文件夹导入')
+    expect(importedDetails).toContain('启停和生效范围仍由你管理')
+    expect(importedDetails).not.toContain('投递范围')
     expect(importedDetails).toContain('class="skill-delete-button"')
     expect(importedDetails).toContain('>删除</button>')
     expect(importedDetails).not.toContain('删除 Skill')

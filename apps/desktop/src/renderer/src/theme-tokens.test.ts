@@ -384,8 +384,10 @@ describe('Porcelain Day + Steel Night theme tokens', () => {
   it('uses readable identity-colored Skill rows and a bounded MCP workbench', () => {
     expect(css).toMatch(/\.skill-card-grid\s*\{[^}]*max-width:\s*none[^}]*gap:\s*5px[^}]*border-radius:\s*12px[^}]*background:\s*var\(--surface-subtle\)/)
     expect(css).toMatch(/\.skill-identity-mark\s*\{[^}]*--skill-identity:\s*var\(--identity-1\)/)
-    expect(css).toMatch(/\.skill-card-primary\s*\{[^}]*grid-template-columns:\s*34px minmax\(0, 1fr\) var\(--skill-actions-width\)/)
-    expect(css).toMatch(/\.skill-card-controls\s*\{[^}]*grid-template-columns:\s*118px 48px 30px/)
+    expect(css).toMatch(/\.skill-library-columns, \.skill-card-primary\s*\{[^}]*grid-template-columns:\s*34px minmax\(0, 1fr\) var\(--skill-actions-width\)[^}]*gap:\s*10px/)
+    expect(css).toMatch(/\.skill-library-columns\s*\{[^}]*min-height:\s*32px[^}]*padding:\s*0 11px[^}]*font:\s*600 9\.5px\/1/)
+    expect(css).toMatch(/\.skill-library-legend, \.skill-card-controls\s*\{[^}]*grid-template-columns:\s*118px 48px 30px[^}]*gap:\s*8px/)
+    expect(css).toMatch(/@media \(max-width: 820px\)[\s\S]*\.skill-library-columns\s*\{\s*display:\s*none/)
     expect(css).toMatch(/\.skill-identity-mark\s*\{[^}]*width:\s*34px[^}]*height:\s*34px[^}]*color:\s*var\(--skill-identity\)/)
     expect(css).toMatch(/\.skill-card-title > strong\s*\{[^}]*font-size:\s*13px/)
     expect(css).toMatch(/\.skill-card-heading > p\s*\{[^}]*font-size:\s*11px/)

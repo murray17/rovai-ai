@@ -91,6 +91,11 @@ badge and details, not grouping or lifecycle. `cli-operations` and `memory-stewa
 badge or a special built-in group. Imported revisions, enablement and `allowed-tools` do not imply
 extra Runtime permission or proof that a model read the Skill.
 
+The wide-list header follows the MCP Library column model: one blank identity-mark slot, then
+`Skill / 生效范围 / 状态 / 查看`. It lives inside the list and shares the row's outer and control grids;
+at widths below 820px the header is hidden while controls reflow beneath the Skill copy without
+changing DOM or keyboard order.
+
 On Windows, an ambiguous or interrupted copy projection is a root-level execution blocker, not an
 individual Skill enablement state. Keep the list and saved choices visible, add one actionable recovery
 surface with the affected Runtime/root, and disable execution-dependent actions until Core reports the
