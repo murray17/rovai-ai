@@ -1,7 +1,7 @@
 ---
 document_type: development-guide
 authority: desktop-ui-acceptance-infrastructure
-last_updated: 2026-08-26
+last_updated: 2026-08-30
 ---
 
 # 桌面 UI 验收与隔离数据
@@ -108,7 +108,7 @@ pnpm accept:onboarding-ui
 它们分别覆盖长期记忆、队员头像、队员生命周期、应用内通知、统一侧栏（含 Project/Camp 置顶、
 可恢复 Project 移除、跨重启隐藏、Quick Chat 焦点回退与 Core 数据保留）、结构化提及和
 当前会话完整正文查找（含地图快捷返回、非 Camp 边界、旧消息 anchored 定位与双主题双尺寸）、
-Task 创建操作行、完整表单聚焦、取消恢复与单卡原地更新、十 Runtime Canonical Activity 工具名称与 Agent 级连续执行过程、A2A 消息
+Task 创建操作行、完整表单聚焦、取消恢复与单卡原地更新、十三 Runtime Canonical Activity 工具名称与 Agent 级连续执行过程、A2A 消息
 Scheme C 转交 footer，诊断中心双尺寸、只读自检、MCP 权限修复复检与 v5 脱敏，以及“关于与更新”
 的真实 packaged 版本、确定性禁用网络自动检查、App Update v1 idle 快照、Day/Night、1040×700、
 200% 等效布局、键盘焦点和无竖线回归。available 到失败的完整状态/动作/fallback 矩阵由 Renderer
@@ -195,7 +195,7 @@ pnpm accept:member-lifecycle-ui
 
 ### Agent 执行过程门禁
 
-Renderer 的权威行为见 [Run Process Detail Surface v23](../contracts/run-process-detail-surface-v23.md) 与
+Renderer 的权威行为见 [Run Process Detail Surface v26](../contracts/run-process-detail-surface-v26.md) 与
 [当前 UI 详规：Camp 执行过程](../ui/components/conversation-workspace.md#camp-执行过程)。修改 AgentRun 分组、执行台、Drawer、
 Task Related execution、停止结果或 Inspector 页签后，至少运行：
 
@@ -260,6 +260,9 @@ pnpm accept:runtime-activity-ui
   `16px 类型图标 / 可缩略名称 / 16px 状态轨 / 20px disclosure 轨` 四列；不可展开行保留末轨
   占位，组图标与摘要文字共享 16px 中心线；Shell、File、Git、Network、Permission、Runtime、Plan、Tool 和 Unknown 使用统一 16px 单色
   线性 SVG，状态只由右侧带辅助名称的形状表达；打开组只显示完整 Tool chronology，不自动打开任一结果；
+- Shell command disclosure 第一行精确为 `$ ` 加完整脱敏 command；公开 output 紧接下一行，不出现“命令 / 输出”
+  标签或空白分隔行。Shell 结果面使用独立主题 token，左边界与 16px Terminal 图标左边界同轴；其他 Tool
+  detail 的颜色和缩进保持不变；
 - 同一 Run 至少 15 个 Canonical Tool operation 时，较早项、中间项和最后项全部按首次出现顺序保留；
   Built-in `camp.read/search` fixture 的顶层 `input/output` 为空、公共结果只在 `coreEnvelope.result` 时，
   两条 Tool 行仍可展开，完整结果不含 Envelope、request/receipt 或 canonical input。

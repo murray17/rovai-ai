@@ -6,7 +6,7 @@ authority: version-scope-and-status
 design_status: confirmed
 implementation_status: in_progress
 model_context_change: false
-last_updated: 2026-08-29
+last_updated: 2026-08-30
 ---
 
 # Rovai-ai v1.29：Camp 动态队员管理与 Runtime 文件变化
@@ -15,7 +15,8 @@ last_updated: 2026-08-29
 
 > 当前状态：动态 Camp membership、Message Delivery zero-attempt cancellation、Managed Attachment v2、安全退出、
 > ACP Client FS/Terminal 权限收敛，以及 Runtime Evidence 驱动的 Command Diff / AgentRun 文件变化主路径已经实现并
-> 通过定向回归；Desktop Navigation 已切换为提交后事件驱动、全局 generation drain 与 20 秒前台安全刷新。
+> 通过定向回归；Runtime Activity 已切换到 `activity-v2` 新 operation 写入、类型化 Search Operation、Renderer 中文标题与
+> 七类图标；Desktop Navigation 已切换为提交后事件驱动、全局 generation drain 与 20 秒前台安全刷新。
 > 真实打包 App 的多 Runtime 文件变化复测仍待完成。
 >
 > 本版本未发布，因此文件变化能力采用 clean break：完全删除 Git tree、Workspace Change Window、baseline/final
@@ -44,7 +45,8 @@ last_updated: 2026-08-29
 - Migration 113 保留 `v1.25 / projection schema 66`，把 durable shutdown cycle 扩为 v2/v3；Migration 114 只为
   既有 Canonical Activity 增加 typed Command Diff projection；Migration 115 建立
   `agent_run_file_change_projection` 与 `complete | no_changes` 幂等 checkpoint，并把当前 Data Contract 升为
-  `v1.28 / projection schema 69`；
+  `v1.28 / projection schema 69`；Migration 116 只把新 operation 的 classifier 切换为
+  `v1.29 / projection schema 70 / activity-v2`，不重写历史 v1 row；
 - 不创建或迁移任何 Workspace Window、participant、coordinator、baseline/final、manifest、OID 或 ref cleanup
   表；使用过未发布中间 schema 的本地数据按 current Data Contract clean break 处理；
 - 新增 `camps.members.add`、`camps.members.removalPreview`、`camps.members.remove`；Camp 至少保留一位 active
@@ -80,6 +82,14 @@ last_updated: 2026-08-29
 - Desktop Navigation 使用一个全局 refresh coordinator：Core 在影响投影的提交后发失效提示，Renderer 以
   80ms debounce、single-flight generation drain、1/2/5/10 秒失败退避与 focus 抢占收敛；隐藏时暂停，前台
   20 秒安全刷新只作漏事件兜底，Overview 附属模块失败不再关闭侧栏恢复。
+- Runtime Activity 新写入只产生 Shell/File/Tool/Runtime/Unknown 五域，file/web/generic search 使用不同
+  semantic kind；已有 v1 operation 继续用 v1 结算，Read Side 双读 v2/v1，历史不回填；
+- Renderer 统一拥有中文标题与 Terminal/File/Web/Tool/Rovai/Runtime/Unknown 七类图标；Rovai 图标只认 Core
+  Catalog identity，不认标题或 Shell `rovai` 文本；搜索词只从 available `runtimeSearchOperation` 与 Canonical
+  Web identity 的交集展示，不按任意 `query` 字段升级，不做敏感词过滤；单项直接显示，多项以 `query` 保留首项、
+  `queries` 保留顺序并用中文逗号展示，Web 搜索计入连续 Tool 组操作数。
+- Shell disclosure 以 `$ <command>` 开始，Web 搜索以 `搜索 <query>` 开始；存在公开结果时都从下一行连续显示，
+  不插入“命令 / 输出 / 搜索词 / 结果”标签或空白分隔行。
 
 ## 明确不做
 
@@ -115,6 +125,10 @@ generation、reconciliation 与文件变化 projection 都不进入模型上下�
   与操作数；任一纯 operation-only 文件仍使整张卡片回退为修改次数；
 - detail 读取强制 Camp 归属、Run、epoch 与 blob identity；Managed Blob GC 保留 active projection root；
 - 当前数据库不存在 workspace change tables，Core 启动、Run claim/cancel/terminal 不执行 Git capture；
+- Migration 116 不改写 v1 Canonical row；新 operation 使用 v2，升级前已开始的 operation 仍在 v1 结算；
+- Web/file/generic search 分类、精确单项/多项 query、`搜索 <query>` 连续展示、Tool 组计数、Renderer 中文标题与七类图标
+  fixture 通过；字面 Shell `rovai ...` 保持 Terminal，Core-verified `camp.read` 使用 Rovai 图标；
+- Shell/Web 搜索详情在 Codex、Claude、ACP 与完整 Evidence 恢复路径上使用相同的操作首行 + 连续结果格式；
 - Renderer 保留现有会话连接轨、执行台形态和 Tool 横条，仅增加明确的 Command rows 与 Run timeline card；
 - 动态 membership、Managed Attachment v2 与 ACP Client FS/Terminal 既有验收继续通过；
 - 修复后的 Kimi Code `0.38.0`、Qoder `1.1.28`、Kiro `2.18.1`、Codex、Claude 及其他可用 Runtime 真实 App
@@ -125,11 +139,11 @@ generation、reconciliation 与文件变化 projection 都不进入模型上下�
 | 范围 | 结论 | 证据或理由 |
 | --- | --- | --- |
 | Version lifecycle | 已更新 | v1.28 按冻结时事实转为 historical；本概览、[实施计划](implementation-plan.md)、[决定](decisions.md)与[版本索引](../README.md)建立唯一 current v1.29。 |
-| Decisions | 已更新 | [V1.29-D01–D06](decisions.md#v1-29-d01)冻结 membership、Delivery 与 Attachment；[D07](decisions.md#v1-29-d07)冻结安全退出；[D08](decisions.md#v1-29-d08)冻结共享 Evidence/独立 projector；[D09](decisions.md#v1-29-d09)彻底放弃 Workspace capture；[D10](decisions.md#v1-29-d10)冻结 Command inline 与 Run Review presentation；[D11](decisions.md#v1-29-d11)冻结 ACP FS/Terminal Runtime-owned 权限；[D12](decisions.md#v1-29-d12)冻结 Navigation 提交后失效与 generation drain；[D13](decisions.md#v1-29-d13)冻结 managed run output exclusion 与无历史迁移边界。 |
-| Contracts | 已更新 | 新增 [Camp Membership v1](../../contracts/camp-membership-v1.md)、[Planned Shutdown v3](../../contracts/planned-shutdown-v3.md)，并以 [Runtime File Change Observation v2](../../contracts/runtime-file-change-observation-v2.md)替代 v1 作为当前入口；Runtime Launch v28 与 ACP Client Terminal v2 收口代理权限。 |
+| Decisions | 已更新 | [V1.29-D01–D06](decisions.md#v1-29-d01)冻结 membership、Delivery 与 Attachment；[D07](decisions.md#v1-29-d07)冻结安全退出；[D08](decisions.md#v1-29-d08)冻结共享 Evidence/独立 projector；[D09](decisions.md#v1-29-d09)彻底放弃 Workspace capture；[D10](decisions.md#v1-29-d10)冻结 Command inline 与 Run Review presentation；[D11](decisions.md#v1-29-d11)冻结 ACP FS/Terminal Runtime-owned 权限；[D12](decisions.md#v1-29-d12)冻结 Navigation 提交后失效与 generation drain；[D13](decisions.md#v1-29-d13)冻结 managed run output exclusion；[D14](decisions.md#v1-29-d14)冻结 activity-v2、无历史回填、类型化 Search Operation 与图标 identity。 |
+| Contracts | 已更新 | 新增 [Camp Membership v1](../../contracts/camp-membership-v1.md)、[Planned Shutdown v3](../../contracts/planned-shutdown-v3.md)，并以 [Runtime File Change Observation v2](../../contracts/runtime-file-change-observation-v2.md)替代 v1；Runtime Launch v28 与 ACP Client Terminal v2 收口代理权限；[Run Process Detail Surface v26](../../contracts/run-process-detail-surface-v26.md)继承 v25 并成为当前活动详情入口。 |
 | Architecture | 已更新 | 新增[动态 Camp 队员关系](../../architecture/dynamic-camp-membership.md)、[Runtime File Change Observation](../../architecture/runtime-file-change-observation.md)与[Desktop Navigation Refresh](../../architecture/desktop-navigation-refresh.md)；[计划关闭](../../architecture/planned-shutdown.md)切换为退出取消全部 AgentRun；基础不变量同步无 Git/无扫描的每 Run Evidence projection。 |
-| UI | 已更新 | [Camp 会话工作区](../../ui/components/conversation-workspace.md)冻结 `修改 xxx` rows、每 Run 卡片、Files Changed Review 与关闭等待面；[App Shell](../../ui/components/app-shell-navigation.md)冻结 400ms 冷启动反馈与事件驱动 Navigation 新鲜度；其他布局不变。 |
-| Runtime Activity | 已更新 | Registry 继续拥有每 Adapter 的 terminal 文件操作与 Command Diff mapping；Run snapshot 是独立 Evidence event。 |
+| UI | 已更新 | [Camp 会话工作区](../../ui/components/conversation-workspace.md)冻结 `修改 xxx` rows、每 Run 卡片、七类 Activity 图标、Shell `$ command` 与 Web `搜索 <query>` 连续结果及关闭等待面；[App Shell](../../ui/components/app-shell-navigation.md)冻结 400ms 冷启动反馈与事件驱动 Navigation 新鲜度；其他布局不变。 |
+| Runtime Activity | 已更新 | Registry 切换 `activity-v2` 新 operation mapping，记录五域、三类 search、v2/v1 双读和无历史回填；Run snapshot 仍是独立 Evidence event。 |
 | Runtime compatibility | 已更新 | 13 个 adapter 按实际协议族归类；当前 fixture 覆盖 Codex、ACP、Claude 与 Antigravity negative gate，修复后真实 App 复测仍待完成。 |
 | Documentation routing | 已更新 | 文档总导航、Architecture/Contract 索引与当前决定导航切换到 Runtime File Change Observation，并加入 Desktop Navigation Refresh；不保留 Window 当前入口。 |
 | Root README | 确认无需更新 | 当前仍为 in-progress，且不改变项目定位或已交付的常青能力声明。 |
@@ -140,6 +154,8 @@ generation、reconciliation 与文件变化 projection 都不进入模型上下�
 - [版本决定](decisions.md)
 - [Runtime File Change Observation 架构](../../architecture/runtime-file-change-observation.md)
 - [Runtime File Change Observation v2 合同](../../contracts/runtime-file-change-observation-v2.md)
+- [Run Process Detail Surface v26](../../contracts/run-process-detail-surface-v26.md)
+- [Runtime Activity Mapping Registry](../../runtime-activity/registry.md)
 - [Runtime Launch and Verification v28](../../contracts/runtime-launch-and-verification-v28.md)
 - [ACP Client Terminal v2](../../contracts/acp-client-terminal-v2.md)
 - [Desktop Navigation Refresh](../../architecture/desktop-navigation-refresh.md)

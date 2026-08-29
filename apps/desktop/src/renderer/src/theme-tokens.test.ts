@@ -53,6 +53,7 @@ const requiredTokens = [
   '--focus',
   '--overlay',
   '--inline-code-canvas',
+  '--shell-result-canvas',
   '--code-block-canvas',
   '--evidence-canvas',
   '--evidence-surface',
@@ -102,6 +103,7 @@ function expectTextContrast(tokens: Record<string, string>): void {
     ['--info', '--info-soft'],
     ['--neutral', '--neutral-soft'],
     ['--evidence-ink', '--inline-code-canvas'],
+    ['--evidence-muted', '--shell-result-canvas'],
     ['--evidence-ink', '--code-block-canvas'],
     ['--evidence-ink', '--evidence-surface'],
     ['--evidence-muted', '--evidence-surface'],
@@ -171,7 +173,8 @@ describe('Porcelain Day + Steel Night theme tokens', () => {
     expect(day['--rail-line']).toBe('#dadde0')
     expect(day['--rail-logo']).toBe('#526f88')
     expect(day['--mention-ink']).toBe('#2f61c8')
-    expect(day['--inline-code-canvas']).toBe('#eef2f5')
+    expect(day['--inline-code-canvas']).toBe('#e9eceb')
+    expect(day['--shell-result-canvas']).toBe('#f3f4f3')
     expect(day['--code-block-canvas']).toBe('#eef2f5')
     expect(day['--diff-add-soft']).toBe('#d9f1e2')
     expect(day['--diff-remove-soft']).toBe('#f5dede')
@@ -199,7 +202,8 @@ describe('Porcelain Day + Steel Night theme tokens', () => {
     expect(night['--brand']).toBe('#7897ae')
     expect(night['--brand-soft']).toBe('#22303a')
     expect(night['--mention-ink']).toBe('#9cc7e2')
-    expect(night['--inline-code-canvas']).toBe('#1d252b')
+    expect(night['--inline-code-canvas']).toBe('#353b3f')
+    expect(night['--shell-result-canvas']).toBe('#373f43')
     expect(night['--code-block-canvas']).toBe('#1d252b')
     expect(night['--diff-add-soft']).toBe('#21412e')
     expect(night['--diff-remove-soft']).toBe('#4c2221')
@@ -281,6 +285,7 @@ describe('Porcelain Day + Steel Night theme tokens', () => {
     expect(css).toMatch(/\.message-body\s*\{[^}]*position: relative[^}]*padding-right: 76px/)
     expect(css).toMatch(/\.message-surface\s*\{[^}]*position: static/)
     expect(css).toMatch(/\.safe-markdown code\s*\{[^}]*padding:\s*0 2px[^}]*border-radius:\s*3px[^}]*background:\s*var\(--inline-code-canvas\)/)
+    expect(css).not.toMatch(/\.safe-markdown code\s*\{[^}]*\bborder\s*:/)
     expect(css).toMatch(/\.safe-markdown pre\s*\{[^}]*background:\s*var\(--code-block-canvas\)/)
     expect(css).toMatch(/\.safe-markdown pre code\s*\{[^}]*padding:\s*0[^}]*background:\s*transparent/)
     expect(css).toContain('.conversation-bubble:hover .message-copy-button')
@@ -318,6 +323,8 @@ describe('Porcelain Day + Steel Night theme tokens', () => {
     expect(css).toMatch(/\.tool-call-disclosure-slot\s*\{[^}]*width:\s*20px[^}]*height:\s*20px/)
     expect(css).toMatch(/\.tool-call-disclosure-slot\.is-placeholder\s*\{[^}]*visibility:\s*hidden/)
     expect(css).toMatch(/\.tool-call-detail\s*\{[^}]*position:\s*relative[^}]*margin:\s*5px 0 8px 24px[^}]*padding-right:\s*52px/)
+    expect(css).toMatch(/\.tool-call-disclosure\[data-activity-domain="shell"\] \.tool-call-detail\s*\{[^}]*margin-left:\s*2px/)
+    expect(css).toMatch(/\.tool-call-disclosure\[data-activity-domain="shell"\] \.tool-call-result-scroll\s*\{[^}]*background:\s*var\(--shell-result-canvas\)/)
     expect(css).toMatch(/\.tool-call-result-scroll\s*\{[^}]*max-height:\s*min\(220px, 30vh\)[^}]*overflow:\s*auto[^}]*scrollbar-gutter:\s*stable/)
     expect(css).toMatch(/\.tool-call-result-scroll\s*\{[^}]*white-space:\s*pre-wrap[^}]*overflow-wrap:\s*anywhere/)
     expect(css).toContain('.tool-call-result-scroll:focus-visible')

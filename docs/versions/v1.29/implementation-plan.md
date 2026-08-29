@@ -3,7 +3,7 @@ document_type: implementation-plan
 version: v1.29
 authority: implementation-and-acceptance-status
 status: in_progress
-last_updated: 2026-08-28
+last_updated: 2026-08-30
 ---
 
 # v1.29 Camp 动态队员管理与 Runtime 文件变化实施计划
@@ -45,8 +45,8 @@ last_updated: 2026-08-28
 - [x] 删除 Window Evidence event、Managed Blob roots、Camp Open fields、Desktop RPC、旧 Workspace Window Review 与
   Window UI；
 - [x] 删除当前 Architecture/Contract/版本/UI 文档中的 Window authority 与 HTML prototype；历史版本冻结文档不改；
-- [x] 当前 Data Contract 升为 `v1.28 / projection schema 69`，让使用过未发布 Window schema 的本地数据 fail
-  closed，而不是运行时查询缺失新表。
+- [x] Migration 115 先把 Data Contract 升为 `v1.28 / projection schema 69`，让使用过未发布 Window schema 的
+  本地数据 fail closed；Migration 116 再只切换为 `v1.29 / schema 70 / activity-v2`，不改写 v1 Canonical row。
 
 ## 4. 已完成：Runtime Evidence normalizer
 
@@ -101,7 +101,19 @@ last_updated: 2026-08-28
   operation-only 显示诚实空态；有可靠 Diff 的 mixed file 显示可证明 totals，含纯 operation-only 文件的 card
   不显示局部 totals；
 - [x] 不改变会话连接轨、底部/右侧执行台、Tool list 宽度与其他既有视觉结构；
+- [x] Shell command disclosure 统一为 `$ <command>` 首行和紧接的公开输出，移除“命令 / 输出”标签与空白分隔行；
 - [x] Renderer fixtures 覆盖每 Run card、三行默认、mixed totals 隐藏、四种 Review mode 与 typed Camp Open。
+- [x] `activity-v2` 新写入收敛为 Shell/File/Tool/Runtime/Unknown 五域，file/web/generic search 分别映射；
+  已有 v1 operation 继续在 v1 收尾，Read Side 双读 v2/v1，Migration 116 不做历史回填；
+- [x] Core v2 不再生成本地化默认标题或 Codex commandActions/file basename 标题；Renderer 统一处理公开
+  Shell command、可靠 `修改 <basename>`、“Web 搜索”和中文 fallback；
+- [x] 类型图标收敛为 Terminal/File/Web/Tool/Rovai/Runtime/Unknown；Rovai 四向星+地平线只绑定
+  Core Catalog identity，字面 Shell `rovai ...` 保持 Terminal；
+- [x] 搜索词只通过 available `runtimeSearchOperation` 进入 Evidence/详情：Codex `webSearch`、Claude
+  `WebSearch`、ACP `web_search` 按明确身份准入；Copilot/Qoder/Kiro/CodeBuddy 的模糊 ACP wire 绑定本次实测
+  版本与 query-only shape。任意顶层 `query`、ACP 文件搜索 shape 和未验证版本 fail closed；query 不做敏感词
+  过滤；单项或多项以 `搜索 <query>` 首行显示，公开结果从下一行连续显示；Web 搜索计入连续 Tool 组；
+  Antigravity `search_web` 只分类、不猜 query。
 
 ## 7. 自动化验证
 
@@ -111,13 +123,20 @@ last_updated: 2026-08-28
   whole-turn snapshot ingress、projector `no_changes` 和同名前缀目录；Windows target fixture 覆盖 drive/root ASCII
   大小写与分隔符语义；
 - [x] TypeScript typecheck 通过；
+- [x] Shell command projection 定向回归覆盖有输出、无输出、ANSI 清理、脱敏、Codex、Claude Bash、ACP execute
+  与完整 Evidence 恢复路径；
+- [x] `activity-v2` mapping、v1 live-operation compatibility、Migration 116 history preservation、类型化 Search
+  Operation allowlist、Antigravity `search_web` 与 Renderer title/icon/query 双门槛定向 fixture 通过；
+- [x] v26 Web 搜索详情定向回归覆盖 query-only、单项/多项 query、typed projection fail-closed、Codex/ACP live
+  与完整 Evidence 恢复路径；App/Tool grouping 151/151 通过；
 - [x] Navigation coordinator 8/8 与 App event routing 2/2 回归通过；隔离 App 已验证 post-commit invalidation、
   后台 Run marker 收敛、隐藏暂停、focus 补读与 20 秒安全轮询；
-- [ ] `cargo test -p rovai-core` 全量通过；
-- [ ] Renderer/Vitest 全量通过；
-- [ ] `pnpm docs:test`、`pnpm docs:check` 与精确 merge-base `docs:check:ci` 通过；
-- [ ] Desktop production build 通过；
-- [ ] Impeccable final detector 对本次 UI targets 只运行一次并通过。
+- [x] `cargo test -p rovai-core` 的 lib、`rovai-core` binary 与 `rovai` binary 全量通过；
+- [x] Renderer/Vitest 全量 620 项通过，完整 `pnpm test` 其余 Node 套件 219 项通过、1 项既有 Windows skip；
+- [x] `pnpm docs:test`、`pnpm docs:check` 与精确 merge-base `docs:check:ci` 通过；
+- [x] Desktop production build 通过；
+- [x] Impeccable final detector 对本次 UI targets 完成唯一一次实际扫描；报告项均来自 `styles.css` 既有未改
+  规则，本次新增 Rovai icon/style 无新 finding。
 
 ## 8. 真实 Runtime 验收
 

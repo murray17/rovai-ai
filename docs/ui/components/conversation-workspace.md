@@ -2,7 +2,7 @@
 document_type: ui-component-contract
 authority: renderer-camp-workspace
 status: accepted
-last_updated: 2026-08-29
+last_updated: 2026-08-30
 ---
 
 # Camp 会话工作区
@@ -277,29 +277,42 @@ Tool 行表达。组 summary 的左侧 16px 图标与摘要文字共享 16px 中
 完整结果仍须再展开精确 Tool；结果 region 在首次展开前不进入 DOM，Managed Blob 也不提前读取。收起组时
 其后代不参与布局，底部与 Inspector 移动同一 Drawer DOM 时保留组、Tool 与已经读取的结果状态。
 
-Tool 行优先显示 Core 的精确工具名或有意义的 Runtime 标题。Codex `commandExecution` 只有在结构化
-`commandActions` 全部证明 read/list/search 时继续显示“读取 / 列出 / 搜索 / 检索项目文件”等中文语义；
-除此以外，Codex、Claude Code、TRAE 与其他 ACP Shell 行只要同一公开 payload 有 command，就使用完整脱敏
-预览：去掉外层 Shell `-c/-lc` 包装，保留参数、Node inline/heredoc 代码开头、全部子命令及
+`activity-v2` 的 Tool 行由 Renderer 统一生成中文 presentation，Core 不再生成本地化默认标题或 Codex
+`commandActions` 中文标题。Shell 行只要同一公开 payload 有 command，就优先使用完整脱敏预览：去掉外层
+Shell `-c/-lc` 包装，保留参数、Node inline/heredoc 代码开头、全部子命令及
 `&&`、`||`、`|`、`;`、`&`。已知 token、password、
 Authorization、API key 与 `rovai send` 正文值替换为脱敏占位。标题值不做固定字符截断，由名称轨在真实
 宽度内单行视觉省略；完整脱敏值仍可通过 `title` 与辅助技术读取。没有公开 command 的 Runtime 继续使用
-各自现有 toolName/title/有界 fallback。命令展示只改变 presentation，不得参与 identity 或 lifecycle 合并；
-ACP 仅由 Adapter 白名单的 command shape 在原生 kind 缺失时证明 execute。Tool 行固定为 `16px 类型图标 / 可缩略名称 /
-16px 状态轨 / 20px disclosure 轨`，不可展开行也保留末轨占位。类型图标是 Shell、File、Git、
-Network、Permission、Runtime、Plan、Tool 和 Unknown 九类统一 16px 单色线性 SVG，不代表状态。
+非通用 title/toolName 与“终端操作”。File 行在 typed `runtimeFileOperation` 或单文件 available Canonical
+Diff 有可靠 path 时显示 `修改 <basename>`，否则使用 toolName/title/“文件操作”；`tool.web.search` 固定为“Web 搜索”，普通 Tool
+使用 canonical toolName/title/“工具调用”，Runtime 与 Unknown 使用对应中文 fallback。命令展示只改变
+presentation，不得参与 identity 或 lifecycle 合并；ACP 仅由 Adapter 白名单的 command shape 在原生 kind
+缺失时证明 execute。
+
+Tool 行固定为 `16px 类型图标 / 可缩略名称 / 16px 状态轨 / 20px disclosure 轨`，不可展开行也保留末轨占位。
+类型图标收敛为 Terminal、File、Web、Tool、Rovai、Runtime 和 Unknown 七类统一 16px 单色 SVG，不代表状态。
+Rovai 图标使用四向星与弧形地平线及 `--rail-logo` 色，只由 Core Catalog 验证后的
+`sourceAuthority=core + credibility=core_verified + toolName` 选择；Shell command 即使以 `rovai` 开头也仍用
+Terminal 图标，Web semantic kind 优先用 Web 图标。
 Tool 行尾状态仍只使用 7px 小点：运行蓝色、等待审批橙色、成功绿色、失败或停止红色，仅记录为中性色。
 普通 Tool 行不再重复显示“已完成”文字；状态仍须通过 `aria-label` 与 `title` 可读取。
 
-Shell command Tool disclosure 展开后先显示完整脱敏“命令”，再显示存在时的完整公开“输出”，两者不得
-互相替代；Claude/ACP terminal Evidence 自带 command，不依赖 Renderer 回看 started event。其他 Tool
+Shell command Tool disclosure 展开后第一行显示 `$ ` 加完整脱敏 command；存在完整公开 output 时从第二行
+连续显示，不插入“命令 / 输出”标签或空白分隔行。两者的数据来源不得互相替代；Claude/ACP terminal
+Evidence 自带 command，不依赖 Renderer 回看 started event。其他 Tool
 disclosure 继续在原位渲染完整公开结果，不再截断，不再提供复制按钮。本地已有全文时
 直接展示；截断 Evidence/Managed Blob 只在用户展开精确 Tool 行后读取。读取中、精确错误与
 “重试”都留在该 disclosure，重试成功后焦点进入结果区域。全文置于固定最大高度的可聚焦
 `role=region` 中，超出后内部滚动；Arrow、Page Up/Down、Space、Home/End 可滚动，Escape 只返回
-对应 summary。底部和 Inspector 复用同一行为。仍不显示 standalone raw Evidence、Envelope JSON 或独立
+对应 summary。Web 搜索 disclosure 只有在 `runtimeSearchOperation.status=available` 且 Canonical semantic 同时为
+`tool.web.search` 时，才在第一行以 `搜索 ` 紧接 typed 公共 query；多项 query 以中文逗号按原顺序连接。存在
+公开结果时从下一行连续显示，不插入“搜索词 / 结果”标签或空白分隔行。query 原样展示，不做敏感词过滤或去重，历史 Evidence 缺失 typed
+projection 时不显示空占位。Web 搜索仍是 Tool item，计入所在连续组的“已执行 N 项操作”，组内使用 Web 图标；
+Shell 结果面的左边界与 Tool 行 16px 类型图标的左边界同轴，不再缩进到标题文本轨；其他 Tool detail 保持
+既有对齐。底部和 Inspector 复用同一行为。仍不显示
+standalone raw Evidence、Envelope JSON 或独立
 “查看完整工具调用”。精确合同见
-[Run Process Detail Surface v23](../../contracts/run-process-detail-surface-v23.md)。
+[Run Process Detail Surface v26](../../contracts/run-process-detail-surface-v26.md)。
 
 ### Runtime 终态文件变更与 AgentRun 文件变化
 
@@ -353,7 +366,7 @@ Inspector 复用同一语义。刷新不得自动打开执行台、改变 Run se
 当权威 AgentRun 已取消时，该 Run 中仍为 running 的 Tool Call 停止所有运行动画，并以中性图形和
 “已停止”作为主状态。该展示只表达父 Run 已失去继续执行权，不改写子活动的 Canonical phase/outcome，
 也不隐藏独立的外部效果待确认提示；明确 canonical cancelled 的 Tool Call 同样显示“已停止”。精确合同见
-[Run Process Detail Surface v23](../../contracts/run-process-detail-surface-v23.md)。
+[Run Process Detail Surface v26](../../contracts/run-process-detail-surface-v26.md)。
 
 当前非终态 Claude Code Run 收到安全 `runtime_api_retrying` Evidence 时，在精确 Run 过程内显示 attention
 notice：“Claude Code API 暂时不可用”，并显示最新重试次数、等待秒数和“本次执行尚未结束，可继续等待或
@@ -361,7 +374,7 @@ notice：“Claude Code API 暂时不可用”，并显示最新重试次数、�
 该状态仍是 running，不产生 Tool、Toast、消息或终态 failure；Run 终态后隐藏旧 notice，真实失败继续使用
 下述 Runtime failure 边界。Renderer 只接受固定 code/status 与有界数字，不展示 raw stderr、API body、
 凭证、用户名或绝对路径。精确合同见
-[Run Process Detail Surface v23](../../contracts/run-process-detail-surface-v23.md)。
+[Run Process Detail Surface v26](../../contracts/run-process-detail-surface-v26.md)。
 
 failed Claude Code 或 Antigravity Run 的公开 `failure` 必须在对应 Run stage 显示 Runtime 名称、安全
 summary 与可选 detail；即使没有任何 Execution Evidence 也默认展开，不能被空详情逻辑隐藏。标题按
@@ -389,7 +402,7 @@ Composer 中的 CampTurn Stop 继续是唯一整轮停止入口并 fence 当前�
 Header、Task 卡、时间线和 Composer 不增加 Run-local 入口。`recovery_blocked` 继续只显示“结束此运行”，
 不与普通 Stop 同时出现。Run-local 请求不创建 Camp 时间线消息；Turn-level 终态用户取消仍以一条“你已在
 {耗时} 后停止”进入时间线。精确资格、required/optional 后果与不确定态见
-[Run Process Detail Surface v23](../../contracts/run-process-detail-surface-v23.md)。
+[Run Process Detail Surface v26](../../contracts/run-process-detail-surface-v26.md)。
 
 ## Camp Composer
 

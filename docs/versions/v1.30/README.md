@@ -31,7 +31,7 @@ last_updated: 2026-08-30
 - 文件选区以冻结快照附加到当前 Composer，不把短期句柄变成持久读取授权。
 
 文件选区进入 Agent input 属于核心模型上下文变更；其精确前后合同见
-[待二次确认的 revision 1](model-context-change-file-selection.md)。确认完成前，该子项不视为可合入交付。
+[待二次确认的 revision 2](model-context-change-file-selection.md)。确认完成前，该子项不视为可合入交付。
 
 ## 明确不做
 
@@ -75,4 +75,4 @@ last_updated: 2026-08-30
 - [File Preview Architecture](../../architecture/file-preview.md)
 - [File Preview v1 Contract](../../contracts/file-preview-v1.md)
 - [文件预览区 UI](../../ui/components/file-preview.md)
-- [模型上下文变更 revision 1（待二次确认）](model-context-change-file-selection.md)
+- [模型上下文变更 revision 2（待二次确认）](model-context-change-file-selection.md)

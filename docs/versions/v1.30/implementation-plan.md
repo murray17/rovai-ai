@@ -3,7 +3,7 @@ document_type: implementation-plan
 version: v1.30
 authority: implementation-and-acceptance-status
 status: in_progress
-last_updated: 2026-08-29
+last_updated: 2026-08-30
 ---
 
 # v1.30 Camp 文件预览实施计划

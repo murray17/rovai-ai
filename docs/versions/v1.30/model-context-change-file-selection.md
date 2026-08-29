@@ -2,20 +2,20 @@
 document_type: model-context-change
 version: v1.30
 change_id: frozen-file-selection-agent-projection
-revision: 1
+revision: 2
 confirmation_status: pending
 confirmed_revision: 0
 confirmed_by: pending
 confirmed_at: pending
 authority: proposed-model-input-change-statement
-implementation_baseline: 36f3b53ce1dddfd0e814b91ab1c29417bdc2c681
+implementation_baseline: a2dbf4b3badbdc00d9e3dffe4bfb5244991518aa
 last_updated: 2026-08-30
 ---
 
 # v1.30 核心模型上下文变更说明：冻结文件选区投影
 
-本文是待开发者二次确认的 revision 1。审阅基线为
-`main@36f3b53ce1dddfd0e814b91ab1c29417bdc2c681`。本说明未确认前，文件选区进入 Agent input 的实现不能
+本文是待开发者二次确认的 revision 2。审阅基线为
+`main@a2dbf4b3badbdc00d9e3dffe4bfb5244991518aa`。本说明未确认前，文件选区进入 Agent input 的实现不能
 视为可合入交付；任何改变下述 shape、文本格式、发送条件、预算、Evidence 或版本轴的调整都必须递增 revision
 并重新确认。
 
@@ -76,9 +76,9 @@ ContextManifest Evidence:         21
 Context Delivery Profile:         4
 Message Projection Audience:      agent_v1
 Gather Completion Input:          3
-Data Contract:                    v1.28
-Projection Schema:                69
-Latest Schema Migration:          115
+Data Contract:                    v1.29
+Projection Schema:                70
+Latest Schema Migration:          116
 ```
 
 ## 变更后
@@ -192,8 +192,8 @@ Context Delivery Profile:         4 (unchanged)
 Message Projection Audience:      agent_v1 (unchanged)
 Gather Completion Input:          3 (unchanged)
 Data Contract:                    v1.30
-Projection Schema:                70
-Latest Schema Migration:          116
+Projection Schema:                71
+Latest Schema Migration:          117
 ```
 
 Formatter/Manifest/Profile 不升版，因为 Dynamic Context 的 section 顺序、outer JSON shape、选择、预算和 Evidence
@@ -201,9 +201,10 @@ Formatter/Manifest/Profile 不升版，因为 Dynamic Context 的 section 顺序
 精确字节仍由既有 source/projected/rendered digests 证明。`agent_v1` 对全部旧 segment 的映射逐字不变；它只为
 旧 reader 无法产生的新 `file_selection` source variant增加映射。
 
-Migration 116 只把 reader/writer gate 从 `v1.28/schema 69` 提升为 `v1.30/schema 70`。既有不含
+Migration 117 只把 reader/writer gate 从 `v1.29/schema 70` 提升为 `v1.30/schema 71`，并保留
+`activity-v2` classifier marker。既有不含
 `file_selection` 的 Structured Content JSON 是新 union 的合法子集，不回填、不重写；既有 Manifest 与 accepted
-input bytes 继续逐字有效。旧 App 因 Data Contract marker 不认识 schema 70 而 fail closed，不能把新 variant
+input bytes 继续逐字有效。旧 App 因 Data Contract marker 不认识 schema 71 而 fail closed，不能把新 variant
 误读成旧消息。
 
 ## 明确不变
@@ -220,8 +221,8 @@ input bytes 继续逐字有效。旧 App 因 Data Contract marker 不认识 sche
 
 ## 数据与恢复策略
 
-Migration 116 不删除 Camp、Message、Draft、Delivery、Run、Manifest、Runtime Input Delivery 或 Session，不旋转既有
-Binding，也不重投影历史 evidence。旧 JSON 无选区且语义不变；新 JSON 只能由支持 schema 70 的 Core 写入。
+Migration 117 不删除 Camp、Message、Draft、Delivery、Run、Manifest、Runtime Input Delivery 或 Session，不旋转既有
+Binding，也不重投影历史 evidence。旧 JSON 无选区且语义不变；新 JSON 只能由支持 schema 71 的 Core 写入。
 Draft 恢复保留完整 File Selection segment；Message/History/Agent projection从同一持久 segment 确定性重建。
 
 ## 验证要求
@@ -232,7 +233,7 @@ Draft 恢复保留完整 File Selection segment；Message/History/Agent projecti
 4. Direct Current Input、Shared Conversation、History/Search/Read 和 projected/rendered digest 使用同一 Agent renderer；
 5. 文件变化后只有显式 `viewer_snapshot_after_change` 可以附加旧 Viewer 快照，发送不重读磁盘；
 6. 句柄、generation、token、canonical path 与原始 source identity 不进入 Draft/Message/Manifest/model payload；
-7. Migration 116 接受完整 `v1.28/schema 69/migration 115`，升级到 `v1.30/schema 70/migration 116`，未来
+7. Migration 117 接受完整 `v1.29/schema 70/migration 116`，升级到 `v1.30/schema 71/migration 117`，未来
    schema 与缺失迁移 fail closed；
 8. 既有无 File Selection 的 ContextManifest、payload digest 和恢复验证保持逐字兼容。
 
@@ -240,7 +241,6 @@ Draft 恢复保留完整 File Selection segment；Message/History/Agent projecti
 
 当前状态：`pending`。
 
-只有开发者在完整阅读 revision 1 后明确确认“同意实施 v1.30 文件选区模型上下文变更 revision 1”，才可把
-Front Matter 更新为 `confirmation_status: confirmed`、`confirmed_revision: 1` 并记录确认人和时间。普通的文件
+只有开发者在完整阅读 revision 2 后明确确认“同意实施 v1.30 文件选区模型上下文变更 revision 2”，才可把
+Front Matter 更新为 `confirmation_status: confirmed`、`confirmed_revision: 2` 并记录确认人和时间。普通的文件
 预览实现授权不能替代这次二次确认。
-

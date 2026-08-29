@@ -4,7 +4,7 @@ version: v1.30
 lifecycle: current
 authority: decision-rationale
 status: accepted
-last_updated: 2026-08-29
+last_updated: 2026-08-30
 ---
 
 # v1.30 版本决定

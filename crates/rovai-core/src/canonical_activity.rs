@@ -15,7 +15,7 @@ use crate::{
     runtime_file_operation,
 };
 
-pub use crate::runtime_activity_mapping::CLASSIFIER_VERSION;
+pub use crate::runtime_activity_mapping::{CLASSIFIER_VERSION, LEGACY_CLASSIFIER_VERSION};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -59,6 +59,29 @@ pub struct EvidenceActivityFacts {
 }
 
 pub fn classify_evidence(
+    agent_run_id: &str,
+    execution_epoch: i64,
+    evidence_id: &str,
+    event_type: &str,
+    kind: &str,
+    phase: &str,
+    payload: &Value,
+) -> EvidenceActivityFacts {
+    classify_evidence_with_version(
+        CLASSIFIER_VERSION,
+        agent_run_id,
+        execution_epoch,
+        evidence_id,
+        event_type,
+        kind,
+        phase,
+        payload,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn classify_evidence_with_version(
+    classifier_version: &str,
     agent_run_id: &str,
     execution_epoch: i64,
     evidence_id: &str,
@@ -117,7 +140,12 @@ pub fn classify_evidence(
                 | "runtime.file_changes.snapshot"
         );
     let (mut activity_domain, mut semantic_kind, runtime_classification_is_structured) =
-        runtime_activity_mapping::classify_with_structure(item_type, kind, payload);
+        runtime_activity_mapping::classify_with_structure_for_version(
+            classifier_version,
+            item_type,
+            kind,
+            payload,
+        );
     let file_operation_path = runtime_file_operation::path_from_evidence(payload);
     let diff_projection = runtime_diff::projection_from_evidence(payload, evidence_id);
     if file_operation_path.is_some()
@@ -152,18 +180,29 @@ pub fn classify_evidence(
     } else {
         "fine_grained"
     };
-    let observed_presentation_hint = file_operation_path
-        .and_then(runtime_activity_mapping::file_operation_presentation_hint)
-        .or_else(|| string_field(payload, "title"))
-        .or_else(|| string_field(item, "title"))
-        .or_else(|| runtime_activity_mapping::structured_presentation_hint(item_type, item));
+    let runtime_presentation_hint =
+        string_field(payload, "title").or_else(|| string_field(item, "title"));
+    let observed_presentation_hint = if classifier_version == LEGACY_CLASSIFIER_VERSION {
+        file_operation_path
+            .and_then(runtime_activity_mapping::legacy_v1_file_operation_presentation_hint)
+            .or(runtime_presentation_hint)
+            .or_else(|| {
+                runtime_activity_mapping::legacy_v1_structured_presentation_hint(item_type, item)
+            })
+    } else {
+        runtime_presentation_hint
+    };
     let presentation_hint_is_explicit = observed_presentation_hint.is_some();
-    let presentation_hint = observed_presentation_hint.or_else(|| {
-        runtime_activity_mapping::default_presentation_hint(
-            &activity_domain,
-            semantic_kind.as_deref(),
-        )
-    });
+    let presentation_hint = if classifier_version == LEGACY_CLASSIFIER_VERSION {
+        observed_presentation_hint.or_else(|| {
+            runtime_activity_mapping::legacy_v1_default_presentation_hint(
+                &activity_domain,
+                semantic_kind.as_deref(),
+            )
+        })
+    } else {
+        observed_presentation_hint
+    };
     EvidenceActivityFacts {
         is_activity,
         operation_id,
@@ -188,9 +227,18 @@ pub fn new_projection(
     evidence_id: &str,
     sequence: i64,
 ) -> Option<CanonicalRuntimeActivity> {
+    new_projection_for_version(facts, CLASSIFIER_VERSION, evidence_id, sequence)
+}
+
+pub fn new_projection_for_version(
+    facts: EvidenceActivityFacts,
+    classifier_version: &str,
+    evidence_id: &str,
+    sequence: i64,
+) -> Option<CanonicalRuntimeActivity> {
     facts.is_activity.then(|| CanonicalRuntimeActivity {
         operation_id: facts.operation_id,
-        classifier_version: CLASSIFIER_VERSION.to_string(),
+        classifier_version: classifier_version.to_string(),
         activity_domain: facts.activity_domain,
         semantic_kind: facts.semantic_kind,
         tool_name: facts.tool_name,
@@ -218,10 +266,15 @@ pub fn merge_projection(
     let prior_outcome = projection.outcome.clone();
     let prior_credibility_rank = credibility_rank(&projection.credibility);
     let incoming_credibility_rank = credibility_rank(&facts.credibility);
-    let prior_default_presentation_hint = runtime_activity_mapping::default_presentation_hint(
-        &projection.activity_domain,
-        projection.semantic_kind.as_deref(),
-    );
+    let prior_default_presentation_hint = (projection.classifier_version
+        == LEGACY_CLASSIFIER_VERSION)
+        .then(|| {
+            runtime_activity_mapping::legacy_v1_default_presentation_hint(
+                &projection.activity_domain,
+                projection.semantic_kind.as_deref(),
+            )
+        })
+        .flatten();
     if let Some(incoming) = facts.diff_projection {
         projection.diff_projection = Some(runtime_diff::merge_projection(
             projection.diff_projection.take(),
@@ -555,24 +608,18 @@ mod tests {
         );
 
         assert_eq!(started.operation_id, completed.operation_id);
-        assert_eq!(
-            completed.presentation_hint.as_deref(),
-            Some("修改 qoder-cli.txt")
-        );
+        assert_eq!(completed.presentation_hint, None);
         assert!(completed.diff_projection.is_none());
         let projection = new_projection(started, "evidence-started", 1).unwrap();
         let projection = merge_projection(projection, completed, "evidence-completed", 2);
         assert_eq!(projection.activity_domain, "file");
         assert_eq!(projection.semantic_kind.as_deref(), Some("file.write"));
-        assert_eq!(
-            projection.presentation_hint.as_deref(),
-            Some("修改 qoder-cli.txt")
-        );
+        assert_eq!(projection.presentation_hint.as_deref(), Some("Edit"));
         assert!(projection.diff_projection.is_none());
     }
 
     #[test]
-    fn codex_command_presentation_hint_survives_completion_merge() {
+    fn codex_command_structure_does_not_create_a_core_owned_presentation_hint() {
         let started = classify_evidence(
             "run-1",
             1,
@@ -610,14 +657,11 @@ mod tests {
                 }
             }),
         );
-        assert_eq!(started.presentation_hint.as_deref(), Some("读取 README.md"));
-        assert!(started.presentation_hint_is_explicit);
+        assert_eq!(started.presentation_hint, None);
+        assert!(!started.presentation_hint_is_explicit);
         let projection = new_projection(started, "evidence-1", 1).unwrap();
         let projection = merge_projection(projection, completed, "evidence-2", 2);
-        assert_eq!(
-            projection.presentation_hint.as_deref(),
-            Some("读取 README.md")
-        );
+        assert_eq!(projection.presentation_hint, None);
         assert_eq!(projection.phase, "terminal");
         assert_eq!(projection.outcome, "succeeded");
     }
@@ -695,7 +739,42 @@ mod tests {
         let projection = merge_projection(projection, structured, "evidence-2", 2);
         assert_eq!(projection.activity_domain, "file");
         assert_eq!(projection.semantic_kind.as_deref(), Some("file.read"));
-        assert_eq!(projection.presentation_hint.as_deref(), Some("读取文件"));
+        assert_eq!(projection.presentation_hint, None);
+    }
+
+    #[test]
+    fn activity_v1_keeps_its_legacy_core_owned_presentation_hint() {
+        let facts = classify_evidence_with_version(
+            LEGACY_CLASSIFIER_VERSION,
+            "run-1",
+            1,
+            "evidence-1",
+            "activity.started",
+            "command",
+            "started",
+            &json!({
+                "item": {
+                    "id": "item-1",
+                    "type": "commandExecution",
+                    "status": "inProgress",
+                    "commandActions": [{
+                        "type": "read",
+                        "name": "cat",
+                        "path": "/repo/docs/README.md"
+                    }]
+                }
+            }),
+        );
+
+        assert_eq!(facts.presentation_hint.as_deref(), Some("读取 README.md"));
+        assert!(facts.presentation_hint_is_explicit);
+        let projection =
+            new_projection_for_version(facts, LEGACY_CLASSIFIER_VERSION, "evidence-1", 1).unwrap();
+        assert_eq!(projection.classifier_version, LEGACY_CLASSIFIER_VERSION);
+        assert_eq!(
+            projection.presentation_hint.as_deref(),
+            Some("读取 README.md")
+        );
     }
 
     #[test]

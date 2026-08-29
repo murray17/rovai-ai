@@ -48,6 +48,7 @@ import {
   liveRuntimeEventFromExecutionEvidence,
   type LiveExecutionProgress,
   type LiveRuntimeEvent,
+  type ActivityIconKind,
   type RuntimeDiagnostic,
   localDayKey,
   messageClockTime,
@@ -8335,7 +8336,8 @@ function ToolCallDetail({
       )
       const fullText = executionEvidenceResultText(
         completeEvidence.eventType,
-        response.payload
+        response.payload,
+        completeEvidence.canonical
       )
       if (fullText === null) {
         throw new Error('证据中没有可展示的公开结果')
@@ -8520,7 +8522,7 @@ function ModifiedFileRow({ change, semanticKind }: {
         className="modified-file-summary"
         aria-label={`修改 ${change.path}，新增 ${change.additions} 行，删除 ${change.deletions} 行`}
       >
-        <ToolCallIcon activityDomain="file" />
+        <ToolCallIcon iconKind="file" />
         <span className="modified-file-title" title={change.path}>修改 {fileName}</span>
         <span className="modified-file-stats" aria-hidden="true">
           <span className="diff-addition">+{change.additions}</span>
@@ -8583,7 +8585,7 @@ function ToolCallRow({
   const hasDetail = Boolean(step.detail) || completeEvidence !== undefined
   const summary = (
     <>
-      <ToolCallIcon activityDomain={step.activityDomain} />
+      <ToolCallIcon iconKind={step.iconKind} />
       <span className="tool-call-title" title={step.title}>{step.title}</span>
       <ToolCallState status={status} />
       <span
@@ -9020,21 +9022,9 @@ export function RunExecutionDisclosure({
   )
 }
 
-const TOOL_ICON_DOMAINS = new Set([
-  'shell',
-  'file',
-  'git',
-  'network',
-  'permission',
-  'runtime',
-  'plan',
-  'tool'
-])
-
-function ToolCallIcon({ activityDomain }: { activityDomain: string }): JSX.Element {
-  const domain = TOOL_ICON_DOMAINS.has(activityDomain) ? activityDomain : 'unknown'
+function ToolCallIcon({ iconKind }: { iconKind: ActivityIconKind }): JSX.Element {
   const icon = ({
-    shell: (
+    terminal: (
       <>
         <rect x="1.75" y="2.25" width="12.5" height="11.5" rx="2" />
         <path d="M4.25 6 6.1 7.8 4.25 9.6M8 10h3.2" />
@@ -9046,24 +9036,10 @@ function ToolCallIcon({ activityDomain }: { activityDomain: string }): JSX.Eleme
         <path d="M9 1.9V5h3.2M6 8h4.4M6 10.5h3.3" />
       </>
     ),
-    git: (
-      <>
-        <circle cx="4" cy="3.25" r="1.35" />
-        <circle cx="4" cy="12.75" r="1.35" />
-        <circle cx="11.75" cy="7.2" r="1.35" />
-        <path d="M4 4.6v6.8M4 6.1h2.2a3.2 3.2 0 0 1 3.2 3.2v.1M9.4 7.2h1" />
-      </>
-    ),
-    network: (
+    web: (
       <>
         <circle cx="8" cy="8" r="5.75" />
         <path d="M2.5 8h11M8 2.25c1.45 1.55 2.15 3.45 2.15 5.75S9.45 12.2 8 13.75M8 2.25C6.55 3.8 5.85 5.7 5.85 8s.7 4.2 2.15 5.75" />
-      </>
-    ),
-    permission: (
-      <>
-        <path d="M8 1.75 13 3.7v3.75c0 3.15-1.9 5.25-5 6.8-3.1-1.55-5-3.65-5-6.8V3.7z" />
-        <path d="M8 5v3.5M8 11h.01" />
       </>
     ),
     runtime: (
@@ -9073,10 +9049,14 @@ function ToolCallIcon({ activityDomain }: { activityDomain: string }): JSX.Eleme
         <path d="M5.25 1.5v1.65M8 1.5v1.65M10.75 1.5v1.65M5.25 12.85v1.65M8 12.85v1.65M10.75 12.85v1.65M1.5 5.25h1.65M1.5 8h1.65M1.5 10.75h1.65M12.85 5.25h1.65M12.85 8h1.65M12.85 10.75h1.65" />
       </>
     ),
-    plan: (
+    rovai: (
       <>
-        <rect x="3" y="1.75" width="10" height="12.5" rx="1.6" />
-        <path d="m5.2 5.2.75.75L7.35 4.5M8.6 5.25h2M5.2 9.1l.75.75 1.4-1.45M8.6 9.15h2" />
+        <path
+          d="M8 1.25 8.78 4.8 11.84 5.82 8.78 6.84 8 10.39 7.22 6.84 4.16 5.82 7.22 4.8 8 1.25Z"
+          fill="currentColor"
+          stroke="none"
+        />
+        <path d="M2 14.03Q8 10.7 14 14.03" strokeWidth="1.4" />
       </>
     ),
     tool: (
@@ -9091,9 +9071,9 @@ function ToolCallIcon({ activityDomain }: { activityDomain: string }): JSX.Eleme
         <path d="M6.45 6.1a1.75 1.75 0 1 1 2.45 1.6c-.6.28-.9.72-.9 1.3M8 11.3h.01" />
       </>
     )
-  } as Record<string, JSX.Element>)[domain]
+  } satisfies Record<ActivityIconKind, JSX.Element>)[iconKind]
   return (
-    <span className="tool-call-icon" data-icon-domain={domain} aria-hidden="true">
+    <span className="tool-call-icon" data-icon-domain={iconKind} aria-hidden="true">
       <svg viewBox="0 0 16 16" focusable="false">{icon}</svg>
     </span>
   )
