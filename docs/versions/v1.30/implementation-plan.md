@@ -103,7 +103,7 @@ last_updated: 2026-08-29
   Secret projection、内置/managed 头像解析、正常发布头像传递、冻结 App 头像/readiness 修复、Manifest 假阳性、P2P
   Scope ID 映射、template-first fallback matrix、durable barrier、activation-first、dynamic patch reuse、Event timeout
   recoverable、Event/Callback mode fail-closed、原会话 project picker/Non-owner toast/authoritative message ID/旧 private
-  picker 与旧 card revision `format_error` 一次性恢复/durable recall、execution console 运行/摘要/展开/分页/Owner-CAS/重启恢复/消息身份、永久 Markdown、附件顺序/独立失败
+  picker 与旧 card revision 已发送原位更新/`format_error` 一次性恢复/durable recall、execution console 运行/摘要/展开/分页/Owner-CAS/重启恢复/消息身份、永久 Markdown、附件顺序/独立失败
   定向测试全部通过；
 - `pnpm typecheck`；
 - `pnpm test`；

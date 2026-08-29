@@ -1500,7 +1500,10 @@ export class ChannelSettingsService {
     if (executionAction) {
       return this.#handleExecutionConsoleCardAction(managed, event, executionAction)
     }
-    const projectAction = projectCardAction(event.action.value)
+    const projectAction = projectCardAction(
+      event.action.value,
+      event.action.tag === 'select_static' ? event.action.option : undefined
+    )
     if (!projectAction) {
       logFeishuBotDiagnostic('card.rejected', {
         appIdDigest: digest(managed.appId),
@@ -2528,7 +2531,7 @@ function projectSelectionOperation(payload: Record<string, unknown>): ProjectSel
       : 'send'
 }
 
-function projectCardAction(value: unknown): ProjectCardAction | null {
+function projectCardAction(value: unknown, selectedOption?: string): ProjectCardAction | null {
   if (!isRecord(value)) return null
   const action = value.rovaiAction === 'bind_project'
     ? 'bind'
@@ -2543,7 +2546,11 @@ function projectCardAction(value: unknown): ProjectCardAction | null {
     || typeof value.expectedVersion !== 'number'
     || !Number.isSafeInteger(value.expectedVersion)
     || value.expectedVersion < 1) return null
-  const projectId = typeof value.projectId === 'string' ? value.projectId : null
+  const projectId = typeof selectedOption === 'string' && selectedOption.trim().length > 0
+    ? selectedOption
+    : typeof value.projectId === 'string'
+      ? value.projectId
+      : null
   if (action === 'bind' && !projectId) return null
   return {
     pendingBindingId: value.pendingBindingId,
@@ -2610,24 +2617,31 @@ function projectSelectionCard(input: {
     nonce: input.nonce,
     ...(projectId ? { projectId } : {})
   })
-  const projectButtons = input.projectOptions.map((project) => ({
-    tag: 'button',
-    text: {
-      tag: 'plain_text',
-      content: `绑定并处理 · ${boundedPlainText(project.displayName, 48)}`
-    },
-    type: 'primary',
-    value: actionValue('bind_project', project.projectId)
-  }))
+  const projectSelector = input.projectOptions.length > 0
+    ? {
+        tag: 'select_static',
+        type: 'default',
+        width: 'fill',
+        placeholder: { tag: 'plain_text', content: '选择项目' },
+        options: input.projectOptions.map((project) => ({
+          text: {
+            tag: 'plain_text',
+            content: boundedPlainText(project.displayName, 48)
+          },
+          value: project.projectId
+        })),
+        behaviors: [{
+          type: 'callback',
+          value: actionValue('bind_project')
+        }]
+      }
+    : null
   const scopeCopy = input.conversationKind === 'topic'
     ? [
         '首次使用这个话题，需要先确定 Camp 的项目。',
         '选择后，这个话题之后都会使用该项目。'
       ]
-    : [
-        '首次使用这个会话，需要先确定 Camp 的项目。',
-        '选择后会立即处理刚才的消息。'
-      ]
+    : ['首次使用这个会话，需要先确定 Camp 的项目。']
   const notice = input.notice === 'project_unavailable'
     ? '刚才选择的项目已不可用，项目列表已经更新。'
     : input.notice === 'moved_to_conversation'
@@ -2647,13 +2661,12 @@ function projectSelectionCard(input: {
           content: [
             notice,
             ...scopeCopy,
-            '项目路径只保留在 Rovai 本机，不会发送到飞书。',
             input.projectOptions.length === 0
               ? '当前没有可用项目。请先在 Rovai 创建或打开一个项目，然后点击刷新。'
               : null
           ].filter(Boolean).join('\n\n')
         },
-        ...projectButtons,
+        ...(projectSelector ? [projectSelector] : []),
         {
           tag: 'button',
           text: { tag: 'plain_text', content: '刷新项目' },

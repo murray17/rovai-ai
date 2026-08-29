@@ -237,8 +237,8 @@ acknowledgement App 直接发送到原群或原 Topic。payload 只有会话显�
 `send | update | recall` operation，以及只用于 presentation 兼容恢复的 `cardRevision`；重启、重试和后续 pending 消息都复用同一 pending authority 与 Bot。当前 pending
 version 对应 sent send/update 行的 external message ID 是唯一权威卡；Core 提交后即失权，recall 失败不会重新开放。Host
 tick 会把旧 private picker 先失权并排入 recall，再在原 conversation 生成 replacement picker；当前 version 的旧
-`cardRevision` 若以 `format_error` 且无 external message ID 终结，也只轮换 version/nonce 并重发一次当前 revision。
-当前 revision 的同类失败不自动重发，避免持久错误形成循环。
+`cardRevision` 若已有 external message ID，则轮换 version/nonce 并原位更新到当前 revision；若未落地的 `send` 以
+`format_error` 且无 external message ID 终结，则只轮换并重发一次。当前 revision 的同类失败不自动重发，避免持久错误形成循环。
 
 Core 只从已提交公开 CampMessage、Managed Attachment authority、AgentRun 公共 Evidence 和请求状态生成
 `ChannelDelivery`。Outbox 使用 priority、lease、attempt、退避和稳定 dedupe key；Main 发送成功后回写外部消息 ID，

@@ -1606,11 +1606,11 @@ describe('channel settings service', () => {
       chatId: 'oc_group',
       operator: { openId: 'ou_owner', userId: 'owner-user-id' },
       action: {
-        tag: 'button',
+        tag: 'select_static',
+        option: 'rvproj_1',
         value: {
           rovaiAction: 'bind_project',
           pendingBindingId: 'rvpcb_1',
-          projectId: 'rvproj_1',
           expectedVersion: 1,
           nonce: 'nonce-1',
           operatorOpenId: 'ou_spoofed'
@@ -1901,12 +1901,37 @@ describe('channel settings service', () => {
     }
     expect(groupPickerInput.card.config).toEqual({ update_multi: true })
     expect(groupPickerInput.card.body.elements.some((element) => element.tag === 'action')).toBe(false)
+    expect(groupPickerInput.card.body.elements).toContainEqual({
+      tag: 'select_static',
+      type: 'default',
+      width: 'fill',
+      placeholder: { tag: 'plain_text', content: '选择项目' },
+      options: [{
+        text: { tag: 'plain_text', content: 'Rovai AI' },
+        value: 'project-safe'
+      }],
+      behaviors: [{
+        type: 'callback',
+        value: {
+          rovaiAction: 'bind_project',
+          pendingBindingId: 'rvpcb_group',
+          expectedVersion: 1,
+          nonce: 'nonce-group'
+        }
+      }]
+    })
+    expect(groupPickerInput.card.body.elements).not.toContainEqual(expect.objectContaining({
+      tag: 'button',
+      type: 'primary'
+    }))
     expect(groupPickerInput.card.body.elements).toContainEqual(expect.objectContaining({
       tag: 'button',
       text: { tag: 'plain_text', content: '刷新项目' }
     }))
     expect(harness.send.mock.calls.map(([target]) => target)).not.toContain('ou_owner')
     expect(JSON.stringify(harness.send.mock.calls)).toContain('首次使用这个话题')
+    expect(JSON.stringify(harness.send.mock.calls)).not.toContain('选择后会立即处理刚才的消息。')
+    expect(JSON.stringify(harness.send.mock.calls)).not.toContain('项目路径只保留在 Rovai 本机，不会发送到飞书。')
     expect(JSON.stringify(harness.send.mock.calls)).not.toContain('canonicalPath')
     expect(harness.updateCard).toHaveBeenCalledWith('om_picker_group', expect.any(Object))
     expect(harness.recallMessage).toHaveBeenCalledWith('om_picker_group')

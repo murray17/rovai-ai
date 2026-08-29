@@ -118,9 +118,9 @@ CampMessage、CampTurn 或 AgentRun。同一 conversation 的后续合格消息�
 原 `chatId`，Topic 使用父群 `chatId + canonical topic reply anchor`。它的 `acknowledgementAppId` 对重试、恢复和后续
 pending messages 保持冻结。卡片可对会话成员可见，但只包含 bounded conversation/project display name 与 opaque
 project ID；不得包含 canonical path、operator identity 或本机权限事实。Delivery payload 还冻结单调递增的
-`cardRevision`。Host tick 发现当前 pending version 的旧 revision `send` 已以 `format_error` 终结且没有外部 message ID
-时，只允许轮换一次 pending version/nonce 并生成当前 revision 的新 `send`；当前 revision 再次失败保持终态，禁止形成
-自动重试循环。
+`cardRevision`。Host tick 发现当前 pending version 的旧 revision 卡时，已发送且有外部 message ID 的卡轮换
+pending version/nonce 后以当前 revision 原位 `update`；未落地的 `send` 只有在 `format_error` 且没有外部 message ID
+时才轮换并生成当前 revision 的新 `send`。当前 revision 再次失败保持终态，禁止形成自动重试循环。
 
 Card action 只携带 `pendingBindingId + projectId? + expectedVersion + nonce + action`。Host 只从 callback envelope 读取
 operator identity 和 clicked `messageId`，再把后者作为 `externalPickerMessageId` 交给 Core；action payload 中的身份字段一律
