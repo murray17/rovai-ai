@@ -1324,6 +1324,10 @@ export class ChannelSettingsService {
       return
     }
     const conversationKind = await this.#conversationKind(managed.channel, message)
+    if (conversationKind === 'group' && message.threadId) {
+      reject('message_thread_unsupported', conversationKind)
+      return
+    }
     if (conversationKind !== 'p2p' && !message.mentionedBot) {
       reject('bot_not_mentioned', conversationKind)
       return
@@ -1333,7 +1337,9 @@ export class ChannelSettingsService {
       reject('roster_reconciliation_failed', conversationKind)
       return
     }
-    const topicKey = conversationKind === 'topic' ? (message.threadId || message.rootId || '') : ''
+    const topicKey = conversationKind === 'topic'
+      ? (message.rootId || (message.replyToMessageId ? '' : message.messageId))
+      : ''
     if (conversationKind === 'topic' && !topicKey) {
       reject('topic_key_missing', conversationKind)
       return
@@ -1389,7 +1395,11 @@ export class ChannelSettingsService {
     )
     if (managed.channel.botIdentity?.name) expectedBotNames.add(managed.channel.botIdentity.name)
     const body = canonicalInboundBody(raw, message, expectedBotNames)
-    const conversationDisplayName = await this.#conversationDisplayName(managed.channel, message)
+    const conversationDisplayName = await this.#conversationDisplayName(
+      managed.channel,
+      message,
+      conversationKind
+    )
     if (body === '/new') {
       if (conversationKind !== 'p2p') {
         reject('control_command_dm_only', conversationKind)
@@ -1802,14 +1812,18 @@ export class ChannelSettingsService {
     return mode
   }
 
-  async #conversationDisplayName(channel: LarkChannel, message: NormalizedMessage): Promise<string> {
+  async #conversationDisplayName(
+    channel: LarkChannel,
+    message: NormalizedMessage,
+    conversationKind: 'p2p' | 'group' | 'topic'
+  ): Promise<string> {
     if (message.chatType === 'p2p') return message.senderName || '飞书私聊'
     let name = this.#chatNameCache.get(message.chatId)
     if (!name) {
       name = (await channel.getChatInfo(message.chatId).catch(() => null))?.name || '飞书群聊'
       this.#chatNameCache.set(message.chatId, name)
     }
-    return message.threadId || message.rootId ? `${name} · 话题` : name
+    return conversationKind === 'topic' ? `${name} · 话题` : name
   }
 
   async #pump(): Promise<void> {

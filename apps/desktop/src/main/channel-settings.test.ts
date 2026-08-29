@@ -149,11 +149,13 @@ function controlledChannels(identities: Record<string, { openId: string; name: s
   send: ReturnType<typeof vi.fn>
   updateCard: ReturnType<typeof vi.fn>
   recallMessage: ReturnType<typeof vi.fn>
+  getChatMode: ReturnType<typeof vi.fn>
 } {
   const handlers = new Map<string, (event: unknown) => unknown | Promise<unknown>>()
   const send = vi.fn(async () => ({ messageId: 'om_sent' }))
   const updateCard = vi.fn(async () => undefined)
   const recallMessage = vi.fn(async () => undefined)
+  const getChatMode = vi.fn(async (_chatId: string): Promise<'p2p' | 'group' | 'topic'> => 'group')
   const createChannel = vi.fn((options: { appId: string }) => ({
     botIdentity: identities[options.appId],
     on: (event: string, handler: (value: unknown) => unknown | Promise<unknown>) => {
@@ -165,7 +167,7 @@ function controlledChannels(identities: Record<string, { openId: string; name: s
     send,
     updateCard,
     recallMessage,
-    getChatMode: vi.fn(async () => 'group'),
+    getChatMode,
     getChatInfo: vi.fn(async () => ({ name: '测试群' })),
     rawClient: {
       im: { v1: {
@@ -175,7 +177,7 @@ function controlledChannels(identities: Record<string, { openId: string; name: s
       } }
     }
   })) as unknown as NonNullable<ChannelHostDependencies['createChannel']>
-  return { createChannel, handlers, send, updateCard, recallMessage }
+  return { createChannel, handlers, send, updateCard, recallMessage, getChatMode }
 }
 
 function inertInterval(): Pick<ChannelHostDependencies, 'setInterval' | 'clearInterval'> {
@@ -195,6 +197,9 @@ function normalizedMessage(input: {
   omitSenderUserId?: boolean
   content: string
   mentions?: Array<{ key: string; openId?: string; name?: string; isBot?: boolean }>
+  rootId?: string
+  threadId?: string
+  replyToMessageId?: string
 }): Record<string, unknown> {
   const mentions = input.mentions ?? []
   return {
@@ -209,6 +214,9 @@ function normalizedMessage(input: {
     mentions,
     mentionAll: false,
     mentionedBot: (input.chatType ?? 'p2p') === 'p2p' || mentions.some((mention) => mention.isBot),
+    rootId: input.rootId,
+    threadId: input.threadId,
+    replyToMessageId: input.replyToMessageId,
     createTime: Date.now(),
     raw: {
       tenant_key: 'tenant-1',
@@ -1805,6 +1813,102 @@ describe('channel settings service', () => {
       expect.objectContaining({ card: expect.anything() }),
       expect.anything()
     )
+    await service.stop()
+  })
+
+  it('accepts topics only from a standalone topic-group chat mode', async () => {
+    const harness = controlledChannels({ cli_a: { openId: 'ou_bot_a', name: '审阅员' } })
+    harness.getChatMode.mockImplementation(async (chatId: string) => (
+      chatId === 'oc_topic_group' ? 'topic' : 'group'
+    ))
+    const observations: Record<string, unknown>[] = []
+    const service = new ChannelSettingsService({
+      credentialStore: memoryCredentialStore({
+        'feishu-member-a': { appId: 'cli_a', appSecret: 'secret-a' }
+      }),
+      createChannel: harness.createChannel,
+      ...inertInterval(),
+      core: channelCore((method, rawParams) => {
+        const command = ((rawParams as { command?: Record<string, unknown> } | undefined)?.command ?? {})
+        if (method === 'channels.feishu.snapshot') {
+          return coreSnapshot({ memberBots: [{
+            agentId: 'agent-a', accountId: 'account-1', brand: 'feishu', appId: 'cli_a',
+            botDisplayName: '审阅员', credentialRef: 'feishu-member-a', status: 'published',
+            failureCode: null, version: 1, ownerIdentityStatus: 'verified'
+          }] })
+        }
+        if (method === 'channels.feishu.owner.verify') {
+          return {
+            status: 'applied',
+            code: 'channel.owner.verified',
+            payload: { classification: 'owner' }
+          }
+        }
+        if (method === 'channels.inbound.observe') {
+          observations.push(command)
+          return {
+            status: 'accepted',
+            code: 'channel.inbound.collecting',
+            payload: { aggregateId: `rvcia_${observations.length}`, readyToFinalize: false }
+          }
+        }
+        if (method === 'channels.host.tick') {
+          return { status: 'applied', code: 'channels.host.ticked', payload: { deliveries: [] } }
+        }
+        return { status: 'applied', code: `${method}.applied`, payload: {} }
+      })
+    })
+    await service.start()
+    const messageHandler = harness.handlers.get('cli_a:message')!
+    const mention = [{ key: '@_bot', openId: 'ou_bot_a', name: '审阅员', isBot: true }]
+
+    await messageHandler(normalizedMessage({
+      messageId: 'om_group_reply',
+      chatId: 'oc_regular_group',
+      chatType: 'group',
+      senderUserId: 'owner-user-id',
+      content: '@_bot 普通群消息回复',
+      mentions: mention,
+      rootId: 'om_regular_root',
+      threadId: 'omt_regular_thread'
+    }))
+    await messageHandler(normalizedMessage({
+      messageId: 'om_topic_reply',
+      chatId: 'oc_topic_group',
+      chatType: 'group',
+      senderUserId: 'owner-user-id',
+      content: '@_bot 独立话题群消息',
+      mentions: mention,
+      rootId: 'om_topic_root',
+      threadId: 'omt_topic_thread',
+      replyToMessageId: 'om_topic_parent'
+    }))
+    await messageHandler(normalizedMessage({
+      messageId: 'om_second_topic_root',
+      chatId: 'oc_topic_group',
+      chatType: 'group',
+      senderUserId: 'owner-user-id',
+      content: '@_bot 独立话题群新话题',
+      mentions: mention,
+      threadId: 'omt_second_topic'
+    }))
+
+    expect(observations).toHaveLength(2)
+    expect(observations).not.toContainEqual(expect.objectContaining({
+      chatId: 'oc_regular_group'
+    }))
+    expect(observations[0]).toMatchObject({
+      chatId: 'oc_topic_group',
+      conversationKind: 'topic',
+      topicKey: 'om_topic_root',
+      conversationDisplayName: '测试群 · 话题'
+    })
+    expect(observations[1]).toMatchObject({
+      chatId: 'oc_topic_group',
+      conversationKind: 'topic',
+      topicKey: 'om_second_topic_root',
+      conversationDisplayName: '测试群 · 话题'
+    })
     await service.stop()
   })
 

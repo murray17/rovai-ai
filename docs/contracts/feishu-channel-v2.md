@@ -93,6 +93,12 @@ admission；不展示项目卡。精确 `/new` 只在 Owner p2p 生效：要求�
 关闭当前 generation，立即创建新 Quick Chat Camp，并回复“已开始新的快速对话”。该控制命令不创建 aggregate、
 CampMessage、CampTurn 或 AgentRun；群/话题中的 `/new` 静默不生效。
 
+`conversationKind=topic` 必须来自父群权威 `chat_mode=topic`，不得从消息级 `root_id/thread_id` 推断。父群为
+`chat_mode=group` 且事件携带非空 `thread_id` 时，Host 必须在 observation 前静默停止；不得形成 conversation、aggregate、
+pending binding、Camp 或 delivery，也不得把该事件降级为普通群消息。父群为 `chat_mode=topic` 时，`topicKey` 必须是
+飞书 Reply API 可接受的根消息锚点：话题根消息使用自身 `message_id`，话题内回复使用 `root_id`；缺失 `root_id` 的回复
+fail closed，且不得把 `thread_id` 写入 `topicKey` 或用作 Reply API 的 `message_id`。
+
 普通群一个不可换绑的 project Camp；每个 topic identity 各有一个不可换绑 project Camp。首次合格 Owner mention 在
 aggregate finalize 时创建或复用：
 

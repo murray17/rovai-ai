@@ -166,6 +166,11 @@ Project Catalog：卡片只得到 opaque project ID 和 display name，canonical
 - 普通群：`provider + tenant + chat`；首次 Owner 显式 mention 选择一次项目，此后一个长期 Camp；
 - 话题：`provider + tenant + chat + canonical topic`；每个话题各选择一次项目并拥有独立 Camp。
 
+这里的“话题”只指父群本身 `chat_mode=topic` 的独立话题群中的 canonical topic。普通群
+`chat_mode=group` 内从单条消息开启的 thread 不受支持：事件携带非空 `thread_id` 时，Host 在 observation 前静默停止，
+不得把它降级为普通群消息、创建 Topic identity 或向该 thread 投递。独立话题群的 canonical topic 同时使用可回复的根
+消息锚点：根消息取自身 `message_id`，话题内回复取 `root_id`；`thread_id` 不得作为飞书 Reply API 的 `message_id`。
+
 精确 `/new` 只在 Owner 私聊中是控制命令。它要求当前没有 collecting aggregate 或 queued/admitted request，关闭 active
 generation，保留旧 Camp，并立即创建新 Quick Chat Camp；控制文本不进入 CampMessage、Turn、Run 或模型。群和话题
 不解释 `/new`，也没有 rebind/change-project 命令。
