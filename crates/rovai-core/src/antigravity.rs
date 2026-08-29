@@ -1225,7 +1225,9 @@ fn antigravity_tool_kind(tool_name: &str) -> &'static str {
     match tool_name.to_ascii_lowercase().as_str() {
         "run_command" | "bash" | "terminal" => "execute",
         "read_file" | "read" | "list_directory" => "read",
-        "grep_search" | "search" | "web_search" => "search",
+        "grep_search" => "file_search",
+        "search" => "search",
+        "web_search" | "search_web" => "web_search",
         "replace_file_content" | "edit_file" | "apply_patch" => "edit",
         "write_to_file" | "write_file" => "write",
         _ => "tool",
@@ -2099,6 +2101,10 @@ printf '%s\n' '{"event":"result","result":{"conversation_id":"0bdd2166-d420-40c6
             assert!(antigravity_command_tool(tool_name));
         }
         assert_eq!(antigravity_tool_kind("read_file"), "read");
+        assert_eq!(antigravity_tool_kind("grep_search"), "file_search");
+        assert_eq!(antigravity_tool_kind("search"), "search");
+        assert_eq!(antigravity_tool_kind("web_search"), "web_search");
+        assert_eq!(antigravity_tool_kind("search_web"), "web_search");
         assert_eq!(antigravity_tool_kind("write_to_file"), "write");
         assert_eq!(antigravity_tool_kind("future_tool"), "tool");
         std::fs::remove_dir_all(root).expect("temporary root should be removed");

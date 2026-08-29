@@ -2442,6 +2442,7 @@ button.task-event-card:focus-visible .task-card-chevron { color: var(--brand-ink
 .tool-call-disclosure > summary:hover,
 .tool-call-static:hover { color: var(--ink); background: var(--surface-hover); }
 .tool-call-icon { display: inline-grid; width: 16px; height: 28px; place-items: center; color: var(--muted); }
+.tool-call-icon[data-icon-domain="rovai"] { color: var(--rail-logo); }
 .tool-call-icon svg { display: block; width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.35; vector-effect: non-scaling-stroke; }
 .tool-call-title { display: flex; min-width: 0; height: 28px; align-items: center; overflow: hidden; color: var(--muted); line-height: 1.25; text-overflow: ellipsis; white-space: nowrap; }
 .tool-call-summary:hover .tool-call-title,

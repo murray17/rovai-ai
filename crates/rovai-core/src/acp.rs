@@ -42,6 +42,7 @@ use rovai_core::{
     runtime_discovery::{
         RuntimeLaunchPurpose, configure_active_runtime_command, runtime_launch_allowed,
     },
+    runtime_search_operation,
 };
 use serde_json::{Value, json};
 use tokio::{
@@ -538,9 +539,10 @@ struct AcpCompactionObserverRoute {
 struct ObservedToolMetadata {
     native_kind: Option<String>,
     observation_digest: Option<String>,
-    // Some ACP servers omit rawInput from the later permission request. Keep
-    // the matching structured update in active-process memory only; durable
-    // events and Action records continue to store digests, never this payload.
+    // Some ACP servers omit rawInput from later updates. Keep the matching
+    // structured input in active-process memory so explicitly public fields
+    // such as a typed Web-search query can survive sparse terminal updates;
+    // Action records still store only digests.
     raw_input: Option<Value>,
     stable_meta: Option<Value>,
     locations: Option<Value>,
@@ -5528,6 +5530,7 @@ pub struct CompletedAcpAction {
     pub native_item_id: String,
     pub native_kind: String,
     pub public_command: Option<String>,
+    pub public_search_operation_candidate: Option<Value>,
     pub public_file_operation_path: Option<String>,
     pub public_file_changes: Option<Value>,
     pub observation_digest: String,
@@ -5583,6 +5586,13 @@ pub fn completed_action(
     )
     .to_string();
     let status = effective_acp_tool_status(update, &native_kind);
+    let public_search_operation_candidate = runtime_search_operation::acp_web_search_candidate(
+        adapter_kind,
+        update.get("sessionUpdate").and_then(Value::as_str),
+        &status,
+        &native_kind,
+        raw_input,
+    );
     let succeeded = status == "completed";
     let observation_digest = canonical_json_digest(&json!({
         "nativeItemId": &native_item_id,
@@ -5602,6 +5612,7 @@ pub fn completed_action(
         native_item_id: native_item_id.clone(),
         native_kind,
         public_command,
+        public_search_operation_candidate,
         public_file_operation_path,
         public_file_changes,
         observation_digest,
@@ -5672,6 +5683,16 @@ fn reconcile_completed_action(
         completion.observation_digest = observation_digest;
     }
     let effective_status = effective_acp_tool_status(update, &completion.native_kind);
+    if completion.public_search_operation_candidate.is_none() {
+        completion.public_search_operation_candidate =
+            runtime_search_operation::acp_web_search_candidate(
+                adapter_kind,
+                update.get("sessionUpdate").and_then(Value::as_str),
+                &effective_status,
+                &completion.native_kind,
+                observed.raw_input.as_ref(),
+            );
+    }
     completion.outcome = if effective_status == "completed" {
         ActionResultOutcome::Succeeded
     } else {
@@ -10216,6 +10237,68 @@ while IFS= read -r ignored; do :; done
                 .result_data
                 .to_string()
                 .contains("SPARSE_PRIVATE_FIELD")
+        );
+    }
+
+    #[test]
+    fn explicit_web_search_builds_a_typed_candidate_and_reconciles_sparse_terminal_updates() {
+        let query = "password=公开测试词 token=也照常展示";
+        let direct = completed_action(
+            AdapterKind::OpencodeCli,
+            &json!({
+                "update": {
+                    "sessionUpdate": "tool_call_update",
+                    "toolCallId": "web-search-direct",
+                    "status": "completed",
+                    "kind": "web_search",
+                    "rawInput": {"query": query, "providerPrivate": "must-not-leak"}
+                }
+            }),
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(
+            direct.public_search_operation_candidate.as_ref().unwrap()["query"],
+            query
+        );
+        assert!(
+            !serde_json::to_string(&direct.result_data)
+                .unwrap()
+                .contains(query)
+        );
+
+        let sparse_update = json!({
+            "sessionUpdate": "tool_call_update",
+            "toolCallId": "web-search-sparse",
+            "status": "completed"
+        });
+        let sparse = completed_action(
+            AdapterKind::OpencodeCli,
+            &json!({"update": sparse_update.clone()}),
+        )
+        .unwrap()
+        .unwrap();
+        let reconciled = reconcile_completed_action(
+            AdapterKind::OpencodeCli,
+            &sparse_update,
+            ObservedToolMetadata {
+                native_kind: Some("web_search".to_string()),
+                observation_digest: None,
+                raw_input: Some(json!({"query": query, "providerPrivate": "must-not-leak"})),
+                stable_meta: None,
+                locations: None,
+                public_file_changes: None,
+            },
+            sparse,
+        )
+        .unwrap();
+        assert_eq!(reconciled.native_kind, "web_search");
+        assert_eq!(
+            reconciled
+                .public_search_operation_candidate
+                .as_ref()
+                .unwrap()["query"],
+            query
         );
     }
 

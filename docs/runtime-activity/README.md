@@ -1,12 +1,12 @@
 ---
 document_type: runtime-activity-maintenance-index
 authority: runtime-activity-registry-process
-last_updated: 2026-08-15
+last_updated: 2026-08-29
 ---
 
 # Runtime Activity Mapping 维护指南
 
-本目录长期管理十二个 Agent Runtime 的“结构化事件如何进入 Canonical Runtime Activity”。它回答
+本目录长期管理十三个 Agent Runtime 的“结构化事件如何进入 Canonical Runtime Activity”。它回答
 “当前有哪些规则、证据来自哪里、怎样安全修改”，不替代 Architecture 的架构边界，也不冒充代码实施事实。
 
 ## 权威关系
@@ -32,16 +32,19 @@ last_updated: 2026-08-15
 5. 验证 live event 与恢复 Read Side 产生相同 Canonical shape；
 6. 验证 Renderer 没有按 title、command、provider 或 Runtime 名称重新分类；
 7. 更新 fixture/smoke/截图状态，真实 smoke 不可运行时明确写明。
+8. 若升级 classifier，必须记录 Data Contract/migration cutover、既有 live operation 的版本固定规则、
+   v1/v2 Read Side 选择与历史是否回填；不能只改常量。
 
 ## 变更等级
 
 - 只改本地化文案：Renderer presentation 变更，不升级 classifier；
-- 新增同一结构化字段的语义映射：升级 classifier，增加 fixture；
+- 新增同一结构化字段的语义映射：升级 classifier，增加 fixture，并显式决定“新 operation 切换”或
+  “历史平行 reprojection”；两者不能混写；
 - 改变 operationId 来源或 Evidence 分组：必须同步更新当前 Architecture/Contract，并在唯一 current 版本记录决定理由；
 - 推断 Runtime 未报告行为：禁止；
 - 新增 Runtime：先以 `unknown`/`run_level` 接入，再凭结构化证据升级 coverage。
 
 ## 防漂移门禁
 
-Core 单测必须证明 `AdapterKind::ALL` 恰好覆盖一次。Registry 文档必须逐行列出相同十二个
+Core 单测必须证明 `AdapterKind::ALL` 恰好覆盖一次。Registry 文档必须逐行列出相同十三个
 Adapter kind；发布验收再用机器可读报告比对显示名称、coverage、期望 tool label 和来源身份。
