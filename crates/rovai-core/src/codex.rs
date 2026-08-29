@@ -31,6 +31,7 @@ use rovai_core::{
     },
     mcp::McpServerDefinition,
     runtime_discovery::configure_active_runtime_command,
+    runtime_search_operation,
 };
 use serde_json::{Value, json};
 use tokio::{
@@ -2042,13 +2043,29 @@ pub fn normalize_event(method: &str, params: &Value) -> (&'static str, Value) {
         ),
         "thread/status/changed" => ("runtime.state", params.clone()),
         "error" => ("error", params.clone()),
-        "item/started" => ("activity.started", params.clone()),
-        "item/completed" => ("activity.completed", completed_activity_payload(params)),
+        "item/started" => (
+            "activity.started",
+            activity_payload_with_search_candidate("item/started", params.clone()),
+        ),
+        "item/completed" => (
+            "activity.completed",
+            activity_payload_with_search_candidate(
+                "item/completed",
+                completed_activity_payload(params),
+            ),
+        ),
         _ => (
             "runtime.native",
             json!({"method": method, "params": params}),
         ),
     }
+}
+
+fn activity_payload_with_search_candidate(method: &str, mut payload: Value) -> Value {
+    let candidate =
+        runtime_search_operation::codex_web_search_candidate(method, payload.get("item"));
+    runtime_search_operation::insert_candidate(&mut payload, candidate);
+    payload
 }
 
 fn completed_activity_payload(params: &Value) -> Value {
@@ -2918,6 +2935,44 @@ while IFS= read -r ignored; do :; done
             terminal_payload["item"]["aggregatedOutput"],
             "secret output"
         );
+    }
+
+    #[test]
+    fn only_a_codex_web_search_item_builds_a_search_operation_candidate() {
+        let query = "password=公开测试词 token=也照常展示";
+        let (_, web_search) = normalize_event(
+            "item/started",
+            &json!({
+                "item": {
+                    "id": "search-1",
+                    "type": "webSearch",
+                    "status": "inProgress",
+                    "query": query,
+                    "providerPrivate": "must-not-leak"
+                }
+            }),
+        );
+        assert_eq!(
+            web_search.pointer("/runtimeSearchOperationCandidate/query"),
+            Some(&json!(query))
+        );
+        assert!(
+            !web_search["runtimeSearchOperationCandidate"]
+                .to_string()
+                .contains("must-not-leak")
+        );
+
+        let (_, database) = normalize_event(
+            "item/started",
+            &json!({
+                "item": {
+                    "id": "database-1",
+                    "type": "dynamicToolCall",
+                    "query": "SELECT * FROM users"
+                }
+            }),
+        );
+        assert!(database.get("runtimeSearchOperationCandidate").is_none());
     }
 
     #[test]

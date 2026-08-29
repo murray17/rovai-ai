@@ -13,7 +13,7 @@ last_updated: 2026-08-29
 
 > 当前状态：动态 Camp membership、Message Delivery zero-attempt cancellation、Managed Attachment v2、安全退出、
 > ACP Client FS/Terminal 权限收敛，以及 Runtime Evidence 驱动的 Command Diff / AgentRun 文件变化主路径已经实现并
-> 通过定向回归；Runtime Activity 已切换到 `activity-v2` 新 operation 写入、typed query、Renderer 中文标题与
+> 通过定向回归；Runtime Activity 已切换到 `activity-v2` 新 operation 写入、类型化 Search Operation、Renderer 中文标题与
 > 七类图标；Desktop Navigation 已切换为提交后事件驱动、全局 generation drain 与 20 秒前台安全刷新。
 > 真实打包 App 的多 Runtime 文件变化复测仍待完成。
 >
@@ -83,8 +83,8 @@ last_updated: 2026-08-29
 - Runtime Activity 新写入只产生 Shell/File/Tool/Runtime/Unknown 五域，file/web/generic search 使用不同
   semantic kind；已有 v1 operation 继续用 v1 结算，Read Side 双读 v2/v1，历史不回填；
 - Renderer 统一拥有中文标题与 Terminal/File/Web/Tool/Rovai/Runtime/Unknown 七类图标；Rovai 图标只认 Core
-  Catalog identity，不认标题或 Shell `rovai` 文本；Codex、Claude WebSearch 与 ACP web_search 从现在起保存
-  精确 typed query，不做敏感词过滤。
+  Catalog identity，不认标题或 Shell `rovai` 文本；搜索词只从 available `runtimeSearchOperation` 与 Canonical
+  Web identity 的交集展示，不按任意 `query` 字段升级，不做敏感词过滤。
 
 ## 明确不做
 
@@ -133,10 +133,10 @@ generation、reconciliation 与文件变化 projection 都不进入模型上下�
 | 范围 | 结论 | 证据或理由 |
 | --- | --- | --- |
 | Version lifecycle | 已更新 | v1.28 按冻结时事实转为 historical；本概览、[实施计划](implementation-plan.md)、[决定](decisions.md)与[版本索引](../README.md)建立唯一 current v1.29。 |
-| Decisions | 已更新 | [V1.29-D01–D06](decisions.md#v1-29-d01)冻结 membership、Delivery 与 Attachment；[D07](decisions.md#v1-29-d07)冻结安全退出；[D08](decisions.md#v1-29-d08)冻结共享 Evidence/独立 projector；[D09](decisions.md#v1-29-d09)彻底放弃 Workspace capture；[D10](decisions.md#v1-29-d10)冻结 Command inline 与 Run Review presentation；[D11](decisions.md#v1-29-d11)冻结 ACP FS/Terminal Runtime-owned 权限；[D12](decisions.md#v1-29-d12)冻结 Navigation 提交后失效与 generation drain；[D13](decisions.md#v1-29-d13)冻结 managed run output exclusion；[D14](decisions.md#v1-29-d14)冻结 activity-v2、无历史回填、typed query 与图标 identity。 |
+| Decisions | 已更新 | [V1.29-D01–D06](decisions.md#v1-29-d01)冻结 membership、Delivery 与 Attachment；[D07](decisions.md#v1-29-d07)冻结安全退出；[D08](decisions.md#v1-29-d08)冻结共享 Evidence/独立 projector；[D09](decisions.md#v1-29-d09)彻底放弃 Workspace capture；[D10](decisions.md#v1-29-d10)冻结 Command inline 与 Run Review presentation；[D11](decisions.md#v1-29-d11)冻结 ACP FS/Terminal Runtime-owned 权限；[D12](decisions.md#v1-29-d12)冻结 Navigation 提交后失效与 generation drain；[D13](decisions.md#v1-29-d13)冻结 managed run output exclusion；[D14](decisions.md#v1-29-d14)冻结 activity-v2、无历史回填、类型化 Search Operation 与图标 identity。 |
 | Contracts | 已更新 | 新增 [Camp Membership v1](../../contracts/camp-membership-v1.md)、[Planned Shutdown v3](../../contracts/planned-shutdown-v3.md)，并以 [Runtime File Change Observation v2](../../contracts/runtime-file-change-observation-v2.md)替代 v1；Runtime Launch v28 与 ACP Client Terminal v2 收口代理权限；[Run Process Detail Surface v24](../../contracts/run-process-detail-surface-v24.md)成为当前活动展示入口。 |
 | Architecture | 已更新 | 新增[动态 Camp 队员关系](../../architecture/dynamic-camp-membership.md)、[Runtime File Change Observation](../../architecture/runtime-file-change-observation.md)与[Desktop Navigation Refresh](../../architecture/desktop-navigation-refresh.md)；[计划关闭](../../architecture/planned-shutdown.md)切换为退出取消全部 AgentRun；基础不变量同步无 Git/无扫描的每 Run Evidence projection。 |
-| UI | 已更新 | [Camp 会话工作区](../../ui/components/conversation-workspace.md)冻结 `修改 xxx` rows、每 Run 卡片、七类 Activity 图标、typed query disclosure 与关闭等待面；[App Shell](../../ui/components/app-shell-navigation.md)冻结 400ms 冷启动反馈与事件驱动 Navigation 新鲜度；其他布局不变。 |
+| UI | 已更新 | [Camp 会话工作区](../../ui/components/conversation-workspace.md)冻结 `修改 xxx` rows、每 Run 卡片、七类 Activity 图标、Search Operation disclosure 与关闭等待面；[App Shell](../../ui/components/app-shell-navigation.md)冻结 400ms 冷启动反馈与事件驱动 Navigation 新鲜度；其他布局不变。 |
 | Runtime Activity | 已更新 | Registry 切换 `activity-v2` 新 operation mapping，记录五域、三类 search、v2/v1 双读和无历史回填；Run snapshot 仍是独立 Evidence event。 |
 | Runtime compatibility | 已更新 | 13 个 adapter 按实际协议族归类；当前 fixture 覆盖 Codex、ACP、Claude 与 Antigravity negative gate，修复后真实 App 复测仍待完成。 |
 | Documentation routing | 已更新 | 文档总导航、Architecture/Contract 索引与当前决定导航切换到 Runtime File Change Observation，并加入 Desktop Navigation Refresh；不保留 Window 当前入口。 |

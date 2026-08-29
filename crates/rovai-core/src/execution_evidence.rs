@@ -14,6 +14,7 @@ use crate::{
     runtime_file_operation::{
         self, FILE_OPERATION_SCHEMA_VERSION, RUNTIME_FILE_OPERATION_MANAGED_OUTPUT_ROOT,
     },
+    runtime_search_operation,
 };
 
 const INLINE_PAYLOAD_LIMIT_BYTES: usize = 16 * 1024;
@@ -529,7 +530,15 @@ impl ExecutionEvidenceService {
         }
 
         let source_event_key = source_event_key(event_type, payload);
-        let mut payload = normalize_public_payload(event_type, payload);
+        let source_payload = payload;
+        let mut payload = normalize_public_payload(event_type, source_payload);
+        normalize_runtime_search_operation_evidence(
+            &mut payload,
+            event_type,
+            source_payload,
+            runtime_adapter_kind.as_deref(),
+            runtime_reported_version.as_deref(),
+        );
         normalize_runtime_file_operation_evidence(
             &mut payload,
             workspace_json.as_deref(),
@@ -809,7 +818,6 @@ fn normalize_public_payload(event_type: &str, payload: &Value) -> Value {
                 "kind": payload.get("kind"),
                 "toolName": payload.get("toolName"),
                 "title": payload.get("title"),
-                "query": payload.get("query"),
                 "sourceAuthority": payload.get("sourceAuthority"),
                 "canonicalTool": payload.get("canonicalTool"),
                 "authorizationDecision": payload.get("authorizationDecision"),
@@ -841,7 +849,6 @@ fn normalize_public_payload(event_type: &str, payload: &Value) -> Value {
                     "type": item.get("type"),
                     "status": item.get("status"),
                     "title": item.get("title"),
-                    "query": item.get("query"),
                     "command": item.get("command"),
                     "commandActions": public_command_actions(item),
                     "cwd": item.get("cwd"),
@@ -859,6 +866,37 @@ fn normalize_public_payload(event_type: &str, payload: &Value) -> Value {
         }
         _ => Value::Null,
     }
+}
+
+fn normalize_runtime_search_operation_evidence(
+    payload: &mut Value,
+    event_type: &str,
+    source_payload: &Value,
+    frozen_adapter_kind: Option<&str>,
+    observed_runtime_version: Option<&str>,
+) {
+    let Some(admitted) = runtime_search_operation::admit_runtime_search_operation(
+        event_type,
+        source_payload,
+        frozen_adapter_kind,
+        observed_runtime_version,
+    ) else {
+        return;
+    };
+    let projection = match admitted {
+        Ok(admitted) => {
+            if event_type == "runtime.action" {
+                payload["kind"] = Value::String("web_search".to_string());
+            }
+            admitted.into_projection()
+        }
+        Err(reason) => runtime_search_operation::unavailable_projection(
+            reason,
+            source_payload.get(runtime_search_operation::SEARCH_OPERATION_CANDIDATE_FIELD),
+            observed_runtime_version,
+        ),
+    };
+    payload["runtimeSearchOperation"] = projection;
 }
 
 fn normalize_runtime_diff_evidence(
@@ -1491,10 +1529,7 @@ mod tests {
         let encoded = serde_json::to_string(&normalized).unwrap();
         assert!(encoded.contains("pnpm test"));
         assert!(encoded.contains("99 tests passed"));
-        assert_eq!(
-            normalized["item"]["query"],
-            "password=公开测试词 token=也照常展示"
-        );
+        assert!(normalized["item"].get("query").is_none());
         assert_eq!(normalized["item"]["commandActions"][0]["type"], "read");
         assert_eq!(
             normalized["item"]["commandActions"][0]["path"],
@@ -1507,19 +1542,78 @@ mod tests {
     }
 
     #[test]
-    fn runtime_action_keeps_the_exact_typed_query_without_private_neighbors() {
-        let normalized = normalize_public_payload(
+    fn generic_query_is_not_public_but_an_admitted_search_operation_is() {
+        let generic = normalize_public_payload(
             "runtime.action",
             &json!({
-                "toolCallId": "web-search-1",
+                "toolCallId": "database-1",
                 "status": "completed",
-                "kind": "web_search",
-                "query": "password=公开测试词 token=也照常展示",
+                "kind": "tool",
+                "toolName": "database.execute",
+                "query": "SELECT * FROM users",
                 "providerPrivate": "must-not-persist"
             }),
         );
-        assert_eq!(normalized["query"], "password=公开测试词 token=也照常展示");
-        assert!(normalized.get("providerPrivate").is_none());
+        assert!(generic.get("query").is_none());
+        assert!(generic.get("runtimeSearchOperation").is_none());
+        assert!(generic.get("providerPrivate").is_none());
+
+        let query = "password=公开测试词 token=也照常展示";
+        let candidate = runtime_search_operation::claude_web_search_candidate(
+            "assistant.tool_use.WebSearch",
+            "WebSearch",
+            Some(query),
+        )
+        .unwrap();
+        let mut source = json!({
+            "toolCallId": "web-search-1",
+            "toolName": "WebSearch",
+            "status": "in_progress",
+            "kind": "web_search",
+        });
+        runtime_search_operation::insert_candidate(&mut source, Some(candidate));
+        let mut normalized = normalize_public_payload("runtime.action", &source);
+        normalize_runtime_search_operation_evidence(
+            &mut normalized,
+            "runtime.action",
+            &source,
+            Some("claude-code-cli"),
+            Some("2.1.220"),
+        );
+        assert!(normalized.get("query").is_none());
+        assert_eq!(normalized["runtimeSearchOperation"]["status"], "available");
+        assert_eq!(normalized["runtimeSearchOperation"]["searchKind"], "web");
+        assert_eq!(normalized["runtimeSearchOperation"]["query"], query);
+        assert_eq!(
+            normalized["runtimeSearchOperation"]["sourceMetadata"]["observedRuntimeVersion"],
+            "2.1.220"
+        );
+        assert_eq!(normalized["kind"], "web_search");
+
+        let candidate = runtime_search_operation::acp_web_search_candidate(
+            crate::agent_profile::AdapterKind::KiroCli,
+            Some("tool_call_update"),
+            "completed",
+            "search",
+            Some(&json!({"query": "network query"})),
+        )
+        .unwrap();
+        let mut source = json!({"status": "completed", "kind": "search"});
+        runtime_search_operation::insert_candidate(&mut source, Some(candidate));
+        let mut unqualified = normalize_public_payload("runtime.action", &source);
+        normalize_runtime_search_operation_evidence(
+            &mut unqualified,
+            "runtime.action",
+            &source,
+            Some("kiro-cli"),
+            Some("2.19.0"),
+        );
+        assert_eq!(unqualified["kind"], "search");
+        assert_eq!(
+            unqualified["runtimeSearchOperation"]["status"],
+            "unavailable"
+        );
+        assert!(unqualified["runtimeSearchOperation"].get("query").is_none());
     }
 
     #[test]

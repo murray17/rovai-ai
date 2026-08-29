@@ -42,6 +42,7 @@ use rovai_core::{
     runtime_discovery::{
         RuntimeLaunchPurpose, configure_active_runtime_command, runtime_launch_allowed,
     },
+    runtime_search_operation,
 };
 use serde_json::{Value, json};
 use tokio::{
@@ -5529,7 +5530,7 @@ pub struct CompletedAcpAction {
     pub native_item_id: String,
     pub native_kind: String,
     pub public_command: Option<String>,
-    pub public_query: Option<String>,
+    pub public_search_operation_candidate: Option<Value>,
     pub public_file_operation_path: Option<String>,
     pub public_file_changes: Option<Value>,
     pub observation_digest: String,
@@ -5584,8 +5585,14 @@ pub fn completed_action(
         raw_input.unwrap_or(&Value::Null),
     )
     .to_string();
-    let public_query = public_acp_search_query(&native_kind, raw_input);
     let status = effective_acp_tool_status(update, &native_kind);
+    let public_search_operation_candidate = runtime_search_operation::acp_web_search_candidate(
+        adapter_kind,
+        update.get("sessionUpdate").and_then(Value::as_str),
+        &status,
+        &native_kind,
+        raw_input,
+    );
     let succeeded = status == "completed";
     let observation_digest = canonical_json_digest(&json!({
         "nativeItemId": &native_item_id,
@@ -5605,7 +5612,7 @@ pub fn completed_action(
         native_item_id: native_item_id.clone(),
         native_kind,
         public_command,
-        public_query,
+        public_search_operation_candidate,
         public_file_operation_path,
         public_file_changes,
         observation_digest,
@@ -5672,14 +5679,20 @@ fn reconcile_completed_action(
     if completion.native_kind == "other" && completion.public_command.is_some() {
         completion.native_kind = "execute".to_string();
     }
-    if completion.public_query.is_none() {
-        completion.public_query =
-            public_acp_search_query(&completion.native_kind, observed.raw_input.as_ref());
-    }
     if let Some(observation_digest) = observed.observation_digest {
         completion.observation_digest = observation_digest;
     }
     let effective_status = effective_acp_tool_status(update, &completion.native_kind);
+    if completion.public_search_operation_candidate.is_none() {
+        completion.public_search_operation_candidate =
+            runtime_search_operation::acp_web_search_candidate(
+                adapter_kind,
+                update.get("sessionUpdate").and_then(Value::as_str),
+                &effective_status,
+                &completion.native_kind,
+                observed.raw_input.as_ref(),
+            );
+    }
     completion.outcome = if effective_status == "completed" {
         ActionResultOutcome::Succeeded
     } else {
@@ -5853,17 +5866,6 @@ pub fn public_acp_shell_command(
         })
         .and_then(Value::as_str)
         .filter(|command| !command.trim().is_empty())
-        .map(str::to_string)
-}
-
-pub fn public_acp_search_query(native_kind: &str, raw_input: Option<&Value>) -> Option<String> {
-    if native_kind != "web_search" {
-        return None;
-    }
-    raw_input?
-        .get("query")
-        .and_then(Value::as_str)
-        .filter(|query| !query.is_empty())
         .map(str::to_string)
 }
 
@@ -10239,7 +10241,7 @@ while IFS= read -r ignored; do :; done
     }
 
     #[test]
-    fn web_search_exposes_the_exact_query_and_reconciles_sparse_terminal_updates() {
+    fn explicit_web_search_builds_a_typed_candidate_and_reconciles_sparse_terminal_updates() {
         let query = "password=公开测试词 token=也照常展示";
         let direct = completed_action(
             AdapterKind::OpencodeCli,
@@ -10255,7 +10257,10 @@ while IFS= read -r ignored; do :; done
         )
         .unwrap()
         .unwrap();
-        assert_eq!(direct.public_query.as_deref(), Some(query));
+        assert_eq!(
+            direct.public_search_operation_candidate.as_ref().unwrap()["query"],
+            query
+        );
         assert!(
             !serde_json::to_string(&direct.result_data)
                 .unwrap()
@@ -10288,7 +10293,13 @@ while IFS= read -r ignored; do :; done
         )
         .unwrap();
         assert_eq!(reconciled.native_kind, "web_search");
-        assert_eq!(reconciled.public_query.as_deref(), Some(query));
+        assert_eq!(
+            reconciled
+                .public_search_operation_candidate
+                .as_ref()
+                .unwrap()["query"],
+            query
+        );
     }
 
     #[test]

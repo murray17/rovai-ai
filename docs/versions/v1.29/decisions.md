@@ -571,9 +571,12 @@ Tool。真实搜索词没有稳定公开字段，用户只能看到通用“Web 
 4. 类型图标收敛为 Terminal、File、Web、Tool、Rovai、Runtime、Unknown 七类。Rovai 图标只由 Catalog 验证后的
    `sourceAuthority=core + credibility=core_verified + toolName` 选择；Shell command 中出现 `rovai` 仍是
    Terminal；
-5. 部署后新 Evidence 可以保存明确 typed 公共 query：Codex `item.query`、Claude
-   `WebSearch.input.query`、effective ACP `web_search.rawInput.query`。query 按原字符串保存和展示，不做敏感词
-   识别或替换；其他相邻字段仍不公开，Antigravity 当前不猜 query；
+5. 部署后新 Evidence 只通过 `runtimeSearchOperation` 保存明确 typed 公共 query，不保存任何顶层通用
+   `query`。Codex `webSearch`、Claude `WebSearch` 与 ACP `web_search` 按明确身份准入；实测 ACP 模糊事件只在
+   Adapter + 版本 + phase + query-only shape 全部匹配时准入，当前冻结 Copilot `1.0.79`、Qoder `1.1.28`、
+   Kiro `2.18.1` 与 CodeBuddy `2.133.1`。query 按原字符串保存和展示，不做敏感词识别或替换；其他相邻字段
+   仍不公开，Antigravity `search_web` 当前只分类、不猜 query；Renderer 还要同时验证 available projection 与
+   Canonical `tool.web.search`；
 6. 当前规范由 [Run Process Detail Surface v24](../../contracts/run-process-detail-surface-v24.md)、
    [Runtime Activity Registry](../../runtime-activity/registry.md)、[Evidence 基础不变量](../../architecture/foundational-invariants.md#evidence-canonical-activity)
    与 [Camp 会话工作区](../../ui/components/conversation-workspace.md)共同拥有。
@@ -583,7 +586,7 @@ Tool。真实搜索词没有稳定公开字段，用户只能看到通用“Web 
 - 历史数据继续按新 Renderer presentation 尽力显示，但 canonical v1 row 本身不变；缺少 query 时没有空占位；
 - 新 operation 的搜索语义可区分文件搜索、通用搜索和 Web 搜索，Core/Renderer 职责更清楚；
 - Rovai 自有 Tool 有稳定品牌图标，且不会把普通 Shell `rovai ...` 或伪造标题识别为第一方调用；
-- query 成为用户可见的公共 Evidence，而不是敏感词策略的隐式产物。
+- 准入后的 typed query 成为用户可见的公共 Evidence，而不是按字段名或敏感词策略产生的隐式事实。
 
 ### 被拒绝方案
 

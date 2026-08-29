@@ -196,6 +196,7 @@ use rovai_core::{
     },
     runtime_platform_admission::RuntimePlatformAdmission,
     runtime_resolution::RuntimeResolutionService,
+    runtime_search_operation,
     skill::{
         CommitSkillImportCommand, DeleteSkillCommand, SetSkillEnabledCommand,
         SetSkillGroupAssignmentsCommand, SkillLibraryService,
@@ -13609,16 +13610,12 @@ fn normalize_acp_event_with_completion(
             let public_command =
                 acp::public_acp_shell_command(adapter_kind, update.get("rawInput"))
                     .or_else(|| completion.and_then(|value| value.public_command.clone()));
-            let public_kind = acp::public_acp_tool_kind(adapter_kind, &update).or_else(|| {
+            let native_kind = acp::public_acp_tool_kind(adapter_kind, &update).or_else(|| {
                 completion
                     .map(|value| value.native_kind.as_str())
                     .filter(|kind| *kind != "other")
                     .map(str::to_string)
             });
-            let public_query = public_kind
-                .as_deref()
-                .and_then(|kind| acp::public_acp_search_query(kind, update.get("rawInput")))
-                .or_else(|| completion.and_then(|value| value.public_query.clone()));
             let public_status = completion
                 .and_then(|value| value.result_data.get("status"))
                 .and_then(Value::as_str)
@@ -13626,9 +13623,24 @@ fn normalize_acp_event_with_completion(
                 .unwrap_or_else(|| {
                     acp::effective_acp_tool_status(
                         &update,
-                        public_kind.as_deref().unwrap_or("other"),
+                        native_kind.as_deref().unwrap_or("other"),
                     )
                 });
+            let search_operation_candidate = native_kind
+                .as_deref()
+                .and_then(|kind| {
+                    runtime_search_operation::acp_web_search_candidate(
+                        adapter_kind,
+                        update.get("sessionUpdate").and_then(Value::as_str),
+                        &public_status,
+                        kind,
+                        update.get("rawInput"),
+                    )
+                })
+                .or_else(|| {
+                    completion.and_then(|value| value.public_search_operation_candidate.clone())
+                });
+            let public_kind = native_kind;
             let mut payload = json!({
                 "sessionUpdate": update.get("sessionUpdate"),
                 "toolCallId": update.get("toolCallId"),
@@ -13636,7 +13648,6 @@ fn normalize_acp_event_with_completion(
                 "status": public_status,
                 "kind": public_kind,
                 "title": update.get("title"),
-                "query": public_query,
                 "locationCount": update
                     .get("locations")
                     .and_then(Value::as_array)
@@ -13654,6 +13665,7 @@ fn normalize_acp_event_with_completion(
                     .get("rawOutput")
                     .and_then(|value| canonical_json_digest(value).ok()),
             });
+            runtime_search_operation::insert_candidate(&mut payload, search_operation_candidate);
             if public_status == "completed"
                 && let Some(path) =
                     completion.and_then(|value| value.public_file_operation_path.as_ref())
@@ -19103,7 +19115,11 @@ while IFS= read -r _ignored; do :; done
                 }
             }),
         );
-        assert_eq!(web_payload["query"], query);
+        assert!(web_payload.get("query").is_none());
+        assert_eq!(
+            web_payload.pointer("/runtimeSearchOperationCandidate/query"),
+            Some(&json!(query))
+        );
         assert!(
             !serde_json::to_string(&web_payload)
                 .unwrap()

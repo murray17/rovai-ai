@@ -82,7 +82,13 @@ const runtimes = [
     ...acp('web_search', 'web_search', 'tool', 'tool.web.search'),
     payload: {
       ...acp('web_search', 'web_search', 'tool', 'tool.web.search').payload,
-      query: 'password=公开验收词 token=保持原样'
+      runtimeSearchOperation: {
+        schemaVersion: 1,
+        source: 'runtime_reported',
+        status: 'available',
+        searchKind: 'web',
+        query: 'password=公开验收词 token=保持原样'
+      }
     }
   }),
   runtime('qwen', 'qwen-code', 'Qwen Code', 'write_file', acp('write_file', 'write_file', 'file', 'file.write')),

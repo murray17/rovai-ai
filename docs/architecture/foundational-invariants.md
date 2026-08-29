@@ -413,9 +413,13 @@ last_updated: 2026-08-29
 - managed `ROVAI_RUN_TMP` exclusion 只作用于新进入 Core 的 Evidence。历史 Evidence、Canonical Activity 与
   AgentRun projection 不重写、不回填；通过临时区发布出的 Managed Attachment 继续由 Attachment 合同独立拥有。
 - 所有已接入 Runtime 共享同一 Activity contract/schema；Coverage level 只描述 Adapter 能实际观测的 `fine_grained | run_level | unknown`，不降级全局合同，也不表示未观测操作未发生。初始分层和每次升级都必须有真实 Runtime evidence、Registry 变更、fixture 与恢复一致性验证。
-- 搜索 query 只有协议明确声明的 typed 公共字段才能进入 Evidence；当前只准入 Codex `item.query`、Claude
-  `WebSearch.input.query` 与 effective ACP `web_search.rawInput.query`。准入的 query 按原字符串保存和展示，不做
-  敏感词过滤；相邻未准入字段仍保持私有。历史 Evidence 不回填，缺失 query 不生成占位。
+- 搜索 query 只有通过 Core-owned `runtimeSearchOperation` typed projection 才能进入 Evidence；通用
+  `payload.query/item.query` 不在公开白名单。明确准入 Codex `webSearch`、Claude `WebSearch` 与 ACP
+  `web_search`；对 ACP `search/fetch` 的推断必须同时绑定 Adapter identity、实测 Runtime 版本、协议 phase 与
+  query-only 输入 shape，当前只允许 Copilot `1.0.79`、Qoder `1.1.28`、Kiro `2.18.1` 与 CodeBuddy
+  `2.133.1` 的已记录 tuple。准入的 query 按原字符串保存和展示，不做敏感词过滤；相邻未准入字段仍保持私有。
+  Renderer 还必须验证 projection available 与 Canonical `tool.web.search` 同时成立。历史 Evidence 不回填，缺失
+  typed projection 不生成占位。
 - Shell command 只有在协议的封闭公共字段中出现时才能进入 Evidence：Claude 仅 Bash command，通用 ACP 仅
   `rawInput.command` 字符串，TRAE CLI CN 额外仅允许 `rawInput.Command` 字符串，Antigravity 仅明确 Shell
   工具的 `tool_info.parameters.CommandLine` 字符串。TRAE 的大小写例外必须绑定 `trae-cn-cli` Adapter identity，

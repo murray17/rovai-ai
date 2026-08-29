@@ -19,7 +19,7 @@ Tool 分组或 Run lifecycle。
 新 operation 使用 `activity-v2`，顶层 `activityDomain` 只产生 `shell | file | tool | runtime | unknown`。
 搜索语义按结构化 kind 明确区分：`file_search → file.search`、`web_search → tool.web.search`、
 `search → tool.search`。Claude Code 的 `Grep` 映射为 `file_search`，`WebSearch` 映射为 `web_search`；
-Antigravity 的 `grep_search | search | web_search` 使用相同三分法。标题、命令正文、Runtime 名称与 provider
+Antigravity 的 `grep_search | search | search_web` 使用相同三分法，并兼容既有 `web_search` 别名。标题、命令正文、Runtime 名称与 provider
 名称都不能参与分类。
 
 Migration 116 只把当前 Data Contract 切换为 `v1.29 / projection schema 70 / activity-v2`，不扫描、删除、
@@ -53,14 +53,24 @@ Tool 行继续使用统一 16px、`currentColor`、单色 SVG 和既有四轨布
 
 ## 4. 公开搜索词
 
-从 v24 部署后，新 Evidence 可以在明确的公开 typed query 字段保存精确搜索词：Codex 使用公开
-`item.query`；Claude Code 只使用 `WebSearch.input.query`；ACP 只在 effective kind 精确为 `web_search`
-时使用 `rawInput.query`。稀疏 terminal update 可以从同 ToolCall 的进程内 started observation 继承该字段。
-Antigravity 当前没有获准的公开 query wire，因此不从私有 parameters 或文本猜测。
+从 v24 部署后，搜索词只通过 Core-owned `runtimeSearchOperation` typed projection 进入新 Evidence：
+`schemaVersion=1 + source=runtime_reported + status=available + searchKind=web + query`。顶层通用
+`payload.query` 与 `item.query` 都不属于公开 Evidence 白名单；Adapter 只能先形成内部 candidate，再由 Core 使用
+冻结的 Adapter identity、协议事件和必要的已验证 Runtime 版本准入。
+
+明确协议身份允许 Codex `item/started | item/completed` 的 `item.type=webSearch + item.query`、Claude
+`assistant.tool_use.WebSearch` 及其 matching `user.tool_result` 的 `input.query`，以及 ACP effective kind 精确为
+`web_search` 的 `rawInput.query`。当前实测的模糊 ACP wire 只在以下冻结组合下允许：Copilot `1.0.79`、Qoder
+`1.1.28`、Kiro `2.18.1` 的 `kind=search + rawInput={query}`，以及 CodeBuddy `2.133.1` terminal
+`kind=fetch + rawInput={query}`；`{query}` 必须是唯一字段。版本缺失、版本改变、相邻字段出现或 tuple 不匹配时，
+candidate 以 unavailable 结算且不保存 query，原始 `search/fetch` 也不升级成 Web 搜索。稀疏 terminal update
+可以从同 ToolCall 的当前 Prompt 观察继承 candidate。Antigravity `1.1.22` 的 Web 工具事件是
+`step_update + step_type=tool + tool_name=search_web`，只获得 Web semantic，不从私有 parameters 或文本猜 query。
 
 搜索词按用户实际输入原样保存和展示，不做敏感词识别、关键词过滤或内容替换；相邻未准入字段仍不进入
-公开 Evidence。展开详情先显示“搜索词”，存在公开结果时再显示“结果”。历史 Evidence 不回填，缺失 query
-时不显示空占位。
+公开 Evidence。Renderer 只有在 projection available 且 Canonical Activity 同时为 `tool.web.search` 时，才在
+展开详情先显示“搜索词”，存在公开结果时再显示“结果”。历史 Evidence 不回填，缺失 typed projection 时不显示
+空占位。
 
 ## 5. 验收
 
@@ -71,6 +81,8 @@ Antigravity 当前没有获准的公开 query wire，因此不从私有 paramete
 - `activity-v1` 历史仍可读取，Migration 116 前后的旧 row bytes 不被重写，新 operation 使用 v2；
 - 七类图标在 Day/Night、底部/Inspector 与 hover/focus 下保持 `currentColor` 和既有四轨尺寸；
 - 搜索词包含 `password`、`token` 等普通字样时仍原样进入新 Evidence 与 disclosure，相邻私有字段不泄露。
+- 普通 `database.execute/vector.lookup/dynamicToolCall.query`、ACP 文件搜索 `{pattern}` / `{path,pattern}` /
+  `{output_mode,path,pattern}` 与未验证新版本都不能生成 available Web 搜索 projection。
 
 ## References
 

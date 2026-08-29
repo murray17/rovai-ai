@@ -7949,7 +7949,8 @@ function ToolCallDetail({
       )
       const fullText = executionEvidenceResultText(
         completeEvidence.eventType,
-        response.payload
+        response.payload,
+        completeEvidence.canonical
       )
       if (fullText === null) {
         throw new Error('证据中没有可展示的公开结果')

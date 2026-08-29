@@ -5488,7 +5488,7 @@ describe('task event projections', () => {
     }))).toBe('unknown')
   })
 
-  it('shows the exact typed Web query without filtering it', () => {
+  it('shows only an admitted typed Web query without filtering it', () => {
     const query = 'password=公开测试词 token=也照常展示'
     const event: LiveRuntimeEvent = {
       id: 'web-search-completed',
@@ -5499,7 +5499,13 @@ describe('task event projections', () => {
         status: 'completed',
         kind: 'web_search',
         toolName: 'WebSearch',
-        query,
+        runtimeSearchOperation: {
+          schemaVersion: 1,
+          source: 'runtime_reported',
+          status: 'available',
+          searchKind: 'web',
+          query
+        },
         output: '找到 3 条结果'
       },
       canonical: canonicalActivity('web-search-1', {
@@ -5520,9 +5526,38 @@ describe('task event projections', () => {
         detail: `搜索词\n${query}\n\n结果\n找到 3 条结果`
       }
     })
-    expect(executionEvidenceResultText('runtime.action', event.payload)).toBe(
+    expect(executionEvidenceResultText('runtime.action', event.payload, event.canonical)).toBe(
       `搜索词\n${query}\n\n结果\n找到 3 条结果`
     )
+
+    expect(executionEvidenceResultText('runtime.action', {
+      toolName: 'database.execute',
+      query: 'SELECT * FROM users',
+      output: '1 row'
+    }, canonicalActivity('database-1', {
+      activityDomain: 'tool', semanticKind: 'tool.call', toolName: 'database.execute'
+    }))).toBe('1 row')
+    expect(executionEvidenceResultText('runtime.action', {
+      runtimeSearchOperation: {
+        schemaVersion: 1,
+        source: 'runtime_reported',
+        status: 'available',
+        searchKind: 'web',
+        query: 'architecture'
+      },
+      output: 'vector result'
+    }, canonicalActivity('vector-1', {
+      activityDomain: 'tool', semanticKind: 'tool.call', toolName: 'vector.lookup'
+    }))).toBe('vector result')
+    expect(executionEvidenceResultText('activity.completed', {
+      item: {
+        type: 'dynamicToolCall',
+        query: 'some provider argument',
+        output: 'done'
+      }
+    }, canonicalActivity('dynamic-1', {
+      activityDomain: 'tool', semanticKind: 'tool.call', toolName: 'dynamic'
+    }))).toBe('done')
   })
 
   it('uses a reliable file-operation path for the Renderer-owned file title', () => {

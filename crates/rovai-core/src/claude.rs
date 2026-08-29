@@ -24,6 +24,7 @@ use rovai_core::{
         RuntimeFailureError, RuntimeFailureOrigin, RuntimeFailurePhase, RuntimeFailureView,
         public_runtime_failure_from_output,
     },
+    runtime_search_operation,
 };
 use serde::Deserialize;
 use serde_json::Value;
@@ -1208,10 +1209,20 @@ fn normalize_claude_runtime_events(
                     "status": if failed { "failed" } else { "completed" },
                     "kind": kind,
                     "title": title,
-                    "query": query,
                     "input": input,
                     "output": output,
                 });
+                let search_operation_candidate = tool_name.as_deref().and_then(|tool_name| {
+                    runtime_search_operation::claude_web_search_candidate(
+                        "assistant.tool_use.WebSearch+user.tool_result",
+                        tool_name,
+                        query.as_deref(),
+                    )
+                });
+                runtime_search_operation::insert_candidate(
+                    &mut payload,
+                    search_operation_candidate,
+                );
                 if reliably_non_error && let Some(exact_mutation) = exact_mutation {
                     payload["runtimeDiff"] = serde_json::json!({
                         "adapterKind": "claude-code-cli",
@@ -1269,21 +1280,32 @@ fn claude_tool_started(
         .insert(tool_use_id.clone(), tool_name.clone());
     let input = state.tool_inputs.get(&tool_use_id).cloned();
     let query = state.tool_queries.get(&tool_use_id).cloned();
-    state
-        .started_tools
-        .insert(tool_use_id.clone())
-        .then(|| ClaudeCodeRuntimeEvent {
+    state.started_tools.insert(tool_use_id.clone()).then(|| {
+        let mut payload = serde_json::json!({
+            "toolCallId": tool_use_id,
+            "toolName": tool_name,
+            "status": "in_progress",
+            "kind": kind,
+            "title": title,
+            "input": input,
+        });
+        let search_operation_candidate =
+            payload
+                .get("toolName")
+                .and_then(Value::as_str)
+                .and_then(|tool_name| {
+                    runtime_search_operation::claude_web_search_candidate(
+                        "assistant.tool_use.WebSearch",
+                        tool_name,
+                        query.as_deref(),
+                    )
+                });
+        runtime_search_operation::insert_candidate(&mut payload, search_operation_candidate);
+        ClaudeCodeRuntimeEvent {
             event_type: "runtime.action",
-            payload: serde_json::json!({
-                "toolCallId": tool_use_id,
-                "toolName": tool_name,
-                "status": "in_progress",
-                "kind": kind,
-                "title": title,
-                "query": query,
-                "input": input,
-            }),
-        })
+            payload,
+        }
+    })
 }
 
 fn public_claude_tool_input(tool_name: &str, input: Option<&Value>) -> Option<Value> {
@@ -1298,7 +1320,7 @@ fn public_claude_tool_input(tool_name: &str, input: Option<&Value>) -> Option<Va
 }
 
 fn public_claude_search_query(tool_name: &str, input: Option<&Value>) -> Option<String> {
-    if !tool_name.eq_ignore_ascii_case("websearch") {
+    if tool_name != "WebSearch" {
         return None;
     }
     input?
@@ -2354,7 +2376,7 @@ exit 1
     }
 
     #[test]
-    fn web_search_keeps_the_exact_public_query_through_a_sparse_result() {
+    fn web_search_keeps_the_exact_typed_candidate_through_a_sparse_result() {
         let session_id = "0bdd2166-d420-40c6-94be-70b93eb290c5";
         let query = "password=公开测试词 token=也照常展示";
         let mut state = ClaudeCodeStreamState::default();
@@ -2374,7 +2396,13 @@ exit 1
         )
         .unwrap();
         assert_eq!(started[0].payload["kind"], "web_search");
-        assert_eq!(started[0].payload["query"], query);
+        assert!(started[0].payload.get("query").is_none());
+        assert_eq!(
+            started[0]
+                .payload
+                .pointer("/runtimeSearchOperationCandidate/query"),
+            Some(&json!(query))
+        );
         assert!(started[0].payload["input"].is_null());
         assert!(
             !serde_json::to_string(&started[0].payload)
@@ -2397,7 +2425,13 @@ exit 1
         )
         .unwrap();
         assert_eq!(completed[0].payload["kind"], "web_search");
-        assert_eq!(completed[0].payload["query"], query);
+        assert!(completed[0].payload.get("query").is_none());
+        assert_eq!(
+            completed[0]
+                .payload
+                .pointer("/runtimeSearchOperationCandidate/query"),
+            Some(&json!(query))
+        );
     }
 
     #[test]

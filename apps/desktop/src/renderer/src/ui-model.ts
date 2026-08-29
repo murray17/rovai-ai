@@ -450,7 +450,7 @@ export function buildLiveExecutionProgress(
           ?? runtimeToolDetail(item, nativeType)
           ?? nativeStatus
           ?? ''
-      const detail = searchEvidenceText(typedSearchQuery(payload), evidenceDetail) ?? ''
+      const detail = searchEvidenceText(typedSearchQuery(payload, canonical), evidenceDetail) ?? ''
       if (shouldDeferUnresolvedShellActivity(canonical, title, status)) continue
       upsertStep({
         id: itemId,
@@ -482,7 +482,7 @@ export function buildLiveExecutionProgress(
       upsertStep({
         id: itemId,
         title,
-        detail: runtimeActionEvidenceText(payload) ?? '',
+        detail: runtimeActionEvidenceText(payload, canonical) ?? '',
         status,
         activityDomain: canonical?.activityDomain ?? 'unknown',
         iconKind: activityIconKind(canonical),
@@ -679,7 +679,10 @@ function fullEvidenceValue(value: unknown): string | null {
   return JSON.stringify(value, null, 2) ?? String(value)
 }
 
-function runtimeActionEvidenceText(payload: Record<string, unknown>): string | null {
+function runtimeActionEvidenceText(
+  payload: Record<string, unknown>,
+  canonical: CanonicalRuntimeActivityView | null | undefined
+): string | null {
   let evidenceText: string | null = null
   const coreOwnedBuiltIn = stringField(payload, 'sourceAuthority') === 'core'
     && stringField(payload, 'canonicalTool') !== null
@@ -705,13 +708,26 @@ function runtimeActionEvidenceText(payload: Record<string, unknown>): string | n
       ? shellCommandDetail(commandDetail, output)
       : output ?? fullEvidenceValue(payload.input)
   }
-  return searchEvidenceText(typedSearchQuery(payload), evidenceText)
+  return searchEvidenceText(typedSearchQuery(payload, canonical), evidenceText)
 }
 
-function typedSearchQuery(payload: unknown): string | null {
-  const root = asRecord(payload)
-  const query = stringField(root, 'query') ?? stringField(asRecord(root.item), 'query')
-  return query !== null && query.length > 0 ? query : null
+function typedSearchQuery(
+  payload: unknown,
+  canonical: CanonicalRuntimeActivityView | null | undefined
+): string | null {
+  if (
+    canonical?.activityDomain !== 'tool'
+    || canonical.semanticKind !== 'tool.web.search'
+  ) return null
+  const operation = asRecord(asRecord(payload).runtimeSearchOperation)
+  if (
+    numberField(operation, 'schemaVersion') !== 1
+    || stringField(operation, 'source') !== 'runtime_reported'
+    || stringField(operation, 'status') !== 'available'
+    || stringField(operation, 'searchKind') !== 'web'
+  ) return null
+  const query = stringField(operation, 'query')
+  return query !== null && query.trim().length > 0 ? query : null
 }
 
 function searchEvidenceText(query: string | null, evidenceText: string | null): string | null {
@@ -731,7 +747,8 @@ function runtimeActionShellCommand(payload: Record<string, unknown>): string | n
 
 export function executionEvidenceResultText(
   eventType: AgentRunExecutionEvidenceView['eventType'],
-  payloadValue: unknown
+  payloadValue: unknown,
+  canonical?: CanonicalRuntimeActivityView | null
 ): string | null {
   const payload = asRecord(payloadValue)
   if (eventType === 'activity.started' || eventType === 'activity.completed') {
@@ -744,10 +761,10 @@ export function executionEvidenceResultText(
       ?? fullEvidenceValue(item.changes)
       ?? runtimeToolDetail(item, stringField(item, 'type') ?? 'activity')
       ?? stringField(item, 'status')
-    return searchEvidenceText(typedSearchQuery(payload), evidenceText)
+    return searchEvidenceText(typedSearchQuery(payload, canonical), evidenceText)
   }
   if (eventType === 'runtime.action') {
-    return runtimeActionEvidenceText(payload)
+    return runtimeActionEvidenceText(payload, canonical)
   }
   if (eventType === 'command.output.delta') {
     return fullEvidenceValue(payload.delta ?? payload.output)
@@ -782,8 +799,7 @@ function runtimeToolDetail(item: Record<string, unknown>, nativeType: string): s
   }
   if (nativeType === 'dynamicToolCall') return stringField(item, 'tool')
   if (nativeType === 'collabAgentToolCall') return stringField(item, 'tool')
-  const query = stringField(item, 'query')
-  return query
+  return null
 }
 
 function canonicalRuntimeActivity(value: unknown): CanonicalRuntimeActivityView | null {

@@ -108,8 +108,10 @@ last_updated: 2026-08-29
   Shell command、可靠 `修改 <basename>`、“Web 搜索”和中文 fallback；
 - [x] 类型图标收敛为 Terminal/File/Web/Tool/Rovai/Runtime/Unknown；Rovai 四向星+地平线只绑定
   Core Catalog identity，字面 Shell `rovai ...` 保持 Terminal；
-- [x] Codex `item.query`、Claude `WebSearch.input.query` 与 effective ACP `web_search.rawInput.query` 从部署后
-  原样进入 Evidence/详情，不做敏感词过滤；Antigravity 无公开 query wire 时不猜测。
+- [x] 搜索词只通过 available `runtimeSearchOperation` 进入 Evidence/详情：Codex `webSearch`、Claude
+  `WebSearch`、ACP `web_search` 按明确身份准入；Copilot/Qoder/Kiro/CodeBuddy 的模糊 ACP wire 绑定本次实测
+  版本与 query-only shape。任意顶层 `query`、ACP 文件搜索 shape 和未验证版本 fail closed；query 不做敏感词
+  过滤；Antigravity `search_web` 只分类、不猜 query。
 
 ## 7. 自动化验证
 
@@ -119,8 +121,8 @@ last_updated: 2026-08-29
   whole-turn snapshot ingress、projector `no_changes` 和同名前缀目录；Windows target fixture 覆盖 drive/root ASCII
   大小写与分隔符语义；
 - [x] TypeScript typecheck 通过；
-- [x] `activity-v2` mapping、v1 live-operation compatibility、Migration 116 history preservation、Claude/ACP query、
-  Antigravity search kind 与 Renderer title/icon/query 定向 fixture 通过；
+- [x] `activity-v2` mapping、v1 live-operation compatibility、Migration 116 history preservation、类型化 Search
+  Operation allowlist、Antigravity `search_web` 与 Renderer title/icon/query 双门槛定向 fixture 通过；
 - [x] Navigation coordinator 8/8 与 App event routing 2/2 回归通过；隔离 App 已验证 post-commit invalidation、
   后台 Run marker 收敛、隐藏暂停、focus 补读与 20 秒安全轮询；
 - [x] `cargo test -p rovai-core` 的 lib、`rovai-core` binary 与 `rovai` binary 全量通过；
