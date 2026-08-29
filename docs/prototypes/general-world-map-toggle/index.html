@@ -302,7 +302,7 @@
     .quiet-button:hover { border-color: var(--control-line); background: var(--surface-hover); }
     .quiet-button svg { width: 14px; height: 14px; }
 
-    .general-configurator { overflow: hidden; padding-bottom: 8px; border-radius: 12px; background: var(--workspace-surface-subtle); }
+    .general-configurator { overflow: visible; padding-bottom: 8px; border-radius: 12px; background: var(--workspace-surface-subtle); }
     .general-config-head { display: flex; min-height: 54px; align-items: center; justify-content: space-between; gap: 14px; padding: 10px 13px; }
     .general-config-head h3 { margin: 0; color: var(--ink); font-size: 12px; font-weight: 620; }
     .general-config-head p { margin: 3px 0 0; color: var(--muted); font-size: 10.5px; line-height: 1.45; }
@@ -318,11 +318,33 @@
     .general-default-member small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .general-default-member strong { color: var(--ink); font-size: 11px; }
     .general-default-member small { color: var(--faint); font-size: 9.5px; }
-    .general-default-lead { display: grid; grid-template-columns: minmax(0, 1fr) minmax(188px, 236px); gap: 14px; align-items: center; margin: 0 8px 8px; padding: 11px 12px; border-radius: 9px; color: var(--muted); background: var(--workspace-surface-raised); }
+    .general-default-lead { position: relative; display: grid; grid-template-columns: minmax(0, 1fr) minmax(188px, 236px); gap: 14px; align-items: center; margin: 0 8px 8px; padding: 11px 12px; border-radius: 9px; color: var(--muted); background: var(--workspace-surface-raised); }
+    .general-default-lead.is-open { z-index: 40; }
     .general-default-lead > span { display: grid; gap: 2px; }
     .general-default-lead strong { color: var(--ink); font-size: 11px; font-weight: 620; }
     .general-default-lead small { color: var(--muted); font-size: 10px; font-weight: 400; }
-    .general-default-lead select { height: 36px; padding: 0 9px; border: 1px solid var(--workspace-line-strong); border-radius: 8px; color: var(--ink); background: var(--surface); font-size: 11px; }
+    .leader-picker { position: relative; min-width: 0; }
+    .leader-trigger { display: grid; width: 100%; min-height: 44px; grid-template-columns: 30px minmax(0, 1fr) 16px; align-items: center; gap: 9px; padding: 5px 9px; border: 1px solid var(--workspace-line-strong); border-radius: 8px; color: var(--ink); background: var(--surface); cursor: pointer; text-align: left; }
+    .leader-trigger:hover:not(:disabled),
+    .leader-trigger[aria-expanded="true"] { border-color: var(--control-line); background: var(--surface-hover); }
+    .leader-trigger:disabled { cursor: not-allowed; }
+    .leader-trigger .member-avatar-mini { width: 30px; height: 30px; }
+    .leader-selection { display: grid; min-width: 0; gap: 2px; }
+    .leader-selection strong,
+    .leader-selection small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .leader-selection small { color: var(--faint); font-size: 9.5px; }
+    .leader-chevron { width: 15px; height: 15px; color: var(--muted); transition: transform 140ms ease; }
+    .leader-trigger[aria-expanded="true"] .leader-chevron { transform: rotate(180deg); }
+    .leader-menu { position: absolute; z-index: 45; top: calc(100% + 6px); right: 0; left: 0; display: grid; gap: 3px; padding: 5px; border: 1px solid var(--workspace-line-strong); border-radius: 9px; background: var(--surface-raised); box-shadow: var(--shadow-menu); }
+    .leader-option { display: grid; min-width: 0; min-height: 46px; grid-template-columns: 30px minmax(0, 1fr) 16px; align-items: center; gap: 9px; padding: 6px 8px; border-radius: 7px; cursor: pointer; }
+    .leader-option:hover,
+    .leader-option.is-active { color: var(--workspace-steel-ink); background: var(--workspace-surface-selected); }
+    .leader-option > span { display: grid; min-width: 0; gap: 2px; }
+    .leader-option strong,
+    .leader-option small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .leader-option small { color: var(--faint); font-size: 9.5px; }
+    .leader-option-check { width: 15px; height: 15px; color: var(--brand-ink); opacity: 0; }
+    .leader-option[aria-selected="true"] .leader-option-check { opacity: 1; }
     .general-save-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin: 0 8px 4px; padding: 9px 4px 5px; }
     .general-draft-state { color: var(--muted); font-size: 10.5px; line-height: 1.5; }
     .primary-button { display: inline-flex; min-height: 32px; align-items: center; justify-content: center; padding: 5px 10px; border: 1px solid var(--brand); border-radius: 6px; color: var(--brand-contrast); background: var(--brand); cursor: pointer; font-size: 10px; font-weight: 650; }
@@ -469,7 +491,7 @@
       *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
     }
     @media (forced-colors: active) {
-      .switch-track, .view-switcher, .map-disabled-popover, .quiet-button, .composer-box { border: 1px solid ButtonText; }
+      .switch-track, .view-switcher, .map-disabled-popover, .quiet-button, .composer-box, .leader-trigger, .leader-menu { border: 1px solid ButtonText; }
       .switch-control input:checked + .switch-track { background: Highlight; }
       .settings-menu button.active::before, .project-row.active::before { background: Highlight; }
     }
@@ -499,6 +521,7 @@
     <symbol id="icon-chat" viewBox="0 0 24 24"><path d="M4 5h16v11H9l-5 4Z" /></symbol>
     <symbol id="icon-lock" viewBox="0 0 24 24"><rect x="5" y="10" width="14" height="10" rx="2" /><path d="M8 10V7a4 4 0 0 1 8 0v3" /></symbol>
     <symbol id="icon-check" viewBox="0 0 24 24"><path d="m5 12 4 4L19 6" /></symbol>
+    <symbol id="icon-chevron-down" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6" /></symbol>
     <symbol id="icon-arrow" viewBox="0 0 24 24"><path d="M5 12h14m-5-5 5 5-5 5" /></symbol>
     <symbol id="icon-reset" viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 3-6.7L3 8" /><path d="M3 3v5h5" /></symbol>
     <symbol id="icon-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14" /></symbol>
@@ -592,19 +615,22 @@
                         <span id="selected-member-count">已选 3 位</span>
                       </div>
                       <div class="general-default-member-list" role="group" aria-label="默认队员">
-                        <label class="general-default-member" style="--member-color: var(--identity-1)"><input class="default-member-checkbox" type="checkbox" checked><i class="member-avatar-mini">芝</i><span><strong>芝士</strong><small>鉴定士</small></span></label>
-                        <label class="general-default-member" style="--member-color: var(--identity-2)"><input class="default-member-checkbox" type="checkbox" checked><i class="member-avatar-mini">叮</i><span><strong>叮叮</strong><small>游学者</small></span></label>
-                        <label class="general-default-member" style="--member-color: var(--identity-3)"><input class="default-member-checkbox" type="checkbox" checked><i class="member-avatar-mini">咕</i><span><strong>咕咕</strong><small>巡夜人</small></span></label>
-                        <label class="general-default-member" style="--member-color: var(--identity-4)"><input class="default-member-checkbox" type="checkbox"><i class="member-avatar-mini">兔</i><span><strong>小兔</strong><small>绘图师</small></span></label>
+                        <label class="general-default-member" data-member-id="zhi" data-member-name="芝士" data-member-role="鉴定士" style="--member-color: var(--identity-1)"><input class="default-member-checkbox" type="checkbox" checked><i class="member-avatar-mini">芝</i><span><strong>芝士</strong><small>鉴定士</small></span></label>
+                        <label class="general-default-member" data-member-id="ding" data-member-name="叮叮" data-member-role="游学者" style="--member-color: var(--identity-2)"><input class="default-member-checkbox" type="checkbox" checked><i class="member-avatar-mini">叮</i><span><strong>叮叮</strong><small>游学者</small></span></label>
+                        <label class="general-default-member" data-member-id="gu" data-member-name="咕咕" data-member-role="巡夜人" style="--member-color: var(--identity-3)"><input class="default-member-checkbox" type="checkbox" checked><i class="member-avatar-mini">咕</i><span><strong>咕咕</strong><small>巡夜人</small></span></label>
+                        <label class="general-default-member" data-member-id="tu" data-member-name="小兔" data-member-role="绘图师" style="--member-color: var(--identity-4)"><input class="default-member-checkbox" type="checkbox"><i class="member-avatar-mini">兔</i><span><strong>小兔</strong><small>绘图师</small></span></label>
                       </div>
-                      <label class="general-default-lead">
-                        <span><strong>默认队长</strong><small>队长必须是已选择的默认队员。</small></span>
-                        <select id="default-lead" aria-label="默认队长">
-                          <option>芝士</option>
-                          <option selected>叮叮</option>
-                          <option>咕咕</option>
-                        </select>
-                      </label>
+                      <div class="general-default-lead" id="default-lead-field">
+                        <span><strong id="default-lead-label">默认队长</strong><small id="default-lead-hint">队长必须是已选择的默认队员。</small></span>
+                        <div class="leader-picker" id="default-lead-picker">
+                          <button class="leader-trigger" id="default-lead" type="button" role="combobox" aria-haspopup="listbox" aria-controls="default-lead-listbox" aria-expanded="false" aria-labelledby="default-lead-label default-lead-name" aria-describedby="default-lead-hint">
+                            <i class="member-avatar-mini" id="default-lead-avatar" style="--member-color: var(--identity-2)">叮</i>
+                            <span class="leader-selection"><strong id="default-lead-name">叮叮</strong><small id="default-lead-role">游学者</small></span>
+                            <svg class="icon leader-chevron" aria-hidden="true"><use href="#icon-chevron-down" /></svg>
+                          </button>
+                          <div class="leader-menu" id="default-lead-listbox" role="listbox" aria-label="可选默认队长" hidden></div>
+                        </div>
+                      </div>
                       <div class="general-save-row">
                         <span class="general-draft-state" id="default-draft-state" role="status">默认配置已保存。</span>
                         <button class="primary-button" id="save-defaults" type="button" disabled>保存默认配置</button>
@@ -756,7 +782,13 @@
     const prototypeSummary = document.getElementById('prototype-summary')
     const defaultMemberCheckboxes = [...document.querySelectorAll('.default-member-checkbox')]
     const selectedMemberCount = document.getElementById('selected-member-count')
+    const defaultLeadField = document.getElementById('default-lead-field')
+    const defaultLeadPicker = document.getElementById('default-lead-picker')
     const defaultLead = document.getElementById('default-lead')
+    const defaultLeadListbox = document.getElementById('default-lead-listbox')
+    const defaultLeadAvatar = document.getElementById('default-lead-avatar')
+    const defaultLeadName = document.getElementById('default-lead-name')
+    const defaultLeadRole = document.getElementById('default-lead-role')
     const defaultDraftState = document.getElementById('default-draft-state')
     const saveDefaultsButton = document.getElementById('save-defaults')
     const oneClickSwitch = document.getElementById('one-click-enabled')
@@ -768,12 +800,26 @@
     const toast = document.getElementById('toast')
     const announcement = document.getElementById('announcement')
     const themeToggle = document.getElementById('theme-toggle')
+    const defaultMembers = defaultMemberCheckboxes.map(checkbox => {
+      const item = checkbox.closest('.general-default-member')
+      return {
+        id: item.dataset.memberId,
+        name: item.dataset.memberName,
+        role: item.dataset.memberRole,
+        avatar: item.querySelector('.member-avatar-mini').textContent.trim(),
+        color: item.style.getPropertyValue('--member-color').trim(),
+        checkbox
+      }
+    })
 
     const state = {
       productView: 'settings',
       mapEnabled: true,
       conversationView: 'conversation',
       theme: 'day',
+      defaultLeadId: 'ding',
+      leadMenuOpen: false,
+      activeLeadIndex: 0,
       saveTimer: null,
       defaultsTimer: null,
       toastTimer: null
@@ -872,6 +918,165 @@
       themeToggle.innerHTML = `<svg class="icon" aria-hidden="true"><use href="#icon-${night ? 'sun' : 'moon'}" /></svg><span>${night ? '日间' : '夜间'}</span>`
     }
 
+    function selectedDefaultMembers() {
+      return defaultMembers.filter(member => member.checkbox.checked)
+    }
+
+    function createLeadOption(member) {
+      const option = document.createElement('div')
+      option.className = 'leader-option'
+      option.id = `default-lead-option-${member.id}`
+      option.dataset.memberId = member.id
+      option.setAttribute('role', 'option')
+      option.setAttribute('aria-selected', String(member.id === state.defaultLeadId))
+
+      const avatar = document.createElement('i')
+      avatar.className = 'member-avatar-mini'
+      avatar.style.setProperty('--member-color', member.color)
+      avatar.textContent = member.avatar
+
+      const copy = document.createElement('span')
+      const name = document.createElement('strong')
+      const role = document.createElement('small')
+      name.textContent = member.name
+      role.textContent = member.role
+      copy.append(name, role)
+
+      const check = document.createElementNS('http://www.w3.org/2000/svg', 'svg')
+      const use = document.createElementNS('http://www.w3.org/2000/svg', 'use')
+      check.setAttribute('class', 'icon leader-option-check')
+      check.setAttribute('aria-hidden', 'true')
+      use.setAttribute('href', '#icon-check')
+      check.append(use)
+      option.append(avatar, copy, check)
+      return option
+    }
+
+    function updateLeadTrigger(member) {
+      defaultLead.disabled = !member
+      defaultLeadAvatar.textContent = member ? member.avatar : '—'
+      defaultLeadAvatar.style.setProperty('--member-color', member ? member.color : 'var(--faint)')
+      defaultLeadName.textContent = member ? member.name : '请选择默认队长'
+      defaultLeadRole.textContent = member ? member.role : '先选择默认队员'
+    }
+
+    function leadOptions() {
+      return [...defaultLeadListbox.querySelectorAll('.leader-option')]
+    }
+
+    function setActiveLeadIndex(index) {
+      const options = leadOptions()
+      if (options.length === 0) {
+        defaultLead.removeAttribute('aria-activedescendant')
+        return
+      }
+      const nextIndex = Math.max(0, Math.min(index, options.length - 1))
+      state.activeLeadIndex = nextIndex
+      options.forEach((option, optionIndex) => option.classList.toggle('is-active', optionIndex === nextIndex))
+      defaultLead.setAttribute('aria-activedescendant', options[nextIndex].id)
+      options[nextIndex].scrollIntoView({ block: 'nearest' })
+    }
+
+    function closeLeadMenu(restoreFocus = false) {
+      state.leadMenuOpen = false
+      defaultLeadListbox.hidden = true
+      defaultLeadField.classList.remove('is-open')
+      defaultLead.setAttribute('aria-expanded', 'false')
+      defaultLead.removeAttribute('aria-activedescendant')
+      if (restoreFocus && !defaultLead.disabled) defaultLead.focus({ preventScroll: true })
+    }
+
+    function syncLeadCandidates(announceFallback = false) {
+      const candidates = selectedDefaultMembers()
+      const previousLeadId = state.defaultLeadId
+      if (!candidates.some(member => member.id === state.defaultLeadId)) {
+        state.defaultLeadId = candidates[0]?.id ?? null
+      }
+
+      const selectedLead = candidates.find(member => member.id === state.defaultLeadId) ?? null
+      updateLeadTrigger(selectedLead)
+      defaultLeadListbox.replaceChildren(...candidates.map(createLeadOption))
+
+      if (candidates.length === 0) {
+        closeLeadMenu()
+      } else if (state.leadMenuOpen) {
+        const selectedIndex = candidates.findIndex(member => member.id === state.defaultLeadId)
+        setActiveLeadIndex(Math.max(0, selectedIndex))
+      }
+
+      if (announceFallback && previousLeadId !== state.defaultLeadId) {
+        announcement.textContent = selectedLead
+          ? `当前队长已取消选择，默认队长自动改为${selectedLead.name}。`
+          : '已取消所有默认队员，默认队长暂未设置。'
+      }
+    }
+
+    function openLeadMenu() {
+      const options = leadOptions()
+      if (defaultLead.disabled || options.length === 0) return
+      state.leadMenuOpen = true
+      defaultLeadListbox.hidden = false
+      defaultLeadField.classList.add('is-open')
+      defaultLead.setAttribute('aria-expanded', 'true')
+      const selectedIndex = options.findIndex(option => option.getAttribute('aria-selected') === 'true')
+      setActiveLeadIndex(Math.max(0, selectedIndex))
+    }
+
+    function moveActiveLead(delta) {
+      const options = leadOptions()
+      if (options.length === 0) return
+      const nextIndex = (state.activeLeadIndex + delta + options.length) % options.length
+      setActiveLeadIndex(nextIndex)
+    }
+
+    function selectDefaultLead(memberId) {
+      const member = selectedDefaultMembers().find(candidate => candidate.id === memberId)
+      if (!member) return
+      const changed = state.defaultLeadId !== memberId
+      state.defaultLeadId = memberId
+      syncLeadCandidates()
+      closeLeadMenu(true)
+      if (changed) {
+        markDefaultsDirty()
+        announcement.textContent = `默认队长已改为${member.name}。`
+      }
+    }
+
+    function handleLeadKeydown(event) {
+      if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+        event.preventDefault()
+        if (!state.leadMenuOpen) openLeadMenu()
+        else moveActiveLead(event.key === 'ArrowDown' ? 1 : -1)
+        return
+      }
+      if (state.leadMenuOpen && (event.key === 'Home' || event.key === 'End')) {
+        event.preventDefault()
+        setActiveLeadIndex(event.key === 'Home' ? 0 : leadOptions().length - 1)
+        return
+      }
+      if (event.key === 'Enter' || event.key === ' ') {
+        event.preventDefault()
+        if (state.leadMenuOpen) {
+          const option = leadOptions()[state.activeLeadIndex]
+          if (option) selectDefaultLead(option.dataset.memberId)
+        } else {
+          openLeadMenu()
+        }
+        return
+      }
+      if (event.key === 'Escape' && state.leadMenuOpen) {
+        event.preventDefault()
+        closeLeadMenu(true)
+      } else if (event.key === 'Tab' && state.leadMenuOpen) {
+        closeLeadMenu()
+      }
+    }
+
+    function handleDefaultMemberChange() {
+      syncLeadCandidates(true)
+      markDefaultsDirty()
+    }
+
     function markDefaultsDirty() {
       const selectedCount = defaultMemberCheckboxes.filter(checkbox => checkbox.checked).length
       selectedMemberCount.textContent = selectedCount > 0 ? `已选 ${selectedCount} 位` : '尚未配置'
@@ -906,7 +1111,8 @@
       saveState.textContent = '当前设置已保存'
       defaultMemberCheckboxes.forEach((checkbox, index) => { checkbox.checked = index < 3 })
       selectedMemberCount.textContent = '已选 3 位'
-      defaultLead.value = '叮叮'
+      state.defaultLeadId = 'ding'
+      syncLeadCandidates()
       defaultDraftState.textContent = '默认配置已保存。'
       saveDefaultsButton.disabled = true
       saveDefaultsButton.textContent = '保存默认配置'
@@ -926,24 +1132,38 @@
     document.getElementById('reset-prototype').addEventListener('click', resetPrototype)
     themeToggle.addEventListener('click', () => setTheme(state.theme === 'day' ? 'night' : 'day'))
     mapSwitch.addEventListener('change', event => saveMapPreference(event.currentTarget.checked))
-    defaultMemberCheckboxes.forEach(checkbox => checkbox.addEventListener('change', markDefaultsDirty))
-    defaultLead.addEventListener('change', markDefaultsDirty)
+    defaultMemberCheckboxes.forEach(checkbox => checkbox.addEventListener('change', handleDefaultMemberChange))
+    defaultLead.addEventListener('click', () => state.leadMenuOpen ? closeLeadMenu() : openLeadMenu())
+    defaultLead.addEventListener('keydown', handleLeadKeydown)
+    defaultLeadListbox.addEventListener('pointermove', event => {
+      const option = event.target.closest('.leader-option')
+      if (option && defaultLeadListbox.contains(option)) setActiveLeadIndex(leadOptions().indexOf(option))
+    })
+    defaultLeadListbox.addEventListener('click', event => {
+      const option = event.target.closest('.leader-option')
+      if (option && defaultLeadListbox.contains(option)) selectDefaultLead(option.dataset.memberId)
+    })
     saveDefaultsButton.addEventListener('click', saveDefaults)
     oneClickSwitch.addEventListener('change', () => showToast(oneClickSwitch.checked ? '一键创建新对话已开启。' : '一键创建新对话已关闭。'))
     conversationButton.addEventListener('click', () => setConversationView('conversation'))
     mapButton.addEventListener('click', () => setConversationView('world'))
 
     document.addEventListener('keydown', event => {
+      if (event.key === 'Escape' && state.leadMenuOpen) {
+        closeLeadMenu(true)
+        return
+      }
       if (event.key === 'Escape' && !disabledPopover.hidden) {
         closeMapNotice()
         mapButton.focus({ preventScroll: true })
       }
     })
     document.addEventListener('pointerdown', event => {
-      if (disabledPopover.hidden) return
-      if (!disabledPopover.contains(event.target) && !mapButton.contains(event.target)) closeMapNotice()
+      if (state.leadMenuOpen && !defaultLeadPicker.contains(event.target)) closeLeadMenu()
+      if (!disabledPopover.hidden && !disabledPopover.contains(event.target) && !mapButton.contains(event.target)) closeMapNotice()
     })
 
+    syncLeadCandidates()
     renderAvailability()
     setConversationView('conversation')
   </script>
