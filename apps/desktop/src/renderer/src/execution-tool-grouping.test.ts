@@ -89,6 +89,31 @@ describe('execution Tool grouping', () => {
     })
   })
 
+  it('counts a Web search in the same operation group as other Tools', () => {
+    const webSearch = tool('web-search')
+    webSearch.step.title = 'Web 搜索'
+    webSearch.step.activityDomain = 'tool'
+    webSearch.step.iconKind = 'web'
+    webSearch.step.toolName = 'WebSearch'
+
+    const grouped = groupConsecutiveToolItems([tool('command'), webSearch])
+
+    expect(grouped).toMatchObject([{
+      kind: 'toolGroup',
+      items: [
+        { step: { id: 'command', iconKind: 'terminal' } },
+        { step: { id: 'web-search', title: 'Web 搜索', iconKind: 'web' } }
+      ]
+    }])
+    expect(toolActivityGroupPresentation(
+      grouped[0].kind === 'toolGroup' ? grouped[0].items : [],
+      'succeeded'
+    )).toMatchObject({
+      primary: '已执行 2 项操作',
+      accessibleLabel: '已执行 2 项操作；状态：全部成功'
+    })
+  })
+
   it('shows only the last active Tool while an operation is in progress', () => {
     const presentation = toolActivityGroupPresentation([
       tool('one'),

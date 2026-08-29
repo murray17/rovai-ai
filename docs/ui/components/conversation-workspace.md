@@ -300,8 +300,10 @@ disclosure 继续在原位渲染完整公开结果，不再截断，不再提供
 “重试”都留在该 disclosure，重试成功后焦点进入结果区域。全文置于固定最大高度的可聚焦
 `role=region` 中，超出后内部滚动；Arrow、Page Up/Down、Space、Home/End 可滚动，Escape 只返回
 对应 summary。Web 搜索 disclosure 只有在 `runtimeSearchOperation.status=available` 且 Canonical semantic 同时为
-`tool.web.search` 时，才先显示 typed 公共“搜索词”，有公开结果时再显示“结果”；query 原样展示，不做敏感词
-过滤，历史 Evidence 缺失 typed projection 时不显示空占位。底部和 Inspector 复用同一行为。仍不显示
+`tool.web.search` 时，才在第一行直接显示 typed 公共 query，不增加“搜索词”标签；多项 query 以中文逗号按原
+顺序连接，有公开结果时再显示“结果”。query 原样展示，不做敏感词过滤或去重，历史 Evidence 缺失 typed
+projection 时不显示空占位。Web 搜索仍是 Tool item，计入所在连续组的“已执行 N 项操作”，组内使用 Web 图标；
+底部和 Inspector 复用同一行为。仍不显示
 standalone raw Evidence、Envelope JSON 或独立
 “查看完整工具调用”。精确合同见
 [Run Process Detail Surface v24](../../contracts/run-process-detail-surface-v24.md)。

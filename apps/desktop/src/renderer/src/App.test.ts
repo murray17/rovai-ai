@@ -5488,8 +5488,9 @@ describe('task event projections', () => {
     }))).toBe('unknown')
   })
 
-  it('shows only an admitted typed Web query without filtering it', () => {
+  it('shows admitted typed Web queries directly and joins multiple queries', () => {
     const query = 'password=公开测试词 token=也照常展示'
+    const queries = [query, '第二个搜索词']
     const event: LiveRuntimeEvent = {
       id: 'web-search-completed',
       agentRunId: 'run-search',
@@ -5504,7 +5505,8 @@ describe('task event projections', () => {
           source: 'runtime_reported',
           status: 'available',
           searchKind: 'web',
-          query
+          query,
+          queries
         },
         output: '找到 3 条结果'
       },
@@ -5523,16 +5525,40 @@ describe('task event projections', () => {
       step: {
         title: 'Web 搜索',
         iconKind: 'web',
-        detail: `搜索词\n${query}\n\n结果\n找到 3 条结果`
+        detail: `${queries.join('，')}\n\n结果\n找到 3 条结果`
       }
     })
     expect(executionEvidenceResultText('runtime.action', event.payload, event.canonical)).toBe(
-      `搜索词\n${query}\n\n结果\n找到 3 条结果`
+      `${queries.join('，')}\n\n结果\n找到 3 条结果`
     )
+    expect(executionEvidenceResultText('runtime.action', {
+      runtimeSearchOperation: {
+        schemaVersion: 1,
+        source: 'runtime_reported',
+        status: 'available',
+        searchKind: 'web',
+        query
+      },
+      output: 'single result'
+    }, event.canonical)).toBe(
+      `${query}\n\n结果\nsingle result`
+    )
+    expect(executionEvidenceResultText('runtime.action', {
+      runtimeSearchOperation: {
+        schemaVersion: 1,
+        source: 'runtime_reported',
+        status: 'available',
+        searchKind: 'web',
+        query,
+        queries: [query, 42]
+      },
+      output: 'malformed projection result'
+    }, event.canonical)).toBe('malformed projection result')
 
     expect(executionEvidenceResultText('runtime.action', {
       toolName: 'database.execute',
       query: 'SELECT * FROM users',
+      queries: ['SELECT * FROM users', 'DELETE FROM users'],
       output: '1 row'
     }, canonicalActivity('database-1', {
       activityDomain: 'tool', semanticKind: 'tool.call', toolName: 'database.execute'

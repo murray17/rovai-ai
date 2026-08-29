@@ -84,7 +84,8 @@ last_updated: 2026-08-29
   semantic kind；已有 v1 operation 继续用 v1 结算，Read Side 双读 v2/v1，历史不回填；
 - Renderer 统一拥有中文标题与 Terminal/File/Web/Tool/Rovai/Runtime/Unknown 七类图标；Rovai 图标只认 Core
   Catalog identity，不认标题或 Shell `rovai` 文本；搜索词只从 available `runtimeSearchOperation` 与 Canonical
-  Web identity 的交集展示，不按任意 `query` 字段升级，不做敏感词过滤。
+  Web identity 的交集展示，不按任意 `query` 字段升级，不做敏感词过滤；单项直接显示，多项以 `query` 保留首项、
+  `queries` 保留顺序并用中文逗号展示，Web 搜索计入连续 Tool 组操作数。
 
 ## 明确不做
 
@@ -121,8 +122,8 @@ generation、reconciliation 与文件变化 projection 都不进入模型上下�
 - detail 读取强制 Camp 归属、Run、epoch 与 blob identity；Managed Blob GC 保留 active projection root；
 - 当前数据库不存在 workspace change tables，Core 启动、Run claim/cancel/terminal 不执行 Git capture；
 - Migration 116 不改写 v1 Canonical row；新 operation 使用 v2，升级前已开始的 operation 仍在 v1 结算；
-- Web/file/generic search 分类、精确 query、Renderer 中文标题与七类图标 fixture 通过；字面 Shell `rovai ...`
-  保持 Terminal，Core-verified `camp.read` 使用 Rovai 图标；
+- Web/file/generic search 分类、精确单项/多项 query、无标签直接展示、Tool 组计数、Renderer 中文标题与七类图标
+  fixture 通过；字面 Shell `rovai ...` 保持 Terminal，Core-verified `camp.read` 使用 Rovai 图标；
 - Renderer 保留现有会话连接轨、执行台形态和 Tool 横条，仅增加明确的 Command rows 与 Run timeline card；
 - 动态 membership、Managed Attachment v2 与 ACP Client FS/Terminal 既有验收继续通过；
 - 修复后的 Kimi Code `0.38.0`、Qoder `1.1.28`、Kiro `2.18.1`、Codex、Claude 及其他可用 Runtime 真实 App

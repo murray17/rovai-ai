@@ -417,8 +417,10 @@ last_updated: 2026-08-29
   `payload.query/item.query` 不在公开白名单。明确准入 Codex `webSearch`、Claude `WebSearch` 与 ACP
   `web_search`；对 ACP `search/fetch` 的推断必须同时绑定 Adapter identity、实测 Runtime 版本、协议 phase 与
   query-only 输入 shape，当前只允许 Copilot `1.0.79`、Qoder `1.1.28`、Kiro `2.18.1` 与 CodeBuddy
-  `2.133.1` 的已记录 tuple。准入的 query 按原字符串保存和展示，不做敏感词过滤；相邻未准入字段仍保持私有。
-  Renderer 还必须验证 projection available 与 Canonical `tool.web.search` 同时成立。历史 Evidence 不回填，缺失
+  `2.133.1` 的已记录 tuple。准入值只能是单个非空字符串或元素全为非空字符串的非空数组；多项 projection 以
+  `query` 保存第一项，并以 `queries` 保存完整有序数组。每项原样保存，不做敏感词过滤或去重；相邻未准入字段仍
+  保持私有。Renderer 还必须验证 projection available 与 Canonical `tool.web.search` 同时成立，直接显示单项或以
+  中文逗号连接多项，不增加“搜索词”标签；该 Activity 仍计入连续 Tool 组操作数。历史 Evidence 不回填，缺失
   typed projection 不生成占位。
 - Shell command 只有在协议的封闭公共字段中出现时才能进入 Evidence：Claude 仅 Bash command，通用 ACP 仅
   `rawInput.command` 字符串，TRAE CLI CN 额外仅允许 `rawInput.Command` 字符串，Antigravity 仅明确 Shell

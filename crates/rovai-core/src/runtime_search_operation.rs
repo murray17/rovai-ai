@@ -17,6 +17,7 @@ const CODEBUDDY_QUERY_ONLY_RULE: &str = "codebuddy.fetch.query_only.v1";
 pub struct AdmittedRuntimeSearchOperation {
     pub search_kind: String,
     pub query: String,
+    pub queries: Vec<String>,
     pub adapter_kind: String,
     pub protocol_family: String,
     pub source_event_kind: String,
@@ -26,7 +27,7 @@ pub struct AdmittedRuntimeSearchOperation {
 
 impl AdmittedRuntimeSearchOperation {
     pub fn into_projection(self) -> Value {
-        json!({
+        let mut projection = json!({
             "schemaVersion": SEARCH_OPERATION_SCHEMA_VERSION,
             "source": "runtime_reported",
             "status": "available",
@@ -39,7 +40,11 @@ impl AdmittedRuntimeSearchOperation {
                 "admissionRule": self.admission_rule,
                 "observedRuntimeVersion": self.observed_runtime_version,
             },
-        })
+        });
+        if self.queries.len() > 1 {
+            projection["queries"] = json!(self.queries);
+        }
+        projection
     }
 }
 
@@ -51,21 +56,21 @@ pub fn codex_web_search_candidate(method: &str, item: Option<&Value>) -> Option<
     if item.get("type").and_then(Value::as_str) != Some("webSearch") {
         return None;
     }
-    let query = nonempty_query(item.get("query"))?;
+    let queries = nonempty_queries(item.get("query"))?;
     Some(candidate(
         AdapterKind::CodexCli,
         "codex-app-server",
         method,
         CODEX_WEB_SEARCH_RULE,
         "webSearch",
-        query,
+        &queries,
     ))
 }
 
 pub fn claude_web_search_candidate(
     source_event_kind: &str,
     tool_name: &str,
-    query: Option<&str>,
+    query: Option<&Value>,
 ) -> Option<Value> {
     if tool_name != "WebSearch"
         || !matches!(
@@ -75,14 +80,14 @@ pub fn claude_web_search_candidate(
     {
         return None;
     }
-    let query = query.filter(|query| !query.trim().is_empty())?;
+    let queries = nonempty_queries(query)?;
     Some(candidate(
         AdapterKind::ClaudeCodeCli,
         "claude-stream-json",
         source_event_kind,
         CLAUDE_WEB_SEARCH_RULE,
         "WebSearch",
-        query,
+        &queries,
     ))
 }
 
@@ -101,19 +106,19 @@ pub fn acp_web_search_candidate(
         _ => return None,
     };
     let native_kind = native_kind.trim();
-    let (admission_rule, query) = if native_kind == "web_search" {
+    let (admission_rule, queries) = if native_kind == "web_search" {
         (
             ACP_EXPLICIT_WEB_SEARCH_RULE,
-            nonempty_query(raw_input?.get("query"))?,
+            nonempty_queries(raw_input?.get("query"))?,
         )
     } else {
-        let query = query_only(raw_input?)?;
+        let queries = query_only(raw_input?)?;
         match (adapter_kind, native_kind, status) {
-            (AdapterKind::CopilotCli, "search", _) => (COPILOT_QUERY_ONLY_RULE, query),
-            (AdapterKind::QoderCli, "search", _) => (QODER_QUERY_ONLY_RULE, query),
-            (AdapterKind::KiroCli, "search", _) => (KIRO_QUERY_ONLY_RULE, query),
+            (AdapterKind::CopilotCli, "search", _) => (COPILOT_QUERY_ONLY_RULE, queries),
+            (AdapterKind::QoderCli, "search", _) => (QODER_QUERY_ONLY_RULE, queries),
+            (AdapterKind::KiroCli, "search", _) => (KIRO_QUERY_ONLY_RULE, queries),
             (AdapterKind::CodebuddyCli, "fetch", "completed" | "failed") => {
-                (CODEBUDDY_QUERY_ONLY_RULE, query)
+                (CODEBUDDY_QUERY_ONLY_RULE, queries)
             }
             _ => return None,
         }
@@ -124,7 +129,7 @@ pub fn acp_web_search_candidate(
         source_event_kind,
         admission_rule,
         native_kind,
-        query,
+        &queries,
     ))
 }
 
@@ -162,9 +167,9 @@ fn admit_candidate(
     let source_event_kind = required_string(candidate, "sourceEventKind")?;
     let admission_rule = required_string(candidate, "admissionRule")?;
     let native_kind = required_string(candidate, "nativeKind")?;
-    let query = required_string(candidate, "query")?;
-    if query.trim().is_empty() || candidate.get("searchKind").and_then(Value::as_str) != Some("web")
-    {
+    let queries = candidate_queries(candidate)?;
+    let query = queries[0].clone();
+    if candidate.get("searchKind").and_then(Value::as_str) != Some("web") {
         return Err("runtime_search_operation_query_invalid");
     }
 
@@ -178,7 +183,7 @@ fn admit_candidate(
                 )
                 && native_kind == "webSearch"
                 && payload.pointer("/item/type").and_then(Value::as_str) == Some("webSearch")
-                && payload.pointer("/item/query").and_then(Value::as_str) == Some(query)
+                && source_queries_match(payload.pointer("/item/query"), &queries)
         }
         CLAUDE_WEB_SEARCH_RULE => {
             adapter == AdapterKind::ClaudeCodeCli
@@ -260,7 +265,8 @@ fn admit_candidate(
 
     Ok(AdmittedRuntimeSearchOperation {
         search_kind: "web".to_string(),
-        query: query.to_string(),
+        query,
+        queries,
         adapter_kind: adapter_kind.to_string(),
         protocol_family: protocol_family.to_string(),
         source_event_kind: source_event_kind.to_string(),
@@ -318,27 +324,61 @@ fn candidate(
     source_event_kind: &str,
     admission_rule: &str,
     native_kind: &str,
-    query: &str,
+    queries: &[&str],
 ) -> Value {
-    json!({
+    let mut value = json!({
         "adapterKind": adapter_kind.as_str(),
         "protocolFamily": protocol_family,
         "sourceEventKind": source_event_kind,
         "admissionRule": admission_rule,
         "nativeKind": native_kind,
         "searchKind": "web",
-        "query": query,
-    })
+        "query": queries[0],
+    });
+    if queries.len() > 1 {
+        value["queries"] = json!(queries);
+    }
+    value
 }
 
-fn query_only(raw_input: &Value) -> Option<&str> {
+fn query_only(raw_input: &Value) -> Option<Vec<&str>> {
     let input = raw_input.as_object()?;
     (input.len() == 1).then_some(())?;
-    nonempty_query(input.get("query"))
+    nonempty_queries(input.get("query"))
 }
 
-fn nonempty_query(query: Option<&Value>) -> Option<&str> {
-    query?.as_str().filter(|query| !query.trim().is_empty())
+fn nonempty_queries(query: Option<&Value>) -> Option<Vec<&str>> {
+    match query? {
+        Value::String(query) if !query.trim().is_empty() => Some(vec![query]),
+        Value::Array(queries) if !queries.is_empty() => queries
+            .iter()
+            .map(|query| query.as_str().filter(|query| !query.trim().is_empty()))
+            .collect(),
+        _ => None,
+    }
+}
+
+fn candidate_queries(candidate: &Value) -> Result<Vec<String>, &'static str> {
+    let query = required_string(candidate, "query")?;
+    if query.trim().is_empty() {
+        return Err("runtime_search_operation_query_invalid");
+    }
+    let Some(queries) = candidate.get("queries") else {
+        return Ok(vec![query.to_string()]);
+    };
+    let queries = nonempty_queries(Some(queries))
+        .filter(|queries| queries.len() > 1 && queries.first().copied() == Some(query))
+        .ok_or("runtime_search_operation_query_invalid")?;
+    Ok(queries.into_iter().map(str::to_string).collect())
+}
+
+fn source_queries_match(source: Option<&Value>, expected: &[String]) -> bool {
+    nonempty_queries(source).is_some_and(|source| {
+        source
+            .iter()
+            .copied()
+            .eq(expected.iter().map(String::as_str))
+    })
 }
 
 fn required_string<'a>(value: &'a Value, key: &str) -> Result<&'a str, &'static str> {
@@ -400,7 +440,11 @@ mod tests {
         } else {
             "in_progress"
         };
-        let query = candidate.get("query").cloned().unwrap_or(Value::Null);
+        let query = candidate
+            .get("queries")
+            .or_else(|| candidate.get("query"))
+            .cloned()
+            .unwrap_or(Value::Null);
         let mut value = json!({
             SEARCH_OPERATION_CANDIDATE_FIELD: candidate,
             "status": status,
@@ -430,11 +474,12 @@ mod tests {
         .unwrap()
         .unwrap();
         assert_eq!(admitted.query, "exact query");
+        assert_eq!(admitted.queries, vec!["exact query"]);
 
         let claude = claude_web_search_candidate(
             "assistant.tool_use.WebSearch",
             "WebSearch",
-            Some("exact query"),
+            Some(&json!("exact query")),
         )
         .expect("Claude WebSearch should create a candidate");
         let admitted = admit_runtime_search_operation(
@@ -446,6 +491,36 @@ mod tests {
         .unwrap()
         .unwrap();
         assert_eq!(admitted.query, "exact query");
+        assert_eq!(admitted.queries, vec!["exact query"]);
+    }
+
+    #[test]
+    fn multiple_queries_are_preserved_in_order_with_the_first_query_as_fallback() {
+        let candidate = codex_web_search_candidate(
+            "item/completed",
+            Some(&json!({
+                "type": "webSearch",
+                "query": ["first query", "second query"]
+            })),
+        )
+        .expect("a typed query array should create a candidate");
+        let admitted = admit_runtime_search_operation(
+            "activity.completed",
+            &payload(candidate, Some("webSearch"), None),
+            Some("codex-cli"),
+            Some("codex-cli 0.147.0"),
+        )
+        .unwrap()
+        .unwrap();
+
+        assert_eq!(admitted.query, "first query");
+        assert_eq!(admitted.queries, vec!["first query", "second query"]);
+        let projection = admitted.into_projection();
+        assert_eq!(projection["query"], "first query");
+        assert_eq!(
+            projection["queries"],
+            json!(["first query", "second query"])
+        );
     }
 
     #[test]
@@ -473,6 +548,7 @@ mod tests {
             .unwrap()
             .unwrap();
             assert_eq!(admitted.query, "network query");
+            assert_eq!(admitted.queries, vec!["network query"]);
         }
     }
 
@@ -483,6 +559,9 @@ mod tests {
             json!({"path": "/repo", "pattern": "needle"}),
             json!({"output_mode": "files_with_matches", "path": "/repo", "pattern": "needle"}),
             json!({"query": "needle", "providerPrivate": true}),
+            json!({"query": []}),
+            json!({"query": ["needle", ""]}),
+            json!({"query": ["needle", 42]}),
         ] {
             assert!(
                 acp_web_search_candidate(
@@ -531,16 +610,20 @@ mod tests {
     }
 
     #[test]
-    fn explicit_acp_web_search_copies_only_the_query() {
+    fn explicit_acp_web_search_copies_only_valid_queries() {
         let candidate = acp_web_search_candidate(
             AdapterKind::OpencodeCli,
             Some("tool_call"),
             "in_progress",
             "web_search",
-            Some(&json!({"query": "network query", "providerPrivate": "not public"})),
+            Some(&json!({
+                "query": ["first query", "second query"],
+                "providerPrivate": "not public"
+            })),
         )
         .unwrap();
-        assert_eq!(candidate["query"], "network query");
+        assert_eq!(candidate["query"], "first query");
+        assert_eq!(candidate["queries"], json!(["first query", "second query"]));
         assert!(candidate.get("providerPrivate").is_none());
     }
 }

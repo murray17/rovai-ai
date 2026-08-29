@@ -860,7 +860,7 @@ struct ClaudeCodeStreamState {
     started_tools: HashSet<String>,
     terminal_tools: HashSet<String>,
     tool_inputs: HashMap<String, Value>,
-    tool_queries: HashMap<String, String>,
+    tool_queries: HashMap<String, Value>,
     exact_edit_mutations: HashMap<String, Value>,
     api_retry_attempts: HashSet<(u64, u64)>,
 }
@@ -1216,7 +1216,7 @@ fn normalize_claude_runtime_events(
                     runtime_search_operation::claude_web_search_candidate(
                         "assistant.tool_use.WebSearch+user.tool_result",
                         tool_name,
-                        query.as_deref(),
+                        query.as_ref(),
                     )
                 });
                 runtime_search_operation::insert_candidate(
@@ -1297,7 +1297,7 @@ fn claude_tool_started(
                     runtime_search_operation::claude_web_search_candidate(
                         "assistant.tool_use.WebSearch",
                         tool_name,
-                        query.as_deref(),
+                        query.as_ref(),
                     )
                 });
         runtime_search_operation::insert_candidate(&mut payload, search_operation_candidate);
@@ -1319,15 +1319,23 @@ fn public_claude_tool_input(tool_name: &str, input: Option<&Value>) -> Option<Va
         .map(|command| Value::String(command.to_string()))
 }
 
-fn public_claude_search_query(tool_name: &str, input: Option<&Value>) -> Option<String> {
+fn public_claude_search_query(tool_name: &str, input: Option<&Value>) -> Option<Value> {
     if tool_name != "WebSearch" {
         return None;
     }
-    input?
-        .get("query")
-        .and_then(Value::as_str)
-        .filter(|query| !query.is_empty())
-        .map(str::to_string)
+    let query = input?.get("query")?;
+    match query {
+        Value::String(query) if !query.trim().is_empty() => Some(Value::String(query.clone())),
+        Value::Array(queries)
+            if !queries.is_empty()
+                && queries
+                    .iter()
+                    .all(|query| query.as_str().is_some_and(|query| !query.trim().is_empty())) =>
+        {
+            Some(Value::Array(queries.clone()))
+        }
+        _ => None,
+    }
 }
 
 fn claude_exact_edit_mutation(tool_name: &str, input: Option<&Value>) -> Option<Value> {
@@ -2376,9 +2384,9 @@ exit 1
     }
 
     #[test]
-    fn web_search_keeps_the_exact_typed_candidate_through_a_sparse_result() {
+    fn web_search_keeps_exact_typed_queries_through_a_sparse_result() {
         let session_id = "0bdd2166-d420-40c6-94be-70b93eb290c5";
-        let query = "password=公开测试词 token=也照常展示";
+        let queries = json!(["password=公开测试词 token=也照常展示", "第二个搜索词"]);
         let mut state = ClaudeCodeStreamState::default();
         let started = normalize_claude_runtime_events(
             &json!({
@@ -2388,7 +2396,7 @@ exit 1
                     "type": "tool_use",
                     "id": "toolu_web_search_1",
                     "name": "WebSearch",
-                    "input": {"query": query, "providerPrivate": "must-not-leak"}
+                    "input": {"query": queries.clone(), "providerPrivate": "must-not-leak"}
                 }]}
             }),
             session_id,
@@ -2401,7 +2409,13 @@ exit 1
             started[0]
                 .payload
                 .pointer("/runtimeSearchOperationCandidate/query"),
-            Some(&json!(query))
+            Some(&queries[0])
+        );
+        assert_eq!(
+            started[0]
+                .payload
+                .pointer("/runtimeSearchOperationCandidate/queries"),
+            Some(&queries)
         );
         assert!(started[0].payload["input"].is_null());
         assert!(
@@ -2430,7 +2444,13 @@ exit 1
             completed[0]
                 .payload
                 .pointer("/runtimeSearchOperationCandidate/query"),
-            Some(&json!(query))
+            Some(&queries[0])
+        );
+        assert_eq!(
+            completed[0]
+                .payload
+                .pointer("/runtimeSearchOperationCandidate/queries"),
+            Some(&queries)
         );
     }
 

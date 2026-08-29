@@ -1562,7 +1562,7 @@ mod tests {
         let candidate = runtime_search_operation::claude_web_search_candidate(
             "assistant.tool_use.WebSearch",
             "WebSearch",
-            Some(query),
+            Some(&json!([query, "第二个搜索词"])),
         )
         .unwrap();
         let mut source = json!({
@@ -1584,6 +1584,10 @@ mod tests {
         assert_eq!(normalized["runtimeSearchOperation"]["status"], "available");
         assert_eq!(normalized["runtimeSearchOperation"]["searchKind"], "web");
         assert_eq!(normalized["runtimeSearchOperation"]["query"], query);
+        assert_eq!(
+            normalized["runtimeSearchOperation"]["queries"],
+            json!([query, "第二个搜索词"])
+        );
         assert_eq!(
             normalized["runtimeSearchOperation"]["sourceMetadata"]["observedRuntimeVersion"],
             "2.1.220"

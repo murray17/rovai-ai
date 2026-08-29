@@ -54,7 +54,9 @@ Tool 行继续使用统一 16px、`currentColor`、单色 SVG 和既有四轨布
 ## 4. 公开搜索词
 
 从 v24 部署后，搜索词只通过 Core-owned `runtimeSearchOperation` typed projection 进入新 Evidence：
-`schemaVersion=1 + source=runtime_reported + status=available + searchKind=web + query`。顶层通用
+`schemaVersion=1 + source=runtime_reported + status=available + searchKind=web + query`。单项 projection 的
+`query` 是该字符串；多项 projection 的 `query` 仍保存第一项，并额外保存有序 `queries` 数组，使既有只读方可继续
+读取第一项。顶层通用
 `payload.query` 与 `item.query` 都不属于公开 Evidence 白名单；Adapter 只能先形成内部 candidate，再由 Core 使用
 冻结的 Adapter identity、协议事件和必要的已验证 Runtime 版本准入。
 
@@ -67,15 +69,20 @@ candidate 以 unavailable 结算且不保存 query，原始 `search/fetch` 也�
 可以从同 ToolCall 的当前 Prompt 观察继承 candidate。Antigravity `1.1.22` 的 Web 工具事件是
 `step_update + step_type=tool + tool_name=search_web`，只获得 Web semantic，不从私有 parameters 或文本猜 query。
 
-搜索词按用户实际输入原样保存和展示，不做敏感词识别、关键词过滤或内容替换；相邻未准入字段仍不进入
-公开 Evidence。Renderer 只有在 projection available 且 Canonical Activity 同时为 `tool.web.search` 时，才在
-展开详情先显示“搜索词”，存在公开结果时再显示“结果”。历史 Evidence 不回填，缺失 typed projection 时不显示
-空占位。
+已准入来源的 `query` 可以是一个非空字符串，或非空、元素全部为非空字符串的数组；数组为空、包含空字符串或
+非字符串元素时整体 fail closed。每项按用户实际输入原样保存，不做敏感词识别、关键词过滤、去重或内容替换；
+相邻未准入字段仍不进入公开 Evidence。Renderer 只有在 projection available 且 Canonical Activity 同时为
+`tool.web.search` 时，才在展开详情第一行直接显示 query，不增加“搜索词”标签；多项按原顺序使用中文逗号连接，
+存在公开结果时再显示“结果”。只含旧 `query` 的 projection 继续显示单项；历史 Evidence 不回填，缺失 typed
+projection 时不显示空占位。Web 搜索仍是普通 Tool item，必须计入其所在连续 Tool 组的“已执行 N 项操作”，组内
+展开行继续使用 Web 图标与上述详情。
 
 ## 5. 验收
 
 - `web_search`、`search`、`file_search` 分别得到 `tool.web.search`、`tool.search`、`file.search`；
 - Claude `Grep` 使用 File 图标，Claude `WebSearch` 使用 Web 图标；搜索词 started→terminal 保持精确一致；
+- 单项 query 在详情第一行直接显示且没有“搜索词”标签；多项 query 按顺序用中文逗号连接，`query` 保持首项；
+- Web 搜索与相邻 Tool 一起计入“已执行 N 项操作”，展开后仍使用 Web 图标；
 - Core Catalog 验证的 `camp.read` 使用 Rovai 图标，字面 Shell `rovai camp read ...` 使用 Terminal 图标；
 - 可靠 file-operation path 显示 `修改 <basename>`，没有可靠 path 时不从 output 或标题猜路径；
 - `activity-v1` 历史仍可读取，Migration 116 前后的旧 row bytes 不被重写，新 operation 使用 v2；

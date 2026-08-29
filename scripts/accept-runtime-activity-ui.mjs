@@ -24,6 +24,7 @@ const recoveryBlockerOnly = process.env.ROVAI_RUNTIME_ACTIVITY_ACCEPT_RECOVERY_B
 const conversationDropZoneOnly = process.env.ROVAI_RUNTIME_ACTIVITY_ACCEPT_DROP_ZONE_ONLY === '1'
 const worldMapOnly = process.env.ROVAI_RUNTIME_ACTIVITY_ACCEPT_WORLD_MAP_ONLY === '1'
 const runtimeModelOnly = process.env.ROVAI_RUNTIME_ACTIVITY_ACCEPT_MODEL_ONLY === '1'
+const webSearchOnly = process.env.ROVAI_RUNTIME_ACTIVITY_ACCEPT_WEB_SEARCH_ONLY === '1'
 const databasePath = join(dataDir, 'rovai.sqlite')
 const debugPort = process.env.ROVAI_RUNTIME_ACTIVITY_ACCEPT_DEBUG_PORT
   ? Number(process.env.ROVAI_RUNTIME_ACTIVITY_ACCEPT_DEBUG_PORT)
@@ -52,8 +53,10 @@ const longToolOutput = Array.from({ length: 8_432 }, (_, index) => {
   return `fixture output line ${index + 1} · vehicle prepayment reconciliation`
 }).join('\n')
 const directoryAttachmentSource = join(fixtureRoot, '项目资料')
+const fixtureExecutionRoot = join(fixtureRoot, 'workspace')
 const codexExpectedCommand = 'rovai camp read --mode timeline --direction before --limit 20'
 const claudeExpectedCommand = "printf '%s\\n' 'ROVAI_CLAUDE_EMPTY_OUTPUT_OK'"
+const webSearchQueries = ['password=公开验收词 token=保持原样', '第二项公开查询']
 
 const runtimes = [
   runtime('codex', 'codex-cli', 'Codex CLI', codexExpectedCommand, {
@@ -87,7 +90,8 @@ const runtimes = [
         source: 'runtime_reported',
         status: 'available',
         searchKind: 'web',
-        query: 'password=公开验收词 token=保持原样'
+        query: webSearchQueries[0],
+        queries: webSearchQueries
       }
     }
   }),
@@ -127,6 +131,7 @@ const runtimes = [
 
 await mkdir(dataDir, { recursive: true })
 await mkdir(outputDir, { recursive: true })
+await mkdir(fixtureExecutionRoot, { recursive: true })
 await mkdir(join(directoryAttachmentSource, 'docs', 'empty'), { recursive: true })
 await writeFile(join(directoryAttachmentSource, 'README.md'), 'Conversation drop zone acceptance.\n')
 await writeFile(join(directoryAttachmentSource, 'docs', 'plan.txt'), 'Keep the hierarchy frozen.\n')
@@ -162,11 +167,29 @@ try {
     && workspaceEntryExecution.focusedRunId === activeRunId
     && !workspaceEntryExecution.drawerOwnsFocus,
     `Entering the running Camp did not open its latest Run without stealing focus: ${JSON.stringify(workspaceEntryExecution)}`)
-  await evaluate(app.cdp,
-    `document.querySelector('.execution-drawer [aria-label="收起执行详情"]')?.click()`)
-  await waitForExpression(app.cdp, `!document.querySelector('.execution-drawer')`)
+  if (!webSearchOnly) {
+    await evaluate(app.cdp,
+      `document.querySelector('.execution-drawer [aria-label="收起执行详情"]')?.click()`)
+    await waitForExpression(app.cdp, `!document.querySelector('.execution-drawer')`)
+  }
 
-  if (worldMapOnly) {
+  if (webSearchOnly) {
+    const webSearchPresentation = await verifyWebSearchPresentation(app.cdp)
+    const webSearchCapture = join(outputDir, 'runtime-activity-web-search.png')
+    await capture(app.cdp, webSearchCapture)
+    const reportPath = join(outputDir, 'runtime-search-acceptance.json')
+    const report = {
+      ok: true,
+      mode: 'controlled-runtime-web-search-fixture',
+      app: basename(appPath),
+      fixtureRoot,
+      outputDir,
+      verified: { webSearchPresentation },
+      captures: { webSearch: webSearchCapture }
+    }
+    await writeFile(reportPath, `${JSON.stringify(report, null, 2)}\n`)
+    console.log(JSON.stringify({ ...report, reportPath }, null, 2))
+  } else if (worldMapOnly) {
     const worldMapAcceptance = await verifyCampWorldMap(app.cdp, outputDir)
     console.log(JSON.stringify({
       ok: true,
@@ -490,6 +513,9 @@ try {
     await writeFile(reportPath, `${JSON.stringify(report, null, 2)}\n`)
     console.log(JSON.stringify({ ...report, reportPath }, null, 2))
   } else {
+  const webSearchPresentation = await verifyWebSearchPresentation(app.cdp)
+  const webSearchCapture = join(outputDir, 'runtime-activity-web-search.png')
+  await capture(app.cdp, webSearchCapture)
   const claudeCommandDisclosure = await verifyClaudeCommandDisclosure(app.cdp)
 
   const recoveryBlockerPresentation = await verifyRecoveryBlockerPresentation(app.cdp)
@@ -790,6 +816,7 @@ try {
       executionDrawerResize,
       executionAutoFollow,
       completeToolOutput,
+      webSearchPresentation,
       claudeCommandDisclosure,
       antigravityCoreToolCatalogName: observed.find((row) => row.runtime === 'Antigravity')?.toolTitles[0] === 'camp.message.send',
       conversationPresentation,
@@ -820,6 +847,7 @@ try {
       nightRuntimeModel: nightRuntimeModelCapture,
       bottom: bottomCapture,
       toolOutput: toolOutputCapture,
+      webSearch: webSearchCapture,
       recoveryBlocker: recoveryBlockerCapture,
       wide: wideCapture,
       wideConversation: wideConversationCapture,
@@ -954,6 +982,11 @@ async function activateControlledRun() {
 
 async function seedFixture() {
   const now = '2026-08-05T12:00:00Z'
+  const workspaceJson = JSON.stringify({
+    executionRoot: fixtureExecutionRoot,
+    access: 'write',
+    isolation: 'shared'
+  })
   const runtimeRoot = runtimeCampFilesRootForDataDirectory(dataDir)
   const runtimeRootMarker = JSON.parse(await readFile(
     join(runtimeRoot, '.runtime-camp-files-root.json'),
@@ -1067,7 +1100,8 @@ async function seedFixture() {
         ${sqlLiteral(`conversation-${entry.key}`)}, 0, 0,
         ${sqlLiteral(`direct:${entry.agentId}`)}, 'initial',
         ${sqlLiteral(`验证 ${entry.runtimeName} Runtime Activity`)},
-        'required', '{}', ${sqlLiteral(nonTerminal ? 'queued' : terminalStatus)}, ${sqlLiteral(`runtime-activity-${entry.key}`)},
+        'required', '{}', ${sqlLiteral(workspaceJson)},
+        ${sqlLiteral(nonTerminal ? 'queued' : terminalStatus)}, ${sqlLiteral(`runtime-activity-${entry.key}`)},
         1, ${sqlLiteral(`2026-08-05T12:${String(index).padStart(2, '0')}:00Z`)},
         ${sqlNullable(active ? null : `2026-08-05T12:${String(index).padStart(2, '0')}:01Z`)},
         ${sqlNullable(nonTerminal ? null : updatedAt)},
@@ -1081,7 +1115,7 @@ async function seedFixture() {
       ${sqlLiteral(historicalRunId)}, 'turn-codex-history', 'conversation-codex', 0, 0,
       ${sqlLiteral(`direct:${activeAgentId}:history`)}, 'initial',
       'Codex 历史 Runtime Activity',
-      'required', '{}', 'succeeded', 'runtime-activity-codex-history',
+      'required', '{}', ${sqlLiteral(workspaceJson)}, 'succeeded', 'runtime-activity-codex-history',
       1, '2026-08-05T11:58:00Z', '2026-08-05T11:58:01Z',
       '2026-08-05T11:58:02Z', '2026-08-05T11:58:02Z',
       'codex-cli', 'codex-app-server',
@@ -1216,7 +1250,7 @@ async function seedFixture() {
       id, camp_turn_id, conversation_id,
       initial_camp_context_through_sequence, initial_conversation_context_through_sequence,
       responsibility_key, start_reason, purpose, completion_role,
-      effective_config_json, status, idempotency_key, execution_epoch,
+      effective_config_json, workspace_json, status, idempotency_key, execution_epoch,
       created_at, started_at, ended_at, updated_at,
       runtime_adapter_kind, runtime_protocol_version,
       runtime_model_selection_json, runtime_observed_model_id
@@ -2935,6 +2969,66 @@ async function verifyCompleteToolOutput(cdp) {
   })}`)
 
   return { ...presentation, keyboard, readingStart, inspectorReading, bottomReading }
+}
+
+async function verifyWebSearchPresentation(cdp) {
+  const expected = runtimes.find((runtime) => runtime.key === 'codebuddy')
+  assert(expected, 'CodeBuddy Web search fixture is missing')
+  const selected = await evaluate(cdp, `(() => {
+    const chip = [...document.querySelectorAll('.run-pulse-chip[data-agent-id]')]
+      .find((candidate) => candidate.dataset.agentId === ${JSON.stringify(expected.agentId)})
+    chip?.click()
+    return Boolean(chip)
+  })()`)
+  assert(selected, 'Could not select the CodeBuddy Web search process entry')
+  await evaluate(cdp, `(() => {
+    document.querySelectorAll('.execution-drawer details.execution-disclosure:not([open]) > summary')
+      .forEach((summary) => summary.click())
+    return true
+  })()`)
+  await waitForExpression(cdp, `(() => {
+    const selected = document.querySelector('.run-pulse-chip.is-selected')
+    return selected?.dataset.agentId === ${JSON.stringify(expected.agentId)}
+      && [...document.querySelectorAll('.execution-drawer .tool-call-title')]
+        .some((title) => title.textContent?.trim() === 'Web 搜索')
+  })()`)
+  const opened = await evaluate(cdp, `(() => {
+    const disclosure = [...document.querySelectorAll('.execution-drawer details.tool-call-disclosure')]
+      .find((candidate) => candidate.querySelector('.tool-call-title')?.textContent?.trim() === 'Web 搜索')
+    const group = disclosure?.closest('details.tool-activity-group')
+    const groupLabel = group?.querySelector(':scope > summary')?.getAttribute('aria-label') ?? null
+    if (group && !group.open) group.querySelector(':scope > summary')?.click()
+    if (disclosure && !disclosure.open) disclosure.querySelector(':scope > summary')?.click()
+    return { found: Boolean(disclosure), groupFound: Boolean(group), groupLabel }
+  })()`)
+  assert(opened.found
+    && opened.groupFound
+    && opened.groupLabel === '已执行 1 项操作；状态：全部成功',
+  `Web search was not counted inside the Tool operation group: ${JSON.stringify(opened)}`)
+  await waitForExpression(cdp, `(() => {
+    const disclosure = [...document.querySelectorAll('.execution-drawer details.tool-call-disclosure')]
+      .find((candidate) => candidate.querySelector('.tool-call-title')?.textContent?.trim() === 'Web 搜索')
+    return Boolean(disclosure?.querySelector('.tool-call-detail pre'))
+  })()`)
+  const presentation = await evaluate(cdp, `(() => {
+    const disclosure = [...document.querySelectorAll('.execution-drawer details.tool-call-disclosure')]
+      .find((candidate) => candidate.querySelector('.tool-call-title')?.textContent?.trim() === 'Web 搜索')
+    const group = disclosure?.closest('details.tool-activity-group')
+    return {
+      groupOpen: group?.open ?? false,
+      disclosureOpen: disclosure?.open ?? false,
+      iconDomain: disclosure?.querySelector('.tool-call-icon')?.dataset.iconDomain ?? null,
+      detail: disclosure?.querySelector('.tool-call-detail pre')?.textContent ?? ''
+    }
+  })()`)
+  const expectedDetail = `${webSearchQueries.join('，')}\n\n结果\nfixture completed`
+  assert(presentation.groupOpen
+    && presentation.disclosureOpen
+    && presentation.iconDomain === 'web'
+    && presentation.detail === expectedDetail
+    && !presentation.detail.includes('搜索词'),
+  `Web search direct query presentation mismatch: ${JSON.stringify({ presentation, expectedDetail })}`)
+  return { ...presentation, groupLabel: opened.groupLabel }
 }
 
 async function verifyClaudeCommandDisclosure(cdp) {

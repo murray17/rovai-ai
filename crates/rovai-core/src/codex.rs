@@ -2962,6 +2962,26 @@ while IFS= read -r ignored; do :; done
                 .contains("must-not-leak")
         );
 
+        let (_, multiple_queries) = normalize_event(
+            "item/completed",
+            &json!({
+                "item": {
+                    "id": "search-2",
+                    "type": "webSearch",
+                    "status": "completed",
+                    "query": ["first query", "second query"]
+                }
+            }),
+        );
+        assert_eq!(
+            multiple_queries.pointer("/runtimeSearchOperationCandidate/query"),
+            Some(&json!("first query"))
+        );
+        assert_eq!(
+            multiple_queries.pointer("/runtimeSearchOperationCandidate/queries"),
+            Some(&json!(["first query", "second query"]))
+        );
+
         let (_, database) = normalize_event(
             "item/started",
             &json!({

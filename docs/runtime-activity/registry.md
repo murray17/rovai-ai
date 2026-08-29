@@ -163,8 +163,9 @@ rawInput 字段保持私有并只参与完整 `rawInputDigest`。Runtime 缺失 
 与 digest；不从 title 或 digest 推导。effective execute 的 `exitCode | exit_code` 非零时，公开 terminal status
 与 Action outcome 为 failed，即使 ACP tool lifecycle 报告 completed。
 
-Search Operation 采用两层准入。第一层是协议明确的 effective kind `web_search`：只复制非空字符串
-`rawInput.query`，相邻字段仍保持私有。第二层是当前 Runtime 实测但 ACP kind 模糊的 Adapter/version tuple：
+Search Operation 采用两层准入。第一层是协议明确的 effective kind `web_search`：只复制一个非空字符串，或
+元素全部为非空字符串的非空 `rawInput.query` 数组，相邻字段仍保持私有。第二层是当前 Runtime 实测但 ACP kind
+模糊的 Adapter/version tuple：
 
 | Adapter/version | 实测 Web 事件 | 必须排除的相邻事件 | 准入规则 |
 |---|---|---|---|
@@ -176,7 +177,9 @@ Search Operation 采用两层准入。第一层是协议明确的 effective kind
 这些 tuple 先形成 internal candidate；Core 使用 AgentRun 冻结的 Adapter 与 reported version 复核后，才把
 Evidence kind 升级为 `web_search` 并写入 available `runtimeSearchOperation`。版本缺失/变化、shape 多一个字段或
 tuple 不匹配时写 unavailable projection（不含 query），并保留原生 `search/fetch` 分类。terminal 省略 rawInput
-时可从同 ToolCall 的当前 Prompt 观察继承 candidate。query 不做敏感词过滤，其他 rawInput 邻接字段仍保持私有。
+时可从同 ToolCall 的当前 Prompt 观察继承 candidate。单项 projection 只保存字符串 `query`；多项另外保存完整
+有序 `queries`，`query` 固定为第一项。数组为空、元素为空或类型混合时不形成 candidate。query 不做敏感词过滤
+或去重，其他 rawInput 邻接字段仍保持私有。
 
 文件操作 presentation 使用更窄的终态合同：只有成功 `completed`、累计 native kind 精确为 `edit | write`，且同一
 `toolCallId` 的标准 `locations[].path` 能确定唯一规范化路径时，才在同一 Canonical Activity 上生成
@@ -206,8 +209,8 @@ Terminal 不可用，因此不会读取 `terminalId` 或从私有 terminal 猜�
 tool-use ID 同时放入 started 与 terminal Evidence，使没有 stdout/stderr 或只加载 terminal 的命令仍可检查；
 只允许 Bash tool result 的公开 stdout/stderr 或标准公开 text result 进入 output。WebSearch 另只把精确
 `input.query` 送入 internal candidate，并按 tool-use ID 保持 started/terminal 自包含；Core 准入后只在
-`runtimeSearchOperation.query` 保存，query 原样保存、不做敏感词过滤。ToolSearch 只是工具发现，不获得这条
-准入。其它工具输入、
+`runtimeSearchOperation.query` 保存首项，多项时另存有序 `queries`；每项原样保存、不做敏感词过滤或去重。
+ToolSearch 只是工具发现，不获得这条准入。其它工具输入、
 文件内容和 provider metadata 不进入普通 Tool input/output。
 
 唯一例外是内部 Command Diff 通道：完整 assistant `tool_use` 的名称精确为 `Edit`、`file_path/old_string/new_string`

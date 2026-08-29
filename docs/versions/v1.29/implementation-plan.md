@@ -111,7 +111,8 @@ last_updated: 2026-08-29
 - [x] 搜索词只通过 available `runtimeSearchOperation` 进入 Evidence/详情：Codex `webSearch`、Claude
   `WebSearch`、ACP `web_search` 按明确身份准入；Copilot/Qoder/Kiro/CodeBuddy 的模糊 ACP wire 绑定本次实测
   版本与 query-only shape。任意顶层 `query`、ACP 文件搜索 shape 和未验证版本 fail closed；query 不做敏感词
-  过滤；Antigravity `search_web` 只分类、不猜 query。
+  过滤；单项直接显示，多项保持有序数组并以中文逗号连接，不显示“搜索词”标签；Web 搜索计入连续 Tool 组；
+  Antigravity `search_web` 只分类、不猜 query。
 
 ## 7. 自动化验证
 
@@ -126,7 +127,7 @@ last_updated: 2026-08-29
 - [x] Navigation coordinator 8/8 与 App event routing 2/2 回归通过；隔离 App 已验证 post-commit invalidation、
   后台 Run marker 收敛、隐藏暂停、focus 补读与 20 秒安全轮询；
 - [x] `cargo test -p rovai-core` 的 lib、`rovai-core` binary 与 `rovai` binary 全量通过；
-- [x] Renderer/Vitest 全量 619 项通过，完整 `pnpm test` 其余 Node 套件 219 项通过、1 项既有 Windows skip；
+- [x] Renderer/Vitest 全量 620 项通过，完整 `pnpm test` 其余 Node 套件 219 项通过、1 项既有 Windows skip；
 - [x] `pnpm docs:test`、`pnpm docs:check` 与精确 merge-base `docs:check:ci` 通过；
 - [x] Desktop production build 通过；
 - [x] Impeccable final detector 对本次 UI targets 完成唯一一次实际扫描；报告项均来自 `styles.css` 既有未改

@@ -727,12 +727,21 @@ function typedSearchQuery(
     || stringField(operation, 'searchKind') !== 'web'
   ) return null
   const query = stringField(operation, 'query')
-  return query !== null && query.trim().length > 0 ? query : null
+  if (query === null || query.trim().length === 0) return null
+  const queryList = operation.queries
+  if (queryList === undefined) return query
+  if (!Array.isArray(queryList) || queryList.length < 2) return null
+  const queries = queryList.map((value) => typeof value === 'string' ? value : null)
+  if (
+    queries.some((value) => value === null || value.trim().length === 0)
+    || queries[0] !== query
+  ) return null
+  return queries.join('，')
 }
 
 function searchEvidenceText(query: string | null, evidenceText: string | null): string | null {
   if (query === null) return evidenceText
-  const sections = [`搜索词\n${query}`]
+  const sections = [query]
   if (evidenceText !== null && evidenceText.length > 0 && evidenceText !== query) {
     sections.push(`结果\n${evidenceText}`)
   }
