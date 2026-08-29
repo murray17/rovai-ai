@@ -22,7 +22,7 @@ describe('Channel settings', () => {
     expect(markup).not.toContain('原型工具')
   })
 
-  it('shows only Feishu, the real local roster, and the owner-only management boundary', () => {
+  it('shows the selected provider, real local roster, and owner-only management boundary', () => {
     const markup = renderToStaticMarkup(createElement(ChannelSettingsView, {
       agents: [agent('removed', 0, 'removed'), agent('agent-b', 2), agent('agent-a', 1)],
       snapshot: unavailableSnapshot()
@@ -32,9 +32,9 @@ describe('Channel settings', () => {
     expect(markup).toContain('<strong>飞书</strong>')
     expect(markup).not.toContain('钉钉')
     expect(markup).not.toContain('Telegram')
-    expect(markup).toContain('只有 Rovai Owner 可以从飞书触发队员')
+    expect(markup).toContain('只有 Rovai Owner 可以从外部渠道触发队员')
     expect(markup).toContain('飞书中的 Owner 消息仍是外部消息身份')
-    expect(markup).toContain('项目绝对路径不会发送到飞书')
+    expect(markup).toContain('项目绝对路径不会发送到外部渠道')
     expect(markup).not.toContain('已授权用户')
     expect(markup).not.toContain('allowlist')
     expect(markup.match(/class="channel-member-bot-grid channel-member-bot-row"/g)).toHaveLength(2)
@@ -44,6 +44,49 @@ describe('Channel settings', () => {
     expect(markup).not.toContain('默认沿用队员名称与头像')
     expect(markup).toContain('disabled="" title="飞书渠道宿主尚未接入"')
     expect(markup).toContain('>等待连接</button>')
+  })
+
+  it('renders DingTalk beside Feishu with OAuth, device fallback, and no topic promise', () => {
+    const snapshot = unavailableSnapshot()
+    snapshot.channels.push({
+      kind: 'dingtalk',
+      displayName: '钉钉',
+      hostStatus: 'ready',
+      connection: {
+        status: 'connected',
+        account: {
+          accountId: 'dingtalk-account',
+          userName: 'Murray',
+          tenantName: '星海科技',
+          brand: 'dingtalk',
+          connectedAt: '2026-08-29T00:00:00Z',
+          lastVerifiedAt: '2026-08-29T00:00:00Z'
+        }
+      },
+      memberBots: [{
+        agentId: 'agent-a',
+        publicationStatus: 'published',
+        botDisplayName: '芝士',
+        appId: 'u-app-1',
+        managementUrl: 'https://open-dev.dingtalk.com/fe/app#/corp/app?appId=u-app-1',
+        failureCode: null
+      }]
+    })
+    const markup = renderToStaticMarkup(createElement(ChannelSettingsView, {
+      agents: [agent('agent-a', 0)],
+      snapshot,
+      selectedKind: 'dingtalk',
+      onConnect: () => undefined
+    }))
+
+    expect(markup).toContain('<strong>飞书</strong>')
+    expect(markup).toContain('<strong>钉钉</strong>')
+    expect(markup).toContain('开发者 OAuth 会话 · 独立安全配置')
+    expect(markup).toContain('>设备授权</button>')
+    expect(markup).toContain('群聊首次由 Owner @')
+    expect(markup).toContain('钉钉话题暂不接入')
+    expect(markup).toContain('>钉钉管理</a>')
+    expect(markup).not.toMatch(/app secret|client secret|access token/i)
   })
 
   it('renders connected account and published Bot facts without exposing credentials', () => {
@@ -143,6 +186,12 @@ describe('Channel settings', () => {
     expect(channelErrorMessage(new Error(
       "Error invoking remote method 'rovai:channels-connect': Error: feishu_login_cancelled"
     ))).toBeNull()
+    expect(channelErrorMessage(new Error(
+      "Error invoking remote method 'rovai:channels-connect': Error: dingtalk_oauth_client_unconfigured"
+    ))).toBe('Rovai 尚未配置钉钉 OAuth Client，当前构建无法连接钉钉开放平台。')
+    expect(channelErrorMessage(new Error(
+      "Error invoking remote method 'rovai:channels-publish-member-bot': Error: dingtalk_approval_mode_invalid"
+    ))).toBe('钉钉开放平台操作尚未完成；请查看下方状态，排除问题后重试。')
   })
 
   it('keeps only present members in deterministic roster order', () => {

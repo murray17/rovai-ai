@@ -2145,7 +2145,9 @@ export class ChannelSettingsService {
             lastVerifiedAt: snapshot.account.lastVerifiedAt
           } : null
         },
-        memberBots: [...bots.values()].sort((left, right) => left.agentId.localeCompare(right.agentId))
+        memberBots: [...bots.values()].sort((left, right) => left.agentId.localeCompare(right.agentId)),
+        pendingBindingCount: snapshot.pendingBindingCount,
+        bindingIssueCount: snapshot.bindingIssueCount
       }],
       pendingBindingCount: snapshot.pendingBindingCount,
       bindingIssueCount: snapshot.bindingIssueCount,
@@ -2213,7 +2215,9 @@ function unavailableSnapshot(): ChannelSettingsSnapshot {
       displayName: '飞书',
       hostStatus: 'unavailable',
       connection: { status: 'not_connected', account: null },
-      memberBots: []
+      memberBots: [],
+      pendingBindingCount: 0,
+      bindingIssueCount: 0
     }],
     pendingBindingCount: 0,
     bindingIssueCount: 0,

@@ -32,6 +32,15 @@ export interface ExecutionConsoleSnapshot {
   terminalAt: string | null
 }
 
+export interface ExecutionConsolePublicPage {
+  title: string
+  body: string
+  pageIndex: number
+  pageCount: number
+  terminal: boolean
+  failed: boolean
+}
+
 type ExecutionCardBlock = {
   body: string
   operationCount: number
@@ -56,6 +65,34 @@ export function executionConsolePages(snapshot: ExecutionConsoleSnapshot): Execu
 
 export function executionConsolePageCount(snapshot: ExecutionConsoleSnapshot): number {
   return executionConsolePages(snapshot).length
+}
+
+export function executionConsolePublicPage(
+  snapshot: ExecutionConsoleSnapshot,
+  requestedPageIndex = 0
+): ExecutionConsolePublicPage {
+  if (!isTerminal(snapshot.run.status)) {
+    const status = agentRunPresentation(snapshot.run)
+    return {
+      title: `${boundedPlainText(snapshot.agentDisplayName, 80)} · ${status.label}`,
+      body: liveExecutionBlocks(snapshot).join('\n\n') || '正在准备执行…',
+      pageIndex: 0,
+      pageCount: 1,
+      terminal: false,
+      failed: false
+    }
+  }
+  const pages = executionConsolePages(snapshot)
+  const pageIndex = Math.min(Math.max(0, requestedPageIndex), pages.length - 1)
+  const duration = formatDuration(durationMs(snapshot.startedAt, snapshot.terminalAt))
+  return {
+    title: `${boundedPlainText(snapshot.agentDisplayName, 80)} · ${terminalTitle(snapshot.run)}`,
+    body: [duration ? `用时 ${duration}` : '', pages[pageIndex].body].filter(Boolean).join('\n\n'),
+    pageIndex,
+    pageCount: pages.length,
+    terminal: true,
+    failed: snapshot.run.status === 'failed'
+  }
 }
 
 function renderLiveExecutionCard(snapshot: ExecutionConsoleSnapshot): Record<string, unknown> {

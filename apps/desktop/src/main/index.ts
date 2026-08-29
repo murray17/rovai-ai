@@ -6,6 +6,8 @@ import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeTheme, scre
 import { isCampId } from '@contracts'
 import type {
   AppearanceSnapshot,
+  ChannelKind,
+  ChannelConnectOptions,
   CoreMethod,
   ExecutionConsolePlacement,
   MonitoringFilter,
@@ -88,11 +90,41 @@ import {
 } from './app-updates'
 import { AppQuitCoordinator } from './app-quit-coordinator'
 import { ChannelSettingsService } from './channel-settings'
+import { ChannelSettingsCoordinator } from './channel-settings-coordinator'
 import { SafeStorageChannelCredentialStore } from './channel-credential-store'
 import { ElectronFeishuDeveloperSessionService } from './feishu-developer-session'
 import { FeishuWebSessionMemberBotProvisioner } from './feishu-member-bot-provisioner'
 import { ControlledMemberBotAvatarSourceResolver } from './member-bot-avatar-source'
+import {
+  DingTalkDeveloperGateway,
+  resolveDingTalkDwsOptions
+} from './dingtalk-developer-gateway'
+import { DwsDingTalkDeveloperSessionService } from './dingtalk-developer-session'
+import { DwsDingTalkMemberBotProvisioner } from './dingtalk-member-bot-provisioner'
+import {
+  DINGTALK_REQUIRED_SCOPE_VALUES,
+  DingTalkChannelSettingsService
+} from './dingtalk-channel-settings'
 import { isolatedSafeStorageApplicationName } from './safe-storage-application-name'
+
+function optionalChannelKind(value: unknown): ChannelKind | undefined {
+  if (value === undefined) return undefined
+  if (value === 'feishu' || value === 'dingtalk') return value
+  throw new Error('Invalid channel kind')
+}
+
+function optionalChannelConnectOptions(value: unknown): ChannelConnectOptions | undefined {
+  if (value === undefined || value === null) return undefined
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error('Invalid channel connection options')
+  }
+  const record = value as Record<string, unknown>
+  if (Object.keys(record).some((key) => key !== 'deviceFlow')
+    || (record.deviceFlow !== undefined && typeof record.deviceFlow !== 'boolean')) {
+    throw new Error('Invalid channel connection options')
+  }
+  return { deviceFlow: record.deviceFlow === true }
+}
 
 const mainStartupStartedAt = performance.now()
 console.info('[startup] stage=main_module_loaded elapsed_ms=0.0')
@@ -262,12 +294,37 @@ const feishuDeveloperSession = new ElectronFeishuDeveloperSessionService(
   coreDataPath,
   () => mainWindow
 )
-const channelSettings = new ChannelSettingsService({
+const channelCredentialStore = new SafeStorageChannelCredentialStore(coreDataPath)
+const feishuChannelSettings = new ChannelSettingsService({
   core,
-  credentialStore: new SafeStorageChannelCredentialStore(coreDataPath),
+  credentialStore: channelCredentialStore,
   developerSession: feishuDeveloperSession,
   memberBotProvisioner: new FeishuWebSessionMemberBotProvisioner(feishuDeveloperSession),
   memberBotAvatarSource
+})
+const dingtalkDwsOptions = resolveDingTalkDwsOptions({
+  appRoot: process.cwd(),
+  resourcesPath: process.resourcesPath,
+  packaged: app.isPackaged,
+  userDataPath: coreDataPath,
+  oauthClientId: process.env.ROVAI_DINGTALK_OAUTH_CLIENT_ID,
+  oauthClientSecret: process.env.ROVAI_DINGTALK_OAUTH_CLIENT_SECRET
+})
+const dingtalkDeveloperGateway = new DingTalkDeveloperGateway(dingtalkDwsOptions)
+const dingtalkChannelSettings = new DingTalkChannelSettingsService({
+  core,
+  credentialStore: channelCredentialStore,
+  developerSession: new DwsDingTalkDeveloperSessionService({
+    gateway: dingtalkDeveloperGateway,
+    configDir: dingtalkDwsOptions.configDir
+  }),
+  provisioner: new DwsDingTalkMemberBotProvisioner(dingtalkDeveloperGateway),
+  avatarSource: memberBotAvatarSource,
+  requiredScopeValues: DINGTALK_REQUIRED_SCOPE_VALUES
+})
+const channelSettings = new ChannelSettingsCoordinator({
+  feishu: feishuChannelSettings,
+  dingtalk: dingtalkChannelSettings
 })
 channelSettings.onChanged((snapshot) => {
   if (!mainWindow || mainWindow.isDestroyed() || mainWindow.webContents.isDestroyed()) return
@@ -552,7 +609,7 @@ if (primaryInstance) void app.whenReady().then(async () => {
     ) ?? undefined
   })
   void channelSettings.start().catch((error) => {
-    console.warn('[rovai] Feishu Channel Host startup failed; the App will remain available.', error)
+    console.warn('[rovai] Channel Host startup failed; the App will remain available.', error)
   })
   userAutomation = await startUserAutomationOptional(
     () => new UserAutomationServer(
@@ -711,26 +768,49 @@ ipcMain.handle('rovai:channels-get', (event) => {
   return channelSettings.get()
 })
 
-ipcMain.handle('rovai:channels-connect', (event) => {
+ipcMain.handle('rovai:channels-connect', (event, kind: unknown, options: unknown) => {
   requireMainWindow(event.sender)
-  return channelSettings.connect()
+  return channelSettings.connect(
+    optionalChannelKind(kind),
+    optionalChannelConnectOptions(options)
+  )
 })
 
-ipcMain.handle('rovai:channels-disconnect', (event) => {
+ipcMain.handle('rovai:channels-disconnect', (event, kind: unknown) => {
   requireMainWindow(event.sender)
-  return channelSettings.disconnect()
+  return channelSettings.disconnect(optionalChannelKind(kind))
 })
 
-ipcMain.handle('rovai:channels-publish-member-bot', (event, agentId: unknown) => {
+ipcMain.handle('rovai:channels-publish-member-bot', (
+  event,
+  agentId: unknown,
+  kind: unknown
+) => {
   requireMainWindow(event.sender)
   if (typeof agentId !== 'string' || !agentId) throw new Error('Invalid Agent ID')
-  return channelSettings.publishMemberBot(agentId)
+  return channelSettings.publishMemberBot(agentId, optionalChannelKind(kind))
 })
 
-ipcMain.handle('rovai:channels-retry-member-bot', (event, agentId: unknown) => {
+ipcMain.handle('rovai:channels-retry-member-bot', (event, agentId: unknown, kind: unknown) => {
   requireMainWindow(event.sender)
   if (typeof agentId !== 'string' || !agentId) throw new Error('Invalid Agent ID')
-  return channelSettings.retryMemberBot(agentId)
+  return channelSettings.retryMemberBot(agentId, optionalChannelKind(kind))
+})
+
+ipcMain.handle('rovai:channels-select-publication-approver', (
+  event,
+  agentId: unknown,
+  userId: unknown,
+  kind: unknown
+) => {
+  requireMainWindow(event.sender)
+  if (typeof agentId !== 'string' || !agentId) throw new Error('Invalid Agent ID')
+  if (typeof userId !== 'string' || !userId) throw new Error('Invalid DingTalk approver')
+  return channelSettings.selectPublicationApprover(
+    agentId,
+    userId,
+    optionalChannelKind(kind)
+  )
 })
 
 ipcMain.handle('rovai:channels-cancel-qr', (event, attemptId: unknown) => {

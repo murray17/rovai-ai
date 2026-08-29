@@ -31,7 +31,9 @@ use crate::{
 };
 
 const FEISHU_PROVIDER: &str = "feishu";
+const DINGTALK_PROVIDER: &str = "dingtalk";
 const FEISHU_CHANNEL_HOST_COMPONENT: &str = "feishu-channel-host";
+const DINGTALK_CHANNEL_HOST_COMPONENT: &str = "dingtalk-channel-host";
 const CHANNEL_MEMBERSHIP_SYNC_COMPONENT: &str = "channel-membership-sync";
 const AGGREGATION_WINDOW_SECONDS: i64 = 3;
 const DELIVERY_LEASE_SECONDS: i64 = 30;
@@ -72,6 +74,46 @@ pub struct ExpireFeishuAccountCommand {
     pub expected_version: i64,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpsertDingTalkAccountCommand {
+    pub account_id: String,
+    pub user_id_digest: String,
+    pub corp_id: String,
+    pub user_name: String,
+    pub corp_name: String,
+    pub oauth_profile_ref: String,
+}
+
+impl sealed::Sealed for UpsertDingTalkAccountCommand {}
+impl DomainCommand for UpsertDingTalkAccountCommand {
+    const TYPE: &'static str = "dingtalk_account.upsert";
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DisconnectDingTalkAccountCommand {
+    pub account_id: String,
+    pub expected_version: i64,
+}
+
+impl sealed::Sealed for DisconnectDingTalkAccountCommand {}
+impl DomainCommand for DisconnectDingTalkAccountCommand {
+    const TYPE: &'static str = "dingtalk_account.disconnect";
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExpireDingTalkAccountCommand {
+    pub account_id: String,
+    pub expected_version: i64,
+}
+
+impl sealed::Sealed for ExpireDingTalkAccountCommand {}
+impl DomainCommand for ExpireDingTalkAccountCommand {
+    const TYPE: &'static str = "dingtalk_account.expire";
+}
+
 impl sealed::Sealed for ExpireFeishuAccountCommand {}
 impl DomainCommand for ExpireFeishuAccountCommand {
     const TYPE: &'static str = "feishu_account.expire";
@@ -106,6 +148,45 @@ pub struct AdvanceMemberBotPublicationIntentCommand {
     pub failure_code: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateDingTalkPublicationIntentCommand {
+    pub publication_intent_id: String,
+    pub account_id: String,
+    pub agent_id: String,
+    pub expected_user_id_digest: String,
+    pub expected_corp_id: String,
+    pub requested_app_name: String,
+    pub provisioning_mode: String,
+}
+
+impl sealed::Sealed for CreateDingTalkPublicationIntentCommand {}
+impl DomainCommand for CreateDingTalkPublicationIntentCommand {
+    const TYPE: &'static str = "dingtalk_member_bot_publication_intent.create";
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AdvanceDingTalkPublicationIntentCommand {
+    pub publication_intent_id: String,
+    pub expected_version: i64,
+    pub state: String,
+    pub remote_unified_app_id: Option<String>,
+    pub app_key: Option<String>,
+    pub robot_code: Option<String>,
+    pub credential_ref: Option<String>,
+    pub version_id: Option<String>,
+    pub approval_mode: Option<String>,
+    pub approver_user_id_digest: Option<String>,
+    pub last_completed_step: Option<String>,
+    pub failure_code: Option<String>,
+}
+
+impl sealed::Sealed for AdvanceDingTalkPublicationIntentCommand {}
+impl DomainCommand for AdvanceDingTalkPublicationIntentCommand {
+    const TYPE: &'static str = "dingtalk_member_bot_publication_intent.advance";
+}
+
 impl sealed::Sealed for AdvanceMemberBotPublicationIntentCommand {}
 impl DomainCommand for AdvanceMemberBotPublicationIntentCommand {
     const TYPE: &'static str = "feishu_member_bot_publication_intent.advance";
@@ -126,6 +207,24 @@ pub struct UpsertFeishuMemberBotCommand {
     pub bot_open_id: Option<String>,
     pub bot_display_name: String,
     pub credential_ref: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpsertDingTalkMemberBotCommand {
+    pub account_id: String,
+    pub agent_id: String,
+    pub unified_app_id: String,
+    pub app_key: String,
+    pub robot_code: String,
+    pub owner_user_id: String,
+    pub bot_display_name: String,
+    pub credential_ref: String,
+}
+
+impl sealed::Sealed for UpsertDingTalkMemberBotCommand {}
+impl DomainCommand for UpsertDingTalkMemberBotCommand {
+    const TYPE: &'static str = "dingtalk_member_bot.upsert";
 }
 
 impl sealed::Sealed for UpsertFeishuMemberBotCommand {}
@@ -405,8 +504,76 @@ pub struct FeishuChannelSnapshot {
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct DingTalkAccountView {
+    pub account_id: String,
+    pub user_id_digest: String,
+    pub corp_id: String,
+    pub user_name: String,
+    pub corp_name: String,
+    pub oauth_profile_ref: String,
+    pub status: String,
+    pub version: i64,
+    pub connected_at: String,
+    pub last_verified_at: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DingTalkMemberBotView {
+    pub agent_id: String,
+    pub account_id: String,
+    pub unified_app_id: String,
+    pub app_key: String,
+    pub robot_code: String,
+    pub bot_display_name: String,
+    pub credential_ref: String,
+    pub status: String,
+    pub failure_code: Option<String>,
+    pub version: i64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DingTalkPublicationIntentView {
+    pub publication_intent_id: String,
+    pub agent_id: String,
+    pub account_id: String,
+    pub expected_user_id_digest: String,
+    pub expected_corp_id: String,
+    pub requested_app_name: String,
+    pub provisioning_mode: String,
+    pub state: String,
+    pub remote_unified_app_id: Option<String>,
+    pub app_key: Option<String>,
+    pub robot_code: Option<String>,
+    pub credential_ref: Option<String>,
+    pub version_id: Option<String>,
+    pub approval_mode: Option<String>,
+    pub last_completed_step: Option<String>,
+    pub failure_code: Option<String>,
+    pub version: i64,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DingTalkChannelSnapshot {
+    pub schema_version: i64,
+    pub account: Option<DingTalkAccountView>,
+    pub member_bots: Vec<DingTalkMemberBotView>,
+    pub publication_intents: Vec<DingTalkPublicationIntentView>,
+    pub pending_binding_count: i64,
+    pub binding_issue_count: i64,
+    pub transport_conversations: Vec<ChannelTransportConversationView>,
+    pub pending_aggregates: Vec<PendingChannelAggregateView>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ClaimedChannelDelivery {
     pub delivery_id: String,
+    pub provider: String,
     pub request_id: Option<String>,
     pub delivery_kind: String,
     pub target_app_id: String,
@@ -741,7 +908,8 @@ impl ChannelService {
             LEFT JOIN channel_conversation_binding AS binding
               ON binding.channel_conversation_id = conversation.id
              AND binding.status = 'active'
-            WHERE conversation.conversation_kind IN ('group', 'topic')
+            WHERE conversation.provider = 'feishu'
+              AND conversation.conversation_kind IN ('group', 'topic')
             ORDER BY conversation.last_seen_at DESC, conversation.id
             "#,
             [],
@@ -770,6 +938,7 @@ impl ChannelService {
                    aggregate.frozen_payload_json, '$.conversationId'
                  )
             WHERE aggregate.status = 'collecting'
+              AND conversation.provider = 'feishu'
               AND (
                 aggregate.canonical_mentions_complete = 1
                 OR NOT EXISTS (
@@ -797,7 +966,14 @@ impl ChannelService {
             },
         )?;
         let pending_binding_count = connection.query_row(
-            "SELECT COUNT(*) FROM pending_camp_binding WHERE status IN ('pending', 'resolving')",
+            r#"
+            SELECT COUNT(*)
+            FROM pending_camp_binding AS pending
+            JOIN channel_conversation AS conversation
+              ON conversation.id = pending.channel_conversation_id
+            WHERE pending.status IN ('pending', 'resolving')
+              AND conversation.provider = 'feishu'
+            "#,
             [],
             |row| row.get(0),
         )?;
@@ -805,8 +981,11 @@ impl ChannelService {
             r#"
             SELECT COUNT(*)
             FROM channel_conversation_binding AS binding
+            JOIN channel_conversation AS conversation
+              ON conversation.id = binding.channel_conversation_id
             LEFT JOIN project_catalog_item AS project ON project.id = binding.project_id
             WHERE binding.status = 'active'
+              AND conversation.provider = 'feishu'
               AND binding.execution_scope_kind = 'project'
               AND (project.id IS NULL OR project.status <> 'active')
             "#,
@@ -815,6 +994,193 @@ impl ChannelService {
         )?;
         Ok(FeishuChannelSnapshot {
             schema_version: 2,
+            account,
+            member_bots,
+            publication_intents,
+            pending_binding_count,
+            binding_issue_count,
+            transport_conversations,
+            pending_aggregates,
+        })
+    }
+
+    pub fn dingtalk_snapshot(&self, database: &mut Database) -> Result<DingTalkChannelSnapshot> {
+        refresh_project_catalog(database)?;
+        let connection = database.connection();
+        let account = connection
+            .query_row(
+                r#"
+                SELECT id, user_id_digest, corp_id, user_name, corp_name,
+                       oauth_profile_ref, status, version,
+                       connected_at, last_verified_at
+                FROM dingtalk_account
+                ORDER BY CASE status WHEN 'connected' THEN 0 ELSE 1 END,
+                         updated_at DESC, id
+                LIMIT 1
+                "#,
+                [],
+                |row| {
+                    Ok(DingTalkAccountView {
+                        account_id: row.get(0)?,
+                        user_id_digest: row.get(1)?,
+                        corp_id: row.get(2)?,
+                        user_name: row.get(3)?,
+                        corp_name: row.get(4)?,
+                        oauth_profile_ref: row.get(5)?,
+                        status: row.get(6)?,
+                        version: row.get(7)?,
+                        connected_at: row.get(8)?,
+                        last_verified_at: row.get(9)?,
+                    })
+                },
+            )
+            .optional()?;
+        let member_bots = query_rows(
+            connection,
+            r#"
+            SELECT agent_id, account_id, unified_app_id, app_key, robot_code,
+                   bot_display_name, credential_ref, status, failure_code, version
+            FROM dingtalk_member_bot
+            ORDER BY agent_id
+            "#,
+            [],
+            |row| {
+                Ok(DingTalkMemberBotView {
+                    agent_id: row.get(0)?,
+                    account_id: row.get(1)?,
+                    unified_app_id: row.get(2)?,
+                    app_key: row.get(3)?,
+                    robot_code: row.get(4)?,
+                    bot_display_name: row.get(5)?,
+                    credential_ref: row.get(6)?,
+                    status: row.get(7)?,
+                    failure_code: row.get(8)?,
+                    version: row.get(9)?,
+                })
+            },
+        )?;
+        let publication_intents = query_rows(
+            connection,
+            r#"
+            SELECT id, agent_id, account_id, expected_user_id_digest,
+                   expected_corp_id, requested_app_name, provisioning_mode,
+                   state, remote_unified_app_id, app_key, robot_code,
+                   credential_ref, version_id, approval_mode,
+                   last_completed_step, failure_code, version, created_at, updated_at
+            FROM dingtalk_member_bot_publication_intent
+            ORDER BY created_at DESC, id
+            "#,
+            [],
+            |row| {
+                Ok(DingTalkPublicationIntentView {
+                    publication_intent_id: row.get(0)?,
+                    agent_id: row.get(1)?,
+                    account_id: row.get(2)?,
+                    expected_user_id_digest: row.get(3)?,
+                    expected_corp_id: row.get(4)?,
+                    requested_app_name: row.get(5)?,
+                    provisioning_mode: row.get(6)?,
+                    state: row.get(7)?,
+                    remote_unified_app_id: row.get(8)?,
+                    app_key: row.get(9)?,
+                    robot_code: row.get(10)?,
+                    credential_ref: row.get(11)?,
+                    version_id: row.get(12)?,
+                    approval_mode: row.get(13)?,
+                    last_completed_step: row.get(14)?,
+                    failure_code: row.get(15)?,
+                    version: row.get(16)?,
+                    created_at: row.get(17)?,
+                    updated_at: row.get(18)?,
+                })
+            },
+        )?;
+        let transport_conversations = query_rows(
+            connection,
+            r#"
+            SELECT conversation.id, binding.id, conversation.provider,
+                   conversation.tenant_key, conversation.chat_id,
+                   conversation.topic_key, conversation.conversation_kind,
+                   binding.camp_id
+            FROM channel_conversation AS conversation
+            LEFT JOIN channel_conversation_binding AS binding
+              ON binding.channel_conversation_id = conversation.id
+             AND binding.status = 'active'
+            WHERE conversation.provider = 'dingtalk'
+              AND conversation.conversation_kind IN ('group', 'topic')
+            ORDER BY conversation.last_seen_at DESC, conversation.id
+            "#,
+            [],
+            |row| {
+                Ok(ChannelTransportConversationView {
+                    channel_conversation_id: row.get(0)?,
+                    binding_id: row.get(1)?,
+                    provider: row.get(2)?,
+                    tenant_key: row.get(3)?,
+                    chat_id: row.get(4)?,
+                    topic_key: row.get(5)?,
+                    conversation_kind: row.get(6)?,
+                    camp_id: row.get(7)?,
+                })
+            },
+        )?;
+        let pending_aggregates = query_rows(
+            connection,
+            r#"
+            SELECT aggregate.id, aggregate.tenant_key, aggregate.chat_id,
+                   aggregate.topic_key, conversation.conversation_kind,
+                   json_extract(aggregate.frozen_payload_json, '$.acknowledgementAppId')
+            FROM channel_inbound_aggregate AS aggregate
+            JOIN channel_conversation AS conversation
+              ON conversation.id = json_extract(
+                   aggregate.frozen_payload_json, '$.conversationId'
+                 )
+            WHERE aggregate.status = 'collecting'
+              AND conversation.provider = 'dingtalk'
+              AND aggregate.canonical_mentions_complete = 1
+            ORDER BY aggregate.created_at, aggregate.id
+            "#,
+            [],
+            |row| {
+                Ok(PendingChannelAggregateView {
+                    aggregate_id: row.get(0)?,
+                    tenant_key: row.get(1)?,
+                    chat_id: row.get(2)?,
+                    topic_key: row.get(3)?,
+                    conversation_kind: row.get(4)?,
+                    acknowledgement_app_id: row.get(5)?,
+                })
+            },
+        )?;
+        let pending_binding_count = connection.query_row(
+            r#"
+            SELECT COUNT(*)
+            FROM pending_camp_binding AS pending
+            JOIN channel_conversation AS conversation
+              ON conversation.id = pending.channel_conversation_id
+            WHERE pending.status IN ('pending', 'resolving')
+              AND conversation.provider = 'dingtalk'
+            "#,
+            [],
+            |row| row.get(0),
+        )?;
+        let binding_issue_count = connection.query_row(
+            r#"
+            SELECT COUNT(*)
+            FROM channel_conversation_binding AS binding
+            JOIN channel_conversation AS conversation
+              ON conversation.id = binding.channel_conversation_id
+            LEFT JOIN project_catalog_item AS project ON project.id = binding.project_id
+            WHERE binding.status = 'active'
+              AND conversation.provider = 'dingtalk'
+              AND binding.execution_scope_kind = 'project'
+              AND (project.id IS NULL OR project.status <> 'active')
+            "#,
+            [],
+            |row| row.get(0),
+        )?;
+        Ok(DingTalkChannelSnapshot {
+            schema_version: 1,
             account,
             member_bots,
             publication_intents,
@@ -840,7 +1206,7 @@ impl ChannelService {
             anyhow::bail!("brand must be feishu or lark");
         }
         self.gateway.execute(database, envelope, |transaction| {
-            if !is_channel_host(&envelope.actor) {
+            if !is_channel_host_for_provider(&envelope.actor, FEISHU_PROVIDER) {
                 return Ok(rejected(
                     "channel.host_required",
                     "Only the trusted Feishu Channel Host can persist account facts",
@@ -1004,7 +1370,7 @@ impl ChannelService {
         envelope: &CommandEnvelope<ExpireFeishuAccountCommand>,
     ) -> Result<CommandExecution> {
         self.gateway.execute(database, envelope, |transaction| {
-            if !is_channel_host(&envelope.actor) {
+            if !is_channel_host_for_provider(&envelope.actor, FEISHU_PROVIDER) {
                 return Ok(rejected(
                     "channel.host_required",
                     "Only the trusted Feishu Channel Host can expire a developer session",
@@ -1044,6 +1410,222 @@ impl ChannelService {
         })
     }
 
+    pub fn upsert_dingtalk_account(
+        &self,
+        database: &mut Database,
+        envelope: &CommandEnvelope<UpsertDingTalkAccountCommand>,
+    ) -> Result<CommandExecution> {
+        validate_nonempty(&envelope.payload.account_id, "accountId")?;
+        validate_digest(&envelope.payload.user_id_digest, "userIdDigest")?;
+        validate_nonempty(&envelope.payload.corp_id, "corpId")?;
+        validate_nonempty(&envelope.payload.oauth_profile_ref, "oauthProfileRef")?;
+        let user_name = normalize_display_name(&envelope.payload.user_name)?;
+        let corp_name = normalize_display_name(&envelope.payload.corp_name)?;
+        self.gateway.execute(database, envelope, |transaction| {
+            if !is_channel_host_for_provider(&envelope.actor, DINGTALK_PROVIDER) {
+                return Ok(rejected(
+                    "channel.host_required",
+                    "Only a trusted Channel Host can persist DingTalk account facts",
+                ));
+            }
+            let existing = transaction
+                .query_row(
+                    r#"
+                    SELECT user_id_digest, corp_id, oauth_profile_ref
+                    FROM dingtalk_account WHERE id = ?1
+                    "#,
+                    [&envelope.payload.account_id],
+                    |row| {
+                        Ok((
+                            row.get::<_, String>(0)?,
+                            row.get::<_, String>(1)?,
+                            row.get::<_, String>(2)?,
+                        ))
+                    },
+                )
+                .optional()?;
+            if existing
+                .as_ref()
+                .is_some_and(|(user_digest, corp_id, profile_ref)| {
+                    user_digest != &envelope.payload.user_id_digest
+                        || corp_id != &envelope.payload.corp_id
+                        || profile_ref != &envelope.payload.oauth_profile_ref
+                })
+            {
+                return Ok(rejected(
+                    "dingtalk_account.identity_conflict",
+                    "DingTalk identity changed for the same account ID",
+                ));
+            }
+            let now = Utc::now().to_rfc3339();
+            transaction.execute(
+                r#"
+                UPDATE dingtalk_account
+                SET status = 'disconnected', disconnected_at = ?2,
+                    version = version + 1, updated_at = ?2
+                WHERE status = 'connected' AND id <> ?1
+                "#,
+                params![envelope.payload.account_id, now],
+            )?;
+            transaction.execute(
+                r#"
+                INSERT INTO dingtalk_account(
+                    id, user_id_digest, corp_id, user_name, corp_name,
+                    oauth_profile_ref, status, version, created_at, updated_at,
+                    connected_at, last_verified_at, disconnected_at
+                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'connected', 1, ?7, ?7, ?7, ?7, NULL)
+                ON CONFLICT(id) DO UPDATE SET
+                    user_name = excluded.user_name,
+                    corp_name = excluded.corp_name,
+                    status = 'connected',
+                    connected_at = CASE
+                        WHEN dingtalk_account.status = 'connected'
+                        THEN dingtalk_account.connected_at
+                        ELSE excluded.connected_at
+                    END,
+                    last_verified_at = excluded.last_verified_at,
+                    disconnected_at = NULL,
+                    version = dingtalk_account.version + 1,
+                    updated_at = excluded.updated_at
+                "#,
+                params![
+                    envelope.payload.account_id,
+                    envelope.payload.user_id_digest,
+                    envelope.payload.corp_id,
+                    user_name,
+                    corp_name,
+                    envelope.payload.oauth_profile_ref,
+                    now,
+                ],
+            )?;
+            transaction.execute(
+                r#"
+                INSERT INTO dingtalk_owner_identity(
+                    account_id, corp_id, canonical_owner_principal_id,
+                    user_id_digest, version, created_at, updated_at
+                ) VALUES (?1, ?2, ?3, ?4, 1, ?5, ?5)
+                ON CONFLICT(account_id) DO UPDATE SET
+                    corp_id = excluded.corp_id,
+                    user_id_digest = excluded.user_id_digest,
+                    version = dingtalk_owner_identity.version + 1,
+                    updated_at = excluded.updated_at
+                "#,
+                params![
+                    envelope.payload.account_id,
+                    envelope.payload.corp_id,
+                    format!("rvep_{}", Uuid::new_v4().simple()),
+                    envelope.payload.user_id_digest,
+                    now,
+                ],
+            )?;
+            let version: i64 = transaction.query_row(
+                "SELECT version FROM dingtalk_account WHERE id = ?1",
+                [&envelope.payload.account_id],
+                |row| row.get(0),
+            )?;
+            Ok(CommandHandlerResult::applied(
+                "dingtalk_account.connected",
+                json!({ "accountId": envelope.payload.account_id, "version": version }),
+                Some(EntityReference {
+                    entity_type: "dingtalk_account".to_string(),
+                    entity_id: envelope.payload.account_id.clone(),
+                }),
+            ))
+        })
+    }
+
+    pub fn disconnect_dingtalk_account(
+        &self,
+        database: &mut Database,
+        envelope: &CommandEnvelope<DisconnectDingTalkAccountCommand>,
+    ) -> Result<CommandExecution> {
+        self.gateway.execute(database, envelope, |transaction| {
+            if !is_owner(&envelope.actor) {
+                return Ok(rejected(
+                    "dingtalk_account.owner_required",
+                    "Only the local owner can disconnect DingTalk",
+                ));
+            }
+            let version = transaction
+                .query_row(
+                    "SELECT version FROM dingtalk_account WHERE id = ?1 AND status = 'connected'",
+                    [&envelope.payload.account_id],
+                    |row| row.get::<_, i64>(0),
+                )
+                .optional()?;
+            let Some(version) = version else {
+                return Ok(rejected(
+                    "dingtalk_account.not_connected",
+                    "Connected DingTalk account does not exist",
+                ));
+            };
+            if version != envelope.payload.expected_version {
+                return Ok(version_conflict(version));
+            }
+            let now = Utc::now().to_rfc3339();
+            transaction.execute(
+                r#"
+                UPDATE dingtalk_account
+                SET status = 'disconnected', disconnected_at = ?2,
+                    version = version + 1, updated_at = ?2
+                WHERE id = ?1 AND version = ?3
+                "#,
+                params![envelope.payload.account_id, now, version],
+            )?;
+            Ok(CommandHandlerResult::applied(
+                "dingtalk_account.disconnected",
+                json!({ "accountId": envelope.payload.account_id, "version": version + 1 }),
+                None,
+            ))
+        })
+    }
+
+    pub fn expire_dingtalk_account(
+        &self,
+        database: &mut Database,
+        envelope: &CommandEnvelope<ExpireDingTalkAccountCommand>,
+    ) -> Result<CommandExecution> {
+        self.gateway.execute(database, envelope, |transaction| {
+            if !is_channel_host_for_provider(&envelope.actor, DINGTALK_PROVIDER) {
+                return Ok(rejected(
+                    "channel.host_required",
+                    "Only a trusted Channel Host can expire DingTalk OAuth",
+                ));
+            }
+            let version = transaction
+                .query_row(
+                    "SELECT version FROM dingtalk_account WHERE id = ?1 AND status = 'connected'",
+                    [&envelope.payload.account_id],
+                    |row| row.get::<_, i64>(0),
+                )
+                .optional()?;
+            let Some(version) = version else {
+                return Ok(rejected(
+                    "dingtalk_account.not_connected",
+                    "Connected DingTalk account does not exist",
+                ));
+            };
+            if version != envelope.payload.expected_version {
+                return Ok(version_conflict(version));
+            }
+            let now = Utc::now().to_rfc3339();
+            transaction.execute(
+                r#"
+                UPDATE dingtalk_account
+                SET status = 'oauth_expired', disconnected_at = ?2,
+                    version = version + 1, updated_at = ?2
+                WHERE id = ?1 AND version = ?3
+                "#,
+                params![envelope.payload.account_id, now, version],
+            )?;
+            Ok(CommandHandlerResult::applied(
+                "dingtalk_account.oauth_expired",
+                json!({ "accountId": envelope.payload.account_id, "version": version + 1 }),
+                None,
+            ))
+        })
+    }
+
     pub fn create_member_bot_publication_intent(
         &self,
         database: &mut Database,
@@ -1069,7 +1651,7 @@ impl ChannelService {
             anyhow::bail!("provisioningMode must be developer_session");
         }
         self.gateway.execute(database, envelope, |transaction| {
-            if !is_channel_host(&envelope.actor) {
+            if !is_channel_host_for_provider(&envelope.actor, FEISHU_PROVIDER) {
                 return Ok(rejected(
                     "channel.host_required",
                     "Only the trusted Feishu Channel Host can create publication intents",
@@ -1214,7 +1796,7 @@ impl ChannelService {
             validate_nonempty(code, "failureCode")?;
         }
         self.gateway.execute(database, envelope, |transaction| {
-            if !is_channel_host(&envelope.actor) {
+            if !is_channel_host_for_provider(&envelope.actor, FEISHU_PROVIDER) {
                 return Ok(rejected(
                     "channel.host_required",
                     "Only the trusted Feishu Channel Host can advance publication intents",
@@ -1423,6 +2005,439 @@ impl ChannelService {
         })
     }
 
+    pub fn create_dingtalk_publication_intent(
+        &self,
+        database: &mut Database,
+        envelope: &CommandEnvelope<CreateDingTalkPublicationIntentCommand>,
+    ) -> Result<CommandExecution> {
+        for (value, field) in [
+            (
+                &envelope.payload.publication_intent_id,
+                "publicationIntentId",
+            ),
+            (&envelope.payload.account_id, "accountId"),
+            (&envelope.payload.agent_id, "agentId"),
+            (&envelope.payload.expected_corp_id, "expectedCorpId"),
+        ] {
+            validate_nonempty(value, field)?;
+        }
+        validate_digest(
+            &envelope.payload.expected_user_id_digest,
+            "expectedUserIdDigest",
+        )?;
+        let requested_app_name = normalize_display_name(&envelope.payload.requested_app_name)?;
+        if envelope.payload.provisioning_mode != "dws_gateway" {
+            anyhow::bail!("provisioningMode must be dws_gateway");
+        }
+        self.gateway.execute(database, envelope, |transaction| {
+            if !is_channel_host_for_provider(&envelope.actor, DINGTALK_PROVIDER) {
+                return Ok(rejected(
+                    "channel.host_required",
+                    "Only a trusted Channel Host can create DingTalk publication intents",
+                ));
+            }
+            let account_matches: bool = transaction.query_row(
+                r#"
+                SELECT EXISTS(
+                    SELECT 1 FROM dingtalk_account
+                    WHERE id = ?1 AND status = 'connected'
+                      AND user_id_digest = ?2 AND corp_id = ?3
+                )
+                "#,
+                params![
+                    envelope.payload.account_id,
+                    envelope.payload.expected_user_id_digest,
+                    envelope.payload.expected_corp_id,
+                ],
+                |row| row.get(0),
+            )?;
+            if !account_matches {
+                return Ok(rejected(
+                    "dingtalk_account.identity_mismatch",
+                    "Publication requires the exact connected DingTalk identity",
+                ));
+            }
+            let agent_present: bool = transaction.query_row(
+                "SELECT EXISTS(SELECT 1 FROM agent_profile WHERE id = ?1 AND profile_status = 'present')",
+                [&envelope.payload.agent_id],
+                |row| row.get(0),
+            )?;
+            if !agent_present {
+                return Ok(rejected(
+                    "agent.unavailable",
+                    "Bot publication requires a present AgentProfile",
+                ));
+            }
+            let already_bound: bool = transaction.query_row(
+                "SELECT EXISTS(SELECT 1 FROM dingtalk_member_bot WHERE agent_id = ?1)",
+                [&envelope.payload.agent_id],
+                |row| row.get(0),
+            )?;
+            if already_bound {
+                return Ok(rejected(
+                    "dingtalk_member_bot.already_bound",
+                    "This member already has an immutable DingTalk App binding",
+                ));
+            }
+            let intent_exists: bool = transaction.query_row(
+                "SELECT EXISTS(SELECT 1 FROM dingtalk_member_bot_publication_intent WHERE agent_id = ?1)",
+                [&envelope.payload.agent_id],
+                |row| row.get(0),
+            )?;
+            if intent_exists {
+                return Ok(rejected(
+                    "dingtalk_publication_intent.already_exists",
+                    "DingTalk publication must resume the member's existing durable intent",
+                ));
+            }
+            let now = Utc::now().to_rfc3339();
+            transaction.execute(
+                r#"
+                INSERT INTO dingtalk_member_bot_publication_intent(
+                    id, agent_id, account_id, expected_user_id_digest,
+                    expected_corp_id, requested_app_name, provisioning_mode,
+                    state, remote_unified_app_id, app_key, robot_code,
+                    credential_ref, version_id, approval_mode,
+                    approver_user_id_digest, last_completed_step, failure_code,
+                    version, created_at, updated_at, completed_at
+                ) VALUES (
+                    ?1, ?2, ?3, ?4, ?5, ?6, 'dws_gateway',
+                    'created', NULL, NULL, NULL, NULL, NULL, NULL,
+                    NULL, NULL, NULL, 1, ?7, ?7, NULL
+                )
+                "#,
+                params![
+                    envelope.payload.publication_intent_id,
+                    envelope.payload.agent_id,
+                    envelope.payload.account_id,
+                    envelope.payload.expected_user_id_digest,
+                    envelope.payload.expected_corp_id,
+                    requested_app_name,
+                    now,
+                ],
+            )?;
+            Ok(CommandHandlerResult::applied(
+                "dingtalk_member_bot_publication_intent.created",
+                json!({
+                    "publicationIntentId": envelope.payload.publication_intent_id,
+                    "version": 1,
+                }),
+                Some(EntityReference {
+                    entity_type: "dingtalk_member_bot_publication_intent".to_string(),
+                    entity_id: envelope.payload.publication_intent_id.clone(),
+                }),
+            ))
+        })
+    }
+
+    pub fn advance_dingtalk_publication_intent(
+        &self,
+        database: &mut Database,
+        envelope: &CommandEnvelope<AdvanceDingTalkPublicationIntentCommand>,
+    ) -> Result<CommandExecution> {
+        validate_nonempty(
+            &envelope.payload.publication_intent_id,
+            "publicationIntentId",
+        )?;
+        validate_dingtalk_publication_state(&envelope.payload.state)?;
+        for (value, field) in [
+            (
+                envelope.payload.remote_unified_app_id.as_ref(),
+                "remoteUnifiedAppId",
+            ),
+            (envelope.payload.app_key.as_ref(), "appKey"),
+            (envelope.payload.robot_code.as_ref(), "robotCode"),
+            (envelope.payload.credential_ref.as_ref(), "credentialRef"),
+            (envelope.payload.version_id.as_ref(), "versionId"),
+            (
+                envelope.payload.last_completed_step.as_ref(),
+                "lastCompletedStep",
+            ),
+            (envelope.payload.failure_code.as_ref(), "failureCode"),
+        ] {
+            if let Some(value) = value {
+                validate_nonempty(value, field)?;
+            }
+        }
+        if let Some(digest) = &envelope.payload.approver_user_id_digest {
+            validate_digest(digest, "approverUserIdDigest")?;
+        }
+        if let Some(mode) = &envelope.payload.approval_mode {
+            if !matches!(mode.as_str(), "NO_APPROVAL" | "SELECT_APPROVER" | "AUTO") {
+                anyhow::bail!("approvalMode is not supported");
+            }
+        }
+        self.gateway.execute(database, envelope, |transaction| {
+            if !is_channel_host_for_provider(&envelope.actor, DINGTALK_PROVIDER) {
+                return Ok(rejected(
+                    "channel.host_required",
+                    "Only a trusted Channel Host can advance DingTalk publication intents",
+                ));
+            }
+            let current = transaction
+                .query_row(
+                    r#"
+                    SELECT agent_id, account_id, state, remote_unified_app_id,
+                           app_key, robot_code, credential_ref, version_id,
+                           approval_mode, approver_user_id_digest, version
+                    FROM dingtalk_member_bot_publication_intent
+                    WHERE id = ?1
+                    "#,
+                    [&envelope.payload.publication_intent_id],
+                    |row| {
+                        Ok((
+                            row.get::<_, String>(0)?,
+                            row.get::<_, String>(1)?,
+                            row.get::<_, String>(2)?,
+                            row.get::<_, Option<String>>(3)?,
+                            row.get::<_, Option<String>>(4)?,
+                            row.get::<_, Option<String>>(5)?,
+                            row.get::<_, Option<String>>(6)?,
+                            row.get::<_, Option<String>>(7)?,
+                            row.get::<_, Option<String>>(8)?,
+                            row.get::<_, Option<String>>(9)?,
+                            row.get::<_, i64>(10)?,
+                        ))
+                    },
+                )
+                .optional()?;
+            let Some((
+                agent_id,
+                account_id,
+                current_state,
+                current_unified_app_id,
+                current_app_key,
+                current_robot_code,
+                current_credential_ref,
+                current_version_id,
+                current_approval_mode,
+                current_approver_digest,
+                version,
+            )) = current
+            else {
+                return Ok(rejected(
+                    "dingtalk_publication_intent.not_found",
+                    "DingTalk publication intent does not exist",
+                ));
+            };
+            if version != envelope.payload.expected_version {
+                return Ok(version_conflict(version));
+            }
+            if !dingtalk_publication_transition_allowed(&current_state, &envelope.payload.state) {
+                return Ok(rejected(
+                    "dingtalk_publication_intent.invalid_transition",
+                    "DingTalk publication intent transition is not allowed",
+                ));
+            }
+            macro_rules! freeze_field {
+                ($current:expr, $incoming:expr, $code:literal, $message:literal) => {
+                    if $current.as_ref().is_some()
+                        && $incoming.as_ref().is_some()
+                        && $current.as_ref() != $incoming.as_ref()
+                    {
+                        return Ok(rejected($code, $message));
+                    }
+                };
+            }
+            freeze_field!(
+                current_unified_app_id,
+                envelope.payload.remote_unified_app_id,
+                "dingtalk_publication_intent.remote_app_conflict",
+                "Publication intent cannot change its unified App identity"
+            );
+            freeze_field!(
+                current_app_key,
+                envelope.payload.app_key,
+                "dingtalk_publication_intent.app_key_conflict",
+                "Publication intent cannot change its AppKey"
+            );
+            freeze_field!(
+                current_robot_code,
+                envelope.payload.robot_code,
+                "dingtalk_publication_intent.robot_code_conflict",
+                "Publication intent cannot change its robotCode"
+            );
+            freeze_field!(
+                current_credential_ref,
+                envelope.payload.credential_ref,
+                "dingtalk_publication_intent.credential_conflict",
+                "Publication intent cannot change its credential reference"
+            );
+            freeze_field!(
+                current_version_id,
+                envelope.payload.version_id,
+                "dingtalk_publication_intent.version_conflict",
+                "Publication intent cannot change its release version identity"
+            );
+            let remote_unified_app_id = envelope
+                .payload
+                .remote_unified_app_id
+                .clone()
+                .or(current_unified_app_id);
+            let app_key = envelope.payload.app_key.clone().or(current_app_key);
+            let robot_code = envelope.payload.robot_code.clone().or(current_robot_code);
+            let credential_ref = envelope
+                .payload
+                .credential_ref
+                .clone()
+                .or(current_credential_ref);
+            let version_id = envelope.payload.version_id.clone().or(current_version_id);
+            let approval_mode = envelope
+                .payload
+                .approval_mode
+                .clone()
+                .or(current_approval_mode);
+            let approver_digest = envelope
+                .payload
+                .approver_user_id_digest
+                .clone()
+                .or(current_approver_digest);
+            if dingtalk_state_requires_app(&envelope.payload.state)
+                && remote_unified_app_id.is_none()
+            {
+                return Ok(rejected(
+                    "dingtalk_publication_intent.remote_app_required",
+                    "This publication state requires a durably frozen unified App ID",
+                ));
+            }
+            if dingtalk_state_requires_credentials(&envelope.payload.state)
+                && (app_key.is_none() || credential_ref.is_none())
+            {
+                return Ok(rejected(
+                    "dingtalk_publication_intent.credentials_required",
+                    "This publication state requires frozen App credentials",
+                ));
+            }
+            if dingtalk_state_requires_robot(&envelope.payload.state) && robot_code.is_none() {
+                return Ok(rejected(
+                    "dingtalk_publication_intent.robot_required",
+                    "This publication state requires a frozen robotCode",
+                ));
+            }
+            if dingtalk_state_requires_version(&envelope.payload.state) && version_id.is_none() {
+                return Ok(rejected(
+                    "dingtalk_publication_intent.version_required",
+                    "This publication state requires a frozen version ID",
+                ));
+            }
+            if envelope.payload.state == "awaiting_approver_selection"
+                && approval_mode.as_deref() != Some("SELECT_APPROVER")
+            {
+                return Ok(rejected(
+                    "dingtalk_publication_intent.approver_selection_mode_required",
+                    "Approver selection requires SELECT_APPROVER mode",
+                ));
+            }
+            if envelope.payload.state == "awaiting_approval"
+                && approval_mode.as_deref() == Some("SELECT_APPROVER")
+                && approver_digest.is_none()
+            {
+                return Ok(rejected(
+                    "dingtalk_publication_intent.approver_required",
+                    "Selected-approver publication requires the Owner's explicit choice",
+                ));
+            }
+            if envelope.payload.state.starts_with("failed_")
+                && envelope.payload.failure_code.is_none()
+            {
+                return Ok(rejected(
+                    "dingtalk_publication_intent.failure_code_required",
+                    "A failed publication intent requires a failure code",
+                ));
+            }
+            if envelope.payload.state == "failed_unknown_remote_state"
+                && remote_unified_app_id.is_some()
+            {
+                return Ok(rejected(
+                    "dingtalk_publication_intent.known_app_is_recoverable",
+                    "A frozen unified App ID must use failed_recoverable",
+                ));
+            }
+            if current_state == "failed_unknown_remote_state"
+                && envelope.payload.state == "failed_recoverable"
+                && remote_unified_app_id.is_none()
+            {
+                return Ok(rejected(
+                    "dingtalk_publication_intent.reconciliation_remote_app_required",
+                    "An unknown create result needs a proven unified App ID before recovery",
+                ));
+            }
+            if matches!(
+                envelope.payload.state.as_str(),
+                "stream_verified" | "card_verified" | "completed"
+            ) {
+                let exact_binding: bool = transaction.query_row(
+                    r#"
+                    SELECT EXISTS(
+                        SELECT 1 FROM dingtalk_member_bot
+                        WHERE agent_id = ?1 AND account_id = ?2
+                          AND unified_app_id = ?3 AND app_key = ?4
+                          AND robot_code = ?5 AND credential_ref = ?6
+                          AND status = 'published'
+                    )
+                    "#,
+                    params![
+                        agent_id,
+                        account_id,
+                        remote_unified_app_id,
+                        app_key,
+                        robot_code,
+                        credential_ref,
+                    ],
+                    |row| row.get(0),
+                )?;
+                if !exact_binding {
+                    return Ok(rejected(
+                        "dingtalk_publication_intent.member_bot_binding_required",
+                        "Stream and card verification require the exact published Bot binding",
+                    ));
+                }
+            }
+            let now = Utc::now().to_rfc3339();
+            let completed_at = (envelope.payload.state == "completed").then_some(now.clone());
+            transaction.execute(
+                r#"
+                UPDATE dingtalk_member_bot_publication_intent
+                SET state = ?2, remote_unified_app_id = ?3, app_key = ?4,
+                    robot_code = ?5, credential_ref = ?6, version_id = ?7,
+                    approval_mode = ?8, approver_user_id_digest = ?9,
+                    last_completed_step = ?10, failure_code = ?11,
+                    completed_at = COALESCE(?12, completed_at),
+                    version = version + 1, updated_at = ?13
+                WHERE id = ?1 AND version = ?14
+                "#,
+                params![
+                    envelope.payload.publication_intent_id,
+                    envelope.payload.state,
+                    remote_unified_app_id,
+                    app_key,
+                    robot_code,
+                    credential_ref,
+                    version_id,
+                    approval_mode,
+                    approver_digest,
+                    envelope.payload.last_completed_step,
+                    envelope.payload.failure_code,
+                    completed_at,
+                    now,
+                    version,
+                ],
+            )?;
+            Ok(CommandHandlerResult::applied(
+                "dingtalk_member_bot_publication_intent.advanced",
+                json!({
+                    "publicationIntentId": envelope.payload.publication_intent_id,
+                    "state": envelope.payload.state,
+                    "version": version + 1,
+                }),
+                Some(EntityReference {
+                    entity_type: "dingtalk_member_bot_publication_intent".to_string(),
+                    entity_id: envelope.payload.publication_intent_id.clone(),
+                }),
+            ))
+        })
+    }
+
     pub fn upsert_feishu_member_bot(
         &self,
         database: &mut Database,
@@ -1442,7 +2457,7 @@ impl ChannelService {
         }
         let display_name = normalize_display_name(&envelope.payload.bot_display_name)?;
         self.gateway.execute(database, envelope, |transaction| {
-            if !is_channel_host(&envelope.actor) {
+            if !is_channel_host_for_provider(&envelope.actor, FEISHU_PROVIDER) {
                 return Ok(rejected(
                     "channel.host_required",
                     "Only the trusted Feishu Channel Host can persist Bot facts",
@@ -1605,6 +2620,214 @@ impl ChannelService {
         })
     }
 
+    pub fn upsert_dingtalk_member_bot(
+        &self,
+        database: &mut Database,
+        envelope: &CommandEnvelope<UpsertDingTalkMemberBotCommand>,
+    ) -> Result<CommandExecution> {
+        for (value, field) in [
+            (&envelope.payload.account_id, "accountId"),
+            (&envelope.payload.agent_id, "agentId"),
+            (&envelope.payload.unified_app_id, "unifiedAppId"),
+            (&envelope.payload.app_key, "appKey"),
+            (&envelope.payload.robot_code, "robotCode"),
+            (&envelope.payload.owner_user_id, "ownerUserId"),
+            (&envelope.payload.credential_ref, "credentialRef"),
+        ] {
+            validate_nonempty(value, field)?;
+        }
+        let display_name = normalize_display_name(&envelope.payload.bot_display_name)?;
+        self.gateway.execute(database, envelope, |transaction| {
+            if !is_channel_host_for_provider(&envelope.actor, DINGTALK_PROVIDER) {
+                return Ok(rejected(
+                    "channel.host_required",
+                    "Only a trusted Channel Host can persist DingTalk Bot facts",
+                ));
+            }
+            let agent_present: bool = transaction.query_row(
+                "SELECT EXISTS(SELECT 1 FROM agent_profile WHERE id = ?1 AND profile_status = 'present')",
+                [&envelope.payload.agent_id],
+                |row| row.get(0),
+            )?;
+            if !agent_present {
+                return Ok(rejected(
+                    "agent.unavailable",
+                    "Bot publication requires a present AgentProfile",
+                ));
+            }
+            let existing_binding = transaction
+                .query_row(
+                    r#"
+                    SELECT account_id, unified_app_id, app_key, robot_code,
+                           credential_ref, status
+                    FROM dingtalk_member_bot WHERE agent_id = ?1
+                    "#,
+                    [&envelope.payload.agent_id],
+                    |row| {
+                        Ok((
+                            row.get::<_, String>(0)?,
+                            row.get::<_, String>(1)?,
+                            row.get::<_, String>(2)?,
+                            row.get::<_, String>(3)?,
+                            row.get::<_, String>(4)?,
+                            row.get::<_, String>(5)?,
+                        ))
+                    },
+                )
+                .optional()?;
+            if let Some((account_id, unified_app_id, app_key, robot_code, credential_ref, status)) =
+                &existing_binding
+            {
+                if account_id != &envelope.payload.account_id
+                    || unified_app_id != &envelope.payload.unified_app_id
+                    || app_key != &envelope.payload.app_key
+                    || robot_code != &envelope.payload.robot_code
+                    || credential_ref != &envelope.payload.credential_ref
+                {
+                    return Ok(rejected(
+                        "dingtalk_member_bot.binding_immutable",
+                        "A member Bot cannot change its DingTalk App, robot, owner account, or credential identity",
+                    ));
+                }
+                if status != "published"
+                    && !dingtalk_member_bot_publication_ready(transaction, &envelope.payload)?
+                {
+                    return Ok(rejected(
+                        "dingtalk_member_bot.publication_state_required",
+                        "Reactivating a member Bot requires its matching publication state machine",
+                    ));
+                }
+            } else {
+                let account_connected: bool = transaction.query_row(
+                    "SELECT EXISTS(SELECT 1 FROM dingtalk_account WHERE id = ?1 AND status = 'connected')",
+                    [&envelope.payload.account_id],
+                    |row| row.get(0),
+                )?;
+                if !account_connected {
+                    return Ok(rejected(
+                        "dingtalk_account.not_connected",
+                        "Initial Bot publication requires the connected DingTalk account",
+                    ));
+                }
+                if !dingtalk_member_bot_publication_ready(transaction, &envelope.payload)? {
+                    return Ok(rejected(
+                        "dingtalk_member_bot.publication_state_required",
+                        "Initial Bot binding requires the matching publication state machine",
+                    ));
+                }
+            }
+            let owner_user_id_digest =
+                opaque_digest("dingtalk-user", &envelope.payload.owner_user_id);
+            let owner_matches_account: bool = transaction.query_row(
+                r#"
+                SELECT EXISTS(
+                    SELECT 1 FROM dingtalk_owner_identity
+                    WHERE account_id = ?1 AND user_id_digest = ?2
+                )
+                "#,
+                params![envelope.payload.account_id, owner_user_id_digest],
+                |row| row.get(0),
+            )?;
+            if !owner_matches_account {
+                return Ok(rejected(
+                    "dingtalk_owner_identity.conflict",
+                    "The App-scoped Owner must match the connected DingTalk account",
+                ));
+            }
+            let app_identity_conflict: bool = transaction.query_row(
+                r#"
+                SELECT EXISTS(
+                    SELECT 1 FROM dingtalk_owner_app_identity
+                    WHERE app_key = ?1
+                      AND (account_id <> ?2 OR user_id_digest <> ?3)
+                )
+                "#,
+                params![
+                    envelope.payload.app_key,
+                    envelope.payload.account_id,
+                    owner_user_id_digest,
+                ],
+                |row| row.get(0),
+            )?;
+            if app_identity_conflict {
+                return Ok(rejected(
+                    "dingtalk_owner_identity.conflict",
+                    "The frozen App-scoped Owner identity cannot be rebound",
+                ));
+            }
+            let corp_id: String = transaction.query_row(
+                "SELECT corp_id FROM dingtalk_account WHERE id = ?1",
+                [&envelope.payload.account_id],
+                |row| row.get(0),
+            )?;
+            let now = Utc::now().to_rfc3339();
+            transaction.execute(
+                r#"
+                INSERT INTO dingtalk_member_bot(
+                    agent_id, account_id, unified_app_id, app_key, robot_code,
+                    bot_display_name, credential_ref, owner_user_id_digest,
+                    status, failure_code, version, created_at, updated_at, published_at
+                ) VALUES (
+                    ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8,
+                    'published', NULL, 1, ?9, ?9, ?9
+                )
+                ON CONFLICT(agent_id) DO UPDATE SET
+                    bot_display_name = excluded.bot_display_name,
+                    status = 'published', failure_code = NULL,
+                    published_at = excluded.published_at,
+                    version = dingtalk_member_bot.version + 1,
+                    updated_at = excluded.updated_at
+                "#,
+                params![
+                    envelope.payload.agent_id,
+                    envelope.payload.account_id,
+                    envelope.payload.unified_app_id,
+                    envelope.payload.app_key,
+                    envelope.payload.robot_code,
+                    display_name,
+                    envelope.payload.credential_ref,
+                    owner_user_id_digest,
+                    now,
+                ],
+            )?;
+            transaction.execute(
+                r#"
+                INSERT INTO dingtalk_owner_app_identity(
+                    app_key, account_id, corp_id, user_id_digest,
+                    version, created_at, updated_at
+                ) VALUES (?1, ?2, ?3, ?4, 1, ?5, ?5)
+                ON CONFLICT(app_key) DO UPDATE SET
+                    version = CASE
+                        WHEN dingtalk_owner_app_identity.user_id_digest = excluded.user_id_digest
+                        THEN dingtalk_owner_app_identity.version
+                        ELSE dingtalk_owner_app_identity.version + 1
+                    END,
+                    updated_at = excluded.updated_at
+                "#,
+                params![
+                    envelope.payload.app_key,
+                    envelope.payload.account_id,
+                    corp_id,
+                    owner_user_id_digest,
+                    now,
+                ],
+            )?;
+            let version: i64 = transaction.query_row(
+                "SELECT version FROM dingtalk_member_bot WHERE agent_id = ?1",
+                [&envelope.payload.agent_id],
+                |row| row.get(0),
+            )?;
+            Ok(CommandHandlerResult::applied(
+                "dingtalk_member_bot.published",
+                json!({ "agentId": envelope.payload.agent_id, "version": version }),
+                Some(EntityReference {
+                    entity_type: "dingtalk_member_bot".to_string(),
+                    entity_id: envelope.payload.agent_id.clone(),
+                }),
+            ))
+        })
+    }
+
     pub fn verify_feishu_owner(
         &self,
         database: &mut Database,
@@ -1620,10 +2843,10 @@ impl ChannelService {
         )?;
         let display_name = normalize_display_name(&envelope.payload.sender_display_name)?;
         self.gateway.execute(database, envelope, |transaction| {
-            if !is_channel_host(&envelope.actor) {
+            if !is_channel_host_for_provider(&envelope.actor, &envelope.payload.provider) {
                 return Ok(rejected(
                     "channel.host_required",
-                    "Only the trusted Feishu Channel Host can verify sender identity",
+                    "Only this provider's trusted Channel Host can verify sender identity",
                 ));
             }
             let now = Utc::now().to_rfc3339();
@@ -1675,8 +2898,11 @@ impl ChannelService {
         validate_nonempty(&envelope.payload.tenant_key, "tenantKey")?;
         validate_nonempty(&envelope.payload.chat_id, "chatId")?;
         validate_nonempty(&envelope.payload.target_agent_id, "targetAgentId")?;
-        if envelope.payload.provider != FEISHU_PROVIDER {
-            anyhow::bail!("provider must be feishu");
+        if !matches!(
+            envelope.payload.provider.as_str(),
+            FEISHU_PROVIDER | DINGTALK_PROVIDER
+        ) {
+            anyhow::bail!("provider must be feishu or dingtalk");
         }
         if !quick_chat_path.is_dir() {
             anyhow::bail!("managed Quick Chat path is unavailable");
@@ -1685,14 +2911,15 @@ impl ChannelService {
             normalize_display_name(&envelope.payload.conversation_display_name)?;
         let canonical_path = quick_chat_path.to_string_lossy().to_string();
         self.gateway.execute(database, envelope, |transaction| {
-            if !is_channel_host(&envelope.actor) {
+            if !is_channel_host_for_provider(&envelope.actor, &envelope.payload.provider) {
                 return Ok(rejected(
                     "channel.host_required",
-                    "Only the trusted Feishu Channel Host can rotate a DM Camp",
+                    "Only this provider's trusted Channel Host can rotate a DM Camp",
                 ));
             }
             let owner = load_verified_owner_for_app(
                 transaction,
+                &envelope.payload.provider,
                 &envelope.payload.app_id,
                 &envelope.payload.tenant_key,
             )?;
@@ -1705,11 +2932,16 @@ impl ChannelService {
             let app_targets_agent: bool = transaction.query_row(
                 r#"
                 SELECT EXISTS(
-                    SELECT 1 FROM feishu_member_bot
-                    WHERE app_id = ?1 AND agent_id = ?2 AND status = 'published'
+                    SELECT 1 FROM channel_member_bot_directory
+                    WHERE provider = ?1 AND app_id = ?2
+                      AND agent_id = ?3 AND status = 'published'
                 )
                 "#,
-                params![envelope.payload.app_id, envelope.payload.target_agent_id],
+                params![
+                    envelope.payload.provider,
+                    envelope.payload.app_id,
+                    envelope.payload.target_agent_id
+                ],
                 |row| row.get(0),
             )?;
             if !app_targets_agent {
@@ -1719,7 +2951,7 @@ impl ChannelService {
                 ));
             }
             let conversation_id = stable_channel_conversation_id(
-                FEISHU_PROVIDER,
+                &envelope.payload.provider,
                 &envelope.payload.tenant_key,
                 &envelope.payload.chat_id,
                 "",
@@ -1729,7 +2961,7 @@ impl ChannelService {
             upsert_channel_conversation(
                 transaction,
                 &conversation_id,
-                FEISHU_PROVIDER,
+                &envelope.payload.provider,
                 &envelope.payload.tenant_key,
                 &envelope.payload.chat_id,
                 "",
@@ -1862,8 +3094,11 @@ impl ChannelService {
         database: &mut Database,
         envelope: &CommandEnvelope<ReconcileFeishuGroupRosterCommand>,
     ) -> Result<CommandExecution> {
-        if envelope.payload.provider != FEISHU_PROVIDER {
-            anyhow::bail!("only the Feishu channel provider is supported");
+        if !matches!(
+            envelope.payload.provider.as_str(),
+            FEISHU_PROVIDER | DINGTALK_PROVIDER
+        ) {
+            anyhow::bail!("channel provider must be feishu or dingtalk");
         }
         validate_nonempty(&envelope.payload.tenant_key, "tenantKey")?;
         validate_nonempty(&envelope.payload.chat_id, "chatId")?;
@@ -1875,20 +3110,21 @@ impl ChannelService {
         }
         let present_app_ids = sorted_unique(&envelope.payload.present_app_ids);
         let execution = self.gateway.execute(database, envelope, |transaction| {
-            if !is_channel_host(&envelope.actor) {
+            if !is_channel_host_for_provider(&envelope.actor, &envelope.payload.provider) {
                 return Ok(rejected(
                     "channel.host_required",
-                    "Only the trusted Feishu Channel Host can reconcile the Bot roster",
+                    "Only a trusted Channel Host can reconcile the Bot roster",
                 ));
             }
             let known_bots = query_rows(
                 transaction,
                 r#"
                 SELECT app_id, agent_id, status
-                FROM feishu_member_bot
+                FROM channel_member_bot_directory
+                WHERE provider = ?1
                 ORDER BY app_id
                 "#,
-                [],
+                [&envelope.payload.provider],
                 |row| {
                     Ok((
                         row.get::<_, String>(0)?,
@@ -2053,10 +3289,10 @@ impl ChannelService {
             },
         )?;
         self.gateway.execute(database, envelope, |transaction| {
-            if !is_channel_host(&envelope.actor) {
+            if !is_channel_host_for_provider(&envelope.actor, &envelope.payload.provider) {
                 return Ok(rejected(
                     "channel.host_required",
-                    "Only the trusted Feishu Channel Host can observe inbound events",
+                    "Only a trusted Channel Host can observe inbound events",
                 ));
             }
             let sender_display_name =
@@ -2077,7 +3313,7 @@ impl ChannelService {
             let FeishuOwnerClassification::Owner { principal_id } = owner else {
                 return Ok(rejected(
                     "channel.owner_required",
-                    "Only the verified Rovai owner can trigger a Feishu human message",
+                    "Only the verified Rovai owner can trigger a channel human message",
                 ));
             };
             let target_agent_ids = resolve_observation_targets(transaction, &envelope.payload)?;
@@ -2234,7 +3470,11 @@ impl ChannelService {
                         now_text,
                     ],
                 )?;
-                let ready = complete || expected.is_subset(&observed);
+                let ready = if envelope.payload.provider == DINGTALK_PROVIDER {
+                    complete
+                } else {
+                    complete || expected.is_subset(&observed)
+                };
                 return Ok(CommandHandlerResult::applied(
                     "channel.inbound.collecting",
                     json!({
@@ -2311,8 +3551,12 @@ impl ChannelService {
                     "aggregateId": aggregate_id,
                     "status": "collecting",
                     "observationCount": 1,
-                    "readyToFinalize": envelope.payload.canonical_mentions_complete
-                        || expected.is_subset(&observed),
+                    "readyToFinalize": if envelope.payload.provider == DINGTALK_PROVIDER {
+                        envelope.payload.canonical_mentions_complete
+                    } else {
+                        envelope.payload.canonical_mentions_complete
+                            || expected.is_subset(&observed)
+                    },
                 }),
                 Some(EntityReference {
                     entity_type: "channel_inbound_aggregate".to_string(),
@@ -2337,25 +3581,33 @@ impl ChannelService {
             if !is_channel_host(&envelope.actor) {
                 return Ok(rejected(
                     "channel.host_required",
-                    "Only the trusted Feishu Channel Host can finalize inbound events",
+                    "Only a trusted Channel Host can finalize inbound events",
                 ));
             }
             let aggregate = load_collecting_aggregate(transaction, &envelope.payload.aggregate_id)?;
             let Some(aggregate) = aggregate else {
                 let existing = transaction
                     .query_row(
-                        "SELECT status FROM channel_inbound_aggregate WHERE id = ?1",
+                        "SELECT status, provider FROM channel_inbound_aggregate WHERE id = ?1",
                         [&envelope.payload.aggregate_id],
-                        |row| row.get::<_, String>(0),
+                        |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
                     )
                     .optional()?;
-                return Ok(match existing.as_deref() {
-                    Some("finalized") => CommandHandlerResult::applied(
+                return Ok(match existing {
+                    Some((_, provider))
+                        if !is_channel_host_for_provider(&envelope.actor, &provider) =>
+                    {
+                        rejected(
+                            "channel.host_required",
+                            "Only this provider's trusted Channel Host can finalize inbound events",
+                        )
+                    }
+                    Some((status, _)) if status == "finalized" => CommandHandlerResult::applied(
                         "channel.inbound.already_finalized",
                         json!({ "aggregateId": envelope.payload.aggregate_id }),
                         None,
                     ),
-                    Some("failed") => rejected(
+                    Some((status, _)) if status == "failed" => rejected(
                         "channel.inbound.failed",
                         "Inbound aggregation is already terminally failed",
                     ),
@@ -2365,11 +3617,21 @@ impl ChannelService {
                     ),
                 });
             };
+            if !is_channel_host_for_provider(&envelope.actor, &aggregate.provider) {
+                return Ok(rejected(
+                    "channel.host_required",
+                    "Only this provider's trusted Channel Host can finalize inbound events",
+                ));
+            }
             let now = Utc::now();
             let now_text = now.to_rfc3339();
             let expected = parse_string_set(&aggregate.expected_app_ids_json)?;
             let observed = parse_string_set(&aggregate.observed_app_ids_json)?;
-            let ready = aggregate.canonical_mentions_complete || expected.is_subset(&observed);
+            let ready = if aggregate.provider == DINGTALK_PROVIDER {
+                aggregate.canonical_mentions_complete
+            } else {
+                aggregate.canonical_mentions_complete || expected.is_subset(&observed)
+            };
             if !ready {
                 if now
                     < chrono::DateTime::parse_from_rfc3339(&aggregate.deadline_at)?
@@ -2412,7 +3674,7 @@ impl ChannelService {
                     return Ok(CommandHandlerResult::rejected(
                         "channel.roster_sync_required",
                         json!({
-                            "message": "The Feishu group Bot roster must be reconciled before admission",
+                            "message": "The channel group Bot roster must be reconciled before admission",
                             "tenantKey": conversation.tenant_key,
                             "chatId": conversation.chat_id,
                         }),
@@ -2422,7 +3684,7 @@ impl ChannelService {
                     return Ok(CommandHandlerResult::rejected(
                         "channel.bot_not_in_roster",
                         json!({
-                            "message": "A mentioned member Bot is no longer in this Feishu group",
+                            "message": "A mentioned member Bot is no longer in this channel group",
                             "tenantKey": conversation.tenant_key,
                             "chatId": conversation.chat_id,
                             "appIds": app_ids,
@@ -2567,7 +3829,13 @@ impl ChannelService {
                     r#"
                     SELECT last_reconciliation_generation
                     FROM camp_membership_source_binding
-                    WHERE camp_id = ?1 AND source_namespace = 'feishu'
+                    WHERE camp_id = ?1 AND source_namespace = (
+                        SELECT conversation.provider
+                        FROM channel_conversation_binding AS source_binding
+                        JOIN channel_conversation AS conversation
+                          ON conversation.id = source_binding.channel_conversation_id
+                        WHERE source_binding.id = ?2
+                    )
                       AND binding_id = ?2
                     "#,
                     params![camp_id, binding.binding_id],
@@ -2661,20 +3929,24 @@ impl ChannelService {
         if envelope.payload.action == "bind" && envelope.payload.project_id.is_none() {
             anyhow::bail!("bind action requires projectId");
         }
-        validate_owner_identity_input(
-            FEISHU_PROVIDER,
-            &envelope.payload.app_id,
-            "callback",
-            envelope.payload.operator_open_id.as_deref(),
-            envelope.payload.operator_user_id.as_deref(),
-            envelope.payload.operator_union_id.as_deref(),
-        )?;
+        for (value, field) in [
+            (envelope.payload.operator_open_id.as_ref(), "operatorOpenId"),
+            (envelope.payload.operator_user_id.as_ref(), "operatorUserId"),
+            (
+                envelope.payload.operator_union_id.as_ref(),
+                "operatorUnionId",
+            ),
+        ] {
+            if let Some(value) = value {
+                validate_nonempty(value, field)?;
+            }
+        }
         refresh_project_catalog(database)?;
         self.gateway.execute(database, envelope, |transaction| {
             if !is_channel_host(&envelope.actor) {
                 return Ok(rejected(
                     "channel.host_required",
-                    "Only the trusted Feishu Channel Host can resolve a project card",
+                    "Only a trusted Channel Host can resolve a project card",
                 ));
             }
             let pending =
@@ -2685,6 +3957,20 @@ impl ChannelService {
                     "Pending Camp binding does not exist",
                 ));
             };
+            if !is_channel_host_for_provider(&envelope.actor, &pending.conversation.provider) {
+                return Ok(rejected(
+                    "channel.host_required",
+                    "Only this provider's trusted Channel Host can resolve a project card",
+                ));
+            }
+            validate_owner_identity_input(
+                &pending.conversation.provider,
+                &envelope.payload.app_id,
+                &pending.conversation.tenant_key,
+                envelope.payload.operator_open_id.as_deref(),
+                envelope.payload.operator_user_id.as_deref(),
+                envelope.payload.operator_union_id.as_deref(),
+            )?;
             if pending.acknowledgement_app_id != envelope.payload.app_id {
                 return Ok(rejected(
                     "channel.binding.callback_app_mismatch",
@@ -2693,8 +3979,9 @@ impl ChannelService {
             }
             let now = Utc::now();
             let now_text = now.to_rfc3339();
-            if !operator_matches_feishu_owner(
+            if !operator_matches_channel_owner(
                 transaction,
+                &pending.conversation.provider,
                 &envelope.payload.app_id,
                 &pending.owner_principal_id,
                 envelope.payload.operator_open_id.as_deref(),
@@ -2889,7 +4176,7 @@ impl ChannelService {
             if active_binding_exists {
                 return Ok(rejected(
                     "channel.binding.already_resolved",
-                    "This Feishu conversation already has an immutable Camp binding",
+                    "This channel conversation already has an immutable Camp binding",
                 ));
             }
             let messages = load_pending_messages(transaction, &pending.id)?;
@@ -2900,20 +4187,21 @@ impl ChannelService {
             for message in &messages {
                 all_targets.extend(message.target_agent_ids.iter().cloned());
             }
-            let expected_apps = app_ids_for_agents(transaction, &all_targets)?;
+            let expected_apps =
+                app_ids_for_agents(transaction, &pending.conversation.provider, &all_targets)?;
             let roster_agent_ids =
                 match group_roster_readiness(transaction, &pending.conversation, &expected_apps)? {
                     GroupRosterReadiness::Ready(agent_ids) => agent_ids,
                     GroupRosterReadiness::MissingState => {
                         return Ok(rejected(
                             "channel.roster_sync_required",
-                            "The Feishu group Bot roster must be reconciled before binding",
+                            "The channel group Bot roster must be reconciled before binding",
                         ));
                     }
                     GroupRosterReadiness::MissingApps(_) => {
                         return Ok(rejected(
                             "channel.bot_not_in_roster",
-                            "A selected message target Bot is no longer in the Feishu group",
+                            "A selected message target Bot is no longer in the channel group",
                         ));
                     }
                     GroupRosterReadiness::NotRequired => Vec::new(),
@@ -3074,42 +4362,48 @@ impl ChannelService {
         {
             anyhow::bail!("pageIndex must address an available execution console page");
         }
-        validate_owner_identity_input(
-            FEISHU_PROVIDER,
-            &envelope.payload.app_id,
-            "callback",
-            envelope.payload.operator_open_id.as_deref(),
-            envelope.payload.operator_user_id.as_deref(),
-            envelope.payload.operator_union_id.as_deref(),
-        )?;
         self.gateway.execute(database, envelope, |transaction| {
             if !is_channel_host(&envelope.actor) {
                 return Ok(rejected(
                     "channel.host_required",
-                    "Only the trusted Feishu Channel Host can authorize an execution console page",
+                    "Only a trusted Channel Host can authorize an execution console page",
                 ));
             }
             let projection = transaction
                 .query_row(
                     r#"
-                    SELECT console.target_app_id, console.external_message_id,
+                    SELECT channel_conversation.provider,
+                           console.target_app_id, console.external_message_id,
                            console.latest_sequence, console.state,
-                           owner.canonical_owner_principal_id
+                           COALESCE(
+                               feishu_owner.canonical_owner_principal_id,
+                               dingtalk_owner.canonical_owner_principal_id
+                           )
                     FROM channel_execution_console AS console
-                    LEFT JOIN feishu_member_bot AS bot
-                      ON bot.app_id = console.target_app_id AND bot.status = 'published'
-                    LEFT JOIN feishu_owner_identity AS owner
-                      ON owner.account_id = bot.account_id
+                    JOIN channel_turn_request AS request ON request.id = console.request_id
+                    JOIN channel_conversation_binding AS binding ON binding.id = request.binding_id
+                    JOIN channel_conversation
+                      ON channel_conversation.id = binding.channel_conversation_id
+                    LEFT JOIN channel_member_bot_directory AS bot
+                      ON bot.provider = channel_conversation.provider
+                     AND bot.app_id = console.target_app_id AND bot.status = 'published'
+                    LEFT JOIN feishu_owner_identity AS feishu_owner
+                      ON channel_conversation.provider = 'feishu'
+                     AND feishu_owner.account_id = bot.account_id
+                    LEFT JOIN dingtalk_owner_identity AS dingtalk_owner
+                      ON channel_conversation.provider = 'dingtalk'
+                     AND dingtalk_owner.account_id = bot.account_id
                     WHERE console.agent_run_id = ?1
                     "#,
                     [&envelope.payload.agent_run_id],
                     |row| {
                         Ok(ExecutionConsolePageProjection {
-                            target_app_id: row.get(0)?,
-                            external_message_id: row.get(1)?,
-                            latest_sequence: row.get(2)?,
-                            state: row.get(3)?,
-                            owner_principal_id: row.get(4)?,
+                            provider: row.get(0)?,
+                            target_app_id: row.get(1)?,
+                            external_message_id: row.get(2)?,
+                            latest_sequence: row.get(3)?,
+                            state: row.get(4)?,
+                            owner_principal_id: row.get(5)?,
                         })
                     },
                 )
@@ -3120,6 +4414,20 @@ impl ChannelService {
                     "Execution console does not exist",
                 ));
             };
+            if !is_channel_host_for_provider(&envelope.actor, &projection.provider) {
+                return Ok(rejected(
+                    "channel.host_required",
+                    "Only this provider's trusted Channel Host can authorize an execution console page",
+                ));
+            }
+            validate_owner_identity_input(
+                &projection.provider,
+                &envelope.payload.app_id,
+                "callback",
+                envelope.payload.operator_open_id.as_deref(),
+                envelope.payload.operator_user_id.as_deref(),
+                envelope.payload.operator_union_id.as_deref(),
+            )?;
             if projection.target_app_id != envelope.payload.app_id {
                 return Ok(rejected(
                     "channel.execution_console.callback_app_mismatch",
@@ -3141,8 +4449,9 @@ impl ChannelService {
                 ));
             };
             let now = Utc::now().to_rfc3339();
-            if !operator_matches_feishu_owner(
+            if !operator_matches_channel_owner(
                 transaction,
+                &projection.provider,
                 &envelope.payload.app_id,
                 owner_principal_id,
                 envelope.payload.operator_open_id.as_deref(),
@@ -3192,11 +4501,13 @@ impl ChannelService {
         if envelope.payload.limit == 0 || envelope.payload.limit > 100 {
             anyhow::bail!("limit must be between 1 and 100");
         }
+        let provider = channel_host_provider(&envelope.actor)
+            .context("Channel Host actor does not identify a supported provider")?;
         self.gateway.execute(database, envelope, |transaction| {
             if !is_channel_host(&envelope.actor) {
                 return Ok(rejected(
                     "channel.host_required",
-                    "Only the trusted Feishu Channel Host can run the outbox pump",
+                    "Only a trusted Channel Host can run the outbox pump",
                 ));
             }
             let now = Utc::now();
@@ -3207,18 +4518,22 @@ impl ChannelService {
                 SET status = 'failed', failure_code = 'aggregation_timeout',
                     finalized_at = ?1, updated_at = ?1
                 WHERE status = 'collecting' AND deadline_at <= ?1
+                  AND provider = ?2
                   AND canonical_mentions_complete = 0
-                  AND EXISTS (
-                      SELECT 1
-                      FROM json_each(channel_inbound_aggregate.expected_app_ids_json) AS expected
-                      WHERE NOT EXISTS (
+                  AND (
+                      provider = 'dingtalk'
+                      OR EXISTS (
                           SELECT 1
-                          FROM json_each(channel_inbound_aggregate.observed_app_ids_json) AS observed
-                          WHERE observed.value = expected.value
+                          FROM json_each(channel_inbound_aggregate.expected_app_ids_json) AS expected
+                          WHERE NOT EXISTS (
+                              SELECT 1
+                              FROM json_each(channel_inbound_aggregate.observed_app_ids_json) AS observed
+                              WHERE observed.value = expected.value
+                          )
                       )
                   )
                 "#,
-                [&now_text],
+                params![now_text, provider],
             )?;
             reconcile_obsolete_project_picker_card_revision(transaction, &now_text)?;
             reconcile_pending_project_picker_placement(transaction, &now_text)?;
@@ -3229,12 +4544,16 @@ impl ChannelService {
             promote_ready_requests(transaction, &now_text, &envelope.command_id)?;
             let claims = claim_deliveries(
                 transaction,
+                provider,
                 &envelope.payload.worker_id,
                 envelope.payload.limit,
                 &now,
             )?;
-            let roster_refreshes =
-                crate::message_delivery::pending_topic_roster_refreshes(transaction)?;
+            let roster_refreshes = if provider == FEISHU_PROVIDER {
+                crate::message_delivery::pending_topic_roster_refreshes(transaction)?
+            } else {
+                Vec::new()
+            };
             let retention_boundary =
                 (now - Duration::days(CHANNEL_TRANSPORT_RETENTION_DAYS)).to_rfc3339();
             transaction.execute(
@@ -3276,16 +4595,34 @@ impl ChannelService {
             if !is_channel_host(&envelope.actor) {
                 return Ok(rejected(
                     "channel.host_required",
-                    "Only the trusted Feishu Channel Host can settle deliveries",
+                    "Only a trusted Channel Host can settle deliveries",
                 ));
             }
             let state = transaction
                 .query_row(
                     r#"
-                    SELECT status, lease_owner, attempt_count, delivery_kind,
-                           console_id, request_id, payload_json, target_app_id,
-                           source_agent_id, source_camp_message_id
-                    FROM channel_delivery WHERE id = ?1
+                    SELECT delivery.status, delivery.lease_owner,
+                           delivery.attempt_count, delivery.delivery_kind,
+                           delivery.console_id, delivery.request_id,
+                           delivery.payload_json, delivery.target_app_id,
+                           delivery.source_agent_id,
+                           delivery.source_camp_message_id,
+                           COALESCE(
+                               request_conversation.provider,
+                               pending_conversation.provider
+                           )
+                    FROM channel_delivery AS delivery
+                    LEFT JOIN channel_turn_request AS request
+                      ON request.id = delivery.request_id
+                    LEFT JOIN channel_conversation_binding AS request_binding
+                      ON request_binding.id = request.binding_id
+                    LEFT JOIN channel_conversation AS request_conversation
+                      ON request_conversation.id = request_binding.channel_conversation_id
+                    LEFT JOIN pending_camp_binding AS pending
+                      ON pending.id = delivery.pending_binding_id
+                    LEFT JOIN channel_conversation AS pending_conversation
+                      ON pending_conversation.id = pending.channel_conversation_id
+                    WHERE delivery.id = ?1
                     "#,
                     [&envelope.payload.delivery_id],
                     |row| {
@@ -3300,6 +4637,7 @@ impl ChannelService {
                             row.get::<_, String>(7)?,
                             row.get::<_, Option<String>>(8)?,
                             row.get::<_, Option<String>>(9)?,
+                            row.get::<_, String>(10)?,
                         ))
                     },
                 )
@@ -3315,6 +4653,7 @@ impl ChannelService {
                 target_app_id,
                 source_agent_id,
                 source_camp_message_id,
+                provider,
             )) = state
             else {
                 return Ok(rejected(
@@ -3322,6 +4661,12 @@ impl ChannelService {
                     "Channel delivery does not exist",
                 ));
             };
+            if !is_channel_host_for_provider(&envelope.actor, &provider) {
+                return Ok(rejected(
+                    "channel.host_required",
+                    "Only this provider's trusted Channel Host can settle deliveries",
+                ));
+            }
             if matches!(status.as_str(), "sent" | "failed") {
                 return Ok(CommandHandlerResult::applied(
                     "channel.delivery.already_terminal",
@@ -3551,8 +4896,9 @@ fn reconcile_bound_group_memberships(
         r#"
         SELECT roster.agent_id
         FROM external_group_bot_roster AS roster
-        JOIN feishu_member_bot AS bot
-          ON bot.app_id = roster.app_id AND bot.agent_id = roster.agent_id
+        JOIN channel_member_bot_directory AS bot
+          ON bot.provider = roster.provider
+         AND bot.app_id = roster.app_id AND bot.agent_id = roster.agent_id
         WHERE roster.provider = ?1 AND roster.tenant_key = ?2
           AND roster.chat_id = ?3 AND roster.status = 'present'
           AND bot.status = 'published'
@@ -3570,16 +4916,14 @@ fn reconcile_bound_group_memberships(
             r#"
             SELECT member.agent_id
             FROM camp_member AS member
-            JOIN external_group_bot_roster AS roster
-              ON roster.agent_id = member.agent_id
-             AND roster.provider = ?2
-             AND roster.tenant_key = ?3
-             AND roster.chat_id = ?4
+            JOIN channel_member_bot_directory AS bot
+              ON bot.agent_id = member.agent_id
+             AND bot.provider = ?2
             WHERE member.camp_id = ?1 AND member.status = 'active'
               AND member.leave_requested_at IS NULL
             ORDER BY member.agent_id
             "#,
-            params![camp.camp_id, provider, tenant_key, chat_id],
+            params![camp.camp_id, provider],
             |row| row.get::<_, String>(0),
         )?
         .into_iter()
@@ -3587,7 +4931,12 @@ fn reconcile_bound_group_memberships(
 
         for agent_id in desired_agents.difference(&active_managed_agents) {
             let (membership_generation, reconciliation_generation) =
-                channel_membership_generations(database, &camp.camp_id, &camp.binding_id)?;
+                channel_membership_generations(
+                    database,
+                    provider,
+                    &camp.camp_id,
+                    &camp.binding_id,
+                )?;
             let execution = CollaborationService::default().add_camp_member(
                 database,
                 &CommandEnvelope {
@@ -3607,7 +4956,7 @@ fn reconcile_bound_group_memberships(
                         expected_membership_generation: membership_generation,
                         capability_overrides: json!({}),
                         source: Some(CampMembershipMutationSource {
-                            namespace: FEISHU_PROVIDER.to_string(),
+                            namespace: provider.to_string(),
                             binding_id: camp.binding_id.clone(),
                             reconciliation_generation,
                         }),
@@ -3616,7 +4965,7 @@ fn reconcile_bound_group_memberships(
             )?;
             if execution.result.status == CommandResultStatus::Rejected {
                 anyhow::bail!(
-                    "Feishu roster member add rejected: {}",
+                    "channel roster member add rejected: {}",
                     execution.result.code
                 );
             }
@@ -3643,8 +4992,12 @@ fn reconcile_bound_group_memberships(
                 // those Runs have reached terminal state.
                 continue;
             }
-            let (_, reconciliation_generation) =
-                channel_membership_generations(database, &camp.camp_id, &camp.binding_id)?;
+            let (_, reconciliation_generation) = channel_membership_generations(
+                database,
+                provider,
+                &camp.camp_id,
+                &camp.binding_id,
+            )?;
             let execution = CollaborationService::default().remove_camp_member(
                 database,
                 &CommandEnvelope {
@@ -3666,9 +5019,9 @@ fn reconcile_bound_group_memberships(
                         replacement_default_lead_agent_id: preview
                             .next_default_lead_agent_id
                             .clone(),
-                        reason: Some("removed_from_feishu_group".to_string()),
+                        reason: Some(format!("removed_from_{provider}_group")),
                         source: Some(CampMembershipMutationSource {
-                            namespace: FEISHU_PROVIDER.to_string(),
+                            namespace: provider.to_string(),
                             binding_id: camp.binding_id.clone(),
                             reconciliation_generation,
                         }),
@@ -3677,7 +5030,7 @@ fn reconcile_bound_group_memberships(
             )?;
             if execution.result.status == CommandResultStatus::Rejected {
                 anyhow::bail!(
-                    "Feishu roster member removal rejected: {}",
+                    "channel roster member removal rejected: {}",
                     execution.result.code
                 );
             }
@@ -3688,6 +5041,7 @@ fn reconcile_bound_group_memberships(
 
 fn channel_membership_generations(
     database: &Database,
+    provider: &str,
     camp_id: &str,
     binding_id: &str,
 ) -> Result<(i64, i64)> {
@@ -3699,13 +5053,18 @@ fn channel_membership_generations(
                    source.last_reconciliation_generation + 1
             FROM camp
             JOIN camp_membership_source_binding AS source
-              ON source.camp_id = camp.id
-             AND source.source_namespace = 'feishu'
-             AND source.binding_id = ?2
-             AND source.trusted_component_id = ?3
+             ON source.camp_id = camp.id
+             AND source.source_namespace = ?2
+             AND source.binding_id = ?3
+             AND source.trusted_component_id = ?4
             WHERE camp.id = ?1
             "#,
-            params![camp_id, binding_id, CHANNEL_MEMBERSHIP_SYNC_COMPONENT],
+            params![
+                camp_id,
+                provider,
+                binding_id,
+                CHANNEL_MEMBERSHIP_SYNC_COMPONENT
+            ],
             |row| Ok((row.get(0)?, row.get(1)?)),
         )
         .context("channel Camp membership source binding is missing")
@@ -3714,6 +5073,7 @@ fn channel_membership_generations(
 #[derive(Debug)]
 struct CollectingAggregate {
     id: String,
+    provider: String,
     expected_app_ids_json: String,
     observed_app_ids_json: String,
     canonical_mentions_complete: bool,
@@ -3747,6 +5107,7 @@ struct ChannelBindingAdmission {
 #[derive(Debug, Clone)]
 struct ChannelConversationAdmission {
     id: String,
+    provider: String,
     display_name: String,
     tenant_key: String,
     chat_id: String,
@@ -3784,6 +5145,7 @@ struct PendingBindingResolution {
 
 #[derive(Debug)]
 struct ExecutionConsolePageProjection {
+    provider: String,
     target_app_id: String,
     external_message_id: Option<String>,
     latest_sequence: i64,
@@ -3821,7 +5183,7 @@ fn load_collecting_aggregate(
     transaction
         .query_row(
             r#"
-            SELECT id, expected_app_ids_json, observed_app_ids_json,
+            SELECT id, provider, expected_app_ids_json, observed_app_ids_json,
                    canonical_mentions_complete, frozen_payload_json, deadline_at
             FROM channel_inbound_aggregate
             WHERE id = ?1 AND status = 'collecting'
@@ -3830,11 +5192,12 @@ fn load_collecting_aggregate(
             |row| {
                 Ok(CollectingAggregate {
                     id: row.get(0)?,
-                    expected_app_ids_json: row.get(1)?,
-                    observed_app_ids_json: row.get(2)?,
-                    canonical_mentions_complete: row.get(3)?,
-                    frozen_payload_json: row.get(4)?,
-                    deadline_at: row.get(5)?,
+                    provider: row.get(1)?,
+                    expected_app_ids_json: row.get(2)?,
+                    observed_app_ids_json: row.get(3)?,
+                    canonical_mentions_complete: row.get(4)?,
+                    frozen_payload_json: row.get(5)?,
+                    deadline_at: row.get(6)?,
                 })
             },
         )
@@ -3957,12 +5320,15 @@ fn validate_owner_identity_input(
     user_id: Option<&str>,
     union_id: Option<&str>,
 ) -> Result<()> {
-    if provider != FEISHU_PROVIDER {
-        anyhow::bail!("provider must be feishu");
+    if !matches!(provider, FEISHU_PROVIDER | DINGTALK_PROVIDER) {
+        anyhow::bail!("provider must be feishu or dingtalk");
     }
     validate_nonempty(app_id, "appId")?;
     validate_nonempty(tenant_key, "tenantKey")?;
-    if open_id.is_none() && user_id.is_none() && union_id.is_none() {
+    if provider == DINGTALK_PROVIDER && user_id.is_none() {
+        anyhow::bail!("a DingTalk sender userId is required");
+    }
+    if provider == FEISHU_PROVIDER && open_id.is_none() && user_id.is_none() && union_id.is_none() {
         anyhow::bail!("a Feishu sender identity is required");
     }
     for (value, field) in [
@@ -3992,6 +5358,16 @@ fn classify_and_record_feishu_owner(
     display_name: &str,
     now: &str,
 ) -> Result<FeishuOwnerClassification> {
+    if provider == DINGTALK_PROVIDER {
+        return classify_and_record_dingtalk_owner(
+            transaction,
+            app_id,
+            tenant_key,
+            user_id,
+            display_name,
+            now,
+        );
+    }
     let identity = transaction
         .query_row(
             r#"
@@ -4147,6 +5523,99 @@ fn classify_and_record_feishu_owner(
     Ok(FeishuOwnerClassification::Owner { principal_id })
 }
 
+fn classify_and_record_dingtalk_owner(
+    transaction: &Transaction<'_>,
+    app_key: &str,
+    corp_id: &str,
+    user_id: Option<&str>,
+    display_name: &str,
+    now: &str,
+) -> Result<FeishuOwnerClassification> {
+    let identity = transaction
+        .query_row(
+            r#"
+            SELECT owner.account_id, owner.canonical_owner_principal_id,
+                   owner.user_id_digest, app.user_id_digest, owner.corp_id
+            FROM dingtalk_member_bot AS bot
+            JOIN dingtalk_owner_identity AS owner ON owner.account_id = bot.account_id
+            JOIN dingtalk_owner_app_identity AS app
+              ON app.account_id = owner.account_id AND app.app_key = bot.app_key
+            WHERE bot.app_key = ?1 AND bot.status = 'published'
+            "#,
+            [app_key],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?,
+                    row.get::<_, String>(4)?,
+                ))
+            },
+        )
+        .optional()?;
+    let Some((account_id, principal_id, owner_digest, app_digest, frozen_corp_id)) = identity
+    else {
+        return Ok(FeishuOwnerClassification::Unverified);
+    };
+    if frozen_corp_id != corp_id {
+        return Ok(FeishuOwnerClassification::Unverified);
+    }
+    let Some(user_id) = user_id else {
+        return Ok(FeishuOwnerClassification::Unverified);
+    };
+    let actual_digest = opaque_digest("dingtalk-user", user_id);
+    if actual_digest != owner_digest {
+        return Ok(FeishuOwnerClassification::NonOwner);
+    }
+    if actual_digest != app_digest {
+        return Ok(FeishuOwnerClassification::Unverified);
+    }
+    transaction.execute(
+        r#"
+        UPDATE dingtalk_owner_identity
+        SET version = version + 1, updated_at = ?2
+        WHERE account_id = ?1
+        "#,
+        params![account_id, now],
+    )?;
+    let canonical_external_user_id = format!("owner:{account_id}");
+    transaction.execute(
+        r#"
+        INSERT INTO external_principal(
+            id, provider, tenant_key, external_user_id, display_name,
+            version, created_at, updated_at
+        ) VALUES (?1, 'dingtalk', ?2, ?3, ?4, 1, ?5, ?5)
+        ON CONFLICT(id) DO UPDATE SET
+            display_name = excluded.display_name,
+            version = CASE
+                WHEN external_principal.display_name IS excluded.display_name
+                THEN external_principal.version
+                ELSE external_principal.version + 1
+            END,
+            updated_at = excluded.updated_at
+        "#,
+        params![
+            principal_id,
+            corp_id,
+            canonical_external_user_id,
+            display_name,
+            now,
+        ],
+    )?;
+    persist_external_principal_identities(
+        transaction,
+        &principal_id,
+        DINGTALK_PROVIDER,
+        app_key,
+        None,
+        Some(user_id),
+        None,
+        now,
+    )?;
+    Ok(FeishuOwnerClassification::Owner { principal_id })
+}
+
 #[allow(clippy::too_many_arguments)]
 fn persist_external_principal_identities(
     transaction: &Transaction<'_>,
@@ -4191,9 +5660,30 @@ fn persist_external_principal_identities(
 
 fn load_verified_owner_for_app(
     transaction: &Transaction<'_>,
+    provider: &str,
     app_id: &str,
     tenant_key: &str,
 ) -> Result<Option<(String, String)>> {
+    if provider == DINGTALK_PROVIDER {
+        return transaction
+            .query_row(
+                r#"
+                SELECT owner.canonical_owner_principal_id, principal.display_name
+                FROM dingtalk_member_bot AS bot
+                JOIN dingtalk_owner_identity AS owner ON owner.account_id = bot.account_id
+                JOIN dingtalk_owner_app_identity AS app
+                  ON app.account_id = owner.account_id AND app.app_key = bot.app_key
+                JOIN external_principal AS principal
+                  ON principal.id = owner.canonical_owner_principal_id
+                WHERE bot.app_key = ?1 AND bot.status = 'published'
+                  AND owner.corp_id = ?2 AND principal.tenant_key = ?2
+                "#,
+                params![app_id, tenant_key],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .optional()
+            .map_err(Into::into);
+    }
     transaction
         .query_row(
             r#"
@@ -4212,6 +5702,76 @@ fn load_verified_owner_for_app(
         )
         .optional()
         .map_err(Into::into)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn operator_matches_channel_owner(
+    transaction: &Transaction<'_>,
+    provider: &str,
+    app_id: &str,
+    expected_principal_id: &str,
+    open_id: Option<&str>,
+    user_id: Option<&str>,
+    union_id: Option<&str>,
+    now: &str,
+) -> Result<bool> {
+    if provider == DINGTALK_PROVIDER {
+        let Some(user_id) = user_id else {
+            return Ok(false);
+        };
+        let expected_digest = opaque_digest("dingtalk-user", user_id);
+        let identity = transaction
+            .query_row(
+                r#"
+                SELECT owner.account_id, owner.user_id_digest, app.user_id_digest
+                FROM dingtalk_member_bot AS bot
+                JOIN dingtalk_owner_identity AS owner ON owner.account_id = bot.account_id
+                JOIN dingtalk_owner_app_identity AS app
+                  ON app.account_id = owner.account_id AND app.app_key = bot.app_key
+                WHERE bot.app_key = ?1 AND bot.status = 'published'
+                  AND owner.canonical_owner_principal_id = ?2
+                "#,
+                params![app_id, expected_principal_id],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?,
+                    ))
+                },
+            )
+            .optional()?;
+        let Some((account_id, owner_digest, app_digest)) = identity else {
+            return Ok(false);
+        };
+        if expected_digest != owner_digest || expected_digest != app_digest {
+            return Ok(false);
+        }
+        transaction.execute(
+            "UPDATE dingtalk_owner_identity SET version = version + 1, updated_at = ?2 WHERE account_id = ?1",
+            params![account_id, now],
+        )?;
+        persist_external_principal_identities(
+            transaction,
+            expected_principal_id,
+            DINGTALK_PROVIDER,
+            app_id,
+            None,
+            Some(user_id),
+            None,
+            now,
+        )?;
+        return Ok(true);
+    }
+    operator_matches_feishu_owner(
+        transaction,
+        app_id,
+        expected_principal_id,
+        open_id,
+        user_id,
+        union_id,
+        now,
+    )
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -4362,7 +5922,7 @@ fn load_channel_conversation(
     transaction
         .query_row(
             r#"
-            SELECT id, display_name, tenant_key, chat_id, conversation_kind
+            SELECT id, provider, display_name, tenant_key, chat_id, conversation_kind
             FROM channel_conversation
             WHERE id = ?1
             "#,
@@ -4370,10 +5930,11 @@ fn load_channel_conversation(
             |row| {
                 Ok(ChannelConversationAdmission {
                     id: row.get(0)?,
-                    display_name: row.get(1)?,
-                    tenant_key: row.get(2)?,
-                    chat_id: row.get(3)?,
-                    conversation_kind: row.get(4)?,
+                    provider: row.get(1)?,
+                    display_name: row.get(2)?,
+                    tenant_key: row.get(3)?,
+                    chat_id: row.get(4)?,
+                    conversation_kind: row.get(5)?,
                 })
             },
         )
@@ -4393,10 +5954,14 @@ fn group_roster_readiness(
         r#"
         SELECT EXISTS(
             SELECT 1 FROM external_group_bot_roster_state
-            WHERE provider = 'feishu' AND tenant_key = ?1 AND chat_id = ?2
+            WHERE provider = ?1 AND tenant_key = ?2 AND chat_id = ?3
         )
         "#,
-        params![conversation.tenant_key, conversation.chat_id],
+        params![
+            conversation.provider,
+            conversation.tenant_key,
+            conversation.chat_id
+        ],
         |row| row.get(0),
     )?;
     if !roster_state_exists {
@@ -4406,11 +5971,15 @@ fn group_roster_readiness(
         transaction,
         r#"
         SELECT app_id FROM external_group_bot_roster
-        WHERE provider = 'feishu' AND tenant_key = ?1 AND chat_id = ?2
+        WHERE provider = ?1 AND tenant_key = ?2 AND chat_id = ?3
           AND status = 'present'
         ORDER BY app_id
         "#,
-        params![conversation.tenant_key, conversation.chat_id],
+        params![
+            conversation.provider,
+            conversation.tenant_key,
+            conversation.chat_id
+        ],
         |row| row.get::<_, String>(0),
     )?
     .into_iter()
@@ -4427,14 +5996,19 @@ fn group_roster_readiness(
         r#"
         SELECT roster.agent_id
         FROM external_group_bot_roster AS roster
-        JOIN feishu_member_bot AS bot
-          ON bot.app_id = roster.app_id AND bot.agent_id = roster.agent_id
-        WHERE roster.provider = 'feishu'
-          AND roster.tenant_key = ?1 AND roster.chat_id = ?2
+        JOIN channel_member_bot_directory AS bot
+          ON bot.provider = roster.provider
+         AND bot.app_id = roster.app_id AND bot.agent_id = roster.agent_id
+        WHERE roster.provider = ?1
+          AND roster.tenant_key = ?2 AND roster.chat_id = ?3
           AND roster.status = 'present' AND bot.status = 'published'
         ORDER BY roster.agent_id
         "#,
-        params![conversation.tenant_key, conversation.chat_id],
+        params![
+            conversation.provider,
+            conversation.tenant_key,
+            conversation.chat_id
+        ],
         |row| row.get::<_, String>(0),
     )?;
     Ok(GroupRosterReadiness::Ready(present_agents))
@@ -4849,7 +6423,7 @@ fn reconcile_pending_project_picker_placement(
         transaction,
         r#"
         SELECT pending.id, pending.acknowledgement_app_id, pending.version,
-               conversation.id, conversation.display_name,
+               conversation.id, conversation.provider, conversation.display_name,
                conversation.tenant_key, conversation.chat_id,
                conversation.conversation_kind
         FROM pending_camp_binding AS pending
@@ -4879,10 +6453,11 @@ fn reconcile_pending_project_picker_placement(
                 row.get::<_, i64>(2)?,
                 ChannelConversationAdmission {
                     id: row.get(3)?,
-                    display_name: row.get(4)?,
-                    tenant_key: row.get(5)?,
-                    chat_id: row.get(6)?,
-                    conversation_kind: row.get(7)?,
+                    provider: row.get(4)?,
+                    display_name: row.get(5)?,
+                    tenant_key: row.get(6)?,
+                    chat_id: row.get(7)?,
+                    conversation_kind: row.get(8)?,
                 },
             ))
         },
@@ -4967,7 +6542,7 @@ fn reconcile_obsolete_project_picker_card_revision(
         transaction,
         r#"
         SELECT pending.id, pending.acknowledgement_app_id, pending.version,
-               conversation.id, conversation.display_name,
+               conversation.id, conversation.provider, conversation.display_name,
                conversation.tenant_key, conversation.chat_id,
                conversation.conversation_kind,
                delivery.external_delivery_message_id
@@ -5027,12 +6602,13 @@ fn reconcile_obsolete_project_picker_card_revision(
                 row.get::<_, i64>(2)?,
                 ChannelConversationAdmission {
                     id: row.get(3)?,
-                    display_name: row.get(4)?,
-                    tenant_key: row.get(5)?,
-                    chat_id: row.get(6)?,
-                    conversation_kind: row.get(7)?,
+                    provider: row.get(4)?,
+                    display_name: row.get(5)?,
+                    tenant_key: row.get(6)?,
+                    chat_id: row.get(7)?,
+                    conversation_kind: row.get(8)?,
                 },
-                row.get::<_, Option<String>>(8)?,
+                row.get::<_, Option<String>>(9)?,
             ))
         },
     )?;
@@ -5261,7 +6837,7 @@ fn load_pending_binding_resolution(
                    ),
                    pending.status, pending.version,
                    pending.nonce_digest, pending.expires_at,
-                   conversation.id, conversation.display_name,
+                   conversation.id, conversation.provider, conversation.display_name,
                    conversation.tenant_key, conversation.chat_id,
                    conversation.conversation_kind
             FROM pending_camp_binding AS pending
@@ -5282,10 +6858,11 @@ fn load_pending_binding_resolution(
                     expires_at: row.get(7)?,
                     conversation: ChannelConversationAdmission {
                         id: row.get(8)?,
-                        display_name: row.get(9)?,
-                        tenant_key: row.get(10)?,
-                        chat_id: row.get(11)?,
-                        conversation_kind: row.get(12)?,
+                        provider: row.get(9)?,
+                        display_name: row.get(10)?,
+                        tenant_key: row.get(11)?,
+                        chat_id: row.get(12)?,
+                        conversation_kind: row.get(13)?,
                     },
                 })
             },
@@ -5338,6 +6915,7 @@ fn load_pending_messages(
 
 fn app_ids_for_agents(
     transaction: &Transaction<'_>,
+    provider: &str,
     agent_ids: &BTreeSet<String>,
 ) -> Result<BTreeSet<String>> {
     let mut app_ids = BTreeSet::new();
@@ -5345,15 +6923,15 @@ fn app_ids_for_agents(
         let app_id = transaction
             .query_row(
                 r#"
-                SELECT app_id FROM feishu_member_bot
-                WHERE agent_id = ?1 AND status = 'published'
+                SELECT app_id FROM channel_member_bot_directory
+                WHERE provider = ?1 AND agent_id = ?2 AND status = 'published'
                 "#,
-                [agent_id],
+                params![provider, agent_id],
                 |row| row.get::<_, String>(0),
             )
             .optional()?;
         let Some(app_id) = app_id else {
-            anyhow::bail!("pending target Agent has no published Feishu Bot");
+            anyhow::bail!("pending target Agent has no published channel Bot");
         };
         app_ids.insert(app_id);
     }
@@ -5428,7 +7006,12 @@ fn create_channel_camp(
         INSERT INTO camp_membership_source_binding(
             camp_id, source_namespace, binding_id, trusted_component_id,
             last_reconciliation_generation, created_at, updated_at
-        ) VALUES (?1, 'feishu', ?2, ?3, 0, ?4, ?4)
+        )
+        SELECT ?1, conversation.provider, binding.id, ?3, 0, ?4, ?4
+        FROM channel_conversation_binding AS binding
+        JOIN channel_conversation AS conversation
+          ON conversation.id = binding.channel_conversation_id
+        WHERE binding.id = ?2
         "#,
         params![
             camp_id,
@@ -5469,7 +7052,7 @@ fn try_admit_request(
                    channel_turn_request.structured_content_json,
                    channel_turn_request.addressed_agent_ids_json,
                    channel_turn_request.ack_app_id,
-                   conversation.conversation_kind, conversation.tenant_key,
+                   conversation.provider, conversation.conversation_kind, conversation.tenant_key,
                    conversation.chat_id
             FROM channel_turn_request
             JOIN channel_conversation_binding AS binding
@@ -5495,6 +7078,7 @@ fn try_admit_request(
                     row.get::<_, String>(5)?,
                     row.get::<_, String>(6)?,
                     row.get::<_, String>(7)?,
+                    row.get::<_, String>(8)?,
                 ))
             },
         )
@@ -5505,6 +7089,7 @@ fn try_admit_request(
         content_json,
         targets_json,
         ack_app_id,
+        provider,
         conversation_kind,
         tenant_key,
         chat_id,
@@ -5517,8 +7102,8 @@ fn try_admit_request(
     for agent_id in &targets {
         let bot_state = transaction
             .query_row(
-                "SELECT app_id, status FROM feishu_member_bot WHERE agent_id = ?1",
-                [agent_id],
+                "SELECT app_id, status FROM channel_member_bot_directory WHERE provider = ?1 AND agent_id = ?2",
+                params![provider, agent_id],
                 |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
             )
             .optional()?;
@@ -5545,11 +7130,11 @@ fn try_admit_request(
                 r#"
                 SELECT EXISTS(
                     SELECT 1 FROM external_group_bot_roster
-                    WHERE provider = 'feishu' AND tenant_key = ?1 AND chat_id = ?2
-                      AND agent_id = ?3 AND status = 'present'
+                    WHERE provider = ?1 AND tenant_key = ?2 AND chat_id = ?3
+                      AND agent_id = ?4 AND status = 'present'
                 )
                 "#,
-                params![tenant_key, chat_id, agent_id],
+                params![provider, tenant_key, chat_id, agent_id],
                 |row| row.get(0),
             )?;
             if !present {
@@ -6015,9 +7600,12 @@ fn project_active_request_deliveries(transaction: &Transaction<'_>, now: &str) -
         transaction,
         r#"
         SELECT request.id, request.camp_turn_id, request.trigger_camp_sequence,
-               request.ack_app_id, request.camp_id, binding.channel_conversation_id
+               request.ack_app_id, request.camp_id, binding.channel_conversation_id,
+               channel_conversation.provider
         FROM channel_turn_request AS request
         JOIN channel_conversation_binding AS binding ON binding.id = request.binding_id
+        JOIN channel_conversation
+          ON channel_conversation.id = binding.channel_conversation_id
         WHERE request.status = 'admitted'
         ORDER BY request.created_at, request.id
         "#,
@@ -6030,6 +7618,7 @@ fn project_active_request_deliveries(transaction: &Transaction<'_>, now: &str) -
                 row.get::<_, String>(3)?,
                 row.get::<_, String>(4)?,
                 row.get::<_, String>(5)?,
+                row.get::<_, String>(6)?,
             ))
         },
     )?;
@@ -6040,6 +7629,7 @@ fn project_active_request_deliveries(transaction: &Transaction<'_>, now: &str) -
         ack_app_id,
         camp_id,
         channel_conversation_id,
+        provider,
     ) in active
     {
         let run_states = query_rows(
@@ -6055,13 +7645,14 @@ fn project_active_request_deliveries(transaction: &Transaction<'_>, now: &str) -
             LEFT JOIN camp_message AS output
               ON output.source_agent_run_id = run.id
              AND output.author_type = 'agent' AND output.tombstoned_at IS NULL
-            LEFT JOIN feishu_member_bot AS bot
-              ON bot.agent_id = conversation.agent_id AND bot.status = 'published'
+            LEFT JOIN channel_member_bot_directory AS bot
+              ON bot.provider = ?2 AND bot.agent_id = conversation.agent_id
+             AND bot.status = 'published'
             WHERE run.camp_turn_id = ?1
             GROUP BY run.id, conversation.agent_id, run.status, run.version, bot.app_id
             ORDER BY run.created_at, run.id
             "#,
-            [&camp_turn_id],
+            params![camp_turn_id, provider],
             |row| {
                 Ok((
                     row.get::<_, String>(0)?,
@@ -6089,7 +7680,7 @@ fn project_active_request_deliveries(transaction: &Transaction<'_>, now: &str) -
                     &json!({
                         "kind": "attention",
                         "failureCode": "channel.author_bot_unpublished",
-                        "text": "一名队员已开始执行，但其飞书 Bot 当前不可用；Rovai 没有用其他 Bot 冒充发送执行台。",
+                        "text": "一名队员已开始执行，但其对应渠道 Bot 当前不可用；Rovai 没有用其他 Bot 冒充发送执行台。",
                     }),
                     now,
                 )?;
@@ -6135,7 +7726,7 @@ fn project_active_request_deliveries(transaction: &Transaction<'_>, now: &str) -
         for (message_id, agent_id, body, structured_content_json) in outputs {
             let content: StructuredCampMessageContent =
                 serde_json::from_str(&structured_content_json)?;
-            if let Some(author_app_id) = bot_app_id(transaction, &agent_id)? {
+            if let Some(author_app_id) = bot_app_id(transaction, &provider, &agent_id)? {
                 if !body.trim().is_empty() {
                     insert_delivery(
                         transaction,
@@ -6178,7 +7769,7 @@ fn project_active_request_deliveries(transaction: &Transaction<'_>, now: &str) -
                     &json!({
                         "kind": "attention",
                         "failureCode": "channel.author_bot_unpublished",
-                        "text": "一名队员已产生公开回复，但其飞书 Bot 当前不可用；Rovai 没有用其他 Bot 冒充发送。",
+                        "text": "一名队员已产生公开回复，但其对应渠道 Bot 当前不可用；Rovai 没有用其他 Bot 冒充发送。",
                     }),
                     now,
                 )?;
@@ -6576,6 +8167,7 @@ fn promote_ready_requests(
 
 fn claim_deliveries(
     transaction: &Transaction<'_>,
+    provider: &str,
     worker_id: &str,
     limit: usize,
     now: &chrono::DateTime<Utc>,
@@ -6597,6 +8189,24 @@ fn claim_deliveries(
         SELECT delivery.id
         FROM channel_delivery AS delivery
         WHERE delivery.status = 'pending' AND delivery.available_at <= ?1
+          AND COALESCE(
+              (
+                  SELECT conversation.provider
+                  FROM channel_turn_request AS request
+                  JOIN channel_conversation_binding AS binding
+                    ON binding.id = request.binding_id
+                  JOIN channel_conversation AS conversation
+                    ON conversation.id = binding.channel_conversation_id
+                  WHERE request.id = delivery.request_id
+              ),
+              (
+                  SELECT conversation.provider
+                  FROM pending_camp_binding AS pending
+                  JOIN channel_conversation AS conversation
+                    ON conversation.id = pending.channel_conversation_id
+                  WHERE pending.id = delivery.pending_binding_id
+              )
+          ) = ?2
           AND (
               delivery.delivery_kind <> 'project_selection'
               OR json_extract(delivery.payload_json, '$.placement') = 'conversation'
@@ -6652,9 +8262,9 @@ fn claim_deliveries(
           )
         ORDER BY delivery.priority, delivery.available_at,
                  delivery.created_at, delivery.id
-        LIMIT ?2
+        LIMIT ?3
         "#,
-        params![now_text, i64::try_from(limit)?],
+        params![now_text, provider, i64::try_from(limit)?],
         |row| row.get::<_, String>(0),
     )?;
     let lease_expires_at = (*now + Duration::seconds(DELIVERY_LEASE_SECONDS)).to_rfc3339();
@@ -6718,11 +8328,24 @@ fn claim_deliveries(
                                  request.external_principal_id,
                                  pending.owner_principal_id
                              )
-                         AND identity.provider = 'feishu'
+                         AND identity.provider = COALESCE(
+                             request_conversation.provider,
+                             pending_conversation.provider
+                         )
                          AND identity.app_id = delivery.target_app_id
-                         AND identity.identity_kind = 'open_id'
+                         AND identity.identity_kind = CASE COALESCE(
+                             request_conversation.provider,
+                             pending_conversation.provider
+                         )
+                             WHEN 'dingtalk' THEN 'user_id'
+                             ELSE 'open_id'
+                         END
                        LIMIT 1
                    ) AS recipient_open_id
+                   ,COALESCE(
+                       request_conversation.provider,
+                       pending_conversation.provider
+                   ) AS provider
             FROM channel_delivery AS delivery
             LEFT JOIN channel_turn_request AS request ON request.id = delivery.request_id
             LEFT JOIN channel_conversation_binding AS binding ON binding.id = request.binding_id
@@ -6732,8 +8355,12 @@ fn claim_deliveries(
               ON pending.id = delivery.pending_binding_id
             LEFT JOIN channel_conversation AS pending_conversation
               ON pending_conversation.id = pending.channel_conversation_id
-            LEFT JOIN feishu_member_bot AS bot
-              ON bot.app_id = delivery.target_app_id
+            LEFT JOIN channel_member_bot_directory AS bot
+              ON bot.provider = COALESCE(
+                    request_conversation.provider,
+                    pending_conversation.provider
+                 )
+             AND bot.app_id = delivery.target_app_id
             LEFT JOIN channel_execution_console AS console
               ON console.id = delivery.console_id
             WHERE delivery.id = ?1
@@ -6750,6 +8377,7 @@ fn claim_deliveries(
                 })?;
                 Ok(ClaimedChannelDelivery {
                     delivery_id: row.get(0)?,
+                    provider: row.get(12)?,
                     request_id: row.get(1)?,
                     delivery_kind: row.get(2)?,
                     target_app_id: row.get(3)?,
@@ -6803,13 +8431,13 @@ fn resolve_observation_targets(
     for app_id in &expected_apps {
         let agent_id = transaction
             .query_row(
-                "SELECT agent_id FROM feishu_member_bot WHERE app_id = ?1 AND status = 'published'",
-                [app_id],
+                "SELECT agent_id FROM channel_member_bot_directory WHERE provider = ?1 AND app_id = ?2 AND status = 'published'",
+                params![command.provider, app_id],
                 |row| row.get::<_, String>(0),
             )
             .optional()?
             .with_context(|| {
-                format!("expected Feishu App {app_id} is not a published member Bot")
+                format!("expected channel App {app_id} is not a published member Bot")
             })?;
         targets_by_app.insert(app_id.clone(), agent_id);
     }
@@ -6893,8 +8521,11 @@ fn build_external_content(
 }
 
 fn validate_observation_input(command: &ObserveChannelInboundCommand) -> Result<()> {
-    if command.provider != FEISHU_PROVIDER {
-        anyhow::bail!("only the Feishu channel provider is supported");
+    if !matches!(
+        command.provider.as_str(),
+        FEISHU_PROVIDER | DINGTALK_PROVIDER
+    ) {
+        anyhow::bail!("channel provider must be feishu or dingtalk");
     }
     for (value, field) in [
         (&command.app_id, "appId"),
@@ -6924,6 +8555,9 @@ fn validate_observation_input(command: &ObserveChannelInboundCommand) -> Result<
         "p2p" | "group" | "topic"
     ) {
         anyhow::bail!("conversationKind must be p2p, group or topic");
+    }
+    if command.provider == DINGTALK_PROVIDER && command.conversation_kind == "topic" {
+        anyhow::bail!("DingTalk topic admission is disabled until capability probes pass");
     }
     if (command.conversation_kind == "topic") != !command.topic_key.is_empty() {
         anyhow::bail!("topic conversation requires exactly one topicKey");
@@ -7041,6 +8675,132 @@ fn publication_intent_requires_app(state: &str) -> bool {
     )
 }
 
+fn validate_dingtalk_publication_state(value: &str) -> Result<()> {
+    if !matches!(
+        value,
+        "created"
+            | "account_verified"
+            | "app_created"
+            | "credentials_read"
+            | "avatar_configured"
+            | "robot_configured"
+            | "permissions_configured"
+            | "version_created"
+            | "awaiting_approver_selection"
+            | "awaiting_approval"
+            | "version_released"
+            | "stream_verified"
+            | "card_verified"
+            | "completed"
+            | "failed_recoverable"
+            | "failed_unknown_remote_state"
+    ) {
+        anyhow::bail!("unknown DingTalk member Bot publication state");
+    }
+    Ok(())
+}
+
+fn dingtalk_publication_transition_allowed(current: &str, next: &str) -> bool {
+    if current == next {
+        return true;
+    }
+    if current == "completed" || next == "created" {
+        return false;
+    }
+    if matches!(next, "failed_recoverable" | "failed_unknown_remote_state") {
+        return true;
+    }
+    if current == "failed_unknown_remote_state" {
+        return next == "failed_recoverable";
+    }
+    if current == "failed_recoverable" {
+        return next != "created";
+    }
+    if current == "version_created" {
+        return matches!(
+            next,
+            "awaiting_approver_selection" | "awaiting_approval" | "version_released"
+        );
+    }
+    if current == "awaiting_approver_selection" {
+        return matches!(next, "awaiting_approval" | "version_released");
+    }
+    if current == "awaiting_approval" {
+        return next == "version_released";
+    }
+    let rank = |state: &str| match state {
+        "created" => Some(0),
+        "account_verified" => Some(1),
+        "app_created" => Some(2),
+        "credentials_read" => Some(3),
+        "avatar_configured" => Some(4),
+        "robot_configured" => Some(5),
+        "permissions_configured" => Some(6),
+        "version_created" => Some(7),
+        "version_released" => Some(8),
+        "stream_verified" => Some(9),
+        "card_verified" => Some(10),
+        "completed" => Some(11),
+        _ => None,
+    };
+    match (rank(current), rank(next)) {
+        (Some(current), Some(next)) => next == current + 1,
+        _ => false,
+    }
+}
+
+fn dingtalk_state_requires_app(state: &str) -> bool {
+    !matches!(
+        state,
+        "created" | "account_verified" | "failed_recoverable" | "failed_unknown_remote_state"
+    )
+}
+
+fn dingtalk_state_requires_credentials(state: &str) -> bool {
+    matches!(
+        state,
+        "credentials_read"
+            | "avatar_configured"
+            | "robot_configured"
+            | "permissions_configured"
+            | "version_created"
+            | "awaiting_approver_selection"
+            | "awaiting_approval"
+            | "version_released"
+            | "stream_verified"
+            | "card_verified"
+            | "completed"
+    )
+}
+
+fn dingtalk_state_requires_robot(state: &str) -> bool {
+    matches!(
+        state,
+        "robot_configured"
+            | "permissions_configured"
+            | "version_created"
+            | "awaiting_approver_selection"
+            | "awaiting_approval"
+            | "version_released"
+            | "stream_verified"
+            | "card_verified"
+            | "completed"
+    )
+}
+
+fn dingtalk_state_requires_version(state: &str) -> bool {
+    matches!(
+        state,
+        "version_created"
+            | "awaiting_approver_selection"
+            | "awaiting_approval"
+            | "version_released"
+            | "stream_verified"
+            | "card_verified"
+            | "completed"
+    )
+}
+
 fn validate_nonempty(value: &str, field: &str) -> Result<()> {
     if value.trim() != value || value.is_empty() || value.len() > 512 {
         anyhow::bail!("{field} must be a bounded canonical value");
@@ -7083,11 +8843,15 @@ fn sorted_unique(values: &[String]) -> BTreeSet<String> {
     values.iter().cloned().collect()
 }
 
-fn bot_app_id(transaction: &Transaction<'_>, agent_id: &str) -> Result<Option<String>> {
+fn bot_app_id(
+    transaction: &Transaction<'_>,
+    provider: &str,
+    agent_id: &str,
+) -> Result<Option<String>> {
     transaction
         .query_row(
-            "SELECT app_id FROM feishu_member_bot WHERE agent_id = ?1 AND status = 'published'",
-            [agent_id],
+            "SELECT app_id FROM channel_member_bot_directory WHERE provider = ?1 AND agent_id = ?2 AND status = 'published'",
+            params![provider, agent_id],
             |row| row.get(0),
         )
         .optional()
@@ -7099,7 +8863,28 @@ fn is_owner(actor: &ActorRef) -> bool {
 }
 
 fn is_channel_host(actor: &ActorRef) -> bool {
-    matches!(actor, ActorRef::System { component_id } if component_id == FEISHU_CHANNEL_HOST_COMPONENT)
+    matches!(
+        actor,
+        ActorRef::System { component_id }
+            if component_id == FEISHU_CHANNEL_HOST_COMPONENT
+                || component_id == DINGTALK_CHANNEL_HOST_COMPONENT
+    )
+}
+
+fn channel_host_provider(actor: &ActorRef) -> Option<&'static str> {
+    match actor {
+        ActorRef::System { component_id } if component_id == FEISHU_CHANNEL_HOST_COMPONENT => {
+            Some(FEISHU_PROVIDER)
+        }
+        ActorRef::System { component_id } if component_id == DINGTALK_CHANNEL_HOST_COMPONENT => {
+            Some(DINGTALK_PROVIDER)
+        }
+        _ => None,
+    }
+}
+
+fn is_channel_host_for_provider(actor: &ActorRef, provider: &str) -> bool {
+    channel_host_provider(actor) == Some(provider)
 }
 
 fn rejected(code: &str, message: &str) -> CommandHandlerResult {
@@ -7130,6 +8915,32 @@ fn member_bot_publication_ready(
             command.agent_id,
             command.account_id,
             command.app_id,
+            command.credential_ref,
+        ],
+        |row| row.get(0),
+    )?)
+}
+
+fn dingtalk_member_bot_publication_ready(
+    transaction: &Transaction<'_>,
+    command: &UpsertDingTalkMemberBotCommand,
+) -> Result<bool> {
+    Ok(transaction.query_row(
+        r#"
+        SELECT EXISTS(
+            SELECT 1 FROM dingtalk_member_bot_publication_intent
+            WHERE agent_id = ?1 AND account_id = ?2
+              AND remote_unified_app_id = ?3 AND app_key = ?4
+              AND robot_code = ?5 AND credential_ref = ?6
+              AND state = 'version_released'
+        )
+        "#,
+        params![
+            command.agent_id,
+            command.account_id,
+            command.unified_app_id,
+            command.app_key,
+            command.robot_code,
             command.credential_ref,
         ],
         |row| row.get(0),
@@ -7170,6 +8981,31 @@ mod tests {
         }
     }
 
+    fn dingtalk_host_envelope<P>(command_id: &str, payload: P) -> CommandEnvelope<P> {
+        CommandEnvelope {
+            command_id: command_id.to_string(),
+            actor: ActorRef::System {
+                component_id: DINGTALK_CHANNEL_HOST_COMPONENT.to_string(),
+            },
+            camp_id: None,
+            expected_versions: Vec::new(),
+            execution_epoch: None,
+            payload,
+        }
+    }
+
+    fn provider_host_envelope<P>(
+        provider: &str,
+        command_id: &str,
+        payload: P,
+    ) -> CommandEnvelope<P> {
+        if provider == DINGTALK_PROVIDER {
+            dingtalk_host_envelope(command_id, payload)
+        } else {
+            host_envelope(command_id, payload)
+        }
+    }
+
     fn connect_account(service: &ChannelService, database: &mut Database) {
         connect_account_with_command_id(service, database, "account");
     }
@@ -7200,6 +9036,147 @@ mod tests {
 
     fn owner_user_digest() -> String {
         opaque_digest("feishu-user", "user_1")
+    }
+
+    fn dingtalk_owner_user_digest() -> String {
+        opaque_digest("dingtalk-user", "owner-staff-1")
+    }
+
+    fn connect_dingtalk_account(service: &ChannelService, database: &mut Database) {
+        service
+            .upsert_dingtalk_account(
+                database,
+                &dingtalk_host_envelope(
+                    "dingtalk-account",
+                    UpsertDingTalkAccountCommand {
+                        account_id: "dingtalk-account-1".to_string(),
+                        user_id_digest: dingtalk_owner_user_digest(),
+                        corp_id: "ding-corp-1".to_string(),
+                        user_name: "Owner".to_string(),
+                        corp_name: "测试组织".to_string(),
+                        oauth_profile_ref: "dingtalk/oauth/profile-1".to_string(),
+                    },
+                ),
+            )
+            .unwrap();
+    }
+
+    fn advance_dingtalk_publication(
+        service: &ChannelService,
+        database: &mut Database,
+        agent_id: &str,
+        expected_version: i64,
+        state: &str,
+        approval_mode: Option<&str>,
+        approver_user_id_digest: Option<String>,
+    ) -> CommandExecution {
+        let remote_unified_app_id =
+            dingtalk_state_requires_app(state).then(|| format!("ding-unified-{agent_id}"));
+        let app_key =
+            dingtalk_state_requires_credentials(state).then(|| format!("ding-app-{agent_id}"));
+        let robot_code =
+            dingtalk_state_requires_robot(state).then(|| format!("ding-robot-{agent_id}"));
+        let credential_ref = dingtalk_state_requires_credentials(state)
+            .then(|| format!("dingtalk/member/{agent_id}"));
+        let version_id =
+            dingtalk_state_requires_version(state).then(|| format!("ding-version-{agent_id}"));
+        service
+            .advance_dingtalk_publication_intent(
+                database,
+                &dingtalk_host_envelope(
+                    &format!("dingtalk-{agent_id}-{state}-{expected_version}"),
+                    AdvanceDingTalkPublicationIntentCommand {
+                        publication_intent_id: format!("dingtalk-intent-{agent_id}"),
+                        expected_version,
+                        state: state.to_string(),
+                        remote_unified_app_id,
+                        app_key,
+                        robot_code,
+                        credential_ref,
+                        version_id,
+                        approval_mode: approval_mode.map(str::to_string),
+                        approver_user_id_digest,
+                        last_completed_step: Some(state.to_string()),
+                        failure_code: None,
+                    },
+                ),
+            )
+            .unwrap()
+    }
+
+    fn publish_dingtalk_bot(service: &ChannelService, database: &mut Database, agent_id: &str) {
+        service
+            .create_dingtalk_publication_intent(
+                database,
+                &dingtalk_host_envelope(
+                    &format!("dingtalk-create-{agent_id}"),
+                    CreateDingTalkPublicationIntentCommand {
+                        publication_intent_id: format!("dingtalk-intent-{agent_id}"),
+                        account_id: "dingtalk-account-1".to_string(),
+                        agent_id: agent_id.to_string(),
+                        expected_user_id_digest: dingtalk_owner_user_digest(),
+                        expected_corp_id: "ding-corp-1".to_string(),
+                        requested_app_name: agent_id.to_string(),
+                        provisioning_mode: "dws_gateway".to_string(),
+                    },
+                ),
+            )
+            .unwrap();
+        for (expected_version, state) in [
+            (1, "account_verified"),
+            (2, "app_created"),
+            (3, "credentials_read"),
+            (4, "avatar_configured"),
+            (5, "robot_configured"),
+            (6, "permissions_configured"),
+            (7, "version_created"),
+            (8, "version_released"),
+        ] {
+            let advanced = advance_dingtalk_publication(
+                service,
+                database,
+                agent_id,
+                expected_version,
+                state,
+                Some("NO_APPROVAL"),
+                None,
+            );
+            assert_eq!(advanced.result.status, CommandResultStatus::Applied);
+        }
+        service
+            .upsert_dingtalk_member_bot(
+                database,
+                &dingtalk_host_envelope(
+                    &format!("dingtalk-publish-{agent_id}"),
+                    UpsertDingTalkMemberBotCommand {
+                        account_id: "dingtalk-account-1".to_string(),
+                        agent_id: agent_id.to_string(),
+                        unified_app_id: format!("ding-unified-{agent_id}"),
+                        app_key: format!("ding-app-{agent_id}"),
+                        robot_code: format!("ding-robot-{agent_id}"),
+                        owner_user_id: "owner-staff-1".to_string(),
+                        bot_display_name: agent_id.to_string(),
+                        credential_ref: format!("dingtalk/member/{agent_id}"),
+                    },
+                ),
+            )
+            .unwrap();
+        for (expected_version, state) in [
+            (9, "stream_verified"),
+            (10, "card_verified"),
+            (11, "completed"),
+        ] {
+            let advanced = advance_dingtalk_publication(
+                service,
+                database,
+                agent_id,
+                expected_version,
+                state,
+                Some("NO_APPROVAL"),
+                None,
+            );
+            assert_eq!(advanced.result.status, CommandResultStatus::Applied);
+        }
     }
 
     fn quick_chat_path(database: &Database) -> std::path::PathBuf {
@@ -7551,6 +9528,22 @@ mod tests {
         pending_binding_id: &str,
         command_id: &str,
     ) -> CommandExecution {
+        resolve_pending_for_provider(
+            service,
+            database,
+            pending_binding_id,
+            command_id,
+            FEISHU_PROVIDER,
+        )
+    }
+
+    fn resolve_pending_for_provider(
+        service: &ChannelService,
+        database: &mut Database,
+        pending_binding_id: &str,
+        command_id: &str,
+        provider: &str,
+    ) -> CommandExecution {
         let existing_picker = database
             .connection()
             .query_row(
@@ -7593,7 +9586,8 @@ mod tests {
                 let tick = service
                     .host_tick(
                         database,
-                        &host_envelope(
+                        &provider_host_envelope(
+                            provider,
                             &format!("{command_id}-picker-tick"),
                             ChannelHostTickCommand {
                                 worker_id: worker_id.clone(),
@@ -7617,7 +9611,8 @@ mod tests {
                 service
                     .settle_delivery(
                         database,
-                        &host_envelope(
+                        &provider_host_envelope(
+                            provider,
                             &format!("{command_id}-picker-sent"),
                             SettleChannelDeliveryCommand {
                                 delivery_id,
@@ -7643,7 +9638,8 @@ mod tests {
         service
             .resolve_pending_camp_binding(
                 database,
-                &host_envelope(
+                &provider_host_envelope(
+                    provider,
                     command_id,
                     ResolvePendingCampBindingCommand {
                         pending_binding_id: pending_binding_id.to_string(),
@@ -7653,9 +9649,15 @@ mod tests {
                         project_id: Some(project_id),
                         expected_version: payload["expectedVersion"].as_i64().unwrap(),
                         nonce: payload["nonce"].as_str().unwrap().to_string(),
-                        operator_open_id: Some("ou_user".to_string()),
-                        operator_user_id: Some("ignored-envelope-user".to_string()),
-                        operator_union_id: Some("union_user".to_string()),
+                        operator_open_id: (provider == FEISHU_PROVIDER)
+                            .then(|| "ou_user".to_string()),
+                        operator_user_id: Some(if provider == DINGTALK_PROVIDER {
+                            "owner-staff-1".to_string()
+                        } else {
+                            "ignored-envelope-user".to_string()
+                        }),
+                        operator_union_id: (provider == FEISHU_PROVIDER)
+                            .then(|| "union_user".to_string()),
                     },
                 ),
             )
@@ -7700,6 +9702,709 @@ mod tests {
                 .unwrap();
             assert_eq!(count, 0, "{table} must not be created for a non-owner");
         }
+    }
+
+    #[test]
+    fn dingtalk_publication_requires_explicit_approver_and_freezes_the_app_binding() {
+        let mut database = seeded_runtime_database_owned();
+        let service = ChannelService::default();
+        connect_dingtalk_account(&service, &mut database);
+        service
+            .create_dingtalk_publication_intent(
+                &mut database,
+                &dingtalk_host_envelope(
+                    "dingtalk-approval-create",
+                    CreateDingTalkPublicationIntentCommand {
+                        publication_intent_id: "dingtalk-intent-agent_1".to_string(),
+                        account_id: "dingtalk-account-1".to_string(),
+                        agent_id: "agent_1".to_string(),
+                        expected_user_id_digest: dingtalk_owner_user_digest(),
+                        expected_corp_id: "ding-corp-1".to_string(),
+                        requested_app_name: "木瓦".to_string(),
+                        provisioning_mode: "dws_gateway".to_string(),
+                    },
+                ),
+            )
+            .unwrap();
+        for (expected_version, state) in [
+            (1, "account_verified"),
+            (2, "app_created"),
+            (3, "credentials_read"),
+            (4, "avatar_configured"),
+            (5, "robot_configured"),
+            (6, "permissions_configured"),
+            (7, "version_created"),
+        ] {
+            let advanced = advance_dingtalk_publication(
+                &service,
+                &mut database,
+                "agent_1",
+                expected_version,
+                state,
+                None,
+                None,
+            );
+            assert_eq!(advanced.result.status, CommandResultStatus::Applied);
+        }
+
+        let missing_approver = advance_dingtalk_publication(
+            &service,
+            &mut database,
+            "agent_1",
+            8,
+            "awaiting_approval",
+            Some("SELECT_APPROVER"),
+            None,
+        );
+        assert_eq!(
+            missing_approver.result.status,
+            CommandResultStatus::Rejected
+        );
+        assert_eq!(
+            missing_approver.result.code,
+            "dingtalk_publication_intent.approver_required"
+        );
+        let selecting = advance_dingtalk_publication(
+            &service,
+            &mut database,
+            "agent_1",
+            8,
+            "awaiting_approver_selection",
+            Some("SELECT_APPROVER"),
+            None,
+        );
+        assert_eq!(selecting.result.status, CommandResultStatus::Applied);
+        let approver_digest = opaque_digest("dingtalk-user", "approver-1");
+        let released = advance_dingtalk_publication(
+            &service,
+            &mut database,
+            "agent_1",
+            9,
+            "version_released",
+            Some("SELECT_APPROVER"),
+            Some(approver_digest),
+        );
+        assert_eq!(released.result.status, CommandResultStatus::Applied);
+
+        let published = service
+            .upsert_dingtalk_member_bot(
+                &mut database,
+                &dingtalk_host_envelope(
+                    "dingtalk-approval-publish",
+                    UpsertDingTalkMemberBotCommand {
+                        account_id: "dingtalk-account-1".to_string(),
+                        agent_id: "agent_1".to_string(),
+                        unified_app_id: "ding-unified-agent_1".to_string(),
+                        app_key: "ding-app-agent_1".to_string(),
+                        robot_code: "ding-robot-agent_1".to_string(),
+                        owner_user_id: "owner-staff-1".to_string(),
+                        bot_display_name: "木瓦".to_string(),
+                        credential_ref: "dingtalk/member/agent_1".to_string(),
+                    },
+                ),
+            )
+            .unwrap();
+        assert_eq!(published.result.status, CommandResultStatus::Applied);
+        let rebound = service
+            .upsert_dingtalk_member_bot(
+                &mut database,
+                &dingtalk_host_envelope(
+                    "dingtalk-approval-rebind",
+                    UpsertDingTalkMemberBotCommand {
+                        account_id: "dingtalk-account-1".to_string(),
+                        agent_id: "agent_1".to_string(),
+                        unified_app_id: "ding-unified-other".to_string(),
+                        app_key: "ding-app-other".to_string(),
+                        robot_code: "ding-robot-other".to_string(),
+                        owner_user_id: "owner-staff-1".to_string(),
+                        bot_display_name: "木瓦".to_string(),
+                        credential_ref: "dingtalk/member/other".to_string(),
+                    },
+                ),
+            )
+            .unwrap();
+        assert_eq!(rebound.result.status, CommandResultStatus::Rejected);
+        assert_eq!(rebound.result.code, "dingtalk_member_bot.binding_immutable");
+
+        let snapshot = service.dingtalk_snapshot(&mut database).unwrap();
+        assert_eq!(snapshot.account.unwrap().corp_id, "ding-corp-1");
+        assert_eq!(snapshot.member_bots.len(), 1);
+        assert_eq!(snapshot.member_bots[0].app_key, "ding-app-agent_1");
+        assert_eq!(snapshot.publication_intents[0].state, "version_released");
+    }
+
+    #[test]
+    fn dingtalk_recoverable_publication_reenters_its_durable_watermark() {
+        let mut database = seeded_runtime_database_owned();
+        let service = ChannelService::default();
+        connect_dingtalk_account(&service, &mut database);
+        service
+            .create_dingtalk_publication_intent(
+                &mut database,
+                &dingtalk_host_envelope(
+                    "dingtalk-recovery-create",
+                    CreateDingTalkPublicationIntentCommand {
+                        publication_intent_id: "dingtalk-intent-agent_1".to_string(),
+                        account_id: "dingtalk-account-1".to_string(),
+                        agent_id: "agent_1".to_string(),
+                        expected_user_id_digest: dingtalk_owner_user_digest(),
+                        expected_corp_id: "ding-corp-1".to_string(),
+                        requested_app_name: "木瓦".to_string(),
+                        provisioning_mode: "dws_gateway".to_string(),
+                    },
+                ),
+            )
+            .unwrap();
+        for (expected_version, state) in [
+            (1, "account_verified"),
+            (2, "app_created"),
+            (3, "credentials_read"),
+        ] {
+            let advanced = advance_dingtalk_publication(
+                &service,
+                &mut database,
+                "agent_1",
+                expected_version,
+                state,
+                None,
+                None,
+            );
+            assert_eq!(advanced.result.status, CommandResultStatus::Applied);
+        }
+        let failed = service
+            .advance_dingtalk_publication_intent(
+                &mut database,
+                &dingtalk_host_envelope(
+                    "dingtalk-recovery-failed",
+                    AdvanceDingTalkPublicationIntentCommand {
+                        publication_intent_id: "dingtalk-intent-agent_1".to_string(),
+                        expected_version: 4,
+                        state: "failed_recoverable".to_string(),
+                        remote_unified_app_id: Some("ding-unified-agent_1".to_string()),
+                        app_key: Some("ding-app-agent_1".to_string()),
+                        robot_code: None,
+                        credential_ref: Some("dingtalk/member/agent_1".to_string()),
+                        version_id: None,
+                        approval_mode: None,
+                        approver_user_id_digest: None,
+                        last_completed_step: Some("credentials_read".to_string()),
+                        failure_code: Some("dingtalk_dws_timeout".to_string()),
+                    },
+                ),
+            )
+            .unwrap();
+        assert_eq!(failed.result.status, CommandResultStatus::Applied);
+
+        let recovered = advance_dingtalk_publication(
+            &service,
+            &mut database,
+            "agent_1",
+            5,
+            "credentials_read",
+            None,
+            None,
+        );
+        assert_eq!(recovered.result.status, CommandResultStatus::Applied);
+        let snapshot = service.dingtalk_snapshot(&mut database).unwrap();
+        assert_eq!(snapshot.publication_intents[0].state, "credentials_read");
+        assert_eq!(snapshot.publication_intents[0].failure_code, None);
+
+        service
+            .create_dingtalk_publication_intent(
+                &mut database,
+                &dingtalk_host_envelope(
+                    "dingtalk-unknown-create",
+                    CreateDingTalkPublicationIntentCommand {
+                        publication_intent_id: "dingtalk-intent-agent_2".to_string(),
+                        account_id: "dingtalk-account-1".to_string(),
+                        agent_id: "agent_2".to_string(),
+                        expected_user_id_digest: dingtalk_owner_user_digest(),
+                        expected_corp_id: "ding-corp-1".to_string(),
+                        requested_app_name: "岩兰".to_string(),
+                        provisioning_mode: "dws_gateway".to_string(),
+                    },
+                ),
+            )
+            .unwrap();
+        let verified = advance_dingtalk_publication(
+            &service,
+            &mut database,
+            "agent_2",
+            1,
+            "account_verified",
+            None,
+            None,
+        );
+        assert_eq!(verified.result.status, CommandResultStatus::Applied);
+        let unknown = service
+            .advance_dingtalk_publication_intent(
+                &mut database,
+                &dingtalk_host_envelope(
+                    "dingtalk-create-unknown",
+                    AdvanceDingTalkPublicationIntentCommand {
+                        publication_intent_id: "dingtalk-intent-agent_2".to_string(),
+                        expected_version: 2,
+                        state: "failed_unknown_remote_state".to_string(),
+                        remote_unified_app_id: None,
+                        app_key: None,
+                        robot_code: None,
+                        credential_ref: None,
+                        version_id: None,
+                        approval_mode: None,
+                        approver_user_id_digest: None,
+                        last_completed_step: Some("account_verified".to_string()),
+                        failure_code: Some("dingtalk_app_create_unknown_remote_state".to_string()),
+                    },
+                ),
+            )
+            .unwrap();
+        assert_eq!(unknown.result.status, CommandResultStatus::Applied);
+        let unsafe_retry = service
+            .advance_dingtalk_publication_intent(
+                &mut database,
+                &dingtalk_host_envelope(
+                    "dingtalk-create-unknown-retry",
+                    AdvanceDingTalkPublicationIntentCommand {
+                        publication_intent_id: "dingtalk-intent-agent_2".to_string(),
+                        expected_version: 3,
+                        state: "failed_recoverable".to_string(),
+                        remote_unified_app_id: None,
+                        app_key: None,
+                        robot_code: None,
+                        credential_ref: None,
+                        version_id: None,
+                        approval_mode: None,
+                        approver_user_id_digest: None,
+                        last_completed_step: Some("account_verified".to_string()),
+                        failure_code: Some("retry_requested".to_string()),
+                    },
+                ),
+            )
+            .unwrap();
+        assert_eq!(unsafe_retry.result.status, CommandResultStatus::Rejected);
+        assert_eq!(
+            unsafe_retry.result.code,
+            "dingtalk_publication_intent.reconciliation_remote_app_required"
+        );
+    }
+
+    #[test]
+    fn dingtalk_owner_dm_reuses_atomic_admission_and_topics_fail_closed() {
+        let mut database = seeded_runtime_database_owned();
+        let service = ChannelService::default();
+        connect_dingtalk_account(&service, &mut database);
+        publish_dingtalk_bot(&service, &mut database, "agent_1");
+        let verified = service
+            .verify_feishu_owner(
+                &mut database,
+                &dingtalk_host_envelope(
+                    "dingtalk-owner-verify",
+                    VerifyFeishuOwnerCommand {
+                        provider: DINGTALK_PROVIDER.to_string(),
+                        app_id: "ding-app-agent_1".to_string(),
+                        tenant_key: "ding-corp-1".to_string(),
+                        sender_open_id: None,
+                        sender_user_id: Some("owner-staff-1".to_string()),
+                        sender_union_id: None,
+                        sender_display_name: "Owner".to_string(),
+                    },
+                ),
+            )
+            .unwrap();
+        assert_eq!(verified.result.payload["classification"], "owner");
+        let quick_chat_path = quick_chat_path(&database);
+        let started = service
+            .start_new_feishu_dm(
+                &mut database,
+                &quick_chat_path,
+                &dingtalk_host_envelope(
+                    "dingtalk-dm-new",
+                    StartNewFeishuDmCommand {
+                        provider: DINGTALK_PROVIDER.to_string(),
+                        app_id: "ding-app-agent_1".to_string(),
+                        tenant_key: "ding-corp-1".to_string(),
+                        chat_id: "ding-dm-1".to_string(),
+                        conversation_display_name: "Owner 与木瓦".to_string(),
+                        target_agent_id: "agent_1".to_string(),
+                    },
+                ),
+            )
+            .unwrap();
+        assert_eq!(started.result.status, CommandResultStatus::Applied);
+
+        let mut observation = observation_command(
+            "ding-app-agent_1",
+            "ding-message-1",
+            "ding-dm-1",
+            "",
+            "p2p",
+            "帮我检查登录模块",
+            &[("agent_1", "ding-app-agent_1")],
+            false,
+        );
+        observation.provider = DINGTALK_PROVIDER.to_string();
+        observation.tenant_key = "ding-corp-1".to_string();
+        observation.sender_external_user_id = "owner-staff-1".to_string();
+        observation.sender_open_id = None;
+        observation.sender_user_id = Some("owner-staff-1".to_string());
+        observation.sender_union_id = None;
+        let observed = service
+            .observe_inbound(
+                &mut database,
+                &dingtalk_host_envelope("dingtalk-observe", observation),
+            )
+            .unwrap();
+        assert_eq!(observed.result.code, "channel.inbound.collecting");
+        assert_eq!(observed.result.payload["readyToFinalize"], false);
+        let wrong_host = service
+            .finalize_inbound(
+                &mut database,
+                &quick_chat_path,
+                &host_envelope(
+                    "dingtalk-finalize-wrong-host",
+                    FinalizeChannelInboundCommand {
+                        aggregate_id: observed.result.payload["aggregateId"]
+                            .as_str()
+                            .unwrap()
+                            .to_string(),
+                    },
+                ),
+            )
+            .unwrap();
+        assert_eq!(wrong_host.result.status, CommandResultStatus::Rejected);
+        assert_eq!(wrong_host.result.code, "channel.host_required");
+        let incomplete = service
+            .finalize_inbound(
+                &mut database,
+                &quick_chat_path,
+                &dingtalk_host_envelope(
+                    "dingtalk-finalize-incomplete",
+                    FinalizeChannelInboundCommand {
+                        aggregate_id: observed.result.payload["aggregateId"]
+                            .as_str()
+                            .unwrap()
+                            .to_string(),
+                    },
+                ),
+            )
+            .unwrap();
+        assert_eq!(incomplete.result.status, CommandResultStatus::Rejected);
+        assert_eq!(incomplete.result.code, "channel.inbound.not_ready");
+        let mut completed_observation = observation_command(
+            "ding-app-agent_1",
+            "ding-message-1",
+            "ding-dm-1",
+            "",
+            "p2p",
+            "帮我检查登录模块",
+            &[("agent_1", "ding-app-agent_1")],
+            true,
+        );
+        completed_observation.provider = DINGTALK_PROVIDER.to_string();
+        completed_observation.tenant_key = "ding-corp-1".to_string();
+        completed_observation.sender_external_user_id = "owner-staff-1".to_string();
+        completed_observation.sender_open_id = None;
+        completed_observation.sender_user_id = Some("owner-staff-1".to_string());
+        completed_observation.sender_union_id = None;
+        let completed = service
+            .observe_inbound(
+                &mut database,
+                &dingtalk_host_envelope("dingtalk-observe-complete", completed_observation),
+            )
+            .unwrap();
+        assert_eq!(completed.result.payload["readyToFinalize"], true);
+        let finalized = service
+            .finalize_inbound(
+                &mut database,
+                &quick_chat_path,
+                &dingtalk_host_envelope(
+                    "dingtalk-finalize",
+                    FinalizeChannelInboundCommand {
+                        aggregate_id: observed.result.payload["aggregateId"]
+                            .as_str()
+                            .unwrap()
+                            .to_string(),
+                    },
+                ),
+            )
+            .unwrap();
+        assert_eq!(finalized.result.code, "channel.turn.admitted");
+        for table in ["camp_message", "camp_turn", "agent_run"] {
+            let count: i64 = database
+                .connection()
+                .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| {
+                    row.get(0)
+                })
+                .unwrap();
+            assert_eq!(count, 1, "DingTalk must reuse atomic admission for {table}");
+        }
+
+        let aggregate_count: i64 = database
+            .connection()
+            .query_row(
+                "SELECT COUNT(*) FROM channel_inbound_aggregate",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let mut topic = observation_command(
+            "ding-app-agent_1",
+            "ding-topic-message-1",
+            "ding-group-1",
+            "ding-thread-1",
+            "topic",
+            "不应进入 Core",
+            &[("agent_1", "ding-app-agent_1")],
+            true,
+        );
+        topic.provider = DINGTALK_PROVIDER.to_string();
+        topic.tenant_key = "ding-corp-1".to_string();
+        topic.sender_external_user_id = "owner-staff-1".to_string();
+        topic.sender_open_id = None;
+        topic.sender_user_id = Some("owner-staff-1".to_string());
+        topic.sender_union_id = None;
+        let error = service
+            .observe_inbound(
+                &mut database,
+                &dingtalk_host_envelope("dingtalk-topic-reject", topic),
+            )
+            .unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("DingTalk topic admission is disabled")
+        );
+        assert_eq!(
+            database
+                .connection()
+                .query_row(
+                    "SELECT COUNT(*) FROM channel_inbound_aggregate",
+                    [],
+                    |row| row.get::<_, i64>(0)
+                )
+                .unwrap(),
+            aggregate_count,
+            "a disabled DingTalk topic must not create transport facts"
+        );
+    }
+
+    #[test]
+    fn dingtalk_incomplete_canonical_observation_times_out_after_the_collecting_window() {
+        let mut database = seeded_runtime_database_owned();
+        let service = ChannelService::default();
+        connect_dingtalk_account(&service, &mut database);
+        publish_dingtalk_bot(&service, &mut database, "agent_1");
+        let mut observation = observation_command(
+            "ding-app-agent_1",
+            "ding-timeout-message-1",
+            "ding-dm-timeout-1",
+            "",
+            "p2p",
+            "这条 observation 尚未完成 canonical 证明",
+            &[("agent_1", "ding-app-agent_1")],
+            false,
+        );
+        observation.provider = DINGTALK_PROVIDER.to_string();
+        observation.tenant_key = "ding-corp-1".to_string();
+        observation.sender_external_user_id = "owner-staff-1".to_string();
+        observation.sender_open_id = None;
+        observation.sender_user_id = Some("owner-staff-1".to_string());
+        observation.sender_union_id = None;
+        let observed = service
+            .observe_inbound(
+                &mut database,
+                &dingtalk_host_envelope("dingtalk-timeout-observe", observation),
+            )
+            .unwrap();
+        assert_eq!(observed.result.payload["readyToFinalize"], false);
+        let aggregate_id = observed.result.payload["aggregateId"].as_str().unwrap();
+        database
+            .connection()
+            .execute(
+                "UPDATE channel_inbound_aggregate SET deadline_at = '2000-01-01T00:00:00Z' WHERE id = ?1",
+                [aggregate_id],
+            )
+            .unwrap();
+
+        service
+            .host_tick(
+                &mut database,
+                &dingtalk_host_envelope(
+                    "dingtalk-timeout-tick",
+                    ChannelHostTickCommand {
+                        worker_id: "dingtalk-test-worker".to_string(),
+                        limit: 10,
+                    },
+                ),
+            )
+            .unwrap();
+        let terminal: (String, Option<String>) = database
+            .connection()
+            .query_row(
+                "SELECT status, failure_code FROM channel_inbound_aggregate WHERE id = ?1",
+                [aggregate_id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(terminal.0, "failed");
+        assert_eq!(terminal.1.as_deref(), Some("aggregation_timeout"));
+    }
+
+    #[test]
+    fn dingtalk_group_roster_reconciles_camp_members_with_dingtalk_generations() {
+        let mut database = seeded_runtime_database_owned();
+        let service = ChannelService::default();
+        connect_dingtalk_account(&service, &mut database);
+        publish_dingtalk_bot(&service, &mut database, "agent_1");
+        publish_dingtalk_bot(&service, &mut database, "agent_2");
+        seed_project(&database, "dingtalk-group-roster");
+        let quick_chat_path = quick_chat_path(&database);
+
+        let verified = service
+            .verify_feishu_owner(
+                &mut database,
+                &dingtalk_host_envelope(
+                    "dingtalk-group-owner-verify",
+                    VerifyFeishuOwnerCommand {
+                        provider: DINGTALK_PROVIDER.to_string(),
+                        app_id: "ding-app-agent_1".to_string(),
+                        tenant_key: "ding-corp-1".to_string(),
+                        sender_open_id: None,
+                        sender_user_id: Some("owner-staff-1".to_string()),
+                        sender_union_id: None,
+                        sender_display_name: "Owner".to_string(),
+                    },
+                ),
+            )
+            .unwrap();
+        assert_eq!(verified.result.payload["classification"], "owner");
+
+        service
+            .reconcile_feishu_group_roster(
+                &mut database,
+                &dingtalk_host_envelope(
+                    "dingtalk-group-roster-initial",
+                    ReconcileFeishuGroupRosterCommand {
+                        provider: DINGTALK_PROVIDER.to_string(),
+                        tenant_key: "ding-corp-1".to_string(),
+                        chat_id: "ding-group-roster".to_string(),
+                        present_app_ids: vec![
+                            "ding-app-agent_1".to_string(),
+                            "ding-app-agent_2".to_string(),
+                        ],
+                    },
+                ),
+            )
+            .unwrap();
+
+        let mut observation = observation_command(
+            "ding-app-agent_1",
+            "ding-group-roster-message-1",
+            "ding-group-roster",
+            "",
+            "group",
+            "只点名一号",
+            &[("agent_1", "ding-app-agent_1")],
+            true,
+        );
+        observation.provider = DINGTALK_PROVIDER.to_string();
+        observation.tenant_key = "ding-corp-1".to_string();
+        observation.sender_external_user_id = "owner-staff-1".to_string();
+        observation.sender_open_id = None;
+        observation.sender_user_id = Some("owner-staff-1".to_string());
+        observation.sender_union_id = None;
+        let observed = service
+            .observe_inbound(
+                &mut database,
+                &dingtalk_host_envelope("dingtalk-group-roster-observe", observation),
+            )
+            .unwrap();
+        let pending = service
+            .finalize_inbound(
+                &mut database,
+                &quick_chat_path,
+                &dingtalk_host_envelope(
+                    "dingtalk-group-roster-finalize",
+                    FinalizeChannelInboundCommand {
+                        aggregate_id: observed.result.payload["aggregateId"]
+                            .as_str()
+                            .unwrap()
+                            .to_string(),
+                    },
+                ),
+            )
+            .unwrap();
+        assert_eq!(pending.result.code, "channel.binding.pending");
+        let pending_id = pending.result.payload["pendingBindingId"].as_str().unwrap();
+        let resolved = resolve_pending_for_provider(
+            &service,
+            &mut database,
+            pending_id,
+            "dingtalk-group-roster-resolve",
+            DINGTALK_PROVIDER,
+        );
+        assert_eq!(resolved.result.code, "channel.binding.resolved");
+        let camp_id = resolved.result.payload["campId"].as_str().unwrap();
+        assert_eq!(
+            database
+                .connection()
+                .query_row(
+                    "SELECT COUNT(*) FROM camp_member WHERE camp_id = ?1 AND status = 'active'",
+                    [camp_id],
+                    |row| row.get::<_, i64>(0),
+                )
+                .unwrap(),
+            2,
+            "the initial DingTalk group Camp uses the full present Bot roster"
+        );
+
+        publish_dingtalk_bot(&service, &mut database, "agent_3");
+        service
+            .reconcile_feishu_group_roster(
+                &mut database,
+                &dingtalk_host_envelope(
+                    "dingtalk-group-roster-updated",
+                    ReconcileFeishuGroupRosterCommand {
+                        provider: DINGTALK_PROVIDER.to_string(),
+                        tenant_key: "ding-corp-1".to_string(),
+                        chat_id: "ding-group-roster".to_string(),
+                        present_app_ids: vec![
+                            "ding-app-agent_1".to_string(),
+                            "ding-app-agent_3".to_string(),
+                        ],
+                    },
+                ),
+            )
+            .unwrap();
+
+        let (agent_2_status, agent_3_status): (String, String) = database
+            .connection()
+            .query_row(
+                r#"
+                SELECT
+                    (SELECT status FROM camp_member WHERE camp_id = ?1 AND agent_id = 'agent_2'),
+                    (SELECT status FROM camp_member WHERE camp_id = ?1 AND agent_id = 'agent_3')
+                "#,
+                [camp_id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(agent_2_status, "left");
+        assert_eq!(agent_3_status, "active");
+        let (namespace, reconciliation_generation): (String, i64) = database
+            .connection()
+            .query_row(
+                r#"
+                SELECT source_namespace, last_reconciliation_generation
+                FROM camp_membership_source_binding
+                WHERE camp_id = ?1
+                "#,
+                [camp_id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(namespace, DINGTALK_PROVIDER);
+        assert_eq!(reconciliation_generation, 2);
     }
 
     #[test]

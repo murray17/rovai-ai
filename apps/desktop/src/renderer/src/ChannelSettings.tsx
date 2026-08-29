@@ -3,6 +3,7 @@ import * as Dialog from '@radix-ui/react-dialog'
 import type {
   AgentProfile,
   ChannelAccountView,
+  ChannelKind,
   ChannelMemberBotView,
   ChannelProviderView,
   ChannelSettingsSnapshot,
@@ -28,7 +29,9 @@ export function ChannelSettings({ agents }: { agents: AgentProfile[] }): React.J
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
+  const [selectedKind, setSelectedKind] = useState<ChannelKind>('feishu')
   const [publishAgentId, setPublishAgentId] = useState<string | null>(null)
+  const [publishKind, setPublishKind] = useState<ChannelKind>('feishu')
   const [publishBoundAppId, setPublishBoundAppId] = useState<string | null>(null)
 
   const load = useCallback(async (): Promise<void> => {
@@ -58,16 +61,17 @@ export function ChannelSettings({ agents }: { agents: AgentProfile[] }): React.J
   const run = useCallback(async (
     key: string,
     action: () => Promise<ChannelSettingsSnapshot>
-  ): Promise<boolean> => {
-    if (busy) return false
+  ): Promise<ChannelSettingsSnapshot | null> => {
+    if (busy) return null
     setBusy(key)
     setError(null)
     try {
-      setSnapshot(assertChannelSettingsSnapshot(await action()))
-      return true
+      const next = assertChannelSettingsSnapshot(await action())
+      setSnapshot(next)
+      return next
     } catch (nextError) {
       setError(channelErrorMessage(nextError))
-      return false
+      return null
     } finally {
       setBusy(null)
     }
@@ -84,7 +88,7 @@ export function ChannelSettings({ agents }: { agents: AgentProfile[] }): React.J
     }
   }, [])
 
-  const channel = snapshot?.channels.find((candidate) => candidate.kind === 'feishu') ?? null
+  const publishChannel = snapshot?.channels.find((candidate) => candidate.kind === publishKind) ?? null
 
   return (
     <>
@@ -94,33 +98,45 @@ export function ChannelSettings({ agents }: { agents: AgentProfile[] }): React.J
         loading={loading}
         busy={busy}
         error={error}
+        selectedKind={selectedKind}
+        onSelectChannel={setSelectedKind}
         onRetry={() => void load()}
-        onConnect={() => void run('connect', () => window.rovai.channels.connect())}
-        onDisconnect={() => void run('disconnect', () => window.rovai.channels.disconnect())}
+        onConnect={(provider, options) => void run(
+          `connect:${provider.kind}${options?.deviceFlow ? ':device' : ''}`,
+          () => window.rovai.channels.connect(provider.kind, options)
+        )}
+        onDisconnect={(provider) => void run(
+          `disconnect:${provider.kind}`,
+          () => window.rovai.channels.disconnect(provider.kind)
+        )}
         onPublish={(provider, agent) => {
           setError(null)
           setPublishBoundAppId(
             provider.memberBots.find((bot) => bot.agentId === agent.agentId)?.appId ?? null
           )
+          setPublishKind(provider.kind)
           setPublishAgentId(agent.agentId)
         }}
-        onRetryPublish={(_, agent) => void run(
-          `retry:${agent.agentId}`,
-          () => window.rovai.channels.retryMemberBot(agent.agentId)
+        onRetryPublish={(provider, agent) => void run(
+          `retry:${provider.kind}:${agent.agentId}`,
+          () => window.rovai.channels.retryMemberBot(agent.agentId, provider.kind)
         )}
       />
 
       <QrDialog
         snapshot={snapshot}
+        kind={selectedKind}
         busy={busy !== null}
         onClose={(attemptId) => void cancelQrAttempt(attemptId)}
       />
 
       <PublishBotDialog
         agent={agents.find((candidate) => candidate.agentId === publishAgentId) ?? null}
-        account={channel?.connection.account ?? null}
+        kind={publishKind}
+        account={publishChannel?.connection.account ?? null}
         boundAppId={publishBoundAppId}
         provisioning={snapshot?.activeProvisioning?.agentId === publishAgentId
+          && (snapshot.activeProvisioning.kind ?? 'feishu') === publishKind
           ? snapshot.activeProvisioning
           : null}
         busy={busy !== null}
@@ -132,16 +148,36 @@ export function ChannelSettings({ agents }: { agents: AgentProfile[] }): React.J
         onReconnect={() => {
           setPublishAgentId(null)
           setPublishBoundAppId(null)
-          void run('connect', () => window.rovai.channels.connect())
+          setSelectedKind(publishKind)
+          void run(`connect:${publishKind}`, () => window.rovai.channels.connect(publishKind))
         }}
         onPublish={(agentId) => {
-          void run(`publish:${agentId}`, () => window.rovai.channels.publishMemberBot(agentId))
-            .then((completed) => {
-              if (completed) {
+          void run(
+            `publish:${publishKind}:${agentId}`,
+            () => window.rovai.channels.publishMemberBot(agentId, publishKind)
+          ).then((next) => {
+              if (
+                next?.activeProvisioning?.stage === 'completed'
+                && (next.activeProvisioning.kind ?? 'feishu') === publishKind
+              ) {
                 setPublishAgentId(null)
                 setPublishBoundAppId(null)
               }
             })
+        }}
+        onSelectApprover={(agentId, userId) => {
+          void run(
+            `approve:${publishKind}:${agentId}`,
+            () => window.rovai.channels.selectPublicationApprover(agentId, userId, publishKind)
+          ).then((next) => {
+            if (
+              next?.activeProvisioning?.stage === 'completed'
+              && (next.activeProvisioning.kind ?? 'feishu') === publishKind
+            ) {
+              setPublishAgentId(null)
+              setPublishBoundAppId(null)
+            }
+          })
         }}
       />
 
@@ -155,7 +191,9 @@ export function ChannelSettingsView({
   loading = false,
   busy = null,
   error = null,
+  selectedKind = 'feishu',
   onRetry = () => undefined,
+  onSelectChannel,
   onConnect,
   onDisconnect,
   onPublish,
@@ -166,21 +204,28 @@ export function ChannelSettingsView({
   loading?: boolean
   busy?: string | null
   error?: string | null
+  selectedKind?: ChannelKind
   onRetry?(): void
-  onConnect?(channel: ChannelProviderView): void
+  onSelectChannel?(kind: ChannelKind): void
+  onConnect?(channel: ChannelProviderView, options?: { deviceFlow?: boolean }): void
   onDisconnect?(channel: ChannelProviderView): void
   onPublish?(channel: ChannelProviderView, agent: AgentProfile): void
   onRetryPublish?(channel: ChannelProviderView, agent: AgentProfile): void
 }): React.JSX.Element {
   const members = useMemo(() => visibleChannelMembers(agents), [agents])
-  const channel = snapshot?.channels.find((candidate) => candidate.kind === 'feishu') ?? null
+  const channel = snapshot?.channels.find((candidate) => candidate.kind === selectedKind)
+    ?? snapshot?.channels[0]
+    ?? null
+  const pendingBindingCount = channel?.pendingBindingCount ?? snapshot?.pendingBindingCount ?? 0
+  const bindingIssueCount = channel?.bindingIssueCount ?? snapshot?.bindingIssueCount ?? 0
+  const providerName = channel?.displayName ?? '渠道'
 
   return (
     <div className="channel-settings">
       <SettingsPageHeader
         eyebrow="Settings / Channels"
         title="渠道"
-        description="在本机连接飞书并逐一发布队员 Bot。只有 Rovai Owner 可以从飞书触发队员；群聊和话题的项目在首次使用时私密选择。"
+        description="在本机连接协作平台并逐一发布队员 Bot。只有 Rovai Owner 可以从外部渠道触发队员；项目选择与执行管理仍由本机掌控。"
         aside={<span className="settings-page-note">Owner 本机</span>}
       />
 
@@ -209,24 +254,36 @@ export function ChannelSettingsView({
             <ChannelSectionHeading
               id="channel-provider-heading"
               title="渠道"
-              description="一期只接入飞书。所有连接和配置都留在这台设备。"
+              description="选择要连接和管理的平台。账号会话、应用凭据与项目路径都留在这台设备。"
               summary={`${snapshot.channels.length} 个渠道`}
             />
             <div className="channel-provider-strip" role="tablist" aria-label="渠道">
-              <button className="channel-provider-tab" type="button" role="tab" aria-selected="true">
-                <ChannelMark />
-                <span>
-                  <strong>{channel.displayName}</strong>
-                  <small>{channel.hostStatus === 'ready' ? connectionLabel(channel) : '待接入'}</small>
-                </span>
-              </button>
+              {snapshot.channels.map((provider) => {
+                const selected = provider.kind === channel.kind
+                return (
+                  <button
+                    className={`channel-provider-tab${selected ? ' is-selected' : ''}`}
+                    type="button"
+                    role="tab"
+                    aria-selected={selected}
+                    key={provider.kind}
+                    onClick={() => onSelectChannel?.(provider.kind)}
+                  >
+                    <ChannelMark kind={provider.kind} />
+                    <span>
+                      <strong>{provider.displayName}</strong>
+                      <small>{provider.hostStatus === 'ready' ? connectionLabel(provider) : '待接入'}</small>
+                    </span>
+                  </button>
+                )
+              })}
             </div>
           </section>
 
           <section className="channel-settings-section" aria-labelledby="channel-connection-heading">
             <ChannelSectionHeading
               id="channel-connection-heading"
-              title="飞书连接"
+              title={`${providerName}连接`}
               description="连接只决定后续 Bot 的发布目标；切换连接不会迁移或停用已发布 Bot。"
             />
             <ChannelConnectionRow
@@ -237,7 +294,7 @@ export function ChannelSettingsView({
             />
             <p className="channel-owner-note">
               <OwnerShieldIcon />
-              <span>飞书中的 Owner 消息仍是外部消息身份，不获得本机管理权限。项目绝对路径不会发送到飞书。</span>
+              <span>{providerName}中的 Owner 消息仍是外部消息身份，不获得本机管理权限。项目绝对路径不会发送到外部渠道。</span>
             </p>
           </section>
 
@@ -261,15 +318,17 @@ export function ChannelSettingsView({
             <ChannelSectionHeading
               id="channel-binding-diagnostics-heading"
               title="会话接入"
-              description="私聊自动进入 Quick Chat；群聊和话题首次由 Owner @ 后，在飞书私密卡片中选择一次项目。"
-              summary={`${snapshot.pendingBindingCount} 个待选择`}
+              description={channel.kind === 'dingtalk'
+                ? '私聊自动进入 Quick Chat；群聊首次由 Owner @ 后，在原群项目卡片中选择一次项目。钉钉话题暂不接入。'
+                : '私聊自动进入 Quick Chat；群聊和话题首次由 Owner @ 后，在飞书私密卡片中选择一次项目。'}
+              summary={`${pendingBindingCount} 个待选择`}
             />
             <div className="channel-binding-diagnostics" role="status">
-              <span><strong>{snapshot.pendingBindingCount}</strong><small>待处理绑定</small></span>
-              <span className={snapshot.bindingIssueCount > 0 ? 'is-warning' : undefined}>
-                <strong>{snapshot.bindingIssueCount}</strong><small>绑定异常</small>
+              <span><strong>{pendingBindingCount}</strong><small>待处理绑定</small></span>
+              <span className={bindingIssueCount > 0 ? 'is-warning' : undefined}>
+                <strong>{bindingIssueCount}</strong><small>绑定异常</small>
               </span>
-              <p>项目绑定完成后不可换绑；需要另一个项目时，请新建飞书群或话题。</p>
+              <p>项目绑定完成后不可换绑；需要另一个项目时，请新建{channel.kind === 'dingtalk' ? '钉钉群' : '飞书群或话题'}。</p>
             </div>
           </section>
         </div>
@@ -326,29 +385,37 @@ function ChannelConnectionRow({
 }: {
   channel: ChannelProviderView
   busy: string | null
-  onConnect?: (channel: ChannelProviderView) => void
+  onConnect?: (channel: ChannelProviderView, options?: { deviceFlow?: boolean }) => void
   onDisconnect?: (channel: ChannelProviderView) => void
 }): React.JSX.Element {
   const account = channel.connection.account
   const connected = channel.connection.status === 'connected' && account !== null
   const hostReady = channel.hostStatus === 'ready'
+  const providerName = channel.displayName
+  const connectBusy = busy === `connect:${channel.kind}`
+    || busy === `connect:${channel.kind}:device`
+  const disconnectBusy = busy === `disconnect:${channel.kind}`
   return (
     <div className="channel-connection-row">
-      <ChannelMark />
+      <ChannelMark kind={channel.kind} />
       <div className="channel-connection-label">
-        <strong>飞书开放平台</strong>
-        <span>{hostReady ? '开发者账号会话 · 本机加密保存' : '渠道宿主尚未就绪'}</span>
+        <strong>{providerName}开放平台</strong>
+        <span>{hostReady
+          ? channel.kind === 'dingtalk'
+            ? '开发者 OAuth 会话 · 独立安全配置'
+            : '开发者账号会话 · 本机加密保存'
+          : '渠道宿主尚未就绪'}</span>
       </div>
       {connected ? (
         <div className="channel-account-summary">
           <span className="channel-account-avatar" aria-hidden="true">{firstGrapheme(account.userName)}</span>
           <span>
             <strong>{account.userName}</strong>
-            <small>{account.email ? `${account.email} · ` : ''}{account.tenantName} · {account.brand === 'lark' ? 'Lark' : '飞书'}</small>
+            <small>{account.email ? `${account.email} · ` : ''}{account.tenantName} · {account.brand === 'lark' ? 'Lark' : providerName}</small>
           </span>
         </div>
       ) : (
-        <span className="channel-account-empty">{hostReady ? '还没有连接飞书账号' : '连接能力尚未开放'}</span>
+        <span className="channel-account-empty">{hostReady ? `还没有连接${providerName}账号` : '连接能力尚未开放'}</span>
       )}
       <span className={`channel-connection-status${connected ? ' is-connected' : ''}`}>
         {connected ? '已连接' : channel.connection.status === 'session_expired' ? '需重新连接' : '未连接'}
@@ -361,18 +428,31 @@ function ChannelConnectionRow({
             disabled={busy !== null || !onDisconnect}
             onClick={() => onDisconnect?.(channel)}
           >
-            {busy === 'disconnect' ? '断开中…' : '断开'}
+            {disconnectBusy ? '断开中…' : '断开'}
           </button>
         )}
         <button
           className="quiet-button compact"
           type="button"
           disabled={!hostReady || busy !== null || !onConnect}
-          title={!hostReady ? '飞书渠道宿主尚未接入' : undefined}
+          title={!hostReady ? `${providerName}渠道宿主尚未接入` : undefined}
           onClick={() => onConnect?.(channel)}
         >
-          {busy === 'connect' ? '等待扫码…' : connected ? '切换账号' : hostReady ? '登录开放平台' : '尚未开放'}
+          {connectBusy
+            ? channel.kind === 'dingtalk' ? '等待授权…' : '等待扫码…'
+            : connected ? '切换账号' : hostReady ? '登录开放平台' : '尚未开放'}
         </button>
+        {channel.kind === 'dingtalk' && hostReady && (
+          <button
+            className="quiet-button compact"
+            type="button"
+            disabled={busy !== null || !onConnect}
+            title="当浏览器回调无法完成时，改用钉钉设备授权"
+            onClick={() => onConnect?.(channel, { deviceFlow: true })}
+          >
+            {busy === `connect:${channel.kind}:device` ? '等待设备授权…' : '设备授权'}
+          </button>
+        )}
       </div>
     </div>
   )
@@ -401,7 +481,7 @@ function ChannelMemberBotTable({
   return (
     <div className="channel-member-bot-table" role="table" aria-label="队员 Bot">
       <div className="channel-member-bot-grid channel-member-bot-head" role="row">
-        <span role="columnheader">队员</span><span role="columnheader">飞书身份</span><span role="columnheader">状态</span><span role="columnheader" aria-label="操作" />
+        <span role="columnheader">队员</span><span role="columnheader">{channel.displayName}身份</span><span role="columnheader">状态</span><span role="columnheader" aria-label="操作" />
       </div>
       <div role="rowgroup">
         {members.map((agent) => {
@@ -412,7 +492,8 @@ function ChannelMemberBotTable({
           const disabled = status === 'disabled'
           const provisioning = status === 'provisioning'
           const action = failed ? onRetryPublish : onPublish
-          const actionBusy = busy === `publish:${agent.agentId}` || busy === `retry:${agent.agentId}`
+          const actionBusy = busy === `publish:${channel.kind}:${agent.agentId}`
+            || busy === `retry:${channel.kind}:${agent.agentId}`
           return (
             <div className="channel-member-bot-grid channel-member-bot-row" role="row" key={agent.agentId}>
               <div className="channel-member-identity" role="cell">
@@ -434,9 +515,9 @@ function ChannelMemberBotTable({
                     href={bot.managementUrl}
                     target="_blank"
                     rel="noreferrer noopener"
-                    aria-label={`在飞书开放平台管理 ${agent.displayName}`}
+                    aria-label={`在${channel.displayName}开放平台管理 ${agent.displayName}`}
                   >
-                    飞书管理
+                    {channel.displayName}管理
                   </a>
                 ) : (
                   <button
@@ -467,36 +548,44 @@ function ChannelMemberBotTable({
 
 function QrDialog({
   snapshot,
+  kind,
   busy,
   onClose
 }: {
   snapshot: ChannelSettingsSnapshot | null
+  kind: ChannelKind
   busy: boolean
   onClose: (attemptId: string) => void
 }): React.JSX.Element {
   const attempt = snapshot?.activeQrAttempt ?? null
   if (!attempt) return <></>
+  const attemptKind = attempt.kind ?? kind
+  const providerName = attemptKind === 'dingtalk' ? '钉钉' : '飞书'
   return (
     <Dialog.Root open onOpenChange={(open) => { if (!open) onClose(attempt.attemptId) }}>
       <Dialog.Portal>
         <Dialog.Overlay className="dialog-overlay app-dialog-overlay" />
           <AppDialogContent className="channel-qr-dialog">
           <AppDialogHeader
-            title="登录飞书开放平台"
-            description="使用飞书扫码登录开发者平台。本次不会创建应用、读取 App Secret 或发布 Bot。"
+            title={`登录${providerName}开放平台`}
+            description={attemptKind === 'dingtalk'
+              ? '在系统浏览器中完成钉钉开发者 OAuth 授权。本次不会创建应用、读取 App Secret 或发布 Bot。'
+              : '使用飞书扫码登录开发者平台。本次不会创建应用、读取 App Secret 或发布 Bot。'}
             icon="shield"
             closeDisabled={busy && attempt.stage !== 'failed'}
           />
           <AppDialogBody className="channel-qr-body">
             <div className={`channel-qr-frame is-${attempt.stage}`}>
               {attempt.qrDataUrl
-                ? <img src={attempt.qrDataUrl} alt="飞书连接二维码" />
-                : <span aria-hidden="true"><ChannelMark /></span>}
+                ? <img src={attempt.qrDataUrl} alt={`${providerName}连接二维码`} />
+                : <span aria-hidden="true"><ChannelMark kind={attemptKind} /></span>}
             </div>
             <strong>{attempt.detail}</strong>
             <small>{attempt.expiresAt
               ? `二维码有效期至 ${formatLocalTime(attempt.expiresAt)}`
-              : '开发者会话只会保存到本机系统安全存储。'}</small>
+              : attemptKind === 'dingtalk'
+                ? '开发者 OAuth Profile 使用 Rovai 独立配置目录，不会暴露给页面。'
+                : '开发者会话只会保存到本机系统安全存储。'}</small>
           </AppDialogBody>
           <AppDialogFooter note="登录后，后续发布会复用同一开发者会话。">
             <button className="quiet-button" type="button" onClick={() => onClose(attempt.attemptId)}>
@@ -511,6 +600,7 @@ function QrDialog({
 
 function PublishBotDialog({
   agent,
+  kind,
   account,
   boundAppId,
   provisioning,
@@ -518,9 +608,11 @@ function PublishBotDialog({
   error,
   onClose,
   onReconnect,
-  onPublish
+  onPublish,
+  onSelectApprover
 }: {
   agent: AgentProfile | null
+  kind: ChannelKind
   account: ChannelAccountView | null
   boundAppId: string | null
   provisioning: MemberBotProvisioningView | null
@@ -529,8 +621,16 @@ function PublishBotDialog({
   onClose: () => void
   onReconnect: () => void
   onPublish: (agentId: string) => void
+  onSelectApprover: (agentId: string, userId: string) => void
 }): React.JSX.Element {
+  const approvers = provisioning?.approvalCandidates ?? []
+  const approverKey = approvers.map((candidate) => candidate.userId).join('\0')
+  const [selectedApprover, setSelectedApprover] = useState('')
+  useEffect(() => {
+    setSelectedApprover('')
+  }, [agent?.agentId, approverKey])
   if (!agent || !account) return <></>
+  const providerName = kind === 'dingtalk' ? '钉钉' : '飞书'
   const terminal = provisioning
     ? ['completed', 'failed', 'unknown_remote_state'].includes(provisioning.stage)
     : false
@@ -538,7 +638,10 @@ function PublishBotDialog({
   const retryLocked = provisioning?.stage === 'unknown_remote_state'
     && provisioning.remoteAppId === null
   const connectionFailed = provisioning?.failureCode === 'feishu_connection_error'
-  const sessionUnavailable = Boolean(error && /登录已过期|账号已变化|重新连接账号/.test(error))
+    || provisioning?.failureCode === 'dingtalk_connection_error'
+  const sessionUnavailable = Boolean(error && /登录已过期|账号已变化|重新连接账号|重新连接/.test(error))
+  const awaitingApprover = kind === 'dingtalk'
+    && provisioning?.failureCode === 'dingtalk_approver_selection_required'
   return (
     <Dialog.Root open onOpenChange={(open) => { if (!open && (!busy || terminal)) onClose() }}>
       <Dialog.Portal>
@@ -546,11 +649,11 @@ function PublishBotDialog({
         <AppDialogContent className="channel-publish-dialog">
           <AppDialogHeader
             title={boundAppId
-              ? `重新发布「${agent.displayName}」飞书 Bot`
-              : `发布「${agent.displayName}」为飞书 Bot`}
+              ? `重新发布「${agent.displayName}」${providerName} Bot`
+              : `发布「${agent.displayName}」为${providerName} Bot`}
             description={boundAppId
-              ? 'Rovai 会核对并恢复这名队员已经绑定的飞书应用。App ID 保持不变，不会创建或换绑其他应用。'
-              : 'Rovai 会复用当前开发者会话，在后台创建、配置并发布这名队员的独立应用。正常流程不会打开飞书创建确认页，也不需要再次扫码。'}
+              ? `Rovai 会核对并恢复这名队员已经绑定的${providerName}应用。App ID 保持不变，不会创建或换绑其他应用。`
+              : `Rovai 会复用当前开发者会话，在后台创建、配置并发布这名队员的独立应用。正常流程不会打开${providerName}创建确认页，也不需要再次登录。`}
             icon="server"
             closeDisabled={busy && !terminal}
           />
@@ -565,14 +668,31 @@ function PublishBotDialog({
               />
               <span><strong>{agent.displayName}</strong><small>{agent.teamRole || '协作者'}</small></span>
               <span className="channel-publish-arrow" aria-hidden="true">→</span>
-              <ChannelMark />
-              <span><strong>独立飞书 Bot</strong><small>权限、事件与长连接彼此隔离</small></span>
+              <ChannelMark kind={kind} />
+              <span><strong>独立{providerName} Bot</strong><small>权限、事件与长连接彼此隔离</small></span>
             </div>
             <div className="channel-dialog-fact"><span>发布账号</span><strong>{account.userName}</strong></div>
             <div className="channel-dialog-fact"><span>所属租户</span><strong>{account.tenantName}</strong></div>
             {effectiveAppId && <div className="channel-dialog-fact"><span>绑定应用</span><code>{effectiveAppId}</code></div>}
             <div className="channel-dialog-fact"><span>应用说明</span><strong>Rovai AI 队员 · {agent.teamRole || '协作者'}</strong></div>
             {error && <div className="channel-dialog-error" role="alert">{error}</div>}
+            {awaitingApprover && (
+              <label className="channel-approver-select">
+                <span>版本审批人</span>
+                <select
+                  value={selectedApprover}
+                  onChange={(event) => setSelectedApprover(event.target.value)}
+                >
+                  <option value="" disabled>请选择审批人</option>
+                  {approvers.map((candidate) => (
+                    <option value={candidate.userId} key={candidate.userId}>
+                      {candidate.displayName}
+                    </option>
+                  ))}
+                </select>
+                <small>钉钉要求由 Owner 明确选择，本机不会自动代选。</small>
+              </label>
+            )}
             {provisioning ? (
               <div className={`channel-provisioning-state is-${provisioning.stage}`} role="status">
                 <span className="channel-provisioning-dot" aria-hidden="true" />
@@ -591,7 +711,7 @@ function PublishBotDialog({
             ) : (
               <p className="channel-publish-note">
                 {boundAppId
-                  ? '该队员的飞书身份已冻结到此应用；重新发布只恢复原应用的配置、版本和连接。'
+                  ? `该队员的${providerName}身份已冻结到此应用；重新发布只恢复原应用的配置、版本和连接。`
                   : '创建前会再次校验账号和租户；一旦身份变化或会话过期，发布会停止并提示重新连接。'}
               </p>
             )}
@@ -599,7 +719,7 @@ function PublishBotDialog({
           <AppDialogFooter note={connectionFailed
             ? effectiveAppId
               ? '已保留原应用绑定；关闭后可以稍后重试。'
-              : '飞书连接异常；关闭后可以稍后重试。'
+              : `${providerName}连接异常；关闭后可以稍后重试。`
             : retryLocked
               ? '创建结果无法确认。Rovai 已锁定再次创建，避免产生重复应用。'
             : effectiveAppId
@@ -608,7 +728,16 @@ function PublishBotDialog({
             <button className="quiet-button" type="button" disabled={busy && !terminal} onClick={onClose}>取消</button>
             {sessionUnavailable ? (
               <button className="primary-button" type="button" disabled={busy} onClick={onReconnect}>
-                重新连接飞书
+                重新连接{providerName}
+              </button>
+            ) : awaitingApprover ? (
+              <button
+                className="primary-button"
+                type="button"
+                disabled={busy || !selectedApprover}
+                onClick={() => onSelectApprover(agent.agentId, selectedApprover)}
+              >
+                {busy ? '正在提交审批…' : '提交审批并继续发布'}
               </button>
             ) : !retryLocked && (
               <button className="primary-button" type="button" disabled={busy} onClick={() => onPublish(agent.agentId)}>
@@ -630,8 +759,12 @@ function PublishBotDialog({
   )
 }
 
-function ChannelMark(): React.JSX.Element {
-  return <span className="channel-mark channel-mark-feishu" aria-hidden="true">飞</span>
+function ChannelMark({ kind }: { kind: ChannelKind }): React.JSX.Element {
+  return (
+    <span className={`channel-mark channel-mark-${kind}`} aria-hidden="true">
+      {kind === 'dingtalk' ? '钉' : '飞'}
+    </span>
+  )
 }
 
 function OwnerShieldIcon(): React.JSX.Element {
@@ -704,6 +837,7 @@ export function channelErrorMessage(error: unknown): string | null {
     .replace(/^Error invoking remote method '[^']+': Error:\s*/, '')
     .trim()
   if (message === 'feishu_login_cancelled') return null
+  if (message === 'dingtalk_operation_cancelled') return null
   if (message === 'feishu_console_remote_app_unavailable') {
     return '原飞书应用已删除或当前账号无权访问，无法按原 App ID 重试。'
   }
@@ -725,6 +859,24 @@ export function channelErrorMessage(error: unknown): string | null {
   if (provisioningFailures[message]) return provisioningFailures[message]
   if (/^feishu_console_/u.test(message)) {
     return '飞书开放平台操作尚未完成；请查看下方状态，排除问题后重试。'
+  }
+  const dingtalkFailures: Record<string, string> = {
+    system_credential_encryption_unavailable:
+      '无法访问系统安全存储。请允许 Rovai 使用系统凭据存储后重试。',
+    dingtalk_oauth_client_unconfigured:
+      'Rovai 尚未配置钉钉 OAuth Client，当前构建无法连接钉钉开放平台。',
+    dingtalk_dws_unavailable: '钉钉开发者后端不可用，请重新安装当前版本后重试。',
+    dingtalk_dws_integrity_failed: '钉钉开发者后端完整性校验失败，已拒绝运行。',
+    dingtalk_login_identity_unavailable: '钉钉授权未返回完整账号与企业身份，请重新连接。',
+    dingtalk_account_identity_changed: '钉钉账号或企业已经变化，请重新连接账号。',
+    dingtalk_app_create_unknown_remote_state:
+      '无法确认钉钉应用是否已经创建；Rovai 已锁定再次创建，避免产生重复应用。',
+    dingtalk_version_not_released: '钉钉应用版本尚未确认发布；原应用已保留，可以稍后继续。',
+    dingtalk_bot_credential_missing: '本机钉钉 Bot 凭据缺失或与冻结应用不一致，已停止连接。'
+  }
+  if (dingtalkFailures[message]) return dingtalkFailures[message]
+  if (/^dingtalk_/u.test(message)) {
+    return '钉钉开放平台操作尚未完成；请查看下方状态，排除问题后重试。'
   }
   return message || '渠道操作失败。'
 }

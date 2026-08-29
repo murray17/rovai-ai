@@ -1,8 +1,8 @@
 ---
 document_type: versions-index
 authority: version-lifecycle
-current_version: v1.30
-last_updated: 2026-08-27
+current_version: v1.31
+last_updated: 2026-08-29
 ---
 
 # Rovai-ai 版本记录
@@ -181,4 +181,5 @@ last_updated: 2026-08-27
 | v1.27 | `historical` | Kimi Code identity、MiniMax M3 私有配置、cold exact resume 与 macOS arm64 准入 | [v1.27/README.md](v1.27/README.md) |
 | v1.28 | `historical` | Grok Build、MiniMax M3、`>= 1.0.0` 与标准 ACP resume；macOS arm64/x64、Windows x64 1.0.5 已分别补证；Published Attachment 后置完整性故障局部降级 | [v1.28/README.md](v1.28/README.md) |
 | v1.29 | `historical` | Camp 动态成员管理、zero-attempt cancellation、Managed Attachment v2 写路径，以及 Runtime Evidence 驱动的 Command Diff 与每 AgentRun 文件变化卡片 | [v1.29/README.md](v1.29/README.md) |
-| v1.30 | `current` | 飞书 Developer Session 与独立队员 Bot、Owner-only Quick Chat/项目卡、多 Bot 聚合、串行 Camp admission、ExternalQuote、临时执行控制台与永久输出/附件 Outbox | [v1.30/README.md](v1.30/README.md) |
+| v1.30 | `historical` | 飞书 Developer Session 与独立队员 Bot、Owner-only Quick Chat/项目卡、多 Bot 聚合、串行 Camp admission、ExternalQuote、临时执行控制台与永久输出/附件 Outbox | [v1.30/README.md](v1.30/README.md) |
+| v1.31 | `current` | 钉钉 OAuth、独立队员应用机器人、Owner-only 私聊/群聊、统一 Camp admission、AI 卡片与 Stream Outbox；生产 OAuth Client 投递和真实租户验收仍待完成 | [v1.31/README.md](v1.31/README.md) |

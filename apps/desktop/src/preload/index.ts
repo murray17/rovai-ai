@@ -113,17 +113,25 @@ const api: RovaiApi = {
     get() {
       return ipcRenderer.invoke('rovai:channels-get') as Promise<ChannelSettingsSnapshot>
     },
-    connect() {
-      return ipcRenderer.invoke('rovai:channels-connect')
+    connect(kind, options) {
+      return ipcRenderer.invoke('rovai:channels-connect', kind, options)
     },
-    disconnect() {
-      return ipcRenderer.invoke('rovai:channels-disconnect')
+    disconnect(kind) {
+      return ipcRenderer.invoke('rovai:channels-disconnect', kind)
     },
-    publishMemberBot(agentId) {
-      return ipcRenderer.invoke('rovai:channels-publish-member-bot', agentId)
+    publishMemberBot(agentId, kind) {
+      return ipcRenderer.invoke('rovai:channels-publish-member-bot', agentId, kind)
     },
-    retryMemberBot(agentId) {
-      return ipcRenderer.invoke('rovai:channels-retry-member-bot', agentId)
+    retryMemberBot(agentId, kind) {
+      return ipcRenderer.invoke('rovai:channels-retry-member-bot', agentId, kind)
+    },
+    selectPublicationApprover(agentId, userId, kind) {
+      return ipcRenderer.invoke(
+        'rovai:channels-select-publication-approver',
+        agentId,
+        userId,
+        kind
+      )
     },
     cancelQrAttempt(attemptId) {
       return ipcRenderer.invoke('rovai:channels-cancel-qr', attemptId)

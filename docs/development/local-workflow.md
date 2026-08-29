@@ -1,7 +1,7 @@
 ---
 document_type: development-guide
 authority: local-development-workflow
-last_updated: 2026-08-26
+last_updated: 2026-08-29
 ---
 
 # 本地开发与 App 隔离流程
@@ -106,6 +106,25 @@ ROVAI_DEV_USER_DATA_DIR="$(mktemp -d)/user-data" pnpm dev
 
 不要用 `electron-vite dev` 绕过启动器。不要把日常数据库复制到默认开发目录；复现真实 Camp 时按
 [桌面 UI 验收](ui-acceptance.md#从明确来源创建只读隔离副本)创建一次性副本。
+
+## 钉钉 OAuth 与 DWS 验收前置
+
+钉钉账号连接必须使用维护者拥有的 Rovai OAuth Client。开发/隔离验收启动前，在同一个启动命令环境中显式提供：
+
+```bash
+ROVAI_DINGTALK_OAUTH_CLIENT_ID="<Rovai OAuth Client ID>" \
+ROVAI_DINGTALK_OAUTH_CLIENT_SECRET="<只在当前安全环境注入的 Secret>" \
+pnpm dev
+```
+
+不要把值写入仓库、`.env` 示例、命令日志、截图或打包资源；不要复用 DWS 自带 Client ID，也不要用队员 Bot AppKey
+代替账号连接。Desktop 只接受随包固定的 DWS 1.0.60 和平台 SHA，开发二进制由 `pnpm prepare:dingtalk-dws` 准备；
+不要从 PATH 或用户全局安装调用未知版本。浏览器 OAuth 是默认路径，设备授权只能由 UI 的显式 fallback 触发。
+
+当前 production secret delivery 尚未完成，因此普通 package 不因 helper 随包而自动具备可发布的钉钉登录。真实验收必须
+使用隔离 `userData`，记录连接前后应用数量、账号 identity、发布 App identity、审批/版本状态、Stream 与卡片收发证据；
+任何缺项都保持 NO-GO。字段、feature gate 和错误见
+[DingTalk Channel v1](../contracts/dingtalk-channel-v1.md)。
 
 ## 打包产物：构建与运行分开
 

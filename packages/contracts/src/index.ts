@@ -2016,7 +2016,7 @@ export type SettingsSection =
   | 'diagnostics'
   | 'about'
 
-export type ChannelKind = 'feishu'
+export type ChannelKind = 'feishu' | 'dingtalk'
 
 export type ChannelHostStatus = 'unavailable' | 'ready'
 
@@ -2034,6 +2034,7 @@ export type ChannelConversationKind = 'p2p' | 'group' | 'topic'
 export type ChannelQrAttemptPurpose = 'account_login'
 
 export interface ChannelQrAttemptView {
+  kind?: ChannelKind
   attemptId: string
   purpose: ChannelQrAttemptPurpose
   agentId: string | null
@@ -2058,7 +2059,7 @@ export interface ChannelAccountView {
   userName: string
   email?: string
   tenantName: string
-  brand: 'feishu' | 'lark'
+  brand: 'feishu' | 'lark' | 'dingtalk'
   connectedAt: string
   lastVerifiedAt: string
 }
@@ -2078,6 +2079,7 @@ export interface ChannelMemberBotView {
 }
 
 export interface MemberBotProvisioningView {
+  kind?: ChannelKind
   publicationIntentId: string
   agentId: string
   stage:
@@ -2095,6 +2097,7 @@ export interface MemberBotProvisioningView {
   detail: string
   remoteAppId: string | null
   failureCode: string | null
+  approvalCandidates?: Array<{ userId: string; displayName: string }>
 }
 
 export interface ChannelProviderView {
@@ -2103,6 +2106,8 @@ export interface ChannelProviderView {
   hostStatus: ChannelHostStatus
   connection: ChannelConnectionView
   memberBots: ChannelMemberBotView[]
+  pendingBindingCount?: number
+  bindingIssueCount?: number
 }
 
 export interface ChannelSettingsSnapshot {
@@ -2114,12 +2119,21 @@ export interface ChannelSettingsSnapshot {
   activeProvisioning: MemberBotProvisioningView | null
 }
 
+export interface ChannelConnectOptions {
+  deviceFlow?: boolean
+}
+
 export interface ChannelsApi {
   get(): Promise<ChannelSettingsSnapshot>
-  connect(): Promise<ChannelSettingsSnapshot>
-  disconnect(): Promise<ChannelSettingsSnapshot>
-  publishMemberBot(agentId: string): Promise<ChannelSettingsSnapshot>
-  retryMemberBot(agentId: string): Promise<ChannelSettingsSnapshot>
+  connect(kind?: ChannelKind, options?: ChannelConnectOptions): Promise<ChannelSettingsSnapshot>
+  disconnect(kind?: ChannelKind): Promise<ChannelSettingsSnapshot>
+  publishMemberBot(agentId: string, kind?: ChannelKind): Promise<ChannelSettingsSnapshot>
+  retryMemberBot(agentId: string, kind?: ChannelKind): Promise<ChannelSettingsSnapshot>
+  selectPublicationApprover(
+    agentId: string,
+    userId: string,
+    kind?: ChannelKind
+  ): Promise<ChannelSettingsSnapshot>
   cancelQrAttempt(attemptId: string): Promise<ChannelSettingsSnapshot>
   onChanged(listener: (snapshot: ChannelSettingsSnapshot) => void): () => void
 }
@@ -2815,6 +2829,22 @@ export type CoreMethod =
   | 'channels.feishu.owner.verify'
   | 'channels.feishu.dm.startNew'
   | 'channels.feishu.pendingBinding.resolve'
+  | 'channels.dingtalk.snapshot'
+  | 'channels.dingtalk.account.upsert'
+  | 'channels.dingtalk.account.disconnect'
+  | 'channels.dingtalk.account.expire'
+  | 'channels.dingtalk.publicationIntent.create'
+  | 'channels.dingtalk.publicationIntent.advance'
+  | 'channels.dingtalk.memberBot.upsert'
+  | 'channels.dingtalk.owner.verify'
+  | 'channels.dingtalk.dm.startNew'
+  | 'channels.dingtalk.pendingBinding.resolve'
+  | 'channels.dingtalk.inbound.observe'
+  | 'channels.dingtalk.roster.reconcile'
+  | 'channels.dingtalk.inbound.finalize'
+  | 'channels.dingtalk.host.tick'
+  | 'channels.dingtalk.executionConsole.page.authorize'
+  | 'channels.dingtalk.deliveries.settle'
   | 'channels.membership.add'
   | 'channels.membership.remove'
   | 'channels.inbound.observe'

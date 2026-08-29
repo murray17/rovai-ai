@@ -327,7 +327,9 @@ describe('channel settings service', () => {
           status: 'not_connected',
           account: null
         },
-        memberBots: []
+        memberBots: [],
+        pendingBindingCount: 0,
+        bindingIssueCount: 0
       }],
       pendingBindingCount: 0,
       bindingIssueCount: 0,
