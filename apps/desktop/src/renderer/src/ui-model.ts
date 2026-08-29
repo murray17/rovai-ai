@@ -741,11 +741,9 @@ function typedSearchQuery(
 
 function searchEvidenceText(query: string | null, evidenceText: string | null): string | null {
   if (query === null) return evidenceText
-  const sections = [query]
-  if (evidenceText !== null && evidenceText.length > 0 && evidenceText !== query) {
-    sections.push(`结果\n${evidenceText}`)
-  }
-  return sections.join('\n\n')
+  const queryLine = `搜索 ${query}`
+  if (evidenceText === null || evidenceText.length === 0 || evidenceText === query) return queryLine
+  return `${queryLine}\n${evidenceText}`
 }
 
 function runtimeActionShellCommand(payload: Record<string, unknown>): string | null {

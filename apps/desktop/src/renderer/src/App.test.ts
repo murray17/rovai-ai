@@ -5525,11 +5525,11 @@ describe('task event projections', () => {
       step: {
         title: 'Web 搜索',
         iconKind: 'web',
-        detail: `${queries.join('，')}\n\n结果\n找到 3 条结果`
+        detail: `搜索 ${queries.join('，')}\n找到 3 条结果`
       }
     })
     expect(executionEvidenceResultText('runtime.action', event.payload, event.canonical)).toBe(
-      `${queries.join('，')}\n\n结果\n找到 3 条结果`
+      `搜索 ${queries.join('，')}\n找到 3 条结果`
     )
     expect(executionEvidenceResultText('runtime.action', {
       runtimeSearchOperation: {
@@ -5541,8 +5541,31 @@ describe('task event projections', () => {
       },
       output: 'single result'
     }, event.canonical)).toBe(
-      `${query}\n\n结果\nsingle result`
+      `搜索 ${query}\nsingle result`
     )
+    expect(executionEvidenceResultText('runtime.action', {
+      runtimeSearchOperation: {
+        schemaVersion: 1,
+        source: 'runtime_reported',
+        status: 'available',
+        searchKind: 'web',
+        query
+      },
+      input: query
+    }, event.canonical)).toBe(`搜索 ${query}`)
+    expect(executionEvidenceResultText('activity.completed', {
+      item: {
+        type: 'webSearch',
+        output: 'Codex search result'
+      },
+      runtimeSearchOperation: {
+        schemaVersion: 1,
+        source: 'runtime_reported',
+        status: 'available',
+        searchKind: 'web',
+        query
+      }
+    }, event.canonical)).toBe(`搜索 ${query}\nCodex search result`)
     expect(executionEvidenceResultText('runtime.action', {
       runtimeSearchOperation: {
         schemaVersion: 1,

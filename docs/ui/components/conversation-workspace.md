@@ -301,14 +301,14 @@ disclosure 继续在原位渲染完整公开结果，不再截断，不再提供
 “重试”都留在该 disclosure，重试成功后焦点进入结果区域。全文置于固定最大高度的可聚焦
 `role=region` 中，超出后内部滚动；Arrow、Page Up/Down、Space、Home/End 可滚动，Escape 只返回
 对应 summary。Web 搜索 disclosure 只有在 `runtimeSearchOperation.status=available` 且 Canonical semantic 同时为
-`tool.web.search` 时，才在第一行直接显示 typed 公共 query，不增加“搜索词”标签；多项 query 以中文逗号按原
-顺序连接，有公开结果时再显示“结果”。query 原样展示，不做敏感词过滤或去重，历史 Evidence 缺失 typed
+`tool.web.search` 时，才在第一行以 `搜索 ` 紧接 typed 公共 query；多项 query 以中文逗号按原顺序连接。存在
+公开结果时从下一行连续显示，不插入“搜索词 / 结果”标签或空白分隔行。query 原样展示，不做敏感词过滤或去重，历史 Evidence 缺失 typed
 projection 时不显示空占位。Web 搜索仍是 Tool item，计入所在连续组的“已执行 N 项操作”，组内使用 Web 图标；
 Shell 结果面的左边界与 Tool 行 16px 类型图标的左边界同轴，不再缩进到标题文本轨；其他 Tool detail 保持
 既有对齐。底部和 Inspector 复用同一行为。仍不显示
 standalone raw Evidence、Envelope JSON 或独立
 “查看完整工具调用”。精确合同见
-[Run Process Detail Surface v25](../../contracts/run-process-detail-surface-v25.md)。
+[Run Process Detail Surface v26](../../contracts/run-process-detail-surface-v26.md)。
 
 ### Runtime 终态文件变更与 AgentRun 文件变化
 
@@ -362,7 +362,7 @@ Inspector 复用同一语义。刷新不得自动打开执行台、改变 Run se
 当权威 AgentRun 已取消时，该 Run 中仍为 running 的 Tool Call 停止所有运行动画，并以中性图形和
 “已停止”作为主状态。该展示只表达父 Run 已失去继续执行权，不改写子活动的 Canonical phase/outcome，
 也不隐藏独立的外部效果待确认提示；明确 canonical cancelled 的 Tool Call 同样显示“已停止”。精确合同见
-[Run Process Detail Surface v25](../../contracts/run-process-detail-surface-v25.md)。
+[Run Process Detail Surface v26](../../contracts/run-process-detail-surface-v26.md)。
 
 当前非终态 Claude Code Run 收到安全 `runtime_api_retrying` Evidence 时，在精确 Run 过程内显示 attention
 notice：“Claude Code API 暂时不可用”，并显示最新重试次数、等待秒数和“本次执行尚未结束，可继续等待或
@@ -370,7 +370,7 @@ notice：“Claude Code API 暂时不可用”，并显示最新重试次数、�
 该状态仍是 running，不产生 Tool、Toast、消息或终态 failure；Run 终态后隐藏旧 notice，真实失败继续使用
 下述 Runtime failure 边界。Renderer 只接受固定 code/status 与有界数字，不展示 raw stderr、API body、
 凭证、用户名或绝对路径。精确合同见
-[Run Process Detail Surface v25](../../contracts/run-process-detail-surface-v25.md)。
+[Run Process Detail Surface v26](../../contracts/run-process-detail-surface-v26.md)。
 
 failed Claude Code 或 Antigravity Run 的公开 `failure` 必须在对应 Run stage 显示 Runtime 名称、安全
 summary 与可选 detail；即使没有任何 Execution Evidence 也默认展开，不能被空详情逻辑隐藏。标题按
@@ -398,7 +398,7 @@ Composer 中的 CampTurn Stop 继续是唯一整轮停止入口并 fence 当前�
 Header、Task 卡、时间线和 Composer 不增加 Run-local 入口。`recovery_blocked` 继续只显示“结束此运行”，
 不与普通 Stop 同时出现。Run-local 请求不创建 Camp 时间线消息；Turn-level 终态用户取消仍以一条“你已在
 {耗时} 后停止”进入时间线。精确资格、required/optional 后果与不确定态见
-[Run Process Detail Surface v25](../../contracts/run-process-detail-surface-v25.md)。
+[Run Process Detail Surface v26](../../contracts/run-process-detail-surface-v26.md)。
 
 ## Camp Composer
 

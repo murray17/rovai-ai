@@ -264,8 +264,10 @@ Canonical Activity 分类，结构化 kind 仍映射 `shell.execute`。`grep_sea
 - title、provider 和 Runtime 名称永远不决定 domain 或 identity；唯一例外是 Adapter 白名单公开的 ACP
   `rawInput.command`，以及仅 `trae-cn-cli` 的 `rawInput.Command`，可在原生 kind 缺失时证明
   shell/execute，但 command 正文不参与 operation identity。
-- 所有公开 Shell command 只允许按上述 Renderer 边界生成完整脱敏的 presentation；没有 command 时保持
-  toolName/title/domain fallback。
+- 所有公开 Shell command 只允许按上述 Renderer 边界生成完整脱敏的 presentation；展开详情第一行使用
+  `$ <command>`，公开 output 从下一行连续显示。没有 command 时保持 toolName/title/domain fallback。
+- available typed Web query 的展开详情第一行使用 `搜索 <query>`，公开结果从下一行连续显示；多项 query 继续
+  按原顺序用中文逗号连接。两类详情都不插入分区标签或空白分隔行。
 - `runtime.diagnostic` 是 non-activity 状态证据；它不能因为 `kind=step`、Runtime 名称或展示文案而伪造成
   Tool operation，也不能替代可靠 terminal outcome。
 

@@ -419,9 +419,9 @@ last_updated: 2026-08-30
   query-only 输入 shape，当前只允许 Copilot `1.0.79`、Qoder `1.1.28`、Kiro `2.18.1` 与 CodeBuddy
   `2.133.1` 的已记录 tuple。准入值只能是单个非空字符串或元素全为非空字符串的非空数组；多项 projection 以
   `query` 保存第一项，并以 `queries` 保存完整有序数组。每项原样保存，不做敏感词过滤或去重；相邻未准入字段仍
-  保持私有。Renderer 还必须验证 projection available 与 Canonical `tool.web.search` 同时成立，直接显示单项或以
-  中文逗号连接多项，不增加“搜索词”标签；该 Activity 仍计入连续 Tool 组操作数。历史 Evidence 不回填，缺失
-  typed projection 不生成占位。
+  保持私有。Renderer 还必须验证 projection available 与 Canonical `tool.web.search` 同时成立；详情第一行以
+  `搜索 ` 紧接单项 query 或中文逗号连接的多项 query，存在公开结果时从下一行连续显示，不插入“搜索词 / 结果”
+  标签或空白分隔行。该 Activity 仍计入连续 Tool 组操作数。历史 Evidence 不回填，缺失 typed projection 不生成占位。
 - Shell command 只有在协议的封闭公共字段中出现时才能进入 Evidence：Claude 仅 Bash command，通用 ACP 仅
   `rawInput.command` 字符串，TRAE CLI CN 额外仅允许 `rawInput.Command` 字符串，Antigravity 仅明确 Shell
   工具的 `tool_info.parameters.CommandLine` 字符串。TRAE 的大小写例外必须绑定 `trae-cn-cli` Adapter identity，

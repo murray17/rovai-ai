@@ -112,7 +112,7 @@ last_updated: 2026-08-30
 - [x] 搜索词只通过 available `runtimeSearchOperation` 进入 Evidence/详情：Codex `webSearch`、Claude
   `WebSearch`、ACP `web_search` 按明确身份准入；Copilot/Qoder/Kiro/CodeBuddy 的模糊 ACP wire 绑定本次实测
   版本与 query-only shape。任意顶层 `query`、ACP 文件搜索 shape 和未验证版本 fail closed；query 不做敏感词
-  过滤；单项直接显示，多项保持有序数组并以中文逗号连接，不显示“搜索词”标签；Web 搜索计入连续 Tool 组；
+  过滤；单项或多项以 `搜索 <query>` 首行显示，公开结果从下一行连续显示；Web 搜索计入连续 Tool 组；
   Antigravity `search_web` 只分类、不猜 query。
 
 ## 7. 自动化验证
@@ -127,6 +127,8 @@ last_updated: 2026-08-30
   与完整 Evidence 恢复路径；
 - [x] `activity-v2` mapping、v1 live-operation compatibility、Migration 116 history preservation、类型化 Search
   Operation allowlist、Antigravity `search_web` 与 Renderer title/icon/query 双门槛定向 fixture 通过；
+- [x] v26 Web 搜索详情定向回归覆盖 query-only、单项/多项 query、typed projection fail-closed、Codex/ACP live
+  与完整 Evidence 恢复路径；App/Tool grouping 151/151 通过；
 - [x] Navigation coordinator 8/8 与 App event routing 2/2 回归通过；隔离 App 已验证 post-commit invalidation、
   后台 Run marker 收敛、隐藏暂停、focus 补读与 20 秒安全轮询；
 - [x] `cargo test -p rovai-core` 的 lib、`rovai-core` binary 与 `rovai` binary 全量通过；
