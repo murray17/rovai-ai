@@ -153,6 +153,20 @@ try {
     const tastefulUi = skillCards.find((card) => card.dataset.skillName === 'tasteful-ui')
     const diagnosingBugs = skillCards.find((card) => card.dataset.skillName === 'diagnosing-bugs')
     const panel = document.querySelector('.settings-panel')
+    const libraryHeader = document.querySelector('.skill-library-columns')
+    const skillColumnHeader = libraryHeader?.children[1]
+    const skillColumnContent = skillCards[0]?.querySelector('.skill-card-heading')
+    const operationColumnHeaders = [...(libraryHeader?.querySelectorAll('.skill-library-legend > span') ?? [])]
+    const operationColumnControls = [...(skillCards[0]?.querySelectorAll('.skill-card-controls > *') ?? [])]
+    const skillColumnHeaderRect = skillColumnHeader?.getBoundingClientRect()
+    const skillColumnContentRect = skillColumnContent?.getBoundingClientRect()
+    const operationColumnCenterDeltas = operationColumnHeaders.map((header, index) => {
+      const headerRect = header.getBoundingClientRect()
+      const controlRect = operationColumnControls[index]?.getBoundingClientRect()
+      return controlRect
+        ? Math.abs((headerRect.left + headerRect.width / 2) - (controlRect.left + controlRect.width / 2))
+        : null
+    })
     const cardMetrics = skillCards.map((card) => {
       const skill = skillViewByName.get(card.dataset.skillName)
       const mark = card.querySelector('.skill-card-mark')
@@ -209,8 +223,13 @@ try {
         card.querySelector('[role="switch"]')?.getAttribute('aria-checked') === 'true'
       ).length,
       enabledCount: enabled.length,
-      operationColumns: [...document.querySelectorAll('.skill-library-columns > div > span')]
-        .map((column) => column.textContent?.trim()),
+      libraryColumns: [skillColumnHeader, ...operationColumnHeaders]
+        .map((column) => column?.textContent?.trim()),
+      libraryColumnsDisplay: libraryHeader ? getComputedStyle(libraryHeader).display : null,
+      skillColumnLeftDelta: skillColumnHeaderRect && skillColumnContentRect
+        ? Math.abs(skillColumnHeaderRect.left - skillColumnContentRect.left)
+        : null,
+      operationColumnCenterDeltas,
       legacyMoreButtonCount: document.querySelectorAll('.skill-more-button').length,
       primaryProvenanceCount: document.querySelectorAll('.skill-card-primary .skill-card-provenance, .skill-card-primary .skill-source-link').length,
       cardMetrics,
@@ -268,6 +287,15 @@ try {
   ))
   const detailsStayNeutral = detailStyles.size === 1
     && result.cardMetrics.every((card) => card.detailsRailColor !== card.markColor)
+  const libraryColumnsValid = JSON.stringify(result.libraryColumns) === JSON.stringify([
+    'Skill', '生效范围', '状态', '查看'
+  ]) && (cssWidth < 820
+    ? result.libraryColumnsDisplay === 'none'
+    : result.libraryColumnsDisplay === 'grid'
+      && result.skillColumnLeftDelta !== null
+      && result.skillColumnLeftDelta < 0.6
+      && result.operationColumnCenterDeltas.length === 3
+      && result.operationColumnCenterDeltas.every((delta) => delta !== null && delta < 0.6))
 
   if (result.theme !== theme
       || result.viewport.width !== cssWidth
@@ -313,7 +341,7 @@ try {
         'worktree',
         'writing-for-agents'
       ])
-      || result.operationColumns.length !== 0
+      || !libraryColumnsValid
       || result.legacyMoreButtonCount !== 0
       || result.primaryProvenanceCount !== 0
       || !identityTokensValid

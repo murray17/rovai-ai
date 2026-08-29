@@ -383,12 +383,12 @@ Composer 与历史消息的人物信息卡截图是此交互的必留视觉证�
 
 Skill 页面验收必须先证明 Core 返回十二项 official Skill，再证明列表只展示其中十项
 `user_managed` Skill；`cli-operations` 与 `memory-stewardship` 两项 `system_required` Skill 不产生列表行、
-禁用开关、投递范围或 locked badge。十个可配置 Skill 都由持久 `Skill.id` 经 FNV-1a 映射到
+禁用开关、生效范围或 locked badge。十个可配置 Skill 都由持久 `Skill.id` 经 FNV-1a 映射到
 `--identity-1..8` 中一个 token（不要求十项覆盖八种颜色），六个短标签显示“Rovai”，四个固定上游
 Skill 短标签显示“GitHub”；主行不存在来源明细，`DonkeyKing01/tasteful-ui-skill` / `159ccd47` 与
 `mattpocock/skills` / `84fdeffd` 只在“详情”中出现。列表名称/简介/来源字号至少为
-14/12.5/10.5px，列名固定为
-“投递范围 / 状态 / 查看”，不存在旧三点菜单。34×20 Steel Switch 不显示“已启用 / 已停用 / 保存中”
+14/12.5/10.5px；宽窗列表的身份标记位留空，四个可见列名固定为
+“Skill / 生效范围 / 状态 / 查看”，并与主行使用同一组 Grid 轨道，不存在旧三点菜单。34×20 Steel Switch 不显示“已启用 / 已停用 / 保存中”
 文案，并保留 `role="switch"`、`aria-checked` 和动作型可访问名称。详情必须包含真实 Revision、安装或
 更新时间、文件信息、内容摘要与固定副本说明，其 Steel rail/Porcelain background 在不同身份色之间
 保持一致；official/固定上游 Skill 不出现删除。九个 Runtime 生效组及真实队员投影继续按原门禁操作。
