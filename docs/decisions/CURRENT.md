@@ -68,7 +68,7 @@ last_updated: 2026-08-29
 
 ## Evidence、Runtime Activity 与 Usage
 
-- 当前规范：[Evidence/Activity 基础不变量](../architecture/foundational-invariants.md#evidence-canonical-activity)、[Runtime File Change Observation](../architecture/runtime-file-change-observation.md)、[Runtime File Change Observation v2](../contracts/runtime-file-change-observation-v2.md)、[Run Process Detail Surface v24](../contracts/run-process-detail-surface-v24.md)、[Runtime Monitoring](../architecture/runtime-monitoring.md)、[Runtime Usage Monitoring v3](../contracts/runtime-usage-monitoring-v3.md)、[Runtime Activity Registry](../runtime-activity/registry.md)。
+- 当前规范：[Evidence/Activity 基础不变量](../architecture/foundational-invariants.md#evidence-canonical-activity)、[Runtime File Change Observation](../architecture/runtime-file-change-observation.md)、[Runtime File Change Observation v2](../contracts/runtime-file-change-observation-v2.md)、[Run Process Detail Surface v25](../contracts/run-process-detail-surface-v25.md)、[Runtime Monitoring](../architecture/runtime-monitoring.md)、[Runtime Usage Monitoring v3](../contracts/runtime-usage-monitoring-v3.md)、[Runtime Activity Registry](../runtime-activity/registry.md)。
 - 理由来源：[v0.17](../versions/v0.17/decisions.md)、[v0.41](../versions/v0.41/decisions.md)、[v0.96](../versions/v0.96/decisions.md)、[v0.99](../versions/v0.99/decisions.md)、[V1.28-D12](../versions/v1.28/decisions.md#v1-28-d12)、[V1.29-D08](../versions/v1.29/decisions.md#v1-29-d08)、[V1.29-D09](../versions/v1.29/decisions.md#v1-29-d09)、[V1.29-D14](../versions/v1.29/decisions.md#v1-29-d14)。
 
 ## Qualification 与 Benchmark
@@ -78,7 +78,7 @@ last_updated: 2026-08-29
 
 ## Product 与 Renderer
 
-- 当前规范：[产品/Renderer 基础不变量](../architecture/foundational-invariants.md#product-execution-surface)、[Desktop Navigation Refresh](../architecture/desktop-navigation-refresh.md)、[UI 规范](../ui/README.md)、[Camp 会话工作区](../ui/components/conversation-workspace.md)、[Run Process Detail Surface v24](../contracts/run-process-detail-surface-v24.md)、[Desktop App Updates](../architecture/desktop-app-updates.md)和[App Update v1](../contracts/app-update-v1.md)。
+- 当前规范：[产品/Renderer 基础不变量](../architecture/foundational-invariants.md#product-execution-surface)、[Desktop Navigation Refresh](../architecture/desktop-navigation-refresh.md)、[UI 规范](../ui/README.md)、[Camp 会话工作区](../ui/components/conversation-workspace.md)、[Run Process Detail Surface v25](../contracts/run-process-detail-surface-v25.md)、[Desktop App Updates](../architecture/desktop-app-updates.md)和[App Update v1](../contracts/app-update-v1.md)。
 - 理由来源：[v0.11](../versions/v0.11/decisions.md)、[v0.24](../versions/v0.24/decisions.md)、[v0.55](../versions/v0.55/decisions.md)、[v0.58](../versions/v0.58/decisions.md)、[v0.84](../versions/v0.84/decisions.md)、[v1.12](../versions/v1.12/decisions.md)、[v1.13](../versions/v1.13/decisions.md)、[V1.15-D01](../versions/v1.15/decisions.md#v1-15-d01)、[V1.15-D02](../versions/v1.15/decisions.md#v1-15-d02)、[V1.15-D05](../versions/v1.15/decisions.md#v1-15-d05)、[V1.18-D01](../versions/v1.18/decisions.md#v1-18-d01)、[V1.20-D02](../versions/v1.20/decisions.md#v1-20-d02)、[V1.28-D12](../versions/v1.28/decisions.md#v1-28-d12)、[V1.28-D13](../versions/v1.28/decisions.md#v1-28-d13)、[V1.29-D10](../versions/v1.29/decisions.md#v1-29-d10)、[V1.29-D12](../versions/v1.29/decisions.md#v1-29-d12)、[V1.29-D14](../versions/v1.29/decisions.md#v1-29-d14)。
 
 ## 文档治理

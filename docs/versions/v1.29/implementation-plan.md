@@ -111,8 +111,9 @@ last_updated: 2026-08-29
 - [x] 搜索词只通过 available `runtimeSearchOperation` 进入 Evidence/详情：Codex `webSearch`、Claude
   `WebSearch`、ACP `web_search` 按明确身份准入；Copilot/Qoder/Kiro/CodeBuddy 的模糊 ACP wire 绑定本次实测
   版本与 query-only shape。任意顶层 `query`、ACP 文件搜索 shape 和未验证版本 fail closed；query 不做敏感词
-  过滤；单项直接显示，多项保持有序数组并以中文逗号连接，不显示“搜索词”标签；Web 搜索计入连续 Tool 组；
+  过滤；单项或多项以 `搜索 <query>` 首行显示，公开结果从下一行连续显示；Web 搜索计入连续 Tool 组；
   Antigravity `search_web` 只分类、不猜 query。
+- [x] Shell command 详情统一为 `$ <command>` 首行和紧接的公开 output；Shell/Web 搜索都移除分区标签与空白分隔行。
 
 ## 7. 自动化验证
 
@@ -124,14 +125,15 @@ last_updated: 2026-08-29
 - [x] TypeScript typecheck 通过；
 - [x] `activity-v2` mapping、v1 live-operation compatibility、Migration 116 history preservation、类型化 Search
   Operation allowlist、Antigravity `search_web` 与 Renderer title/icon/query 双门槛定向 fixture 通过；
+- [x] v25 Shell/Web 详情定向回归覆盖有输出、无输出、多项 query、typed projection fail-closed、Codex/ACP live
+  与完整 Evidence 恢复路径；App/Tool grouping 共 151 项、TypeScript、Desktop production build 与文档门禁通过；
 - [x] Navigation coordinator 8/8 与 App event routing 2/2 回归通过；隔离 App 已验证 post-commit invalidation、
   后台 Run marker 收敛、隐藏暂停、focus 补读与 20 秒安全轮询；
 - [x] `cargo test -p rovai-core` 的 lib、`rovai-core` binary 与 `rovai` binary 全量通过；
 - [x] Renderer/Vitest 全量 620 项通过，完整 `pnpm test` 其余 Node 套件 219 项通过、1 项既有 Windows skip；
 - [x] `pnpm docs:test`、`pnpm docs:check` 与精确 merge-base `docs:check:ci` 通过；
 - [x] Desktop production build 通过；
-- [x] Impeccable final detector 对本次 UI targets 完成唯一一次实际扫描；报告项均来自 `styles.css` 既有未改
-  规则，本次新增 Rovai icon/style 无新 finding。
+- [x] Impeccable final detector 对 v25 `ui-model.ts` target 完成唯一一次实际扫描并返回零 finding。
 
 ## 8. 真实 Runtime 验收
 

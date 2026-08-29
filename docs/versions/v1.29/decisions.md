@@ -579,7 +579,7 @@ Tool。真实搜索词没有稳定公开字段，用户只能看到通用“Web 
    公开，Antigravity `search_web` 当前只分类、不猜 query；Renderer 还要同时验证 available projection 与
    Canonical `tool.web.search`，直接显示 query、多项用中文逗号连接且不显示“搜索词”标签。Web 搜索继续作为
    Tool item 计入连续 Tool 组；
-6. 当前规范由 [Run Process Detail Surface v24](../../contracts/run-process-detail-surface-v24.md)、
+6. 当前规范由 [Run Process Detail Surface v25](../../contracts/run-process-detail-surface-v25.md)、
    [Runtime Activity Registry](../../runtime-activity/registry.md)、[Evidence 基础不变量](../../architecture/foundational-invariants.md#evidence-canonical-activity)
    与 [Camp 会话工作区](../../ui/components/conversation-workspace.md)共同拥有。
 

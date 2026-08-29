@@ -199,7 +199,8 @@ Architecture 解释组件如何组成，Version 概览记录交付范围；它�
 | [ContextManifest Evidence v9 (historical)](context-manifest-evidence-v9.md) | bounded public omission evidence；不作为 Formatter v13 恢复入口 |
 | [Context Delivery Profile v2 (historical)](context-delivery-profile-v2.md) | 公共引用链与历史 budget 的旧当前合同；不选择 self-active Task |
 | [Context Delivery Profile v1 (historical)](context-delivery-profile-v1.md) | AgentRun 公共消息窗口、Unicode scalar 正文截断、历史字符预算与遗漏提示 |
-| [Run Process Detail Surface v24（当前）](run-process-detail-surface-v24.md) | v23 分组与 live-tail 不变；`activity-v2` 五域、Renderer 中文标题、七类图标、Rovai Catalog identity、公开 typed query 与无历史回填切换 |
+| [Run Process Detail Surface v25（当前）](run-process-detail-surface-v25.md) | v24 分类、图标与 typed query 边界不变；Shell 以 `$ <command>`、Web 搜索以 `搜索 <query>` 开始，公开结果从下一行连续显示 |
+| [Run Process Detail Surface v24（历史）](run-process-detail-surface-v24.md) | v23 分组与 live-tail 不变；`activity-v2` 五域、Renderer 中文标题、七类图标、Rovai Catalog identity、公开 typed query 与无历史回填切换 |
 | [Run Process Detail Surface v23（历史）](run-process-detail-surface-v23.md) | v22 live-tail 与收口边界不变；Tool 间隙持续显示“执行中 · <最近一条指令>”，不再切换为累计数 |
 | [Run Process Detail Surface v22（历史）](run-process-detail-surface-v22.md) | v21 摘要与状态边界不变；running Run 的尾组延迟到真实 process/Run 边界再收口，Tool 间隙保持运行摘要与稳定高度，组图标和文字共享 16px 中心线 |
 | [Run Process Detail Surface v21（历史）](run-process-detail-surface-v21.md) | v20 分组与惰性结果边界不变；活动摘要只显示已执行总数，终态摘要不追加结果文字，组内有成功即为绿色、仅全部失败为红色 |
