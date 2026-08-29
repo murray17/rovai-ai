@@ -24,6 +24,7 @@ use rovai_core::{
         RuntimeFailureError, RuntimeFailureOrigin, RuntimeFailurePhase, RuntimeFailureView,
         public_runtime_failure_from_output,
     },
+    runtime_search_operation,
 };
 use serde::Deserialize;
 use serde_json::Value;
@@ -859,6 +860,7 @@ struct ClaudeCodeStreamState {
     started_tools: HashSet<String>,
     terminal_tools: HashSet<String>,
     tool_inputs: HashMap<String, Value>,
+    tool_queries: HashMap<String, Value>,
     exact_edit_mutations: HashMap<String, Value>,
     api_retry_attempts: HashSet<(u64, u64)>,
 }
@@ -1068,7 +1070,10 @@ fn normalize_claude_runtime_events(
                 .tool_names
                 .insert(tool_use_id.clone(), tool_name.clone());
             if let Some(input) = public_claude_tool_input(&tool_name, block.get("input")) {
-                state.tool_inputs.insert(tool_use_id, input);
+                state.tool_inputs.insert(tool_use_id.clone(), input);
+            }
+            if let Some(query) = public_claude_search_query(&tool_name, block.get("input")) {
+                state.tool_queries.insert(tool_use_id, query);
             }
         }
         Some("stream_event")
@@ -1143,6 +1148,9 @@ fn normalize_claude_runtime_events(
                 if let Some(input) = public_claude_tool_input(&tool_name, block.get("input")) {
                     state.tool_inputs.insert(tool_use_id.clone(), input);
                 }
+                if let Some(query) = public_claude_search_query(&tool_name, block.get("input")) {
+                    state.tool_queries.insert(tool_use_id.clone(), query);
+                }
                 if let Some(mutation) = claude_exact_edit_mutation(&tool_name, block.get("input")) {
                     state
                         .exact_edit_mutations
@@ -1191,6 +1199,7 @@ fn normalize_claude_runtime_events(
                     .filter(|name| name.eq_ignore_ascii_case("bash"))
                     .and_then(|_| public_claude_bash_output(event, block));
                 let input = state.tool_inputs.get(&tool_use_id).cloned();
+                let query = state.tool_queries.get(&tool_use_id).cloned();
                 let kind = tool_name.as_deref().map(claude_tool_kind).unwrap_or("tool");
                 let title = tool_name.clone();
                 let exact_mutation = state.exact_edit_mutations.remove(&tool_use_id);
@@ -1203,6 +1212,17 @@ fn normalize_claude_runtime_events(
                     "input": input,
                     "output": output,
                 });
+                let search_operation_candidate = tool_name.as_deref().and_then(|tool_name| {
+                    runtime_search_operation::claude_web_search_candidate(
+                        "assistant.tool_use.WebSearch+user.tool_result",
+                        tool_name,
+                        query.as_ref(),
+                    )
+                });
+                runtime_search_operation::insert_candidate(
+                    &mut payload,
+                    search_operation_candidate,
+                );
                 if reliably_non_error && let Some(exact_mutation) = exact_mutation {
                     payload["runtimeDiff"] = serde_json::json!({
                         "adapterKind": "claude-code-cli",
@@ -1259,20 +1279,33 @@ fn claude_tool_started(
         .tool_names
         .insert(tool_use_id.clone(), tool_name.clone());
     let input = state.tool_inputs.get(&tool_use_id).cloned();
-    state
-        .started_tools
-        .insert(tool_use_id.clone())
-        .then(|| ClaudeCodeRuntimeEvent {
+    let query = state.tool_queries.get(&tool_use_id).cloned();
+    state.started_tools.insert(tool_use_id.clone()).then(|| {
+        let mut payload = serde_json::json!({
+            "toolCallId": tool_use_id,
+            "toolName": tool_name,
+            "status": "in_progress",
+            "kind": kind,
+            "title": title,
+            "input": input,
+        });
+        let search_operation_candidate =
+            payload
+                .get("toolName")
+                .and_then(Value::as_str)
+                .and_then(|tool_name| {
+                    runtime_search_operation::claude_web_search_candidate(
+                        "assistant.tool_use.WebSearch",
+                        tool_name,
+                        query.as_ref(),
+                    )
+                });
+        runtime_search_operation::insert_candidate(&mut payload, search_operation_candidate);
+        ClaudeCodeRuntimeEvent {
             event_type: "runtime.action",
-            payload: serde_json::json!({
-                "toolCallId": tool_use_id,
-                "toolName": tool_name,
-                "status": "in_progress",
-                "kind": kind,
-                "title": title,
-                "input": input,
-            }),
-        })
+            payload,
+        }
+    })
 }
 
 fn public_claude_tool_input(tool_name: &str, input: Option<&Value>) -> Option<Value> {
@@ -1284,6 +1317,25 @@ fn public_claude_tool_input(tool_name: &str, input: Option<&Value>) -> Option<Va
         .and_then(Value::as_str)
         .filter(|command| !command.trim().is_empty())
         .map(|command| Value::String(command.to_string()))
+}
+
+fn public_claude_search_query(tool_name: &str, input: Option<&Value>) -> Option<Value> {
+    if tool_name != "WebSearch" {
+        return None;
+    }
+    let query = input?.get("query")?;
+    match query {
+        Value::String(query) if !query.trim().is_empty() => Some(Value::String(query.clone())),
+        Value::Array(queries)
+            if !queries.is_empty()
+                && queries
+                    .iter()
+                    .all(|query| query.as_str().is_some_and(|query| !query.trim().is_empty())) =>
+        {
+            Some(Value::Array(queries.clone()))
+        }
+        _ => None,
+    }
 }
 
 fn claude_exact_edit_mutation(tool_name: &str, input: Option<&Value>) -> Option<Value> {
@@ -1316,7 +1368,8 @@ fn claude_tool_kind(tool_name: &str) -> &'static str {
     match tool_name.to_ascii_lowercase().as_str() {
         "bash" => "execute",
         "read" | "glob" => "read",
-        "grep" | "websearch" => "search",
+        "grep" => "file_search",
+        "websearch" => "web_search",
         "edit" | "notebookedit" => "edit",
         "write" => "write",
         _ => "tool",
@@ -2331,6 +2384,77 @@ exit 1
     }
 
     #[test]
+    fn web_search_keeps_exact_typed_queries_through_a_sparse_result() {
+        let session_id = "0bdd2166-d420-40c6-94be-70b93eb290c5";
+        let queries = json!(["password=公开测试词 token=也照常展示", "第二个搜索词"]);
+        let mut state = ClaudeCodeStreamState::default();
+        let started = normalize_claude_runtime_events(
+            &json!({
+                "type": "assistant",
+                "session_id": session_id,
+                "message": {"content": [{
+                    "type": "tool_use",
+                    "id": "toolu_web_search_1",
+                    "name": "WebSearch",
+                    "input": {"query": queries.clone(), "providerPrivate": "must-not-leak"}
+                }]}
+            }),
+            session_id,
+            &mut state,
+        )
+        .unwrap();
+        assert_eq!(started[0].payload["kind"], "web_search");
+        assert!(started[0].payload.get("query").is_none());
+        assert_eq!(
+            started[0]
+                .payload
+                .pointer("/runtimeSearchOperationCandidate/query"),
+            Some(&queries[0])
+        );
+        assert_eq!(
+            started[0]
+                .payload
+                .pointer("/runtimeSearchOperationCandidate/queries"),
+            Some(&queries)
+        );
+        assert!(started[0].payload["input"].is_null());
+        assert!(
+            !serde_json::to_string(&started[0].payload)
+                .unwrap()
+                .contains("must-not-leak")
+        );
+
+        let completed = normalize_claude_runtime_events(
+            &json!({
+                "type": "user",
+                "session_id": session_id,
+                "message": {"content": [{
+                    "type": "tool_result",
+                    "tool_use_id": "toolu_web_search_1",
+                    "content": "completed"
+                }]}
+            }),
+            session_id,
+            &mut state,
+        )
+        .unwrap();
+        assert_eq!(completed[0].payload["kind"], "web_search");
+        assert!(completed[0].payload.get("query").is_none());
+        assert_eq!(
+            completed[0]
+                .payload
+                .pointer("/runtimeSearchOperationCandidate/query"),
+            Some(&queries[0])
+        );
+        assert_eq!(
+            completed[0]
+                .payload
+                .pointer("/runtimeSearchOperationCandidate/queries"),
+            Some(&queries)
+        );
+    }
+
+    #[test]
     fn failed_incomplete_replace_all_and_non_edit_tools_never_emit_exact_mutation() {
         let session_id = "0bdd2166-d420-40c6-94be-70b93eb290c5";
         let cases = [
@@ -2666,6 +2790,8 @@ exit 1
         assert!(accepted_receiver.try_recv().is_err());
         assert_eq!(claude_tool_kind("Bash"), "execute");
         assert_eq!(claude_tool_kind("Read"), "read");
+        assert_eq!(claude_tool_kind("Grep"), "file_search");
+        assert_eq!(claude_tool_kind("WebSearch"), "web_search");
         assert_eq!(claude_tool_kind("Edit"), "edit");
         assert_eq!(claude_tool_kind("Write"), "write");
         assert_eq!(claude_tool_kind("FutureTool"), "tool");

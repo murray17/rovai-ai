@@ -262,7 +262,7 @@ describe('Feishu execution console card', () => {
     }
 
     const body = cardBody(executionConsoleCard(snapshot('succeeded', { evidence: [patch] })))
-    expect(body).toContain('✓ apply_patch')
+    expect(body).toContain('✓ 修改 foo.ts')
     expect(body).toContain('`src/foo.ts` +4 −2')
     expect(body).not.toContain('secret patch body')
     expect(body).not.toContain('*** Begin Patch')

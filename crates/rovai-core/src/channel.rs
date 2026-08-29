@@ -2162,10 +2162,13 @@ impl ChannelService {
         if let Some(digest) = &envelope.payload.approver_user_id_digest {
             validate_digest(digest, "approverUserIdDigest")?;
         }
-        if let Some(mode) = &envelope.payload.approval_mode {
-            if !matches!(mode.as_str(), "NO_APPROVAL" | "SELECT_APPROVER" | "AUTO") {
-                anyhow::bail!("approvalMode is not supported");
-            }
+        if envelope
+            .payload
+            .approval_mode
+            .as_deref()
+            .is_some_and(|mode| !matches!(mode, "NO_APPROVAL" | "SELECT_APPROVER" | "AUTO"))
+        {
+            anyhow::bail!("approvalMode is not supported");
         }
         self.gateway.execute(database, envelope, |transaction| {
             if !is_channel_host_for_provider(&envelope.actor, DINGTALK_PROVIDER) {

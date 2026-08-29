@@ -2,7 +2,7 @@
 document_type: version-decisions
 version: v1.29
 lifecycle: historical
-last_updated: 2026-08-28
+last_updated: 2026-08-29
 ---
 
 # v1.29 决策记录
@@ -546,3 +546,56 @@ Published/Managed Attachment 已由独立合同持久化。Runtime File Change v
 - **禁止所有 execution-root-external 路径：** 会丢失 Runtime 明确报告的合法用户文件，与 v1 的 display contract
   冲突；
 - **迁移或重投影旧数据：** 需要改写已持久 Evidence/卡片且无法恢复当时 exact process root，收益不足以支持风险。
+
+<a id="v1-29-d14"></a>
+## V1.29-D14：Activity v2 只切换新 operation，Renderer 收口中文标题、七类图标与 typed query
+
+### 背景
+
+`activity-v1` 同时让 Core 生成中文默认标题、把 Codex commandActions 翻译成 presentation，并把
+`search | web_search | file_search` 全部归为 Web 搜索。Renderer 又维护 Shell、File、Git、Network、
+Permission、Runtime、Plan、Tool、Unknown 九类图标，无法单独表达“Rovai 自有 Catalog Tool”和普通 Runtime
+Tool。真实搜索词没有稳定公开字段，用户只能看到通用“Web 搜索”。如果直接修改 v1 常量，历史 row 和升级时仍
+运行的 operation 会在无迁移记录的情况下改变语义。
+
+### 决定
+
+1. 新增 `activity-v2`：新写入只产生 `shell | file | tool | runtime | unknown`，并将 `file_search`、
+   `web_search`、`search` 分别映射为 `file.search`、`tool.web.search`、`tool.search`；Claude Grep/WebSearch
+   与 Antigravity 三类 search kind 使用同一语义；
+2. Migration 116 把 current marker 升为 `v1.29 / projection schema 70 / activity-v2`，但不改写任何
+   `activity-v1` row。已有 v1 projection 的 operation 继续用 v1 结算；没有既有 row 的 operation 才建立 v2。
+   Read Side 双读 v2/v1并确定性优先 v2；不建立批量历史 reprojection；
+3. Core v2 只保留 Runtime 明确 title。Renderer 拥有中文 fallback、公开 Shell command 标题、可靠 file path 的
+   `修改 <basename>` 与 `tool.web.search` 的“Web 搜索”；
+4. 类型图标收敛为 Terminal、File、Web、Tool、Rovai、Runtime、Unknown 七类。Rovai 图标只由 Catalog 验证后的
+   `sourceAuthority=core + credibility=core_verified + toolName` 选择；Shell command 中出现 `rovai` 仍是
+   Terminal；
+5. 部署后新 Evidence 只通过 `runtimeSearchOperation` 保存明确 typed 公共 query，不保存任何顶层通用
+   `query`。Codex `webSearch`、Claude `WebSearch` 与 ACP `web_search` 按明确身份准入；实测 ACP 模糊事件只在
+   Adapter + 版本 + phase + query-only shape 全部匹配时准入，当前冻结 Copilot `1.0.79`、Qoder `1.1.28`、
+   Kiro `2.18.1` 与 CodeBuddy `2.133.1`。query 可为单个非空字符串或元素全为非空字符串的非空数组；多项以
+   `query` 保留首项、`queries` 保留完整顺序。每项原样保存，不做敏感词识别、替换或去重；其他相邻字段仍不
+   公开，Antigravity `search_web` 当前只分类、不猜 query；Renderer 还要同时验证 available projection 与
+   Canonical `tool.web.search`，直接显示 query、多项用中文逗号连接且不显示“搜索词”标签。Web 搜索继续作为
+   Tool item 计入连续 Tool 组；
+6. 当前规范由 [Run Process Detail Surface v24](../../contracts/run-process-detail-surface-v24.md)、
+   [Runtime Activity Registry](../../runtime-activity/registry.md)、[Evidence 基础不变量](../../architecture/foundational-invariants.md#evidence-canonical-activity)
+   与 [Camp 会话工作区](../../ui/components/conversation-workspace.md)共同拥有。
+
+### 后果
+
+- 历史数据继续按新 Renderer presentation 尽力显示，但 canonical v1 row 本身不变；缺少 query 时没有空占位；
+- 新 operation 的搜索语义可区分文件搜索、通用搜索和 Web 搜索，Core/Renderer 职责更清楚；
+- Rovai 自有 Tool 有稳定品牌图标，且不会把普通 Shell `rovai ...` 或伪造标题识别为第一方调用；
+- 准入后的 typed query 成为用户可见的公共 Evidence，而不是按字段名或敏感词策略产生的隐式事实；多项仍保持
+  稳定首项兼容和完整顺序，Web 搜索不会脱离既有 Tool 操作汇总。
+
+### 被拒绝方案
+
+- **原地修改 activity-v1 或批量重写历史：** 会破坏版本事实，也无法安全处理升级瞬间仍在运行的 operation；
+- **为所有历史 Evidence 重放 v2：** 当前没有已准入的任意历史 replay/mapping-digest 基础设施；
+- **按 title/toolName/command 字符串识别 Rovai：** Runtime 可自由命名，Shell 文本也不证明 Core 介入；
+- **继续九类图标：** 顶层域与视觉语义重复，且挤占真正需要区分的 Web 与 Rovai；
+- **对 query 做敏感词过滤：** 会改变用户明确输入且无法定义稳定、可验证的词表；邻接私有字段隔离已经承担
+  数据边界。

@@ -21,6 +21,7 @@ function tool(
       detail: `结果 ${id}`,
       status,
       activityDomain: 'shell',
+      iconKind: 'terminal',
       toolName: null,
       credibility: 'runtime_structured'
     }
@@ -78,6 +79,31 @@ describe('execution Tool grouping', () => {
       items: [
         { step: { id: 'files', fileChanges: [{ path: 'src/app.ts' }, { path: 'src/styles.css' }] } },
         { step: { id: 'verify' } }
+      ]
+    }])
+    expect(toolActivityGroupPresentation(
+      grouped[0].kind === 'toolGroup' ? grouped[0].items : [],
+      'succeeded'
+    )).toMatchObject({
+      primary: '已执行 2 项操作',
+      accessibleLabel: '已执行 2 项操作；状态：全部成功'
+    })
+  })
+
+  it('counts a Web search in the same operation group as other Tools', () => {
+    const webSearch = tool('web-search')
+    webSearch.step.title = 'Web 搜索'
+    webSearch.step.activityDomain = 'tool'
+    webSearch.step.iconKind = 'web'
+    webSearch.step.toolName = 'WebSearch'
+
+    const grouped = groupConsecutiveToolItems([tool('command'), webSearch])
+
+    expect(grouped).toMatchObject([{
+      kind: 'toolGroup',
+      items: [
+        { step: { id: 'command', iconKind: 'terminal' } },
+        { step: { id: 'web-search', title: 'Web 搜索', iconKind: 'web' } }
       ]
     }])
     expect(toolActivityGroupPresentation(

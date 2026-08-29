@@ -118,6 +118,7 @@ describe('Camp world map model', () => {
             detail: 'CampWorkspace.tsx',
             status: 'running',
             activityDomain: 'filesystem',
+            iconKind: 'file',
             toolName: 'read',
             credibility: 'runtime_structured'
           }

@@ -8,7 +8,8 @@ use serde_json::Value;
 
 use crate::agent_profile::AdapterKind;
 
-pub const CLASSIFIER_VERSION: &str = "activity-v1";
+pub const LEGACY_CLASSIFIER_VERSION: &str = "activity-v1";
+pub const CLASSIFIER_VERSION: &str = "activity-v2";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RuntimeActivityMappingDescriptor {
@@ -81,6 +82,15 @@ pub(crate) fn classify_with_structure(
     evidence_kind: &str,
     payload: &Value,
 ) -> (String, Option<String>, bool) {
+    classify_with_structure_for_version(CLASSIFIER_VERSION, item_type, evidence_kind, payload)
+}
+
+pub(crate) fn classify_with_structure_for_version(
+    classifier_version: &str,
+    item_type: &str,
+    evidence_kind: &str,
+    payload: &Value,
+) -> (String, Option<String>, bool) {
     let runtime_kind = payload
         .get("kind")
         .and_then(Value::as_str)
@@ -97,11 +107,22 @@ pub(crate) fn classify_with_structure(
         "runtime" | "run" => return structured_domain("runtime", "runtime.run"),
         _ => {}
     }
-    match runtime_kind.to_ascii_lowercase().as_str() {
+    let runtime_kind = runtime_kind.to_ascii_lowercase();
+    if classifier_version == LEGACY_CLASSIFIER_VERSION
+        && matches!(
+            runtime_kind.as_str(),
+            "search" | "web_search" | "file_search"
+        )
+    {
+        return structured_domain("tool", "tool.web.search");
+    }
+    match runtime_kind.as_str() {
         "read" | "read_file" | "readfile" => structured_domain("file", "file.read"),
         "edit" | "write" | "write_file" | "apply_patch" => structured_domain("file", "file.write"),
         "execute" | "command" | "terminal" | "shell" => structured_domain("shell", "shell.execute"),
-        "search" | "web_search" => structured_domain("tool", "tool.web.search"),
+        "file_search" => structured_domain("file", "file.search"),
+        "web_search" => structured_domain("tool", "tool.web.search"),
+        "search" => structured_domain("tool", "tool.search"),
         "mcp_tool_call" | "tool" => structured_domain("tool", "tool.call"),
         "runtime" | "run" => structured_domain("runtime", "runtime.run"),
         _ => {
@@ -117,7 +138,7 @@ pub(crate) fn classify_with_structure(
     }
 }
 
-pub fn default_presentation_hint(
+pub(crate) fn legacy_v1_default_presentation_hint(
     activity_domain: &str,
     semantic_kind: Option<&str>,
 ) -> Option<String> {
@@ -135,7 +156,10 @@ pub fn default_presentation_hint(
     )
 }
 
-pub(crate) fn structured_presentation_hint(item_type: &str, item: &Value) -> Option<String> {
+pub(crate) fn legacy_v1_structured_presentation_hint(
+    item_type: &str,
+    item: &Value,
+) -> Option<String> {
     match item_type {
         "commandExecution" => command_actions_presentation_hint(item),
         "fileChange" => file_changes_presentation_hint(item),
@@ -201,7 +225,7 @@ fn file_changes_presentation_hint(item: &Value) -> Option<String> {
     }
 }
 
-pub(crate) fn file_operation_presentation_hint(path: &str) -> Option<String> {
+pub(crate) fn legacy_v1_file_operation_presentation_hint(path: &str) -> Option<String> {
     compact_path_label(path).map(|path| format!("修改 {path}"))
 }
 
@@ -284,6 +308,37 @@ mod tests {
     }
 
     #[test]
+    fn activity_v2_separates_file_generic_and_web_search() {
+        assert_eq!(
+            classify("", "tool_call", &json!({"kind": "file_search"})),
+            domain("file", "file.search")
+        );
+        assert_eq!(
+            classify("", "tool_call", &json!({"kind": "search"})),
+            domain("tool", "tool.search")
+        );
+        assert_eq!(
+            classify("", "tool_call", &json!({"kind": "web_search"})),
+            domain("tool", "tool.web.search")
+        );
+    }
+
+    #[test]
+    fn activity_v1_compatibility_keeps_its_original_search_semantics() {
+        for kind in ["file_search", "search", "web_search"] {
+            let (activity_domain, semantic_kind, structured) = classify_with_structure_for_version(
+                LEGACY_CLASSIFIER_VERSION,
+                "",
+                "tool_call",
+                &json!({"kind": kind}),
+            );
+            assert_eq!(activity_domain, "tool");
+            assert_eq!(semantic_kind.as_deref(), Some("tool.web.search"));
+            assert!(structured);
+        }
+    }
+
+    #[test]
     fn structured_and_legacy_one_shot_coverage_remain_explicit() {
         assert_eq!(
             descriptor_for(AdapterKind::ClaudeCodeCli).baseline_coverage,
@@ -304,9 +359,9 @@ mod tests {
     }
 
     #[test]
-    fn codex_command_actions_generate_bounded_presentation_hints() {
+    fn legacy_v1_codex_command_actions_generate_bounded_presentation_hints() {
         assert_eq!(
-            structured_presentation_hint(
+            legacy_v1_structured_presentation_hint(
                 "commandExecution",
                 &json!({
                     "commandActions": [{
@@ -320,7 +375,7 @@ mod tests {
             Some("读取 README.md")
         );
         assert_eq!(
-            structured_presentation_hint(
+            legacy_v1_structured_presentation_hint(
                 "commandExecution",
                 &json!({
                     "commandActions": [
@@ -333,7 +388,7 @@ mod tests {
             Some("检索项目文件")
         );
         assert_eq!(
-            structured_presentation_hint(
+            legacy_v1_structured_presentation_hint(
                 "commandExecution",
                 &json!({"commandActions": [{"type": "unknown"}]}),
             ),
@@ -342,9 +397,9 @@ mod tests {
     }
 
     #[test]
-    fn codex_file_changes_include_observed_scope_without_exposing_full_paths() {
+    fn legacy_v1_codex_file_changes_include_observed_scope_without_exposing_full_paths() {
         assert_eq!(
-            structured_presentation_hint(
+            legacy_v1_structured_presentation_hint(
                 "fileChange",
                 &json!({
                     "changes": [{
@@ -357,7 +412,7 @@ mod tests {
             Some("新增 design.md")
         );
         assert_eq!(
-            structured_presentation_hint(
+            legacy_v1_structured_presentation_hint(
                 "fileChange",
                 &json!({
                     "changes": [
