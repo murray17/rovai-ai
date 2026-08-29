@@ -31,6 +31,10 @@ Helper 必须同时满足：DWS version `1.0.60`；目标平台 binary SHA 与�
 `--yes`；非登录输出要求 JSON；OAuth Client Secret 只经 `DWS_CLIENT_SECRET` 环境传递。未知 operation、argument、空值、
 NUL、超长值、binary 缺失或 hash mismatch 都在启动前拒绝。
 
+macOS 分发包只能携带解包后命中该 allowlist 的非可执行 DWS 压缩资源，不能把 DWS Mach-O 交给 App signer 重签。Main 仅可
+把已校验载荷物化到按 `version + SHA` 隔离的 owner-only 本机 runtime 目录，并须在每个 Gateway 实例首次 spawn 前复核最终
+可执行文件摘要。打包门禁必须拒绝包内出现原始可执行 DWS、压缩载荷损坏或解包摘要不符。
+
 允许的 Gateway operation 闭集为：
 
 ```text

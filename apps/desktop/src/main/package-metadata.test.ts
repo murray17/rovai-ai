@@ -62,7 +62,7 @@ describe('desktop package metadata', () => {
     expect(packageMetadata.build.mac.extraResources.map(({ to }: { to: string }) => to)).toEqual([
       'bin/rovai-core',
       'bin/rovai',
-      'bin/dws',
+      'bin/dws.gz',
       'licenses/dingtalk-dws'
     ])
   })
@@ -78,8 +78,8 @@ describe('desktop package metadata', () => {
         to: 'bin/rovai'
       },
       {
-        from: 'resources/bin/macos-${arch}/dws',
-        to: 'bin/dws'
+        from: 'resources/bin/macos-${arch}/dws.gz',
+        to: 'bin/dws.gz'
       },
       {
         from: 'resources/licenses/dingtalk-dws',
@@ -105,6 +105,13 @@ describe('desktop package metadata', () => {
       }
     ])
     expect(packageMetadata.build).not.toHaveProperty('extraResources')
+    expect(packageMetadata.build.mac.binaries).toEqual([
+      'Contents/Resources/bin/rovai-core',
+      'Contents/Resources/bin/rovai'
+    ])
+    expect(packageMetadata.build.mac.binaries).not.toContain(
+      'Contents/Resources/bin/dws'
+    )
     expect(Object.keys(packageMetadata.scripts).some((name) => name.startsWith('legal:'))).toBe(false)
     expect(packageMetadata.scripts.test).not.toContain('legal:')
     expect(packageMetadata.scripts['package:mac:unsigned']).not.toContain('legal:')

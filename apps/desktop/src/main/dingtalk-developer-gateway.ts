@@ -1,8 +1,9 @@
-import { createHash } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { spawn } from 'node:child_process'
-import { access, readFile } from 'node:fs/promises'
+import { access, chmod, lstat, mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises'
 import { constants } from 'node:fs'
-import { join } from 'node:path'
+import { basename, dirname, join } from 'node:path'
+import { gunzipSync } from 'node:zlib'
 
 export const DINGTALK_DWS_VERSION = '1.0.60'
 
@@ -46,6 +47,7 @@ export type DingTalkGatewayBackend = {
 
 export type DingTalkDeveloperGatewayOptions = {
   binaryPath: string
+  archivePath?: string
   configDir: string
   expectedSha256: string
   oauthClientId?: string
@@ -136,6 +138,7 @@ export class DingTalkDeveloperGateway implements DingTalkGatewayBackend {
 
   async #verifyBinary(): Promise<void> {
     if (this.#verified) return
+    await materializeDingTalkDwsBinary(this.#options)
     await access(this.#options.binaryPath, constants.X_OK)
       .catch(() => { throw new Error('dingtalk_dws_unavailable') })
     const digest = createHash('sha256')
@@ -200,15 +203,87 @@ export function resolveDingTalkDwsOptions(input: {
   const target = platform === 'darwin'
     ? `macos-${arch === 'x64' ? 'x64' : 'arm64'}`
     : 'windows-x64'
+  const packagedMacosBinaryPath = join(
+    input.userDataPath,
+    'channel-runtime',
+    'dingtalk-dws',
+    `v${DINGTALK_DWS_VERSION}`,
+    expectedSha256,
+    executable
+  )
   return {
     binaryPath: input.packaged
-      ? join(input.resourcesPath, 'bin', executable)
+      ? platform === 'darwin'
+        ? packagedMacosBinaryPath
+        : join(input.resourcesPath, 'bin', executable)
       : join(input.appRoot, 'resources', 'bin', target, executable),
+    archivePath: input.packaged && platform === 'darwin'
+      ? join(input.resourcesPath, 'bin', `${executable}.gz`)
+      : undefined,
     configDir: join(input.userDataPath, 'channel-auth', 'dingtalk-dws'),
     expectedSha256,
     oauthClientId: input.oauthClientId,
     oauthClientSecret: input.oauthClientSecret
   }
+}
+
+export async function materializeDingTalkDwsBinary(
+  options: Pick<DingTalkDeveloperGatewayOptions, 'archivePath' | 'binaryPath' | 'expectedSha256'>
+): Promise<void> {
+  if (!options.archivePath) return
+  if (await fileMatchesDigest(options.binaryPath, options.expectedSha256)) {
+    await chmod(options.binaryPath, 0o700)
+      .catch(() => { throw new Error('dingtalk_dws_unavailable') })
+    return
+  }
+
+  let archive: Buffer
+  try {
+    archive = await readFile(options.archivePath)
+  } catch {
+    throw new Error('dingtalk_dws_unavailable')
+  }
+  let binary: Buffer
+  try {
+    binary = gunzipSync(archive)
+  } catch {
+    throw new Error('dingtalk_dws_integrity_failed')
+  }
+  if (digest(binary) !== options.expectedSha256) {
+    throw new Error('dingtalk_dws_integrity_failed')
+  }
+
+  const directory = dirname(options.binaryPath)
+  const temporaryPath = join(directory, `.${basename(options.binaryPath)}.${randomUUID()}.tmp`)
+  try {
+    await mkdir(directory, { recursive: true, mode: 0o700 })
+    await chmod(directory, 0o700)
+    await writeFile(temporaryPath, binary, { flag: 'wx', mode: 0o700 })
+    await chmod(temporaryPath, 0o700)
+    await rename(temporaryPath, options.binaryPath)
+  } catch {
+    throw new Error('dingtalk_dws_unavailable')
+  } finally {
+    await unlink(temporaryPath).catch(() => undefined)
+  }
+
+  if (!await fileMatchesDigest(options.binaryPath, options.expectedSha256)) {
+    throw new Error('dingtalk_dws_integrity_failed')
+  }
+}
+
+async function fileMatchesDigest(path: string, expectedSha256: string): Promise<boolean> {
+  try {
+    const metadata = await lstat(path)
+    if (!metadata.isFile() || metadata.isSymbolicLink()) return false
+    return digest(await readFile(path)) === expectedSha256
+  } catch {
+    return false
+  }
+}
+
+function digest(bytes: Uint8Array): string {
+  return createHash('sha256').update(bytes).digest('hex')
 }
 
 function gatewayArgs(

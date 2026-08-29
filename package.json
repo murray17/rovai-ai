@@ -188,8 +188,8 @@
           "to": "bin/rovai"
         },
         {
-          "from": "resources/bin/macos-${arch}/dws",
-          "to": "bin/dws"
+          "from": "resources/bin/macos-${arch}/dws.gz",
+          "to": "bin/dws.gz"
         },
         {
           "from": "resources/licenses/dingtalk-dws",
@@ -198,8 +198,7 @@
       ],
       "binaries": [
         "Contents/Resources/bin/rovai-core",
-        "Contents/Resources/bin/rovai",
-        "Contents/Resources/bin/dws"
+        "Contents/Resources/bin/rovai"
       ],
       "hardenedRuntime": true,
       "entitlements": "build/entitlements.mac.plist",

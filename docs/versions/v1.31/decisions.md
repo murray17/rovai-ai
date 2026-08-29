@@ -21,7 +21,8 @@ last_updated: 2026-08-29
 ### 决定
 
 Main 只调用随包固定的 DWS 1.0.60 binary，逐平台校验 SHA，并通过无 Shell、隔离 config、固定超时/取消的窄 Gateway
-暴露审查过的 operation 与参数。OAuth Client pair 只经环境进入 helper，Secret 不进 argv、Core、Renderer 或日志。
+暴露审查过的 operation 与参数。macOS 将原始 binary 封为非可执行资源，运行前物化到按版本与 SHA 分区的私有目录，避免
+App signer 重签后破坏固定摘要。OAuth Client pair 只经环境进入 helper，Secret 不进 argv、Core、Renderer 或日志。
 创建和 mutation outcome 无法证明时 fail closed。生产包在 public-client/device-flow 或 token broker 明确前保持 NO-GO；
 不得复用 DWS 内置 Client ID，也不得回退为人工粘贴 AppSecret。
 

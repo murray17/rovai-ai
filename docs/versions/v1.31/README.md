@@ -29,7 +29,8 @@ Owner 可在私聊或群聊显式 `@Bot` 后复用现有 Quick Chat、项目选�
   publication intent、member Bot 与 per-App Owner identity，并建立 provider-neutral Bot/Owner directory view；
 - 账号连接使用预注册 Rovai OAuth Client，经浏览器 loopback 或显式设备授权进入隔离 DWS profile。账号切换先保留旧
   Profile，新身份完整读取且 Core upsert 成功后才确认；Core commit 失败会切回旧 Profile，不删除两边登录态；
-- Main 只允许固定 `DWS 1.0.60`、固定平台 SHA 和封闭 operation/argument 集。helper 以 `shell=false`、隔离 config、
+- Main 只允许固定 `DWS 1.0.60`、固定平台 SHA 和封闭 operation/argument 集。macOS 以非可执行压缩资源随包携带并在
+  owner-only、按 SHA 分区的本机目录物化，避免 App signer 改写受审查二进制；helper 以 `shell=false`、隔离 config、
   有界超时/取消运行，OAuth Secret 只经进程环境传递，stdout/stderr 不进入 Renderer；
 - 每个 Agent 只有一个 immutable `unifiedAppId + appKey + robotCode`。发布状态机冻结远端身份后读取 credential、上传队员
   头像、配置 Stream robot、消息/群 roster/AI 卡片最小权限、事件、版本和审批，最后分别验证 Stream 与 AI 卡片；创建结果不明且

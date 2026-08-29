@@ -1,5 +1,14 @@
+import { createHash } from 'node:crypto'
+import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { gzipSync } from 'node:zlib'
 import { describe, expect, it } from 'vitest'
-import { buildDingTalkGatewayInvocation } from './dingtalk-developer-gateway'
+import {
+  buildDingTalkGatewayInvocation,
+  materializeDingTalkDwsBinary,
+  resolveDingTalkDwsOptions
+} from './dingtalk-developer-gateway'
 
 describe('DingTalk Developer Gateway command boundary', () => {
   it('uses reviewed full commands for writes missing from the shortcut catalog', () => {
@@ -24,6 +33,41 @@ describe('DingTalk Developer Gateway command boundary', () => {
         confirmedSensitive: true
       }
     }).args).toContain('publish')
+  })
+
+  it('materializes the reviewed macOS helper from a non-executable packaged resource', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'rovai-dws-materialize-'))
+    try {
+      const archivePath = join(root, 'dws.gz')
+      const binaryPath = join(root, 'runtime', 'dws')
+      const binary = Buffer.from('reviewed-dws-binary')
+      const expectedSha256 = createHash('sha256').update(binary).digest('hex')
+      await writeFile(archivePath, gzipSync(binary))
+
+      await materializeDingTalkDwsBinary({ archivePath, binaryPath, expectedSha256 })
+      expect(await readFile(binaryPath)).toEqual(binary)
+      expect((await stat(binaryPath)).mode & 0o100).toBe(0o100)
+
+      await writeFile(binaryPath, 'tampered')
+      await materializeDingTalkDwsBinary({ archivePath, binaryPath, expectedSha256 })
+      expect(await readFile(binaryPath)).toEqual(binary)
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  it('uses a content-addressed private executable for packaged macOS', () => {
+    const options = resolveDingTalkDwsOptions({
+      appRoot: '/app',
+      resourcesPath: '/app/Contents/Resources',
+      packaged: true,
+      userDataPath: '/private/user-data',
+      platform: 'darwin',
+      arch: 'arm64'
+    })
+    expect(options.archivePath).toBe('/app/Contents/Resources/bin/dws.gz')
+    expect(options.binaryPath).toContain('/private/user-data/channel-runtime/dingtalk-dws/v1.0.60/')
+    expect(options.binaryPath).toMatch(/\/dws$/u)
   })
 
   it('emits Cobra boolean flags without a string value', () => {

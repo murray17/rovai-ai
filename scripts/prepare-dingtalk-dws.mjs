@@ -2,7 +2,7 @@ import { createHash, randomUUID } from 'node:crypto'
 import { chmod, mkdir, readFile, rename, writeFile } from 'node:fs/promises'
 import { basename, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { gunzipSync, inflateRawSync } from 'node:zlib'
+import { gzipSync, gunzipSync, inflateRawSync } from 'node:zlib'
 
 const VERSION = '1.0.60'
 const RELEASE = `https://github.com/DingTalk-Real-AI/dingtalk-workspace-cli/releases/download/v${VERSION}`
@@ -36,30 +36,39 @@ if (!target) throw new Error(`Unsupported DingTalk DWS target: ${targetKey}`)
 
 const root = new URL('../', import.meta.url)
 const binaryPath = new URL(`resources/bin/${targetKey}/${target.executable}`, root)
-if (await matchesDigest(binaryPath, target.binarySha256)) {
-  console.info(`[dingtalk-dws] ${targetKey} v${VERSION} already staged`)
-  process.exit(0)
-}
-
-const response = await fetch(`${RELEASE}/${target.asset}`, {
-  headers: { 'user-agent': 'rovai-ai-build' },
-  signal: AbortSignal.timeout(120_000)
-})
-if (!response.ok) throw new Error(`DingTalk DWS download failed: HTTP ${response.status}`)
-const archive = Buffer.from(await response.arrayBuffer())
-requireDigest(archive, target.archiveSha256, 'archive')
-
-const entries = target.format === 'tar.gz'
-  ? tarEntries(gunzipSync(archive))
-  : zipEntries(archive)
-const binary = requiredEntry(entries, target.executable)
-requireDigest(binary, target.binarySha256, 'binary')
-
-await atomicWrite(binaryPath, binary, targetKey.startsWith('macos-') ? 0o755 : 0o644)
 const licenseRoot = new URL('resources/licenses/dingtalk-dws/', root)
-for (const fileName of ['LICENSE', 'NOTICE']) {
-  await atomicWrite(new URL(fileName, licenseRoot), requiredEntry(entries, fileName), 0o644)
+const alreadyStaged = await matchesDigest(binaryPath, target.binarySha256)
+let binary
+if (alreadyStaged) {
+  binary = await readFile(binaryPath)
+} else {
+  const response = await fetch(`${RELEASE}/${target.asset}`, {
+    headers: { 'user-agent': 'rovai-ai-build' },
+    signal: AbortSignal.timeout(120_000)
+  })
+  if (!response.ok) throw new Error(`DingTalk DWS download failed: HTTP ${response.status}`)
+  const archive = Buffer.from(await response.arrayBuffer())
+  requireDigest(archive, target.archiveSha256, 'archive')
+
+  const entries = target.format === 'tar.gz'
+    ? tarEntries(gunzipSync(archive))
+    : zipEntries(archive)
+  binary = requiredEntry(entries, target.executable)
+  requireDigest(binary, target.binarySha256, 'binary')
+
+  await atomicWrite(binaryPath, binary, targetKey.startsWith('macos-') ? 0o755 : 0o644)
+  for (const fileName of ['LICENSE', 'NOTICE']) {
+    await atomicWrite(new URL(fileName, licenseRoot), requiredEntry(entries, fileName), 0o644)
+  }
 }
+
+if (targetKey.startsWith('macos-')) {
+  const packagedResource = new URL(`resources/bin/${targetKey}/${target.executable}.gz`, root)
+  if (!await gzipContainsDigest(packagedResource, target.binarySha256)) {
+    await atomicWrite(packagedResource, gzipSync(binary, { level: 9, mtime: 0 }), 0o644)
+  }
+}
+
 await atomicWrite(
   new URL('PROVENANCE.txt', licenseRoot),
   Buffer.from([
@@ -74,7 +83,7 @@ await atomicWrite(
   ].join('\n')),
   0o644
 )
-console.info(`[dingtalk-dws] staged ${targetKey} v${VERSION}`)
+console.info(`[dingtalk-dws] ${alreadyStaged ? 'already staged' : 'staged'} ${targetKey} v${VERSION}`)
 
 function argument(name) {
   const index = process.argv.indexOf(name)
@@ -94,6 +103,15 @@ async function matchesDigest(url, expected) {
   } catch (error) {
     if (error?.code === 'ENOENT') return false
     throw error
+  }
+}
+
+async function gzipContainsDigest(url, expected) {
+  try {
+    return digest(gunzipSync(await readFile(url))) === expected
+  } catch (error) {
+    if (error?.code === 'ENOENT') return false
+    return false
   }
 }
 

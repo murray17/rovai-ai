@@ -58,6 +58,11 @@ operation 与参数；命令使用 `shell=false`、独立 `DWS_CONFIG_DIR`、有
 OAuth Secret 只进入子进程环境，不进入 argv；Renderer 永远不读取 helper 输出。helper mutation 结果无法解析或应用创建
 outcome 不明时 fail closed。该 Gateway 是可替换的 Main Adapter，不是 Core domain API。
 
+macOS 包把原始 DWS 作为非可执行 gzip 资源封入已签名 App，避免 App 签名阶段重签并改变受审查的上游二进制。首次调用前，
+Main 将载荷解到按版本与 SHA 分区的本机私有 runtime 目录，原子替换旧文件、设置 owner-only 执行权限并再次校验平台 SHA；
+最终打包门禁同时拒绝 App 内可执行 DWS、损坏压缩资源和解包后摘要不符。Windows 继续随目标包携带固定的签名 EXE，并在
+启动前执行同一平台 SHA 门禁。
+
 DWS 支持多个 OAuth profile。切换账号时旧 profile 保持有效：Main 先记录当前 identity，再完成新 OAuth、读取完整
 `corpId/userId/userName/corpName`，最后提交 Core account upsert。Core 失败时用 exact `corpId:userId` 切回旧 profile；
 不删除两边登录态。断开只登出当前 Core account 对应的 exact profile，不关闭、迁移或删除已发布 Bot。
