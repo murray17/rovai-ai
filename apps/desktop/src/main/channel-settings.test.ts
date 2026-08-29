@@ -1893,6 +1893,18 @@ describe('channel settings service', () => {
       { card: expect.any(Object) },
       { replyTo: 'om_topic_root', replyInThread: true }
     )
+    const groupPickerInput = harness.send.mock.calls.find(([target]) => target === 'oc_group')?.[1] as {
+      card: {
+        config: Record<string, unknown>
+        body: { elements: Array<Record<string, unknown>> }
+      }
+    }
+    expect(groupPickerInput.card.config).toEqual({ update_multi: true })
+    expect(groupPickerInput.card.body.elements.some((element) => element.tag === 'action')).toBe(false)
+    expect(groupPickerInput.card.body.elements).toContainEqual(expect.objectContaining({
+      tag: 'button',
+      text: { tag: 'plain_text', content: '刷新项目' }
+    }))
     expect(harness.send.mock.calls.map(([target]) => target)).not.toContain('ou_owner')
     expect(JSON.stringify(harness.send.mock.calls)).toContain('首次使用这个话题')
     expect(JSON.stringify(harness.send.mock.calls)).not.toContain('canonicalPath')

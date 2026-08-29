@@ -490,7 +490,9 @@ promotion 与统一 admission，然后追加 durable recall；外部撤回成功
 kind，以 `operation = send | update | recall` 表达外部生命周期，不新增数据库 kind 或 schema。
 
 启动恢复发现旧 private picker 时，Core 先轮换 version/nonce 使旧卡失权，再为已发送旧卡排 durable recall，并在原群/Topic
-创建 replacement picker。成功后不把原卡 patch 成永久“已绑定”结果；公共卡只在选择期间存在。
+创建 replacement picker。项目卡 payload 同时冻结 `cardRevision`；当前 pending version 的旧 revision `send` 若以
+`format_error` 且没有 external message ID 终结，Host tick 只轮换一次 version/nonce 并生成当前 revision replacement。
+当前 revision 再次失败保持终态，不能循环重发。成功后不把原卡 patch 成永久“已绑定”结果；公共卡只在选择期间存在。
 
 当前规范见[飞书渠道架构](../../architecture/feishu-channel.md#owner-only-入站与会话执行范围)、
 [Feishu Channel v2](../../contracts/feishu-channel-v2.md#2-owner-only-camp-与项目选择)和

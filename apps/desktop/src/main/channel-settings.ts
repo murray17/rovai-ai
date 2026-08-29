@@ -2635,7 +2635,7 @@ function projectSelectionCard(input: {
       : null
   return {
     schema: '2.0',
-    config: { update_multi: true, wide_screen_mode: true },
+    config: { update_multi: true },
     header: {
       title: { tag: 'plain_text', content: '选择 Rovai 项目' },
       template: input.notice ? 'orange' : 'blue'
@@ -2655,15 +2655,10 @@ function projectSelectionCard(input: {
         },
         ...projectButtons,
         {
-          tag: 'action',
-          actions: [
-            {
-              tag: 'button',
-              text: { tag: 'plain_text', content: '刷新项目' },
-              type: 'default',
-              value: actionValue('refresh_projects')
-            }
-          ]
+          tag: 'button',
+          text: { tag: 'plain_text', content: '刷新项目' },
+          type: 'default',
+          value: actionValue('refresh_projects')
         }
       ]
     }
@@ -2702,7 +2697,7 @@ function deliveryCard(delivery: ClaimedChannelDelivery): Record<string, unknown>
     : 'Rovai 已接收'
   return {
     schema: '2.0',
-    config: { update_multi: true, wide_screen_mode: true },
+    config: { update_multi: true },
     header: {
       title: { tag: 'plain_text', content: title },
       template: delivery.deliveryKind === 'attention'

@@ -38,6 +38,7 @@ const DELIVERY_LEASE_SECONDS: i64 = 30;
 const CHANNEL_TRANSPORT_RETENTION_DAYS: i64 = 7;
 const MAX_DELIVERY_ATTEMPTS: i64 = 5;
 const PENDING_BINDING_LIFETIME_HOURS: i64 = 24;
+const PROJECT_SELECTION_CARD_REVISION: i64 = 2;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -3350,6 +3351,7 @@ impl ChannelService {
                 "#,
                 [&now_text],
             )?;
+            reconcile_failed_project_picker_card_revision(transaction, &now_text)?;
             reconcile_pending_project_picker_placement(transaction, &now_text)?;
             expire_pending_project_pickers(transaction, &now_text)?;
             decline_unattended_channel_retries(transaction, &envelope.actor, &now_text)?;
@@ -4847,6 +4849,7 @@ fn insert_pending_project_delivery(
         "pendingBindingId": input.pending_binding_id,
         "conversationDisplayName": input.conversation.display_name,
         "conversationKind": input.conversation.conversation_kind,
+        "cardRevision": PROJECT_SELECTION_CARD_REVISION,
         "expectedVersion": input.expected_version,
         "nonce": input.nonce,
         "projectOptions": active_project_card_items(transaction)?,
@@ -5087,6 +5090,99 @@ fn reconcile_pending_project_picker_placement(
                 expected_version: next_version,
                 operation: PendingProjectPickerOperation::Send,
                 notice: Some("moved_to_conversation"),
+                now,
+            },
+        )?;
+    }
+    Ok(())
+}
+
+fn reconcile_failed_project_picker_card_revision(
+    transaction: &Transaction<'_>,
+    now: &str,
+) -> Result<()> {
+    let pending = query_rows(
+        transaction,
+        r#"
+        SELECT pending.id, pending.acknowledgement_app_id, pending.version,
+               conversation.id, conversation.display_name,
+               conversation.tenant_key, conversation.chat_id,
+               conversation.conversation_kind
+        FROM pending_camp_binding AS pending
+        JOIN channel_conversation AS conversation
+          ON conversation.id = pending.channel_conversation_id
+        WHERE pending.status = 'pending' AND pending.expires_at > ?1
+          AND EXISTS (
+              SELECT 1 FROM channel_delivery AS delivery
+              WHERE delivery.pending_binding_id = pending.id
+                AND delivery.delivery_kind = 'project_selection'
+                AND delivery.status = 'failed'
+                AND delivery.failure_code = 'format_error'
+                AND delivery.external_delivery_message_id IS NULL
+                AND json_extract(delivery.payload_json, '$.placement') = 'conversation'
+                AND COALESCE(
+                    json_extract(delivery.payload_json, '$.operation'),
+                    'send'
+                ) = 'send'
+                AND CAST(
+                    json_extract(delivery.payload_json, '$.expectedVersion') AS INTEGER
+                ) = pending.version
+                AND COALESCE(
+                    CAST(json_extract(
+                        delivery.payload_json,
+                        '$.cardRevision'
+                    ) AS INTEGER),
+                    0
+                ) < ?2
+          )
+        ORDER BY pending.created_at, pending.id
+        "#,
+        params![now, PROJECT_SELECTION_CARD_REVISION],
+        |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, i64>(2)?,
+                ChannelConversationAdmission {
+                    id: row.get(3)?,
+                    display_name: row.get(4)?,
+                    tenant_key: row.get(5)?,
+                    chat_id: row.get(6)?,
+                    conversation_kind: row.get(7)?,
+                },
+            ))
+        },
+    )?;
+    for (pending_id, app_id, version, conversation) in pending {
+        let nonce = Uuid::new_v4().simple().to_string();
+        let next_version = version + 1;
+        let changed = transaction.execute(
+            r#"
+            UPDATE pending_camp_binding
+            SET version = ?2, nonce_digest = ?3, updated_at = ?4
+            WHERE id = ?1 AND status = 'pending' AND version = ?5
+            "#,
+            params![
+                pending_id,
+                next_version,
+                opaque_digest("pending-binding-nonce", &nonce),
+                now,
+                version,
+            ],
+        )?;
+        if changed != 1 {
+            continue;
+        }
+        insert_pending_project_delivery(
+            transaction,
+            PendingProjectPickerDelivery {
+                pending_binding_id: &pending_id,
+                app_id: &app_id,
+                conversation: &conversation,
+                nonce: &nonce,
+                expected_version: next_version,
+                operation: PendingProjectPickerOperation::Send,
+                notice: None,
                 now,
             },
         )?;
@@ -9350,6 +9446,196 @@ mod tests {
             )
             .unwrap();
         assert_eq!(stale.result.code, "channel.binding.stale_card");
+    }
+
+    #[test]
+    fn failed_picker_from_an_obsolete_card_revision_is_reissued_once() {
+        let mut database = seeded_runtime_database_owned();
+        let service = ChannelService::default();
+        connect_account(&service, &mut database);
+        publish_bot(&service, &mut database, "agent_1", "cli_app_1");
+        seed_project(&database, "picker-card-revision");
+        let quick_chat_path = quick_chat_path(&database);
+        service
+            .reconcile_feishu_group_roster(
+                &mut database,
+                &host_envelope(
+                    "picker-card-revision-roster",
+                    ReconcileFeishuGroupRosterCommand {
+                        provider: FEISHU_PROVIDER.to_string(),
+                        tenant_key: "tenant_1".to_string(),
+                        chat_id: "oc_picker_card_revision".to_string(),
+                        present_app_ids: vec!["cli_app_1".to_string()],
+                    },
+                ),
+            )
+            .unwrap();
+        let observation = service
+            .observe_inbound(
+                &mut database,
+                &host_envelope(
+                    "observe-picker-card-revision",
+                    observation_command(
+                        "cli_app_1",
+                        "om_picker_card_revision",
+                        "oc_picker_card_revision",
+                        "",
+                        "group",
+                        "请检查",
+                        &[("agent_1", "cli_app_1")],
+                        true,
+                    ),
+                ),
+            )
+            .unwrap();
+        let pending = service
+            .finalize_inbound(
+                &mut database,
+                &quick_chat_path,
+                &host_envelope(
+                    "finalize-picker-card-revision",
+                    FinalizeChannelInboundCommand {
+                        aggregate_id: observation.result.payload["aggregateId"]
+                            .as_str()
+                            .unwrap()
+                            .to_string(),
+                    },
+                ),
+            )
+            .unwrap();
+        let pending_binding_id = pending.result.payload["pendingBindingId"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        database
+            .connection()
+            .execute(
+                r#"
+                UPDATE channel_delivery
+                SET payload_json = json_remove(payload_json, '$.cardRevision')
+                WHERE pending_binding_id = ?1 AND delivery_kind = 'project_selection'
+                "#,
+                [&pending_binding_id],
+            )
+            .unwrap();
+        let (original_version, original_nonce_digest): (i64, String) = database
+            .connection()
+            .query_row(
+                "SELECT version, nonce_digest FROM pending_camp_binding WHERE id = ?1",
+                [&pending_binding_id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+
+        let first_tick = service
+            .host_tick(
+                &mut database,
+                &host_envelope(
+                    "claim-obsolete-picker-card",
+                    ChannelHostTickCommand {
+                        worker_id: "obsolete-picker-worker".to_string(),
+                        limit: 20,
+                    },
+                ),
+            )
+            .unwrap();
+        let obsolete_delivery_id = first_tick.result.payload["deliveries"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|delivery| delivery["deliveryKind"] == "project_selection")
+            .unwrap()["deliveryId"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        service
+            .settle_delivery(
+                &mut database,
+                &host_envelope(
+                    "fail-obsolete-picker-card",
+                    SettleChannelDeliveryCommand {
+                        delivery_id: obsolete_delivery_id,
+                        worker_id: "obsolete-picker-worker".to_string(),
+                        outcome: "failed".to_string(),
+                        external_delivery_message_id: None,
+                        failure_code: Some("format_error".to_string()),
+                        retryable: false,
+                    },
+                ),
+            )
+            .unwrap();
+
+        let recovery_tick = service
+            .host_tick(
+                &mut database,
+                &host_envelope(
+                    "recover-obsolete-picker-card",
+                    ChannelHostTickCommand {
+                        worker_id: "recovered-picker-worker".to_string(),
+                        limit: 20,
+                    },
+                ),
+            )
+            .unwrap();
+        let replacement = recovery_tick.result.payload["deliveries"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|delivery| delivery["deliveryKind"] == "project_selection")
+            .expect("an obsolete failed picker must be reissued with the current card revision");
+        assert_eq!(replacement["chatId"], "oc_picker_card_revision");
+        assert_eq!(
+            replacement["payload"]["expectedVersion"],
+            original_version + 1
+        );
+        assert_eq!(replacement["payload"]["cardRevision"], 2);
+        let (next_version, next_nonce_digest): (i64, String) = database
+            .connection()
+            .query_row(
+                "SELECT version, nonce_digest FROM pending_camp_binding WHERE id = ?1",
+                [&pending_binding_id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(next_version, original_version + 1);
+        assert_ne!(next_nonce_digest, original_nonce_digest);
+
+        service
+            .settle_delivery(
+                &mut database,
+                &host_envelope(
+                    "fail-current-picker-card",
+                    SettleChannelDeliveryCommand {
+                        delivery_id: replacement["deliveryId"].as_str().unwrap().to_string(),
+                        worker_id: "recovered-picker-worker".to_string(),
+                        outcome: "failed".to_string(),
+                        external_delivery_message_id: None,
+                        failure_code: Some("format_error".to_string()),
+                        retryable: false,
+                    },
+                ),
+            )
+            .unwrap();
+        let no_loop_tick = service
+            .host_tick(
+                &mut database,
+                &host_envelope(
+                    "do-not-loop-current-picker-card",
+                    ChannelHostTickCommand {
+                        worker_id: "current-picker-worker".to_string(),
+                        limit: 20,
+                    },
+                ),
+            )
+            .unwrap();
+        assert!(
+            no_loop_tick.result.payload["deliveries"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .all(|delivery| delivery["deliveryKind"] != "project_selection"),
+            "the current card revision must not enter an automatic retry loop"
+        );
     }
 
     #[test]

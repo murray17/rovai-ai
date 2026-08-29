@@ -112,9 +112,7 @@ function renderCollapsedTerminalCard(
     cardTemplate(snapshot.run.status, snapshot.run.waitReason),
     [
       { tag: 'markdown', content: lines.join('\n\n') },
-      actionRow([
-        cardButton('查看执行过程', actionValue('execution_console_expand', snapshot, view))
-      ])
+      cardButton('查看执行过程', actionValue('execution_console_expand', snapshot, view))
     ]
   )
 }
@@ -151,7 +149,7 @@ function renderExpandedTerminalCard(
     cardTemplate(snapshot.run.status, snapshot.run.waitReason),
     [
       { tag: 'markdown', content: body },
-      actionRow(actions)
+      ...actions
     ]
   )
 }
@@ -397,10 +395,6 @@ function cardButton(text: string, value: Record<string, unknown>): Record<string
   }
 }
 
-function actionRow(actions: Record<string, unknown>[]): Record<string, unknown> {
-  return { tag: 'action', actions }
-}
-
 function baseCard(
   title: string,
   template: 'grey' | 'blue' | 'orange' | 'green' | 'red',
@@ -408,7 +402,7 @@ function baseCard(
 ): Record<string, unknown> {
   return {
     schema: '2.0',
-    config: { update_multi: true, wide_screen_mode: true },
+    config: { update_multi: true },
     header: {
       title: { tag: 'plain_text', content: title },
       template

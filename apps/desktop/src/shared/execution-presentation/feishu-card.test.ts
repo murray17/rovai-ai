@@ -84,9 +84,9 @@ function cardBody(card: Record<string, unknown>): string {
 
 function cardActions(card: Record<string, unknown>): Array<Record<string, unknown>> {
   const body = card.body as {
-    elements: Array<{ tag: string; actions?: Array<Record<string, unknown>> }>
+    elements: Array<Record<string, unknown>>
   }
-  return body.elements.find((element) => element.tag === 'action')?.actions ?? []
+  return body.elements.filter((element) => element.tag === 'button')
 }
 
 describe('Feishu execution console card', () => {
@@ -141,6 +141,18 @@ describe('Feishu execution console card', () => {
         }
       })
     ])
+  })
+
+  it('uses Card 2.0 button elements without legacy action wrappers', () => {
+    const card = executionConsoleCard(snapshot('succeeded'), view('collapsed'))
+    const body = card.body as { elements: Array<Record<string, unknown>> }
+
+    expect(card.config).toEqual({ update_multi: true })
+    expect(body.elements.some((element) => element.tag === 'action')).toBe(false)
+    expect(body.elements).toContainEqual(expect.objectContaining({
+      tag: 'button',
+      text: { tag: 'plain_text', content: '查看执行过程' }
+    }))
   })
 
   it('expands every tool operation and retains narration and Agent output', () => {
