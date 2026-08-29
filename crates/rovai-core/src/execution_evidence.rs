@@ -258,8 +258,10 @@ impl ExecutionEvidenceService {
                 sequence,
                 &id,
                 &evidence.occurred_at,
-                &facts,
-                &legacy_facts,
+                EvidenceActivityClassifications {
+                    current: &facts,
+                    legacy: &legacy_facts,
+                },
             )?;
             recorded.push(Some(RecordedExecutionEvidence {
                 evidence: AgentRunExecutionEvidence {
@@ -688,8 +690,10 @@ impl ExecutionEvidenceService {
             sequence,
             &id,
             &occurred_at,
-            &facts,
-            &legacy_facts,
+            EvidenceActivityClassifications {
+                current: &facts,
+                legacy: &legacy_facts,
+            },
         )?;
         transaction.commit()?;
         Ok(Some(RecordedExecutionEvidence {
@@ -1271,6 +1275,11 @@ fn load_by_source_key(
         .transpose()
 }
 
+struct EvidenceActivityClassifications<'a> {
+    current: &'a EvidenceActivityFacts,
+    legacy: &'a EvidenceActivityFacts,
+}
+
 fn upsert_canonical_activity(
     transaction: &rusqlite::Transaction<'_>,
     agent_run_id: &str,
@@ -1278,9 +1287,9 @@ fn upsert_canonical_activity(
     sequence: i64,
     evidence_id: &str,
     occurred_at: &str,
-    facts: &EvidenceActivityFacts,
-    legacy_facts: &EvidenceActivityFacts,
+    classifications: EvidenceActivityClassifications<'_>,
 ) -> Result<Option<CanonicalRuntimeActivity>> {
+    let facts = classifications.current;
     if !facts.is_activity {
         return Ok(None);
     }
@@ -1311,13 +1320,13 @@ fn upsert_canonical_activity(
             canonical_activity_row,
         )
         .optional()?;
-    let selected_facts = existing
-        .as_ref()
-        .is_some_and(|projection| {
-            projection.classifier_version == canonical_activity::LEGACY_CLASSIFIER_VERSION
-        })
-        .then_some(legacy_facts)
-        .unwrap_or(facts);
+    let selected_facts = if existing.as_ref().is_some_and(|projection| {
+        projection.classifier_version == canonical_activity::LEGACY_CLASSIFIER_VERSION
+    }) {
+        classifications.legacy
+    } else {
+        facts
+    };
     let projection = match existing {
         Some(existing) => canonical_activity::merge_projection(
             existing,
@@ -1691,8 +1700,10 @@ mod tests {
             2,
             "terminal-evidence",
             "2026-08-29T00:00:00Z",
-            &current_facts,
-            &legacy_facts,
+            EvidenceActivityClassifications {
+                current: &current_facts,
+                legacy: &legacy_facts,
+            },
         )
         .unwrap()
         .unwrap();

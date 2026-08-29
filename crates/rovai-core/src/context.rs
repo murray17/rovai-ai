@@ -8330,7 +8330,7 @@ mod slow_tests {
                 |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
             )
             .unwrap();
-        assert_eq!(contract, ("v1.28".to_string(), 69, 1));
+        assert_eq!(contract, ("v1.29".to_string(), 70, 1));
         drop(reopened);
         remove_managed_attachment_tree(&directory).unwrap();
     }
