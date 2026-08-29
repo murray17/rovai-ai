@@ -124,6 +124,15 @@ export function createStructuredMessageClipboardData(
       // ordinary slash text and can never be reverse-parsed into a selection.
       return { kind: 'text', text: `/${segment.nameAtSend}` }
     }
+    if (segment.kind === 'file_selection') {
+      const selection = segment.selection
+      const start = `L${selection.startLine}${selection.startColumn ? `:${selection.startColumn}` : ''}`
+      const end = `L${selection.endLine}${selection.endColumn ? `:${selection.endColumn}` : ''}`
+      return {
+        kind: 'text',
+        text: `\n文件选区：${selection.displayPath} · ${start}–${end}\n${selection.selectedText}${selection.selectedText.endsWith('\n') ? '' : '\n'}`
+      }
+    }
     return {
       kind: 'member_mention',
       agentId: segment.agentId,

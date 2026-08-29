@@ -25,8 +25,8 @@ use uuid::Uuid;
 use crate::{
     camp_attachment_publication::AuthorityAttachment,
     camp_content::{
-        StructuredCampMessageContent, StructuredCampMessageSegment, has_all_members_mention,
-        member_mention_ids, normalize_content, render_current_plain_text,
+        FileSelectionSnapshot, StructuredCampMessageContent, StructuredCampMessageSegment,
+        has_all_members_mention, member_mention_ids, normalize_content, render_current_plain_text,
         validate_user_authored_content,
     },
     camp_id::CampId,
@@ -759,6 +759,62 @@ impl CampAttachmentStore {
             }
         }
         self.load_draft(database, camp_id)
+    }
+
+    pub fn attach_file_selection(
+        &self,
+        database: &mut Database,
+        camp_id: &str,
+        expected_revision: i64,
+        selection: FileSelectionSnapshot,
+    ) -> Result<CampComposerDraftView> {
+        let current = self.load_draft(database, camp_id)?;
+        if current.revision != expected_revision {
+            anyhow::bail!("draft_changed");
+        }
+        if current.content.iter().any(|segment| {
+            matches!(
+                segment,
+                StructuredCampMessageSegment::FileSelection { selection: current }
+                    if current.selection_id == selection.selection_id
+            )
+        }) {
+            anyhow::bail!("File Selection identity already exists");
+        }
+        let mut content = current.content;
+        content.push(StructuredCampMessageSegment::FileSelection { selection });
+        self.save_content_with_continuation(database, camp_id, expected_revision, content, None)
+    }
+
+    pub fn remove_file_selection(
+        &self,
+        database: &mut Database,
+        camp_id: &str,
+        expected_revision: i64,
+        selection_id: &str,
+    ) -> Result<CampComposerDraftView> {
+        let current = self.load_draft(database, camp_id)?;
+        if current.revision != expected_revision {
+            anyhow::bail!("draft_changed");
+        }
+        let mut removed = false;
+        let content = current
+            .content
+            .into_iter()
+            .filter(|segment| {
+                let matches = matches!(
+                    segment,
+                    StructuredCampMessageSegment::FileSelection { selection }
+                        if selection.selection_id == selection_id
+                );
+                removed |= matches;
+                !matches
+            })
+            .collect();
+        if !removed {
+            return self.load_draft(database, camp_id);
+        }
+        self.save_content_with_continuation(database, camp_id, expected_revision, content, None)
     }
 
     pub fn start_reply(

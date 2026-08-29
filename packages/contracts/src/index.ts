@@ -959,6 +959,7 @@ export type StructuredCampMessageSegment =
   | { kind: 'all_members_mention' }
   | { kind: 'current_user_mention'; userId: 'local_user' }
   | { kind: 'skill_mention'; skillId: string; nameAtSend: string }
+  | { kind: 'file_selection'; selection: FileSelectionSnapshot }
 
 export type StructuredCampMessageContent = StructuredCampMessageSegment[]
 
@@ -1105,6 +1106,255 @@ export interface AttachmentOpenResult {
 export interface AttachmentRevealResult {
   revealed: boolean
   error: AttachmentActionError | null
+}
+
+export type FilePreviewSourceKind =
+  | 'message_reference'
+  | 'camp_workspace'
+  | 'attachment'
+  | 'run_evidence'
+  | 'child_of_handle'
+  | 'authorized_root'
+
+export type OpenFilePreviewRequest =
+  | {
+      kind: 'message_reference'
+      campId: string
+      messageId: string
+      rawReference: string
+    }
+  | {
+      kind: 'camp_workspace'
+      campId: string
+      rawReference: string
+    }
+  | {
+      kind: 'attachment'
+      campId: string
+      attachmentId: string
+    }
+  | {
+      kind: 'run_evidence'
+      campId: string
+      agentRunId: string
+      executionEpoch: number
+      evidenceFileId: string
+      action: 'review' | 'open_current'
+    }
+  | {
+      kind: 'child_of_handle'
+      parentHandleId: string
+      rawReference: string
+      allowSystemOpen?: boolean
+    }
+  | {
+      kind: 'authorized_root'
+      campId: string
+      rootGrantId: string
+      rawReference: string
+    }
+
+export interface ReopenFilePreviewRequest {
+  campId: string
+  reopenToken: string
+}
+
+export interface FileLocationTarget {
+  line?: number
+  column?: number
+  endLine?: number
+  endColumn?: number
+  heading?: string
+  htmlFragment?: string
+}
+
+export interface ParsedFileReference {
+  raw: string
+  pathPart: string
+  query?: string
+  fragment?: string
+  target?: FileLocationTarget
+  pathKind:
+    | 'unix_absolute'
+    | 'windows_absolute'
+    | 'unc'
+    | 'home_relative'
+    | 'relative'
+    | 'file_uri'
+}
+
+export type FilePreviewKind =
+  | 'markdown'
+  | 'html'
+  | 'code'
+  | 'text'
+  | 'paged_text'
+  | 'image'
+  | 'svg'
+  | 'patch'
+
+export type FilePreviewCapability =
+  | 'read'
+  | 'read_child'
+  | 'open_in_system'
+  | 'preview_asset'
+
+export interface FileContentVersion {
+  size: number
+  mtimeMs: number
+  fileId?: string
+}
+
+export interface FileSelectionSnapshot {
+  selectionId: string
+  displayPath: string
+  selectedText: string
+  startLine: number
+  startColumn?: number
+  endLine: number
+  endColumn?: number
+  positionEncoding: 'utf-16'
+  rangeEnd: 'exclusive'
+  contentVersion: FileContentVersion
+  verification: 'current_file' | 'viewer_snapshot_after_change'
+  sourceKind: FilePreviewSourceKind
+  sourceIdentityDigest: string
+}
+
+export interface AttachFileSelectionRequest {
+  campId: string
+  expectedDraftRevision: number
+  handleId: string
+  expectedGeneration: string
+  selectedText: string
+  startLine: number
+  startColumn?: number
+  endLine: number
+  endColumn?: number
+  attachMode: 'verified_current' | 'visible_snapshot'
+}
+
+export interface ResolvedFilePreview {
+  handleId: string
+  reopenToken: string
+  previewKey: string
+  displayPath: string
+  fileName: string
+  size: number
+  mime: string
+  extension: string
+  kind: FilePreviewKind
+  hasExternalUpdate: boolean
+  contentVersion: FileContentVersion
+  contentGeneration: string
+  capabilities: FilePreviewCapability[]
+  target?: FileLocationTarget
+}
+
+export type OpenFilePreviewResult =
+  | {
+      kind: 'evidence_review'
+      campId: string
+      agentRunId: string
+      executionEpoch: number
+      evidenceFileId: string
+    }
+  | { kind: 'file_preview'; file: ResolvedFilePreview }
+  | { kind: 'opened_in_system'; fileName: string }
+
+export type FilePreviewErrorCode =
+  | 'source_not_authorized'
+  | 'reference_not_clickable'
+  | 'file_not_found'
+  | 'authorization_required'
+  | 'too_many_open_files'
+  | 'evidence_identity_unavailable'
+  | 'selection_too_large'
+  | 'not_regular_file'
+  | 'outside_authorized_root'
+  | 'file_too_large'
+  | 'decode_failed'
+  | 'read_failed'
+  | 'open_failed'
+  | 'reveal_failed'
+
+export interface FilePreviewErrorPayload {
+  code: FilePreviewErrorCode
+  message: string
+  displayReference?: string
+  retryable: boolean
+  authorizationChallenge?: FilePreviewAuthorizationChallenge
+}
+
+export type FilePreviewOperationResult<T> =
+  | { ok: true; value: T }
+  | { ok: false; error: FilePreviewErrorPayload }
+
+export interface FilePreviewAuthorizationChallenge {
+  pendingOpenId: string
+  campId: string
+  displayReference: string
+  expiresAt: number
+}
+
+export interface FilePreviewRootGrantResult {
+  rootGrantId: string
+  displayName: string
+  result: OpenFilePreviewResult
+}
+
+export interface FilePreviewTextContent {
+  text: string
+  contentGeneration: string
+  contentVersion: FileContentVersion
+}
+
+export interface FilePreviewPageContent extends FilePreviewTextContent {
+  startOffset: number
+  endOffset: number
+  startLine: number
+  hasPrevious: boolean
+  hasNext: boolean
+}
+
+export interface FilePreviewBinaryContent {
+  bytes: Uint8Array
+  mime: string
+  contentGeneration: string
+  contentVersion: FileContentVersion
+}
+
+export interface FilePreviewHtmlDocument {
+  html: string
+  tabToken: string
+  bridgeToken: string
+  assetBasePath: string
+  contentGeneration: string
+  contentVersion: FileContentVersion
+}
+
+export interface FilePreviewExternalUpdateEvent {
+  campId: string
+  previewKeys: string[]
+}
+
+export interface FilePreviewApi {
+  bindCamp(campId: string | null): Promise<void>
+  open(request: OpenFilePreviewRequest): Promise<FilePreviewOperationResult<OpenFilePreviewResult>>
+  reopen(request: ReopenFilePreviewRequest): Promise<FilePreviewOperationResult<OpenFilePreviewResult>>
+  readText(request: { handleId: string; expectedGeneration: string }): Promise<FilePreviewOperationResult<FilePreviewTextContent>>
+  readPage(request: { handleId: string; expectedGeneration: string; offset: number; maxBytes?: number }): Promise<FilePreviewOperationResult<FilePreviewPageContent>>
+  resolveLine(request: { handleId: string; expectedGeneration: string; line: number }): Promise<FilePreviewOperationResult<{ offset: number; line: number; contentGeneration: string }>>
+  readBinary(request: { handleId: string; expectedGeneration: string }): Promise<FilePreviewOperationResult<FilePreviewBinaryContent>>
+  prepareHtml(request: { handleId: string; expectedGeneration: string }): Promise<FilePreviewOperationResult<FilePreviewHtmlDocument>>
+  reload(request: { handleId: string; reopenToken: string; expectedGeneration: string }): Promise<FilePreviewOperationResult<ResolvedFilePreview>>
+  release(request: { handleId: string }): Promise<{ released: true }>
+  openInSystem(request: { handleId: string }): Promise<FilePreviewOperationResult<{ opened: true }>>
+  revealInFolder(request: { handleId: string }): Promise<FilePreviewOperationResult<{ revealed: true }>>
+  copyPath(request: { handleId: string; format: 'display' | 'absolute' }): Promise<FilePreviewOperationResult<{ copied: true }>>
+  attachSelection(request: AttachFileSelectionRequest): Promise<FilePreviewOperationResult<CampComposerDraftView>>
+  chooseAuthorizedRoot(request: { campId: string; pendingOpenId: string }): Promise<FilePreviewOperationResult<FilePreviewRootGrantResult | null>>
+  onExternalUpdate(listener: (event: FilePreviewExternalUpdateEvent) => void): () => void
 }
 
 export type CampTimelinePresentation =
@@ -1549,6 +1799,7 @@ export type AgentRunFileChangePresentationKind =
   | 'operation_history'
 
 export interface AgentRunChangedFileSummaryView {
+  evidenceFileId: string
   path: string
   changeKind: string
   presentationKind: AgentRunFileChangePresentationKind
@@ -1558,7 +1809,7 @@ export interface AgentRunChangedFileSummaryView {
 }
 
 export interface AgentRunFileChangesView {
-  schemaVersion: 1
+  schemaVersion: 2
   agentRunId: string
   executionEpoch: number
   files: AgentRunChangedFileSummaryView[]
@@ -1583,7 +1834,7 @@ export interface AgentRunChangedFileDetailView extends AgentRunChangedFileSummar
 }
 
 export interface AgentRunFileChangesDetailView {
-  schemaVersion: 1
+  schemaVersion: 2
   card: AgentRunFileChangesView
   files: AgentRunChangedFileDetailView[]
 }
@@ -2724,6 +2975,8 @@ export type CoreMethod =
   | 'camp.composerDraft.dismissContinuation'
   | 'camp.composerDraft.resolveContinuationRecipient'
   | 'camp.composerDraft.removeAttachment'
+  | 'camp.composer.selection.attach'
+  | 'camp.composer.selection.remove'
   | 'camp.composerDraft.discard'
   | 'camp.messages.send'
   | 'userAutomation.camp.send'
@@ -2761,6 +3014,7 @@ export interface RovaiApi {
     open(campId: string, attachmentId: string): Promise<AttachmentOpenResult>
     reveal(campId: string, attachmentId: string): Promise<AttachmentRevealResult>
   }
+  filePreview: FilePreviewApi
   clipboard: {
     write(input: { text: string; html: string | null }): Promise<void>
   }

@@ -1,15 +1,17 @@
 ---
 document_type: version-overview
 version: v1.29
-lifecycle: current
+lifecycle: historical
 authority: version-scope-and-status
 design_status: confirmed
 implementation_status: in_progress
 model_context_change: false
-last_updated: 2026-08-28
+last_updated: 2026-08-29
 ---
 
 # Rovai-ai v1.29：Camp 动态队员管理与 Runtime 文件变化
+
+后继版本：[v1.30 Camp 文件预览](../v1.30/README.md)。
 
 > 当前状态：动态 Camp membership、Message Delivery zero-attempt cancellation、Managed Attachment v2、安全退出、
 > ACP Client FS/Terminal 权限收敛，以及 Runtime Evidence 驱动的 Command Diff / AgentRun 文件变化主路径已经实现并

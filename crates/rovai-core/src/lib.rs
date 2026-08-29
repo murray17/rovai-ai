@@ -31,6 +31,7 @@ pub mod db;
 pub mod diagnostics;
 pub mod execution_budget;
 pub mod execution_evidence;
+pub mod file_preview_authority;
 pub mod gather;
 pub mod git;
 pub mod managed_attachment;

@@ -236,6 +236,61 @@ const api: RovaiApi = {
       return ipcRenderer.invoke('rovai:attachment-reveal', campId, attachmentId)
     }
   },
+  filePreview: {
+    bindCamp(campId) {
+      return ipcRenderer.invoke('rovai:file-preview-bind-camp', campId)
+    },
+    open(request) {
+      return ipcRenderer.invoke('rovai:file-preview-open', request)
+    },
+    reopen(request) {
+      return ipcRenderer.invoke('rovai:file-preview-reopen', request)
+    },
+    readText(request) {
+      return ipcRenderer.invoke('rovai:file-preview-read-text', request)
+    },
+    readPage(request) {
+      return ipcRenderer.invoke('rovai:file-preview-read-page', request)
+    },
+    resolveLine(request) {
+      return ipcRenderer.invoke('rovai:file-preview-resolve-line', request)
+    },
+    readBinary(request) {
+      return ipcRenderer.invoke('rovai:file-preview-read-binary', request)
+    },
+    prepareHtml(request) {
+      return ipcRenderer.invoke('rovai:file-preview-prepare-html', request)
+    },
+    reload(request) {
+      return ipcRenderer.invoke('rovai:file-preview-reload', request)
+    },
+    release(request) {
+      return ipcRenderer.invoke('rovai:file-preview-release', request)
+    },
+    openInSystem(request) {
+      return ipcRenderer.invoke('rovai:file-preview-open-in-system', request)
+    },
+    revealInFolder(request) {
+      return ipcRenderer.invoke('rovai:file-preview-reveal', request)
+    },
+    copyPath(request) {
+      return ipcRenderer.invoke('rovai:file-preview-copy-path', request)
+    },
+    attachSelection(request) {
+      return ipcRenderer.invoke('rovai:file-preview-attach-selection', request)
+    },
+    chooseAuthorizedRoot(request) {
+      return ipcRenderer.invoke('rovai:file-preview-choose-root', request)
+    },
+    onExternalUpdate(listener) {
+      const handler = (
+        _event: Electron.IpcRendererEvent,
+        value: Parameters<typeof listener>[0]
+      ): void => listener(value)
+      ipcRenderer.on('rovai:file-preview-external-update', handler)
+      return () => ipcRenderer.removeListener('rovai:file-preview-external-update', handler)
+    }
+  },
   clipboard: {
     write(input) {
       return ipcRenderer.invoke('rovai:clipboard-write', input)

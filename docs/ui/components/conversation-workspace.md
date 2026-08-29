@@ -2,7 +2,7 @@
 document_type: ui-component-contract
 authority: renderer-camp-workspace
 status: accepted
-last_updated: 2026-08-28
+last_updated: 2026-08-29
 ---
 
 # Camp 会话工作区
@@ -11,6 +11,10 @@ Camp 是开放阅读面，不按角色铺不同底色。时间线、Agent 执行
 Composer 共享主列；Inspector 是右侧辅助列。普通叙述保持 `76ch` 阅读宽度，代码、表格等工件
 可以扩展到 `930px`，宽会话轨道与 Dock 上限保持 `1040px`；Composer 常规上限为 `1040px`，
 viewport `>= 1800px` 时独立扩展到 `1440px`。
+
+打开文件时，会话、独立文件预览与任务/队员 Sidecar 的共享顶栏、响应式列替换和焦点返回遵循
+[Camp 文件预览区](file-preview.md)。文件预览不改变本文件拥有的时间线、Composer、Approval、执行台或
+Files Changed 历史 Review 真源。
 
 ## 打开与渐进历史
 

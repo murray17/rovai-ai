@@ -76,7 +76,7 @@ use rovai_core::{
     camp_attachment_view::{
         CampAttachmentRuntimeAuthorization, CampAttachmentViewStore, PreparedCampAttachmentCleanup,
     },
-    camp_content::StructuredCampMessageContent,
+    camp_content::{FileSelectionSnapshot, StructuredCampMessageContent},
     camp_history::{
         CAMP_LIST_TOOL_NAME, CAMP_READ_TOOL_NAME, CAMP_SEARCH_TOOL_NAME, CampHistoryService,
         CampListInput, CampReadInput, CampSearchInput, HISTORY_SEARCH_TOOL_NAME,
@@ -122,6 +122,7 @@ use rovai_core::{
         AgentRunExecutionEvidence, ExecutionEvidenceService, PreparedRuntimeEvidence,
         RUNTIME_EVIDENCE_DELTA_BATCH_MAX_BYTES, RecordedExecutionEvidence,
     },
+    file_preview_authority::{ResolveFilePreviewSourceParams, resolve_file_preview_source},
     git,
     managed_attachment::ManagedAttachmentStore,
     managed_blob::ManagedBlobStore,
@@ -448,6 +449,8 @@ fn request_invalidates_navigation(method: &str) -> bool {
             | "camp.composerDraft.dismissContinuation"
             | "camp.composerDraft.resolveContinuationRecipient"
             | "camp.composerDraft.removeAttachment"
+            | "camp.composer.selection.attach"
+            | "camp.composer.selection.remove"
             | "camp.composerDraft.discard"
             | "camp.attachments.prepareFromPath"
             | "camp.messages.send"
@@ -464,6 +467,8 @@ fn navigation_invalidation_emitted_at_commit_boundary(method: &str) -> bool {
         "camps.create"
             | "camps.discardPending"
             | "camp.composerDraft.removeAttachment"
+            | "camp.composer.selection.attach"
+            | "camp.composer.selection.remove"
             | "camp.composerDraft.discard"
             | "camp.attachments.prepareFromPath"
             | "camp.messages.send"
@@ -480,6 +485,8 @@ fn navigation_invalidation_requires_pending_camp(method: &str) -> bool {
             | "camp.composerDraft.dismissContinuation"
             | "camp.composerDraft.resolveContinuationRecipient"
             | "camp.composerDraft.removeAttachment"
+            | "camp.composer.selection.attach"
+            | "camp.composer.selection.remove"
             | "camp.composerDraft.discard"
             | "camp.attachments.prepareFromPath"
     )
@@ -986,6 +993,22 @@ struct RemovePreparedAttachmentParams {
     camp_id: CampId,
     expected_revision: i64,
     attachment_id: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct AttachFileSelectionParams {
+    camp_id: CampId,
+    expected_draft_revision: i64,
+    selection: FileSelectionSnapshot,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct RemoveFileSelectionParams {
+    camp_id: CampId,
+    expected_draft_revision: i64,
+    selection_id: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -6038,6 +6061,48 @@ impl Core {
                     )?,
                 )?)
             }
+            "camp.composer.selection.attach" => {
+                let params: AttachFileSelectionParams =
+                    serde_json::from_value(request.params.clone())?;
+                let draft = {
+                    let mut database = self.database.lock().await;
+                    CampAttachmentStore::new(&self.data_dir).attach_file_selection(
+                        &mut database,
+                        params.camp_id.as_str(),
+                        params.expected_draft_revision,
+                        params.selection,
+                    )?
+                };
+                emit_navigation_invalidated_for_pending_camp(
+                    &self.database,
+                    &self.output,
+                    "camp.composer.selection.attach",
+                    params.camp_id.as_str(),
+                )
+                .await;
+                Ok(serde_json::to_value(draft)?)
+            }
+            "camp.composer.selection.remove" => {
+                let params: RemoveFileSelectionParams =
+                    serde_json::from_value(request.params.clone())?;
+                let draft = {
+                    let mut database = self.database.lock().await;
+                    CampAttachmentStore::new(&self.data_dir).remove_file_selection(
+                        &mut database,
+                        params.camp_id.as_str(),
+                        params.expected_draft_revision,
+                        &params.selection_id,
+                    )?
+                };
+                emit_navigation_invalidated_for_pending_camp(
+                    &self.database,
+                    &self.output,
+                    "camp.composer.selection.remove",
+                    params.camp_id.as_str(),
+                )
+                .await;
+                Ok(serde_json::to_value(draft)?)
+            }
             "camp.composerDraft.removeAttachment" => {
                 let params: RemovePreparedAttachmentParams =
                     serde_json::from_value(request.params.clone())?;
@@ -6151,6 +6216,16 @@ impl Core {
                 .await
                 .context("Desktop Attachment target verification task failed")??;
                 Ok(serde_json::to_value(target)?)
+            }
+            "filePreview.resolveSource" => {
+                let params: ResolveFilePreviewSourceParams =
+                    serde_json::from_value(request.params.clone())?;
+                let database = self.database.lock().await;
+                Ok(serde_json::to_value(resolve_file_preview_source(
+                    &database,
+                    &ManagedBlobStore::new(&self.data_dir),
+                    params,
+                )?)?)
             }
             "camp.messages.send" => {
                 let params: SendCampMessageParams = serde_json::from_value(request.params.clone())?;

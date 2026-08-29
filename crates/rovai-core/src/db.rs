@@ -50,8 +50,10 @@ pub struct Database {
     runtime_camp_files_root_identity_digest: String,
 }
 
-const CURRENT_DATA_CONTRACT_VERSION: &str = "v1.28";
-const CURRENT_PROJECTION_SCHEMA_VERSION: i64 = 69;
+const CURRENT_DATA_CONTRACT_VERSION: &str = "v1.30";
+const CURRENT_PROJECTION_SCHEMA_VERSION: i64 = 70;
+const V116_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.28";
+const V116_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION: i64 = 69;
 const V115_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.26";
 const V115_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION: i64 = 67;
 const V114_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.25";
@@ -186,6 +188,7 @@ struct CurrentMigrationState {
     v113: bool,
     v114: bool,
     v115: bool,
+    v116: bool,
 }
 
 impl CurrentMigrationState {
@@ -195,6 +198,56 @@ impl CurrentMigrationState {
             return false;
         }
         if contract == CURRENT_DATA_CONTRACT_VERSION && schema == CURRENT_PROJECTION_SCHEMA_VERSION
+        {
+            return self.v70
+                && self.v71
+                && self.v76
+                && self.v77
+                && self.v78
+                && self.v79
+                && self.v80
+                && self.v81
+                && self.v82
+                && self.v83
+                && self.v84
+                && self.v85
+                && self.v86
+                && self.v87
+                && self.v88
+                && self.v89
+                && self.v90
+                && self.v91
+                && self.v92
+                && self.v93
+                && self.v94
+                && self.v95
+                && self.v96
+                && self.v97
+                && self.v98
+                && self.v99
+                && self.v100
+                && self.v101
+                && self.v102
+                && self.v103
+                && self.v104
+                && self.v105
+                && self.v106
+                && self.v107
+                && self.v108
+                && self.v109
+                && self.v110
+                && self.v111
+                && self.v112
+                && self.v113
+                && self.v114
+                && self.v115
+                && self.v116;
+        }
+        if self.v116 {
+            return false;
+        }
+        if contract == V116_MIGRATION_SOURCE_DATA_CONTRACT_VERSION
+            && schema == V116_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION
         {
             return self.v70
                 && self.v71
@@ -1370,7 +1423,7 @@ fn connection_has_current_data_contract(connection: &Connection) -> rusqlite::Re
         r#"
         SELECT contract_version = ?1
                AND projection_schema_version = ?2
-               AND EXISTS(SELECT 1 FROM schema_migration WHERE version = 115)
+               AND EXISTS(SELECT 1 FROM schema_migration WHERE version = 116)
         FROM rovai_data_contract
         WHERE singleton = 1
         "#,
@@ -1432,7 +1485,8 @@ fn load_current_migration_state(
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 112),
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 113),
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 114),
-               EXISTS(SELECT 1 FROM schema_migration WHERE version = 115)
+               EXISTS(SELECT 1 FROM schema_migration WHERE version = 115),
+               EXISTS(SELECT 1 FROM schema_migration WHERE version = 116)
         "#,
         [],
         |row| {
@@ -1483,6 +1537,7 @@ fn load_current_migration_state(
                 v113: row.get(43)?,
                 v114: row.get(44)?,
                 v115: row.get(45)?,
+                v116: row.get(46)?,
             })
         },
     )
@@ -2955,6 +3010,9 @@ impl Database {
             if !self.schema_migration_applied(115)? {
                 self.migrate_agent_run_file_changes_v115()?;
             }
+            if !self.schema_migration_applied(116)? {
+                self.migrate_file_selection_contract_v116()?;
+            }
             if let Err(error) =
                 crate::notification::maintain_notification_episode_retention(self.connection())
             {
@@ -3349,6 +3407,9 @@ impl Database {
         }
         if !self.schema_migration_applied(115)? {
             self.migrate_agent_run_file_changes_v115()?;
+        }
+        if !self.schema_migration_applied(116)? {
+            self.migrate_file_selection_contract_v116()?;
         }
         if let Err(error) =
             crate::notification::maintain_notification_episode_retention(self.connection())
@@ -16266,6 +16327,25 @@ impl Database {
         Ok(())
     }
 
+    fn migrate_file_selection_contract_v116(&mut self) -> Result<()> {
+        let transaction = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        transaction.execute_batch(
+            r#"
+            UPDATE rovai_data_contract
+            SET contract_version = 'v1.30', projection_schema_version = 70,
+                reset_reason = NULL, updated_at = datetime('now')
+            WHERE singleton = 1;
+
+            INSERT INTO schema_migration(version, applied_at)
+            VALUES (116, datetime('now'));
+            "#,
+        )?;
+        transaction.commit()?;
+        Ok(())
+    }
+
     fn migrate_pending_camp_activation_v67(&mut self) -> Result<()> {
         let transaction = self
             .connection
@@ -20686,6 +20766,7 @@ fn downgrade_current_schema_to_v114_source_for_test(connection: &Connection) {
             UPDATE rovai_data_contract
             SET contract_version = 'v1.26', projection_schema_version = 67
             WHERE singleton = 1;
+            DELETE FROM schema_migration WHERE version = 116;
             DELETE FROM schema_migration WHERE version = 115;
             "#,
         )
@@ -21652,6 +21733,7 @@ mod tests {
             v113: version >= 113,
             v114: version >= 114,
             v115: version >= 115,
+            v116: version >= 116,
         }
     }
 
@@ -21662,6 +21744,12 @@ mod tests {
                 "current",
                 CURRENT_DATA_CONTRACT_VERSION,
                 CURRENT_PROJECTION_SCHEMA_VERSION,
+                116,
+            ),
+            (
+                "v1.28/schema-69 before File Selection content",
+                V116_MIGRATION_SOURCE_DATA_CONTRACT_VERSION,
+                V116_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION,
                 115,
             ),
             (
@@ -21918,7 +22006,7 @@ mod tests {
             );
         }
 
-        let current = migration_state_through(115);
+        let current = migration_state_through(116);
         let v092_source = migration_state_through(91);
         let mut missing_intermediate = current;
         missing_intermediate.v84 = false;
@@ -21988,7 +22076,7 @@ mod tests {
             )
             .expect("current contract marker should load");
 
-        assert_eq!(state, migration_state_through(115));
+        assert_eq!(state, migration_state_through(116));
         assert!(state.admits(&contract, schema));
         assert!(has_admissible_data_contract(
             &directory.join("rovai.sqlite")
@@ -24019,7 +24107,7 @@ mod tests {
     }
 
     #[test]
-    fn v115_adds_agent_run_file_change_projection_without_git_windows() {
+    fn v115_adds_file_change_projection_and_v116_advances_file_selection_contract() {
         let directory = std::env::temp_dir().join(format!("rovai-db-v115-test-{}", Uuid::new_v4()));
         let mut database = crate::test_support::fresh_schema_database_fast_at(&directory);
         downgrade_current_schema_to_v114_source_for_test(database.connection());
@@ -24053,6 +24141,18 @@ mod tests {
                 )
                 .unwrap(),
             ("v1.28".to_string(), 69)
+        );
+        database.migrate_file_selection_contract_v116().unwrap();
+        assert_eq!(
+            database
+                .connection()
+                .query_row(
+                    "SELECT contract_version, projection_schema_version, EXISTS(SELECT 1 FROM schema_migration WHERE version = 116) FROM rovai_data_contract WHERE singleton = 1",
+                    [],
+                    |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?, row.get::<_, bool>(2)?)),
+                )
+                .unwrap(),
+            ("v1.30".to_string(), 70, true)
         );
         assert_eq!(
             database
