@@ -1,7 +1,7 @@
 ---
 document_type: architecture
 authority: current-foundational-invariants
-last_updated: 2026-08-29
+last_updated: 2026-08-30
 ---
 
 # 当前基础架构不变量

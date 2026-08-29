@@ -3,7 +3,7 @@ document_type: implementation-plan
 version: v1.29
 authority: implementation-and-acceptance-status
 status: in_progress
-last_updated: 2026-08-29
+last_updated: 2026-08-30
 ---
 
 # v1.29 Camp 动态队员管理与 Runtime 文件变化实施计划
@@ -101,6 +101,7 @@ last_updated: 2026-08-29
   operation-only 显示诚实空态；有可靠 Diff 的 mixed file 显示可证明 totals，含纯 operation-only 文件的 card
   不显示局部 totals；
 - [x] 不改变会话连接轨、底部/右侧执行台、Tool list 宽度与其他既有视觉结构；
+- [x] Shell command disclosure 统一为 `$ <command>` 首行和紧接的公开输出，移除“命令 / 输出”标签与空白分隔行；
 - [x] Renderer fixtures 覆盖每 Run card、三行默认、mixed totals 隐藏、四种 Review mode 与 typed Camp Open。
 - [x] `activity-v2` 新写入收敛为 Shell/File/Tool/Runtime/Unknown 五域，file/web/generic search 分别映射；
   已有 v1 operation 继续在 v1 收尾，Read Side 双读 v2/v1，Migration 116 不做历史回填；
@@ -113,7 +114,6 @@ last_updated: 2026-08-29
   版本与 query-only shape。任意顶层 `query`、ACP 文件搜索 shape 和未验证版本 fail closed；query 不做敏感词
   过滤；单项或多项以 `搜索 <query>` 首行显示，公开结果从下一行连续显示；Web 搜索计入连续 Tool 组；
   Antigravity `search_web` 只分类、不猜 query。
-- [x] Shell command 详情统一为 `$ <command>` 首行和紧接的公开 output；Shell/Web 搜索都移除分区标签与空白分隔行。
 
 ## 7. 自动化验证
 
@@ -123,17 +123,20 @@ last_updated: 2026-08-29
   whole-turn snapshot ingress、projector `no_changes` 和同名前缀目录；Windows target fixture 覆盖 drive/root ASCII
   大小写与分隔符语义；
 - [x] TypeScript typecheck 通过；
+- [x] Shell command projection 定向回归覆盖有输出、无输出、ANSI 清理、脱敏、Codex、Claude Bash、ACP execute
+  与完整 Evidence 恢复路径；
 - [x] `activity-v2` mapping、v1 live-operation compatibility、Migration 116 history preservation、类型化 Search
   Operation allowlist、Antigravity `search_web` 与 Renderer title/icon/query 双门槛定向 fixture 通过；
-- [x] v25 Shell/Web 详情定向回归覆盖有输出、无输出、多项 query、typed projection fail-closed、Codex/ACP live
-  与完整 Evidence 恢复路径；App/Tool grouping 共 151 项、TypeScript、Desktop production build 与文档门禁通过；
+- [x] v26 Web 搜索详情定向回归覆盖 query-only、单项/多项 query、typed projection fail-closed、Codex/ACP live
+  与完整 Evidence 恢复路径；App/Tool grouping 151/151 通过；
 - [x] Navigation coordinator 8/8 与 App event routing 2/2 回归通过；隔离 App 已验证 post-commit invalidation、
   后台 Run marker 收敛、隐藏暂停、focus 补读与 20 秒安全轮询；
 - [x] `cargo test -p rovai-core` 的 lib、`rovai-core` binary 与 `rovai` binary 全量通过；
 - [x] Renderer/Vitest 全量 620 项通过，完整 `pnpm test` 其余 Node 套件 219 项通过、1 项既有 Windows skip；
 - [x] `pnpm docs:test`、`pnpm docs:check` 与精确 merge-base `docs:check:ci` 通过；
 - [x] Desktop production build 通过；
-- [x] Impeccable final detector 对 v25 `ui-model.ts` target 完成唯一一次实际扫描并返回零 finding。
+- [x] Impeccable final detector 对本次 UI targets 完成唯一一次实际扫描；报告项均来自 `styles.css` 既有未改
+  规则，本次新增 Rovai icon/style 无新 finding。
 
 ## 8. 真实 Runtime 验收
 
