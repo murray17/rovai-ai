@@ -190,6 +190,36 @@ pub(crate) fn atomic_write_private_bytes(path: &Path, bytes: &[u8]) -> Result<()
     result
 }
 
+/// Publishes a fully written private sibling to its final name.
+///
+/// Callers must create, validate, flush, and close `source` before invoking
+/// this operation. On Windows this uses the native replace-existing path;
+/// Unix uses same-filesystem rename semantics.
+pub(crate) fn publish_private_temporary_file(source: &Path, destination: &Path) -> Result<()> {
+    commit_private_temporary(source, destination)
+}
+
+/// Publishes a fully written private sibling only when the final name is still absent.
+///
+/// The hard-link creation is the no-overwrite commit point. Removing the temporary
+/// name afterwards never changes the published file's contents.
+pub(crate) fn publish_private_new_temporary_file(source: &Path, destination: &Path) -> Result<()> {
+    std::fs::hard_link(source, destination).with_context(|| {
+        format!(
+            "failed to publish new private file {} to {}",
+            source.display(),
+            destination.display()
+        )
+    })?;
+    std::fs::remove_file(source).with_context(|| {
+        format!(
+            "published private file but failed to remove temporary name {}",
+            source.display()
+        )
+    })?;
+    Ok(())
+}
+
 #[cfg(windows)]
 fn prepare_windows_data_root_platform(layout: &WindowsDataRootLayout) -> Result<()> {
     prepare_private_directory(&layout.root)?;
@@ -1053,6 +1083,24 @@ mod tests {
         assert!(WindowsDataRootLayout::from_root(Path::new("relative-root")).is_err());
         let parent_path = std::env::temp_dir().join("child").join("..").join("root");
         assert!(WindowsDataRootLayout::from_root(&parent_path).is_err());
+    }
+
+    #[test]
+    fn new_private_publish_never_replaces_an_existing_destination() {
+        let root = std::env::temp_dir().join(format!(
+            "rovai-private-new-publish-{}",
+            uuid::Uuid::new_v4()
+        ));
+        prepare_private_directory(&root).unwrap();
+        let source = root.join("staging");
+        let destination = root.join("authority");
+        std::fs::write(&source, b"new").unwrap();
+        std::fs::write(&destination, b"existing").unwrap();
+
+        assert!(publish_private_new_temporary_file(&source, &destination).is_err());
+        assert_eq!(std::fs::read(&destination).unwrap(), b"existing");
+        assert_eq!(std::fs::read(&source).unwrap(), b"new");
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[cfg(windows)]

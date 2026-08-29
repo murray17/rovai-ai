@@ -24,11 +24,16 @@ async function temporaryFile(): Promise<string> {
 }
 
 describe('onboarding preferences', () => {
-  it('starts uninitialized when the file is missing or malformed', async () => {
+  it('starts from memory defaults and preserves malformed onboarding evidence', async () => {
     const filePath = await temporaryFile()
     expect(await readOnboardingSnapshot(filePath)).toEqual(DEFAULT_ONBOARDING_SNAPSHOT)
-    await writeFile(filePath, '{broken')
+    const malformed = '{broken'
+    await writeFile(filePath, malformed)
     expect(await readOnboardingSnapshot(filePath)).toEqual(DEFAULT_ONBOARDING_SNAPSHOT)
+    const store = await OnboardingStore.load(filePath)
+    expect(store.get()).toEqual(DEFAULT_ONBOARDING_SNAPSHOT)
+    expect(store.loadDegradation?.code).toBe('onboarding_preferences_unreadable')
+    expect(await readFile(filePath, 'utf8')).toBe(malformed)
   })
 
   it('skips onboarding for an installation that already has product data', async () => {

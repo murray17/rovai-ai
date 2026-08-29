@@ -1,14 +1,28 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
-import { createHash } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { createInterface } from 'node:readline'
 import { accessSync, constants, realpathSync } from 'node:fs'
 import { join, posix, resolve, win32 } from 'node:path'
 import { app } from 'electron'
-import type { CoreEvent, CoreMethod } from '@contracts'
+import type {
+  AuthorityState,
+  CoreEvent,
+  CoreMethod,
+  RovaiRequestFailure,
+  RovaiRequestFailureKind,
+  StructuredError,
+  SupervisorSnapshot,
+  StartupPhase
+} from '@contracts'
+
+type ChildToken = { readonly id: string }
 
 type PendingRequest = {
+  generation: number
+  childToken: ChildToken
+  requestId: number
   resolve(value: unknown): void
-  reject(error: Error): void
+  reject(error: RovaiRequestError): void
   timer: NodeJS.Timeout
   method: CoreMethod | 'core.shutdown'
   startedAt: number
@@ -18,9 +32,62 @@ type PendingRequest = {
 type CoreWireResponse = {
   id?: number
   result?: unknown
-  error?: { code?: string; message?: string }
+  error?: {
+    kind?: 'domain_rejection' | 'infrastructure_failure'
+    code?: string
+    message?: string
+    retryable?: boolean
+    details?: unknown
+  }
   method?: string
   params?: unknown
+}
+
+type CoreStartupWireFrame = {
+  kind: 'core_startup'
+  schemaVersion: 1
+  status: 'phase' | 'ready' | 'blocked' | 'failed'
+  phase?: StartupPhase
+  authorityState?: AuthorityState
+  error?: StructuredError
+  progress?: unknown
+}
+
+type ActiveChild = {
+  process: ChildProcessWithoutNullStreams
+  generation: number
+  token: ChildToken
+  ready: boolean
+  deterministicRefusal: boolean
+}
+
+export class RovaiRequestError extends Error implements RovaiRequestFailure {
+  readonly kind: RovaiRequestFailureKind
+  readonly code: string
+  readonly retryable: boolean
+  readonly generation: number
+  readonly details: unknown
+
+  constructor(failure: RovaiRequestFailure) {
+    super(failure.message)
+    this.name = 'RovaiRequestError'
+    this.kind = failure.kind
+    this.code = failure.code
+    this.retryable = failure.retryable
+    this.generation = failure.generation
+    this.details = failure.details
+  }
+
+  toFailure(): RovaiRequestFailure {
+    return {
+      kind: this.kind,
+      code: this.code,
+      message: this.message,
+      retryable: this.retryable,
+      generation: this.generation,
+      details: this.details
+    }
+  }
 }
 
 export type PlannedShutdownReport = {
@@ -118,14 +185,86 @@ const PLANNED_SHUTDOWN_DEADLINE_MS = 10_000
 const SHUTDOWN_SIGTERM_GRACE_MS = 3_000
 const SHUTDOWN_SIGKILL_GRACE_MS = 2_000
 
+function capabilitiesFor(
+  runtimeMode: SupervisorSnapshot['runtimeMode'],
+  fullCoreState: SupervisorSnapshot['fullCoreState']
+): SupervisorSnapshot['capabilities'] {
+  const fullCoreReady = runtimeMode === 'full_core' && fullCoreState === 'ready'
+  return {
+    authoritativeWorkspace: fullCoreReady,
+    coreRequests: fullCoreReady,
+    localPreferences: true,
+    supervisorStatus: true,
+    diagnosticsExport: true,
+    fullCoreRetry: fullCoreState === 'idle'
+      || fullCoreState === 'blocked'
+      || fullCoreState === 'crashed'
+  }
+}
+
+function initialSupervisorSnapshot(): SupervisorSnapshot {
+  return {
+    schemaVersion: 1,
+    revision: 0,
+    generation: 0,
+    runtimeMode: 'bootstrap_only',
+    fullCoreState: 'idle',
+    authorityState: { kind: 'unknown' },
+    startupPhase: null,
+    restartAttempt: 0,
+    capabilities: capabilitiesFor('bootstrap_only', 'idle'),
+    localDegradations: [],
+    lastError: null,
+    migrationProgress: null
+  }
+}
+
+function cloneSupervisorSnapshot(snapshot: SupervisorSnapshot): SupervisorSnapshot {
+  return {
+    ...snapshot,
+    authorityState: { ...snapshot.authorityState },
+    capabilities: { ...snapshot.capabilities },
+    localDegradations: snapshot.localDegradations.map((failure) => ({ ...failure })),
+    lastError: snapshot.lastError ? { ...snapshot.lastError } : null
+  }
+}
+
+function structuredError(
+  code: string,
+  message: string,
+  retryable: boolean,
+  details: unknown
+): StructuredError {
+  return { code, message, retryable, details }
+}
+
+function structuredFailure(
+  kind: RovaiRequestFailureKind,
+  code: string,
+  message: string,
+  retryable: boolean,
+  generation: number,
+  details: unknown
+): RovaiRequestFailure {
+  return { kind, code, message, retryable, generation, details }
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error)
+}
+
 export class CoreClient {
-  #child: ChildProcessWithoutNullStreams | null = null
+  #child: ActiveChild | null = null
   #nextId = 1
   #pending = new Map<number, PendingRequest>()
   #eventListeners = new Set<(event: CoreEvent) => void>()
+  #snapshotListeners = new Set<(snapshot: SupervisorSnapshot) => void>()
+  #snapshot: SupervisorSnapshot = initialSupervisorSnapshot()
+  #generation = 0
   #restartAttempts = 0
   #restartTimer: NodeJS.Timeout | null = null
   #stableTimer: NodeJS.Timeout | null = null
+  #queuedRetryGeneration: number | null = null
   #stopping = false
   #shutdownPromise: Promise<CoreShutdownResult> | null = null
   #removedSkillProjectRoots: string[] = []
@@ -148,6 +287,32 @@ export class CoreClient {
     this.#removedSkillProjectRoots = [...new Set(executionRoots)]
   }
 
+  setLocalDegradations(degradations: StructuredError[]): void {
+    this.#updateSnapshot({ localDegradations: degradations.map((value) => ({ ...value })) })
+  }
+
+  getSnapshot(): SupervisorSnapshot {
+    return cloneSupervisorSnapshot(this.#snapshot)
+  }
+
+  onSnapshot(listener: (snapshot: SupervisorSnapshot) => void): () => void {
+    this.#snapshotListeners.add(listener)
+    return () => this.#snapshotListeners.delete(listener)
+  }
+
+  retryFullCore(): SupervisorSnapshot {
+    if (this.#stopping) return this.getSnapshot()
+    if (this.#child) {
+      if (this.#child.deterministicRefusal) {
+        this.#queuedRetryGeneration = this.#child.generation
+      }
+      return this.getSnapshot()
+    }
+    this.#restartAttempts = 0
+    this.start()
+    return this.getSnapshot()
+  }
+
   start(options?: CoreStartOptions): void {
     if (options?.removedSkillProjectRoots) {
       this.setRemovedSkillProjectRoots(options.removedSkillProjectRoots)
@@ -157,66 +322,77 @@ export class CoreClient {
     }
     if (this.#child) return
     this.#stopping = false
+    this.#queuedRetryGeneration = null
     if (this.#restartTimer) {
       clearTimeout(this.#restartTimer)
       this.#restartTimer = null
     }
 
-    const binary = resolveCoreBinary()
+    const generation = ++this.#generation
+    const token: ChildToken = { id: `${generation}:${randomUUID()}` }
+    let binary: string
+    try {
+      binary = resolveCoreBinary()
+    } catch (error) {
+      const failure = structuredFailure(
+        'infrastructure_failure',
+        'core_binary_unavailable',
+        errorMessage(error),
+        false,
+        generation,
+        {}
+      )
+      this.#updateSnapshot({
+        generation,
+        runtimeMode: 'bootstrap_only',
+        fullCoreState: 'blocked',
+        authorityState: { kind: 'unknown' },
+        startupPhase: null,
+        restartAttempt: this.#restartAttempts,
+        lastError: failure
+      })
+      return
+    }
     const args = coreLaunchArguments(
       this.#dataDirectory,
       this.#runtimeCampFilesRoot,
       this.#skillLibraryRoot,
       this.#removedSkillProjectRoots
     )
-    const coreStartedAt = performance.now()
     console.info('[startup] stage=core_spawn')
     const child = spawn(binary, args, {
       stdio: ['pipe', 'pipe', 'pipe'],
       windowsHide: process.platform === 'win32'
     })
-    let readyReported = false
-    this.#child = child
+    const active: ActiveChild = {
+      process: child,
+      generation,
+      token,
+      ready: false,
+      deterministicRefusal: false
+    }
+    this.#child = active
+    this.#updateSnapshot({
+      generation,
+      runtimeMode: 'bootstrap_only',
+      fullCoreState: 'starting',
+      authorityState: { kind: 'unknown' },
+      startupPhase: 'lease',
+      restartAttempt: this.#restartAttempts,
+      lastError: null,
+      migrationProgress: null
+    })
     this.#emit({ method: 'runtime.state', params: { status: 'starting' } })
-    this.#stableTimer = setTimeout(() => {
-      this.#restartAttempts = 0
-      this.#stableTimer = null
-    }, 10_000)
 
     const lines = createInterface({ input: child.stdout })
-    lines.on('line', (line) => this.#handleLine(line))
+    lines.on('line', (line) => this.#handleLine(generation, token, line))
     child.stderr.on('data', (chunk) => {
       const text = String(chunk).trimEnd()
       console.error(`[rovai-core] ${text}`)
-      if (!readyReported && text.includes('rovai-core') && text.includes('ready')) {
-        readyReported = true
-        console.info(
-          `[startup] stage=core_ready elapsed_ms=${(performance.now() - coreStartedAt).toFixed(1)}`
-        )
-        this.#emit({ method: 'runtime.state', params: { status: 'ready' } })
-      }
     })
-    child.on('error', (error) => this.#failAll(error))
+    child.on('error', (error) => this.#handleProcessError(generation, token, error))
     child.on('exit', (code, signal) => {
-      const error = new Error(`Rust Core exited (code=${code}, signal=${signal})`)
-      if (this.#child === child) this.#child = null
-      if (this.#stableTimer) {
-        clearTimeout(this.#stableTimer)
-        this.#stableTimer = null
-      }
-      this.#failAll(error)
-      if (this.#stopping) return
-      if (this.#restartAttempts >= 2) {
-        this.#emit({ method: 'runtime.state', params: { status: 'crashed', message: error.message } })
-        return
-      }
-      this.#restartAttempts += 1
-      const delayMs = this.#restartAttempts * 750
-      this.#emit({
-        method: 'runtime.state',
-        params: { status: 'restarting', attempt: this.#restartAttempts, message: error.message }
-      })
-      this.#restartTimer = setTimeout(() => this.start(), delayMs)
+      this.#handleExit(generation, token, code, signal)
     })
   }
 
@@ -226,19 +402,42 @@ export class CoreClient {
     if (this.#stableTimer) clearTimeout(this.#stableTimer)
     this.#restartTimer = null
     this.#stableTimer = null
-    const child = this.#child
+    this.#queuedRetryGeneration = null
+    const active = this.#child
     this.#child = null
-    if (child && !child.killed) child.kill('SIGTERM')
-    this.#failAll(new Error('Rust Core stopped'))
+    if (active && !active.process.killed) active.process.kill('SIGTERM')
+    this.#updateSnapshot({
+      runtimeMode: 'bootstrap_only',
+      fullCoreState: 'shutting_down',
+      startupPhase: null
+    })
+    this.#failAllForShutdown('Rust Core stopped')
   }
 
   async request<T>(method: CoreMethod, params: unknown = {}): Promise<T> {
-    if (this.#stopping) throw new Error('Rust Core is shutting down')
-    if (!this.#child) this.start()
-    const child = this.#child
-    if (!child) throw new Error('Rust Core is unavailable')
+    if (this.#stopping) {
+      throw new RovaiRequestError(structuredFailure(
+        'shutdown',
+        'full_core_shutting_down',
+        'Rust Core is shutting down',
+        false,
+        this.#snapshot.generation,
+        {}
+      ))
+    }
+    const active = this.#child
+    if (!active?.ready || this.#snapshot.fullCoreState !== 'ready') {
+      throw new RovaiRequestError(structuredFailure(
+        'full_core_unavailable',
+        'full_core_unavailable',
+        'The authoritative workspace is unavailable while Rovai is in bootstrap mode.',
+        true,
+        this.#snapshot.generation,
+        { authorityState: this.#snapshot.authorityState }
+      ))
+    }
 
-    return this.#sendRequest<T>(child, method, params, 60_000)
+    return this.#sendRequest<T>(active, method, params, 60_000)
   }
 
   shutdown(): Promise<CoreShutdownResult> {
@@ -254,9 +453,19 @@ export class CoreClient {
     if (this.#stableTimer) clearTimeout(this.#stableTimer)
     this.#restartTimer = null
     this.#stableTimer = null
+    this.#queuedRetryGeneration = null
+    this.#updateSnapshot({
+      runtimeMode: 'bootstrap_only',
+      fullCoreState: 'shutting_down',
+      startupPhase: null
+    })
 
-    const child = this.#child
-    if (!child) return { report: null, forcedSignal: null }
+    const active = this.#child
+    if (!active) {
+      this.#failAllForShutdown('Rust Core is shutting down')
+      return { report: null, forcedSignal: null }
+    }
+    const child = active.process
 
     let forcedSignal: CoreShutdownResult['forcedSignal'] = null
     let sigkillTimer: NodeJS.Timeout | null = null
@@ -279,7 +488,7 @@ export class CoreClient {
       child.once('exit', () => resolve())
     })
     const reportPromise = this.#sendRequest<PlannedShutdownReport>(
-      child,
+      active,
       'core.shutdown',
       { protocolVersion: 3, deadlineMs: PLANNED_SHUTDOWN_DEADLINE_MS },
       PLANNED_SHUTDOWN_DEADLINE_MS + SHUTDOWN_SIGTERM_GRACE_MS
@@ -296,7 +505,7 @@ export class CoreClient {
   }
 
   #sendRequest<T>(
-    child: ChildProcessWithoutNullStreams,
+    active: ActiveChild,
     method: CoreMethod | 'core.shutdown',
     params: unknown,
     timeoutMs: number
@@ -311,10 +520,23 @@ export class CoreClient {
     }
     return new Promise<T>((resolve, reject) => {
       const timer = setTimeout(() => {
-        this.#pending.delete(id)
-        reject(new Error(`Rust Core request timed out: ${method}`))
+        const pending = this.#pending.get(id)
+        if (pending?.generation === active.generation && pending.childToken === active.token) {
+          this.#pending.delete(id)
+        }
+        reject(new RovaiRequestError(structuredFailure(
+          'infrastructure_failure',
+          'core_request_timeout',
+          `Rust Core request timed out: ${method}`,
+          true,
+          active.generation,
+          { method }
+        )))
       }, timeoutMs)
       this.#pending.set(id, {
+        generation: active.generation,
+        childToken: active.token,
+        requestId: id,
         resolve: (value) => resolve(value as T),
         reject,
         timer,
@@ -322,11 +544,21 @@ export class CoreClient {
         startedAt,
         traceId
       })
-      child.stdin.write(payload, (error) => {
+      active.process.stdin.write(payload, (error) => {
         if (!error) return
         clearTimeout(timer)
-        this.#pending.delete(id)
-        reject(error)
+        const pending = this.#pending.get(id)
+        if (pending?.generation === active.generation && pending.childToken === active.token) {
+          this.#pending.delete(id)
+        }
+        reject(new RovaiRequestError(structuredFailure(
+          'infrastructure_failure',
+          'core_request_write_failed',
+          error.message,
+          true,
+          active.generation,
+          { method }
+        )))
       })
     })
   }
@@ -336,26 +568,33 @@ export class CoreClient {
     return () => this.#eventListeners.delete(listener)
   }
 
-  #handleLine(line: string): void {
-    let message: CoreWireResponse
+  #handleLine(generation: number, childToken: ChildToken, line: string): void {
+    let message: CoreWireResponse | CoreStartupWireFrame
     const parseStartedAt = performance.now()
     try {
-      message = JSON.parse(line) as CoreWireResponse
+      message = JSON.parse(line) as CoreWireResponse | CoreStartupWireFrame
     } catch (error) {
       console.error('Invalid Rust Core response', error, line)
       return
     }
 
-    if (message.method) {
-      this.#emit({ method: message.method, params: message.params })
+    if ((message as CoreStartupWireFrame).kind === 'core_startup') {
+      this.#handleStartupFrame(generation, childToken, message as CoreStartupWireFrame)
+      return
+    }
+    const response = message as CoreWireResponse
+
+    if (response.method) {
+      if (!this.#isActive(generation, childToken)) return
+      this.#emit({ method: response.method, params: response.params })
       return
     }
 
-    if (typeof message.id !== 'number') return
-    const pending = this.#pending.get(message.id)
-    if (!pending) return
+    if (typeof response.id !== 'number') return
+    const pending = this.#pending.get(response.id)
+    if (!pending || pending.generation !== generation || pending.childToken !== childToken) return
     clearTimeout(pending.timer)
-    this.#pending.delete(message.id)
+    this.#pending.delete(response.id)
     if (
       pending.traceId
       && (pending.method === 'camps.enter' || pending.method === 'camps.open')
@@ -367,10 +606,17 @@ export class CoreClient {
         + `response_bytes=${Buffer.byteLength(line, 'utf8')}`
       )
     }
-    if (message.error) {
-      pending.reject(new Error(message.error.message ?? message.error.code ?? 'Core request failed'))
+    if (response.error) {
+      pending.reject(new RovaiRequestError(structuredFailure(
+        response.error.kind ?? 'infrastructure_failure',
+        response.error.code ?? 'core_request_failed',
+        response.error.message ?? response.error.code ?? 'Core request failed',
+        response.error.retryable ?? false,
+        generation,
+        response.error.details ?? {}
+      )))
     } else {
-      pending.resolve(message.result)
+      pending.resolve(response.result)
     }
   }
 
@@ -378,12 +624,219 @@ export class CoreClient {
     for (const listener of this.#eventListeners) listener(event)
   }
 
-  #failAll(error: Error): void {
-    for (const pending of this.#pending.values()) {
-      clearTimeout(pending.timer)
-      pending.reject(error)
+  #handleStartupFrame(
+    generation: number,
+    childToken: ChildToken,
+    frame: CoreStartupWireFrame
+  ): void {
+    const active = this.#child
+    if (!active || active.generation !== generation || active.token !== childToken) return
+    if (frame.schemaVersion !== 1) {
+      this.#handleProcessError(
+        generation,
+        childToken,
+        new Error(`Unsupported Core startup frame schema ${frame.schemaVersion}`)
+      )
+      return
     }
-    this.#pending.clear()
+    if (frame.status === 'ready') {
+      active.ready = true
+      this.#updateSnapshot({
+        generation,
+        runtimeMode: 'full_core',
+        fullCoreState: 'ready',
+        authorityState: frame.authorityState ?? { kind: 'current' },
+        startupPhase: null,
+        restartAttempt: this.#restartAttempts,
+        lastError: null,
+        migrationProgress: null
+      })
+      console.info('[startup] stage=core_ready')
+      this.#emit({ method: 'runtime.state', params: { status: 'ready' } })
+      if (this.#stableTimer) clearTimeout(this.#stableTimer)
+      this.#stableTimer = setTimeout(() => {
+        if (this.#isActive(generation, childToken) && active.ready) this.#restartAttempts = 0
+        this.#stableTimer = null
+      }, 10_000)
+      return
+    }
+    if (frame.status === 'phase') {
+      this.#updateSnapshot({
+        generation,
+        runtimeMode: 'bootstrap_only',
+        fullCoreState: 'starting',
+        authorityState: frame.authorityState ?? this.#snapshot.authorityState,
+        startupPhase: frame.phase ?? null,
+        restartAttempt: this.#restartAttempts,
+        lastError: null,
+        migrationProgress: frame.progress ?? null
+      })
+      return
+    }
+
+    active.deterministicRefusal = true
+    const failure = frame.error
+      ? structuredFailure(
+          'infrastructure_failure',
+          frame.error.code,
+          frame.error.message,
+          frame.error.retryable,
+          generation,
+          frame.error.details
+        )
+      : null
+    this.#updateSnapshot({
+      generation,
+      runtimeMode: 'bootstrap_only',
+      fullCoreState: 'blocked',
+      authorityState: frame.authorityState ?? { kind: 'unknown' },
+      startupPhase: frame.phase ?? null,
+      restartAttempt: this.#restartAttempts,
+      lastError: failure,
+      migrationProgress: frame.progress ?? null
+    })
+    this.#failGeneration(
+      generation,
+      childToken,
+      structuredFailure(
+        'full_core_unavailable',
+        'full_core_startup_refused',
+        failure?.message ?? 'Full Core startup was refused by authority admission.',
+        frame.error?.retryable ?? true,
+        generation,
+        { authorityState: frame.authorityState }
+      )
+    )
+    this.#emit({
+      method: 'runtime.state',
+      params: { status: 'blocked', authorityState: frame.authorityState }
+    })
+  }
+
+  #handleProcessError(generation: number, childToken: ChildToken, error: Error): void {
+    const failure = structuredFailure(
+      'infrastructure_failure',
+      'core_process_error',
+      error.message,
+      true,
+      generation,
+      {}
+    )
+    this.#failGeneration(generation, childToken, failure)
+    if (!this.#isActive(generation, childToken)) return
+    this.#updateSnapshot({ lastError: failure })
+  }
+
+  #handleExit(
+    generation: number,
+    childToken: ChildToken,
+    code: number | null,
+    signal: NodeJS.Signals | null
+  ): void {
+    const message = `Rust Core exited (code=${code}, signal=${signal})`
+    this.#failGeneration(
+      generation,
+      childToken,
+      structuredFailure(
+        this.#stopping ? 'shutdown' : 'infrastructure_failure',
+        this.#stopping ? 'full_core_shutting_down' : 'core_process_exited',
+        message,
+        !this.#stopping,
+        generation,
+        { code, signal }
+      )
+    )
+    const active = this.#child
+    if (!active || active.generation !== generation || active.token !== childToken) return
+    this.#child = null
+    if (this.#stableTimer) {
+      clearTimeout(this.#stableTimer)
+      this.#stableTimer = null
+    }
+    if (this.#stopping) return
+    if (active.deterministicRefusal) {
+      if (this.#queuedRetryGeneration === generation) {
+        this.#queuedRetryGeneration = null
+        this.#restartAttempts = 0
+        this.start()
+      }
+      return
+    }
+    if (this.#restartAttempts >= 2) {
+      const failure = structuredError('core_process_exited', message, true, { code, signal })
+      this.#updateSnapshot({
+        runtimeMode: 'bootstrap_only',
+        fullCoreState: 'crashed',
+        authorityState: { kind: 'unknown' },
+        startupPhase: null,
+        lastError: failure
+      })
+      this.#emit({ method: 'runtime.state', params: { status: 'crashed', message } })
+      return
+    }
+    this.#restartAttempts += 1
+    const delayMs = this.#restartAttempts * 750
+    this.#updateSnapshot({
+      runtimeMode: 'bootstrap_only',
+      fullCoreState: 'starting',
+      authorityState: { kind: 'unknown' },
+      startupPhase: null,
+      restartAttempt: this.#restartAttempts,
+      lastError: structuredError('core_process_exited', message, true, { code, signal })
+    })
+    this.#emit({
+      method: 'runtime.state',
+      params: { status: 'restarting', attempt: this.#restartAttempts, message }
+    })
+    this.#restartTimer = setTimeout(() => this.start(), delayMs)
+  }
+
+  #isActive(generation: number, childToken: ChildToken): boolean {
+    return this.#child?.generation === generation && this.#child.token === childToken
+  }
+
+  #failGeneration(
+    generation: number,
+    childToken: ChildToken,
+    failure: RovaiRequestFailure
+  ): void {
+    for (const [id, pending] of this.#pending) {
+      if (pending.generation !== generation || pending.childToken !== childToken) continue
+      clearTimeout(pending.timer)
+      pending.reject(new RovaiRequestError(failure))
+      this.#pending.delete(id)
+    }
+  }
+
+  #failAllForShutdown(message: string): void {
+    for (const [id, pending] of this.#pending) {
+      clearTimeout(pending.timer)
+      pending.reject(new RovaiRequestError(structuredFailure(
+        'shutdown',
+        'full_core_shutting_down',
+        message,
+        false,
+        pending.generation,
+        {}
+      )))
+      this.#pending.delete(id)
+    }
+  }
+
+  #updateSnapshot(patch: Partial<Omit<SupervisorSnapshot, 'schemaVersion' | 'revision' | 'capabilities'>>): void {
+    const runtimeMode = patch.runtimeMode ?? this.#snapshot.runtimeMode
+    const fullCoreState = patch.fullCoreState ?? this.#snapshot.fullCoreState
+    this.#snapshot = {
+      ...this.#snapshot,
+      ...patch,
+      schemaVersion: 1,
+      revision: this.#snapshot.revision + 1,
+      runtimeMode,
+      fullCoreState,
+      capabilities: capabilitiesFor(runtimeMode, fullCoreState)
+    }
+    const snapshot = this.getSnapshot()
+    for (const listener of this.#snapshotListeners) listener(snapshot)
   }
 }
 

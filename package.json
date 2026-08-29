@@ -103,6 +103,7 @@
     "accept:app-updates-ui": "node scripts/accept-app-updates-ui.mjs",
     "accept:runtime-monitoring-ui": "node scripts/accept-runtime-monitoring-ui.mjs",
     "accept:onboarding-ui": "node scripts/accept-onboarding-ui.mjs",
+    "accept:bootstrap-shell-ui": "node scripts/accept-bootstrap-shell-ui.mjs",
     "smoke:recovery": "pnpm core:build:debug && node scripts/smoke-recovery.mjs",
     "smoke:missing-send-recovery": "pnpm core:build:debug && node scripts/smoke-missing-send-recovery.mjs",
     "experiment:p1:copilot-native-turn": "node scripts/experiment-copilot-native-turn-reconciliation.mjs",

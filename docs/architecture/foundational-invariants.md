@@ -12,6 +12,24 @@ last_updated: 2026-08-30
 
 ## Core 数据、命令与 Read Side
 
+<a id="desktop-authority-admission"></a>
+
+### Desktop 可用性与权威准入
+
+- Desktop 窗口、主题、本机偏好、Supervisor、重试和 bootstrap diagnostics 可以在 Full Core 不可用时继续工作；
+  Camp、Member、Memory、Navigation 与其他业务读写只有 `authoritativeWorkspace` capability ready 后才能挂载。
+  阻断期间不得创建替代数据库、查询未准入 authority 或用空集合冒充正常工作区。
+- Core 必须先持有绑定 canonical data directory 与稳定对象身份的 OS 排他 lease，再观察或操作 SQLite。数据库
+  准入只返回 existing、initializable、migration 或 typed blocked；票据绑定 lease、不可复制、一次消费并在打开、
+  清理或发布前复核相关对象。只有 `lumen.sqlite` 时精确使用它，不创建 `rovai.sqlite`。
+- 没有 main 但存在 WAL/journal 是不完整 authority，必须阻断；孤立 SHM 只有在票据消费时 exact identity 未变才能
+  清理。全新 authority 只在两个 namespace 都确认无 main/WAL/journal 后，通过 staging 与原子 no-replace 发布。
+- 旧合同 migration 使用一致副本，原 main/sidecar 的私有备份、identity manifest、完整校验与原子切换；中断恢复按
+  current main 的 original/migrated identity 决定恢复，未知 identity fail closed。迁移失败保留原 authority 与壳层。
+- Full Core Supervisor 发布单调 generation/revision 的完整快照。旧 child 的 frame、event、response 或 exit 不能污染
+  当前 generation；确定性准入阻断不消耗 crash budget。Renderer-facing request 继续是 `Promise<T>`，内部 transport
+  必须保留领域拒绝、基础设施失败、Full Core 不可用与 shutdown 的结构化类别。
+
 <a id="core-command-transaction"></a>
 
 ### 权威写入与幂等事务
@@ -97,7 +115,12 @@ last_updated: 2026-08-30
 - Managed v2 使用 durable ingest intent、quota reservation、私有同卷 staging、no-replace promote、final reverify/fsync 与最终 SQLite semantic commit。它不取得 legacy View write admission，不等待 quiescence/AgentRun，不推进 generation，不停止或 fence 已运行 Run，也不创建 `projection_blocked` Delivery；新 Delivery 直接进入普通 Dispatch Pump。
 - Context、Camp History 与 Camp Open 对 v2 只查持久 metadata 并组合路径，不 `stat/open/read_dir/digest` payload。文件后来不可读时由 Runtime 原生工具失败；Context 不生成 unavailable descriptor/Run Fact，也不据此改写全局附件状态。
 - 历史 `message_attachment`、Authority 与 Published Attachment View 保持只读兼容，不批量迁移、不双写。Legacy writer intent、generation、recovery 与 `projection_blocked` 只收口既有 v1 operation；View verifier 忽略 `.managed-v2` 保留子树。旧 Camp 无需转换历史附件即可发送新 v2 消息和继续运行。
-- 首次安装 admission 与训练进度由 Electron Main 在 Core 启动前以私有版本化 Desktop 状态拥有；产品数据库存在性参与 clean/fail-closed 判定。正常 Provisioning 通过可重试 checkpoint 幂等创建首个成员、Runtime 选择和“初次集结”Camp/Draft，不把半完成状态伪装为已完成；无可用 Runtime 且 provisioning 尚未开始时可以原子完成为 `runtime_deferred`，但不得创建成员、Runtime 配置、Camp、Run 或 onboarding restore target，也不得在以后启动时重新打开训练营。
+- 首次安装训练进度由 Electron Main 的私有版本化 Desktop 状态拥有，但 fresh/existing admission 只使用 Full Core
+  已准入的 authority origin：全新初始化进入训练，existing/migrated grandfather 为既有安装；文件名存在性、sidecar
+  或探测失败都不能代替该结论。损坏偏好使用内存默认、告警并保留原文件。正常 Provisioning 通过可重试 checkpoint
+  幂等创建首个成员、Runtime 选择和“初次集结”Camp/Draft，不把半完成状态伪装为已完成；无可用 Runtime 且
+  provisioning 尚未开始时可以原子完成为 `runtime_deferred`，但不得创建成员、Runtime 配置、Camp、Run 或
+  onboarding restore target，也不得在以后启动时重新打开训练营。
 - Camp 永久删除保持 User-only、exact-version 和单事务聚合删除。普通模式要求 quiescent；用户明确确认的 force 模式先持久化停止/隔离边界，再删除 Camp 聚合并异步清理受管资源，不能把未知 Runtime 外部效果宣称为已撤销。
 
 ## 成员身份、生命周期与投影

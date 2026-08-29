@@ -61,6 +61,7 @@ use rovai_core::{
         executable_fingerprint as fingerprint_executable, observe_executable_file_identity,
         verify_executable_integrity,
     },
+    authority_migration::{AuthorityMigrationProgress, AuthorityMigrationRunner},
     builtin_tool_evidence_projection::{
         BUILTIN_TOOL_EVIDENCE_PROJECTION_SCHEMA_VERSION, project_builtin_tool_invocation,
     },
@@ -110,9 +111,10 @@ use rovai_core::{
         DEFAULT_MAX_CONTEXT_PAYLOAD_BYTES, MaterializeContextRequest, PreparedContext,
         RuntimeInputDelivery, charter_delivery_mode_for_adapter,
     },
-    core_data_dir_lock::CoreDataDirLock,
+    core_data_dir_lock::{CoreDataDirLease, CoreDataDirLeaseAcquisition},
     current_user::CURRENT_USER_ID,
-    db::Database,
+    database_admission::{AdmissionAssessment, AuthorityBlock, DatabaseAdmission},
+    db::{Database, DatabaseInitializeError, DatabaseMigrationError, DatabaseOpenError},
     diagnostics::{
         DiagnosticCheck, DiagnosticGroup, DiagnosticStatus, DiagnosticsReport, aggregate_counts,
         database_integrity_check, diagnostics_export_v5,
@@ -373,8 +375,163 @@ struct Response {
 
 #[derive(Debug, Serialize)]
 struct ErrorBody {
+    kind: &'static str,
     code: String,
     message: String,
+    retryable: bool,
+    details: Value,
+}
+
+fn request_error_body(error: &anyhow::Error) -> ErrorBody {
+    if let Some(error) = error.downcast_ref::<CommandGatewayError>() {
+        let code = match error {
+            CommandGatewayError::InvalidEnvelope(_) => "COMMAND_ENVELOPE_INVALID",
+            CommandGatewayError::IdempotencyConflict { .. } => "COMMAND_IDEMPOTENCY_CONFLICT",
+        };
+        return ErrorBody {
+            kind: "domain_rejection",
+            code: code.to_string(),
+            message: error.to_string(),
+            retryable: false,
+            details: json!({}),
+        };
+    }
+    let retryable = error.chain().any(|cause| {
+        cause
+            .downcast_ref::<rusqlite::Error>()
+            .is_some_and(|error| {
+                matches!(
+                    error,
+                    rusqlite::Error::SqliteFailure(sqlite, _)
+                        if matches!(
+                            sqlite.code,
+                            rusqlite::ErrorCode::DatabaseBusy
+                                | rusqlite::ErrorCode::DatabaseLocked
+                        )
+                )
+            })
+    });
+    ErrorBody {
+        kind: "infrastructure_failure",
+        code: "CORE_REQUEST_FAILED".to_string(),
+        message: format!("{error:#}"),
+        retryable,
+        details: json!({}),
+    }
+}
+
+fn write_startup_frame(
+    status: &str,
+    phase: Option<&str>,
+    authority_state: Value,
+    error: Option<Value>,
+    progress: Option<Value>,
+) -> Result<()> {
+    use std::io::Write as _;
+
+    let mut frame = serde_json::Map::from_iter([
+        (
+            "kind".to_string(),
+            Value::String("core_startup".to_string()),
+        ),
+        ("schemaVersion".to_string(), Value::from(1)),
+        ("status".to_string(), Value::String(status.to_string())),
+        ("authorityState".to_string(), authority_state),
+    ]);
+    if let Some(phase) = phase {
+        frame.insert("phase".to_string(), Value::String(phase.to_string()));
+    }
+    if let Some(error) = error {
+        frame.insert("error".to_string(), error);
+    }
+    if let Some(progress) = progress {
+        frame.insert("progress".to_string(), progress);
+    }
+    let stdout = std::io::stdout();
+    let mut output = stdout.lock();
+    serde_json::to_writer(&mut output, &Value::Object(frame))?;
+    output.write_all(b"\n")?;
+    output.flush()?;
+    Ok(())
+}
+
+fn structured_startup_error(
+    code: &str,
+    message: impl Into<String>,
+    retryable: bool,
+    details: Value,
+) -> Value {
+    json!({
+        "code": code,
+        "message": message.into(),
+        "retryable": retryable,
+        "details": details,
+    })
+}
+
+fn write_authority_block(block: &AuthorityBlock) -> Result<()> {
+    write_startup_frame(
+        "blocked",
+        None,
+        json!({ "kind": "blocked", "reason": block }),
+        None,
+        None,
+    )
+}
+
+fn write_database_open_refusal(error: &DatabaseOpenError) -> Result<()> {
+    if let Some(block) = error.authority_block() {
+        return write_authority_block(block);
+    }
+    write_startup_frame(
+        "failed",
+        None,
+        json!({ "kind": "unknown" }),
+        Some(structured_startup_error(
+            error.code(),
+            error.to_string(),
+            false,
+            json!({ "stage": "database_open" }),
+        )),
+        None,
+    )
+}
+
+fn write_database_initialize_refusal(error: &DatabaseInitializeError) -> Result<()> {
+    if let Some(block) = error.authority_block() {
+        return write_authority_block(block);
+    }
+    write_startup_frame(
+        "failed",
+        None,
+        json!({ "kind": "confirmed_absent" }),
+        Some(structured_startup_error(
+            error.code(),
+            error.to_string(),
+            false,
+            json!({ "stage": "database_initialize" }),
+        )),
+        None,
+    )
+}
+
+fn write_database_migration_refusal(error: &DatabaseMigrationError) -> Result<()> {
+    let authority_state = match error.authority_block() {
+        Some(block) => json!({ "kind": "blocked", "reason": block }),
+        None => json!({ "kind": "migration_failed" }),
+    };
+    write_startup_frame(
+        "blocked",
+        Some("migration_failed"),
+        authority_state,
+        Some(structured_startup_error(
+            error.code(),
+            error.to_string(),
+            error.retryable(),
+            json!({ "stage": "database_migration" }),
+        )),
+        None,
+    )
 }
 
 fn request_runs_outside_main_queue(method: &str) -> bool {
@@ -419,10 +576,7 @@ async fn response_for_request(core: &Core, request: &Request) -> Response {
         Err(error) => Response {
             id: request.id.clone(),
             result: None,
-            error: Some(ErrorBody {
-                code: "CORE_REQUEST_FAILED".into(),
-                message: format!("{error:#}"),
-            }),
+            error: Some(request_error_body(&error)),
         },
     }
 }
@@ -11442,22 +11596,169 @@ async fn run_core(
 ) -> Result<()> {
     let data_dir = parse_data_dir()?;
     let skill_library_root = parse_skill_library_root()?;
-    let _data_dir_lock = CoreDataDirLock::acquire(&data_dir)?;
+    let data_dir_lease = match CoreDataDirLease::try_acquire(&data_dir) {
+        Ok(CoreDataDirLeaseAcquisition::Acquired(lease)) => lease,
+        Ok(CoreDataDirLeaseAcquisition::OwnedByActiveCore { data_dir, owner }) => {
+            write_startup_frame(
+                "blocked",
+                Some("lease"),
+                json!({
+                    "kind": "owned_by_active_core",
+                    "dataDir": data_dir,
+                    "owner": owner,
+                }),
+                None,
+                None,
+            )?;
+            return Ok(());
+        }
+        Err(error) => {
+            write_startup_frame(
+                "failed",
+                Some("lease"),
+                json!({ "kind": "unknown" }),
+                Some(structured_startup_error(
+                    "core_data_dir_lease_infrastructure_failed",
+                    error.to_string(),
+                    false,
+                    json!({ "stage": error.stage }),
+                )),
+                None,
+            )?;
+            return Ok(());
+        }
+    };
+    write_startup_frame(
+        "phase",
+        Some("assessing_authority"),
+        json!({ "kind": "assessing" }),
+        None,
+        None,
+    )?;
+    let admission = match DatabaseAdmission::assess(&data_dir_lease) {
+        Ok(AdmissionAssessment::Blocked(block)) => {
+            write_authority_block(&block)?;
+            return Ok(());
+        }
+        Ok(admission) => admission,
+        Err(error) => {
+            write_startup_frame(
+                "failed",
+                Some("assessing_authority"),
+                json!({ "kind": "unknown" }),
+                Some(structured_startup_error(
+                    &error.code,
+                    error.message,
+                    false,
+                    json!({ "stage": "database_admission" }),
+                )),
+                None,
+            )?;
+            return Ok(());
+        }
+    };
     #[cfg(target_os = "macos")]
     configure_user_automation_denial_root(&data_dir.join("automation-v1"))?;
     let runtime_camp_files_root = parse_runtime_camp_files_root()?;
-    let attachment_views = CampAttachmentViewStore::admit(
+    let attachment_views = match CampAttachmentViewStore::admit(
         &runtime_camp_files_root,
         &data_dir,
         std::slice::from_ref(&skill_library_root),
-    )?;
+    ) {
+        Ok(store) => store,
+        Err(error) => {
+            write_startup_frame(
+                "failed",
+                Some("preparing_runtime_storage"),
+                json!({ "kind": "admitted" }),
+                Some(structured_startup_error(
+                    "runtime_camp_files_root_admission_failed",
+                    format!("{error:#}"),
+                    false,
+                    json!({ "stage": "runtime_storage" }),
+                )),
+                None,
+            )?;
+            return Ok(());
+        }
+    };
     let mcp_config_path = parse_mcp_config_path()?;
     let database_started_at = Instant::now();
-    let mut database = Database::open_with_runtime_camp_files_root(
-        &data_dir,
-        attachment_views.root(),
-        attachment_views.root_identity_digest(),
-    )?;
+    let (mut database, authority_origin) = match admission {
+        AdmissionAssessment::AdmittedExisting(ticket) => {
+            write_startup_frame(
+                "phase",
+                Some("opening_authority"),
+                json!({ "kind": "admitted" }),
+                None,
+                None,
+            )?;
+            match Database::open_admitted_with_runtime_camp_files_root(
+                *ticket,
+                attachment_views.root(),
+                attachment_views.root_identity_digest(),
+            ) {
+                Ok(database) => (database, "existing"),
+                Err(error) => {
+                    write_database_open_refusal(&error)?;
+                    return Ok(());
+                }
+            }
+        }
+        AdmissionAssessment::Initializable(ticket) => {
+            write_startup_frame(
+                "phase",
+                Some("initializing_authority"),
+                json!({ "kind": "confirmed_absent" }),
+                None,
+                None,
+            )?;
+            match Database::initialize_new_with_runtime_camp_files_root(
+                *ticket,
+                attachment_views.root(),
+                attachment_views.root_identity_digest(),
+            ) {
+                Ok(database) => (database, "initialized"),
+                Err(error) => {
+                    write_database_initialize_refusal(&error)?;
+                    return Ok(());
+                }
+            }
+        }
+        AdmissionAssessment::RequiresMigration(ticket) => {
+            write_startup_frame(
+                "phase",
+                Some("migrating_authority"),
+                json!({ "kind": "migration_required" }),
+                None,
+                None,
+            )?;
+            let migration = AuthorityMigrationRunner::run_with_progress(
+                *ticket,
+                attachment_views.root(),
+                attachment_views.root_identity_digest(),
+                |progress: AuthorityMigrationProgress| {
+                    let _ = write_startup_frame(
+                        "phase",
+                        Some("migrating_authority"),
+                        json!({ "kind": "migration_required" }),
+                        None,
+                        serde_json::to_value(progress).ok(),
+                    );
+                },
+            );
+            match migration {
+                Ok(database) => (database, "migrated"),
+                Err(error) => {
+                    write_database_migration_refusal(&error)?;
+                    return Ok(());
+                }
+            }
+        }
+        AdmissionAssessment::Blocked(_) => {
+            unreachable!("blocked admission returns before Runtime storage side effects")
+        }
+    };
     eprintln!(
         "[startup] stage=database_ready duration_ms={} elapsed_ms={}",
         database_started_at.elapsed().as_millis(),
@@ -11823,6 +12124,14 @@ async fn run_core(
         runtime_usage_shutdown_rx,
     ));
 
+    output_tx
+        .send(serde_json::to_string(&json!({
+            "kind": "core_startup",
+            "schemaVersion": 1,
+            "status": "ready",
+            "authorityState": { "kind": "current", "origin": authority_origin },
+        }))?)
+        .map_err(|_| anyhow::anyhow!("failed to publish structured Core ready frame"))?;
     eprintln!(
         "[startup] stage=core_ready elapsed_ms={}",
         startup_started_at.elapsed().as_millis(),
@@ -11882,8 +12191,11 @@ async fn run_core(
                             id: request.id,
                             result: None,
                             error: Some(ErrorBody {
+                                kind: "domain_rejection",
                                 code: "CORE_SHUTDOWN_INVALID".to_string(),
                                 message: format!("{error:#}"),
+                                retryable: false,
+                                details: json!({}),
                             }),
                         },
                     )?;

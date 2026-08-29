@@ -16,17 +16,18 @@ afterEach(async () => {
 })
 
 describe('navigation preferences', () => {
-  it('migrates legacy pins into the current application-level navigation snapshot', async () => {
+  it('normalizes legacy pins in memory without overwriting the source file', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'rovai-navigation-preferences-'))
     cleanup.push(directory)
     const filePath = join(directory, 'navigation.json')
-    await writeFile(filePath, JSON.stringify({
+    const persisted = {
       schemaVersion: 1,
       pins: [
         { kind: 'project', targetKey: 'directory:/work/b', pinnedAt: '2026-07-30T12:00:00Z' },
         { kind: 'camp', targetKey: CAMP_A, pinnedAt: '2026-07-30T10:00:00Z' }
       ]
-    }))
+    }
+    await writeFile(filePath, JSON.stringify(persisted))
 
     const snapshot = await readNavigationPreferences(filePath)
 
@@ -38,7 +39,10 @@ describe('navigation preferences', () => {
       ],
       removedProjects: []
     })
-    expect(JSON.parse(await readFile(filePath, 'utf8'))).toEqual(snapshot)
+    expect(JSON.parse(await readFile(filePath, 'utf8'))).toEqual(persisted)
+    const store = await NavigationPreferencesStore.load(filePath)
+    expect(store.get()).toEqual(snapshot)
+    expect(store.loadDegradation?.code).toBe('navigation_preferences_invalid')
   })
 
   it('removes one project locally and atomically clears its Project and Camp pins', async () => {
@@ -125,11 +129,11 @@ describe('navigation preferences', () => {
     await expect(readNavigationPreferences(filePath)).resolves.toEqual(snapshot)
   })
 
-  it('cleans malformed, duplicate and non-directory records', async () => {
+  it('cleans malformed records in memory and leaves recovery evidence untouched', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'rovai-navigation-preferences-'))
     cleanup.push(directory)
     const filePath = join(directory, 'navigation.json')
-    await writeFile(filePath, JSON.stringify({
+    const persisted = {
       schemaVersion: 2,
       pins: [
         { kind: 'camp', targetKey: CAMP_A, pinnedAt: '2026-07-30T10:00:00Z' },
@@ -141,7 +145,8 @@ describe('navigation preferences', () => {
         { targetKey: 'directory:/work/a', removedAt: '2026-08-11T08:01:00Z' },
         { targetKey: 'directory:/work/a', removedAt: '2026-08-11T08:02:00Z' }
       ]
-    }))
+    }
+    await writeFile(filePath, JSON.stringify(persisted))
 
     const snapshot = await readNavigationPreferences(filePath)
 
@@ -149,6 +154,8 @@ describe('navigation preferences', () => {
     expect(snapshot.removedProjects).toEqual([
       { targetKey: 'directory:/work/a', removedAt: '2026-08-11T08:01:00Z' }
     ])
-    expect(JSON.parse(await readFile(filePath, 'utf8'))).toEqual(snapshot)
+    expect(JSON.parse(await readFile(filePath, 'utf8'))).toEqual(persisted)
+    const store = await NavigationPreferencesStore.load(filePath)
+    expect(store.loadDegradation?.code).toBe('navigation_preferences_invalid')
   })
 })

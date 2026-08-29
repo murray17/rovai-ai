@@ -1,13 +1,16 @@
 use std::{
     collections::{BTreeMap, BTreeSet},
-    fs,
     path::{Path, PathBuf},
+    time::Duration,
 };
 
+#[cfg(any(test, feature = "slow-tests"))]
+use std::fs;
+
 use anyhow::{Context, Result};
-#[cfg(test)]
-use rusqlite::OpenFlags;
-use rusqlite::{Connection, OptionalExtension, Transaction, TransactionBehavior, params};
+use rusqlite::{
+    Connection, ErrorCode, OpenFlags, OptionalExtension, Transaction, TransactionBehavior, params,
+};
 use serde::Serialize;
 use serde_json::{Value, json};
 use uuid::Uuid;
@@ -21,6 +24,9 @@ use crate::agent_runtime_adapter::SkillDeliveryGroupKey;
 use crate::camp_id::CampId;
 use crate::command::canonical_json_digest;
 use crate::context_index::{camp_message_content_digest, extract_context_references};
+use crate::database_admission::{
+    AuthorityBlock, ExistingAuthorityTicket, NewAuthorityTicket, TicketValidationError,
+};
 use crate::execution_budget::{
     CAMP_TURN_EXECUTION_BUDGET_SCHEMA_VERSION, PRODUCT_MAX_ACCEPTED_A2A,
     PRODUCT_MAX_AGENT_RUN_RESPONSIBILITIES, PRODUCT_MAX_EXECUTION_ELAPSED_SECONDS,
@@ -50,8 +56,158 @@ pub struct Database {
     runtime_camp_files_root_identity_digest: String,
 }
 
-const CURRENT_DATA_CONTRACT_VERSION: &str = "v1.29";
-const CURRENT_PROJECTION_SCHEMA_VERSION: i64 = 70;
+#[derive(Debug)]
+pub struct DatabaseOpenError {
+    code: &'static str,
+    message: String,
+    authority_block: Option<Box<AuthorityBlock>>,
+}
+
+impl DatabaseOpenError {
+    pub fn code(&self) -> &'static str {
+        self.code
+    }
+
+    pub fn authority_block(&self) -> Option<&AuthorityBlock> {
+        self.authority_block.as_deref()
+    }
+
+    fn operation(
+        code: &'static str,
+        operation: &str,
+        path: &Path,
+        error: impl std::fmt::Display,
+    ) -> Self {
+        Self {
+            code,
+            message: format!("failed to {operation} {}: {error}", path.display()),
+            authority_block: None,
+        }
+    }
+
+    fn contract_changed(path: &Path) -> Self {
+        Self {
+            code: "authority_contract_changed",
+            message: format!(
+                "authority data contract changed before opening {}",
+                path.display()
+            ),
+            authority_block: Some(Box::new(AuthorityBlock::IdentityChanged {
+                target: path.to_path_buf(),
+                stage: crate::database_admission::BusyStage::Revalidation,
+            })),
+        }
+    }
+}
+
+impl From<TicketValidationError> for DatabaseOpenError {
+    fn from(error: TicketValidationError) -> Self {
+        match error {
+            TicketValidationError::Blocked(block) => Self {
+                code: "authority_ticket_blocked",
+                message: format!("authority ticket was blocked: {block:?}"),
+                authority_block: Some(block),
+            },
+            TicketValidationError::Infrastructure(error) => Self {
+                code: "authority_ticket_infrastructure_failed",
+                message: error.message,
+                authority_block: None,
+            },
+        }
+    }
+}
+
+impl std::fmt::Display for DatabaseOpenError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(&self.message)
+    }
+}
+
+impl std::error::Error for DatabaseOpenError {}
+
+#[derive(Debug)]
+pub struct DatabaseInitializeError(DatabaseOpenError);
+
+impl DatabaseInitializeError {
+    pub fn code(&self) -> &'static str {
+        self.0.code()
+    }
+
+    pub fn authority_block(&self) -> Option<&AuthorityBlock> {
+        self.0.authority_block()
+    }
+}
+
+impl From<DatabaseOpenError> for DatabaseInitializeError {
+    fn from(error: DatabaseOpenError) -> Self {
+        Self(error)
+    }
+}
+
+impl From<TicketValidationError> for DatabaseInitializeError {
+    fn from(error: TicketValidationError) -> Self {
+        Self(DatabaseOpenError::from(error))
+    }
+}
+
+impl std::fmt::Display for DatabaseInitializeError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.0.fmt(formatter)
+    }
+}
+
+impl std::error::Error for DatabaseInitializeError {}
+
+#[derive(Debug)]
+pub struct DatabaseMigrationError {
+    pub(crate) code: String,
+    pub(crate) message: String,
+    pub(crate) retryable: bool,
+    pub(crate) authority_block: Option<Box<AuthorityBlock>>,
+}
+
+impl DatabaseMigrationError {
+    pub fn code(&self) -> &str {
+        &self.code
+    }
+
+    pub fn retryable(&self) -> bool {
+        self.retryable
+    }
+
+    pub fn authority_block(&self) -> Option<&AuthorityBlock> {
+        self.authority_block.as_deref()
+    }
+
+    pub(crate) fn operation(code: &str, message: &str, retryable: bool) -> Self {
+        Self {
+            code: code.to_string(),
+            message: message.to_string(),
+            retryable,
+            authority_block: None,
+        }
+    }
+
+    pub(crate) fn blocked(block: AuthorityBlock, message: &str) -> Self {
+        Self {
+            code: "authority_migration_blocked".to_string(),
+            message: message.to_string(),
+            retryable: matches!(block, AuthorityBlock::Busy { .. }),
+            authority_block: Some(Box::new(block)),
+        }
+    }
+}
+
+impl std::fmt::Display for DatabaseMigrationError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(&self.message)
+    }
+}
+
+impl std::error::Error for DatabaseMigrationError {}
+
+pub(crate) const CURRENT_DATA_CONTRACT_VERSION: &str = "v1.29";
+pub(crate) const CURRENT_PROJECTION_SCHEMA_VERSION: i64 = 70;
 const V116_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.28";
 const V116_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION: i64 = 69;
 const V115_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.26";
@@ -140,6 +296,20 @@ const V052_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v0.52";
 const V052_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION: i64 = 28;
 const V043_CLASSIFIER_VERSION: &str = "activity-v1";
 const V116_CLASSIFIER_VERSION: &str = "activity-v2";
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct DatabaseContractMarker {
+    pub contract_version: String,
+    pub projection_schema_version: i64,
+    pub classifier_version: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum DatabaseContractClassification {
+    Current(DatabaseContractMarker),
+    SupportedMigrationSource(DatabaseContractMarker),
+    Unknown(Option<DatabaseContractMarker>),
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct CurrentMigrationState {
@@ -1311,6 +1481,7 @@ impl CurrentMigrationState {
     }
 }
 
+#[cfg(any(test, feature = "slow-tests"))]
 const V107_QUARANTINE_FILES: &[&str] = &[
     "rovai.sqlite",
     "rovai.sqlite-wal",
@@ -1320,6 +1491,7 @@ const V107_QUARANTINE_FILES: &[&str] = &[
     "lumen.sqlite-shm",
 ];
 
+#[cfg(any(test, feature = "slow-tests"))]
 const V107_QUARANTINE_DIRECTORIES: &[&str] = &[
     "managed-blobs",
     "camp-attachments",
@@ -1335,6 +1507,7 @@ const V107_QUARANTINE_DIRECTORIES: &[&str] = &[
     "runtime/qwen",
 ];
 
+#[cfg(any(test, feature = "slow-tests"))]
 fn has_admissible_data_contract(path: &Path) -> bool {
     if !path.exists() {
         return true;
@@ -1345,6 +1518,7 @@ fn has_admissible_data_contract(path: &Path) -> bool {
     connection_has_admissible_data_contract(&connection).unwrap_or(false)
 }
 
+#[cfg(any(test, feature = "slow-tests"))]
 fn connection_has_admissible_data_contract(connection: &Connection) -> rusqlite::Result<bool> {
     let marker = connection
         .query_row(
@@ -1374,6 +1548,69 @@ fn connection_has_admissible_data_contract(connection: &Connection) -> rusqlite:
         (Ok(Some((contract, schema, classifier))), Ok(true), Ok(migrations))
             if migrations.admits(&contract, schema, &classifier)
     ))
+}
+
+pub(crate) fn classify_database_contract(
+    connection: &Connection,
+) -> rusqlite::Result<DatabaseContractClassification> {
+    let required_tables_present: bool = connection.query_row(
+        r#"
+        SELECT EXISTS(
+            SELECT 1 FROM sqlite_master
+            WHERE type = 'table' AND name = 'rovai_data_contract'
+        ) AND EXISTS(
+            SELECT 1 FROM sqlite_master
+            WHERE type = 'table' AND name = 'schema_migration'
+        ) AND EXISTS(
+            SELECT 1 FROM sqlite_master
+            WHERE type = 'table' AND name = 'canonical_runtime_activity'
+        )
+        "#,
+        [],
+        |row| row.get(0),
+    )?;
+    if !required_tables_present {
+        return Ok(DatabaseContractClassification::Unknown(None));
+    }
+
+    let marker = connection
+        .query_row(
+            r#"
+            SELECT contract_version, projection_schema_version, classifier_version
+            FROM rovai_data_contract
+            WHERE singleton = 1
+            "#,
+            [],
+            |row| {
+                Ok(DatabaseContractMarker {
+                    contract_version: row.get(0)?,
+                    projection_schema_version: row.get(1)?,
+                    classifier_version: row.get(2)?,
+                })
+            },
+        )
+        .optional()?;
+    let Some(marker) = marker else {
+        return Ok(DatabaseContractClassification::Unknown(None));
+    };
+    let migrations = load_current_migration_state(connection)?;
+    if !migrations.admits(
+        &marker.contract_version,
+        marker.projection_schema_version,
+        &marker.classifier_version,
+    ) {
+        return Ok(DatabaseContractClassification::Unknown(Some(marker)));
+    }
+    if marker.contract_version == CURRENT_DATA_CONTRACT_VERSION
+        && marker.projection_schema_version == CURRENT_PROJECTION_SCHEMA_VERSION
+        && marker.classifier_version == V116_CLASSIFIER_VERSION
+    {
+        Ok(DatabaseContractClassification::Current(marker))
+    } else {
+        Ok(DatabaseContractClassification::SupportedMigrationSource(
+            marker,
+        ))
+    }
 }
 
 #[cfg(test)]
@@ -1507,6 +1744,7 @@ fn load_current_migration_state(
     )
 }
 
+#[cfg(any(test, feature = "slow-tests"))]
 fn quarantine_v107_owned_state(data_dir: &Path) -> Result<PathBuf> {
     let quarantine_root = data_dir.join("inactive-data-quarantine").join(format!(
         "v1.07-{}-{}",
@@ -2030,7 +2268,549 @@ fn register_runtime_camp_files_functions(
     Ok(())
 }
 
+fn open_existing_authority_connection(
+    path: &Path,
+) -> std::result::Result<Connection, DatabaseOpenError> {
+    let connection = Connection::open_with_flags(
+        path,
+        OpenFlags::SQLITE_OPEN_READ_WRITE
+            | OpenFlags::SQLITE_OPEN_NO_MUTEX
+            | OpenFlags::SQLITE_OPEN_NOFOLLOW,
+    )
+    .map_err(|error| {
+        database_sqlite_open_error(
+            "authority_open_failed",
+            "open admitted authority database",
+            path,
+            crate::database_admission::BusyStage::Open,
+            error,
+        )
+    })?;
+    connection
+        .busy_timeout(Duration::from_millis(250))
+        .map_err(|error| {
+            database_sqlite_open_error(
+                "authority_busy_timeout_failed",
+                "configure authority busy timeout for",
+                path,
+                crate::database_admission::BusyStage::Open,
+                error,
+            )
+        })?;
+    Ok(connection)
+}
+
+fn database_sqlite_open_error(
+    code: &'static str,
+    operation: &str,
+    path: &Path,
+    stage: crate::database_admission::BusyStage,
+    error: rusqlite::Error,
+) -> DatabaseOpenError {
+    let sqlite_code = match &error {
+        rusqlite::Error::SqliteFailure(sqlite, _) => Some(sqlite.code),
+        _ => None,
+    };
+    if matches!(
+        sqlite_code,
+        Some(ErrorCode::DatabaseBusy | ErrorCode::DatabaseLocked)
+    ) {
+        return DatabaseOpenError {
+            code: "authority_sqlite_busy",
+            message: format!(
+                "authority database is busy while attempting to {operation} {}",
+                path.display()
+            ),
+            authority_block: Some(Box::new(AuthorityBlock::Busy { stage })),
+        };
+    }
+    DatabaseOpenError::operation(code, operation, path, error)
+}
+
+fn finalize_staged_authority(
+    connection: &Connection,
+    path: &Path,
+) -> std::result::Result<(), DatabaseOpenError> {
+    connection
+        .execute_batch("PRAGMA wal_checkpoint(TRUNCATE);")
+        .map_err(|error| {
+            database_sqlite_open_error(
+                "authority_staging_checkpoint_failed",
+                "checkpoint staged authority database",
+                path,
+                crate::database_admission::BusyStage::Revalidation,
+                error,
+            )
+        })?;
+    let journal_mode: String = connection
+        .query_row("PRAGMA journal_mode = DELETE", [], |row| row.get(0))
+        .map_err(|error| {
+            database_sqlite_open_error(
+                "authority_staging_journal_mode_failed",
+                "finalize staged authority journal mode for",
+                path,
+                crate::database_admission::BusyStage::Revalidation,
+                error,
+            )
+        })?;
+    if !journal_mode.eq_ignore_ascii_case("delete") {
+        return Err(DatabaseOpenError {
+            code: "authority_staging_journal_mode_unexpected",
+            message: format!(
+                "staged authority database {} retained unexpected journal mode {journal_mode}",
+                path.display()
+            ),
+            authority_block: None,
+        });
+    }
+    Ok(())
+}
+
+fn validate_staged_authority(
+    connection: &Connection,
+    path: &Path,
+) -> std::result::Result<(), DatabaseOpenError> {
+    if !matches!(
+        classify_database_contract(connection).map_err(|error| {
+            database_sqlite_open_error(
+                "authority_migration_contract_validation_failed",
+                "validate migrated authority contract for",
+                path,
+                crate::database_admission::BusyStage::ContractQuery,
+                error,
+            )
+        })?,
+        DatabaseContractClassification::Current(_)
+    ) {
+        return Err(DatabaseOpenError::contract_changed(path));
+    }
+    let quick_check: String = connection
+        .query_row("PRAGMA quick_check", [], |row| row.get(0))
+        .map_err(|error| {
+            database_sqlite_open_error(
+                "authority_migration_quick_check_failed",
+                "run quick_check on migrated authority copy",
+                path,
+                crate::database_admission::BusyStage::ContractQuery,
+                error,
+            )
+        })?;
+    if quick_check != "ok" {
+        return Err(DatabaseOpenError {
+            code: "authority_migration_quick_check_rejected",
+            message: format!(
+                "migrated authority copy {} failed quick_check: {quick_check}",
+                path.display()
+            ),
+            authority_block: None,
+        });
+    }
+    let mut foreign_key_check =
+        connection
+            .prepare("PRAGMA foreign_key_check")
+            .map_err(|error| {
+                database_sqlite_open_error(
+                    "authority_migration_foreign_key_check_failed",
+                    "prepare foreign_key_check for migrated authority copy",
+                    path,
+                    crate::database_admission::BusyStage::ContractQuery,
+                    error,
+                )
+            })?;
+    let has_violation = foreign_key_check
+        .query([])
+        .and_then(|mut rows| Ok(rows.next()?.is_some()))
+        .map_err(|error| {
+            database_sqlite_open_error(
+                "authority_migration_foreign_key_check_failed",
+                "run foreign_key_check on migrated authority copy",
+                path,
+                crate::database_admission::BusyStage::ContractQuery,
+                error,
+            )
+        })?;
+    if has_violation {
+        return Err(DatabaseOpenError {
+            code: "authority_migration_foreign_key_check_rejected",
+            message: format!(
+                "migrated authority copy {} contains foreign-key violations",
+                path.display()
+            ),
+            authority_block: None,
+        });
+    }
+    Ok(())
+}
+
+fn remove_generated_sqlite_sidecars(path: &Path) {
+    let name = path.as_os_str().to_string_lossy();
+    for suffix in ["-wal", "-shm", "-journal"] {
+        let _ = std::fs::remove_file(format!("{name}{suffix}"));
+    }
+}
+
 impl Database {
+    pub fn open_admitted(
+        ticket: ExistingAuthorityTicket<'_>,
+    ) -> std::result::Result<Self, DatabaseOpenError> {
+        let open = ticket.into_open()?;
+        let data_dir = open.path.parent().ok_or_else(|| DatabaseOpenError {
+            code: "authority_target_parent_missing",
+            message: format!("authority target has no parent: {}", open.path.display()),
+            authority_block: None,
+        })?;
+        let runtime_camp_files_root = data_dir.join("runtime-files");
+        let root_identity = crate::camp_attachment_view::runtime_root_identity_digest_for_database(
+            &runtime_camp_files_root,
+        )
+        .map_err(|error| {
+            DatabaseOpenError::operation(
+                "runtime_root_identity_failed",
+                "resolve runtime Camp files root identity for",
+                &runtime_camp_files_root,
+                error,
+            )
+        })?;
+        Self::open_admitted_parts(open, &runtime_camp_files_root, &root_identity)
+    }
+
+    pub fn open_admitted_with_runtime_camp_files_root(
+        ticket: ExistingAuthorityTicket<'_>,
+        runtime_camp_files_root: &Path,
+        runtime_camp_files_root_identity_digest: &str,
+    ) -> std::result::Result<Self, DatabaseOpenError> {
+        let open = ticket.into_open()?;
+        Self::open_admitted_parts(
+            open,
+            runtime_camp_files_root,
+            runtime_camp_files_root_identity_digest,
+        )
+    }
+
+    fn open_admitted_parts(
+        open: crate::database_admission::ExistingAuthorityOpen<'_>,
+        runtime_camp_files_root: &Path,
+        runtime_camp_files_root_identity_digest: &str,
+    ) -> std::result::Result<Self, DatabaseOpenError> {
+        let path = open.path.clone();
+        let connection = open_existing_authority_connection(&path)?;
+        crate::monitoring::register_monitoring_sql_functions(&connection).map_err(|error| {
+            DatabaseOpenError::operation(
+                "authority_sql_function_registration_failed",
+                "register monitoring SQL functions for",
+                &path,
+                error,
+            )
+        })?;
+        register_runtime_camp_files_functions(
+            &connection,
+            runtime_camp_files_root,
+            runtime_camp_files_root_identity_digest,
+        )
+        .map_err(|error| {
+            DatabaseOpenError::operation(
+                "authority_runtime_root_registration_failed",
+                "register runtime Camp files functions for",
+                &path,
+                error,
+            )
+        })?;
+        match classify_database_contract(&connection).map_err(|error| {
+            database_sqlite_open_error(
+                "authority_contract_revalidation_failed",
+                "revalidate authority data contract for",
+                &path,
+                crate::database_admission::BusyStage::Revalidation,
+                error,
+            )
+        })? {
+            DatabaseContractClassification::Current(_) => {}
+            DatabaseContractClassification::SupportedMigrationSource(_)
+            | DatabaseContractClassification::Unknown(_) => {
+                return Err(DatabaseOpenError::contract_changed(&path));
+            }
+        }
+        open.revalidate()?;
+        let mut database = Self {
+            connection,
+            path,
+            runtime_camp_files_root: runtime_camp_files_root.to_path_buf(),
+            runtime_camp_files_root_identity_digest: runtime_camp_files_root_identity_digest
+                .to_string(),
+        };
+        database.seed_agents().map_err(|error| {
+            DatabaseOpenError::operation(
+                "authority_seed_reconciliation_failed",
+                "reconcile built-in agents in",
+                &database.path,
+                error,
+            )
+        })?;
+        Ok(database)
+    }
+
+    pub fn initialize_new(
+        ticket: NewAuthorityTicket<'_>,
+    ) -> std::result::Result<Self, DatabaseInitializeError> {
+        let open = ticket.into_initialization()?;
+        let data_dir = open.path.parent().ok_or_else(|| {
+            DatabaseInitializeError(DatabaseOpenError {
+                code: "authority_target_parent_missing",
+                message: format!("authority target has no parent: {}", open.path.display()),
+                authority_block: None,
+            })
+        })?;
+        let runtime_camp_files_root = data_dir.join("runtime-files");
+        let root_identity = crate::camp_attachment_view::runtime_root_identity_digest_for_database(
+            &runtime_camp_files_root,
+        )
+        .map_err(|error| {
+            DatabaseInitializeError(DatabaseOpenError::operation(
+                "runtime_root_identity_failed",
+                "resolve runtime Camp files root identity for",
+                &runtime_camp_files_root,
+                error,
+            ))
+        })?;
+        Self::initialize_new_parts(open, &runtime_camp_files_root, &root_identity)
+    }
+
+    pub fn initialize_new_with_runtime_camp_files_root(
+        ticket: NewAuthorityTicket<'_>,
+        runtime_camp_files_root: &Path,
+        runtime_camp_files_root_identity_digest: &str,
+    ) -> std::result::Result<Self, DatabaseInitializeError> {
+        let open = ticket.into_initialization()?;
+        Self::initialize_new_parts(
+            open,
+            runtime_camp_files_root,
+            runtime_camp_files_root_identity_digest,
+        )
+    }
+
+    fn initialize_new_parts(
+        open: crate::database_admission::NewAuthorityOpen<'_>,
+        runtime_camp_files_root: &Path,
+        runtime_camp_files_root_identity_digest: &str,
+    ) -> std::result::Result<Self, DatabaseInitializeError> {
+        let target = open.path.clone();
+        let parent = target.parent().ok_or_else(|| {
+            DatabaseInitializeError(DatabaseOpenError {
+                code: "authority_target_parent_missing",
+                message: format!("authority target has no parent: {}", target.display()),
+                authority_block: None,
+            })
+        })?;
+        let temporary = parent.join(format!(
+            ".rovai-authority-initialize-{}.sqlite",
+            Uuid::new_v4()
+        ));
+        let result = (|| -> std::result::Result<(), DatabaseInitializeError> {
+            drop(
+                crate::platform::private_storage::create_private_new_file(&temporary).map_err(
+                    |error| {
+                        DatabaseInitializeError(DatabaseOpenError::operation(
+                            "authority_initialize_staging_create_failed",
+                            "create authority initialization staging file",
+                            &temporary,
+                            error,
+                        ))
+                    },
+                )?,
+            );
+            let connection = Connection::open_with_flags(
+                &temporary,
+                OpenFlags::SQLITE_OPEN_READ_WRITE
+                    | OpenFlags::SQLITE_OPEN_NO_MUTEX
+                    | OpenFlags::SQLITE_OPEN_NOFOLLOW,
+            )
+            .map_err(|error| {
+                DatabaseInitializeError(database_sqlite_open_error(
+                    "authority_initialize_staging_open_failed",
+                    "open authority initialization staging file",
+                    &temporary,
+                    crate::database_admission::BusyStage::Open,
+                    error,
+                ))
+            })?;
+            crate::monitoring::register_monitoring_sql_functions(&connection).map_err(|error| {
+                DatabaseInitializeError(DatabaseOpenError::operation(
+                    "authority_sql_function_registration_failed",
+                    "register monitoring SQL functions for",
+                    &temporary,
+                    error,
+                ))
+            })?;
+            register_runtime_camp_files_functions(
+                &connection,
+                runtime_camp_files_root,
+                runtime_camp_files_root_identity_digest,
+            )
+            .map_err(|error| {
+                DatabaseInitializeError(DatabaseOpenError::operation(
+                    "authority_runtime_root_registration_failed",
+                    "register runtime Camp files functions for",
+                    &temporary,
+                    error,
+                ))
+            })?;
+            let mut staged = Self {
+                connection,
+                path: temporary.clone(),
+                runtime_camp_files_root: runtime_camp_files_root.to_path_buf(),
+                runtime_camp_files_root_identity_digest: runtime_camp_files_root_identity_digest
+                    .to_string(),
+            };
+            staged.migrate(true).map_err(|error| {
+                DatabaseInitializeError(DatabaseOpenError::operation(
+                    "authority_initialize_schema_failed",
+                    "initialize authority schema in",
+                    &temporary,
+                    error,
+                ))
+            })?;
+            staged.seed_agents().map_err(|error| {
+                DatabaseInitializeError(DatabaseOpenError::operation(
+                    "authority_initialize_seed_failed",
+                    "initialize built-in agents in",
+                    &temporary,
+                    error,
+                ))
+            })?;
+            finalize_staged_authority(&staged.connection, &temporary)
+                .map_err(DatabaseInitializeError)?;
+            drop(staged);
+            remove_generated_sqlite_sidecars(&temporary);
+            open.revalidate_absence()
+                .map_err(DatabaseInitializeError::from)?;
+            crate::platform::private_storage::publish_private_new_temporary_file(
+                &temporary, &target,
+            )
+            .map_err(|error| {
+                DatabaseInitializeError(DatabaseOpenError::operation(
+                    "authority_initialize_publish_failed",
+                    "publish initialized authority database to",
+                    &target,
+                    error,
+                ))
+            })?;
+            Ok(())
+        })();
+        if let Err(error) = result {
+            let _ = std::fs::remove_file(&temporary);
+            remove_generated_sqlite_sidecars(&temporary);
+            return Err(error);
+        }
+
+        let connection =
+            open_existing_authority_connection(&target).map_err(DatabaseInitializeError)?;
+        crate::monitoring::register_monitoring_sql_functions(&connection).map_err(|error| {
+            DatabaseInitializeError(DatabaseOpenError::operation(
+                "authority_sql_function_registration_failed",
+                "register monitoring SQL functions for",
+                &target,
+                error,
+            ))
+        })?;
+        register_runtime_camp_files_functions(
+            &connection,
+            runtime_camp_files_root,
+            runtime_camp_files_root_identity_digest,
+        )
+        .map_err(|error| {
+            DatabaseInitializeError(DatabaseOpenError::operation(
+                "authority_runtime_root_registration_failed",
+                "register runtime Camp files functions for",
+                &target,
+                error,
+            ))
+        })?;
+        Ok(Self {
+            connection,
+            path: target,
+            runtime_camp_files_root: runtime_camp_files_root.to_path_buf(),
+            runtime_camp_files_root_identity_digest: runtime_camp_files_root_identity_digest
+                .to_string(),
+        })
+    }
+
+    pub(crate) fn migrate_staged_authority_copy(
+        path: &Path,
+        runtime_camp_files_root: &Path,
+        runtime_camp_files_root_identity_digest: &str,
+    ) -> std::result::Result<(), DatabaseOpenError> {
+        let connection = open_existing_authority_connection(path)?;
+        crate::monitoring::register_monitoring_sql_functions(&connection).map_err(|error| {
+            DatabaseOpenError::operation(
+                "authority_migration_sql_function_registration_failed",
+                "register monitoring SQL functions for migration copy",
+                path,
+                error,
+            )
+        })?;
+        register_runtime_camp_files_functions(
+            &connection,
+            runtime_camp_files_root,
+            runtime_camp_files_root_identity_digest,
+        )
+        .map_err(|error| {
+            DatabaseOpenError::operation(
+                "authority_migration_runtime_root_registration_failed",
+                "register runtime Camp files functions for migration copy",
+                path,
+                error,
+            )
+        })?;
+        let initialized_database: i64 = connection
+            .query_row(
+                r#"
+                SELECT COUNT(*)
+                FROM sqlite_master
+                WHERE type = 'table' AND name = 'schema_migration'
+                "#,
+                [],
+                |row| row.get(0),
+            )
+            .map_err(|error| {
+                database_sqlite_open_error(
+                    "authority_migration_source_probe_failed",
+                    "inspect migration copy schema in",
+                    path,
+                    crate::database_admission::BusyStage::ContractQuery,
+                    error,
+                )
+            })?;
+        let mut staged = Self {
+            connection,
+            path: path.to_path_buf(),
+            runtime_camp_files_root: runtime_camp_files_root.to_path_buf(),
+            runtime_camp_files_root_identity_digest: runtime_camp_files_root_identity_digest
+                .to_string(),
+        };
+        staged.migrate(initialized_database == 0).map_err(|error| {
+            DatabaseOpenError::operation(
+                "authority_migration_schema_failed",
+                "migrate staged authority copy",
+                path,
+                error,
+            )
+        })?;
+        staged.seed_agents().map_err(|error| {
+            DatabaseOpenError::operation(
+                "authority_migration_seed_failed",
+                "reconcile built-in agents in staged authority copy",
+                path,
+                error,
+            )
+        })?;
+        validate_staged_authority(&staged.connection, path)?;
+        finalize_staged_authority(&staged.connection, path)?;
+        drop(staged);
+        remove_generated_sqlite_sidecars(path);
+        Ok(())
+    }
+
+    #[cfg(any(test, feature = "slow-tests"))]
     pub fn open(data_dir: &Path) -> Result<Self> {
         let runtime_camp_files_root = data_dir.join("runtime-files");
         let root_identity = crate::camp_attachment_view::runtime_root_identity_digest_for_database(
@@ -2061,6 +2841,7 @@ impl Database {
         )
     }
 
+    #[cfg(any(test, feature = "slow-tests"))]
     pub fn open_with_runtime_camp_files_root(
         data_dir: &Path,
         runtime_camp_files_root: &Path,
@@ -2074,6 +2855,7 @@ impl Database {
         )
     }
 
+    #[cfg(any(test, feature = "slow-tests"))]
     fn open_with_runtime_camp_files_root_and_enforcement(
         data_dir: &Path,
         runtime_camp_files_root: &Path,
@@ -20713,7 +21495,7 @@ impl Database {
 }
 
 #[cfg(test)]
-fn downgrade_current_schema_to_v115_source_for_test(connection: &Connection) {
+pub(crate) fn downgrade_current_schema_to_v115_source_for_test(connection: &Connection) {
     let has_v116: bool = connection
         .query_row(
             "SELECT EXISTS(SELECT 1 FROM schema_migration WHERE version = 116)",
