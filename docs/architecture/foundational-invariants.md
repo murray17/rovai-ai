@@ -1,7 +1,7 @@
 ---
 document_type: architecture
 authority: current-foundational-invariants
-last_updated: 2026-08-29
+last_updated: 2026-08-30
 ---
 
 # 当前基础架构不变量
@@ -507,8 +507,9 @@ last_updated: 2026-08-29
   不是恢复旧 Drawer 状态。显式“移到右侧”和其他既有精确执行导航仍会显示并激活“执行”。移动必须复用
   同一已挂载 DOM，保留 selection、disclosure、局部加载和嵌套阅读位置，不复制 console、不改变 Run 状态。
 - Tool 全文不属于 Camp open 默认 DOM；截断 Evidence/Managed Blob 只在用户展开精确 Canonical Tool 行后读取，并只提取公开结果字段。读取成功后允许完整结果在当前 Drawer 会话内挂载于有最大高度的内部滚动 region，但不得暴露 Envelope 或建立 standalone raw Evidence surface。
-- 任一 Shell Activity 只要同一公开 payload 提供 command，就使用统一完整脱敏标题并在 disclosure 中分开
-  显示命令与公开输出；没有 command 时保留 Runtime toolName/title/domain fallback，不从其他字段补写。
+- 任一 Shell Activity 只要同一公开 payload 提供 command，就使用统一完整脱敏标题；disclosure 第一行以
+  `$ ` 紧接完整命令，存在公开输出时从下一行连续显示，不插入“命令 / 输出”标签或空白分隔行。没有 command
+  时保留 Runtime toolName/title/domain fallback，不从其他字段补写。
 - 运行中的 Runtime diagnostic 只能从 Adapter 严格白名单的结构化公开字段进入 Execution Evidence；它不改变
   AgentRun 终态、不证明 Tool Activity，也不从 raw stderr、provider body 或私有日志补写事实。Renderer 在
   精确 non-terminal Run 内明显显示最新可恢复状态；Run 终态后移除 live notice，并继续以权威 terminal failure

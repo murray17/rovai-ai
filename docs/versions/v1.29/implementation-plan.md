@@ -3,7 +3,7 @@ document_type: implementation-plan
 version: v1.29
 authority: implementation-and-acceptance-status
 status: in_progress
-last_updated: 2026-08-29
+last_updated: 2026-08-30
 ---
 
 # v1.29 Camp 动态队员管理与 Runtime 文件变化实施计划
@@ -101,6 +101,7 @@ last_updated: 2026-08-29
   operation-only 显示诚实空态；有可靠 Diff 的 mixed file 显示可证明 totals，含纯 operation-only 文件的 card
   不显示局部 totals；
 - [x] 不改变会话连接轨、底部/右侧执行台、Tool list 宽度与其他既有视觉结构；
+- [x] Shell command disclosure 统一为 `$ <command>` 首行和紧接的公开输出，移除“命令 / 输出”标签与空白分隔行；
 - [x] Renderer fixtures 覆盖每 Run card、三行默认、mixed totals 隐藏、四种 Review mode 与 typed Camp Open。
 - [x] `activity-v2` 新写入收敛为 Shell/File/Tool/Runtime/Unknown 五域，file/web/generic search 分别映射；
   已有 v1 operation 继续在 v1 收尾，Read Side 双读 v2/v1，Migration 116 不做历史回填；
@@ -122,6 +123,8 @@ last_updated: 2026-08-29
   whole-turn snapshot ingress、projector `no_changes` 和同名前缀目录；Windows target fixture 覆盖 drive/root ASCII
   大小写与分隔符语义；
 - [x] TypeScript typecheck 通过；
+- [x] Shell command projection 定向回归覆盖有输出、无输出、ANSI 清理、脱敏、Codex、Claude Bash、ACP execute
+  与完整 Evidence 恢复路径；
 - [x] `activity-v2` mapping、v1 live-operation compatibility、Migration 116 history preservation、类型化 Search
   Operation allowlist、Antigravity `search_web` 与 Renderer title/icon/query 双门槛定向 fixture 通过；
 - [x] Navigation coordinator 8/8 与 App event routing 2/2 回归通过；隔离 App 已验证 post-commit invalidation、

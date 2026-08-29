@@ -87,7 +87,8 @@
   --shadow-dialog: var(--shadow-float);
   --shadow-card: none;
   --approval-line: #d8bd87;
-  --inline-code-canvas: #eef2f5;
+  --inline-code-canvas: #e9eceb;
+  --shell-result-canvas: #f3f4f3;
   --code-block-canvas: #eef2f5;
   --evidence-canvas: #f4f6f3;
   --evidence-surface: #ffffff;
@@ -199,7 +200,8 @@
   --overlay: rgba(0, 0, 0, 0.58);
   --shadow-float: 0 22px 64px rgba(0, 0, 0, 0.42);
   --approval-line: #8f7447;
-  --inline-code-canvas: #1d252b;
+  --inline-code-canvas: #353b3f;
+  --shell-result-canvas: #373f43;
   --code-block-canvas: #1d252b;
   --evidence-canvas: #12191d;
   --evidence-surface: #171f24;
@@ -2492,6 +2494,8 @@ button.task-event-card:focus-visible .task-card-chevron { color: var(--brand-ink
 .modified-file-diff.is-exact-mutation .modified-file-diff-line code { border-left: 1px solid color-mix(in srgb, var(--evidence-line) 55%, transparent); }
 .tool-call-detail { position: relative; min-width: 0; margin: 5px 0 8px 24px; padding-right: 52px; }
 .tool-call-result-scroll { box-sizing: border-box; width: 100%; max-width: 100%; max-height: min(220px, 30vh); margin: 0; overflow: auto; overscroll-behavior: contain; scrollbar-gutter: stable; padding: 8px 9px; border: 1px solid var(--evidence-line); border-radius: 5px; color: var(--evidence-muted); background: var(--evidence-canvas); font: 10px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre-wrap; overflow-wrap: anywhere; scrollbar-color: var(--control-line) transparent; scrollbar-width: thin; }
+.tool-call-disclosure[data-activity-domain="shell"] .tool-call-detail { margin-left: 2px; }
+.tool-call-disclosure[data-activity-domain="shell"] .tool-call-result-scroll { background: var(--shell-result-canvas); }
 .tool-call-result-scroll:focus-visible { border-color: var(--focus); outline: 2px solid var(--focus); outline-offset: 2px; }
 .tool-result-state { display: flex; min-height: 52px; align-items: center; gap: 8px; padding: 9px 10px; border: 1px solid var(--evidence-line); border-radius: 5px; color: var(--evidence-muted); background: var(--evidence-canvas); font-size: 10px; line-height: 1.5; }
 .tool-result-state.is-error { align-items: flex-start; justify-content: space-between; color: var(--danger); background: color-mix(in srgb, var(--evidence-canvas) 88%, var(--danger-soft)); }

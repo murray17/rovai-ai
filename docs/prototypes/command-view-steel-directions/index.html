@@ -1,0 +1,858 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="night">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="color-scheme" content="light dark" />
+  <title>Rovai AI · 执行台内 Command View Steel 方向稿</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --canvas: #eceeef;
+      --surface: #fbfbfa;
+      --surface-raised: #ffffff;
+      --surface-subtle: #f0f2f4;
+      --surface-muted: #e7eaed;
+      --surface-hover: #e8eaea;
+      --conversation: #ffffff;
+      --ink: #171b20;
+      --muted: #616a73;
+      --faint: #6e7382;
+      --line: #dfe4e8;
+      --line-strong: #c7cfd6;
+      --control-line: #8b9389;
+      --steel: #526f88;
+      --steel-strong: #405f7e;
+      --steel-soft: #e9eef3;
+      --steel-contrast: #ffffff;
+      --focus: #526f88;
+      --success: #3e775c;
+      --success-soft: #e7f1ea;
+      --attention: #8a6226;
+      --attention-soft: #f8edda;
+      --danger: #a24c46;
+      --danger-soft: #f7e6e3;
+      --info: #416c86;
+      --info-soft: #e5eef3;
+      --evidence-canvas: #f4f6f3;
+      --evidence-surface: #ffffff;
+      --evidence-ink: #252a36;
+      --evidence-muted: #5f6678;
+      --evidence-line: #d5dad3;
+      --rail: #f3f4f4;
+      --rail-ink: #626b72;
+      --rail-line: #dadde0;
+      --shadow-float: 0 18px 56px rgba(38, 45, 58, 0.14);
+      --sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", "Segoe UI", sans-serif;
+      --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    }
+
+    :root[data-theme="night"] {
+      color-scheme: dark;
+      --canvas: #0d1114;
+      --surface: #151a1e;
+      --surface-raised: #1b2227;
+      --surface-subtle: #1a2024;
+      --surface-muted: #242d33;
+      --surface-hover: #1d252b;
+      --conversation: #181d21;
+      --ink: #e7ecef;
+      --muted: #abb5bc;
+      --faint: #919da6;
+      --line: #333e46;
+      --line-strong: #53616b;
+      --control-line: #687b88;
+      --steel: #7897ae;
+      --steel-strong: #c0d4e1;
+      --steel-soft: #22303a;
+      --steel-contrast: #091116;
+      --focus: #8fb3cb;
+      --success: #82b695;
+      --success-soft: #1a2b22;
+      --attention: #d2ac70;
+      --attention-soft: #302719;
+      --danger: #d6857f;
+      --danger-soft: #321e1d;
+      --info: #83afc9;
+      --info-soft: #182832;
+      --evidence-canvas: #12191d;
+      --evidence-surface: #171f24;
+      --evidence-ink: #dce4e9;
+      --evidence-muted: #9eabb3;
+      --evidence-line: #35424a;
+      --rail: #11161a;
+      --rail-ink: #a6b1b8;
+      --rail-line: #313b43;
+      --shadow-float: 0 22px 64px rgba(0, 0, 0, 0.42);
+    }
+
+    * { box-sizing: border-box; }
+    html, body { width: 100%; min-width: 760px; min-height: 100%; margin: 0; }
+    body {
+      overflow: hidden;
+      color: var(--ink);
+      background: var(--canvas);
+      font-family: var(--sans);
+      font-size: 13px;
+      line-height: 1.55;
+      text-rendering: optimizeLegibility;
+    }
+    button { color: inherit; font: inherit; }
+    button, summary { -webkit-tap-highlight-color: transparent; }
+    button:focus-visible, summary:focus-visible, [tabindex]:focus-visible {
+      outline: 2px solid var(--focus);
+      outline-offset: 2px;
+    }
+    ::selection { color: var(--ink); background: var(--steel-soft); }
+    * { scrollbar-color: var(--control-line) transparent; scrollbar-width: thin; }
+    .sr-only {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      padding: 0;
+      margin: -1px;
+      overflow: hidden;
+      clip: rect(0, 0, 0, 0);
+      white-space: nowrap;
+      border: 0;
+    }
+
+    .review-bar {
+      position: relative;
+      z-index: 20;
+      display: grid;
+      min-height: 72px;
+      grid-template-columns: minmax(230px, 1fr) auto minmax(260px, .9fr);
+      align-items: center;
+      gap: 18px;
+      padding: 9px 18px;
+      border-bottom: 1px solid var(--line-strong);
+      background: var(--surface-raised);
+    }
+    .review-title { display: grid; min-width: 0; gap: 2px; }
+    .review-title strong { font-size: 13px; letter-spacing: -.015em; }
+    .review-title span { color: var(--muted); font-size: 10px; }
+    .review-controls { display: flex; align-items: center; justify-content: center; gap: 10px; }
+    .control-set { display: grid; gap: 3px; }
+    .control-label { padding-left: 3px; color: var(--faint); font-size: 8.5px; font-weight: 720; letter-spacing: .05em; }
+    .segments {
+      display: inline-flex;
+      min-height: 32px;
+      align-items: center;
+      gap: 2px;
+      padding: 2px;
+      border: 1px solid var(--line-strong);
+      border-radius: 8px;
+      background: var(--surface-subtle);
+    }
+    .segment {
+      min-height: 26px;
+      padding: 0 9px;
+      border: 0;
+      border-radius: 5px;
+      color: var(--muted);
+      background: transparent;
+      cursor: pointer;
+      font-size: 10px;
+      font-weight: 700;
+      white-space: nowrap;
+    }
+    .segment:hover { color: var(--ink); background: var(--surface-hover); }
+    .segment[aria-pressed="true"] {
+      color: var(--steel-strong);
+      background: var(--surface-raised);
+      box-shadow: 0 1px 2px rgba(22, 30, 38, .08);
+    }
+    .review-decision { display: grid; min-width: 0; gap: 2px; justify-self: end; text-align: right; }
+    .review-decision strong { color: var(--steel-strong); font-size: 10.5px; }
+    .review-decision span { color: var(--muted); font-size: 9.5px; line-height: 1.4; }
+
+    .preview-stage {
+      height: calc(100vh - 72px);
+      min-height: 620px;
+      padding: 16px;
+      overflow: auto;
+      background: var(--canvas);
+    }
+    .mock-app {
+      display: grid;
+      width: min(1420px, 100%);
+      height: 100%;
+      min-height: 588px;
+      margin: 0 auto;
+      grid-template-columns: 238px minmax(0, 1fr);
+      overflow: hidden;
+      border: 1px solid var(--line-strong);
+      border-radius: 11px;
+      background: var(--conversation);
+      box-shadow: var(--shadow-float);
+    }
+
+    /* The outer execution drawer is fixed. Direction tokens only affect its inner Command View. */
+    .mock-app {
+      --command-canvas: var(--surface);
+      --command-header: color-mix(in srgb, var(--surface) 96%, var(--steel-soft));
+      --run-surface: var(--surface-raised);
+      --run-line: var(--line);
+      --row-surface: transparent;
+      --command-spine: var(--line-strong);
+      --command-view-accent: var(--steel);
+      --inline-local: #e9eceb;
+      --inline-local-ink: #3f484f;
+    }
+    :root[data-theme="night"] .mock-app {
+      --inline-local: #353b3f;
+      --inline-local-ink: #e7ebed;
+    }
+    .mock-app[data-direction="air"] {
+      --command-view-canvas: #f4f7f8;
+      --command-view-line: #d5e0e6;
+      --command-view-ink: #29323a;
+    }
+    .mock-app[data-direction="mist"] {
+      --command-view-canvas: #f3f4f3;
+      --command-view-line: #d6d9d8;
+      --command-view-ink: #596167;
+    }
+    .mock-app[data-direction="frost"] {
+      --command-view-canvas: #e4eef3;
+      --command-view-line: #b9ced9;
+      --command-view-ink: #202e37;
+    }
+    :root[data-theme="night"] .mock-app[data-direction="air"] {
+      --command-view-canvas: #293840;
+      --command-view-line: #465b65;
+      --command-view-ink: #edf2f4;
+    }
+    :root[data-theme="night"] .mock-app[data-direction="mist"] {
+      --command-view-canvas: #373f43;
+      --command-view-line: #5c666b;
+      --command-view-ink: #edf1f3;
+    }
+    :root[data-theme="night"] .mock-app[data-direction="frost"] {
+      --command-view-canvas: #3e535e;
+      --command-view-line: #697f8a;
+      --command-view-ink: #f6f8f9;
+    }
+
+    .rail {
+      display: flex;
+      min-width: 0;
+      min-height: 0;
+      flex-direction: column;
+      padding: 17px 10px 11px;
+      border-right: 1px solid var(--rail-line);
+      color: var(--rail-ink);
+      background: var(--rail);
+    }
+    .brand-row { display: flex; align-items: center; gap: 9px; padding: 0 8px 14px; color: var(--ink); }
+    .brand-mark { width: 25px; height: 25px; flex: 0 0 25px; color: var(--steel); }
+    .brand-mark svg { display: block; width: 100%; height: 100%; fill: none; stroke: currentColor; stroke-width: 1.7; }
+    .brand-row strong { font-size: 13px; letter-spacing: -.02em; }
+    .rail-label { margin: 16px 8px 5px; color: var(--faint); font-size: 8.5px; font-weight: 750; letter-spacing: .08em; text-transform: uppercase; }
+    .rail-row {
+      display: grid;
+      min-height: 34px;
+      grid-template-columns: 18px minmax(0, 1fr) auto;
+      align-items: center;
+      gap: 8px;
+      padding: 0 8px;
+      border: 0;
+      border-radius: 6px;
+      color: var(--rail-ink);
+      background: transparent;
+      text-align: left;
+      font-size: 11px;
+    }
+    .rail-row.is-selected { color: var(--steel-strong); background: var(--steel-soft); font-weight: 700; }
+    .rail-row svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.5; }
+    .rail-row small { color: var(--faint); font-size: 8.5px; }
+    .rail-spacer { flex: 1 1 auto; }
+    .rail-user { display: flex; align-items: center; gap: 8px; padding: 10px 8px 0; border-top: 1px solid var(--rail-line); }
+    .avatar {
+      display: inline-grid;
+      width: 25px;
+      height: 25px;
+      flex: 0 0 25px;
+      place-items: center;
+      border-radius: 50%;
+      color: #fff;
+      background: #39777a;
+      font-size: 10px;
+      font-weight: 760;
+    }
+    .avatar.agent { background: #74628f; }
+    .rail-user strong { display: block; color: var(--ink); font-size: 10.5px; }
+    .rail-user small { display: block; color: var(--faint); font-size: 8.5px; }
+
+    .workspace {
+      display: grid;
+      min-width: 0;
+      min-height: 0;
+      grid-template-rows: 48px minmax(130px, 1fr) minmax(264px, 324px) 78px;
+      background: var(--conversation);
+    }
+    .topbar {
+      display: flex;
+      min-width: 0;
+      align-items: center;
+      justify-content: space-between;
+      gap: 14px;
+      padding: 0 16px;
+      border-bottom: 1px solid var(--line);
+      background: var(--surface);
+    }
+    .topbar-copy { display: grid; min-width: 0; gap: 1px; }
+    .topbar-copy strong { overflow: hidden; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+    .topbar-copy span { color: var(--faint); font-size: 8.5px; }
+    .topbar-actions { display: flex; align-items: center; gap: 5px; }
+    .quiet-button {
+      min-height: 28px;
+      padding: 0 9px;
+      border: 1px solid transparent;
+      border-radius: 6px;
+      color: var(--muted);
+      background: transparent;
+      cursor: pointer;
+      font-size: 9.5px;
+      font-weight: 680;
+    }
+    .quiet-button:hover { color: var(--ink); background: var(--surface-hover); }
+    .quiet-button.danger { color: var(--danger); }
+
+    .conversation {
+      min-height: 0;
+      overflow: auto;
+      padding: 20px clamp(22px, 5vw, 76px);
+      background: var(--conversation);
+    }
+    .message {
+      position: relative;
+      display: grid;
+      max-width: 76ch;
+      grid-template-columns: 27px minmax(0, 1fr);
+      gap: 10px;
+      margin: 0 auto 18px;
+    }
+    .message-copy { min-width: 0; }
+    .message-copy header { display: flex; align-items: baseline; gap: 7px; margin-bottom: 4px; }
+    .message-copy header strong { font-size: 10.5px; }
+    .message-copy header time { color: var(--faint); font-size: 8.5px; }
+    .message-copy p { margin: 0; color: var(--ink); font-size: 12px; line-height: 1.65; }
+    code.inline-code {
+      padding: 1px 3px;
+      border-radius: 3px;
+      color: var(--inline-local-ink);
+      background: var(--inline-local);
+      font: .9em/1.5 var(--mono);
+      box-decoration-break: clone;
+      -webkit-box-decoration-break: clone;
+    }
+    .message-note {
+      margin-top: 8px;
+      padding-left: 9px;
+      border-left: 2px solid var(--command-spine);
+      color: var(--muted);
+      font-size: 10px;
+      line-height: 1.5;
+    }
+
+    .execution-drawer {
+      position: relative;
+      display: grid;
+      min-width: 0;
+      min-height: 0;
+      grid-template-rows: auto minmax(0, 1fr);
+      overflow: hidden;
+      border-top: 1px solid var(--run-line);
+      color: var(--ink);
+      background: var(--command-canvas);
+    }
+    .execution-drawer::before {
+      position: absolute;
+      z-index: 4;
+      top: 0;
+      left: 50%;
+      width: 40px;
+      height: 2px;
+      border-radius: 0 0 999px 999px;
+      background: var(--command-spine);
+      content: "";
+      transform: translateX(-50%);
+    }
+    .command-header {
+      display: flex;
+      min-width: 0;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 11px 18px 9px;
+      border-bottom: 1px solid var(--run-line);
+      background: var(--command-header);
+    }
+    .command-agent { display: flex; min-width: 0; align-items: center; gap: 8px; }
+    .command-agent-copy { display: grid; min-width: 0; gap: 1px; }
+    .command-title-line { display: flex; min-width: 0; align-items: baseline; gap: 8px; }
+    .command-title-line h2 { overflow: hidden; margin: 0; font-size: 11.5px; text-overflow: ellipsis; white-space: nowrap; }
+    .direction-tag {
+      flex: 0 0 auto;
+      color: var(--steel-strong);
+      font-size: 8.5px;
+      font-weight: 760;
+      letter-spacing: .02em;
+    }
+    .command-agent-copy > span { color: var(--faint); font-size: 8.5px; }
+    .command-actions { display: flex; flex: 0 0 auto; align-items: center; gap: 4px; }
+    .command-body { min-height: 0; overflow: auto; padding: 11px 18px 18px; overscroll-behavior: contain; }
+    .timeline { position: relative; margin: 0; padding: 0; list-style: none; }
+    .timeline::before {
+      position: absolute;
+      top: 11px;
+      bottom: 14px;
+      left: 6px;
+      width: 1px;
+      background: color-mix(in srgb, var(--command-spine) 58%, var(--run-line));
+      content: "";
+    }
+    .run-stage { position: relative; display: grid; grid-template-columns: 14px minmax(0, 1fr); gap: 9px; }
+    .run-node {
+      position: relative;
+      z-index: 1;
+      width: 13px;
+      height: 13px;
+      margin-top: 4px;
+      border: 2px solid var(--info);
+      border-radius: 50%;
+      background: var(--info-soft);
+    }
+    .run-node::after {
+      position: absolute;
+      inset: 3px;
+      border-radius: 50%;
+      background: var(--info);
+      content: "";
+    }
+    .run-card {
+      min-width: 0;
+      padding: 9px 10px 10px;
+      border: 1px solid var(--run-line);
+      border-radius: 8px;
+      background: var(--run-surface);
+    }
+    .run-boundary { display: flex; min-width: 0; align-items: flex-start; justify-content: space-between; gap: 12px; }
+    .run-boundary-main { display: grid; min-width: 0; gap: 3px; }
+    .run-time { display: flex; align-items: center; gap: 7px; }
+    .run-time time { font-size: 10.5px; font-weight: 730; }
+    .run-state { color: var(--info); font-size: 8.5px; font-weight: 750; }
+    .current-run {
+      min-height: 17px;
+      padding: 0 6px;
+      border-radius: 999px;
+      color: var(--steel-strong);
+      background: color-mix(in srgb, var(--command-spine) 13%, transparent);
+      font-size: 7.5px;
+      font-weight: 780;
+      line-height: 17px;
+    }
+    .run-meta { display: flex; min-width: 0; flex-wrap: wrap; gap: 4px 7px; color: var(--faint); font-size: 8.5px; }
+    .run-meta code { font-size: 8.5px; }
+    .narration {
+      margin: 8px 0 5px;
+      color: var(--muted);
+      font-size: 10px;
+      line-height: 1.5;
+    }
+    details { min-width: 0; }
+    summary { list-style: none; cursor: pointer; }
+    summary::-webkit-details-marker { display: none; }
+    .tool-group { margin-top: 5px; }
+    .tool-group-summary {
+      display: grid;
+      min-height: 28px;
+      grid-template-columns: 16px minmax(0, 1fr) 16px 20px;
+      align-items: center;
+      gap: 7px;
+      padding: 0 2px;
+      border-radius: 5px;
+      color: var(--muted);
+    }
+    .tool-group-summary:hover { color: var(--ink); background: color-mix(in srgb, var(--command-spine) 8%, transparent); }
+    .tool-group-summary strong { color: var(--ink); font-size: 9.5px; }
+    .tool-group-icon, .tool-icon { color: var(--evidence-muted); }
+    .tool-group-icon svg, .tool-icon svg, .chevron svg {
+      display: block;
+      width: 15px;
+      height: 15px;
+      fill: none;
+      stroke: currentColor;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+      stroke-width: 1.45;
+    }
+    .status-dot { width: 7px; height: 7px; justify-self: center; border-radius: 50%; background: var(--success); }
+    .status-dot.running { background: var(--info); box-shadow: 0 0 0 3px color-mix(in srgb, var(--info) 12%, transparent); }
+    .chevron { color: var(--faint); transition: transform 120ms ease; }
+    details[open] > summary .chevron { transform: rotate(180deg); }
+    .tool-items {
+      display: grid;
+      gap: 2px;
+      margin-left: 22px;
+      padding: 2px 0 0 8px;
+      border-left: 1px solid color-mix(in srgb, var(--run-line) 78%, transparent);
+    }
+    .tool-row { border-radius: 5px; background: var(--row-surface); }
+    .tool-summary {
+      display: grid;
+      min-height: 28px;
+      grid-template-columns: 16px minmax(0, 1fr) 16px 20px;
+      align-items: center;
+      gap: 7px;
+      padding: 0 5px;
+      border-radius: 5px;
+      color: var(--muted);
+    }
+    .tool-summary:hover { color: var(--ink); background: color-mix(in srgb, var(--command-spine) 8%, transparent); }
+    .tool-title { min-width: 0; overflow: hidden; color: var(--evidence-ink); font: 9px/1.35 var(--mono); text-overflow: ellipsis; white-space: nowrap; }
+    .tool-detail { display: grid; gap: 5px; margin: 2px 5px 7px; padding-right: 39px; }
+    .evidence-label { color: var(--evidence-muted); font-size: 7.5px; font-weight: 760; letter-spacing: .06em; text-transform: uppercase; }
+    .command-view-heading {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin-top: 1px;
+      color: var(--evidence-muted);
+      font-size: 7.5px;
+      font-weight: 760;
+      letter-spacing: .06em;
+      text-transform: uppercase;
+    }
+    .command-view-heading strong { color: var(--steel-strong); font-size: 7.5px; letter-spacing: .02em; text-transform: none; }
+    .command-result-view {
+      max-height: 124px;
+      overflow: auto;
+      margin: 0;
+      padding: 8px 9px;
+      border: 1px solid var(--command-view-line);
+      border-radius: 6px;
+      color: var(--command-view-ink);
+      background: var(--command-view-canvas);
+      font: 8.5px/1.5 var(--mono);
+      scrollbar-gutter: stable;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+    }
+    .command-result-view:focus-visible { border-color: var(--focus); outline: 2px solid var(--focus); outline-offset: 2px; }
+
+    .composer {
+      display: grid;
+      align-content: center;
+      padding: 9px clamp(22px, 5vw, 76px) 10px;
+      border-top: 1px solid var(--line);
+      background: var(--conversation);
+    }
+    .composer-box {
+      display: grid;
+      width: min(840px, 100%);
+      min-height: 54px;
+      margin: 0 auto;
+      grid-template-columns: minmax(0, 1fr) auto;
+      align-items: center;
+      gap: 12px;
+      padding: 8px 9px 8px 12px;
+      border: 1px solid var(--control-line);
+      border-radius: 10px;
+      color: var(--faint);
+      background: var(--surface-raised);
+      font-size: 10.5px;
+    }
+    .send-button {
+      width: 31px;
+      height: 31px;
+      border: 0;
+      border-radius: 7px;
+      color: var(--steel-contrast);
+      background: var(--steel);
+      cursor: pointer;
+    }
+    .send-button svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.7; }
+
+    @media (max-width: 1100px) {
+      .review-bar { grid-template-columns: 1fr auto; }
+      .review-decision { display: none; }
+      .mock-app { grid-template-columns: 200px minmax(0, 1fr); }
+      .workspace { grid-template-rows: 48px minmax(120px, 1fr) minmax(250px, 304px) 74px; }
+    }
+    @media (max-width: 860px) {
+      .review-title span { display: none; }
+      .review-controls { gap: 5px; }
+      .mock-app { grid-template-columns: minmax(0, 1fr); }
+      .rail { display: none; }
+      .preview-stage { padding: 10px; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; animation-duration: .01ms !important; }
+    }
+  </style>
+</head>
+<body>
+  <header class="review-bar">
+    <div class="review-title">
+      <strong>执行台内 Command View · Steel 底色方向稿</strong>
+      <span>遵循最新 v25：inline code 固定无描边灰 Mist，Command View 比较三个浅色方向</span>
+    </div>
+    <div class="review-controls">
+      <div class="control-set">
+        <span class="control-label">方向</span>
+        <div class="segments" role="group" aria-label="选择设计方向">
+          <button class="segment direction-button" type="button" data-direction="air" aria-pressed="false">A · Air</button>
+          <button class="segment direction-button" type="button" data-direction="mist" aria-pressed="true">B · Mist</button>
+          <button class="segment direction-button" type="button" data-direction="frost" aria-pressed="false">C · Frost</button>
+        </div>
+      </div>
+      <div class="control-set">
+        <span class="control-label">主题</span>
+        <div class="segments" role="group" aria-label="选择主题">
+          <button class="segment theme-button" type="button" data-theme-value="day" aria-pressed="false">Day</button>
+          <button class="segment theme-button" type="button" data-theme-value="night" aria-pressed="true">Night</button>
+        </div>
+      </div>
+    </div>
+    <div class="review-decision" aria-live="polite" aria-atomic="true">
+      <strong id="direction-title">B · Steel Mist · 建议首选</strong>
+      <span id="direction-note">参考截图的低饱和浅灰面，文字同步收柔，弱化蓝钢感。</span>
+    </div>
+  </header>
+
+  <main class="preview-stage">
+    <section class="mock-app" data-direction="mist" aria-label="Rovai AI Command View 设计预览">
+      <aside class="rail" aria-label="应用侧栏">
+        <div class="brand-row">
+          <span class="brand-mark" aria-hidden="true">
+            <svg viewBox="0 0 24 24"><path d="M12 2.7l1.35 3.7 3.7 1.35-3.7 1.35L12 12.8l-1.35-3.7-3.7-1.35 3.7-1.35L12 2.7Z"/><path d="M4 18.2c2.25-2.35 4.9-3.5 8-3.5s5.75 1.15 8 3.5"/><circle cx="12" cy="18.2" r="1.1" fill="#d3a45f" stroke="none"/></svg>
+          </span>
+          <strong>Rovai AI</strong>
+        </div>
+        <div class="rail-label">工作区</div>
+        <button class="rail-row" type="button">
+          <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 3.5h11v9h-11z"/><path d="M5 6h6M5 8.5h4"/></svg>
+          <span>快速对话</span>
+        </button>
+        <button class="rail-row is-selected" type="button">
+          <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 3.5h10v7H7l-3.5 2v-2H3z"/></svg>
+          <span>Renderer Polish</span>
+          <small>3</small>
+        </button>
+        <button class="rail-row" type="button">
+          <svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="6" cy="6" r="2.5"/><path d="M1.8 13c.7-2.1 2.1-3.2 4.2-3.2S9.5 10.9 10.2 13M11 4.5h3M12.5 3v3"/></svg>
+          <span>队员</span>
+        </button>
+        <button class="rail-row" type="button">
+          <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 3.2h8.5a1.5 1.5 0 0 1 1.5 1.5v8.1H4.5A1.5 1.5 0 0 1 3 11.3z"/><path d="M5.5 6h5M5.5 8.5h4"/></svg>
+          <span>记忆</span>
+        </button>
+        <div class="rail-spacer"></div>
+        <div class="rail-user">
+          <span class="avatar">M</span>
+          <span><strong>Murray</strong><small>当前用户</small></span>
+        </div>
+      </aside>
+
+      <section class="workspace">
+        <header class="topbar">
+          <div class="topbar-copy">
+            <strong>Renderer Polish</strong>
+            <span>3 位队员 · Default Lead 沐瓦</span>
+          </div>
+          <div class="topbar-actions">
+            <button class="quiet-button" type="button">地图</button>
+            <button class="quiet-button" type="button">详情</button>
+          </div>
+        </header>
+
+        <section class="conversation" aria-label="会话">
+          <article class="message">
+            <span class="avatar">M</span>
+            <div class="message-copy">
+              <header><strong>Murray</strong><time>19:42</time></header>
+              <p>执行台里面展开命令后，Command View 的底色应该更像 Steel；外层执行台不要变。还有 <code class="inline-code">&lt;code&gt;</code> 的底色别压得太深。</p>
+            </div>
+          </article>
+          <article class="message">
+            <span class="avatar agent">沐</span>
+            <div class="message-copy">
+              <header><strong>沐瓦</strong><time>19:43</time></header>
+              <p>我会固定执行台和 Run 卡，并按最新格式保留一个连续 <code class="inline-code">$ command\noutput</code> 文本面，只比较 Command View 与 inline code 的亮度。</p>
+              <div class="message-note">三案没有结构差异：只沿同一 Steel 色相逐级提高明度，方便直接判断舒适区间。</div>
+            </div>
+          </article>
+        </section>
+
+        <section class="execution-drawer" role="region" aria-labelledby="execution-drawer-title" tabindex="-1">
+          <header class="command-header">
+            <div class="command-agent">
+              <span class="avatar agent" aria-hidden="true">沐</span>
+              <div class="command-agent-copy">
+                <div class="command-title-line">
+                  <h2 id="execution-drawer-title">沐瓦的执行过程</h2>
+                </div>
+                <span>共 4 次执行 · 当前正在执行</span>
+              </div>
+            </div>
+            <div class="command-actions">
+              <button class="quiet-button danger" type="button">停止</button>
+              <button class="quiet-button" type="button">收起</button>
+            </div>
+          </header>
+          <div class="command-body">
+            <ol class="timeline">
+              <li class="run-stage">
+                <span class="run-node" aria-hidden="true"></span>
+                <article class="run-card">
+                  <header class="run-boundary">
+                    <div class="run-boundary-main">
+                      <div class="run-time">
+                        <time>19:43 — 现在</time>
+                        <span class="run-state">正在执行</span>
+                        <span class="current-run">当前执行</span>
+                      </div>
+                      <div class="run-meta">
+                        <span>执行 <code class="inline-code">run_7F31</code></span>
+                        <span>直接执行</span>
+                        <span>模型 <code class="inline-code" tabindex="0" title="gpt-5.6-sol">gpt-5.6-sol</code> · 默认</span>
+                      </div>
+                    </div>
+                  </header>
+                  <p class="narration">先定位生产 token 与执行台容器，再检查两套主题的层级和对比度。</p>
+                  <details class="tool-group" open>
+                    <summary class="tool-group-summary">
+                      <span class="tool-group-icon" aria-hidden="true">
+                        <svg viewBox="0 0 16 16"><path d="M2.5 4.5h11v7h-11z"/><path d="m4.5 7 1.5 1-1.5 1M7.5 9h2.5"/></svg>
+                      </span>
+                      <strong>执行中 · 检查 Command View 主题变量</strong>
+                      <span class="status-dot running" role="img" aria-label="正在执行" title="正在执行"></span>
+                      <span class="chevron" aria-hidden="true"><svg viewBox="0 0 16 16"><path d="m4.75 6.25 3.25 3.5 3.25-3.5"/></svg></span>
+                    </summary>
+                    <div class="tool-items">
+                      <details class="tool-row" open>
+                        <summary class="tool-summary">
+                          <span class="tool-icon" aria-hidden="true"><svg viewBox="0 0 16 16"><path d="M2.5 4.5h11v7h-11z"/><path d="m4.5 7 1.5 1-1.5 1M7.5 9h2.5"/></svg></span>
+                          <span class="tool-title">rg -n "inline-code|execution-drawer" styles.css</span>
+                          <span class="status-dot" role="img" aria-label="已完成" title="已完成"></span>
+                          <span class="chevron" aria-hidden="true"><svg viewBox="0 0 16 16"><path d="m4.75 6.25 3.25 3.5 3.25-3.5"/></svg></span>
+                        </summary>
+                        <div class="tool-detail">
+                          <div class="command-view-heading">
+                            <span>Command View</span>
+                            <strong id="surface-tag">Steel Mist</strong>
+                          </div>
+                          <pre class="command-result-view" tabindex="0" role="region" aria-label="完整命令与输出，可滚动">$ rg -n "inline-code|execution-drawer" apps/desktop/src/renderer/src/styles.css
+--inline-code-canvas: #1d252b;
+--evidence-canvas: #12191d;
+--evidence-surface: #171f24;
+.tool-call-result-scroll {
+  background: var(--evidence-canvas);
+}</pre>
+                        </div>
+                      </details>
+                      <details class="tool-row">
+                        <summary class="tool-summary">
+                          <span class="tool-icon" aria-hidden="true"><svg viewBox="0 0 16 16"><path d="M3 2.5h7l3 3v8H3z"/><path d="M10 2.5v3h3M5.5 8h5M5.5 10.5h4"/></svg></span>
+                          <span class="tool-title">读取 docs/ui/themes/steel-night.md</span>
+                          <span class="status-dot" role="img" aria-label="已完成" title="已完成"></span>
+                          <span class="chevron" aria-hidden="true"><svg viewBox="0 0 16 16"><path d="m4.75 6.25 3.25 3.5 3.25-3.5"/></svg></span>
+                        </summary>
+                      </details>
+                      <details class="tool-row">
+                        <summary class="tool-summary">
+                          <span class="tool-icon" aria-hidden="true"><svg viewBox="0 0 16 16"><path d="M3 12.5h10M4.5 10.5l6.7-6.7 1 1-6.7 6.7z"/></svg></span>
+                          <span class="tool-title">生成三个 Steel 方向并验证 inline code</span>
+                          <span class="status-dot running" role="img" aria-label="正在执行" title="正在执行"></span>
+                          <span class="chevron" aria-hidden="true"><svg viewBox="0 0 16 16"><path d="m4.75 6.25 3.25 3.5 3.25-3.5"/></svg></span>
+                        </summary>
+                      </details>
+                    </div>
+                  </details>
+                </article>
+              </li>
+            </ol>
+          </div>
+        </section>
+
+        <footer class="composer">
+          <div class="composer-box">
+            <span>和队伍继续前行：补充线索、调整方向或布置新任务…</span>
+            <button class="send-button" type="button" aria-label="发送">
+              <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8h9M8.5 4.5 12 8l-3.5 3.5"/></svg>
+            </button>
+          </div>
+        </footer>
+      </section>
+    </section>
+  </main>
+
+  <script>
+    const directions = {
+      air: {
+        title: 'A · Steel Air',
+        tag: 'Steel Air',
+        note: '比现状明显抬亮，但最接近原有 Evidence 层级；最克制。'
+      },
+      mist: {
+        title: 'B · Steel Mist · 建议首选',
+        tag: 'Steel Mist',
+        note: '参考截图的低饱和浅灰面，文字同步收柔，弱化蓝钢感。'
+      },
+      frost: {
+        title: 'C · Steel Frost',
+        tag: 'Steel Frost',
+        note: '三案中最亮、最有独立面板感；适合你希望彻底摆脱深色块时。'
+      }
+    };
+
+    const root = document.documentElement;
+    const mockApp = document.querySelector('.mock-app');
+    const title = document.querySelector('#direction-title');
+    const note = document.querySelector('#direction-note');
+    const surfaceTag = document.querySelector('#surface-tag');
+    const params = new URLSearchParams(window.location.search);
+
+    function setDirection(value, updateUrl = true) {
+      const direction = directions[value] ? value : 'mist';
+      mockApp.dataset.direction = direction;
+      document.querySelectorAll('.direction-button').forEach((button) => {
+        button.setAttribute('aria-pressed', String(button.dataset.direction === direction));
+      });
+      title.textContent = directions[direction].title;
+      note.textContent = directions[direction].note;
+      surfaceTag.textContent = directions[direction].tag;
+      if (updateUrl) {
+        params.set('direction', direction);
+        history.replaceState(null, '', `?${params.toString()}`);
+      }
+    }
+
+    function setTheme(value, updateUrl = true) {
+      const theme = value === 'day' ? 'day' : 'night';
+      root.dataset.theme = theme;
+      document.querySelectorAll('.theme-button').forEach((button) => {
+        button.setAttribute('aria-pressed', String(button.dataset.themeValue === theme));
+      });
+      if (updateUrl) {
+        params.set('theme', theme);
+        history.replaceState(null, '', `?${params.toString()}`);
+      }
+    }
+
+    document.querySelectorAll('.direction-button').forEach((button) => {
+      button.addEventListener('click', () => setDirection(button.dataset.direction));
+    });
+    document.querySelectorAll('.theme-button').forEach((button) => {
+      button.addEventListener('click', () => setTheme(button.dataset.themeValue));
+    });
+
+    setDirection(params.get('direction') || 'mist', false);
+    setTheme(params.get('theme') || 'night', false);
+  </script>
+</body>
+</html>
