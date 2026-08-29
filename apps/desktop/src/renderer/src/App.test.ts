@@ -151,6 +151,7 @@ import { SafeMarkdown } from './SafeMarkdown'
 import type { AppUpdatesController } from './useAppUpdates'
 import {
   activityStatusForAgentRun,
+  activityIconKind,
   agentRunPresentation,
   agentRunStateTag,
   agentRunWaitDetail,
@@ -4566,7 +4567,7 @@ describe('task event projections', () => {
       kind: 'tool',
       step: expect.objectContaining({
         id: 'command-1',
-        title: '读取 SKILL.md',
+        title: 'sed -n 1,120p SKILL.md',
         status: 'completed'
       })
     })])
@@ -4729,6 +4730,7 @@ describe('task event projections', () => {
         detail: 'Tests passed',
         status: 'completed' as const,
         activityDomain: 'shell',
+        iconKind: 'terminal' as const,
         toolName: null,
         credibility: 'runtime_structured' as const
       }
@@ -4884,17 +4886,15 @@ describe('task event projections', () => {
     expect(markup).not.toContain('private-request-2')
   })
 
-  it('uses one 16px SVG family and stable four-track markup for all Tool domains', () => {
-    const domains = [
-      'shell',
-      'file',
-      'git',
-      'network',
-      'permission',
-      'runtime',
-      'plan',
-      'tool',
-      'unknown'
+  it('uses one 16px SVG family and stable four-track markup for the converged icon set', () => {
+    const icons = [
+      { iconKind: 'terminal' as const, activityDomain: 'shell' },
+      { iconKind: 'file' as const, activityDomain: 'file' },
+      { iconKind: 'web' as const, activityDomain: 'tool' },
+      { iconKind: 'tool' as const, activityDomain: 'tool' },
+      { iconKind: 'rovai' as const, activityDomain: 'tool' },
+      { iconKind: 'runtime' as const, activityDomain: 'runtime' },
+      { iconKind: 'unknown' as const, activityDomain: 'unknown' }
     ]
     const run: AgentRunView = {
       id: 'run-domains', campTurnId: 'turn-domains', conversationId: 'conversation-domains',
@@ -4905,21 +4905,22 @@ describe('task event projections', () => {
       terminalReasonCode: null, failure: null, runtimeModel: null,
       permissionSemantics: 'runtime_managed_v2', invocationKind: 'direct',
       triggerDeliveryGeneration: 0, a2aParentAgentRunId: null, a2aRootAgentRunId: null,
-      a2aDepth: 0, executionEvidenceCount: domains.length, hasUnsettledExternalEffects: false,
+      a2aDepth: 0, executionEvidenceCount: icons.length, hasUnsettledExternalEffects: false,
       workspace: { path: '/repo' }, startingGitObservation: null, endingGitObservation: null,
       version: 1, createdAt: '2026-08-19T00:00:00Z', startedAt: '2026-08-19T00:00:00Z',
       endedAt: '2026-08-19T00:00:09Z', updatedAt: '2026-08-19T00:00:09Z'
     }
     const progress = {
-      items: domains.map((domain, index) => ({
-        key: `tool:${domain}`,
+      items: icons.map(({ iconKind, activityDomain }, index) => ({
+        key: `tool:${iconKind}`,
         kind: 'tool' as const,
         step: {
-          id: `tool-${domain}`,
-          title: `${domain} command`,
-          detail: `${domain} complete result`,
+          id: `tool-${iconKind}`,
+          title: `${iconKind} command`,
+          detail: `${iconKind} complete result`,
           status: 'completed' as const,
-          activityDomain: domain,
+          activityDomain,
+          iconKind,
           toolName: null,
           credibility: 'runtime_structured' as const
         }
@@ -4929,17 +4930,17 @@ describe('task event projections', () => {
       run, progress, campId: 'camp-domains', focused: true
     }))
 
-    for (const domain of domains) {
-      expect(markup).toContain(`data-icon-domain="${domain}"`)
-      expect(markup).not.toContain(`${domain} complete result`)
+    for (const { iconKind } of icons) {
+      expect(markup).toContain(`data-icon-domain="${iconKind}"`)
+      expect(markup).not.toContain(`${iconKind} complete result`)
     }
-    expect(markup).toContain('aria-label="已执行 9 项操作；状态：全部成功"')
+    expect(markup).toContain('aria-label="已执行 7 项操作；状态：全部成功"')
     expect(markup.match(/class="tool-group-icon"/g)).toHaveLength(1)
-    expect(markup.match(/class="tool-call-icon"/g)).toHaveLength(domains.length)
-    expect(markup.match(/<svg viewBox="0 0 16 16"/g)?.length).toBeGreaterThanOrEqual(domains.length)
-    expect(markup.match(/<summary class="tool-call-summary">/g)).toHaveLength(domains.length)
-    expect(markup.match(/class="tool-call-state status-completed"/g)).toHaveLength(domains.length)
-    expect(markup.match(/class="tool-call-disclosure-slot"/g)).toHaveLength(domains.length)
+    expect(markup.match(/class="tool-call-icon"/g)).toHaveLength(icons.length)
+    expect(markup.match(/<svg viewBox="0 0 16 16"/g)?.length).toBeGreaterThanOrEqual(icons.length)
+    expect(markup.match(/<summary class="tool-call-summary">/g)).toHaveLength(icons.length)
+    expect(markup.match(/class="tool-call-state status-completed"/g)).toHaveLength(icons.length)
+    expect(markup.match(/class="tool-call-disclosure-slot"/g)).toHaveLength(icons.length)
     expect(markup).toMatch(/tool-call-icon[\s\S]*tool-call-title[\s\S]*tool-call-state[\s\S]*tool-call-disclosure-slot/)
     expect(markup).not.toMatch(/<summary class="tool-call-summary"[^>]*aria-label=/)
   })
@@ -5024,7 +5025,8 @@ describe('task event projections', () => {
           kind: 'tool' as const,
           step: {
             id: 'failed-command', title: 'pnpm test', detail: 'exit 1',
-            status: 'failed' as const, activityDomain: 'shell', toolName: null,
+            status: 'failed' as const, activityDomain: 'shell', iconKind: 'terminal' as const,
+            toolName: null,
             credibility: 'runtime_structured'
           }
         }]
@@ -5189,13 +5191,17 @@ describe('task event projections', () => {
         toolCallId: 'qoder-edit',
         status: 'completed',
         kind: 'edit',
-        output: 'Successfully modified file'
+        output: 'Successfully modified file',
+        runtimeFileOperation: {
+          status: 'available', operationKind: 'write',
+          path: 'rovai-runtime-validation/qoder-cli.txt'
+        }
       },
       canonical: canonicalActivity('qoder-edit', {
         activityDomain: 'file',
         semanticKind: 'file.write',
         toolName: 'Edit',
-        presentationHint: '修改 qoder-cli.txt',
+        presentationHint: null,
         phase: 'terminal',
         outcome: 'succeeded'
       }),
@@ -5264,8 +5270,14 @@ describe('task event projections', () => {
 
     expect(progress.items).toHaveLength(2)
     expect(progress.items).toMatchObject([
-      { key: 'tool:toolu-edit-1', step: { fileChangeSemantics: 'exact_mutation' } },
-      { key: 'tool:toolu-edit-2', step: { fileChangeSemantics: 'exact_mutation' } }
+      {
+        key: 'tool:toolu-edit-1',
+        step: { title: '修改 CampWorkspace.tsx', fileChangeSemantics: 'exact_mutation' }
+      },
+      {
+        key: 'tool:toolu-edit-2',
+        step: { title: '修改 CampWorkspace.tsx', fileChangeSemantics: 'exact_mutation' }
+      }
     ])
 
     const run: AgentRunView = {
@@ -5447,7 +5459,7 @@ describe('task event projections', () => {
         type: 'commandExecution', command: 'rg executionActivityTitle apps',
         commandActions: [{ type: 'search', query: 'executionActivityTitle', path: 'apps' }]
       }
-    })).toBe('搜索项目文件')
+    })).toBe('rg executionActivityTitle apps')
     expect(executionActivityTitle(canonicalActivity('file-write', {
       activityDomain: 'file', semanticKind: 'file.write', toolName: null,
       presentationHint: 'write_file', phase: 'started', outcome: 'unknown'
@@ -5456,7 +5468,80 @@ describe('task event projections', () => {
     })).toBe('write_file')
   })
 
-  it('keeps the Core Codex presentation hint for structured read commands', () => {
+  it('derives the converged icon from canonical identity instead of display text', () => {
+    expect(activityIconKind(canonicalActivity('shell-rovai', {
+      activityDomain: 'shell', semanticKind: 'shell.execute', toolName: 'rovai',
+      sourceAuthority: 'core', credibility: 'core_verified'
+    }))).toBe('terminal')
+    expect(activityIconKind(canonicalActivity('web', {
+      activityDomain: 'tool', semanticKind: 'tool.web.search', toolName: 'web_search'
+    }))).toBe('web')
+    expect(activityIconKind(canonicalActivity('rovai', {
+      activityDomain: 'tool', semanticKind: 'tool.call', toolName: 'camp.read',
+      sourceAuthority: 'core', credibility: 'core_verified'
+    }))).toBe('rovai')
+    expect(activityIconKind(canonicalActivity('search', {
+      activityDomain: 'tool', semanticKind: 'tool.search', toolName: 'search'
+    }))).toBe('tool')
+    expect(activityIconKind(canonicalActivity('legacy-git', {
+      activityDomain: 'git', semanticKind: 'git.status'
+    }))).toBe('unknown')
+  })
+
+  it('shows the exact typed Web query without filtering it', () => {
+    const query = 'password=公开测试词 token=也照常展示'
+    const event: LiveRuntimeEvent = {
+      id: 'web-search-completed',
+      agentRunId: 'run-search',
+      eventType: 'runtime.action',
+      payload: {
+        toolCallId: 'web-search-1',
+        status: 'completed',
+        kind: 'web_search',
+        toolName: 'WebSearch',
+        query,
+        output: '找到 3 条结果'
+      },
+      canonical: canonicalActivity('web-search-1', {
+        classifierVersion: 'activity-v2',
+        activityDomain: 'tool',
+        semanticKind: 'tool.web.search',
+        toolName: 'WebSearch'
+      }),
+      createdAt: '2026-08-29T00:00:00Z'
+    }
+    const progress = buildLiveExecutionProgress([event], 'run-search')
+
+    expect(progress.items[0]).toMatchObject({
+      kind: 'tool',
+      step: {
+        title: 'Web 搜索',
+        iconKind: 'web',
+        detail: `搜索词\n${query}\n\n结果\n找到 3 条结果`
+      }
+    })
+    expect(executionEvidenceResultText('runtime.action', event.payload)).toBe(
+      `搜索词\n${query}\n\n结果\n找到 3 条结果`
+    )
+  })
+
+  it('uses a reliable file-operation path for the Renderer-owned file title', () => {
+    expect(executionActivityTitle(canonicalActivity('file-operation', {
+      classifierVersion: 'activity-v2',
+      activityDomain: 'file',
+      semanticKind: 'file.write',
+      toolName: 'Edit',
+      presentationHint: null
+    }), {
+      runtimeFileOperation: {
+        status: 'available',
+        operationKind: 'write',
+        path: 'rovai-runtime-validation/qoder-cli.txt'
+      }
+    })).toBe('修改 qoder-cli.txt')
+  })
+
+  it('presents a Codex structured read as the observed terminal command', () => {
     const progress = buildLiveExecutionProgress([{
       id: 'codex-command', agentRunId: 'run-codex', eventType: 'activity.started',
       payload: {
@@ -5476,7 +5561,7 @@ describe('task event projections', () => {
     expect(progress.items[0]).toMatchObject({
       kind: 'tool',
       step: {
-        title: '读取 README.md',
+        title: 'sed -n 1,120p /repo/docs/README.md',
         detail: '命令\nsed -n 1,120p /repo/docs/README.md',
         activityDomain: 'shell'
       }

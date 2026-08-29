@@ -240,6 +240,16 @@ impl ExecutionEvidenceService {
                 &evidence.phase,
                 &evidence.payload,
             );
+            let legacy_facts = canonical_activity::classify_evidence_with_version(
+                canonical_activity::LEGACY_CLASSIFIER_VERSION,
+                agent_run_id,
+                execution_epoch,
+                &id,
+                &evidence.event_type,
+                &evidence.kind,
+                &evidence.phase,
+                &evidence.payload,
+            );
             let canonical = upsert_canonical_activity(
                 &transaction,
                 agent_run_id,
@@ -248,6 +258,7 @@ impl ExecutionEvidenceService {
                 &id,
                 &evidence.occurred_at,
                 &facts,
+                &legacy_facts,
             )?;
             recorded.push(Some(RecordedExecutionEvidence {
                 evidence: AgentRunExecutionEvidence {
@@ -651,6 +662,16 @@ impl ExecutionEvidenceService {
             phase,
             &payload,
         );
+        let legacy_facts = canonical_activity::classify_evidence_with_version(
+            canonical_activity::LEGACY_CLASSIFIER_VERSION,
+            agent_run_id,
+            execution_epoch,
+            &id,
+            event_type,
+            kind,
+            phase,
+            &payload,
+        );
         let canonical = upsert_canonical_activity(
             &transaction,
             agent_run_id,
@@ -659,6 +680,7 @@ impl ExecutionEvidenceService {
             &id,
             &occurred_at,
             &facts,
+            &legacy_facts,
         )?;
         transaction.commit()?;
         Ok(Some(RecordedExecutionEvidence {
@@ -787,6 +809,7 @@ fn normalize_public_payload(event_type: &str, payload: &Value) -> Value {
                 "kind": payload.get("kind"),
                 "toolName": payload.get("toolName"),
                 "title": payload.get("title"),
+                "query": payload.get("query"),
                 "sourceAuthority": payload.get("sourceAuthority"),
                 "canonicalTool": payload.get("canonicalTool"),
                 "authorizationDecision": payload.get("authorizationDecision"),
@@ -811,12 +834,14 @@ fn normalize_public_payload(event_type: &str, payload: &Value) -> Value {
             let item = payload.get("item").unwrap_or(&Value::Null);
             serde_json::json!({
                 "runtimeDiff": payload.get("runtimeDiff"),
+                "runtimeFileOperation": payload.get("runtimeFileOperation"),
                 "reasonCode": payload.get("reasonCode"),
                 "item": {
                     "id": item.get("id"),
                     "type": item.get("type"),
                     "status": item.get("status"),
                     "title": item.get("title"),
+                    "query": item.get("query"),
                     "command": item.get("command"),
                     "commandActions": public_command_actions(item),
                     "cwd": item.get("cwd"),
@@ -1216,6 +1241,7 @@ fn upsert_canonical_activity(
     evidence_id: &str,
     occurred_at: &str,
     facts: &EvidenceActivityFacts,
+    legacy_facts: &EvidenceActivityFacts,
 ) -> Result<Option<CanonicalRuntimeActivity>> {
     if !facts.is_activity {
         return Ok(None);
@@ -1233,23 +1259,41 @@ fn upsert_canonical_activity(
             WHERE agent_run_id = ?1
               AND execution_epoch = ?2
               AND operation_id = ?3
-              AND classifier_version = ?4
+              AND classifier_version IN (?4, ?5)
+            ORDER BY CASE classifier_version WHEN ?4 THEN 0 ELSE 1 END
+            LIMIT 1
             "#,
             params![
                 agent_run_id,
                 execution_epoch,
                 facts.operation_id,
                 canonical_activity::CLASSIFIER_VERSION,
+                canonical_activity::LEGACY_CLASSIFIER_VERSION,
             ],
             canonical_activity_row,
         )
         .optional()?;
+    let selected_facts = existing
+        .as_ref()
+        .is_some_and(|projection| {
+            projection.classifier_version == canonical_activity::LEGACY_CLASSIFIER_VERSION
+        })
+        .then_some(legacy_facts)
+        .unwrap_or(facts);
     let projection = match existing {
-        Some(existing) => {
-            canonical_activity::merge_projection(existing, facts.clone(), evidence_id, sequence)
-        }
-        None => canonical_activity::new_projection(facts.clone(), evidence_id, sequence)
-            .context("Activity Evidence must produce a Canonical Runtime Activity")?,
+        Some(existing) => canonical_activity::merge_projection(
+            existing,
+            selected_facts.clone(),
+            evidence_id,
+            sequence,
+        ),
+        None => canonical_activity::new_projection_for_version(
+            selected_facts.clone(),
+            canonical_activity::CLASSIFIER_VERSION,
+            evidence_id,
+            sequence,
+        )
+        .context("Activity Evidence must produce a Canonical Runtime Activity")?,
     };
     let now = chrono::Utc::now().to_rfc3339();
     let started_at = (facts.phase == "started").then_some(occurred_at);
@@ -1342,15 +1386,20 @@ fn load_canonical_for_evidence(
               ON evidence.agent_run_id = activity.agent_run_id
              AND evidence.execution_epoch = activity.execution_epoch
             WHERE evidence.id = ?1
-              AND activity.classifier_version = ?2
+              AND activity.classifier_version IN (?2, ?3)
               AND EXISTS (
                   SELECT 1
                   FROM json_each(activity.source_evidence_ids_json)
                   WHERE json_each.value = evidence.id
               )
+            ORDER BY CASE activity.classifier_version WHEN ?2 THEN 0 ELSE 1 END
             LIMIT 1
             "#,
-            params![evidence_id, canonical_activity::CLASSIFIER_VERSION],
+            params![
+                evidence_id,
+                canonical_activity::CLASSIFIER_VERSION,
+                canonical_activity::LEGACY_CLASSIFIER_VERSION,
+            ],
             canonical_activity_row,
         )
         .optional()
@@ -1425,6 +1474,7 @@ mod tests {
                     "id": "command-1",
                     "type": "commandExecution",
                     "status": "completed",
+                    "query": "password=公开测试词 token=也照常展示",
                     "command": "pnpm test",
                     "commandActions": [{
                         "type": "read",
@@ -1441,6 +1491,10 @@ mod tests {
         let encoded = serde_json::to_string(&normalized).unwrap();
         assert!(encoded.contains("pnpm test"));
         assert!(encoded.contains("99 tests passed"));
+        assert_eq!(
+            normalized["item"]["query"],
+            "password=公开测试词 token=也照常展示"
+        );
         assert_eq!(normalized["item"]["commandActions"][0]["type"], "read");
         assert_eq!(
             normalized["item"]["commandActions"][0]["path"],
@@ -1450,6 +1504,126 @@ mod tests {
         assert!(!encoded.contains("hiddenProviderPacket"));
         assert!(!encoded.contains("providerPrivateState"));
         assert!(!encoded.contains("internal-thread"));
+    }
+
+    #[test]
+    fn runtime_action_keeps_the_exact_typed_query_without_private_neighbors() {
+        let normalized = normalize_public_payload(
+            "runtime.action",
+            &json!({
+                "toolCallId": "web-search-1",
+                "status": "completed",
+                "kind": "web_search",
+                "query": "password=公开测试词 token=也照常展示",
+                "providerPrivate": "must-not-persist"
+            }),
+        );
+        assert_eq!(normalized["query"], "password=公开测试词 token=也照常展示");
+        assert!(normalized.get("providerPrivate").is_none());
+    }
+
+    #[test]
+    fn an_inflight_v1_operation_keeps_settling_into_its_v1_projection() {
+        let directory = std::env::temp_dir().join(format!(
+            "rovai-execution-evidence-v1-continuity-test-{}",
+            Uuid::new_v4()
+        ));
+        let mut database = crate::test_support::fresh_schema_database_fast_at(&directory);
+        let payload = json!({
+            "toolCallId": "search-1",
+            "status": "completed",
+            "kind": "search"
+        });
+        let current_facts = canonical_activity::classify_evidence(
+            "run-v1",
+            1,
+            "terminal-evidence",
+            "runtime.action",
+            "tool_call",
+            "terminal",
+            &payload,
+        );
+        let legacy_facts = canonical_activity::classify_evidence_with_version(
+            canonical_activity::LEGACY_CLASSIFIER_VERSION,
+            "run-v1",
+            1,
+            "terminal-evidence",
+            "runtime.action",
+            "tool_call",
+            "terminal",
+            &payload,
+        );
+        assert_eq!(current_facts.semantic_kind.as_deref(), Some("tool.search"));
+        assert_eq!(
+            legacy_facts.semantic_kind.as_deref(),
+            Some("tool.web.search")
+        );
+
+        database
+            .connection()
+            .execute_batch("PRAGMA foreign_keys = OFF;")
+            .unwrap();
+        database
+            .connection()
+            .execute(
+                r#"
+                INSERT INTO canonical_runtime_activity(
+                    agent_run_id, execution_epoch, operation_id, classifier_version,
+                    activity_domain, semantic_kind, tool_name, presentation_hint,
+                    phase, outcome, credibility, coverage_level, source_authority,
+                    source_evidence_ids_json, first_evidence_sequence,
+                    last_evidence_sequence, revision, created_at, updated_at
+                ) VALUES (
+                    'run-v1', 1, ?1, 'activity-v1',
+                    'tool', 'tool.web.search', NULL, 'Web 搜索',
+                    'started', 'unknown', 'runtime_structured', 'fine_grained',
+                    'runtime', '["started-evidence"]', 1, 1, 1,
+                    datetime('now'), datetime('now')
+                )
+                "#,
+                [current_facts.operation_id.as_str()],
+            )
+            .unwrap();
+
+        let transaction = database.connection_mut().transaction().unwrap();
+        let projection = upsert_canonical_activity(
+            &transaction,
+            "run-v1",
+            1,
+            2,
+            "terminal-evidence",
+            "2026-08-29T00:00:00Z",
+            &current_facts,
+            &legacy_facts,
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(
+            projection.classifier_version,
+            canonical_activity::LEGACY_CLASSIFIER_VERSION
+        );
+        assert_eq!(projection.semantic_kind.as_deref(), Some("tool.web.search"));
+        assert_eq!(projection.phase, "terminal");
+        transaction.commit().unwrap();
+
+        let versions: (i64, i64) = database
+            .connection()
+            .query_row(
+                r#"
+                SELECT
+                    SUM(CASE WHEN classifier_version = 'activity-v1' THEN 1 ELSE 0 END),
+                    SUM(CASE WHEN classifier_version = 'activity-v2' THEN 1 ELSE 0 END)
+                FROM canonical_runtime_activity
+                WHERE agent_run_id = 'run-v1' AND operation_id = ?1
+                "#,
+                [current_facts.operation_id.as_str()],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(versions, (1, 0));
+
+        drop(database);
+        std::fs::remove_dir_all(directory).unwrap();
     }
 
     #[test]

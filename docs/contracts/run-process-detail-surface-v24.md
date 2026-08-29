@@ -1,0 +1,80 @@
+---
+document_type: contract
+contract: run-process-detail-surface-v24
+authority: runtime-activity-classification-presentation-and-icons
+status: accepted
+source_version: v1.29
+last_updated: 2026-08-29
+---
+
+# Run Process Detail Surface v24（活动分类、中文呈现与图标收敛）
+
+本合同完整继承 [Run Process Detail Surface v23](run-process-detail-surface-v23.md) 的连续 Tool 分组、
+live-tail、两级 disclosure、惰性全文读取、执行台位置和四轨布局。v24 只收敛 Canonical Activity 的新写入
+分类、Renderer 中文标题、类型图标与公开搜索词；不改变 operation identity、lifecycle、outcome、状态点、
+Tool 分组或 Run lifecycle。
+
+## 1. `activity-v2` 分类与版本切换
+
+新 operation 使用 `activity-v2`，顶层 `activityDomain` 只产生 `shell | file | tool | runtime | unknown`。
+搜索语义按结构化 kind 明确区分：`file_search → file.search`、`web_search → tool.web.search`、
+`search → tool.search`。Claude Code 的 `Grep` 映射为 `file_search`，`WebSearch` 映射为 `web_search`；
+Antigravity 的 `grep_search | search | web_search` 使用相同三分法。标题、命令正文、Runtime 名称与 provider
+名称都不能参与分类。
+
+Migration 116 只把当前 Data Contract 切换为 `v1.29 / projection schema 70 / activity-v2`，不扫描、删除、
+回填或重新分类任何历史 Canonical row。已经存在 `activity-v1` projection 的 operation 必须继续用 v1
+完成后续 phase；没有既有 projection 的 operation 才建立 v2。Read Side 同时读取 v2 与 v1，同一 Evidence
+意外存在两版时优先 v2。历史行缺少新公开字段时诚实留空。
+
+## 2. Renderer 拥有中文标题
+
+Core v2 只保留 Runtime 明确报告的 `title` 作为 `presentationHint`，不再生成中文默认标题、Codex
+`commandActions` 中文标题或文件 basename 标题。Renderer 按下列顺序生成当前展示：
+
+- Shell：优先公开 command 的完整安全预览；其次非通用 Runtime title、非通用 toolName；最后“终端操作”。
+  字面命令 `rovai ...` 仍是 Shell Activity，不能因为命令文本换成 Rovai 图标；
+- File：可靠 `runtimeFileOperation.status=available` 的 path，或单文件 available Canonical Diff 的 path，显示
+  `修改 <basename>`；否则依次使用 toolName、Runtime title、“文件操作”；
+- `tool.web.search`：固定显示“Web 搜索”；其他 Tool 依次使用 canonical toolName、Runtime title、“工具调用”；
+- Runtime：Runtime title 或“Agent 运行”；其他/未知历史域：Runtime title 或“系统活动”。
+
+同一 Renderer 规则同时作用于 live 与历史 Evidence；它只改变呈现，不改写持久 Canonical 事实。
+
+## 3. 七类类型图标
+
+Tool 行继续使用统一 16px、`currentColor`、单色 SVG 和既有四轨布局，只保留
+`terminal | file | web | tool | rovai | runtime | unknown` 七类类型图标。状态仍由行尾 7px 状态点独立表达。
+
+`rovai` 图标是四向星与弧形地平线，使用 `--rail-logo` 色；它只在 Canonical Activity 同时满足
+`activityDomain=tool`、`sourceAuthority=core`、`credibility=core_verified` 且存在经 Catalog 验证的
+`toolName` 时出现。`tool.web.search` 优先使用 Web 图标。任何 display title、Tool 文案或 Shell command
+都不能证明 Rovai identity。
+
+## 4. 公开搜索词
+
+从 v24 部署后，新 Evidence 可以在明确的公开 typed query 字段保存精确搜索词：Codex 使用公开
+`item.query`；Claude Code 只使用 `WebSearch.input.query`；ACP 只在 effective kind 精确为 `web_search`
+时使用 `rawInput.query`。稀疏 terminal update 可以从同 ToolCall 的进程内 started observation 继承该字段。
+Antigravity 当前没有获准的公开 query wire，因此不从私有 parameters 或文本猜测。
+
+搜索词按用户实际输入原样保存和展示，不做敏感词识别、关键词过滤或内容替换；相邻未准入字段仍不进入
+公开 Evidence。展开详情先显示“搜索词”，存在公开结果时再显示“结果”。历史 Evidence 不回填，缺失 query
+时不显示空占位。
+
+## 5. 验收
+
+- `web_search`、`search`、`file_search` 分别得到 `tool.web.search`、`tool.search`、`file.search`；
+- Claude `Grep` 使用 File 图标，Claude `WebSearch` 使用 Web 图标；搜索词 started→terminal 保持精确一致；
+- Core Catalog 验证的 `camp.read` 使用 Rovai 图标，字面 Shell `rovai camp read ...` 使用 Terminal 图标；
+- 可靠 file-operation path 显示 `修改 <basename>`，没有可靠 path 时不从 output 或标题猜路径；
+- `activity-v1` 历史仍可读取，Migration 116 前后的旧 row bytes 不被重写，新 operation 使用 v2；
+- 七类图标在 Day/Night、底部/Inspector 与 hover/focus 下保持 `currentColor` 和既有四轨尺寸；
+- 搜索词包含 `password`、`token` 等普通字样时仍原样进入新 Evidence 与 disclosure，相邻私有字段不泄露。
+
+## References
+
+- [Run Process Detail Surface v23](run-process-detail-surface-v23.md)
+- [Runtime Activity Mapping Registry](../runtime-activity/registry.md)
+- [Evidence 与 Canonical Activity](../architecture/foundational-invariants.md#evidence-canonical-activity)
+- [Camp 会话工作区](../ui/components/conversation-workspace.md)

@@ -58,7 +58,7 @@ const claudeExpectedCommand = "printf '%s\\n' 'ROVAI_CLAUDE_EMPTY_OUTPUT_OK'"
 const runtimes = [
   runtime('codex', 'codex-cli', 'Codex CLI', codexExpectedCommand, {
     protocol: 'codex-app-server', domain: 'shell', semantic: 'shell.execute',
-    evidenceKind: 'command', eventType: 'activity.completed', presentationHint: '执行 Shell 命令', payload: {
+    evidenceKind: 'command', eventType: 'activity.completed', payload: {
       item: {
         id: 'op-codex', type: 'commandExecution', status: 'completed', title: null,
         command: '/bin/zsh -lc "rovai camp read --mode timeline --direction before --limit 20"',
@@ -74,11 +74,17 @@ const runtimes = [
   }),
   runtime('kiro', 'kiro-cli', 'Kiro', 'execute', acp('execute', 'execute', 'shell', 'shell.execute')),
   runtime('qoder', 'qoder-cli', 'Qoder', 'search_workspace', {
-    ...acp('search', 'search_workspace', 'tool', 'tool.web.search'),
+    ...acp('search', 'search_workspace', 'tool', 'tool.search'),
     cancelledWithInProgressActivity: true,
     expectedToolDisclosure: false
   }),
-  runtime('codebuddy', 'codebuddy-cli', 'CodeBuddy', 'mcp_call', acp('mcp_tool_call', 'mcp_call', 'tool', 'tool.call')),
+  runtime('codebuddy', 'codebuddy-cli', 'CodeBuddy', 'Web 搜索', {
+    ...acp('web_search', 'web_search', 'tool', 'tool.web.search'),
+    payload: {
+      ...acp('web_search', 'web_search', 'tool', 'tool.web.search').payload,
+      query: 'password=公开验收词 token=保持原样'
+    }
+  }),
   runtime('qwen', 'qwen-code', 'Qwen Code', 'write_file', acp('write_file', 'write_file', 'file', 'file.write')),
   runtime('trae', 'trae-cn-cli', 'TRAE CLI', 'edit_file', acp('edit_file', 'edit_file', 'file', 'file.write')),
   runtime('cursor', 'cursor-agent', 'Cursor Agent', null, {
@@ -758,7 +764,7 @@ try {
   const report = {
     ok: true,
     mode: 'controlled-structured-fixture',
-    classifierVersion: 'activity-v1',
+    classifierVersion: 'activity-v2',
     app: basename(appPath),
     fixtureRoot,
     outputDir,
@@ -859,9 +865,22 @@ function runtime(key, adapterKind, runtimeName, expectedToolName, details) {
     runtimeName,
     expectedToolName,
     expectedToolDisclosure: true,
+    expectedIconKind: fixtureIconKind(details),
     ...modelFixture,
     ...details
   }
+}
+
+function fixtureIconKind(details) {
+  if (details.domain === 'shell') return 'terminal'
+  if (details.domain === 'file') return 'file'
+  if (details.domain === 'tool' && details.semantic === 'tool.web.search') return 'web'
+  if (details.domain === 'tool'
+    && details.sourceAuthority === 'core'
+    && details.credibility === 'core_verified') return 'rovai'
+  if (details.domain === 'tool') return 'tool'
+  if (details.domain === 'runtime') return 'runtime'
+  return 'unknown'
 }
 
 function runtimeModelFixture(key) {
@@ -1867,9 +1886,9 @@ async function seedActivity(entry, index) {
       source_evidence_ids_json, first_evidence_sequence,
       last_evidence_sequence, revision, created_at, updated_at
     ) VALUES (
-      ${sqlLiteral(runId)}, 1, ${sqlLiteral(operationId)}, 'activity-v1',
+      ${sqlLiteral(runId)}, 1, ${sqlLiteral(operationId)}, 'activity-v2',
       ${sqlLiteral(entry.domain)}, ${sqlLiteral(entry.semantic)}, ${sqlNullable(toolName)},
-      ${sqlLiteral(entry.presentationHint ?? entry.payload.title ?? toolName ?? '工具调用')},
+      ${sqlNullable(entry.presentationHint ?? entry.payload.title ?? null)},
       ${sqlLiteral(stoppedProjectionFixture ? 'progress' : 'terminal')},
       ${sqlLiteral(stoppedProjectionFixture ? 'unknown' : 'succeeded')},
       ${sqlLiteral(entry.credibility ?? 'runtime_structured')},
@@ -3298,6 +3317,7 @@ function assertRuntimeRows(observed) {
     assert(row.toolLayouts.length === 1
       && row.toolLayouts.every((layout) => layout.display === 'grid'
         && layout.childCount === 4
+        && layout.iconDomain === expected.expectedIconKind
         && Math.abs(layout.iconWidth - 16) <= .5
         && Math.abs(layout.iconSvgWidth - 16) <= .5
         && Math.abs(layout.iconSvgHeight - 16) <= .5

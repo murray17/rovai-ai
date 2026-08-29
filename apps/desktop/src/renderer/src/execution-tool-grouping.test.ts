@@ -20,6 +20,7 @@ function tool(
       detail: `结果 ${id}`,
       status,
       activityDomain: 'shell',
+      iconKind: 'terminal',
       toolName: null,
       credibility: 'runtime_structured'
     }

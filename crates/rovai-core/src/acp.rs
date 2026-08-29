@@ -538,9 +538,10 @@ struct AcpCompactionObserverRoute {
 struct ObservedToolMetadata {
     native_kind: Option<String>,
     observation_digest: Option<String>,
-    // Some ACP servers omit rawInput from the later permission request. Keep
-    // the matching structured update in active-process memory only; durable
-    // events and Action records continue to store digests, never this payload.
+    // Some ACP servers omit rawInput from later updates. Keep the matching
+    // structured input in active-process memory so explicitly public fields
+    // such as a typed Web-search query can survive sparse terminal updates;
+    // Action records still store only digests.
     raw_input: Option<Value>,
     stable_meta: Option<Value>,
     locations: Option<Value>,
@@ -5528,6 +5529,7 @@ pub struct CompletedAcpAction {
     pub native_item_id: String,
     pub native_kind: String,
     pub public_command: Option<String>,
+    pub public_query: Option<String>,
     pub public_file_operation_path: Option<String>,
     pub public_file_changes: Option<Value>,
     pub observation_digest: String,
@@ -5582,6 +5584,7 @@ pub fn completed_action(
         raw_input.unwrap_or(&Value::Null),
     )
     .to_string();
+    let public_query = public_acp_search_query(&native_kind, raw_input);
     let status = effective_acp_tool_status(update, &native_kind);
     let succeeded = status == "completed";
     let observation_digest = canonical_json_digest(&json!({
@@ -5602,6 +5605,7 @@ pub fn completed_action(
         native_item_id: native_item_id.clone(),
         native_kind,
         public_command,
+        public_query,
         public_file_operation_path,
         public_file_changes,
         observation_digest,
@@ -5667,6 +5671,10 @@ fn reconcile_completed_action(
     }
     if completion.native_kind == "other" && completion.public_command.is_some() {
         completion.native_kind = "execute".to_string();
+    }
+    if completion.public_query.is_none() {
+        completion.public_query =
+            public_acp_search_query(&completion.native_kind, observed.raw_input.as_ref());
     }
     if let Some(observation_digest) = observed.observation_digest {
         completion.observation_digest = observation_digest;
@@ -5845,6 +5853,17 @@ pub fn public_acp_shell_command(
         })
         .and_then(Value::as_str)
         .filter(|command| !command.trim().is_empty())
+        .map(str::to_string)
+}
+
+pub fn public_acp_search_query(native_kind: &str, raw_input: Option<&Value>) -> Option<String> {
+    if native_kind != "web_search" {
+        return None;
+    }
+    raw_input?
+        .get("query")
+        .and_then(Value::as_str)
+        .filter(|query| !query.is_empty())
         .map(str::to_string)
 }
 
@@ -10217,6 +10236,59 @@ while IFS= read -r ignored; do :; done
                 .to_string()
                 .contains("SPARSE_PRIVATE_FIELD")
         );
+    }
+
+    #[test]
+    fn web_search_exposes_the_exact_query_and_reconciles_sparse_terminal_updates() {
+        let query = "password=公开测试词 token=也照常展示";
+        let direct = completed_action(
+            AdapterKind::OpencodeCli,
+            &json!({
+                "update": {
+                    "sessionUpdate": "tool_call_update",
+                    "toolCallId": "web-search-direct",
+                    "status": "completed",
+                    "kind": "web_search",
+                    "rawInput": {"query": query, "providerPrivate": "must-not-leak"}
+                }
+            }),
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(direct.public_query.as_deref(), Some(query));
+        assert!(
+            !serde_json::to_string(&direct.result_data)
+                .unwrap()
+                .contains(query)
+        );
+
+        let sparse_update = json!({
+            "sessionUpdate": "tool_call_update",
+            "toolCallId": "web-search-sparse",
+            "status": "completed"
+        });
+        let sparse = completed_action(
+            AdapterKind::OpencodeCli,
+            &json!({"update": sparse_update.clone()}),
+        )
+        .unwrap()
+        .unwrap();
+        let reconciled = reconcile_completed_action(
+            AdapterKind::OpencodeCli,
+            &sparse_update,
+            ObservedToolMetadata {
+                native_kind: Some("web_search".to_string()),
+                observation_digest: None,
+                raw_input: Some(json!({"query": query, "providerPrivate": "must-not-leak"})),
+                stable_meta: None,
+                locations: None,
+                public_file_changes: None,
+            },
+            sparse,
+        )
+        .unwrap();
+        assert_eq!(reconciled.native_kind, "web_search");
+        assert_eq!(reconciled.public_query.as_deref(), Some(query));
     }
 
     #[test]

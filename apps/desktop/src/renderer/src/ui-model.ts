@@ -95,12 +95,15 @@ export type ExecutionPlanStep = {
   status: 'pending' | 'inProgress' | 'completed'
 }
 
+export type ActivityIconKind = 'terminal' | 'file' | 'web' | 'tool' | 'rovai' | 'runtime' | 'unknown'
+
 export type ExecutionStep = {
   id: string
   title: string
   detail: string
   status: ActivityStatus
   activityDomain: string
+  iconKind: ActivityIconKind
   toolName: string | null
   credibility: string
   fileChanges?: Array<{
@@ -439,7 +442,7 @@ export function buildLiveExecutionProgress(
       const codexCommand = nativeType === 'commandExecution' && command
         ? shellCommandDetailText(command)
         : null
-      const detail = codexCommand
+      const evidenceDetail = codexCommand
         ? shellCommandDetail(codexCommand, publicOutput)
         : publicOutput
           ?? command
@@ -447,6 +450,7 @@ export function buildLiveExecutionProgress(
           ?? runtimeToolDetail(item, nativeType)
           ?? nativeStatus
           ?? ''
+      const detail = searchEvidenceText(typedSearchQuery(payload), evidenceDetail) ?? ''
       if (shouldDeferUnresolvedShellActivity(canonical, title, status)) continue
       upsertStep({
         id: itemId,
@@ -454,6 +458,7 @@ export function buildLiveExecutionProgress(
         detail,
         status,
         activityDomain: canonical?.activityDomain ?? 'unknown',
+        iconKind: activityIconKind(canonical),
         toolName: canonical?.toolName ?? null,
         credibility: canonical?.credibility ?? 'unknown',
         fileChanges,
@@ -480,6 +485,7 @@ export function buildLiveExecutionProgress(
         detail: runtimeActionEvidenceText(payload) ?? '',
         status,
         activityDomain: canonical?.activityDomain ?? 'unknown',
+        iconKind: activityIconKind(canonical),
         toolName: canonical?.toolName ?? null,
         credibility: canonical?.credibility ?? 'unknown',
         fileChanges,
@@ -674,27 +680,47 @@ function fullEvidenceValue(value: unknown): string | null {
 }
 
 function runtimeActionEvidenceText(payload: Record<string, unknown>): string | null {
+  let evidenceText: string | null = null
   const coreOwnedBuiltIn = stringField(payload, 'sourceAuthority') === 'core'
     && stringField(payload, 'canonicalTool') !== null
   if (coreOwnedBuiltIn) {
     const coreEnvelope = asRecord(payload.coreEnvelope)
     if (Object.prototype.hasOwnProperty.call(coreEnvelope, 'result') && coreEnvelope.result != null) {
-      return fullEvidenceValue(coreEnvelope.result)
-    }
-    if (Object.prototype.hasOwnProperty.call(coreEnvelope, 'error') && coreEnvelope.error != null) {
-      return fullEvidenceValue(coreEnvelope.error)
-    }
-    const operationProjection = asRecord(payload.operationProjection)
-    if (Object.prototype.hasOwnProperty.call(operationProjection, 'canonicalResult')
+      evidenceText = fullEvidenceValue(coreEnvelope.result)
+    } else if (Object.prototype.hasOwnProperty.call(coreEnvelope, 'error') && coreEnvelope.error != null) {
+      evidenceText = fullEvidenceValue(coreEnvelope.error)
+    } else {
+      const operationProjection = asRecord(payload.operationProjection)
+      if (Object.prototype.hasOwnProperty.call(operationProjection, 'canonicalResult')
       && operationProjection.canonicalResult != null) {
-      return fullEvidenceValue(operationProjection.canonicalResult)
+        evidenceText = fullEvidenceValue(operationProjection.canonicalResult)
+      }
     }
   }
-  const output = fullEvidenceValue(payload.output)
-  const command = runtimeActionShellCommand(payload)
-  const commandDetail = command ? shellCommandDetailText(command) : null
-  if (commandDetail) return shellCommandDetail(commandDetail, output)
-  return output ?? fullEvidenceValue(payload.input)
+  if (evidenceText === null) {
+    const output = fullEvidenceValue(payload.output)
+    const command = runtimeActionShellCommand(payload)
+    const commandDetail = command ? shellCommandDetailText(command) : null
+    evidenceText = commandDetail
+      ? shellCommandDetail(commandDetail, output)
+      : output ?? fullEvidenceValue(payload.input)
+  }
+  return searchEvidenceText(typedSearchQuery(payload), evidenceText)
+}
+
+function typedSearchQuery(payload: unknown): string | null {
+  const root = asRecord(payload)
+  const query = stringField(root, 'query') ?? stringField(asRecord(root.item), 'query')
+  return query !== null && query.length > 0 ? query : null
+}
+
+function searchEvidenceText(query: string | null, evidenceText: string | null): string | null {
+  if (query === null) return evidenceText
+  const sections = [`搜索词\n${query}`]
+  if (evidenceText !== null && evidenceText.length > 0 && evidenceText !== query) {
+    sections.push(`结果\n${evidenceText}`)
+  }
+  return sections.join('\n\n')
 }
 
 function runtimeActionShellCommand(payload: Record<string, unknown>): string | null {
@@ -714,10 +740,11 @@ export function executionEvidenceResultText(
     const commandDetail = command ? shellCommandDetailText(command) : null
     const output = fullEvidenceValue(item.aggregatedOutput ?? item.output)
     if (commandDetail) return shellCommandDetail(commandDetail, output)
-    return output
+    const evidenceText = output
       ?? fullEvidenceValue(item.changes)
       ?? runtimeToolDetail(item, stringField(item, 'type') ?? 'activity')
       ?? stringField(item, 'status')
+    return searchEvidenceText(typedSearchQuery(payload), evidenceText)
   }
   if (eventType === 'runtime.action') {
     return runtimeActionEvidenceText(payload)
@@ -772,44 +799,80 @@ export function executionActivityTitle(
   canonical: CanonicalRuntimeActivityView | null | undefined,
   payload: unknown
 ): string {
-  const presentationHint = canonical?.presentationHint
+  const runtimeTitle = canonical?.presentationHint
     ?.replaceAll('Runtime 工具调用', '工具调用')
     .replaceAll('Runtime 活动', '系统活动')
-  const shellActivity = canonical?.activityDomain === 'shell'
-  const command = shellActivity ? publicShellCommand(payload) : null
-  const codexCommand = shellActivity && codexCommandExecution(payload)
+  const domain = canonical?.activityDomain ?? 'unknown'
 
-  if (shellActivity) {
-    if (codexCommand) {
-      if (presentationHint && codexStructuredCommandPresentation(payload)) {
-        return presentationHint
-      }
-    }
+  if (domain === 'shell') {
+    const command = publicShellCommand(payload)
     const commandPreview = command ? shellCommandPreview(command) : null
     if (commandPreview) return commandPreview
-    if (presentationHint && !genericShellTitle(presentationHint)) {
-      return presentationHint
+    if (runtimeTitle && !genericShellTitle(runtimeTitle)) {
+      return runtimeTitle
     }
     const commandLabel = command ? shellCommandLabel(command) : null
     if (commandLabel) return commandLabel
     if (canonical?.toolName && !genericShellTitle(canonical.toolName)) return canonical.toolName
-    if (presentationHint && !genericShellTitle(presentationHint)) return presentationHint
-  } else {
-    if (canonical?.activityDomain === 'file' && presentationHint) return presentationHint
-    if (canonical?.toolName) return canonical.toolName
-    if (presentationHint) return presentationHint
+    return '终端操作'
   }
-  return ({
-    shell: '终端操作',
-    file: '文件操作',
-    git: 'Git 操作',
-    network: '网络操作',
-    tool: '工具调用',
-    permission: '权限处理',
-    runtime: 'Agent 运行',
-    plan: '计划更新',
-    unknown: '系统活动'
-  } as Record<string, string>)[canonical?.activityDomain ?? 'unknown'] ?? '系统活动'
+  if (domain === 'file') {
+    const fileTitle = reliableFileActivityTitle(canonical, payload)
+    if (fileTitle) return fileTitle
+    if (canonical?.toolName) return canonical.toolName
+    if (runtimeTitle) return runtimeTitle
+    return '文件操作'
+  }
+  if (domain === 'tool' && canonical?.semanticKind === 'tool.web.search') {
+    return 'Web 搜索'
+  }
+  if (domain === 'tool') {
+    if (canonical?.toolName) return canonical.toolName
+    if (runtimeTitle) return runtimeTitle
+    return '工具调用'
+  }
+  if (domain === 'runtime') {
+    if (runtimeTitle) return runtimeTitle
+    return 'Agent 运行'
+  }
+  if (runtimeTitle) return runtimeTitle
+  return '系统活动'
+}
+
+export function activityIconKind(
+  canonical: CanonicalRuntimeActivityView | null | undefined
+): ActivityIconKind {
+  if (canonical?.activityDomain === 'shell') return 'terminal'
+  if (canonical?.activityDomain === 'file') return 'file'
+  if (canonical?.activityDomain === 'tool') {
+    if (canonical.semanticKind === 'tool.web.search') return 'web'
+    if (
+      canonical.sourceAuthority === 'core'
+      && canonical.credibility === 'core_verified'
+      && canonical.toolName
+    ) return 'rovai'
+    return 'tool'
+  }
+  if (canonical?.activityDomain === 'runtime') return 'runtime'
+  return 'unknown'
+}
+
+function reliableFileActivityTitle(
+  canonical: CanonicalRuntimeActivityView | null | undefined,
+  payload: unknown
+): string | null {
+  const operation = asRecord(asRecord(payload).runtimeFileOperation)
+  const operationPath = stringField(operation, 'status') === 'available'
+    ? stringField(operation, 'path')
+    : null
+  const diffEntries = canonical?.diffProjection?.status === 'available'
+    && Array.isArray(canonical.diffProjection.entries)
+    ? canonical.diffProjection.entries
+    : []
+  const path = operationPath ?? (diffEntries.length === 1 ? diffEntries[0]?.path : null)
+  if (!path) return null
+  const fileName = path.split(/[\\/]/u).filter(Boolean).at(-1)
+  return fileName ? `修改 ${fileName}` : null
 }
 
 const GENERIC_SHELL_TITLES = new Set([
@@ -837,25 +900,6 @@ function shouldDeferUnresolvedShellActivity(
   return canonical?.activityDomain === 'shell'
     && status === 'running'
     && genericShellTitle(title)
-}
-
-const CODEX_STRUCTURED_COMMAND_ACTIONS = new Set(['read', 'listFiles', 'search'])
-
-function codexCommandExecution(payload: unknown): boolean {
-  const item = asRecord(asRecord(payload).item)
-  return stringField(item, 'type') === 'commandExecution'
-}
-
-function codexStructuredCommandPresentation(payload: unknown): boolean {
-  const item = asRecord(asRecord(payload).item)
-  const actions = item.commandActions
-  return Array.isArray(actions)
-    && actions.length > 0
-    && actions.every((value) => {
-      const action = asRecord(value)
-      const type = stringField(action, 'type')
-      return type !== null && CODEX_STRUCTURED_COMMAND_ACTIONS.has(type)
-    })
 }
 
 const SHELL_WRAPPER_EXECUTABLES = new Set(['bash', 'dash', 'fish', 'ksh', 'sh', 'zsh'])

@@ -13615,6 +13615,10 @@ fn normalize_acp_event_with_completion(
                     .filter(|kind| *kind != "other")
                     .map(str::to_string)
             });
+            let public_query = public_kind
+                .as_deref()
+                .and_then(|kind| acp::public_acp_search_query(kind, update.get("rawInput")))
+                .or_else(|| completion.and_then(|value| value.public_query.clone()));
             let public_status = completion
                 .and_then(|value| value.result_data.get("status"))
                 .and_then(Value::as_str)
@@ -13632,6 +13636,7 @@ fn normalize_acp_event_with_completion(
                 "status": public_status,
                 "kind": public_kind,
                 "title": update.get("title"),
+                "query": public_query,
                 "locationCount": update
                     .get("locations")
                     .and_then(Value::as_array)
@@ -19083,6 +19088,27 @@ while IFS= read -r _ignored; do :; done
         assert_eq!(payload["toolName"], "execute");
         assert!(payload["rawInputDigest"].is_string());
         assert!(payload["rawOutputDigest"].is_string());
+
+        let query = "password=公开测试词 token=也照常展示";
+        let (_, web_payload) = normalize_acp_event(
+            AdapterKind::OpencodeCli,
+            "session/update",
+            &json!({
+                "update": {
+                    "sessionUpdate": "tool_call",
+                    "toolCallId": "web-search-1",
+                    "status": "in_progress",
+                    "kind": "web_search",
+                    "rawInput": {"query": query, "providerPrivate": "must-not-leak"}
+                }
+            }),
+        );
+        assert_eq!(web_payload["query"], query);
+        assert!(
+            !serde_json::to_string(&web_payload)
+                .unwrap()
+                .contains("must-not-leak")
+        );
 
         let trae_params = json!({
             "update": {
