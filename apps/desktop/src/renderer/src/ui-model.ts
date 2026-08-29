@@ -1219,9 +1219,9 @@ function redactInlineSensitiveAssignments(command: string): string {
 }
 
 function shellCommandDetail(command: string, output: string | null): string {
-  const sections = [`命令\n${command}`]
-  if (output !== null && output.length > 0) sections.push(`输出\n${stripAnsi(output)}`)
-  return sections.join('\n\n')
+  const commandLine = `$ ${command}`
+  if (output === null || output.length === 0) return commandLine
+  return `${commandLine}\n${stripAnsi(output)}`
 }
 
 const COMMANDS_WITH_SUBCOMMAND = new Set([

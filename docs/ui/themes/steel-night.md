@@ -4,7 +4,7 @@ authority: renderer-theme
 status: accepted
 theme_id: steel-night
 mode: dark
-last_updated: 2026-08-28
+last_updated: 2026-08-30
 ---
 
 # Steel Night
@@ -119,7 +119,8 @@ Dark. `color-scheme: dark`.
 
 | Token | Value |
 |---|---:|
-| `--inline-code-canvas` | `#1d252b` |
+| `--inline-code-canvas` | `#353b3f` |
+| `--shell-result-canvas` | `#373f43` |
 | `--code-block-canvas` | `#1d252b` |
 | `--evidence-canvas` | `#12191d` |
 | `--evidence-surface` | `#171f24` |
@@ -161,8 +162,9 @@ Night inherits the shared non-color structure from `:root`; aliases resolve agai
 
 The same semantic separation as Day applies. Brightened identity colors retain stable ID mapping;
 they do not become statuses. Evidence and diffs remain neutral and structurally labeled. Narrative
-inline code uses `--inline-code-canvas`; fenced code uses the bounded `--code-block-canvas` with its
-evidence border, while other evidence surfaces continue to use `--evidence-canvas`.
+inline code uses the borderless `--inline-code-canvas`; Shell command results use
+`--shell-result-canvas`; fenced code uses the bounded `--code-block-canvas` with its evidence border,
+while other evidence surfaces continue to use `--evidence-canvas`.
 
 ## Contrast requirements
 

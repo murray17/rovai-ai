@@ -4363,7 +4363,7 @@ describe('task event projections', () => {
     expect(progress.items[2]).toMatchObject({
       step: {
         title: 'pnpm test',
-        detail: '命令\npnpm test',
+        detail: '$ pnpm test',
         status: 'running'
       }
     })
@@ -4982,7 +4982,7 @@ describe('task event projections', () => {
     const item = progress.items[0]
     if (item.kind !== 'tool') throw new Error('Expected Claude Bash tool progress')
     expect(item.step.detail).toBe(
-      "命令\nprintf '%s\\n' 'ROVAI_CLAUDE_EMPTY_OUTPUT_OK'"
+      "$ printf '%s\\n' 'ROVAI_CLAUDE_EMPTY_OUTPUT_OK'"
     )
 
     const run: AgentRunView = {
@@ -5075,7 +5075,7 @@ describe('task event projections', () => {
       kind: 'tool',
       step: {
         title: 'pwd',
-        detail: '命令\npwd\n\n输出\n/repo\n',
+        detail: '$ pwd\n/repo\n',
         status: 'completed'
       }
     })
@@ -5404,7 +5404,7 @@ describe('task event projections', () => {
       kind: 'tool',
       step: {
         title: 'pnpm test',
-        detail: '命令\npnpm test\n\n输出\ntests passed',
+        detail: '$ pnpm test\ntests passed',
         status: 'completed',
         activityDomain: 'shell',
         toolName: 'run_command'
@@ -5623,7 +5623,7 @@ describe('task event projections', () => {
       kind: 'tool',
       step: {
         title: 'sed -n 1,120p /repo/docs/README.md',
-        detail: '命令\nsed -n 1,120p /repo/docs/README.md',
+        detail: '$ sed -n 1,120p /repo/docs/README.md',
         activityDomain: 'shell'
       }
     })
@@ -5706,7 +5706,7 @@ describe('task event projections', () => {
         exitCode: 0
       },
       _rovaiTruncated: true
-    })).toBe('命令\ngit diff\n\n输出\nfull diff\nsecond line')
+    })).toBe('$ git diff\nfull diff\nsecond line')
     expect(executionEvidenceResultText('activity.completed', {
       item: {
         type: 'commandExecution',
@@ -5714,7 +5714,7 @@ describe('task event projections', () => {
         aggregatedOutput: 'done'
       }
     })).toBe(
-      "命令\nnode <<'NODE' ; const token = '[已隐藏]' ; console.log('done') ; NODE\n\n输出\ndone"
+      "$ node <<'NODE' ; const token = '[已隐藏]' ; console.log('done') ; NODE\ndone"
     )
     expect(executionEvidenceResultText('runtime.action', {
       output: { status: 'accepted', receiptId: 'receipt-1' },
@@ -5725,7 +5725,7 @@ describe('task event projections', () => {
       input: "printf 'CLAUDE_DISPLAY_SINGLE\\n'",
       output: 'CLAUDE_DISPLAY_SINGLE\n'
     })).toBe(
-      "命令\nprintf 'CLAUDE_DISPLAY_SINGLE\\n'\n\n输出\nCLAUDE_DISPLAY_SINGLE\n"
+      "$ printf 'CLAUDE_DISPLAY_SINGLE\\n'\nCLAUDE_DISPLAY_SINGLE\n"
     )
     expect(executionEvidenceResultText('file.change.updated', {
       patch: '*** Begin Patch\n*** End Patch',
