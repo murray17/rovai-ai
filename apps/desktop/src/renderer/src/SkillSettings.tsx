@@ -340,13 +340,13 @@ export function SkillSettings(): React.JSX.Element {
               <SearchIcon />
               <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="搜索 Skill 名称、简介或来源" aria-label="搜索 Skill" />
             </label>
-            <div className="skill-library-legend" aria-hidden="true"><span>投递范围</span><span>状态</span><span>查看</span></div>
           </div>
           {skills === null && <div className="skill-empty" aria-live="polite">正在读取 Skill Library…</div>}
           {skills?.length === 0 && <div className="skill-empty">还没有可用的 Skill。可以导入包含 <code>SKILL.md</code> 的目录。</div>}
           {skills && skills.length > 0 && visibleSkills?.length === 0 && <div className="skill-empty">没有匹配“{search.trim()}”的 Skill。</div>}
           {visibleSkills && visibleSkills.length > 0 && (
             <div className="skill-card-grid">
+              <SkillLibraryColumns />
               {visibleSkills.map((skill) => (
                 <SkillCard
                   key={skill.id}
@@ -385,6 +385,18 @@ export function SkillSettings(): React.JSX.Element {
         onClose={() => !busy && setUpdatingCandidate(null)}
         onConfirm={() => updatingCandidate && void commitCandidate(updatingCandidate, true)}
       />
+    </div>
+  )
+}
+
+export function SkillLibraryColumns(): React.JSX.Element {
+  return (
+    <div className="skill-library-columns" aria-hidden="true">
+      <span />
+      <span>Skill</span>
+      <div className="skill-card-controls skill-library-legend">
+        <span>生效范围</span><span>状态</span><span>查看</span>
+      </div>
     </div>
   )
 }
@@ -578,7 +590,7 @@ export function skillSourcePresentation(skill: SkillView): SkillSourcePresentati
     repositoryUrl: repository?.url ?? null,
     repositoryLabel: repository?.label ?? null,
     revisionLabel: revision ? shortGitRevision(revision) : internalRevision,
-    detailNote: 'Rovai 已保存独立副本，不依赖原始来源；后续不会自动同步，启停和投递范围仍由你管理。'
+    detailNote: 'Rovai 已保存独立副本，不依赖原始来源；后续不会自动同步，启停和生效范围仍由你管理。'
   }
 }
 
@@ -677,7 +689,7 @@ function SkillGroupMenu({ skill, groups, selected, disabled, onToggle }: {
   return (
     <DropdownMenu.Root>
       <DropdownMenu.Trigger asChild>
-        <button className="skill-group-select" type="button" disabled={disabled} aria-label={`${skill.name} 投递范围，${summary}`}>
+        <button className="skill-group-select" type="button" disabled={disabled} aria-label={`${skill.name} 生效范围，${summary}`}>
           <span>{summary}</span><ChevronIcon />
         </button>
       </DropdownMenu.Trigger>

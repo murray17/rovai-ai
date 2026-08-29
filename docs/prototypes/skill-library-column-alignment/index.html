@@ -1,3 +1,11 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Rovai AI · Skill 列表表头对齐交互稿</title>
+  <!-- BUNDLED_PRODUCTION_CSS_START -->
+  <style data-bundled-production-css>
 :root {
   color-scheme: light;
   color: var(--ink);
@@ -6846,3 +6854,345 @@ button.attachment-open:disabled { cursor: wait; opacity: .76; }
   .memory-review-schedule-option[aria-checked="true"],
   .memory-review-schedule-custom-trigger[aria-checked="true"] { outline: 2px solid Highlight; outline-offset: -3px; }
 }
+
+  </style>
+  <!-- BUNDLED_PRODUCTION_CSS_END -->
+  <style>
+    .prototype-skill-list { display: contents; }
+    .prototype-group-menu { position: fixed; }
+    .prototype-group-menu[hidden] { display: none; }
+    .prototype-group-menu .skill-group-option { border: 0; color: inherit; background: transparent; text-align: left; }
+    .prototype-group-menu .skill-group-option:hover,
+    .prototype-group-menu .skill-group-option:focus-visible { background: var(--surface-muted); }
+    .prototype-toast {
+      opacity: 0;
+      pointer-events: none;
+      transform: translateY(5px);
+      transition: opacity 140ms ease, transform 140ms ease;
+    }
+    .prototype-toast.is-visible { opacity: 1; transform: translateY(0); }
+    .prototype-empty { grid-column: 1 / -1; }
+    @media (prefers-reduced-motion: reduce) {
+      .prototype-toast { transition: none; }
+    }
+  </style>
+</head>
+<body>
+  <div id="root">
+    <div class="app-shell">
+      <aside class="unified-sidebar settings-navigation-mode" aria-label="设置分类">
+        <div class="unified-sidebar-drag" aria-hidden="true"></div>
+        <div class="unified-brand">
+          <span class="rail-logo" role="img" aria-label="Rovai AI">
+            <svg class="rail-logo-mark" data-brand-mark="horizon" data-brand-layout="separated" width="20" height="20" viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M12 2 L13.16 7.3 L17.76 8.84 L13.16 10.38 L12 15.68 L10.84 10.38 L6.24 8.84 L10.84 7.3 Z" fill="currentColor"></path>
+              <path d="M3 20.96 Q12 15.96 21 20.96" fill="none" stroke="currentColor" stroke-width="2.08" stroke-linecap="round"></path>
+              <circle class="brand-rendezvous-point" cx="12" cy="18.46" r="1.05"></circle>
+            </svg>
+            <span><strong>Rovai AI</strong></span>
+          </span>
+        </div>
+        <div class="settings-sidebar-navigation">
+          <div class="settings-sidebar-heading">
+            <button class="settings-sidebar-back" type="button" data-notice="原型不会离开设置页。">
+              <span aria-hidden="true"><svg class="navigation-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="m15 18-6-6 6-6"></path></svg></span>
+              <strong>返回 App</strong>
+            </button>
+            <div class="settings-sidebar-title"><strong>设置</strong><span>应用级偏好与本机能力</span></div>
+          </div>
+          <nav class="settings-sidebar-menu" aria-label="设置页面">
+            <section class="settings-sidebar-group" aria-labelledby="prototype-application">
+              <h2 id="prototype-application" class="settings-sidebar-group-title">应用</h2>
+              <button type="button" data-notice="原型仅展示 Skills 页面。"><span aria-hidden="true"><svg class="navigation-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M4 7h10M18 7h2M4 17h2M10 17h10M14 4v6M6 14v6"></path></svg></span><strong>通用</strong></button>
+              <button type="button" data-notice="原型仅展示 Skills 页面。"><span aria-hidden="true"><svg class="navigation-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="12" cy="12" r="4"></circle><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"></path></svg></span><strong>外观</strong></button>
+              <button type="button" data-notice="原型仅展示 Skills 页面。"><span aria-hidden="true"><svg class="navigation-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4"></path></svg></span><strong>提醒</strong></button>
+            </section>
+            <section class="settings-sidebar-group" aria-labelledby="prototype-capability">
+              <h2 id="prototype-capability" class="settings-sidebar-group-title">能力</h2>
+              <button class="active" type="button" aria-current="page"><span aria-hidden="true"><svg class="navigation-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="m12 3 1.7 4.3L18 9l-4.3 1.7L12 15l-1.7-4.3L6 9l4.3-1.7ZM18.5 15l.8 2.2 2.2.8-2.2.8-.8 2.2-.8-2.2-2.2-.8 2.2-.8Z"></path></svg></span><strong>Skills</strong></button>
+              <button type="button" data-notice="原型仅展示 Skills 页面。"><span aria-hidden="true"><svg class="navigation-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="4" y="4" width="6" height="6" rx="1"></rect><rect x="14" y="14" width="6" height="6" rx="1"></rect><path d="M10 7h4a3 3 0 0 1 3 3v4M7 10v4a3 3 0 0 0 3 3h4"></path></svg></span><strong>MCP</strong></button>
+              <button type="button" data-notice="原型仅展示 Skills 页面。"><span aria-hidden="true"><svg class="navigation-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="4" y="5" width="16" height="14" rx="2"></rect><path d="m8 10 2 2-2 2M13 14h3"></path></svg></span><strong>Agent 运行时</strong></button>
+            </section>
+            <section class="settings-sidebar-group" aria-labelledby="prototype-support">
+              <h2 id="prototype-support" class="settings-sidebar-group-title">支持</h2>
+              <button type="button" data-notice="原型仅展示 Skills 页面。"><span aria-hidden="true"><svg class="navigation-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M4 19V9M10 19V5M16 19v-7M22 19H2"></path></svg></span><strong>运行监控</strong></button>
+              <button type="button" data-notice="原型仅展示 Skills 页面。"><span aria-hidden="true"><svg class="navigation-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M14.7 6.3a4 4 0 0 0-5 5L4 17l3 3 5.7-5.7a4 4 0 0 0 5-5l-2.4 2.4-3-3Z"></path></svg></span><strong>诊断与修复</strong></button>
+              <button type="button" data-notice="原型仅展示 Skills 页面。"><span aria-hidden="true"><svg class="navigation-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="12" cy="12" r="9"></circle><path d="M12 11v5M12 8h.01"></path></svg></span><strong>关于与更新</strong></button>
+            </section>
+          </nav>
+        </div>
+      </aside>
+
+      <div class="window-drag-strip" aria-hidden="true"></div>
+
+      <main class="content settings-content">
+        <div class="settings-workbench">
+          <div class="settings-panel settings-panel-skills">
+            <div class="skill-settings">
+              <header class="settings-page-heading">
+                <div class="settings-page-heading-copy">
+                  <p class="settings-page-eyebrow">Settings / Skills</p>
+                  <h1>Skills</h1>
+                  <p>管理 Rovai AI 和队员可使用的 Skill。</p>
+                </div>
+                <div class="settings-page-heading-aside">
+                  <span class="settings-page-note">应用全局配置</span>
+                  <button class="primary-button" id="add-skill-toggle" type="button" aria-expanded="false" aria-controls="skill-import-panel">添加 Skill</button>
+                </div>
+              </header>
+
+              <div class="skill-section-stack">
+                <section id="skill-import-panel" class="skill-import-panel" hidden>
+                  <div class="skill-import-heading">
+                    <div><h2>添加 Skill</h2><p>检查来源与内容后，再保存到 Rovai 的本机受管仓库。</p></div>
+                    <button class="skill-import-close" id="skill-import-close" type="button" aria-label="关闭添加 Skill">
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"></path></svg>
+                    </button>
+                  </div>
+                  <div class="skill-import-tabs" role="tablist" aria-label="Skill 添加方式">
+                    <button id="local-tab" class="active" type="button" role="tab" aria-selected="true" aria-controls="local-panel">本地文件夹</button>
+                    <button id="github-tab" type="button" role="tab" aria-selected="false" aria-controls="github-panel" tabindex="-1">GitHub</button>
+                  </div>
+                  <div id="local-panel" class="skill-import-body" role="tabpanel" aria-labelledby="local-tab">
+                    <div class="skill-import-copy"><strong>选择包含 <code>SKILL.md</code> 的完整目录</strong><small>先生成安全预览；确认后复制完整内容，不再依赖原始文件夹。</small></div>
+                    <button class="primary-button" type="button" data-notice="交互稿不会打开本机目录。">选择文件夹</button>
+                  </div>
+                  <div id="github-panel" class="skill-import-body" role="tabpanel" aria-labelledby="github-tab" hidden>
+                    <label class="skill-import-github-field"><span>GitHub Skill 链接</span><input class="skill-text-input" placeholder="粘贴仓库或带 ref / 子目录的链接"></label>
+                    <button class="primary-button skill-import-github-submit" type="button" data-notice="交互稿不会访问 GitHub。">检查并导入</button>
+                  </div>
+                </section>
+
+                <section class="skill-section skill-library-section" aria-labelledby="installed-skills-title">
+                  <div class="skill-section-heading">
+                    <div><h2 id="installed-skills-title">已安装 Skills</h2><p>搜索 Skill，调整运行时生效组，或查看来源详情。</p></div>
+                    <span class="skill-section-count" id="skill-count">11 项</span>
+                  </div>
+                  <div class="skill-library-toolbar">
+                    <label class="skill-search-row">
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="11" cy="11" r="6.5"></circle><path d="m16 16 4 4"></path></svg>
+                      <input id="skill-search" type="search" placeholder="搜索 Skill 名称、简介或来源" aria-label="搜索 Skill">
+                    </label>
+                  </div>
+                  <div class="skill-card-grid" id="skill-grid">
+                    <div class="skill-library-columns" aria-hidden="true">
+                      <span></span><span>Skill</span>
+                      <div class="skill-card-controls skill-library-legend"><span>生效范围</span><span>状态</span><span>查看</span></div>
+                    </div>
+                    <div class="prototype-skill-list" id="skill-list"></div>
+                  </div>
+                </section>
+              </div>
+            </div>
+          </div>
+        </div>
+      </main>
+    </div>
+  </div>
+
+  <div class="skill-group-menu prototype-group-menu" id="group-menu" role="menu" aria-label="选择 Agent 运行时生效组" hidden>
+    <div class="skill-group-menu-header"><div><strong>选择 Agent 运行时生效组</strong><small>可多选。队员根据当前 Agent 运行时实时计算，仅用于展示。</small></div><span id="group-count">0 / 9</span></div>
+    <div class="skill-group-options" id="group-options"></div>
+    <div class="skill-group-menu-footer">关闭 Skill 只暂停投递，不会清除这里的选择。</div>
+  </div>
+  <div class="app-toast prototype-toast" id="toast" role="status" aria-live="polite"><span id="toast-message"></span></div>
+
+  <script>
+    if (new URLSearchParams(window.location.search).get('theme') === 'night') document.documentElement.dataset.theme = 'night'
+    const chevron = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m7 9 5 5 5-5"></path></svg>'
+    const skills = [
+      ['analyze-agent-codebase', '从源码、配置、Schema 和测试还原 Agent 系统的真实执行边界。', 'Rovai', 'bundled', 9, true],
+      ['campfire', '邀请多位 Camp 成员从不同角度讨论，并整理形成共同建议。', 'Rovai', 'bundled', 9, true],
+      ['diagnosing-bugs', '用可复现证据调查困难、间歇性或性能问题的根因。', 'GitHub', 'third-party', 9, true],
+      ['member-studio', '创建新的 Rovai 队员，并完成名牌与头像方案。', 'Rovai', 'bundled', 7, true],
+      ['worktree', '为独立开发工作创建、复用与交接隔离的 Git worktree。', 'Rovai', 'bundled', 9, true],
+      ['grill-duo', '由一位固定搭档持续复核并追问计划中的关键假设。', 'GitHub', 'third-party', 9, true],
+      ['grill-duo-with-docs', '在双人追问过程中同步维护领域词汇与权威文档。', 'GitHub', 'third-party', 9, true],
+      ['review-duo', '由两位成员分别检查代码质量与需求符合度。', 'Rovai', 'bundled', 9, true],
+      ['tasteful-ui', '以产品语境、品味探索与验证门禁指导真实界面的设计和实现。', 'GitHub', 'third-party', 9, true],
+      ['tdd', '通过红、绿、重构的纵向切片完成测试驱动实现。', 'GitHub', 'third-party', 5, false],
+      ['writing-for-agents', '编写与重构供 Coding Agent 使用的指令和文档。', 'GitHub', 'third-party', 9, true]
+    ].map((item, index) => ({
+      id: `prototype-skill-${index + 1}`,
+      name: item[0], description: item[1], source: item[2], sourceKind: item[3],
+      selectedGroups: new Set(Array.from({ length: item[4] }, (_, groupIndex) => groupIndex)),
+      enabled: item[5], expanded: false, revision: index % 3 + 1
+    }))
+    const runtimes = [
+      ['Codex · Personal', '.codex/skills', 'Codex'],
+      ['OpenCode · Personal', '.agents/skills', 'OpenCode'],
+      ['GitHub Copilot · Personal', '.agents/skills', 'GitHub Copilot'],
+      ['Claude Code · Personal', '.claude/skills', 'Claude Code'],
+      ['Antigravity · Personal', '.agent/skills', 'Antigravity'],
+      ['Kiro · Personal', '.kiro/skills', 'Kiro'],
+      ['Qoder · Personal', '.qoder/skills', 'Qoder'],
+      ['CodeBuddy · Personal', '.codebuddy/skills', 'CodeBuddy'],
+      ['Qwen Code · Personal', '.qwen/skills', 'Qwen Code']
+    ]
+    const search = document.getElementById('skill-search')
+    const list = document.getElementById('skill-list')
+    const count = document.getElementById('skill-count')
+    const menu = document.getElementById('group-menu')
+    const groupOptions = document.getElementById('group-options')
+    const groupCount = document.getElementById('group-count')
+    const toast = document.getElementById('toast')
+    const toastMessage = document.getElementById('toast-message')
+    let activeSkill = null
+    let activeGroupButton = null
+    let toastTimer = null
+
+    function initials(name) {
+      return name.split(/[-_\s]+/u).filter(Boolean).slice(0, 2).map(part => Array.from(part)[0] || '').join('').toUpperCase().slice(0, 2) || 'SK'
+    }
+    function identityToken(index) { return `var(--identity-${index % 8 + 1})` }
+    function groupSummary(skill) {
+      if (skill.selectedGroups.size === runtimes.length) return `全部 ${runtimes.length} 组`
+      if (skill.selectedGroups.size === 0) return '未选择'
+      return `${skill.selectedGroups.size} / ${runtimes.length} 组`
+    }
+    function sourceDetail(skill) {
+      return skill.sourceKind === 'third-party'
+        ? '<a class="skill-source-link" href="#" data-notice="交互稿不会打开外部仓库。"><span>mattpocock/skills</span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M14 5h5v5M10 14 19 5M19 14v5H5V5h5"></path></svg></a><span aria-hidden="true">·</span><code class="skill-detail-source-revision">159ccd47</code>'
+        : '<strong>随 Rovai 安装</strong>'
+    }
+    function skillMarkup(skill, index) {
+      const detailsId = `skill-details-${skill.id}`
+      return `<article class="skill-card ${skill.enabled ? '' : 'is-disabled'} ${skill.expanded ? 'is-expanded' : ''}" data-skill-id="${skill.id}" aria-busy="false">
+        <div class="skill-card-primary">
+          <span class="skill-identity-mark" style="--skill-identity:${identityToken(index)}" aria-hidden="true">${initials(skill.name)}</span>
+          <div class="skill-card-heading">
+            <div class="skill-card-title"><strong title="${skill.name}">${skill.name}</strong><span class="skill-source source-${skill.sourceKind}">${skill.source}</span></div>
+            <p>${skill.description}</p>
+          </div>
+          <div class="skill-card-controls">
+            <button class="skill-group-select" type="button" aria-expanded="false" aria-haspopup="menu" aria-label="${skill.name} 生效范围，${groupSummary(skill)}"><span>${groupSummary(skill)}</span>${chevron}</button>
+            <button class="skill-toggle" type="button" role="switch" aria-checked="${skill.enabled}" aria-label="${skill.enabled ? '停用' : '启用'} ${skill.name}"><span aria-hidden="true"></span></button>
+            <button class="skill-detail-button" type="button" aria-expanded="${skill.expanded}" aria-controls="${detailsId}" aria-label="${skill.expanded ? '收起' : '查看'} ${skill.name} 详情">${chevron}</button>
+          </div>
+        </div>
+        <div class="skill-card-details" id="${detailsId}" ${skill.expanded ? '' : 'hidden'}>
+          <div class="skill-detail-fact skill-detail-source"><span>来源</span><div class="skill-detail-source-value">${sourceDetail(skill)}</div></div>
+          <div class="skill-detail-fact"><span>Library Revision</span><strong class="mono">r${skill.revision}</strong></div>
+          <div class="skill-detail-fact"><span>安装时间</span><strong>2026-08-28 16:20</strong></div>
+          <div class="skill-detail-fact"><span>内容</span><strong>${index + 2} 个文件 · ${(12.4 + index * 3.8).toFixed(1)} KB</strong></div>
+          <div class="skill-detail-fact"><span>内容摘要</span><strong class="mono" title="sha256:prototype-${index}">sha256:4a${index}c…9e2f</strong></div>
+          <p class="skill-detail-note">${skill.sourceKind === 'third-party' ? '随 Rovai 安装的固定上游副本；启动和使用时不访问 GitHub，也不会随上游自动更新。' : '随 Rovai 发布并由应用更新；启用不代表获得额外工具或权限。'}</p>
+        </div>
+      </article>`
+    }
+    function render() {
+      const query = search.value.trim().toLocaleLowerCase('zh-CN')
+      const visible = skills.filter(skill => `${skill.name}\n${skill.description}\n${skill.source}`.toLocaleLowerCase('zh-CN').includes(query))
+      count.textContent = `${visible.length} 项`
+      list.innerHTML = visible.length
+        ? visible.map(skill => skillMarkup(skill, skills.indexOf(skill))).join('')
+        : '<div class="skill-empty prototype-empty">没有匹配当前搜索的 Skill。</div>'
+    }
+    function showToast(message) {
+      toastMessage.textContent = message
+      toast.classList.add('is-visible')
+      clearTimeout(toastTimer)
+      toastTimer = setTimeout(() => toast.classList.remove('is-visible'), 2600)
+    }
+    function closeMenu(returnFocus = false) {
+      menu.hidden = true
+      if (activeGroupButton) activeGroupButton.setAttribute('aria-expanded', 'false')
+      const trigger = activeGroupButton
+      activeGroupButton = null
+      activeSkill = null
+      if (returnFocus && trigger) trigger.focus()
+    }
+    function openMenu(button, skill) {
+      if (activeGroupButton && activeGroupButton !== button) closeMenu()
+      activeGroupButton = button
+      activeSkill = skill
+      button.setAttribute('aria-expanded', 'true')
+      groupCount.textContent = `${skill.selectedGroups.size} / ${runtimes.length}`
+      groupOptions.innerHTML = runtimes.map((runtime, index) => {
+        const selected = skill.selectedGroups.has(index)
+        return `<button class="skill-group-option" type="button" role="menuitemcheckbox" aria-checked="${selected}" data-state="${selected ? 'checked' : 'unchecked'}" data-runtime-index="${index}">
+          <span class="skill-group-checkbox">${selected ? '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m3 8 3 3 7-7"></path></svg>' : ''}</span>
+          <span class="skill-group-main"><span class="skill-group-name-line"><strong>${runtime[0]}</strong><code>${runtime[1]}</code><i class="verified">已验证</i></span><span class="skill-runtime-line">对应 Agent 运行时：${runtime[2]}</span><span class="skill-member-line"><span>当前示例队员按运行时实时计算</span></span></span>
+        </button>`
+      }).join('')
+      menu.hidden = false
+      const rect = button.getBoundingClientRect()
+      const width = Math.min(390, window.innerWidth - 28)
+      menu.style.left = `${Math.max(14, Math.min(rect.left, window.innerWidth - width - 14))}px`
+      menu.style.top = `${Math.min(rect.bottom + 5, window.innerHeight - Math.min(menu.offsetHeight, 590) - 14)}px`
+      groupOptions.querySelector('button')?.focus()
+    }
+
+    search.addEventListener('input', () => { closeMenu(); render() })
+    list.addEventListener('click', event => {
+      const card = event.target.closest('.skill-card')
+      if (!card) return
+      const skill = skills.find(item => item.id === card.dataset.skillId)
+      if (!skill) return
+      const groupButton = event.target.closest('.skill-group-select')
+      if (groupButton) {
+        if (!menu.hidden && activeSkill === skill) closeMenu(true)
+        else openMenu(groupButton, skill)
+        return
+      }
+      const toggle = event.target.closest('.skill-toggle')
+      if (toggle) {
+        toggle.disabled = true
+        card.setAttribute('aria-busy', 'true')
+        setTimeout(() => {
+          skill.enabled = !skill.enabled
+          render()
+          list.querySelector(`[data-skill-id="${skill.id}"] .skill-toggle`)?.focus()
+          showToast(`${skill.name} 已${skill.enabled ? '启用' : '停用'}`)
+        }, 360)
+        return
+      }
+      const details = event.target.closest('.skill-detail-button')
+      if (details) {
+        skill.expanded = !skill.expanded
+        render()
+        list.querySelector(`[data-skill-id="${skill.id}"] .skill-detail-button`)?.focus()
+      }
+    })
+    groupOptions.addEventListener('click', event => {
+      const option = event.target.closest('.skill-group-option')
+      if (!option || !activeSkill) return
+      const index = Number(option.dataset.runtimeIndex)
+      if (activeSkill.selectedGroups.has(index)) activeSkill.selectedGroups.delete(index)
+      else activeSkill.selectedGroups.add(index)
+      const skill = activeSkill
+      render()
+      const nextTrigger = list.querySelector(`[data-skill-id="${skill.id}"] .skill-group-select`)
+      activeGroupButton = nextTrigger
+      openMenu(nextTrigger, skill)
+      groupOptions.querySelector(`[data-runtime-index="${index}"]`)?.focus()
+    })
+    menu.addEventListener('keydown', event => { if (event.key === 'Escape') { event.preventDefault(); closeMenu(true) } })
+    document.addEventListener('pointerdown', event => {
+      if (!menu.hidden && !menu.contains(event.target) && !event.target.closest('.skill-group-select')) closeMenu()
+    })
+    window.addEventListener('resize', () => closeMenu())
+
+    const addToggle = document.getElementById('add-skill-toggle')
+    const importPanel = document.getElementById('skill-import-panel')
+    const closeImport = () => { importPanel.hidden = true; addToggle.setAttribute('aria-expanded', 'false'); addToggle.focus() }
+    addToggle.addEventListener('click', () => {
+      importPanel.hidden = !importPanel.hidden
+      addToggle.setAttribute('aria-expanded', String(!importPanel.hidden))
+    })
+    document.getElementById('skill-import-close').addEventListener('click', closeImport)
+    const tabs = [document.getElementById('local-tab'), document.getElementById('github-tab')]
+    tabs.forEach(tab => tab.addEventListener('click', () => {
+      const github = tab.id === 'github-tab'
+      tabs.forEach(item => { const active = item === tab; item.classList.toggle('active', active); item.setAttribute('aria-selected', String(active)); item.tabIndex = active ? 0 : -1 })
+      document.getElementById('local-panel').hidden = github
+      document.getElementById('github-panel').hidden = !github
+    }))
+    document.addEventListener('click', event => {
+      const notice = event.target.closest('[data-notice]')
+      if (notice) { event.preventDefault(); showToast(notice.dataset.notice) }
+    })
+    render()
+  </script>
+</body>
+</html>
