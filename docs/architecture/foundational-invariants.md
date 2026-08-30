@@ -1,7 +1,7 @@
 ---
 document_type: architecture
 authority: current-foundational-invariants
-last_updated: 2026-08-29
+last_updated: 2026-08-30
 ---
 
 # 当前基础架构不变量
@@ -421,9 +421,9 @@ last_updated: 2026-08-29
   query-only 输入 shape，当前只允许 Copilot `1.0.79`、Qoder `1.1.28`、Kiro `2.18.1` 与 CodeBuddy
   `2.133.1` 的已记录 tuple。准入值只能是单个非空字符串或元素全为非空字符串的非空数组；多项 projection 以
   `query` 保存第一项，并以 `queries` 保存完整有序数组。每项原样保存，不做敏感词过滤或去重；相邻未准入字段仍
-  保持私有。Renderer 还必须验证 projection available 与 Canonical `tool.web.search` 同时成立，直接显示单项或以
-  中文逗号连接多项，不增加“搜索词”标签；该 Activity 仍计入连续 Tool 组操作数。历史 Evidence 不回填，缺失
-  typed projection 不生成占位。
+  保持私有。Renderer 还必须验证 projection available 与 Canonical `tool.web.search` 同时成立；详情第一行以
+  `搜索 ` 紧接单项 query 或中文逗号连接的多项 query，存在公开结果时从下一行连续显示，不插入“搜索词 / 结果”
+  标签或空白分隔行。该 Activity 仍计入连续 Tool 组操作数。历史 Evidence 不回填，缺失 typed projection 不生成占位。
 - Shell command 只有在协议的封闭公共字段中出现时才能进入 Evidence：Claude 仅 Bash command，通用 ACP 仅
   `rawInput.command` 字符串，TRAE CLI CN 额外仅允许 `rawInput.Command` 字符串，Antigravity 仅明确 Shell
   工具的 `tool_info.parameters.CommandLine` 字符串。TRAE 的大小写例外必须绑定 `trae-cn-cli` Adapter identity，
@@ -510,8 +510,9 @@ last_updated: 2026-08-29
   不是恢复旧 Drawer 状态。显式“移到右侧”和其他既有精确执行导航仍会显示并激活“执行”。移动必须复用
   同一已挂载 DOM，保留 selection、disclosure、局部加载和嵌套阅读位置，不复制 console、不改变 Run 状态。
 - Tool 全文不属于 Camp open 默认 DOM；截断 Evidence/Managed Blob 只在用户展开精确 Canonical Tool 行后读取，并只提取公开结果字段。读取成功后允许完整结果在当前 Drawer 会话内挂载于有最大高度的内部滚动 region，但不得暴露 Envelope 或建立 standalone raw Evidence surface。
-- 任一 Shell Activity 只要同一公开 payload 提供 command，就使用统一完整脱敏标题并在 disclosure 中分开
-  显示命令与公开输出；没有 command 时保留 Runtime toolName/title/domain fallback，不从其他字段补写。
+- 任一 Shell Activity 只要同一公开 payload 提供 command，就使用统一完整脱敏标题；disclosure 第一行以
+  `$ ` 紧接完整命令，存在公开输出时从下一行连续显示，不插入“命令 / 输出”标签或空白分隔行。没有 command
+  时保留 Runtime toolName/title/domain fallback，不从其他字段补写。
 - 运行中的 Runtime diagnostic 只能从 Adapter 严格白名单的结构化公开字段进入 Execution Evidence；它不改变
   AgentRun 终态、不证明 Tool Activity，也不从 raw stderr、provider body 或私有日志补写事实。Renderer 在
   精确 non-terminal Run 内明显显示最新可恢复状态；Run 终态后移除 live notice，并继续以权威 terminal failure

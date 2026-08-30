@@ -761,11 +761,9 @@ function typedSearchQuery(
 
 function searchEvidenceText(query: string | null, evidenceText: string | null): string | null {
   if (query === null) return evidenceText
-  const sections = [query]
-  if (evidenceText !== null && evidenceText.length > 0 && evidenceText !== query) {
-    sections.push(`结果\n${evidenceText}`)
-  }
-  return sections.join('\n\n')
+  const queryLine = `搜索 ${query}`
+  if (evidenceText === null || evidenceText.length === 0 || evidenceText === query) return queryLine
+  return `${queryLine}\n${evidenceText}`
 }
 
 function runtimeActionShellCommand(payload: Record<string, unknown>): string | null {
@@ -1247,9 +1245,9 @@ function redactInlineSensitiveAssignments(command: string): string {
 }
 
 function shellCommandDetail(command: string, output: string | null): string {
-  const sections = [`命令\n${command}`]
-  if (output !== null && output.length > 0) sections.push(`输出\n${stripAnsi(output)}`)
-  return sections.join('\n\n')
+  const commandLine = `$ ${command}`
+  if (output === null || output.length === 0) return commandLine
+  return `${commandLine}\n${stripAnsi(output)}`
 }
 
 const COMMANDS_WITH_SUBCOMMAND = new Set([

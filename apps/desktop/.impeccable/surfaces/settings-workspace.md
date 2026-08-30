@@ -48,9 +48,10 @@ disclosure whose expanded chooser stays two-column. Narrow layouts reflow the ch
 World-map availability appears in a 会话 section immediately after 新对话 and before 窗口. It starts
 enabled for new and migrated preferences and commits immediately. The row does not repeat that default
 as a badge, add a current-effective summary or add a conversation-page preview action. Turning it off
-forces Camp reading surfaces back to the timeline. The compact 地图 control remains discoverable but
-unavailable; activating it explains the setting and offers a direct recovery path back to this section
-without entering the map. Preserve the established 启动 and 新对话 composition. The 窗口 reset row uses
+forces Camp reading surfaces back to the timeline and removes the entire 会话 / 地图 switcher and map
+route controls. Do not retain a disabled entry, explanatory popover or settings shortcut. Conversation
+find remains available independently. Re-enabling the setting restores the switcher without opening
+the map automatically. Preserve the established 启动 and 新对话 composition. The 窗口 reset row uses
 one quiet raised surface, including in Porcelain Day where it reads as a white support card.
 
 ## 外观与提醒
