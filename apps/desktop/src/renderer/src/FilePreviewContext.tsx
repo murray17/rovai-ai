@@ -9,6 +9,7 @@ import {
   type ReactNode
 } from 'react'
 import type {
+  AgentRunFileChangesView,
   FilePreviewErrorPayload,
   FilePreviewOperationResult,
   FilePreviewPageContent,
@@ -17,6 +18,7 @@ import type {
   ResolvedFilePreview
 } from '@contracts'
 import { secureFilePreviewHtml } from './file-preview-html-document'
+import { FilePreviewLayoutProvider } from './FilePreviewLayout'
 
 export type FilePreviewContent =
   | { kind: 'markdown'; text: string; tabToken: string; assetBasePath: string }
@@ -26,6 +28,7 @@ export type FilePreviewContent =
   | { kind: 'page'; page: FilePreviewPageContent }
 
 export interface FilePreviewTabModel {
+  kind: 'file'
   id: string
   file: ResolvedFilePreview
   loadState: 'opening' | 'ready' | 'error'
@@ -39,6 +42,16 @@ export interface FilePreviewTabModel {
   pageIndex: number
 }
 
+export interface FileChangesPreviewTabModel {
+  kind: 'file_change'
+  id: string
+  campId: string
+  changes: AgentRunFileChangesView
+  selectedEvidenceFileId: string | null
+}
+
+export type PreviewTabModel = FilePreviewTabModel | FileChangesPreviewTabModel
+
 export type FilePreviewOpenOutcome =
   | { kind: 'preview'; tabId: string }
   | { kind: 'system' }
@@ -46,32 +59,24 @@ export type FilePreviewOpenOutcome =
   | { kind: 'cancelled' }
   | { kind: 'error'; error: FilePreviewErrorPayload }
 
-export interface FilePreviewReturnTarget {
-  kind: 'evidence_review'
-  label: string
-  onReturn(): void
-}
-
 export interface FilePreviewOpenFeedback {
   tabId: string
   sequence: number
   isNew: boolean
+  focusTab?: boolean
 }
 
 export interface FilePreviewContextValue {
-  tabs: FilePreviewTabModel[]
-  activeTab: FilePreviewTabModel | null
+  tabs: PreviewTabModel[]
+  activeTab: PreviewTabModel | null
   activeTabId: string | null
   openFeedback: FilePreviewOpenFeedback | null
   paneVisible: boolean
-  paneWidth: number
-  returnTarget: Pick<FilePreviewReturnTarget, 'kind' | 'label'> | null
   open(request: OpenFilePreviewRequest): Promise<FilePreviewOpenOutcome>
-  setReturnTarget(target: FilePreviewReturnTarget | null): void
-  returnToTarget(): void
+  openFileChanges(campId: string, changes: AgentRunFileChangesView, evidenceFileId?: string): void
+  selectChangedFile(tabId: string, evidenceFileId: string): void
   showPane(): void
   hidePane(): void
-  setPaneWidth(width: number): void
   activate(tabId: string): void
   move(tabId: string, direction: -1 | 1): void
   close(tabId: string): void
@@ -101,30 +106,14 @@ export function FilePreviewProvider({
   campId: string | null
   children: ReactNode
 }): React.JSX.Element {
-  const [tabs, setTabsState] = useState<FilePreviewTabModel[]>([])
+  const [tabs, setTabsState] = useState<PreviewTabModel[]>([])
   const [activeTabId, setActiveTabId] = useState<string | null>(null)
   const [openFeedback, setOpenFeedback] = useState<FilePreviewOpenFeedback | null>(null)
   const [paneVisible, setPaneVisible] = useState(false)
-  const [paneWidth, setPaneWidthState] = useState(480)
   const tabsRef = useRef(tabs)
   const objectUrls = useRef(new Set<string>())
   const campIdRef = useRef(campId)
-  const returnTargetRef = useRef<FilePreviewReturnTarget | null>(null)
-  const [returnTarget, setReturnTargetState] = useState<Pick<FilePreviewReturnTarget, 'kind' | 'label'> | null>(null)
-  const setReturnTarget = useCallback((target: FilePreviewReturnTarget | null) => {
-    returnTargetRef.current = target
-    setReturnTargetState(target ? { kind: target.kind, label: target.label } : null)
-  }, [])
-
-  const returnToTarget = useCallback(() => {
-    const target = returnTargetRef.current
-    returnTargetRef.current = null
-    setReturnTargetState(null)
-    setPaneVisible(false)
-    target?.onReturn()
-  }, [])
-
-  const setTabs = useCallback((update: (current: FilePreviewTabModel[]) => FilePreviewTabModel[]) => {
+  const setTabs = useCallback((update: (current: PreviewTabModel[]) => PreviewTabModel[]) => {
     const next = update(tabsRef.current)
     tabsRef.current = next
     setTabsState(next)
@@ -138,18 +127,17 @@ export function FilePreviewProvider({
 
   useEffect(() => {
     campIdRef.current = campId
-    for (const tab of tabsRef.current) revokeContent(tab.content)
+    for (const tab of tabsRef.current) if (tab.kind === 'file') revokeContent(tab.content)
     tabsRef.current = []
     setTabsState([])
     setActiveTabId(null)
     setOpenFeedback(null)
     setPaneVisible(false)
-    setReturnTarget(null)
     void window.rovai.filePreview.bindCamp(campId)
     return () => {
       if (campIdRef.current === campId) void window.rovai.filePreview.bindCamp(null)
     }
-  }, [campId, revokeContent, setReturnTarget])
+  }, [campId, revokeContent])
 
   useEffect(() => () => {
     for (const url of objectUrls.current) URL.revokeObjectURL(url)
@@ -159,7 +147,7 @@ export function FilePreviewProvider({
   useEffect(() => window.rovai.filePreview.onExternalUpdate((event) => {
     if (event.campId !== campIdRef.current) return
     const changed = new Set(event.previewKeys)
-    setTabs((current) => current.map((tab) => changed.has(tab.file.previewKey)
+    setTabs((current) => current.map((tab) => tab.kind === 'file' && changed.has(tab.file.previewKey)
       ? {
           ...tab,
           hasExternalUpdate: true,
@@ -250,11 +238,11 @@ export function FilePreviewProvider({
   const finishOpening = useCallback(async (file: ResolvedFilePreview): Promise<void> => {
     const loaded = await loadContent(file)
     const current = tabsRef.current.find((tab) => tab.id === file.previewKey)
-    if (!current || current.file.handleId !== file.handleId) {
+    if (current?.kind !== 'file' || current.file.handleId !== file.handleId) {
       if (loaded.ok) revokeContent(loaded.content)
       return
     }
-    setTabs((entries) => entries.map((tab) => tab.id !== file.previewKey
+    setTabs((entries) => entries.map((tab) => tab.kind !== 'file' || tab.id !== file.previewKey
       ? tab
       : loaded.ok
         ? {
@@ -268,28 +256,55 @@ export function FilePreviewProvider({
         : { ...tab, loadState: 'error', error: loaded.error }))
   }, [loadContent, revokeContent, setTabs])
 
-  const showOpenedTab = useCallback((tabId: string, isNew: boolean) => {
+  const showOpenedTab = useCallback((tabId: string, isNew: boolean, focusTab = false) => {
     setActiveTabId(tabId)
     setPaneVisible(true)
-    setOpenFeedback((previous) => ({ tabId, sequence: (previous?.sequence ?? 0) + 1, isNew }))
+    setOpenFeedback((previous) => ({ tabId, sequence: (previous?.sequence ?? 0) + 1, isNew, focusTab }))
   }, [])
 
+  const openFileChanges = useCallback((
+    targetCampId: string,
+    changes: AgentRunFileChangesView,
+    evidenceFileId?: string
+  ) => {
+    if (targetCampId !== campIdRef.current) return
+    const id = `file-change:${encodeURIComponent(targetCampId)}:${encodeURIComponent(changes.agentRunId)}:${changes.executionEpoch}`
+    const existing = tabsRef.current.find((tab) => tab.id === id)
+    const previousSelection = existing?.kind === 'file_change' ? existing.selectedEvidenceFileId : null
+    const selectedFile = changes.files.find((file) => file.evidenceFileId === evidenceFileId)
+      ?? changes.files.find((file) => file.evidenceFileId === previousSelection)
+      ?? changes.files[0]
+    const selectedEvidenceFileId = selectedFile?.evidenceFileId ?? null
+    const tab: FileChangesPreviewTabModel = { kind: 'file_change', id, campId: targetCampId, changes, selectedEvidenceFileId }
+    setTabs((current) => existing ? current.map((entry) => entry.id === id ? tab : entry) : [...current, tab])
+    showOpenedTab(id, !existing)
+  }, [setTabs, showOpenedTab])
+
+  const selectChangedFile = useCallback((tabId: string, evidenceFileId: string) => {
+    setTabs((current) => current.map((tab) => tab.id === tabId && tab.kind === 'file_change'
+      && tab.changes.files.some((file) => file.evidenceFileId === evidenceFileId)
+      ? { ...tab, selectedEvidenceFileId: evidenceFileId }
+      : tab))
+  }, [setTabs])
+
   const installOpenResult = useCallback(async (
-    result: OpenFilePreviewResult
+    result: OpenFilePreviewResult,
+    focusTab = false
   ): Promise<FilePreviewOpenOutcome> => {
     if (result.kind === 'opened_in_system') return { kind: 'system' }
     if (result.kind === 'evidence_review') return { kind: 'evidence_review', result }
     const file = result.file
-    const duplicate = tabsRef.current.find((tab) => tab.id === file.previewKey)
+    const duplicate = tabsRef.current.find((tab) => tab.kind === 'file' && tab.id === file.previewKey)
     if (duplicate) {
       await window.rovai.filePreview.release({ handleId: file.handleId })
-      setTabs((current) => current.map((tab) => tab.id === duplicate.id
+      setTabs((current) => current.map((tab) => tab.kind === 'file' && tab.id === duplicate.id
         ? { ...tab, file: { ...tab.file, target: file.target } }
         : tab))
-      showOpenedTab(duplicate.id, false)
+      showOpenedTab(duplicate.id, false, focusTab)
       return { kind: 'preview', tabId: duplicate.id }
     }
     const tab: FilePreviewTabModel = {
+      kind: 'file',
       id: file.previewKey,
       file,
       loadState: 'opening',
@@ -303,15 +318,16 @@ export function FilePreviewProvider({
       pageIndex: 0
     }
     setTabs((current) => [...current, tab])
-    showOpenedTab(tab.id, true)
+    showOpenedTab(tab.id, true, focusTab)
     void finishOpening(file)
     return { kind: 'preview', tabId: tab.id }
   }, [finishOpening, setTabs, showOpenedTab])
 
   const open = useCallback(async (request: OpenFilePreviewRequest): Promise<FilePreviewOpenOutcome> => {
+    const focusTab = Boolean(document.activeElement?.closest('.file-preview-pane'))
     try {
       const result = await window.rovai.filePreview.open(request)
-      if (result.ok) return installOpenResult(result.value)
+      if (result.ok) return installOpenResult(result.value, focusTab)
       const challenge = result.error.authorizationChallenge
       if (result.error.code !== 'authorization_required' || !challenge) {
         return { kind: 'error', error: result.error }
@@ -322,7 +338,7 @@ export function FilePreviewProvider({
       })
       if (!granted.ok) return { kind: 'error', error: granted.error }
       if (!granted.value) return { kind: 'cancelled' }
-      return installOpenResult(granted.value.result)
+      return installOpenResult(granted.value.result, focusTab)
     } catch {
       return { kind: 'error', error: errorFromUnknown() }
     }
@@ -334,16 +350,9 @@ export function FilePreviewProvider({
     setPaneVisible(true)
   }, [])
 
-  const showPane = useCallback(() => {
-    if (tabsRef.current.length > 0) setPaneVisible(true)
-  }, [])
+  const showPane = useCallback(() => setPaneVisible(true), [])
 
   const hidePane = useCallback(() => setPaneVisible(false), [])
-
-  const setPaneWidth = useCallback((width: number) => {
-    if (!Number.isFinite(width)) return
-    setPaneWidthState(Math.round(Math.min(620, Math.max(360, width))))
-  }, [])
 
   const move = useCallback((tabId: string, direction: -1 | 1) => {
     setTabs((current) => {
@@ -372,26 +381,24 @@ export function FilePreviewProvider({
         : previous.slice(Math.max(0, activeIndex + 1)).find((tab) => !ids.has(tab.id))?.id
           ?? previous.slice(0, Math.max(0, activeIndex)).reverse().find((tab) => !ids.has(tab.id))?.id
           ?? remaining[0].id
-    for (const tab of closing) revokeContent(tab.content)
+    for (const tab of closing) if (tab.kind === 'file') revokeContent(tab.content)
     setTabs(() => remaining)
     setActiveTabId(nextActiveTabId)
     setOpenFeedback((current) => current && ids.has(current.tabId) ? null : current)
     if (remaining.length === 0) {
-      const target = returnTargetRef.current
-      returnTargetRef.current = null
-      setReturnTargetState(null)
       setPaneVisible(false)
-      target?.onReturn()
     }
     for (const tab of closing) {
-      void window.rovai.filePreview.release({ handleId: tab.file.handleId })
+      if (tab.kind === 'file') void window.rovai.filePreview.release({ handleId: tab.file.handleId })
     }
   }, [activeTabId, revokeContent, setTabs])
 
   const close = useCallback((tabId: string) => closeMany([tabId]), [closeMany])
 
-  const fileForAction = useCallback((tabId: string): ResolvedFilePreview | null =>
-    tabsRef.current.find((tab) => tab.id === tabId)?.file ?? null, [])
+  const fileForAction = useCallback((tabId: string): ResolvedFilePreview | null => {
+    const tab = tabsRef.current.find((entry) => entry.id === tabId)
+    return tab?.kind === 'file' ? tab.file : null
+  }, [])
 
   const openInSystem = useCallback(async (tabId: string) => {
     const file = fileForAction(tabId)
@@ -416,8 +423,8 @@ export function FilePreviewProvider({
 
   const retry = useCallback(async (tabId: string): Promise<void> => {
     const tab = tabsRef.current.find((entry) => entry.id === tabId)
-    if (!tab) return
-    setTabs((current) => current.map((entry) => entry.id === tabId
+    if (tab?.kind !== 'file') return
+    setTabs((current) => current.map((entry) => entry.kind === 'file' && entry.id === tabId
       ? { ...entry, loadState: 'opening', error: null }
       : entry))
     await finishOpening(tab.file)
@@ -425,7 +432,7 @@ export function FilePreviewProvider({
 
   const reload = useCallback(async (tabId: string): Promise<void> => {
     const tab = tabsRef.current.find((entry) => entry.id === tabId)
-    if (!tab || tab.isRefreshing) return
+    if (tab?.kind !== 'file' || tab.isRefreshing) return
     const refreshStartVersion = tab.externalUpdateVersion
     setTabs((current) => current.map((entry) => entry.id === tabId
       ? { ...entry, isRefreshing: true, refreshError: null }
@@ -455,7 +462,7 @@ export function FilePreviewProvider({
         return
       }
       setTabs((current) => current.map((entry) => {
-        if (entry.id !== tabId) return entry
+        if (entry.kind !== 'file' || entry.id !== tabId) return entry
         revokeContent(entry.content)
         return {
           ...entry,
@@ -480,7 +487,7 @@ export function FilePreviewProvider({
 
   const changePage = useCallback(async (tabId: string, direction: -1 | 1): Promise<void> => {
     const tab = tabsRef.current.find((entry) => entry.id === tabId)
-    if (!tab || tab.content?.kind !== 'page') return
+    if (tab?.kind !== 'file' || tab.content?.kind !== 'page') return
     const nextIndex = tab.pageIndex + direction
     if (nextIndex < 0) return
     const offset = direction === 1
@@ -494,7 +501,7 @@ export function FilePreviewProvider({
     })
     if (!result.ok) return
     setTabs((current) => current.map((entry) => {
-      if (entry.id !== tabId) return entry
+      if (entry.kind !== 'file' || entry.id !== tabId) return entry
       const offsets = entry.pageOffsets.slice(0, nextIndex + 1)
       offsets[nextIndex] = offset
       if (result.value.hasNext) offsets[nextIndex + 1] = result.value.endOffset
@@ -514,14 +521,11 @@ export function FilePreviewProvider({
     activeTabId,
     openFeedback,
     paneVisible,
-    paneWidth,
-    returnTarget,
     open,
-    setReturnTarget,
-    returnToTarget,
+    openFileChanges,
+    selectChangedFile,
     showPane,
     hidePane,
-    setPaneWidth,
     activate,
     move,
     close,
@@ -532,9 +536,15 @@ export function FilePreviewProvider({
     reload,
     retry,
     changePage
-  }), [activate, activeTab, activeTabId, changePage, close, closeMany, copyDisplayPath, hidePane, move, open, openFeedback, openInSystem, paneVisible, paneWidth, reload, revealInFolder, retry, returnTarget, returnToTarget, setPaneWidth, setReturnTarget, showPane, tabs])
+  }), [activate, activeTab, activeTabId, changePage, close, closeMany, copyDisplayPath, hidePane, move, open, openFileChanges, openFeedback, openInSystem, paneVisible, reload, revealInFolder, retry, selectChangedFile, showPane, tabs])
 
-  return <FilePreviewContext.Provider value={value}>{children}</FilePreviewContext.Provider>
+  return (
+    <FilePreviewContext.Provider value={value}>
+      <FilePreviewLayoutProvider campId={campId} visible={paneVisible}>
+        {children}
+      </FilePreviewLayoutProvider>
+    </FilePreviewContext.Provider>
+  )
 }
 
 export function useFilePreview(): FilePreviewContextValue {

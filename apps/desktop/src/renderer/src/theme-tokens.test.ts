@@ -310,7 +310,7 @@ describe('Porcelain Day + Steel Night theme tokens', () => {
       /\.conversation-bubble\.agent \.safe-markdown > :where\(pre, table\)\s*\{[^}]*width:\s*min\(var\(--conversation-artifact-width\), 100%\)/
     )
     expect(css).toMatch(
-      /@media\s*\(min-width:\s*1800px\)[\s\S]*?\.timeline-event-card\s*\{[^}]*width:\s*min\(var\(--conversation-artifact-width\), 100%\)/
+      /@media\s*\(min-width:\s*1800px\)[\s\S]*?\.timeline-event-card:not\(\.task-event-card\)\s*\{[^}]*width:\s*min\(var\(--conversation-artifact-width\), 100%\)/
     )
     expect(css).toMatch(
       /@media\s*\(min-width:\s*1800px\)[\s\S]*?\.approval-dock, \.runtime-recovery-dock\s*\{[^}]*width:\s*min\(var\(--conversation-wide-width\), calc\(100% - 54px\)\)/
