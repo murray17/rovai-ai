@@ -1009,10 +1009,16 @@ mod tests {
             assert_eq!(result.result.status, CommandResultStatus::Applied);
         };
         let frozen_config = |database: &Database, turn_id: &str| -> serde_json::Value {
-            let serialized: String = database.connection().query_row(
-                "SELECT effective_config_json FROM agent_run WHERE camp_turn_id = ?1 AND agent_id = 'agent_1'",
-                [turn_id], |row| row.get(0),
-            ).unwrap();
+            let serialized: String = database
+                .connection()
+                .query_row(
+                    "SELECT agent_run.effective_config_json FROM agent_run
+                 JOIN conversation ON conversation.id = agent_run.conversation_id
+                 WHERE agent_run.camp_turn_id = ?1 AND conversation.agent_id = 'agent_1'",
+                    [turn_id],
+                    |row| row.get(0),
+                )
+                .unwrap();
             serde_json::from_str(&serialized).unwrap()
         };
         set_fast(&mut database, false);

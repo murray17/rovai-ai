@@ -1,7 +1,7 @@
 ---
 document_type: implementation-plan
 version: v1.34
-status: in_progress
+status: completed
 last_updated: 2026-08-31
 ---
 
@@ -50,7 +50,26 @@ A 的完整冻结配置保持不变；不增加并行测试 owner 或改变消�
 
 验证在隔离 worktree 进行，不启动日常 App，不使用日常 Electron userData。UI fixture 运行生产
 CampWorkspace，通过关闭的模拟 API 供给数据，无 Core/SQLite/真实 Runtime；native auth/schema 只检查
-metadata，不发起模型请求。完整检查结果在完成后记录。
+metadata，不发起模型请求。以下为主线整合后的本地结果；PR CI、合并与清理结果由 GitHub PR 和开发交接记录拥有。
+
+| 检查 | 结果 |
+| --- | --- |
+| `pnpm typecheck`、`pnpm test` | 通过；719 项 Vitest、219 项 Node 测试，1 项既有平台 skip；文档与 Skill 检查通过 |
+| `pnpm build:desktop` | 通过 |
+| `pnpm test:rust:pr` | 415 项 lib、32 项 CLI、291 项 slow 测试通过 |
+| `cargo test -p rovai-core --bin rovai-core -- --quiet` | 184 项通过，4 项既有 ignore |
+| `cargo test -p rovai-core --lib pending_camp_input::tests -- --quiet` | 7 项通过，包括整合后补充的 Pending/Fast 发布时冻结断言 |
+| `cargo fmt --all --check`、严格 Clippy 全 workspace/all-targets | 通过 |
+| 生产 Electron fixtures | Fast 布局、连续消息、contextBridge、结构化输入、启动呈现、文件预览六组通过 |
+| diff-aware 文档检查 | 对整合基线 `8c98d5bf257abaf91cfcbbcf6ba55e95f6a28da6` 通过；无 checker exception |
+
+## 独立复核
+
+| Standards | Spec |
+| --- | --- |
+| rebind 丢失冻结选择与摘要问题已修复；metadata 复用完整 executable identity，并在检查后再次验证原 fingerprint。双迁移、旧源助手和版本路由复核无剩余阻断。 | Codex fallback 不再改写 Thread 默认；迟到的检测/保存结果不能恢复旧绑定 UI。Pending 发布时冻结新选择，已有 Run 保持原值；无剩余实现问题。 |
+
+复核针对 `b9f58fc7` 的生产实现；随后仅扩展现有 Pending owner 并完成上述回归，没有修改队列产品语义。
 
 本机边界：Claude 2.1.220 仅报告 `oauth_token`、订阅类型为空；Codex 0.147.0 标准与 experimental schema
 均无 `serviceTierForTurn`。两者均按未知/不支持隐藏，不能宣称本机原生 Fast 端到端成功。
