@@ -1381,6 +1381,7 @@ export function CampWorkspace({
   })
   const [resolvingRecoveryBlockerId, setResolvingRecoveryBlockerId] = useState<string | null>(null)
   const [submittedExecutionRequest, setSubmittedExecutionRequest] = useState<CampMessageSendReceipt | null>(null)
+  const publishedMessageSequence = snapshot.messages.reduce((latest, message) => Math.max(latest, message.sequence), 0)
   const executionDrawerTriggerRef = useRef<HTMLButtonElement | null>(null)
   const executionDrawerReturnAgentIdRef = useRef<string | null>(null)
   const bottomPlacementButtonRef = useRef<HTMLButtonElement>(null)
@@ -1919,6 +1920,26 @@ export function CampWorkspace({
     replyAnchorLoads.current.set(messageId, request)
     return request
   }, [snapshot.camp.id])
+
+  useEffect(() => {
+    if (!composerDraft || hasLocalDraftPayload || composerSubmitting || routingMutating) return
+    const campId = snapshot.camp.id
+    let cancelled = false
+    // Pending publication bypasses submitMessage. Refresh Core's route projection
+    // when a message enters the conversation, without replacing the local editor.
+    void (async () => {
+      await draftMutationQueues.current.get(campId)
+      if (cancelled) return
+      const current = composerDraftRef.current
+      const content = draftContent.current
+      const refreshed = await window.rovai.request<CampComposerDraftView>('camp.composerDraft.get', { campId })
+      if (cancelled || draftCampId.current !== campId
+        || composerDraftRef.current !== current || draftContent.current !== content
+        || draftSaveTimer.current !== null || draftMutationQueues.current.has(campId)) return
+      applyComposerDraft(campId, refreshed)
+    })().catch(() => { /* Keep the current Draft; the next publication or Draft mutation refreshes it. */ })
+    return () => { cancelled = true }
+  }, [snapshot.camp.id, publishedMessageSequence, composerDraft !== null, hasLocalDraftPayload, composerSubmitting, routingMutating])
 
   useEffect(() => {
     const missingReplyIds = new Set(visibleCampMessages.flatMap((message) => {

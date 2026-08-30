@@ -195,6 +195,11 @@ pnpm test:composer-input
 验证可见正文、受控草稿值、焦点及页面存活。夹具隔离 `userData`，不启动 Core 或调用模型；不能用静态
 Markup 测试替代。无显示器 Linux 使用 `xvfb-run -a pnpm test:composer-input`，同一 CI 工作流覆盖相关改动。
 
+Composer 续发目标的发布时点与草稿保护运行 `pnpm test:composer-continuation`。夹具在隔离 Electron 中挂载生产
+`CampWorkspace`，提供受控 Core 投影，验证入队不改址、正式发布即刷新而不等待 Run 结束，以及迟到读取、
+已有正文/附件/显式接收者、冻结来源和切换 Camp 的保护。它不启动 Core 或真实 Runtime，不能代替 Core 路由
+计算与队列调度验收；Linux CI 使用 `xvfb-run -a pnpm test:composer-continuation`。
+
 ### Core 可选功能启动回归
 
 涉及 `run_core()` ready 边界、可选初始化或功能重试时，运行：
