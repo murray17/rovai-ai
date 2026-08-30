@@ -1,7 +1,7 @@
 ---
 document_type: research-index
 authority: research-routing
-last_updated: 2026-08-23
+last_updated: 2026-08-30
 ---
 
 # Research
@@ -43,6 +43,7 @@ observation into a stronger claim.
 
 - [Cursor Agent Runtime research](cursor-agent-runtime-research.md)
 - [DeepSeek Harness Runtime research](deepseek-harness-runtime/README.md)
+- [DingTalk Developer Web Session probe](dingtalk-web-session-probe.md)
 - [Grok Build Runtime research](grok-build-runtime-research.md)
 - [Kimi Code Runtime research](kimi-code-runtime-research.md)
 - [Pi Runtime research](pi-runtime-research.md)

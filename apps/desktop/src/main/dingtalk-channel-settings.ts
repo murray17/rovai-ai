@@ -241,6 +241,7 @@ export class DingTalkChannelSettingsService {
   #pumping = false
   #stopped = false
   #sessionCheckGeneration = 0
+  #sessionNeedsReconnect = false
   #nextRosterSweepAt = 0
 
   constructor(dependencies: DingTalkChannelHostDependencies) {
@@ -269,11 +270,7 @@ export class DingTalkChannelSettingsService {
         credential: DingTalkAppCredential
       } => item.provider === 'dingtalk')
       .map((item) => [item.credentialRef, item.credential] as const))
-    let snapshot = await this.#snapshot()
-    if (snapshot.account?.status === 'connected') {
-      await this.#checkSavedAccount(snapshot.account, sessionCheckGeneration).catch(() => undefined)
-    }
-    snapshot = await this.#snapshot()
+    const snapshot = await this.#snapshot()
     for (const bot of snapshot.memberBots.filter((candidate) => candidate.status === 'published')) {
       await this.#startBot(bot, credentialsByRef.get(bot.credentialRef) ?? null).catch((error) => {
         this.#failures.set(bot.agentId, failureCode(error))
@@ -284,6 +281,11 @@ export class DingTalkChannelSettingsService {
     this.#pumpTimer.unref?.()
     void this.#pump()
     this.#notify()
+    // Bot credentials are independent of developer-console SSO. Restore Stream
+    // before checking a web session that may need a slow portal navigation.
+    if (snapshot.account?.status === 'connected') {
+      void this.#checkSavedAccount(snapshot.account, sessionCheckGeneration).catch(() => undefined)
+    }
   }
 
   async stop(): Promise<void> {
@@ -310,7 +312,8 @@ export class DingTalkChannelSettingsService {
         displayName: '钉钉',
         hostStatus: 'ready',
         connection: {
-          status: snapshot.account?.status === 'connected'
+          status: this.#sessionNeedsReconnect ? 'session_expired'
+            : snapshot.account?.status === 'connected'
             ? 'connected'
             : snapshot.account?.status === 'oauth_expired' ? 'session_expired' : 'not_connected',
           account: snapshot.account ? {
@@ -368,7 +371,7 @@ export class DingTalkChannelSettingsService {
       stage: 'preparing',
       qrDataUrl: null,
       expiresAt: null,
-      detail: '正在打开钉钉授权页面…'
+      detail: '正在打开钉钉登录窗口…'
     }
     this.#notify()
     const previous = (await this.#snapshot()).account
@@ -383,7 +386,7 @@ export class DingTalkChannelSettingsService {
               : stage === 'inspecting_identity' ? 'inspecting_identity'
                 : stage === 'awaiting_browser' ? 'awaiting_scan' : 'preparing',
             detail: stage === 'awaiting_browser'
-              ? '请在浏览器中扫码或确认钉钉登录，完成后返回 Rovai。'
+              ? '请在钉钉登录窗口中扫码或确认登录，完成后返回 Rovai。'
               : stage === 'inspecting_identity'
                 ? '正在读取钉钉账号与企业身份…'
                 : stage === 'connected' ? '钉钉开发者账号已连接。' : '正在准备安全登录…'
@@ -402,6 +405,7 @@ export class DingTalkChannelSettingsService {
         this.#dependencies.developerSession,
         sessionRevisionFrom(result)
       )
+      this.#sessionNeedsReconnect = false
       if (this.#activeQrAttempt) {
         this.#activeQrAttempt = {
           ...this.#activeQrAttempt,
@@ -431,16 +435,12 @@ export class DingTalkChannelSettingsService {
     this.#sessionCheckGeneration += 1
     const snapshot = await this.#snapshot()
     if (!snapshot.account || snapshot.account.status !== 'connected') return
-    const identity = await this.#dependencies.developerSession.inspect()
-    if (identity
-      && identity.corpId === snapshot.account.corpId
-      && identity.userIdDigest === snapshot.account.userIdDigest) {
-      await this.#dependencies.developerSession.disconnect()
-    }
     await this.#command('channels.dingtalk.account.disconnect', {
       accountId: snapshot.account.accountId,
       expectedVersion: snapshot.account.version
     })
+    await this.#dependencies.developerSession.disconnect()
+    this.#sessionNeedsReconnect = false
     this.#notify()
   }
 
@@ -764,8 +764,15 @@ export class DingTalkChannelSettingsService {
     try {
       identity = await this.#dependencies.developerSession.inspect()
     } catch (error) {
+      if (error instanceof Error && error.message === 'dingtalk_legacy_session_requires_reconnect') {
+        if (!this.#stopped && this.#sessionCheckGeneration === generation) {
+          this.#sessionNeedsReconnect = true
+          this.#notify()
+        }
+        return
+      }
       if (!(error instanceof Error)
-        || !['dingtalk_oauth_expired', 'dingtalk_login_identity_mismatch'].includes(error.message)) return
+        || !['dingtalk_developer_session_expired', 'dingtalk_login_identity_mismatch'].includes(error.message)) return
       identity = null
     }
     const current = (await this.#snapshot()).account
@@ -777,9 +784,11 @@ export class DingTalkChannelSettingsService {
         accountId: account.accountId,
         expectedVersion: account.version
       })
+      await this.#dependencies.developerSession.disconnect()
     } else {
       await this.#upsertAccount(identity)
     }
+    this.#notify()
   }
 
   async #upsertAccount(identity: DingTalkDeveloperIdentity): Promise<void> {

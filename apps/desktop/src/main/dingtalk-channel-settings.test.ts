@@ -20,8 +20,8 @@ import { DingTalkStreamRegistry } from './dingtalk-stream-registry'
 
 describe('DingTalk channel account connection', () => {
   it.each([
-    'dingtalk_oauth_unavailable', 'dingtalk_oauth_timeout', 'channel_storage_unavailable',
-    'dingtalk_oauth_client_rejected', 'dingtalk_oauth_response_invalid', 'dingtalk_oauth_store_invalid'
+    'dingtalk_open_platform_unavailable', 'dingtalk_open_platform_timeout', 'channel_storage_unavailable',
+    'dingtalk_open_platform_access_denied', 'dingtalk_open_platform_response_invalid', 'dingtalk_web_session_store_invalid'
   ])(
     'does not expire the saved account when startup inspection fails temporarily: %s',
     async (code) => {
@@ -40,7 +40,7 @@ describe('DingTalk channel account connection', () => {
     }
   )
 
-  it.each(['missing', 'dingtalk_oauth_expired'])(
+  it.each(['missing', 'dingtalk_developer_session_expired'])(
     'expires an account only on a confirmed unusable login: %s',
     async (code) => {
       const fixture = completedBotFixture({ credentialPresent: true })
@@ -48,7 +48,7 @@ describe('DingTalk channel account connection', () => {
       else fixture.developerSession.inspect.mockRejectedValueOnce(new Error(code))
       try {
         await fixture.service.start()
-        expect(fixture.commands).toContain('channels.dingtalk.account.expire')
+        await vi.waitFor(() => expect(fixture.commands).toContain('channels.dingtalk.account.expire'))
         expect((await fixture.service.get()).provider.connection.status).toBe('session_expired')
         expect(fixture.streamStart).toHaveBeenCalledTimes(1)
         expect(fixture.developerSession.beginLogin).not.toHaveBeenCalled()
@@ -76,6 +76,31 @@ describe('DingTalk channel account connection', () => {
       await starting
       await fixture.service.stop()
     }
+  })
+
+  it('restores published Bot Stream without waiting for the developer web session', async () => {
+    const fixture = completedBotFixture({ credentialPresent: true })
+    const inspection = deferred<DingTalkDeveloperIdentity | null>()
+    fixture.developerSession.inspect.mockReturnValueOnce(inspection.promise)
+    try {
+      await fixture.service.start()
+      expect(fixture.streamStart).toHaveBeenCalledOnce()
+      expect(fixture.commands).not.toContain('channels.dingtalk.account.expire')
+    } finally {
+      await fixture.service.stop()
+      inspection.resolve(null)
+    }
+  })
+
+  it('offers reconnect for a legacy OAuth row without deleting it or stopping existing Bots', async () => {
+    const fixture = completedBotFixture({ credentialPresent: true })
+    fixture.developerSession.inspect.mockRejectedValueOnce(new Error('dingtalk_legacy_session_requires_reconnect'))
+    try {
+      await fixture.service.start()
+      await vi.waitFor(async () => expect((await fixture.service.get()).provider.connection.status).toBe('session_expired'))
+      expect(fixture.commands).not.toContain('channels.dingtalk.account.expire')
+      expect(fixture.streamStart).toHaveBeenCalledOnce()
+    } finally { await fixture.service.stop() }
   })
 
   it('does not commit a late browser login after the Owner cancels it', async () => {
@@ -239,7 +264,7 @@ describe('DingTalk channel account connection', () => {
     })).toBe(true)
   })
 
-  it('discards the staged OAuth profile when the Core account commit fails', async () => {
+  it('discards staged cookies when the Core account commit fails', async () => {
     const previous = identity('corp-old', 'owner-old')
     const replacement = identity('corp-new', 'owner-new')
     const discardPendingLogin = vi.fn(async () => previous)
@@ -248,11 +273,10 @@ describe('DingTalk channel account connection', () => {
       beginLogin: vi.fn(async () => replacement),
       pendingConnection: vi.fn(() => ({
         identity: replacement,
-        session: { schemaVersion: 1 as const, currentProfileKey: 'pending', profiles: [] }
+        session: { schemaVersion: 2 as const, cookies: [] }
       })),
       activatePendingLogin: vi.fn(async () => undefined),
       discardPendingLogin,
-      accessToken: vi.fn(async () => 'access-token'),
       disconnect: vi.fn(async () => undefined)
     }
     const core = {
@@ -450,7 +474,6 @@ function completedBotFixture(options: {
   const developerSession = {
     inspect: vi.fn<DingTalkDeveloperSessionService['inspect']>(async () => activeOwner),
     beginLogin: vi.fn<DingTalkDeveloperSessionService['beginLogin']>(async () => activeOwner),
-    accessToken: vi.fn(async () => 'fixture-token'),
     disconnect: vi.fn(async () => undefined)
   }
   const service = new DingTalkChannelSettingsService({

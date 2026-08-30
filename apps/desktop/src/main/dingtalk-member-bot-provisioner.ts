@@ -1,5 +1,6 @@
 import {
   DingTalkDeveloperApiError,
+  type DingTalkDeveloperRequest,
   type DingTalkDeveloperBackend
 } from './dingtalk-developer-gateway'
 import type { DingTalkDeveloperSessionService } from './dingtalk-developer-session'
@@ -97,6 +98,10 @@ export class DingTalkOpenPlatformMemberBotProvisioner implements DingTalkMemberB
   }
 
   async create(input: DingTalkProvisioningInput): Promise<ProvisionedDingTalkMemberBot> {
+    const execute = (request: Omit<DingTalkDeveloperRequest, 'expectedIdentity'>): Promise<unknown> =>
+      this.#developerApi.execute({ ...request, expectedIdentity: {
+        corpId: input.expectedCorpId, userId: input.expectedUserId
+      } })
     const resumeRank = provisioningRank(input.resumeState)
     const auth = await this.#developerSession.inspect(input.signal)
     if (
@@ -110,7 +115,7 @@ export class DingTalkOpenPlatformMemberBotProvisioner implements DingTalkMemberB
     if (!unifiedAppId) {
       let created: Record<string, unknown>
       try {
-        created = businessObject(await this.#developerApi.execute({
+        created = businessObject(await execute({
           operation: 'app.create',
           values: { appName: input.appName, description: input.description },
           signal: input.signal
@@ -133,14 +138,14 @@ export class DingTalkOpenPlatformMemberBotProvisioner implements DingTalkMemberB
       }
       await input.onStep('app_created', { unifiedAppId })
     }
-    const app = businessObject(await this.#developerApi.execute({
+    const app = businessObject(await execute({
       operation: 'app.get',
       values: { unifiedAppId },
       signal: input.signal
     }))
     requireIdentity(app, 'unifiedAppId', unifiedAppId)
 
-    const credential = businessObject(await this.#developerApi.execute({
+    const credential = businessObject(await execute({
       operation: 'app.credentials.get',
       values: { unifiedAppId },
       signal: input.signal
@@ -156,12 +161,12 @@ export class DingTalkOpenPlatformMemberBotProvisioner implements DingTalkMemberB
     let iconMediaId: string | null = null
     if (resumeRank < provisioningRank('avatar_configured')) {
       iconMediaId = await input.resolveIconMediaId(appKey, appSecret)
-      businessObject(await this.#developerApi.execute({
+      businessObject(await execute({
         operation: 'app.update',
         values: { unifiedAppId, iconMediaId },
         signal: input.signal
       }))
-      const updatedApp = businessObject(await this.#developerApi.execute({
+      const updatedApp = businessObject(await execute({
         operation: 'app.get',
         values: { unifiedAppId },
         signal: input.signal
@@ -179,7 +184,7 @@ export class DingTalkOpenPlatformMemberBotProvisioner implements DingTalkMemberB
     let robotCode = input.frozen?.robotCode
     if (resumeRank < provisioningRank('robot_configured')) {
       iconMediaId ??= await input.resolveIconMediaId(appKey, appSecret)
-      businessObject(await this.#developerApi.execute({
+      businessObject(await execute({
         operation: 'app.robot.config',
         values: {
           unifiedAppId,
@@ -192,13 +197,13 @@ export class DingTalkOpenPlatformMemberBotProvisioner implements DingTalkMemberB
         },
         signal: input.signal
       }))
-      businessObject(await this.#developerApi.execute({
+      businessObject(await execute({
         operation: 'app.robot.enable',
         values: { unifiedAppId },
         signal: input.signal
       }))
     }
-    const robot = businessObject(await this.#developerApi.execute({
+    const robot = businessObject(await execute({
       operation: 'app.robot.get',
       values: { unifiedAppId },
       signal: input.signal
@@ -240,14 +245,14 @@ export class DingTalkOpenPlatformMemberBotProvisioner implements DingTalkMemberB
 
     if (resumeRank < provisioningRank('permissions_configured')) {
       if (input.requiredScopeValues.length > 0) {
-        businessObject(await this.#developerApi.execute({
+        businessObject(await execute({
           operation: 'app.permission.add',
           values: { unifiedAppId, scopeValues: input.requiredScopeValues },
           signal: input.signal
         }))
       }
       for (const scopeValue of input.requiredScopeValues) {
-        const permissions = businessObject(await this.#developerApi.execute({
+        const permissions = businessObject(await execute({
           operation: 'app.permission.list',
           values: { unifiedAppId, scopeValue, authStatus: 'AUTHED', pageSize: '1' },
           signal: input.signal
@@ -255,14 +260,14 @@ export class DingTalkOpenPlatformMemberBotProvisioner implements DingTalkMemberB
         requireAuthorizedPermission(permissions, scopeValue)
       }
       if (input.requiredEventCodes.length > 0) {
-        businessObject(await this.#developerApi.execute({
+        businessObject(await execute({
           operation: 'app.event.subscribe',
           values: { unifiedAppId, eventCodes: input.requiredEventCodes },
           signal: input.signal
         }))
       }
       for (const eventCode of input.requiredEventCodes) {
-        const events = businessObject(await this.#developerApi.execute({
+        const events = businessObject(await execute({
           operation: 'app.event.list',
           values: { unifiedAppId, keyword: eventCode, pageSize: '50' },
           signal: input.signal
@@ -274,7 +279,7 @@ export class DingTalkOpenPlatformMemberBotProvisioner implements DingTalkMemberB
 
     let versionId = input.frozen?.versionId
     if (!versionId) {
-      const version = businessObject(await this.#developerApi.execute({
+      const version = businessObject(await execute({
         operation: 'app.version.create',
         values: { unifiedAppId, versionDescription: input.description },
         signal: input.signal
@@ -289,7 +294,7 @@ export class DingTalkOpenPlatformMemberBotProvisioner implements DingTalkMemberB
     // A previous publish attempt may have reached DingTalk even when the
     // network response was lost. Read the frozen version before issuing
     // another mutation so retry cannot resubmit a released/reviewing version.
-    const existingStatus = businessObject(await this.#developerApi.execute({
+    const existingStatus = businessObject(await execute({
       operation: 'app.version.status',
       values: { unifiedAppId, versionId },
       signal: input.signal
@@ -319,7 +324,7 @@ export class DingTalkOpenPlatformMemberBotProvisioner implements DingTalkMemberB
       })
     }
 
-    const approval = businessObject(await this.#developerApi.execute({
+    const approval = businessObject(await execute({
       operation: 'app.version.checkApproval',
       values: { unifiedAppId, versionId },
       signal: input.signal
@@ -340,7 +345,7 @@ export class DingTalkOpenPlatformMemberBotProvisioner implements DingTalkMemberB
     }
     let published: Record<string, unknown>
     try {
-      published = businessObject(await this.#developerApi.execute({
+      published = businessObject(await execute({
         operation: 'app.version.publish',
         values: {
           unifiedAppId,
@@ -353,7 +358,7 @@ export class DingTalkOpenPlatformMemberBotProvisioner implements DingTalkMemberB
     } catch (publishError) {
       let recoveredStatus: Record<string, unknown>
       try {
-        recoveredStatus = businessObject(await this.#developerApi.execute({
+        recoveredStatus = businessObject(await execute({
           operation: 'app.version.status',
           values: { unifiedAppId, versionId },
           signal: input.signal
@@ -385,7 +390,7 @@ export class DingTalkOpenPlatformMemberBotProvisioner implements DingTalkMemberB
       }
       throw publishError
     }
-    const status = businessObject(await this.#developerApi.execute({
+    const status = businessObject(await execute({
       operation: 'app.version.status',
       values: { unifiedAppId, versionId },
       signal: input.signal

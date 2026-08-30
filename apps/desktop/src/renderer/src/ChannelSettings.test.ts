@@ -16,8 +16,8 @@ describe('Channel settings', () => {
 
   it('keeps cancellation silent and distinguishes expired login from temporary connection failures', () => {
     expect(channelErrorMessage(new Error('dingtalk_operation_cancelled'))).toBeNull()
-    expect(channelErrorMessage(new Error('dingtalk_oauth_expired'))).toBe('登录已失效，请重新连接。')
-    for (const code of ['dingtalk_oauth_unavailable', 'dingtalk_oauth_timeout', 'dingtalk_oauth_client_rejected']) {
+    expect(channelErrorMessage(new Error('dingtalk_developer_session_expired'))).toBe('登录已失效，请重新连接。')
+    for (const code of ['dingtalk_open_platform_unavailable', 'dingtalk_open_platform_timeout', 'dingtalk_web_session_store_unavailable']) {
       expect(channelErrorMessage(new Error(code))).not.toMatch(/失效|重新连接/u)
     }
   })
@@ -224,8 +224,8 @@ describe('Channel settings', () => {
       "Error invoking remote method 'rovai:channels-connect': Error: feishu_login_cancelled"
     ))).toBeNull()
     expect(channelErrorMessage(new Error(
-      "Error invoking remote method 'rovai:channels-connect': Error: dingtalk_oauth_client_unconfigured"
-    ))).toBe('Rovai 尚未配置钉钉 OAuth Client，当前构建无法连接钉钉开放平台。')
+      "Error invoking remote method 'rovai:channels-connect': Error: dingtalk_legacy_session_requires_reconnect"
+    ))).toBe('钉钉已改用网页登录，请重新连接一次；已有 Bot 和应用绑定会保留。')
     expect(channelErrorMessage(new Error(
       "Error invoking remote method 'rovai:channels-publish-member-bot': Error: dingtalk_approval_mode_invalid"
     ))).toBe('钉钉开放平台操作尚未完成；请查看下方状态，排除问题后重试。')

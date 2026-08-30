@@ -443,7 +443,7 @@ function ChannelConnectionRow({
           onClick={() => onConnect?.(channel)}
         >
           {connectBusy
-            ? channel.kind === 'dingtalk' ? '等待授权…' : '等待扫码…'
+            ? '等待扫码…'
             : connectLabel}
         </button>
       </div>
@@ -562,7 +562,7 @@ function QrDialog({
           <AppDialogHeader
             title={`登录${providerName}开放平台`}
             description={attemptKind === 'dingtalk'
-              ? '在系统浏览器中完成钉钉开发者 OAuth 授权。本次不会创建应用、读取 App Secret 或发布 Bot。'
+              ? '在钉钉登录窗口中扫码或确认登录。本次不会创建应用、读取 App Secret 或发布 Bot。'
               : '使用飞书扫码登录开发者平台。本次不会创建应用、读取 App Secret 或发布 Bot。'}
             icon="shield"
             closeDisabled={busy && attempt.stage !== 'failed'}
@@ -576,9 +576,7 @@ function QrDialog({
             <strong>{attempt.detail}</strong>
             <small>{attempt.expiresAt
               ? `二维码有效期至 ${formatLocalTime(attempt.expiresAt)}`
-              : attemptKind === 'dingtalk'
-                ? '开发者 OAuth Profile 保存在 Rovai 本地数据库，不会暴露给页面。'
-                : '开发者会话保存在 Rovai 本地数据库，不会暴露给页面。'}</small>
+              : '开发者会话保存在 Rovai 本地数据库，不会暴露给页面。'}</small>
           </AppDialogBody>
           <AppDialogFooter note="登录后，后续发布会复用同一开发者会话。">
             <button className="quiet-button" type="button" onClick={() => onClose(attempt.attemptId)}>
@@ -857,20 +855,18 @@ export function channelErrorMessage(error: unknown): string | null {
     return '本机 Bot 凭据缺失或与冻结应用不一致，已停止连接。'
   }
   const dingtalkFailures: Record<string, string> = {
-    dingtalk_oauth_client_unconfigured:
-      'Rovai 尚未配置钉钉 OAuth Client，当前构建无法连接钉钉开放平台。',
-    dingtalk_oauth_client_rejected: 'Rovai 的钉钉登录配置未通过验证；已有登录态会保留。',
-    dingtalk_oauth_expired: '登录已失效，请重新连接。',
-    dingtalk_oauth_failed: '本次钉钉登录请求未完成，请稍后重试；已有登录态会保留。',
-    dingtalk_oauth_store_invalid: '暂时无法读取本机钉钉登录态，数据已保留，请稍后重试。',
-    dingtalk_oauth_unavailable: '暂时无法连接钉钉登录服务，请检查网络后重试。',
-    dingtalk_oauth_timeout: '钉钉登录服务响应超时，请稍后重试；已有登录态会保留。',
-    dingtalk_oauth_state_mismatch: '本次钉钉登录无法通过安全校验，请重新发起连接。',
+    dingtalk_developer_session_expired: '登录已失效，请重新连接。',
+    dingtalk_legacy_session_requires_reconnect: '钉钉已改用网页登录，请重新连接一次；已有 Bot 和应用绑定会保留。',
+    dingtalk_web_session_store_invalid: '暂时无法读取本机钉钉登录态，数据已保留，请稍后重试。',
+    dingtalk_web_session_store_unavailable: '暂时无法保存钉钉登录态，请稍后重试；已有会话和应用绑定会保留。',
+    dingtalk_login_timeout: '本次钉钉登录等待超时，请重新连接；已有登录态会保留。',
+    dingtalk_login_identity_mismatch: '当前登录的钉钉账号或企业与原账号不一致，请重新连接。',
+    dingtalk_console_protocol_unverified: '当前版本尚未完成钉钉后台此步骤的验证，操作已停止；已有应用身份会保留。',
     dingtalk_open_platform_unavailable: '暂时无法连接钉钉开放平台，请检查网络后重试。',
     dingtalk_open_platform_timeout: '钉钉开放平台响应超时；已有应用身份会保留，可以稍后重试。',
     dingtalk_open_platform_access_denied: '当前钉钉账号没有完成此开放平台操作的权限。',
     dingtalk_open_platform_operation_failed: '钉钉开放平台拒绝了本次操作，请核对账号权限后重试。',
-    dingtalk_login_identity_unavailable: '钉钉授权未返回完整账号与企业身份，请重新连接。',
+    dingtalk_login_identity_unavailable: '暂时未能读取完整的钉钉账号与企业身份，请稍后重试。',
     dingtalk_account_identity_changed: '钉钉账号或企业已经变化，请重新连接账号。',
     dingtalk_app_create_unknown_remote_state:
       '无法确认钉钉应用是否已经创建；Rovai 已锁定再次创建，避免产生重复应用。',

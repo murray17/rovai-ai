@@ -342,8 +342,6 @@ function provisioner(gateway: DingTalkDeveloperBackend): DingTalkOpenPlatformMem
       expiresAt: '2026-08-30T00:00:00Z'
     }),
     beginLogin: async () => { throw new Error('unused') },
-    accessToken: async () => 'access-token',
-    activate: async () => undefined,
     disconnect: async () => undefined
   }
   return new DingTalkOpenPlatformMemberBotProvisioner({

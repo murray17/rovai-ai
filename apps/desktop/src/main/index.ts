@@ -112,7 +112,6 @@ import { ElectronFeishuDeveloperSessionService } from './feishu-developer-sessio
 import { FeishuWebSessionMemberBotProvisioner } from './feishu-member-bot-provisioner'
 import { ControlledMemberBotAvatarSourceResolver } from './member-bot-avatar-source'
 import {
-  DingTalkDeveloperApiTransport,
   DingTalkDeveloperGateway
 } from './dingtalk-developer-gateway'
 import { ElectronDingTalkDeveloperSessionService } from './dingtalk-developer-session'
@@ -363,16 +362,12 @@ const feishuChannelSettings = new ChannelSettingsService({
   memberBotAvatarSource,
   executionPreview: createFeishuExecutionPreviewHost(process.argv, coreDataPath)
 })
-const dingtalkDeveloperTransport = new DingTalkDeveloperApiTransport()
 const dingtalkDeveloperSession = new ElectronDingTalkDeveloperSessionService({
   store: channelDeveloperSessionStore,
-  oauthClientId: process.env.ROVAI_DINGTALK_OAUTH_CLIENT_ID,
-  oauthClientSecret: process.env.ROVAI_DINGTALK_OAUTH_CLIENT_SECRET,
-  transport: dingtalkDeveloperTransport
+  getParentWindow: () => mainWindow
 })
 const dingtalkDeveloperGateway = new DingTalkDeveloperGateway({
-  tokenProvider: dingtalkDeveloperSession,
-  transport: dingtalkDeveloperTransport
+  session: dingtalkDeveloperSession
 })
 const dingtalkChannelSettings = new DingTalkChannelSettingsService({
   core,
