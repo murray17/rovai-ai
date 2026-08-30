@@ -8772,6 +8772,7 @@ impl Core {
                 &execution.agent_run_id,
                 execution.execution_epoch,
                 credential,
+                Path::new(&execution.workspace.execution_root),
             )
             .await?;
         Ok(())

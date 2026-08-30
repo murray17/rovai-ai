@@ -54,7 +54,8 @@ impl Drop for BuiltinToolProcessConfigInner {
             // outcome; ordinary Runtime/Host exit still cleans up normally.
             return;
         }
-        let _ = fs::remove_dir_all(&self.process_root);
+        let _ =
+            rovai_core::local_attachment_snapshot::remove_local_snapshot_tree(&self.process_root);
     }
 }
 
@@ -219,7 +220,14 @@ impl BuiltinToolLeaseRegistry {
         agent_run_id: &str,
         execution_epoch: i64,
         native_binding: &BuiltinToolBindingCredential,
+        execution_root: &Path,
     ) -> Result<BuiltinToolAuth> {
+        if !execution_root.is_absolute() || !execution_root.is_dir() {
+            bail!("Built-in Tool lease requires an absolute execution workspace");
+        }
+        let execution_root = execution_root
+            .to_str()
+            .context("AgentRun workspace is not UTF-8")?;
         let (binding, retired_run_tmp) = {
             let _gate = self.invocation_gate.lock().await;
             if agent_run_id.trim().is_empty() || execution_epoch <= 0 {
@@ -270,6 +278,12 @@ impl BuiltinToolLeaseRegistry {
             let binding = process
                 .config
                 .write_context(Some(BuiltinToolLeaseContext {
+                    execution_root: execution_root.to_string(),
+                    run_tmp: active
+                        .run_tmp
+                        .to_str()
+                        .context("Run tmp is not UTF-8")?
+                        .to_string(),
                     lease_id: active.lease_id.clone(),
                     lease_generation: active.lease_generation,
                     lease_token: active.lease_token.clone(),
@@ -563,7 +577,7 @@ fn remove_retired_run_tmp(path: &Path) -> Result<()> {
         fs::remove_file(path)
             .with_context(|| format!("failed to remove unsafe Run tmp {}", path.display()))?;
     } else {
-        fs::remove_dir_all(path)
+        rovai_core::local_attachment_snapshot::remove_local_snapshot_tree(path)
             .with_context(|| format!("failed to remove Run tmp tree {}", path.display()))?;
     }
     Ok(())
@@ -775,17 +789,30 @@ mod tests {
         let config = BuiltinToolProcessConfig::create(&executable(), &endpoint, &root).unwrap();
         let registry = BuiltinToolLeaseRegistry::default();
         let first = registry
-            .bind(&config, "run-1", 1, &binding())
+            .bind(&config, "run-1", 1, &binding(), &root)
             .await
             .unwrap();
         assert_eq!(registry.active_count().await, 1);
+        let context: BuiltinToolCliContext =
+            serde_json::from_slice(&fs::read(config.context_path()).unwrap()).unwrap();
+        let lease = context.lease.unwrap();
+        assert_eq!(Path::new(&lease.execution_root), root);
+        assert_eq!(Path::new(&lease.run_tmp), config.run_tmp());
+        let frozen_source = root.join("frozen-source");
+        fs::create_dir(&frozen_source).unwrap();
+        fs::write(frozen_source.join("file.txt"), b"frozen").unwrap();
+        rovai_core::local_attachment_snapshot::snapshot_local_attachment(
+            &frozen_source,
+            &config.run_tmp().join("snapshot"),
+        )
+        .unwrap();
         fs::write(
             config.run_tmp().join("stale-from-first-lease.txt"),
             b"stale",
         )
         .unwrap();
         let rotated = registry
-            .bind(&config, "run-1", 1, &binding())
+            .bind(&config, "run-1", 1, &binding(), &root)
             .await
             .unwrap();
         assert!(rotated.lease_generation > first.lease_generation);
@@ -824,7 +851,7 @@ mod tests {
         assert!(registry.authenticate(&rotated).await.is_err());
         assert!(!config.run_tmp().exists());
         let second = registry
-            .bind(&config, "run-2", 2, &binding())
+            .bind(&config, "run-2", 2, &binding(), &root)
             .await
             .unwrap();
         assert!(second.lease_generation > rotated.lease_generation);
@@ -858,7 +885,7 @@ mod tests {
             BuiltinToolProcessConfig::create(&executable(), &endpoint, &root).unwrap();
         let registry = Arc::new(BuiltinToolLeaseRegistry::default());
         registry
-            .bind(&first_config, "run-1", 1, &binding())
+            .bind(&first_config, "run-1", 1, &binding(), &root)
             .await
             .unwrap();
         fs::create_dir(first_config.run_tmp().join("nested")).unwrap();
@@ -889,7 +916,7 @@ mod tests {
         let second_bind = if cleanup_started {
             match tokio::time::timeout(
                 std::time::Duration::from_secs(1),
-                registry.bind(&second_config, "run-2", 2, &binding()),
+                registry.bind(&second_config, "run-2", 2, &binding(), &root),
             )
             .await
             {

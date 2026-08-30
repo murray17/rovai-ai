@@ -37,6 +37,8 @@ use uuid::Uuid;
 
 #[path = "rovai/app_cli.rs"]
 mod app_cli;
+#[path = "rovai/send_attachments.rs"]
+mod send_attachments;
 
 const CORE_TIMEOUT: Duration = Duration::from_secs(30);
 const CORE_ATTEMPTS: usize = 3;
@@ -132,7 +134,7 @@ async fn run() -> Result<u8> {
         return Ok(2);
     }
 
-    let (operation, input) = match args.as_slice() {
+    let (operation, mut input) = match args.as_slice() {
         [command, rest @ ..] if matches!(command.as_str(), "send" | "gather") => {
             let identity = builtin_tool_identity_by_command(command, "")
                 .with_context(|| format!("unknown Rovai command: rovai {command}"))?;
@@ -163,16 +165,34 @@ async fn run() -> Result<u8> {
     };
     let context = load_context()?;
     let auth = context.auth()?;
+    let request_id = Uuid::new_v4().to_string();
+    let mut snapshots = if operation == "camp.message.send" {
+        match send_attachments::stage_external_send_files(&mut input, &context, &request_id) {
+            Ok(snapshots) => snapshots,
+            Err(failure) => {
+                println!("{}", serde_json::to_string(&failure.output())?);
+                return Ok(2);
+            }
+        }
+    } else {
+        send_attachments::SendSnapshots::default()
+    };
+    // A long local copy must not submit under a lease that rotated during staging.
+    if operation == "camp.message.send" && context.lease != load_context()?.lease {
+        print_safe_cli_error();
+        return Ok(2);
+    }
     let request = BuiltinToolIpcRequest {
         ipc_protocol_version: BUILTIN_TOOL_IPC_PROTOCOL_VERSION,
         auth,
         body: BuiltinToolIpcRequestBody::Invoke {
-            request_id: Uuid::new_v4().to_string(),
+            request_id,
             operation,
             input,
         },
     };
 
+    snapshots.retain_for_run();
     let response = match send_with_retry(&context.core_endpoint, &request).await {
         Ok(response) => response,
         Err(BuiltinToolIpcFailure::OutcomeIndeterminate) => {
@@ -191,6 +211,9 @@ async fn run() -> Result<u8> {
     match response {
         BuiltinToolIpcResponse::Envelope { envelope } => {
             envelope.validate()?;
+            if envelope_exit_code(&envelope) != 3 {
+                snapshots.response_received();
+            }
             let projected = match project_envelope(&envelope) {
                 Ok(projected) => projected,
                 Err(error) => {
@@ -2747,7 +2770,7 @@ mod tests {
                 "rovai send --public-only --body 'Final conclusion: the failure is a client-version regression.'",
                 "rovai send --to agent_5 --body 'Please reproduce on the previous client build and return the version and result.'",
                 "rovai send --public-only --to-principal --body 'Please choose whether to roll back the client or continue the token investigation.'",
-                "rovai send --file \"$ROVAI_RUN_TMP/report.pdf\"",
+                "rovai send --file \"$HOME/.runtime/artifacts/report.pdf\"",
             ]
         );
         let help = operation_help_text(&description);
@@ -2765,7 +2788,7 @@ mod tests {
             r"Direct --body values are literal: \n inside ordinary shell quotes is text, not a line break."
         ));
         assert!(help.contains(r"JSON stdin/heredoc and JSON --input-file decode \n escapes."));
-        assert!(help.contains("--body may be omitted for an attachment-only message"));
+        assert!(help.contains("--body may be omitted"));
         assert!(help.contains("It may be combined with --to-principal."));
         assert!(!help.contains("--to-user"));
         assert!(!help.contains("--to agent_5 --public-only"));
