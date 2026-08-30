@@ -4,6 +4,7 @@ import { createPortal } from 'react-dom'
 import * as Dialog from '@radix-ui/react-dialog'
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
 import { CampDetailPopover } from './CampDetailPopover'
+import { CampMemberFastToggle } from './CampMemberFastToggle'
 import type {
   ActionApprovalView,
   AdapterInstallation,
@@ -21,6 +22,7 @@ import type {
   CampMessageFindSnapshot,
   CampMessageView,
   CampMemberRemovalPreview,
+  CampMemberFastView,
   CampOpenCollectionCoverage,
   CampOpenMessageCoverage,
   CampOpenProjection,
@@ -4041,7 +4043,7 @@ export function CampWorkspace({
               />
             </section>
             <section className="camp-detail-content tab-scroll camp-members-panel" hidden={inspectorSurfaceTab !== 'members'}>
-              {inspectorSurfaceTab === 'members' && <CampMembersPanel
+              {inspectorSurfaceTab === 'members' && <CampMembersPanel key={snapshot.camp.id}
                 snapshot={snapshot}
                 profileById={profileById}
                 installations={installations}
@@ -5703,6 +5705,57 @@ function CampMembersPanel({
   onRemoveMember?(preview: CampMemberRemovalPreview): Promise<CampMemberRemoveOutcome>
   onNotify(message: string): void
 }): JSX.Element {
+  const [fastOverrides, setFastOverrides] = useState<Record<string, CampMemberFastView | null>>({})
+  const [fastPending, setFastPending] = useState<string | null>(null)
+  const fastPendingRef = useRef(false)
+  const fastBindingGeneration = useRef(0)
+  const fastBindingScope = JSON.stringify([snapshot.camp.id, snapshot.camp.projectPath,
+    snapshot.members.map(member => [member.agentId, member.membershipStatus,
+      member.fast?.runtimeBindingRevision, profileById.get(member.agentId)?.runtimeConfiguration])])
+  const [costConfirmation, setCostConfirmation] = useState<{ agentId: string; value: CampMemberFastView; trigger: HTMLButtonElement } | null>(null)
+  const costConfirmRef = useRef<HTMLButtonElement>(null)
+  useEffect(() => { setFastOverrides({}) }, [snapshot])
+  useLayoutEffect(() => { fastBindingGeneration.current += 1; setFastOverrides({}) }, [fastBindingScope])
+  useEffect(() => { costConfirmRef.current?.focus() }, [costConfirmation])
+  const saveFast = async (agentId: string, value: CampMemberFastView, fastOverride: boolean | null): Promise<void> => {
+    if (fastPendingRef.current) return
+    fastPendingRef.current = true
+    const generation = fastBindingGeneration.current
+    setFastPending(agentId)
+    try {
+      const result = await window.rovai.request<StoredCommandResult>('camps.members.fast.set', {
+        commandId: crypto.randomUUID(),
+        command: { campId: snapshot.camp.id, agentId, expectedRuntimeBindingRevision: value.runtimeBindingRevision, fastOverride }
+      })
+      if (result.status === 'rejected') throw new Error('队员配置已变化，请重新检测响应模式。')
+      if (generation !== fastBindingGeneration.current) return
+      const updated = result.payload as { fast?: CampMemberFastView | null }
+      setFastOverrides(current => ({ ...current, [agentId]: updated.fast ?? null }))
+      const running = snapshot.agentRuns.some(run => run.agentId === agentId && ['running', 'waiting'].includes(run.status))
+      onNotify(running ? '当前执行不会改变，后续执行将使用新设置' : fastOverride === null ? '已恢复默认响应模式' : '已保存，后续执行将使用新设置')
+    } catch (error) {
+      onNotify(readErrorMessage(error, '响应模式未保存，请重试。'))
+    } finally { fastPendingRef.current = false; setFastPending(null) }
+  }
+  const checkFast = async (agentId: string): Promise<void> => {
+    if (fastPendingRef.current) return
+    fastPendingRef.current = true
+    const generation = fastBindingGeneration.current
+    setFastPending(agentId)
+    try {
+      const value = await window.rovai.request<CampMemberFastView | null>('camps.members.fast.check', { campId: snapshot.camp.id, agentId })
+      if (generation !== fastBindingGeneration.current) return
+      setFastOverrides(current => ({ ...current, [agentId]: value }))
+      onNotify(value ? '响应模式检测完成' : '当前账号、模型或 Agent 运行时版本不支持此 Fast 设置。')
+    } catch { onNotify('暂时无法检测响应模式，请重试。') }
+    finally { fastPendingRef.current = false; setFastPending(null) }
+  }
+  const requestFast = (agentId: string, value: CampMemberFastView, next: boolean, trigger: HTMLButtonElement): void => {
+    let acknowledged = false
+    try { acknowledged = localStorage.getItem('rovai.camp-fast-cost-ack.v1') === 'true' } catch { /* Retain a safe confirmation when storage is unavailable. */ }
+    if (next && !acknowledged) { setCostConfirmation({ agentId, value, trigger }); return }
+    void saveFast(agentId, value, next)
+  }
   const members = campInspectorMembers(snapshot.members)
   const presentCount = members.filter(campMemberIsLeadEligible).length
   const awayCount = members.length - presentCount
@@ -5908,6 +5961,21 @@ function CampMembersPanel({
         </div>
       </div>
 
+      {costConfirmation && <div className="camp-fast-cost-confirmation" role="group" aria-label="确认 Fast 用量">
+        <p>Fast 可能增加费用或更快消耗用量；Claude Code 也可能切换到支持 Fast 的模型。</p>
+        <button className="quiet-button compact" type="button" ref={costConfirmRef} onClick={() => {
+          const confirmation = costConfirmation
+          try { localStorage.setItem('rovai.camp-fast-cost-ack.v1', 'true') } catch { /* Confirmation still applies to this click. */ }
+          setCostConfirmation(null)
+          confirmation.trigger.focus({ preventScroll: true })
+          void saveFast(confirmation.agentId, confirmation.value, true)
+        }}>确认开启</button>
+        <button className="quiet-button compact" type="button" onClick={() => {
+          costConfirmation.trigger.focus({ preventScroll: true })
+          setCostConfirmation(null)
+        }}>取消</button>
+      </div>}
+
       {snapshot.membershipReconciliations.map((reconciliation) => {
         const displayName = profileById.get(reconciliation.agentId)?.displayName ?? '已移出队员'
         return (
@@ -5924,6 +5992,11 @@ function CampMembersPanel({
       <div className="camp-inspector-member-list" role="list" aria-label="会话队员列表">
         {members.map((member) => {
           const profile = profileById.get(member.agentId) ?? null
+          const supportsFastCheck = profile?.runtimeConfiguration?.adapterKind === 'claude-code-cli'
+            || profile?.runtimeConfiguration?.adapterKind === 'codex-cli'
+          const fast = supportsFastCheck
+            ? Object.hasOwn(fastOverrides, member.agentId) ? fastOverrides[member.agentId] : member.fast
+            : undefined
           const present = campMemberIsLeadEligible(member)
           const presenceLabel = member.leaveRequestedAt
             ? '正在暂离'
@@ -5945,7 +6018,7 @@ function CampMembersPanel({
           const runtimeDetailsOpen = expandedRuntimeAgentIds.has(member.agentId)
           const runtimeDetailsId = `camp-member-runtime-${member.agentId}`
           return (
-            <article className={`camp-inspector-member-row ${present ? '' : 'is-away'}`} role="listitem" key={member.agentId}>
+            <article className={`camp-inspector-member-row ${fast ? 'has-fast' : ''} ${present ? '' : 'is-away'}`} role="listitem" key={member.agentId}>
               <span className="camp-inspector-member-avatar">
                 <MemberAvatar agentId={member.agentId} avatarRef={member.avatarRef} displayName={member.displayName} size="list" decorative />
               </span>
@@ -5956,6 +6029,9 @@ function CampMembersPanel({
                 </span>
                 <small title={member.teamRole || undefined}>{runtimeLabel}</small>
               </span>
+              {fast && <CampMemberFastToggle value={fast} displayName={member.displayName} pending={fastPending !== null}
+                runtimeName={profile?.runtimeConfiguration?.adapterKind === 'claude-code-cli' ? 'Claude Code' : 'Codex'}
+                onToggle={(next, trigger) => requestFast(member.agentId, fast, next, trigger)} />}
               <span className={`camp-inspector-member-state ${present ? '' : 'is-away'}`}>
                 <strong>{presenceLabel}</strong>
                 {runtimeTone === 'attention' && profile && <small className="runtime-attention">{runtimeReadinessLabel(profile.runtimeReadiness.status)}</small>}
@@ -6003,6 +6079,18 @@ function CampMembersPanel({
                       <small>{runtimeConfiguration ? runtimeLabel : '请先配置 Agent 运行时'}</small>
                     </DropdownMenu.Item>
                     <DropdownMenu.Separator className="camp-member-menu-separator" />
+                    {supportsFastCheck && <>
+                      <DropdownMenu.Item className="camp-member-menu-item" disabled={fastPending !== null}
+                        onSelect={() => { void checkFast(member.agentId) }}>
+                        <strong>{fastPending === member.agentId ? '正在检测响应模式…' : '检测响应模式'}</strong>
+                        <small>检查原生账号和能力，不发起模型请求</small>
+                      </DropdownMenu.Item>
+                      {fast && <DropdownMenu.Item className="camp-member-menu-item" disabled={fastPending !== null || fast.fastOverride === null}
+                        onSelect={() => { void saveFast(member.agentId, fast, null) }}>
+                        <strong>恢复默认响应模式</strong>
+                      </DropdownMenu.Item>}
+                      <DropdownMenu.Separator className="camp-member-menu-separator" />
+                    </>}
                     <DropdownMenu.Item
                       className="camp-member-menu-item is-danger"
                       disabled={members.length <= 1 || !onRemoveMember}

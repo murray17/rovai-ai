@@ -206,8 +206,10 @@ impl std::fmt::Display for DatabaseMigrationError {
 
 impl std::error::Error for DatabaseMigrationError {}
 
-pub(crate) const CURRENT_DATA_CONTRACT_VERSION: &str = "v1.33";
-pub(crate) const CURRENT_PROJECTION_SCHEMA_VERSION: i64 = 71;
+pub(crate) const CURRENT_DATA_CONTRACT_VERSION: &str = "v1.34";
+pub(crate) const CURRENT_PROJECTION_SCHEMA_VERSION: i64 = 72;
+const V118_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.33";
+const V118_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION: i64 = 71;
 const V117_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.29";
 const V117_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION: i64 = 70;
 const V116_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.28";
@@ -363,6 +365,7 @@ struct CurrentMigrationState {
     v115: bool,
     v116: bool,
     v117: bool,
+    v118: bool,
 }
 
 impl CurrentMigrationState {
@@ -414,6 +417,18 @@ impl CurrentMigrationState {
             && self.v114
             && self.v115;
         if contract == CURRENT_DATA_CONTRACT_VERSION && schema == CURRENT_PROJECTION_SCHEMA_VERSION
+        {
+            return classifier == V116_CLASSIFIER_VERSION
+                && through_v115
+                && self.v116
+                && self.v117
+                && self.v118;
+        }
+        if self.v118 {
+            return false;
+        }
+        if contract == V118_MIGRATION_SOURCE_DATA_CONTRACT_VERSION
+            && schema == V118_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION
         {
             return classifier == V116_CLASSIFIER_VERSION && through_v115 && self.v116 && self.v117;
         }
@@ -1634,7 +1649,9 @@ fn connection_has_current_data_contract(connection: &Connection) -> rusqlite::Re
         SELECT contract_version = ?1
                AND projection_schema_version = ?2
                AND classifier_version = ?3
+               AND EXISTS(SELECT 1 FROM schema_migration WHERE version = 116)
                AND EXISTS(SELECT 1 FROM schema_migration WHERE version = 117)
+               AND EXISTS(SELECT 1 FROM schema_migration WHERE version = 118)
         FROM rovai_data_contract
         WHERE singleton = 1
         "#,
@@ -1699,7 +1716,8 @@ fn load_current_migration_state(
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 114),
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 115),
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 116),
-               EXISTS(SELECT 1 FROM schema_migration WHERE version = 117)
+               EXISTS(SELECT 1 FROM schema_migration WHERE version = 117),
+               EXISTS(SELECT 1 FROM schema_migration WHERE version = 118)
         "#,
         [],
         |row| {
@@ -1752,6 +1770,7 @@ fn load_current_migration_state(
                 v115: row.get(45)?,
                 v116: row.get(46)?,
                 v117: row.get(47)?,
+                v118: row.get(48)?,
             })
         },
     )
@@ -3805,6 +3824,9 @@ impl Database {
             if !self.schema_migration_applied(117)? {
                 self.migrate_pending_camp_inputs_v117()?;
             }
+            if !self.schema_migration_applied(118)? {
+                self.migrate_camp_member_fast_v118()?;
+            }
             if let Err(error) =
                 crate::notification::maintain_notification_episode_retention(self.connection())
             {
@@ -4205,6 +4227,9 @@ impl Database {
         }
         if !self.schema_migration_applied(117)? {
             self.migrate_pending_camp_inputs_v117()?;
+        }
+        if !self.schema_migration_applied(118)? {
+            self.migrate_camp_member_fast_v118()?;
         }
         if let Err(error) =
             crate::notification::maintain_notification_episode_retention(self.connection())
@@ -17122,6 +17147,54 @@ impl Database {
         Ok(())
     }
 
+    fn migrate_camp_member_fast_v118(&mut self) -> Result<()> {
+        let transaction = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        transaction.execute_batch(
+            r#"
+            ALTER TABLE agent_profile ADD COLUMN runtime_binding_revision TEXT NOT NULL DEFAULT '';
+            UPDATE agent_profile SET runtime_binding_revision = lower(hex(randomblob(16)));
+            CREATE TRIGGER agent_profile_fast_revision_insert AFTER INSERT ON agent_profile
+            WHEN NEW.runtime_binding_revision = '' BEGIN
+                UPDATE agent_profile SET runtime_binding_revision = lower(hex(randomblob(16))) WHERE id = NEW.id;
+            END;
+            CREATE TRIGGER agent_profile_fast_revision_update
+            AFTER UPDATE OF selected_runtime_adapter_kind, default_runtime_installation_id,
+                default_model_selection_json, default_permission_config_json ON agent_profile
+            WHEN OLD.selected_runtime_adapter_kind IS NOT NEW.selected_runtime_adapter_kind
+              OR OLD.default_runtime_installation_id IS NOT NEW.default_runtime_installation_id
+              OR OLD.default_model_selection_json IS NOT NEW.default_model_selection_json
+              OR OLD.default_permission_config_json IS NOT NEW.default_permission_config_json
+            BEGIN
+                UPDATE agent_profile SET runtime_binding_revision = lower(hex(randomblob(16))) WHERE id = NEW.id;
+                DELETE FROM camp_member_fast_preference WHERE agent_id = NEW.id;
+            END;
+            CREATE TABLE camp_member_fast_preference (
+                camp_id TEXT NOT NULL REFERENCES camp(id) ON DELETE CASCADE,
+                agent_id TEXT NOT NULL REFERENCES agent_profile(id) ON DELETE CASCADE,
+                runtime_binding_revision TEXT NOT NULL,
+                fast_override INTEGER CHECK(fast_override IN (0, 1)),
+                cwd TEXT NOT NULL,
+                executable_fingerprint TEXT NOT NULL,
+                eligible INTEGER NOT NULL DEFAULT 0 CHECK(eligible IN (0, 1)),
+                runtime_default_fast INTEGER CHECK(runtime_default_fast IN (0, 1)),
+                observed_fast_state TEXT NOT NULL DEFAULT 'unknown'
+                    CHECK(observed_fast_state IN ('unknown', 'standard', 'fast', 'cooldown')),
+                unavailable_reason TEXT,
+                PRIMARY KEY(camp_id, agent_id)
+            );
+            ALTER TABLE runtime_usage_run_summary ADD COLUMN observed_service_tier TEXT;
+            UPDATE rovai_data_contract
+            SET contract_version = 'v1.34', projection_schema_version = 72,
+                updated_at = datetime('now') WHERE singleton = 1;
+            INSERT INTO schema_migration(version, applied_at) VALUES (118, datetime('now'));
+            "#,
+        )?;
+        transaction.commit()?;
+        Ok(())
+    }
+
     fn migrate_runtime_activity_classifier_v116(&mut self) -> Result<()> {
         let transaction = self
             .connection
@@ -21595,7 +21668,31 @@ impl Database {
 }
 
 #[cfg(test)]
+fn downgrade_current_schema_to_v118_source_for_test(connection: &Connection) {
+    let applied: bool = connection
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM schema_migration WHERE version = 118)",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    if !applied {
+        return;
+    }
+    connection.execute_batch(r#"
+        DROP TRIGGER agent_profile_fast_revision_insert;
+        DROP TRIGGER agent_profile_fast_revision_update;
+        DROP TABLE camp_member_fast_preference;
+        ALTER TABLE agent_profile DROP COLUMN runtime_binding_revision;
+        ALTER TABLE runtime_usage_run_summary DROP COLUMN observed_service_tier;
+        UPDATE rovai_data_contract SET contract_version = 'v1.33', projection_schema_version = 71 WHERE singleton = 1;
+        DELETE FROM schema_migration WHERE version = 118;
+    "#).unwrap();
+}
+
+#[cfg(test)]
 fn downgrade_current_schema_to_v116_source_for_test(connection: &Connection) {
+    downgrade_current_schema_to_v118_source_for_test(connection);
     let applied: bool = connection
         .query_row(
             "SELECT EXISTS(SELECT 1 FROM schema_migration WHERE version = 117)",
@@ -22634,6 +22731,7 @@ mod tests {
             v115: version >= 115,
             v116: version >= 116,
             v117: version >= 117,
+            v118: version >= 118,
         }
     }
 
@@ -22644,6 +22742,12 @@ mod tests {
                 "current",
                 CURRENT_DATA_CONTRACT_VERSION,
                 CURRENT_PROJECTION_SCHEMA_VERSION,
+                118,
+            ),
+            (
+                "v1.33/schema-71 before Camp Fast",
+                V118_MIGRATION_SOURCE_DATA_CONTRACT_VERSION,
+                V118_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION,
                 117,
             ),
             (
@@ -22911,7 +23015,7 @@ mod tests {
             );
         }
 
-        let current = migration_state_through(117);
+        let current = migration_state_through(118);
         let v092_source = migration_state_through(91);
         let mut missing_intermediate = current;
         missing_intermediate.v84 = false;
@@ -22991,7 +23095,7 @@ mod tests {
             )
             .expect("current contract marker should load");
 
-        assert_eq!(state, migration_state_through(117));
+        assert_eq!(state, migration_state_through(118));
         assert!(state.admits(&contract, schema, &classifier));
         assert!(has_admissible_data_contract(
             &directory.join("rovai.sqlite")
@@ -23107,7 +23211,6 @@ mod tests {
         let workspace = directory.join("workspace");
         std::fs::create_dir_all(&workspace).unwrap();
         let mut database = crate::test_support::seeded_runtime_database();
-        downgrade_current_schema_to_v98_source_for_test(database.0.connection());
         let collaboration = crate::collaboration::CollaborationService::default();
         let camp = collaboration
             .create_camp(
@@ -23163,6 +23266,8 @@ mod tests {
             .as_str()
             .unwrap()
             .to_string();
+        // Materialize with the current writer, then restore the historical source shape.
+        downgrade_current_schema_to_v98_source_for_test(database.0.connection());
         database
             .0
             .connection()
@@ -23327,7 +23432,6 @@ mod tests {
     #[test]
     fn v98_invalidates_profile_v3_context_and_preserves_public_messages() {
         let (mut database, source_directory) = crate::test_support::seeded_runtime_database();
-        downgrade_current_schema_to_v98_source_for_test(database.connection());
         let workspace = source_directory.join("v98-workspace");
         std::fs::create_dir_all(&workspace).unwrap();
         let collaboration = crate::collaboration::CollaborationService::default();
@@ -23389,6 +23493,8 @@ mod tests {
             .as_str()
             .unwrap()
             .to_string();
+        // Materialize with the current writer, then restore the historical source shape.
+        downgrade_current_schema_to_v98_source_for_test(database.connection());
         let (agent_id, conversation_id): (String, String) = database
             .connection()
             .query_row(
@@ -25089,11 +25195,20 @@ mod tests {
             DatabaseContractClassification::SupportedMigrationSource(_)
         ));
         database.migrate_pending_camp_inputs_v117().unwrap();
-        assert!(connection_has_current_data_contract(database.connection()).unwrap());
+        assert!(
+            load_current_migration_state(database.connection())
+                .unwrap()
+                .admits(
+                    V118_MIGRATION_SOURCE_DATA_CONTRACT_VERSION,
+                    V118_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION,
+                    V116_CLASSIFIER_VERSION,
+                )
+        );
         let draft: (String, i64) = database.connection().query_row("SELECT body, revision FROM camp_composer_draft WHERE camp_id = 'camp-pending-migration'", [], |row| Ok((row.get(0)?, row.get(1)?))).unwrap();
         assert_eq!(draft, ("keep draft".to_string(), 7));
         drop(database);
         let reopened = Database::open(&directory).unwrap();
+        assert!(connection_has_current_data_contract(reopened.connection()).unwrap());
         assert_eq!(
             reopened
                 .connection()
@@ -25116,6 +25231,57 @@ mod tests {
         );
         drop(reopened);
         std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn v118_preserves_saved_bindings_and_introduces_no_fast_override() {
+        let mut database = crate::test_support::seeded_runtime_database_owned();
+        let before: String = database
+            .connection()
+            .query_row(
+                "SELECT default_model_selection_json FROM agent_profile WHERE id = 'agent_1'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        downgrade_current_schema_to_v118_source_for_test(database.connection());
+        assert!(
+            load_current_migration_state(database.connection())
+                .unwrap()
+                .admits("v1.33", 71, V116_CLASSIFIER_VERSION)
+        );
+        database.migrate_camp_member_fast_v118().unwrap();
+        assert!(connection_has_current_data_contract(database.connection()).unwrap());
+        let after: (String, String) = database.connection().query_row(
+            "SELECT default_model_selection_json, runtime_binding_revision FROM agent_profile WHERE id = 'agent_1'", [], |row| Ok((row.get(0)?, row.get(1)?))).unwrap();
+        assert_eq!(before, after.0);
+        assert_eq!(after.1.len(), 32);
+        let revisions: (i64, i64) = database
+            .connection()
+            .query_row(
+                "SELECT count(*), count(DISTINCT runtime_binding_revision) FROM agent_profile",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(revisions.0, revisions.1);
+        assert_eq!(
+            database
+                .connection()
+                .query_row(
+                    "SELECT count(*) FROM camp_member_fast_preference",
+                    [],
+                    |row| row.get::<_, i64>(0)
+                )
+                .unwrap(),
+            0
+        );
+        assert!(
+            database
+                .connection()
+                .prepare("SELECT observed_service_tier FROM runtime_usage_run_summary")
+                .is_ok()
+        );
     }
 
     #[test]

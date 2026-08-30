@@ -844,7 +844,17 @@ export interface CampViewedAcknowledgement {
   lastSeenGlobalSequence: number
 }
 
+export interface CampMemberFastView {
+  runtimeBindingRevision: string
+  fastOverride: boolean | null
+  runtimeDefaultFast: boolean | null
+  observedFastState: 'unknown' | 'standard' | 'fast' | 'cooldown'
+  unavailableReason: string | null
+}
+
 export interface CampMemberView {
+  fast?: CampMemberFastView
+
   agentId: string
   displayName: string
   avatarRef: string | null
@@ -3031,6 +3041,8 @@ export type CoreMethod =
   | 'camps.create'
   | 'camps.discardPending'
   | 'camps.rename'
+  | 'camps.members.fast.check'
+  | 'camps.members.fast.set'
   | 'camps.members.add'
   | 'camps.members.removalPreview'
   | 'camps.members.remove'

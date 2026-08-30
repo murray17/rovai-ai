@@ -19,7 +19,7 @@ on:
       - "apps/desktop/src/renderer/src/FileChangesPreview*"
       - "apps/desktop/src/renderer/src/file-preview-*"
       - "apps/desktop/src/renderer/src/file-changes-presentation*"
-      - "apps/desktop/src/renderer/src/CampWorkspace*"
+      - "apps/desktop/src/renderer/src/CampMemberFast*"
       - "packages/contracts/**"
       - "scripts/lib/rovai-request-context-bridge.test.mjs"
       - "scripts/fixtures/rovai-request-context-bridge.cjs"
@@ -31,6 +31,8 @@ on:
       - "scripts/fixtures/desktop-startup-presentation/**"
       - "scripts/lib/file-preview-layout.test.mjs"
       - "scripts/fixtures/file-preview-layout/**"
+      - "scripts/lib/camp-fast-layout.test.mjs"
+      - "scripts/fixtures/camp-fast-layout/**"
       - "package.json"
       - "pnpm-lock.yaml"
       - ".github/workflows/desktop-bridge.yml"
@@ -70,5 +72,6 @@ jobs:
           xvfb-run -a pnpm test:composer-continuation
           xvfb-run -a pnpm test:startup-presentation
           xvfb-run -a pnpm test:file-preview-layout
+          xvfb-run -a pnpm test:camp-fast-layout
           pnpm exec vitest run apps/desktop/src/main/desktop-session.test.ts apps/desktop/src/renderer/src/CampNavigationPagination.test.ts
           pnpm exec vitest run apps/desktop/src/renderer/src/error-message.test.ts apps/desktop/src/main/core-client.test.ts apps/desktop/src/main/windows-data-root.test.ts apps/desktop/src/main/windows-bootstrap.test.ts apps/desktop/src/renderer/src/CoreSubsystemNotice.test.ts apps/desktop/src/renderer/src/App.test.ts

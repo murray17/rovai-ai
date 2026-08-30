@@ -142,6 +142,8 @@ pub struct CampView {
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CampMemberView {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fast: Option<crate::camp_fast::CampMemberFastView>,
     pub agent_id: String,
     pub display_name: String,
     pub avatar_ref: Option<String>,
@@ -1947,10 +1949,11 @@ fn load_members(
         ORDER BY agent_profile.member_order, camp_member.agent_id
         "#,
     )?;
-    statement
+    let mut members = statement
         .query_map([camp_id], |row| {
             let agent_id: String = row.get(0)?;
             Ok(CampMemberView {
+                fast: None,
                 is_default_lead: default_lead == Some(agent_id.as_str()),
                 agent_id,
                 display_name: row.get(1)?,
@@ -1965,7 +1968,11 @@ fn load_members(
             })
         })?
         .collect::<rusqlite::Result<Vec<_>>>()
-        .context("failed to load Camp members")
+        .context("failed to load Camp members")?;
+    for member in &mut members {
+        member.fast = crate::camp_fast::view_on_connection(transaction, camp_id, &member.agent_id)?;
+    }
+    Ok(members)
 }
 
 fn load_membership_reconciliations(

@@ -183,6 +183,8 @@ const allowedMethods = new Set<CoreMethod>([
   'camps.create',
   'camps.discardPending',
   'camps.rename',
+  'camps.members.fast.check',
+  'camps.members.fast.set',
   'camps.members.add',
   'camps.members.removalPreview',
   'camps.members.remove',

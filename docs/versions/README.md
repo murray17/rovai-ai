@@ -1,8 +1,8 @@
 ---
 document_type: versions-index
 authority: version-lifecycle
-current_version: v1.33
-last_updated: 2026-08-30
+current_version: v1.34
+last_updated: 2026-08-31
 ---
 
 # Rovai-ai 版本记录
@@ -184,4 +184,5 @@ last_updated: 2026-08-30
 | v1.30 | `historical` | Camp 内独立文件预览、封闭文件能力、事件驱动更新感知与多类型只读 Viewer；引用延期，合入 v1.31 时按已有实施与验收事实冻结 | [v1.30/README.md](v1.30/README.md) |
 | v1.31 | `historical` | Desktop Bootstrap/Full Core 分层、SQLite lease/admission/copy migration 与正常日志恢复、Supervisor fencing、本机偏好 fail-open 和跨桥结构化错误已完成 | [v1.31/README.md](v1.31/README.md) |
 | v1.32 | `historical` | CLI 外部附件静默快照、保持 Core 根目录边界 | [v1.32/README.md](v1.32/README.md) |
-| v1.33 | `current` | Camp 连续消息、私有待发送队列与编辑占用 | [v1.33/README.md](v1.33/README.md) |
+| v1.33 | `historical` | Camp 连续消息、私有待发送队列与编辑占用 | [v1.33/README.md](v1.33/README.md) |
+| v1.34 | `current` | Camp 队员三态 Fast 覆盖、原生资格与执行冻结、紧凑成员胶囊 | [v1.34/README.md](v1.34/README.md) |

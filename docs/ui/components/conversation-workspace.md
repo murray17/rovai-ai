@@ -7,6 +7,20 @@ last_updated: 2026-08-31
 
 # Camp 会话工作区
 
+## 成员 Fast 响应模式
+
+成员浮层只为合格 Claude Code/Codex 绑定显示 Fast 胶囊；资格和作用域见
+[Camp Member Fast v1](../../contracts/camp-member-fast-v1.md)。保留既有行高、头像/名称层级和末尾操作菜单。
+胶囊视觉 20–22px、实际目标至少 28px、字体不低于 10.5px；使用现有语义主题 token，开启不只依赖颜色，
+同时填充闪电图标。未知默认采用中性样式，hover/focus 说明由 Runtime 继承、首次执行后显示观察结果。
+
+首次开启先用轻量行内提示确认额外用量，并持久记住确认；检查与恢复默认放进成员菜单。
+切换仅保存当前 Camp 该队员后续执行的意图，运行中提示当前执行不变。cooldown 不翻转开关，只在高亮
+意图旁给出警告。保存失败保留原状态，按钮不重建，确认后返回触发按钮焦点；背景检查不由打开浮层触发。
+
+长名册在浮层内滚动，最小验收 1280×720 保持 Composer/发送按钮可达。生产 CampWorkspace 的隔离 Electron
+fixture 由 `pnpm test:camp-fast-layout` 验证主题、尺寸、键盘/焦点、失败、费用确认、重测和恢复默认。
+
 Camp 是开放阅读面，不按角色铺不同底色。时间线、Agent 执行台、Approval/Recovery Dock 和
 Composer 共享主列；会话详情由标题栏入口打开浮层，不占用常驻侧列。普通叙述保持 `76ch` 阅读宽度，代码、表格等工件
 可以扩展到 `930px`，宽会话轨道与 Dock 上限保持 `1040px`；Composer 常规上限为 `1040px`，
@@ -18,7 +32,7 @@ Files Changed 历史 Review 真源。
 
 ## 打开与渐进历史
 
-Camp 的首个 meaningful paint 只依赖 [Camp Open Projection v8](../../contracts/camp-open-projection-v8.md)：
+Camp 的首个 meaningful paint 只依赖 [Camp Open Projection v9](../../contracts/camp-open-projection-v9.md)：
 Camp/成员、最近消息、当前运行摘要、pending Approval 和 Composer 可用即完成。项目导航恢复、侧栏刷新
 与可见来源确认在首屏后执行，失败不能撤销已打开会话。只显示“正在打开对话”的 Shell 不算完成。
 

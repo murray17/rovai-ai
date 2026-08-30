@@ -5631,6 +5631,11 @@ fn runtime_logical_identity_matches(
         || frozen.auth_scope != effective.auth_scope
         || frozen.permissions != effective.permissions
         || frozen.model.source != effective.model.source
+        || frozen.camp_fast != effective.camp_fast
+        || (frozen.camp_fast.is_some()
+            && frozen.adapter_kind == AdapterKind::CodexCli
+            && frozen.model.options.get("serviceTier")
+                != effective.model.options.get("serviceTier"))
     {
         return false;
     }
@@ -5777,6 +5782,7 @@ mod tests {
             purpose: "resume safely".to_string(),
             effective_config: json!({}),
             runtime: FrozenAgentRuntimeConfig {
+                camp_fast: None,
                 adapter_kind: AdapterKind::CodexCli,
                 installation_id: "adapter-test-codex".to_string(),
                 installation_generation: current_generation,
@@ -8018,6 +8024,35 @@ mod tests {
                 ),
             )
             .unwrap();
+        let fast_target = crate::camp_fast::target(&database, &camp_id, "agent_2")
+            .unwrap()
+            .unwrap();
+        let selected_runtime = crate::camp_fast::runtime_for_target(&database, &fast_target)
+            .unwrap()
+            .unwrap();
+        crate::camp_fast::record_eligibility(
+            &database,
+            &fast_target,
+            &selected_runtime,
+            &crate::camp_fast::NativeFastEligibility {
+                eligible: true,
+                runtime_default_fast: Some(false),
+            },
+        )
+        .unwrap();
+        let preference = |command_id: &str, enabled| {
+            user_envelope(
+                command_id,
+                Some(&camp_id),
+                crate::camp_fast::SetCampMemberFastCommand {
+                    camp_id: camp_id.clone(),
+                    agent_id: "agent_2".into(),
+                    expected_runtime_binding_revision: fast_target.runtime_binding_revision.clone(),
+                    fast_override: Some(enabled),
+                },
+            )
+        };
+        crate::camp_fast::set_preference(&mut database, &preference("freeze-fast", true)).unwrap();
         let sent = collaboration
             .send_test_camp_message(
                 &mut database,
@@ -8052,6 +8087,10 @@ mod tests {
             .find(|candidate| candidate.agent_run_id == run_id)
             .unwrap();
         let frozen = candidate.frozen_runtime().unwrap();
+        assert_eq!(frozen.camp_fast.as_ref().unwrap().fast_override, Some(true));
+        assert!(runtime_config_digest_is_valid(&frozen).unwrap());
+        crate::camp_fast::set_preference(&mut database, &preference("later-standard", false))
+            .unwrap();
         let mut effective = frozen.clone();
         effective.installation_generation += 1;
         effective.reported_version = Some("2.0.0".to_string());
@@ -8085,6 +8124,31 @@ mod tests {
             )
             .unwrap();
 
+        // Both model modes preserve the admitted choice, even after the UI chose Standard.
+        for explicit in [false, true] {
+            let mut admitted = frozen.clone();
+            if explicit {
+                admitted.model.source = "explicit".into();
+                admitted.model.model_id = "gpt-test".into();
+                admitted.model.options["reasoning_effort"] = json!("high");
+            }
+            admitted.refresh_config_digest().unwrap();
+            let resolved = AgentProfileService::default()
+                .resolve_rebound_runtime(&database, &admitted)
+                .unwrap()
+                .unwrap();
+            assert!(runtime_logical_identity_matches(&admitted, &resolved));
+            assert!(runtime_config_digest_is_valid(&resolved).unwrap());
+            assert_eq!(resolved.camp_fast, admitted.camp_fast);
+            assert_eq!(resolved.model.options["serviceTier"], "priority");
+            let mut lost_intent = resolved.clone();
+            lost_intent.camp_fast = None;
+            assert!(!runtime_logical_identity_matches(&admitted, &lost_intent));
+        }
+        let effective = AgentProfileService::default()
+            .resolve_rebound_runtime(&database, &frozen)
+            .unwrap()
+            .unwrap();
         let service = ExecutionRuntimeService::default();
         let rebound = service
             .rebind_agent_run_runtime(

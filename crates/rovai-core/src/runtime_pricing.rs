@@ -222,9 +222,9 @@ fn rate_for(
         .map(str::trim)
         .filter(|value| !value.is_empty())
     {
-        None | Some("standard" | "default" | "auto") => PricingTier::Standard,
+        Some("standard" | "default") => PricingTier::Standard,
         Some("fast" | "priority") => PricingTier::Fast,
-        Some(_) => return None,
+        None | Some(_) => return None,
     };
     CODEX_PRICING_CATALOG
         .iter()
@@ -259,9 +259,14 @@ mod tests {
 
     #[test]
     fn codex_catalog_selects_effective_model_and_cache_write_rates() {
-        let before_reduction = estimate_codex_api_price(
+        assert!(!supports_codex_price_estimate(
             Some("gpt-5.6-terra"),
             None,
+            Utc::now()
+        ));
+        let before_reduction = estimate_codex_api_price(
+            Some("gpt-5.6-terra"),
+            Some("default"),
             Utc.with_ymd_and_hms(2026, 7, 29, 12, 0, 0).unwrap(),
             CodexTokenBuckets {
                 uncached_input: 1_000_000,
@@ -279,7 +284,7 @@ mod tests {
 
         let current = estimate_codex_api_price(
             Some("gpt-5.6-terra"),
-            None,
+            Some("default"),
             Utc.with_ymd_and_hms(2026, 8, 17, 0, 0, 0).unwrap(),
             CodexTokenBuckets {
                 uncached_input: 1_000_000,
@@ -297,7 +302,7 @@ mod tests {
 
         let older_model = estimate_codex_api_price(
             Some("gpt-5.4-mini"),
-            None,
+            Some("default"),
             Utc.with_ymd_and_hms(2026, 8, 17, 0, 0, 0).unwrap(),
             CodexTokenBuckets {
                 uncached_input: 0,

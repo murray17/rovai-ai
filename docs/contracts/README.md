@@ -1,7 +1,7 @@
 ---
 document_type: contracts-index
 authority: protocol-contract-routing
-last_updated: 2026-08-30
+last_updated: 2026-08-31
 ---
 
 # 长期接口合同
@@ -27,6 +27,10 @@ Architecture 解释组件如何组成，Version 概览记录交付范围；它�
 
 | 合同 | 权威范围 |
 | --- | --- |
+| [Camp Member Fast v1（当前）](camp-member-fast-v1.md) | Camp/member/保存绑定代次的三态覆盖、原生订阅资格、执行冻结、观察与紧凑 UI |
+| [Camp Open Projection v9（当前）](camp-open-projection-v9.md) | v8 保留；Snapshot 34/Open 5 增加可选 member.fast，仅查询安全缓存 |
+| [Runtime Launch and Verification v29（当前）](runtime-launch-and-verification-v29.md) | v28 保留；现有 Check Manager 的 Fast metadata 与单执行原生覆盖 |
+| [Runtime Usage Monitoring v4（当前）](runtime-usage-monitoring-v4.md) | v3 保留；可选实际档位、observed 优先与未知撤回估价 |
 | [Pending Camp Input v1（当前）](pending-camp-input-v1.md) | 私有下一轮输入、FIFO、编辑 token、暂停、原子发布与无附件边界 |
 | [Camp Identity v1（当前）](camp-identity-v1.md) | 唯一 `rvcamp_` UUIDv7/Crockford 主键、strict boundary、SQLite/JSON/path 使用与 Native Session identity 分离 |
 | [Desktop Runtime Availability v1（当前）](desktop-runtime-availability-v1.md) | Bootstrap/Full Core capability、Supervisor generation/revision、data-dir lease、SQLite 准入票据、copy migration 与结构化 request failure |
@@ -34,7 +38,7 @@ Architecture 解释组件如何组成，Version 概览记录交付范围；它�
 | [First-run Onboarding v2（历史）](first-run-onboarding-v2.md) | v1 admission/provisioning 不变；schema 2 增加无可用 Runtime 时无产品副作用的 `runtime_deferred` 终态；其 pre-Core 文件存在性 admission 已由 v3 替代 |
 | [First-run Onboarding v1（历史）](first-run-onboarding-v1.md) | Desktop 首次安装判定、三页 mandatory 状态、幂等 provisioning、`初次集结` 与第四页 Draft-only 入口；不允许无 Runtime 完成 |
 | [Camp Membership v1（当前）](camp-membership-v1.md) | 动态添加/移除、至少一位成员、generation/version、atomic cutover、durable reconciliation、exact lifetime fence 与受信外部来源 |
-| [Camp Open Projection v8（当前）](camp-open-projection-v8.md) | v7 read/membership state 不变；Snapshot 34/Open 5 增加每 AgentRun/epoch 文件变化 summary |
+| [Camp Open Projection v8（历史）](camp-open-projection-v8.md) | v7 read/membership state 不变；Snapshot 34/Open 5 增加每 AgentRun/epoch 文件变化 summary |
 | [Camp Open Projection v7（历史）](camp-open-projection-v7.md) | v6 read/attachment state 不变；Snapshot 33/Open 4 增加 membership generation 与活动 reconciliation |
 | [Camp Open Projection v6（历史）](camp-open-projection-v6.md) | v5 read/evidence 不变；Message Attachment 增加 Runtime projection state，Renderer 诚实展示 pending/recovery/failed |
 | [Camp Open Projection v5（历史）](camp-open-projection-v5.md) | v4 activation-aware enter 与 wire 不变；Camp open 完整返回所有 non-terminal Run Evidence，Renderer live event 不做最后 N 项裁剪 |
@@ -56,7 +60,7 @@ Architecture 解释组件如何组成，Version 概览记录交付范围；它�
 | [Paired Collaboration Experiment v1（当前）](paired-collaboration-experiment-v1.md) | Team/Solo pre-registration、fresh arms、typed resources 与 outcome-conditioned paired comparison |
 | [ACP Client Terminal v2（当前）](acp-client-terminal-v2.md) | v1 capability/wire/lifecycle 不变；显式绝对 cwd 只校验存在目录，不做 execution-root containment，权限由 Runtime/OS 拥有 |
 | [ACP Client Terminal v1（历史）](acp-client-terminal-v1.md) | Runtime-specific `disabled/local_bridged` policy、标准 ACP Terminal wire、本地 ManagedProcess 派生、旧 workspace-contained cwd、Run fencing、有界输出与 cancellation/release cleanup |
-| [Runtime Launch and Verification v28（当前）](runtime-launch-and-verification-v28.md) | v27 边界不变；ACP Client FS 成为无 execution-root containment、无一次性 token 的 Runtime-owned 文件执行代理；自动/绕过模式的合格 permission request 只作协议兼容 allow |
+| [Runtime Launch and Verification v28（历史）](runtime-launch-and-verification-v28.md) | v27 边界不变；ACP Client FS 成为无 execution-root containment、无一次性 token 的 Runtime-owned 文件执行代理；自动/绕过模式的合格 permission request 只作协议兼容 allow |
 | [Runtime Launch and Verification v27（历史）](runtime-launch-and-verification-v27.md) | v26 边界不变；Grok Build 三端最低版本统一为 `>= 1.0.0`，Ready 要求标准 ACP resume，cold continuation 从 load-only HistoryRestore 切到 `session/resume`，creation-only rules 不在恢复时重注入 |
 | [Runtime Launch and Verification v26（历史）](runtime-launch-and-verification-v26.md) | v25 launch/权限/Cursor 边界不变；增加 TRAE 专属 `rawInput.Command`、ACP error/activity/failure 与时间域规则，并补充 Grok Build 的官方配置、load-only continuation、原生 rules、compaction、Plugin MCP 和 generic agent-text 边界 |
 | [Runtime Launch and Verification v25（历史）](runtime-launch-and-verification-v25.md) | v24 的 Kimi `yolo` 与十二种 Runtime 最高权限默认不变；Cursor 在 Settings 与普通成员 Runtime selector 中保持隐藏，历史配置只读保留；不含 v26 的 TRAE command、ACP error/activity、failure 与时间域修正 |
@@ -86,7 +90,7 @@ Architecture 解释组件如何组成，Version 概览记录交付范围；它�
 | [Runtime Launch and Verification v3（历史）](runtime-launch-and-verification-v3.md) | v2 加 light discovery、显式/首次执行深检、manager-owned attempt、两路并发、generation/fingerprint fence 与统一受限 Probe process owner |
 | [Runtime Launch and Verification v2（历史）](runtime-launch-and-verification-v2.md) | v1 的 purpose/static verification 加 ACP Reuse/Resume/New、LoadHistory replay quarantine、Prompt fence、response-only ACK 与 TRAE warm Host |
 | [Runtime Launch and Verification v1（历史）](runtime-launch-and-verification-v1.md) | Runtime launch purpose、TRAE 静态 Installation、`installed_unverified`、nullable version 与旧 `session/new|load` 执行路径 |
-| [Runtime Usage Monitoring v3（当前）](runtime-usage-monitoring-v3.md) | v2 五表与 Snapshot 不变；补齐 OpenCode 版本感知 Cache Write/零值语义和 Codex 版本化 API 公价估算 |
+| [Runtime Usage Monitoring v3（历史）](runtime-usage-monitoring-v3.md) | v2 五表与 Snapshot 不变；补齐 OpenCode 版本感知 Cache Write/零值语义和 Codex 版本化 API 公价估算 |
 | [Runtime Usage Monitoring v2（历史）](runtime-usage-monitoring-v2.md) | 五表 clean break、内存 Usage 合并、稀疏 Token/Cache/Cost、Coverage、单 Snapshot 与有界刷新 |
 | [Runtime Monitoring v1（历史）](runtime-monitoring-v1.md) | Clean-break collection/enrollment、稀疏 Usage Observation、Native Session fact、三类查询、Coverage、Tool Duration 与 Cost layer |
 | [Diagnostics Center v1（当前）](diagnostics-center-v1.md) | `diagnostics.check` typed read model、三态分类、显式单项修复映射、Recovery 与集中脱敏的 `rovai-diagnostics-v5` |
