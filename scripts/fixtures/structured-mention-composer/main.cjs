@@ -10,8 +10,11 @@ app.setPath('userData', userData)
 app.setPath('sessionData', join(userData, 'session'))
 
 app.whenReady().then(async () => {
+  const startedAt = Date.now()
+  const trace = message => console.error(`[${Date.now() - startedAt}ms] ${message}`)
   const window = new BrowserWindow({
-    show: false,
+    // Keep the Linux fixture mapped in Xvfb so native rendering runs in the foreground.
+    show: process.platform === 'linux',
     width: 1000,
     height: 700,
     webPreferences: { contextIsolation: true, sandbox: true, nodeIntegration: false, backgroundThrottling: false }
@@ -30,13 +33,13 @@ app.whenReady().then(async () => {
     }
   }
   const evaluate = source => {
-    console.error(`Composer Renderer step: ${source.replace(/\s+/g, ' ').slice(0, 200)}`)
+    trace(`Composer Renderer step: ${source.replace(/\s+/g, ' ').slice(0, 200)}`)
     return complete(window.webContents.executeJavaScript(source, true), source)
   }
   const frames = () => evaluate('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))')
   const command = (method, params) => {
     const operation = `${method} ${JSON.stringify(params)}`
-    console.error(`Composer input step: ${operation}`)
+    trace(`Composer input step: ${operation}`)
     return complete(window.webContents.debugger.sendCommand(method, params), operation)
   }
   const cases = []
@@ -70,22 +73,22 @@ app.whenReady().then(async () => {
     if (options.sameEditor) assert.equal(state.sameEditor, true, 'Simple native text edits must not reset the host')
   }
   async function run(name, callback) {
-    console.error(`Composer fixture: ${name}`)
+    trace(`Composer fixture: ${name}`)
     try {
       await callback()
       cases.push(name)
     } catch (error) {
-      console.error(`Composer fixture failed (${name}): ${error.stack}`)
+      trace(`Composer fixture failed (${name}): ${error.stack}`)
       failures.push({ name, message: error.message })
     }
   }
   try {
-    console.error('Composer fixture: loading Renderer')
+    trace('Composer fixture: loading Renderer')
     await window.loadFile(renderer)
-    console.error('Composer fixture: attaching debugger')
+    trace('Composer fixture: attaching debugger')
     window.webContents.debugger.attach('1.3')
     await command('Emulation.setFocusEmulationEnabled', { enabled: true })
-    console.error('Composer fixture: waiting for initial frames')
+    trace('Composer fixture: waiting for initial frames')
     await frames()
 
     await run('IME replaces a newline without blanking the page', async () => {
