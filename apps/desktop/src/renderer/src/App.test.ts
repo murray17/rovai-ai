@@ -23,6 +23,7 @@ import type {
   SupervisorSnapshot
 } from '@contracts'
 import {
+  App,
   AppHeader,
   CAMP_OPEN_FEEDBACK_DELAY_MS,
   ControlledShutdownOverlay,
@@ -236,6 +237,21 @@ function supervisorSnapshot(
 }
 
 describe('availability-first workspace gate', () => {
+  it('starts with the ordinary page frame before the first Supervisor snapshot, without loading feedback', () => {
+    vi.stubGlobal('document', { documentElement: { dataset: {}, style: {} } })
+    vi.stubGlobal('window', { rovai: { platform: 'darwin' } })
+    try {
+      const markup = renderToStaticMarkup(createElement(App))
+      expect(markup).toContain('unified-sidebar')
+      expect(markup).not.toContain('bootstrap-shell')
+      expect(markup).not.toContain('startup-route-loading')
+      expect(markup).not.toContain('sidebar-empty')
+      expect(markup).not.toContain('onboarding-app-shell')
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+
   it('mounts the authoritative workspace only for one fully ready capability snapshot', () => {
     expect(authoritativeWorkspaceIsAvailable(null)).toBe(false)
     expect(authoritativeWorkspaceIsAvailable(supervisorSnapshot())).toBe(false)

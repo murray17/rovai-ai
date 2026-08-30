@@ -602,6 +602,50 @@ export function ControlledShutdownOverlay({
 
 export function App(): React.JSX.Element {
   const [supervisor, setSupervisor] = useState<SupervisorSnapshot | null>(null)
+  const [startupSnapshot, setStartupSnapshot] = useState<DesktopStartupSnapshot | null>(null)
+  const [startupError, setStartupError] = useState<string | null>(null)
+  const [startupReadAttempt, setStartupReadAttempt] = useState(0)
+  const [startupFeedbackDelayElapsed, setStartupFeedbackDelayElapsed] = useState(false)
+  const startupStartedAt = useRef(performance.now())
+
+  useEffect(() => {
+    const elapsed = performance.now() - startupStartedAt.current
+    const remaining = Math.max(0, STARTUP_FEEDBACK_DELAY_MS - elapsed)
+    const timer = window.setTimeout(() => setStartupFeedbackDelayElapsed(true), remaining)
+    return () => window.clearTimeout(timer)
+  }, [])
+
+  useEffect(() => {
+    let disposed = false
+    setStartupError(null)
+    // This snapshot belongs to the local Main Window Session, not to Core. Read it
+    // alongside the Supervisor so the target frame never waits for DB admission.
+    void window.rovai.desktopSession.getStartupSnapshot().then((snapshot) => {
+      if (!disposed) setStartupSnapshot(snapshot)
+    }).catch((error) => {
+      if (!disposed) setStartupError(errorMessage(error))
+    })
+    return () => { disposed = true }
+  }, [startupReadAttempt])
+
+  useEffect(() => {
+    let disposed = false
+    let receivedChange = false
+    const apply = (snapshot: AppearanceSnapshot): void => {
+      if (!disposed) applyAppearanceSnapshot(document.documentElement, snapshot)
+    }
+    const unsubscribe = window.rovai.appearance.onChanged((snapshot) => {
+      receivedChange = true
+      apply(snapshot)
+    })
+    void window.rovai.appearance.get().then((snapshot) => {
+      if (!receivedChange) apply(snapshot)
+    }).catch(() => undefined)
+    return () => {
+      disposed = true
+      unsubscribe()
+    }
+  }, [])
 
   useEffect(() => {
     let disposed = false
@@ -619,12 +663,25 @@ export function App(): React.JSX.Element {
     }
   }, [])
 
-  if (!authoritativeWorkspaceIsAvailable(supervisor)) {
+  if (supervisor?.fullCoreState === 'blocked' || supervisor?.fullCoreState === 'crashed') {
     return <BootstrapShell snapshot={supervisor} />
+  }
+  if (!authoritativeWorkspaceIsAvailable(supervisor) || !startupSnapshot) {
+    return <StartupWorkspace
+      snapshot={startupSnapshot}
+      feedbackVisible={startupFeedbackDelayElapsed}
+      error={startupError}
+      migrating={supervisor?.startupPhase === 'migrating_authority'}
+      onRetry={() => setStartupReadAttempt((attempt) => attempt + 1)}
+    />
   }
   return (
     <div className="authoritative-workspace">
-      <AuthoritativeApp />
+      <AuthoritativeApp
+        initialStartupSnapshot={startupSnapshot}
+        startupStartedAtMs={startupStartedAt.current}
+        startupFeedbackDelayElapsed={startupFeedbackDelayElapsed}
+      />
       <CoreSubsystemNotice subsystems={supervisor?.coreSubsystems ?? []} />
     </div>
   )
@@ -637,6 +694,82 @@ export function authoritativeWorkspaceIsAvailable(
     && snapshot.fullCoreState === 'ready'
     && snapshot.capabilities.authoritativeWorkspace
     && snapshot.capabilities.coreRequests
+}
+
+function startupView(target: RestorableLocation | null): View {
+  return target?.kind === 'camp' || target?.kind === 'members' || target?.kind === 'memory'
+    ? target.kind
+    : 'compose'
+}
+
+/** The normal page chrome, without mounting any Core-backed query or mutation. */
+function StartupWorkspace({
+  snapshot,
+  feedbackVisible,
+  error,
+  migrating = false,
+  onRetry
+}: {
+  snapshot: DesktopStartupSnapshot | null
+  feedbackVisible: boolean
+  error: string | null
+  migrating?: boolean
+  onRetry(): void
+}): React.JSX.Element {
+  const target = snapshot ? startupTargetFromSnapshot(snapshot) : null
+  const view = startupView(target)
+  const dragPage = windowDragStripPage(view)
+  const ignore = (): void => undefined
+  const ignoreAsync = async (): Promise<void> => undefined
+  const contentClass = view === 'camp' ? 'task-content camp-content'
+    : view === 'members' ? 'members-content'
+      : view === 'memory' ? 'memory-content' : 'task-content compose-content'
+  return (
+    <div
+      className={view === 'camp' ? 'app-shell app-shell-camp' : 'app-shell'}
+      data-startup-frame={target?.kind ?? 'location'}
+    >
+      <CampNavigation
+        platform={window.rovai.platform}
+        view={view}
+        state="loading"
+        disabled
+        navigation={null}
+        activeCampId={null}
+        pendingMemoryCount={0}
+        onNewConversation={ignore}
+        onMembers={ignore}
+        onMemory={ignore}
+        onSettings={ignore}
+        onOpenProject={ignore}
+        onCamp={ignore}
+        onRemoveProject={ignoreAsync}
+        onRename={ignoreAsync}
+        onDelete={ignoreAsync}
+        onError={ignore}
+      />
+      {view === 'camp' && <AppHeader
+        campTitle="对话"
+        contextLabel={null}
+        camp={null}
+        inspectorVisible={false}
+        onToggleInspector={ignore}
+        onFocusApprovals={ignore}
+      />}
+      {dragPage && <WindowDragStrip page={dragPage} />}
+      <main className={`content ${contentClass}`} aria-busy="true">
+        {(feedbackVisible || error) && (target
+          ? <StartupRouteLoading
+              kind={target.kind}
+              waiting={error !== null}
+              error={error}
+              migrating={migrating}
+              onRetry={onRetry}
+            />
+          : <StartupGate waiting={error !== null} error={error} onRetry={onRetry} />)}
+      </main>
+    </div>
+  )
 }
 
 export function BootstrapShell({
@@ -833,7 +966,16 @@ export function bootstrapAuthorityCopy(snapshot: SupervisorSnapshot | null): {
   }
 }
 
-function AuthoritativeApp(): React.JSX.Element {
+function AuthoritativeApp({
+  initialStartupSnapshot,
+  startupStartedAtMs,
+  startupFeedbackDelayElapsed
+}: {
+  initialStartupSnapshot: DesktopStartupSnapshot
+  startupStartedAtMs: number
+  startupFeedbackDelayElapsed: boolean
+}): React.JSX.Element {
+  const initialTarget = startupTargetFromSnapshot(initialStartupSnapshot)
   const [appearance, setAppearance] = useState<AppearanceSnapshot>(
     () => initialAppearanceSnapshot(document.documentElement)
   )
@@ -879,19 +1021,24 @@ function AuthoritativeApp(): React.JSX.Element {
   const shuttingDownRef = useRef(false)
   const [shutdownFeedbackVisible, setShutdownFeedbackVisible] = useState(false)
   const [notificationHeadsUpVisible, setNotificationHeadsUpVisible] = useState(false)
-  const [startupSnapshot, setStartupSnapshot] = useState<DesktopStartupSnapshot | null>(null)
-  const [startupRouteTarget, setStartupRouteTarget] = useState<RestorableLocation | null>(null)
+  const [startupSnapshot, setStartupSnapshot] = useState<DesktopStartupSnapshot | null>(
+    initialStartupSnapshot
+  )
+  const [startupRouteTarget, setStartupRouteTarget] = useState<RestorableLocation | null>(initialTarget)
   const [startupStatus, setStartupStatus] = useState<StartupStatus>('loading')
-  const [startupFeedbackDelayElapsed, setStartupFeedbackDelayElapsed] = useState(false)
   const [startupError, setStartupError] = useState<string | null>(null)
   const [onboardingSnapshot, setOnboardingSnapshot] = useState<OnboardingSnapshot | null>(null)
   const [onboardingRuntimePhase, setOnboardingRuntimePhase] = useState<OnboardingRuntimePhase>('idle')
   const [onboardingBusy, setOnboardingBusy] = useState(false)
   const [onboardingError, setOnboardingError] = useState<string | null>(null)
   const [locationSaveError, setLocationSaveError] = useState<string | null>(null)
-  const [view, setView] = useState<View>('compose')
-  const [selectedMemberId, setSelectedMemberId] = useState<string | null>(null)
-  const [memberTab, setMemberTab] = useState<MemberWorkspaceTab>('identity')
+  const [view, setView] = useState<View>(() => startupView(initialTarget))
+  const [selectedMemberId, setSelectedMemberId] = useState<string | null>(
+    initialTarget.kind === 'members' ? initialTarget.agentId : null
+  )
+  const [memberTab, setMemberTab] = useState<MemberWorkspaceTab>(
+    initialTarget.kind === 'members' ? initialTarget.tab : 'identity'
+  )
   const [memberRuntimeFocusRequest, setMemberRuntimeFocusRequest] = useState(0)
   const [settingsSection, setSettingsSection] = useState<SettingsSection>('general')
   const [generalPreferences, setGeneralPreferences] = useState<GeneralPreferencesSnapshot | null>(null)
@@ -933,8 +1080,8 @@ function AuthoritativeApp(): React.JSX.Element {
   const onboardingSnapshotRequest = useRef<Promise<void> | null>(null)
   const onboardingRuntimeRequest = useRef<Promise<void> | null>(null)
   const startupTraceId = useRef(crypto.randomUUID())
-  const startupStartedAt = useRef(performance.now())
-  const lastMainView = useRef<View>('compose')
+  const startupStartedAt = useRef(startupStartedAtMs)
+  const lastMainView = useRef<View>(startupView(initialTarget))
   const newConversationReturnFocus = useRef<HTMLElement | null>(null)
   const liveRuntimeEventSequence = useRef(0)
   const runtimeHealthRefreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -1555,13 +1702,6 @@ function AuthoritativeApp(): React.JSX.Element {
   }, [loadStartupSnapshot])
 
   useEffect(() => {
-    const elapsed = performance.now() - startupStartedAt.current
-    const remaining = Math.max(0, STARTUP_FEEDBACK_DELAY_MS - elapsed)
-    const timer = window.setTimeout(() => setStartupFeedbackDelayElapsed(true), remaining)
-    return () => window.clearTimeout(timer)
-  }, [])
-
-  useEffect(() => {
     if (!shuttingDown) {
       setShutdownFeedbackVisible(false)
       return undefined
@@ -1653,9 +1793,12 @@ function AuthoritativeApp(): React.JSX.Element {
     currentWorkspaceHint?.projectPath
   ])
 
+  const startupPrerequisitesReady = generalPreferences !== null
+    && onboardingSnapshot?.status === 'completed'
   useEffect(() => {
     if (
       !startupSnapshot
+      || !startupPrerequisitesReady
       || startupResolvedSessionId.current === startupSnapshot.sessionId
     ) return
     let cancelled = false
@@ -1800,6 +1943,7 @@ function AuthoritativeApp(): React.JSX.Element {
     loadOverview,
     requestCampProjection,
     setCampSnapshot,
+    startupPrerequisitesReady,
     startupSnapshot
   ])
 
@@ -3307,23 +3451,15 @@ function AuthoritativeApp(): React.JSX.Element {
 
   if (onboardingSnapshot === null) {
     return (
-      <div className="app-shell onboarding-app-shell">
-        {(startupFeedbackDelayElapsed || onboardingError) && (
-          <section className="startup-gate onboarding-admission-gate" aria-busy={!onboardingError} aria-live="polite">
-            <span className="startup-gate-mark" aria-hidden="true">✦</span>
-            <p className="settings-page-eyebrow">ROVAI FIRST START</p>
-            <h1>{onboardingError ? '暂时无法读取首次训练状态' : '正在准备 Rovai'}</h1>
-            <p>{onboardingError
-              ? '已保存的进度不会被清除。重试后会继续打开同一个未完成页面。'
-              : '正在读取本机的首次训练进度。'}</p>
-            {onboardingError && <small role="alert">{onboardingError}</small>}
-            {onboardingError && (
-              <button className="quiet-button" type="button" onClick={retryStartup}>重试</button>
-            )}
-          </section>
-        )}
+      <>
+        <StartupWorkspace
+          snapshot={startupSnapshot}
+          feedbackVisible={startupFeedbackDelayElapsed}
+          error={onboardingError || startupError}
+          onRetry={retryStartup}
+        />
         {shuttingDown && <ControlledShutdownOverlay visible={shutdownFeedbackVisible} />}
-      </div>
+      </>
     )
   }
 
@@ -3436,7 +3572,7 @@ function AuthoritativeApp(): React.JSX.Element {
         onError={(nextError) => setError(errorMessage(nextError))}
       />
       {!startupGateVisible && view === 'camp' && <AppHeader
-        campTitle={activeCampTitle || null}
+        campTitle={activeCampTitle || '对话'}
         contextLabel={activeCampContextLabel}
         camp={campSnapshot?.camp.id === activeCampId ? campSnapshot : null}
         inspectorVisible={campSnapshot?.camp.activationState === 'active' && campInspectorVisible}
@@ -3728,14 +3864,16 @@ export function StartupRouteLoading({
   kind,
   waiting,
   error,
+  migrating = false,
   onRetry
 }: {
-  kind: 'camp' | 'members'
+  kind: RestorableLocation['kind']
   waiting: boolean
   error: string | null
+  migrating?: boolean
   onRetry(): void
 }): React.JSX.Element {
-  const label = kind === 'camp' ? '对话' : '队员'
+  const label = { camp: '对话', members: '队员', memory: '记忆', quick_chat: '快速对话' }[kind]
   return (
     <section
       className={`startup-route-loading startup-route-loading-${kind}`}
@@ -3750,7 +3888,9 @@ export function StartupRouteLoading({
           <h2>{waiting ? `${label}暂时无法打开` : `正在打开${label}`}</h2>
           <p>{waiting
             ? '上次位置仍保留在本机，可以在本地服务恢复后重试。'
-            : '页面框架已经就绪，最近内容即将就绪。'}</p>
+            : migrating
+              ? '正在升级本地数据，完成后会自动打开；原工作区仍被保留。'
+              : '页面框架已经就绪，最近内容即将就绪。'}</p>
         </div>
         {waiting && (
           <button className="quiet-button" type="button" onClick={onRetry}>重试</button>

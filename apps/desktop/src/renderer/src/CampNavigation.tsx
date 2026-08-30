@@ -188,6 +188,7 @@ export async function revealMoreNavigationCamps(
 export function CampNavigation({
   view,
   state,
+  disabled = false,
   navigation,
   activeCampId,
   openingCampId = null,
@@ -220,6 +221,7 @@ export function CampNavigation({
 }: {
   view: 'compose' | 'camp' | 'members' | 'memory' | 'settings'
   state: 'loading' | 'ready' | 'error'
+  disabled?: boolean
   navigation: NavigationSnapshot | null
   activeCampId: string | null
   openingCampId?: string | null
@@ -314,6 +316,7 @@ export function CampNavigation({
   }, [view])
 
   useEffect(() => {
+    if (disabled) return undefined
     const onKeyDown = (event: KeyboardEvent): void => {
       if (shouldHandlePrimaryShortcut(platform, event, 'K')) {
         event.preventDefault()
@@ -322,7 +325,7 @@ export function CampNavigation({
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [platform])
+  }, [disabled, platform])
 
   const commitPagination = (groupKey: string, pagination: NavigationGroupPaginationState): void => {
     const next = { ...paginationByGroupRef.current, [groupKey]: pagination }
@@ -513,7 +516,7 @@ export function CampNavigation({
 
   return (
     <>
-      <aside ref={sidebarRef} className={`unified-sidebar ${view === 'settings' ? 'settings-navigation-mode' : ''}`} aria-label={view === 'settings' ? '设置分类' : '全局导航'}>
+      <aside ref={sidebarRef} className={`unified-sidebar ${view === 'settings' ? 'settings-navigation-mode' : ''}`} inert={disabled} aria-label={view === 'settings' ? '设置分类' : '全局导航'}>
         <div className="unified-sidebar-drag" aria-hidden="true" />
         <div className="unified-brand">
           <span className="rail-logo" role="img" aria-label="Rovai AI">
@@ -670,7 +673,7 @@ export function CampNavigation({
             )
           })}
           {navigation && navigation.projects.length === 0 && <p className="sidebar-empty">选择工作目录后，对话会在这里成组显示。</p>}
-          <CampGroup
+          {navigation && <CampGroup
             groupKey="quick-chat"
             label="快速对话"
             totalCount={quickChatTotalCount}
@@ -692,7 +695,7 @@ export function CampNavigation({
             onCopyCampId={(camp) => void copyCampId(camp)}
             onCamp={onCamp}
             onAction={openAction}
-          />
+          />}
         </section>
           </div>
       <div className="unified-sidebar-footer">

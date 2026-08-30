@@ -166,6 +166,15 @@ pnpm build:desktop
 
 ### Electron 隔离世界回归
 
+启动页面与 authority gate 的组合回归运行 `pnpm test:startup-presentation`。它在真实 Electron 中挂载生产 `App` 与 CSS，
+仅替换本机 API 和反馈时钟：验证 null/starting、四类恢复目标、迁移、ready 交接、首次训练、订阅竞态与明确阻断；
+同时检查 400ms 前无反馈、超时反馈只在内容区、未准入时没有权威请求、未知导航不显示空态。Main Window Session
+延后冻结恢复目标与关闭窗口后的迟到读取由 `desktop-session.test.ts` 单独拥有。
+
+夹具创建临时绝对 `userData`，不启动 Core/SQLite/Runtime，也不读取日常数据；它是生产组件组合测试，不冒充真实数据库
+迁移端到端验收。默认删除本次夹具，`ROVAI_KEEP_STARTUP_PRESENTATION_FIXTURE=1` 可保留 Day/Night、最小窗口与
+200%/reduced-motion 截图。Linux CI 通过 `xvfb-run -a pnpm test:startup-presentation` 执行。
+
 涉及 Preload 请求 transport 或 Renderer 错误读取时，除普通 Vitest 外还运行：
 
 ```bash
