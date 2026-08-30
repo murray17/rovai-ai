@@ -1,7 +1,7 @@
 ---
 document_type: current-decision-navigation
 authority: current-authority-and-rationale-routing
-last_updated: 2026-08-29
+last_updated: 2026-08-30
 ---
 
 # 当前规范与决定理由导航
@@ -22,9 +22,9 @@ last_updated: 2026-08-29
 
 ## Channels 与 External Principals
 
-- 当前规范：[飞书渠道架构](../architecture/feishu-channel.md)、[Feishu Channel v2](../contracts/feishu-channel-v2.md)、[钉钉渠道架构](../architecture/dingtalk-channel.md)、[DingTalk Channel v1](../contracts/dingtalk-channel-v1.md)、[Camp Membership v1](../contracts/camp-membership-v1.md)、[ContextManifest Evidence v22](../contracts/context-manifest-evidence-v22.md)和[渠道设置](../ui/components/channel-settings.md)。
+- 当前规范：[Channel Storage v1](../contracts/channel-storage-v1.md)、[飞书渠道架构](../architecture/feishu-channel.md)、[Feishu Channel v2](../contracts/feishu-channel-v2.md)、[钉钉渠道架构](../architecture/dingtalk-channel.md)、[DingTalk Channel v2](../contracts/dingtalk-channel-v2.md)、[Camp Membership v1](../contracts/camp-membership-v1.md)、[ContextManifest Evidence v22](../contracts/context-manifest-evidence-v22.md)和[渠道设置](../ui/components/channel-settings.md)。
 - 飞书理由来源：[V1.30-D01（已由 D09 取代）](../versions/v1.30/decisions.md#v1-30-d01)、[V1.30-D02](../versions/v1.30/decisions.md#v1-30-d02)、[V1.30-D03](../versions/v1.30/decisions.md#v1-30-d03)、[V1.30-D04（话题扩张部分已由 D15 取代）](../versions/v1.30/decisions.md#v1-30-d04)、[V1.30-D05](../versions/v1.30/decisions.md#v1-30-d05)、[V1.30-D06](../versions/v1.30/decisions.md#v1-30-d06)、[V1.30-D07](../versions/v1.30/decisions.md#v1-30-d07)、[V1.30-D08](../versions/v1.30/decisions.md#v1-30-d08)、[V1.30-D09（私聊投递部分已由 D12 取代）](../versions/v1.30/decisions.md#v1-30-d09)、[V1.30-D10](../versions/v1.30/decisions.md#v1-30-d10)、[V1.30-D11](../versions/v1.30/decisions.md#v1-30-d11)、[V1.30-D12](../versions/v1.30/decisions.md#v1-30-d12)、[V1.30-D13（终态展示与 view state 已由 D16 取代）](../versions/v1.30/decisions.md#v1-30-d13)、[V1.30-D14（命令展示与 callback 已由 D16 取代）](../versions/v1.30/decisions.md#v1-30-d14)、[V1.30-D15](../versions/v1.30/decisions.md#v1-30-d15)和[V1.30-D16](../versions/v1.30/decisions.md#v1-30-d16)。
-- 钉钉理由来源：[V1.31-D01](../versions/v1.31/decisions.md#v1-31-d01)、[V1.31-D02](../versions/v1.31/decisions.md#v1-31-d02)和[V1.31-D03](../versions/v1.31/decisions.md#v1-31-d03)。
+- 钉钉与共享渠道存储理由来源：[V1.31-D01（存储条款已由 D04 取代）](../versions/v1.31/decisions.md#v1-31-d01)、[V1.31-D02](../versions/v1.31/decisions.md#v1-31-d02)、[V1.31-D03](../versions/v1.31/decisions.md#v1-31-d03)和[V1.31-D04](../versions/v1.31/decisions.md#v1-31-d04)。
 
 ## Member identity
 

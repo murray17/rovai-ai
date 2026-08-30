@@ -1,21 +1,19 @@
-import { randomUUID } from 'node:crypto'
-import { chmod, mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises'
-import { dirname, join } from 'node:path'
+import { createHash, randomUUID } from 'node:crypto'
 import {
   BrowserWindow,
-  safeStorage,
   session as electronSession,
   type Cookie,
   type Session
 } from 'electron'
+import type { SqliteChannelDeveloperSessionStore } from './channel-credential-store'
 
 export type FeishuLoginStage =
-  | 'checking_secure_storage'
+  | 'loading_local_session'
   | 'preparing'
   | 'awaiting_scan'
   | 'scan_confirmed'
   | 'inspecting_identity'
-  | 'securing_session'
+  | 'saving_local_session'
   | 'connected'
   | 'expired'
   | 'cancelled'
@@ -37,8 +35,9 @@ export interface FeishuDeveloperSessionService {
     onQrReady?(qr: { payload: string; expiresAt: string }): void
     onStatus?(status: FeishuLoginStage): void
   }): Promise<FeishuDeveloperIdentity>
-  confirmLogin?(): Promise<void>
-  rollbackLogin?(): Promise<FeishuDeveloperIdentity | null>
+  pendingConnection?(): PendingFeishuDeveloperConnection
+  activatePendingLogin?(sessionRevision: number): Promise<void>
+  discardPendingLogin?(): Promise<FeishuDeveloperIdentity | null>
   inspect(): Promise<FeishuDeveloperIdentity | null>
   requireExpectedIdentity(expected: {
     userId: string
@@ -65,15 +64,18 @@ export interface FeishuDeveloperPortalSession extends FeishuDeveloperSessionServ
   persist(): Promise<void>
 }
 
-type StoredCookie = Pick<
+export type StoredFeishuCookie = Pick<
 Cookie,
   'name' | 'value' | 'secure' | 'httpOnly' | 'sameSite' | 'session'
 > & { domain: string; path: string; expirationDate?: number }
 
-type StoredDeveloperSession = {
-  schemaVersion: 1
+export type StoredFeishuDeveloperSession = {
+  cookies: StoredFeishuCookie[]
+}
+
+export type PendingFeishuDeveloperConnection = {
   identity: FeishuDeveloperIdentity
-  cookies: StoredCookie[]
+  session: StoredFeishuDeveloperSession
 }
 
 type PortalIdentity = Partial<{
@@ -96,23 +98,29 @@ const SESSION_PARTITION = `rovai-feishu-developer-${randomUUID()}`
 const LOGIN_TIMEOUT_MS = 10 * 60_000
 const LOGIN_POLL_MS = 500
 const IDENTITY_INSPECTION_TIMEOUT_MS = 20_000
-const SAFE_STORAGE_OPERATION_TIMEOUT_MS = 15_000
 
 export class ElectronFeishuDeveloperSessionService implements FeishuDeveloperPortalSession {
   #browserSession: Session | null = null
-  readonly #store: SafeStorageFeishuDeveloperSessionStore
+  readonly #store: Pick<SqliteChannelDeveloperSessionStore, 'read' | 'replace'>
   readonly #getParentWindow: () => BrowserWindow | null
   #restored = false
+  #storedIdentity: FeishuDeveloperIdentity | null = null
+  #storedRevision: number | null = null
   #activeLoginWindow: BrowserWindow | null = null
   #activeOpenPlatformWindows = new Set<BrowserWindow>()
   #pendingLoginReplacement: {
     previousSession: Session | null
-    previousStored: StoredDeveloperSession | null
     replacementSession: Session
+    identity: FeishuDeveloperIdentity
+    session: StoredFeishuDeveloperSession
+    onStatus?: (status: FeishuLoginStage) => void
   } | null = null
 
-  constructor(userDataPath: string, getParentWindow: () => BrowserWindow | null = () => null) {
-    this.#store = new SafeStorageFeishuDeveloperSessionStore(userDataPath)
+  constructor(
+    store: Pick<SqliteChannelDeveloperSessionStore, 'read' | 'replace'>,
+    getParentWindow: () => BrowserWindow | null = () => null
+  ) {
+    this.#store = store
     this.#getParentWindow = getParentWindow
   }
 
@@ -123,18 +131,17 @@ export class ElectronFeishuDeveloperSessionService implements FeishuDeveloperPor
     onStatus?(status: FeishuLoginStage): void
   } = {}): Promise<FeishuDeveloperIdentity> {
     this.#closeActiveLogin()
-    options.onStatus?.('checking_secure_storage')
-    await this.#store.requireAvailable()
+    options.onStatus?.('loading_local_session')
     await this.#ensureRestored()
-    if (this.#pendingLoginReplacement) await this.rollbackLogin()
+    if (this.#pendingLoginReplacement) await this.discardPendingLogin()
     if (options.signal?.aborted) throw sessionError('feishu_login_cancelled')
 
-    const previousSession = options.forceFresh ? this.#browserSession : null
-    const previousStored = options.forceFresh ? await this.#store.read() : null
-    const loginSession = options.forceFresh
-      ? electronSession.fromPartition(`${SESSION_PARTITION}-login-${randomUUID()}`, { cache: false })
-      : this.#session
-    let replacementCommitted = !options.forceFresh
+    const previousSession = this.#browserSession
+    const loginSession = electronSession.fromPartition(
+      `${SESSION_PARTITION}-login-${randomUUID()}`,
+      { cache: false }
+    )
+    let replacementReady = false
     options.onStatus?.('preparing')
     const window = this.#createWindow(false, null, loginSession)
     this.#activeLoginWindow = window
@@ -202,19 +209,15 @@ export class ElectronFeishuDeveloperSessionService implements FeishuDeveloperPor
                 }
                 return
               }
-              emitStage('securing_session')
-              await this.#persist(identity, loginSession)
-              if (options.forceFresh) {
-                this.#browserSession = loginSession
-                this.#restored = true
-                replacementCommitted = true
-                this.#pendingLoginReplacement = {
-                  previousSession,
-                  previousStored,
-                  replacementSession: loginSession
-                }
+              emitStage('saving_local_session')
+              this.#pendingLoginReplacement = {
+                previousSession,
+                replacementSession: loginSession,
+                identity,
+                session: await this.#capture(loginSession),
+                onStatus: options.onStatus
               }
-              emitStage('connected')
+              replacementReady = true
               finish(identity)
               return
             }
@@ -258,40 +261,47 @@ export class ElectronFeishuDeveloperSessionService implements FeishuDeveloperPor
     } finally {
       if (this.#activeLoginWindow === window) this.#activeLoginWindow = null
       if (!window.isDestroyed()) window.destroy()
-      if (options.forceFresh && !replacementCommitted) {
+      if (!replacementReady) {
         await loginSession.clearStorageData().catch(() => undefined)
       }
     }
   }
 
-  async confirmLogin(): Promise<void> {
+  pendingConnection(): PendingFeishuDeveloperConnection {
     const pending = this.#pendingLoginReplacement
-    if (!pending) return
+    if (!pending) throw sessionError('feishu_login_pending_session_missing')
+    return { identity: pending.identity, session: pending.session }
+  }
+
+  async activatePendingLogin(sessionRevision: number): Promise<void> {
+    const pending = this.#pendingLoginReplacement
+    if (!pending) throw sessionError('feishu_login_pending_session_missing')
     this.#pendingLoginReplacement = null
+    this.#browserSession = pending.replacementSession
+    this.#storedIdentity = pending.identity
+    this.#storedRevision = sessionRevision
+    this.#restored = true
     if (pending.previousSession && pending.previousSession !== pending.replacementSession) {
       await pending.previousSession.clearStorageData().catch(() => undefined)
     }
+    pending.onStatus?.('connected')
   }
 
-  async rollbackLogin(): Promise<FeishuDeveloperIdentity | null> {
+  async discardPendingLogin(): Promise<FeishuDeveloperIdentity | null> {
     const pending = this.#pendingLoginReplacement
     if (!pending) return null
-    if (pending.previousStored) await this.#store.write(pending.previousStored)
-    else await this.#store.delete()
     this.#pendingLoginReplacement = null
-    this.#browserSession = pending.previousSession
-    this.#restored = pending.previousSession !== null || pending.previousStored === null
     await pending.replacementSession.clearStorageData().catch(() => undefined)
-    return pending.previousStored?.identity ?? null
+    return this.#storedIdentity
   }
 
   async inspect(): Promise<FeishuDeveloperIdentity | null> {
     await this.#ensureRestored()
-    const stored = await this.#store.read()
-    if (!stored) return null
+    const restoredIdentity = this.#storedIdentity
+    if (!restoredIdentity) return null
     const window = this.#createWindow(false)
     try {
-      await window.loadURL(portalUrlForBrand(stored.identity.brand))
+      await window.loadURL(portalUrlForBrand(restoredIdentity.brand))
       const currentUrl = window.webContents.getURL()
       if (!isDeveloperPortalUrl(currentUrl)) return null
       const identity = await readDeveloperIdentity(window, currentUrl)
@@ -319,13 +329,15 @@ export class ElectronFeishuDeveloperSessionService implements FeishuDeveloperPor
 
   async disconnect(): Promise<void> {
     this.#closeActiveLogin()
-    await this.rollbackLogin().catch(() => undefined)
+    await this.discardPendingLogin().catch(() => undefined)
     for (const window of this.#activeOpenPlatformWindows) {
       if (!window.isDestroyed()) window.destroy()
     }
     this.#activeOpenPlatformWindows.clear()
     await this.#session.clearStorageData()
-    await this.#store.delete()
+    this.#browserSession = null
+    this.#storedIdentity = null
+    this.#storedRevision = null
     this.#restored = true
   }
 
@@ -338,9 +350,9 @@ export class ElectronFeishuDeveloperSessionService implements FeishuDeveloperPor
   }): Promise<FeishuOpenPlatformSession> {
     await this.#ensureRestored()
     if (input.signal?.aborted) throw sessionError('feishu_provisioning_cancelled')
-    const stored = await this.#store.read()
-    if (!stored) throw sessionError('feishu_developer_session_expired')
-    const portalUrl = portalUrlForBrand(stored.identity.brand)
+    const identity = this.#storedIdentity
+    if (!identity) throw sessionError('feishu_developer_session_expired')
+    const portalUrl = portalUrlForBrand(identity.brand)
     const cookies = await this.#session.cookies.get({ url: portalUrl })
     if (cookies.length === 0) throw sessionError('feishu_developer_session_expired')
 
@@ -368,9 +380,9 @@ export class ElectronFeishuDeveloperSessionService implements FeishuDeveloperPor
         userId !== input.expectedIdentity.userId
         || tenantId !== input.expectedIdentity.tenantId
       ) throw sessionError('feishu_developer_identity_changed')
-      const apiOrigin = requireOpenPlatformOrigin(bootstrap.apiOrigin, stored.identity.brand)
+      const apiOrigin = requireOpenPlatformOrigin(bootstrap.apiOrigin, identity.brand)
       return {
-        brand: stored.identity.brand,
+        brand: identity.brand,
         apiOrigin,
         csrfToken,
         fetch: async (rawUrl, init = {}) => {
@@ -397,9 +409,8 @@ export class ElectronFeishuDeveloperSessionService implements FeishuDeveloperPor
   }
 
   async persist(): Promise<void> {
-    const stored = await this.#store.read()
-    if (!stored) return
-    await this.#persist(stored.identity)
+    if (!this.#storedIdentity) return
+    await this.#persist(this.#storedIdentity)
   }
 
   #createWindow(
@@ -434,10 +445,14 @@ export class ElectronFeishuDeveloperSessionService implements FeishuDeveloperPor
 
   async #ensureRestored(): Promise<void> {
     if (this.#restored) return
+    const stored = await this.#store.read<FeishuDeveloperIdentity, StoredFeishuDeveloperSession>(
+      'feishu'
+    )
     this.#restored = true
-    const stored = await this.#store.read()
     if (!stored) return
-    for (const cookie of stored.cookies) {
+    this.#storedIdentity = stored.identity
+    this.#storedRevision = stored.revision
+    for (const cookie of stored.session.cookies) {
       try {
         await this.#session.cookies.set({
           url: cookieUrl(cookie),
@@ -460,10 +475,21 @@ export class ElectronFeishuDeveloperSessionService implements FeishuDeveloperPor
     identity: FeishuDeveloperIdentity,
     browserSession: Session = this.#session
   ): Promise<void> {
-    const cookies = await browserSession.cookies.get({})
-    await this.#store.write({
-      schemaVersion: 1,
+    if (this.#storedRevision === null) return
+    const session = await this.#capture(browserSession)
+    this.#storedRevision = await this.#store.replace({
+      provider: 'feishu',
+      accountId: accountIdForStoredIdentity(identity),
       identity,
+      session,
+      expectedRevision: this.#storedRevision
+    })
+    this.#storedIdentity = identity
+  }
+
+  async #capture(browserSession: Session): Promise<StoredFeishuDeveloperSession> {
+    const cookies = await browserSession.cookies.get({})
+    return {
       cookies: cookies
         .filter((cookie): cookie is Cookie & { domain: string } => (
           typeof cookie.domain === 'string' && isFeishuCookieDomain(cookie.domain)
@@ -479,7 +505,7 @@ export class ElectronFeishuDeveloperSessionService implements FeishuDeveloperPor
           session: cookie.session,
           expirationDate: cookie.expirationDate
         }))
-    })
+    }
   }
 
   #closeActiveLogin(): void {
@@ -491,73 +517,6 @@ export class ElectronFeishuDeveloperSessionService implements FeishuDeveloperPor
   get #session(): Session {
     this.#browserSession ??= electronSession.fromPartition(SESSION_PARTITION, { cache: false })
     return this.#browserSession
-  }
-}
-
-class SafeStorageFeishuDeveloperSessionStore {
-  readonly #path: string
-
-  constructor(userDataPath: string) {
-    this.#path = join(userDataPath, 'channel-credentials', 'feishu-developer-session.bin')
-  }
-
-  async requireAvailable(): Promise<void> {
-    try {
-      const available = await boundedSafeStorageOperation(
-        safeStorage.isAsyncEncryptionAvailable()
-      )
-      if (!available) throw sessionError('system_credential_encryption_unavailable')
-    } catch {
-      throw sessionError('system_credential_encryption_unavailable')
-    }
-  }
-
-  async read(): Promise<StoredDeveloperSession | null> {
-    let encoded: string
-    try {
-      encoded = await readFile(this.#path, 'utf8')
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null
-      throw error
-    }
-    await this.requireAvailable()
-    let plaintext: string
-    try {
-      const decrypted = await boundedSafeStorageOperation(
-        safeStorage.decryptStringAsync(Buffer.from(encoded, 'base64'))
-      )
-      plaintext = decrypted.result
-    } catch {
-      throw sessionError('system_credential_encryption_unavailable')
-    }
-    const parsed = JSON.parse(plaintext) as StoredDeveloperSession
-    if (!isStoredDeveloperSession(parsed)) throw sessionError('feishu_session_store_invalid')
-    return parsed
-  }
-
-  async write(value: StoredDeveloperSession): Promise<void> {
-    await this.requireAvailable()
-    await mkdir(dirname(this.#path), { recursive: true, mode: 0o700 })
-    let encrypted: string
-    try {
-      encrypted = (await boundedSafeStorageOperation(
-        safeStorage.encryptStringAsync(JSON.stringify(value))
-      )).toString('base64')
-    } catch {
-      throw sessionError('system_credential_encryption_unavailable')
-    }
-    const temporaryPath = `${this.#path}.${randomUUID()}.tmp`
-    await writeFile(temporaryPath, encrypted, { encoding: 'utf8', mode: 0o600 })
-    await chmod(temporaryPath, 0o600)
-    await rename(temporaryPath, this.#path)
-  }
-
-  async delete(): Promise<void> {
-    try {
-      await unlink(this.#path)
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
-    }
   }
 }
 
@@ -636,26 +595,7 @@ async function qrCanvasBounds(window: BrowserWindow): Promise<{
   return value
 }
 
-function isStoredDeveloperSession(value: unknown): value is StoredDeveloperSession {
-  if (!value || typeof value !== 'object') return false
-  const candidate = value as Partial<StoredDeveloperSession>
-  return candidate.schemaVersion === 1
-    && Boolean(candidate.identity)
-    && Array.isArray(candidate.cookies)
-    && isDeveloperIdentity(candidate.identity)
-}
-
-function isDeveloperIdentity(value: unknown): value is FeishuDeveloperIdentity {
-  if (!value || typeof value !== 'object') return false
-  const candidate = value as Partial<FeishuDeveloperIdentity>
-  return (candidate.brand === 'feishu' || candidate.brand === 'lark')
-    && Boolean(normalizedRequired(candidate.userId))
-    && Boolean(normalizedRequired(candidate.userName))
-    && Boolean(normalizedRequired(candidate.tenantId))
-    && Boolean(normalizedRequired(candidate.tenantName))
-}
-
-function cookieUrl(cookie: StoredCookie): string {
+function cookieUrl(cookie: StoredFeishuCookie): string {
   const host = cookie.domain.replace(/^\./, '')
   const path = cookie.path.startsWith('/') ? cookie.path : `/${cookie.path}`
   return `${cookie.secure ? 'https' : 'http'}://${host}${path}`
@@ -765,23 +705,9 @@ function normalizedOptional(value: unknown): string | undefined {
   return normalizedRequired(value) ?? undefined
 }
 
-function boundedSafeStorageOperation<T>(operation: Promise<T>): Promise<T> {
-  return new Promise<T>((resolve, reject) => {
-    const timer = setTimeout(() => {
-      reject(sessionError('system_credential_encryption_unavailable'))
-    }, SAFE_STORAGE_OPERATION_TIMEOUT_MS)
-    timer.unref?.()
-    operation.then(
-      (value) => {
-        clearTimeout(timer)
-        resolve(value)
-      },
-      (error) => {
-        clearTimeout(timer)
-        reject(error)
-      }
-    )
-  })
+function accountIdForStoredIdentity(identity: FeishuDeveloperIdentity): `sha256:${string}` {
+  const value = `${identity.brand}\0${identity.tenantId}\0${identity.userId}`
+  return `sha256:${createHash('sha256').update(value).digest('hex')}`
 }
 
 function sessionError(code: string): Error {

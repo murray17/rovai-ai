@@ -1,21 +1,26 @@
 import { describe, expect, it, vi } from 'vitest'
-import type {
-  DingTalkGatewayBackend,
-  DingTalkGatewayOperation,
-  DingTalkGatewayRequest
+import {
+  DingTalkDeveloperApiError,
+  type DingTalkDeveloperBackend,
+  type DingTalkDeveloperOperation,
+  type DingTalkDeveloperRequest
 } from './dingtalk-developer-gateway'
+/*
+ * Keep these tests on the raw Open Platform response fields. The direct
+ * provisioner no longer receives DWS's projected output aliases.
+ */
+import type { DingTalkDeveloperSessionService } from './dingtalk-developer-session'
 import {
   DingTalkApprovalPending,
   DingTalkApproverSelectionRequired,
+  DingTalkOpenPlatformMemberBotProvisioner,
   DingTalkProvisioningError,
-  DwsDingTalkMemberBotProvisioner,
   type DingTalkProvisioningInput
 } from './dingtalk-member-bot-provisioner'
 
-describe('DWS DingTalk member Bot provisioning', () => {
+describe('direct DingTalk Open Platform member Bot provisioning', () => {
   it('creates, configures, verifies, and releases one frozen app', async () => {
     const gateway = new ScriptedGateway({
-      'auth.status': [{ success: true, authenticated: true, corp_id: 'corp-1', user_id: 'owner-1' }],
       'app.create': [{ unifiedAppId: 'u-app-1' }],
       'app.get': [
         { unifiedAppId: 'u-app-1' },
@@ -26,14 +31,15 @@ describe('DWS DingTalk member Bot provisioning', () => {
       'app.robot.config': [{}],
       'app.robot.enable': [{}],
       'app.robot.get': [{
-        robotCode: 'ding-app-1', mode: 'STREAM', name: '芝士', iconMediaId: 'media-1',
-        robotStatus: 'ONLINE', configured: true
+        mode: 'STREAM', name: '芝士', iconMediaId: 'media-1', robotStatus: 'ONLINE'
       }],
       'app.permission.add': [{}],
-      'app.permission.list': [{ items: [{ scopeValue: 'scope.robot', authed: true }] }],
+      'app.permission.list': [{
+        items: [{ permissionCode: 'scope.robot', auth_status: 'AUTHED' }]
+      }],
       'app.event.subscribe': [{}],
       'app.event.list': [{
-        events: [{ eventCode: 'event.robot', subscribed: true, pushType: 'STREAM' }]
+        events: [{ event_code: 'event.robot', subscribe_status: 'ON' }]
       }],
       'app.version.create': [{ versionId: 'version-1' }],
       'app.version.status': [{ status: 'DEVELOPMENT' }, { versionStatus: 'RELEASE' }],
@@ -42,7 +48,7 @@ describe('DWS DingTalk member Bot provisioning', () => {
     })
     const steps: string[] = []
     const resolveIcon = vi.fn(async () => 'media-1')
-    const result = await new DwsDingTalkMemberBotProvisioner(gateway).create(input({
+    const result = await provisioner(gateway).create(input({
       resolveIconMediaId: resolveIcon,
       requiredScopeValues: ['scope.robot'],
       requiredEventCodes: ['event.robot'],
@@ -62,7 +68,7 @@ describe('DWS DingTalk member Bot provisioning', () => {
       'robot_configured', 'permissions_configured', 'version_created', 'version_released'
     ])
     expect(gateway.operations).toEqual([
-      'auth.status', 'app.create', 'app.get', 'app.credentials.get',
+      'app.create', 'app.get', 'app.credentials.get',
       'app.update', 'app.get', 'app.robot.config', 'app.robot.enable',
       'app.robot.get', 'app.permission.add', 'app.permission.list',
       'app.event.subscribe', 'app.event.list', 'app.version.create',
@@ -86,42 +92,68 @@ describe('DWS DingTalk member Bot provisioning', () => {
 
   it('locks an app create whose remote result is unknown', async () => {
     const gateway = new ScriptedGateway({
-      'auth.status': [{ success: true, authenticated: true, corp_id: 'corp-1', user_id: 'owner-1' }],
       'app.create': [new Error('transport_lost')]
     })
 
-    await expect(new DwsDingTalkMemberBotProvisioner(gateway).create(input()))
+    await expect(provisioner(gateway).create(input()))
       .rejects.toMatchObject({
         message: 'dingtalk_app_create_unknown_remote_state',
         unknownRemoteState: true
       } satisfies Partial<DingTalkProvisioningError>)
-    expect(gateway.operations).toEqual(['auth.status', 'app.create'])
+    expect(gateway.operations).toEqual(['app.create'])
   })
 
-  it('fails closed when DWS reports a nested business failure', async () => {
+  it('locks a create whose successful HTTP response cannot identify the app', async () => {
     const gateway = new ScriptedGateway({
-      'auth.status': [{ result: { success: false, errorCode: 'Forbidden' } }]
+      'app.create': ['not-an-object']
     })
 
-    await expect(new DwsDingTalkMemberBotProvisioner(gateway).create(input()))
-      .rejects.toMatchObject({ message: 'dingtalk_dws_remote_failure' })
-    expect(gateway.operations).toEqual(['auth.status'])
+    await expect(provisioner(gateway).create(input()))
+      .rejects.toMatchObject({
+        message: 'dingtalk_app_create_unknown_remote_state',
+        unknownRemoteState: true
+      } satisfies Partial<DingTalkProvisioningError>)
+  })
+
+  it('keeps an explicit remote create rejection recoverable', async () => {
+    const gateway = new ScriptedGateway({
+      'app.create': [new DingTalkDeveloperApiError('dingtalk_open_platform_access_denied', {
+        definitelyRejected: true
+      })]
+    })
+
+    await expect(provisioner(gateway).create(input()))
+      .rejects.toMatchObject({
+        message: 'dingtalk_open_platform_access_denied',
+        definitelyRejected: true
+      })
+  })
+
+  it('fails closed when the developer service reports a nested business failure', async () => {
+    const gateway = new ScriptedGateway({
+      'app.create': [{ result: { success: false, errorCode: 'Forbidden' } }]
+    })
+
+    await expect(provisioner(gateway).create(input()))
+      .rejects.toMatchObject({ message: 'dingtalk_open_platform_operation_failed' })
+    expect(gateway.operations).toEqual(['app.create'])
   })
 
   it('does not accept a permission row that is present but not authorized', async () => {
     const gateway = new ScriptedGateway({
-      'auth.status': [{ success: true, authenticated: true, corp_id: 'corp-1', user_id: 'owner-1' }],
       'app.get': [{ unifiedAppId: 'u-app-1' }],
       'app.credentials.get': [{ appKey: 'ding-app-1', appSecret: 'secret-1' }],
       'app.robot.get': [{
         robotCode: 'ding-app-1', mode: 'STREAM', name: '芝士',
-        robotStatus: 'ONLINE', configured: true
+        robotStatus: 'ONLINE'
       }],
       'app.permission.add': [{}],
-      'app.permission.list': [{ items: [{ scopeValue: 'scope.robot', authed: false }] }]
+      'app.permission.list': [{
+        items: [{ permissionCode: 'scope.robot', auth_status: 'UNAUTHED' }]
+      }]
     })
 
-    await expect(new DwsDingTalkMemberBotProvisioner(gateway).create(input({
+    await expect(provisioner(gateway).create(input({
       frozen: frozen(),
       resumeState: 'robot_configured',
       requiredScopeValues: ['scope.robot']
@@ -136,9 +168,9 @@ describe('DWS DingTalk member Bot provisioning', () => {
         approvalCandidates: [{ userId: 'approver-1', name: '管理员甲' }]
       }
     })
-    const provisioner = new DwsDingTalkMemberBotProvisioner(gateway)
+    const memberBotProvisioner = provisioner(gateway)
 
-    await expect(provisioner.create(input({
+    await expect(memberBotProvisioner.create(input({
       frozen: frozen(),
       resumeState: 'version_created'
     }))).rejects.toMatchObject({
@@ -153,7 +185,7 @@ describe('DWS DingTalk member Bot provisioning', () => {
       checkApproval: { approvalMode: 'FUTURE_MODE' }
     })
 
-    await expect(new DwsDingTalkMemberBotProvisioner(gateway).create(input({
+    await expect(provisioner(gateway).create(input({
       frozen: frozen(),
       resumeState: 'version_created'
     }))).rejects.toMatchObject({ message: 'dingtalk_approval_mode_invalid' })
@@ -170,7 +202,7 @@ describe('DWS DingTalk member Bot provisioning', () => {
       checkApproval: { approvalMode: 'SELECT_APPROVER', approvalCandidates }
     })
 
-    const error = await new DwsDingTalkMemberBotProvisioner(gateway).create(input({
+    const error = await provisioner(gateway).create(input({
       frozen: frozen(),
       resumeState: 'version_created'
     })).catch((caught) => caught)
@@ -189,8 +221,8 @@ describe('DWS DingTalk member Bot provisioning', () => {
       publish: { approvalSubmitted: true },
       afterPublishStatus: { versionStatus: 'AUDIT' }
     })
-    const provisioner = new DwsDingTalkMemberBotProvisioner(pendingGateway)
-    await expect(provisioner.create(input({
+    const memberBotProvisioner = provisioner(pendingGateway)
+    await expect(memberBotProvisioner.create(input({
       frozen: frozen(),
       resumeState: 'awaiting_approver_selection',
       selectedApproverUserId: 'approver-1'
@@ -201,7 +233,7 @@ describe('DWS DingTalk member Bot provisioning', () => {
     const releasedGateway = resumeGateway({
       initialStatus: { versionStatus: 'RELEASE' }
     })
-    const result = await new DwsDingTalkMemberBotProvisioner(releasedGateway).create(input({
+    const result = await provisioner(releasedGateway).create(input({
       frozen: frozen(),
       resumeState: 'awaiting_approval',
       frozenApprovalMode: 'SELECT_APPROVER'
@@ -216,7 +248,7 @@ describe('DWS DingTalk member Bot provisioning', () => {
       afterPublishStatus: { versionStatus: 'RELEASE' }
     })
 
-    const result = await new DwsDingTalkMemberBotProvisioner(gateway).create(input({
+    const result = await provisioner(gateway).create(input({
       frozen: frozen(),
       resumeState: 'version_created'
     }))
@@ -260,12 +292,11 @@ function resumeGateway(options: {
   afterPublishStatus?: Record<string, unknown>
 }): ScriptedGateway {
   return new ScriptedGateway({
-    'auth.status': [{ success: true, authenticated: true, corp_id: 'corp-1', user_id: 'owner-1' }],
     'app.get': [{ unifiedAppId: 'u-app-1' }],
     'app.credentials.get': [{ appKey: 'ding-app-1', appSecret: 'secret-1' }],
     'app.robot.get': [{
       robotCode: 'ding-app-1', mode: 'STREAM', name: '芝士',
-      robotStatus: 'ONLINE', configured: true
+      robotStatus: 'ONLINE'
     }],
     'app.version.status': [
       options.initialStatus ?? { status: 'DEVELOPMENT' },
@@ -276,21 +307,44 @@ function resumeGateway(options: {
   })
 }
 
-class ScriptedGateway implements DingTalkGatewayBackend {
-  readonly requests: DingTalkGatewayRequest[] = []
-  readonly #responses: Partial<Record<DingTalkGatewayOperation, unknown[]>>
+function provisioner(gateway: DingTalkDeveloperBackend): DingTalkOpenPlatformMemberBotProvisioner {
+  const developerSession: DingTalkDeveloperSessionService = {
+    inspect: async () => ({
+      accountId: 'account-1',
+      userIdDigest: `sha256:${'a'.repeat(64)}`,
+      corpId: 'corp-1',
+      userId: 'owner-1',
+      userName: 'Owner',
+      corpName: 'Corp',
+      oauthProfileRef: 'dingtalk-oauth:profile-1',
+      expiresAt: '2026-08-30T00:00:00Z'
+    }),
+    beginLogin: async () => { throw new Error('unused') },
+    accessToken: async () => 'access-token',
+    activate: async () => undefined,
+    disconnect: async () => undefined
+  }
+  return new DingTalkOpenPlatformMemberBotProvisioner({
+    developerApi: gateway,
+    developerSession
+  })
+}
 
-  constructor(responses: Partial<Record<DingTalkGatewayOperation, unknown[]>>) {
+class ScriptedGateway implements DingTalkDeveloperBackend {
+  readonly requests: DingTalkDeveloperRequest[] = []
+  readonly #responses: Partial<Record<DingTalkDeveloperOperation, unknown[]>>
+
+  constructor(responses: Partial<Record<DingTalkDeveloperOperation, unknown[]>>) {
     this.#responses = Object.fromEntries(
       Object.entries(responses).map(([operation, values]) => [operation, [...values]])
     )
   }
 
-  get operations(): DingTalkGatewayOperation[] {
+  get operations(): DingTalkDeveloperOperation[] {
     return this.requests.map((request) => request.operation)
   }
 
-  async execute(request: DingTalkGatewayRequest): Promise<unknown> {
+  async execute(request: DingTalkDeveloperRequest): Promise<unknown> {
     this.requests.push(request)
     const response = this.#responses[request.operation]?.shift()
     if (response instanceof Error) throw response

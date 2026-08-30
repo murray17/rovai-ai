@@ -6,12 +6,12 @@ authority: version-scope-and-status
 design_status: confirmed
 implementation_status: in_progress
 model_context_change: false
-last_updated: 2026-08-29
+last_updated: 2026-08-30
 ---
 
 # Rovai-ai v1.31：钉钉队员 Bot 与 Camp 渠道
 
-> 当前状态：Migration、Core、Electron Main、Renderer、固定 DWS Gateway、每 App Stream 与本地自动化已经实现。
+> 当前状态：Migration、Core、Electron Main 直接 OAuth/Developer API、Renderer、每 App Stream 与本地自动化已经实现。
 > 真实钉钉租户的 OAuth、应用创建/审批/发布、AI 卡片 callback、私聊和群聊收发仍需外部验收。生产包还没有可安全
 > 分发的 Rovai OAuth Client 方案；缺少显式注入的 Client ID/Secret 时连接按合同失败，不复用上游工具内置身份。
 
@@ -25,13 +25,17 @@ Owner 可在私聊或群聊显式 `@Bot` 后复用现有 Quick Chat、项目选�
 
 ## 交付范围
 
-- Migration 122 把 Data Contract 升到 `v1.35 / projection schema 76`，增加 DingTalk account、Owner identity、
-  publication intent、member Bot 与 per-App Owner identity，并建立 provider-neutral Bot/Owner directory view；
-- 账号连接使用预注册 Rovai OAuth Client，经浏览器 loopback 或显式设备授权进入隔离 DWS profile。账号切换先保留旧
-  Profile，新身份完整读取且 Core upsert 成功后才确认；Core commit 失败会切回旧 Profile，不删除两边登录态；
-- Main 只允许固定 `DWS 1.0.60`、固定平台 SHA 和封闭 operation/argument 集。macOS 以非可执行压缩资源随包携带并在
-  owner-only、按 SHA 分区的本机目录物化，避免 App signer 改写受审查二进制；helper 以 `shell=false`、隔离 config、
-  有界超时/取消运行，OAuth Secret 只经进程环境传递，stdout/stderr 不进入 Renderer；
+- Migration 122 增加 DingTalk account、Owner identity、publication intent、member Bot 与 per-App Owner identity，并建立
+  provider-neutral Bot/Owner directory view；Migration 123 把旧 helper 发布模式无损迁移为 `direct_open_platform`，将 Data
+  Contract 升到 `v1.36 / projection schema 77`；Migration 124 增加共享 `channel_credentials` 与
+  `channel_developer_sessions`，切换到 `v1.37 / projection schema 78`；
+- 账号连接使用预注册 Rovai OAuth Client，经 Main 的浏览器 loopback 或显式设备授权进入临时 Profile。新身份与 Token/Cookie
+  通过 Core 原子 `account.commitConnection` 一次写入 `rovai.sqlite`；失败只丢弃临时 Profile，旧账号与 Session 不变；
+- 飞书/钉钉 Bot credential 与 Developer Session 明文存入既有 SQLite，由 Core/Main 独占；Renderer/日志/诊断不接收 raw
+  payload。启动一次批量加载所有 published Bot，旧 `.bin` 不读取、不解密，系统安全存储与 Keychain 命名空间已移除；
+- Main 直接调用钉钉固定 OAuth 与官方 developer service endpoint，只允许封闭 operation/argument 集，并限制 redirect、
+  response size、timeout 与取消；Token/Secret 不进入 URL、Core、Renderer、日志或命令行。包体不含 DWS binary/压缩载荷，
+  不再需要版本/SHA、重签排除、物化目录、subprocess 生命周期和 stdout/stderr 解析；
 - 每个 Agent 只有一个 immutable `unifiedAppId + appKey + robotCode`。发布状态机冻结远端身份后读取 credential、上传队员
   头像、配置 Stream robot、消息/群 roster/AI 卡片最小权限、事件、版本和审批，最后分别验证 Stream 与 AI 卡片；创建结果不明且
   没有 App ID 时锁住自动重试，已冻结 App 的失败只能在原 App 恢复；
@@ -60,7 +64,7 @@ Owner 可在私聊或群聊显式 `@Bot` 后复用现有 Quick Chat、项目选�
 
 ## 验收
 
-仓库内门槛包括 Migration 122、状态机不可换绑、create unknown、审批选择、DWS 命令/参数/Secret 边界、staged 账号切换、
+仓库内门槛包括 Migration 122/123/124、状态机不可换绑、credential/intent 与 account/Session 原子提交、批量启动、create unknown、审批选择、OAuth/Developer API Token 与参数边界、staged 账号切换、
 Stream fast ACK、入站 normalize/topic 拒绝、Owner gate、统一 admission、roster、卡片参数、Provider UI、Rust/TypeScript、
 文档和 Desktop 构建。外部门槛包括真实 OAuth、连接不创建应用、连续发布不重复 OAuth、应用审批/发布、头像、Stream、
 私聊、群聊、项目卡 callback、执行卡翻页和重启恢复。外部证据完成前本版本保持 `in_progress`。
@@ -70,8 +74,8 @@ Stream fast ACK、入站 normalize/topic 拒绝、Owner gate、统一 admission�
 | 范围 | 结论 | 证据或理由 |
 | --- | --- | --- |
 | Version lifecycle | 已更新 | 本概览、[实施计划](implementation-plan.md)、[决定](decisions.md)与[版本索引](../README.md)共同切换 `current_version`，v1.30 冻结为 historical。 |
-| Decisions | 已更新 | [v1.31 决定](decisions.md)记录固定 DWS Gateway、provider-neutral Core 复用和未实测能力 fail-closed 的高成本取舍。 |
-| Contracts | 已更新 | 新增 [DingTalk Channel v1](../../contracts/dingtalk-channel-v1.md)，并更新合同索引。 |
+| Decisions | 已更新 | [v1.31 决定](decisions.md)记录 Main 直接拥有 OAuth/Developer API、provider-neutral Core 复用和未实测能力 fail-closed 的高成本取舍。 |
+| Contracts | 已更新 | [DingTalk Channel v2](../../contracts/dingtalk-channel-v2.md)接管直接 OAuth/Developer API；[Channel Storage v1](../../contracts/channel-storage-v1.md)接管共享 SQLite credential/Session 与 Migration 124；DingTalk v1 冻结为历史合同。 |
 | Architecture | 已更新 | 新增[钉钉渠道架构](../../architecture/dingtalk-channel.md)，并更新架构索引。 |
 | UI | 已更新 | [渠道设置](../../ui/components/channel-settings.md)增加 Provider Tab、钉钉 OAuth/审批/发布与 Provider-local 诊断合同。 |
 | Runtime Activity | 确认无需更新 | 钉钉继续消费既有公开 AgentRun Evidence 和 CampMessage，不新增 Runtime activity kind 或 Adapter mapping。 |

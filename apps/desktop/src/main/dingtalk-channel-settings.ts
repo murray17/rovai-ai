@@ -9,7 +9,11 @@ import type {
   StoredCommandResult
 } from '@contracts'
 import type { CoreClient } from './core-client'
-import type { DingTalkCredentialStore } from './channel-credential-store'
+import type {
+  DingTalkAppCredential,
+  DingTalkCredentialStore,
+  PublishedChannelCredential
+} from './channel-credential-store'
 import type {
   DingTalkDeveloperIdentity,
   DingTalkDeveloperSessionService
@@ -139,7 +143,7 @@ type DingTalkPublicationIntent = {
   expectedUserIdDigest: string
   expectedCorpId: string
   requestedAppName: string
-  provisioningMode: 'dws_gateway'
+  provisioningMode: 'direct_open_platform'
   state: DingTalkPublicationState
   remoteUnifiedAppId: string | null
   appKey: string | null
@@ -257,6 +261,13 @@ export class DingTalkChannelSettingsService {
 
   async start(): Promise<void> {
     this.#stopped = false
+    const publishedCredentials = await this.#dependencies.credentialStore.listPublished()
+    const credentialsByRef = new Map(publishedCredentials
+      .filter((item): item is PublishedChannelCredential & {
+        provider: 'dingtalk'
+        credential: DingTalkAppCredential
+      } => item.provider === 'dingtalk')
+      .map((item) => [item.credentialRef, item.credential] as const))
     let snapshot = await this.#snapshot()
     if (snapshot.account?.status === 'connected') {
       const identity = await this.#dependencies.developerSession.inspect().catch(() => null)
@@ -273,7 +284,7 @@ export class DingTalkChannelSettingsService {
     }
     snapshot = await this.#snapshot()
     for (const bot of snapshot.memberBots.filter((candidate) => candidate.status === 'published')) {
-      await this.#startBot(bot).catch((error) => {
+      await this.#startBot(bot, credentialsByRef.get(bot.credentialRef) ?? null).catch((error) => {
         this.#failures.set(bot.agentId, failureCode(error))
       })
     }
@@ -367,7 +378,7 @@ export class DingTalkChannelSettingsService {
       detail: '正在打开钉钉授权页面…'
     }
     this.#notify()
-    const previousIdentity = await this.#dependencies.developerSession.inspect().catch(() => null)
+    const previous = (await this.#snapshot()).account
     try {
       const identity = await this.#dependencies.developerSession.beginLogin({
         signal: abort.signal,
@@ -390,21 +401,26 @@ export class DingTalkChannelSettingsService {
           this.#notify()
         }
       })
-      try {
-        await this.#upsertAccount(identity)
-      } catch (error) {
-        if (previousIdentity && (
-          previousIdentity.corpId !== identity.corpId
-          || previousIdentity.userId !== identity.userId
-        )) {
-          try {
-            await this.#dependencies.developerSession.activate(previousIdentity)
-          } catch {
-            throw new Error('dingtalk_account_switch_rollback_failed')
-          }
+      const pending = pendingDingTalkConnection(this.#dependencies.developerSession)
+      const result = await this.#command('channels.dingtalk.account.commitConnection', {
+        expectedPreviousAccountVersion: previous?.status === 'connected' ? previous.version : null,
+        account: dingtalkConnectionAccount(identity),
+        developerSession: pending
+      })
+      await activatePendingDingTalkLogin(
+        this.#dependencies.developerSession,
+        sessionRevisionFrom(result)
+      )
+      if (this.#activeQrAttempt) {
+        this.#activeQrAttempt = {
+          ...this.#activeQrAttempt,
+          stage: 'connected',
+          detail: '钉钉开发者账号已连接。'
         }
-        throw error
       }
+    } catch (error) {
+      await this.#dependencies.developerSession.discardPendingLogin?.().catch(() => undefined)
+      throw error
     } finally {
       this.#activeQrAbort = null
       this.#activeQrAttempt = null
@@ -427,7 +443,7 @@ export class DingTalkChannelSettingsService {
     if (identity
       && identity.corpId === snapshot.account.corpId
       && identity.userIdDigest === snapshot.account.userIdDigest) {
-      await this.#dependencies.developerSession.disconnect(identity)
+      await this.#dependencies.developerSession.disconnect()
     }
     await this.#command('channels.dingtalk.account.disconnect', {
       accountId: snapshot.account.accountId,
@@ -462,7 +478,7 @@ export class DingTalkChannelSettingsService {
         const credential = await this.#dependencies.credentialStore.readDingTalk(
           existingBot.credentialRef
         )
-        if (!credential) throw new Error('dingtalk_bot_credential_missing')
+        if (!credential) throw new Error('published_bot_credential_missing')
         await this.#verifyCard(credential)
         this.#failures.delete(agentId)
         this.#activeProvisioning = {
@@ -496,7 +512,7 @@ export class DingTalkChannelSettingsService {
         expectedUserIdDigest: account.userIdDigest,
         expectedCorpId: account.corpId,
         requestedAppName: agent.displayName,
-        provisioningMode: 'dws_gateway'
+        provisioningMode: 'direct_open_platform'
       })
       intent = (await this.#snapshot()).publicationIntents.find((item) => item.agentId === agentId)
     }
@@ -544,11 +560,23 @@ export class DingTalkChannelSettingsService {
             if (!credentialRef || !facts.appKey || !facts.appSecret) {
               throw new Error('dingtalk_credentials_freeze_invalid')
             }
-            await this.#dependencies.credentialStore.writeDingTalk(credentialRef, {
-              appKey: facts.appKey,
-              appSecret: facts.appSecret,
-              robotCode: facts.robotCode ?? current.robotCode ?? facts.appKey
+            if (!shouldAdvanceDingTalkPublicationStep(current, step)) return
+            this.#activeProvisioning = provisioningForStep(current, step, facts)
+            this.#notify()
+            await this.#command('channels.dingtalk.publicationIntent.storeCredential', {
+              provider: 'dingtalk',
+              publicationIntentId: current.publicationIntentId,
+              expectedIntentVersion: current.version,
+              credentialRef,
+              remoteAppId: facts.appKey,
+              credential: {
+                appSecret: facts.appSecret,
+                robotCode: facts.robotCode ?? current.robotCode ?? facts.appKey
+              }
             })
+            current = (await this.#snapshot()).publicationIntents
+              .find((item) => item.publicationIntentId === current.publicationIntentId)!
+            return
           }
           if (!shouldAdvanceDingTalkPublicationStep(current, step)) return
           this.#activeProvisioning = provisioningForStep(current, step, facts)
@@ -559,11 +587,11 @@ export class DingTalkChannelSettingsService {
         }
       })
       if (!credentialRef) throw new Error('dingtalk_credential_ref_missing')
-      await this.#dependencies.credentialStore.writeDingTalk(credentialRef, {
-        appKey: provisioned.appKey,
-        appSecret: provisioned.appSecret,
-        robotCode: provisioned.robotCode
-      })
+      if (
+        provisioned.appKey !== current.appKey
+        || provisioned.robotCode !== current.robotCode
+        || current.credentialRef !== credentialRef
+      ) throw new Error('dingtalk_credentials_freeze_invalid')
       await this.#command('channels.dingtalk.memberBot.upsert', {
         accountId: account.accountId,
         agentId,
@@ -670,14 +698,7 @@ export class DingTalkChannelSettingsService {
   }
 
   async #upsertAccount(identity: DingTalkDeveloperIdentity): Promise<void> {
-    await this.#command('channels.dingtalk.account.upsert', {
-      accountId: identity.accountId,
-      userIdDigest: identity.userIdDigest,
-      corpId: identity.corpId,
-      userName: identity.userName,
-      corpName: identity.corpName,
-      oauthProfileRef: identity.oauthProfileRef
-    })
+    await this.#command('channels.dingtalk.account.upsert', dingtalkConnectionAccount(identity))
   }
 
   async #advance(
@@ -727,11 +748,16 @@ export class DingTalkChannelSettingsService {
     })
   }
 
-  async #startBot(bot: CoreDingTalkSnapshot['memberBots'][number]): Promise<void> {
-    const credential = await this.#dependencies.credentialStore.readDingTalk(bot.credentialRef)
+  async #startBot(
+    bot: CoreDingTalkSnapshot['memberBots'][number],
+    loadedCredential?: DingTalkAppCredential | null
+  ): Promise<void> {
+    const credential = loadedCredential === undefined
+      ? await this.#dependencies.credentialStore.readDingTalk(bot.credentialRef)
+      : loadedCredential
     if (!credential
       || credential.appKey !== bot.appKey
-      || credential.robotCode !== bot.robotCode) throw new Error('dingtalk_bot_credential_missing')
+      || credential.robotCode !== bot.robotCode) throw new Error('published_bot_credential_missing')
     this.#apis.set(bot.appKey, this.#api(credential))
     await this.#stream.start(credential)
   }
@@ -869,7 +895,7 @@ export class DingTalkChannelSettingsService {
     const api = this.#apis.get(message.appId)
     if (!bot || !api) return
     await api.sendPrivateMarkdown({
-      robotCode: bot.appKey,
+      robotCode: bot.robotCode,
       userId: message.senderUserId,
       title: 'Rovai',
       text: '该 Bot 当前仅供 Rovai Owner 使用。'
@@ -1034,14 +1060,14 @@ export class DingTalkChannelSettingsService {
         externalId = delivery.conversationKind === 'group'
           ? await api.sendGroupMarkdown({
             openConversationId: delivery.chatId,
-            robotCode: bot.appKey,
+            robotCode: bot.robotCode,
             title,
             text: body,
             atUserIds: delivery.payload.mentionPrincipal === true && delivery.recipientOpenId
               ? [delivery.recipientOpenId] : []
           })
           : await api.sendPrivateMarkdown({
-            robotCode: bot.appKey,
+            robotCode: bot.robotCode,
             userId: delivery.recipientOpenId ?? delivery.chatId,
             title,
             text: body
@@ -1059,7 +1085,7 @@ export class DingTalkChannelSettingsService {
             openSpaceId: delivery.conversationKind === 'group'
               ? `dtv1.card//IM_GROUP.${delivery.chatId}`
               : `dtv1.card//IM_ROBOT.${delivery.recipientOpenId ?? delivery.chatId}`,
-            robotCode: bot.appKey,
+            robotCode: bot.robotCode,
             space: delivery.conversationKind,
             cardParamMap: params
           })
@@ -1098,7 +1124,7 @@ export class DingTalkChannelSettingsService {
             openSpaceId: delivery.conversationKind === 'group'
               ? `dtv1.card//IM_GROUP.${delivery.chatId}`
               : `dtv1.card//IM_ROBOT.${delivery.recipientOpenId ?? delivery.chatId}`,
-            robotCode: bot.appKey,
+            robotCode: bot.robotCode,
             space: delivery.conversationKind,
             cardParamMap: params
           })
@@ -1123,7 +1149,7 @@ export class DingTalkChannelSettingsService {
             openSpaceId: delivery.conversationKind === 'group'
               ? `dtv1.card//IM_GROUP.${delivery.chatId}`
               : `dtv1.card//IM_ROBOT.${delivery.recipientOpenId ?? delivery.chatId}`,
-            robotCode: bot.appKey,
+            robotCode: bot.robotCode,
             space: delivery.conversationKind,
             cardParamMap: params
           })
@@ -1136,12 +1162,12 @@ export class DingTalkChannelSettingsService {
           const externalId = delivery.conversationKind === 'group'
             ? await api.sendGroupMarkdown({
               openConversationId: delivery.chatId,
-              robotCode: bot.appKey,
+              robotCode: bot.robotCode,
               title: cardFallback.title,
               text: cardFallback.text
             })
             : await api.sendPrivateMarkdown({
-              robotCode: bot.appKey,
+              robotCode: bot.robotCode,
               userId: delivery.recipientOpenId ?? delivery.chatId,
               title: cardFallback.title,
               text: cardFallback.text
@@ -1248,7 +1274,7 @@ function provisioningForStep(
   const [stage, detail]: [MemberBotProvisioningView['stage'], string] = step === 'account_verified'
     ? ['verifying_session', '钉钉账号已确认。']
     : step === 'app_created' ? ['creating_app', '应用已创建，正在冻结应用身份…']
-      : step === 'credentials_read' ? ['activating_app', '正在安全保存应用凭据…']
+      : step === 'credentials_read' ? ['activating_app', '正在保存应用凭据…']
         : step === 'avatar_configured' ? ['activating_app', '正在配置队员头像…']
           : step === 'robot_configured' ? ['configuring_permissions', '正在配置 Stream Bot…']
             : step === 'permissions_configured' ? ['waiting_configuration', '权限与事件已配置。']
@@ -1373,6 +1399,51 @@ function requiredPayloadString(payload: Record<string, unknown>, key: string): s
 
 function credentialRefFor(agentId: string, unifiedAppId: string): string {
   return `dingtalk-${createHash('sha256').update(`${agentId}\0${unifiedAppId}`).digest('hex').slice(0, 40)}`
+}
+
+function dingtalkConnectionAccount(identity: DingTalkDeveloperIdentity): {
+  accountId: string
+  userIdDigest: string
+  corpId: string
+  userName: string
+  corpName: string
+  oauthProfileRef: string
+} {
+  return {
+    accountId: identity.accountId,
+    userIdDigest: identity.userIdDigest,
+    corpId: identity.corpId,
+    userName: identity.userName,
+    corpName: identity.corpName,
+    oauthProfileRef: identity.oauthProfileRef
+  }
+}
+
+function sessionRevisionFrom(result: StoredCommandResult): number {
+  const payload = result.payload
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+    throw new Error('channel_developer_session_response_invalid')
+  }
+  const revision = (payload as Record<string, unknown>).sessionRevision
+  if (!Number.isSafeInteger(revision) || Number(revision) < 1) {
+    throw new Error('channel_developer_session_response_invalid')
+  }
+  return Number(revision)
+}
+
+function pendingDingTalkConnection(
+  service: DingTalkDeveloperSessionService
+): ReturnType<NonNullable<DingTalkDeveloperSessionService['pendingConnection']>> {
+  if (!service.pendingConnection) throw new Error('dingtalk_login_pending_session_missing')
+  return service.pendingConnection()
+}
+
+async function activatePendingDingTalkLogin(
+  service: DingTalkDeveloperSessionService,
+  revision: number
+): Promise<void> {
+  if (!service.activatePendingLogin) throw new Error('dingtalk_login_pending_session_missing')
+  await service.activatePendingLogin(revision)
 }
 
 function digest(value: string): string {

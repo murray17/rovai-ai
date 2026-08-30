@@ -4242,11 +4242,11 @@ button.attachment-open:disabled { cursor: wait; opacity: .76; }
 .channel-qr-frame { display: grid; width: 196px; height: 196px; place-items: center; overflow: hidden; border: 1px solid var(--line); border-radius: 12px; background: var(--qr-canvas); box-shadow: inset 0 0 0 7px var(--qr-canvas); }
 .channel-qr-frame img { display: block; width: 100%; height: 100%; object-fit: contain; }
 .channel-qr-frame > span { transform: scale(1.5); }
-.channel-qr-frame.is-checking_secure_storage > span,
+.channel-qr-frame.is-loading_local_session > span,
 .channel-qr-frame.is-preparing > span,
 .channel-qr-frame.is-scan_confirmed > span,
 .channel-qr-frame.is-inspecting_identity > span,
-.channel-qr-frame.is-securing_session > span { animation: channel-qr-pulse 1.4s ease-in-out infinite; }
+.channel-qr-frame.is-saving_local_session > span { animation: channel-qr-pulse 1.4s ease-in-out infinite; }
 .channel-qr-frame.is-failed { background: var(--danger-soft); box-shadow: none; }
 .channel-qr-body > strong { color: var(--ink); font-size: 12px; font-weight: 620; }
 .channel-qr-body > small { color: var(--muted); font-size: 10.5px; line-height: 1.5; }

@@ -3,23 +3,26 @@ document_type: implementation-plan
 version: v1.31
 authority: implementation-and-acceptance-status
 status: in_progress
-last_updated: 2026-08-29
+last_updated: 2026-08-30
 ---
 
 # v1.31 实施计划
 
 ## 仓库内实施
 
-- [x] Migration 122、Data Contract `v1.35 / schema 76` 与显式升级测试；
+- [x] Migration 122/123/124、Data Contract `v1.37 / schema 78`、helper mode 数据保留、共享渠道 SQLite storage 与显式升级测试；
 - [x] DingTalk account、Owner identity、publication intent、member Bot、per-App identity 和 provider-neutral directory；
-- [x] 固定 DWS Gateway：版本/SHA、封闭命令与参数、无 Shell、隔离 profile、超时/取消和 Renderer 秘密隔离；
-- [x] 浏览器 OAuth、设备授权 fallback、staged 账号切换和旧 Profile 回滚；
+- [x] Electron Main 直接 OAuth/Developer API：固定 endpoint、封闭 operation/argument、staged profile、超时/取消和 Renderer 秘密隔离；
+- [x] 飞书/钉钉账号与 Developer Session 原子连接、publication credential 与 intent 原子推进、启动单次批量读取；
+- [x] 删除 safeStorage/Keychain/独立 `.bin` 读取路径；旧文件只按严格名称 best-effort 清理，不迁移或解密；
+- [x] 删除 DWS binary、版本/SHA、签名排除、打包资源、subprocess 生命周期与 stdout/stderr 协议；
+- [x] 浏览器 OAuth、设备授权 fallback、staged 账号切换和 Core 失败时的内存丢弃；
 - [x] 每队员单 App publication 状态机、App identity freeze、头像、Robot、权限、版本、审批和恢复；
 - [x] 每 App Stream、Robot/Card callback fast ACK、身份规范化和 topic fail-closed；
 - [x] Owner-only 私聊/普通群、精确 `/new`、ExternalQuote、项目卡、单根 FIFO 与统一原子 admission；
 - [x] 群 roster 与 Camp Membership reconcile、Core ChannelDelivery、AI 卡片、执行控制台安全投影和 Markdown 输出；
 - [x] 设置页 Provider Tab、钉钉连接/发布/审批/管理入口、Provider-local 诊断与双主题样式；
-- [x] 单元测试覆盖 DWS、Session、Provisioner、Open API、Stream、Inbound、Migration、Core admission 和 Renderer；
+- [x] 单元测试覆盖 OAuth、Developer API、Session、Provisioner、Open API、Stream、Inbound、Migration、Core admission 和 Renderer；
 - [x] 完成仓库全量 Rust、TypeScript、文档、UI detector 与 Desktop build 门禁并记录本次结果。
 
 ## 外部验收与生产门槛
@@ -34,4 +37,4 @@ last_updated: 2026-08-29
 ## Go / No-Go
 
 仓库门禁通过只表示实现可构建和本地合同成立。生产 OAuth Client 未完成或任一真实租户关键链路未证实时，钉钉渠道仍是
-`NO-GO`；不得用本地 mock、DWS 成功退出码或卡片实例创建替代远端收发证据。
+`NO-GO`；不得用本地 mock、Developer API 本地响应或卡片实例创建替代远端收发证据。

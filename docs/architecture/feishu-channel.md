@@ -3,12 +3,13 @@ document_type: architecture
 architecture: feishu-channel
 authority: feishu-channel-component-and-authority-boundaries
 status: accepted
-last_updated: 2026-08-29
+last_updated: 2026-08-30
 ---
 
 # 飞书渠道架构
 
-字段、状态和恢复合同见 [Feishu Channel v2](../contracts/feishu-channel-v2.md)，模型输入证据见
+字段、状态和恢复合同见 [Feishu Channel v2](../contracts/feishu-channel-v2.md)，credential 与 Developer Session 持久化见
+[Channel Storage v1](../contracts/channel-storage-v1.md)，模型输入证据见
 [ContextManifest Evidence v22](../contracts/context-manifest-evidence-v22.md)，取舍理由见
 [v1.30 决策记录](../versions/v1.30/decisions.md)。
 
@@ -18,17 +19,17 @@ last_updated: 2026-08-29
 Renderer 渠道设置
   └─ typed Preload API
        └─ Electron Main / Feishu Channel Host
-          ├─ Developer Session Adapter：开放平台登录、身份回读、加密 Cookie jar、控制台 bootstrap
+          ├─ Developer Session Adapter：临时登录、身份回读、Cookie jar、控制台 bootstrap
           ├─ OpenPlatformApiClient：同源控制台创建、配置、发布与回读
           ├─ Member Bot Provisioner：身份复核与发布状态机
-          ├─ OS safeStorage：每 Agent App Secret
+          ├─ SQLite Channel Store Client：Session/credential 批量读取与原子命令
           ├─ 每 App WebSocket
           ├─ 入站规范化、群 Bot roster 观测
           └─ 领取并发送 Core ChannelDelivery
                          │
                          ▼
                     Rust Core
-          ├─ Developer Identity / Publication Intent
+          ├─ Developer Identity / Session / Credential / Publication Intent
           ├─ Feishu Owner / per-App identity
           ├─ Project Catalog / conversation binding generation
           ├─ PendingCampBinding / frozen message FIFO
@@ -40,7 +41,8 @@ Renderer 渠道设置
 
 Rust Core 是 Owner identity、项目目录投影、渠道会话/执行范围、Camp、消息、Turn、Run、成员关系、排队和 Outbox 的
 唯一持久权威。
-Electron Main 只拥有需要网络和本机秘密的 Feishu Host；Renderer 只获得设置投影与 Owner 操作，不获得 App
+Electron Main 与 Rust Core 共同位于渠道秘密边界：Main 拥有需要网络的 Feishu Host 与运行期 Cookie/Secret，Core 在
+`rovai.sqlite` 中拥有明文持久 credential/Session。Renderer 只获得设置投影与 Owner 操作，不获得 App
 Secret、原始 `userId`、Session Cookie、Host 恢复游标或内部路由事实。
 
 `ExternalPrincipal` 表达消息作者、上下文来源和回复目标。即使它代表已验证 Feishu Owner，也不是 `local_user`，不能
@@ -49,20 +51,17 @@ Secret、原始 `userId`、Session Cookie、Host 恢复游标或内部路由事�
 
 ## 开发者会话与队员发布
 
-“连接飞书账号”只在独立 Electron Session 中加载开放平台登录页，截取真实登录二维码，回读
-`userId + userName + tenantId + tenantName + brand`，并把 Cookie jar 经 `safeStorage` 加密后原子写入本机私有文件。
-它不创建 App、不产生 App ID/Secret，也不启动 Bot。Core 只保存由 `brand + tenantId + userId` 派生的不透明
-`accountId`、`userIdDigest` 与可展示身份；缺少任一必需身份字段时不能进入 connected。
-登录页打开前先异步预检 OS 安全存储；身份回读与安全保存是两个可见阶段。安全存储操作和身份回读都具有固定截止
-时间，系统拒绝、超时或身份不完整会 fail closed，不让 Renderer 永久停留在 loading。显式隔离验收实例在 Electron
-ready 前把应用名切换为 `Rovai AI Isolated <userData 摘要>`，从而与日常 App 和其他验收目录使用不同的 macOS
-Keychain 命名空间；摘要不暴露原始路径，非隔离 App 继续使用原应用名以保持既有密文可读。
+“连接飞书账号”只在一次性 Electron Session 中加载开放平台登录页，截取真实登录二维码，回读
+`userId + userName + tenantId + tenantName + brand` 并收集受限飞书/Lark 域 Cookie。它不创建 App、不产生 App
+ID/Secret，也不启动 Bot。身份与 Cookie 在登录期间只留在临时 Session；Main 随后调用
+`channels.feishu.account.commitConnection`，由 Core 在一个 SQLite 事务中同时写入 connected account 与
+`channel_developer_sessions`。缺少任一身份字段、identity mismatch、previous account version conflict 或 SQLite 失败都不能
+进入 connected。
 
-切换账号采用 staged Session：Main 为新二维码建立一次性非持久 partition，当前活动 Session 与 safeStorage 文件继续
-服务旧账号。临时 Session 得到完整 Developer Identity 且新 Cookie jar 原子写入后，只建立可回滚 replacement；Core
-account upsert 成功才 confirm 并清理旧内存存储。取消、超时、导航失败、加密失败或 Core commit 失败都会恢复旧 Cookie
-store/活动 Session 并清理临时 partition，Core 中的当前账号不失效。显式“断开”仍
-直接清除当前 Session。该切换只替换以后发布所用的 Developer Identity，不迁移或停止任何已发布 Bot。
+事务成功后临时 Session 才成为当前内存 Session 并清理旧 partition；失败只丢弃临时 Session，既有 SQLite row 和旧内存
+Session 均保持不变。持久层没有 confirm/rollback 文件，也不访问系统凭据库。启动与 refresh 从 SQLite 恢复 Cookie，并用
+Developer Session revision CAS 保存远端刷新；断开/过期在 Core 同一事务删除 Session row 与更新账号状态。隔离验收只依赖
+不同 `userData`/SQLite，不改变 `app.setName(APP_NAME)`，也没有 Keychain namespace。
 
 普通队员发布先创建持久 `MemberBotPublicationIntent`，再要求当前 Web Session 仍属于 intent 冻结的
 `userId + tenantId`。`FeishuWebSessionMemberBotProvisioner` 从同一 Electron Session 的 Cookie jar 加载开放平台页，
@@ -85,7 +84,8 @@ version，先确认它 published。之后统一配置 tenant scopes、receive/ro
 写入；在线 `callbackMode=4` 与 `card.action.trigger` 都是必需条件。最后一次共享 convergence 生成仅限同一 Provisioner
 操作使用的可信配置状态；没有后续配置 mutation 时，final verify 复用它并只回读 robot、version 和需要核验的头像/
 Manifest。重启恢复或 App/requirements 不匹配时仍完整回读 scope/event/callback。Manifest 字段不能自证配置完成。在线配置验证通过后，
-Main 依次把独立 credential 写入 safeStorage、Core upsert exact frozen Bot、建立并回读 Bot WebSocket identity，最后
+Main 通过 `publicationIntent.storeCredential` 在同一 SQLite 事务写入独立 credential 并推进 intent，再由 Core upsert exact
+frozen Bot、建立并回读 Bot WebSocket identity，最后
 完成 intent。普通流程始终保持隐藏窗口，不打开飞书“创建飞书智能体应用 / 立即创建”确认页，也不向 Renderer 产生二维码。
 Provisioner 与 Channel Host 共用单调时钟计时上下文，记录从 Session、创建、配置、发布、核验、Owner 解析到真实
 WebSocket handshake 的阶段与总耗时；日志只含白名单分类和 App digest，失败也记录，秘密与原始外部身份不进入样本。
@@ -292,6 +292,8 @@ Core Snapshot 保存 pending aggregate、transport conversation 和 delivery 恢
 Bot 长连接、过期 lease、collecting finalize 与 Outbox。Renderer snapshot 在 Main 中剥离这些 Host-only 字段。
 Host 为连接阶段、SDK policy reject、归一化 message 和 Rovai handler 接受/拒绝记录结构化诊断；所有 App/message/chat
 identity 都先摘要，消息正文与外部用户 ID 不进入日志。当前 SDK 不提供归一化前 raw-event hook，Host 不虚构该观测层。
-每个 App Secret 只以随机 credential ref 关联 Core；Developer Session Cookie jar 和 App Secret 都只在 Electron
-`safeStorage` 可用时经异步 API 加密落盘。明文不进入 SQLite、Renderer、日志、Agent Context 或诊断输出，也不因
-安全存储超时而降级。断开账号只删除 Developer Session；已发布 Bot 的 credential 与 WebSocket 生命周期保持独立。
+每个 App Secret 只以稳定 credential ref 关联 Bot。Developer Session Cookie jar 和 App Secret 明文存于同一个
+`rovai.sqlite`，只允许 Core/Main 读取；Renderer、日志、Agent Context 和诊断输出仍不得获得 raw payload。Main 启动时通过
+一次 `channels.credentials.listPublished` 批量加载所有 Provider 的 published Bot credential，并把运行期对象分发给各 Host；
+普通收发与重连不逐 Bot 查询。旧 `.bin` 不读取、不解密，只允许 Main 按严格已知文件名 best-effort 删除。断开账号只删除
+Developer Session；已发布 Bot credential 与 WebSocket 生命周期保持独立。

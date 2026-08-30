@@ -31,18 +31,29 @@ function memoryCredentialStore(
   initial: Record<string, FeishuAppCredential> = {}
 ): ChannelCredentialStore & { values: Map<string, FeishuAppCredential> } {
   const values = new Map(Object.entries(initial))
-  return {
+  const store = {
     values,
-    async read(credentialRef) {
+    async read(credentialRef: string) {
       return values.get(credentialRef) ?? null
     },
-    async write(credentialRef, credential) {
+    async write(credentialRef: string, credential: FeishuAppCredential) {
       values.set(credentialRef, structuredClone(credential))
     },
-    async delete(credentialRef) {
+    async delete(credentialRef: string) {
       values.delete(credentialRef)
+    },
+    async listPublished() {
+      return [...values].map(([credentialRef, credential]) => ({
+        agentId: credentialRef,
+        credentialRef,
+        provider: 'feishu' as const,
+        remoteAppId: credential.appId,
+        credential,
+        revision: 1
+      }))
     }
   }
+  return store
 }
 
 function coreSnapshot(overrides: Record<string, unknown> = {}): Record<string, unknown> {
@@ -101,6 +112,9 @@ function developerSession(value = identity()): NonNullable<ChannelHostDependenci
 } {
   return {
     beginLogin: vi.fn(async () => value),
+    pendingConnection: vi.fn(() => ({ identity: value, session: { cookies: [] } })),
+    activatePendingLogin: vi.fn(async () => undefined),
+    discardPendingLogin: vi.fn(async () => value),
     inspect: vi.fn(async () => value),
     requireExpectedIdentity: vi.fn(async () => value),
     disconnect: vi.fn(async () => undefined)
@@ -428,7 +442,7 @@ describe('channel settings service', () => {
   it('connects a real developer identity without registering an app or storing a controller secret', async () => {
     const credentialStore = memoryCredentialStore()
     const provision = vi.fn()
-    const confirmLogin = vi.fn(async () => undefined)
+    const activatePendingLogin = vi.fn(async () => undefined)
     const beginLogin = vi.fn(async () => ({
       brand: 'feishu' as const,
       userId: 'owner-user-id',
@@ -443,14 +457,18 @@ describe('channel settings service', () => {
       memberBotProvisioner: { create: provision },
       developerSession: {
         beginLogin,
-        confirmLogin,
+        pendingConnection: () => ({ identity: identity(), session: { cookies: [] } }),
+        activatePendingLogin,
+        async discardPendingLogin() { return null },
         async inspect() { return null },
         async requireExpectedIdentity() { throw new Error('not_used') },
         async disconnect() {}
       },
       core: channelCore((method, params) => {
         commands.push({ method, params })
-        if (method === 'channels.feishu.account.upsert') return { status: 'applied' }
+        if (method === 'channels.feishu.account.commitConnection') {
+          return { status: 'applied', payload: { sessionRevision: 1 } }
+        }
         return coreSnapshot()
       })
     })
@@ -458,16 +476,18 @@ describe('channel settings service', () => {
     await service.connect()
 
     expect(beginLogin).toHaveBeenCalledWith(expect.objectContaining({ forceFresh: true }))
-    expect(confirmLogin).toHaveBeenCalledTimes(1)
+    expect(activatePendingLogin).toHaveBeenCalledWith(1)
     expect(provision).not.toHaveBeenCalled()
     expect(credentialStore.values.size).toBe(0)
-    const upsert = commands.find((entry) => entry.method === 'channels.feishu.account.upsert')
-    expect(upsert).toBeDefined()
-    expect(JSON.stringify(upsert)).toContain('Murray')
-    expect(JSON.stringify(upsert)).toContain('murray@example.com')
-    expect(JSON.stringify(upsert)).not.toContain('owner-user-id')
-    expect(JSON.stringify(upsert)).toContain('tenant-1')
-    expect(JSON.stringify(upsert)).not.toMatch(/appSecret|client_secret|controller/i)
+    const commit = commands.find((entry) => (
+      entry.method === 'channels.feishu.account.commitConnection'
+    ))
+    expect(commit).toBeDefined()
+    expect(JSON.stringify(commit)).toContain('Murray')
+    expect(JSON.stringify(commit)).toContain('murray@example.com')
+    expect(JSON.stringify(commit)).toContain('owner-user-id')
+    expect(JSON.stringify(commit)).toContain('tenant-1')
+    expect(JSON.stringify(commit)).not.toMatch(/appSecret|client_secret|controller/i)
   })
 
   it('uses only the developer session for publishing', async () => {
@@ -478,6 +498,7 @@ describe('channel settings service', () => {
     const owner = identity()
     const credentialStore = memoryCredentialStore()
     const memberBotUpserts: Record<string, unknown>[] = []
+    const storedCredentials: Record<string, unknown>[] = []
     const provision = vi.fn(async () => ({
       appId: 'cli-normal',
       appSecret: 'normal-secret',
@@ -510,6 +531,11 @@ describe('channel settings service', () => {
             (rawParams as { command: Record<string, unknown> }).command
           )
         }
+        if (method === 'channels.feishu.publicationIntent.storeCredential') {
+          storedCredentials.push(
+            (rawParams as { command: Record<string, unknown> }).command
+          )
+        }
         return { status: 'applied' }
       })
     })
@@ -528,10 +554,10 @@ describe('channel settings service', () => {
       stage: 'completed',
       remoteAppId: 'cli-normal'
     })
-    expect([...credentialStore.values.values()]).toContainEqual({
-      appId: 'cli-normal',
-      appSecret: 'normal-secret'
-    })
+    expect(storedCredentials).toContainEqual(expect.objectContaining({
+      provider: 'feishu', remoteAppId: 'cli-normal',
+      credential: { appSecret: 'normal-secret' }
+    }))
     expect(memberBotUpserts).toHaveLength(2)
     expect(memberBotUpserts).toEqual([
       expect.objectContaining({
@@ -640,6 +666,7 @@ describe('channel settings service', () => {
       version: 1
     }
     const advancedStates: string[] = []
+    const storedCredentials: Record<string, unknown>[] = []
     let intentCreates = 0
     const service = new ChannelSettingsService({
       credentialStore,
@@ -665,6 +692,15 @@ describe('channel settings service', () => {
             ...params.command,
             version: Number(publicationIntent.version) + 1,
             updatedAt: '2026-08-27T00:02:00Z'
+          }
+        }
+        if (method === 'channels.feishu.publicationIntent.storeCredential') {
+          storedCredentials.push(params.command ?? {})
+          publicationIntent = {
+            ...publicationIntent,
+            state: 'credentials_read',
+            credentialRef: params.command?.credentialRef,
+            version: Number(publicationIntent.version) + 1
           }
         }
         if (method === 'channels.feishu.memberBot.upsert') {
@@ -695,12 +731,12 @@ describe('channel settings service', () => {
     expect(advancedStates).toEqual([
       'session_verified',
       'app_created',
-      'credentials_read',
       'bot_configured',
       'version_published',
       'connection_verified',
       'completed'
     ])
+    expect(storedCredentials).toHaveLength(1)
     expect(reactivated.channels[0].memberBots).toContainEqual(expect.objectContaining({
       agentId: 'agent-a',
       appId: 'cli-frozen',
@@ -780,28 +816,6 @@ describe('channel settings service', () => {
     })
   })
 
-  it('turns secure-storage rejection into an actionable login error', async () => {
-    const service = new ChannelSettingsService({
-      credentialStore: memoryCredentialStore(),
-      developerSession: {
-        async beginLogin() { throw new Error('system_credential_encryption_unavailable') },
-        async inspect() { return null },
-        async requireExpectedIdentity() { throw new Error('not_used') },
-        async disconnect() {}
-      },
-      core: channelCore((method) => (
-        method === 'channels.feishu.snapshot' ? coreSnapshot() : { status: 'applied' }
-      ))
-    })
-
-    await expect(service.connect()).rejects.toThrow('system_credential_encryption_unavailable')
-
-    expect((await service.get()).activeQrAttempt).toMatchObject({
-      stage: 'failed',
-      detail: '无法访问系统安全存储。macOS 上请在钥匙串提示中选择“允许”，然后重试。'
-    })
-  })
-
   it('treats a cancelled account switch as a quiet no-op', async () => {
     const account = connectedAccount()
     const commands: string[] = []
@@ -855,15 +869,19 @@ describe('channel settings service', () => {
 
   it('rolls the staged developer session back when the Core account switch cannot commit', async () => {
     const account = connectedAccount()
-    const confirmLogin = vi.fn(async () => undefined)
-    const rollbackLogin = vi.fn(async () => identity())
+    const activatePendingLogin = vi.fn(async () => undefined)
+    const discardPendingLogin = vi.fn(async () => identity())
     const commands: string[] = []
     const service = new ChannelSettingsService({
       credentialStore: memoryCredentialStore(),
       developerSession: {
         async beginLogin() { return identity({ userId: 'replacement-owner' }) },
-        confirmLogin,
-        rollbackLogin,
+        pendingConnection: () => ({
+          identity: identity({ userId: 'replacement-owner' }),
+          session: { cookies: [] }
+        }),
+        activatePendingLogin,
+        discardPendingLogin,
         async inspect() { return identity() },
         async requireExpectedIdentity() { return identity() },
         async disconnect() {}
@@ -871,15 +889,17 @@ describe('channel settings service', () => {
       core: channelCore((method) => {
         commands.push(method)
         if (method === 'channels.feishu.snapshot') return coreSnapshot({ account })
-        if (method === 'channels.feishu.account.upsert') throw new Error('core_switch_failed')
+        if (method === 'channels.feishu.account.commitConnection') {
+          throw new Error('core_switch_failed')
+        }
         return { status: 'applied' }
       })
     })
 
     await expect(service.connect()).rejects.toThrow('core_switch_failed')
 
-    expect(rollbackLogin).toHaveBeenCalledTimes(1)
-    expect(confirmLogin).not.toHaveBeenCalled()
+    expect(discardPendingLogin).toHaveBeenCalledTimes(1)
+    expect(activatePendingLogin).not.toHaveBeenCalled()
     expect(commands).not.toContain('channels.feishu.account.expire')
   })
 
@@ -990,6 +1010,23 @@ describe('channel settings service', () => {
             ...params.command,
             version: Number(publicationIntent.version) + 1,
             updatedAt: '2026-08-27T00:01:00Z'
+          }
+        } else if (
+          method === 'channels.feishu.publicationIntent.storeCredential'
+          && publicationIntent
+        ) {
+          const command = params.command ?? {}
+          const credential = command.credential as { appSecret?: string } | undefined
+          credentialStore.values.set(String(command.credentialRef), {
+            appId: String(command.remoteAppId),
+            appSecret: String(credential?.appSecret)
+          })
+          publicationIntent = {
+            ...publicationIntent,
+            state: 'credentials_read',
+            credentialRef: command.credentialRef,
+            lastCompletedStep: 'credentials_read',
+            version: Number(publicationIntent.version) + 1
           }
         } else if (method === 'channels.feishu.memberBot.upsert') {
           expect(params.command).toMatchObject({ ownerOpenId: 'ou_owner_retry' })
@@ -1390,6 +1427,21 @@ describe('channel settings service', () => {
             ...params.command,
             version: Number(publicationIntent.version) + 1,
             updatedAt: '2026-08-27T00:02:00Z'
+          }
+        }
+        if (method === 'channels.feishu.publicationIntent.storeCredential') {
+          const command = params.command ?? {}
+          const credential = command.credential as { appSecret?: string } | undefined
+          credentialStore.values.set(String(command.credentialRef), {
+            appId: String(command.remoteAppId),
+            appSecret: String(credential?.appSecret)
+          })
+          publicationIntent = {
+            ...publicationIntent,
+            state: 'credentials_read',
+            credentialRef: command.credentialRef,
+            lastCompletedStep: 'credentials_read',
+            version: Number(publicationIntent.version) + 1
           }
         }
         if (method === 'channels.feishu.memberBot.upsert') {

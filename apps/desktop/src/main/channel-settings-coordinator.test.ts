@@ -6,7 +6,7 @@ import type { DingTalkChannelSettingsService } from './dingtalk-channel-settings
 describe('ChannelSettingsCoordinator', () => {
   it('keeps Feishu running when the optional DingTalk Host cannot start', async () => {
     const feishu = host()
-    const dingtalk = host(new Error('dingtalk_dws_unavailable'))
+    const dingtalk = host(new Error('dingtalk_open_platform_unavailable'))
     const coordinator = new ChannelSettingsCoordinator({
       feishu: feishu.service as ChannelSettingsService,
       dingtalk: dingtalk.service as DingTalkChannelSettingsService

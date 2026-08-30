@@ -3,7 +3,7 @@ document_type: ui-component
 component: channel-settings
 authority: channel-settings-presentation-and-interaction
 status: accepted
-last_updated: 2026-08-29
+last_updated: 2026-08-30
 ---
 
 # 渠道设置
@@ -11,7 +11,7 @@ last_updated: 2026-08-29
 渠道设置是 Owner 在 Rovai 本机维护飞书/钉钉连接与队员 Bot 的 Renderer surface。群首次项目选择发生在对应外部会话的
 Owner-only 卡片中；Renderer 不提供 Channel 项目目录或会话绑定操作。领域状态和错误按 Provider 分别见
 [Feishu Channel v2](../../contracts/feishu-channel-v2.md)与
-[DingTalk Channel v1](../../contracts/dingtalk-channel-v1.md)；本页只拥有信息层级、交互与可访问性。
+[DingTalk Channel v2](../../contracts/dingtalk-channel-v2.md)；本页只拥有信息层级、交互与可访问性。
 
 ## 页面结构
 
@@ -38,14 +38,15 @@ Dialog、状态点和间距复用现有组件语法。
 它展示 preparing、awaiting scan、scan confirmed、identity inspection 和过期/错误；关闭必须取消 exact attempt，
 迟到状态不再打开或更新 UI。用户取消是成功的 no-op：Dialog 立即关闭，不形成 failed state、页面 alert 或 toast。账号登录
 是产品中唯一的扫码流程；队员发布没有兼容扫码或平台 registration 确认入口。
-账号登录在 preparing 前展示安全存储检查，在 identity inspection 后展示安全保存；两者必须使用不同文案，不能把
-钥匙串等待描述成“读取账号”。安全存储拒绝、身份读取超时和页面失败使用中文可操作提示，不向用户显示 `unknown`
-或原始异常文本。
+账号登录在 preparing 前展示 `loading_local_session`（“正在读取 Rovai 本地渠道数据…”），identity inspection 后展示
+`saving_local_session`（“身份读取完成，正在保存开发者会话…”）。页面不得出现系统安全存储、钥匙串、加密授权或
+`system_credential_encryption_unavailable`；身份读取超时和页面失败使用中文可操作提示，不向用户显示 `unknown` 或原始异常文本。
+连接行统一说明“开发者账号会话 · 保存在 Rovai 本地数据库”。
 
 钉钉使用同一个 modal 结构，但默认打开系统浏览器 OAuth，frame 只显示钉钉标记和当前阶段，不伪造二维码。连接行另有
-“设备授权”次级动作，仅在 loopback 无法完成时由 Owner 显式触发。文案说明 OAuth Profile 位于 Rovai 独立安全配置，
+“设备授权”次级动作，仅在 loopback 无法完成时由 Owner 显式触发。文案说明 OAuth Profile 保存在 Rovai 本地数据库，
 本次不创建应用或读取 AppSecret。新 OAuth/Core commit 失败后页面仍显示旧账号；缺少 Rovai OAuth Client 时显示可行动
-配置错误，不静默改用 DWS 内置 Client 或队员 AppKey。
+配置错误，不静默改用第三方工具的 Client 或队员 AppKey。
 
 普通发布不得进入 QR Dialog。点击列表“发布”先打开独立确认 Dialog，展示现有 `MemberAvatar`、队员名称/职责、
 应用说明、当前开发者账号和租户；“确认发布”后在同一 Dialog 逐步展示八个进行中阶段。主文案固定为：
@@ -131,5 +132,5 @@ credential 或内部错误。钉钉卡固定使用官方 AI Markdown 模板、St
 - [设置工作区 brief](../../../apps/desktop/.impeccable/surfaces/settings-workspace.md)
 - [Feishu Channel v2](../../contracts/feishu-channel-v2.md)
 - [飞书渠道架构](../../architecture/feishu-channel.md)
-- [DingTalk Channel v1](../../contracts/dingtalk-channel-v1.md)
+- [DingTalk Channel v2](../../contracts/dingtalk-channel-v2.md)
 - [钉钉渠道架构](../../architecture/dingtalk-channel.md)

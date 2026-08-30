@@ -81,7 +81,7 @@ describe('Channel settings', () => {
 
     expect(markup).toContain('<strong>飞书</strong>')
     expect(markup).toContain('<strong>钉钉</strong>')
-    expect(markup).toContain('开发者 OAuth 会话 · 独立安全配置')
+    expect(markup).toContain('开发者账号会话 · 保存在 Rovai 本地数据库')
     expect(markup).toContain('>设备授权</button>')
     expect(markup).toContain('群聊首次由 Owner @')
     expect(markup).toContain('钉钉话题暂不接入')

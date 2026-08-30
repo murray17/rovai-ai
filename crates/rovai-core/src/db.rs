@@ -50,8 +50,12 @@ pub struct Database {
     runtime_camp_files_root_identity_digest: String,
 }
 
-const CURRENT_DATA_CONTRACT_VERSION: &str = "v1.35";
-const CURRENT_PROJECTION_SCHEMA_VERSION: i64 = 76;
+const CURRENT_DATA_CONTRACT_VERSION: &str = "v1.37";
+const CURRENT_PROJECTION_SCHEMA_VERSION: i64 = 78;
+const V124_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.36";
+const V124_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION: i64 = 77;
+const V123_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.35";
+const V123_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION: i64 = 76;
 const V122_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.34";
 const V122_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION: i64 = 75;
 const V121_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.33";
@@ -208,6 +212,8 @@ struct CurrentMigrationState {
     v120: bool,
     v121: bool,
     v122: bool,
+    v123: bool,
+    v124: bool,
 }
 
 impl CurrentMigrationState {
@@ -260,6 +266,45 @@ impl CurrentMigrationState {
         let channel_classifier_admissible =
             classifier == V043_CLASSIFIER_VERSION || classifier == V116_CLASSIFIER_VERSION;
         if contract == CURRENT_DATA_CONTRACT_VERSION && schema == CURRENT_PROJECTION_SCHEMA_VERSION
+        {
+            return channel_classifier_admissible
+                && through_v113
+                && self.v114
+                && self.v115
+                && self.v116
+                && self.v117
+                && self.v118
+                && self.v119
+                && self.v120
+                && self.v121
+                && self.v122
+                && self.v123
+                && self.v124;
+        }
+        if self.v124 {
+            return false;
+        }
+        if contract == V124_MIGRATION_SOURCE_DATA_CONTRACT_VERSION
+            && schema == V124_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION
+        {
+            return channel_classifier_admissible
+                && through_v113
+                && self.v114
+                && self.v115
+                && self.v116
+                && self.v117
+                && self.v118
+                && self.v119
+                && self.v120
+                && self.v121
+                && self.v122
+                && self.v123;
+        }
+        if self.v123 {
+            return false;
+        }
+        if contract == V123_MIGRATION_SOURCE_DATA_CONTRACT_VERSION
+            && schema == V123_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION
         {
             return channel_classifier_admissible
                 && through_v113
@@ -1616,7 +1661,7 @@ fn connection_has_current_data_contract(connection: &Connection) -> rusqlite::Re
         SELECT contract_version = ?1
                AND projection_schema_version = ?2
                AND classifier_version = ?3
-               AND EXISTS(SELECT 1 FROM schema_migration WHERE version = 122)
+               AND EXISTS(SELECT 1 FROM schema_migration WHERE version = 124)
         FROM rovai_data_contract
         WHERE singleton = 1
         "#,
@@ -1686,7 +1731,9 @@ fn load_current_migration_state(
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 119),
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 120),
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 121),
-               EXISTS(SELECT 1 FROM schema_migration WHERE version = 122)
+               EXISTS(SELECT 1 FROM schema_migration WHERE version = 122),
+               EXISTS(SELECT 1 FROM schema_migration WHERE version = 123),
+               EXISTS(SELECT 1 FROM schema_migration WHERE version = 124)
         "#,
         [],
         |row| {
@@ -1744,6 +1791,8 @@ fn load_current_migration_state(
                 v120: row.get(50)?,
                 v121: row.get(51)?,
                 v122: row.get(52)?,
+                v123: row.get(53)?,
+                v124: row.get(54)?,
             })
         },
     )
@@ -3285,6 +3334,12 @@ impl Database {
             if !self.schema_migration_applied(122)? {
                 self.migrate_dingtalk_channel_v122()?;
             }
+            if !self.schema_migration_applied(123)? {
+                self.migrate_dingtalk_direct_open_platform_v123()?;
+            }
+            if !self.schema_migration_applied(124)? {
+                self.migrate_channel_storage_v124()?;
+            }
             if let Err(error) =
                 crate::notification::maintain_notification_episode_retention(self.connection())
             {
@@ -3698,6 +3753,12 @@ impl Database {
         }
         if !self.schema_migration_applied(122)? {
             self.migrate_dingtalk_channel_v122()?;
+        }
+        if !self.schema_migration_applied(123)? {
+            self.migrate_dingtalk_direct_open_platform_v123()?;
+        }
+        if !self.schema_migration_applied(124)? {
+            self.migrate_channel_storage_v124()?;
         }
         if let Err(error) =
             crate::notification::maintain_notification_episode_retention(self.connection())
@@ -17742,6 +17803,158 @@ impl Database {
         Ok(())
     }
 
+    fn migrate_dingtalk_direct_open_platform_v123(&mut self) -> Result<()> {
+        let transaction = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        transaction.execute_batch(
+            r#"
+            ALTER TABLE dingtalk_member_bot_publication_intent
+                RENAME TO dingtalk_member_bot_publication_intent_v122;
+            DROP INDEX dingtalk_publication_intent_state_idx;
+
+            CREATE TABLE dingtalk_member_bot_publication_intent (
+                id TEXT PRIMARY KEY,
+                agent_id TEXT NOT NULL REFERENCES agent_profile(id),
+                account_id TEXT NOT NULL REFERENCES dingtalk_account(id),
+                expected_user_id_digest TEXT NOT NULL
+                    CHECK(length(expected_user_id_digest) > 0),
+                expected_corp_id TEXT NOT NULL CHECK(length(trim(expected_corp_id)) > 0),
+                requested_app_name TEXT NOT NULL CHECK(length(trim(requested_app_name)) > 0),
+                provisioning_mode TEXT NOT NULL
+                    CHECK(provisioning_mode = 'direct_open_platform'),
+                state TEXT NOT NULL CHECK(state IN (
+                    'created', 'account_verified', 'app_created', 'credentials_read',
+                    'avatar_configured', 'robot_configured', 'permissions_configured',
+                    'version_created', 'awaiting_approver_selection',
+                    'awaiting_approval', 'version_released', 'stream_verified',
+                    'card_verified', 'completed', 'failed_recoverable',
+                    'failed_unknown_remote_state'
+                )),
+                remote_unified_app_id TEXT,
+                app_key TEXT,
+                robot_code TEXT,
+                credential_ref TEXT,
+                version_id TEXT,
+                approval_mode TEXT CHECK(
+                    approval_mode IS NULL
+                    OR approval_mode IN ('NO_APPROVAL', 'SELECT_APPROVER', 'AUTO')
+                ),
+                approver_user_id_digest TEXT,
+                last_completed_step TEXT,
+                failure_code TEXT,
+                version INTEGER NOT NULL DEFAULT 1 CHECK(version >= 1),
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                completed_at TEXT,
+                UNIQUE(agent_id),
+                UNIQUE(remote_unified_app_id),
+                UNIQUE(app_key),
+                UNIQUE(credential_ref),
+                CHECK(
+                    (state IN ('created', 'account_verified')
+                        AND remote_unified_app_id IS NULL)
+                    OR state NOT IN ('created', 'account_verified')
+                ),
+                CHECK(
+                    (state = 'completed' AND completed_at IS NOT NULL
+                        AND remote_unified_app_id IS NOT NULL
+                        AND app_key IS NOT NULL AND robot_code IS NOT NULL
+                        AND credential_ref IS NOT NULL AND version_id IS NOT NULL
+                        AND failure_code IS NULL)
+                    OR state <> 'completed'
+                ),
+                CHECK(
+                    (state IN ('failed_recoverable', 'failed_unknown_remote_state')
+                        AND failure_code IS NOT NULL)
+                    OR state NOT IN ('failed_recoverable', 'failed_unknown_remote_state')
+                )
+            );
+            INSERT INTO dingtalk_member_bot_publication_intent(
+                id, agent_id, account_id, expected_user_id_digest,
+                expected_corp_id, requested_app_name, provisioning_mode,
+                state, remote_unified_app_id, app_key, robot_code,
+                credential_ref, version_id, approval_mode,
+                approver_user_id_digest, last_completed_step, failure_code,
+                version, created_at, updated_at, completed_at
+            )
+            SELECT id, agent_id, account_id, expected_user_id_digest,
+                   expected_corp_id, requested_app_name, 'direct_open_platform',
+                   state, remote_unified_app_id, app_key, robot_code,
+                   credential_ref, version_id, approval_mode,
+                   approver_user_id_digest, last_completed_step, failure_code,
+                   version, created_at, updated_at, completed_at
+            FROM dingtalk_member_bot_publication_intent_v122;
+            DROP TABLE dingtalk_member_bot_publication_intent_v122;
+            CREATE INDEX dingtalk_publication_intent_state_idx
+                ON dingtalk_member_bot_publication_intent(state, updated_at DESC, id);
+
+            UPDATE rovai_data_contract
+            SET contract_version = 'v1.36', projection_schema_version = 77,
+                reset_reason = NULL, updated_at = datetime('now')
+            WHERE singleton = 1;
+
+            INSERT INTO schema_migration(version, applied_at)
+            VALUES (123, datetime('now'));
+            "#,
+        )?;
+        transaction.commit()?;
+        Ok(())
+    }
+
+    fn migrate_channel_storage_v124(&mut self) -> Result<()> {
+        let transaction = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        transaction.execute_batch(
+            r#"
+            CREATE TABLE channel_credentials (
+                credential_ref TEXT PRIMARY KEY NOT NULL
+                    CHECK(length(trim(credential_ref)) > 0 AND length(credential_ref) <= 128),
+                provider TEXT NOT NULL CHECK(provider IN ('feishu', 'dingtalk')),
+                credential_kind TEXT NOT NULL CHECK(credential_kind = 'member_bot'),
+                remote_app_id TEXT NOT NULL
+                    CHECK(length(trim(remote_app_id)) > 0 AND length(remote_app_id) <= 512),
+                payload_json TEXT NOT NULL
+                    CHECK(length(payload_json) > 0 AND length(payload_json) <= 65536),
+                schema_version INTEGER NOT NULL DEFAULT 1 CHECK(schema_version = 1),
+                revision INTEGER NOT NULL DEFAULT 1 CHECK(revision >= 1),
+                created_at INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL,
+                UNIQUE(provider, credential_kind, remote_app_id)
+            );
+            CREATE INDEX channel_credentials_provider_idx
+                ON channel_credentials(provider);
+            CREATE INDEX channel_credentials_remote_app_idx
+                ON channel_credentials(provider, remote_app_id);
+
+            CREATE TABLE channel_developer_sessions (
+                provider TEXT PRIMARY KEY NOT NULL CHECK(provider IN ('feishu', 'dingtalk')),
+                account_id TEXT NOT NULL
+                    CHECK(length(trim(account_id)) > 0 AND length(account_id) <= 128),
+                identity_json TEXT NOT NULL
+                    CHECK(length(identity_json) > 0 AND length(identity_json) <= 65536),
+                session_json TEXT NOT NULL
+                    CHECK(length(session_json) > 0 AND length(session_json) <= 1048576),
+                schema_version INTEGER NOT NULL DEFAULT 1 CHECK(schema_version = 1),
+                revision INTEGER NOT NULL DEFAULT 1 CHECK(revision >= 1),
+                created_at INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL
+            );
+
+            UPDATE rovai_data_contract
+            SET contract_version = 'v1.37', projection_schema_version = 78,
+                reset_reason = NULL, updated_at = datetime('now')
+            WHERE singleton = 1;
+
+            INSERT INTO schema_migration(version, applied_at)
+            VALUES (124, datetime('now'));
+            "#,
+        )?;
+        transaction.commit()?;
+        Ok(())
+    }
+
     fn migrate_managed_attachment_v2_v112(&mut self) -> Result<()> {
         let transaction = self
             .connection
@@ -22500,7 +22713,144 @@ impl Database {
 }
 
 #[cfg(test)]
+fn downgrade_current_schema_to_v123_source_for_test(connection: &Connection) {
+    let has_v124: bool = connection
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM schema_migration WHERE version = 124)",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    if !has_v124 {
+        return;
+    }
+    connection
+        .execute_batch(
+            r#"
+            PRAGMA foreign_keys = OFF;
+            BEGIN IMMEDIATE;
+            DROP TABLE channel_developer_sessions;
+            DROP TABLE channel_credentials;
+            UPDATE rovai_data_contract
+            SET contract_version = 'v1.36', projection_schema_version = 77
+            WHERE singleton = 1;
+            DELETE FROM schema_migration WHERE version = 124;
+            COMMIT;
+            PRAGMA foreign_keys = ON;
+            "#,
+        )
+        .unwrap();
+}
+
+#[cfg(test)]
+fn downgrade_current_schema_to_v122_source_for_test(connection: &Connection) {
+    downgrade_current_schema_to_v123_source_for_test(connection);
+    let has_v123: bool = connection
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM schema_migration WHERE version = 123)",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    if !has_v123 {
+        return;
+    }
+    connection
+        .execute_batch(
+            r#"
+            PRAGMA foreign_keys = OFF;
+            BEGIN IMMEDIATE;
+            ALTER TABLE dingtalk_member_bot_publication_intent
+                RENAME TO dingtalk_member_bot_publication_intent_v123;
+            DROP INDEX dingtalk_publication_intent_state_idx;
+            CREATE TABLE dingtalk_member_bot_publication_intent (
+                id TEXT PRIMARY KEY,
+                agent_id TEXT NOT NULL REFERENCES agent_profile(id),
+                account_id TEXT NOT NULL REFERENCES dingtalk_account(id),
+                expected_user_id_digest TEXT NOT NULL
+                    CHECK(length(expected_user_id_digest) > 0),
+                expected_corp_id TEXT NOT NULL CHECK(length(trim(expected_corp_id)) > 0),
+                requested_app_name TEXT NOT NULL CHECK(length(trim(requested_app_name)) > 0),
+                provisioning_mode TEXT NOT NULL CHECK(provisioning_mode = 'dws_gateway'),
+                state TEXT NOT NULL CHECK(state IN (
+                    'created', 'account_verified', 'app_created', 'credentials_read',
+                    'avatar_configured', 'robot_configured', 'permissions_configured',
+                    'version_created', 'awaiting_approver_selection',
+                    'awaiting_approval', 'version_released', 'stream_verified',
+                    'card_verified', 'completed', 'failed_recoverable',
+                    'failed_unknown_remote_state'
+                )),
+                remote_unified_app_id TEXT,
+                app_key TEXT,
+                robot_code TEXT,
+                credential_ref TEXT,
+                version_id TEXT,
+                approval_mode TEXT CHECK(
+                    approval_mode IS NULL
+                    OR approval_mode IN ('NO_APPROVAL', 'SELECT_APPROVER', 'AUTO')
+                ),
+                approver_user_id_digest TEXT,
+                last_completed_step TEXT,
+                failure_code TEXT,
+                version INTEGER NOT NULL DEFAULT 1 CHECK(version >= 1),
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                completed_at TEXT,
+                UNIQUE(agent_id),
+                UNIQUE(remote_unified_app_id),
+                UNIQUE(app_key),
+                UNIQUE(credential_ref),
+                CHECK(
+                    (state IN ('created', 'account_verified')
+                        AND remote_unified_app_id IS NULL)
+                    OR state NOT IN ('created', 'account_verified')
+                ),
+                CHECK(
+                    (state = 'completed' AND completed_at IS NOT NULL
+                        AND remote_unified_app_id IS NOT NULL
+                        AND app_key IS NOT NULL AND robot_code IS NOT NULL
+                        AND credential_ref IS NOT NULL AND version_id IS NOT NULL
+                        AND failure_code IS NULL)
+                    OR state <> 'completed'
+                ),
+                CHECK(
+                    (state IN ('failed_recoverable', 'failed_unknown_remote_state')
+                        AND failure_code IS NOT NULL)
+                    OR state NOT IN ('failed_recoverable', 'failed_unknown_remote_state')
+                )
+            );
+            INSERT INTO dingtalk_member_bot_publication_intent(
+                id, agent_id, account_id, expected_user_id_digest,
+                expected_corp_id, requested_app_name, provisioning_mode,
+                state, remote_unified_app_id, app_key, robot_code,
+                credential_ref, version_id, approval_mode,
+                approver_user_id_digest, last_completed_step, failure_code,
+                version, created_at, updated_at, completed_at
+            )
+            SELECT id, agent_id, account_id, expected_user_id_digest,
+                   expected_corp_id, requested_app_name, 'dws_gateway',
+                   state, remote_unified_app_id, app_key, robot_code,
+                   credential_ref, version_id, approval_mode,
+                   approver_user_id_digest, last_completed_step, failure_code,
+                   version, created_at, updated_at, completed_at
+            FROM dingtalk_member_bot_publication_intent_v123;
+            DROP TABLE dingtalk_member_bot_publication_intent_v123;
+            CREATE INDEX dingtalk_publication_intent_state_idx
+                ON dingtalk_member_bot_publication_intent(state, updated_at DESC, id);
+            UPDATE rovai_data_contract
+            SET contract_version = 'v1.35', projection_schema_version = 76
+            WHERE singleton = 1;
+            DELETE FROM schema_migration WHERE version = 123;
+            COMMIT;
+            PRAGMA foreign_keys = ON;
+            "#,
+        )
+        .unwrap();
+}
+
+#[cfg(test)]
 fn downgrade_current_schema_to_v121_source_for_test(connection: &Connection) {
+    downgrade_current_schema_to_v122_source_for_test(connection);
     let has_v122: bool = connection
         .query_row(
             "SELECT EXISTS(SELECT 1 FROM schema_migration WHERE version = 122)",
@@ -24160,6 +24510,8 @@ mod tests {
             v120: version >= 120,
             v121: version >= 121,
             v122: version >= 122,
+            v123: version >= 123,
+            v124: version >= 124,
         }
     }
 
@@ -24170,6 +24522,18 @@ mod tests {
                 "current",
                 CURRENT_DATA_CONTRACT_VERSION,
                 CURRENT_PROJECTION_SCHEMA_VERSION,
+                124,
+            ),
+            (
+                "v1.36/schema-77 before SQLite channel storage",
+                V124_MIGRATION_SOURCE_DATA_CONTRACT_VERSION,
+                V124_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION,
+                123,
+            ),
+            (
+                "v1.35/schema-76 before direct DingTalk Open Platform",
+                V123_MIGRATION_SOURCE_DATA_CONTRACT_VERSION,
+                V123_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION,
                 122,
             ),
             (
@@ -24473,7 +24837,7 @@ mod tests {
             );
         }
 
-        let current = migration_state_through(122);
+        let current = migration_state_through(124);
         let v092_source = migration_state_through(91);
         let mut missing_intermediate = current;
         missing_intermediate.v84 = false;
@@ -24553,7 +24917,7 @@ mod tests {
             )
             .expect("current contract marker should load");
 
-        assert_eq!(state, migration_state_through(122));
+        assert_eq!(state, migration_state_through(124));
         assert!(state.admits(&contract, schema, &classifier));
         assert!(has_admissible_data_contract(
             &directory.join("rovai.sqlite")
@@ -27613,6 +27977,208 @@ mod tests {
                 .connection()
                 .query_row(
                     "SELECT COUNT(*) FROM schema_migration WHERE version = 122",
+                    [],
+                    |row| row.get::<_, i64>(0),
+                )
+                .unwrap(),
+            1
+        );
+        drop(restarted);
+        std::fs::remove_dir_all(directory).expect("temporary database should be removable");
+    }
+
+    #[test]
+    fn v123_rehomes_existing_dingtalk_intents_to_direct_open_platform() {
+        let (database, directory) = crate::test_support::seeded_runtime_database();
+        let agent_id: String = database
+            .connection()
+            .query_row(
+                "SELECT id FROM agent_profile ORDER BY member_order LIMIT 1",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        database
+            .connection()
+            .execute_batch(
+                r#"
+                INSERT INTO dingtalk_account(
+                    id, user_id_digest, corp_id, user_name, corp_name,
+                    oauth_profile_ref, status, version, created_at, updated_at,
+                    connected_at, last_verified_at, disconnected_at
+                ) VALUES (
+                    'account-v123', 'sha256:owner-v123', 'corp-v123', 'Owner', '测试组织',
+                    'dingtalk-oauth:profile-v123', 'connected', 1,
+                    '2026-08-30T00:00:00Z', '2026-08-30T00:00:00Z',
+                    '2026-08-30T00:00:00Z', '2026-08-30T00:00:00Z', NULL
+                );
+                "#,
+            )
+            .unwrap();
+        database
+            .connection()
+            .execute(
+                r#"
+                INSERT INTO dingtalk_member_bot_publication_intent(
+                    id, agent_id, account_id, expected_user_id_digest,
+                    expected_corp_id, requested_app_name, provisioning_mode,
+                    state, version, created_at, updated_at
+                ) VALUES (
+                    'intent-v123', ?1, 'account-v123', 'sha256:owner-v123',
+                    'corp-v123', '芝士', 'direct_open_platform',
+                    'created', 4, '2026-08-30T00:00:00Z', '2026-08-30T00:00:01Z'
+                )
+                "#,
+                [agent_id],
+            )
+            .unwrap();
+        downgrade_current_schema_to_v122_source_for_test(database.connection());
+
+        assert_eq!(
+            database
+                .connection()
+                .query_row(
+                    r#"
+                    SELECT contract_version, projection_schema_version,
+                           (SELECT provisioning_mode
+                            FROM dingtalk_member_bot_publication_intent
+                            WHERE id = 'intent-v123'),
+                           (SELECT COUNT(*) FROM schema_migration WHERE version = 123)
+                    FROM rovai_data_contract WHERE singleton = 1
+                    "#,
+                    [],
+                    |row| Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, i64>(1)?,
+                        row.get::<_, String>(2)?,
+                        row.get::<_, i64>(3)?,
+                    )),
+                )
+                .unwrap(),
+            ("v1.35".to_string(), 76, "dws_gateway".to_string(), 0)
+        );
+        drop(database);
+
+        let upgraded = Database::open(&directory).expect("v122 source should migrate to v123");
+        assert!(connection_has_current_data_contract(upgraded.connection()).unwrap());
+        assert_eq!(
+            upgraded
+                .connection()
+                .query_row(
+                    r#"
+                    SELECT provisioning_mode, state, version, requested_app_name
+                    FROM dingtalk_member_bot_publication_intent
+                    WHERE id = 'intent-v123'
+                    "#,
+                    [],
+                    |row| Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, i64>(2)?,
+                        row.get::<_, String>(3)?,
+                    )),
+                )
+                .unwrap(),
+            (
+                "direct_open_platform".to_string(),
+                "created".to_string(),
+                4,
+                "芝士".to_string(),
+            )
+        );
+        assert_eq!(
+            upgraded
+                .connection()
+                .query_row("SELECT COUNT(*) FROM pragma_foreign_key_check", [], |row| {
+                    row.get::<_, i64>(0)
+                })
+                .unwrap(),
+            0
+        );
+        assert!(
+            upgraded
+                .connection()
+                .execute(
+                    "UPDATE dingtalk_member_bot_publication_intent SET provisioning_mode = 'dws_gateway' WHERE id = 'intent-v123'",
+                    [],
+                )
+                .is_err(),
+            "the upgraded schema must reject the retired helper mode"
+        );
+        drop(upgraded);
+
+        let restarted = Database::open(&directory).expect("v123 restart should be idempotent");
+        assert_eq!(
+            restarted
+                .connection()
+                .query_row(
+                    "SELECT COUNT(*) FROM schema_migration WHERE version = 123",
+                    [],
+                    |row| row.get::<_, i64>(0),
+                )
+                .unwrap(),
+            1
+        );
+        drop(restarted);
+        std::fs::remove_dir_all(directory).expect("temporary database should be removable");
+    }
+
+    #[test]
+    fn v124_adds_plaintext_channel_storage_without_importing_retired_files() {
+        let (database, directory) = crate::test_support::seeded_runtime_database();
+        downgrade_current_schema_to_v123_source_for_test(database.connection());
+        assert!(
+            !database
+                .connection()
+                .table_exists(None::<&str>, "channel_credentials")
+                .unwrap()
+        );
+        assert!(
+            !database
+                .connection()
+                .table_exists(None::<&str>, "channel_developer_sessions")
+                .unwrap()
+        );
+        let retired_directory = directory.join("channel-credentials");
+        std::fs::create_dir_all(&retired_directory).unwrap();
+        let retired_file = retired_directory.join("feishu-developer-session.bin");
+        std::fs::write(&retired_file, b"retired-encrypted-payload").unwrap();
+        drop(database);
+
+        let upgraded = Database::open(&directory).expect("v123 source should migrate to v124");
+        assert!(connection_has_current_data_contract(upgraded.connection()).unwrap());
+        assert_eq!(
+            upgraded
+                .connection()
+                .query_row(
+                    r#"
+                    SELECT
+                        (SELECT COUNT(*) FROM schema_migration WHERE version = 124),
+                        (SELECT COUNT(*) FROM channel_credentials),
+                        (SELECT COUNT(*) FROM channel_developer_sessions)
+                    "#,
+                    [],
+                    |row| Ok((
+                        row.get::<_, i64>(0)?,
+                        row.get::<_, i64>(1)?,
+                        row.get::<_, i64>(2)?
+                    )),
+                )
+                .unwrap(),
+            (1, 0, 0)
+        );
+        assert_eq!(
+            std::fs::read(&retired_file).unwrap(),
+            b"retired-encrypted-payload"
+        );
+        drop(upgraded);
+
+        let restarted = Database::open(&directory).expect("v124 restart should be idempotent");
+        assert_eq!(
+            restarted
+                .connection()
+                .query_row(
+                    "SELECT COUNT(*) FROM schema_migration WHERE version = 124",
                     [],
                     |row| row.get::<_, i64>(0),
                 )

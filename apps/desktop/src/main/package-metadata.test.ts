@@ -61,13 +61,11 @@ describe('desktop package metadata', () => {
     expect(packageMetadata.scripts['build:desktop']).not.toContain('native:build:macos')
     expect(packageMetadata.build.mac.extraResources.map(({ to }: { to: string }) => to)).toEqual([
       'bin/rovai-core',
-      'bin/rovai',
-      'bin/dws.gz',
-      'licenses/dingtalk-dws'
+      'bin/rovai'
     ])
   })
 
-  it('packages target-specific sidecars and the reviewed DingTalk DWS notices', () => {
+  it('packages only Rovai-owned target-specific sidecars', () => {
     expect(packageMetadata.build.mac.extraResources).toEqual([
       {
         from: 'resources/bin/macos-${arch}/rovai-core',
@@ -76,14 +74,6 @@ describe('desktop package metadata', () => {
       {
         from: 'resources/bin/macos-${arch}/rovai',
         to: 'bin/rovai'
-      },
-      {
-        from: 'resources/bin/macos-${arch}/dws.gz',
-        to: 'bin/dws.gz'
-      },
-      {
-        from: 'resources/licenses/dingtalk-dws',
-        to: 'licenses/dingtalk-dws'
       }
     ])
     expect(packageMetadata.build.win.extraResources).toEqual([
@@ -94,14 +84,6 @@ describe('desktop package metadata', () => {
       {
         from: 'resources/bin/windows-x64/rovai.exe',
         to: 'bin/rovai.exe'
-      },
-      {
-        from: 'resources/bin/windows-x64/dws.exe',
-        to: 'bin/dws.exe'
-      },
-      {
-        from: 'resources/licenses/dingtalk-dws',
-        to: 'licenses/dingtalk-dws'
       }
     ])
     expect(packageMetadata.build).not.toHaveProperty('extraResources')
@@ -109,9 +91,10 @@ describe('desktop package metadata', () => {
       'Contents/Resources/bin/rovai-core',
       'Contents/Resources/bin/rovai'
     ])
-    expect(packageMetadata.build.mac.binaries).not.toContain(
-      'Contents/Resources/bin/dws'
-    )
+    expect(JSON.stringify(packageMetadata.build)).not.toMatch(/dws/iu)
+    expect(Object.keys(packageMetadata.scripts).some((name) => name.startsWith('dws:'))).toBe(false)
+    expect(packageMetadata.scripts.dev).not.toContain('dws')
+    expect(packageMetadata.scripts.build).not.toContain('dws')
     expect(Object.keys(packageMetadata.scripts).some((name) => name.startsWith('legal:'))).toBe(false)
     expect(packageMetadata.scripts.test).not.toContain('legal:')
     expect(packageMetadata.scripts['package:mac:unsigned']).not.toContain('legal:')
@@ -120,15 +103,15 @@ describe('desktop package metadata', () => {
     expect(packageMetadata.scripts['dist:mac:release:arm64']).toContain(
       'pnpm build:macos:arm64'
     )
-    expect(packageMetadata.scripts['build:macos:arm64']).toContain('dws:prepare:macos:arm64')
+    expect(packageMetadata.scripts['build:macos:arm64']).not.toContain('dws')
     expect(packageMetadata.scripts['dist:mac:release:arm64']).not.toContain('legal:')
     expect(packageMetadata.scripts['dist:mac:release:x64']).toContain(
       'pnpm build:macos:x64'
     )
-    expect(packageMetadata.scripts['build:macos:x64']).toContain('dws:prepare:macos:x64')
+    expect(packageMetadata.scripts['build:macos:x64']).not.toContain('dws')
     expect(packageMetadata.scripts['dist:mac:release:x64']).not.toContain('legal:')
     expect(packageMetadata.scripts['package:windows:x64']).toContain('pnpm build:windows:x64')
-    expect(packageMetadata.scripts['build:windows:x64']).toContain('dws:prepare:windows:x64')
+    expect(packageMetadata.scripts['build:windows:x64']).not.toContain('dws')
     expect(packageMetadata.scripts['dist:windows:x64']).toContain('scripts/package-windows.mjs nsis')
     expect(packageMetadata.scripts['dist:windows:release:x64']).toContain('--require-signed')
     expect(packageMetadata.scripts['package:windows:x64']).not.toContain('legal:')

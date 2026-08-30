@@ -91,21 +91,23 @@ import {
 import { AppQuitCoordinator } from './app-quit-coordinator'
 import { ChannelSettingsService } from './channel-settings'
 import { ChannelSettingsCoordinator } from './channel-settings-coordinator'
-import { SafeStorageChannelCredentialStore } from './channel-credential-store'
+import {
+  SqliteChannelCredentialStore,
+  SqliteChannelDeveloperSessionStore
+} from './channel-credential-store'
 import { ElectronFeishuDeveloperSessionService } from './feishu-developer-session'
 import { FeishuWebSessionMemberBotProvisioner } from './feishu-member-bot-provisioner'
 import { ControlledMemberBotAvatarSourceResolver } from './member-bot-avatar-source'
 import {
-  DingTalkDeveloperGateway,
-  resolveDingTalkDwsOptions
+  DingTalkDeveloperApiTransport,
+  DingTalkDeveloperGateway
 } from './dingtalk-developer-gateway'
-import { DwsDingTalkDeveloperSessionService } from './dingtalk-developer-session'
-import { DwsDingTalkMemberBotProvisioner } from './dingtalk-member-bot-provisioner'
+import { ElectronDingTalkDeveloperSessionService } from './dingtalk-developer-session'
+import { DingTalkOpenPlatformMemberBotProvisioner } from './dingtalk-member-bot-provisioner'
 import {
   DINGTALK_REQUIRED_SCOPE_VALUES,
   DingTalkChannelSettingsService
 } from './dingtalk-channel-settings'
-import { isolatedSafeStorageApplicationName } from './safe-storage-application-name'
 
 function optionalChannelKind(value: unknown): ChannelKind | undefined {
   if (value === undefined) return undefined
@@ -247,9 +249,7 @@ const explicitUserDataDirectory = hasExplicitUserDataDirectory
 const isolatedAcceptanceInstance =
   process.env.ROVAI_ALLOW_ISOLATED_INSTANCE === '1'
   && hasExplicitUserDataDirectory
-app.setName(isolatedAcceptanceInstance
-  ? isolatedSafeStorageApplicationName(APP_NAME, explicitUserDataDirectory ?? '')
-  : APP_NAME)
+app.setName(APP_NAME)
 let coreDataPath: string
 if (process.platform === 'win32') {
   const windowsRoot = resolveWindowsDataRoot(
@@ -290,11 +290,12 @@ let userAutomation: UserAutomationServer | null = null
 const desktopSessions = new DesktopSessionRegistry()
 const memberAvatars = new MemberAvatarAssetService(coreDataPath)
 const memberBotAvatarSource = new ControlledMemberBotAvatarSourceResolver(memberAvatars)
+const channelCredentialStore = new SqliteChannelCredentialStore(core)
+const channelDeveloperSessionStore = new SqliteChannelDeveloperSessionStore(core)
 const feishuDeveloperSession = new ElectronFeishuDeveloperSessionService(
-  coreDataPath,
+  channelDeveloperSessionStore,
   () => mainWindow
 )
-const channelCredentialStore = new SafeStorageChannelCredentialStore(coreDataPath)
 const feishuChannelSettings = new ChannelSettingsService({
   core,
   credentialStore: channelCredentialStore,
@@ -302,23 +303,25 @@ const feishuChannelSettings = new ChannelSettingsService({
   memberBotProvisioner: new FeishuWebSessionMemberBotProvisioner(feishuDeveloperSession),
   memberBotAvatarSource
 })
-const dingtalkDwsOptions = resolveDingTalkDwsOptions({
-  appRoot: process.cwd(),
-  resourcesPath: process.resourcesPath,
-  packaged: app.isPackaged,
-  userDataPath: coreDataPath,
+const dingtalkDeveloperTransport = new DingTalkDeveloperApiTransport()
+const dingtalkDeveloperSession = new ElectronDingTalkDeveloperSessionService({
+  store: channelDeveloperSessionStore,
   oauthClientId: process.env.ROVAI_DINGTALK_OAUTH_CLIENT_ID,
-  oauthClientSecret: process.env.ROVAI_DINGTALK_OAUTH_CLIENT_SECRET
+  oauthClientSecret: process.env.ROVAI_DINGTALK_OAUTH_CLIENT_SECRET,
+  transport: dingtalkDeveloperTransport
 })
-const dingtalkDeveloperGateway = new DingTalkDeveloperGateway(dingtalkDwsOptions)
+const dingtalkDeveloperGateway = new DingTalkDeveloperGateway({
+  tokenProvider: dingtalkDeveloperSession,
+  transport: dingtalkDeveloperTransport
+})
 const dingtalkChannelSettings = new DingTalkChannelSettingsService({
   core,
   credentialStore: channelCredentialStore,
-  developerSession: new DwsDingTalkDeveloperSessionService({
-    gateway: dingtalkDeveloperGateway,
-    configDir: dingtalkDwsOptions.configDir
+  developerSession: dingtalkDeveloperSession,
+  provisioner: new DingTalkOpenPlatformMemberBotProvisioner({
+    developerApi: dingtalkDeveloperGateway,
+    developerSession: dingtalkDeveloperSession
   }),
-  provisioner: new DwsDingTalkMemberBotProvisioner(dingtalkDeveloperGateway),
   avatarSource: memberBotAvatarSource,
   requiredScopeValues: DINGTALK_REQUIRED_SCOPE_VALUES
 })
@@ -608,9 +611,11 @@ if (primaryInstance) void app.whenReady().then(async () => {
       process.platform
     ) ?? undefined
   })
-  void channelSettings.start().catch((error) => {
-    console.warn('[rovai] Channel Host startup failed; the App will remain available.', error)
-  })
+  void channelSettings.start()
+    .then(() => removeRetiredChannelCredentialFiles(coreDataPath))
+    .catch((error) => {
+      console.warn('[rovai] Channel Host startup failed; the App will remain available.', error)
+    })
   userAutomation = await startUserAutomationOptional(
     () => new UserAutomationServer(
       userAutomationRoot(app.getPath('appData'), userDataPath, hasExplicitUserDataDirectory),
@@ -636,6 +641,21 @@ if (primaryInstance) void app.whenReady().then(async () => {
   console.error('[rovai] Quick Chat cutover failed; startup aborted.', error)
   app.quit()
 })
+
+async function removeRetiredChannelCredentialFiles(userDataPath: string): Promise<void> {
+  const root = join(userDataPath, 'channel-credentials')
+  const rootStat = await lstat(root).catch(() => null)
+  if (!rootStat?.isDirectory()) return
+  await unlink(join(root, 'feishu-developer-session.bin')).catch(() => undefined)
+  await unlink(join(root, 'dingtalk-developer-session.bin')).catch(() => undefined)
+  const entries = await readdir(root, { withFileTypes: true }).catch(() => [])
+  await Promise.all(entries
+    .filter((entry) => entry.isFile() && (
+      /^feishu-[a-z0-9-]+\.bin$/.test(entry.name)
+      || /^dingtalk-[a-z0-9-]+\.bin$/.test(entry.name)
+    ))
+    .map((entry) => unlink(join(root, entry.name)).catch(() => undefined)))
+}
 
 app.on('second-instance', () => {
   if (!mainWindow || mainWindow.isDestroyed()) return

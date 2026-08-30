@@ -71,18 +71,29 @@ describe('DingTalk channel account connection', () => {
     })).toBe(true)
   })
 
-  it('restores the previous OAuth profile when the Core account commit fails', async () => {
+  it('discards the staged OAuth profile when the Core account commit fails', async () => {
     const previous = identity('corp-old', 'owner-old')
     const replacement = identity('corp-new', 'owner-new')
-    const activate = vi.fn(async () => undefined)
+    const discardPendingLogin = vi.fn(async () => previous)
     const developerSession: DingTalkDeveloperSessionService = {
       inspect: vi.fn(async () => previous),
       beginLogin: vi.fn(async () => replacement),
-      activate,
+      pendingConnection: vi.fn(() => ({
+        identity: replacement,
+        session: { schemaVersion: 1 as const, currentProfileKey: 'pending', profiles: [] }
+      })),
+      activatePendingLogin: vi.fn(async () => undefined),
+      discardPendingLogin,
+      accessToken: vi.fn(async () => 'access-token'),
       disconnect: vi.fn(async () => undefined)
     }
     const core = {
-      async request(): Promise<never> {
+      async request(method: string): Promise<unknown> {
+        if (method === 'channels.dingtalk.snapshot') return {
+          schemaVersion: 1, account: null, memberBots: [], publicationIntents: [],
+          pendingBindingCount: 0, bindingIssueCount: 0,
+          transportConversations: [], pendingAggregates: []
+        }
         throw new Error('core_commit_failed')
       }
     } as unknown as Pick<CoreClient, 'request'>
@@ -91,15 +102,15 @@ describe('DingTalk channel account connection', () => {
       developerSession,
       credentialStore: {
         readDingTalk: vi.fn(async () => null),
-        writeDingTalk: vi.fn(async () => undefined),
-        deleteDingTalk: vi.fn(async () => undefined)
+        deleteDingTalk: vi.fn(async () => undefined),
+        listPublished: vi.fn(async () => [])
       },
       provisioner: { async create() { throw new Error('unused') } },
       avatarSource: { async resolve() { return undefined } }
     })
 
     await expect(service.connect()).rejects.toThrow('core_commit_failed')
-    expect(activate).toHaveBeenCalledWith(previous)
+    expect(discardPendingLogin).toHaveBeenCalledTimes(1)
   })
 
   it('accepts only an approver from the active frozen candidate list', async () => {
@@ -108,8 +119,8 @@ describe('DingTalk channel account connection', () => {
       developerSession: {} as DingTalkDeveloperSessionService,
       credentialStore: {
         readDingTalk: vi.fn(async () => null),
-        writeDingTalk: vi.fn(async () => undefined),
-        deleteDingTalk: vi.fn(async () => undefined)
+        deleteDingTalk: vi.fn(async () => undefined),
+        listPublished: vi.fn(async () => [])
       },
       provisioner: { async create() { throw new Error('unused') } },
       avatarSource: { async resolve() { return undefined } }
@@ -135,7 +146,7 @@ describe('DingTalk channel account connection', () => {
           publicationIntents: [{
             publicationIntentId: 'intent-a', agentId: 'agent-a', accountId: 'account-a',
             expectedUserIdDigest: `sha256:${'a'.repeat(64)}`, expectedCorpId: 'corp-a',
-            requestedAppName: '芝士', provisioningMode: 'dws_gateway',
+            requestedAppName: '芝士', provisioningMode: 'direct_open_platform',
             state: 'failed_recoverable', remoteUnifiedAppId: 'u-app-a', appKey: 'ding-app-a',
             robotCode: 'robot-a', credentialRef: 'dingtalk-credential-a', versionId: 'version-a',
             approvalMode: 'NO_APPROVAL', lastCompletedStep: 'stream_verified',
@@ -154,8 +165,8 @@ describe('DingTalk channel account connection', () => {
       developerSession: {} as DingTalkDeveloperSessionService,
       credentialStore: {
         readDingTalk: vi.fn(async () => null),
-        writeDingTalk: vi.fn(async () => undefined),
-        deleteDingTalk: vi.fn(async () => undefined)
+        deleteDingTalk: vi.fn(async () => undefined),
+        listPublished: vi.fn(async () => [])
       },
       provisioner: { async create() { throw new Error('unused') } },
       avatarSource: { async resolve() { return undefined } }

@@ -1,13 +1,13 @@
 import { EventEmitter } from 'node:events'
-import { mkdtempSync, rmSync } from 'node:fs'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import type {
+  FeishuDeveloperIdentity,
+  PendingFeishuDeveloperConnection,
+  StoredFeishuDeveloperSession
+} from './feishu-developer-session'
 
 let currentUrl = 'about:blank'
 let loadUrlCount = 0
-let encryptionAvailable = true
-let encryptionCheckCount = 0
 let portalLoadsAuthenticated = false
 let portalApiOrigin = 'https://open.feishu.cn'
 let portalIdentity: Record<string, string> = {
@@ -117,27 +117,11 @@ const browserSession = fakeBrowserSession()
 const partitionSessions = new Map<string, ReturnType<typeof fakeBrowserSession>>()
 let isolateSessionPartitions = false
 
-const temporaryRoots: string[] = []
-
 beforeEach(() => {
   vi.useFakeTimers()
   vi.resetModules()
   vi.doMock('electron', () => ({
     BrowserWindow: FakeBrowserWindow,
-    safeStorage: {
-      isEncryptionAvailable: () => encryptionAvailable,
-      isAsyncEncryptionAvailable: async () => {
-        encryptionCheckCount += 1
-        return encryptionAvailable
-      },
-      encryptString: (value: string) => Buffer.from(value, 'utf8'),
-      encryptStringAsync: async (value: string) => Buffer.from(value, 'utf8'),
-      decryptString: (value: Buffer) => value.toString('utf8'),
-      decryptStringAsync: async (value: Buffer) => ({
-        result: value.toString('utf8'),
-        shouldReEncrypt: false
-      })
-    },
     session: {
       fromPartition: (partition: string) => {
         if (!isolateSessionPartitions) return browserSession
@@ -151,8 +135,6 @@ beforeEach(() => {
   }))
   currentUrl = 'about:blank'
   loadUrlCount = 0
-  encryptionAvailable = true
-  encryptionCheckCount = 0
   portalLoadsAuthenticated = false
   portalApiOrigin = 'https://open.feishu.cn'
   isolateSessionPartitions = false
@@ -172,37 +154,26 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.useRealTimers()
-  for (const root of temporaryRoots.splice(0)) rmSync(root, { recursive: true, force: true })
 })
 
 describe('Feishu developer session login', () => {
-  it('fails before opening the login page when secure storage is unavailable', async () => {
+  it('starts without consulting operating-system credential storage', async () => {
     const { ElectronFeishuDeveloperSessionService } = await import('./feishu-developer-session')
-    const root = mkdtempSync(join(tmpdir(), 'rovai-feishu-session-'))
-    temporaryRoots.push(root)
-    encryptionAvailable = false
-    const service = new ElectronFeishuDeveloperSessionService(root)
+    const store = new MemoryStore()
+    const service = new ElectronFeishuDeveloperSessionService(store)
 
     const login = service.beginLogin({ forceFresh: true })
-    const outcome = login.then(
-      () => 'resolved',
-      (error: unknown) => error instanceof Error ? error.message : String(error)
-    )
-    await vi.waitFor(() => {
-      expect(encryptionCheckCount + loadUrlCount).toBeGreaterThan(0)
-    })
+    await vi.waitFor(() => expect(currentUrl).toContain('accounts.feishu.cn'))
 
-    expect(await outcome).toBe('system_credential_encryption_unavailable')
-    expect(loadUrlCount).toBe(0)
+    expect(loadUrlCount).toBeGreaterThan(0)
+    service.disconnect()
     await login.catch(() => undefined)
   })
 
   it('continues polling when the portal entry navigation is aborted by its login redirect', async () => {
     const { ElectronFeishuDeveloperSessionService } = await import('./feishu-developer-session')
-    const root = mkdtempSync(join(tmpdir(), 'rovai-feishu-session-'))
-    temporaryRoots.push(root)
     const onQrReady = vi.fn()
-    const service = new ElectronFeishuDeveloperSessionService(root)
+    const service = new ElectronFeishuDeveloperSessionService(new MemoryStore())
 
     const login = service.beginLogin({ forceFresh: true, onQrReady })
     const earlyOutcome = login.then(() => 'resolved', () => 'rejected')
@@ -233,10 +204,9 @@ describe('Feishu developer session login', () => {
   it('keeps the current developer session when a fresh account switch is cancelled', async () => {
     isolateSessionPartitions = true
     const { ElectronFeishuDeveloperSessionService } = await import('./feishu-developer-session')
-    const root = mkdtempSync(join(tmpdir(), 'rovai-feishu-session-'))
-    temporaryRoots.push(root)
-    const service = new ElectronFeishuDeveloperSessionService(root)
-    await connectDeveloperSession(service)
+    const store = new MemoryStore()
+    const service = new ElectronFeishuDeveloperSessionService(store)
+    await connectDeveloperSession(service, store)
     const [currentSession] = [...partitionSessions.values()]
     const abort = new AbortController()
 
@@ -259,10 +229,9 @@ describe('Feishu developer session login', () => {
   it('replaces the current developer session only after a fresh login succeeds', async () => {
     isolateSessionPartitions = true
     const { ElectronFeishuDeveloperSessionService } = await import('./feishu-developer-session')
-    const root = mkdtempSync(join(tmpdir(), 'rovai-feishu-session-'))
-    temporaryRoots.push(root)
-    const service = new ElectronFeishuDeveloperSessionService(root)
-    await connectDeveloperSession(service)
+    const store = new MemoryStore()
+    const service = new ElectronFeishuDeveloperSessionService(store)
+    await connectDeveloperSession(service, store)
     const [currentSession] = [...partitionSessions.values()]
 
     const switching = service.beginLogin({ forceFresh: true })
@@ -285,7 +254,7 @@ describe('Feishu developer session login', () => {
     expect(currentSession?.clearStorageData).not.toHaveBeenCalled()
     expect(replacementSession?.clearStorageData).not.toHaveBeenCalled()
 
-    await service.confirmLogin()
+    await service.activatePendingLogin(store.commit(service.pendingConnection()))
     expect(currentSession?.clearStorageData).toHaveBeenCalledTimes(1)
     expect(replacementSession?.clearStorageData).not.toHaveBeenCalled()
 
@@ -298,13 +267,12 @@ describe('Feishu developer session login', () => {
     expect(currentSession?.fetch).not.toHaveBeenCalled()
   })
 
-  it('can roll a successful fresh login back before the account switch is committed', async () => {
+  it('can discard a successful fresh login before the account switch is committed', async () => {
     isolateSessionPartitions = true
     const { ElectronFeishuDeveloperSessionService } = await import('./feishu-developer-session')
-    const root = mkdtempSync(join(tmpdir(), 'rovai-feishu-session-'))
-    temporaryRoots.push(root)
-    const service = new ElectronFeishuDeveloperSessionService(root)
-    await connectDeveloperSession(service)
+    const store = new MemoryStore()
+    const service = new ElectronFeishuDeveloperSessionService(store)
+    await connectDeveloperSession(service, store)
     const [currentSession] = [...partitionSessions.values()]
 
     const switching = service.beginLogin({ forceFresh: true })
@@ -321,7 +289,7 @@ describe('Feishu developer session login', () => {
     await vi.advanceTimersByTimeAsync(501)
     await switching
 
-    const restored = await service.rollbackLogin()
+    const restored = await service.discardPendingLogin()
 
     expect(restored).toMatchObject({ userId: 'developer-user-1', tenantId: 'tenant-1' })
     expect(currentSession?.clearStorageData).not.toHaveBeenCalled()
@@ -342,8 +310,6 @@ describe('Feishu developer session login', () => {
 
   it('does not leave the UI loading when the portal never exposes a complete identity', async () => {
     const { ElectronFeishuDeveloperSessionService } = await import('./feishu-developer-session')
-    const root = mkdtempSync(join(tmpdir(), 'rovai-feishu-session-'))
-    temporaryRoots.push(root)
     portalIdentity = {
       id: 'developer-user-1',
       name: 'Murray',
@@ -352,7 +318,7 @@ describe('Feishu developer session login', () => {
       tenantName: ''
     }
     const abort = new AbortController()
-    const service = new ElectronFeishuDeveloperSessionService(root)
+    const service = new ElectronFeishuDeveloperSessionService(new MemoryStore())
     const login = service.beginLogin({ forceFresh: true, signal: abort.signal })
     const outcome = login.then(
       () => 'resolved',
@@ -371,10 +337,9 @@ describe('Feishu developer session login', () => {
 
   it('bootstraps CSRF and console fetch from the authenticated Electron Session without exposing cookies', async () => {
     const { ElectronFeishuDeveloperSessionService } = await import('./feishu-developer-session')
-    const root = mkdtempSync(join(tmpdir(), 'rovai-feishu-session-'))
-    temporaryRoots.push(root)
-    const service = new ElectronFeishuDeveloperSessionService(root)
-    await connectDeveloperSession(service)
+    const store = new MemoryStore()
+    const service = new ElectronFeishuDeveloperSessionService(store)
+    await connectDeveloperSession(service, store)
     portalLoadsAuthenticated = true
 
     const platform = await service.openPlatformSession({
@@ -401,10 +366,9 @@ describe('Feishu developer session login', () => {
 
   it('rejects a console api origin that does not match the signed-in brand', async () => {
     const { ElectronFeishuDeveloperSessionService } = await import('./feishu-developer-session')
-    const root = mkdtempSync(join(tmpdir(), 'rovai-feishu-session-'))
-    temporaryRoots.push(root)
-    const service = new ElectronFeishuDeveloperSessionService(root)
-    await connectDeveloperSession(service)
+    const store = new MemoryStore()
+    const service = new ElectronFeishuDeveloperSessionService(store)
+    await connectDeveloperSession(service, store)
     portalLoadsAuthenticated = true
     portalApiOrigin = 'https://open.feishu.cn.evil.example'
 
@@ -417,11 +381,65 @@ describe('Feishu developer session login', () => {
 })
 
 async function connectDeveloperSession(
-  service: { beginLogin(): Promise<unknown> }
+  service: InstanceType<typeof import('./feishu-developer-session')['ElectronFeishuDeveloperSessionService']>,
+  store: MemoryStore
 ): Promise<void> {
   const login = service.beginLogin()
   await vi.waitFor(() => expect(currentUrl).toContain('accounts.feishu.cn'))
   currentUrl = 'https://open.feishu.cn/app?lang=zh-CN'
   await vi.advanceTimersByTimeAsync(501)
   await login
+  await service.activatePendingLogin(store.commit(service.pendingConnection()))
+}
+
+class MemoryStore {
+  record: {
+    provider: 'feishu'
+    accountId: string
+    identity: FeishuDeveloperIdentity
+    session: StoredFeishuDeveloperSession
+    revision: number
+  } | null = null
+
+  async read<TIdentity, TSession>(): Promise<{
+    provider: 'feishu'
+    accountId: string
+    identity: TIdentity
+    session: TSession
+    revision: number
+  } | null> {
+    return this.record ? structuredClone(this.record) as unknown as {
+      provider: 'feishu'
+      accountId: string
+      identity: TIdentity
+      session: TSession
+      revision: number
+    } : null
+  }
+
+  async replace(input: {
+    accountId: string
+    identity: unknown
+    session: unknown
+  }): Promise<number> {
+    const revision = (this.record?.revision ?? 0) + 1
+    this.record = {
+      provider: 'feishu',
+      accountId: input.accountId,
+      identity: structuredClone(input.identity) as FeishuDeveloperIdentity,
+      session: structuredClone(input.session) as StoredFeishuDeveloperSession,
+      revision
+    }
+    return revision
+  }
+
+  commit(pending: PendingFeishuDeveloperConnection): number {
+    const revision = (this.record?.revision ?? 0) + 1
+    this.record = {
+      provider: 'feishu', accountId: 'account-fixture',
+      identity: structuredClone(pending.identity),
+      session: structuredClone(pending.session), revision
+    }
+    return revision
+  }
 }

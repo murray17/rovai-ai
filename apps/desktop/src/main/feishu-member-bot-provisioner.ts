@@ -593,6 +593,18 @@ export class UnavailableFeishuDeveloperSessionService implements FeishuDeveloper
     throw new Error('feishu_developer_session_unavailable')
   }
 
+  pendingConnection(): never {
+    throw new Error('feishu_developer_session_unavailable')
+  }
+
+  async activatePendingLogin(): Promise<never> {
+    throw new Error('feishu_developer_session_unavailable')
+  }
+
+  async discardPendingLogin(): Promise<null> {
+    return null
+  }
+
   async inspect(): Promise<null> {
     return null
   }

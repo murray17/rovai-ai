@@ -1,4 +1,8 @@
-import type { DingTalkGatewayBackend } from './dingtalk-developer-gateway'
+import {
+  DingTalkDeveloperApiError,
+  type DingTalkDeveloperBackend
+} from './dingtalk-developer-gateway'
+import type { DingTalkDeveloperSessionService } from './dingtalk-developer-session'
 
 export type DingTalkPublicationStep =
   | 'account_verified'
@@ -80,23 +84,25 @@ export interface DingTalkMemberBotProvisioner {
   create(input: DingTalkProvisioningInput): Promise<ProvisionedDingTalkMemberBot>
 }
 
-export class DwsDingTalkMemberBotProvisioner implements DingTalkMemberBotProvisioner {
-  readonly #gateway: DingTalkGatewayBackend
+export class DingTalkOpenPlatformMemberBotProvisioner implements DingTalkMemberBotProvisioner {
+  readonly #developerApi: DingTalkDeveloperBackend
+  readonly #developerSession: DingTalkDeveloperSessionService
 
-  constructor(gateway: DingTalkGatewayBackend) {
-    this.#gateway = gateway
+  constructor(input: {
+    developerApi: DingTalkDeveloperBackend
+    developerSession: DingTalkDeveloperSessionService
+  }) {
+    this.#developerApi = input.developerApi
+    this.#developerSession = input.developerSession
   }
 
   async create(input: DingTalkProvisioningInput): Promise<ProvisionedDingTalkMemberBot> {
     const resumeRank = provisioningRank(input.resumeState)
-    const auth = businessObject(await this.#gateway.execute({
-      operation: 'auth.status',
-      signal: input.signal
-    }))
+    const auth = await this.#developerSession.inspect(input.signal)
     if (
-      auth.authenticated !== true
-      || stringAt(auth, 'corp_id') !== input.expectedCorpId
-      || stringAt(auth, 'user_id') !== input.expectedUserId
+      !auth
+      || auth.corpId !== input.expectedCorpId
+      || auth.userId !== input.expectedUserId
     ) throw new DingTalkProvisioningError('dingtalk_account_identity_changed')
     await input.onStep('account_verified', {})
 
@@ -104,15 +110,16 @@ export class DwsDingTalkMemberBotProvisioner implements DingTalkMemberBotProvisi
     if (!unifiedAppId) {
       let created: Record<string, unknown>
       try {
-        created = businessObject(await this.#gateway.execute({
+        created = businessObject(await this.#developerApi.execute({
           operation: 'app.create',
           values: { appName: input.appName, description: input.description },
           signal: input.signal
         }))
       } catch (error) {
         if (
-          error instanceof DingTalkProvisioningError
-          && error.message === 'dingtalk_dws_remote_failure'
+          (error instanceof DingTalkProvisioningError
+            && error.message === 'dingtalk_open_platform_operation_failed')
+          || (error instanceof DingTalkDeveloperApiError && error.definitelyRejected)
         ) throw error
         throw new DingTalkProvisioningError('dingtalk_app_create_unknown_remote_state', {
           unknownRemoteState: true
@@ -126,14 +133,14 @@ export class DwsDingTalkMemberBotProvisioner implements DingTalkMemberBotProvisi
       }
       await input.onStep('app_created', { unifiedAppId })
     }
-    const app = businessObject(await this.#gateway.execute({
+    const app = businessObject(await this.#developerApi.execute({
       operation: 'app.get',
       values: { unifiedAppId },
       signal: input.signal
     }))
     requireIdentity(app, 'unifiedAppId', unifiedAppId)
 
-    const credential = businessObject(await this.#gateway.execute({
+    const credential = businessObject(await this.#developerApi.execute({
       operation: 'app.credentials.get',
       values: { unifiedAppId },
       signal: input.signal
@@ -149,12 +156,12 @@ export class DwsDingTalkMemberBotProvisioner implements DingTalkMemberBotProvisi
     let iconMediaId: string | null = null
     if (resumeRank < provisioningRank('avatar_configured')) {
       iconMediaId = await input.resolveIconMediaId(appKey, appSecret)
-      businessObject(await this.#gateway.execute({
+      businessObject(await this.#developerApi.execute({
         operation: 'app.update',
         values: { unifiedAppId, iconMediaId },
         signal: input.signal
       }))
-      const updatedApp = businessObject(await this.#gateway.execute({
+      const updatedApp = businessObject(await this.#developerApi.execute({
         operation: 'app.get',
         values: { unifiedAppId },
         signal: input.signal
@@ -172,7 +179,7 @@ export class DwsDingTalkMemberBotProvisioner implements DingTalkMemberBotProvisi
     let robotCode = input.frozen?.robotCode
     if (resumeRank < provisioningRank('robot_configured')) {
       iconMediaId ??= await input.resolveIconMediaId(appKey, appSecret)
-      businessObject(await this.#gateway.execute({
+      businessObject(await this.#developerApi.execute({
         operation: 'app.robot.config',
         values: {
           unifiedAppId,
@@ -185,19 +192,18 @@ export class DwsDingTalkMemberBotProvisioner implements DingTalkMemberBotProvisi
         },
         signal: input.signal
       }))
-      businessObject(await this.#gateway.execute({
+      businessObject(await this.#developerApi.execute({
         operation: 'app.robot.enable',
         values: { unifiedAppId },
         signal: input.signal
       }))
     }
-    const robot = businessObject(await this.#gateway.execute({
+    const robot = businessObject(await this.#developerApi.execute({
       operation: 'app.robot.get',
       values: { unifiedAppId },
       signal: input.signal
     }))
-    const readRobotCode = firstString(robot, 'robotCode', 'robot_code')
-    if (!readRobotCode) throw new DingTalkProvisioningError('dingtalk_robot_identity_missing')
+    const readRobotCode = firstString(robot, 'robotCode', 'robot_code') ?? appKey
     if (robotCode && robotCode !== readRobotCode) {
       throw new DingTalkProvisioningError('dingtalk_robot_identity_mismatch')
     }
@@ -220,9 +226,6 @@ export class DwsDingTalkMemberBotProvisioner implements DingTalkMemberBotProvisi
       'ONLINE',
       'dingtalk_robot_status_verification_failed'
     )
-    if (robot.configured !== true) {
-      throw new DingTalkProvisioningError('dingtalk_robot_configuration_verification_failed')
-    }
     if (iconMediaId) {
       requireOptionalMatch(
         robot,
@@ -237,14 +240,14 @@ export class DwsDingTalkMemberBotProvisioner implements DingTalkMemberBotProvisi
 
     if (resumeRank < provisioningRank('permissions_configured')) {
       if (input.requiredScopeValues.length > 0) {
-        businessObject(await this.#gateway.execute({
+        businessObject(await this.#developerApi.execute({
           operation: 'app.permission.add',
           values: { unifiedAppId, scopeValues: input.requiredScopeValues },
           signal: input.signal
         }))
       }
       for (const scopeValue of input.requiredScopeValues) {
-        const permissions = businessObject(await this.#gateway.execute({
+        const permissions = businessObject(await this.#developerApi.execute({
           operation: 'app.permission.list',
           values: { unifiedAppId, scopeValue, authStatus: 'AUTHED', pageSize: '1' },
           signal: input.signal
@@ -252,14 +255,14 @@ export class DwsDingTalkMemberBotProvisioner implements DingTalkMemberBotProvisi
         requireAuthorizedPermission(permissions, scopeValue)
       }
       if (input.requiredEventCodes.length > 0) {
-        businessObject(await this.#gateway.execute({
+        businessObject(await this.#developerApi.execute({
           operation: 'app.event.subscribe',
           values: { unifiedAppId, eventCodes: input.requiredEventCodes },
           signal: input.signal
         }))
       }
       for (const eventCode of input.requiredEventCodes) {
-        const events = businessObject(await this.#gateway.execute({
+        const events = businessObject(await this.#developerApi.execute({
           operation: 'app.event.list',
           values: { unifiedAppId, keyword: eventCode, pageSize: '50' },
           signal: input.signal
@@ -271,7 +274,7 @@ export class DwsDingTalkMemberBotProvisioner implements DingTalkMemberBotProvisi
 
     let versionId = input.frozen?.versionId
     if (!versionId) {
-      const version = businessObject(await this.#gateway.execute({
+      const version = businessObject(await this.#developerApi.execute({
         operation: 'app.version.create',
         values: { unifiedAppId, versionDescription: input.description },
         signal: input.signal
@@ -283,11 +286,10 @@ export class DwsDingTalkMemberBotProvisioner implements DingTalkMemberBotProvisi
       })
     }
 
-    // A previous publish attempt may have reached DingTalk even when DWS lost
-    // the response. Always read the frozen version before issuing another
-    // mutation so retry cannot accidentally resubmit a released/reviewing
-    // version.
-    const existingStatus = businessObject(await this.#gateway.execute({
+    // A previous publish attempt may have reached DingTalk even when the
+    // network response was lost. Read the frozen version before issuing
+    // another mutation so retry cannot resubmit a released/reviewing version.
+    const existingStatus = businessObject(await this.#developerApi.execute({
       operation: 'app.version.status',
       values: { unifiedAppId, versionId },
       signal: input.signal
@@ -317,7 +319,7 @@ export class DwsDingTalkMemberBotProvisioner implements DingTalkMemberBotProvisi
       })
     }
 
-    const approval = businessObject(await this.#gateway.execute({
+    const approval = businessObject(await this.#developerApi.execute({
       operation: 'app.version.checkApproval',
       values: { unifiedAppId, versionId },
       signal: input.signal
@@ -338,7 +340,7 @@ export class DwsDingTalkMemberBotProvisioner implements DingTalkMemberBotProvisi
     }
     let published: Record<string, unknown>
     try {
-      published = businessObject(await this.#gateway.execute({
+      published = businessObject(await this.#developerApi.execute({
         operation: 'app.version.publish',
         values: {
           unifiedAppId,
@@ -351,7 +353,7 @@ export class DwsDingTalkMemberBotProvisioner implements DingTalkMemberBotProvisi
     } catch (publishError) {
       let recoveredStatus: Record<string, unknown>
       try {
-        recoveredStatus = businessObject(await this.#gateway.execute({
+        recoveredStatus = businessObject(await this.#developerApi.execute({
           operation: 'app.version.status',
           values: { unifiedAppId, versionId },
           signal: input.signal
@@ -383,7 +385,7 @@ export class DwsDingTalkMemberBotProvisioner implements DingTalkMemberBotProvisi
       }
       throw publishError
     }
-    const status = businessObject(await this.#gateway.execute({
+    const status = businessObject(await this.#developerApi.execute({
       operation: 'app.version.status',
       values: { unifiedAppId, versionId },
       signal: input.signal
@@ -413,11 +415,11 @@ export class DwsDingTalkMemberBotProvisioner implements DingTalkMemberBotProvisi
 
 function businessObject(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
-    throw new DingTalkProvisioningError('dingtalk_dws_response_invalid')
+    throw new DingTalkProvisioningError('dingtalk_open_platform_response_invalid')
   }
   const root = value as Record<string, unknown>
   if (containsBusinessFailure(root, new Set(), 0)) {
-    throw new DingTalkProvisioningError('dingtalk_dws_remote_failure')
+    throw new DingTalkProvisioningError('dingtalk_open_platform_operation_failed')
   }
   let current = root
   for (let depth = 0; depth < 8; depth += 1) {
@@ -493,18 +495,28 @@ function requireMatch(
 
 function requireAuthorizedPermission(value: Record<string, unknown>, expected: string): void {
   const found = someRecord(value, (item) => (
-    firstString(item, 'scopeValue', 'scope_value') === expected
-    && item.authed === true
+    firstString(item, 'scopeValue', 'scope_value', 'permissionCode', 'code') === expected
+    && (
+      item.authed === true
+      || firstString(item, 'authStatus', 'auth_status', 'status')?.toUpperCase() === 'AUTHED'
+    )
   ), new Set())
   if (!found) throw new DingTalkProvisioningError('dingtalk_permission_verification_failed')
 }
 
 function requireSubscribedEvent(value: Record<string, unknown>, expected: string): void {
-  const found = someRecord(value, (item) => (
-    firstString(item, 'eventCode', 'event_code') === expected
-    && item.subscribed === true
-    && firstString(item, 'pushType', 'push_type')?.toUpperCase() === 'STREAM'
-  ), new Set())
+  const found = someRecord(value, (item) => {
+    const status = firstString(
+      item,
+      'status',
+      'subscribeStatus',
+      'subscribe_status'
+    )?.toUpperCase()
+    const pushType = firstString(item, 'pushType', 'push_type')?.toUpperCase()
+    return firstString(item, 'eventCode', 'event_code', 'code') === expected
+      && (item.subscribed === true || ['ON', 'SUBSCRIBED', 'ENABLED', 'ACTIVE'].includes(status ?? ''))
+      && (pushType === undefined || pushType === 'STREAM')
+  }, new Set())
   if (!found) throw new DingTalkProvisioningError('dingtalk_event_verification_failed')
 }
 

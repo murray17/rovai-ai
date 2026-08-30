@@ -1,7 +1,7 @@
 ---
 document_type: development-guide
 authority: local-development-workflow
-last_updated: 2026-08-29
+last_updated: 2026-08-30
 ---
 
 # 本地开发与 App 隔离流程
@@ -107,7 +107,7 @@ ROVAI_DEV_USER_DATA_DIR="$(mktemp -d)/user-data" pnpm dev
 不要用 `electron-vite dev` 绕过启动器。不要把日常数据库复制到默认开发目录；复现真实 Camp 时按
 [桌面 UI 验收](ui-acceptance.md#从明确来源创建只读隔离副本)创建一次性副本。
 
-## 钉钉 OAuth 与 DWS 验收前置
+## 钉钉 OAuth 与 Developer API 验收前置
 
 钉钉账号连接必须使用维护者拥有的 Rovai OAuth Client。开发/隔离验收启动前，在同一个启动命令环境中显式提供：
 
@@ -117,14 +117,15 @@ ROVAI_DINGTALK_OAUTH_CLIENT_SECRET="<只在当前安全环境注入的 Secret>" 
 pnpm dev
 ```
 
-不要把值写入仓库、`.env` 示例、命令日志、截图或打包资源；不要复用 DWS 自带 Client ID，也不要用队员 Bot AppKey
-代替账号连接。Desktop 只接受随包固定的 DWS 1.0.60 和平台 SHA，开发二进制由 `pnpm prepare:dingtalk-dws` 准备；
-不要从 PATH 或用户全局安装调用未知版本。浏览器 OAuth 是默认路径，设备授权只能由 UI 的显式 fallback 触发。
+不要把值写入仓库、`.env` 示例、命令日志、截图或打包资源；不要复用第三方工具的 Client ID，也不要用队员 Bot AppKey
+代替账号连接。Desktop Main 直接完成 OAuth、官方 Developer API 与 Stream，不需要准备、安装或调用任何 DWS binary。
+浏览器 OAuth 是默认路径，设备授权只能由 UI 的显式 fallback 触发；两者的 Token profile 都只写入隔离 `userData` 下的
+`rovai.sqlite`。该数据库内渠道 Token/Secret/Cookie 是明文；验收目录必须按秘密数据保护，不得上传、复制进仓库或进入诊断附件。
 
-当前 production secret delivery 尚未完成，因此普通 package 不因 helper 随包而自动具备可发布的钉钉登录。真实验收必须
+当前 production secret delivery 尚未完成，因此普通 package 不因代码已内置 OAuth 协议而自动具备可发布的钉钉登录。真实验收必须
 使用隔离 `userData`，记录连接前后应用数量、账号 identity、发布 App identity、审批/版本状态、Stream 与卡片收发证据；
 任何缺项都保持 NO-GO。字段、feature gate 和错误见
-[DingTalk Channel v1](../contracts/dingtalk-channel-v1.md)。
+[DingTalk Channel v2](../contracts/dingtalk-channel-v2.md)。
 
 ## 打包产物：构建与运行分开
 
@@ -146,9 +147,9 @@ ROVAI_ALLOW_ISOLATED_INSTANCE=1 \
 
 Desktop 检测到这组显式隔离标记后，会以
 `--skill-library-root "$FIXTURE_ROOT/user-data/managed-skill-library"` 启动 Core；验收脚本不得绕过
-Desktop 另起一个仍指向日常全局 Skill Library 的 Core。它还会用显式 `userData` 的非敏感摘要派生独立应用名，
-隔离 macOS Keychain 中的 safeStorage 项。每次验证重新生成的 ad-hoc `.app` 都必须重新执行 `mktemp -d`，不能复用
-上一构建的 fixture：macOS Keychain 会把访问控制与代码签名身份关联，复用目录可能触发旧授权或拒绝访问。
+Desktop 另起一个仍指向日常全局 Skill Library 的 Core。隔离实例与日常 App 都保持 `app.setName(APP_NAME)`；隔离只由显式
+`userData`、独立 `rovai.sqlite` 和独立 Skill Library 提供，不创建或访问 Keychain namespace。每次验证重新执行
+`mktemp -d`，避免旧数据库、渠道 credential 或 Developer Session 污染结果。
 
 AI Agent 不得把 `open "$(pwd)/dist/mac-arm64/Rovai AI.app"` 当作打包验证，因为该命令没有证明
 `userData` 隔离。签名和二进制检查不需要启动 App，优先使用

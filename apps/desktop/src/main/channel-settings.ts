@@ -16,7 +16,11 @@ import type {
   StoredCommandResult
 } from '@contracts'
 import type { CoreClient } from './core-client'
-import type { ChannelCredentialStore, FeishuAppCredential } from './channel-credential-store'
+import type {
+  ChannelCredentialStore,
+  FeishuAppCredential,
+  PublishedChannelCredential
+} from './channel-credential-store'
 import type {
   FeishuDeveloperIdentity,
   FeishuDeveloperSessionService,
@@ -265,7 +269,13 @@ export class ChannelSettingsService {
     this.#started = true
     this.#stopped = false
     try {
-      await this.#dependencies.credentialStore.delete('feishu-controller')
+      const publishedCredentials = await this.#dependencies.credentialStore.listPublished()
+      const credentialsByRef = new Map(publishedCredentials
+        .filter((item): item is PublishedChannelCredential & {
+          provider: 'feishu'
+          credential: FeishuAppCredential
+        } => item.provider === 'feishu')
+        .map((item) => [item.credentialRef, item.credential] as const))
       let snapshot = await this.#coreSnapshot()
       if (snapshot.account?.status === 'connected') {
         const identity = await this.#developerSession.inspect().catch(() => null)
@@ -281,7 +291,7 @@ export class ChannelSettingsService {
       snapshot = await this.#coreSnapshot()
       for (const bot of snapshot.memberBots.filter((candidate) => candidate.status === 'published')) {
         try {
-          await this.#startPublishedBot(bot)
+          await this.#startPublishedBot(bot, credentialsByRef.get(bot.credentialRef) ?? null)
         } catch (error) {
           this.#publicationFailures.set(bot.agentId, channelFailureCode(error))
         }
@@ -330,7 +340,6 @@ export class ChannelSettingsService {
     if (this.#activeQrAttempt) throw new Error('已有一个飞书二维码流程正在进行。')
     this.#activeProvisioningAbort?.abort()
     const previous = (await this.#coreSnapshot()).account
-    let replacementIdentityReady = false
     const attemptId = randomUUID()
     const abort = new AbortController()
     this.#activeQrAbort = abort
@@ -341,7 +350,7 @@ export class ChannelSettingsService {
       stage: 'preparing',
       qrDataUrl: null,
       expiresAt: null,
-      detail: '正在检查系统安全存储…'
+      detail: '正在读取 Rovai 本地渠道数据…'
     }
     void this.#emit()
     try {
@@ -364,24 +373,16 @@ export class ChannelSettingsService {
       if (this.#activeQrAttempt?.attemptId !== attemptId) {
         throw new Error('feishu_login_cancelled')
       }
-      replacementIdentityReady = true
-      await this.#upsertAccount(identity)
-      await this.#developerSession.confirmLogin?.()
+      const pending = pendingFeishuConnection(this.#developerSession)
+      const result = await this.#command('channels.feishu.account.commitConnection', {
+        expectedPreviousAccountVersion: previous?.status === 'connected' ? previous.version : null,
+        account: feishuConnectionAccount(identity),
+        developerSession: pending
+      })
+      await activatePendingFeishuLogin(this.#developerSession, sessionRevisionFrom(result))
     } catch (error) {
       const failureCode = channelFailureCode(error)
-      let rollbackFailed = false
-      if (this.#developerSession.rollbackLogin) {
-        try {
-          await this.#developerSession.rollbackLogin()
-        } catch {
-          rollbackFailed = true
-        }
-      } else if (replacementIdentityReady) {
-        rollbackFailed = true
-      }
-      if (rollbackFailed && previous?.status === 'connected') {
-        await this.#expireAccount(previous).catch(() => undefined)
-      }
+      await this.#developerSession.discardPendingLogin?.().catch(() => undefined)
       if (failureCode === 'feishu_login_cancelled') {
         this.#finishQr()
         return this.#emit()
@@ -691,15 +692,17 @@ export class ChannelSettingsService {
         appId: provisioned.appId,
         appSecret: provisioned.appSecret
       }
-      await this.#dependencies!.credentialStore.write(credentialRef, credential)
-      credentialWritten = true
-      await advanceIntent({
-        state: 'credentials_read',
-        remoteAppId,
+      await this.#command('channels.feishu.publicationIntent.storeCredential', {
+        provider: 'feishu',
+        publicationIntentId,
+        expectedIntentVersion: intentVersion,
         credentialRef,
-        lastCompletedStep: 'credentials_read',
-        failureCode: null
+        remoteAppId,
+        credential: { appSecret: credential.appSecret }
       })
+      credentialWritten = true
+      intentVersion += 1
+      lastCompletedStep = 'credentials_read'
       await advanceIntent({
         state: 'bot_configured',
         remoteAppId,
@@ -879,15 +882,17 @@ export class ChannelSettingsService {
         appId: remoteAppId,
         appSecret: provisioned.appSecret
       }
-      await this.#dependencies!.credentialStore.write(credentialRef, credential)
-      credentialWritten = true
-      await advanceIntent({
-        state: 'credentials_read',
-        remoteAppId,
+      await this.#command('channels.feishu.publicationIntent.storeCredential', {
+        provider: 'feishu',
+        publicationIntentId: intent.publicationIntentId,
+        expectedIntentVersion: intentVersion,
         credentialRef,
-        lastCompletedStep: 'credentials_read',
-        failureCode: null
+        remoteAppId,
+        credential: { appSecret: credential.appSecret }
       })
+      credentialWritten = true
+      intentVersion += 1
+      lastCompletedStep = 'credentials_read'
       await advanceIntent({
         state: 'bot_configured',
         remoteAppId,
@@ -967,15 +972,7 @@ export class ChannelSettingsService {
   }
 
   async #upsertAccount(identity: FeishuDeveloperIdentity): Promise<void> {
-    await this.#command('channels.feishu.account.upsert', {
-      accountId: accountIdForIdentity(identity),
-      userIdDigest: userIdDigest(identity.userId),
-      tenantId: identity.tenantId,
-      userName: identity.userName,
-      email: identity.email ?? null,
-      tenantName: identity.tenantName,
-      brand: identity.brand
-    })
+    await this.#command('channels.feishu.account.upsert', feishuConnectionAccount(identity))
   }
 
   async #expireAccount(account: NonNullable<CoreChannelSnapshot['account']>): Promise<void> {
@@ -1082,12 +1079,12 @@ export class ChannelSettingsService {
   #updateLoginAttempt(attemptId: string, stage: FeishuLoginStage): void {
     if (this.#activeQrAttempt?.attemptId !== attemptId) return
     const details: Partial<Record<FeishuLoginStage, string>> = {
-      checking_secure_storage: '正在检查系统安全存储；如出现系统授权提示，请选择允许…',
+      loading_local_session: '正在读取 Rovai 本地渠道数据…',
       preparing: '正在准备飞书开放平台登录…',
       awaiting_scan: '请使用飞书扫码登录开放平台。',
       scan_confirmed: '已扫码，正在确认登录…',
       inspecting_identity: '正在读取飞书账号与企业身份…',
-      securing_session: '身份读取完成，正在安全保存开发者会话…',
+      saving_local_session: '身份读取完成，正在保存开发者会话…',
       connected: '飞书账号已连接。',
       expired: '登录二维码已过期，请关闭后重试。',
       cancelled: '登录已取消。',
@@ -1171,8 +1168,10 @@ export class ChannelSettingsService {
     this.#managedChannels.set(managed.appId, managed)
   }
 
-  async #startPublishedBot(bot: CoreChannelSnapshot['memberBots'][number]): Promise<void> {
-    const credential = await this.#dependencies!.credentialStore.read(bot.credentialRef)
+  async #startPublishedBot(
+    bot: CoreChannelSnapshot['memberBots'][number],
+    credential: FeishuAppCredential | null
+  ): Promise<void> {
     if (!credential || credential.appId !== bot.appId) throw new Error('published_bot_credential_missing')
     const managed = await this.#connectBot(bot.agentId, bot.credentialRef, credential)
     this.#managedChannels.set(bot.appId, managed)
@@ -2274,6 +2273,53 @@ function accountIdForIdentity(identity: FeishuDeveloperIdentity): `sha256:${stri
   return digest(`${identity.brand}\0${identity.tenantId}\0${identity.userId}`)
 }
 
+function feishuConnectionAccount(identity: FeishuDeveloperIdentity): {
+  accountId: `sha256:${string}`
+  userIdDigest: `sha256:${string}`
+  tenantId: string
+  userName: string
+  email: string | null
+  tenantName: string
+  brand: 'feishu' | 'lark'
+} {
+  return {
+    accountId: accountIdForIdentity(identity),
+    userIdDigest: userIdDigest(identity.userId),
+    tenantId: identity.tenantId,
+    userName: identity.userName,
+    email: identity.email ?? null,
+    tenantName: identity.tenantName,
+    brand: identity.brand
+  }
+}
+
+function sessionRevisionFrom(result: StoredCommandResult): number {
+  const payload = result.payload
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+    throw new Error('channel_developer_session_response_invalid')
+  }
+  const revision = (payload as Record<string, unknown>).sessionRevision
+  if (!Number.isSafeInteger(revision) || Number(revision) < 1) {
+    throw new Error('channel_developer_session_response_invalid')
+  }
+  return Number(revision)
+}
+
+function pendingFeishuConnection(
+  service: FeishuDeveloperSessionService
+): ReturnType<NonNullable<FeishuDeveloperSessionService['pendingConnection']>> {
+  if (!service.pendingConnection) throw new Error('feishu_login_pending_session_missing')
+  return service.pendingConnection()
+}
+
+async function activatePendingFeishuLogin(
+  service: FeishuDeveloperSessionService,
+  revision: number
+): Promise<void> {
+  if (!service.activatePendingLogin) throw new Error('feishu_login_pending_session_missing')
+  await service.activatePendingLogin(revision)
+}
+
 function latestPublicationIntent(
   snapshot: CoreChannelSnapshot,
   agentId: string
@@ -2315,8 +2361,6 @@ function recoverableProvisioningDetail(failureCode: string, hasRemoteApp: boolea
 function channelFailureDetail(error: unknown): string {
   const code = channelFailureCode(error)
   const details: Record<string, string> = {
-    system_credential_encryption_unavailable:
-      '无法访问系统安全存储。macOS 上请在钥匙串提示中选择“允许”，然后重试。',
     feishu_developer_identity_incomplete:
       '已登录飞书，但未能读取完整的账号与企业信息。请关闭后重试。',
     feishu_login_failed: '无法打开飞书登录页面，请检查网络后重试。',

@@ -87,13 +87,17 @@ use rovai_core::{
     channel::{
         AdvanceDingTalkPublicationIntentCommand, AdvanceMemberBotPublicationIntentCommand,
         AuthorizeChannelExecutionConsolePageCommand, ChannelHostTickCommand, ChannelService,
+        CommitDingTalkAccountConnectionCommand, CommitFeishuAccountConnectionCommand,
         CreateDingTalkPublicationIntentCommand, CreateMemberBotPublicationIntentCommand,
+        DeleteChannelCredentialCommand, DeleteChannelDeveloperSessionCommand,
         DisconnectDingTalkAccountCommand, DisconnectFeishuAccountCommand,
         ExpireDingTalkAccountCommand, ExpireFeishuAccountCommand, FinalizeChannelInboundCommand,
-        ObserveChannelInboundCommand, ReconcileFeishuGroupRosterCommand,
+        GetChannelCredentialParams, GetChannelDeveloperSessionParams, ObserveChannelInboundCommand,
+        ReconcileFeishuGroupRosterCommand, ReplaceChannelDeveloperSessionCommand,
         ResolvePendingCampBindingCommand, SettleChannelDeliveryCommand, StartNewFeishuDmCommand,
-        UpsertDingTalkAccountCommand, UpsertDingTalkMemberBotCommand, UpsertFeishuAccountCommand,
-        UpsertFeishuMemberBotCommand, VerifyFeishuOwnerCommand,
+        StorePublicationCredentialCommand, UpsertDingTalkAccountCommand,
+        UpsertDingTalkMemberBotCommand, UpsertFeishuAccountCommand, UpsertFeishuMemberBotCommand,
+        VerifyFeishuOwnerCommand,
     },
     collaboration::{
         AddCampMemberCommand, CampActivationState, CampCollaborationMode, ChangeDefaultLeadCommand,
@@ -4746,6 +4750,73 @@ impl Core {
     async fn handle(&self, request: &Request) -> Result<Value> {
         let _ = &request.params;
         match request.method.as_str() {
+            "channels.credentials.get" => {
+                let params: GetChannelCredentialParams =
+                    serde_json::from_value(request.params.clone())?;
+                let mut database = self.database.lock().await;
+                Ok(serde_json::to_value(
+                    ChannelService::default().channel_credential(&mut database, &params)?,
+                )?)
+            }
+            "channels.credentials.listPublished" => {
+                let mut database = self.database.lock().await;
+                Ok(serde_json::to_value(
+                    ChannelService::default().published_channel_credentials(&mut database)?,
+                )?)
+            }
+            "channels.credentials.delete" => {
+                let params: UserCommandParams<DeleteChannelCredentialCommand> =
+                    serde_json::from_value(request.params.clone())?;
+                let component = match params.command.provider.as_str() {
+                    "feishu" => "feishu-channel-host",
+                    "dingtalk" => "dingtalk-channel-host",
+                    _ => anyhow::bail!("unsupported channel provider"),
+                };
+                let mut database = self.database.lock().await;
+                let execution = ChannelService::default().delete_channel_credential(
+                    &mut database,
+                    &system_command_envelope(params.command_id, component, None, params.command),
+                )?;
+                Ok(serde_json::to_value(execution.result)?)
+            }
+            "channels.developerSession.get" => {
+                let params: GetChannelDeveloperSessionParams =
+                    serde_json::from_value(request.params.clone())?;
+                let mut database = self.database.lock().await;
+                Ok(serde_json::to_value(
+                    ChannelService::default().channel_developer_session(&mut database, &params)?,
+                )?)
+            }
+            "channels.developerSession.replace" => {
+                let params: UserCommandParams<ReplaceChannelDeveloperSessionCommand> =
+                    serde_json::from_value(request.params.clone())?;
+                let component = match params.command.provider.as_str() {
+                    "feishu" => "feishu-channel-host",
+                    "dingtalk" => "dingtalk-channel-host",
+                    _ => anyhow::bail!("unsupported channel provider"),
+                };
+                let mut database = self.database.lock().await;
+                let execution = ChannelService::default().replace_channel_developer_session(
+                    &mut database,
+                    &system_command_envelope(params.command_id, component, None, params.command),
+                )?;
+                Ok(serde_json::to_value(execution.result)?)
+            }
+            "channels.developerSession.delete" => {
+                let params: UserCommandParams<DeleteChannelDeveloperSessionCommand> =
+                    serde_json::from_value(request.params.clone())?;
+                let component = match params.command.provider.as_str() {
+                    "feishu" => "feishu-channel-host",
+                    "dingtalk" => "dingtalk-channel-host",
+                    _ => anyhow::bail!("unsupported channel provider"),
+                };
+                let mut database = self.database.lock().await;
+                let execution = ChannelService::default().delete_channel_developer_session(
+                    &mut database,
+                    &system_command_envelope(params.command_id, component, None, params.command),
+                )?;
+                Ok(serde_json::to_value(execution.result)?)
+            }
             "channels.feishu.snapshot" => {
                 let mut database = self.database.lock().await;
                 Ok(serde_json::to_value(
@@ -4763,6 +4834,21 @@ impl Core {
                     serde_json::from_value(request.params.clone())?;
                 let mut database = self.database.lock().await;
                 let execution = ChannelService::default().upsert_dingtalk_account(
+                    &mut database,
+                    &system_command_envelope(
+                        params.command_id,
+                        "dingtalk-channel-host",
+                        None,
+                        params.command,
+                    ),
+                )?;
+                Ok(serde_json::to_value(execution.result)?)
+            }
+            "channels.dingtalk.account.commitConnection" => {
+                let params: UserCommandParams<CommitDingTalkAccountConnectionCommand> =
+                    serde_json::from_value(request.params.clone())?;
+                let mut database = self.database.lock().await;
+                let execution = ChannelService::default().commit_dingtalk_account_connection(
                     &mut database,
                     &system_command_envelope(
                         params.command_id,
@@ -4818,6 +4904,21 @@ impl Core {
                     serde_json::from_value(request.params.clone())?;
                 let mut database = self.database.lock().await;
                 let execution = ChannelService::default().advance_dingtalk_publication_intent(
+                    &mut database,
+                    &system_command_envelope(
+                        params.command_id,
+                        "dingtalk-channel-host",
+                        None,
+                        params.command,
+                    ),
+                )?;
+                Ok(serde_json::to_value(execution.result)?)
+            }
+            "channels.dingtalk.publicationIntent.storeCredential" => {
+                let params: UserCommandParams<StorePublicationCredentialCommand> =
+                    serde_json::from_value(request.params.clone())?;
+                let mut database = self.database.lock().await;
+                let execution = ChannelService::default().store_publication_credential(
                     &mut database,
                     &system_command_envelope(
                         params.command_id,
@@ -4913,6 +5014,21 @@ impl Core {
                 )?;
                 Ok(serde_json::to_value(execution.result)?)
             }
+            "channels.feishu.account.commitConnection" => {
+                let params: UserCommandParams<CommitFeishuAccountConnectionCommand> =
+                    serde_json::from_value(request.params.clone())?;
+                let mut database = self.database.lock().await;
+                let execution = ChannelService::default().commit_feishu_account_connection(
+                    &mut database,
+                    &system_command_envelope(
+                        params.command_id,
+                        "feishu-channel-host",
+                        None,
+                        params.command,
+                    ),
+                )?;
+                Ok(serde_json::to_value(execution.result)?)
+            }
             "channels.feishu.account.disconnect" => {
                 let params: UserCommandParams<DisconnectFeishuAccountCommand> =
                     serde_json::from_value(request.params.clone())?;
@@ -4958,6 +5074,21 @@ impl Core {
                     serde_json::from_value(request.params.clone())?;
                 let mut database = self.database.lock().await;
                 let execution = ChannelService::default().advance_member_bot_publication_intent(
+                    &mut database,
+                    &system_command_envelope(
+                        params.command_id,
+                        "feishu-channel-host",
+                        None,
+                        params.command,
+                    ),
+                )?;
+                Ok(serde_json::to_value(execution.result)?)
+            }
+            "channels.feishu.publicationIntent.storeCredential" => {
+                let params: UserCommandParams<StorePublicationCredentialCommand> =
+                    serde_json::from_value(request.params.clone())?;
+                let mut database = self.database.lock().await;
+                let execution = ChannelService::default().store_publication_credential(
                     &mut database,
                     &system_command_envelope(
                         params.command_id,

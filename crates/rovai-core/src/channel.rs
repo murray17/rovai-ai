@@ -109,6 +109,129 @@ pub struct ExpireDingTalkAccountCommand {
     pub expected_version: i64,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct FeishuConnectionAccountInput {
+    pub account_id: String,
+    pub user_id_digest: String,
+    pub tenant_id: String,
+    pub user_name: String,
+    pub email: Option<String>,
+    pub tenant_name: String,
+    pub brand: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct DingTalkConnectionAccountInput {
+    pub account_id: String,
+    pub user_id_digest: String,
+    pub corp_id: String,
+    pub user_name: String,
+    pub corp_name: String,
+    pub oauth_profile_ref: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ChannelDeveloperSessionInput {
+    pub identity: Value,
+    pub session: Value,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CommitFeishuAccountConnectionCommand {
+    pub expected_previous_account_version: Option<i64>,
+    pub account: FeishuConnectionAccountInput,
+    pub developer_session: ChannelDeveloperSessionInput,
+}
+
+impl sealed::Sealed for CommitFeishuAccountConnectionCommand {}
+impl DomainCommand for CommitFeishuAccountConnectionCommand {
+    const TYPE: &'static str = "feishu_account.commit_connection";
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CommitDingTalkAccountConnectionCommand {
+    pub expected_previous_account_version: Option<i64>,
+    pub account: DingTalkConnectionAccountInput,
+    pub developer_session: ChannelDeveloperSessionInput,
+}
+
+impl sealed::Sealed for CommitDingTalkAccountConnectionCommand {}
+impl DomainCommand for CommitDingTalkAccountConnectionCommand {
+    const TYPE: &'static str = "dingtalk_account.commit_connection";
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ReplaceChannelDeveloperSessionCommand {
+    pub provider: String,
+    pub account_id: String,
+    pub identity: Value,
+    pub session: Value,
+    pub expected_revision: Option<i64>,
+}
+
+impl sealed::Sealed for ReplaceChannelDeveloperSessionCommand {}
+impl DomainCommand for ReplaceChannelDeveloperSessionCommand {
+    const TYPE: &'static str = "channel_developer_session.replace";
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct DeleteChannelDeveloperSessionCommand {
+    pub provider: String,
+}
+
+impl sealed::Sealed for DeleteChannelDeveloperSessionCommand {}
+impl DomainCommand for DeleteChannelDeveloperSessionCommand {
+    const TYPE: &'static str = "channel_developer_session.delete";
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct StorePublicationCredentialCommand {
+    pub provider: String,
+    pub publication_intent_id: String,
+    pub expected_intent_version: i64,
+    pub credential_ref: String,
+    pub remote_app_id: String,
+    pub credential: Value,
+}
+
+impl sealed::Sealed for StorePublicationCredentialCommand {}
+impl DomainCommand for StorePublicationCredentialCommand {
+    const TYPE: &'static str = "channel_publication_intent.store_credential";
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct DeleteChannelCredentialCommand {
+    pub provider: String,
+    pub credential_ref: String,
+}
+
+impl sealed::Sealed for DeleteChannelCredentialCommand {}
+impl DomainCommand for DeleteChannelCredentialCommand {
+    const TYPE: &'static str = "channel_credential.delete";
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct GetChannelCredentialParams {
+    pub credential_ref: String,
+    pub provider: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct GetChannelDeveloperSessionParams {
+    pub provider: String,
+}
+
 impl sealed::Sealed for ExpireDingTalkAccountCommand {}
 impl DomainCommand for ExpireDingTalkAccountCommand {
     const TYPE: &'static str = "dingtalk_account.expire";
@@ -567,6 +690,37 @@ pub struct DingTalkChannelSnapshot {
     pub binding_issue_count: i64,
     pub transport_conversations: Vec<ChannelTransportConversationView>,
     pub pending_aggregates: Vec<PendingChannelAggregateView>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChannelCredentialView {
+    pub credential_ref: String,
+    pub provider: String,
+    pub remote_app_id: String,
+    pub payload: Value,
+    pub revision: i64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PublishedChannelCredentialView {
+    pub agent_id: String,
+    pub credential_ref: String,
+    pub provider: String,
+    pub remote_app_id: String,
+    pub payload: Value,
+    pub revision: i64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChannelDeveloperSessionView {
+    pub provider: String,
+    pub account_id: String,
+    pub identity: Value,
+    pub session: Value,
+    pub revision: i64,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -1191,6 +1345,410 @@ impl ChannelService {
         })
     }
 
+    pub fn channel_credential(
+        &self,
+        database: &mut Database,
+        params: &GetChannelCredentialParams,
+    ) -> Result<Option<ChannelCredentialView>> {
+        validate_provider(&params.provider)?;
+        validate_credential_ref(&params.credential_ref, &params.provider)?;
+        database
+            .connection()
+            .query_row(
+                r#"
+                SELECT credential_ref, provider, remote_app_id, payload_json, revision
+                FROM channel_credentials
+                WHERE credential_ref = ?1 AND provider = ?2
+                "#,
+                params![params.credential_ref, params.provider],
+                |row| {
+                    let provider = row.get::<_, String>(1)?;
+                    let payload_json = row.get::<_, String>(3)?;
+                    let payload = parse_stored_credential_payload(&provider, &payload_json)
+                        .map_err(|error| {
+                            rusqlite::Error::FromSqlConversionFailure(
+                                3,
+                                rusqlite::types::Type::Text,
+                                error.into(),
+                            )
+                        })?;
+                    Ok(ChannelCredentialView {
+                        credential_ref: row.get(0)?,
+                        provider,
+                        remote_app_id: row.get(2)?,
+                        payload,
+                        revision: row.get(4)?,
+                    })
+                },
+            )
+            .optional()
+            .map_err(Into::into)
+    }
+
+    pub fn published_channel_credentials(
+        &self,
+        database: &mut Database,
+    ) -> Result<Vec<PublishedChannelCredentialView>> {
+        query_rows(
+            database.connection(),
+            r#"
+            SELECT bot.agent_id, credential.credential_ref, credential.provider,
+                   credential.remote_app_id, credential.payload_json, credential.revision
+            FROM feishu_member_bot AS bot
+            JOIN channel_credentials AS credential
+              ON credential.credential_ref = bot.credential_ref
+             AND credential.provider = 'feishu'
+             AND credential.credential_kind = 'member_bot'
+             AND credential.remote_app_id = bot.app_id
+            WHERE bot.status = 'published'
+            UNION ALL
+            SELECT bot.agent_id, credential.credential_ref, credential.provider,
+                   credential.remote_app_id, credential.payload_json, credential.revision
+            FROM dingtalk_member_bot AS bot
+            JOIN channel_credentials AS credential
+              ON credential.credential_ref = bot.credential_ref
+             AND credential.provider = 'dingtalk'
+             AND credential.credential_kind = 'member_bot'
+             AND credential.remote_app_id = bot.app_key
+            WHERE bot.status = 'published'
+            ORDER BY provider, agent_id
+            "#,
+            [],
+            |row| {
+                let provider = row.get::<_, String>(2)?;
+                let payload_json = row.get::<_, String>(4)?;
+                let payload =
+                    parse_stored_credential_payload(&provider, &payload_json).map_err(|error| {
+                        rusqlite::Error::FromSqlConversionFailure(
+                            4,
+                            rusqlite::types::Type::Text,
+                            error.into(),
+                        )
+                    })?;
+                Ok(PublishedChannelCredentialView {
+                    agent_id: row.get(0)?,
+                    credential_ref: row.get(1)?,
+                    provider,
+                    remote_app_id: row.get(3)?,
+                    payload,
+                    revision: row.get(5)?,
+                })
+            },
+        )
+    }
+
+    pub fn channel_developer_session(
+        &self,
+        database: &mut Database,
+        params: &GetChannelDeveloperSessionParams,
+    ) -> Result<Option<ChannelDeveloperSessionView>> {
+        validate_provider(&params.provider)?;
+        database
+            .connection()
+            .query_row(
+                r#"
+                SELECT provider, account_id, identity_json, session_json, revision
+                FROM channel_developer_sessions WHERE provider = ?1
+                "#,
+                [&params.provider],
+                |row| {
+                    let identity_json = row.get::<_, String>(2)?;
+                    let session_json = row.get::<_, String>(3)?;
+                    let identity = serde_json::from_str(&identity_json).map_err(|error| {
+                        rusqlite::Error::FromSqlConversionFailure(
+                            2,
+                            rusqlite::types::Type::Text,
+                            Box::new(error),
+                        )
+                    })?;
+                    let session = serde_json::from_str(&session_json).map_err(|error| {
+                        rusqlite::Error::FromSqlConversionFailure(
+                            3,
+                            rusqlite::types::Type::Text,
+                            Box::new(error),
+                        )
+                    })?;
+                    Ok(ChannelDeveloperSessionView {
+                        provider: row.get(0)?,
+                        account_id: row.get(1)?,
+                        identity,
+                        session,
+                        revision: row.get(4)?,
+                    })
+                },
+            )
+            .optional()
+            .map_err(Into::into)
+    }
+
+    pub fn commit_feishu_account_connection(
+        &self,
+        database: &mut Database,
+        envelope: &CommandEnvelope<CommitFeishuAccountConnectionCommand>,
+    ) -> Result<CommandExecution> {
+        validate_feishu_connection(&envelope.payload)?;
+        self.gateway.execute(database, envelope, |transaction| {
+            if !is_channel_host_for_provider(&envelope.actor, FEISHU_PROVIDER) {
+                return Ok(rejected(
+                    "channel.host_required",
+                    "Only the trusted Feishu Channel Host can commit a connection",
+                ));
+            }
+            if let Some(conflict) = previous_account_version_conflict(
+                transaction,
+                "feishu_account",
+                envelope.payload.expected_previous_account_version,
+            )? {
+                return Ok(version_conflict(conflict));
+            }
+            let session_revision = replace_developer_session_row(
+                transaction,
+                FEISHU_PROVIDER,
+                &envelope.payload.account.account_id,
+                &envelope.payload.developer_session.identity,
+                &envelope.payload.developer_session.session,
+            )?;
+            let account_version = persist_feishu_account(transaction, &envelope.payload.account)?;
+            Ok(CommandHandlerResult::applied(
+                "feishu_account.connection_committed",
+                json!({
+                    "accountId": envelope.payload.account.account_id,
+                    "version": account_version,
+                    "sessionRevision": session_revision,
+                }),
+                Some(EntityReference {
+                    entity_type: "feishu_account".to_string(),
+                    entity_id: envelope.payload.account.account_id.clone(),
+                }),
+            ))
+        })
+    }
+
+    pub fn commit_dingtalk_account_connection(
+        &self,
+        database: &mut Database,
+        envelope: &CommandEnvelope<CommitDingTalkAccountConnectionCommand>,
+    ) -> Result<CommandExecution> {
+        validate_dingtalk_connection(&envelope.payload)?;
+        self.gateway.execute(database, envelope, |transaction| {
+            if !is_channel_host_for_provider(&envelope.actor, DINGTALK_PROVIDER) {
+                return Ok(rejected(
+                    "channel.host_required",
+                    "Only the trusted DingTalk Channel Host can commit a connection",
+                ));
+            }
+            if let Some(conflict) = previous_account_version_conflict(
+                transaction,
+                "dingtalk_account",
+                envelope.payload.expected_previous_account_version,
+            )? {
+                return Ok(version_conflict(conflict));
+            }
+            let session_revision = replace_developer_session_row(
+                transaction,
+                DINGTALK_PROVIDER,
+                &envelope.payload.account.account_id,
+                &envelope.payload.developer_session.identity,
+                &envelope.payload.developer_session.session,
+            )?;
+            let account_version = persist_dingtalk_account(transaction, &envelope.payload.account)?;
+            Ok(CommandHandlerResult::applied(
+                "dingtalk_account.connection_committed",
+                json!({
+                    "accountId": envelope.payload.account.account_id,
+                    "version": account_version,
+                    "sessionRevision": session_revision,
+                }),
+                Some(EntityReference {
+                    entity_type: "dingtalk_account".to_string(),
+                    entity_id: envelope.payload.account.account_id.clone(),
+                }),
+            ))
+        })
+    }
+
+    pub fn replace_channel_developer_session(
+        &self,
+        database: &mut Database,
+        envelope: &CommandEnvelope<ReplaceChannelDeveloperSessionCommand>,
+    ) -> Result<CommandExecution> {
+        validate_provider(&envelope.payload.provider)?;
+        validate_nonempty(&envelope.payload.account_id, "accountId")?;
+        validate_developer_session_documents(
+            &envelope.payload.provider,
+            &envelope.payload.identity,
+            &envelope.payload.session,
+        )?;
+        self.gateway.execute(database, envelope, |transaction| {
+            if !is_channel_host_for_provider(&envelope.actor, &envelope.payload.provider) {
+                return Ok(rejected(
+                    "channel.host_required",
+                    "Only this provider's trusted Channel Host can replace its session",
+                ));
+            }
+            let account_table = if envelope.payload.provider == FEISHU_PROVIDER {
+                "feishu_account"
+            } else {
+                "dingtalk_account"
+            };
+            let account_connected: bool = transaction.query_row(
+                &format!(
+                    "SELECT EXISTS(SELECT 1 FROM {account_table} WHERE id = ?1 AND status = 'connected')"
+                ),
+                [&envelope.payload.account_id],
+                |row| row.get(0),
+            )?;
+            if !account_connected {
+                return Ok(rejected(
+                    "channel_developer_session.account_not_connected",
+                    "Developer Session replacement requires its connected account",
+                ));
+            }
+            let current = transaction
+                .query_row(
+                    r#"
+                    SELECT account_id, revision FROM channel_developer_sessions
+                    WHERE provider = ?1
+                    "#,
+                    [&envelope.payload.provider],
+                    |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)),
+                )
+                .optional()?;
+            match current {
+                Some((account_id, revision)) => {
+                    if account_id != envelope.payload.account_id {
+                        return Ok(rejected(
+                            "channel_developer_session.account_mismatch",
+                            "Developer Session cannot move to another account outside connection commit",
+                        ));
+                    }
+                    if envelope.payload.expected_revision != Some(revision) {
+                        return Ok(version_conflict(revision));
+                    }
+                }
+                None if envelope.payload.expected_revision.is_some() => {
+                    return Ok(version_conflict(0));
+                }
+                None => {}
+            }
+            let revision = replace_developer_session_row(
+                transaction,
+                &envelope.payload.provider,
+                &envelope.payload.account_id,
+                &envelope.payload.identity,
+                &envelope.payload.session,
+            )?;
+            Ok(CommandHandlerResult::applied(
+                "channel_developer_session.replaced",
+                json!({
+                    "provider": envelope.payload.provider,
+                    "accountId": envelope.payload.account_id,
+                    "revision": revision,
+                }),
+                None,
+            ))
+        })
+    }
+
+    pub fn delete_channel_developer_session(
+        &self,
+        database: &mut Database,
+        envelope: &CommandEnvelope<DeleteChannelDeveloperSessionCommand>,
+    ) -> Result<CommandExecution> {
+        validate_provider(&envelope.payload.provider)?;
+        self.gateway.execute(database, envelope, |transaction| {
+            if !is_channel_host_for_provider(&envelope.actor, &envelope.payload.provider) {
+                return Ok(rejected(
+                    "channel.host_required",
+                    "Only this provider's trusted Channel Host can delete its session",
+                ));
+            }
+            transaction.execute(
+                "DELETE FROM channel_developer_sessions WHERE provider = ?1",
+                [&envelope.payload.provider],
+            )?;
+            Ok(CommandHandlerResult::applied(
+                "channel_developer_session.deleted",
+                json!({ "provider": envelope.payload.provider }),
+                None,
+            ))
+        })
+    }
+
+    pub fn delete_channel_credential(
+        &self,
+        database: &mut Database,
+        envelope: &CommandEnvelope<DeleteChannelCredentialCommand>,
+    ) -> Result<CommandExecution> {
+        validate_provider(&envelope.payload.provider)?;
+        validate_credential_ref(&envelope.payload.credential_ref, &envelope.payload.provider)?;
+        self.gateway.execute(database, envelope, |transaction| {
+            if !is_channel_host_for_provider(&envelope.actor, &envelope.payload.provider) {
+                return Ok(rejected(
+                    "channel.host_required",
+                    "Only this provider's trusted Channel Host can delete credentials",
+                ));
+            }
+            let referenced: bool = transaction.query_row(
+                r#"
+                SELECT EXISTS(
+                    SELECT 1 FROM channel_member_bot_directory
+                    WHERE provider = ?1 AND credential_ref = ?2
+                )
+                "#,
+                params![envelope.payload.provider, envelope.payload.credential_ref],
+                |row| row.get(0),
+            )?;
+            if referenced {
+                return Ok(rejected(
+                    "channel_credential.still_referenced",
+                    "A member Bot still references this credential",
+                ));
+            }
+            transaction.execute(
+                "DELETE FROM channel_credentials WHERE provider = ?1 AND credential_ref = ?2",
+                params![envelope.payload.provider, envelope.payload.credential_ref],
+            )?;
+            Ok(CommandHandlerResult::applied(
+                "channel_credential.deleted",
+                json!({
+                    "provider": envelope.payload.provider,
+                    "credentialRef": envelope.payload.credential_ref,
+                }),
+                None,
+            ))
+        })
+    }
+
+    pub fn store_publication_credential(
+        &self,
+        database: &mut Database,
+        envelope: &CommandEnvelope<StorePublicationCredentialCommand>,
+    ) -> Result<CommandExecution> {
+        validate_provider(&envelope.payload.provider)?;
+        validate_credential_ref(&envelope.payload.credential_ref, &envelope.payload.provider)?;
+        validate_nonempty(
+            &envelope.payload.publication_intent_id,
+            "publicationIntentId",
+        )?;
+        validate_nonempty(&envelope.payload.remote_app_id, "remoteAppId")?;
+        let payload =
+            validated_credential_payload(&envelope.payload.provider, &envelope.payload.credential)?;
+        self.gateway.execute(database, envelope, |transaction| {
+            if !is_channel_host_for_provider(&envelope.actor, &envelope.payload.provider) {
+                return Ok(rejected(
+                    "channel.host_required",
+                    "Only this provider's trusted Channel Host can freeze credentials",
+                ));
+            }
+            if envelope.payload.provider == FEISHU_PROVIDER {
+                store_feishu_publication_credential(transaction, &envelope.payload, &payload)
+            } else {
+                store_dingtalk_publication_credential(transaction, &envelope.payload, &payload)
+            }
+        })
+    }
+
     pub fn upsert_feishu_account(
         &self,
         database: &mut Database,
@@ -1356,6 +1914,10 @@ impl ChannelService {
                 "#,
                 params![envelope.payload.account_id, now, version],
             )?;
+            transaction.execute(
+                "DELETE FROM channel_developer_sessions WHERE provider = 'feishu'",
+                [],
+            )?;
             Ok(CommandHandlerResult::applied(
                 "feishu_account.disconnected",
                 json!({ "accountId": envelope.payload.account_id, "version": version + 1 }),
@@ -1401,6 +1963,10 @@ impl ChannelService {
                 WHERE id = ?1 AND version = ?3
                 "#,
                 params![envelope.payload.account_id, now, version],
+            )?;
+            transaction.execute(
+                "DELETE FROM channel_developer_sessions WHERE provider = 'feishu'",
+                [],
             )?;
             Ok(CommandHandlerResult::applied(
                 "feishu_account.session_expired",
@@ -1572,6 +2138,10 @@ impl ChannelService {
                 "#,
                 params![envelope.payload.account_id, now, version],
             )?;
+            transaction.execute(
+                "DELETE FROM channel_developer_sessions WHERE provider = 'dingtalk'",
+                [],
+            )?;
             Ok(CommandHandlerResult::applied(
                 "dingtalk_account.disconnected",
                 json!({ "accountId": envelope.payload.account_id, "version": version + 1 }),
@@ -1617,6 +2187,10 @@ impl ChannelService {
                 WHERE id = ?1 AND version = ?3
                 "#,
                 params![envelope.payload.account_id, now, version],
+            )?;
+            transaction.execute(
+                "DELETE FROM channel_developer_sessions WHERE provider = 'dingtalk'",
+                [],
             )?;
             Ok(CommandHandlerResult::applied(
                 "dingtalk_account.oauth_expired",
@@ -2026,8 +2600,8 @@ impl ChannelService {
             "expectedUserIdDigest",
         )?;
         let requested_app_name = normalize_display_name(&envelope.payload.requested_app_name)?;
-        if envelope.payload.provisioning_mode != "dws_gateway" {
-            anyhow::bail!("provisioningMode must be dws_gateway");
+        if envelope.payload.provisioning_mode != "direct_open_platform" {
+            anyhow::bail!("provisioningMode must be direct_open_platform");
         }
         self.gateway.execute(database, envelope, |transaction| {
             if !is_channel_host_for_provider(&envelope.actor, DINGTALK_PROVIDER) {
@@ -2101,7 +2675,7 @@ impl ChannelService {
                     approver_user_id_digest, last_completed_step, failure_code,
                     version, created_at, updated_at, completed_at
                 ) VALUES (
-                    ?1, ?2, ?3, ?4, ?5, ?6, 'dws_gateway',
+                    ?1, ?2, ?3, ?4, ?5, ?6, 'direct_open_platform',
                     'created', NULL, NULL, NULL, NULL, NULL, NULL,
                     NULL, NULL, NULL, 1, ?7, ?7, NULL
                 )
@@ -8861,6 +9435,782 @@ fn bot_app_id(
         .map_err(Into::into)
 }
 
+fn validate_provider(provider: &str) -> Result<()> {
+    if !matches!(provider, FEISHU_PROVIDER | DINGTALK_PROVIDER) {
+        anyhow::bail!("provider is not supported");
+    }
+    Ok(())
+}
+
+fn validate_credential_ref(credential_ref: &str, provider: &str) -> Result<()> {
+    validate_nonempty(credential_ref, "credentialRef")?;
+    let prefix = if provider == FEISHU_PROVIDER {
+        "feishu-"
+    } else {
+        "dingtalk-"
+    };
+    if credential_ref.len() > 128
+        || !credential_ref.starts_with(prefix)
+        || !credential_ref
+            .bytes()
+            .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-')
+    {
+        anyhow::bail!("credentialRef is invalid for provider");
+    }
+    Ok(())
+}
+
+fn required_json_string<'a>(
+    object: &'a serde_json::Map<String, Value>,
+    key: &str,
+    maximum: usize,
+) -> Result<&'a str> {
+    let value = object
+        .get(key)
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty() && value.len() <= maximum && !value.contains('\0'))
+        .with_context(|| format!("{key} is invalid"))?;
+    Ok(value)
+}
+
+fn validated_credential_payload(provider: &str, value: &Value) -> Result<Value> {
+    validate_provider(provider)?;
+    let object = value
+        .as_object()
+        .context("credential payload must be an object")?;
+    let app_secret = required_json_string(object, "appSecret", 16_384)?;
+    if provider == FEISHU_PROVIDER {
+        if object.len() != 1 {
+            anyhow::bail!("Feishu credential payload has unsupported fields");
+        }
+        return Ok(json!({ "appSecret": app_secret }));
+    }
+    if object.len() != 2 {
+        anyhow::bail!("DingTalk credential payload has unsupported fields");
+    }
+    let robot_code = required_json_string(object, "robotCode", 512)?;
+    Ok(json!({ "appSecret": app_secret, "robotCode": robot_code }))
+}
+
+fn parse_stored_credential_payload(provider: &str, payload_json: &str) -> Result<Value> {
+    let value: Value = serde_json::from_str(payload_json)
+        .context("stored channel credential payload is invalid")?;
+    validated_credential_payload(provider, &value)
+}
+
+fn validate_developer_session_documents(
+    provider: &str,
+    identity: &Value,
+    session: &Value,
+) -> Result<()> {
+    validate_provider(provider)?;
+    let identity_object = identity
+        .as_object()
+        .context("developer identity must be an object")?;
+    let session_object = session
+        .as_object()
+        .context("developer session must be an object")?;
+    if serde_json::to_vec(identity)?.len() > 65_536 {
+        anyhow::bail!("developer identity exceeds the storage limit");
+    }
+    if serde_json::to_vec(session)?.len() > 1_048_576 {
+        anyhow::bail!("developer session exceeds the storage limit");
+    }
+    if provider == FEISHU_PROVIDER {
+        for (key, maximum) in [
+            ("brand", 16),
+            ("userId", 512),
+            ("userName", 512),
+            ("tenantId", 512),
+            ("tenantName", 512),
+        ] {
+            required_json_string(identity_object, key, maximum)?;
+        }
+        if !matches!(
+            identity_object.get("brand").and_then(Value::as_str),
+            Some("feishu" | "lark")
+        ) {
+            anyhow::bail!("Feishu developer identity brand is invalid");
+        }
+        if let Some(email) = identity_object.get("email")
+            && !email.is_null()
+        {
+            let email = email
+                .as_str()
+                .context("developer identity email is invalid")?;
+            if email.len() > 512 || email.contains('\0') {
+                anyhow::bail!("developer identity email is invalid");
+            }
+        }
+        let cookies = session_object
+            .get("cookies")
+            .and_then(Value::as_array)
+            .context("Feishu developer session cookies are missing")?;
+        if session_object.len() != 1 || cookies.len() > 512 {
+            anyhow::bail!("Feishu developer session shape is invalid");
+        }
+        for cookie in cookies {
+            let cookie = cookie
+                .as_object()
+                .context("Feishu developer session cookie is invalid")?;
+            required_json_string(cookie, "name", 512)?;
+            required_json_string(cookie, "value", 16_384)?;
+            let domain = required_json_string(cookie, "domain", 512)?;
+            let domain = domain.trim_start_matches('.').to_ascii_lowercase();
+            if !(domain == "feishu.cn"
+                || domain.ends_with(".feishu.cn")
+                || domain == "larksuite.com"
+                || domain.ends_with(".larksuite.com"))
+            {
+                anyhow::bail!("Feishu developer session cookie domain is invalid");
+            }
+            required_json_string(cookie, "path", 4096)?;
+        }
+    } else {
+        for (key, maximum) in [
+            ("corpId", 512),
+            ("corpName", 512),
+            ("userId", 512),
+            ("userName", 512),
+        ] {
+            required_json_string(identity_object, key, maximum)?;
+        }
+        if session_object.get("schemaVersion").and_then(Value::as_i64) != Some(1) {
+            anyhow::bail!("DingTalk developer session schema is invalid");
+        }
+        let current_profile_key = required_json_string(session_object, "currentProfileKey", 512)?;
+        let profiles = session_object
+            .get("profiles")
+            .and_then(Value::as_array)
+            .context("DingTalk developer session profiles are missing")?;
+        if profiles.is_empty() || profiles.len() > 32 {
+            anyhow::bail!("DingTalk developer session profiles are invalid");
+        }
+        let expected_corp_id = required_json_string(identity_object, "corpId", 512)?;
+        let expected_user_id = required_json_string(identity_object, "userId", 512)?;
+        let mut active_identity_matches = false;
+        for profile in profiles {
+            let profile = profile
+                .as_object()
+                .context("DingTalk developer session profile is invalid")?;
+            for (key, maximum) in [
+                ("accessToken", 16_384),
+                ("refreshToken", 16_384),
+                ("accessTokenExpiresAt", 128),
+                ("refreshTokenExpiresAt", 128),
+                ("corpId", 512),
+                ("corpName", 512),
+                ("userId", 512),
+                ("userName", 512),
+                ("clientId", 4096),
+            ] {
+                required_json_string(profile, key, maximum)?;
+            }
+            let profile_key = profile_key_for_dingtalk(
+                required_json_string(profile, "corpId", 512)?,
+                required_json_string(profile, "userId", 512)?,
+            );
+            if profile_key == current_profile_key {
+                active_identity_matches = required_json_string(profile, "corpId", 512)?
+                    == expected_corp_id
+                    && required_json_string(profile, "userId", 512)? == expected_user_id;
+            }
+        }
+        if !active_identity_matches {
+            anyhow::bail!("DingTalk active profile does not match the developer identity");
+        }
+    }
+    Ok(())
+}
+
+fn profile_key_for_dingtalk(corp_id: &str, user_id: &str) -> String {
+    let mut digest = Sha256::new();
+    digest.update(corp_id.as_bytes());
+    digest.update([0]);
+    digest.update(user_id.as_bytes());
+    let encoded = format!("{:x}", digest.finalize());
+    format!("rvdtp_{}", &encoded[..32])
+}
+
+fn validate_feishu_connection(command: &CommitFeishuAccountConnectionCommand) -> Result<()> {
+    let account = &command.account;
+    validate_nonempty(&account.account_id, "accountId")?;
+    validate_digest(&account.user_id_digest, "userIdDigest")?;
+    validate_nonempty(&account.tenant_id, "tenantId")?;
+    normalize_display_name(&account.user_name)?;
+    normalize_display_name(&account.tenant_name)?;
+    normalize_optional_email(account.email.as_deref())?;
+    if !matches!(account.brand.as_str(), "feishu" | "lark") {
+        anyhow::bail!("brand must be feishu or lark");
+    }
+    validate_developer_session_documents(
+        FEISHU_PROVIDER,
+        &command.developer_session.identity,
+        &command.developer_session.session,
+    )?;
+    let identity = command.developer_session.identity.as_object().unwrap();
+    let user_id = required_json_string(identity, "userId", 512)?;
+    if opaque_digest("feishu-user", user_id) != account.user_id_digest
+        || required_json_string(identity, "tenantId", 512)? != account.tenant_id
+        || required_json_string(identity, "userName", 512)? != account.user_name
+        || required_json_string(identity, "tenantName", 512)? != account.tenant_name
+        || required_json_string(identity, "brand", 16)? != account.brand
+    {
+        anyhow::bail!("Feishu account and developer identity do not match");
+    }
+    Ok(())
+}
+
+fn validate_dingtalk_connection(command: &CommitDingTalkAccountConnectionCommand) -> Result<()> {
+    let account = &command.account;
+    validate_nonempty(&account.account_id, "accountId")?;
+    validate_digest(&account.user_id_digest, "userIdDigest")?;
+    validate_nonempty(&account.corp_id, "corpId")?;
+    validate_nonempty(&account.oauth_profile_ref, "oauthProfileRef")?;
+    normalize_display_name(&account.user_name)?;
+    normalize_display_name(&account.corp_name)?;
+    validate_developer_session_documents(
+        DINGTALK_PROVIDER,
+        &command.developer_session.identity,
+        &command.developer_session.session,
+    )?;
+    let identity = command.developer_session.identity.as_object().unwrap();
+    let user_id = required_json_string(identity, "userId", 512)?;
+    if opaque_digest("dingtalk-user", user_id) != account.user_id_digest
+        || required_json_string(identity, "corpId", 512)? != account.corp_id
+        || required_json_string(identity, "userName", 512)? != account.user_name
+        || required_json_string(identity, "corpName", 512)? != account.corp_name
+    {
+        anyhow::bail!("DingTalk account and developer identity do not match");
+    }
+    Ok(())
+}
+
+fn previous_account_version_conflict(
+    transaction: &Transaction<'_>,
+    table: &str,
+    expected: Option<i64>,
+) -> Result<Option<i64>> {
+    let current = transaction
+        .query_row(
+            &format!("SELECT version FROM {table} WHERE status = 'connected' LIMIT 1"),
+            [],
+            |row| row.get::<_, i64>(0),
+        )
+        .optional()?;
+    Ok(match (current, expected) {
+        (None, None) => None,
+        (Some(current), Some(expected)) if current == expected => None,
+        (Some(current), _) => Some(current),
+        (None, Some(_)) => Some(0),
+    })
+}
+
+fn replace_developer_session_row(
+    transaction: &Transaction<'_>,
+    provider: &str,
+    account_id: &str,
+    identity: &Value,
+    session: &Value,
+) -> Result<i64> {
+    validate_developer_session_documents(provider, identity, session)?;
+    let identity_json = serde_json::to_string(identity)?;
+    let session_json = serde_json::to_string(session)?;
+    let now = Utc::now().timestamp_millis();
+    transaction.execute(
+        r#"
+        INSERT INTO channel_developer_sessions(
+            provider, account_id, identity_json, session_json,
+            schema_version, revision, created_at, updated_at
+        ) VALUES (?1, ?2, ?3, ?4, 1, 1, ?5, ?5)
+        ON CONFLICT(provider) DO UPDATE SET
+            account_id = excluded.account_id,
+            identity_json = excluded.identity_json,
+            session_json = excluded.session_json,
+            schema_version = 1,
+            revision = channel_developer_sessions.revision + 1,
+            updated_at = excluded.updated_at
+        "#,
+        params![provider, account_id, identity_json, session_json, now],
+    )?;
+    transaction
+        .query_row(
+            "SELECT revision FROM channel_developer_sessions WHERE provider = ?1",
+            [provider],
+            |row| row.get(0),
+        )
+        .map_err(Into::into)
+}
+
+fn persist_feishu_account(
+    transaction: &Transaction<'_>,
+    account: &FeishuConnectionAccountInput,
+) -> Result<i64> {
+    let conflicting_identity = transaction
+        .query_row(
+            "SELECT user_id_digest FROM feishu_account WHERE id = ?1",
+            [&account.account_id],
+            |row| row.get::<_, Option<String>>(0),
+        )
+        .optional()?
+        .flatten()
+        .is_some_and(|digest| digest != account.user_id_digest);
+    if conflicting_identity {
+        anyhow::bail!("Feishu account identity conflict");
+    }
+    let now = Utc::now().to_rfc3339();
+    transaction.execute(
+        r#"
+        UPDATE feishu_account
+        SET status = 'disconnected', disconnected_at = ?2,
+            version = version + 1, updated_at = ?2
+        WHERE status = 'connected' AND id <> ?1
+        "#,
+        params![account.account_id, now],
+    )?;
+    transaction.execute(
+        r#"
+        INSERT INTO feishu_account(
+            id, identity_digest, display_name, tenant_name,
+            status, version, created_at, updated_at, disconnected_at,
+            user_id_digest, tenant_id, user_name, email, brand,
+            connected_at, last_verified_at
+        ) VALUES (
+            ?1, ?2, ?3, ?4, 'connected', 1, ?8, ?8, NULL,
+            ?2, ?5, ?3, ?6, ?7, ?8, ?8
+        )
+        ON CONFLICT(id) DO UPDATE SET
+            identity_digest = excluded.identity_digest,
+            display_name = excluded.display_name,
+            tenant_name = excluded.tenant_name,
+            user_id_digest = excluded.user_id_digest,
+            tenant_id = excluded.tenant_id,
+            user_name = excluded.user_name,
+            email = excluded.email,
+            brand = excluded.brand,
+            status = 'connected', disconnected_at = NULL,
+            connected_at = CASE
+                WHEN feishu_account.status = 'connected'
+                 AND feishu_account.connected_at IS NOT NULL
+                THEN feishu_account.connected_at ELSE excluded.connected_at END,
+            last_verified_at = excluded.last_verified_at,
+            version = feishu_account.version + 1,
+            updated_at = excluded.updated_at
+        "#,
+        params![
+            account.account_id,
+            account.user_id_digest,
+            normalize_display_name(&account.user_name)?,
+            normalize_display_name(&account.tenant_name)?,
+            account.tenant_id,
+            normalize_optional_email(account.email.as_deref())?,
+            account.brand,
+            now,
+        ],
+    )?;
+    transaction.execute(
+        r#"
+        INSERT INTO feishu_owner_identity(
+            account_id, tenant_id, canonical_owner_principal_id,
+            user_id_digest, union_id_digest, verified_at,
+            version, created_at, updated_at
+        ) VALUES (?1, ?2, ?3, ?4, NULL, ?5, 1, ?5, ?5)
+        ON CONFLICT(account_id) DO UPDATE SET
+            tenant_id = excluded.tenant_id,
+            user_id_digest = excluded.user_id_digest,
+            verified_at = excluded.verified_at,
+            version = feishu_owner_identity.version + 1,
+            updated_at = excluded.updated_at
+        "#,
+        params![
+            account.account_id,
+            account.tenant_id,
+            format!("rvep_{}", Uuid::new_v4().simple()),
+            account.user_id_digest,
+            now,
+        ],
+    )?;
+    transaction
+        .query_row(
+            "SELECT version FROM feishu_account WHERE id = ?1",
+            [&account.account_id],
+            |row| row.get(0),
+        )
+        .map_err(Into::into)
+}
+
+fn persist_dingtalk_account(
+    transaction: &Transaction<'_>,
+    account: &DingTalkConnectionAccountInput,
+) -> Result<i64> {
+    let existing = transaction
+        .query_row(
+            "SELECT user_id_digest, corp_id, oauth_profile_ref FROM dingtalk_account WHERE id = ?1",
+            [&account.account_id],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                ))
+            },
+        )
+        .optional()?;
+    if existing
+        .as_ref()
+        .is_some_and(|(user_digest, corp_id, profile_ref)| {
+            user_digest != &account.user_id_digest
+                || corp_id != &account.corp_id
+                || profile_ref != &account.oauth_profile_ref
+        })
+    {
+        anyhow::bail!("DingTalk account identity conflict");
+    }
+    let now = Utc::now().to_rfc3339();
+    transaction.execute(
+        r#"
+        UPDATE dingtalk_account
+        SET status = 'disconnected', disconnected_at = ?2,
+            version = version + 1, updated_at = ?2
+        WHERE status = 'connected' AND id <> ?1
+        "#,
+        params![account.account_id, now],
+    )?;
+    transaction.execute(
+        r#"
+        INSERT INTO dingtalk_account(
+            id, user_id_digest, corp_id, user_name, corp_name,
+            oauth_profile_ref, status, version, created_at, updated_at,
+            connected_at, last_verified_at, disconnected_at
+        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'connected', 1, ?7, ?7, ?7, ?7, NULL)
+        ON CONFLICT(id) DO UPDATE SET
+            user_name = excluded.user_name,
+            corp_name = excluded.corp_name,
+            status = 'connected',
+            connected_at = CASE WHEN dingtalk_account.status = 'connected'
+                THEN dingtalk_account.connected_at ELSE excluded.connected_at END,
+            last_verified_at = excluded.last_verified_at,
+            disconnected_at = NULL,
+            version = dingtalk_account.version + 1,
+            updated_at = excluded.updated_at
+        "#,
+        params![
+            account.account_id,
+            account.user_id_digest,
+            account.corp_id,
+            normalize_display_name(&account.user_name)?,
+            normalize_display_name(&account.corp_name)?,
+            account.oauth_profile_ref,
+            now,
+        ],
+    )?;
+    transaction.execute(
+        r#"
+        INSERT INTO dingtalk_owner_identity(
+            account_id, corp_id, canonical_owner_principal_id,
+            user_id_digest, version, created_at, updated_at
+        ) VALUES (?1, ?2, ?3, ?4, 1, ?5, ?5)
+        ON CONFLICT(account_id) DO UPDATE SET
+            corp_id = excluded.corp_id,
+            user_id_digest = excluded.user_id_digest,
+            version = dingtalk_owner_identity.version + 1,
+            updated_at = excluded.updated_at
+        "#,
+        params![
+            account.account_id,
+            account.corp_id,
+            format!("rvep_{}", Uuid::new_v4().simple()),
+            account.user_id_digest,
+            now,
+        ],
+    )?;
+    transaction
+        .query_row(
+            "SELECT version FROM dingtalk_account WHERE id = ?1",
+            [&account.account_id],
+            |row| row.get(0),
+        )
+        .map_err(Into::into)
+}
+
+fn load_credential_identity(
+    transaction: &Transaction<'_>,
+    credential_ref: &str,
+) -> Result<Option<(String, String, i64)>> {
+    transaction
+        .query_row(
+            "SELECT provider, remote_app_id, revision FROM channel_credentials WHERE credential_ref = ?1",
+            [credential_ref],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )
+        .optional()
+        .map_err(Into::into)
+}
+
+fn credential_identity_conflict(
+    transaction: &Transaction<'_>,
+    provider: &str,
+    credential_ref: &str,
+    remote_app_id: &str,
+) -> Result<bool> {
+    if load_credential_identity(transaction, credential_ref)?.is_some_and(
+        |(stored_provider, stored_app_id, _)| {
+            stored_provider != provider || stored_app_id != remote_app_id
+        },
+    ) {
+        return Ok(true);
+    }
+    transaction
+        .query_row(
+            r#"
+            SELECT EXISTS(
+                SELECT 1 FROM channel_credentials
+                WHERE provider = ?1 AND credential_kind = 'member_bot'
+                  AND remote_app_id = ?2 AND credential_ref <> ?3
+            )
+            "#,
+            params![provider, remote_app_id, credential_ref],
+            |row| row.get(0),
+        )
+        .map_err(Into::into)
+}
+
+fn upsert_credential_row(
+    transaction: &Transaction<'_>,
+    provider: &str,
+    credential_ref: &str,
+    remote_app_id: &str,
+    payload: &Value,
+) -> Result<i64> {
+    let payload_json = serde_json::to_string(payload)?;
+    if payload_json.len() > 65_536 {
+        anyhow::bail!("credential payload exceeds the storage limit");
+    }
+    let now = Utc::now().timestamp_millis();
+    transaction.execute(
+        r#"
+        INSERT INTO channel_credentials(
+            credential_ref, provider, credential_kind, remote_app_id,
+            payload_json, schema_version, revision, created_at, updated_at
+        ) VALUES (?1, ?2, 'member_bot', ?3, ?4, 1, 1, ?5, ?5)
+        ON CONFLICT(credential_ref) DO UPDATE SET
+            payload_json = excluded.payload_json,
+            schema_version = 1,
+            revision = channel_credentials.revision + 1,
+            updated_at = excluded.updated_at
+        "#,
+        params![credential_ref, provider, remote_app_id, payload_json, now],
+    )?;
+    transaction
+        .query_row(
+            "SELECT revision FROM channel_credentials WHERE credential_ref = ?1",
+            [credential_ref],
+            |row| row.get(0),
+        )
+        .map_err(Into::into)
+}
+
+fn store_feishu_publication_credential(
+    transaction: &Transaction<'_>,
+    command: &StorePublicationCredentialCommand,
+    payload: &Value,
+) -> Result<CommandHandlerResult> {
+    let current = transaction
+        .query_row(
+            r#"
+            SELECT state, remote_app_id, credential_ref, version
+            FROM feishu_member_bot_publication_intent WHERE id = ?1
+            "#,
+            [&command.publication_intent_id],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, Option<String>>(1)?,
+                    row.get::<_, Option<String>>(2)?,
+                    row.get::<_, i64>(3)?,
+                ))
+            },
+        )
+        .optional()?;
+    let Some((state, remote_app_id, credential_ref, version)) = current else {
+        return Ok(rejected(
+            "feishu_publication_intent.not_found",
+            "Publication intent does not exist",
+        ));
+    };
+    if version != command.expected_intent_version {
+        return Ok(version_conflict(version));
+    }
+    if !publication_intent_transition_allowed(&state, "credentials_read") {
+        return Ok(rejected(
+            "feishu_publication_intent.invalid_transition",
+            "Credential storage requires the credentials_read transition",
+        ));
+    }
+    if remote_app_id.as_deref() != Some(command.remote_app_id.as_str()) {
+        return Ok(rejected(
+            "feishu_publication_intent.remote_app_conflict",
+            "Credential does not belong to the frozen App",
+        ));
+    }
+    if credential_ref
+        .as_deref()
+        .is_some_and(|current| current != command.credential_ref)
+        || credential_identity_conflict(
+            transaction,
+            FEISHU_PROVIDER,
+            &command.credential_ref,
+            &command.remote_app_id,
+        )?
+    {
+        return Ok(rejected(
+            "channel_credential.identity_conflict",
+            "Credential identity is immutable",
+        ));
+    }
+    let revision = upsert_credential_row(
+        transaction,
+        FEISHU_PROVIDER,
+        &command.credential_ref,
+        &command.remote_app_id,
+        payload,
+    )?;
+    let now = Utc::now().to_rfc3339();
+    transaction.execute(
+        r#"
+        UPDATE feishu_member_bot_publication_intent
+        SET state = 'credentials_read', credential_ref = ?2,
+            last_completed_step = 'credentials_read', failure_code = NULL,
+            version = version + 1, updated_at = ?3
+        WHERE id = ?1 AND version = ?4
+        "#,
+        params![
+            command.publication_intent_id,
+            command.credential_ref,
+            now,
+            version
+        ],
+    )?;
+    Ok(CommandHandlerResult::applied(
+        "feishu_publication_intent.credential_stored",
+        json!({
+            "publicationIntentId": command.publication_intent_id,
+            "credentialRef": command.credential_ref,
+            "credentialRevision": revision,
+            "version": version + 1,
+        }),
+        None,
+    ))
+}
+
+fn store_dingtalk_publication_credential(
+    transaction: &Transaction<'_>,
+    command: &StorePublicationCredentialCommand,
+    payload: &Value,
+) -> Result<CommandHandlerResult> {
+    let current = transaction
+        .query_row(
+            r#"
+            SELECT state, remote_unified_app_id, app_key, robot_code,
+                   credential_ref, version
+            FROM dingtalk_member_bot_publication_intent WHERE id = ?1
+            "#,
+            [&command.publication_intent_id],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, Option<String>>(1)?,
+                    row.get::<_, Option<String>>(2)?,
+                    row.get::<_, Option<String>>(3)?,
+                    row.get::<_, Option<String>>(4)?,
+                    row.get::<_, i64>(5)?,
+                ))
+            },
+        )
+        .optional()?;
+    let Some((state, unified_app_id, app_key, robot_code, credential_ref, version)) = current
+    else {
+        return Ok(rejected(
+            "dingtalk_publication_intent.not_found",
+            "DingTalk publication intent does not exist",
+        ));
+    };
+    if version != command.expected_intent_version {
+        return Ok(version_conflict(version));
+    }
+    if !dingtalk_publication_transition_allowed(&state, "credentials_read") {
+        return Ok(rejected(
+            "dingtalk_publication_intent.invalid_transition",
+            "Credential storage requires the credentials_read transition",
+        ));
+    }
+    if unified_app_id.is_none()
+        || app_key
+            .as_deref()
+            .is_some_and(|current| current != command.remote_app_id)
+        || credential_ref
+            .as_deref()
+            .is_some_and(|current| current != command.credential_ref)
+        || credential_identity_conflict(
+            transaction,
+            DINGTALK_PROVIDER,
+            &command.credential_ref,
+            &command.remote_app_id,
+        )?
+    {
+        return Ok(rejected(
+            "channel_credential.identity_conflict",
+            "Credential does not belong to the frozen DingTalk App",
+        ));
+    }
+    let payload_robot_code = payload.get("robotCode").and_then(Value::as_str).unwrap();
+    if robot_code
+        .as_deref()
+        .is_some_and(|current| current != payload_robot_code)
+    {
+        return Ok(rejected(
+            "dingtalk_publication_intent.robot_conflict",
+            "Credential cannot change the frozen robot identity",
+        ));
+    }
+    let revision = upsert_credential_row(
+        transaction,
+        DINGTALK_PROVIDER,
+        &command.credential_ref,
+        &command.remote_app_id,
+        payload,
+    )?;
+    let now = Utc::now().to_rfc3339();
+    transaction.execute(
+        r#"
+        UPDATE dingtalk_member_bot_publication_intent
+        SET state = 'credentials_read', app_key = ?2, robot_code = ?3,
+            credential_ref = ?4, last_completed_step = 'credentials_read',
+            failure_code = NULL, version = version + 1, updated_at = ?5
+        WHERE id = ?1 AND version = ?6
+        "#,
+        params![
+            command.publication_intent_id,
+            command.remote_app_id,
+            payload_robot_code,
+            command.credential_ref,
+            now,
+            version,
+        ],
+    )?;
+    Ok(CommandHandlerResult::applied(
+        "dingtalk_publication_intent.credential_stored",
+        json!({
+            "publicationIntentId": command.publication_intent_id,
+            "credentialRef": command.credential_ref,
+            "credentialRevision": revision,
+            "version": version + 1,
+        }),
+        None,
+    ))
+}
+
 fn is_owner(actor: &ActorRef) -> bool {
     matches!(actor, ActorRef::User { user_id } if user_id == CURRENT_USER_ID)
 }
@@ -9045,6 +10395,243 @@ mod tests {
         opaque_digest("dingtalk-user", "owner-staff-1")
     }
 
+    #[test]
+    fn sqlite_channel_storage_keeps_connection_and_publication_transitions_atomic() {
+        let mut database = seeded_runtime_database_owned();
+        let service = ChannelService::default();
+        let agent_id: String = database
+            .connection()
+            .query_row(
+                "SELECT id FROM agent_profile ORDER BY member_order LIMIT 1",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let account_id = "account-sqlite";
+        let identity = json!({
+            "brand": "feishu",
+            "userId": "user-sqlite",
+            "userName": "Owner",
+            "email": "owner@example.com",
+            "tenantId": "tenant-sqlite",
+            "tenantName": "测试租户"
+        });
+        let session = json!({
+            "cookies": [{
+                "name": "session",
+                "value": "plaintext-cookie",
+                "domain": ".feishu.cn",
+                "path": "/",
+                "secure": true,
+                "httpOnly": true,
+                "sameSite": "lax",
+                "session": true
+            }]
+        });
+        let connected = service
+            .commit_feishu_account_connection(
+                &mut database,
+                &host_envelope(
+                    "sqlite-connect",
+                    CommitFeishuAccountConnectionCommand {
+                        expected_previous_account_version: None,
+                        account: FeishuConnectionAccountInput {
+                            account_id: account_id.to_string(),
+                            user_id_digest: opaque_digest("feishu-user", "user-sqlite"),
+                            tenant_id: "tenant-sqlite".to_string(),
+                            user_name: "Owner".to_string(),
+                            email: Some("owner@example.com".to_string()),
+                            tenant_name: "测试租户".to_string(),
+                            brand: "feishu".to_string(),
+                        },
+                        developer_session: ChannelDeveloperSessionInput {
+                            identity: identity.clone(),
+                            session: session.clone(),
+                        },
+                    },
+                ),
+            )
+            .unwrap();
+        assert_eq!(connected.result.status, CommandResultStatus::Applied);
+        assert_eq!(connected.result.payload["sessionRevision"], 1);
+        let stored_session = service
+            .channel_developer_session(
+                &mut database,
+                &GetChannelDeveloperSessionParams {
+                    provider: FEISHU_PROVIDER.to_string(),
+                },
+            )
+            .unwrap()
+            .unwrap();
+        assert_eq!(stored_session.identity, identity);
+        assert_eq!(stored_session.session, session);
+
+        let stale_switch = service
+            .commit_feishu_account_connection(
+                &mut database,
+                &host_envelope(
+                    "sqlite-stale-switch",
+                    CommitFeishuAccountConnectionCommand {
+                        expected_previous_account_version: None,
+                        account: FeishuConnectionAccountInput {
+                            account_id: "account-other".to_string(),
+                            user_id_digest: opaque_digest("feishu-user", "user-other"),
+                            tenant_id: "tenant-other".to_string(),
+                            user_name: "Other".to_string(),
+                            email: None,
+                            tenant_name: "其他租户".to_string(),
+                            brand: "feishu".to_string(),
+                        },
+                        developer_session: ChannelDeveloperSessionInput {
+                            identity: json!({
+                                "brand": "feishu", "userId": "user-other",
+                                "userName": "Other", "tenantId": "tenant-other",
+                                "tenantName": "其他租户"
+                            }),
+                            session: json!({"cookies": []}),
+                        },
+                    },
+                ),
+            )
+            .unwrap();
+        assert_eq!(stale_switch.result.status, CommandResultStatus::Rejected);
+        assert_eq!(
+            service
+                .channel_developer_session(
+                    &mut database,
+                    &GetChannelDeveloperSessionParams {
+                        provider: FEISHU_PROVIDER.to_string(),
+                    },
+                )
+                .unwrap()
+                .unwrap()
+                .identity,
+            identity
+        );
+
+        let intent_id = "intent-sqlite";
+        service
+            .create_member_bot_publication_intent(
+                &mut database,
+                &host_envelope(
+                    "sqlite-intent",
+                    CreateMemberBotPublicationIntentCommand {
+                        publication_intent_id: intent_id.to_string(),
+                        account_id: account_id.to_string(),
+                        agent_id: agent_id.clone(),
+                        expected_user_id_digest: opaque_digest("feishu-user", "user-sqlite"),
+                        expected_tenant_id: "tenant-sqlite".to_string(),
+                        requested_app_name: "SQLite Bot".to_string(),
+                        provisioning_mode: "developer_session".to_string(),
+                    },
+                ),
+            )
+            .unwrap();
+        for (expected_version, state, app_id) in [
+            (1, "session_verified", None),
+            (2, "app_created", Some("cli-sqlite")),
+        ] {
+            service
+                .advance_member_bot_publication_intent(
+                    &mut database,
+                    &host_envelope(
+                        &format!("sqlite-{state}"),
+                        AdvanceMemberBotPublicationIntentCommand {
+                            publication_intent_id: intent_id.to_string(),
+                            expected_version,
+                            state: state.to_string(),
+                            remote_app_id: app_id.map(str::to_string),
+                            credential_ref: None,
+                            last_completed_step: Some(state.to_string()),
+                            failure_code: None,
+                        },
+                    ),
+                )
+                .unwrap();
+        }
+        let credential_ref = "feishu-sqlite";
+        let stored = service
+            .store_publication_credential(
+                &mut database,
+                &host_envelope(
+                    "sqlite-store-credential",
+                    StorePublicationCredentialCommand {
+                        provider: FEISHU_PROVIDER.to_string(),
+                        publication_intent_id: intent_id.to_string(),
+                        expected_intent_version: 3,
+                        credential_ref: credential_ref.to_string(),
+                        remote_app_id: "cli-sqlite".to_string(),
+                        credential: json!({"appSecret": "plaintext-app-secret"}),
+                    },
+                ),
+            )
+            .unwrap();
+        assert_eq!(stored.result.status, CommandResultStatus::Applied);
+        assert_eq!(stored.result.payload["version"], 4);
+        assert_eq!(
+            database
+                .connection()
+                .query_row(
+                    r#"
+                    SELECT intent.state, credential.payload_json
+                    FROM feishu_member_bot_publication_intent AS intent
+                    JOIN channel_credentials AS credential
+                      ON credential.credential_ref = intent.credential_ref
+                    WHERE intent.id = ?1
+                    "#,
+                    [intent_id],
+                    |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+                )
+                .unwrap(),
+            (
+                "credentials_read".to_string(),
+                r#"{"appSecret":"plaintext-app-secret"}"#.to_string(),
+            )
+        );
+        for (expected_version, state) in [(4, "bot_configured"), (5, "version_published")] {
+            service
+                .advance_member_bot_publication_intent(
+                    &mut database,
+                    &host_envelope(
+                        &format!("sqlite-{state}"),
+                        AdvanceMemberBotPublicationIntentCommand {
+                            publication_intent_id: intent_id.to_string(),
+                            expected_version,
+                            state: state.to_string(),
+                            remote_app_id: Some("cli-sqlite".to_string()),
+                            credential_ref: Some(credential_ref.to_string()),
+                            last_completed_step: Some(state.to_string()),
+                            failure_code: None,
+                        },
+                    ),
+                )
+                .unwrap();
+        }
+        service
+            .upsert_feishu_member_bot(
+                &mut database,
+                &host_envelope(
+                    "sqlite-publish-bot",
+                    UpsertFeishuMemberBotCommand {
+                        account_id: account_id.to_string(),
+                        agent_id: agent_id.clone(),
+                        app_id: "cli-sqlite".to_string(),
+                        owner_open_id: "ou-owner-sqlite".to_string(),
+                        bot_open_id: None,
+                        bot_display_name: "SQLite Bot".to_string(),
+                        credential_ref: credential_ref.to_string(),
+                    },
+                ),
+            )
+            .unwrap();
+        let published = service
+            .published_channel_credentials(&mut database)
+            .unwrap();
+        assert_eq!(published.len(), 1);
+        assert_eq!(published[0].agent_id, agent_id);
+        assert_eq!(published[0].payload["appSecret"], "plaintext-app-secret");
+    }
+
     fn connect_dingtalk_account(service: &ChannelService, database: &mut Database) {
         service
             .upsert_dingtalk_account(
@@ -9120,7 +10707,7 @@ mod tests {
                         expected_user_id_digest: dingtalk_owner_user_digest(),
                         expected_corp_id: "ding-corp-1".to_string(),
                         requested_app_name: agent_id.to_string(),
-                        provisioning_mode: "dws_gateway".to_string(),
+                        provisioning_mode: "direct_open_platform".to_string(),
                     },
                 ),
             )
@@ -9724,7 +11311,7 @@ mod tests {
                         expected_user_id_digest: dingtalk_owner_user_digest(),
                         expected_corp_id: "ding-corp-1".to_string(),
                         requested_app_name: "木瓦".to_string(),
-                        provisioning_mode: "dws_gateway".to_string(),
+                        provisioning_mode: "direct_open_platform".to_string(),
                     },
                 ),
             )
@@ -9853,7 +11440,7 @@ mod tests {
                         expected_user_id_digest: dingtalk_owner_user_digest(),
                         expected_corp_id: "ding-corp-1".to_string(),
                         requested_app_name: "木瓦".to_string(),
-                        provisioning_mode: "dws_gateway".to_string(),
+                        provisioning_mode: "direct_open_platform".to_string(),
                     },
                 ),
             )
@@ -9891,7 +11478,7 @@ mod tests {
                         approval_mode: None,
                         approver_user_id_digest: None,
                         last_completed_step: Some("credentials_read".to_string()),
-                        failure_code: Some("dingtalk_dws_timeout".to_string()),
+                        failure_code: Some("dingtalk_open_platform_timeout".to_string()),
                     },
                 ),
             )
@@ -9924,7 +11511,7 @@ mod tests {
                         expected_user_id_digest: dingtalk_owner_user_digest(),
                         expected_corp_id: "ding-corp-1".to_string(),
                         requested_app_name: "岩兰".to_string(),
-                        provisioning_mode: "dws_gateway".to_string(),
+                        provisioning_mode: "direct_open_platform".to_string(),
                     },
                 ),
             )
