@@ -8,7 +8,7 @@ last_updated: 2026-08-17
 
 # Runtime Monitoring 架构
 
-精确字段与方法见 [Runtime Usage Monitoring v3](../contracts/runtime-usage-monitoring-v3.md)。长期最小化、
+精确字段与方法见 [Runtime Usage Monitoring v4](../contracts/runtime-usage-monitoring-v4.md)。长期最小化、
 稀疏语义、clean break 与 Cost grain 由
 [Evidence 与 Usage 不变量](foundational-invariants.md#evidence-usage)拥有。本架构只说明 Usage Transport、内存归一化、
 Projection/Rollup、Read Side 和 Renderer 如何组合。
@@ -60,6 +60,11 @@ Run 的 API public-price equivalent；不新增长期事件表，也不在页面
 
 ## Read path
 
+Codex Run summary 可记录实际 service tier；费用投影先用原生观察、再用冻结/发送时请求档位。未知不套
+Standard 价，实际回退 Standard 不按请求 Fast 计价；失去档位依据时撤回旧目录估价。这个小型 metadata
+写入不新增计费系统，也不替代 Claude 等 Runtime 的原生 reported cost。精确行为由
+[Runtime Usage Monitoring v4](../contracts/runtime-usage-monitoring-v4.md) 拥有。
+
 ```text
 visible Settings page
   -> one monitoring.snapshot(filter)
@@ -96,7 +101,7 @@ epoch、Database contract `v0.99` 与 projection schema `47`。不存在回填�
 ## References
 
 - [Evidence 与 Usage 不变量](foundational-invariants.md#evidence-usage)
-- [Runtime Usage Monitoring v3](../contracts/runtime-usage-monitoring-v3.md)
+- [Runtime Usage Monitoring v4](../contracts/runtime-usage-monitoring-v4.md)
 - [v0.99 implementation plan](../versions/v0.99/implementation-plan.md)
 - [Runtime monitoring feasibility audit](../research/runtime-monitoring/README.md)
 - [Core 受管内容不变量](foundational-invariants.md#core-managed-content)

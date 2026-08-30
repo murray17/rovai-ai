@@ -5775,6 +5775,7 @@ mod tests {
             purpose: "resume safely".to_string(),
             effective_config: json!({}),
             runtime: FrozenAgentRuntimeConfig {
+                camp_fast: None,
                 adapter_kind: AdapterKind::CodexCli,
                 installation_id: "adapter-test-codex".to_string(),
                 installation_generation: current_generation,

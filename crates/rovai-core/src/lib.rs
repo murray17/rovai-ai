@@ -12,6 +12,7 @@ pub mod camp_attachment;
 pub mod camp_attachment_publication;
 pub mod camp_attachment_view;
 pub mod camp_content;
+pub mod camp_fast;
 pub mod camp_history;
 pub mod camp_id;
 mod camp_message_publication;

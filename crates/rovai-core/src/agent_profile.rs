@@ -396,6 +396,8 @@ pub struct ResolvedModelSelection {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FrozenAgentRuntimeConfig {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub camp_fast: Option<crate::camp_fast::FrozenCampMemberFast>,
     pub adapter_kind: AdapterKind,
     pub installation_id: String,
     pub installation_generation: i64,
@@ -3908,7 +3910,11 @@ pub fn resolve_frozen_runtime(
             }),
         )));
     }
-    resolve_frozen_runtime_binding(transaction, &binding)
+    let mut result = resolve_frozen_runtime_binding(transaction, &binding)?;
+    if let Ok(runtime) = &mut result {
+        crate::camp_fast::freeze(transaction, conversation_id, agent_id, runtime)?;
+    }
+    Ok(result)
 }
 
 pub(crate) fn resolve_frozen_runtime_binding(
@@ -4118,6 +4124,7 @@ pub(crate) fn resolve_frozen_runtime_binding(
         }
     };
     let mut frozen = FrozenAgentRuntimeConfig {
+        camp_fast: None,
         adapter_kind,
         installation_id,
         installation_generation,

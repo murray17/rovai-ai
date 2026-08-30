@@ -14,7 +14,7 @@ last_updated: 2026-08-25
 [Runtime Platform Admission v1](../contracts/runtime-platform-admission-v1.md)拥有；Runtime 启动与延迟验证边界见
 [Runtime 进程与校验不变量](foundational-invariants.md#runtime-process-verification)、
 [Runtime 恢复与关闭不变量](foundational-invariants.md#runtime-recovery-shutdown)及
-[Runtime Launch and Verification v28](../contracts/runtime-launch-and-verification-v28.md)。实测版本和能力只由
+[Runtime Launch and Verification v29](../contracts/runtime-launch-and-verification-v29.md)。实测版本和能力只由
 [Runtime 兼容性清单](../runtime-compatibility.md)记录。
 
 ## 四层权威
@@ -106,6 +106,18 @@ catalog。Rovai 只有在唯一内容的项目 Skill 同时通过新 Session adv
 边界明确时才建立 delivery group。当前 managed TRAE group 只写项目 `.trae/skills`；Runtime 兼容扫描到的
 `.agents/skills`、`.traecli/skills` 或用户目录不因此成为 Rovai-owned 投影目标。
 
+## Camp 队员 Fast 边界
+
+Camp Fast service 只拥有成员局部三态偏好、保存绑定代次和安全 metadata 缓存；原生 Adapter 拥有认证、
+模型资格、默认设置解析和实际执行状态。普通 Camp 投影只读缓存，不调用 Runtime。显式检测进入既有
+Runtime Check Manager；同 Runtime 串行、全局预算、deadline 与子进程清理保持原有边界。
+
+新 Run 冻结偏好，Claude 使用一次 inline settings，Codex 使用原生单 Turn 字段。Fast 不参与 Host/Session
+兼容性，因此无需重建 Thread；不触碰用户全局设置。实际执行前复核资格，失败只停止下发覆盖，不清除
+Camp 意图。未知默认或实际状态保持未知，观察不变成 Activity/Evidence。字段合同见
+[Camp Member Fast v1](../contracts/camp-member-fast-v1.md)，理由见
+[V1.33-D01](../versions/v1.33/decisions.md#v1-33-d01)。
+
 ## 模型目录缓存与执行事实
 
 模型目录是 Product Runtime Availability snapshot 的一部分，但其配置体验与执行事实分离。只有 deep probe
@@ -157,7 +169,7 @@ response 已证明输入 accepted 时，公开 failure 的 retryable 必须为 f
 `AgentRunView.failure` 和 `ProductRuntimeAvailability.failure` 只投影该安全对象。显式检查可以持久化 Probe
 Attempt failure；启动浅检测的瞬时 version failure 仍只用于内部发现，不升级为产品级 failure，也不覆盖
 last-known-good。此增量不修改其他 Runtime 的执行路径或 Availability 状态集合。字段级合同见
-[Runtime Launch and Verification v28](../contracts/runtime-launch-and-verification-v28.md)。
+[Runtime Launch and Verification v29](../contracts/runtime-launch-and-verification-v29.md)。
 
 ## TRAE CLI CN 当前边界
 
@@ -220,7 +232,7 @@ Cursor Host 完成 Run 后停止，不跨 Run 延伸未证明的进程状态。
 项目 `.cursor/skills` 是 Rovai managed delivery target；该结论只建立可清理文件投影，不把上游文档中的
 Skill 扫描能力冒充真实 load/invocation pass。当前所有平台未准入，因此普通产品路径不会实际投影或启动
 Cursor。Settings 的 Agent Runtime 目录默认不展示 Cursor；closed identity 只用于内部兼容、历史读取和后续实现。
-字段级行为见 [Runtime Launch and Verification v28](../contracts/runtime-launch-and-verification-v28.md)，
+字段级行为见 [Runtime Launch and Verification v29](../contracts/runtime-launch-and-verification-v29.md)，
 证据状态见 [Runtime 兼容性清单](../runtime-compatibility.md)。
 
 ## ACP Client Terminal 边界
@@ -286,7 +298,7 @@ lease fencing、exact successor read 与 logical/native continuation 全部通�
 因此 snapshot 声明 built-in transport。macOS arm64、macOS x64 与 Windows x64 当前均为 digest-bound
 `qualified`：arm64 由完整 Kimi 资格矩阵准入，macOS x64 由维护者完成平台验收后的独立发布确认准入，Windows
 x64 由独立 Windows 资格证据准入。三者都进入普通 discovery、检查、成员配置和 AgentRun 路径。字段级行为见
-[Runtime Launch and Verification v28](../contracts/runtime-launch-and-verification-v28.md)，证据状态见
+[Runtime Launch and Verification v29](../contracts/runtime-launch-and-verification-v29.md)，证据状态见
 [Runtime 兼容性清单](../runtime-compatibility.md)。
 
 ## Grok Build 当前边界
@@ -346,7 +358,7 @@ Runtime-managed AgentRun 通过标准 ACP `session/set_config_option` 投递冻�
 `CoreEnforcedV1 + read_only Workspace` 恢复路径仍强制 `plan`。descriptor 的 `recommendedValue=default` 只是
 保守提示，不改变 Product default；已有成员保存的
 `default`、`auto` 或 `plan` 不由 discovery、升级或 migration 静默扩权。十二种 Runtime 的 exact 默认矩阵见
-[Runtime Launch and Verification v28](../contracts/runtime-launch-and-verification-v28.md)。
+[Runtime Launch and Verification v29](../contracts/runtime-launch-and-verification-v29.md)。
 
 ACP Client FS 不把这些权限 descriptor 复制成 Core allowlist。`fs/read_text_file` / `fs/write_text_file` 对当前
 fenced Run 只作协议与参数校验，绝对路径按 Runtime 请求执行，相对路径以 execution root 解析；是否能读写、是否

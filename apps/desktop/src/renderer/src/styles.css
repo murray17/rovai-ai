@@ -3558,6 +3558,22 @@ button.task-event-card:focus-visible .task-card-chevron { color: var(--brand-ink
 @media (prefers-reduced-motion: reduce) { .camp-members-reconciliation-mark { animation: none; } }
 .camp-inspector-member-list { padding: 4px 12px 22px; }
 .camp-inspector-member-row { display: grid; min-width: 0; grid-template-columns: 34px minmax(0, 1fr) auto 28px; align-items: center; gap: 8px; padding: 10px 2px; border-bottom: 1px solid var(--line); }
+.camp-inspector-member-row.has-fast { grid-template-columns: 34px minmax(0, 1fr) auto auto 28px; }
+.camp-fast-control { position: relative; display: inline-flex; min-width: 0; }
+.camp-fast-toggle { display: inline-flex; min-height: 28px; align-items: center; justify-content: center; padding: 3px 0; border: 0; border-radius: 6px; color: var(--muted); background: transparent; cursor: pointer; }
+.camp-fast-pill { display: inline-flex; min-height: 22px; align-items: center; gap: 4px; padding: 1px 7px; border: 1px solid var(--control-line); border-radius: 12px; font-size: 10.5px; line-height: 18px; font-weight: 600; }
+.camp-fast-pill svg { width: 12px; height: 12px; flex: 0 0 auto; }
+.camp-fast-toggle.is-on { color: var(--brand); }
+.camp-fast-toggle.is-on .camp-fast-pill { border-color: currentColor; background: var(--brand-soft); }
+.camp-fast-toggle:hover .camp-fast-pill { background: var(--surface-hover); }
+.camp-fast-toggle:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.camp-fast-toggle[aria-disabled="true"] { opacity: .65; cursor: wait; }
+.camp-fast-warning { color: var(--attention); }
+.camp-fast-tooltip { position: absolute; z-index: 2; right: 0; bottom: calc(100% + 6px); display: none; width: 232px; padding: 8px 10px; border: 1px solid var(--line-strong); border-radius: 6px; background: var(--inspector-surface); color: var(--ink); font-size: 11px; line-height: 1.6; pointer-events: none; }
+.camp-fast-control:hover .camp-fast-tooltip, .camp-fast-control:focus-within .camp-fast-tooltip { display: block; }
+.camp-fast-cost-confirmation { padding: 8px 0 12px; border-bottom: 1px solid var(--line); }
+.camp-fast-cost-confirmation p { margin: 0 0 8px; font-size: 12px; line-height: 1.6; color: var(--ink); }
+.camp-fast-cost-confirmation button + button { margin-inline-start: 8px; }
 .camp-inspector-member-avatar { position: relative; display: block; width: 32px; height: 32px; }
 .camp-inspector-member-avatar > i { position: absolute; right: -2px; bottom: -2px; width: 9px; height: 9px; border: 2px solid var(--surface); border-radius: 50%; background: var(--success); }
 .camp-inspector-member-avatar > i.is-away { background: var(--neutral); }

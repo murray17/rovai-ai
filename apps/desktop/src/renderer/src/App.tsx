@@ -141,6 +141,7 @@ export function appendLiveRuntimeEvent(
 }
 
 const ACTIVE_CAMP_INVALIDATION_EVENTS = new Set([
+  'camp.member.fast.updated',
   'camp.member_added',
   'camp.member_removed',
   'camp.membership_reconciliation_started',

@@ -1,7 +1,7 @@
 ---
 document_type: runtime-compatibility-register
 authority: runtime-validation-evidence
-last_updated: 2026-08-27
+last_updated: 2026-08-31
 ---
 
 # Agent Runtime 兼容性清单
@@ -31,6 +31,20 @@ Cursor identity 仅保留内部兼容与历史读取，默认不进入 discovery
 目录不展示该项。设置页的
 DeepSeek Harness “待支持”行是 Renderer-only Preview，不在这个目录中，也没有 Installation、
 Probe、成员选择、诊断或 AgentRun 语义。
+
+### 2026-08-31 Camp Fast metadata 边界
+
+macOS arm64 上只运行原生版本/auth/schema 检查，没有创建模型请求：
+
+| Runtime | 本机观察 | Camp Fast 结论 |
+| --- | --- | --- |
+| Claude Code 2.1.220 | `auth status` 返回 loggedIn、firstParty，但 authMethod 为 `oauth_token`、subscriptionType 为空 | 未明确订阅登录，隐藏；不从 token 或凭据文件推测资格 |
+| Codex CLI 0.147.0 | 标准及 `--experimental` app-server schema 仅有持久 `serviceTier`，没有 `serviceTierForTurn`；模型字段为 `serviceTiers` / `defaultServiceTier` | 不支持所需单 Turn 覆盖，隐藏；禁止用持久字段代替 |
+
+Claude inline settings、默认模型切换及 cooldown 边界参考[原生 Fast 文档](https://code.claude.com/docs/en/fast-mode)。
+离线 native 协议 fixture 验证后续合格版本的精确字段、实际 cwd、分页与未知拒绝；隔离 Electron 验证生产
+成员浮层。它们不等于本机 Fast 付费执行成功，也不扩大既有平台准入。合同见
+[Camp Member Fast v1](contracts/camp-member-fast-v1.md)。
 
 ### 2026-08-27 ACP 文件操作与 Diff pre-fix 真实观测
 
