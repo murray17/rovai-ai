@@ -150,6 +150,10 @@ Agent 公共正文不显示“来自执行”来源条，也不投影 compact �
 当前可操作的队员头像、显示名和 Mention 可打开同一个锚定人物信息卡，不导航。已离开、移除或
 不可解析身份保持静态。精确 token 行为见[结构化 Mention](structured-mentions.md)。
 
+飞书、钉钉通过 Owner 校验后进入 Camp 的用户消息，与普通 Camp 用户消息统一显示“你”和相同的用户头像、
+姓名颜色；不显示平台成员称呼或平台字样头像。这只是 Renderer 呈现，底层 `external_principal` 作者、Provider
+来源与权限边界保持不变，不转换为 `local_user`。
+
 ## 消息回复与父引用
 
 稳定的 user/agent 公共消息在内容列右上角与“复制”并列提供“回复”；鼠标悬停、消息内键盘聚焦或
@@ -178,6 +182,10 @@ Agent 公共正文不显示“来自执行”来源条，也不投影 compact �
 时间线，也不创建私密 thread。失效作者错误和替代成员选择独立展开，不受单行引用规则裁切。领域与字段边界见
 [Camp Composer Draft v2](../../contracts/camp-composer-draft-v2.md)，评审方向见
 [HTML 交互稿](../../prototypes/message-reply-chain/README.md)。
+
+渠道 `external_quote` 复用相同的回复图标、作者与单行摘要，无独立底色或边框；附件名称并入摘要，长内容省略。
+外部引用没有本地父消息导航关系，因此是不可点击、不可 Tab 聚焦、无交互悬停态的静态预览；保留真实引用作者，
+不统一改为“你”。此呈现不改变 Structured Content、引用正文/附件摘要或 Agent 上下文投影。
 
 正文编辑器的折叠光标位于绝对开头时，`Backspace` 等价于取消 reply dock：只清除 reply intent，保留正文、
 附件和所有可见 Mention，并让光标继续停在正文开头。有选区、光标不在开头或 IME 正在合成时不得触发该

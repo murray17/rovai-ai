@@ -3731,11 +3731,7 @@ export function CampWorkspace({
                   }
                   const campMessage = timelineItem.message
                   const member = memberById.get(campMessage.authorId)
-                  const author = campMessage.authorType === 'user'
-                    ? '你'
-                    : campMessage.authorType === 'external_principal'
-                      ? campMessage.authorDisplayName ?? '飞书成员'
-                      : member?.displayName ?? (campMessage.authorType === 'system' ? '系统' : campMessage.authorId)
+                  const author = campMessageAuthorLabel(campMessage, memberById)
                   const authorProfile = profileById.get(campMessage.authorId) ?? null
                   const authorProfileAvailable = Boolean(
                     campMessage.authorType === 'agent'
@@ -3801,11 +3797,8 @@ export function CampWorkspace({
                               decorative
                             />
                           ))}
-                      {campMessage.authorType === 'user' && (
+                      {(campMessage.authorType === 'user' || campMessage.authorType === 'external_principal') && (
                         <span className="local-message-avatar" aria-hidden="true">你</span>
-                      )}
-                      {campMessage.authorType === 'external_principal' && (
-                        <span className="external-message-avatar" aria-hidden="true">飞</span>
                       )}
                       {(campMessage.authorType === 'user'
                         || campMessage.authorType === 'agent'
@@ -3846,7 +3839,7 @@ export function CampWorkspace({
                                   <ReplyParentQuote
                                     parent={replyParent}
                                     authorLabel={replyParent
-                                      ? campMessageAuthorLabel(replyParent, snapshot.members)
+                                      ? campMessageAuthorLabel(replyParent, memberById)
                                       : null}
                                     unavailable={replyParentUnavailable}
                                     loading={!replyParent && !replyParentUnavailable}
@@ -7002,15 +6995,12 @@ function StopOutcomeEvent({
 
 function campMessageAuthorLabel(
   message: CampMessageView,
-  members: CampSnapshot['members']
+  memberById: ReadonlyMap<string, CampSnapshot['members'][number]>
 ): string {
-  if (message.authorType === 'user') return '你'
+  // Channel admission is Owner-only; this label does not change the stored author.
+  if (message.authorType === 'user' || message.authorType === 'external_principal') return '你'
   if (message.authorType === 'system') return '系统'
-  if (message.authorType === 'external_principal') {
-    return message.authorDisplayName ?? '飞书成员'
-  }
-  return members.find((member) => member.agentId === message.authorId)?.displayName
-    ?? message.authorId
+  return memberById.get(message.authorId)?.displayName ?? message.authorId
 }
 
 function ReplyParentQuote({
@@ -7034,13 +7024,43 @@ function ReplyParentQuote({
       </div>
     )
   }
-  const excerpt = parent.body.split(/\s+/u).filter(Boolean).join(' ')
-  const label = `${authorLabel ?? '原消息'} · ${excerpt}`
+  return (
+    <MessageQuotePreview
+      authorLabel={authorLabel ?? '原消息'}
+      body={parent.body}
+      onReveal={onReveal}
+    />
+  )
+}
+
+function MessageQuotePreview({
+  authorLabel,
+  body,
+  onReveal
+}: {
+  authorLabel: string
+  body: string
+  onReveal?(): void
+}): JSX.Element {
+  const excerpt = body.split(/\s+/u).filter(Boolean).join(' ')
+  const label = `${authorLabel} · ${excerpt}`
+  const preview = (
+    <>
+      <ReplyMark />
+      <strong>{authorLabel}</strong>
+      <span>{excerpt}</span>
+    </>
+  )
+  if (!onReveal) {
+    return (
+      <span className="reply-parent-quote is-static" title={label}>
+        {preview}
+      </span>
+    )
+  }
   return (
     <button className="reply-parent-quote" type="button" title={label} onClick={onReveal}>
-      <ReplyMark />
-      <strong>{authorLabel ?? '原消息'}</strong>
-      <span>{excerpt}</span>
+      {preview}
     </button>
   )
 }
@@ -7127,7 +7147,14 @@ function StructuredMessageBody({
   return (
     <p className="structured-message-body">
       {content.map((segment, index) => {
-        if (segment.kind === 'text') return <span key={`text-${index}`}>{segment.text}</span>
+        if (segment.kind === 'text') {
+          // Core's quote separator belongs to the plain-text/context projection;
+          // the shared preview already owns the visual gap before the message.
+          const text = content[index - 1]?.kind === 'external_quote'
+            ? segment.text.replace(/^\n\n/u, '')
+            : segment.text
+          return text ? <span key={`text-${index}`}>{text}</span> : null
+        }
         if (segment.kind === 'current_user_mention') {
           return (
             <span key={`current-user-${index}`}>
@@ -7150,20 +7177,16 @@ function StructuredMessageBody({
           )
         }
         if (segment.kind === 'external_quote') {
+          const excerpt = [
+            segment.body,
+            ...segment.attachmentSummaries.map((attachment) => `[附件] ${attachment.name}`)
+          ].filter((text) => text.trim().length > 0).join(' ')
           return (
-            <span className="external-quote-segment" key={`external-quote-${index}`}>
-              <span className="external-quote-label">引用 {segment.senderDisplayName}</span>
-              <span className="external-quote-body">{segment.body || '（无文本）'}</span>
-              {segment.attachmentSummaries.length > 0 && (
-                <span className="external-quote-attachments">
-                  {segment.attachmentSummaries.map((attachment, attachmentIndex) => (
-                    <span key={`${attachment.name}-${attachmentIndex}`}>
-                      附件 · {attachment.name}
-                    </span>
-                  ))}
-                </span>
-              )}
-            </span>
+            <MessageQuotePreview
+              key={`external-quote-${index}`}
+              authorLabel={segment.senderDisplayName}
+              body={excerpt || '（无文本）'}
+            />
           )
         }
         if (segment.kind === 'all_members_mention') {

@@ -1724,12 +1724,10 @@ button.camp-world-map-live-caption { cursor: pointer; font: inherit; }
 .message-body { position: relative; min-width: 0; max-width: 690px; padding-right: 76px; }
 .bubble-meta { display: flex; min-height: 20px; align-items: baseline; gap: 7px; margin-bottom: 3px; }
 .bubble-meta strong { font-size: 11.5px; font-weight: 700; }
-.conversation-bubble.user .bubble-meta strong { color: var(--brand-ink); }
-.conversation-bubble.external_principal .bubble-meta strong { color: var(--channel-feishu); }
+.conversation-bubble:is(.user, .external_principal) .bubble-meta strong { color: var(--brand-ink); }
 .conversation-bubble.agent .bubble-meta strong { color: var(--agent-accent); }
 .bubble-meta time, .bubble-meta > span:not(.run-message-state) { color: var(--faint); font: 500 9.5px/1.3 ui-monospace, SFMono-Regular, Menlo, monospace; }
 .local-message-avatar { display: grid; width: 32px; height: 32px; flex: 0 0 32px; place-items: center; border: 1px solid color-mix(in srgb, var(--brand) 36%, var(--line)); border-radius: 50%; color: var(--brand-ink); background: var(--surface-raised); font-size: 10px; font-weight: 700; }
-.external-message-avatar { display: grid; width: 32px; height: 32px; flex: 0 0 32px; place-items: center; border: 1px solid color-mix(in srgb, var(--channel-feishu) 34%, var(--line)); border-radius: 50%; color: var(--channel-feishu); background: color-mix(in srgb, var(--channel-feishu) 8%, var(--surface-raised)); font-size: 10px; font-weight: 750; }
 .message-bubble {
   position: relative;
   width: fit-content;
@@ -1741,11 +1739,6 @@ button.camp-world-map-live-caption { cursor: pointer; font: inherit; }
   background: transparent;
 }
 .structured-message-body { white-space: pre-wrap; }
-.external-quote-segment { display: grid; max-width: min(560px, 100%); gap: 5px; margin: 2px 0 10px; padding: 9px 11px; border-left: 2px solid color-mix(in srgb, var(--channel-feishu) 56%, var(--line)); border-radius: 0 6px 6px 0; color: var(--muted); background: color-mix(in srgb, var(--channel-feishu) 5%, var(--surface-subtle)); white-space: normal; }
-.external-quote-label { color: var(--ink); font-size: 10.5px; font-weight: 700; }
-.external-quote-body { white-space: pre-wrap; }
-.external-quote-attachments { display: flex; flex-wrap: wrap; gap: 5px; }
-.external-quote-attachments > span { padding: 2px 6px; border: 1px solid var(--line); border-radius: 4px; color: var(--faint); background: var(--surface-raised); font: 500 9.5px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; }
 .current-user-markdown-body > .current-user-mention-prefix,
 .current-user-markdown-body > .current-user-markdown-content > :first-child:is(p, h3, h4) {
   display: inline;
@@ -2042,7 +2035,7 @@ button.camp-world-map-live-caption { cursor: pointer; font: inherit; }
 .reply-parent-quote svg { width: 13px; height: 13px; flex: 0 0 13px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.4; }
 .reply-parent-quote strong { max-width: 38%; min-width: 0; flex: 0 0 auto; overflow: hidden; color: var(--muted); font-weight: 680; text-overflow: ellipsis; white-space: nowrap; }
 .reply-parent-quote span { min-width: 0; flex: 1 1 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.reply-parent-quote:hover { color: var(--brand-ink); }
+.reply-parent-quote:not(.is-static):hover { color: var(--brand-ink); }
 .reply-parent-quote:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 .reply-parent-quote.is-static { cursor: default; }
 .reply-parent-quote.is-unavailable { color: var(--attention); }
