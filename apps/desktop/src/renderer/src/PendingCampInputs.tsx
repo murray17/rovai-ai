@@ -218,12 +218,11 @@ export function PendingCampInputs({
           </li>
         })}
       </ul>
-      <span className="pending-input-status">
-        {queue.editSession?.pendingInputId === queue.items[0]?.id
-          ? '队首正在编辑，保存或取消后继续。'
-          : queue.items[0]?.state === 'needs_repair' ? '队首需要处理，请编辑保存或删除。'
-          : queue.executionActive ? '当前执行完成后依次发送。' : '即将发送队首消息。'}
-      </span>
+      {queue.editSession?.pendingInputId === queue.items[0]?.id ? (
+        <span className="pending-input-status">队首正在编辑，保存或取消后继续。</span>
+      ) : queue.items[0]?.state === 'needs_repair' ? (
+        <span className="pending-input-status">队首需要处理，请编辑保存或删除。</span>
+      ) : null}
     </section>}
     {error && <p className="pending-input-notice" role="alert">{error}</p>}
     {edit && <div className="composer-box pending-input-editor" onKeyDown={(event) => {
