@@ -11,6 +11,9 @@ const fixtureRoot = process.env.ROVAI_DIAGNOSTICS_ACCEPT_FIXTURE_ROOT
 const outputDir = process.env.ROVAI_DIAGNOSTICS_ACCEPT_OUTPUT_DIR
   ?? await mkdtemp(join(tmpdir(), 'rovai-diagnostics-ui-captures-'))
 const firstPort = Number(process.env.ROVAI_DIAGNOSTICS_ACCEPT_DEBUG_PORT ?? 9491)
+// Cursor remains in the catalog but has no qualified macOS platform evidence.
+const expectedRuntimeCount = 12
+const expectedCheckCount = 6 + expectedRuntimeCount
 
 await mkdir(outputDir, { recursive: true })
 
@@ -118,7 +121,7 @@ try {
       missingMcpRemainsMissing: true,
       explicitMcpPermissionRepairAndRecheck: true,
       repairPreservesMcpJsonBytes: true,
-      allTenRuntimesVisibleWithoutUnusedIssues: true,
+      qualifiedRuntimesVisibleWithoutUnusedIssues: true,
       attentionAndUnknownFilters: true,
       v5CentralRedactionAndNoV4: true,
       dayDesktopAndCompactReducedMotionLayouts: true,
@@ -159,9 +162,9 @@ async function createFixture(name, withPermissionIssue) {
 
 async function assertDiagnosticsReport(cdp, expected) {
   await waitForExpression(cdp,
-    `Boolean(document.querySelector('.diagnostics-summary')
-      && document.querySelectorAll('.diagnostics-result-row').length === 16)`, 20_000)
+    `Boolean(document.querySelector('.diagnostics-summary, .diagnostics-state-error'))`, 20_000)
   const state = await evaluate(cdp, `({
+    summary: Boolean(document.querySelector('.diagnostics-summary')),
     attention: Number(document.querySelector('.diagnostics-summary-counts .is-attention dd')?.textContent),
     unknown: Number(document.querySelector('.diagnostics-summary-counts .is-unknown dd')?.textContent),
     issues: document.querySelectorAll('.diagnostics-issue').length,
@@ -176,14 +179,15 @@ async function assertDiagnosticsReport(cdp, expected) {
     })(),
     body: document.querySelector('.diagnostics-center')?.textContent ?? ''
   })`)
+  assert(state.summary, `${expected.context} could not load diagnostics: ${JSON.stringify(state)}`)
   assert(state.attention === expected.attention,
     `${expected.context} attention was ${state.attention}`)
   assert(state.unknown === expected.unknown,
     `${expected.context} unknown was ${state.unknown}`)
   assert(state.issues === expected.issueCount,
     `${expected.context} issue count was ${state.issues}`)
-  assert(state.rows === 16 && state.runtimes === 10,
-    `${expected.context} did not render 16 checks / 10 Runtimes: ${JSON.stringify(state)}`)
+  assert(state.rows === expectedCheckCount && state.runtimes === expectedRuntimeCount,
+    `${expected.context} did not render ${expectedCheckCount} checks / ${expectedRuntimeCount} Runtimes: ${JSON.stringify(state)}`)
   assert(!state.prototypeSwitcher && !state.repairAll,
     `${expected.context} rendered a prototype or repair-all control`)
   assert(!state.documentOverflow && !state.centerOverflow,
@@ -198,7 +202,7 @@ function assertV5Export(exported, fixture) {
   assert(exported?.diagnostics?.schemaVersion === 1,
     'Diagnostics export omitted the typed report')
   assert(Array.isArray(exported?.diagnostics?.checks)
-      && exported.diagnostics.checks.length === 16,
+      && exported.diagnostics.checks.length === expectedCheckCount,
   'Diagnostics export did not contain all checks')
   const serialized = JSON.stringify(exported)
   assert(!serialized.includes('rovai-diagnostics-v4'), 'Diagnostics export retained v4')
@@ -223,7 +227,7 @@ function visitStrings(value, visit) {
 
 async function openDiagnostics(cdp) {
   const opened = await evaluate(cdp, `(() => {
-    const settings = document.querySelector('.unified-sidebar-footer button[aria-label="设置"]')
+    const settings = document.querySelector('.unified-sidebar-footer .sidebar-settings-main')
     settings?.click()
     return Boolean(settings)
   })()`)
