@@ -63,6 +63,9 @@ import { writeClipboardText } from './clipboard'
 import { runtimeReadinessLabel } from './runtime-status'
 import { runtimeEditorInstallation } from './MemberRuntimeParameters'
 import { SafeMarkdown } from './SafeMarkdown'
+import { FilePreviewPane } from './FilePreviewPane'
+import { useOptionalFilePreview } from './FilePreviewContext'
+import { FileReferenceText } from './FileReferenceLink'
 import { RuntimeFailureNotice } from './RuntimeFailureNotice'
 import { identityColorToken } from './theme'
 import { availableComposerSkillsForLead } from './composer-skill-picker'
@@ -1191,6 +1194,7 @@ export function CampWorkspace({
   workspaceEntrySnapshotReady = true,
   inspectorVisible = true,
   inspectorTab: controlledInspectorTab,
+  inspectorSelectionRequest,
   onInspectorTabChange,
   onOpenInspector,
   notificationFocus = null,
@@ -1234,6 +1238,7 @@ export function CampWorkspace({
   workspaceEntrySnapshotReady?: boolean
   inspectorVisible?: boolean
   inspectorTab?: CampInspectorTab
+  inspectorSelectionRequest?: { tab: CampInspectorTab; sequence: number }
   onInspectorTabChange?(tab: CampInspectorTab): void
   onOpenInspector?(tab: CampInspectorTab): void
   notificationFocus?: NotificationFocusTarget | null
@@ -1245,10 +1250,13 @@ export function CampWorkspace({
   onDismissRuntimeRecovery?(): void
   onNotify?(message: string): void
 }): JSX.Element {
+  const filePreview = useOptionalFilePreview()
+  const [filePreviewResizing, setFilePreviewResizing] = useState(false)
   const [messageContent, setMessageContent] = useState<StructuredCampMessageContent>([])
   const [fileChangesReview, setFileChangesReview] = useState<{
     changes: AgentRunFileChangesView
-    selectedPath: string | null
+    selectedEvidenceFileId: string | null
+    previewingCurrent: boolean
   } | null>(null)
   const fileChangesReviewTriggerRef = useRef<HTMLButtonElement | null>(null)
   const [composerDraft, setComposerDraft] = useState<CampComposerDraftView | null>(null)
@@ -1390,6 +1398,11 @@ export function CampWorkspace({
     && executionInspectorActive
     ? 'execution'
     : inspectorTab
+  useEffect(() => {
+    if (!inspectorSelectionRequest) return
+    setExecutionInspectorActive(false)
+    if (controlledInspectorTab === undefined) setLocalInspectorTab(inspectorSelectionRequest.tab)
+  }, [controlledInspectorTab, inspectorSelectionRequest])
   const [taskCreationActive, setTaskCreationActive] = useState(false)
   const [focusedTaskId, setFocusedTaskId] = useState<string | null>(null)
   const [taskFocusRequest, setTaskFocusRequest] = useState(0)
@@ -3462,11 +3475,44 @@ export function CampWorkspace({
     />
   ) : null
 
+  useEffect(() => () => {
+    document.documentElement.classList.remove('file-preview-resizing')
+  }, [])
+
+  const beginFilePreviewResize = (event: ReactPointerEvent<HTMLDivElement>): void => {
+    if (event.button !== 0 || !filePreview) return
+    event.preventDefault()
+    event.currentTarget.setPointerCapture(event.pointerId)
+    document.documentElement.classList.add('file-preview-resizing')
+    setFilePreviewResizing(true)
+  }
+
+  const resizeFilePreview = (event: ReactPointerEvent<HTMLDivElement>): void => {
+    if (!filePreviewResizing || !filePreview) return
+    const grid = event.currentTarget.parentElement
+    if (!grid) return
+    const bounds = grid.getBoundingClientRect()
+    const rightBoundary = bounds.right - (inspectorVisible ? 310 : 0)
+    const maximum = Math.max(360, Math.min(bounds.width * .48, rightBoundary - bounds.left - 300))
+    filePreview.setPaneWidth(Math.min(maximum, Math.max(360, rightBoundary - event.clientX)))
+  }
+
+  const endFilePreviewResize = (event: ReactPointerEvent<HTMLDivElement>): void => {
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId)
+    }
+    document.documentElement.classList.remove('file-preview-resizing')
+    setFilePreviewResizing(false)
+  }
+
   return (
     <section className="workspace-shell camp-workspace" aria-label={`会话：${snapshot.camp.title}`}>
       <div
-        className={`workspace-grid ${inspectorVisible ? '' : 'inspector-collapsed'}`.trim()}
-        hidden={fileChangesReview !== null}
+        className={`workspace-grid ${inspectorVisible ? '' : 'inspector-collapsed'} ${filePreview?.tabs.length && filePreview.paneVisible ? 'file-preview-open' : ''}`.trim()}
+        style={filePreview?.tabs.length && filePreview.paneVisible
+          ? { '--file-preview-width': `${filePreview.paneWidth}px` } as CSSProperties
+          : undefined}
+        hidden={fileChangesReview !== null && !fileChangesReview.previewingCurrent}
       >
         <section
           className="timeline-pane"
@@ -3690,11 +3736,14 @@ export function CampWorkspace({
                       <AgentRunFileChangesTimelineCard
                         key={timelineItem.id}
                         changes={timelineItem.changes}
-                        onOpenReview={(selectedPath, trigger) => {
+                        onOpenReview={(selectedEvidenceFileId, trigger) => {
                           fileChangesReviewTriggerRef.current = trigger
                           setFileChangesReview({
                             changes: timelineItem.changes,
-                            selectedPath: selectedPath ?? timelineItem.changes.files[0]?.path ?? null
+                            selectedEvidenceFileId: selectedEvidenceFileId
+                              ?? timelineItem.changes.files[0]?.evidenceFileId
+                              ?? null,
+                            previewingCurrent: false
                           })
                         }}
                       />
@@ -3839,7 +3888,21 @@ export function CampWorkspace({
                                   )
                                     ? (
                                         <div className="final-copy">
-                                          <SafeMarkdown>{displayBody}</SafeMarkdown>
+                                          <SafeMarkdown
+                                            onFileReference={(rawReference) => {
+                                              if (!filePreview) return
+                                              void filePreview.open({
+                                                kind: 'message_reference',
+                                                campId: snapshot.camp.id,
+                                                messageId: campMessage.id,
+                                                rawReference
+                                              }).then((outcome) => {
+                                                if (outcome.kind === 'error') onNotify(outcome.error.message)
+                                              })
+                                            }}
+                                          >
+                                            {displayBody}
+                                          </SafeMarkdown>
                                         </div>
                                       )
                                     : (
@@ -3857,6 +3920,17 @@ export function CampWorkspace({
                                                 trigger,
                                                 focusPanel
                                               )}
+                                            onFileReference={(rawReference) => {
+                                              if (!filePreview) return
+                                              void filePreview.open({
+                                                kind: 'message_reference',
+                                                campId: snapshot.camp.id,
+                                                messageId: campMessage.id,
+                                                rawReference
+                                              }).then((outcome) => {
+                                                if (outcome.kind === 'error') onNotify(outcome.error.message)
+                                              })
+                                            }}
                                           />
                                         </div>
                                       )
@@ -3935,6 +4009,34 @@ export function CampWorkspace({
             {!executionDrawerPortal && executionPlacement === 'bottom' && executionDrawer}
           </div>
         </section>
+
+        {filePreview?.tabs.length && filePreview.paneVisible ? (
+          <>
+            <div
+              className={`file-preview-resize-handle${filePreviewResizing ? ' is-resizing' : ''}`}
+              role="separator"
+              aria-label="调整文件预览宽度"
+              aria-orientation="vertical"
+              aria-valuemin={360}
+              aria-valuenow={filePreview.paneWidth}
+              tabIndex={0}
+              onPointerDown={beginFilePreviewResize}
+              onPointerMove={resizeFilePreview}
+              onPointerUp={endFilePreviewResize}
+              onPointerCancel={endFilePreviewResize}
+              onLostPointerCapture={() => {
+                document.documentElement.classList.remove('file-preview-resizing')
+                setFilePreviewResizing(false)
+              }}
+              onKeyDown={(event) => {
+                if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return
+                event.preventDefault()
+                filePreview.setPaneWidth(filePreview.paneWidth + (event.key === 'ArrowLeft' ? 16 : -16))
+              }}
+            />
+            <FilePreviewPane />
+          </>
+        ) : null}
 
         {inspectorVisible && <aside
           className="activity-pane"
@@ -4398,13 +4500,26 @@ export function CampWorkspace({
             : ''}
         </span>
       </div>
-      {fileChangesReview && (
+      {fileChangesReview && !fileChangesReview.previewingCurrent && (
         <AgentRunFileChangesReviewPage
           key={`${fileChangesReview.changes.agentRunId}:${fileChangesReview.changes.executionEpoch}`}
           campId={snapshot.camp.id}
           changes={fileChangesReview.changes}
-          initialSelectedPath={fileChangesReview.selectedPath}
+          initialSelectedEvidenceFileId={fileChangesReview.selectedEvidenceFileId}
+          onPreviewCurrent={() => {
+            setFileChangesReview((current) => current
+              ? { ...current, previewingCurrent: true }
+              : current)
+            filePreview?.setReturnTarget({
+              kind: 'evidence_review',
+              label: '返回文件变更',
+              onReturn: () => setFileChangesReview((current) => current
+                ? { ...current, previewingCurrent: false }
+                : current)
+            })
+          }}
           onBack={() => {
+            filePreview?.setReturnTarget(null)
             setFileChangesReview(null)
             window.requestAnimationFrame(() => {
               fileChangesReviewTriggerRef.current?.focus({ preventScroll: true })
@@ -6531,7 +6646,7 @@ export function AgentRunFileChangesTimelineCard({
   onOpenReview
 }: {
   changes: AgentRunFileChangesView
-  onOpenReview(selectedPath: string | undefined, trigger: HTMLButtonElement): void
+  onOpenReview(selectedEvidenceFileId: string | undefined, trigger: HTMLButtonElement): void
 }): JSX.Element {
   const [showAllFiles, setShowAllFiles] = useState(false)
   const visibleFiles = showAllFiles ? changes.files : changes.files.slice(0, 3)
@@ -6562,11 +6677,11 @@ export function AgentRunFileChangesTimelineCard({
       <div className="run-file-changes-card-files" aria-label="变更文件">
         {visibleFiles.map((file, index) => (
           <button
-            key={`${index}:${file.path}`}
+            key={file.evidenceFileId}
             className="run-file-change-file"
             type="button"
             aria-label={`查看 ${file.path} 的文件变化`}
-            onClick={(event) => onOpenReview(file.path, event.currentTarget)}
+            onClick={(event) => onOpenReview(file.evidenceFileId, event.currentTarget)}
           >
             <code title={file.path}>{file.path}</code>
             <span className="run-file-change-stats" aria-hidden="true">
@@ -6641,21 +6756,28 @@ type AgentRunFileChangesDetailStatus = 'loading' | 'ready' | 'error'
 export function AgentRunFileChangesReviewPage({
   campId,
   changes,
-  initialSelectedPath,
+  initialSelectedEvidenceFileId,
+  onPreviewCurrent,
   onBack
 }: {
   campId: string
   changes: AgentRunFileChangesView
-  initialSelectedPath: string | null
+  initialSelectedEvidenceFileId: string | null
+  onPreviewCurrent(): void
   onBack(): void
 }): JSX.Element {
-  const initialPath = changes.files.some((file) => file.path === initialSelectedPath)
-    ? initialSelectedPath
-    : changes.files[0]?.path ?? null
-  const [selectedPath, setSelectedPath] = useState<string | null>(initialPath)
+  const filePreview = useOptionalFilePreview()
+  const initialEvidenceFileId = changes.files.some((file) =>
+    file.evidenceFileId === initialSelectedEvidenceFileId
+  )
+    ? initialSelectedEvidenceFileId
+    : changes.files[0]?.evidenceFileId ?? null
+  const [selectedEvidenceFileId, setSelectedEvidenceFileId] = useState<string | null>(initialEvidenceFileId)
   const [detail, setDetail] = useState<AgentRunFileChangesDetailView | null>(null)
   const [detailStatus, setDetailStatus] = useState<AgentRunFileChangesDetailStatus>('loading')
   const [loadAttempt, setLoadAttempt] = useState(0)
+  const [openCurrentStatus, setOpenCurrentStatus] = useState<'idle' | 'opening'>('idle')
+  const [openCurrentError, setOpenCurrentError] = useState<string | null>(null)
   const requestId = useRef(0)
   const headingRef = useRef<HTMLHeadingElement>(null)
 
@@ -6677,7 +6799,7 @@ export function AgentRunFileChangesReviewPage({
     ).then((result) => {
       if (currentRequest !== requestId.current) return
       if (
-        result.schemaVersion !== 1
+        result.schemaVersion !== 2
         || result.card.agentRunId !== changes.agentRunId
         || result.card.executionEpoch !== changes.executionEpoch
       ) {
@@ -6694,14 +6816,44 @@ export function AgentRunFileChangesReviewPage({
     }
   }, [campId, changes.agentRunId, changes.executionEpoch, loadAttempt])
 
+  const openCurrentFile = async (): Promise<void> => {
+    const file = changes.files.find((candidate) =>
+      candidate.evidenceFileId === selectedEvidenceFileId
+    )
+    if (!file || !filePreview || openCurrentStatus === 'opening') return
+    setOpenCurrentStatus('opening')
+    setOpenCurrentError(null)
+    const outcome = await filePreview.open({
+      kind: 'run_evidence',
+      campId,
+      agentRunId: changes.agentRunId,
+      executionEpoch: changes.executionEpoch,
+      evidenceFileId: file.evidenceFileId,
+      action: 'open_current'
+    })
+    setOpenCurrentStatus('idle')
+    if (outcome.kind === 'preview') {
+      onPreviewCurrent()
+      return
+    }
+    setOpenCurrentError(outcome.kind === 'error'
+      ? outcome.error.message
+      : outcome.kind === 'system'
+        ? '这个文件已使用系统默认应用打开。'
+        : '当前文件暂时无法打开。')
+  }
+
   return (
     <AgentRunFileChangesReviewSurface
       changes={changes}
       detail={detail}
       detailStatus={detailStatus}
-      selectedPath={selectedPath}
+      selectedEvidenceFileId={selectedEvidenceFileId}
       headingRef={headingRef}
-      onSelectPath={setSelectedPath}
+      onSelectEvidenceFileId={setSelectedEvidenceFileId}
+      onOpenCurrent={() => void openCurrentFile()}
+      openCurrentStatus={openCurrentStatus}
+      openCurrentError={openCurrentError}
       onBack={onBack}
       onRetry={() => setLoadAttempt((attempt) => attempt + 1)}
     />
@@ -6712,25 +6864,33 @@ export function AgentRunFileChangesReviewSurface({
   changes,
   detail,
   detailStatus,
-  selectedPath,
+  selectedEvidenceFileId,
   headingRef,
-  onSelectPath,
+  onSelectEvidenceFileId,
+  onOpenCurrent,
+  openCurrentStatus,
+  openCurrentError,
   onBack,
   onRetry
 }: {
   changes: AgentRunFileChangesView
   detail: AgentRunFileChangesDetailView | null
   detailStatus: AgentRunFileChangesDetailStatus
-  selectedPath: string | null
+  selectedEvidenceFileId: string | null
   headingRef?: RefObject<HTMLHeadingElement | null>
-  onSelectPath(path: string): void
+  onSelectEvidenceFileId(evidenceFileId: string): void
+  onOpenCurrent(): void
+  openCurrentStatus: 'idle' | 'opening'
+  openCurrentError: string | null
   onBack(): void
   onRetry(): void
 }): JSX.Element {
-  const selectedIndex = Math.max(0, changes.files.findIndex((file) => file.path === selectedPath))
+  const selectedIndex = Math.max(0, changes.files.findIndex((file) =>
+    file.evidenceFileId === selectedEvidenceFileId
+  ))
   const selectedFile = changes.files[selectedIndex] ?? null
   const selectedDetail = selectedFile
-    ? detail?.files.find((file) => file.path === selectedFile.path) ?? null
+    ? detail?.files.find((file) => file.evidenceFileId === selectedFile.evidenceFileId) ?? null
     : null
   const truthNote = selectedFile ? agentRunFileChangeTruthNote(selectedFile.presentationKind) : null
   return (
@@ -6752,14 +6912,18 @@ export function AgentRunFileChangesReviewSurface({
           <button
             type="button"
             disabled={selectedIndex <= 0}
-            onClick={() => onSelectPath(changes.files[selectedIndex - 1]?.path ?? selectedFile?.path ?? '')}
+            onClick={() => onSelectEvidenceFileId(
+              changes.files[selectedIndex - 1]?.evidenceFileId ?? selectedFile?.evidenceFileId ?? ''
+            )}
           >
             上一文件
           </button>
           <button
             type="button"
             disabled={selectedIndex < 0 || selectedIndex >= changes.files.length - 1}
-            onClick={() => onSelectPath(changes.files[selectedIndex + 1]?.path ?? selectedFile?.path ?? '')}
+            onClick={() => onSelectEvidenceFileId(
+              changes.files[selectedIndex + 1]?.evidenceFileId ?? selectedFile?.evidenceFileId ?? ''
+            )}
           >
             下一文件
           </button>
@@ -6776,10 +6940,10 @@ export function AgentRunFileChangesReviewSurface({
                 <button
                   className="agent-run-file-review-file"
                   type="button"
-                  key={file.path}
-                  aria-current={file.path === selectedFile?.path ? 'true' : undefined}
+                  key={file.evidenceFileId}
+                  aria-current={file.evidenceFileId === selectedFile?.evidenceFileId ? 'true' : undefined}
                   title={file.path}
-                  onClick={() => onSelectPath(file.path)}
+                  onClick={() => onSelectEvidenceFileId(file.evidenceFileId)}
                 >
                   <span className="agent-run-file-review-kind" aria-hidden="true">
                     {agentRunFileChangeKindMark(file.changeKind)}
@@ -6812,15 +6976,30 @@ export function AgentRunFileChangesReviewSurface({
                     <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h10l6 6v10H4Z" /><path d="M14 4v6h6" /></svg>
                     <code title={selectedFile.path}>{selectedFile.path}</code>
                   </div>
-                  <span className="agent-run-file-review-pane-meta">
-                    <small>{agentRunFileChangeModeLabel(selectedFile.presentationKind)}</small>
-                    <span aria-hidden="true">
-                      {selectedFile.additions !== undefined && selectedFile.deletions !== undefined
-                        ? <><i className="addition">+{selectedFile.additions}</i><i className="deletion">−{selectedFile.deletions}</i></>
-                        : `${selectedFile.operationCount} 次修改`}
+                  <div className="agent-run-file-review-pane-actions">
+                    <span className="agent-run-file-review-pane-meta">
+                      <small>{agentRunFileChangeModeLabel(selectedFile.presentationKind)}</small>
+                      <span aria-hidden="true">
+                        {selectedFile.additions !== undefined && selectedFile.deletions !== undefined
+                          ? <><i className="addition">+{selectedFile.additions}</i><i className="deletion">−{selectedFile.deletions}</i></>
+                          : `${selectedFile.operationCount} 次修改`}
+                      </span>
                     </span>
-                  </span>
+                    <button
+                      className="agent-run-file-review-open-current"
+                      type="button"
+                      disabled={openCurrentStatus === 'opening'}
+                      onClick={onOpenCurrent}
+                    >
+                      {openCurrentStatus === 'opening' ? '正在打开…' : '打开当前文件'}
+                    </button>
+                  </div>
                 </header>
+                {openCurrentError && (
+                  <div className="agent-run-file-review-current-error" role="status">
+                    {openCurrentError}
+                  </div>
+                )}
                 {truthNote && (
                   <div className="agent-run-file-review-truth-note">
                     <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9" /><path d="M12 11v5M12 8h.01" /></svg>
@@ -6829,7 +7008,7 @@ export function AgentRunFileChangesReviewSurface({
                 )}
                 <div
                   className="agent-run-file-review-scroll"
-                  key={selectedFile.path}
+                  key={selectedFile.evidenceFileId}
                   tabIndex={0}
                   aria-label={`${selectedFile.path} 的文件变化内容`}
                 >
@@ -7069,7 +7248,8 @@ function StructuredMessageBody({
   members,
   renderLeadingCurrentUserMarkdown = false,
   onActivateMemberMention,
-  onActivateAllMembersMention
+  onActivateAllMembersMention,
+  onFileReference
 }: {
   body: string
   content: StructuredCampMessageContent | null
@@ -7081,8 +7261,9 @@ function StructuredMessageBody({
     focusPanel: boolean
   ): void
   onActivateAllMembersMention?(trigger: HTMLElement, focusPanel: boolean): void
+  onFileReference?(rawReference: string): void
 }): JSX.Element {
-  if (content === null) return <p>{body}</p>
+  if (content === null) return <p><FileReferenceText text={body} onActivate={onFileReference} /></p>
   const markdownBody = renderLeadingCurrentUserMarkdown
     ? projectLeadingCurrentUserMentionMarkdownBody(content, members)
     : null
@@ -7094,7 +7275,7 @@ function StructuredMessageBody({
           {markdownBody.length > 0 ? ' ' : ''}
         </span>
         {markdownBody.length > 0 && (
-          <SafeMarkdown className="current-user-markdown-content">{markdownBody}</SafeMarkdown>
+          <SafeMarkdown className="current-user-markdown-content" onFileReference={onFileReference}>{markdownBody}</SafeMarkdown>
         )}
       </div>
     )
@@ -7103,7 +7284,11 @@ function StructuredMessageBody({
   return (
     <p className="structured-message-body">
       {content.map((segment, index) => {
-        if (segment.kind === 'text') return <span key={`text-${index}`}>{segment.text}</span>
+        if (segment.kind === 'text') return (
+          <span key={`text-${index}`}>
+            <FileReferenceText text={segment.text} onActivate={onFileReference} />
+          </span>
+        )
         if (segment.kind === 'current_user_mention') {
           return (
             <span key={`current-user-${index}`}>
@@ -7245,6 +7430,7 @@ function AttachmentCard({
   onNotify?: (message: string) => void
   timeline?: boolean
 }): JSX.Element {
+  const filePreview = useOptionalFilePreview()
   const [previewUrl, setPreviewUrl] = useState<string | null>(null)
   const [previewFailed, setPreviewFailed] = useState(false)
   const [previewOpen, setPreviewOpen] = useState(false)
@@ -7281,11 +7467,23 @@ function AttachmentCard({
     }
   }, [attachment.id, attachment.previewKind])
 
-  const runAttachmentAction = async (action: 'open' | 'reveal'): Promise<void> => {
+  const runAttachmentAction = async (
+    action: 'open' | 'reveal',
+    forceSystem = false
+  ): Promise<void> => {
     if (!timeline || !campId || attachmentAction) return
     setAttachmentAction(action)
     try {
       if (action === 'open') {
+        if (!forceSystem && attachment.kind === 'file' && filePreview) {
+          const outcome = await filePreview.open({
+            kind: 'attachment',
+            campId,
+            attachmentId: attachment.id
+          })
+          if (outcome.kind === 'error') onNotify(outcome.error.message)
+          return
+        }
         const result = await window.rovai.attachments.open(campId, attachment.id)
         if (result.error === 'target_unavailable') onNotify('此附件当前不可用')
         else if (result.error) onNotify('无法使用系统应用打开此附件')
@@ -7372,10 +7570,13 @@ function AttachmentCard({
                 aria-busy={attachmentAction !== null}
                 aria-label={hasImagePreview
                   ? `预览附件 ${attachment.displayName}`
-                  : `${systemOpenLabel} ${attachment.displayName}`}
+                  : attachment.kind === 'file' && filePreview
+                    ? `打开文件预览 ${attachment.displayName}`
+                    : `${systemOpenLabel} ${attachment.displayName}`}
                 disabled={attachmentAction !== null}
                 onClick={() => {
-                  if (hasImagePreview) setPreviewOpen(true)
+                  if (attachment.kind === 'file' && filePreview) void runAttachmentAction('open')
+                  else if (hasImagePreview) setPreviewOpen(true)
                   else void runAttachmentAction('open')
                 }}
                 onKeyDown={(event) => {
@@ -7416,7 +7617,7 @@ function AttachmentCard({
                     <DropdownMenu.Item
                       className="attachment-context-menu-item"
                       disabled={attachmentAction !== null}
-                      onSelect={() => void runAttachmentAction('open')}
+                      onSelect={() => void runAttachmentAction('open', true)}
                     >
                       <AttachmentOpenGlyph kind={attachment.kind} />
                       <span>{systemOpenLabel}</span>

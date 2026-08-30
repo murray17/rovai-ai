@@ -358,6 +358,27 @@ mod tests {
         );
         assert!(serde_json::from_str::<Segment>(r#"{"kind":"markdown","text":"@木瓦"}"#).is_err());
         assert!(
+            serde_json::from_value::<Segment>(serde_json::json!({
+                "kind": "file_selection",
+                "selection": {
+                    "selectionId": "selection-1",
+                    "displayPath": "src/app.ts",
+                    "selectedText": "const ready = true;",
+                    "startLine": 1,
+                    "startColumn": 1,
+                    "endLine": 1,
+                    "endColumn": 20,
+                    "positionEncoding": "utf-16",
+                    "rangeEnd": "exclusive",
+                    "contentVersion": { "size": 19, "mtimeMs": 10, "fileId": "1:2" },
+                    "verification": "current_file",
+                    "sourceKind": "camp_workspace",
+                    "sourceIdentityDigest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                }
+            }))
+            .is_err()
+        );
+        assert!(
             validate_content(&[Segment::MemberMention {
                 agent_id: " agent_2".into(),
             }])

@@ -2,7 +2,7 @@
 document_type: ui-component-contract
 authority: renderer-structured-mentions
 status: accepted
-last_updated: 2026-08-14
+last_updated: 2026-08-30
 ---
 
 # 结构化 Mention
@@ -47,7 +47,8 @@ Default Lead。用户手动改址后，即使删除全部 Mention，也不再从
 
 ## 复制与粘贴
 
-整条用户消息的复制入口同时写入当前可见纯文本与 Rovai AI 私有结构化身份。粘贴回 Composer 时，
+整条用户消息的复制入口同时写入正文纯文本与 Rovai AI 私有结构化身份；[文件链接](file-preview.md#会话内的文件链接)
+保留原始 Markdown/代码路径，不能因显示 label 而丢掉 target。普通系统选区复制仍以实际选中的可见文字为准。粘贴回 Composer 时，
 只恢复目标 Camp 中当前仍可提及的 Member Mention；其他内容按可见文字降级。普通系统选区复制和
 外部纯文本 Paste 不反向猜测身份。
 

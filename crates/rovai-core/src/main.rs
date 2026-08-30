@@ -128,6 +128,7 @@ use rovai_core::{
         AgentRunExecutionEvidence, ExecutionEvidenceService, PreparedRuntimeEvidence,
         RUNTIME_EVIDENCE_DELTA_BATCH_MAX_BYTES, RecordedExecutionEvidence,
     },
+    file_preview_authority::{ResolveFilePreviewSourceParams, resolve_file_preview_source},
     git,
     managed_attachment::ManagedAttachmentStore,
     managed_blob::ManagedBlobStore,
@@ -6354,6 +6355,16 @@ impl Core {
                 .await
                 .context("Desktop Attachment target verification task failed")??;
                 Ok(serde_json::to_value(target)?)
+            }
+            "filePreview.resolveSource" => {
+                let params: ResolveFilePreviewSourceParams =
+                    serde_json::from_value(request.params.clone())?;
+                let database = self.database.lock().await;
+                Ok(serde_json::to_value(resolve_file_preview_source(
+                    &database,
+                    &ManagedBlobStore::new(&self.data_dir),
+                    params,
+                )?)?)
             }
             "camp.messages.send" => {
                 let params: SendCampMessageParams = serde_json::from_value(request.params.clone())?;

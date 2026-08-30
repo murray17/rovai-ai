@@ -1,7 +1,7 @@
 import { chmod, lstat, mkdir, readFile, readdir, rename, unlink, writeFile } from 'node:fs/promises'
 import { randomUUID } from 'node:crypto'
 import { dirname, join } from 'node:path'
-import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeTheme, screen, shell } from 'electron'
+import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeTheme, protocol, screen, shell } from 'electron'
 import { isCampId } from '@contracts'
 import type {
   AppearanceSnapshot,
@@ -99,6 +99,20 @@ import {
   type DesktopAutoUpdater
 } from './app-updates'
 import { AppQuitCoordinator } from './app-quit-coordinator'
+import { CoreFilePreviewSourceAuthority } from './file-preview/file-preview-authority'
+import { FilePreviewService } from './file-preview/file-preview-service'
+import {
+  parseChooseRootRequest,
+  parseCopyPathRequest,
+  parseFilePreviewCamp,
+  parseGenerationRequest,
+  parseHandleRequest,
+  parseLineRequest,
+  parseOpenFilePreviewRequest,
+  parsePageRequest,
+  parseReloadRequest,
+  parseReopenRequest
+} from './file-preview/file-preview-ipc-input'
 
 const mainStartupStartedAt = performance.now()
 console.info('[startup] stage=main_module_loaded elapsed_ms=0.0')
@@ -217,6 +231,16 @@ const allowedMethods = new Set<CoreMethod>([
 ])
 const APP_NAME = 'Rovai AI'
 app.setName(APP_NAME)
+protocol.registerSchemesAsPrivileged([{
+  scheme: 'rovai-preview',
+  privileges: {
+    standard: true,
+    secure: true,
+    supportFetchAPI: true,
+    corsEnabled: true,
+    stream: true
+  }
+}])
 const hasExplicitUserDataDirectory = app.commandLine.hasSwitch('user-data-dir')
 const isolatedAcceptanceInstance =
   process.env.ROVAI_ALLOW_ISOLATED_INSTANCE === '1'
@@ -292,6 +316,77 @@ const memberAvatars = coreDataPath === null ? null : new MemberAvatarAssetServic
 function requireMemberAvatars(): MemberAvatarAssetService {
   if (!memberAvatars) throw new Error('Core data directory has not been admitted')
   return memberAvatars
+}
+
+const filePreview = new FilePreviewService(
+  new CoreFilePreviewSourceAuthority(core),
+  {
+    async selectRoot(webContentsId) {
+      const window = mainWindow?.webContents.id === webContentsId ? mainWindow : null
+      if (!window || window.isDestroyed()) return null
+      const result = await dialog.showOpenDialog(window, {
+        title: '授权文件所在目录',
+        buttonLabel: '选择目录',
+        properties: ['openDirectory']
+      })
+      return result.canceled ? null : result.filePaths[0] ?? null
+    },
+    async confirmOpen(displayName) {
+      const options = {
+        type: 'warning' as const,
+        buttons: ['取消', '仍然打开'],
+        defaultId: 0,
+        cancelId: 0,
+        noLink: true,
+        message: '此文件可能执行程序或安装软件',
+        detail: `只有在你确认来源可信时才继续。\n\n${displayName}`
+      }
+      const result = mainWindow
+        ? await dialog.showMessageBox(mainWindow, options)
+        : await dialog.showMessageBox(options)
+      return result.response === 1
+    },
+    openPath(path) {
+      return shell.openPath(path)
+    },
+    revealPath(path) {
+      shell.showItemInFolder(path)
+    },
+    copyText(text) {
+      clipboard.writeText(text)
+    },
+    publishExternalUpdate(notification) {
+      if (
+        !mainWindow
+        || mainWindow.isDestroyed()
+        || mainWindow.webContents.id !== notification.webContentsId
+      ) return
+      mainWindow.webContents.send('rovai:file-preview-external-update', {
+        campId: notification.campId,
+        previewKeys: notification.previewKeys
+      })
+    }
+  }
+)
+const filePreviewProtocolSessions = new WeakSet<Electron.Session>()
+
+function installFilePreviewProtocol(window: BrowserWindow): void {
+  const targetSession = window.webContents.session
+  if (filePreviewProtocolSessions.has(targetSession)) return
+  targetSession.webRequest.onBeforeRequest(
+    { urls: ['rovai-preview://asset/*'] },
+    (details, callback) => {
+      callback({
+        cancel: !filePreview.authorizeHtmlAsset(
+          details.webContentsId ?? -1,
+          details.method,
+          details.url
+        )
+      })
+    }
+  )
+  targetSession.protocol.handle('rovai-preview', (request) => filePreview.serveHtmlAsset(request))
+  filePreviewProtocolSessions.add(targetSession)
 }
 
 function publishLocalDegradations(next: StructuredError[]): void {
@@ -458,6 +553,7 @@ function createWindow(): void {
     }
   })
   const webContentsId = window.webContents.id
+  installFilePreviewProtocol(window)
   if (process.platform === 'win32') window.setMenuBarVisibility(false)
   mainWindow = window
   desktopSessions.create(
@@ -517,6 +613,7 @@ function createWindow(): void {
     if (pageZoomFeedbackTimer !== null) clearTimeout(pageZoomFeedbackTimer)
     pageZoomFeedbackTimer = null
     desktopSessions.delete(webContentsId)
+    void filePreview.releaseWindow(webContentsId)
     if (mainWindow === window) mainWindow = null
   })
 
@@ -528,6 +625,9 @@ function createWindow(): void {
   window.webContents.on('will-navigate', (event, url) => {
     const current = window.webContents.getURL()
     if (current && url !== current) event.preventDefault()
+  })
+  window.webContents.on('will-frame-navigate', (details) => {
+    if (!details.isMainFrame) details.preventDefault()
   })
 
   if (process.env.ELECTRON_RENDERER_URL) {
@@ -742,6 +842,48 @@ ipcMain.handle('rovai:supervisor-retry', () => {
   }
   return core.retryFullCore()
 })
+
+ipcMain.handle('rovai:file-preview-bind-camp', (event, value: unknown) =>
+  filePreview.bindCamp(requireFilePreviewSender(event), parseFilePreviewCamp(value)))
+
+ipcMain.handle('rovai:file-preview-open', (event, value: unknown) =>
+  filePreview.open(requireFilePreviewSender(event), parseOpenFilePreviewRequest(value)))
+
+ipcMain.handle('rovai:file-preview-reopen', (event, value: unknown) =>
+  filePreview.reopen(requireFilePreviewSender(event), parseReopenRequest(value)))
+
+ipcMain.handle('rovai:file-preview-read-text', (event, value: unknown) =>
+  filePreview.readText(requireFilePreviewSender(event), parseGenerationRequest(value)))
+
+ipcMain.handle('rovai:file-preview-read-page', (event, value: unknown) =>
+  filePreview.readPage(requireFilePreviewSender(event), parsePageRequest(value)))
+
+ipcMain.handle('rovai:file-preview-resolve-line', (event, value: unknown) =>
+  filePreview.resolveLine(requireFilePreviewSender(event), parseLineRequest(value)))
+
+ipcMain.handle('rovai:file-preview-read-binary', (event, value: unknown) =>
+  filePreview.readBinary(requireFilePreviewSender(event), parseGenerationRequest(value)))
+
+ipcMain.handle('rovai:file-preview-prepare-html', (event, value: unknown) =>
+  filePreview.prepareHtml(requireFilePreviewSender(event), parseGenerationRequest(value)))
+
+ipcMain.handle('rovai:file-preview-reload', (event, value: unknown) =>
+  filePreview.reload(requireFilePreviewSender(event), parseReloadRequest(value)))
+
+ipcMain.handle('rovai:file-preview-release', (event, value: unknown) =>
+  filePreview.release(requireFilePreviewSender(event), parseHandleRequest(value)))
+
+ipcMain.handle('rovai:file-preview-open-in-system', (event, value: unknown) =>
+  filePreview.openInSystem(requireFilePreviewSender(event), parseHandleRequest(value)))
+
+ipcMain.handle('rovai:file-preview-reveal', (event, value: unknown) =>
+  filePreview.revealInFolder(requireFilePreviewSender(event), parseHandleRequest(value)))
+
+ipcMain.handle('rovai:file-preview-copy-path', (event, value: unknown) =>
+  filePreview.copyPath(requireFilePreviewSender(event), parseCopyPathRequest(value)))
+
+ipcMain.handle('rovai:file-preview-choose-root', (event, value: unknown) =>
+  filePreview.chooseAuthorizedRoot(requireFilePreviewSender(event), parseChooseRootRequest(value)))
 
 ipcMain.handle('rovai:clipboard-write', (_event, input: unknown) => {
   clipboard.write(parseClipboardWriteRequest(input))
@@ -1395,6 +1537,7 @@ app.on('window-all-closed', () => {
 })
 
 app.on('before-quit', (event) => {
+  void filePreview.closeAll()
   appQuitCoordinator.handleBeforeQuit(event)
 })
 
@@ -1419,4 +1562,12 @@ function requireMainWindow(webContents: Electron.WebContents): BrowserWindow {
     throw new Error('Main window is unavailable')
   }
   return window
+}
+
+function requireFilePreviewSender(event: Electron.IpcMainInvokeEvent): number {
+  requireMainWindow(event.sender)
+  if (event.senderFrame !== event.sender.mainFrame) {
+    throw new Error('File preview is only available to the main frame')
+  }
+  return event.sender.id
 }

@@ -1198,10 +1198,11 @@ describe('task event projections', () => {
 
   it('projects every completed AgentRun file-change Evidence as its own timeline card', () => {
     const changes: CampSnapshot['agentRunFileChanges'] = [{
-      schemaVersion: 1,
+      schemaVersion: 2,
       agentRunId: 'run-a',
       executionEpoch: 1,
       files: [{
+        evidenceFileId: 'ef-run-a-0',
         path: 'src/app.ts', changeKind: 'update', presentationKind: 'operation_history',
         operationCount: 1, additions: 4, deletions: 1
       }],
@@ -1211,10 +1212,11 @@ describe('task event projections', () => {
       deletions: 1,
       completedAt: '2026-08-27T00:00:00Z'
     }, {
-      schemaVersion: 1,
+      schemaVersion: 2,
       agentRunId: 'run-b',
       executionEpoch: 2,
       files: [{
+        evidenceFileId: 'ef-run-b-0',
         path: 'src/styles.css', changeKind: 'update', presentationKind: 'exact_mutations',
         operationCount: 2
       }],
@@ -1257,10 +1259,11 @@ describe('task event projections', () => {
       agentRunId: string,
       completedAt: string
     ): CampSnapshot['agentRunFileChanges'][number] => ({
-      schemaVersion: 1,
+      schemaVersion: 2,
       agentRunId,
       executionEpoch: 1,
       files: [{
+        evidenceFileId: `ef-${agentRunId}-0`,
         path: `${agentRunId}/result.ts`,
         changeKind: 'update',
         presentationKind: 'full_net_diff',
@@ -1302,19 +1305,23 @@ describe('task event projections', () => {
 
   it('renders a three-row Files Changed card with a quiet View entry and mixed totals', () => {
     const changes = {
-      schemaVersion: 1,
+      schemaVersion: 2,
       agentRunId: 'run-card',
       executionEpoch: 3,
       files: [{
+        evidenceFileId: 'ef-card-0',
         path: 'src/app.ts', changeKind: 'update', presentationKind: 'full_net_diff',
         operationCount: 1, additions: 4, deletions: 1
       }, {
+        evidenceFileId: 'ef-card-1',
         path: 'src/styles.css', changeKind: 'update', presentationKind: 'operation_only',
         operationCount: 1
       }, {
+        evidenceFileId: 'ef-card-2',
         path: 'src/card.tsx', changeKind: 'update', presentationKind: 'exact_mutations',
         operationCount: 2
       }, {
+        evidenceFileId: 'ef-card-3',
         path: '/tmp/outside-fixture.json', changeKind: 'add', presentationKind: 'operation_only',
         operationCount: 1
       }],
@@ -1340,10 +1347,11 @@ describe('task event projections', () => {
 
   it('renders Qoder totals when path-only operations stay in the operation count', () => {
     const changes = {
-      schemaVersion: 1,
+      schemaVersion: 2,
       agentRunId: 'run-qoder-totals',
       executionEpoch: 1,
       files: [{
+        evidenceFileId: 'ef-qoder-0',
         path: 'src/app.ts', changeKind: 'update', presentationKind: 'full_net_diff',
         operationCount: 2, additions: 1, deletions: 1
       }],
@@ -1367,19 +1375,23 @@ describe('task event projections', () => {
 
   it('renders full, exact, history, and operation-only evidence honestly in Files Changed Review', () => {
     const changes = {
-      schemaVersion: 1,
+      schemaVersion: 2,
       agentRunId: 'run-review',
       executionEpoch: 4,
       files: [{
+        evidenceFileId: 'ef-review-0',
         path: 'src/full.ts', changeKind: 'update', presentationKind: 'full_net_diff',
         operationCount: 1, additions: 1, deletions: 1
       }, {
+        evidenceFileId: 'ef-review-1',
         path: 'src/exact.ts', changeKind: 'update', presentationKind: 'exact_mutations',
         operationCount: 1
       }, {
+        evidenceFileId: 'ef-review-2',
         path: '/tmp/history.ts', changeKind: 'update', presentationKind: 'operation_history',
         operationCount: 3
       }, {
+        evidenceFileId: 'ef-review-3',
         path: 'src/path-only.ts', changeKind: 'update', presentationKind: 'operation_only',
         operationCount: 1
       }],
@@ -1388,7 +1400,7 @@ describe('task event projections', () => {
       completedAt: '2026-08-27T00:00:00Z'
     } satisfies AgentRunFileChangesView
     const detail = {
-      schemaVersion: 1,
+      schemaVersion: 2,
       card: changes,
       files: [{
         ...changes.files[0],
@@ -1440,8 +1452,11 @@ describe('task event projections', () => {
         changes,
         detail,
         detailStatus: 'ready',
-        selectedPath,
-        onSelectPath: vi.fn(),
+        selectedEvidenceFileId: changes.files.find((file) => file.path === selectedPath)?.evidenceFileId ?? null,
+        onSelectEvidenceFileId: vi.fn(),
+        onOpenCurrent: vi.fn(),
+        openCurrentStatus: 'idle',
+        openCurrentError: null,
         onBack: vi.fn(),
         onRetry: vi.fn()
       }

@@ -21,6 +21,7 @@ last_updated: 2026-08-30
 > Windows x64 CI 承担；macOS 结果不作为 Windows 实机 UI 验收。
 
 前置基线：[v1.29](../v1.29/README.md)按本分支切换时事实转为 historical。
+合入文件预览分支后，[v1.30](../v1.30/README.md)也按已有范围、实施状态与验收记录冻结；本版本继续作为唯一 current。
 
 ## 版本目标
 
@@ -80,7 +81,7 @@ Desktop 窗口和本机恢复能力不再与 SQLite authority 的成功打开绑
 
 | 范围 | 结论 | 证据或理由 |
 | --- | --- | --- |
-| Version lifecycle | 已更新 | 本概览、[实施计划](implementation-plan.md)、[决定](decisions.md)与版本索引建立唯一 current v1.31；v1.29 转为 historical。 |
+| Version lifecycle | 已更新 | 本概览、[实施计划](implementation-plan.md)、[决定](decisions.md)与版本索引保持唯一 current v1.31；v1.29 与合入的 [v1.30](../v1.30/README.md)按各自已有实施和验收事实转为 historical。 |
 | Decisions | 已更新 | [V1.31-D01–D06](decisions.md#v1-31-d01)记录壳层分层、准入票据、copy migration、Supervisor/偏好/Onboarding、可选功能门禁与 Windows 独立壳层 profile。 |
 | Contracts | 已更新 | 新增 [Desktop Runtime Availability v1](../../contracts/desktop-runtime-availability-v1.md)，补充 [Windows Private Storage v2](../../contracts/windows-private-storage-v2.md)，并以 [First-run Onboarding v3](../../contracts/first-run-onboarding-v3.md)替代 v2 当前入口。 |
 | Architecture | 已更新 | 新增 [Availability-first Runtime](../../architecture/availability-first-runtime.md)，同步基础不变量与 First-run 组件边界。 |
