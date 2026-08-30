@@ -301,6 +301,11 @@ type StructuredComposerQuery =
   | { kind: 'mention'; value: StructuredMentionQuery }
   | { kind: 'skill'; value: StructuredSkillQuery }
 
+interface EditorDomSnapshot {
+  node: Node
+  children: EditorDomSnapshot[]
+}
+
 export function StructuredMentionComposer({
   id,
   value,
@@ -327,6 +332,10 @@ export function StructuredMentionComposer({
   const isComposingRef = useRef(false)
   const compositionFrameRef = useRef<number | null>(null)
   const compositionGenerationRef = useRef(0)
+  const editorDomProjectionRef = useRef<{
+    content: StructuredMentionContent
+    tree: EditorDomSnapshot
+  } | null>(null)
   const [query, setQuery] = useState<StructuredComposerQuery | null>(null)
   const [activeOption, setActiveOption] = useState(0)
   const [editorDomRevision, setEditorDomRevision] = useState(0)
@@ -373,7 +382,18 @@ export function StructuredMentionComposer({
   useLayoutEffect(() => {
     const editor = editorRef.current
     const pending = pendingSelectionRef.current
-    if (!editor || !pending) return
+    if (!editor) return
+    const projection = editorDomProjectionRef.current
+    if (
+      !projection
+      || projection.tree.node !== editor
+      || !structuredContentEqual(projection.content, content)
+    ) {
+      // Only a new host or changed React content establishes a new projection.
+      // An equal parent refresh during IME must not adopt native replacement nodes.
+      editorDomProjectionRef.current = { content, tree: captureEditorDom(editor) }
+    }
+    if (!pending) return
     if (restoreFocusAfterDomResetRef.current) {
       editor.focus({ preventScroll: true })
     }
@@ -418,6 +438,10 @@ export function StructuredMentionComposer({
     const nextContent = readStructuredContent(editor)
     const nextSelection = readDomSelection(editor)
     const requiresOwnershipReset = !editorDomMatchesReactProjection(editor, content)
+      // The empty placeholder span is removed as a unit by React on first input.
+      // Its descendants may change without resetting the IME host, but the span
+      // itself must still be the node React owns.
+      || !editorDomMatchesSnapshot(editor, editorDomProjectionRef.current?.tree, content.length > 0)
     const contentChanged = !structuredContentEqual(content, nextContent)
     lastSelectionRef.current = nextSelection
     if (requiresOwnershipReset) {
@@ -426,6 +450,7 @@ export function StructuredMentionComposer({
       // can detach a React-owned descendant and make a later commit throw from
       // removeChild. Remount the editor host instead, so React discards the
       // mutated subtree as one unit and establishes ownership again.
+      // Identical markup can still contain split or replaced, unowned nodes.
       pendingSelectionRef.current = nextSelection
       restoreFocusAfterDomResetRef.current = restoreFocusAfterDomResetRef.current
         || document.activeElement === editor
@@ -1136,6 +1161,23 @@ function readEditorTextNode(node: Node): string {
     }
   }
   return [...node.childNodes].map(readEditorTextNode).join('')
+}
+
+function captureEditorDom(node: Node): EditorDomSnapshot {
+  return { node, children: [...node.childNodes].map(captureEditorDom) }
+}
+
+function editorDomMatchesSnapshot(
+  node: Node,
+  snapshot: EditorDomSnapshot | undefined,
+  checkDescendants = true
+): boolean {
+  if (!snapshot || snapshot.node !== node) return false
+  const children = [...node.childNodes]
+  return children.length === snapshot.children.length
+    && children.every((child, index) => checkDescendants
+      ? editorDomMatchesSnapshot(child, snapshot.children[index])
+      : child === snapshot.children[index].node)
 }
 
 function editorDomMatchesReactProjection(

@@ -176,6 +176,16 @@ pnpm test:desktop-bridge
 它使用临时 `userData`，不启动 Core 或调用模型；不能用 Main 单测或 jsdom 代替。无显示器 Linux 使用
 `xvfb-run -a pnpm test:desktop-bridge`；[Desktop bridge CI](../../.github/workflows/desktop-bridge.yml)覆盖相关改动。
 
+修改 Composer 的原生输入、IME、DOM 同步或光标恢复时，还运行：
+
+```bash
+pnpm test:composer-input
+```
+
+该测试把生产 Composer 装入独立 Electron Renderer，用真实 Chromium IME/input 事件与受控原生节点变动
+验证可见正文、受控草稿值、焦点及页面存活。夹具隔离 `userData`，不启动 Core 或调用模型；不能用静态
+Markup 测试替代。无显示器 Linux 使用 `xvfb-run -a pnpm test:composer-input`，同一 CI 工作流覆盖相关改动。
+
 ### Core 可选功能启动回归
 
 涉及 `run_core()` ready 边界、可选初始化或功能重试时，运行：
