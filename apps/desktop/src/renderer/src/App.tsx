@@ -2800,6 +2800,12 @@ function AuthoritativeApp({
     setError(null)
     let requestedTurnIds: string[] = []
     try {
+      // Hold admission while cancellation is requested. Core restores auto atomically
+      // with the Stop request, then waits for every Run/Delivery to settle before advancing.
+      const paused = await window.rovai.request<StoredCommandResult>('camp.pendingInputs.setMode', {
+        commandId: crypto.randomUUID(), command: { campId, mode: 'paused' }
+      })
+      if (paused.status === 'rejected') throw new Error(commandFailureMessage(paused))
       const snapshot = campSnapshot?.camp.id === campId
         ? campSnapshot
         : (await requestCampProjection(campId, 'open')).snapshot
@@ -2809,7 +2815,13 @@ function AuthoritativeApp({
       ))
       const activeTurns = snapshot.turns.filter((turn) => cancellableIds.has(turn.id))
       requestedTurnIds = activeTurns.map((turn) => turn.id)
-      if (requestedTurnIds.length === 0) return
+      if (requestedTurnIds.length === 0) {
+        const resumed = await window.rovai.request<StoredCommandResult>('camp.pendingInputs.setMode', {
+          commandId: crypto.randomUUID(), command: { campId, mode: 'auto' }
+        })
+        if (resumed.status === 'rejected') throw new Error(commandFailureMessage(resumed))
+        return
+      }
       setCancellingTurnIds((current) => new Set([...current, ...requestedTurnIds]))
       await Promise.all(activeTurns.map(async (turn) => {
         const result = await window.rovai.request<StoredCommandResult>('campTurns.cancel', {
@@ -2826,6 +2838,9 @@ function AuthoritativeApp({
       setCancellingTurnIds((current) =>
         new Set([...current].filter((turnId) => !requestedTurnIds.includes(turnId)))
       )
+      await window.rovai.request<StoredCommandResult>('camp.pendingInputs.setMode', {
+        commandId: crypto.randomUUID(), command: { campId, mode: 'paused' }
+      }).catch(() => undefined)
       setError(errorMessage(nextError))
       throw nextError
     }
@@ -3148,10 +3163,8 @@ function AuthoritativeApp({
       commandId,
       draft
     )
-    setOptimisticCampMessages((current) => [
-      ...current,
-      { campId, commandId, message: optimisticMessage }
-    ])
+    // Core decides direct publication versus private queue admission. Never expose
+    // a pending input as an optimistic public CampMessage before that decision.
     setBusy('camp-message')
     setError(null)
     setToast(null)
@@ -3174,24 +3187,18 @@ function AuthoritativeApp({
         throw new Error(commandFailureMessage(result.commandResult))
       }
       const campMessageId = stringField(result.commandResult.payload, 'campMessageId')
+      const pendingInputId = stringField(result.commandResult.payload, 'pendingInputId')
       const campTurnId = stringField(result.commandResult.payload, 'campTurnId')
       const agentRunIds = stringArrayField(result.commandResult.payload, 'agentRunIds')
       const sequence = typeof result.commandResult.payload.sequence === 'number'
         ? result.commandResult.payload.sequence
         : optimisticMessage.sequence
-      setOptimisticCampMessages((current) => current.map((entry) =>
-        entry.commandId === commandId
-          ? {
-              ...entry,
-              message: {
-                ...entry.message,
-                id: campMessageId ?? entry.message.id,
-                sequence,
-                campTurnId
-              }
-            }
-          : entry
-      ))
+      if (campMessageId) {
+        setOptimisticCampMessages((current) => [...current, {
+          campId, commandId,
+          message: { ...optimisticMessage, id: campMessageId, sequence, campTurnId }
+        }])
+      }
       void requestCampProjection(campId, 'open')
         .then(async ({ snapshot }) => {
           if (selectionGeneration !== campSelectionGeneration.current) return
@@ -3204,6 +3211,7 @@ function AuthoritativeApp({
         })
         .catch((nextError) => setError(errorMessage(nextError)))
       return {
+        ...(pendingInputId ? { pendingInputId } : {}),
         campTurnId,
         agentRunIds,
         addressedAgentIds: optimisticMessage.addressedAgentIds

@@ -27,6 +27,7 @@ Architecture 解释组件如何组成，Version 概览记录交付范围；它�
 
 | 合同 | 权威范围 |
 | --- | --- |
+| [Pending Camp Input v1（当前）](pending-camp-input-v1.md) | 私有下一轮输入、FIFO、编辑 token、暂停、原子发布与无附件边界 |
 | [Camp Identity v1（当前）](camp-identity-v1.md) | 唯一 `rvcamp_` UUIDv7/Crockford 主键、strict boundary、SQLite/JSON/path 使用与 Native Session identity 分离 |
 | [Desktop Runtime Availability v1（当前）](desktop-runtime-availability-v1.md) | Bootstrap/Full Core capability、Supervisor generation/revision、data-dir lease、SQLite 准入票据、copy migration 与结构化 request failure |
 | [First-run Onboarding v3（当前）](first-run-onboarding-v3.md) | v2 schema/flow 不变；首次安装改用 Full Core authority origin，损坏偏好只在内存降级且保留原文件 |
@@ -119,7 +120,8 @@ Architecture 解释组件如何组成，Version 概览记录交付范围；它�
 | [Built-in Tool Transport v7 (historical)](builtin-tool-transport-v7.md) | v0.67 的 Camp Message Send v4、exact Camp read addressing 与初版渐进式 CLI 教学；不作为 v0.73 CLI context/catalog 入口 |
 | [Built-in Tool Transport v7 Errata](builtin-tool-transport-v7-errata.md) | 历史 v7 locator-present recovery 勘误；其 self-write exact-read 语义已由 v8/v9 继承 |
 | [Durable Task v3（当前）](durable-task-v3.md) | User/Lead 责任定义、Assignee execution-state update、Camp-wide read、explicit owner、unassigned holding 与 advisory actions |
-| [Camp Message Send v14（当前）](camp-message-send-v14.md) | v13 原子提交/结果不变；CLI 接受 Runtime 可读外部文件/目录并在 IPC 前快照 |
+| [Camp Message Send v15（当前）](camp-message-send-v15.md) | Agent/User Automation 保持既有合同；Desktop Composer 增加私有 next-turn admission |
+| [Camp Message Send v14（历史）](camp-message-send-v14.md) | v13 原子提交/结果不变；CLI 接受 Runtime 可读外部文件/目录并在 IPC 前快照 |
 | [Camp Message Send v13（历史）](camp-message-send-v13.md) | v12 input/结果不变；Agent files 一次 ingest 为 Managed v2，Delivery 不再进入 publication gate 或等待活跃 Run |
 | [Camp Message Send v12（历史）](camp-message-send-v12.md) | v11 publication/结果不变；body 可选默认空串，正文或至少一个文件即可构成 Send payload |
 | [Camp Message Send v11（历史）](camp-message-send-v11.md) | v10 寻址/结果不变；增加 AgentRun-local `files`、真实 accepted IDs 与统一异步附件 publication |
@@ -153,7 +155,8 @@ Architecture 解释组件如何组成，Version 概览记录交付范围；它�
 | [Camp Published Attachment View v2（历史）](camp-published-attachment-view-v2.md) | v1 root/journal/generation fence 不变；增加稳定 semantic catalog/receipt、可重建物理轴与无全局 DB 锁 copy phase |
 | [Camp Published Attachment View v1（历史）](camp-published-attachment-view-v1.md) | 实例/Camp 隔离 root、publication journal、ready catalog、generation、物理 Manifest receipt、quota、rebuild 与安全清理 |
 | [Camp Attachment v1（历史）](camp-attachment-v1.md) | 普通文件/目录联合、Core-owned 只读快照、限制、Draft 原子消费、Snapshot 29 与旧 Runtime Authority path |
-| [Camp Composer Draft v5（当前）](camp-composer-draft-v5.md) | v4 Draft/revision 语义不变；Send 时 ingest Managed v2，最终事务原子提交 Message/ref/Delivery 且不等待 Run |
+| [Camp Composer Draft v6（当前）](camp-composer-draft-v6.md) | exact Draft 经 Core 决定直接发送或私有 FIFO 入队；Pending 编辑独立于普通 Draft |
+| [Camp Composer Draft v5（历史）](camp-composer-draft-v5.md) | v4 Draft/revision 语义不变；Send 时 ingest Managed v2，最终事务原子提交 Message/ref/Delivery 且不等待 Run |
 | [Camp Composer Draft v4（历史）](camp-composer-draft-v4.md) | v3 sendability 不变；语义事务先提交并由持久 writer intent 阻断 Run，View 异步物化 |
 | [Camp Composer Draft v3（历史）](camp-composer-draft-v3.md) | v2 reply/continuation 边界不变；ready 附件可以独立构成用户发送 payload，空正文忠实持久化并保留原子消费 |
 | [Camp Composer Draft v2（历史）](camp-composer-draft-v2.md) | v1 reply 边界加 durable recipient continuation、source suppression、发送物化、显式修复与无 Default Lead fallback；仍继承正文非空发送要求 |

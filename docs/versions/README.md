@@ -1,7 +1,7 @@
 ---
 document_type: versions-index
 authority: version-lifecycle
-current_version: v1.32
+current_version: v1.33
 last_updated: 2026-08-30
 ---
 
@@ -183,4 +183,5 @@ last_updated: 2026-08-30
 | v1.29 | `historical` | 动态 Camp membership、Runtime 文件变化与 Activity v2 新写入已实现；typed query、Renderer 中文标题和七类图标完成定向回归，真实 Runtime 验收仍在进行 | [v1.29/README.md](v1.29/README.md) |
 | v1.30 | `historical` | Camp 内独立文件预览、封闭文件能力、事件驱动更新感知与多类型只读 Viewer；引用延期，合入 v1.31 时按已有实施与验收事实冻结 | [v1.30/README.md](v1.30/README.md) |
 | v1.31 | `historical` | Desktop Bootstrap/Full Core 分层、SQLite lease/admission/copy migration 与正常日志恢复、Supervisor fencing、本机偏好 fail-open 和跨桥结构化错误已完成 | [v1.31/README.md](v1.31/README.md) |
-| v1.32 | `current` | CLI 外部附件静默快照、保持 Core 根目录边界 | [v1.32/README.md](v1.32/README.md) |
+| v1.32 | `historical` | CLI 外部附件静默快照、保持 Core 根目录边界 | [v1.32/README.md](v1.32/README.md) |
+| v1.33 | `current` | Camp 连续消息、私有待发送队列与编辑占用 | [v1.33/README.md](v1.33/README.md) |

@@ -105,10 +105,10 @@ last_updated: 2026-08-30
 ### Composer Draft 与用户发送
 
 - 每个 Camp 至多一个 Core-owned Composer Draft。Draft 保存 Structured Content、准备中的附件、reply intent、显式接收者修复状态和 recipient continuation，并以统一 revision、恢复、过期和消费边界保持用户私有编辑状态。
-- 用户发送只能提交精确 Draft revision。Core 从权威 Draft 物化 CampMessage、附件和执行意图；accepted 后原子消费 Draft，冲突或拒绝不部分消费。用户消息、Agent 消息和系统来源都保存封闭、版本化的 Structured Content，而不是依赖 Renderer Markdown 推断身份。
+- Composer 提交只能引用精确 Draft revision。Core 准入后直接物化 CampMessage、附件和执行意图，或原子转入私有 Pending Camp Input；两种成功都消费 Draft，冲突或拒绝不部分消费。用户消息、Agent 消息和系统来源都保存封闭、版本化的 Structured Content，而不是依赖 Renderer Markdown 推断身份。
 - 用户 Draft 的 rendered body 非空或至少一个 Prepared Attachment 为 `ready` 时才可发送；两者同时为空继续拒绝。纯附件 accepted 消息忠实保存空 body 与空 Structured Content，不生成占位正文，并沿用同一 publication、consume、CampTurn 与 AgentRun 原子边界。
 - Reply 是持久双意图：引用同 Camp 可回复消息，并从其最终冻结寻址推导接收者；引用失效时必须显式修复，不能静默退回 Default Lead。单一非 Lead 显式收件人可形成下一空白 Draft 的 continuation，Agent 发言、Default、Broadcast、多收件人或 Lead 消息不会推进该候选。
-- Composer 的乐观消息只存在于 Renderer；只有 Core accepted 的消息、Turn 和 Run 才进入公共时间线和执行调度。
+- 私有 Pending 不进入公共时间线、History 或 Runtime Context。Renderer 先等 Core 决定入队或发布；只有具有正式 Message 身份的输入才展示为消息。Pending 原子发布、FIFO、编辑占用与暂停见 [Pending Camp Input v1](../contracts/pending-camp-input-v1.md)。
 
 <a id="camp-resources"></a>
 
@@ -172,7 +172,7 @@ last_updated: 2026-08-30
 - Renderer 可以先本地显示待确认的用户消息，但不得把它当成 CampMessage。Core 接受发送时原子持久公共消息、Turn、目标 Run 和冻结配置；Scheduler 在执行边界完成 workspace、Runtime、Git、当前 exact membership lifetime/permission/fence 检查。所有 Agent 业务工具也必须匹配 Run 冻结的 membership version；再次添加同一 Agent 不恢复旧 Run 权限。失败产生诚实 Run 终态，不撤销已接受消息；per-Run ending Git observation 属于终态审计，Runtime 文件变化属于 terminal 后的附加 Evidence projection，二者都不是发送准入。
 - 一次 CampTurn 的 root Run 与 A2A 后代共享冻结 execution budget。Core 以一个事务检查与消费总 AgentRun、accepted A2A、depth、fanout 和相关 allowance，并对重放返回同一结果；客户端、Runtime 或多条 Delivery 不能拆分请求绕过预算。
 - CampMessage/CampTurn/AgentRun/Conversation 与 Domain Event 的创建、开始、更新和结束字段使用调用时 UTC wall clock；`AgentRun.created_at` 属于输入接受边界，`started_at` 属于实际 claim 边界。Execution Budget 另用非倒退 observation，取 wall clock、进程 awake elapsed anchor 和上次 observation 的最大值，使系统休眠计入 deadline、wall clock 回拨不延长预算；Budget observation 不得写入业务审计时间。
-- Composer Stop 作用于整个 CampTurn 执行树；共享 ExecutionDrawer 的 Run Stop 只作用于当前 AgentRun，不写 Turn cancel request、不取消兄弟 Run/Delivery，也不创建公共时间线消息。两者都由 Core 先幂等持久取消意图并立即关闭相应 Run 的新领域写入，再由既有 coordinator 有界中断 Runtime；只有可靠 Runtime 终态才能声称已取消。外部效果是否待确认必须作为独立事实保留；缺少权威终态时设置 `hasUnsettledExternalEffects`，不得从 Run 的取消状态推断效果已经结算。
+- Composer Stop 作用于整个 CampTurn 执行树；共享 ExecutionDrawer 的 Run Stop 只作用于当前 AgentRun，不写 Turn cancel request、不取消兄弟 Run/Delivery，也不创建公共时间线消息。两者都由 Core 先暂停该 Camp 的用户输入队列，再幂等持久取消意图并立即关闭相应 Run 的新领域写入，再由既有 coordinator 有界中断 Runtime；只有可靠 Runtime 终态才能声称已取消。外部效果是否待确认必须作为独立事实保留；缺少权威终态时设置 `hasUnsettledExternalEffects`，不得从 Run 的取消状态推断效果已经结算。
 
 <a id="collaboration-task"></a>
 

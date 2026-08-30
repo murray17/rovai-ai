@@ -6155,6 +6155,37 @@ impl Core {
                     )?,
                 )?)
             }
+            "camp.pendingInputs.get" => {
+                let params: CampIdParams = serde_json::from_value(request.params.clone())?;
+                let database = self.database.lock().await;
+                Ok(serde_json::to_value(
+                    rovai_core::pending_camp_input::read_queue(&database, params.camp_id.as_str())?,
+                )?)
+            }
+            "camp.pendingInputs.edit" => {
+                let params: UserCommandParams<
+                    rovai_core::pending_camp_input::EditPendingCampInputCommand,
+                > = serde_json::from_value(request.params.clone())?;
+                let camp_id = params.command.camp_id.clone();
+                let mut database = self.database.lock().await;
+                let execution = rovai_core::pending_camp_input::edit_input(
+                    &mut database,
+                    &user_camp_command_envelope(params.command_id, camp_id, params.command),
+                )?;
+                Ok(serde_json::to_value(execution.result)?)
+            }
+            "camp.pendingInputs.setMode" => {
+                let params: UserCommandParams<
+                    rovai_core::pending_camp_input::SetCampQueueModeCommand,
+                > = serde_json::from_value(request.params.clone())?;
+                let camp_id = params.command.camp_id.clone();
+                let mut database = self.database.lock().await;
+                let execution = rovai_core::pending_camp_input::set_queue_mode(
+                    &mut database,
+                    &user_camp_command_envelope(params.command_id, camp_id, params.command),
+                )?;
+                Ok(serde_json::to_value(execution.result)?)
+            }
             "camp.composerDraft.get" => {
                 let params: CampComposerDraftParams =
                     serde_json::from_value(request.params.clone())?;
@@ -6687,6 +6718,27 @@ impl Core {
             }));
         }
 
+        // Queue admission has no file side effects. In particular, do not copy an
+        // attachment only to reject it because this Camp cannot send directly.
+        let queued = {
+            let mut database = self.database.lock().await;
+            if rovai_core::pending_camp_input::requires_queue(&database, params.camp_id.as_str())? {
+                Some(
+                    CollaborationService::default().send_user_camp_draft_with_managed_ingest(
+                        &mut database,
+                        &envelope,
+                        None,
+                    )?,
+                )
+            } else {
+                None
+            }
+        };
+        if let Some(execution) = queued {
+            return Ok(
+                json!({"commandResult": execution.result, "replayed": execution.replayed, "preflight": null, "pendingExecution": null}),
+            );
+        }
         let (managed_store, ingest_plan) = {
             let mut database = self.database.lock().await;
             let managed_store = ManagedAttachmentStore::for_database(&database);
@@ -11842,6 +11894,7 @@ async fn run_core(
     let compaction_detector_policies =
         DesiredCompactionDetectorPolicies::from_process_environment();
     let recovery = (|| -> Result<_> {
+        rovai_core::pending_camp_input::recover_edit_sessions(&database)?;
         let controlled = ExecutionRuntimeService::default()
             .recover_interrupted_controlled_shutdowns(&mut database)?;
         // Preserve the existing best-effort observer semantics and ordering:
@@ -16271,6 +16324,33 @@ async fn process_agent_run_exit(
     }
 }
 
+async fn dispatch_pending_camp_inputs(core: &Core) {
+    let mut database = core.database.lock().await;
+    let heads = match rovai_core::pending_camp_input::ready_heads(&database) {
+        Ok(heads) => heads,
+        Err(error) => {
+            eprintln!("Pending Camp Input admission failed: {error:#}");
+            return;
+        }
+    };
+    for command in heads {
+        let camp_id = command.camp_id.clone();
+        let envelope =
+            user_camp_command_envelope(uuid::Uuid::new_v4().to_string(), camp_id.clone(), command);
+        match CollaborationService::default().send_pending_camp_input(&mut database, &envelope) {
+            Ok(execution) if execution.result.status != CommandResultStatus::Rejected => {
+                emit_navigation_invalidated(
+                    &core.output,
+                    "camp.pendingInputs.published",
+                    Some(&camp_id),
+                );
+            }
+            Ok(_) => {}
+            Err(error) => eprintln!("Pending Camp Input publication paused: {error:#}"),
+        }
+    }
+}
+
 async fn process_agent_run_scheduler(
     core: Arc<Core>,
     output: mpsc::UnboundedSender<String>,
@@ -16294,6 +16374,7 @@ async fn process_agent_run_scheduler(
                 core.expire_elapsed_execution_budgets(&output).await;
                 core.dispatch_runtime_deliveries(&output).await;
                 core.dispatch_agent_run_cancellations(&output).await;
+                dispatch_pending_camp_inputs(&core).await;
                 core.dispatch_agent_runs(&output).await;
             },
             _ = core.agent_run_cancellation_notify.notified() => {
