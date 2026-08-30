@@ -18,7 +18,7 @@ SQLite 阻断时继续工作；SQLite authority 仍然 fail closed。这个拆�
 | Electron bootstrap | 窗口、主题、本机偏好默认、诊断保存、Supervisor IPC | SQLite 选择、数据库修复推断、业务投影 |
 | CoreClient Supervisor | child generation、完整 revision snapshot、能力门禁、请求 fencing、意外退出预算 | 领域状态、SQLite recovery 决策 |
 | Core data-directory lease | canonical data directory 的 OS 排他所有权与稳定对象身份 | 数据合同分类或迁移 |
-| DatabaseAdmission | exact Rovai/Lumen artifact 观察、SQLite 只读探测、一次性票据、typed blocker | schema 写入、自动 quarantine、UI 文案 |
+| DatabaseAdmission | exact Rovai/Lumen artifact 观察、只读优先探测、租约内 SQLite journal recovery、一次性票据、typed blocker | schema 写入、自动 quarantine、UI 文案 |
 | Database open/init | 票据消费后的 exact open，或 confirmed absence 上的 staging initialization | 目录扫描式猜测、覆盖竞态 target |
 | AuthorityMigrationRunner | 一致副本、旧数据保留、验证、manifest、原子切换与中断恢复 | 原库原地 migration、失败后创建空 authority |
 | Renderer bootstrap gate | 订阅 Supervisor、展示壳层状态、主题、重试与诊断 | 挂载权威 hooks、合成业务空集合 |
@@ -52,11 +52,25 @@ Core-backed read path。
 authority artifacts；SHM 是可丢弃协调缓存，但只能在 main 不存在、票据仍有效且 identity 未变化时清理。
 
 两个 main 同时出现、孤立 WAL/journal、未知合同、损坏/不可读、权限拒绝、SQLite busy 或对象 identity 改变都产生
-typed blocker。现有 main 只以 READ_ONLY/NOFOLLOW 探测，探测本身不创建文件。支持的旧合同拿 migration ticket；
-current 合同拿 existing ticket；确定没有两个 namespace 的 authority artifacts 才拿 initialization ticket。
+typed blocker。现有 main 优先以 READ_ONLY/NOFOLLOW 探测，不使用 CREATE。只读连接对干净 WAL 库可能新建空 WAL
+和 SHM：只有 main/journal 的对象、长度与状态未变，且原本缺失的 WAL 新建后为零字节，才视为正常探测副作用。
+已存在 WAL 的改变、新出现的非空 WAL 与 main/journal 改变仍拒绝；这不改变孤立 WAL 的阻断规则。
+
+`SQLITE_READONLY_ROLLBACK` / `SQLITE_READONLY_RECOVERY` 表示引擎需要正常日志恢复，不等同于目录权限拒绝。
+Admission 在仍持有 lease 且复核两个 namespace 后，只对原 exact target 做一次 READ_WRITE/NOFOLLOW、无 CREATE、
+`query_only` 的探测，让 SQLite 回滚 hot journal 或恢复 WAL。恢复可以改变物理字节和移除已消费日志，但不执行应用
+DML、schema migration 或手动 journal 删除。随后丢弃旧观察并完整重新准入；未知合同、真实权限问题或损坏仍按实际
+结果拒绝，重复遇到恢复要求返回可重试 busy，不增加永久 blocked 状态。
+
+支持的旧合同拿 migration ticket；current 合同拿 existing ticket；确定没有两个 namespace 的 authority artifacts
+才拿 initialization ticket。
 
 票据将“检查结果”与“允许执行的下一步”绑定。打开前再次核对 main/WAL/journal；初始化发布前再次确认 absence，并
-通过 no-replace commit 消除最后窗口的覆盖风险。SHM 不参与 existing/migration ticket 的绝对字节稳定要求。
+通过 no-replace commit 消除最后窗口的覆盖风险。票据保存探测后的完整 WAL identity，消费时不再放宽空 WAL 转换。
+SHM 不参与 existing/migration ticket 的绝对字节稳定要求。
+
+正常打开、新建发布后打开、迁移发布后打开统一配置 WAL、`synchronous=NORMAL` 与 foreign keys；staging 的 DELETE
+模式只服务于单文件发布，不得成为正式连接的运行配置。
 
 ## Migration switch
 
@@ -73,7 +87,9 @@ exit 都绑定二者；旧 child 的迟到消息被丢弃。Snapshot 每次发�
 budget。关闭是唯一允许跨 generation 失败全部 pending request 的路径。
 
 请求在 Core 内保留领域拒绝与基础设施失败的结构化类别，经 Main 的 value/failure envelope 穿过 Electron IPC；Preload
-重新构造本地 Error，Renderer 对外仍只见 `Promise<T>`。
+以普通 failure 对象拒绝 Promise，保留 `kind/code/message/retryable/generation/details`。`contextBridge` 会丢弃 Error
+的自定义字段；如需 Error 实例只能在 Renderer 收到对象后构造。统一错误读取函数同时接受本地 Error 和 failure 对象，
+Renderer 对外仍只见 `Promise<T>`。
 
 ## Local fail-open boundary
 

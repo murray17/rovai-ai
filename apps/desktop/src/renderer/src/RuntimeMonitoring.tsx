@@ -1,3 +1,4 @@
+import { readErrorMessage } from './error-message'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type {
   AdapterKind,
@@ -602,5 +603,5 @@ function sameMonitoringFilter(left: MonitoringFilter, right: MonitoringFilter): 
 }
 
 function errorMessage(reason: unknown): string {
-  return reason instanceof Error ? reason.message : String(reason)
+  return readErrorMessage(reason)
 }

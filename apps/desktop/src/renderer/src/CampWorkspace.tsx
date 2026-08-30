@@ -1,3 +1,4 @@
+import { readErrorMessage } from './error-message'
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type DragEvent as ReactDragEvent, type FormEvent, type JSX, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent, type RefObject } from 'react'
 import { createPortal } from 'react-dom'
 import * as Dialog from '@radix-ui/react-dialog'
@@ -3317,7 +3318,7 @@ export function CampWorkspace({
       if (!executionPlacementMounted.current) return
       setExecutionPlacementError({
         message: executionPlacementSaveFailureMessage(executionPlacement),
-        detail: nextError instanceof Error ? nextError.message : null
+        detail: readErrorMessage(nextError, null)
       })
     } finally {
       executionPlacementRequest.current = false
@@ -5812,7 +5813,7 @@ function CampMembersPanel({
     } catch (error) {
       setAddResult({
         tone: 'danger',
-        message: error instanceof Error ? error.message : '邀请队员失败，请重试。',
+        message: readErrorMessage(error, '邀请队员失败，请重试。'),
         failures: new Map()
       })
     } finally {
@@ -5832,7 +5833,7 @@ function CampMembersPanel({
     } catch (error) {
       setRemovalPreviewState({
         status: 'error',
-        message: error instanceof Error ? error.message : '无法读取 Core 权威影响，请重试。'
+        message: readErrorMessage(error, '无法读取 Core 权威影响，请重试。')
       })
     }
   }, [onPreviewMemberRemoval])
@@ -5872,7 +5873,7 @@ function CampMembersPanel({
     } catch (error) {
       setRemovalPreviewState({
         status: 'error',
-        message: error instanceof Error ? error.message : '移出未完成，请重试。'
+        message: readErrorMessage(error, '移出未完成，请重试。')
       })
     } finally {
       setRemoveSubmitting(false)
@@ -7616,7 +7617,7 @@ function attachmentTypeLabel(mediaType: string): string {
 }
 
 function attachmentErrorMessage(error: unknown): string {
-  const message = error instanceof Error ? error.message : String(error)
+  const message = readErrorMessage(error)
   if (message.includes('25 MiB')) return '文件超过 25 MiB'
   if (message.includes('count limit')) return '一条消息最多 10 个附件'
   if (message.includes('total attachment') || message.includes('64 MiB')) return '附件总大小超过 64 MiB'
@@ -7630,7 +7631,7 @@ function attachmentErrorMessage(error: unknown): string {
 }
 
 function replyDraftErrorMessage(error: unknown): string {
-  const message = error instanceof Error ? error.message : String(error)
+  const message = readErrorMessage(error)
   if (message.includes('draft_changed')) return '草稿已在其他位置更新，请重试。'
   if (message.includes('mention_target_unavailable')) {
     return '所选成员当前不可接收，请选择其他成员。'
@@ -7828,7 +7829,7 @@ interface ToolResultViewState {
 }
 
 function toolResultErrorMessage(error: unknown): string {
-  const detail = error instanceof Error ? error.message.trim() : ''
+  const detail = readErrorMessage(error, '').trim()
   return detail ? `读取完整结果失败：${detail}` : '读取完整结果失败：未知错误'
 }
 
@@ -8953,7 +8954,7 @@ export function TaskPanel({
       resetForm()
       await onTasksChanged()
     } catch (error) {
-      setFormError(localizeExecutionEngineTerms(error instanceof Error ? error.message : String(error)))
+      setFormError(localizeExecutionEngineTerms(readErrorMessage(error)))
     } finally {
       setSubmitting(false)
     }
@@ -9015,7 +9016,7 @@ export function TaskPanel({
       resetForm()
       await onTasksChanged()
     } catch (error) {
-      setFormError(localizeExecutionEngineTerms(error instanceof Error ? error.message : String(error)))
+      setFormError(localizeExecutionEngineTerms(readErrorMessage(error)))
     } finally {
       setSubmitting(false)
     }
@@ -9043,7 +9044,7 @@ export function TaskPanel({
       resetForm()
       await onTasksChanged()
     } catch (error) {
-      setFormError(localizeExecutionEngineTerms(error instanceof Error ? error.message : String(error)))
+      setFormError(localizeExecutionEngineTerms(readErrorMessage(error)))
     } finally {
       setSubmitting(false)
     }

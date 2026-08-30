@@ -14,6 +14,8 @@ last_updated: 2026-08-30
 > 当前状态：data-dir lease、数据库准入票据、copy migration、Supervisor generation/revision、结构化请求失败、
 > Desktop Bootstrap Shell 与本机偏好 fail-open 主路径已完成；全仓测试、`-D warnings` 静态检查、打包 App
 > 隔离 authority/双主题/200%/reduced-motion 验收及文档 merge-base 门禁全部通过。
+> 后续修正已验证 SQLite hot-journal 自动恢复、三条正式连接的 WAL 配置及真实 contextBridge 字段保留；
+> 打包 App 在写事务中 SIGKILL Core 后自动重启并恢复工作区，1024 行已提交数据保留。
 
 前置基线：[v1.29](../v1.29/README.md)按本分支切换时事实转为 historical。
 
@@ -28,18 +30,19 @@ Desktop 窗口和本机恢复能力不再与 SQLite authority 的成功打开绑
   SQLite；偏好损坏使用内存默认、告警并保留原文件；
 - Core 先取得绑定 canonical directory/object identity 的 OS lease；第二个 Core 返回 typed owner state，不做 SQLite
   recovery；
-- `DatabaseAdmission` 对 Rovai/Lumen main/WAL/journal/SHM 做无创建观察和只读合同探测，返回绑定 lease 的
-  one-shot existing/new/migration ticket 或 typed blocker；
+- `DatabaseAdmission` 对 Rovai/Lumen main/WAL/journal/SHM 做无创建观察和只读优先合同探测；正常日志恢复在 lease 内
+  由 SQLite 完成并重新准入，探测自建空 WAL/SHM 不误报 identity race，返回 one-shot ticket 或 typed blocker；
 - confirmed absence 才在 staging 初始化 `rovai.sqlite`，发布前再核对并原子 create-if-absent；只有
   `lumen.sqlite` 时精确打开/迁移，不制造 `rovai.sqlite`；
 - 支持旧合同用 SQLite Backup API 一致复制，在副本上迁移、seed、quick/FK check、checkpoint；原 artifacts、identity
   manifest 与 exact filename 原子切换支持进程中断恢复；
+- existing/new/migrated 三条正式连接路径统一配置 WAL、NORMAL 同步与 foreign keys，DELETE 仅用于 staging 发布；
 - bundled `rusqlite` 升到 0.40.2，bundled SQLite 为 3.53.2，满足 `>= 3.51.3`；
 - Core stdout 发布 schema-1 startup frame；Main Supervisor 用 generation + child token fence 迟到 frame/event/exit，
   完整 snapshot revision 驱动 Renderer capability gate；
 - 确定性准入阻断不使用 crash budget。只有显式 shutdown 跨 generation 失败全部请求；普通 child 只失败自己的 pending；
-- Main/Preload 使用结构化 value/failure transport，Renderer outward API 仍是 `Promise<T>`，错误保留类别、code、
-  retryable、generation 与 details；
+- Main/Preload 使用结构化 value/failure transport；failure 以普通对象穿过真实 contextBridge，Renderer outward API
+  仍是 `Promise<T>`，错误保留类别、code、retryable、generation 与 details，统一读取函数不退化为 `[object Object]`；
 - 正常 App tree 仅在 `authoritativeWorkspace` ready 后挂载，阻断期间不查询权威工作区、不展示合成空列表；
 - First-run admission 从 Core ready 的 `current.origin = initialized | existing | migrated` 得出，不再检查 SQLite 文件名。
 
@@ -57,9 +60,10 @@ Desktop 窗口和本机恢复能力不再与 SQLite authority 的成功打开绑
 - `lumen.sqlite` 单独存在时不出现 `rovai.sqlite`；孤立 WAL/journal 阻断，孤立 SHM 仅在 identity 未变时清理；
 - absence assessment 零写入，初始化竞态不能覆盖突然出现的 target；
 - 支持历史 fixture 在副本上迁移并保留业务值；原子切换前强杀进程后可恢复再迁移，原 authority 保留；
+- DELETE/WAL 写事务中强杀 Core 后，正常日志恢复保留已提交数据；打包 App 自动重启 Core 并重新挂载工作区；
 - migration/lease/admission failure 只阻断 Full Core，主题、重试与 bootstrap diagnostics 可用；
 - Snapshot revision 单调、ready 前 capability false、确定性阻断 restartAttempt 保持 0；
-- domain rejection 与 infrastructure failure 跨 Core/Main/Preload 后仍可区分；
+- domain rejection 与 infrastructure failure 跨 Core/Main/Preload/contextBridge 到真实 Renderer 后仍可区分；
 - preference 损坏不被启动自动覆盖，并作为 `localDegradations` 展示；
 - Renderer authority gate 前没有业务请求或 fake empty list。
 

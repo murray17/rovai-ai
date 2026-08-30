@@ -24,7 +24,9 @@ const api: RovaiApi = {
       params
     ) as RovaiRequestTransport<T>
     if (transport.kind === 'failure') {
-      return Promise.reject(Object.assign(new Error(transport.failure.message), transport.failure))
+      // contextBridge drops custom Error properties; keep the rejection cloneable.
+      // Any Error instance must be constructed after the Renderer receives it.
+      return Promise.reject(transport.failure)
     }
     return transport.value
   },

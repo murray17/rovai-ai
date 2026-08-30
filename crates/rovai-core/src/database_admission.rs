@@ -375,6 +375,13 @@ impl DatabaseAdmission {
     pub fn assess<'lease>(
         lease: &'lease CoreDataDirLease,
     ) -> Result<AdmissionAssessment<'lease>, AdmissionInfrastructureError> {
+        Self::assess_with_recovery(lease, true)
+    }
+
+    fn assess_with_recovery<'lease>(
+        lease: &'lease CoreDataDirLease,
+        allow_recovery: bool,
+    ) -> Result<AdmissionAssessment<'lease>, AdmissionInfrastructureError> {
         if !lease.revalidate_identity().map_err(|error| {
             AdmissionInfrastructureError::filesystem(
                 "revalidate data-directory identity",
@@ -473,9 +480,32 @@ impl DatabaseAdmission {
             )));
         }
 
-        let classification = match probe_contract(artifacts) {
+        let classification = match probe_contract(artifacts, OpenFlags::SQLITE_OPEN_READ_ONLY) {
             Ok(classification) => classification,
-            Err(block) => return Ok(AdmissionAssessment::Blocked(Box::new(block))),
+            Err(error) => {
+                if let Some(recovery) = error.recovery_kind() {
+                    // One engine recovery per assessment. If a new writer makes
+                    // recovery necessary again, retry admission rather than
+                    // misreporting a read-only probe as a filesystem denial.
+                    if !allow_recovery {
+                        return Ok(AdmissionAssessment::Blocked(Box::new(
+                            AuthorityBlock::Busy {
+                                stage: BusyStage::Revalidation,
+                            },
+                        )));
+                    }
+                    match recover_sqlite_journal(lease, &observed, namespace, recovery) {
+                        Ok(()) => return Self::assess_with_recovery(lease, false),
+                        Err(ObservationFailure::Blocked(block)) => {
+                            return Ok(AdmissionAssessment::Blocked(Box::new(block)));
+                        }
+                        Err(ObservationFailure::Infrastructure(error)) => return Err(error),
+                    }
+                }
+                return Ok(AdmissionAssessment::Blocked(Box::new(
+                    error.into_block(artifacts),
+                )));
+            }
         };
         let refreshed = match observe_namespace(lease, namespace) {
             Ok(refreshed) => refreshed,
@@ -484,19 +514,7 @@ impl DatabaseAdmission {
             }
             Err(ObservationFailure::Infrastructure(error)) => return Err(error),
         };
-        if artifacts.main.as_ref().map(|artifact| &artifact.identity)
-            != refreshed.main.as_ref().map(|artifact| &artifact.identity)
-            || artifacts.wal.as_ref().map(|artifact| &artifact.identity)
-                != refreshed.wal.as_ref().map(|artifact| &artifact.identity)
-            || artifacts
-                .rollback_journal
-                .as_ref()
-                .map(|artifact| &artifact.identity)
-                != refreshed
-                    .rollback_journal
-                    .as_ref()
-                    .map(|artifact| &artifact.identity)
-        {
+        if !artifacts.matches_read_probe(&refreshed) {
             return Ok(AdmissionAssessment::Blocked(Box::new(
                 AuthorityBlock::IdentityChanged {
                     target: artifacts.main_path(),
@@ -574,6 +592,45 @@ pub(crate) struct NamespaceArtifactSet {
 }
 
 impl NamespaceArtifactSet {
+    fn authority_unchanged(&self, other: &Self) -> bool {
+        [
+            (&self.main, &other.main),
+            (&self.wal, &other.wal),
+            (&self.rollback_journal, &other.rollback_journal),
+        ]
+        .into_iter()
+        .all(|(before, after)| {
+            before.as_ref().map(|artifact| &artifact.identity)
+                == after.as_ref().map(|artifact| &artifact.identity)
+        })
+    }
+
+    fn matches_read_probe(&self, other: &Self) -> bool {
+        if self.authority_unchanged(other) {
+            return true;
+        }
+        // Reading a clean WAL-mode database can materialize an empty WAL and
+        // rebuildable SHM. Only this absent -> zero-byte transition is benign:
+        // main/journal must be identical, and existing WAL changes still fail.
+        // Tickets retain the refreshed WAL identity and are revalidated strictly.
+        self.main.is_some()
+            && self.main.as_ref().map(|artifact| &artifact.identity)
+                == other.main.as_ref().map(|artifact| &artifact.identity)
+            && self
+                .rollback_journal
+                .as_ref()
+                .map(|artifact| &artifact.identity)
+                == other
+                    .rollback_journal
+                    .as_ref()
+                    .map(|artifact| &artifact.identity)
+            && self.wal.is_none()
+            && other
+                .wal
+                .as_ref()
+                .is_some_and(|artifact| artifact.identity.byte_length == 0)
+    }
+
     fn main_path(&self) -> PathBuf {
         self.main
             .as_ref()
@@ -598,6 +655,13 @@ struct CompleteArtifactObservation {
 }
 
 impl CompleteArtifactObservation {
+    fn namespace(&self, namespace: AuthorityNamespace) -> &NamespaceArtifactSet {
+        match namespace {
+            AuthorityNamespace::Rovai => &self.rovai,
+            AuthorityNamespace::Lumen => &self.lumen,
+        }
+    }
+
     fn authoritative_sidecars(&self) -> Vec<AuthorityArtifactSummary> {
         self.rovai
             .authoritative_sidecars()
@@ -788,36 +852,141 @@ pub(crate) fn observe_authority_identity_token(
     })
 }
 
+#[derive(Debug, Clone, Copy)]
+enum SqliteJournalRecovery {
+    Rollback,
+    Wal,
+}
+
+struct ContractProbeFailure {
+    stage: BusyStage,
+    error: rusqlite::Error,
+}
+
+impl ContractProbeFailure {
+    fn recovery_kind(&self) -> Option<SqliteJournalRecovery> {
+        match &self.error {
+            rusqlite::Error::SqliteFailure(sqlite, _) => match sqlite.extended_code {
+                rusqlite::ffi::SQLITE_READONLY_ROLLBACK => Some(SqliteJournalRecovery::Rollback),
+                rusqlite::ffi::SQLITE_READONLY_RECOVERY => Some(SqliteJournalRecovery::Wal),
+                _ => None,
+            },
+            _ => None,
+        }
+    }
+
+    fn into_block(self, artifacts: &NamespaceArtifactSet) -> AuthorityBlock {
+        sqlite_block(
+            &artifacts.main_path(),
+            self.stage,
+            artifacts.wal.is_some(),
+            self.error,
+        )
+    }
+}
+
 fn probe_contract(
     artifacts: &NamespaceArtifactSet,
-) -> Result<DatabaseContractClassification, AuthorityBlock> {
+    access: OpenFlags,
+) -> Result<DatabaseContractClassification, ContractProbeFailure> {
     let target = artifacts.main_path();
-    let flags = OpenFlags::SQLITE_OPEN_READ_ONLY
-        | OpenFlags::SQLITE_OPEN_NO_MUTEX
-        | OpenFlags::SQLITE_OPEN_NOFOLLOW;
-    let connection = Connection::open_with_flags(&target, flags)
-        .map_err(|error| sqlite_block(&target, BusyStage::Open, artifacts.wal.is_some(), error))?;
+    let flags = access | OpenFlags::SQLITE_OPEN_NO_MUTEX | OpenFlags::SQLITE_OPEN_NOFOLLOW;
+    let connection =
+        Connection::open_with_flags(&target, flags).map_err(|error| ContractProbeFailure {
+            stage: BusyStage::Open,
+            error,
+        })?;
     connection
         .busy_timeout(AUTHORITY_BUSY_TIMEOUT)
-        .map_err(|error| sqlite_block(&target, BusyStage::Open, artifacts.wal.is_some(), error))?;
+        .map_err(|error| ContractProbeFailure {
+            stage: BusyStage::Open,
+            error,
+        })?;
     connection
         .execute_batch("PRAGMA query_only = ON; PRAGMA foreign_keys = ON;")
-        .map_err(|error| {
-            sqlite_block(
-                &target,
-                BusyStage::ContractQuery,
-                artifacts.wal.is_some(),
-                error,
-            )
-        })?;
-    classify_database_contract(&connection).map_err(|error| {
-        sqlite_block(
-            &target,
-            BusyStage::ContractQuery,
-            artifacts.wal.is_some(),
+        .map_err(|error| ContractProbeFailure {
+            stage: BusyStage::ContractQuery,
             error,
-        )
+        })?;
+    classify_database_contract(&connection).map_err(|error| ContractProbeFailure {
+        stage: BusyStage::ContractQuery,
+        error,
     })
+}
+
+fn recover_sqlite_journal(
+    lease: &CoreDataDirLease,
+    expected: &CompleteArtifactObservation,
+    namespace: AuthorityNamespace,
+    recovery: SqliteJournalRecovery,
+) -> Result<(), ObservationFailure> {
+    let artifacts = expected.namespace(namespace);
+    let changed = || {
+        ObservationFailure::Blocked(AuthorityBlock::IdentityChanged {
+            target: artifacts.main_path(),
+            stage: BusyStage::Revalidation,
+        })
+    };
+    let map_ticket_error = |error| match error {
+        TicketValidationError::Blocked(block) => ObservationFailure::Blocked(*block),
+        TicketValidationError::Infrastructure(error) => ObservationFailure::Infrastructure(error),
+    };
+    revalidate_lease(lease).map_err(map_ticket_error)?;
+    let current = observe_all(lease)?;
+    if !expected.rovai.authority_unchanged(&current.rovai)
+        || !expected.lumen.authority_unchanged(&current.lumen)
+        || match recovery {
+            SqliteJournalRecovery::Rollback => artifacts.rollback_journal.is_none(),
+            SqliteJournalRecovery::Wal => artifacts.wal.is_none(),
+        }
+    {
+        return Err(changed());
+    }
+
+    // This is SQLite's own transaction recovery, not an application write or
+    // migration. No CREATE flag, no schema changes, no manual journal deletion.
+    // query_only prevents application DML while SQLite may recover before SELECT.
+    probe_contract(artifacts, OpenFlags::SQLITE_OPEN_READ_WRITE)
+        .map_err(|error| ObservationFailure::Blocked(error.into_block(artifacts)))?;
+
+    revalidate_lease(lease).map_err(map_ticket_error)?;
+    let recovered = observe_all(lease)?;
+    let after = recovered.namespace(namespace);
+    if artifacts
+        .main
+        .as_ref()
+        .map(|artifact| &artifact.identity.object)
+        != after
+            .main
+            .as_ref()
+            .map(|artifact| &artifact.identity.object)
+    {
+        return Err(changed());
+    }
+    // Recovery can rewrite/truncate bytes and remove sidecars, but cannot
+    // replace main or a surviving sidecar with a different filesystem object.
+    for (before, after) in [
+        (&artifacts.wal, &after.wal),
+        (&artifacts.rollback_journal, &after.rollback_journal),
+    ] {
+        if let Some(after) = after
+            && before.as_ref().map(|artifact| &artifact.identity.object)
+                != Some(&after.identity.object)
+        {
+            return Err(changed());
+        }
+    }
+    let other = match namespace {
+        AuthorityNamespace::Rovai => AuthorityNamespace::Lumen,
+        AuthorityNamespace::Lumen => AuthorityNamespace::Rovai,
+    };
+    if !expected
+        .namespace(other)
+        .authority_unchanged(recovered.namespace(other))
+    {
+        return Err(changed());
+    }
+    Ok(())
 }
 
 fn sqlite_block(
@@ -904,19 +1073,7 @@ fn revalidate_namespace_artifacts(
 ) -> Result<(), TicketValidationError> {
     let actual =
         observe_namespace(lease, expected.namespace).map_err(observation_to_ticket_error)?;
-    let same = expected.main.as_ref().map(|artifact| &artifact.identity)
-        == actual.main.as_ref().map(|artifact| &artifact.identity)
-        && expected.wal.as_ref().map(|artifact| &artifact.identity)
-            == actual.wal.as_ref().map(|artifact| &artifact.identity)
-        && expected
-            .rollback_journal
-            .as_ref()
-            .map(|artifact| &artifact.identity)
-            == actual
-                .rollback_journal
-                .as_ref()
-                .map(|artifact| &artifact.identity);
-    if same {
+    if expected.authority_unchanged(&actual) {
         Ok(())
     } else {
         Err(TicketValidationError::Blocked(Box::new(
@@ -955,6 +1112,7 @@ fn revalidate_optional_shm(
 mod tests {
     use super::*;
     use crate::core_data_dir_lock::CoreDataDirLease;
+    use std::process::{Child, Command, Stdio};
 
     struct TestDirectory(PathBuf);
 
@@ -970,6 +1128,164 @@ mod tests {
     impl Drop for TestDirectory {
         fn drop(&mut self) {
             let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    struct CrashWriter(Child);
+
+    impl Drop for CrashWriter {
+        fn drop(&mut self) {
+            let _ = self.0.kill();
+            let _ = self.0.wait();
+        }
+    }
+
+    // This process seam owns SQLite crash recovery, not migration-switch recovery:
+    // dropping a Connection would roll back cleanly and could never expose this regression.
+    #[test]
+    fn crashed_sqlite_writer_is_recovered_and_readmitted() {
+        for (mode, namespace, migrate) in [
+            ("DELETE", AuthorityNamespace::Rovai, false),
+            ("DELETE", AuthorityNamespace::Lumen, true),
+            ("WAL", AuthorityNamespace::Rovai, false),
+        ] {
+            let directory = TestDirectory::new("crashed-writer");
+            let database = crate::test_support::fresh_schema_database_fast_at(&directory.0);
+            database.connection().execute_batch(
+                "CREATE TABLE admission_recovery_probe (id INTEGER PRIMARY KEY, value TEXT NOT NULL);",
+            ).unwrap();
+            for id in 0..8 {
+                database.connection().execute(
+                    "INSERT INTO admission_recovery_probe VALUES (?1, 'committed-' || hex(zeroblob(4096)))",
+                    [id],
+                ).unwrap();
+            }
+            let runtime_root = database.runtime_camp_files_root().to_path_buf();
+            let runtime_identity = database
+                .runtime_camp_files_root_identity_digest()
+                .to_string();
+            drop(database);
+            let path = directory.0.join(namespace.main_file_name());
+            if namespace == AuthorityNamespace::Lumen {
+                std::fs::rename(directory.0.join("rovai.sqlite"), &path).unwrap();
+            }
+            let marker = directory.0.join("writer-active.test-marker");
+            let mut child = CrashWriter(
+                Command::new(std::env::current_exe().unwrap())
+                    .args([
+                        "--exact",
+                        "database_admission::tests::sqlite_crash_writer_helper",
+                        "--nocapture",
+                    ])
+                    .env("ROVAI_SQLITE_CRASH_TEST_DATA_DIR", &directory.0)
+                    .env("ROVAI_SQLITE_CRASH_TEST_JOURNAL_MODE", mode)
+                    .env(
+                        "ROVAI_SQLITE_CRASH_TEST_MIGRATE",
+                        if migrate { "1" } else { "0" },
+                    )
+                    .stdout(Stdio::null())
+                    .stderr(Stdio::inherit())
+                    .spawn()
+                    .unwrap(),
+            );
+            let deadline = std::time::Instant::now() + Duration::from_secs(20);
+            while !marker.exists() {
+                assert!(
+                    child.0.try_wait().unwrap().is_none(),
+                    "writer exited before its transaction was interrupted"
+                );
+                assert!(
+                    std::time::Instant::now() < deadline,
+                    "writer did not reach its active transaction"
+                );
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            child.0.kill().unwrap();
+            assert!(!child.0.wait().unwrap().success());
+            drop(child);
+
+            if mode == "DELETE" {
+                let read_only =
+                    Connection::open_with_flags(&path, OpenFlags::SQLITE_OPEN_READ_ONLY).unwrap();
+                let error = classify_database_contract(&read_only).unwrap_err();
+                assert!(matches!(error, rusqlite::Error::SqliteFailure(sqlite, _)
+                    if sqlite.extended_code == rusqlite::ffi::SQLITE_READONLY_ROLLBACK));
+            }
+            let lease = CoreDataDirLease::acquire(&directory.0).unwrap();
+            let reopened = match DatabaseAdmission::assess(&lease).unwrap() {
+                AdmissionAssessment::AdmittedExisting(ticket) if !migrate => {
+                    crate::db::Database::open_admitted(*ticket).unwrap()
+                }
+                AdmissionAssessment::RequiresMigration(ticket) if migrate => {
+                    crate::authority_migration::AuthorityMigrationRunner::run(
+                        *ticket,
+                        &runtime_root,
+                        &runtime_identity,
+                    )
+                    .unwrap()
+                }
+                other => {
+                    panic!("SQLite must recover and readmit {namespace:?}/{mode}, got {other:?}")
+                }
+            };
+            crate::test_support::assert_production_database_configuration(&reopened);
+            let committed: i64 = reopened
+                .connection()
+                .query_row(
+                    "SELECT count(*) FROM admission_recovery_probe WHERE value LIKE 'committed-%'",
+                    [],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(
+                committed, 8,
+                "the interrupted transaction must not replace committed data"
+            );
+            let integrity: String = reopened
+                .connection()
+                .query_row("PRAGMA quick_check", [], |row| row.get(0))
+                .unwrap();
+            assert_eq!(integrity, "ok");
+            assert_eq!(
+                reopened.path(),
+                lease.data_dir().join(namespace.main_file_name())
+            );
+            if namespace == AuthorityNamespace::Lumen {
+                assert!(!directory.0.join("rovai.sqlite").exists());
+            }
+        }
+    }
+
+    #[test]
+    fn sqlite_crash_writer_helper() {
+        let Some(directory) = std::env::var_os("ROVAI_SQLITE_CRASH_TEST_DATA_DIR") else {
+            return;
+        };
+        let directory = PathBuf::from(directory);
+        let lease = CoreDataDirLease::acquire(&directory).unwrap();
+        let AdmissionAssessment::AdmittedExisting(ticket) =
+            DatabaseAdmission::assess(&lease).unwrap()
+        else {
+            panic!("crash writer requires an admitted current authority");
+        };
+        let database = crate::db::Database::open_admitted(*ticket).unwrap();
+        if std::env::var("ROVAI_SQLITE_CRASH_TEST_MIGRATE").unwrap() == "1" {
+            crate::db::downgrade_current_schema_to_v115_source_for_test(database.connection());
+        }
+        let mode = std::env::var("ROVAI_SQLITE_CRASH_TEST_JOURNAL_MODE").unwrap();
+        assert!(matches!(mode.as_str(), "DELETE" | "WAL"));
+        database
+            .connection()
+            .execute_batch(&format!(
+            "PRAGMA journal_mode = {mode}; PRAGMA synchronous = FULL; PRAGMA wal_autocheckpoint = 0;
+             PRAGMA cache_size = 5; PRAGMA cache_spill = ON;
+             BEGIN IMMEDIATE;
+             UPDATE admission_recovery_probe SET value = 'uncommitted-' || hex(zeroblob(4096));"
+        ))
+            .unwrap();
+        std::fs::write(directory.join("writer-active.test-marker"), b"active").unwrap();
+        loop {
+            std::thread::park();
         }
     }
 
@@ -1052,6 +1368,59 @@ mod tests {
     }
 
     #[test]
+    fn read_probe_tolerates_only_a_new_empty_wal_not_authority_changes() {
+        let directory = TestDirectory::new("read-probe-side-effects");
+        let lease = CoreDataDirLease::acquire(&directory.0).unwrap();
+        let main = directory.0.join("rovai.sqlite");
+        let wal = directory.0.join("rovai.sqlite-wal");
+        std::fs::write(&main, b"unchanged authority").unwrap();
+        let before = observe_namespace(&lease, AuthorityNamespace::Rovai)
+            .ok()
+            .unwrap();
+        std::fs::write(&wal, b"").unwrap();
+        let empty_wal = observe_namespace(&lease, AuthorityNamespace::Rovai)
+            .ok()
+            .unwrap();
+        assert!(before.matches_read_probe(&empty_wal));
+        assert!(!before.authority_unchanged(&empty_wal));
+
+        // A post-probe ticket must fence even this newly observed empty WAL.
+        let ticket = ExistingAuthorityTicket {
+            lease: &lease,
+            namespace: AuthorityNamespace::Rovai,
+            artifacts: empty_wal.clone(),
+        };
+        std::fs::write(&wal, b"concurrent frames").unwrap();
+        let nonempty_wal = observe_namespace(&lease, AuthorityNamespace::Rovai)
+            .ok()
+            .unwrap();
+        assert!(!before.matches_read_probe(&nonempty_wal));
+        assert!(!empty_wal.matches_read_probe(&nonempty_wal));
+        assert!(matches!(
+            ticket.into_open(),
+            Err(TicketValidationError::Blocked(block))
+                if matches!(*block, AuthorityBlock::IdentityChanged { .. })
+        ));
+
+        for kind in [
+            AuthorityArtifactKind::Main,
+            AuthorityArtifactKind::RollbackJournal,
+        ] {
+            let mut changed = empty_wal.clone();
+            match kind {
+                AuthorityArtifactKind::Main => {
+                    changed.main.as_mut().unwrap().identity.byte_length += 1;
+                }
+                AuthorityArtifactKind::RollbackJournal => {
+                    changed.rollback_journal = changed.wal.clone();
+                }
+                _ => unreachable!(),
+            }
+            assert!(!before.matches_read_probe(&changed), "changed {kind:?}");
+        }
+    }
+
+    #[test]
     fn new_authority_open_refuses_a_canonical_target_that_appears_before_publish() {
         let directory = TestDirectory::new("initialize-publish-race");
         let lease = CoreDataDirLease::acquire(&directory.0).unwrap();
@@ -1079,6 +1448,7 @@ mod tests {
             panic!("empty data directory must be initializable");
         };
         let initialized = crate::db::Database::initialize_new(*ticket).unwrap();
+        crate::test_support::assert_production_database_configuration(&initialized);
         assert_eq!(initialized.path(), lease.data_dir().join("rovai.sqlite"));
         assert!(matches!(
             classify_database_contract(initialized.connection()).unwrap(),
@@ -1086,12 +1456,12 @@ mod tests {
         ));
         drop(initialized);
 
-        let AdmissionAssessment::AdmittedExisting(ticket) =
-            DatabaseAdmission::assess(&lease).unwrap()
-        else {
-            panic!("initialized authority must be admitted on restart");
+        let ticket = match DatabaseAdmission::assess(&lease).unwrap() {
+            AdmissionAssessment::AdmittedExisting(ticket) => ticket,
+            other => panic!("new authority must reopen normally, got {other:?}"),
         };
         let reopened = crate::db::Database::open_admitted(*ticket).unwrap();
+        crate::test_support::assert_production_database_configuration(&reopened);
         assert_eq!(reopened.path(), lease.data_dir().join("rovai.sqlite"));
     }
 

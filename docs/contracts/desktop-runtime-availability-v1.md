@@ -87,9 +87,23 @@ Core 持有租约时返回 `owned_by_active_core`，不能执行 SQLite recovery
 可在票据消费时再次核对 exact identity 后删除。`rovai.sqlite` 与 `lumen.sqlite` 同时存在是歧义；只有
 `lumen.sqlite` 时必须精确打开或迁移它，不能顺带创建 `rovai.sqlite`。
 
+合同探测优先使用 READ_ONLY/NOFOLLOW，禁止 CREATE。干净 WAL 模式下，SQLite 可能新建零字节 WAL 与 SHM；只有
+main/journal 的完整 identity 未变且 WAL 从缺失变为零字节普通文件时，才接受该探测副作用。新出现的非空 WAL、
+已有 WAL 的改变或 main/journal 改变必须拒绝。票据保存刷新后的 WAL identity，后续消费严格复核，不延续该例外。
+
+精确的 `SQLITE_READONLY_ROLLBACK`（776）与 `SQLITE_READONLY_RECOVERY`（264）不能直接归类为权限拒绝。在 lease
+仍有效、两个 namespace 的 authority artifacts 与观察相符且对应 journal/WAL 存在时，Admission 可以对 exact target
+执行一次 READ_WRITE/NOFOLLOW、无 CREATE、`query_only=ON` 的合同探测，让 SQLite 自己完成正常 journal recovery。
+这只允许引擎恢复，不允许应用写入、schema migration、手动删除 journal、改权限或另建 authority。恢复后复核 main
+对象和仍存在的 sidecar 对象没有被替换、另一 namespace 未变，再完整重新评估并签发新票据。若再次需要恢复，返回
+可重试 busy；未知合同、损坏和真正权限故障仍按重新评估结果处理。
+
 只有完整确认两个 namespace 都没有 main/WAL/journal 后才能初始化。初始化在私有 staging 数据库中完成 schema、
 seed、checkpoint 和校验，发布前再次确认 absence，并用原子 create-if-absent 提交 `rovai.sqlite`；竞态出现的
 canonical target 永不被覆盖。
+
+所有正式连接（existing、initialized、migrated）都必须配置 `journal_mode=WAL`、`synchronous=NORMAL` 与
+`foreign_keys=ON`。staging 为安全发布收敛到 DELETE 不改变该运行合同。
 
 ## 4. Migration and recovery
 
@@ -123,8 +137,10 @@ type RovaiRequestFailureKind =
 ```
 
 失败还必须保留 `code/message/retryable/generation/details`。Main 不依赖 Electron 对 remote Error 的字符串化来区分
-领域拒绝与基础设施失败；Preload 用带上述字段的本地 `Error` 拒绝 Promise。只有显式 Desktop shutdown 可以失败
-所有 generation；普通 child error/exit 只能失败其自己的 pending request。
+领域拒绝与基础设施失败；Preload 用普通 `RovaiRequestFailure` 对象拒绝 Promise，不让带自定义字段的 `Error` 跨
+`contextBridge`。需要 Error 实例时只能在 Renderer 收到对象后构造；统一错误读取函数必须同时识别本地 Error 和普通
+failure 的字符串 `message`。真实 Electron 隔离世界测试必须验证所有字段保留，成功值与公开 `Promise<T>` 不变。
+只有显式 Desktop shutdown 可以失败所有 generation；普通 child error/exit 只能失败其自己的 pending request。
 
 ## 6. Local preference degradation
 

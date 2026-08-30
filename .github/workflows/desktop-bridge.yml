@@ -1,0 +1,45 @@
+name: Desktop context bridge
+
+on:
+  pull_request:
+    paths:
+      - "apps/desktop/src/preload/**"
+      - "apps/desktop/src/renderer/src/error-message*"
+      - "packages/contracts/**"
+      - "scripts/lib/rovai-request-context-bridge.test.mjs"
+      - "scripts/fixtures/rovai-request-context-bridge.cjs"
+      - "package.json"
+      - "pnpm-lock.yaml"
+      - ".github/workflows/desktop-bridge.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: desktop-bridge-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  context-bridge:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 26
+
+      - name: Install pnpm and dependencies
+        run: |
+          npm install --global pnpm@11.20.0
+          pnpm install --frozen-lockfile
+
+      - name: Verify real Electron contextBridge and Renderer error reading
+        run: |
+          xvfb-run -a pnpm test:desktop-bridge
+          pnpm exec vitest run apps/desktop/src/renderer/src/error-message.test.ts

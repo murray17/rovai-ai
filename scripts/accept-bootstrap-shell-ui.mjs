@@ -1,8 +1,11 @@
-import { spawn } from 'node:child_process'
-import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises'
+import { execFileSync, spawn } from 'node:child_process'
+import { mkdir, mkdtemp, readFile, realpath, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { basename, join, resolve } from 'node:path'
+import { DatabaseSync } from 'node:sqlite'
 import { assertUserDataIsIsolated } from './lib/dev-desktop.mjs'
+import { startQualificationCore } from './lib/qualification-core.mjs'
+import { removeEphemeralRuntimeCampFilesRoot } from './lib/runtime-camp-files-root.mjs'
 
 if (process.platform !== 'darwin') {
   throw new Error('Bootstrap Shell packaged UI acceptance currently requires macOS')
@@ -10,8 +13,11 @@ if (process.platform !== 'darwin') {
 
 const root = resolve(import.meta.dirname, '..')
 const appPath = resolve(process.argv[2] ?? join(root, 'dist', 'mac-arm64', 'Rovai AI.app'))
-const fixtureRoot = resolve(process.env.ROVAI_BOOTSTRAP_ACCEPT_FIXTURE_ROOT
+const requestedFixtureRoot = resolve(process.env.ROVAI_BOOTSTRAP_ACCEPT_FIXTURE_ROOT
   ?? await mkdtemp(join(tmpdir(), 'rovai-bootstrap-shell-ui-accept-')))
+await mkdir(requestedFixtureRoot, { recursive: true })
+// Core rejects symlink components in managed roots; macOS /tmp and /var are aliases.
+const fixtureRoot = await realpath(requestedFixtureRoot)
 const dataDir = assertUserDataIsIsolated(join(fixtureRoot, 'user-data'))
 const outputDir = resolve(process.env.ROVAI_BOOTSTRAP_ACCEPT_OUTPUT_DIR
   ?? join(fixtureRoot, 'captures'))
@@ -73,6 +79,10 @@ try {
   )
   await capture(running.cdp, nightCapture)
 
+  await closeApp(running)
+  running = null
+  const recovery = await verifyCoreCrashRecovery()
+
   process.stdout.write(`${JSON.stringify({
     ok: true,
     app: basename(appPath),
@@ -90,12 +100,186 @@ try {
       dayAndNightLayouts: true,
       narrowTwoHundredPercentEquivalentLayout: true,
       reducedMotion: true,
-      horizontalOverflow: false
+      horizontalOverflow: false,
+      automaticCoreCrashRecovery: true,
+      interruptedWriteRolledBack: true,
+      committedStatePreserved: true,
+      structuredCrashFailureInRenderer: true,
+      workspaceRemounted: true
     },
-    captures: { day: dayCapture, nightCompact: nightCapture }
+    recovery,
+    captures: { day: dayCapture, nightCompact: nightCapture, recovered: recovery.capture }
   }, null, 2)}\n`)
 } finally {
   if (running) await closeApp(running)
+}
+
+async function verifyCoreCrashRecovery() {
+  const recoveryDataDir = assertUserDataIsIsolated(join(fixtureRoot, 'crash-recovery-user-data'))
+  await mkdir(recoveryDataDir, { recursive: false })
+  const coreExecutable = await realpath(join(appPath, 'Contents', 'Resources', 'bin', 'rovai-core'))
+  const core = startQualificationCore({
+    coreExecutable,
+    dataDirectory: recoveryDataDir,
+    workingDirectory: root,
+    runtimeCacheDirectory: join(fixtureRoot, 'runtime-cache')
+  })
+  let application = null
+  try {
+    // Initialize with the real Core, then close it before installing test-only
+    // tables/triggers. Both the data dir and managed Skill Library are isolated.
+    try {
+      await core.request('members.list')
+    } finally {
+      const stopped = await core.stop()
+      assert(stopped.code === 0, `Fixture Core failed: ${JSON.stringify(stopped)}`)
+    }
+    const recoveryDatabase = join(recoveryDataDir, 'rovai.sqlite')
+    const fixture = new DatabaseSync(recoveryDatabase)
+    try {
+      assert(fixture.prepare('PRAGMA journal_mode').get().journal_mode === 'wal',
+        'A newly initialized production database must use WAL')
+      fixture.exec(`
+        CREATE TABLE acceptance_crash_probe (id INTEGER PRIMARY KEY, value TEXT NOT NULL);
+        WITH RECURSIVE rows(id) AS (
+          VALUES(1) UNION ALL SELECT id + 1 FROM rows WHERE id < 1024
+        ) INSERT INTO acceptance_crash_probe
+          SELECT id, 'committed-' || hex(zeroblob(8192)) FROM rows;
+        CREATE TRIGGER acceptance_pause_write AFTER UPDATE OF display_name ON agent_profile
+        WHEN NEW.id = 'agent_1' AND NEW.display_name = 'recovery-uncommitted'
+        BEGIN
+          UPDATE acceptance_crash_probe SET value = 'uncommitted-' || hex(zeroblob(8192));
+          SELECT sum(value) FROM (
+            WITH RECURSIVE delay(value) AS (
+              VALUES(0) UNION ALL SELECT value + 1 FROM delay WHERE value < 100000000
+            ) SELECT value FROM delay
+          );
+        END;
+      `)
+    } finally {
+      fixture.close()
+    }
+
+    application = await launchApp(recoveryDataDir)
+    await waitForExpression(application.cdp, `window.rovai.supervisor.getSnapshot()
+      .then(snapshot => snapshot.fullCoreState === 'ready')`, 45_000)
+    await waitForSelector(application.cdp, '.app-shell', 45_000)
+    await evaluate(application.cdp,
+      "void (window.__workspaceBeforeCrash = document.querySelector('.app-shell'))")
+    const before = await evaluate(application.cdp, 'window.rovai.supervisor.getSnapshot()', true)
+    const member = await evaluate(application.cdp,
+      `window.rovai.request('members.get', { agentId: 'agent_1' })`, true)
+    const walPath = `${recoveryDatabase}-wal`
+    const walBefore = await stat(walPath).then(metadata => metadata.size)
+
+    await evaluate(application.cdp, `(() => {
+      const member = ${JSON.stringify(member)}
+      window.__crashWriteSettled = false
+      window.__crashWrite = window.rovai.request('members.update', {
+        commandId: crypto.randomUUID(),
+        command: {
+          agentId: member.agentId, expectedVersion: member.version,
+          displayName: 'recovery-uncommitted', teamRole: member.teamRole,
+          professionalResponsibilities: member.professionalResponsibilities,
+          personalityTraits: member.personalityTraits,
+          workingPrinciples: member.workingPrinciples, growthTopic: member.growthTopic
+        }
+      }).then(value => {
+        window.__crashWriteSettled = true
+        return { value }
+      }, failure => {
+        window.__crashWriteSettled = true
+        return { failure }
+      })
+    })()`)
+
+    // Wait for dirty pages to spill, not merely for a request to be enqueued.
+    // The fixture trigger keeps the real Core's transaction open until SIGKILL.
+    const deadline = Date.now() + 20_000
+    let walBytes = walBefore
+    while (walBytes < walBefore + 4 * 1024 * 1024 && Date.now() < deadline) {
+      if (await evaluate(application.cdp, 'window.__crashWriteSettled')) {
+        throw new Error(`Write settled before interruption: ${JSON.stringify(await evaluate(
+          application.cdp, 'window.__crashWrite', true))}`)
+      }
+      await wait(25)
+      walBytes = await stat(walPath).then(metadata => metadata.size)
+    }
+    assert(walBytes >= walBefore + 4 * 1024 * 1024, 'Core did not spill an active write to WAL')
+    const killedPid = await killIsolatedCore(application, recoveryDataDir, coreExecutable)
+    const interrupted = await evaluate(application.cdp, 'window.__crashWrite', true)
+    const failure = interrupted?.failure
+    assert(failure?.kind === 'infrastructure_failure'
+      && failure.code === 'core_process_exited'
+      && failure.retryable === true
+      && failure.generation === before.generation
+      && typeof failure.message === 'string'
+      && failure.details?.signal === 'SIGKILL',
+    `Renderer lost structured crash failure fields: ${JSON.stringify(interrupted)}`)
+
+    await waitForExpression(application.cdp, `window.rovai.supervisor.getSnapshot().then(
+      snapshot => snapshot.generation > ${before.generation}
+        && snapshot.fullCoreState === 'ready'
+        && snapshot.capabilities.authoritativeWorkspace
+        && snapshot.capabilities.coreRequests)`, 45_000)
+    await waitForSelector(application.cdp, '.app-shell', 45_000)
+    assert(await evaluate(application.cdp, `!window.__workspaceBeforeCrash.isConnected
+      && window.__workspaceBeforeCrash !== document.querySelector('.app-shell')`),
+    'The authoritative workspace tree was not unmounted and rebuilt for the new generation')
+    const after = await evaluate(application.cdp, 'window.rovai.supervisor.getSnapshot()', true)
+    const recoveredMember = await evaluate(application.cdp,
+      `window.rovai.request('members.get', { agentId: 'agent_1' })`, true)
+    assert(recoveredMember.displayName === member.displayName
+      && recoveredMember.version === member.version,
+    'The interrupted member update was committed or replayed')
+    // Only inspect after the restarted Core is ready; the acceptance harness
+    // must not be the process that performs SQLite recovery.
+    const recovered = new DatabaseSync(recoveryDatabase, { readOnly: true })
+    try {
+      assert(recovered.prepare(`SELECT count(*) AS count FROM acceptance_crash_probe
+        WHERE value LIKE 'committed-%'`).get().count === 1024,
+      'Previously committed data was not preserved')
+      assert(recovered.prepare('PRAGMA quick_check').get().quick_check === 'ok',
+        'Recovered SQLite database failed quick_check')
+      assert(recovered.prepare('PRAGMA journal_mode').get().journal_mode === 'wal',
+        'Recovered Core did not keep WAL enabled')
+    } finally {
+      recovered.close()
+    }
+    const capturePath = join(outputDir, 'bootstrap-core-crash-recovered-workspace.png')
+    await capture(application.cdp, capturePath)
+    return {
+      dataDir: recoveryDataDir,
+      killedPid,
+      generationBefore: before.generation,
+      generationAfter: after.generation,
+      uncommittedWalBytesObserved: walBytes - walBefore,
+      committedRows: 1024,
+      capture: capturePath
+    }
+  } finally {
+    if (application) await closeApp(application)
+    await removeEphemeralRuntimeCampFilesRoot(recoveryDataDir, { temporaryDirectory: fixtureRoot })
+  }
+}
+
+async function killIsolatedCore(application, recoveryDataDir, coreExecutable) {
+  const owner = JSON.parse(await readFile(join(recoveryDataDir, '.rovai-core-instance.lock'), 'utf8'))
+  assert(Number.isSafeInteger(owner.processId) && owner.processId > 1,
+    'The isolated Core lock has no valid process ID')
+  assert(await realpath(owner.executablePath) === coreExecutable,
+    'Refusing to kill a Core outside this packaged acceptance build')
+  const processInfo = execFileSync('/bin/ps', [
+    '-p', String(owner.processId), '-o', 'ppid=,command='
+  ], { encoding: 'utf8' }).trim()
+  const match = processInfo.match(/^(\d+)\s+(.+)$/)
+  const canonicalDataDir = await realpath(recoveryDataDir)
+  assert(match && Number(match[1]) === application.child.pid
+    && match[2].startsWith(`${coreExecutable} `)
+    && [canonicalDataDir, recoveryDataDir].some(path => match[2].includes(`--data-dir ${path} `)),
+  `Refusing to kill a process not owned by this isolated App: ${processInfo}`)
+  process.kill(owner.processId, 'SIGKILL')
+  return owner.processId
 }
 
 async function inspectBootstrap(cdp) {
@@ -157,13 +341,13 @@ async function setTheme(cdp, preference) {
     `document.documentElement.dataset.theme === ${JSON.stringify(preference)}`)
 }
 
-async function launchApp() {
+async function launchApp(userData = dataDir) {
   const executable = join(appPath, 'Contents', 'MacOS', 'Rovai AI')
   const stderr = []
   const child = spawn(executable, [
     '--no-sandbox',
     `--remote-debugging-port=${port}`,
-    `--user-data-dir=${dataDir}`
+    `--user-data-dir=${userData}`
   ], {
     cwd: root,
     stdio: ['ignore', 'ignore', 'pipe'],

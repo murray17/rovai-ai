@@ -2327,6 +2327,37 @@ fn database_sqlite_open_error(
     DatabaseOpenError::operation(code, operation, path, error)
 }
 
+fn configure_runtime_connection(
+    connection: &Connection,
+    path: &Path,
+) -> std::result::Result<(), DatabaseOpenError> {
+    let map_error = |error| {
+        database_sqlite_open_error(
+            "authority_runtime_configuration_failed",
+            "configure runtime SQLite connection for",
+            path,
+            crate::database_admission::BusyStage::Open,
+            error,
+        )
+    };
+    let mode: String = connection
+        .query_row("PRAGMA journal_mode = WAL", [], |row| row.get(0))
+        .map_err(map_error)?;
+    if !mode.eq_ignore_ascii_case("wal") {
+        return Err(DatabaseOpenError {
+            code: "authority_runtime_journal_mode_unavailable",
+            message: format!(
+                "authority database {} could not enable WAL (retained {mode})",
+                path.display()
+            ),
+            authority_block: None,
+        });
+    }
+    connection
+        .execute_batch("PRAGMA foreign_keys = ON; PRAGMA synchronous = NORMAL;")
+        .map_err(map_error)
+}
+
 fn finalize_staged_authority(
     connection: &Connection,
     path: &Path,
@@ -2531,6 +2562,7 @@ impl Database {
             }
         }
         open.revalidate()?;
+        configure_runtime_connection(&connection, &path)?;
         let mut database = Self {
             connection,
             path,
@@ -2704,6 +2736,7 @@ impl Database {
 
         let connection =
             open_existing_authority_connection(&target).map_err(DatabaseInitializeError)?;
+        configure_runtime_connection(&connection, &target).map_err(DatabaseInitializeError)?;
         crate::monitoring::register_monitoring_sql_functions(&connection).map_err(|error| {
             DatabaseInitializeError(DatabaseOpenError::operation(
                 "authority_sql_function_registration_failed",
@@ -3340,12 +3373,9 @@ impl Database {
     }
 
     fn migrate(&mut self, fresh_database: bool) -> Result<()> {
+        configure_runtime_connection(&self.connection, &self.path)?;
         self.connection.execute_batch(
             r#"
-            PRAGMA journal_mode = WAL;
-            PRAGMA foreign_keys = ON;
-            PRAGMA synchronous = NORMAL;
-
             CREATE TABLE IF NOT EXISTS schema_migration (
                 version INTEGER PRIMARY KEY,
                 applied_at TEXT NOT NULL

@@ -1136,6 +1136,7 @@ mod tests {
         };
         let migrated =
             AuthorityMigrationRunner::run(*ticket, &runtime_root, &runtime_root_identity).unwrap();
+        crate::test_support::assert_production_database_configuration(&migrated);
         assert!(matches!(
             classify_database_contract(migrated.connection()).unwrap(),
             DatabaseContractClassification::Current(_)

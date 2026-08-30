@@ -24,11 +24,14 @@ last_updated: 2026-08-30
   清理或发布前复核相关对象。只有 `lumen.sqlite` 时精确使用它，不创建 `rovai.sqlite`。
 - 没有 main 但存在 WAL/journal 是不完整 authority，必须阻断；孤立 SHM 只有在票据消费时 exact identity 未变才能
   清理。全新 authority 只在两个 namespace 都确认无 main/WAL/journal 后，通过 staging 与原子 no-replace 发布。
+- 只读探测报告需要正常 SQLite journal recovery 时，可在同一 lease 的 exact target 上让引擎完成恢复，再重新准入；
+  不把正常 hot journal 回滚永久当作权限故障，也不授权业务写入或手动删除日志。正式连接统一配置 WAL 与同步策略。
 - 旧合同 migration 使用一致副本，原 main/sidecar 的私有备份、identity manifest、完整校验与原子切换；中断恢复按
   current main 的 original/migrated identity 决定恢复，未知 identity fail closed。迁移失败保留原 authority 与壳层。
 - Full Core Supervisor 发布单调 generation/revision 的完整快照。旧 child 的 frame、event、response 或 exit 不能污染
   当前 generation；确定性准入阻断不消耗 crash budget。Renderer-facing request 继续是 `Promise<T>`，内部 transport
-  必须保留领域拒绝、基础设施失败、Full Core 不可用与 shutdown 的结构化类别。
+  必须保留领域拒绝、基础设施失败、Full Core 不可用与 shutdown 的结构化类别；failure 以普通对象穿过 contextBridge，
+  不能依赖 Error 自定义字段跨隔离世界保留。
 
 <a id="core-command-transaction"></a>
 

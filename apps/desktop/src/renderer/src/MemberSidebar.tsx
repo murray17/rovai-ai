@@ -1,3 +1,4 @@
+import { readErrorMessage } from './error-message'
 import {
   useCallback,
   useEffect,
@@ -486,5 +487,5 @@ function assertApplied(result: StoredCommandResult): void {
 }
 
 function errorMessage(error: unknown): string {
-  return localizeExecutionEngineTerms(error instanceof Error ? error.message : String(error))
+  return localizeExecutionEngineTerms(readErrorMessage(error))
 }

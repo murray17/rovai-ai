@@ -1,3 +1,4 @@
+import { readErrorMessage } from './error-message'
 import { useEffect, useMemo, useState } from 'react'
 import type {
   AdapterKind,
@@ -619,5 +620,5 @@ function assertApplied(result: StoredCommandResult): void {
 }
 
 function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error)
+  return readErrorMessage(error)
 }

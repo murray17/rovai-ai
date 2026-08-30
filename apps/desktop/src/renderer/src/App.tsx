@@ -1,3 +1,4 @@
+import { readErrorMessage } from './error-message'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type {
   AdapterInstallation,
@@ -4183,7 +4184,7 @@ function stringArrayField(value: Record<string, unknown>, key: string): string[]
 }
 
 function errorMessage(error: unknown): string {
-  return localizeExecutionEngineTerms(error instanceof Error ? error.message : String(error))
+  return localizeExecutionEngineTerms(readErrorMessage(error))
 }
 
 function afterNextPaint(timeoutMs = 250): Promise<void> {

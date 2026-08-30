@@ -1,7 +1,7 @@
 ---
 document_type: development-index
 authority: development-routing
-last_updated: 2026-08-24
+last_updated: 2026-08-30
 ---
 
 # Rovai-ai 开发者指南
@@ -88,6 +88,9 @@ cargo clippy --workspace --all-targets -- -D warnings
 ```bash
 pnpm build:desktop
 ```
+
+Preload 请求 transport 或 Renderer 错误读取改动还须运行 `pnpm test:desktop-bridge`，通过真实 Electron 隔离世界验证
+成功值和结构化拒绝；临时目录与 headless CI 说明见[Electron 隔离世界回归](testing.md#electron-隔离世界回归)。
 
 真实 Runtime Smoke、完整 macOS 打包、Windows 打包/安装和 UI 截图验收耗时更长，且部分命令会调用上游
 模型。它们保持独立，不进入普通 commit 门禁；运行前先阅读对应文档。

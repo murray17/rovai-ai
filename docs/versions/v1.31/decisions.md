@@ -45,9 +45,10 @@ Desktop 先提供主题、Supervisor、重试和诊断；Full Core 通过 capabi
 
 ### 决定
 
-Core 先持有 data-dir OS lease。Admission 精确观察 Rovai/Lumen artifacts 并只读探测合同，返回绑定 lease、不可复制、
-一次消费的 existing/new/migration ticket。main/WAL/journal 严格复核；孤立 SHM 只在 exact identity 未变时清理。
-初始化使用 pre-publish absence revalidation 与 no-replace commit。
+Core 先持有 data-dir OS lease。Admission 精确观察 Rovai/Lumen artifacts 并只读优先探测合同；若 SQLite 明确报告正常
+journal recovery 需求，在同一 lease 的原 target 上让引擎恢复，再完整重新评估。返回绑定 lease、不可复制、一次消费的
+existing/new/migration ticket。票据保存探测后的 main/WAL/journal 并严格复核；正常探测新建的空 WAL 与可重建 SHM
+不视为 authority 替换。孤立 SHM 只在 exact identity 未变时清理。初始化使用 absence revalidation 与 no-replace commit。
 
 当前规范见 [Desktop Runtime Availability v1](../../contracts/desktop-runtime-availability-v1.md)。
 
@@ -60,6 +61,7 @@ Core 先持有 data-dir OS lease。Admission 精确观察 Rovai/Lumen artifacts 
 
 - **文件存在性 boolean：** 丢失 sidecar、合同、identity 与 busy 语义；
 - **所有 SHM 都要求字节不变：** 会把可变协调缓存误判为永久 authority blocker。
+- **只读 probe 失败一律权限拒绝：** 会阻断正常 hot journal 回滚，用户反复重试也无法恢复工作区。
 
 <a id="v1-31-d03"></a>
 ## V1.31-D03：历史合同只在一致副本上迁移，并用 identity manifest 恢复切换
@@ -95,8 +97,9 @@ child 的迟到 exit/response 可能毒化新进程；Electron remote Error 会�
 ### 决定
 
 Supervisor 使用单调 generation、child token 与 revision 完整快照；pending request 按 generation 失败，确定性阻断不计
-crash。Main/Preload 使用结构化 request transport。本机偏好损坏使用内存默认、告警并保留原文件；Onboarding 从 ready
-authority origin 初始化，而不是读取文件存在性。
+crash。Main/Preload 使用结构化 request transport，failure 以普通对象穿过 contextBridge；Error 只能在 Renderer 接收后
+构造，避免 Electron 丢失自定义字段。本机偏好损坏使用内存默认、告警并保留原文件；Onboarding 从 ready authority
+origin 初始化，而不是读取文件存在性。
 
 当前规范见 [Desktop Runtime Availability v1](../../contracts/desktop-runtime-availability-v1.md)与
 [First-run Onboarding v3](../../contracts/first-run-onboarding-v3.md)。
@@ -110,5 +113,6 @@ authority origin 初始化，而不是读取文件存在性。
 ### 被拒绝方案
 
 - **全局 failAll on child exit：** 会错误失败新 generation 请求；
+- **Preload 在 Error 上挂结构化字段：** 字段在 contextBridge 复制 Error 时丢失，只有错误文字无法支撑状态判断；
 - **损坏偏好即禁止 Core：** 把非权威文件升级成产品 authority；
 - **启动前 exists 检查：** 无法区分旧库、孤儿 sidecar、迁移与真正 absence。
