@@ -29,10 +29,16 @@ app.whenReady().then(async () => {
       clearTimeout(timeout)
     }
   }
-  const evaluate = source => complete(window.webContents.executeJavaScript(source, true), source)
+  const evaluate = source => {
+    console.error(`Composer Renderer step: ${source.replace(/\s+/g, ' ').slice(0, 200)}`)
+    return complete(window.webContents.executeJavaScript(source, true), source)
+  }
   const frames = () => evaluate('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))')
-  const command = (method, params) => complete(window.webContents.debugger.sendCommand(method, params),
-    `${method} ${JSON.stringify(params)}`)
+  const command = (method, params) => {
+    const operation = `${method} ${JSON.stringify(params)}`
+    console.error(`Composer input step: ${operation}`)
+    return complete(window.webContents.debugger.sendCommand(method, params), operation)
+  }
   const cases = []
   const failures = []
   async function reset(text) {
