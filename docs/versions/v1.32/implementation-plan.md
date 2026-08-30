@@ -1,7 +1,7 @@
 ---
 document_type: implementation-plan
 version: v1.32
-status: in_progress
+status: completed
 last_updated: 2026-08-30
 ---
 
@@ -34,4 +34,23 @@ fixture 表驱动覆盖连接不存在、非 JSON、无效 UTF-8 和响应丢失
 
 ## 验证记录
 
-待实现后填写；真实 Runtime 和日常 App 均未运行，不以离线结果代替 Runtime 矩阵。
+2026-08-30，隔离 worktree 内验证：
+
+| 检查 | 结果 |
+| --- | --- |
+| `pnpm typecheck` | 通过 |
+| `pnpm test` | 通过，包含文档/Skills 检查；主 Node suite 219 通过、1 项 Windows 专属测试在 macOS 跳过 |
+| `pnpm build:desktop` | 通过，仅构建，未启动 App |
+| `pnpm test:rust:staged` | 路由到 `cargo test --workspace`：Library 403、CLI 32、Core 182 通过，4 项既有人工/真实 Runtime 测试保持显式 ignore |
+| `pnpm test:rust:slow` | 291 通过，现有 Managed v2 持久化、目录摘要和原子提交 owner 保留 |
+| `cargo check --workspace --all-targets` | 通过 |
+| `cargo clippy --workspace --all-targets -- -D warnings` | 通过 |
+| `cargo fmt --all --check` / `git diff --check` | 通过 |
+| 构建后的 CLI 进程 + 临时 IPC 接收端 | 首次请求混合外部文件/目录与内部路径，cwd 和环境变量不覆盖 lease 根；原文件不变，确定响应和未发出请求均清理快照 |
+| `DOCS_BASE_REF=3123e885e2ab54a64848646c485434658b6154de pnpm docs:check:ci` | 通过 |
+
+独立 Standards / Spec 复核已闭合 Windows junction 清理、未 dispatch 回滚、根以上路径 alias 和
+promotion 后同步失败归属四项问题，无遗留实质发现。Windows 专属测试的共享函数引用随抽取同步修复。
+
+真实 Runtime 和日常 App 均未运行，不以离线结果代替 Runtime 矩阵。Windows 原生验证由既有 PR CI
+compile gate、attachment traversal 和 Named Pipe job 执行；此处不宣称本机完成 Windows 实测。

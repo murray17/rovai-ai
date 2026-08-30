@@ -3341,7 +3341,7 @@ mod windows_attachment_tests {
 
         make_owned_tree_removable(&first.path).unwrap();
         make_owned_tree_removable(&second.path).unwrap();
-        allow_file_update(&single.path).unwrap();
+        crate::local_attachment_snapshot::remove_local_snapshot_tree(&single.path).unwrap();
         fs::remove_dir_all(fixture).unwrap();
     }
 

@@ -4,7 +4,7 @@ version: v1.32
 lifecycle: current
 authority: version-scope-and-status
 design_status: confirmed
-implementation_status: in_progress
+implementation_status: completed
 model_context_change: true
 last_updated: 2026-08-30
 ---
@@ -24,6 +24,9 @@ last_updated: 2026-08-30
 
 CLI 路径适配、共用文件快照能力、lease 根目录、Run tmp 清理、错误脱敏和精确附件帮助。
 Managed v2 数据库、消息/Delivery 原子提交、Renderer 和 Runtime 专属目录准入不改变。
+
+实现与本地回归已完成，结果见[实施计划的验证记录](implementation-plan.md#验证记录)。
+未启动日常 App 或真实 Runtime；Windows 原生附件与 Named Pipe 验证由 PR CI 执行，不据此扩大 Runtime 支持声明。
 
 ## 跨版本文档影响
 
