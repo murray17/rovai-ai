@@ -9,9 +9,13 @@ on:
       - "apps/desktop/src/renderer/src/CoreSubsystemNotice*"
       - "apps/desktop/src/renderer/src/styles.css"
       - "apps/desktop/src/renderer/src/error-message*"
+      - "apps/desktop/src/renderer/src/StructuredMentionComposer*"
+      - "apps/desktop/src/renderer/src/structured-mention-model*"
       - "packages/contracts/**"
       - "scripts/lib/rovai-request-context-bridge.test.mjs"
       - "scripts/fixtures/rovai-request-context-bridge.cjs"
+      - "scripts/lib/structured-mention-composer.test.mjs"
+      - "scripts/fixtures/structured-mention-composer/**"
       - "package.json"
       - "pnpm-lock.yaml"
       - ".github/workflows/desktop-bridge.yml"
@@ -47,4 +51,5 @@ jobs:
         run: |
           pnpm typecheck
           xvfb-run -a pnpm test:desktop-bridge
+          xvfb-run -a pnpm test:composer-input
           pnpm exec vitest run apps/desktop/src/renderer/src/error-message.test.ts apps/desktop/src/main/core-client.test.ts apps/desktop/src/main/windows-data-root.test.ts apps/desktop/src/main/windows-bootstrap.test.ts apps/desktop/src/renderer/src/CoreSubsystemNotice.test.ts apps/desktop/src/renderer/src/App.test.ts
