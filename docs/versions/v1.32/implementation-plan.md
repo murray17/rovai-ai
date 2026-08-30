@@ -7,7 +7,8 @@ last_updated: 2026-08-30
 
 # 外部附件静默快照实施计划
 
-基线：`3123e885e2ab54a64848646c485434658b6154de`。
+初始基线：`3123e885e2ab54a64848646c485434658b6154de`。
+合入前同步主线：`18ee7f0510b37831ced1c89a481313519e0bb052`（保留并行合入的 #118 / #120）。
 工作分支：`rovai/send-external-snapshot`。
 
 ## 实施范围
@@ -47,13 +48,16 @@ fixture 表驱动覆盖连接不存在、非 JSON、无效 UTF-8 和响应丢失
 | `cargo clippy --workspace --all-targets -- -D warnings` | 通过 |
 | `cargo fmt --all --check` / `git diff --check` | 通过 |
 | 构建后的 CLI 进程 + 临时 IPC 接收端 | 首次请求混合外部文件/目录与内部路径，cwd 和环境变量不覆盖 lease 根；原文件不变，确定响应和未发出请求均清理快照 |
-| `DOCS_BASE_REF=3123e885e2ab54a64848646c485434658b6154de pnpm docs:check:ci` | 通过 |
+| `DOCS_BASE_REF=18ee7f0510b37831ced1c89a481313519e0bb052 pnpm docs:check:ci` | 通过 |
 
 独立 Standards / Spec 复核已闭合 Windows junction 清理、未 dispatch 回滚、根以上路径 alias 和
 promotion 后同步失败归属四项问题，无遗留实质发现。Windows 专属测试的共享函数引用随抽取同步修复。
 
 首轮 Windows CI 发现通用 typed error 覆盖了 Core 原有的 reparse-point 诊断。修复保留原始诊断及
 typed category，既有 junction owner 同时断言二者；CLI 仍只投影安全分类，不输出内部诊断。
+
+并行主线更新了当时仍为 current 的 v1.31 决策正文，因此旧基线上的合并预览触发历史冻结检查。
+同步主线后，以 `18ee7f05` 为比较基线保留该正文，本 PR 仅改变 v1.31 lifecycle 元数据，不豁免冻结规则。
 
 真实 Runtime 和日常 App 均未运行，不以离线结果代替 Runtime 矩阵。Windows 原生验证由既有 PR CI
 compile gate、attachment traversal、新增 CLI snapshot 执行步骤和 Named Pipe job 执行；CLI 步骤复用
