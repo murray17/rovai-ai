@@ -22,7 +22,7 @@ SQLite 阻断时继续工作；SQLite authority 仍然 fail closed。这个拆�
 | DatabaseAdmission | exact Rovai/Lumen artifact 观察、只读优先探测、租约内 SQLite journal recovery、一次性票据、typed blocker | schema 写入、自动 quarantine、UI 文案 |
 | Database open/init | 票据消费后的 exact open，或 confirmed absence 上的 staging initialization | 目录扫描式猜测、覆盖竞态 target |
 | AuthorityMigrationRunner | 一致副本、旧数据保留、验证、manifest、原子切换与中断恢复 | 原库原地 migration、失败后创建空 authority |
-| Renderer bootstrap gate | 订阅 Supervisor、展示壳层状态、主题、重试与诊断 | 挂载权威 hooks、合成业务空集合 |
+| Renderer startup boundary | 订阅 Supervisor、读取本机恢复目标、立即显示页面框架、400ms 局部反馈；明确阻断时展示恢复壳层 | 未准入时挂载权威 hooks、合成业务空集合 |
 
 ## Startup sequence
 
@@ -31,8 +31,9 @@ Windows only: admit private Bootstrap profile -> single-instance lock
   -> assess formal root (failure => bound Bootstrap Shell, no Core path)
 Electron ready
   -> install in-memory local defaults
-  -> create BrowserWindow and mount Bootstrap Shell
+  -> create BrowserWindow and mount ordinary page chrome (no Core hooks)
   -> load local preference files (failure => warning, original retained)
+  -> freeze Main Window Session from loaded local preferences, render its target frame
   -> spawn Full Core generation
        -> acquire CoreDataDirLease
        -> DatabaseAdmission::assess
@@ -43,13 +44,22 @@ Electron ready
        -> mandatory execution/input/delivery recovery (failure => typed refusal)
        -> ready(authority origin, initializing subsystems)
   -> Supervisor enables authoritativeWorkspace/coreRequests
-  -> Renderer mounts the normal App tree
+  -> Renderer mounts authority-backed hooks inside the restored route
        -> initialize optional services -> ready or feature-scoped degraded
 ```
 
 Runtime attachment storage admission发生在数据库已经分类且 lease 仍持有之后；任何失败都不能反向创建另一个 SQLite
 authority。Full Core ready 之前，Renderer 不调用 `navigation.snapshot`、Camp、Member、Memory 或 Onboarding 的
 Core-backed read path。
+
+页面框架不是权威查询树。Root 从首次挂载起只计一次 400ms；正常检查、迁移和自动重启都保留既有 rail/顶行，超时仅在
+目标内容区呈现 loading。ready 后读取 Onboarding、偏好和目标投影时继续使用同一截止时间，不插入第二个全屏 gate。
+只有 `blocked` / `crashed` 才切换到带重试、主题与诊断的 Bootstrap Shell。数据未返回前不展示业务空态、不确认已读、
+不提交恢复位置。精确呈现由 [冷启动反馈](../ui/components/app-shell-navigation.md#冷启动反馈)拥有。
+
+BrowserWindow 可以先于本机文件读取创建，但 Main Window Session 不能用尚未加载的默认偏好冻结恢复目标。首次窗口的
+snapshot IPC 等待本机 preference/restorable-location 加载，不等待 Core；关闭窗口使迟到读取失效。之后新建窗口仍从
+当前偏好创建新的、冻结的 session snapshot。
 
 ## Optional startup boundary
 

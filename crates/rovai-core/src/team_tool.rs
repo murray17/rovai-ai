@@ -582,7 +582,7 @@ impl TeamToolService {
                     "maxItems": MAX_PREPARED_ATTACHMENTS,
                     "uniqueItems": true,
                     "items": {"type": "string", "minLength": 1},
-                    "description": "Optional AgentRun-local file or directory path; repeat --file to preserve attachment order."
+                    "description": "Optional local file or directory path readable by the active Runtime. Repeat to preserve attachment order. Pass the existing path directly; Rovai privately snapshots paths outside the current AgentRun workspace and ROVAI_RUN_TMP before sending."
                 }
             }
         })

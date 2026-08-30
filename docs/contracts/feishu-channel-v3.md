@@ -56,4 +56,4 @@ Bot、项目与 Camp 不迁移、不清理。
 
 - [飞书渠道架构](../architecture/feishu-channel.md)
 - [飞书官方 Card JSON 2.0 折叠面板](https://open.feishu.cn/document/feishu-cards/card-json-v2-components/containers/collapsible-panel)
-- [v1.33 实施计划](../versions/v1.33/implementation-plan.md)
+- [v1.34 实施计划](../versions/v1.34/implementation-plan.md)

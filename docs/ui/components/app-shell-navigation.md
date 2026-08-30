@@ -2,7 +2,7 @@
 document_type: ui-component-contract
 authority: renderer-app-shell-navigation
 status: accepted
-last_updated: 2026-08-28
+last_updated: 2026-08-30
 ---
 
 # App Shell 与统一侧栏
@@ -42,12 +42,17 @@ Core-owned Pending Camp 并进入同一 Composer，第一条消息成功后再�
 
 ## 冷启动反馈
 
-App 启动后立即读取 Main Window Session 与目标页面数据，不用提示面阻断读取。前 400ms 不显示
+App 启动后立即读取本机 Main Window Session，Core capability ready 后立即读取目标数据，不用提示面阻断读取。前 400ms 不显示
 “正在打开”反馈；读取在门槛内完成时直接呈现目标页面。超过 400ms 时只在目标页面内容区显示局部
 反馈，rail 与顶行保持稳定，不使用覆盖整个 App 的通用恢复页。
 
 Camp 与队员页使用与目标一致的“正在打开”文案；记忆页保留自身内容骨架。错误不等待 400ms，立即
 在原目标上下文中提供重试。队员页与记忆页的结构、导航和已加载内容不因反馈门槛改变。
+
+Main Window Session 必须等待本机偏好读取后冻结恢复目标，不能把窗口创建时的临时默认值当成上次位置。窗口无需等待
+这些读取或 Core 就可以出现。Core 检查/迁移期间保留非权威页面框架，业务控件与快捷键暂不接受操作；没有投影不代表
+项目或会话为空。400ms 从根组件首次挂载起计算，Core ready、Onboarding admission 和目标投影之间的交接不重置计时。
+只有明确 `blocked` / `crashed` 才使用 [Bootstrap Shell](bootstrap-shell.md)；局部偏好读取失败立即在内容区提供重试。
 
 ## 导航投影新鲜度
 

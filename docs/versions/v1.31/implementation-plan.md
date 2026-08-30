@@ -50,6 +50,23 @@ last_updated: 2026-08-30
 
 ## Completion evidence
 
+### 冷启动呈现回归修正（2026-08-30）
+
+- 根组件不再因 null/starting Supervisor 快照立即显示全屏 Bootstrap；先读本机恢复目标并显示既有页面框架，
+  Core 查询门禁保持不变。普通检查/迁移在 400ms 后只显示页内反馈，ready 交接与 Onboarding admission 不重置计时。
+- Main Window Session 改为在本机偏好加载后冻结，而不是把建窗时的内存默认值误当成上次位置；关闭窗口后迟到读取失效。
+- 回归归属：`App.test.ts` 的真实根组件首渲染断言修复前因出现 `bootstrap-shell` 而失败，修复后通过。
+  `pnpm test:startup-presentation` 在真实 Electron 中挂载生产 App 与 CSS，以受控 API/时钟覆盖四类恢复目标、
+  null/starting、399/400ms、迁移、ready 交接、首次训练、迟到快照、明确阻断和本机读取错误。
+  单独测试 helper 的布尔返回值不能发现“外层门禁挡住内层计时器”，因此该组合边界需要组件测试；不重复数据库恢复矩阵。
+- `desktop-session.test.ts` 拥有本机延迟读取与窗口关闭失效的最低成本测试。此轮没有 Rust、SQLite 或 Runtime 改动。
+- `pnpm test`（714 项 Vitest、219 项 Node 测试通过，1 项 Windows-only 测试按平台跳过）、`pnpm typecheck`、
+  `pnpm build:desktop`、`pnpm test:startup-presentation` 与真实 base SHA 的 `pnpm docs:check:ci` 通过。
+  生产组件的 Day/Night、1040×700 与 200%/reduced-motion 截图已检查；该夹具不启动 Core 或使用日常数据，
+  不将组件测试声称为真实数据库迁移或 Windows 原生 UI 验收。
+
+### 前序实现证据
+
 - `cargo test --workspace --no-fail-fast`、`cargo check --workspace --all-targets` 与
   `cargo clippy --workspace --all-targets -- -D warnings` 通过；migration switch-boundary process-kill regression 包含在全仓套件；
 - `pnpm test`、`pnpm typecheck`、`pnpm build:desktop`、`pnpm docs:test`、`pnpm docs:check` 与

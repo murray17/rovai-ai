@@ -380,7 +380,7 @@ try {
     cli: await verifyBinary('rovai', cliExecutable)
   }
   const cliVersion = run(cliExecutable, ['--version'])
-  if (!cliVersion.includes(`rovai ${packageMetadata.version} contract-v20 ipc-v2`)) {
+  if (!cliVersion.includes(`rovai ${packageMetadata.version} contract-v21 ipc-v2`)) {
     throw new Error(`unexpected packaged CLI version: ${cliVersion}`)
   }
   report.push(`CLI: ${cliVersion}`)
@@ -393,7 +393,7 @@ try {
   const health = await core.request('health.check')
   if (health?.core?.ok !== true
       || health.core.version !== packageMetadata.version
-      || health.core.builtinToolContractVersion !== 20
+      || health.core.builtinToolContractVersion !== 21
       || health.core.builtinToolIpcProtocolVersion !== 2) {
     throw new Error(`packaged Core health is incompatible: ${JSON.stringify(health?.core)}`)
   }
@@ -436,7 +436,7 @@ try {
     packagedCoreSmoke: {
       isolatedDataRoot: true,
       healthCheck: true,
-      builtinToolContractVersion: 20,
+      builtinToolContractVersion: 21,
       builtinToolIpcProtocolVersion: 2
     }
   }

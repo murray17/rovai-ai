@@ -47,7 +47,8 @@ Desktop 窗口和本机恢复能力不再与 SQLite authority 的成功打开绑
 - 确定性准入阻断不使用 crash budget。只有显式 shutdown 跨 generation 失败全部请求；普通 child 只失败自己的 pending；
 - Main/Preload 使用结构化 value/failure transport；failure 以普通对象穿过真实 contextBridge，Renderer outward API
   仍是 `Promise<T>`，错误保留类别、code、retryable、generation 与 details，统一读取函数不退化为 `[object Object]`；
-- 正常 App tree 仅在 `authoritativeWorkspace` ready 后挂载，阻断期间不查询权威工作区、不展示合成空列表；
+- 权威查询树仅在 `authoritativeWorkspace` ready 后挂载；普通页面框架提前恢复，正常检查/迁移使用 400ms 页内 loading，
+  明确 blocked/crashed 才显示 Bootstrap Shell。阻断期间不查询权威工作区、不展示合成空列表；
 - First-run admission 从 Core ready 的 `current.origin = initialized | existing | migrated` 得出，不再检查 SQLite 文件名。
 - DB 后的权威恢复失败发布 typed refusal；Skill/MCP/adapter/Builtin IPC/附件及维护移到 ready 后，以 `coreSubsystems`
   门禁和原进程重试隔离故障，不卸载工作区。pending cleanup 限定到启动候选，不能清理新建 Camp；

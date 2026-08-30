@@ -19,6 +19,8 @@ last_updated: 2026-08-30
 - Desktop 窗口、主题、本机偏好、Supervisor、重试和 bootstrap diagnostics 可以在 Full Core 不可用时继续工作；
   Camp、Member、Memory、Navigation 与其他业务读写只有 `authoritativeWorkspace` capability ready 后才能挂载。
   阻断期间不得创建替代数据库、查询未准入 authority 或用空集合冒充正常工作区。
+  非权威页面框架不属于业务读写：本机恢复目标读取后先显示对应页面框架，正常慢启动/迁移沿用 400ms 内容区反馈，
+  不以 Core 未 ready 为由展示全屏恢复页；只有明确阻断或 crashed 才展示 Bootstrap 恢复面。
 - Core 必须先持有绑定 canonical data directory 与稳定对象身份的 OS 排他 lease，再观察或操作 SQLite。数据库
   准入只返回 existing、initializable、migration 或 typed blocked；票据绑定 lease、不可复制、一次消费并在打开、
   清理或发布前复核相关对象。只有 `lumen.sqlite` 时精确使用它，不创建 `rovai.sqlite`。

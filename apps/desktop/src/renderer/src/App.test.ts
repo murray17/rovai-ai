@@ -1,3 +1,4 @@
+import { CampDetailEntries } from './CampDetailPopover'
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it, vi } from 'vitest'
@@ -23,6 +24,7 @@ import type {
   SupervisorSnapshot
 } from '@contracts'
 import {
+  App,
   AppHeader,
   CAMP_OPEN_FEEDBACK_DELAY_MS,
   ControlledShutdownOverlay,
@@ -37,7 +39,6 @@ import {
   campActivationStateForCreation,
   campDeleteCommand,
   campViewIsVisibleForReadAcknowledgement,
-  campInspectorVisibleFromStoredValue,
   cancellableTurnIds,
   campCreationPreflightFromAgents,
   campMessageExecutionPurpose,
@@ -236,6 +237,21 @@ function supervisorSnapshot(
 }
 
 describe('availability-first workspace gate', () => {
+  it('starts with the ordinary page frame before the first Supervisor snapshot, without loading feedback', () => {
+    vi.stubGlobal('document', { documentElement: { dataset: {}, style: {} } })
+    vi.stubGlobal('window', { rovai: { platform: 'darwin' } })
+    try {
+      const markup = renderToStaticMarkup(createElement(App))
+      expect(markup).toContain('unified-sidebar')
+      expect(markup).not.toContain('bootstrap-shell')
+      expect(markup).not.toContain('startup-route-loading')
+      expect(markup).not.toContain('sidebar-empty')
+      expect(markup).not.toContain('onboarding-app-shell')
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+
   it('mounts the authoritative workspace only for one fully ready capability snapshot', () => {
     expect(authoritativeWorkspaceIsAvailable(null)).toBe(false)
     expect(authoritativeWorkspaceIsAvailable(supervisorSnapshot())).toBe(false)
@@ -2018,11 +2034,19 @@ describe('task event projections', () => {
     ).map((item) => item.kind)).toEqual(['camp_message'])
   })
 
-  it('defaults Inspector visibility on and restores only the explicit hidden preference', () => {
-    expect(campInspectorVisibleFromStoredValue(null)).toBe(true)
-    expect(campInspectorVisibleFromStoredValue('visible')).toBe(true)
-    expect(campInspectorVisibleFromStoredValue('hidden')).toBe(false)
-    expect(campInspectorVisibleFromStoredValue('legacy-value')).toBe(true)
+  it('keeps execution first, exposes the active detail, and only marks actual execution as loading', () => {
+    const entries = (executionCount: number | null, runningCount: number): string => renderToStaticMarkup(createElement(CampDetailEntries, {
+      activeTab: 'tasks', visible: true, panelId: 'camp-details', executionCount,
+      runningCount, taskCount: 4, memberCount: 3, onSelect: () => undefined
+    }))
+    const running = entries(3, 2)
+    expect(running.indexOf('data-detail="execution"')).toBeLessThan(running.indexOf('data-detail="tasks"'))
+    expect(running.indexOf('data-detail="tasks"')).toBeLessThan(running.indexOf('data-detail="members"'))
+    expect(running).toContain('aria-label="2 位队员正在执行"')
+    expect(running).toMatch(/data-detail="tasks" aria-expanded="true"/)
+    expect(running).toContain('aria-controls="camp-details"')
+    expect(entries(3, 0)).not.toContain('camp-loading-spinner')
+    expect(entries(null, 2)).not.toContain('data-detail="execution"')
   })
 
   it('shows unsettled external effects only after a failed or cancelled AgentRun', () => {
@@ -2128,16 +2152,14 @@ describe('task event projections', () => {
       campTitle: '会话界面',
       contextLabel: 'Quick Chat',
       camp,
-      inspectorVisible: false,
-      onToggleInspector: () => undefined,
       onFocusApprovals: () => undefined
     }))
     expect(campMarkup).toContain('Quick Chat')
     expect(campMarkup).not.toContain('运行中 1')
     expect(campMarkup).toContain('待审批 1')
     expect(campMarkup).toContain('aria-label="待审批 1，定位输入框上方审批"')
-    expect(campMarkup).toContain('aria-label="显示右侧检查器"')
-    expect(campMarkup).toContain('aria-pressed="false"')
+    expect(campMarkup).toContain('camp-detail-entry-host')
+    expect(campMarkup).not.toContain('topbar-inspector-toggle')
 
     const composeStrip = renderToStaticMarkup(createElement(WindowDragStrip, {
       page: 'compose'
@@ -3014,9 +3036,9 @@ describe('task event projections', () => {
     expect(markup).toContain('先了解项目')
     expect(markup).toContain('整理成任务')
     expect(markup).toContain('检查工作区')
-    expect(markup).toContain('队员 <small>1</small>')
+    expect(markup).toContain('>队员</span><small>1</small>')
     expect(markup).toContain('协作队员')
-    expect(markup).toContain('队长 · 洛可')
+    expect(markup).not.toContain('camp-lead-picker')
     expect(markup).toContain('>队长</small>')
     expect(markup).not.toContain('默认负责人 · 洛可')
     expect(markup).toContain('1 位在队 · 0 位暂离')
@@ -3378,7 +3400,7 @@ describe('task event projections', () => {
     expect(executionPlacementChangeShouldStart('bottom', 'inspector', true)).toBe(false)
     expect(executionPlacementChangeShouldStart('bottom', 'bottom', false)).toBe(false)
     expect(executionPlacementSaveFailureMessage('bottom')).toBe('未能保存，仍在底部。')
-    expect(executionPlacementSaveFailureMessage('inspector')).toBe('未能保存，仍在右侧。')
+    expect(executionPlacementSaveFailureMessage('inspector')).toBe('未能保存，仍在详情浮层。')
     expect(executionDrawerIsNearBottom(648, 1_000, 320)).toBe(true)
     expect(executionDrawerIsNearBottom(647, 1_000, 320)).toBe(false)
     expect(executionDrawerHeightBounds(600, 54, 920)).toEqual({ min: 160, max: 434 })
@@ -3433,7 +3455,7 @@ describe('task event projections', () => {
     expect(markup.indexOf('class="message-bubble"'))
       .toBeLessThan(markup.indexOf('class="message-copy-button"'))
     expect(markup).toContain('aria-label="Agent 执行台"')
-    expect(markup).toContain('aria-label="将执行台移到右侧检查器并记住此位置"')
+    expect(markup).toContain('aria-label="将执行台移到详情浮层并记住此位置"')
     expect(markup).toContain('class="run-pulse-title"')
     expect(markup).toContain('class="run-pulse-chip is-selected"')
     expect((markup.match(/class="run-pulse-chip(?: is-selected)?"/g) ?? [])).toHaveLength(1)
@@ -3505,14 +3527,14 @@ describe('task event projections', () => {
       executionPlacement: 'inspector',
       inspectorVisible: true
     }))
-    const inspectorTabListStart = inspectorMarkup.indexOf('class="tabs-list sticky-tabs"')
+    const inspectorTabListStart = inspectorMarkup.indexOf('class="camp-detail-entries"')
     const inspectorTabListEnd = inspectorMarkup.indexOf('</div>', inspectorTabListStart)
     const inspectorTabList = inspectorMarkup.slice(inspectorTabListStart, inspectorTabListEnd)
-    expect(inspectorTabList.indexOf('>执行 <small>'))
-      .toBeLessThan(inspectorTabList.indexOf('>任务 <small>'))
-    expect(inspectorTabList.indexOf('>任务 <small>'))
-      .toBeLessThan(inspectorTabList.indexOf('>队员 <small>'))
-    expect(inspectorMarkup).toMatch(/role="tab" aria-selected="true"[^>]*trigger-execution/)
+    expect(inspectorTabList.indexOf('>执行</span><small>'))
+      .toBeLessThan(inspectorTabList.indexOf('>任务</span><small>'))
+    expect(inspectorTabList.indexOf('>任务</span><small>'))
+      .toBeLessThan(inspectorTabList.indexOf('>队员</span><small>'))
+    expect(inspectorMarkup).toMatch(/data-detail="execution" aria-expanded="true"/)
     expect(inspectorMarkup).toContain('data-placement="inspector"')
 
     const terminalInspectorMarkup = renderToStaticMarkup(createElement(CampWorkspace, {
@@ -3536,7 +3558,7 @@ describe('task event projections', () => {
       executionPlacement: 'inspector',
       inspectorVisible: true
     }))
-    expect(terminalInspectorMarkup).toMatch(/role="tab" aria-selected="true"[^>]*trigger-execution/)
+    expect(terminalInspectorMarkup).toMatch(/data-detail="execution" aria-expanded="true"/)
 
     const ordinaryInspectorMarkup = renderToStaticMarkup(createElement(CampWorkspace, {
       snapshot,
@@ -3551,13 +3573,13 @@ describe('task event projections', () => {
       onStop: () => undefined,
       inspectorVisible: true
     }))
-    const ordinaryTabListStart = ordinaryInspectorMarkup.indexOf('class="tabs-list sticky-tabs"')
+    const ordinaryTabListStart = ordinaryInspectorMarkup.indexOf('class="camp-detail-entries"')
     const ordinaryTabListEnd = ordinaryInspectorMarkup.indexOf('</div>', ordinaryTabListStart)
     const ordinaryTabList = ordinaryInspectorMarkup.slice(ordinaryTabListStart, ordinaryTabListEnd)
-    expect(ordinaryTabList).not.toContain('>执行 <small>')
-    expect(ordinaryTabList.indexOf('>任务 <small>'))
-      .toBeLessThan(ordinaryTabList.indexOf('>队员 <small>'))
-    expect(ordinaryInspectorMarkup).toMatch(/role="tab" aria-selected="true"[^>]*trigger-tasks/)
+    expect(ordinaryTabList).not.toContain('>执行</span><small>')
+    expect(ordinaryTabList.indexOf('>任务</span><small>'))
+      .toBeLessThan(ordinaryTabList.indexOf('>队员</span><small>'))
+    expect(ordinaryInspectorMarkup).toMatch(/data-detail="tasks" aria-expanded="true"/)
 
     const groupedEvidenceMarkup = renderToStaticMarkup(createElement(CampWorkspace, {
       snapshot: {
@@ -3982,9 +4004,9 @@ describe('task event projections', () => {
     expect(markup).toContain('aria-label="收起审批详情"')
     expect(markup).toContain('aria-expanded="true"')
     expect(markup).not.toContain('class="approval-card')
-    expect((markup.match(/role="tab"/g) ?? []).length).toBe(2)
-    expect(markup).toContain('任务 <small>0</small>')
-    expect(markup).toContain('队员 <small>2</small>')
+    expect((markup.match(/class="camp-detail-entry"/g) ?? []).length).toBe(2)
+    expect(markup).toContain('>任务</span><small>0</small>')
+    expect(markup).toContain('>队员</span><small>2</small>')
     expect(markup).not.toContain('上下文投递')
     expect(markup).not.toContain('>审批<')
     expect(markup.indexOf('class="approval-dock"')).toBeLessThan(markup.indexOf('class="composer"'))
@@ -4314,10 +4336,11 @@ describe('task event projections', () => {
     }))
 
     expect(markup).toContain('task-action-row')
-    expect(markup).toContain('task-action-button')
+    expect(markup).toContain('task-new-button')
     expect(markup).toContain('新建任务')
     expect(markup).toContain('实现 Task 工具')
-    expect(markup).toContain('跨消息持续跟踪，不自动唤醒负责人。')
+    expect(markup).not.toContain('跨消息持续跟踪，不自动唤醒负责人。')
+    expect(markup).toContain('筛选任务状态')
     expect(markup).toContain('沐瓦')
     expect(markup).not.toContain('acceptanceCriteria')
     expect(markup).not.toContain('长期事项')

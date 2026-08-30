@@ -9,13 +9,13 @@ use serde_json::{Map, Value, json};
 
 use crate::{command::canonical_json_digest, team_tool_catalog::builtin_tool_definitions};
 
-pub const BUILTIN_TOOL_CONTRACT_VERSION: u32 = 20;
+pub const BUILTIN_TOOL_CONTRACT_VERSION: u32 = 21;
 pub const BUILTIN_TOOL_IPC_PROTOCOL_VERSION: u32 = 2;
 pub const BUILTIN_TOOL_ENVELOPE_VERSION: u32 = 1;
 pub const BUILTIN_TOOL_RECEIPT_VERSION: u32 = 1;
-pub const BUILTIN_TOOL_CLI_COMMAND_VERSION: u32 = 20;
+pub const BUILTIN_TOOL_CLI_COMMAND_VERSION: u32 = 21;
 pub const BUILTIN_TOOL_AGENT_OUTPUT_CONTRACT_VERSION: u32 = 2;
-pub const BUILTIN_TOOL_RUNTIME_CAPABILITY: &str = "builtin_cli.transport.v20";
+pub const BUILTIN_TOOL_RUNTIME_CAPABILITY: &str = "builtin_cli.transport.v21";
 pub const BUILTIN_TOOL_MAX_IPC_REQUEST_BYTES: usize = 1024 * 1024;
 pub const ROVAI_AGENT_CLI_ENV: &str = "ROVAI_AGENT_CLI";
 pub const ROVAI_CLI_CONTEXT_ENV: &str = "ROVAI_CLI_CONTEXT";
@@ -65,6 +65,8 @@ impl LocalIpcEndpoint {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct BuiltinToolLeaseContext {
+    pub execution_root: String,
+    pub run_tmp: String,
     pub lease_id: String,
     pub lease_generation: u64,
     pub lease_token: String,
@@ -99,6 +101,8 @@ impl BuiltinToolCliContext {
         if lease.lease_id.trim().is_empty()
             || lease.lease_generation == 0
             || lease.lease_token.trim().is_empty()
+            || !std::path::Path::new(&lease.execution_root).is_absolute()
+            || !std::path::Path::new(&lease.run_tmp).is_absolute()
         {
             bail!("Built-in Tool active lease is incomplete");
         }
@@ -995,9 +999,9 @@ mod tests {
 
     #[test]
     fn cli_mapping_is_complete_unique_and_contract_valid() {
-        assert_eq!(BUILTIN_TOOL_CONTRACT_VERSION, 20);
-        assert_eq!(BUILTIN_TOOL_CLI_COMMAND_VERSION, 20);
-        assert_eq!(BUILTIN_TOOL_RUNTIME_CAPABILITY, "builtin_cli.transport.v20");
+        assert_eq!(BUILTIN_TOOL_CONTRACT_VERSION, 21);
+        assert_eq!(BUILTIN_TOOL_CLI_COMMAND_VERSION, 21);
+        assert_eq!(BUILTIN_TOOL_RUNTIME_CAPABILITY, "builtin_cli.transport.v21");
         validate_builtin_tool_contract().unwrap();
         let operations = BUILTIN_TOOL_CLI_IDENTITIES
             .iter()

@@ -132,4 +132,4 @@ Migration 125 将 `Data Contract v1.37 / projection schema 78` 升到 `v1.38 / s
 - [飞书官方 Card JSON 2.0 折叠面板](https://open.feishu.cn/document/feishu-cards/card-json-v2-components/containers/collapsible-panel)
 - [飞书官方 Card JSON 2.0 Markdown](https://open.feishu.cn/document/feishu-cards/card-json-v2-components/content-components/rich-text)
 - [Desktop Runtime Availability v1](desktop-runtime-availability-v1.md)
-- [v1.33 实施计划](../versions/v1.33/implementation-plan.md)
+- [v1.34 实施计划](../versions/v1.34/implementation-plan.md)

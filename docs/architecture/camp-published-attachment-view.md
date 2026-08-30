@@ -9,12 +9,14 @@ last_updated: 2026-08-27
 # Camp Attachments 与 Legacy Published View
 
 本架构拥有当前 Managed Attachment v2 写路径，以及既有 Published Attachment View v1 数据的只读兼容边界。
-字段与状态合同见 [Camp Attachment v6](../contracts/camp-attachment-v6.md)，旧 publication 对象见
+字段与状态合同见 [Camp Attachment v7](../contracts/camp-attachment-v7.md)，旧 publication 对象见
 [Camp Published Attachment View v4](../contracts/camp-published-attachment-view-v4.md)。
 
 ## 当前组件边界
 
 ```text
+Runtime external source -> CLI private snapshot -> Run tmp
+
 Composer Prepared Attachment ─┐
                               ├─ durable ingest intent -> private staging
 Agent workspace / Run tmp ────┘                         -> one copy + digest/fsync
@@ -28,7 +30,9 @@ Agent workspace / Run tmp ────┘                         -> one copy + 
 legacy message_attachment -> legacy Authority/View resolver and recovery only
 ```
 
-Prepared Attachment 仍属于私有 Draft。Agent ingress 仍只接受 exact execution workspace 或 `ROVAI_RUN_TMP`。
+Prepared Attachment 仍属于私有 Draft。Core Agent ingress 仍只接受 exact execution workspace 或 `ROVAI_RUN_TMP`。
+CLI 在首次 IPC 前把 Runtime 可读外部文件/目录私有快照到当前 lease Run tmp，沿用同一套安全复制和摘要能力；
+Core 不接收原始外部路径，也不成为文件读取代理。重试复用同一快照，源文件不移动、不修改。
 Managed v2 payload 是发送后唯一长期物理副本，位于既有 Camp-scoped Runtime attachment root 的保留子目录
 `.managed-v2/<attachment-id>/payload/`。数据库只保存 runtime root-relative locator、不可变 receipt、Camp identity
 与全局状态；同 Camp 多条消息通过 ref 共享该资源。
@@ -102,9 +106,9 @@ operation；新 v2 intent 永不进入它。
 
 ## References
 
-- [Camp Attachment v6](../contracts/camp-attachment-v6.md)
+- [Camp Attachment v7](../contracts/camp-attachment-v7.md)
 - [Camp Composer Draft v5](../contracts/camp-composer-draft-v5.md)
-- [Camp Message Send v13](../contracts/camp-message-send-v13.md)
+- [Camp Message Send v14](../contracts/camp-message-send-v14.md)
 - [Message Delivery v8](../contracts/message-delivery-v8.md)
 - [Camp Published Attachment View v4](../contracts/camp-published-attachment-view-v4.md)
 - [ContextManifest Evidence v22](../contracts/context-manifest-evidence-v22.md)

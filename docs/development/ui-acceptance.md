@@ -245,26 +245,27 @@ pnpm accept:runtime-activity-ui
   Home/End、Enter 恢复默认和 ARIA 数值均通过。用户高度在同一 Main Window Session 的收起重开、
   切换 Agent/Camp 后保持；调整不得改变所选 Agent/stage，sticky-bottom 仍跟随，手动上滚仍暂停；
   最大高度在 1040×700 与 200% zoom 下不覆盖消息历史、Agent 执行台、Approval Dock 或 Composer；
-- 默认底部 placement 下 Inspector 仅有“队员 / 任务”；点击“移到右侧”后底部 Run Pulse/Drawer
-  消失，Inspector 自动显示并增加、激活唯一且位于首位的“执行”Tab，完整顺序为“执行 / 队员 / 任务”。
+- 默认底部 placement 下标题栏仅有“任务 / 队员”详情入口；点击“移到浮层”后底部 Run Pulse/Drawer
+  消失，标题栏增加首位“执行”入口并自动打开浮层，完整顺序为“执行 / 任务 / 队员”。
   两处入口都只显示头像、最多两行名称和
   带形状的状态标记，不显示状态文字；右侧入口为全宽纵向列表、最多约四行且超出内部滚动，详情不显示
   resize separator。点击“移回底部”恢复横向 Run Pulse、底部 Drawer、原基础 Tab、selected Agent/
   focused Run 和底部高度偏好；移动前后必须是同一个 Drawer 与结果 DOM，并按比例保留 Drawer/结果
   阅读位置、disclosure 和加载状态；任一时刻不存在第二条过程时间线或重复入口；
-- 全新或旧版 General Preferences 没有位置字段时从底部开始；显式移到右侧后，切换 Camp、进入其他
+- 全新或旧版 General Preferences 没有位置字段时从底部开始；显式移到浮层后，切换 Camp、进入其他
   一级页面再返回和完整应用重启都继续由 Inspector 承载，再显式移回底部后同一矩阵继续由底部承载；
   保存中重复点击被拒绝，注入偏好原子写失败后执行台和旧 snapshot 均保持原位并显示可重试错误，恢复
   Inspector 偏好时首个 Camp meaningful paint 不出现 bottom→inspector 闪跳；
 - placement=inspector 与 Inspector hidden 可以同时成立：进入不含 running Run 的 Camp 和已挂载 workspace
   的后台事件不强制显示 Inspector，也不临时回退到底部；进入含 running Run 的 Camp 必须显示 Inspector、
-  激活首个“执行”Tab，并定位最新 Run。Header 恢复、用户显式“移到右侧”与 Task/停止结果/世界地图等
+  激活首个“执行”入口，并定位最新 Run。执行入口点击、用户显式“移到浮层”与 Task/停止结果/世界地图等
   精确导航仍显示 Inspector、激活“执行”并定位目标；
 - Context Delivery/Approval/Activity/Audit Tab、旧 route/state 不得返回；“队员”读取真实
   CampMember/AgentProfile，并用既有 Core 命令切换一个符合 presence/leave 约束的 Default Lead；
-  Task/停止结果/世界地图入口在当前 placement 按 Agent 打开过程，顶栏不存在执行入口；
-- Approval Dock 是唯一普通审批决定 surface；顶栏与通知摘要只展开、定位并聚焦 Dock，不改变 Inspector
-  显隐或页签。收起/展开不改变队列，解决最后一项后焦点返回 Composer；
+  Task/停止结果/世界地图入口在当前 placement 按 Agent 打开过程；只有 `running` Run 使顶栏执行入口 loading，
+  waiting/recovery_blocked/terminal 不旋转；浮层开合不挤占文件预览或改变主列宽度；
+- Approval Dock 是唯一普通审批决定 surface；顶栏与通知摘要只展开、定位并聚焦 Dock，不改变执行台 placement 或 Run selection；
+  浮层可以按外部焦点规则收起，不强制切换其内容。收起/展开不改变队列，解决最后一项后焦点返回 Composer；
 - Drawer 顶栏只为当前聚焦且可停止的 AgentRun 提供一个“停止”按钮；单击必须直接提交、立即进入停止态，
   不挂载确认 Dialog、“继续运行”动作或第二个提交按钮。Composer 继续拥有唯一 CampTurn Stop；两级停止、
   Approval Dock 与 Composer 在 `2560×1440`、`1440×920`、`1040×700`、200% zoom 和 reduced motion 下均可见、
@@ -298,9 +299,9 @@ pnpm accept:runtime-activity-ui
   无横向溢出或相互遮挡；DOM 不存在 standalone“查看完整工具调用”、`.complete-evidence-control` 或
   raw Payload 展开面。
 
-### Task Inspector 门禁
+### Task 详情门禁
 
-Renderer 的权威行为见[当前 UI 详规：Camp 右侧详情栏](../ui/components/conversation-workspace.md#camp-右侧详情栏inspector)。
+Renderer 的权威行为见[当前 UI 详规：Camp 详情浮层](../ui/components/conversation-workspace.md#camp-详情浮层)。
 修改 Task 首层入口、空状态、创建/编辑表单、列表或详情后，至少运行：
 
 ```bash
@@ -310,12 +311,11 @@ pnpm accept:task-card-ui
 
 隔离 fixture 必须同时覆盖无任务和已有任务两种列表状态，并证明：
 
-- “任务”Tab 下只有一条 42px“新建任务”操作行；不存在“长期事项”、工具栏说明、解释性空状态、
-  虚线占位或 Tab 栏 Icon-only 创建入口；
-- 点击操作行进入现有完整 Task editor，标题输入框立即获得焦点；不出现快速 Todo 表单、全局 `N`、
-  `Command+Enter` 或可见快捷键提示；
-- 同一操作行在创建态变为“返回任务列表”；返回后无任务 fixture 仍为空，已有任务 fixture 恢复原有
-  列表数量和内容，不写入 Task、CampMessage 或其他 Core 状态；
+- 标题栏“任务”直接入口打开按需浮层，状态筛选与新建入口可用；不恢复常驻侧栏、独立折叠按钮或解释性空状态；
+- 列表和时间线卡片打开完整只读详情；新建/编辑使用标准 Dialog，标题输入框立即获得焦点；
+- 关闭新建 Dialog 返回原列表并保留草稿，不写入 Task、CampMessage 或其他 Core 状态；跨详情切换和浮层收起
+  后重开草稿仍在，版本冲突刷新权威版本但不覆盖用户修改；
+- 编辑、取消任务均使用既有任务命令，取消必须填写原因，不启动或停止 AgentRun；
 - 原有 Task 创建、五态原卡更新、terminal 详情、version conflict 草稿、审计、Related execution、
   键盘打开与 `1440×920`、`1040×700`、200% zoom 无横向溢出继续通过。
 

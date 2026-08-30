@@ -136,4 +136,4 @@ digest only admits 21. Native Session Bootstrap bytes, Bootstrap Formatter and S
 - [Feishu Channel v1](feishu-channel-v1.md)
 - [Context Delivery Profile v4](context-delivery-profile-v4.md)
 - [Run Facts v2](run-facts-v2.md)
-- [v1.32 模型上下文变更说明](../versions/v1.32/model-context-change-feishu-external-principal.md)
+- [v1.33 模型上下文变更说明](../versions/v1.33/model-context-change-feishu-external-principal.md)

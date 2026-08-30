@@ -13,7 +13,7 @@ last_updated: 2026-08-30
 模型输入分别继续由 [Feishu Channel v2](../contracts/feishu-channel-v2.md)中已经 provider-neutral 的渠道核心、
 [Camp Membership v1](../contracts/camp-membership-v1.md)和
 [ContextManifest Evidence v22](../contracts/context-manifest-evidence-v22.md)拥有。取舍理由见
-[v1.33 决策记录](../versions/v1.33/decisions.md)。
+[v1.34 决策记录](../versions/v1.34/decisions.md)。
 
 ## 组件与权威
 
@@ -186,4 +186,4 @@ roster、finalize ready aggregate、领取 delivery 并结算。任何外部失�
 - [Channel Storage v2](../contracts/channel-storage-v2.md)
 - [Camp Membership v1](../contracts/camp-membership-v1.md)
 - [渠道设置](../ui/components/channel-settings.md)
-- [v1.33 决策记录](../versions/v1.33/decisions.md)
+- [v1.34 决策记录](../versions/v1.34/decisions.md)

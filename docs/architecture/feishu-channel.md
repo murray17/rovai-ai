@@ -11,7 +11,7 @@ last_updated: 2026-08-30
 字段、状态和恢复合同见 [Feishu Channel v5](../contracts/feishu-channel-v5.md)，credential 与 Developer Session 持久化见
 [Channel Storage v2](../contracts/channel-storage-v2.md)，模型输入证据见
 [ContextManifest Evidence v22](../contracts/context-manifest-evidence-v22.md)，取舍理由见
-[v1.32 决策记录](../versions/v1.32/decisions.md)。
+[v1.33 决策记录](../versions/v1.33/decisions.md)。
 
 ## 组件与权威
 

@@ -5,7 +5,7 @@ import { basename, join, resolve } from 'node:path'
 import { spawn } from 'node:child_process'
 import { createInterface } from 'node:readline'
 import { createServer } from 'node:net'
-import { stagedSidecarPath } from './lib/sidecar-targets.mjs'
+import { seedCompletedOnboardingForAcceptance } from './lib/dev-desktop.mjs'
 import {
   coreDataDirectoryArguments,
   runtimeCampFilesRootForDataDirectory
@@ -75,7 +75,7 @@ const runtimes = [
     ...acp('edit', 'edit_file', 'file', 'file.write', null),
     expectedToolDisclosure: false
   }),
-  runtime('kiro', 'kiro-cli', 'Kiro', 'execute', acp('execute', 'execute', 'shell', 'shell.execute')),
+  runtime('kiro', 'kiro-cli', 'Kiro', '终端操作', acp('execute', 'execute', 'shell', 'shell.execute')),
   runtime('qoder', 'qoder-cli', 'Qoder', 'search_workspace', {
     ...acp('search', 'search_workspace', 'tool', 'tool.search'),
     cancelledWithInProgressActivity: true,
@@ -130,6 +130,7 @@ const runtimes = [
 ]
 
 await mkdir(dataDir, { recursive: true })
+seedCompletedOnboardingForAcceptance(dataDir)
 await mkdir(outputDir, { recursive: true })
 await mkdir(fixtureExecutionRoot, { recursive: true })
 await mkdir(join(directoryAttachmentSource, 'docs', 'empty'), { recursive: true })
@@ -403,12 +404,12 @@ try {
     `Agent dock is not attached below the conversation timeline: ${JSON.stringify(agentDock)}`)
   assert(agentDock.topRunBadgeCount === 0
     && agentDock.auditTabCount === 0
-    && JSON.stringify(agentDock.inspectorTabLabels) === JSON.stringify(['队员', '任务']),
+    && JSON.stringify(agentDock.inspectorTabLabels) === JSON.stringify(['任务', '队员']),
   `Removed top Run/Audit entries or legacy Inspector tabs returned: ${JSON.stringify(agentDock)}`)
 
   await evaluate(app.cdp, `document.querySelector('.run-pulse-bottom .execution-placement-button')?.click()`)
   await waitForExpression(app.cdp, `(() => {
-    const activeTab = document.querySelector('.activity-tabs > .tabs-list [role="tab"][data-state="active"]')
+    const activeTab = document.querySelector('.camp-detail-entry[aria-expanded="true"]')
     return activeTab?.textContent?.includes('执行')
       && Boolean(document.querySelector('.run-pulse-inspector'))
       && !document.querySelector('.timeline-pane > .run-pulse')
@@ -422,7 +423,7 @@ try {
   await waitForExpression(app.cdp,
     `document.querySelector('.execution-drawer')?.dataset.placement === 'inspector'`)
   const executionSidecar = await collectExecutionSidecar(app.cdp)
-  assert(JSON.stringify(executionSidecar.inspectorTabLabels) === JSON.stringify(['执行', '队员', '任务'])
+  assert(JSON.stringify(executionSidecar.inspectorTabLabels) === JSON.stringify(['执行', '任务', '队员'])
     && executionSidecar.activeTab === '执行'
     && executionSidecar.bottomDockCount === 0
     && executionSidecar.sideDockCount === 1
@@ -451,7 +452,7 @@ try {
   await waitForExpression(app.cdp, `(() => {
     const drawer = document.querySelector('.execution-drawer')
     return Boolean(document.querySelector('.timeline-pane > .run-pulse.run-pulse-bottom'))
-      && !document.querySelector('.activity-tabs [role="tab"][value="execution"]')
+      && !document.querySelector('.camp-detail-entry[data-detail="execution"]')
       && drawer?.dataset.placement === 'bottom'
       && Boolean(drawer.querySelector('.execution-drawer-resize-handle'))
   })()`)
@@ -460,14 +461,14 @@ try {
     selectedAgentId: document.querySelector('.run-pulse-bottom .run-pulse-chip.is-selected')?.dataset.agentId ?? null,
     drawerPlacement: document.querySelector('.execution-drawer')?.dataset.placement ?? null,
     resizeHandle: Boolean(document.querySelector('.execution-drawer .execution-drawer-resize-handle')),
-    inspectorTabLabels: [...document.querySelectorAll('.activity-tabs > .tabs-list [role="tab"]')]
+    inspectorTabLabels: [...document.querySelectorAll('.camp-detail-entry')]
       .map((tab) => tab.textContent?.replace(/\\d+/g, '').replace(/\\s+/g, ' ').trim() ?? '')
   }))()`)
   assert(returnedExecutionDock.followsTimeline
     && returnedExecutionSelection.selectedAgentId === activeAgentId
     && returnedExecutionSelection.drawerPlacement === 'bottom'
     && returnedExecutionSelection.resizeHandle
-    && JSON.stringify(returnedExecutionSelection.inspectorTabLabels) === JSON.stringify(['队员', '任务']),
+    && JSON.stringify(returnedExecutionSelection.inspectorTabLabels) === JSON.stringify(['任务', '队员']),
   `Execution console did not return to the production bottom surface: ${JSON.stringify({ returnedExecutionDock, returnedExecutionSelection })}`)
 
   await setTheme(app.cdp, 'night')
@@ -581,11 +582,11 @@ try {
     `document.querySelector('.camp-workspace')?.getAttribute('aria-label') === ${JSON.stringify(`会话：${composerLayoutCampTitle}`)}`)
   await evaluate(app.cdp, `(() => {
     const grid = document.querySelector('.workspace-grid')
-    const toggle = document.querySelector('.topbar-inspector-toggle[aria-pressed="false"]')
-    if (grid?.classList.contains('inspector-collapsed')) toggle?.click()
+    const toggle = document.querySelector('.camp-detail-entry[data-detail="tasks"][aria-expanded="false"]')
+    if (document.querySelector('.camp-detail-popover')?.hidden) toggle?.click()
     return true
   })()`)
-  await waitForExpression(app.cdp, `!document.querySelector('.workspace-grid')?.classList.contains('inspector-collapsed')`)
+  await waitForExpression(app.cdp, `!document.querySelector('.camp-detail-popover')?.hidden`)
   await wait(200)
   const wideComposerLayout = await collectWideComposerLayout(app.cdp)
   assert(wideComposerLayout.viewportWidth === 2560 && wideComposerLayout.viewportHeight === 1440,
@@ -617,10 +618,10 @@ try {
   await capture(app.cdp, wideCapture)
 
   await evaluate(app.cdp, `(() => {
-    document.querySelector('.topbar-inspector-toggle[aria-pressed="true"]')?.click()
+    document.querySelector('.camp-detail-entry[aria-expanded="true"]')?.click()
     return true
   })()`)
-  await waitForExpression(app.cdp, `document.querySelector('.workspace-grid')?.classList.contains('inspector-collapsed')`)
+  await waitForExpression(app.cdp, `document.querySelector('.camp-detail-popover')?.hidden`)
   const wideComposerWithoutInspector = await collectWideComposerLayout(app.cdp)
   assert(wideComposerWithoutInspector.documentScrollWidth <= wideComposerWithoutInspector.viewportWidth + 1
     && wideComposerWithoutInspector.composerBoxWidth >= 1438
@@ -637,10 +638,10 @@ try {
   await capture(app.cdp, wideWithoutInspectorCapture)
 
   await evaluate(app.cdp, `(() => {
-    document.querySelector('.topbar-inspector-toggle[aria-pressed="false"]')?.click()
+    document.querySelector('.camp-detail-entry[data-detail="tasks"][aria-expanded="false"]')?.click()
     return true
   })()`)
-  await waitForExpression(app.cdp, `!document.querySelector('.workspace-grid')?.classList.contains('inspector-collapsed')`)
+  await waitForExpression(app.cdp, `!document.querySelector('.camp-detail-popover')?.hidden`)
   await app.cdp.send('Emulation.setDeviceMetricsOverride', {
     width: 1799, height: 920, deviceScaleFactor: 1, mobile: false
   })
@@ -748,7 +749,7 @@ try {
   await capture(app.cdp, compactCapture)
 
   await evaluate(app.cdp, `(() => {
-    const toggle = document.querySelector('.topbar-inspector-toggle[aria-pressed="true"]')
+    const toggle = document.querySelector('.camp-detail-entry[aria-expanded="true"]')
     toggle?.click()
     return !toggle || true
   })()`)
@@ -757,7 +758,7 @@ try {
     screenWidth: 1040, screenHeight: 700
   })
   await waitForExpression(app.cdp, `innerWidth === 520 && innerHeight === 350 && Math.abs(devicePixelRatio - 2) < 0.01`)
-  await waitForExpression(app.cdp, `document.querySelector('.workspace-grid')?.classList.contains('inspector-collapsed')`)
+  await waitForExpression(app.cdp, `document.querySelector('.camp-detail-popover')?.hidden`)
   await focusExecutionDrawerResizeHandle(app.cdp)
   await pressKey(app.cdp, 'End', 'End', 35)
   await waitForExpression(app.cdp, `(() => {
@@ -861,6 +862,15 @@ try {
   }
 } catch (error) {
   testFailure = error
+  if (app) {
+    try {
+      await capture(app.cdp, join(outputDir, 'runtime-activity-failure.png'))
+      const visibleState = await evaluate(app.cdp, 'document.body.innerText.slice(-7000)')
+      process.stderr.write(`Runtime activity failure state: ${visibleState}\n`)
+    } catch {
+      // Preserve the original assertion even if the failing window is unavailable.
+    }
+  }
 } finally {
   if (app) {
     try {
@@ -1187,19 +1197,19 @@ async function seedFixture() {
     INSERT INTO camp(
       id, title, name_origin, collaboration_mode, project_binding_kind,
       project_path, default_lead_agent_id, last_message_sequence,
-      version, created_at, updated_at
+      version, created_at, updated_at, activation_state
     ) VALUES (
       ${sqlLiteral(campId)}, ${sqlLiteral(campTitle)}, 'user', 'peer', 'quick_chat',
       '', ${sqlLiteral(runtimes[0].agentId)}, ${runtimes.length}, 1,
-      ${sqlLiteral(now)}, ${sqlLiteral(now)}
+      ${sqlLiteral(now)}, ${sqlLiteral(now)}, 'active'
     ), (
       ${sqlLiteral(composerLayoutCampId)}, ${sqlLiteral(composerLayoutCampTitle)}, 'user', 'peer', 'quick_chat',
       '', ${sqlLiteral(runtimes[0].agentId)}, 0, 1,
-      ${sqlLiteral(now)}, ${sqlLiteral(now)}
+      ${sqlLiteral(now)}, ${sqlLiteral(now)}, 'active'
     ), (
       ${sqlLiteral(ambientEncounterCampId)}, ${sqlLiteral(ambientEncounterCampTitle)}, 'user', 'peer', 'quick_chat',
       '', ${sqlLiteral(ambientEncounterAgentIds[0])}, 0, 1,
-      ${sqlLiteral(now)}, ${sqlLiteral(now)}
+      ${sqlLiteral(now)}, ${sqlLiteral(now)}, 'active'
     );
     INSERT INTO camp_attachment_view(
       camp_id, state, generation, root_relative_path,
@@ -1634,9 +1644,9 @@ async function collectAgentDock(cdp) {
         stateShape: [...(state?.classList ?? [])].find((name) => name.startsWith('state-')) ?? null
       }
     })
-    const auditTabCount = [...document.querySelectorAll('.activity-tabs > .tabs-list [role="tab"]')]
+    const auditTabCount = [...document.querySelectorAll('.camp-detail-entry')]
       .filter((tab) => tab.textContent?.includes('审计')).length
-    const inspectorTabLabels = [...document.querySelectorAll('.activity-tabs > .tabs-list [role="tab"]')]
+    const inspectorTabLabels = [...document.querySelectorAll('.camp-detail-entry')]
       .map((tab) => tab.textContent?.replace(/\\d+/g, '').replace(/\\s+/g, ' ').trim() ?? '')
     return {
       chipCount: agentIds.length,
@@ -1660,9 +1670,9 @@ async function collectExecutionSidecar(cdp) {
     const chips = [...(list?.querySelectorAll('.run-pulse-chip[data-agent-id]') ?? [])]
     const rects = chips.map((chip) => chip.getBoundingClientRect())
     const agentIds = chips.map((chip) => chip.dataset.agentId ?? '').filter(Boolean)
-    const inspectorTabLabels = [...document.querySelectorAll('.activity-tabs > .tabs-list [role="tab"]')]
+    const inspectorTabLabels = [...document.querySelectorAll('.camp-detail-entry')]
       .map((tab) => tab.textContent?.replace(/\\d+/g, '').replace(/\\s+/g, ' ').trim() ?? '')
-    const activeTab = document.querySelector('.activity-tabs > .tabs-list [role="tab"][data-state="active"]')
+    const activeTab = document.querySelector('.camp-detail-entry[aria-expanded="true"]')
       ?.textContent?.replace(/\\d+/g, '').replace(/\\s+/g, ' ').trim() ?? null
     const drawer = document.querySelector('.execution-drawer')
     return {
@@ -1819,7 +1829,7 @@ async function collectWideComposerLayout(cdp) {
       composerRouteRailCenterDelta: composerBoxRect && composerRouteRailRect
         ? Math.abs((composerBoxRect.left + composerBoxRect.width / 2) - (composerRouteRailRect.left + composerRouteRailRect.width / 2))
         : null,
-      inspectorCollapsed: document.querySelector('.workspace-grid')?.classList.contains('inspector-collapsed') ?? false,
+      inspectorCollapsed: document.querySelector('.camp-detail-popover')?.hidden ?? false,
       actionGap: Number.parseFloat(actionStyle?.columnGap ?? actionStyle?.gap ?? '0'),
       enterHint: hint?.querySelector('.sr-only')?.textContent?.trim() ?? null,
       enterHintVisual: hint?.querySelector('.composer-hint-visual')?.textContent?.replace(/\\s+/g, '').trim() ?? null,
@@ -2250,7 +2260,7 @@ async function verifyResponsiveRuntimeModelLayouts(cdp, capturesDirectory) {
   await capture(cdp, compactCapture)
 
   await evaluate(cdp, `(() => {
-    document.querySelector('.topbar-inspector-toggle[aria-pressed="true"]')?.click()
+    document.querySelector('.camp-detail-entry[aria-expanded="true"]')?.click()
     return true
   })()`)
   await cdp.send('Emulation.setDeviceMetricsOverride', {
@@ -2260,7 +2270,7 @@ async function verifyResponsiveRuntimeModelLayouts(cdp, capturesDirectory) {
   await waitForExpression(cdp,
     `innerWidth === 520 && innerHeight === 350 && Math.abs(devicePixelRatio - 2) < 0.01`)
   await waitForExpression(cdp,
-    `document.querySelector('.workspace-grid')?.classList.contains('inspector-collapsed')`)
+    `document.querySelector('.camp-detail-popover')?.hidden`)
   await focusExecutionDrawerResizeHandle(cdp)
   await pressKey(cdp, 'End', 'End', 35)
   await waitForExpression(cdp, `(() => {
@@ -2310,11 +2320,11 @@ async function verifyResponsiveRuntimeModelLayouts(cdp, capturesDirectory) {
   })
   await waitForExpression(cdp, `innerWidth === 1440 && innerHeight === 920`)
   await evaluate(cdp, `(() => {
-    document.querySelector('.topbar-inspector-toggle[aria-pressed="false"]')?.click()
+    document.querySelector('.camp-detail-entry[data-detail="tasks"][aria-expanded="false"]')?.click()
     return true
   })()`)
   await waitForExpression(cdp,
-    `!document.querySelector('.workspace-grid')?.classList.contains('inspector-collapsed')`)
+    `!document.querySelector('.camp-detail-popover')?.hidden`)
   return {
     compact,
     zoom200,
@@ -2418,13 +2428,13 @@ async function verifyConversationDropZone(cdp, sourceDirectory, capturesDirector
   await evaluate(cdp,
     `document.querySelector('.run-pulse-bottom .execution-placement-button')?.click()`)
   await waitForExpression(cdp, `(() => {
-    const activeTab = document.querySelector('.activity-tabs > .tabs-list [role="tab"][data-state="active"]')
+    const activeTab = document.querySelector('.camp-detail-entry[aria-expanded="true"]')
     return activeTab?.textContent?.includes('执行')
       && document.querySelector('.execution-drawer')?.dataset.placement === 'inspector'
   })()`)
-  await mouseClickSelector(cdp, '.activity-tabs > .tabs-list [role="tab"]:nth-child(2)')
+  await mouseClickSelector(cdp, '.camp-detail-entry:nth-child(2)')
   await waitForExpression(cdp, `(() => {
-    const activeTab = document.querySelector('.activity-tabs > .tabs-list [role="tab"][data-state="active"]')
+    const activeTab = document.querySelector('.camp-detail-entry[aria-expanded="true"]')
     return activeTab?.textContent?.includes('任务')
   })()`)
   const hiddenDrawerDrag = await beginFileDrag(cdp, sourceDirectory, '.timeline-pane')
@@ -2510,14 +2520,14 @@ async function collectConversationDropPresentation(cdp, sourceDirectory) {
     const layerElement = document.querySelector('.conversation-drop-layer')
     const layer = layerElement?.getBoundingClientRect()
     const callout = document.querySelector('.conversation-drop-callout')?.getBoundingClientRect()
-    const inspector = document.querySelector('.activity-pane')?.getBoundingClientRect()
+    const inspector = document.querySelector('.camp-detail-popover:not([hidden])')?.getBoundingClientRect()
     const runPulse = document.querySelector('.run-pulse')?.getBoundingClientRect()
     const timeline = document.querySelector('.timeline-pane')?.getBoundingClientRect()
     const composer = document.querySelector('.composer')
     const composerRect = composer?.getBoundingClientRect()
     const composerBox = document.querySelector('.composer-box')?.getBoundingClientRect()
     const destination = document.querySelector('.composer-destination')
-    const tabs = [...document.querySelectorAll('.activity-tabs > .tabs-list [role="tab"]')]
+    const tabs = [...document.querySelectorAll('.camp-detail-entry')]
       .map((tab) => tab.textContent?.replace(/\\d+/g, '').replace(/\\s+/g, ' ').trim())
     const overlap = (left, right) => Boolean(left && right
       && left.left < right.right && left.right > right.left
@@ -2543,7 +2553,7 @@ async function collectConversationDropPresentation(cdp, sourceDirectory) {
         && layer.left >= grid.left + 6
         && layer.top >= grid.top + 6
         && layer.bottom <= grid.bottom - 6),
-      inspectorExcluded: !inspector || Boolean(layer && layer.right <= inspector.left - 5),
+      inspectorExcluded: !inspector || Boolean(composerRect && inspector.bottom <= composerRect.top),
       calloutWidth: callout?.width ?? 0,
       tabs,
       documentOverflow: document.documentElement.scrollWidth > innerWidth + 1,
@@ -2567,7 +2577,7 @@ function assertConversationDropPresentation(presentation, context, expectedCallo
     && presentation.layerInsideGrid
     && presentation.inspectorExcluded
     && Math.abs(presentation.calloutWidth - expectedCalloutWidth) <= 1
-    && JSON.stringify(presentation.tabs) === JSON.stringify(['队员', '任务'])
+    && JSON.stringify(presentation.tabs) === JSON.stringify(['任务', '队员'])
     && !presentation.documentOverflow
     && !presentation.sourcePathVisible,
   `${context} conversation drop presentation failed: ${JSON.stringify(presentation)}`)
@@ -2720,7 +2730,7 @@ async function verifyCompleteToolOutput(cdp) {
       hasFirstMarker: text.includes(${JSON.stringify(longToolOutputFirstMarker)}),
       hasMiddleMarker: text.includes(${JSON.stringify(longToolOutputMiddleMarker)}),
       hasLastMarker: text.includes(${JSON.stringify(longToolOutputLastMarker)}),
-      startsWithCommandAndOutputSections: text.startsWith(${JSON.stringify(`命令\n${codexExpectedCommand}\n\n输出\n${longToolOutputFirstMarker}`)}),
+      startsWithCommandAndOutput: text.startsWith(${JSON.stringify(`$ ${codexExpectedCommand}\n${longToolOutputFirstMarker}`)}),
       endsWithPublicOutput: text.endsWith(${JSON.stringify(`${longToolOutputLastMarker} · line 8432`)}),
       hasCutNotice: text.includes('…（后续内容未显示）'),
       leakedEnvelope: text.startsWith('{') || text.includes('"_rovaiTruncated"'),
@@ -2741,9 +2751,9 @@ async function verifyCompleteToolOutput(cdp) {
   assert(presentation.hasFirstMarker
     && presentation.hasMiddleMarker
     && presentation.hasLastMarker
-    && presentation.startsWithCommandAndOutputSections
+    && presentation.startsWithCommandAndOutput
     && presentation.endsWithPublicOutput
-    && presentation.lineCount === 8_436
+    && presentation.lineCount === 8_433
     && presentation.verticalOverflow
     && !presentation.hasCutNotice
     && !presentation.leakedEnvelope,
@@ -2882,6 +2892,14 @@ async function verifyCompleteToolOutput(cdp) {
       groupOpen: result?.closest('details.tool-activity-group')?.open ?? false
     }
   })()`)
+  await evaluate(cdp, `document.querySelector('.camp-detail-entry[data-detail="execution"]')?.click()`)
+  await waitForExpression(cdp, `document.querySelector('.camp-detail-popover')?.hidden`)
+  await evaluate(cdp, `document.querySelector('.camp-detail-entry[data-detail="tasks"]')?.click()`)
+  await waitForExpression(cdp, `document.querySelector('.camp-detail-entry[data-detail="tasks"]')?.getAttribute('aria-expanded') === 'true'`)
+  await evaluate(cdp, `document.querySelector('.camp-detail-entry[data-detail="members"]')?.click()`)
+  await waitForExpression(cdp, `document.querySelector('.camp-detail-entry[data-detail="members"]')?.getAttribute('aria-expanded') === 'true'`)
+  await evaluate(cdp, `document.querySelector('.camp-detail-entry[data-detail="execution"]')?.click()`)
+  await waitForExpression(cdp, inspectorReadingRestored)
   await evaluate(cdp,
     `document.querySelector('.run-pulse-inspector .execution-placement-button')?.click()`)
   const bottomReadingRestored = `(() => {
@@ -3052,13 +3070,21 @@ async function verifyClaudeCommandDisclosure(cdp) {
   await waitForExpression(cdp, `(() => [...document.querySelectorAll(
     '.execution-drawer details.tool-call-disclosure .tool-call-title'
   )].some((candidate) => candidate.textContent?.trim() === ${JSON.stringify(claudeExpectedCommand)}))()`)
-  const presentation = await evaluate(cdp, `(() => {
+  await evaluate(cdp, `(() => {
     const disclosure = [...document.querySelectorAll('.execution-drawer details.tool-call-disclosure')]
       .find((candidate) => candidate.querySelector('.tool-call-title')?.textContent?.trim()
         === ${JSON.stringify(claudeExpectedCommand)})
     const group = disclosure?.closest('details.tool-activity-group')
     if (group && !group.open) group.querySelector(':scope > summary')?.click()
-    disclosure?.querySelector('summary')?.click()
+    if (disclosure && !disclosure.open) disclosure.querySelector(':scope > summary')?.click()
+    return Boolean(disclosure)
+  })()`)
+  await waitForExpression(cdp, `document.querySelector('.execution-drawer .tool-call-detail pre')?.textContent?.includes('ROVAI_CLAUDE_EMPTY_OUTPUT_OK') === true`)
+  const presentation = await evaluate(cdp, `(() => {
+    const disclosure = [...document.querySelectorAll('.execution-drawer details.tool-call-disclosure')]
+      .find((candidate) => candidate.querySelector('.tool-call-title')?.textContent?.trim()
+        === ${JSON.stringify(claudeExpectedCommand)})
+    const group = disclosure?.closest('details.tool-activity-group')
     return {
       found: Boolean(disclosure),
       groupOpen: group?.open ?? false,
@@ -3742,7 +3768,7 @@ async function verifyCampWorldMap(cdp, capturesDirectory) {
   await capture(cdp, compactCapture)
 
   await evaluate(cdp, `(() => {
-    const toggle = document.querySelector('.topbar-inspector-toggle[aria-pressed="true"]')
+    const toggle = document.querySelector('.camp-detail-entry[aria-expanded="true"]')
     toggle?.click()
     return true
   })()`)
@@ -3751,7 +3777,7 @@ async function verifyCampWorldMap(cdp, capturesDirectory) {
     screenWidth: 1040, screenHeight: 700
   })
   await waitForExpression(cdp, `innerWidth === 520 && innerHeight === 350 && Math.abs(devicePixelRatio - 2) < 0.01`)
-  await waitForExpression(cdp, `document.querySelector('.workspace-grid')?.classList.contains('inspector-collapsed')`)
+  await waitForExpression(cdp, `document.querySelector('.camp-detail-popover')?.hidden`)
   await waitForWorldMapFit(cdp)
   const zoomLayout = await collectCampWorldMapLayout(cdp)
   assertCampWorldMapLayout(zoomLayout, '200% zoom', worldMapVisibleRuntimeCount)
@@ -4072,7 +4098,7 @@ async function verifyGlobalExecutionPlacement(cdp) {
     `document.querySelector('.camp-workspace')?.getAttribute('aria-label') === ${JSON.stringify(`会话：${composerLayoutCampTitle}`)}`)
   const acrossCamp = await evaluate(cdp, `(() => ({
     bottomDockCount: document.querySelectorAll('.timeline-pane > .run-pulse-bottom').length,
-    executionTabCount: [...document.querySelectorAll('.activity-tabs [role="tab"]')]
+    executionTabCount: [...document.querySelectorAll('.camp-detail-entry')]
       .filter((tab) => tab.textContent?.includes('执行')).length
   }))()`)
   const acrossCampAuthority = await evaluate(cdp, 'window.rovai.generalPreferences.get()', true)
@@ -4080,14 +4106,14 @@ async function verifyGlobalExecutionPlacement(cdp) {
     && acrossCampAuthority.executionConsolePlacement === 'inspector',
   `A second Camp did not inherit Inspector placement: ${JSON.stringify({ acrossCamp, acrossCampAuthority })}`)
 
-  await evaluate(cdp, `document.querySelector('.unified-sidebar button[aria-label="设置"]')?.click()`)
+  await evaluate(cdp, `document.querySelector('.unified-sidebar button[aria-label="设置，打开上次保留的设置页面"]')?.click()`)
   await waitForExpression(cdp, `Boolean(document.querySelector('.settings-workbench'))`)
   await evaluate(cdp, `document.querySelector('.settings-sidebar-back')?.click()`)
   await waitForExpression(cdp,
     `document.querySelector('.camp-workspace')?.getAttribute('aria-label') === ${JSON.stringify(`会话：${composerLayoutCampTitle}`)}`)
   const acrossPage = await evaluate(cdp, `(() => ({
     bottomDockCount: document.querySelectorAll('.timeline-pane > .run-pulse-bottom').length,
-    executionTabCount: [...document.querySelectorAll('.activity-tabs [role="tab"]')]
+    executionTabCount: [...document.querySelectorAll('.camp-detail-entry')]
       .filter((tab) => tab.textContent?.includes('执行')).length
   }))()`)
   const acrossPageAuthority = await evaluate(cdp, 'window.rovai.generalPreferences.get()', true)
@@ -4096,16 +4122,16 @@ async function verifyGlobalExecutionPlacement(cdp) {
   `Returning from another primary page lost Inspector placement: ${JSON.stringify({ acrossPage, acrossPageAuthority })}`)
 
   await evaluate(cdp,
-    `document.querySelector('.topbar-inspector-toggle[aria-pressed="true"]')?.click()`)
+    `document.querySelector('.camp-detail-entry[aria-expanded="true"]')?.click()`)
   await waitForExpression(cdp,
-    `document.querySelector('.workspace-grid')?.classList.contains('inspector-collapsed')`)
+    `document.querySelector('.camp-detail-popover')?.hidden`)
   await openCamp(cdp, campId)
   await waitForExpression(cdp,
     `document.querySelector('.camp-workspace')?.getAttribute('aria-label') === ${JSON.stringify(`会话：${campTitle}`)}`)
   const runningEntryReveal = await evaluate(cdp, `(() => ({
-    inspectorCollapsed: document.querySelector('.workspace-grid')?.classList.contains('inspector-collapsed') ?? false,
+    inspectorCollapsed: document.querySelector('.camp-detail-popover')?.hidden ?? false,
     bottomDockCount: document.querySelectorAll('.timeline-pane > .run-pulse-bottom').length,
-    activeTab: document.querySelector('.activity-tabs [role="tab"][data-state="active"]')?.textContent
+    activeTab: document.querySelector('.camp-detail-entry[aria-expanded="true"]')?.textContent
       ?.replace(/\\d+/g, '').replace(/\\s+/g, ' ').trim() ?? null,
     selectedAgentId: document.querySelector('.run-pulse-inspector .run-pulse-chip.is-selected')?.dataset.agentId ?? null,
     focusedRunId: document.querySelector('.execution-process-stage.is-focused')?.dataset.agentRunId ?? null,
@@ -4119,13 +4145,13 @@ async function verifyGlobalExecutionPlacement(cdp) {
     && !runningEntryReveal.drawerOwnsFocus,
     `Entering a running Camp did not reveal its current Inspector Run without stealing focus: ${JSON.stringify(runningEntryReveal)}`)
 
-  await evaluate(cdp, `document.querySelector('.unified-sidebar button[aria-label="设置"]')?.click()`)
+  await evaluate(cdp, `document.querySelector('.unified-sidebar button[aria-label="设置，打开上次保留的设置页面"]')?.click()`)
   await waitForExpression(cdp, `Boolean(document.querySelector('.settings-workbench'))`)
   await evaluate(cdp, `document.querySelector('.settings-sidebar-back')?.click()`)
   await waitForExpression(cdp,
     `document.querySelector('.camp-workspace')?.getAttribute('aria-label') === ${JSON.stringify(`会话：${campTitle}`)}`)
   const runningPageReturn = await evaluate(cdp, `(() => ({
-    activeTab: document.querySelector('.activity-tabs [role="tab"][data-state="active"]')?.textContent
+    activeTab: document.querySelector('.camp-detail-entry[aria-expanded="true"]')?.textContent
       ?.replace(/\\d+/g, '').replace(/\\s+/g, ' ').trim() ?? null,
     selectedAgentId: document.querySelector('.run-pulse-inspector .run-pulse-chip.is-selected')?.dataset.agentId ?? null,
     focusedRunId: document.querySelector('.execution-process-stage.is-focused')?.dataset.agentRunId ?? null,
@@ -4175,26 +4201,26 @@ async function verifyExecutionPlacementAcrossRestart(currentApp) {
     const firstCampPaint = await evaluate(relaunchedApp.cdp, `(() => ({
       bottomDockCount: document.querySelectorAll('.timeline-pane > .run-pulse-bottom').length,
       inspectorDockCount: document.querySelectorAll('.run-pulse-inspector').length,
-      executionTabCount: [...document.querySelectorAll('.activity-tabs [role="tab"]')]
+      executionTabCount: [...document.querySelectorAll('.camp-detail-entry')]
         .filter((tab) => tab.textContent?.includes('执行')).length,
-      inspectorHidden: document.querySelector('.workspace-grid')?.classList.contains('inspector-collapsed') ?? false,
-      activeTab: document.querySelector('.activity-tabs [role="tab"][data-state="active"]')?.textContent
+      inspectorHidden: document.querySelector('.camp-detail-popover')?.hidden ?? false,
+      activeTab: document.querySelector('.camp-detail-entry[aria-expanded="true"]')?.textContent
         ?.replace(/\\d+/g, '').replace(/\\s+/g, ' ').trim() ?? null,
       selectedAgentId: document.querySelector('.run-pulse-inspector .run-pulse-chip.is-selected')?.dataset.agentId ?? null,
       focusedRunId: document.querySelector('.execution-process-stage.is-focused')?.dataset.agentRunId ?? null
     }))()`)
     assert(afterRestart.executionConsolePlacement === 'inspector'
       && firstCampPaint.bottomDockCount === 0
-      && !firstCampPaint.inspectorHidden
+      && firstCampPaint.inspectorHidden
       && firstCampPaint.inspectorDockCount === 1
       && firstCampPaint.executionTabCount === 1
-      && firstCampPaint.activeTab === '任务'
+      && firstCampPaint.activeTab === null
       && firstCampPaint.selectedAgentId === null
       && firstCampPaint.focusedRunId === null,
     `Relaunch did not restore Inspector placement before Camp mount: ${JSON.stringify({ afterRestart, firstCampPaint })}`)
 
     await evaluate(relaunchedApp.cdp, `(() => {
-      const tab = [...document.querySelectorAll('.activity-tabs [role="tab"]')]
+      const tab = [...document.querySelectorAll('.camp-detail-entry')]
         .find((candidate) => candidate.textContent?.includes('执行'))
       tab?.click()
       return Boolean(tab)
@@ -4243,7 +4269,7 @@ async function verifyExecutionPlacementWriteFailure(cdp) {
     assert(authority.executionConsolePlacement === 'inspector'
       && failedState.inspectorDockCount === 1
       && failedState.bottomDockCount === 0
-      && failedState.message.includes('未能保存，仍在右侧。')
+      && failedState.message.includes('未能保存，仍在详情浮层。')
       && failedState.retryVisible
       && temporaryFiles.length === 0,
     `Failed placement write did not retain authority and show retry in place: ${JSON.stringify({ authority, failedState, temporaryFiles })}`)
@@ -4446,9 +4472,10 @@ async function connectCdp(url) {
 }
 
 function startCore(dataDirectory) {
-  const child = spawn(stagedSidecarPath(root, 'rovai-core'), [
+  const child = spawn(join(appPath, 'Contents', 'Resources', 'bin', 'rovai-core'), [
     ...coreDataDirectoryArguments(dataDirectory),
-    '--skill-library-root', join(dataDirectory, 'managed-skill-library')
+    '--skill-library-root', join(dataDirectory, 'managed-skill-library'),
+    '--mcp-config-path', join(dataDirectory, 'mcp.json')
   ], {
     cwd: root,
     stdio: ['pipe', 'pipe', 'pipe'],

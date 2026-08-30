@@ -3,7 +3,7 @@ import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useSta
 import { createPortal } from 'react-dom'
 import * as Dialog from '@radix-ui/react-dialog'
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
-import * as Tabs from '@radix-ui/react-tabs'
+import { CampDetailPopover } from './CampDetailPopover'
 import type {
   ActionApprovalView,
   AdapterInstallation,
@@ -516,7 +516,7 @@ export function executionPlacementSaveFailureMessage(
 ): string {
   return current === 'bottom'
     ? '未能保存，仍在底部。'
-    : '未能保存，仍在右侧。'
+    : '未能保存，仍在详情浮层。'
 }
 
 export function attachmentDropIsBlocked({
@@ -1205,9 +1205,10 @@ export function CampWorkspace({
   onExecutionPlacementChange = async () => undefined,
   worldMapEnabled = true,
   workspaceEntrySnapshotReady = true,
-  inspectorVisible = true,
+  inspectorVisible = false,
   inspectorTab: controlledInspectorTab,
-  inspectorSelectionRequest,
+  detailEntryHost,
+  onCloseInspector = () => undefined,
   onInspectorTabChange,
   onOpenInspector,
   notificationFocus = null,
@@ -1251,7 +1252,8 @@ export function CampWorkspace({
   workspaceEntrySnapshotReady?: boolean
   inspectorVisible?: boolean
   inspectorTab?: CampInspectorTab
-  inspectorSelectionRequest?: { tab: CampInspectorTab; sequence: number }
+  detailEntryHost?: HTMLElement | null
+  onCloseInspector?(): void
   onInspectorTabChange?(tab: CampInspectorTab): void
   onOpenInspector?(tab: CampInspectorTab): void
   notificationFocus?: NotificationFocusTarget | null
@@ -1411,11 +1413,6 @@ export function CampWorkspace({
     && executionInspectorActive
     ? 'execution'
     : inspectorTab
-  useEffect(() => {
-    if (!inspectorSelectionRequest) return
-    setExecutionInspectorActive(false)
-    if (controlledInspectorTab === undefined) setLocalInspectorTab(inspectorSelectionRequest.tab)
-  }, [controlledInspectorTab, inspectorSelectionRequest])
   const [taskCreationActive, setTaskCreationActive] = useState(false)
   const [focusedTaskId, setFocusedTaskId] = useState<string | null>(null)
   const [taskFocusRequest, setTaskFocusRequest] = useState(0)
@@ -3308,6 +3305,7 @@ export function CampWorkspace({
         onOpenInspector?.(inspectorTab)
       } else {
         setExecutionInspectorActive(false)
+        onCloseInspector()
       }
       focusPlacementButton(target)
     } catch (nextError) {
@@ -3505,7 +3503,7 @@ export function CampWorkspace({
     const grid = event.currentTarget.parentElement
     if (!grid) return
     const bounds = grid.getBoundingClientRect()
-    const rightBoundary = bounds.right - (inspectorVisible ? 310 : 0)
+    const rightBoundary = bounds.right
     const maximum = Math.max(360, Math.min(bounds.width * .48, rightBoundary - bounds.left - 300))
     filePreview.setPaneWidth(Math.min(maximum, Math.max(360, rightBoundary - event.clientX)))
   }
@@ -3521,7 +3519,7 @@ export function CampWorkspace({
   return (
     <section className="workspace-shell camp-workspace" aria-label={`会话：${snapshot.camp.title}`}>
       <div
-        className={`workspace-grid ${inspectorVisible ? '' : 'inspector-collapsed'} ${filePreview?.tabs.length && filePreview.paneVisible ? 'file-preview-open' : ''}`.trim()}
+        className={`workspace-grid inspector-collapsed ${filePreview?.tabs.length && filePreview.paneVisible ? 'file-preview-open' : ''}`.trim()}
         style={filePreview?.tabs.length && filePreview.paneVisible
           ? { '--file-preview-width': `${filePreview.paneWidth}px` } as CSSProperties
           : undefined}
@@ -4002,6 +4000,83 @@ export function CampWorkspace({
                 />
               </div>
             )}
+            {snapshot.camp.activationState === 'active' && <CampDetailPopover
+              entryHost={detailEntryHost}
+              activeTab={inspectorSurfaceTab}
+              visible={inspectorVisible}
+              executionCount={executionPlacement === 'inspector' ? executionProcesses.length : null}
+              runningCount={executionProcesses.filter((process) => process.runs.some((run) => run.status === 'running')).length}
+              taskCount={openCoverage?.tasks.totalCount ?? snapshot.tasks.length}
+              memberCount={campInspectorMembers(snapshot.members).length}
+              onOpen={(tab) => {
+                selectInspectorSurfaceTab(tab)
+                onOpenInspector?.(tab === 'execution' ? inspectorTab : tab)
+              }}
+              onClose={onCloseInspector}
+            >
+            <section className="camp-detail-content execution-sidecar-panel" hidden={inspectorSurfaceTab !== 'execution'}>
+              {executionPlacement === 'inspector' && (
+                <RunPulse
+                  placement="inspector"
+                  placementButtonRef={inspectorPlacementButtonRef}
+                  processes={executionProcesses}
+                  memberById={memberById}
+                  stopping={stopping}
+                  selectedAgentId={executionDrawerAgentId}
+                  onOpen={openExecutionProcess}
+                  onMovePlacement={moveExecutionToBottom}
+                  placementPending={executionPlacementPending}
+                  placementError={executionPlacementError}
+                />
+              )}
+              <div
+                ref={inspectorExecutionDrawerHostRef}
+                className="execution-sidecar-detail execution-drawer-host execution-drawer-host-inspector"
+              >
+                {!executionDrawerPortal && executionPlacement === 'inspector' && executionDrawer}
+                {executionPlacement === 'inspector' && !executionDrawer && (
+                  <div className="execution-sidecar-empty">
+                    {executionProcesses.length > 0 ? '选择一位队员，查看连续执行历史。' : <>
+                      <span>暂无执行记录</span>
+                      <button
+                        ref={inspectorPlacementButtonRef}
+                        className="quiet-button compact"
+                        type="button"
+                        disabled={executionPlacementPending}
+                        onClick={moveExecutionToBottom}
+                      >{executionPlacementPending ? '正在保存…' : '将执行台移回底部'}</button>
+                      {executionPlacementError && <span role="alert">{executionPlacementError.message}</span>}
+                    </>}
+                  </div>
+                )}
+              </div>
+            </section>
+            <section className="camp-detail-content tab-scroll task-panel-scroll" hidden={inspectorSurfaceTab !== 'tasks'}>
+              <TaskPanel
+                snapshot={snapshot}
+                coverage={openCoverage?.tasks ?? null}
+                busy={busy}
+                focusTaskId={focusedTaskId}
+                focusRequest={taskFocusRequest}
+                onTasksChanged={onTasksChanged}
+                onOpenAgent={openExecutionProcess}
+                onCreateModeChange={setTaskCreationActive}
+              />
+            </section>
+            <section className="camp-detail-content tab-scroll camp-members-panel" hidden={inspectorSurfaceTab !== 'members'}>
+              {inspectorSurfaceTab === 'members' && <CampMembersPanel
+                snapshot={snapshot}
+                profileById={profileById}
+                installations={installations}
+                busy={busy}
+                onChangeLead={onChangeLead}
+                onAddMembers={onAddMembers}
+                onPreviewMemberRemoval={onPreviewMemberRemoval}
+                onRemoveMember={onRemoveMember}
+                onNotify={onNotify}
+              />}
+            </section>
+            </CampDetailPopover>}
           </div>
           {executionPlacement === 'bottom' && (
             <RunPulse
@@ -4053,95 +4128,6 @@ export function CampWorkspace({
           </>
         ) : null}
 
-        {inspectorVisible && <aside
-          className="activity-pane"
-          aria-label="会话详情"
-          onDragEnter={(event) => {
-            if (!dataTransferContainsFiles(event.dataTransfer)) return
-            event.dataTransfer.dropEffect = 'none'
-            clearAttachmentDragState()
-          }}
-          onDragOver={(event) => {
-            if (!dataTransferContainsFiles(event.dataTransfer)) return
-            event.dataTransfer.dropEffect = 'none'
-          }}
-          onDrop={(event) => {
-            if (!dataTransferContainsFiles(event.dataTransfer)) return
-            event.preventDefault()
-            event.dataTransfer.dropEffect = 'none'
-            clearAttachmentDragState()
-          }}
-        >
-          <Tabs.Root
-            value={inspectorSurfaceTab}
-            onValueChange={(value) => selectInspectorSurfaceTab(value as CampInspectorSurfaceTab)}
-            activationMode="manual"
-            className="activity-tabs"
-          >
-            <Tabs.List className="tabs-list sticky-tabs" aria-label="会话详情">
-              {executionPlacement === 'inspector' && (
-                <Tabs.Trigger value="execution">执行 <small>{executionProcesses.length}</small></Tabs.Trigger>
-              )}
-              <Tabs.Trigger value="tasks">任务 <small>{openCoverage?.tasks.totalCount ?? snapshot.tasks.length}</small></Tabs.Trigger>
-              <Tabs.Trigger value="members">队员 <small>{campInspectorMembers(snapshot.members).length}</small></Tabs.Trigger>
-            </Tabs.List>
-            <Tabs.Content value="execution" forceMount className="execution-sidecar-panel">
-              {executionPlacement === 'inspector' && (
-                <RunPulse
-                  placement="inspector"
-                  placementButtonRef={inspectorPlacementButtonRef}
-                  processes={executionProcesses}
-                  memberById={memberById}
-                  stopping={stopping}
-                  selectedAgentId={executionDrawerAgentId}
-                  onOpen={openExecutionProcess}
-                  onMovePlacement={moveExecutionToBottom}
-                  placementPending={executionPlacementPending}
-                  placementError={executionPlacementError}
-                />
-              )}
-              <div
-                ref={inspectorExecutionDrawerHostRef}
-                className="execution-sidecar-detail execution-drawer-host execution-drawer-host-inspector"
-              >
-                {!executionDrawerPortal && executionPlacement === 'inspector' && executionDrawer}
-                {executionPlacement === 'inspector' && !executionDrawer && (
-                    <div className="execution-sidecar-empty">
-                      选择一位队员，查看连续执行历史。
-                    </div>
-                )}
-              </div>
-            </Tabs.Content>
-            <Tabs.Content value="tasks" className="tab-scroll task-panel-scroll">
-              <TaskPanel
-                snapshot={snapshot}
-                coverage={openCoverage?.tasks ?? null}
-                busy={busy}
-                focusTaskId={focusedTaskId}
-                focusRequest={taskFocusRequest}
-                onTasksChanged={onTasksChanged}
-                onOpenAgent={openExecutionProcess}
-                onCreateModeChange={setTaskCreationActive}
-              />
-            </Tabs.Content>
-            <Tabs.Content value="members" className="tab-scroll camp-members-panel">
-              <CampMembersPanel
-                snapshot={snapshot}
-                profileById={profileById}
-                installations={installations}
-                busy={busy}
-                onChangeLead={onChangeLead}
-                onAddMembers={onAddMembers}
-                onPreviewMemberRemoval={onPreviewMemberRemoval}
-                onRemoveMember={onRemoveMember}
-                onNotify={onNotify}
-              />
-            </Tabs.Content>
-          </Tabs.Root>
-          <div className="inspector-meta">
-            {snapshot.agentRuns.length > 0 && `run ${shortIdentity(snapshot.agentRuns[snapshot.agentRuns.length - 1].id)} · `}seq {snapshot.throughGlobalSequence}
-          </div>
-        </aside>}
         <div
           className="conversation-controls"
           onDragEnter={enterAttachmentDropSurface}
@@ -4627,12 +4613,12 @@ function RunPulse({
   if (visibleProcesses.length === 0) return <></>
   const placementLabel = placementPending
     ? '正在保存'
-    : placement === 'bottom' ? '移到右侧' : '移回底部'
+    : placement === 'bottom' ? '移到浮层' : '移回底部'
   const placementAriaLabel = placement === 'bottom'
-    ? '将执行台移到右侧检查器并记住此位置'
+    ? '将执行台移到详情浮层并记住此位置'
     : '将执行台移回会话底部并记住此位置'
   const placementTitle = placement === 'bottom'
-    ? '移到右侧并记住此位置'
+    ? '移到浮层并记住此位置'
     : '移回底部并记住此位置'
   return (
     <div className={`run-pulse run-pulse-${placement}`} aria-label="Agent 执行台">
@@ -5787,7 +5773,6 @@ function CampMembersPanel({
   onNotify(message: string): void
 }): JSX.Element {
   const members = campInspectorMembers(snapshot.members)
-  const defaultLead = members.find((member) => member.isDefaultLead) ?? null
   const presentCount = members.filter(campMemberIsLeadEligible).length
   const awayCount = members.length - presentCount
   const activeAgentIds = useMemo(
@@ -5980,7 +5965,6 @@ function CampMembersPanel({
             <small>{presentCount} 位在队 · {awayCount} 位暂离</small>
           </div>
           <div className="camp-members-summary-actions">
-            <span className="camp-members-scope">当前会话</span>
             <button
               className="camp-add-member-button"
               type="button"
@@ -5991,67 +5975,6 @@ function CampMembersPanel({
             </button>
           </div>
         </div>
-        <DropdownMenu.Root>
-          <DropdownMenu.Trigger asChild>
-            <button
-              className="camp-lead-picker"
-              type="button"
-              disabled={busy || presentCount === 0}
-              aria-label={defaultLead
-                ? `队长，${defaultLead.displayName}；更换队长`
-                : '选择队长'}
-            >
-              {defaultLead
-                ? <MemberAvatar agentId={defaultLead.agentId} avatarRef={defaultLead.avatarRef} displayName={defaultLead.displayName} size="mention" decorative />
-                : <span className="camp-lead-picker-empty" aria-hidden="true">—</span>}
-              <span className="camp-lead-picker-copy">
-                <strong>队长 · {defaultLead?.displayName ?? '未设置'}</strong>
-                <small>{defaultLead?.teamRole || '从在队队员中选择'}</small>
-              </span>
-              <svg className="camp-lead-picker-chevron" aria-hidden="true" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.6" viewBox="0 0 16 16">
-                <path d="m4 6 4 4 4-4" />
-              </svg>
-            </button>
-          </DropdownMenu.Trigger>
-          <DropdownMenu.Portal>
-            <DropdownMenu.Content
-              className="camp-lead-menu"
-              align="end"
-              sideOffset={5}
-              collisionPadding={10}
-              aria-label="更换队长"
-            >
-              <DropdownMenu.Label className="camp-lead-menu-label">选择队长</DropdownMenu.Label>
-              <DropdownMenu.RadioGroup
-                value={defaultLead?.agentId ?? ''}
-                onValueChange={(agentId) => {
-                  if (!agentId || agentId === defaultLead?.agentId) return
-                  void onChangeLead(agentId).catch(() => undefined)
-                }}
-              >
-                {members.map((member) => {
-                  const eligible = campMemberIsLeadEligible(member)
-                  return (
-                    <DropdownMenu.RadioItem
-                      className="camp-lead-menu-item"
-                      value={member.agentId}
-                      key={member.agentId}
-                      disabled={busy || !eligible}
-                      aria-label={`${member.displayName}，${member.teamRole || '团队角色未设置'}${eligible ? '' : '，暂不可选'}`}
-                    >
-                      <MemberAvatar agentId={member.agentId} avatarRef={member.avatarRef} displayName={member.displayName} size="mention" decorative />
-                      <span className="camp-lead-menu-copy">
-                        <strong>{member.displayName}</strong>
-                        <small>{member.teamRole || '团队角色未设置'} · {eligible ? '在队' : '暂离'}</small>
-                      </span>
-                      <DropdownMenu.ItemIndicator className="camp-lead-menu-check">✓</DropdownMenu.ItemIndicator>
-                    </DropdownMenu.RadioItem>
-                  )
-                })}
-              </DropdownMenu.RadioGroup>
-            </DropdownMenu.Content>
-          </DropdownMenu.Portal>
-        </DropdownMenu.Root>
       </div>
 
       {snapshot.membershipReconciliations.map((reconciliation) => {
@@ -6094,18 +6017,17 @@ function CampMembersPanel({
             <article className={`camp-inspector-member-row ${present ? '' : 'is-away'}`} role="listitem" key={member.agentId}>
               <span className="camp-inspector-member-avatar">
                 <MemberAvatar agentId={member.agentId} avatarRef={member.avatarRef} displayName={member.displayName} size="list" decorative />
-                <i className={present ? '' : 'is-away'} aria-hidden="true" />
               </span>
               <span className="camp-inspector-member-copy">
                 <span className="camp-inspector-member-name">
                   <strong>{member.displayName}</strong>
                   {member.isDefaultLead && <small>队长</small>}
                 </span>
-                <small>{member.teamRole || '团队角色未设置'}</small>
+                <small title={member.teamRole || undefined}>{runtimeLabel}</small>
               </span>
               <span className={`camp-inspector-member-state ${present ? '' : 'is-away'}`}>
                 <strong>{presenceLabel}</strong>
-                <small className={`runtime-${runtimeTone}`}>{runtimeLabel}</small>
+                {runtimeTone === 'attention' && profile && <small className="runtime-attention">{runtimeReadinessLabel(profile.runtimeReadiness.status)}</small>}
               </span>
               <DropdownMenu.Root>
                 <DropdownMenu.Trigger asChild>
@@ -6130,6 +6052,15 @@ function CampMembersPanel({
                     collisionPadding={10}
                     aria-label={`${member.displayName}的队员操作`}
                   >
+                    <DropdownMenu.Item
+                      className="camp-member-menu-item"
+                      disabled={busy || member.isDefaultLead || !present}
+                      onSelect={() => { void onChangeLead(member.agentId).catch(() => undefined) }}
+                    >
+                      <strong>{member.isDefaultLead ? '当前队长' : '设为队长'}</strong>
+                      {!present && <small>暂离的队员不可设为队长</small>}
+                    </DropdownMenu.Item>
+                    <DropdownMenu.Separator className="camp-member-menu-separator" />
                     <DropdownMenu.Item
                       className="camp-member-menu-item"
                       disabled={!runtimeConfiguration}
@@ -9041,6 +8972,17 @@ function isPresentableExecutionEvidence(
   return evidence.kind !== 'reasoning_summary'
 }
 
+interface TaskEditorDraft {
+  title: string
+  description: string
+  acceptanceCriteriaText: string
+  assigneeAgentId: string
+  status: TaskStatus
+  blockedReason: string
+  completionSummary: string
+  expectedVersion: number
+}
+
 export function TaskPanel({
   snapshot,
   coverage = null,
@@ -9060,6 +9002,13 @@ export function TaskPanel({
   onOpenAgent?(agentId: string, trigger?: HTMLButtonElement): void
   onCreateModeChange?(active: boolean): void
 }): JSX.Element {
+  const [detailTaskId, setDetailTaskId] = useState<string | null>(null)
+  const [statusFilter, setStatusFilter] = useState<'all' | TaskStatus>('all')
+  const [editorOpen, setEditorOpen] = useState(false)
+  const [cancelOpen, setCancelOpen] = useState(false)
+  const editorTriggerRef = useRef<HTMLElement | null>(null)
+  const detailRef = useRef<HTMLElement>(null)
+  const drafts = useRef(new Map<string, TaskEditorDraft>())
   const [mode, setMode] = useState<'list' | 'create' | 'edit'>('list')
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null)
   const [title, setTitle] = useState('')
@@ -9076,15 +9025,22 @@ export function TaskPanel({
   const selectedTask = selectedTaskId
     ? snapshot.tasks.find((task) => task.taskId === selectedTaskId) ?? null
     : null
+  const detailTask = detailTaskId
+    ? snapshot.tasks.find((task) => task.taskId === detailTaskId) ?? null
+    : null
+  const visibleTasks = snapshot.tasks.filter((task) => statusFilter === 'all' || task.status === statusFilter)
+  const openTaskCount = snapshot.tasks.filter((task) => task.status !== 'completed' && task.status !== 'cancelled').length
   const activeMembers = snapshot.members.filter((member) =>
     member.membershipStatus === 'active' && member.leaveRequestedAt === null)
 
   useEffect(() => {
-    onCreateModeChange?.(mode === 'create')
+    onCreateModeChange?.(editorOpen && mode === 'create')
     return () => onCreateModeChange?.(false)
-  }, [mode, onCreateModeChange])
+  }, [editorOpen, mode, onCreateModeChange])
 
   const resetForm = (): void => {
+    setEditorOpen(false)
+    setCancelOpen(false)
     setMode('list')
     setSelectedTaskId(null)
     setTitle('')
@@ -9099,36 +9055,76 @@ export function TaskPanel({
     setFormError(null)
   }
 
-  const beginCreate = (): void => {
-    resetForm()
-    setMode('create')
+  const applyDraft = (draft: TaskEditorDraft): void => {
+    setTitle(draft.title)
+    setDescription(draft.description)
+    setAcceptanceCriteriaText(draft.acceptanceCriteriaText)
+    setAssigneeAgentId(draft.assigneeAgentId)
+    setStatus(draft.status)
+    setBlockedReason(draft.blockedReason)
+    setCompletionSummary(draft.completionSummary)
+    setExpectedVersion(draft.expectedVersion)
+    setFormError(null)
   }
 
-  const beginEdit = (task: TaskView): void => {
+  const closeEditor = (): void => {
+    if (submitting) return
+    drafts.current.set(selectedTaskId ?? 'new', {
+      title, description, acceptanceCriteriaText, assigneeAgentId, status,
+      blockedReason, completionSummary, expectedVersion
+    })
+    setEditorOpen(false)
+  }
+
+  const restoreEditorFocus = (event: Event): void => {
+    event.preventDefault()
+    const trigger = editorTriggerRef.current
+    if (trigger?.isConnected) trigger.focus({ preventScroll: true })
+  }
+
+  const beginCreate = (trigger: HTMLElement): void => {
+    editorTriggerRef.current = trigger
+    resetForm()
+    const draft = drafts.current.get('new')
+    if (draft) applyDraft(draft)
+    setMode('create')
+    setEditorOpen(true)
+  }
+
+  const beginEdit = (task: TaskView, trigger: HTMLElement): void => {
+    editorTriggerRef.current = trigger
     setSelectedTaskId(task.taskId)
-    setTitle(task.title)
-    setDescription(task.description)
-    setAcceptanceCriteriaText(task.acceptanceCriteria.join('\n'))
-    setAssigneeAgentId(task.assigneeAgentId ?? '')
-    setStatus(task.status)
-    setBlockedReason(task.blockedReason ?? '')
-    setCompletionSummary(task.completionSummary ?? '')
-    setCancelReason(task.cancelReason ?? '')
-    setExpectedVersion(task.version)
-    setFormError(null)
+    applyDraft(drafts.current.get(task.taskId) ?? {
+      title: task.title,
+      description: task.description,
+      acceptanceCriteriaText: task.acceptanceCriteria.join('\n'),
+      assigneeAgentId: task.assigneeAgentId ?? '',
+      status: task.status,
+      blockedReason: task.blockedReason ?? '',
+      completionSummary: task.completionSummary ?? '',
+      expectedVersion: task.version
+    })
     setMode('edit')
+    setEditorOpen(true)
   }
 
   useEffect(() => {
     if (!focusTaskId || focusRequest === 0) return
     const task = snapshot.tasks.find((candidate) => candidate.taskId === focusTaskId)
     if (task) {
-      beginEdit(task)
+      setDetailTaskId(task.taskId)
     } else {
-      resetForm()
+      setDetailTaskId(null)
       setFormError('这项任务当前不可见，无法打开详情。')
     }
   }, [focusRequest, focusTaskId])
+
+  useEffect(() => {
+    if (!detailTaskId) return
+    detailRef.current?.focus({ preventScroll: true })
+    const scroll = detailRef.current?.closest('.task-panel-scroll')
+    if (scroll) scroll.scrollTop = 0
+  }, [detailTaskId, focusRequest])
 
   const submitCreate = async (event: FormEvent): Promise<void> => {
     event.preventDefault()
@@ -9152,6 +9148,7 @@ export function TaskPanel({
         setFormError(taskCommandMessage(result))
         return
       }
+      drafts.current.delete(selectedTaskId ?? 'new')
       resetForm()
       await onTasksChanged()
     } catch (error) {
@@ -9214,6 +9211,7 @@ export function TaskPanel({
         }
         return
       }
+      drafts.current.delete(selectedTaskId ?? 'new')
       resetForm()
       await onTasksChanged()
     } catch (error) {
@@ -9242,6 +9240,7 @@ export function TaskPanel({
         setFormError(taskCommandMessage(result))
         return
       }
+      drafts.current.delete(selectedTaskId ?? 'new')
       resetForm()
       await onTasksChanged()
     } catch (error) {
@@ -9255,101 +9254,149 @@ export function TaskPanel({
     ? selectedTask.status === 'completed' || selectedTask.status === 'cancelled'
     : false
 
+  const detailTerminal = detailTask?.status === 'completed' || detailTask?.status === 'cancelled'
+
   return (
     <div className="task-panel">
-      <div className="task-action-row">
-        <button
-          className={mode === 'list' ? 'task-action-button' : 'task-action-button is-back'}
-          type="button"
-          onClick={mode === 'list' ? beginCreate : resetForm}
-          disabled={mode === 'list' ? busy : submitting}
-        >
-          <span aria-hidden="true">{mode === 'list' ? '＋' : '←'}</span>
-          <strong>{mode === 'list' ? '新建任务' : '返回任务列表'}</strong>
-        </button>
-      </div>
-
-      {mode === 'create' && (
-        <form className="task-editor" onSubmit={(event) => void submitCreate(event)}>
-          <div className="task-editor-heading"><strong>新建任务</strong><span>初始状态为待处理</span></div>
-          <TaskFields
-            title={title}
-            description={description}
-            acceptanceCriteriaText={acceptanceCriteriaText}
-            assigneeAgentId={assigneeAgentId}
-            status="pending"
-            members={activeMembers}
-            disabled={submitting || busy}
-            showStatus={false}
-            requireAssignee
-            autoFocusTitle
-            onTitle={setTitle}
-            onDescription={setDescription}
-            onAcceptanceCriteria={setAcceptanceCriteriaText}
-            onAssignee={setAssigneeAgentId}
-            onStatus={setStatus}
-          />
-          {formError && <p className="task-form-error" role="alert">{formError}</p>}
-          <button className="primary-button task-submit" type="submit" disabled={!title.trim() || submitting || busy}>{submitting ? '正在保存…' : '创建任务'}</button>
-        </form>
-      )}
-
-      {mode === 'edit' && selectedTask && (
-        <form className="task-editor" onSubmit={(event) => void submitUpdate(event)}>
-          <div className="task-editor-heading"><strong>{terminal ? '任务详情' : '编辑任务'}</strong><span>版本 {expectedVersion}</span></div>
-          <TaskFields
-            title={title}
-            description={description}
-            acceptanceCriteriaText={acceptanceCriteriaText}
-            assigneeAgentId={assigneeAgentId}
-            status={status}
-            blockedReason={blockedReason}
-            completionSummary={completionSummary}
-            cancelReason={cancelReason}
-            members={activeMembers}
-            disabled={terminal || submitting || busy}
-            showStatus
-            onTitle={setTitle}
-            onDescription={setDescription}
-            onAcceptanceCriteria={setAcceptanceCriteriaText}
-            onAssignee={setAssigneeAgentId}
-            onStatus={setStatus}
-            onBlockedReason={setBlockedReason}
-            onCompletionSummary={setCompletionSummary}
-          />
-          <TaskAuditDetail task={selectedTask} snapshot={snapshot} />
-          <RelatedTaskExecution task={selectedTask} snapshot={snapshot} onOpenAgent={onOpenAgent} />
-          {formError && <p className="task-form-error" role="alert">{formError}</p>}
-          {terminal
-            ? <p className="task-terminal-note">已结束的任务保留为只读记录，不能重新打开或删除。</p>
-            : <>
-                <button className="primary-button task-submit" type="submit" disabled={!title.trim() || submitting || busy}>{submitting ? '正在保存…' : '保存修改'}</button>
-                <div className="task-cancel-zone">
-                  <strong>取消任务</strong>
-                  <p>取消任务不会取消已经接受或正在运行的执行。</p>
-                  <label className="task-field"><span>取消原因</span><textarea value={cancelReason} rows={2} maxLength={4000} disabled={submitting || busy} onChange={(event) => setCancelReason(event.currentTarget.value)} /></label>
-                  <button className="danger-button" type="button" disabled={!cancelReason.trim() || submitting || busy} onClick={() => void submitCancel()}>确认取消任务</button>
-                </div>
-              </>}
-        </form>
-      )}
-
-      {mode === 'list' && (
+      {!detailTask && <>
+        <div className="task-action-row">
+          <span className="task-list-summary">{openTaskCount > 0 ? `${openTaskCount} 项未完成` : `${snapshot.tasks.length} 项任务`}</span>
+          <select
+            className="task-status-filter"
+            aria-label="筛选任务状态"
+            value={statusFilter}
+            onChange={(event) => setStatusFilter(event.currentTarget.value as 'all' | TaskStatus)}
+          >
+            <option value="all">全部状态</option>
+            <option value="in_progress">进行中</option>
+            <option value="pending">待处理</option>
+            <option value="blocked">已阻塞</option>
+            <option value="completed">已完成</option>
+            <option value="cancelled">已取消</option>
+          </select>
+          <button className="quiet-button compact task-new-button" type="button" onClick={(event) => beginCreate(event.currentTarget)} disabled={busy}>
+            <span aria-hidden="true">＋</span> 新建任务
+          </button>
+        </div>
+        {formError && !editorOpen && !cancelOpen && <p className="task-form-error" role="alert">{formError}</p>}
+        {coverage && !coverage.complete && (
+          <p className="task-history-note" role="status">
+            当前显示 {coverage.loadedCount} / {coverage.totalCount} 个任务；更早的已结束任务尚未载入。
+          </p>
+        )}
         <div className="task-list">
-          {coverage && !coverage.complete && (
-            <p className="task-history-note" role="status">
-              当前显示 {coverage.loadedCount} / {coverage.totalCount} 个任务；更早的已结束任务尚未载入。
-            </p>
-          )}
-          {snapshot.tasks.map((task) => (
-            <button className="task-list-row" type="button" key={task.taskId} onClick={() => beginEdit(task)}>
-              <span className={`task-state-dot state-${task.status}`} aria-hidden="true" />
-              <span className="task-list-copy"><strong>{task.title}</strong><small>{taskListPreview(task) || '没有补充说明'}</small></span>
-              <span className="task-list-meta"><b>{taskStatusLabel(task.status)}</b><small>{taskAssigneeName(task, snapshot)} · {task.acceptanceCriteria.length} 个验收条件</small></span>
+          {visibleTasks.map((task) => (
+            <button className="task-list-row" type="button" key={task.taskId} data-task-id={task.taskId} onClick={() => setDetailTaskId(task.taskId)}>
+              <span className={`task-state-dot state-${task.status}`} aria-hidden="true">{task.status === 'completed' ? '✓' : task.status === 'blocked' ? '!' : task.status === 'cancelled' ? '−' : ''}</span>
+              <span className="task-list-copy">
+                <strong>{task.title}</strong>
+                <span className="task-list-meta">
+                  <b className={`state-${task.status}`}>{taskStatusLabel(task.status)}</b>
+                  <small>{taskAssigneeName(task, snapshot)}</small>
+                  {task.acceptanceCriteria.length > 0 && <small>{task.acceptanceCriteria.length} 个验收条件</small>}
+                </span>
+                {task.status === 'blocked' && task.blockedReason && <small className="task-list-note">{task.blockedReason}</small>}
+              </span>
+              <svg className="task-list-chevron" viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.3"><path d="m6 4 4 4-4 4" /></svg>
             </button>
           ))}
+          {visibleTasks.length === 0 && <p className="task-empty">{snapshot.tasks.length === 0 ? '暂无任务' : '没有符合筛选条件的任务'}</p>}
         </div>
-      )}
+      </>}
+
+      {detailTask && <article className="task-detail" ref={detailRef} tabIndex={-1} aria-label="任务详情" data-task-id={detailTask.taskId}>
+        <div className="task-detail-navigation">
+          <button className="quiet-button compact" type="button" onClick={() => setDetailTaskId(null)}><span aria-hidden="true">←</span> 返回任务列表</button>
+          <small>版本 {detailTask.version}</small>
+        </div>
+        <h3>{detailTask.title}</h3>
+        <div className="task-detail-meta"><span className={`task-detail-status state-${detailTask.status}`}>{taskStatusLabel(detailTask.status)}</span><span>{taskAssigneeName(detailTask, snapshot)}</span></div>
+        <section className="task-detail-section"><strong>说明</strong><p className="task-detail-copy">{detailTask.description || '暂无说明'}</p></section>
+        <section className="task-detail-section"><strong>验收条件 <small>{detailTask.acceptanceCriteria.length}</small></strong>
+          {detailTask.acceptanceCriteria.length > 0
+            ? <ol className="task-acceptance-list">{detailTask.acceptanceCriteria.map((criterion, index) => <li key={index}>{criterion}</li>)}</ol>
+            : <p>暂无验收条件</p>}
+        </section>
+        {detailTask.blockedReason && <section className="task-detail-section task-outcome is-blocked"><strong>阻塞原因</strong><p className="task-detail-copy">{detailTask.blockedReason}</p></section>}
+        {detailTask.completionSummary && <section className="task-detail-section task-outcome is-completed"><strong>完成摘要</strong><p className="task-detail-copy">{detailTask.completionSummary}</p></section>}
+        {detailTask.cancelReason && <section className="task-detail-section task-outcome"><strong>取消原因</strong><p className="task-detail-copy">{detailTask.cancelReason}</p></section>}
+        <RelatedTaskExecution task={detailTask} snapshot={snapshot} onOpenAgent={onOpenAgent} />
+        <details className="task-audit-disclosure"><summary>审计信息</summary><TaskAuditDetail task={detailTask} snapshot={snapshot} /></details>
+        {detailTerminal
+          ? <p className="task-terminal-note">已结束的任务保留为只读记录，不能重新打开或删除。</p>
+          : <div className="task-detail-actions">
+              <button className="quiet-button" type="button" disabled={busy} onClick={(event) => beginEdit(detailTask, event.currentTarget)}>编辑任务</button>
+              <button className="quiet-button task-cancel-action" type="button" disabled={busy} onClick={(event) => {
+                editorTriggerRef.current = event.currentTarget
+                setSelectedTaskId(detailTask.taskId)
+                setExpectedVersion(detailTask.version)
+                setCancelReason('')
+                setFormError(null)
+                setCancelOpen(true)
+              }}>取消任务</button>
+            </div>}
+      </article>}
+
+      <Dialog.Root open={editorOpen} onOpenChange={(open) => { if (!open) closeEditor() }}>
+        <Dialog.Portal>
+          <Dialog.Overlay className="dialog-overlay app-dialog-overlay" />
+          <AppDialogContent className="task-editor-dialog" width="wide" onCloseAutoFocus={restoreEditorFocus}>
+            <AppDialogHeader icon="pencil" title={mode === 'create' ? '新建任务' : '编辑任务'} description={mode === 'create' ? '记录需要持续跟踪的责任与验收条件。' : `版本 ${expectedVersion} · 修改任务内容与状态。`} />
+            <form className="task-editor" onSubmit={(event) => void (mode === 'create' ? submitCreate(event) : submitUpdate(event))}>
+              <AppDialogBody>
+                {formError && <p className="task-form-error" role="alert">{formError}</p>}
+                {mode === 'edit' && terminal && <p className="task-terminal-note" role="status">这项任务已结束，不能再修改。你的草稿仍保留。</p>}
+                <TaskFields
+                  title={title}
+                  description={description}
+                  acceptanceCriteriaText={acceptanceCriteriaText}
+                  assigneeAgentId={assigneeAgentId}
+                  status={mode === 'create' ? 'pending' : status}
+                  blockedReason={blockedReason}
+                  completionSummary={completionSummary}
+                  members={activeMembers}
+                  disabled={submitting || busy || (mode === 'edit' && terminal)}
+                  showStatus={mode === 'edit'}
+                  requireAssignee={mode === 'create'}
+                  autoFocusTitle
+                  onTitle={setTitle}
+                  onDescription={setDescription}
+                  onAcceptanceCriteria={setAcceptanceCriteriaText}
+                  onAssignee={setAssigneeAgentId}
+                  onStatus={setStatus}
+                  onBlockedReason={setBlockedReason}
+                  onCompletionSummary={setCompletionSummary}
+                />
+              </AppDialogBody>
+              <AppDialogFooter>
+                <small className="task-draft-note">关闭后保留本次草稿</small>
+                <button className="quiet-button" type="button" disabled={submitting} onClick={closeEditor}>收起</button>
+                <button className="primary-button task-submit" type="submit" disabled={!title.trim() || submitting || busy || (mode === 'edit' && (terminal || !selectedTask))}>
+                  {submitting ? '正在保存…' : mode === 'create' ? '创建任务' : '保存修改'}
+                </button>
+              </AppDialogFooter>
+            </form>
+          </AppDialogContent>
+        </Dialog.Portal>
+      </Dialog.Root>
+
+      <Dialog.Root open={cancelOpen} onOpenChange={(open) => { if (!submitting) setCancelOpen(open) }}>
+        <Dialog.Portal>
+          <Dialog.Overlay className="dialog-overlay app-dialog-overlay" />
+          <AppDialogContent className="task-cancel-dialog" tone="danger" width="compact" onCloseAutoFocus={restoreEditorFocus}>
+            <AppDialogHeader icon="warning" title="取消任务" description={selectedTask?.title} />
+            <AppDialogBody>
+              <p className="task-cancel-description">取消任务不会停止已经接受或正在运行的执行。</p>
+              <label className="task-field"><span>取消原因</span><textarea data-dialog-autofocus value={cancelReason} rows={3} maxLength={4000} required disabled={submitting || busy} onChange={(event) => setCancelReason(event.currentTarget.value)} /></label>
+              {formError && <p className="task-form-error" role="alert">{formError}</p>}
+            </AppDialogBody>
+            <AppDialogFooter>
+              <button className="quiet-button" type="button" disabled={submitting} onClick={() => setCancelOpen(false)}>返回</button>
+              <button className="danger-button" type="button" disabled={!cancelReason.trim() || submitting || busy || terminal} onClick={() => void submitCancel()}>{submitting ? '正在取消…' : '确认取消任务'}</button>
+            </AppDialogFooter>
+          </AppDialogContent>
+        </Dialog.Portal>
+      </Dialog.Root>
     </div>
   )
 }
@@ -9402,7 +9449,7 @@ function TaskFields({
 
   return (
     <>
-      <label className="task-field"><span>标题</span><input value={title} maxLength={160} required autoFocus={autoFocusTitle} disabled={disabled} onChange={(event) => onTitle(event.currentTarget.value)} /></label>
+      <label className="task-field"><span>标题</span><input value={title} maxLength={160} required data-dialog-autofocus={autoFocusTitle || undefined} disabled={disabled} onChange={(event) => onTitle(event.currentTarget.value)} /></label>
       <label className="task-field"><span>说明</span><textarea value={description} rows={4} maxLength={8000} disabled={disabled} onChange={(event) => onDescription(event.currentTarget.value)} placeholder="记录需要跨消息持续跟踪的责任与边界…" /></label>
       <label className="task-field"><span>验收条件（每行一项，最多 12 项）</span><textarea value={acceptanceCriteriaText} rows={3} maxLength={6000} disabled={disabled} onChange={(event) => onAcceptanceCriteria(event.currentTarget.value)} /></label>
       <div className="task-field-grid">
@@ -9439,13 +9486,6 @@ function formatDateTime(value: string): string {
   }).format(new Date(value))
 }
 
-function taskListPreview(task: TaskView): string {
-  if (task.status === 'blocked') return task.blockedReason ?? ''
-  if (task.status === 'completed') return task.completionSummary ?? ''
-  if (task.status === 'cancelled') return task.cancelReason ?? ''
-  return task.description
-}
-
 function TaskAuditDetail({ task, snapshot }: { task: TaskView; snapshot: CampSnapshot }): JSX.Element {
   const releaseEvent = [...snapshot.timeline].reverse().find((event) =>
     event.entityType === 'task'
@@ -9461,6 +9501,7 @@ function TaskAuditDetail({ task, snapshot }: { task: TaskView; snapshot: CampSna
     <section className="task-detail-section" aria-label="任务审计信息">
       <strong>责任与审计</strong>
       <dl className="task-detail-grid">
+        <div><dt>任务 ID</dt><dd>{task.taskId}</dd></div>
         <div><dt>创建者</dt><dd>{task.createdByType} · {task.createdById}</dd></div>
         <div><dt>来源执行</dt><dd>{task.sourceAgentRunId ?? '无'}</dd></div>
         <div><dt>创建时间</dt><dd>{formatDateTime(task.createdAt)}</dd></div>

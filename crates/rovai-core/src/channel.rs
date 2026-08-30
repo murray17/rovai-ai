@@ -9764,17 +9764,33 @@ fn validate_dingtalk_web_session(session: &serde_json::Map<String, Value>) -> Re
             .as_object()
             .context("DingTalk Web Session cookie is invalid")?;
         if cookie.keys().any(|key| {
-            !matches!(key.as_str(), "name" | "value" | "domain" | "path" | "secure"
-                | "httpOnly" | "sameSite" | "session" | "hostOnly" | "expirationDate")
+            !matches!(
+                key.as_str(),
+                "name"
+                    | "value"
+                    | "domain"
+                    | "path"
+                    | "secure"
+                    | "httpOnly"
+                    | "sameSite"
+                    | "session"
+                    | "hostOnly"
+                    | "expirationDate"
+            )
         }) {
             anyhow::bail!("DingTalk Web Session cookie fields are invalid");
         }
         let name = required_json_string(cookie, "name", 512)?;
         required_json_string(cookie, "value", 16_384)?;
         let domain = required_json_string(cookie, "domain", 512)?;
-        let normalized_domain = domain.strip_prefix('.').unwrap_or(domain).to_ascii_lowercase();
-        if !matches!(normalized_domain.as_str(), "dingtalk.com"
-            | "open-dev.dingtalk.com" | "login.dingtalk.com") {
+        let normalized_domain = domain
+            .strip_prefix('.')
+            .unwrap_or(domain)
+            .to_ascii_lowercase();
+        if !matches!(
+            normalized_domain.as_str(),
+            "dingtalk.com" | "open-dev.dingtalk.com" | "login.dingtalk.com"
+        ) {
             anyhow::bail!("DingTalk Web Session cookie domain is invalid");
         }
         let path = required_json_string(cookie, "path", 4096)?;
@@ -9786,14 +9802,20 @@ fn validate_dingtalk_web_session(session: &serde_json::Map<String, Value>) -> Re
                 anyhow::bail!("DingTalk Web Session cookie flag is invalid");
             }
         }
-        if cookie.get("hostOnly").is_some_and(|value| value.as_bool().is_none())
-            || !matches!(cookie.get("sameSite").and_then(Value::as_str),
-                Some("unspecified" | "no_restriction" | "lax" | "strict"))
+        if cookie
+            .get("hostOnly")
+            .is_some_and(|value| value.as_bool().is_none())
+            || !matches!(
+                cookie.get("sameSite").and_then(Value::as_str),
+                Some("unspecified" | "no_restriction" | "lax" | "strict")
+            )
         {
             anyhow::bail!("DingTalk Web Session cookie policy is invalid");
         }
         if let Some(value) = cookie.get("expirationDate") {
-            let expiry = value.as_f64().context("DingTalk cookie expiry is invalid")?;
+            let expiry = value
+                .as_f64()
+                .context("DingTalk cookie expiry is invalid")?;
             if !expiry.is_finite() || !(0.0..=8_640_000_000_000.0).contains(&expiry) {
                 anyhow::bail!("DingTalk cookie expiry is invalid");
             }
@@ -10622,12 +10644,20 @@ mod tests {
         ] {
             let mut invalid_session = session.clone();
             invalid_session["cookies"][0][field] = invalid;
-            assert!(validate_developer_session_documents(
-                DINGTALK_PROVIDER, &identity, &invalid_session
-            ).is_err(), "invalid cookie field {field} was accepted");
+            assert!(
+                validate_developer_session_documents(
+                    DINGTALK_PROVIDER,
+                    &identity,
+                    &invalid_session
+                )
+                .is_err(),
+                "invalid cookie field {field} was accepted"
+            );
         }
         let duplicate = json!({"schemaVersion": 2, "cookies": [cookie.clone(), cookie]});
-        assert!(validate_developer_session_documents(DINGTALK_PROVIDER, &identity, &duplicate).is_err());
+        assert!(
+            validate_developer_session_documents(DINGTALK_PROVIDER, &identity, &duplicate).is_err()
+        );
         let legacy = json!({
             "schemaVersion": 1,
             "currentProfileKey": profile_key_for_dingtalk("corp-1", "staff-1"),

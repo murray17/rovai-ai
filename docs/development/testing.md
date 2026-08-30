@@ -166,6 +166,15 @@ pnpm build:desktop
 
 ### Electron 隔离世界回归
 
+启动页面与 authority gate 的组合回归运行 `pnpm test:startup-presentation`。它在真实 Electron 中挂载生产 `App` 与 CSS，
+仅替换本机 API 和反馈时钟：验证 null/starting、四类恢复目标、迁移、ready 交接、首次训练、订阅竞态与明确阻断；
+同时检查 400ms 前无反馈、超时反馈只在内容区、未准入时没有权威请求、未知导航不显示空态。Main Window Session
+延后冻结恢复目标与关闭窗口后的迟到读取由 `desktop-session.test.ts` 单独拥有。
+
+夹具创建临时绝对 `userData`，不启动 Core/SQLite/Runtime，也不读取日常数据；它是生产组件组合测试，不冒充真实数据库
+迁移端到端验收。默认删除本次夹具，`ROVAI_KEEP_STARTUP_PRESENTATION_FIXTURE=1` 可保留 Day/Night、最小窗口与
+200%/reduced-motion 截图。Linux CI 通过 `xvfb-run -a pnpm test:startup-presentation` 执行。
+
 涉及 Preload 请求 transport 或 Renderer 错误读取时，除普通 Vitest 外还运行：
 
 ```bash
@@ -175,6 +184,16 @@ pnpm test:desktop-bridge
 该测试编译当前生产 Preload，并在真实 Electron `contextIsolation` 窗口中验证 Promise 成功值以及结构化拒绝的全部字段。
 它使用临时 `userData`，不启动 Core 或调用模型；不能用 Main 单测或 jsdom 代替。无显示器 Linux 使用
 `xvfb-run -a pnpm test:desktop-bridge`；[Desktop bridge CI](../../.github/workflows/desktop-bridge.yml)覆盖相关改动。
+
+修改 Composer 的原生输入、IME、DOM 同步或光标恢复时，还运行：
+
+```bash
+pnpm test:composer-input
+```
+
+该测试把生产 Composer 装入独立 Electron Renderer，用真实 Chromium IME/input 事件与受控原生节点变动
+验证可见正文、受控草稿值、焦点及页面存活。夹具隔离 `userData`，不启动 Core 或调用模型；不能用静态
+Markup 测试替代。无显示器 Linux 使用 `xvfb-run -a pnpm test:composer-input`，同一 CI 工作流覆盖相关改动。
 
 ### Core 可选功能启动回归
 
