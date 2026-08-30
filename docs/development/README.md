@@ -91,6 +91,8 @@ pnpm build:desktop
 
 Preload 请求 transport 或 Renderer 错误读取改动还须运行 `pnpm test:desktop-bridge`，通过真实 Electron 隔离世界验证
 成功值和结构化拒绝；临时目录与 headless CI 说明见[Electron 隔离世界回归](testing.md#electron-隔离世界回归)。
+修改启动页面、Supervisor Renderer gate 或 400ms 反馈时运行 `pnpm test:startup-presentation`：真实 Electron 中挂载生产
+App，以受控本机 API 和时钟验证页面框架、截止时间与 authority 请求门禁，不启动 Core 或访问日常数据。
 
 真实 Runtime Smoke、完整 macOS 打包、Windows 打包/安装和 UI 截图验收耗时更长，且部分命令会调用上游
 模型。它们保持独立，不进入普通 commit 门禁；运行前先阅读对应文档。

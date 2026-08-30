@@ -300,6 +300,8 @@ let onboarding: OnboardingStore | null = null
 let restorableLocations: RestorableLocationStore | null = null
 let navigationPreferences: NavigationPreferencesStore | null = null
 let localStoresReady = false
+let resolveLocalStoresLoaded: () => void
+const localStoresLoaded = new Promise<void>((resolve) => { resolveLocalStoresLoaded = resolve })
 let localDegradations: StructuredError[] = windowsBootstrap?.kind === 'blocked' ? [{
   code: 'windows_bootstrap_profile_active',
   message: '当前使用独立的受保护壳层存储，不含 Core 数据。这里的外观设置不会覆盖正式工作区偏好；重新检查会重启桌面壳层。',
@@ -556,11 +558,14 @@ function createWindow(): void {
   installFilePreviewProtocol(window)
   if (process.platform === 'win32') window.setMenuBarVisibility(false)
   mainWindow = window
-  desktopSessions.create(
-    webContentsId,
-    generalPreferences.get(),
-    restorableLocations.get()
-  )
+  if (localStoresReady) {
+    desktopSessions.create(webContentsId, generalPreferences.get(), restorableLocations.get())
+  } else {
+    desktopSessions.createWhenReady(webContentsId, localStoresLoaded.then(() => ({
+      preferences: requireGeneralPreferences().get(),
+      restorable: restorableLocations!.get()
+    })))
+  }
 
   let pageZoomFeedbackTimer: ReturnType<typeof setTimeout> | null = null
   const publishPageZoom = (): void => {
@@ -724,6 +729,7 @@ if (primaryInstance) void app.whenReady().then(async () => {
   restorableLocations = loadedRestorableLocations
   navigationPreferences = loadedNavigationPreferences
   localStoresReady = true
+  resolveLocalStoresLoaded()
   const restorableDegradation: StructuredError | null =
     loadedRestorableLocations.get().status === 'invalid'
       ? {
@@ -949,8 +955,8 @@ ipcMain.handle('rovai:window-application-menu-popup', (event, input: unknown) =>
   return true
 })
 
-ipcMain.handle('rovai:desktop-session-get-startup', (event) => {
-  const snapshot = desktopSessions.get(event.sender.id)
+ipcMain.handle('rovai:desktop-session-get-startup', async (event) => {
+  const snapshot = await desktopSessions.getWhenReady(event.sender.id)
   if (!snapshot) throw new Error('Main Window Session is unavailable')
   return structuredClone(snapshot)
 })

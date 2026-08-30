@@ -50,6 +50,11 @@ interface SupervisorSnapshot {
 并且只接受大于当前 revision 的快照。只有 `authoritativeWorkspace && coreRequests` 为真时，Renderer 才能挂载
 Camp、成员、Memory、Navigation 或其他权威查询树；阻断期间不得发起这些查询，也不得用合成空集合替代。
 
+这里的门禁约束权威查询/操作，不禁止只包含既有导航 chrome、候选目标标题和局部 loading 的非权威页面框架。
+本机 Main Window Session snapshot 不依赖 Core ready；框架不代表 Camp 已存在、已进入或已读，也不能提交下次恢复位置。
+正常启动的 400ms 反馈与明确阻断后的恢复面由 [App Shell 冷启动反馈](../ui/components/app-shell-navigation.md#冷启动反馈)
+和 [Bootstrap Shell](../ui/components/bootstrap-shell.md)规定；本段不改变 capability、请求或数据库准入语义。
+
 ## 2. Core startup frames
 
 Core stdout 使用独立于普通 request/response 的 NDJSON 启动帧：
