@@ -16,7 +16,7 @@ function visibleTabLabel(tab: FilePreviewTabModel, duplicateNames: ReadonlySet<s
   return segments.slice(-2).join('/') || tab.file.fileName
 }
 
-export function FilePreviewTabs(): React.JSX.Element | null {
+export function FilePreviewTabs({ compact = false }: { compact?: boolean } = {}): React.JSX.Element | null {
   const {
     tabs,
     activeTabId,
@@ -54,6 +54,10 @@ export function FilePreviewTabs(): React.JSX.Element | null {
   }, [activeTabId, openFeedback, paneVisible])
 
   useEffect(() => {
+    if (compact && paneVisible) listRef.current?.querySelector<HTMLButtonElement>('[aria-selected="true"]')?.focus({ preventScroll: true })
+  }, [compact, paneVisible])
+
+  useEffect(() => {
     if (!menu) return undefined
     const dismiss = (event: Event): void => {
       if (event.target instanceof Node && menuRef.current?.contains(event.target)) return
@@ -88,6 +92,14 @@ export function FilePreviewTabs(): React.JSX.Element | null {
     window.requestAnimationFrame(() => document.getElementById(tabDomId(tabId))?.focus())
   }
 
+  const focusConversation = (): void => {
+    window.requestAnimationFrame(() => {
+      const target = document.querySelector<HTMLElement>('.camp-timeline:not([hidden])')
+        ?? document.querySelector<HTMLElement>('.timeline-pane')
+      target?.focus({ preventScroll: true })
+    })
+  }
+
   const announce = (message: string): void => {
     setAnnouncement(message)
     window.setTimeout(() => setAnnouncement(''), 1_800)
@@ -108,9 +120,7 @@ export function FilePreviewTabs(): React.JSX.Element | null {
     const neighbor = tabs[index + 1] ?? tabs[index - 1]
     close(tab.id)
     if (neighbor) focusTab(neighbor.id)
-    else window.requestAnimationFrame(() => {
-      document.querySelector<HTMLElement>('.camp-timeline')?.focus({ preventScroll: true })
-    })
+    else focusConversation()
   }
 
   const handleTabKeyDown = (event: KeyboardEvent<HTMLButtonElement>, index: number): void => {
@@ -147,9 +157,7 @@ export function FilePreviewTabs(): React.JSX.Element | null {
             return
           }
           hidePane()
-          window.requestAnimationFrame(() => {
-            document.querySelector<HTMLElement>('.camp-timeline')?.focus({ preventScroll: true })
-          })
+          focusConversation()
         }}
       >
         <svg viewBox="0 0 16 16" aria-hidden="true"><path d="m9.5 3.5-4.5 4.5 4.5 4.5M5 8h7" /></svg>

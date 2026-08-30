@@ -462,7 +462,7 @@ function Viewer({ tab }: { tab: FilePreviewTabModel }): React.JSX.Element {
 }
 
 export function FilePreviewPane(): React.JSX.Element | null {
-  const { activeTab, reload, retry, changePage } = useFilePreview()
+  const { activeTab, paneVisible, reload, retry, changePage } = useFilePreview()
   if (!activeTab) return null
   const tab = activeTab
   const page = tab.content?.kind === 'page' ? tab.content.page : null
@@ -470,6 +470,7 @@ export function FilePreviewPane(): React.JSX.Element | null {
     <section
       id={`file-preview-panel-${tab.id}`}
       className="file-preview-pane"
+      hidden={!paneVisible}
       role="tabpanel"
       aria-label={`文件预览：${tab.file.fileName}`}
       aria-labelledby={`file-preview-tab-${tab.id}`}

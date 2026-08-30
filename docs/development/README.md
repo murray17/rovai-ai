@@ -93,6 +93,9 @@ Preload 请求 transport 或 Renderer 错误读取改动还须运行 `pnpm test:
 成功值和结构化拒绝；临时目录与 headless CI 说明见[Electron 隔离世界回归](testing.md#electron-隔离世界回归)。
 修改启动页面、Supervisor Renderer gate 或 400ms 反馈时运行 `pnpm test:startup-presentation`：真实 Electron 中挂载生产
 App，以受控本机 API 和时钟验证页面框架、截止时间与 authority 请求门禁，不启动 Core 或访问日常数据。
+修改文件预览分栏时运行 `pnpm test:file-preview-layout`：真实 Electron 中组合生产标题栏、分栏、Tab 和 Viewer，
+验证鼠标/键盘调整、关闭与取消、比例持久化、单 Pane 替换、420–480px 会话紧凑排版与阅读位置保留；
+同样不启动 Core 或模型。
 
 真实 Runtime Smoke、完整 macOS 打包、Windows 打包/安装和 UI 截图验收耗时更长，且部分命令会调用上游
 模型。它们保持独立，不进入普通 commit 门禁；运行前先阅读对应文档。

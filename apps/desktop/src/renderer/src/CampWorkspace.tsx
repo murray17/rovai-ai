@@ -64,6 +64,7 @@ import { runtimeReadinessLabel } from './runtime-status'
 import { runtimeEditorInstallation } from './MemberRuntimeParameters'
 import { SafeMarkdown } from './SafeMarkdown'
 import { FilePreviewPane } from './FilePreviewPane'
+import { FilePreviewResizeHandle, FilePreviewWorkspace } from './FilePreviewLayout'
 import { useOptionalFilePreview } from './FilePreviewContext'
 import { FileReferenceText } from './FileReferenceLink'
 import { RuntimeFailureNotice } from './RuntimeFailureNotice'
@@ -1253,7 +1254,6 @@ export function CampWorkspace({
   onNotify?(message: string): void
 }): JSX.Element {
   const filePreview = useOptionalFilePreview()
-  const [filePreviewResizing, setFilePreviewResizing] = useState(false)
   const [messageContent, setMessageContent] = useState<StructuredCampMessageContent>([])
   const [fileChangesReview, setFileChangesReview] = useState<{
     changes: AgentRunFileChangesView
@@ -3473,47 +3473,14 @@ export function CampWorkspace({
     />
   ) : null
 
-  useEffect(() => () => {
-    document.documentElement.classList.remove('file-preview-resizing')
-  }, [])
-
-  const beginFilePreviewResize = (event: ReactPointerEvent<HTMLDivElement>): void => {
-    if (event.button !== 0 || !filePreview) return
-    event.preventDefault()
-    event.currentTarget.setPointerCapture(event.pointerId)
-    document.documentElement.classList.add('file-preview-resizing')
-    setFilePreviewResizing(true)
-  }
-
-  const resizeFilePreview = (event: ReactPointerEvent<HTMLDivElement>): void => {
-    if (!filePreviewResizing || !filePreview) return
-    const grid = event.currentTarget.parentElement
-    if (!grid) return
-    const bounds = grid.getBoundingClientRect()
-    const rightBoundary = bounds.right
-    const maximum = Math.max(360, Math.min(bounds.width * .48, rightBoundary - bounds.left - 300))
-    filePreview.setPaneWidth(Math.min(maximum, Math.max(360, rightBoundary - event.clientX)))
-  }
-
-  const endFilePreviewResize = (event: ReactPointerEvent<HTMLDivElement>): void => {
-    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
-      event.currentTarget.releasePointerCapture(event.pointerId)
-    }
-    document.documentElement.classList.remove('file-preview-resizing')
-    setFilePreviewResizing(false)
-  }
-
   return (
     <section className="workspace-shell camp-workspace" aria-label={`会话：${snapshot.camp.title}`}>
-      <div
-        className={`workspace-grid inspector-collapsed ${filePreview?.tabs.length && filePreview.paneVisible ? 'file-preview-open' : ''}`.trim()}
-        style={filePreview?.tabs.length && filePreview.paneVisible
-          ? { '--file-preview-width': `${filePreview.paneWidth}px` } as CSSProperties
-          : undefined}
+      <FilePreviewWorkspace
         hidden={fileChangesReview !== null && !fileChangesReview.previewingCurrent}
       >
         <section
           className="timeline-pane"
+          tabIndex={-1}
           onDragEnter={enterAttachmentDropSurface}
           onDragOver={continueAttachmentDrop}
           onDragLeave={leaveAttachmentDropSurface}
@@ -4085,30 +4052,9 @@ export function CampWorkspace({
           </div>
         </section>
 
-        {filePreview?.tabs.length && filePreview.paneVisible ? (
+        {filePreview?.tabs.length ? (
           <>
-            <div
-              className={`file-preview-resize-handle${filePreviewResizing ? ' is-resizing' : ''}`}
-              role="separator"
-              aria-label="调整文件预览宽度"
-              aria-orientation="vertical"
-              aria-valuemin={360}
-              aria-valuenow={filePreview.paneWidth}
-              tabIndex={0}
-              onPointerDown={beginFilePreviewResize}
-              onPointerMove={resizeFilePreview}
-              onPointerUp={endFilePreviewResize}
-              onPointerCancel={endFilePreviewResize}
-              onLostPointerCapture={() => {
-                document.documentElement.classList.remove('file-preview-resizing')
-                setFilePreviewResizing(false)
-              }}
-              onKeyDown={(event) => {
-                if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return
-                event.preventDefault()
-                filePreview.setPaneWidth(filePreview.paneWidth + (event.key === 'ArrowLeft' ? 16 : -16))
-              }}
-            />
+            <FilePreviewResizeHandle onClose={filePreview.hidePane} />
             <FilePreviewPane />
           </>
         ) : null}
@@ -4485,7 +4431,7 @@ export function CampWorkspace({
             ? '已进入当前消息附件区域，释放以添加文件或文件夹。'
             : ''}
         </span>
-      </div>
+      </FilePreviewWorkspace>
       {fileChangesReview && !fileChangesReview.previewingCurrent && (
         <AgentRunFileChangesReviewPage
           key={`${fileChangesReview.changes.agentRunId}:${fileChangesReview.changes.executionEpoch}`}
@@ -5674,7 +5620,7 @@ function mentionRuntimeLabel(profile: AgentProfile): string {
     : readiness
 }
 
-function RuntimeRecoveryDock({
+export function RuntimeRecoveryDock({
   recovery,
   memberById,
   profileById,
@@ -6256,7 +6202,7 @@ function CampMembersPanel({
   )
 }
 
-function ApprovalDock({
+export function ApprovalDock({
   approvals,
   profileById,
   busy,
@@ -6603,7 +6549,7 @@ export function AgentRunFileChangesTimelineCard({
           <strong>Files Changed</strong>
           <span>{agentRunFileChangesSummaryLabel(changes)}</span>
         </span>
-        <span className="run-file-changes-card-view" aria-hidden="true">View</span>
+        <span className="run-file-changes-card-view" aria-hidden="true">查看变化</span>
       </button>
       <div className="run-file-changes-card-files" aria-label="变更文件">
         {visibleFiles.map((file, index) => (
@@ -7824,7 +7770,7 @@ function TaskTimelineStatusIcon({
   )
 }
 
-function TaskTimelineCard({
+export function TaskTimelineCard({
   task,
   assigneeName,
   onOpen

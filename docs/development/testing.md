@@ -175,6 +175,16 @@ pnpm build:desktop
 迁移端到端验收。默认删除本次夹具，`ROVAI_KEEP_STARTUP_PRESENTATION_FIXTURE=1` 可保留 Day/Night、最小窗口与
 200%/reduced-motion 截图。Linux CI 通过 `xvfb-run -a pnpm test:startup-presentation` 执行。
 
+文件预览分栏交互运行 `pnpm test:file-preview-layout`。它在真实 Electron 中挂载生产 `FilePreviewProvider`、
+标题栏、分栏组件、文件 Tab 与 Viewer，以原生鼠标/键盘输入验证拖动提交、回弹、关闭与取消、焦点回退、
+阅读位置和草稿保留、窗口缩放及重载后的比例。它还组合真实 Task、Files Changed、结构化 Composer 和
+Approval/Recovery Dock，验证大屏中 481/480/450/420px 会话的容器断点、信息与按钮命中区域、DOM 保留，
+并用受控查找工具组检查窄列排版。查询行为仍由会话查找测试拥有。纯宽度输入矩阵仍由 `file-preview-layout.test.ts` 拥有；
+静态 Markup/CSS 测试不能替代指针捕获、ResizeObserver 和浏览器布局组合。
+夹具只使用临时绝对 `userData` 与受控文件 API，不启动 Core/SQLite/Skill Library/Runtime，不读取真实 Camp。
+`ROVAI_KEEP_FILE_PREVIEW_FIXTURE=1` 保留双主题、宽/窄窗口、关闭提示和 200%/reduced-motion 截图；
+默认清理本次夹具。Linux CI 使用 `xvfb-run -a pnpm test:file-preview-layout`。
+
 涉及 Preload 请求 transport 或 Renderer 错误读取时，除普通 Vitest 外还运行：
 
 ```bash

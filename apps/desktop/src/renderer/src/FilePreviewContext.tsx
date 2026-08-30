@@ -17,6 +17,7 @@ import type {
   ResolvedFilePreview
 } from '@contracts'
 import { secureFilePreviewHtml } from './file-preview-html-document'
+import { FilePreviewLayoutProvider } from './FilePreviewLayout'
 
 export type FilePreviewContent =
   | { kind: 'markdown'; text: string; tabToken: string; assetBasePath: string }
@@ -64,14 +65,12 @@ export interface FilePreviewContextValue {
   activeTabId: string | null
   openFeedback: FilePreviewOpenFeedback | null
   paneVisible: boolean
-  paneWidth: number
   returnTarget: Pick<FilePreviewReturnTarget, 'kind' | 'label'> | null
   open(request: OpenFilePreviewRequest): Promise<FilePreviewOpenOutcome>
   setReturnTarget(target: FilePreviewReturnTarget | null): void
   returnToTarget(): void
   showPane(): void
   hidePane(): void
-  setPaneWidth(width: number): void
   activate(tabId: string): void
   move(tabId: string, direction: -1 | 1): void
   close(tabId: string): void
@@ -105,7 +104,6 @@ export function FilePreviewProvider({
   const [activeTabId, setActiveTabId] = useState<string | null>(null)
   const [openFeedback, setOpenFeedback] = useState<FilePreviewOpenFeedback | null>(null)
   const [paneVisible, setPaneVisible] = useState(false)
-  const [paneWidth, setPaneWidthState] = useState(480)
   const tabsRef = useRef(tabs)
   const objectUrls = useRef(new Set<string>())
   const campIdRef = useRef(campId)
@@ -340,11 +338,6 @@ export function FilePreviewProvider({
 
   const hidePane = useCallback(() => setPaneVisible(false), [])
 
-  const setPaneWidth = useCallback((width: number) => {
-    if (!Number.isFinite(width)) return
-    setPaneWidthState(Math.round(Math.min(620, Math.max(360, width))))
-  }, [])
-
   const move = useCallback((tabId: string, direction: -1 | 1) => {
     setTabs((current) => {
       const index = current.findIndex((tab) => tab.id === tabId)
@@ -514,14 +507,12 @@ export function FilePreviewProvider({
     activeTabId,
     openFeedback,
     paneVisible,
-    paneWidth,
     returnTarget,
     open,
     setReturnTarget,
     returnToTarget,
     showPane,
     hidePane,
-    setPaneWidth,
     activate,
     move,
     close,
@@ -532,9 +523,15 @@ export function FilePreviewProvider({
     reload,
     retry,
     changePage
-  }), [activate, activeTab, activeTabId, changePage, close, closeMany, copyDisplayPath, hidePane, move, open, openFeedback, openInSystem, paneVisible, paneWidth, reload, revealInFolder, retry, returnTarget, returnToTarget, setPaneWidth, setReturnTarget, showPane, tabs])
+  }), [activate, activeTab, activeTabId, changePage, close, closeMany, copyDisplayPath, hidePane, move, open, openFeedback, openInSystem, paneVisible, reload, revealInFolder, retry, returnTarget, returnToTarget, setReturnTarget, showPane, tabs])
 
-  return <FilePreviewContext.Provider value={value}>{children}</FilePreviewContext.Provider>
+  return (
+    <FilePreviewContext.Provider value={value}>
+      <FilePreviewLayoutProvider campId={campId} visible={paneVisible && tabs.length > 0}>
+        {children}
+      </FilePreviewLayoutProvider>
+    </FilePreviewContext.Provider>
+  )
 }
 
 export function useFilePreview(): FilePreviewContextValue {

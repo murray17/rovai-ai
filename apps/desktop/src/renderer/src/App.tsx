@@ -1,6 +1,6 @@
 import { readErrorMessage } from './error-message'
 import { CoreSubsystemNotice } from './CoreSubsystemNotice'
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type {
   AdapterInstallation,
   AdapterKind,
@@ -73,6 +73,7 @@ import {
 import { NewConversationDialog } from './NewConversationDialog'
 import { openRuntimeModelCatalog } from './runtime-check'
 import { FilePreviewProvider, useOptionalFilePreview } from './FilePreviewContext'
+import { useOptionalFilePreviewLayout } from './FilePreviewLayout'
 import { FilePreviewTabs } from './FilePreviewTabs'
 import { AppearanceSettings } from './AppearanceSettings'
 import { AboutUpdatesSettings } from './AboutUpdatesSettings'
@@ -3892,6 +3893,7 @@ export function AppHeader({
   onFocusApprovals(): void
 }): React.JSX.Element {
   const filePreview = useOptionalFilePreview()
+  const previewLayout = useOptionalFilePreviewLayout()
   const tabs = filePreview?.tabs ?? []
   const previewVisible = Boolean(filePreview?.paneVisible && tabs.length > 0)
   const title = campTitle ?? '正在打开对话'
@@ -3899,10 +3901,8 @@ export function AppHeader({
   const dayNumber = camp ? campDayNumber(camp.camp.createdAt) : null
   return (
     <header
-      className={`topbar camp-topbar ${previewVisible ? 'has-file-preview' : ''}`.trim()}
-      style={previewVisible
-        ? { '--file-preview-width': `${filePreview?.paneWidth ?? 480}px` } as CSSProperties
-        : undefined}
+      className={`topbar camp-topbar ${previewVisible ? `has-file-preview ${previewLayout?.className ?? ''}` : ''}`.trim()}
+      style={previewVisible ? previewLayout?.style : undefined}
     >
       <div className="topbar-conversation-context">
         <div className="context-breadcrumb">
@@ -3925,7 +3925,7 @@ export function AppHeader({
         </div>
         <div className="camp-detail-entry-host" ref={detailEntryHostRef} />
       </div>
-      {previewVisible && <FilePreviewTabs />}
+      {previewVisible && <FilePreviewTabs compact={previewLayout?.compact} />}
     </header>
   )
 }

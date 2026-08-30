@@ -344,7 +344,7 @@ operation count 中，不阻止可靠 Diff 参与统计。只有所有文件都�
 
 文件名顶格排列且不使用横线分隔。display root 内文件显示相对路径，Runtime 明确报告的 root 外文件显示规范化
 绝对路径。卡片默认显示三行，更多文件由“再显示 N 个文件 / 收起文件”在原位切换；不增加行间分隔。
-header 右侧是浅边框、非品牌色且没有箭头的 `View`，hover/focus 使用轻微底色。点击 header、`View` 或任一文件行
+header 右侧是浅边框、非品牌色且没有箭头的“查看变化”，hover/focus 使用轻微底色。点击 header、“查看变化”或任一文件行
 进入独立 `Files Changed` 页面；从文件行进入时预选该文件。卡片不显示时间、“已保存”、Git 状态、参与运行或
 底部 metadata。
 
@@ -404,6 +404,26 @@ Header、Task 卡、时间线和 Composer 不增加 Run-local 入口。`recovery
 不与普通 Stop 同时出现。Run-local 请求不创建 Camp 时间线消息；Turn-level 终态用户取消仍以一条“你已在
 {耗时} 后停止”进入时间线。精确资格、required/optional 后果与不确定态见
 [Run Process Detail Surface v26](../../contracts/run-process-detail-surface-v26.md)。
+
+## 会话 Pane 紧凑布局
+
+布局依据会话列自身的宽度，而不是整个应用窗口宽度。时间线与 Composer 所在的两行共用同一列，分别以
+`conversation-pane` inline-size container 暴露此宽度，不重新挂载正文、Draft 或文件 Viewer。宽于 480px
+保留标准布局；420–480px 使用紧凑排版。双栏的最小宽度、单 Pane 替换及比例记忆由
+[文件预览](file-preview.md#结构与布局)拥有，不新增 Sidecar 或移动端导航模式。
+
+- 时间线与 Composer 左右边距缩至 12px。Task 与 Files Changed 取消 42px 额外左缩进，使用当前正文轨道的
+  可用宽度。普通消息自然换行，Markdown 表格与代码块使用自己的横向滚动。
+- Task 状态图标缩至 26px，隐藏右侧 Chevron；标题自然换行，负责人、验收条件和更新时间继续 wrap。
+  状态说明标题与正文改为上下排列，任务语义不删减。
+- Files Changed 的 header 图标缩至 28px、间距收紧，标题与摘要允许单行省略，但保留“查看变化”文字。
+  文件行保留路径、增删统计和箭头，优先省略路径，不隐藏可靠的 `+N / −N` 统计。
+- Composer 优先收紧间距和隐藏非必要快捷键提示，底部操作允许换行；附件、Mention、Skill、发送和停止的
+  点击区域不缩小。输入区不横向滚动，也不因尺寸变化丢失 Draft 或编辑器状态。
+- 查找打开时临时隐藏会话/地图切换器，查找条占用右上角工具组主要宽度；关闭查找立即恢复切换器。
+  快捷键从地图回到会话、查询与恢复阅读位置的既有行为不变。
+- Approval 与 Runtime Recovery 继续位于 Composer 上方，宽度随会话列变化；关键说明不截断，操作可换行。
+  较长审批内容在 Dock 内滚动，不能因为文件区变宽而移入详情浮层或消失。
 
 ## Camp Composer
 
