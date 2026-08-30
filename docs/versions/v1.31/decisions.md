@@ -19,8 +19,9 @@ last_updated: 2026-08-30
 
 ### 决定
 
-Desktop 先提供主题、Supervisor、重试和诊断；Full Core 通过 capability 独立晋升。业务树只在 authority ready 后
-挂载，阻断期间没有假空态或 fallback database。
+Desktop 先提供非权威页面框架、本机状态与恢复能力；Full Core 通过 capability 独立晋升。业务查询树只在 authority ready
+后挂载，阻断期间没有假空态或 fallback database。此门禁不阻止原有页面框架，正常检查/迁移保留 400ms 局部 loading；
+只有明确阻断或 crashed 才展示全屏恢复面。
 
 当前规范见 [Availability-first Runtime](../../architecture/availability-first-runtime.md)与
 [Desktop Runtime Availability v1](../../contracts/desktop-runtime-availability-v1.md)。
