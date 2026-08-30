@@ -1313,12 +1313,12 @@ async function seedFixture() {
       0, ${runtimes.length}, 0,
       4, '{"profileVersion":4,"maxPublicMessages":15,"maxPublicHistoryChars":24000,"maxMessageBodyChars":2000,"maxPublicReferenceChainMessages":3,"maxSelfActiveTasks":8}',
       'fixture-context-profile', NULL,
-      '[]', 21,
+      '[]', 22,
       ${sqlLiteral(recoveryBlob.id)}, ${sqlLiteral(recoveryBlob.digest)}, ${sqlLiteral(now)},
       '[]', '[]', '[]', 'fixture-shared-message-evidence', '{"schemaVersion":1}',
       'agent_v1', '{"schemaVersion":1,"included":false}',
       '8f0abde6b1c7b1bf405e1efa2a2cfe82a1bd329a64003a93c3e20c84a8c26d92',
-      21, 2, 2,
+      22, 2, 2,
       ${sqlLiteral(JSON.stringify(campAttachmentViewReceipt))},
       ${sqlLiteral(campAttachmentViewReceiptDigest)}
     );
@@ -3021,7 +3021,7 @@ async function verifyWebSearchPresentation(cdp) {
       detail: disclosure?.querySelector('.tool-call-detail pre')?.textContent ?? ''
     }
   })()`)
-  const expectedDetail = `${webSearchQueries.join('，')}\n\n结果\nfixture completed`
+  const expectedDetail = `搜索 ${webSearchQueries.join('，')}\nfixture completed`
   assert(presentation.groupOpen
     && presentation.disclosureOpen
     && presentation.iconDomain === 'web'
