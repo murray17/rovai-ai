@@ -52,6 +52,9 @@ fixture 表驱动覆盖连接不存在、非 JSON、无效 UTF-8 和响应丢失
 独立 Standards / Spec 复核已闭合 Windows junction 清理、未 dispatch 回滚、根以上路径 alias 和
 promotion 后同步失败归属四项问题，无遗留实质发现。Windows 专属测试的共享函数引用随抽取同步修复。
 
+首轮 Windows CI 发现通用 typed error 覆盖了 Core 原有的 reparse-point 诊断。修复保留原始诊断及
+typed category，既有 junction owner 同时断言二者；CLI 仍只投影安全分类，不输出内部诊断。
+
 真实 Runtime 和日常 App 均未运行，不以离线结果代替 Runtime 矩阵。Windows 原生验证由既有 PR CI
 compile gate、attachment traversal、新增 CLI snapshot 执行步骤和 Named Pipe job 执行；CLI 步骤复用
 本次已有的跨平台低成本 fixture，不新增重复用例。此处不宣称本机完成 Windows 实测。

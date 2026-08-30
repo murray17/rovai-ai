@@ -3367,9 +3367,12 @@ mod windows_attachment_tests {
         assert!(status.success(), "failed to create the junction fixture");
 
         let destination = fixture.join("snapshot");
-        let error = copy_and_inspect(&source, &destination)
-            .unwrap_err()
-            .to_string();
+        let error = copy_and_inspect(&source, &destination).unwrap_err();
+        assert_eq!(
+            error.downcast_ref::<crate::local_attachment_snapshot::LocalAttachmentError>(),
+            Some(&crate::local_attachment_snapshot::LocalAttachmentError::Unsupported)
+        );
+        let error = error.to_string();
         assert!(error.contains("reparse point"), "unexpected error: {error}");
         assert!(!destination.join("linked-outside/secret.txt").exists());
 

@@ -761,8 +761,13 @@ fn hash_tree_entry(
 fn inspect_open_node(file: &File) -> Result<OpenedNodeMetadata> {
     use crate::platform::windows_file_tree::NodeKind;
 
-    let metadata = crate::platform::windows_file_tree::inspect_node(file)
-        .map_err(|error| error.context(LocalAttachmentError::Unsupported))?;
+    let metadata = crate::platform::windows_file_tree::inspect_node(file).map_err(|error| {
+        // Preserve Core's existing diagnostic; the CLI only projects the typed category.
+        let message = error.to_string();
+        error
+            .context(LocalAttachmentError::Unsupported)
+            .context(message)
+    })?;
     Ok(OpenedNodeMetadata {
         kind: match metadata.kind {
             NodeKind::RegularFile => OpenedNodeKind::RegularFile,
