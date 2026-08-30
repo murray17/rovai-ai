@@ -1,6 +1,6 @@
 ---
 document_type: implementation-plan
-version: v1.33
+version: v1.34
 status: in_progress
 last_updated: 2026-08-31
 ---
@@ -12,7 +12,7 @@ last_updated: 2026-08-31
 
 ## 实施
 
-1. Migration 117、保存绑定代次、Camp preference、事务命令/receipt、异步检查 fence 和 Run freeze。
+1. Migration 118、保存绑定代次、Camp preference、事务命令/receipt、异步检查 fence 和 Run freeze。
 2. Claude 原生认证、单 settings argv、on/off/cooldown；Codex 原生 metadata、schema 能力门禁、每 Turn 覆盖。
 3. Usage observed tier 优先级、未知撤回估价、原生成本保留。
 4. 既有成员浮层、一次用量提示、默认恢复、焦点稳定、布局与隔离 Electron 回归。
@@ -26,7 +26,7 @@ last_updated: 2026-08-31
 | --- | --- | --- |
 | `camp_fast` 原生资格纯函数矩阵 | 未知 auth、自定义 endpoint、缺模型 tiers 被误认为合格；两种原生输入形状分别拥有最低层 parser | `cargo test -p rovai-core --lib camp_fast::tests` |
 | `camp_fast` 持久化生命周期 | 普通重测丢选择、切回旧绑定复活选择、Run 中途读到新覆盖；必须通过 SQLite/receipt/freeze seam | 同上 |
-| `db` v117 migration | v1.29/schema 70 已有成员升级后丢绑定或被默认开启；新列/trigger 的升级是独立兼容入口 | `cargo test -p rovai-core --lib db::tests::v117` |
+| `db` v118 migration | v1.33/schema 71 已有成员升级后丢绑定或被默认开启；新列/trigger 的升级是独立兼容入口 | `cargo test -p rovai-core --lib db::tests::v118` |
 | `health` metadata 进程 seam | 原生检查未使用选定 executable/实际 cwd、丢 config includeLayers 或模型分页；纯 parser 不能验证进程参数和 RPC | `cargo test -p rovai-core --bin rovai-core health::tests::native_fast` |
 | `claude` Session 观察 | 非当前 Session 的 Fast 结果污染状态，cooldown 被丢失；该新 metadata route 无既有 owner | `cargo test -p rovai-core --bin rovai-core claude::tests::native_fast` |
 

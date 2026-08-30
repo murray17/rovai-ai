@@ -116,7 +116,7 @@ Runtime Check Manager；同 Runtime 串行、全局预算、deadline 与子进�
 兼容性，因此无需重建 Thread；不触碰用户全局设置。实际执行前复核资格，失败只停止下发覆盖，不清除
 Camp 意图。未知默认或实际状态保持未知，观察不变成 Activity/Evidence。字段合同见
 [Camp Member Fast v1](../contracts/camp-member-fast-v1.md)，理由见
-[V1.33-D01](../versions/v1.33/decisions.md#v1-33-d01)。
+[V1.34-D01](../versions/v1.34/decisions.md#v1-34-d01)。
 
 ## 模型目录缓存与执行事实
 

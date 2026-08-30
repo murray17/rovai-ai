@@ -206,10 +206,10 @@ impl std::fmt::Display for DatabaseMigrationError {
 
 impl std::error::Error for DatabaseMigrationError {}
 
-pub(crate) const CURRENT_DATA_CONTRACT_VERSION: &str = "v1.33";
-pub(crate) const CURRENT_PROJECTION_SCHEMA_VERSION: i64 = 71;
-const V117_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.29";
-const V117_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION: i64 = 70;
+pub(crate) const CURRENT_DATA_CONTRACT_VERSION: &str = "v1.34";
+pub(crate) const CURRENT_PROJECTION_SCHEMA_VERSION: i64 = 72;
+const V118_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.33";
+const V118_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION: i64 = 71;
 const V116_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.28";
 const V116_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION: i64 = 69;
 const V115_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.26";
@@ -362,7 +362,7 @@ struct CurrentMigrationState {
     v114: bool,
     v115: bool,
     v116: bool,
-    v117: bool,
+    v118: bool,
 }
 
 impl CurrentMigrationState {
@@ -415,13 +415,13 @@ impl CurrentMigrationState {
             && self.v115;
         if contract == CURRENT_DATA_CONTRACT_VERSION && schema == CURRENT_PROJECTION_SCHEMA_VERSION
         {
-            return classifier == V116_CLASSIFIER_VERSION && through_v115 && self.v116 && self.v117;
+            return classifier == V116_CLASSIFIER_VERSION && through_v115 && self.v116 && self.v118;
         }
-        if self.v117 {
+        if self.v118 {
             return false;
         }
-        if contract == V117_MIGRATION_SOURCE_DATA_CONTRACT_VERSION
-            && schema == V117_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION
+        if contract == V118_MIGRATION_SOURCE_DATA_CONTRACT_VERSION
+            && schema == V118_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION
         {
             return classifier == V116_CLASSIFIER_VERSION && through_v115 && self.v116;
         }
@@ -1635,7 +1635,7 @@ fn connection_has_current_data_contract(connection: &Connection) -> rusqlite::Re
                AND projection_schema_version = ?2
                AND classifier_version = ?3
                AND EXISTS(SELECT 1 FROM schema_migration WHERE version = 116)
-               AND EXISTS(SELECT 1 FROM schema_migration WHERE version = 117)
+               AND EXISTS(SELECT 1 FROM schema_migration WHERE version = 118)
         FROM rovai_data_contract
         WHERE singleton = 1
         "#,
@@ -1700,7 +1700,7 @@ fn load_current_migration_state(
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 114),
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 115),
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 116),
-               EXISTS(SELECT 1 FROM schema_migration WHERE version = 117)
+               EXISTS(SELECT 1 FROM schema_migration WHERE version = 118)
         "#,
         [],
         |row| {
@@ -1752,7 +1752,7 @@ fn load_current_migration_state(
                 v114: row.get(44)?,
                 v115: row.get(45)?,
                 v116: row.get(46)?,
-                v117: row.get(47)?,
+                v118: row.get(47)?,
             })
         },
     )
@@ -3803,8 +3803,8 @@ impl Database {
             if !self.schema_migration_applied(116)? {
                 self.migrate_runtime_activity_classifier_v116()?;
             }
-            if !self.schema_migration_applied(117)? {
-                self.migrate_camp_member_fast_v117()?;
+            if !self.schema_migration_applied(118)? {
+                self.migrate_camp_member_fast_v118()?;
             }
             if let Err(error) =
                 crate::notification::maintain_notification_episode_retention(self.connection())
@@ -4204,8 +4204,8 @@ impl Database {
         if !self.schema_migration_applied(116)? {
             self.migrate_runtime_activity_classifier_v116()?;
         }
-        if !self.schema_migration_applied(117)? {
-            self.migrate_camp_member_fast_v117()?;
+        if !self.schema_migration_applied(118)? {
+            self.migrate_camp_member_fast_v118()?;
         }
         if let Err(error) =
             crate::notification::maintain_notification_episode_retention(self.connection())
@@ -17123,7 +17123,7 @@ impl Database {
         Ok(())
     }
 
-    fn migrate_camp_member_fast_v117(&mut self) -> Result<()> {
+    fn migrate_camp_member_fast_v118(&mut self) -> Result<()> {
         let transaction = self
             .connection
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
@@ -17162,9 +17162,9 @@ impl Database {
             );
             ALTER TABLE runtime_usage_run_summary ADD COLUMN observed_service_tier TEXT;
             UPDATE rovai_data_contract
-            SET contract_version = 'v1.33', projection_schema_version = 71,
+            SET contract_version = 'v1.34', projection_schema_version = 72,
                 updated_at = datetime('now') WHERE singleton = 1;
-            INSERT INTO schema_migration(version, applied_at) VALUES (117, datetime('now'));
+            INSERT INTO schema_migration(version, applied_at) VALUES (118, datetime('now'));
             "#,
         )?;
         transaction.commit()?;
@@ -21593,10 +21593,10 @@ impl Database {
 }
 
 #[cfg(test)]
-fn downgrade_current_schema_to_v117_source_for_test(connection: &Connection) {
+fn downgrade_current_schema_to_v118_source_for_test(connection: &Connection) {
     let applied: bool = connection
         .query_row(
-            "SELECT EXISTS(SELECT 1 FROM schema_migration WHERE version = 117)",
+            "SELECT EXISTS(SELECT 1 FROM schema_migration WHERE version = 118)",
             [],
             |row| row.get(0),
         )
@@ -21610,14 +21610,14 @@ fn downgrade_current_schema_to_v117_source_for_test(connection: &Connection) {
         DROP TABLE camp_member_fast_preference;
         ALTER TABLE agent_profile DROP COLUMN runtime_binding_revision;
         ALTER TABLE runtime_usage_run_summary DROP COLUMN observed_service_tier;
-        UPDATE rovai_data_contract SET contract_version = 'v1.29', projection_schema_version = 70 WHERE singleton = 1;
-        DELETE FROM schema_migration WHERE version = 117;
+        UPDATE rovai_data_contract SET contract_version = 'v1.33', projection_schema_version = 71 WHERE singleton = 1;
+        DELETE FROM schema_migration WHERE version = 118;
     "#).unwrap();
 }
 
 #[cfg(test)]
 pub(crate) fn downgrade_current_schema_to_v115_source_for_test(connection: &Connection) {
-    downgrade_current_schema_to_v117_source_for_test(connection);
+    downgrade_current_schema_to_v118_source_for_test(connection);
     let has_v116: bool = connection
         .query_row(
             "SELECT EXISTS(SELECT 1 FROM schema_migration WHERE version = 116)",
@@ -22628,7 +22628,7 @@ mod tests {
             v114: version >= 114,
             v115: version >= 115,
             v116: version >= 116,
-            v117: version >= 117,
+            v118: version >= 118,
         }
     }
 
@@ -22639,13 +22639,13 @@ mod tests {
                 "current",
                 CURRENT_DATA_CONTRACT_VERSION,
                 CURRENT_PROJECTION_SCHEMA_VERSION,
-                117,
+                118,
             ),
             (
-                "v1.29/schema-70 before Camp Fast",
-                V117_MIGRATION_SOURCE_DATA_CONTRACT_VERSION,
-                V117_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION,
-                116,
+                "v1.33/schema-71 before Camp Fast",
+                V118_MIGRATION_SOURCE_DATA_CONTRACT_VERSION,
+                V118_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION,
+                117,
             ),
             (
                 "v1.26/schema-67 after Runtime diff projection",
@@ -22906,7 +22906,7 @@ mod tests {
             );
         }
 
-        let current = migration_state_through(117);
+        let current = migration_state_through(118);
         let v092_source = migration_state_through(91);
         let mut missing_intermediate = current;
         missing_intermediate.v84 = false;
@@ -22986,7 +22986,7 @@ mod tests {
             )
             .expect("current contract marker should load");
 
-        assert_eq!(state, migration_state_through(117));
+        assert_eq!(state, migration_state_through(118));
         assert!(state.admits(&contract, schema, &classifier));
         assert!(has_admissible_data_contract(
             &directory.join("rovai.sqlite")
@@ -25069,7 +25069,7 @@ mod tests {
     }
 
     #[test]
-    fn v117_preserves_saved_bindings_and_introduces_no_fast_override() {
+    fn v118_preserves_saved_bindings_and_introduces_no_fast_override() {
         let mut database = crate::test_support::seeded_runtime_database_owned();
         let before: String = database
             .connection()
@@ -25079,13 +25079,13 @@ mod tests {
                 |row| row.get(0),
             )
             .unwrap();
-        downgrade_current_schema_to_v117_source_for_test(database.connection());
+        downgrade_current_schema_to_v118_source_for_test(database.connection());
         assert!(
             load_current_migration_state(database.connection())
                 .unwrap()
-                .admits("v1.29", 70, V116_CLASSIFIER_VERSION)
+                .admits("v1.33", 71, V116_CLASSIFIER_VERSION)
         );
-        database.migrate_camp_member_fast_v117().unwrap();
+        database.migrate_camp_member_fast_v118().unwrap();
         assert!(connection_has_current_data_contract(database.connection()).unwrap());
         let after: (String, String) = database.connection().query_row(
             "SELECT default_model_selection_json, runtime_binding_revision FROM agent_profile WHERE id = 'agent_1'", [], |row| Ok((row.get(0)?, row.get(1)?))).unwrap();

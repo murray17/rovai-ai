@@ -3,7 +3,7 @@ document_type: contract
 contract: runtime-usage-monitoring
 version: 4
 status: accepted
-source_version: v1.33
+source_version: v1.34
 last_updated: 2026-08-31
 ---
 

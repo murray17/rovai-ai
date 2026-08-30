@@ -1,14 +1,14 @@
 ---
 document_type: version-decisions
-version: v1.33
+version: v1.34
 lifecycle: current
 last_updated: 2026-08-31
 ---
 
-# v1.33 决策记录
+# v1.34 决策记录
 
-<a id="v1-33-d01"></a>
-## V1.33-D01：Camp 覆盖绑定保存代次，原生设置限定单次执行
+<a id="v1-34-d01"></a>
+## V1.34-D01：Camp 覆盖绑定保存代次，原生设置限定单次执行
 
 ### 背景
 

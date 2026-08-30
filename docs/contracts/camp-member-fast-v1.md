@@ -3,7 +3,7 @@ document_type: contract
 name: Camp Member Fast
 version: v1
 status: accepted
-source_version: v1.33
+source_version: v1.34
 last_updated: 2026-08-31
 ---
 
@@ -23,7 +23,7 @@ Fast 只支持 Claude Code CLI 的明确 Claude 订阅登录，以及 Codex CLI 
 permission configuration 确实改变时轮换，同时删除旧覆盖。它不是绑定内容 hash；切走再切回仍是新代次。
 重测、认证刷新、目录检查、页面刷新、显示名修改都不轮换代次，也不清除用户意图。
 
-Migration 117 从 v1.29/schema 70 升级到 v1.33/schema 71，为现有 Profile 初始化不同代次，不创建覆盖。
+Migration 118 从 v1.33/schema 71 升级到 v1.34/schema 72，为现有 Profile 初始化不同代次，不创建覆盖。
 旧 Run 的可选 `campFast` 缺失仍可反序列化；不得修改既有 Run 的冻结配置。
 
 新 AgentRun 冻结 `campFast { runtimeBindingRevision, fastOverride }`。Codex 请求档位写入既有
