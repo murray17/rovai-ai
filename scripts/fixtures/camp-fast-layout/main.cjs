@@ -9,7 +9,7 @@ app.setPath('userData', userData)
 app.setPath('sessionData', join(userData, 'session'))
 // Production CampWorkspace, closed metadata/draft API. No Core, Runtime or daily data is opened.
 app.whenReady().then(async () => {
-  const window = new BrowserWindow({ show: process.platform === 'linux', width: 1280, height: 720, useContentSize: true,
+  const window = new BrowserWindow({ show: process.platform === 'linux' || process.env.ROVAI_SHOW_FAST_FIXTURE === '1', width: 1280, height: 720, useContentSize: true,
     webPreferences: { contextIsolation: true, sandbox: true, nodeIntegration: false, backgroundThrottling: false } })
   window.webContents.on('console-message', event => console.error(event.message))
   await window.loadFile(renderer)
@@ -31,7 +31,9 @@ app.whenReady().then(async () => {
   const capture = async name => writeFileSync(join(dirname(userData), name + '.png'), (await window.webContents.capturePage()).toPNG())
   try {
     let state = await snapshot()
-    assert.ok(state.button, 'Production member popover mounted')
+    assert.equal(state.panel.height, 0, 'Members start collapsed, as in the production workspace')
+    state = await click('.camp-detail-entry[data-detail="members"]')
+    assert.ok(state.panel.height > 0, 'Native input opens the production member popover')
     assert.equal(state.requests.length, 0, 'Opening the popover must not launch an auth/model check')
     assert.equal(state.toggles, 14, 'Other Runtime and unknown auth rows have no pill')
     assert.ok(state.scrollable)

@@ -72,7 +72,7 @@ Object.assign(window, { rovai: {
 function Fixture(): React.JSX.Element {
   const [snapshot, setSnapshot] = useState(initial)
   const [profiles, setProfiles] = useState(agents)
-  const [open, setOpen] = useState(true)
+  const [open, setOpen] = useState(false)
   const [entryHost, setEntryHost] = useState<HTMLElement | null>(null)
   const [notice, setNotice] = useState('')
   updateSnapshot = setSnapshot

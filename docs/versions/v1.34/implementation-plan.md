@@ -69,7 +69,9 @@ metadata，不发起模型请求。以下为主线整合后的本地结果；PR 
 | --- | --- |
 | rebind 丢失冻结选择与摘要问题已修复；metadata 复用完整 executable identity，并在检查后再次验证原 fingerprint。双迁移、旧源助手和版本路由复核无剩余阻断。 | Codex fallback 不再改写 Thread 默认；迟到的检测/保存结果不能恢复旧绑定 UI。Pending 发布时冻结新选择，已有 Run 保持原值；无剩余实现问题。 |
 
-复核针对 `b9f58fc7` 的生产实现；随后仅扩展现有 Pending owner 并完成上述回归，没有修改队列产品语义。
+复核针对 `b9f58fc7` 的生产实现；随后扩展现有 Pending owner 并完成上述回归，没有修改队列产品语义。
+首轮 Linux CI 暴露 fixture 预先打开浮层会被启动焦点事件收起；fixture 改为与正常工作区相同的初始收起状态，
+经原生点击入口打开后再断言，并保留全部布局/焦点断言。产品的浮层关闭规则未修改。
 
 本机边界：Claude 2.1.220 仅报告 `oauth_token`、订阅类型为空；Codex 0.147.0 标准与 experimental schema
 均无 `serviceTierForTurn`。两者均按未知/不支持隐藏，不能宣称本机原生 Fast 端到端成功。
