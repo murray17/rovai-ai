@@ -449,52 +449,6 @@ fn message_source(
     }))
 }
 
-#[cfg(test)]
-mod tests {
-    use super::message_authorizes_reference;
-
-    #[test]
-    fn message_reference_requires_a_clickable_markdown_or_high_confidence_path_context() {
-        assert!(message_authorizes_reference(
-            "请看 [说明](README.md) 和 `notes.txt`。",
-            "README.md"
-        ));
-        assert!(message_authorizes_reference(
-            "请看 [说明](README.md) 和 `notes.txt`。",
-            "notes.txt"
-        ));
-        assert!(message_authorizes_reference(
-            "修改位于 ./src/app.ts:42。",
-            "./src/app.ts:42"
-        ));
-        assert!(!message_authorizes_reference(
-            "普通文字里提到了 README.md，但没有可点击语法。",
-            "README.md"
-        ));
-        assert!(!message_authorizes_reference("请采用 `方案 B`。", "方案 B"));
-    }
-
-    #[test]
-    fn message_reference_rejects_fenced_code_urls_and_partial_matches() {
-        assert!(!message_authorizes_reference(
-            "```text\n./src/app.ts\n```",
-            "./src/app.ts"
-        ));
-        assert!(!message_authorizes_reference(
-            "https://example.com/src/app.ts",
-            "src/app.ts"
-        ));
-        assert!(!message_authorizes_reference(
-            "prefix./src/app.ts-suffix",
-            "./src/app.ts"
-        ));
-        assert!(!message_authorizes_reference(
-            "[网页](https://example.com/src/app.ts)",
-            "src/app.ts"
-        ));
-    }
-}
-
 fn evidence_review(
     database: &Database,
     camp_id: &str,
@@ -636,5 +590,51 @@ pub fn resolve_file_preview_source(
         }
         "run_evidence" => Ok(None),
         _ => anyhow::bail!("unsupported file preview source kind"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::message_authorizes_reference;
+
+    #[test]
+    fn message_reference_requires_a_clickable_markdown_or_high_confidence_path_context() {
+        assert!(message_authorizes_reference(
+            "请看 [说明](README.md) 和 `notes.txt`。",
+            "README.md"
+        ));
+        assert!(message_authorizes_reference(
+            "请看 [说明](README.md) 和 `notes.txt`。",
+            "notes.txt"
+        ));
+        assert!(message_authorizes_reference(
+            "修改位于 ./src/app.ts:42。",
+            "./src/app.ts:42"
+        ));
+        assert!(!message_authorizes_reference(
+            "普通文字里提到了 README.md，但没有可点击语法。",
+            "README.md"
+        ));
+        assert!(!message_authorizes_reference("请采用 `方案 B`。", "方案 B"));
+    }
+
+    #[test]
+    fn message_reference_rejects_fenced_code_urls_and_partial_matches() {
+        assert!(!message_authorizes_reference(
+            "```text\n./src/app.ts\n```",
+            "./src/app.ts"
+        ));
+        assert!(!message_authorizes_reference(
+            "https://example.com/src/app.ts",
+            "src/app.ts"
+        ));
+        assert!(!message_authorizes_reference(
+            "prefix./src/app.ts-suffix",
+            "./src/app.ts"
+        ));
+        assert!(!message_authorizes_reference(
+            "[网页](https://example.com/src/app.ts)",
+            "src/app.ts"
+        ));
     }
 }

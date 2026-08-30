@@ -1,3 +1,4 @@
+import { readErrorMessage } from './error-message'
 import { useCallback, useEffect, useState } from 'react'
 import * as Dialog from '@radix-ui/react-dialog'
 import type {
@@ -506,7 +507,7 @@ export function GeneralSettings({
               <span>
                 <strong>世界地图</strong>
                 <small id="general-world-map-description">
-                  在 Camp 会话中显示“地图”视图，可随时在会话时间线与沉浸世界地图之间切换。
+                  在 Camp 会话中启用地图视图；关闭后仅显示会话时间线，并隐藏视图切换按钮。
                 </small>
               </span>
               <input
@@ -659,5 +660,5 @@ function missingAgentProfile(agentId: string): AgentProfile {
 }
 
 function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error)
+  return readErrorMessage(error)
 }

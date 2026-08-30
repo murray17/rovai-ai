@@ -101,8 +101,22 @@ pub struct AntigravityAppRuntimeAdapter {
 }
 
 impl AntigravityAppRuntimeAdapter {
+    #[cfg(test)]
     pub fn new(data_dir: &Path) -> Result<Self> {
-        let legacy_log_dir = data_dir.join("runtime-private").join("agy");
+        let adapter = Self::deferred(data_dir);
+        adapter.initialize_storage()?;
+        Ok(adapter)
+    }
+
+    pub fn deferred(data_dir: &Path) -> Self {
+        Self {
+            active: Mutex::new(HashMap::new()),
+            log_dir: data_dir.join("runtime-private").join("antigravity"),
+        }
+    }
+
+    pub fn initialize_storage(&self) -> Result<()> {
+        let legacy_log_dir = self.log_dir.with_file_name("agy");
         if legacy_log_dir.exists() {
             std::fs::remove_dir_all(&legacy_log_dir).with_context(|| {
                 format!(
@@ -111,26 +125,23 @@ impl AntigravityAppRuntimeAdapter {
                 )
             })?;
         }
-        let log_dir = data_dir.join("runtime-private").join("antigravity");
-        std::fs::create_dir_all(&log_dir).with_context(|| {
+        let log_dir = &self.log_dir;
+        std::fs::create_dir_all(log_dir).with_context(|| {
             format!(
                 "failed to create private Antigravity companion directory {}",
                 log_dir.display()
             )
         })?;
-        restrict_directory_permissions(&log_dir)?;
+        restrict_directory_permissions(log_dir)?;
         // A hard crash can leave a sensitive upstream log behind. It is never
         // a recovery source, so remove leftovers before accepting new work.
-        for entry in std::fs::read_dir(&log_dir)? {
+        for entry in std::fs::read_dir(log_dir)? {
             let entry = entry?;
             if entry.file_type()?.is_file() {
                 let _ = std::fs::remove_file(entry.path());
             }
         }
-        Ok(Self {
-            active: Mutex::new(HashMap::new()),
-            log_dir,
-        })
+        Ok(())
     }
 
     pub async fn run(&self, mut request: AntigravityRunRequest) -> Result<AntigravityRunResult> {

@@ -1,7 +1,7 @@
 ---
 document_type: version-overview
 version: v1.30
-lifecycle: current
+lifecycle: historical
 authority: version-scope-and-status
 design_status: confirmed
 implementation_status: in_progress
@@ -15,6 +15,9 @@ last_updated: 2026-08-30
 > [实施计划](implementation-plan.md)中的逐项记录为准。
 
 前置版本：[v1.29 Camp 动态队员管理与 Runtime 文件变化](../v1.29/README.md)已按冻结时事实转为 historical。
+
+2026-08-30 合入主线后，[v1.31](../v1.31/README.md)保持唯一 current；本版本按上述范围与已有验收记录冻结，
+尚未完成的验收不因生命周期切换而视为通过。
 
 ## 版本目标
 

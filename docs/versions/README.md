@@ -1,7 +1,7 @@
 ---
 document_type: versions-index
 authority: version-lifecycle
-current_version: v1.30
+current_version: v1.31
 last_updated: 2026-08-30
 ---
 
@@ -180,5 +180,6 @@ last_updated: 2026-08-30
 | v1.26 | `historical` | Cursor Agent Catalog 接入、同名命令防碰撞与保守平台未准入 | [v1.26/README.md](v1.26/README.md) |
 | v1.27 | `historical` | Kimi Code identity、MiniMax M3 私有配置、cold exact resume 与 macOS arm64 准入 | [v1.27/README.md](v1.27/README.md) |
 | v1.28 | `historical` | Grok Build、MiniMax M3、`>= 1.0.0` 与标准 ACP resume；macOS arm64/x64、Windows x64 1.0.5 已分别补证；Published Attachment 后置完整性故障局部降级 | [v1.28/README.md](v1.28/README.md) |
-| v1.29 | `historical` | 动态 Camp membership、Runtime 文件变化与 Activity v2 新写入已实现；typed query、Renderer 中文标题和七类图标完成定向回归，冻结时真实 Runtime 验收仍在进行 | [v1.29/README.md](v1.29/README.md) |
-| v1.30 | `current` | Camp 内独立文件预览、封闭文件能力、事件驱动更新感知与多类型只读 Viewer 正在实施 | [v1.30/README.md](v1.30/README.md) |
+| v1.29 | `historical` | 动态 Camp membership、Runtime 文件变化与 Activity v2 新写入已实现；typed query、Renderer 中文标题和七类图标完成定向回归，真实 Runtime 验收仍在进行 | [v1.29/README.md](v1.29/README.md) |
+| v1.30 | `historical` | Camp 内独立文件预览、封闭文件能力、事件驱动更新感知与多类型只读 Viewer；引用延期，合入 v1.31 时按已有实施与验收事实冻结 | [v1.30/README.md](v1.30/README.md) |
+| v1.31 | `current` | Desktop Bootstrap/Full Core 分层、SQLite lease/admission/copy migration 与正常日志恢复、Supervisor fencing、本机偏好 fail-open 和跨桥结构化错误已完成 | [v1.31/README.md](v1.31/README.md) |

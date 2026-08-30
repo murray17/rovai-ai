@@ -1,3 +1,4 @@
+import { readErrorMessage } from './error-message'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import * as Dialog from '@radix-ui/react-dialog'
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
@@ -941,5 +942,5 @@ function assertCommandApplied(result: StoredCommandResult): void {
 }
 
 function errorMessage(error: unknown): string {
-  return localizeExecutionEngineTerms(error instanceof Error ? error.message : String(error))
+  return localizeExecutionEngineTerms(readErrorMessage(error))
 }

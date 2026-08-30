@@ -757,14 +757,27 @@ impl SkillLibraryService {
     }
 
     pub fn new(root: PathBuf) -> Result<Self> {
-        prepare_private_directory(&root)
-            .with_context(|| format!("failed to create Skill Library at {}", root.display()))?;
-        prepare_private_directory(&root.join(".staging"))?;
-        prepare_private_directory(&root.join("revisions"))?;
-        Ok(Self {
+        let library = Self::deferred(root);
+        library.initialize_storage()?;
+        Ok(library)
+    }
+
+    /// Constructs the service without filesystem effects. Core gates every
+    /// consumer until initialize_storage and projection recovery succeed.
+    pub fn deferred(root: PathBuf) -> Self {
+        Self {
             root,
             gateway: DomainCommandGateway,
-        })
+        }
+    }
+
+    pub fn initialize_storage(&self) -> Result<()> {
+        prepare_private_directory(&self.root).with_context(|| {
+            format!("failed to create Skill Library at {}", self.root.display())
+        })?;
+        prepare_private_directory(&self.root.join(".staging"))?;
+        prepare_private_directory(&self.root.join("revisions"))?;
+        Ok(())
     }
 
     pub fn root(&self) -> &Path {

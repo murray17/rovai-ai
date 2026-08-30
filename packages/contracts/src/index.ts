@@ -2126,6 +2126,96 @@ export interface CoreEvent<T = unknown> {
   params: T
 }
 
+export interface StructuredError {
+  code: string
+  message: string
+  retryable: boolean
+  details: unknown
+}
+
+export type RovaiRequestFailureKind =
+  | 'domain_rejection'
+  | 'infrastructure_failure'
+  | 'full_core_unavailable'
+  | 'shutdown'
+
+export interface RovaiRequestFailure extends StructuredError {
+  kind: RovaiRequestFailureKind
+  generation: number
+}
+
+export type RovaiRequestTransport<T> =
+  | { kind: 'value'; value: T }
+  | { kind: 'failure'; failure: RovaiRequestFailure }
+
+export type RuntimeMode = 'bootstrap_only' | 'full_core'
+export type FullCoreState =
+  | 'idle'
+  | 'starting'
+  | 'ready'
+  | 'blocked'
+  | 'crashed'
+  | 'shutting_down'
+
+export type StartupPhase =
+  | 'lease'
+  | 'assessing_authority'
+  | 'preparing_runtime_storage'
+  | 'preparing_windows_data_root'
+  | 'recovering_authority'
+  | 'opening_authority'
+  | 'initializing_authority'
+  | 'migrating_authority'
+  | 'migration_failed'
+
+export type AuthorityState =
+  | { kind: 'unknown' }
+  | { kind: 'assessing' }
+  | { kind: 'confirmed_absent' }
+  | { kind: 'admitted' }
+  | { kind: 'current'; origin?: 'existing' | 'initialized' | 'migrated' }
+  | { kind: 'migration_required' }
+  | { kind: 'migration_failed' }
+  | { kind: 'owned_by_active_core'; dataDir: string; owner: unknown }
+  | { kind: 'blocked'; reason: unknown }
+
+export interface DesktopCapabilities {
+  authoritativeWorkspace: boolean
+  coreRequests: boolean
+  localPreferences: boolean
+  supervisorStatus: boolean
+  diagnosticsExport: boolean
+  fullCoreRetry: boolean
+}
+
+export interface SupervisorSnapshot {
+  schemaVersion: 1
+  revision: number
+  generation: number
+  runtimeMode: RuntimeMode
+  fullCoreState: FullCoreState
+  authorityState: AuthorityState
+  startupPhase: StartupPhase | null
+  restartAttempt: number
+  capabilities: DesktopCapabilities
+  localDegradations: StructuredError[]
+  coreSubsystems: CoreSubsystemSnapshot[]
+  lastError: StructuredError | null
+  migrationProgress: unknown | null
+}
+
+export interface CoreSubsystemSnapshot {
+  id: string
+  state: 'initializing' | 'ready' | 'degraded'
+  error: StructuredError | null
+}
+
+export interface SupervisorApi {
+  getSnapshot(): Promise<SupervisorSnapshot>
+  retryFullCore(): Promise<SupervisorSnapshot>
+  onChanged(listener: (snapshot: SupervisorSnapshot) => void): () => void
+}
+
 export type ThemePreference = 'system' | 'day' | 'night'
 export type ResolvedTheme = 'day' | 'night'
 
@@ -2835,6 +2925,8 @@ export type CoreMethod =
   | 'diagnostics.check'
   | 'monitoring.snapshot'
   | 'runtime.discovery.rescan'
+  | 'runtime.subsystems.get'
+  | 'runtime.subsystems.retry'
   | 'runtime.product.ensure'
   | 'runtime.product.check'
   | 'runtime.modelCatalog.open'
@@ -2953,6 +3045,7 @@ export type CoreMethod =
 export interface RovaiApi {
   request<T>(method: CoreMethod, params?: unknown): Promise<T>
   onEvent(listener: (event: CoreEvent) => void): () => void
+  supervisor: SupervisorApi
   userAutomation: {
     onOpenCamp(listener: (request: { campId: string }) => void): () => void
   }

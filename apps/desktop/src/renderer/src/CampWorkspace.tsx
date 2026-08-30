@@ -1,3 +1,4 @@
+import { readErrorMessage } from './error-message'
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type DragEvent as ReactDragEvent, type FormEvent, type JSX, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent, type RefObject } from 'react'
 import { createPortal } from 'react-dom'
 import * as Dialog from '@radix-ui/react-dialog'
@@ -1190,7 +1191,6 @@ export function CampWorkspace({
   executionPlacement = 'bottom',
   onExecutionPlacementChange = async () => undefined,
   worldMapEnabled = true,
-  onOpenWorldMapSettings,
   workspaceEntrySnapshotReady = true,
   inspectorVisible = true,
   inspectorTab: controlledInspectorTab,
@@ -1235,7 +1235,6 @@ export function CampWorkspace({
   executionPlacement?: ExecutionConsolePlacement
   onExecutionPlacementChange?(placement: ExecutionConsolePlacement): Promise<ExecutionConsolePlacement | void>
   worldMapEnabled?: boolean
-  onOpenWorldMapSettings?(): void
   workspaceEntrySnapshotReady?: boolean
   inspectorVisible?: boolean
   inspectorTab?: CampInspectorTab
@@ -1344,9 +1343,6 @@ export function CampWorkspace({
       return initialCampConversationView(null, showingFirstRunWelcome, worldMapEnabled)
     }
   })
-  const [worldMapUnavailableNoticeOpen, setWorldMapUnavailableNoticeOpen] = useState(false)
-  const worldMapControlsRef = useRef<HTMLDivElement>(null)
-  const worldMapButtonRef = useRef<HTMLButtonElement>(null)
   const firstRunConversationShownForCamp = useRef<string | null>(
     showingFirstRunWelcome ? snapshot.camp.id : null
   )
@@ -1424,35 +1420,10 @@ export function CampWorkspace({
     }
   }, [conversationView])
   useEffect(() => {
-    if (worldMapEnabled) {
-      setWorldMapUnavailableNoticeOpen(false)
-      return
+    if (!worldMapEnabled && conversationView === 'world') {
+      setConversationView('conversation')
     }
-    if (conversationView === 'world') setConversationView('conversation')
   }, [conversationView, worldMapEnabled])
-  useEffect(() => {
-    setWorldMapUnavailableNoticeOpen(false)
-  }, [snapshot.camp.id])
-  useEffect(() => {
-    if (!worldMapUnavailableNoticeOpen) return undefined
-    const handlePointerDown = (event: PointerEvent): void => {
-      if (event.target instanceof Node && !worldMapControlsRef.current?.contains(event.target)) {
-        setWorldMapUnavailableNoticeOpen(false)
-      }
-    }
-    const handleKeyDown = (event: KeyboardEvent): void => {
-      if (event.key !== 'Escape') return
-      event.preventDefault()
-      setWorldMapUnavailableNoticeOpen(false)
-      worldMapButtonRef.current?.focus({ preventScroll: true })
-    }
-    document.addEventListener('pointerdown', handlePointerDown)
-    document.addEventListener('keydown', handleKeyDown)
-    return () => {
-      document.removeEventListener('pointerdown', handlePointerDown)
-      document.removeEventListener('keydown', handleKeyDown)
-    }
-  }, [worldMapUnavailableNoticeOpen])
   useLayoutEffect(() => {
     if (!executionDrawerPortal) return
     const host = executionPlacement === 'inspector'
@@ -3330,7 +3301,7 @@ export function CampWorkspace({
       if (!executionPlacementMounted.current) return
       setExecutionPlacementError({
         message: executionPlacementSaveFailureMessage(executionPlacement),
-        detail: nextError instanceof Error ? nextError.message : null
+        detail: readErrorMessage(nextError, null)
       })
     } finally {
       executionPlacementRequest.current = false
@@ -3650,84 +3621,48 @@ export function CampWorkspace({
                   </span>
                 </div>
               )}
-              <div className="camp-conversation-view-controls" ref={worldMapControlsRef} role="group" aria-label="会话区视图">
-                <button
-                  type="button"
-                  aria-pressed={conversationView === 'conversation'}
-                  onClick={() => {
-                    setWorldMapUnavailableNoticeOpen(false)
-                    setConversationView('conversation')
-                  }}
-                >
-                  会话
-                </button>
-                <button
-                  ref={worldMapButtonRef}
-                  className={!worldMapEnabled ? 'is-unavailable' : undefined}
-                  type="button"
-                  aria-pressed={conversationView === 'world'}
-                  aria-disabled={!worldMapEnabled ? true : undefined}
-                  aria-haspopup={!worldMapEnabled ? 'dialog' : undefined}
-                  aria-expanded={!worldMapEnabled ? worldMapUnavailableNoticeOpen : undefined}
-                  title={!worldMapEnabled ? '世界地图已在通用设置中关闭' : undefined}
-                  onClick={(event) => {
-                    if (!worldMapEnabled) {
-                      setWorldMapUnavailableNoticeOpen((open) => !open)
-                      return
-                    }
-                    const trigger = event.currentTarget
-                    const preserveKeyboardFocus = event.detail === 0
-                    if (conversationFind.open) closeConversationFind(false)
-                    setConversationView('world')
-                    if (preserveKeyboardFocus) {
-                      window.requestAnimationFrame(() => trigger.focus({ preventScroll: true }))
-                    }
-                  }}
-                >
-                  地图
-                </button>
-                {conversationView === 'world' && (
+              {worldMapEnabled && (
+                <div className="camp-conversation-view-controls" role="group" aria-label="会话区视图">
                   <button
-                    className="camp-world-map-route-toggle"
                     type="button"
-                    aria-label={worldMapRoutesVisible ? '隐藏地图路线' : '展示地图路线'}
-                    aria-pressed={worldMapRoutesVisible}
-                    title={worldMapRoutesVisible ? '隐藏路线' : '展示路线'}
-                    onClick={() => setWorldMapRoutesVisible((visible) => !visible)}
+                    aria-pressed={conversationView === 'conversation'}
+                    onClick={() => setConversationView('conversation')}
                   >
-                    <svg viewBox="0 0 24 24" aria-hidden="true">
-                      <path d="M5 18c2.2-4 3.2-7.4 7-7.4 3.1 0 3.1-4.6 7-4.6" />
-                      <circle cx="5" cy="18" r="1.8" />
-                      <circle cx="19" cy="6" r="1.8" />
-                    </svg>
+                    会话
                   </button>
-                )}
-                {!worldMapEnabled && worldMapUnavailableNoticeOpen && (
-                  <div
-                    className="camp-world-map-unavailable-popover"
-                    role="dialog"
-                    aria-labelledby="camp-world-map-unavailable-title"
-                    aria-describedby="camp-world-map-unavailable-description"
+                  <button
+                    type="button"
+                    aria-pressed={conversationView === 'world'}
+                    onClick={(event) => {
+                      const trigger = event.currentTarget
+                      const preserveKeyboardFocus = event.detail === 0
+                      if (conversationFind.open) closeConversationFind(false)
+                      setConversationView('world')
+                      if (preserveKeyboardFocus) {
+                        window.requestAnimationFrame(() => trigger.focus({ preventScroll: true }))
+                      }
+                    }}
                   >
-                    <strong id="camp-world-map-unavailable-title">世界地图已关闭</strong>
-                    <p id="camp-world-map-unavailable-description">
-                      可在“设置 → 通用 → 会话”中重新开启。当前会话内容不会受到影响。
-                    </p>
-                    {onOpenWorldMapSettings && (
-                      <button
-                        className="camp-world-map-settings-link"
-                        type="button"
-                        onClick={() => {
-                          setWorldMapUnavailableNoticeOpen(false)
-                          onOpenWorldMapSettings()
-                        }}
-                      >
-                        前往通用设置
-                      </button>
-                    )}
-                  </div>
-                )}
-              </div>
+                    地图
+                  </button>
+                  {conversationView === 'world' && (
+                    <button
+                      className="camp-world-map-route-toggle"
+                      type="button"
+                      aria-label={worldMapRoutesVisible ? '隐藏地图路线' : '展示地图路线'}
+                      aria-pressed={worldMapRoutesVisible}
+                      title={worldMapRoutesVisible ? '隐藏路线' : '展示路线'}
+                      onClick={() => setWorldMapRoutesVisible((visible) => !visible)}
+                    >
+                      <svg viewBox="0 0 24 24" aria-hidden="true">
+                        <path d="M5 18c2.2-4 3.2-7.4 7-7.4 3.1 0 3.1-4.6 7-4.6" />
+                        <circle cx="5" cy="18" r="1.8" />
+                        <circle cx="19" cy="6" r="1.8" />
+                      </svg>
+                    </button>
+                  )}
+                </div>
+              )}
             </div>
             <div
               className="timeline-scroll camp-timeline"
@@ -5927,7 +5862,7 @@ function CampMembersPanel({
     } catch (error) {
       setAddResult({
         tone: 'danger',
-        message: error instanceof Error ? error.message : '邀请队员失败，请重试。',
+        message: readErrorMessage(error, '邀请队员失败，请重试。'),
         failures: new Map()
       })
     } finally {
@@ -5947,7 +5882,7 @@ function CampMembersPanel({
     } catch (error) {
       setRemovalPreviewState({
         status: 'error',
-        message: error instanceof Error ? error.message : '无法读取 Core 权威影响，请重试。'
+        message: readErrorMessage(error, '无法读取 Core 权威影响，请重试。')
       })
     }
   }, [onPreviewMemberRemoval])
@@ -5987,7 +5922,7 @@ function CampMembersPanel({
     } catch (error) {
       setRemovalPreviewState({
         status: 'error',
-        message: error instanceof Error ? error.message : '移出未完成，请重试。'
+        message: readErrorMessage(error, '移出未完成，请重试。')
       })
     } finally {
       setRemoveSubmitting(false)
@@ -7817,7 +7752,7 @@ function attachmentTypeLabel(mediaType: string): string {
 }
 
 function attachmentErrorMessage(error: unknown): string {
-  const message = error instanceof Error ? error.message : String(error)
+  const message = readErrorMessage(error)
   if (message.includes('25 MiB')) return '文件超过 25 MiB'
   if (message.includes('count limit')) return '一条消息最多 10 个附件'
   if (message.includes('total attachment') || message.includes('64 MiB')) return '附件总大小超过 64 MiB'
@@ -7831,7 +7766,7 @@ function attachmentErrorMessage(error: unknown): string {
 }
 
 function replyDraftErrorMessage(error: unknown): string {
-  const message = error instanceof Error ? error.message : String(error)
+  const message = readErrorMessage(error)
   if (message.includes('draft_changed')) return '草稿已在其他位置更新，请重试。'
   if (message.includes('mention_target_unavailable')) {
     return '所选成员当前不可接收，请选择其他成员。'
@@ -8029,7 +7964,7 @@ interface ToolResultViewState {
 }
 
 function toolResultErrorMessage(error: unknown): string {
-  const detail = error instanceof Error ? error.message.trim() : ''
+  const detail = readErrorMessage(error, '').trim()
   return detail ? `读取完整结果失败：${detail}` : '读取完整结果失败：未知错误'
 }
 
@@ -9154,7 +9089,7 @@ export function TaskPanel({
       resetForm()
       await onTasksChanged()
     } catch (error) {
-      setFormError(localizeExecutionEngineTerms(error instanceof Error ? error.message : String(error)))
+      setFormError(localizeExecutionEngineTerms(readErrorMessage(error)))
     } finally {
       setSubmitting(false)
     }
@@ -9216,7 +9151,7 @@ export function TaskPanel({
       resetForm()
       await onTasksChanged()
     } catch (error) {
-      setFormError(localizeExecutionEngineTerms(error instanceof Error ? error.message : String(error)))
+      setFormError(localizeExecutionEngineTerms(readErrorMessage(error)))
     } finally {
       setSubmitting(false)
     }
@@ -9244,7 +9179,7 @@ export function TaskPanel({
       resetForm()
       await onTasksChanged()
     } catch (error) {
-      setFormError(localizeExecutionEngineTerms(error instanceof Error ? error.message : String(error)))
+      setFormError(localizeExecutionEngineTerms(readErrorMessage(error)))
     } finally {
       setSubmitting(false)
     }

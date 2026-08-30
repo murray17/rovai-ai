@@ -1,7 +1,7 @@
 ---
 document_type: version-decisions
 version: v1.30
-lifecycle: current
+lifecycle: historical
 authority: decision-rationale
 status: accepted
 last_updated: 2026-08-30
