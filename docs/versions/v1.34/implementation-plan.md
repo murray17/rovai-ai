@@ -41,6 +41,8 @@ unknown 撤回。未删除、禁用或复制旧 Rust 测试。
 fallback 不改 Thread 默认；metadata 检查复用已有 executable identity wrapper 及其更新/清理失败测试，
 检查前后均验证已解析的 executable，避免等待锁期间替换后的稳定结果写入旧 identity。
 Electron owner 增加原生输入触发后挂起响应、换绑定、再释放旧响应，分别覆盖检测和保存迟到。
+主线整合后扩展现有 Pending 队列终态 owner：A 已冻结、B 已入队时切 Fast，B 发布时采用新选择，
+A 的完整冻结配置保持不变；不增加并行测试 owner 或改变消息队列行为。
 历史 Migration owner 的升级后断言改为当前 contract 常量；旧源形状仍独立冻结。Product Fingerprint 的
 现行版本断言与兼容性文件 byte digest 同步更新，不改变平台资格状态或既有历史证据内容。
 

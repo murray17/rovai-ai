@@ -972,6 +972,50 @@ mod tests {
     #[test]
     fn terminal_turns_advance_queue_while_recovery_waits_for_settlement() {
         let (mut database, camp_id) = setup();
+        let fast_target = crate::camp_fast::target(&database, &camp_id, "agent_1")
+            .unwrap()
+            .unwrap();
+        let runtime = crate::camp_fast::runtime_for_target(&database, &fast_target)
+            .unwrap()
+            .unwrap();
+        assert!(
+            crate::camp_fast::record_eligibility(
+                &database,
+                &fast_target,
+                &runtime,
+                &crate::camp_fast::NativeFastEligibility {
+                    eligible: true,
+                    runtime_default_fast: Some(false),
+                },
+            )
+            .unwrap()
+        );
+        let set_fast = |database: &mut Database, enabled| {
+            let result = crate::camp_fast::set_preference(
+                database,
+                &envelope(
+                    &camp_id,
+                    crate::camp_fast::SetCampMemberFastCommand {
+                        camp_id: camp_id.clone(),
+                        agent_id: "agent_1".to_string(),
+                        expected_runtime_binding_revision: fast_target
+                            .runtime_binding_revision
+                            .clone(),
+                        fast_override: Some(enabled),
+                    },
+                ),
+            )
+            .unwrap();
+            assert_eq!(result.result.status, CommandResultStatus::Applied);
+        };
+        let frozen_config = |database: &Database, turn_id: &str| -> serde_json::Value {
+            let serialized: String = database.connection().query_row(
+                "SELECT effective_config_json FROM agent_run WHERE camp_turn_id = ?1 AND agent_id = 'agent_1'",
+                [turn_id], |row| row.get(0),
+            ).unwrap();
+            serde_json::from_str(&serialized).unwrap()
+        };
+        set_fast(&mut database, false);
         let first = send(&mut database, &camp_id, text("A"));
         send(&mut database, &camp_id, text("B"));
         send(&mut database, &camp_id, text("C"));
@@ -979,6 +1023,10 @@ mod tests {
             .as_str()
             .unwrap()
             .to_string();
+        let first_config = frozen_config(&database, &turn_id);
+        assert_eq!(first_config["runtime"]["campFast"]["fastOverride"], false);
+        set_fast(&mut database, true);
+        assert_eq!(frozen_config(&database, &turn_id), first_config);
         let version = database
             .connection()
             .query_row(
@@ -1027,6 +1075,12 @@ mod tests {
         assert!(ready_heads(&database).unwrap().is_empty());
         assert_eq!(read_queue(&database, &camp_id).unwrap().items[0].body, "C");
         let turn = published.result.payload["campTurnId"].as_str().unwrap();
+        assert_eq!(
+            frozen_config(&database, turn)["runtime"]["campFast"]["fastOverride"],
+            true,
+            "Pending B freezes the current Fast choice when published, not when enqueued"
+        );
+        assert_eq!(frozen_config(&database, &turn_id), first_config);
         let transaction = database.connection_mut().transaction().unwrap();
         transaction.execute("UPDATE agent_run SET status = 'failed', ended_at = datetime('now'), manual_retry_allowed = 0 WHERE camp_turn_id = ?1", [turn]).unwrap();
         crate::runtime::recompute_camp_turn(
