@@ -17,7 +17,19 @@ app.whenReady().then(async () => {
     webPreferences: { contextIsolation: true, sandbox: true, nodeIntegration: false, backgroundThrottling: false }
   })
   const evaluate = source => window.webContents.executeJavaScript(source, true)
-  const frames = () => evaluate('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))')
+  async function frames() {
+    let timeout
+    try {
+      await Promise.race([
+        evaluate('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))'),
+        new Promise((_, reject) => {
+          timeout = setTimeout(() => reject(new Error('Composer fixture received no animation frames')), 5_000)
+        })
+      ])
+    } finally {
+      clearTimeout(timeout)
+    }
+  }
   const command = (method, params) => window.webContents.debugger.sendCommand(method, params)
   const cases = []
   const failures = []
@@ -50,6 +62,7 @@ app.whenReady().then(async () => {
     if (options.sameEditor) assert.equal(state.sameEditor, true, 'Simple native text edits must not reset the host')
   }
   async function run(name, callback) {
+    console.error(`Composer fixture: ${name}`)
     try {
       await callback()
       cases.push(name)
@@ -58,9 +71,12 @@ app.whenReady().then(async () => {
     }
   }
   try {
+    console.error('Composer fixture: loading Renderer')
     await window.loadFile(renderer)
+    console.error('Composer fixture: attaching debugger')
     window.webContents.debugger.attach('1.3')
     await command('Emulation.setFocusEmulationEnabled', { enabled: true })
+    console.error('Composer fixture: waiting for initial frames')
     await frames()
 
     await run('IME replaces a newline without blanking the page', async () => {
