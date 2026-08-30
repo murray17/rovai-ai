@@ -2022,7 +2022,6 @@ impl ExecutionRuntimeService {
                 ));
             }
             if matches!(status.as_str(), "completed" | "failed" | "cancelled") {
-                crate::pending_camp_input::resume_queue(transaction, &camp_id)?;
                 return Ok(CommandHandlerResult::applied(
                     "camp_turn.already_terminal",
                     json!({
@@ -2033,7 +2032,6 @@ impl ExecutionRuntimeService {
                 ));
             }
             if cancel_requested_at.is_some() {
-                crate::pending_camp_input::resume_queue(transaction, &camp_id)?;
                 return Ok(CommandHandlerResult::accepted(
                     "camp_turn.cancellation_already_requested",
                     json!({ "campTurnId": envelope.payload.camp_turn_id }),
@@ -2115,7 +2113,6 @@ impl ExecutionRuntimeService {
             }
             // The scheduler still requires every Run/Delivery to be terminal before
             // publishing the next head. Persisting auto here also survives Desktop loss.
-            crate::pending_camp_input::resume_queue(transaction, &camp_id)?;
             let camp_turn_status = recompute_camp_turn(
                 transaction,
                 &camp_id,
@@ -2197,7 +2194,6 @@ impl ExecutionRuntimeService {
                     "AgentRun is outside the Camp",
                 ));
             }
-            crate::pending_camp_input::pause_queue(transaction, &camp_id, "user_stop")?;
             if matches!(status.as_str(), "succeeded" | "failed" | "cancelled") {
                 return Ok(CommandHandlerResult::applied(
                     "agent_run.already_terminal",
@@ -5087,15 +5083,6 @@ pub(crate) fn recompute_camp_turn(
 
     if current_status != next_status || current_aggregate_reason.as_deref() != next_aggregate_reason
     {
-        if (cancel_requested_at.is_none() || budget_exhausted_at.is_some())
-            && (runs
-                .iter()
-                .any(|(_, status, _, _)| matches!(status.as_str(), "failed" | "cancelled"))
-                || has_failed_delivery
-                || matches!(next_status, "failed" | "cancelled"))
-        {
-            crate::pending_camp_input::pause_queue(transaction, camp_id, "execution_failure")?;
-        }
         let ended_at = matches!(next_status, "completed" | "failed" | "cancelled").then_some(now);
         transaction.execute(
             r#"

@@ -6174,18 +6174,6 @@ impl Core {
                 )?;
                 Ok(serde_json::to_value(execution.result)?)
             }
-            "camp.pendingInputs.setMode" => {
-                let params: UserCommandParams<
-                    rovai_core::pending_camp_input::SetCampQueueModeCommand,
-                > = serde_json::from_value(request.params.clone())?;
-                let camp_id = params.command.camp_id.clone();
-                let mut database = self.database.lock().await;
-                let execution = rovai_core::pending_camp_input::set_queue_mode(
-                    &mut database,
-                    &user_camp_command_envelope(params.command_id, camp_id, params.command),
-                )?;
-                Ok(serde_json::to_value(execution.result)?)
-            }
             "camp.composerDraft.get" => {
                 let params: CampComposerDraftParams =
                     serde_json::from_value(request.params.clone())?;

@@ -15,7 +15,7 @@ User Automation 的既有显式命令保持原合同。
 
 ## 入队与发布
 
-Core 在同一个 immediate SQLite 事务内决定：队列为 auto、没有 queued/running/waiting 的 Camp 执行、
+Core 在同一个 immediate SQLite 事务内决定：没有 queued/running/waiting 的 Camp 执行、
 没有 pending/running Delivery，并且没有 queued/needs_repair 输入时，走现有直接发送；否则追加队尾。
 Camp 已空闲但队首正在编辑或需要修复时，新输入仍只能追加。
 
@@ -38,17 +38,17 @@ CampMessage、CampTurn、AgentRun 与写入 Pending 发布结果。Pending 发�
 replyToCampMessageId、recipientSelectionRequired、execution request、原 User identity、
 publishedCampMessageId/publishedCampTurnId/publishedAt、lastAttemptErrorCode 和创建/更新时间。
 state 仅为 queued / needs_repair / published / cancelled。Reply ID 可在历史消息失效后保留用于修复提示。
-同一 Camp 的序号唯一，删除和编辑不改变其他输入顺序；Camp 删除级联清理三个私有表。
+同一 Camp 的序号唯一，删除和编辑不改变其他输入顺序；Camp 删除级联清理两个私有表。
 
 `pending_input_edit_session` 以 Camp 为唯一键，只保存 pendingInputId、随机 editToken、
 basePendingRevision 和 recoveryRequired。没有 working content、心跳、超时解锁或多窗口合并。
 
-`camp_queue_control` 保存 auto/paused 和暂停原因 manual / user_stop / execution_failure /
-recovery_blocked / send_failure。没有重试计时器或后台发布租约。
+没有独立的队列暂停状态、暂停/继续命令、重试计时器或后台发布租约。队列只等待现有执行结算、
+队首编辑结束或队首错误被处理。
 
 ## 编辑命令
 
-`camp.pendingInputs.get({campId})` 返回 CampPendingInputsView：mode、pauseReason、executionActive、
+`camp.pendingInputs.get({campId})` 返回 CampPendingInputsView：executionActive、
 按 FIFO 排序的非终态 items 与 editSession。items 包含正文、结构化内容、Reply 投影、revision 和错误。
 这些数据只通过 Desktop 用户读取入口暴露；Agent History/Context 不读取私有输入。
 
@@ -71,18 +71,18 @@ Dirty 比较 content、Reply 和 recipientSelectionRequired，但不作为 Core 
 Core 重启把已有编辑标成 recoveryRequired。Renderer 刷新或重新进入 Camp 不自动认领旧 token，也不
 自动 cancel；必须显式重新编辑、放弃未保存修改或删除。旧 token 的迟到保存/取消一律拒绝。
 
-## 暂停、错误和幂等
+## 自动续发、错误和幂等
 
-`camp.pendingInputs.setMode` 使用 UserCommandParams，command 为 `{campId, mode: auto | paused}`。
-显式继续发送不绕过执行、编辑或 FIFO 阻塞；需要修复的队首会重新校验。
-Composer Stop 在请求取消前短暂暂停准入；CampTurn 取消命令同时持久恢复 auto。取消请求 accepted
-不代表已经停止：必须等该 Camp 所有 Run、Turn 与 Delivery 离开非终态后，Scheduler 才发布一条队首。
-无需再次点击“继续发送”；其余输入仍排队，待新一轮结束后按 FIFO 继续。用户在停止期间显式暂停队列
-仍然有效，编辑占用、审批与 recovery blocker 不被绕过。
-上轮失败、中断、单独 AgentRun Stop 和 recovery blocker 暂停自动发送；审批和普通 waiting 保持非终态。
+上一轮进入终态且该 Camp 所有 Run、Turn 与 Delivery 均已离开非终态后，Scheduler 自动发布一条队首。
+Composer Stop 复用既有取消命令；取消请求 accepted 不代表已经停止，必须等当前执行完全结束再推进。
+不存在“暂停队列”或“继续发送”入口；其余输入待新一轮结束后按 FIFO 自动继续。审批、恢复等待、
+可恢复失败形成的 waiting Turn 及编辑占用继续阻塞，现有恢复或停止操作结算后自动解除阻塞。
+上轮终态为失败或取消时也按同一规则推进，已公开消息不会退回 Pending 或重复执行。
 
-发布拒绝保留输入并暂停；需要修复的接收者/Reply/Lead 问题标为 needs_repair，事务错误保留 queued。
-用户检查后显式继续，不自动重试。已创建正式消息的输入永远不因 Runtime 后续失败而重新入队。
+发布拒绝或事务错误保留该条输入并标为 needs_repair，后续输入不能越过它，不自动重试。
+用户通过既有编辑入口修正并保存后，该条恢复 queued、保持原位置并自动接受下一次准入；
+也可删除该条让下一条继续。仅打开或取消编辑不清除错误，普通新消息不代替修复队首。
+发送按钮始终显示“发送”，不随忙闲、入队或提交中状态更换文字；处理中继续禁用重复提交。
 
 同一传输请求复用 commandId 和摘要，由 CommandGateway 重放。修改输入或重新尝试使用新 commandId；
 先前 rejected 结果同样会重放。最多成功发布一次由 Pending 行的发布结果和同一事务保证，独立于

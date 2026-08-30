@@ -4470,8 +4470,9 @@ export function CampWorkspace({
                       className="primary-button composer-send"
                       type="submit"
                       disabled={composerSendDisabled}
+                      aria-busy={Boolean(busy || composerSubmitting || preparingAttachments.length > 0)}
                     >
-                      {busy || composerSubmitting ? '提交中…' : preparingAttachments.length > 0 ? '处理中…' : requiresQueue ? '加入待发送' : '发送'}
+                      发送
                     </button>
             </div>
           </div>

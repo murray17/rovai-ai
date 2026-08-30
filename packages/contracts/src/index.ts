@@ -1085,8 +1085,6 @@ export interface PendingInputEditSession {
 
 export interface CampPendingInputsView {
   campId: string
-  mode: 'auto' | 'paused'
-  pauseReason: 'manual' | 'user_stop' | 'execution_failure' | 'recovery_blocked' | 'send_failure' | null
   executionActive: boolean
   items: PendingCampInputView[]
   editSession: PendingInputEditSession | null
@@ -3060,7 +3058,6 @@ export type CoreMethod =
   | 'camp.composerDraft.get'
   | 'camp.pendingInputs.get'
   | 'camp.pendingInputs.edit'
-  | 'camp.pendingInputs.setMode'
   | 'camp.composerDraft.save'
   | 'camp.composerDraft.startReply'
   | 'camp.composerDraft.cancelReply'

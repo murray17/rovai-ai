@@ -49,8 +49,6 @@ pub struct PendingInputEditSession {
 #[serde(rename_all = "camelCase")]
 pub struct CampPendingInputsView {
     pub camp_id: String,
-    pub mode: String,
-    pub pause_reason: Option<String>,
     pub execution_active: bool,
     pub items: Vec<PendingCampInputView>,
     pub edit_session: Option<PendingInputEditSession>,
@@ -86,26 +84,6 @@ pub enum PendingInputEditAction {
 impl sealed::Sealed for EditPendingCampInputCommand {}
 impl DomainCommand for EditPendingCampInputCommand {
     const TYPE: &'static str = "camp.pending_input.edit";
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct SetCampQueueModeCommand {
-    #[serde(deserialize_with = "crate::camp_id::deserialize_camp_id_string")]
-    pub camp_id: String,
-    pub mode: CampQueueMode,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum CampQueueMode {
-    Auto,
-    Paused,
-}
-
-impl sealed::Sealed for SetCampQueueModeCommand {}
-impl DomainCommand for SetCampQueueModeCommand {
-    const TYPE: &'static str = "camp.pending_input.queue_mode";
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -165,33 +143,9 @@ pub fn requires_queue(database: &Database, camp_id: &str) -> Result<bool> {
 
 pub(crate) fn must_queue(connection: &Connection, camp_id: &str) -> Result<bool> {
     Ok(has_nonterminal_execution(connection, camp_id)? || connection.query_row(
-        "SELECT EXISTS(SELECT 1 FROM camp_queue_control WHERE camp_id = ?1 AND mode = 'paused')
-             OR EXISTS(SELECT 1 FROM pending_camp_input WHERE camp_id = ?1 AND state IN ('queued', 'needs_repair'))",
+        "SELECT EXISTS(SELECT 1 FROM pending_camp_input WHERE camp_id = ?1 AND state IN ('queued', 'needs_repair'))",
         [camp_id], |row| row.get::<_, bool>(0),
     )?)
-}
-
-pub(crate) fn pause_queue(connection: &Connection, camp_id: &str, reason: &str) -> Result<()> {
-    connection.execute(
-        "INSERT INTO camp_queue_control(camp_id, mode, pause_reason) VALUES (?1, 'paused', ?2)
-         ON CONFLICT(camp_id) DO UPDATE SET mode = 'paused', pause_reason = excluded.pause_reason
-         WHERE camp_queue_control.mode = 'auto' OR excluded.pause_reason IN ('user_stop', 'manual')",
-        params![camp_id, reason],
-    )?;
-    Ok(())
-}
-
-pub(crate) fn resume_queue(connection: &Connection, camp_id: &str) -> Result<()> {
-    connection.execute(
-        "INSERT INTO camp_queue_control(camp_id, mode, pause_reason) VALUES (?1, 'auto', NULL)
-         ON CONFLICT(camp_id) DO UPDATE SET mode = 'auto', pause_reason = NULL",
-        [camp_id],
-    )?;
-    connection.execute(
-        "UPDATE pending_camp_input SET state = 'queued' WHERE camp_id = ?1 AND state = 'needs_repair'",
-        [camp_id],
-    )?;
-    Ok(())
 }
 
 pub fn recover_edit_sessions(database: &Database) -> Result<()> {
@@ -210,14 +164,6 @@ pub fn read_queue(database: &Database, camp_id: &str) -> Result<CampPendingInput
         |row| row.get(0),
     )?;
     anyhow::ensure!(exists, "Camp does not exist");
-    let (mode, pause_reason) = connection
-        .query_row(
-            "SELECT mode, pause_reason FROM camp_queue_control WHERE camp_id = ?1",
-            [camp_id],
-            |row| Ok((row.get(0)?, row.get(1)?)),
-        )
-        .optional()?
-        .unwrap_or(("auto".to_string(), None));
     let mut statement = connection.prepare(
         "SELECT id, enqueue_sequence, revision, state, last_attempt_error_code FROM pending_camp_input
          WHERE camp_id = ?1 AND state IN ('queued', 'needs_repair') ORDER BY enqueue_sequence",
@@ -257,8 +203,6 @@ pub fn read_queue(database: &Database, camp_id: &str) -> Result<CampPendingInput
     }
     Ok(CampPendingInputsView {
         camp_id: camp_id.to_string(),
-        mode,
-        pause_reason,
         execution_active: has_nonterminal_execution(connection, camp_id)?,
         items,
         edit_session: load_edit_session(connection, camp_id)?,
@@ -381,40 +325,6 @@ pub fn edit_input(
     })
 }
 
-pub fn set_queue_mode(
-    database: &mut Database,
-    envelope: &CommandEnvelope<SetCampQueueModeCommand>,
-) -> Result<CommandExecution> {
-    DomainCommandGateway.execute(database, envelope, |transaction| {
-        if !matches!(envelope.actor, ActorRef::User { .. })
-            || envelope.camp_id.as_deref() != Some(&envelope.payload.camp_id)
-        {
-            return Ok(reject(
-                "pending_input.user_required",
-                "Only the Camp user can change its queue",
-            ));
-        }
-        let camp_id = &envelope.payload.camp_id;
-        let exists: bool = transaction.query_row(
-            "SELECT EXISTS(SELECT 1 FROM camp WHERE id = ?1)",
-            [camp_id],
-            |row| row.get(0),
-        )?;
-        if !exists {
-            return Ok(reject("camp.not_found", "Camp does not exist"));
-        }
-        match envelope.payload.mode {
-            CampQueueMode::Paused => pause_queue(transaction, camp_id, "manual")?,
-            CampQueueMode::Auto => resume_queue(transaction, camp_id)?,
-        }
-        Ok(CommandHandlerResult::applied(
-            "pending_input.queue_mode_changed",
-            json!({"mode": envelope.payload.mode}),
-            None,
-        ))
-    })
-}
-
 pub(crate) fn insert_input(
     transaction: &Transaction<'_>,
     camp_id: &str,
@@ -463,9 +373,8 @@ pub(crate) fn publish_admission(
         [&command.camp_id], |row| row.get(0),
     ).optional()?;
     let blocked: bool = transaction.query_row(
-        "SELECT EXISTS(SELECT 1 FROM camp_queue_control WHERE camp_id = ?1 AND mode = 'paused')
-            OR EXISTS(SELECT 1 FROM pending_input_edit_session WHERE pending_input_id = ?2)",
-        params![command.camp_id, command.pending_input_id],
+        "SELECT EXISTS(SELECT 1 FROM pending_input_edit_session WHERE pending_input_id = ?1)",
+        [&command.pending_input_id],
         |row| row.get(0),
     )?;
     if record.0 != command.expected_revision
@@ -500,48 +409,29 @@ pub(crate) fn record_publish_failure(
     connection: &Connection,
     command: &SendPendingCampInputCommand,
     code: &str,
-    needs_repair: bool,
 ) -> Result<()> {
-    let changed = connection.execute(
-        "UPDATE pending_camp_input SET state = ?3, last_attempt_error_code = ?4, updated_at = ?5
-         WHERE id = ?1 AND revision = ?2 AND camp_id = ?6 AND state IN ('queued', 'needs_repair')",
+    connection.execute(
+        "UPDATE pending_camp_input SET state = 'needs_repair', last_attempt_error_code = ?3, updated_at = ?4
+         WHERE id = ?1 AND revision = ?2 AND camp_id = ?5 AND state IN ('queued', 'needs_repair')",
         params![
             command.pending_input_id,
             command.expected_revision,
-            if needs_repair {
-                "needs_repair"
-            } else {
-                "queued"
-            },
             code,
             chrono::Utc::now().to_rfc3339(),
             command.camp_id
         ],
     )?;
-    if changed > 0 {
-        pause_queue(connection, &command.camp_id, "send_failure")?;
-    }
     Ok(())
 }
 
 /// Existing scheduler asks for one head per Camp. No leases, workers, or automatic retry timer.
 pub fn ready_heads(database: &Database) -> Result<Vec<SendPendingCampInputCommand>> {
     let connection = database.connection();
-    connection.execute(
-        "INSERT INTO camp_queue_control(camp_id, mode, pause_reason)
-         SELECT DISTINCT camp_turn.camp_id, 'paused', 'recovery_blocked' FROM agent_run
-         JOIN camp_turn ON camp_turn.id = agent_run.camp_turn_id
-         WHERE agent_run.status = 'waiting' AND agent_run.wait_reason = 'recovery_blocked'
-         ON CONFLICT(camp_id) DO UPDATE SET mode = 'paused', pause_reason = 'recovery_blocked'
-         WHERE camp_queue_control.mode != 'paused'",
-        [],
-    )?;
     let mut statement = connection.prepare(
         "SELECT input.camp_id, input.id, input.revision FROM pending_camp_input AS input
          WHERE input.state = 'queued'
            AND NOT EXISTS(SELECT 1 FROM pending_camp_input AS older WHERE older.camp_id = input.camp_id
                AND older.state IN ('queued', 'needs_repair') AND older.enqueue_sequence < input.enqueue_sequence)
-           AND NOT EXISTS(SELECT 1 FROM camp_queue_control WHERE camp_id = input.camp_id AND mode = 'paused')
            AND NOT EXISTS(SELECT 1 FROM pending_input_edit_session WHERE pending_input_id = input.id)
          ORDER BY input.created_at, input.id",
     )?;
@@ -654,21 +544,6 @@ mod tests {
                 None,
             )
             .unwrap()
-    }
-
-    fn mode(database: &mut Database, camp_id: &str, mode: CampQueueMode) {
-        let result = set_queue_mode(
-            database,
-            &envelope(
-                camp_id,
-                SetCampQueueModeCommand {
-                    camp_id: camp_id.to_string(),
-                    mode,
-                },
-            ),
-        )
-        .unwrap();
-        assert_eq!(result.result.status, CommandResultStatus::Applied);
     }
 
     fn complete_fixture_runs(database: &Database) {
@@ -804,7 +679,7 @@ mod tests {
     #[test]
     fn edit_recovery_blocks_head_and_fences_stale_save_and_cancel() {
         let (mut database, camp_id) = setup();
-        mode(&mut database, &camp_id, CampQueueMode::Paused);
+        send(&mut database, &camp_id, text("A"));
         send(&mut database, &camp_id, text("B"));
         send(&mut database, &camp_id, text("C"));
         let items = read_queue(&database, &camp_id).unwrap().items;
@@ -821,7 +696,7 @@ mod tests {
             .as_str()
             .unwrap()
             .to_string();
-        mode(&mut database, &camp_id, CampQueueMode::Auto);
+        complete_fixture_runs(&database);
         assert!(ready_heads(&database).unwrap().is_empty());
         assert_eq!(
             edit(
@@ -924,8 +799,6 @@ mod tests {
             .as_str()
             .unwrap()
             .to_string();
-        complete_fixture_runs(&database);
-        mode(&mut database, &camp_id, CampQueueMode::Paused);
         let store = CampAttachmentStore::new(database.directory());
         let draft = store
             .save_content(
@@ -953,7 +826,7 @@ mod tests {
                 [],
             )
             .unwrap();
-        mode(&mut database, &camp_id, CampQueueMode::Auto);
+        complete_fixture_runs(&database);
         let item = read_queue(&database, &camp_id).unwrap().items.remove(0);
         let failed_request = envelope(
             &camp_id,
@@ -967,8 +840,13 @@ mod tests {
             .send_pending_camp_input(&mut database, &failed_request)
             .unwrap();
         assert_eq!(rejected.result.code, "mention_target_unavailable");
+        assert_eq!(
+            send(&mut database, &camp_id, text("after repaired head"))
+                .result
+                .code,
+            "pending_input.queued"
+        );
         let queue = read_queue(&database, &camp_id).unwrap();
-        assert_eq!(queue.mode, "paused");
         assert_eq!(queue.items[0].state, "needs_repair");
         assert!(ready_heads(&database).unwrap().is_empty());
         let started = edit(
@@ -990,7 +868,7 @@ mod tests {
                 recipient_selection_required: false,
             },
         );
-        mode(&mut database, &camp_id, CampQueueMode::Auto);
+        assert_eq!(ready_heads(&database).unwrap()[0].pending_input_id, item.id);
         let replay = CollaborationService::default()
             .send_pending_camp_input(&mut database, &failed_request)
             .unwrap();
@@ -1018,8 +896,6 @@ mod tests {
                 },
             ],
         );
-        complete_fixture_runs(&database);
-        mode(&mut database, &camp_id, CampQueueMode::Paused);
         let store = CampAttachmentStore::new(database.directory());
         let draft = store.load_draft(&database, &camp_id).unwrap();
         let draft = store
@@ -1051,7 +927,7 @@ mod tests {
                 [&camp_id],
             )
             .unwrap();
-        mode(&mut database, &camp_id, CampQueueMode::Auto);
+        complete_fixture_runs(&database);
         let item = read_queue(&database, &camp_id).unwrap().items.remove(0);
         let sent = publish(&mut database, &camp_id, &item.id, item.revision);
         let route: String = database
@@ -1068,7 +944,7 @@ mod tests {
     #[test]
     fn attachments_cannot_be_queued_and_rejection_keeps_exact_draft() {
         let (mut database, camp_id) = setup();
-        mode(&mut database, &camp_id, CampQueueMode::Paused);
+        send(&mut database, &camp_id, text("A"));
         let store = CampAttachmentStore::new(database.directory());
         let source = database.directory().join("attachment.txt");
         std::fs::write(&source, "keep this attachment").unwrap();
@@ -1094,12 +970,11 @@ mod tests {
     }
 
     #[test]
-    fn stop_advances_after_settlement_while_failure_and_recovery_pause() {
+    fn terminal_turns_advance_queue_while_recovery_waits_for_settlement() {
         let (mut database, camp_id) = setup();
         let first = send(&mut database, &camp_id, text("A"));
         send(&mut database, &camp_id, text("B"));
         send(&mut database, &camp_id, text("C"));
-        mode(&mut database, &camp_id, CampQueueMode::Paused);
         let turn_id = first.result.payload["campTurnId"]
             .as_str()
             .unwrap()
@@ -1126,7 +1001,6 @@ mod tests {
             )
             .unwrap();
         assert_eq!(result.result.status, CommandResultStatus::Accepted);
-        assert_eq!(read_queue(&database, &camp_id).unwrap().mode, "auto");
         // An accepted Stop is not a completed Stop: A still owns execution until settled.
         assert!(ready_heads(&database).unwrap().is_empty());
         let transaction = database.connection_mut().transaction().unwrap();
@@ -1167,38 +1041,62 @@ mod tests {
         )
         .unwrap();
         transaction.commit().unwrap();
+        let remaining = read_queue(&database, &camp_id).unwrap().items.remove(0);
         assert_eq!(
-            read_queue(&database, &camp_id)
-                .unwrap()
-                .pause_reason
-                .as_deref(),
-            Some("execution_failure")
+            ready_heads(&database).unwrap()[0].pending_input_id,
+            remaining.id
         );
-        assert!(ready_heads(&database).unwrap().is_empty());
         assert_eq!(
             read_queue(&database, &camp_id).unwrap().items[0].body,
             "C",
             "published B is never requeued on Runtime failure"
         );
-        mode(&mut database, &camp_id, CampQueueMode::Auto);
         database.connection().execute("UPDATE agent_run SET status = 'waiting', ended_at = NULL, wait_reason = 'recovery_blocked' WHERE camp_turn_id = ?1", [turn]).unwrap();
         assert!(ready_heads(&database).unwrap().is_empty());
+        database.connection().execute("UPDATE agent_run SET status = 'failed', ended_at = datetime('now'), wait_reason = NULL WHERE camp_turn_id = ?1", [turn]).unwrap();
         assert_eq!(
-            read_queue(&database, &camp_id)
-                .unwrap()
-                .pause_reason
-                .as_deref(),
-            Some("recovery_blocked")
+            ready_heads(&database).unwrap()[0].pending_input_id,
+            remaining.id
         );
     }
 
     #[test]
-    fn publication_rollback_preserves_input_and_requires_explicit_resume() {
+    fn publication_rollback_preserves_input_until_explicit_edit_save() {
         let (mut database, camp_id) = setup();
-        mode(&mut database, &camp_id, CampQueueMode::Paused);
+        send(&mut database, &camp_id, text("A"));
         send(&mut database, &camp_id, text("B"));
-        mode(&mut database, &camp_id, CampQueueMode::Auto);
+        complete_fixture_runs(&database);
         let item = read_queue(&database, &camp_id).unwrap().items.remove(0);
+        let public_count: i64 = database.connection().query_row("SELECT (SELECT COUNT(*) FROM camp_message) + (SELECT COUNT(*) FROM camp_turn) + (SELECT COUNT(*) FROM agent_run)", [], |row| row.get(0)).unwrap();
+        let resave = |database: &mut Database| {
+            let current = read_queue(database, &camp_id).unwrap().items.remove(0);
+            let started = edit(
+                database,
+                &camp_id,
+                &current,
+                None,
+                PendingInputEditAction::Begin,
+            );
+            let token = started.result.payload["editToken"].as_str().unwrap();
+            let saved = edit(
+                database,
+                &camp_id,
+                &current,
+                Some(token),
+                PendingInputEditAction::Save {
+                    content: current.content.clone(),
+                    reply_to_camp_message_id: None,
+                    recipient_selection_required: false,
+                },
+            );
+            assert_eq!(saved.result.status, CommandResultStatus::Applied);
+            let updated = read_queue(database, &camp_id).unwrap().items.remove(0);
+            assert_eq!(
+                ready_heads(database).unwrap()[0].pending_input_id,
+                updated.id
+            );
+            updated
+        };
         database.connection().execute_batch("CREATE TEMP TRIGGER interrupt_pending_publication BEFORE UPDATE OF state ON pending_camp_input
             WHEN NEW.state = 'published' BEGIN SELECT RAISE(ABORT, 'test commit failure'); END;").unwrap();
         let request = envelope(
@@ -1214,16 +1112,18 @@ mod tests {
                 .send_pending_camp_input(&mut database, &request)
                 .is_err()
         );
-        assert_eq!(database.connection().query_row("SELECT (SELECT COUNT(*) FROM camp_message) + (SELECT COUNT(*) FROM camp_turn) + (SELECT COUNT(*) FROM agent_run)", [], |row| row.get::<_, i64>(0)).unwrap(), 0);
+        assert_eq!(database.connection().query_row("SELECT (SELECT COUNT(*) FROM camp_message) + (SELECT COUNT(*) FROM camp_turn) + (SELECT COUNT(*) FROM agent_run)", [], |row| row.get::<_, i64>(0)).unwrap(), public_count);
         assert!(ready_heads(&database).unwrap().is_empty());
         assert_eq!(
             read_queue(&database, &camp_id).unwrap().items[0].state,
-            "queued"
+            "needs_repair"
         );
         database
             .connection()
             .execute_batch("DROP TRIGGER interrupt_pending_publication")
             .unwrap();
+        assert!(ready_heads(&database).unwrap().is_empty());
+        let item = resave(&mut database);
         // A failure before the publication transaction must also stop the scheduler.
         let execution_json: String = database
             .connection()
@@ -1240,7 +1140,14 @@ mod tests {
                 [&item.id],
             )
             .unwrap();
-        mode(&mut database, &camp_id, CampQueueMode::Auto);
+        let request = envelope(
+            &camp_id,
+            SendPendingCampInputCommand {
+                camp_id: camp_id.clone(),
+                pending_input_id: item.id.clone(),
+                expected_revision: item.revision,
+            },
+        );
         assert!(
             CollaborationService::default()
                 .send_pending_camp_input(&mut database, &request)
@@ -1254,7 +1161,8 @@ mod tests {
                 params![item.id, execution_json],
             )
             .unwrap();
-        mode(&mut database, &camp_id, CampQueueMode::Auto);
+        assert!(ready_heads(&database).unwrap().is_empty());
+        let item = resave(&mut database);
         assert_eq!(
             publish(&mut database, &camp_id, &item.id, item.revision)
                 .result

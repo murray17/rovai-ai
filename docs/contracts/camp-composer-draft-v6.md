@@ -12,7 +12,7 @@ last_updated: 2026-08-30
 v6 replaces [v5](camp-composer-draft-v5.md). Draft 字段、revision、Reply、Continuation、附件准备与
 Managed v2 提交保持不变；发送先经过 [Pending Camp Input v1](pending-camp-input-v1.md) 的 Core 准入。
 
-可直接发送时执行原有事务；Camp 忙、队列未空或暂停时，纯文本 Draft 被原子转换为私有 Pending。
+可直接发送时执行原有事务；Camp 忙或队列未空时，纯文本 Draft 被原子转换为私有 Pending。
 两种成功都会消费 exact Draft，拒绝都保留 Draft。携带附件而需要排队时返回
 `pending_input.attachments_unsupported`，不复制、消费或丢弃附件；普通直接发送仍支持附件和纯附件。
 

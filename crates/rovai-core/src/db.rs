@@ -17183,12 +17183,6 @@ impl Database {
                 FOREIGN KEY(camp_id, pending_input_id)
                     REFERENCES pending_camp_input(camp_id, id) ON DELETE CASCADE
             );
-            CREATE TABLE camp_queue_control (
-                camp_id TEXT PRIMARY KEY REFERENCES camp(id) ON DELETE CASCADE,
-                mode TEXT NOT NULL DEFAULT 'auto' CHECK(mode IN ('auto', 'paused')),
-                pause_reason TEXT,
-                CHECK((mode = 'paused') = (pause_reason IS NOT NULL))
-            );
             UPDATE rovai_data_contract
                 SET contract_version = 'v1.33', projection_schema_version = 71,
                     updated_at = datetime('now') WHERE singleton = 1;
@@ -21617,7 +21611,6 @@ fn downgrade_current_schema_to_v116_source_for_test(connection: &Connection) {
             r#"
         DROP TABLE IF EXISTS pending_input_edit_session;
         DROP TABLE IF EXISTS pending_camp_input;
-        DROP TABLE IF EXISTS camp_queue_control;
         UPDATE rovai_data_contract
             SET contract_version = 'v1.29', projection_schema_version = 70,
                 classifier_version = 'activity-v2' WHERE singleton = 1;

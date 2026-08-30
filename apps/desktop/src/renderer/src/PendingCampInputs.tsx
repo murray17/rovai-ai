@@ -40,31 +40,21 @@ export function pendingInputHasContent(content: StructuredCampMessageContent): b
 }
 
 export function pendingQueueRequiresEnqueue(queue: CampPendingInputsView | null, executionActive: boolean): boolean {
-  return executionActive || Boolean(queue && (queue.executionActive || queue.mode === 'paused' || queue.items.length > 0))
+  return executionActive || Boolean(queue && (queue.executionActive || queue.items.length > 0))
 }
 
 function pendingError(code: string): string {
-  if (code === 'mention_target_unavailable' || code === 'camp_message.invalid_explicit_target') return '接收者已不可用，请修改 @成员后继续发送。'
-  if (code === 'camp.default_lead_invariant') return '当前队长不可用，请设置队长或在消息中 @指定成员后继续发送。'
-  if (code === 'camp_message.no_addressable_member') return '当前会话没有可用的接收者，请先邀请队员后继续发送。'
-  if (code === 'agent_run.runtime_not_ready') return '接收队员的 Runtime 尚未就绪，请检查队员配置后继续发送。'
-  if (code === 'camp_message.invalid_reply') return '引用消息已不可用，请取消引用后继续发送。'
-  if (code === 'reply_recipient_required') return '请选择接收者后继续发送。'
+  if (code === 'mention_target_unavailable' || code === 'camp_message.invalid_explicit_target') return '接收者已不可用，请修改 @成员并保存这条消息。'
+  if (code === 'camp.default_lead_invariant') return '当前队长不可用，请设置队长或 @指定成员，再保存这条消息。'
+  if (code === 'camp_message.no_addressable_member') return '当前会话没有可用的接收者，请先邀请队员，再编辑并保存这条消息。'
+  if (code === 'agent_run.runtime_not_ready') return '接收队员的 Runtime 尚未就绪，请检查队员配置，再编辑并保存这条消息。'
+  if (code === 'camp_message.invalid_reply') return '引用消息已不可用，请取消引用并保存这条消息。'
+  if (code === 'reply_recipient_required') return '请选择 @接收者并保存这条消息。'
   if (code === 'pending_input.edit_open') return '请先结束当前编辑，再编辑另一条消息。'
   if (code === 'pending_input.changed') return '这条消息已经变化或发出，请查看最新队列。'
   if (code === 'pending_input.edit_fenced') return '编辑已在别处关闭或重新打开，本次修改未保存。'
   if (code === 'camp_message.empty_body') return '消息不能为空。'
-  return `发送未完成（${code}），消息已保留。请检查后继续发送。`
-}
-
-function pauseReason(queue: CampPendingInputsView): string {
-  switch (queue.pauseReason) {
-    case 'user_stop': return '已停止执行，队列已暂停'
-    case 'execution_failure': return '上轮执行未正常完成，队列已暂停'
-    case 'recovery_blocked': return '执行需要恢复确认，队列已暂停'
-    case 'send_failure': return '发送未完成，队列已暂停'
-    default: return '队列已暂停'
-  }
+  return `发送未完成（${code}），消息已保留。请检查后编辑并保存，或删除这条消息。`
 }
 
 export function PendingCampInputs({
@@ -191,18 +181,12 @@ export function PendingCampInputs({
   const ownsEdit = Boolean(edit && queue?.editSession?.pendingInputId === edit.item.id
     && queue.editSession.editToken === edit.token && !queue.editSession.recoveryRequired)
   const saveDisabled = !edit || busy || !ownsEdit || !pendingInputHasContent(edit.content)
-  const visible = Boolean(queue && (queue.items.length > 0 || queue.mode === 'paused'))
+  const visible = Boolean(queue && queue.items.length > 0)
 
   return <>
     {visible && queue && <section className="pending-input-queue" aria-label="待发送消息">
       <div className="pending-input-heading">
-        <span>{queue.mode === 'paused' ? pauseReason(queue) : `待发送 · ${queue.items.length}`}</span>
-        <button type="button" className="quiet-button compact" disabled={busy} onClick={() => void perform(async () => {
-          const result = await window.rovai.request<StoredCommandResult>('camp.pendingInputs.setMode', {
-            commandId: crypto.randomUUID(), command: { campId, mode: queue.mode === 'paused' ? 'auto' : 'paused' }
-          })
-          if (result.status === 'rejected') throw new Error(pendingError(result.code))
-        })}>{queue.mode === 'paused' ? '继续发送' : '暂停队列'}</button>
+        <span>待发送 · {queue.items.length}</span>
       </div>
       <ul className="pending-input-list">
         {queue.items.map((item) => {
@@ -234,11 +218,12 @@ export function PendingCampInputs({
           </li>
         })}
       </ul>
-      {queue.mode === 'auto' && queue.items.length > 0 && <span className="pending-input-status">
+      <span className="pending-input-status">
         {queue.editSession?.pendingInputId === queue.items[0]?.id
           ? '队首正在编辑，保存或取消后继续。'
+          : queue.items[0]?.state === 'needs_repair' ? '队首需要处理，请编辑保存或删除。'
           : queue.executionActive ? '当前执行完成后依次发送。' : '即将发送队首消息。'}
-      </span>}
+      </span>
     </section>}
     {error && <p className="pending-input-notice" role="alert">{error}</p>}
     {edit && <div className="composer-box pending-input-editor" onKeyDown={(event) => {

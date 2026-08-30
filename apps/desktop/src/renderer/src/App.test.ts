@@ -3491,7 +3491,8 @@ describe('task event projections', () => {
     expect(markup).not.toContain('live-execution-progress')
     expect(markup).toContain('aria-label="停止当前执行"')
     expect(markup).toContain('class="primary-button composer-send"')
-    expect(markup).toContain('加入待发送')
+    expect(markup).toMatch(/class="primary-button composer-send"[^>]*>发送<\/button>/)
+    expect(markup).not.toContain('加入待发送')
 
     const cachedPreviewMarkup = renderToStaticMarkup(createElement(CampWorkspace, {
       snapshot: groupedSnapshot,

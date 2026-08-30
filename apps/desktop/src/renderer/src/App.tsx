@@ -2800,12 +2800,6 @@ function AuthoritativeApp({
     setError(null)
     let requestedTurnIds: string[] = []
     try {
-      // Hold admission while cancellation is requested. Core restores auto atomically
-      // with the Stop request, then waits for every Run/Delivery to settle before advancing.
-      const paused = await window.rovai.request<StoredCommandResult>('camp.pendingInputs.setMode', {
-        commandId: crypto.randomUUID(), command: { campId, mode: 'paused' }
-      })
-      if (paused.status === 'rejected') throw new Error(commandFailureMessage(paused))
       const snapshot = campSnapshot?.camp.id === campId
         ? campSnapshot
         : (await requestCampProjection(campId, 'open')).snapshot
@@ -2815,13 +2809,7 @@ function AuthoritativeApp({
       ))
       const activeTurns = snapshot.turns.filter((turn) => cancellableIds.has(turn.id))
       requestedTurnIds = activeTurns.map((turn) => turn.id)
-      if (requestedTurnIds.length === 0) {
-        const resumed = await window.rovai.request<StoredCommandResult>('camp.pendingInputs.setMode', {
-          commandId: crypto.randomUUID(), command: { campId, mode: 'auto' }
-        })
-        if (resumed.status === 'rejected') throw new Error(commandFailureMessage(resumed))
-        return
-      }
+      if (requestedTurnIds.length === 0) return
       setCancellingTurnIds((current) => new Set([...current, ...requestedTurnIds]))
       await Promise.all(activeTurns.map(async (turn) => {
         const result = await window.rovai.request<StoredCommandResult>('campTurns.cancel', {
@@ -2838,9 +2826,6 @@ function AuthoritativeApp({
       setCancellingTurnIds((current) =>
         new Set([...current].filter((turnId) => !requestedTurnIds.includes(turnId)))
       )
-      await window.rovai.request<StoredCommandResult>('camp.pendingInputs.setMode', {
-        commandId: crypto.randomUUID(), command: { campId, mode: 'paused' }
-      }).catch(() => undefined)
       setError(errorMessage(nextError))
       throw nextError
     }

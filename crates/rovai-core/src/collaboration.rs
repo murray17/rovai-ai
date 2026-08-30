@@ -2743,13 +2743,12 @@ impl CollaborationService {
             )
         })();
         if result.is_err() {
-            // The failed message transaction rolled back. Pause explicitly, never auto retry.
+            // The failed message transaction rolled back. Keep the input for explicit repair.
             let transaction = database.connection_mut().transaction()?;
             pending_camp_input::record_publish_failure(
                 &transaction,
                 &envelope.payload,
                 "pending_input.send_failed",
-                false,
             )?;
             transaction.commit()?;
         }
@@ -3031,12 +3030,7 @@ impl CollaborationService {
             if let UserCampMessageSource::Pending(pending) = attachment_commit.source
                 && result.status == crate::command::CommandResultStatus::Rejected
             {
-                pending_camp_input::record_publish_failure(
-                    transaction,
-                    pending,
-                    &result.code,
-                    true,
-                )?;
+                pending_camp_input::record_publish_failure(transaction, pending, &result.code)?;
             }
             Ok(result)
         })

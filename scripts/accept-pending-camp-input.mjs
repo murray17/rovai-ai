@@ -98,7 +98,7 @@ try {
   report.fifo = runs.map(({ id, status, startedAt, endedAt, runtimeModel }) => ({ id, status, startedAt, endedAt, runtimeModel }))
   check('真实 Runtime 按 A → B → C 执行，每条只产生一次公开消息和 Run')
 
-  // Desktop briefly holds admission; one Stop lets Core advance after cancellation settles.
+  // One Stop lets Core advance after cancellation settles; there is no queue mode to resume.
   const stopFirst = await createConfiguredCampAndSend(core.request, {
     commandId: crypto.randomUUID(), workspace, name: 'Pending Input · 停止验收',
     memberAgentIds: ['agent_1'], defaultLeadAgentId: 'agent_1',
@@ -111,7 +111,6 @@ try {
   assert.equal(afterStop.code, 'pending_input.queued')
   const afterNext = await send(stopCampId, '请只回复 QUEUE_AFTER_NEXT_OK，不要使用工具。')
   assert.equal(afterNext.code, 'pending_input.queued')
-  await mode(stopCampId, 'paused')
   const active = await waitFor(async () => {
     const value = await snapshot(stopCampId)
     assertNoFailedRuns(value)
@@ -133,7 +132,7 @@ try {
   assert.equal(stoppedRun.status, 'cancelled')
   assert.ok(stoppedRun.endedAt && nextRun.startedAt)
   assert.ok(Date.parse(stoppedRun.endedAt) <= Date.parse(nextRun.startedAt))
-  assert.equal((await queue(stopCampId)).mode, 'auto')
+  assert.equal('mode' in await queue(stopCampId), false)
   assert.deepEqual((await queue(stopCampId)).items.map((item) => item.id), [afterNext.payload.pendingInputId])
   assert.equal(advanced.messages.filter((message) => message.authorType === 'user').length, 2)
   report.stop = [stoppedRun, nextRun].map(({ id, status, startedAt, endedAt }) => ({ id, status, startedAt, endedAt }))
@@ -146,31 +145,53 @@ try {
       && (await queue(stopCampId)).items.length === 0 ? value : null
   }, 'normal FIFO resumes after the successor finishes')
 
-  // Leave a useful paused fixture for the subsequent packaged-App acceptance.
-  await mode(campId, 'paused')
-  await send(campId, 'B · 先检查输入框，再回复验收结果。')
-  await send(campId, 'C · B 完成之后，再总结两条建议。')
-  const ordinary = await saveDraft(campId, 'D · 这是一条未提交的普通草稿，编辑队列时应保留。')
-  let item = (await queue(campId)).items[0]
+  // Use an actual running turn for edit coverage, then leave the fixture idle and unblocked.
+  const editFirst = await createConfiguredCampAndSend(core.request, {
+    commandId: crypto.randomUUID(), workspace, name: 'Pending Input · 编辑验收',
+    memberAgentIds: ['agent_1'], defaultLeadAgentId: 'agent_1',
+    body: '从 1 数到 300，每行一个数字，不要调用工具。', purpose: 'Queue edit acceptance'
+  })
+  assert.equal(editFirst.status, 'accepted')
+  const editCampId = editFirst.payload.campId
+  report.editCampId = editCampId
+  assert.equal((await send(editCampId, '请只回复 QUEUE_EDIT_B_OK，不要使用工具。')).code, 'pending_input.queued')
+  assert.equal((await send(editCampId, '请只回复 QUEUE_EDIT_C_OK，不要使用工具。')).code, 'pending_input.queued')
+  const ordinary = await saveDraft(editCampId, 'D · 这是一条未提交的普通草稿，编辑队列时应保留。')
+  let item = (await queue(editCampId)).items[0]
   const started = await edit(item, { type: 'begin' })
   assert.equal(started.status, 'applied')
   const saved = await edit(item, {
-    type: 'save', content: [{ kind: 'text', text: 'B · 已修改：先检查输入框，再回复验收结果。' }],
+    type: 'save', content: [{ kind: 'text', text: '请只回复 QUEUE_EDIT_B_SAVED_OK，不要使用工具。' }],
     replyToCampMessageId: null, recipientSelectionRequired: false
   }, started.payload.editToken)
   assert.equal(saved.status, 'applied')
-  const afterEdit = await queue(campId)
+  const afterEdit = await queue(editCampId)
   assert.equal(afterEdit.items[0].id, item.id)
   assert.equal(afterEdit.items[0].revision, item.revision + 1)
-  assert.deepEqual((await core.request('camp.composerDraft.get', { campId })).content, ordinary.content)
+  assert.deepEqual((await core.request('camp.composerDraft.get', { campId: editCampId })).content, ordinary.content)
   check('保存编辑保留原排队位置，普通 Composer 草稿不被覆盖')
 
   item = afterEdit.items[0]
   const unfinished = await edit(item, { type: 'begin' })
+  const beforeRestart = await waitFor(async () => {
+    const value = await snapshot(editCampId)
+    assertNoFailedRuns(value)
+    return value.agentRuns[0]?.status === 'running' ? value : null
+  }, 'active Runtime before edit recovery')
+  const editingTurn = beforeRestart.turns.find((candidate) => candidate.id === editFirst.payload.campTurnId)
+  assert.notEqual((await core.request('campTurns.cancel', {
+    commandId: crypto.randomUUID(), command: {
+      campId: editCampId, campTurnId: editingTurn.id, expectedVersion: editingTurn.version
+    }
+  })).status, 'rejected')
+  await waitFor(async () => {
+    const value = await snapshot(editCampId)
+    return value.agentRuns[0]?.status === 'cancelled' && !(await queue(editCampId)).executionActive ? value : null
+  }, 'Runtime settlement before edit recovery')
   await core.stop()
   core = startCore()
   await core.request('health.check')
-  assert.equal((await queue(campId)).editSession.recoveryRequired, true)
+  assert.equal((await queue(editCampId)).editSession.recoveryRequired, true)
   const staleSave = await edit(item, {
     type: 'save', content: [{ kind: 'text', text: '旧窗口不应覆盖这条消息' }],
     replyToCampMessageId: null, recipientSelectionRequired: false
@@ -181,6 +202,15 @@ try {
   const staleCancel = await edit(item, { type: 'cancel' }, unfinished.payload.editToken)
   assert.equal(staleCancel.code, 'pending_input.edit_fenced')
   check('重启保留编辑占用；重新编辑后，旧保存与旧取消均不能生效')
+  assert.equal((await edit(item, { type: 'cancel' }, reopened.payload.editToken)).status, 'applied')
+  await waitFor(async () => {
+    const value = await snapshot(editCampId)
+    assertNoFailedRuns(value)
+    return value.agentRuns.length === 3 && value.agentRuns.every((run) => ['succeeded', 'cancelled'].includes(run.status))
+      && (await queue(editCampId)).items.length === 0 ? value : null
+  }, 'automatic FIFO after closing recovered edit')
+  assert.equal((await queue(editCampId)).editSession, null)
+  assert.deepEqual((await core.request('camp.composerDraft.get', { campId: editCampId })).content, ordinary.content)
   report.status = 'passed'
 } catch (error) {
   report.status = 'failed'
@@ -195,10 +225,6 @@ try {
 function check(message) { report.checks.push(message); console.log(`PASS ${message}`) }
 function queue(campId) { return core.request('camp.pendingInputs.get', { campId }) }
 function snapshot(campId) { return core.request('camps.snapshot', { campId }) }
-async function mode(campId, nextMode) {
-  const result = await core.request('camp.pendingInputs.setMode', { commandId: crypto.randomUUID(), command: { campId, mode: nextMode } })
-  assert.equal(result.status, 'applied')
-}
 async function saveDraft(campId, body) {
   const draft = await core.request('camp.composerDraft.get', { campId })
   return core.request('camp.composerDraft.save', { campId, expectedRevision: draft.revision, content: [{ kind: 'text', text: body }] })
