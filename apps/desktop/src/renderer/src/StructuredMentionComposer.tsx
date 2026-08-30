@@ -1032,12 +1032,11 @@ function structuredContentEqual(
 function authorableStructuredContent(
   content: StructuredCampMessageContent
 ): StructuredMentionContent {
-  return normalizeStructuredMentionContent(content.flatMap((segment) => {
-    if (segment.kind === 'file_selection') return []
+  return normalizeStructuredMentionContent(content.map((segment) => {
     if (segment.kind === 'current_user_mention') {
-      return [{ kind: 'text' as const, text: '@你' }]
+      return { kind: 'text' as const, text: '@你' }
     }
-    return [segment]
+    return segment
   }))
 }
 

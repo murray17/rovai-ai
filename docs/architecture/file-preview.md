@@ -2,7 +2,7 @@
 document_type: architecture
 authority: file-preview-components-and-boundaries
 status: accepted
-last_updated: 2026-08-29
+last_updated: 2026-08-30
 ---
 
 # File Preview Architecture
@@ -18,10 +18,13 @@ Renderer entry
   → safe metadata/content response
 ```
 
-- **Core** 拥有 Camp、Message、Attachment、Runtime Evidence、Composer Draft 与当前文件身份映射；
+- **Core** 拥有 Camp、Message、Attachment、Runtime Evidence 与当前文件身份映射；
 - **Desktop Main** 拥有宿主路径、原生选择器、Root Grant、只读文件能力、reopen token、HTML/asset token、watcher 和系统操作；
-- **Preload** 只暴露 [File Preview v1](../contracts/file-preview-v1.md) 的场景化方法；iframe 不获得 Preload；
+- **Preload** 只暴露 [File Preview v2](../contracts/file-preview-v2.md) 的场景化方法；iframe 不获得 Preload；
 - **Renderer** 拥有当前 Camp 的 Tab、布局与阅读状态，不解析路径形成 Authority，也不读取磁盘。
+
+预览仅提供阅读能力。文字选择与系统复制是本地阅读行为，不连接 Composer 写入、消息持久化或 Agent input；
+引用能力不在当前组件图内。
 
 任何来源必须先成为封闭 `OpenFilePreviewRequest`。Core 返回的 root/base/candidate 只在 Core↔Main 内部存在；
 Main 对 root 和目标分别 realpath，使用平台感知的路径段比较做 containment，并拒绝目录、symlink 越界和特殊文件。
@@ -32,8 +35,9 @@ Main 对 root 和目标分别 realpath，使用平台感知的路径段比较做
 authorizedRoot + capabilities + contentVersion + contentGeneration`。TTL 为 30 分钟，每窗口最多 64 项；正常读取、
 刷新和系统动作延长 TTL，但没有 Renderer heartbeat。
 
-`previewKey` 由已验证来源身份与 canonical file identity 摘要生成，用于 Renderer Tab 去重。`reopenToken` 在 Main
-绑定原始来源链；刷新或句柄过期时重新验证来源、realpath 和文件身份并最多自动重试一次。子文件成功打开后获得
+`previewKey` 由窗口、Camp 与已校验的 canonical path 摘要生成，仅用于 Renderer Tab 去重；不包含消息/Run 来源或行号，
+同一文件从不同入口打开仍激活现有 Tab。每次打开继续单独校验来源、创建来源绑定的 handle；去重不共享或升级权限。
+`reopenToken` 在 Main 绑定各自原始来源链；刷新或句柄过期时重新验证来源、realpath 和文件身份并最多自动重试一次。子文件成功打开后获得
 独立 token，父 Tab 关闭不撤销子 Tab。
 
 ## 读取与 generation

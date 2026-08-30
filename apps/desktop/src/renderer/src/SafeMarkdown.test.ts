@@ -9,9 +9,10 @@ describe('SafeMarkdown file preview references', () => {
       onFileReference: () => undefined,
       children: '打开 `README.md` 或 ./src/app.ts:42。\n\n```text\n./secret.txt\n```'
     }))
-    expect(markup).toContain('title="打开 README.md"')
-    expect(markup).toContain('title="打开 ./src/app.ts:42"')
-    expect(markup).not.toContain('title="打开 ./secret.txt"')
+    expect(markup).toContain('title="README.md"')
+    expect(markup).toContain('title="./src/app.ts:42"')
+    expect(markup).not.toContain('title="./secret.txt"')
+    expect(markup).toContain('<code>README.md</code></a>')
   })
 
   it('keeps local images disabled by default and admits only URLs projected by the preview', () => {
@@ -36,5 +37,14 @@ describe('SafeMarkdown file preview references', () => {
     expect(markup).toContain('data-markdown-heading="Quick start"')
     expect(markup).toContain('href="#quick-start"')
     expect(markup).not.toContain('markdown-inert-link')
+  })
+
+  it('keeps malformed or executable file-link fragments inert', () => {
+    const markup = renderToStaticMarkup(createElement(SafeMarkdown, {
+      onFileReference: () => undefined,
+      children: '[broken](#rovai-file-reference=%ZZ) [unsafe](#rovai-file-reference=javascript%3Aalert%281%29)'
+    }))
+    expect(markup.match(/markdown-inert-link/g)).toHaveLength(2)
+    expect(markup).not.toContain('class="markdown-file-reference"')
   })
 })

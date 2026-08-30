@@ -5,7 +5,7 @@ lifecycle: current
 authority: version-scope-and-status
 design_status: confirmed
 implementation_status: in_progress
-model_context_change: true
+model_context_change: false
 last_updated: 2026-08-30
 ---
 
@@ -27,11 +27,12 @@ last_updated: 2026-08-30
 - Markdown、HTML、代码/文本、分页文本、图片/SVG 与 Diff/Patch 的单一规范阅读视图；
 - Camp workspace、消息文件引用、Attachment、Files Changed 当前文件、文档子链接和用户授权 root 的封闭来源；
 - 一个 canonical root 复用一个事件 watcher，外部变化只设置轻量更新提示，用户主动刷新前保留旧内容；
-- 不支持的文件不创建 Tab、句柄或 watcher，显式激活后继续交给系统默认应用；
-- 文件选区以冻结快照附加到当前 Composer，不把短期句柄变成持久读取授权。
+- 不支持的文件不创建 Tab、句柄或 watcher，显式激活后继续交给系统默认应用。
 
-文件选区进入 Agent input 属于核心模型上下文变更；其精确前后合同见
-[待二次确认的 revision 2](model-context-change-file-selection.md)。确认完成前，该子项不视为可合入交付。
+2026-08-30 按用户决定，本期撤回文件选区附加、Draft/Message 持久化与 Agent input 投影，引用能力留待后续整体设计。
+原模型上下文提案 revision 2 未获确认并已撤回；本版本不再改变模型输入，沿用合入基线
+`main@a2dbf4b3badbdc00d9e3dffe4bfb5244991518aa` 的消息联合和 `v1.29/schema 70/migration 116` 数据合同。
+预览的普通文字选择与系统复制保持可用；不因选择文字而写入 Composer 或发送内容。
 
 ## 明确不做
 
@@ -40,6 +41,7 @@ last_updated: 2026-08-30
 - 不扫描工作区、不轮询打开文件、不自动覆盖用户当前正在阅读的内容；
 - 不把历史 Runtime Evidence 与当前磁盘文件混成一个真源；
 - 不为不支持格式建立文件信息占位页；
+- 不实现文件选区引用、引用卡片或为此新增消息字段、模型输入格式和数据库迁移；
 - 不建立 macOS 与 Windows 两套 Renderer 组件树。
 
 ## 核心验收口径
@@ -59,8 +61,8 @@ last_updated: 2026-08-30
 | 范围 | 结论 | 证据或理由 |
 | --- | --- | --- |
 | Version lifecycle | 已更新 | v1.29 冻结为 historical；本概览、[实施计划](implementation-plan.md)、[决定](decisions.md)与[版本索引](../README.md)建立唯一 current v1.30。 |
-| Decisions | 已更新 | [V1.30-D01–D07](decisions.md#v1-30-d01)记录独立 Pane、封闭来源、窗口能力、HTML 隔离、Evidence 分流、事件更新与选区快照。 |
-| Contracts | 已更新 | 新增 [File Preview v1](../../contracts/file-preview-v1.md)，固定公开联合、读取、更新、释放、错误与短期能力边界。 |
+| Decisions | 已更新 | [V1.30-D01–D06](decisions.md#v1-30-d01)记录独立 Pane、封闭来源、窗口能力、HTML 隔离、Evidence 分流与事件更新；[D07](decisions.md#v1-30-d07)记录选区方案本期撤回。 |
+| Contracts | 已更新 | [File Preview v2](../../contracts/file-preview-v2.md)继承预览能力并移除选区附加；v1 保留为历史合同。 |
 | Architecture | 已更新 | 新增 [File Preview](../../architecture/file-preview.md)，固定 Core/Main/Preload/Renderer 职责、root watcher 与 HTML 协议。 |
 | UI | 已更新 | 新增 [文件预览区](../../ui/components/file-preview.md)，并从 Camp 会话工作区路由共享顶栏、响应式替换和焦点恢复。 |
 | Runtime Activity | 确认无需更新 | 本版本消费既有 Files Changed typed projection，不改变 Runtime Activity 映射或 Evidence 准入。 |
@@ -73,6 +75,5 @@ last_updated: 2026-08-30
 - [实施与验收计划](implementation-plan.md)
 - [版本决定](decisions.md)
 - [File Preview Architecture](../../architecture/file-preview.md)
-- [File Preview v1 Contract](../../contracts/file-preview-v1.md)
+- [File Preview v2 Contract](../../contracts/file-preview-v2.md)
 - [文件预览区 UI](../../ui/components/file-preview.md)
-- [模型上下文变更 revision 2（待二次确认）](model-context-change-file-selection.md)

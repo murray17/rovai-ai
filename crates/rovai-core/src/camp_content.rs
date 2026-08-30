@@ -33,53 +33,16 @@ pub enum StructuredCampMessageSegment {
         #[serde(rename = "nameAtSend")]
         name_at_send: String,
     },
-    FileSelection {
-        selection: FileSelectionSnapshot,
-    },
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct FileSelectionSnapshot {
-    pub selection_id: String,
-    pub display_path: String,
-    pub selected_text: String,
-    pub start_line: u64,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub start_column: Option<u64>,
-    pub end_line: u64,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub end_column: Option<u64>,
-    pub position_encoding: String,
-    pub range_end: String,
-    pub content_version: FileSelectionContentVersion,
-    pub verification: String,
-    pub source_kind: String,
-    pub source_identity_digest: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct FileSelectionContentVersion {
-    pub size: u64,
-    pub mtime_ms: u64,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub file_id: Option<String>,
 }
 
 const MAX_CONTENT_SEGMENTS: usize = 4_096;
 const MAX_CONTENT_TEXT_BYTES: usize = 1_048_576;
-const MAX_FILE_SELECTIONS: usize = 8;
-const MAX_FILE_SELECTION_BYTES: usize = 64 * 1_024;
-const MAX_FILE_SELECTION_TOTAL_BYTES: usize = 256 * 1_024;
 
 pub fn validate_content(content: &[StructuredCampMessageSegment]) -> Result<()> {
     if content.len() > MAX_CONTENT_SEGMENTS {
         anyhow::bail!("Structured Camp Message Content has too many segments");
     }
     let mut text_bytes = 0_usize;
-    let mut selection_count = 0_usize;
-    let mut selection_bytes = 0_usize;
     for segment in content {
         match segment {
             StructuredCampMessageSegment::Text { text } => {
@@ -107,84 +70,10 @@ pub fn validate_content(content: &[StructuredCampMessageSegment]) -> Result<()> 
                 }
                 crate::skill::validate_skill_name(name_at_send)?;
             }
-            StructuredCampMessageSegment::FileSelection { selection } => {
-                validate_file_selection(selection)?;
-                selection_count = selection_count.saturating_add(1);
-                selection_bytes = selection_bytes
-                    .checked_add(selection.selected_text.len())
-                    .context("File Selection size overflow")?;
-            }
         }
     }
     if text_bytes > MAX_CONTENT_TEXT_BYTES {
         anyhow::bail!("Structured Camp Message Content text exceeds 1 MiB");
-    }
-    if selection_count > MAX_FILE_SELECTIONS || selection_bytes > MAX_FILE_SELECTION_TOTAL_BYTES {
-        anyhow::bail!("file_selection_limit_exceeded");
-    }
-    Ok(())
-}
-
-fn validate_file_selection(selection: &FileSelectionSnapshot) -> Result<()> {
-    if selection.selection_id.is_empty()
-        || selection.selection_id.trim() != selection.selection_id
-        || selection.selection_id.len() > 128
-        || selection.selection_id.contains(['\0', '\r', '\n'])
-    {
-        anyhow::bail!("File Selection requires a canonical Selection ID");
-    }
-    if selection.display_path.is_empty()
-        || selection.display_path.len() > 1_024
-        || selection.display_path.contains(['\0', '\r', '\n'])
-    {
-        anyhow::bail!("File Selection display path is invalid");
-    }
-    if selection.selected_text.is_empty()
-        || selection.selected_text.len() > MAX_FILE_SELECTION_BYTES
-    {
-        anyhow::bail!("file_selection_limit_exceeded");
-    }
-    if selection.start_line == 0
-        || selection.end_line == 0
-        || selection.end_line < selection.start_line
-        || selection.start_column == Some(0)
-        || selection.end_column == Some(0)
-        || (selection.end_line == selection.start_line
-            && selection.start_column.is_some()
-            && selection.end_column.is_some()
-            && selection.end_column < selection.start_column)
-    {
-        anyhow::bail!("File Selection range is invalid");
-    }
-    if selection.position_encoding != "utf-16" || selection.range_end != "exclusive" {
-        anyhow::bail!("File Selection position semantics are invalid");
-    }
-    if !matches!(
-        selection.verification.as_str(),
-        "current_file" | "viewer_snapshot_after_change"
-    ) || !matches!(
-        selection.source_kind.as_str(),
-        "message_reference"
-            | "camp_workspace"
-            | "attachment"
-            | "run_evidence"
-            | "child_of_handle"
-            | "authorized_root"
-    ) || !selection.source_identity_digest.starts_with("sha256:")
-        || selection.source_identity_digest.len() != 71
-        || !selection.source_identity_digest[7..]
-            .bytes()
-            .all(|byte| byte.is_ascii_hexdigit())
-    {
-        anyhow::bail!("File Selection provenance is invalid");
-    }
-    if selection
-        .content_version
-        .file_id
-        .as_deref()
-        .is_some_and(|file_id| file_id.is_empty() || file_id.len() > 256)
-    {
-        anyhow::bail!("File Selection content version is invalid");
     }
     Ok(())
 }
@@ -267,26 +156,6 @@ pub fn render_plain_text_with_current_user(
     mut member_name: impl FnMut(&str) -> Option<String>,
     current_user_display_name: &str,
 ) -> Result<String> {
-    render_plain_text_with_current_user_mode(
-        content,
-        &mut member_name,
-        current_user_display_name,
-        FileSelectionProjection::Human,
-    )
-}
-
-#[derive(Clone, Copy)]
-enum FileSelectionProjection {
-    Human,
-    Agent,
-}
-
-fn render_plain_text_with_current_user_mode(
-    content: &[StructuredCampMessageSegment],
-    mut member_name: impl FnMut(&str) -> Option<String>,
-    current_user_display_name: &str,
-    file_selection_projection: FileSelectionProjection,
-) -> Result<String> {
     if current_user_display_name.trim().is_empty() {
         anyhow::bail!("Current User display name must not be empty");
     }
@@ -315,55 +184,9 @@ fn render_plain_text_with_current_user_mode(
                 rendered.push('/');
                 rendered.push_str(name_at_send);
             }
-            StructuredCampMessageSegment::FileSelection { selection } => {
-                if !rendered.is_empty() && !rendered.ends_with('\n') {
-                    rendered.push('\n');
-                }
-                match file_selection_projection {
-                    FileSelectionProjection::Human => {
-                        rendered.push_str("文件选区：");
-                        rendered.push_str(&selection.display_path);
-                        rendered.push_str(" · ");
-                        rendered.push_str(&file_selection_range_label(selection));
-                        rendered.push('\n');
-                        rendered.push_str(&selection.selected_text);
-                        if !selection.selected_text.ends_with('\n') {
-                            rendered.push('\n');
-                        }
-                    }
-                    FileSelectionProjection::Agent => {
-                        render_agent_file_selection(&mut rendered, selection);
-                    }
-                }
-            }
         }
     }
     Ok(rendered)
-}
-
-fn render_agent_file_selection(rendered: &mut String, selection: &FileSelectionSnapshot) {
-    rendered.push_str("<file_selection>\n");
-    rendered.push_str("path: ");
-    rendered.push_str(&selection.display_path);
-    rendered.push_str("\nrange: ");
-    rendered.push_str(&file_selection_range_label(selection));
-    rendered.push_str("\nposition_encoding: utf-16\nrange_end: exclusive\n");
-    rendered.push_str("content_version: size=");
-    rendered.push_str(&selection.content_version.size.to_string());
-    rendered.push_str("; mtime_ms=");
-    rendered.push_str(&selection.content_version.mtime_ms.to_string());
-    if let Some(file_id) = selection.content_version.file_id.as_deref() {
-        rendered.push_str("; file_id=");
-        rendered.push_str(file_id);
-    }
-    rendered.push_str("\nverification: ");
-    rendered.push_str(&selection.verification);
-    rendered.push_str("\ntext:\n");
-    rendered.push_str(&selection.selected_text);
-    if !selection.selected_text.ends_with('\n') {
-        rendered.push('\n');
-    }
-    rendered.push_str("</file_selection>\n");
 }
 
 fn segment_projects_nonempty(segment: &StructuredCampMessageSegment) -> bool {
@@ -372,21 +195,8 @@ fn segment_projects_nonempty(segment: &StructuredCampMessageSegment) -> bool {
         StructuredCampMessageSegment::MemberMention { .. }
         | StructuredCampMessageSegment::AllMembersMention
         | StructuredCampMessageSegment::CurrentUserMention { .. }
-        | StructuredCampMessageSegment::SkillMention { .. }
-        | StructuredCampMessageSegment::FileSelection { .. } => true,
+        | StructuredCampMessageSegment::SkillMention { .. } => true,
     }
-}
-
-fn file_selection_range_label(selection: &FileSelectionSnapshot) -> String {
-    let start = match selection.start_column {
-        Some(column) => format!("L{}:{}", selection.start_line, column),
-        None => format!("L{}", selection.start_line),
-    };
-    let end = match selection.end_column {
-        Some(column) => format!("L{}:{}", selection.end_line, column),
-        None => format!("L{}", selection.end_line),
-    };
-    format!("{start}–{end}")
 }
 
 pub fn render_current_plain_text(
@@ -410,11 +220,10 @@ pub fn render_agent_plain_text(
     connection: &Connection,
     content: &[StructuredCampMessageSegment],
 ) -> Result<String> {
-    render_plain_text_for_connection_with_current_user_mode(
+    render_plain_text_for_connection_with_current_user(
         connection,
         content,
         AGENT_PRINCIPAL_DISPLAY_NAME,
-        FileSelectionProjection::Agent,
     )
 }
 
@@ -422,20 +231,6 @@ fn render_plain_text_for_connection_with_current_user(
     connection: &Connection,
     content: &[StructuredCampMessageSegment],
     current_user_display_name: &str,
-) -> Result<String> {
-    render_plain_text_for_connection_with_current_user_mode(
-        connection,
-        content,
-        current_user_display_name,
-        FileSelectionProjection::Human,
-    )
-}
-
-fn render_plain_text_for_connection_with_current_user_mode(
-    connection: &Connection,
-    content: &[StructuredCampMessageSegment],
-    current_user_display_name: &str,
-    file_selection_projection: FileSelectionProjection,
 ) -> Result<String> {
     let mut names = BTreeMap::new();
     for agent_id in member_mention_ids(content) {
@@ -450,11 +245,10 @@ fn render_plain_text_for_connection_with_current_user_mode(
             names.insert(agent_id, display_name);
         }
     }
-    render_plain_text_with_current_user_mode(
+    render_plain_text_with_current_user(
         content,
         |agent_id| names.get(agent_id).cloned(),
         current_user_display_name,
-        file_selection_projection,
     )
 }
 
@@ -510,97 +304,12 @@ pub fn canonical_content_digest(content: &[StructuredCampMessageSegment]) -> Res
 #[cfg(test)]
 mod tests {
     use super::{
-        FileSelectionContentVersion, FileSelectionSnapshot,
         StructuredCampMessageSegment as Segment, canonical_content_digest, member_mention_ids,
         mentions_current_user, normalize_content, render_agent_plain_text, render_plain_text,
         render_plain_text_with_current_user, validate_content, validate_user_authored_content,
     };
     use crate::current_user::CURRENT_USER_ID;
     use rusqlite::{Connection, params};
-
-    fn file_selection(text: &str) -> Segment {
-        Segment::FileSelection {
-            selection: FileSelectionSnapshot {
-                selection_id: "selection-1".into(),
-                display_path: "src/app.ts".into(),
-                selected_text: text.into(),
-                start_line: 4,
-                start_column: Some(2),
-                end_line: 5,
-                end_column: Some(7),
-                position_encoding: "utf-16".into(),
-                range_end: "exclusive".into(),
-                content_version: FileSelectionContentVersion {
-                    size: 42,
-                    mtime_ms: 10,
-                    file_id: Some("1:2".into()),
-                },
-                verification: "current_file".into(),
-                source_kind: "camp_workspace".into(),
-                source_identity_digest:
-                    "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".into(),
-            },
-        }
-    }
-
-    #[test]
-    fn file_selection_is_validated_and_rendered_as_a_frozen_plain_text_block() {
-        let content = vec![
-            Segment::Text {
-                text: "请看".into(),
-            },
-            file_selection("const ready = true;"),
-        ];
-        validate_user_authored_content(&content).unwrap();
-        assert_eq!(
-            render_plain_text(&content, |_| None).unwrap(),
-            "请看\n文件选区：src/app.ts · L4:2–L5:7\nconst ready = true;\n"
-        );
-    }
-
-    #[test]
-    fn agent_file_selection_projection_includes_frozen_version_and_verification() {
-        let content = vec![
-            Segment::Text {
-                text: "inspect".into(),
-            },
-            file_selection("const ready = true;"),
-        ];
-        let connection = Connection::open_in_memory().unwrap();
-
-        assert_eq!(
-            render_agent_plain_text(&connection, &content).unwrap(),
-            concat!(
-                "inspect\n",
-                "<file_selection>\n",
-                "path: src/app.ts\n",
-                "range: L4:2–L5:7\n",
-                "position_encoding: utf-16\n",
-                "range_end: exclusive\n",
-                "content_version: size=42; mtime_ms=10; file_id=1:2\n",
-                "verification: current_file\n",
-                "text:\n",
-                "const ready = true;\n",
-                "</file_selection>\n",
-            )
-        );
-    }
-
-    #[test]
-    fn file_selection_limits_are_enforced_independently_of_message_text() {
-        let too_large = file_selection(&"x".repeat(64 * 1_024 + 1));
-        assert!(validate_content(&[too_large]).is_err());
-        let too_many = (0..9)
-            .map(|index| {
-                let mut selection = file_selection("x");
-                if let Segment::FileSelection { selection } = &mut selection {
-                    selection.selection_id = format!("selection-{index}");
-                }
-                selection
-            })
-            .collect::<Vec<_>>();
-        assert!(validate_content(&too_many).is_err());
-    }
 
     #[test]
     fn normalization_preserves_occurrences_and_merges_only_adjacent_text() {
@@ -648,6 +357,27 @@ mod tests {
             .is_err()
         );
         assert!(serde_json::from_str::<Segment>(r#"{"kind":"markdown","text":"@木瓦"}"#).is_err());
+        assert!(
+            serde_json::from_value::<Segment>(serde_json::json!({
+                "kind": "file_selection",
+                "selection": {
+                    "selectionId": "selection-1",
+                    "displayPath": "src/app.ts",
+                    "selectedText": "const ready = true;",
+                    "startLine": 1,
+                    "startColumn": 1,
+                    "endLine": 1,
+                    "endColumn": 20,
+                    "positionEncoding": "utf-16",
+                    "rangeEnd": "exclusive",
+                    "contentVersion": { "size": 19, "mtimeMs": 10, "fileId": "1:2" },
+                    "verification": "current_file",
+                    "sourceKind": "camp_workspace",
+                    "sourceIdentityDigest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                }
+            }))
+            .is_err()
+        );
         assert!(
             validate_content(&[Segment::MemberMention {
                 agent_id: " agent_2".into(),

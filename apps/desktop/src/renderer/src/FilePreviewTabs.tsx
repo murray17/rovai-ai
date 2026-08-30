@@ -20,6 +20,8 @@ export function FilePreviewTabs(): React.JSX.Element | null {
   const {
     tabs,
     activeTabId,
+    openFeedback,
+    paneVisible,
     activate,
     close,
     hidePane,
@@ -41,6 +43,15 @@ export function FilePreviewTabs(): React.JSX.Element | null {
     for (const tab of tabs) counts.set(tab.file.fileName, (counts.get(tab.file.fileName) ?? 0) + 1)
     return new Set([...counts].filter(([, count]) => count > 1).map(([name]) => name))
   }, [tabs])
+
+  useEffect(() => {
+    if (!paneVisible || !openFeedback || openFeedback.tabId !== activeTabId) return
+    document.getElementById(tabDomId(openFeedback.tabId))?.parentElement?.scrollIntoView({
+      block: 'nearest',
+      inline: 'nearest',
+      behavior: 'instant'
+    })
+  }, [activeTabId, openFeedback, paneVisible])
 
   useEffect(() => {
     if (!menu) return undefined
@@ -148,9 +159,10 @@ export function FilePreviewTabs(): React.JSX.Element | null {
         {tabs.map((tab, index) => {
           const active = tab.id === activeTabId
           const label = visibleTabLabel(tab, duplicateNames)
+          const feedback = openFeedback?.tabId === tab.id ? openFeedback : null
           return (
             <div
-              className={`file-preview-tab ${active ? 'is-active' : ''}`}
+              className={`file-preview-tab${active ? ' is-active' : ''}${feedback?.isNew ? ' is-arriving' : ''}`}
               key={tab.id}
               onContextMenu={(event) => {
                 event.preventDefault()
@@ -192,6 +204,14 @@ export function FilePreviewTabs(): React.JSX.Element | null {
               >
                 <svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4.5 4.5 7 7m0-7-7 7" /></svg>
               </button>
+              {feedback && (
+                <span
+                  key={feedback.sequence}
+                  className="file-preview-tab-open-feedback"
+                  data-open-sequence={feedback.sequence}
+                  aria-hidden="true"
+                />
+              )}
             </div>
           )
         })}

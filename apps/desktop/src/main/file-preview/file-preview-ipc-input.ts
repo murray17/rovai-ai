@@ -1,4 +1,4 @@
-import { isCampId, type AttachFileSelectionRequest, type OpenFilePreviewRequest } from '@contracts'
+import { isCampId, type OpenFilePreviewRequest } from '@contracts'
 import { isAttachmentId } from '../attachment-desktop'
 
 function record(value: unknown): Record<string, unknown> {
@@ -28,17 +28,6 @@ function positiveInteger(value: unknown): number {
     throw new Error('Unsupported file preview number')
   }
   return value as number
-}
-
-function nonNegativeInteger(value: unknown): number {
-  if (!Number.isSafeInteger(value) || (value as number) < 0) {
-    throw new Error('Unsupported file preview number')
-  }
-  return value as number
-}
-
-function optionalPositiveInteger(value: unknown): number | undefined {
-  return value === undefined ? undefined : positiveInteger(value)
 }
 
 export function parseFilePreviewCamp(value: unknown): string | null {
@@ -169,29 +158,4 @@ export function parseCopyPathRequest(value: unknown): {
     throw new Error('Unsupported file path format')
   }
   return { handleId: string(input.handleId, 128), format: input.format }
-}
-
-export function parseAttachSelectionRequest(value: unknown): AttachFileSelectionRequest {
-  const input = record(value)
-  if (input.attachMode !== 'verified_current' && input.attachMode !== 'visible_snapshot') {
-    throw new Error('Unsupported File Selection mode')
-  }
-  if (
-    typeof input.selectedText !== 'string'
-    || input.selectedText.length === 0
-    || input.selectedText.length > 128 * 1_024
-    || input.selectedText.includes('\0')
-  ) throw new Error('Unsupported File Selection text')
-  return {
-    campId: campId(input.campId),
-    expectedDraftRevision: nonNegativeInteger(input.expectedDraftRevision),
-    handleId: string(input.handleId, 128),
-    expectedGeneration: string(input.expectedGeneration, 128),
-    selectedText: input.selectedText,
-    startLine: positiveInteger(input.startLine),
-    startColumn: optionalPositiveInteger(input.startColumn),
-    endLine: positiveInteger(input.endLine),
-    endColumn: optionalPositiveInteger(input.endColumn),
-    attachMode: input.attachMode
-  }
 }

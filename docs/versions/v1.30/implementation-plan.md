@@ -9,12 +9,35 @@ last_updated: 2026-08-30
 # v1.30 Camp 文件预览实施计划
 
 本计划记录实现和可复核验收事实；设计结论由 [File Preview Architecture](../../architecture/file-preview.md)、
-[File Preview v1 Contract](../../contracts/file-preview-v1.md)和[文件预览区 UI](../../ui/components/file-preview.md)拥有。
+[File Preview v2 Contract](../../contracts/file-preview-v2.md)和[文件预览区 UI](../../ui/components/file-preview.md)拥有。
+
+## 本期范围调整：引用延期
+
+2026-08-30 用户要求撤回文件选区引用，留待后续整体设计。预览、外部更新提示、主动刷新、普通选择/系统复制、
+附件与消息中的文件打开入口保留；选区浮层、Composer 引用卡片、附加/移除 IPC、持久化 variant 和模型输入投影全部撤回。
+原 revision 2 提案由 Git 历史保存，不再作为本期确认门槛或实施入口。
+
+数据继续使用合入 main 基线的 `v1.29/schema 70/migration 116`，保留 Activity v2 与全部既有迁移覆盖；
+删除未交付的选区 Migration 117，不执行数据降级，也不修改仍在运行的旧验收实例。该旧实例的 schema 71 fixture
+必须保持隔离，不能直接交给新的 schema 70 构建，也不能通过手改 marker 冒充兼容数据。
+
+测试退役与合同同改：删除 3 项选区专用 Rust 测试和 3 项 Main 选区测试；原有闭合消息联合测试增加完整旧选区
+payload 的拒绝 case。Migration 116 的 Activity 历史保留测试恢复原 owner，fresh baseline 与受支持升级测试继续保留。
+
+撤回验证（2026-08-30）：
+
+- `pnpm typecheck`、`cargo fmt --all --check`、`git diff --check` 通过；
+- `pnpm test` 通过：Vitest 94 文件 / 656 项，Node 脚本测试 219 通过 / 1 项平台跳过，文档与 Skill 门禁通过；
+- `pnpm test:rust:workspace-default --quiet` 通过：Library 386、CLI 25、Core 182 项通过，4 项既有 ignored；未将此结果宣称为 slow/all-features 验证；
+- 以合入基线 `a2dbf4b3badbdc00d9e3dffe4bfb5244991518aa` 运行 `docs:check:ci` 通过；
+- `pnpm build:macos:arm64` 通过，新包单独输出到 `dist/file-preview-only/mac-arm64/Rovai AI.app`，签名检查与 App/Core/CLI 的 arm64 架构检查通过，不覆盖运行中的旧包；
+- 生产源码与构建后的 Main/Preload/Renderer 不再包含选区附加/移除链路；消息投影与数据库实现恢复合入 main 基线，仅闭合联合测试增加拒绝 case；
+- 预览共用会话底色、Sidecar 收起后顶栏/正文同轨的 3 项布局回归保留并通过；未对仍运行的旧验收窗口宣称热更新或完成新版视觉验收。
 
 ## 1. 版本与合同
 
 - [x] 建立 v1.30、决定、Architecture、Contract、UI 与路由；
-- [ ] 文档门禁通过并保持唯一 current version；
+- [x] 文档门禁通过并保持唯一 current version；
 - [ ] TypeScript/Rust 公共类型与合同字段一致。
 
 ## 2. Core/Main/Preload
@@ -34,7 +57,6 @@ last_updated: 2026-08-30
 - [ ] 完成消息 Markdown、inline-code、裸路径、附件与子链接入口；
 - [ ] 完成外部更新提示、保留旧内容的主动刷新和并发信号保护；
 - [ ] 完成 Tab 上下文菜单、系统打开/显示位置/复制安全路径和平台文案；
-- [ ] 完成文件选区 Draft/Message/History/Agent input 投影；
 - [ ] 不支持格式只走默认应用且不改变 Pane 状态。
 
 ## 4. 验证
@@ -55,6 +77,6 @@ last_updated: 2026-08-30
 - 刷新先清空旧内容，失败时销毁 Tab；
 - HTML 能访问 Preload、网络、任意 IPC、顶层导航、新窗口、下载或授权 root 外资源；
 - Files Changed 当前文件按显示 path 猜身份或改写历史 Evidence；
-- Camp 切换短暂显示旧 Camp Tab、选区或错误；
+- Camp 切换短暂显示旧 Camp Tab 或错误；
 - 键盘无法操作/关闭/恢复文件 Tab，或关闭按钮只在 hover 下可达；
 - 路径行出现宿主绝对前缀或横向滚动条。

@@ -9,7 +9,6 @@ import {
   type ReactNode
 } from 'react'
 import type {
-  CampComposerDraftView,
   FilePreviewErrorPayload,
   FilePreviewOperationResult,
   FilePreviewPageContent,
@@ -53,39 +52,23 @@ export interface FilePreviewReturnTarget {
   onReturn(): void
 }
 
-export interface FilePreviewTextSelection {
-  selectedText: string
-  startLine: number
-  startColumn?: number
-  endLine: number
-  endColumn?: number
-}
-
-export interface FilePreviewSelectionBridge {
-  attach(
-    file: ResolvedFilePreview,
-    selection: FilePreviewTextSelection,
-    attachMode: 'verified_current' | 'visible_snapshot'
-  ): Promise<FilePreviewOperationResult<CampComposerDraftView>>
+export interface FilePreviewOpenFeedback {
+  tabId: string
+  sequence: number
+  isNew: boolean
 }
 
 export interface FilePreviewContextValue {
   tabs: FilePreviewTabModel[]
   activeTab: FilePreviewTabModel | null
   activeTabId: string | null
+  openFeedback: FilePreviewOpenFeedback | null
   paneVisible: boolean
   paneWidth: number
   returnTarget: Pick<FilePreviewReturnTarget, 'kind' | 'label'> | null
-  selectionBridgeAvailable: boolean
   open(request: OpenFilePreviewRequest): Promise<FilePreviewOpenOutcome>
   setReturnTarget(target: FilePreviewReturnTarget | null): void
   returnToTarget(): void
-  setSelectionBridge(bridge: FilePreviewSelectionBridge | null): void
-  attachSelection(
-    tabId: string,
-    selection: FilePreviewTextSelection,
-    attachMode: 'verified_current' | 'visible_snapshot'
-  ): Promise<FilePreviewOperationResult<CampComposerDraftView>>
   showPane(): void
   hidePane(): void
   setPaneWidth(width: number): void
@@ -120,6 +103,7 @@ export function FilePreviewProvider({
 }): React.JSX.Element {
   const [tabs, setTabsState] = useState<FilePreviewTabModel[]>([])
   const [activeTabId, setActiveTabId] = useState<string | null>(null)
+  const [openFeedback, setOpenFeedback] = useState<FilePreviewOpenFeedback | null>(null)
   const [paneVisible, setPaneVisible] = useState(false)
   const [paneWidth, setPaneWidthState] = useState(480)
   const tabsRef = useRef(tabs)
@@ -127,14 +111,6 @@ export function FilePreviewProvider({
   const campIdRef = useRef(campId)
   const returnTargetRef = useRef<FilePreviewReturnTarget | null>(null)
   const [returnTarget, setReturnTargetState] = useState<Pick<FilePreviewReturnTarget, 'kind' | 'label'> | null>(null)
-  const selectionBridgeRef = useRef<FilePreviewSelectionBridge | null>(null)
-  const [selectionBridgeAvailable, setSelectionBridgeAvailable] = useState(false)
-
-  const setSelectionBridge = useCallback((bridge: FilePreviewSelectionBridge | null) => {
-    selectionBridgeRef.current = bridge
-    setSelectionBridgeAvailable(Boolean(bridge))
-  }, [])
-
   const setReturnTarget = useCallback((target: FilePreviewReturnTarget | null) => {
     returnTargetRef.current = target
     setReturnTargetState(target ? { kind: target.kind, label: target.label } : null)
@@ -149,11 +125,9 @@ export function FilePreviewProvider({
   }, [])
 
   const setTabs = useCallback((update: (current: FilePreviewTabModel[]) => FilePreviewTabModel[]) => {
-    setTabsState((current) => {
-      const next = update(current)
-      tabsRef.current = next
-      return next
-    })
+    const next = update(tabsRef.current)
+    tabsRef.current = next
+    setTabsState(next)
   }, [])
 
   const revokeContent = useCallback((content: FilePreviewContent | null) => {
@@ -168,14 +142,14 @@ export function FilePreviewProvider({
     tabsRef.current = []
     setTabsState([])
     setActiveTabId(null)
+    setOpenFeedback(null)
     setPaneVisible(false)
     setReturnTarget(null)
-    setSelectionBridge(null)
     void window.rovai.filePreview.bindCamp(campId)
     return () => {
       if (campIdRef.current === campId) void window.rovai.filePreview.bindCamp(null)
     }
-  }, [campId, revokeContent, setReturnTarget, setSelectionBridge])
+  }, [campId, revokeContent, setReturnTarget])
 
   useEffect(() => () => {
     for (const url of objectUrls.current) URL.revokeObjectURL(url)
@@ -294,6 +268,12 @@ export function FilePreviewProvider({
         : { ...tab, loadState: 'error', error: loaded.error }))
   }, [loadContent, revokeContent, setTabs])
 
+  const showOpenedTab = useCallback((tabId: string, isNew: boolean) => {
+    setActiveTabId(tabId)
+    setPaneVisible(true)
+    setOpenFeedback((previous) => ({ tabId, sequence: (previous?.sequence ?? 0) + 1, isNew }))
+  }, [])
+
   const installOpenResult = useCallback(async (
     result: OpenFilePreviewResult
   ): Promise<FilePreviewOpenOutcome> => {
@@ -306,8 +286,7 @@ export function FilePreviewProvider({
       setTabs((current) => current.map((tab) => tab.id === duplicate.id
         ? { ...tab, file: { ...tab.file, target: file.target } }
         : tab))
-      setActiveTabId(duplicate.id)
-      setPaneVisible(true)
+      showOpenedTab(duplicate.id, false)
       return { kind: 'preview', tabId: duplicate.id }
     }
     const tab: FilePreviewTabModel = {
@@ -324,11 +303,10 @@ export function FilePreviewProvider({
       pageIndex: 0
     }
     setTabs((current) => [...current, tab])
-    setActiveTabId(tab.id)
-    setPaneVisible(true)
+    showOpenedTab(tab.id, true)
     void finishOpening(file)
     return { kind: 'preview', tabId: tab.id }
-  }, [finishOpening, setTabs])
+  }, [finishOpening, setTabs, showOpenedTab])
 
   const open = useCallback(async (request: OpenFilePreviewRequest): Promise<FilePreviewOpenOutcome> => {
     try {
@@ -397,6 +375,7 @@ export function FilePreviewProvider({
     for (const tab of closing) revokeContent(tab.content)
     setTabs(() => remaining)
     setActiveTabId(nextActiveTabId)
+    setOpenFeedback((current) => current && ids.has(current.tabId) ? null : current)
     if (remaining.length === 0) {
       const target = returnTargetRef.current
       returnTargetRef.current = null
@@ -528,33 +507,18 @@ export function FilePreviewProvider({
     }))
   }, [setTabs])
 
-  const attachSelection = useCallback(async (
-    tabId: string,
-    selection: FilePreviewTextSelection,
-    attachMode: 'verified_current' | 'visible_snapshot'
-  ): Promise<FilePreviewOperationResult<CampComposerDraftView>> => {
-    const tab = tabsRef.current.find((entry) => entry.id === tabId)
-    const bridge = selectionBridgeRef.current
-    if (!tab || !bridge) {
-      return { ok: false, error: errorFromUnknown() }
-    }
-    return bridge.attach(tab.file, selection, attachMode)
-  }, [])
-
   const activeTab = tabs.find((tab) => tab.id === activeTabId) ?? null
   const value = useMemo<FilePreviewContextValue>(() => ({
     tabs,
     activeTab,
     activeTabId,
+    openFeedback,
     paneVisible,
     paneWidth,
     returnTarget,
-    selectionBridgeAvailable,
     open,
     setReturnTarget,
     returnToTarget,
-    setSelectionBridge,
-    attachSelection,
     showPane,
     hidePane,
     setPaneWidth,
@@ -568,7 +532,7 @@ export function FilePreviewProvider({
     reload,
     retry,
     changePage
-  }), [activate, activeTab, activeTabId, attachSelection, changePage, close, closeMany, copyDisplayPath, hidePane, move, open, openInSystem, paneVisible, paneWidth, reload, revealInFolder, retry, returnTarget, returnToTarget, selectionBridgeAvailable, setPaneWidth, setReturnTarget, setSelectionBridge, showPane, tabs])
+  }), [activate, activeTab, activeTabId, changePage, close, closeMany, copyDisplayPath, hidePane, move, open, openFeedback, openInSystem, paneVisible, paneWidth, reload, revealInFolder, retry, returnTarget, returnToTarget, setPaneWidth, setReturnTarget, showPane, tabs])
 
   return <FilePreviewContext.Provider value={value}>{children}</FilePreviewContext.Provider>
 }

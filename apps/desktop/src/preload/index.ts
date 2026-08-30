@@ -276,9 +276,6 @@ const api: RovaiApi = {
     copyPath(request) {
       return ipcRenderer.invoke('rovai:file-preview-copy-path', request)
     },
-    attachSelection(request) {
-      return ipcRenderer.invoke('rovai:file-preview-attach-selection', request)
-    },
     chooseAuthorizedRoot(request) {
       return ipcRenderer.invoke('rovai:file-preview-choose-root', request)
     },

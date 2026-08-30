@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { createPortal } from 'react-dom'
 import { SafeMarkdown } from './SafeMarkdown'
 import { useFilePreview, type FilePreviewTabModel } from './FilePreviewContext'
 import { filePreviewAssetUrl } from '../../file-preview-asset-url'
@@ -36,88 +35,8 @@ function RelativePath({ path, fileName }: { path: string; fileName: string }): R
   )
 }
 
-interface PositionedTextSelection {
-  selectedText: string
-  startLine: number
-  startColumn: number
-  endLine: number
-  endColumn: number
-  left: number
-  top: number
-}
-
-function utf16OffsetWithin(node: HTMLElement, container: Node, offset: number): number | null {
-  try {
-    const range = document.createRange()
-    range.selectNodeContents(node)
-    range.setEnd(container, offset)
-    return range.toString().length
-  } catch {
-    return null
-  }
-}
-
-function currentCodeSelection(root: HTMLElement): PositionedTextSelection | null {
-  const selection = window.getSelection()
-  if (!selection || selection.rangeCount !== 1 || selection.isCollapsed) return null
-  const range = selection.getRangeAt(0)
-  if (!root.contains(range.startContainer) || !root.contains(range.endContainer)) return null
-  const startElement = (range.startContainer.nodeType === Node.ELEMENT_NODE
-    ? range.startContainer as Element
-    : range.startContainer.parentElement)?.closest<HTMLElement>('code[data-file-line]')
-  const endElement = (range.endContainer.nodeType === Node.ELEMENT_NODE
-    ? range.endContainer as Element
-    : range.endContainer.parentElement)?.closest<HTMLElement>('code[data-file-line]')
-  if (!startElement || !endElement || !root.contains(startElement) || !root.contains(endElement)) return null
-  const startLine = Number(startElement.dataset.fileLine)
-  const endLine = Number(endElement.dataset.fileLine)
-  const startOffset = utf16OffsetWithin(startElement, range.startContainer, range.startOffset)
-  const endOffset = utf16OffsetWithin(endElement, range.endContainer, range.endOffset)
-  if (
-    !Number.isSafeInteger(startLine)
-    || !Number.isSafeInteger(endLine)
-    || startOffset === null
-    || endOffset === null
-  ) return null
-  const selectedText = startLine === endLine
-    ? (startElement.textContent ?? '').slice(startOffset, endOffset)
-    : [
-        (startElement.textContent ?? '').slice(startOffset),
-        ...[...root.querySelectorAll<HTMLElement>('code[data-file-line]')]
-          .filter((element) => {
-            const line = Number(element.dataset.fileLine)
-            return line > startLine && line < endLine
-          })
-          .map((element) => element.textContent ?? ''),
-        (endElement.textContent ?? '').slice(0, endOffset)
-      ].join('\n')
-  if (selectedText.length === 0) return null
-  const rect = range.getBoundingClientRect()
-  if (rect.width === 0 && rect.height === 0) return null
-  const width = 224
-  const left = Math.min(Math.max(8, rect.left), Math.max(8, window.innerWidth - width - 8))
-  const top = rect.bottom + 8 + 116 < window.innerHeight
-    ? rect.bottom + 8
-    : Math.max(8, rect.top - 42)
-  return {
-    selectedText,
-    startLine,
-    startColumn: startOffset + 1,
-    endLine,
-    endColumn: endOffset + 1,
-    left,
-    top
-  }
-}
-
 function CodeViewer({ tab }: { tab: FilePreviewTabModel }): React.JSX.Element {
   const rootRef = useRef<HTMLDivElement>(null)
-  const { attachSelection, reload, selectionBridgeAvailable } = useFilePreview()
-  const [selection, setSelection] = useState<PositionedTextSelection | null>(null)
-  const [attaching, setAttaching] = useState(false)
-  const [attachError, setAttachError] = useState<string | null>(null)
-  const [offerSnapshot, setOfferSnapshot] = useState(false)
-  const [announcement, setAnnouncement] = useState('')
   const [searchOpen, setSearchOpen] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
   const [searchIndex, setSearchIndex] = useState(0)
@@ -168,29 +87,6 @@ function CodeViewer({ tab }: { tab: FilePreviewTabModel }): React.JSX.Element {
     if (searchMatches.length === 0) return
     setSearchIndex((current) => (current + direction + searchMatches.length) % searchMatches.length)
   }
-  const captureSelection = (): void => {
-    const root = rootRef.current
-    if (!root) return
-    setAttachError(null)
-    setOfferSnapshot(false)
-    setSelection(currentCodeSelection(root))
-  }
-  const attach = async (mode: 'verified_current' | 'visible_snapshot'): Promise<void> => {
-    if (!selection || attaching) return
-    setAttaching(true)
-    setAttachError(null)
-    const result = await attachSelection(tab.id, selection, mode)
-    setAttaching(false)
-    if (!result.ok) {
-      setAttachError(result.error.message)
-      setOfferSnapshot(mode === 'verified_current' && result.error.code === 'read_failed')
-      return
-    }
-    setSelection(null)
-    setOfferSnapshot(false)
-    setAnnouncement('已附加到当前会话')
-    window.setTimeout(() => setAnnouncement(''), 1_600)
-  }
   return (
     <>
       <div
@@ -199,7 +95,6 @@ function CodeViewer({ tab }: { tab: FilePreviewTabModel }): React.JSX.Element {
         role="region"
         aria-label={`${tab.file.fileName} 内容`}
         tabIndex={0}
-        onMouseUp={captureSelection}
         onKeyDown={(event) => {
           if ((event.metaKey || event.ctrlKey) && event.key.toLocaleLowerCase() === 'f') {
             event.preventDefault()
@@ -211,12 +106,6 @@ function CodeViewer({ tab }: { tab: FilePreviewTabModel }): React.JSX.Element {
             setSearchOpen(false)
           }
         }}
-        onKeyUp={(event) => {
-          if (event.key.startsWith('Arrow') || event.key === 'Home' || event.key === 'End') {
-            captureSelection()
-          }
-        }}
-        onScroll={() => setSelection(null)}
       >
         {lines.map((line, index) => {
           const patchClass = tab.file.kind === 'patch'
@@ -277,30 +166,6 @@ function CodeViewer({ tab }: { tab: FilePreviewTabModel }): React.JSX.Element {
           }}>×</button>
         </div>
       )}
-      {selection && selectionBridgeAvailable && createPortal(
-        <div
-          className="file-preview-selection-action"
-          style={{ left: selection.left, top: selection.top }}
-          role="dialog"
-          aria-label="文件选区操作"
-          onPointerDown={(event) => event.preventDefault()}
-        >
-          <button type="button" disabled={attaching} onClick={() => void attach('verified_current')}>
-            {attaching ? '正在附加…' : '附加到当前会话'}
-          </button>
-          {attachError && <span role="status">{attachError}</span>}
-          {offerSnapshot && (
-            <div>
-              <button type="button" onClick={() => void reload(tab.id)}>重新加载</button>
-              <button type="button" disabled={attaching} onClick={() => void attach('visible_snapshot')}>
-                附加当前可见快照
-              </button>
-            </div>
-          )}
-        </div>,
-        document.body
-      )}
-      <span className="sr-only" role="status" aria-live="polite">{announcement}</span>
     </>
   )
 }

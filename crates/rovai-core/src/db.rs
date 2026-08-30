@@ -50,10 +50,8 @@ pub struct Database {
     runtime_camp_files_root_identity_digest: String,
 }
 
-const CURRENT_DATA_CONTRACT_VERSION: &str = "v1.30";
-const CURRENT_PROJECTION_SCHEMA_VERSION: i64 = 71;
-const V117_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.29";
-const V117_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION: i64 = 70;
+const CURRENT_DATA_CONTRACT_VERSION: &str = "v1.29";
+const CURRENT_PROJECTION_SCHEMA_VERSION: i64 = 70;
 const V116_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.28";
 const V116_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION: i64 = 69;
 const V115_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.26";
@@ -192,7 +190,6 @@ struct CurrentMigrationState {
     v114: bool,
     v115: bool,
     v116: bool,
-    v117: bool,
 }
 
 impl CurrentMigrationState {
@@ -244,14 +241,6 @@ impl CurrentMigrationState {
             && self.v114
             && self.v115;
         if contract == CURRENT_DATA_CONTRACT_VERSION && schema == CURRENT_PROJECTION_SCHEMA_VERSION
-        {
-            return classifier == V116_CLASSIFIER_VERSION && through_v115 && self.v116 && self.v117;
-        }
-        if self.v117 {
-            return false;
-        }
-        if contract == V117_MIGRATION_SOURCE_DATA_CONTRACT_VERSION
-            && schema == V117_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION
         {
             return classifier == V116_CLASSIFIER_VERSION && through_v115 && self.v116;
         }
@@ -1397,7 +1386,7 @@ fn connection_has_current_data_contract(connection: &Connection) -> rusqlite::Re
         SELECT contract_version = ?1
                AND projection_schema_version = ?2
                AND classifier_version = ?3
-               AND EXISTS(SELECT 1 FROM schema_migration WHERE version = 117)
+               AND EXISTS(SELECT 1 FROM schema_migration WHERE version = 116)
         FROM rovai_data_contract
         WHERE singleton = 1
         "#,
@@ -1461,8 +1450,7 @@ fn load_current_migration_state(
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 113),
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 114),
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 115),
-               EXISTS(SELECT 1 FROM schema_migration WHERE version = 116),
-               EXISTS(SELECT 1 FROM schema_migration WHERE version = 117)
+               EXISTS(SELECT 1 FROM schema_migration WHERE version = 116)
         "#,
         [],
         |row| {
@@ -1514,7 +1502,6 @@ fn load_current_migration_state(
                 v114: row.get(44)?,
                 v115: row.get(45)?,
                 v116: row.get(46)?,
-                v117: row.get(47)?,
             })
         },
     )
@@ -2990,9 +2977,6 @@ impl Database {
             if !self.schema_migration_applied(116)? {
                 self.migrate_runtime_activity_classifier_v116()?;
             }
-            if !self.schema_migration_applied(117)? {
-                self.migrate_file_selection_contract_v117()?;
-            }
             if let Err(error) =
                 crate::notification::maintain_notification_episode_retention(self.connection())
             {
@@ -3390,9 +3374,6 @@ impl Database {
         }
         if !self.schema_migration_applied(116)? {
             self.migrate_runtime_activity_classifier_v116()?;
-        }
-        if !self.schema_migration_applied(117)? {
-            self.migrate_file_selection_contract_v117()?;
         }
         if let Err(error) =
             crate::notification::maintain_notification_episode_retention(self.connection())
@@ -16330,26 +16311,6 @@ impl Database {
         Ok(())
     }
 
-    fn migrate_file_selection_contract_v117(&mut self) -> Result<()> {
-        let transaction = self
-            .connection
-            .transaction_with_behavior(TransactionBehavior::Immediate)?;
-        transaction.execute_batch(
-            r#"
-            UPDATE rovai_data_contract
-            SET contract_version = 'v1.30', projection_schema_version = 71,
-                classifier_version = 'activity-v2', reset_reason = NULL,
-                updated_at = datetime('now')
-            WHERE singleton = 1;
-
-            INSERT INTO schema_migration(version, applied_at)
-            VALUES (117, datetime('now'));
-            "#,
-        )?;
-        transaction.commit()?;
-        Ok(())
-    }
-
     fn migrate_pending_camp_activation_v67(&mut self) -> Result<()> {
         let transaction = self
             .connection
@@ -20752,33 +20713,7 @@ impl Database {
 }
 
 #[cfg(test)]
-fn downgrade_current_schema_to_v116_source_for_test(connection: &Connection) {
-    let has_v117: bool = connection
-        .query_row(
-            "SELECT EXISTS(SELECT 1 FROM schema_migration WHERE version = 117)",
-            [],
-            |row| row.get(0),
-        )
-        .unwrap();
-    if !has_v117 {
-        return;
-    }
-    connection
-        .execute_batch(
-            r#"
-            UPDATE rovai_data_contract
-            SET contract_version = 'v1.29', projection_schema_version = 70,
-                classifier_version = 'activity-v2'
-            WHERE singleton = 1;
-            DELETE FROM schema_migration WHERE version = 117;
-            "#,
-        )
-        .unwrap();
-}
-
-#[cfg(test)]
 fn downgrade_current_schema_to_v115_source_for_test(connection: &Connection) {
-    downgrade_current_schema_to_v116_source_for_test(connection);
     let has_v116: bool = connection
         .query_row(
             "SELECT EXISTS(SELECT 1 FROM schema_migration WHERE version = 116)",
@@ -21789,7 +21724,6 @@ mod tests {
             v114: version >= 114,
             v115: version >= 115,
             v116: version >= 116,
-            v117: version >= 117,
         }
     }
 
@@ -21800,12 +21734,6 @@ mod tests {
                 "current",
                 CURRENT_DATA_CONTRACT_VERSION,
                 CURRENT_PROJECTION_SCHEMA_VERSION,
-                117,
-            ),
-            (
-                "v1.29/schema-70 before File Selection content",
-                V117_MIGRATION_SOURCE_DATA_CONTRACT_VERSION,
-                V117_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION,
                 116,
             ),
             (
@@ -22056,7 +21984,7 @@ mod tests {
             ),
         ];
         for (name, contract, schema, through) in supported {
-            let classifier = if through >= 116 {
+            let classifier = if through == 116 {
                 V116_CLASSIFIER_VERSION
             } else {
                 V043_CLASSIFIER_VERSION
@@ -22067,7 +21995,7 @@ mod tests {
             );
         }
 
-        let current = migration_state_through(117);
+        let current = migration_state_through(116);
         let v092_source = migration_state_through(91);
         let mut missing_intermediate = current;
         missing_intermediate.v84 = false;
@@ -22147,7 +22075,7 @@ mod tests {
             )
             .expect("current contract marker should load");
 
-        assert_eq!(state, migration_state_through(117));
+        assert_eq!(state, migration_state_through(116));
         assert!(state.admits(&contract, schema, &classifier));
         assert!(has_admissible_data_contract(
             &directory.join("rovai.sqlite")
@@ -24228,7 +24156,7 @@ mod tests {
     }
 
     #[test]
-    fn v116_switches_new_activity_writes_and_v117_advances_file_selection_contract() {
+    fn v116_switches_new_activity_writes_without_reclassifying_history() {
         let directory =
             std::env::temp_dir().join(format!("rovai-db-v116-classifier-test-{}", Uuid::new_v4()));
         let mut database = crate::test_support::fresh_schema_database_fast_at(&directory);
@@ -24282,29 +24210,6 @@ mod tests {
                 "tool.web.search".to_string(),
                 "Web 搜索".to_string()
             )
-        );
-
-        database.migrate_file_selection_contract_v117().unwrap();
-
-        let marker: (String, i64, String) = database
-            .connection()
-            .query_row(
-                "SELECT contract_version, projection_schema_version, classifier_version FROM rovai_data_contract WHERE singleton = 1",
-                [],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
-            )
-            .unwrap();
-        assert_eq!(marker, ("v1.30".to_string(), 71, "activity-v2".to_string()));
-        assert_eq!(
-            database
-                .connection()
-                .query_row(
-                    "SELECT classifier_version, semantic_kind, presentation_hint FROM canonical_runtime_activity WHERE operation_id = 'historical-operation'",
-                    [],
-                    |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?)),
-                )
-                .unwrap(),
-            historical
         );
 
         drop(database);
@@ -24598,7 +24503,7 @@ mod tests {
                 },
             )
             .unwrap();
-        assert_eq!(upgraded_marker, ("v1.30".to_string(), 71, 1, 1, 0));
+        assert_eq!(upgraded_marker, ("v1.29".to_string(), 70, 1, 1, 0));
         assert_table_columns(upgraded.connection(), "camp", &["attachment_revision"], &[]);
         assert_schema_objects(
             upgraded.connection(),
@@ -24630,7 +24535,7 @@ mod tests {
                     )),
                 )
                 .unwrap(),
-            ("v1.30".to_string(), 71, 1)
+            ("v1.29".to_string(), 70, 1)
         );
         drop(restarted);
         std::fs::remove_dir_all(directory).expect("temporary database should be removable");
@@ -24871,7 +24776,7 @@ mod tests {
                 },
             )
             .unwrap();
-        assert_eq!(upgraded_marker, ("v1.30".to_string(), 71, 1, 1, 0));
+        assert_eq!(upgraded_marker, ("v1.29".to_string(), 70, 1, 1, 0));
         assert_table_columns(
             upgraded.connection(),
             "message_delivery",
@@ -24931,8 +24836,8 @@ mod tests {
                 "terminal".to_string(),
                 0,
                 1,
-                "v1.30".to_string(),
-                71,
+                "v1.29".to_string(),
+                70,
             )
         );
         drop(restarted);
@@ -25042,7 +24947,7 @@ mod tests {
                     )),
                 )
                 .unwrap(),
-            ("v1.30".to_string(), 71, 1, 1, 1)
+            ("v1.29".to_string(), 70, 1, 1, 1)
         );
         assert_eq!(
             reopened

@@ -1,6 +1,7 @@
 import { isValidElement, useEffect, useRef, type JSX, type ReactNode } from 'react'
 import Markdown, { defaultUrlTransform } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
+import { FILE_REFERENCE_FRAGMENT, FileReferenceLink } from './FileReferenceLink'
 import {
   isInlineFileReference,
   parseFileReference,
@@ -13,8 +14,6 @@ type MarkdownTreeNode = {
   children?: MarkdownTreeNode[]
   url?: string
 }
-
-const FILE_REFERENCE_FRAGMENT = '#rovai-file-reference='
 
 function markdownHeadingText(children: ReactNode): string {
   if (typeof children === 'string' || typeof children === 'number') return String(children)
@@ -53,6 +52,10 @@ function remarkFileReferences(): (tree: MarkdownTreeNode) => void {
       const next: MarkdownTreeNode[] = []
       for (const child of node.children) {
         if (child.type !== 'text' || typeof child.value !== 'string') {
+          if (child.type === 'link' && typeof child.url === 'string' && parseFileReference(child.url)) {
+            next.push({ ...child, url: `${FILE_REFERENCE_FRAGMENT}${encodeURIComponent(child.url)}` })
+            continue
+          }
           if (
             child.type === 'inlineCode'
             && typeof child.value === 'string'
@@ -61,7 +64,7 @@ function remarkFileReferences(): (tree: MarkdownTreeNode) => void {
             next.push({
               type: 'link',
               url: `${FILE_REFERENCE_FRAGMENT}${encodeURIComponent(child.value)}`,
-              children: [{ type: 'text', value: child.value }]
+              children: [{ type: 'inlineCode', value: child.value }]
             })
             continue
           }
@@ -142,16 +145,21 @@ export function SafeMarkdown({
           h3: heading('h4'),
           a({ href, children: linkChildren }) {
             if (href?.startsWith(FILE_REFERENCE_FRAGMENT) && onFileReference) {
-              const rawReference = decodeURIComponent(href.slice(FILE_REFERENCE_FRAGMENT.length))
+              let rawReference: string
+              try {
+                rawReference = decodeURIComponent(href.slice(FILE_REFERENCE_FRAGMENT.length))
+              } catch {
+                return <code className="markdown-inert-link">{linkChildren}</code>
+              }
+              if (!parseFileReference(rawReference)) return <code className="markdown-inert-link">{linkChildren}</code>
               return (
-                <button
+                <FileReferenceLink
                   className="markdown-file-reference"
-                  type="button"
-                  title={`打开 ${rawReference}`}
-                  onClick={() => onFileReference(rawReference)}
+                  rawReference={rawReference}
+                  onActivate={onFileReference}
                 >
-                  {linkChildren}
-                </button>
+                  {markdownHeadingText(linkChildren).trim() ? linkChildren : rawReference}
+                </FileReferenceLink>
               )
             }
             if (href?.startsWith('#')) {

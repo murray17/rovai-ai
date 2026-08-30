@@ -37,12 +37,14 @@ async function fixture(): Promise<{
   directories.push(root)
   const authority: FilePreviewSourceAuthority = {
     async resolve(request) {
-      if (request.kind !== 'camp_workspace') return null
+      if (request.kind !== 'camp_workspace' && request.kind !== 'message_reference') return null
       return {
         kind: 'file_target',
         campId: request.campId,
         sourceKind: request.kind,
-        sourceIdentity: `${request.campId}:${request.rawReference}`,
+        sourceIdentity: request.kind === 'message_reference'
+          ? `message:${request.messageId}`
+          : `${request.campId}:${request.rawReference}`,
         rootPath: root,
         basePath: root,
         rawReference: request.rawReference,
@@ -57,18 +59,7 @@ async function fixture(): Promise<{
     openPath,
     revealPath: vi.fn(),
     copyText: vi.fn(),
-    publishExternalUpdate: vi.fn(),
-    attachSelection: vi.fn(async () => ({
-      campId: 'camp-1',
-      body: '',
-      content: [],
-      revision: 1,
-      attachments: [],
-      replyIntent: null,
-      continuationIntent: null,
-      updatedAt: null,
-      expiresAt: null
-    }))
+    publishExternalUpdate: vi.fn()
   }
   const registry = new RootWatchRegistry({
     notify: vi.fn(),
@@ -104,6 +95,70 @@ describe('FilePreviewService', () => {
     expect(content).toMatchObject({ ok: true, value: { text: '# Hello' } })
     await service.release(1, { handleId: opened.value.file.handleId })
     expect(registry.rootCount).toBe(0)
+  })
+
+  it('deduplicates the verified file across messages and locations without reusing source authority', async () => {
+    const { root, service, authority, registry } = await fixture()
+    await mkdir(join(root, 'src'))
+    await writeFile(join(root, 'src', 'app.ts'), 'const value = 1')
+    const resolveSource = vi.spyOn(authority, 'resolve')
+    const firstRequest: OpenFilePreviewRequest = {
+      kind: 'message_reference', campId: 'camp-1', messageId: 'message-1', rawReference: 'src/app.ts:1'
+    }
+    const secondRequest: OpenFilePreviewRequest = {
+      kind: 'message_reference', campId: 'camp-1', messageId: 'message-2', rawReference: './src/app.ts:20'
+    }
+    try {
+      const first = await service.open(1, firstRequest)
+      const second = await service.open(1, secondRequest)
+      expect(first).toMatchObject({ ok: true, value: { kind: 'file_preview' } })
+      expect(second).toMatchObject({ ok: true, value: { kind: 'file_preview' } })
+      if (!first.ok || first.value.kind !== 'file_preview' || !second.ok || second.value.kind !== 'file_preview') return
+      const firstFile = first.value.file
+      const secondFile = second.value.file
+      expect(secondFile.previewKey).toBe(firstFile.previewKey)
+      expect(secondFile.handleId).not.toBe(firstFile.handleId)
+      expect(secondFile.reopenToken).not.toBe(firstFile.reopenToken)
+      expect(secondFile.target).toMatchObject({ line: 20 })
+      expect(resolveSource).toHaveBeenNthCalledWith(1, firstRequest)
+      expect(resolveSource).toHaveBeenNthCalledWith(2, secondRequest)
+      await service.release(1, { handleId: secondFile.handleId })
+      expect(service.handleCount).toBe(1)
+      expect(registry.rootCount).toBe(1)
+      expect(await service.readText(1, { handleId: firstFile.handleId, expectedGeneration: firstFile.contentGeneration }))
+        .toMatchObject({ ok: true, value: { text: 'const value = 1' } })
+      resolveSource.mockResolvedValueOnce(null)
+      expect((await service.open(1, secondRequest)).ok).toBe(false)
+      expect(resolveSource).toHaveBeenCalledTimes(3)
+      expect(service.handleCount).toBe(1)
+    } finally {
+      await service.closeAll()
+    }
+  })
+
+  it('keeps different files, windows and Camps distinct while preserving identity after a disk update', async () => {
+    const { root, service } = await fixture()
+    await mkdir(join(root, 'first'))
+    await mkdir(join(root, 'second'))
+    await writeFile(join(root, 'first', 'app.ts'), 'first')
+    await writeFile(join(root, 'second', 'app.ts'), 'second')
+    const openKey = async (windowId: number, campId: string, rawReference: string): Promise<string> => {
+      const opened = await service.open(windowId, { kind: 'camp_workspace', campId, rawReference })
+      if (!opened.ok || opened.value.kind !== 'file_preview') throw new Error('Expected a preview')
+      return opened.value.file.previewKey
+    }
+    try {
+      const original = await openKey(1, 'camp-1', 'first/app.ts')
+      expect(await openKey(1, 'camp-1', 'second/app.ts')).not.toBe(original)
+      await writeFile(join(root, 'first', 'app.ts'), 'updated first file')
+      expect(await openKey(1, 'camp-1', './first/app.ts:20')).toBe(original)
+      await service.bindCamp(2, 'camp-1')
+      expect(await openKey(2, 'camp-1', 'first/app.ts')).not.toBe(original)
+      await service.bindCamp(1, 'camp-2')
+      expect(await openKey(1, 'camp-2', 'first/app.ts')).not.toBe(original)
+    } finally {
+      await service.closeAll()
+    }
   })
 
   it('silently reopens an expired file descriptor while keeping the tab watcher alive', async () => {
@@ -330,103 +385,4 @@ describe('FilePreviewService', () => {
     expect(openPath).not.toHaveBeenCalled()
   })
 
-  it('freezes a verified text selection without persisting handle authority', async () => {
-    const { root, service, native } = await fixture()
-    await writeFile(join(root, 'notes.txt'), 'first line\nsecond line\n')
-    const opened = await service.open(1, request('notes.txt'))
-    expect(opened.ok).toBe(true)
-    if (!opened.ok || opened.value.kind !== 'file_preview') return
-    const attached = await service.attachSelection(1, {
-      campId: 'camp-1',
-      expectedDraftRevision: 0,
-      handleId: opened.value.file.handleId,
-      expectedGeneration: opened.value.file.contentGeneration,
-      selectedText: 'second',
-      startLine: 2,
-      startColumn: 1,
-      endLine: 2,
-      endColumn: 7,
-      attachMode: 'verified_current'
-    })
-    expect(attached.ok).toBe(true)
-    const snapshot = vi.mocked(native.attachSelection).mock.calls[0]?.[2]
-    expect(snapshot).toMatchObject({
-      displayPath: 'notes.txt',
-      selectedText: 'second',
-      verification: 'current_file',
-      positionEncoding: 'utf-16',
-      rangeEnd: 'exclusive'
-    })
-    expect(snapshot).not.toHaveProperty('handleId')
-    expect(snapshot).not.toHaveProperty('contentGeneration')
-    expect(snapshot?.sourceIdentityDigest).toMatch(/^sha256:[a-f0-9]{64}$/u)
-  })
-
-  it('verifies multiline UTF-16 selection text against the current file', async () => {
-    const { root, service, native } = await fixture()
-    await writeFile(join(root, 'unicode.txt'), 'first\n😀second\n')
-    const opened = await service.open(1, request('unicode.txt'))
-    expect(opened.ok).toBe(true)
-    if (!opened.ok || opened.value.kind !== 'file_preview') return
-    const base = {
-      campId: 'camp-1',
-      expectedDraftRevision: 0,
-      handleId: opened.value.file.handleId,
-      expectedGeneration: opened.value.file.contentGeneration,
-      startLine: 1,
-      startColumn: 1,
-      endLine: 2,
-      endColumn: 3,
-      attachMode: 'verified_current' as const
-    }
-    const attached = await service.attachSelection(1, {
-      ...base,
-      selectedText: 'first\n😀'
-    })
-    expect(attached.ok).toBe(true)
-    expect(vi.mocked(native.attachSelection).mock.calls[0]?.[2].selectedText).toBe('first\n😀')
-
-    const forged = await service.attachSelection(1, {
-      ...base,
-      selectedText: 'first\n伪造'
-    })
-    expect(forged).toMatchObject({
-      ok: false,
-      error: { code: 'read_failed', message: '选区内容与当前文件不一致，请重新选择。' }
-    })
-    await service.closeAll()
-  })
-
-  it('requires an explicit visible-snapshot action after the file changes', async () => {
-    const { root, service, native } = await fixture()
-    const file = join(root, 'notes.txt')
-    await writeFile(file, 'old')
-    const opened = await service.open(1, request('notes.txt'))
-    expect(opened.ok).toBe(true)
-    if (!opened.ok || opened.value.kind !== 'file_preview') return
-    await writeFile(file, 'new version with a different size')
-    const base = {
-      campId: 'camp-1',
-      expectedDraftRevision: 0,
-      handleId: opened.value.file.handleId,
-      expectedGeneration: opened.value.file.contentGeneration,
-      selectedText: 'old',
-      startLine: 1,
-      startColumn: 1,
-      endLine: 1,
-      endColumn: 4
-    }
-    const verified = await service.attachSelection(1, {
-      ...base,
-      attachMode: 'verified_current'
-    })
-    expect(verified).toMatchObject({ ok: false, error: { code: 'read_failed' } })
-    const snapshot = await service.attachSelection(1, {
-      ...base,
-      attachMode: 'visible_snapshot'
-    })
-    expect(snapshot.ok).toBe(true)
-    expect(vi.mocked(native.attachSelection).mock.calls[0]?.[2].verification)
-      .toBe('viewer_snapshot_after_change')
-  })
 })

@@ -90,7 +90,6 @@ import { AppQuitCoordinator } from './app-quit-coordinator'
 import { CoreFilePreviewSourceAuthority } from './file-preview/file-preview-authority'
 import { FilePreviewService } from './file-preview/file-preview-service'
 import {
-  parseAttachSelectionRequest,
   parseChooseRootRequest,
   parseCopyPathRequest,
   parseFilePreviewCamp,
@@ -201,7 +200,6 @@ const allowedMethods = new Set<CoreMethod>([
   'camp.composerDraft.dismissContinuation',
   'camp.composerDraft.resolveContinuationRecipient',
   'camp.composerDraft.removeAttachment',
-  'camp.composer.selection.remove',
   'camp.composerDraft.discard',
   'camp.messages.send',
   'userAutomation.camp.send',
@@ -320,13 +318,6 @@ const filePreview = new FilePreviewService(
       mainWindow.webContents.send('rovai:file-preview-external-update', {
         campId: notification.campId,
         previewKeys: notification.previewKeys
-      })
-    },
-    attachSelection(campId, expectedDraftRevision, selection) {
-      return core.request('camp.composer.selection.attach', {
-        campId,
-        expectedDraftRevision,
-        selection
       })
     }
   }
@@ -709,9 +700,6 @@ ipcMain.handle('rovai:file-preview-reveal', (event, value: unknown) =>
 
 ipcMain.handle('rovai:file-preview-copy-path', (event, value: unknown) =>
   filePreview.copyPath(requireFilePreviewSender(event), parseCopyPathRequest(value)))
-
-ipcMain.handle('rovai:file-preview-attach-selection', (event, value: unknown) =>
-  filePreview.attachSelection(requireFilePreviewSender(event), parseAttachSelectionRequest(value)))
 
 ipcMain.handle('rovai:file-preview-choose-root', (event, value: unknown) =>
   filePreview.chooseAuthorizedRoot(requireFilePreviewSender(event), parseChooseRootRequest(value)))

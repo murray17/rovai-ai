@@ -959,7 +959,6 @@ export type StructuredCampMessageSegment =
   | { kind: 'all_members_mention' }
   | { kind: 'current_user_mention'; userId: 'local_user' }
   | { kind: 'skill_mention'; skillId: string; nameAtSend: string }
-  | { kind: 'file_selection'; selection: FileSelectionSnapshot }
 
 export type StructuredCampMessageContent = StructuredCampMessageSegment[]
 
@@ -1108,14 +1107,6 @@ export interface AttachmentRevealResult {
   error: AttachmentActionError | null
 }
 
-export type FilePreviewSourceKind =
-  | 'message_reference'
-  | 'camp_workspace'
-  | 'attachment'
-  | 'run_evidence'
-  | 'child_of_handle'
-  | 'authorized_root'
-
 export type OpenFilePreviewRequest =
   | {
       kind: 'message_reference'
@@ -1205,35 +1196,6 @@ export interface FileContentVersion {
   fileId?: string
 }
 
-export interface FileSelectionSnapshot {
-  selectionId: string
-  displayPath: string
-  selectedText: string
-  startLine: number
-  startColumn?: number
-  endLine: number
-  endColumn?: number
-  positionEncoding: 'utf-16'
-  rangeEnd: 'exclusive'
-  contentVersion: FileContentVersion
-  verification: 'current_file' | 'viewer_snapshot_after_change'
-  sourceKind: FilePreviewSourceKind
-  sourceIdentityDigest: string
-}
-
-export interface AttachFileSelectionRequest {
-  campId: string
-  expectedDraftRevision: number
-  handleId: string
-  expectedGeneration: string
-  selectedText: string
-  startLine: number
-  startColumn?: number
-  endLine: number
-  endColumn?: number
-  attachMode: 'verified_current' | 'visible_snapshot'
-}
-
 export interface ResolvedFilePreview {
   handleId: string
   reopenToken: string
@@ -1269,7 +1231,6 @@ export type FilePreviewErrorCode =
   | 'authorization_required'
   | 'too_many_open_files'
   | 'evidence_identity_unavailable'
-  | 'selection_too_large'
   | 'not_regular_file'
   | 'outside_authorized_root'
   | 'file_too_large'
@@ -1352,7 +1313,6 @@ export interface FilePreviewApi {
   openInSystem(request: { handleId: string }): Promise<FilePreviewOperationResult<{ opened: true }>>
   revealInFolder(request: { handleId: string }): Promise<FilePreviewOperationResult<{ revealed: true }>>
   copyPath(request: { handleId: string; format: 'display' | 'absolute' }): Promise<FilePreviewOperationResult<{ copied: true }>>
-  attachSelection(request: AttachFileSelectionRequest): Promise<FilePreviewOperationResult<CampComposerDraftView>>
   chooseAuthorizedRoot(request: { campId: string; pendingOpenId: string }): Promise<FilePreviewOperationResult<FilePreviewRootGrantResult | null>>
   onExternalUpdate(listener: (event: FilePreviewExternalUpdateEvent) => void): () => void
 }
@@ -2975,8 +2935,6 @@ export type CoreMethod =
   | 'camp.composerDraft.dismissContinuation'
   | 'camp.composerDraft.resolveContinuationRecipient'
   | 'camp.composerDraft.removeAttachment'
-  | 'camp.composer.selection.attach'
-  | 'camp.composer.selection.remove'
   | 'camp.composerDraft.discard'
   | 'camp.messages.send'
   | 'userAutomation.camp.send'

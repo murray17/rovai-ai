@@ -25,7 +25,6 @@ import type {
   CampOpenProjection,
   CampSnapshot,
   ExecutionConsolePlacement,
-  FilePreviewErrorPayload,
   MessageDeliveryView,
   TaskStatus,
   TaskView,
@@ -64,11 +63,8 @@ import { runtimeReadinessLabel } from './runtime-status'
 import { runtimeEditorInstallation } from './MemberRuntimeParameters'
 import { SafeMarkdown } from './SafeMarkdown'
 import { FilePreviewPane } from './FilePreviewPane'
-import {
-  useOptionalFilePreview,
-  type FilePreviewSelectionBridge
-} from './FilePreviewContext'
-import { tokenizeFileReferences } from '../../file-preview-reference'
+import { useOptionalFilePreview } from './FilePreviewContext'
+import { FileReferenceText } from './FileReferenceLink'
 import { RuntimeFailureNotice } from './RuntimeFailureNotice'
 import { identityColorToken } from './theme'
 import { availableComposerSkillsForLead } from './composer-skill-picker'
@@ -121,42 +117,11 @@ const EXECUTION_DRAWER_KEYBOARD_STEP = 24
 const EXECUTION_DRAWER_KEYBOARD_PAGE_STEP = 80
 const CAMP_CONVERSATION_VIEW_STORAGE_KEY = 'rovai.camp-conversation-view.v1'
 
-class FileSelectionAttachFailure extends Error {
-  constructor(readonly payload: FilePreviewErrorPayload) {
-    super(payload.message)
-  }
-}
-
 export function composerHasSendablePayload(
   message: string,
-  hasReadyAttachment: boolean,
-  hasFileSelection = false
+  hasReadyAttachment: boolean
 ): boolean {
-  return message.trim().length > 0 || hasReadyAttachment || hasFileSelection
-}
-
-function editableComposerContent(
-  content: StructuredCampMessageContent
-): StructuredCampMessageContent {
-  return content.filter((segment) => segment.kind !== 'file_selection')
-}
-
-function contentWithPreservedFileSelections(
-  editable: StructuredCampMessageContent,
-  current: StructuredCampMessageContent
-): StructuredCampMessageContent {
-  return [
-    ...editable.filter((segment) => segment.kind !== 'file_selection'),
-    ...current.filter((segment) => segment.kind === 'file_selection')
-  ]
-}
-
-function fileSelectionRangeLabel(
-  selection: Extract<StructuredCampMessageContent[number], { kind: 'file_selection' }>['selection']
-): string {
-  const start = `L${selection.startLine}${selection.startColumn ? `:${selection.startColumn}` : ''}`
-  const end = `L${selection.endLine}${selection.endColumn ? `:${selection.endColumn}` : ''}`
-  return `${start}–${end}`
+  return message.trim().length > 0 || hasReadyAttachment
 }
 
 export function composerSendIsDisabled(input: {
@@ -1084,9 +1049,6 @@ export function structuredCampContentPlainText(
     if (segment.kind === 'all_members_mention') return '@所有队员'
     if (segment.kind === 'current_user_mention') return '@你'
     if (segment.kind === 'skill_mention') return `/${segment.nameAtSend}`
-    if (segment.kind === 'file_selection') {
-      return `\n文件选区：${segment.selection.displayPath} · ${fileSelectionRangeLabel(segment.selection)}\n${segment.selection.selectedText}${segment.selection.selectedText.endsWith('\n') ? '' : '\n'}`
-    }
     return `@${names.get(segment.agentId) ?? '不可用队员'}`
   }).join('')
   return content[0]?.kind === 'current_user_mention' && content.length > 1
@@ -1103,9 +1065,7 @@ export function projectLeadingCurrentUserMentionMarkdownBody(
   if (
     leadingSegment?.kind !== 'current_user_mention'
     || leadingSegment.userId !== 'local_user'
-    || content.slice(1).some((segment) =>
-      segment.kind === 'current_user_mention' || segment.kind === 'file_selection'
-    )
+    || content.slice(1).some((segment) => segment.kind === 'current_user_mention')
   ) return null
 
   const names = new Map(members.map((member) => [member.agentId, member.displayName]))
@@ -1802,14 +1762,7 @@ export function CampWorkspace({
   const continuationRecipientAvailable = continuationRecipient?.membershipStatus === 'active'
     && continuationRecipient.profilePresence === 'present'
   const hasReadyAttachment = (composerDraft?.attachments.length ?? 0) > 0
-  const fileSelections = composerDraft?.content.filter((segment) =>
-    segment.kind === 'file_selection'
-  ) ?? []
-  const hasSendablePayload = composerHasSendablePayload(
-    message,
-    hasReadyAttachment,
-    fileSelections.length > 0
-  )
+  const hasSendablePayload = composerHasSendablePayload(message, hasReadyAttachment)
   const hasLocalDraftPayload = Boolean(
     hasSendablePayload
       || preparingAttachments.length > 0
@@ -1952,62 +1905,10 @@ export function CampWorkspace({
     (draft) => window.rovai.request<CampComposerDraftView>('camp.composerDraft.save', {
       campId,
       expectedRevision: draft.revision,
-      content: contentWithPreservedFileSelections(content, draft.content),
+      content,
       continuationSourceMessageId: draft.continuationIntent?.sourceCampMessageId ?? null
     })
   )
-
-  const setFileSelectionBridge = filePreview?.setSelectionBridge
-  useEffect(() => {
-    if (!setFileSelectionBridge) return undefined
-    const campId = snapshot.camp.id
-    const bridge: FilePreviewSelectionBridge = {
-      async attach(file, selection, attachMode) {
-        try {
-          const next = await queueDraftMutation(campId, async (draft) => {
-            const exactDraft = await window.rovai.request<CampComposerDraftView>(
-              'camp.composerDraft.save',
-              {
-                campId,
-                expectedRevision: draft.revision,
-                content: contentWithPreservedFileSelections(
-                  draftContent.current,
-                  draft.content
-                ),
-                continuationSourceMessageId:
-                  draft.continuationIntent?.sourceCampMessageId ?? null
-              }
-            )
-            const result = await window.rovai.filePreview.attachSelection({
-              campId,
-              expectedDraftRevision: exactDraft.revision,
-              handleId: file.handleId,
-              expectedGeneration: file.contentGeneration,
-              ...selection,
-              attachMode
-            })
-            if (!result.ok) throw new FileSelectionAttachFailure(result.error)
-            return result.value
-          })
-          return { ok: true, value: next }
-        } catch (error) {
-          if (error instanceof FileSelectionAttachFailure) {
-            return { ok: false, error: error.payload }
-          }
-          return {
-            ok: false,
-            error: {
-              code: 'read_failed',
-              message: '无法附加这个文件选区。',
-              retryable: true
-            }
-          }
-        }
-      }
-    }
-    setFileSelectionBridge(bridge)
-    return () => setFileSelectionBridge(null)
-  }, [setFileSelectionBridge, snapshot.camp.id])
 
   const loadReplyAnchorWindow = useCallback((messageId: string): Promise<CampMessageView[] | null> => {
     const existing = replyAnchorLoads.current.get(messageId)
@@ -2398,9 +2299,8 @@ export function CampWorkspace({
 
   const syncReplyDraft = (draft: CampComposerDraftView): CampComposerDraftView => {
     applyComposerDraft(draft.campId, draft)
-    const editable = editableComposerContent(draft.content)
-    setMessageContent(editable)
-    draftContent.current = editable
+    setMessageContent(draft.content)
+    draftContent.current = draft.content
     return draft
   }
 
@@ -2424,7 +2324,7 @@ export function CampWorkspace({
         {
           campId,
           expectedRevision: draft.revision,
-          content: contentWithPreservedFileSelections(localContent, draft.content),
+          content: localContent,
           continuationSourceMessageId: draft.continuationIntent?.sourceCampMessageId ?? null
         }
       )
@@ -2653,9 +2553,8 @@ export function CampWorkspace({
       .then((draft) => {
         if (cancelled || draftCampId.current !== campId) return
         applyComposerDraft(campId, draft)
-        const editable = editableComposerContent(draft.content)
-        setMessageContent(editable)
-        draftContent.current = editable
+        setMessageContent(draft.content)
+        draftContent.current = draft.content
       })
       .catch(() => {
         if (!cancelled && draftCampId.current === campId) {
@@ -3185,10 +3084,7 @@ export function CampWorkspace({
                 {
                   campId,
                   expectedRevision: draft.revision,
-                  content: contentWithPreservedFileSelections(
-                    draftContent.current,
-                    draft.content
-                  ),
+                  content: draftContent.current,
                   continuationSourceMessageId:
                     draft.continuationIntent?.sourceCampMessageId ?? null
                 }
@@ -3322,17 +3218,6 @@ export function CampWorkspace({
       (draft) => window.rovai.request<CampComposerDraftView>(
         'camp.composerDraft.removeAttachment',
         { campId, expectedRevision: draft.revision, attachmentId }
-      )
-    )
-  }
-
-  const removeFileSelection = async (selectionId: string): Promise<void> => {
-    const campId = snapshot.camp.id
-    await queueDraftMutation(
-      campId,
-      (draft) => window.rovai.request<CampComposerDraftView>(
-        'camp.composer.selection.remove',
-        { campId, expectedDraftRevision: draft.revision, selectionId }
       )
     )
   }
@@ -4065,7 +3950,6 @@ export function CampWorkspace({
                                   campMessage.authorType === 'agent'
                                   && !campMessage.content?.some((segment) =>
                                     segment.kind === 'current_user_mention'
-                                      || segment.kind === 'file_selection'
                                   )
                                     ? (
                                         <div className="final-copy">
@@ -4403,30 +4287,6 @@ export function CampWorkspace({
             <span className="composer-destination">将添加到这条消息</span>
           )}
           <div className="composer-input">
-            {fileSelections.length > 0 && (
-              <div className="composer-file-selection-strip" aria-label="待发送文件选区">
-                {fileSelections.map(({ selection }) => (
-                  <div className="composer-file-selection" key={selection.selectionId}>
-                    <svg viewBox="0 0 16 16" aria-hidden="true">
-                      <path d="M3 2.5h7l3 3v8H3Z" /><path d="M10 2.5v3h3M5.5 8h5M5.5 10.5h4" />
-                    </svg>
-                    <span>
-                      <strong title={selection.displayPath}>{selection.displayPath}</strong>
-                      <small>{fileSelectionRangeLabel(selection)}</small>
-                    </span>
-                    <button
-                      type="button"
-                      aria-label={`移除 ${selection.displayPath} 的文件选区`}
-                      title="移除文件选区"
-                      disabled={routingMutating}
-                      onClick={() => void removeFileSelection(selection.selectionId)}
-                    >
-                      <svg viewBox="0 0 12 12" aria-hidden="true"><path d="m3 3 6 6M9 3 3 9" /></svg>
-                    </button>
-                  </div>
-                ))}
-              </div>
-            )}
             {(composerDraft?.attachments.length ?? 0) > 0
               || preparingAttachments.length > 0
               || failedAttachments.length > 0
@@ -7487,7 +7347,7 @@ function StructuredMessageBody({
   }
   const memberById = new Map(members.map((member) => [member.agentId, member]))
   return (
-    <div className="structured-message-body">
+    <p className="structured-message-body">
       {content.map((segment, index) => {
         if (segment.kind === 'text') return (
           <span key={`text-${index}`}>
@@ -7540,21 +7400,6 @@ function StructuredMessageBody({
             </span>
           )
         }
-        if (segment.kind === 'file_selection') {
-          return (
-            <figure className="message-file-selection" key={segment.selection.selectionId}>
-              <figcaption>
-                <span>文件选区</span>
-                <strong title={segment.selection.displayPath}>{segment.selection.displayPath}</strong>
-                <small>{fileSelectionRangeLabel(segment.selection)}</small>
-              </figcaption>
-              <pre><code>{segment.selection.selectedText}</code></pre>
-              {segment.selection.verification === 'viewer_snapshot_after_change' && (
-                <span className="message-file-selection-snapshot">附加时源文件已有更新 · 当前可见快照</span>
-              )}
-            </figure>
-          )
-        }
         const member = memberById.get(segment.agentId)
         const available = Boolean(
           member
@@ -7593,39 +7438,8 @@ function StructuredMessageBody({
           </span>
         )
       })}
-    </div>
+    </p>
   )
-}
-
-function FileReferenceText({
-  text,
-  onActivate
-}: {
-  text: string
-  onActivate?(rawReference: string): void
-}): JSX.Element {
-  if (!onActivate) return <>{text}</>
-  const tokens = tokenizeFileReferences(text)
-  if (tokens.length === 0) return <>{text}</>
-  const output: React.ReactNode[] = []
-  let offset = 0
-  for (const token of tokens) {
-    if (token.start > offset) output.push(text.slice(offset, token.start))
-    output.push(
-      <button
-        className="message-file-reference"
-        type="button"
-        title={`打开 ${token.raw}`}
-        key={`${token.start}:${token.raw}`}
-        onClick={() => onActivate(token.raw)}
-      >
-        {token.raw}
-      </button>
-    )
-    offset = token.end
-  }
-  if (offset < text.length) output.push(text.slice(offset))
-  return <>{output}</>
 }
 
 function CurrentUserMentionToken(): JSX.Element {

@@ -22,8 +22,8 @@ last_updated: 2026-08-30
 
 ## Camp 文件预览
 
-- 当前规范：[File Preview Architecture](../architecture/file-preview.md)、[File Preview v1](../contracts/file-preview-v1.md)、[Camp 文件预览区](../ui/components/file-preview.md)及[Camp 会话工作区](../ui/components/conversation-workspace.md)。
-- 理由来源：[V1.30-D01–D07](../versions/v1.30/decisions.md#v1-30-d01)。
+- 当前规范：[File Preview Architecture](../architecture/file-preview.md)、[File Preview v2](../contracts/file-preview-v2.md)、[Camp 文件预览区](../ui/components/file-preview.md)及[Camp 会话工作区](../ui/components/conversation-workspace.md)。
+- 理由来源：[V1.30-D01–D06](../versions/v1.30/decisions.md#v1-30-d01)；[D07](../versions/v1.30/decisions.md#v1-30-d07) 的选区方案本期已撤回。
 
 ## Member identity
 

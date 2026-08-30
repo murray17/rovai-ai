@@ -2,8 +2,6 @@ import { createHash, randomUUID } from 'node:crypto'
 import { basename, dirname, extname, isAbsolute, relative, resolve } from 'node:path'
 import type { FileHandle } from 'node:fs/promises'
 import type {
-  AttachFileSelectionRequest,
-  CampComposerDraftView,
   FileContentVersion,
   FileLocationTarget,
   FilePreviewApi,
@@ -16,7 +14,6 @@ import type {
   FilePreviewRootGrantResult,
   FilePreviewTextContent,
   FilePreviewKind,
-  FileSelectionSnapshot,
   OpenFilePreviewRequest,
   OpenFilePreviewResult,
   ParsedFileReference,
@@ -88,11 +85,6 @@ export interface FilePreviewNativeActions {
   revealPath(path: string): void
   copyText(text: string): void
   publishExternalUpdate(notification: RootWatchNotification): void
-  attachSelection(
-    campId: string,
-    expectedDraftRevision: number,
-    selection: FileSelectionSnapshot
-  ): Promise<CampComposerDraftView>
 }
 
 interface ResolvedTarget {
@@ -118,7 +110,6 @@ interface PreviewHandleRecord {
   campId: string
   request: OpenFilePreviewRequest
   sourceIdentity: string
-  sourceKind: OpenFilePreviewRequest['kind']
   file: FileHandle | null
   reopening: Promise<FileHandle> | null
   reopenTarget: ResolvedTarget
@@ -620,89 +611,6 @@ export class FilePreviewService {
     }
   }
 
-  async attachSelection(
-    webContentsId: number,
-    request: AttachFileSelectionRequest
-  ): Promise<FilePreviewOperationResult<CampComposerDraftView>> {
-    try {
-      const record = this.#record(webContentsId, request.handleId, request.expectedGeneration)
-      if (record.campId !== request.campId) {
-        return failed('source_not_authorized', '这个文件不属于当前会话。')
-      }
-      const selectedBytes = Buffer.byteLength(request.selectedText, 'utf8')
-      if (selectedBytes === 0 || selectedBytes > 64 * 1_024) {
-        return failed('selection_too_large', '单个文件选区不能超过 64 KiB。')
-      }
-      if (
-        request.endLine < request.startLine
-        || (
-          request.endLine === request.startLine
-          && request.startColumn !== undefined
-          && request.endColumn !== undefined
-          && request.endColumn < request.startColumn
-        )
-      ) return failed('read_failed', '选区范围无效。')
-
-      let current: OpenedPreviewFile | null = null
-      let changed = record.hasExternalUpdate
-      try {
-        current = await openPreviewFile(record.canonicalRoot, record.canonicalPath)
-        changed ||= !contentVersionMatches(record.version, current.version)
-      } catch {
-        changed = true
-      } finally {
-        await current?.file.close().catch(() => undefined)
-      }
-      if (request.attachMode === 'verified_current' && changed) {
-        return failed(
-          'read_failed',
-          '文件已有更新。请重新加载，或明确附加当前仍可见的快照。',
-          true
-        )
-      }
-      if (request.attachMode === 'visible_snapshot' && !changed) {
-        return failed('reference_not_clickable', '文件仍是当前版本，无需按旧快照附加。')
-      }
-      if (request.attachMode === 'verified_current') {
-        const expectedText = await this.#selectionText(record, request)
-        if (expectedText !== request.selectedText.replace(/\r\n/gu, '\n')) {
-          return failed('read_failed', '选区内容与当前文件不一致，请重新选择。')
-        }
-      }
-
-      const selection: FileSelectionSnapshot = {
-        selectionId: randomUUID(),
-        displayPath: record.displayPath,
-        selectedText: request.selectedText,
-        startLine: request.startLine,
-        startColumn: request.startColumn,
-        endLine: request.endLine,
-        endColumn: request.endColumn,
-        positionEncoding: 'utf-16',
-        rangeEnd: 'exclusive',
-        contentVersion: {
-          ...record.version,
-          mtimeMs: Math.max(0, Math.round(record.version.mtimeMs))
-        },
-        verification: request.attachMode === 'verified_current'
-          ? 'current_file'
-          : 'viewer_snapshot_after_change',
-        sourceKind: record.sourceKind,
-        sourceIdentityDigest: `sha256:${createHash('sha256').update(record.sourceIdentity).digest('hex')}`
-      }
-      return ok(await this.#native.attachSelection(
-        record.campId,
-        request.expectedDraftRevision,
-        selection
-      ))
-    } catch (error) {
-      if (error instanceof Error && error.message.includes('file_selection_limit_exceeded')) {
-        return failed('selection_too_large', '当前消息最多附加 8 个文件选区，合计 256 KiB。')
-      }
-      return this.#errorResult(error)
-    }
-  }
-
   async chooseAuthorizedRoot(
     webContentsId: number,
     request: { campId: string; pendingOpenId: string }
@@ -871,7 +779,7 @@ export class FilePreviewService {
     }
     const handleId = randomUUID()
     const previewKey = createHash('sha256')
-      .update(`${webContentsId}\0${target.campId}\0${target.sourceIdentity}\0${opened.canonicalPath}`)
+      .update(`${webContentsId}\0${target.campId}\0${opened.canonicalPath}`)
       .digest('hex')
     const allowChildren = target.allowChildren ?? target.sourceKind !== 'attachment'
     const capabilities: FilePreviewCapability[] = ['read', 'open_in_system']
@@ -891,7 +799,6 @@ export class FilePreviewService {
         allowChildren
       },
       sourceIdentity: target.sourceIdentity,
-      sourceKind: target.sourceKind,
       file: opened.file,
       reopening: null,
       canonicalRoot: opened.canonicalRoot,
@@ -1126,68 +1033,6 @@ export class FilePreviewService {
       offset += bytes.byteLength
     }
     return line
-  }
-
-  async #selectionText(
-    record: PreviewHandleRecord,
-    selection: Pick<
-      AttachFileSelectionRequest,
-      'startLine' | 'startColumn' | 'endLine' | 'endColumn'
-    >
-  ): Promise<string> {
-    let line = 1
-    let offset = 0
-    let startOffset: number | null = selection.startLine === 1 ? 0 : null
-    let endOffset: number | null = selection.endLine === 1 ? 0 : null
-    let afterEndOffset: number | null = null
-    while (offset < record.version.size && afterEndOffset === null) {
-      const bytes = await this.#readAt(
-        record,
-        offset,
-        Math.min(64 * 1_024, record.version.size - offset)
-      )
-      if (bytes.byteLength === 0) break
-      for (let index = 0; index < bytes.byteLength; index += 1) {
-        if (bytes[index] !== 0x0a) continue
-        const nextOffset = offset + index + 1
-        if (line === selection.endLine) {
-          afterEndOffset = nextOffset
-          break
-        }
-        line += 1
-        if (line === selection.startLine) startOffset = nextOffset
-        if (line === selection.endLine) endOffset = nextOffset
-      }
-      offset += bytes.byteLength
-    }
-    if (endOffset !== null && afterEndOffset === null) afterEndOffset = record.version.size
-    if (startOffset === null || endOffset === null || afterEndOffset === null) {
-      throw new FilePreviewAccessError('read_failed', '选区行号超出当前文件。')
-    }
-    if (afterEndOffset - startOffset > 512 * 1_024) {
-      throw new FilePreviewAccessError('read_failed', '选区跨度过大，请缩小范围。')
-    }
-    const window = strictDecode(await this.#readAt(record, startOffset, afterEndOffset - startOffset))
-    const lines = window.split('\n')
-    const lineAt = (index: number): string => (lines[index] ?? '').replace(/\r$/u, '')
-    const endIndex = selection.endLine - selection.startLine
-    const first = lineAt(0)
-    const last = lineAt(endIndex)
-    const startColumn = selection.startColumn ?? 1
-    const endColumn = selection.endColumn ?? last.length + 1
-    if (
-      startColumn < 1
-      || endColumn < 1
-      || startColumn > first.length + 1
-      || endColumn > last.length + 1
-      || (endIndex === 0 && endColumn < startColumn)
-    ) throw new FilePreviewAccessError('read_failed', '选区列号超出当前文件。')
-    if (endIndex === 0) return first.slice(startColumn - 1, endColumn - 1)
-    return [
-      first.slice(startColumn - 1),
-      ...lines.slice(1, endIndex).map((value) => value.replace(/\r$/u, '')),
-      last.slice(0, endColumn - 1)
-    ].join('\n')
   }
 
   async #openNative(
