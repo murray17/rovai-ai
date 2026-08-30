@@ -67,6 +67,7 @@ app.whenReady().then(async () => {
       await callback()
       cases.push(name)
     } catch (error) {
+      console.error(`Composer fixture failed (${name}): ${error.stack}`)
       failures.push({ name, message: error.message })
     }
   }
