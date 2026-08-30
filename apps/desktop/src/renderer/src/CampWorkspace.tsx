@@ -14,6 +14,7 @@ import type {
   AgentRunView,
   BuiltinMemberAvatarRole,
   CampComposerDraftView,
+  CampPendingInputsView,
   CampComposerReplyRecipient,
   CampMessageAttachmentView,
   CampMessageAroundSnapshot,
@@ -37,6 +38,7 @@ import type {
 } from '@contracts'
 import { EmptyInline } from './ui-elements'
 import { StructuredMentionComposer } from './StructuredMentionComposer'
+import { PendingCampInputs, pendingQueueRequiresEnqueue } from './PendingCampInputs'
 import {
   activityStatusForAgentRun,
   agentRunPresentation,
@@ -387,6 +389,7 @@ export function agentRunRuntimeModelPresentation(
 }
 
 export type CampMessageSendReceipt = {
+  pendingInputId?: string
   campTurnId: string | null
   agentRunIds: string[]
   addressedAgentIds: string[]
@@ -1256,6 +1259,9 @@ export function CampWorkspace({
   const filePreview = useOptionalFilePreview()
   const [messageContent, setMessageContent] = useState<StructuredCampMessageContent>([])
   const [composerDraft, setComposerDraft] = useState<CampComposerDraftView | null>(null)
+  const [pendingQueue, setPendingQueue] = useState<CampPendingInputsView | null>(null)
+  const [pendingEditing, setPendingEditing] = useState(false)
+  const [pendingRefresh, setPendingRefresh] = useState(0)
   const [preparingAttachments, setPreparingAttachments] = useState<Array<{ id: string; name: string; kind: AttachmentKind }>>([])
   const [failedAttachments, setFailedAttachments] = useState<Array<{ id: string; name: string; kind: AttachmentKind; error: string }>>([])
   const [attachmentDragState, setAttachmentDragState] = useState<AttachmentDragKind | null>(null)
@@ -1369,6 +1375,7 @@ export function CampWorkspace({
   })
   const [resolvingRecoveryBlockerId, setResolvingRecoveryBlockerId] = useState<string | null>(null)
   const [submittedExecutionRequest, setSubmittedExecutionRequest] = useState<CampMessageSendReceipt | null>(null)
+  const publishedMessageSequence = snapshot.messages.reduce((latest, message) => Math.max(latest, message.sequence), 0)
   const executionDrawerTriggerRef = useRef<HTMLButtonElement | null>(null)
   const executionDrawerReturnAgentIdRef = useRef<string | null>(null)
   const bottomPlacementButtonRef = useRef<HTMLButtonElement>(null)
@@ -1752,6 +1759,11 @@ export function CampWorkspace({
   )
   const activeRuns = snapshot.agentRuns.filter((run) => NON_TERMINAL_RUNS.has(run.status))
   const executionBlocked = activeRuns.length > 0 || stopping
+  const showComposerStop = executionBlocked && message.trim().length === 0
+  const requiresQueue = pendingQueueRequiresEnqueue(
+    pendingQueue?.campId === snapshot.camp.id ? pendingQueue : null, executionBlocked
+  )
+  const queueAttachmentsBlocked = requiresQueue && hasReadyAttachment
   const composerSendDisabled = composerSendIsDisabled({
     hasSendablePayload,
     hasUnavailableMention,
@@ -1763,7 +1775,7 @@ export function CampWorkspace({
     composerDraftAvailable: composerDraft !== null,
     preparingAttachmentCount: preparingAttachments.length,
     failedAttachmentCount: failedAttachments.length
-  })
+  }) || queueAttachmentsBlocked
   const executionDrawerProcess = executionDrawerAgentId
     ? executionProcessByAgentId.get(executionDrawerAgentId) ?? null
     : null
@@ -1899,6 +1911,26 @@ export function CampWorkspace({
     replyAnchorLoads.current.set(messageId, request)
     return request
   }, [snapshot.camp.id])
+
+  useEffect(() => {
+    if (!composerDraft || hasLocalDraftPayload || composerSubmitting || routingMutating) return
+    const campId = snapshot.camp.id
+    let cancelled = false
+    // Pending publication bypasses submitMessage. Refresh Core's route projection
+    // when a message enters the conversation, without replacing the local editor.
+    void (async () => {
+      await draftMutationQueues.current.get(campId)
+      if (cancelled) return
+      const current = composerDraftRef.current
+      const content = draftContent.current
+      const refreshed = await window.rovai.request<CampComposerDraftView>('camp.composerDraft.get', { campId })
+      if (cancelled || draftCampId.current !== campId
+        || composerDraftRef.current !== current || draftContent.current !== content
+        || draftSaveTimer.current !== null || draftMutationQueues.current.has(campId)) return
+      applyComposerDraft(campId, refreshed)
+    })().catch(() => { /* Keep the current Draft; the next publication or Draft mutation refreshes it. */ })
+    return () => { cancelled = true }
+  }, [snapshot.camp.id, publishedMessageSequence, composerDraft !== null, hasLocalDraftPayload, composerSubmitting, routingMutating])
 
   useEffect(() => {
     const missingReplyIds = new Set(visibleCampMessages.flatMap((message) => {
@@ -2317,6 +2349,10 @@ export function CampWorkspace({
     message: CampMessageView,
     modality: ReplyFocusModality
   ): Promise<void> => {
+    if (pendingEditing) {
+      onNotify?.('请先保存或取消待发送消息的编辑，再回复另一条消息。')
+      return
+    }
     if (message.id.startsWith('optimistic:') || routingMutating) return
     setRoutingMutating(true)
     setReplyInteractionError(null)
@@ -2468,6 +2504,8 @@ export function CampWorkspace({
   useEffect(() => {
     const campId = snapshot.camp.id
     let cancelled = false
+    setPendingEditing(false)
+    setPendingQueue(null)
     conversationFindRequestGeneration.current += 1
     if (conversationFindDebounceTimer.current !== null) {
       window.clearTimeout(conversationFindDebounceTimer.current)
@@ -2930,8 +2968,7 @@ export function CampWorkspace({
 
   const submitMessage = async (): Promise<void> => {
     if (
-      executionBlocked
-      || composerSendDisabled
+      pendingEditing || composerSendDisabled
     ) return
     const campId = snapshot.camp.id
     followTimelineAfterUserSend(campId)
@@ -2997,6 +3034,7 @@ export function CampWorkspace({
       }
     } finally {
       setComposerSubmitting(false)
+      setPendingRefresh((value) => value + 1)
       if (restoreEditorFocus) {
         window.requestAnimationFrame(() => composerEditorRef.current?.focus())
       }
@@ -3020,6 +3058,10 @@ export function CampWorkspace({
   }
 
   const prepareFiles = async (inputs: AttachmentPreparationInput[]): Promise<void> => {
+    if (pendingEditing || requiresQueue) {
+      onNotify?.('待发送消息暂不支持附件，请在队列结束后添加。')
+      return
+    }
     const campId = snapshot.camp.id
     const pending = inputs.map(({ file, kindHint }, index) => ({
       id: crypto.randomUUID(),
@@ -3102,7 +3144,7 @@ export function CampWorkspace({
   const attachmentDropBlocked = attachmentDropIsBlocked({
     executionDrawerPresent: Boolean(executionDrawerProcess),
     mentionPopoverPresent: Boolean(mentionPopover)
-  })
+  }) || pendingEditing || requiresQueue
 
   const enterAttachmentDropSurface = (event: ReactDragEvent<HTMLElement>): void => {
     const kind = attachmentDragKind(event.dataTransfer)
@@ -4091,6 +4133,14 @@ export function CampWorkspace({
           }
         }}
       >
+        <PendingCampInputs key={snapshot.camp.id} campId={snapshot.camp.id}
+          refreshKey={snapshot.throughGlobalSequence + pendingRefresh}
+          members={composerMembers} skills={composerSkills} skillCatalogStatus={composerSkillCatalog.status}
+          stopping={stopping} onStop={onStop} onQueueChange={setPendingQueue} onEditingChange={(editing) => {
+            setPendingEditing(editing)
+            if (!editing && pendingEditing) requestAnimationFrame(() => composerEditorRef.current?.focus())
+          }} />
+        <div hidden={pendingEditing}>
         {(continuationVisible && continuationIntent) || (
           composerDraft
           && recipientSummary
@@ -4333,7 +4383,7 @@ export function CampWorkspace({
                 type="button"
                 aria-label="添加文件"
                 title="添加文件"
-                disabled={busy || composerSubmitting || routingMutating}
+                disabled={busy || composerSubmitting || routingMutating || requiresQueue}
                 onClick={() => composerFileInputRef.current?.click()}
               >
                 <svg aria-hidden="true" viewBox="0 0 18 18">
@@ -4342,7 +4392,9 @@ export function CampWorkspace({
               </button>
             </div>
             <div className="composer-actions">
-              {!executionBlocked && (
+              {queueAttachmentsBlocked
+                ? <span className="pending-input-attachment-notice">暂不支持排队附件，草稿已保留。</span>
+                : !executionBlocked && (
                 <span className="composer-hint">
                   <span className="sr-only">Enter 发送，Shift+Enter 换行</span>
                   <span className="composer-hint-visual" aria-hidden="true">
@@ -4354,29 +4406,21 @@ export function CampWorkspace({
                   </span>
                 </span>
               )}
-              {executionBlocked
-                ? (
-                    <button
-                      className="danger-button composer-stop"
-                      type="button"
-                      aria-label={stopping ? '正在停止当前执行' : '停止当前执行'}
-                      onClick={onStop}
-                      disabled={stopping || activeRuns.length === 0}
-                    >
-                      {stopping ? '正在停止…' : '停止'}
-                    </button>
-                  )
-                : (
-                    <button
-                      className="primary-button composer-send"
-                      type="submit"
-                      disabled={composerSendDisabled}
-                    >
-                      {busy || composerSubmitting ? '发送中…' : preparingAttachments.length > 0 ? '处理中…' : '发送'}
-                    </button>
-                  )}
+              <button
+                className={showComposerStop ? 'danger-button composer-stop' : 'primary-button composer-send'}
+                type={showComposerStop ? 'button' : 'submit'}
+                aria-label={showComposerStop ? (stopping ? '正在停止当前执行' : '停止当前执行') : undefined}
+                onClick={showComposerStop ? onStop : undefined}
+                disabled={showComposerStop ? stopping || activeRuns.length === 0 : composerSendDisabled}
+                aria-busy={showComposerStop
+                  ? stopping
+                  : Boolean(busy || composerSubmitting || preparingAttachments.length > 0)}
+              >
+                {showComposerStop ? (stopping ? '正在停止…' : '停止') : '发送'}
+              </button>
             </div>
           </div>
+        </div>
         </div>
           </form>
         </div>

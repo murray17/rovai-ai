@@ -1063,6 +1063,42 @@ export interface CampComposerDraftView {
   expiresAt: string | null
 }
 
+export interface PendingCampInputView {
+  id: string
+  campId: string
+  enqueueSequence: number
+  revision: number
+  state: 'queued' | 'needs_repair'
+  content: StructuredCampMessageContent
+  body: string
+  replyIntent: CampComposerReplyIntentView | null
+  recipientSelectionRequired: boolean
+  lastAttemptErrorCode: string | null
+}
+
+export interface PendingInputEditSession {
+  pendingInputId: string
+  editToken: string
+  basePendingRevision: number
+  recoveryRequired: boolean
+}
+
+export interface CampPendingInputsView {
+  campId: string
+  executionActive: boolean
+  items: PendingCampInputView[]
+  editSession: PendingInputEditSession | null
+}
+
+export type PendingInputEditAction =
+  | { type: 'begin' | 'takeover' | 'cancel' | 'delete' }
+  | {
+      type: 'save'
+      content: StructuredCampMessageContent
+      replyToCampMessageId: string | null
+      recipientSelectionRequired: boolean
+    }
+
 export interface CampComposerContinuationIntentView {
   sourceCampMessageId: string
   recipient: {
@@ -3020,6 +3056,8 @@ export type CoreMethod =
   | 'tasks.list'
   | 'tasks.get'
   | 'camp.composerDraft.get'
+  | 'camp.pendingInputs.get'
+  | 'camp.pendingInputs.edit'
   | 'camp.composerDraft.save'
   | 'camp.composerDraft.startReply'
   | 'camp.composerDraft.cancelReply'

@@ -2111,6 +2111,8 @@ impl ExecutionRuntimeService {
                     }),
                 )?;
             }
+            // The scheduler still requires every Run/Delivery to be terminal before
+            // publishing the next head. Persisting auto here also survives Desktop loss.
             let camp_turn_status = recompute_camp_turn(
                 transaction,
                 &camp_id,

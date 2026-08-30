@@ -8,8 +8,8 @@ last_updated: 2026-08-27
 
 # Camp Composer Draft 架构
 
-Camp Composer Draft 是用户下一条 Camp 消息的唯一持久编辑真源。字段、命令和错误见
-[Camp Composer Draft v5](../contracts/camp-composer-draft-v5.md)；长期取舍见
+Camp Composer Draft 是普通输入框的唯一持久编辑真源；已提交但尚未公开的下一轮输入由私有 Pending Camp Input 拥有。字段、命令和错误见
+[Camp Composer Draft v6](../contracts/camp-composer-draft-v6.md)；长期取舍见
 [Composer Draft 不变量](foundational-invariants.md#camp-composer)、
 [Composer Draft 不变量](foundational-invariants.md#camp-composer)与
 [Composer Draft 不变量](foundational-invariants.md#camp-composer)与
@@ -120,8 +120,24 @@ message回看更早记录。动态空白候选可以因失效被抑制；已经�
 
 ## References
 
-- [Camp Composer Draft v5](../contracts/camp-composer-draft-v5.md)
+- [Camp Composer Draft v6](../contracts/camp-composer-draft-v6.md)
 - [Camp Attachment v6](../contracts/camp-attachment-v6.md)
 - [Camp Published Attachment View v4（legacy v1）](../contracts/camp-published-attachment-view-v4.md)
 - [Public A2A Message 与 Message Delivery](public-a2a-message-delivery.md)
 - [Camp 会话工作区](../ui/components/conversation-workspace.md)
+
+## Pending next-turn admission
+
+普通 Composer 提交先经过 Core 的 [Pending Camp Input v1](../contracts/pending-camp-input-v1.md)。
+Camp 有未完成执行或待发送输入时，纯文本 Draft 转入私有 FIFO；此时不创建公共消息。
+入队物化 Continuation，真正发布才读取默认 Lead。Attachment Draft 不能入队，拒绝不消费文件或内容。
+
+Pending 模块只拥有内容和一个 Camp 编辑 token；不保存队列模式、每次按键或文件 Bundle。
+Renderer 编辑期间保留原普通 Draft；Core 占用阻止队首发送。异常退出保留占用，用户显式恢复。
+现有 Scheduler 每轮读取可发送队首，调用 CollaborationService 的用户消息内核，在一个 SQLite
+事务内写 Message/Turn/Run 和 Pending 发布结果。成功后的 Runtime 失败不退回队列。
+
+Composer Stop 复用既有取消命令；只有当前执行完全停止后才自动发布一个队首，后续按正常 FIFO 继续。
+没有独立暂停/继续模式；编辑占用、审批和恢复等待通过现有非终态执行阻塞准入，结算后自动推进。
+发布失败保留队首并标为 needs_repair，编辑保存后恢复准入或删除后让下一条继续，不增加自动重试。
+Agent Send 和 User Automation 不经过 Composer 私有队列。

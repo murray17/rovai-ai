@@ -3644,6 +3644,29 @@ details summary { min-height: 28px; padding: 5px 0; color: var(--muted); font-si
 .composer-route-rail .mention-target-summary > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .composer-box { position: relative; display: grid; width: min(var(--conversation-composer-width), 100%); grid-template-rows: minmax(0, auto) auto; margin: 0 auto; gap: 2px; padding: 8px; border: 1px solid var(--control-line); border-radius: 8px; background: var(--input); overflow: visible; transition: border-color 120ms ease, box-shadow 120ms ease; }
 .composer-box:focus-within { border-color: var(--brand); box-shadow: 0 0 0 3px var(--focus-soft); }
+.pending-input-queue { --queue-surface: color-mix(in srgb, var(--surface-subtle) 44%, var(--conversation-surface)); --queue-surface-active: color-mix(in srgb, var(--brand-soft) 42%, var(--conversation-surface)); width: min(var(--conversation-composer-width), 100%); min-width: 0; margin: 0 auto 6px; color: var(--muted); }
+.pending-input-heading { display: flex; min-height: 26px; align-items: center; justify-content: space-between; gap: 8px; color: var(--muted); font-size: 11px; }
+.pending-input-list { display: grid; gap: 4px; max-height: min(176px, 23vh); margin: 0; padding: 0; overflow-y: auto; overscroll-behavior: contain; list-style: none; scrollbar-width: thin; }
+.pending-input-row { display: flex; min-width: 0; min-height: 32px; flex-wrap: wrap; align-items: center; gap: 4px; padding: 3px 4px 3px 9px; border: 1px solid color-mix(in srgb, var(--line) 82%, transparent); border-radius: 7px; background: var(--queue-surface); }
+.pending-input-row.is-editing { border-color: color-mix(in srgb, var(--brand) 42%, var(--line)); color: var(--ink); background: var(--queue-surface-active); }
+.pending-input-preview { display: flex; min-width: 0; flex: 1 1 160px; align-items: center; gap: 7px; min-height: 24px; padding: 2px 0; font-size: 10.5px; line-height: 1.35; }
+.pending-input-mark { width: 6px; height: 6px; flex: 0 0 6px; border: 1px solid color-mix(in srgb, var(--faint) 78%, transparent); border-radius: 50%; background: transparent; }
+.pending-input-row.is-editing .pending-input-mark { border-color: var(--brand); background: var(--brand); }
+.pending-input-copy { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pending-input-preview small { flex: 0 0 auto; color: var(--muted); font-size: 10.5px; }
+.pending-input-actions { display: flex; flex: 0 0 auto; align-items: center; gap: 1px; }
+.pending-input-edit:focus-visible, .pending-input-delete:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.pending-input-edit, .pending-input-delete { display: grid; flex: 0 0 24px; width: 24px; height: 24px; place-items: center; padding: 0; border: 0; border-radius: 5px; color: var(--faint); background: transparent; cursor: pointer; }
+.pending-input-edit svg, .pending-input-delete svg { width: 13px; height: 13px; fill: none; stroke: currentColor; stroke-width: 1.55; stroke-linecap: round; stroke-linejoin: round; }
+.pending-input-edit:hover:not(:disabled), .pending-input-edit[aria-pressed="true"] { color: var(--brand-ink); background: var(--brand-soft); }
+.pending-input-delete:hover:not(:disabled) { color: var(--danger); background: var(--danger-soft); }
+.pending-input-status { color: var(--muted); font-size: 10.5px; line-height: 1.5; }
+.pending-input-queue > .pending-input-status { display: block; padding: 4px 2px 0; }
+.pending-input-error { flex-basis: 100%; margin: 0; padding: 2px 0 4px; color: var(--danger); font-size: 11px; line-height: 1.5; overflow-wrap: anywhere; }
+.pending-input-notice { width: min(var(--conversation-composer-width), 100%); margin: 4px auto 8px; color: var(--danger); font-size: 11px; }
+.pending-input-editor .composer-action-row { justify-content: flex-end; }
+.pending-input-attachment-notice { max-width: 240px; color: var(--attention); font-size: 10.5px; line-height: 1.4; }
+@media (max-width: 1200px) { .pending-input-editor .composer-action-row { flex-wrap: wrap; } .pending-input-editor .composer-actions { margin-left: auto; } }
 .composer.suppress-pointer-focus-ring .composer-box:focus-within { border-color: var(--control-line); box-shadow: none; }
 .composer.is-dragging-attachments { z-index: 10; }
 .composer.is-dragging-attachments .composer-box { border-color: var(--brand); box-shadow: 0 0 0 3px var(--focus-soft); }
