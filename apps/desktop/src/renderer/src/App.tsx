@@ -2075,11 +2075,6 @@ export function App(): React.JSX.Element {
     void requestMemberTransition(() => commitSettingsSurface(rememberedSection))
   }
 
-  const openWorldMapSettings = (): void => {
-    chooseSettingsSection('general')
-    commitSettingsSurface('general')
-  }
-
   const openUpdateSettings = async (
     prompt: AppUpdatePromptValue | null = appUpdates.snapshot?.pendingPrompt ?? null
   ): Promise<boolean> => {
@@ -3271,7 +3266,6 @@ export function App(): React.JSX.Element {
             executionPlacement={generalPreferences.executionConsolePlacement}
             onExecutionPlacementChange={changeExecutionConsolePlacement}
             worldMapEnabled={generalPreferences.worldMapEnabled}
-            onOpenWorldMapSettings={openWorldMapSettings}
             workspaceEntrySnapshotReady={!campSnapshotState.entryPreview}
             inspectorVisible={visibleCampSnapshot.camp.activationState === 'active' && campInspectorVisible}
             inspectorTab={campInspectorTab}

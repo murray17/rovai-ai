@@ -3301,8 +3301,7 @@ describe('task event projections', () => {
     const markup = renderToStaticMarkup(createElement(CampWorkspace, workspaceProps))
     const disabledMapMarkup = renderToStaticMarkup(createElement(CampWorkspace, {
       ...workspaceProps,
-      worldMapEnabled: false,
-      onOpenWorldMapSettings: () => undefined
+      worldMapEnabled: false
     }))
 
     expect(markup).toContain('aria-label="复制这条消息"')
@@ -3343,9 +3342,11 @@ describe('task event projections', () => {
     expect(markup).not.toContain('Progress')
     expect(markup).toContain('正在补充复制入口。')
     expect(markup).not.toContain('Steps')
+    expect(markup).toContain('aria-label="会话区视图"')
     expect(markup).toContain('aria-label="会话世界地图"')
-    expect(disabledMapMarkup).toContain('aria-disabled="true"')
-    expect(disabledMapMarkup).toContain('title="世界地图已在通用设置中关闭"')
+    expect(disabledMapMarkup).not.toContain('aria-label="会话区视图"')
+    expect(disabledMapMarkup).not.toContain('>会话</button>')
+    expect(disabledMapMarkup).not.toContain('>地图</button>')
     expect(disabledMapMarkup).not.toContain('aria-label="会话世界地图"')
     expect(markup).toContain('执行 · 正在运行')
     expect(markup).toContain('pnpm test')

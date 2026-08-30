@@ -1396,14 +1396,7 @@ html[data-rovai-platform="win32"] .unified-sidebar-drag {
 .camp-conversation-view-controls button { min-height: 26px; padding: 0 9px; border: 0; border-radius: 6px; color: inherit; background: transparent; cursor: pointer; font-size: 10.5px; font-weight: 680; line-height: 1; }
 .camp-conversation-view-controls button:hover { color: var(--ink); background: var(--surface-hover); }
 .camp-conversation-view-controls button[aria-pressed="true"] { color: var(--brand-ink); background: var(--brand-soft); }
-.camp-conversation-view-controls button.is-unavailable { color: var(--faint); cursor: help; opacity: .64; }
-.camp-conversation-view-controls button.is-unavailable:hover { color: var(--muted); background: var(--surface-hover); opacity: .82; }
 .camp-conversation-view-controls .camp-world-map-route-toggle { display: grid; width: 30px; padding: 0; place-items: center; border-left: 1px solid var(--line); border-radius: 0 6px 6px 0; }
-.camp-world-map-unavailable-popover { position: absolute; z-index: 24; top: calc(100% + 8px); right: 0; display: grid; width: min(286px, calc(100vw - 32px)); gap: 7px; padding: 12px 13px; border: 1px solid var(--line-strong); border-radius: 9px; color: var(--ink); background: var(--surface-raised); box-shadow: var(--shadow-menu); text-align: left; }
-.camp-world-map-unavailable-popover strong { font-size: 11.5px; font-weight: 680; }
-.camp-world-map-unavailable-popover p { margin: 0; color: var(--muted); font-size: 10px; line-height: 1.55; }
-.camp-conversation-view-controls .camp-world-map-settings-link { min-height: 28px; justify-self: start; padding: 0; color: var(--brand-ink); background: transparent; font-size: 10px; font-weight: 700; }
-.camp-conversation-view-controls .camp-world-map-settings-link:hover { color: var(--brand-hover); background: transparent; }
 .camp-world-map-route-toggle svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.7; }
 .camp-world-map-panel { position: absolute; inset: 0; min-width: 0; min-height: 0; overflow: hidden; }
 .camp-world-map { position: absolute; inset: 0; min-width: 0; min-height: 0; overflow: hidden; color: var(--lightbox-ink); background: var(--lightbox-surface); isolation: isolate; }
