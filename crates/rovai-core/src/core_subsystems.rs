@@ -174,16 +174,19 @@ impl super::Core {
         }
 
         if self.subsystems.begin("builtin-tools") {
-            let result = LocalIpcListener::bind(&builtin_tool_endpoint());
-            let result = match result {
+            match LocalIpcListener::bind(&builtin_tool_endpoint()) {
                 Ok(listener) => {
-                    *self.builtin_tool_listener.lock().await = Some(listener);
+                    let mut slot = self.builtin_tool_listener.lock().await;
+                    *slot = Some(listener);
+                    // Publish ready before the acceptor can take the listener.
+                    // Otherwise an immediate fatal accept could publish degraded
+                    // and then have that failure overwritten by this initializer.
+                    self.finish_subsystem("builtin-tools", Ok(()));
+                    drop(slot);
                     self.builtin_tool_listener_notify.notify_one();
-                    Ok(())
                 }
-                Err(error) => Err(error),
-            };
-            self.finish_subsystem("builtin-tools", result);
+                Err(error) => self.finish_subsystem("builtin-tools", Err(error)),
+            }
         }
 
         for kind in AdapterKind::ALL {
