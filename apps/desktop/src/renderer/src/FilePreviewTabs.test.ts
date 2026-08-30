@@ -13,6 +13,7 @@ vi.mock('./FilePreviewContext', () => ({ useFilePreview: vi.fn() }))
 
 function tab(id: string): FilePreviewTabModel {
   return {
+    kind: 'file',
     id,
     file: {
       previewKey: id,
@@ -56,14 +57,11 @@ beforeEach(() => {
     activeTabId: 'second',
     openFeedback: null,
     paneVisible: true,
-    paneWidth: 480,
-    returnTarget: null,
     open: vi.fn(),
-    setReturnTarget: vi.fn(),
-    returnToTarget: vi.fn(),
+    openFileChanges: vi.fn(),
+    selectChangedFile: vi.fn(),
     showPane: vi.fn(),
     hidePane: vi.fn(),
-    setPaneWidth: vi.fn(),
     activate: vi.fn(),
     move: vi.fn(),
     close: vi.fn(),
@@ -78,6 +76,29 @@ beforeEach(() => {
 })
 
 describe('FilePreviewTabs open feedback', () => {
+  it('distinguishes a historical review from the same current file without changing accessible tab names', () => {
+    const currentFile = tab('readme')
+    currentFile.file = { ...currentFile.file, kind: 'markdown', fileName: 'readme.md', displayPath: 'docs/readme.md' }
+    const review = {
+      kind: 'file_change' as const, id: 'review-1', campId: 'camp-1', selectedEvidenceFileId: 'evidence-1',
+      changes: {
+        schemaVersion: 2 as const, agentRunId: 'run-1', executionEpoch: 1,
+        fileCount: 1, operationCount: 1, completedAt: '2026-08-30T08:00:00Z',
+        files: [{ evidenceFileId: 'evidence-1', path: 'docs/readme.md', changeKind: 'update' as const, presentationKind: 'full_net_diff' as const, operationCount: 1 }]
+      }
+    }
+    preview.tabs = [currentFile, review]
+    preview.activeTab = review
+    preview.activeTabId = review.id
+    const markup = renderTabs()
+    expect(markup).toContain('aria-label="readme.md"')
+    expect(markup).toContain('aria-label="File Change·readme.md"')
+    expect(markup).toContain('aria-label="关闭 File Change·readme.md"')
+    expect(markup).toContain('data-file-type="markdown" viewBox="0 0 24 24" aria-hidden="true"')
+    expect(markup).toContain('data-file-type="file_change" viewBox="0 0 24 24" aria-hidden="true"')
+    expect(markup).not.toContain('File Change·docs/readme.md')
+  })
+
   it('preserves selected state, keyboard activation and named close controls', () => {
     const markup = renderTabs()
     expect(markup).toContain('aria-label="first.ts" aria-selected="false" aria-controls="file-preview-panel-first" tabindex="-1"')
@@ -103,8 +124,9 @@ describe('FilePreviewTabs open feedback', () => {
   })
 
   it('does not create opening feedback from selection, file updates or refreshing alone', () => {
-    preview.tabs[1].hasExternalUpdate = true
-    preview.tabs[1].isRefreshing = true
+    const file = preview.tabs[1] as FilePreviewTabModel
+    file.hasExternalUpdate = true
+    file.isRefreshing = true
     const markup = renderTabs()
     expect(markup).toContain('aria-label="second.ts，有更新"')
     expect(markup).not.toContain('file-preview-tab-open-feedback')

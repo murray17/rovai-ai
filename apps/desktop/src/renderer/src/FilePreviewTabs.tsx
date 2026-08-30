@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
 import { createPortal } from 'react-dom'
-import { useFilePreview, type FilePreviewTabModel } from './FilePreviewContext'
+import { useFilePreview } from './FilePreviewContext'
+import { FilePreviewTabIcon } from './FilePreviewTabIcon'
+import { previewTabLabel, previewTabPresentation } from './file-preview-tab-presentation'
 
 function tabDomId(tabId: string): string {
   return `file-preview-tab-${tabId}`
@@ -10,13 +12,7 @@ function panelDomId(tabId: string): string {
   return `file-preview-panel-${tabId}`
 }
 
-function visibleTabLabel(tab: FilePreviewTabModel, duplicateNames: ReadonlySet<string>): string {
-  if (!duplicateNames.has(tab.file.fileName)) return tab.file.fileName
-  const segments = tab.file.displayPath.replace(/\\/gu, '/').split('/').filter(Boolean)
-  return segments.slice(-2).join('/') || tab.file.fileName
-}
-
-export function FilePreviewTabs(): React.JSX.Element | null {
+export function FilePreviewTabs({ compact = false }: { compact?: boolean } = {}): React.JSX.Element | null {
   const {
     tabs,
     activeTabId,
@@ -30,9 +26,7 @@ export function FilePreviewTabs(): React.JSX.Element | null {
     openInSystem,
     revealInFolder,
     copyDisplayPath,
-    reload,
-    returnTarget,
-    returnToTarget
+    reload
   } = useFilePreview()
   const listRef = useRef<HTMLDivElement>(null)
   const menuRef = useRef<HTMLDivElement>(null)
@@ -40,18 +34,34 @@ export function FilePreviewTabs(): React.JSX.Element | null {
   const [announcement, setAnnouncement] = useState('')
   const duplicateNames = useMemo(() => {
     const counts = new Map<string, number>()
-    for (const tab of tabs) counts.set(tab.file.fileName, (counts.get(tab.file.fileName) ?? 0) + 1)
+    for (const tab of tabs) {
+      const key = `${tab.kind}:${previewTabPresentation(tab).fileName}`
+      counts.set(key, (counts.get(key) ?? 0) + 1)
+    }
     return new Set([...counts].filter(([, count]) => count > 1).map(([name]) => name))
   }, [tabs])
 
   useEffect(() => {
     if (!paneVisible || !openFeedback || openFeedback.tabId !== activeTabId) return
-    document.getElementById(tabDomId(openFeedback.tabId))?.parentElement?.scrollIntoView({
+    const tab = document.getElementById(tabDomId(openFeedback.tabId))
+    tab?.parentElement?.scrollIntoView({
       block: 'nearest',
       inline: 'nearest',
       behavior: 'instant'
     })
+    if (openFeedback.focusTab
+      && (document.activeElement === document.body || document.activeElement?.closest('.file-preview-pane'))) {
+      tab?.focus({ preventScroll: true })
+    }
   }, [activeTabId, openFeedback, paneVisible])
+
+  useEffect(() => {
+    if (compact && paneVisible) {
+      const target = listRef.current?.querySelector<HTMLButtonElement>('[aria-selected="true"]')
+        ?? listRef.current?.parentElement?.querySelector<HTMLButtonElement>('.file-preview-return')
+      target?.focus({ preventScroll: true })
+    }
+  }, [compact, paneVisible])
 
   useEffect(() => {
     if (!menu) return undefined
@@ -82,10 +92,17 @@ export function FilePreviewTabs(): React.JSX.Element | null {
   useEffect(() => {
     if (menu && !tabs.some((tab) => tab.id === menu.tabId)) setMenu(null)
   }, [menu, tabs])
-  if (tabs.length === 0) return null
 
   const focusTab = (tabId: string): void => {
     window.requestAnimationFrame(() => document.getElementById(tabDomId(tabId))?.focus())
+  }
+
+  const focusConversation = (): void => {
+    window.requestAnimationFrame(() => {
+      const target = document.querySelector<HTMLElement>('.camp-timeline:not([hidden])')
+        ?? document.querySelector<HTMLElement>('.timeline-pane')
+      target?.focus({ preventScroll: true })
+    })
   }
 
   const announce = (message: string): void => {
@@ -108,9 +125,7 @@ export function FilePreviewTabs(): React.JSX.Element | null {
     const neighbor = tabs[index + 1] ?? tabs[index - 1]
     close(tab.id)
     if (neighbor) focusTab(neighbor.id)
-    else window.requestAnimationFrame(() => {
-      document.querySelector<HTMLElement>('.camp-timeline')?.focus({ preventScroll: true })
-    })
+    else focusConversation()
   }
 
   const handleTabKeyDown = (event: KeyboardEvent<HTMLButtonElement>, index: number): void => {
@@ -139,26 +154,23 @@ export function FilePreviewTabs(): React.JSX.Element | null {
   return (
     <div className="file-preview-tabs">
       <button
-        className={`file-preview-return${returnTarget ? ' is-surface-return' : ''}`}
+        className="file-preview-return"
         type="button"
         onClick={() => {
-          if (returnTarget) {
-            returnToTarget()
-            return
-          }
           hidePane()
-          window.requestAnimationFrame(() => {
-            document.querySelector<HTMLElement>('.camp-timeline')?.focus({ preventScroll: true })
-          })
+          focusConversation()
         }}
       >
         <svg viewBox="0 0 16 16" aria-hidden="true"><path d="m9.5 3.5-4.5 4.5 4.5 4.5M5 8h7" /></svg>
-        <span>{returnTarget?.label ?? '返回会话'}</span>
+        <span>返回会话</span>
       </button>
-      <div className="file-preview-tab-strip" role="tablist" aria-label="打开的文件" ref={listRef}>
+      <div className="file-preview-tab-strip" role={tabs.length ? 'tablist' : undefined} aria-label="打开的预览" ref={listRef}>
+        {tabs.length === 0 && <span className="file-preview-tabs-empty">文件预览</span>}
         {tabs.map((tab, index) => {
           const active = tab.id === activeTabId
-          const label = visibleTabLabel(tab, duplicateNames)
+          const label = previewTabLabel(tab, duplicateNames)
+          const { displayPath, icon } = previewTabPresentation(tab)
+          const hasExternalUpdate = tab.kind === 'file' && tab.hasExternalUpdate
           const feedback = openFeedback?.tabId === tab.id ? openFeedback : null
           return (
             <div
@@ -167,7 +179,7 @@ export function FilePreviewTabs(): React.JSX.Element | null {
               onContextMenu={(event) => {
                 event.preventDefault()
                 const width = 196
-                const height = 282
+                const height = tab.kind === 'file' ? 282 : 134
                 const keyboardInvocation = event.clientX === 0 && event.clientY === 0
                 const bounds = event.currentTarget.getBoundingClientRect()
                 const requestedLeft = keyboardInvocation ? bounds.left + 8 : event.clientX
@@ -184,16 +196,17 @@ export function FilePreviewTabs(): React.JSX.Element | null {
                 className="file-preview-tab-activate"
                 type="button"
                 role="tab"
-                aria-label={`${label}${tab.hasExternalUpdate ? '，有更新' : ''}`}
+                aria-label={`${label}${hasExternalUpdate ? '，有更新' : ''}`}
                 aria-selected={active}
                 aria-controls={panelDomId(tab.id)}
                 tabIndex={active ? 0 : -1}
-                title={tab.file.displayPath}
+                title={tab.kind === 'file_change' ? `${displayPath}\nFile Change · ${tab.changes.completedAt}` : displayPath}
                 onClick={() => activate(tab.id)}
                 onKeyDown={(event) => handleTabKeyDown(event, index)}
               >
-                <span>{label}</span>
-                {tab.hasExternalUpdate && <i className="file-preview-tab-update" aria-hidden="true" />}
+                <FilePreviewTabIcon kind={icon} />
+                <span className="file-preview-tab-label">{label}</span>
+                {hasExternalUpdate && <i className="file-preview-tab-update" aria-hidden="true" />}
               </button>
               <button
                 className="file-preview-tab-close"
@@ -229,10 +242,10 @@ export function FilePreviewTabs(): React.JSX.Element | null {
             ref={menuRef}
             className="file-preview-tab-menu"
             role="menu"
-            aria-label={`${visibleTabLabel(tab, duplicateNames)} 操作`}
+            aria-label={`${previewTabLabel(tab, duplicateNames)} 操作`}
             style={{ left: menu.left, top: menu.top }}
           >
-            <button role="menuitem" type="button" onClick={() => void runSystemAction(
+            {tab.kind === 'file' && <><button role="menuitem" type="button" onClick={() => void runSystemAction(
               () => openInSystem(tab.id),
               '已交给系统默认应用打开'
             )}>使用默认应用打开</button>
@@ -248,7 +261,7 @@ export function FilePreviewTabs(): React.JSX.Element | null {
               setMenu(null)
               void reload(tab.id)
             }}>重新加载</button>
-            <div role="separator" />
+            <div role="separator" /></>}
             <button role="menuitem" type="button" onClick={() => {
               setMenu(null)
               close(tab.id)

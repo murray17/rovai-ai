@@ -13,6 +13,11 @@ on:
       - "apps/desktop/src/renderer/src/error-message*"
       - "apps/desktop/src/renderer/src/StructuredMentionComposer*"
       - "apps/desktop/src/renderer/src/structured-mention-model*"
+      - "apps/desktop/src/renderer/src/FilePreview*"
+      - "apps/desktop/src/renderer/src/FileChangesPreview*"
+      - "apps/desktop/src/renderer/src/file-preview-*"
+      - "apps/desktop/src/renderer/src/file-changes-presentation*"
+      - "apps/desktop/src/renderer/src/CampWorkspace*"
       - "packages/contracts/**"
       - "scripts/lib/rovai-request-context-bridge.test.mjs"
       - "scripts/fixtures/rovai-request-context-bridge.cjs"
@@ -20,6 +25,8 @@ on:
       - "scripts/fixtures/structured-mention-composer/**"
       - "scripts/lib/desktop-startup-presentation.test.mjs"
       - "scripts/fixtures/desktop-startup-presentation/**"
+      - "scripts/lib/file-preview-layout.test.mjs"
+      - "scripts/fixtures/file-preview-layout/**"
       - "package.json"
       - "pnpm-lock.yaml"
       - ".github/workflows/desktop-bridge.yml"
@@ -57,5 +64,6 @@ jobs:
           xvfb-run -a pnpm test:desktop-bridge
           xvfb-run -a pnpm test:composer-input
           xvfb-run -a pnpm test:startup-presentation
+          xvfb-run -a pnpm test:file-preview-layout
           pnpm exec vitest run apps/desktop/src/main/desktop-session.test.ts apps/desktop/src/renderer/src/CampNavigationPagination.test.ts
           pnpm exec vitest run apps/desktop/src/renderer/src/error-message.test.ts apps/desktop/src/main/core-client.test.ts apps/desktop/src/main/windows-data-root.test.ts apps/desktop/src/main/windows-bootstrap.test.ts apps/desktop/src/renderer/src/CoreSubsystemNotice.test.ts apps/desktop/src/renderer/src/App.test.ts
