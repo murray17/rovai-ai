@@ -2,7 +2,7 @@
 document_type: ui-component-contract
 authority: renderer-camp-workspace
 status: accepted
-last_updated: 2026-08-30
+last_updated: 2026-08-31
 ---
 
 # Camp 会话工作区
@@ -530,7 +530,8 @@ Day/Night 复用同一 DOM 和状态矩阵。主要操作支持键盘；Drawer�
 不改成“加入待发送”或“提交中”。队列未空时，即使当前
 没有运行也继续入队。队列条位于 Composer 上方，与输入框同宽、同轴，按 FIFO 排列，不显示单条
 序号，不提供排序或合并；较长队列在有界区域滚动。Pending 不作为用户消息显示在公共时间线。
-普通排队不额外显示自动续发说明；仅在队首编辑或发送失败、需要用户处理时显示相应提示。
+普通排队不额外显示自动续发说明；编辑时不再显示队首等待、编辑标题或本地草稿说明，
+仅保留当前编辑行的状态标识和保存、取消操作。发送失败或编辑占用失效等需要处理的情况仍显示错误提示。
 
 队列继承现有系统字体栈，正文为 10.5px；普通行最小高度为 32px，以 6px 空心圆点起行。普通底色
 由 `--surface-subtle` 44% 与 `--conversation-surface` 混合，编辑底色由 `--brand-soft` 42% 与同一

@@ -4,7 +4,7 @@ version: v1.33
 lifecycle: current
 authority: implementation-status
 status: completed
-last_updated: 2026-08-30
+last_updated: 2026-08-31
 ---
 
 # v1.33 实施与验收
@@ -65,6 +65,20 @@ arm64 打包和签名检查，以及更新后的 7 个真实 Runtime 场景。�
 该 Renderer 修正已通过类型检查、完整前端回归及真实 Electron 原生输入组件回归；既有渲染用例同步
 验证运行中/停止中不并列显示发送、终态恢复发送。原生整页鼠标与键盘切换验证仍受上述工具故障限制。
 
+2026-08-31，移除编辑区三处说明：队列下方的等待提示、框内编辑标题/顺序说明、框内本地草稿说明。
+保留编辑行标识、保存/取消、可访问名称及错误/恢复提示；操作按钮继续靠右。不改变 Core 状态机。
+类型检查、`App.test.ts` 147 项、原生 Composer 6 个输入场景、Pending Core 7 项确定性测试均通过。
+本轮 arm64 开发包重新构建、签名检查和启动核对通过；当前验收会话保留原队列、普通草稿、消息和 Run，
+第二位队员芝士已配置并加入会话。更新前的队首编辑继续保留，重开后由用户重新编辑或关闭，不代为提交。
+
+同日扩展既有 opt-in 验收脚本，以相同的 Codex CLI / gpt-5.6-sol / xhigh 配置运行两位队员。
+11 项场景检查通过：指定非队长“芝士”后 B/C/D 的续发目标保持不变；编辑队首时 A 自然完成后仍保留三条私有输入且不启动下一轮；
+取消编辑后发送原版 B，保存编辑后发送修改版 B，随后 C/D 各在前一条结束后执行一次；普通草稿不被覆盖。
+附件在队列非空时被拒绝且保留完整草稿，队列清空后原草稿可发送，芝士实际读出中文文件名附件中的随机校验值。
+既有一次停止后自动推进和重启编辑 token fencing 场景也通过。配置值与 Runtime 上报分开记录：本次 Codex Run 的
+`runtimeModel` 未上报，不用配置推断提供方返回的实际模型。测试使用全新隔离 fixture，不修改用户当前验收 Camp。
+原生 App 点击通道仍返回 `Sky Computer Use native pipe closed before response`，上述结果不等同于完整鼠标/焦点验收。
+
 ## 测试准入说明
 
 Pending 模块是队列准入、编辑 fencing 和原子发布的唯一 owner。已有消息和 Runtime 测试没有覆盖
@@ -80,6 +94,6 @@ v1.29/schema-70 来源，新迁移 owner 验证原数据保留和重开幂等。
 新的队列断言走生产 Composer 发送入口，避免把历史消息内核夹具误当作用户正在提交的草稿。
 
 真实 Runtime 验收入口为 `node scripts/accept-pending-camp-input.mjs --core <绝对 Core 路径>`。
-它创建全新的临时 userData、项目、Skill Library 和 MCP config，验证 FIFO、停止后自动推进、编辑保存和重启 fencing，
+它创建全新的临时 userData、项目、Skill Library 和 MCP config，验证两队员定向续发、文件附件、三条队列的队首编辑、FIFO、停止后自动推进和重启 fencing，
 不加入普通测试门禁。可通过 `--runtime-config <JSON 路径>` 指定 adapterKind、model 和 permissions；配置不应含凭据。
 结果与合成验收 Camp 写入脚本打印的隔离 fixture；结束时不遗留人工暂停或编辑占用，供打包 App 后续验收。

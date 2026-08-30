@@ -3576,8 +3576,7 @@ details summary { min-height: 28px; padding: 5px 0; color: var(--muted); font-si
 .pending-input-queue > .pending-input-status { display: block; padding: 4px 2px 0; }
 .pending-input-error { flex-basis: 100%; margin: 0; padding: 2px 0 4px; color: var(--danger); font-size: 11px; line-height: 1.5; overflow-wrap: anywhere; }
 .pending-input-notice { width: min(var(--conversation-composer-width), 100%); margin: 4px auto 8px; color: var(--danger); font-size: 11px; }
-.pending-input-edit-heading { display: flex; min-width: 0; justify-content: space-between; gap: 8px; padding: 2px 0 6px; font-size: 11px; }
-.pending-input-edit-heading > span { color: var(--muted); }
+.pending-input-editor .composer-action-row { justify-content: flex-end; }
 .pending-input-attachment-notice { max-width: 240px; color: var(--attention); font-size: 10.5px; line-height: 1.4; }
 @media (max-width: 1200px) { .pending-input-editor .composer-action-row { flex-wrap: wrap; } .pending-input-editor .composer-actions { margin-left: auto; } }
 .composer.suppress-pointer-focus-ring .composer-box:focus-within { border-color: var(--control-line); box-shadow: none; }

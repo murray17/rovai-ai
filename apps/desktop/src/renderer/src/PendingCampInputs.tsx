@@ -218,9 +218,7 @@ export function PendingCampInputs({
           </li>
         })}
       </ul>
-      {queue.editSession?.pendingInputId === queue.items[0]?.id ? (
-        <span className="pending-input-status">队首正在编辑，保存或取消后继续。</span>
-      ) : queue.items[0]?.state === 'needs_repair' ? (
+      {queue.editSession?.pendingInputId !== queue.items[0]?.id && queue.items[0]?.state === 'needs_repair' ? (
         <span className="pending-input-status">队首需要处理，请编辑保存或删除。</span>
       ) : null}
     </section>}
@@ -228,7 +226,6 @@ export function PendingCampInputs({
     {edit && <div className="composer-box pending-input-editor" onKeyDown={(event) => {
       if (event.key === 'Escape' && !event.defaultPrevented) { event.preventDefault(); requestClose() }
     }}>
-      <div className="pending-input-edit-heading"><strong>编辑待发送消息</strong><span>保存后保持原顺序</span></div>
       {!ownsEdit && <p role="alert" className="pending-input-error">编辑占用已变化。未保存的修改只在本窗口；关闭后可重新编辑。</p>}
       {edit.replyToCampMessageId && <div className="composer-reply-line">
         <svg viewBox="0 0 16 16" aria-hidden="true"><path d="m6 3-4 4 4 4M2 7h8c3 0 4 2 4 5" /></svg>
@@ -243,7 +240,6 @@ export function PendingCampInputs({
         onBackspaceAtStart={() => { if (edit.replyToCampMessageId) setEdit({ ...edit, replyToCampMessageId: null, recipientSelectionRequired: false }) }}
         onSubmit={() => { if (!saveDisabled) return perform(() => finish(true)) }} />
       <div className="composer-action-row">
-        <span className="pending-input-status">未保存的修改仅保留在当前窗口。</span>
         <div className="composer-actions">
           {queue?.executionActive && <button className="danger-button composer-stop" type="button" disabled={stopping} onClick={onStop}>{stopping ? '正在停止…' : '停止'}</button>}
           <button type="button" className="quiet-button" disabled={busy} onClick={() => {

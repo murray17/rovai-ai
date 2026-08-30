@@ -6,7 +6,7 @@ authority: version-scope-and-status
 design_status: confirmed
 implementation_status: completed
 model_context_change: false
-last_updated: 2026-08-30
+last_updated: 2026-08-31
 ---
 
 # Rovai-ai v1.33：Camp 连续消息
@@ -15,7 +15,8 @@ last_updated: 2026-08-30
 这是 next-turn queue；没有 Runtime mid-run 注入、Pending 附件、自动重试、重排、合并或持久 working copy。
 本地实现、自动化回归、真实 Runtime 验证和开发包构建已完成。按用户验收反馈移除暂停/继续模式，
 已验证原队列自动续发，发送动作保持固定“发送”文案；后续反馈要求运行中无正文时仅显示“停止”，
-有正文时切为“发送”，输入区主操作始终为单按钮。已核对此前夜间窗口截图；
+有正文时切为“发送”，输入区主操作始终为单按钮。编辑区三处说明已移除；
+补充真实 Codex 验收覆盖指定队员续发、文件读取、三条队列编辑队首时等待及保存/取消后续发。已核对此前夜间窗口截图；
 完整双主题、尺寸和原生鼠标/焦点矩阵仍未覆盖。用户验收及主线合入尚未完成，具体证据边界见实施计划。
 
 前置版本：[v1.32](../v1.32/README.md)。
