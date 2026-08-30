@@ -116,3 +116,55 @@ origin 初始化，而不是读取文件存在性。
 - **Preload 在 Error 上挂结构化字段：** 字段在 contextBridge 复制 Error 时丢失，只有错误文字无法支撑状态判断；
 - **损坏偏好即禁止 Core：** 把非权威文件升级成产品 authority；
 - **启动前 exists 检查：** 无法区分旧库、孤儿 sidecar、迁移与真正 absence。
+
+<a id="v1-31-d05"></a>
+## V1.31-D05：权威 ready 与可选功能 ready 分离
+
+### 背景
+
+DB 已准入后仍让 Skill、MCP、adapter 或派生文件 cleanup 的错误从 `run_core()` 传播，会把单功能故障放大为 Core
+意外退出。只提前发 ready 而不约束调用，又会把未初始化存储暴露给真实执行。
+
+### 决定
+
+权威 execution/input/delivery 恢复留在 ready 前；可选对象先无 I/O 构造、ready 后初始化，以当前进程的功能状态控制
+依赖请求与执行，发布真实降级并支持原进程重试。健康 Runtime 不重建；启动专属清理只处理启动快照中的候选并再次复核。
+当前规范见 [可选功能门禁](../../contracts/desktop-runtime-availability-v1.md#7-authority-ready-and-optional-subsystem-gates)。
+
+### 后果
+
+Camp/Task/消息记录可在功能降级时继续使用；Core 与 Renderer 都要区分工作区 authority 和功能可用性。该状态不持久化
+为数据库准入或新的业务事实，不改变冻结模型输入与原 Runtime 平台门禁。
+
+### 被拒绝方案
+
+- **所有初始化成功后才 ready：** 非权威文件错误继续阻断整个工作区；
+- **只 catch 错误但功能照常开放：** 可能使用不完整 Skill/MCP/附件投影；
+- **功能失败时重启整个 Core：** 重复同一故障并中断原本健康的工作区和 Runtime。
+
+<a id="v1-31-d06"></a>
+## V1.31-D06：Windows 用 Core 独立的私有壳层 profile 获取稳定实例锁
+
+### 背景
+
+原生完整 data-root preparer 在模块加载期间抛错，窗口尚不存在；简单 catch 后使用默认路径会丢失 private-storage
+保证。Electron 的 sessionData 必须在 ready 前绑定，而实例锁又以当时的 userData 为 identity。
+
+### 决定
+
+复用已打包 Agent CLI 的 Desktop-only 原生入口与既有 DACL 原语，建立只含 Electron 状态的 profile，先取稳定实例锁。
+primary 才准备正式布局；成功在 ready 前绑定正式路径，失败留在壳层且不给 Core 任何 fallback data path。
+Windows 该 assessment 的重试通过原参数 relaunch 完成。当前规范见
+[Windows Bootstrap assessment](../../contracts/desktop-runtime-availability-v1.md#8-windows-pre-ready-bootstrap-assessment)。
+
+### 后果
+
+正式 Core binary / preparer 故障不再等价于无窗口；壳层状态与正式偏好不隐式迁移。仅当独立私有壳层也无法准入时
+使用原生错误对话框终止，不为可用性牺牲存储安全。Native Windows 验证仍独立于跨平台组合测试。
+
+### 被拒绝方案
+
+- **所有 Electron 状态永久迁入新 profile：** 改变已有正式偏好/缓存路径，扩大迁移范围；
+- **新加一个单独 helper EXE：** 已有 CLI 能复用原语，额外二进制增加签名、打包和兼容成本；
+- **仍让 Core 负责壳层目录准备：** Core binary 缺失时仍无法显示壳层；
+- **普通 mkdir/继承 ACL fallback：** 不满足私有存储的创建时安全边界。

@@ -1,4 +1,5 @@
 import { readErrorMessage } from './error-message'
+import { CoreSubsystemNotice } from './CoreSubsystemNotice'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type {
   AdapterInstallation,
@@ -619,7 +620,12 @@ export function App(): React.JSX.Element {
   if (!authoritativeWorkspaceIsAvailable(supervisor)) {
     return <BootstrapShell snapshot={supervisor} />
   }
-  return <AuthoritativeApp />
+  return (
+    <div className="authoritative-workspace">
+      <AuthoritativeApp />
+      <CoreSubsystemNotice subsystems={supervisor?.coreSubsystems ?? []} />
+    </div>
+  )
 }
 
 export function authoritativeWorkspaceIsAvailable(
@@ -715,7 +721,8 @@ export function BootstrapShell({
               disabled={busy !== null || !snapshot?.capabilities.fullCoreRetry}
               onClick={() => void retry()}
             >
-              {busy === 'retry' ? '正在重试…' : '重新检查'}
+              {busy === 'retry' ? '正在重试…'
+                : snapshot?.startupPhase === 'preparing_windows_data_root' ? '重启并重新检查' : '重新检查'}
             </button>
             <button
               className="quiet-button"
@@ -775,6 +782,13 @@ export function bootstrapAuthorityCopy(snapshot: SupervisorSnapshot | null): {
   title: string
   description: string
 } {
+  if (snapshot?.startupPhase === 'preparing_windows_data_root') {
+    return {
+      eyebrow: '桌面壳层已就绪',
+      title: '本机数据目录尚未准备好',
+      description: 'Core 尚未启动，也没有建立替代工作区。请查看具体原因，修复后重启桌面壳层并重新检查，或先导出诊断。'
+    }
+  }
   if (!snapshot || snapshot.fullCoreState === 'idle' || snapshot.fullCoreState === 'starting') {
     if (snapshot?.startupPhase === 'migrating_authority') {
       return {

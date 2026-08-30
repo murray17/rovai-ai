@@ -61,16 +61,54 @@ fn platform_identity_key(_path: &Path, metadata: &std::fs::Metadata) -> io::Resu
 }
 
 #[cfg(windows)]
-fn platform_identity_key(path: &Path, metadata: &std::fs::Metadata) -> io::Result<String> {
-    use std::os::windows::fs::MetadataExt;
+fn platform_identity_key(path: &Path, _metadata: &std::fs::Metadata) -> io::Result<String> {
+    use std::os::windows::{
+        fs::{MetadataExt, OpenOptionsExt},
+        io::AsRawHandle,
+    };
+    use windows_sys::Win32::Storage::FileSystem::{
+        FILE_ATTRIBUTE_DEVICE, FILE_ATTRIBUTE_REPARSE_POINT, FILE_FLAG_BACKUP_SEMANTICS,
+        FILE_FLAG_OPEN_REPARSE_POINT, FILE_ID_INFO, FILE_READ_ATTRIBUTES, FILE_SHARE_DELETE,
+        FILE_SHARE_READ, FILE_SHARE_WRITE, FileIdInfo, GetFileInformationByHandleEx,
+    };
 
-    match (metadata.volume_serial_number(), metadata.file_index()) {
-        (Some(volume), Some(index)) => Ok(format!("windows:{volume}:{index}")),
-        _ => Err(io::Error::new(
-            io::ErrorKind::Unsupported,
-            format!("filesystem identity unavailable for {}", path.display()),
-        )),
+    // MetadataExt's file-index APIs are unstable. Retain a metadata-only handle
+    // and inspect the opened leaf, including a replacement racing the path stat.
+    let file = std::fs::OpenOptions::new()
+        .access_mode(FILE_READ_ATTRIBUTES)
+        .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE)
+        .custom_flags(FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT)
+        .open(path)?;
+    if file.metadata()?.file_attributes() & (FILE_ATTRIBUTE_REPARSE_POINT | FILE_ATTRIBUTE_DEVICE)
+        != 0
+    {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!(
+                "filesystem identity refuses reparse/device object {}",
+                path.display()
+            ),
+        ));
     }
+    let mut identity = FILE_ID_INFO::default();
+    let read = unsafe {
+        // SAFETY: file remains open, and the output buffer's type and size
+        // match FileIdInfo. The operation neither creates nor modifies data.
+        GetFileInformationByHandleEx(
+            file.as_raw_handle(),
+            FileIdInfo,
+            (&mut identity as *mut FILE_ID_INFO).cast(),
+            std::mem::size_of::<FILE_ID_INFO>() as u32,
+        )
+    };
+    if read == 0 {
+        return Err(io::Error::last_os_error());
+    }
+    Ok(format!(
+        "windows:{}:{}",
+        identity.VolumeSerialNumber,
+        u128::from_le_bytes(identity.FileId.Identifier)
+    ))
 }
 
 #[cfg(not(any(unix, windows)))]
@@ -328,6 +366,27 @@ mod tests {
         fn drop(&mut self) {
             let _ = std::fs::remove_dir_all(&self.0);
         }
+    }
+
+    #[test]
+    fn filesystem_identity_tracks_objects_not_paths_or_contents() {
+        let directory = TestDirectory::new("identity");
+        let root = prepare_private_directory(&directory.0).unwrap();
+        let directory_identity = FilesystemObjectIdentity::observe(&root).unwrap();
+        let file = root.join("authority");
+        std::fs::write(&file, b"committed").unwrap();
+        let original = FilesystemObjectIdentity::observe(&file).unwrap();
+        std::fs::write(&file, b"updated").unwrap();
+        assert_eq!(original, FilesystemObjectIdentity::observe(&file).unwrap());
+        // Keep the old object alive under another name so inode/file-ID reuse
+        // cannot make the replacement assertion dependent on allocator timing.
+        std::fs::rename(&file, root.join("retained-authority")).unwrap();
+        std::fs::write(&file, b"replacement").unwrap();
+        assert_ne!(original, FilesystemObjectIdentity::observe(&file).unwrap());
+        assert_eq!(
+            directory_identity,
+            FilesystemObjectIdentity::observe(&root).unwrap()
+        );
     }
 
     #[test]

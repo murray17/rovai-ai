@@ -1950,6 +1950,8 @@ export type StartupPhase =
   | 'lease'
   | 'assessing_authority'
   | 'preparing_runtime_storage'
+  | 'preparing_windows_data_root'
+  | 'recovering_authority'
   | 'opening_authority'
   | 'initializing_authority'
   | 'migrating_authority'
@@ -1986,8 +1988,15 @@ export interface SupervisorSnapshot {
   restartAttempt: number
   capabilities: DesktopCapabilities
   localDegradations: StructuredError[]
+  coreSubsystems: CoreSubsystemSnapshot[]
   lastError: StructuredError | null
   migrationProgress: unknown | null
+}
+
+export interface CoreSubsystemSnapshot {
+  id: string
+  state: 'initializing' | 'ready' | 'degraded'
+  error: StructuredError | null
 }
 
 export interface SupervisorApi {
@@ -2705,6 +2714,8 @@ export type CoreMethod =
   | 'diagnostics.check'
   | 'monitoring.snapshot'
   | 'runtime.discovery.rescan'
+  | 'runtime.subsystems.get'
+  | 'runtime.subsystems.retry'
   | 'runtime.product.ensure'
   | 'runtime.product.check'
   | 'runtime.modelCatalog.open'

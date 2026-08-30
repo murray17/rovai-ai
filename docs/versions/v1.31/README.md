@@ -16,6 +16,9 @@ last_updated: 2026-08-30
 > 隔离 authority/双主题/200%/reduced-motion 验收及文档 merge-base 门禁全部通过。
 > 后续修正已验证 SQLite hot-journal 自动恢复、三条正式连接的 WAL 配置及真实 contextBridge 字段保留；
 > 打包 App 在写事务中 SIGKILL Core 后自动重启并恢复工作区，1024 行已提交数据保留。
+> 可选功能启动故障已从 authority ready 分离，真实 Core 与打包 App 验证单功能降级、同进程重试和工作区不重挂载；
+> Windows 正式目录 preparation 改为壳层 assessment，跨平台组合测试通过。原生 Windows helper / 文件身份验证由
+> Windows x64 CI 承担；macOS 结果不作为 Windows 实机 UI 验收。
 
 前置基线：[v1.29](../v1.29/README.md)按本分支切换时事实转为 historical。
 
@@ -45,6 +48,10 @@ Desktop 窗口和本机恢复能力不再与 SQLite authority 的成功打开绑
   仍是 `Promise<T>`，错误保留类别、code、retryable、generation 与 details，统一读取函数不退化为 `[object Object]`；
 - 正常 App tree 仅在 `authoritativeWorkspace` ready 后挂载，阻断期间不查询权威工作区、不展示合成空列表；
 - First-run admission 从 Core ready 的 `current.origin = initialized | existing | migrated` 得出，不再检查 SQLite 文件名。
+- DB 后的权威恢复失败发布 typed refusal；Skill/MCP/adapter/Builtin IPC/附件及维护移到 ready 后，以 `coreSubsystems`
+  门禁和原进程重试隔离故障，不卸载工作区。pending cleanup 限定到启动候选，不能清理新建 Camp；
+- Windows 先准入 Core-independent 私有壳层并判定 single-instance，再 assessment 正式 data root；失败显示壳层而不
+  spawn Core，重试用原参数 relaunch。正式数据布局与 DACL 约束不变。
 
 ## 明确不做
 
@@ -66,14 +73,16 @@ Desktop 窗口和本机恢复能力不再与 SQLite authority 的成功打开绑
 - domain rejection 与 infrastructure failure 跨 Core/Main/Preload/contextBridge 到真实 Renderer 后仍可区分；
 - preference 损坏不被启动自动覆盖，并作为 `localDegradations` 展示；
 - Renderer authority gate 前没有业务请求或 fake empty list。
+- Skill/MCP/Runtime 私有目录与维护故障下，真实 Core ready、成员/导航 RPC 可用；移除故障后同 generation 恢复；
+- Windows native preparer 不可用/超时/异常输出/ACL 拒绝仍提供壳层 assessment，secondary 不执行正式 preparer。
 
 ## 跨版本文档影响
 
 | 范围 | 结论 | 证据或理由 |
 | --- | --- | --- |
 | Version lifecycle | 已更新 | 本概览、[实施计划](implementation-plan.md)、[决定](decisions.md)与版本索引建立唯一 current v1.31；v1.29 转为 historical。 |
-| Decisions | 已更新 | [V1.31-D01–D04](decisions.md#v1-31-d01)记录壳层分层、准入票据、copy migration 与 Supervisor/偏好/Onboarding 边界。 |
-| Contracts | 已更新 | 新增 [Desktop Runtime Availability v1](../../contracts/desktop-runtime-availability-v1.md)，并以 [First-run Onboarding v3](../../contracts/first-run-onboarding-v3.md)替代 v2 当前入口。 |
+| Decisions | 已更新 | [V1.31-D01–D06](decisions.md#v1-31-d01)记录壳层分层、准入票据、copy migration、Supervisor/偏好/Onboarding、可选功能门禁与 Windows 独立壳层 profile。 |
+| Contracts | 已更新 | 新增 [Desktop Runtime Availability v1](../../contracts/desktop-runtime-availability-v1.md)，补充 [Windows Private Storage v2](../../contracts/windows-private-storage-v2.md)，并以 [First-run Onboarding v3](../../contracts/first-run-onboarding-v3.md)替代 v2 当前入口。 |
 | Architecture | 已更新 | 新增 [Availability-first Runtime](../../architecture/availability-first-runtime.md)，同步基础不变量与 First-run 组件边界。 |
 | UI | 已更新 | 新增 [Desktop Bootstrap Shell](../../ui/components/bootstrap-shell.md)，首次训练明确位于 Full Core capability gate 之后。 |
 | Runtime Activity | 确认无需更新 | 本版本不改变 Runtime Evidence、Canonical Activity 或 mapping registry。 |

@@ -59,6 +59,23 @@ afterEach(() => {
 })
 
 describe('CoreClient planned shutdown', () => {
+  it('keeps an unadmitted Windows root blocked without inventing a Core path or consuming a generation', async () => {
+    const client = new CoreClient(null)
+    client.blockStartup({
+      code: 'windows_data_root_preparation_failed', message: 'private ACL unavailable', retryable: true, details: {}
+    }, 'preparing_windows_data_root')
+    client.start()
+    client.retryFullCore()
+    expect(client.getSnapshot()).toMatchObject({
+      generation: 0, restartAttempt: 0, runtimeMode: 'bootstrap_only', fullCoreState: 'blocked',
+      startupPhase: 'preparing_windows_data_root',
+      capabilities: { authoritativeWorkspace: false, coreRequests: false, fullCoreRetry: true },
+      lastError: { code: 'windows_data_root_preparation_failed' }
+    })
+    await expect(client.request('members.list')).rejects.toMatchObject({ kind: 'full_core_unavailable' })
+    await client.shutdown()
+  })
+
   it('uses one closed target key and the native executable suffix', () => {
     expect(sidecarTargetKey('darwin', 'arm64')).toBe('macos-arm64')
     expect(sidecarTargetKey('darwin', 'x64')).toBe('macos-x64')
@@ -69,6 +86,10 @@ describe('CoreClient planned shutdown', () => {
   })
 
   it('passes an isolated Skill Library root to Core', () => {
+    expect(coreLaunchArguments('/isolated/data', '/isolated/views', '/isolated/skills', [], '/isolated/mcp.json'))
+      .toContain('--mcp-config-path')
+    expect(coreLaunchArguments('/isolated/data', '/isolated/views', '/isolated/skills', [], '/isolated/mcp.json'))
+      .toContain('/isolated/mcp.json')
     expect(coreProcessHomeDirectory('/Users/system', '/tmp/isolated-home', 'darwin')).toBe(
       '/tmp/isolated-home'
     )
@@ -331,6 +352,41 @@ done
         details: { campId: 'camp-1' }
       })
       client.stop()
+    }
+  )
+
+  it.runIf(process.platform !== 'win32')(
+    'keeps authority ready with optional subsystem failures and clears them when Core stops',
+    async () => {
+      useSupportedPosixHost()
+      const root = mkdtempSync(join(tmpdir(), 'rovai-core-subsystems-'))
+      temporaryRoots.push(root)
+      const fakeCore = join(root, 'fake-core.sh')
+      writeFileSync(fakeCore, `#!/bin/sh
+printf '%s\\n' '{"kind":"core_startup","schemaVersion":1,"status":"ready","subsystems":[{"id":"skills","state":"initializing","error":null}]}'
+while IFS= read -r request; do
+  printf '%s\\n' '{"method":"runtime.subsystemsChanged","params":[{"id":"skills","state":"degraded","error":{"code":"subsystem_initialization_failed","message":"staging unavailable","retryable":true,"details":{"subsystem":"skills"}}}]}'
+  printf '%s\\n' '{"id":1,"result":[]}'
+done
+`)
+      chmodSync(fakeCore, 0o700)
+      process.env.ROVAI_CORE_BIN = fakeCore
+      process.env.ROVAI_CORE_TEST_USER_DATA = root
+      const client = new CoreClient()
+      try {
+        const ready = nextSnapshot(client, (snapshot) => snapshot.fullCoreState === 'ready')
+        client.start()
+        expect(await ready).toMatchObject({ coreSubsystems: [{ id: 'skills', state: 'initializing' }] })
+        const degraded = nextSnapshot(client, (snapshot) => snapshot.coreSubsystems?.[0]?.state === 'degraded')
+        await client.request('members.list')
+        expect(await degraded).toMatchObject({
+          fullCoreState: 'ready',
+          restartAttempt: 0,
+          capabilities: { authoritativeWorkspace: true, coreRequests: true },
+          coreSubsystems: [{ id: 'skills', state: 'degraded', error: { retryable: true } }]
+        })
+      } finally { client.stop() }
+      expect(client.getSnapshot().coreSubsystems).toEqual([])
     }
   )
 

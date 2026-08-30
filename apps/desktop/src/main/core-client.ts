@@ -8,6 +8,7 @@ import type {
   AuthorityState,
   CoreEvent,
   CoreMethod,
+  CoreSubsystemSnapshot,
   RovaiRequestFailure,
   RovaiRequestFailureKind,
   StructuredError,
@@ -51,6 +52,7 @@ type CoreStartupWireFrame = {
   authorityState?: AuthorityState
   error?: StructuredError
   progress?: unknown
+  subsystems?: CoreSubsystemSnapshot[]
 }
 
 type ActiveChild = {
@@ -112,7 +114,8 @@ export function coreLaunchArguments(
   dataDirectory: string,
   runtimeCampFilesRoot: string,
   skillLibraryRoot: string | null,
-  removedSkillProjectRoots: readonly string[]
+  removedSkillProjectRoots: readonly string[],
+  mcpConfigPath: string | null = null
 ): string[] {
   const args = [
     '--data-dir', dataDirectory,
@@ -120,6 +123,7 @@ export function coreLaunchArguments(
   ]
   if (skillLibraryRoot) args.push('--skill-library-root', skillLibraryRoot)
   else args.push('--use-default-skill-library')
+  if (mcpConfigPath) args.push('--mcp-config-path', mcpConfigPath)
   for (const executionRoot of removedSkillProjectRoots) {
     args.push('--removed-skill-project-root', executionRoot)
   }
@@ -179,6 +183,7 @@ export function desktopSkillLibraryRoot(
 type CoreStartOptions = {
   removedSkillProjectRoots?: string[]
   skillLibraryRoot?: string
+  mcpConfigPath?: string
 }
 
 const PLANNED_SHUTDOWN_DEADLINE_MS = 10_000
@@ -214,6 +219,7 @@ function initialSupervisorSnapshot(): SupervisorSnapshot {
     restartAttempt: 0,
     capabilities: capabilitiesFor('bootstrap_only', 'idle'),
     localDegradations: [],
+    coreSubsystems: [],
     lastError: null,
     migrationProgress: null
   }
@@ -225,6 +231,7 @@ function cloneSupervisorSnapshot(snapshot: SupervisorSnapshot): SupervisorSnapsh
     authorityState: { ...snapshot.authorityState },
     capabilities: { ...snapshot.capabilities },
     localDegradations: snapshot.localDegradations.map((failure) => ({ ...failure })),
+    coreSubsystems: structuredClone(snapshot.coreSubsystems),
     lastError: snapshot.lastError ? { ...snapshot.lastError } : null
   }
 }
@@ -269,18 +276,33 @@ export class CoreClient {
   #shutdownPromise: Promise<CoreShutdownResult> | null = null
   #removedSkillProjectRoots: string[] = []
   #skillLibraryRoot: string | null = null
-  readonly #dataDirectory: string
-  readonly #runtimeCampFilesRoot: string
+  #mcpConfigPath: string | null = null
+  readonly #dataDirectory: string | null
+  readonly #runtimeCampFilesRoot: string | null
+  #startupBlock: { error: StructuredError; phase: StartupPhase } | null = null
 
   constructor(
-    dataDirectory: string = app.getPath('userData'),
-    runtimeFilesRoot: string = runtimeCampFilesRoot(
+    dataDirectory: string | null = app.getPath('userData'),
+    runtimeFilesRoot?: string
+  ) {
+    this.#dataDirectory = dataDirectory
+    this.#runtimeCampFilesRoot = dataDirectory === null ? null : runtimeFilesRoot ?? runtimeCampFilesRoot(
       dataDirectory,
       coreProcessHomeDirectory(app.getPath('home'))
     )
-  ) {
-    this.#dataDirectory = dataDirectory
-    this.#runtimeCampFilesRoot = runtimeFilesRoot
+  }
+
+  blockStartup(error: StructuredError, phase: StartupPhase): void {
+    if (this.#child) throw new Error('Cannot replace storage admission while Core is running')
+    this.#startupBlock = { error, phase }
+    this.#updateSnapshot({
+      runtimeMode: 'bootstrap_only',
+      fullCoreState: 'blocked',
+      authorityState: { kind: 'unknown' },
+      startupPhase: phase,
+      lastError: error,
+      migrationProgress: null
+    })
   }
 
   setRemovedSkillProjectRoots(executionRoots: string[]): void {
@@ -314,12 +336,22 @@ export class CoreClient {
   }
 
   start(options?: CoreStartOptions): void {
+    if (this.#startupBlock || this.#dataDirectory === null || this.#runtimeCampFilesRoot === null) {
+      this.blockStartup(this.#startupBlock?.error ?? {
+        code: 'core_data_directory_not_admitted',
+        message: 'The Core data directory has not been admitted.',
+        retryable: true,
+        details: {}
+      }, this.#startupBlock?.phase ?? 'preparing_windows_data_root')
+      return
+    }
     if (options?.removedSkillProjectRoots) {
       this.setRemovedSkillProjectRoots(options.removedSkillProjectRoots)
     }
     if (options?.skillLibraryRoot) {
       this.#skillLibraryRoot = options.skillLibraryRoot
     }
+    if (options?.mcpConfigPath) this.#mcpConfigPath = options.mcpConfigPath
     if (this.#child) return
     this.#stopping = false
     this.#queuedRetryGeneration = null
@@ -357,7 +389,8 @@ export class CoreClient {
       this.#dataDirectory,
       this.#runtimeCampFilesRoot,
       this.#skillLibraryRoot,
-      this.#removedSkillProjectRoots
+      this.#removedSkillProjectRoots,
+      this.#mcpConfigPath
     )
     console.info('[startup] stage=core_spawn')
     const child = spawn(binary, args, {
@@ -586,6 +619,10 @@ export class CoreClient {
 
     if (response.method) {
       if (!this.#isActive(generation, childToken)) return
+      if (response.method === 'runtime.subsystemsChanged' && this.#child?.ready) {
+        const coreSubsystems = parseCoreSubsystems(response.params)
+        if (coreSubsystems) this.#updateSnapshot({ coreSubsystems })
+      }
       this.#emit({ method: response.method, params: response.params })
       return
     }
@@ -649,7 +686,8 @@ export class CoreClient {
         startupPhase: null,
         restartAttempt: this.#restartAttempts,
         lastError: null,
-        migrationProgress: null
+        migrationProgress: null,
+        coreSubsystems: parseCoreSubsystems(frame.subsystems) ?? []
       })
       console.info('[startup] stage=core_ready')
       this.#emit({ method: 'runtime.state', params: { status: 'ready' } })
@@ -833,11 +871,28 @@ export class CoreClient {
       revision: this.#snapshot.revision + 1,
       runtimeMode,
       fullCoreState,
+      coreSubsystems: runtimeMode === 'full_core'
+        ? patch.coreSubsystems ?? this.#snapshot.coreSubsystems
+        : [],
       capabilities: capabilitiesFor(runtimeMode, fullCoreState)
     }
     const snapshot = this.getSnapshot()
     for (const listener of this.#snapshotListeners) listener(snapshot)
   }
+}
+
+function parseCoreSubsystems(value: unknown): CoreSubsystemSnapshot[] | null {
+  if (!Array.isArray(value) || value.length > 64) return null
+  const ids = new Set<string>()
+  for (const entry of value) {
+    if (!entry || typeof entry !== 'object' || typeof entry.id !== 'string'
+      || !/^[a-z][a-z0-9.-]{0,79}$/.test(entry.id)
+      || ids.has(entry.id) || !['initializing', 'ready', 'degraded'].includes(entry.state)) return null
+    ids.add(entry.id)
+    if (entry.error !== null && (!entry.error || typeof entry.error.code !== 'string'
+      || typeof entry.error.message !== 'string' || typeof entry.error.retryable !== 'boolean')) return null
+  }
+  return structuredClone(value) as CoreSubsystemSnapshot[]
 }
 
 function campOpenTraceId(params: unknown): string | null {
@@ -867,14 +922,24 @@ export function sidecarExecutableName(
 }
 
 export function resolveCoreBinary(): string {
-  const executable = sidecarExecutableName('rovai-core')
+  return resolveBundledSidecar('rovai-core', [
+    process.env.ROVAI_CORE_BIN,
+    process.env.HORIZONWARD_CORE_BIN,
+    process.env.LUMEN_CORE_BIN
+  ])
+}
+
+export function resolveDesktopBootstrapBinary(): string {
+  return resolveBundledSidecar('rovai')
+}
+
+function resolveBundledSidecar(binary: 'rovai-core' | 'rovai', overrides: Array<string | undefined> = []): string {
+  const executable = sidecarExecutableName(binary)
   const stagedTarget = sidecarTargetKey()
   const candidates = app.isPackaged
     ? [join(process.resourcesPath, 'bin', executable)]
     : [
-        process.env.ROVAI_CORE_BIN,
-        process.env.HORIZONWARD_CORE_BIN,
-        process.env.LUMEN_CORE_BIN,
+        ...overrides,
         join(app.getAppPath(), 'resources', 'bin', stagedTarget, executable),
         join(process.cwd(), 'resources', 'bin', stagedTarget, executable)
       ]
@@ -890,5 +955,5 @@ export function resolveCoreBinary(): string {
     }
   }
 
-  throw new Error(`Rovai AI Rust Core binary was not found. Checked: ${candidates.filter(Boolean).map((candidate) => resolve(candidate as string)).join(', ')}`)
+  throw new Error(`Rovai AI ${binary === 'rovai-core' ? 'Rust Core binary' : 'Desktop bootstrap helper'} was not found. Checked: ${candidates.filter(Boolean).map((candidate) => resolve(candidate as string)).join(', ')}`)
 }

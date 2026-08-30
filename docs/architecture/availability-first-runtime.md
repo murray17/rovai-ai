@@ -17,6 +17,7 @@ SQLite 阻断时继续工作；SQLite authority 仍然 fail closed。这个拆�
 | --- | --- | --- |
 | Electron bootstrap | 窗口、主题、本机偏好默认、诊断保存、Supervisor IPC | SQLite 选择、数据库修复推断、业务投影 |
 | CoreClient Supervisor | child generation、完整 revision snapshot、能力门禁、请求 fencing、意外退出预算 | 领域状态、SQLite recovery 决策 |
+| CoreSubsystems | 当前进程的可选功能初始化、错误、执行门禁与串行重试 | 数据库准入、替代 authority、Runtime qualification |
 | Core data-directory lease | canonical data directory 的 OS 排他所有权与稳定对象身份 | 数据合同分类或迁移 |
 | DatabaseAdmission | exact Rovai/Lumen artifact 观察、只读优先探测、租约内 SQLite journal recovery、一次性票据、typed blocker | schema 写入、自动 quarantine、UI 文案 |
 | Database open/init | 票据消费后的 exact open，或 confirmed absence 上的 staging initialization | 目录扫描式猜测、覆盖竞态 target |
@@ -26,6 +27,8 @@ SQLite 阻断时继续工作；SQLite authority 仍然 fail closed。这个拆�
 ## Startup sequence
 
 ```text
+Windows only: admit private Bootstrap profile -> single-instance lock
+  -> assess formal root (failure => bound Bootstrap Shell, no Core path)
 Electron ready
   -> install in-memory local defaults
   -> create BrowserWindow and mount Bootstrap Shell
@@ -37,14 +40,38 @@ Electron ready
           -> Initializable ticket -> staged create-if-absent publish
           -> Migration ticket -> backup/migrate/validate/switch/reassess
           -> Blocked -> structured refusal and clean exit
-       -> ready(authority origin)
+       -> mandatory execution/input/delivery recovery (failure => typed refusal)
+       -> ready(authority origin, initializing subsystems)
   -> Supervisor enables authoritativeWorkspace/coreRequests
   -> Renderer mounts the normal App tree
+       -> initialize optional services -> ready or feature-scoped degraded
 ```
 
 Runtime attachment storage admission发生在数据库已经分类且 lease 仍持有之后；任何失败都不能反向创建另一个 SQLite
 authority。Full Core ready 之前，Renderer 不调用 `navigation.snapshot`、Camp、Member、Memory 或 Onboarding 的
 Core-backed read path。
+
+## Optional startup boundary
+
+Skill/MCP/adapter 对象先无 I/O 构造。ready 后独立初始化其存储与迁移、Builtin IPC、附件协调及非关键 cleanup；一个失败
+不会从 `run_core()` 传播到进程退出。Core 持有功能门禁，拒绝依赖功能的请求并暂缓相关执行；数据库记录查询不依赖这些
+初始化结果。状态由 startup frame + generation-fenced event 合并到 Supervisor 完整快照，Renderer 显示原因与原进程重试，
+不卸载健康的权威工作区。重试跳过已健康服务，不能清理或替换已活动的 Runtime/IPC。
+
+既有 compaction 启动协调保留 best-effort 语义与 replay-before-fence 顺序，在新 Runtime 启动前运行一次；它不进入
+可重试 cleanup 集合。controlled-shutdown、accepted-input 和 delivery recovery 仍在 ready 前，失败通过结构化 refusal
+阻断执行，不能用 optional failure 策略掩盖未收敛的权威状态。
+
+## Windows shell storage boundary
+
+完整 Core preparer 不再是窗口前置条件。独立壳层 profile 由已经打包的 Agent CLI 的 Desktop-only 原生入口创建，只有
+Electron 本机状态，不包含 Core path；继续使用原有 protected-DACL 原语，没有 PowerShell、普通 mkdir fallback 或静默修权。
+所有实例先绑定同一个 profile 再判定 single-instance，只有 primary 才准备正式 data root。成功后仍在 ready 前使用原正式
+布局；失败回到已准入的壳层路径并展示 assessment，CoreClient 持有 null data path 而不是临时数据库目录。
+
+Windows 重新检查该 assessment 会保留原参数 relaunch Desktop，避免 ready 后重绑 Chromium sessionData。若私有壳层
+存储本身也不可用，只能原生提示并结束启动；这与正式 root 失败时仍显示 Electron Shell 是两条不同边界。
+协议细节见 [Windows Bootstrap assessment](../contracts/desktop-runtime-availability-v1.md#8-windows-pre-ready-bootstrap-assessment)。
 
 ## Database authority state machine
 

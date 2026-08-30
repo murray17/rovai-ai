@@ -132,7 +132,7 @@ pnpm test:rust:pr
 ```
 
 `.github/workflows/rust.yml` 在 pull request 时，对 Rust 源码、Cargo 文件和 Rust 构建/lint
-配置改动并行执行三个独立 job：
+配置改动并行执行 lint、fast、database smoke 与 Windows x64 原生编译/验证 job；前三个基础命令为：
 
 ```bash
 cargo fmt --all --check
@@ -156,7 +156,7 @@ cargo test --workspace --all-features
 ```
 
 所有 feature-gated 测试因此都会在 nightly 中编译并执行；历史兼容覆盖只是移出 PR 关键路径，未被
-永久禁用。CI 使用 Cargo 缓存缩短重复构建，但测试是否通过不依赖缓存命中。三个 PR job 并行启动，
+永久禁用。CI 使用 Cargo 缓存缩短重复构建，但测试是否通过不依赖缓存命中。各个 PR job 并行启动，
 各自恢复与其构建目标相容的既有 cache；不通过 job 间传递可写 `target` 目录制造顺序依赖。需要验证
 桌面构建时另行运行：
 
@@ -175,6 +175,21 @@ pnpm test:desktop-bridge
 该测试编译当前生产 Preload，并在真实 Electron `contextIsolation` 窗口中验证 Promise 成功值以及结构化拒绝的全部字段。
 它使用临时 `userData`，不启动 Core 或调用模型；不能用 Main 单测或 jsdom 代替。无显示器 Linux 使用
 `xvfb-run -a pnpm test:desktop-bridge`；[Desktop bridge CI](../../.github/workflows/desktop-bridge.yml)覆盖相关改动。
+
+### Core 可选功能启动回归
+
+涉及 `run_core()` ready 边界、可选初始化或功能重试时，运行：
+
+```bash
+pnpm test:core-startup
+```
+
+该入口构建真实 Core，在独立 data-dir/Skill Library/MCP config/Runtime Files Root 中注入可选存储故障，验证
+authority ready、业务 RPC 可达和同进程重试；另验证 mandatory recovery 失败为结构化拒绝而不是 crash 或 false ready。
+不启动真实 Runtime 或调用模型。它拥有进程 seam，具体 cleanup/identity 规则仍由 Rust 单一 owner 测试；Rust fast CI
+同时执行它。Windows bootstrap composition 由 `windows-bootstrap.test.ts` 拥有，native DACL/helper/identity 由
+Windows x64 job 验证。改动还涉及完整桌面挂载和恢复时，在遵守[本地工作流](local-workflow.md)后运行隔离
+`pnpm accept:bootstrap-shell-ui`，不能用 macOS 打包结果代替 Windows 原生验收。
 
 ### 非模型 Smoke
 

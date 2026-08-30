@@ -1,9 +1,9 @@
 import { execFileSync, spawn } from 'node:child_process'
-import { mkdir, mkdtemp, readFile, realpath, stat, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, realpath, rename, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { basename, join, resolve } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
-import { assertUserDataIsIsolated } from './lib/dev-desktop.mjs'
+import { assertUserDataIsIsolated, seedCompletedOnboardingForAcceptance } from './lib/dev-desktop.mjs'
 import { startQualificationCore } from './lib/qualification-core.mjs'
 import { removeEphemeralRuntimeCampFilesRoot } from './lib/runtime-camp-files-root.mjs'
 
@@ -82,6 +82,7 @@ try {
   await closeApp(running)
   running = null
   const recovery = await verifyCoreCrashRecovery()
+  const optionalSubsystem = await verifyOptionalSubsystemRecovery()
 
   process.stdout.write(`${JSON.stringify({
     ok: true,
@@ -105,9 +106,12 @@ try {
       interruptedWriteRolledBack: true,
       committedStatePreserved: true,
       structuredCrashFailureInRenderer: true,
-      workspaceRemounted: true
+      workspaceRemounted: true,
+      optionalSubsystemDoesNotUnmountWorkspace: true,
+      optionalSubsystemRetryWithoutCoreRestart: true
     },
     recovery,
+    optionalSubsystem,
     captures: { day: dayCapture, nightCompact: nightCapture, recovered: recovery.capture }
   }, null, 2)}\n`)
 } finally {
@@ -122,7 +126,8 @@ async function verifyCoreCrashRecovery() {
     coreExecutable,
     dataDirectory: recoveryDataDir,
     workingDirectory: root,
-    runtimeCacheDirectory: join(fixtureRoot, 'runtime-cache')
+    runtimeCacheDirectory: join(fixtureRoot, 'runtime-cache'),
+    mcpConfigPath: join(recoveryDataDir, 'mcp.json')
   })
   let application = null
   try {
@@ -260,6 +265,89 @@ async function verifyCoreCrashRecovery() {
   } finally {
     if (application) await closeApp(application)
     await removeEphemeralRuntimeCampFilesRoot(recoveryDataDir, { temporaryDirectory: fixtureRoot })
+  }
+}
+
+async function verifyOptionalSubsystemRecovery() {
+  const optionalDataDir = assertUserDataIsIsolated(join(fixtureRoot, 'optional-subsystem-user-data'))
+  await mkdir(optionalDataDir)
+  const seed = startQualificationCore({
+    coreExecutable: await realpath(join(appPath, 'Contents', 'Resources', 'bin', 'rovai-core')),
+    dataDirectory: optionalDataDir,
+    workingDirectory: root,
+    runtimeCacheDirectory: join(fixtureRoot, 'runtime-cache'),
+    mcpConfigPath: join(optionalDataDir, 'mcp.json')
+  })
+  let application = null
+  try {
+    try {
+      await seed.request('members.list')
+      await seed.request('runtime.subsystems.retry')
+    } finally {
+      assert((await seed.stop()).code === 0, 'Fixture Core did not stop cleanly')
+    }
+    seedCompletedOnboardingForAcceptance(optionalDataDir)
+    const fault = join(optionalDataDir, 'managed-skill-library', '.staging')
+    await rename(fault, `${fault}.original`)
+    await writeFile(fault, 'retained test obstruction', { flag: 'wx', mode: 0o600 })
+    application = await launchApp(optionalDataDir)
+    await waitForExpression(application.cdp, `window.rovai.supervisor.getSnapshot().then(snapshot =>
+      snapshot.fullCoreState === 'ready'
+      && snapshot.coreSubsystems.some(subsystem => subsystem.id === 'skills' && subsystem.state === 'degraded')
+      && snapshot.coreSubsystems.every(subsystem => subsystem.state !== 'initializing'))`, 45_000)
+    await waitForSelector(application.cdp, '.app-shell:not(.onboarding-app-shell)', 45_000)
+    await waitForSelector(application.cdp, '.core-subsystem-notice', 45_000)
+    const before = await evaluate(application.cdp, 'window.rovai.supervisor.getSnapshot()', true)
+    assert((await evaluate(application.cdp, `window.rovai.request('members.list')`, true)).length > 0,
+      'Member authority is unavailable while Skill Library is degraded')
+    await evaluate(application.cdp, 'window.rovai.request("navigation.snapshot")', true)
+    const blocked = await evaluate(application.cdp,
+      `window.rovai.request('skills.list').then(() => null, failure => failure)`, true)
+    assert(blocked.code === 'subsystem_unavailable' && blocked.details.subsystem === 'skills'
+      && blocked.generation === before.generation && blocked.retryable,
+    'Renderer lost the structured feature failure across contextBridge')
+    await evaluate(application.cdp, `(() => {
+      window.__authorityBeforeFeatureRetry = document.querySelector('.app-shell')
+      document.querySelector('.core-subsystem-notice details').open = true
+      document.querySelector('.core-subsystem-notice button').focus()
+    })()`)
+    await setTheme(application.cdp, 'day')
+    const dayCapture = join(outputDir, 'core-skill-degraded-day-1040x700.png')
+    await capture(application.cdp, dayCapture)
+    await application.cdp.send('Emulation.setDeviceMetricsOverride', {
+      width: 520, height: 350, deviceScaleFactor: 2, mobile: false
+    })
+    await application.cdp.send('Emulation.setEmulatedMedia', {
+      features: [{ name: 'prefers-reduced-motion', value: 'reduce' }]
+    })
+    await setTheme(application.cdp, 'night')
+    assert(await evaluate(application.cdp, `(() => {
+      const notice = document.querySelector('.core-subsystem-notice')
+      const button = notice.querySelector('button')
+      return !button.disabled && document.activeElement === button
+        && notice.scrollWidth <= notice.clientWidth + 1
+        && notice.getBoundingClientRect().bottom <= window.innerHeight + 1
+    })()`), 'The compact feature notice overflows or loses keyboard recovery')
+    const nightCapture = join(outputDir, 'core-skill-degraded-night-200-percent.png')
+    await capture(application.cdp, nightCapture)
+    await rename(fault, `${fault}.obstruction`)
+    await evaluate(application.cdp, `document.querySelector('.core-subsystem-notice button').click()`)
+    await waitForExpression(application.cdp, `window.rovai.supervisor.getSnapshot().then(snapshot =>
+      snapshot.coreSubsystems.find(subsystem => subsystem.id === 'skills')?.state === 'ready'
+      && !document.querySelector('.core-subsystem-notice'))`, 45_000)
+    const after = await evaluate(application.cdp, 'window.rovai.supervisor.getSnapshot()', true)
+    assert(after.generation === before.generation && after.restartAttempt === 0
+      && after.capabilities.authoritativeWorkspace && after.capabilities.coreRequests,
+    'Feature retry restarted or blocked Full Core')
+    assert(await evaluate(application.cdp,
+      'window.__authorityBeforeFeatureRetry === document.querySelector(".app-shell")'),
+    'Feature retry remounted the authority workspace')
+    assert((await evaluate(application.cdp, 'window.rovai.request("skills.list")', true)).length > 0,
+      'Skill Library did not recover')
+    return { generation: after.generation, dataDir: optionalDataDir, captures: { day: dayCapture, night: nightCapture } }
+  } finally {
+    if (application) await closeApp(application)
+    await removeEphemeralRuntimeCampFilesRoot(optionalDataDir, { temporaryDirectory: fixtureRoot })
   }
 }
 

@@ -3,7 +3,7 @@ document_type: architecture
 architecture: windows-desktop-platform
 authority: windows-desktop-platform-composition
 status: accepted
-last_updated: 2026-08-25
+last_updated: 2026-08-30
 ---
 
 # Windows Desktop Platform
@@ -86,6 +86,12 @@ same verified handles. Skill Projection uses the separate multi-stage copy contr
 inside Runtime-visible Skill content.
 
 ## 6. Desktop and packaging
+
+Windows startup 的壳层/正式 data-root 分层由
+[Availability-first Runtime](availability-first-runtime.md#windows-shell-storage-boundary)拥有。先用已打包 `rovai.exe`
+的独立原生入口建立私有 Electron bootstrap profile 并获取实例锁，只有 primary 运行完整 Core data-root preparer；正式
+准备失败仍显示壳层，但没有 Core data path。ready 后恢复必须 relaunch 到同一目标 root，不重绑 sessionData，也不创建
+临时 SQLite。两个 helper 都沿用现有 private-storage 原语，不新增可继承 ACL 或 PowerShell 后备路径。
 
 Windows keeps the system frame while hiding its App icon/title strip and native menu-bar presentation. The Renderer projects
 only four fixed top-level menu labels on the rail-colored WCO row; a closed preload/Main request maps each label back to the

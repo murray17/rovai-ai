@@ -1,9 +1,13 @@
-name: Desktop context bridge
+name: Desktop availability and context bridge
 
 on:
   pull_request:
     paths:
       - "apps/desktop/src/preload/**"
+      - "apps/desktop/src/main/**"
+      - "apps/desktop/src/renderer/src/App*"
+      - "apps/desktop/src/renderer/src/CoreSubsystemNotice*"
+      - "apps/desktop/src/renderer/src/styles.css"
       - "apps/desktop/src/renderer/src/error-message*"
       - "packages/contracts/**"
       - "scripts/lib/rovai-request-context-bridge.test.mjs"
@@ -41,5 +45,6 @@ jobs:
 
       - name: Verify real Electron contextBridge and Renderer error reading
         run: |
+          pnpm typecheck
           xvfb-run -a pnpm test:desktop-bridge
-          pnpm exec vitest run apps/desktop/src/renderer/src/error-message.test.ts
+          pnpm exec vitest run apps/desktop/src/renderer/src/error-message.test.ts apps/desktop/src/main/core-client.test.ts apps/desktop/src/main/windows-data-root.test.ts apps/desktop/src/main/windows-bootstrap.test.ts apps/desktop/src/renderer/src/CoreSubsystemNotice.test.ts apps/desktop/src/renderer/src/App.test.ts

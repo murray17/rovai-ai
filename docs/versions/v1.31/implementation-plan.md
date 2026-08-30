@@ -37,6 +37,9 @@ last_updated: 2026-08-30
 - [x] Renderer capability gate、Bootstrap Shell、主题/重试/诊断与 migration 状态；
 - [x] Onboarding 使用 admitted authority origin；
 - [x] Day/Night、窄窗口、200% zoom 与 reduced-motion 视觉验收。
+- [x] DB 后 authority recovery 保留前置门禁，其余 Skill/MCP/adapter/IPC/清理按功能降级并支持原进程重试；
+- [x] Windows 先准入独立私有壳层并取实例锁，正式 data-root preparation 失败不阻止壳层；
+- [x] pending cleanup 限制到启动候选；Windows 文件身份改用稳定 Win32 handle API。
 
 ## Checkpoint 5 — Governance and release evidence
 
@@ -86,3 +89,40 @@ last_updated: 2026-08-30
 - 上述打包验收使用独立 data-dir/Skill Library，不调用模型、不改日常 App；脚本先 canonicalize 夹具 root，避免 macOS
   `/tmp`、`/var` 符号链接别名被误当作可用于 Core managed roots 的路径。
 - `DOCS_BASE_REF=e96503a600ceddba72922888e425bcfbbf0fe01f pnpm docs:check:ci` 通过；该 SHA 为验证时目标主线基准。
+
+## 可选启动功能 / Windows 壳层修正的测试归属
+
+- `scripts/lib/core-startup-availability.test.mjs` 拥有真实 Core 的 startup/RPC/process seam。表驱动向 MCP 配置、
+  Skill staging、Runtime 私有目录和后台维护路径注入 obstruction，覆盖 ready、结构化单功能拒绝、成员/导航仍可用、
+  移除 obstruction 后同进程恢复；另用隔离 DB trigger 精确命中 mandatory authority recovery，验证 typed refusal、
+  无 false ready、退出码 0 与下次重启恢复。构造器单测不能证明 `run_core()` 的错误传播与 ready 顺序，所以保留真实子进程。
+  最小命令 `pnpm test:core-startup`，不启动模型 Runtime；Rust fast CI 同时执行此 seam。
+- `CollaborationService` 既有 `discard_empty_pending_camps_on_startup` slow-test owner 增加快照后创建 Camp 和重复 cleanup
+  断言，保持事务中重新核对空草稿条件，不增建平行 DB fixture。初始化状态保留领域已删除但目录清理失败的 exact targets。
+- `core_data_dir_lock::tests::filesystem_identity_tracks_objects_not_paths_or_contents` 拥有纯文件对象身份边界：目录与文件
+  重读稳定、内容写入不改变对象身份、原对象仍存活时替换同一路径必须不同。无 SQLite fixture；保留原对象避免依赖 inode
+  回收时序。既有 lease 测试只覆盖争锁而不能检查 SQLite artifact identity；Windows 修复前 stable 编译在不稳定
+  `MetadataExt` API 失败，改为 metadata-only no-follow handle + `FILE_ID_INFO`，继续拒绝 reparse/device。
+  最小命令 `cargo test -p rovai-core --lib core_data_dir_lock::tests::`。
+- `windows_bootstrap_root_prepares_only_private_shell_directories` 拥有原生 Windows helper 的独立、Core-free、可重复准入
+  与 private DACL 边界，复用 native storage fixture，不打开 SQLite。完整 data-root owner 必须创建 Core，不能替代此断言。
+  最小命令 `cargo test -p rovai-core --all-targets windows_bootstrap_root`；仅 Windows CI 执行原生分支。
+- `windows-bootstrap.test.ts` 拥有 Desktop composition：缺失 binary/环境、超时/异常输出/ACL 拒绝、部分路径绑定回滚，
+  primary/secondary 顺序与稳定锁 profile；`core-client.test.ts` 验证 null authority path 不能 spawn 或消耗 generation。
+- Renderer feature notice 只覆盖状态呈现；打包 App 额外拥有真实 bridge、工作区 DOM 节点保持和同 generation 按钮重试，
+  不重复底层四种故障矩阵。沿用现有 Impeccable 视觉世界，以 footer 呈现功能故障，不重做工作区。
+
+### 本轮验证记录（2026-08-30）
+
+- 原 MCP 目录故障复现脚本在同一隔离 fixture 重跑：healthy / fault / repeat / restored 均 `databaseReady=true`、
+  `coreReady=true`、exit 0 与 `quick_check=ok`；保留修复前两次 fail 和修复后的独立日志。
+- `pnpm test:core-startup` 通过四个可选故障 case 与 mandatory authority recovery refusal/restart case；
+  `pnpm test:desktop-bridge` 验证真实 Electron Promise failure 字段保留。
+- `cargo test --workspace --no-fail-fast`、291 项 slow library、Clippy `-D warnings`、fmt、`pnpm test`、
+  typecheck 与文档/skills gates 通过；最终 PR 记录对应最新提交的 CI 状态，不以本机 macOS 结果代替 Windows 原生验证。
+- `pnpm package:mac:unsigned` 与扩展打包验收通过。fixture 为独立 `rovai-availability-accept.*`，显式隔离
+  `userData`、Skill Library、MCP config、Runtime Files Root；不使用日常配置，不调用模型。
+  Skill 故障时成员/导航可用，修复后 generation 保持 1，工作区 DOM 节点未重挂载，失败字段跨真实 bridge 保留；
+  Day 1040×700 与 Night/200%/reduced-motion 截图已检查，提示可滚动、重试键盘可达、无横向溢出。
+- 同轮打包回归在真实 Core 写出 4,787,440 字节未提交 WAL 后强杀，仅此隔离 child 被终止；generation 1→2 自动恢复，
+  1024 行已提交数据保留。已有未知 authority 两次检查、原文件保留与 Bootstrap capability gate 验收继续通过。

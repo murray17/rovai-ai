@@ -55,6 +55,7 @@ export function startQualificationCore({
   dataDirectory,
   workingDirectory,
   runtimeCacheDirectory,
+  mcpConfigPath = null,
   onNotification = null
 }) {
   const executable = resolve(coreExecutable)
@@ -63,6 +64,7 @@ export function startQualificationCore({
     ...coreDataDirectoryArguments(resolvedDataDirectory),
     '--skill-library-root', join(resolvedDataDirectory, 'managed-skill-library')
   ]
+  if (mcpConfigPath) args.push('--mcp-config-path', resolve(mcpConfigPath))
   const environment = { ...process.env }
   for (const key of Object.keys(environment)) {
     if (key.startsWith('ROVAI_QUALIFICATION_')) delete environment[key]

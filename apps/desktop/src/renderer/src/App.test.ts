@@ -228,6 +228,7 @@ function supervisorSnapshot(
       fullCoreRetry: false
     },
     localDegradations: [],
+    coreSubsystems: [],
     lastError: null,
     migrationProgress: null,
     ...overrides
@@ -281,6 +282,19 @@ describe('availability-first workspace gate', () => {
     expect(copy.title).toContain('另一个 Rovai Core')
     expect(copy.description).toContain('没有创建第二份数据')
     expect(`${copy.title}${copy.description}`).not.toMatch(/空工作区|空列表/)
+  })
+
+  it('describes Windows preparation refusal as a shell-only state with a desktop restart', () => {
+    const copy = bootstrapAuthorityCopy(supervisorSnapshot({
+      fullCoreState: 'blocked',
+      authorityState: { kind: 'unknown' },
+      startupPhase: 'preparing_windows_data_root'
+    }))
+
+    expect(copy.title).toContain('数据目录尚未准备好')
+    expect(copy.description).toContain('Core 尚未启动')
+    expect(copy.description).toContain('重启桌面壳层')
+    expect(`${copy.title}${copy.description}`).not.toMatch(/数据库损坏|权限已修复/)
   })
 })
 

@@ -7,7 +7,10 @@ pub(crate) mod windows_file_tree;
 #[cfg(windows)]
 pub(crate) mod windows_security;
 
-pub use private_storage::{WindowsDataRootLayout, prepare_windows_data_root};
+pub use private_storage::{
+    WindowsBootstrapLayout, WindowsDataRootLayout, prepare_windows_bootstrap_root,
+    prepare_windows_data_root,
+};
 
 /// Closed identity for build targets Rovai can ship.
 ///

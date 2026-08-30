@@ -40,6 +40,7 @@ interface SupervisorSnapshot {
     fullCoreRetry: boolean
   }
   localDegradations: StructuredError[]
+  coreSubsystems: CoreSubsystemSnapshot[]
   lastError: StructuredError | null
   migrationProgress: unknown | null
 }
@@ -62,6 +63,7 @@ type CoreStartupFrame = {
   authorityState?: AuthorityState
   error?: StructuredError
   progress?: unknown
+  subsystems?: CoreSubsystemSnapshot[]
 }
 ```
 
@@ -147,6 +149,58 @@ failure 的字符串 `message`。真实 Electron 隔离世界测试必须验证�
 Desktop 本机偏好不属于 SQLite authority。文件 missing 使用内存默认且不告警；文件损坏、不可读或需要清理时，
 使用内存默认/规范化结果、发布 `localDegradations`，并保留原文件。只有后续明确的用户设置操作才可写新快照。
 偏好故障不能禁止 Full Core；反过来，Full Core 阻断也不能禁止主题、Supervisor 或 bootstrap diagnostics。
+
+## 7. Authority ready and optional subsystem gates
+
+Core ready 必须先完成 controlled-shutdown、accepted-input / execution 与 delivery 的领域恢复。此类恢复失败发布
+`failed / recovering_authority / authority_recovery_failed`，保留原 authority、正常退出并允许用户重试，不计作意外崩溃。
+既有 compaction policy/outbox/observer 启动协调仍是 best effort，保持 replay-before-fence 和启动一次的顺序，不能在
+功能重试中重新 fence 已启动的新 Observer，也不能把 detector 故障提升为 Runtime Readiness。
+
+Skill Library、MCP config、Runtime adapter 私有存储、Built-in Tool IPC、attachment reconciliation 和非关键维护在
+ready 后初始化；服务对象构造本身不做这些 I/O。每个功能只拥有当前进程内的能力状态，不增加数据库准入类别或替代 authority：
+
+```ts
+interface CoreSubsystemSnapshot {
+  id: string // skills, mcp, attachments, maintenance, builtin-tools, runtime.<AdapterKind>
+  state: 'initializing' | 'ready' | 'degraded'
+  error: StructuredError | null
+}
+```
+
+ready 帧携带初始完整 `subsystems`；普通 `runtime.subsystemsChanged` event 携带更新后的完整数组。Supervisor 只接受
+当前 ready child 的 event，并在离开 `full_core` 时清空 `coreSubsystems`；旧 generation 不能恢复旧功能状态。
+`runtime.subsystems.get` 返回完整数组；`runtime.subsystems.retry` 串行重试未就绪功能，已健康服务不重建、不重复清理
+活动 Runtime。它不重启 Core、不重新数据库准入、不消耗 crash budget。
+
+Core 对依赖的功能执行门禁，不仅是 Renderer 隐藏控件：`skills.*`、MCP 操作（显式 permissions repair 除外）与
+`camp.attachments.*` 在对应功能未就绪时返回 `infrastructure_failure / subsystem_unavailable`，带
+`retryable=true`、`details.subsystem/state` 与 Main 注入的当前 generation。AgentRun dispatch/launch 在 Skills、MCP、
+Attachments、Built-in Tools 及该 Runtime adapter 未就绪时不执行；已排队工作保留，功能恢复后由现有 dispatcher 重试。
+`maintenance` 失败不阻断领域读写或 Runtime admission。成员、Camp/Task/消息记录和导航仍读取同一 authority，不能用空数据
+替代失败的功能结果。原有 per-Camp 附件权限与 Runtime 平台准入继续独立生效。
+
+pending Camp cleanup 只接受 ready 前捕获的候选 ID；实际删除在同一事务中复核空草稿条件。重试不重扫本次启动后新建的
+Camp；已完成领域删除但尚未成功清理的 exact 目录在当前进程内保留为 retry targets，不把目录清理失败传播到 Full Core。
+候选快照读取失败时记录诊断并跳过本次启动的 pending cleanup，不阻断 ready，也不在稍后改为全量重扫。
+
+## 8. Windows pre-ready Bootstrap assessment
+
+Windows 先使用已打包的 `rovai.exe --prepare-windows-bootstrap-root <instance-key>` 建立独立私有壳层布局；该入口
+不启动 Core、不打开 SQLite、不运行 Runtime。它用 OS LocalAppData Known Folder 与稳定 key，创建时即设置 protected
+DACL，输出只有 Electron User Data / Session Data、Logs、CrashDumps 的封闭布局，绝无 Core path。
+
+绑定壳层路径后取得 single-instance lock；只有 primary 才解析 Core binary / 正式 root，并调用完整 data-root preparer。
+成功时在 ready 前绑定正式 Electron 路径并把正式 `<root>\Core` 传给 Core。正式 root 解析、binary 缺失、preparer
+启动/超时/退出/输出或路径绑定失败都收敛为 `blocked / preparing_windows_data_root` assessment：恢复全部壳层路径，
+打开 Bootstrap Shell，保留具体原因和 local degradation，Core data path 为 null，不能 spawn，也不创建 fallback SQLite。
+每次启动均先用同一个壳层 profile 取锁；正式路径绑定成功与否不改变下一实例的锁 identity。
+
+由于 `sessionData` 必须在 Electron ready 前绑定，Windows 此类重试是用原命令行 relaunch Desktop，UI 明确标注
+“重启并重新检查”。壳层偏好与正式偏好不隐式复制或覆盖。若连独立私有壳层存储也无法准入，使用可在 ready 前调用的
+原生错误对话框结束启动；不能降到未验证 ACL 的默认 profile。此宿主安全边界不伪装为 Full Core crash 或数据库故障。
+
+这些约束补充 [Windows Private Storage v2](windows-private-storage-v2.md)，不改变正式 Core / Runtime Files Root 布局。
 
 ## References
 

@@ -127,20 +127,31 @@ pub struct ClaudeCodeCliRuntimeAdapter {
 }
 
 impl ClaudeCodeCliRuntimeAdapter {
+    #[cfg(test)]
     pub fn new(data_dir: &Path) -> Result<Self> {
-        let private_runtime_dir = data_dir.join("runtime-private");
-        std::fs::create_dir_all(&private_runtime_dir).with_context(|| {
+        let adapter = Self::deferred(data_dir);
+        adapter.initialize_storage()?;
+        Ok(adapter)
+    }
+
+    pub fn deferred(data_dir: &Path) -> Self {
+        Self {
+            active: StdMutex::new(HashMap::new()),
+            private_runtime_dir: data_dir.join("runtime-private"),
+        }
+    }
+
+    pub fn initialize_storage(&self) -> Result<()> {
+        let private_runtime_dir = &self.private_runtime_dir;
+        std::fs::create_dir_all(private_runtime_dir).with_context(|| {
             format!(
                 "failed to create private Runtime directory {}",
                 private_runtime_dir.display()
             )
         })?;
-        restrict_directory_permissions(&private_runtime_dir)?;
-        remove_stale_mcp_configs(&private_runtime_dir)?;
-        Ok(Self {
-            active: StdMutex::new(HashMap::new()),
-            private_runtime_dir,
-        })
+        restrict_directory_permissions(private_runtime_dir)?;
+        remove_stale_mcp_configs(private_runtime_dir)?;
+        Ok(())
     }
 
     pub async fn run(&self, mut request: ClaudeCodeRunRequest) -> Result<ClaudeCodeRunResult> {
