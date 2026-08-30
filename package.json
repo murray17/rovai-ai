@@ -43,6 +43,7 @@
     "typecheck": "tsc --noEmit",
     "test:desktop-bridge": "node --test scripts/lib/rovai-request-context-bridge.test.mjs",
     "test:composer-input": "node --test scripts/lib/structured-mention-composer.test.mjs",
+    "test:composer-continuation": "node --test scripts/lib/camp-composer-continuation.test.mjs",
     "test:startup-presentation": "node --test scripts/lib/desktop-startup-presentation.test.mjs",
     "test:camp-fast-layout": "node --test scripts/lib/camp-fast-layout.test.mjs",
     "test:file-preview-layout": "node --test scripts/lib/file-preview-layout.test.mjs",

@@ -3150,10 +3150,8 @@ function AuthoritativeApp({
       commandId,
       draft
     )
-    setOptimisticCampMessages((current) => [
-      ...current,
-      { campId, commandId, message: optimisticMessage }
-    ])
+    // Core decides direct publication versus private queue admission. Never expose
+    // a pending input as an optimistic public CampMessage before that decision.
     setBusy('camp-message')
     setError(null)
     setToast(null)
@@ -3176,24 +3174,18 @@ function AuthoritativeApp({
         throw new Error(commandFailureMessage(result.commandResult))
       }
       const campMessageId = stringField(result.commandResult.payload, 'campMessageId')
+      const pendingInputId = stringField(result.commandResult.payload, 'pendingInputId')
       const campTurnId = stringField(result.commandResult.payload, 'campTurnId')
       const agentRunIds = stringArrayField(result.commandResult.payload, 'agentRunIds')
       const sequence = typeof result.commandResult.payload.sequence === 'number'
         ? result.commandResult.payload.sequence
         : optimisticMessage.sequence
-      setOptimisticCampMessages((current) => current.map((entry) =>
-        entry.commandId === commandId
-          ? {
-              ...entry,
-              message: {
-                ...entry.message,
-                id: campMessageId ?? entry.message.id,
-                sequence,
-                campTurnId
-              }
-            }
-          : entry
-      ))
+      if (campMessageId) {
+        setOptimisticCampMessages((current) => [...current, {
+          campId, commandId,
+          message: { ...optimisticMessage, id: campMessageId, sequence, campTurnId }
+        }])
+      }
       void requestCampProjection(campId, 'open')
         .then(async ({ snapshot }) => {
           if (selectionGeneration !== campSelectionGeneration.current) return
@@ -3206,6 +3198,7 @@ function AuthoritativeApp({
         })
         .catch((nextError) => setError(errorMessage(nextError)))
       return {
+        ...(pendingInputId ? { pendingInputId } : {}),
         campTurnId,
         agentRunIds,
         addressedAgentIds: optimisticMessage.addressedAgentIds

@@ -7,7 +7,9 @@ last_updated: 2026-08-31
 
 # Camp Fast 实施与验收
 
-基线 `53d6e99a4662676cb7b3794681f1be74bf619b2f`；分支 `codex/fast-camp-member-mvp`。
+初始基线 `53d6e99a4662676cb7b3794681f1be74bf619b2f`；分支 `codex/fast-camp-member-mvp`。
+实施期间同步主线 `8c98d5bf257abaf91cfcbbcf6ba55e95f6a28da6`，保留其连续消息队列与 Migration 117；
+Fast 顺延为 v1.34 / Migration 118，两条旧源升级路径分别验证。
 用户已授权独立 worktree 实施、PR 到 main 并合并。原始下载原型仅作参考，后续修订的最小方案拥有范围。
 
 ## 实施
@@ -36,7 +38,8 @@ unknown 撤回。未删除、禁用或复制旧 Rust 测试。
 
 独立复核补充：扩展既有 scheduler rebind owner，验证默认/显式模型均保留已冻结的 Fast，即使用户后来
 选择 Standard；冻结摘要仍通过既有完整对象校验。资格缓存 owner 增加 search generation 拒绝、Codex
-fallback 不改 Thread 默认；metadata 检查复用已有 executable identity wrapper 及其更新/清理失败测试。
+fallback 不改 Thread 默认；metadata 检查复用已有 executable identity wrapper 及其更新/清理失败测试，
+检查前后均验证已解析的 executable，避免等待锁期间替换后的稳定结果写入旧 identity。
 Electron owner 增加原生输入触发后挂起响应、换绑定、再释放旧响应，分别覆盖检测和保存迟到。
 历史 Migration owner 的升级后断言改为当前 contract 常量；旧源形状仍独立冻结。Product Fingerprint 的
 现行版本断言与兼容性文件 byte digest 同步更新，不改变平台资格状态或既有历史证据内容。

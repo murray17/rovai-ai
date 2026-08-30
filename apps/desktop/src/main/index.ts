@@ -209,6 +209,8 @@ const allowedMethods = new Set<CoreMethod>([
   'tasks.list',
   'tasks.get',
   'camp.composerDraft.get',
+  'camp.pendingInputs.get',
+  'camp.pendingInputs.edit',
   'camp.composerDraft.save',
   'camp.composerDraft.startReply',
   'camp.composerDraft.cancelReply',

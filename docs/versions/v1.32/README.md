@@ -14,7 +14,7 @@ last_updated: 2026-08-30
 `rovai send --file` 在首次 IPC 前把 Runtime 可读取的外部文件或目录快照到当前 Run tmp，
 消除“发送失败、手工复制、重新发送”的重复操作。Core 继续只读取 execution workspace 或 Run tmp。
 
-前置版本：[v1.31](../v1.31/README.md)。
+前置版本：[v1.31](../v1.31/README.md)。后续版本：[v1.33](../v1.33/README.md)。
 
 - [实施计划](implementation-plan.md)
 - [版本决定](decisions.md)

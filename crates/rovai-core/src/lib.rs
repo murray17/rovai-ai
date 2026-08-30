@@ -53,6 +53,7 @@ pub mod memory_tool;
 pub mod message_delivery;
 pub mod monitoring;
 pub mod notification;
+pub mod pending_camp_input;
 pub mod planned_shutdown;
 pub mod platform;
 pub mod read_model;

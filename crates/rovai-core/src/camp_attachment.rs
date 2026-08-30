@@ -2375,7 +2375,7 @@ fn active_reply_agent(connection: &Connection, camp_id: &str, agent_id: &str) ->
         .context("failed to resolve reply author availability")
 }
 
-fn project_reply_intent(
+pub(crate) fn project_reply_intent(
     database: &Database,
     camp_id: &str,
     reply_to_camp_message_id: Option<&str>,
