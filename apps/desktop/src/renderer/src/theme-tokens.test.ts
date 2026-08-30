@@ -356,18 +356,15 @@ describe('Porcelain Day + Steel Night theme tokens', () => {
     expect(css).toMatch(/\.composer-action-row\s*\{[^}]*z-index:\s*1[^}]*justify-content:\s*space-between[^}]*background:\s*var\(--input\)/)
   })
 
-  it('uses a focused Task and Team Inspector without legacy Context or Approval cards', () => {
-    expect(css).toMatch(/\.task-action-row\s*\{[^}]*position:\s*sticky[^}]*min-height:\s*42px/)
-    expect(css).toMatch(/\.task-action-button\s*\{[^}]*width:\s*100%[^}]*background:\s*transparent/)
-    expect(css).toMatch(/\.task-action-button > span\s*\{[^}]*background:\s*var\(--brand-soft\)/)
-    expect(css).toMatch(/\.task-list-row\s*\{[^}]*grid-template-columns:\s*4px minmax\(0, 1fr\) auto/)
-    expect(css).toMatch(/\.task-state-dot\.state-in_progress\s*\{[^}]*background:\s*var\(--brand\)/)
+  it('keeps Camp details on a themed popover with row-level member menus', () => {
+    expect(css).toMatch(/\.camp-detail-popover\s*\{[^}]*position:\s*absolute[^}]*background:\s*var\(--inspector-surface\)/)
+    expect(css).toMatch(/\.task-action-row\s*\{[^}]*position:\s*sticky/)
+    expect(css).toMatch(/\.task-state-dot\.state-in_progress\s*\{[^}]*border-color:\s*var\(--brand\)/)
     expect(css).toMatch(/\.camp-members-summary\s*\{[^}]*position:\s*sticky/)
-    expect(css).toMatch(/\.camp-lead-picker\s*\{[^}]*grid-template-columns:\s*28px minmax\(0, 1fr\) 16px/)
-    expect(css).toMatch(/\.camp-lead-menu-item\[data-disabled\]\s*\{[^}]*cursor:\s*not-allowed/)
+    expect(css).toMatch(/\.camp-member-menu-item\[data-disabled\]\s*\{[^}]*cursor:\s*not-allowed/)
+    expect(css).not.toContain('.camp-lead-picker {')
     expect(css).not.toContain('.context-card {')
     expect(css).not.toContain('.approval-card {')
-    expect(css).not.toContain('.task-panel-toolbar {')
   })
 
   it('keeps the Composer Skill picker in the accepted native Steel dropdown', () => {

@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { basename, join, resolve } from 'node:path'
 import { spawn } from 'node:child_process'
 import { createInterface } from 'node:readline'
-import { stagedSidecarPath } from './lib/sidecar-targets.mjs'
+import { seedCompletedOnboardingForAcceptance } from './lib/dev-desktop.mjs'
 import { coreDataDirectoryArguments } from './lib/runtime-camp-files-root.mjs'
 
 const root = resolve(import.meta.dirname, '..')
@@ -19,6 +19,7 @@ const databasePath = join(dataDir, 'rovai.sqlite')
 const firstPort = Number(process.env.ROVAI_TASK_CARD_ACCEPT_DEBUG_PORT ?? 9501)
 
 await mkdir(dataDir, { recursive: true })
+seedCompletedOnboardingForAcceptance(dataDir)
 await mkdir(outputDir, { recursive: true })
 
 const fixture = await createFixtureCamp()
@@ -57,7 +58,7 @@ try {
     statusKey: 'pending',
     headline: '任务责任已更新',
     noteLabel: '当前',
-    note: '等待负责人开始；创建不会自动启动 AgentRun',
+    note: '等待负责人开始；创建不会自动启动执行',
     assigneeName: fixture.primaryAssignee.name,
     assignment: 'assigned',
     count: 1
@@ -276,6 +277,8 @@ try {
   await assertZoomedTaskFunctionality(compactApp.cdp)
   const zoomCapture = join(outputDir, 'task-card-details-compact-1040x700-zoom-200.png')
   await capture(compactApp.cdp, zoomCapture)
+  await emulateDesktopZoom(compactApp.cdp, 1440, 920, 1)
+  const editorLifecycle = await verifyTaskEditorLifecycle(compactApp.cdp, fixture)
 
   console.log(JSON.stringify({
     ok: true,
@@ -297,6 +300,7 @@ try {
       taskCreateActionReplacesLegacyToolbar: true,
       taskCreateTitleReceivesFocus: true,
       taskCreateCancelRestoresPreviousList: true,
+      taskEditorLifecycle: editorLifecycle,
       dayAndNightTaskCardThemes: true,
       desktopAndCompactReducedMotionLayouts: true,
       zoom200KeepsTaskFunctionality: true,
@@ -329,7 +333,8 @@ async function createFixtureCamp() {
       workspace: null,
       memberAgentIds: presentMembers.map((member) => member.agentId),
       defaultLeadAgentId: preflight.initialLeadAgentId,
-      collaborationMode: 'peer'
+      collaborationMode: 'peer',
+      activationState: 'active'
     })
     assert(created.status === 'applied' && created.payload?.campId,
       `Could not create task-card fixture Camp: ${JSON.stringify(created)}`)
@@ -352,48 +357,36 @@ async function getTask(cdp, campId, taskId) {
 }
 
 async function assertTaskCreateAction(cdp, expectedTaskRows) {
+  await evaluate(cdp, `document.querySelector('.camp-detail-entry[data-detail="tasks"][aria-expanded="false"]')?.click()`)
+  await waitForExpression(cdp, `document.querySelector('.camp-detail-entry[data-detail="tasks"]')?.getAttribute('aria-expanded') === 'true'`)
   const opened = await evaluate(cdp, `(() => {
-    const action = document.querySelector('.task-action-button')
-    const panelText = document.querySelector('.task-panel')?.textContent ?? ''
+    const action = document.querySelector('.task-new-button')
     const before = {
-      glyph: action?.querySelector('span')?.textContent ?? '',
-      label: action?.querySelector('strong')?.textContent ?? '',
+      label: action?.textContent ?? '',
       taskRows: document.querySelectorAll('.task-list-row').length,
-      legacyHeading: panelText.includes('长期事项'),
-      legacyExplanation: panelText.includes('普通对话不需要 Task')
+      legacyExplanation: document.querySelector('.task-panel')?.textContent?.includes('普通对话不需要 Task') ?? false
     }
     action?.click()
     return { opened: Boolean(action), before }
   })()`)
-  assert(opened.opened
-      && opened.before.glyph === '＋'
-      && opened.before.label === '新建任务'
-      && opened.before.taskRows === expectedTaskRows
-      && !opened.before.legacyHeading
-      && !opened.before.legacyExplanation,
-  `Task creation action did not replace the legacy toolbar: ${JSON.stringify(opened)}`)
-
+  assert(opened.opened && opened.before.label.includes('新建任务')
+      && opened.before.taskRows === expectedTaskRows && !opened.before.legacyExplanation,
+    `Task creation entry is unavailable: ${JSON.stringify(opened)}`)
   await waitForExpression(cdp, `(() => {
-    const editor = document.querySelector('.task-editor')
-    const title = editor?.querySelector('label:first-of-type input')
-    const action = document.querySelector('.task-action-button')
-    return Boolean(editor && title && document.activeElement === title)
-      && action?.querySelector('span')?.textContent === '←'
-      && action?.querySelector('strong')?.textContent === '返回任务列表'
+    const dialog = document.querySelector('.task-editor-dialog')
+    const title = dialog?.querySelector('input[data-dialog-autofocus]')
+    return Boolean(dialog && title && document.activeElement === title)
+      && dialog.getAttribute('role') === 'dialog'
   })()`)
-
-  const returned = await evaluate(cdp, `(() => {
-    const action = document.querySelector('.task-action-button')
-    action?.click()
-    return Boolean(action)
+  await evaluate(cdp, `(() => {
+    const button = [...document.querySelectorAll('.task-editor-dialog .app-dialog-footer button')]
+      .find((candidate) => candidate.textContent === '收起')
+    button?.click()
+    return Boolean(button)
   })()`)
-  assert(returned, 'Task creation return action was unavailable')
-  await waitForExpression(cdp, `(() => {
-    return !document.querySelector('.task-editor')
-      && document.querySelectorAll('.task-list-row').length === ${expectedTaskRows}
-      && document.querySelector('.task-action-button span')?.textContent === '＋'
-      && document.querySelector('.task-action-button strong')?.textContent === '新建任务'
-  })()`)
+  await waitForExpression(cdp, `!document.querySelector('.task-editor-dialog')
+    && document.querySelectorAll('.task-list-row').length === ${expectedTaskRows}
+    && document.activeElement === document.querySelector('.task-new-button')`)
 }
 
 async function waitForTaskCard(cdp, title, status, count, headline) {
@@ -479,7 +472,7 @@ async function assertTaskCardProjection(cdp, expected) {
     `Task description leaked into the conversation card: ${JSON.stringify(state)}`)
   assert(!state.prototypeAnnotationVisible,
     `Prototype-only annotation leaked into the product card: ${JSON.stringify(state)}`)
-  assert(state.widths.every((width) => width.scroll <= width.client + 1),
+  assert(state.widths.every((width) => width.client > 0 && width.scroll <= width.client + 1),
     `Task card overflowed horizontally: ${JSON.stringify(state.widths)}`)
 }
 
@@ -493,8 +486,9 @@ async function openTaskDetails(cdp, title) {
   })()`)
   assert(opened, `Could not open Task card ${JSON.stringify(title)}`)
   await waitForExpression(cdp, `(() => {
-    const heading = document.querySelector('.task-editor-heading')?.textContent ?? ''
-    return heading.includes('Task 详情') && Boolean(document.querySelector('.task-editor'))
+    const detail = document.querySelector('.task-detail')
+    return Boolean(detail && detail.getBoundingClientRect().height > 0)
+      && !document.querySelector('.task-editor-dialog')
   })()`)
 }
 
@@ -521,39 +515,38 @@ async function openTaskDetailsWithKeyboard(cdp, title) {
     nativeVirtualKeyCode: 36
   })
   await waitForExpression(cdp, `(() => {
-    const heading = document.querySelector('.task-editor-heading')?.textContent ?? ''
-    return heading.includes('Task 详情') && Boolean(document.querySelector('.task-editor'))
+    const detail = document.querySelector('.task-detail')
+    return Boolean(detail && detail.getBoundingClientRect().height > 0)
+      && !document.querySelector('.task-editor-dialog')
   })()`)
 }
 
 async function assertTerminalDetails(cdp, expectedDescription, expectedCriteriaCount) {
   const state = await evaluate(cdp, `(() => {
-    const editor = document.querySelector('.task-editor')
-    const description = editor?.querySelector('textarea')
-    const criteria = [...(editor?.querySelectorAll('textarea') ?? [])]
-      .find((field) => field.closest('label')?.textContent?.includes('验收条件'))
+    const detail = document.querySelector('.task-detail')
+    const audit = detail?.querySelector('.task-audit-disclosure')
+    if (audit) audit.open = true
     return {
-      description: description?.value ?? null,
-      disabled: description?.disabled ?? false,
-      note: editor?.querySelector('.task-terminal-note')?.textContent ?? '',
-      criteriaCount: (criteria?.value ?? '').split('\\n').filter(Boolean).length,
-      auditVisible: Boolean(editor?.querySelector('[aria-label="Task 审计信息"]')),
-      relatedExecutionVisible: Boolean(editor?.querySelector('[aria-label="关联执行"]')),
-      visible: Boolean(editor)
+      description: detail?.querySelector('.task-detail-copy')?.textContent ?? null,
+      editable: Boolean(detail?.querySelector('.task-detail-actions')),
+      note: detail?.querySelector('.task-terminal-note')?.textContent ?? '',
+      criteriaCount: detail?.querySelectorAll('.task-acceptance-list li').length ?? 0,
+      auditVisible: Boolean(detail?.querySelector('[aria-label="任务审计信息"]')),
+      relatedExecutionVisible: Boolean(detail?.querySelector('[aria-label="关联执行"]')),
+      visible: Boolean(detail && detail.getBoundingClientRect().height > 0)
     }
   })()`)
-  assert(state.visible && state.disabled && state.description === expectedDescription
-      && state.criteriaCount === expectedCriteriaCount
-      && state.auditVisible && state.relatedExecutionVisible
-      && state.note.includes('已结束的 Task 保留为只读记录'),
-  `Task details did not show current terminal data: ${JSON.stringify(state)}`)
+  assert(state.visible && !state.editable && state.description === expectedDescription
+      && state.criteriaCount === expectedCriteriaCount && state.auditVisible && state.relatedExecutionVisible
+      && state.note.includes('已结束的任务保留为只读记录'),
+    `Task details did not show current terminal data: ${JSON.stringify(state)}`)
 }
 
 async function assertZoomedTaskFunctionality(cdp) {
   const state = await evaluate(cdp, `(() => {
     const scroll = document.querySelector('.task-panel-scroll')
-    const editor = document.querySelector('.task-editor')
-    const returnButton = document.querySelector('.task-action-button.is-back')
+    const editor = document.querySelector('.task-detail')
+    const returnButton = document.querySelector('.task-detail-navigation button')
     const returnButtonRect = returnButton?.getBoundingClientRect()
     const before = scroll?.scrollTop ?? 0
     if (scroll) scroll.scrollTop = scroll.scrollHeight
@@ -572,7 +565,7 @@ async function assertZoomedTaskFunctionality(cdp) {
         && returnButtonRect.height > 0
         && returnButtonRect.bottom > 0
         && returnButtonRect.top < window.innerHeight),
-      auditVisible: Boolean(editor?.querySelector('[aria-label="Task 审计信息"]')),
+      auditVisible: Boolean(editor?.querySelector('[aria-label="任务审计信息"]')),
       relatedExecutionVisible: Boolean(editor?.querySelector('[aria-label="关联执行"]')),
       scrollable: Boolean(scroll && scroll.scrollHeight > scroll.clientHeight && after > before)
     }
@@ -585,17 +578,101 @@ async function assertZoomedTaskFunctionality(cdp) {
   `200% zoom hid Task functionality: ${JSON.stringify(state)}`)
 
   const returned = await evaluate(cdp, `(() => {
-    const button = document.querySelector('.task-action-button.is-back')
+    const button = document.querySelector('.task-detail-navigation button')
     button?.click()
     return Boolean(button)
   })()`)
   assert(returned, '200% zoom made the Task return control unavailable')
   await waitForExpression(cdp, `(() => {
-    return !document.querySelector('.task-editor')
+    return !document.querySelector('.task-detail')
       && document.querySelectorAll('button.task-event-card').length === 2
   })()`)
   await openTaskDetails(cdp, '取消路径仍复用原卡')
   await assertTerminalDetails(cdp, '取消后保留在任务详情与审计记录。', 0)
+}
+
+async function setTaskField(cdp, label, value) {
+  const updated = await evaluate(cdp, `(() => {
+    const field = [...document.querySelectorAll('.app-dialog .task-field')]
+      .find((candidate) => candidate.querySelector('span')?.textContent === ${JSON.stringify(label)})
+      ?.querySelector('input, textarea, select')
+    if (!field) return false
+    const prototype = field instanceof HTMLInputElement ? HTMLInputElement.prototype
+      : field instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLSelectElement.prototype
+    Object.getOwnPropertyDescriptor(prototype, 'value').set.call(field, ${JSON.stringify(value)})
+    field.dispatchEvent(new Event(field instanceof HTMLSelectElement ? 'change' : 'input', { bubbles: true }))
+    return true
+  })()`)
+  assert(updated, `Task editor field is missing: ${label}`)
+  await evaluate(cdp, `new Promise((resolveFrame) => requestAnimationFrame(() => requestAnimationFrame(resolveFrame)))`, true)
+}
+
+async function verifyTaskEditorLifecycle(cdp, fixture) {
+  await evaluate(cdp, `document.querySelector('.task-detail-navigation button')?.click()`)
+  await waitForExpression(cdp, `!document.querySelector('.task-detail')`)
+  await evaluate(cdp, `document.querySelector('.task-new-button')?.click()`)
+  await waitForExpression(cdp, `Boolean(document.querySelector('.task-editor-dialog'))`)
+  await setTaskField(cdp, '标题', '浮层编辑与草稿验收')
+  await setTaskField(cdp, '说明', '关闭后保留的任务说明')
+  await setTaskField(cdp, '验收条件（每行一项，最多 12 项）', '保留草稿\n保留版本冲突时的修改')
+  await setTaskField(cdp, '负责人', fixture.primaryAssignee.id)
+  await evaluate(cdp, `document.querySelector('.task-editor-dialog .app-dialog-close')?.click()`)
+  await waitForExpression(cdp, `!document.querySelector('.task-editor-dialog')`)
+  await evaluate(cdp, `document.querySelector('.camp-detail-entry[data-detail="members"]')?.click()`)
+  await waitForExpression(cdp, `document.querySelector('.camp-detail-entry[data-detail="members"]')?.getAttribute('aria-expanded') === 'true'`)
+  await evaluate(cdp, `document.querySelector('.camp-detail-entry[data-detail="tasks"]')?.click()`)
+  await waitForExpression(cdp, `document.querySelector('.camp-detail-entry[data-detail="tasks"]')?.getAttribute('aria-expanded') === 'true'`)
+  await evaluate(cdp, `document.querySelector('.camp-detail-entry[data-detail="tasks"]')?.click()`)
+  await waitForExpression(cdp, `document.querySelector('.camp-detail-popover')?.hidden`)
+  await evaluate(cdp, `document.querySelector('.camp-detail-entry[data-detail="tasks"]')?.click()`)
+  await evaluate(cdp, `document.querySelector('.task-new-button')?.click()`)
+  await waitForExpression(cdp, `document.querySelector('.task-editor input')?.value === '浮层编辑与草稿验收'`)
+  const restored = await evaluate(cdp, `(() => ({
+    description: document.querySelector('.task-editor textarea')?.value,
+    assignee: document.querySelector('.task-editor select')?.value,
+    criteria: document.querySelectorAll('.task-editor textarea')[1]?.value
+  }))()`)
+  assert(restored.description === '关闭后保留的任务说明'
+    && restored.assignee === fixture.primaryAssignee.id
+    && restored.criteria === '保留草稿\n保留版本冲突时的修改',
+    `Switching/closing Camp details lost the Task draft: ${JSON.stringify(restored)}`)
+  await evaluate(cdp, `document.querySelector('.task-editor')?.requestSubmit()`)
+  await waitForExpression(cdp, `!document.querySelector('.task-editor-dialog')`)
+  let snapshot = await request(cdp, 'camps.snapshot', { campId: fixture.campId })
+  const task = snapshot.tasks.find((candidate) => candidate.title === '浮层编辑与草稿验收')
+  assert(task && task.acceptanceCriteria.length === 2, 'Task dialog did not submit its complete draft')
+  await evaluate(cdp, `document.querySelector('.task-list-row[data-task-id="${task.taskId}"]')?.click()`)
+  await waitForExpression(cdp, `Boolean(document.querySelector('.task-detail-actions'))`)
+  await evaluate(cdp, `document.querySelector('.task-detail-actions button')?.click()`)
+  await waitForExpression(cdp, `Boolean(document.querySelector('.task-editor-dialog'))`)
+  await setTaskField(cdp, '说明', '我在编辑器中保留的修改')
+  await setTaskField(cdp, '状态', 'blocked')
+  await setTaskField(cdp, '阻塞原因', '等待用户验收')
+  const concurrent = await request(cdp, 'tasks.update', {
+    commandId: crypto.randomUUID(), campId: fixture.campId, taskId: task.taskId,
+    expectedVersion: task.version, description: '另一次操作更新了说明',
+    assignee: { operation: 'unchanged' }, acceptanceCriteria: { operation: 'unchanged' }
+  })
+  assert(concurrent.status === 'applied', `Could not prepare a Task version conflict: ${JSON.stringify(concurrent)}`)
+  await evaluate(cdp, `document.querySelector('.task-editor')?.requestSubmit()`)
+  await waitForExpression(cdp, `document.querySelector('.task-editor .task-form-error')?.textContent?.includes('草稿仍保留')`)
+  assert(await evaluate(cdp, `document.querySelector('.task-editor textarea')?.value === '我在编辑器中保留的修改'`),
+    'A Task version conflict overwrote the user draft')
+  await evaluate(cdp, `document.querySelector('.task-editor')?.requestSubmit()`)
+  await waitForExpression(cdp, `!document.querySelector('.task-editor-dialog')
+    && document.querySelector('.task-detail-status')?.textContent === '已阻塞'`)
+  await evaluate(cdp, `document.querySelector('.task-cancel-action')?.click()`)
+  await waitForExpression(cdp, `Boolean(document.querySelector('.task-cancel-dialog'))`)
+  await setTaskField(cdp, '取消原因', '仅用于隔离 UI 验收')
+  await evaluate(cdp, `document.querySelector('.task-cancel-dialog .danger-button')?.click()`)
+  await waitForExpression(cdp, `!document.querySelector('.task-cancel-dialog')
+    && document.querySelector('.task-detail-status')?.textContent === '已取消'`)
+  snapshot = await request(cdp, 'camps.snapshot', { campId: fixture.campId })
+  const cancelled = snapshot.tasks.find((candidate) => candidate.taskId === task.taskId)
+  assert(cancelled?.cancelReason === '仅用于隔离 UI 验收'
+    && snapshot.messages.length === 0 && snapshot.agentRuns.length === 0,
+    'Task editing/cancellation created an execution or lost its cancellation reason')
+  return { draftAcrossCloseAndSwitch: true, create: true, edit: true, versionConflict: true, cancel: true, noExecutionSideEffects: true }
 }
 
 async function emulateDesktopZoom(cdp, physicalWidth, physicalHeight, zoomFactor) {
@@ -619,7 +696,7 @@ async function emulateDesktopZoom(cdp, physicalWidth, physicalHeight, zoomFactor
 async function assertNoHorizontalOverflow(cdp, context) {
   const state = await evaluate(cdp, `(() => {
     const timeline = document.querySelector('.camp-timeline')
-    const inspector = document.querySelector('.activity-pane')
+    const inspector = document.querySelector('.camp-detail-popover')
     return {
       document: document.documentElement.scrollWidth > window.innerWidth + 1,
       timeline: timeline ? timeline.scrollWidth > timeline.clientWidth + 1 : true,
@@ -647,6 +724,12 @@ async function openCamp(cdp, campId) {
   })()`)
   assert(opened, `Could not open Camp ${campId}`)
   await waitForExpression(cdp, `Boolean(document.querySelector('.camp-workspace'))`, 30_000)
+  await evaluate(cdp, `(() => {
+    const view = [...document.querySelectorAll('.camp-conversation-view-controls button')]
+      .find((button) => button.textContent === '会话')
+    if (view?.getAttribute('aria-pressed') !== 'true') view?.click()
+  })()`)
+  await waitForExpression(cdp, `document.querySelector('.camp-timeline')?.hidden === false`)
 }
 
 async function request(cdp, method, params = {}) {
@@ -766,7 +849,9 @@ async function waitForExpression(cdp, expression, timeoutMs = 10_000) {
     await wait(100)
   }
   if (await evaluate(cdp, expression)) return
-  throw new Error(`Expression did not become true within ${timeoutMs}ms: ${expression}`)
+  await capture(cdp, join(outputDir, 'task-acceptance-failure.png'))
+  const visibleState = await evaluate(cdp, `document.body.innerText.slice(-7000)`)
+  throw new Error(`Expression did not become true within ${timeoutMs}ms: ${expression}\nVisible state: ${visibleState}`)
 }
 
 async function waitForTarget(port, stderr) {
@@ -822,9 +907,10 @@ async function connectCdp(url) {
 }
 
 function startCore(dataDirectory) {
-  const child = spawn(stagedSidecarPath(root, 'rovai-core'), [
+  const child = spawn(join(appPath, 'Contents', 'Resources', 'bin', 'rovai-core'), [
     ...coreDataDirectoryArguments(dataDirectory),
-    '--skill-library-root', join(dataDirectory, 'managed-skill-library')
+    '--skill-library-root', join(dataDirectory, 'managed-skill-library'),
+    '--mcp-config-path', join(dataDirectory, 'mcp.json')
   ], {
     cwd: root,
     stdio: ['pipe', 'pipe', 'pipe'],

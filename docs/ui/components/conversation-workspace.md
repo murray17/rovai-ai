@@ -8,11 +8,11 @@ last_updated: 2026-08-30
 # Camp 会话工作区
 
 Camp 是开放阅读面，不按角色铺不同底色。时间线、Agent 执行台、Approval/Recovery Dock 和
-Composer 共享主列；Inspector 是右侧辅助列。普通叙述保持 `76ch` 阅读宽度，代码、表格等工件
+Composer 共享主列；会话详情由标题栏入口打开浮层，不占用常驻侧列。普通叙述保持 `76ch` 阅读宽度，代码、表格等工件
 可以扩展到 `930px`，宽会话轨道与 Dock 上限保持 `1040px`；Composer 常规上限为 `1040px`，
 viewport `>= 1800px` 时独立扩展到 `1440px`。
 
-打开文件时，会话、独立文件预览与任务/队员 Sidecar 的共享顶栏、响应式列替换和焦点返回遵循
+打开文件时，会话与独立文件预览的共享顶栏、响应式列替换和焦点返回遵循
 [Camp 文件预览区](file-preview.md)。文件预览不改变本文件拥有的时间线、Composer、Approval、执行台或
 Files Changed 历史 Review 真源。
 
@@ -57,7 +57,7 @@ Camp 可以回到 Quick Chat。Notification navigation、恢复位置写入和�
 文案处理，不显示“重新加入”或历史离队分组。提交按权威 membership generation 顺序执行；多选出现局部失败
 时保留失败项和明确原因，已成功项立即从候选移除，不伪装为整批回滚。
 
-成员行保持头像、身份、Runtime 名称与静态“可用/不可用”状态。模型信息展开与“移出当前会话”统一收进
+成员行保持头像、身份、Runtime 名称与真实“在队 / 暂离”状态；队长通过行内徽标表达。设为队长、模型信息展开与“移出当前会话”统一收进
 行尾单个水平三点菜单，避免并排按钮破坏层级。入口保留 `28×28px` 命中区，静止态无边框、无底色，
 仅在悬停、键盘聚焦或菜单打开时显示低强调度底色。菜单项必须有文本动作名、键盘焦点、Esc/外部点击关闭和
 `aria-expanded`；模型项只控制既有详情 disclosure，不改变 Runtime 配置。
@@ -112,7 +112,7 @@ generation/version，冲突后不自动重放，必须刷新 preview。
 直接隐藏环境内容。真实或 waiting 字幕保留其既有可操作语义；闲时字幕是非交互静态文字，不进入
 `aria-live`。
 
-地图必须按会话容器而非窗口高度适配：Inspector 显隐和可上下拖动执行台压缩主列时，地图收缩、裁切
+地图必须按会话容器而非窗口高度适配：文件预览和可上下拖动执行台压缩主列时，地图收缩、裁切
 或降低次要信息密度，不能遮住 Approval/Recovery Dock、Composer 或执行台。静态模式与 reduced motion
 停止角色移动、路线流光、脉冲和会合动画，但不能停止 Snapshot/Runtime 驱动的真实文字更新，也不能
 关闭无动画的静态闲时文案。
@@ -216,16 +216,17 @@ Mention，本 Draft 也只回到默认 Lead，不能让路由控件反复出现�
 领域对象，也不合并 AgentRun。
 
 首次安装或旧偏好没有位置字段时，执行台位于时间线底部：横向队员过程入口下方打开可调高度详情。
-“移到右侧 / 移回底部”是唯一位置偏好写入口；最后一次成功的显式选择作为本机安装级偏好跨 Camp、
+“移到浮层 / 移回底部”是唯一位置偏好写入口；最后一次成功的显式选择作为本机安装级偏好跨 Camp、
 页面切换和应用重启生效，不新增 Settings 默认项。提交中控件不可重复触发；写成功后才移动，失败时
 保持原位置并在控件附近提供可重试错误。Camp workspace 必须在偏好解析后以正确位置挂载，不得先显示
-底部再跳到右侧。
+底部再跳到浮层。
 
-移到现有 Inspector 时，底部入口与详情完全移除，Inspector 临时增加首个“执行”Tab，并自动显示、
-激活该 Tab。右侧使用既有 310px / compact 260px 宽度，不新增可拖宽 Sidecar。移回底部后恢复用户
-切换前最后使用的“任务 / 队员”基础 Tab。位置偏好只拥有承载位置，不跨 Camp 保存 Agent/Run selection、
-Drawer 开合、Tool 全文或滚动位置，也不根据窗口宽度自动改变。重新进入 Camp 时可以从当前权威 snapshot
-推导最新 running Run；这是新的瞬时 selection，不是恢复旧 Drawer 状态，也不改写位置偏好。
+移到详情浮层（偏好值仍为 `inspector`）时，底部入口与详情完全移除，标题栏临时增加首个“执行”入口，
+并自动打开执行浮层。浮层最大宽 440px，受当前会话阅读区宽高约束，不挤占会话或文件预览。
+移回底部后“执行”入口消失、浮层收起，保留最后使用的“任务 / 队员”基础选择。位置偏好只拥有承载位置，
+不跨 Camp 保存 Agent/Run selection、Drawer 开合、Tool 全文或滚动位置，也不根据窗口宽度自动改变。
+重新进入 Camp 时可以从当前权威 snapshot 推导最新 running Run；这是新的瞬时 selection，不是恢复旧
+Drawer 状态，也不改写位置偏好。
 
 两个位置共享当前 Agent 与精确 Run selection、Evidence load 和状态投影，不允许同时存在两套过程列表
 或详情。位置切换通过稳定 host 移动同一个已挂载 Drawer DOM，保留 disclosure、加载状态、
@@ -395,8 +396,7 @@ summary 与可选 detail；即使没有任何 Execution Evidence 也默认展开
 负责发现和完整责任审计，Agent 过程负责执行事实；Task 取消不等于 AgentRun 或 CampTurn 取消。
 
 所有 pending Approval 位于 Composer 正上方的唯一非模态 Dock。多项请求显示“N 项待审批”，
-保留 Runtime 原生选项、范围和决定身份。Header/通知摘要只展开、定位并聚焦 Dock，不改变
-Inspector 显隐或页签；Approval 不进入消息时间线。
+保留 Runtime 原生选项、范围和决定身份。Header/通知摘要只展开、定位并聚焦 Dock，不改变执行台位置或 Run selection，不强制切换详情内容；浮层按外部焦点规则收起。Approval 不进入消息时间线。
 
 Composer 中的 CampTurn Stop 继续是唯一整轮停止入口并 fence 当前执行树。共享 ExecutionDrawer 顶栏在
 “收起”旁提供唯一 AgentRun Stop，只停止当前聚焦 Run；底部和 Inspector 复用同一个直接停止入口与状态。
@@ -475,30 +475,40 @@ Porcelain Day / Steel Night 语义 token，不引入新的视觉世界，也不�
 空 Camp 显示欢迎图形、真实协作配置摘要和三个只填充 Composer 的起步建议，不显示单行空占位。
 建议不会直接发送、不会创建假消息，也不会改变已保存协作配置。
 
-## Camp 右侧详情栏（Inspector）
+## Camp 详情浮层
 
-默认底部执行台时，ordinary Inspector 只有“任务 / 队员”，DOM、视觉与键盘顺序也保持一致；进入新的
-Camp workspace 时默认选择首个“任务”Tab。队员读取当前 CampMember 与 AgentProfile，
-并通过既有 versioned Core 命令提供唯一 Default Lead 选择器；Task 提供列表与详情责任层。ContextManifest 与
-Runtime Input Delivery Evidence 继续存在于 Core/Snapshot，但不进入普通 Inspector；审批只在
-Approval Dock 决定。
+标题栏使用直接入口，默认顺序为“任务 / 队员”；执行台位置为 `inspector` 时，顺序为“执行 / 任务 / 队员”。
+DOM、视觉和键盘顺序一致；不再提供常驻侧栏、独立折叠按钮或文件预览开关。执行入口只在有 `running` Run
+时显示 loading，queued、waiting、recovery_blocked 与 terminal 不显示旋转状态。计数读取真实 Camp 投影，
+不能将 coverage 未加载的数据表达为不存在。
 
-仅当用户把执行台移到右侧时，Inspector 增加条件式首个“执行”Tab；右侧 Tab 的 DOM、视觉与键盘顺序为
-“执行 / 任务 / 队员”。进入新的 Camp workspace 时默认选择首个“执行”Tab；若权威 snapshot 含 running
-Run，既有进入逻辑仍须进一步定位精确 Agent/Run，不能被空的默认执行页覆盖。它承载同一 Agent 过程详情，
-不是新的 Activity/Audit timeline，也不改变 Task、队员、Default Lead 或 Approval 边界。移回底部后
-该 Tab 从 DOM 和键盘顺序中消失。
+所有入口共用一个非模态详情浮层，位于消息阅读区右上方，最大宽 440px，四周保留间距。浮层不覆盖
+Approval/Recovery Dock、Composer 或文件预览，不改变会话网格列宽。点击当前入口再次收起，点击其他入口
+切换内容；外部点击或焦点移出收起，Esc 收起并返回触发入口。菜单和任务 Dialog 保有自己的焦点边界；执行
+详情与 Tool 结果继续使用既有 Esc 层级。键盘打开浮层时将焦点移入，后台刷新不抢焦点。
 
-Inspector 可从 Camp 顶栏完整隐藏/恢复，常规宽 310px，`1040–1179px` 为 260px。隐藏不会改变
-当前页签、Draft、选择或消息滚动位置。Inspector visibility 与执行台 placement 独立持久：当偏好位置
-为右侧而 Inspector 被隐藏时，执行台仍归右侧并随 Inspector 不可见，Header 恢复后返回保留的“执行”
-上下文；进入不含 running Run 的 Camp 或已挂载 workspace 的后台事件不强制显示 Inspector，也不把执行台
-临时搬回底部。进入含 running Run 的 Camp、用户显式“移到右侧”和既有精确执行导航会显示 Inspector、
-激活首个“执行”Tab，并定位目标。
+三个浮层共用 `--inspector-surface` 阅读底色、2px Steel 顶部色线和固定头尾栏。首行按“图标 / 执行、任务或队员 / 当前会话 / 关闭”排列，
+底栏右侧显示 `Esc 收起`，左侧分别为“连续执行历史”“任务取消不等于执行停止”“仅管理当前会话队员”。
+内容区独立滚动，头尾栏始终可见；执行台内部的颜色、列表与工具输出样式不随浮层外壳改变。
+
+浮层开合只在当前工作区内保留，不读取旧的侧栏显隐偏好。进入没有 running Run 的 Camp 时默认收起；进入
+含 running Run 的 Camp、显式移动到浮层或精确执行导航仍遵循上面的自动展开规则。切换内容或收起浮层不得
+重建执行 Drawer，不得丢失 Agent/Run selection、已展开 Tool、已读结果或滚动位置。
+
+任务区使用状态筛选和紧凑列表：标题、状态、负责人、验收条件数量，以及必要的阻塞原因。点击列表或时间线
+任务卡打开只读详情；说明、完整有序验收条件、阻塞/完成/取消原因、关联执行与可展开审计均保留。新建和编辑
+使用标准 Dialog；在当前 Camp 工作区内关闭 Dialog、切换详情或收起浮层保留各任务独立草稿，重新打开继续
+编辑。草稿不跨 Camp 卸载或应用重启持久化。版本冲突刷新权威版本，保留草稿并要求用户再次提交；已结束任务
+只读。取消任务使用填写原因的独立确认 Dialog，仍不取消已接受或运行中的执行。
+
+队员区读取当前 CampMember 与 AgentProfile。队长以队员行徽标表达，“设为队长 / 查看模型信息 / 移出当前
+会话”集中在该行菜单，不显示单独队长选择框或常驻操作说明。队长资格、版本检查、邀请候选、移出预览和在途
+收拢仍由现有 Core 命令负责。ContextManifest 与 Runtime Input Delivery Evidence 不进入普通详情；审批继续
+只在 Approval Dock 决定。
 
 ## Camp 顶栏与关闭等待面
 
-Camp Header 右侧只保留待审批摘要和 Inspector 显隐，不提供执行入口、Stop 或 `•••`。主动退出、
+Camp Header 显示会话定位、待审批摘要和详情直接入口；文件 Tabs 占据独立文件列。不增加 Stop、分享或 `•••`。主动退出、
 重启或更新立即阻止新的界面交互；400ms 内完成则直接退出，超过门槛才显示无操作按钮的 modal 关闭等待面。
 标题为“正在安全退出”，正文说明正在保存本地状态并关闭后台服务，并以条件文案说明尚未完成的 AgentRun
 会一并取消。关闭开始后不再刷新 Camp 投影，取消结算产生的晚到请求拒绝也不显示为错误横幅或 Toast。

@@ -37,7 +37,7 @@ describe('File preview reading planes', () => {
     expect(declarations('.file-preview-image-stage img')[0]).toContain('background-image:')
   })
 
-  it('keeps header and body tracks equal with the sidecar open, collapsed and responsively hidden', () => {
+  it('keeps header and body tracks equal without reserving a column for Camp details', () => {
     expect(gridTracks('.camp-topbar.has-file-preview')).toEqual([
       'minmax(300px, 1fr) var(--file-preview-width, 480px)',
       'minmax(300px, 1fr) minmax(360px, 500px)',
@@ -46,28 +46,19 @@ describe('File preview reading planes', () => {
     expect(gridTracks('.camp-topbar.has-file-preview')).toEqual(
       gridTracks('.workspace-grid.file-preview-open.inspector-collapsed')
     )
-    expect(gridTracks('.camp-topbar.has-file-preview.has-inspector')).toEqual(
-      gridTracks('.workspace-grid.file-preview-open')
-    )
+    expect(gridTracks('.camp-topbar.has-file-preview').every((tracks) => !tracks.includes('310px'))).toBe(true)
   })
 
-  it('reserves tab-strip space for the restore button without adding a grid column', () => {
-    for (const selector of [
-      '.camp-topbar.has-file-preview:not(.has-inspector) .topbar-sidecar-context',
-      '.camp-topbar.has-file-preview .topbar-sidecar-context'
-    ]) {
-      expect(declarations(selector)[0], selector).toContain('position: absolute;')
-      expect(declarations(selector)[0], selector).toContain('right: 0;')
-      expect(declarations(selector)[0], selector).toContain('border-left: 0;')
-    }
+  it('uses the full preview tab strip without reserving an obsolete inspector toggle', () => {
     expect(declarations('.camp-topbar')[0]).toContain('position: relative;')
     expect(declarations('.file-preview-tabs')[0]).toContain(
       'padding: 5px var(--file-preview-tabs-end-padding, 6px) 5px 6px;'
     )
-    const collapsedPadding = declarations('.camp-topbar.has-file-preview')
+    const padding = declarations('.camp-topbar.has-file-preview')
       .filter((rule) => rule.includes('--file-preview-tabs-end-padding:'))
-    expect(collapsedPadding[0]).toContain('--file-preview-tabs-end-padding: 44px;')
-    expect(collapsedPadding.at(-1)).toContain('--file-preview-tabs-end-padding: 6px;')
+    expect(padding).toHaveLength(1)
+    expect(padding[0]).toContain('--file-preview-tabs-end-padding: 6px;')
+    expect(declarations('.camp-detail-popover')[0]).toContain('position: absolute;')
   })
 })
 

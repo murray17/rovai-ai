@@ -72,7 +72,6 @@ import {
 } from './CampNavigation'
 import { NewConversationDialog } from './NewConversationDialog'
 import { openRuntimeModelCatalog } from './runtime-check'
-import { PanelToggleIcon } from './PanelToggleIcon'
 import { FilePreviewProvider, useOptionalFilePreview } from './FilePreviewContext'
 import { FilePreviewTabs } from './FilePreviewTabs'
 import { AppearanceSettings } from './AppearanceSettings'
@@ -403,12 +402,6 @@ const CANCELLABLE_RUN_STATUSES = new Set<CampSnapshot['agentRuns'][number]['stat
   'running',
   'waiting'
 ])
-const CAMP_INSPECTOR_VISIBILITY_KEY = 'rovai.camp.inspector.visibility'
-
-export function campInspectorVisibleFromStoredValue(value: string | null): boolean {
-  return value !== 'hidden'
-}
-
 export function campActivationStateForCreation(
   source: 'one_click' | 'dialog'
 ): CampActivationState {
@@ -426,14 +419,6 @@ export async function selectProjectDirectory(
   await restoreProject(workspace.projectPath)
   selectProject({ kind: 'directory', projectPath: workspace.projectPath }, workspace)
   return 'selected'
-}
-
-function initialCampInspectorVisibility(): boolean {
-  try {
-    return campInspectorVisibleFromStoredValue(window.localStorage.getItem(CAMP_INSPECTOR_VISIBILITY_KEY))
-  } catch {
-    return true
-  }
 }
 
 export function cancellableTurnIds(snapshot: {
@@ -864,12 +849,9 @@ function AuthoritativeApp(): React.JSX.Element {
     entryPreview: boolean
   }>({ snapshot: null, entryPreview: false })
   const campSnapshot = campSnapshotState.snapshot
-  const [campInspectorVisible, setCampInspectorVisible] = useState(initialCampInspectorVisibility)
+  const [campInspectorCampId, setCampInspectorCampId] = useState<string | null>(null)
   const [campInspectorTab, setCampInspectorTab] = useState<CampInspectorTab>('tasks')
-  const [campInspectorSelectionRequest, setCampInspectorSelectionRequest] = useState({
-    tab: 'tasks' as CampInspectorTab,
-    sequence: 0
-  })
+  const [campDetailEntryHost, setCampDetailEntryHost] = useState<HTMLDivElement | null>(null)
   const [optimisticCampMessages, setOptimisticCampMessages] = useState<OptimisticCampMessageEntry[]>([])
   const [cancellingTurnIds, setCancellingTurnIds] = useState<Set<string>>(() => new Set())
   const [cancellingRunIds, setCancellingRunIds] = useState<Set<string>>(() => new Set())
@@ -898,6 +880,7 @@ function AuthoritativeApp(): React.JSX.Element {
   const [currentProject, setCurrentProject] = useState<CurrentProject>(() => readCurrentProject())
   const [currentWorkspaceHint, setCurrentWorkspaceHint] = useState<WorkspaceSelection | null>(null)
   const [activeCampId, setActiveCampId] = useState<string | null>(null)
+  const campInspectorVisible = activeCampId !== null && campInspectorCampId === activeCampId
   const [notificationFocus, setNotificationFocus] = useState<NotificationFocusTarget | null>(null)
   const [visibleNotificationSources, setVisibleNotificationSources] = useState<VisibleNotificationSources | null>(null)
   const [notificationAnchor, setNotificationAnchor] = useState<{
@@ -1030,15 +1013,8 @@ function AuthoritativeApp(): React.JSX.Element {
   }, [agents, selectedMemberId, view])
 
   useEffect(() => {
-    try {
-      window.localStorage.setItem(
-        CAMP_INSPECTOR_VISIBILITY_KEY,
-        campInspectorVisible ? 'visible' : 'hidden'
-      )
-    } catch {
-      // A blocked storage area leaves the in-memory preference usable for this window.
-    }
-  }, [campInspectorVisible])
+    setCampInspectorCampId((current) => view === 'camp' && current === activeCampId ? current : null)
+  }, [activeCampId, view])
 
   const loadAgents = useCallback((): Promise<AgentProfile[]> => {
     if (agentListRequest.current) return agentListRequest.current
@@ -3214,8 +3190,7 @@ function AuthoritativeApp(): React.JSX.Element {
 
   const openCampInspector = (tab: CampInspectorTab): void => {
     setCampInspectorTab(tab)
-    setCampInspectorVisible(true)
-    setCampInspectorSelectionRequest((current) => ({ tab, sequence: current.sequence + 1 }))
+    setCampInspectorCampId(activeCampId)
   }
 
   const changeExecutionConsolePlacement = useCallback(async (
@@ -3439,10 +3414,7 @@ function AuthoritativeApp(): React.JSX.Element {
         campTitle={activeCampTitle || null}
         contextLabel={activeCampContextLabel}
         camp={campSnapshot?.camp.id === activeCampId ? campSnapshot : null}
-        inspectorVisible={campSnapshot?.camp.activationState === 'active' && campInspectorVisible}
-        onToggleInspector={() => setCampInspectorVisible((visible) => !visible)}
-        inspectorTab={campInspectorTab}
-        onSelectInspectorTab={openCampInspector}
+        detailEntryHostRef={setCampDetailEntryHost}
         onFocusApprovals={focusCampApprovals}
       />}
       {windowDragPage && <WindowDragStrip page={windowDragPage} />}
@@ -3515,7 +3487,8 @@ function AuthoritativeApp(): React.JSX.Element {
             workspaceEntrySnapshotReady={!campSnapshotState.entryPreview}
             inspectorVisible={visibleCampSnapshot.camp.activationState === 'active' && campInspectorVisible}
             inspectorTab={campInspectorTab}
-            inspectorSelectionRequest={campInspectorSelectionRequest}
+            detailEntryHost={campDetailEntryHost}
+            onCloseInspector={() => setCampInspectorCampId(null)}
             onInspectorTabChange={setCampInspectorTab}
             onOpenInspector={openCampInspector}
             notificationFocus={notificationFocus}
@@ -3771,19 +3744,13 @@ export function AppHeader({
   campTitle,
   contextLabel,
   camp,
-  inspectorVisible,
-  onToggleInspector,
-  inspectorTab = 'tasks',
-  onSelectInspectorTab = () => undefined,
+  detailEntryHostRef,
   onFocusApprovals
 }: {
   campTitle: string | null
   contextLabel: string | null
   camp: CampSnapshot | null
-  inspectorVisible: boolean
-  onToggleInspector(): void
-  inspectorTab?: CampInspectorTab
-  onSelectInspectorTab?(tab: CampInspectorTab): void
+  detailEntryHostRef?(host: HTMLDivElement | null): void
   onFocusApprovals(): void
 }): React.JSX.Element {
   const filePreview = useOptionalFilePreview()
@@ -3794,7 +3761,7 @@ export function AppHeader({
   const dayNumber = camp ? campDayNumber(camp.camp.createdAt) : null
   return (
     <header
-      className={`topbar camp-topbar ${previewVisible ? 'has-file-preview' : ''} ${inspectorVisible ? 'has-inspector' : ''}`.trim()}
+      className={`topbar camp-topbar ${previewVisible ? 'has-file-preview' : ''}`.trim()}
       style={previewVisible
         ? { '--file-preview-width': `${filePreview?.paneWidth ?? 480}px` } as CSSProperties
         : undefined}
@@ -3818,44 +3785,9 @@ export function AppHeader({
             </button>
           )}
         </div>
+        <div className="camp-detail-entry-host" ref={detailEntryHostRef} />
       </div>
       {previewVisible && <FilePreviewTabs />}
-      {camp && camp.camp.activationState === 'active' && (
-        <div className="topbar-sidecar-context">
-          {inspectorVisible && (
-            <div className="topbar-sidecar-tabs" role="tablist" aria-label="会话详情">
-              <button
-                type="button"
-                role="tab"
-                aria-selected={inspectorTab === 'tasks'}
-                onClick={() => onSelectInspectorTab('tasks')}
-              >
-                任务 <small>{camp.tasks.length}</small>
-              </button>
-              <button
-                type="button"
-                role="tab"
-                aria-selected={inspectorTab === 'members'}
-                onClick={() => onSelectInspectorTab('members')}
-              >
-                队员 <small>{camp.members.filter((member) => member.membershipStatus === 'active').length}</small>
-              </button>
-            </div>
-          )}
-          <div className="topbar-context-actions">
-            <button
-              className={`topbar-inspector-toggle ${inspectorVisible ? 'is-visible' : 'is-hidden'}`}
-              type="button"
-              aria-label={inspectorVisible ? '隐藏右侧检查器' : '显示右侧检查器'}
-              aria-pressed={inspectorVisible}
-              title={inspectorVisible ? '隐藏右侧检查器' : '显示右侧检查器'}
-              onClick={onToggleInspector}
-            >
-              <PanelToggleIcon side="right" visible={inspectorVisible} />
-            </button>
-          </div>
-        </div>
-      )}
     </header>
   )
 }
