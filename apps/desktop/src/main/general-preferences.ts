@@ -6,7 +6,8 @@ import type {
   GeneralPreferencesSnapshot,
   NewConversationDefaults,
   SettingsSection,
-  StartupLocationMode
+  StartupLocationMode,
+  StructuredError
 } from '@contracts'
 
 const STARTUP_LOCATION_MODES = new Set<StartupLocationMode>(['last_location', 'quick_chat'])
@@ -117,11 +118,35 @@ export function parseGeneralPreferences(value: unknown): GeneralPreferencesSnaps
 }
 
 export async function readGeneralPreferences(filePath: string): Promise<GeneralPreferencesSnapshot> {
+  return (await readGeneralPreferencesResult(filePath)).snapshot
+}
+
+async function readGeneralPreferencesResult(filePath: string): Promise<{
+  snapshot: GeneralPreferencesSnapshot
+  degradation: StructuredError | null
+}> {
   try {
     const parsed = JSON.parse(await readFile(filePath, 'utf8')) as unknown
-    return parseGeneralPreferences(parsed) ?? { ...DEFAULT_GENERAL_PREFERENCES }
-  } catch {
-    return { ...DEFAULT_GENERAL_PREFERENCES }
+    const snapshot = parseGeneralPreferences(parsed)
+    return snapshot
+      ? { snapshot, degradation: null }
+      : {
+          snapshot: { ...DEFAULT_GENERAL_PREFERENCES },
+          degradation: preferenceDegradation(
+            'general_preferences_invalid',
+            'General preferences are invalid; in-memory defaults are active and the original file was not changed.'
+          )
+        }
+  } catch (error) {
+    return {
+      snapshot: { ...DEFAULT_GENERAL_PREFERENCES },
+      degradation: isMissingPathError(error)
+        ? null
+        : preferenceDegradation(
+            'general_preferences_unreadable',
+            'General preferences could not be read; in-memory defaults are active and the original file was not changed.'
+          )
+    }
   }
 }
 
@@ -143,15 +168,26 @@ export async function writePrivateJson(filePath: string, value: unknown): Promis
 export class GeneralPreferencesStore {
   readonly #filePath: string
   #snapshot: GeneralPreferencesSnapshot
+  readonly loadDegradation: StructuredError | null
   #writeTail: Promise<void> = Promise.resolve()
 
-  private constructor(filePath: string, snapshot: GeneralPreferencesSnapshot) {
+  private constructor(
+    filePath: string,
+    snapshot: GeneralPreferencesSnapshot,
+    loadDegradation: StructuredError | null = null
+  ) {
     this.#filePath = filePath
     this.#snapshot = snapshot
+    this.loadDegradation = loadDegradation
   }
 
   static async load(filePath: string): Promise<GeneralPreferencesStore> {
-    return new GeneralPreferencesStore(filePath, await readGeneralPreferences(filePath))
+    const result = await readGeneralPreferencesResult(filePath)
+    return new GeneralPreferencesStore(filePath, result.snapshot, result.degradation)
+  }
+
+  static defaults(filePath: string): GeneralPreferencesStore {
+    return new GeneralPreferencesStore(filePath, { ...DEFAULT_GENERAL_PREFERENCES })
   }
 
   get(): GeneralPreferencesSnapshot {
@@ -251,6 +287,16 @@ export class GeneralPreferencesStore {
     this.#writeTail = result.then(() => undefined, () => undefined)
     return result
   }
+}
+
+function preferenceDegradation(code: string, message: string): StructuredError {
+  return { code, message, retryable: true, details: {} }
+}
+
+function isMissingPathError(error: unknown): boolean {
+  return error instanceof Error
+    && 'code' in error
+    && (error as NodeJS.ErrnoException).code === 'ENOENT'
 }
 
 function isStableId(value: unknown): value is string {

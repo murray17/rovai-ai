@@ -1,3 +1,4 @@
+import { readErrorMessage } from './error-message'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { NotificationPreference, StoredCommandResult } from '@contracts'
 import { SettingsPageHeader } from './SettingsPageHeader'
@@ -410,5 +411,5 @@ function assertPreference(value: unknown): NotificationPreference {
 }
 
 function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error)
+  return readErrorMessage(error)
 }

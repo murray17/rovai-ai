@@ -12,6 +12,10 @@ Composer 共享主列；Inspector 是右侧辅助列。普通叙述保持 `76ch`
 可以扩展到 `930px`，宽会话轨道与 Dock 上限保持 `1040px`；Composer 常规上限为 `1040px`，
 viewport `>= 1800px` 时独立扩展到 `1440px`。
 
+打开文件时，会话、独立文件预览与任务/队员 Sidecar 的共享顶栏、响应式列替换和焦点返回遵循
+[Camp 文件预览区](file-preview.md)。文件预览不改变本文件拥有的时间线、Composer、Approval、执行台或
+Files Changed 历史 Review 真源。
+
 ## 打开与渐进历史
 
 Camp 的首个 meaningful paint 只依赖 [Camp Open Projection v8](../../contracts/camp-open-projection-v8.md)：
@@ -145,7 +149,8 @@ Agent 公共正文不显示“来自执行”来源条，也不投影 compact �
 用户、队员和已交付 A2A 正文支持原生鼠标拖选与系统复制。整条消息使用可见文字“复制”作为入口，固定在
 内容列右上角，只在悬停或键盘聚焦消息区域时显现；不能退回只有图标的含糊操作，也不能随正文、宽屏
 工件或 footer 漂移。用户消息保持
-精确纯文本；Agent 正文使用清洗后的 GFM；Tool 输出使用结构化证据组件。
+精确纯文本，仅对[文件链接](file-preview.md#会话内的文件链接)做展示投影：Markdown label 替代其链接语法，
+文件代码路径保留等宽样式，原始消息及整条消息复制内容不改写；Agent 正文使用清洗后的 GFM；Tool 输出使用结构化证据组件。
 
 当前可操作的队员头像、显示名和 Mention 可打开同一个锚定人物信息卡，不导航。已离开、移除或
 不可解析身份保持静态。精确 token 行为见[结构化 Mention](structured-mentions.md)。

@@ -1,8 +1,8 @@
 ---
 document_type: versions-index
 authority: version-lifecycle
-current_version: v1.31
-last_updated: 2026-08-29
+current_version: v1.33
+last_updated: 2026-08-30
 ---
 
 # Rovai-ai 版本记录
@@ -181,5 +181,7 @@ last_updated: 2026-08-29
 | v1.27 | `historical` | Kimi Code identity、MiniMax M3 私有配置、cold exact resume 与 macOS arm64 准入 | [v1.27/README.md](v1.27/README.md) |
 | v1.28 | `historical` | Grok Build、MiniMax M3、`>= 1.0.0` 与标准 ACP resume；macOS arm64/x64、Windows x64 1.0.5 已分别补证；Published Attachment 后置完整性故障局部降级 | [v1.28/README.md](v1.28/README.md) |
 | v1.29 | `historical` | 动态 Camp membership、Runtime 文件变化与 Activity v2 新写入已实现；typed query、Renderer 中文标题和七类图标完成定向回归，真实 Runtime 验收仍在进行 | [v1.29/README.md](v1.29/README.md) |
-| v1.30 | `historical` | 飞书 Developer Session 与独立队员 Bot、Owner-only Quick Chat/项目卡、多 Bot 聚合、串行 Camp admission、ExternalQuote、临时执行控制台与永久输出/附件 Outbox | [v1.30/README.md](v1.30/README.md) |
-| v1.31 | `current` | 钉钉 OAuth、独立队员应用机器人、Owner-only 私聊/群聊、统一 Camp admission、AI 卡片与 Stream Outbox；生产 OAuth Client 投递和真实租户验收仍待完成 | [v1.31/README.md](v1.31/README.md) |
+| v1.30 | `historical` | Camp 内独立文件预览、封闭文件能力、事件驱动更新感知与多类型只读 Viewer；引用延期，合入 v1.31 时按已有实施与验收事实冻结 | [v1.30/README.md](v1.30/README.md) |
+| v1.31 | `historical` | Desktop Bootstrap/Full Core 分层、SQLite lease/admission/copy migration 与正常日志恢复、Supervisor fencing、本机偏好 fail-open 和跨桥结构化错误已完成 | [v1.31/README.md](v1.31/README.md) |
+| v1.32 | `historical` | 飞书队员 Bot、Owner-only Camp、原会话项目卡、动态 roster 与执行输出；由 channel 分支原 v1.30 编号迁入 | [v1.32/README.md](v1.32/README.md) |
+| v1.33 | `current` | 钉钉浏览器 OAuth、共享 SQLite 凭据与渠道集成；保留主线文件预览和 Availability-first Runtime，真实租户验收仍待完成 | [v1.33/README.md](v1.33/README.md) |

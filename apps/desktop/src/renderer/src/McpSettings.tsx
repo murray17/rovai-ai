@@ -1,3 +1,4 @@
+import { readErrorMessage } from './error-message'
 import {
   useCallback,
   useEffect,
@@ -1039,5 +1040,5 @@ function importIssueText(code: string, fallback: string): string {
 }
 
 function errorMessage(error: unknown): string {
-  return localizeExecutionEngineTerms(error instanceof Error ? error.message : String(error))
+  return localizeExecutionEngineTerms(readErrorMessage(error))
 }

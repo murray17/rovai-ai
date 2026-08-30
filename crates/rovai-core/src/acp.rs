@@ -3586,6 +3586,7 @@ pub struct AcpCliRuntimeAdapter {
 }
 
 impl AcpCliRuntimeAdapter {
+    #[cfg(test)]
     pub fn new(
         kind: AdapterKind,
         incoming: mpsc::UnboundedSender<AcpIncoming>,
@@ -3593,6 +3594,36 @@ impl AcpCliRuntimeAdapter {
         fleet: Arc<AgentRuntimeFleetManager>,
         compaction_detector_policy: CompactionDetectorPolicy,
     ) -> Result<Self> {
+        let adapter = Self::deferred(
+            kind,
+            incoming,
+            private_runtime_dir,
+            fleet,
+            compaction_detector_policy,
+        );
+        adapter.initialize_storage()?;
+        Ok(adapter)
+    }
+
+    pub fn deferred(
+        kind: AdapterKind,
+        incoming: mpsc::UnboundedSender<AcpIncoming>,
+        private_runtime_dir: PathBuf,
+        fleet: Arc<AgentRuntimeFleetManager>,
+        compaction_detector_policy: CompactionDetectorPolicy,
+    ) -> Self {
+        Self {
+            kind,
+            runtimes: Mutex::new(HashMap::new()),
+            incoming,
+            private_runtime_dir,
+            fleet,
+            compaction_detector_policy,
+        }
+    }
+
+    pub fn initialize_storage(&self) -> Result<()> {
+        let kind = self.kind;
         if !launchable_acp_adapter(kind) {
             bail!("{} is not a launchable ACP Adapter", kind.as_str());
         }
@@ -3604,16 +3635,9 @@ impl AcpCliRuntimeAdapter {
                 | AdapterKind::CodebuddyCli
                 | AdapterKind::QwenCode
         ) {
-            remove_stale_mcp_configs(&private_runtime_dir)?;
+            remove_stale_mcp_configs(&self.private_runtime_dir)?;
         }
-        Ok(Self {
-            kind,
-            runtimes: Mutex::new(HashMap::new()),
-            incoming,
-            private_runtime_dir,
-            fleet,
-            compaction_detector_policy,
-        })
+        Ok(())
     }
 
     #[allow(clippy::too_many_arguments)]

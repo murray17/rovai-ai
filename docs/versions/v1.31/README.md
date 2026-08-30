@@ -1,86 +1,106 @@
 ---
 document_type: version-overview
 version: v1.31
-lifecycle: current
+lifecycle: historical
 authority: version-scope-and-status
 design_status: confirmed
-implementation_status: in_progress
+implementation_status: completed
 model_context_change: false
 last_updated: 2026-08-30
 ---
 
-# Rovai-ai v1.31：钉钉队员 Bot 与 Camp 渠道
+# Rovai-ai v1.31：Availability-first Runtime v2
 
-> 当前状态：Migration、Core、Electron Main 直接 OAuth/Developer API、Renderer、每 App Stream 与本地自动化已经实现。
-> 真实钉钉租户的 OAuth、应用创建/审批/发布、AI 卡片 callback、私聊和群聊收发仍需外部验收。生产包还没有可安全
-> 分发的 Rovai OAuth Client 方案；缺少显式注入的 Client ID/Secret 时连接按合同失败，不复用上游工具内置身份。
+> 当前状态：data-dir lease、数据库准入票据、copy migration、Supervisor generation/revision、结构化请求失败、
+> Desktop Bootstrap Shell 与本机偏好 fail-open 主路径已完成；全仓测试、`-D warnings` 静态检查、打包 App
+> 隔离 authority/双主题/200%/reduced-motion 验收及文档 merge-base 门禁全部通过。
+> 后续修正已验证 SQLite hot-journal 自动恢复、三条正式连接的 WAL 配置及真实 contextBridge 字段保留；
+> 打包 App 在写事务中 SIGKILL Core 后自动重启并恢复工作区，1024 行已提交数据保留。
+> 可选功能启动故障已从 authority ready 分离，真实 Core 与打包 App 验证单功能降级、同进程重试和工作区不重挂载；
+> Windows 正式目录 preparation 改为壳层 assessment，跨平台组合测试通过。原生 Windows helper / 文件身份验证由
+> Windows x64 CI 承担；macOS 结果不作为 Windows 实机 UI 验收。
 
-前置版本：[v1.30 飞书队员 Bot 与 Camp 渠道](../v1.30/README.md)已按完成事实转为 historical。
+前置基线：[v1.29](../v1.29/README.md)按本分支切换时事实转为 historical。
+合入文件预览分支后，[v1.30](../v1.30/README.md)也按已有范围、实施状态与验收记录冻结；本版本继续作为唯一 current。
 
 ## 版本目标
 
-在不复制 Camp 业务链的前提下接入钉钉。每名在场 Rovai 队员可发布为一个独立内部应用机器人；已连接账号对应的
-Owner 可在私聊或群聊显式 `@Bot` 后复用现有 Quick Chat、项目选择、原子 admission、Camp Membership、执行控制台
-和永久输出。设置页以飞书既有信息层级增加 Provider Tab，同时保持各 Provider 的账号、Bot、秘密和诊断隔离。
+Desktop 窗口和本机恢复能力不再与 SQLite authority 的成功打开绑定。Rovai 可以在数据库迁移、另一个 Core 占用、
+偏好损坏或 Core 意外退出时保持壳层可用，同时仍保证只有一份经租约和票据准入的权威工作区。
 
 ## 交付范围
 
-- Migration 122 增加 DingTalk account、Owner identity、publication intent、member Bot 与 per-App Owner identity，并建立
-  provider-neutral Bot/Owner directory view；Migration 123 把旧 helper 发布模式无损迁移为 `direct_open_platform`，将 Data
-  Contract 升到 `v1.36 / projection schema 77`；Migration 124 增加共享 `channel_credentials` 与
-  `channel_developer_sessions`，切换到 `v1.37 / projection schema 78`；
-- 账号连接使用预注册 Rovai OAuth Client，仅经 Main 的浏览器扫码/确认与 loopback 进入临时 Profile。新身份与 Token/Cookie
-  通过 Core 原子 `account.commitConnection` 一次写入 `rovai.sqlite`；失败只丢弃临时 Profile，旧账号与 Session 不变；
-- Device Flow UI、参数、设备 endpoint 与轮询完全删除。旧 schema-1 Profile 重启后复用，access token 静默续期；断网、
-  timeout 和本地读取/保存失败不清会话，轮换后保存失败先补存，不重复使用旧 refresh token；
-- 飞书/钉钉 Bot credential 与 Developer Session 明文存入既有 SQLite，由 Core/Main 独占；Renderer/日志/诊断不接收 raw
-  payload。启动一次批量加载所有 published Bot，旧 `.bin` 不读取、不解密，系统安全存储与 Keychain 命名空间已移除；
-- Main 直接调用钉钉固定 OAuth 与官方 developer service endpoint，只允许封闭 operation/argument 集，并限制 redirect、
-  response size、timeout 与取消；Token/Secret 不进入 URL、Core、Renderer、日志或命令行。包体不含 DWS binary/压缩载荷，
-  不再需要版本/SHA、重签排除、物化目录、subprocess 生命周期和 stdout/stderr 解析；
-- 每个 Agent 只有一个 immutable `unifiedAppId + appKey + robotCode`。发布状态机冻结远端身份后读取 credential、上传队员
-  头像、配置 Stream robot、消息/群 roster/AI 卡片最小权限、事件、版本和审批，最后分别验证 Stream 与 AI 卡片；创建结果不明且
-  没有 App ID 时锁住自动重试，已冻结 App 的失败只能在原 App 恢复；
-- `SELECT_APPROVER` 必须由 Owner 在 Rovai 发布 Dialog 中显式选择审批人；等待审批不是失败，也不伪造已发布；
-- 每个 App 一个 `dingtalk-stream` Client，注册 Robot 与 Card callback topic。回调先 ACK，再进入异步 Main/Core 处理；
-- 入站仅支持私聊和普通群。只有 Owner 私聊或 Owner 在群内显式 `@Bot` 才进入 Core；精确 `/new` 只支持私聊。话题字段
-  一律 fail closed；非 Owner 群消息静默忽略，非 Owner 私聊提示按人/App 24 小时限流；
-- 普通群首次消息在原群发送项目卡；项目绑定后不可换绑。第一条有效请求及后续根请求复用 provider-neutral
-  ExternalPrincipal、ExternalQuote、ChannelTurnRequest、单根 FIFO 和统一原子 admission；
-- 群 roster 从钉钉当前群机器人列表读取并与已发布 Rovai Bot 交集后同步到既有 Camp Membership；运行中 Run 不被修改；
-- AI 卡片固定模板 `382e4302-551d-4880-bf29-a30acfab2e71.schema`、`callbackType=STREAM` 且禁止转发。执行控制台只展示
-  Core 公开安全投影，不传 command stdout/stderr、工具 JSON 或推理；正式结果使用 Markdown；
-- 设置页增加飞书/钉钉 Tab、浏览器 OAuth、队员发布、审批人选择、官方应用管理链接和 Provider-local 绑定诊断。
+- BrowserWindow 在异步偏好加载和 Full Core 启动前创建；本机主题、重试、Supervisor 与 bootstrap diagnostics 不依赖
+  SQLite；偏好损坏使用内存默认、告警并保留原文件；
+- Core 先取得绑定 canonical directory/object identity 的 OS lease；第二个 Core 返回 typed owner state，不做 SQLite
+  recovery；
+- `DatabaseAdmission` 对 Rovai/Lumen main/WAL/journal/SHM 做无创建观察和只读优先合同探测；正常日志恢复在 lease 内
+  由 SQLite 完成并重新准入，探测自建空 WAL/SHM 不误报 identity race，返回 one-shot ticket 或 typed blocker；
+- confirmed absence 才在 staging 初始化 `rovai.sqlite`，发布前再核对并原子 create-if-absent；只有
+  `lumen.sqlite` 时精确打开/迁移，不制造 `rovai.sqlite`；
+- 支持旧合同用 SQLite Backup API 一致复制，在副本上迁移、seed、quick/FK check、checkpoint；原 artifacts、identity
+  manifest 与 exact filename 原子切换支持进程中断恢复；
+- existing/new/migrated 三条正式连接路径统一配置 WAL、NORMAL 同步与 foreign keys，DELETE 仅用于 staging 发布；
+- bundled `rusqlite` 升到 0.40.2，bundled SQLite 为 3.53.2，满足 `>= 3.51.3`；
+- Core stdout 发布 schema-1 startup frame；Main Supervisor 用 generation + child token fence 迟到 frame/event/exit，
+  完整 snapshot revision 驱动 Renderer capability gate；
+- 确定性准入阻断不使用 crash budget。只有显式 shutdown 跨 generation 失败全部请求；普通 child 只失败自己的 pending；
+- Main/Preload 使用结构化 value/failure transport；failure 以普通对象穿过真实 contextBridge，Renderer outward API
+  仍是 `Promise<T>`，错误保留类别、code、retryable、generation 与 details，统一读取函数不退化为 `[object Object]`；
+- 正常 App tree 仅在 `authoritativeWorkspace` ready 后挂载，阻断期间不查询权威工作区、不展示合成空列表；
+- First-run admission 从 Core ready 的 `current.origin = initialized | existing | migrated` 得出，不再检查 SQLite 文件名。
+- DB 后的权威恢复失败发布 typed refusal；Skill/MCP/adapter/Builtin IPC/附件及维护移到 ready 后，以 `coreSubsystems`
+  门禁和原进程重试隔离故障，不卸载工作区。pending cleanup 限定到启动候选，不能清理新建 Camp；
+- Windows 先准入 Core-independent 私有壳层并判定 single-instance，再 assessment 正式 data root；失败显示壳层而不
+  spawn Core，重试用原参数 relaunch。正式数据布局与 DACL 约束不变。
 
-## 保守能力边界
+## 明确不做
 
-- 同一钉钉消息直接 `@` 多个 Bot 的完整 canonical mapping 尚无真实租户证据；普通群只在 `isInAtList` 且 bounded canonical
-  `atUsers` 恰好证明一个直接目标时进入 3 秒观察窗。缺失、歧义、多个条目或多个 receiving App 均整条 fail closed，不启动
-  先到的部分 Agent。单 Bot 后续协作通过 Rovai Core A2A；不得把它宣称为多 Bot 直接 admission；
-- 钉钉话题/独立话题群均未接入；任何 topic/thread identity 出现都拒绝，不降级为普通群；
-- 入站附件只形成名称/媒体类型摘要。出站附件尚无已验证的 app-only 官方投递路径，当前明确失败为
-  `dingtalk_attachment_delivery_not_supported`，不得伪造发送成功；
-- 本地 `card_verified` 只证明官方模板实例创建 API 成功；卡片投递、callback 和翻页仍属于真实租户验收；
-- 生产浏览器 OAuth Client 仍需安全分发或服务端 token broker 决策，不重开设备授权。当前开发入口仅接受
-  `ROVAI_DINGTALK_OAUTH_CLIENT_ID` 与 `ROVAI_DINGTALK_OAUTH_CLIENT_SECRET` 的显式安全注入。
+- 不建立 fallback/temporary SQLite，不把空库或空列表作为降级后的正常 Rovai；
+- 不自动 quarantine、删除或覆盖未知 main/WAL/journal；孤立 SHM 也必须通过 ticketed identity revalidation；
+- 不把每个 SQLite busy、偏好或边车错误永久升级为全产品不可用；
+- 不在 Bootstrap Shell 暴露 Camp、成员、Memory、Navigation 或伪造业务 empty state；
+- 不改变模型上下文、Agent Runtime、Camp/Message/Task/Memory 领域合同。
 
-## 验收
+## 核心验收口径
 
-仓库内门槛包括 Migration 122/123/124、状态机不可换绑、credential/intent 与 account/Session 原子提交、批量启动、create unknown、审批选择、OAuth/Developer API Token 与参数边界、staged 账号切换、
-Stream fast ACK、入站 normalize/topic 拒绝、Owner gate、统一 admission、roster、卡片参数、Provider UI、Rust/TypeScript、
-文档和 Desktop 构建。外部门槛包括真实 OAuth、连接不创建应用、连续发布不重复 OAuth、应用审批/发布、头像、Stream、
-私聊、群聊、项目卡 callback、执行卡翻页和重启恢复。外部证据完成前本版本保持 `in_progress`。
+- 两个 Core 同目录时第二个实例保持壳层并显示占用，且不创建/迁移数据库；
+- `lumen.sqlite` 单独存在时不出现 `rovai.sqlite`；孤立 WAL/journal 阻断，孤立 SHM 仅在 identity 未变时清理；
+- absence assessment 零写入，初始化竞态不能覆盖突然出现的 target；
+- 支持历史 fixture 在副本上迁移并保留业务值；原子切换前强杀进程后可恢复再迁移，原 authority 保留；
+- DELETE/WAL 写事务中强杀 Core 后，正常日志恢复保留已提交数据；打包 App 自动重启 Core 并重新挂载工作区；
+- migration/lease/admission failure 只阻断 Full Core，主题、重试与 bootstrap diagnostics 可用；
+- Snapshot revision 单调、ready 前 capability false、确定性阻断 restartAttempt 保持 0；
+- domain rejection 与 infrastructure failure 跨 Core/Main/Preload/contextBridge 到真实 Renderer 后仍可区分；
+- preference 损坏不被启动自动覆盖，并作为 `localDegradations` 展示；
+- Renderer authority gate 前没有业务请求或 fake empty list。
+- Skill/MCP/Runtime 私有目录与维护故障下，真实 Core ready、成员/导航 RPC 可用；移除故障后同 generation 恢复；
+- Windows native preparer 不可用/超时/异常输出/ACL 拒绝仍提供壳层 assessment，secondary 不执行正式 preparer。
 
 ## 跨版本文档影响
 
 | 范围 | 结论 | 证据或理由 |
 | --- | --- | --- |
-| Version lifecycle | 已更新 | 本概览、[实施计划](implementation-plan.md)、[决定](decisions.md)与[版本索引](../README.md)共同切换 `current_version`，v1.30 冻结为 historical。 |
-| Decisions | 已更新 | [v1.31 决定](decisions.md)记录 Main 直接拥有 OAuth/Developer API、provider-neutral Core 复用和未实测能力 fail-closed 的高成本取舍。 |
-| Contracts | 已更新 | [DingTalk Channel v3](../../contracts/dingtalk-channel-v3.md)继承直接 OAuth/Developer API，并收敛为浏览器登录、旧 Profile 复用和暂时失败保留；[Channel Storage v2](../../contracts/channel-storage-v2.md)继承共享 SQLite credential/Session 与 Migration 124，并区分飞书暂时检查失败和失效、支持钉钉 completed 同应用凭据恢复；旧合同冻结为历史入口。 |
-| Architecture | 已更新 | 新增[钉钉渠道架构](../../architecture/dingtalk-channel.md)，并更新架构索引。 |
-| UI | 已更新 | [渠道设置](../../ui/components/channel-settings.md)增加 Provider Tab、钉钉 OAuth/审批/发布与 Provider-local 诊断合同。 |
-| Runtime Activity | 确认无需更新 | 钉钉继续消费既有公开 AgentRun Evidence 和 CampMessage，不新增 Runtime activity kind 或 Adapter mapping。 |
-| Runtime compatibility | 确认无需更新 | 不改变 Product Runtime command、Session、模型、权限、平台准入或实测支持矩阵。 |
-| Documentation routing | 已更新 | 文档总入口、Architecture、Contracts、Decisions、UI、Development 与版本索引加入钉钉任务入口。 |
-| Root README | 确认无需更新 | 钉钉是可选外部渠道，不改变 Rovai-ai 常青定位或 Runtime 支持声明；外部验收未完成也不应写入根能力宣称。 |
+| Version lifecycle | 已更新 | 本概览、[实施计划](implementation-plan.md)、[决定](decisions.md)与版本索引保持唯一 current v1.31；v1.29 与合入的 [v1.30](../v1.30/README.md)按各自已有实施和验收事实转为 historical。 |
+| Decisions | 已更新 | [V1.31-D01–D06](decisions.md#v1-31-d01)记录壳层分层、准入票据、copy migration、Supervisor/偏好/Onboarding、可选功能门禁与 Windows 独立壳层 profile。 |
+| Contracts | 已更新 | 新增 [Desktop Runtime Availability v1](../../contracts/desktop-runtime-availability-v1.md)，补充 [Windows Private Storage v2](../../contracts/windows-private-storage-v2.md)，并以 [First-run Onboarding v3](../../contracts/first-run-onboarding-v3.md)替代 v2 当前入口。 |
+| Architecture | 已更新 | 新增 [Availability-first Runtime](../../architecture/availability-first-runtime.md)，同步基础不变量与 First-run 组件边界。 |
+| UI | 已更新 | 新增 [Desktop Bootstrap Shell](../../ui/components/bootstrap-shell.md)，首次训练明确位于 Full Core capability gate 之后。 |
+| Runtime Activity | 确认无需更新 | 本版本不改变 Runtime Evidence、Canonical Activity 或 mapping registry。 |
+| Runtime compatibility | 确认无需更新 | 不新增或改变 Agent Runtime；SQLite 库升级不是 Runtime compatibility 结论。 |
+| Documentation routing | 已更新 | 总导航、Architecture、Contract、UI 与当前决定导航均加入 availability-first 入口。 |
+| Root README | 确认无需更新 | 不改变产品定位或已经发布的常青能力声明。 |
+
+## References
+
+- [实施计划](implementation-plan.md)
+- [版本决定](decisions.md)
+- [Availability-first Runtime](../../architecture/availability-first-runtime.md)
+- [Desktop Runtime Availability v1](../../contracts/desktop-runtime-availability-v1.md)
+- [First-run Onboarding v3](../../contracts/first-run-onboarding-v3.md)
+- [Desktop Bootstrap Shell](../../ui/components/bootstrap-shell.md)
+
+## 后续版本
+
+2026-08-30 渠道分支合并后，本版本按主线既有范围与验收证据冻结为 historical；
+[v1.33 钉钉与渠道集成](../v1.33/README.md)成为唯一 current，并保留本版本的启动准入与恢复能力。

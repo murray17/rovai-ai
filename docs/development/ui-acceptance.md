@@ -103,6 +103,7 @@ pnpm accept:runtime-activity-ui
 pnpm accept:diagnostics-ui
 pnpm accept:app-updates-ui
 pnpm accept:onboarding-ui
+pnpm accept:bootstrap-shell-ui
 ```
 
 它们分别覆盖长期记忆、队员头像、队员生命周期、应用内通知、统一侧栏（含 Project/Camp 置顶、
@@ -110,8 +111,9 @@ pnpm accept:onboarding-ui
 当前会话完整正文查找（含地图快捷返回、非 Camp 边界、旧消息 anchored 定位与双主题双尺寸）、
 Task 创建操作行、完整表单聚焦、取消恢复与单卡原地更新、十三 Runtime Canonical Activity 工具名称与 Agent 级连续执行过程、A2A 消息
 Scheme C 转交 footer，诊断中心双尺寸、只读自检、MCP 权限修复复检与 v5 脱敏，以及“关于与更新”
-的真实 packaged 版本、确定性禁用网络自动检查、App Update v1 idle 快照、Day/Night、1040×700、
-200% 等效布局、键盘焦点和无竖线回归。available 到失败的完整状态/动作/fallback 矩阵由 Renderer
+的真实 packaged 版本、确定性禁用网络自动检查、App Update v1 idle 快照，以及 Bootstrap Shell 在未知 authority 下
+保留原文件、隔离业务树、显式重试不消耗 crash budget、Day/Night、1040×700、窄窗口、
+200% 等效布局、reduced motion、键盘焦点和无横向溢出回归。available 到失败的完整状态/动作/fallback 矩阵由 Renderer
 测试覆盖；签名 macOS/Windows 跨版本升级仍属于各平台 Release qualification。
 当前 Neutral Porcelain + Steel 视觉迁移还必须按当前版本实施计划覆盖 2K Composer、八个设置页、
 队员半身照与 Runtime 入口、记忆 Workbench、New Conversation 和各类 Dialog/Drawer。

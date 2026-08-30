@@ -1,146 +1,170 @@
 ---
 document_type: version-decisions
 version: v1.31
-lifecycle: current
+lifecycle: historical
 last_updated: 2026-08-30
 ---
 
 # v1.31 决策记录
 
-本文件只记录本版本满足准入门槛的重要取舍；当前规范由链接的 Architecture、Contract、UI 与 Development 说明拥有。
+本文件只记录本版本满足准入门槛的重要取舍；当前规范由链接的 Architecture 与 Contract 拥有。
 
 <a id="v1-31-d01"></a>
-## V1.31-D01：钉钉控制面由 Main 直接拥有 OAuth 与官方开发者 API
+## V1.31-D01：Desktop 壳层 fail open，SQLite authority fail closed
 
 ### 背景
 
-钉钉队员应用的创建、Robot 配置、权限、版本和审批需要开发者控制面。早期实现把 DWS 当作固定 helper 以隔离 Shell 与
-全局 profile；源码复核后确认它在本场景只是钉钉 OAuth、官方 `op-app` developer service 与本地 token persistence 的薄封装，
-Stream 本来也由 Rovai Main 直接连接。继续随包携带第三方 binary 只会增加版本/SHA、重签、物化目录和子进程协议边界，
-并不增加钉钉平台安全能力。
+把窗口生命周期与 Core/SQLite 成功启动绑定，会让迁移、占用或偏好错误表现为整款应用退出；但用临时空库继续又会
+制造第二个权威世界。
 
 ### 决定
 
-Electron Main 直接实现浏览器 loopback/设备 OAuth、加密多 profile token store、官方 developer service 调用和
-`dingtalk-stream`。Developer Gateway 固定钉钉 endpoint、operation/argument、header、响应大小、timeout 与取消边界；Token 与
-Secret 只存在 Main 内存、OS safeStorage 和发往固定钉钉 endpoint 的 HTTPS credential 字段，不进 URL、Core、Renderer、
-日志或命令行。创建和 mutation outcome 无法证明时继续 fail closed。安装包不含或启动 DWS，也不保留 DWS version/SHA、
-重签排除、物化和 stdout/stderr 解析。生产包在 public-client/device-flow 或 token broker 明确前保持 NO-GO；不得复用第三方
-工具内置 Client ID，也不得回退为人工粘贴 AppSecret。
+Desktop 先提供主题、Supervisor、重试和诊断；Full Core 通过 capability 独立晋升。业务树只在 authority ready 后
+挂载，阻断期间没有假空态或 fallback database。
 
-当前规范见[钉钉渠道架构](../../architecture/dingtalk-channel.md#developer-gateway-与-oauth)和
-[DingTalk Channel v2](../../contracts/dingtalk-channel-v2.md)。
+当前规范见 [Availability-first Runtime](../../architecture/availability-first-runtime.md)与
+[Desktop Runtime Availability v1](../../contracts/desktop-runtime-availability-v1.md)。
 
 ### 后果
 
-- OAuth 与 developer service 协议变化只修改 Main Adapter，不改变 Core 渠道合同；
-- 安装、签名和运行时不再引入第三方本地可执行信任主体；
-- 缺少显式 Rovai OAuth Client 是可见配置错误，不是假连接或降级路径。
+- 用户能看见并处理启动阻断，原数据不被空工作区掩盖；
+- Renderer 必须把 capability gate 放在所有权威 hooks 外层。
 
 ### 被拒绝方案
 
-- **继续随包携带固定 DWS：** 没有平台要求，且增加 SHA、签名、物化与 subprocess 复杂度；
-- **调用用户 PATH 中的 DWS：** 版本、profile 和命令表不可证明；
-- **Renderer 执行 OAuth/API 或读取 credential：** 扩大 Token、Secret 和控制面注入边界；
-- **复用第三方工具内置 OAuth Client：** 所有权、配额和生产授权对象不属于 Rovai；
-- **复制开放平台网页 console 私有 HTTP：** 形成高漂移协议面；当前直接使用官方 developer service，而非网页抓包接口。
+- **Core 失败即退出 Electron：** 把局部权威故障扩大为全产品不可用；
+- **自动打开临时/空 SQLite：** 形成第二权威并掩盖恢复问题。
 
 <a id="v1-31-d02"></a>
-## V1.31-D02：Provider 专属身份与传输，复用同一个 Core admission/Outbox
+## V1.31-D02：lease 先于观察，DatabaseAdmission 用一次性票据授权下一步
 
 ### 背景
 
-钉钉的 `corpId/userId/appKey/robotCode`、Stream 与卡片协议不同于飞书，但项目冻结、ExternalPrincipal、根请求 FIFO、
-Camp Membership、原子 CampMessage/Turn/Run 创建和可靠输出语义相同。复制一套钉钉 Camp 执行链会让两个渠道在安全与恢复
-边界上逐渐分叉。
+“先检查文件，再让任意 open(create)”存在 TOCTOU、双实例和错误文件名创建风险；SHM 又不能与 main/WAL 使用同一
+绝对稳定规则。
 
 ### 决定
 
-账号、发布、credential、入站规范化、远端 roster、Stream 和 Card 留在 DingTalk Host；Migration 122 只增加钉钉身份表，
-再用 provider-neutral directory 把已发布 Bot 和 Owner identity 接入现有渠道聚合、PendingCampBinding、ChannelTurnRequest、
-统一原子 admission、Camp Membership 与 ChannelDelivery。所有共享对象都携带 `provider=dingtalk`，但不创建第二套
-CampMessage、CampTurn 或 AgentRun 写入路径。
+Core 先持有 data-dir OS lease。Admission 精确观察 Rovai/Lumen artifacts 并只读优先探测合同；若 SQLite 明确报告正常
+journal recovery 需求，在同一 lease 的原 target 上让引擎恢复，再完整重新评估。返回绑定 lease、不可复制、一次消费的
+existing/new/migration ticket。票据保存探测后的 main/WAL/journal 并严格复核；正常探测新建的空 WAL 与可重建 SHM
+不视为 authority 替换。孤立 SHM 只在 exact identity 未变时清理。初始化使用 absence revalidation 与 no-replace commit。
 
-当前规范见[钉钉渠道架构](../../architecture/dingtalk-channel.md#core-复用与入站准入)和
-[DingTalk Channel v2](../../contracts/dingtalk-channel-v2.md#5-core-入站与-camp-语义)。
+当前规范见 [Desktop Runtime Availability v1](../../contracts/desktop-runtime-availability-v1.md)。
 
 ### 后果
 
-- 两个 Provider 可以独立掉线、发布和恢复，但共享项目与执行正确性；
-- 钉钉 Host 不能直接写 CampMessage、CampTurn、AgentRun 或 membership 表；
-- 共享 Core 语义变更必须同时验证飞书回归和钉钉 provider isolation。
+- `lumen.sqlite` 不再触发隐式 `rovai.sqlite` 创建；
+- 检查、清理、打开和初始化共享同一 lease/identity 证明链。
 
 ### 被拒绝方案
 
-- **复制 Feishu Core 表和 admission：** 会形成第二套事务、FIFO 和恢复语义；
-- **把钉钉 ID 强塞进 Feishu 表：** 混淆不同 identity namespace 与发布状态；
-- **Main 收到消息后直接启动 Runtime：** 绕过 Owner、项目、membership 和原子 admission 门禁。
+- **文件存在性 boolean：** 丢失 sidecar、合同、identity 与 busy 语义；
+- **所有 SHM 都要求字节不变：** 会把可变协调缓存误判为永久 authority blocker。
+- **只读 probe 失败一律权限拒绝：** 会阻断正常 hot journal 回滚，用户反复重试也无法恢复工作区。
 
 <a id="v1-31-d03"></a>
-## V1.31-D03：没有真实协议证据的会话能力默认关闭
+## V1.31-D03：历史合同只在一致副本上迁移，并用 identity manifest 恢复切换
 
 ### 背景
 
-方案目标包含多 Bot、话题、附件和 AI 卡片，但仓库自动化不能证明钉钉真实客户端会提供完整 canonical mention、话题身份、
-app-only 附件投递或 callback 行为。把普通群 fallback 当成话题、把多 observation 猜成完整目标或在附件 API 不明时报告成功，
-都会在 Owner 不知情时改变项目与执行范围。
+原库原地 migration 失败时难以区分旧、半迁移与新状态；只保存 stage 字符串也不足以在进程中断后证明 main 已切换。
 
 ### 决定
 
-当前只准入 Owner 私聊和普通群显式 `@`。topic/thread 字段一律拒绝；同一消息在 3 秒观察窗内到达多个 receiving App 时
-整条 fail closed，不启动先到的部分 Agent，其他协作走 Core A2A；出站附件明确失败；卡片能力在真实投递/callback 验收
-完成前不提升为生产通过。后续解除任何 gate 必须先取得官方协议与真实租户证据，再更新当前 Contract、测试和版本验收。
-
-当前规范见[钉钉渠道架构](../../architecture/dingtalk-channel.md#当前-feature-gate)和
-[DingTalk Channel v2](../../contracts/dingtalk-channel-v2.md#8-feature-gate-与错误)。
+使用 SQLite Backup API 创建一致副本，在副本上迁移和完整校验；保存原 artifacts 与 original/migrated identity，原子
+替换 exact source。恢复按当前 main identity 决定恢复旧 sidecar或保留新 main，未知 identity 阻断。
 
 ### 后果
 
-- 未支持场景不会静默落入错误 Camp 或伪造 delivery success；
-- 当前首轮只能有一个钉钉直接目标，但 Agent 仍可通过 Core A2A 使用 Camp 协作者；
-- 能力扩张是独立、可验收的合同变化，而不是 parser 的宽松兼容。
+- 迁移失败不修改原 authority；
+- 切换窗口可以通过持久 manifest 在下一进程恢复；
+- 需要长期保留操作级原件备份供人工诊断。
 
 ### 被拒绝方案
 
-- **topic 缺字段时按普通群处理：** 可能把多个 Topic 合并到一个 Camp；
-- **收到几个 App callback 就猜完整多 Bot 集：** 无法证明漏掉的 observation；
-- **附件转成路径或 Markdown 链接并标记成功：** 既可能泄露本机路径，也没有远端交付证据；
-- **以卡片 create API 代替 callback 验收：** 只证明实例存在，不能证明用户交互闭环。
+- **原地 migration：** 失败隔离与回退证据不足；
+- **只看 manifest stage：** crash 可能发生在文件系统提交与 stage 更新之间。
 
 <a id="v1-31-d04"></a>
-## V1.31-D04：渠道秘密统一进入现有 SQLite，不依赖系统凭据库
+## V1.31-D04：Supervisor 完整快照负责 generation fencing，偏好与 Onboarding 使用独立 fail-open 边界
 
 ### 背景
 
-飞书 App Secret/Cookie 与钉钉 App Secret/OAuth Profile 原先由 Main 分别经 Electron `safeStorage` 写入 `.bin`。这形成了
-SQLite 业务状态与外部 credential 文件的双权威：账号、publication intent 或 Bot row 可以提交而对应文件失败，启动还要逐
-Bot 访问系统凭据库。Keychain/DPAPI/Secret Service 的可用性、应用名 namespace、签名身份和授权 UI 又让开发、隔离验收与
-跨平台恢复产生额外状态，但并未消除本机 Owner 对应用数据目录的信任。
+child 的迟到 exit/response 可能毒化新进程；Electron remote Error 会压平类别；Desktop 偏好损坏又不应阻止完整 Core。
+旧 Onboarding 通过 SQLite 文件名存在性推断 fresh/existing，与新的准入状态机冲突。
 
 ### 决定
 
-Migration 124 在既有 `rovai.sqlite` 增加 `channel_credentials` 与 `channel_developer_sessions`，明文保存渠道 Secret、Token 和
-Cookie。Core/Main 是唯一读取边界；Renderer、日志、诊断和 Agent Context 继续禁止 raw payload。账号与 Session、credential
-与 publication intent 分别用单一 Core 事务提交；Session refresh 使用 revision CAS；启动用一次 JOIN 批量加载所有 published
-Bot。旧 `.bin` clean break：不读取、不解密、不迁移，只允许 Main 严格名称删除。Electron 不再调用 `safeStorage`，隔离实例
-只依赖不同 `userData`/SQLite，应用名保持 `APP_NAME`。
+Supervisor 使用单调 generation、child token 与 revision 完整快照；pending request 按 generation 失败，确定性阻断不计
+crash。Main/Preload 使用结构化 request transport，failure 以普通对象穿过 contextBridge；Error 只能在 Renderer 接收后
+构造，避免 Electron 丢失自定义字段。本机偏好损坏使用内存默认、告警并保留原文件；Onboarding 从 ready authority
+origin 初始化，而不是读取文件存在性。
 
-该决定局部替代本文件 V1.31-D01 中 Token/Secret 不进入 Core、使用 OS safeStorage 的条款，以及 v1.30 飞书决定中相同的
-持久化条款；OAuth/Developer API 固定端点、Renderer 隔离、网络与日志安全边界不变。当前规范见
-[Channel Storage v1](../../contracts/channel-storage-v1.md)、[飞书渠道架构](../../architecture/feishu-channel.md)和
-[钉钉渠道架构](../../architecture/dingtalk-channel.md)。
+当前规范见 [Desktop Runtime Availability v1](../../contracts/desktop-runtime-availability-v1.md)与
+[First-run Onboarding v3](../../contracts/first-run-onboarding-v3.md)。
 
 ### 后果
 
-- 备份或取得 `rovai.sqlite` 即可读取渠道秘密，因此数据目录本身必须按秘密材料保护；Rovai 不再宣称 at-rest OS encryption；
-- Core 可以在同一事务维护 credential/session 与业务状态，消除文件/数据库半提交，并用一次查询恢复全部 Bot；
-- 开发、打包和隔离验收不再弹出系统凭据库授权，也不再受应用名或签名 namespace 影响；
-- Provider Host 仍只能获得自身必要 payload，秘密不得越过 Main/Core 或进入公开错误。
+- 旧 child 不能关闭或失败当前 generation；
+- 领域拒绝与基础设施失败在 Renderer 仍可区分；
+- 偏好故障与 authority 故障互不扩大，首次安装不再由路径启发式决定。
 
 ### 被拒绝方案
 
-- **继续 OS safeStorage + `.bin`：** 保留双权威、逐 Bot 启动访问、平台授权 UI 和签名 namespace；
-- **单独 `channel.sqlite`：** 引入第二个事务与备份边界，不能与 account/publication 状态原子提交；
-- **自动解密迁移旧文件：** 启动仍需访问旧系统凭据库，并把 clean break 变成跨平台兼容矩阵；
-- **把 Secret 放 Renderer 或配置文件：** 扩大页面、日志、IPC 与注入攻击面；
-- **只把 credential 放 SQLite、Session 留 safeStorage：** 仍保留两套恢复和账号切换半状态。
+- **全局 failAll on child exit：** 会错误失败新 generation 请求；
+- **Preload 在 Error 上挂结构化字段：** 字段在 contextBridge 复制 Error 时丢失，只有错误文字无法支撑状态判断；
+- **损坏偏好即禁止 Core：** 把非权威文件升级成产品 authority；
+- **启动前 exists 检查：** 无法区分旧库、孤儿 sidecar、迁移与真正 absence。
+
+<a id="v1-31-d05"></a>
+## V1.31-D05：权威 ready 与可选功能 ready 分离
+
+### 背景
+
+DB 已准入后仍让 Skill、MCP、adapter 或派生文件 cleanup 的错误从 `run_core()` 传播，会把单功能故障放大为 Core
+意外退出。只提前发 ready 而不约束调用，又会把未初始化存储暴露给真实执行。
+
+### 决定
+
+权威 execution/input/delivery 恢复留在 ready 前；可选对象先无 I/O 构造、ready 后初始化，以当前进程的功能状态控制
+依赖请求与执行，发布真实降级并支持原进程重试。健康 Runtime 不重建；启动专属清理只处理启动快照中的候选并再次复核。
+当前规范见 [可选功能门禁](../../contracts/desktop-runtime-availability-v1.md#7-authority-ready-and-optional-subsystem-gates)。
+
+### 后果
+
+Camp/Task/消息记录可在功能降级时继续使用；Core 与 Renderer 都要区分工作区 authority 和功能可用性。该状态不持久化
+为数据库准入或新的业务事实，不改变冻结模型输入与原 Runtime 平台门禁。
+
+### 被拒绝方案
+
+- **所有初始化成功后才 ready：** 非权威文件错误继续阻断整个工作区；
+- **只 catch 错误但功能照常开放：** 可能使用不完整 Skill/MCP/附件投影；
+- **功能失败时重启整个 Core：** 重复同一故障并中断原本健康的工作区和 Runtime。
+
+<a id="v1-31-d06"></a>
+## V1.31-D06：Windows 用 Core 独立的私有壳层 profile 获取稳定实例锁
+
+### 背景
+
+原生完整 data-root preparer 在模块加载期间抛错，窗口尚不存在；简单 catch 后使用默认路径会丢失 private-storage
+保证。Electron 的 sessionData 必须在 ready 前绑定，而实例锁又以当时的 userData 为 identity。
+
+### 决定
+
+复用已打包 Agent CLI 的 Desktop-only 原生入口与既有 DACL 原语，建立只含 Electron 状态的 profile，先取稳定实例锁。
+primary 才准备正式布局；成功在 ready 前绑定正式路径，失败留在壳层且不给 Core 任何 fallback data path。
+Windows 该 assessment 的重试通过原参数 relaunch 完成。当前规范见
+[Windows Bootstrap assessment](../../contracts/desktop-runtime-availability-v1.md#8-windows-pre-ready-bootstrap-assessment)。
+
+### 后果
+
+正式 Core binary / preparer 故障不再等价于无窗口；壳层状态与正式偏好不隐式迁移。仅当独立私有壳层也无法准入时
+使用原生错误对话框终止，不为可用性牺牲存储安全。Native Windows 验证仍独立于跨平台组合测试。
+
+### 被拒绝方案
+
+- **所有 Electron 状态永久迁入新 profile：** 改变已有正式偏好/缓存路径，扩大迁移范围；
+- **新加一个单独 helper EXE：** 已有 CLI 能复用原语，额外二进制增加签名、打包和兼容成本；
+- **仍让 Core 负责壳层目录准备：** Core binary 缺失时仍无法显示壳层；
+- **普通 mkdir/继承 ACL fallback：** 不满足私有存储的创建时安全边界。

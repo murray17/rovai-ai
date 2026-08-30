@@ -23,6 +23,8 @@ last_updated: 2026-08-30
 `dist/`、`out/` 或 `resources/` 运行。只把 `.app` 复制到另一个目录仍不足以完成隔离：开发和验收
 进程还必须使用独立 `userData`。显式隔离的 Desktop 实例会同时把 Core Skill Library 绑定到该
 `userData` 下的 `managed-skill-library/`；只隔离 SQLite、却继续共享日常 Skill Library 不构成完整隔离。
+带 `ROVAI_ALLOW_ISOLATED_INSTANCE=1` 与显式 `--user-data-dir` 的开发/验收 Desktop 还把 MCP config 固定到
+Core data-dir 下的 `mcp.json`；直接启动验收 Core 时显式传入 `--mcp-config-path`，不能迁移或清理日常全局 MCP 文件。
 
 无论通道如何，Core 都只接受显式绝对 `--data-dir`，并要求 Skill Library 选择恰好为以下一种：
 日常 macOS Desktop 显式传入 `--use-default-skill-library`；Windows Desktop、显式收到
@@ -32,13 +34,16 @@ Core 必须在创建、修复或清理 Skill Revision 前失败。Core 会在打
 之前独占 data-dir 下的 `.rovai-core-instance.lock`；第二个 Core 必须拒绝启动且不得修改数据库。
 该文件会保留供诊断使用，进程退出时释放的是操作系统锁，不要把“删除锁文件”当作并发修复手段。
 
-Windows 的 `--user-data-dir=<root>` 是隔离 data-root 开关，不直接等于 Electron `userData`。Desktop 在
-`app.ready` 前先由 `rovai-core.exe --prepare-windows-data-root <root>` 原生创建并准入完整布局，再把 Core
+Windows 的 `--user-data-dir=<root>` 是隔离 data-root 开关，不直接等于 Electron `userData`。Desktop 先由
+已打包的 `rovai.exe --prepare-windows-bootstrap-root <instance-key>` 原生创建独立私有 Electron 壳层 profile，绑定后
+判定 single-instance；只有 primary 在 `app.ready` 前调用 `rovai-core.exe --prepare-windows-data-root <root>` 准备正式布局，把 Core
 绑定到 `<root>\Core`，把 Electron `userData` / `sessionData` 分别绑定到
 `<root>\Electron\User Data` / `<root>\Electron\Session Data`，并将隔离 Skill Library 放在
 `<root>\Core\managed-skill-library`。验收方必须传入一个尚未被普通 `mkdir` 以继承 ACL 创建的目标 root；
 已有但不满足 protected DACL 的未知目录会按合同拒绝，而不是被静默修权后复用。macOS 的现有
 `--user-data-dir` 语义保持不变。
+正式 root 准备失败仍用已准入的壳层显示原因、不启动 Core；重试会保留原参数重启 Desktop，不能 ready 后重绑 sessionData。
+壳层 profile 不含 Core data path，也不是验收数据库后备目录。Windows 真机 UI/ACL 验收与其他平台的控制流模拟必须分开报告。
 
 ## AI 必读规则
 

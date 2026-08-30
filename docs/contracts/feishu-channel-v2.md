@@ -596,4 +596,4 @@ Topic 动态默认协作队员不增加持久表或 Migration：继续使用既�
 - [飞书渠道架构](../architecture/feishu-channel.md)
 - [Camp Membership v1](camp-membership-v1.md)
 - [ContextManifest Evidence v22](context-manifest-evidence-v22.md)
-- [v1.30 决策记录](../versions/v1.30/decisions.md#v1-30-d16)
+- [v1.32 决策记录](../versions/v1.32/decisions.md#v1-32-d16)

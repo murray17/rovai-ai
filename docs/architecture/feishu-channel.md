@@ -11,7 +11,7 @@ last_updated: 2026-08-30
 字段、状态和恢复合同见 [Feishu Channel v2](../contracts/feishu-channel-v2.md)，credential 与 Developer Session 持久化见
 [Channel Storage v2](../contracts/channel-storage-v2.md)，模型输入证据见
 [ContextManifest Evidence v22](../contracts/context-manifest-evidence-v22.md)，取舍理由见
-[v1.30 决策记录](../versions/v1.30/decisions.md)。
+[v1.32 决策记录](../versions/v1.32/decisions.md)。
 
 ## 组件与权威
 
@@ -294,6 +294,8 @@ Managed Attachment v2 引用逐个生成原生 image/file delivery：Main 发送
 
 Core Snapshot 保存 pending aggregate、transport conversation 和 delivery 恢复事实，Main 启动后恢复所有 published
 Bot 长连接、过期 lease、collecting finalize 与 Outbox。Renderer snapshot 在 Main 中剥离这些 Host-only 字段。
+Main 的 `ChannelHostLifecycle` 等待 Supervisor 的 Core authority 与请求能力同时就绪后启动 Host；同 generation
+不重复启动，authority 丢失后停止，新的 ready generation 再恢复同一 SQLite 绑定和凭据，shutdown 后不再重启。
 Host 为连接阶段、SDK policy reject、归一化 message 和 Rovai handler 接受/拒绝记录结构化诊断；所有 App/message/chat
 identity 都先摘要，消息正文与外部用户 ID 不进入日志。当前 SDK 不提供归一化前 raw-event hook，Host 不虚构该观测层。
 每个 App Secret 只以稳定 credential ref 关联 Bot。Developer Session Cookie jar 和 App Secret 明文存于同一个

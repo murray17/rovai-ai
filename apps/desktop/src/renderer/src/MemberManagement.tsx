@@ -1,3 +1,4 @@
+import { readErrorMessage } from './error-message'
 import {
   forwardRef,
   useCallback,
@@ -1857,5 +1858,5 @@ function stringField(value: Record<string, unknown>, key: string): string | null
 }
 
 function errorMessage(error: unknown): string {
-  return localizeExecutionEngineTerms(error instanceof Error ? error.message : String(error))
+  return localizeExecutionEngineTerms(readErrorMessage(error))
 }

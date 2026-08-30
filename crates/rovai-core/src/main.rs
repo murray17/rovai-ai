@@ -3,6 +3,7 @@ mod antigravity;
 mod builtin_tool_runtime;
 mod claude;
 mod codex;
+mod core_subsystems;
 mod health;
 mod runtime_fleet;
 mod runtime_mcp;
@@ -33,6 +34,9 @@ use codex::{
     CodexAgentRunRuntimeRequest, CodexAgentThreadOptions, CodexCliRuntimeAdapter, CodexIncoming,
     CodexLiveModelValidationError, CodexRuntime,
 };
+use core_subsystems::{
+    CoreSubsystems, SubsystemInitialization, SubsystemUnavailable, runtime_subsystem_id,
+};
 #[cfg(target_os = "macos")]
 use rovai_core::managed_process::configure_user_automation_denial_root;
 use rovai_core::{
@@ -61,6 +65,7 @@ use rovai_core::{
         executable_fingerprint as fingerprint_executable, observe_executable_file_identity,
         verify_executable_integrity,
     },
+    authority_migration::{AuthorityMigrationProgress, AuthorityMigrationRunner},
     builtin_tool_evidence_projection::{
         BUILTIN_TOOL_EVIDENCE_PROJECTION_SCHEMA_VERSION, project_builtin_tool_invocation,
     },
@@ -125,9 +130,10 @@ use rovai_core::{
         DEFAULT_MAX_CONTEXT_PAYLOAD_BYTES, MaterializeContextRequest, PreparedContext,
         RuntimeInputDelivery, charter_delivery_mode_for_adapter,
     },
-    core_data_dir_lock::CoreDataDirLock,
+    core_data_dir_lock::{CoreDataDirLease, CoreDataDirLeaseAcquisition},
     current_user::CURRENT_USER_ID,
-    db::Database,
+    database_admission::{AdmissionAssessment, AuthorityBlock, DatabaseAdmission},
+    db::{Database, DatabaseInitializeError, DatabaseMigrationError, DatabaseOpenError},
     diagnostics::{
         DiagnosticCheck, DiagnosticGroup, DiagnosticStatus, DiagnosticsReport, aggregate_counts,
         database_integrity_check, diagnostics_export_v5,
@@ -137,13 +143,13 @@ use rovai_core::{
         AgentRunExecutionEvidence, ExecutionEvidenceService, PreparedRuntimeEvidence,
         RUNTIME_EVIDENCE_DELTA_BATCH_MAX_BYTES, RecordedExecutionEvidence,
     },
+    file_preview_authority::{ResolveFilePreviewSourceParams, resolve_file_preview_source},
     git,
     managed_attachment::ManagedAttachmentStore,
     managed_blob::ManagedBlobStore,
     mcp::{
-        CommitMcpImportParams, CreateMcpServerParams, DeleteMcpServerParams,
-        McpConfigMigrationOutcome, McpConfigStore, SetMcpAssignmentParams,
-        SetMcpServerEnabledParams, UpdateMcpServerParams,
+        CommitMcpImportParams, CreateMcpServerParams, DeleteMcpServerParams, McpConfigStore,
+        SetMcpAssignmentParams, SetMcpServerEnabledParams, UpdateMcpServerParams,
     },
     mcp_import::McpImportScanner,
     mcp_projection::{McpProjectionRequest, McpProjectionService, PreparedMcpProjection},
@@ -388,8 +394,172 @@ struct Response {
 
 #[derive(Debug, Serialize)]
 struct ErrorBody {
+    kind: &'static str,
     code: String,
     message: String,
+    retryable: bool,
+    details: Value,
+}
+
+fn request_error_body(error: &anyhow::Error) -> ErrorBody {
+    if let Some(error) = error.downcast_ref::<SubsystemUnavailable>() {
+        return ErrorBody {
+            kind: "infrastructure_failure",
+            code: "subsystem_unavailable".to_owned(),
+            message: error.to_string(),
+            retryable: true,
+            details: json!({ "subsystem": error.id, "state": error.state }),
+        };
+    }
+    if let Some(error) = error.downcast_ref::<CommandGatewayError>() {
+        let code = match error {
+            CommandGatewayError::InvalidEnvelope(_) => "COMMAND_ENVELOPE_INVALID",
+            CommandGatewayError::IdempotencyConflict { .. } => "COMMAND_IDEMPOTENCY_CONFLICT",
+        };
+        return ErrorBody {
+            kind: "domain_rejection",
+            code: code.to_string(),
+            message: error.to_string(),
+            retryable: false,
+            details: json!({}),
+        };
+    }
+    let retryable = error.chain().any(|cause| {
+        cause
+            .downcast_ref::<rusqlite::Error>()
+            .is_some_and(|error| {
+                matches!(
+                    error,
+                    rusqlite::Error::SqliteFailure(sqlite, _)
+                        if matches!(
+                            sqlite.code,
+                            rusqlite::ErrorCode::DatabaseBusy
+                                | rusqlite::ErrorCode::DatabaseLocked
+                        )
+                )
+            })
+    });
+    ErrorBody {
+        kind: "infrastructure_failure",
+        code: "CORE_REQUEST_FAILED".to_string(),
+        message: format!("{error:#}"),
+        retryable,
+        details: json!({}),
+    }
+}
+
+fn write_startup_frame(
+    status: &str,
+    phase: Option<&str>,
+    authority_state: Value,
+    error: Option<Value>,
+    progress: Option<Value>,
+) -> Result<()> {
+    use std::io::Write as _;
+
+    let mut frame = serde_json::Map::from_iter([
+        (
+            "kind".to_string(),
+            Value::String("core_startup".to_string()),
+        ),
+        ("schemaVersion".to_string(), Value::from(1)),
+        ("status".to_string(), Value::String(status.to_string())),
+        ("authorityState".to_string(), authority_state),
+    ]);
+    if let Some(phase) = phase {
+        frame.insert("phase".to_string(), Value::String(phase.to_string()));
+    }
+    if let Some(error) = error {
+        frame.insert("error".to_string(), error);
+    }
+    if let Some(progress) = progress {
+        frame.insert("progress".to_string(), progress);
+    }
+    let stdout = std::io::stdout();
+    let mut output = stdout.lock();
+    serde_json::to_writer(&mut output, &Value::Object(frame))?;
+    output.write_all(b"\n")?;
+    output.flush()?;
+    Ok(())
+}
+
+fn structured_startup_error(
+    code: &str,
+    message: impl Into<String>,
+    retryable: bool,
+    details: Value,
+) -> Value {
+    json!({
+        "code": code,
+        "message": message.into(),
+        "retryable": retryable,
+        "details": details,
+    })
+}
+
+fn write_authority_block(block: &AuthorityBlock) -> Result<()> {
+    write_startup_frame(
+        "blocked",
+        None,
+        json!({ "kind": "blocked", "reason": block }),
+        None,
+        None,
+    )
+}
+
+fn write_database_open_refusal(error: &DatabaseOpenError) -> Result<()> {
+    if let Some(block) = error.authority_block() {
+        return write_authority_block(block);
+    }
+    write_startup_frame(
+        "failed",
+        None,
+        json!({ "kind": "unknown" }),
+        Some(structured_startup_error(
+            error.code(),
+            error.to_string(),
+            false,
+            json!({ "stage": "database_open" }),
+        )),
+        None,
+    )
+}
+
+fn write_database_initialize_refusal(error: &DatabaseInitializeError) -> Result<()> {
+    if let Some(block) = error.authority_block() {
+        return write_authority_block(block);
+    }
+    write_startup_frame(
+        "failed",
+        None,
+        json!({ "kind": "confirmed_absent" }),
+        Some(structured_startup_error(
+            error.code(),
+            error.to_string(),
+            false,
+            json!({ "stage": "database_initialize" }),
+        )),
+        None,
+    )
+}
+
+fn write_database_migration_refusal(error: &DatabaseMigrationError) -> Result<()> {
+    let authority_state = match error.authority_block() {
+        Some(block) => json!({ "kind": "blocked", "reason": block }),
+        None => json!({ "kind": "migration_failed" }),
+    };
+    write_startup_frame(
+        "blocked",
+        Some("migration_failed"),
+        authority_state,
+        Some(structured_startup_error(
+            error.code(),
+            error.to_string(),
+            error.retryable(),
+            json!({ "stage": "database_migration" }),
+        )),
+        None,
+    )
 }
 
 fn request_runs_outside_main_queue(method: &str) -> bool {
@@ -412,6 +582,7 @@ fn request_runs_outside_main_queue(method: &str) -> bool {
             | "campTurns.cancel"
             | "agentRuns.cancel"
             | "runtime.pendingExecution.cancel"
+            | "runtime.subsystems.retry"
     )
 }
 
@@ -434,10 +605,7 @@ async fn response_for_request(core: &Core, request: &Request) -> Response {
         Err(error) => Response {
             id: request.id.clone(),
             result: None,
-            error: Some(ErrorBody {
-                code: "CORE_REQUEST_FAILED".into(),
-                message: format!("{error:#}"),
-            }),
+            error: Some(request_error_body(&error)),
         },
     }
 }
@@ -1483,6 +1651,12 @@ struct ClaudeInputAcceptanceTarget<'a> {
 
 struct Core {
     database: Mutex<Database>,
+    subsystems: CoreSubsystems,
+    subsystem_initialization: Mutex<SubsystemInitialization>,
+    startup_skill_execution_roots: Vec<String>,
+    startup_pending_camp_ids: Vec<String>,
+    builtin_tool_listener: Mutex<Option<LocalIpcListener>>,
+    builtin_tool_listener_notify: Notify,
     runtime_usage: Mutex<RuntimeUsageBuffer>,
     runtime_usage_flush: Mutex<()>,
     output: mpsc::UnboundedSender<String>,
@@ -1499,7 +1673,7 @@ struct Core {
     agent_run_cancellation_notify: Notify,
     pending_execution_recovery: Mutex<()>,
     skill_library: SkillLibraryService,
-    mcp_config: McpConfigStore,
+    mcp_config: Result<McpConfigStore>,
     mcp_projection: McpProjectionService,
     codex_cli: CodexCliRuntimeAdapter,
     opencode_cli: AcpCliRuntimeAdapter,
@@ -2929,64 +3103,69 @@ impl Core {
             }
 
             let known_agents = Self::known_agent_ids(&database).unwrap_or_default();
-            checks.push(match self.mcp_config.inspect(&known_agents) {
-                Ok(config) if !config.exists => DiagnosticCheck::new(
-                    "mcp-config",
-                    DiagnosticGroup::ManagedContent,
-                    "mcp_config",
-                    "MCP 配置",
-                    DiagnosticStatus::Ok,
-                    "mcp_config_not_initialized",
-                    "No MCP configuration exists and no external MCP is in use",
-                )
-                .with_observed_at(&checked_at)
-                .with_fact("serverCount", "0"),
-                Ok(config) if config.file_issue.is_some() => {
-                    let issue = config.file_issue.expect("checked above");
-                    DiagnosticCheck::new(
+            checks.push(
+                match self
+                    .mcp_config()
+                    .and_then(|config| config.inspect(&known_agents))
+                {
+                    Ok(config) if !config.exists => DiagnosticCheck::new(
+                        "mcp-config",
+                        DiagnosticGroup::ManagedContent,
+                        "mcp_config",
+                        "MCP 配置",
+                        DiagnosticStatus::Ok,
+                        "mcp_config_not_initialized",
+                        "No MCP configuration exists and no external MCP is in use",
+                    )
+                    .with_observed_at(&checked_at)
+                    .with_fact("serverCount", "0"),
+                    Ok(config) if config.file_issue.is_some() => {
+                        let issue = config.file_issue.expect("checked above");
+                        DiagnosticCheck::new(
+                            "mcp-config",
+                            DiagnosticGroup::ManagedContent,
+                            "mcp_config",
+                            "MCP 配置",
+                            DiagnosticStatus::Attention,
+                            issue.code,
+                            "MCP configuration is preserved but cannot be used",
+                        )
+                        .with_observed_at(&checked_at)
+                    }
+                    Ok(config) if config.permission_issue => DiagnosticCheck::new(
                         "mcp-config",
                         DiagnosticGroup::ManagedContent,
                         "mcp_config",
                         "MCP 配置",
                         DiagnosticStatus::Attention,
-                        issue.code,
-                        "MCP configuration is preserved but cannot be used",
+                        "mcp_config_permissions_too_broad",
+                        "MCP configuration permissions are broader than the safe 0600 mode",
                     )
                     .with_observed_at(&checked_at)
-                }
-                Ok(config) if config.permission_issue => DiagnosticCheck::new(
-                    "mcp-config",
-                    DiagnosticGroup::ManagedContent,
-                    "mcp_config",
-                    "MCP 配置",
-                    DiagnosticStatus::Attention,
-                    "mcp_config_permissions_too_broad",
-                    "MCP configuration permissions are broader than the safe 0600 mode",
-                )
-                .with_observed_at(&checked_at)
-                .with_fact("expectedMode", "0600"),
-                Ok(config) => DiagnosticCheck::new(
-                    "mcp-config",
-                    DiagnosticGroup::ManagedContent,
-                    "mcp_config",
-                    "MCP 配置",
-                    DiagnosticStatus::Ok,
-                    "mcp_config_ready",
-                    "MCP configuration is valid and uses safe file permissions",
-                )
-                .with_observed_at(&checked_at)
-                .with_fact("serverCount", config.servers.len().to_string()),
-                Err(_) => DiagnosticCheck::new(
-                    "mcp-config",
-                    DiagnosticGroup::ManagedContent,
-                    "mcp_config",
-                    "MCP 配置",
-                    DiagnosticStatus::Unknown,
-                    "mcp_config_inspection_failed",
-                    "MCP configuration could not be confirmed",
-                )
-                .with_observed_at(&checked_at),
-            });
+                    .with_fact("expectedMode", "0600"),
+                    Ok(config) => DiagnosticCheck::new(
+                        "mcp-config",
+                        DiagnosticGroup::ManagedContent,
+                        "mcp_config",
+                        "MCP 配置",
+                        DiagnosticStatus::Ok,
+                        "mcp_config_ready",
+                        "MCP configuration is valid and uses safe file permissions",
+                    )
+                    .with_observed_at(&checked_at)
+                    .with_fact("serverCount", config.servers.len().to_string()),
+                    Err(_) => DiagnosticCheck::new(
+                        "mcp-config",
+                        DiagnosticGroup::ManagedContent,
+                        "mcp_config",
+                        "MCP 配置",
+                        DiagnosticStatus::Unknown,
+                        "mcp_config_inspection_failed",
+                        "MCP configuration could not be confirmed",
+                    )
+                    .with_observed_at(&checked_at),
+                },
+            );
 
             match AgentProfileService::default().selected_runtime_counts(&database) {
                 Ok(counts) => {
@@ -3553,6 +3732,12 @@ impl Core {
 
     async fn recover_pending_execution_intents(&self) {
         if self.planned_shutdown.shutdown_started() {
+            return;
+        }
+        if ["skills", "mcp", "attachments", "builtin-tools"]
+            .iter()
+            .any(|id| self.subsystems.require(id).is_err())
+        {
             return;
         }
         let Ok(_recovery_guard) = self.pending_execution_recovery.try_lock() else {
@@ -4748,6 +4933,15 @@ impl Core {
     }
 
     async fn handle(&self, request: &Request) -> Result<Value> {
+        if request.method.starts_with("skills.") {
+            self.subsystems.require("skills")?;
+        }
+        if request.method.starts_with("mcp.") && request.method != "mcp.config.repairPermissions" {
+            self.subsystems.require("mcp")?;
+        }
+        if request.method.starts_with("camp.attachments.") {
+            self.subsystems.require("attachments")?;
+        }
         let _ = &request.params;
         match request.method.as_str() {
             "channels.credentials.get" => {
@@ -5411,6 +5605,11 @@ impl Core {
                 )?;
                 Ok(serde_json::to_value(execution.result)?)
             }
+            "runtime.subsystems.get" => Ok(serde_json::to_value(self.subsystems.snapshot())?),
+            "runtime.subsystems.retry" => {
+                self.initialize_optional_subsystems().await;
+                Ok(serde_json::to_value(self.subsystems.snapshot())?)
+            }
             "app.info" => Ok(json!({
                 "name": "Rovai-ai",
                 "version": env!("CARGO_PKG_VERSION"),
@@ -5829,20 +6028,24 @@ impl Core {
             "mcp.config.get" => {
                 let database = self.database.lock().await;
                 let known_agents = Self::known_agent_ids(&database)?;
-                Ok(serde_json::to_value(self.mcp_config.get(&known_agents)?)?)
+                Ok(serde_json::to_value(
+                    self.mcp_config()?.get(&known_agents)?,
+                )?)
             }
             "mcp.config.repairPermissions" => {
                 let database = self.database.lock().await;
                 let known_agents = Self::known_agent_ids(&database)?;
-                self.mcp_config.repair_permissions()?;
-                Ok(serde_json::to_value(self.mcp_config.get(&known_agents)?)?)
+                self.mcp_config()?.repair_permissions()?;
+                Ok(serde_json::to_value(
+                    self.mcp_config()?.get(&known_agents)?,
+                )?)
             }
             "mcp.servers.create" => {
                 let params: CreateMcpServerParams = serde_json::from_value(request.params.clone())?;
                 let database = self.database.lock().await;
                 let known_agents = Self::known_agent_ids(&database)?;
                 Ok(serde_json::to_value(
-                    self.mcp_config.create(params, &known_agents)?,
+                    self.mcp_config()?.create(params, &known_agents)?,
                 )?)
             }
             "mcp.servers.update" => {
@@ -5850,7 +6053,7 @@ impl Core {
                 let database = self.database.lock().await;
                 let known_agents = Self::known_agent_ids(&database)?;
                 Ok(serde_json::to_value(
-                    self.mcp_config.update(params, &known_agents)?,
+                    self.mcp_config()?.update(params, &known_agents)?,
                 )?)
             }
             "mcp.servers.setEnabled" => {
@@ -5859,7 +6062,7 @@ impl Core {
                 let database = self.database.lock().await;
                 let known_agents = Self::known_agent_ids(&database)?;
                 Ok(serde_json::to_value(
-                    self.mcp_config.set_enabled(params, &known_agents)?,
+                    self.mcp_config()?.set_enabled(params, &known_agents)?,
                 )?)
             }
             "mcp.assignments.set" => {
@@ -5868,7 +6071,7 @@ impl Core {
                 let database = self.database.lock().await;
                 let known_agents = Self::known_agent_ids(&database)?;
                 Ok(serde_json::to_value(
-                    self.mcp_config.set_assignment(params, &known_agents)?,
+                    self.mcp_config()?.set_assignment(params, &known_agents)?,
                 )?)
             }
             "mcp.servers.delete" => {
@@ -5876,14 +6079,14 @@ impl Core {
                 let database = self.database.lock().await;
                 let known_agents = Self::known_agent_ids(&database)?;
                 Ok(serde_json::to_value(
-                    self.mcp_config.delete(params, &known_agents)?,
+                    self.mcp_config()?.delete(params, &known_agents)?,
                 )?)
             }
             "mcp.import.scan" => {
                 let database = self.database.lock().await;
                 let known_agents = Self::known_agent_ids(&database)?;
                 Ok(serde_json::to_value(
-                    McpImportScanner.scan(&self.mcp_config, &known_agents)?,
+                    McpImportScanner.scan(self.mcp_config()?, &known_agents)?,
                 )?)
             }
             "mcp.import.commit" => {
@@ -5891,7 +6094,7 @@ impl Core {
                 let database = self.database.lock().await;
                 let known_agents = Self::known_agent_ids(&database)?;
                 Ok(serde_json::to_value(
-                    self.mcp_config.commit_import(params, &known_agents)?,
+                    self.mcp_config()?.commit_import(params, &known_agents)?,
                 )?)
             }
             "skills.import.inspect" => {
@@ -6854,6 +7057,16 @@ impl Core {
                 .context("Desktop Attachment target verification task failed")??;
                 Ok(serde_json::to_value(target)?)
             }
+            "filePreview.resolveSource" => {
+                let params: ResolveFilePreviewSourceParams =
+                    serde_json::from_value(request.params.clone())?;
+                let database = self.database.lock().await;
+                Ok(serde_json::to_value(resolve_file_preview_source(
+                    &database,
+                    &ManagedBlobStore::new(&self.data_dir),
+                    params,
+                )?)?)
+            }
             "camp.messages.send" => {
                 let params: SendCampMessageParams = serde_json::from_value(request.params.clone())?;
                 self.send_test_camp_message_request(params).await
@@ -7657,6 +7870,15 @@ impl Core {
         mut candidate: rovai_core::runtime::QueuedAgentRunCandidate,
         output: mpsc::UnboundedSender<String>,
     ) {
+        // Keep queued work intact while dependencies initialize or need repair.
+        // In particular, do not classify it as a failed provider dispatch.
+        let runtime_kind = candidate
+            .frozen_runtime()
+            .ok()
+            .map(|runtime| runtime.adapter_kind);
+        if runtime_kind.is_some_and(|kind| self.require_execution_subsystems(kind).is_err()) {
+            return;
+        }
         let Some(launch_permit) = self.planned_shutdown.enter_launch().await else {
             return;
         };
@@ -8984,6 +9206,7 @@ impl Core {
         &self,
         execution: &AgentRunExecution,
     ) -> Result<Option<PreparedSkillExposure>> {
+        self.subsystems.require("skills")?;
         loop {
             let result = {
                 let mut database = self.database.lock().await;
@@ -9012,12 +9235,13 @@ impl Core {
         &self,
         execution: &AgentRunExecution,
     ) -> Result<PreparedMcpProjection> {
+        self.subsystems.require("mcp")?;
         let execution_root = PathBuf::from(&execution.workspace.execution_root);
         let mut projection = {
             let database = self.database.lock().await;
             self.mcp_projection.prepare(
                 &database,
-                &self.mcp_config,
+                self.mcp_config()?,
                 &McpProjectionRequest {
                     agent_run_id: &execution.agent_run_id,
                     execution_epoch: execution.execution_epoch,
@@ -9845,6 +10069,7 @@ impl Core {
         camp_id: &str,
         workspace: &Path,
     ) -> Result<CampAttachmentRuntimeAuthorization> {
+        self.subsystems.require("attachments")?;
         let database = self.database.lock().await;
         self.attachment_views
             .camp_root_runtime_authorization(&database, camp_id, Some(workspace))
@@ -9858,6 +10083,7 @@ impl Core {
         output: &mpsc::UnboundedSender<String>,
         launch_permit: &mut ExecutionLaunchPermit,
     ) -> Result<()> {
+        self.require_execution_subsystems(execution.runtime.adapter_kind)?;
         attachment_admission.prove(&execution.camp_id)?;
         let Some(skill_exposure) = self
             .prepare_agent_run_skill_exposure(execution)
@@ -12161,185 +12387,243 @@ async fn run_core(
 ) -> Result<()> {
     let data_dir = parse_data_dir()?;
     let skill_library_root = parse_skill_library_root()?;
-    let _data_dir_lock = CoreDataDirLock::acquire(&data_dir)?;
+    let data_dir_lease = match CoreDataDirLease::try_acquire(&data_dir) {
+        Ok(CoreDataDirLeaseAcquisition::Acquired(lease)) => lease,
+        Ok(CoreDataDirLeaseAcquisition::OwnedByActiveCore { data_dir, owner }) => {
+            write_startup_frame(
+                "blocked",
+                Some("lease"),
+                json!({
+                    "kind": "owned_by_active_core",
+                    "dataDir": data_dir,
+                    "owner": owner,
+                }),
+                None,
+                None,
+            )?;
+            return Ok(());
+        }
+        Err(error) => {
+            write_startup_frame(
+                "failed",
+                Some("lease"),
+                json!({ "kind": "unknown" }),
+                Some(structured_startup_error(
+                    "core_data_dir_lease_infrastructure_failed",
+                    error.to_string(),
+                    false,
+                    json!({ "stage": error.stage }),
+                )),
+                None,
+            )?;
+            return Ok(());
+        }
+    };
+    write_startup_frame(
+        "phase",
+        Some("assessing_authority"),
+        json!({ "kind": "assessing" }),
+        None,
+        None,
+    )?;
+    let admission = match DatabaseAdmission::assess(&data_dir_lease) {
+        Ok(AdmissionAssessment::Blocked(block)) => {
+            write_authority_block(&block)?;
+            return Ok(());
+        }
+        Ok(admission) => admission,
+        Err(error) => {
+            write_startup_frame(
+                "failed",
+                Some("assessing_authority"),
+                json!({ "kind": "unknown" }),
+                Some(structured_startup_error(
+                    &error.code,
+                    error.message,
+                    false,
+                    json!({ "stage": "database_admission" }),
+                )),
+                None,
+            )?;
+            return Ok(());
+        }
+    };
     #[cfg(target_os = "macos")]
     configure_user_automation_denial_root(&data_dir.join("automation-v1"))?;
     let runtime_camp_files_root = parse_runtime_camp_files_root()?;
-    let attachment_views = CampAttachmentViewStore::admit(
+    let attachment_views = match CampAttachmentViewStore::admit(
         &runtime_camp_files_root,
         &data_dir,
         std::slice::from_ref(&skill_library_root),
-    )?;
+    ) {
+        Ok(store) => store,
+        Err(error) => {
+            write_startup_frame(
+                "failed",
+                Some("preparing_runtime_storage"),
+                json!({ "kind": "admitted" }),
+                Some(structured_startup_error(
+                    "runtime_camp_files_root_admission_failed",
+                    format!("{error:#}"),
+                    false,
+                    json!({ "stage": "runtime_storage" }),
+                )),
+                None,
+            )?;
+            return Ok(());
+        }
+    };
     let mcp_config_path = parse_mcp_config_path()?;
     let database_started_at = Instant::now();
-    let mut database = Database::open_with_runtime_camp_files_root(
-        &data_dir,
-        attachment_views.root(),
-        attachment_views.root_identity_digest(),
-    )?;
+    let (mut database, authority_origin) = match admission {
+        AdmissionAssessment::AdmittedExisting(ticket) => {
+            write_startup_frame(
+                "phase",
+                Some("opening_authority"),
+                json!({ "kind": "admitted" }),
+                None,
+                None,
+            )?;
+            match Database::open_admitted_with_runtime_camp_files_root(
+                *ticket,
+                attachment_views.root(),
+                attachment_views.root_identity_digest(),
+            ) {
+                Ok(database) => (database, "existing"),
+                Err(error) => {
+                    write_database_open_refusal(&error)?;
+                    return Ok(());
+                }
+            }
+        }
+        AdmissionAssessment::Initializable(ticket) => {
+            write_startup_frame(
+                "phase",
+                Some("initializing_authority"),
+                json!({ "kind": "confirmed_absent" }),
+                None,
+                None,
+            )?;
+            match Database::initialize_new_with_runtime_camp_files_root(
+                *ticket,
+                attachment_views.root(),
+                attachment_views.root_identity_digest(),
+            ) {
+                Ok(database) => (database, "initialized"),
+                Err(error) => {
+                    write_database_initialize_refusal(&error)?;
+                    return Ok(());
+                }
+            }
+        }
+        AdmissionAssessment::RequiresMigration(ticket) => {
+            write_startup_frame(
+                "phase",
+                Some("migrating_authority"),
+                json!({ "kind": "migration_required" }),
+                None,
+                None,
+            )?;
+            let migration = AuthorityMigrationRunner::run_with_progress(
+                *ticket,
+                attachment_views.root(),
+                attachment_views.root_identity_digest(),
+                |progress: AuthorityMigrationProgress| {
+                    let _ = write_startup_frame(
+                        "phase",
+                        Some("migrating_authority"),
+                        json!({ "kind": "migration_required" }),
+                        None,
+                        serde_json::to_value(progress).ok(),
+                    );
+                },
+            );
+            match migration {
+                Ok(database) => (database, "migrated"),
+                Err(error) => {
+                    write_database_migration_refusal(&error)?;
+                    return Ok(());
+                }
+            }
+        }
+        AdmissionAssessment::Blocked(_) => {
+            unreachable!("blocked admission returns before Runtime storage side effects")
+        }
+    };
     eprintln!(
         "[startup] stage=database_ready duration_ms={} elapsed_ms={}",
         database_started_at.elapsed().as_millis(),
         startup_started_at.elapsed().as_millis(),
     );
-    let controlled_shutdown_recovery = ExecutionRuntimeService::default()
-        .recover_interrupted_controlled_shutdowns(&mut database)?;
-    if controlled_shutdown_recovery.cycles_settled != 0
-        || !controlled_shutdown_recovery.fenced_agent_runs.is_empty()
-    {
-        eprintln!(
-            "controlled shutdown startup recovery settled {} cycle(s) and fenced {} AgentRun(s)",
-            controlled_shutdown_recovery.cycles_settled,
-            controlled_shutdown_recovery.fenced_agent_runs.len(),
-        );
-    }
-    SkillProjectionReconciler.synchronize_removed_execution_roots(
-        &mut database,
-        &parse_removed_skill_project_roots()?,
-    )?;
+    // These recoveries fence durable execution/input state. Unlike optional
+    // filesystem maintenance, their failure cannot expose normal execution.
     let compaction_detector_policies =
         DesiredCompactionDetectorPolicies::from_process_environment();
-    for diagnostic in &compaction_detector_policies.diagnostics {
-        eprintln!("Compaction detector policy diagnostic: {diagnostic}");
-    }
-    match reconcile_detector_policies(&mut database, &compaction_detector_policies) {
-        Ok(reconciliation) if !reconciliation.changed_adapters.is_empty() => eprintln!(
-            "Compaction detector policy reconciled for {} Runtime(s); {} stored Native Binding baseline requirement(s) created",
-            reconciliation.changed_adapters.len(),
-            reconciliation.baseline_requirements_created,
-        ),
-        Ok(_) => {}
-        Err(error) => eprintln!(
-            "Compaction detector policy reconciliation is unavailable; AgentRun admission remains enabled: {error:#}"
-        ),
-    }
-    match reconcile_compaction_observation_outbox(&mut database, &data_dir.join("runtime"), None) {
-        Ok(reconciliation)
-            if reconciliation.applied > 0
-                || reconciliation.duplicates > 0
-                || reconciliation.discarded > 0 =>
+    let recovery = (|| -> Result<_> {
+        let controlled = ExecutionRuntimeService::default()
+            .recover_interrupted_controlled_shutdowns(&mut database)?;
+        // Preserve the existing best-effort observer semantics and ordering:
+        // replay old signals before fencing old leases, and never repeat the
+        // process-start fence after new Runtime observers can be registered.
+        for diagnostic in &compaction_detector_policies.diagnostics {
+            eprintln!("Compaction detector policy diagnostic: {diagnostic}");
+        }
+        if let Err(error) =
+            reconcile_detector_policies(&mut database, &compaction_detector_policies)
         {
-            eprintln!(
-                "Compaction observation outbox reconciled: {} applied, {} duplicate, {} discarded, {} retained",
-                reconciliation.applied,
-                reconciliation.duplicates,
-                reconciliation.discarded,
-                reconciliation.retained,
-            );
+            eprintln!("Compaction policy reconciliation unavailable: {error:#}");
         }
-        Ok(_) => {}
-        Err(error) => eprintln!(
-            "Compaction observation outbox reconciliation is unavailable; AgentRun admission remains enabled: {error:#}"
-        ),
-    }
-    if let Err(error) = fence_active_observers_on_core_start(&mut database) {
-        eprintln!(
-            "Stale Compaction Observer fencing is unavailable; AgentRun admission remains enabled: {error:#}"
-        );
-    }
-    let attachment_store = CampAttachmentStore::new(&data_dir);
-    attachment_store.cleanup_expired(&mut database)?;
-    let recovered_managed_ingests =
-        ManagedAttachmentStore::for_database(&database).reconcile(&mut database)?;
-    if recovered_managed_ingests != 0 {
-        eprintln!(
-            "Managed Attachment startup recovery reconciled {recovered_managed_ingests} ingest intent(s)"
-        );
-    }
-    let discarded_pending_camps =
-        CollaborationService::default().discard_empty_pending_camps_on_startup(&mut database)?;
-    for camp_id in &discarded_pending_camps {
-        attachment_store.remove_camp(camp_id)?;
-    }
-    if !discarded_pending_camps.is_empty() {
-        eprintln!(
-            "Pending Camp startup cleanup discarded {} empty draft(s)",
-            discarded_pending_camps.len()
-        );
-    }
-    attachment_views
-        .reconcile(&mut database, &attachment_store)
-        .context("failed to reconcile Camp Published Attachment Views")?;
-    let search_summary = runtime_search_environment.summary();
-    database.record_runtime_search_environment_generation(
-        search_summary.generation,
-        &search_summary.created_at,
-    )?;
-    let skill_library = SkillLibraryService::new(skill_library_root)?;
-    let mcp_config = McpConfigStore::new(match mcp_config_path {
-        Some(path) => path,
-        None => McpConfigStore::default_path()?,
-    });
-    match mcp_config.migrate_pre_release_config()? {
-        McpConfigMigrationOutcome::Migrated => {
-            eprintln!("Pre-release MCP config migrated to the empty-default schema");
+        if let Err(error) =
+            reconcile_compaction_observation_outbox(&mut database, &data_dir.join("runtime"), None)
+        {
+            eprintln!("Compaction observation outbox reconciliation unavailable: {error:#}");
         }
-        McpConfigMigrationOutcome::ResetInvalid => {
-            eprintln!("Invalid pre-release MCP config removed; the Library will initialize empty");
+        if let Err(error) = fence_active_observers_on_core_start(&mut database) {
+            eprintln!("Stale Compaction Observer fencing unavailable: {error:#}");
         }
-        McpConfigMigrationOutcome::Missing | McpConfigMigrationOutcome::Unchanged => {}
-    }
-    mcp_config.migrate_agent_ids(&database.agent_id_aliases()?)?;
-    let mcp_projection = McpProjectionService::new(&data_dir);
-    skill_library.cleanup_expired_staging()?;
-    let bundled_skills_started_at = Instant::now();
-    let bundled_skills = skill_library.install_bundled_skills(&mut database)?;
-    eprintln!(
-        "[startup] stage=bundled_skills_ready duration_ms={} elapsed_ms={} fast_path_count={} materialized_count={} repaired_count={} changed={}",
-        bundled_skills_started_at.elapsed().as_millis(),
-        startup_started_at.elapsed().as_millis(),
-        bundled_skills.fast_path_count,
-        bundled_skills.materialized_count,
-        bundled_skills.repaired_count,
-        bundled_skills.changed,
-    );
-    if bundled_skills.changed {
-        SkillProjectionReconciler.mark_observed_roots_dirty(&mut database, false)?;
-    }
-    for execution_root in controlled_shutdown_recovery
+        database.prepare_v2_recovery()?;
+        mark_unstarted_deliveries_interrupted_before_dispatch(&mut database)?;
+        Ok(controlled)
+    })();
+    let controlled_shutdown_recovery = match recovery {
+        Ok(recovery) => recovery,
+        Err(error) => {
+            write_startup_frame(
+                "failed",
+                Some("recovering_authority"),
+                json!({ "kind": "admitted" }),
+                Some(structured_startup_error(
+                    "authority_recovery_failed",
+                    format!("{error:#}"),
+                    true,
+                    json!({ "stage": "authority_recovery" }),
+                )),
+                None,
+            )?;
+            return Ok(());
+        }
+    };
+    // Freeze candidate IDs before exposing RPC, then recheck eligibility at
+    // deletion time. A failed optional snapshot skips cleanup for this boot;
+    // neither fail authority readiness nor rescan newly created Camps on retry.
+    let startup_pending_camp_ids = CollaborationService::default()
+        .snapshot_pending_camps_for_startup_cleanup(&database)
+        .unwrap_or_else(|error| {
+            eprintln!("Startup pending Camp cleanup skipped: {error:#}");
+            Vec::new()
+        });
+    let startup_skill_execution_roots = controlled_shutdown_recovery
         .fenced_agent_runs
         .iter()
-        .map(|run| run.execution_root.as_str())
+        .map(|run| run.execution_root.clone())
         .collect::<BTreeSet<_>>()
-    {
-        SkillProjectionReconciler.reconcile_after_run_terminal(
-            &mut database,
-            &skill_library,
-            Path::new(execution_root),
-        )?;
-    }
-    skill_library.cleanup_orphan_revisions(&database)?;
-    mcp_projection.cleanup_terminal_and_orphaned(&database)?;
-    let v2_recovery = database.prepare_v2_recovery()?;
-    let interrupted_deliveries =
-        mark_unstarted_deliveries_interrupted_before_dispatch(&mut database)?;
-    if interrupted_deliveries != 0 {
-        eprintln!(
-            "Message Delivery startup recovery marked {interrupted_deliveries} unstarted Delivery rows as interrupted_before_dispatch"
-        );
-    }
-    if v2_recovery.runs_waiting_for_recovery != 0
-        || v2_recovery.accepted_input_recovery_blockers_created != 0
-        || v2_recovery.actions_returned_to_prepared != 0
-        || v2_recovery.actions_marked_unknown != 0
-        || v2_recovery.intercepted_actions_failed_closed != 0
-        || v2_recovery.action_approvals_cancelled != 0
-        || v2_recovery.deliveries_returned_to_pending != 0
-        || v2_recovery.authorization_deliveries_failed_closed != 0
-        || v2_recovery.input_deliveries_marked_unknown != 0
-    {
-        eprintln!(
-            "v0.02 recovery prepared: {}",
-            serde_json::to_string(&v2_recovery)?
-        );
-    }
-    let recovered_run_file_changes = AgentRunFileChangeProjector
-        .recover_terminal_runs(&mut database, &ManagedBlobStore::new(&data_dir))?;
-    if recovered_run_file_changes != 0 {
-        eprintln!(
-            "AgentRun file-change startup recovery projected {recovered_run_file_changes} terminal Runs"
-        );
-    }
+        .into_iter()
+        .collect();
+    let skill_library = SkillLibraryService::deferred(skill_library_root);
+    let mcp_config = mcp_config_path
+        .map_or_else(McpConfigStore::default_path, Ok)
+        .map(McpConfigStore::new);
+    let mcp_projection = McpProjectionService::new(&data_dir);
     let (codex_tx, codex_rx) = mpsc::unbounded_channel();
     let (acp_tx, acp_rx) = mpsc::unbounded_channel();
     let (output_tx, output_rx) = mpsc::unbounded_channel();
@@ -12348,8 +12632,8 @@ async fn run_core(
     let (attachment_projection_tx, attachment_projection_rx) = mpsc::unbounded_channel();
     let output_handle = tokio::spawn(write_output(output_rx, output_control_rx));
     let (event_shutdown_tx, event_shutdown_rx) = oneshot::channel();
-    let antigravity_app = AntigravityAppRuntimeAdapter::new(&data_dir)?;
-    let claude_code_cli = ClaudeCodeCliRuntimeAdapter::new(&data_dir)?;
+    let antigravity_app = AntigravityAppRuntimeAdapter::deferred(&data_dir);
+    let claude_code_cli = ClaudeCodeCliRuntimeAdapter::deferred(&data_dir);
     let builtin_tool_leases = Arc::new(BuiltinToolLeaseRegistry::default());
     let runtime_fleet = Arc::new(AgentRuntimeFleetManager::new_with_builtin_tools(
         AgentRuntimeFleetConfig::default(),
@@ -12359,6 +12643,12 @@ async fn run_core(
     let planned_shutdown = PlannedShutdownCoordinator::new(uuid::Uuid::new_v4().to_string());
     let core = Arc::new(Core {
         database: Mutex::new(database),
+        subsystems: CoreSubsystems::new(),
+        subsystem_initialization: Mutex::new(SubsystemInitialization::default()),
+        startup_skill_execution_roots,
+        startup_pending_camp_ids,
+        builtin_tool_listener: Mutex::new(None),
+        builtin_tool_listener_notify: Notify::new(),
         runtime_usage: Mutex::new(RuntimeUsageBuffer::default()),
         runtime_usage_flush: Mutex::new(()),
         output: output_tx.clone(),
@@ -12388,7 +12678,7 @@ async fn run_core(
         mcp_config,
         mcp_projection,
         codex_cli: CodexCliRuntimeAdapter::new(codex_tx, runtime_fleet.clone()),
-        opencode_cli: AcpCliRuntimeAdapter::new(
+        opencode_cli: AcpCliRuntimeAdapter::deferred(
             rovai_core::agent_profile::AdapterKind::OpencodeCli,
             acp_tx.clone(),
             data_dir.join("runtime/opencode"),
@@ -12396,8 +12686,8 @@ async fn run_core(
             compaction_detector_policies
                 .policy_for(AdapterKind::OpencodeCli)
                 .unwrap_or(CompactionDetectorPolicy::Disabled),
-        )?,
-        copilot_cli: AcpCliRuntimeAdapter::new(
+        ),
+        copilot_cli: AcpCliRuntimeAdapter::deferred(
             rovai_core::agent_profile::AdapterKind::CopilotCli,
             acp_tx.clone(),
             data_dir.join("runtime/copilot"),
@@ -12405,8 +12695,8 @@ async fn run_core(
             compaction_detector_policies
                 .policy_for(AdapterKind::CopilotCli)
                 .unwrap_or(CompactionDetectorPolicy::Disabled),
-        )?,
-        kiro_cli: AcpCliRuntimeAdapter::new(
+        ),
+        kiro_cli: AcpCliRuntimeAdapter::deferred(
             rovai_core::agent_profile::AdapterKind::KiroCli,
             acp_tx.clone(),
             data_dir.join("runtime/kiro"),
@@ -12414,8 +12704,8 @@ async fn run_core(
             compaction_detector_policies
                 .policy_for(AdapterKind::KiroCli)
                 .unwrap_or(CompactionDetectorPolicy::Disabled),
-        )?,
-        qoder_cli: AcpCliRuntimeAdapter::new(
+        ),
+        qoder_cli: AcpCliRuntimeAdapter::deferred(
             rovai_core::agent_profile::AdapterKind::QoderCli,
             acp_tx.clone(),
             data_dir.join("runtime/qoder"),
@@ -12423,8 +12713,8 @@ async fn run_core(
             compaction_detector_policies
                 .policy_for(AdapterKind::QoderCli)
                 .unwrap_or(CompactionDetectorPolicy::Disabled),
-        )?,
-        codebuddy_cli: AcpCliRuntimeAdapter::new(
+        ),
+        codebuddy_cli: AcpCliRuntimeAdapter::deferred(
             rovai_core::agent_profile::AdapterKind::CodebuddyCli,
             acp_tx.clone(),
             data_dir.join("runtime/codebuddy"),
@@ -12432,8 +12722,8 @@ async fn run_core(
             compaction_detector_policies
                 .policy_for(AdapterKind::CodebuddyCli)
                 .unwrap_or(CompactionDetectorPolicy::Disabled),
-        )?,
-        qwen_code: AcpCliRuntimeAdapter::new(
+        ),
+        qwen_code: AcpCliRuntimeAdapter::deferred(
             rovai_core::agent_profile::AdapterKind::QwenCode,
             acp_tx.clone(),
             data_dir.join("runtime/qwen"),
@@ -12441,22 +12731,22 @@ async fn run_core(
             compaction_detector_policies
                 .policy_for(AdapterKind::QwenCode)
                 .unwrap_or(CompactionDetectorPolicy::Disabled),
-        )?,
-        trae_cn_cli: AcpCliRuntimeAdapter::new(
+        ),
+        trae_cn_cli: AcpCliRuntimeAdapter::deferred(
             rovai_core::agent_profile::AdapterKind::TraeCnCli,
             acp_tx.clone(),
             data_dir.join("runtime/trae-cn"),
             runtime_fleet.clone(),
             CompactionDetectorPolicy::Disabled,
-        )?,
-        cursor_agent: AcpCliRuntimeAdapter::new(
+        ),
+        cursor_agent: AcpCliRuntimeAdapter::deferred(
             rovai_core::agent_profile::AdapterKind::CursorAgent,
             acp_tx.clone(),
             data_dir.join("runtime/cursor"),
             runtime_fleet.clone(),
             CompactionDetectorPolicy::Disabled,
-        )?,
-        kimi_code_cli: AcpCliRuntimeAdapter::new(
+        ),
+        kimi_code_cli: AcpCliRuntimeAdapter::deferred(
             rovai_core::agent_profile::AdapterKind::KimiCodeCli,
             acp_tx.clone(),
             data_dir.join("runtime/kimi-code"),
@@ -12464,8 +12754,8 @@ async fn run_core(
             compaction_detector_policies
                 .policy_for(AdapterKind::KimiCodeCli)
                 .unwrap_or(CompactionDetectorPolicy::Disabled),
-        )?,
-        grok_build: AcpCliRuntimeAdapter::new(
+        ),
+        grok_build: AcpCliRuntimeAdapter::deferred(
             rovai_core::agent_profile::AdapterKind::GrokBuild,
             acp_tx,
             data_dir.join("runtime/grok-build"),
@@ -12473,7 +12763,7 @@ async fn run_core(
             compaction_detector_policies
                 .policy_for(AdapterKind::GrokBuild)
                 .unwrap_or(CompactionDetectorPolicy::Disabled),
-        )?,
+        ),
         claude_code_cli,
         antigravity_app,
         planned_shutdown,
@@ -12490,13 +12780,6 @@ async fn run_core(
         attachment_projection_rx,
         attachment_projection_shutdown_rx,
     ));
-    let startup_publication_camps = {
-        let database = core.database.lock().await;
-        unresolved_publication_camp_ids(&database)?
-    };
-    for camp_id in startup_publication_camps {
-        core.request_camp_attachment_projection(&camp_id);
-    }
     let (fleet_sweeper_shutdown_tx, fleet_sweeper_shutdown_rx) = oneshot::channel();
     let mut fleet_sweeper_handle = tokio::spawn(
         core.runtime_fleet
@@ -12504,11 +12787,8 @@ async fn run_core(
             .run_idle_sweeper(fleet_sweeper_shutdown_rx),
     );
     let (builtin_tool_shutdown_tx, builtin_tool_shutdown_rx) = oneshot::channel();
-    let builtin_tool_endpoint = builtin_tool_endpoint();
-    let builtin_tool_listener = LocalIpcListener::bind(&builtin_tool_endpoint)?;
     let mut builtin_tool_handle = tokio::spawn(serve_builtin_tool_ipc(
         core.clone(),
-        builtin_tool_listener,
         builtin_tool_shutdown_rx,
     ));
     let mut event_handle = tokio::spawn(process_codex_events(
@@ -12542,6 +12822,15 @@ async fn run_core(
         runtime_usage_shutdown_rx,
     ));
 
+    output_tx
+        .send(serde_json::to_string(&json!({
+            "kind": "core_startup",
+            "schemaVersion": 1,
+            "status": "ready",
+            "authorityState": { "kind": "current", "origin": authority_origin },
+            "subsystems": core.subsystems.snapshot(),
+        }))?)
+        .map_err(|_| anyhow::anyhow!("failed to publish structured Core ready frame"))?;
     eprintln!(
         "[startup] stage=core_ready elapsed_ms={}",
         startup_started_at.elapsed().as_millis(),
@@ -12549,6 +12838,9 @@ async fn run_core(
     eprintln!("rovai-core {} ready", env!("CARGO_PKG_VERSION"));
     let runtime_discovery_core = core.clone();
     let mut runtime_discovery_handle = tokio::spawn(async move {
+        runtime_discovery_core
+            .initialize_optional_subsystems()
+            .await;
         runtime_discovery_core.run_runtime_discovery().await;
         runtime_discovery_core
             .recover_pending_execution_intents()
@@ -12601,8 +12893,11 @@ async fn run_core(
                             id: request.id,
                             result: None,
                             error: Some(ErrorBody {
+                                kind: "domain_rejection",
                                 code: "CORE_SHUTDOWN_INVALID".to_string(),
                                 message: format!("{error:#}"),
+                                retryable: false,
+                                details: json!({}),
                             }),
                         },
                     )?;
@@ -17247,43 +17542,53 @@ async fn write_output(
     Ok(())
 }
 
-async fn serve_builtin_tool_ipc(
-    core: Arc<Core>,
-    mut listener: LocalIpcListener,
-    mut shutdown: oneshot::Receiver<()>,
-) {
+async fn serve_builtin_tool_ipc(core: Arc<Core>, mut shutdown: oneshot::Receiver<()>) {
     let mut connections = tokio::task::JoinSet::new();
     loop {
-        let accepted = tokio::select! {
-            accepted = listener.accept() => accepted,
-            _ = &mut shutdown => break,
-            completed = connections.join_next(), if !connections.is_empty() => {
-                if let Some(Err(error)) = completed {
-                    eprintln!("Built-in Tool IPC worker failed: {error}");
-                }
-                continue;
-            },
-        };
-        let stream = match accepted {
-            Ok(stream) => stream,
-            Err(error) => {
-                eprintln!("Built-in Tool IPC accept failed: {error:#}");
-                if error.closes_admission() {
-                    break;
-                }
-                continue;
+        // A failed bind disables execution, not the authority/RPC server. The
+        // initializer publishes a new listener after an explicit feature retry.
+        let mut listener = loop {
+            if let Some(listener) = core.builtin_tool_listener.lock().await.take() {
+                break listener;
+            }
+            tokio::select! {
+                _ = core.builtin_tool_listener_notify.notified() => {},
+                _ = &mut shutdown => return,
             }
         };
-        let core = core.clone();
-        connections.spawn(async move {
-            if let Err(error) = handle_builtin_tool_connection(core, stream).await {
-                eprintln!("Built-in Tool IPC request failed: {error:#}");
-            }
-        });
+        let admission_error = loop {
+            let accepted = tokio::select! {
+                accepted = listener.accept() => accepted,
+                _ = &mut shutdown => return,
+                completed = connections.join_next(), if !connections.is_empty() => {
+                    if let Some(Err(error)) = completed {
+                        eprintln!("Built-in Tool IPC worker failed: {error}");
+                    }
+                    continue;
+                },
+            };
+            let stream = match accepted {
+                Ok(stream) => stream,
+                Err(error) => {
+                    eprintln!("Built-in Tool IPC accept failed: {error:#}");
+                    if error.closes_admission() {
+                        break error;
+                    }
+                    continue;
+                }
+            };
+            let core = core.clone();
+            connections.spawn(async move {
+                if let Err(error) = handle_builtin_tool_connection(core, stream).await {
+                    eprintln!("Built-in Tool IPC request failed: {error:#}");
+                }
+            });
+        };
+        drop(listener);
+        connections.abort_all();
+        while connections.try_join_next().is_some() {}
+        core.finish_subsystem("builtin-tools", Err(admission_error.into()));
     }
-    drop(listener);
-    connections.abort_all();
-    while connections.try_join_next().is_some() {}
 }
 
 async fn handle_builtin_tool_connection(core: Arc<Core>, stream: LocalIpcStream) -> Result<()> {
@@ -17892,6 +18197,12 @@ mod tests {
 
         Ok(Core {
             database: Mutex::new(database),
+            subsystems: CoreSubsystems::ready_for_test(),
+            subsystem_initialization: Mutex::new(SubsystemInitialization::default()),
+            startup_skill_execution_roots: Vec::new(),
+            startup_pending_camp_ids: Vec::new(),
+            builtin_tool_listener: Mutex::new(None),
+            builtin_tool_listener_notify: Notify::new(),
             runtime_usage: Mutex::new(RuntimeUsageBuffer::default()),
             runtime_usage_flush: Mutex::new(()),
             output,
@@ -17907,7 +18218,7 @@ mod tests {
             agent_run_cancellation_notify: Notify::new(),
             pending_execution_recovery: Mutex::new(()),
             skill_library,
-            mcp_config,
+            mcp_config: Ok(mcp_config),
             mcp_projection,
             codex_cli: CodexCliRuntimeAdapter::new(codex_tx, runtime_fleet.clone()),
             opencode_cli: AcpCliRuntimeAdapter::new(

@@ -17,6 +17,8 @@ on:
       - "clippy.toml"
       - ".clippy.toml"
       - ".github/workflows/rust.yml"
+      - "scripts/lib/core-startup-availability.test.mjs"
+      - "scripts/lib/runtime-camp-files-root.mjs"
 permissions:
   contents: read
 
@@ -67,6 +69,16 @@ jobs:
 
       - name: Run fast Rust tests
         run: cargo test -p rovai-core --lib
+
+      - name: Set up Node.js for real Core startup regression
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 26
+
+      - name: Verify authority survives optional startup failures
+        run: |
+          cargo build -p rovai-core --bins
+          node --test scripts/lib/core-startup-availability.test.mjs
 
   db-smoke:
     name: Rust database smoke
@@ -128,6 +140,12 @@ jobs:
           cargo test -p rovai-core --all-targets
           --target x86_64-pc-windows-msvc
           windows_data_root
+
+      - name: Exercise Core-independent Windows bootstrap storage
+        run: >-
+          cargo test -p rovai-core --all-targets
+          --target x86_64-pc-windows-msvc
+          windows_bootstrap_root
 
       - name: Exercise Windows attachment traversal
         run: >-

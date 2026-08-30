@@ -132,4 +132,4 @@ Migration 124 只接受完整 `Data Contract v1.36 / projection schema 77` 且 M
 - [飞书渠道架构](../architecture/feishu-channel.md)
 - [钉钉渠道架构](../architecture/dingtalk-channel.md)
 - [渠道设置](../ui/components/channel-settings.md)
-- [v1.31 决策记录](../versions/v1.31/decisions.md#v1-31-d04)
+- [v1.33 决策记录](../versions/v1.33/decisions.md#v1-33-d04)

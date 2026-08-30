@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { safeMarkdownHasRenderableContent } from './safe-markdown-model'
+import { projectMessageFileReferences, safeMarkdownHasRenderableContent } from './safe-markdown-model'
 
 describe('safe Markdown presentation admission', () => {
   it.each([
@@ -14,5 +14,48 @@ describe('safe Markdown presentation admission', () => {
     ['a visible task control', '- [ ]', true]
   ])('classifies %s', (_label, source, expected) => {
     expect(safeMarkdownHasRenderableContent(source)).toBe(expected)
+  })
+})
+
+describe('message file-reference projection', () => {
+  it('uses source offsets, including Unicode and Markdown escapes before the link', () => {
+    const source = '📝 **原文** &amp; \\* [计划](docs/plan.md)；代码 `src/app.ts:20`。'
+    const references = projectMessageFileReferences(source)
+    expect(references.map((reference) => source.slice(reference.start, reference.end))).toEqual([
+      '[计划](docs/plan.md)', '`src/app.ts:20`'
+    ])
+    expect(references.map(({ rawReference, label, inlineCode }) => ({ rawReference, label, inlineCode }))).toEqual([
+      { rawReference: 'docs/plan.md', label: '计划', inlineCode: false },
+      { rawReference: 'src/app.ts:20', label: 'src/app.ts:20', inlineCode: true }
+    ])
+  })
+
+  it('preserves URL, image, HTML and fenced/indented code boundaries', () => {
+    const source = [
+      '![图片](src/image.png)',
+      '[网站](https://example.com/src/app.ts)',
+      '<https://example.com/src/app.ts>',
+      '',
+      '<div data-path="src/private.ts">src/hidden.ts</div>',
+      '',
+      '    src/indented.ts',
+      '',
+      '```ts',
+      'src/fenced.ts',
+      '```',
+      '',
+      '外部 src/visible.ts:20'
+    ].join('\n')
+    expect(projectMessageFileReferences(source).map((reference) => reference.rawReference)).toEqual(['src/visible.ts:20'])
+  })
+
+  it('does not interpret ordinary prose, unsafe URLs, inline code or incomplete code fences as files', () => {
+    expect(projectMessageFileReferences('v1.30 test@example.com `value + 1` [危险](javascript:alert)')).toEqual([])
+    expect(projectMessageFileReferences('```md\n[路径](src/hidden.ts)')).toEqual([])
+  })
+
+  it('bounds parsing and uses the path when a Markdown link has no description', () => {
+    expect(projectMessageFileReferences('[](src/app.ts)')[0]).toMatchObject({ label: 'src/app.ts', rawReference: 'src/app.ts' })
+    expect(projectMessageFileReferences('x'.repeat(1_048_577))).toEqual([])
   })
 })

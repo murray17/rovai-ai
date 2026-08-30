@@ -9,6 +9,31 @@ use std::{
 };
 use uuid::Uuid;
 
+pub(crate) fn assert_production_database_configuration(database: &Database) {
+    let connection = database.connection();
+    let journal_mode: String = connection
+        .query_row("PRAGMA journal_mode", [], |row| row.get(0))
+        .unwrap();
+    let synchronous: i64 = connection
+        .query_row("PRAGMA synchronous", [], |row| row.get(0))
+        .unwrap();
+    let foreign_keys: bool = connection
+        .query_row("PRAGMA foreign_keys", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(
+        journal_mode, "wal",
+        "every production open must configure WAL"
+    );
+    assert_eq!(
+        synchronous, 1,
+        "every production open must configure NORMAL sync"
+    );
+    assert!(
+        foreign_keys,
+        "every production open must enforce foreign keys"
+    );
+}
+
 struct TestDatabaseTemplate {
     directory: PathBuf,
     database_path: PathBuf,

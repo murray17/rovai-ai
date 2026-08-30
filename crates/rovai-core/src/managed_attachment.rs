@@ -1,6 +1,6 @@
 use std::{
     collections::HashMap,
-    fs::{self, File},
+    fs,
     path::{Component, Path, PathBuf},
     sync::{Arc, Mutex, OnceLock, Weak},
 };
@@ -1455,7 +1455,7 @@ fn restrict_runtime_attachment_root(path: &Path) -> Result<()> {
 fn sync_directory(path: &Path) -> Result<()> {
     #[cfg(unix)]
     {
-        File::open(path)?.sync_all()?;
+        fs::File::open(path)?.sync_all()?;
     }
     #[cfg(not(unix))]
     let _ = path;

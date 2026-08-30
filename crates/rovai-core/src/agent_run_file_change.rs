@@ -7,6 +7,8 @@ use anyhow::{Context, Result};
 use rusqlite::{OptionalExtension, params};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use sha2::{Digest, Sha256};
+use uuid::Uuid;
 
 use crate::{
     db::Database,
@@ -17,11 +19,13 @@ use crate::{
     },
 };
 
-pub const AGENT_RUN_FILE_CHANGES_SCHEMA_VERSION: u32 = 1;
+pub const AGENT_RUN_FILE_CHANGES_SCHEMA_VERSION: u32 = 2;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct AgentRunChangedFileSummaryView {
+    #[serde(default)]
+    pub evidence_file_id: String,
     pub path: String,
     pub change_kind: String,
     pub presentation_kind: String,
@@ -65,6 +69,8 @@ pub struct AgentRunFileChangeBlockView {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct AgentRunChangedFileDetailView {
+    #[serde(default)]
+    pub evidence_file_id: String,
     pub path: String,
     pub change_kind: String,
     pub presentation_kind: String,
@@ -275,7 +281,8 @@ pub fn list_completed_run_file_changes(
         SELECT projection.agent_run_id, projection.execution_epoch,
                projection.file_count, projection.operation_count,
                projection.additions, projection.deletions,
-               projection.files_summary_json, projection.completed_at
+               projection.files_summary_json, projection.completed_at,
+               projection.schema_version, camp_turn.camp_id
         FROM agent_run_file_change_projection AS projection
         JOIN agent_run ON agent_run.id = projection.agent_run_id
         JOIN camp_turn ON camp_turn.id = agent_run.camp_turn_id
@@ -290,18 +297,21 @@ pub fn list_completed_run_file_changes(
         .map_err(Into::into)
 }
 
-pub fn read_run_file_changes(
-    database: &Database,
-    blob_store: &ManagedBlobStore,
+pub fn find_run_file_change_summary(
+    connection: &rusqlite::Connection,
     camp_id: &str,
     agent_run_id: &str,
     execution_epoch: i64,
-) -> Result<AgentRunFileChangesDetailView> {
-    let blob_id = database
-        .connection()
+    evidence_file_id: &str,
+) -> Result<Option<AgentRunChangedFileSummaryView>> {
+    let card = connection
         .query_row(
             r#"
-            SELECT projection.details_blob_id
+            SELECT projection.agent_run_id, projection.execution_epoch,
+                   projection.file_count, projection.operation_count,
+                   projection.additions, projection.deletions,
+                   projection.files_summary_json, projection.completed_at,
+                   projection.schema_version, camp_turn.camp_id
             FROM agent_run_file_change_projection AS projection
             JOIN agent_run ON agent_run.id = projection.agent_run_id
             JOIN camp_turn ON camp_turn.id = agent_run.camp_turn_id
@@ -311,20 +321,56 @@ pub fn read_run_file_changes(
               AND projection.status = 'complete'
             "#,
             params![agent_run_id, execution_epoch, camp_id],
-            |row| row.get::<_, String>(0),
+            card_from_row,
+        )
+        .optional()?;
+    Ok(card.and_then(|card| {
+        card.files
+            .into_iter()
+            .find(|file| file.evidence_file_id == evidence_file_id)
+    }))
+}
+
+pub fn read_run_file_changes(
+    database: &Database,
+    blob_store: &ManagedBlobStore,
+    camp_id: &str,
+    agent_run_id: &str,
+    execution_epoch: i64,
+) -> Result<AgentRunFileChangesDetailView> {
+    let (blob_id, stored_schema_version) = database
+        .connection()
+        .query_row(
+            r#"
+            SELECT projection.details_blob_id, projection.schema_version
+            FROM agent_run_file_change_projection AS projection
+            JOIN agent_run ON agent_run.id = projection.agent_run_id
+            JOIN camp_turn ON camp_turn.id = agent_run.camp_turn_id
+            WHERE projection.agent_run_id = ?1
+              AND projection.execution_epoch = ?2
+              AND camp_turn.camp_id = ?3
+              AND projection.status = 'complete'
+            "#,
+            params![agent_run_id, execution_epoch, camp_id],
+            |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)),
         )
         .optional()?
         .context("AgentRun file changes do not exist in this Camp")?;
+    let stored_schema_version = u32::try_from(stored_schema_version)
+        .context("AgentRun file changes have an invalid stored schema version")?;
+    ensure_supported_schema_version(stored_schema_version)?;
     let bytes = blob_store.read_bytes(database, &blob_id)?;
     let detail = serde_json::from_slice::<AgentRunFileChangesDetailView>(&bytes)
         .context("AgentRun file changes are not valid JSON")?;
-    if detail.schema_version != AGENT_RUN_FILE_CHANGES_SCHEMA_VERSION
-        || detail.card.agent_run_id != agent_run_id
-        || detail.card.execution_epoch != execution_epoch
-    {
+    if detail.card.agent_run_id != agent_run_id || detail.card.execution_epoch != execution_epoch {
         anyhow::bail!("AgentRun file changes identity is invalid");
     }
-    Ok(detail)
+    if detail.schema_version != stored_schema_version
+        || detail.card.schema_version != stored_schema_version
+    {
+        anyhow::bail!("AgentRun file changes schema evidence is inconsistent");
+    }
+    adapt_detail_to_public_v2(detail, camp_id, stored_schema_version)
 }
 
 fn load_card(
@@ -336,10 +382,16 @@ fn load_card(
         .connection()
         .query_row(
             r#"
-            SELECT agent_run_id, execution_epoch, file_count, operation_count,
-                   additions, deletions, files_summary_json, completed_at
-            FROM agent_run_file_change_projection
-            WHERE agent_run_id = ?1 AND execution_epoch = ?2 AND status = 'complete'
+            SELECT projection.agent_run_id, projection.execution_epoch,
+                   projection.file_count, projection.operation_count,
+                   projection.additions, projection.deletions,
+                   projection.files_summary_json, projection.completed_at,
+                   projection.schema_version, camp_turn.camp_id
+            FROM agent_run_file_change_projection AS projection
+            JOIN agent_run ON agent_run.id = projection.agent_run_id
+            JOIN camp_turn ON camp_turn.id = agent_run.camp_turn_id
+            WHERE projection.agent_run_id = ?1 AND projection.execution_epoch = ?2
+              AND projection.status = 'complete'
             "#,
             params![agent_run_id, execution_epoch],
             card_from_row,
@@ -396,24 +448,162 @@ fn insert_no_changes_projection(
 
 fn card_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<AgentRunFileChangesView> {
     let files_json = row.get::<_, String>(6)?;
-    let files = serde_json::from_str(&files_json).map_err(|error| {
+    let mut files = serde_json::from_str::<Vec<AgentRunChangedFileSummaryView>>(&files_json)
+        .map_err(|error| {
+            rusqlite::Error::FromSqlConversionFailure(
+                files_json.len(),
+                rusqlite::types::Type::Text,
+                Box::new(error),
+            )
+        })?;
+    let agent_run_id = row.get::<_, String>(0)?;
+    let execution_epoch = row.get::<_, i64>(1)?;
+    let stored_schema_version = u32::try_from(row.get::<_, i64>(8)?).map_err(|error| {
+        rusqlite::Error::FromSqlConversionFailure(
+            8,
+            rusqlite::types::Type::Integer,
+            Box::new(error),
+        )
+    })?;
+    let camp_id = row.get::<_, String>(9)?;
+    adapt_summary_ids(
+        &mut files,
+        &camp_id,
+        &agent_run_id,
+        execution_epoch,
+        stored_schema_version,
+    )
+    .map_err(|error| {
         rusqlite::Error::FromSqlConversionFailure(
             files_json.len(),
             rusqlite::types::Type::Text,
-            Box::new(error),
+            error.into(),
         )
     })?;
     Ok(AgentRunFileChangesView {
         schema_version: AGENT_RUN_FILE_CHANGES_SCHEMA_VERSION,
-        agent_run_id: row.get(0)?,
-        execution_epoch: row.get(1)?,
-        file_count: row.get::<_, i64>(2)? as u64,
-        operation_count: row.get::<_, i64>(3)? as u64,
-        additions: row.get::<_, Option<i64>>(4)?.map(|value| value as u64),
-        deletions: row.get::<_, Option<i64>>(5)?.map(|value| value as u64),
+        agent_run_id,
+        execution_epoch,
+        file_count: row.get::<_, i64>(2)?.max(0) as u64,
+        operation_count: row.get::<_, i64>(3)?.max(0) as u64,
+        additions: row
+            .get::<_, Option<i64>>(4)?
+            .map(|value| value.max(0) as u64),
+        deletions: row
+            .get::<_, Option<i64>>(5)?
+            .map(|value| value.max(0) as u64),
         files,
         completed_at: row.get(7)?,
     })
+}
+
+fn new_evidence_file_id() -> String {
+    format!("ef_{}", Uuid::now_v7().simple())
+}
+
+fn legacy_evidence_file_id(
+    camp_id: &str,
+    agent_run_id: &str,
+    execution_epoch: i64,
+    stored_schema_version: u32,
+    ordinal: usize,
+) -> String {
+    let mut digest = Sha256::new();
+    for component in [
+        "rovai-evidence-file-id-v1".to_string(),
+        camp_id.to_string(),
+        agent_run_id.to_string(),
+        execution_epoch.to_string(),
+        stored_schema_version.to_string(),
+        ordinal.to_string(),
+    ] {
+        digest.update(component.as_bytes());
+        digest.update([0]);
+    }
+    format!("ef_{:x}", digest.finalize())
+}
+
+fn ensure_supported_schema_version(stored_schema_version: u32) -> Result<()> {
+    if !matches!(
+        stored_schema_version,
+        1 | AGENT_RUN_FILE_CHANGES_SCHEMA_VERSION
+    ) {
+        anyhow::bail!(
+            "AgentRun file changes schema version {stored_schema_version} is not supported"
+        );
+    }
+    Ok(())
+}
+
+fn adapt_summary_ids(
+    files: &mut [AgentRunChangedFileSummaryView],
+    camp_id: &str,
+    agent_run_id: &str,
+    execution_epoch: i64,
+    stored_schema_version: u32,
+) -> Result<()> {
+    ensure_supported_schema_version(stored_schema_version)?;
+    for (ordinal, file) in files.iter_mut().enumerate() {
+        match stored_schema_version {
+            1 => {
+                file.evidence_file_id = legacy_evidence_file_id(
+                    camp_id,
+                    agent_run_id,
+                    execution_epoch,
+                    stored_schema_version,
+                    ordinal,
+                );
+            }
+            AGENT_RUN_FILE_CHANGES_SCHEMA_VERSION => {
+                if file.evidence_file_id.trim().is_empty() {
+                    anyhow::bail!("AgentRun file changes have a missing Evidence File identity");
+                }
+            }
+            _ => unreachable!("schema version was validated before adaptation"),
+        }
+    }
+    Ok(())
+}
+
+fn adapt_detail_to_public_v2(
+    mut detail: AgentRunFileChangesDetailView,
+    camp_id: &str,
+    stored_schema_version: u32,
+) -> Result<AgentRunFileChangesDetailView> {
+    if detail.card.files.len() != detail.files.len() {
+        anyhow::bail!("AgentRun file changes summary and detail are misaligned");
+    }
+    let agent_run_id = detail.card.agent_run_id.clone();
+    let execution_epoch = detail.card.execution_epoch;
+    adapt_summary_ids(
+        &mut detail.card.files,
+        camp_id,
+        &agent_run_id,
+        execution_epoch,
+        stored_schema_version,
+    )?;
+    for (ordinal, file) in detail.files.iter_mut().enumerate() {
+        let summary = &detail.card.files[ordinal];
+        if file.path != summary.path {
+            anyhow::bail!("AgentRun file changes summary and detail are misaligned");
+        }
+        match stored_schema_version {
+            1 => file.evidence_file_id = summary.evidence_file_id.clone(),
+            AGENT_RUN_FILE_CHANGES_SCHEMA_VERSION => {
+                if file.evidence_file_id != summary.evidence_file_id
+                    || file.evidence_file_id.trim().is_empty()
+                {
+                    anyhow::bail!(
+                        "AgentRun file changes summary and detail identity are misaligned"
+                    );
+                }
+            }
+            _ => unreachable!("schema version was validated before detail adaptation"),
+        }
+    }
+    detail.schema_version = AGENT_RUN_FILE_CHANGES_SCHEMA_VERSION;
+    detail.card.schema_version = AGENT_RUN_FILE_CHANGES_SCHEMA_VERSION;
+    Ok(detail)
 }
 
 fn load_full_evidence(
@@ -494,7 +684,7 @@ fn aggregate_evidence(
     source_evidence_ids.dedup();
 
     let observed_counts = operation_counts_by_path(&changes);
-    let files = match latest_run_snapshot {
+    let mut files = match latest_run_snapshot {
         Some((sequence, diff)) => file_details_with_authoritative_snapshot(
             sequence,
             execution_root,
@@ -506,6 +696,9 @@ fn aggregate_evidence(
     };
     if files.is_empty() {
         return None;
+    }
+    for file in &mut files {
+        file.evidence_file_id = new_evidence_file_id();
     }
     let all_files_have_counts = files
         .iter()
@@ -522,6 +715,7 @@ fn aggregate_evidence(
     let summaries = files
         .iter()
         .map(|file| AgentRunChangedFileSummaryView {
+            evidence_file_id: file.evidence_file_id.clone(),
             path: file.path.clone(),
             change_kind: file.change_kind.clone(),
             presentation_kind: file.presentation_kind.clone(),
@@ -778,6 +972,7 @@ fn file_detail_from_operations(
         .collect::<Vec<_>>();
     if diff_operations.is_empty() {
         return Some(AgentRunChangedFileDetailView {
+            evidence_file_id: String::new(),
             path,
             change_kind: combined_change_kind(&operations),
             presentation_kind: "operation_only".to_string(),
@@ -792,6 +987,7 @@ fn file_detail_from_operations(
             return None;
         }
         return Some(AgentRunChangedFileDetailView {
+            evidence_file_id: String::new(),
             path,
             change_kind: combined_change_kind(&operation_only),
             presentation_kind: "operation_only".to_string(),
@@ -803,6 +999,7 @@ fn file_detail_from_operations(
     };
     if !operation_only.is_empty() {
         return Some(AgentRunChangedFileDetailView {
+            evidence_file_id: String::new(),
             path,
             change_kind: combined_change_kind(&operations),
             presentation_kind: "operation_history".to_string(),
@@ -840,6 +1037,7 @@ fn file_detail_from_diff_operations(
         };
         let (additions, deletions) = unified_diff_counts(diff);
         return Some(AgentRunChangedFileDetailView {
+            evidence_file_id: String::new(),
             path,
             change_kind: operation.change_kind.clone(),
             presentation_kind: "full_net_diff".to_string(),
@@ -867,6 +1065,7 @@ fn file_detail_from_diff_operations(
             .map(|block| (block.additions, block.deletions)),
     );
     Some(AgentRunChangedFileDetailView {
+        evidence_file_id: String::new(),
         path,
         change_kind,
         presentation_kind: if exact_only {
@@ -916,6 +1115,7 @@ fn continuous_full_state_detail(
                 .map(|block| (block.additions, block.deletions)),
         );
         return Some(AgentRunChangedFileDetailView {
+            evidence_file_id: String::new(),
             path,
             change_kind,
             presentation_kind: "operation_history".to_string(),
@@ -937,6 +1137,7 @@ fn continuous_full_state_detail(
     let diff = unified_diff_from_complete_states(&path, baseline.as_deref(), current.as_deref())?;
     let (additions, deletions) = unified_diff_counts(&diff);
     Some(AgentRunChangedFileDetailView {
+        evidence_file_id: String::new(),
         path,
         change_kind: change_kind.clone(),
         presentation_kind: "full_net_diff".to_string(),
@@ -1034,6 +1235,7 @@ fn file_details_from_authoritative_snapshot(
         let (additions, deletions) = unified_diff_counts(&section);
         let operation_count = observed_counts.get(&path).copied().unwrap_or(1);
         files.push(AgentRunChangedFileDetailView {
+            evidence_file_id: String::new(),
             path,
             change_kind: change_kind.clone(),
             presentation_kind: "full_net_diff".to_string(),
@@ -1126,6 +1328,42 @@ mod tests {
                 }
             }),
         )
+    }
+
+    fn summary(path: &str) -> AgentRunChangedFileSummaryView {
+        AgentRunChangedFileSummaryView {
+            evidence_file_id: String::new(),
+            path: path.to_string(),
+            change_kind: "update".to_string(),
+            presentation_kind: "operation_only".to_string(),
+            operation_count: 1,
+            additions: None,
+            deletions: None,
+        }
+    }
+
+    #[test]
+    fn legacy_evidence_file_ids_are_stable_and_ordinal_specific() {
+        let mut first = vec![summary("src/a.ts"), summary("src/b.ts")];
+        let mut replay = first.clone();
+
+        adapt_summary_ids(&mut first, "camp-1", "run-1", 3, 1).unwrap();
+        adapt_summary_ids(&mut replay, "camp-1", "run-1", 3, 1).unwrap();
+
+        assert_eq!(first, replay);
+        assert_ne!(first[0].evidence_file_id, first[1].evidence_file_id);
+        assert!(
+            first
+                .iter()
+                .all(|file| file.evidence_file_id.starts_with("ef_"))
+        );
+    }
+
+    #[test]
+    fn unknown_file_change_projection_schema_fails_closed() {
+        let mut files = vec![summary("src/a.ts")];
+        let error = adapt_summary_ids(&mut files, "camp-1", "run-1", 3, 99).unwrap_err();
+        assert!(error.to_string().contains("is not supported"));
     }
 
     #[test]

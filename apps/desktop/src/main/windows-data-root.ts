@@ -10,6 +10,9 @@ export type WindowsDataRootLayout = {
   crashDumps: string
 }
 
+// This layout deliberately has no Core/SQLite/Runtime path.
+export type WindowsBootstrapLayout = Omit<WindowsDataRootLayout, 'core'>
+
 type DataRootPreparationResult = {
   status: number | null
   signal: NodeJS.Signals | null
@@ -23,7 +26,7 @@ type DataRootPreparer = (
   arguments_: readonly string[]
 ) => DataRootPreparationResult
 
-type ElectronPathBinder = {
+export type ElectronPathBinder = {
   setPath(name: string, path: string): void
   setAppLogsPath(path: string): void
 }
@@ -82,12 +85,43 @@ export function expectedWindowsDataRootLayout(root: string): WindowsDataRootLayo
 
 export function bindWindowsDataRootBeforeReady(
   electronApp: ElectronPathBinder,
-  layout: WindowsDataRootLayout
+  layout: WindowsBootstrapLayout
 ): void {
   electronApp.setPath('userData', layout.electronUserData)
   electronApp.setPath('sessionData', layout.electronSessionData)
   electronApp.setAppLogsPath(layout.logs)
   electronApp.setPath('crashDumps', layout.crashDumps)
+}
+
+export function prepareWindowsBootstrapRoot(
+  bootstrapBinary: string,
+  instanceKey: string,
+  prepare: DataRootPreparer = runDataRootPreparer
+): WindowsBootstrapLayout {
+  if (!/^[a-f0-9]{32}$/.test(instanceKey)) throw new Error('Invalid Windows bootstrap instance key')
+  const result = prepare(bootstrapBinary, ['--prepare-windows-bootstrap-root', instanceKey])
+  if (result.error || result.status !== 0) {
+    throw new Error(`Windows bootstrap storage is unavailable: ${result.error?.message ?? (result.stderr.trim() || `status=${result.status}`)}`)
+  }
+  const parsed: unknown = JSON.parse(result.stdout.trim())
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error('Windows bootstrap preparer returned an invalid layout')
+  }
+  const record = parsed as Record<string, unknown>
+  if (typeof record.root !== 'string' || win32.basename(record.root) !== instanceKey) {
+    throw new Error('Windows bootstrap preparer returned an unexpected instance root')
+  }
+  const root = resolveWindowsDataRoot(record.root, undefined)
+  const { core: _core, ...expected } = expectedWindowsDataRootLayout(root)
+  if (Object.keys(record).sort().join('\0') !== Object.keys(expected).sort().join('\0')) {
+    throw new Error('Windows bootstrap preparer returned an unknown layout shape')
+  }
+  for (const key of Object.keys(expected) as Array<keyof WindowsBootstrapLayout>) {
+    if (typeof record[key] !== 'string' || record[key].toLowerCase() !== expected[key].toLowerCase()) {
+      throw new Error(`Windows bootstrap preparer returned an unexpected ${key} path`)
+    }
+  }
+  return expected
 }
 
 export function prepareWindowsDataRoot(

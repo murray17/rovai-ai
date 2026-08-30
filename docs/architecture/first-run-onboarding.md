@@ -2,7 +2,7 @@
 document_type: architecture
 authority: desktop-first-run-component-boundary
 status: accepted
-last_updated: 2026-08-23
+last_updated: 2026-08-30
 ---
 
 # First-run Onboarding
@@ -11,7 +11,7 @@ last_updated: 2026-08-23
 
 | Component | Responsibility |
 | --- | --- |
-| Electron Main | Determines fresh install versus upgrade before Core creates SQLite, owns the private state machine, validates closed snapshots and serializes atomic writes. |
+| Electron Main | Owns the private state machine, validates closed snapshots and serializes atomic writes; it initializes only from an admitted Full Core authority origin. |
 | Preload bridge | Exposes typed reads and transitions; it does not expose initialization or direct file access. |
 | Renderer onboarding gate | Replaces the normal App shell while a page is unfinished, performs real Runtime discovery/health checks, projects either configured selection or the zero-usable empty page, and persists user choices through Main. |
 | Provisioning saga | Converts the saved selection into idempotent existing Core commands, records stage checkpoints and commits the Camp restore target before completion. |
@@ -24,10 +24,12 @@ last_updated: 2026-08-23
 
 ```text
 Electron ready
-  -> inspect onboarding.json + pre-Core database existence
-     -> existing product data: completed(existing_installation)
-     -> fresh install: in_progress(welcome)
-  -> start Core and Renderer
+  -> show Bootstrap Shell + load onboarding.json into memory
+  -> start Full Core
+     -> authority initialized: initialize in_progress(welcome)
+     -> authority existing/migrated: initialize completed(existing_installation)
+     -> authority blocked: keep Bootstrap Shell; do not initialize onboarding
+  -> Full Core ready -> mount authoritative Renderer
      -> welcome -> member -> runtime
         -> usable Runtime exists:
            -> persist provisioning command IDs + normalized Runtime permissions
@@ -66,7 +68,8 @@ and member configuration surfaces.
 
 ## Invariants
 
-- Core SQLite existence is sampled before Core startup can create a fresh database.
+- First-run admission uses Full Core's ticketed `authorityState.current.origin`; Desktop never infers it from a filename.
+- A corrupt or unreadable onboarding file uses an in-memory default and warning while preserving the original; Core readiness is independent.
 - An unfinished mandatory page is never represented only in React or browser storage.
 - Valid schema 1 state is normalized to schema 2 without losing an unfinished page or provisioning checkpoint.
 - Permissions are copied once from the selected Adapter Installation, frozen with the command IDs and never invented
@@ -83,7 +86,8 @@ and member configuration surfaces.
 ## References
 
 - [Camp 资源不变量](foundational-invariants.md#camp-resources)
-- [First-run Onboarding v2](../contracts/first-run-onboarding-v2.md)
+- [First-run Onboarding v3](../contracts/first-run-onboarding-v3.md)
+- [Availability-first Runtime](availability-first-runtime.md)
 - [Camp Activation Lifecycle](camp-activation-lifecycle.md)
 - [Camp Composer Draft](camp-composer-draft.md)
 - [Runtime Catalog Boundaries](runtime-catalog-boundaries.md)

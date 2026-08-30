@@ -2,14 +2,15 @@
 document_type: ui-component-spec
 authority: first-run-onboarding-presentation
 status: accepted
-last_updated: 2026-08-23
+last_updated: 2026-08-30
 ---
 
 # 首次训练与“初次集结”
 
 ## 结构
 
-前三页是全窗口 mandatory gate，不显示普通侧栏、Camp、设置或可跳转步骤条：
+Full Core authority ready 后，前三页才作为全窗口 mandatory gate 挂载；Core 检查、迁移或阻断期间只显示
+[Desktop Bootstrap Shell](bootstrap-shell.md)，不短暂显示训练页。训练页不显示普通侧栏、Camp、设置或可跳转步骤条：
 
 1. 欢迎页只有品牌、简短说明和“开始旅程”；
 2. 队员页左侧只显示当前选择的一张大半身像，右侧用四条纯文字行选择内置队员；
@@ -19,7 +20,8 @@ last_updated: 2026-08-23
 
 欢迎页和队员页没有 Skip。Runtime 正常配置分支仍必须完成配置；只有统一空结果页提供“进入 Rovai”，其
 语义是终止训练营并延后 Runtime 配置，不是跳过前置页或暂停。Back 只回到前一页，并且 provisioning 开始后
-不再允许更换前置选择或延后配置。用户重新打开 App 时直接回到未完成页，不短暂展示普通 Shell。
+不再允许更换前置选择或延后配置。用户重新打开 App 时先经过 Bootstrap capability gate；authority ready 后
+直接回到未完成页，不短暂展示普通业务工作区。
 
 ## Runtime 状态
 
@@ -67,7 +69,8 @@ Rovai”。重新扫描回到真实扫描进度；“进入 Rovai”持久化 `r
 
 ## References
 
-- [First-run Onboarding v2](../../contracts/first-run-onboarding-v2.md)
+- [First-run Onboarding v3](../../contracts/first-run-onboarding-v3.md)
+- [Desktop Bootstrap Shell](bootstrap-shell.md)
 - [First-run Onboarding 架构](../../architecture/first-run-onboarding.md)
 - [Camp 会话工作区](conversation-workspace.md)
 - [全局设计系统](../../../DESIGN.md)

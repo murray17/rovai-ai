@@ -11,7 +11,7 @@ type MarkdownNode = {
 
 const safeMarkdownParser = unified()
   .use(remarkParse)
-  .use(remarkGfm)
+  .use(remarkGfm, { singleTilde: false })
 
 const omittedNodeTypes = new Set([
   'definition',

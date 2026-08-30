@@ -13,7 +13,7 @@ last_updated: 2026-08-30
 模型输入分别继续由 [Feishu Channel v2](../contracts/feishu-channel-v2.md)中已经 provider-neutral 的渠道核心、
 [Camp Membership v1](../contracts/camp-membership-v1.md)和
 [ContextManifest Evidence v22](../contracts/context-manifest-evidence-v22.md)拥有。取舍理由见
-[v1.31 决策记录](../versions/v1.31/decisions.md)。
+[v1.33 决策记录](../versions/v1.33/decisions.md)。
 
 ## 组件与权威
 
@@ -174,10 +174,16 @@ OAuth Profile 并按需静默刷新，再恢复所有 published Bot Stream；暂
 失效只阻止新的发布，不停止已有 Bot。周期 worker 重取已知群
 roster、finalize ready aggregate、领取 delivery 并结算。任何外部失败都不从 Renderer 状态重建业务事实。
 
+## Core authority 与渠道启动
+
+渠道 Host 生命周期由 Main 的 `ChannelHostLifecycle` 与 Supervisor authority 对齐：只在 Core ready 且业务请求能力
+可用后启动，每个 generation 一次；authority 丢失后串行停止，后续 generation 恢复后重新加载同一 SQLite 凭据。
+旧启动的迟到结果先清理，App shutdown 后不再启动。Windows 尚未准入 data root 时不创建替代路径或渠道存储。
+
 ## References
 
 - [DingTalk Channel v3](../contracts/dingtalk-channel-v3.md)
 - [Channel Storage v2](../contracts/channel-storage-v2.md)
 - [Camp Membership v1](../contracts/camp-membership-v1.md)
 - [渠道设置](../ui/components/channel-settings.md)
-- [v1.31 决策记录](../versions/v1.31/decisions.md)
+- [v1.33 决策记录](../versions/v1.33/decisions.md)

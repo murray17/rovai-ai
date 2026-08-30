@@ -6,6 +6,7 @@ import {
   isThemePreference,
   nativeThemeSource,
   readThemePreference,
+  readThemePreferenceResult,
   resolvedTheme,
   themeBackground,
   writeThemePreference
@@ -56,7 +57,14 @@ describe('appearance preference', () => {
     expect(readThemePreference(filePath)).toBe('system')
     await writeFile(filePath, '{invalid', 'utf8')
     expect(readThemePreference(filePath)).toBe('system')
+    expect(readThemePreferenceResult(filePath).degradation?.code).toBe(
+      'appearance_preferences_unreadable'
+    )
+    expect(await readFile(filePath, 'utf8')).toBe('{invalid')
     await writeFile(filePath, JSON.stringify({ themePreference: 'dark' }), 'utf8')
     expect(readThemePreference(filePath)).toBe('system')
+    expect(readThemePreferenceResult(filePath).degradation?.code).toBe(
+      'appearance_preferences_invalid'
+    )
   })
 })

@@ -1295,9 +1295,22 @@ impl CollaborationService {
         })
     }
 
+    pub fn snapshot_pending_camps_for_startup_cleanup(
+        &self,
+        database: &Database,
+    ) -> Result<Vec<String>> {
+        let mut statement = database
+            .connection()
+            .prepare("SELECT id FROM camp WHERE activation_state = 'pending' ORDER BY id")?;
+        Ok(statement
+            .query_map([], |row| row.get(0))?
+            .collect::<rusqlite::Result<_>>()?)
+    }
+
     pub fn discard_empty_pending_camps_on_startup(
         &self,
         database: &mut Database,
+        candidate_camp_ids: &[String],
     ) -> Result<Vec<String>> {
         let transaction = database.connection_mut().transaction()?;
         let camp_ids = {
@@ -1306,6 +1319,7 @@ impl CollaborationService {
                 SELECT camp.id
                 FROM camp
                 WHERE camp.activation_state = 'pending'
+                  AND camp.id IN (SELECT value FROM json_each(?1))
                   AND camp.version = 1
                   AND camp.last_message_sequence = 0
                   AND NOT EXISTS(
@@ -1326,7 +1340,9 @@ impl CollaborationService {
                 "#,
             )?;
             statement
-                .query_map([], |row| row.get::<_, String>(0))?
+                .query_map([serde_json::to_string(candidate_camp_ids)?], |row| {
+                    row.get::<_, String>(0)
+                })?
                 .collect::<rusqlite::Result<Vec<_>>>()?
         };
         for camp_id in &camp_ids {
@@ -6517,10 +6533,25 @@ mod slow_tests {
             &directory,
             "pending-abandoned-create",
         );
+        let startup_candidates = service
+            .snapshot_pending_camps_for_startup_cleanup(&database)
+            .unwrap();
+        let new_id = create_pending_camp(
+            &service,
+            &mut database,
+            &directory,
+            "pending-created-after-ready",
+        );
         let cleaned = service
-            .discard_empty_pending_camps_on_startup(&mut database)
+            .discard_empty_pending_camps_on_startup(&mut database, &startup_candidates)
             .unwrap();
         assert_eq!(cleaned, vec![abandoned_id]);
+        assert!(
+            service
+                .discard_empty_pending_camps_on_startup(&mut database, &startup_candidates)
+                .unwrap()
+                .is_empty()
+        );
         let remaining: Vec<String> = database
             .connection()
             .prepare("SELECT id FROM camp ORDER BY id")
@@ -6529,7 +6560,9 @@ mod slow_tests {
             .unwrap()
             .collect::<rusqlite::Result<_>>()
             .unwrap();
-        assert_eq!(remaining, vec![retained_id]);
+        let mut expected_remaining = vec![retained_id, new_id];
+        expected_remaining.sort();
+        assert_eq!(remaining, expected_remaining);
 
         drop(database);
         std::fs::remove_dir_all(directory).unwrap();

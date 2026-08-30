@@ -1,7 +1,7 @@
 ---
 document_type: development-guide
 authority: test-policy-and-command-routing
-last_updated: 2026-08-25
+last_updated: 2026-08-30
 ---
 
 # 测试与 Smoke Test
@@ -132,7 +132,7 @@ pnpm test:rust:pr
 ```
 
 `.github/workflows/rust.yml` 在 pull request 时，对 Rust 源码、Cargo 文件和 Rust 构建/lint
-配置改动并行执行三个独立 job：
+配置改动并行执行 lint、fast、database smoke 与 Windows x64 原生编译/验证 job；前三个基础命令为：
 
 ```bash
 cargo fmt --all --check
@@ -156,13 +156,40 @@ cargo test --workspace --all-features
 ```
 
 所有 feature-gated 测试因此都会在 nightly 中编译并执行；历史兼容覆盖只是移出 PR 关键路径，未被
-永久禁用。CI 使用 Cargo 缓存缩短重复构建，但测试是否通过不依赖缓存命中。三个 PR job 并行启动，
+永久禁用。CI 使用 Cargo 缓存缩短重复构建，但测试是否通过不依赖缓存命中。各个 PR job 并行启动，
 各自恢复与其构建目标相容的既有 cache；不通过 job 间传递可写 `target` 目录制造顺序依赖。需要验证
 桌面构建时另行运行：
 
 ```bash
 pnpm build:desktop
 ```
+
+### Electron 隔离世界回归
+
+涉及 Preload 请求 transport 或 Renderer 错误读取时，除普通 Vitest 外还运行：
+
+```bash
+pnpm test:desktop-bridge
+```
+
+该测试编译当前生产 Preload，并在真实 Electron `contextIsolation` 窗口中验证 Promise 成功值以及结构化拒绝的全部字段。
+它使用临时 `userData`，不启动 Core 或调用模型；不能用 Main 单测或 jsdom 代替。无显示器 Linux 使用
+`xvfb-run -a pnpm test:desktop-bridge`；[Desktop bridge CI](../../.github/workflows/desktop-bridge.yml)覆盖相关改动。
+
+### Core 可选功能启动回归
+
+涉及 `run_core()` ready 边界、可选初始化或功能重试时，运行：
+
+```bash
+pnpm test:core-startup
+```
+
+该入口构建真实 Core，在独立 data-dir/Skill Library/MCP config/Runtime Files Root 中注入可选存储故障，验证
+authority ready、业务 RPC 可达和同进程重试；另验证 mandatory recovery 失败为结构化拒绝而不是 crash 或 false ready。
+不启动真实 Runtime 或调用模型。它拥有进程 seam，具体 cleanup/identity 规则仍由 Rust 单一 owner 测试；Rust fast CI
+同时执行它。Windows bootstrap composition 由 `windows-bootstrap.test.ts` 拥有，native DACL/helper/identity 由
+Windows x64 job 验证。改动还涉及完整桌面挂载和恢复时，在遵守[本地工作流](local-workflow.md)后运行隔离
+`pnpm accept:bootstrap-shell-ui`，不能用 macOS 打包结果代替 Windows 原生验收。
 
 ### 非模型 Smoke
 
@@ -194,6 +221,7 @@ pnpm build:desktop
 | `pnpm smoke:missing-send-recovery` | 十二种已完成专项矩阵的 Runtime（含 Kimi、Grok）；Cursor Disabled | 每种 Runtime 使用独立临时 data-dir/Git workspace，真实执行 zero-send 与 accepted-send suppression；ACP 额外执行 tool→final 并生成独立协议 fixture。Kimi/Grok 与其他 ACP Runtime 共用公开 assistant stream、严格 candidate/抑制规则和完整正文 digest；provider `<think>` 不清洗、不重分类 |
 | `pnpm accept:planned-shutdown` | 当前平台正式 Runtime + packaged App | 在隔离 Git workspace/`userData` 中等待真实 input handoff 后退出，验证 5 秒目标、10 秒硬 deadline、400ms 关闭反馈门槛、无伪 terminal、进程 reap、重启 blocker、Run 取消审计与安全退出 modal 截图；运行前在 macOS 执行 `pnpm package:mac`，在 Windows x64 执行 `pnpm package:windows:x64` |
 | `pnpm accept:onboarding-ui` | 本机首个可用正式 Runtime + packaged App | 不调用模型；用全新隔离 `userData` 验证三页断点、真实 provisioning、`初次集结`、Draft-only starter、重启与 `1040×700` 双主题截图 |
+| `pnpm accept:bootstrap-shell-ui` | 无 Runtime；packaged App + 独立未知 authority / 崩溃恢复 fixture | 不调用模型；证明未知 authority 保留、业务树不挂载、显式重试不消耗 crash budget；另在真实 Core 写事务产生 WAL 后强杀该隔离子进程，验证结构化失败字段、自动恢复已提交数据和工作区重挂载；覆盖双主题、窄窗口、200% 等效布局与 reduced motion 截图 |
 
 `pnpm smoke:runtime-permissions` 是 `smoke:action-approval` 与
 `smoke:multi-agent` 的聚合命令。

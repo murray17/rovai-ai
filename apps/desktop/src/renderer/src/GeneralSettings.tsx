@@ -1,3 +1,4 @@
+import { readErrorMessage } from './error-message'
 import { useCallback, useEffect, useState } from 'react'
 import * as Dialog from '@radix-ui/react-dialog'
 import type {
@@ -659,5 +660,5 @@ function missingAgentProfile(agentId: string): AgentProfile {
 }
 
 function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error)
+  return readErrorMessage(error)
 }

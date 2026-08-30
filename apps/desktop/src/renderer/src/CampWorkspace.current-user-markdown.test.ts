@@ -37,15 +37,16 @@ const members: CampSnapshot['members'] = [{
   version: 1
 }]
 
-function renderAgentMessage(
+function renderMessage(
   content: StructuredCampMessageContent,
-  body = 'NON_AUTHORITATIVE_BODY_CACHE'
+  body = 'NON_AUTHORITATIVE_BODY_CACHE',
+  authorType: 'agent' | 'user' = 'agent'
 ): string {
   const message: CampMessageView = {
     id: 'message-current-user-markdown',
     sequence: 1,
     timelineGlobalSequence: 1,
-    authorType: 'agent',
+    authorType,
     authorId: 'agent_author',
     sourceAgentRunId: null,
     body,
@@ -183,7 +184,7 @@ describe('Agent Current User Mention Markdown rendering', () => {
       text: ' 审阅。'
     }]
 
-    const markup = renderAgentMessage(content)
+    const markup = renderMessage(content)
     const token = markup.match(
       /<span class="message-mention-token current-user"[^>]*>@你<\/span>/
     )?.[0]
@@ -193,10 +194,10 @@ describe('Agent Current User Mention Markdown rendering', () => {
     expect(token).not.toContain('role=')
     expect(token).not.toContain('tabindex=')
     expect(token).not.toContain('aria-haspopup=')
-    expect(markup.indexOf(token!)).toBeLessThan(markup.indexOf('<h3>请确认</h3>'))
+    expect(markup.indexOf(token!)).toBeLessThan(markup.indexOf('data-markdown-heading="请确认"'))
     expect(markup).toContain('current-user-mention-prefix')
     expect(markup).toContain('current-user-markdown-content')
-    expect(markup).toContain('<h3>请确认</h3>')
+    expect(markup).toContain('<h3 data-markdown-heading="请确认">请确认</h3>')
     expect(markup).toContain('<ul>')
     expect(markup).toContain('<code>方案 B</code>')
     expect(markup).toContain(
@@ -233,11 +234,49 @@ describe('Agent Current User Mention Markdown rendering', () => {
     expect(projectLeadingCurrentUserMentionMarkdownBody(nonLeading, members)).toBeNull()
     expect(projectLeadingCurrentUserMentionMarkdownBody(repeated, members)).toBeNull()
 
-    const markup = renderAgentMessage(nonLeading, '<script>cache()</script>')
+    const markup = renderMessage(nonLeading, '<script>cache()</script>')
     expect(markup).toContain('## 不应解析为标题')
     expect(markup).not.toContain('<h3>不应解析为标题')
     expect(markup).toContain('&lt;script&gt;alert(&quot;unsafe&quot;)&lt;/script&gt;')
     expect(markup).not.toContain('<script>')
     expect(markup).not.toContain('cache()')
+  })
+
+  it('projects file labels in user messages without flattening Member and Skill identities', () => {
+    const content: StructuredCampMessageContent = [{
+      kind: 'member_mention',
+      agentId: 'agent_reviewer'
+    }, {
+      kind: 'text',
+      text: ' 请查看 [v1.30 方案](docs/versions/v1.30/README.md) 和 `src/app.ts:20`，再用 '
+    }, {
+      kind: 'skill_mention',
+      skillId: 'skill-review',
+      nameAtSend: 'review'
+    }]
+    const markup = renderMessage(content, 'NON_AUTHORITATIVE_BODY_CACHE', 'user')
+    expect(markup).toContain('data-agent-id="agent_reviewer"')
+    expect(markup).toContain('aria-label="查看沐瓦的基础信息"')
+    expect(markup).toContain('class="message-mention-token skill-mention"')
+    expect(markup).toContain('aria-label="Skill /review"')
+    expect(markup).toContain('title="docs/versions/v1.30/README.md">v1.30 方案</a>')
+    expect(markup).toContain('<code>src/app.ts:20</code></a>')
+    expect(markup.replace(/<[^>]*>/gu, '')).not.toContain('docs/versions/v1.30/README.md')
+    expect(markup).not.toContain('NON_AUTHORITATIVE_BODY_CACHE')
+    expect(content[1]).toEqual({ kind: 'text', text: ' 请查看 [v1.30 方案](docs/versions/v1.30/README.md) 和 `src/app.ts:20`，再用 ' })
+  })
+
+  it('uses the same label projection for plain user bodies and leading Current User Markdown', () => {
+    const source = '[方案](docs/plan.md)'
+    const user = renderMessage([{ kind: 'text', text: source }], source, 'user')
+    const currentUser = renderMessage([
+      { kind: 'current_user_mention', userId: 'local_user' },
+      { kind: 'text', text: source }
+    ])
+    for (const markup of [user, currentUser]) {
+      expect(markup).toContain('title="docs/plan.md">方案</a>')
+      expect(markup.replace(/<[^>]*>/gu, '')).not.toContain('docs/plan.md')
+    }
+    expect(currentUser).toContain('message-mention-token current-user')
   })
 })

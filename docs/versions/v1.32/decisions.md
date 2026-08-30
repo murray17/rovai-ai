@@ -1,0 +1,705 @@
+---
+document_type: version-decisions
+version: v1.32
+lifecycle: historical
+last_updated: 2026-08-29
+---
+
+# v1.32 决策记录
+
+本文件只记录本版本满足准入门槛的重要取舍；当前规范由链接的 Architecture、Contract、UI 与 Context 说明拥有。
+
+<a id="v1-32-d01"></a>
+## V1.32-D01：项目绑定是 Owner 本机目录，不把外部成员提升为本地用户
+
+> 当前产品语义已由 [V1.32-D09](#v1-32-d09)取代；本节保留早期方案的取舍记录。
+
+### 背景
+
+飞书群成员需要使用 Agent，但本机项目路径可以暴露源码、凭据和文件权限。authorized users、sender allowlist 或
+飞书侧项目申请都会把消息身份误当成本机管理身份，也会把路径选择扩散到不受控渠道表面。
+
+### 决定
+
+Core 建立 owner-only `ProjectBinding` 目录；只有 `local_user` 可以维护路径和绑定/切换渠道会话。飞书只使用不透明
+Binding ID。绑定后任意会话成员可通过私聊或显式 mention 使用 Agent；`ExternalPrincipal` 只表达作者、上下文来源
+和回复目标，不获得任何 Owner 能力。
+
+未绑定消息只记录待绑定会话，不建立 Principal、Camp 或执行；Owner 绑定后发送者必须重发。当前规范见
+[飞书渠道架构](../../architecture/feishu-channel.md#owner-only-入站与会话执行范围)和
+[Feishu Channel v2](../../contracts/feishu-channel-v2.md#2-owner-only-camp-与项目选择)。
+
+### 后果
+
+- 项目路径和选择入口始终留在本机 Renderer；
+- 群成员使用 Agent 不需要维护第二套授权名单；
+- 绑定不会把之前的消息变成迟到执行，安全边界可由 frozen binding 证明。
+
+### 被拒绝方案
+
+- **sender allowlist / 已授权用户：** 混淆消息准入与本机项目管理，并产生持续名册治理；
+- **飞书项目 picker 或申请卡：** 会暴露本机目录和 Owner 操作面；
+- **绑定后自动回放首条消息：** 不能证明用户仍希望执行，也跨越 observation 时的授权事实。
+
+<a id="v1-32-d02"></a>
+## V1.32-D02：多 Bot 先聚合、再走统一原子 admission 与单根 FIFO
+
+### 背景
+
+同一飞书消息同时 mention 多个独立 Bot 时，每个 App 都可能收到相同事件。由第一个连接立即创建 Run 会遗漏目标；
+由 Host 直接写 CampMessage/Run 会形成第二套发送事务。同一 Camp 并行接受多条根用户消息又会交错公共结果。
+
+### 决定
+
+第一条 observation 只建立 collecting aggregate。只有 canonical mentions 完整或全部预期 App observation 到齐，
+独立 finalize 才可继续；payload mismatch 或三秒 timeout fail closed。Finalize 创建持久
+`ChannelTurnRequest`，每个 Binding 同时至多一个 admitted root，后续 FIFO queued 且不进入 conversation。
+
+真正提升调用 `CollaborationService.admit_external_channel_message`，复用本地用户发送的同一原子 admission，一次性
+创建触发 CampMessage、CampTurn 和全部目标 Run。当前规范见
+[飞书渠道架构](../../architecture/feishu-channel.md#入站聚合与串行准入)和
+[Feishu Channel v2](../../contracts/feishu-channel-v2.md#5-多-bot-入站聚合)。
+
+### 后果
+
+- 多 App 重试只得到一个请求和一张状态卡；
+- queued 请求不污染 History/Context，Core 重启可从持久队列恢复；
+- 不同 Camp 仍并行，同一根 Turn 内的多 Agent/A2A/Gather 仍按既有语义运行。
+
+### 被拒绝方案
+
+- **第一条 observation 直接 admission：** canonical target 集可能尚不完整；
+- **Host 拼装 CampMessage/Run：** 绕过用户路径已具备的原子门禁；
+- **把 queued 消息先放入 Timeline：** 会让后续 Turn 指令提前进入当前 Run 上下文。
+
+<a id="v1-32-d03"></a>
+## V1.32-D03：飞书 reply 永远冻结为当前消息的 ExternalQuote
+
+### 背景
+
+判断飞书 parent message 是否已经投影到当前 Camp 需要长期维护 external ID 到 CampMessage 的双向账本，并处理
+编辑、撤回、跨 Camp、Bot 回声和未 mention 历史。该复杂度只为模拟 Rovai 本地 reply，却会让同一渠道回复出现
+两种不可预测语义。
+
+### 决定
+
+任意飞书 `parent_id` 都只在本次入站读取一次并冻结为当前触发 CampMessage 的 Structured Content
+`ExternalQuote`。被引消息不单独物化，飞书触发消息的 `replyToCampMessageId` 始终为空；external message ID 只在
+有 TTL 的 dedup/aggregation/outbox transport 中使用。Core Context projector 通过 Formatter/Manifest 22 把 quote
+投影进标准 `CURRENT_INPUT.message`，不接受 Host prompt override。
+
+当前规范见 [ContextManifest Evidence v22](../../contracts/context-manifest-evidence-v22.md)、
+[模型上下文变更说明](model-context-change-feishu-external-principal.md)和
+[Feishu Channel v2](../../contracts/feishu-channel-v2.md#4-externalprincipal-与-structured-content)。
+
+### 后果
+
+- 本轮唯一自然语言指令仍是一个可审计 CampMessage；
+- 回复用户消息和 Bot 消息行为一致，缺失来源使用确定性不可读摘要；
+- 不建立永久 external-message reply projection，也不污染 reference closure。
+
+### 被拒绝方案
+
+- **命中时内部 reply、未命中时 quote：** 结果依赖异步投影时序；
+- **把被引消息建成第二条 CampMessage：** 未 mention 历史会进入公共会话；
+- **Host 直接拼 Runtime prompt：** 绕过 Structured Content、Manifest 和 Runtime delivery evidence。
+
+<a id="v1-32-d04"></a>
+## V1.32-D04：群 Bot roster 复用 Camp Membership v1，普通群与话题采用不同扩张规则
+
+> D04 关于完整 roster authority、普通群同步和复用 Camp Membership v1 的决定继续有效；“话题仅按 mention/A2A
+> 按需扩张”的部分已由 [V1.32-D15](#v1-32-d15)取代。
+
+### 背景
+
+普通群直觉上所有在群 Rovai Bot 都属于同一 Camp；话题群若同步父群完整名册，则以后加入的新 Bot 会污染每个
+历史话题。另建飞书专属成员表又会绕过 v1.29 的 lifetime fence、移除 cutover 与 reconciliation。
+
+### 决定
+
+Host 只提交所有 published Bot 的完整 `isInChat` 快照。普通群首次及后续都把 present roster 通过既有
+`camp.member.add/remove` 与 exact source generation 同步。话题首次只使用当前 mentions，父群新增不自动扩张；
+只有话题内显式目标或 A2A exact target 且其 Bot 仍在父群时，才按需调用同一 add。移出统一走既有 remove。
+
+当前规范见 [飞书渠道架构](../../architecture/feishu-channel.md#bot-roster-与-camp-membership)、
+[Feishu Channel v2](../../contracts/feishu-channel-v2.md#6-camp-创建roster-与-admission)和
+[Camp Membership v1](../../contracts/camp-membership-v1.md)。
+
+### 后果
+
+- 动态成员沿用 membership generation/version、source binding 与 reconciliation；
+- 普通群 roster 与 Camp 一致，历史话题保持最小成员集；
+- roster 不完整、未知 App 或 absent target 都 fail closed。
+
+### 被拒绝方案
+
+- **飞书专属 add/remove：** 会形成第二套成员授权与收口；
+- **父群 roster 广播到全部话题：** 历史 Camp 被无关 Bot 污染；
+- **只信 botAdded/botDeleted delta：** 丢事件或乱序后无法证明完整当前集合。
+
+<a id="v1-32-d05"></a>
+## V1.32-D05：秘密与网络留在 Main，公开结果由 Core Outbox 可靠投影
+
+### 背景
+
+多 App Secret、WebSocket 和飞书网络重试属于桌面宿主能力；把 Secret 放进 Core/Renderer 会扩大暴露面。另一边，
+若 Agent 输出由 Main 临时监听并直发，网络失败或重启会丢失已经提交的公共结果，也可能泄漏 Runtime 原始流。
+
+### 决定
+
+Main 使用 OS safeStorage 保存 Developer Session Cookie jar 与每 App Secret，Core 只保存 identity 摘要、
+credential ref 和业务身份。公开输出和状态先由 Core 从
+权威请求/CampMessage 投影为 durable ChannelDelivery；Main 使用 lease 领取、发送并回写结果。只有 Core 已提交
+内容可以外发，实际作者使用其独立 Bot，不能用另一个 Bot 冒充。Renderer snapshot 删除 credential 和 Host-only
+恢复字段。
+
+Developer Session 与 App provisioning 的进一步边界由 [V1.32-D06](#v1-32-d06)修正；本决定继续拥有
+Main/Core/Renderer 的秘密和 Outbox 分工。当前规范见 [飞书渠道架构](../../architecture/feishu-channel.md#输出恢复与秘密)和
+[Feishu Channel v2](../../contracts/feishu-channel-v2.md#7-channeldelivery)。
+
+### 后果
+
+- 飞书不可用不回滚或丢失 Core CampMessage；
+- App 间故障隔离，重启后可恢复连接、queue card 和 Outbox；
+- 断开 Developer Session 不删除已发布 Bot credential，也不停止其独立长连接。
+
+### 被拒绝方案
+
+- **Secret 存 SQLite 或返回 Renderer：** 扩大日志、诊断和 UI 注入暴露面；
+- **直接转发 Runtime stream：** 可能泄漏推理/工具输出且没有公共消息 authority。
+
+<a id="v1-32-d06"></a>
+## V1.32-D06：Developer Session 与队员 App credential 分离，普通发布直连开放平台控制台
+
+### 背景
+
+把应用注册结果当成账号连接，会把 App credential 误当 Developer Identity；连接本身会意外新增远端应用，用户名/
+企业只能写占位值，而每名队员发布仍要重新扫码。继续把官方 application registration begin/poll 当作普通发布，虽能
+复用已登录 Session，却仍会打开飞书“创建飞书智能体应用 / 立即创建”确认页，无法形成 Rovai 自己拥有的连续发布
+体验。开放平台 console API 与页面 CSRF 又是版本敏感、未公开稳定合同，需要明确隔离而不能扩散到业务层。
+Manifest 可以保存应用元数据，但它不是飞书运行时权限、事件订阅或接收模式的在线 authority；写入后再读同一 Manifest
+会形成自证假阳性，即使 WebSocket 能握手也不代表飞书会推送消息。
+
+### 决定
+
+连接只建立独立 Developer Web Session，读取真实 `userId + userName + tenantId + tenantName + brand`，并用
+`safeStorage` 加密 Cookie jar；不创建 App、Secret 或 Bot。Core account 使用本地不透明 identity ID 与 digest。
+
+普通发布由 `FeishuWebSessionMemberBotProvisioner` 先复核原始 user/tenant，再从同一 Electron Session 读取 Cookie
+jar、加载开放平台页取得 CSRF 与 exact API origin。`OpenPlatformApiClient` 使用该 Session 的 Chromium fetch，通过
+console API 创建并 durable freeze App、读取 Secret、启用 Bot、配置 scopes/events/callback WebSocket、发布版本，最后
+回读 robot、scope catalog、event/callback state 与 version status。具体 template-first、activation-first 与恢复顺序由
+[V1.32-D08](#v1-32-d08)进一步收敛。Manifest 只保留头像和兼容元数据，不参与运行时 readiness
+判定。Cookie、CSRF、Secret 不离开 Main；origin/path、响应 shape 与 read-back verification 全部 fail
+closed。正常路径不调用 application registration endpoint，不打开飞书确认页，也不向 Renderer 产生二维码。
+
+该 console Adapter 明确接受上游内部协议可能变化的代价：实现集中在一个 typed client，只有精确 Feishu/Lark
+origin 与 `/developers/` 路径可达，协议变化只产生可诊断失败；不得静默降级为 registration、确认页或结果不明时的
+第二次创建。真实租户回归负责证明
+当前上游页面与 API 仍兼容，仓库测试只证明本地请求顺序、秘密边界、回读和恢复状态机。
+
+旧的 `/oauth/v1/app/registration + verification_uri_complete + showRegistrationConfirmation + pollRegistration`
+实现整体退出产品；对应 Provisioner、Developer Session 确认窗口、typed API、IPC 与 Renderer 入口一并删除。console
+发布失败保持可诊断失败，不要求队员单独扫码，不打开平台创建确认页，也不存在向 registration/确认页的手动或自动
+fallback。
+
+首次创建前写持久 `MemberBotPublicationIntent`；第一次取得 App ID 后，状态机永久冻结该队员的
+`agentId + accountId + remoteAppId`，并在首次写入后冻结 `credentialRef`。失败、完成、历史 `disabled` 恢复和重新发布都不能新建 intent 或把 Bot 记录换成
+第二个 App；`completed` 后只允许在 exact Bot 绑定仍存在且原账号已连接时重开同一 intent，核对并恢复原 App。Core
+在 intent create、Bot 首次写入、连接完成和重复 upsert 各状态边界交叉验证这份身份，不以 Renderer 隐藏按钮代替唯一性。
+当前规范见[飞书渠道架构](../../architecture/feishu-channel.md#开发者会话与队员发布)、
+[Feishu Channel v2](../../contracts/feishu-channel-v2.md#3-飞书账号与队员-bot)和
+[渠道设置](../../ui/components/channel-settings.md#渠道连接与二维码)。
+
+锁定的是任何第二个 App 和换绑，不是对同一冻结 App 的 Owner 显式核对。未知 intent 已有 `remoteAppId` 时，再次普通发布
+继续使用同一 intent 和冻结 App ID；在线 readiness 不完整时只允许在同一 App 配置并发布下一 patch 版本，缺少 App ID
+的未知结果仍不可恢复。队员头像来源与同 App 头像修复 mutation 的
+后续修正见 [V1.32-D07](#v1-32-d07)。
+
+### 后果
+
+- 一次账号登录可服务多个队员发布；连接与发布是两个独立生命周期；
+- 真实 identity 能在切换/失效时做 exact user/tenant 检查，Renderer 不再显示假 owner/tenant；
+- 正常发布只展示 Rovai 的账号校验、创建、启用、配置、等待、发布、在线核验、长连接和完成进度，不出现飞书创建确认页；
+- WebSocket 握手与 Manifest 都不是消息可达证明；只有在线 Scope/Event/Callback 状态和 published version 联合通过才完成发布；
+- Rovai 不再提供 Bot 管理/停用命令；已发布 Bot 只按绑定 brand 和冻结 App ID 跳转官方应用详情页，远端生命周期由 Owner
+  在开放平台治理；
+- Web 页面身份/bootstrap 与 console API 是版本敏感的可替换 Adapter，真实租户效果必须独立验收，不能由本地测试
+  声明成功。
+
+### 被拒绝方案
+
+- **保留或改名 controller App：** 它既不是账号 Session，也没有渠道运行职责；
+- **连接/发布共用 application registration：** 会把每次应用注册误投影为账号授权，并让普通发布进入平台确认页；
+- **保留显式兼容扫码发布：** 维持第二套创建路径、扩大版本敏感攻击面，并使首次发布的唯一状态机出现旁路；
+- **普通失败后自动弹兼容二维码：** 改变用户选择，并可能在未知远端状态下重复建 App；
+- **在 Rovai 中保留无远端控制力的管理/停用动作：** 会让用户误以为本机状态能够关闭飞书 Bot；
+- **把 console endpoint 散落在 ChannelSettings/Renderer：** 扩大 Cookie/CSRF 暴露面，且无法统一做同源准入、响应校验
+  和回读；
+- **以 Manifest 写入与回读自证权限/事件已生效：** 无法证明飞书运行时会向长连接投递消息；
+- **用占位 identity 标记 connected：** 无法证明发布发生在预期 user/tenant。
+
+<a id="v1-32-d07"></a>
+## V1.32-D07：飞书 Bot 复用队员受控头像，并允许冻结 App 做同身份修复
+
+### 背景
+
+初版普通发布统一上传 Rovai App icon，理由是本机头像不是公网 URL。但正常
+console 路径本来就能上传 PNG bytes，Main 也已经拥有内置素材和 managed avatar 的完整性校验边界。继续使用统一 icon
+会让飞书里的独立 Bot 丢失最重要的队员身份；在远端版本已经发布、Rovai intent 仍为 unknown 时只读接管，又会把这个
+错误永久固化到当前 App。
+
+### 决定
+
+普通发布使用 `AgentProfile.avatarRef` 对应的 exact icon rendition：内置头像来自打包素材，managed 头像只通过 Main
+受管存储校验后读取；路径和任意文件输入都不进入发布接口。只有 `avatarRef=null` 才回退 Rovai App icon，非空引用
+无法读取时在远端 mutation 前 fail closed。上传 URL 同时写入创建请求与 manifest，并纳入 read-back verification。
+
+Owner 显式重试一个已经冻结 `remoteAppId` 的 unknown intent 时仍不得创建第二个 App。若其 latest published 是初始
+`1.0.0`，允许在同一 App 上传当前队员头像、重放幂等在线配置并创建或复用 `1.0.1` 修复版本；头像及在线 readiness
+已经完整时只读
+验证，避免重复发布。当前规范见
+[飞书渠道架构](../../architecture/feishu-channel.md#开发者会话与队员发布)、
+[Feishu Channel v2](../../contracts/feishu-channel-v2.md#3-飞书账号与队员-bot)和
+[渠道设置](../../ui/components/channel-settings.md#队员-bot)。
+
+### 后果
+
+- Rovai 与飞书显示同一名队员的同一受控头像；
+- managed 文件损坏不会悄悄退化成另一身份，且本地路径仍不出 Main；
+- 当前错误 App 可原地修复，不需要删除、重建或产生第二份 Secret；
+- 头像修复会产生一次新的飞书版本，真实租户仍需验证平台对 manifest avatar 的最终展示。
+
+### 被拒绝方案
+
+- **所有 Bot 继续使用 Rovai icon：** 独立 Bot 只有名称不同，无法保持队员视觉身份；
+- **把本机文件路径或 data URL 交给 Renderer/网络请求：** 破坏受控头像与本地路径边界；
+- **删除并新建 App：** 会产生第二个远端身份、Secret 和潜在群成员漂移；
+- **unknown reconciliation 永远只读：** 能接管错误发布，但无法修复已知由本地错误输入造成的头像。
+
+<a id="v1-32-d08"></a>
+## V1.32-D08：队员 App 采用 template-first、durable freeze 与 activation-first 收敛
+
+### 背景
+
+开放平台新应用在第一次发布前立即配置完整 Scope、Event 和 Callback 时，在线控制面可能长时间不返回目标状态，连续
+出现 `feishu_console_event_verification_failed`。单纯延长轮询不能修正创建与发布顺序；同时，取得 App ID 后若只更新
+Renderer 进度、等整个 Provisioner 返回才写 Core，会留下“远端 App 已创建、本机没有冻结 ID”的重复创建窗口。旧错误
+分类还把所有“已有 App ID、credential 尚未写入”的失败视为 unknown，导致本来能安全核对同一 App 的配置失败被锁死。
+
+飞书同时提供模板创建和 self-build 创建：永远只用其中一条会牺牲兼容性，但在结果不明时自动尝试另一条又可能产生两个
+App。因此创建 fallback 必须以“服务器明确未创建”为边界，而不是以普通错误为边界。
+
+### 决定
+
+首次创建优先调用固定 `developer_console` 模板，并以 `publicationIntentId` 作为 correlation。只有模板请求被明确拒绝且
+能够证明没有创建时，才调用一次 self-build create；transport、timeout、HTTP 408/409/429/5xx、成功响应缺少 App ID、
+Session 失效或其他 commit 结果不明都 fail closed，不进入第二次创建。
+
+取得 App ID 后，Provisioner 必须 await Main 的 durable barrier，把 exact `remoteAppId` 持久推进到 `app_created`；该
+写入成功前不允许读取 Secret、启用 Bot、配置或创建版本。随后先启用 Bot、请求长连接事件模式，并创建或复用
+`1.0.0` activation version 直到 published；完整 Scope/Event/Callback 配置移到 activation 之后。Event mode 与事件条目
+继续共享 120 秒、每秒一次的 bounded convergence。配置方法报告真实 mutation：有变化时发布当前版本的下一 patch，
+无变化时复用现有 published version，crash recovery 复用已经存在的 exact patch。
+
+远端失败分类收敛为 `none | known_frozen | create_outcome_unknown`。只有创建结果不明且没有可信冻结 App ID 才进入
+`failed_unknown_remote_state`；App ID 已冻结后的 Secret、配置、版本、credential、upsert 或 WebSocket 失败一律
+`failed_recoverable`，再次操作只核对同一 App。在线 `verifyMemberBot()` 与真正 WebSocket connect 分成两个进度阶段；
+Renderer 使用八个进行中阶段，并把固定 failure code 降为次级诊断。
+
+当前规范见[飞书渠道架构](../../architecture/feishu-channel.md#开发者会话与队员发布)、
+[Feishu Channel v2](../../contracts/feishu-channel-v2.md#3-飞书账号与队员-bot)和
+[渠道设置](../../ui/components/channel-settings.md#渠道连接与二维码)。
+
+### 后果
+
+- 新 App 先获得可发布的 activation 基线，再等待完整在线能力收敛；120 秒预算保留但不再承担修正创建顺序的职责；
+- App ID 在任何后续 mutation 前成为 Core durable fact，配置失败、进程退出和重试都不会创建第二个 App；
+- template 与 self-build 兼容性被限制在一个可审计 fallback，结果不明时以唯一性优先；
+- 已冻结 App 的事件等待超时显示可恢复说明和“继续核对”，只有真正 create outcome unknown 锁住重建；
+- 最终版本只在配置发生变化时递增，在线验证和长连接分别给出诚实进度。
+
+### 被拒绝方案
+
+- **继续 self-build-first：** 与平台标准模板初始化路径偏离，放大首次发布前控制面不完整的窗口；
+- **模板失败一律 fallback：** transport 或响应丢失后可能再次创建，破坏每名队员唯一 App 身份；
+- **拿到 App ID 后只发 progress、最终再持久化：** crash 会丢失唯一恢复锚点；
+- **首次发布前等待完整业务配置：** 把最终一致性等待放在应用尚未 activation 的阶段，重复触发 Event 假失败；
+- **所有后续失败继续标成 unknown：** 混淆“创建是否发生”和“已知 App 是否配置完成”，阻断安全 reconciliation；
+- **固定总是发布 `1.0.1`：** 重试或 crash recovery 会重复版本，无法表达配置实际是否发生 mutation。
+
+<a id="v1-32-d09"></a>
+## V1.32-D09：飞书一期收敛为 Owner-only Camp，群与话题首次在私聊冻结项目
+
+> Owner-only、Quick Chat、不可换绑与统一 admission 仍有效；项目卡投递位置和完成态已由
+> [V1.32-D12](#v1-32-d12)取代。本节保留此前私聊方案的取舍记录。
+
+### 背景
+
+V1.32-D01 允许绑定会话中的任意飞书成员触发 Agent，并让 Owner 在渠道设置页维护第二套 ProjectBinding 目录与会话
+绑定。该模型同时引入外部成员准入、桌面端手工目录、未绑定消息重发和项目切换四套长期状态，却没有提升一期的核心
+体验。群内公开项目列表还会泄露本机工作范围，多 Bot 各自抢先回卡则会重复暴露选择入口。
+
+### 决定
+
+飞书一期只有连接开发者账号所确认的 Owner 能触发人类根消息；每个 App 通过 `union_id -> tenant user_id -> verified
+open_id` fail closed 识别。Owner 的渠道消息仍是 `ExternalPrincipal`，不映射为 `local_user`。非 Owner 私聊最多收到
+节流提示，群/话题静默忽略，且都在 observation 前终止，不产生 Principal、conversation、pending binding、Camp 或 Run。
+Developer Session 的开放平台 `tenantId` 与消息 envelope 的 `tenant_key` 属于不同命名空间，禁止直接比较。首条消息
+必须由 frozen App 下匹配 canonical Developer Identity 的 tenant `user_id` 建立 Owner，并把 event `tenant_key` 冻结到
+canonical ExternalPrincipal；后续漂移 fail closed。
+
+删除渠道侧人工 ProjectBinding 与会话绑定操作。Core 从 Rovai 既有 directory Camp 事实投影 Project Catalog；飞书只
+接收 opaque `projectId + displayName`。Owner 私聊自动使用当前 Quick Chat Camp；精确 `/new` 只在私聊关闭当前 generation、
+创建新 Quick Chat Camp，且不产生 CampMessage/Turn/Run。活动根请求期间 fail closed。
+
+普通群一个长期 Camp，话题按 canonical topic 各有一个 Camp。首次合格 Owner mention 在完整 multi-Bot aggregate finalize
+后建立 `PendingCampBinding`，冻结原始消息并私聊 Owner 一张项目卡；canonical mention 顺序中的第一个受管 Bot 被冻结为
+`acknowledgementAppId`，重试、恢复和后续 pending 消息不能换 Bot 或重复发卡。Card callback 只信 envelope operator，
+使用 nonce/version/CAS 校验；选择 active 项目后原子创建不可换绑的 Camp，并把冻结消息按 FIFO 送入既有统一 admission。
+
+当前规范见[飞书渠道架构](../../architecture/feishu-channel.md#owner-only-入站与会话执行范围)、
+[Feishu Channel v2](../../contracts/feishu-channel-v2.md#2-owner-only-camp-与项目选择)和
+[渠道设置](../../ui/components/channel-settings.md#页面结构)。
+
+### 后果
+
+- 一期没有飞书成员授权、渠道项目管理或会话换绑状态；
+- 私聊即时可用，`/new` 只轮换 Quick Chat 历史，不把控制指令送入模型；
+- 群/话题只选择一次项目，Camp 冻结路径后不可换绑；
+- 项目列表只发送给 Owner，多 Bot 同一消息只有一张可恢复卡；
+- `card.action.trigger`、callback mode 4 与在线回读成为每个队员 Bot 的发布必需能力。
+
+### 被拒绝方案
+
+- **继续允许绑定后的任意成员触发：** 扩大一期身份与滥用面，并需要额外的项目可见性和治理规则；
+- **保留渠道页手工项目目录/会话绑定：** 重复 Rovai 既有项目事实源，造成路径和生命周期漂移；
+- **未绑定消息要求重发：** 丢失 Owner 已明确表达的首条请求，且无法提供连续群聊体验；
+- **每个被 mention Bot 都发项目卡：** 重复展示项目并产生 callback 竞态；
+- **在公共群展示项目选择：** 泄露本机项目名称和工作范围；
+- **允许群内 `/new` 或项目换绑：** 破坏一个群/话题、一个 Camp、一个冻结执行范围的不变量。
+
+<a id="v1-32-d10"></a>
+## V1.32-D10：发布期解析并冻结每个 App 的 Owner open ID
+
+### 背景
+
+真实飞书个人版的 `im.message.receive_v1` 可只携带 `open_id + union_id`，不携带 tenant `user_id`。
+开放平台 Developer Session 能稳定证明当前 Rovai Owner 账号，但没有可直接跨 App 使用的 `union_id`；`open_id` 又是 App-scoped，叮叮与
+咕咕即使属于同一 Owner，也会得到不同 `open_id`。直接信任第一个发送者不构成身份证明，每条消息远程查身份
+又会把稳定准入变成高延迟网络依赖。
+
+### 决定
+
+每个冻结 App 的稳定 Owner identity 是 `(app_id, open_id)`。发布或同 App reconciliation 完成在线配置后，
+Provisioner 先再次证明 publication intent 对应的 Developer Identity，再使用该 App 的 `appId + appSecret` 调用
+Application v6 get，以 `user_id_type=open_id` 读取不可变 `creator_id`。App 创建与 durable freeze 均发生在该已证明
+Session 中，因此该值就是 App-scoped `ownerOpenId`。可信 Main Host 把它随 Bot upsert 交给 Core；Core 在同一事务
+冻结 Bot binding 与 `(account_id, app_id, owner_open_id digest)`，已有不同 digest 时拒绝，禁止换绑。Owner 解析属于
+发布完成条件；失败后保留原 App，只能原地重试。
+
+发布与同 App reconciliation 只要求 App 自身资源管理权限，不要求 Contact scope，也不读取通讯录；Rovai 只读取
+当前 App 的创建者 Open ID 并持久化其摘要。
+入站不再回读消息或远程查 Contact，直接以本地 `(app_id, open_id)` 证明；`union_id/user_id` 只做补充归并与
+冲突检查。缺少冻结映射或冲突都按连接异常 fail closed，不得误报 non-owner。
+
+当前规范见[飞书渠道架构](../../architecture/feishu-channel.md#owner-only-入站与会话执行范围)和
+[Feishu Channel v2](../../contracts/feishu-channel-v2.md#2-owner-only-camp-与项目选择)。
+
+### 后果
+
+- 个人版 Owner 首条消息不需要手工核验，也不会因 envelope 缺少 `user_id` 被当成 non-owner；
+- 每次发布/对账只解析该 App 的已知 Owner；稳定消息路径始终是本地 Core gate；
+- 切换 Developer Session 不迁移、换绑或重发已有 App；旧 Bot 继续使用原账号的 App ID 与 credential。
+
+### 被拒绝方案
+
+- **把首个发送者的 open ID 直接冻结为 Owner：** 群成员可在真正 Owner 之前触发，不能构成身份证明；
+- **首条消息回读 tenant user ID：** 把发布完整性留到线上消息路径，增加首消息延迟与平台故障面；
+- **用 Contact v3 按 tenant user ID 转换：** 额外要求用户 ID/通讯录权限，且把 App 自身身份问题错误扩展为联系人读取；
+- **读取可转移的当前应用 Owner：** 远端转移会诱发身份换绑；不可变创建者才符合 no-rebind 状态机；
+- **只按裸 `open_id` 判断：** `open_id` 是 App-scoped，缺少 `app_id` 会错误合并不同 App 的身份；
+- **按 `union_id` 读取通讯录详情：** 不能替代 App-scoped `open_id`，也扩大跨 App 身份依赖；
+- **切换开发者账号后自动重建 Bot：** 会打破每队员唯一 App 与 no-rebind 状态机。
+
+<a id="v1-32-d11"></a>
+## V1.32-D11：执行过程使用临时控制台，公开正文与附件保持永久且独立
+
+> D11 的临时控制台、永久正文与附件生命周期边界继续有效；终态卡片的当前展示、sealing 与分页边界见
+> [V1.32-D16](#v1-32-d16)。
+
+### 背景
+
+早期 ChannelDelivery 用 `agent_status`、`agent_output` 和 `completion` 反复更新状态卡。同一飞书消息同时承担执行过程、
+公开回复和最终状态，导致正文可能被终态覆盖，也无法表达多 Agent 各自的工具进度。Renderer 已有可信的公共
+Execution Evidence presentation，Main 若另写一套又会产生本地/飞书语义漂移。Camp 已有 Managed Attachment v2 正式
+发布 authority，继续把公开图片/文件降级为文本也会丢失 Agent 的实际交付物。
+
+### 决定
+
+每个 AgentRun 建立一个 Core-owned execution console identity，由实际作者 Bot 把公开 Evidence、Run 状态和公开输出
+投影为同一 Card 2.0 并 durable upsert；Main 和 Renderer 共享操作归一化、时序、状态和分组规则。reasoning/thought 永不进入该
+surface，活跃工具展开，终态连续成功/已记录工具折叠。下一条 root request admission 由原 Bot recall 同一
+ChannelConversation 中更早 Turn 的控制台；在途 upsert 先结束，已撤回/不存在按幂等成功。
+
+Agent 的正式公开正文改为每条 CampMessage 一个新的无标题 Markdown 消息，永不更新任何状态卡或其他正文。
+CampMessage 的 available Managed Attachment v2 引用按 ordinal 生成独立原生 image/file delivery；发送时重新验证
+`campId + attachmentId` authority、字节数和 digest。正文先终态，附件逐个独立重试；一个附件最终失败只追加一条
+attention，不重发正文或其他附件。
+
+`queue_ack` 只为真实 queued 请求创建，admission 后删除或 recall。`agent_status` 与 `completion` 退出用户可见协议。
+ChannelTurnRequest settlement 只等待 terminal Turn 与永久 `agent_output | agent_attachment | attention`，不等待临时
+控制台、recall 或 queue ack。当前规范见[飞书渠道架构](../../architecture/feishu-channel.md#输出恢复与秘密)和
+[Feishu Channel v2](../../contracts/feishu-channel-v2.md#7-channeldelivery)。
+
+### 后果
+
+- 多 Agent/A2A 各有一个可持续更新、可恢复且作者身份准确的执行控制台；
+- 飞书永久正文与本地公开 CampMessage 一一对应，不再出现“回复卡”标题或终态覆盖；
+- 图片/文件复用现有 Attachment authority，上传失败范围收敛到单一附件；
+- 旧 schema 的状态/完成 transport 行在 Migration 119 clean break 中退出，既有业务消息和附件 authority 保留。
+
+### 被拒绝方案
+
+- **继续用一张卡覆盖状态、正文和完成：** presentation 与业务消息生命周期混在一起，终态会破坏永久输出；
+- **直接转发 Runtime stream：** 会泄漏 reasoning、stdout 或未形成公共 authority 的过程数据；
+- **Main 单独实现执行过程格式：** 本地与飞书会随事件分类和工具分组规则演化而漂移；
+- **把所有附件绑成一次发送：** 任一上传失败都会迫使正文或已成功附件重复；
+- **用路径作为附件 identity：** 绕过 Managed Attachment 的 Camp scope、digest 与 symlink/可读性验证。
+
+<a id="v1-32-d12"></a>
+## V1.32-D12：项目选择回到原会话，Core 先失权再异步撤回
+
+### 背景
+
+D09 把未绑定群与话题的项目卡私聊给 Owner，以避免公开本机项目路径。但这会让 Owner 离开正在工作的上下文，无法直观看出
+选择作用于哪个群或话题，也让 Topic 的首次使用体验断裂。当前 Project Catalog 已能把飞书卡片限制为 opaque project ID
+与可控显示名，canonical path 始终留在 Core；因此无需用私聊位置承担路径保密。与此同时，公共卡片会被群成员看到，必须把
+“谁能点击”“哪张卡仍有效”“成功后如何消失”收敛为 Core 可恢复的安全状态，而不能依赖飞书 UI 是否及时更新。
+
+### 决定
+
+普通群的 `project_selection` 发送到原 `chatId`，Topic 的卡片发送到原父群并使用该 Topic 的稳定 reply anchor；不再以
+Owner open ID 作为正常投递目标。卡片只展示 bounded conversation/project display name 和 opaque `projectId`，禁止
+canonical path、operator identity 或本机凭据。multi-Bot 仍只由冻结的 `acknowledgementAppId` 发一张卡。
+
+Core 以 exact PendingCampBinding、frozen App、callback envelope 中的 Owner identity、当前已发送卡片的 external
+message ID、version、nonce 与 expiry 共同判定权威卡。action payload 中的身份字段不可信。Non-owner 点击不改变 pending、
+version 或 nonce，只通过 card-action ACK 收到“仅 Rovai Owner 可以选择项目”；旧卡、双击与重放返回过期提示。
+
+Owner bind 成功时，Core 在同一事务完成 `pending -> resolving -> resolved`、immutable binding/Camp 创建、冻结消息 FIFO
+promotion 与统一 admission，然后追加 durable recall；外部撤回成功与否不影响卡片已经失权。项目刚好 unavailable/archived
+时 pending 不被消费，Core 轮换 version/nonce 并以 durable update 刷新原卡。`project_selection` 继续是一个封闭 delivery
+kind，以 `operation = send | update | recall` 表达外部生命周期，不新增数据库 kind 或 schema。
+
+启动恢复发现旧 private picker 时，Core 先轮换 version/nonce 使旧卡失权，再为已发送旧卡排 durable recall，并在原群/Topic
+创建 replacement picker。项目卡 payload 同时冻结 `cardRevision`；当前 pending version 的旧 revision 卡若已发送，
+Host tick 轮换 version/nonce 后原位更新到当前 revision；未落地的旧 revision `send` 只有在 `format_error` 且没有
+external message ID 时才轮换并生成 replacement。当前 revision 再次失败保持终态，不能循环重发。成功后不把原卡
+patch 成永久“已绑定”结果；公共卡只在选择期间存在。
+
+当前规范见[飞书渠道架构](../../architecture/feishu-channel.md#owner-only-入站与会话执行范围)、
+[Feishu Channel v2](../../contracts/feishu-channel-v2.md#2-owner-only-camp-与项目选择)和
+[渠道设置](../../ui/components/channel-settings.md#owner-identity-与绑定诊断)。
+
+### 后果
+
+- Owner 在原群或原 Topic 完成选择，不再跨到私聊确认作用域；
+- 项目显示名在选择期间对当前会话可见，路径和本机 authority 仍不出 Core；
+- Non-owner 的点击只得到私有 toast，不修改公共卡片或任何业务事实；
+- Core commit 是安全失效点，飞书 recall 是可重试的 presentation 清理；
+- 既有 private picker 可在重启/Host tick 后自动迁移，不要求 Owner 重发首次请求。
+
+### 被拒绝方案
+
+- **继续私聊 Owner：** 保密了已经可控的显示名，却持续制造上下文切换和 Topic 归属歧义；
+- **成功后 patch 为永久结果卡：** 在公共会话留下无后续价值的状态噪音，并把 presentation 成功误当作安全提交；
+- **先同步撤回、再提交 Core：** 网络超时会让业务提交依赖外部 UI，且无法证明是否需要重做；
+- **只信 nonce/version：** replacement 或残留旧卡仍可能携带合法旧控制值，缺少 exact external message identity；
+- **从 action payload 判断 Owner：** 卡片 payload 可被重放或构造，不能成为身份来源；
+- **新增独立 recall delivery kind：** 现有 `project_selection` authority 与外部 message ID 已足以表达同一生命周期，扩大闭集和
+  Migration 没有收益。
+
+<a id="v1-32-d13"></a>
+## V1.32-D13：终态执行台在原卡持久收起，Owner 以 CAS 展开完整过程
+
+> D13 的终态收起、持久 view state、nonce/CAS 与 expand/collapse action 已由
+> [V1.32-D16](#v1-32-d16)取代；per-AgentRun 原卡、同卡分页和下一根请求 recall 边界继续有效。
+
+### 背景
+
+D11 让每个 AgentRun 拥有独立临时控制台，但终态仍把 narration、输出和失败项铺在消息流中，并把连续成功工具替换成
+不可继续展开的“已执行 N 项操作”。前者让已完成的多 Agent 会话持续占据屏幕，后者又无法在需要审计时看到具体操作。
+飞书卡片没有适合手机端的可靠多层折叠；只在 Main 内存保存展开状态也无法支撑重启后的旧卡 callback、乱序点击和分页。
+
+### 决定
+
+非终态控制台保持完整 `live`，不提供收起动作。Run 首次终结时，同一张 Card 2.0 自动切到 `collapsed`，只显示状态、由
+公共 execution presentation 计算的操作统计、稳定开始/结束时间和安全失败摘要；无工具时不伪造零项统计。Owner 点击后
+在同一 external message 切到 `expanded`，按真实顺序展示 narration、plan、diagnostic、执行台 Agent output 和每一项
+安全工具摘要。连续工具只加视觉组标题，不产生第二层 disclosure；过长详情按语义 block 在原卡分页。
+
+Core execution-console projection 持久保存 mode、page index 与单调 view version。外部 action 只携带 Run、预期 snapshot/
+view version 和 version-bound nonce；真实 operator identity 只取 callback envelope。Core 同时校验 Owner、冻结 App、exact
+external message、terminal state、snapshot/version/nonce 和动作适用性，再以 CAS 更新投影、旋转版本并排 durable upsert。
+Main 重新读取最新 Core snapshot 后更新原卡，不使用 callback 正文。终态 snapshot reconciliation 递增 view version；页码
+越界由可信 Host 通过同一 CAS seam 钳制。下一条 root admission 仍无条件 recall 旧控制台，与其当前 mode/page 无关。
+
+当前规范见[飞书渠道架构](../../architecture/feishu-channel.md#输出恢复与秘密)和
+[Feishu Channel v2](../../contracts/feishu-channel-v2.md#7-channeldelivery)。
+
+### 后果
+
+- 已完成的多 Agent 会话默认保持安静，需要时仍能查看公开执行摘要；
+- 卡片双击、旧按钮、重放、错误 App 与 non-owner 不会回滚或覆盖更新后的视图；
+- `collapsed/expanded/pageIndex` 跨 Core/Main 重启恢复，外部更新失败仍由 Outbox 重试原消息；
+- Migration 120 将 Data Contract 推进到 `v1.33 / projection schema 74`，不改变 AgentRun、CampMessage、永久输出或附件。
+
+### 被拒绝方案
+
+- **外层收起后再按工具组二次展开：** 手机端层级过深，且要持久化多个 panel 状态；
+- **终态只保留不可点击的工具汇总：** 降低消息噪音，却丢失用户需要复核的具体操作；
+- **展开时另发详情消息或打开 Web 页面：** 增加第二份生命周期和清理目标，破坏原卡 recall 边界；
+- **只在 Main 内存保存 mode/page：** 重启后旧卡无法恢复，乱序 callback 可覆盖新 snapshot；
+- **只信 action payload 的 Owner 或版本：** payload 不是身份 authority，也不能证明点击的是冻结 App 的当前原卡。
+
+<a id="v1-32-d14"></a>
+## V1.32-D14：飞书执行卡只显示安全操作摘要，命令输入输出留在本机
+
+> D14 关于不展示工具输入输出、Secret 和完整 patch body 的边界继续有效；只显示“执行命令”、expand/collapse 与持久
+> CAS callback 的部分已由 [V1.32-D16](#v1-32-d16)取代。
+
+### 背景
+
+D13 允许 Owner 在飞书原卡展开完整公共过程，但共享 presentation 把本机 Shell command input 和 output 一并复制到外部
+会话。它既增加卡片噪音，也把仅用于本机审计的工作区命令与输出扩大到飞书会话。与此同时，执行卡的按钮仍使用旧式
+直接 `button.value`；卡片声明为 schema 2.0 后，飞书客户端不会为该结构触发受支持的 callback，因此完成态入口看似可点却
+没有行为。
+
+### 决定
+
+Core Evidence 与 Rovai 本机执行历史保持不变。飞书 execution console 只复用操作时序、状态、分组和非命令公开内容；
+Shell/command 项无论 live 还是 expanded 都只显示状态与“执行命令”，不得携带 command input、命令预览、stdout/stderr、
+聚合输出或从这些字段推导的失败正文。文件变化、其他 Tool 摘要、narration、plan、diagnostic 与正式 Agent output 继续
+按当前合同展示。
+
+展开、收起和翻页按钮统一使用 Card 2.0 的 `column_set -> column -> button`，并以
+`behaviors: [{ type: 'callback', value }]` 回传已有 CAS action。Core projection、nonce、Owner/App/message 校验与原卡更新
+流程不变。
+
+### 后果
+
+- 飞书会话仍能判断执行进度与操作数量，但不会获得本机命令正文和输出；
+- 完整命令证据仍可在 Rovai 本机按原有授权查看，Core 不删除或改写 Evidence；
+- 完成态展开、收起和分页会实际产生 `card.action.trigger`，继续复用既有 Owner/CAS 防重放边界；
+- 变更只影响飞书 presentation 与卡片 JSON，不需要 Migration 或新的 Core 状态。
+
+### 被拒绝方案
+
+- **继续复制完整命令详情：** 外部卡片信息过载，并扩大本机执行信息的分发范围；
+- **从 Core 删除命令 Evidence：** 会破坏 Rovai 本机执行历史与审计能力，范围远超渠道展示需求；
+- **保留旧式按钮并只修 Host handler：** 客户端不会可靠发出 V2 callback，服务端修复无法触达；
+- **点击后另发一张详情卡：** 制造第二份生命周期，破坏 D13 的原卡更新与 recall 边界。
+
+当前规范见[飞书渠道架构](../../architecture/feishu-channel.md#输出恢复与秘密)和
+[Feishu Channel v2](../../contracts/feishu-channel-v2.md#7-channeldelivery)。
+
+<a id="v1-32-d15"></a>
+## V1.32-D15：话题群当前 Rovai Bot roster 是 Topic Camp 的动态默认协作队员池
+
+### 背景
+
+D04 为避免污染历史话题，把 Topic Camp membership 冻结为首次 mention，并只在后续显式 mention 或 A2A exact target 时
+按需扩张。这把“当前根消息首先启动谁”和“Camp 内允许谁协作”错误合并成了同一个集合：Owner 只 @ Alice 创建话题后，
+Alice 无法直接 A2A 给同在父话题群的 Bob/Carol；父群加入或移出 Bot 也不能从下一次 Run 起稳定反映到既有 Topic。
+
+### 决定
+
+独立话题群父群中当前 `present + published` 的 Rovai Bot roster 是该父群所有 Topic Camp 的动态默认协作队员池。新 Topic
+Camp 在 admission 首条消息前，以完整 roster 建立 Camp membership；但该根消息的初始 AgentRun targets 仍严格等于
+canonical mentions。完整协作池不得扩大本轮初始 fan-out。
+
+Host 在新 Topic 建 Camp、每条 Owner 根消息和项目卡 resolve 前强制读取全部已发布 Bot 的 `isInChat`，并继续消费 Bot
+add/remove event 与周期性 sweep。每次权威快照推进 roster generation，并通过既有 `feishu` source binding、membership
+generation/version 和 reconciliation generation，把父群所有 active Topic Camp 对齐到 desired roster。
+
+A2A、Gather、Message Delivery retry/successor 等内部路径在物化新的 Topic AgentRun 前，Core 持久建立一个晚于当前值的
+roster generation 门闩。Host tick 返回父群 refresh 请求；Main 完整重读并提交新 generation 后，Core 先完成 membership
+reconciliation，再恢复等待的 Delivery。读取失败、回写失败或目标已移出都 fail closed，不能用旧 roster 创建 Run。
+
+移出 Bot 时不得取消已经运行的 AgentRun。若 membership remove 会影响非终态 Run，正式 cutover 延迟到 Run 终态后的
+reconciliation；但 latest roster 立即成为 future-admission fence，新的根目标、A2A/Gather target、retry/successor 都不能
+再为该 Bot 创建 Run。历史消息、历史 Run、Camp、Topic identity 与一个 Topic 对应的冻结项目全部保留。
+
+### 后果
+
+- Owner 只 @ Alice 时仍只启动 Alice，但 Alice 从首轮开始即可在 Core 内 A2A 给同群 Bob/Carol；
+- 新增 Bot 在下一次权威同步后的新 Run 可用，既有 Topic 无需重建或再次 mention；
+- 移出 Bot 不污染在途执行，但所有下一 Run fail closed，历史证据保持可读；
+- 普通群语义、一个 Topic 一个 Camp/冻结项目、飞书显式 mention 只决定根 targets，以及 A2A 不经过飞书互相 @ 均不改变；
+- 继续复用既有 roster state、Camp Membership 与 Message Delivery waiting facts，不新增 Migration。
+
+### 被拒绝方案
+
+- **继续冻结首次 mentions：** 把首轮路由误当长期协作授权，无法表达父群当前协作队员；
+- **只在 Topic 中再次 mention 后加入：** 要求 Owner 为 Core 内部协作手工预热 membership；
+- **只在 Bot add/remove delta 时同步：** 丢事件、乱序或停机恢复后无法证明当前完整集合；
+- **更新 roster 时取消正在运行的 Run：** 破坏已经冻结的执行上下文和历史可解释性；
+- **只在周期 sweep 同步：** A2A/Gather/retry 可能在下一次 sweep 前按旧 roster 创建 Run。
+
+当前规范见[飞书渠道架构](../../architecture/feishu-channel.md#bot-roster-与-camp-membership)、
+[Feishu Channel v2](../../contracts/feishu-channel-v2.md#6-camp-创建roster-与-admission)和
+[Camp Membership v1](../../contracts/camp-membership-v1.md)。
+
+<a id="v1-32-d16"></a>
+## V1.32-D16：终态执行卡使用 sealed snapshot、同源安全命令与无状态分页
+
+### 背景
+
+D13/D14 的终态展开依赖 Core 持久 view state：callback 先更新 mode/page/version 并排一条 Outbox upsert，Main 又在 callback
+内直接更新原卡。两个 writer 会竞争同一 external message，表现为展开后一闪而过、再次点击因 version/nonce 失效。终态
+摘要也隐藏了用户真正需要核对的命令，而 D14 把命令统一降为“执行命令”，丢失 flags、参数和路径。直接复制原始 tool
+payload 又会泄露 stdin/stdout/stderr、消息正文或 patch body，不能作为替代。
+
+### 决定
+
+运行中和终态执行卡都直接按真实顺序平铺公开 narration、plan、diagnostic、每条 command、结构化 file changes 与最终公开
+输出；终态不再收起，不显示操作计数，也没有查看/收起 action。Runtime/shared execution presentation 生成同一个安全
+`publicCommand`，供 Rovai 本机执行台和飞书共同消费。它保留 executable、subcommand、flags、路径和非敏感参数，不翻译、
+不截断；自由正文、认证信息、Token/Cookie/环境变量值仍统一脱敏。飞书不得从原始 payload 或 `detail` 二次解析，也不显示
+stdin、stdout、stderr、aggregated output、tool input/output JSON 或完整 patch body；`apply_patch` 只显示文件增删行。
+
+AgentRun 终结后，Core 先进入 `terminal_pending`，等待公开 evidence/output 连续 900ms 静默，再产生唯一最终
+`terminal_sealed` snapshot。sealed 后 materializer 不再更新卡片。终态内容按时序分成每页最多 20 条 command、约 10,000
+字符的页面，且不拆开 command 与 file changes。
+
+分页 action 只有 `execution_console_page`，携带 `agentRunId + snapshotSequence + pageIndex`。Core 的
+`channels.executionConsole.page.authorize` 只验证 callback envelope Owner、冻结 App、authoritative message、
+`terminal_sealed` exact sequence 和合法页码，不保存页面状态。Main 直接从 sealed snapshot 渲染目标页并且只更新原卡一次；
+不写 display/page/view state，不轮换 nonce，不排 Outbox，也不触发 delivery pump。相同页可重复点击，下一根 root admission
+仍按既有规则 recall 旧卡。
+
+### 后果
+
+- 终态卡不会被后台 materializer 或第二条 Outbox upsert 覆盖，反复翻页保持稳定；
+- 飞书与本机执行台展示同源安全命令，完整 flags、参数和路径可复核，同时工具输入输出与秘密仍不外发；
+- Migration 121 将 Data Contract 推进到 `v1.34 / projection schema 75`，增加 pending/sealed 状态并把旧 `terminal` 映射为
+  `terminal_sealed`；旧 display/page/view 列暂留但不再进入正常路径；
+- 旧终态卡的 expand/collapse callback 不再受支持；已冻结 external message identity 和下一根请求 recall 生命周期不变。
+
+### 被拒绝方案
+
+- **继续修补 view-version CAS：** 仍保留 callback update 与 Outbox update 的双 writer，无法消除覆盖竞态；
+- **只延长终态 materializer 延迟：** 没有 sealed 状态就不能证明卡片以后不会再次被覆盖；
+- **每次翻页写 Core page state：** 页面不是业务事实，增加重启状态、版本冲突和无收益的 Outbox 写入；
+- **在飞书重新解析原始 Shell 字符串：** 会与本机脱敏规则漂移，也容易恢复出不应外发的 payload；
+- **继续只显示命令名或中文 activity：** 无法核对实际 flags、参数和路径。
+
+当前规范见[飞书渠道架构](../../architecture/feishu-channel.md#输出恢复与秘密)和
+[Feishu Channel v2](../../contracts/feishu-channel-v2.md#7-channeldelivery)。
+
+## 版本编号合并说明
+
+2026-08-30 合并 `main@27c6b16f` 时，主线已使用 v1.30 保存其他功能。渠道分支
+`7eaa7b97` 中原 v1.30 的记录迁至 v1.32，仅调整版本元数据、决定 ID/锚点和链接；
+原取舍、确认内容、Data Contract 编号与验收结论保持不变，原始记录可从该 Git revision 追溯。

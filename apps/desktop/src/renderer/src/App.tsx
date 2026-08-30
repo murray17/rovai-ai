@@ -1,4 +1,6 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { readErrorMessage } from './error-message'
+import { CoreSubsystemNotice } from './CoreSubsystemNotice'
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import type {
   AdapterInstallation,
   AdapterKind,
@@ -38,6 +40,7 @@ import type {
   HearthReviewItem,
   SendCampMessageResult,
   StoredCommandResult,
+  SupervisorSnapshot,
   ThemePreference,
   WorkspaceInspection,
   WorkspaceSelection
@@ -70,6 +73,8 @@ import {
 import { NewConversationDialog } from './NewConversationDialog'
 import { openRuntimeModelCatalog } from './runtime-check'
 import { PanelToggleIcon } from './PanelToggleIcon'
+import { FilePreviewProvider, useOptionalFilePreview } from './FilePreviewContext'
+import { FilePreviewTabs } from './FilePreviewTabs'
 import { AppearanceSettings } from './AppearanceSettings'
 import { AboutUpdatesSettings } from './AboutUpdatesSettings'
 import { AppUpdatePrompt } from './AppUpdatePrompt'
@@ -597,6 +602,239 @@ export function ControlledShutdownOverlay({
 }
 
 export function App(): React.JSX.Element {
+  const [supervisor, setSupervisor] = useState<SupervisorSnapshot | null>(null)
+
+  useEffect(() => {
+    let disposed = false
+    const apply = (snapshot: SupervisorSnapshot): void => {
+      if (disposed || snapshot.schemaVersion !== 1) return
+      setSupervisor((current) => (
+        current === null || snapshot.revision > current.revision ? snapshot : current
+      ))
+    }
+    const unsubscribe = window.rovai.supervisor.onChanged(apply)
+    void window.rovai.supervisor.getSnapshot().then(apply).catch(() => undefined)
+    return () => {
+      disposed = true
+      unsubscribe()
+    }
+  }, [])
+
+  if (!authoritativeWorkspaceIsAvailable(supervisor)) {
+    return <BootstrapShell snapshot={supervisor} />
+  }
+  return (
+    <div className="authoritative-workspace">
+      <AuthoritativeApp />
+      <CoreSubsystemNotice subsystems={supervisor?.coreSubsystems ?? []} />
+    </div>
+  )
+}
+
+export function authoritativeWorkspaceIsAvailable(
+  snapshot: SupervisorSnapshot | null
+): boolean {
+  return snapshot?.runtimeMode === 'full_core'
+    && snapshot.fullCoreState === 'ready'
+    && snapshot.capabilities.authoritativeWorkspace
+    && snapshot.capabilities.coreRequests
+}
+
+export function BootstrapShell({
+  snapshot
+}: {
+  snapshot: SupervisorSnapshot | null
+}): React.JSX.Element {
+  const [appearance, setAppearance] = useState<AppearanceSnapshot>(
+    () => initialAppearanceSnapshot(document.documentElement)
+  )
+  const [actionError, setActionError] = useState<string | null>(null)
+  const [busy, setBusy] = useState<'retry' | 'diagnostics' | null>(null)
+
+  useEffect(() => {
+    let disposed = false
+    const acceptSnapshot = (next: AppearanceSnapshot): void => {
+      if (disposed) return
+      applyAppearanceSnapshot(document.documentElement, next)
+      setAppearance(next)
+    }
+    void window.rovai.appearance.get().then(acceptSnapshot).catch(() => undefined)
+    const unsubscribe = window.rovai.appearance.onChanged(acceptSnapshot)
+    return () => {
+      disposed = true
+      unsubscribe()
+    }
+  }, [])
+
+  const authorityCopy = bootstrapAuthorityCopy(snapshot)
+  const retry = async (): Promise<void> => {
+    setBusy('retry')
+    setActionError(null)
+    try {
+      await window.rovai.supervisor.retryFullCore()
+    } catch (error) {
+      setActionError(errorMessage(error))
+    } finally {
+      setBusy(null)
+    }
+  }
+  const exportDiagnostics = async (): Promise<void> => {
+    setBusy('diagnostics')
+    setActionError(null)
+    try {
+      await window.rovai.exportDiagnostics()
+    } catch (error) {
+      setActionError(errorMessage(error))
+    } finally {
+      setBusy(null)
+    }
+  }
+  const changeAppearance = async (preference: ThemePreference): Promise<void> => {
+    setActionError(null)
+    try {
+      setAppearance(await window.rovai.appearance.setPreference(preference))
+    } catch (error) {
+      setActionError(errorMessage(error))
+    }
+  }
+
+  return (
+    <div className="bootstrap-shell" data-runtime-mode={snapshot?.runtimeMode ?? 'bootstrap_only'}>
+      <WindowDragStrip page="settings" />
+      <header className="bootstrap-shell-brand" aria-label="Rovai AI">
+        <span className="bootstrap-shell-mark" aria-hidden="true">R</span>
+        <span>Rovai AI</span>
+      </header>
+      <main className="bootstrap-shell-main">
+        <section className="bootstrap-authority-card" aria-live="polite">
+          <span className={`bootstrap-authority-state state-${snapshot?.fullCoreState ?? 'idle'}`}>
+            {authorityCopy.eyebrow}
+          </span>
+          <h1>{authorityCopy.title}</h1>
+          <p>{authorityCopy.description}</p>
+          {snapshot?.startupPhase === 'migrating_authority' && (
+            <div className="bootstrap-migration-progress" role="progressbar" aria-label="正在升级本地数据">
+              <i />
+            </div>
+          )}
+          <div className="bootstrap-actions">
+            <button
+              className="primary-button"
+              type="button"
+              disabled={busy !== null || !snapshot?.capabilities.fullCoreRetry}
+              onClick={() => void retry()}
+            >
+              {busy === 'retry' ? '正在重试…'
+                : snapshot?.startupPhase === 'preparing_windows_data_root' ? '重启并重新检查' : '重新检查'}
+            </button>
+            <button
+              className="quiet-button"
+              type="button"
+              disabled={busy !== null}
+              onClick={() => void exportDiagnostics()}
+            >
+              {busy === 'diagnostics' ? '正在导出…' : '导出诊断'}
+            </button>
+          </div>
+          {(actionError || snapshot?.lastError) && (
+            <p className="bootstrap-action-error" role="alert">
+              {actionError ?? snapshot?.lastError?.message}
+            </p>
+          )}
+        </section>
+
+        <aside className="bootstrap-local-card">
+          <div>
+            <span className="bootstrap-local-label">本地外观</span>
+            <p>壳层设置不依赖权威工作区，可以继续使用。</p>
+          </div>
+          <div className="bootstrap-theme-options" role="group" aria-label="外观主题">
+            {([
+              ['system', '跟随系统'],
+              ['day', '日间'],
+              ['night', '夜间']
+            ] as const).map(([preference, label]) => (
+              <button
+                type="button"
+                aria-pressed={appearance.preference === preference}
+                onClick={() => void changeAppearance(preference)}
+                key={preference}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+          {(snapshot?.localDegradations.length ?? 0) > 0 && (
+            <div className="bootstrap-degradations">
+              <span className="bootstrap-local-label">本机设置提示</span>
+              <ul>
+                {snapshot?.localDegradations.map((degradation) => (
+                  <li key={degradation.code}>{degradation.message}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </aside>
+      </main>
+    </div>
+  )
+}
+
+export function bootstrapAuthorityCopy(snapshot: SupervisorSnapshot | null): {
+  eyebrow: string
+  title: string
+  description: string
+} {
+  if (snapshot?.startupPhase === 'preparing_windows_data_root') {
+    return {
+      eyebrow: '桌面壳层已就绪',
+      title: '本机数据目录尚未准备好',
+      description: 'Core 尚未启动，也没有建立替代工作区。请查看具体原因，修复后重启桌面壳层并重新检查，或先导出诊断。'
+    }
+  }
+  if (!snapshot || snapshot.fullCoreState === 'idle' || snapshot.fullCoreState === 'starting') {
+    if (snapshot?.startupPhase === 'migrating_authority') {
+      return {
+        eyebrow: '正在安全升级',
+        title: '工作区数据正在迁移',
+        description: 'Rovai 正在一致副本上升级并验证数据；原数据库会保留到原子切换完成。'
+      }
+    }
+    return {
+      eyebrow: '桌面壳层已就绪',
+      title: '正在检查本地工作区',
+      description: '外观、诊断和本机状态已经可用；权威工作区通过检查后会自动打开。'
+    }
+  }
+  if (snapshot.authorityState.kind === 'owned_by_active_core') {
+    return {
+      eyebrow: '工作区正在使用',
+      title: '另一个 Rovai Core 正在使用这份数据',
+      description: '当前窗口没有创建第二份数据。关闭另一个实例后，可在这里重新检查。'
+    }
+  }
+  if (snapshot.authorityState.kind === 'migration_failed') {
+    return {
+      eyebrow: '升级尚未完成',
+      title: '原工作区仍被安全保留',
+      description: '迁移副本未通过完整流程，Rovai 没有切换或建立空数据库。可以重试并导出诊断。'
+    }
+  }
+  if (snapshot.fullCoreState === 'crashed') {
+    return {
+      eyebrow: '后台服务已停止',
+      title: '权威工作区暂时不可用',
+      description: '桌面壳层仍在运行。你可以重新检查，或先导出诊断信息。'
+    }
+  }
+  return {
+    eyebrow: '权威检查已阻止启动',
+    title: '工作区没有被猜测或覆盖',
+    description: 'Rovai 保留了现有本地状态，不会用空列表冒充原工作区。请重新检查或导出诊断。'
+  }
+}
+
+function AuthoritativeApp(): React.JSX.Element {
   const [appearance, setAppearance] = useState<AppearanceSnapshot>(
     () => initialAppearanceSnapshot(document.documentElement)
   )
@@ -629,6 +867,10 @@ export function App(): React.JSX.Element {
   const campSnapshot = campSnapshotState.snapshot
   const [campInspectorVisible, setCampInspectorVisible] = useState(initialCampInspectorVisibility)
   const [campInspectorTab, setCampInspectorTab] = useState<CampInspectorTab>('tasks')
+  const [campInspectorSelectionRequest, setCampInspectorSelectionRequest] = useState({
+    tab: 'tasks' as CampInspectorTab,
+    sequence: 0
+  })
   const [optimisticCampMessages, setOptimisticCampMessages] = useState<OptimisticCampMessageEntry[]>([])
   const [cancellingTurnIds, setCancellingTurnIds] = useState<Set<string>>(() => new Set())
   const [cancellingRunIds, setCancellingRunIds] = useState<Set<string>>(() => new Set())
@@ -2974,6 +3216,7 @@ export function App(): React.JSX.Element {
   const openCampInspector = (tab: CampInspectorTab): void => {
     setCampInspectorTab(tab)
     setCampInspectorVisible(true)
+    setCampInspectorSelectionRequest((current) => ({ tab, sequence: current.sequence + 1 }))
   }
 
   const changeExecutionConsolePlacement = useCallback(async (
@@ -3137,7 +3380,8 @@ export function App(): React.JSX.Element {
   }
 
   return (
-    <div className="app-shell">
+    <FilePreviewProvider campId={view === 'camp' ? activeCampId : null}>
+    <div className={view === 'camp' ? 'app-shell app-shell-camp' : 'app-shell'}>
       <CampNavigation
         platform={window.rovai.platform}
         view={view}
@@ -3198,6 +3442,8 @@ export function App(): React.JSX.Element {
         camp={campSnapshot?.camp.id === activeCampId ? campSnapshot : null}
         inspectorVisible={campSnapshot?.camp.activationState === 'active' && campInspectorVisible}
         onToggleInspector={() => setCampInspectorVisible((visible) => !visible)}
+        inspectorTab={campInspectorTab}
+        onSelectInspectorTab={openCampInspector}
         onFocusApprovals={focusCampApprovals}
       />}
       {windowDragPage && <WindowDragStrip page={windowDragPage} />}
@@ -3270,6 +3516,7 @@ export function App(): React.JSX.Element {
             workspaceEntrySnapshotReady={!campSnapshotState.entryPreview}
             inspectorVisible={visibleCampSnapshot.camp.activationState === 'active' && campInspectorVisible}
             inspectorTab={campInspectorTab}
+            inspectorSelectionRequest={campInspectorSelectionRequest}
             onInspectorTabChange={setCampInspectorTab}
             onOpenInspector={openCampInspector}
             notificationFocus={notificationFocus}
@@ -3428,6 +3675,7 @@ export function App(): React.JSX.Element {
       />
       {shuttingDown && <ControlledShutdownOverlay visible={shutdownFeedbackVisible} />}
     </div>
+    </FilePreviewProvider>
   )
 }
 
@@ -3526,6 +3774,8 @@ export function AppHeader({
   camp,
   inspectorVisible,
   onToggleInspector,
+  inspectorTab = 'tasks',
+  onSelectInspectorTab = () => undefined,
   onFocusApprovals
 }: {
   campTitle: string | null
@@ -3533,43 +3783,78 @@ export function AppHeader({
   camp: CampSnapshot | null
   inspectorVisible: boolean
   onToggleInspector(): void
+  inspectorTab?: CampInspectorTab
+  onSelectInspectorTab?(tab: CampInspectorTab): void
   onFocusApprovals(): void
 }): React.JSX.Element {
+  const filePreview = useOptionalFilePreview()
+  const tabs = filePreview?.tabs ?? []
+  const previewVisible = Boolean(filePreview?.paneVisible && tabs.length > 0)
   const title = campTitle ?? '正在打开对话'
   const pendingApprovals = camp?.approvals.filter((approval) => approval.status === 'pending').length ?? 0
   const dayNumber = camp ? campDayNumber(camp.camp.createdAt) : null
   return (
-    <header className="topbar">
-      <div className="context-breadcrumb">
-        {contextLabel && <span className="context-project">{contextLabel}</span>}
-        {contextLabel && <span className="context-sep" aria-hidden="true">›</span>}
-        <h1>{title}</h1>
+    <header
+      className={`topbar camp-topbar ${previewVisible ? 'has-file-preview' : ''} ${inspectorVisible ? 'has-inspector' : ''}`.trim()}
+      style={previewVisible
+        ? { '--file-preview-width': `${filePreview?.paneWidth ?? 480}px` } as CSSProperties
+        : undefined}
+    >
+      <div className="topbar-conversation-context">
+        <div className="context-breadcrumb">
+          {contextLabel && <span className="context-project">{contextLabel}</span>}
+          {contextLabel && <span className="context-sep" aria-hidden="true">›</span>}
+          <h1>{title}</h1>
+        </div>
+        {dayNumber !== null && <span className="context-day-badge">第 {dayNumber} 天</span>}
+        <div className="topbar-context-status" aria-live="polite">
+          {pendingApprovals > 0 && (
+            <button
+              className="approval-badge"
+              type="button"
+              onClick={onFocusApprovals}
+              aria-label={`待审批 ${pendingApprovals}，定位输入框上方审批`}
+            >
+              ◆ 待审批 {pendingApprovals}
+            </button>
+          )}
+        </div>
       </div>
-      {dayNumber !== null && <span className="context-day-badge">第 {dayNumber} 天</span>}
+      {previewVisible && <FilePreviewTabs />}
       {camp && camp.camp.activationState === 'active' && (
-        <div className="topbar-context-actions">
-          <div className="topbar-context-status" aria-live="polite">
-            {pendingApprovals > 0 && (
+        <div className="topbar-sidecar-context">
+          {inspectorVisible && (
+            <div className="topbar-sidecar-tabs" role="tablist" aria-label="会话详情">
               <button
-                className="approval-badge"
                 type="button"
-                onClick={onFocusApprovals}
-                aria-label={`待审批 ${pendingApprovals}，定位输入框上方审批`}
+                role="tab"
+                aria-selected={inspectorTab === 'tasks'}
+                onClick={() => onSelectInspectorTab('tasks')}
               >
-                ◆ 待审批 {pendingApprovals}
+                任务 <small>{camp.tasks.length}</small>
               </button>
-            )}
+              <button
+                type="button"
+                role="tab"
+                aria-selected={inspectorTab === 'members'}
+                onClick={() => onSelectInspectorTab('members')}
+              >
+                队员 <small>{camp.members.filter((member) => member.membershipStatus === 'active').length}</small>
+              </button>
+            </div>
+          )}
+          <div className="topbar-context-actions">
+            <button
+              className={`topbar-inspector-toggle ${inspectorVisible ? 'is-visible' : 'is-hidden'}`}
+              type="button"
+              aria-label={inspectorVisible ? '隐藏右侧检查器' : '显示右侧检查器'}
+              aria-pressed={inspectorVisible}
+              title={inspectorVisible ? '隐藏右侧检查器' : '显示右侧检查器'}
+              onClick={onToggleInspector}
+            >
+              <PanelToggleIcon side="right" visible={inspectorVisible} />
+            </button>
           </div>
-          <button
-            className={`topbar-inspector-toggle ${inspectorVisible ? 'is-visible' : 'is-hidden'}`}
-            type="button"
-            aria-label={inspectorVisible ? '隐藏右侧检查器' : '显示右侧检查器'}
-            aria-pressed={inspectorVisible}
-            title={inspectorVisible ? '隐藏右侧检查器' : '显示右侧检查器'}
-            onClick={onToggleInspector}
-          >
-            <PanelToggleIcon side="right" visible={inspectorVisible} />
-          </button>
         </div>
       )}
     </header>
@@ -3958,7 +4243,7 @@ function stringArrayField(value: Record<string, unknown>, key: string): string[]
 }
 
 function errorMessage(error: unknown): string {
-  return localizeExecutionEngineTerms(error instanceof Error ? error.message : String(error))
+  return localizeExecutionEngineTerms(readErrorMessage(error))
 }
 
 function afterNextPaint(timeoutMs = 250): Promise<void> {

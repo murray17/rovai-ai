@@ -3,7 +3,7 @@ document_type: contract
 contract: windows-private-storage-v2
 status: accepted
 source_version: v1.15
-last_updated: 2026-08-20
+last_updated: 2026-08-30
 ---
 
 # Windows Private Storage v2
@@ -41,6 +41,13 @@ Private storage implementation is necessary but not sufficient for Runtime acces
 remain `not_qualified`; each requires its own directory-authorization, read-only behavior, process lifecycle and sandbox
 evidence before execution can receive a Camp View root. Windows readonly/DACL hardening is not described as strong
 same-SID isolation.
+
+## 3. Desktop Bootstrap composition
+
+[Desktop Runtime Availability v1](desktop-runtime-availability-v1.md#8-windows-pre-ready-bootstrap-assessment) 补充独立
+`LocalAppData Known Folder\\Rovai AI Bootstrap\\<instance-key>` 壳层 profile。它只容纳 Electron 本机状态与稳定实例锁，
+不承载 Core authority 或 Runtime files；使用与正式 root 相同的 creation-time protected DACL / identity admission。
+只有 primary 准备正式布局，失败不向该 profile 传递 Core data path。正式 v2 布局与 Runtime 平台资格不变。
 
 ## References
 

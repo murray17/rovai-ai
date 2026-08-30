@@ -28,7 +28,9 @@ Architecture 解释组件如何组成，Version 概览记录交付范围；它�
 | 合同 | 权威范围 |
 | --- | --- |
 | [Camp Identity v1（当前）](camp-identity-v1.md) | 唯一 `rvcamp_` UUIDv7/Crockford 主键、strict boundary、SQLite/JSON/path 使用与 Native Session identity 分离 |
-| [First-run Onboarding v2（当前）](first-run-onboarding-v2.md) | v1 admission/provisioning 不变；schema 2 增加无可用 Runtime 时无产品副作用的 `runtime_deferred` 终态 |
+| [Desktop Runtime Availability v1（当前）](desktop-runtime-availability-v1.md) | Bootstrap/Full Core capability、Supervisor generation/revision、data-dir lease、SQLite 准入票据、copy migration 与结构化 request failure |
+| [First-run Onboarding v3（当前）](first-run-onboarding-v3.md) | v2 schema/flow 不变；首次安装改用 Full Core authority origin，损坏偏好只在内存降级且保留原文件 |
+| [First-run Onboarding v2（历史）](first-run-onboarding-v2.md) | v1 admission/provisioning 不变；schema 2 增加无可用 Runtime 时无产品副作用的 `runtime_deferred` 终态；其 pre-Core 文件存在性 admission 已由 v3 替代 |
 | [First-run Onboarding v1（历史）](first-run-onboarding-v1.md) | Desktop 首次安装判定、三页 mandatory 状态、幂等 provisioning、`初次集结` 与第四页 Draft-only 入口；不允许无 Runtime 完成 |
 | [Camp Membership v1（当前）](camp-membership-v1.md) | 动态添加/移除、至少一位成员、generation/version、atomic cutover、durable reconciliation、exact lifetime fence 与受信外部来源 |
 | [Channel Storage v2（当前）](channel-storage-v2.md) | v1 存储与秘密边界不变；飞书三态检查、独立 Bot 启动及钉钉 completed 同应用凭据恢复 |
@@ -47,6 +49,8 @@ Architecture 解释组件如何组成，Version 概览记录交付范围；它�
 | [Camp Open Projection v2（历史）](camp-open-projection-v2.md) | v1 methods/window 不变；AgentRun 独立取消请求事实、Camp Open schema 2 与 Read Model schema 31；不含 Runtime 模型观测 |
 | [Camp Open Projection v1（历史）](camp-open-projection-v1.md) | Desktop `camps.enter/open/exists`、有界首屏投影、coverage/high-water、earlier message page 与 data-minimized trace；不含 AgentRun 取消请求字段 |
 | [Camp Conversation Find v1（当前）](camp-conversation-find-v1.md) | Desktop 当前 Camp 公开 user/agent 正文的 exact count、单命中 traversal、Unicode scalar offset 与有界 around-window 定位 |
+| [File Preview v2（当前）](file-preview-v2.md) | v1 预览读取/授权不变；撤回选区附加，预览不写入 Composer 或模型输入 |
+| [File Preview v1（历史）](file-preview-v1.md) | 封闭文件来源、窗口句柄、读取、Root Grant、更新、HTML 资源与系统动作；选区子项未交付并由 v2 撤回 |
 | [Camp Permanent Deletion v2（当前）](camp-permanent-deletion-v2.md) | v1 删除合同不变；增加 Camp Published Attachment View journal cleanup，并规定先 fence Runtime、再取得 View write gate |
 | [Camp Permanent Deletion v1（历史）](camp-permanent-deletion-v1.md) | `camps.delete` force 字段、兼容 blocker、单事务物理删除、Runtime cleanup 与 Renderer 确认边界；不含 Published View cleanup |
 | [Runtime File Change Observation v2（当前）](runtime-file-change-observation-v2.md) | v1 Evidence/投影/呈现不变；精确排除当前 `ROVAI_RUN_TMP` 临时交付区，mixed evidence 保留普通文件且不迁移历史数据 |
