@@ -1493,9 +1493,8 @@ html[data-rovai-platform="win32"] .bootstrap-shell-brand { padding-left: 20px; }
   isolation: isolate;
   display: flex;
   min-width: 0;
-  max-width: 220px;
   height: 28px;
-  flex: 0 0 auto;
+  flex: 0 0 180px;
   align-items: center;
   overflow: hidden;
   border-radius: 6px;
@@ -1546,7 +1545,18 @@ html[data-rovai-platform="win32"] .bootstrap-shell-brand { padding-left: 20px; }
   cursor: pointer;
 }
 .file-preview-tab-icon { width: 14px; height: 14px; flex: 0 0 14px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.6; }
-.file-preview-tab-label { min-width: 0; overflow: hidden; font-size: 10.5px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.file-preview-tab-label {
+  min-width: 0;
+  flex: 1 1 0;
+  padding-inline-end: 16px;
+  overflow: hidden;
+  font-size: 10.5px;
+  font-weight: 600;
+  text-align: start;
+  white-space: nowrap;
+  /* The fade occupies trailing padding until the filename overflows. */
+  mask-image: linear-gradient(to right, black calc(100% - 16px), transparent);
+}
 .file-preview-tab-update { width: 5px; height: 5px; flex: 0 0 5px; border-radius: 50%; background: var(--attention); }
 .file-preview-tab-close {
   display: grid;
