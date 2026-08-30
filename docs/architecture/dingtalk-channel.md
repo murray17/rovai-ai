@@ -8,8 +8,8 @@ last_updated: 2026-08-30
 
 # 钉钉渠道架构
 
-字段、状态和恢复合同见 [DingTalk Channel v2](../contracts/dingtalk-channel-v2.md)，credential 与 OAuth Profile 持久化见
-[Channel Storage v1](../contracts/channel-storage-v1.md)，共享 Camp admission、membership 与
+字段、状态和恢复合同见 [DingTalk Channel v3](../contracts/dingtalk-channel-v3.md)，credential 与 OAuth Profile 持久化见
+[Channel Storage v2](../contracts/channel-storage-v2.md)，共享 Camp admission、membership 与
 模型输入分别继续由 [Feishu Channel v2](../contracts/feishu-channel-v2.md)中已经 provider-neutral 的渠道核心、
 [Camp Membership v1](../contracts/camp-membership-v1.md)和
 [ContextManifest Evidence v22](../contracts/context-manifest-evidence-v22.md)拥有。取舍理由见
@@ -50,12 +50,12 @@ membership 与 Outbox。DingTalk Host 不直接创建 CampMessage、CampTurn 或
 
 ## Developer Gateway 与 OAuth
 
-账号连接依赖预先注册的 Rovai DingTalk OAuth Client。浏览器 loopback 是默认交互，设备授权是用户显式 fallback；两者只
-改变 OAuth UX，不改变账号 identity 或 Core 合同。开发和验收由宿主显式注入
-`ROVAI_DINGTALK_OAUTH_CLIENT_ID/SECRET`。生产必须选择可分发 public client/device flow 或服务端 token broker；不得
+账号连接依赖预先注册的 Rovai DingTalk OAuth Client，唯一交互是系统浏览器扫码/确认与 state-bound loopback callback。
+设备授权的 UI、参数、endpoint 与轮询已删除，不保留备用链路。开发和验收由宿主显式注入
+`ROVAI_DINGTALK_OAUTH_CLIENT_ID/SECRET`。生产必须完成浏览器 OAuth Client 的安全分发或服务端 token broker；不得
 硬编码 confidential secret、借用第三方工具的 OAuth client、使用队员 AppKey 登录或失败后改成人工粘贴 credential。
 
-`DingTalkOAuthClient` 直接完成浏览器 loopback 或设备授权、authorization code exchange 与 refresh；多账号 token profile 以
+`DingTalkOAuthClient` 直接完成浏览器 loopback、authorization code exchange 与 refresh；多账号 token profile 以
 `corpId + userId` 精确分区，并作为当前 Provider Session 的 schema-1 JSON 明文保存到 `rovai.sqlite`。
 `DingTalkDeveloperGateway` 只允许 reviewed operation 与
 参数，把当前 user access token 放在固定钉钉域名请求头中，直接调用官方开发者服务；redirect、未知 endpoint/operation/
@@ -71,8 +71,11 @@ sidecar。Stream 从始至终由 Main 内的 `dingtalk-stream` SDK 直接连接�
 切换账号时旧 profile 保持有效：Main 在内存 staged profile 中完成新 OAuth 并读取完整
 `corpId/userId/userName/corpName`，再调用 `channels.dingtalk.account.commitConnection`，由单一 SQLite 事务同时替换当前
 Developer Session 与 connected account。Core 失败时只丢弃 staged profile，旧 SQLite/内存 Profile 均不变。Token refresh
-通过 Session revision CAS 保存。断开/过期在 Core 同一事务删除当前 Provider Session 并更新账号状态，不关闭、迁移或删除
-已发布 Bot。
+通过 Session revision CAS 保存；失败的轮换结果暂存在 Main，下次先回读 revision 并补存，不能再次兑换旧 refresh token
+或覆盖之后已提交的新账号。启动直接复用原 schema-1 Profile，有效 access token 无需联网登录，过期时静默续期。
+断网、timeout、Client 配置拒绝、未知响应和 SQLite 失败保留 Session；本地加载失败必须可重试，不缓存成未登录。
+只有明确没有 Profile、refresh grant 失效/到期或身份漂移时才按 account/version expire。断开/明确过期仍在 Core 同一事务
+删除当前 Provider Session 并更新账号状态，不关闭、迁移或删除已发布 Bot。显式连接/断开或 Host stop 使旧启动检查失效。
 
 ## 队员应用发布
 
@@ -93,6 +96,10 @@ agentId
 并创建官方 AI 卡片模板实例。每一步推进持久 publication intent，重启或失败只能从同一 App 恢复。
 App credential 与 `credentials_read` 必须通过 `channels.dingtalk.publicationIntent.storeCredential` 在同一 SQLite 事务提交；
 不能先写 Main 文件再单独推进 intent，也不能在后续失败时换 App。
+
+completed intent 不替代本地 credential 可用性检查。重试先读取 exact ref；缺失时只以原账号和原 App 的 completed resume
+路径回读 Secret/Robot/版本，由 Core 核对 exact published binding 后补写 SQLite。该事务保持 completed 和发布水位，
+不重开发布、不改变 Bot identity；恢复失败后仍可重试同一 App，不创建应用或新版本。
 
 `NO_APPROVAL` 可直接发布；`SELECT_APPROVER` 必须把远端候选人投影到 Rovai Dialog，由 Owner 明确选择后继续；`AUTO`
 按远端事实处理。提交审批后若状态仍为 audit/review，intent 停在 `awaiting_approval`，不是失败。publish 请求超时或返回
@@ -163,13 +170,14 @@ App 或目标已移出时 fail closed。
 
 Core 在同一个 SQLite 保存 account、Developer Session、Bot credential、publication intent、Bot identity、conversation/
 binding、roster、request、console 和 Outbox；Main 只保留运行期 `appKey/appSecret/robotCode` 与 OAuth profile。启动时先核对当前
-OAuth identity，再恢复所有 published Bot Stream；OAuth 失效只阻止新的发布，不停止已有 Bot。周期 worker 重取已知群
+OAuth Profile 并按需静默刷新，再恢复所有 published Bot Stream；暂时检查失败保留 Profile 且继续恢复 Bot，明确 OAuth
+失效只阻止新的发布，不停止已有 Bot。周期 worker 重取已知群
 roster、finalize ready aggregate、领取 delivery 并结算。任何外部失败都不从 Renderer 状态重建业务事实。
 
 ## References
 
-- [DingTalk Channel v2](../contracts/dingtalk-channel-v2.md)
-- [Channel Storage v1](../contracts/channel-storage-v1.md)
+- [DingTalk Channel v3](../contracts/dingtalk-channel-v3.md)
+- [Channel Storage v2](../contracts/channel-storage-v2.md)
 - [Camp Membership v1](../contracts/camp-membership-v1.md)
 - [渠道设置](../ui/components/channel-settings.md)
 - [v1.31 决策记录](../versions/v1.31/decisions.md)

@@ -19,6 +19,28 @@ import {
 } from './dingtalk-member-bot-provisioner'
 
 describe('direct DingTalk Open Platform member Bot provisioning', () => {
+  it('recovers completed application credentials with read-only console calls and no new app or version', async () => {
+    const gateway = resumeGateway({ initialStatus: { versionStatus: 'RELEASE' } })
+    const resolveIconMediaId = vi.fn(async () => 'unused')
+    const onStep = vi.fn<DingTalkProvisioningInput['onStep']>(async () => undefined)
+
+    const result = await provisioner(gateway).create(input({
+      frozen: frozen(), resumeState: 'completed', resolveIconMediaId, onStep
+    }))
+
+    expect(result).toMatchObject({
+      unifiedAppId: 'u-app-1', appKey: 'ding-app-1', appSecret: 'secret-1',
+      robotCode: 'ding-app-1', versionId: 'version-1'
+    })
+    expect(gateway.operations).toEqual([
+      'app.get', 'app.credentials.get', 'app.robot.get', 'app.version.status'
+    ])
+    expect(resolveIconMediaId).not.toHaveBeenCalled()
+    expect(onStep).toHaveBeenCalledWith('credentials_read', expect.objectContaining({
+      unifiedAppId: 'u-app-1', appKey: 'ding-app-1'
+    }))
+  })
+
   it('creates, configures, verifies, and releases one frozen app', async () => {
     const gateway = new ScriptedGateway({
       'app.create': [{ unifiedAppId: 'u-app-1' }],

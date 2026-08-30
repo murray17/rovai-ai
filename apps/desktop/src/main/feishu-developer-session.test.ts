@@ -9,6 +9,7 @@ import type {
 let currentUrl = 'about:blank'
 let loadUrlCount = 0
 let portalLoadsAuthenticated = false
+let portalLoadError: Error | null = null
 let portalApiOrigin = 'https://open.feishu.cn'
 let portalIdentity: Record<string, string> = {
   id: 'developer-user-1',
@@ -58,6 +59,10 @@ class FakeBrowserWindow extends EventEmitter {
 
   async loadURL(url: string): Promise<void> {
     loadUrlCount += 1
+    if (portalLoadError) {
+      currentUrl = url
+      throw portalLoadError
+    }
     if (
       url.startsWith('https://open.feishu.cn/page/cli?')
       || url.startsWith('https://open.feishu.cn/page/launcher?')
@@ -136,6 +141,7 @@ beforeEach(() => {
   currentUrl = 'about:blank'
   loadUrlCount = 0
   portalLoadsAuthenticated = false
+  portalLoadError = null
   portalApiOrigin = 'https://open.feishu.cn'
   isolateSessionPartitions = false
   partitionSessions.clear()
@@ -157,6 +163,100 @@ afterEach(() => {
 })
 
 describe('Feishu developer session login', () => {
+  it.each(['navigation', 'identity', 'persistence'] as const)(
+    'retains the committed session when inspection is temporarily unavailable: %s',
+    async (failure) => {
+      const { ElectronFeishuDeveloperSessionService } = await import('./feishu-developer-session')
+      const store = new MemoryStore()
+      const service = new ElectronFeishuDeveloperSessionService(store)
+      await connectDeveloperSession(service, store)
+      const committed = structuredClone(store.record)
+      portalLoadsAuthenticated = true
+      if (failure === 'navigation') portalLoadError = new Error('ERR_INTERNET_DISCONNECTED')
+      if (failure === 'identity') portalIdentity = {}
+      if (failure === 'persistence') {
+        vi.spyOn(store, 'replace').mockRejectedValueOnce(new Error('sqlite_fixture_unavailable'))
+      }
+
+      await expect(service.inspect()).resolves.toMatchObject({ status: 'unavailable' })
+      expect(store.record).toEqual(committed)
+      expect(browserSession.clearStorageData).not.toHaveBeenCalled()
+
+      portalLoadError = null
+      portalIdentity = {
+        id: 'developer-user-1', name: 'Murray', tenantId: 'tenant-1', tenantName: '星海科技'
+      }
+      await expect(service.inspect()).resolves.toMatchObject({
+        status: 'valid', identity: { userId: 'developer-user-1', tenantId: 'tenant-1' }
+      })
+    }
+  )
+
+  it.each(['expired', 'identity_changed'] as const)(
+    'requires positive invalidation evidence: %s',
+    async (reason) => {
+      const { ElectronFeishuDeveloperSessionService } = await import('./feishu-developer-session')
+      const store = new MemoryStore()
+      const service = new ElectronFeishuDeveloperSessionService(store)
+      await connectDeveloperSession(service, store)
+      const committed = structuredClone(store.record)
+      if (reason === 'identity_changed') {
+        portalLoadsAuthenticated = true
+        portalIdentity = { ...portalIdentity, id: 'different-user' }
+      }
+
+      await expect(service.inspect()).resolves.toEqual({ status: 'invalid', reason })
+      expect(store.record).toEqual(committed)
+    }
+  )
+
+  it.each(['read', 'cookies'] as const)(
+    'can retry a failed local session restoration without logging in again: %s',
+    async (failure) => {
+      const { ElectronFeishuDeveloperSessionService } = await import('./feishu-developer-session')
+      const store = new MemoryStore()
+      await connectDeveloperSession(new ElectronFeishuDeveloperSessionService(store), store)
+      const committed = structuredClone(store.record)
+      const service = new ElectronFeishuDeveloperSessionService(store)
+      portalLoadsAuthenticated = true
+      if (failure === 'read') vi.spyOn(store, 'read').mockRejectedValueOnce(new Error('sqlite_fixture_unavailable'))
+      else browserSession.cookies.set.mockRejectedValueOnce(new Error('cookie_store_fixture_unavailable'))
+
+      await expect(service.inspect()).resolves.toEqual({ status: 'unavailable' })
+      expect(store.record).toEqual(committed)
+      await expect(service.inspect()).resolves.toMatchObject({ status: 'valid' })
+    }
+  )
+
+  it('discards an inspection that finishes after a successful account switch', async () => {
+    isolateSessionPartitions = true
+    const { ElectronFeishuDeveloperSessionService } = await import('./feishu-developer-session')
+    const store = new MemoryStore()
+    const service = new ElectronFeishuDeveloperSessionService(store)
+    await connectDeveloperSession(service, store)
+    let finishNavigation!: () => void
+    const navigation = new Promise<void>((resolve) => { finishNavigation = resolve })
+    const load = vi.spyOn(FakeBrowserWindow.prototype, 'loadURL').mockImplementationOnce(() => navigation)
+    const replace = vi.spyOn(store, 'replace')
+    const inspecting = service.inspect()
+    try {
+      await vi.waitFor(() => expect(load).toHaveBeenCalled())
+      portalLoadsAuthenticated = true
+      portalIdentity = { ...portalIdentity, id: 'replacement-user' }
+      await service.beginLogin({ forceFresh: true })
+      await service.activatePendingLogin(store.commit(service.pendingConnection()))
+      finishNavigation()
+
+      await expect(inspecting).resolves.toEqual({ status: 'unavailable' })
+      expect(store.record?.identity.userId).toBe('replacement-user')
+      expect(replace).not.toHaveBeenCalled()
+    } finally {
+      finishNavigation()
+      await inspecting
+      load.mockRestore()
+    }
+  })
+
   it('starts without consulting operating-system credential storage', async () => {
     const { ElectronFeishuDeveloperSessionService } = await import('./feishu-developer-session')
     const store = new MemoryStore()
@@ -221,8 +321,8 @@ describe('Feishu developer session login', () => {
 
     portalLoadsAuthenticated = true
     await expect(service.inspect()).resolves.toMatchObject({
-      userId: 'developer-user-1',
-      tenantId: 'tenant-1'
+      status: 'valid',
+      identity: { userId: 'developer-user-1', tenantId: 'tenant-1' }
     })
   })
 
@@ -303,8 +403,8 @@ describe('Feishu developer session login', () => {
     }
     portalLoadsAuthenticated = true
     await expect(service.inspect()).resolves.toMatchObject({
-      userId: 'developer-user-1',
-      tenantId: 'tenant-1'
+      status: 'valid',
+      identity: { userId: 'developer-user-1', tenantId: 'tenant-1' }
     })
   })
 

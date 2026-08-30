@@ -28,6 +28,11 @@ export interface FeishuDeveloperIdentity {
   tenantName: string
 }
 
+export type FeishuDeveloperSessionInspection =
+  | { status: 'valid'; identity: FeishuDeveloperIdentity }
+  | { status: 'invalid'; reason: 'missing' | 'expired' | 'identity_changed' }
+  | { status: 'unavailable' }
+
 export interface FeishuDeveloperSessionService {
   beginLogin(options?: {
     forceFresh?: boolean
@@ -38,7 +43,7 @@ export interface FeishuDeveloperSessionService {
   pendingConnection?(): PendingFeishuDeveloperConnection
   activatePendingLogin?(sessionRevision: number): Promise<void>
   discardPendingLogin?(): Promise<FeishuDeveloperIdentity | null>
-  inspect(): Promise<FeishuDeveloperIdentity | null>
+  inspect(): Promise<FeishuDeveloperSessionInspection>
   requireExpectedIdentity(expected: {
     userId: string
     tenantId: string
@@ -104,6 +109,8 @@ export class ElectronFeishuDeveloperSessionService implements FeishuDeveloperPor
   readonly #store: Pick<SqliteChannelDeveloperSessionStore, 'read' | 'replace'>
   readonly #getParentWindow: () => BrowserWindow | null
   #restored = false
+  #restoring: Promise<void> | null = null
+  #sessionGeneration = 0
   #storedIdentity: FeishuDeveloperIdentity | null = null
   #storedRevision: number | null = null
   #activeLoginWindow: BrowserWindow | null = null
@@ -276,6 +283,7 @@ export class ElectronFeishuDeveloperSessionService implements FeishuDeveloperPor
   async activatePendingLogin(sessionRevision: number): Promise<void> {
     const pending = this.#pendingLoginReplacement
     if (!pending) throw sessionError('feishu_login_pending_session_missing')
+    this.#sessionGeneration += 1
     this.#pendingLoginReplacement = null
     this.#browserSession = pending.replacementSession
     this.#storedIdentity = pending.identity
@@ -295,23 +303,38 @@ export class ElectronFeishuDeveloperSessionService implements FeishuDeveloperPor
     return this.#storedIdentity
   }
 
-  async inspect(): Promise<FeishuDeveloperIdentity | null> {
-    await this.#ensureRestored()
-    const restoredIdentity = this.#storedIdentity
-    if (!restoredIdentity) return null
-    const window = this.#createWindow(false)
+  async inspect(): Promise<FeishuDeveloperSessionInspection> {
+    let window: BrowserWindow | null = null
     try {
-      await window.loadURL(portalUrlForBrand(restoredIdentity.brand))
+      await this.#ensureRestored()
+      const restoredIdentity = this.#storedIdentity
+      if (!restoredIdentity) return { status: 'invalid', reason: 'missing' }
+      const browserSession = this.#session
+      const revision = this.#storedRevision
+      const isCurrent = (): boolean => this.#browserSession === browserSession
+        && this.#storedIdentity === restoredIdentity && this.#storedRevision === revision
+      window = this.#createWindow(false, null, browserSession)
+      try {
+        await window.loadURL(portalUrlForBrand(restoredIdentity.brand))
+      } catch (error) {
+        if (!isExpectedPortalRedirectAbort(error, window)) throw error
+      }
+      if (!isCurrent()) return { status: 'unavailable' }
       const currentUrl = window.webContents.getURL()
-      if (!isDeveloperPortalUrl(currentUrl)) return null
+      if (isFeishuLoginUrl(currentUrl)) return { status: 'invalid', reason: 'expired' }
+      if (!isDeveloperPortalUrl(currentUrl)) return { status: 'unavailable' }
       const identity = await readDeveloperIdentity(window, currentUrl)
-      if (!identity) return null
-      await this.#persist(identity)
-      return identity
+      if (!identity || !isCurrent()) return { status: 'unavailable' }
+      if (accountIdForStoredIdentity(identity) !== accountIdForStoredIdentity(restoredIdentity)) {
+        return { status: 'invalid', reason: 'identity_changed' }
+      }
+      await this.#persist(identity, browserSession)
+      return { status: 'valid', identity }
     } catch {
-      return null
+      // Failed observation or refresh storage is not proof that saved credentials expired.
+      return { status: 'unavailable' }
     } finally {
-      if (!window.isDestroyed()) window.destroy()
+      if (window && !window.isDestroyed()) window.destroy()
     }
   }
 
@@ -319,8 +342,15 @@ export class ElectronFeishuDeveloperSessionService implements FeishuDeveloperPor
     userId: string
     tenantId: string
   }): Promise<FeishuDeveloperIdentity> {
-    const identity = await this.inspect()
-    if (!identity) throw sessionError('feishu_developer_session_expired')
+    const inspection = await this.inspect()
+    if (inspection.status === 'unavailable') {
+      throw sessionError('feishu_developer_session_inspection_unavailable')
+    }
+    if (inspection.status === 'invalid') {
+      throw sessionError(inspection.reason === 'identity_changed'
+        ? 'feishu_developer_identity_changed' : 'feishu_developer_session_expired')
+    }
+    const { identity } = inspection
     if (identity.userId !== expected.userId || identity.tenantId !== expected.tenantId) {
       throw sessionError('feishu_developer_identity_changed')
     }
@@ -328,6 +358,7 @@ export class ElectronFeishuDeveloperSessionService implements FeishuDeveloperPor
   }
 
   async disconnect(): Promise<void> {
+    this.#sessionGeneration += 1
     this.#closeActiveLogin()
     await this.discardPendingLogin().catch(() => undefined)
     for (const window of this.#activeOpenPlatformWindows) {
@@ -445,45 +476,64 @@ export class ElectronFeishuDeveloperSessionService implements FeishuDeveloperPor
 
   async #ensureRestored(): Promise<void> {
     if (this.#restored) return
+    this.#restoring ??= this.#restore().finally(() => { this.#restoring = null })
+    await this.#restoring
+  }
+
+  async #restore(): Promise<void> {
+    const generation = this.#sessionGeneration
     const stored = await this.#store.read<FeishuDeveloperIdentity, StoredFeishuDeveloperSession>(
       'feishu'
     )
-    this.#restored = true
-    if (!stored) return
+    if (generation !== this.#sessionGeneration) return
+    if (!stored) {
+      this.#restored = true
+      return
+    }
+    const browserSession = this.#session
+    for (const cookie of stored.session.cookies) {
+      if (!cookie.session && cookie.expirationDate !== undefined
+        && cookie.expirationDate <= Date.now() / 1_000) continue
+      // A local Cookie store failure is retryable; do not inspect a partially restored jar.
+      await browserSession.cookies.set({
+        url: cookieUrl(cookie),
+        name: cookie.name,
+        value: cookie.value,
+        domain: cookie.domain,
+        path: cookie.path,
+        secure: cookie.secure,
+        httpOnly: cookie.httpOnly,
+        sameSite: cookie.sameSite,
+        expirationDate: cookie.session ? undefined : cookie.expirationDate
+      })
+    }
+    if (generation !== this.#sessionGeneration) return
     this.#storedIdentity = stored.identity
     this.#storedRevision = stored.revision
-    for (const cookie of stored.session.cookies) {
-      try {
-        await this.#session.cookies.set({
-          url: cookieUrl(cookie),
-          name: cookie.name,
-          value: cookie.value,
-          domain: cookie.domain,
-          path: cookie.path,
-          secure: cookie.secure,
-          httpOnly: cookie.httpOnly,
-          sameSite: cookie.sameSite,
-          expirationDate: cookie.session ? undefined : cookie.expirationDate
-        })
-      } catch {
-        // One expired or rejected cookie must not discard the rest of the jar.
-      }
-    }
+    this.#restored = true
   }
 
   async #persist(
     identity: FeishuDeveloperIdentity,
     browserSession: Session = this.#session
   ): Promise<void> {
-    if (this.#storedRevision === null) return
+    const expectedRevision = this.#storedRevision
+    if (expectedRevision === null) return
     const session = await this.#capture(browserSession)
-    this.#storedRevision = await this.#store.replace({
+    if (this.#browserSession !== browserSession || this.#storedRevision !== expectedRevision) {
+      throw sessionError('feishu_developer_session_inspection_unavailable')
+    }
+    const revision = await this.#store.replace({
       provider: 'feishu',
       accountId: accountIdForStoredIdentity(identity),
       identity,
       session,
-      expectedRevision: this.#storedRevision
+      expectedRevision
     })
+    if (this.#browserSession !== browserSession || this.#storedRevision !== expectedRevision) {
+      throw sessionError('feishu_developer_session_inspection_unavailable')
+    }
+    this.#storedRevision = revision
     this.#storedIdentity = identity
   }
 
@@ -620,8 +670,9 @@ function isAllowedFeishuTopLevelUrl(value: string): boolean {
 
 function isDeveloperPortalUrl(value: string): boolean {
   try {
-    const host = new URL(value).hostname.toLowerCase()
-    return host === 'open.feishu.cn' || host === 'open.larksuite.com'
+    const url = new URL(value)
+    return url.protocol === 'https:' && !url.username && !url.password
+      && (url.hostname === 'open.feishu.cn' || url.hostname === 'open.larksuite.com')
   } catch {
     return false
   }
@@ -629,8 +680,9 @@ function isDeveloperPortalUrl(value: string): boolean {
 
 function isFeishuLoginUrl(value: string): boolean {
   try {
-    const host = new URL(value).hostname.toLowerCase()
-    return host === 'accounts.feishu.cn' || host === 'accounts.larksuite.com'
+    const url = new URL(value)
+    return url.protocol === 'https:' && !url.username && !url.password
+      && (url.hostname === 'accounts.feishu.cn' || url.hostname === 'accounts.larksuite.com')
   } catch {
     return false
   }

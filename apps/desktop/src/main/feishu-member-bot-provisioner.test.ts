@@ -607,7 +607,9 @@ describe('Feishu Web Session member Bot provisioner', () => {
 function fakePortal(overrides: Partial<FeishuDeveloperPortalSession> = {}): FeishuDeveloperPortalSession {
   return {
     beginLogin: vi.fn(overrides.beginLogin ?? (async () => developerIdentity())),
-    inspect: vi.fn(overrides.inspect ?? (async () => developerIdentity())),
+    inspect: vi.fn(overrides.inspect ?? (async () => ({
+      status: 'valid' as const, identity: developerIdentity()
+    }))),
     requireExpectedIdentity: vi.fn(
       overrides.requireExpectedIdentity ?? (async () => developerIdentity())
     ),

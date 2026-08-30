@@ -11,7 +11,7 @@ last_updated: 2026-08-30
 渠道设置是 Owner 在 Rovai 本机维护飞书/钉钉连接与队员 Bot 的 Renderer surface。群首次项目选择发生在对应外部会话的
 Owner-only 卡片中；Renderer 不提供 Channel 项目目录或会话绑定操作。领域状态和错误按 Provider 分别见
 [Feishu Channel v2](../../contracts/feishu-channel-v2.md)与
-[DingTalk Channel v2](../../contracts/dingtalk-channel-v2.md)；本页只拥有信息层级、交互与可访问性。
+[DingTalk Channel v3](../../contracts/dingtalk-channel-v3.md)；本页只拥有信息层级、交互与可访问性。
 
 ## 页面结构
 
@@ -29,7 +29,7 @@ Dialog、状态点和间距复用现有组件语法。
 <a id="渠道连接与二维码"></a>
 ## 渠道连接与 OAuth
 
-未连接时主动作是“登录开放平台”；已连接时为“切换账号”，并提供次级“断开”。连接行只展示真实 `userName`、
+飞书未连接时主动作是“登录开放平台”，已连接时为“切换账号”；钉钉为“连接钉钉／重新连接”。已连接时均保留次级“断开”。连接行只展示真实 `userName`、
 `tenantName`、可选 email 与 Feishu/Lark/DingTalk brand，不显示 controller App 或“平台 Owner/企业”占位值。说明必须明确：
 连接只决定以后发布的目标，切换不会迁移或停用已发布 Bot。点击“切换账号”后，当前账号在新二维码成功完成前继续
 有效；取消或失败关闭 Dialog 后仍显示原账号，不得降级为“登录已过期”。只有切换成功才展示新账号。
@@ -43,10 +43,11 @@ Dialog、状态点和间距复用现有组件语法。
 `system_credential_encryption_unavailable`；身份读取超时和页面失败使用中文可操作提示，不向用户显示 `unknown` 或原始异常文本。
 连接行统一说明“开发者账号会话 · 保存在 Rovai 本地数据库”。
 
-钉钉使用同一个 modal 结构，但默认打开系统浏览器 OAuth，frame 只显示钉钉标记和当前阶段，不伪造二维码。连接行另有
-“设备授权”次级动作，仅在 loopback 无法完成时由 Owner 显式触发。文案说明 OAuth Profile 保存在 Rovai 本地数据库，
-本次不创建应用或读取 AppSecret。新 OAuth/Core commit 失败后页面仍显示旧账号；缺少 Rovai OAuth Client 时显示可行动
-配置错误，不静默改用第三方工具的 Client 或队员 AppKey。
+钉钉使用同一个 modal 结构，只打开系统浏览器 OAuth，frame 只显示钉钉标记和当前阶段，不伪造二维码。未连接时为
+“连接钉钉”，已连接或明确失效时为“重新连接”；进行中显示“等待授权…”。设备授权按钮、提示、等待状态和备用入口均删除。
+说明 OAuth Profile 保存在 Rovai 本地数据库，本次不创建应用或读取 AppSecret。重启复用既有 Profile，Token 静默续期
+不打开 Dialog；只有明确失效才显示“登录已失效，请重新连接”。取消浏览器授权是无告警的 no-op；网络、超时、存储或新
+OAuth/Core commit 失败保留旧账号。缺少 Rovai OAuth Client 时显示可行动配置错误，不静默改用第三方工具的 Client 或队员 AppKey。
 
 普通发布不得进入 QR Dialog。点击列表“发布”先打开独立确认 Dialog，展示现有 `MemberAvatar`、队员名称/职责、
 应用说明、当前开发者账号和租户；“确认发布”后在同一 Dialog 逐步展示八个进行中阶段。主文案固定为：
@@ -132,5 +133,5 @@ credential 或内部错误。钉钉卡固定使用官方 AI Markdown 模板、St
 - [设置工作区 brief](../../../apps/desktop/.impeccable/surfaces/settings-workspace.md)
 - [Feishu Channel v2](../../contracts/feishu-channel-v2.md)
 - [飞书渠道架构](../../architecture/feishu-channel.md)
-- [DingTalk Channel v2](../../contracts/dingtalk-channel-v2.md)
+- [DingTalk Channel v3](../../contracts/dingtalk-channel-v3.md)
 - [钉钉渠道架构](../../architecture/dingtalk-channel.md)

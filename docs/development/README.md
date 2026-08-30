@@ -97,7 +97,7 @@ pnpm build:desktop
 | 任务 | 文档 |
 | --- | --- |
 | 启动开发 App、运行打包产物或区分日常/开发数据 | [本地开发与 App 隔离流程](local-workflow.md) |
-| 配置和验收钉钉 OAuth/Developer API 渠道 | [本地开发与 App 隔离流程：钉钉 OAuth](local-workflow.md#钉钉-oauth-与-developer-api-验收前置)、[DingTalk Channel v2](../contracts/dingtalk-channel-v2.md)、[Channel Storage v1](../contracts/channel-storage-v1.md) |
+| 配置和验收钉钉 OAuth/Developer API 渠道 | [本地开发与 App 隔离流程：钉钉 OAuth](local-workflow.md#钉钉-oauth-与-developer-api-验收前置)、[DingTalk Channel v3](../contracts/dingtalk-channel-v3.md)、[Channel Storage v2](../contracts/channel-storage-v2.md) |
 | 创建、复用、交接、合入或清理 Git worktree | [Git Worktree 生命周期与清理](worktrees.md) |
 | 判断主机、Node、pnpm、Rust、Git 或 Runtime 前置条件 | [开发环境与依赖](environment.md) |
 | 新增 Product Runtime、建立真实 Probe 或完成逐平台准入 | [Agent Runtime 接入与准入 Checklist](runtime-integration-checklist.md) |

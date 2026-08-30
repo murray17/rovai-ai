@@ -113,8 +113,8 @@ const api: RovaiApi = {
     get() {
       return ipcRenderer.invoke('rovai:channels-get') as Promise<ChannelSettingsSnapshot>
     },
-    connect(kind, options) {
-      return ipcRenderer.invoke('rovai:channels-connect', kind, options)
+    connect(kind) {
+      return ipcRenderer.invoke('rovai:channels-connect', kind)
     },
     disconnect(kind) {
       return ipcRenderer.invoke('rovai:channels-disconnect', kind)

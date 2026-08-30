@@ -29,8 +29,10 @@ Owner 可在私聊或群聊显式 `@Bot` 后复用现有 Quick Chat、项目选�
   provider-neutral Bot/Owner directory view；Migration 123 把旧 helper 发布模式无损迁移为 `direct_open_platform`，将 Data
   Contract 升到 `v1.36 / projection schema 77`；Migration 124 增加共享 `channel_credentials` 与
   `channel_developer_sessions`，切换到 `v1.37 / projection schema 78`；
-- 账号连接使用预注册 Rovai OAuth Client，经 Main 的浏览器 loopback 或显式设备授权进入临时 Profile。新身份与 Token/Cookie
+- 账号连接使用预注册 Rovai OAuth Client，仅经 Main 的浏览器扫码/确认与 loopback 进入临时 Profile。新身份与 Token/Cookie
   通过 Core 原子 `account.commitConnection` 一次写入 `rovai.sqlite`；失败只丢弃临时 Profile，旧账号与 Session 不变；
+- Device Flow UI、参数、设备 endpoint 与轮询完全删除。旧 schema-1 Profile 重启后复用，access token 静默续期；断网、
+  timeout 和本地读取/保存失败不清会话，轮换后保存失败先补存，不重复使用旧 refresh token；
 - 飞书/钉钉 Bot credential 与 Developer Session 明文存入既有 SQLite，由 Core/Main 独占；Renderer/日志/诊断不接收 raw
   payload。启动一次批量加载所有 published Bot，旧 `.bin` 不读取、不解密，系统安全存储与 Keychain 命名空间已移除；
 - Main 直接调用钉钉固定 OAuth 与官方 developer service endpoint，只允许封闭 operation/argument 集，并限制 redirect、
@@ -48,7 +50,7 @@ Owner 可在私聊或群聊显式 `@Bot` 后复用现有 Quick Chat、项目选�
 - 群 roster 从钉钉当前群机器人列表读取并与已发布 Rovai Bot 交集后同步到既有 Camp Membership；运行中 Run 不被修改；
 - AI 卡片固定模板 `382e4302-551d-4880-bf29-a30acfab2e71.schema`、`callbackType=STREAM` 且禁止转发。执行控制台只展示
   Core 公开安全投影，不传 command stdout/stderr、工具 JSON 或推理；正式结果使用 Markdown；
-- 设置页增加飞书/钉钉 Tab、OAuth/设备授权、队员发布、审批人选择、官方应用管理链接和 Provider-local 绑定诊断。
+- 设置页增加飞书/钉钉 Tab、浏览器 OAuth、队员发布、审批人选择、官方应用管理链接和 Provider-local 绑定诊断。
 
 ## 保守能力边界
 
@@ -59,7 +61,7 @@ Owner 可在私聊或群聊显式 `@Bot` 后复用现有 Quick Chat、项目选�
 - 入站附件只形成名称/媒体类型摘要。出站附件尚无已验证的 app-only 官方投递路径，当前明确失败为
   `dingtalk_attachment_delivery_not_supported`，不得伪造发送成功；
 - 本地 `card_verified` 只证明官方模板实例创建 API 成功；卡片投递、callback 和翻页仍属于真实租户验收；
-- 生产 OAuth Client 需要 public-client/device-flow 或服务端 token broker 决策。当前开发入口仅接受
+- 生产浏览器 OAuth Client 仍需安全分发或服务端 token broker 决策，不重开设备授权。当前开发入口仅接受
   `ROVAI_DINGTALK_OAUTH_CLIENT_ID` 与 `ROVAI_DINGTALK_OAUTH_CLIENT_SECRET` 的显式安全注入。
 
 ## 验收
@@ -75,7 +77,7 @@ Stream fast ACK、入站 normalize/topic 拒绝、Owner gate、统一 admission�
 | --- | --- | --- |
 | Version lifecycle | 已更新 | 本概览、[实施计划](implementation-plan.md)、[决定](decisions.md)与[版本索引](../README.md)共同切换 `current_version`，v1.30 冻结为 historical。 |
 | Decisions | 已更新 | [v1.31 决定](decisions.md)记录 Main 直接拥有 OAuth/Developer API、provider-neutral Core 复用和未实测能力 fail-closed 的高成本取舍。 |
-| Contracts | 已更新 | [DingTalk Channel v2](../../contracts/dingtalk-channel-v2.md)接管直接 OAuth/Developer API；[Channel Storage v1](../../contracts/channel-storage-v1.md)接管共享 SQLite credential/Session 与 Migration 124；DingTalk v1 冻结为历史合同。 |
+| Contracts | 已更新 | [DingTalk Channel v3](../../contracts/dingtalk-channel-v3.md)继承直接 OAuth/Developer API，并收敛为浏览器登录、旧 Profile 复用和暂时失败保留；[Channel Storage v2](../../contracts/channel-storage-v2.md)继承共享 SQLite credential/Session 与 Migration 124，并区分飞书暂时检查失败和失效、支持钉钉 completed 同应用凭据恢复；旧合同冻结为历史入口。 |
 | Architecture | 已更新 | 新增[钉钉渠道架构](../../architecture/dingtalk-channel.md)，并更新架构索引。 |
 | UI | 已更新 | [渠道设置](../../ui/components/channel-settings.md)增加 Provider Tab、钉钉 OAuth/审批/发布与 Provider-local 诊断合同。 |
 | Runtime Activity | 确认无需更新 | 钉钉继续消费既有公开 AgentRun Evidence 和 CampMessage，不新增 Runtime activity kind 或 Adapter mapping。 |

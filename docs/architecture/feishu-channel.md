@@ -9,7 +9,7 @@ last_updated: 2026-08-30
 # 飞书渠道架构
 
 字段、状态和恢复合同见 [Feishu Channel v2](../contracts/feishu-channel-v2.md)，credential 与 Developer Session 持久化见
-[Channel Storage v1](../contracts/channel-storage-v1.md)，模型输入证据见
+[Channel Storage v2](../contracts/channel-storage-v2.md)，模型输入证据见
 [ContextManifest Evidence v22](../contracts/context-manifest-evidence-v22.md)，取舍理由见
 [v1.30 决策记录](../versions/v1.30/decisions.md)。
 
@@ -62,6 +62,10 @@ ID/Secret，也不启动 Bot。身份与 Cookie 在登录期间只留在临时 S
 Session 均保持不变。持久层没有 confirm/rollback 文件，也不访问系统凭据库。启动与 refresh 从 SQLite 恢复 Cookie，并用
 Developer Session revision CAS 保存远端刷新；断开/过期在 Core 同一事务删除 Session row 与更新账号状态。隔离验收只依赖
 不同 `userData`/SQLite，不改变 `app.setName(APP_NAME)`，也没有 Keychain namespace。
+
+启动先恢复 published Bot 和消息 worker，再异步复核开发者账号；两者不共享等待或失败生命周期。Session 检查区分 valid、
+明确 invalid 和 unavailable：网络、页面、身份字段不完整、Cookie 恢复和 SQLite/CAS 异常均保留原 Session；只有明确失效
+才允许 Core expire。后台检查有 Host/账号代次与版本保护，不能用迟到结果覆盖或清理新登录态。
 
 普通队员发布先创建持久 `MemberBotPublicationIntent`，再要求当前 Web Session 仍属于 intent 冻结的
 `userId + tenantId`。`FeishuWebSessionMemberBotProvisioner` 从同一 Electron Session 的 Cookie jar 加载开放平台页，

@@ -9,6 +9,7 @@ import rovaiMemberBotIconPath from '../../../../build/icon.png?asset'
 import type {
   FeishuDeveloperPortalSession,
   FeishuDeveloperSessionService,
+  FeishuDeveloperSessionInspection,
   FeishuOpenPlatformSession
 } from './feishu-developer-session'
 import {
@@ -605,8 +606,8 @@ export class UnavailableFeishuDeveloperSessionService implements FeishuDeveloper
     return null
   }
 
-  async inspect(): Promise<null> {
-    return null
+  async inspect(): Promise<FeishuDeveloperSessionInspection> {
+    return { status: 'unavailable' }
   }
 
   async requireExpectedIdentity(): Promise<never> {

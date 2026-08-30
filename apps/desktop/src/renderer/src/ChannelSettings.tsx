@@ -101,9 +101,9 @@ export function ChannelSettings({ agents }: { agents: AgentProfile[] }): React.J
         selectedKind={selectedKind}
         onSelectChannel={setSelectedKind}
         onRetry={() => void load()}
-        onConnect={(provider, options) => void run(
-          `connect:${provider.kind}${options?.deviceFlow ? ':device' : ''}`,
-          () => window.rovai.channels.connect(provider.kind, options)
+        onConnect={(provider) => void run(
+          `connect:${provider.kind}`,
+          () => window.rovai.channels.connect(provider.kind)
         )}
         onDisconnect={(provider) => void run(
           `disconnect:${provider.kind}`,
@@ -207,7 +207,7 @@ export function ChannelSettingsView({
   selectedKind?: ChannelKind
   onRetry?(): void
   onSelectChannel?(kind: ChannelKind): void
-  onConnect?(channel: ChannelProviderView, options?: { deviceFlow?: boolean }): void
+  onConnect?(channel: ChannelProviderView): void
   onDisconnect?(channel: ChannelProviderView): void
   onPublish?(channel: ChannelProviderView, agent: AgentProfile): void
   onRetryPublish?(channel: ChannelProviderView, agent: AgentProfile): void
@@ -385,7 +385,7 @@ function ChannelConnectionRow({
 }: {
   channel: ChannelProviderView
   busy: string | null
-  onConnect?: (channel: ChannelProviderView, options?: { deviceFlow?: boolean }) => void
+  onConnect?: (channel: ChannelProviderView) => void
   onDisconnect?: (channel: ChannelProviderView) => void
 }): React.JSX.Element {
   const account = channel.connection.account
@@ -393,8 +393,11 @@ function ChannelConnectionRow({
   const hostReady = channel.hostStatus === 'ready'
   const providerName = channel.displayName
   const connectBusy = busy === `connect:${channel.kind}`
-    || busy === `connect:${channel.kind}:device`
   const disconnectBusy = busy === `disconnect:${channel.kind}`
+  const connectLabel = !hostReady ? '尚未开放'
+    : channel.kind === 'dingtalk'
+      ? channel.connection.status === 'not_connected' ? '连接钉钉' : '重新连接'
+      : connected ? '切换账号' : '登录开放平台'
   return (
     <div className="channel-connection-row">
       <ChannelMark kind={channel.kind} />
@@ -413,7 +416,9 @@ function ChannelConnectionRow({
           </span>
         </div>
       ) : (
-        <span className="channel-account-empty">{hostReady ? `还没有连接${providerName}账号` : '连接能力尚未开放'}</span>
+        <span className="channel-account-empty">{!hostReady ? '连接能力尚未开放'
+          : channel.kind === 'dingtalk' && channel.connection.status === 'session_expired'
+            ? '登录已失效，请重新连接' : `还没有连接${providerName}账号`}</span>
       )}
       <span className={`channel-connection-status${connected ? ' is-connected' : ''}`}>
         {connected ? '已连接' : channel.connection.status === 'session_expired' ? '需重新连接' : '未连接'}
@@ -438,19 +443,8 @@ function ChannelConnectionRow({
         >
           {connectBusy
             ? channel.kind === 'dingtalk' ? '等待授权…' : '等待扫码…'
-            : connected ? '切换账号' : hostReady ? '登录开放平台' : '尚未开放'}
+            : connectLabel}
         </button>
-        {channel.kind === 'dingtalk' && hostReady && (
-          <button
-            className="quiet-button compact"
-            type="button"
-            disabled={busy !== null || !onConnect}
-            title="当浏览器回调无法完成时，改用钉钉设备授权"
-            onClick={() => onConnect?.(channel, { deviceFlow: true })}
-          >
-            {busy === `connect:${channel.kind}:device` ? '等待设备授权…' : '设备授权'}
-          </button>
-        )}
       </div>
     </div>
   )
@@ -864,10 +858,12 @@ export function channelErrorMessage(error: unknown): string | null {
   const dingtalkFailures: Record<string, string> = {
     dingtalk_oauth_client_unconfigured:
       'Rovai 尚未配置钉钉 OAuth Client，当前构建无法连接钉钉开放平台。',
-    dingtalk_oauth_expired: '钉钉登录态已失效，请重新连接账号。',
+    dingtalk_oauth_client_rejected: 'Rovai 的钉钉登录配置未通过验证；已有登录态会保留。',
+    dingtalk_oauth_expired: '登录已失效，请重新连接。',
+    dingtalk_oauth_failed: '本次钉钉登录请求未完成，请稍后重试；已有登录态会保留。',
+    dingtalk_oauth_store_invalid: '暂时无法读取本机钉钉登录态，数据已保留，请稍后重试。',
     dingtalk_oauth_unavailable: '暂时无法连接钉钉登录服务，请检查网络后重试。',
-    dingtalk_oauth_timeout: '钉钉登录等待超时，请重新发起连接。',
-    dingtalk_oauth_access_denied: '本次钉钉授权未获同意，可以重新连接后再试。',
+    dingtalk_oauth_timeout: '钉钉登录服务响应超时，请稍后重试；已有登录态会保留。',
     dingtalk_oauth_state_mismatch: '本次钉钉登录无法通过安全校验，请重新发起连接。',
     dingtalk_open_platform_unavailable: '暂时无法连接钉钉开放平台，请检查网络后重试。',
     dingtalk_open_platform_timeout: '钉钉开放平台响应超时；已有应用身份会保留，可以稍后重试。',

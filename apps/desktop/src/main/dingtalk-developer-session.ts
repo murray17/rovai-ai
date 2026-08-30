@@ -9,9 +9,6 @@ import {
 
 const AUTHORIZE_URL = 'https://login.dingtalk.com/oauth2/auth'
 const TOKEN_URL = 'https://api.dingtalk.com/v1.0/oauth2/userAccessToken'
-const DEVICE_CODE_URL = 'https://login.dingtalk.com/oauth2/device/code.json'
-const DEVICE_TOKEN_URL = 'https://login.dingtalk.com/oauth2/device/token.json'
-const DEVICE_POLL_URL = 'https://mcp.dingtalk.com/cli/oauth/device/poll'
 const OAUTH_SCOPE = 'openid corpid'
 const OAUTH_TIMEOUT_MS = 10 * 60_000
 const MAX_RESPONSE_BYTES = 1_000_000
@@ -39,7 +36,6 @@ export interface DingTalkDeveloperSessionService {
   inspect(signal?: AbortSignal): Promise<DingTalkDeveloperIdentity | null>
   beginLogin(options: {
     signal: AbortSignal
-    deviceFlow?: boolean
     onStage?(stage: DingTalkLoginStage): void
   }): Promise<DingTalkDeveloperIdentity>
   pendingConnection?(): PendingDingTalkDeveloperConnection
@@ -74,7 +70,7 @@ export type PendingDingTalkDeveloperConnection = {
 }
 
 export interface DingTalkOAuthBackend {
-  login(options: { deviceFlow: boolean; signal: AbortSignal }): Promise<DingTalkOAuthTokenSet>
+  login(options: { signal: AbortSignal }): Promise<DingTalkOAuthTokenSet>
   refresh(refreshToken: string, signal?: AbortSignal): Promise<DingTalkOAuthTokenSet>
   resolveIdentity(
     accessToken: string,
@@ -91,7 +87,6 @@ export class DingTalkOAuthClient implements DingTalkOAuthBackend {
   readonly #fetch: FetchLike
   readonly #transport: DingTalkDeveloperApiTransport
   readonly #openExternal: (url: string) => Promise<unknown>
-  readonly #sleep: (durationMs: number, signal?: AbortSignal) => Promise<void>
 
   constructor(options: {
     clientId?: string
@@ -99,7 +94,6 @@ export class DingTalkOAuthClient implements DingTalkOAuthBackend {
     fetchImpl?: FetchLike
     transport?: DingTalkDeveloperApiTransport
     openExternal?: (url: string) => Promise<unknown>
-    sleep?: (durationMs: number, signal?: AbortSignal) => Promise<void>
   }) {
     this.#clientId = options.clientId?.trim() ?? ''
     this.#clientSecret = options.clientSecret?.trim() ?? ''
@@ -108,17 +102,11 @@ export class DingTalkOAuthClient implements DingTalkOAuthBackend {
       fetchImpl: this.#fetch
     })
     this.#openExternal = options.openExternal ?? ((url) => shell.openExternal(url))
-    this.#sleep = options.sleep ?? abortableDelay
   }
 
-  async login(options: {
-    deviceFlow: boolean
-    signal: AbortSignal
-  }): Promise<DingTalkOAuthTokenSet> {
+  async login(options: { signal: AbortSignal }): Promise<DingTalkOAuthTokenSet> {
     this.#requireClient()
-    const authorizationCode = options.deviceFlow
-      ? await this.#deviceAuthorizationCode(options.signal)
-      : await this.#browserAuthorizationCode(options.signal)
+    const authorizationCode = await this.#browserAuthorizationCode(options.signal)
     return this.#exchangeCode(authorizationCode, options.signal)
   }
 
@@ -154,12 +142,7 @@ export class DingTalkOAuthClient implements DingTalkOAuthBackend {
     body: Record<string, string>,
     signal?: AbortSignal
   ): Promise<DingTalkOAuthTokenSet> {
-    const response = await this.#requestJson(TOKEN_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-      signal
-    })
+    const response = await this.#requestTokenJson(body, signal)
     const root = asRecord(response)
     const payload = asRecord(root?.result) ?? asRecord(root?.data) ?? root
     const accessToken = firstString(payload, 'accessToken', 'access_token')
@@ -188,6 +171,8 @@ export class DingTalkOAuthClient implements DingTalkOAuthBackend {
     if (signal.aborted) throw oauthError('dingtalk_operation_cancelled')
     const state = randomBytes(32).toString('base64url')
     const callback = deferred<string>()
+    // The callback may arrive before openExternal resolves.
+    void callback.promise.catch(() => undefined)
     const server = createServer((request, response) => {
       let url: URL
       try {
@@ -211,7 +196,8 @@ export class DingTalkOAuthClient implements DingTalkOAuthBackend {
       if (remoteError) {
         response.writeHead(400, { 'Content-Type': 'text/plain; charset=utf-8' })
           .end('钉钉登录未完成，可以返回 Rovai 重试。')
-        callback.reject(oauthError('dingtalk_oauth_failed'))
+        callback.reject(oauthError(remoteError === 'access_denied'
+          ? 'dingtalk_operation_cancelled' : 'dingtalk_oauth_failed'))
         return
       }
       const code = url.searchParams.get('authCode') ?? url.searchParams.get('code') ?? ''
@@ -230,6 +216,7 @@ export class DingTalkOAuthClient implements DingTalkOAuthBackend {
 
     try {
       const port = await listenLoopback(server)
+      requireActiveOperation(signal)
       const redirectUri = `http://127.0.0.1:${port}/callback`
       const authorizationUrl = new URL(AUTHORIZE_URL)
       authorizationUrl.searchParams.set('redirect_uri', redirectUri)
@@ -238,7 +225,9 @@ export class DingTalkOAuthClient implements DingTalkOAuthBackend {
       authorizationUrl.searchParams.set('scope', OAUTH_SCOPE)
       authorizationUrl.searchParams.set('state', state)
       authorizationUrl.searchParams.set('prompt', 'consent')
-      await this.#openExternal(authorizationUrl.toString())
+      void this.#openExternal(authorizationUrl.toString()).catch(() => {
+        callback.reject(oauthError('dingtalk_oauth_unavailable'))
+      })
       return await waitForDeferred(callback, signal, OAUTH_TIMEOUT_MS)
     } catch (error) {
       if (isAbortError(error) || signal.aborted) {
@@ -251,113 +240,36 @@ export class DingTalkOAuthClient implements DingTalkOAuthBackend {
     }
   }
 
-  async #deviceAuthorizationCode(signal: AbortSignal): Promise<string> {
-    const codeResponse = await this.#requestForm(DEVICE_CODE_URL, {
-      client_id: this.#clientId,
-      scope: OAUTH_SCOPE
-    }, signal)
-    const root = asRecord(codeResponse)
-    if (root?.success !== true) throw oauthError('dingtalk_oauth_failed')
-    const auth = asRecord(root.result) ?? asRecord(root.data)
-    const deviceCode = firstString(auth, 'deviceCode', 'device_code')
-    const userCode = firstString(auth, 'userCode', 'user_code')
-    const verificationUri = firstString(
-      auth,
-      'verificationUriComplete',
-      'verification_uri_complete',
-      'verificationUri',
-      'verification_uri'
-    )
-    const flowId = firstString(auth, 'flowId', 'flow_id')
-    const expiresIn = positiveNumber(auth, 'expiresIn', 'expires_in') ?? 900
-    let interval = positiveNumber(auth, 'interval') ?? 2
-    interval = Math.min(30, Math.max(1, interval))
-    if (!deviceCode || !userCode || !verificationUri) {
-      throw oauthError('dingtalk_oauth_response_invalid')
-    }
-    await this.#openExternal(requireDingTalkAuthorizationUrl(verificationUri))
-
-    const deadline = Date.now() + Math.min(OAUTH_TIMEOUT_MS, expiresIn * 1_000)
-    while (Date.now() < deadline) {
-      await this.#sleep(interval * 1_000, signal)
-      if (flowId) {
-        const pollUrl = new URL(DEVICE_POLL_URL)
-        pollUrl.searchParams.set('flowId', flowId)
-        const polled = asRecord(await this.#requestJson(pollUrl.toString(), {
-          method: 'GET',
-          signal
-        }))
-        const data = asRecord(polled?.data) ?? asRecord(polled?.result)
-        const status = firstString(data, 'status')?.toUpperCase()
-        if (status === 'APPROVED') {
-          const authCode = firstString(data, 'authCode', 'auth_code')
-          if (!authCode) throw oauthError('dingtalk_oauth_response_invalid')
-          return authCode
-        }
-        if (status === 'REJECTED') throw oauthError('dingtalk_oauth_access_denied')
-        if (status === 'EXPIRED') throw oauthError('dingtalk_oauth_expired')
-        continue
-      }
-
-      const tokenResponse = await this.#requestForm(DEVICE_TOKEN_URL, {
-        grant_type: 'urn:ietf:params:oauth:grant-type:device_code',
-        device_code: deviceCode,
-        client_id: this.#clientId
-      }, signal)
-      const tokenRoot = asRecord(tokenResponse)
-      const tokenResult = asRecord(tokenRoot?.result) ?? asRecord(tokenRoot?.data)
-      const error = firstString(tokenResult, 'error')
-      if (!error) {
-        const authCode = firstString(tokenResult, 'authCode', 'auth_code')
-        if (!authCode) throw oauthError('dingtalk_oauth_response_invalid')
-        return authCode
-      }
-      if (error === 'slow_down') interval = Math.min(30, interval + 5)
-      else if (error === 'access_denied') throw oauthError('dingtalk_oauth_access_denied')
-      else if (error === 'expired_token') throw oauthError('dingtalk_oauth_expired')
-      else if (error !== 'authorization_pending') throw oauthError('dingtalk_oauth_failed')
-    }
-    throw oauthError('dingtalk_oauth_expired')
-  }
-
-  async #requestForm(
-    url: string,
-    values: Record<string, string>,
-    signal?: AbortSignal
-  ): Promise<unknown> {
-    return this.#requestJson(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams(values).toString(),
-      signal
-    })
-  }
-
-  async #requestJson(
-    url: string,
-    input: { method: 'GET' | 'POST'; headers?: Record<string, string>; body?: string; signal?: AbortSignal }
-  ): Promise<unknown> {
-    const bounded = boundedSignal(input.signal, 45_000)
+  async #requestTokenJson(body: Record<string, string>, signal?: AbortSignal): Promise<unknown> {
+    const bounded = boundedSignal(signal, 45_000)
     try {
-      const response = await this.#fetch(url, {
-        method: input.method,
-        headers: { Accept: 'application/json', ...input.headers },
-        body: input.body,
+      const response = await this.#fetch(TOKEN_URL, {
+        method: 'POST',
+        headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
         redirect: 'error',
         signal: bounded.signal
       })
-      if (!response.ok) {
-        if (response.status === 401) throw oauthError('dingtalk_oauth_expired')
-        if (response.status >= 400 && response.status < 500) {
-          throw oauthError('dingtalk_oauth_failed')
-        }
+      if (response.status === 408 || response.status === 429 || response.status >= 500) {
+        await response.body?.cancel().catch(() => undefined)
         throw oauthError('dingtalk_oauth_unavailable')
       }
-      return readBoundedJson(response)
+      const payload = await readBoundedJson(response)
+      if (!response.ok) {
+        const errorCode = firstString(asRecord(payload), 'error', 'code')
+        if (errorCode === 'invalid_grant' && body.grantType === 'refresh_token') {
+          throw oauthError('dingtalk_oauth_expired')
+        }
+        if (errorCode === 'invalid_client' || errorCode === 'unauthorized_client') {
+          throw oauthError('dingtalk_oauth_client_rejected')
+        }
+        throw oauthError('dingtalk_oauth_failed')
+      }
+      return payload
     } catch (error) {
       if (error instanceof Error && error.message.startsWith('dingtalk_')) throw error
       if (bounded.timedOut()) throw oauthError('dingtalk_oauth_timeout')
-      if (isAbortError(error) || input.signal?.aborted) {
+      if (isAbortError(error) || signal?.aborted) {
         throw oauthError('dingtalk_operation_cancelled')
       }
       throw oauthError('dingtalk_oauth_unavailable')
@@ -383,6 +295,10 @@ export class ElectronDingTalkDeveloperSessionService implements DingTalkDevelope
   #loaded = false
   #revision: number | null = null
   #state: StoredDingTalkDeveloperSessions = emptyStoredSessions()
+  #pendingRefresh: {
+    state: StoredDingTalkDeveloperSessions
+    profile: StoredOAuthProfile
+  } | null = null
   #pendingLogin: {
     profile: StoredOAuthProfile
     replacement: StoredDingTalkDeveloperSessions
@@ -417,17 +333,17 @@ export class ElectronDingTalkDeveloperSessionService implements DingTalkDevelope
 
   beginLogin(options: {
     signal: AbortSignal
-    deviceFlow?: boolean
     onStage?(stage: DingTalkLoginStage): void
   }): Promise<DingTalkDeveloperIdentity> {
     return this.#exclusive(async () => {
+      requireActiveOperation(options.signal)
       options.onStage?.('preparing')
       this.#pendingLogin = null
       options.onStage?.('awaiting_browser')
       const token = await this.#oauth.login({
-        deviceFlow: options.deviceFlow === true,
         signal: options.signal
       })
+      requireActiveOperation(options.signal)
       options.onStage?.('inspecting_identity')
       const identity = await this.#oauth.resolveIdentity(
         token.accessToken,
@@ -446,6 +362,7 @@ export class ElectronDingTalkDeveloperSessionService implements DingTalkDevelope
         clientId: this.#clientId
       }
       const stored = await this.#readState()
+      requireActiveOperation(options.signal)
       const key = profileKey(profile)
       const profiles = stored.profiles.filter((candidate) => profileKey(candidate) !== key)
       profiles.push(profile)
@@ -475,6 +392,7 @@ export class ElectronDingTalkDeveloperSessionService implements DingTalkDevelope
       const pending = this.#pendingLogin
       if (!pending) throw oauthError('dingtalk_login_pending_session_missing')
       this.#pendingLogin = null
+      this.#pendingRefresh = null
       this.#state = pending.replacement
       this.#revision = sessionRevision
       this.#loaded = true
@@ -484,7 +402,8 @@ export class ElectronDingTalkDeveloperSessionService implements DingTalkDevelope
   discardPendingLogin(): Promise<DingTalkDeveloperIdentity | null> {
     return this.#exclusive(async () => {
       this.#pendingLogin = null
-      const active = await this.#activeProfile()
+      const stored = await this.#readState()
+      const active = stored.profiles.find((profile) => profileKey(profile) === stored.currentProfileKey)
       return active ? projectIdentity(active) : null
     })
   }
@@ -500,6 +419,7 @@ export class ElectronDingTalkDeveloperSessionService implements DingTalkDevelope
   disconnect(): Promise<void> {
     return this.#exclusive(async () => {
       this.#pendingLogin = null
+      this.#pendingRefresh = null
       this.#state = emptyStoredSessions()
       this.#revision = null
       this.#loaded = true
@@ -507,6 +427,10 @@ export class ElectronDingTalkDeveloperSessionService implements DingTalkDevelope
   }
 
   async #activeProfile(signal?: AbortSignal): Promise<StoredOAuthProfile | null> {
+    requireActiveOperation(signal)
+    if (this.#pendingRefresh) {
+      await this.#savePendingRefresh()
+    }
     const stored = await this.#readState()
     if (!stored.currentProfileKey) return null
     const index = stored.profiles.findIndex(
@@ -515,8 +439,11 @@ export class ElectronDingTalkDeveloperSessionService implements DingTalkDevelope
     if (index < 0) throw oauthError('dingtalk_oauth_store_invalid')
     const profile = stored.profiles[index]!
     if (Date.parse(profile.accessTokenExpiresAt) > Date.now() + REFRESH_SKEW_MS) return profile
-    if (Date.parse(profile.refreshTokenExpiresAt) <= Date.now()) {
+    if (!profile.refreshToken.trim() || Date.parse(profile.refreshTokenExpiresAt) <= Date.now()) {
       throw oauthError('dingtalk_oauth_expired')
+    }
+    if (this.#clientId && profile.clientId !== this.#clientId) {
+      throw oauthError('dingtalk_oauth_client_rejected')
     }
     const refreshed = await this.#oauth.refresh(profile.refreshToken, signal)
     if (refreshed.corpId && refreshed.corpId !== profile.corpId) {
@@ -533,7 +460,11 @@ export class ElectronDingTalkDeveloperSessionService implements DingTalkDevelope
     }
     const profiles = [...stored.profiles]
     profiles[index] = updated
-    await this.#persistState({ ...stored, profiles }, updated)
+    // Refresh tokens can rotate remotely before the local write succeeds. Retain
+    // the result in Main so retry saves it instead of exchanging the old token again.
+    this.#pendingRefresh = { state: { ...stored, profiles }, profile: updated }
+    await this.#persistState(this.#pendingRefresh.state, updated)
+    this.#pendingRefresh = null
     return updated
   }
 
@@ -541,12 +472,33 @@ export class ElectronDingTalkDeveloperSessionService implements DingTalkDevelope
     if (this.#loaded) return this.#state
     const stored = await this.#store.read<DingTalkDeveloperIdentityRecord,
     StoredDingTalkDeveloperSessions>('dingtalk')
-    this.#loaded = true
-    if (!stored) return this.#state
+    if (!stored) {
+      this.#loaded = true
+      return this.#state
+    }
     if (!isStoredSessions(stored.session)) throw oauthError('dingtalk_oauth_store_invalid')
     this.#state = stored.session
     this.#revision = stored.revision
+    this.#loaded = true
     return this.#state
+  }
+
+  async #savePendingRefresh(): Promise<void> {
+    const pending = this.#pendingRefresh
+    if (!pending) return
+    const stored = await this.#store.read<DingTalkDeveloperIdentityRecord,
+    StoredDingTalkDeveloperSessions>('dingtalk')
+    if (stored && !isStoredSessions(stored.session)) throw oauthError('dingtalk_oauth_store_invalid')
+    if (!stored || stored.revision !== this.#revision) {
+      // A lost commit response or a later connection/disconnect owns the newer
+      // revision. Reload it instead of overwriting it with this refresh attempt.
+      this.#state = stored?.session ?? emptyStoredSessions()
+      this.#revision = stored?.revision ?? null
+      this.#loaded = true
+    } else {
+      await this.#persistState(pending.state, pending.profile)
+    }
+    this.#pendingRefresh = null
   }
 
   async #persistState(
@@ -617,8 +569,9 @@ function isStoredSessions(value: unknown): value is StoredDingTalkDeveloperSessi
 }
 
 function isStoredProfile(value: Record<string, unknown>): boolean {
+  if (typeof value.refreshToken !== 'string' || value.refreshToken.includes('\0')) return false
   for (const key of [
-    'accessToken', 'refreshToken', 'accessTokenExpiresAt', 'refreshTokenExpiresAt',
+    'accessToken', 'accessTokenExpiresAt', 'refreshTokenExpiresAt',
     'corpId', 'corpName', 'userId', 'userName', 'clientId'
   ]) {
     const candidate = value[key]
@@ -693,48 +646,15 @@ function waitForDeferred<T>(
   })
 }
 
-function abortableDelay(durationMs: number, signal?: AbortSignal): Promise<void> {
-  return new Promise((resolve, reject) => {
-    if (signal?.aborted) {
-      reject(oauthError('dingtalk_operation_cancelled'))
-      return
-    }
-    const onAbort = (): void => {
-      clearTimeout(timer)
-      reject(oauthError('dingtalk_operation_cancelled'))
-    }
-    const timer = setTimeout(() => {
-      signal?.removeEventListener('abort', onAbort)
-      resolve()
-    }, durationMs)
-    timer.unref?.()
-    signal?.addEventListener('abort', onAbort, { once: true })
-  })
-}
-
 function safeEqual(expected: string, actual: string): boolean {
   const left = Buffer.from(expected)
   const right = Buffer.from(actual)
   return left.length === right.length && timingSafeEqual(left, right)
 }
 
-function requireDingTalkAuthorizationUrl(value: string): string {
-  let url: URL
-  try {
-    url = new URL(value)
-  } catch {
-    throw oauthError('dingtalk_oauth_url_rejected')
-  }
-  const hostname = url.hostname.toLowerCase()
-  if (
-    url.protocol !== 'https:'
-    || url.username
-    || url.password
-    || !(hostname === 'dingtalk.com' || hostname.endsWith('.dingtalk.com'))
-  ) throw oauthError('dingtalk_oauth_url_rejected')
-  return url.toString()
+function requireActiveOperation(signal?: AbortSignal): void {
+  if (signal?.aborted) throw oauthError('dingtalk_operation_cancelled')
 }
-
 async function readBoundedJson(response: Response): Promise<unknown> {
   const length = response.headers.get('content-length')
   if (length !== null && Number(length) > MAX_RESPONSE_BYTES) {

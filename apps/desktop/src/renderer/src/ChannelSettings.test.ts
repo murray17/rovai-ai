@@ -1,7 +1,7 @@
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
-import { describe, expect, it } from 'vitest'
-import type { AgentProfile, ChannelSettingsSnapshot } from '@contracts'
+import { describe, expect, expectTypeOf, it } from 'vitest'
+import type { AgentProfile, ChannelKind, ChannelsApi, ChannelSettingsSnapshot } from '@contracts'
 import {
   ChannelSettings,
   ChannelSettingsView,
@@ -10,6 +10,18 @@ import {
 } from './ChannelSettings'
 
 describe('Channel settings', () => {
+  it('exposes only the provider choice on the typed connection boundary', () => {
+    expectTypeOf<ChannelsApi['connect']>().parameters.toEqualTypeOf<[kind?: ChannelKind]>()
+  })
+
+  it('keeps cancellation silent and distinguishes expired login from temporary connection failures', () => {
+    expect(channelErrorMessage(new Error('dingtalk_operation_cancelled'))).toBeNull()
+    expect(channelErrorMessage(new Error('dingtalk_oauth_expired'))).toBe('登录已失效，请重新连接。')
+    for (const code of ['dingtalk_oauth_unavailable', 'dingtalk_oauth_timeout', 'dingtalk_oauth_client_rejected']) {
+      expect(channelErrorMessage(new Error(code))).not.toMatch(/失效|重新连接/u)
+    }
+  })
+
   it('renders the Rovai Settings header and an honest loading state before Main responds', () => {
     const markup = renderToStaticMarkup(createElement(ChannelSettings, {
       agents: [agent('agent-a', 0)]
@@ -46,7 +58,7 @@ describe('Channel settings', () => {
     expect(markup).toContain('>等待连接</button>')
   })
 
-  it('renders DingTalk beside Feishu with OAuth, device fallback, and no topic promise', () => {
+  it('renders DingTalk beside Feishu with only browser login and no topic promise', () => {
     const snapshot = unavailableSnapshot()
     snapshot.channels.push({
       kind: 'dingtalk',
@@ -82,12 +94,37 @@ describe('Channel settings', () => {
     expect(markup).toContain('<strong>飞书</strong>')
     expect(markup).toContain('<strong>钉钉</strong>')
     expect(markup).toContain('开发者账号会话 · 保存在 Rovai 本地数据库')
-    expect(markup).toContain('>设备授权</button>')
+    expect(markup).toContain('>重新连接</button>')
+    expect(markup).not.toContain('设备授权')
     expect(markup).toContain('群聊首次由 Owner @')
     expect(markup).toContain('钉钉话题暂不接入')
     expect(markup).toContain('>钉钉管理</a>')
     expect(markup).not.toMatch(/app secret|client secret|access token/i)
   })
+
+  it.each(['not_connected', 'session_expired', 'connected'] as const)(
+    'offers one DingTalk browser connection action for %s',
+    (status) => {
+      const snapshot = unavailableSnapshot()
+      snapshot.channels = [{
+        kind: 'dingtalk', displayName: '钉钉', hostStatus: 'ready',
+        connection: { status, account: status === 'not_connected' ? null : {
+          accountId: 'dingtalk-account', userName: 'Murray', tenantName: '星海科技',
+          brand: 'dingtalk', connectedAt: '2026-08-30T00:00:00Z',
+          lastVerifiedAt: '2026-08-30T00:00:00Z'
+        } },
+        memberBots: []
+      }]
+      const markup = renderToStaticMarkup(createElement(ChannelSettingsView, {
+        agents: [], snapshot, selectedKind: 'dingtalk', onConnect: () => undefined
+      }))
+
+      expect(markup.match(/>(连接钉钉|重新连接)<\/button>/gu)).toHaveLength(1)
+      expect(markup).toContain(status === 'not_connected' ? '>连接钉钉</button>' : '>重新连接</button>')
+      expect(markup).not.toContain('设备授权')
+      if (status === 'session_expired') expect(markup).toContain('登录已失效，请重新连接')
+    }
+  )
 
   it('renders connected account and published Bot facts without exposing credentials', () => {
     const snapshot: ChannelSettingsSnapshot = {

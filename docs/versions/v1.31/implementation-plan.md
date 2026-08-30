@@ -16,7 +16,8 @@ last_updated: 2026-08-30
 - [x] 飞书/钉钉账号与 Developer Session 原子连接、publication credential 与 intent 原子推进、启动单次批量读取；
 - [x] 删除 safeStorage/Keychain/独立 `.bin` 读取路径；旧文件只按严格名称 best-effort 清理，不迁移或解密；
 - [x] 删除 DWS binary、版本/SHA、签名排除、打包资源、subprocess 生命周期与 stdout/stderr 协议；
-- [x] 浏览器 OAuth、设备授权 fallback、staged 账号切换和 Core 失败时的内存丢弃；
+- [x] 唯一浏览器 OAuth、staged 账号切换和 Core 失败时的内存丢弃；完整删除设备授权 UI/参数/endpoint/轮询；
+- [x] 原 schema-1 Profile 重启复用、串行静默续期、临时失败保留、轮换保存重试与迟到检查 fence；
 - [x] 每队员单 App publication 状态机、App identity freeze、头像、Robot、权限、版本、审批和恢复；
 - [x] 每 App Stream、Robot/Card callback fast ACK、身份规范化和 topic fail-closed；
 - [x] Owner-only 私聊/普通群、精确 `/new`、ExternalQuote、项目卡、单根 FIFO 与统一原子 admission；
@@ -27,8 +28,9 @@ last_updated: 2026-08-30
 
 ## 外部验收与生产门槛
 
-- [ ] 确认生产 Rovai OAuth Client 采用 public-client/device-flow 或服务端 token broker，并完成可安全分发实现；
+- [ ] 完成生产浏览器 OAuth Client 安全分发或服务端 token broker 实现；不得以设备授权作为备用；
 - [ ] 在真实钉钉租户证明连接不创建应用、连续发布不重复 OAuth、切换失败保留旧账号；
+- [ ] 在隔离环境完成浏览器首次登录、重启/静默续期、授权撤销后重连、取消与断网恢复验收；
 - [ ] 证明应用创建、头像、Robot、权限、显式审批、版本 release 与原 App 恢复；
 - [ ] 证明每 App Stream 断线恢复、Owner 私聊、Owner 群 `@`、non-owner gate 和 `/new`；
 - [ ] 证明项目卡投递/callback、执行卡 streaming/终态翻页、Markdown 永久输出与应用管理链接；

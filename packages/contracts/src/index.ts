@@ -2119,13 +2119,9 @@ export interface ChannelSettingsSnapshot {
   activeProvisioning: MemberBotProvisioningView | null
 }
 
-export interface ChannelConnectOptions {
-  deviceFlow?: boolean
-}
-
 export interface ChannelsApi {
   get(): Promise<ChannelSettingsSnapshot>
-  connect(kind?: ChannelKind, options?: ChannelConnectOptions): Promise<ChannelSettingsSnapshot>
+  connect(kind?: ChannelKind): Promise<ChannelSettingsSnapshot>
   disconnect(kind?: ChannelKind): Promise<ChannelSettingsSnapshot>
   publishMemberBot(agentId: string, kind?: ChannelKind): Promise<ChannelSettingsSnapshot>
   retryMemberBot(agentId: string, kind?: ChannelKind): Promise<ChannelSettingsSnapshot>

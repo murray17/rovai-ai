@@ -16,7 +16,10 @@ import type {
   ChannelCredentialStore,
   FeishuAppCredential
 } from './channel-credential-store'
-import type { FeishuDeveloperIdentity } from './feishu-developer-session'
+import type {
+  FeishuDeveloperIdentity,
+  FeishuDeveloperSessionInspection
+} from './feishu-developer-session'
 import type { FeishuMemberBotProvisioner } from './feishu-member-bot-provisioner'
 
 function channelCore(
@@ -115,7 +118,7 @@ function developerSession(value = identity()): NonNullable<ChannelHostDependenci
     pendingConnection: vi.fn(() => ({ identity: value, session: { cookies: [] } })),
     activatePendingLogin: vi.fn(async () => undefined),
     discardPendingLogin: vi.fn(async () => value),
-    inspect: vi.fn(async () => value),
+    inspect: vi.fn(async () => ({ status: 'valid' as const, identity: value })),
     requireExpectedIdentity: vi.fn(async () => value),
     disconnect: vi.fn(async () => undefined)
   }
@@ -262,6 +265,147 @@ function normalizedMessage(input: {
 }
 
 describe('channel settings service', () => {
+  it('does not expire a connected account when startup inspection throws a transient error', async () => {
+    const session = developerSession()
+    session.inspect.mockRejectedValue(new Error('ERR_INTERNET_DISCONNECTED'))
+    const commands: string[] = []
+    const service = new ChannelSettingsService({
+      ...inertInterval(),
+      credentialStore: memoryCredentialStore(),
+      developerSession: session,
+      core: channelCore((method) => {
+        commands.push(method)
+        if (method === 'channels.feishu.snapshot') return coreSnapshot({ account: connectedAccount() })
+        return { status: 'applied', payload: { deliveries: [] } }
+      })
+    })
+    try {
+      await service.start()
+      await vi.waitFor(() => expect(session.inspect).toHaveBeenCalled())
+      expect(commands).not.toContain('channels.feishu.account.expire')
+      expect(session.disconnect).not.toHaveBeenCalled()
+    } finally {
+      await service.stop()
+    }
+  })
+
+  it('starts published Bots before a pending developer session inspection finishes', async () => {
+    const session = developerSession()
+    let finishInspection!: (value: FeishuDeveloperSessionInspection) => void
+    const pending = new Promise<FeishuDeveloperSessionInspection>((resolve) => { finishInspection = resolve })
+    session.inspect.mockReturnValue(pending)
+    const createChannel = fakeCreateChannel()
+    const service = new ChannelSettingsService({
+      ...inertInterval(),
+      developerSession: session,
+      credentialStore: memoryCredentialStore({
+        'feishu-member-a': { appId: 'cli_a', appSecret: 'fixture-secret' }
+      }),
+      createChannel,
+      core: channelCore((method) => {
+        if (method === 'channels.feishu.snapshot') return coreSnapshot({
+          account: connectedAccount(),
+          memberBots: [{
+            agentId: 'agent-a', accountId: connectedAccount().accountId,
+            brand: 'feishu', appId: 'cli_a', botDisplayName: '审阅员',
+            credentialRef: 'feishu-member-a', status: 'published', failureCode: null,
+            version: 1, ownerIdentityStatus: 'verified'
+          }]
+        })
+        return { status: 'applied', payload: { deliveries: [] } }
+      })
+    })
+    const starting = service.start()
+    try {
+      await vi.waitFor(() => expect(createChannel).toHaveBeenCalledTimes(1), { timeout: 200 })
+      await starting
+    } finally {
+      finishInspection({ status: 'valid', identity: identity() })
+      await starting
+      await service.stop()
+    }
+  })
+
+  it.each(['expired', 'identity_changed'] as const)(
+    'expires the account only after a conclusive background inspection: %s',
+    async (reason) => {
+      const session = developerSession()
+      session.inspect.mockResolvedValue({ status: 'invalid', reason })
+      const commands: string[] = []
+      const service = new ChannelSettingsService({
+        ...inertInterval(), credentialStore: memoryCredentialStore(), developerSession: session,
+        core: channelCore((method) => {
+          commands.push(method)
+          if (method === 'channels.feishu.snapshot') return coreSnapshot({ account: connectedAccount() })
+          return { status: 'applied', payload: { deliveries: [] } }
+        })
+      })
+      try {
+        await service.start()
+        await vi.waitFor(() => expect(commands).toContain('channels.feishu.account.expire'))
+      } finally {
+        await service.stop()
+      }
+    }
+  )
+
+  it('ignores a stale background invalidation after a new account connection commits', async () => {
+    const replacement = identity({ userId: 'replacement-owner' })
+    const session = developerSession(replacement)
+    let finishInspection!: (value: FeishuDeveloperSessionInspection) => void
+    const inspecting = new Promise<FeishuDeveloperSessionInspection>((resolve) => { finishInspection = resolve })
+    session.inspect.mockReturnValue(inspecting)
+    let account = connectedAccount()
+    const commands: string[] = []
+    const service = new ChannelSettingsService({
+      ...inertInterval(), credentialStore: memoryCredentialStore(), developerSession: session,
+      core: channelCore((method) => {
+        commands.push(method)
+        if (method === 'channels.feishu.snapshot') return coreSnapshot({ account })
+        if (method === 'channels.feishu.account.commitConnection') {
+          account = connectedAccount(replacement)
+          return { status: 'applied', payload: { sessionRevision: 2 } }
+        }
+        return { status: 'applied', payload: { deliveries: [] } }
+      })
+    })
+    try {
+      await service.start()
+      await service.connect()
+      finishInspection({ status: 'invalid', reason: 'expired' })
+      await new Promise<void>((resolve) => setImmediate(resolve))
+
+      expect(commands).not.toContain('channels.feishu.account.expire')
+      expect(commands).not.toContain('channels.feishu.account.upsert')
+      expect((await service.get()).channels[0].connection).toMatchObject({
+        status: 'connected', account: { accountId: connectedAccount(replacement).accountId }
+      })
+    } finally {
+      finishInspection({ status: 'invalid', reason: 'expired' })
+      await service.stop()
+    }
+  })
+
+  it('preserves the account when publishing cannot inspect the developer session temporarily', async () => {
+    const session = developerSession()
+    session.inspect.mockResolvedValue({ status: 'unavailable' })
+    const commands: string[] = []
+    const provision = vi.fn()
+    const service = new ChannelSettingsService({
+      credentialStore: memoryCredentialStore(), developerSession: session,
+      memberBotProvisioner: { create: provision },
+      core: channelCore((method) => {
+        commands.push(method)
+        return method === 'channels.feishu.snapshot'
+          ? coreSnapshot({ account: connectedAccount() }) : { status: 'applied' }
+      })
+    })
+
+    await expect(service.publishMemberBot('agent-a')).rejects.toThrow('已有登录会话已保留')
+    expect(commands).not.toContain('channels.feishu.account.expire')
+    expect(provision).not.toHaveBeenCalled()
+  })
+
   it('propagates card-action acknowledgements through the installed Lark SDK', async () => {
     const channel = createLarkChannel({
       appId: 'cli_card_ack_test',
@@ -460,7 +604,7 @@ describe('channel settings service', () => {
         pendingConnection: () => ({ identity: identity(), session: { cookies: [] } }),
         activatePendingLogin,
         async discardPendingLogin() { return null },
-        async inspect() { return null },
+        async inspect() { return { status: 'invalid', reason: 'missing' } },
         async requireExpectedIdentity() { throw new Error('not_used') },
         async disconnect() {}
       },
@@ -797,7 +941,7 @@ describe('channel settings service', () => {
       credentialStore: memoryCredentialStore(),
       developerSession: {
         async beginLogin() { throw new Error('feishu_developer_identity_incomplete') },
-        async inspect() { return null },
+        async inspect() { return { status: 'invalid', reason: 'missing' } },
         async requireExpectedIdentity() { throw new Error('not_used') },
         async disconnect() {}
       },
@@ -823,7 +967,7 @@ describe('channel settings service', () => {
       credentialStore: memoryCredentialStore(),
       developerSession: {
         async beginLogin() { throw new Error('feishu_login_cancelled') },
-        async inspect() { return identity() },
+        async inspect() { return { status: 'valid', identity: identity() } },
         async requireExpectedIdentity() { return identity() },
         async disconnect() {}
       },
@@ -849,7 +993,7 @@ describe('channel settings service', () => {
       credentialStore: memoryCredentialStore(),
       developerSession: {
         async beginLogin() { throw new Error('feishu_login_cancelled') },
-        async inspect() { return null },
+        async inspect() { return { status: 'invalid', reason: 'missing' } },
         async requireExpectedIdentity() { throw new Error('not_used') },
         async disconnect() {}
       },
@@ -882,7 +1026,7 @@ describe('channel settings service', () => {
         }),
         activatePendingLogin,
         discardPendingLogin,
-        async inspect() { return identity() },
+        async inspect() { return { status: 'valid', identity: identity() } },
         async requireExpectedIdentity() { return identity() },
         async disconnect() {}
       },
@@ -907,7 +1051,7 @@ describe('channel settings service', () => {
     const owner = identity()
     const provision = vi.fn()
     const expiredSession = developerSession(owner)
-    expiredSession.inspect.mockResolvedValue(null)
+    expiredSession.inspect.mockResolvedValue({ status: 'invalid', reason: 'expired' })
     const service = new ChannelSettingsService({
       credentialStore: memoryCredentialStore(),
       developerSession: expiredSession,

@@ -1,4 +1,4 @@
-import type { ChannelConnectOptions, ChannelKind, ChannelSettingsSnapshot } from '@contracts'
+import type { ChannelKind, ChannelSettingsSnapshot } from '@contracts'
 import type { ChannelSettingsService } from './channel-settings'
 import type { DingTalkChannelSettingsService } from './dingtalk-channel-settings'
 
@@ -71,11 +71,8 @@ export class ChannelSettingsCoordinator {
     return () => this.#listeners.delete(listener)
   }
 
-  async connect(
-    kind: ChannelKind = 'feishu',
-    options: ChannelConnectOptions = {}
-  ): Promise<ChannelSettingsSnapshot> {
-    if (kind === 'dingtalk') await this.#dingtalk.connect(options)
+  async connect(kind: ChannelKind = 'feishu'): Promise<ChannelSettingsSnapshot> {
+    if (kind === 'dingtalk') await this.#dingtalk.connect()
     else await this.#feishu.connect()
     return this.get()
   }

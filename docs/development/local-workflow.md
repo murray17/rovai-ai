@@ -119,13 +119,14 @@ pnpm dev
 
 不要把值写入仓库、`.env` 示例、命令日志、截图或打包资源；不要复用第三方工具的 Client ID，也不要用队员 Bot AppKey
 代替账号连接。Desktop Main 直接完成 OAuth、官方 Developer API 与 Stream，不需要准备、安装或调用任何 DWS binary。
-浏览器 OAuth 是默认路径，设备授权只能由 UI 的显式 fallback 触发；两者的 Token profile 都只写入隔离 `userData` 下的
+浏览器 OAuth 与本机 callback 是唯一登录路径；不保留设备授权。Token Profile 只写入隔离 `userData` 下的
 `rovai.sqlite`。该数据库内渠道 Token/Secret/Cookie 是明文；验收目录必须按秘密数据保护，不得上传、复制进仓库或进入诊断附件。
 
 当前 production secret delivery 尚未完成，因此普通 package 不因代码已内置 OAuth 协议而自动具备可发布的钉钉登录。真实验收必须
 使用隔离 `userData`，记录连接前后应用数量、账号 identity、发布 App identity、审批/版本状态、Stream 与卡片收发证据；
 任何缺项都保持 NO-GO。字段、feature gate 和错误见
-[DingTalk Channel v2](../contracts/dingtalk-channel-v2.md)。
+[DingTalk Channel v3](../contracts/dingtalk-channel-v3.md)。验收同时覆盖首次浏览器登录、重启恢复、静默续期、明确撤销后
+重新连接、取消和网络失败；网络异常不得清空既有 Profile。
 
 ## 打包产物：构建与运行分开
 

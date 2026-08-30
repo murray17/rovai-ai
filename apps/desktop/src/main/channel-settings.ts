@@ -23,6 +23,7 @@ import type {
 } from './channel-credential-store'
 import type {
   FeishuDeveloperIdentity,
+  FeishuDeveloperSessionInspection,
   FeishuDeveloperSessionService,
   FeishuLoginStage
 } from './feishu-developer-session'
@@ -251,6 +252,7 @@ export class ChannelSettingsService {
   #stopped = false
   #nextRosterSweepAt = 0
   #nextAggregateRecoveryAt = 0
+  #sessionCheckGeneration = 0
 
   constructor(dependencies?: ChannelHostDependencies) {
     this.#dependencies = dependencies ?? null
@@ -268,6 +270,7 @@ export class ChannelSettingsService {
     if (!this.#dependencies || this.#started) return
     this.#started = true
     this.#stopped = false
+    const sessionCheckGeneration = ++this.#sessionCheckGeneration
     try {
       const publishedCredentials = await this.#dependencies.credentialStore.listPublished()
       const credentialsByRef = new Map(publishedCredentials
@@ -277,16 +280,6 @@ export class ChannelSettingsService {
         } => item.provider === 'feishu')
         .map((item) => [item.credentialRef, item.credential] as const))
       let snapshot = await this.#coreSnapshot()
-      if (snapshot.account?.status === 'connected') {
-        const identity = await this.#developerSession.inspect().catch(() => null)
-        if (!identity || accountIdForIdentity(identity) !== snapshot.account.accountId) {
-          await this.#expireAccount(snapshot.account)
-          snapshot = await this.#coreSnapshot()
-        } else {
-          await this.#upsertAccount(identity)
-          snapshot = await this.#coreSnapshot()
-        }
-      }
       await this.#recoverPublicationIntents(snapshot)
       snapshot = await this.#coreSnapshot()
       for (const bot of snapshot.memberBots.filter((candidate) => candidate.status === 'published')) {
@@ -301,6 +294,9 @@ export class ChannelSettingsService {
       this.#pumpTimer.unref?.()
       await this.#emit()
       void this.#pump()
+      if (snapshot.account?.status === 'connected') {
+        void this.#checkDeveloperSession(snapshot.account, sessionCheckGeneration)
+      }
     } catch (error) {
       await this.stop()
       this.#started = false
@@ -310,6 +306,7 @@ export class ChannelSettingsService {
 
   async stop(): Promise<void> {
     this.#stopped = true
+    this.#sessionCheckGeneration += 1
     this.#activeQrAbort?.abort()
     this.#activeQrAbort = null
     this.#activeProvisioningAbort?.abort()
@@ -338,6 +335,7 @@ export class ChannelSettingsService {
   async connect(): Promise<ChannelSettingsSnapshot> {
     this.#requireHost()
     if (this.#activeQrAttempt) throw new Error('已有一个飞书二维码流程正在进行。')
+    this.#sessionCheckGeneration += 1
     this.#activeProvisioningAbort?.abort()
     const previous = (await this.#coreSnapshot()).account
     const attemptId = randomUUID()
@@ -396,6 +394,7 @@ export class ChannelSettingsService {
 
   async disconnect(): Promise<ChannelSettingsSnapshot> {
     this.#requireHost()
+    this.#sessionCheckGeneration += 1
     const snapshot = await this.#coreSnapshot()
     this.#activeProvisioningAbort?.abort()
     this.#activeProvisioningAbort = null
@@ -453,12 +452,12 @@ export class ChannelSettingsService {
       && this.#memberBotProvisioner.reconcile
       && snapshot.account?.status === 'connected'
     ) {
-      const identity = await this.#developerSession.inspect().catch(() => null)
+      const inspection = await this.#inspectDeveloperSession()
       if (
-        identity
-        && accountIdForIdentity(identity) === snapshot.account.accountId
-        && userIdDigest(identity.userId) === snapshot.account.userIdDigest
-        && identity.tenantId === snapshot.account.tenantId
+        inspection.status === 'valid'
+        && accountIdForIdentity(inspection.identity) === snapshot.account.accountId
+        && userIdDigest(inspection.identity.userId) === snapshot.account.userIdDigest
+        && inspection.identity.tenantId === snapshot.account.tenantId
       ) return this.#publishNewMemberBot(agentId, 'retry')
     }
     const bindingAccountId = bot?.accountId ?? intent?.accountId
@@ -577,16 +576,20 @@ export class ChannelSettingsService {
     ) {
       throw new Error('该队员已有未完成的发布记录。')
     }
-    const identity = await this.#developerSession.inspect()
+    const inspection = await this.#inspectDeveloperSession()
+    if (inspection.status === 'unavailable') {
+      throw new Error('暂时无法检查飞书登录状态，请稍后重试。已有登录会话已保留。')
+    }
     if (
-      !identity
-      || accountIdForIdentity(identity) !== account.accountId
-      || userIdDigest(identity.userId) !== account.userIdDigest
-      || identity.tenantId !== account.tenantId
+      inspection.status === 'invalid'
+      || accountIdForIdentity(inspection.identity) !== account.accountId
+      || userIdDigest(inspection.identity.userId) !== account.userIdDigest
+      || inspection.identity.tenantId !== account.tenantId
     ) {
       await this.#expireAccount(account).catch(() => undefined)
       throw new Error('飞书登录已过期或账号已变化，请先重新连接账号。')
     }
+    const { identity } = inspection
     const agent = await this.#dependencies!.core.request<AgentProfile>('members.get', { agentId })
     if (!agent || agent.presence !== 'present') throw new Error('该队员当前不可发布。')
     const appDescription = `Rovai AI 队员 · ${agent.teamRole || '协作者'}`
@@ -973,6 +976,33 @@ export class ChannelSettingsService {
 
   async #upsertAccount(identity: FeishuDeveloperIdentity): Promise<void> {
     await this.#command('channels.feishu.account.upsert', feishuConnectionAccount(identity))
+  }
+
+  async #inspectDeveloperSession(): Promise<FeishuDeveloperSessionInspection> {
+    return this.#developerSession.inspect().catch(() => ({ status: 'unavailable' as const }))
+  }
+
+  async #checkDeveloperSession(
+    account: NonNullable<CoreChannelSnapshot['account']>,
+    generation: number
+  ): Promise<void> {
+    try {
+      const inspection = await this.#inspectDeveloperSession()
+      if (inspection.status === 'unavailable') return
+      const current = (await this.#coreSnapshot()).account
+      if (this.#stopped || generation !== this.#sessionCheckGeneration
+        || current?.accountId !== account.accountId || current.version !== account.version
+        || current.status !== 'connected') return
+      if (inspection.status === 'invalid'
+        || accountIdForIdentity(inspection.identity) !== account.accountId) {
+        await this.#expireAccount(account)
+      } else {
+        await this.#upsertAccount(inspection.identity)
+      }
+      await this.#emit()
+    } catch {
+      // Background account verification must not tear down independently authenticated Bots.
+    }
   }
 
   async #expireAccount(account: NonNullable<CoreChannelSnapshot['account']>): Promise<void> {

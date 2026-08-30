@@ -10139,11 +10139,35 @@ fn store_dingtalk_publication_credential(
     if version != command.expected_intent_version {
         return Ok(version_conflict(version));
     }
-    if !dingtalk_publication_transition_allowed(&state, "credentials_read") {
+    let completed_recovery = state == "completed";
+    if !completed_recovery && !dingtalk_publication_transition_allowed(&state, "credentials_read") {
         return Ok(rejected(
             "dingtalk_publication_intent.invalid_transition",
             "Credential storage requires the credentials_read transition",
         ));
+    }
+    if completed_recovery {
+        let binding_matches: bool = transaction.query_row(
+            r#"
+            SELECT EXISTS(
+                SELECT 1 FROM dingtalk_member_bot_publication_intent AS intent
+                JOIN dingtalk_member_bot AS bot
+                  ON bot.agent_id = intent.agent_id AND bot.account_id = intent.account_id
+                 AND bot.unified_app_id = intent.remote_unified_app_id
+                 AND bot.app_key = intent.app_key AND bot.robot_code = intent.robot_code
+                 AND bot.credential_ref = intent.credential_ref
+                WHERE intent.id = ?1 AND bot.status = 'published'
+            )
+            "#,
+            [&command.publication_intent_id],
+            |row| row.get(0),
+        )?;
+        if !binding_matches {
+            return Ok(rejected(
+                "dingtalk_publication_intent.published_binding_required",
+                "Completed credential recovery requires the exact published Bot binding",
+            ));
+        }
     }
     if unified_app_id.is_none()
         || app_key
@@ -10185,8 +10209,9 @@ fn store_dingtalk_publication_credential(
     transaction.execute(
         r#"
         UPDATE dingtalk_member_bot_publication_intent
-        SET state = 'credentials_read', app_key = ?2, robot_code = ?3,
-            credential_ref = ?4, last_completed_step = 'credentials_read',
+        SET state = CASE WHEN state = 'completed' THEN state ELSE 'credentials_read' END,
+            app_key = ?2, robot_code = ?3, credential_ref = ?4,
+            last_completed_step = CASE WHEN state = 'completed' THEN last_completed_step ELSE 'credentials_read' END,
             failure_code = NULL, version = version + 1, updated_at = ?5
         WHERE id = ?1 AND version = ?6
         "#,
@@ -10630,6 +10655,140 @@ mod tests {
         assert_eq!(published.len(), 1);
         assert_eq!(published[0].agent_id, agent_id);
         assert_eq!(published[0].payload["appSecret"], "plaintext-app-secret");
+    }
+
+    #[test]
+    fn completed_dingtalk_bot_recovers_its_exact_credential_without_reopening_publication() {
+        let mut database = seeded_runtime_database_owned();
+        let service = ChannelService::default();
+        connect_dingtalk_account(&service, &mut database);
+        publish_dingtalk_bot(&service, &mut database, "agent_1");
+        // Model a pre-SQLite completed binding with no credential row, using a current ref.
+        for table in [
+            "dingtalk_member_bot_publication_intent",
+            "dingtalk_member_bot",
+        ] {
+            database.connection().execute(
+                &format!("UPDATE {table} SET credential_ref = 'dingtalk-recovery' WHERE agent_id = 'agent_1'"),
+                [],
+            ).unwrap();
+        }
+        let before = service.dingtalk_snapshot(&mut database).unwrap();
+        let mut command = StorePublicationCredentialCommand {
+            provider: DINGTALK_PROVIDER.to_string(),
+            publication_intent_id: "dingtalk-intent-agent_1".to_string(),
+            expected_intent_version: before.publication_intents[0].version,
+            credential_ref: "dingtalk-recovery".to_string(),
+            remote_app_id: "ding-app-agent_1".to_string(),
+            credential: json!({"appSecret": "recovered-fixture-secret", "robotCode": "ding-robot-agent_1"}),
+        };
+        let stored = service
+            .store_publication_credential(
+                &mut database,
+                &dingtalk_host_envelope("restore-completed-credential", command.clone()),
+            )
+            .unwrap();
+        assert_eq!(stored.result.status, CommandResultStatus::Applied);
+        let after = service.dingtalk_snapshot(&mut database).unwrap();
+        assert_eq!(after.publication_intents[0].state, "completed");
+        assert_eq!(
+            after.publication_intents[0].last_completed_step.as_deref(),
+            Some("completed")
+        );
+        assert_eq!(
+            after.publication_intents[0].version,
+            command.expected_intent_version + 1
+        );
+        assert_eq!(
+            serde_json::to_value(&before.member_bots).unwrap(),
+            serde_json::to_value(&after.member_bots).unwrap()
+        );
+        let credentials = service
+            .published_channel_credentials(&mut database)
+            .unwrap();
+        assert_eq!(credentials.len(), 1);
+        assert_eq!(
+            credentials[0].payload["appSecret"],
+            "recovered-fixture-secret"
+        );
+        assert_eq!(credentials[0].credential_ref, command.credential_ref);
+
+        let stale = service
+            .store_publication_credential(
+                &mut database,
+                &dingtalk_host_envelope("restore-stale-credential", command.clone()),
+            )
+            .unwrap();
+        assert_eq!(stale.result.status, CommandResultStatus::Rejected);
+        command.expected_intent_version += 1;
+        for (suffix, app_id, credential_ref, robot_code) in [
+            (
+                "app",
+                "different-app",
+                "dingtalk-recovery",
+                "ding-robot-agent_1",
+            ),
+            (
+                "ref",
+                "ding-app-agent_1",
+                "dingtalk-replacement",
+                "ding-robot-agent_1",
+            ),
+            (
+                "robot",
+                "ding-app-agent_1",
+                "dingtalk-recovery",
+                "different-robot",
+            ),
+        ] {
+            let mut mismatched = command.clone();
+            mismatched.remote_app_id = app_id.to_string();
+            mismatched.credential_ref = credential_ref.to_string();
+            mismatched.credential["robotCode"] = json!(robot_code);
+            let rejected = service
+                .store_publication_credential(
+                    &mut database,
+                    &dingtalk_host_envelope(&format!("restore-mismatched-{suffix}"), mismatched),
+                )
+                .unwrap();
+            assert_eq!(rejected.result.status, CommandResultStatus::Rejected);
+        }
+        assert_eq!(
+            service
+                .dingtalk_snapshot(&mut database)
+                .unwrap()
+                .publication_intents[0]
+                .version,
+            command.expected_intent_version
+        );
+        assert_eq!(
+            service
+                .published_channel_credentials(&mut database)
+                .unwrap()
+                .len(),
+            1
+        );
+        database
+            .connection()
+            .execute(
+                "UPDATE dingtalk_member_bot SET status = 'disabled' WHERE agent_id = 'agent_1'",
+                [],
+            )
+            .unwrap();
+        let no_published_binding = service
+            .store_publication_credential(
+                &mut database,
+                &dingtalk_host_envelope("restore-without-published-binding", command),
+            )
+            .unwrap();
+        assert_eq!(
+            no_published_binding.result.status,
+            CommandResultStatus::Rejected
+        );
+        assert_eq!(
+            no_published_binding.result.code,
+            "dingtalk_publication_intent.published_binding_required"
+        );
     }
 
     fn connect_dingtalk_account(service: &ChannelService, database: &mut Database) {

@@ -1,7 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto'
 import type {
   AgentProfile,
-  ChannelConnectOptions,
   ChannelMemberBotView,
   ChannelProviderView,
   ChannelQrAttemptView,
@@ -241,6 +240,7 @@ export class DingTalkChannelSettingsService {
   #pumpTimer: ReturnType<typeof globalThis.setInterval> | null = null
   #pumping = false
   #stopped = false
+  #sessionCheckGeneration = 0
   #nextRosterSweepAt = 0
 
   constructor(dependencies: DingTalkChannelHostDependencies) {
@@ -261,6 +261,7 @@ export class DingTalkChannelSettingsService {
 
   async start(): Promise<void> {
     this.#stopped = false
+    const sessionCheckGeneration = ++this.#sessionCheckGeneration
     const publishedCredentials = await this.#dependencies.credentialStore.listPublished()
     const credentialsByRef = new Map(publishedCredentials
       .filter((item): item is PublishedChannelCredential & {
@@ -270,17 +271,7 @@ export class DingTalkChannelSettingsService {
       .map((item) => [item.credentialRef, item.credential] as const))
     let snapshot = await this.#snapshot()
     if (snapshot.account?.status === 'connected') {
-      const identity = await this.#dependencies.developerSession.inspect().catch(() => null)
-      if (!identity
-        || identity.userIdDigest !== snapshot.account.userIdDigest
-        || identity.corpId !== snapshot.account.corpId) {
-        await this.#command('channels.dingtalk.account.expire', {
-          accountId: snapshot.account.accountId,
-          expectedVersion: snapshot.account.version
-        }).catch(() => undefined)
-      } else {
-        await this.#upsertAccount(identity)
-      }
+      await this.#checkSavedAccount(snapshot.account, sessionCheckGeneration).catch(() => undefined)
     }
     snapshot = await this.#snapshot()
     for (const bot of snapshot.memberBots.filter((candidate) => candidate.status === 'published')) {
@@ -297,6 +288,7 @@ export class DingTalkChannelSettingsService {
 
   async stop(): Promise<void> {
     this.#stopped = true
+    this.#sessionCheckGeneration += 1
     this.#activeQrAbort?.abort()
     this.#activeProvisioningAbort?.abort()
     if (this.#pumpTimer) {
@@ -360,11 +352,12 @@ export class DingTalkChannelSettingsService {
     }
   }
 
-  async connect(options: ChannelConnectOptions = {}): Promise<void> {
+  async connect(): Promise<void> {
     if (this.#activeQrAttempt) throw new Error('已有一个钉钉登录流程正在进行。')
     if (this.#activeProvisioning && !['completed', 'failed', 'unknown_remote_state'].includes(
       this.#activeProvisioning.stage
     )) throw new Error('队员发布期间不能切换钉钉账号。')
+    this.#sessionCheckGeneration += 1
     const abort = new AbortController()
     const attemptId = randomUUID()
     this.#activeQrAbort = abort
@@ -382,18 +375,15 @@ export class DingTalkChannelSettingsService {
     try {
       const identity = await this.#dependencies.developerSession.beginLogin({
         signal: abort.signal,
-        deviceFlow: options.deviceFlow === true,
         onStage: (stage) => {
-          if (!this.#activeQrAttempt) return
+          if (this.#activeQrAttempt?.attemptId !== attemptId || abort.signal.aborted) return
           this.#activeQrAttempt = {
             ...this.#activeQrAttempt,
             stage: stage === 'connected' ? 'connected'
               : stage === 'inspecting_identity' ? 'inspecting_identity'
                 : stage === 'awaiting_browser' ? 'awaiting_scan' : 'preparing',
             detail: stage === 'awaiting_browser'
-              ? options.deviceFlow
-                ? '请在浏览器中完成钉钉设备授权。'
-                : '请在浏览器中确认钉钉开放平台授权。'
+              ? '请在浏览器中扫码或确认钉钉登录，完成后返回 Rovai。'
               : stage === 'inspecting_identity'
                 ? '正在读取钉钉账号与企业身份…'
                 : stage === 'connected' ? '钉钉开发者账号已连接。' : '正在准备安全登录…'
@@ -401,6 +391,7 @@ export class DingTalkChannelSettingsService {
           this.#notify()
         }
       })
+      if (abort.signal.aborted) throw new Error('dingtalk_operation_cancelled')
       const pending = pendingDingTalkConnection(this.#dependencies.developerSession)
       const result = await this.#command('channels.dingtalk.account.commitConnection', {
         expectedPreviousAccountVersion: previous?.status === 'connected' ? previous.version : null,
@@ -437,6 +428,7 @@ export class DingTalkChannelSettingsService {
     if (this.#activeProvisioning && !['completed', 'failed', 'unknown_remote_state'].includes(
       this.#activeProvisioning.stage
     )) throw new Error('队员发布期间不能断开钉钉账号。')
+    this.#sessionCheckGeneration += 1
     const snapshot = await this.#snapshot()
     if (!snapshot.account || snapshot.account.status !== 'connected') return
     const identity = await this.#dependencies.developerSession.inspect()
@@ -467,18 +459,38 @@ export class DingTalkChannelSettingsService {
     const agent = await this.#dependencies.core.request<AgentProfile>('members.get', { agentId })
     const existing = snapshot.publicationIntents.find((intent) => intent.agentId === agentId)
     const existingBot = snapshot.memberBots.find((bot) => bot.agentId === agentId)
+    if (existing && (existing.accountId !== account.accountId
+      || existing.expectedCorpId !== identity.corpId
+      || existing.expectedUserIdDigest !== identity.userIdDigest)) {
+      throw new Error('请先连接最初发布该队员应用的钉钉账号。')
+    }
+    if (existingBot && (!existing
+      || existingBot.accountId !== existing.accountId
+      || existingBot.unifiedAppId !== existing.remoteUnifiedAppId
+      || existingBot.appKey !== existing.appKey
+      || existingBot.robotCode !== existing.robotCode
+      || existingBot.credentialRef !== existing.credentialRef)) {
+      throw new Error('dingtalk_credentials_freeze_invalid')
+    }
     if (existing?.state === 'completed' && existingBot) {
+      const abort = new AbortController()
+      this.#activeProvisioningAbort = abort
       this.#activeProvisioning = {
         ...provisioningView(existing, 'verifying_session', '正在核对原应用连接与 AI 卡片…'),
         remoteAppId: existingBot.unifiedAppId
       }
       this.#notify()
       try {
-        await this.#startBot(existingBot)
-        const credential = await this.#dependencies.credentialStore.readDingTalk(
+        let credential = await this.#dependencies.credentialStore.readDingTalk(
           existingBot.credentialRef
         )
-        if (!credential) throw new Error('published_bot_credential_missing')
+        if (!credential) {
+          credential = await this.#recoverCompletedBotCredential(existing, existingBot, identity, abort.signal)
+          this.#stream.stop(existingBot.appKey)
+          this.#apis.delete(existingBot.appKey)
+        }
+        if (abort.signal.aborted) throw new Error('dingtalk_provisioning_cancelled')
+        await this.#startBot(existingBot, credential)
         await this.#verifyCard(credential)
         this.#failures.delete(agentId)
         this.#activeProvisioning = {
@@ -497,6 +509,8 @@ export class DingTalkChannelSettingsService {
         }
         this.#notify()
         throw error
+      } finally {
+        if (this.#activeProvisioningAbort === abort) this.#activeProvisioningAbort = null
       }
     }
     if (existing?.state === 'failed_unknown_remote_state' && !existing.remoteUnifiedAppId) {
@@ -695,6 +709,77 @@ export class DingTalkChannelSettingsService {
     ) throw new Error('dingtalk_approver_selection_invalid')
     this.#activeProvisioning = null
     await this.publish(agentId, userId)
+  }
+
+  async #recoverCompletedBotCredential(
+    intent: DingTalkPublicationIntent,
+    bot: CoreDingTalkSnapshot['memberBots'][number],
+    identity: DingTalkDeveloperIdentity,
+    signal: AbortSignal
+  ): Promise<DingTalkAppCredential> {
+    if (!intent.versionId || !bot.unifiedAppId || !bot.appKey || !bot.robotCode || !bot.credentialRef) {
+      throw new Error('dingtalk_credentials_freeze_invalid')
+    }
+    this.#activeProvisioning = provisioningView(intent, 'verifying_session', '正在恢复原应用的本地凭据…')
+    this.#notify()
+    const recovered = await this.#dependencies.provisioner.create({
+      appName: bot.botDisplayName,
+      description: `Rovai AI 队员 · ${bot.botDisplayName}`,
+      expectedCorpId: identity.corpId,
+      expectedUserId: identity.userId,
+      frozen: {
+        unifiedAppId: bot.unifiedAppId, appKey: bot.appKey,
+        robotCode: bot.robotCode, versionId: intent.versionId
+      },
+      resumeState: 'completed',
+      frozenApprovalMode: intent.approvalMode ?? undefined,
+      requiredScopeValues: this.#dependencies.requiredScopeValues ?? [],
+      requiredEventCodes: this.#dependencies.requiredEventCodes ?? [],
+      signal,
+      resolveIconMediaId: async () => { throw new Error('dingtalk_completed_recovery_mutation_rejected') },
+      // Completed recovery is read-only; do not rewind publication milestones.
+      onStep: async () => undefined
+    })
+    if (!recovered.appSecret || recovered.unifiedAppId !== bot.unifiedAppId
+      || recovered.appKey !== bot.appKey || recovered.robotCode !== bot.robotCode
+      || recovered.versionId !== intent.versionId) {
+      throw new Error('dingtalk_credentials_freeze_invalid')
+    }
+    if (signal.aborted) throw new Error('dingtalk_provisioning_cancelled')
+    const credential = { appKey: bot.appKey, appSecret: recovered.appSecret, robotCode: bot.robotCode }
+    await this.#command('channels.dingtalk.publicationIntent.storeCredential', {
+      provider: 'dingtalk', publicationIntentId: intent.publicationIntentId,
+      expectedIntentVersion: intent.version, credentialRef: bot.credentialRef,
+      remoteAppId: bot.appKey,
+      credential: { appSecret: credential.appSecret, robotCode: credential.robotCode }
+    })
+    return credential
+  }
+
+  async #checkSavedAccount(
+    account: NonNullable<CoreDingTalkSnapshot['account']>,
+    generation: number
+  ): Promise<void> {
+    let identity: DingTalkDeveloperIdentity | null
+    try {
+      identity = await this.#dependencies.developerSession.inspect()
+    } catch (error) {
+      if (!(error instanceof Error)
+        || !['dingtalk_oauth_expired', 'dingtalk_login_identity_mismatch'].includes(error.message)) return
+      identity = null
+    }
+    const current = (await this.#snapshot()).account
+    if (this.#stopped || this.#sessionCheckGeneration !== generation
+      || current?.status !== 'connected' || current.accountId !== account.accountId
+      || current.version !== account.version) return
+    if (!identity || identity.userIdDigest !== account.userIdDigest || identity.corpId !== account.corpId) {
+      await this.#command('channels.dingtalk.account.expire', {
+        accountId: account.accountId,
+        expectedVersion: account.version
+      })
+    } else {
+      await this.#upsertAccount(identity)
+    }
   }
 
   async #upsertAccount(identity: DingTalkDeveloperIdentity): Promise<void> {

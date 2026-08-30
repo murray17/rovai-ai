@@ -7,7 +7,6 @@ import { isCampId } from '@contracts'
 import type {
   AppearanceSnapshot,
   ChannelKind,
-  ChannelConnectOptions,
   CoreMethod,
   ExecutionConsolePlacement,
   MonitoringFilter,
@@ -113,19 +112,6 @@ function optionalChannelKind(value: unknown): ChannelKind | undefined {
   if (value === undefined) return undefined
   if (value === 'feishu' || value === 'dingtalk') return value
   throw new Error('Invalid channel kind')
-}
-
-function optionalChannelConnectOptions(value: unknown): ChannelConnectOptions | undefined {
-  if (value === undefined || value === null) return undefined
-  if (!value || typeof value !== 'object' || Array.isArray(value)) {
-    throw new Error('Invalid channel connection options')
-  }
-  const record = value as Record<string, unknown>
-  if (Object.keys(record).some((key) => key !== 'deviceFlow')
-    || (record.deviceFlow !== undefined && typeof record.deviceFlow !== 'boolean')) {
-    throw new Error('Invalid channel connection options')
-  }
-  return { deviceFlow: record.deviceFlow === true }
 }
 
 const mainStartupStartedAt = performance.now()
@@ -788,12 +774,9 @@ ipcMain.handle('rovai:channels-get', (event) => {
   return channelSettings.get()
 })
 
-ipcMain.handle('rovai:channels-connect', (event, kind: unknown, options: unknown) => {
+ipcMain.handle('rovai:channels-connect', (event, kind: unknown) => {
   requireMainWindow(event.sender)
-  return channelSettings.connect(
-    optionalChannelKind(kind),
-    optionalChannelConnectOptions(options)
-  )
+  return channelSettings.connect(optionalChannelKind(kind))
 })
 
 ipcMain.handle('rovai:channels-disconnect', (event, kind: unknown) => {
