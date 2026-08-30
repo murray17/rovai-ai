@@ -53,4 +53,5 @@ fixture 表驱动覆盖连接不存在、非 JSON、无效 UTF-8 和响应丢失
 promotion 后同步失败归属四项问题，无遗留实质发现。Windows 专属测试的共享函数引用随抽取同步修复。
 
 真实 Runtime 和日常 App 均未运行，不以离线结果代替 Runtime 矩阵。Windows 原生验证由既有 PR CI
-compile gate、attachment traversal 和 Named Pipe job 执行；此处不宣称本机完成 Windows 实测。
+compile gate、attachment traversal、新增 CLI snapshot 执行步骤和 Named Pipe job 执行；CLI 步骤复用
+本次已有的跨平台低成本 fixture，不新增重复用例。此处不宣称本机完成 Windows 实测。
