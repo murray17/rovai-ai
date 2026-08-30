@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto'
 import { performance } from 'node:perf_hooks'
 import type { FeishuOpenPlatformSession } from './feishu-developer-session'
 import type { ProvisioningTimingRecorder } from './feishu-provisioning-timing'
+import { FEISHU_MEMBER_BOT_LABEL } from '../shared/channel-member-bot-copy'
 
 export interface FeishuMemberBotConsoleConfiguration {
   appName: string
@@ -865,7 +866,7 @@ export class OpenPlatformApiClient {
       {
         body: {
           autoPublish: false,
-          remark: input.remark ?? 'Rovai AI 队员 Bot 首次发布',
+          remark: input.remark ?? `${FEISHU_MEMBER_BOT_LABEL} Bot 首次发布`,
           changeLog: input.changeLog ?? '由 Rovai AI 配置 Bot、权限、事件与长连接。',
           appVersion,
           visibleSuggest: {

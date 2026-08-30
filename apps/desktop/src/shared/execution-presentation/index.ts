@@ -298,7 +298,8 @@ export function liveRuntimeEventFromExecutionEvidence(
 
 export function buildLiveExecutionProgress(
   events: LiveRuntimeEvent[],
-  agentRunId: string
+  agentRunId: string,
+  options: { textMode?: 'live_tail' | 'complete' } = {}
 ): LiveExecutionProgress {
   const narrationByItem = new Map<string, string>()
   let anonymousNarrationSegment = 0
@@ -521,14 +522,17 @@ export function buildLiveExecutionProgress(
   const stepById = new Map(steps.map((step) => [step.id, step]))
   const items = itemOrder.flatMap((key): ExecutionProgressItem[] => {
     if (key === 'plan') {
-      const explanation = planExplanation.trim().slice(-2_000)
+      const explanation = options.textMode === 'complete'
+        ? planExplanation.trim()
+        : planExplanation.trim().slice(-2_000)
       return explanation || plan.length > 0
         ? [{ key, kind: 'plan', explanation, plan }]
         : []
     }
     if (key.startsWith('narration:')) {
       const itemId = key.slice('narration:'.length)
-      const body = (narrationByItem.get(itemId) ?? '').trim().slice(-4_000)
+      const narration = (narrationByItem.get(itemId) ?? '').trim()
+      const body = options.textMode === 'complete' ? narration : narration.slice(-4_000)
       return safeMarkdownHasRenderableContent(body)
         ? [{ key, kind: 'narration', body }]
         : []

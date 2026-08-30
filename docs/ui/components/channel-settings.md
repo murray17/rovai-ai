@@ -10,7 +10,7 @@ last_updated: 2026-08-30
 
 渠道设置是 Owner 在 Rovai 本机维护飞书/钉钉连接与队员 Bot 的 Renderer surface。群首次项目选择发生在对应外部会话的
 Owner-only 卡片中；Renderer 不提供 Channel 项目目录或会话绑定操作。领域状态和错误按 Provider 分别见
-[Feishu Channel v2](../../contracts/feishu-channel-v2.md)与
+[Feishu Channel v4](../../contracts/feishu-channel-v4.md)与
 [DingTalk Channel v3](../../contracts/dingtalk-channel-v3.md)；本页只拥有信息层级、交互与可访问性。
 
 ## 页面结构
@@ -119,6 +119,13 @@ credential 或内部错误。钉钉卡固定使用官方 AI Markdown 模板、St
 “该项目已不可用，请重新选择”并刷新原卡；旧卡/双击显示“该项目选择已完成或卡片已过期”。成功只显示短暂
 “项目已绑定，正在处理消息”反馈，Core 随后异步撤回卡片，不留下永久完成卡。
 
+## 飞书执行卡
+
+飞书外部执行卡沿用原生执行台的阅读顺序：公开文字与 command 混排。执行中没有折叠容器；终态每条 command 自带
+原生箭头和本地展开/收起，安全命令/flags/路径在 header，展开后只有一个结果代码框。没有外层执行过程分组或二级标题。
+文字最多前 10 行；安全结果超过 20 行时显示前 9 / 截断提示 / 后 10。多页才出现页码和上一页/下一页；安全、预算、
+封存与 callback 约束由 [Feishu Channel v4](../../contracts/feishu-channel-v4.md) 拥有，不增加 Renderer 设置或视图状态。
+
 ## 状态、错误与键盘
 
 - 首次读取使用页面内 status；无 Snapshot 时提供重试；已有 Snapshot 刷新失败保留旧内容并显示 alert；
@@ -131,7 +138,7 @@ credential 或内部错误。钉钉卡固定使用官方 AI Markdown 模板、St
 
 - [全局设计系统](../../../DESIGN.md)
 - [设置工作区 brief](../../../apps/desktop/.impeccable/surfaces/settings-workspace.md)
-- [Feishu Channel v2](../../contracts/feishu-channel-v2.md)
+- [Feishu Channel v4](../../contracts/feishu-channel-v4.md)
 - [飞书渠道架构](../../architecture/feishu-channel.md)
 - [DingTalk Channel v3](../../contracts/dingtalk-channel-v3.md)
 - [钉钉渠道架构](../../architecture/dingtalk-channel.md)

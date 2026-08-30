@@ -17,9 +17,16 @@ import {
   type GroupedExecutionProgressItem,
   type ToolProgressItem
 } from './tool-grouping'
+import { boundFeishuPreviewLine, createFeishuCommandProjector } from './feishu-result-preview'
 
-const TERMINAL_PAGE_CHAR_BUDGET = 10_000
-const TERMINAL_PAGE_OPERATION_BUDGET = 20
+// The plain projection is also used by DingTalk; its contract is unchanged.
+const PLAIN_PAGE_CHAR_BUDGET = 10_000
+const PLAIN_PAGE_OPERATION_BUDGET = 20
+const FEISHU_PAGE_COMMAND_BUDGET = 15
+const FEISHU_PAGE_ELEMENT_BUDGET = 50
+const FEISHU_PAGE_BYTE_BUDGET = 28_000
+type CardElement = Record<string, unknown>
+type TimelineBlock = { kind: 'text' | 'command'; element: CardElement }
 
 export interface ExecutionConsoleSnapshot {
   sequence: number
@@ -42,20 +49,28 @@ export interface ExecutionConsolePublicPage {
 }
 
 type ExecutionCardBlock = {
+  kind: 'process' | 'public_output'
   body: string
   operationCount: number
 }
 
 export function executionConsoleCard(
   snapshot: ExecutionConsoleSnapshot,
-  requestedPageIndex = 0
+  requestedPageIndex?: number
 ): Record<string, unknown> {
   if (!isTerminal(snapshot.run.status)) return renderLiveExecutionCard(snapshot)
   return renderTerminalExecutionCard(snapshot, requestedPageIndex)
 }
 
 export function executionConsolePages(snapshot: ExecutionConsoleSnapshot): ExecutionConsolePage[] {
-  const pages = paginateExecutionBlocks(expandedExecutionBlocks(snapshot))
+  return executionPages(expandedExecutionBlocks(snapshot))
+}
+
+function executionPages(
+  blocks: ExecutionCardBlock[],
+  characterBudget = PLAIN_PAGE_CHAR_BUDGET
+): ExecutionConsolePage[] {
+  const pages = paginateExecutionBlocks(blocks, characterBudget)
   return pages.map((blocks, pageIndex) => ({
     pageIndex,
     pageCount: pages.length,
@@ -64,7 +79,7 @@ export function executionConsolePages(snapshot: ExecutionConsoleSnapshot): Execu
 }
 
 export function executionConsolePageCount(snapshot: ExecutionConsoleSnapshot): number {
-  return executionConsolePages(snapshot).length
+  return isTerminal(snapshot.run.status) ? terminalTimelinePages(snapshot).length : 1
 }
 
 export function executionConsolePublicPage(
@@ -107,17 +122,27 @@ function renderLiveExecutionCard(snapshot: ExecutionConsoleSnapshot): Record<str
 
 function renderTerminalExecutionCard(
   snapshot: ExecutionConsoleSnapshot,
-  requestedPageIndex: number
+  requestedPageIndex: number | undefined
 ): Record<string, unknown> {
-  const pages = executionConsolePages(snapshot)
-  const pageIndex = Math.min(Math.max(0, requestedPageIndex), pages.length - 1)
-  const page = pages[pageIndex]
-  const elements: Record<string, unknown>[] = []
+  const pages = terminalTimelinePages(snapshot)
+  const requested = Number.isInteger(requestedPageIndex) ? requestedPageIndex ?? 0 : 0
+  const pageIndex = Math.min(Math.max(0, requested), pages.length - 1)
+  return terminalTimelineCard(snapshot, pages[pageIndex], pageIndex, pages.length)
+}
+
+function terminalTimelineCard(
+  snapshot: ExecutionConsoleSnapshot,
+  blocks: TimelineBlock[],
+  pageIndex: number,
+  pageCount: number
+): Record<string, unknown> {
+  const elements: CardElement[] = []
   const duration = formatDuration(durationMs(snapshot.startedAt, snapshot.terminalAt))
   if (duration) elements.push({ tag: 'markdown', content: `用时 ${duration}` })
-  elements.push({ tag: 'markdown', content: page.body })
-  if (page.pageCount > 1) {
-    elements.push(cardPaginationRow(snapshot, pageIndex, page.pageCount))
+  elements.push(...blocks.map((block) => block.element))
+  if (pageCount > 1) {
+    elements.push({ tag: 'markdown', content: `第 ${pageIndex + 1} / ${pageCount} 页`, text_align: 'center' })
+    elements.push(cardPaginationRow(snapshot, pageIndex, pageCount))
   }
   return baseCard(
     `${boundedPlainText(snapshot.agentDisplayName, 80)} · ${terminalTitle(snapshot.run)}`,
@@ -126,10 +151,110 @@ function renderTerminalExecutionCard(
   )
 }
 
-function progressItems(snapshot: ExecutionConsoleSnapshot): ExecutionProgressItem[] {
+function terminalTimelineBlocks(snapshot: ExecutionConsoleSnapshot): TimelineBlock[] {
+  const items = progressItems(snapshot, true)
+  const commandProjection = createFeishuCommandProjector(snapshot.evidence, snapshot.agentRunId)
+  const blocks: TimelineBlock[] = items.flatMap((item, index): TimelineBlock[] => {
+    if (item.kind !== 'tool') {
+      const body = renderNonGroupItem(item, snapshot.run.status)
+      return body ? [textBlock(body)] : []
+    }
+    const { title, result } = commandProjection(item.step)
+    return [{
+      kind: 'command',
+      element: {
+        tag: 'collapsible_panel',
+        element_id: `command_${index}`,
+        // Local Feishu client state only. No callback behavior on a command.
+        expanded: false,
+        header: {
+          title: {
+            tag: 'plain_text',
+            content: `${statusIcon(activityStatusForAgentRun(item.step.status, snapshot.run.status))} ${title}`
+          },
+          icon: { tag: 'standard_icon', token: 'down-small-ccm_outlined', size: '16px 16px' },
+          icon_position: 'right',
+          icon_expanded_angle: -180
+        },
+        vertical_spacing: '8px',
+        padding: '8px 0px 8px 0px',
+        elements: [resultFrame(result)]
+      }
+    }]
+  })
+  const output = snapshot.publicOutput?.trim()
+  if (output && !items.some((item) => item.kind === 'narration' && item.body.trim() === output)) {
+    blocks.push(textBlock(output))
+  }
+  return blocks.length ? blocks : [textBlock('没有可展示的执行记录。')]
+}
+
+function textBlock(body: string): TimelineBlock {
+  const lines = body.trim().replace(/\r\n?/gu, '\n').split('\n')
+  const preview = lines.slice(0, 10)
+  if (lines.length > 10) preview[9] += ` …（已截断 ${lines.length - 10} 行）`
+  return { kind: 'text', element: { tag: 'markdown', content: preview.map(boundFeishuPreviewLine).join('\n') } }
+}
+
+function resultFrame(result: string): CardElement {
+  // An output fence must not be able to end the single neutral result frame.
+  return { tag: 'markdown', content: `\`\`\`text\n${result.replace(/`{3}/gu, '`\u200b``')}\n\`\`\`` }
+}
+
+function terminalTimelinePages(snapshot: ExecutionConsoleSnapshot): TimelineBlock[][] {
+  const rawBlocks = terminalTimelineBlocks(snapshot)
+  const fits = (blocks: TimelineBlock[], paged: boolean): boolean => {
+    if (blocks.filter((block) => block.kind === 'command').length > FEISHU_PAGE_COMMAND_BUDGET) return false
+    // Reserve both buttons, the page counter, and the widest possible page numbers.
+    const card = terminalTimelineCard(snapshot, blocks, paged ? rawBlocks.length : 0, paged ? rawBlocks.length + 2 : 1)
+    const elements = (card.body as { elements: CardElement[] }).elements
+    return countCardElements(elements) <= FEISHU_PAGE_ELEMENT_BUDGET
+      && new TextEncoder().encode(JSON.stringify(card)).length <= FEISHU_PAGE_BYTE_BUDGET
+  }
+  const blocks = rawBlocks.map((block) => {
+    if (fits([block], true)) return block
+    // Results are already line-bounded. Preserve a very long safe command before
+    // giving up its preview; never silently shorten a command into a different one.
+    if (block.kind === 'command') {
+      const withoutResult = {
+        ...block,
+        element: { ...block.element, elements: [resultFrame('（结果过长，请在 Rovai 查看）')] }
+      }
+      if (fits([withoutResult], true)) return withoutResult
+    }
+    return textBlock('这条执行记录超出飞书单卡大小限制，请在 Rovai 查看完整记录。')
+  })
+  if (fits(blocks, false)) return [blocks]
+  const pages: TimelineBlock[][] = []
+  let page: TimelineBlock[] = []
+  for (let index = 0; index < blocks.length;) {
+    const next = blocks[index + 1]
+    const pair = blocks[index].kind === 'text' && next?.kind === 'command'
+      ? [blocks[index], next]
+      : null
+    const unit = pair && fits(pair, true) ? pair : [blocks[index]]
+    if (page.length && !fits([...page, ...unit], true)) {
+      pages.push(page)
+      page = []
+    }
+    page.push(...unit)
+    index += unit.length
+  }
+  if (page.length) pages.push(page)
+  return pages
+}
+
+function countCardElements(elements: CardElement[]): number {
+  return elements.reduce((count, element) => count + 1
+    + countCardElements((element.elements ?? []) as CardElement[])
+    + countCardElements((element.columns ?? []) as CardElement[]), 0)
+}
+
+function progressItems(snapshot: ExecutionConsoleSnapshot, complete = false): ExecutionProgressItem[] {
   return buildLiveExecutionProgress(
     snapshot.evidence.map(liveRuntimeEventFromExecutionEvidence),
-    snapshot.agentRunId
+    snapshot.agentRunId,
+    { textMode: complete ? 'complete' : 'live_tail' }
   ).items
 }
 
@@ -141,19 +266,21 @@ function liveExecutionBlocks(snapshot: ExecutionConsoleSnapshot): string[] {
 
 function expandedExecutionBlocks(snapshot: ExecutionConsoleSnapshot): ExecutionCardBlock[] {
   const blocks: ExecutionCardBlock[] = []
+  const publicOutput = snapshot.publicOutput?.trim() ?? ''
   for (const item of progressItems(snapshot)) {
     const body = item.kind === 'tool'
       ? renderTool(item, snapshot.run.status)
       : renderNonGroupItem(item, snapshot.run.status)
-    if (body) blocks.push({ body, operationCount: item.kind === 'tool' ? 1 : 0 })
+    if (body) blocks.push({
+      kind: item.kind === 'narration' && body === publicOutput ? 'public_output' : 'process',
+      body,
+      operationCount: item.kind === 'tool' ? 1 : 0
+    })
   }
-  const publicOutput = snapshot.publicOutput?.trim() ?? ''
   if (publicOutput && !blocks.some((block) => block.body.trim() === publicOutput)) {
-    blocks.push({ body: publicOutput, operationCount: 0 })
+    blocks.push({ kind: 'public_output', body: publicOutput, operationCount: 0 })
   }
-  return blocks.length > 0
-    ? blocks
-    : [{ body: '没有可展示的执行记录。', operationCount: 0 }]
+  return blocks
 }
 
 function executionBlocks(
@@ -190,7 +317,10 @@ function renderNonGroupItem(
   return renderTool(item, runStatus)
 }
 
-function paginateExecutionBlocks(blocks: ExecutionCardBlock[]): ExecutionCardBlock[][] {
+function paginateExecutionBlocks(
+  blocks: ExecutionCardBlock[],
+  characterBudget: number
+): ExecutionCardBlock[][] {
   const pages: ExecutionCardBlock[][] = []
   let page: ExecutionCardBlock[] = []
   let characters = 0
@@ -204,16 +334,18 @@ function paginateExecutionBlocks(blocks: ExecutionCardBlock[]): ExecutionCardBlo
   for (const block of blocks) {
     const separatorCharacters = page.length > 0 ? 2 : 0
     const exceedsCharacters = page.length > 0
-      && characters + separatorCharacters + block.body.length > TERMINAL_PAGE_CHAR_BUDGET
+      && characters + separatorCharacters + block.body.length > characterBudget
     const exceedsOperations = page.length > 0
-      && operations + block.operationCount > TERMINAL_PAGE_OPERATION_BUDGET
+      && operations + block.operationCount > PLAIN_PAGE_OPERATION_BUDGET
     if (exceedsCharacters || exceedsOperations) flush()
     page.push(block)
     characters += separatorCharacters + block.body.length
     operations += block.operationCount
   }
   flush()
-  return pages.length > 0 ? pages : [[{ body: '没有可展示的执行记录。', operationCount: 0 }]]
+  return pages.length > 0
+    ? pages
+    : [[{ kind: 'process', body: '没有可展示的执行记录。', operationCount: 0 }]]
 }
 
 function renderTool(item: ToolProgressItem, runStatus: AgentRunView['status']): string {
@@ -288,7 +420,6 @@ function cardPaginationRow(
     horizontal_spacing: '8px',
     columns: [
       [pageIndex > 0 ? button('上一页', pageIndex - 1) : placeholder()],
-      [{ tag: 'markdown', content: `第 ${pageIndex + 1} / ${pageCount} 页`, text_align: 'center' }],
       [pageIndex < pageCount - 1 ? button('下一页', pageIndex + 1) : placeholder()]
     ].map((elements) => ({
       tag: 'column',

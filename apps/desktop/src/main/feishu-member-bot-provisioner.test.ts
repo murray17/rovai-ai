@@ -69,7 +69,7 @@ describe('Feishu Web Session member Bot provisioner', () => {
       publicationIntentId: 'intent-1',
       agentId: 'agent-a',
       appName: '叮叮',
-      appDescription: 'Rovai AI 队员 · 游学者',
+      appDescription: 'Rovai AI Teammate · 游学者',
       avatarSource: { pngBytes: memberAvatar, width: 192, height: 192 },
       expectedDeveloperIdentity: { userId: 'owner-user', tenantId: 'tenant-1' },
       onRemoteAppCreated: async ({ appId, creationMode }) => {
@@ -183,7 +183,7 @@ describe('Feishu Web Session member Bot provisioner', () => {
       publicationIntentId: 'intent-barrier',
       agentId: 'agent-a',
       appName: '叮叮',
-      appDescription: 'Rovai AI 队员 · 游学者',
+      appDescription: 'Rovai AI Teammate · 游学者',
       expectedDeveloperIdentity: { userId: 'owner-user', tenantId: 'tenant-1' },
       onRemoteAppCreated: async () => barrier
     })
@@ -209,7 +209,7 @@ describe('Feishu Web Session member Bot provisioner', () => {
       publicationIntentId: 'intent-barrier-rejected',
       agentId: 'agent-a',
       appName: '叮叮',
-      appDescription: 'Rovai AI 队员 · 游学者',
+      appDescription: 'Rovai AI Teammate · 游学者',
       expectedDeveloperIdentity: { userId: 'owner-user', tenantId: 'tenant-1' },
       onRemoteAppCreated: async () => { throw new Error('core_freeze_failed') }
     })).rejects.toMatchObject({
@@ -244,7 +244,7 @@ describe('Feishu Web Session member Bot provisioner', () => {
       publicationIntentId: 'intent-current',
       agentId: 'agent-a',
       appName: '叮叮',
-      appDescription: 'Rovai AI 队员 · 游学者',
+      appDescription: 'Rovai AI Teammate · 游学者',
       expectedDeveloperIdentity: { userId: 'owner-user', tenantId: 'tenant-1' },
       onRemoteAppCreated: async () => undefined,
       onProgress: (step) => progress.push(step)
@@ -284,7 +284,7 @@ describe('Feishu Web Session member Bot provisioner', () => {
       publicationIntentId: 'intent-event-timeout',
       agentId: 'agent-a',
       appName: '叮叮',
-      appDescription: 'Rovai AI 队员 · 游学者',
+      appDescription: 'Rovai AI Teammate · 游学者',
       expectedDeveloperIdentity: { userId: 'owner-user', tenantId: 'tenant-1' },
       onRemoteAppCreated: async () => undefined
     }).catch((reason: unknown): unknown => reason)
@@ -315,7 +315,7 @@ describe('Feishu Web Session member Bot provisioner', () => {
       publicationIntentId: 'intent-owner-resolution',
       agentId: 'agent-a',
       appName: '叮叮',
-      appDescription: 'Rovai AI 队员 · 游学者',
+      appDescription: 'Rovai AI Teammate · 游学者',
       expectedDeveloperIdentity: { userId: 'owner-user', tenantId: 'tenant-1' },
       onRemoteAppCreated: async () => undefined,
       onProgress: (step) => progress.push(step)
@@ -342,7 +342,7 @@ describe('Feishu Web Session member Bot provisioner', () => {
       agentId: 'agent-a',
       remoteAppId: 'cli_dingding',
       appName: '叮叮',
-      appDescription: 'Rovai AI 队员 · 游学者',
+      appDescription: 'Rovai AI Teammate · 游学者',
       avatarSource: {
         pngBytes: new Uint8Array([9, 8, 7]),
         width: 192,
@@ -404,7 +404,7 @@ describe('Feishu Web Session member Bot provisioner', () => {
       agentId: 'agent-a',
       remoteAppId: 'cli_dingding',
       appName: '叮叮',
-      appDescription: 'Rovai AI 队员 · 游学者',
+      appDescription: 'Rovai AI Teammate · 游学者',
       avatarSource: {
         pngBytes: new Uint8Array([9, 8, 7]),
         width: 192,
@@ -444,7 +444,7 @@ describe('Feishu Web Session member Bot provisioner', () => {
       agentId: 'agent-a',
       remoteAppId: 'cli_dingding',
       appName: '叮叮',
-      appDescription: 'Rovai AI 队员 · 游学者',
+      appDescription: 'Rovai AI Teammate · 游学者',
       expectedDeveloperIdentity: { userId: 'owner-user', tenantId: 'tenant-1' }
     })
 
@@ -490,7 +490,7 @@ describe('Feishu Web Session member Bot provisioner', () => {
       agentId: 'agent-a',
       remoteAppId: 'cli_dingding',
       appName: '叮叮',
-      appDescription: 'Rovai AI 队员 · 游学者',
+      appDescription: 'Rovai AI Teammate · 游学者',
       avatarSource: {
         pngBytes: new Uint8Array([9, 8, 7]),
         width: 192,
@@ -536,7 +536,7 @@ describe('Feishu Web Session member Bot provisioner', () => {
       publicationIntentId: 'intent-1',
       agentId: 'agent-a',
       appName: '叮叮',
-      appDescription: 'Rovai AI 队员 · 游学者',
+      appDescription: 'Rovai AI Teammate · 游学者',
       expectedDeveloperIdentity: { userId: 'owner-user', tenantId: 'tenant-1' }
     })).rejects.toThrow('feishu_developer_identity_changed')
 
@@ -562,7 +562,7 @@ describe('Feishu Web Session member Bot provisioner', () => {
       publicationIntentId: 'intent-1',
       agentId: 'agent-a',
       appName: '叮叮',
-      appDescription: 'Rovai AI 队员 · 游学者',
+      appDescription: 'Rovai AI Teammate · 游学者',
       expectedDeveloperIdentity: { userId: 'owner-user', tenantId: 'tenant-1' }
     }).catch((reason: unknown): unknown => reason)
 
@@ -592,7 +592,7 @@ describe('Feishu Web Session member Bot provisioner', () => {
       publicationIntentId: 'intent-1',
       agentId: 'agent-a',
       appName: '叮叮',
-      appDescription: 'Rovai AI 队员 · 游学者',
+      appDescription: 'Rovai AI Teammate · 游学者',
       expectedDeveloperIdentity: { userId: 'owner-user', tenantId: 'tenant-1' },
       onRemoteAppCreated: async ({ appId }) => { remoteAppId = appId },
       onProgress: (_step, appId) => { remoteAppId = appId ?? remoteAppId }

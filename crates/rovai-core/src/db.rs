@@ -56,8 +56,10 @@ pub struct Database {
     runtime_camp_files_root_identity_digest: String,
 }
 
-pub(crate) const CURRENT_DATA_CONTRACT_VERSION: &str = "v1.37";
-pub(crate) const CURRENT_PROJECTION_SCHEMA_VERSION: i64 = 78;
+pub(crate) const CURRENT_DATA_CONTRACT_VERSION: &str = "v1.38";
+pub(crate) const CURRENT_PROJECTION_SCHEMA_VERSION: i64 = 79;
+const V125_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.37";
+const V125_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION: i64 = 78;
 const V124_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.36";
 const V124_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION: i64 = 77;
 const V123_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.35";
@@ -385,6 +387,7 @@ struct CurrentMigrationState {
     v122: bool,
     v123: bool,
     v124: bool,
+    v125: bool,
 }
 
 impl CurrentMigrationState {
@@ -437,6 +440,27 @@ impl CurrentMigrationState {
         let channel_classifier_admissible =
             classifier == V043_CLASSIFIER_VERSION || classifier == V116_CLASSIFIER_VERSION;
         if contract == CURRENT_DATA_CONTRACT_VERSION && schema == CURRENT_PROJECTION_SCHEMA_VERSION
+        {
+            return channel_classifier_admissible
+                && through_v113
+                && self.v114
+                && self.v115
+                && self.v116
+                && self.v117
+                && self.v118
+                && self.v119
+                && self.v120
+                && self.v121
+                && self.v122
+                && self.v123
+                && self.v124
+                && self.v125;
+        }
+        if self.v125 {
+            return false;
+        }
+        if contract == V125_MIGRATION_SOURCE_DATA_CONTRACT_VERSION
+            && schema == V125_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION
         {
             return channel_classifier_admissible
                 && through_v113
@@ -1904,7 +1928,7 @@ fn connection_has_current_data_contract(connection: &Connection) -> rusqlite::Re
         SELECT contract_version = ?1
                AND projection_schema_version = ?2
                AND classifier_version = ?3
-               AND EXISTS(SELECT 1 FROM schema_migration WHERE version = 124)
+               AND EXISTS(SELECT 1 FROM schema_migration WHERE version = 125)
         FROM rovai_data_contract
         WHERE singleton = 1
         "#,
@@ -1976,7 +2000,8 @@ fn load_current_migration_state(
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 121),
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 122),
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 123),
-               EXISTS(SELECT 1 FROM schema_migration WHERE version = 124)
+               EXISTS(SELECT 1 FROM schema_migration WHERE version = 124),
+               EXISTS(SELECT 1 FROM schema_migration WHERE version = 125)
         "#,
         [],
         |row| {
@@ -2036,6 +2061,7 @@ fn load_current_migration_state(
                 v122: row.get(52)?,
                 v123: row.get(53)?,
                 v124: row.get(54)?,
+                v125: row.get(55)?,
             })
         },
     )
@@ -4170,6 +4196,9 @@ impl Database {
             if !self.schema_migration_applied(124)? {
                 self.migrate_channel_storage_v124()?;
             }
+            if !self.schema_migration_applied(125)? {
+                self.migrate_execution_console_snapshots_v125()?;
+            }
             if let Err(error) =
                 crate::notification::maintain_notification_episode_retention(self.connection())
             {
@@ -4589,6 +4618,9 @@ impl Database {
         }
         if !self.schema_migration_applied(124)? {
             self.migrate_channel_storage_v124()?;
+        }
+        if !self.schema_migration_applied(125)? {
+            self.migrate_execution_console_snapshots_v125()?;
         }
         if let Err(error) =
             crate::notification::maintain_notification_episode_retention(self.connection())
@@ -18785,6 +18817,47 @@ impl Database {
         Ok(())
     }
 
+    fn migrate_execution_console_snapshots_v125(&mut self) -> Result<()> {
+        let transaction = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        transaction.execute_batch(
+            r#"
+            ALTER TABLE channel_execution_console ADD COLUMN terminal_snapshot_json TEXT
+                CHECK(terminal_snapshot_json IS NULL OR (
+                    json_valid(terminal_snapshot_json)
+                    AND json_extract(terminal_snapshot_json, '$.schemaVersion') IS 1
+                ));
+            ALTER TABLE channel_execution_console DROP COLUMN display_mode;
+            ALTER TABLE channel_execution_console DROP COLUMN page_index;
+            ALTER TABLE channel_execution_console DROP COLUMN view_version;
+            "#,
+        )?;
+        crate::channel::backfill_sealed_execution_console_snapshots(&transaction)?;
+        transaction.execute_batch(
+            r#"
+            CREATE TRIGGER channel_execution_console_snapshot_immutable
+            BEFORE UPDATE OF terminal_snapshot_json, latest_sequence ON channel_execution_console
+            FOR EACH ROW
+            WHEN OLD.terminal_snapshot_json IS NOT NULL
+              AND (NEW.terminal_snapshot_json IS NOT OLD.terminal_snapshot_json
+                OR NEW.latest_sequence <> OLD.latest_sequence)
+            BEGIN
+                SELECT RAISE(ABORT, 'sealed execution console snapshot is immutable');
+            END;
+
+            UPDATE rovai_data_contract
+            SET contract_version = 'v1.38', projection_schema_version = 79,
+                reset_reason = NULL, updated_at = datetime('now')
+            WHERE singleton = 1;
+            INSERT INTO schema_migration(version, applied_at)
+            VALUES (125, datetime('now'));
+            "#,
+        )?;
+        transaction.commit()?;
+        Ok(())
+    }
+
     fn migrate_managed_attachment_v2_v112(&mut self) -> Result<()> {
         let transaction = self
             .connection
@@ -23543,7 +23616,34 @@ impl Database {
 }
 
 #[cfg(test)]
+pub(crate) fn downgrade_current_schema_to_v124_source_for_test(connection: &Connection) {
+    let applied: bool = connection
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM schema_migration WHERE version = 125)",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    if !applied {
+        return;
+    }
+    connection.execute_batch(r#"
+        BEGIN IMMEDIATE;
+        DROP TRIGGER channel_execution_console_snapshot_immutable;
+        ALTER TABLE channel_execution_console DROP COLUMN terminal_snapshot_json;
+        ALTER TABLE channel_execution_console ADD COLUMN display_mode TEXT NOT NULL DEFAULT 'live'
+            CHECK(display_mode IN ('live', 'collapsed', 'expanded'));
+        ALTER TABLE channel_execution_console ADD COLUMN page_index INTEGER NOT NULL DEFAULT 0 CHECK(page_index >= 0);
+        ALTER TABLE channel_execution_console ADD COLUMN view_version INTEGER NOT NULL DEFAULT 1 CHECK(view_version >= 1);
+        UPDATE rovai_data_contract SET contract_version = 'v1.37', projection_schema_version = 78 WHERE singleton = 1;
+        DELETE FROM schema_migration WHERE version = 125;
+        COMMIT;
+    "#).unwrap();
+}
+
+#[cfg(test)]
 fn downgrade_current_schema_to_v123_source_for_test(connection: &Connection) {
+    downgrade_current_schema_to_v124_source_for_test(connection);
     let has_v124: bool = connection
         .query_row(
             "SELECT EXISTS(SELECT 1 FROM schema_migration WHERE version = 124)",
@@ -25342,6 +25442,7 @@ mod tests {
             v122: version >= 122,
             v123: version >= 123,
             v124: version >= 124,
+            v125: version >= 125,
         }
     }
 
@@ -25352,6 +25453,12 @@ mod tests {
                 "current",
                 CURRENT_DATA_CONTRACT_VERSION,
                 CURRENT_PROJECTION_SCHEMA_VERSION,
+                125,
+            ),
+            (
+                "v1.37/schema-78 before immutable terminal snapshots",
+                V125_MIGRATION_SOURCE_DATA_CONTRACT_VERSION,
+                V125_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION,
                 124,
             ),
             (
@@ -25667,7 +25774,7 @@ mod tests {
             );
         }
 
-        let current = migration_state_through(124);
+        let current = migration_state_through(125);
         let v092_source = migration_state_through(91);
         let mut missing_intermediate = current;
         missing_intermediate.v84 = false;
@@ -25747,7 +25854,7 @@ mod tests {
             )
             .expect("current contract marker should load");
 
-        assert_eq!(state, migration_state_through(124));
+        assert_eq!(state, migration_state_through(125));
         assert!(state.admits(&contract, schema, &classifier));
         assert!(has_admissible_data_contract(
             &directory.join("rovai.sqlite")
@@ -28631,10 +28738,10 @@ mod tests {
         assert!(connection_has_current_data_contract(upgraded.connection()).unwrap());
         for column in ["display_mode", "page_index", "view_version"] {
             assert!(
-                table_columns(upgraded.connection(), "channel_execution_console")
+                !table_columns(upgraded.connection(), "channel_execution_console")
                     .unwrap()
                     .contains(&column.to_string()),
-                "Migration 120 must add channel_execution_console.{column}"
+                "Migration 120 adds {column}; Migration 125 must retire it on upgrade to current"
             );
         }
         drop(upgraded);
@@ -28706,10 +28813,10 @@ mod tests {
         );
         for column in ["display_mode", "page_index", "view_version"] {
             assert!(
-                table_columns(upgraded.connection(), "channel_execution_console")
+                !table_columns(upgraded.connection(), "channel_execution_console")
                     .unwrap()
                     .contains(&column.to_string()),
-                "Migration 121 must preserve legacy {column} until a later cleanup"
+                "Migration 125 retires legacy {column} after the v121 upgrade"
             );
         }
         drop(upgraded);

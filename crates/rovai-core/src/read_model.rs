@@ -416,7 +416,7 @@ pub struct AgentRunDiagnosticView {
     pub observed_through_global_sequence: i64,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AgentRunExecutionEvidenceView {
     pub id: String,

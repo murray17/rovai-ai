@@ -27,6 +27,7 @@ use crate::{
     },
     current_user::CURRENT_USER_ID,
     db::Database,
+    managed_blob::ManagedBlobStore,
     read_model::{AgentRunExecutionEvidenceView, public_execution_evidence_for_agent_run},
 };
 
@@ -416,7 +417,10 @@ pub struct AuthorizeChannelExecutionConsolePageCommand {
     pub external_message_id: String,
     pub snapshot_sequence: i64,
     pub page_index: i64,
-    pub page_count: i64,
+    /// Feishu checks rendered bounds in the Host after authorizing the card identity.
+    /// Plain providers can still supply their already-computed count.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub page_count: Option<i64>,
     pub operator_open_id: Option<String>,
     pub operator_user_id: Option<String>,
     pub operator_union_id: Option<String>,
@@ -741,7 +745,7 @@ pub struct ClaimedChannelDelivery {
     pub recipient_open_id: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ChannelExecutionConsoleRunView {
     pub status: String,
@@ -765,6 +769,100 @@ pub struct ChannelExecutionConsoleSourceView {
     pub state: String,
 }
 
+/// Content snapshot, not card/view state. Once sealed, even canonical activity
+/// updates and late public messages must not change what pagination reads.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct SealedExecutionConsoleSnapshot {
+    schema_version: i64,
+    agent_run_id: String,
+    sequence: i64,
+    agent_display_name: String,
+    run: ChannelExecutionConsoleRunView,
+    evidence: Vec<AgentRunExecutionEvidenceView>,
+    public_output: Option<String>,
+    started_at: Option<String>,
+    terminal_at: Option<String>,
+}
+
+fn capture_execution_console_snapshot(
+    transaction: &Transaction<'_>,
+    agent_run_id: &str,
+    sequence: i64,
+) -> Result<SealedExecutionConsoleSnapshot> {
+    let (agent_display_name, status, wait_reason, terminal_reason_code, started_at, terminal_at) =
+        transaction.query_row(
+            r#"
+            SELECT profile.display_name, run.status, run.wait_reason,
+                   run.terminal_reason_code, run.started_at, run.ended_at
+            FROM agent_run AS run
+            JOIN channel_execution_console AS console ON console.agent_run_id = run.id
+            JOIN agent_profile AS profile ON profile.id = console.agent_id
+            WHERE run.id = ?1
+            "#,
+            [agent_run_id],
+            |row| {
+                Ok((
+                    row.get(0)?,
+                    row.get(1)?,
+                    row.get(2)?,
+                    row.get(3)?,
+                    row.get(4)?,
+                    row.get(5)?,
+                ))
+            },
+        )?;
+    let evidence = public_execution_evidence_for_agent_run(transaction, agent_run_id)?;
+    let public_output = transaction
+        .query_row(
+            r#"
+            SELECT body FROM camp_message
+            WHERE source_agent_run_id = ?1
+              AND author_type = 'agent' AND tombstoned_at IS NULL
+            ORDER BY sequence DESC, id DESC LIMIT 1
+            "#,
+            [agent_run_id],
+            |row| row.get(0),
+        )
+        .optional()?;
+    Ok(SealedExecutionConsoleSnapshot {
+        schema_version: 1,
+        agent_run_id: agent_run_id.to_string(),
+        sequence,
+        agent_display_name,
+        run: ChannelExecutionConsoleRunView {
+            status,
+            wait_reason,
+            terminal_reason_code,
+        },
+        evidence,
+        public_output,
+        started_at,
+        terminal_at,
+    })
+}
+
+/// The old schema retained only a digest. Preserve legacy card identities and
+/// freeze their best available content once, inside the copy-migration transaction.
+pub(crate) fn backfill_sealed_execution_console_snapshots(
+    transaction: &Transaction<'_>,
+) -> Result<()> {
+    let consoles = query_rows(
+        transaction,
+        "SELECT agent_run_id, latest_sequence FROM channel_execution_console WHERE state = 'terminal_sealed' AND terminal_snapshot_json IS NULL",
+        [],
+        |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)),
+    )?;
+    for (agent_run_id, sequence) in consoles {
+        let snapshot = capture_execution_console_snapshot(transaction, &agent_run_id, sequence)?;
+        transaction.execute(
+            "UPDATE channel_execution_console SET terminal_snapshot_json = ?2 WHERE agent_run_id = ?1 AND terminal_snapshot_json IS NULL",
+            params![agent_run_id, serde_json::to_string(&snapshot)?],
+        )?;
+    }
+    Ok(())
+}
+
 #[derive(Debug, Default)]
 pub struct ChannelService {
     gateway: DomainCommandGateway,
@@ -785,14 +883,11 @@ impl ChannelService {
         let source = transaction
             .query_row(
                 r#"
-                SELECT console.latest_sequence, run.id, profile.display_name,
-                       run.status, run.wait_reason, run.terminal_reason_code,
-                       run.started_at, run.ended_at,
+                SELECT console.latest_sequence, console.agent_run_id,
                        console.target_app_id, console.external_message_id,
-                       console.state
+                       console.state, console.terminal_snapshot_json, conversation.provider
                 FROM channel_execution_console AS console
-                JOIN agent_run AS run ON run.id = console.agent_run_id
-                JOIN agent_profile AS profile ON profile.id = console.agent_id
+                JOIN channel_conversation AS conversation ON conversation.id = console.channel_conversation_id
                 WHERE console.agent_run_id = ?1
                   AND console.latest_sequence = ?2
                   AND console.state IN ('opening', 'active', 'terminal_sealed')
@@ -803,14 +898,10 @@ impl ChannelService {
                         row.get::<_, i64>(0)?,
                         row.get::<_, String>(1)?,
                         row.get::<_, String>(2)?,
-                        row.get::<_, String>(3)?,
-                        row.get::<_, Option<String>>(4)?,
+                        row.get::<_, Option<String>>(3)?,
+                        row.get::<_, String>(4)?,
                         row.get::<_, Option<String>>(5)?,
-                        row.get::<_, Option<String>>(6)?,
-                        row.get::<_, Option<String>>(7)?,
-                        row.get::<_, String>(8)?,
-                        row.get::<_, Option<String>>(9)?,
-                        row.get::<_, String>(10)?,
+                        row.get::<_, String>(6)?,
                     ))
                 },
             )
@@ -818,48 +909,62 @@ impl ChannelService {
         let Some((
             sequence,
             agent_run_id,
-            agent_display_name,
-            status,
-            wait_reason,
-            terminal_reason_code,
-            started_at,
-            terminal_at,
             target_app_id,
             external_message_id,
             state,
+            terminal_snapshot_json,
+            provider,
         )) = source
         else {
             transaction.commit()?;
             return Ok(None);
         };
-        let evidence = public_execution_evidence_for_agent_run(&transaction, &agent_run_id)?;
-        let public_output = transaction
-            .query_row(
-                r#"
-                SELECT body FROM camp_message
-                WHERE source_agent_run_id = ?1
-                  AND author_type = 'agent' AND tombstoned_at IS NULL
-                ORDER BY sequence DESC, id DESC
-                LIMIT 1
-                "#,
-                [&agent_run_id],
-                |row| row.get::<_, String>(0),
+        let mut snapshot = if state == "terminal_sealed" {
+            let snapshot: SealedExecutionConsoleSnapshot = serde_json::from_str(
+                terminal_snapshot_json
+                    .as_deref()
+                    .context("sealed execution console snapshot missing")?,
             )
-            .optional()?;
+            .context("sealed execution console snapshot invalid")?;
+            anyhow::ensure!(
+                snapshot.schema_version == 1
+                    && snapshot.agent_run_id == agent_run_id
+                    && snapshot.sequence == sequence,
+                "sealed execution console snapshot identity mismatch"
+            );
+            snapshot
+        } else {
+            capture_execution_console_snapshot(&transaction, &agent_run_id, sequence)?
+        };
         transaction.commit()?;
+        if state == "terminal_sealed" && provider == FEISHU_PROVIDER {
+            let blob_store = ManagedBlobStore::new(
+                database
+                    .path()
+                    .parent()
+                    .context("execution console data directory missing")?,
+            );
+            for evidence in &mut snapshot.evidence {
+                if let Some(blob_id) = &evidence.content_blob_id {
+                    // The sealed snapshot pins the immutable content-addressed Blob,
+                    // not a re-read of current Evidence. Hydrate before Main redacts
+                    // and selects head/tail; a bounded preview is not the real tail.
+                    let bytes = blob_store.read_bytes(database, blob_id)?;
+                    evidence.payload = serde_json::from_slice(&bytes)
+                        .context("sealed execution evidence payload invalid")?;
+                    evidence.is_truncated = false;
+                }
+            }
+        }
         Ok(Some(ChannelExecutionConsoleSourceView {
             sequence,
             agent_run_id,
-            agent_display_name,
-            run: ChannelExecutionConsoleRunView {
-                status,
-                wait_reason,
-                terminal_reason_code,
-            },
-            evidence,
-            public_output,
-            started_at,
-            terminal_at,
+            agent_display_name: snapshot.agent_display_name,
+            run: snapshot.run,
+            evidence: snapshot.evidence,
+            public_output: snapshot.public_output,
+            started_at: snapshot.started_at,
+            terminal_at: snapshot.terminal_at,
             target_app_id,
             external_message_id,
             state,
@@ -4931,11 +5036,15 @@ impl ChannelService {
         if envelope.payload.snapshot_sequence < 1 {
             anyhow::bail!("snapshotSequence must be positive");
         }
-        if !(1..=10_000).contains(&envelope.payload.page_count) {
+        if envelope
+            .payload
+            .page_count
+            .is_some_and(|count| !(1..=10_000).contains(&count))
+        {
             anyhow::bail!("pageCount must be between 1 and 10000");
         }
         if envelope.payload.page_index < 0
-            || envelope.payload.page_index >= envelope.payload.page_count
+            || envelope.payload.page_index >= envelope.payload.page_count.unwrap_or(10_000)
         {
             anyhow::bail!("pageIndex must address an available execution console page");
         }
@@ -8434,15 +8543,27 @@ fn materialize_execution_console(
                     now,
                 )? {
                     let next_sequence = latest_sequence + 1;
+                    let snapshot = capture_execution_console_snapshot(
+                        transaction,
+                        agent_run_id,
+                        next_sequence,
+                    )?;
                     transaction.execute(
                         r#"
                         UPDATE channel_execution_console
                         SET latest_sequence = ?2, state = 'terminal_sealed',
-                            updated_at = ?3
+                            updated_at = ?3, terminal_snapshot_json = ?6
                         WHERE id = ?1 AND state = 'terminal_pending'
                           AND latest_sequence = ?4 AND latest_snapshot_digest = ?5
                         "#,
-                        params![console_id, next_sequence, now, latest_sequence, digest],
+                        params![
+                            console_id,
+                            next_sequence,
+                            now,
+                            latest_sequence,
+                            digest,
+                            serde_json::to_string(&snapshot)?
+                        ],
                     )?;
                     (console_id, next_sequence, true)
                 } else {
@@ -11099,7 +11220,7 @@ mod tests {
             external_message_id: external_message_id.to_string(),
             snapshot_sequence: source.sequence,
             page_index,
-            page_count,
+            page_count: Some(page_count),
             operator_open_id: Some(if owner { "ou_user" } else { "ou_other" }.to_string()),
             operator_user_id: Some(if owner { "user_1" } else { "user_other" }.to_string()),
             operator_union_id: Some(if owner { "union_user" } else { "union_other" }.to_string()),
@@ -12955,6 +13076,26 @@ mod tests {
             )
             .unwrap();
 
+        let full_result = (1..=210)
+            .map(|line| format!("line {line} {}", "x".repeat(100)))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let large_payload = serde_json::to_vec(&json!({
+            "item": { "type": "commandExecution", "command": "cargo test", "status": "completed", "aggregatedOutput": full_result }
+        })).unwrap();
+        let blob_store = ManagedBlobStore::new(database.directory());
+        let large_blob = blob_store
+            .put_bytes(&mut database, &large_payload, "application/json", "normal")
+            .unwrap();
+        database.connection().execute(r#"
+            INSERT INTO agent_run_execution_evidence(
+                id, agent_run_id, execution_epoch, sequence, event_type, kind, phase,
+                payload_preview_json, content_blob_id, content_byte_count, is_truncated, occurred_at
+            ) VALUES ('large-console-result', ?1, 1, 1, 'activity.completed', 'command', 'completed',
+                '{"item":{"type":"commandExecution","command":"cargo test","status":"completed","aggregatedOutput":"preview only"}}',
+                ?2, ?3, 1, ?4)
+        "#, params![agent_run_id, large_blob.id, large_payload.len() as i64, failed_at]).unwrap();
+
         let tick = service
             .host_tick(
                 &mut database,
@@ -13031,6 +13172,16 @@ mod tests {
             .expect("the terminal execution console remains readable");
         assert_eq!(terminal_source.run.status, "failed");
         assert_eq!(terminal_source.state, "terminal_sealed");
+        let complete_evidence = terminal_source
+            .evidence
+            .iter()
+            .find(|item| item.id == "large-console-result")
+            .unwrap();
+        assert!(!complete_evidence.is_truncated);
+        assert_eq!(
+            complete_evidence.payload["item"]["aggregatedOutput"], full_result,
+            "terminal result truncation must see the verified full Blob, not the stored preview"
+        );
         assert_eq!(
             terminal_source.external_message_id.as_deref(),
             Some("om-console-1")
@@ -13089,11 +13240,11 @@ mod tests {
             non_owner.result.code,
             "channel.execution_console.owner_required"
         );
-        let view_state_before: (String, i64, i64) = database
+        let snapshot_state_before: (String, i64, String) = database
             .connection()
             .query_row(
                 r#"
-                SELECT display_mode, page_index, view_version
+                SELECT state, latest_sequence, terminal_snapshot_json
                 FROM channel_execution_console WHERE agent_run_id = ?1
                 "#,
                 [&agent_run_id],
@@ -13106,20 +13257,22 @@ mod tests {
                 row.get(0)
             })
             .unwrap();
+        let mut page_two_command = execution_console_page_command(
+            &terminal_source,
+            "cli_app_1",
+            "om-console-1",
+            1,
+            2,
+            true,
+        );
+        page_two_command.page_count = None;
+        // Feishu authenticates first: pageCount is absent on its wire payload.
+        let page_two_command =
+            serde_json::from_value(serde_json::to_value(page_two_command).unwrap()).unwrap();
         let page_two = service
             .authorize_execution_console_page(
                 &mut database,
-                &host_envelope(
-                    "execution-console-page-two",
-                    execution_console_page_command(
-                        &terminal_source,
-                        "cli_app_1",
-                        "om-console-1",
-                        1,
-                        2,
-                        true,
-                    ),
-                ),
+                &host_envelope("execution-console-page-two", page_two_command),
             )
             .unwrap();
         assert_eq!(page_two.result.status, CommandResultStatus::Accepted);
@@ -13186,11 +13339,11 @@ mod tests {
             wrong_message.result.code,
             "channel.execution_console.stale_card"
         );
-        let view_state_after: (String, i64, i64) = database
+        let snapshot_state_after: (String, i64, String) = database
             .connection()
             .query_row(
                 r#"
-                SELECT display_mode, page_index, view_version
+                SELECT state, latest_sequence, terminal_snapshot_json
                 FROM channel_execution_console WHERE agent_run_id = ?1
                 "#,
                 [&agent_run_id],
@@ -13203,8 +13356,32 @@ mod tests {
                 row.get(0)
             })
             .unwrap();
-        assert_eq!(view_state_after, view_state_before);
+        assert_eq!(snapshot_state_after, snapshot_state_before);
         assert_eq!(delivery_count_after, delivery_count_before);
+        assert!(database.connection().execute(
+            "UPDATE channel_execution_console SET terminal_snapshot_json = NULL WHERE agent_run_id = ?1",
+            [&agent_run_id],
+        ).is_err(), "a sealed snapshot cannot be cleared or rewritten");
+        database
+            .connection()
+            .execute(
+                r#"
+            INSERT INTO agent_run_execution_evidence(
+                id, agent_run_id, execution_epoch, sequence, event_type, kind, phase,
+                payload_preview_json, content_blob_id, content_byte_count, is_truncated, occurred_at
+            ) VALUES ('late-console-text', ?1, 1, 2, 'agent.text.delta', 'narration', 'updated',
+                      '{"itemId":"late","delta":"late narration"}', NULL, 43, 0, ?2)
+            "#,
+                params![agent_run_id, failed_at],
+            )
+            .unwrap();
+        database
+            .connection()
+            .execute(
+                "UPDATE camp_message SET body = 'late public output' WHERE id = 'channel-output'",
+                [],
+            )
+            .unwrap();
         database
             .connection()
             .execute(
@@ -13241,6 +13418,15 @@ mod tests {
             )
             .unwrap();
         assert_eq!(sealed_sequence, terminal_source.sequence);
+        let after_seal_source = service
+            .execution_console_source(&mut database, &agent_run_id, terminal_source.sequence)
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            serde_json::to_value(&after_seal_source).unwrap(),
+            serde_json::to_value(&terminal_source).unwrap(),
+            "late Evidence and public output must not change sealed timeline content"
+        );
         assert!(
             claimed
                 .iter()
@@ -13369,6 +13555,67 @@ mod tests {
             .expect("the sealed execution console snapshot must survive restart");
         assert_eq!(restored.state, "terminal_sealed");
         assert_eq!(restored.sequence, terminal_source.sequence);
+        assert_eq!(
+            serde_json::to_value(&restored).unwrap(),
+            serde_json::to_value(&terminal_source).unwrap()
+        );
+
+        // A distinct upgrade boundary: v124 had no content snapshot to preserve.
+        // Copy migration freezes the best available content without new deliveries,
+        // card identity changes, or importing the retired view state.
+        crate::db::downgrade_current_schema_to_v124_source_for_test(restarted.connection());
+        let deliveries_before_upgrade: i64 = restarted
+            .connection()
+            .query_row("SELECT COUNT(*) FROM channel_delivery", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        drop(restarted);
+        let mut upgraded = Database::open(&data_directory).unwrap();
+        let migrated = service
+            .execution_console_source(&mut upgraded, &agent_run_id, terminal_source.sequence)
+            .unwrap()
+            .unwrap();
+        assert_eq!(migrated.sequence, terminal_source.sequence);
+        assert_eq!(
+            migrated.external_message_id,
+            terminal_source.external_message_id
+        );
+        assert_eq!(
+            migrated.public_output.as_deref(),
+            Some("late public output")
+        );
+        assert!(
+            migrated
+                .evidence
+                .iter()
+                .any(|item| item.id == "late-console-text")
+        );
+        assert_eq!(
+            upgraded
+                .connection()
+                .query_row("SELECT COUNT(*) FROM channel_delivery", [], |row| row
+                    .get::<_, i64>(0),)
+                .unwrap(),
+            deliveries_before_upgrade
+        );
+        assert_eq!(upgraded.connection().query_row(
+            "SELECT COUNT(*) FROM pragma_table_info('channel_execution_console') WHERE name IN ('display_mode', 'page_index', 'view_version')",
+            [], |row| row.get::<_, i64>(0),
+        ).unwrap(), 0);
+        upgraded
+            .connection()
+            .execute(
+                "UPDATE managed_blob SET state = 'missing' WHERE id = ?1",
+                [&large_blob.id],
+            )
+            .unwrap();
+        assert!(
+            service
+                .execution_console_source(&mut upgraded, &agent_run_id, terminal_source.sequence)
+                .is_err(),
+            "missing full evidence must fail closed instead of presenting a preview as the true tail"
+        );
     }
 
     #[test]

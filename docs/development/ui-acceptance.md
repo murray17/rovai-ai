@@ -61,6 +61,27 @@ node scripts/capture-desktop.mjs "$ROVAI_APP" "$FIXTURE_ROOT/compact"
 `onboarding.json`，以继续覆盖原有 App Shell；它不会修改已有 onboarding 状态。只有下文的
 `accept:onboarding-ui` 使用真正全新的状态并拥有首次安装语义。
 
+## 手动飞书终态卡片预览
+
+用户明确要求向自己发送模拟卡片并允许重启后，可以在已安装 App 的本次启动参数中使用：
+
+```text
+--feishu-execution-preview=<request-uuid>/<agent-id>/<command-count>[,<command-count>]
+```
+
+这是 Main-only、默认关闭的手动预览入口，不是 Renderer IPC 或 Agent 工具。最多两张卡，每张 1～200 条模拟 command，
+每次新预览使用新的 request UUID；同一 request/App/count 使用稳定发送 UUID。普通启动不读预览身份、不发送示例。
+自动化验收仍使用隔离 `userData`；不能把这个参数当作操作日常 App 或发真实飞书消息的默认授权。
+
+预览只复用指定已发布队员的现有长连接，向该 App 冻结且本机已记录的 Owner 发送。不会创建应用、改变发布配置、启动
+第二条 WebSocket、运行示例 command，或写入 Camp、Message、Turn、Run、Outbox/console fixture。它只读 Core 当前数据目录
+中 exact Bot/Owner identity，不读取 credential payload；发送使用 Main 已有的 SDK client。
+
+模拟 timeline 和已脱敏页面只保存在 Main 内存，所有卡片明确标为预览。每次翻页核对可信 callback operator、App、消息 ID、
+本次预览 sequence、页码范围、六小时有效期与当前本机 Owner 绑定，并仅 patch 原消息一次。不持久化 pageIndex、nonce 或
+viewVersion，不产生 Core 命令或 pump；真实 execution console 和项目卡继续走原来的 Core 授权。预览在 App 退出后失效，
+不能把此入口的验收当作真实 Run 的 Core seal/admission/恢复证明。
+
 ## Windows 验收入口（设计已接受、工具待实现）
 
 当前 `package.json` 尚无可运行的 Windows package/accept 命令，下面是实现验收合同，不是可复制命令。脚本和

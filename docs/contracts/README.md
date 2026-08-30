@@ -35,7 +35,9 @@ Architecture 解释组件如何组成，Version 概览记录交付范围；它�
 | [Camp Membership v1（当前）](camp-membership-v1.md) | 动态添加/移除、至少一位成员、generation/version、atomic cutover、durable reconciliation、exact lifetime fence 与受信外部来源 |
 | [Channel Storage v2（当前）](channel-storage-v2.md) | v1 存储与秘密边界不变；飞书三态检查、独立 Bot 启动及钉钉 completed 同应用凭据恢复 |
 | [Channel Storage v1（历史）](channel-storage-v1.md) | 飞书/钉钉 credential 与 Developer Session 的 `rovai.sqlite` 明文存储、Main-only API、批量启动、账号/发布原子提交、CAS refresh 与旧 `.bin` clean break |
-| [Feishu Channel v2（当前）](feishu-channel-v2.md) | Owner-only 入站、Quick Chat/PendingCampBinding、统一 admission、每 AgentRun 临时执行控制台、永久 Markdown 与 Managed Attachment 原生投递；存储条款由 Channel Storage v2 替代 |
+| [Feishu Channel v4（当前）](feishu-channel-v4.md) | 终态文字/command 混排、原生单条折叠、安全结果 20 行、15-command/50-element 分页、不可变 sealed 内容与无状态翻页；Migration 125 清理旧 view state |
+| [Feishu Channel v3（历史）](feishu-channel-v3.md) | 飞书终态外层原生折叠、正文直接可见、仅过程分页与翻页保持展开；终态呈现由 v4 替代 |
+| [Feishu Channel v2（历史）](feishu-channel-v2.md) | Owner-only 入站、Quick Chat/PendingCampBinding、统一 admission、每 AgentRun 临时执行控制台、永久 Markdown 与 Managed Attachment 原生投递；终态平铺由 v3 替代，存储条款由 Channel Storage v2 替代 |
 | [Feishu Channel v1（历史）](feishu-channel-v1.md) | Developer Identity/Session、持久 Bot publication intent、owner-only ProjectBinding、ExternalPrincipal、multi-App aggregate、serial ChannelTurnRequest、roster 与 durable ChannelDelivery；不含 template/activation-first 恢复边界 |
 | [DingTalk Channel v3（当前）](dingtalk-channel-v3.md) | v2 发布/Stream/Owner/项目/投递不变；删除设备授权，仅浏览器登录；旧 Profile 复用、串行静默续期、暂时失败保留与迟到检查 fence；存储沿用 Channel Storage v2 |
 | [DingTalk Channel v2（历史）](dingtalk-channel-v2.md) | Main 直接 OAuth/Developer API、每队员 immutable 应用机器人、显式审批、Owner-only 私聊/普通群、统一 admission、群 roster、AI 卡片/Markdown、恢复和保守 feature gate；存储条款由 Channel Storage v2 替代 |

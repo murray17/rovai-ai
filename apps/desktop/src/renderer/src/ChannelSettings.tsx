@@ -17,6 +17,7 @@ import {
 } from './AppDialog'
 import { MemberAvatar } from './MemberAvatar'
 import { SettingsPageHeader } from './SettingsPageHeader'
+import { memberBotAppDescription } from '../../shared/channel-member-bot-copy'
 
 export function visibleChannelMembers(agents: readonly AgentProfile[]): AgentProfile[] {
   return agents
@@ -666,7 +667,7 @@ function PublishBotDialog({
             <div className="channel-dialog-fact"><span>发布账号</span><strong>{account.userName}</strong></div>
             <div className="channel-dialog-fact"><span>所属租户</span><strong>{account.tenantName}</strong></div>
             {effectiveAppId && <div className="channel-dialog-fact"><span>绑定应用</span><code>{effectiveAppId}</code></div>}
-            <div className="channel-dialog-fact"><span>应用说明</span><strong>Rovai AI 队员 · {agent.teamRole || '协作者'}</strong></div>
+            <div className="channel-dialog-fact"><span>应用说明</span><strong>{memberBotAppDescription(kind, agent.teamRole)}</strong></div>
             {error && <div className="channel-dialog-error" role="alert">{error}</div>}
             {awaitingApprover && (
               <label className="channel-approver-select">

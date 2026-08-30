@@ -37,6 +37,8 @@ import {
 } from './feishu-member-bot-provisioner'
 import type { MemberBotAvatarSourceResolver } from './member-bot-avatar-source'
 import { ProvisioningTimingRecorder } from './feishu-provisioning-timing'
+import { memberBotAppDescription } from '../shared/channel-member-bot-copy'
+import type { FeishuExecutionPreviewHost } from './feishu-execution-preview'
 import {
   executionConsoleCard,
   executionConsolePageCount,
@@ -172,6 +174,7 @@ export interface ChannelHostDependencies {
   memberBotProvisioner?: FeishuMemberBotProvisioner
   memberBotAvatarSource?: MemberBotAvatarSourceResolver
   createChannel?: CreateChannel
+  executionPreview?: FeishuExecutionPreviewHost
   now?: () => number
   setInterval?: typeof globalThis.setInterval
   clearInterval?: typeof globalThis.clearInterval
@@ -592,7 +595,7 @@ export class ChannelSettingsService {
     const { identity } = inspection
     const agent = await this.#dependencies!.core.request<AgentProfile>('members.get', { agentId })
     if (!agent || agent.presence !== 'present') throw new Error('该队员当前不可发布。')
-    const appDescription = `Rovai AI 队员 · ${agent.teamRole || '协作者'}`
+    const appDescription = memberBotAppDescription('feishu', agent.teamRole)
     const avatarSource = await this.#memberBotAvatarSource.resolve(agent.avatarRef)
     if (
       existingBot
@@ -1205,6 +1208,10 @@ export class ChannelSettingsService {
     if (!credential || credential.appId !== bot.appId) throw new Error('published_bot_credential_missing')
     const managed = await this.#connectBot(bot.agentId, bot.credentialRef, credential)
     this.#managedChannels.set(bot.appId, managed)
+    // Opt-in synthetic previews reuse this exact connection, never a competing WebSocket.
+    void this.#dependencies?.executionPreview?.connected(bot.agentId, bot.appId, managed.channel).catch(() => {
+      logFeishuBotDiagnostic('execution_preview.failed', { agentId: bot.agentId })
+    })
   }
 
   async #connectBot(
@@ -1547,6 +1554,8 @@ export class ChannelSettingsService {
     event: CardActionEvent
   ): Promise<FeishuCardActionResponse | void> {
     if (this.#stopped) return
+    const preview = await this.#dependencies?.executionPreview?.handleCardAction(managed.appId, event, managed.channel)
+    if (preview) return preview
     const executionAction = executionConsoleCardAction(event.action.value)
     if (executionAction) {
       return this.#handleExecutionConsoleCardAction(managed, event, executionAction)
@@ -1627,16 +1636,7 @@ export class ChannelSettingsService {
   ): Promise<FeishuCardActionResponse> {
     const raw = (event.raw ?? {}) as RawCardActionEvent
     try {
-      const current = await this.#dependencies!.core.request<ExecutionConsoleSource | null>(
-        'channels.executionConsole.source',
-        {
-          agentRunId: action.agentRunId,
-          expectedSequence: action.snapshotSequence
-        }
-      )
-      if (!current) return executionConsoleCardActionResponse('stale')
-      const pageCount = executionConsolePageCount(current)
-      if (action.pageIndex >= pageCount) return executionConsoleCardActionResponse('stale')
+      // Authenticate the Owner and exact sealed card before reading full result Blobs.
       const result = await this.#commandWithId(
         'channels.executionConsole.page.authorize',
         randomUUID(),
@@ -1646,7 +1646,6 @@ export class ChannelSettingsService {
           externalMessageId: event.messageId,
           snapshotSequence: action.snapshotSequence,
           pageIndex: action.pageIndex,
-          pageCount,
           operatorOpenId: raw.operator?.open_id ?? event.operator.openId ?? null,
           operatorUserId: raw.operator?.user_id ?? event.operator.userId ?? null,
           operatorUnionId: raw.operator?.union_id ?? null
@@ -1656,9 +1655,14 @@ export class ChannelSettingsService {
       if (result.status === 'rejected') {
         return executionConsoleCardActionResponse(result.code)
       }
-      if (current.targetAppId !== managed.appId
+      const current = await this.#dependencies!.core.request<ExecutionConsoleSource | null>(
+        'channels.executionConsole.source',
+        { agentRunId: action.agentRunId, expectedSequence: action.snapshotSequence }
+      )
+      if (!current || current.targetAppId !== managed.appId
         || current.externalMessageId !== event.messageId
-        || current.state !== 'terminal_sealed') {
+        || current.state !== 'terminal_sealed'
+        || action.pageIndex >= executionConsolePageCount(current)) {
         return executionConsoleCardActionResponse('stale')
       }
       await managed.channel.updateCard(

@@ -101,6 +101,7 @@ import {
 } from './app-updates'
 import { AppQuitCoordinator } from './app-quit-coordinator'
 import { ChannelSettingsService } from './channel-settings'
+import { createFeishuExecutionPreviewHost } from './feishu-execution-preview'
 import { ChannelSettingsCoordinator } from './channel-settings-coordinator'
 import { ChannelHostLifecycle } from './channel-host-lifecycle'
 import {
@@ -359,7 +360,8 @@ const feishuChannelSettings = new ChannelSettingsService({
   credentialStore: channelCredentialStore,
   developerSession: feishuDeveloperSession,
   memberBotProvisioner: new FeishuWebSessionMemberBotProvisioner(feishuDeveloperSession),
-  memberBotAvatarSource
+  memberBotAvatarSource,
+  executionPreview: createFeishuExecutionPreviewHost(process.argv, coreDataPath)
 })
 const dingtalkDeveloperTransport = new DingTalkDeveloperApiTransport()
 const dingtalkDeveloperSession = new ElectronDingTalkDeveloperSessionService({

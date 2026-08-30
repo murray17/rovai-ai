@@ -10,7 +10,7 @@ last_updated: 2026-08-30
 
 ## 仓库内实施
 
-- [x] Migration 122/123/124、Data Contract `v1.37 / schema 78`、helper mode 数据保留、共享渠道 SQLite storage 与显式升级测试；
+- [x] Migration 122/123/124/125、Data Contract `v1.38 / schema 79`、helper mode 数据保留、共享渠道 SQLite storage 与显式升级测试；
 - [x] DingTalk account、Owner identity、publication intent、member Bot、per-App identity 和 provider-neutral directory；
 - [x] Electron Main 直接 OAuth/Developer API：固定 endpoint、封闭 operation/argument、staged profile、超时/取消和 Renderer 秘密隔离；
 - [x] 飞书/钉钉账号与 Developer Session 原子连接、publication credential 与 intent 原子推进、启动单次批量读取；
@@ -32,6 +32,18 @@ last_updated: 2026-08-30
 - [x] 渠道 Host 随 Core authority generation 启停和恢复，旧启动/关闭并发不会留下重复连接；
 - [x] 保留完整渠道 migration chain，并通过真实 ticket/copy migration 验证旧飞书 marker collision 与 Bot/账号保留；
 - [x] ExternalQuote 保留普通 Camp 的不可跳转引用外观，同时消息正文继续支持主线文件预览入口。
+
+## 飞书执行卡呈现回归
+
+- [x] 按 [Feishu Channel v4](../../contracts/feishu-channel-v4.md) 实现真实 timeline、文字前 10 行、单条原生 command
+  折叠和无二级标题的结果框；超过 20 行使用前 9 / 提示 / 后 10，先脱敏再截断，apply_patch 仅结构化文件变化；
+- [x] 15-command、50-element 与序列化 UTF-8 字节预算分页，文字和后续首条 command 尽量同页；钉钉纯文本格式不变；
+- [x] Migration 125 清理旧 view state，封存内容及 Blob reference；迟到 evidence/正文不改 sealed timeline，重启/旧数据
+  copy migration 保留 App/message/sequence，完整 Blob 缺失 fail closed；
+- [x] 分页复用 Owner/原 App/原消息/sealed sequence 授权，一次点击仅一次 updateCard，不发 upsert、不触发 pump；
+- [x] 扩展现有卡片/Main 测试与 Core 生命周期 owner，覆盖安全输出、空结果、成功/失败/取消、分页/UTF-8 边界、
+  长 Blob 恢复与不可变性；不新增重复 Rust fixture owner，既有 migration 准入矩阵继续覆盖所有受支持来源；
+- [ ] 在实际飞书客户端验收新终态卡的展开/收起与多页往返；既有 sealed 卡不批量回填。
 
 ## 外部验收与生产门槛
 

@@ -8,6 +8,7 @@ import {
   LoggerLevel
 } from '@larksuiteoapi/node-sdk'
 import { describe, expect, it, vi } from 'vitest'
+import type { AgentRunExecutionEvidenceView } from '@contracts'
 import {
   ChannelSettingsService,
   type ChannelHostDependencies
@@ -28,6 +29,27 @@ function channelCore(
   return {
     request: (method, params) => Promise.resolve(handler(method, params))
   } as ChannelHostDependencies['core']
+}
+
+function consoleCommandEvidence(agentRunId: string): AgentRunExecutionEvidenceView[] {
+  return [{
+    id: `evidence-${agentRunId}`,
+    agentRunId,
+    executionEpoch: 1,
+    sequence: 1,
+    eventType: 'activity.completed',
+    kind: 'command',
+    phase: 'completed',
+    payload: { item: {
+      type: 'commandExecution', command: 'pnpm test', status: 'completed',
+      aggregatedOutput: 'tests passed\nAuthorization: Bearer private-stdout-token'
+    } },
+    contentBlobId: null,
+    contentByteCount: 0,
+    isTruncated: false,
+    occurredAt: '2026-08-28T00:00:01Z',
+    canonical: null
+  }]
 }
 
 function memoryCredentialStore(
@@ -1611,7 +1633,7 @@ describe('channel settings service', () => {
       publicationIntentId: 'intent-unknown',
       remoteAppId: 'cli-published-remotely',
       expectedDeveloperIdentity: { userId: owner.userId, tenantId: owner.tenantId },
-      appDescription: 'Rovai AI 队员 · 代码审阅',
+      appDescription: 'Rovai AI Teammate · 代码审阅',
       avatarSource
     }))
     expect(intentCreates).toBe(0)
@@ -1722,6 +1744,41 @@ describe('channel settings service', () => {
     })
   })
 
+  it('shares the existing Bot connection with an explicit preview without admitting preview callbacks to Core', async () => {
+    const harness = controlledChannels({ cli_a: { openId: 'ou_bot_a', name: '审阅员' } })
+    const requests: string[] = []
+    const executionPreview = {
+      connected: vi.fn(async () => undefined),
+      handleCardAction: vi.fn(async () => ({ toast: { type: 'info' as const, content: '第 2 / 7 页' } }))
+    }
+    const service = new ChannelSettingsService({
+      credentialStore: memoryCredentialStore({ 'feishu-member-a': { appId: 'cli_a', appSecret: 'secret-a' } }),
+      createChannel: harness.createChannel, executionPreview, ...inertInterval(),
+      core: channelCore((method) => {
+        requests.push(method)
+        if (method === 'channels.feishu.snapshot') return coreSnapshot({ memberBots: [{
+          agentId: 'agent-a', accountId: 'account-1', brand: 'feishu', appId: 'cli_a',
+          botDisplayName: '审阅员', credentialRef: 'feishu-member-a', status: 'published',
+          failureCode: null, version: 1, ownerIdentityStatus: 'verified'
+        }] })
+        if (method === 'agents.list') return [presentAgent()]
+        if (method === 'channels.delivery.claim') return []
+        return { status: 'applied', code: 'ok', payload: {} }
+      })
+    })
+    await service.start()
+    expect(harness.createChannel).toHaveBeenCalledTimes(1)
+    expect(executionPreview.connected).toHaveBeenCalledWith('agent-a', 'cli_a', expect.anything())
+    const result = await harness.handlers.get('cli_a:cardAction')!({
+      messageId: 'om_preview', chatId: 'oc_preview', operator: { openId: 'ou_owner' },
+      action: { tag: 'button', value: { action: 'execution_console_page', agentRunId: 'feishu-preview:fixture', pageIndex: 1, snapshotSequence: 1 } }
+    })
+    expect(result).toEqual({ toast: { type: 'info', content: '第 2 / 7 页' } })
+    expect(requests).not.toContain('channels.executionConsole.page.authorize')
+    expect(requests).not.toContain('channels.executionConsole.source')
+    await service.stop()
+  })
+
   it('gates non-owner input, keeps /new private-only, and trusts callback operator envelopes', async () => {
     const harness = controlledChannels({ cli_a: { openId: 'ou_bot_a', name: '审阅员' } })
     const commands: Array<{ method: string; command: Record<string, unknown> }> = []
@@ -1793,7 +1850,7 @@ describe('channel settings service', () => {
             agentRunId: 'run-console',
             agentDisplayName: '审阅员',
             run: { status: 'succeeded', waitReason: null, terminalReasonCode: null },
-            evidence: [],
+            evidence: consoleCommandEvidence('run-console'),
             publicOutput: '执行台输出',
             startedAt: '2026-08-28T00:00:00Z',
             terminalAt: '2026-08-28T00:00:05Z',
@@ -1997,12 +2054,15 @@ describe('channel settings service', () => {
       agentRunId: 'run-console',
       snapshotSequence: 7,
       pageIndex: 0,
-      pageCount: 1,
       operatorOpenId: 'ou_owner',
       operatorUserId: 'owner-user-id',
       operatorUnionId: 'on_owner'
     })
     expect(JSON.stringify(executionCallback)).not.toContain('spoofed-user')
+    expect(executionCallback).not.toHaveProperty('pageCount')
+    const authorizationIndex = commands.findIndex(({ method }) => method === 'channels.executionConsole.page.authorize')
+    const sourceIndex = commands.findIndex(({ method }) => method === 'channels.executionConsole.source')
+    expect(authorizationIndex).toBeLessThan(sourceIndex)
     expect(pageResult).toEqual({
       toast: { type: 'info', content: '执行记录页面已更新' }
     })
@@ -2012,10 +2072,15 @@ describe('channel settings service', () => {
       expect.objectContaining({
         header: expect.objectContaining({
           title: { tag: 'plain_text', content: '审阅员 · 已完成' }
-        })
+        }),
+        body: expect.objectContaining({ elements: expect.arrayContaining([
+          expect.objectContaining({ tag: 'collapsible_panel', expanded: false }),
+          { tag: 'markdown', content: '执行台输出' }
+        ]) })
       })
     )
 
+    const sourceReadsBeforeOutsider = commands.filter(({ method }) => method === 'channels.executionConsole.source').length
     const outsiderExecutionResult = await cardHandler({
       messageId: 'om_console',
       chatId: 'oc_group',
@@ -2040,6 +2105,7 @@ describe('channel settings service', () => {
     expect(outsiderExecutionResult).toEqual({
       toast: { type: 'warning', content: '仅 Rovai Owner 可以操作执行记录' }
     })
+    expect(commands.filter(({ method }) => method === 'channels.executionConsole.source')).toHaveLength(sourceReadsBeforeOutsider)
     expect(harness.updateCard).toHaveBeenCalledTimes(1)
 
     const repeatedPageResult = await cardHandler({
@@ -2612,7 +2678,11 @@ describe('channel settings service', () => {
     await service.stop()
   })
 
-  it('sends execution consoles as cards and permanent Agent output as unheaded Markdown', async () => {
+  it.each([
+    { label: 'live send', runStatus: 'running', updateMessageId: null },
+    { label: 'sealed send', runStatus: 'succeeded', updateMessageId: null },
+    { label: 'sealed update', runStatus: 'succeeded', updateMessageId: 'om_console' }
+  ])('keeps $label console disclosure separate from permanent Agent Markdown', async ({ runStatus, updateMessageId }) => {
     const harness = controlledChannels({ cli_a: { openId: 'ou_bot_a', name: '芝士' } })
     const settlements: Array<Record<string, unknown>> = []
     let delivered = false
@@ -2643,7 +2713,7 @@ describe('channel settings service', () => {
                 deliveryId: 'delivery-console', requestId: 'request-1',
                 deliveryKind: 'execution_console_upsert', targetAppId: 'cli_a',
                 credentialRef: 'feishu-member-a', chatId: 'oc_group', topicKey: '',
-                conversationKind: 'group', attemptCount: 1, updateMessageId: null,
+                conversationKind: 'group', attemptCount: 1, updateMessageId,
                 recipientOpenId: 'ou_owner',
                 payload: {
                   kind: 'execution_console_upsert', executionConsoleId: 'console-1',
@@ -2665,14 +2735,14 @@ describe('channel settings service', () => {
             sequence: 1,
             agentRunId: 'run-1',
             agentDisplayName: '芝士',
-            run: { status: 'running', waitReason: null, terminalReasonCode: null },
-            evidence: [],
-            publicOutput: null,
+            run: { status: runStatus, waitReason: null, terminalReasonCode: null },
+            evidence: consoleCommandEvidence('run-1'),
+            publicOutput: runStatus === 'succeeded' ? '执行台最终回复。' : null,
             startedAt: '2026-08-28T00:00:00Z',
-            terminalAt: null,
+            terminalAt: runStatus === 'succeeded' ? '2026-08-28T00:00:05Z' : null,
             targetAppId: 'cli_a',
-            externalMessageId: null,
-            state: 'active'
+            externalMessageId: updateMessageId,
+            state: runStatus === 'succeeded' ? 'terminal_sealed' : 'active'
           }
         }
         if (method === 'channels.deliveries.settle') {
@@ -2686,13 +2756,37 @@ describe('channel settings service', () => {
     await service.start()
     await vi.waitFor(() => expect(settlements).toHaveLength(2))
 
-    expect(harness.send).toHaveBeenCalledWith(
-      'oc_group',
-      { card: expect.objectContaining({
-        header: expect.objectContaining({ title: { tag: 'plain_text', content: '芝士 · 执行中' } })
-      }) },
-      undefined
-    )
+    const expectedCard = expect.objectContaining({
+      header: expect.objectContaining({ title: {
+        tag: 'plain_text', content: runStatus === 'succeeded' ? '芝士 · 已完成' : '芝士 · 执行中'
+      } })
+    })
+    if (updateMessageId) {
+      expect(harness.updateCard).toHaveBeenCalledWith(updateMessageId, expectedCard)
+      expect(harness.send).toHaveBeenCalledTimes(1)
+    } else {
+      expect(harness.send).toHaveBeenCalledWith('oc_group', { card: expectedCard }, undefined)
+      expect(harness.updateCard).not.toHaveBeenCalled()
+    }
+    const card = (updateMessageId
+      ? harness.updateCard.mock.calls[0][1]
+      : (harness.send.mock.calls[0][1] as { card: unknown }).card
+    ) as { body: { elements: Array<{ tag: string; content?: string }> } }
+    const visibleBody = card.body.elements
+      .filter((element) => element.tag === 'markdown')
+      .map((element) => element.content).join('\n')
+    if (runStatus === 'succeeded') {
+      expect(card.body.elements).toEqual(expect.arrayContaining([
+        expect.objectContaining({ tag: 'collapsible_panel', expanded: false })
+      ]))
+      expect(visibleBody).not.toContain('pnpm test')
+      expect(visibleBody).toContain('执行台最终回复。')
+    } else {
+      expect(visibleBody).toContain('pnpm test')
+      expect(JSON.stringify(card)).not.toContain('collapsible_panel')
+    }
+    expect(JSON.stringify(card)).not.toContain('private-stdout-token')
+    expect(JSON.stringify(card).includes('tests passed')).toBe(runStatus === 'succeeded')
     expect(harness.send).toHaveBeenCalledWith(
       'oc_group',
       { markdown: '这是永久正文。' },
