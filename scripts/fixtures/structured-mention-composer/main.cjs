@@ -16,21 +16,23 @@ app.whenReady().then(async () => {
     height: 700,
     webPreferences: { contextIsolation: true, sandbox: true, nodeIntegration: false, backgroundThrottling: false }
   })
-  const evaluate = source => window.webContents.executeJavaScript(source, true)
-  async function frames() {
+  async function complete(promise, operation) {
     let timeout
     try {
-      await Promise.race([
-        evaluate('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))'),
+      return await Promise.race([
+        promise,
         new Promise((_, reject) => {
-          timeout = setTimeout(() => reject(new Error('Composer fixture received no animation frames')), 5_000)
+          timeout = setTimeout(() => reject(new Error(`Composer fixture timed out: ${operation}`)), 5_000)
         })
       ])
     } finally {
       clearTimeout(timeout)
     }
   }
-  const command = (method, params) => window.webContents.debugger.sendCommand(method, params)
+  const evaluate = source => complete(window.webContents.executeJavaScript(source, true), source)
+  const frames = () => evaluate('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))')
+  const command = (method, params) => complete(window.webContents.debugger.sendCommand(method, params),
+    `${method} ${JSON.stringify(params)}`)
   const cases = []
   const failures = []
   async function reset(text) {
