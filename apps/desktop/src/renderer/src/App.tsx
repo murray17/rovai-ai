@@ -3894,8 +3894,7 @@ export function AppHeader({
 }): React.JSX.Element {
   const filePreview = useOptionalFilePreview()
   const previewLayout = useOptionalFilePreviewLayout()
-  const tabs = filePreview?.tabs ?? []
-  const previewVisible = Boolean(filePreview?.paneVisible && tabs.length > 0)
+  const previewVisible = Boolean(filePreview?.paneVisible)
   const title = campTitle ?? '正在打开对话'
   const pendingApprovals = camp?.approvals.filter((approval) => approval.status === 'pending').length ?? 0
   const dayNumber = camp ? campDayNumber(camp.camp.createdAt) : null
@@ -3926,6 +3925,22 @@ export function AppHeader({
         <div className="camp-detail-entry-host" ref={detailEntryHostRef} />
       </div>
       {previewVisible && <FilePreviewTabs compact={previewLayout?.compact} />}
+      {filePreview && <div className="file-preview-toggle-group">
+        <span className="file-preview-toggle-divider" aria-hidden="true" />
+        <button
+          className="file-preview-toggle"
+          type="button"
+          aria-label={previewVisible ? '收起文件预览' : '展开文件预览'}
+          title={previewVisible ? '收起文件预览' : '展开文件预览'}
+          aria-expanded={previewVisible}
+          aria-controls="file-preview-pane"
+          onClick={previewVisible ? filePreview.hidePane : filePreview.showPane}
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+            <path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9ZM14 3v6h6M8 13h3M8 17h3M15 13v5" />
+          </svg>
+        </button>
+      </div>}
     </header>
   )
 }

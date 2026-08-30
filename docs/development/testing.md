@@ -179,7 +179,10 @@ pnpm build:desktop
 标题栏、分栏组件、文件 Tab 与 Viewer，以原生鼠标/键盘输入验证拖动提交、回弹、关闭与取消、焦点回退、
 阅读位置和草稿保留、窗口缩放及重载后的比例。它还组合真实 Task、Files Changed、结构化 Composer 和
 Approval/Recovery Dock，验证大屏中 481/480/450/420px 会话的容器断点、信息与按钮命中区域、DOM 保留，
-并用受控查找工具组检查窄列排版。查询行为仍由会话查找测试拥有。纯宽度输入矩阵仍由 `file-preview-layout.test.ts` 拥有；
+并用受控查找工具组检查窄列排版。它还验证常驻预览按钮和空态、File Change/当前文件切换、不同 epoch 去重边界、
+历史读取不访问当前文件、加载失败后重试、窄预览文件选择与阅读位置保留。原生窗口拖拽区验证覆盖顶栏与控件
+的区域排除、预留空白及真实点击；系统标题栏双击的最大化/还原行为仍需平台验收。
+查询行为仍由会话查找测试拥有。纯宽度输入矩阵仍由 `file-preview-layout.test.ts` 拥有；
 静态 Markup/CSS 测试不能替代指针捕获、ResizeObserver 和浏览器布局组合。
 夹具只使用临时绝对 `userData` 与受控文件 API，不启动 Core/SQLite/Skill Library/Runtime，不读取真实 Camp。
 `ROVAI_KEEP_FILE_PREVIEW_FIXTURE=1` 保留双主题、宽/窄窗口、关闭提示和 200%/reduced-motion 截图；

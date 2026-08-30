@@ -345,15 +345,17 @@ operation count 中，不阻止可靠 Diff 参与统计。只有所有文件都�
 文件名顶格排列且不使用横线分隔。display root 内文件显示相对路径，Runtime 明确报告的 root 外文件显示规范化
 绝对路径。卡片默认显示三行，更多文件由“再显示 N 个文件 / 收起文件”在原位切换；不增加行间分隔。
 header 右侧是浅边框、非品牌色且没有箭头的“查看变化”，hover/focus 使用轻微底色。点击 header、“查看变化”或任一文件行
-进入独立 `Files Changed` 页面；从文件行进入时预选该文件。卡片不显示时间、“已保存”、Git 状态、参与运行或
+在[文件预览区](file-preview.md#file-change-标签页)打开 `File Change·文件名` 标签页；从文件行进入时预选该文件。
+卡片不显示时间、“已保存”、Git 状态、参与运行或
 底部 metadata。
 
-Review 保留 App 侧栏和顶部上下文，隐藏会话/Inspector 工作区，内部使用左侧文件列表与右侧 Evidence 阅读面。
+Review 与普通文件共用预览区和标签栏，正常双栏中保留左侧会话、Composer 与审批信息。
+宽预览内部使用文件列表与 Evidence 阅读面；窄预览改用文件选择框，单文件省略切换控件。
 完整净差异显示 unified diff 及可靠 hunk、旧/新行号；exact mutation 不显示 hunk、行号或推测上下文；history
 保留全部 operation 的时序与计数，但只渲染有可靠 diff 的代码块，并将可见代码块从“修改 1”连续编号，不为
 operation-only 记录生成空白占位块。exact mutation 与 history 不显示额外解释提示；operation-only 文件仍可选择，
-右侧显示“没有可审查的差异内容”。返回后恢复原会话，
-不跳转系统编辑器或独立文件 Review。
+右侧显示“没有可审查的差异内容”。“打开当前文件”通过既有来源校验打开普通文件 Tab，历史 Review 保留原
+选择和阅读位置；关闭预览或在单 Pane 模式返回时恢复原会话，不默认跳转系统编辑器。
 
 卡片只读取不可变 AgentRun projection 与受管 detail blob，不读取当前 workspace 或重新执行 Git。`no_changes` 和
 没有可靠 Evidence 的 Run 不生成卡片；Review 也只读取同一 projection/detail，不补造行号或 diff。Git 与非 Git

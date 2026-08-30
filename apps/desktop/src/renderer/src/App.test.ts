@@ -1,3 +1,4 @@
+import { AgentRunFileChangesReviewSurface } from './FileChangesPreview'
 import { CampDetailEntries } from './CampDetailPopover'
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
@@ -84,7 +85,6 @@ import {
   RunExecutionDisclosure,
   TaskPanel,
   AgentRunFileChangesTimelineCard,
-  AgentRunFileChangesReviewSurface,
   agentExecutionProcesses,
   agentRunTerminalNote,
   agentRunCountsAsExecuting,
@@ -1473,7 +1473,6 @@ describe('task event projections', () => {
         onOpenCurrent: vi.fn(),
         openCurrentStatus: 'idle',
         openCurrentError: null,
-        onBack: vi.fn(),
         onRetry: vi.fn()
       }
     ))

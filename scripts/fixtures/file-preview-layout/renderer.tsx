@@ -1,9 +1,9 @@
 import { useRef, useState } from 'react'
 import { createRoot } from 'react-dom/client'
-import type { ActionApprovalView, AgentRunFileChangesView, FilePreviewApi, ResolvedFilePreview, StructuredCampMessageContent, TaskView } from '@contracts'
+import type { ActionApprovalView, AgentRunFileChangesDetailView, AgentRunFileChangesView, FilePreviewApi, OpenFilePreviewRequest, ResolvedFilePreview, StructuredCampMessageContent, TaskView } from '@contracts'
 import { AppHeader } from '../../../apps/desktop/src/renderer/src/App'
 import { AgentRunFileChangesTimelineCard, ApprovalDock, RuntimeRecoveryDock, TaskTimelineCard } from '../../../apps/desktop/src/renderer/src/CampWorkspace'
-import { FilePreviewProvider, useFilePreview } from '../../../apps/desktop/src/renderer/src/FilePreviewContext'
+import { FilePreviewProvider, useFilePreview, type FilePreviewContextValue } from '../../../apps/desktop/src/renderer/src/FilePreviewContext'
 import { FilePreviewResizeHandle, FilePreviewWorkspace } from '../../../apps/desktop/src/renderer/src/FilePreviewLayout'
 import { FilePreviewPane } from '../../../apps/desktop/src/renderer/src/FilePreviewPane'
 import { FileReferenceLink } from '../../../apps/desktop/src/renderer/src/FileReferenceLink'
@@ -19,21 +19,34 @@ const file: ResolvedFilePreview = {
   contentGeneration: 'generation-1', capabilities: ['read']
 }
 const unsupported = async (): Promise<never> => { throw new Error('Unexpected fixture API operation') }
+const fileOpens: OpenFilePreviewRequest[] = []
+const releases: string[] = []
+const reviewRequests: Array<{ campId: string; agentRunId: string; executionEpoch: number }> = []
+let failNextReview = false
+let fileReads = 0
 const api: FilePreviewApi = {
   bindCamp: async () => {},
-  open: async () => ({ ok: true, value: { kind: 'file_preview', file: { ...file, handleId: crypto.randomUUID() } } }),
-  readText: async () => ({ ok: true, value: {
+  open: async (request) => {
+    fileOpens.push(request)
+    let target = file
+    if (request.kind === 'run_evidence' && request.action === 'open_current') {
+      const selected = changes.files.find((entry) => entry.evidenceFileId === request.evidenceFileId)
+      if (!selected) return unsupported()
+      target = { ...file, previewKey: `current:${selected.path}`, displayPath: selected.path, fileName: selected.path.split('/').at(-1)! }
+    } else if (request.kind !== 'message_reference' || request.rawReference !== file.displayPath) return unsupported()
+    return { ok: true, value: { kind: 'file_preview', file: { ...target, handleId: crypto.randomUUID() } } }
+  },
+  readText: async () => { fileReads += 1; return { ok: true, value: {
     text: Array.from({ length: 300 }, (_, index) => `const readingLine${index + 1} = "保持会话和文件的阅读位置"`).join('\n'),
     contentGeneration: file.contentGeneration, contentVersion: file.contentVersion
-  } }),
-  release: async () => ({ released: true }),
+  } } },
+  release: async ({ handleId }) => { releases.push(handleId); return { released: true } },
   onExternalUpdate: () => () => {},
   reopen: unsupported, readPage: unsupported, resolveLine: unsupported,
   readBinary: unsupported, prepareHtml: unsupported, reload: unsupported,
   openInSystem: unsupported, revealInFolder: unsupported, copyPath: unsupported,
   chooseAuthorizedRoot: unsupported
 }
-Object.assign(window, { rovai: { filePreview: api } })
 
 const task: TaskView = {
   taskId: 'task-1', campId: 'camp-1', title: '检查文件预览的拖拽边界，并保留窄会话中的完整任务信息',
@@ -51,6 +64,23 @@ const changes: AgentRunFileChangesView = {
   })),
   fileCount: 2, operationCount: 2, additions: 247, deletions: 91, completedAt: '2026-08-30T08:00:00Z'
 }
+Object.assign(window, { rovai: {
+  filePreview: api,
+  request: async (method: string, request: { campId: string; agentRunId: string; executionEpoch: number }): Promise<AgentRunFileChangesDetailView> => {
+    if (method !== 'agentRunFileChanges.get' || request.campId !== 'camp-1' || request.agentRunId !== changes.agentRunId) return unsupported()
+    reviewRequests.push(request)
+    if (failNextReview) { failNextReview = false; throw new Error('Fixture detail unavailable') }
+    return {
+      schemaVersion: 2, card: { ...changes, executionEpoch: request.executionEpoch },
+      files: changes.files.map((entry) => ({ ...entry, blocks: [{
+        sequence: 1, semantics: 'full_net_diff', changeKind: 'update',
+        diff: `@@ -1,${entry.deletions} +1,${entry.additions} @@\n`
+          + Array.from({ length: entry.deletions! }, (_, index) => `-历史旧内容 ${index + 1}`).join('\n') + '\n'
+          + Array.from({ length: entry.additions! }, (_, index) => `+历史新内容 ${index + 1}${entry.evidenceFileId === 'file-1' && index === 0 ? ' const preservedLongLine = '.repeat(30) : ''}`).join('\n')
+      }] }))
+    }
+  }
+} })
 const approval: ActionApprovalView = {
   id: 'approval-1', actionId: 'action-1', actionKind: 'command',
   actionSummary: '运行文件预览验证并写入当前工作区的构建产物', canonicalInput: { command: 'pnpm test:file-preview-layout' },
@@ -66,9 +96,11 @@ const approval: ActionApprovalView = {
 }
 let showFind: (open: boolean) => void
 let showDocks: (mode: 'none' | 'approval' | 'recovery' | 'both') => void
+let previewController: FilePreviewContextValue
 
 function Workspace(): React.JSX.Element {
   const preview = useFilePreview()
+  previewController = preview
   const [draft, setDraft] = useState<StructuredCampMessageContent>([{ kind: 'text', text: '保留这条未发送草稿' }])
   const [findOpen, setFindOpen] = useState(false)
   const [docks, setDocks] = useState<'none' | 'approval' | 'recovery' | 'both'>('none')
@@ -104,7 +136,7 @@ function Workspace(): React.JSX.Element {
                 preview-layout.ts
               </FileReferenceLink>
               <TaskTimelineCard task={task} assigneeName="未分配" onOpen={() => {}} />
-              <AgentRunFileChangesTimelineCard changes={changes} onOpenReview={() => {}} />
+              <AgentRunFileChangesTimelineCard changes={changes} onOpenReview={(evidenceFileId) => preview.openFileChanges('camp-1', changes, evidenceFileId)} />
               <div className="safe-markdown">
                 <p>宽代码和表格保持各自的横向滚动，会话仍可以收窄至 420px。</p>
                 <pre><code>{'const keepConversationReadable = '.repeat(12)}</code></pre>
@@ -115,10 +147,8 @@ function Workspace(): React.JSX.Element {
           </div>
         </div>
       </section>
-      {preview.tabs.length > 0 && <>
-        <FilePreviewResizeHandle onClose={preview.hidePane} />
-        <FilePreviewPane />
-      </>}
+      <FilePreviewResizeHandle onClose={preview.hidePane} />
+      <FilePreviewPane />
       <div className="conversation-controls">
         {(docks === 'approval' || docks === 'both') && <ApprovalDock approvals={[approval]} profileById={new Map()} busy={false}
           onResolve={() => {}} containerRef={approvalRef} focusRequest={null} focusApprovalId={null} />}
@@ -166,6 +196,7 @@ let bookmarkedViewer: HTMLElement | null = null
 let bookmarkedEditor: HTMLElement | null = null
 let bookmarkedTimeline: HTMLElement | null = null
 let bookmarkedTask: HTMLElement | null = null
+let bookmarkedReview: HTMLElement | null = null
 let lastPointer = 0
 const pointerEvents: unknown[] = []
 for (const type of ['pointerdown', 'pointermove', 'pointerup', 'pointercancel', 'gotpointercapture', 'lostpointercapture']) {
@@ -190,6 +221,26 @@ Object.assign(window, { previewTest: {
   async open() {
     element('.message-file-reference')!.click()
     await settle()
+  },
+  async openReview(index = 0) {
+    document.querySelectorAll<HTMLElement>('.run-file-change-file')[index].click()
+    await settle()
+  },
+  async otherEpoch(fail = false) {
+    failNextReview = fail
+    previewController.openFileChanges('camp-1', { ...changes, executionEpoch: 2 })
+    await settle()
+  },
+  async closeAll() { previewController.closeMany(previewController.tabs.map((tab) => tab.id)); await settle() },
+  async selectChangedFile(index: number) {
+    const select = document.querySelector<HTMLSelectElement>('.file-preview-tab-panel:not([hidden]) select')!
+    select.value = changes.files[index].evidenceFileId
+    select.dispatchEvent(new Event('change', { bubbles: true }))
+    await settle()
+  },
+  bookmarkReview() {
+    bookmarkedReview = element('.file-preview-tab-panel:not([hidden]) .agent-run-file-review-scroll')!
+    bookmarkedReview.scrollTop = 640
   },
   async switchCamp() { switchCamp(); await settle() },
   async find(open: boolean) { showFind(open); await settle() },
@@ -242,6 +293,39 @@ Object.assign(window, { previewTest: {
       tabCount: document.querySelectorAll('[role="tab"]').length,
       reducedMotion: matchMedia('(prefers-reduced-motion: reduce)').matches,
       transition: getComputedStyle(grid).transitionDuration
+    }
+  },
+  reviewSnapshot() {
+    const panel = element('.file-preview-tab-panel:not([hidden])')
+    const review = panel?.querySelector<HTMLElement>('.agent-run-file-review')
+    const scroll = review?.querySelector<HTMLElement>('.agent-run-file-review-scroll')
+    const bar = element('.file-preview-tabs')
+    const strip = element('.file-preview-tab-strip')
+    const toggle = element('.file-preview-toggle')!
+    const region = (node: Element | null) => node ? getComputedStyle(node).getPropertyValue('-webkit-app-region') : null
+    return {
+      reviewVisible: Boolean(review && review.getBoundingClientRect().height > 0),
+      emptyVisible: visible('.file-preview-empty'),
+      selectedFile: review?.querySelector('.agent-run-file-review-pane-header code')?.textContent,
+      selectedTab: element('[role="tab"][aria-selected="true"]')?.getAttribute('aria-label'),
+      tabs: [...document.querySelectorAll<HTMLElement>('[role="tab"]')].map((tab) => ({
+        label: tab.getAttribute('aria-label'), icon: tab.querySelector('svg')?.dataset.fileType,
+        noDrag: region(tab.parentElement) === 'no-drag', iconVisible: tab.firstElementChild?.tagName === 'svg'
+      })),
+      sameReview: bookmarkedReview === scroll, reviewScroll: scroll?.scrollTop,
+      error: review?.querySelector('[role="alert"]')?.textContent,
+      text: scroll?.textContent,
+      horizontalScroll: scroll ? scroll.scrollWidth > scroll.clientWidth + 1 : null,
+      sidebarVisible: Boolean(review?.querySelector('.agent-run-file-review-sidebar')?.getBoundingClientRect().width),
+      pickerVisible: Boolean(review?.querySelector('.agent-run-file-review-file-picker')?.getBoundingClientRect().width),
+      reviewInPreview: Boolean(review?.closest('.file-preview-pane')),
+      overflow: [...document.querySelectorAll<HTMLElement>('.file-preview-tab-panel:not([hidden]), .agent-run-file-review, .agent-run-file-review-header, .agent-run-file-review-file-picker, .agent-run-file-review-pane-header')]
+        .filter((node) => node.getBoundingClientRect().width && node.scrollWidth > node.clientWidth + 1).map(node => node.className),
+      headerDrag: region(bar), toggleNoDrag: region(toggle.parentElement) === 'no-drag',
+      dragSpace: strip ? toggle.parentElement!.getBoundingClientRect().left - strip.getBoundingClientRect().right : null,
+      toggleExpanded: toggle.getAttribute('aria-expanded'), toggleVisible: visible('.file-preview-toggle'),
+      separatorVisible: visible('.file-preview-toggle-divider'),
+      reviewRequests: [...reviewRequests], fileOpens: [...fileOpens], fileReads, releases: [...releases]
     }
   },
   conversationSnapshot() {

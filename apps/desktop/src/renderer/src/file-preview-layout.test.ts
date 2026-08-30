@@ -89,7 +89,7 @@ describe('File preview reading planes', () => {
     )
   })
 
-  it('uses the full preview tab strip without reserving an obsolete inspector toggle', () => {
+  it('reserves a native drag area and the shared preview toggle at the end of the tab strip', () => {
     expect(declarations('.camp-topbar')[0]).toContain('position: relative;')
     expect(declarations('.file-preview-tabs')[0]).toContain(
       'padding: 5px var(--file-preview-tabs-end-padding, 6px) 5px 6px;'
@@ -97,8 +97,12 @@ describe('File preview reading planes', () => {
     const padding = declarations('.camp-topbar.has-file-preview')
       .filter((rule) => rule.includes('--file-preview-tabs-end-padding:'))
     expect(padding).toHaveLength(1)
-    expect(padding[0]).toContain('--file-preview-tabs-end-padding: 6px;')
+    expect(padding[0]).toContain('--file-preview-tabs-end-padding: 76px;')
     expect(declarations('.camp-detail-popover')[0]).toContain('position: absolute;')
+    expect(declarations('.file-preview-tabs')[0]).toContain('-webkit-app-region: drag;')
+    expect(declarations('.file-preview-tab')[0]).toContain('-webkit-app-region: no-drag;')
+    expect(declarations('.file-preview-return')[0]).toContain('-webkit-app-region: no-drag;')
+    expect(declarations('.file-preview-toggle-group')[0]).toContain('-webkit-app-region: no-drag;')
   })
 })
 
@@ -121,7 +125,7 @@ describe('File preview tab interaction styles', () => {
 
   it('keeps arrival motion on the label and the repeat feedback clear of all hit targets', () => {
     expect(declarations('.file-preview-tab')[0]).not.toContain('animation:')
-    expect(declarations('.file-preview-tab.is-arriving .file-preview-tab-activate > span:first-child')[0])
+    expect(declarations('.file-preview-tab.is-arriving .file-preview-tab-label')[0])
       .toContain('animation: file-preview-tab-arrive 200ms')
     const feedback = declarations('.file-preview-tab-open-feedback')[0]
     expect(feedback).toContain('position: absolute;')
@@ -134,6 +138,6 @@ describe('File preview tab interaction styles', () => {
   })
 
   it('disables both entry movement and feedback flashing for reduced motion', () => {
-    expect(styles).toMatch(/@media \(prefers-reduced-motion: reduce\)\s*\{\s*\.file-preview-tab\.is-arriving \.file-preview-tab-activate > span:first-child,\s*\.file-preview-tab-open-feedback \{ animation: none; \}/)
+    expect(styles).toMatch(/@media \(prefers-reduced-motion: reduce\)\s*\{\s*\.file-preview-tab\.is-arriving \.file-preview-tab-label,\s*\.file-preview-tab-open-feedback \{ animation: none; \}/)
   })
 })

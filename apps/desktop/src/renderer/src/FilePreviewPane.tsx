@@ -1,6 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { SafeMarkdown } from './SafeMarkdown'
 import { useFilePreview, type FilePreviewTabModel } from './FilePreviewContext'
+import { FileChangesPreview } from './FileChangesPreview'
+import { FilePreviewTabIcon } from './FilePreviewTabIcon'
+import { previewTabLabel } from './file-preview-tab-presentation'
 import { filePreviewAssetUrl } from '../../file-preview-asset-url'
 import { parseUnifiedPatch } from './file-preview-patch'
 
@@ -461,20 +464,11 @@ function Viewer({ tab }: { tab: FilePreviewTabModel }): React.JSX.Element {
   return <CodeViewer tab={tab} />
 }
 
-export function FilePreviewPane(): React.JSX.Element | null {
-  const { activeTab, paneVisible, reload, retry, changePage } = useFilePreview()
-  if (!activeTab) return null
-  const tab = activeTab
+function FilePreviewDocument({ tab }: { tab: FilePreviewTabModel }): React.JSX.Element {
+  const { reload, retry, changePage } = useFilePreview()
   const page = tab.content?.kind === 'page' ? tab.content.page : null
   return (
-    <section
-      id={`file-preview-panel-${tab.id}`}
-      className="file-preview-pane"
-      hidden={!paneVisible}
-      role="tabpanel"
-      aria-label={`文件预览：${tab.file.fileName}`}
-      aria-labelledby={`file-preview-tab-${tab.id}`}
-    >
+    <>
       <div className="file-preview-path-row">
         <RelativePath path={tab.file.displayPath} fileName={tab.file.fileName} />
         {(tab.hasExternalUpdate || tab.isRefreshing) && (
@@ -517,6 +511,31 @@ export function FilePreviewPane(): React.JSX.Element | null {
           </div>
         </footer>
       )}
+    </>
+  )
+}
+
+export function FilePreviewPane(): React.JSX.Element {
+  const { tabs, activeTabId, paneVisible } = useFilePreview()
+  return (
+    <section id="file-preview-pane" className="file-preview-pane" hidden={!paneVisible} aria-label="文件预览">
+      {tabs.length === 0 && <div className="file-preview-empty">
+        <FilePreviewTabIcon kind="text" />
+        <h2>选择一个文件预览</h2>
+        <p>点击会话中的文件链接或 File Change 卡片，在这里查看文件和变更。</p>
+      </div>}
+      {tabs.map((tab) => <section
+        key={tab.id}
+        id={`file-preview-panel-${tab.id}`}
+        className="file-preview-tab-panel"
+        hidden={tab.id !== activeTabId}
+        role="tabpanel"
+        tabIndex={0}
+        aria-label={previewTabLabel(tab)}
+        aria-labelledby={`file-preview-tab-${tab.id}`}
+      >
+        {tab.kind === 'file_change' ? <FileChangesPreview tab={tab} /> : <FilePreviewDocument tab={tab} />}
+      </section>)}
     </section>
   )
 }
