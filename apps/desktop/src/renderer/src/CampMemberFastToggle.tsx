@@ -27,7 +27,7 @@ export function CampMemberFastToggle({
       type="button"
       className={`camp-fast-toggle ${enabled ? 'is-on' : ''}`}
       aria-label={`${displayName}的 Fast，${stateLabel}${warning ? '，暂时不可用' : ''}`}
-      aria-pressed={enabled}
+      aria-pressed={unknown ? 'mixed' : enabled}
       aria-disabled={pending}
       aria-busy={pending}
       aria-describedby={tooltipId}

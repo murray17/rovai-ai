@@ -34,6 +34,13 @@ last_updated: 2026-08-31
 owner 覆盖精确字段/省略/持久字段拒绝；扩展现有 pricing/monitoring owner 覆盖请求 Fast、实际 Standard 和
 unknown 撤回。未删除、禁用或复制旧 Rust 测试。
 
+独立复核补充：扩展既有 scheduler rebind owner，验证默认/显式模型均保留已冻结的 Fast，即使用户后来
+选择 Standard；冻结摘要仍通过既有完整对象校验。资格缓存 owner 增加 search generation 拒绝、Codex
+fallback 不改 Thread 默认；metadata 检查复用已有 executable identity wrapper 及其更新/清理失败测试。
+Electron owner 增加原生输入触发后挂起响应、换绑定、再释放旧响应，分别覆盖检测和保存迟到。
+历史 Migration owner 的升级后断言改为当前 contract 常量；旧源形状仍独立冻结。Product Fingerprint 的
+现行版本断言与兼容性文件 byte digest 同步更新，不改变平台资格状态或既有历史证据内容。
+
 ## 验证记录
 
 验证在隔离 worktree 进行，不启动日常 App，不使用日常 Electron userData。UI fixture 运行生产

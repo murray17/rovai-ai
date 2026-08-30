@@ -416,6 +416,14 @@ pub struct FrozenAgentRuntimeConfig {
     pub config_digest: String,
 }
 
+impl FrozenAgentRuntimeConfig {
+    pub(crate) fn refresh_config_digest(&mut self) -> Result<()> {
+        self.config_digest.clear();
+        self.config_digest = canonical_json_digest(&serde_json::to_value(&*self)?)?;
+        Ok(())
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct RuntimeConfigurationBlocker {
     pub code: String,
@@ -1474,15 +1482,23 @@ impl AgentProfileService {
         database: &Database,
         frozen: &FrozenAgentRuntimeConfig,
     ) -> Result<std::result::Result<FrozenAgentRuntimeConfig, RuntimeConfigurationBlocker>> {
+        let mut model_options = frozen.model.options.clone();
+        if frozen.adapter_kind == AdapterKind::CodexCli
+            && frozen.camp_fast.is_some()
+            && let Some(options) = model_options.as_object_mut()
+        {
+            // Camp request audit is not a model descriptor option.
+            options.remove("serviceTier");
+        }
         let model = match frozen.model.source.as_str() {
             "runtime_default" => ModelSelection::RuntimeDefault,
             "explicit" => ModelSelection::Explicit {
                 model_id: frozen.model.model_id.clone(),
-                options: frozen.model.options.clone(),
+                options: model_options,
             },
             _ => anyhow::bail!("frozen Runtime model source is invalid"),
         };
-        resolve_frozen_runtime_binding(
+        let mut rebound = match resolve_frozen_runtime_binding(
             database.connection(),
             &ResolvedRuntimeBinding {
                 adapter_kind: frozen.adapter_kind,
@@ -1490,7 +1506,20 @@ impl AgentProfileService {
                 model,
                 permissions: frozen.permissions.clone(),
             },
-        )
+        )? {
+            Ok(runtime) => runtime,
+            Err(blocker) => return Ok(Err(blocker)),
+        };
+        // Re-probing may change executable evidence, never the admitted Run's Camp intent.
+        rebound.camp_fast = frozen.camp_fast.clone();
+        if frozen.adapter_kind == AdapterKind::CodexCli
+            && frozen.camp_fast.is_some()
+            && let Some(tier) = frozen.model.options.get("serviceTier")
+        {
+            rebound.model.options["serviceTier"] = tier.clone();
+        }
+        rebound.refresh_config_digest()?;
+        Ok(Ok(rebound))
     }
 
     pub fn record_verified_executable_identity(
@@ -4142,7 +4171,7 @@ pub(crate) fn resolve_frozen_runtime_binding(
         host_config_digest: projection.host_config_digest,
         config_digest: String::new(),
     };
-    frozen.config_digest = canonical_json_digest(&serde_json::to_value(&frozen)?)?;
+    frozen.refresh_config_digest()?;
     Ok(Ok(frozen))
 }
 

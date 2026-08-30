@@ -21,6 +21,7 @@ const values = new Map<string, CampMemberFastView>(agents.filter((_, index) => i
   observedFastState: 'unknown', unavailableReason: null
 }]))
 let updateSnapshot: (snapshot: CampSnapshot) => void
+let updateAgents: (agents: AgentProfile[]) => void
 const initial: CampSnapshot = {
   schemaVersion: 34, throughGlobalSequence: 1,
   camp: { id: campId, title: '响应模式与紧凑会话验收', activationState: 'active', projectBindingKind: 'directory',
@@ -35,6 +36,13 @@ let draft: CampComposerDraftView = { campId, body: '验收中保留的消息草�
   revision: 1, attachments: [], replyIntent: null, continuationIntent: null, updatedAt: now, expiresAt: null }
 const requests: Array<{ method: string; params: unknown }> = []
 let failNext = false
+let holdNext = false
+let releaseResponse: (() => void) | null = null
+const delayResponse = async (): Promise<void> => {
+  if (!holdNext) return
+  holdNext = false
+  await new Promise<void>(resolve => { releaseResponse = resolve })
+}
 Object.assign(window, { rovai: {
   platform: 'darwin', onEvent: () => () => {},
   request: async (method: string, params?: Record<string, any>): Promise<unknown> => {
@@ -42,7 +50,11 @@ Object.assign(window, { rovai: {
     if (method === 'skills.list' || method === 'skills.deliveryGroups.list') return []
     if (method === 'camp.composerDraft.get') return draft
     if (method === 'camp.composerDraft.save') { draft = { ...draft, ...params, revision: draft.revision + 1 }; return draft }
-    if (method === 'camps.members.fast.check') return values.get(params!.agentId) ?? null
+    if (method === 'camps.members.fast.check') {
+      const value = values.get(params!.agentId) ?? null
+      await delayResponse()
+      return value
+    }
     if (method === 'camps.members.fast.set') {
       if (failNext) { failNext = false; throw new Error('fixture offline') }
       const command = params!.command
@@ -50,6 +62,7 @@ Object.assign(window, { rovai: {
       if (command.campId !== campId || command.expectedRuntimeBindingRevision !== prior.runtimeBindingRevision) throw new Error('Fixture scope mismatch')
       const value = { ...prior, fastOverride: command.fastOverride }
       values.set(command.agentId, value)
+      await delayResponse()
       return { status: 'applied', code: 'camp.member.fast.updated', payload: { fast: value } }
     }
     throw new Error(`Unexpected fixture API: ${method}`)
@@ -58,15 +71,17 @@ Object.assign(window, { rovai: {
 
 function Fixture(): React.JSX.Element {
   const [snapshot, setSnapshot] = useState(initial)
+  const [profiles, setProfiles] = useState(agents)
   const [open, setOpen] = useState(true)
   const [entryHost, setEntryHost] = useState<HTMLElement | null>(null)
   const [notice, setNotice] = useState('')
   updateSnapshot = setSnapshot
+  updateAgents = setProfiles
   return <div className="app-shell app-shell-camp">
     <aside style={{ gridRow: '1 / -1', padding: '48px 24px', background: 'var(--rail)' }}>Rovai AI</aside>
     <AppHeader campTitle={snapshot.camp.title} contextLabel="隔离验收" camp={snapshot} detailEntryHostRef={setEntryHost} onFocusApprovals={() => {}} />
     <main className="content task-content">
-      <CampWorkspace snapshot={snapshot} projectName="隔离验收" agents={agents} busy={false} stopping={false}
+      <CampWorkspace snapshot={snapshot} projectName="隔离验收" agents={profiles} busy={false} stopping={false}
         onSend={async () => {}} onChangeLead={async () => {}} onTasksChanged={async () => {}} onResolveApproval={() => {}}
         onStop={() => {}} worldMapEnabled={false} inspectorVisible={open} inspectorTab="members" detailEntryHost={entryHost}
         onOpenInspector={() => setOpen(true)} onCloseInspector={() => setOpen(false)} onNotify={setNotice} />
@@ -86,6 +101,21 @@ Object.assign(window, { fastTest: {
     updateSnapshot({ ...initial, members: initial.members.map(member => ({ ...member, fast: values.get(member.agentId) })) })
   },
   failNext: () => { failNext = true },
+  holdNext: () => { holdNext = true },
+  release: () => { releaseResponse?.(); releaseResponse = null },
+  rebind: (kind: 'codex-cli' | 'opencode-cli') => {
+    values.delete('agent-0')
+    updateAgents(agents.map(agent => agent.agentId === 'agent-0' ? { ...agent,
+      runtimeConfiguration: { adapterKind: kind, model: { mode: 'runtime_default' },
+        permissions: { adapterKind: kind, schemaVersion: 1, values: {} } } } : agent))
+    updateSnapshot({ ...initial, members: initial.members.map(member => ({ ...member, fast: values.get(member.agentId) })) })
+  },
+  restore: () => {
+    values.set('agent-0', { runtimeBindingRevision: 'binding-restored', fastOverride: null,
+      runtimeDefaultFast: null, observedFastState: 'unknown', unavailableReason: null })
+    updateAgents(agents)
+    updateSnapshot({ ...initial, members: initial.members.map(member => ({ ...member, fast: values.get(member.agentId) })) })
+  },
   snapshot: () => {
     const panel = element('.camp-detail-popover')
     const button = element('.camp-fast-toggle')

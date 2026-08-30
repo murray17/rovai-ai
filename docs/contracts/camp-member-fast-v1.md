@@ -29,7 +29,10 @@ Migration 117 从 v1.29/schema 70 升级到 v1.33/schema 71，为现有 Profile 
 新 AgentRun 冻结 `campFast { runtimeBindingRevision, fastOverride }`。Codex 请求档位写入既有
 `model.options.serviceTier` 供审计；继承默认但没有可信默认值时不补造 Standard。Fast 参与 Run config digest，
 不改变 Host config 或 Native Session binding compatibility digest。异步检查与原生观察必须与当前 Camp、
-member、绑定代次匹配；检查结果还校验 cwd、executable fingerprint 和 installation generation。
+member、绑定代次匹配；检查结果还校验 cwd、executable fingerprint、installation generation 和 search generation。
+Runtime 自动 rebind 保留旧 Run 的冻结偏好及请求档位，不重读当前 Camp 选择；config digest 继续按清空摘要
+字段后的完整冻结对象计算。metadata Probe 复用前后 executable file identity 围栏，第一次变化在原 deadline
+内最多重试一次，仍变化则 Superseded，不把新文件的结果写到旧 fingerprint。
 
 ## 用户命令与只读投影
 
@@ -78,7 +81,8 @@ Fast 覆盖。点击控件不修改当前 Run、运行中的子进程、Thread �
 `ObservedFastState = unknown | standard | fast | cooldown` 独立于用户意图。Claude 只从当前 Session 的
 `system/init.fast_mode_state` / `result.fast_mode_state` 接受 on/off/cooldown。Codex 只接受原生事件明确报告
 的档位，不用请求值充当观察值。cooldown 保持 `fast_override=true`，公开原因使用固定安全文案。
-只有继承模式下的观察能更新缓存的原生默认；一次强制 Fast 的结果不能成为“恢复默认”后的默认。
+只有 Claude 继承模式下的观察能推断缓存的原生默认；Codex 的默认只来自 native config/model/Thread，
+本轮 fallback 不改写它。一次强制 Fast 的结果不能成为“恢复默认”后的默认。
 
 费用仍由 [Runtime Usage Monitoring v4](runtime-usage-monitoring-v4.md) 拥有：实际档位优先于请求档位，
 未知不补标准价，Claude 原生 `total_cost_usd` 不被覆盖。

@@ -7012,47 +7012,94 @@ impl Core {
         deadline: tokio::time::Instant,
     ) -> Result<RuntimeCheckOutcome> {
         use rovai_core::camp_fast;
-        let mut runtime = {
-            let database = self.database.lock().await;
-            camp_fast::runtime_for_target(&database, &target)?
-        };
-        if runtime.is_none() {
-            let outcome = self
-                .run_product_runtime_resolution(
+        // Reuse the complete Probe identity boundary, with at most one retry in this deadline.
+        for _ in 0..2 {
+            if tokio::time::Instant::now() >= deadline {
+                return Ok(RuntimeCheckOutcome::Superseded);
+            }
+            let mut runtime = {
+                let database = self.database.lock().await;
+                camp_fast::runtime_for_target(&database, &target)?
+            };
+            if runtime.is_none() {
+                let outcome = self
+                    .run_product_runtime_resolution(
+                        target.adapter_kind,
+                        RuntimeLaunchPurpose::AvailabilityCheck,
+                        deadline,
+                    )
+                    .await?;
+                if !outcome.is_ready() {
+                    return Ok(outcome);
+                }
+                let database = self.database.lock().await;
+                runtime = camp_fast::runtime_for_target(&database, &target)?;
+            }
+            let Some(runtime) = runtime else {
+                return Ok(RuntimeCheckOutcome::Superseded);
+            };
+            if !matches!(
+                self.inspect_runtime_integrity(&runtime).await?,
+                RuntimeIntegrityPreflight::Verified
+            ) {
+                continue;
+            }
+            let path = Path::new(&runtime.executable_path);
+            let search_generation = u64::try_from(runtime.search_environment_generation)
+                .context("invalid Runtime search generation")?;
+            if !self
+                .runtime_probe_identity_is_current(
                     target.adapter_kind,
-                    RuntimeLaunchPurpose::AvailabilityCheck,
-                    deadline,
+                    search_generation,
+                    path,
+                    &runtime.executable_fingerprint,
                 )
-                .await?;
-            if !outcome.is_ready() {
-                return Ok(outcome);
+                .await
+            {
+                return Ok(RuntimeCheckOutcome::Superseded);
             }
+            let checked = run_identity_checked_probe(path, async {
+                match target.adapter_kind {
+                    AdapterKind::ClaudeCodeCli => {
+                        health::claude_fast_eligibility(&runtime, Path::new(&target.cwd)).await
+                    }
+                    AdapterKind::CodexCli => {
+                        health::codex_fast_eligibility(&runtime, Path::new(&target.cwd)).await
+                    }
+                    _ => unreachable!("Fast target is restricted to two native runtimes"),
+                }
+            })
+            .await;
+            let observation = match checked {
+                IdentityCheckedProbe::Stable(result) => result.unwrap_or_default(),
+                IdentityCheckedProbe::Superseded => {
+                    self.inspect_runtime_integrity(&runtime).await?;
+                    continue;
+                }
+            };
+            if !self
+                .runtime_probe_identity_is_current(
+                    target.adapter_kind,
+                    search_generation,
+                    path,
+                    &runtime.executable_fingerprint,
+                )
+                .await
+            {
+                return Ok(RuntimeCheckOutcome::Superseded);
+            }
+            // Failed metadata hides the control, but neither clears nor re-reads the saved intent.
             let database = self.database.lock().await;
-            runtime = camp_fast::runtime_for_target(&database, &target)?;
-        }
-        let Some(runtime) = runtime else {
-            return Ok(RuntimeCheckOutcome::Superseded);
-        };
-        let observation = match target.adapter_kind {
-            AdapterKind::ClaudeCodeCli => {
-                health::claude_fast_eligibility(&runtime, Path::new(&target.cwd)).await
+            if !camp_fast::record_eligibility(&database, &target, &runtime, &observation)? {
+                return Ok(RuntimeCheckOutcome::Superseded);
             }
-            AdapterKind::CodexCli => {
-                health::codex_fast_eligibility(&runtime, Path::new(&target.cwd)).await
-            }
-            _ => unreachable!("Fast target is restricted to two native runtimes"),
-        };
-        // A failed metadata check hides the control but preserves the saved intent.
-        let observation = observation.unwrap_or_default();
-        let database = self.database.lock().await;
-        if !camp_fast::record_eligibility(&database, &target, &runtime, &observation)? {
-            return Ok(RuntimeCheckOutcome::Superseded);
+            return Ok(if observation.eligible {
+                RuntimeCheckOutcome::Ready
+            } else {
+                RuntimeCheckOutcome::StableFailure
+            });
         }
-        Ok(if observation.eligible {
-            RuntimeCheckOutcome::Ready
-        } else {
-            RuntimeCheckOutcome::StableFailure
-        })
+        Ok(RuntimeCheckOutcome::Superseded)
     }
 
     async fn deep_probe_candidate(

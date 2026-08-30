@@ -5664,13 +5664,19 @@ function CampMembersPanel({
   const [fastOverrides, setFastOverrides] = useState<Record<string, CampMemberFastView | null>>({})
   const [fastPending, setFastPending] = useState<string | null>(null)
   const fastPendingRef = useRef(false)
+  const fastBindingGeneration = useRef(0)
+  const fastBindingScope = JSON.stringify([snapshot.camp.id, snapshot.camp.projectPath,
+    snapshot.members.map(member => [member.agentId, member.membershipStatus,
+      member.fast?.runtimeBindingRevision, profileById.get(member.agentId)?.runtimeConfiguration])])
   const [costConfirmation, setCostConfirmation] = useState<{ agentId: string; value: CampMemberFastView; trigger: HTMLButtonElement } | null>(null)
   const costConfirmRef = useRef<HTMLButtonElement>(null)
   useEffect(() => { setFastOverrides({}) }, [snapshot])
+  useLayoutEffect(() => { fastBindingGeneration.current += 1; setFastOverrides({}) }, [fastBindingScope])
   useEffect(() => { costConfirmRef.current?.focus() }, [costConfirmation])
   const saveFast = async (agentId: string, value: CampMemberFastView, fastOverride: boolean | null): Promise<void> => {
     if (fastPendingRef.current) return
     fastPendingRef.current = true
+    const generation = fastBindingGeneration.current
     setFastPending(agentId)
     try {
       const result = await window.rovai.request<StoredCommandResult>('camps.members.fast.set', {
@@ -5678,6 +5684,7 @@ function CampMembersPanel({
         command: { campId: snapshot.camp.id, agentId, expectedRuntimeBindingRevision: value.runtimeBindingRevision, fastOverride }
       })
       if (result.status === 'rejected') throw new Error('队员配置已变化，请重新检测响应模式。')
+      if (generation !== fastBindingGeneration.current) return
       const updated = result.payload as { fast?: CampMemberFastView | null }
       setFastOverrides(current => ({ ...current, [agentId]: updated.fast ?? null }))
       const running = snapshot.agentRuns.some(run => run.agentId === agentId && ['running', 'waiting'].includes(run.status))
@@ -5689,9 +5696,11 @@ function CampMembersPanel({
   const checkFast = async (agentId: string): Promise<void> => {
     if (fastPendingRef.current) return
     fastPendingRef.current = true
+    const generation = fastBindingGeneration.current
     setFastPending(agentId)
     try {
       const value = await window.rovai.request<CampMemberFastView | null>('camps.members.fast.check', { campId: snapshot.camp.id, agentId })
+      if (generation !== fastBindingGeneration.current) return
       setFastOverrides(current => ({ ...current, [agentId]: value }))
       onNotify(value ? '响应模式检测完成' : '当前账号、模型或 Agent 运行时版本不支持此 Fast 设置。')
     } catch { onNotify('暂时无法检测响应模式，请重试。') }
@@ -5939,9 +5948,11 @@ function CampMembersPanel({
       <div className="camp-inspector-member-list" role="list" aria-label="会话队员列表">
         {members.map((member) => {
           const profile = profileById.get(member.agentId) ?? null
-          const fast = Object.hasOwn(fastOverrides, member.agentId) ? fastOverrides[member.agentId] : member.fast
           const supportsFastCheck = profile?.runtimeConfiguration?.adapterKind === 'claude-code-cli'
             || profile?.runtimeConfiguration?.adapterKind === 'codex-cli'
+          const fast = supportsFastCheck
+            ? Object.hasOwn(fastOverrides, member.agentId) ? fastOverrides[member.agentId] : member.fast
+            : undefined
           const present = campMemberIsLeadEligible(member)
           const presenceLabel = member.leaveRequestedAt
             ? '正在暂离'

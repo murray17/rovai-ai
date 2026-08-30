@@ -11,7 +11,7 @@ use crate::{
     },
     command::{
         CommandEnvelope, CommandExecution, CommandHandlerResult, DomainCommand,
-        DomainCommandGateway, canonical_json_digest, sealed,
+        DomainCommandGateway, sealed,
     },
     db::Database,
 };
@@ -168,6 +168,7 @@ pub(crate) fn record_eligibility_on_connection(
     };
     if current.executable_fingerprint != runtime.executable_fingerprint
         || current.installation_generation != runtime.installation_generation
+        || current.search_environment_generation != runtime.search_environment_generation
     {
         return Ok(false);
     }
@@ -279,9 +280,7 @@ pub fn freeze(
         }
     }
     runtime.camp_fast = Some(fast);
-    runtime.config_digest = canonical_json_digest(&json!({
-        "runtimeConfigDigest": runtime.config_digest, "campFast": runtime.camp_fast,
-    }))?;
+    runtime.refresh_config_digest()?;
     Ok(())
 }
 
@@ -296,7 +295,9 @@ pub(crate) fn record_observation_on_connection(
     // A late result from an old binding cannot alter the new binding, or the user's intent.
     Ok(connection.execute(
         "UPDATE camp_member_fast_preference SET observed_fast_state = ?4, unavailable_reason = ?5,
-             runtime_default_fast = CASE WHEN ?6 THEN ?7 ELSE runtime_default_fast END
+             runtime_default_fast = CASE WHEN ?6 AND EXISTS(
+                 SELECT 1 FROM agent_profile WHERE id = ?2 AND selected_runtime_adapter_kind = 'claude-code-cli'
+             ) THEN ?7 ELSE runtime_default_fast END
          WHERE camp_id = ?1 AND agent_id = ?2 AND runtime_binding_revision = ?3
            AND EXISTS(SELECT 1 FROM agent_profile WHERE id = ?2 AND runtime_binding_revision = ?3)",
         params![
@@ -735,6 +736,43 @@ mod tests {
             runtime.binding_compatibility_digest
         );
         assert_eq!(frozen.host_config_digest, runtime.host_config_digest);
+        let mut unsigned = frozen.clone();
+        unsigned.config_digest.clear();
+        assert_eq!(
+            frozen.config_digest,
+            crate::command::canonical_json_digest(&serde_json::to_value(unsigned).unwrap())
+                .unwrap()
+        );
+        let mut stale_environment = runtime.clone();
+        stale_environment.search_environment_generation -= 1;
+        assert!(!record_eligibility(&database, &initial, &stale_environment, &observed).unwrap());
+        record_eligibility(
+            &database,
+            &initial,
+            &runtime,
+            &NativeFastEligibility {
+                eligible: true,
+                runtime_default_fast: Some(true),
+            },
+        )
+        .unwrap();
+        record_observation(
+            &database,
+            &camp_id,
+            "agent_1",
+            &initial.runtime_binding_revision,
+            ObservedFastState::Standard,
+            true,
+        )
+        .unwrap();
+        assert_eq!(
+            view(&database, &camp_id, "agent_1")
+                .unwrap()
+                .unwrap()
+                .runtime_default_fast,
+            Some(true),
+            "Codex observed fallback cannot rewrite its native Thread default"
+        );
         record_eligibility(&database, &initial, &runtime, &observed).unwrap();
         record_observation(
             &database,

@@ -25508,7 +25508,11 @@ mod tests {
                     )),
                 )
                 .unwrap(),
-            ("v1.29".to_string(), 70, 1)
+            (
+                CURRENT_DATA_CONTRACT_VERSION.to_string(),
+                CURRENT_PROJECTION_SCHEMA_VERSION,
+                1
+            )
         );
         drop(restarted);
         std::fs::remove_dir_all(directory).expect("temporary database should be removable");
@@ -25818,8 +25822,8 @@ mod tests {
                 "terminal".to_string(),
                 0,
                 1,
-                "v1.29".to_string(),
-                70,
+                CURRENT_DATA_CONTRACT_VERSION.to_string(),
+                CURRENT_PROJECTION_SCHEMA_VERSION,
             )
         );
         drop(restarted);

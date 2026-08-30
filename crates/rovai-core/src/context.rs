@@ -8330,7 +8330,14 @@ mod slow_tests {
                 |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
             )
             .unwrap();
-        assert_eq!(contract, ("v1.29".to_string(), 70, 1));
+        assert_eq!(
+            contract,
+            (
+                crate::db::CURRENT_DATA_CONTRACT_VERSION.to_string(),
+                crate::db::CURRENT_PROJECTION_SCHEMA_VERSION,
+                1
+            )
+        );
         drop(reopened);
         remove_managed_attachment_tree(&directory).unwrap();
     }
