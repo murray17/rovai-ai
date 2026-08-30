@@ -427,7 +427,7 @@ try {
 
   console.log(JSON.stringify({
     ok: true,
-    contractVersion: 20,
+    contractVersion: 21,
     ipcProtocolVersion: 2,
     runtimeCount: results.length,
     operationCountPerRuntime: expectedOperations.length,
@@ -472,9 +472,9 @@ function assertBuiltinCliCapability(label, installation, allowDeferred = false) 
     return
   }
   if (snapshot?.probeStatus !== 'ready'
-      || !snapshot.capabilities.includes('builtin_cli.transport.v20')
+      || !snapshot.capabilities.includes('builtin_cli.transport.v21')
       || !snapshot.models.length) {
-    throw new Error(`${label} is not ready for Built-in CLI v20: ${JSON.stringify(snapshot)}`)
+    throw new Error(`${label} is not ready for Built-in CLI v21: ${JSON.stringify(snapshot)}`)
   }
 }
 
@@ -1073,7 +1073,7 @@ function verificationScript(input) {
     action: 'add',
     scope: 'companion',
     kind: 'preference',
-    body: `Remember that ${input.adapterKind} completed Built-in CLI transport v20 qualification.`,
+    body: `Remember that ${input.adapterKind} completed Built-in CLI transport v21 qualification.`,
     retrievalKeys: [`cli-${input.slug.slice(0, 18)}`]
   })
   const hearth = JSON.stringify({
@@ -1140,7 +1140,7 @@ assert_fix_input() {
 }
 
 STEP=version
-"$CLI" --version | grep -q 'contract-v20 ipc-v2'
+"$CLI" --version | grep -q 'contract-v21 ipc-v2'
 
 STEP=exact_help
 root_help="$("$CLI" --help)"

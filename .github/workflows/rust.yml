@@ -153,6 +153,12 @@ jobs:
           --target x86_64-pc-windows-msvc
           windows_attachment
 
+      - name: Exercise Windows CLI attachment snapshots
+        run: >-
+          cargo test -p rovai-core --bin rovai
+          --target x86_64-pc-windows-msvc
+          send_attachments
+
       - name: Exercise Windows Skill Library
         run: >-
           cargo test -p rovai-core --lib
