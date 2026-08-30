@@ -10,18 +10,46 @@ import type {
   StartupLocationMode,
   NavigationPin,
   NavigationPreferencesSnapshot,
+  RovaiRequestTransport,
   RovaiApi,
+  SupervisorSnapshot,
   ThemePreference
 } from '@contracts'
 
 const api: RovaiApi = {
-  request<T>(method: CoreMethod, params?: unknown): Promise<T> {
-    return ipcRenderer.invoke('rovai:request', method, params) as Promise<T>
+  async request<T>(method: CoreMethod, params?: unknown): Promise<T> {
+    const transport = await ipcRenderer.invoke(
+      'rovai:request',
+      method,
+      params
+    ) as RovaiRequestTransport<T>
+    if (transport.kind === 'failure') {
+      // contextBridge drops custom Error properties; keep the rejection cloneable.
+      // Any Error instance must be constructed after the Renderer receives it.
+      return Promise.reject(transport.failure)
+    }
+    return transport.value
   },
   onEvent(listener: (event: CoreEvent) => void): () => void {
     const handler = (_event: Electron.IpcRendererEvent, value: CoreEvent): void => listener(value)
     ipcRenderer.on('rovai:event', handler)
     return () => ipcRenderer.removeListener('rovai:event', handler)
+  },
+  supervisor: {
+    getSnapshot() {
+      return ipcRenderer.invoke('rovai:supervisor-get-snapshot') as Promise<SupervisorSnapshot>
+    },
+    retryFullCore() {
+      return ipcRenderer.invoke('rovai:supervisor-retry') as Promise<SupervisorSnapshot>
+    },
+    onChanged(listener: (snapshot: SupervisorSnapshot) => void): () => void {
+      const handler = (
+        _event: Electron.IpcRendererEvent,
+        snapshot: SupervisorSnapshot
+      ): void => listener(snapshot)
+      ipcRenderer.on('rovai:supervisor-changed', handler)
+      return () => ipcRenderer.removeListener('rovai:supervisor-changed', handler)
+    }
   },
   userAutomation: {
     onOpenCamp(listener) {

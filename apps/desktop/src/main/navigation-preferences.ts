@@ -3,7 +3,8 @@ import { isCampId } from '@contracts'
 import type {
   NavigationPin,
   NavigationPreferencesSnapshot,
-  RemovedNavigationProject
+  RemovedNavigationProject,
+  StructuredError
 } from '@contracts'
 import { writePrivateJson } from './general-preferences'
 
@@ -16,50 +17,78 @@ const EMPTY_SNAPSHOT: NavigationPreferencesSnapshot = {
 export async function readNavigationPreferences(
   filePath: string
 ): Promise<NavigationPreferencesSnapshot> {
+  return (await readNavigationPreferencesResult(filePath)).snapshot
+}
+
+async function readNavigationPreferencesResult(filePath: string): Promise<{
+  snapshot: NavigationPreferencesSnapshot
+  degradation: StructuredError | null
+}> {
   let source: unknown
   try {
     source = JSON.parse(await readFile(filePath, 'utf8')) as unknown
   } catch (error) {
-    if (isMissingPathError(error)) return structuredClone(EMPTY_SNAPSHOT)
-    if (error instanceof SyntaxError) {
-      await writePrivateJson(filePath, EMPTY_SNAPSHOT)
-      return structuredClone(EMPTY_SNAPSHOT)
+    return {
+      snapshot: structuredClone(EMPTY_SNAPSHOT),
+      degradation: isMissingPathError(error)
+        ? null
+        : navigationDegradation(
+            'navigation_preferences_unreadable',
+            'Navigation preferences could not be read; in-memory defaults are active and the original file was not changed.'
+          )
     }
-    throw error
   }
 
   const snapshot = sanitizeSnapshot(source)
-  if (JSON.stringify(source) !== JSON.stringify(snapshot)) {
-    await writePrivateJson(filePath, snapshot)
+  const changed = JSON.stringify(source) !== JSON.stringify(snapshot)
+  return {
+    snapshot,
+    degradation: changed
+      ? navigationDegradation(
+          'navigation_preferences_invalid',
+          'Navigation preferences required in-memory normalization; the original file was not changed.'
+        )
+      : null
   }
-  return snapshot
 }
 
 export class NavigationPreferencesStore {
   readonly #filePath: string
   readonly #now: () => string
   #snapshot: NavigationPreferencesSnapshot
+  readonly loadDegradation: StructuredError | null
   #writeTail: Promise<void> = Promise.resolve()
 
   private constructor(
     filePath: string,
     snapshot: NavigationPreferencesSnapshot,
-    now: () => string
+    now: () => string,
+    loadDegradation: StructuredError | null = null
   ) {
     this.#filePath = filePath
     this.#snapshot = snapshot
     this.#now = now
+    this.loadDegradation = loadDegradation
   }
 
   static async load(
     filePath: string,
     now: () => string = () => new Date().toISOString()
   ): Promise<NavigationPreferencesStore> {
+    const result = await readNavigationPreferencesResult(filePath)
     return new NavigationPreferencesStore(
       filePath,
-      await readNavigationPreferences(filePath),
-      now
+      result.snapshot,
+      now,
+      result.degradation
     )
+  }
+
+  static defaults(
+    filePath: string,
+    now: () => string = () => new Date().toISOString()
+  ): NavigationPreferencesStore {
+    return new NavigationPreferencesStore(filePath, structuredClone(EMPTY_SNAPSHOT), now)
   }
 
   get(): NavigationPreferencesSnapshot {
@@ -161,6 +190,10 @@ export class NavigationPreferencesStore {
     this.#writeTail = result.then(() => undefined, () => undefined)
     return result
   }
+}
+
+function navigationDegradation(code: string, message: string): StructuredError {
+  return { code, message, retryable: true, details: {} }
 }
 
 function sanitizeSnapshot(source: unknown): NavigationPreferencesSnapshot {

@@ -63,6 +63,10 @@ export class RestorableLocationStore {
     return new RestorableLocationStore(filePath, await readRestorableLocation(filePath))
   }
 
+  static defaults(filePath: string): RestorableLocationStore {
+    return new RestorableLocationStore(filePath, { status: 'missing', location: null })
+  }
+
   get(): RestorableLocationReadResult {
     return {
       status: this.#readResult.status,

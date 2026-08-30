@@ -1,3 +1,4 @@
+import { readErrorMessage } from './error-message'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type {
   NotificationActionView,
@@ -770,5 +771,5 @@ function CloseIcon(): React.JSX.Element {
 }
 
 function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error)
+  return readErrorMessage(error)
 }

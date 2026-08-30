@@ -9,7 +9,8 @@ import type {
   OnboardingProvisioningOperation,
   OnboardingRuntimeSelection,
   OnboardingSnapshot,
-  OnboardingStep
+  OnboardingStep,
+  StructuredError
 } from '@contracts'
 import { writePrivateJson } from './general-preferences'
 
@@ -131,33 +132,71 @@ export function parseOnboardingSnapshot(value: unknown): OnboardingSnapshot | nu
 }
 
 export async function readOnboardingSnapshot(filePath: string): Promise<OnboardingSnapshot> {
+  return (await readOnboardingSnapshotResult(filePath)).snapshot
+}
+
+async function readOnboardingSnapshotResult(filePath: string): Promise<{
+  snapshot: OnboardingSnapshot
+  degradation: StructuredError | null
+}> {
   try {
     const parsed = JSON.parse(await readFile(filePath, 'utf8')) as unknown
-    return parseOnboardingSnapshot(parsed) ?? { ...DEFAULT_ONBOARDING_SNAPSHOT }
-  } catch {
-    return { ...DEFAULT_ONBOARDING_SNAPSHOT }
+    const snapshot = parseOnboardingSnapshot(parsed)
+    return snapshot
+      ? { snapshot, degradation: null }
+      : {
+          snapshot: { ...DEFAULT_ONBOARDING_SNAPSHOT },
+          degradation: onboardingDegradation(
+            'onboarding_preferences_invalid',
+            'Onboarding preferences are invalid; in-memory defaults are active and the original file was not changed.'
+          )
+        }
+  } catch (error) {
+    return {
+      snapshot: { ...DEFAULT_ONBOARDING_SNAPSHOT },
+      degradation: isMissingPathError(error)
+        ? null
+        : onboardingDegradation(
+            'onboarding_preferences_unreadable',
+            'Onboarding preferences could not be read; in-memory defaults are active and the original file was not changed.'
+          )
+    }
   }
 }
 
 export class OnboardingStore {
   readonly #filePath: string
   #snapshot: OnboardingSnapshot
+  readonly loadDegradation: StructuredError | null
   #writeTail: Promise<void> = Promise.resolve()
 
-  private constructor(filePath: string, snapshot: OnboardingSnapshot) {
+  private constructor(
+    filePath: string,
+    snapshot: OnboardingSnapshot,
+    loadDegradation: StructuredError | null = null
+  ) {
     this.#filePath = filePath
     this.#snapshot = snapshot
+    this.loadDegradation = loadDegradation
   }
 
   static async load(filePath: string): Promise<OnboardingStore> {
-    return new OnboardingStore(filePath, await readOnboardingSnapshot(filePath))
+    const result = await readOnboardingSnapshotResult(filePath)
+    return new OnboardingStore(filePath, result.snapshot, result.degradation)
+  }
+
+  static defaults(filePath: string): OnboardingStore {
+    return new OnboardingStore(filePath, { ...DEFAULT_ONBOARDING_SNAPSHOT })
   }
 
   get(): OnboardingSnapshot {
     return structuredClone(this.#snapshot)
   }
 
-  initialize(hasExistingProductData: boolean): Promise<OnboardingSnapshot> {
+  initialize(
+    hasExistingProductData: boolean,
+    options: { persist?: boolean } = {}
+  ): Promise<OnboardingSnapshot> {
     return this.#enqueue(async () => {
       if (this.#snapshot.status !== 'uninitialized') return this.get()
       const next: OnboardingSnapshot = hasExistingProductData
@@ -171,6 +210,10 @@ export class OnboardingStore {
             quickChatCampId: null
           }
         : inProgress('welcome')
+      if (options.persist === false) {
+        this.#snapshot = next
+        return this.get()
+      }
       return this.#commit(next)
     })
   }
@@ -391,6 +434,16 @@ export class OnboardingStore {
     this.#writeTail = result.then(() => undefined, () => undefined)
     return result
   }
+}
+
+function onboardingDegradation(code: string, message: string): StructuredError {
+  return { code, message, retryable: true, details: {} }
+}
+
+function isMissingPathError(error: unknown): boolean {
+  return error instanceof Error
+    && 'code' in error
+    && (error as NodeJS.ErrnoException).code === 'ENOENT'
 }
 
 function inProgress(step: OnboardingStep): Extract<OnboardingSnapshot, { status: 'in_progress' }> {

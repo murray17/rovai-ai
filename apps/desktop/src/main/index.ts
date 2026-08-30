@@ -1,4 +1,3 @@
-import { existsSync } from 'node:fs'
 import { chmod, lstat, mkdir, readFile, readdir, rename, unlink, writeFile } from 'node:fs/promises'
 import { randomUUID } from 'node:crypto'
 import { dirname, join } from 'node:path'
@@ -14,13 +13,21 @@ import type {
   SaveMemberAvatarAssetInput,
   SettingsSection,
   StartupLocationMode,
+  StructuredError,
+  SupervisorSnapshot,
   ThemePreference
 } from '@contracts'
-import { CoreClient, desktopSkillLibraryRoot, resolveCoreBinary } from './core-client'
+import {
+  CoreClient,
+  RovaiRequestError,
+  desktopSkillLibraryRoot,
+  resolveCoreBinary,
+  resolveDesktopBootstrapBinary
+} from './core-client'
 import {
   isThemePreference,
   nativeThemeSource,
-  readThemePreference,
+  readThemePreferenceResult,
   resolvedTheme,
   themeBackground,
   writeThemePreference
@@ -77,10 +84,15 @@ import {
   type DesktopAttachmentTarget
 } from './attachment-desktop'
 import {
-  bindWindowsDataRootBeforeReady,
+  prepareWindowsBootstrapRoot,
   prepareWindowsDataRoot,
   resolveWindowsDataRoot
 } from './windows-data-root'
+import {
+  assessWindowsDesktopBootstrap,
+  windowsBootstrapInstanceKey,
+  type WindowsBootstrapAssessment
+} from './windows-bootstrap'
 import {
   AppUpdatesService,
   createAppUpdatesServiceFailOpen,
@@ -121,6 +133,8 @@ const allowedMethods = new Set<CoreMethod>([
   'memory.hearthReviewItems.accept',
   'memory.hearthReviewItems.reject',
   'runtime.installations.list',
+  'runtime.subsystems.get',
+  'runtime.subsystems.retry',
   'runtime.installations.create',
   'runtime.installations.update',
   'runtime.installations.refresh',
@@ -204,20 +218,37 @@ const allowedMethods = new Set<CoreMethod>([
 const APP_NAME = 'Rovai AI'
 app.setName(APP_NAME)
 const hasExplicitUserDataDirectory = app.commandLine.hasSwitch('user-data-dir')
-let coreDataPath: string
+const isolatedAcceptanceInstance =
+  process.env.ROVAI_ALLOW_ISOLATED_INSTANCE === '1'
+  && hasExplicitUserDataDirectory
+let coreDataPath: string | null = null
+let windowsBootstrap: WindowsBootstrapAssessment | null = null
+let primaryInstance: boolean
 if (process.platform === 'win32') {
-  const windowsRoot = resolveWindowsDataRoot(
-    hasExplicitUserDataDirectory
-      ? app.commandLine.getSwitchValue('user-data-dir')
-      : null,
-    process.env.LOCALAPPDATA
-  )
-  const layout = prepareWindowsDataRoot(resolveCoreBinary(), windowsRoot)
-  bindWindowsDataRootBeforeReady(app, layout)
-  console.info(
-    `[startup] stage=windows_data_root_ready elapsed_ms=${(performance.now() - mainStartupStartedAt).toFixed(1)}`
-  )
-  coreDataPath = layout.core
+  const explicitRoot = hasExplicitUserDataDirectory ? app.commandLine.getSwitchValue('user-data-dir') : null
+  windowsBootstrap = assessWindowsDesktopBootstrap({
+    electronApp: app,
+    isolatedInstance: isolatedAcceptanceInstance,
+    prepareShell: () => prepareWindowsBootstrapRoot(
+      resolveDesktopBootstrapBinary(), windowsBootstrapInstanceKey(explicitRoot)
+    ),
+    prepareAuthority: () => prepareWindowsDataRoot(
+      resolveCoreBinary(), resolveWindowsDataRoot(explicitRoot, process.env.LOCALAPPDATA)
+    )
+  })
+  primaryInstance = windowsBootstrap.kind === 'ready' || windowsBootstrap.kind === 'blocked'
+  if (windowsBootstrap.kind === 'ready') {
+    coreDataPath = windowsBootstrap.layout.core
+    console.info(
+      `[startup] stage=windows_data_root_ready elapsed_ms=${(performance.now() - mainStartupStartedAt).toFixed(1)}`
+    )
+  } else if (windowsBootstrap.kind === 'shell_storage_unavailable') {
+    // No safe Chromium profile exists. Do not silently switch to a broad-ACL
+    // default or write authority into a fallback folder. This is a native dialog,
+    // not a thrown module-load exception or a Full Core crash/restart loop.
+    dialog.showErrorBox('Rovai 无法准备安全的桌面存储',
+      `Core 未启动，也没有创建替代工作区。\n\n${windowsBootstrap.error.message}`)
+  }
 } else {
   const legacyDataPath = legacyUserDataPath(
     app.getPath('appData'),
@@ -226,13 +257,13 @@ if (process.platform === 'win32') {
   )
   if (legacyDataPath) app.setPath('userData', legacyDataPath)
   coreDataPath = app.getPath('userData')
+  primaryInstance = isolatedAcceptanceInstance || app.requestSingleInstanceLock()
 }
-const isolatedAcceptanceInstance =
-  process.env.ROVAI_ALLOW_ISOLATED_INSTANCE === '1'
-  && hasExplicitUserDataDirectory
-const primaryInstance = isolatedAcceptanceInstance || app.requestSingleInstanceLock()
 if (!primaryInstance) app.quit()
 const core = new CoreClient(coreDataPath)
+if (windowsBootstrap?.kind === 'blocked') {
+  core.blockStartup(windowsBootstrap.error, 'preparing_windows_data_root')
+}
 let appUpdates: AppUpdatesService | null = null
 let mainWindow: BrowserWindow | null = null
 let themePreference: ThemePreference = 'system'
@@ -244,10 +275,69 @@ let generalPreferences: GeneralPreferencesStore | null = null
 let onboarding: OnboardingStore | null = null
 let restorableLocations: RestorableLocationStore | null = null
 let navigationPreferences: NavigationPreferencesStore | null = null
+let localStoresReady = false
+let localDegradations: StructuredError[] = windowsBootstrap?.kind === 'blocked' ? [{
+  code: 'windows_bootstrap_profile_active',
+  message: '当前使用独立的受保护壳层存储，不含 Core 数据。这里的外观设置不会覆盖正式工作区偏好；重新检查会重启桌面壳层。',
+  retryable: true,
+  details: {}
+}] : []
+let onboardingAuthorityKey: string | null = null
+let retiredManagedDirectoryCleanupStarted = false
 const projectAccessTransactions = new ProjectAccessTransactionCoordinator()
 let userAutomation: UserAutomationServer | null = null
 const desktopSessions = new DesktopSessionRegistry()
-const memberAvatars = new MemberAvatarAssetService(coreDataPath)
+const memberAvatars = coreDataPath === null ? null : new MemberAvatarAssetService(coreDataPath)
+
+function requireMemberAvatars(): MemberAvatarAssetService {
+  if (!memberAvatars) throw new Error('Core data directory has not been admitted')
+  return memberAvatars
+}
+
+function publishLocalDegradations(next: StructuredError[]): void {
+  localDegradations = [...new Map(next.map((degradation) => [
+    degradation.code,
+    degradation
+  ])).values()]
+  core.setLocalDegradations(localDegradations)
+}
+
+function maybeInitializeOnboarding(snapshot: SupervisorSnapshot): void {
+  if (coreDataPath === null) return
+  if (!localStoresReady || !onboarding) return
+  if (snapshot.fullCoreState !== 'ready' || snapshot.authorityState.kind !== 'current') return
+  const origin = snapshot.authorityState.origin ?? 'existing'
+  const key = `${snapshot.generation}:${origin}`
+  if (onboardingAuthorityKey === key) return
+  onboardingAuthorityKey = key
+  void onboarding.initialize(origin !== 'initialized', {
+    persist: onboarding.loadDegradation === null
+  }).catch((error) => {
+    publishLocalDegradations([
+      ...localDegradations,
+      {
+        code: 'onboarding_authority_initialization_failed',
+        message: error instanceof Error ? error.message : String(error),
+        retryable: true,
+        details: {}
+      }
+    ])
+  })
+  if (!retiredManagedDirectoryCleanupStarted) {
+    retiredManagedDirectoryCleanupStarted = true
+    void deleteRetiredManagedDirectory(coreDataPath).catch((error) => {
+      publishLocalDegradations([
+        ...localDegradations,
+        {
+          code: 'retired_managed_directory_cleanup_failed',
+          message: error instanceof Error ? error.message : String(error),
+          retryable: true,
+          details: {}
+        }
+      ])
+    })
+  }
+}
 
 async function initializeAppUpdates(): Promise<void> {
   // electron-updater eagerly touches Electron's native autoUpdater while the
@@ -480,53 +570,92 @@ if (primaryInstance) void app.whenReady().then(async () => {
   console.info(
     `[startup] stage=electron_ready elapsed_ms=${(performance.now() - mainStartupStartedAt).toFixed(1)}`
   )
-  await initializeAppUpdates()
-  removeRetiredLoginItemRegistration()
-  await deleteRetiredManagedDirectory(coreDataPath)
   const userDataPath = app.getPath('userData')
-  const hadExistingCoreDatabase = existsSync(join(coreDataPath, 'rovai.sqlite'))
-    || existsSync(join(coreDataPath, 'lumen.sqlite'))
   appearanceFilePath = join(userDataPath, 'appearance.json')
+  const generalPreferencesPath = join(userDataPath, 'general-preferences.json')
+  const onboardingPath = join(userDataPath, 'onboarding.json')
+  const restorableLocationPath = join(userDataPath, 'restorable-location.json')
+  const navigationPreferencesPath = join(userDataPath, 'navigation.json')
+  generalPreferences = GeneralPreferencesStore.defaults(generalPreferencesPath)
+  onboarding = OnboardingStore.defaults(onboardingPath)
+  restorableLocations = RestorableLocationStore.defaults(restorableLocationPath)
+  navigationPreferences = NavigationPreferencesStore.defaults(navigationPreferencesPath)
+  const loadedAppearance = readThemePreferenceResult(appearanceFilePath)
+  themePreference = loadedAppearance.preference
+  nativeTheme.themeSource = nativeThemeSource(themePreference)
+  nativeTheme.on('updated', publishAppearance)
+  publishAppearance()
+  core.onEvent((event) => mainWindow?.webContents.send('rovai:event', event))
+  core.onSnapshot((snapshot) => {
+    mainWindow?.webContents.send('rovai:supervisor-changed', snapshot)
+    maybeInitializeOnboarding(snapshot)
+  })
+  createWindow()
+  console.info(
+    `[startup] stage=window_created elapsed_ms=${(performance.now() - mainStartupStartedAt).toFixed(1)}`
+  )
+
+  void initializeAppUpdates().catch((error) => {
+    publishLocalDegradations([
+      ...localDegradations,
+      {
+        code: 'app_updates_initialization_failed',
+        message: error instanceof Error ? error.message : String(error),
+        retryable: true,
+        details: {}
+      }
+    ])
+  })
+  removeRetiredLoginItemRegistration()
+  void memberAvatars?.cleanupStaleTemporaryDirectories().catch(() => undefined)
   const [
     loadedGeneralPreferences,
     loadedOnboarding,
     loadedRestorableLocations,
     loadedNavigationPreferences
   ] = await Promise.all([
-    GeneralPreferencesStore.load(join(userDataPath, 'general-preferences.json')),
-    OnboardingStore.load(join(userDataPath, 'onboarding.json')),
-    RestorableLocationStore.load(join(userDataPath, 'restorable-location.json')),
-    NavigationPreferencesStore.load(join(userDataPath, 'navigation.json'))
+    GeneralPreferencesStore.load(generalPreferencesPath),
+    OnboardingStore.load(onboardingPath),
+    RestorableLocationStore.load(restorableLocationPath),
+    NavigationPreferencesStore.load(navigationPreferencesPath)
   ])
   generalPreferences = loadedGeneralPreferences
   onboarding = loadedOnboarding
-  // Decide first-run versus upgrade before Core can create a fresh SQLite file.
-  // initialize() is idempotent, so a persisted in-progress or completed flow wins.
-  await onboarding.initialize(hadExistingCoreDatabase)
   restorableLocations = loadedRestorableLocations
   navigationPreferences = loadedNavigationPreferences
+  localStoresReady = true
+  const restorableDegradation: StructuredError | null =
+    loadedRestorableLocations.get().status === 'invalid'
+      ? {
+          code: 'restorable_location_invalid',
+          message: 'The saved navigation location is invalid; no authority data was changed.',
+          retryable: true,
+          details: {}
+        }
+      : null
+  publishLocalDegradations([
+    ...localDegradations,
+    loadedAppearance.degradation,
+    loadedGeneralPreferences.loadDegradation,
+    loadedOnboarding.loadDegradation,
+    loadedNavigationPreferences.loadDegradation,
+    restorableDegradation
+  ].filter((degradation): degradation is StructuredError => degradation !== null))
   console.info(
     `[startup] stage=main_session_stores_ready elapsed_ms=${(performance.now() - mainStartupStartedAt).toFixed(1)}`
   )
-  themePreference = readThemePreference(appearanceFilePath)
-  nativeTheme.themeSource = nativeThemeSource(themePreference)
-  nativeTheme.on('updated', publishAppearance)
-  publishAppearance()
-  void memberAvatars.cleanupStaleTemporaryDirectories().catch(() => undefined)
-  core.onEvent((event) => mainWindow?.webContents.send('rovai:event', event))
-  createWindow()
-  console.info(
-    `[startup] stage=window_created elapsed_ms=${(performance.now() - mainStartupStartedAt).toFixed(1)}`
-  )
-  core.start({
+  core.start(coreDataPath === null ? undefined : {
     removedSkillProjectRoots: removedSkillProjectRoots(),
+    // Isolated development/acceptance must not migrate the daily global MCP file.
+    mcpConfigPath: isolatedAcceptanceInstance ? join(coreDataPath, 'mcp.json') : undefined,
     skillLibraryRoot: desktopSkillLibraryRoot(
       coreDataPath,
       hasExplicitUserDataDirectory,
       process.platform
     ) ?? undefined
   })
-  userAutomation = await startUserAutomationOptional(
+  maybeInitializeOnboarding(core.getSnapshot())
+  userAutomation = coreDataPath === null ? null : await startUserAutomationOptional(
     () => new UserAutomationServer(
       userAutomationRoot(app.getPath('appData'), userDataPath, hasExplicitUserDataDirectory),
       { core, openCamp: openCampFromAutomation, appVersion: app.getVersion() }
@@ -548,7 +677,17 @@ if (primaryInstance) void app.whenReady().then(async () => {
     window.focus()
   })
 }).catch((error: unknown) => {
-  console.error('[rovai] Quick Chat cutover failed; startup aborted.', error)
+  console.error('[rovai] Desktop bootstrap initialization failed.', error)
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    publishLocalDegradations([{
+      code: 'desktop_bootstrap_initialization_failed',
+      message: error instanceof Error ? error.message : String(error),
+      retryable: true,
+      details: {}
+    }])
+    core.start()
+    return
+  }
   app.quit()
 })
 
@@ -559,8 +698,49 @@ app.on('second-instance', () => {
 })
 
 ipcMain.handle('rovai:request', async (_event, method: CoreMethod, params?: unknown) => {
-  if (!allowedMethods.has(method)) throw new Error(`Renderer requested an unsupported method: ${method}`)
-  return core.request(method, params)
+  if (!allowedMethods.has(method)) {
+    return {
+      kind: 'failure',
+      failure: {
+        kind: 'domain_rejection',
+        code: 'renderer_core_method_unsupported',
+        message: `Renderer requested an unsupported method: ${method}`,
+        retryable: false,
+        generation: core.getSnapshot().generation,
+        details: { method }
+      }
+    }
+  }
+  try {
+    return { kind: 'value', value: await core.request(method, params) }
+  } catch (error) {
+    if (error instanceof RovaiRequestError) {
+      return { kind: 'failure', failure: error.toFailure() }
+    }
+    return {
+      kind: 'failure',
+      failure: {
+        kind: 'infrastructure_failure',
+        code: 'desktop_core_request_failed',
+        message: error instanceof Error ? error.message : String(error),
+        retryable: false,
+        generation: core.getSnapshot().generation,
+        details: {}
+      }
+    }
+  }
+})
+
+ipcMain.handle('rovai:supervisor-get-snapshot', () => core.getSnapshot())
+ipcMain.handle('rovai:supervisor-retry', () => {
+  if (windowsBootstrap?.kind === 'blocked' && core.getSnapshot().capabilities.fullCoreRetry) {
+    // sessionData must be bound before ready. Retry the same root in a fresh
+    // Desktop process rather than rebinding Chromium or opening a substitute DB.
+    app.relaunch()
+    app.quit()
+    return core.getSnapshot()
+  }
+  return core.retryFullCore()
 })
 
 ipcMain.handle('rovai:clipboard-write', (_event, input: unknown) => {
@@ -827,7 +1007,7 @@ ipcMain.handle('rovai:member-avatar-select-source', async () => {
 
 ipcMain.handle(
   'rovai:member-avatar-save',
-  async (_event, input: SaveMemberAvatarAssetInput) => memberAvatars.save(input)
+  async (_event, input: SaveMemberAvatarAssetInput) => requireMemberAvatars().save(input)
 )
 
 ipcMain.handle(
@@ -843,7 +1023,7 @@ ipcMain.handle(
     ) {
       throw new Error('Unsupported member avatar read request')
     }
-    return memberAvatars.read(avatarRef, rendition)
+    return requireMemberAvatars().read(avatarRef, rendition)
   }
 )
 
@@ -912,6 +1092,9 @@ ipcMain.handle(
     const resolvedDisplayName = requireIpcString(displayName, '附件名称')
     if (!(input instanceof Uint8Array) || input.byteLength > MAX_COMPOSER_ATTACHMENT_BYTES) {
       throw new Error('附件无效或超过 25 MiB。')
+    }
+    if (coreDataPath === null || !core.getSnapshot().capabilities.coreRequests) {
+      throw new Error('Core data directory is not available for attachment import')
     }
     const ingressDirectory = join(coreDataPath, 'attachment-ingress')
     await mkdir(ingressDirectory, { recursive: true, mode: 0o700 })
@@ -1075,7 +1258,18 @@ ipcMain.handle('rovai:export-diagnostics', async () => {
         filters: [{ name: 'JSON', extensions: ['json'] }]
   })
   if (result.canceled || !result.filePath) return null
-  const diagnostics = await core.request('diagnostics.export')
+  const supervisor = core.getSnapshot()
+  const diagnostics = supervisor.capabilities.coreRequests
+    ? await core.request('diagnostics.export')
+    : {
+        schemaVersion: 1,
+        kind: 'desktop_bootstrap_diagnostics',
+        exportedAt: new Date().toISOString(),
+        appVersion: app.getVersion(),
+        platform: process.platform,
+        arch: process.arch,
+        supervisor
+      }
   const temporary = `${result.filePath}.rovai-${randomUUID()}.tmp`
   try {
     await writeFile(temporary, `${JSON.stringify(diagnostics, null, 2)}\n`, {

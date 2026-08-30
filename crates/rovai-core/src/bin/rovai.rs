@@ -47,6 +47,33 @@ const CAMP_READ_DEFAULT_DIRECTION: &str = "before";
 const CAMP_READ_DEFAULT_LIMIT: i64 = 20;
 
 fn main() -> ExitCode {
+    let args = env::args().skip(1).collect::<Vec<_>>();
+    if args
+        .first()
+        .is_some_and(|arg| arg == "--prepare-windows-bootstrap-root")
+    {
+        // A Desktop bootstrap operation, not an Agent-facing command. It must
+        // remain independent of Core startup, SQLite and the async IPC runtime.
+        if !user_automation_available_in_current_process() {
+            print_safe_cli_error();
+            return ExitCode::from(2);
+        }
+        let result = (|| -> Result<()> {
+            let [_, key] = args.as_slice() else {
+                bail!("bootstrap preparation requires exactly one instance key");
+            };
+            let layout = rovai_core::platform::prepare_windows_bootstrap_root(key)?;
+            println!("{}", serde_json::to_string(&layout)?);
+            Ok(())
+        })();
+        return match result {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(error) => {
+                eprintln!("{error:#}");
+                ExitCode::from(1)
+            }
+        };
+    }
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_io()
         .enable_time()

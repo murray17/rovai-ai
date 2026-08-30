@@ -19,7 +19,8 @@ import type {
   HealthStatus,
   MessageDeliveryView,
   NotificationActionView,
-  RovaiApi
+  RovaiApi,
+  SupervisorSnapshot
 } from '@contracts'
 import {
   AppHeader,
@@ -30,6 +31,8 @@ import {
   WindowDragStrip,
   allNavigationCamps,
   appendLiveRuntimeEvent,
+  authoritativeWorkspaceIsAvailable,
+  bootstrapAuthorityCopy,
   campActivationPreview,
   campActivationStateForCreation,
   campDeleteCommand,
@@ -203,6 +206,97 @@ function testAppUpdateSnapshot(overrides: Partial<AppUpdateSnapshot> = {}): AppU
     ...overrides
   }
 }
+
+function supervisorSnapshot(
+  overrides: Partial<SupervisorSnapshot> = {}
+): SupervisorSnapshot {
+  return {
+    schemaVersion: 1,
+    revision: 1,
+    generation: 1,
+    runtimeMode: 'bootstrap_only',
+    fullCoreState: 'starting',
+    authorityState: { kind: 'assessing' },
+    startupPhase: 'assessing_authority',
+    restartAttempt: 0,
+    capabilities: {
+      authoritativeWorkspace: false,
+      coreRequests: false,
+      localPreferences: true,
+      supervisorStatus: true,
+      diagnosticsExport: true,
+      fullCoreRetry: false
+    },
+    localDegradations: [],
+    coreSubsystems: [],
+    lastError: null,
+    migrationProgress: null,
+    ...overrides
+  }
+}
+
+describe('availability-first workspace gate', () => {
+  it('mounts the authoritative workspace only for one fully ready capability snapshot', () => {
+    expect(authoritativeWorkspaceIsAvailable(null)).toBe(false)
+    expect(authoritativeWorkspaceIsAvailable(supervisorSnapshot())).toBe(false)
+    expect(authoritativeWorkspaceIsAvailable(supervisorSnapshot({
+      runtimeMode: 'full_core',
+      fullCoreState: 'ready',
+      authorityState: { kind: 'current', origin: 'existing' },
+      capabilities: {
+        authoritativeWorkspace: true,
+        coreRequests: false,
+        localPreferences: true,
+        supervisorStatus: true,
+        diagnosticsExport: true,
+        fullCoreRetry: false
+      }
+    }))).toBe(false)
+    expect(authoritativeWorkspaceIsAvailable(supervisorSnapshot({
+      runtimeMode: 'full_core',
+      fullCoreState: 'ready',
+      authorityState: { kind: 'current', origin: 'existing' },
+      startupPhase: null,
+      capabilities: {
+        authoritativeWorkspace: true,
+        coreRequests: true,
+        localPreferences: true,
+        supervisorStatus: true,
+        diagnosticsExport: true,
+        fullCoreRetry: false
+      }
+    }))).toBe(true)
+  })
+
+  it('explains an occupied authority without presenting an empty workspace', () => {
+    const copy = bootstrapAuthorityCopy(supervisorSnapshot({
+      fullCoreState: 'blocked',
+      authorityState: {
+        kind: 'owned_by_active_core',
+        dataDir: '/private/authority',
+        owner: { pid: 42 }
+      },
+      startupPhase: null
+    }))
+
+    expect(copy.title).toContain('另一个 Rovai Core')
+    expect(copy.description).toContain('没有创建第二份数据')
+    expect(`${copy.title}${copy.description}`).not.toMatch(/空工作区|空列表/)
+  })
+
+  it('describes Windows preparation refusal as a shell-only state with a desktop restart', () => {
+    const copy = bootstrapAuthorityCopy(supervisorSnapshot({
+      fullCoreState: 'blocked',
+      authorityState: { kind: 'unknown' },
+      startupPhase: 'preparing_windows_data_root'
+    }))
+
+    expect(copy.title).toContain('数据目录尚未准备好')
+    expect(copy.description).toContain('Core 尚未启动')
+    expect(copy.description).toContain('重启桌面壳层')
+    expect(`${copy.title}${copy.description}`).not.toMatch(/数据库损坏|权限已修复/)
+  })
+})
 
 describe('active Camp event invalidation', () => {
   it('refreshes the active Camp when a persisted AgentRun reaches terminal', () => {

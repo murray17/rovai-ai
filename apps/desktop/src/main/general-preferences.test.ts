@@ -22,12 +22,17 @@ async function temporaryDirectory(): Promise<string> {
 }
 
 describe('general preferences', () => {
-  it('uses last location and General when the file is missing or malformed', async () => {
+  it('uses memory defaults and preserves a malformed source file for recovery', async () => {
     const directory = await temporaryDirectory()
     const filePath = join(directory, 'general-preferences.json')
     expect(await readGeneralPreferences(filePath)).toEqual(DEFAULT_GENERAL_PREFERENCES)
-    await writeFile(filePath, '{broken')
+    const malformed = '{broken'
+    await writeFile(filePath, malformed)
     expect(await readGeneralPreferences(filePath)).toEqual(DEFAULT_GENERAL_PREFERENCES)
+    const store = await GeneralPreferencesStore.load(filePath)
+    expect(store.get()).toEqual(DEFAULT_GENERAL_PREFERENCES)
+    expect(store.loadDegradation?.code).toBe('general_preferences_unreadable')
+    expect(await readFile(filePath, 'utf8')).toBe(malformed)
   })
 
   it('accepts only the exact schema and finite enums', () => {

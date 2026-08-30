@@ -58,6 +58,67 @@ pub fn prepare_windows_data_root(root: &Path) -> Result<WindowsDataRootLayout> {
     Ok(layout)
 }
 
+/// Non-authoritative Electron storage. There is intentionally no Core child.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WindowsBootstrapLayout {
+    pub root: PathBuf,
+    pub electron_user_data: PathBuf,
+    pub electron_session_data: PathBuf,
+    pub logs: PathBuf,
+    pub crash_dumps: PathBuf,
+}
+
+impl WindowsBootstrapLayout {
+    pub fn from_root(root: &Path) -> Result<Self> {
+        let layout = WindowsDataRootLayout::from_root(root)?;
+        Ok(Self {
+            root: layout.root,
+            electron_user_data: layout.electron_user_data,
+            electron_session_data: layout.electron_session_data,
+            logs: layout.logs,
+            crash_dumps: layout.crash_dumps,
+        })
+    }
+}
+
+/// Called only by the bundled CLI's Desktop bootstrap entrypoint. Windows Known
+/// Folder resolution does not depend on the inherited LOCALAPPDATA variable.
+/// This does not open a DB, launch a Runtime or repair the formal authority root.
+pub fn prepare_windows_bootstrap_root(instance_key: &str) -> Result<WindowsBootstrapLayout> {
+    if instance_key.len() != 32
+        || !instance_key
+            .bytes()
+            .all(|byte| matches!(byte, b'0'..=b'9' | b'a'..=b'f'))
+    {
+        anyhow::bail!("windows_storage.host_unsupported: invalid bootstrap instance key");
+    }
+    #[cfg(windows)]
+    {
+        let base = dirs::data_local_dir()
+            .context("windows_storage.host_unsupported: LocalAppData Known Folder unavailable")?;
+        prepare_windows_bootstrap_layout(&base.join("Rovai AI Bootstrap").join(instance_key))
+    }
+    #[cfg(not(windows))]
+    anyhow::bail!("windows_storage.host_unsupported: bootstrap storage requires Windows")
+}
+
+#[cfg(windows)]
+fn prepare_windows_bootstrap_layout(root: &Path) -> Result<WindowsBootstrapLayout> {
+    let layout = WindowsBootstrapLayout::from_root(root)?;
+    for directory in [
+        layout.root.as_path(),
+        layout.electron_user_data.parent().expect("Electron parent"),
+        layout.electron_user_data.as_path(),
+        layout.electron_session_data.as_path(),
+        layout.logs.as_path(),
+        layout.crash_dumps.as_path(),
+    ] {
+        prepare_private_directory(directory)?;
+    }
+    Ok(layout)
+}
+
 /// Creates or admits a private directory and returns its canonical path.
 ///
 /// Windows uses native creation with a protected DACL and rejects an existing
@@ -188,6 +249,36 @@ pub(crate) fn atomic_write_private_bytes(path: &Path, bytes: &[u8]) -> Result<()
         let _ = std::fs::remove_file(&temporary);
     }
     result
+}
+
+/// Publishes a fully written private sibling to its final name.
+///
+/// Callers must create, validate, flush, and close `source` before invoking
+/// this operation. On Windows this uses the native replace-existing path;
+/// Unix uses same-filesystem rename semantics.
+pub(crate) fn publish_private_temporary_file(source: &Path, destination: &Path) -> Result<()> {
+    commit_private_temporary(source, destination)
+}
+
+/// Publishes a fully written private sibling only when the final name is still absent.
+///
+/// The hard-link creation is the no-overwrite commit point. Removing the temporary
+/// name afterwards never changes the published file's contents.
+pub(crate) fn publish_private_new_temporary_file(source: &Path, destination: &Path) -> Result<()> {
+    std::fs::hard_link(source, destination).with_context(|| {
+        format!(
+            "failed to publish new private file {} to {}",
+            source.display(),
+            destination.display()
+        )
+    })?;
+    std::fs::remove_file(source).with_context(|| {
+        format!(
+            "published private file but failed to remove temporary name {}",
+            source.display()
+        )
+    })?;
+    Ok(())
 }
 
 #[cfg(windows)]
@@ -1055,6 +1146,24 @@ mod tests {
         assert!(WindowsDataRootLayout::from_root(&parent_path).is_err());
     }
 
+    #[test]
+    fn new_private_publish_never_replaces_an_existing_destination() {
+        let root = std::env::temp_dir().join(format!(
+            "rovai-private-new-publish-{}",
+            uuid::Uuid::new_v4()
+        ));
+        prepare_private_directory(&root).unwrap();
+        let source = root.join("staging");
+        let destination = root.join("authority");
+        std::fs::write(&source, b"new").unwrap();
+        std::fs::write(&destination, b"existing").unwrap();
+
+        assert!(publish_private_new_temporary_file(&source, &destination).is_err());
+        assert_eq!(std::fs::read(&destination).unwrap(), b"existing");
+        assert_eq!(std::fs::read(&source).unwrap(), b"new");
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
     #[cfg(windows)]
     #[test]
     fn windows_data_root_is_created_as_one_private_closed_layout() {
@@ -1073,6 +1182,28 @@ mod tests {
         }
         let admitted_again = prepare_windows_data_root(&root).unwrap();
         assert_eq!(admitted_again, layout);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_bootstrap_root_prepares_only_private_shell_directories() {
+        let root = std::env::temp_dir().join(format!("rovai-windows-bootstrap-{}", Uuid::new_v4()));
+        let layout = prepare_windows_bootstrap_layout(&root).unwrap();
+        for directory in [
+            &layout.root,
+            &layout.electron_user_data,
+            &layout.electron_session_data,
+            &layout.logs,
+            &layout.crash_dumps,
+        ] {
+            // Reopening validates protected user/SYSTEM ACL, owner and identity.
+            admit_private_directory(directory).unwrap();
+        }
+        assert!(!root.join("Core").exists());
+        assert!(!root.join("rovai.sqlite").exists());
+        assert!(serde_json::to_value(&layout).unwrap().get("core").is_none());
+        assert_eq!(prepare_windows_bootstrap_layout(&root).unwrap(), layout);
         std::fs::remove_dir_all(root).unwrap();
     }
 
