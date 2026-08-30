@@ -6,11 +6,13 @@ use std::{
 
 use anyhow::{Context, Result};
 use rovai_core::{
-    builtin_tool_transport::BuiltinToolCliContext,
+    builtin_tool_transport::{
+        BuiltinToolCliContext, BuiltinToolIpcRequest, BuiltinToolIpcResponse, LocalIpcEndpoint,
+    },
     local_attachment_snapshot::{
         LocalAttachmentError, LocalSnapshotRoot, MAX_DRAFT_ATTACHMENT_BYTES,
         local_attachment_byte_size, promote_local_snapshot_root, reject_symlink_path,
-        remove_local_snapshot_tree, snapshot_local_attachment,
+        remove_local_snapshot_tree, snapshot_local_attachment, sync_parent,
     },
 };
 use serde_json::{Value, json};
@@ -77,6 +79,20 @@ pub(super) struct SendSnapshots {
     retain_for_run: bool,
 }
 impl SendSnapshots {
+    pub(super) async fn send(
+        &mut self,
+        endpoint: &LocalIpcEndpoint,
+        request: &BuiltinToolIpcRequest,
+    ) -> std::result::Result<BuiltinToolIpcResponse, super::BuiltinToolIpcFailure> {
+        // Cancellation or a malformed response may follow a successful dispatch.
+        self.retain_for_run();
+        let response = super::send_with_retry(endpoint, request).await;
+        if matches!(response, Err(super::BuiltinToolIpcFailure::BeforeDispatch)) {
+            self.retain_for_run = false;
+        }
+        response
+    }
+
     pub(super) fn retain_for_run(&mut self) {
         self.retain_for_run = true;
     }
@@ -172,18 +188,12 @@ pub(super) fn stage_external_send_files(
                 (Path::new(&lease.run_tmp), &run_tmp),
             ] {
                 // Reject links below an admitted root even when their target lies outside that root.
-                if let Ok(relative) = path
-                    .strip_prefix(configured)
-                    .or_else(|_| path.strip_prefix(canonical_root))
-                {
-                    reject_symlink_path(canonical_root, &canonical_root.join(relative))?;
+                let original_root = admitted_root_alias(&path, configured, canonical_root)?;
+                if let Some(original_root) = &original_root {
+                    reject_symlink_path(original_root, &path)?;
                 }
                 if canonical.starts_with(canonical_root) {
-                    let relative = path
-                        .strip_prefix(configured)
-                        .or_else(|_| path.strip_prefix(canonical_root))
-                        .map_err(|_| LocalAttachmentError::InvalidPath)?;
-                    reject_symlink_path(canonical_root, &canonical_root.join(relative))?;
+                    original_root.context(LocalAttachmentError::InvalidPath)?;
                     external = false;
                 }
             }
@@ -284,11 +294,33 @@ pub(super) fn stage_external_send_files(
         .validate()
         .map_err(|_| AttachmentFailure::staging())?;
     promote_local_snapshot_root(&staging, &committed).map_err(|_| AttachmentFailure::staging())?;
-    snapshots.owned_path = Some(committed);
+    // Rename transfers ownership even if the following durability operation fails.
+    snapshots.owned_path = Some(committed.clone());
+    sync_parent(&committed).map_err(|_| AttachmentFailure::staging())?;
     for (file, path) in files.iter_mut().zip(rewritten) {
         *file = path_value(&path).map_err(|_| AttachmentFailure::staging())?;
     }
     Ok(snapshots)
+}
+
+fn admitted_root_alias(
+    source: &Path,
+    configured: &Path,
+    canonical_root: &Path,
+) -> Result<Option<PathBuf>> {
+    for root in [configured, canonical_root] {
+        if source.starts_with(root) {
+            return Ok(Some(root.to_path_buf()));
+        }
+    }
+    // Find the outermost spelling of the admitted root. Choosing a nearer alias could
+    // hide a symlink below that root, such as workspace/link-back-to-workspace/file.
+    for ancestor in source.ancestors().collect::<Vec<_>>().into_iter().rev() {
+        if fs::canonicalize(ancestor)? == canonical_root {
+            return Ok(Some(ancestor.to_path_buf()));
+        }
+    }
+    Ok(None)
 }
 
 fn path_value(path: &Path) -> Result<Value> {
@@ -576,6 +608,38 @@ mod tests {
             .unwrap();
             assert_eq!(error.code, "unsupported_type", "{source}");
         }
+        // An alias above an admitted root is allowed, but must not hide links below it.
+        let local = fixture.file("workspace/local.txt", b"local");
+        symlink(&fixture.root, fixture.root.join("root-alias")).unwrap();
+        symlink(
+            fixture.root.join("workspace"),
+            fixture.root.join("workspace/link-back"),
+        )
+        .unwrap();
+        let mut input = json!({"files":[fixture.root.join("root-alias/workspace/local.txt")]});
+        let snapshots = stage_external_send_files(
+            &mut input,
+            &fixture.context,
+            &uuid::Uuid::new_v4().to_string(),
+        )
+        .unwrap();
+        assert_eq!(input["files"], json!([local]));
+        drop(snapshots);
+        assert!(!fixture.root.join("run-tmp/.send-import").exists());
+        for source in [
+            "root-alias/workspace/alias/good.txt",
+            "root-alias/workspace/link-back/local.txt",
+        ] {
+            let mut input = json!({"files":[fixture.root.join(source)]});
+            let error = stage_external_send_files(
+                &mut input,
+                &fixture.context,
+                &uuid::Uuid::new_v4().to_string(),
+            )
+            .err()
+            .unwrap();
+            assert_eq!(error.code, "unsupported_type", "{source}");
+        }
         symlink(
             fixture.root.join("external"),
             fixture.root.join("run-tmp/.send-import"),
@@ -612,6 +676,77 @@ mod tests {
             b"unowned",
             "cleanup must not follow a replaced import parent"
         );
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn ipc_failure_cleans_unsent_snapshots_but_retains_unconfirmed_dispatches() {
+        use super::super::{BuiltinToolIpcFailure, CORE_ATTEMPTS};
+        use rovai_core::builtin_tool_transport::BuiltinToolIpcRequestBody;
+        use std::{
+            io::{BufRead, BufReader, Write},
+            os::unix::net::UnixListener,
+        };
+
+        let cases: [(Option<&[u8]>, BuiltinToolIpcFailure, bool); 4] = [
+            (None, BuiltinToolIpcFailure::BeforeDispatch, false),
+            (
+                Some(b"not-json\n"),
+                BuiltinToolIpcFailure::Predictable,
+                true,
+            ),
+            (Some(b"\xff\n"), BuiltinToolIpcFailure::Predictable, true),
+            (Some(b""), BuiltinToolIpcFailure::OutcomeIndeterminate, true),
+        ];
+        for (reply, expected_failure, retained) in cases {
+            let fixture = Fixture::new();
+            let source = fixture.file("external/result.txt", b"keep source");
+            let id = uuid::Uuid::new_v4().to_string();
+            let mut input = json!({"files":[source]});
+            let mut snapshots =
+                stage_external_send_files(&mut input, &fixture.context, &id).unwrap();
+            let request = BuiltinToolIpcRequest {
+                ipc_protocol_version: BUILTIN_TOOL_IPC_PROTOCOL_VERSION,
+                auth: fixture.context.auth().unwrap(),
+                body: BuiltinToolIpcRequestBody::Invoke {
+                    request_id: id.clone(),
+                    operation: "camp.message.send".into(),
+                    input,
+                },
+            };
+            let socket = PathBuf::from("/tmp").join(format!("rv-snf-{}.sock", &id[..8]));
+            let endpoint = LocalIpcEndpoint::UnixSocket {
+                path: socket.to_str().unwrap().into(),
+            };
+            let server = reply.map(|reply| {
+                let listener = UnixListener::bind(&socket).unwrap();
+                std::thread::spawn(move || {
+                    // Response loss exhausts retries; invalid replies fail on their first frame.
+                    let attempts = if reply.is_empty() { CORE_ATTEMPTS } else { 1 };
+                    for _ in 0..attempts {
+                        let (stream, _) = listener.accept().unwrap();
+                        stream
+                            .set_read_timeout(Some(std::time::Duration::from_secs(5)))
+                            .unwrap();
+                        let mut stream = BufReader::new(stream);
+                        let mut frame = String::new();
+                        stream.read_line(&mut frame).unwrap();
+                        stream.get_mut().write_all(reply).unwrap();
+                    }
+                })
+            });
+            assert_eq!(
+                snapshots.send(&endpoint, &request).await.unwrap_err(),
+                expected_failure
+            );
+            if let Some(server) = server {
+                server.join().unwrap();
+                fs::remove_file(socket).unwrap();
+            }
+            drop(snapshots);
+            assert_eq!(fixture.request_root(&id).exists(), retained);
+            assert_eq!(fs::read(source).unwrap(), b"keep source");
+        }
     }
 
     #[cfg(unix)]
@@ -672,10 +807,7 @@ mod tests {
                 }
             }
         });
-        snapshots.retain_for_run();
-        let actual = super::super::send_with_retry(&endpoint, &request)
-            .await
-            .unwrap();
+        let actual = snapshots.send(&endpoint, &request).await.unwrap();
         assert_eq!(actual, expected);
         server.join().unwrap();
         fs::remove_file(socket).unwrap();

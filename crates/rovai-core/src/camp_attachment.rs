@@ -14,6 +14,8 @@ use crate::local_attachment_snapshot::{
 pub(crate) use crate::local_attachment_snapshot::{
     RuntimeAttachmentCopyReceipt, inspect_runtime_attachment_copy,
 };
+#[cfg(all(test, feature = "slow-tests"))]
+use std::fs::File;
 
 use std::{
     collections::HashMap,
@@ -3344,7 +3346,7 @@ mod windows_attachment_tests {
     }
 
     #[test]
-    fn windows_attachment_directory_rejects_junctions() {
+    fn windows_attachment_directory_rejects_junctions_and_cleans_only_owned_tree() {
         let fixture = std::env::temp_dir().join(format!(
             "rovai-windows-attachment-reparse-{}",
             Uuid::new_v4()
@@ -3371,7 +3373,13 @@ mod windows_attachment_tests {
         assert!(error.contains("reparse point"), "unexpected error: {error}");
         assert!(!destination.join("linked-outside/secret.txt").exists());
 
-        fs::remove_dir(&junction).unwrap();
+        copy_and_inspect(&outside.join("secret.txt"), &source.join("frozen.txt")).unwrap();
+        crate::local_attachment_snapshot::remove_local_snapshot_tree(&source).unwrap();
+        assert!(!source.exists());
+        assert_eq!(
+            fs::read(outside.join("secret.txt")).unwrap(),
+            b"must not be copied"
+        );
         if destination.exists() {
             make_owned_tree_removable(&destination).unwrap();
         }

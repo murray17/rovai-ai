@@ -192,8 +192,7 @@ async fn run() -> Result<u8> {
         },
     };
 
-    snapshots.retain_for_run();
-    let response = match send_with_retry(&context.core_endpoint, &request).await {
+    let response = match snapshots.send(&context.core_endpoint, &request).await {
         Ok(response) => response,
         Err(BuiltinToolIpcFailure::OutcomeIndeterminate) => {
             println!(
@@ -202,7 +201,7 @@ async fn run() -> Result<u8> {
             );
             return Ok(3);
         }
-        Err(BuiltinToolIpcFailure::Predictable) => {
+        Err(BuiltinToolIpcFailure::BeforeDispatch | BuiltinToolIpcFailure::Predictable) => {
             print_safe_cli_error();
             return Ok(2);
         }
@@ -1357,9 +1356,10 @@ async fn send_with_retry(
     endpoint: &LocalIpcEndpoint,
     request: &BuiltinToolIpcRequest,
 ) -> std::result::Result<BuiltinToolIpcResponse, BuiltinToolIpcFailure> {
-    let serialized = serde_json::to_vec(request).map_err(|_| BuiltinToolIpcFailure::Predictable)?;
+    let serialized =
+        serde_json::to_vec(request).map_err(|_| BuiltinToolIpcFailure::BeforeDispatch)?;
     if serialized.len() > BUILTIN_TOOL_MAX_IPC_REQUEST_BYTES {
-        return Err(BuiltinToolIpcFailure::Predictable);
+        return Err(BuiltinToolIpcFailure::BeforeDispatch);
     }
     let mut dispatch_became_indeterminate = false;
     for attempt in 0..CORE_ATTEMPTS {
@@ -1383,7 +1383,7 @@ async fn send_with_retry(
     Err(if dispatch_became_indeterminate {
         BuiltinToolIpcFailure::OutcomeIndeterminate
     } else {
-        BuiltinToolIpcFailure::Predictable
+        BuiltinToolIpcFailure::BeforeDispatch
     })
 }
 
@@ -1455,6 +1455,7 @@ async fn read_bounded_response(stream: impl AsyncRead + Unpin) -> std::io::Resul
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum BuiltinToolIpcFailure {
+    BeforeDispatch,
     Predictable,
     OutcomeIndeterminate,
 }
@@ -2833,7 +2834,7 @@ mod tests {
             send_with_retry(&endpoint, &request_for_ipc_test())
                 .await
                 .unwrap_err(),
-            BuiltinToolIpcFailure::Predictable
+            BuiltinToolIpcFailure::BeforeDispatch
         );
     }
 
@@ -2932,7 +2933,7 @@ mod tests {
             send_with_retry(&endpoint, &request_for_ipc_test())
                 .await
                 .unwrap_err(),
-            BuiltinToolIpcFailure::Predictable
+            BuiltinToolIpcFailure::BeforeDispatch
         );
     }
 

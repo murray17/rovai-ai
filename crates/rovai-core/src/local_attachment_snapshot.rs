@@ -1154,7 +1154,7 @@ pub(crate) fn commit_temporary(source: &Path, destination: &Path) -> Result<()> 
 }
 
 #[cfg(unix)]
-pub(crate) fn sync_parent(path: &Path) -> Result<()> {
+pub fn sync_parent(path: &Path) -> Result<()> {
     if let Some(parent) = path.parent() {
         File::open(parent)?.sync_all()?;
     }
@@ -1162,7 +1162,7 @@ pub(crate) fn sync_parent(path: &Path) -> Result<()> {
 }
 
 #[cfg(windows)]
-pub(crate) fn sync_parent(_path: &Path) -> Result<()> {
+pub fn sync_parent(_path: &Path) -> Result<()> {
     // Windows documents FlushFileBuffers for writable file handles, not as a
     // directory-fsync primitive. Files are flushed before MOVEFILE_WRITE_THROUGH
     // commits their same-directory rename in commit_temporary.
@@ -1306,8 +1306,13 @@ pub fn remove_local_snapshot_tree(path: &Path) -> Result<()> {
     let is_link = metadata.file_type().is_symlink();
     if is_link {
         #[cfg(windows)]
-        if metadata.is_dir() {
-            return fs::remove_dir(path).map_err(Into::into);
+        {
+            use std::os::windows::fs::MetadataExt;
+            use windows_sys::Win32::Storage::FileSystem::FILE_ATTRIBUTE_DIRECTORY;
+            // symlink_metadata().is_dir() is false for directory symlinks/junctions.
+            if metadata.file_attributes() & FILE_ATTRIBUTE_DIRECTORY != 0 {
+                return fs::remove_dir(path).map_err(Into::into);
+            }
         }
         return fs::remove_file(path).map_err(Into::into);
     }
@@ -1365,6 +1370,7 @@ impl LocalSnapshotRoot {
 }
 
 /// Publish a complete request directory without replacing any existing entry.
+/// The caller must track the new owned path before calling sync_parent.
 pub fn promote_local_snapshot_root(source: &Path, destination: &Path) -> Result<()> {
     #[cfg(unix)]
     File::open(source)?.sync_all()?;
@@ -1410,7 +1416,7 @@ pub fn promote_local_snapshot_root(source: &Path, destination: &Path) -> Result<
     }
     #[cfg(not(any(target_os = "macos", target_os = "linux", windows)))]
     anyhow::bail!("Exclusive attachment promotion is unsupported on this platform");
-    sync_parent(destination)
+    Ok(())
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
