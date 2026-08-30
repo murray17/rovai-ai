@@ -26,9 +26,14 @@ function canonical(operationId: string): NonNullable<AgentRunExecutionEvidenceVi
   }
 }
 function elements(card: Element): Element[] { return (card.body as { elements: Element[] }).elements }
-function panels(card: Element): Element[] { return elements(card).filter((element) => element.tag === 'collapsible_panel') }
+function outerPanel(card: Element): Element | undefined { return elements(card).find((element) => element.element_id === 'execution_process') }
+function timeline(card: Element): Element[] { return (outerPanel(card)?.elements ?? elements(card)) as Element[] }
+function panels(card: Element): Element[] { return timeline(card).filter((element) => element.tag === 'collapsible_panel') }
 function header(panel: Element): string { return (panel.header as { title: { content: string } }).title.content }
-function bodyText(card: Element): string { return elements(card).filter((element) => element.tag === 'markdown').map((element) => element.content).join('\n\n') }
+function bodyText(card: Element): string {
+  const content = outerPanel(card) ? [...elements(card), ...timeline(card)] : elements(card)
+  return content.filter((element) => element.tag === 'markdown').map((element) => element.content).join('\n\n')
+}
 function result(panel: Element): string {
   const children = panel.elements as Element[]
   expect(children).toHaveLength(1)
@@ -71,9 +76,11 @@ describe('Feishu execution console card', () => {
       narration(3, '类型检查已完成，继续测试。'), command(4, 'pnpm test -- channel-settings', 'test output')
     ], publicOutput: '实现与验证都已完成。' }))
     expect(card).toMatchObject({ header: { title: { content: '芝士 · 已完成' }, template: 'green' } })
-    expect(elements(card).map((element) => element.tag)).toEqual(['markdown', 'markdown', 'collapsible_panel', 'markdown', 'collapsible_panel', 'markdown'])
-    expect(elements(card)[1].content).toBe('先运行两项核验。')
-    expect(elements(card)[3].content).toBe('类型检查已完成，继续测试。')
+    expect(elements(card).map((element) => element.tag)).toEqual(['markdown', 'collapsible_panel'])
+    expect(outerPanel(card)).toMatchObject({ expanded: false, header: { title: { content: '执行过程 · 2 条' }, icon_position: 'left' } })
+    expect(timeline(card).map((element) => element.tag)).toEqual(['markdown', 'collapsible_panel', 'markdown', 'collapsible_panel', 'markdown'])
+    expect(timeline(card)[0].content).toBe('先运行两项核验。')
+    expect(timeline(card)[2].content).toBe('类型检查已完成，继续测试。')
     expect(bodyText(card)).toContain('用时 28 秒')
     expect(panels(card).map(header)).toEqual(['✓ pnpm typecheck', '✓ pnpm test -- channel-settings'])
     expect(panels(card).map(result)).toEqual(['type output', 'test output'])
@@ -120,6 +127,26 @@ describe('Feishu execution console card', () => {
     expect(result(panels(card)[0]).split('\n')).toHaveLength(20)
   })
 
+  it('also bounds dense UTF-8 results to 4 KiB without losing the head/tail selection', () => {
+    const output = Array.from({ length: 210 }, (_, index) => `line ${index + 1}: ${'项目😀'.repeat(100)}`).join('\n')
+    const card = executionConsoleCard(snapshot('succeeded', { evidence: [command(1, 'inspect --verbose', output)] }))
+    const preview = result(panels(card)[0])
+    expect(Buffer.byteLength(preview)).toBeLessThanOrEqual(4096)
+    expect(preview.split('\n')).toHaveLength(20)
+    expect(preview).toContain('line 1:')
+    expect(preview).toContain('line 210:')
+    expect(preview).toContain('… 已截断 191 行 …')
+    expect(preview).not.toContain('\uFFFD')
+  })
+
+  it.each(['data:image/png;base64,aGVsbG8=', 'VGhpcy1pcy1hLXByaXZhdGUtZW5jb2RlZC1yZXN1bHQ='.repeat(8).replace(/=/gu, '')])(
+    'hides encoded results before line and byte truncation', (encoded) => {
+      const card = executionConsoleCard(snapshot('succeeded', { evidence: [command(1, 'read-artifact', `before\n${encoded}\nafter`)] }))
+      expect(result(panels(card)[0])).toBe('（二进制或编码结果已隐藏）')
+      expect(JSON.stringify(card)).not.toContain(encoded)
+    }
+  )
+
   it('never projects stdin, send bodies, raw input/output envelopes or reasoning', () => {
     const card = executionConsoleCard(snapshot('succeeded', { evidence: [
       command(1, "TOKEN=top-secret rovai send --public-only --body 'private message' && curl -H 'Cookie: session=private-cookie' https://example.test", 'private message'),
@@ -144,7 +171,7 @@ describe('Feishu execution console card', () => {
     expect(panels(card)).toHaveLength(1)
     expect(header(panels(card)[0])).toBe('✓ cargo test -p rovai-core')
     expect(result(panels(card)[0])).toBe('27 tests passed')
-    expect(elements(card).map((element) => element.tag)).toEqual(['markdown', 'markdown', 'collapsible_panel', 'markdown'])
+    expect(timeline(card).map((element) => element.tag)).toEqual(['markdown', 'collapsible_panel', 'markdown'])
   })
 
   it('shows apply_patch with structured file deltas and never its raw patch', () => {
@@ -170,15 +197,17 @@ describe('Feishu execution console card', () => {
     expect(result(panels(card)[1]).split('\n')).toHaveLength(4)
   })
 
-  it('takes the first ten narration lines, not the live tail, and deduplicates the final public text', () => {
+  it('uses nine narration lines plus a truncation notice and deduplicates the final public text', () => {
     const text = Array.from({ length: 12 }, (_, index) => `narration line ${index + 1} ${'x'.repeat(450)}`).join('\n')
     const card = executionConsoleCard(snapshot('succeeded', { evidence: [narration(1, text)], publicOutput: text }))
-    const body = elements(card)[1].content as string
+    const body = timeline(card)[0].content as string
     expect(body.split('\n')).toHaveLength(10)
     expect(body).toContain('narration line 1 ')
-    expect(body).toContain('narration line 10 ')
-    expect(body).not.toContain('narration line 11 ')
+    expect(body).toContain('narration line 9 ')
+    expect(body).toContain('… 已截断 3 行 …')
+    expect(body).not.toContain('narration line 10 ')
     expect(elements(card)).toHaveLength(2)
+    expect(timeline(card)).toHaveLength(1)
     expect(panels(card)).toEqual([])
   })
 
@@ -188,7 +217,7 @@ describe('Feishu execution console card', () => {
       ...Array.from({ length: 16 }, (_, index) => command(index + 17, `command-${index + 16} --flag path/${index + 16}`))
     ], publicOutput: '最终结论。' })
     expect(executionConsolePageCount(run)).toBe(3)
-    const cards = [0, 1, 2].map((index) => executionConsoleCard(run, index))
+    const cards = [0, 1, 2].map((pageIndex) => executionConsoleCard(run, { pageIndex, outerExpanded: true }))
     expect(cards.map((card) => panels(card).length)).toEqual([15, 15, 1])
     expect(bodyText(cards[0])).not.toContain('现在运行下一项测试。')
     expect(bodyText(cards[1])).toContain('现在运行下一项测试。')
@@ -203,6 +232,7 @@ describe('Feishu execution console card', () => {
     expect(buttons(cards[0])).toHaveLength(1)
     expect(buttons(cards[2])).toHaveLength(1)
     for (const card of cards) {
+      expect(outerPanel(card)).toMatchObject({ expanded: true, header: { title: { content: '执行过程 · 31 条' } } })
       expect(countElements(elements(card))).toBeLessThanOrEqual(50)
       expect(panels(card).every((panel) => panel.expanded === false)).toBe(true)
       expect(JSON.stringify(card)).not.toMatch(/nonce|viewVersion|displayMode|execution_console_expand|execution_console_collapse/)
@@ -229,10 +259,12 @@ describe('Feishu execution console card', () => {
       ...Array.from({ length: 12 }, (_, index) => narration(index + 45, `后续段落 ${index + 1}`))
     ] })
     expect(executionConsolePageCount(run)).toBe(2)
-    const first = executionConsoleCard(run, 0)
-    const second = executionConsoleCard(run, 1)
+    const first = executionConsoleCard(run, { pageIndex: 0 })
+    const second = executionConsoleCard(run, { pageIndex: 1, outerExpanded: true })
     expect(bodyText(first)).not.toContain('现在运行测试。')
-    expect(elements(second)[1].content).toBe('现在运行测试。')
+    const narrationIndex = timeline(second).findIndex((element) => element.content === '现在运行测试。')
+    expect(narrationIndex).toBeGreaterThanOrEqual(0)
+    expect(timeline(second)[narrationIndex + 1]).toBe(panels(second)[0])
     expect(header(panels(second)[0])).toBe('✓ cargo test')
     expect(countElements(elements(first))).toBeLessThanOrEqual(50)
     expect(countElements(elements(second))).toBeLessThanOrEqual(50)
@@ -243,10 +275,10 @@ describe('Feishu execution console card', () => {
     const run = snapshot('succeeded', { evidence: commands.map((cmd, index) => command(index + 1, cmd, '😀'.repeat(2_000))) })
     const count = executionConsolePageCount(run)
     expect(count).toBeGreaterThan(2)
-    const cards = Array.from({ length: count }, (_, index) => executionConsoleCard(run, index))
+    const cards = Array.from({ length: count }, (_, pageIndex) => executionConsoleCard(run, { pageIndex, outerExpanded: true }))
     expect(cards.flatMap(panels).map(header)).toEqual(commands.map((cmd) => `✓ ${cmd}`))
     for (const card of cards) {
-      expect(Buffer.byteLength(JSON.stringify(card))).toBeLessThanOrEqual(28_000)
+      expect(Buffer.byteLength(JSON.stringify(card))).toBeLessThanOrEqual(24_000)
       expect(countElements(elements(card))).toBeLessThanOrEqual(50)
       for (const panel of panels(card)) {
         expect(result(panel).split('\n')).toHaveLength(1)
@@ -259,7 +291,7 @@ describe('Feishu execution console card', () => {
   it('reports an over-limit indivisible command honestly instead of failing the whole card', () => {
     const card = executionConsoleCard(snapshot('succeeded', { evidence: [command(1, `command ${'x'.repeat(40_000)}`)] }))
     expect(bodyText(card)).toContain('超出飞书单卡大小限制')
-    expect(Buffer.byteLength(JSON.stringify(card))).toBeLessThanOrEqual(28_000)
+    expect(Buffer.byteLength(JSON.stringify(card))).toBeLessThanOrEqual(24_000)
     expect(buttons(card)).toEqual([])
   })
 

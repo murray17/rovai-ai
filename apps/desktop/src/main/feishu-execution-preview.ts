@@ -4,6 +4,7 @@ import { DatabaseSync } from 'node:sqlite'
 import type { CardActionEvent, LarkChannel } from '@larksuiteoapi/node-sdk'
 import { executionConsoleCard, executionConsolePageCount } from '../shared/execution-presentation/feishu-card'
 import { feishuExecutionPreviewFixture } from './feishu-execution-preview-fixture'
+import { feishuPageFailure, withFeishuPageDeadline, type FeishuCardActionResponse } from './feishu-card-action'
 
 const ARGUMENT = '--feishu-execution-preview='
 const RUN_PREFIX = 'feishu-preview:'
@@ -23,7 +24,7 @@ export type FeishuPreviewOwner = {
 }
 
 type PreviewChannel = Pick<LarkChannel, 'rawClient' | 'updateCard'>
-type PreviewResponse = { toast: { type: 'info' | 'warning' | 'error'; content: string } }
+type PreviewResponse = FeishuCardActionResponse
 type PreviewRecord = {
   appId: string
   owner: FeishuPreviewOwner
@@ -128,10 +129,11 @@ export class FeishuExecutionPreviewService implements FeishuExecutionPreviewHost
         const runId = `${RUN_PREFIX}${this.#request.requestId}:${agentId}:${count}`
         const snapshot = feishuExecutionPreviewFixture(runId, owner.displayName, count)
         const pageCount = executionConsolePageCount(snapshot)
-        const pages = Array.from({ length: pageCount }, (_, page) => executionConsoleCard(snapshot, page))
+        const pages = Array.from({ length: pageCount }, (_, pageIndex) => executionConsoleCard(snapshot, { pageIndex, outerExpanded: true }))
+        const initialCard = executionConsoleCard(snapshot)
         const sent = await channel.rawClient.im.v1.message.create({
           params: { receive_id_type: 'open_id' },
-          data: { receive_id: owner.openId, msg_type: 'interactive', content: JSON.stringify(pages[0]),
+          data: { receive_id: owner.openId, msg_type: 'interactive', content: JSON.stringify(initialCard),
             uuid: createHash('sha256').update(`${appId}:${runId}`).digest('hex').slice(0, 32) }
         })
         const messageId = sent.data?.message_id
@@ -159,25 +161,31 @@ export class FeishuExecutionPreviewService implements FeishuExecutionPreviewHost
       || this.#now() >= record.expiresAt || value.snapshotSequence !== record.sequence
       || typeof value.pageIndex !== 'number' || !Number.isSafeInteger(value.pageIndex)
       || value.pageIndex < 0 || value.pageIndex >= record.pages.length) return unavailable()
+    const pageIndex = value.pageIndex
     try {
-      const raw = isRecord(event.raw) ? event.raw : {}
-      const rawOperator = isRecord(raw.operator) ? raw.operator.open_id : undefined
-      const operatorOpenId = event.operator.openId
-      if (!operatorOpenId || (rawOperator !== undefined && rawOperator !== operatorOpenId)
-        || openIdDigest(operatorOpenId) !== record.owner.openIdDigest
-        || (raw.app_id !== undefined && raw.app_id !== appId)) return unavailable()
-      // Current local publication/Owner binding must still agree with the frozen preview recipient.
-      const owner = this.#readOwner(this.#request.agentId, appId)
-      if (owner.accountId !== record.owner.accountId || owner.openIdDigest !== record.owner.openIdDigest
-        || owner.openId !== operatorOpenId) return unavailable()
-      // Immutable pages in Main memory, no Core page/view state, no pump and one patch only.
-      await channel.updateCard(record.messageId, structuredClone(record.pages[value.pageIndex]))
-      this.#report({ stage: 'page_updated', pageIndex: value.pageIndex, pageCount: record.pages.length,
-        messageIdDigest: identityDigest(record.messageId), patches: 1 })
-      return { toast: { type: 'info', content: `第 ${value.pageIndex + 1} / ${record.pages.length} 页` } }
-    } catch {
-      this.#report({ stage: 'page_failed' })
-      return { toast: { type: 'error', content: '预览更新失败，请重试' } }
+      return await withFeishuPageDeadline(async (checkDeadline) => {
+        const raw = isRecord(event.raw) ? event.raw : {}
+        const rawOperator = isRecord(raw.operator) ? raw.operator.open_id : undefined
+        const operatorOpenId = event.operator.openId
+        if (!operatorOpenId || (rawOperator !== undefined && rawOperator !== operatorOpenId)
+          || openIdDigest(operatorOpenId) !== record.owner.openIdDigest
+          || (raw.app_id !== undefined && raw.app_id !== appId)) return unavailable()
+        // Current local publication/Owner binding must still agree with the frozen preview recipient.
+        const owner = this.#readOwner(this.#request.agentId, appId)
+        if (owner.accountId !== record.owner.accountId || owner.openIdDigest !== record.owner.openIdDigest
+          || owner.openId !== operatorOpenId) return unavailable()
+        // Immutable pages in Main memory, no Core page/view state, no pump and one patch only.
+        checkDeadline()
+        await channel.updateCard(record.messageId, structuredClone(record.pages[pageIndex]))
+        checkDeadline()
+        this.#report({ stage: 'page_updated', pageIndex, pageCount: record.pages.length,
+          messageIdDigest: identityDigest(record.messageId), patches: 1 })
+        return {}
+      })
+    } catch (error) {
+      const { response, ...diagnostic } = feishuPageFailure(error)
+      this.#report({ stage: 'page_failed', ...diagnostic })
+      return response
     }
   }
 }

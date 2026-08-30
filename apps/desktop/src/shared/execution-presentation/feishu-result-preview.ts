@@ -181,17 +181,24 @@ function looksLikeStructuredResult(value: string): boolean {
 
 function resultPreview(value: string): string {
   if (!value.trim()) return '（无可公开的文本结果）'
+  if (/(?:data:[^\s,]+;base64,|(?:^|\n)\s*[A-Za-z0-9+/]{160,}={0,2}\s*(?:\n|$))/u.test(value)) {
+    return '（二进制或编码结果已隐藏）'
+  }
   // A final newline terminates the last output line; indentation is still output.
   const lines = value.replace(/\n$/u, '').split('\n')
   const preview = lines.length <= 20
     ? lines
     : [...lines.slice(0, 9), `… 已截断 ${lines.length - 19} 行 …`, ...lines.slice(-10)]
-  return preview.map(boundFeishuPreviewLine).join('\n')
+  const bounded = preview.map((line) => boundFeishuPreviewLine(line))
+  if (new TextEncoder().encode(bounded.join('\n')).length <= 4096) return bounded.join('\n')
+  // Preserve the selected head/tail lines while also bounding a dense 20-line
+  // result. Newline separators and truncation notices are part of the budget.
+  const lineBudget = Math.floor((4096 - preview.length + 1) / preview.length)
+  return preview.map((line) => boundFeishuPreviewLine(line, lineBudget)).join('\n')
 }
 
 /** A line is not a byte budget. Keep pathological single-line results deliverable. */
-export function boundFeishuPreviewLine(line: string): string {
-  const byteLimit = 512
+export function boundFeishuPreviewLine(line: string, byteLimit = 512): string {
   const encoder = new TextEncoder()
   if (encoder.encode(line).length <= byteLimit) return line
   const suffix = ' …（此行过长，已截断）'

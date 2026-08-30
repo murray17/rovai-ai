@@ -8,7 +8,7 @@ last_updated: 2026-08-30
 
 # 飞书渠道架构
 
-字段、状态和恢复合同见 [Feishu Channel v4](../contracts/feishu-channel-v4.md)，credential 与 Developer Session 持久化见
+字段、状态和恢复合同见 [Feishu Channel v5](../contracts/feishu-channel-v5.md)，credential 与 Developer Session 持久化见
 [Channel Storage v2](../contracts/channel-storage-v2.md)，模型输入证据见
 [ContextManifest Evidence v22](../contracts/context-manifest-evidence-v22.md)，取舍理由见
 [v1.32 决策记录](../versions/v1.32/decisions.md)。
@@ -267,27 +267,34 @@ Agent 永久输出使用实际作者 Agent 的已发布 Bot；作者 Bot 不可�
 每个 AgentRun 有一个 Core-owned execution console identity。Core 把可公开 Execution Evidence、Run 状态和公开输出
 coalesce 为同一 Card 2.0 snapshot；Main 与 Renderer 共同消费 shared execution presentation 生成的安全 `publicCommand`，
 始终滤掉 reasoning/thought。运行中以普通 Card 2.0 按真实时序直接展示进度；终态保留真实状态、稳定用时，按原始顺序
-混排文字与单条 command 的原生折叠面板，没有外层“查看执行过程”分组。TextBlock 最多前 10 行；每条 command 的结果
+在一个默认收起的“执行过程”原生面板内混排文字与单条 command 的原生折叠面板。TextBlock 最多 10 行，长文为前 9 行
+与截断提示；每条 command 的结果
 只在它自己的中性代码框中显示，不附“指令／状态／输出”等二级标题。相同公开正文去重，不在每页重复。
 
 shared presentation 保留命令的 executable、subcommand、flags、路径和非敏感参数，并统一脱敏自由正文、认证头、Token、
 Cookie 与敏感环境变量值。飞书只消费该安全命令字段，不从 `detail` 二次解析命令或结果。终态结果从明确文本字段提取，
 先排除敏感值、stdin、完整 tool input/output JSON、原始 patch 和消息正文回显，再限制为最多 20 行；超过时为前 9 行、
-一行准确截断提示、后 10 行。`apply_patch` 使用明确工具名及 canonical 结构化文件增删行，不公开 patch body。
+一行准确截断提示、后 10 行，并另限 4KiB；二进制/base64 结果不公开。`apply_patch` 使用明确工具名及 canonical
+结构化文件增删行，不公开 patch body。
 
 Run 进入终态后，Core 先把控制台置为 `terminal_pending`；公开 evidence/output 连续 900ms 没有变化后才生成最后一次
 `terminal_sealed` snapshot。Migration 125 增加不可变 `terminal_snapshot_json`，同事务固定 Run、canonical Evidence、
 正文、时间和 Blob reference；不能只冻结 sequence 后在翻页时重新读取最新 Evidence。完整 Blob 由 Core 校验后读取，
 再由 Main 脱敏截断；缺失/损坏不得退回残缺 preview。sealed 后 materializer 不再更新该卡，迁移后的读取也不会回写视图状态。
 
-飞书对整条 timeline 分页，每页最多 15 条 command、50 个 body elements（包含页码和按钮容器），再受保守 UTF-8
-字节预算保护。不拆 block；文字和紧接的首条 command 尽量放在同页。钉钉继续使用原纯文本格式和分页预算。
+飞书对整条 timeline 分页，每页最多 15 条 command、50 个递归 body elements（包含外层面板、页码和按钮容器），
+整卡 UTF-8 JSON 最多 24,000 bytes。不拆 block；文字和紧接的首条 command 尽量同页。钉钉继续使用原纯文本格式和预算。
 
 终态分页是无持久视图状态的 Card 2.0 callback。payload 只含 action、AgentRun、sealed snapshot sequence 和目标页；Core
 只授权 callback envelope 中的 Owner、冻结 App、authoritative external message、`terminal_sealed` exact sequence 与合法页码。
-Main 随后按该页直接 `updateCard` 原消息一次；单条 command 默认关闭并在客户端本地展开，不写 display/page/view state，
+Main 随后按该页直接 `updateCard` 原消息一次，外层保持展开（包括返回第 1 页）；单条 command 默认关闭并在客户端本地展开，不写 display/page/view state，
 不创建 Outbox，也不触发 pump。Migration 125 物理移除旧 display/page/view 列。展开/收起本身不需要 callback。重复点击同一页
 仍可成功；旧 snapshot、错误 App/message、越界页与 non-owner fail closed。
+
+SDK 用飞书 event ID 去重 callback，不把多次点击同页当成同一次重投；卡片更新检查远端业务码，成功仅回空 ACK。
+Main 翻页处理器有 2.5 秒响应预算，超时后的读取不再触发 patch；在途 HTTP outcome 不明时不自动重试。
+可响应的故障返回固定安全 Toast；若整个 App/设备/长连接离线，由飞书显示平台错误，本地不能保证自定义文案。
+显式预览复用同一渲染器与现有连接，页面只在 Main 内存保存；预览失效不读写假的 Core Run 或日用 SQLite。
 
 控制台只能由该 Agent 的冻结 App 创建、更新和撤回；下一条 root request admission 无论 sealed 卡当前显示哪一页，都召回
 同 ChannelConversation 中更早 Turn 的控制台，recall 等待在途 upsert 并把飞书 target revoked 当作幂等成功。控制台是临时

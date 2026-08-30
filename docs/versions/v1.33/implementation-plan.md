@@ -35,12 +35,15 @@ last_updated: 2026-08-30
 
 ## 飞书执行卡呈现回归
 
-- [x] 按 [Feishu Channel v4](../../contracts/feishu-channel-v4.md) 实现真实 timeline、文字前 10 行、单条原生 command
-  折叠和无二级标题的结果框；超过 20 行使用前 9 / 提示 / 后 10，先脱敏再截断，apply_patch 仅结构化文件变化；
-- [x] 15-command、50-element 与序列化 UTF-8 字节预算分页，文字和后续首条 command 尽量同页；钉钉纯文本格式不变；
+- [x] 按 [Feishu Channel v5](../../contracts/feishu-channel-v5.md) 实现总折叠内的真实 timeline、文字最多 10 行、单条原生
+  command 折叠和无二级标题结果框；长结果前 9 / 提示 / 后 10，并限 4KiB，先脱敏再截断，apply_patch 仅结构化文件变化；
+- [x] 15-command、50 个递归 element 与整卡 24,000 UTF-8 bytes 预算分页，文字和后续首条 command 尽量同页；
+  首次终态总面板收起，任何翻页后展开，单条 command 仍收起；钉钉纯文本格式不变；
 - [x] Migration 125 清理旧 view state，封存内容及 Blob reference；迟到 evidence/正文不改 sealed timeline，重启/旧数据
   copy migration 保留 App/message/sequence，完整 Blob 缺失 fail closed；
 - [x] 分页复用 Owner/原 App/原消息/sealed sequence 授权，一次点击仅一次 updateCard，不发 upsert、不触发 pump；
+- [x] 正式卡和显式预览共用分页呈现及 2.5 秒响应预算，超时后不启动迟到 patch；SDK 检查业务码、event ID 去重，
+  成功空 ACK，错误返回安全 Toast；完全离线时由飞书处理，不增加云端服务；
 - [x] 扩展现有卡片/Main 测试与 Core 生命周期 owner，覆盖安全输出、空结果、成功/失败/取消、分页/UTF-8 边界、
   长 Blob 恢复与不可变性；不新增重复 Rust fixture owner，既有 migration 准入矩阵继续覆盖所有受支持来源；
 - [ ] 在实际飞书客户端验收新终态卡的展开/收起与多页往返；既有 sealed 卡不批量回填。

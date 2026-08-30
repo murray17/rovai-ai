@@ -1749,7 +1749,7 @@ describe('channel settings service', () => {
     const requests: string[] = []
     const executionPreview = {
       connected: vi.fn(async () => undefined),
-      handleCardAction: vi.fn(async () => ({ toast: { type: 'info' as const, content: '第 2 / 7 页' } }))
+      handleCardAction: vi.fn(async () => ({}))
     }
     const service = new ChannelSettingsService({
       credentialStore: memoryCredentialStore({ 'feishu-member-a': { appId: 'cli_a', appSecret: 'secret-a' } }),
@@ -1773,7 +1773,7 @@ describe('channel settings service', () => {
       messageId: 'om_preview', chatId: 'oc_preview', operator: { openId: 'ou_owner' },
       action: { tag: 'button', value: { action: 'execution_console_page', agentRunId: 'feishu-preview:fixture', pageIndex: 1, snapshotSequence: 1 } }
     })
-    expect(result).toEqual({ toast: { type: 'info', content: '第 2 / 7 页' } })
+    expect(result).toEqual({})
     expect(requests).not.toContain('channels.executionConsole.page.authorize')
     expect(requests).not.toContain('channels.executionConsole.source')
     await service.stop()
@@ -2063,9 +2063,7 @@ describe('channel settings service', () => {
     const authorizationIndex = commands.findIndex(({ method }) => method === 'channels.executionConsole.page.authorize')
     const sourceIndex = commands.findIndex(({ method }) => method === 'channels.executionConsole.source')
     expect(authorizationIndex).toBeLessThan(sourceIndex)
-    expect(pageResult).toEqual({
-      toast: { type: 'info', content: '执行记录页面已更新' }
-    })
+    expect(pageResult).toEqual({})
     expect(harness.updateCard).toHaveBeenCalledTimes(1)
     expect(harness.updateCard).toHaveBeenCalledWith(
       'om_console',
@@ -2074,8 +2072,12 @@ describe('channel settings service', () => {
           title: { tag: 'plain_text', content: '审阅员 · 已完成' }
         }),
         body: expect.objectContaining({ elements: expect.arrayContaining([
-          expect.objectContaining({ tag: 'collapsible_panel', expanded: false }),
-          { tag: 'markdown', content: '执行台输出' }
+          expect.objectContaining({ tag: 'collapsible_panel', element_id: 'execution_process', expanded: true,
+            elements: expect.arrayContaining([
+              expect.objectContaining({ tag: 'collapsible_panel', expanded: false }),
+              { tag: 'markdown', content: '执行台输出' }
+            ])
+          })
         ]) })
       })
     )
@@ -2129,9 +2131,7 @@ describe('channel settings service', () => {
         }
       }
     })
-    expect(repeatedPageResult).toEqual({
-      toast: { type: 'info', content: '执行记录页面已更新' }
-    })
+    expect(repeatedPageResult).toEqual({})
     expect(harness.updateCard).toHaveBeenCalledTimes(2)
     expect(commands.filter(({ method }) => method === 'channels.host.tick')).toHaveLength(
       tickCountBeforePaging
@@ -2144,6 +2144,70 @@ describe('channel settings service', () => {
     )
     await service.stop()
   })
+
+  it.each(['unavailable', 'authorize', 'source', 'patch'] as const)(
+    'returns a safe page error for %s without dispatching late work or pumping the outbox', async (failure) => {
+      const harness = controlledChannels({ cli_a: { openId: 'ou_bot_a', name: '审阅员' } })
+      let release!: (value: unknown) => void
+      const deferred = new Promise<unknown>(resolve => { release = resolve })
+      const source = {
+        sequence: 7, agentRunId: 'run-console', agentDisplayName: '审阅员',
+        run: { status: 'succeeded', waitReason: null, terminalReasonCode: null },
+        evidence: consoleCommandEvidence('run-console'), publicOutput: null,
+        startedAt: '2026-08-28T00:00:00Z', terminalAt: '2026-08-28T00:00:05Z',
+        targetAppId: 'cli_a', externalMessageId: 'om_console', state: 'terminal_sealed'
+      }
+      const authorized = { status: 'accepted', code: 'channel.execution_console.page_authorized', payload: {} }
+      const requests: string[] = []
+      const service = new ChannelSettingsService({
+        credentialStore: memoryCredentialStore({ 'feishu-member-a': { appId: 'cli_a', appSecret: 'secret-a' } }),
+        createChannel: harness.createChannel, ...inertInterval(),
+        core: channelCore((method) => {
+          requests.push(method)
+          if (method === 'channels.feishu.snapshot') return coreSnapshot({ memberBots: [{
+            agentId: 'agent-a', accountId: 'account-1', brand: 'feishu', appId: 'cli_a',
+            botDisplayName: '审阅员', credentialRef: 'feishu-member-a', status: 'published',
+            failureCode: null, version: 1, ownerIdentityStatus: 'verified'
+          }] })
+          if (method === 'agents.list') return [presentAgent()]
+          if (method === 'channels.delivery.claim') return []
+          if (method === 'channels.executionConsole.page.authorize') {
+            if (failure === 'unavailable') throw Object.assign(new Error('private-core-diagnostic'), { code: 'full_core_unavailable' })
+            return failure === 'authorize' ? deferred : authorized
+          }
+          if (method === 'channels.executionConsole.source') return failure === 'source' ? deferred : source
+          return { status: 'applied', code: 'ok', payload: {} }
+        })
+      })
+      await service.start()
+      await vi.waitFor(() => expect(requests).toContain('channels.host.tick'))
+      if (failure === 'patch') harness.updateCard.mockReturnValueOnce(deferred)
+      const tickCount = requests.filter(method => method === 'channels.host.tick').length
+      vi.useFakeTimers()
+      try {
+        let response: unknown
+        const pending = Promise.resolve(harness.handlers.get('cli_a:cardAction')!({
+          messageId: 'om_console', chatId: 'oc_group', operator: { openId: 'ou_owner' },
+          action: { tag: 'button', value: { action: 'execution_console_page', agentRunId: 'run-console', snapshotSequence: 7, pageIndex: 0 } }
+        })).then(value => { response = value })
+        await vi.advanceTimersByTimeAsync(2500)
+        expect(response).toEqual({ toast: { type: 'error', content: failure === 'unavailable'
+          ? 'Rovai 执行服务暂不可用，请检查本机 Rovai 状态后重试'
+          : '翻页响应超时，请稍后重试' } })
+        release(failure === 'authorize' ? authorized : source)
+        await pending
+        await vi.advanceTimersByTimeAsync(0)
+        expect(harness.updateCard).toHaveBeenCalledTimes(failure === 'patch' ? 1 : 0)
+        if (failure === 'authorize' || failure === 'unavailable') expect(requests).not.toContain('channels.executionConsole.source')
+        expect(requests.filter(method => method === 'channels.host.tick')).toHaveLength(tickCount)
+        expect(JSON.stringify(response)).not.toContain('private-core-diagnostic')
+      } finally {
+        release(null)
+        vi.useRealTimers()
+        await service.stop()
+      }
+    }
+  )
 
   it('accepts topics only from a standalone topic-group chat mode', async () => {
     const harness = controlledChannels({ cli_a: { openId: 'ou_bot_a', name: '审阅员' } })
@@ -2777,10 +2841,15 @@ describe('channel settings service', () => {
       .map((element) => element.content).join('\n')
     if (runStatus === 'succeeded') {
       expect(card.body.elements).toEqual(expect.arrayContaining([
-        expect.objectContaining({ tag: 'collapsible_panel', expanded: false })
+        expect.objectContaining({ tag: 'collapsible_panel', element_id: 'execution_process', expanded: false,
+          elements: expect.arrayContaining([
+            expect.objectContaining({ tag: 'collapsible_panel', expanded: false }),
+            { tag: 'markdown', content: '执行台最终回复。' }
+          ])
+        })
       ]))
       expect(visibleBody).not.toContain('pnpm test')
-      expect(visibleBody).toContain('执行台最终回复。')
+      expect(visibleBody).not.toContain('执行台最终回复。')
     } else {
       expect(visibleBody).toContain('pnpm test')
       expect(JSON.stringify(card)).not.toContain('collapsible_panel')

@@ -24,8 +24,9 @@ const owner: FeishuPreviewOwner = {
 }
 
 type Element = { tag: string; content?: string; expanded?: boolean; elements?: Element[];
-  columns?: Element[]; behaviors?: Array<{ value: Record<string, unknown> }> }
+  element_id?: string; columns?: Element[]; behaviors?: Array<{ value: Record<string, unknown> }> }
 const elements = (card: Record<string, unknown>): Element[] => (card.body as { elements: Element[] }).elements
+const outerPanel = (card: Record<string, unknown>): Element => elements(card).find(item => item.element_id === 'execution_process')!
 const flatten = (items: Element[]): Element[] => items.flatMap(item => [item, ...flatten(item.elements ?? []), ...flatten(item.columns ?? [])])
 
 function harness(counts = [100, 200]) {
@@ -72,14 +73,16 @@ describe('opt-in Feishu execution-card previews', () => {
     expect(executionConsolePageCount(snapshot)).toBe(expectedPages)
     let total = 0
     for (let pageIndex = 0; pageIndex < expectedPages; pageIndex += 1) {
-      const card = executionConsoleCard(snapshot, pageIndex)
+      const card = executionConsoleCard(snapshot, { pageIndex, outerExpanded: true })
       const items = elements(card)
-      const panels = items.filter(item => item.tag === 'collapsible_panel')
+      const timeline = outerPanel(card).elements!
+      const panels = timeline.filter(item => item.tag === 'collapsible_panel')
+      expect(outerPanel(card).expanded).toBe(true)
       expect(panels).toHaveLength(Math.min(15, count - pageIndex * 15))
       expect(flatten(items).length).toBeLessThanOrEqual(50)
-      expect(Buffer.byteLength(JSON.stringify(card))).toBeLessThanOrEqual(28000)
+      expect(Buffer.byteLength(JSON.stringify(card))).toBeLessThanOrEqual(24000)
       expect(JSON.stringify(card)).not.toMatch(/preview-only-|这段测试正文必须隐藏/u)
-      expect(items).toContainEqual({ tag: 'markdown', content: `第 ${pageIndex + 1} / ${expectedPages} 页`, text_align: 'center' })
+      expect(timeline).toContainEqual({ tag: 'markdown', content: `第 ${pageIndex + 1} / ${expectedPages} 页`, text_align: 'center' })
       expect(items.findIndex(item => item.tag === 'markdown')).toBeLessThan(items.findIndex(item => item.tag === 'collapsible_panel'))
       for (const panel of panels) {
         expect(panel.expanded).toBe(false)
@@ -105,6 +108,7 @@ describe('opt-in Feishu execution-card previews', () => {
       params: { receive_id_type: 'open_id' }, data: expect.objectContaining({ receive_id: owner.openId, uuid: expect.any(String) })
     }))
     expect(JSON.stringify(h.sent)).toContain('没有实际执行')
+    expect(h.sent.every(card => outerPanel(card).expanded === false)).toBe(true)
     await h.service.connected(agentId, appId, h.channel)
     expect(h.create).toHaveBeenCalledTimes(2)
     expect(JSON.stringify(h.report.mock.calls)).not.toContain(owner.openId)
@@ -116,10 +120,11 @@ describe('opt-in Feishu execution-card previews', () => {
     await h.service.connected(agentId, appId, h.channel)
     for (const [index, [count, page]] of [[100, 1], [100, 6], [200, 13], [200, 13], [200, 0]].entries()) {
       const response = await h.service.handleCardAction(appId, h.action(page, count), h.channel)
-      expect(response?.toast.type).toBe('info')
+      expect(response).toEqual({})
       expect(h.updateCard).toHaveBeenCalledTimes(index + 1)
       const patched = h.updateCard.mock.calls.at(-1)![1] as Record<string, unknown>
-      expect(elements(patched)).toContainEqual({ tag: 'markdown', content: `第 ${page + 1} / ${count === 100 ? 7 : 14} 页`, text_align: 'center' })
+      expect(outerPanel(patched).expanded).toBe(true)
+      expect(outerPanel(patched).elements).toContainEqual({ tag: 'markdown', content: `第 ${page + 1} / ${count === 100 ? 7 : 14} 页`, text_align: 'center' })
       expect(response).not.toHaveProperty('card')
     }
     expect(h.create).toHaveBeenCalledTimes(2)
@@ -156,9 +161,9 @@ describe('opt-in Feishu execution-card previews', () => {
     for (const mutate of mutations) {
       const event = h.action()
       mutate(event)
-      expect((await h.service.handleCardAction(appId, event, h.channel))?.toast.type).toBe('warning')
+      expect((await h.service.handleCardAction(appId, event, h.channel))?.toast?.type).toBe('warning')
     }
-    expect((await h.service.handleCardAction('cli_other', h.action(), h.channel))?.toast.type).toBe('warning')
+    expect((await h.service.handleCardAction('cli_other', h.action(), h.channel))?.toast?.type).toBe('warning')
     expect(h.updateCard).not.toHaveBeenCalled()
   })
 
@@ -166,13 +171,36 @@ describe('opt-in Feishu execution-card previews', () => {
     const h = harness()
     await h.service.connected(agentId, appId, h.channel)
     h.readOwner.mockReturnValueOnce({ ...owner, accountId: 'different-account' })
-    expect((await h.service.handleCardAction(appId, h.action(), h.channel))?.toast.type).toBe('warning')
+    expect((await h.service.handleCardAction(appId, h.action(), h.channel))?.toast?.type).toBe('warning')
     h.updateCard.mockRejectedValueOnce(new Error('Authorization: Bearer should-not-be-logged'))
-    expect((await h.service.handleCardAction(appId, h.action(), h.channel))?.toast.type).toBe('error')
+    expect((await h.service.handleCardAction(appId, h.action(), h.channel))?.toast?.type).toBe('error')
     expect(JSON.stringify(h.report.mock.calls)).not.toContain('should-not-be-logged')
     h.advanceClock(6 * 60 * 60_000)
-    expect((await h.service.handleCardAction(appId, h.action(), h.channel))?.toast.type).toBe('warning')
+    expect((await h.service.handleCardAction(appId, h.action(), h.channel))?.toast?.type).toBe('warning')
     expect(h.updateCard).toHaveBeenCalledTimes(1)
+  })
+
+  it('answers a stalled preview patch within the callback deadline without retrying or claiming success', async () => {
+    const h = harness([31])
+    await h.service.connected(agentId, appId, h.channel)
+    let release!: () => void
+    const patch = new Promise<undefined>(resolve => { release = () => resolve(undefined) })
+    h.updateCard.mockReturnValueOnce(patch)
+    vi.useFakeTimers()
+    try {
+      let response: unknown
+      const pending = h.service.handleCardAction(appId, h.action(), h.channel).then(value => { response = value })
+      await vi.advanceTimersByTimeAsync(2500)
+      expect(response).toEqual({ toast: { type: 'error', content: '翻页响应超时，请稍后重试' } })
+      release()
+      await pending
+      await vi.advanceTimersByTimeAsync(0)
+      expect(h.updateCard).toHaveBeenCalledTimes(1)
+      expect(h.report).not.toHaveBeenCalledWith(expect.objectContaining({ stage: 'page_updated' }))
+    } finally {
+      release()
+      vi.useRealTimers()
+    }
   })
 
   it('reads only the exact published Bot and frozen app-scoped Owner from a read-only store', async () => {

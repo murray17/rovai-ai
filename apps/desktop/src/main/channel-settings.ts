@@ -39,6 +39,7 @@ import type { MemberBotAvatarSourceResolver } from './member-bot-avatar-source'
 import { ProvisioningTimingRecorder } from './feishu-provisioning-timing'
 import { memberBotAppDescription } from '../shared/channel-member-bot-copy'
 import type { FeishuExecutionPreviewHost } from './feishu-execution-preview'
+import { feishuPageFailure, withFeishuPageDeadline, type FeishuCardActionResponse } from './feishu-card-action'
 import {
   executionConsoleCard,
   executionConsolePageCount,
@@ -210,13 +211,6 @@ type RawCardActionEvent = {
     open_id?: string
     user_id?: string
     union_id?: string
-  }
-}
-
-type FeishuCardActionResponse = {
-  toast: {
-    type: 'info' | 'success' | 'warning' | 'error'
-    content: string
   }
 }
 
@@ -1636,48 +1630,54 @@ export class ChannelSettingsService {
   ): Promise<FeishuCardActionResponse> {
     const raw = (event.raw ?? {}) as RawCardActionEvent
     try {
-      // Authenticate the Owner and exact sealed card before reading full result Blobs.
-      const result = await this.#commandWithId(
-        'channels.executionConsole.page.authorize',
-        randomUUID(),
-        {
-          agentRunId: action.agentRunId,
-          appId: managed.appId,
-          externalMessageId: event.messageId,
-          snapshotSequence: action.snapshotSequence,
-          pageIndex: action.pageIndex,
-          operatorOpenId: raw.operator?.open_id ?? event.operator.openId ?? null,
-          operatorUserId: raw.operator?.user_id ?? event.operator.userId ?? null,
-          operatorUnionId: raw.operator?.union_id ?? null
-        },
-        false
-      )
-      if (result.status === 'rejected') {
-        return executionConsoleCardActionResponse(result.code)
-      }
-      const current = await this.#dependencies!.core.request<ExecutionConsoleSource | null>(
-        'channels.executionConsole.source',
-        { agentRunId: action.agentRunId, expectedSequence: action.snapshotSequence }
-      )
-      if (!current || current.targetAppId !== managed.appId
-        || current.externalMessageId !== event.messageId
-        || current.state !== 'terminal_sealed'
-        || action.pageIndex >= executionConsolePageCount(current)) {
-        return executionConsoleCardActionResponse('stale')
-      }
-      await managed.channel.updateCard(
-        event.messageId,
-        executionConsoleCard(current, action.pageIndex)
-      )
-      return executionConsoleCardActionResponse('execution_console_page')
+      return await withFeishuPageDeadline(async (checkDeadline) => {
+        // Authenticate the Owner and exact sealed card before reading full result Blobs.
+        const result = await this.#commandWithId(
+          'channels.executionConsole.page.authorize',
+          randomUUID(),
+          {
+            agentRunId: action.agentRunId,
+            appId: managed.appId,
+            externalMessageId: event.messageId,
+            snapshotSequence: action.snapshotSequence,
+            pageIndex: action.pageIndex,
+            operatorOpenId: raw.operator?.open_id ?? event.operator.openId ?? null,
+            operatorUserId: raw.operator?.user_id ?? event.operator.userId ?? null,
+            operatorUnionId: raw.operator?.union_id ?? null
+          },
+          false
+        )
+        checkDeadline()
+        if (result.status === 'rejected') {
+          return executionConsoleCardActionResponse(result.code)
+        }
+        const current = await this.#dependencies!.core.request<ExecutionConsoleSource | null>(
+          'channels.executionConsole.source',
+          { agentRunId: action.agentRunId, expectedSequence: action.snapshotSequence }
+        )
+        checkDeadline()
+        if (!current || current.targetAppId !== managed.appId
+          || current.externalMessageId !== event.messageId
+          || current.state !== 'terminal_sealed'
+          || action.pageIndex >= executionConsolePageCount(current)) {
+          return executionConsoleCardActionResponse('stale')
+        }
+        const card = executionConsoleCard(current, { pageIndex: action.pageIndex, outerExpanded: true })
+        // A slow read/render must not start a patch after the timeout response.
+        checkDeadline()
+        await managed.channel.updateCard(event.messageId, card)
+        return executionConsoleCardActionResponse('execution_console_page')
+      })
     } catch (error) {
+      const { response, reason, providerCode } = feishuPageFailure(error)
       logFeishuBotDiagnostic('execution_console.card_update_failed', {
         appIdDigest: digest(managed.appId),
         agentId: managed.agentId,
         messageIdDigest: digest(event.messageId),
-        reason: channelFailureCode(error)
+        reason,
+        ...(providerCode === undefined ? {} : { providerCode: String(providerCode) })
       })
-      return { toast: { type: 'error', content: '执行记录更新失败，请重试' } }
+      return response
     }
   }
 
@@ -2607,7 +2607,7 @@ function executionConsoleCardActionResponse(
     return { toast: { type: 'warning', content: '仅 Rovai Owner 可以操作执行记录' } }
   }
   if (result === 'execution_console_page') {
-    return { toast: { type: 'info', content: '执行记录页面已更新' } }
+    return {}
   }
   if (result === 'stale'
     || result === 'channel.execution_console.not_found'

@@ -5,7 +5,7 @@ settings:
   excludeLinksFromLockfile: false
 
 patchedDependencies:
-  '@larksuiteoapi/node-sdk@1.73.0': 0b0234f5ea8d875d87b3c580a090e6c02ce18ec3809febcdd2234e19ca18e473
+  '@larksuiteoapi/node-sdk@1.73.0': 97c95bd39991d6d592e6a57dc9b0f79e52f8c5a5022326c139a8745acd138af8
 
 importers:
 
@@ -13,7 +13,7 @@ importers:
     dependencies:
       '@larksuiteoapi/node-sdk':
         specifier: 1.73.0
-        version: 1.73.0(patch_hash=0b0234f5ea8d875d87b3c580a090e6c02ce18ec3809febcdd2234e19ca18e473)(debug@4.4.3(supports-color@7.2.0))(supports-color@7.2.0)
+        version: 1.73.0(patch_hash=97c95bd39991d6d592e6a57dc9b0f79e52f8c5a5022326c139a8745acd138af8)(debug@4.4.3(supports-color@7.2.0))(supports-color@7.2.0)
       '@radix-ui/react-dialog':
         specifier: 1.1.19
         version: 1.1.19(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
@@ -3218,7 +3218,7 @@ snapshots:
       '@jridgewell/resolve-uri': 3.1.2
       '@jridgewell/sourcemap-codec': 1.5.5
 
-  '@larksuiteoapi/node-sdk@1.73.0(patch_hash=0b0234f5ea8d875d87b3c580a090e6c02ce18ec3809febcdd2234e19ca18e473)(debug@4.4.3(supports-color@7.2.0))(supports-color@7.2.0)':
+  '@larksuiteoapi/node-sdk@1.73.0(patch_hash=97c95bd39991d6d592e6a57dc9b0f79e52f8c5a5022326c139a8745acd138af8)(debug@4.4.3(supports-color@7.2.0))(supports-color@7.2.0)':
     dependencies:
       axios: 1.19.0(debug@4.4.3(supports-color@7.2.0))(supports-color@7.2.0)
       lodash.identity: 3.0.0

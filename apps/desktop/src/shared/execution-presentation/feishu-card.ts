@@ -24,9 +24,15 @@ const PLAIN_PAGE_CHAR_BUDGET = 10_000
 const PLAIN_PAGE_OPERATION_BUDGET = 20
 const FEISHU_PAGE_COMMAND_BUDGET = 15
 const FEISHU_PAGE_ELEMENT_BUDGET = 50
-const FEISHU_PAGE_BYTE_BUDGET = 28_000
+const FEISHU_PAGE_BYTE_BUDGET = 24_000
 type CardElement = Record<string, unknown>
 type TimelineBlock = { kind: 'text' | 'command'; element: CardElement }
+type TerminalTimeline = { pages: TimelineBlock[][]; commandCount: number }
+
+export interface ExecutionConsoleCardOptions {
+  pageIndex?: number
+  outerExpanded?: boolean
+}
 
 export interface ExecutionConsoleSnapshot {
   sequence: number
@@ -56,10 +62,10 @@ type ExecutionCardBlock = {
 
 export function executionConsoleCard(
   snapshot: ExecutionConsoleSnapshot,
-  requestedPageIndex?: number
+  options?: ExecutionConsoleCardOptions
 ): Record<string, unknown> {
   if (!isTerminal(snapshot.run.status)) return renderLiveExecutionCard(snapshot)
-  return renderTerminalExecutionCard(snapshot, requestedPageIndex)
+  return renderTerminalExecutionCard(snapshot, options)
 }
 
 export function executionConsolePages(snapshot: ExecutionConsoleSnapshot): ExecutionConsolePage[] {
@@ -79,7 +85,7 @@ function executionPages(
 }
 
 export function executionConsolePageCount(snapshot: ExecutionConsoleSnapshot): number {
-  return isTerminal(snapshot.run.status) ? terminalTimelinePages(snapshot).length : 1
+  return isTerminal(snapshot.run.status) ? terminalTimelinePages(snapshot).pages.length : 1
 }
 
 export function executionConsolePublicPage(
@@ -122,28 +128,46 @@ function renderLiveExecutionCard(snapshot: ExecutionConsoleSnapshot): Record<str
 
 function renderTerminalExecutionCard(
   snapshot: ExecutionConsoleSnapshot,
-  requestedPageIndex: number | undefined
+  options: ExecutionConsoleCardOptions | undefined
 ): Record<string, unknown> {
-  const pages = terminalTimelinePages(snapshot)
+  const { pages, commandCount } = terminalTimelinePages(snapshot)
+  const requestedPageIndex = options?.pageIndex
   const requested = Number.isInteger(requestedPageIndex) ? requestedPageIndex ?? 0 : 0
   const pageIndex = Math.min(Math.max(0, requested), pages.length - 1)
-  return terminalTimelineCard(snapshot, pages[pageIndex], pageIndex, pages.length)
+  return terminalTimelineCard(snapshot, pages[pageIndex], pageIndex, pages.length, commandCount, options?.outerExpanded === true)
 }
 
 function terminalTimelineCard(
   snapshot: ExecutionConsoleSnapshot,
   blocks: TimelineBlock[],
   pageIndex: number,
-  pageCount: number
+  pageCount: number,
+  commandCount: number,
+  outerExpanded = false
 ): Record<string, unknown> {
   const elements: CardElement[] = []
   const duration = formatDuration(durationMs(snapshot.startedAt, snapshot.terminalAt))
   if (duration) elements.push({ tag: 'markdown', content: `用时 ${duration}` })
-  elements.push(...blocks.map((block) => block.element))
+  const timeline = blocks.map((block) => block.element)
   if (pageCount > 1) {
-    elements.push({ tag: 'markdown', content: `第 ${pageIndex + 1} / ${pageCount} 页`, text_align: 'center' })
-    elements.push(cardPaginationRow(snapshot, pageIndex, pageCount))
+    timeline.push({ tag: 'markdown', content: `第 ${pageIndex + 1} / ${pageCount} 页`, text_align: 'center' })
+    timeline.push(cardPaginationRow(snapshot, pageIndex, pageCount))
   }
+  elements.push({
+    tag: 'collapsible_panel',
+    element_id: 'execution_process',
+    expanded: outerExpanded,
+    header: {
+      title: { tag: 'plain_text', content: commandCount ? `执行过程 · ${commandCount} 条` : '执行过程' },
+      icon: { tag: 'standard_icon', token: 'down-small-ccm_outlined', size: '16px 16px' },
+      icon_position: 'left',
+      icon_expanded_angle: -180
+    },
+    vertical_spacing: '8px',
+    padding: '0px',
+    // Both levels expand locally. Only the page buttons carry callbacks.
+    elements: timeline
+  })
   return baseCard(
     `${boundedPlainText(snapshot.agentDisplayName, 80)} · ${terminalTitle(snapshot.run)}`,
     cardTemplate(snapshot.run.status, snapshot.run.waitReason),
@@ -191,9 +215,8 @@ function terminalTimelineBlocks(snapshot: ExecutionConsoleSnapshot): TimelineBlo
 
 function textBlock(body: string): TimelineBlock {
   const lines = body.trim().replace(/\r\n?/gu, '\n').split('\n')
-  const preview = lines.slice(0, 10)
-  if (lines.length > 10) preview[9] += ` …（已截断 ${lines.length - 10} 行）`
-  return { kind: 'text', element: { tag: 'markdown', content: preview.map(boundFeishuPreviewLine).join('\n') } }
+  const preview = lines.length <= 10 ? lines : [...lines.slice(0, 9), `… 已截断 ${lines.length - 9} 行 …`]
+  return { kind: 'text', element: { tag: 'markdown', content: preview.map((line) => boundFeishuPreviewLine(line)).join('\n') } }
 }
 
 function resultFrame(result: string): CardElement {
@@ -201,12 +224,13 @@ function resultFrame(result: string): CardElement {
   return { tag: 'markdown', content: `\`\`\`text\n${result.replace(/`{3}/gu, '`\u200b``')}\n\`\`\`` }
 }
 
-function terminalTimelinePages(snapshot: ExecutionConsoleSnapshot): TimelineBlock[][] {
+function terminalTimelinePages(snapshot: ExecutionConsoleSnapshot): TerminalTimeline {
   const rawBlocks = terminalTimelineBlocks(snapshot)
+  const commandCount = rawBlocks.filter((block) => block.kind === 'command').length
   const fits = (blocks: TimelineBlock[], paged: boolean): boolean => {
     if (blocks.filter((block) => block.kind === 'command').length > FEISHU_PAGE_COMMAND_BUDGET) return false
     // Reserve both buttons, the page counter, and the widest possible page numbers.
-    const card = terminalTimelineCard(snapshot, blocks, paged ? rawBlocks.length : 0, paged ? rawBlocks.length + 2 : 1)
+    const card = terminalTimelineCard(snapshot, blocks, paged ? rawBlocks.length : 0, paged ? rawBlocks.length + 2 : 1, commandCount)
     const elements = (card.body as { elements: CardElement[] }).elements
     return countCardElements(elements) <= FEISHU_PAGE_ELEMENT_BUDGET
       && new TextEncoder().encode(JSON.stringify(card)).length <= FEISHU_PAGE_BYTE_BUDGET
@@ -224,7 +248,7 @@ function terminalTimelinePages(snapshot: ExecutionConsoleSnapshot): TimelineBloc
     }
     return textBlock('这条执行记录超出飞书单卡大小限制，请在 Rovai 查看完整记录。')
   })
-  if (fits(blocks, false)) return [blocks]
+  if (fits(blocks, false)) return { pages: [blocks], commandCount }
   const pages: TimelineBlock[][] = []
   let page: TimelineBlock[] = []
   for (let index = 0; index < blocks.length;) {
@@ -241,7 +265,7 @@ function terminalTimelinePages(snapshot: ExecutionConsoleSnapshot): TimelineBloc
     index += unit.length
   }
   if (page.length) pages.push(page)
-  return pages
+  return { pages, commandCount }
 }
 
 function countCardElements(elements: CardElement[]): number {
