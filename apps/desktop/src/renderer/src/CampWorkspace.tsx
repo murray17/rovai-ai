@@ -1767,6 +1767,7 @@ export function CampWorkspace({
   )
   const activeRuns = snapshot.agentRuns.filter((run) => NON_TERMINAL_RUNS.has(run.status))
   const executionBlocked = activeRuns.length > 0 || stopping
+  const showComposerStop = executionBlocked && message.trim().length === 0
   const requiresQueue = pendingQueueRequiresEnqueue(
     pendingQueue?.campId === snapshot.camp.id ? pendingQueue : null, executionBlocked
   )
@@ -4455,25 +4456,18 @@ export function CampWorkspace({
                   </span>
                 </span>
               )}
-              {executionBlocked && (
-                    <button
-                      className="danger-button composer-stop"
-                      type="button"
-                      aria-label={stopping ? '正在停止当前执行' : '停止当前执行'}
-                      onClick={onStop}
-                      disabled={stopping || activeRuns.length === 0}
-                    >
-                      {stopping ? '正在停止…' : '停止'}
-                    </button>
-                  )}
-                    <button
-                      className="primary-button composer-send"
-                      type="submit"
-                      disabled={composerSendDisabled}
-                      aria-busy={Boolean(busy || composerSubmitting || preparingAttachments.length > 0)}
-                    >
-                      发送
-                    </button>
+              <button
+                className={showComposerStop ? 'danger-button composer-stop' : 'primary-button composer-send'}
+                type={showComposerStop ? 'button' : 'submit'}
+                aria-label={showComposerStop ? (stopping ? '正在停止当前执行' : '停止当前执行') : undefined}
+                onClick={showComposerStop ? onStop : undefined}
+                disabled={showComposerStop ? stopping || activeRuns.length === 0 : composerSendDisabled}
+                aria-busy={showComposerStop
+                  ? stopping
+                  : Boolean(busy || composerSubmitting || preparingAttachments.length > 0)}
+              >
+                {showComposerStop ? (stopping ? '正在停止…' : '停止') : '发送'}
+              </button>
             </div>
           </div>
         </div>
