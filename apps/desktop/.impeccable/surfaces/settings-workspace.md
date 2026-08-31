@@ -122,7 +122,9 @@ installed, unsupported, unavailable and temporarily unknown. A successful bounde
 result reads “可用” and means the executable can be selected and tried; supporting copy says login, models and
 capabilities are confirmed by explicit check or first task. A path-only result remains temporarily unknown,
 never synthetic checking. Do not expose internal “found/not checked”, fingerprint or
-attempt stages. Executable path, fingerprint, backoff and audit remain inside advanced diagnostics.
+attempt stages. Do not show discovery summaries (source, entrypoint kind, candidate extension, native target
+resolution or version probe outcome) in Runtime rows on any platform. Executable path, fingerprint, backoff
+and audit remain inside advanced diagnostics.
 
 Before those machine states, every row consumes the Core-owned Runtime Platform Admission. On Windows,
 `not_qualified` renders “Windows 尚未验证” and `unsupported` renders “此平台不支持”; neither state has an

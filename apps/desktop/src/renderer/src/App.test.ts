@@ -6253,7 +6253,7 @@ describe('task event projections', () => {
     expect(markup).not.toContain('前往 Agent 运行时')
   })
 
-  it('keeps all product checks visible with redacted discovery diagnostics', () => {
+  it('keeps all product checks visible without discovery diagnostics', () => {
     const health: HealthStatus = {
       core: { ok: true, version: '0.0.1', dataDir: '/tmp/rovai' },
       database: { ok: true, path: '/tmp/rovai/rovai.db' },
@@ -6321,8 +6321,8 @@ describe('task event projections', () => {
     expect(markup.match(/检查可用性/g)).toHaveLength(12)
     expect(markup).not.toContain('重新扫描安装')
     expect(markup).toContain('codex-cli 1.0.0')
-    expect(markup).toContain('来源 inherited_path · 入口 native_executable · 后缀 native')
-    expect(markup).toContain('Native 目标 未解析 · Version Probe 成功')
+    expect(markup).not.toContain('来源 inherited_path')
+    expect(markup).not.toContain('Version Probe')
     expect(markup).not.toContain('九种已支持产品')
     expect(markup).not.toContain('自查命令')
     expect(markup).not.toContain('command -v')
