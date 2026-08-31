@@ -59,6 +59,7 @@ use rovai_core::{
         UpdateAgentProfileCommand, VerifiedManagedInstallation,
     },
     agent_run_file_change::{self, AgentRunFileChangeProjector},
+    agent_run_image::{self, RuntimeImageObservation},
     agent_runtime_adapter::{
         AcpProbeObservation, AgentRuntimeAdapterRegistry, AntigravityProbeObservation,
         ClaudeCodeProbeObservation, CodexProbeObservation, ExecutableIntegrityStatus,
@@ -871,6 +872,13 @@ struct AgentRunFileChangesParams {
     camp_id: CampId,
     agent_run_id: String,
     execution_epoch: i64,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct AgentRunImageParams {
+    camp_id: CampId,
+    image_id: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -6767,6 +6775,16 @@ impl Core {
                 Ok(serde_json::to_value(
                     ReadModelService.camp_snapshot(&mut database, params.camp_id.as_str())?,
                 )?)
+            }
+            "agentRunImages.read" => {
+                let params: AgentRunImageParams = serde_json::from_value(request.params.clone())?;
+                let database = self.database.lock().await;
+                Ok(serde_json::to_value(agent_run_image::read_image(
+                    &database,
+                    &ManagedBlobStore::new(&self.data_dir),
+                    params.camp_id.as_str(),
+                    &params.image_id,
+                )?)?)
             }
             "agentRunFileChanges.get" => {
                 let params: AgentRunFileChangesParams =
@@ -14776,6 +14794,19 @@ async fn process_agent_run_acp_message(
             adapter_kind.as_str()
         );
     }
+    if let Some(images) = runtime.observe_images(native_prompt_id, &message).await {
+        persist_runtime_images(
+            core,
+            output,
+            agent_run_id,
+            execution_epoch,
+            runtime
+                .builtin_tool_process_config()
+                .map(BuiltinToolProcessConfig::run_tmp),
+            &images,
+        )
+        .await;
+    }
     let completed_action = match runtime
         .observe_message(native_prompt_id, &method, &params)
         .await
@@ -15199,6 +15230,21 @@ async fn process_runtime_event(
     let Some(_runtime_route_permit) = core.planned_shutdown.enter_runtime_route().await else {
         return Ok(());
     };
+    if event_type == agent_run_image::IMAGE_EVENT {
+        if let Ok(images) = serde_json::from_value::<RuntimeImageObservation>(payload.clone()) {
+            persist_runtime_images(
+                core,
+                output,
+                scope.agent_run_id,
+                scope.execution_epoch,
+                scope.managed_output_root,
+                &images,
+            )
+            .await;
+        }
+        // Internal image bytes/paths never become public Execution Evidence or channel messages.
+        return Ok(());
+    }
     if matches!(
         event_type,
         "runtime.fast.eligibility" | "runtime.fast.observed"
@@ -15283,6 +15329,43 @@ async fn process_runtime_event(
         }),
     );
     Ok(())
+}
+
+async fn persist_runtime_images(
+    core: &Core,
+    output: &mpsc::UnboundedSender<String>,
+    agent_run_id: &str,
+    execution_epoch: i64,
+    run_tmp: Option<&Path>,
+    images: &RuntimeImageObservation,
+) {
+    let mut database = core.database.lock().await;
+    match agent_run_image::record_images(
+        &mut database,
+        &ManagedBlobStore::new(&core.data_dir),
+        agent_run_id,
+        execution_epoch,
+        run_tmp,
+        images,
+    ) {
+        Ok(0) => {}
+        Ok(_) => {
+            if let Ok(Some(execution)) = ExecutionRuntimeService::default()
+                .load_agent_run_execution(&database, agent_run_id, execution_epoch)
+            {
+                emit(
+                    output,
+                    "agent_run.images.updated",
+                    json!({
+                        "campId": execution.camp_id,
+                        "agentRunId": agent_run_id,
+                        "executionEpoch": execution_epoch,
+                    }),
+                );
+            }
+        }
+        Err(_) => eprintln!("Runtime image observation skipped for AgentRun {agent_run_id}"),
+    }
 }
 
 async fn persist_runtime_evidence(
@@ -16550,6 +16633,19 @@ async fn process_agent_run_codex_message(
     }
     if method == "thread/tokenUsage/updated" {
         return;
+    }
+    if let Some(images) = agent_run_image::codex_tool_images(&message) {
+        persist_runtime_images(
+            core,
+            output,
+            agent_run_id,
+            execution_epoch,
+            runtime
+                .builtin_tool_process_config()
+                .map(BuiltinToolProcessConfig::run_tmp),
+            &images,
+        )
+        .await;
     }
     let (event_type, payload) = codex::normalize_event(&method, &params);
     runtime.observe_agent_message(&method, &params).await;

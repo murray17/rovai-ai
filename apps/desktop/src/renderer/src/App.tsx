@@ -146,6 +146,7 @@ const ACTIVE_CAMP_INVALIDATION_EVENTS = new Set([
   'agent_run.recovery_blocker_resolved',
   'agent_run.runtime_model_observed',
   'agent_run.terminal',
+  'agent_run.images.updated',
   'agent_run.file_changes_completed'
 ])
 
@@ -375,6 +376,7 @@ export function campOpenProjectionAsSnapshot(
     agentRuns: projection.agentRuns,
     executionEvidence: projection.executionEvidence,
     agentRunFileChanges: projection.agentRunFileChanges,
+    agentRunImages: projection.agentRunImages ?? [],
     contextManifests: [],
     approvals: projection.approvals,
     actions: [],

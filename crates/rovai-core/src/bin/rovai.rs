@@ -2771,7 +2771,6 @@ mod tests {
                 "rovai send --public-only --body 'Final conclusion: the failure is a client-version regression.'",
                 "rovai send --to agent_5 --body 'Please reproduce on the previous client build and return the version and result.'",
                 "rovai send --public-only --to-principal --body 'Please choose whether to roll back the client or continue the token investigation.'",
-                "rovai send --file \"$HOME/.runtime/artifacts/report.pdf\"",
             ]
         );
         let help = operation_help_text(&description);
@@ -2789,7 +2788,8 @@ mod tests {
             r"Direct --body values are literal: \n inside ordinary shell quotes is text, not a line break."
         ));
         assert!(help.contains(r"JSON stdin/heredoc and JSON --input-file decode \n escapes."));
-        assert!(help.contains("--body may be omitted"));
+        assert!(help.contains(CAMP_MESSAGE_SEND_FILE_HELP));
+        assert!(!help.contains("Rovai privately snapshots"));
         assert!(help.contains("It may be combined with --to-principal."));
         assert!(!help.contains("--to-user"));
         assert!(!help.contains("--to agent_5 --public-only"));

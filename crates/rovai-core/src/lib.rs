@@ -2,6 +2,7 @@ pub mod action;
 pub mod agent_identity;
 pub mod agent_profile;
 pub mod agent_run_file_change;
+pub mod agent_run_image;
 pub mod agent_runtime_adapter;
 pub mod authority_migration;
 pub mod brand;

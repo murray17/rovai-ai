@@ -1,0 +1,19 @@
+{
+  "jsonrpc": "2.0",
+  "method": "session/update",
+  "params": {
+    "sessionId": "image-fixture-session",
+    "update": {
+      "sessionUpdate": "tool_call_update",
+      "toolCallId": "view-image-fixture",
+      "status": "completed",
+      "rawOutput": {
+        "content": "Image loaded",
+        "detailedContent": "Image loaded for the model",
+        "binaryResultsForLlm": [
+          { "type": "image", "data": "aW1hZ2UtZml4dHVyZQ==", "mimeType": "image/png", "description": "A blue paper boat" }
+        ]
+      }
+    }
+  }
+}

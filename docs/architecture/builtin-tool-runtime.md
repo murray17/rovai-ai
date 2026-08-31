@@ -13,7 +13,7 @@ last_updated: 2026-08-31
 [Built-in Tool Agent Output Projection v1](../contracts/builtin-tool-agent-output-projection-v1.md)、
 [Camp History Retrieval v4](../contracts/camp-history-v4.md)、
 [Durable Task v3](../contracts/durable-task-v3.md) 和
-[Camp Message Send v14](../contracts/camp-message-send-v14.md)、
+[Camp Message Send v16](../contracts/camp-message-send-v16.md)、
 [Gather v4](../contracts/gather-v4.md)、
 [Current User Attention v4](../contracts/current-user-attention-v4.md)与
 [Missing-Send Recovery Publication v2](../contracts/missing-send-recovery-publication-v2.md) 为准；v19 及更早 Transport 只保留
@@ -165,6 +165,10 @@ CLI 不根据 `messageId` 或其他 branch 字段猜测 mode。
 回答或行动”正向条件、常规负向场景、消息局部不继承、无 Agent Delivery 与不代表批准；旧
 `--to-user` 只在 CLI 参数归一化层作为不可发现 alias。
 
+文件用途只在 `--file` 的精确帮助中说明：发送收件人需要的交付文件，不把中间产物当成交付。
+Summary 不再说明附件快照、路径优化或纯附件示例；输入 schema、纯附件发送和路径处理均不变。
+精确教学及飞书 Session 的补充提示由 [Camp Message Send v16](../contracts/camp-message-send-v16.md) 拥有。
+
 Send exact help 公开 line-leading display-name alias：它必须是 logical line 的首个非空白 token，并在完整
 显示名后跟 whitespace/EOF；trailing handoff 使用专门 final line。`--to` 仍只接受 canonical ID，稳定自动化
 优先使用 `agent_N`。`--public-only` 在任何 alias/member lookup 前绕过正文寻址，并与显式 `to/taskId`
@@ -173,8 +177,8 @@ Parser 和 alias map 属于 Domain Service；
 CLI、Runtime Adapter、Bootstrap 与 Skill 都不重写正文。该 teaching/schema 继续进入当前 catalog digest。
 当前 v21 contract/CLI command version、`builtin_cli.transport.v21` capability 与 IPC protocol 2 必须同时进入
 Binding compatibility 和 digest。Camp History 使用 v4；Native Binding context contract 加入内部
-`sessionCharterRevision: 2`，使旧 Charter Binding 不可兼容恢复。Bootstrap v3/Formatter 3 不变；动态 Context
-继续使用 Formatter 21 / ContextManifest 21。v21 Context 不做 endpoint 猜测并 fail closed。
+`sessionCharterRevision: 3`，使旧 Charter Binding 不可兼容恢复。Bootstrap v3/Formatter 3 不变；动态 Context
+继续使用 Formatter 22 / ContextManifest 22，不做 endpoint 猜测并 fail closed。
 
 `ROVAI_RUN_TMP` 是 Runtime Host 启动时继承的稳定精确路径，不是 process root、Camp workspace 或附件存储。
 每次新 lease 在 active context 写入前 fail-closed 清空并重建该目录；unbind/fence 只做 best-effort 清理，后继
@@ -401,6 +405,12 @@ Session Charter 只说明：
 - `RUN_FACTS` 字段化表达冻结 Task reference、Session continuity、external effect、Gather member 与
   delegation budget；命令特定教学不回填 Charter。
 
+创建 Bootstrap evidence 时，Core 仅为存在 active 飞书 conversation binding 的 Camp，在静态 CLI Charter
+最后一条后、Adapter 指导前追加一条文件交付提示。Quick Chat/Project 共用该 Camp 级判断；普通、钉钉、
+closed 或尚未绑定的会话不追加。已有 Binding 从 Blob 复用冻结 Charter，不重新查询渠道，因此关闭绑定或
+从本地继续聊天不改写提示，也不触发 Session rotation。下一次正常新 Binding 才读取当前关系。
+精确文本见 [Send v16](../contracts/camp-message-send-v16.md#feishu-session-charter)。
+
 Charter 不承载 Task 创建克制、字段权限、Camp-wide read、local planning/A2A、wake/send、Memory
 治理或 polling 操作指导。普通 flags 属于精确 operation help；命令族选择、message→Task、多操作协调
 与复杂 recovery 属于窄触发 `cli-operations` official Skill；Memory 治理属于
@@ -481,6 +491,7 @@ AgentRun Formatter/Manifest binding contract，并由 Migration 89 clean break �
 v1.23 不修改 Bootstrap wrapper、Formatter 或数据库，而是在 Native Binding context contract 中加入
 `sessionCharterRevision: 2`；该字段只进入每个 Adapter 的 Binding compatibility digest，使新 Run 轮换旧
 Native Session 并投递完整新 Charter，历史 Bootstrap Evidence 保留原 bytes/digest。
+当前 revision 为 3，新增的飞书文件提示继续复用同一兼容路径，不新增迁移或重启机制。
 `MEMBER_IDENTITY` 是该 Native Session 唯一的 self identity，包含最新已提交的完整六字段；它只在
 既有 eligible Bootstrap boundary 原子读取，不进入 AgentRun Dynamic Context，不持久化 Identity
 Blob、snapshot、digest 或 history。身份编辑不轮换 Session，也不构造下一 Run 的 patch。

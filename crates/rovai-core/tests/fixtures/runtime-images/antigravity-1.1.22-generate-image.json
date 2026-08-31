@@ -1,0 +1,37 @@
+{
+  "steps": [
+    {
+      "type": "CORTEX_STEP_TYPE_GENERATE_IMAGE",
+      "status": "CORTEX_STEP_STATUS_DONE",
+      "metadata": {
+        "toolCall": { "id": "tool-image", "name": "generate_image" },
+        "sourceTrajectoryStepInfo": {
+          "trajectoryId": "fixture-trajectory",
+          "stepIndex": 2,
+          "cascadeId": "0bdd2166-d420-40c6-94be-70b93eb290c5"
+        }
+      },
+      "generateImage": {
+        "prompt": "A blue paper boat on a cream background",
+        "imageName": "rovai_image_acceptance",
+        "modelName": "gemini-3.1-flash-image",
+        "generatedMedia": {
+          "mimeType": "image/jpeg",
+          "inlineData": "",
+          "uri": "file:///fixture/blue-paper-boat.jpg"
+        }
+      }
+    },
+    {
+      "type": "CORTEX_STEP_TYPE_PLANNER_RESPONSE",
+      "status": "CORTEX_STEP_STATUS_DONE",
+      "metadata": {
+        "sourceTrajectoryStepInfo": {
+          "stepIndex": 3,
+          "cascadeId": "0bdd2166-d420-40c6-94be-70b93eb290c5"
+        }
+      },
+      "plannerResponse": { "response": "Generated successfully." }
+    }
+  ]
+}

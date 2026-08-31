@@ -897,6 +897,24 @@ adapter-scoped 初始历史证据位于
 当前 1.0.5 三平台证据见上方三个独立 artifact；它们都不包含 Key、完整 Native ID、Prompt 或本机私有路径。
 原生 Usage/Cost 字段保持 Disabled。
 
+### 2026-08-31 Runtime 图片观察边界
+
+本次接入已有 ACP `tool_call` / `tool_call_update` 的标准图片 block、Claude 的结构化 base64 Tool Result、
+Codex MCP content 和原生 `imageGeneration`。ACP 以 toolCallId 增量累积，在 completed/failed 才提交；
+Codex 原生字段依据上游 app-server `ImageGenerationItem` 的 `result` / `savedPath`，inline 内容不因 path 存在而丢弃。
+初始阶段完成了协议提取、epoch/Session fence、本地生命周期和隔离 Electron Gallery 验证。
+随后经用户授权，本机已真实执行 Codex / Antigravity 原生生图，并用实际队员配置检查其余 Runtime。
+
+Antigravity 1.1.22 的 stream-json 只给出 generate_image 参数；其本机只读 step API 返回 generatedMedia。
+现已接入精确 conversation/step 的只读查询，原生 JPEG 入库/读取通过，稳定路径不复制。
+TRAE 0.120.52 的 builtin Output 与 Copilot 1.0.79 的 binaryResultsForLlm 已按真实 wire 补齐；
+Codex、Antigravity、Claude、OpenCode、TRAE、Copilot 六种 Runtime 的图片结果通过隔离 Core 入库/读取。
+Qwen 当前 ACP 只回文字；CodeBuddy/Kimi/Grok 本机工具配置没有返回图片；Kiro/Qoder 本机 Prompt 上游失败。
+Cursor 本机仍为不支持 ACP 的旧版，不升级、不提高准入资格，也不猜测非标准通知中的建议路径。
+各构建、真实生图与读图的区别、失败边界见 [v1.37 验收记录](versions/v1.37/runtime-image-acceptance.md)。
+本观察能力不改变 Session、Usage、活动分类或 Built-in/External MCP 资格。规范见
+[Runtime Images v2](contracts/runtime-images-v2.md)，状态见 [v1.37](versions/v1.37/implementation-plan.md)。
+
 ## 历史：内置 MCP / Antigravity 专项复核
 
 以下记录只解释 v0.30–v0.32 当时的实现和证据，不能作为当前运输合同，也不表示旧 MCP

@@ -1,7 +1,7 @@
 ---
 document_type: version-overview
 version: v1.36
-lifecycle: current
+lifecycle: historical
 authority: version-scope-and-status
 design_status: confirmed
 implementation_status: in_progress
@@ -72,6 +72,8 @@ Owner 可在私聊或群聊显式 `@Bot` 后复用现有 Quick Chat、项目选�
 - 飞书群/话题首次项目卡提供一行项目下拉框，下一行“开始快速对话”“刷新项目”；文案明确“话题”或“群聊”。
   两种选择共用 Owner、roster、卡片防重和 FIFO 原子绑定；空项目列表也可 Quick Chat，不增加换绑或钉钉入口；
 - 设置页保留飞书/钉钉 Tab、内置扫码 Dialog、队员发布、审批人选择、官方应用管理链接和 Provider-local 绑定诊断。
+
+后续版本：[v1.37 Runtime 图片与飞书文件交付](../v1.37/README.md)。本版本冻结时的钉钉未验收边界不变。
 
 ## 本轮存储优化
 

@@ -1,7 +1,7 @@
 ---
 document_type: architecture-index
 authority: long-lived-architecture-routing
-last_updated: 2026-08-30
+last_updated: 2026-08-31
 ---
 
 # 长期系统架构
@@ -12,6 +12,7 @@ last_updated: 2026-08-30
 <!-- architecture-index:begin -->
 | 架构 | 内容 |
 | --- | --- |
+| [Runtime 图片](runtime-images.md) | 结构化观察、混合文件生命周期、现有 Blob、Camp-scoped 按需读取及共享图片 UI；与显式渠道文件交付分离 |
 | [Benchmark Protocol](benchmark-protocol.md) | Core 外的 Adapter/Profile/Execution/Evaluation/Reporting、Process/Outcome/Tool-Use Judge、Tool Interaction、typed Resource 与 paired counterfactual 模块 |
 | [Diagnostics Center](diagnostics-center.md) | Core 严格只读诊断组装、Skill/MCP 审计、Runtime 缓存事实、Renderer 单项修复复检、Electron v5 导出与 Startup Recovery 边界 |
 | [Desktop App Updates](desktop-app-updates.md) | Main 单一更新快照、完成后递归调度、检查来源合并、提醒代次、显式下载/安装、Renderer 深链与 updater-first 受控退出边界 |

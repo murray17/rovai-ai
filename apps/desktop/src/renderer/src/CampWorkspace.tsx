@@ -10,6 +10,7 @@ import type {
   AdapterInstallation,
   AgentProfile,
   AgentRunFileChangesView,
+  AgentRunImagesView,
   AgentRunExecutionEvidencePage,
   AgentRunExecutionEvidenceView,
   AgentRunView,
@@ -61,6 +62,7 @@ import {
   timelineDayLabel
 } from './ui-model'
 import { MemberAvatar } from './MemberAvatar'
+import { ImageGallery, groupMessageAttachments } from './ImageGallery'
 import { ExecutionAvatarRail } from './ExecutionAvatarRail'
 import { MemberPortrait } from './MemberPortrait'
 import { localizeExecutionEngineTerms } from './product-copy'
@@ -876,6 +878,13 @@ export type CampConversationTimelineItem =
       changes: AgentRunFileChangesView
     }
   | {
+      kind: 'run_images'
+      id: string
+      createdAt: string
+      timelineGlobalSequence: null
+      images: AgentRunImagesView
+    }
+  | {
       kind: 'stop_event'
       id: string
       createdAt: string
@@ -891,7 +900,8 @@ export function campConversationTimeline(
   timeline: CampSnapshot['timeline'] = [],
   agentRuns: CampSnapshot['agentRuns'] = [],
   tasks: CampSnapshot['tasks'] = [],
-  agentRunFileChanges: CampSnapshot['agentRunFileChanges'] = []
+  agentRunFileChanges: CampSnapshot['agentRunFileChanges'] = [],
+  agentRunImages: AgentRunImagesView[] = []
 ): CampConversationTimelineItem[] {
   const taskCreatedSequenceById = new Map(
     timeline
@@ -916,6 +926,15 @@ export function campConversationTimeline(
     timelineGlobalSequence: null,
     changes
   }))
+  const runImageCards: CampConversationTimelineItem[] = agentRunImages
+    .filter((images) => images.images.length > 0)
+    .map((images) => ({
+      kind: 'run_images',
+      id: `run-images:${images.agentRunId}:${images.executionEpoch}`,
+      createdAt: images.createdAt,
+      timelineGlobalSequence: null,
+      images
+    }))
   const publicMessages: CampConversationTimelineItem[] = messages
     .filter((message) => {
       const kind = (message.presentation as { kind?: string } | null)?.kind
@@ -969,7 +988,7 @@ export function campConversationTimeline(
     const kindOrder = left.kind.localeCompare(right.kind)
     return kindOrder !== 0 ? kindOrder : left.id.localeCompare(right.id)
   }
-  const sortedItems = [...taskCards, ...publicMessages, ...stopEvents, ...runFileChangeCards]
+  const sortedItems = [...taskCards, ...publicMessages, ...stopEvents, ...runFileChangeCards, ...runImageCards]
     .sort(compareTimelineItems)
   const lastPublicMessageByRunId = new Map<string, CampConversationTimelineItem>()
   for (const item of publicMessages.slice().sort(compareTimelineItems)) {
@@ -979,20 +998,27 @@ export function campConversationTimeline(
   }
   const anchoredCardIds = new Set<string>()
   const cardsByAnchorMessageId = new Map<string, CampConversationTimelineItem[]>()
-  for (const card of runFileChangeCards) {
-    if (card.kind !== 'run_file_changes') continue
-    const anchor = lastPublicMessageByRunId.get(card.changes.agentRunId)
+  for (const card of [...runImageCards, ...runFileChangeCards]) {
+    if (card.kind !== 'run_file_changes' && card.kind !== 'run_images') continue
+    const runId = card.kind === 'run_images' ? card.images.agentRunId : card.changes.agentRunId
+    // With no public message, place the images immediately before that Run's Files Changed.
+    const fileCard = card.kind === 'run_images'
+      ? runFileChangeCards.find((candidate) => candidate.kind === 'run_file_changes'
+        && candidate.changes.agentRunId === runId && candidate.changes.executionEpoch === card.images.executionEpoch)
+      : undefined
+    const anchor = lastPublicMessageByRunId.get(runId) ?? fileCard
     if (!anchor) continue
     anchoredCardIds.add(card.id)
     cardsByAnchorMessageId.set(
       anchor.id,
-      [...(cardsByAnchorMessageId.get(anchor.id) ?? []), card].sort(compareTimelineItems)
+      [...(cardsByAnchorMessageId.get(anchor.id) ?? []), card]
     )
   }
 
   return sortedItems.flatMap((item) => {
     if (anchoredCardIds.has(item.id)) return []
-    return [item, ...(cardsByAnchorMessageId.get(item.id) ?? [])]
+    const cards = cardsByAnchorMessageId.get(item.id) ?? []
+    return item.kind === 'run_file_changes' ? [...cards, item] : [item, ...cards]
   })
 }
 
@@ -1714,7 +1740,8 @@ export function CampWorkspace({
       snapshot.timeline,
       snapshot.agentRuns,
       snapshot.tasks,
-      snapshot.agentRunFileChanges
+      snapshot.agentRunFileChanges,
+      snapshot.agentRunImages
     ),
     [
       snapshot.agentRuns,
@@ -1722,6 +1749,7 @@ export function CampWorkspace({
       snapshot.timeline,
       snapshot.turns,
       snapshot.agentRunFileChanges,
+      snapshot.agentRunImages,
       visibleCampMessages
     ]
   )
@@ -3820,6 +3848,16 @@ export function CampWorkspace({
                     )
                     continue
                   }
+                  if (timelineItem.kind === 'run_images') {
+                    previousMessageAuthorKey = null
+                    items.push(
+                      <div className="timeline-node runtime-image-supplement" key={timelineItem.id}>
+                        <ImageGallery label={`运行图片 · ${timelineItem.images.images.length}`}
+                          images={timelineItem.images.images.map((image) => ({ kind: 'runtime', campId: snapshot.camp.id, image }))} />
+                      </div>
+                    )
+                    continue
+                  }
                   if (timelineItem.kind === 'run_file_changes') {
                     previousMessageAuthorKey = null
                     items.push(
@@ -4024,15 +4062,11 @@ export function CampWorkspace({
                                 )}
                                 {campMessage.attachments.length > 0 && (
                                   <div className="timeline-attachments" aria-label="消息附件">
-                                    {campMessage.attachments.map((attachment) => (
-                                      <AttachmentCard
-                                        attachment={attachment}
-                                        campId={snapshot.camp.id}
-                                        key={attachment.id}
-                                        onNotify={onNotify}
-                                        timeline
-                                      />
-                                    ))}
+                                    {groupMessageAttachments(campMessage.attachments).map((segment) => segment.kind === 'images'
+                                      ? <ImageGallery key={segment.attachments[0].id} onNotify={onNotify}
+                                          images={segment.attachments.map((image) => ({ kind: 'attachment', campId: snapshot.camp.id, image }))} />
+                                      : <AttachmentCard attachment={segment.attachment} campId={snapshot.camp.id}
+                                          key={segment.attachment.id} onNotify={onNotify} timeline />)}
                                   </div>
                                 )}
                               </MessageSurface>

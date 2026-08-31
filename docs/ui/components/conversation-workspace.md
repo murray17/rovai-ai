@@ -436,6 +436,26 @@ summary 与可选 detail；即使没有任何 Execution Evidence 也默认展开
 不创建 successor。精确合同见
 [Run Process Detail Surface v5](../../contracts/run-process-detail-surface-v5.md)。
 
+## Runtime 图片与消息图片
+
+公开正文后先显示原有顺序的消息附件，再显示来源 Run 的本地图片，最后显示 `Files Changed`。
+每个 Run/epoch 的图片固定跟随该 Run 最后一条公开消息；没有公开消息时按 Run 图片时间定位，
+且仍在同 Run 文件变化卡之前。只读取图片元数据，不把图片变成正文或执行台 Tool。
+
+显式图片附件和 Runtime 图片共用 `ImageGallery` / `ImageTile` / Lightbox。一张单列，多张在正常宽度下
+双列、窄容器单列；全部展示，不增加四张上限或“查看全部”。使用 `object-fit: contain`，保留截图、文字和
+图表完整边界。只把连续图片附件组合成一段 Gallery；`image A / image B / PDF / image C` 的文件顺序不变。
+PDF、文档、压缩包和目录继续使用现有文件块。
+
+图片接近可视区域时读取，通过 Chromium 真实图片解码后展示；损坏/消失的 Runtime 图片显示“图片已不可用”，
+不影响其他图片或 AgentRun。稳定路径重开时可读取更新后的内容，不承诺历史不可变；临时路径和 inline 内容由
+已有 Blob 保留。缩略图点击或键盘激活打开大图，关闭后焦点回到该图，两个主题均使用现有颜色与焦点 token。
+
+消息图片保留附件系统打开、显示所在位置和现有风险确认；解码失败时主点击回退为系统打开，Runtime projection
+pending/recovery/failed 说明不被图片遮掉。Runtime 图片只可查看大图，不提供附件发送/打开所在位置入口。
+同一图同时作为 Runtime 结果和显式附件时允许重复，不新增跨来源去重。底层边界见
+[Runtime Images v2](../../contracts/runtime-images-v2.md)，不引入 File Preview 授权流程。
+
 ## Task、Approval 与停止
 
 每个 Task 在创建位置只显示一张读取当前五态文案、标题和负责人的实时卡。Inspector list/detail

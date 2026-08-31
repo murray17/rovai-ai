@@ -906,6 +906,7 @@ where
     R: AsyncRead + Unpin,
 {
     let mut line = Vec::new();
+    let mut oversized_line = false;
     let mut buffer = [0_u8; 16 * 1024];
     let mut state = ClaudeCodeStreamState::default();
     loop {
@@ -915,6 +916,10 @@ where
         }
         for byte in &buffer[..read] {
             if *byte == b'\n' {
+                if oversized_line {
+                    oversized_line = false;
+                    continue;
+                }
                 if !line.is_empty() {
                     process_claude_stream_line(
                         &line,
@@ -929,11 +934,15 @@ where
                 }
                 continue;
             }
-            if line.len() >= MAX_CAPTURE_BYTES {
-                anyhow::bail!(
-                    "Claude Code stream event exceeded the {} byte safety limit",
-                    MAX_CAPTURE_BYTES
-                );
+            if oversized_line {
+                continue;
+            }
+            if line.len() >= rovai_core::agent_run_image::MAX_IMAGE_EVENT_BYTES {
+                // An oversized image/tool result is optional evidence, not a failed AgentRun.
+                // Drop this frame, then keep reading the independently framed terminal result.
+                line.clear();
+                oversized_line = true;
+                continue;
             }
             line.push(*byte);
         }
@@ -1227,6 +1236,14 @@ fn normalize_claude_runtime_events(
                     continue;
                 }
                 let tool_name = state.tool_names.get(&tool_use_id).cloned();
+                if let Some(images) =
+                    rovai_core::agent_run_image::claude_tool_images(block, tool_name.clone())
+                {
+                    normalized.push(ClaudeCodeRuntimeEvent {
+                        event_type: rovai_core::agent_run_image::IMAGE_EVENT,
+                        payload: serde_json::to_value(images)?,
+                    });
+                }
                 if let Some(tool_name) = tool_name.clone()
                     && let Some(event) = claude_tool_started(state, tool_use_id.clone(), tool_name)
                 {
@@ -2437,6 +2454,78 @@ exit 1
             .is_err(),
             "another Session must be fenced"
         );
+    }
+
+    #[test]
+    fn structured_tool_images_stay_internal_and_are_fenced_by_session_and_replay() {
+        let session_id = "0bdd2166-d420-40c6-94be-70b93eb290c5";
+        let mut state = ClaudeCodeStreamState::default();
+        let mut event = json!({
+            "type":"user", "session_id":session_id, "message":{"content":[{
+                "type":"tool_result", "tool_use_id":"toolu_image", "is_error":true, "content":[
+                    {"type":"image","source":{"type":"base64","media_type":"image/png","data":"aW1hZ2UtYnl0ZXM="}},
+                    {"type":"text","text":"Saved to /tmp/not-an-image-result.png"}
+                ]
+            }]}
+        });
+        event["session_id"] = json!("other-session");
+        assert!(normalize_claude_runtime_events(&event, session_id, &mut state).is_err());
+        event["session_id"] = json!(session_id);
+        let events = normalize_claude_runtime_events(&event, session_id, &mut state).unwrap();
+        assert_eq!(events.len(), 2);
+        assert_eq!(
+            events[0].event_type,
+            rovai_core::agent_run_image::IMAGE_EVENT
+        );
+        assert_eq!(events[0].payload["images"][0]["data"], "aW1hZ2UtYnl0ZXM=");
+        assert_eq!(events[1].event_type, "runtime.action");
+        let public = events[1].payload.to_string();
+        assert!(!public.contains("aW1hZ2UtYnl0ZXM="));
+        assert!(!public.contains("not-an-image-result"));
+        assert!(
+            normalize_claude_runtime_events(&event, session_id, &mut state)
+                .unwrap()
+                .is_empty()
+        );
+    }
+
+    // Owner: stdout framing, which is separate from the structured image parser above.
+    #[tokio::test]
+    async fn image_frame_larger_than_the_log_budget_preserves_the_terminal_result() {
+        use base64::Engine;
+        let session_id = "0bdd2166-d420-40c6-94be-70b93eb290c5";
+        let data = base64::engine::general_purpose::STANDARD.encode(vec![0; MAX_CAPTURE_BYTES]);
+        let image = json!({"type":"user","session_id":session_id,"message":{"content":[{
+            "type":"tool_result","tool_use_id":"large-image","content":[
+                {"type":"image","source":{"type":"base64","media_type":"image/png","data":data}}
+            ]
+        }]}});
+        let result = json!({"type":"result","session_id":session_id,"subtype":"success","is_error":false,"result":"done"});
+        let wire = format!("{image}\n{result}\n");
+        let (sender, mut receiver) = mpsc::unbounded_channel();
+        let captured = capture_claude_stream(
+            wire.as_bytes(),
+            session_id.into(),
+            "image-turn".into(),
+            None,
+            Some(sender),
+            Arc::new(AtomicBool::new(false)),
+        )
+        .await
+        .unwrap();
+        assert_eq!(captured.final_result.unwrap().result, "done");
+        let image = receiver.try_recv().unwrap();
+        assert_eq!(image.event_type, rovai_core::agent_run_image::IMAGE_EVENT);
+        assert_eq!(
+            image.payload["images"][0]["data"].as_str().unwrap().len(),
+            data.len()
+        );
+        while let Ok(event) = receiver.try_recv() {
+            assert!(
+                !event.payload.to_string().contains(&data),
+                "image bytes are not public evidence"
+            );
+        }
     }
 
     #[test]

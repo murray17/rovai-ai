@@ -13,6 +13,7 @@ use crate::builtin_tool_runtime::BuiltinToolProcessConfig;
 use anyhow::{Context, Result};
 use rovai_core::{
     agent_profile::FrozenAgentRuntimeConfig,
+    agent_run_image::{self, RuntimeImageObservation},
     agent_runtime_adapter::ANTIGRAVITY_RUNTIME_DEFAULT_MODEL_ID,
     managed_process::{
         ManagedProcess, ManagedProcessLaunchSpec, ManagedProcessPurpose, ManagedStdinPolicy,
@@ -28,7 +29,8 @@ use rovai_core::{
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 use tokio::{
-    io::{AsyncRead, AsyncReadExt},
+    io::{AsyncRead, AsyncReadExt, AsyncWriteExt},
+    net::TcpStream,
     process::Command,
     sync::{Mutex, mpsc, oneshot},
     time::{Duration, Instant, MissedTickBehavior},
@@ -453,11 +455,13 @@ impl AntigravityAppRuntimeAdapter {
         let stdout_task = if structured_output {
             let resumable_native_session_id = request.resumable_native_session_id.clone();
             let runtime_events = request.runtime_events.clone();
+            let image_log_path = log_path.clone();
             tokio::spawn(async move {
                 capture_antigravity_stream(
                     stdout,
                     resumable_native_session_id.as_deref(),
                     runtime_events.as_ref(),
+                    &image_log_path,
                 )
                 .await
                 .map(|capture| AntigravityStdoutCapture::Structured(Box::new(capture)))
@@ -973,6 +977,7 @@ async fn capture_antigravity_stream<R>(
     mut reader: R,
     expected_session_id: Option<&str>,
     runtime_events: Option<&mpsc::UnboundedSender<AntigravityRuntimeEvent>>,
+    log_path: &Path,
 ) -> Result<AntigravityStreamCapture>
 where
     R: AsyncRead + Unpin,
@@ -993,7 +998,9 @@ where
                         expected_session_id,
                         runtime_events,
                         &mut capture,
-                    )?;
+                        log_path,
+                    )
+                    .await?;
                     line.clear();
                 }
                 continue;
@@ -1008,16 +1015,24 @@ where
         }
     }
     if !line.is_empty() {
-        process_antigravity_stream_line(&line, expected_session_id, runtime_events, &mut capture)?;
+        process_antigravity_stream_line(
+            &line,
+            expected_session_id,
+            runtime_events,
+            &mut capture,
+            log_path,
+        )
+        .await?;
     }
     Ok(capture)
 }
 
-fn process_antigravity_stream_line(
+async fn process_antigravity_stream_line(
     line: &[u8],
     expected_session_id: Option<&str>,
     runtime_events: Option<&mpsc::UnboundedSender<AntigravityRuntimeEvent>>,
     capture: &mut AntigravityStreamCapture,
+    log_path: &Path,
 ) -> Result<()> {
     let event: Value =
         serde_json::from_slice(line).context("Antigravity emitted invalid stream JSON")?;
@@ -1049,6 +1064,22 @@ fn process_antigravity_stream_line(
             if let Some(runtime_event) = normalize_antigravity_tool_step(step, capture)?
                 && let Some(sender) = runtime_events
             {
+                if runtime_event.payload["status"] == "completed"
+                    && runtime_event.payload["toolName"]
+                        .as_str()
+                        .is_some_and(|name| name.eq_ignore_ascii_case("generate_image"))
+                    && let Some(step_index) = step.get("step_index").and_then(Value::as_u64)
+                    && let Ok(Some(images)) = tokio::time::timeout(
+                        Duration::from_secs(2),
+                        read_antigravity_step_images(log_path, conversation_id, step_index),
+                    )
+                    .await
+                {
+                    let _ = sender.send(AntigravityRuntimeEvent {
+                        event_type: agent_run_image::IMAGE_EVENT,
+                        payload: serde_json::to_value(images)?,
+                    });
+                }
                 let _ = sender.send(runtime_event);
             }
         }
@@ -1103,6 +1134,67 @@ fn process_antigravity_stream_line(
         None => anyhow::bail!("Antigravity stream event omitted its event type"),
     }
     Ok(())
+}
+
+/// Best-effort image supplement from this CLI child's loopback result API. No account API,
+/// directory scan, transcript scraping, global port discovery, or credentials are involved.
+async fn read_antigravity_step_images(
+    log_path: &Path,
+    conversation_id: &str,
+    step_index: u64,
+) -> Option<RuntimeImageObservation> {
+    let mut log = Vec::new();
+    tokio::fs::File::open(log_path)
+        .await
+        .ok()?
+        .take(MAX_LOG_INSPECTION_BYTES)
+        .read_to_end(&mut log)
+        .await
+        .ok()?;
+    let port = String::from_utf8_lossy(&log).lines().find_map(|line| {
+        let (_, suffix) = line.split_once("Language server listening on random port at ")?;
+        let port = suffix.strip_suffix(" for HTTP")?.parse::<u16>().ok()?;
+        (port != 0).then_some(port)
+    })?;
+    let body =
+        serde_json::json!({"cascadeId": conversation_id, "stepOffset": step_index}).to_string();
+    let mut connection = TcpStream::connect((std::net::Ipv4Addr::LOCALHOST, port))
+        .await
+        .ok()?;
+    // HTTP/1.0 + identity gives a bounded, EOF-delimited JSON response from AGY's local Go server.
+    // Deliberately not a general HTTP client: no redirects, remote hosts, compression or cookies.
+    let request = format!(
+        "POST /exa.language_server_pb.LanguageServerService/GetCascadeTrajectorySteps HTTP/1.0\r\nHost: 127.0.0.1:{port}\r\nContent-Type: application/json\r\nAccept-Encoding: identity\r\nConnection: close\r\nContent-Length: {}\r\n\r\n{body}",
+        body.len()
+    );
+    connection.write_all(request.as_bytes()).await.ok()?;
+    const MAX_REPLY_BYTES: usize =
+        agent_run_image::MAX_IMAGE_BYTES.div_ceil(3) * 4 + MAX_CAPTURE_BYTES;
+    let mut response = Vec::new();
+    connection
+        .take((MAX_REPLY_BYTES + 1) as u64)
+        .read_to_end(&mut response)
+        .await
+        .ok()?;
+    if response.len() > MAX_REPLY_BYTES {
+        return None;
+    }
+    let boundary = response.windows(4).position(|bytes| bytes == b"\r\n\r\n")?;
+    let headers = std::str::from_utf8(&response[..boundary]).ok()?;
+    if !headers
+        .lines()
+        .next()
+        .is_some_and(|line| matches!(line, "HTTP/1.0 200 OK" | "HTTP/1.1 200 OK"))
+        || headers.lines().any(|line| {
+            let line = line.to_ascii_lowercase();
+            line.starts_with("transfer-encoding:")
+                || (line.starts_with("content-encoding:") && line != "content-encoding: identity")
+        })
+    {
+        return None;
+    }
+    let response = serde_json::from_slice(&response[boundary + 4..]).ok()?;
+    agent_run_image::antigravity_tool_images(&response, conversation_id, step_index)
 }
 
 fn antigravity_init_model_id(event: &Value) -> Option<String> {
@@ -1524,6 +1616,110 @@ impl Drop for SensitiveLogGuard {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // Owner: the stream -> child-local result API -> internal image seam. Parser input
+    // cases live in agent_run_image; no SQLite or real Runtime is needed here.
+    #[tokio::test]
+    async fn completed_image_step_queries_once_and_api_failure_does_not_fail_the_run() {
+        let root = std::env::temp_dir().join(format!("rovai-agy-image-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&root).unwrap();
+        let log_path = root.join("child.log");
+        let listener = tokio::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0))
+            .await
+            .unwrap();
+        let port = listener.local_addr().unwrap().port();
+        std::fs::write(&log_path, format!(
+            "server.go:599] Language server listening on random port at 12345 for HTTPS (gRPC)\nserver.go:607] Language server listening on random port at {port} for HTTP\n"
+        )).unwrap();
+        let server = tokio::spawn(async move {
+            let (mut connection, _) = listener.accept().await.unwrap();
+            let mut request = Vec::new();
+            loop {
+                let mut buffer = [0; 512];
+                let count = connection.read(&mut buffer).await.unwrap();
+                assert!(count > 0);
+                request.extend_from_slice(&buffer[..count]);
+                if request.ends_with(b"}") {
+                    break;
+                }
+            }
+            let request = String::from_utf8(request).unwrap();
+            assert!(request.starts_with("POST /exa.language_server_pb.LanguageServerService/GetCascadeTrajectorySteps HTTP/1.0\r\n"));
+            assert!(request.contains("\"stepOffset\":2"));
+            assert!(request.contains("\"cascadeId\":\"0bdd2166-d420-40c6-94be-70b93eb290c5\""));
+            let body = include_str!(
+                "../tests/fixtures/runtime-images/antigravity-1.1.22-generate-image.json"
+            );
+            connection.write_all(format!("HTTP/1.0 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{body}", body.len()).as_bytes()).await.unwrap();
+        });
+        let session_id = "0bdd2166-d420-40c6-94be-70b93eb290c5";
+        let event = serde_json::json!({"event":"step_update","step_update":{
+            "conversation_id":session_id,"step_index":2,"state":"DONE","step_type":"tool",
+            "tool_name":"generate_image","tool_info":{"name":"generate_image","parameters":{"ImageName":"input-is-not-a-result.jpg"}}
+        }}).to_string();
+        let (sender, mut receiver) = mpsc::unbounded_channel();
+        let mut capture = AntigravityStreamCapture::default();
+        process_antigravity_stream_line(
+            event.as_bytes(),
+            Some(session_id),
+            Some(&sender),
+            &mut capture,
+            &log_path,
+        )
+        .await
+        .unwrap();
+        server.await.unwrap();
+        let images = receiver.try_recv().unwrap();
+        assert_eq!(images.event_type, agent_run_image::IMAGE_EVENT);
+        assert_eq!(
+            images.payload["images"][0]["path"],
+            "file:///fixture/blue-paper-boat.jpg"
+        );
+        let public = receiver.try_recv().unwrap();
+        assert_eq!(public.event_type, "runtime.action");
+        assert!(!public.payload.to_string().contains(".jpg"));
+        process_antigravity_stream_line(
+            event.as_bytes(),
+            Some(session_id),
+            Some(&sender),
+            &mut capture,
+            &log_path,
+        )
+        .await
+        .unwrap();
+        assert!(
+            receiver.try_recv().is_err(),
+            "terminal replay must neither query nor re-emit"
+        );
+        let mut capture = AntigravityStreamCapture::default();
+        process_antigravity_stream_line(
+            event.as_bytes(),
+            Some(session_id),
+            Some(&sender),
+            &mut capture,
+            &log_path,
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            receiver.try_recv().unwrap().event_type,
+            "runtime.action",
+            "closed API is an image-only degradation"
+        );
+        assert!(receiver.try_recv().is_err());
+        assert!(
+            process_antigravity_stream_line(
+                event.as_bytes(),
+                Some("other-session"),
+                Some(&sender),
+                &mut AntigravityStreamCapture::default(),
+                &log_path
+            )
+            .await
+            .is_err()
+        );
+        std::fs::remove_dir_all(root).unwrap();
+    }
 
     #[test]
     fn structured_init_exposes_only_an_explicit_nonempty_model() {

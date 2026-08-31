@@ -208,8 +208,10 @@ impl MainCampMigrationSource {
     }
 }
 
-pub(crate) const CURRENT_DATA_CONTRACT_VERSION: &str = "v1.42";
-pub(crate) const CURRENT_PROJECTION_SCHEMA_VERSION: i64 = 83;
+pub(crate) const CURRENT_DATA_CONTRACT_VERSION: &str = "v1.43";
+pub(crate) const CURRENT_PROJECTION_SCHEMA_VERSION: i64 = 84;
+const V133_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.42";
+const V133_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION: i64 = 83;
 const V132_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.41";
 const V132_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION: i64 = 82;
 const V130_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.40";
@@ -586,6 +588,7 @@ struct CurrentMigrationState {
     v130: bool,
     v131: bool,
     v132: bool,
+    v133: bool,
 }
 
 impl CurrentMigrationState {
@@ -664,6 +667,22 @@ impl CurrentMigrationState {
             return false;
         }
         if contract == CURRENT_DATA_CONTRACT_VERSION && schema == CURRENT_PROJECTION_SCHEMA_VERSION
+        {
+            return self.v133
+                && self.v132
+                && self.v126
+                && self.v127
+                && self.v128
+                && self.v129
+                && self.v130
+                && self.v131
+                && self.admits_channel_v125(channel_classifier_admissible, through_v113);
+        }
+        if self.v133 {
+            return false;
+        }
+        if contract == V133_MIGRATION_SOURCE_DATA_CONTRACT_VERSION
+            && schema == V133_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION
         {
             return self.v132
                 && self.v126
@@ -2367,7 +2386,7 @@ fn connection_has_current_data_contract(connection: &Connection) -> rusqlite::Re
         SELECT contract_version = ?1
                AND projection_schema_version = ?2
                AND classifier_version = ?3
-               AND EXISTS(SELECT 1 FROM schema_migration WHERE version = 132)
+               AND EXISTS(SELECT 1 FROM schema_migration WHERE version = 133)
         FROM rovai_data_contract
         WHERE singleton = 1
         "#,
@@ -2447,7 +2466,8 @@ fn load_current_migration_state(
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 129),
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 130),
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 131),
-               EXISTS(SELECT 1 FROM schema_migration WHERE version = 132)
+               EXISTS(SELECT 1 FROM schema_migration WHERE version = 132),
+               EXISTS(SELECT 1 FROM schema_migration WHERE version = 133)
         "#,
         [],
         |row| {
@@ -2515,6 +2535,7 @@ fn load_current_migration_state(
                 v130: row.get(60)?,
                 v131: row.get(61)?,
                 v132: row.get(62)?,
+                v133: row.get(63)?,
             })
         },
     )
@@ -4979,6 +5000,9 @@ impl Database {
             if !self.schema_migration_applied(132)? {
                 migration_step!("migration_132", self.migrate_pending_quick_chat_v132());
             }
+            if !self.schema_migration_applied(133)? {
+                migration_step!("migration_133", self.migrate_runtime_images_v133());
+            }
             if let Err(error) =
                 crate::notification::maintain_notification_episode_retention(self.connection())
             {
@@ -5554,6 +5578,9 @@ impl Database {
         }
         if !self.schema_migration_applied(132)? {
             migration_step!("migration_132", self.migrate_pending_quick_chat_v132());
+        }
+        if !self.schema_migration_applied(133)? {
+            migration_step!("migration_133", self.migrate_runtime_images_v133());
         }
         if let Err(error) =
             crate::notification::maintain_notification_episode_retention(self.connection())
@@ -20305,7 +20332,7 @@ impl Database {
             transaction.execute(
                 "UPDATE rovai_data_contract SET contract_version = ?1, projection_schema_version = ?2,
                  updated_at = datetime('now') WHERE singleton = 1",
-                params![CURRENT_DATA_CONTRACT_VERSION, CURRENT_PROJECTION_SCHEMA_VERSION],
+                params![V133_MIGRATION_SOURCE_DATA_CONTRACT_VERSION, V133_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION],
             )?;
             transaction.execute(
                 "INSERT INTO schema_migration(version, applied_at) VALUES (132, datetime('now'))",
@@ -20317,6 +20344,65 @@ impl Database {
         let pragma_result = self.connection.execute_batch("PRAGMA foreign_keys = ON;");
         migration_result?;
         pragma_result?;
+        Ok(())
+    }
+
+    fn migrate_runtime_images_v133(&mut self) -> Result<()> {
+        let transaction = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let marker = transaction.query_row(
+            "SELECT contract_version, projection_schema_version, classifier_version
+             FROM rovai_data_contract WHERE singleton=1",
+            [],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, i64>(1)?,
+                    row.get::<_, String>(2)?,
+                ))
+            },
+        )?;
+        if marker.0 != V133_MIGRATION_SOURCE_DATA_CONTRACT_VERSION
+            || marker.1 != V133_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION
+            || !load_current_migration_state(&transaction)?.admits(&marker.0, marker.1, &marker.2)
+        {
+            anyhow::bail!("Runtime images migration requires the exact preceding data contract");
+        }
+        transaction.execute_batch(
+            "CREATE TABLE agent_run_image (
+                id TEXT PRIMARY KEY,
+                agent_run_id TEXT NOT NULL REFERENCES agent_run(id) ON DELETE CASCADE,
+                execution_epoch INTEGER NOT NULL,
+                tool_call_id TEXT NOT NULL,
+                source_key TEXT NOT NULL,
+                source_path TEXT,
+                content_blob_id TEXT REFERENCES managed_blob(id),
+                display_name TEXT NOT NULL,
+                media_type TEXT NOT NULL,
+                byte_size INTEGER NOT NULL CHECK(byte_size > 0 AND byte_size <= 20971520),
+                ordinal INTEGER NOT NULL CHECK(ordinal >= 0),
+                created_at TEXT NOT NULL,
+                CHECK((source_path IS NOT NULL) != (content_blob_id IS NOT NULL)),
+                UNIQUE(agent_run_id, execution_epoch, tool_call_id, source_key)
+             );
+             CREATE INDEX agent_run_image_run_idx ON agent_run_image(agent_run_id, execution_epoch, ordinal);
+             CREATE INDEX agent_run_image_blob_idx ON agent_run_image(content_blob_id)
+                WHERE content_blob_id IS NOT NULL;",
+        )?;
+        transaction.execute(
+            "UPDATE rovai_data_contract SET contract_version=?1, projection_schema_version=?2,
+             updated_at=datetime('now') WHERE singleton=1",
+            params![
+                CURRENT_DATA_CONTRACT_VERSION,
+                CURRENT_PROJECTION_SCHEMA_VERSION
+            ],
+        )?;
+        transaction.execute(
+            "INSERT INTO schema_migration(version, applied_at) VALUES(133, datetime('now'))",
+            [],
+        )?;
+        transaction.commit()?;
         Ok(())
     }
 
@@ -25018,6 +25104,7 @@ pub(crate) fn downgrade_current_schema_to_main_camp_source_for_test(
 
 #[cfg(test)]
 pub(crate) fn downgrade_current_schema_to_v131_source_for_test(connection: &Connection) {
+    connection.execute_batch("DROP TABLE IF EXISTS agent_run_image; DELETE FROM schema_migration WHERE version = 133;").unwrap();
     let applied: bool = connection
         .query_row(
             "SELECT EXISTS(SELECT 1 FROM schema_migration WHERE version = 132)",
@@ -27167,6 +27254,7 @@ mod tests {
             v130: version >= 130,
             v131: version >= 131,
             v132: version >= 132,
+            v133: version >= 133,
         }
     }
 
@@ -27272,6 +27360,12 @@ mod tests {
                 "current",
                 CURRENT_DATA_CONTRACT_VERSION,
                 CURRENT_PROJECTION_SCHEMA_VERSION,
+                133,
+            ),
+            (
+                "v1.42/schema-83 before local Runtime images",
+                V133_MIGRATION_SOURCE_DATA_CONTRACT_VERSION,
+                V133_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION,
                 132,
             ),
             (
@@ -27623,7 +27717,7 @@ mod tests {
             );
         }
 
-        let current = migration_state_through(132);
+        let current = migration_state_through(133);
         let v092_source = migration_state_through(91);
         let mut missing_intermediate = current;
         missing_intermediate.v84 = false;
@@ -27631,7 +27725,16 @@ mod tests {
         missing_index_migration.v129 = false;
         let mut missing_quick_chat_migration = current;
         missing_quick_chat_migration.v132 = false;
+        let mut missing_image_migration = current;
+        missing_image_migration.v133 = false;
         let rejected = [
+            (
+                "current marker without Runtime image migration",
+                missing_image_migration,
+                CURRENT_DATA_CONTRACT_VERSION,
+                CURRENT_PROJECTION_SCHEMA_VERSION,
+                V116_CLASSIFIER_VERSION,
+            ),
             (
                 "current marker without Quick Chat picker migration",
                 missing_quick_chat_migration,
@@ -27871,7 +27974,7 @@ mod tests {
             )
             .expect("current contract marker should load");
 
-        assert_eq!(state, migration_state_through(132));
+        assert_eq!(state, migration_state_through(133));
         assert!(state.admits(&contract, schema, &classifier));
         assert!(has_admissible_data_contract(
             &directory.join("rovai.sqlite")
@@ -30179,6 +30282,45 @@ mod tests {
             .unwrap();
         database.migrate_fast_lifetime_contract_v131().unwrap();
         database.migrate_pending_quick_chat_v132().unwrap();
+        // The additive image table, marker, and receipt must roll back together; reuse this source chain.
+        database.connection().execute_batch(
+            "CREATE TEMP TRIGGER reject_image_receipt BEFORE INSERT ON schema_migration
+             WHEN NEW.version = 133 BEGIN SELECT RAISE(ABORT, 'image receipt fixture failure'); END;"
+        ).unwrap();
+        assert!(
+            database
+                .migrate_runtime_images_v133()
+                .unwrap_err()
+                .to_string()
+                .contains("image receipt fixture failure")
+        );
+        assert!(!database.schema_migration_applied(133).unwrap());
+        let preceding: (String, i64) = database.connection().query_row(
+            "SELECT contract_version, projection_schema_version FROM rovai_data_contract WHERE singleton=1",
+            [], |row| Ok((row.get(0)?, row.get(1)?))
+        ).unwrap();
+        assert_eq!(
+            preceding,
+            (
+                V133_MIGRATION_SOURCE_DATA_CONTRACT_VERSION.to_owned(),
+                V133_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION
+            )
+        );
+        assert!(
+            !database
+                .connection()
+                .query_row(
+                    "SELECT EXISTS(SELECT 1 FROM sqlite_schema WHERE name='agent_run_image')",
+                    [],
+                    |row| row.get::<_, bool>(0)
+                )
+                .unwrap()
+        );
+        database
+            .connection()
+            .execute_batch("DROP TRIGGER reject_image_receipt")
+            .unwrap();
+        database.migrate_runtime_images_v133().unwrap();
         assert!(connection_has_current_data_contract(database.connection()).unwrap());
         let after: (String, String) = database.connection().query_row(
             "SELECT default_model_selection_json, runtime_binding_revision FROM agent_profile WHERE id = 'agent_1'", [], |row| Ok((row.get(0)?, row.get(1)?))).unwrap();

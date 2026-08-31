@@ -340,6 +340,10 @@ describe('active Camp event invalidation', () => {
       method: 'agent_run.cancelled',
       params: { campId: 'camp-1', agentRunId: 'run-1' }
     }, 'camp-1')).toBe(true)
+    const images = { method: 'agent_run.images.updated', params: { campId: 'camp-1', agentRunId: 'run-1', executionEpoch: 1 } }
+    expect(shouldRefreshActiveCampForCoreEvent(images, 'camp-1')).toBe(true)
+    expect(shouldRefreshActiveCampForCoreEvent(images, 'camp-2')).toBe(false)
+    expect(shouldRefreshActiveCampForCoreEvent(images, 'camp-1', true)).toBe(false)
   })
 
   it('refreshes membership cutover and reconciliation projections', () => {
@@ -1308,6 +1312,20 @@ describe('task event projections', () => {
       'kiro-message',
       'run-file-changes:run-kiro:1'
     ])
+    const images = [{
+      agentRunId: 'run-claude', executionEpoch: 1,
+      createdAt: '2026-08-28T06:49:55.000000Z',
+      images: [{ id: 'runtime-image', displayName: '结果.png', mediaType: 'image/png', byteSize: 32 }]
+    }]
+    const imageTimeline = campConversationTimeline([
+      message('claude-message', 1, 'run-claude', 'agent-claude', '2026-08-28T06:49:36.444822Z'),
+      message('kiro-message', 2, 'run-kiro', 'agent-kiro', '2026-08-28T06:49:40.099875Z')
+    ], [], [], [], [], [changes('run-claude', '2026-08-28T06:49:40.554605Z')], images)
+    expect(imageTimeline.map((item) => item.id)).toEqual([
+      'claude-message', 'run-images:run-claude:1', 'run-file-changes:run-claude:1', 'kiro-message'
+    ])
+    expect(campConversationTimeline([], [], [], [], [], [changes('run-claude', '2026-08-28T06:49:40Z')], images)
+      .map((item) => item.kind)).toEqual(['run_images', 'run_file_changes'])
   })
 
   it('renders a three-row Files Changed card with a quiet review entry and mixed totals', () => {

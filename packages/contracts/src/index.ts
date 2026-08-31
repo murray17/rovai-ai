@@ -1862,6 +1862,25 @@ export interface AgentRunFileChangesDetailView {
   files: AgentRunChangedFileDetailView[]
 }
 
+export interface AgentRunImageView {
+  id: string
+  displayName: string
+  mediaType: string
+  byteSize: number
+}
+
+export interface AgentRunImagesView {
+  agentRunId: string
+  executionEpoch: number
+  createdAt: string
+  images: AgentRunImageView[]
+}
+
+export interface AgentRunImageContent {
+  mediaType: string
+  data: string
+}
+
 export interface CampSnapshot {
   schemaVersion: 34
   throughGlobalSequence: number
@@ -1887,6 +1906,7 @@ export interface CampSnapshot {
   agentRuns: AgentRunView[]
   executionEvidence: AgentRunExecutionEvidenceView[]
   agentRunFileChanges: AgentRunFileChangesView[]
+  agentRunImages?: AgentRunImagesView[]
   contextManifests: ContextManifestView[]
   approvals: ActionApprovalView[]
   actions: ActionView[]
@@ -1919,6 +1939,7 @@ export interface CampOpenProjection {
   agentRuns: AgentRunView[]
   executionEvidence: AgentRunExecutionEvidenceView[]
   agentRunFileChanges: AgentRunFileChangesView[]
+  agentRunImages?: AgentRunImagesView[]
   approvals: ActionApprovalView[]
   timeline: DomainEventView[]
   coverage: {
@@ -3253,6 +3274,7 @@ export type CoreMethod =
   | 'agentRuns.resolveRecoveryBlocker'
   | 'camps.snapshot'
   | 'agentRunFileChanges.get'
+  | 'agentRunImages.read'
   | 'camp.messages.page'
   | 'camp.messages.around'
   | 'camp.messages.find'

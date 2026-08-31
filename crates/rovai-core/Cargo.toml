@@ -11,6 +11,7 @@ legacy-migration-tests = ["slow-tests"]
 
 [dependencies]
 anyhow = "1"
+base64 = "0.22"
 chrono = { version = "0.4", features = ["serde"] }
 dirs = "6"
 image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }

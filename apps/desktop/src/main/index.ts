@@ -227,6 +227,7 @@ const allowedMethods = new Set<CoreMethod>([
   'agentRuns.resolveRecoveryBlocker',
   'camps.snapshot',
   'agentRunFileChanges.get',
+  'agentRunImages.read',
   'camp.messages.page',
   'camp.messages.around',
   'camp.messages.find',
