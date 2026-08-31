@@ -51,7 +51,23 @@ last_updated: 2026-08-31
 - 文档治理9项、`docs:check`、以同一 main SHA 为 base 的 `docs:check:ci` 与 diff 空白检查通过。
 
 上述不调用模型、不读取日常渠道凭据，不等于钉钉真实扫码后的组织交互或远端收发验收；既有 NO-GO 项保留。
-分支推送/英文改名与用户要求的 daily App 安装结果由后续交付记录拥有，不以测试通过推断安装完成。
+
+### 分支与 daily App 交付
+
+- 合并提交 `972542ed` 已推送；GitHub 原生分支改名把 `rovai/channel接入` 统一为
+  `rovai/channel-integration`，本地 upstream 同步，未强推或创建 PR；共享 worktree 目录不变。
+- 以该代码快照执行 `pnpm package:mac:daily`，生成0.0.4 arm64 ad-hoc App，App/Core/CLI 签名门通过；
+  Main SHA-256 为 `9bd20f67e78461ba2c9de99aced2b8a6231418f4e52bb305cfc5de86523303a6`，包内与构建产物一致，
+  Core/CLI Mach-O UUID 也分别一致。此本地 daily 包不声称具有正式分发签名或公证资格。
+- 独立 fixture `rovai-channel-main-bootstrap.xkP7PKM8Dm` 的 packaged Bootstrap、未知 authority 保留、
+  Core 崩溃/WAL 恢复、可选子系统失败与同进程重试、双主题和200%布局验收通过；没有调用模型或访问日常凭据。
+- `pnpm install:mac:daily` 已完成源/同卷暂存/最终目标三处验证，安装到 `/Applications/Rovai AI.app`；
+  旧包保留为 `/Applications/Rovai AI.backup-before-channel-integration-20260831-972542ed.app`。
+  安装后 Main SHA 与 Core/CLI UUID 与验收候选一致。
+- 安装未退出或重启旧实例；Main34994/Core35007及原 Helper 继续存活，文件映射已随旧 bundle 移至备份。
+  这是磁盘安装交接，不是热升级；用户退出后须从规范 Applications 路径启动新版本。没有写入、复制或清空日常数据。
+
+钉钉新内置 Dialog 的真实扫码后验收、Owner/Core/群聊/卡片等外部 NO-GO 项继续保留。
 
 ## 2026-08-31 钉钉内置扫码与静默取消
 
