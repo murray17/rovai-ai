@@ -93,6 +93,8 @@ Preload 请求 transport 或 Renderer 错误读取改动还须运行 `pnpm test:
 成功值和结构化拒绝；临时目录与 headless CI 说明见[Electron 隔离世界回归](testing.md#electron-隔离世界回归)。
 修改启动页面、Supervisor Renderer gate 或 400ms 反馈时运行 `pnpm test:startup-presentation`：真实 Electron 中挂载生产
 App，以受控本机 API 和时钟验证页面框架、截止时间与 authority 请求门禁，不启动 Core 或访问日常数据。
+修改审批 Dock 的焦点、原生选项或 Reason 展示时运行 `pnpm test:approval-dock`，使用生产组件的隔离 Electron
+夹具验证键盘操作与动态布局，不启动 Core 或模型。
 修改文件预览分栏、Tab 或 File Change 详情时运行 `pnpm test:file-preview-layout`：真实 Electron 中组合生产标题栏、分栏、Tab 和 Viewer，
 验证鼠标/键盘调整、关闭与取消、比例持久化、单 Pane 替换、420–480px 会话紧凑排版与阅读位置保留；
 并验证常驻预览按钮、变更 Tab/当前文件切换、历史来源隔离、加载重试与原生拖拽区排除点击控件；不启动 Core 或模型。
