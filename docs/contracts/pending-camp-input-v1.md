@@ -63,7 +63,7 @@ Renderer 在挂载、回到前台、Core ready/reconnect 和上述变更时读�
 突发通知合并为一个在途请求；读取期间又有通知时补读一次最新权威，内容未变时不替换本地队列。
 读取失败保留已知队列，下一次通知或前台恢复再读取；它不重放发送、编辑命令或释放编辑占用。
 提交成功后先初始化下一份 Draft 的权威路由，再恢复输入，避免快速连续输入以空 source 冻结接收者。
-普通发布刷新复用已读取的同一 Draft/消息序列，不重复读取；晚到结果仍不得覆盖新草稿。
+普通发布刷新复用同一 Draft 已覆盖的消息序列，不因公共投影晚到而重复读取；晚到结果仍不得覆盖新草稿。
 
 `camp.pendingInputs.edit` 使用已有 UserCommandParams Envelope，command 包含 campId、pendingInputId、
 expectedRevision、nullable editToken 与 action：

@@ -1913,8 +1913,9 @@ export function CampWorkspace({
 
   useEffect(() => {
     if (!composerDraft || hasLocalDraftPayload || composerSubmitting || routingMutating) return
-    if (initializedComposerRoute.current?.draft === composerDraftRef.current
-      && initializedComposerRoute.current?.publishedMessageSequence === publishedMessageSequence) return
+    const initializedRoute = initializedComposerRoute.current
+    if (initializedRoute && initializedRoute.draft === composerDraftRef.current
+      && initializedRoute.publishedMessageSequence >= publishedMessageSequence) return
     const campId = snapshot.camp.id
     let cancelled = false
     // Pending publication bypasses submitMessage. Refresh Core's route projection

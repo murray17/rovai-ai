@@ -274,11 +274,12 @@ Object.assign(window, { continuationTest: { async run() {
   check(snapshot.messages.length === 1, 'Private admission must not add a public message')
   cases.push('an autosaved pending send avoids duplicate Draft saves and reads')
 
-  for (const admission of ['pending', 'published']) {
+  for (const admission of ['pending', 'published', 'published-lagging']) {
+    const published = admission !== 'pending'
     await reset(continuedDraft('message-1'))
     const previous = message(1, 'agent_2')
     snapshot = { ...snapshot, messages: [previous], ...running(previous) }
-    if (admission === 'published') {
+    if (published) {
       snapshot = { ...snapshot, turns: [], agentRuns: [] }
       queue = { ...queue, executionActive: false }
     }
@@ -286,23 +287,26 @@ Object.assign(window, { continuationTest: { async run() {
     editor().focus()
     document.execCommand('insertText', false, '第一条继续给芝士')
     await until(() => savedContinuationSources.length === 1, 'The first Draft must autosave its continuation')
-    const source = admission === 'published' ? 'message-2' : 'message-1'
+    const source = published ? 'message-2' : 'message-1'
     const nextDraft = continuedDraft(source)
     let heldNextDraft: ReturnType<typeof holdRead> | null = null
     let sends = 0
+    const publishSnapshot = async () => {
+      const sent = message(2, 'agent_2')
+      snapshot = { ...snapshot, throughGlobalSequence: 2, messages: [...snapshot.messages, sent], ...running(sent) }
+      await render()
+    }
     send = async (draft) => {
       sends += 1
       check(draft.continuationIntent?.recipient.agentId === 'agent_2', 'Both sends must retain the non-Lead recipient')
       drafts.set(campId, nextDraft)
       if (sends === 1) {
         if (admission === 'published') {
-          const sent = message(2, 'agent_2')
-          snapshot = { ...snapshot, throughGlobalSequence: 2, messages: [...snapshot.messages, sent], ...running(sent) }
-          await render()
+          await publishSnapshot()
         }
         heldNextDraft = holdRead()
       }
-      return { ...(admission === 'published' ? { publishedMessageSequence: 2 } : { pendingInputId: 'queued-next' }),
+      return { ...(published ? { publishedMessageSequence: 2 } : { pendingInputId: 'queued-next' }),
         agentRunIds: [], campTurnId: null, addressedAgentIds: ['agent_2'] }
     }
     const beforeSendReads = draftReads()
@@ -318,6 +322,10 @@ Object.assign(window, { continuationTest: { async run() {
     await until(() => editor().getAttribute('aria-disabled') !== 'true' && continuation() === '继续发给 芝士',
       'The next editor must restore the non-Lead route')
     check(draftReads() === beforeSendReads + 1, 'Route initialization must not trigger a duplicate publication read')
+    if (admission === 'published-lagging') {
+      await publishSnapshot()
+      check(draftReads() === beforeSendReads + 1, 'A late public projection must reuse the already initialized route')
+    }
     editor().focus()
     document.execCommand('insertText', false, '第二条还是给芝士')
     await until(() => savedContinuationSources.length === 2, 'The second Draft must autosave')
