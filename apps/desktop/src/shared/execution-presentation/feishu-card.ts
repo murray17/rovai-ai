@@ -147,7 +147,10 @@ function terminalTimelineCard(
 ): Record<string, unknown> {
   const elements: CardElement[] = []
   const duration = formatDuration(durationMs(snapshot.startedAt, snapshot.terminalAt))
-  if (duration) elements.push({ tag: 'markdown', content: `用时 ${duration}` })
+  if (duration) elements.push(
+    { tag: 'markdown', content: `用时 ${duration}` },
+    { tag: 'hr' }
+  )
   const timeline = blocks.map((block) => block.element)
   if (pageCount > 1) {
     timeline.push({ tag: 'markdown', content: `第 ${pageIndex + 1} / ${pageCount} 页`, text_align: 'center' })
@@ -158,7 +161,7 @@ function terminalTimelineCard(
     element_id: 'execution_process',
     expanded: outerExpanded,
     header: {
-      title: { tag: 'plain_text', content: commandCount ? `执行过程 · ${commandCount} 条` : '执行过程' },
+      title: { tag: 'plain_text', content: commandCount ? `执行过程 · ${commandCount} 条指令` : '执行过程' },
       icon: { tag: 'standard_icon', token: 'down-small-ccm_outlined', size: '16px 16px' },
       icon_position: 'left',
       icon_expanded_angle: -180

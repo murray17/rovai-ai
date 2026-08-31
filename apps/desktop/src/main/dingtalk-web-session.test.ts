@@ -75,6 +75,44 @@ describe('DingTalk console cookie transport', () => {
       .toBe('token+value=')
   })
 
+  it('uploads only a bounded PNG multipart body with the same Main cookie/CSRF boundary', async () => {
+    const f = fixture()
+    f.jar.push(cookie({ name: '_csrf_token_', value: 'csrf-fixture' }))
+    const image = new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10, 0, 42])
+    f.session.fetch.mockResolvedValueOnce(json({ success: true, data: { logoImg: 'media-1' } }))
+    await f.web.request('/microapp/uploadPic/logo.json', { method: 'POST', image })
+    const [url, options] = f.session.fetch.mock.calls[0]!
+    const headers = options!.headers as Headers
+    expect(new URL(String(url)).pathname).toBe('/microapp/uploadPic/logo.json')
+    expect(headers.get('Content-Type')).toMatch(/^multipart\/form-data; boundary=/u)
+    expect(headers.get('_csrf_token_')).toBe('csrf-fixture')
+    const form = await new Request(String(url), options).formData()
+    const file = form.get('file') as File
+    expect(file.name).toBe('member.png')
+    expect(file.type).toBe('image/png')
+    expect(new Uint8Array(await file.arrayBuffer())).toEqual(image)
+    expect([...form.keys()]).toEqual(['file'])
+  })
+
+  it.each(['wrong_path', 'wrong_method', 'json_body', 'not_png', 'oversized'])('rejects invalid image upload %s', async (kind) => {
+    const f = fixture()
+    const image = new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10, 0])
+    await expect(f.web.request(kind === 'wrong_path' ? '/baseInfo' : '/microapp/uploadPic/logo.json', {
+      method: kind === 'wrong_method' ? 'GET' : 'POST',
+      ...(kind === 'json_body' ? { body: { extra: 'not allowed' } } : {}),
+      image: kind === 'not_png' ? new Uint8Array([1]) : kind === 'oversized' ? new Uint8Array(2_097_153) : image
+    })).rejects.toThrow('dingtalk_console_request_rejected')
+    expect(f.session.fetch).not.toHaveBeenCalled()
+  })
+
+  it('retains a successful void console mutation instead of inventing a business failure', async () => {
+    const f = fixture()
+    f.session.fetch.mockResolvedValueOnce(json({ success: true }))
+    expect(await f.web.request('/openapp/unifiedapp/u-app/publishVersion', { method: 'POST', body: {} }))
+      .toBeUndefined()
+    expect(f.session.fetch).toHaveBeenCalledOnce()
+  })
+
   it('snapshots only reviewed DingTalk cookie domains', async () => {
     const f = fixture()
     f.jar.push(cookie({ domain: '.unrelated.example', value: 'unrelated-secret' }))

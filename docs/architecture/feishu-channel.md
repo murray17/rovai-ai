@@ -8,7 +8,7 @@ last_updated: 2026-08-30
 
 # 飞书渠道架构
 
-字段、状态和恢复合同见 [Feishu Channel v5](../contracts/feishu-channel-v5.md)，credential 与 Developer Session 持久化见
+字段、状态和恢复合同见 [Feishu Channel v6](../contracts/feishu-channel-v6.md)，credential 与 Developer Session 持久化见
 [Channel Storage v2](../contracts/channel-storage-v2.md)，模型输入证据见
 [ContextManifest Evidence v22](../contracts/context-manifest-evidence-v22.md)，取舍理由见
 [v1.33 决策记录](../versions/v1.33/decisions.md)。
@@ -287,21 +287,33 @@ Run 进入终态后，Core 先把控制台置为 `terminal_pending`；公开 evi
 
 终态分页是无持久视图状态的 Card 2.0 callback。payload 只含 action、AgentRun、sealed snapshot sequence 和目标页；Core
 只授权 callback envelope 中的 Owner、冻结 App、authoritative external message、`terminal_sealed` exact sequence 与合法页码。
-Main 随后按该页直接 `updateCard` 原消息一次，外层保持展开（包括返回第 1 页）；单条 command 默认关闭并在客户端本地展开，不写 display/page/view state，
+Main 随后把该页作为同步 response card 返回，由飞书更新原卡一次，外层保持展开（包括返回第 1 页）；单条 command 默认关闭并在客户端本地展开，不写 display/page/view state，
 不创建 Outbox，也不触发 pump。Migration 125 物理移除旧 display/page/view 列。展开/收起本身不需要 callback。重复点击同一页
 仍可成功；旧 snapshot、错误 App/message、越界页与 non-owner fail closed。
 
-SDK 用飞书 event ID 去重 callback，不把多次点击同页当成同一次重投；卡片更新检查远端业务码，成功仅回空 ACK。
-Main 翻页处理器有 2.5 秒响应预算，超时后的读取不再触发 patch；在途 HTTP outcome 不明时不自动重试。
+SDK 用飞书 event ID 去重 callback，不把多次点击同页当成同一次重投。分页成功只返回目标卡，无成功 Toast，
+不在 ACK 前后独立 PATCH，避免预先更新的新页被本次点击的空应答退回旧页。运行中与封存投递仍使用 `updateCard` 并检查远端业务码。
+Main 翻页处理器有 2.5 秒响应预算，超时只返回安全错误，不追加迟到 response card 或补偿更新。
 可响应的故障返回固定安全 Toast；若整个 App/设备/长连接离线，由飞书显示平台错误，本地不能保证自定义文案。
-显式预览复用同一渲染器与现有连接，页面只在 Main 内存保存；预览失效不读写假的 Core Run 或日用 SQLite。
+显式预览复用同一渲染器、同步应答与现有连接，页面只在 Main 内存保存；预览失效不读写假的 Core Run 或日用 SQLite。
+本地 response-ready 日志仅表示应答已准备好，不证明飞书已显示目标页。
 
 控制台只能由该 Agent 的冻结 App 创建、更新和撤回；下一条 root request admission 无论 sealed 卡当前显示哪一页，都召回
 同 ChannelConversation 中更早 Turn 的控制台，recall 等待在途 upsert 并把飞书 target revoked 当作幂等成功。控制台是临时
 execution presentation，不是 CampMessage，也不参与请求业务 settlement。
 
-公开 Agent 正文永远新建无标题 Markdown 消息，不覆盖控制台、queue ack 或其他正文。`CurrentUserMention` 在群/话题
-通过 SDK structured mention 投影为飞书原生 mention，不靠普通 `@名称` 或手写标签猜身份。公开 CampMessage 的 available
+公开 Agent 正文新建无标题 Card 2.0，不覆盖控制台、queue ack 或其他正文。正文下方的“发送给”行只消费 Core 从公共
+MessageDelivery 提取的有序 A2A 接收对象及 Structured CurrentUserMention；多个原生 @ 用空格分隔。飞书专用正文从
+Structured Content 排除 CurrentUserMention，不改写源消息、Renderer/Agent Context，不按字面 `@你` 删除文字。
+卡片顶部的回复摘要只沿 CampMessage 的 `reply_to_camp_message_id` 读取同 Camp 的直接父消息，最多 3 行/240 个 Unicode
+字符，不读取 Human body cache 或嵌套 ExternalQuote，也不从 Topic root 推断关系；引用作者与摘要静态转义，不再触发 @。
+无关系不显示，父消息不可用只显示占位。Owner 名称只在 canonical Principal 与作者 Bot 账号匹配时使用该账号名称。
+原生 Bot ID 来自与作者同账号的已发布绑定，Owner ID 来自原 Principal 在发送 App 下的映射；缺失时显示静态名称，
+不猜身份。正文中的原始 `<at>` 标签不获得通知能力。提及只展示/通知，不参与 A2A dispatch 或创建新 Run。
+长正文按 24KB 卡片预算完整拆分，每片仍回复同一 Topic root，仅第一张显示回复摘要，只有最后一张展示接收对象；Main 使用同 Bot SDK client
+发送 interactive，并以 delivery/分片稳定 UUID 覆盖飞书一小时内的重试去重。旧未发送 delivery 在 claim 内升级投影，
+已发送卡不回填；钉钉保持原输出格式。详细恢复及字段见 [Feishu Channel v6](../contracts/feishu-channel-v6.md#4-永久公开正文与接收对象)。
+公开 CampMessage 的 available
 Managed Attachment v2 引用逐个生成原生 image/file delivery：Main 发送前经 Core 重新解析 authority，并在读取后复核
 字节数与 digest；正文先终态，附件按 ordinal 依次发送且独立重试。单个附件最终失败只追加 attention，不重放正文或
 已成功附件。请求 settlement 只等待 terminal Turn 与永久正文、附件、attention；queue ack、控制台及 recall 不阻塞 FIFO。

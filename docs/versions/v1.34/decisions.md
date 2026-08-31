@@ -28,7 +28,7 @@ Secret 只存在 Main 内存、OS safeStorage 和发往固定钉钉 endpoint 的
 重签排除、物化和 stdout/stderr 解析。生产包在 public-client/device-flow 或 token broker 明确前保持 NO-GO；不得复用第三方
 工具内置 Client ID，也不得回退为人工粘贴 AppSecret。
 
-当前规范见[钉钉渠道架构](../../architecture/dingtalk-channel.md#developer-gateway-与-oauth)和
+当前规范见[钉钉渠道架构](../../architecture/dingtalk-channel.md#developer-web-session-与控制台-api)和
 [DingTalk Channel v2](../../contracts/dingtalk-channel-v2.md)。
 
 ### 后果
@@ -144,6 +144,36 @@ Bot。旧 `.bin` clean break：不读取、不解密、不迁移，只允许 Mai
 - **自动解密迁移旧文件：** 启动仍需访问旧系统凭据库，并把 clean break 变成跨平台兼容矩阵；
 - **把 Secret 放 Renderer 或配置文件：** 扩大页面、日志、IPC 与注入攻击面；
 - **只把 credential 放 SQLite、Session 留 safeStorage：** 仍保留两套恢复和账号切换半状态。
+
+<a id="v1-34-d05"></a>
+## V1.34-D05：钉钉开发者控制面改用 Main-owned Web Session
+
+### 背景与决定
+
+预注册 Rovai OAuth Client 的分发和 token broker 会引入额外授权主体与运营边界；普通客户端无法仅凭自己的一次开发者
+扫码直接完成既有控制面操作。用户要求沿用飞书式的 Main-owned Developer Session，并授权在其测试组织验证。
+官方控制台的 Cookie/SSO 已在隔离 Electron 中完成身份、重启恢复、同一企业应用创建、配置和发布验证。
+
+因此用 Main 隔离 Web Session 与封闭 Console Gateway 替代 Rovai OAuth Client/loopback/refresh-token 链路，
+不借用平台 Client Secret 或 Chrome Profile。Session 与 Bot credential 仍由现有 SQLite/Core 原子事务持久化；
+Bot OpenAPI/Stream 使用独立 App 凭据，不使用开发者 Cookie。取消、临时网络和存储失败保留旧 Session；
+只有明确的登录失效才让用户重连。
+
+这一决定替代 D01 的 OAuth Client、developer service 与“拒绝网页 console”条款，不改变其删除 DWS 的决定，
+也不改变 D02 的统一 admission、D03 的保守 feature gate 或 D04 的 SQLite 秘密边界。
+当前规范见 [DingTalk Channel v4](../../contracts/dingtalk-channel-v4.md)与
+[钉钉渠道架构](../../architecture/dingtalk-channel.md#developer-web-session-与控制台-api)。
+
+### 取舍与后果
+
+- 接受官方网页内部接口的漂移维护成本，换取无需 Rovai OAuth Client 配置的本地开发者登录和应用管理；
+  只能准入有官方源码与实测依据的封闭操作，未知 shape 保留原应用并停止，不能猜测或自动重新创建。
+- 平台规定的 access_token query 只存在固定 HTTPS 请求内，不能进入日志或 Renderer；Cookie 有效期由平台拥有，
+  不承诺固定天数，也不模拟或延长平台会话。
+- 旧 OAuth Profile 无法无损转成 Cookie，保留旧记录直到显式成功重连；已发布 App 与 Bot Secret 不换绑。
+- 不选继续维护 OAuth Client/token broker：增加与当前纯本地产品不一致的授权和部署依赖。
+- 不选复用第三方 Client Secret、用户浏览器 Profile 或网页点击脚本：扩大秘密/自动化边界，不能提供可靠的身份冻结和读回。
+- 隔离发布通过不等于生产 Camp/群聊/卡片 callback 全链路通过；验收状态仍独立记录在本版本实施计划。
 
 ## 版本编号合并说明
 

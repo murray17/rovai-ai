@@ -17,6 +17,7 @@ import type {
 import type { DingTalkAppCredential } from './channel-credential-store'
 import { DingTalkOpenApiClient } from './dingtalk-open-api'
 import { DingTalkStreamRegistry } from './dingtalk-stream-registry'
+import { DingTalkProvisioningError } from './dingtalk-member-bot-provisioner'
 
 describe('DingTalk channel account connection', () => {
   it.each([
@@ -389,6 +390,24 @@ describe('DingTalk channel account connection', () => {
       lastCompletedStep: null
     }, 'account_verified')).toBe(true)
   })
+
+  it('blocks an interrupted create at the durable account_verified boundary instead of creating twice', async () => {
+    const f = completedBotFixture({ beforeApp: 'account_verified' })
+    await expect(f.service.publish('agent-a')).rejects.toThrow('dingtalk_app_create_unknown_remote_state')
+    expect(f.provision).not.toHaveBeenCalled()
+    expect(f.intent()).toMatchObject({ state: 'failed_unknown_remote_state', remoteUnifiedAppId: null })
+  })
+
+  it('persists a proven app ID in the failure transaction when its normal checkpoint failed', async () => {
+    const f = completedBotFixture({ beforeApp: 'created' })
+    f.provision.mockRejectedValueOnce(new DingTalkProvisioningError('dingtalk_app_identity_checkpoint_failed', {
+      facts: { unifiedAppId: 'u-app-a' }
+    }))
+    await expect(f.service.publish('agent-a')).rejects.toThrow('dingtalk_app_identity_checkpoint_failed')
+    expect(f.intent()).toMatchObject({ state: 'failed_recoverable', remoteUnifiedAppId: 'u-app-a',
+      lastCompletedStep: 'app_created' })
+    expect((await f.service.get()).activeProvisioning?.remoteAppId).toBe('u-app-a')
+  })
 })
 
 function completedBotFixture(options: {
@@ -396,6 +415,7 @@ function completedBotFixture(options: {
   rejectCredentialWrites?: number
   otherAccount?: boolean
   emptyFrozenAppId?: boolean
+  beforeApp?: 'created' | 'account_verified'
 } = {}) {
   const owner = identity('corp-a', 'owner-a')
   const activeOwner = options.otherAccount ? identity('corp-other', 'owner-other') : owner
@@ -418,6 +438,9 @@ function completedBotFixture(options: {
     approvalMode: 'NO_APPROVAL', lastCompletedStep: 'completed', failureCode: null,
     version: 14, createdAt: '2026-08-30T00:00:00Z', updatedAt: '2026-08-30T00:00:00Z'
   }
+  if (options.beforeApp) intent = { ...intent, state: options.beforeApp, remoteUnifiedAppId: null,
+    appKey: null, robotCode: null, credentialRef: null, versionId: null, approvalMode: null,
+    lastCompletedStep: options.beforeApp === 'created' ? null : options.beforeApp }
   let credential: DingTalkAppCredential | null = options.credentialPresent ? {
     appKey: bot.appKey, appSecret: 'fixture-recovered-secret', robotCode: bot.robotCode
   } : null
@@ -426,7 +449,7 @@ function completedBotFixture(options: {
   const core = {
     async request(method: string, params: { command?: Record<string, unknown> }): Promise<unknown> {
       if (method === 'channels.dingtalk.snapshot') return {
-        schemaVersion: 1, account, memberBots: [bot], publicationIntents: [intent],
+        schemaVersion: 1, account, memberBots: options.beforeApp ? [] : [bot], publicationIntents: [intent],
         pendingBindingCount: 0, bindingIssueCount: 0,
         transportConversations: [], pendingAggregates: []
       }

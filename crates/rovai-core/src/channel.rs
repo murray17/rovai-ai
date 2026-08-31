@@ -14,7 +14,8 @@ use uuid::Uuid;
 use crate::{
     camp_content::{
         ExternalQuoteAttachmentSummary, StructuredCampMessageContent, StructuredCampMessageSegment,
-        canonical_content_digest, mentions_current_user, normalize_content, validate_content,
+        canonical_content_digest, mentions_current_user, normalize_content,
+        render_current_plain_text, validate_content,
     },
     camp_id::CampId,
     collaboration::{
@@ -8414,6 +8415,22 @@ fn project_active_request_deliveries(transaction: &Transaction<'_>, now: &str) -
                 serde_json::from_str(&structured_content_json)?;
             if let Some(author_app_id) = bot_app_id(transaction, &provider, &agent_id)? {
                 if !body.trim().is_empty() {
+                    let payload = if provider == FEISHU_PROVIDER {
+                        feishu_agent_output_projection(
+                            transaction,
+                            &message_id,
+                            &agent_id,
+                            &author_app_id,
+                            &content,
+                        )?
+                    } else {
+                        json!({
+                            "kind": "agent_output",
+                            "agentId": agent_id,
+                            "body": body,
+                            "mentionPrincipal": mentions_current_user(&content),
+                        })
+                    };
                     insert_delivery(
                         transaction,
                         &request_id,
@@ -8422,12 +8439,7 @@ fn project_active_request_deliveries(transaction: &Transaction<'_>, now: &str) -
                         &author_app_id,
                         Some(&agent_id),
                         Some(&message_id),
-                        &json!({
-                            "kind": "agent_output",
-                            "agentId": agent_id,
-                            "body": body,
-                            "mentionPrincipal": mentions_current_user(&content),
-                        }),
+                        &payload,
                         now,
                     )?;
                 }
@@ -8462,6 +8474,196 @@ fn project_active_request_deliveries(transaction: &Transaction<'_>, now: &str) -
             }
         }
     }
+    Ok(())
+}
+
+fn feishu_agent_output_projection(
+    transaction: &Transaction<'_>,
+    message_id: &str,
+    agent_id: &str,
+    author_app_id: &str,
+    content: &[StructuredCampMessageSegment],
+) -> Result<Value> {
+    // This is a Feishu-only presentation, not a rewrite of the Camp message or
+    // Agent context. In particular, literal "@你" text is never string-stripped.
+    let body_content: Vec<_> = content
+        .iter()
+        .filter(|segment| {
+            !matches!(
+                segment,
+                StructuredCampMessageSegment::CurrentUserMention { .. }
+            )
+        })
+        .cloned()
+        .collect();
+    let body = render_current_plain_text(transaction, &body_content)?;
+    let member_recipients = query_rows(
+        transaction,
+        r#"
+        SELECT delivery.recipient_agent_id,
+               COALESCE(profile.display_name, bot.bot_display_name, delivery.recipient_agent_id),
+               bot.bot_open_id
+        FROM message_delivery AS delivery
+        LEFT JOIN agent_profile AS profile ON profile.id = delivery.recipient_agent_id
+        LEFT JOIN feishu_member_bot AS bot
+          ON bot.agent_id = delivery.recipient_agent_id
+         AND bot.status = 'published'
+         AND bot.account_id = (
+             SELECT account_id FROM feishu_member_bot WHERE app_id = ?2
+         )
+        WHERE delivery.message_id = ?1 AND delivery.delivery_kind = 'public_a2a'
+        ORDER BY delivery.recipient_canonical_position, delivery.id
+        "#,
+        params![message_id, author_app_id],
+        |row| {
+            Ok(json!({
+                "agentId": row.get::<_, String>(0)?,
+                "displayName": row.get::<_, String>(1)?,
+                "openId": row.get::<_, Option<String>>(2)?,
+            }))
+        },
+    )?;
+    Ok(json!({
+        "kind": "agent_output",
+        "presentationVersion": 1,
+        "agentId": agent_id,
+        "body": body,
+        "mentionPrincipal": mentions_current_user(content),
+        "memberRecipients": member_recipients,
+        "reply": feishu_agent_reply_projection(transaction, message_id, author_app_id)?,
+    }))
+}
+
+fn feishu_agent_reply_projection(
+    transaction: &Transaction<'_>,
+    message_id: &str,
+    author_app_id: &str,
+) -> Result<Value> {
+    // The semantic parent belongs to CampMessage, never to Feishu's Topic root.
+    // Only a surviving, earlier message in this same Camp may supply an excerpt.
+    let source = transaction
+        .query_row(
+            r#"
+            SELECT source.reply_to_camp_message_id, parent.structured_content_json,
+                   CASE parent.author_type
+                     WHEN 'agent' THEN COALESCE(profile.display_name, '队员')
+                     WHEN 'external_principal' THEN COALESCE(
+                         NULLIF(trim(account.user_name), ''), principal.display_name, '消息作者'
+                     )
+                     WHEN 'user' THEN 'Owner'
+                     ELSE '系统'
+                   END
+            FROM camp_message AS source
+            LEFT JOIN camp_message AS parent
+              ON parent.id = source.reply_to_camp_message_id
+             AND parent.camp_id = source.camp_id
+             AND parent.sequence < source.sequence
+             AND parent.tombstoned_at IS NULL
+            LEFT JOIN agent_profile AS profile
+              ON parent.author_type = 'agent' AND profile.id = parent.author_id
+            LEFT JOIN external_principal AS principal
+              ON parent.author_type = 'external_principal' AND principal.id = parent.author_id
+            LEFT JOIN feishu_member_bot AS bot ON bot.app_id = ?2
+            LEFT JOIN feishu_owner_identity AS owner
+              ON owner.account_id = bot.account_id
+             AND parent.author_type = 'external_principal'
+             AND owner.canonical_owner_principal_id = parent.author_id
+            LEFT JOIN feishu_account AS account ON account.id = owner.account_id
+            WHERE source.id = ?1
+            "#,
+            params![message_id, author_app_id],
+            |row| {
+                Ok((
+                    row.get::<_, Option<String>>(0)?,
+                    row.get::<_, Option<String>>(1)?,
+                    row.get::<_, String>(2)?,
+                ))
+            },
+        )
+        .optional()?;
+    let Some((Some(parent_id), parent_content_json, author_name)) = source else {
+        return Ok(Value::Null);
+    };
+    let Some(content) = parent_content_json
+        .and_then(|json| serde_json::from_str::<StructuredCampMessageContent>(&json).ok())
+    else {
+        return Ok(json!({"status": "unavailable"}));
+    };
+    // Preview only the immediate parent's own words, not a recursive ExternalQuote
+    // chain or the localized CurrentUserMention label used by the desktop UI.
+    let body_content: Vec<_> = content
+        .into_iter()
+        .filter(|segment| {
+            !matches!(
+                segment,
+                StructuredCampMessageSegment::CurrentUserMention { .. }
+                    | StructuredCampMessageSegment::ExternalQuote { .. }
+            )
+        })
+        .collect();
+    let Ok(body) = render_current_plain_text(transaction, &body_content) else {
+        return Ok(json!({"status": "unavailable"}));
+    };
+    Ok(json!({
+        "status": "available",
+        "messageId": parent_id,
+        "authorDisplayName": author_name.chars().take(120).collect::<String>(),
+        "body": feishu_reply_excerpt(&body),
+    }))
+}
+
+fn feishu_reply_excerpt(body: &str) -> String {
+    // A quote is a bounded preview; the public output itself remains complete.
+    let mut lines = body.trim().lines();
+    let first_lines = lines.by_ref().take(3).collect::<Vec<_>>().join("\n");
+    let mut chars = first_lines.chars();
+    let mut excerpt = chars.by_ref().take(240).collect::<String>();
+    if lines.next().is_some() || chars.next().is_some() {
+        if excerpt.chars().count() == 240 {
+            excerpt.pop();
+        }
+        excerpt.truncate(excerpt.trim_end().len());
+        excerpt.push('…');
+    }
+    excerpt
+}
+
+fn upgrade_legacy_feishu_output_claim(
+    transaction: &Transaction<'_>,
+    claim: &mut ClaimedChannelDelivery,
+) -> Result<()> {
+    if claim.provider != FEISHU_PROVIDER
+        || claim.delivery_kind != "agent_output"
+        || claim.payload.get("presentationVersion").is_some()
+    {
+        return Ok(());
+    }
+    // Upgrade only an unsent, already-leased delivery from its source authority.
+    // Sent messages are never backfilled; retry keeps this frozen projection.
+    let (message_id, agent_id, content_json): (String, String, String) = transaction.query_row(
+        r#"
+        SELECT message.id, message.author_id, message.structured_content_json
+        FROM channel_delivery AS delivery
+        JOIN camp_message AS message ON message.id = delivery.source_camp_message_id
+        WHERE delivery.id = ?1 AND delivery.status = 'attempting'
+          AND message.author_type = 'agent' AND message.tombstoned_at IS NULL
+          AND message.author_id = delivery.source_agent_id
+        "#,
+        [&claim.delivery_id],
+        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+    )?;
+    let content: StructuredCampMessageContent = serde_json::from_str(&content_json)?;
+    claim.payload = feishu_agent_output_projection(
+        transaction,
+        &message_id,
+        &agent_id,
+        &claim.target_app_id,
+        &content,
+    )?;
+    transaction.execute(
+        "UPDATE channel_delivery SET payload_json = ?2 WHERE id = ?1 AND status = 'attempting'",
+        params![claim.delivery_id, serde_json::to_string(&claim.payload)?],
+    )?;
     Ok(())
 }
 
@@ -8980,7 +9182,7 @@ fn claim_deliveries(
         if changed == 0 {
             continue;
         }
-        let claim = transaction.query_row(
+        let mut claim = transaction.query_row(
             r#"
             SELECT delivery.id, delivery.request_id, delivery.delivery_kind,
                    delivery.target_app_id, COALESCE(bot.credential_ref, ''),
@@ -9090,6 +9292,7 @@ fn claim_deliveries(
                 })
             },
         )?;
+        upgrade_legacy_feishu_output_claim(transaction, &mut claim)?;
         claims.push(claim);
     }
     Ok(claims)
@@ -10545,6 +10748,278 @@ where
 mod tests {
     use super::*;
     use crate::{command::CommandResultStatus, test_support::seeded_runtime_database_owned};
+
+    #[test]
+    fn feishu_output_projects_frozen_recipients_without_rewriting_camp_content() {
+        // The SQL presentation seam owns recipient order/account isolation,
+        // same-Camp reply excerpts and legacy unsent recovery. No Runtime or
+        // full Camp fixture is required.
+        let mut connection = rusqlite::Connection::open_in_memory().unwrap();
+        connection
+            .execute_batch(
+                r#"
+            CREATE TABLE agent_profile(id TEXT PRIMARY KEY, display_name TEXT);
+            CREATE TABLE feishu_member_bot(
+                agent_id TEXT PRIMARY KEY, account_id TEXT, app_id TEXT,
+                bot_display_name TEXT, bot_open_id TEXT, status TEXT
+            );
+            CREATE TABLE message_delivery(
+                id TEXT PRIMARY KEY, message_id TEXT, recipient_agent_id TEXT,
+                recipient_canonical_position INTEGER, delivery_kind TEXT
+            );
+            CREATE TABLE camp_message(
+                id TEXT PRIMARY KEY, author_id TEXT, author_type TEXT,
+                structured_content_json TEXT, body TEXT, tombstoned_at TEXT,
+                camp_id TEXT, sequence INTEGER, reply_to_camp_message_id TEXT
+            );
+            CREATE TABLE external_principal(id TEXT PRIMARY KEY, display_name TEXT);
+            CREATE TABLE feishu_account(id TEXT PRIMARY KEY, user_name TEXT);
+            CREATE TABLE feishu_owner_identity(account_id TEXT, canonical_owner_principal_id TEXT);
+            CREATE TABLE channel_delivery(
+                id TEXT PRIMARY KEY, status TEXT, source_camp_message_id TEXT,
+                source_agent_id TEXT, payload_json TEXT
+            );
+            INSERT INTO agent_profile VALUES
+                ('agent_2', '响子'), ('agent_3', '爱丽丝'), ('agent_4', '离线队员');
+            INSERT INTO external_principal VALUES
+                ('owner_a', '飞书成员'), ('owner_b', '另一名用户');
+            INSERT INTO feishu_account VALUES ('account_a', 'Murray'), ('account_b', 'Other');
+            INSERT INTO feishu_owner_identity VALUES ('account_a', 'owner_a'), ('account_b', 'owner_b');
+            INSERT INTO feishu_member_bot VALUES
+                ('agent_1', 'account_a', 'cli_sender', '惠', 'ou_sender', 'published'),
+                ('agent_2', 'account_a', 'cli_recipient', '响子', 'ou_kyoko', 'published'),
+                ('agent_3', 'account_b', 'cli_foreign', '爱丽丝', 'ou_foreign', 'published'),
+                ('agent_4', 'account_a', 'cli_disabled', '离线队员', 'ou_disabled', 'disabled');
+            INSERT INTO message_delivery VALUES
+                ('delivery_z', 'message_1', 'agent_2', 0, 'public_a2a'),
+                ('delivery_a', 'message_1', 'agent_3', 1, 'public_a2a'),
+                ('delivery_b', 'message_1', 'agent_4', 2, 'public_a2a'),
+                ('delivery_completion', 'message_1', 'agent_1', NULL, 'gather_completion'),
+                ('delivery_other', 'message_other', 'agent_other', 0, 'public_a2a');
+            INSERT INTO channel_delivery VALUES
+                ('channel_delivery', 'attempting', 'message_1', 'agent_1', '{}');
+        "#,
+            )
+            .unwrap();
+        let content = vec![
+            StructuredCampMessageSegment::CurrentUserMention {
+                user_id: CURRENT_USER_ID.to_string(),
+            },
+            StructuredCampMessageSegment::Text {
+                text: "文字里的 @你 和 @其他人 不能被当成寻址。".to_string(),
+            },
+        ];
+        let original_json = serde_json::to_string(&content).unwrap();
+        let original_digest = canonical_content_digest(&content).unwrap();
+        connection.execute(
+            "INSERT INTO camp_message VALUES ('message_1', 'agent_1', 'agent', ?1, '@你 原始显示缓存', NULL, 'camp_a', 10, 'message_parent')",
+            [&original_json],
+        ).unwrap();
+        let parent_content = json!([
+            {"kind": "current_user_mention", "userId": CURRENT_USER_ID},
+            {"kind": "external_quote", "senderDisplayName": "最早的消息作者",
+             "body": "不要再次引用话题开头。", "attachmentSummaries": [], "contentDigest": "fixture"},
+            {"kind": "text", "text": "真正的上一条 A2A 消息。"},
+        ]);
+        connection.execute(
+            "INSERT INTO camp_message VALUES ('message_parent', 'agent_2', 'agent', ?1, '旧显示缓存', NULL, 'camp_a', 2, 'message_owner')",
+            [parent_content.to_string()],
+        ).unwrap();
+        for (id, author_type, author_id, camp_id, sequence, tombstoned_at) in [
+            (
+                "message_owner",
+                "external_principal",
+                "owner_a",
+                "camp_a",
+                1,
+                None,
+            ),
+            (
+                "message_other_owner",
+                "external_principal",
+                "owner_b",
+                "camp_a",
+                3,
+                None,
+            ),
+            (
+                "message_local_owner",
+                "user",
+                CURRENT_USER_ID,
+                "camp_a",
+                4,
+                None,
+            ),
+            (
+                "message_foreign_camp",
+                "agent",
+                "agent_2",
+                "camp_b",
+                1,
+                None,
+            ),
+            ("message_later", "agent", "agent_2", "camp_a", 11, None),
+            (
+                "message_deleted",
+                "agent",
+                "agent_2",
+                "camp_a",
+                5,
+                Some("deleted"),
+            ),
+        ] {
+            connection.execute(
+                "INSERT INTO camp_message VALUES (?1, ?2, ?3, ?4, '不要读取正文缓存', ?5, ?6, ?7, NULL)",
+                params![id, author_id, author_type,
+                    json!([{"kind": "text", "text": "这次真正要检查的内容。"}]).to_string(),
+                    tombstoned_at, camp_id, sequence],
+            ).unwrap();
+        }
+        let transaction = connection.transaction().unwrap();
+        let projected = feishu_agent_output_projection(
+            &transaction,
+            "message_1",
+            "agent_1",
+            "cli_sender",
+            &content,
+        )
+        .unwrap();
+        assert_eq!(projected["presentationVersion"], 1);
+        assert_eq!(
+            projected["body"],
+            "文字里的 @你 和 @其他人 不能被当成寻址。"
+        );
+        assert_eq!(projected["mentionPrincipal"], true);
+        assert_eq!(
+            projected["reply"],
+            json!({
+                "status": "available", "messageId": "message_parent", "authorDisplayName": "响子",
+                "body": "真正的上一条 A2A 消息。",
+            })
+        );
+        assert_eq!(
+            projected["memberRecipients"],
+            json!([
+                {"agentId": "agent_2", "displayName": "响子", "openId": "ou_kyoko"},
+                {"agentId": "agent_3", "displayName": "爱丽丝", "openId": null},
+                {"agentId": "agent_4", "displayName": "离线队员", "openId": null},
+            ])
+        );
+        let mut claim = ClaimedChannelDelivery {
+            delivery_id: "channel_delivery".to_string(),
+            provider: FEISHU_PROVIDER.to_string(),
+            request_id: Some("request_1".to_string()),
+            delivery_kind: "agent_output".to_string(),
+            target_app_id: "cli_sender".to_string(),
+            credential_ref: "feishu/member/agent_1".to_string(),
+            chat_id: "oc_topic".to_string(),
+            topic_key: "om_root".to_string(),
+            conversation_kind: "topic".to_string(),
+            payload: json!({"body": "@你 原始显示缓存", "mentionPrincipal": true}),
+            attempt_count: 1,
+            update_message_id: None,
+            recipient_open_id: Some("ou_owner_in_sender_app".to_string()),
+        };
+        upgrade_legacy_feishu_output_claim(&transaction, &mut claim).unwrap();
+        assert_eq!(claim.payload, projected);
+        transaction
+            .execute("UPDATE agent_profile SET display_name = '后来改名'", [])
+            .unwrap();
+        upgrade_legacy_feishu_output_claim(&transaction, &mut claim).unwrap();
+        assert_eq!(
+            claim.payload, projected,
+            "retry must keep the existing output projection"
+        );
+        let stored: (String, String) = transaction
+            .query_row(
+                "SELECT structured_content_json, body FROM camp_message WHERE id = 'message_1'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(stored, (original_json, "@你 原始显示缓存".to_string()));
+        assert_eq!(canonical_content_digest(&content).unwrap(), original_digest);
+        for (parent_id, expected_name) in [
+            ("message_owner", "Murray"),
+            ("message_other_owner", "另一名用户"),
+            ("message_local_owner", "Owner"),
+        ] {
+            transaction
+                .execute(
+                    "UPDATE camp_message SET reply_to_camp_message_id = ?1 WHERE id = 'message_1'",
+                    [parent_id],
+                )
+                .unwrap();
+            let reply =
+                feishu_agent_reply_projection(&transaction, "message_1", "cli_sender").unwrap();
+            assert_eq!(
+                reply,
+                json!({
+                    "status": "available", "messageId": parent_id,
+                    "authorDisplayName": expected_name, "body": "这次真正要检查的内容。",
+                })
+            );
+        }
+        for parent_id in [
+            "message_missing",
+            "message_foreign_camp",
+            "message_later",
+            "message_deleted",
+            "message_1",
+        ] {
+            transaction
+                .execute(
+                    "UPDATE camp_message SET reply_to_camp_message_id = ?1 WHERE id = 'message_1'",
+                    [parent_id],
+                )
+                .unwrap();
+            assert_eq!(
+                feishu_agent_reply_projection(&transaction, "message_1", "cli_sender").unwrap(),
+                json!({"status": "unavailable"}),
+                "invalid parent must not leak content or fall back to the Topic root: {parent_id}",
+            );
+        }
+        transaction
+            .execute(
+                "UPDATE camp_message SET reply_to_camp_message_id = NULL WHERE id = 'message_1'",
+                [],
+            )
+            .unwrap();
+        assert_eq!(
+            feishu_agent_reply_projection(&transaction, "message_1", "cli_sender").unwrap(),
+            Value::Null,
+        );
+        for (body, expected) in [
+            (
+                "  第一行\r\n第二行\r\n第三行\r\n第四行  ".to_string(),
+                "第一行\n第二行\n第三行…".to_string(),
+            ),
+            ("😀".repeat(240), "😀".repeat(240)),
+            ("😀".repeat(241), format!("{}…", "😀".repeat(239))),
+            (" \n ".to_string(), String::new()),
+        ] {
+            let excerpt = feishu_reply_excerpt(&body);
+            assert_eq!(excerpt, expected);
+            assert!(excerpt.lines().count() <= 3);
+            assert!(excerpt.chars().count() <= 240);
+        }
+        let public_only = feishu_agent_output_projection(
+            &transaction,
+            "no_deliveries",
+            "agent_1",
+            "cli_sender",
+            &content[1..],
+        )
+        .unwrap();
+        assert_eq!(public_only["memberRecipients"], json!([]));
+        assert_eq!(public_only["mentionPrincipal"], false);
+        assert_eq!(public_only["reply"], Value::Null);
+        claim.provider = DINGTALK_PROVIDER.to_string();
+        claim.payload = json!({"body": "@你 钉钉保持原样", "mentionPrincipal": true});
+        let dingtalk_payload = claim.payload.clone();
+        upgrade_legacy_feishu_output_claim(&transaction, &mut claim).unwrap();
+        assert_eq!(claim.payload, dingtalk_payload);
+    }
 
     fn host_envelope<P>(command_id: &str, payload: P) -> CommandEnvelope<P> {
         CommandEnvelope {
@@ -13243,6 +13718,8 @@ mod tests {
         assert!(claimed.iter().any(|delivery| {
             delivery["deliveryKind"] == "agent_output"
                 && delivery["payload"]["body"] == "partial channel output"
+                && delivery["payload"]["presentationVersion"] == 1
+                && delivery["payload"]["memberRecipients"] == json!([])
         }));
         assert!(claimed.iter().all(|delivery| !matches!(
             delivery["deliveryKind"].as_str(),

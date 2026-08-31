@@ -4,7 +4,7 @@ import { DatabaseSync } from 'node:sqlite'
 import type { CardActionEvent, LarkChannel } from '@larksuiteoapi/node-sdk'
 import { executionConsoleCard, executionConsolePageCount } from '../shared/execution-presentation/feishu-card'
 import { feishuExecutionPreviewFixture } from './feishu-execution-preview-fixture'
-import { feishuPageFailure, withFeishuPageDeadline, type FeishuCardActionResponse } from './feishu-card-action'
+import { feishuPageCardResponse, feishuPageFailure, withFeishuPageDeadline, type FeishuCardActionResponse } from './feishu-card-action'
 
 const ARGUMENT = '--feishu-execution-preview='
 const RUN_PREFIX = 'feishu-preview:'
@@ -23,7 +23,7 @@ export type FeishuPreviewOwner = {
   openIdDigest: string
 }
 
-type PreviewChannel = Pick<LarkChannel, 'rawClient' | 'updateCard'>
+type PreviewChannel = Pick<LarkChannel, 'rawClient'>
 type PreviewResponse = FeishuCardActionResponse
 type PreviewRecord = {
   appId: string
@@ -36,7 +36,7 @@ type PreviewRecord = {
 
 export interface FeishuExecutionPreviewHost {
   connected(agentId: string, appId: string, channel: PreviewChannel): Promise<void>
-  handleCardAction(appId: string, event: CardActionEvent, channel: PreviewChannel): Promise<PreviewResponse | null>
+  handleCardAction(appId: string, event: CardActionEvent): Promise<PreviewResponse | null>
 }
 
 export function parseFeishuPreviewRequest(argv: readonly string[]): FeishuPreviewRequest | null {
@@ -152,7 +152,7 @@ export class FeishuExecutionPreviewService implements FeishuExecutionPreviewHost
     }
   }
 
-  async handleCardAction(appId: string, event: CardActionEvent, channel: PreviewChannel): Promise<PreviewResponse | null> {
+  async handleCardAction(appId: string, event: CardActionEvent): Promise<PreviewResponse | null> {
     const value = event.action.value
     if (!isRecord(value) || value.action !== 'execution_console_page'
       || typeof value.agentRunId !== 'string' || !value.agentRunId.startsWith(RUN_PREFIX)) return null
@@ -174,13 +174,13 @@ export class FeishuExecutionPreviewService implements FeishuExecutionPreviewHost
         const owner = this.#readOwner(this.#request.agentId, appId)
         if (owner.accountId !== record.owner.accountId || owner.openIdDigest !== record.owner.openIdDigest
           || owner.openId !== operatorOpenId) return unavailable()
-        // Immutable pages in Main memory, no Core page/view state, no pump and one patch only.
+        // One response-card update, no competing PATCH or Core page/view state.
         checkDeadline()
-        await channel.updateCard(record.messageId, structuredClone(record.pages[pageIndex]))
+        const response = feishuPageCardResponse(structuredClone(record.pages[pageIndex]))
         checkDeadline()
-        this.#report({ stage: 'page_updated', pageIndex, pageCount: record.pages.length,
-          messageIdDigest: identityDigest(record.messageId), patches: 1 })
-        return {}
+        this.#report({ stage: 'page_response_ready', pageIndex, pageCount: record.pages.length,
+          messageIdDigest: identityDigest(record.messageId), responseCards: 1 })
+        return response
       })
     } catch (error) {
       const { response, ...diagnostic } = feishuPageFailure(error)

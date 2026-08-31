@@ -1,8 +1,14 @@
 export type FeishuCardActionResponse = {
   toast?: { type: 'info' | 'success' | 'warning' | 'error'; content: string }
+  card?: { type: 'raw'; data: Record<string, unknown> }
 }
 
 const PAGE_CALLBACK_BUDGET_MS = 2500
+
+/** The callback response is the sole page update; never PATCH before an empty ACK. */
+export function feishuPageCardResponse(card: Record<string, unknown>): FeishuCardActionResponse {
+  return { card: { type: 'raw', data: card } }
+}
 
 class FeishuPageTimeout extends Error {
   constructor() { super('feishu_card_action_timeout') }
@@ -43,7 +49,7 @@ export function feishuPageFailure(error: unknown): {
   const cause = fields.cause && typeof fields.cause === 'object' ? fields.cause as Record<string, unknown> : {}
   const providerCode = typeof cause.code === 'number' && Number.isSafeInteger(cause.code) ? cause.code : undefined
   return {
-    reason: unavailable ? 'core_unavailable' : timeout ? 'callback_timeout' : 'card_update_failed',
+    reason: unavailable ? 'core_unavailable' : timeout ? 'callback_timeout' : 'card_response_failed',
     ...(providerCode === undefined ? {} : { providerCode }),
     response: { toast: { type: 'error', content: unavailable
       ? 'Rovai 执行服务暂不可用，请检查本机 Rovai 状态后重试'

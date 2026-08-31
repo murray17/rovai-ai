@@ -188,6 +188,8 @@ function controlledChannels(identities: Record<string, { openId: string; name: s
   send: ReturnType<typeof vi.fn>
   updateCard: ReturnType<typeof vi.fn>
   recallMessage: ReturnType<typeof vi.fn>
+  createMessage: ReturnType<typeof vi.fn>
+  replyMessage: ReturnType<typeof vi.fn>
   getChatMode: ReturnType<typeof vi.fn>
   isInChat: Map<string, ReturnType<typeof vi.fn>>
 } {
@@ -195,6 +197,8 @@ function controlledChannels(identities: Record<string, { openId: string; name: s
   const send = vi.fn(async () => ({ messageId: 'om_sent' }))
   const updateCard = vi.fn(async () => undefined)
   const recallMessage = vi.fn(async () => undefined)
+  const createMessage = vi.fn(async () => ({ code: 0, data: { message_id: 'om_output' } }))
+  const replyMessage = vi.fn(async () => ({ code: 0, data: { message_id: 'om_output_reply' } }))
   const getChatMode = vi.fn(async (_chatId: string): Promise<'p2p' | 'group' | 'topic'> => 'group')
   const isInChat = new Map<string, ReturnType<typeof vi.fn>>()
   const createChannel = vi.fn((options: { appId: string }) => {
@@ -215,6 +219,7 @@ function controlledChannels(identities: Record<string, { openId: string; name: s
       getChatInfo: vi.fn(async () => ({ name: '测试群' })),
       rawClient: {
         im: { v1: {
+          message: { create: createMessage, reply: replyMessage },
           chatMembers: {
             isInChat: observeMembership
           }
@@ -222,7 +227,7 @@ function controlledChannels(identities: Record<string, { openId: string; name: s
       }
     }
   }) as unknown as NonNullable<ChannelHostDependencies['createChannel']>
-  return { createChannel, handlers, send, updateCard, recallMessage, getChatMode, isInChat }
+  return { createChannel, handlers, send, updateCard, recallMessage, createMessage, replyMessage, getChatMode, isInChat }
 }
 
 function inertInterval(): Pick<ChannelHostDependencies, 'setInterval' | 'clearInterval'> {
@@ -1747,9 +1752,10 @@ describe('channel settings service', () => {
   it('shares the existing Bot connection with an explicit preview without admitting preview callbacks to Core', async () => {
     const harness = controlledChannels({ cli_a: { openId: 'ou_bot_a', name: '审阅员' } })
     const requests: string[] = []
+    const previewResponse = { card: { type: 'raw' as const, data: { schema: '2.0', body: { elements: [] } } } }
     const executionPreview = {
       connected: vi.fn(async () => undefined),
-      handleCardAction: vi.fn(async () => ({}))
+      handleCardAction: vi.fn(async () => previewResponse)
     }
     const service = new ChannelSettingsService({
       credentialStore: memoryCredentialStore({ 'feishu-member-a': { appId: 'cli_a', appSecret: 'secret-a' } }),
@@ -1773,7 +1779,8 @@ describe('channel settings service', () => {
       messageId: 'om_preview', chatId: 'oc_preview', operator: { openId: 'ou_owner' },
       action: { tag: 'button', value: { action: 'execution_console_page', agentRunId: 'feishu-preview:fixture', pageIndex: 1, snapshotSequence: 1 } }
     })
-    expect(result).toEqual({})
+    expect(result).toEqual(previewResponse)
+    expect(harness.updateCard).not.toHaveBeenCalled()
     expect(requests).not.toContain('channels.executionConsole.page.authorize')
     expect(requests).not.toContain('channels.executionConsole.source')
     await service.stop()
@@ -2063,11 +2070,9 @@ describe('channel settings service', () => {
     const authorizationIndex = commands.findIndex(({ method }) => method === 'channels.executionConsole.page.authorize')
     const sourceIndex = commands.findIndex(({ method }) => method === 'channels.executionConsole.source')
     expect(authorizationIndex).toBeLessThan(sourceIndex)
-    expect(pageResult).toEqual({})
-    expect(harness.updateCard).toHaveBeenCalledTimes(1)
-    expect(harness.updateCard).toHaveBeenCalledWith(
-      'om_console',
-      expect.objectContaining({
+    expect(harness.updateCard).not.toHaveBeenCalled()
+    expect(pageResult).toEqual({
+      card: { type: 'raw', data: expect.objectContaining({
         header: expect.objectContaining({
           title: { tag: 'plain_text', content: '审阅员 · 已完成' }
         }),
@@ -2079,8 +2084,8 @@ describe('channel settings service', () => {
             ])
           })
         ]) })
-      })
-    )
+      }) }
+    })
 
     const sourceReadsBeforeOutsider = commands.filter(({ method }) => method === 'channels.executionConsole.source').length
     const outsiderExecutionResult = await cardHandler({
@@ -2108,7 +2113,7 @@ describe('channel settings service', () => {
       toast: { type: 'warning', content: '仅 Rovai Owner 可以操作执行记录' }
     })
     expect(commands.filter(({ method }) => method === 'channels.executionConsole.source')).toHaveLength(sourceReadsBeforeOutsider)
-    expect(harness.updateCard).toHaveBeenCalledTimes(1)
+    expect(harness.updateCard).not.toHaveBeenCalled()
 
     const repeatedPageResult = await cardHandler({
       messageId: 'om_console',
@@ -2131,8 +2136,8 @@ describe('channel settings service', () => {
         }
       }
     })
-    expect(repeatedPageResult).toEqual({})
-    expect(harness.updateCard).toHaveBeenCalledTimes(2)
+    expect(repeatedPageResult).toEqual(pageResult)
+    expect(harness.updateCard).not.toHaveBeenCalled()
     expect(commands.filter(({ method }) => method === 'channels.host.tick')).toHaveLength(
       tickCountBeforePaging
     )
@@ -2145,7 +2150,7 @@ describe('channel settings service', () => {
     await service.stop()
   })
 
-  it.each(['unavailable', 'authorize', 'source', 'patch'] as const)(
+  it.each(['unavailable', 'authorize', 'source', 'source_error'] as const)(
     'returns a safe page error for %s without dispatching late work or pumping the outbox', async (failure) => {
       const harness = controlledChannels({ cli_a: { openId: 'ou_bot_a', name: '审阅员' } })
       let release!: (value: unknown) => void
@@ -2175,13 +2180,15 @@ describe('channel settings service', () => {
             if (failure === 'unavailable') throw Object.assign(new Error('private-core-diagnostic'), { code: 'full_core_unavailable' })
             return failure === 'authorize' ? deferred : authorized
           }
-          if (method === 'channels.executionConsole.source') return failure === 'source' ? deferred : source
+          if (method === 'channels.executionConsole.source') {
+            if (failure === 'source_error') throw new Error('private-core-diagnostic')
+            return failure === 'source' ? deferred : source
+          }
           return { status: 'applied', code: 'ok', payload: {} }
         })
       })
       await service.start()
       await vi.waitFor(() => expect(requests).toContain('channels.host.tick'))
-      if (failure === 'patch') harness.updateCard.mockReturnValueOnce(deferred)
       const tickCount = requests.filter(method => method === 'channels.host.tick').length
       vi.useFakeTimers()
       try {
@@ -2193,11 +2200,12 @@ describe('channel settings service', () => {
         await vi.advanceTimersByTimeAsync(2500)
         expect(response).toEqual({ toast: { type: 'error', content: failure === 'unavailable'
           ? 'Rovai 执行服务暂不可用，请检查本机 Rovai 状态后重试'
-          : '翻页响应超时，请稍后重试' } })
+          : failure === 'source_error' ? '执行记录暂时无法翻页，请稍后重试'
+            : '翻页响应超时，请稍后重试' } })
         release(failure === 'authorize' ? authorized : source)
         await pending
         await vi.advanceTimersByTimeAsync(0)
-        expect(harness.updateCard).toHaveBeenCalledTimes(failure === 'patch' ? 1 : 0)
+        expect(harness.updateCard).not.toHaveBeenCalled()
         if (failure === 'authorize' || failure === 'unavailable') expect(requests).not.toContain('channels.executionConsole.source')
         expect(requests.filter(method => method === 'channels.host.tick')).toHaveLength(tickCount)
         expect(JSON.stringify(response)).not.toContain('private-core-diagnostic')
@@ -2746,7 +2754,7 @@ describe('channel settings service', () => {
     { label: 'live send', runStatus: 'running', updateMessageId: null },
     { label: 'sealed send', runStatus: 'succeeded', updateMessageId: null },
     { label: 'sealed update', runStatus: 'succeeded', updateMessageId: 'om_console' }
-  ])('keeps $label console disclosure separate from permanent Agent Markdown', async ({ runStatus, updateMessageId }) => {
+  ])('keeps $label console disclosure separate from permanent Agent output cards', async ({ runStatus, updateMessageId }) => {
     const harness = controlledChannels({ cli_a: { openId: 'ou_bot_a', name: '芝士' } })
     const settlements: Array<Record<string, unknown>> = []
     let delivered = false
@@ -2789,7 +2797,9 @@ describe('channel settings service', () => {
                 credentialRef: 'feishu-member-a', chatId: 'oc_group', topicKey: '',
                 conversationKind: 'group', attemptCount: 1, updateMessageId: null,
                 recipientOpenId: 'ou_owner',
-                payload: { kind: 'agent_output', body: '这是永久正文。', mentionPrincipal: true }
+                payload: { kind: 'agent_output', presentationVersion: 1, body: '这是永久正文。', mentionPrincipal: true,
+                  reply: { status: 'available', messageId: 'cm_parent', authorDisplayName: 'Murray', body: '请检查这个问题。' },
+                  memberRecipients: [{ agentId: 'agent-b', displayName: '响子', openId: 'ou_bot_b' }] }
               }]
             }
           }
@@ -2827,7 +2837,7 @@ describe('channel settings service', () => {
     })
     if (updateMessageId) {
       expect(harness.updateCard).toHaveBeenCalledWith(updateMessageId, expectedCard)
-      expect(harness.send).toHaveBeenCalledTimes(1)
+      expect(harness.send).not.toHaveBeenCalled()
     } else {
       expect(harness.send).toHaveBeenCalledWith('oc_group', { card: expectedCard }, undefined)
       expect(harness.updateCard).not.toHaveBeenCalled()
@@ -2856,11 +2866,16 @@ describe('channel settings service', () => {
     }
     expect(JSON.stringify(card)).not.toContain('private-stdout-token')
     expect(JSON.stringify(card).includes('tests passed')).toBe(runStatus === 'succeeded')
-    expect(harness.send).toHaveBeenCalledWith(
-      'oc_group',
-      { markdown: '这是永久正文。' },
-      { mentions: [{ key: 'request_author', openId: 'ou_owner', name: 'Owner' }] }
-    )
+    expect(harness.createMessage).toHaveBeenCalledTimes(1)
+    const outputRequest = harness.createMessage.mock.calls[0][0] as unknown as { data: { content: string; msg_type: string; receive_id: string } }
+    expect(outputRequest.data).toMatchObject({ msg_type: 'interactive', receive_id: 'oc_group' })
+    expect(JSON.parse(outputRequest.data.content)).toEqual({
+      schema: '2.0', config: { update_multi: true }, body: { elements: [
+        { tag: 'markdown', text_size: 'notation', content: '> 回复 Murray\n> 请检查这个问题。' },
+        { tag: 'markdown', content: '这是永久正文。' },
+        { tag: 'markdown', text_size: 'notation', content: '发送给 <at id="ou_bot_b"></at> <at id="ou_owner"></at>' }
+      ] }
+    })
     expect(JSON.stringify(harness.send.mock.calls)).not.toContain('Rovai 队员回复')
     expect(settlements.every((command) => command.outcome === 'sent')).toBe(true)
     await service.stop()
@@ -2952,7 +2967,7 @@ describe('channel settings service', () => {
             targetAppId: 'cli_a', credentialRef: 'feishu-member-a', chatId: 'oc_group',
             topicKey: '', conversationKind: 'group', attemptCount: 1, updateMessageId: null,
             recipientOpenId: null,
-            payload: { kind: 'agent_output', body: '先发送正文。', mentionPrincipal: false }
+            payload: { kind: 'agent_output', presentationVersion: 1, body: '先发送正文。', mentionPrincipal: false, memberRecipients: [] }
           }, {
             deliveryId: 'delivery-image', requestId: 'request-1', deliveryKind: 'agent_attachment',
             targetAppId: 'cli_a', credentialRef: 'feishu-member-a', chatId: 'oc_group',
@@ -2983,7 +2998,8 @@ describe('channel settings service', () => {
       await service.start()
       await vi.waitFor(() => expect(settlements).toHaveLength(2))
 
-      expect(harness.send.mock.calls.filter(([, input]) => 'markdown' in input)).toHaveLength(1)
+      expect(harness.createMessage).toHaveBeenCalledTimes(1)
+      expect(harness.send.mock.calls.filter(([, input]) => 'markdown' in input)).toHaveLength(0)
       expect(harness.send.mock.calls.filter(([, input]) => 'image' in input)).toHaveLength(1)
       expect(settlements).toEqual(expect.arrayContaining([
         expect.objectContaining({ deliveryId: 'delivery-body', outcome: 'sent' }),

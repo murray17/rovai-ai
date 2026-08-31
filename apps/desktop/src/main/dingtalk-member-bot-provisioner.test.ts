@@ -6,8 +6,8 @@ import {
   type DingTalkDeveloperRequest
 } from './dingtalk-developer-gateway'
 /*
- * Keep these tests on the raw Open Platform response fields. The direct
- * provisioner no longer receives DWS's projected output aliases.
+ * This seam consumes the console gateway's normalized DTOs. Wire shapes and
+ * identity-bound request bodies are covered in dingtalk-developer-gateway.test.
  */
 import type { DingTalkDeveloperSessionService } from './dingtalk-developer-session'
 import {
@@ -21,11 +21,11 @@ import {
 describe('direct DingTalk Open Platform member Bot provisioning', () => {
   it('recovers completed application credentials with read-only console calls and no new app or version', async () => {
     const gateway = resumeGateway({ initialStatus: { versionStatus: 'RELEASE' } })
-    const resolveIconMediaId = vi.fn(async () => 'unused')
+    const readAvatarPng = vi.fn(async () => new Uint8Array())
     const onStep = vi.fn<DingTalkProvisioningInput['onStep']>(async () => undefined)
 
     const result = await provisioner(gateway).create(input({
-      frozen: frozen(), resumeState: 'completed', resolveIconMediaId, onStep
+      frozen: frozen(), resumeState: 'completed', readAvatarPng, onStep
     }))
 
     expect(result).toMatchObject({
@@ -35,7 +35,7 @@ describe('direct DingTalk Open Platform member Bot provisioning', () => {
     expect(gateway.operations).toEqual([
       'app.get', 'app.credentials.get', 'app.robot.get', 'app.version.status'
     ])
-    expect(resolveIconMediaId).not.toHaveBeenCalled()
+    expect(readAvatarPng).not.toHaveBeenCalled()
     expect(onStep).toHaveBeenCalledWith('credentials_read', expect.objectContaining({
       unifiedAppId: 'u-app-1', appKey: 'ding-app-1'
     }))
@@ -49,11 +49,12 @@ describe('direct DingTalk Open Platform member Bot provisioning', () => {
         { unifiedAppId: 'u-app-1', iconMediaId: 'media-1' }
       ],
       'app.credentials.get': [{ appKey: 'ding-app-1', appSecret: 'secret-1' }],
+      'app.avatar.upload': [{ iconMediaId: 'media-1', iconUrl: 'https://static.dingtalk.com/media/avatar.png' }],
       'app.update': [{}],
       'app.robot.config': [{}],
       'app.robot.enable': [{}],
       'app.robot.get': [{
-        mode: 'STREAM', name: '芝士', iconMediaId: 'media-1', robotStatus: 'ONLINE'
+        robotCode: 'ding-app-1', mode: 'STREAM', name: '芝士', iconMediaId: 'media-1', robotStatus: 'ONLINE'
       }],
       'app.permission.add': [{}],
       'app.permission.list': [{
@@ -65,16 +66,21 @@ describe('direct DingTalk Open Platform member Bot provisioning', () => {
       }],
       'app.version.create': [{ versionId: 'version-1' }],
       'app.version.status': [{ status: 'DEVELOPMENT' }, { versionStatus: 'RELEASE' }],
+      'app.version.configure': [{}],
       'app.version.checkApproval': [{ approvalMode: 'NO_APPROVAL' }],
       'app.version.publish': [{ published: true }]
     })
     const steps: string[] = []
-    const resolveIcon = vi.fn(async () => 'media-1')
+    const readAvatarPng = vi.fn(async () => new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10, 0]))
     const result = await provisioner(gateway).create(input({
-      resolveIconMediaId: resolveIcon,
+      readAvatarPng,
       requiredScopeValues: ['scope.robot'],
       requiredEventCodes: ['event.robot'],
-      onStep: async (step) => { steps.push(step) }
+      onStep: async (step) => {
+        if (step === 'version_created') expect(gateway.operations).not.toContain('app.version.configure')
+        if (step === 'app_created') expect(gateway.operations).toEqual(['app.create'])
+        steps.push(step)
+      }
     }))
 
     expect(result).toEqual({
@@ -84,17 +90,17 @@ describe('direct DingTalk Open Platform member Bot provisioning', () => {
       robotCode: 'ding-app-1',
       versionId: 'version-1'
     })
-    expect(resolveIcon).toHaveBeenCalledTimes(1)
+    expect(readAvatarPng).toHaveBeenCalledTimes(1)
     expect(steps).toEqual([
       'account_verified', 'app_created', 'credentials_read', 'avatar_configured',
       'robot_configured', 'permissions_configured', 'version_created', 'version_released'
     ])
     expect(gateway.operations).toEqual([
       'app.create', 'app.get', 'app.credentials.get',
-      'app.update', 'app.get', 'app.robot.config', 'app.robot.enable',
+      'app.avatar.upload', 'app.update', 'app.get', 'app.robot.enable', 'app.robot.config',
       'app.robot.get', 'app.permission.add', 'app.permission.list',
       'app.event.subscribe', 'app.event.list', 'app.version.create',
-      'app.version.status', 'app.version.checkApproval', 'app.version.publish',
+      'app.version.status', 'app.version.configure', 'app.version.checkApproval', 'app.version.publish',
       'app.version.status'
     ])
     expect(gateway.requests.find((request) => request.operation === 'app.permission.list')?.values)
@@ -110,6 +116,8 @@ describe('direct DingTalk Open Platform member Bot provisioning', () => {
         keyword: 'event.robot',
         pageSize: '50'
       })
+    expect(gateway.requests.find((request) => request.operation === 'app.version.publish')?.values)
+      .toMatchObject({ confirmedSensitive: false })
   })
 
   it('locks an app create whose remote result is unknown', async () => {
@@ -123,6 +131,41 @@ describe('direct DingTalk Open Platform member Bot provisioning', () => {
         unknownRemoteState: true
       } satisfies Partial<DingTalkProvisioningError>)
     expect(gateway.operations).toEqual(['app.create'])
+  })
+
+  it('retains a proven app ID when its Core checkpoint fails and stops before reading credentials', async () => {
+    const gateway = new ScriptedGateway({ 'app.create': [{ unifiedAppId: 'u-app-1' }] })
+    await expect(provisioner(gateway).create(input({ onStep: async (step) => {
+      if (step === 'app_created') throw new Error('core temporarily unavailable')
+    } }))).rejects.toMatchObject({
+      message: 'dingtalk_app_identity_checkpoint_failed', unknownRemoteState: false,
+      facts: { unifiedAppId: 'u-app-1' }
+    })
+    expect(gateway.operations).toEqual(['app.create'])
+  })
+
+  it('does not commit a version until the draft identity has been durably frozen', async () => {
+    const gateway = resumeGateway({})
+    const original = gateway.execute.bind(gateway)
+    gateway.execute = async (request) => request.operation === 'app.version.create'
+      ? { versionId: 'version-1' } : original(request)
+    await expect(provisioner(gateway).create(input({
+      frozen: { ...frozen(), versionId: undefined }, resumeState: 'permissions_configured',
+      onStep: async (step) => { if (step === 'version_created') throw new Error('checkpoint unavailable') }
+    }))).rejects.toThrow('checkpoint unavailable')
+    expect(gateway.operations).not.toContain('app.version.configure')
+    expect(gateway.operations).not.toContain('app.version.publish')
+  })
+
+  it('recovers the frozen remote presentation after a local member rename', async () => {
+    const gateway = resumeGateway({ initialStatus: { versionStatus: 'RELEASE' } })
+    const original = gateway.execute.bind(gateway)
+    gateway.execute = async (request) => request.operation === 'app.get'
+      ? { unifiedAppId: 'u-app-1', appName: '芝士' } : original(request)
+    expect(await provisioner(gateway).create(input({
+      appName: '后来改名', frozen: frozen(), resumeState: 'completed'
+    }))).toMatchObject({ unifiedAppId: 'u-app-1', appKey: 'ding-app-1' })
+    expect(gateway.operations).not.toContain('app.update')
   })
 
   it('locks a create whose successful HTTP response cannot identify the app', async () => {
@@ -287,7 +330,7 @@ function input(overrides: Partial<DingTalkProvisioningInput> = {}): DingTalkProv
   return {
     appName: '芝士',
     description: 'Rovai AI 队员 · 鉴定士',
-    resolveIconMediaId: async () => 'media-1',
+    readAvatarPng: async () => new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10, 0]),
     expectedCorpId: 'corp-1',
     expectedUserId: 'owner-1',
     requiredScopeValues: [],
@@ -325,6 +368,7 @@ function resumeGateway(options: {
       options.afterPublishStatus ?? { versionStatus: 'RELEASE' }
     ],
     'app.version.checkApproval': [options.checkApproval ?? { approvalMode: 'NO_APPROVAL' }],
+    'app.version.configure': [{}],
     'app.version.publish': [options.publish ?? { published: true }]
   })
 }

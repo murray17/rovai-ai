@@ -1,5 +1,6 @@
 import {
   DingTalkDeveloperApiError,
+  dingTalkApplicationPresentation,
   type DingTalkDeveloperRequest,
   type DingTalkDeveloperBackend
 } from './dingtalk-developer-gateway'
@@ -35,7 +36,7 @@ export type ProvisionedDingTalkMemberBot = Required<Pick<
 export type DingTalkProvisioningInput = {
   appName: string
   description: string
-  resolveIconMediaId(appKey: string, appSecret: string): Promise<string>
+  readAvatarPng(): Promise<Uint8Array>
   expectedCorpId: string
   expectedUserId: string
   frozen?: Partial<ProvisionedDingTalkMemberBot>
@@ -136,7 +137,15 @@ export class DingTalkOpenPlatformMemberBotProvisioner implements DingTalkMemberB
           unknownRemoteState: true
         })
       }
-      await input.onStep('app_created', { unifiedAppId })
+      try {
+        await input.onStep('app_created', { unifiedAppId })
+      } catch {
+        // The remote identity is already known even if its Core checkpoint
+        // failed. Carry it to the Host's failure transaction; never recreate.
+        throw new DingTalkProvisioningError('dingtalk_app_identity_checkpoint_failed', {
+          facts: { unifiedAppId }
+        })
+      }
     }
     const app = businessObject(await execute({
       operation: 'app.get',
@@ -144,6 +153,10 @@ export class DingTalkOpenPlatformMemberBotProvisioner implements DingTalkMemberB
       signal: input.signal
     }))
     requireIdentity(app, 'unifiedAppId', unifiedAppId)
+    const presentation = dingTalkApplicationPresentation(input.appName, input.description)
+    // The frozen remote app remains authoritative across local member renames.
+    const appName = firstString(app, 'appName') ?? presentation.name
+    const description = firstString(app, 'appDescription') ?? presentation.description
 
     const credential = businessObject(await execute({
       operation: 'app.credentials.get',
@@ -160,10 +173,16 @@ export class DingTalkOpenPlatformMemberBotProvisioner implements DingTalkMemberB
 
     let iconMediaId: string | null = null
     if (resumeRank < provisioningRank('avatar_configured')) {
-      iconMediaId = await input.resolveIconMediaId(appKey, appSecret)
+      const uploaded = businessObject(await execute({
+        operation: 'app.avatar.upload', values: { unifiedAppId },
+        image: await input.readAvatarPng(), signal: input.signal
+      }))
+      iconMediaId = firstString(uploaded, 'iconMediaId')
+      const iconUrl = firstString(uploaded, 'iconUrl')
+      if (!iconMediaId || !iconUrl) throw new DingTalkProvisioningError('dingtalk_app_avatar_upload_invalid')
       businessObject(await execute({
         operation: 'app.update',
-        values: { unifiedAppId, iconMediaId },
+        values: { unifiedAppId, iconMediaId, iconUrl },
         signal: input.signal
       }))
       const updatedApp = businessObject(await execute({
@@ -172,7 +191,7 @@ export class DingTalkOpenPlatformMemberBotProvisioner implements DingTalkMemberB
         signal: input.signal
       }))
       requireIdentity(updatedApp, 'unifiedAppId', unifiedAppId)
-      requireOptionalMatch(
+      requireExactMatch(
         updatedApp,
         ['iconMediaId', 'icon_media_id'],
         iconMediaId,
@@ -183,23 +202,16 @@ export class DingTalkOpenPlatformMemberBotProvisioner implements DingTalkMemberB
 
     let robotCode = input.frozen?.robotCode
     if (resumeRank < provisioningRank('robot_configured')) {
-      iconMediaId ??= await input.resolveIconMediaId(appKey, appSecret)
-      businessObject(await execute({
-        operation: 'app.robot.config',
-        values: {
-          unifiedAppId,
-          robotName: input.appName,
-          robotBrief: input.description,
-          robotDescription: input.description,
-          iconMediaId,
-          mode: 'STREAM',
-          addScope: true
-        },
-        signal: input.signal
-      }))
+      iconMediaId ??= firstString(app, 'iconMediaId')
+      if (!iconMediaId) throw new DingTalkProvisioningError('dingtalk_app_avatar_verification_failed')
       businessObject(await execute({
         operation: 'app.robot.enable',
         values: { unifiedAppId },
+        signal: input.signal
+      }))
+      businessObject(await execute({
+        operation: 'app.robot.config',
+        values: { unifiedAppId, iconMediaId, mode: 'STREAM' },
         signal: input.signal
       }))
     }
@@ -208,7 +220,8 @@ export class DingTalkOpenPlatformMemberBotProvisioner implements DingTalkMemberB
       values: { unifiedAppId },
       signal: input.signal
     }))
-    const readRobotCode = firstString(robot, 'robotCode', 'robot_code') ?? appKey
+    const readRobotCode = firstString(robot, 'robotCode', 'robot_code')
+    if (!readRobotCode) throw new DingTalkProvisioningError('dingtalk_robot_identity_mismatch')
     if (robotCode && robotCode !== readRobotCode) {
       throw new DingTalkProvisioningError('dingtalk_robot_identity_mismatch')
     }
@@ -219,10 +232,10 @@ export class DingTalkOpenPlatformMemberBotProvisioner implements DingTalkMemberB
       'STREAM',
       'dingtalk_robot_mode_verification_failed'
     )
-    requireMatch(
+    requireExactMatch(
       robot,
       ['name', 'robotName'],
-      input.appName,
+      appName,
       'dingtalk_robot_name_verification_failed'
     )
     requireMatch(
@@ -232,7 +245,7 @@ export class DingTalkOpenPlatformMemberBotProvisioner implements DingTalkMemberB
       'dingtalk_robot_status_verification_failed'
     )
     if (iconMediaId) {
-      requireOptionalMatch(
+      requireExactMatch(
         robot,
         ['iconMediaId', 'icon_media_id'],
         iconMediaId,
@@ -281,7 +294,7 @@ export class DingTalkOpenPlatformMemberBotProvisioner implements DingTalkMemberB
     if (!versionId) {
       const version = businessObject(await execute({
         operation: 'app.version.create',
-        values: { unifiedAppId, versionDescription: input.description },
+        values: { unifiedAppId, versionDescription: description },
         signal: input.signal
       }))
       versionId = firstString(version, 'versionId', 'version_id', 'id') ?? undefined
@@ -324,6 +337,11 @@ export class DingTalkOpenPlatformMemberBotProvisioner implements DingTalkMemberB
       })
     }
 
+    businessObject(await execute({
+      operation: 'app.version.configure',
+      values: { unifiedAppId, versionId, versionDescription: description },
+      signal: input.signal
+    }))
     const approval = businessObject(await execute({
       operation: 'app.version.checkApproval',
       values: { unifiedAppId, versionId },
@@ -351,7 +369,7 @@ export class DingTalkOpenPlatformMemberBotProvisioner implements DingTalkMemberB
           unifiedAppId,
           versionId,
           approverUserId: input.selectedApproverUserId,
-          confirmedSensitive: true
+          confirmedSensitive: false
         },
         signal: input.signal
       }))
@@ -474,14 +492,14 @@ function requireIdentity(value: Record<string, unknown>, key: string, expected: 
   if (actual !== expected) throw new DingTalkProvisioningError('dingtalk_app_identity_mismatch')
 }
 
-function requireOptionalMatch(
+function requireExactMatch(
   value: Record<string, unknown>,
   keys: readonly string[],
   expected: string,
   code: string
 ): void {
   const actual = firstString(value, ...keys)
-  if (actual !== null && actual.toUpperCase() !== expected.toUpperCase()) {
+  if (actual !== expected) {
     throw new DingTalkProvisioningError(code)
   }
 }

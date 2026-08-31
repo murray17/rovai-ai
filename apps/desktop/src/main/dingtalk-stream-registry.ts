@@ -2,6 +2,7 @@ import { DWClient, TOPIC_CARD, TOPIC_ROBOT, type DWClientDownStream } from 'ding
 import { normalizeDingTalkRobotMessage, type DingTalkInboundMessage } from './dingtalk-inbound'
 
 type DingTalkStreamClient = {
+  readonly connected: boolean
   registerCallbackListener(
     topic: string,
     listener: (message: DWClientDownStream) => void
@@ -22,11 +23,13 @@ export type DingTalkStreamRegistryOptions = {
   onMessage(message: DingTalkInboundMessage): Promise<void>
   onCard(callback: DingTalkCardCallback): Promise<void>
   onFailure?(appKey: string, error: unknown): void
+  connectTimeoutMs?: number
 }
 
 export class DingTalkStreamRegistry {
   readonly #options: DingTalkStreamRegistryOptions
   readonly #clients = new Map<string, DingTalkStreamClient>()
+  readonly #starting = new Map<string, Promise<void>>()
 
   constructor(options: DingTalkStreamRegistryOptions) {
     this.#options = options
@@ -37,7 +40,18 @@ export class DingTalkStreamRegistry {
     appSecret: string
     robotCode: string
   }): Promise<void> {
-    if (this.#clients.has(input.appKey)) return
+    const starting = this.#starting.get(input.appKey)
+    if (starting) return starting
+    if (this.has(input.appKey)) return
+    this.stop(input.appKey)
+    const pending = this.#connect(input)
+    this.#starting.set(input.appKey, pending)
+    try { await pending } finally {
+      if (this.#starting.get(input.appKey) === pending) this.#starting.delete(input.appKey)
+    }
+  }
+
+  async #connect(input: { appKey: string; appSecret: string; robotCode: string }): Promise<void> {
     const create = this.#options.createClient ?? ((credential) => new DWClient({
       clientId: credential.appKey,
       clientSecret: credential.appSecret,
@@ -48,16 +62,19 @@ export class DingTalkStreamRegistry {
     client.registerCallbackListener(TOPIC_ROBOT, (message) => {
       acknowledge(client, message)
       defer(
-        () => this.#options.onMessage(normalizeDingTalkRobotMessage(
-          JSON.parse(message.data),
-          { appKey: input.appKey, robotCode: input.robotCode }
-        )),
+        async () => {
+          if (this.#clients.get(input.appKey) !== client) return
+          await this.#options.onMessage(normalizeDingTalkRobotMessage(
+            JSON.parse(message.data), { appKey: input.appKey, robotCode: input.robotCode }
+          ))
+        },
         (error) => this.#options.onFailure?.(input.appKey, error)
       )
     })
     client.registerCallbackListener(TOPIC_CARD, (message) => {
       acknowledge(client, message)
       defer(async () => {
+        if (this.#clients.get(input.appKey) !== client) return
         const payload = JSON.parse(message.data) as Record<string, unknown>
         await this.#options.onCard({
           appKey: input.appKey,
@@ -67,12 +84,26 @@ export class DingTalkStreamRegistry {
       }, (error) => this.#options.onFailure?.(input.appKey, error))
     })
     this.#clients.set(input.appKey, client)
+    let timer: ReturnType<typeof setTimeout> | undefined
     try {
-      await client.connect()
-    } catch (error) {
-      this.#clients.delete(input.appKey)
+      await Promise.race([
+        client.connect(),
+        new Promise<never>((_resolve, reject) => {
+          timer = setTimeout(() => reject(new Error('dingtalk_stream_not_connected')),
+            this.#options.connectTimeoutMs ?? 20_000)
+        })
+      ])
+      // The SDK resolves connect() even after a failed endpoint/handshake.
+      // `registered` is not a readiness signal for current Stream connections.
+      if (!client.connected || this.#clients.get(input.appKey) !== client) {
+        throw new Error('dingtalk_stream_not_connected')
+      }
+    } catch {
+      if (this.#clients.get(input.appKey) === client) this.#clients.delete(input.appKey)
       client.disconnect()
-      throw error
+      throw new Error('dingtalk_stream_not_connected')
+    } finally {
+      if (timer !== undefined) clearTimeout(timer)
     }
   }
 
@@ -88,7 +119,7 @@ export class DingTalkStreamRegistry {
   }
 
   has(appKey: string): boolean {
-    return this.#clients.has(appKey)
+    return this.#clients.get(appKey)?.connected === true
   }
 }
 

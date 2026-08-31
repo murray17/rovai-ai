@@ -76,8 +76,8 @@ describe('Feishu execution console card', () => {
       narration(3, '类型检查已完成，继续测试。'), command(4, 'pnpm test -- channel-settings', 'test output')
     ], publicOutput: '实现与验证都已完成。' }))
     expect(card).toMatchObject({ header: { title: { content: '芝士 · 已完成' }, template: 'green' } })
-    expect(elements(card).map((element) => element.tag)).toEqual(['markdown', 'collapsible_panel'])
-    expect(outerPanel(card)).toMatchObject({ expanded: false, header: { title: { content: '执行过程 · 2 条' }, icon_position: 'left' } })
+    expect(elements(card).map((element) => element.tag)).toEqual(['markdown', 'hr', 'collapsible_panel'])
+    expect(outerPanel(card)).toMatchObject({ expanded: false, header: { title: { content: '执行过程 · 2 条指令' }, icon_position: 'left' } })
     expect(timeline(card).map((element) => element.tag)).toEqual(['markdown', 'collapsible_panel', 'markdown', 'collapsible_panel', 'markdown'])
     expect(timeline(card)[0].content).toBe('先运行两项核验。')
     expect(timeline(card)[2].content).toBe('类型检查已完成，继续测试。')
@@ -91,6 +91,30 @@ describe('Feishu execution console card', () => {
     expect(JSON.stringify(card)).not.toContain('查看执行过程')
     expect(buttons(card)).toEqual([])
   })
+
+  it.each(['succeeded', 'failed', 'cancelled'] as const)('shows elapsed time, a divider and the actual instruction count for %s', (status) => {
+    const card = executionConsoleCard(snapshot(status, {
+      terminalAt: '2026-08-28T00:00:18Z',
+      evidence: [narration(1, '检查六项。'), ...Array.from({ length: 6 }, (_, index) => command(index + 2, `check-${index + 1}`))],
+      publicOutput: '检查结束。'
+    }))
+    expect(elements(card)).toMatchObject([
+      { tag: 'markdown', content: '用时 18 秒' },
+      { tag: 'hr' },
+      { tag: 'collapsible_panel', expanded: false, header: { title: { content: '执行过程 · 6 条指令' } } }
+    ])
+    expect(panels(card)).toHaveLength(6)
+    expect(buttons(card)).toEqual([])
+  })
+
+  it.each([{ startedAt: null }, { terminalAt: null }, { terminalAt: 'invalid-time' }])(
+    'does not invent elapsed time or leave an orphan divider when timestamps are unavailable: %j', (timing) => {
+      const card = executionConsoleCard(snapshot('succeeded', { ...timing, evidence: [command(1, 'check')] }))
+      expect(elements(card).map((element) => element.tag)).toEqual(['collapsible_panel'])
+      expect(header(outerPanel(card)!)).toBe('执行过程 · 1 条指令')
+      expect(bodyText(card)).not.toContain('用时')
+    }
+  )
 
   it.each([1, 19, 20, 21, 210])('limits a %i-line result to 20 actual lines: head 9 + notice + tail 10', (count) => {
     const output = Array.from({ length: count }, (_, index) => `line ${index + 1}`).join('\n')
@@ -206,7 +230,8 @@ describe('Feishu execution console card', () => {
     expect(body).toContain('narration line 9 ')
     expect(body).toContain('… 已截断 3 行 …')
     expect(body).not.toContain('narration line 10 ')
-    expect(elements(card)).toHaveLength(2)
+    expect(elements(card)).toHaveLength(3)
+    expect(header(outerPanel(card)!)).toBe('执行过程')
     expect(timeline(card)).toHaveLength(1)
     expect(panels(card)).toEqual([])
   })
@@ -232,7 +257,8 @@ describe('Feishu execution console card', () => {
     expect(buttons(cards[0])).toHaveLength(1)
     expect(buttons(cards[2])).toHaveLength(1)
     for (const card of cards) {
-      expect(outerPanel(card)).toMatchObject({ expanded: true, header: { title: { content: '执行过程 · 31 条' } } })
+      expect(outerPanel(card)).toMatchObject({ expanded: true, header: { title: { content: '执行过程 · 31 条指令' } } })
+      expect(elements(card).slice(0, 2)).toEqual([{ tag: 'markdown', content: '用时 28 秒' }, { tag: 'hr' }])
       expect(countElements(elements(card))).toBeLessThanOrEqual(50)
       expect(panels(card).every((panel) => panel.expanded === false)).toBe(true)
       expect(JSON.stringify(card)).not.toMatch(/nonce|viewVersion|displayMode|execution_console_expand|execution_console_collapse/)

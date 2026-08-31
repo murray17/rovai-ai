@@ -185,4 +185,4 @@ last_updated: 2026-08-30
 | v1.31 | `historical` | Desktop Bootstrap/Full Core 分层、SQLite lease/admission/copy migration 与正常日志恢复、Supervisor fencing、本机偏好 fail-open 和跨桥结构化错误已完成 | [v1.31/README.md](v1.31/README.md) |
 | v1.32 | `historical` | CLI 外部附件静默快照、保持 Core 根目录边界 | [v1.32/README.md](v1.32/README.md) |
 | v1.33 | `historical` | 飞书队员 Bot、Owner-only Camp、原会话项目卡、动态 roster 与执行输出；channel 分支原 v1.32 编号顺延 | [v1.33/README.md](v1.33/README.md) |
-| v1.34 | `current` | 共享 SQLite 凭据、飞书终态双层折叠与渠道集成；钉钉 Web Session 为 WIP，完整 Bot 发布未验收 | [v1.34/README.md](v1.34/README.md) |
+| v1.34 | `current` | 共享 SQLite、飞书终态卡与钉钉 Web Session；钉钉单应用发布已隔离验证，Core/收发/群卡片与 packaged 验收未闭环 | [v1.34/README.md](v1.34/README.md) |

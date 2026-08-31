@@ -29,6 +29,8 @@ export type DingTalkConsoleRequest = {
   query?: Readonly<Record<string, string | number | boolean>>
   body?: Readonly<Record<string, unknown>>
   form?: boolean
+  /** Only the reviewed developer-console PNG upload, never an arbitrary file. */
+  image?: Uint8Array
   signal?: AbortSignal
   timeoutMs?: number
 }
@@ -135,6 +137,11 @@ export class ElectronDingTalkWebSession implements DingTalkWebSession {
       throw new DingTalkConsoleError('dingtalk_operation_cancelled', true)
     }
     const url = requireDingTalkConsoleUrl(path)
+    if (options.image !== undefined && (path !== '/microapp/uploadPic/logo.json'
+      || options.method !== 'POST' || options.body !== undefined || options.form
+      || !isDingTalkAvatarPng(options.image))) {
+      throw new DingTalkConsoleError('dingtalk_console_request_rejected', true)
+    }
     const cookies = await this.#session.cookies.get({ url: PORTAL_URL })
     const token = cookies.find((cookie) => cookie.name === 'access_token')?.value
     // The official portal unescapes document.cookie before building its query.
@@ -147,8 +154,14 @@ export class ElectronDingTalkWebSession implements DingTalkWebSession {
     const headers = new Headers({ Accept: 'application/json', Referer: PORTAL_URL })
     const csrf = cookies.find((cookie) => cookie.name === '_csrf_token_')?.value
     if (csrf) headers.set('_csrf_token_', decodeConsoleCookie(csrf))
-    let body: string | undefined
-    if (options.body) {
+    let body: string | ArrayBuffer | undefined
+    if (options.image) {
+      const form = new FormData()
+      form.append('file', new Blob([new Uint8Array(options.image)], { type: 'image/png' }), 'member.png')
+      const encoded = new Request(PORTAL_URL, { method: 'POST', body: form })
+      headers.set('Content-Type', encoded.headers.get('Content-Type')!)
+      body = await encoded.arrayBuffer()
+    } else if (options.body) {
       if (options.form) {
         headers.set('Content-Type', 'application/x-www-form-urlencoded;charset=UTF-8')
         body = new URLSearchParams(Object.entries(options.body).map(([key, value]) => [
@@ -315,6 +328,11 @@ export class ElectronDingTalkWebSession implements DingTalkWebSession {
       else await candidate?.close().catch(() => undefined)
     }
   }
+}
+
+export function isDingTalkAvatarPng(value: unknown): value is Uint8Array {
+  return value instanceof Uint8Array && value.byteLength > 8 && value.byteLength <= 2 * 1024 * 1024
+    && [137, 80, 78, 71, 13, 10, 26, 10].every((byte, index) => value[index] === byte)
 }
 
 export function isDingTalkCookieDomain(domain: string | undefined): boolean {

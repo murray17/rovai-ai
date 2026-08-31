@@ -516,6 +516,15 @@ export class DingTalkChannelSettingsService {
     if (existing?.state === 'failed_unknown_remote_state' && !existing.remoteUnifiedAppId) {
       throw new Error('dingtalk_app_create_unknown_remote_state')
     }
+    if (existing?.state === 'account_verified' && !existing.remoteUnifiedAppId) {
+      // account_verified is durable before create dispatch. An interrupted
+      // attempt at this boundary cannot prove that no remote app was created.
+      const code = 'dingtalk_app_create_unknown_remote_state'
+      await this.#markFailed(existing, true, code)
+      this.#failures.set(agentId, code)
+      this.#notify()
+      throw new Error(code)
+    }
     let intent = existing
     if (!intent) {
       const intentId = `rvdtpi_${randomUUID().replaceAll('-', '')}`
@@ -544,7 +553,7 @@ export class DingTalkChannelSettingsService {
       const avatar = await this.#dependencies.avatarSource.resolve(agent.avatarRef)
       if (!avatar?.pngBytes) throw new Error('dingtalk_member_bot_avatar_unavailable')
       const provisioned = await this.#dependencies.provisioner.create({
-        appName: agent.displayName,
+        appName: current.requestedAppName,
         description: `Rovai AI 队员 · ${agent.teamRole || '协作者'}`,
         expectedCorpId: identity.corpId,
         expectedUserId: identity.userId,
@@ -562,10 +571,7 @@ export class DingTalkChannelSettingsService {
         requiredScopeValues: this.#dependencies.requiredScopeValues ?? [],
         requiredEventCodes: this.#dependencies.requiredEventCodes ?? [],
         signal: abort.signal,
-        resolveIconMediaId: async (appKey, appSecret) => {
-          const api = this.#api({ appKey, appSecret })
-          return api.uploadImage(Buffer.from(avatar.pngBytes!), `${agent.agentId}.png`)
-        },
+        readAvatarPng: async () => new Uint8Array(avatar.pngBytes!),
         onStep: async (step, facts) => {
           if (facts.unifiedAppId && !credentialRef) {
             credentialRef = credentialRefFor(agentId, facts.unifiedAppId)
@@ -684,10 +690,16 @@ export class DingTalkChannelSettingsService {
       const code = failureCode(error)
       this.#failures.set(agentId, code)
       const unknown = error instanceof DingTalkProvisioningError && error.unknownRemoteState
-      await this.#markFailed(current, unknown, code).catch(() => undefined)
+      const facts = error instanceof DingTalkProvisioningError ? error.facts : {}
+      // A Core checkpoint can apply while its response is lost. Refresh its CAS
+      // revision before recording failure, carrying any proven remote identity.
+      current = (await this.#snapshot().catch(() => null))?.publicationIntents
+        .find((item) => item.publicationIntentId === current.publicationIntentId) ?? current
+      await this.#markFailed(current, unknown, code, facts).catch(() => undefined)
       this.#activeProvisioning = {
         ...this.#activeProvisioning!,
         stage: unknown ? 'unknown_remote_state' : 'failed',
+        remoteAppId: facts.unifiedAppId ?? current.remoteUnifiedAppId,
         detail: unknown
           ? '无法确认钉钉应用是否已创建；已停止自动重试。'
           : '钉钉发布未完成，可以排除问题后继续。',
@@ -736,7 +748,7 @@ export class DingTalkChannelSettingsService {
       requiredScopeValues: this.#dependencies.requiredScopeValues ?? [],
       requiredEventCodes: this.#dependencies.requiredEventCodes ?? [],
       signal,
-      resolveIconMediaId: async () => { throw new Error('dingtalk_completed_recovery_mutation_rejected') },
+      readAvatarPng: async () => { throw new Error('dingtalk_completed_recovery_mutation_rejected') },
       // Completed recovery is read-only; do not rewind publication milestones.
       onStep: async () => undefined
     })
@@ -822,22 +834,24 @@ export class DingTalkChannelSettingsService {
   async #markFailed(
     intent: DingTalkPublicationIntent,
     unknown: boolean,
-    failureCodeValue: string
+    failureCodeValue: string,
+    facts: DingTalkProvisioningFacts = {}
   ): Promise<void> {
+    const remoteUnifiedAppId = facts.unifiedAppId ?? intent.remoteUnifiedAppId
     await this.#command('channels.dingtalk.publicationIntent.advance', {
       publicationIntentId: intent.publicationIntentId,
       expectedVersion: intent.version,
-      state: unknown && !intent.remoteUnifiedAppId
+      state: unknown && !remoteUnifiedAppId
         ? 'failed_unknown_remote_state'
         : 'failed_recoverable',
-      remoteUnifiedAppId: intent.remoteUnifiedAppId,
+      remoteUnifiedAppId,
       appKey: intent.appKey,
       robotCode: intent.robotCode,
       credentialRef: intent.credentialRef,
       versionId: intent.versionId,
       approvalMode: intent.approvalMode,
       approverUserIdDigest: null,
-      lastCompletedStep: intent.lastCompletedStep,
+      lastCompletedStep: !intent.remoteUnifiedAppId && facts.unifiedAppId ? 'app_created' : intent.lastCompletedStep,
       failureCode: failureCodeValue
     })
   }

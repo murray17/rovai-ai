@@ -3,7 +3,7 @@ import { net, type Session } from 'electron'
 export type DingTalkConsoleFetch = (url: string, options: {
   method: string
   headers: Headers
-  body?: string
+  body?: string | ArrayBuffer
   signal: AbortSignal
   credentials: 'include'
   redirect: 'manual'
@@ -72,6 +72,7 @@ export function dingTalkConsoleFetch(session: Session): DingTalkConsoleFetch {
       })
     })
     if (options.signal.aborted) abort()
-    else request.end(options.body)
+    else request.end(typeof options.body === 'string' || options.body === undefined
+      ? options.body : Buffer.from(options.body))
   })
 }

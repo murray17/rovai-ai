@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto'
 import { createLarkChannel, LoggerLevel, WSClient } from '@larksuiteoapi/node-sdk'
 import { describe, expect, it, vi } from 'vitest'
+import { feishuPageCardResponse } from './feishu-card-action'
 import { FeishuExecutionPreviewService } from './feishu-execution-preview'
 
 function sdkChannel() {
@@ -35,12 +36,12 @@ describe('Feishu execution-card SDK transport', () => {
       dispatcher: { invoke: (event: unknown, options: { needCheck: false }) => Promise<unknown> }
     }
     internals.registerDispatcherHandlers()
+    const render = vi.fn((pageIndex: number) => feishuPageCardResponse({ schema: '2.0', body: {
+      elements: [{ tag: 'markdown', content: `page ${pageIndex + 1}` }]
+    } }))
     channel.on('cardAction', async (event) => {
       const value = event.action.value as { pageIndex: number }
-      await channel.updateCard(event.messageId, { schema: '2.0', body: {
-        elements: [{ tag: 'markdown', content: `page ${value.pageIndex + 1}` }]
-      } })
-      return {}
+      return render(value.pageIndex)
     })
     const click = (eventId: string, pageIndex: number) => ({
       schema: '2.0',
@@ -53,16 +54,20 @@ describe('Feishu execution-card SDK transport', () => {
       }
     })
     for (const [id, page] of [['click-next-1', 1], ['click-previous', 0], ['click-next-2', 1]] as const) {
-      await internals.dispatcher.invoke(click(id, page), { needCheck: false })
+      expect(await internals.dispatcher.invoke(click(id, page), { needCheck: false })).toEqual({
+        card: { type: 'raw', data: { schema: '2.0', body: {
+          elements: [{ tag: 'markdown', content: `page ${page + 1}` }]
+        } } }
+      })
     }
-    expect(patch.mock.calls.map(([request]) => JSON.parse(request!.data!.content).body.elements[0].content))
-      .toEqual(['page 2', 'page 1', 'page 2'])
+    expect(render.mock.calls).toEqual([[1], [0], [1]])
 
     await internals.dispatcher.invoke(click('click-next-2', 1), { needCheck: false })
-    expect(patch).toHaveBeenCalledTimes(3)
+    expect(render).toHaveBeenCalledTimes(3)
+    expect(patch).not.toHaveBeenCalled()
   })
 
-  it('carries a preview page and a safe error through the actual SDK WebSocket ACK path', async () => {
+  it('updates a paginated preview only in the SDK WebSocket ACK, without a pre-ACK PATCH that can revert the card', async () => {
     const channel = sdkChannel()
     const appId = 'cli_card_transport_fixture'
     const openId = 'ou_transport_owner'
@@ -73,13 +78,13 @@ describe('Feishu execution-card SDK transport', () => {
     }] } })
     const patch = vi.spyOn(channel.rawClient.im.v1.message, 'patch').mockResolvedValue({ code: 0 })
     const report = vi.fn()
-    const preview = new FeishuExecutionPreviewService({ requestId, agentId: 'agent-fixture', commandCounts: [31] }, {
+    const preview = new FeishuExecutionPreviewService({ requestId, agentId: 'agent-fixture', commandCounts: [200] }, {
       readOwner: () => ({ accountId: 'account-fixture', displayName: '惠', openId,
         openIdDigest: `sha256:${createHash('sha256').update(`feishu-open\0${openId}`).digest('hex')}` }),
       report
     })
     await preview.connected('agent-fixture', appId, channel)
-    channel.on('cardAction', async event => await preview.handleCardAction(appId, event, channel) ?? {})
+    channel.on('cardAction', async event => await preview.handleCardAction(appId, event) ?? {})
     const internals = channel as unknown as {
       registerDispatcherHandlers: () => void
       dispatcher: unknown
@@ -96,15 +101,15 @@ describe('Feishu execution-card SDK transport', () => {
     }
     wire.eventDispatcher = internals.dispatcher
     const send = vi.spyOn(wire, 'sendMessage').mockImplementation(() => undefined)
-    const click = async (id: string, pageIndex: number) => {
+    const click = async (id: string, pageIndex: number, operatorOpenId = openId) => {
       await wire.handleEventData({
         headers: [{ key: 'type', value: 'event' }, { key: 'message_id', value: id },
           { key: 'sum', value: '1' }, { key: 'seq', value: '0' }],
         payload: Buffer.from(JSON.stringify({ schema: '2.0',
           header: { event_type: 'card.action.trigger', event_id: id, app_id: appId },
           event: { context: { open_message_id: 'om_wire_preview', open_chat_id: 'oc_wire_preview' },
-            operator: { open_id: openId }, action: { tag: 'button', value: { action: 'execution_console_page',
-              agentRunId: `feishu-preview:${requestId}:agent-fixture:31`, snapshotSequence: 1, pageIndex } } }
+            operator: { open_id: operatorOpenId }, action: { tag: 'button', value: { action: 'execution_console_page',
+              agentRunId: `feishu-preview:${requestId}:agent-fixture:200`, snapshotSequence: 1, pageIndex } } }
         }))
       })
       const ack = JSON.parse(Buffer.from(send.mock.calls.at(-1)![0].payload).toString())
@@ -112,20 +117,24 @@ describe('Feishu execution-card SDK transport', () => {
       return JSON.parse(Buffer.from(ack.data, 'base64').toString())
     }
     try {
-      expect(await click('wire-next', 1)).toEqual({})
-      expect(patch).toHaveBeenCalledTimes(1)
-      const card = JSON.parse(patch.mock.calls[0][0]!.data!.content)
-      const outer = card.body.elements.find((element: { element_id?: string }) => element.element_id === 'execution_process')
-      expect(outer.expanded).toBe(true)
-      expect(outer.elements).toContainEqual({ tag: 'markdown', content: '第 2 / 3 页', text_align: 'center' })
-
-      patch.mockResolvedValueOnce({ code: 230099, msg: 'private-provider-message' })
-      expect(await click('wire-previous-fails', 0)).toEqual({ toast: {
-        type: 'error', content: '执行记录暂时无法翻页，请稍后重试'
+      for (const [index, pageIndex] of [1, 2, 1, 0, 13, 12].entries()) {
+        const response = await click(`wire-page-${index}`, pageIndex)
+        expect(patch.mock.calls.length).toBe(0)
+        expect(response).toMatchObject({ card: { type: 'raw', data: { schema: '2.0' } } })
+        expect(response.toast).toBeUndefined()
+        const card = response.card.data
+        const outer = card.body.elements.find((element: { element_id?: string }) => element.element_id === 'execution_process')
+        expect(outer.expanded).toBe(true)
+        expect(outer.elements).toContainEqual({ tag: 'markdown', content: `第 ${pageIndex + 1} / 14 页`, text_align: 'center' })
+        expect(outer.elements.filter((element: { tag: string }) => element.tag === 'collapsible_panel')
+          .every((element: { expanded: boolean }) => element.expanded === false)).toBe(true)
+        expect(Buffer.byteLength(JSON.stringify(card))).toBeLessThanOrEqual(24_000)
+        expect(send).toHaveBeenCalledTimes(index + 1)
+      }
+      expect(await click('wire-non-owner', 1, 'ou_someone_else')).toEqual({ toast: {
+        type: 'warning', content: '此预览不可用，请让 Owner 重新发起预览'
       } })
-      expect(patch).toHaveBeenCalledTimes(2)
-      expect(report).toHaveBeenCalledWith({ stage: 'page_failed', reason: 'card_update_failed', providerCode: 230099 })
-      expect(JSON.stringify(report.mock.calls)).not.toContain('private-provider-message')
+      expect(patch).not.toHaveBeenCalled()
     } finally { transport.close() }
   })
 })

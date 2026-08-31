@@ -39,7 +39,8 @@ import type { MemberBotAvatarSourceResolver } from './member-bot-avatar-source'
 import { ProvisioningTimingRecorder } from './feishu-provisioning-timing'
 import { memberBotAppDescription } from '../shared/channel-member-bot-copy'
 import type { FeishuExecutionPreviewHost } from './feishu-execution-preview'
-import { feishuPageFailure, withFeishuPageDeadline, type FeishuCardActionResponse } from './feishu-card-action'
+import { sendFeishuAgentOutput } from './feishu-agent-output-card'
+import { feishuPageCardResponse, feishuPageFailure, withFeishuPageDeadline, type FeishuCardActionResponse } from './feishu-card-action'
 import {
   executionConsoleCard,
   executionConsolePageCount,
@@ -1548,7 +1549,7 @@ export class ChannelSettingsService {
     event: CardActionEvent
   ): Promise<FeishuCardActionResponse | void> {
     if (this.#stopped) return
-    const preview = await this.#dependencies?.executionPreview?.handleCardAction(managed.appId, event, managed.channel)
+    const preview = await this.#dependencies?.executionPreview?.handleCardAction(managed.appId, event)
     if (preview) return preview
     const executionAction = executionConsoleCardAction(event.action.value)
     if (executionAction) {
@@ -1663,14 +1664,13 @@ export class ChannelSettingsService {
           return executionConsoleCardActionResponse('stale')
         }
         const card = executionConsoleCard(current, { pageIndex: action.pageIndex, outerExpanded: true })
-        // A slow read/render must not start a patch after the timeout response.
+        // Return the only update inside the ACK; a separate pre-ACK PATCH can be reverted.
         checkDeadline()
-        await managed.channel.updateCard(event.messageId, card)
-        return executionConsoleCardActionResponse('execution_console_page')
+        return feishuPageCardResponse(card)
       })
     } catch (error) {
       const { response, reason, providerCode } = feishuPageFailure(error)
-      logFeishuBotDiagnostic('execution_console.card_update_failed', {
+      logFeishuBotDiagnostic('execution_console.card_response_failed', {
         appIdDigest: digest(managed.appId),
         agentId: managed.agentId,
         messageIdDigest: digest(event.messageId),
@@ -2012,19 +2012,13 @@ export class ChannelSettingsService {
           messageId = delivery.updateMessageId ?? null
         }
       } else if (delivery.deliveryKind === 'agent_output') {
-        const body = requiredPayloadString(delivery.payload, 'body').trim()
-        if (!body) throw new Error('channel_output_empty')
-        const mentions = delivery.payload.mentionPrincipal === true
-          && delivery.conversationKind !== 'p2p'
-          && validOpenId(delivery.recipientOpenId)
-            ? [{ key: 'request_author', openId: delivery.recipientOpenId!, name: 'Owner' }]
-            : undefined
-        const sent = await managed.channel.send(
-          delivery.chatId,
-          { markdown: body },
-          { ...replyOptions, ...(mentions ? { mentions } : {}) }
-        )
-        messageId = sent.messageId
+        messageId = await sendFeishuAgentOutput(managed.channel.rawClient.im.v1.message, {
+          deliveryId: delivery.deliveryId,
+          chatId: delivery.chatId,
+          topicKey: delivery.topicKey,
+          payload: delivery.payload,
+          ownerOpenId: delivery.recipientOpenId
+        })
       } else if (delivery.deliveryKind === 'agent_attachment') {
         const campId = requiredPayloadString(delivery.payload, 'campId')
         const attachmentId = requiredPayloadString(delivery.payload, 'attachmentId')
@@ -2605,9 +2599,6 @@ function executionConsoleCardActionResponse(
 ): FeishuCardActionResponse {
   if (result === 'channel.execution_console.owner_required') {
     return { toast: { type: 'warning', content: '仅 Rovai Owner 可以操作执行记录' } }
-  }
-  if (result === 'execution_console_page') {
-    return {}
   }
   if (result === 'stale'
     || result === 'channel.execution_console.not_found'

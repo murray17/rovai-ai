@@ -10,8 +10,8 @@ last_updated: 2026-08-30
 
 渠道设置是 Owner 在 Rovai 本机维护飞书/钉钉连接与队员 Bot 的 Renderer surface。群首次项目选择发生在对应外部会话的
 Owner-only 卡片中；Renderer 不提供 Channel 项目目录或会话绑定操作。领域状态和错误按 Provider 分别见
-[Feishu Channel v5](../../contracts/feishu-channel-v5.md)与
-[DingTalk Channel v3](../../contracts/dingtalk-channel-v3.md)；本页只拥有信息层级、交互与可访问性。
+[Feishu Channel v6](../../contracts/feishu-channel-v6.md)与
+[DingTalk Channel v4](../../contracts/dingtalk-channel-v4.md)；本页只拥有信息层级、交互与可访问性。
 
 ## 页面结构
 
@@ -43,11 +43,12 @@ Dialog、状态点和间距复用现有组件语法。
 `system_credential_encryption_unavailable`；身份读取超时和页面失败使用中文可操作提示，不向用户显示 `unknown` 或原始异常文本。
 连接行统一说明“开发者账号会话 · 保存在 Rovai 本地数据库”。
 
-钉钉使用同一个 modal 结构，只打开系统浏览器 OAuth，frame 只显示钉钉标记和当前阶段，不伪造二维码。未连接时为
+钉钉使用同一个 modal 结构，由 Main 打开隔离的官方开放平台登录窗口，frame 只显示钉钉标记和当前阶段，不伪造二维码。未连接时为
 “连接钉钉”，已连接或明确失效时为“重新连接”；进行中显示“等待授权…”。设备授权按钮、提示、等待状态和备用入口均删除。
-说明 OAuth Profile 保存在 Rovai 本地数据库，本次不创建应用或读取 AppSecret。重启复用既有 Profile，Token 静默续期
-不打开 Dialog；只有明确失效才显示“登录已失效，请重新连接”。取消浏览器授权是无告警的 no-op；网络、超时、存储或新
-OAuth/Core commit 失败保留旧账号。缺少 Rovai OAuth Client 时显示可行动配置错误，不静默改用第三方工具的 Client 或队员 AppKey。
+说明开发者 Web Session 保存在 Rovai 本地数据库，本次不创建应用或读取 AppSecret。重启恢复 Cookie，平台 SSO 能自动续接
+时不打开 Dialog；只有明确失效才显示“登录已失效，请重新连接”。取消登录是无告警的 no-op；网络、超时、存储或新
+Session/Core commit 失败保留旧账号。不需要 Rovai OAuth Client 配置；旧 OAuth Profile 不能当作 Cookie 使用，提示显式重连，
+但成功提交前不删除旧数据或已发布 Bot。
 
 普通发布不得进入 QR Dialog。点击列表“发布”先打开独立确认 Dialog，展示现有 `MemberAvatar`、队员名称/职责、
 应用说明、当前开发者账号和租户；“确认发布”后在同一 Dialog 逐步展示八个进行中阶段。主文案固定为：
@@ -119,15 +120,32 @@ credential 或内部错误。钉钉卡固定使用官方 AI Markdown 模板、St
 “该项目已不可用，请重新选择”并刷新原卡；旧卡/双击显示“该项目选择已完成或卡片已过期”。成功只显示短暂
 “项目已绑定，正在处理消息”反馈，Core 随后异步撤回卡片，不留下永久完成卡。
 
+## 飞书永久正文卡
+
+公开 Agent 回复使用无标题 Card 2.0，正文为正常 Markdown；下方按 Rovai 的转交层级，以辅助字号显示
+“发送给 @雾切响子 @Murray”一类的接收对象行。多个原生 @ 之间只有空格，不加逗号或顿号；没有“A2A 对象／Owner”标签、
+执行状态、操作按钮或折叠。没有真实接收对象时省略整行，不把普通正文中的人名当作寻址。
+
+有真实回复关系时，在正文上方以辅助字号的原生 Markdown 引用显示“回复 药师寺惠”及直接父消息摘要，最多 3 行/240 个
+Unicode 字符，超长用省略号收尾。引用只作展示，不跳转、不额外 @；没有回复对象则省略，已删除/不可读时显示
+“回复的消息已不可用”，无文本时显示“（无文本）”。不把 Topic root 当成每条消息的引用，也不嵌套展示原消息自带的引用。
+
+该行只呈现 Core 的实际 A2A 接收对象和显式 Owner attention；不代表新的飞书 Bot 互相调用。结构化 `@你` 不再重复留在
+飞书正文，普通文字中真正写出的 `@你` 保留。无法取得原生身份时名称静态显示，不冒充可用身份。
+永久正文完整保留，超长拆成连续卡片，仅首张显示回复摘要，只有最后一张显示接收对象。历史已发消息不批量替换，钉钉格式不在此变更范围。
+
 ## 飞书执行卡
 
-飞书外部执行卡沿用原生执行台的阅读顺序：公开文字与 command 混排。执行中没有折叠容器；终态把完整 timeline 放进
-默认收起的“执行过程 · N 条”原生面板。每条 command 自带第二层原生折叠，安全命令/flags/路径在 header，展开后只有
-一个结果代码框，无二级标题。两层展开/收起都不请求 Rovai；永久 Markdown 正文仍独立显示。
+飞书外部执行卡沿用原生执行台的阅读顺序：公开文字与 command 混排。执行中没有折叠容器；终态先显示真实“用时 18 秒”
+一类的时长，其后为原生分隔线，再把完整 timeline 放进默认收起的“执行过程 · N 条指令”原生面板。
+N 统计整轮 command，不计正文，也不是当前页数量；无 command 时标题仍为“执行过程”。缺失可靠起止时间时不虚构时长，
+同时省略时长与分隔线。每条 command 自带第二层原生折叠，安全命令/flags/路径在 header，展开后只有
+一个结果代码框，无二级标题。两层展开/收起都不请求 Rovai；永久正文卡仍独立显示。
 文字最多 10 行，长文为前 9 行加截断提示；安全结果最多 20 行和 4KiB，长结果显示前 9 / 截断提示 / 后 10。
 多页才在总面板内出现页码和上一页/下一页；翻页后总面板展开，单条 command 收起，包括返回第 1 页。
 成功翻页无 Toast；可响应的超时/服务不可用返回清晰的错误 Toast，完全离线时由飞书提示平台错误，不承诺自定义文案。
-安全、预算、封存与 callback 约束由 [Feishu Channel v5](../../contracts/feishu-channel-v5.md) 拥有，不增加 Renderer 设置或视图状态。
+安全、预算、封存与 callback 约束由 [Feishu Channel v6](../../contracts/feishu-channel-v6.md) 拥有；新页只经同步 response card 提交，
+不额外 PATCH，不增加 Renderer 设置或视图状态。
 
 ## 状态、错误与键盘
 
@@ -141,7 +159,7 @@ credential 或内部错误。钉钉卡固定使用官方 AI Markdown 模板、St
 
 - [全局设计系统](../../../DESIGN.md)
 - [设置工作区 brief](../../../apps/desktop/.impeccable/surfaces/settings-workspace.md)
-- [Feishu Channel v5](../../contracts/feishu-channel-v5.md)
+- [Feishu Channel v6](../../contracts/feishu-channel-v6.md)
 - [飞书渠道架构](../../architecture/feishu-channel.md)
-- [DingTalk Channel v3](../../contracts/dingtalk-channel-v3.md)
+- [DingTalk Channel v4](../../contracts/dingtalk-channel-v4.md)
 - [钉钉渠道架构](../../architecture/dingtalk-channel.md)

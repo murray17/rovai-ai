@@ -112,26 +112,23 @@ ROVAI_DEV_USER_DATA_DIR="$(mktemp -d)/user-data" pnpm dev
 不要用 `electron-vite dev` 绕过启动器。不要把日常数据库复制到默认开发目录；复现真实 Camp 时按
 [桌面 UI 验收](ui-acceptance.md#从明确来源创建只读隔离副本)创建一次性副本。
 
-## 钉钉 OAuth 与 Developer API 验收前置
+## 钉钉 Web Session 验收前置
 
-钉钉账号连接必须使用维护者拥有的 Rovai OAuth Client。开发/隔离验收启动前，在同一个启动命令环境中显式提供：
+钉钉连接使用 Rovai Main 的隔离官方登录窗口，不需要 OAuth Client 环境变量、loopback server、设备授权、token broker
+或 DWS。用户须在具备企业应用开发能力的授权组织中扫码；能进入后台本身不等于具有创建/发布权限。
+不能借用第三方 Client Secret、用户 Chrome Profile 或日常 App 的 Cookie，也不能用 Bot AppKey 代替开发者登录。
 
-```bash
-ROVAI_DINGTALK_OAUTH_CLIENT_ID="<Rovai OAuth Client ID>" \
-ROVAI_DINGTALK_OAUTH_CLIENT_SECRET="<只在当前安全环境注入的 Secret>" \
-pnpm dev
-```
+真实验收使用本节前述独立 `userData`/Skill Library。Cookie Snapshot 与 App Secret 只写隔离 SQLite；数据库中这些值
+是明文，目录和备份须按秘密数据保护，不得上传、复制进仓库或进入日志/诊断。请求 URL 可能含平台 access_token query，
+只记录封闭阶段、状态与身份匹配结果，不打印完整 URL、响应正文、Cookie 或 Secret。
 
-不要把值写入仓库、`.env` 示例、命令日志、截图或打包资源；不要复用第三方工具的 Client ID，也不要用队员 Bot AppKey
-代替账号连接。Desktop Main 直接完成 OAuth、官方 Developer API 与 Stream，不需要准备、安装或调用任何 DWS binary。
-浏览器 OAuth 与本机 callback 是唯一登录路径；不保留设备授权。Token Profile 只写入隔离 `userData` 下的
-`rovai.sqlite`。该数据库内渠道 Token/Secret/Cookie 是明文；验收目录必须按秘密数据保护，不得上传、复制进仓库或进入诊断附件。
+记录连接前后应用数量、App/冻结版本 identity、头像、Bot/权限、Owner-only 可见范围、发布读回、Stream 与收发证据。
+创建取得 ID 后所有恢复使用同一应用；未知创建结果不能重发创建。网页会话的重启/SSO 续接实测与 packaged App/Core
+恢复必须分别验收，不能彼此替代。Schema-1 OAuth Profile 保留到用户显式重连成功；不做伪造 Cookie 的自动迁移。
 
-当前 production secret delivery 尚未完成，因此普通 package 不因代码已内置 OAuth 协议而自动具备可发布的钉钉登录。真实验收必须
-使用隔离 `userData`，记录连接前后应用数量、账号 identity、发布 App identity、审批/版本状态、Stream 与卡片收发证据；
-任何缺项都保持 NO-GO。字段、feature gate 和错误见
-[DingTalk Channel v3](../contracts/dingtalk-channel-v3.md)。验收同时覆盖首次浏览器登录、重启恢复、静默续期、明确撤销后
-重新连接、取消和网络失败；网络异常不得清空既有 Profile。
+字段、刷新、feature gate 与错误见 [DingTalk Channel v4](../contracts/dingtalk-channel-v4.md)。验收还须覆盖取消、断网、
+明确撤销后重连与 Cookie CAS 保存；普通网络异常不得清空 Session。没有独立生产 OAuth Client 已不构成阻塞，
+但 Owner/Core/群聊/卡片等关键链路证据不完整时仍保持 NO-GO。
 
 ## 打包产物：构建与运行分开
 

@@ -115,17 +115,20 @@ describe('opt-in Feishu execution-card previews', () => {
     expect(JSON.stringify(h.report.mock.calls)).not.toContain('om_preview_')
   })
 
-  it('updates exactly once per valid click, including repeated pages and each last page', async () => {
+  it('returns exactly one response card per valid click without patching, including repeated pages and each last page', async () => {
     const h = harness()
     await h.service.connected(agentId, appId, h.channel)
     for (const [index, [count, page]] of [[100, 1], [100, 6], [200, 13], [200, 13], [200, 0]].entries()) {
-      const response = await h.service.handleCardAction(appId, h.action(page, count), h.channel)
-      expect(response).toEqual({})
-      expect(h.updateCard).toHaveBeenCalledTimes(index + 1)
-      const patched = h.updateCard.mock.calls.at(-1)![1] as Record<string, unknown>
-      expect(outerPanel(patched).expanded).toBe(true)
-      expect(outerPanel(patched).elements).toContainEqual({ tag: 'markdown', content: `第 ${page + 1} / ${count === 100 ? 7 : 14} 页`, text_align: 'center' })
-      expect(response).not.toHaveProperty('card')
+      const response = await h.service.handleCardAction(appId, h.action(page, count))
+      expect(response?.card?.type).toBe('raw')
+      expect(response).not.toHaveProperty('toast')
+      expect(h.updateCard).not.toHaveBeenCalled()
+      const card = response!.card!.data
+      expect(outerPanel(card).expanded).toBe(true)
+      expect(outerPanel(card).elements).toContainEqual({ tag: 'markdown', content: `第 ${page + 1} / ${count === 100 ? 7 : 14} 页`, text_align: 'center' })
+      expect(h.report.mock.calls.filter(([event]) => event.stage === 'page_response_ready')).toHaveLength(index + 1)
+      // A caller/client mutating its returned view must not alter a later page response.
+      outerPanel(card).expanded = false
     }
     expect(h.create).toHaveBeenCalledTimes(2)
   })
@@ -136,7 +139,7 @@ describe('opt-in Feishu execution-card previews', () => {
     for (const value of [{ action: 'execution_console_page', agentRunId: 'real-run' }, { rovaiAction: 'bind_project' }]) {
       const event = h.action()
       event.action.value = value
-      expect(await h.service.handleCardAction(appId, event, h.channel)).toBeNull()
+      expect(await h.service.handleCardAction(appId, event)).toBeNull()
     }
     expect(h.updateCard).not.toHaveBeenCalled()
   })
@@ -161,44 +164,44 @@ describe('opt-in Feishu execution-card previews', () => {
     for (const mutate of mutations) {
       const event = h.action()
       mutate(event)
-      expect((await h.service.handleCardAction(appId, event, h.channel))?.toast?.type).toBe('warning')
+      const response = await h.service.handleCardAction(appId, event)
+      expect(response?.toast?.type).toBe('warning')
+      expect(response).not.toHaveProperty('card')
     }
-    expect((await h.service.handleCardAction('cli_other', h.action(), h.channel))?.toast?.type).toBe('warning')
+    expect((await h.service.handleCardAction('cli_other', h.action()))?.toast?.type).toBe('warning')
     expect(h.updateCard).not.toHaveBeenCalled()
   })
 
-  it('rejects expired or changed publication/Owner bindings and redacts failed API diagnostics', async () => {
+  it('rejects expired or changed publication/Owner bindings and redacts failed lookup diagnostics', async () => {
     const h = harness()
     await h.service.connected(agentId, appId, h.channel)
     h.readOwner.mockReturnValueOnce({ ...owner, accountId: 'different-account' })
-    expect((await h.service.handleCardAction(appId, h.action(), h.channel))?.toast?.type).toBe('warning')
-    h.updateCard.mockRejectedValueOnce(new Error('Authorization: Bearer should-not-be-logged'))
-    expect((await h.service.handleCardAction(appId, h.action(), h.channel))?.toast?.type).toBe('error')
+    expect((await h.service.handleCardAction(appId, h.action()))?.toast?.type).toBe('warning')
+    h.readOwner.mockImplementationOnce(() => { throw new Error('Authorization: Bearer should-not-be-logged') })
+    const failed = await h.service.handleCardAction(appId, h.action())
+    expect(failed?.toast?.type).toBe('error')
+    expect(failed).not.toHaveProperty('card')
     expect(JSON.stringify(h.report.mock.calls)).not.toContain('should-not-be-logged')
     h.advanceClock(6 * 60 * 60_000)
-    expect((await h.service.handleCardAction(appId, h.action(), h.channel))?.toast?.type).toBe('warning')
-    expect(h.updateCard).toHaveBeenCalledTimes(1)
+    expect((await h.service.handleCardAction(appId, h.action()))?.toast?.type).toBe('warning')
+    expect(h.updateCard).not.toHaveBeenCalled()
   })
 
-  it('answers a stalled preview patch within the callback deadline without retrying or claiming success', async () => {
+  it('returns only a timeout toast when a slow Owner lookup consumes the callback budget', async () => {
     const h = harness([31])
     await h.service.connected(agentId, appId, h.channel)
-    let release!: () => void
-    const patch = new Promise<undefined>(resolve => { release = () => resolve(undefined) })
-    h.updateCard.mockReturnValueOnce(patch)
     vi.useFakeTimers()
     try {
-      let response: unknown
-      const pending = h.service.handleCardAction(appId, h.action(), h.channel).then(value => { response = value })
-      await vi.advanceTimersByTimeAsync(2500)
+      h.readOwner.mockImplementationOnce(() => {
+        vi.setSystemTime(Date.now() + 2500)
+        return { ...owner }
+      })
+      const response = await h.service.handleCardAction(appId, h.action())
       expect(response).toEqual({ toast: { type: 'error', content: '翻页响应超时，请稍后重试' } })
-      release()
-      await pending
       await vi.advanceTimersByTimeAsync(0)
-      expect(h.updateCard).toHaveBeenCalledTimes(1)
-      expect(h.report).not.toHaveBeenCalledWith(expect.objectContaining({ stage: 'page_updated' }))
+      expect(h.updateCard).not.toHaveBeenCalled()
+      expect(h.report).not.toHaveBeenCalledWith(expect.objectContaining({ stage: 'page_response_ready' }))
     } finally {
-      release()
       vi.useRealTimers()
     }
   })
