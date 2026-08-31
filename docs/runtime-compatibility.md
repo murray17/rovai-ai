@@ -38,10 +38,12 @@ macOS arm64 上只运行原生版本/auth/schema 检查，没有创建模型请�
 
 | Runtime | 本机观察 | Camp Fast 结论 |
 | --- | --- | --- |
-| Claude Code 2.1.220 | `auth status` 返回 loggedIn、firstParty，但 authMethod 为 `oauth_token`、subscriptionType 为空 | 未明确订阅登录，隐藏；不从 token 或凭据文件推测资格 |
+| Claude Code 2.1.220 | `auth status` 返回 loggedIn、firstParty、authMethod 为 `oauth_token`、subscriptionType 为空；进程环境无自定义 Key/Base URL/云 Provider | 原生官方 OAuth 身份通过 Fast 入口认证门禁；不要求套餐字段，实际用量/组织资格由 Runtime 判断，未发起付费模型请求 |
 | Codex CLI 0.147.0 | 标准及 `--experimental` app-server schema 仅有持久 `serviceTier`，没有 `serviceTierForTurn`；模型字段为 `serviceTiers` / `defaultServiceTier` | 不支持所需单 Turn 覆盖，隐藏；禁止用持久字段代替 |
 
 Claude inline settings、默认模型切换及 cooldown 边界参考[原生 Fast 文档](https://code.claude.com/docs/en/fast-mode)。
+官方订阅组织也可使用 `setup-token` / `CLAUDE_CODE_OAUTH_TOKEN`，见[官方迁移说明](https://support.claude.com/en/articles/14128775-claude-code-on-console-to-enterprise-migration)。
+套餐字段只作可选 metadata，不以缺失代表认证未知；未知认证方式、自定义 Provider/endpoint 仍拒绝。
 离线 native 协议 fixture 验证后续合格版本的精确字段、实际 cwd、分页与未知拒绝；隔离 Electron 验证生产
 成员浮层。它们不等于本机 Fast 付费执行成功，也不扩大既有平台准入。合同见
 [Camp Member Fast v1](contracts/camp-member-fast-v1.md)。

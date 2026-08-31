@@ -3066,7 +3066,7 @@ mod tests {
 printf '%s\n' "$PWD" > native-cwd
 printf '%s\n' "$@" > native-argv
 if [ "$1:$2" = 'auth:status' ]; then
-  printf '%s\n' '{"loggedIn":true,"authMethod":"claude.ai","apiProvider":"firstParty","subscriptionType":"max"}'
+  printf '%s\n' '{"loggedIn":true,"authMethod":"oauth_token","apiProvider":"firstParty","subscriptionType":null}'
   exit 0
 fi
 while IFS= read -r request; do

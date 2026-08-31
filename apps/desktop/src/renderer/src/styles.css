@@ -3573,7 +3573,6 @@ button.task-event-card:focus-visible .task-card-chevron { color: var(--brand-ink
 .camp-fast-toggle:hover .camp-fast-pill { background: var(--surface-hover); }
 .camp-fast-toggle:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 .camp-fast-toggle[aria-disabled="true"] { opacity: .65; cursor: wait; }
-.camp-fast-warning { color: var(--attention); }
 .camp-fast-tooltip { position: absolute; z-index: 2; right: 0; bottom: calc(100% + 6px); display: none; width: 232px; padding: 8px 10px; border: 1px solid var(--line-strong); border-radius: 6px; background: var(--inspector-surface); color: var(--ink); font-size: 11px; line-height: 1.6; pointer-events: none; }
 .camp-fast-control:hover .camp-fast-tooltip, .camp-fast-control:focus-within .camp-fast-tooltip { display: block; }
 .camp-fast-cost-confirmation { padding: 8px 0 12px; border-bottom: 1px solid var(--line); }
