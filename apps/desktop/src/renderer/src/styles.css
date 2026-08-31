@@ -1457,7 +1457,7 @@ html[data-rovai-platform="win32"] .bootstrap-shell-brand { padding-left: 20px; }
   flex-direction: column;
   overflow: hidden;
   border: 1px solid var(--line-strong);
-  border-top: 2px solid var(--brand);
+  border-top: 2px solid var(--workspace-steel);
   border-radius: 10px;
   outline: 0;
   color: var(--ink);
