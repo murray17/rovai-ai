@@ -22,9 +22,29 @@ app.whenReady().then(async () => {
   window.webContents.debugger.attach('1.3')
   await window.webContents.debugger.sendCommand('Emulation.setFocusEmulationEnabled', { enabled: true })
   const click = async selector => {
-    const pointer = await run(`(() => { const r = document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect(); return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) } })()`)
+    const pointer = await run(`(() => { const r = document.querySelector(${JSON.stringify(selector)}).getClientRects()[0]; return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) } })()`)
     for (const type of ['mouseMove', 'mouseDown', 'mouseUp']) window.webContents.sendInputEvent({ type, ...pointer, button: 'left', clickCount: 1 })
     return state()
+  }
+  const selectText = async selector => {
+    const points = await run(`(() => {
+      window.getSelection().removeAllRanges();
+      const node = document.querySelector(${JSON.stringify(selector)}).firstChild;
+      const range = document.createRange();
+      range.setStart(node, 1); range.setEnd(node, 8);
+      const r = range.getClientRects()[0];
+      return { left: Math.ceil(r.left), right: Math.floor(r.right), y: Math.round(r.top + r.height / 2) };
+    })()`)
+    window.webContents.sendInputEvent({ type: 'mouseDown', x: points.left, y: points.y, button: 'left', clickCount: 1, modifiers: ['alt'] })
+    for (let step = 1; step <= 4; step += 1) {
+      window.webContents.sendInputEvent({ type: 'mouseMove', x: points.left + Math.round((points.right - points.left) * step / 4),
+        y: points.y, button: 'left', modifiers: ['alt', 'leftButtonDown'] })
+    }
+    window.webContents.sendInputEvent({ type: 'mouseUp', x: points.right, y: points.y, button: 'left', clickCount: 1, modifiers: ['alt'] })
+    await state()
+    const selection = await run('window.getSelection().toString()')
+    assert.ok(selection.length > 0, 'Native drag must leave selected text')
+    return selection
   }
   const key = async keyCode => {
     window.webContents.sendInputEvent({ type: 'keyDown', keyCode })
@@ -117,6 +137,40 @@ app.whenReady().then(async () => {
     await click('[title="run_report.py:44-46"]')
     assert.equal((await state()).tabCount, 1)
     await capture('range-night')
+  })
+  const locatedLink = '[title="run_report.py:44-46"]'
+  const plainLink = 'a[title="src/report/run_report.py"]:not(.inline-code-file-reference)'
+  const nearbyProse = 'p:has([title="run_report.py:44-46"]) + p'
+  for (const [label, selector] of [['inline code', locatedLink], ['plain Markdown', plainLink]]) {
+    await check(`${label} opens with an existing selection elsewhere in the message`, async () => {
+      await run('window.navigationTest.bookmark()')
+      const selection = await selectText(nearbyProse)
+      const before = await state()
+      const after = await click(selector)
+      assert.equal(after.opens.length, before.opens.length + 1)
+      assert.equal(after.opens.at(-1).rawReference, 'src/report/run_report.py')
+      assert.equal(after.visible, true)
+      assert.equal(await run('window.getSelection().toString()'), selection)
+      assert.equal(await run('location.hash'), '')
+      assert.deepEqual(after.notices, [])
+    })
+  }
+  await check('dragging text inside a link does not open it, but a later single click does', async () => {
+    const before = await state()
+    await selectText(`${locatedLink} .inline-code-file-reference-label`)
+    assert.equal((await state()).opens.length, before.opens.length)
+    const after = await click(locatedLink)
+    assert.equal(after.opens.length, before.opens.length + 1)
+    assert.deepEqual(after.targetLines, [44, 45, 46])
+  })
+  await check('keyboard activation works while other message text is selected', async () => {
+    await selectText(nearbyProse)
+    await run(`document.querySelector(${JSON.stringify(locatedLink)}).focus({ preventScroll: true })`)
+    const before = await state()
+    const after = await key('Enter')
+    assert.equal(after.opens.length, before.opens.length + 1)
+    assert.deepEqual(after.targetLines, [44, 45, 46])
+    assert.equal(await run('location.hash'), '')
   })
   const report = { ok: true, cases, measurements }
   writeFileSync(join(dirname(userData), 'report.json'), JSON.stringify(report, null, 2))
