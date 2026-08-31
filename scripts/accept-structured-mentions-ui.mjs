@@ -1845,6 +1845,12 @@ try {
   await mouseClick(running.cdp, '.composer-reply-cancel')
   await waitForValue(async () => request(running.cdp, 'camp.composerDraft.get', { campId }),
     (draft) => draft.replyIntent === null, 10_000)
+  // The Core receipt can arrive before cancelReply's Renderer focus callback.
+  // Finish that interaction before moving focus to the keyboard Reply action.
+  await waitForExpression(running.cdp, `(() => (
+    !document.querySelector('.composer-reply-line')
+      && document.activeElement?.id === 'camp-message'
+  ))()`)
   await setViewport(running.cdp, 1440, 920)
   await running.cdp.send('Page.bringToFront')
   await running.cdp.send('Emulation.setFocusEmulationEnabled', { enabled: true })
