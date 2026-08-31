@@ -98,6 +98,7 @@ impl ExecutionEvidenceService {
                 | "runtime.plan"
                 | "runtime.plan.delta"
                 | "runtime.diagnostic"
+                | "runtime.fast.observed"
                 | "file.change.updated"
                 | "runtime.file_changes.snapshot"
                 | "runtime.action"
@@ -757,6 +758,7 @@ fn evidence_classification(
         "agent.text.delta" => Some(("narration", "updated")),
         "runtime.plan" | "runtime.plan.delta" => Some(("plan", "updated")),
         "runtime.diagnostic" => Some(("step", "updated")),
+        "runtime.fast.observed" => Some(("step", "updated")),
         "file.change.updated" => Some(("file_change", "updated")),
         "runtime.file_changes.snapshot" => Some(("file_change", "completed")),
         "runtime.action" => Some((
@@ -807,6 +809,20 @@ fn normalize_public_payload(event_type: &str, payload: &Value) -> Value {
             "maxAttempts": payload.get("maxAttempts"),
             "retryAfterSeconds": payload.get("retryAfterSeconds"),
         }),
+        "runtime.fast.observed" => {
+            let state = payload
+                .get("state")
+                .and_then(|state| {
+                    serde_json::from_value::<crate::camp_fast::ObservedFastState>(state.clone())
+                        .ok()
+                })
+                .unwrap_or_default();
+            let tier = payload
+                .get("observedServiceTier")
+                .and_then(Value::as_str)
+                .filter(|tier| matches!(*tier, "priority" | "fast" | "default" | "standard"));
+            serde_json::json!({ "state": state, "observedServiceTier": tier })
+        }
         "file.change.updated" => serde_json::json!({
             "itemId": payload.get("itemId"),
             "patch": payload.get("patch").or_else(|| payload.get("delta")),
@@ -2429,6 +2445,38 @@ mod tests {
         assert!(runtime_diagnostic.payload.get("rawDetail").is_none());
         assert!(!runtime_diagnostic.is_inline_delta_batchable());
 
+        for (state, tier, expected_tier) in [
+            ("fast", "priority", json!("priority")),
+            ("standard", "default", json!("default")),
+            ("cooldown", "standard", json!("standard")),
+            ("unknown", "private-unrecognized-tier", Value::Null),
+        ] {
+            let observed = ExecutionEvidenceService
+                .record_runtime_event(
+                    &mut database,
+                    &blob_store,
+                    &run_id,
+                    execution_epoch,
+                    "runtime.fast.observed",
+                    &json!({
+                        "state": state,
+                        "observedServiceTier": tier,
+                        "rawDetail": "private-token",
+                    }),
+                )
+                .unwrap()
+                .unwrap();
+            assert_eq!(observed.agent_run_id, run_id);
+            assert_eq!(observed.execution_epoch, execution_epoch);
+            assert_eq!(observed.payload["state"], state);
+            assert_eq!(observed.payload["observedServiceTier"], expected_tier);
+            assert!(observed.payload.get("rawDetail").is_none());
+            assert!(
+                observed.canonical.is_none(),
+                "Fast metadata is not a tool activity"
+            );
+        }
+
         let oversized = ExecutionEvidenceService
             .prepare_runtime_event(
                 "agent.text.delta",
@@ -2466,7 +2514,7 @@ mod tests {
             .unwrap()
             .expect("a Built-in Tool start must be durable before execution");
         assert!(started_tool.inserted);
-        assert_eq!(started_tool.sequence, 6);
+        assert_eq!(started_tool.sequence, 10);
 
         let interrupted_started = ExecutionEvidenceService
             .record_runtime_event(
@@ -2486,7 +2534,7 @@ mod tests {
             )
             .unwrap()
             .unwrap();
-        assert_eq!(interrupted_started.sequence, 7);
+        assert_eq!(interrupted_started.sequence, 11);
 
         let materialized = ContextService
             .materialize(
@@ -2551,7 +2599,7 @@ mod tests {
             )
             .unwrap()
             .expect("an already-started Activity must receive one interruption terminal");
-        assert_eq!(interrupted.sequence, 8);
+        assert_eq!(interrupted.sequence, 12);
         assert_eq!(interrupted.payload["reasonCode"], "runtime_interrupted");
         let interrupted_canonical = interrupted.canonical.as_ref().unwrap();
         assert_eq!(interrupted_canonical.phase, "terminal");
@@ -2611,7 +2659,7 @@ mod tests {
             .unwrap()
             .expect("terminal Team Tool result must survive the Turn fence");
         assert!(failed.inserted);
-        assert_eq!(failed.sequence, 9);
+        assert_eq!(failed.sequence, 13);
         assert_eq!(
             failed.payload["errorCode"],
             "team_tool.execution_budget_exhausted"
@@ -2643,7 +2691,7 @@ mod tests {
             .unwrap()
             .expect("the first replay observation must remain visible");
         assert!(replay.inserted);
-        assert_eq!(replay.sequence, 10);
+        assert_eq!(replay.sequence, 14);
         assert_eq!(replay.payload["idempotentReplay"], true);
 
         let replay_duplicate = ExecutionEvidenceService
@@ -2658,7 +2706,7 @@ mod tests {
             .unwrap();
         assert!(replay_duplicate.inserted);
         assert_ne!(replay_duplicate.id, replay.id);
-        assert_eq!(replay_duplicate.sequence, 11);
+        assert_eq!(replay_duplicate.sequence, 15);
 
         drop(database);
         std::fs::remove_dir_all(directory).unwrap();

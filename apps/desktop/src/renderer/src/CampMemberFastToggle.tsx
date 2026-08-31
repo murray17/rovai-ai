@@ -17,16 +17,15 @@ export function CampMemberFastToggle({
   const tooltipId = useId()
   const enabled = effectiveCampMemberFast(value)
   const unknown = value.fastOverride === null && value.runtimeDefaultFast === null
-  const warning = enabled && value.observedFastState === 'cooldown'
-  const stateLabel = unknown ? '状态未知' : enabled ? '已请求 Fast' : '标准速度'
-  const explanation = unknown
-    ? `跟随 ${runtimeName} 设置，首次运行后显示实际状态`
-    : value.unavailableReason ?? (value.fastOverride === null ? '跟随 Agent 运行时默认设置' : '已保存当前会话的响应模式')
+  const stateLabel = unknown ? '跟随运行时默认' : enabled ? '后续执行请求 Fast' : '后续执行请求标准速度'
+  const explanation = value.fastOverride === null
+    ? `跟随 ${runtimeName} 默认设置，不覆盖原生配置`
+    : enabled ? '后续执行请求 Fast' : '后续执行请求标准速度'
   return <span className="camp-fast-control">
     <button
       type="button"
       className={`camp-fast-toggle ${enabled ? 'is-on' : ''}`}
-      aria-label={`${displayName}的 Fast，${stateLabel}${warning ? '，暂时不可用' : ''}`}
+      aria-label={`${displayName}的 Fast，${stateLabel}`}
       aria-pressed={unknown ? 'mixed' : enabled}
       aria-disabled={pending}
       aria-busy={pending}
@@ -36,7 +35,6 @@ export function CampMemberFastToggle({
       <span className="camp-fast-pill">
         <svg viewBox="0 0 16 16" aria-hidden="true" fill={enabled ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth="1.25" strokeLinejoin="round"><path d="m9 1-6 8h4l-1 6 7-9H9z" /></svg>
         Fast
-        {warning && <svg className="camp-fast-warning" viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.3"><path d="M8 2 1 14h14Z M8 6v4 M8 12v.5" /></svg>}
       </span>
     </button>
     <span className="camp-fast-tooltip" id={tooltipId} role="tooltip">

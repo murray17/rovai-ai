@@ -17,8 +17,12 @@ last_updated: 2026-08-31
 前置版本：[v1.33](../v1.33/README.md)。[实施计划](implementation-plan.md)；[决定理由](decisions.md)。
 
 仅支持明确的 Claude 订阅登录与 Codex ChatGPT 登录，原生能力未知即隐藏。不增加通用 Runtime 性能配置。
-本机 Claude 2.1.220 的 auth status 未明确订阅类型，Codex 0.147.0 未导出 `serviceTierForTurn`，因此本机
-两者当前均不会展示 Fast。隔离 fixture 验证 wire 和 UI，不据此宣称真实 Fast 付费执行已验证。
+本机 Claude 2.1.220 原生 firstParty OAuth 登录在套餐字段为空时仍通过入口认证门禁；Codex 0.147.0
+未导出 `serviceTierForTurn`，仍隐藏入口。隔离 fixture 验证 wire 和 UI，不据此宣称真实 Fast 付费执行已验证。
+
+修正将三态意图、模型资格与 Run 观测分开：模型变化只清资格缓存，权限变化不影响 Fast，实际绑定变化才失效覆盖。
+成员浮层只显示后续执行偏好；运行观测留在对应 Run 的 Evidence/Usage，不回写 Camp。Migration 119
+将 schema 72 升到 73，保留已有覆盖，不增加偏好版本号或状态字段。修正验证见实施计划。
 
 本地实现、数据库升级、自动化回归与 Standards / Spec 双轴复核已完成；验收结果见实施计划。
 

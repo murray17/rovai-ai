@@ -62,10 +62,15 @@ app.whenReady().then(async () => {
     state = await key('Enter')
     assert.equal(state.pressed, 'true', 'Failed save leaves the prior intent visible')
     assert.ok(state.sameNode && state.focused)
-    await run('window.fastTest.cooldown()')
-    state = await snapshot()
-    assert.equal(state.saved.fastOverride, true)
-    assert.ok(state.label.includes('暂时不可用'))
+    for (const observed of ['fast', 'standard', 'cooldown']) {
+      await run(`window.fastTest.legacyObservation('${observed}')`)
+      state = await snapshot()
+      assert.equal(state.saved.fastOverride, true)
+      assert.equal(state.pressed, 'true')
+      assert.ok(state.label.includes('后续执行请求 Fast'))
+      assert.equal(await run("document.querySelector('.camp-fast-warning') !== null"), false)
+      assert.equal(await run("document.querySelector('.camp-fast-tooltip').textContent.includes('暂时不可用')"), false)
+    }
     await click('.camp-member-action-button')
     await run(`document.querySelectorAll('[role="menuitem"]').forEach(node => { if(node.textContent.includes('检测响应模式')) node.setAttribute('data-fixture-check','true') })`)
     state = await click('[data-fixture-check]')
@@ -104,7 +109,7 @@ app.whenReady().then(async () => {
     await run('window.fastTest.release()')
     state = await snapshot()
     assert.equal(state.toggles, 13, 'A delayed save cannot show Fast on an unsupported Runtime')
-    console.log(JSON.stringify({ ok: true, requests: state.requests.length, cases: ['1280×720', '1040×700', '1440×920', 'cost acknowledgement', 'native keyboard/focus', 'save failure', 'cooldown', 'probe', 'reset', 'late check', 'late save'] }))
+    console.log(JSON.stringify({ ok: true, requests: state.requests.length, cases: ['1280×720', '1040×700', '1440×920', 'cost acknowledgement', 'native keyboard/focus', 'save failure', 'observations ignored', 'probe', 'reset', 'late check', 'late save'] }))
     window.destroy(); app.quit()
   } catch (error) {
     console.error(await snapshot())

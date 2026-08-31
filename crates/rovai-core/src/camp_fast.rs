@@ -76,8 +76,6 @@ pub struct CampMemberFastView {
     pub runtime_binding_revision: String,
     pub fast_override: Option<bool>,
     pub runtime_default_fast: Option<bool>,
-    pub observed_fast_state: ObservedFastState,
-    pub unavailable_reason: Option<String>,
 }
 
 /// A probe target is also the fence for an async result. Re-probes never create revisions.
@@ -88,6 +86,7 @@ pub struct CampMemberFastTarget {
     pub runtime_binding_revision: String,
     pub cwd: String,
     pub adapter_kind: AdapterKind,
+    pub model_selection_json: Option<String>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -102,16 +101,17 @@ pub(crate) fn target_on_connection(
     agent_id: &str,
 ) -> Result<Option<CampMemberFastTarget>> {
     let row = connection.query_row(
-        "SELECT profile.runtime_binding_revision, camp.project_path, profile.selected_runtime_adapter_kind
+        "SELECT profile.runtime_binding_revision, camp.project_path, profile.selected_runtime_adapter_kind,
+                profile.default_model_selection_json
          FROM camp_member AS member
          JOIN camp ON camp.id = member.camp_id
          JOIN agent_profile AS profile ON profile.id = member.agent_id
          WHERE member.camp_id = ?1 AND member.agent_id = ?2
            AND member.status = 'active' AND profile.profile_status != 'removed'",
         params![camp_id, agent_id],
-        |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, Option<String>>(2)?)),
+        |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, Option<String>>(2)?, row.get::<_, Option<String>>(3)?)),
     ).optional()?;
-    let Some((revision, cwd, Some(adapter))) = row else {
+    let Some((revision, cwd, Some(adapter), model_selection_json)) = row else {
         return Ok(None);
     };
     let adapter_kind: AdapterKind = adapter.parse()?;
@@ -127,6 +127,7 @@ pub(crate) fn target_on_connection(
         runtime_binding_revision: revision,
         cwd,
         adapter_kind,
+        model_selection_json,
     }))
 }
 
@@ -166,7 +167,21 @@ pub(crate) fn record_eligibility_on_connection(
     let Some(current) = runtime_for_target_on_connection(connection, expected)? else {
         return Ok(false);
     };
-    if current.executable_fingerprint != runtime.executable_fingerprint
+    // serviceTier is an audit annotation added during Run freeze, not a model selection.
+    let model_selection = |runtime: &FrozenAgentRuntimeConfig| {
+        let mut model = runtime.model.clone();
+        if runtime.adapter_kind == AdapterKind::CodexCli
+            && let Some(options) = model.options.as_object_mut()
+        {
+            options.remove("serviceTier");
+        }
+        model
+    };
+    if model_selection(&current) != model_selection(runtime)
+        || current.adapter_kind != runtime.adapter_kind
+        || current.installation_id != runtime.installation_id
+        || current.auth_scope != runtime.auth_scope
+        || current.executable_fingerprint != runtime.executable_fingerprint
         || current.installation_generation != runtime.installation_generation
         || current.search_environment_generation != runtime.search_environment_generation
     {
@@ -178,14 +193,12 @@ pub(crate) fn record_eligibility_on_connection(
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
          ON CONFLICT(camp_id, agent_id) DO UPDATE SET
              fast_override = CASE WHEN runtime_binding_revision = excluded.runtime_binding_revision THEN fast_override ELSE NULL END,
-             observed_fast_state = CASE WHEN runtime_binding_revision = excluded.runtime_binding_revision AND cwd = excluded.cwd AND executable_fingerprint = excluded.executable_fingerprint THEN observed_fast_state ELSE 'unknown' END,
-             unavailable_reason = CASE WHEN runtime_binding_revision = excluded.runtime_binding_revision AND cwd = excluded.cwd AND executable_fingerprint = excluded.executable_fingerprint THEN unavailable_reason ELSE NULL END,
              runtime_binding_revision = excluded.runtime_binding_revision, cwd = excluded.cwd,
              executable_fingerprint = excluded.executable_fingerprint, eligible = excluded.eligible,
-             runtime_default_fast = CASE WHEN ?8 AND runtime_binding_revision = excluded.runtime_binding_revision AND cwd = excluded.cwd AND executable_fingerprint = excluded.executable_fingerprint
-                 THEN COALESCE(excluded.runtime_default_fast, runtime_default_fast) ELSE excluded.runtime_default_fast END",
+             runtime_default_fast = excluded.runtime_default_fast",
         params![expected.camp_id, expected.agent_id, expected.runtime_binding_revision, expected.cwd,
-            runtime.executable_fingerprint, observation.eligible, observation.runtime_default_fast, runtime.adapter_kind == AdapterKind::ClaudeCodeCli],
+            runtime.executable_fingerprint, observation.eligible,
+            (runtime.adapter_kind == AdapterKind::CodexCli).then_some(observation.runtime_default_fast).flatten()],
     )?;
     Ok(true)
 }
@@ -196,8 +209,8 @@ pub(crate) fn view_on_connection(
     agent_id: &str,
 ) -> Result<Option<CampMemberFastView>> {
     let row = connection.query_row(
-        "SELECT fast.runtime_binding_revision, fast.fast_override, fast.runtime_default_fast,
-                fast.observed_fast_state, fast.unavailable_reason
+        "SELECT fast.runtime_binding_revision, fast.fast_override,
+                CASE WHEN profile.selected_runtime_adapter_kind = 'codex-cli' THEN fast.runtime_default_fast ELSE NULL END
          FROM camp_member_fast_preference AS fast
          JOIN camp_member AS member ON member.camp_id = fast.camp_id AND member.agent_id = fast.agent_id
          JOIN camp ON camp.id = fast.camp_id
@@ -212,27 +225,13 @@ pub(crate) fn view_on_connection(
            AND snapshot.authentication_status != 'authentication_required'
            AND fast.executable_fingerprint = snapshot.executable_fingerprint",
         params![camp_id, agent_id],
-        |row| Ok((row.get::<_, String>(0)?, row.get::<_, Option<bool>>(1)?, row.get::<_, Option<bool>>(2)?,
-            row.get::<_, String>(3)?, row.get::<_, Option<String>>(4)?)),
+        |row| Ok(CampMemberFastView {
+            runtime_binding_revision: row.get(0)?,
+            fast_override: row.get(1)?,
+            runtime_default_fast: row.get(2)?,
+        }),
     ).optional()?;
-    row.map(
-        |(
-            runtime_binding_revision,
-            fast_override,
-            runtime_default_fast,
-            state,
-            unavailable_reason,
-        )| {
-            Ok(CampMemberFastView {
-                runtime_binding_revision,
-                fast_override,
-                runtime_default_fast,
-                observed_fast_state: serde_json::from_value(json!(state))?,
-                unavailable_reason,
-            })
-        },
-    )
-    .transpose()
+    Ok(row)
 }
 
 pub fn freeze(
@@ -282,38 +281,6 @@ pub fn freeze(
     runtime.camp_fast = Some(fast);
     runtime.refresh_config_digest()?;
     Ok(())
-}
-
-pub(crate) fn record_observation_on_connection(
-    connection: &Connection,
-    camp_id: &str,
-    agent_id: &str,
-    revision: &str,
-    state: ObservedFastState,
-    inherited: bool,
-) -> Result<bool> {
-    // A late result from an old binding cannot alter the new binding, or the user's intent.
-    Ok(connection.execute(
-        "UPDATE camp_member_fast_preference SET observed_fast_state = ?4, unavailable_reason = ?5,
-             runtime_default_fast = CASE WHEN ?6 AND EXISTS(
-                 SELECT 1 FROM agent_profile WHERE id = ?2 AND selected_runtime_adapter_kind = 'claude-code-cli'
-             ) THEN ?7 ELSE runtime_default_fast END
-         WHERE camp_id = ?1 AND agent_id = ?2 AND runtime_binding_revision = ?3
-           AND EXISTS(SELECT 1 FROM agent_profile WHERE id = ?2 AND runtime_binding_revision = ?3)",
-        params![
-            camp_id,
-            agent_id,
-            revision,
-            state.as_str(),
-            (state == ObservedFastState::Cooldown).then_some("Fast 暂时不可用，本次按标准速度执行"),
-            inherited,
-            match state {
-                ObservedFastState::Fast | ObservedFastState::Cooldown => Some(true),
-                ObservedFastState::Standard => Some(false),
-                ObservedFastState::Unknown => None,
-            }
-        ],
-    )? > 0)
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -384,15 +351,15 @@ pub fn set_preference(
     })
 }
 
-/// Only native, non-secret account classifications are accepted. Unknown shapes stay hidden.
+/// Native first-party logins can omit plan metadata (including official setup-token logins).
+/// Entitlement and usage limits remain the runtime's responsibility; unknown auth stays hidden.
 pub fn claude_subscription_auth(status: &Value) -> bool {
     status.get("loggedIn").and_then(Value::as_bool) == Some(true)
-        && status.get("authMethod").and_then(Value::as_str) == Some("claude.ai")
-        && status.get("apiProvider").and_then(Value::as_str) == Some("firstParty")
         && matches!(
-            status.get("subscriptionType").and_then(Value::as_str),
-            Some("pro" | "max" | "team" | "enterprise")
+            status.get("authMethod").and_then(Value::as_str),
+            Some("claude.ai" | "oauth_token")
         )
+        && status.get("apiProvider").and_then(Value::as_str) == Some("firstParty")
 }
 
 pub fn claude_fast_version_supported(version: Option<&str>) -> bool {
@@ -529,22 +496,25 @@ pub fn record_eligibility(
 ) -> Result<bool> {
     record_eligibility_on_connection(database.connection(), target, runtime, observation)
 }
-pub fn record_observation(
+/// A Run may refresh eligibility only for its unchanged binding and model configuration.
+/// Native execution observations never enter the Camp preference table.
+pub fn record_runtime_eligibility(
     database: &Database,
     camp_id: &str,
     agent_id: &str,
-    revision: &str,
-    state: ObservedFastState,
-    inherited: bool,
+    runtime: &FrozenAgentRuntimeConfig,
+    observation: &NativeFastEligibility,
 ) -> Result<bool> {
-    record_observation_on_connection(
-        database.connection(),
-        camp_id,
-        agent_id,
-        revision,
-        state,
-        inherited,
-    )
+    let Some(fast) = runtime.camp_fast.as_ref() else {
+        return Ok(false);
+    };
+    let Some(expected) = target(database, camp_id, agent_id)? else {
+        return Ok(false);
+    };
+    if fast.runtime_binding_revision != expected.runtime_binding_revision {
+        return Ok(false);
+    }
+    record_eligibility(database, &expected, runtime, observation)
 }
 
 #[cfg(test)]
@@ -568,13 +538,36 @@ mod tests {
     #[test]
     fn native_claude_auth_and_inline_settings_fail_closed() {
         let subscribed = json!({"loggedIn": true, "authMethod": "claude.ai", "apiProvider": "firstParty", "subscriptionType": "max"});
-        assert!(claude_subscription_auth(&subscribed));
+        for method in ["claude.ai", "oauth_token"] {
+            for plan in [
+                Some(json!("max")),
+                Some(Value::Null),
+                Some(json!("future-plan")),
+                None,
+            ] {
+                let mut status = subscribed.clone();
+                status["authMethod"] = json!(method);
+                if let Some(plan) = plan {
+                    status["subscriptionType"] = plan;
+                } else {
+                    status.as_object_mut().unwrap().remove("subscriptionType");
+                }
+                assert!(
+                    claude_subscription_auth(&status),
+                    "native first-party auth must not require plan metadata"
+                );
+            }
+        }
         for (key, value) in [
             ("loggedIn", json!(false)),
+            ("loggedIn", Value::Null),
             ("authMethod", json!("api_key")),
-            ("authMethod", json!("oauth_token")),
+            ("authMethod", json!("console")),
+            ("authMethod", json!("unknown")),
+            ("authMethod", Value::Null),
             ("apiProvider", json!("bedrock")),
-            ("subscriptionType", Value::Null),
+            ("apiProvider", json!("custom")),
+            ("apiProvider", Value::Null),
         ] {
             let mut status = subscribed.clone();
             status[key] = value;
@@ -668,68 +661,93 @@ mod tests {
         let mut database = crate::test_support::seeded_runtime_database_owned();
         let workspace = database.directory().join("workspace");
         std::fs::create_dir_all(&workspace).unwrap();
-        let create = envelope(
-            None,
-            CreateCampCommand::for_test_with_members(
-                workspace.to_string_lossy().into_owned(),
-                &["agent_1", "agent_2"],
-                "agent_1",
-            ),
-        );
-        let created = CollaborationService::default()
-            .create_camp(&mut database, &create)
-            .unwrap();
-        let camp_id = created.result.payload["campId"]
-            .as_str()
-            .unwrap()
-            .to_owned();
-        let initial = target(&database, &camp_id, "agent_1").unwrap().unwrap();
+        let mut camps = Vec::new();
+        for _ in 0..2 {
+            let created = CollaborationService::default()
+                .create_camp(
+                    &mut database,
+                    &envelope(
+                        None,
+                        CreateCampCommand::for_test_with_members(
+                            workspace.to_string_lossy().into_owned(),
+                            &["agent_1", "agent_2"],
+                            "agent_1",
+                        ),
+                    ),
+                )
+                .unwrap();
+            camps.push(
+                created.result.payload["campId"]
+                    .as_str()
+                    .unwrap()
+                    .to_owned(),
+            );
+        }
+        let camp_id = &camps[0];
+        assert_ne!(camps[0], camps[1]);
+        let initial = target(&database, camp_id, "agent_1").unwrap().unwrap();
         let runtime = runtime_for_target(&database, &initial).unwrap().unwrap();
-        let observed = NativeFastEligibility {
+        let eligible = NativeFastEligibility {
             eligible: true,
             runtime_default_fast: Some(false),
         };
-        assert!(record_eligibility(&database, &initial, &runtime, &observed).unwrap());
-        let set = |value| {
+        let set = |camp: &str, revision: &str, value| {
             envelope(
-                Some(&camp_id),
+                Some(camp),
                 SetCampMemberFastCommand {
-                    camp_id: camp_id.clone(),
+                    camp_id: camp.into(),
                     agent_id: "agent_1".into(),
-                    expected_runtime_binding_revision: initial.runtime_binding_revision.clone(),
+                    expected_runtime_binding_revision: revision.into(),
                     fast_override: value,
                 },
             )
         };
-        let command = set(Some(true));
-        assert_eq!(
-            set_preference(&mut database, &command)
-                .unwrap()
-                .result
-                .status,
-            CommandResultStatus::Applied
-        );
-        // Receipt replay does not create a second mutation.
-        assert_eq!(
-            set_preference(&mut database, &command)
-                .unwrap()
-                .result
-                .status,
-            CommandResultStatus::Applied
-        );
+        for (camp, choice) in camps.iter().zip([true, false]) {
+            let expected = target(&database, camp, "agent_1").unwrap().unwrap();
+            assert!(record_eligibility(&database, &expected, &runtime, &eligible).unwrap());
+            let command = set(camp, &initial.runtime_binding_revision, Some(choice));
+            assert_eq!(
+                set_preference(&mut database, &command)
+                    .unwrap()
+                    .result
+                    .status,
+                CommandResultStatus::Applied
+            );
+            // Receipt replay must not create a second mutation.
+            assert_eq!(
+                set_preference(&mut database, &command)
+                    .unwrap()
+                    .result
+                    .status,
+                CommandResultStatus::Applied
+            );
+        }
+        let assert_saved_choices = |database: &Database| {
+            for (camp, choice) in camps.iter().zip([true, false]) {
+                let stored: Option<bool> = database.connection().query_row(
+                    "SELECT fast_override FROM camp_member_fast_preference WHERE camp_id = ?1 AND agent_id = 'agent_1'",
+                    [camp], |row| row.get(0),
+                ).unwrap();
+                assert_eq!(stored, Some(choice));
+            }
+        };
+        assert!(view(&database, camp_id, "agent_2").unwrap().is_none());
         database.connection().execute(
             "INSERT INTO conversation(id, camp_id, agent_id, summary_through_message_sequence, last_message_sequence, version, created_at, updated_at)
-             VALUES ('fast-conversation', ?1, 'agent_1', 0, 0, 1, datetime('now'), datetime('now'))", [&camp_id]).unwrap();
-        let conversation: String = database
-            .connection()
-            .query_row(
-                "SELECT id FROM conversation WHERE camp_id = ?1 AND agent_id = 'agent_1'",
-                [&camp_id],
-                |row| row.get(0),
-            )
-            .unwrap();
+             VALUES ('fast-conversation', ?1, 'agent_1', 0, 0, 1, datetime('now'), datetime('now'))", [camp_id],
+        ).unwrap();
         let mut frozen = runtime.clone();
-        freeze(database.connection(), &conversation, "agent_1", &mut frozen).unwrap();
+        freeze(
+            database.connection(),
+            "fast-conversation",
+            "agent_1",
+            &mut frozen,
+        )
+        .unwrap();
+        assert_eq!(
+            frozen.camp_fast.as_ref().unwrap().service_tier_for_turn(),
+            Some("priority")
+        );
         assert_eq!(frozen.model.options["serviceTier"], "priority");
         assert_eq!(
             frozen.binding_compatibility_digest,
@@ -743,50 +761,34 @@ mod tests {
             crate::command::canonical_json_digest(&serde_json::to_value(unsigned).unwrap())
                 .unwrap()
         );
+        // The audit serviceTier added by freeze must not break model eligibility matching.
+        assert!(
+            record_runtime_eligibility(&database, camp_id, "agent_1", &frozen, &eligible).unwrap()
+        );
         let mut stale_environment = runtime.clone();
         stale_environment.search_environment_generation -= 1;
-        assert!(!record_eligibility(&database, &initial, &stale_environment, &observed).unwrap());
-        record_eligibility(
-            &database,
-            &initial,
-            &runtime,
-            &NativeFastEligibility {
-                eligible: true,
-                runtime_default_fast: Some(true),
-            },
-        )
-        .unwrap();
-        record_observation(
-            &database,
-            &camp_id,
-            "agent_1",
-            &initial.runtime_binding_revision,
-            ObservedFastState::Standard,
-            true,
-        )
-        .unwrap();
-        assert_eq!(
-            view(&database, &camp_id, "agent_1")
-                .unwrap()
-                .unwrap()
-                .runtime_default_fast,
-            Some(true),
-            "Codex observed fallback cannot rewrite its native Thread default"
-        );
-        record_eligibility(&database, &initial, &runtime, &observed).unwrap();
-        record_observation(
-            &database,
-            &camp_id,
-            "agent_1",
-            &initial.runtime_binding_revision,
-            ObservedFastState::Cooldown,
-            false,
-        )
-        .unwrap();
-        let preference = view(&database, &camp_id, "agent_1").unwrap().unwrap();
-        assert_eq!(preference.fast_override, Some(true));
-        assert_eq!(preference.observed_fast_state, ObservedFastState::Cooldown);
-        assert!(view(&database, &camp_id, "agent_2").unwrap().is_none());
+        assert!(!record_eligibility(&database, &initial, &stale_environment, &eligible).unwrap());
+        for choice in [Some(false), None, Some(true)] {
+            set_preference(
+                &mut database,
+                &set(camp_id, &initial.runtime_binding_revision, choice),
+            )
+            .unwrap();
+            let mut next = runtime.clone();
+            freeze(
+                database.connection(),
+                "fast-conversation",
+                "agent_1",
+                &mut next,
+            )
+            .unwrap();
+            assert_eq!(next.camp_fast.as_ref().unwrap().fast_override, choice);
+            assert_eq!(
+                next.camp_fast.as_ref().unwrap().service_tier_for_turn(),
+                choice.map(|fast| if fast { "priority" } else { "default" })
+            );
+            assert_eq!(frozen.camp_fast.as_ref().unwrap().fast_override, Some(true));
+        }
         record_eligibility(
             &database,
             &initial,
@@ -794,91 +796,196 @@ mod tests {
             &NativeFastEligibility::default(),
         )
         .unwrap();
+        assert!(view(&database, camp_id, "agent_1").unwrap().is_none());
+        assert_saved_choices(&database);
         let mut retry = runtime.clone();
-        freeze(database.connection(), &conversation, "agent_1", &mut retry).unwrap();
-        assert_eq!(retry.camp_fast.unwrap().fast_override, Some(true));
-        record_eligibility(&database, &initial, &runtime, &observed).unwrap();
-        set_preference(&mut database, &set(Some(false))).unwrap();
-        assert_eq!(frozen.camp_fast.as_ref().unwrap().fast_override, Some(true));
-        let mut next = runtime.clone();
-        freeze(database.connection(), &conversation, "agent_1", &mut next).unwrap();
-        assert_eq!(next.model.options["serviceTier"], "default");
-        set_preference(&mut database, &set(None)).unwrap();
-        assert_eq!(
-            view(&database, &camp_id, "agent_1")
-                .unwrap()
-                .unwrap()
-                .fast_override,
-            None
-        );
-        set_preference(&mut database, &set(Some(true))).unwrap();
-        // Metadata/health and unrelated member edits cannot rotate the binding revision.
+        freeze(
+            database.connection(),
+            "fast-conversation",
+            "agent_1",
+            &mut retry,
+        )
+        .unwrap();
+        assert_eq!(retry.camp_fast.as_ref().unwrap().fast_override, Some(true));
+        record_eligibility(&database, &initial, &runtime, &eligible).unwrap();
+
+        // Old persisted observation columns are deliberately absent from the Camp read model.
+        database.connection().execute(
+            "UPDATE camp_member_fast_preference SET observed_fast_state = 'cooldown', unavailable_reason = 'legacy warning' WHERE agent_id = 'agent_1'", [],
+        ).unwrap();
+        let projected =
+            serde_json::to_value(view(&database, camp_id, "agent_1").unwrap().unwrap()).unwrap();
+        assert!(projected.get("observedFastState").is_none());
+        assert!(projected.get("unavailableReason").is_none());
+        assert_eq!(projected["fastOverride"], true);
+        assert_eq!(projected["runtimeDefaultFast"], false);
         database.connection().execute("UPDATE agent_profile SET display_name = 'Renamed', version = version + 1 WHERE id = 'agent_1'", []).unwrap();
         crate::agent_profile::configure_test_runtime(&database, &["agent_1"]);
         assert_eq!(
-            target(&database, &camp_id, "agent_1").unwrap().unwrap(),
+            target(&database, camp_id, "agent_1").unwrap().unwrap(),
+            initial
+        );
+        let old_permissions: String = database
+            .connection()
+            .query_row(
+                "SELECT default_permission_config_json FROM agent_profile WHERE id = 'agent_1'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        database.connection().execute(
+            "UPDATE agent_profile SET default_permission_config_json = json_set(default_permission_config_json, '$.values.approval_policy', 'never') WHERE id = 'agent_1'", [],
+        ).unwrap();
+        assert_eq!(
+            target(&database, camp_id, "agent_1").unwrap().unwrap(),
             initial
         );
         assert_eq!(
-            view(&database, &camp_id, "agent_1")
+            view(&database, camp_id, "agent_1")
                 .unwrap()
                 .unwrap()
                 .fast_override,
             Some(true)
         );
-        let old_model: String = database
+        assert_saved_choices(&database);
+        database
             .connection()
-            .query_row(
-                "SELECT default_model_selection_json FROM agent_profile WHERE id = 'agent_1'",
-                [],
-                |row| row.get(0),
+            .execute(
+                "UPDATE agent_profile SET default_permission_config_json = ?1 WHERE id = 'agent_1'",
+                [&old_permissions],
             )
             .unwrap();
+
+        let old_model = initial.model_selection_json.as_ref().unwrap();
         database
             .connection()
             .execute(
                 "UPDATE agent_profile SET default_model_selection_json = ?1 WHERE id = 'agent_1'",
-                ["{\"mode\":\"explicit\",\"modelId\":\"gpt-test\",\"options\":{}}"],
+                [r#"{"mode":"explicit","modelId":"gpt-test","options":{}}"#],
             )
             .unwrap();
-        let changed = target(&database, &camp_id, "agent_1").unwrap().unwrap();
-        assert_ne!(
+        let changed = target(&database, camp_id, "agent_1").unwrap().unwrap();
+        assert_eq!(
             changed.runtime_binding_revision,
             initial.runtime_binding_revision
         );
+        assert_ne!(changed.model_selection_json, initial.model_selection_json);
+        assert_saved_choices(&database);
+        for camp in &camps {
+            assert!(view(&database, camp, "agent_1").unwrap().is_none());
+        }
         assert_eq!(
-            set_preference(&mut database, &set(Some(true)))
-                .unwrap()
-                .result
-                .code,
-            "runtime_binding_conflict"
-        );
-        assert!(!record_eligibility(&database, &initial, &runtime, &observed).unwrap());
-        assert!(
-            !record_observation(
-                &database,
-                &camp_id,
-                "agent_1",
-                &initial.runtime_binding_revision,
-                ObservedFastState::Fast,
-                false
+            set_preference(
+                &mut database,
+                &set(camp_id, &initial.runtime_binding_revision, Some(true))
             )
             .unwrap()
+            .result
+            .code,
+            "camp_member_fast_unavailable"
         );
+        assert!(!record_eligibility(&database, &initial, &runtime, &eligible).unwrap());
+        assert!(
+            !record_runtime_eligibility(&database, camp_id, "agent_1", &frozen, &eligible).unwrap()
+        );
+        let changed_runtime = runtime_for_target(&database, &changed).unwrap().unwrap();
+        record_eligibility(
+            &database,
+            &changed,
+            &changed_runtime,
+            &NativeFastEligibility::default(),
+        )
+        .unwrap();
+        assert_saved_choices(&database);
         database
             .connection()
             .execute(
                 "UPDATE agent_profile SET default_model_selection_json = ?1 WHERE id = 'agent_1'",
-                [&old_model],
+                [old_model],
             )
             .unwrap();
+        for camp in &camps {
+            assert!(view(&database, camp, "agent_1").unwrap().is_none());
+            let expected = target(&database, camp, "agent_1").unwrap().unwrap();
+            let selected = runtime_for_target(&database, &expected).unwrap().unwrap();
+            record_eligibility(&database, &expected, &selected, &eligible).unwrap();
+        }
+        assert_saved_choices(&database);
+        assert_eq!(
+            view(&database, camp_id, "agent_1")
+                .unwrap()
+                .unwrap()
+                .fast_override,
+            Some(true)
+        );
+        assert_eq!(
+            view(&database, &camps[1], "agent_1")
+                .unwrap()
+                .unwrap()
+                .fast_override,
+            Some(false)
+        );
+
+        // Switch to another complete installation and back; neither old choice may revive.
+        database.connection().execute(
+            "INSERT INTO adapter_installation(id, adapter_kind, executable_path, command_name, installation_class,
+                source, auth_scope, enabled, version, created_at, updated_at)
+             SELECT 'other-fast-installation', adapter_kind, executable_path, command_name, installation_class,
+                source, 'other-fast-scope', enabled, version, created_at, updated_at
+             FROM adapter_installation WHERE id = ?1", [&runtime.installation_id],
+        ).unwrap();
+        database.connection().execute("UPDATE agent_profile SET default_runtime_installation_id = 'other-fast-installation' WHERE id = 'agent_1'", []).unwrap();
+        let switched = target(&database, camp_id, "agent_1").unwrap().unwrap();
         assert_ne!(
-            target(&database, &camp_id, "agent_1")
+            switched.runtime_binding_revision,
+            initial.runtime_binding_revision
+        );
+        assert_eq!(
+            set_preference(
+                &mut database,
+                &set(camp_id, &initial.runtime_binding_revision, Some(true))
+            )
+            .unwrap()
+            .result
+            .code,
+            "runtime_binding_conflict"
+        );
+        assert!(
+            !record_runtime_eligibility(&database, camp_id, "agent_1", &frozen, &eligible).unwrap()
+        );
+        database.connection().execute("UPDATE agent_profile SET default_runtime_installation_id = ?1 WHERE id = 'agent_1'", [&runtime.installation_id]).unwrap();
+        let rebound = target(&database, camp_id, "agent_1").unwrap().unwrap();
+        assert_ne!(
+            rebound.runtime_binding_revision,
+            initial.runtime_binding_revision
+        );
+        assert_ne!(
+            rebound.runtime_binding_revision,
+            switched.runtime_binding_revision
+        );
+        assert!(view(&database, &camps[1], "agent_1").unwrap().is_none());
+        let selected = runtime_for_target(&database, &rebound).unwrap().unwrap();
+        record_eligibility(&database, &rebound, &selected, &eligible).unwrap();
+        assert_eq!(
+            view(&database, camp_id, "agent_1")
+                .unwrap()
+                .unwrap()
+                .fast_override,
+            None
+        );
+        set_preference(
+            &mut database,
+            &set(camp_id, &rebound.runtime_binding_revision, Some(true)),
+        )
+        .unwrap();
+        database.connection().execute("UPDATE adapter_installation SET auth_scope = 'different-account-scope' WHERE id = ?1", [&runtime.installation_id]).unwrap();
+        assert_ne!(
+            target(&database, camp_id, "agent_1")
                 .unwrap()
                 .unwrap()
                 .runtime_binding_revision,
-            initial.runtime_binding_revision
+            rebound.runtime_binding_revision
         );
-        assert!(view(&database, &camp_id, "agent_1").unwrap().is_none());
+        assert!(view(&database, camp_id, "agent_1").unwrap().is_none());
     }
 }
