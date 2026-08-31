@@ -18,6 +18,8 @@ const file: ResolvedFilePreview = {
   hasExternalUpdate: false, contentVersion: { size: 8_000, mtimeMs: 1 },
   contentGeneration: 'generation-1', capabilities: ['read']
 }
+const tabFiles = ['src/app.ts', 'src/layout.tsx', 'src/theme.ts', 'src/routes.ts', 'src/search.ts',
+  'src/settings.tsx', 'src/navigation.ts', 'src/very-long-file-preview-reading-anchor.tsx']
 const unsupported = async (): Promise<never> => { throw new Error('Unexpected fixture API operation') }
 const fileOpens: OpenFilePreviewRequest[] = []
 const releases: string[] = []
@@ -33,6 +35,9 @@ const api: FilePreviewApi = {
       const selected = changes.files.find((entry) => entry.evidenceFileId === request.evidenceFileId)
       if (!selected) return unsupported()
       target = { ...file, previewKey: `current:${selected.path}`, displayPath: selected.path, fileName: selected.path.split('/').at(-1)! }
+    } else if (request.kind === 'message_reference' && tabFiles.includes(request.rawReference)) {
+      target = { ...file, previewKey: request.rawReference, displayPath: request.rawReference,
+        fileName: request.rawReference.split('/').at(-1)! }
     } else if (request.kind !== 'message_reference' || request.rawReference !== file.displayPath) return unsupported()
     return { ok: true, value: { kind: 'file_preview', file: { ...target, handleId: crypto.randomUUID() } } }
   },
@@ -221,6 +226,40 @@ Object.assign(window, { previewTest: {
   async open() {
     element('.message-file-reference')!.click()
     await settle()
+  },
+  async openTab(index: number) {
+    const rawReference = tabFiles[index]
+    if (!rawReference) throw new Error('Unknown fixture tab')
+    await previewController.open({ kind: 'message_reference', campId: 'camp-1', messageId: 'message-1', rawReference })
+    await settle()
+  },
+  async closeExtraTabs() {
+    previewController.closeMany(previewController.tabs.filter((tab) => tab.kind !== 'file' || tab.file.previewKey !== file.previewKey).map((tab) => tab.id))
+    await settle()
+  },
+  tabSnapshot() {
+    const strip = element('.file-preview-tab-strip')!
+    const bounds = strip.getBoundingClientRect()
+    const leftButton = element('.file-preview-tab-scroll.is-left')!
+    const rightButton = element('.file-preview-tab-scroll.is-right')!
+    const edges = { left: getComputedStyle(leftButton).visibility !== 'hidden', right: getComputedStyle(rightButton).visibility !== 'hidden' }
+    return {
+      overflow: strip.scrollWidth > strip.clientWidth + 1,
+      left: bounds.left, right: bounds.right, top: bounds.top, scrollLeft: strip.scrollLeft,
+      maximum: strip.scrollWidth - strip.clientWidth, edges,
+      visibleLeft: edges.left ? leftButton.getBoundingClientRect().right : bounds.left,
+      visibleRight: edges.right ? rightButton.getBoundingClientRect().left : bounds.right,
+      tabs: [...document.querySelectorAll<HTMLElement>('.file-preview-tab')].map((tab) => {
+        const rect = tab.getBoundingClientRect()
+        const label = tab.querySelector<HTMLElement>('.file-preview-tab-label')!
+        return { width: rect.width, left: rect.left, right: rect.right,
+          selected: tab.querySelector('[role="tab"]')?.getAttribute('aria-selected') === 'true',
+          focused: tab.contains(document.activeElement),
+          faded: getComputedStyle(label).maskImage !== 'none',
+          iconWidth: tab.querySelector('.file-preview-tab-icon')!.getBoundingClientRect().width,
+          closeWidth: tab.querySelector('.file-preview-tab-close')!.getBoundingClientRect().width }
+      })
+    }
   },
   async openReview(index = 0) {
     document.querySelectorAll<HTMLElement>('.run-file-change-file')[index].click()
