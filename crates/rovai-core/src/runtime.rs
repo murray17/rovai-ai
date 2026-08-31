@@ -4972,6 +4972,56 @@ fn planned_shutdown_abortive_terminal_facts(
     }
 }
 
+/// Repair only obsolete manual-retry waits, after startup has settled Run and Delivery recovery.
+/// Run history and pending inputs stay unchanged; the scheduler still owns queue publication.
+pub fn settle_legacy_retry_waits(database: &mut Database) -> Result<()> {
+    let transaction = database.connection_mut().transaction()?;
+    let now = chrono::Utc::now().to_rfc3339();
+    let turns = {
+        let mut statement = transaction.prepare(
+            r#"
+            SELECT turn.camp_id, turn.id
+            FROM camp_turn AS turn
+            WHERE turn.status = 'waiting'
+              AND EXISTS (
+                  SELECT 1 FROM agent_run AS run
+                  WHERE run.camp_turn_id = turn.id
+                    AND run.completion_role = 'required' AND run.status = 'failed'
+                    AND run.manual_retry_allowed = 1 AND run.retry_declined_at IS NULL
+                    AND NOT EXISTS (
+                        SELECT 1 FROM agent_run AS successor
+                        WHERE successor.predecessor_agent_run_id = run.id
+                    )
+              )
+              AND NOT EXISTS (
+                  SELECT 1 FROM agent_run AS run
+                  WHERE run.camp_turn_id = turn.id
+                    AND run.status IN ('queued', 'running', 'waiting')
+              )
+              AND NOT EXISTS (
+                  SELECT 1 FROM message_delivery AS delivery
+                  WHERE delivery.camp_turn_id = turn.id
+                    AND delivery.status IN ('pending', 'running')
+              )
+            ORDER BY turn.created_at, turn.id
+            "#,
+        )?;
+        statement
+            .query_map([], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?
+    };
+    let actor = ActorRef::System {
+        component_id: "runtime-recovery-coordinator".to_string(),
+    };
+    for (camp_id, turn_id) in turns {
+        recompute_camp_turn(&transaction, &camp_id, &turn_id, &actor, None, &now)?;
+    }
+    transaction.commit()?;
+    Ok(())
+}
+
 pub(crate) fn recompute_camp_turn(
     transaction: &Transaction<'_>,
     camp_id: &str,
@@ -4992,8 +5042,7 @@ pub(crate) fn recompute_camp_turn(
     )?;
     let mut statement = transaction.prepare(
         r#"
-        SELECT agent_run.completion_role, agent_run.status,
-               agent_run.manual_retry_allowed, agent_run.retry_declined_at
+        SELECT agent_run.completion_role, agent_run.status
         FROM agent_run
         WHERE agent_run.camp_turn_id = ?1
           AND NOT EXISTS (
@@ -5004,12 +5053,7 @@ pub(crate) fn recompute_camp_turn(
     )?;
     let runs = statement
         .query_map([camp_turn_id], |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, String>(1)?,
-                row.get::<_, i64>(2)? != 0,
-                row.get::<_, Option<String>>(3)?,
-            ))
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
     if runs.is_empty() {
@@ -5018,7 +5062,7 @@ pub(crate) fn recompute_camp_turn(
 
     let has_nonterminal = runs
         .iter()
-        .any(|(_, status, _, _)| matches!(status.as_str(), "queued" | "running" | "waiting"));
+        .any(|(_, status)| matches!(status.as_str(), "queued" | "running" | "waiting"));
     let delivery_states = {
         let mut statement = transaction.prepare(
             r#"
@@ -5056,25 +5100,20 @@ pub(crate) fn recompute_camp_turn(
             ("cancelled", None)
         }
     } else if has_nonterminal || has_nonterminal_delivery {
-        if runs.iter().any(|(_, status, _, _)| status == "waiting") {
+        if runs.iter().any(|(_, status)| status == "waiting") {
             ("waiting", None)
         } else {
             ("running", None)
         }
     } else if runs
         .iter()
-        .any(|(role, status, _, _)| role == "required" && status == "cancelled")
+        .any(|(role, status)| role == "required" && status == "cancelled")
     {
         ("failed", Some("required_run_incomplete"))
-    } else if has_failed_delivery {
-        ("failed", None)
-    } else if runs.iter().any(|(role, status, retry, declined)| {
-        role == "required" && status == "failed" && *retry && declined.is_none()
-    }) {
-        ("waiting", None)
-    } else if runs
-        .iter()
-        .any(|(role, status, _, _)| role == "required" && status == "failed")
+    } else if has_failed_delivery
+        || runs
+            .iter()
+            .any(|(role, status)| role == "required" && status == "failed")
     {
         ("failed", None)
     } else {
@@ -7965,7 +8004,7 @@ mod tests {
             )
             .unwrap();
         assert_eq!(state.0, "failed");
-        assert_eq!(state.1, "waiting");
+        assert_eq!(state.1, "failed");
         assert!(state.2.is_none());
         assert!(state.3.is_none());
         assert_eq!(state.4, "workspace_unavailable");
