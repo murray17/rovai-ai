@@ -238,6 +238,17 @@ Mention，本 Draft 也只回到默认 Lead，不能让路由控件反复出现�
 该 Agent 的独立 Run stage、状态、收件人与证据；这只是 Renderer grouping，不创建 Process
 领域对象，也不合并 AgentRun。
 
+每个 Run 的“协作投递”只显示 `public_a2a` 且 `sourceAgentRunId` 精确匹配该 Run 的收件人；不能从接收方
+Run、target parent、return target 或同一 CampTurn 推断发送归属。投递来源由
+[Camp Open Projection v9](../../contracts/camp-open-projection-v9.md#public-a2a-投递来源)提供；缺少来源时不展示猜测结果。
+同一队员的多次消息或重试按 `recipientAgentId` 去重，按首次消息时间、消息 ID 和消息内 canonical position
+保留稳定顺序，不随投递状态变化重排；底层投递、失败和恢复事实不合并、不修改。
+
+保留“协作投递”标签，对象仅以 24px 头像展示，焦点槽位 28px、间距 4px。底部和浮层共用单行布局，
+按实际可用宽度为 `+N` 预留完整位置；不换行、不横滑、不裁掉半个头像。Hover 或键盘 Focus 显示完整姓名，
+`+N` 是可操作入口，以非模态名单展示其余头像与完整姓名，缺失头像使用既有身份回退。Escape 先收起姓名提示
+或名单，不连带收起执行详情；名单关闭后焦点回到入口。没有公开投递对象时隐藏整行。
+
 首次安装或旧偏好没有位置字段时，执行台默认由详情浮层承载（`inspector`）；已保存的合法 `bottom` 或
 `inspector` 选择保持不变。“移到底部 / 移到浮层”是唯一位置偏好写入口；最后一次成功的显式选择作为本机安装级偏好跨 Camp、
 页面切换和应用重启生效，不新增 Settings 默认项。提交中控件不可重复触发；写成功后才移动，失败时

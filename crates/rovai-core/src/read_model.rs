@@ -795,6 +795,7 @@ pub struct MessageDeliveryView {
 )]
 pub enum MessageDeliveryKindView {
     PublicA2a {
+        source_agent_run_id: String,
         dispatch_disposition: String,
         completion_role: Option<String>,
         gather_id: Option<String>,
@@ -2637,7 +2638,7 @@ fn load_message_deliveries(
                recipient_canonical_position, edge_kind,
                target_parent_agent_run_id, return_to_agent_run_id,
                target_conversation_id,
-               recipient_membership_version_at_admission
+               recipient_membership_version_at_admission, source_agent_run_id
         FROM message_delivery
         WHERE camp_id = ?1
         ORDER BY
@@ -2658,6 +2659,7 @@ fn load_message_deliveries(
             let delivery_kind = row.get::<_, String>(18)?;
             let kind = match delivery_kind.as_str() {
                 "public_a2a" => MessageDeliveryKindView::PublicA2a {
+                    source_agent_run_id: row.get(29)?,
                     dispatch_disposition: row.get(19)?,
                     completion_role: row.get(20)?,
                     gather_id: row.get(21)?,
@@ -3791,6 +3793,60 @@ mod tests {
                 .is_err()
         );
         assert!(validate_camp_message_find_query("中").is_ok());
+    }
+
+    #[test]
+    fn public_delivery_projection_preserves_causal_source_not_target_lineage() {
+        // Own the SQL -> public DTO seam with a minimal table, not another full Camp fixture.
+        // Existing read-model tests cover messages/evidence, not delivery source attribution.
+        let mut connection = rusqlite::Connection::open_in_memory().unwrap();
+        connection.execute_batch(r#"
+            CREATE TABLE message_delivery (
+                id TEXT, camp_id TEXT, message_id TEXT DEFAULT 'message',
+                camp_turn_id TEXT DEFAULT 'turn', task_id TEXT,
+                recipient_agent_id TEXT DEFAULT 'recipient', status TEXT,
+                dispatch_phase TEXT DEFAULT 'terminal', wait_condition TEXT,
+                dispatch_attempt_count INTEGER DEFAULT 1, retry_generation INTEGER DEFAULT 0,
+                context_manifest_id TEXT, target_agent_run_id TEXT,
+                manual_intervention_required INTEGER DEFAULT 0, failure_code TEXT,
+                version INTEGER DEFAULT 1, created_at TEXT DEFAULT '2026-08-31T00:00:00Z',
+                updated_at TEXT DEFAULT '2026-08-31T00:00:00Z', ended_at TEXT,
+                delivery_kind TEXT, dispatch_disposition TEXT DEFAULT 'dispatch',
+                completion_role TEXT DEFAULT 'required', gather_id TEXT,
+                gather_dispatch_delivery_id TEXT, recipient_canonical_position INTEGER,
+                edge_kind TEXT, target_parent_agent_run_id TEXT, return_to_agent_run_id TEXT,
+                target_conversation_id TEXT, recipient_membership_version_at_admission INTEGER DEFAULT 1,
+                source_agent_run_id TEXT, queue_sequence INTEGER DEFAULT 1
+            );
+            INSERT INTO message_delivery (
+                id, camp_id, status, delivery_kind, recipient_canonical_position, edge_kind,
+                source_agent_run_id, target_parent_agent_run_id, target_agent_run_id, return_to_agent_run_id
+            ) VALUES
+                ('pending', 'camp', 'pending', 'public_a2a', 0, 'forward', 'sender', 'sender', NULL, NULL),
+                ('running', 'camp', 'running', 'public_a2a', 1, 'forward', 'sender', 'sender', 'receiver', NULL),
+                ('return', 'camp', 'settled', 'public_a2a', 0, 'return', 'child', 'ancestor', 'continuation', 'caller'),
+                ('captured', 'camp', 'settled', 'public_a2a', 0, 'return', 'child', NULL, NULL, 'caller');
+            UPDATE message_delivery SET dispatch_disposition = 'gather_captured', gather_id = 'gather'
+                WHERE id = 'captured';
+            INSERT INTO message_delivery (
+                id, camp_id, status, delivery_kind, gather_id, target_conversation_id
+            ) VALUES ('completion', 'camp', 'pending', 'gather_completion', 'gather', 'conversation');
+        "#).unwrap();
+        let transaction = connection.transaction().unwrap();
+        // Full Snapshot and bounded Camp-open use the same projection with different ordering.
+        for limit in [None, Some(10)] {
+            let deliveries = super::load_message_deliveries(&transaction, "camp", limit).unwrap();
+            assert_eq!(deliveries.len(), 5);
+            for delivery in deliveries {
+                let value = serde_json::to_value(&delivery).unwrap();
+                match delivery.id.as_str() {
+                    "pending" | "running" => assert_eq!(value["sourceAgentRunId"], "sender"),
+                    "return" | "captured" => assert_eq!(value["sourceAgentRunId"], "child"),
+                    "completion" => assert!(value.get("sourceAgentRunId").is_none()),
+                    _ => unreachable!(),
+                }
+            }
+        }
     }
 }
 
