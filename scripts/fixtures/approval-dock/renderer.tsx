@@ -27,20 +27,20 @@ const initial: ActionApprovalView[] = [1, 2, 3].map(index => ({
 }))
 let complete: () => void
 let refresh: () => void
-let setTarget: (id: string) => void
+let setTarget: (id: string | null) => void
 let focusSerial = 0
 const presented: number[] = []
 
 function Fixture() {
   const [approvals, setApprovals] = useState(initial)
   const [busy, setBusy] = useState(false)
-  const [focus, setFocus] = useState<{ id: string; serial: number } | null>(null)
+  const [focus, setFocus] = useState<{ id: string | null; serial: number } | null>(null)
   const dockRef = useRef<HTMLElement>(null)
   refresh = () => setApprovals(previous => previous.map(item => ({ ...item })))
   setTarget = id => setFocus({ id, serial: ++focusSerial })
   return <div className="camp-workspace" style={{ height: '100vh', display: 'flex', flexDirection: 'column' }}>
     <div style={{ display: 'flex', gap: 12, padding: 12 }}>
-      <button id="locate" onClick={() => setTarget(approvals[0].id)}>定位审批</button>
+      <button id="locate" onClick={() => setTarget(null)}>定位审批</button>
       <label>消息草稿 <input id="draft" defaultValue="Keep my focus" /></label>
     </div>
     <div className="workspace-grid" id="approval-layout" style={{ width: 1200, maxWidth: '100%', margin: '0 auto' }}>
@@ -50,7 +50,8 @@ function Fixture() {
       <div className="conversation-controls">
         {approvals.length > 0 && <ApprovalDock approvals={approvals} profileById={new Map()} busy={busy}
           containerRef={dockRef} focusRequest={focus?.serial ?? null} focusApprovalId={focus?.id ?? null}
-          onFocusPresented={serial => { presented.push(serial); setFocus(null) }}
+          // Header requests can remain set after presentation without a notification waiter.
+          onFocusPresented={serial => { presented.push(serial) }}
           onResolve={(approval, optionId) => {
             requests.push({ approvalId: approval.id, optionId, version: approval.version })
             setBusy(true)

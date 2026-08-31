@@ -6299,6 +6299,7 @@ export function ApprovalDock({
   const [collapsed, setCollapsed] = useState(false)
   const [expandedReasonIds, setExpandedReasonIds] = useState<Set<string>>(() => new Set())
   const contentId = useId()
+  const presentedFocusRequest = useRef<number | null>(null)
   const currentIndex = Math.min(activeIndex, approvals.length - 1)
   const approval = approvals[currentIndex]
   const previousApprovals = useRef({ ids: approvals.map((item) => item.id), activeId: approval.id })
@@ -6330,7 +6331,7 @@ export function ApprovalDock({
   }, [approvals, approval.id, containerRef])
 
   useEffect(() => {
-    if (focusRequest === null) return
+    if (focusRequest === null || presentedFocusRequest.current === focusRequest) return
     setCollapsed(false)
     if (focusApprovalId) {
       const targetIndex = approvals.findIndex((candidate) => candidate.id === focusApprovalId)
@@ -6339,7 +6340,7 @@ export function ApprovalDock({
   }, [approvals, focusApprovalId, focusRequest])
 
   useEffect(() => {
-    if (focusRequest === null || collapsed) return undefined
+    if (focusRequest === null || presentedFocusRequest.current === focusRequest || collapsed) return undefined
     if (focusApprovalId && approval.id !== focusApprovalId) return undefined
     let frame: number | null = null
     let scrolled = false
@@ -6360,6 +6361,7 @@ export function ApprovalDock({
         })
       }
       if (focusObserved && document.activeElement === target) {
+        presentedFocusRequest.current = focusRequest
         onFocusPresented?.(focusRequest)
         return
       }

@@ -64,6 +64,20 @@ app.whenReady().then(async () => {
     await click('[aria-label="上一项审批"]')
     await click('[aria-label="上一项审批"]')
 
+    await run("window.approvalTest.locate('approval-2')")
+    state = await snapshot()
+    assert.equal(state.id, 'approval-2')
+    assert.ok(state.summaryFocused)
+    state = await click('[aria-label="上一项审批"]')
+    assert.equal(state.id, 'approval-1')
+    assert.equal(state.active, '上一项审批')
+    await click('#draft')
+    await run('window.approvalTest.refresh()')
+    state = await snapshot()
+    assert.equal(state.id, 'approval-1', 'A presented focus request cannot replay on a refresh')
+    assert.equal(state.active, 'draft')
+    assert.equal(state.presented.length, 2, 'Each focus request is presented exactly once')
+
     // Change only CSS geometry; no React render/fixture data change can hide a missing observer.
     await run('window.approvalTest.setWidth(420)')
     state = await snapshot()

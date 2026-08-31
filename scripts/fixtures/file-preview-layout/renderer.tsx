@@ -353,7 +353,8 @@ Object.assign(window, { previewTest: {
       approval: bounds('.approval-dock'), recovery: bounds('.runtime-recovery-dock'),
       approvalActionsVisible: element('.approval-dock') ? [...document.querySelectorAll('.approval-dock-actions button')]
         .every(button => button.getBoundingClientRect().bottom <= bounds('.approval-dock-scroll')!.bottom) : null,
-      approvalTextWraps: element('.approval-dock') ? style('.approval-dock > header span', 'white-space') === 'normal' : null,
+      approvalHeadingSingleLine: element('.approval-dock') ? ['.approval-dock-heading strong', '.approval-dock-heading span']
+        .every(selector => style(selector, 'white-space') === 'nowrap') : null,
       recoveryTextWraps: element('.runtime-recovery-dock') ? style('.runtime-recovery-heading span:not(.runtime-recovery-symbol)', 'white-space') === 'normal' : null,
       codeScrolls: style('.safe-markdown pre', 'overflow-x') === 'auto', tableScrolls: style('.safe-markdown table', 'overflow-x') === 'auto'
     }
