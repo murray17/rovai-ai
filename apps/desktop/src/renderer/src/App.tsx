@@ -102,7 +102,6 @@ import {
 } from './theme'
 import {
   allNavigationCamps,
-  campDayNumber,
   liveRuntimeEventFromCore,
   type LiveRuntimeEvent
 } from './ui-model'
@@ -3908,7 +3907,6 @@ export function AppHeader({
   const previewVisible = Boolean(filePreview?.paneVisible)
   const title = campTitle ?? '正在打开对话'
   const pendingApprovals = camp?.approvals.filter((approval) => approval.status === 'pending').length ?? 0
-  const dayNumber = camp ? campDayNumber(camp.camp.createdAt) : null
   return (
     <header
       className={`topbar camp-topbar ${previewVisible ? `has-file-preview ${previewLayout?.className ?? ''}` : ''}`.trim()}
@@ -3920,7 +3918,6 @@ export function AppHeader({
           {contextLabel && <span className="context-sep" aria-hidden="true">›</span>}
           <h1>{title}</h1>
         </div>
-        {dayNumber !== null && <span className="context-day-badge">第 {dayNumber} 天</span>}
         <div className="topbar-context-status" aria-live="polite">
           {pendingApprovals > 0 && (
             <button
