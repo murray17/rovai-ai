@@ -3,12 +3,12 @@ document_type: architecture
 architecture: camp-open-read-path
 authority: desktop-camp-enter-and-progressive-read-boundaries
 status: accepted
-last_updated: 2026-08-28
+last_updated: 2026-08-31
 ---
 
 # Camp Open Read Path 架构
 
-字段与窗口见 [Camp Open Projection v9](../contracts/camp-open-projection-v9.md)与
+字段与窗口见 [Camp Open Projection v10](../contracts/camp-open-projection-v10.md)与
 [Camp Conversation Find v1](../contracts/camp-conversation-find-v1.md)。本架构把“进入会话”、
 “继续阅读”、“查找完整当前会话”和“检查运行详情”分成用途明确的接口，同时保持 SQLite Read Side
 为唯一权威。
@@ -22,13 +22,22 @@ last_updated: 2026-08-28
 | Renderer enter controller | 生成 trace/command ID、selection generation 与 high-water fence；应用内缓存未命中时保留当前 surface，投影到达后原子 commit 目标 Camp/项目并完成 meaningful paint，再恢复项目导航、确认可见来源和刷新侧栏 |
 | Electron Main bridge | allowlist typed method、记录不含内容的 IPC roundtrip/response bytes；不组装或缓存领域投影 |
 | Core Camp enter module | 在一次串行 request 中先读 activation state；Pending 直接读取投影，Active 顺序执行 Default Lead reconcile 与 post-reconcile read；缺失或 rejected 时 fail closed |
-| Core Camp open read model | 在单一 SQLite transaction 中组装 membership generation、活动 reconciliation、完整 non-terminal Execution Evidence、其他有界首屏投影、coverage 与 high-water；不加载 Context Manifest/Action history |
+| Core Camp open read model | 在单一 SQLite transaction 中组装业务首屏投影、完整 non-terminal Execution Evidence、coverage 与 high-water；不读取 event_log 或 Context Manifest/Action history |
 | Camp message history read | 以 stable sequence cursor 读取 earlier page；不回放 event 构造第二真源 |
 | Camp conversation find read | 扫描当前 Camp 公开 user/agent 正文投影，返回 exact total 与一个选中命中；不改变 Agent-facing discovery search，也不返回完整结果集 |
 | Run detail read | terminal Run 在用户展开后复用 Evidence page/content 接口；大 Evidence 正文继续按需读取，不随普通 Camp open 挂载 |
 | Full Camp snapshot | 兼容、诊断与定向测试面；保持纯读，但不服务普通 open/refresh |
 
 ## Enter and refresh flow
+
+Open 仅读取当前 Camp 的业务表。它及其嵌套 loader、CTE、view 不得访问 `event_log`；消息专用
+`load_open_messages()` 复用正文、附件和 presentation hydration，但不查询 publication event sequence。
+`throughGlobalSequence` 仍从 `event_sequence` singleton 读取，不通过事件表求最大值。移除 timeline 与其
+exact count 后，打开成本不随其他 Camp 的事件历史增长；当前 Camp 的活动 Evidence 完整性不因此降级。
+
+此边界只约束投影读取，不撤销 Active enter 的 reconciliation/command receipt，也不修改完整
+`camp_snapshot()`、显式 History/Find、Navigation 或 `events.subscribe` 的审计与 invalidation 语义。
+无需清理旧数据、补历史字段、迁移或给旧 event 查询补索引。
 
 ```text
 app click / notification target
@@ -120,6 +129,6 @@ Memory 分别拥有局部 loading/error；全屏 StartupGate 只允许覆盖 Mai
 
 - [Core 受管内容不变量](foundational-invariants.md#core-managed-content)
 - [协作与执行准入不变量](foundational-invariants.md#collaboration-admission)
-- [Camp Open Projection v9](../contracts/camp-open-projection-v9.md)
+- [Camp Open Projection v10](../contracts/camp-open-projection-v10.md)
 - [Camp Conversation Find v1](../contracts/camp-conversation-find-v1.md)
 - [Desktop Navigation Refresh](desktop-navigation-refresh.md)

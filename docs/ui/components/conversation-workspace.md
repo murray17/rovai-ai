@@ -37,9 +37,15 @@ Files Changed 历史 Review 真源。
 
 ## 打开与渐进历史
 
-Camp 的首个 meaningful paint 只依赖 [Camp Open Projection v9](../../contracts/camp-open-projection-v9.md)：
+Camp 的首个 meaningful paint 只依赖 [Camp Open Projection v10](../../contracts/camp-open-projection-v10.md)：
 Camp/成员、最近消息、当前运行摘要、pending Approval 和 Composer 可用即完成。项目导航恢复、侧栏刷新
 与可见来源确认在首屏后执行，失败不能撤销已打开会话。只显示“正在打开对话”的 Shell 不算完成。
+
+Open schema 6 不返回审计 timeline；Renderer 适配 Snapshot 时使用空 timeline，并清空包括已加载旧页在内
+的消息 `timelineGlobalSequence`。会话仍显示消息、Task、Stop 与 Files Changed：消息按 Camp-local
+`sequence`，卡片按业务时间、显式类型顺序和稳定 ID 分别排序后合并。同时间依次为消息、Task、Stop、
+Files Changed；时钟回拨时消息 sequence 优先，不能用非传递比较器混排。Files Changed 仍锚定在其来源 Run
+最后一条公开消息后。Task 详情保留业务状态原因、责任与时间，去掉从审计事件推断的可选“审计原因”。
 
 应用内打开另一个 Camp 时，Renderer 不得在投影返回前提交目标 Camp ID、目标项目或空 Snapshot。缓存
 未命中时保留当前 Quick Chat、Camp、成员、记忆或设置工作区，投影到达后一次性提交目标 Camp；有效缓存
@@ -240,7 +246,7 @@ Mention，本 Draft 也只回到默认 Lead，不能让路由控件反复出现�
 
 每个 Run 的“协作投递”只显示 `public_a2a` 且 `sourceAgentRunId` 精确匹配该 Run 的收件人；不能从接收方
 Run、target parent、return target 或同一 CampTurn 推断发送归属。投递来源由
-[Camp Open Projection v9](../../contracts/camp-open-projection-v9.md#public-a2a-投递来源)提供；缺少来源时不展示猜测结果。
+[Camp Open Projection v10](../../contracts/camp-open-projection-v10.md#public-a2a-投递来源)提供；缺少来源时不展示猜测结果。
 同一队员的多次消息或重试按 `recipientAgentId` 去重，按首次消息时间、消息 ID 和消息内 canonical position
 保留稳定顺序，不随投递状态变化重排；底层投递、失败和恢复事实不合并、不修改。
 
