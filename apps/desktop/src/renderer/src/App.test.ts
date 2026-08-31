@@ -4501,6 +4501,50 @@ describe('task event projections', () => {
     expect(historicalProgress.items).toEqual([])
   })
 
+  it.each(['message-1', null])('keeps complete streaming narration for item %s', (itemId) => {
+    const deltas = [
+      '正文开头🙂\n\n```text\n'.padEnd(4_000, '文'),
+      '甲',
+      '文'.repeat(4_000),
+      '\n```\n\n正文末尾🙂'
+    ]
+    const events: LiveRuntimeEvent[] = []
+    let body = ''
+    for (const delta of deltas) {
+      body += delta
+      events.push({
+        id: `text-${events.length}`, agentRunId: 'run-long-text', eventType: 'agent.text.delta',
+        payload: { itemId, delta }, createdAt: '2026-08-31T00:00:00Z'
+      })
+      const progress = buildLiveExecutionProgress(events, 'run-long-text')
+      const narration = progress.items.find((item) => item.kind === 'narration')
+      expect(progress.items).toHaveLength(1)
+      expect(narration?.body).toHaveLength(body.length)
+      expect(narration?.body).toBe(body)
+    }
+  })
+
+  it('keeps complete plan explanations across updates', () => {
+    const explanation = '计划开头🙂'.padEnd(2_000, '文')
+    const plan = [{ step: '核对正文完整性', status: 'inProgress' }]
+    const events: LiveRuntimeEvent[] = [{
+      id: 'plan-1', agentRunId: 'run-long-plan', eventType: 'runtime.plan',
+      payload: { explanation, plan }, createdAt: '2026-08-31T00:00:00Z'
+    }]
+    let body = explanation
+    for (const delta of ['甲', `${'文'.repeat(4_000)}计划末尾🙂`]) {
+      body += delta
+      events.push({
+        id: `plan-${events.length + 1}`, agentRunId: 'run-long-plan', eventType: 'runtime.plan.delta',
+        payload: { delta }, createdAt: '2026-08-31T00:00:01Z'
+      })
+      const item = buildLiveExecutionProgress(events, 'run-long-plan').items
+        .find((item) => item.kind === 'plan')
+      expect(item?.explanation).toHaveLength(body.length)
+      expect(item).toMatchObject({ explanation: body, plan })
+    }
+  })
+
   it('omits anonymous ACP thoughts without merging narration across tool boundaries', () => {
     const progress = buildLiveExecutionProgress([{
       id: 'thought-1', agentRunId: 'run-acp', eventType: 'agent.thought.delta',
@@ -5875,6 +5919,7 @@ describe('task event projections', () => {
 
   it('loads complete historical execution evidence through stable per-AgentRun pages', async () => {
     const requestedAfter: number[] = []
+    const deltas = ['正文开头🙂\n\n', '文'.repeat(4_000), '\n\n正文末尾🙂']
     const evidence = (sequence: number) => ({
       id: `evidence-${sequence}`,
       agentRunId: 'run-history',
@@ -5883,9 +5928,9 @@ describe('task event projections', () => {
       eventType: 'agent.text.delta',
       kind: 'narration' as const,
       phase: 'updated' as const,
-      payload: { itemId: null, delta: `片段${sequence}` },
+      payload: { itemId: null, delta: deltas[sequence - 1] },
       contentBlobId: null,
-      contentByteCount: 32,
+      contentByteCount: Buffer.byteLength(JSON.stringify({ itemId: null, delta: deltas[sequence - 1] })),
       isTruncated: false,
       occurredAt: `2026-08-03T00:00:0${sequence}Z`
     })
@@ -5916,6 +5961,10 @@ describe('task event projections', () => {
     expect(events.map((event) => event.id)).toEqual([
       'evidence-1', 'evidence-2', 'evidence-3'
     ])
+    const progress = buildLiveExecutionProgress(events.map(liveRuntimeEventFromExecutionEvidence), 'run-history')
+    const narration = progress.items.find((item) => item.kind === 'narration')
+    expect(narration?.body).toHaveLength(deltas.join('').length)
+    expect(narration?.body).toBe(deltas.join(''))
   })
 
   it('classifies diff lines without treating file headers as changes', () => {
@@ -6268,7 +6317,7 @@ describe('task event projections', () => {
     expect(markup).not.toContain('前往 Agent 运行时')
   })
 
-  it('keeps all product checks visible with redacted discovery diagnostics', () => {
+  it('keeps all product checks visible without discovery diagnostics', () => {
     const health: HealthStatus = {
       core: { ok: true, version: '0.0.1', dataDir: '/tmp/rovai' },
       database: { ok: true, path: '/tmp/rovai/rovai.db' },
@@ -6336,8 +6385,8 @@ describe('task event projections', () => {
     expect(markup.match(/检查可用性/g)).toHaveLength(12)
     expect(markup).not.toContain('重新扫描安装')
     expect(markup).toContain('codex-cli 1.0.0')
-    expect(markup).toContain('来源 inherited_path · 入口 native_executable · 后缀 native')
-    expect(markup).toContain('Native 目标 未解析 · Version Probe 成功')
+    expect(markup).not.toContain('来源 inherited_path')
+    expect(markup).not.toContain('Version Probe')
     expect(markup).not.toContain('九种已支持产品')
     expect(markup).not.toContain('自查命令')
     expect(markup).not.toContain('command -v')

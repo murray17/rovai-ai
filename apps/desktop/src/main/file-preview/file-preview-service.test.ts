@@ -1,7 +1,8 @@
 import { EventEmitter } from 'node:events'
-import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
+import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from 'node:fs/promises'
+import { homedir, tmpdir } from 'node:os'
 import { basename, join } from 'node:path'
+import { pathToFileURL } from 'node:url'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { OpenFilePreviewRequest } from '@contracts'
 import { RootWatchRegistry } from './file-preview-watchers'
@@ -10,6 +11,11 @@ import {
   type FilePreviewNativeActions,
   type FilePreviewSourceAuthority
 } from './file-preview-service'
+
+vi.mock('node:os', async (importOriginal) => {
+  const os = await importOriginal<typeof import('node:os')>()
+  return { ...os, homedir: vi.fn(os.homedir) }
+})
 
 class FakeWatcher extends EventEmitter {
   close = vi.fn()
@@ -79,6 +85,119 @@ function request(rawReference: string): OpenFilePreviewRequest {
 }
 
 describe('FilePreviewService', () => {
+  it('repairs a prose colon only after verifying the file and keeps the original message authority', async () => {
+    vi.useFakeTimers()
+    try {
+      const { root, service, authority, native } = await fixture()
+      await mkdir(join(root, 'tests'))
+      const path = join(root, 'tests', 'test_accrual_supporting_audit_script.py')
+      await writeFile(path, 'assert True')
+      const originalRequest: OpenFilePreviewRequest = {
+        kind: 'message_reference', campId: 'camp-1', messageId: 'message-1',
+        rawReference: 'tests/test_accrual_supporting_audit_script.py:'
+      }
+      const resolveSource = vi.spyOn(authority, 'resolve')
+      const opened = await service.open(1, originalRequest)
+      expect(opened).toMatchObject({ ok: true, value: { kind: 'file_preview', file: {
+        fileName: 'test_accrual_supporting_audit_script.py', target: undefined
+      } } })
+      if (!opened.ok || opened.value.kind !== 'file_preview') return
+      const file = opened.value.file
+      vi.setSystemTime(Date.now() + 31 * 60 * 1_000)
+      expect(await service.readText(1, { handleId: file.handleId, expectedGeneration: file.contentGeneration }))
+        .toMatchObject({ ok: true, value: { text: 'assert True' } })
+      expect(await service.revealInFolder(1, { handleId: file.handleId })).toEqual({ ok: true, value: { revealed: true } })
+      expect(native.revealPath).toHaveBeenCalledWith(await realpath(path))
+      await writeFile(path, 'assert 1 == 1')
+      const reloaded = await service.reload(1, {
+        handleId: file.handleId, reopenToken: file.reopenToken, expectedGeneration: file.contentGeneration
+      })
+      expect(reloaded).toMatchObject({ ok: true, value: { fileName: file.fileName } })
+      expect(resolveSource.mock.calls.every(([input]) => input === originalRequest)).toBe(true)
+      resolveSource.mockResolvedValueOnce(null)
+      expect(await service.revealInFolder(1, { handleId: file.handleId })).toMatchObject({ ok: false })
+      expect(native.revealPath).toHaveBeenCalledTimes(1)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it.each([
+    './missing.py:', './report.py::', './report.py:1:', './report.py:1:2:', './report.py:1-2:',
+    './report.py:#L1', './report.py:#L1C2', './report.py:#L1-L2', './folder:', './javascript:payload:'
+  ])('does not guess a different file for %s', async (rawReference) => {
+    const { root, service, native, registry } = await fixture()
+    await writeFile(join(root, 'report.py'), 'assert True')
+    await mkdir(join(root, 'folder'))
+    const opened = await service.open(1, request(rawReference))
+    expect(opened).toMatchObject({ ok: false, error: { code: 'file_not_found' } })
+    expect(service.handleCount).toBe(0)
+    expect(registry.rootCount).toBe(0)
+    expect(native.revealPath).not.toHaveBeenCalled()
+    expect(native.openPath).not.toHaveBeenCalled()
+  })
+
+  it.skipIf(process.platform === 'win32')('prefers an existing literal colon filename to a punctuation correction', async () => {
+    const { root, service, native } = await fixture()
+    await writeFile(join(root, 'notes.txt'), 'without colon')
+    await writeFile(join(root, 'notes.txt:'), 'literal filename')
+    const opened = await service.open(1, request('./notes.txt:'))
+    expect(opened).toMatchObject({ ok: true, value: { kind: 'file_preview', file: { fileName: 'notes.txt:' } } })
+    if (!opened.ok || opened.value.kind !== 'file_preview') return
+    expect(await service.readText(1, {
+      handleId: opened.value.file.handleId, expectedGeneration: opened.value.file.contentGeneration
+    })).toMatchObject({ ok: true, value: { text: 'literal filename' } })
+    expect(native.openPath).not.toHaveBeenCalled()
+  })
+
+  it('keeps repaired file references inside the existing read authorization boundary', async () => {
+    const { root, service, native, registry } = await fixture()
+    const outside = await mkdtemp(join(tmpdir(), 'rovai-preview-colon-outside-'))
+    directories.push(outside)
+    const path = join(outside, 'notes.txt')
+    await writeFile(path, 'outside')
+    await symlink(path, join(root, 'link.txt'))
+    for (const rawReference of [`${path}:`, './link.txt:']) {
+      expect(await service.open(1, request(rawReference)))
+        .toMatchObject({ ok: false, error: { code: 'authorization_required' } })
+    }
+    expect(service.handleCount).toBe(0)
+    expect(registry.rootCount).toBe(0)
+    expect(native.openPath).not.toHaveBeenCalled()
+    expect(native.revealPath).not.toHaveBeenCalled()
+  })
+
+  it('reveals explicit outside directories without granting read access or launching app bundles', async () => {
+    const { service, authority, registry, native } = await fixture()
+    const outside = await mkdtemp(join(tmpdir(), 'rovai-preview-directory-home-'))
+    directories.push(outside)
+    const downloads = join(outside, 'Downloads')
+    const bundle = join(outside, 'Untrusted.app')
+    await mkdir(downloads)
+    await mkdir(bundle)
+    await writeFile(join(downloads, 'private.txt'), 'not authorized by a directory reveal')
+    vi.mocked(homedir).mockReturnValueOnce(outside)
+    const resolveSource = vi.spyOn(authority, 'resolve')
+    for (const rawReference of ['~/Downloads/', downloads, pathToFileURL(downloads).href, bundle]) {
+      const input: OpenFilePreviewRequest = {
+        kind: 'message_reference', campId: 'camp-1', messageId: 'message-1', rawReference
+      }
+      expect(await service.open(1, input)).toMatchObject({ ok: true, value: { kind: 'opened_in_system' } })
+      expect(resolveSource).toHaveBeenLastCalledWith(input)
+    }
+    expect(native.revealPath).toHaveBeenCalledTimes(4)
+    expect(native.revealPath).toHaveBeenCalledWith(await realpath(downloads))
+    expect(native.openPath).not.toHaveBeenCalled()
+    expect(native.selectRoot).not.toHaveBeenCalled()
+    expect(service.handleCount).toBe(0)
+    expect(registry.rootCount).toBe(0)
+    expect(await service.open(1, request(join(downloads, 'private.txt'))))
+      .toMatchObject({ ok: false, error: { code: 'authorization_required' } })
+    resolveSource.mockResolvedValueOnce(null)
+    expect(await service.open(1, request(downloads))).toMatchObject({ ok: false, error: { code: 'source_not_authorized' } })
+    expect(native.revealPath).toHaveBeenCalledTimes(4)
+  })
+
   it('shows authorized directories in the file manager without a tab, watcher, or app launch', async () => {
     const { root, service, registry, native, openPath } = await fixture()
     await mkdir(join(root, 'reports'))
@@ -99,11 +218,26 @@ describe('FilePreviewService', () => {
     directories.push(outside)
     await symlink(outside, join(root, 'outside'))
     expect(await service.open(1, request('missing'))).toMatchObject({ ok: false, error: { code: 'file_not_found' } })
-    expect(await service.open(1, request('outside'))).toMatchObject({ ok: false, error: { code: 'authorization_required' } })
+    for (const path of ['outside', join(root, 'outside'), join(await realpath(root), 'outside')]) {
+      expect(await service.open(1, request(path))).toMatchObject({ ok: false, error: { code: 'authorization_required' } })
+    }
     await service.bindCamp(1, 'camp-2')
     expect(await service.open(1, request(root))).toMatchObject({ ok: false })
     expect(native.revealPath).not.toHaveBeenCalled()
     await service.closeAll()
+  })
+
+  it.each(['attachment', 'run_evidence'] as const)('does not reveal a directory from %s', async (kind) => {
+    const { root, service, authority, native } = await fixture()
+    vi.spyOn(authority, 'resolve').mockResolvedValue({
+      kind: 'file_target', campId: 'camp-1', sourceKind: kind, sourceIdentity: 'source-1',
+      rootPath: root, basePath: root, candidatePath: root, allowChildren: kind !== 'attachment'
+    })
+    const input: OpenFilePreviewRequest = kind === 'attachment'
+      ? { kind, campId: 'camp-1', attachmentId: 'attachment-1' }
+      : { kind, campId: 'camp-1', agentRunId: 'run-1', executionEpoch: 1, evidenceFileId: 'file-1', action: 'open_current' }
+    expect(await service.open(1, input)).toMatchObject({ ok: false, error: { code: 'not_regular_file' } })
+    expect(native.revealPath).not.toHaveBeenCalled()
   })
 
   it('keeps noninteractive preview children from opening a directory in the file manager', async () => {

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
+import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
 import { createPortal } from 'react-dom'
 import { useFilePreview } from './FilePreviewContext'
 import { FilePreviewTabIcon } from './FilePreviewTabIcon'
@@ -10,6 +10,20 @@ function tabDomId(tabId: string): string {
 
 function panelDomId(tabId: string): string {
   return `file-preview-panel-${tabId}`
+}
+
+// Keep the tab, including its close button, clear of the overlaid edge controls.
+const SCROLL_EDGE_INSET = 32
+
+function revealTab(strip: HTMLDivElement, tab: HTMLElement): void {
+  const viewport = strip.getBoundingClientRect()
+  const bounds = tab.getBoundingClientRect()
+  const maximum = Math.max(0, strip.scrollWidth - strip.clientWidth)
+  const left = viewport.left + (strip.scrollLeft > 1 ? SCROLL_EDGE_INSET : 0)
+  const right = viewport.right - (strip.scrollLeft < maximum - 1 ? SCROLL_EDGE_INSET : 0)
+  const delta = bounds.left < left ? bounds.left - left : bounds.right > right ? bounds.right - right : 0
+  // Only move the tab strip, never the conversation or the preview's reading position.
+  if (delta !== 0) strip.scrollTo({ left: Math.max(0, Math.min(strip.scrollLeft + delta, maximum)), behavior: 'instant' })
 }
 
 export function FilePreviewTabs({ compact = false }: { compact?: boolean } = {}): React.JSX.Element | null {
@@ -29,6 +43,11 @@ export function FilePreviewTabs({ compact = false }: { compact?: boolean } = {})
     reload
   } = useFilePreview()
   const listRef = useRef<HTMLDivElement>(null)
+  const leftButtonRef = useRef<HTMLButtonElement>(null)
+  const rightButtonRef = useRef<HTMLButtonElement>(null)
+  const arrowScrollTarget = useRef<number | null>(null)
+  const listId = useId()
+  const [edges, setEdges] = useState({ left: false, right: false })
   const menuRef = useRef<HTMLDivElement>(null)
   const [menu, setMenu] = useState<{ tabId: string; left: number; top: number } | null>(null)
   const [announcement, setAnnouncement] = useState('')
@@ -41,14 +60,44 @@ export function FilePreviewTabs({ compact = false }: { compact?: boolean } = {})
     return new Set([...counts].filter(([, count]) => count > 1).map(([name]) => name))
   }, [tabs])
 
+  const updateEdges = useCallback((): void => {
+    const strip = listRef.current
+    if (!strip) return
+    const maximum = Math.max(0, strip.scrollWidth - strip.clientWidth)
+    if (arrowScrollTarget.current !== null
+      && (Math.abs(strip.scrollLeft - arrowScrollTarget.current) < 1 || arrowScrollTarget.current > maximum)) {
+      arrowScrollTarget.current = null
+    }
+    const left = maximum > 1 && strip.scrollLeft > 1
+    const right = maximum > 1 && strip.scrollLeft < maximum - 1
+    // Transfer focus before disabling the arrow; Chromium otherwise drops it onto the document.
+    if (!left && document.activeElement === leftButtonRef.current) {
+      strip.querySelector<HTMLButtonElement>('[role="tab"]')?.focus({ preventScroll: true })
+    } else if (!right && document.activeElement === rightButtonRef.current) {
+      const buttons = strip.querySelectorAll<HTMLButtonElement>('[role="tab"]')
+      buttons[buttons.length - 1]?.focus({ preventScroll: true })
+    }
+    setEdges(previous => previous.left === left && previous.right === right ? previous : { left, right })
+  }, [])
+
+  useLayoutEffect(() => {
+    const strip = listRef.current
+    if (!strip) return
+    const observer = new ResizeObserver(updateEdges)
+    observer.observe(strip)
+    strip.addEventListener('scroll', updateEdges, { passive: true })
+    updateEdges()
+    return () => {
+      observer.disconnect()
+      strip.removeEventListener('scroll', updateEdges)
+    }
+  }, [tabs.length, paneVisible, updateEdges])
+
   useEffect(() => {
     if (!paneVisible || !openFeedback || openFeedback.tabId !== activeTabId) return
     const tab = document.getElementById(tabDomId(openFeedback.tabId))
-    tab?.parentElement?.scrollIntoView({
-      block: 'nearest',
-      inline: 'nearest',
-      behavior: 'instant'
-    })
+    arrowScrollTarget.current = null
+    if (listRef.current && tab?.parentElement) revealTab(listRef.current, tab.parentElement)
     if (openFeedback.focusTab
       && (document.activeElement === document.body || document.activeElement?.closest('.file-preview-pane'))) {
       tab?.focus({ preventScroll: true })
@@ -58,7 +107,7 @@ export function FilePreviewTabs({ compact = false }: { compact?: boolean } = {})
   useEffect(() => {
     if (compact && paneVisible) {
       const target = listRef.current?.querySelector<HTMLButtonElement>('[aria-selected="true"]')
-        ?? listRef.current?.parentElement?.querySelector<HTMLButtonElement>('.file-preview-return')
+        ?? listRef.current?.closest('.file-preview-tabs')?.querySelector<HTMLButtonElement>('.file-preview-return')
       target?.focus({ preventScroll: true })
     }
   }, [compact, paneVisible])
@@ -94,7 +143,18 @@ export function FilePreviewTabs({ compact = false }: { compact?: boolean } = {})
   }, [menu, tabs])
 
   const focusTab = (tabId: string): void => {
-    window.requestAnimationFrame(() => document.getElementById(tabDomId(tabId))?.focus())
+    window.requestAnimationFrame(() => document.getElementById(tabDomId(tabId))?.focus({ preventScroll: true }))
+  }
+
+  const scrollTabs = (direction: -1 | 1): void => {
+    const strip = listRef.current
+    if (!strip) return
+    const target = Math.max(0, Math.min(
+      (arrowScrollTarget.current ?? strip.scrollLeft) + direction * Math.max(120, strip.clientWidth - SCROLL_EDGE_INSET * 2),
+      strip.scrollWidth - strip.clientWidth
+    ))
+    arrowScrollTarget.current = target
+    strip.scrollTo({ left: target, behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth' })
   }
 
   const focusConversation = (): void => {
@@ -148,7 +208,7 @@ export function FilePreviewTabs({ compact = false }: { compact?: boolean } = {})
     else if (event.key === 'End') next = tabs.length - 1
     else return
     event.preventDefault()
-    listRef.current?.querySelectorAll<HTMLButtonElement>('[role="tab"]')[next]?.focus()
+    listRef.current?.querySelectorAll<HTMLButtonElement>('[role="tab"]')[next]?.focus({ preventScroll: true })
   }
 
   return (
@@ -164,70 +224,101 @@ export function FilePreviewTabs({ compact = false }: { compact?: boolean } = {})
         <svg viewBox="0 0 16 16" aria-hidden="true"><path d="m9.5 3.5-4.5 4.5 4.5 4.5M5 8h7" /></svg>
         <span>返回会话</span>
       </button>
-      <div className="file-preview-tab-strip" role={tabs.length ? 'tablist' : undefined} aria-label="打开的预览" ref={listRef}>
-        {tabs.length === 0 && <span className="file-preview-tabs-empty">文件预览</span>}
-        {tabs.map((tab, index) => {
-          const active = tab.id === activeTabId
-          const label = previewTabLabel(tab, duplicateNames)
-          const { displayPath, icon } = previewTabPresentation(tab)
-          const hasExternalUpdate = tab.kind === 'file' && tab.hasExternalUpdate
-          const feedback = openFeedback?.tabId === tab.id ? openFeedback : null
-          return (
-            <div
-              className={`file-preview-tab${active ? ' is-active' : ''}${feedback?.isNew ? ' is-arriving' : ''}`}
-              key={tab.id}
-              onContextMenu={(event) => {
-                event.preventDefault()
-                const width = 196
-                const height = tab.kind === 'file' ? 282 : 134
-                const keyboardInvocation = event.clientX === 0 && event.clientY === 0
-                const bounds = event.currentTarget.getBoundingClientRect()
-                const requestedLeft = keyboardInvocation ? bounds.left + 8 : event.clientX
-                const requestedTop = keyboardInvocation ? bounds.bottom + 4 : event.clientY
-                setMenu({
-                  tabId: tab.id,
-                  left: Math.max(8, Math.min(requestedLeft, window.innerWidth - width - 8)),
-                  top: Math.max(8, Math.min(requestedTop, window.innerHeight - height - 8))
-                })
-              }}
-            >
-              <button
-                id={tabDomId(tab.id)}
-                className="file-preview-tab-activate"
-                type="button"
-                role="tab"
-                aria-label={`${label}${hasExternalUpdate ? '，有更新' : ''}`}
-                aria-selected={active}
-                aria-controls={panelDomId(tab.id)}
-                tabIndex={active ? 0 : -1}
-                title={tab.kind === 'file_change' ? `${displayPath}\nFile Change · ${tab.changes.completedAt}` : displayPath}
-                onClick={() => activate(tab.id)}
-                onKeyDown={(event) => handleTabKeyDown(event, index)}
+      <div className={`file-preview-tab-rail${edges.left ? ' can-scroll-left' : ''}${edges.right ? ' can-scroll-right' : ''}`}>
+        <button
+          ref={leftButtonRef}
+          className="file-preview-tab-scroll is-left"
+          type="button"
+          aria-label="向左滚动预览标签"
+          title="向左滚动预览标签"
+          aria-controls={listId}
+          aria-hidden={!edges.left}
+          disabled={!edges.left}
+          onClick={() => scrollTabs(-1)}
+        ><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m10 3.5-4.5 4.5 4.5 4.5" /></svg></button>
+        <div className="file-preview-tab-strip" id={listId} role={tabs.length ? 'tablist' : undefined} aria-label="打开的预览" ref={listRef}
+          onWheel={() => { arrowScrollTarget.current = null }}
+          onPointerDown={() => { arrowScrollTarget.current = null }}
+        >
+          {tabs.length === 0 && <span className="file-preview-tabs-empty">文件预览</span>}
+          {tabs.map((tab, index) => {
+            const active = tab.id === activeTabId
+            const label = previewTabLabel(tab, duplicateNames)
+            const { displayPath, icon } = previewTabPresentation(tab)
+            const hasExternalUpdate = tab.kind === 'file' && tab.hasExternalUpdate
+            const feedback = openFeedback?.tabId === tab.id ? openFeedback : null
+            return (
+              <div
+                className={`file-preview-tab${active ? ' is-active' : ''}${feedback?.isNew ? ' is-arriving' : ''}`}
+                key={tab.id}
+                onFocus={(event) => {
+                  arrowScrollTarget.current = null
+                  if (listRef.current) revealTab(listRef.current, event.currentTarget)
+                }}
+                onContextMenu={(event) => {
+                  event.preventDefault()
+                  const width = 196
+                  const height = tab.kind === 'file' ? 282 : 134
+                  const keyboardInvocation = event.clientX === 0 && event.clientY === 0
+                  const bounds = event.currentTarget.getBoundingClientRect()
+                  const requestedLeft = keyboardInvocation ? bounds.left + 8 : event.clientX
+                  const requestedTop = keyboardInvocation ? bounds.bottom + 4 : event.clientY
+                  setMenu({
+                    tabId: tab.id,
+                    left: Math.max(8, Math.min(requestedLeft, window.innerWidth - width - 8)),
+                    top: Math.max(8, Math.min(requestedTop, window.innerHeight - height - 8))
+                  })
+                }}
               >
-                <FilePreviewTabIcon kind={icon} />
-                <span className="file-preview-tab-label">{label}</span>
-                {hasExternalUpdate && <i className="file-preview-tab-update" aria-hidden="true" />}
-              </button>
-              <button
-                className="file-preview-tab-close"
-                type="button"
-                aria-label={`关闭 ${label}`}
-                title={`关闭 ${label}`}
-                onClick={() => closeAndRestoreFocus(index)}
-              >
-                <svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4.5 4.5 7 7m0-7-7 7" /></svg>
-              </button>
-              {feedback && (
-                <span
-                  key={feedback.sequence}
-                  className="file-preview-tab-open-feedback"
-                  data-open-sequence={feedback.sequence}
-                  aria-hidden="true"
-                />
-              )}
-            </div>
-          )
-        })}
+                <button
+                  id={tabDomId(tab.id)}
+                  className="file-preview-tab-activate"
+                  type="button"
+                  role="tab"
+                  aria-label={`${label}${hasExternalUpdate ? '，有更新' : ''}`}
+                  aria-selected={active}
+                  aria-controls={panelDomId(tab.id)}
+                  tabIndex={active ? 0 : -1}
+                  title={tab.kind === 'file_change' ? `${displayPath}\nFile Change · ${tab.changes.completedAt}` : displayPath}
+                  onClick={() => activate(tab.id)}
+                  onKeyDown={(event) => handleTabKeyDown(event, index)}
+                >
+                  <FilePreviewTabIcon kind={icon} />
+                  <span className="file-preview-tab-label">{label}</span>
+                  {hasExternalUpdate && <i className="file-preview-tab-update" aria-hidden="true" />}
+                </button>
+                <button
+                  className="file-preview-tab-close"
+                  type="button"
+                  aria-label={`关闭 ${label}`}
+                  title={`关闭 ${label}`}
+                  onClick={() => closeAndRestoreFocus(index)}
+                >
+                  <svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4.5 4.5 7 7m0-7-7 7" /></svg>
+                </button>
+                {feedback && (
+                  <span
+                    key={feedback.sequence}
+                    className="file-preview-tab-open-feedback"
+                    data-open-sequence={feedback.sequence}
+                    aria-hidden="true"
+                  />
+                )}
+              </div>
+            )
+          })}
+        </div>
+        <button
+          ref={rightButtonRef}
+          className="file-preview-tab-scroll is-right"
+          type="button"
+          aria-label="向右滚动预览标签"
+          title="向右滚动预览标签"
+          aria-controls={listId}
+          aria-hidden={!edges.right}
+          disabled={!edges.right}
+          onClick={() => scrollTabs(1)}
+        ><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m6 3.5 4.5 4.5L6 12.5" /></svg></button>
       </div>
       {menu && createPortal((() => {
         const index = tabs.findIndex((tab) => tab.id === menu.tabId)

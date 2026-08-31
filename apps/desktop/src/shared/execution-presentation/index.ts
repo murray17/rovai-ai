@@ -517,9 +517,9 @@ export function buildLiveExecutionProgress(
   const stepById = new Map(steps.map((step) => [step.id, { ...step, publicResult: publicResult(step) }]))
   const items = itemOrder.flatMap((key): ExecutionProgressItem[] => {
     if (key === 'plan') {
-      const explanation = options.textMode === 'complete'
-        ? planExplanation.trim()
-        : planExplanation.trim().slice(-2_000)
+      const explanation = options.textMode === 'live_tail'
+        ? planExplanation.trim().slice(-2_000)
+        : planExplanation.trim()
       return explanation || plan.length > 0
         ? [{ key, kind: 'plan', explanation, plan }]
         : []
@@ -527,7 +527,7 @@ export function buildLiveExecutionProgress(
     if (key.startsWith('narration:')) {
       const itemId = key.slice('narration:'.length)
       const narration = (narrationByItem.get(itemId) ?? '').trim()
-      const body = options.textMode === 'complete' ? narration : narration.slice(-4_000)
+      const body = options.textMode === 'live_tail' ? narration.slice(-4_000) : narration
       return safeMarkdownHasRenderableContent(body)
         ? [{ key, kind: 'narration', body }]
         : []

@@ -28,8 +28,13 @@ Renderer entry
 
 任何来源必须先成为封闭 `OpenFilePreviewRequest`。Core 返回的 root/base/candidate 只在 Core↔Main 内部存在；
 Main 对 root 和目标分别 realpath，使用平台感知的路径段比较做 containment，并拒绝 symlink 越界和特殊文件。
-目录不取得文件读取能力：仅在已授权的明确用户激活中交给系统文件管理器显示，不创建 Tab、handle 或 watcher。
+目录不取得文件读取能力：仅在来源已校验的明确用户激活中交给系统文件管理器显示，不创建 Tab、handle 或 watcher。
+消息/工作区中的显式绝对路径、Home 相对路径或本机 file URI 若直接指向项目外目录，可只执行系统显示，不弹 Root Grant
+选择器；相对路径或项目内 symlink 越界不扩大此例外。普通文件读取仍必须通过 canonical containment。
 目录包同样只显示，不调用可能启动应用的默认打开动作；Attachment、历史 Evidence 和非交互子资源不扩展到目录。
+
+消息/工作区引用的尾部单个冒号仅由 Main 在原路径不存在、无行列/范围目标、去掉冒号后仍为合法路径且普通文件
+实际存在时恢复；不修改原始引用或 Core 来源校验，刷新、重开与系统动作重复相同解析及 containment 检查。
 
 ## 窗口文件能力
 
