@@ -63,6 +63,14 @@ app.whenReady().then(async () => {
     await command('Input.dispatchKeyEvent', { type: 'keyUp', ...event })
     await frames()
   }
+  async function movePointerTo(selector) {
+    const point = await evaluate(`(() => {
+      const bounds = document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect()
+      return { x: bounds.left + bounds.width / 2, y: bounds.top + bounds.height / 2 }
+    })()`)
+    await command('Input.dispatchMouseEvent', { type: 'mouseMoved', ...point })
+    await frames()
+  }
   async function expectText(expected, options = {}) {
     const state = await evaluate('window.composerTest.state()')
     assert.deepEqual(state.errors, [], 'A native edit must not throw and blank the Renderer')
@@ -436,12 +444,22 @@ app.whenReady().then(async () => {
     await run('keyboard navigation scrolls the active option and clamps after catalog changes', async () => {
       await reset('请 ')
       await insert('/')
+      // The pointer stays over the menu while keyboard navigation scrolls it.
+      // A boundary event caused by scrolling must not replace the keyboard choice.
+      await movePointerTo('.skill-picker-menu [data-skill-name="worktree"]')
       await key('ArrowUp', 38)
       let state = await evaluate('window.composerTest.state()')
       assert.equal(state.activeSkill, 'fixture-15')
       assert.equal(state.activeVisible, true, 'Keyboard navigation must reveal the option')
       assert.ok(state.menuScrollTop > 0)
       assert.equal(state.focused, true)
+      await movePointerTo('.skill-picker-menu [data-skill-name="fixture-14"]')
+      state = await evaluate('window.composerTest.state()')
+      assert.equal(state.activeSkill, 'fixture-14', 'Moving the pointer must still select the hovered option')
+      await key('ArrowDown', 40)
+      state = await evaluate('window.composerTest.state()')
+      assert.equal(state.activeSkill, 'fixture-15')
+      assert.equal(state.activeVisible, true)
       await key('ArrowDown', 40)
       state = await evaluate('window.composerTest.state()')
       assert.equal(state.activeSkill, 'worktree')

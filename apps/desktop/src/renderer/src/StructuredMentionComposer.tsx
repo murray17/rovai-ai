@@ -946,7 +946,7 @@ export function StructuredMentionComposer({
                   key={option.kind === 'all_members' ? 'all-members' : option.member.agentId}
                   disabled={disabled}
                   onPointerDown={(event) => event.preventDefault()}
-                  onMouseEnter={() => setActiveOption(index)}
+                  onMouseMove={() => setActiveOption(index)}
                   onClick={() => chooseMentionOption(option)}
                 >
                   <StructuredMentionOptionAvatar option={option} />
@@ -968,7 +968,7 @@ export function StructuredMentionComposer({
                   key={option.id}
                   disabled={disabled}
                   onPointerDown={(event) => event.preventDefault()}
-                  onMouseEnter={() => setActiveOption(index)}
+                  onMouseMove={() => setActiveOption(index)}
                   onClick={() => chooseSkillOption(option)}
                 >
                   <SkillIdentityMark skillId={option.id} name={option.name} size="compact" />
