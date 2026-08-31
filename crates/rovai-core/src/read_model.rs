@@ -3859,6 +3859,10 @@ mod tests {
 }
 
 #[cfg(all(test, feature = "slow-tests"))]
+#[path = "read_model/camp_open_tests.rs"]
+mod camp_open_slow_tests;
+
+#[cfg(all(test, feature = "slow-tests"))]
 mod slow_tests {
     use super::*;
     use crate::{

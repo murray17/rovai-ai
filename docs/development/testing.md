@@ -73,6 +73,29 @@ cargo test --workspace -- --list
 
 ## 测试层级
 
+### CampOpen 业务读取边界
+
+`read_model::camp_open_slow_tests` 拥有 Open 的完整 SQLite 读取边界：authorizer 拒绝任何直接或间接
+`event_log` 读取后，带附件、Task、Run、Delivery、Approval 和活动 Evidence 的投影仍须成功。历史事件
+`camp_id = NULL`、`task_id` 非空是保留的兼容输入。固定业务状态下分别加入 5 万、50 万、500 万无关事件，
+验证投影不变、watermark 前进和 SQL VM 步数不变；5 次读取只用于报告耗时分布，不断言易波动的毫秒阈值。
+
+这两个 owner 分别约束禁止越界读取与无关历史规模隔离；原有分页/完整 Snapshot 测试没有 SQL 授权边界，
+不能证明嵌套 hydration 不访问事件表，纯函数测试也无法覆盖该事务 seam。共享 `OwnedTestDatabase` fixture
+并在退出时清理，不访问日常数据库。Run 对象按 ID 比较完整字段，分别保留 Open 的活动优先顺序与
+完整 Snapshot 的原有排序。最小命令：
+
+```bash
+cargo test -p rovai-core --features slow-tests --lib camp_open_slow_tests:: -- --nocapture
+pnpm test:camp-open-projection
+```
+
+Electron 回归使用生产 adapter、CampWorkspace 与 CSS，验证空事件下的三类卡片、Task 业务原因、已加载
+旧页与 DOM 阅读锚点，以及后台新消息不抢位置。排序/时钟回拨输入矩阵由既有 `App.test.ts` owner 负责。
+夹具创建临时绝对 `userData`，不启动 Core/SQLite/Skill Library/Runtime；`ROVAI_KEEP_CAMP_OPEN_FIXTURE=1`
+保留测量和双主题截图。Linux CI 使用 `xvfb-run -a pnpm test:camp-open-projection`。这些分别是数据库边界
+和生产组件组合测试，不冒充已安装 App 的真实会话端到端耗时。
+
 ### 日常 commit 验证
 
 ```bash
