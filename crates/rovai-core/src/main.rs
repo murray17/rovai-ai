@@ -6229,8 +6229,12 @@ impl Core {
                 let mut database = self.database.lock().await;
                 let execution = rovai_core::pending_camp_input::edit_input(
                     &mut database,
-                    &user_camp_command_envelope(params.command_id, camp_id, params.command),
+                    &user_camp_command_envelope(params.command_id, camp_id.clone(), params.command),
                 )?;
+                drop(database);
+                if execution.result.status != CommandResultStatus::Rejected && !execution.replayed {
+                    emit_pending_inputs_changed(&self.output, &camp_id, "edited");
+                }
                 Ok(serde_json::to_value(execution.result)?)
             }
             "camp.composerDraft.get" => {
@@ -6782,6 +6786,9 @@ impl Core {
             }
         };
         if let Some(execution) = queued {
+            if execution.result.status != CommandResultStatus::Rejected && !execution.replayed {
+                emit_pending_inputs_changed(&self.output, params.camp_id.as_str(), "enqueued");
+            }
             return Ok(
                 json!({"commandResult": execution.result, "replayed": execution.replayed, "preflight": null, "pendingExecution": null}),
             );
@@ -6863,11 +6870,15 @@ impl Core {
             }
         };
         if execution.result.status != CommandResultStatus::Rejected {
-            emit_navigation_invalidated(
-                &self.output,
-                "camp.messages.send",
-                Some(params.camp_id.as_str()),
-            );
+            if execution.result.payload.get("pendingInputId").is_some() {
+                emit_pending_inputs_changed(&self.output, params.camp_id.as_str(), "enqueued");
+            } else {
+                emit_navigation_invalidated(
+                    &self.output,
+                    "camp.messages.send",
+                    Some(params.camp_id.as_str()),
+                );
+            }
         }
         if let Some(prepared) = prepared_ingest {
             let cleanup_store = managed_store.clone();
@@ -16594,8 +16605,11 @@ async fn process_agent_run_exit(
 }
 
 async fn dispatch_pending_camp_inputs(core: &Core) {
-    let mut database = core.database.lock().await;
-    let heads = match rovai_core::pending_camp_input::ready_heads(&database) {
+    let heads = {
+        let database = core.database.lock().await;
+        rovai_core::pending_camp_input::ready_heads(&database)
+    };
+    let heads = match heads {
         Ok(heads) => heads,
         Err(error) => {
             eprintln!("Pending Camp Input admission failed: {error:#}");
@@ -16606,16 +16620,24 @@ async fn dispatch_pending_camp_inputs(core: &Core) {
         let camp_id = command.camp_id.clone();
         let envelope =
             user_camp_command_envelope(uuid::Uuid::new_v4().to_string(), camp_id.clone(), command);
-        match CollaborationService::default().send_pending_camp_input(&mut database, &envelope) {
+        let result = {
+            let mut database = core.database.lock().await;
+            CollaborationService::default().send_pending_camp_input(&mut database, &envelope)
+        };
+        match result {
             Ok(execution) if execution.result.status != CommandResultStatus::Rejected => {
+                emit_pending_inputs_changed(&core.output, &camp_id, "published");
                 emit_navigation_invalidated(
                     &core.output,
                     "camp.pendingInputs.published",
                     Some(&camp_id),
                 );
             }
-            Ok(_) => {}
-            Err(error) => eprintln!("Pending Camp Input publication paused: {error:#}"),
+            Ok(_) => emit_pending_inputs_changed(&core.output, &camp_id, "publication_failed"),
+            Err(error) => {
+                emit_pending_inputs_changed(&core.output, &camp_id, "publication_failed");
+                eprintln!("Pending Camp Input publication paused: {error:#}");
+            }
         }
     }
 }
@@ -17154,6 +17176,20 @@ fn emit_navigation_invalidated(
             Some(camp_id) => json!({ "reason": reason, "campId": camp_id }),
             None => json!({ "reason": reason }),
         },
+    );
+}
+
+fn emit_pending_inputs_changed(
+    output: &mpsc::UnboundedSender<String>,
+    camp_id: &str,
+    reason: &str,
+) {
+    // Private post-commit invalidation only. Never put queued content, recipients
+    // or edit tokens into the public event log or Runtime context.
+    emit(
+        output,
+        "camp.pendingInputs.changed",
+        json!({ "campId": camp_id, "reason": reason }),
     );
 }
 

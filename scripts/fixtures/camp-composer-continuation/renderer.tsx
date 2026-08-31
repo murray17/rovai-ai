@@ -1,7 +1,8 @@
-import type { AgentProfile, CampComposerDraftView, CampMessageView, CampPendingInputsView, CampSnapshot, RovaiApi } from '@contracts'
+import type { AgentProfile, CampComposerDraftView, CampMessageView, CampPendingInputsView, CampSnapshot, CoreEvent, RovaiApi } from '@contracts'
 import { createRoot, type Root } from 'react-dom/client'
 import { flushSync } from 'react-dom'
-import { CampWorkspace } from '../../../apps/desktop/src/renderer/src/CampWorkspace'
+import { CampWorkspace, type CampMessageSendReceipt } from '../../../apps/desktop/src/renderer/src/CampWorkspace'
+import { SafeMarkdown } from '../../../apps/desktop/src/renderer/src/SafeMarkdown'
 import '../../../apps/desktop/src/renderer/src/styles.css'
 
 const campId = 'rvcamp_01h47kvsy5fk1shh6w1g60eec0'
@@ -10,6 +11,13 @@ const errors: string[] = []
 window.addEventListener('error', event => errors.push(String(event.error?.stack ?? event.message)))
 window.addEventListener('unhandledrejection', event => errors.push(String(event.reason)))
 const calls: string[] = []
+const savedContinuationSources: unknown[] = []
+const listeners = new Set<(event: CoreEvent) => void>()
+const emit = (method: string, params: Record<string, unknown>) => {
+  for (const listener of listeners) listener({ method, params })
+}
+const neverSend = async (): Promise<CampMessageSendReceipt> => { throw new Error('This scenario must not submit messages') }
+let send: (draft: CampComposerDraftView) => Promise<CampMessageSendReceipt> = neverSend
 const drafts = new Map<string, CampComposerDraftView>()
 let root: Root | null = null
 let snapshot: CampSnapshot
@@ -52,7 +60,10 @@ const continuedDraft = (messageId: string): CampComposerDraftView => ({
 // Core's projection is supplied explicitly per scenario. This fixture tests the
 // production Renderer lifecycle, not a second implementation of route calculation.
 Object.assign(window, { rovai: {
-  platform: 'darwin', onEvent: () => () => undefined,
+  platform: 'darwin', onEvent: (listener: (event: CoreEvent) => void) => {
+    listeners.add(listener)
+    return () => { listeners.delete(listener) }
+  },
   async request(method: string, params: Record<string, unknown> = {}) {
     calls.push(method)
     if (method === 'skills.list' || method === 'skills.deliveryGroups.list') return []
@@ -62,6 +73,7 @@ Object.assign(window, { rovai: {
       return structuredClone(drafts.get(String(params.campId)))
     }
     if (method === 'camp.composerDraft.save') {
+      savedContinuationSources.push(params.continuationSourceMessageId)
       const current = drafts.get(String(params.campId))!
       const content = params.content as CampComposerDraftView['content']
       const saved = { ...current, content, body: content.map(segment => segment.kind === 'text' ? segment.text : '').join(''),
@@ -105,7 +117,7 @@ function running(current: CampMessageView): Pick<CampSnapshot, 'turns' | 'agentR
 async function render() {
   flushSync(() => root!.render(<CampWorkspace snapshot={snapshot} projectName={null} agents={agents}
     busy={false} stopping={false} worldMapEnabled={false}
-    onSend={async () => { throw new Error('This fixture must not submit messages') }} onStop={() => undefined}
+    onSend={(draft) => send(draft)} onStop={() => undefined}
     onChangeLead={async () => undefined} onTasksChanged={async () => undefined} onResolveApproval={() => undefined} />))
   await flush()
 }
@@ -117,9 +129,11 @@ async function reset(draft = emptyDraft()) {
     await flush()
   }
   calls.length = 0
+  savedContinuationSources.length = 0
   drafts.clear()
   drafts.set(campId, draft)
   nextRead = null
+  send = neverSend
   queue = { campId, executionActive: true, items: [], editSession: null }
   const first = message(1, 'agent_1')
   snapshot = { schemaVersion: 34, throughGlobalSequence: 1,
@@ -142,6 +156,7 @@ async function publish(agentId: string, projected: CampComposerDraftView) {
   snapshot = { ...snapshot, throughGlobalSequence: snapshot.throughGlobalSequence + 1,
     messages: [...snapshot.messages, next], ...running(next) }
   queue = { ...queue, items: queue.items.slice(1) }
+  emit('camp.pendingInputs.changed', { campId: snapshot.camp.id, reason: 'published' })
   await render()
 }
 
@@ -156,11 +171,21 @@ Object.assign(window, { continuationTest: { async run() {
   const cases: string[] = []
   await reset()
   const initialReads = draftReads()
+  const queueReads = () => calls.filter(call => call === 'camp.pendingInputs.get').length
+  check(queueReads() === 1, 'Mount must read the queue once')
+  await new Promise(resolve => setTimeout(resolve, 1_200))
+  await flush()
+  check(queueReads() === 1, 'An unchanged queue must not be polled every second')
+  snapshot = { ...snapshot, throughGlobalSequence: 2 }
+  await render()
+  check(queueReads() === 1, 'Unrelated public evidence must not reread the private queue')
+  cases.push('idle queues do not poll or refresh for unrelated public evidence')
+
   queue.items = [{ id: 'pending-B', campId, enqueueSequence: 1, revision: 1, state: 'queued',
     content: message(2, 'agent_2').content, body: '给芝士的 B', replyIntent: null,
     recipientSelectionRequired: false, lastAttemptErrorCode: null }]
-  snapshot = { ...snapshot, throughGlobalSequence: 2 }
-  await render()
+  emit('camp.pendingInputs.changed', { campId, reason: 'enqueued' })
+  await flush()
   check(document.querySelector('.pending-input-list'), 'B must be visible in the private queue')
   check(continuation() === null && draftReads() === initialReads, 'Queue admission or Run progress must not recalculate the route')
   cases.push('private queue admission leaves the published route unchanged')
@@ -222,5 +247,121 @@ Object.assign(window, { continuationTest: { async run() {
   await flush()
   check(continuation() === null, 'A late read from the previous Camp must not change this Camp')
   cases.push('late publication responses are scoped to their Camp')
+
+  await reset()
+  editor().focus()
+  document.execCommand('insertText', false, '已经自动保存的下一条')
+  await until(() => calls.includes('camp.composerDraft.save'), 'Typing must autosave the Draft')
+  await flush()
+  const savesBefore = calls.filter(call => call === 'camp.composerDraft.save').length
+  const readsBefore = draftReads()
+  let submissions = 0
+  send = async (draft) => {
+    check(draft.body === '已经自动保存的下一条' && draft.revision > 0, 'Send must use the saved exact Draft')
+    submissions += 1
+    drafts.set(campId, emptyDraft())
+    queue = { ...queue, items: [{ id: 'pending-send', campId, enqueueSequence: 1, revision: 1, state: 'queued',
+      content: draft.content, body: draft.body, replyIntent: null, recipientSelectionRequired: false, lastAttemptErrorCode: null }] }
+    emit('camp.pendingInputs.changed', { campId, reason: 'enqueued' })
+    return { pendingInputId: 'pending-send', agentRunIds: [], campTurnId: null, addressedAgentIds: ['agent_1'] }
+  }
+  editor().dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', bubbles: true, cancelable: true }))
+  await until(() => submissions === 1 && !editor().textContent?.trim(), 'The pending send must consume the ordinary Draft')
+  await flush()
+  check(calls.filter(call => call === 'camp.composerDraft.save').length === savesBefore, 'Send must not save an identical autosaved Draft again')
+  check(draftReads() === readsBefore + 1, 'A successful send must read the next Draft only once')
+  check(document.querySelector('.pending-input-list')?.textContent?.includes('已经自动保存的下一条'), 'Admission must appear in the private queue')
+  check(snapshot.messages.length === 1, 'Private admission must not add a public message')
+  cases.push('an autosaved pending send avoids duplicate Draft saves and reads')
+
+  for (const admission of ['pending', 'published', 'published-lagging']) {
+    const published = admission !== 'pending'
+    await reset(continuedDraft('message-1'))
+    const previous = message(1, 'agent_2')
+    snapshot = { ...snapshot, messages: [previous], ...running(previous) }
+    if (published) {
+      snapshot = { ...snapshot, turns: [], agentRuns: [] }
+      queue = { ...queue, executionActive: false }
+    }
+    await render()
+    editor().focus()
+    document.execCommand('insertText', false, '第一条继续给芝士')
+    await until(() => savedContinuationSources.length === 1, 'The first Draft must autosave its continuation')
+    const source = published ? 'message-2' : 'message-1'
+    const nextDraft = continuedDraft(source)
+    let heldNextDraft: ReturnType<typeof holdRead> | null = null
+    let sends = 0
+    const publishSnapshot = async () => {
+      const sent = message(2, 'agent_2')
+      snapshot = { ...snapshot, throughGlobalSequence: 2, messages: [...snapshot.messages, sent], ...running(sent) }
+      await render()
+    }
+    send = async (draft) => {
+      sends += 1
+      check(draft.continuationIntent?.recipient.agentId === 'agent_2', 'Both sends must retain the non-Lead recipient')
+      drafts.set(campId, nextDraft)
+      if (sends === 1) {
+        if (admission === 'published') {
+          await publishSnapshot()
+        }
+        heldNextDraft = holdRead()
+      }
+      return { ...(published ? { publishedMessageSequence: 2 } : { pendingInputId: 'queued-next' }),
+        agentRunIds: [], campTurnId: null, addressedAgentIds: ['agent_2'] }
+    }
+    const beforeSendReads = draftReads()
+    const pressEnter = () => editor().dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', bubbles: true, cancelable: true }))
+    pressEnter()
+    await until(() => heldNextDraft !== null && nextRead === null, 'Send must initialize the next authoritative route')
+    check(editor().getAttribute('aria-disabled') === 'true' && !editor().isContentEditable,
+      'A fast next keystroke must not freeze a null route before the next Draft is initialized')
+    pressEnter()
+    await flush()
+    check(sends === 1, 'A second send must wait for the route initialization')
+    heldNextDraft!.resolve(nextDraft)
+    await until(() => editor().getAttribute('aria-disabled') !== 'true' && continuation() === '继续发给 芝士',
+      'The next editor must restore the non-Lead route')
+    check(draftReads() === beforeSendReads + 1, 'Route initialization must not trigger a duplicate publication read')
+    if (admission === 'published-lagging') {
+      await publishSnapshot()
+      check(draftReads() === beforeSendReads + 1, 'A late public projection must reuse the already initialized route')
+    }
+    editor().focus()
+    document.execCommand('insertText', false, '第二条还是给芝士')
+    await until(() => savedContinuationSources.length === 2, 'The second Draft must autosave')
+    check(savedContinuationSources[1] === source, 'A quick following Draft must persist the initialized continuation source')
+    pressEnter()
+    await until(() => sends === 2 && editor().getAttribute('aria-disabled') !== 'true', 'The second send must complete')
+  }
+  cases.push('delayed next-Draft initialization preserves the recipient across two quick sends')
+
+  flushSync(() => root!.unmount())
+  root = createRoot(document.getElementById('root')!)
+  const activations: string[] = []
+  const markdown = '# 标题\n\n[跳转](#标题)\n\n打开 `README.md`\n\n![image](./image.png)'
+  const asset = 'data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="1" height="1"/>')
+  const firstImage = () => `${asset}#first`
+  const drawMarkdown = (label: string, localImageUrl = firstImage, content = markdown) => {
+    flushSync(() => root!.render(<SafeMarkdown
+      onFileReference={(reference) => activations.push(`${label}:${reference}`)}
+      onHeadingTargetResult={(found) => activations.push(`${label}:heading:${found}`)}
+      localImageUrl={localImageUrl}>{content}</SafeMarkdown>))
+  }
+  drawMarkdown('old')
+  await flush()
+  const fileLink = document.querySelector<HTMLElement>('.markdown-file-reference')!
+  check(fileLink, 'Markdown must render its file link')
+  drawMarkdown('latest')
+  await flush()
+  check(document.querySelector('.markdown-file-reference') === fileLink, 'Unchanged Markdown must retain its rendered tree when callbacks change')
+  fileLink.click()
+  document.querySelector<HTMLAnchorElement>('.safe-markdown a[href^="#"]:not(.markdown-file-reference)')!.click()
+  check(activations.join(',') === 'latest:README.md,latest:heading:true', 'Cached links must invoke the latest file and heading callbacks')
+  drawMarkdown('latest', () => `${asset}#second`)
+  check(document.querySelector('img')?.getAttribute('src') === `${asset}#second`, 'A changed image projection must update cached Markdown')
+  drawMarkdown('latest', firstImage, 'Updated `src/app.ts`')
+  check(document.querySelector('.markdown-file-reference')?.getAttribute('title') === 'src/app.ts', 'Changed Markdown content must be reparsed')
+  cases.push('Markdown caching preserves fresh callbacks, image authority and changed content')
+  await flush()
   return { ok: true, cases }
 } } })

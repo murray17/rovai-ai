@@ -1,4 +1,4 @@
-import { isValidElement, useEffect, useRef, type JSX, type ReactNode } from 'react'
+import { isValidElement, useEffect, useLayoutEffect, useMemo, useRef, type JSX, type ReactNode } from 'react'
 import Markdown, { defaultUrlTransform } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { FILE_REFERENCE_FRAGMENT, FileReferenceLink } from './FileReferenceLink'
@@ -111,6 +111,11 @@ export function SafeMarkdown({
   onHeadingTargetResult?(found: boolean): void
 }): JSX.Element {
   const rootRef = useRef<HTMLDivElement>(null)
+  const callbacks = useRef({ onFileReference, onHeadingTargetResult })
+  useLayoutEffect(() => {
+    callbacks.current = { onFileReference, onHeadingTargetResult }
+  }, [onFileReference, onHeadingTargetResult])
+  const fileReferencesEnabled = Boolean(onFileReference)
 
   useEffect(() => {
     if (!headingTarget) return undefined
@@ -121,17 +126,20 @@ export function SafeMarkdown({
     return () => window.cancelAnimationFrame(frame)
   }, [children, headingTarget, onHeadingTargetResult])
 
-  const heading = (Tag: 'h3' | 'h4') => function MarkdownHeading({ children: headingChildren }: { children?: ReactNode }) {
-    const text = markdownHeadingText(headingChildren)
-    return <Tag data-markdown-heading={text}>{headingChildren}</Tag>
-  }
+  // Parsing old messages must not be coupled to Composer keystrokes or Runtime
+  // deltas. Keep event callbacks fresh without rebuilding the Markdown tree;
+  // image projection changes still invalidate it because they change the output.
+  const markdown = useMemo(() => {
+    const heading = (Tag: 'h3' | 'h4') => function MarkdownHeading({ children: headingChildren }: { children?: ReactNode }) {
+      const text = markdownHeadingText(headingChildren)
+      return <Tag data-markdown-heading={text}>{headingChildren}</Tag>
+    }
 
-  return (
-    <div ref={rootRef} className={className ? `safe-markdown ${className}` : 'safe-markdown'}>
+    return (
       <Markdown
         remarkPlugins={[
           [remarkGfm, { singleTilde: false }],
-          ...(onFileReference ? [remarkFileReferences] : [])
+          ...(fileReferencesEnabled ? [remarkFileReferences] : [])
         ]}
         skipHtml
         disallowedElements={[
@@ -144,7 +152,7 @@ export function SafeMarkdown({
           h2: heading('h3'),
           h3: heading('h4'),
           a({ href, children: linkChildren }) {
-            if (href?.startsWith(FILE_REFERENCE_FRAGMENT) && onFileReference) {
+            if (href?.startsWith(FILE_REFERENCE_FRAGMENT) && fileReferencesEnabled) {
               let rawReference: string
               try {
                 rawReference = decodeURIComponent(href.slice(FILE_REFERENCE_FRAGMENT.length))
@@ -156,7 +164,7 @@ export function SafeMarkdown({
                 <FileReferenceLink
                   className="markdown-file-reference"
                   rawReference={rawReference}
-                  onActivate={onFileReference}
+                  onActivate={(reference) => callbacks.current.onFileReference?.(reference)}
                 >
                   {markdownHeadingText(linkChildren).trim() ? linkChildren : rawReference}
                 </FileReferenceLink>
@@ -175,7 +183,7 @@ export function SafeMarkdown({
                   onClick={(event) => {
                     event.preventDefault()
                     const root = rootRef.current
-                    if (root) onHeadingTargetResult?.(scrollToMarkdownHeading(root, target))
+                    if (root) callbacks.current.onHeadingTargetResult?.(scrollToMarkdownHeading(root, target))
                   }}
                 >
                   {linkChildren}
@@ -201,7 +209,7 @@ export function SafeMarkdown({
           }
         }}
         urlTransform={(url) => {
-          if (onFileReference && parseFileReference(url)) {
+          if (fileReferencesEnabled && parseFileReference(url)) {
             return `${FILE_REFERENCE_FRAGMENT}${encodeURIComponent(url)}`
           }
           return defaultUrlTransform(url)
@@ -209,6 +217,12 @@ export function SafeMarkdown({
       >
         {children}
       </Markdown>
+    )
+  }, [children, fileReferencesEnabled, localImageUrl])
+
+  return (
+    <div ref={rootRef} className={className ? `safe-markdown ${className}` : 'safe-markdown'}>
+      {markdown}
     </div>
   )
 }

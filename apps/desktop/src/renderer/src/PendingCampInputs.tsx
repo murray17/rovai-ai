@@ -8,6 +8,7 @@ import { StructuredMentionComposer, type StructuredMentionMember } from './Struc
 import type { ComposerSkillOption } from './composer-skill-picker'
 import { AppDialogContent, AppDialogFooter, AppDialogHeader } from './AppDialog'
 import { readErrorMessage } from './error-message'
+import { createPendingInputsRefresh, shouldRefreshPendingInputs } from './pending-input-refresh'
 
 export type PendingInputSnapshot = {
   content: StructuredCampMessageContent
@@ -58,11 +59,12 @@ function pendingError(code: string): string {
 }
 
 export function PendingCampInputs({
-  campId, refreshKey, members, skills, skillCatalogStatus, stopping, onStop,
+  campId, refreshKey, executionActive, members, skills, skillCatalogStatus, stopping, onStop,
   onQueueChange, onEditingChange
 }: {
   campId: string
   refreshKey: number
+  executionActive: boolean
   members: readonly StructuredMentionMember[]
   skills: readonly ComposerSkillOption[]
   skillCatalogStatus: 'loading' | 'ready' | 'error'
@@ -78,37 +80,44 @@ export function PendingCampInputs({
   const [switchTarget, setSwitchTarget] = useState<PendingCampInputView | 'close' | null>(null)
   const editorRef = useRef<HTMLDivElement>(null)
   const mounted = useRef(true)
-  const requestSequence = useRef(0)
+  const refreshReader = useRef<ReturnType<typeof createPendingInputsRefresh> | null>(null)
   const callbacks = useRef({ onQueueChange, onEditingChange })
   callbacks.current = { onQueueChange, onEditingChange }
 
-  const refresh = useCallback(async (): Promise<void> => {
-    const sequence = ++requestSequence.current
-    const next = await window.rovai.request<CampPendingInputsView>('camp.pendingInputs.get', { campId })
-    if (!mounted.current || sequence !== requestSequence.current || next?.campId !== campId) return
-    setQueue(next)
-    callbacks.current.onQueueChange(next)
-  }, [campId])
+  const refresh = useCallback((): Promise<void> => refreshReader.current?.refresh() ?? Promise.resolve(), [])
 
   useEffect(() => {
     mounted.current = true
-    let cancelled = false
-    let timer: ReturnType<typeof setTimeout>
-    const poll = async (): Promise<void> => {
-      try { await refresh() } catch { /* Keep last authority; mutations surface actionable errors. */ }
-      if (!cancelled) timer = setTimeout(() => void poll(), 1000)
-    }
-    void poll()
+    const reader = createPendingInputsRefresh(
+      () => window.rovai.request<CampPendingInputsView>('camp.pendingInputs.get', { campId }),
+      (next) => {
+        if (next.campId !== campId) return
+        setQueue(next)
+        callbacks.current.onQueueChange(next)
+      }
+    )
+    refreshReader.current = reader
+    const invalidate = (): void => { void reader.refresh().catch(() => undefined) }
+    const foreground = (): void => { if (document.visibilityState !== 'hidden') invalidate() }
+    const unsubscribe = window.rovai.onEvent((event) => {
+      if (shouldRefreshPendingInputs(event, campId)) invalidate()
+    })
+    window.addEventListener('focus', foreground)
+    document.addEventListener('visibilitychange', foreground)
+    invalidate()
     return () => {
-      cancelled = true
       mounted.current = false
-      clearTimeout(timer)
+      reader.dispose()
+      if (refreshReader.current === reader) refreshReader.current = null
+      unsubscribe()
+      window.removeEventListener('focus', foreground)
+      document.removeEventListener('visibilitychange', foreground)
       // Deliberately do not cancel the Core lock on unmount/crash.
       // Unsaved edits are local and reopening requires an explicit recovery action.
     }
-  }, [refresh])
+  }, [campId])
 
-  useEffect(() => { void refresh().catch(() => undefined) }, [refreshKey, refresh])
+  useEffect(() => { void refresh().catch(() => undefined) }, [refreshKey, executionActive, refresh])
   useEffect(() => { callbacks.current.onEditingChange(edit !== null) }, [edit !== null])
 
   const mutate = async (item: PendingCampInputView, action: PendingInputEditAction, token: string | null): Promise<StoredCommandResult> => {

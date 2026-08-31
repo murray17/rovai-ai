@@ -39,7 +39,7 @@ test('the production Camp Composer refreshes continuation on publication without
     assert.equal(code, 0, `Camp Composer continuation regression failed:\n${stdout}\n${stderr}`)
     const report = JSON.parse(stdout.split('\n').find(line => line.startsWith('{')))
     assert.equal(report.ok, true)
-    assert.equal(report.cases.length, 7)
+    assert.equal(report.cases.length, 11)
   } finally {
     if (child && child.exitCode === null && child.signalCode === null) {
       child.kill('SIGKILL')

@@ -108,7 +108,15 @@ root 当作 active，或把已经完整恢复的 root 再次标为 removed。
 
 ## Bundled bootstrap 与完整性门禁
 
-Core ready 前先从 embedded bundled definitions 在内存计算 expected digest。数据库 current digest 与
+Authority ready 后，optional Skill bootstrap 先短暂持有数据库锁读取并规范化 Library metadata，
+随后在 blocking worker 中从 embedded bundled definitions 计算 expected digest，并完成所有目录检查、
+物化、哈希、fsync 和文件发布；这些文件操作不占用共享数据库锁，不阻塞 Composer Draft 或 Pending 准入。
+准备完成后重新持有短锁，核对规划时的 Skill identity、current Revision 和 version/configuration 仍未变化，
+仅提交 metadata 和 dirty 标记。整个过程由既有 subsystem initializer 串行化，Skill consumer/Runtime
+执行门禁直到 bootstrap 与必要的恢复完成后才开放。准备或提交失败保持门禁关闭；未注册的完整 Revision
+沿用成功 bootstrap 后的 orphan cleanup，不把文件存在误当作 Library 已提交。
+
+数据库 current digest 与
 文件树 paths/types/sizes/modes 全部匹配时，bootstrap 不创建 staging、不复制、不 `fsync`、不读取全文；
 只继续检查 system-required DB configuration。bundle 变化或轻量检查不匹配时才执行完整 materialize、
 digest verify 与 publish/repair。
