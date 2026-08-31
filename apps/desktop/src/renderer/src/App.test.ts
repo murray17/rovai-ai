@@ -444,7 +444,7 @@ describe('active Camp event invalidation', () => {
         complete: true
       }
       return {
-        schemaVersion: 5,
+        schemaVersion: 6,
         throughGlobalSequence: terminal ? 12 : 10,
         camp: {
           id: 'camp-terminal-refresh', title: '终态刷新', activationState: 'active',
@@ -460,7 +460,7 @@ describe('active Camp event invalidation', () => {
         membershipReconciliations: [],
         tasks: [],
         messages: [{
-          id: 'message-terminal-refresh', sequence: 1, timelineGlobalSequence: 1,
+          id: 'message-terminal-refresh', sequence: 1, timelineGlobalSequence: null,
           authorType: 'user', authorId: 'local_user', sourceAgentRunId: null,
           body: '完成验收', content: [{ kind: 'text', text: '完成验收' }], attachments: [],
           addressMode: 'default', addressedAgentIds: [], replyToCampMessageId: null,
@@ -494,7 +494,7 @@ describe('active Camp event invalidation', () => {
           endedAt: terminal ? '2026-08-25T00:00:02Z' : null,
           updatedAt: '2026-08-25T00:00:02Z'
         }],
-        executionEvidence: [], agentRunFileChanges: [], approvals: [], timeline: [],
+        executionEvidence: [], agentRunFileChanges: [], approvals: [],
         coverage: {
           tasks: complete,
           messages: {
@@ -505,8 +505,7 @@ describe('active Camp event invalidation', () => {
           turns: { ...complete, loadedCount: 1, totalCount: 1 },
           agentRuns: { ...complete, loadedCount: 1, totalCount: 1 },
           executionEvidence: complete,
-          approvals: complete,
-          timeline: complete
+          approvals: complete
         }
       }
     }
@@ -832,7 +831,7 @@ describe('Camp snapshot cache', () => {
       complete: true
     }
     const projection = {
-      schemaVersion: 5,
+      schemaVersion: 6,
       throughGlobalSequence: 20,
       camp,
       members: [],
@@ -845,7 +844,6 @@ describe('Camp snapshot cache', () => {
       executionEvidence: [],
       agentRunFileChanges: [],
       approvals: [],
-      timeline: [],
       coverage: {
         tasks: complete,
         messages: {
@@ -861,14 +859,15 @@ describe('Camp snapshot cache', () => {
         turns: complete,
         agentRuns: complete,
         executionEvidence: complete,
-        approvals: complete,
-        timeline: complete
+        approvals: complete
       }
     } satisfies CampOpenProjection
 
     const snapshot = campOpenProjectionAsSnapshot(projection, previous)
 
     expect(snapshot.messages.map(({ id }) => id)).toEqual(['older', 'recent'])
+    expect(snapshot.timeline).toEqual([])
+    expect(snapshot.messages.every((message) => message.timelineGlobalSequence === null)).toBe(true)
     expect(snapshot.contextManifests).toEqual([])
     expect(snapshot.actions).toEqual([])
     expect(snapshot.openCoverage?.messages.loadedCount).toBe(2)
@@ -1079,21 +1078,6 @@ describe('task event projections', () => {
       assigneeNameAtEvent: '沐瓦',
       occurredAt: '2026-08-05T02:05:00Z'
     })
-    const createdEvent = {
-      globalSequence: 2,
-      eventId: 'event-task-created',
-      eventType: 'task.created',
-      campId: 'camp-live-card',
-      entityType: 'task',
-      entityId: task.taskId,
-      actorType: 'user',
-      actorId: 'local_user',
-      sourceAgentRunId: null,
-      executionEpoch: null,
-      payload: { status: 'pending' },
-      createdAt: task.createdAt
-    } satisfies CampSnapshot['timeline'][number]
-
     const projected = campConversationTimeline(
       [
         message('before-task', 1, '2026-08-05T01:59:00Z'),
@@ -1102,7 +1086,6 @@ describe('task event projections', () => {
         message('after-task', 5, '2026-08-05T02:11:00Z')
       ],
       [],
-      [createdEvent],
       [],
       [task]
     )
@@ -1136,7 +1119,6 @@ describe('task event projections', () => {
     expect(campConversationTimeline([legacyApprovalResolution])).toEqual([])
     expect(projected[1]).toMatchObject({
       kind: 'task_card',
-      timelineGlobalSequence: 2,
       task: {
         taskId: task.taskId,
         title: '更新后的任务标题',
@@ -1146,7 +1128,7 @@ describe('task event projections', () => {
       }
     })
 
-    const updated = campConversationTimeline([], [], [createdEvent], [], [{
+    const updated = campConversationTimeline([], [], [], [{
       ...task,
       title: '再次更新标题',
       status: 'cancelled',
@@ -1169,7 +1151,7 @@ describe('task event projections', () => {
     })
   })
 
-  it('keeps a Task card when its creation event is outside the audit window', () => {
+  it('renders a Task card directly from its business projection', () => {
     const task = {
       taskId: 'task-old',
       campId: 'camp-old',
@@ -1194,12 +1176,56 @@ describe('task event projections', () => {
       availableActions: ['update']
     } satisfies CampSnapshot['tasks'][number]
 
-    expect(campConversationTimeline([], [], [], [], [task])).toMatchObject([{
+    expect(campConversationTimeline([], [], [], [task])).toMatchObject([{
       id: 'task:task-old',
       kind: 'task_card',
-      timelineGlobalSequence: null,
       createdAt: task.createdAt
     }])
+
+    const message = (sequence: number, createdAt = task.createdAt): CampMessageView => ({
+      id: `message-${sequence}`, sequence, timelineGlobalSequence: null,
+      authorType: 'user', authorId: 'local_user', sourceAgentRunId: null,
+      body: 'message', content: [{ kind: 'text', text: 'message' }], attachments: [],
+      addressMode: 'default', addressedAgentIds: [], replyToCampMessageId: null,
+      campTurnId: null, presentation: null, createdAt
+    })
+    const stop: CampSnapshot['turns'][number] = {
+      id: 'same-time-stop', triggerType: 'camp_message', triggerId: 'message-1',
+      status: 'cancelled', cancelRequestedAt: task.createdAt, aggregateReasonCode: null,
+      executionBudget: TEST_EXECUTION_BUDGET, version: 1, createdAt: task.createdAt,
+      updatedAt: task.createdAt, endedAt: task.createdAt
+    }
+    const changes: CampSnapshot['agentRunFileChanges'][number] = {
+      schemaVersion: 2, agentRunId: 'completed-run', executionEpoch: 1,
+      files: [{ evidenceFileId: 'same-time-file', path: 'src/app.ts', changeKind: 'update',
+        presentationKind: 'operation_history', operationCount: 1 }],
+      fileCount: 1, operationCount: 1, completedAt: task.createdAt
+    }
+    // Both open messages and retained history pages use business ordering;
+    // history publication sequences must not affect the visible order.
+    for (const withHistoricalSequences of [false, true]) {
+      const messages = [message(2), message(1)].map((entry) => ({
+        ...entry, timelineGlobalSequence: withHistoricalSequences ? 100 - entry.sequence : null
+      }))
+      const tasks = [{ ...task, taskId: 'b' }, { ...task, taskId: 'a' }]
+      const expected = ['message-1', 'message-2', 'task:a', 'task:b',
+        'stop:same-time-stop', 'run-file-changes:completed-run:1']
+      expect(campConversationTimeline(messages, [stop], [], tasks, [changes])
+        .map((item) => item.id)).toEqual(expected)
+      expect(campConversationTimeline(messages.toReversed(), [stop], [], tasks.toReversed(), [changes])
+        .map((item) => item.id)).toEqual(expected)
+    }
+
+    const skewedMessages = [
+      message(2, '2026-07-01T00:00:00Z'),
+      message(1, '2026-07-01T00:02:00Z')
+    ]
+    const betweenMessages = { ...task, createdAt: '2026-07-01T00:01:00Z' }
+    const skewedOrder = ['task:task-old', 'message-1', 'message-2']
+    expect(campConversationTimeline(skewedMessages, [], [], [betweenMessages])
+      .map((item) => item.id)).toEqual(skewedOrder)
+    expect(campConversationTimeline(skewedMessages.toReversed(), [], [], [betweenMessages])
+      .map((item) => item.id)).toEqual(skewedOrder)
   })
 
   it('projects every completed AgentRun file-change Evidence as its own timeline card', () => {
@@ -1231,7 +1257,7 @@ describe('task event projections', () => {
       completedAt: '2026-08-27T00:01:00Z'
     }]
 
-    expect(campConversationTimeline([], [], [], [], [], changes)).toMatchObject([
+    expect(campConversationTimeline([], [], [], [], changes)).toMatchObject([
       { id: 'run-file-changes:run-a:1', kind: 'run_file_changes', changes: { agentRunId: 'run-a' } },
       { id: 'run-file-changes:run-b:2', kind: 'run_file_changes', changes: { agentRunId: 'run-b' } }
     ])
@@ -1290,7 +1316,6 @@ describe('task event projections', () => {
         message('claude-followup', 2, 'run-claude', 'agent-claude', '2026-08-28T06:49:38.000000Z'),
         message('kiro-message', 3, 'run-kiro', 'agent-kiro', '2026-08-28T06:49:40.099875Z')
       ],
-      [],
       [],
       [],
       [],
@@ -1979,20 +2004,6 @@ describe('task event projections', () => {
       updatedAt: '2026-07-31T10:02:19Z',
       endedAt: '2026-07-31T10:02:19Z'
     }
-    const timeline = [{
-      globalSequence: 14,
-      eventId: 'event-stop',
-      eventType: 'camp_turn.cancel_requested',
-      campId: 'camp-1',
-      entityType: 'camp_turn',
-      entityId: turn.id,
-      actorType: 'user',
-      actorId: 'local_user',
-      sourceAgentRunId: null,
-      executionEpoch: null,
-      payload: { agentRunCount: 2 },
-      createdAt: turn.cancelRequestedAt
-    }]
     const agentRuns = [{
       campTurnId: turn.id,
       hasUnsettledExternalEffects: true
@@ -2004,13 +2015,11 @@ describe('task event projections', () => {
     const projected = campConversationTimeline(
       [userMessage],
       [turn],
-      timeline,
       agentRuns
     )
     expect(projected.map((item) => item.kind)).toEqual(['camp_message', 'stop_event'])
     expect(projected[1]).toMatchObject({
       id: 'stop:turn-stop',
-      timelineGlobalSequence: 14,
       elapsedLabel: '2分18秒',
       hasUnsettledExternalEffects: true
     })
@@ -2018,7 +2027,6 @@ describe('task event projections', () => {
     expect(campConversationTimeline(
       [userMessage],
       [{ ...turn, status: 'waiting' as const, endedAt: null }],
-      timeline,
       agentRuns
     ).map((item) => item.kind)).toEqual(['camp_message'])
   })
