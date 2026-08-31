@@ -9,6 +9,9 @@ import '../../../apps/desktop/src/renderer/src/styles.css'
 const now = '2026-08-31T04:00:00Z'
 const campId = 'rvcamp_01m0wzxbb8e1ht984tsbjmysfe'
 const fixtureMessage = '本页挂载真实的执行浮层、执行详情和三个生产入口。可检查头像横滑、键盘导航，并从任务的关联执行定位最后一位队员。'
+const longPath = `/fixture/workspace/${'execution_popover_width_regression_'.repeat(7)}report.md`
+const longCommand = `git show HEAD -- ${longPath}`
+const longNarration = `这是隔离验收数据。长正文、路径和行内代码应在浮层内完整换行，命令标题保持单行省略。\n\n检查文件：\`${longPath}\`。\n\n\`\`\`text\n${longPath}\n\`\`\`\n\n正文结束标记：完整可读。`
 const names = ['洛可', '沐瓦', '绵栀', '奇鹿', '言川', '予墨', '知夏', '负责跨项目执行审查与回归验收的长名称队员', '时屿', '星澜', '安禾', '云舒']
 const agents: AgentProfile[] = Array.from({ length: 20 }, (_, index) => ({
   agentId: `agent-${index + 1}`, displayName: names[index] ?? `队员 ${index + 1}`,
@@ -34,7 +37,7 @@ function snapshotFor(count: number, revision: number): CampSnapshot {
       cancelAcknowledgedAt: null, terminalResolutionSource: null, terminalReasonCode: null, failure: null,
       runtimeModel: { modelId: 'claude-opus-4-6' }, executionEpoch: 1, permissionSemantics: 'runtime_managed_v2',
       invocationKind: 'direct', triggerDeliveryGeneration: 0, a2aParentAgentRunId: null, a2aRootAgentRunId: null,
-      a2aDepth: 0, executionEvidenceCount: 1, hasUnsettledExternalEffects: false, workspace: { path: '/fixture/workspace' },
+      a2aDepth: 0, executionEvidenceCount: 2, hasUnsettledExternalEffects: false, workspace: { path: '/fixture/workspace' },
       startingGitObservation: null, endingGitObservation: null, version: revision + 1,
       createdAt: now, startedAt: now, endedAt: index < 3 ? null : now, updatedAt: now
     }
@@ -58,10 +61,21 @@ function snapshotFor(count: number, revision: number): CampSnapshot {
       content: [{ kind: 'text', text: fixtureMessage }], addressMode: 'default', attachments: [], addressedAgentIds: [], replyToCampMessageId: null,
       campTurnId: null, presentation: null, createdAt: now }],
     messageDeliveries: [], turns: [], agentRuns: runs,
-    executionEvidence: runs.map(run => ({ id: `evidence-${run.agentId}`, agentRunId: run.id, executionEpoch: 1,
+    executionEvidence: runs.flatMap<CampSnapshot['executionEvidence'][number]>(run => [{ id: `evidence-${run.agentId}`, agentRunId: run.id, executionEpoch: 1,
       sequence: 1, eventType: 'agent.text.delta', kind: 'narration', phase: 'updated',
-      payload: { itemId: `message-${run.agentId}`, delta: '这是隔离验收数据。队员身份、执行状态与模型仍在详情 Header 中展示；选择器只保留头像和状态符号。' },
-      contentBlobId: null, contentByteCount: 0, isTruncated: false, occurredAt: now })),
+      payload: { itemId: `message-${run.agentId}`, delta: longNarration },
+      contentBlobId: null, contentByteCount: 0, isTruncated: false, occurredAt: now }, {
+      id: `command-${run.agentId}`, agentRunId: run.id, executionEpoch: 1, sequence: 2,
+      eventType: 'activity.completed', kind: 'command', phase: 'completed',
+      payload: { item: { id: `shell-${run.agentId}`, type: 'commandExecution', command: longCommand,
+        status: 'completed', aggregatedOutput: `检查文件 ${longPath}\n${'完整输出仍可纵向滚动。\n'.repeat(24)}输出结束标记。` } },
+      canonical: { operationId: `shell-${run.agentId}`, classifierVersion: 'activity-v1',
+        activityDomain: 'shell', semanticKind: 'shell.execute', toolName: null, presentationHint: '执行 Shell 命令',
+        phase: 'terminal', outcome: 'succeeded', credibility: 'runtime_structured', coverageLevel: 'fine_grained',
+        sourceAuthority: 'runtime', sourceEvidenceIds: [`command-${run.agentId}`],
+        firstEvidenceSequence: 2, lastEvidenceSequence: 2, revision: 1 },
+      contentBlobId: null, contentByteCount: 0, isTruncated: false, occurredAt: now
+    }]),
     agentRunFileChanges: [], contextManifests: [], approvals: [], actions: [], timeline: []
   }
 }
@@ -74,6 +88,10 @@ Object.assign(window, { rovai: {
     if (method === 'skills.list' || method === 'skills.deliveryGroups.list') return []
     if (method === 'camp.composerDraft.get') return draft
     if (method === 'camp.composerDraft.save') { draft = { ...draft, ...params, revision: draft.revision + 1 }; return draft }
+    if (method === 'agentRunEvidence.getContent') {
+      const evidence = snapshotFor(20, 0).executionEvidence.find(item => item.id === params?.evidenceId)
+      if (evidence) return { payload: evidence.payload }
+    }
     throw new Error(`Unexpected fixture API: ${method}`)
   }
 } })

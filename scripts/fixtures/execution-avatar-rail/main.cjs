@@ -120,17 +120,62 @@ app.whenReady().then(async () => {
     assert.equal(value.inlineNames, false)
     assert.equal(value.stateIcons, true)
   }
+  const assertExecutionWidth = async () => {
+    const widths = await run(`(() => {
+      const body = document.querySelector('.execution-drawer-inspector .execution-drawer-body')
+      const bounds = body.getBoundingClientRect()
+      const boxes = [body, ...body.querySelectorAll('.execution-process-timeline, .execution-process-card, .execution-disclosure, .process-content, .process-copy, .tool-group-items')]
+        .filter(node => node.checkVisibility() && node.getBoundingClientRect().height > 0)
+        .map(node => ({ className: node.className, width: node.clientWidth, scrollWidth: node.scrollWidth }))
+      const prose = [...body.querySelectorAll('.process-copy p, .process-copy pre')].filter(node => node.checkVisibility() && node.getBoundingClientRect().height > 0)
+      const textRects = prose.flatMap(node => { const range = document.createRange(); range.selectNodeContents(node); return [...range.getClientRects()] })
+      return { boxes, textFits: textRects.every(rect => rect.left >= bounds.left && rect.right <= bounds.right),
+        completeProse: prose.some(node => node.textContent.endsWith('正文结束标记：完整可读。')) }
+    })()`)
+    assert.ok(widths.boxes.every(box => box.scrollWidth <= box.width + 1), `Execution content must fit the popover: ${JSON.stringify(widths)}`)
+    assert.ok(widths.textFits, 'Long prose wraps inside the popover instead of being clipped')
+    assert.ok(widths.completeProse, 'Wrapping preserves the full narration')
+  }
 
   try {
+    await focusWindow()
     await settle()
     let value = await state()
     if (value.panel.height === 0) value = await click('.camp-detail-entry[data-detail="execution"]')
+    value = await waitForState(value => value.panel.height > 0 && value.rail.height > 0, 'the initial execution popover')
     assert.equal(value.count, 12)
     assertLayout(value)
+    await assertExecutionWidth()
+    await run("document.querySelector('.tool-group-summary').scrollIntoView({block:'nearest',inline:'nearest',behavior:'instant'})")
+    await settle()
+    await click('.tool-group-summary')
+    await assertExecutionWidth()
+    await run("document.querySelector('.tool-call-summary').scrollIntoView({block:'center',inline:'nearest',behavior:'instant'})")
+    await settle()
+    const command = await run(`(() => {
+      const title = document.querySelector('.tool-call-title')
+      return { text: title.textContent, title: title.title, width: title.clientWidth, scrollWidth: title.scrollWidth, height: title.clientHeight }
+    })()`)
+    assert.ok(command.width > 0 && command.scrollWidth > command.width && command.height === 28, 'Long command occupies one constrained title row')
+    assert.equal(command.title, command.text, 'The full command remains available on hover and to assistive technology')
+    assert.ok(command.text.startsWith('git show HEAD -- /fixture/workspace/') && command.text.endsWith('report.md'))
+    await capture('execution-long-command')
+    await click('.tool-call-summary')
+    await assertExecutionWidth()
+    assert.equal(await run(`(() => {
+      const result = document.querySelector('.tool-call-result-scroll')
+      return result?.textContent.startsWith('$ ' + document.querySelector('.tool-call-title').textContent)
+        && result.textContent.endsWith('输出结束标记。') && result.scrollHeight > result.clientHeight
+        && result.scrollWidth <= result.clientWidth + 1
+    })()`), true, 'Expanded output preserves the full command and vertical scrolling without widening the popover')
+    await capture('execution-long-output')
+    await click('.tool-call-summary')
     assert.ok(value.rightEnabled && !value.leftEnabled)
+    await focusWindow()
+    value = await state()
     const hover = value.rects[0]
     window.webContents.sendInputEvent({ type: 'mouseMove', x: Math.round(hover.x + hover.width / 2), y: Math.round(hover.y + hover.height / 2) })
-    await settle()
+    await waitForState(value => value.tooltip?.startsWith('洛可 · '), 'the hovered member tooltip')
     assert.ok((await state()).tooltip?.startsWith('洛可 · '), 'Hover exposes the member name and status')
     window.webContents.sendInputEvent({ type: 'mouseMove', x: 800, y: 400 })
     await capture('avatar-rail-day-1440')
@@ -224,12 +269,16 @@ app.whenReady().then(async () => {
     await click('[data-count="12"]')
     await click('[data-theme-toggle]')
     await click('.camp-detail-entry[data-detail="execution"]')
+    await click('.run-pulse-avatar-rail [data-agent-id="agent-1"]')
+    await click('.execution-disclosure.worked > summary')
+    await assertExecutionWidth()
     await capture('avatar-rail-night-1440')
     window.webContents.debugger.attach('1.3')
     for (const [width, height] of [[1040, 700], [2560, 1440], [720, 460]]) {
       await window.webContents.debugger.sendCommand('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false })
       await settle()
       assertLayout(await state())
+      await assertExecutionWidth()
       if (width === 1040) await capture('avatar-rail-night-1040')
     }
     await window.webContents.debugger.sendCommand('Emulation.setDeviceMetricsOverride', { width: 1440, height: 920, deviceScaleFactor: 1, mobile: false })
@@ -248,6 +297,7 @@ app.whenReady().then(async () => {
 
     console.log(JSON.stringify({ ok: true, cases: ['12/20-member overflow', '176px steps and overlap', 'mouse wheel/trackpad', 'keyboard and long-name tooltip',
       'selection and node retention', 'status refresh/reopen', 'Task navigation/repeated target', '8-member no overflow',
+      'long prose containment', 'single-line command and full expanded output',
       'Day/Night', '1040/1440/2560/200% layout', 'reduced motion', 'forced colors', 'bottom dock unchanged'] }))
     window.destroy()
     app.quit()

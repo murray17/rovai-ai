@@ -167,9 +167,10 @@ Stream fast ACK、入站 normalize/topic 拒绝、Owner gate、统一 admission�
 
 ### 本次主线执行正文与文件预览合入：2026-08-31
 
-合入 `main@33003e13`，保留渠道自动命名和飞书 v7 紧凑实时卡。主线完整执行正文修复移入共享 presentation owner，
+本次最终主线基线固定为 `cda05852`，保留渠道自动命名和飞书 v7 紧凑实时卡。主线完整执行正文修复移入共享 presentation owner，
 Renderer 不再只保留正文/计划末尾；飞书卡片与钉钉显式预览继续独立应用各自预算。文件引用、Tab 收缩/滚动和
-Runtime 发现诊断隐藏同时合入，不改变数据库协议或渠道权限。门禁与 daily 安装结果见[实施计划](implementation-plan.md#2026-08-31-合入主线执行正文与文件预览修复)。
+Runtime 发现诊断隐藏、侧栏滚动条和执行浮层宽度修复同时合入，不改变数据库协议或渠道权限。
+门禁与 daily 安装结果见[实施计划](implementation-plan.md#2026-08-31-合入主线执行正文与文件预览修复)。
 
 ### 飞书分页回退修正
 

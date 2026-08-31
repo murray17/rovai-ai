@@ -32,15 +32,20 @@ last_updated: 2026-08-31
 
 ## 2026-08-31 合入主线执行正文与文件预览修复
 
-- 先将渠道 Camp 命名与飞书紧凑实时卡保存为 `32fd0804`，再合入 `main@33003e13`。
-  主线包括完整执行正文、文件引用打开、预览 Tab 收缩/滚动以及 Runtime 发现诊断隐藏；没有新增数据库迁移。
+- 先将渠道 Camp 命名与飞书紧凑实时卡保存为 `32fd0804`。最初获取主线 `33003e13` 后，远端引用在执行期间推进；
+  首轮合并 `0f124a4a` 的实际主线父提交是 `3baf46c9`，随后按固定 SHA 补齐至 `main@cda05852`，不再跟随移动引用。
+  合入完整执行正文、文件引用打开、预览 Tab 收缩/滚动、Runtime 发现诊断隐藏、侧栏滚动条和执行浮层宽度修复；
+  没有新增数据库迁移。
 - `ui-model.ts` 保留渠道分支的共享模块 re-export。主线“完整正文”修复迁入共享 presentation owner，
   默认 narration/plan 不裁掉开头；仅显式 `live_tail` 消费者保留原有尾部预览，飞书 v7 的整卡/行数预算不变。
-- 合并后 typecheck、131 文件/1276 项 Vitest、Desktop build、fmt、文档治理及以 `33003e13` 为显式 base 的
+- 首轮合并后 typecheck、131 文件/1276 项 Vitest、Desktop build、fmt、文档治理及以 `33003e13` 为显式 base 的
   docs CI 通过。合并前同一 Rust 源码的 staged library 门通过：workspace/all-targets check 和 462 项 Library；
   Node suite 220 通过、1 项 Windows 专属跳过，Skill authoring 3 项及文档治理 9 项通过。
 - 隔离原生 Electron 的渠道 Camp 命名、文件预览布局和消息文件引用三项通过；检查 Day 命名与 Night Tab 截图。
   userData 全部在本轮临时目录内，未访问日常数据、启动真实 Runtime 或发送渠道消息。
+- 补齐 `cda05852` 后再次通过 typecheck、131 文件/1276 项 Vitest 和以该 SHA 为 base 的 docs CI；
+  原生 Electron 重跑上述三项并增加执行头像栏/浮层回归，共四项通过，包含长正文完整换行、指令单行和展开结果有界。
+  检查执行结果截图；新主线增量没有 Rust、锁文件或打包配置变化，复用已验证的同一 Release Core。
 - 同 worktree 的 `dingtalk-avatar.ts/test.ts` 与 `dingtalk-developer-gateway.ts/test.ts` 并行改动原样保留且未纳入此提交；
   以上 TypeScript 测试覆盖当前组合工作树。这不改变钉钉真实 Owner/Core/群聊/卡片及 packaged 恢复的 NO-GO 边界。
 - 后续按本次用户指令生成 daily App、执行隔离打包验收并非终止安装到 Applications；打包与安装结果另记。
