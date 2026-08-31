@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { SafeMarkdown } from './SafeMarkdown'
 import { useFilePreview, type FilePreviewTabModel } from './FilePreviewContext'
 import { FileChangesPreview } from './FileChangesPreview'
@@ -70,13 +70,14 @@ function CodeViewer({ tab }: { tab: FilePreviewTabModel }): React.JSX.Element {
       : Math.min(current, searchMatches.length - 1))
   }, [searchMatches.length])
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const targetLine = tab.file.target?.line
-    if (!targetLine) return
-    window.requestAnimationFrame(() => rootRef.current
-      ?.querySelector<HTMLElement>(`[data-file-row="${targetLine}"]`)
-      ?.scrollIntoView({ block: 'center' }))
-  }, [startLine, tab.content, tab.file.target?.line])
+    const root = rootRef.current
+    const row = targetLine ? root?.querySelector<HTMLElement>(`[data-file-row="${targetLine}"]`) : null
+    if (!root || !row) return
+    root.scrollTop += row.getBoundingClientRect().top - root.getBoundingClientRect().top
+      - (root.clientHeight - row.getBoundingClientRect().height) / 2
+  }, [startLine, tab.content, tab.file.target])
 
   useEffect(() => {
     const match = searchMatches[searchIndex]
@@ -122,9 +123,12 @@ function CodeViewer({ tab }: { tab: FilePreviewTabModel }): React.JSX.Element {
             : ''
           const currentMatch = searchMatches[searchIndex]
           const highlight = currentMatch?.line === index ? currentMatch : null
+          const target = tab.file.target
+          const targeted = target?.line !== undefined && startLine + index >= target.line
+            && startLine + index <= (target.endLine ?? target.line)
           return (
             <div
-              className={`file-preview-code-line ${patchClass}${highlight ? ' is-search-match' : ''}`}
+              className={`file-preview-code-line ${patchClass}${highlight ? ' is-search-match' : ''}${targeted ? ' is-location-target' : ''}`}
               data-file-row={startLine + index}
               key={`${startLine + index}:${line}`}
             >
@@ -436,13 +440,13 @@ function Viewer({ tab }: { tab: FilePreviewTabModel }): React.JSX.Element {
             tab.content?.kind === 'markdown' ? tab.content.tabToken : '',
             tab.content?.kind === 'markdown' ? tab.content.assetBasePath : ''
           )}
-          onFileReference={(rawReference) => {
+          onFileReference={(rawReference, _source, target) => {
             void open({
               kind: 'child_of_handle',
               parentHandleId: tab.file.handleId,
               rawReference,
               allowSystemOpen: true
-            }).then((outcome) => {
+            }, target).then((outcome) => {
               setLinkError(outcome.kind === 'error' ? outcome.error.message : null)
             })
           }}

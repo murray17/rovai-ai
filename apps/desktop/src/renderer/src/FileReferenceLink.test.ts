@@ -88,6 +88,18 @@ describe.each(renderers)('file-link presentation in $name', ({ render }) => {
     expect(markup).toContain('title="src/app.ts">src/app.ts</a>')
     expect(markup).toContain('title="docs/plan.md">~原样~</a>')
   })
+
+  it('leaves field lists and unqualified filenames inert, and links a located short name only with a source', () => {
+    const markup = render('WBS(外码)/WBS描述/成本中心/FBP/GR-手工金额，心/FBP）有值。`run_gr_reminder.py`；`run_report.py:44-46`')
+    expect(markup).not.toContain('<a ')
+    const resolved = render('主实现 `src/report/run_report.py`，定位 `run_report.py:44-46`；`run_gr_reminder.py` 保持原文。')
+    expect(resolved.match(/<a /gu)).toHaveLength(2)
+    expect(resolved).toContain('title="run_report.py:44-46"')
+    expect(resolved).not.toContain('title="run_gr_reminder.py"')
+    expect(render('`src/a/run_report.py` `src/b/run_report.py` `run_report.py:44-46`'))
+      .not.toContain('title="run_report.py:44-46"')
+    expect(render('```\nsrc/run_report.py\n```\n\n`run_report.py:44-46`')).not.toContain('<a ')
+  })
 })
 
 describe('file link activation', () => {
@@ -97,12 +109,15 @@ describe('file link activation', () => {
     const onActivate = vi.fn()
     vi.stubGlobal('window', { getSelection: () => ({ toString: () => '' }) })
     const link = FileReferenceLink({ rawReference: 'src/app.ts:20', children: '实现', className: 'message-file-reference', onActivate })
-    const props = link.props as { onClick(event: { detail: number; preventDefault(): void }): void }
+    const props = link.props as { onClick(event: { detail: number; currentTarget: HTMLElement; preventDefault(): void }): void }
     const preventDefault = vi.fn()
-    props.onClick({ detail: 1, preventDefault })
-    props.onClick({ detail: 0, preventDefault })
+    const currentTarget = {} as HTMLElement
+    props.onClick({ detail: 1, currentTarget, preventDefault })
+    props.onClick({ detail: 0, currentTarget, preventDefault })
     expect(preventDefault).toHaveBeenCalledTimes(2)
-    expect(onActivate.mock.calls).toEqual([['src/app.ts:20'], ['src/app.ts:20']])
+    expect(onActivate.mock.calls).toEqual([
+      ['src/app.ts:20', currentTarget, undefined], ['src/app.ts:20', currentTarget, undefined]
+    ])
   })
 
   it('keeps mouse text selection from opening a file, without blocking keyboard activation', () => {
@@ -113,7 +128,20 @@ describe('file link activation', () => {
     props.onClick({ detail: 1, preventDefault: () => undefined })
     expect(onActivate).not.toHaveBeenCalled()
     props.onClick({ detail: 0, preventDefault: () => undefined })
-    expect(onActivate).toHaveBeenCalledWith('src/app.ts')
+    expect(onActivate).toHaveBeenCalledWith('src/app.ts', undefined, undefined)
+  })
+
+  it('keeps the verified source and the requested line range separate on activation', () => {
+    const onActivate = vi.fn()
+    vi.stubGlobal('window', { getSelection: () => null })
+    const link = FileReferenceLink({
+      rawReference: 'run_report.py:44-46', sourceReference: 'src/report/run_report.py',
+      children: 'run_report.py:44-46', className: 'message-file-reference', onActivate
+    })
+    const currentTarget = {} as HTMLElement
+    const props = link.props as { onClick(event: { detail: number; currentTarget: HTMLElement; preventDefault(): void }): void }
+    props.onClick({ detail: 1, currentTarget, preventDefault: () => undefined })
+    expect(onActivate).toHaveBeenCalledWith('src/report/run_report.py', currentTarget, { line: 44, endLine: 46 })
   })
 
   it('preserves the original source when there is no file opener', () => {

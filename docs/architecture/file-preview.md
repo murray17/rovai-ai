@@ -2,7 +2,7 @@
 document_type: architecture
 authority: file-preview-components-and-boundaries
 status: accepted
-last_updated: 2026-08-30
+last_updated: 2026-08-31
 ---
 
 # File Preview Architecture
@@ -27,7 +27,9 @@ Renderer entry
 引用能力不在当前组件图内。
 
 任何来源必须先成为封闭 `OpenFilePreviewRequest`。Core 返回的 root/base/candidate 只在 Core↔Main 内部存在；
-Main 对 root 和目标分别 realpath，使用平台感知的路径段比较做 containment，并拒绝目录、symlink 越界和特殊文件。
+Main 对 root 和目标分别 realpath，使用平台感知的路径段比较做 containment，并拒绝 symlink 越界和特殊文件。
+目录不取得文件读取能力：仅在已授权的明确用户激活中交给系统文件管理器显示，不创建 Tab、handle 或 watcher。
+目录包同样只显示，不调用可能启动应用的默认打开动作；Attachment、历史 Evidence 和非交互子资源不扩展到目录。
 
 ## 窗口文件能力
 
