@@ -27,7 +27,7 @@ const renderers = [{
 }]
 
 describe.each(renderers)('file-link presentation in $name', ({ render }) => {
-  it('shows descriptions once, keeps targets in tooltips, and preserves code styling', () => {
+  it('shows descriptions once, keeps targets in tooltips, and distinguishes code file links', () => {
     const markup = render(examples)
     const visibleText = markup.replace(/<[^>]*>/gu, '')
     expect(markup.match(/<a /gu)).toHaveLength(5)
@@ -43,7 +43,11 @@ describe.each(renderers)('file-link presentation in $name', ({ render }) => {
       expect(markup).toContain(`title="${target}"`)
       expect(visibleText).not.toContain(`[${label}]`)
     }
-    expect(markup).toContain('<code>apps/desktop/src/renderer/src/FilePreviewPane.tsx:1</code></a>')
+    expect(markup.match(/class="(?:message|markdown)-file-reference inline-code-file-reference"/gu)).toHaveLength(1)
+    expect(markup.match(/<svg /gu)).toHaveLength(1)
+    expect(markup).toContain('aria-hidden="true"')
+    expect(markup).toContain('<span class="inline-code-file-reference-label">apps/desktop/src/renderer/src/FilePreviewPane.tsx:1</span>')
+    expect(markup).not.toContain('<code>')
     expect(visibleText.match(/apps\/desktop\/src\/renderer\/src\/FilePreviewPane.tsx:1/gu)).toHaveLength(1)
   })
 

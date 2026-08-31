@@ -1,4 +1,4 @@
-import type { DesktopStartupSnapshot, OnboardingSnapshot, RestorableLocation, RovaiApi, SupervisorSnapshot } from '@contracts'
+import type { CoreEvent, DesktopStartupSnapshot, HealthStatus, OnboardingSnapshot, RestorableLocation, RovaiApi, SupervisorSnapshot } from '@contracts'
 import { createRoot, type Root } from 'react-dom/client'
 import { flushSync } from 'react-dom'
 import { App } from '../../../apps/desktop/src/renderer/src/App'
@@ -10,6 +10,8 @@ window.addEventListener('error', event => errors.push(String(event.error?.stack 
 window.addEventListener('unhandledrejection', event => errors.push(String(event.reason)))
 const calls: string[] = []
 const listeners = new Set<(snapshot: SupervisorSnapshot) => void>()
+const coreListeners = new Set<(event: CoreEvent) => void>()
+const responses = new Map<string, unknown>()
 let now = 0
 let nextTimer = 0
 const timers = new Map<number, { at: number; callback: () => void }>()
@@ -49,7 +51,7 @@ function session(target: RestorableLocation): DesktopStartupSnapshot {
 }
 
 // Unknown query methods remain pending, never return fabricated business empties.
-// Subscriptions are inert; every authority read/mutation is recorded and checked.
+// Only Supervisor and Core event subscriptions are active; authority calls are recorded.
 function api(path = ''): unknown {
   return new Proxy(() => undefined, {
     get(_target, key) {
@@ -61,6 +63,10 @@ function api(path = ''): unknown {
         listeners.add(args[0])
         return () => listeners.delete(args[0])
       }
+      if (path === 'onEvent') {
+        coreListeners.add(args[0])
+        return () => coreListeners.delete(args[0])
+      }
       if (path.split('.').at(-1)?.startsWith('on')) return () => undefined
       if (path === 'supervisor.getSnapshot') return initialSupervisor.promise
       if (path === 'desktopSession.getStartupSnapshot') { calls.push(path); return localSession.promise }
@@ -70,6 +76,7 @@ function api(path = ''): unknown {
         newConversationDefaults: null, newConversationDefaultsRequireConfirmation: false,
         oneClickNewConversationEnabled: false, worldMapEnabled: true })
       calls.push(path === 'request' ? args[0] : path)
+      if (path === 'request' && responses.has(args[0])) return Promise.resolve(responses.get(args[0]))
       if (path === 'onboarding.get') return onboarding.promise
       return new Promise(() => undefined)
     }
@@ -99,6 +106,8 @@ async function reset(target: RestorableLocation | null = { kind: 'camp', campId 
   if (root) flushSync(() => root!.unmount())
   timers.clear()
   listeners.clear()
+  coreListeners.clear()
+  responses.clear()
   calls.length = 0
   errors.length = 0
   now = 0
@@ -231,6 +240,49 @@ Object.assign(window, { startupTest: {
       'Local session failure must be visible before 400ms')
     noAuthority()
     cases.push('local preference read errors stay local and do not wait 400ms')
+
+    await reset({ kind: 'members', agentId: null, tab: 'runtime' })
+    const health: HealthStatus = {
+      core: { ok: true, version: 'fixture', dataDir: '/isolated/fixture' },
+      database: { ok: true, path: '/isolated/fixture/rovai.sqlite' },
+      git: { installed: true, version: 'fixture' },
+      hostPlatform: 'macos-arm64', runtimeCatalog: [], runtimePlatformAdmission: [], runtimeAvailability: [],
+      searchEnvironment: { generation: 1, createdAt: '2026-08-31T00:00:00Z', pathEntryCount: 0,
+        shell: { status: 'unavailable', interactive: false, shellName: null, entryCount: 0, elapsedMillis: 0 } }
+    }
+    responses.set('health.check', health)
+    responses.set('members.list', [])
+    responses.set('runtime.installations.list', [])
+    onboarding.resolve({ schemaVersion: 2, status: 'completed', origin: 'existing_installation',
+      completedAt: '2026-08-31T00:00:00Z', selectedMemberRole: null, memberAgentId: null, quickChatCampId: null })
+    publish({ runtimeMode: 'full_core', fullCoreState: 'ready', startupPhase: null,
+      authorityState: { kind: 'current', origin: 'existing' },
+      capabilities: { ...supervisor.capabilities, authoritativeWorkspace: true, coreRequests: true } })
+    await flush()
+    await flush()
+    await advance(0)
+    check(coreListeners.size > 0, 'The production App must subscribe to Core events')
+    for (const [events, memberReads] of [
+      [['runtime.availability.updated'], 0],
+      [['runtime.discovery.updated'], 1],
+      [['runtime.discovery.completed'], 1],
+      [['runtime.discovery.updated', 'runtime.availability.updated'], 1],
+      [['runtime.availability.updated', 'runtime.discovery.completed'], 1],
+      [['runtime.availability.updated'], 0]
+    ] as const) {
+      calls.length = 0
+      for (const method of events) {
+        coreListeners.forEach(listener => listener({ method, params: { runtimeKind: 'copilot-cli' } }))
+      }
+      await advance(79)
+      check(!calls.includes('runtime.installations.list'), 'Runtime reads must wait for the shared debounce')
+      await advance(1)
+      check(calls.filter(call => call === 'health.check').length === 1, `${events}: refresh health once`)
+      check(calls.filter(call => call === 'runtime.installations.list').length === 1, `${events}: refresh installations once`)
+      check(calls.filter(call => call === 'members.list').length === memberReads, `${events}: incorrect member refresh scope`)
+    }
+    cases.push('Runtime availability refreshes health and installations without reloading members')
+    cases.push('Runtime discovery retains full refresh across mixed debounce events')
     return { ok: true, cases }
   },
   async capture(theme: string) {

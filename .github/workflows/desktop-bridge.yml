@@ -8,6 +8,7 @@ on:
       - "apps/desktop/src/renderer/src/App*"
       - "apps/desktop/src/renderer/src/CampNavigation*"
       - "apps/desktop/src/renderer/src/CampWorkspace*"
+      - "apps/desktop/src/renderer/src/ExecutionAvatarRail*"
       - "apps/desktop/src/renderer/src/PendingCampInputs*"
       - "apps/desktop/src/renderer/src/startup-location*"
       - "apps/desktop/src/renderer/src/CoreSubsystemNotice*"
@@ -33,6 +34,8 @@ on:
       - "scripts/fixtures/file-preview-layout/**"
       - "scripts/lib/camp-fast-layout.test.mjs"
       - "scripts/fixtures/camp-fast-layout/**"
+      - "scripts/lib/execution-avatar-rail.test.mjs"
+      - "scripts/fixtures/execution-avatar-rail/**"
       - "scripts/lib/approval-dock.test.mjs"
       - "scripts/fixtures/approval-dock/**"
       - "package.json"
@@ -75,6 +78,7 @@ jobs:
           xvfb-run -a pnpm test:startup-presentation
           xvfb-run -a pnpm test:file-preview-layout
           xvfb-run -a pnpm test:camp-fast-layout
+          xvfb-run -a pnpm test:execution-avatar-rail
           xvfb-run -a pnpm test:approval-dock
           pnpm exec vitest run apps/desktop/src/main/desktop-session.test.ts apps/desktop/src/renderer/src/CampNavigationPagination.test.ts
           pnpm exec vitest run apps/desktop/src/renderer/src/error-message.test.ts apps/desktop/src/main/core-client.test.ts apps/desktop/src/main/windows-data-root.test.ts apps/desktop/src/main/windows-bootstrap.test.ts apps/desktop/src/renderer/src/CoreSubsystemNotice.test.ts apps/desktop/src/renderer/src/App.test.ts

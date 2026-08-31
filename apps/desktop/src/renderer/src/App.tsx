@@ -1067,6 +1067,7 @@ function AuthoritativeApp({
   const newConversationReturnFocus = useRef<HTMLElement | null>(null)
   const liveRuntimeEventSequence = useRef(0)
   const runtimeHealthRefreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const runtimeHealthRefreshIncludesMembers = useRef(false)
   const membersViewRef = useRef<MembersViewHandle>(null)
   const startupResolvedSessionId = useRef<string | null>(null)
   const pendingRestorableLocation = useRef<RestorableLocation | null>(null)
@@ -1352,13 +1353,14 @@ function AuthoritativeApp({
     return request
   }, [])
 
-  const loadMemberData = useCallback(async (): Promise<void> => {
-    const [, nextInstallations] = await Promise.all([
-      loadAgents(),
-      window.rovai.request<AdapterInstallation[]>('runtime.installations.list')
-    ])
+  const loadInstallations = useCallback(async (): Promise<void> => {
+    const nextInstallations = await window.rovai.request<AdapterInstallation[]>('runtime.installations.list')
     setInstallations(nextInstallations)
-  }, [loadAgents])
+  }, [])
+
+  const loadMemberData = useCallback(async (): Promise<void> => {
+    await Promise.all([loadAgents(), loadInstallations()])
+  }, [loadAgents, loadInstallations])
 
   const applyNavigationPreferences = useCallback((
     snapshot: NavigationPreferencesSnapshot
@@ -2129,10 +2131,16 @@ function AuthoritativeApp({
         || event.method === 'runtime.discovery.completed'
         || event.method === 'runtime.availability.updated'
       ) {
+        runtimeHealthRefreshIncludesMembers.current ||= event.method !== 'runtime.availability.updated'
         if (runtimeHealthRefreshTimer.current) clearTimeout(runtimeHealthRefreshTimer.current)
         runtimeHealthRefreshTimer.current = setTimeout(() => {
           runtimeHealthRefreshTimer.current = null
-          void Promise.all([loadHealth(), loadMemberData()]).catch(() => undefined)
+          const includeMembers = runtimeHealthRefreshIncludesMembers.current
+          runtimeHealthRefreshIncludesMembers.current = false
+          void Promise.all([
+            loadHealth(),
+            includeMembers ? loadMemberData() : loadInstallations()
+          ]).catch(() => undefined)
         }, 80)
       }
       if (shouldRefreshNavigationForCoreEvent(event, shuttingDownRef.current)) {
@@ -2155,6 +2163,7 @@ function AuthoritativeApp({
   }, [
     activeCampRefreshCoordinator,
     loadHealth,
+    loadInstallations,
     loadMemberData,
     loadOverview,
     navigationRefreshCoordinator

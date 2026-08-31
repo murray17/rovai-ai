@@ -5,18 +5,66 @@ import { describe, expect, it } from 'vitest'
 import type {
   AdapterInstallation,
   AdapterKind,
-  PermissionOptionDescriptor
+  PermissionOptionDescriptor,
+  RuntimeModelCatalogView
 } from '@contracts'
 import {
   MemberModelParameters,
   MemberRuntimeParameters,
   draftFromDefaults,
+  liveCatalogIsAtLeastAsRecent,
   modelCatalogStatusCopy,
   runtimeDraftForMember,
   runtimeEditorInstallation
 } from './MemberRuntimeParameters'
 
 const styles = readFileSync(new URL('./styles.css', import.meta.url), 'utf8')
+
+describe('runtime model catalog source', () => {
+  const installation = runtimeInstallation('copilot-cli')
+  const cached: RuntimeModelCatalogView = {
+    runtimeKind: 'copilot-cli',
+    cache: { ...installation.modelCatalog, status: 'stale' },
+    models: installation.snapshot!.models,
+    refreshStatus: 'scheduled',
+    diagnosticCode: null
+  }
+  const refreshed: RuntimeModelCatalogView = {
+    ...cached,
+    cache: { ...cached.cache, status: 'fresh', observedAt: '2026-07-31T00:02:00Z' },
+    refreshStatus: 'completed'
+  }
+
+  it('lets a background installation update replace the cached response', () => {
+    expect(liveCatalogIsAtLeastAsRecent(cached, cached.cache)).toBe(true)
+    expect(liveCatalogIsAtLeastAsRecent(cached, refreshed.cache)).toBe(false)
+  })
+
+  it('uses a newer response before the installation update arrives', () => {
+    expect(liveCatalogIsAtLeastAsRecent(refreshed, cached.cache)).toBe(true)
+  })
+
+  it('does not let a late older response replace an already refreshed installation', () => {
+    expect(liveCatalogIsAtLeastAsRecent(refreshed, refreshed.cache)).toBe(true)
+    expect(liveCatalogIsAtLeastAsRecent(cached, refreshed.cache)).toBe(false)
+  })
+
+  it.each(['scheduled', 'joined', 'deferred'] as const)(
+    'keeps the live %s status when observations are equal',
+    (refreshStatus) => {
+      expect(liveCatalogIsAtLeastAsRecent({ ...cached, refreshStatus }, cached.cache)).toBe(true)
+    }
+  )
+
+  it('uses the installation until a live response exists and handles missing observations', () => {
+    const unavailableCache = { ...cached.cache, status: 'unavailable' as const, observedAt: null }
+    const unavailable = { ...cached, cache: unavailableCache }
+    expect(liveCatalogIsAtLeastAsRecent(null, cached.cache)).toBe(false)
+    expect(liveCatalogIsAtLeastAsRecent(unavailable, cached.cache)).toBe(false)
+    expect(liveCatalogIsAtLeastAsRecent(refreshed, unavailableCache)).toBe(true)
+    expect(liveCatalogIsAtLeastAsRecent(unavailable, unavailableCache)).toBe(true)
+  })
+})
 
 describe('member runtime parameters', () => {
   it('presents a superseded refresh as a temporary Runtime update, not a failure', () => {
