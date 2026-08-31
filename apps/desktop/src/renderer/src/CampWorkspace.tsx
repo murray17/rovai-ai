@@ -4,6 +4,7 @@ import { createPortal } from 'react-dom'
 import * as Dialog from '@radix-ui/react-dialog'
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
 import { CampDetailPopover } from './CampDetailPopover'
+import { CampMemberFastToggle } from './CampMemberFastToggle'
 import type {
   ActionApprovalView,
   AdapterInstallation,
@@ -14,12 +15,14 @@ import type {
   AgentRunView,
   BuiltinMemberAvatarRole,
   CampComposerDraftView,
+  CampPendingInputsView,
   CampComposerReplyRecipient,
   CampMessageAttachmentView,
   CampMessageAroundSnapshot,
   CampMessageFindSnapshot,
   CampMessageView,
   CampMemberRemovalPreview,
+  CampMemberFastView,
   CampOpenCollectionCoverage,
   CampOpenMessageCoverage,
   CampOpenProjection,
@@ -37,6 +40,7 @@ import type {
 } from '@contracts'
 import { EmptyInline } from './ui-elements'
 import { StructuredMentionComposer } from './StructuredMentionComposer'
+import { PendingCampInputs, pendingQueueRequiresEnqueue } from './PendingCampInputs'
 import {
   activityStatusForAgentRun,
   agentRunPresentation,
@@ -388,6 +392,7 @@ export function agentRunRuntimeModelPresentation(
 }
 
 export type CampMessageSendReceipt = {
+  pendingInputId?: string
   campTurnId: string | null
   agentRunIds: string[]
   addressedAgentIds: string[]
@@ -1269,6 +1274,9 @@ export function CampWorkspace({
   const filePreview = useOptionalFilePreview()
   const [messageContent, setMessageContent] = useState<StructuredCampMessageContent>([])
   const [composerDraft, setComposerDraft] = useState<CampComposerDraftView | null>(null)
+  const [pendingQueue, setPendingQueue] = useState<CampPendingInputsView | null>(null)
+  const [pendingEditing, setPendingEditing] = useState(false)
+  const [pendingRefresh, setPendingRefresh] = useState(0)
   const [preparingAttachments, setPreparingAttachments] = useState<Array<{ id: string; name: string; kind: AttachmentKind }>>([])
   const [failedAttachments, setFailedAttachments] = useState<Array<{ id: string; name: string; kind: AttachmentKind; error: string }>>([])
   const [attachmentDragState, setAttachmentDragState] = useState<AttachmentDragKind | null>(null)
@@ -1382,6 +1390,7 @@ export function CampWorkspace({
   })
   const [resolvingRecoveryBlockerId, setResolvingRecoveryBlockerId] = useState<string | null>(null)
   const [submittedExecutionRequest, setSubmittedExecutionRequest] = useState<CampMessageSendReceipt | null>(null)
+  const publishedMessageSequence = snapshot.messages.reduce((latest, message) => Math.max(latest, message.sequence), 0)
   const executionDrawerTriggerRef = useRef<HTMLButtonElement | null>(null)
   const executionDrawerReturnAgentIdRef = useRef<string | null>(null)
   const bottomPlacementButtonRef = useRef<HTMLButtonElement>(null)
@@ -1765,6 +1774,11 @@ export function CampWorkspace({
   )
   const activeRuns = snapshot.agentRuns.filter((run) => NON_TERMINAL_RUNS.has(run.status))
   const executionBlocked = activeRuns.length > 0 || stopping
+  const showComposerStop = executionBlocked && message.trim().length === 0
+  const requiresQueue = pendingQueueRequiresEnqueue(
+    pendingQueue?.campId === snapshot.camp.id ? pendingQueue : null, executionBlocked
+  )
+  const queueAttachmentsBlocked = requiresQueue && hasReadyAttachment
   const composerSendDisabled = composerSendIsDisabled({
     hasSendablePayload,
     hasUnavailableMention,
@@ -1776,7 +1790,7 @@ export function CampWorkspace({
     composerDraftAvailable: composerDraft !== null,
     preparingAttachmentCount: preparingAttachments.length,
     failedAttachmentCount: failedAttachments.length
-  })
+  }) || queueAttachmentsBlocked
   const executionDrawerProcess = executionDrawerAgentId
     ? executionProcessByAgentId.get(executionDrawerAgentId) ?? null
     : null
@@ -1912,6 +1926,26 @@ export function CampWorkspace({
     replyAnchorLoads.current.set(messageId, request)
     return request
   }, [snapshot.camp.id])
+
+  useEffect(() => {
+    if (!composerDraft || hasLocalDraftPayload || composerSubmitting || routingMutating) return
+    const campId = snapshot.camp.id
+    let cancelled = false
+    // Pending publication bypasses submitMessage. Refresh Core's route projection
+    // when a message enters the conversation, without replacing the local editor.
+    void (async () => {
+      await draftMutationQueues.current.get(campId)
+      if (cancelled) return
+      const current = composerDraftRef.current
+      const content = draftContent.current
+      const refreshed = await window.rovai.request<CampComposerDraftView>('camp.composerDraft.get', { campId })
+      if (cancelled || draftCampId.current !== campId
+        || composerDraftRef.current !== current || draftContent.current !== content
+        || draftSaveTimer.current !== null || draftMutationQueues.current.has(campId)) return
+      applyComposerDraft(campId, refreshed)
+    })().catch(() => { /* Keep the current Draft; the next publication or Draft mutation refreshes it. */ })
+    return () => { cancelled = true }
+  }, [snapshot.camp.id, publishedMessageSequence, composerDraft !== null, hasLocalDraftPayload, composerSubmitting, routingMutating])
 
   useEffect(() => {
     const missingReplyIds = new Set(visibleCampMessages.flatMap((message) => {
@@ -2330,6 +2364,10 @@ export function CampWorkspace({
     message: CampMessageView,
     modality: ReplyFocusModality
   ): Promise<void> => {
+    if (pendingEditing) {
+      onNotify?.('请先保存或取消待发送消息的编辑，再回复另一条消息。')
+      return
+    }
     if (message.id.startsWith('optimistic:') || routingMutating) return
     setRoutingMutating(true)
     setReplyInteractionError(null)
@@ -2481,6 +2519,8 @@ export function CampWorkspace({
   useEffect(() => {
     const campId = snapshot.camp.id
     let cancelled = false
+    setPendingEditing(false)
+    setPendingQueue(null)
     conversationFindRequestGeneration.current += 1
     if (conversationFindDebounceTimer.current !== null) {
       window.clearTimeout(conversationFindDebounceTimer.current)
@@ -2943,8 +2983,7 @@ export function CampWorkspace({
 
   const submitMessage = async (): Promise<void> => {
     if (
-      executionBlocked
-      || composerSendDisabled
+      pendingEditing || composerSendDisabled
     ) return
     const campId = snapshot.camp.id
     followTimelineAfterUserSend(campId)
@@ -3010,6 +3049,7 @@ export function CampWorkspace({
       }
     } finally {
       setComposerSubmitting(false)
+      setPendingRefresh((value) => value + 1)
       if (restoreEditorFocus) {
         window.requestAnimationFrame(() => composerEditorRef.current?.focus())
       }
@@ -3033,6 +3073,10 @@ export function CampWorkspace({
   }
 
   const prepareFiles = async (inputs: AttachmentPreparationInput[]): Promise<void> => {
+    if (pendingEditing || requiresQueue) {
+      onNotify?.('待发送消息暂不支持附件，请在队列结束后添加。')
+      return
+    }
     const campId = snapshot.camp.id
     const pending = inputs.map(({ file, kindHint }, index) => ({
       id: crypto.randomUUID(),
@@ -3115,7 +3159,7 @@ export function CampWorkspace({
   const attachmentDropBlocked = attachmentDropIsBlocked({
     executionDrawerPresent: Boolean(executionDrawerProcess),
     mentionPopoverPresent: Boolean(mentionPopover)
-  })
+  }) || pendingEditing || requiresQueue
 
   const enterAttachmentDropSurface = (event: ReactDragEvent<HTMLElement>): void => {
     const kind = attachmentDragKind(event.dataTransfer)
@@ -4014,7 +4058,7 @@ export function CampWorkspace({
               />
             </section>
             <section className="camp-detail-content tab-scroll camp-members-panel" hidden={inspectorSurfaceTab !== 'members'}>
-              {inspectorSurfaceTab === 'members' && <CampMembersPanel
+              {inspectorSurfaceTab === 'members' && <CampMembersPanel key={snapshot.camp.id}
                 snapshot={snapshot}
                 profileById={profileById}
                 installations={installations}
@@ -4106,6 +4150,14 @@ export function CampWorkspace({
           }
         }}
       >
+        <PendingCampInputs key={snapshot.camp.id} campId={snapshot.camp.id}
+          refreshKey={snapshot.throughGlobalSequence + pendingRefresh}
+          members={composerMembers} skills={composerSkills} skillCatalogStatus={composerSkillCatalog.status}
+          stopping={stopping} onStop={onStop} onQueueChange={setPendingQueue} onEditingChange={(editing) => {
+            setPendingEditing(editing)
+            if (!editing && pendingEditing) requestAnimationFrame(() => composerEditorRef.current?.focus())
+          }} />
+        <div hidden={pendingEditing}>
         {(continuationVisible && continuationIntent) || (
           composerDraft
           && recipientSummary
@@ -4348,7 +4400,7 @@ export function CampWorkspace({
                 type="button"
                 aria-label="添加文件"
                 title="添加文件"
-                disabled={busy || composerSubmitting || routingMutating}
+                disabled={busy || composerSubmitting || routingMutating || requiresQueue}
                 onClick={() => composerFileInputRef.current?.click()}
               >
                 <svg aria-hidden="true" viewBox="0 0 18 18">
@@ -4357,7 +4409,9 @@ export function CampWorkspace({
               </button>
             </div>
             <div className="composer-actions">
-              {!executionBlocked && (
+              {queueAttachmentsBlocked
+                ? <span className="pending-input-attachment-notice">暂不支持排队附件，草稿已保留。</span>
+                : !executionBlocked && (
                 <span className="composer-hint">
                   <span className="sr-only">Enter 发送，Shift+Enter 换行</span>
                   <span className="composer-hint-visual" aria-hidden="true">
@@ -4369,29 +4423,21 @@ export function CampWorkspace({
                   </span>
                 </span>
               )}
-              {executionBlocked
-                ? (
-                    <button
-                      className="danger-button composer-stop"
-                      type="button"
-                      aria-label={stopping ? '正在停止当前执行' : '停止当前执行'}
-                      onClick={onStop}
-                      disabled={stopping || activeRuns.length === 0}
-                    >
-                      {stopping ? '正在停止…' : '停止'}
-                    </button>
-                  )
-                : (
-                    <button
-                      className="primary-button composer-send"
-                      type="submit"
-                      disabled={composerSendDisabled}
-                    >
-                      {busy || composerSubmitting ? '发送中…' : preparingAttachments.length > 0 ? '处理中…' : '发送'}
-                    </button>
-                  )}
+              <button
+                className={showComposerStop ? 'danger-button composer-stop' : 'primary-button composer-send'}
+                type={showComposerStop ? 'button' : 'submit'}
+                aria-label={showComposerStop ? (stopping ? '正在停止当前执行' : '停止当前执行') : undefined}
+                onClick={showComposerStop ? onStop : undefined}
+                disabled={showComposerStop ? stopping || activeRuns.length === 0 : composerSendDisabled}
+                aria-busy={showComposerStop
+                  ? stopping
+                  : Boolean(busy || composerSubmitting || preparingAttachments.length > 0)}
+              >
+                {showComposerStop ? (stopping ? '正在停止…' : '停止') : '发送'}
+              </button>
             </div>
           </div>
+        </div>
         </div>
           </form>
         </div>
@@ -5674,6 +5720,57 @@ function CampMembersPanel({
   onRemoveMember?(preview: CampMemberRemovalPreview): Promise<CampMemberRemoveOutcome>
   onNotify(message: string): void
 }): JSX.Element {
+  const [fastOverrides, setFastOverrides] = useState<Record<string, CampMemberFastView | null>>({})
+  const [fastPending, setFastPending] = useState<string | null>(null)
+  const fastPendingRef = useRef(false)
+  const fastBindingGeneration = useRef(0)
+  const fastBindingScope = JSON.stringify([snapshot.camp.id, snapshot.camp.projectPath,
+    snapshot.members.map(member => [member.agentId, member.membershipStatus,
+      member.fast?.runtimeBindingRevision, profileById.get(member.agentId)?.runtimeConfiguration])])
+  const [costConfirmation, setCostConfirmation] = useState<{ agentId: string; value: CampMemberFastView; trigger: HTMLButtonElement } | null>(null)
+  const costConfirmRef = useRef<HTMLButtonElement>(null)
+  useEffect(() => { setFastOverrides({}) }, [snapshot])
+  useLayoutEffect(() => { fastBindingGeneration.current += 1; setFastOverrides({}) }, [fastBindingScope])
+  useEffect(() => { costConfirmRef.current?.focus() }, [costConfirmation])
+  const saveFast = async (agentId: string, value: CampMemberFastView, fastOverride: boolean | null): Promise<void> => {
+    if (fastPendingRef.current) return
+    fastPendingRef.current = true
+    const generation = fastBindingGeneration.current
+    setFastPending(agentId)
+    try {
+      const result = await window.rovai.request<StoredCommandResult>('camps.members.fast.set', {
+        commandId: crypto.randomUUID(),
+        command: { campId: snapshot.camp.id, agentId, expectedRuntimeBindingRevision: value.runtimeBindingRevision, fastOverride }
+      })
+      if (result.status === 'rejected') throw new Error('队员配置已变化，请重新检测响应模式。')
+      if (generation !== fastBindingGeneration.current) return
+      const updated = result.payload as { fast?: CampMemberFastView | null }
+      setFastOverrides(current => ({ ...current, [agentId]: updated.fast ?? null }))
+      const running = snapshot.agentRuns.some(run => run.agentId === agentId && ['running', 'waiting'].includes(run.status))
+      onNotify(running ? '当前执行不会改变，后续执行将使用新设置' : fastOverride === null ? '已恢复默认响应模式' : '已保存，后续执行将使用新设置')
+    } catch (error) {
+      onNotify(readErrorMessage(error, '响应模式未保存，请重试。'))
+    } finally { fastPendingRef.current = false; setFastPending(null) }
+  }
+  const checkFast = async (agentId: string): Promise<void> => {
+    if (fastPendingRef.current) return
+    fastPendingRef.current = true
+    const generation = fastBindingGeneration.current
+    setFastPending(agentId)
+    try {
+      const value = await window.rovai.request<CampMemberFastView | null>('camps.members.fast.check', { campId: snapshot.camp.id, agentId })
+      if (generation !== fastBindingGeneration.current) return
+      setFastOverrides(current => ({ ...current, [agentId]: value }))
+      onNotify(value ? '响应模式检测完成' : '当前账号、模型或 Agent 运行时版本不支持此 Fast 设置。')
+    } catch { onNotify('暂时无法检测响应模式，请重试。') }
+    finally { fastPendingRef.current = false; setFastPending(null) }
+  }
+  const requestFast = (agentId: string, value: CampMemberFastView, next: boolean, trigger: HTMLButtonElement): void => {
+    let acknowledged = false
+    try { acknowledged = localStorage.getItem('rovai.camp-fast-cost-ack.v1') === 'true' } catch { /* Retain a safe confirmation when storage is unavailable. */ }
+    if (next && !acknowledged) { setCostConfirmation({ agentId, value, trigger }); return }
+    void saveFast(agentId, value, next)
+  }
   const members = campInspectorMembers(snapshot.members)
   const presentCount = members.filter(campMemberIsLeadEligible).length
   const awayCount = members.length - presentCount
@@ -5879,6 +5976,21 @@ function CampMembersPanel({
         </div>
       </div>
 
+      {costConfirmation && <div className="camp-fast-cost-confirmation" role="group" aria-label="确认 Fast 用量">
+        <p>Fast 可能增加费用或更快消耗用量；Claude Code 也可能切换到支持 Fast 的模型。</p>
+        <button className="quiet-button compact" type="button" ref={costConfirmRef} onClick={() => {
+          const confirmation = costConfirmation
+          try { localStorage.setItem('rovai.camp-fast-cost-ack.v1', 'true') } catch { /* Confirmation still applies to this click. */ }
+          setCostConfirmation(null)
+          confirmation.trigger.focus({ preventScroll: true })
+          void saveFast(confirmation.agentId, confirmation.value, true)
+        }}>确认开启</button>
+        <button className="quiet-button compact" type="button" onClick={() => {
+          costConfirmation.trigger.focus({ preventScroll: true })
+          setCostConfirmation(null)
+        }}>取消</button>
+      </div>}
+
       {snapshot.membershipReconciliations.map((reconciliation) => {
         const displayName = profileById.get(reconciliation.agentId)?.displayName ?? '已移出队员'
         return (
@@ -5895,6 +6007,11 @@ function CampMembersPanel({
       <div className="camp-inspector-member-list" role="list" aria-label="会话队员列表">
         {members.map((member) => {
           const profile = profileById.get(member.agentId) ?? null
+          const supportsFastCheck = profile?.runtimeConfiguration?.adapterKind === 'claude-code-cli'
+            || profile?.runtimeConfiguration?.adapterKind === 'codex-cli'
+          const fast = supportsFastCheck
+            ? Object.hasOwn(fastOverrides, member.agentId) ? fastOverrides[member.agentId] : member.fast
+            : undefined
           const present = campMemberIsLeadEligible(member)
           const presenceLabel = member.leaveRequestedAt
             ? '正在暂离'
@@ -5916,7 +6033,7 @@ function CampMembersPanel({
           const runtimeDetailsOpen = expandedRuntimeAgentIds.has(member.agentId)
           const runtimeDetailsId = `camp-member-runtime-${member.agentId}`
           return (
-            <article className={`camp-inspector-member-row ${present ? '' : 'is-away'}`} role="listitem" key={member.agentId}>
+            <article className={`camp-inspector-member-row ${fast ? 'has-fast' : ''} ${present ? '' : 'is-away'}`} role="listitem" key={member.agentId}>
               <span className="camp-inspector-member-avatar">
                 <MemberAvatar agentId={member.agentId} avatarRef={member.avatarRef} displayName={member.displayName} size="list" decorative />
               </span>
@@ -5927,6 +6044,9 @@ function CampMembersPanel({
                 </span>
                 <small title={member.teamRole || undefined}>{runtimeLabel}</small>
               </span>
+              {fast && <CampMemberFastToggle value={fast} displayName={member.displayName} pending={fastPending !== null}
+                runtimeName={profile?.runtimeConfiguration?.adapterKind === 'claude-code-cli' ? 'Claude Code' : 'Codex'}
+                onToggle={(next, trigger) => requestFast(member.agentId, fast, next, trigger)} />}
               <span className={`camp-inspector-member-state ${present ? '' : 'is-away'}`}>
                 <strong>{presenceLabel}</strong>
                 {runtimeTone === 'attention' && profile && <small className="runtime-attention">{runtimeReadinessLabel(profile.runtimeReadiness.status)}</small>}
@@ -5974,6 +6094,18 @@ function CampMembersPanel({
                       <small>{runtimeConfiguration ? runtimeLabel : '请先配置 Agent 运行时'}</small>
                     </DropdownMenu.Item>
                     <DropdownMenu.Separator className="camp-member-menu-separator" />
+                    {supportsFastCheck && <>
+                      <DropdownMenu.Item className="camp-member-menu-item" disabled={fastPending !== null}
+                        onSelect={() => { void checkFast(member.agentId) }}>
+                        <strong>{fastPending === member.agentId ? '正在检测响应模式…' : '检测响应模式'}</strong>
+                        <small>检查原生账号和能力，不发起模型请求</small>
+                      </DropdownMenu.Item>
+                      {fast && <DropdownMenu.Item className="camp-member-menu-item" disabled={fastPending !== null || fast.fastOverride === null}
+                        onSelect={() => { void saveFast(member.agentId, fast, null) }}>
+                        <strong>恢复默认响应模式</strong>
+                      </DropdownMenu.Item>}
+                      <DropdownMenu.Separator className="camp-member-menu-separator" />
+                    </>}
                     <DropdownMenu.Item
                       className="camp-member-menu-item is-danger"
                       disabled={members.length <= 1 || !onRemoveMember}

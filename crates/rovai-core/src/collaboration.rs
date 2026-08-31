@@ -43,6 +43,7 @@ use crate::{
         CommitManagedAttachmentIngest, ManagedAttachmentIngestSource, ManagedAttachmentService,
     },
     message_delivery::cancel_pending_turn_deliveries,
+    pending_camp_input::{self, SendPendingCampInputCommand},
     runtime::AgentRunWorkspace,
 };
 
@@ -616,7 +617,26 @@ impl CollaborationService {
                 execution: envelope.payload.execution.clone(),
             },
         };
-        self.send_user_camp_draft(database, &command)
+        // This fixture constructs already-admitted messages for scheduler and
+        // historical migration owners. Composer admission is exercised through
+        // the production send entry point in pending_camp_input::tests.
+        self.execute_user_camp_message(
+            database,
+            &command,
+            &command.payload,
+            UserCampMessageAttachmentCommit {
+                legacy_publication_operation_id: None,
+                managed_ingest_intent_id: None,
+                source: UserCampMessageSource::FixtureComposer,
+            },
+            |transaction| {
+                load_structured_draft_submission(
+                    transaction,
+                    &command.payload.camp_id,
+                    command.payload.draft_revision,
+                )
+            },
+        )
     }
 
     #[cfg(all(test, feature = "slow-tests"))]
@@ -2546,7 +2566,7 @@ impl CollaborationService {
             UserCampMessageAttachmentCommit {
                 legacy_publication_operation_id: None,
                 managed_ingest_intent_id: managed_attachment_ingest_intent_id,
-                consume_composer_draft: true,
+                source: UserCampMessageSource::Composer,
             },
             |transaction| {
                 load_structured_draft_submission(
@@ -2572,7 +2592,7 @@ impl CollaborationService {
             UserCampMessageAttachmentCommit {
                 legacy_publication_operation_id: attachment_publication_operation_id,
                 managed_ingest_intent_id: None,
-                consume_composer_draft: true,
+                source: UserCampMessageSource::Composer,
             },
             |transaction| {
                 load_structured_draft_submission(
@@ -2620,7 +2640,7 @@ impl CollaborationService {
             UserCampMessageAttachmentCommit {
                 legacy_publication_operation_id: None,
                 managed_ingest_intent_id: None,
-                consume_composer_draft: false,
+                source: UserCampMessageSource::Automation,
             },
             move |transaction| {
                 let camp_exists = transaction
@@ -2842,6 +2862,68 @@ impl CollaborationService {
         }))
     }
 
+    pub fn send_pending_camp_input(
+        &self,
+        database: &mut Database,
+        envelope: &CommandEnvelope<SendPendingCampInputCommand>,
+    ) -> Result<CommandExecution> {
+        let result = (|| {
+            let pending = pending_camp_input::load_input(
+                database.connection(),
+                &envelope.payload.pending_input_id,
+                &envelope.payload.camp_id,
+            )?;
+            if envelope.actor
+                != (ActorRef::User {
+                    user_id: pending.user_id.clone(),
+                })
+            {
+                anyhow::bail!("Pending input must publish as its original user");
+            }
+            let command = SendUserCampDraftCommand {
+                camp_id: envelope.payload.camp_id.clone(),
+                draft_revision: envelope.payload.expected_revision,
+                execution: pending.execution,
+            };
+            self.execute_user_camp_message(
+                database,
+                envelope,
+                &command,
+                UserCampMessageAttachmentCommit {
+                    legacy_publication_operation_id: None,
+                    managed_ingest_intent_id: None,
+                    source: UserCampMessageSource::Pending(&envelope.payload),
+                },
+                |transaction| {
+                    let current = pending_camp_input::load_input(
+                        transaction,
+                        &envelope.payload.pending_input_id,
+                        &command.camp_id,
+                    )?;
+                    load_structured_content_submission(
+                        transaction,
+                        &command.camp_id,
+                        current.content,
+                        current.reply_to_camp_message_id,
+                        current.recipient_selection_required,
+                        Vec::new(),
+                    )
+                },
+            )
+        })();
+        if result.is_err() {
+            // The failed message transaction rolled back. Keep the input for explicit repair.
+            let transaction = database.connection_mut().transaction()?;
+            pending_camp_input::record_publish_failure(
+                &transaction,
+                &envelope.payload,
+                "pending_input.send_failed",
+            )?;
+            transaction.commit()?;
+        }
+        result
+    }
+
     fn execute_user_camp_message<C, Prepare>(
         &self,
         database: &mut Database,
@@ -2864,8 +2946,56 @@ impl CollaborationService {
             .as_ref()
             .map(|_| Uuid::new_v4().to_string());
         self.gateway.execute(database, envelope, |transaction| {
+            if let UserCampMessageSource::Pending(pending) = attachment_commit.source
+                && let Some(result) = pending_camp_input::publish_admission(transaction, pending)?
+            {
+                return Ok(result);
+            }
+            if matches!(attachment_commit.source, UserCampMessageSource::Composer)
+                && pending_camp_input::must_queue(transaction, &command.camp_id)?
+            {
+                let ActorRef::User { user_id } = &envelope.actor else {
+                    return Ok(rejected(
+                        "pending_input.user_required",
+                        "Only a User can queue Camp input",
+                    ));
+                };
+                if !actor_can_write_camp(
+                    transaction,
+                    &envelope.actor,
+                    envelope.execution_epoch,
+                    &command.camp_id,
+                )? {
+                    return Ok(rejected(
+                        "camp.write_forbidden",
+                        "Actor cannot write to this Camp",
+                    ));
+                }
+                let has_attachments: bool = transaction.query_row(
+                    "SELECT EXISTS(SELECT 1 FROM prepared_attachment WHERE camp_id = ?1)",
+                    [&command.camp_id],
+                    |row| row.get(0),
+                )?;
+                if has_attachments {
+                    return Ok(rejected(
+                        "pending_input.attachments_unsupported",
+                        "当前版本暂不支持排队附件；草稿和附件已保留，请等待队列结束后发送。",
+                    ));
+                }
+                return match prepare(transaction)? {
+                    Ok(submission) => pending_camp_input::insert_input(
+                        transaction,
+                        &command.camp_id,
+                        &submission.structured_content,
+                        submission.reply_to_camp_message_id.as_deref(),
+                        &command.execution,
+                        user_id,
+                    ),
+                    Err(rejection) => Ok(rejection),
+                };
+            }
             let prepared = prepare(transaction)?;
-            match prepared {
+            let result = match prepared {
                 Ok(submission) => (|| -> Result<CommandHandlerResult> {
                     let camp_exists = transaction
                         .query_row(
@@ -3003,7 +3133,7 @@ impl CollaborationService {
                                 .legacy_publication_operation_id,
                             managed_attachment_ingest_intent_id: attachment_commit
                                 .managed_ingest_intent_id,
-                            consume_composer_draft: attachment_commit.consume_composer_draft,
+                            consume_composer_draft: attachment_commit.source.consumes_composer(),
                             draft_revision: command.draft_revision,
                             address_mode: submission.address.mode(),
                             reply_to_camp_message_id: submission
@@ -3024,6 +3154,14 @@ impl CollaborationService {
                                 .then(|| submission.generated_camp_name.clone()),
                         },
                     )?;
+                    if let UserCampMessageSource::Pending(pending) = attachment_commit.source {
+                        pending_camp_input::record_published(
+                            transaction,
+                            &pending.pending_input_id,
+                            &camp_message_id,
+                            camp_turn_id.as_deref(),
+                        )?;
+                    }
                     let result_payload = json!({
                         "campMessageId": camp_message_id,
                         "sequence": queued.camp_sequence,
@@ -3058,7 +3196,13 @@ impl CollaborationService {
                     }
                 })(),
                 Err(rejection) => Ok(rejection),
+            }?;
+            if let UserCampMessageSource::Pending(pending) = attachment_commit.source
+                && result.status == crate::command::CommandResultStatus::Rejected
+            {
+                pending_camp_input::record_publish_failure(transaction, pending, &result.code)?;
             }
+            Ok(result)
         })
     }
 }
@@ -3102,7 +3246,27 @@ struct PreparedAgentRunConfig {
 struct UserCampMessageAttachmentCommit<'a> {
     legacy_publication_operation_id: Option<&'a str>,
     managed_ingest_intent_id: Option<&'a str>,
-    consume_composer_draft: bool,
+    source: UserCampMessageSource<'a>,
+}
+
+#[derive(Debug, Clone, Copy)]
+enum UserCampMessageSource<'a> {
+    Composer,
+    Automation,
+    Pending(&'a SendPendingCampInputCommand),
+    #[cfg(test)]
+    FixtureComposer,
+}
+
+impl UserCampMessageSource<'_> {
+    fn consumes_composer(self) -> bool {
+        match self {
+            Self::Composer => true,
+            #[cfg(test)]
+            Self::FixtureComposer => true,
+            _ => false,
+        }
+    }
 }
 
 struct CampMessageSubmission {
@@ -3203,30 +3367,6 @@ fn load_structured_draft_submission(
             "Camp Composer Draft no longer matches the requested Revision",
         )));
     }
-    if recipient_required {
-        return Ok(Err(rejected(
-            "reply_recipient_required",
-            "Reply author is unavailable; choose an explicit replacement recipient",
-        )));
-    }
-    if let Some(reply_id) = &reply_to_camp_message_id {
-        let reply_is_available: bool = transaction.query_row(
-            r#"
-            SELECT EXISTS(
-                SELECT 1 FROM camp_message
-                WHERE id = ?1 AND camp_id = ?2 AND tombstoned_at IS NULL
-            )
-            "#,
-            params![reply_id, camp_id],
-            |row| row.get(0),
-        )?;
-        if !reply_is_available {
-            return Ok(Err(rejected(
-                "camp_message.invalid_reply",
-                "Reply target is outside the Camp or no longer available",
-            )));
-        }
-    }
 
     let mut content = normalize_content(
         serde_json::from_str::<StructuredCampMessageContent>(&content_json)
@@ -3276,6 +3416,62 @@ fn load_structured_draft_submission(
         }
         materialize_leading_member_mention(&mut content, continuation_agent_id);
     }
+    let prepared_attachment_ids = {
+        let mut statement = transaction.prepare(
+            r#"
+            SELECT id
+            FROM prepared_attachment
+            WHERE camp_id = ?1 AND state = 'ready'
+            ORDER BY ordinal, id
+            "#,
+        )?;
+        statement
+            .query_map([camp_id], |row| row.get::<_, String>(0))?
+            .collect::<rusqlite::Result<Vec<_>>>()?
+    };
+    load_structured_content_submission(
+        transaction,
+        camp_id,
+        content,
+        reply_to_camp_message_id,
+        recipient_required,
+        prepared_attachment_ids,
+    )
+}
+
+fn load_structured_content_submission(
+    transaction: &Transaction<'_>,
+    camp_id: &str,
+    content: StructuredCampMessageContent,
+    reply_to_camp_message_id: Option<String>,
+    recipient_required: bool,
+    prepared_attachment_ids: Vec<String>,
+) -> Result<std::result::Result<CampMessageSubmission, CommandHandlerResult>> {
+    if recipient_required {
+        return Ok(Err(rejected(
+            "reply_recipient_required",
+            "Reply author is unavailable; choose an explicit replacement recipient",
+        )));
+    }
+    if let Some(reply_id) = &reply_to_camp_message_id {
+        let reply_is_available: bool = transaction.query_row(
+            r#"
+            SELECT EXISTS(
+                SELECT 1 FROM camp_message
+                WHERE id = ?1 AND camp_id = ?2 AND tombstoned_at IS NULL
+            )
+            "#,
+            params![reply_id, camp_id],
+            |row| row.get(0),
+        )?;
+        if !reply_is_available {
+            return Ok(Err(rejected(
+                "camp_message.invalid_reply",
+                "Reply target is outside the Camp or no longer available",
+            )));
+        }
+    }
+
     let mentioned_agent_ids = member_mention_ids(&content);
     let mut member_names = BTreeMap::new();
     for agent_id in &mentioned_agent_ids {
@@ -3300,19 +3496,6 @@ fn load_structured_draft_submission(
         );
     }
     let body = render_plain_text(&content, |agent_id| member_names.get(agent_id).cloned())?;
-    let prepared_attachment_ids = {
-        let mut statement = transaction.prepare(
-            r#"
-            SELECT id
-            FROM prepared_attachment
-            WHERE camp_id = ?1 AND state = 'ready'
-            ORDER BY ordinal, id
-            "#,
-        )?;
-        statement
-            .query_map([camp_id], |row| row.get::<_, String>(0))?
-            .collect::<rusqlite::Result<Vec<_>>>()?
-    };
     if body.trim().is_empty() && prepared_attachment_ids.is_empty() {
         return Ok(Err(rejected(
             "camp_message.empty_body",

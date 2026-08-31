@@ -713,6 +713,7 @@ pub struct CodexRuntime {
     host: Arc<CodexHost>,
     thread_id: RwLock<Option<String>>,
     observed_model_id: RwLock<Option<String>>,
+    thread_service_tier: RwLock<Option<String>>,
     action_items: Mutex<HashMap<String, Value>>,
     streamed_agent_text: Mutex<String>,
     completed_agent_message: RwLock<Option<String>>,
@@ -776,6 +777,7 @@ impl CodexRuntime {
             host,
             thread_id: RwLock::new(None),
             observed_model_id: RwLock::new(None),
+            thread_service_tier: RwLock::new(None),
             action_items: Mutex::new(HashMap::new()),
             streamed_agent_text: Mutex::new(String::new()),
             completed_agent_message: RwLock::new(None),
@@ -912,6 +914,10 @@ impl CodexRuntime {
         self.host.bind_thread(&thread_id, &self.owner).await?;
         *self.thread_id.write().await = Some(thread_id.clone());
         *self.observed_model_id.write().await = observed_model_id;
+        *self.thread_service_tier.write().await = result
+            .get("serviceTier")
+            .and_then(Value::as_str)
+            .map(str::to_owned);
         Ok(thread_id)
     }
 
@@ -920,6 +926,7 @@ impl CodexRuntime {
         text: &str,
         model: Option<&str>,
         reasoning_effort: Option<&str>,
+        service_tier_for_turn: Option<&str>,
     ) -> Result<String> {
         self.streamed_agent_text.lock().await.clear();
         *self.completed_agent_message.write().await = None;
@@ -928,7 +935,13 @@ impl CodexRuntime {
             .thread_id()
             .await
             .context("Codex thread is not ready")?;
-        let request = turn_start_request(&thread_id, text, model, reasoning_effort);
+        let request = turn_start_request(
+            &thread_id,
+            text,
+            model,
+            reasoning_effort,
+            service_tier_for_turn,
+        );
         let result = self
             .host
             .rpc_start_turn(&thread_id, &self.owner, request)
@@ -939,6 +952,61 @@ impl CodexRuntime {
             .context("Codex turn response did not include turn.id")?
             .to_string();
         Ok(turn_id)
+    }
+
+    pub async fn fast_eligibility(
+        &self,
+        cwd: &Path,
+        model: Option<&str>,
+    ) -> Result<rovai_core::camp_fast::NativeFastEligibility> {
+        if crate::health::custom_fast_environment(AdapterKind::CodexCli) {
+            return Ok(rovai_core::camp_fast::NativeFastEligibility::default());
+        }
+        let account = self
+            .rpc("account/read", json!({"refreshToken": false}))
+            .await?;
+        let config = self
+            .rpc("config/read", json!({"cwd": cwd, "includeLayers": true}))
+            .await?;
+        let mut models = Vec::new();
+        let mut cursor: Option<String> = None;
+        for _ in 0..100 {
+            let page = self
+                .rpc(
+                    "model/list",
+                    json!({"includeHidden": true, "limit": 100, "cursor": cursor}),
+                )
+                .await?;
+            models.extend(
+                page.get("data")
+                    .and_then(Value::as_array)
+                    .context("model/list omitted data")?
+                    .iter()
+                    .cloned(),
+            );
+            cursor = page
+                .get("nextCursor")
+                .and_then(Value::as_str)
+                .map(str::to_owned);
+            if cursor.is_none() {
+                let observed_model = self.observed_model_id().await;
+                let mut eligibility = rovai_core::camp_fast::codex_eligibility(
+                    &account,
+                    &config,
+                    &json!({"data": models}),
+                    model.or(observed_model.as_deref()),
+                );
+                if let Some(tier) = self.thread_service_tier.read().await.as_deref() {
+                    eligibility.runtime_default_fast = match tier {
+                        "priority" | "fast" => Some(true),
+                        "default" | "standard" => Some(false),
+                        _ => None,
+                    };
+                }
+                return Ok(eligibility);
+            }
+        }
+        anyhow::bail!("model/list exceeded pagination limit")
     }
 
     pub async fn interrupt(&self) -> Result<()> {
@@ -1109,6 +1177,10 @@ impl CodexRuntime {
     #[cfg(test)]
     pub async fn process_id(&self) -> Option<u32> {
         self.host.child.lock().await.id()
+    }
+
+    pub fn camp_id(&self) -> Option<&str> {
+        self.camp_id.as_deref()
     }
 
     fn belongs_to_camp(&self, camp_id: &str) -> bool {
@@ -1556,6 +1628,7 @@ fn turn_start_request(
     text: &str,
     model: Option<&str>,
     reasoning_effort: Option<&str>,
+    service_tier_for_turn: Option<&str>,
 ) -> Value {
     let mut request = json!({
         "threadId": thread_id,
@@ -1563,6 +1636,9 @@ fn turn_start_request(
         "input": [{"type": "text", "text": text}],
         "summary": "auto"
     });
+    if let Some(tier) = service_tier_for_turn {
+        request["serviceTierForTurn"] = json!(tier);
+    }
     if let Some(model) = model {
         request
             .as_object_mut()
@@ -2392,6 +2468,7 @@ while IFS= read -r ignored; do :; done
         )
         .unwrap();
         let runtime_config = FrozenAgentRuntimeConfig {
+            camp_fast: None,
             adapter_kind: AdapterKind::CodexCli,
             installation_id: "smoke".to_string(),
             installation_generation: 1,
@@ -2496,7 +2573,7 @@ while IFS= read -r ignored; do :; done
                     .is_some_and(|source| source.ends_with("/AGENTS.md")))
         );
         let native_turn_id = first
-            .start_turn_with_config("Reply exactly: session-persisted", None, None)
+            .start_turn_with_config("Reply exactly: session-persisted", None, None, None)
             .await
             .unwrap();
         timeout(Duration::from_secs(180), async {
@@ -3066,11 +3143,23 @@ while IFS= read -r ignored; do :; done
             "inspect the project",
             Some("gpt-5.6"),
             Some("high"),
+            None,
         );
         assert_eq!(request["threadId"], "thread-1");
         assert_eq!(request["summary"], "auto");
         assert_eq!(request["model"], "gpt-5.6");
         assert_eq!(request["effort"], "high");
+        for tier in [None, Some("priority"), Some("default")] {
+            let request = turn_start_request("thread-1", "next", None, None, tier);
+            assert_eq!(
+                request.get("serviceTierForTurn").and_then(Value::as_str),
+                tier
+            );
+            assert!(
+                request.get("serviceTier").is_none(),
+                "A turn override must never mutate thread defaults"
+            );
+        }
     }
 
     #[test]

@@ -118,6 +118,10 @@ migrated identity；未知 identity 永远阻断。真实子进程强杀测试�
 渠道分支的完整 migration chain 同样经过上述准入与副本路径。已支持的旧飞书 marker collision 仍要求精确 schema
 证据才能取得 migration ticket，并且只在 staging copy 内修正；当前渠道合同不会因合并较旧主线而被降级或视为未知。
 
+主线 Pending/Fast 与渠道的 117/118 编号冲突按 [Channel/Main Schema Join v1](../contracts/channel-main-schema-join-v1.md)
+汇合：保留已安装渠道顺序，把精确识别的旧主线 receipt 在副本内映射到 126/127，128 只在两侧 schema 全部完成后
+发布新 marker。原 main 来源不能仅凭版本字符串准入，也不能为了消除编号冲突清空凭据、队列或 Fast 选择。
+
 ## Supervisor and request fencing
 
 每个 spawn 获得单调 generation 和不可复用 child token。所有 pending request、stdout line、event、process error 与

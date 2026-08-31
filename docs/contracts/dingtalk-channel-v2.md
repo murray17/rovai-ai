@@ -271,4 +271,4 @@ Outbox、Context 或 Attachment。旧 Feishu rows 通过 directory view 原样�
 - [钉钉渠道架构](../architecture/dingtalk-channel.md)
 - [Camp Membership v1](camp-membership-v1.md)
 - [ContextManifest Evidence v22](context-manifest-evidence-v22.md)
-- [v1.34 决策记录](../versions/v1.34/decisions.md)
+- [v1.36 决策记录](../versions/v1.36/decisions.md)

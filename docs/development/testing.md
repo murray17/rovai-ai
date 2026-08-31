@@ -208,6 +208,11 @@ pnpm test:composer-input
 验证可见正文、受控草稿值、焦点及页面存活。夹具隔离 `userData`，不启动 Core 或调用模型；不能用静态
 Markup 测试替代。无显示器 Linux 使用 `xvfb-run -a pnpm test:composer-input`，同一 CI 工作流覆盖相关改动。
 
+Composer 续发目标的发布时点与草稿保护运行 `pnpm test:composer-continuation`。夹具在隔离 Electron 中挂载生产
+`CampWorkspace`，提供受控 Core 投影，验证入队不改址、正式发布即刷新而不等待 Run 结束，以及迟到读取、
+已有正文/附件/显式接收者、冻结来源和切换 Camp 的保护。它不启动 Core 或真实 Runtime，不能代替 Core 路由
+计算与队列调度验收；Linux CI 使用 `xvfb-run -a pnpm test:composer-continuation`。
+
 ### Core 可选功能启动回归
 
 涉及 `run_core()` ready 边界、可选初始化或功能重试时，运行：
@@ -315,6 +320,11 @@ Team Case 可在密封 manifest 中声明 `collaboration` 合同。Runner 将它
 中更新本表。
 
 ## UI 验收命令
+
+`pnpm test:camp-fast-layout` 使用生产 CampWorkspace/CSS 的独立 Electron fixture，无需打包或 Core。
+关闭的模拟 API 只提供成员偏好与 Draft；临时 userData 与日常 App 完全分离，不调用模型。
+它拥有 Fast 的 1280×720/窄屏/大屏布局、日夜主题、键盘焦点、失败保留、首次用量确认、冷却与恢复默认。
+`ROVAI_KEEP_FAST_FIXTURE=1` 保留本次临时截图供排错；成功默认自动清理。Linux CI 通过 `xvfb-run -a` 执行。
 
 以下命令使用已打包 App 和隔离 `userData`，不调用模型：
 

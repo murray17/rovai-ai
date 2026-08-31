@@ -1111,51 +1111,145 @@ mod tests {
 
     #[test]
     fn supported_database_is_migrated_on_a_copy_and_atomically_readmitted() {
-        let directory =
-            std::env::temp_dir().join(format!("rovai-authority-migration-test-{}", Uuid::new_v4()));
-        let database = crate::test_support::fresh_schema_database_fast_at(&directory);
-        database
-            .connection()
-            .execute(
-                "UPDATE agent_profile SET display_name = '迁移保留值' WHERE id = 'agent_1'",
-                [],
-            )
-            .unwrap();
-        crate::db::downgrade_current_schema_to_v115_source_for_test(database.connection());
-        let runtime_root = database.runtime_camp_files_root().to_path_buf();
-        let runtime_root_identity = database
-            .runtime_camp_files_root_identity_digest()
-            .to_string();
-        drop(database);
+        for source in ["v115", "channel_v125", "main_pending", "main_fast"] {
+            let directory = std::env::temp_dir()
+                .join(format!("rovai-authority-migration-test-{}", Uuid::new_v4()));
+            let mut database = crate::test_support::fresh_schema_database_fast_at(&directory);
+            database
+                .connection()
+                .execute(
+                    "UPDATE agent_profile SET display_name = '迁移保留值' WHERE id = 'agent_1'",
+                    [],
+                )
+                .unwrap();
+            database.connection().execute_batch(r#"
+            INSERT INTO camp(id, title, project_binding_kind, project_path, default_lead_agent_id,
+                last_message_sequence, version, created_at, updated_at)
+            VALUES ('camp-join', 'kept Camp', 'directory', '/tmp', 'agent_1', 0, 1, datetime('now'), datetime('now'));
+            INSERT INTO camp_composer_draft(camp_id, body, structured_content_json, revision, created_at, updated_at, expires_at)
+            VALUES ('camp-join', 'kept draft', '[{"kind":"text","text":"kept draft"}]', 7, datetime('now'), datetime('now'), datetime('now', '+1 day'));
+        "#).unwrap();
+            match source {
+                "v115" => crate::db::downgrade_current_schema_to_v115_source_for_test(
+                    database.connection(),
+                ),
+                "channel_v125" => {
+                    crate::db::downgrade_current_schema_to_v125_source_for_test(
+                        database.connection(),
+                    );
+                    database.connection().execute_batch(r#"
+                    INSERT INTO channel_credentials(credential_ref, provider, credential_kind, remote_app_id,
+                        payload_json, revision, created_at, updated_at)
+                    VALUES ('fixture-ref', 'feishu', 'member_bot', 'fixture-app', '{"fixture":"kept credential"}', 4, 1, 2);
+                    INSERT INTO channel_developer_sessions(provider, account_id, identity_json, session_json,
+                        revision, created_at, updated_at)
+                    VALUES ('dingtalk', 'fixture-account', '{"fixture":"identity"}', '{"fixture":"kept session"}', 5, 1, 2);
+                "#).unwrap();
+                }
+                "main_pending" | "main_fast" => {
+                    crate::db::downgrade_current_schema_to_main_camp_source_for_test(
+                        &mut database,
+                        source == "main_fast",
+                    );
+                    database.connection().execute_batch(r#"
+                    INSERT INTO pending_camp_input(id, camp_id, enqueue_sequence, revision, structured_content_json,
+                        execution_json, user_id, created_at, updated_at)
+                    VALUES ('pending-join', 'camp-join', 1, 3, '[{"kind":"text","text":"kept queued input"}]',
+                        '{"purpose":"fixture","completionRole":"required"}', 'fixture-owner', datetime('now'), datetime('now'));
+                "#).unwrap();
+                    if source == "main_fast" {
+                        database.connection().execute_batch(r#"
+                        INSERT INTO camp_member_fast_preference(camp_id, agent_id, runtime_binding_revision,
+                            fast_override, cwd, executable_fingerprint, eligible)
+                        SELECT 'camp-join', id, runtime_binding_revision, 1, '/tmp', 'fixture-fingerprint', 1
+                        FROM agent_profile WHERE id = 'agent_1';
+                    "#).unwrap();
+                    }
+                }
+                _ => unreachable!(),
+            }
+            let runtime_root = database.runtime_camp_files_root().to_path_buf();
+            let runtime_root_identity = database
+                .runtime_camp_files_root_identity_digest()
+                .to_string();
+            drop(database);
 
-        let lease = CoreDataDirLease::acquire(&directory).unwrap();
-        let AdmissionAssessment::RequiresMigration(ticket) =
-            DatabaseAdmission::assess(&lease).unwrap()
-        else {
-            panic!("supported historical contract must produce a migration ticket");
-        };
-        let migrated =
-            AuthorityMigrationRunner::run(*ticket, &runtime_root, &runtime_root_identity).unwrap();
-        crate::test_support::assert_production_database_configuration(&migrated);
-        assert!(matches!(
-            classify_database_contract(migrated.connection()).unwrap(),
-            DatabaseContractClassification::Current(_)
-        ));
-        let display_name: String = migrated
-            .connection()
-            .query_row(
-                "SELECT display_name FROM agent_profile WHERE id = 'agent_1'",
-                [],
-                |row| row.get(0),
-            )
-            .unwrap();
-        assert_eq!(display_name, "迁移保留值");
-        assert!(!directory.join(AUTHORITY_MIGRATION_MANIFEST_FILE).exists());
-        assert!(directory.join(MIGRATION_BACKUP_ROOT).is_dir());
+            let lease = CoreDataDirLease::acquire(&directory).unwrap();
+            let AdmissionAssessment::RequiresMigration(ticket) =
+                DatabaseAdmission::assess(&lease).unwrap()
+            else {
+                panic!("supported historical contract must produce a migration ticket");
+            };
+            let migrated =
+                AuthorityMigrationRunner::run(*ticket, &runtime_root, &runtime_root_identity)
+                    .unwrap();
+            crate::test_support::assert_production_database_configuration(&migrated);
+            assert!(matches!(
+                classify_database_contract(migrated.connection()).unwrap(),
+                DatabaseContractClassification::Current(_)
+            ));
+            let display_name: String = migrated
+                .connection()
+                .query_row(
+                    "SELECT display_name FROM agent_profile WHERE id = 'agent_1'",
+                    [],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(display_name, "迁移保留值", "{source}");
+            let draft: (String, i64) = migrated
+                .connection()
+                .query_row(
+                    "SELECT body, revision FROM camp_composer_draft WHERE camp_id = 'camp-join'",
+                    [],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                )
+                .unwrap();
+            assert_eq!(draft, ("kept draft".to_string(), 7), "{source}");
+            if source == "channel_v125" {
+                let credential: (String, i64) = migrated.connection().query_row(
+                "SELECT payload_json, revision FROM channel_credentials WHERE credential_ref = 'fixture-ref'",
+                [], |row| Ok((row.get(0)?, row.get(1)?)),
+            ).unwrap();
+                assert_eq!(
+                    credential,
+                    (r#"{"fixture":"kept credential"}"#.to_string(), 4)
+                );
+                let session: (String, i64) = migrated.connection().query_row(
+                "SELECT session_json, revision FROM channel_developer_sessions WHERE provider = 'dingtalk'",
+                [], |row| Ok((row.get(0)?, row.get(1)?)),
+            ).unwrap();
+                assert_eq!(session, (r#"{"fixture":"kept session"}"#.to_string(), 5));
+            }
+            if source.starts_with("main_") {
+                let pending: (String, i64) = migrated.connection().query_row(
+                "SELECT structured_content_json, revision FROM pending_camp_input WHERE id = 'pending-join'",
+                [], |row| Ok((row.get(0)?, row.get(1)?)),
+            ).unwrap();
+                assert_eq!(
+                    pending,
+                    (
+                        r#"[{"kind":"text","text":"kept queued input"}]"#.to_string(),
+                        3
+                    )
+                );
+            }
+            if source == "main_fast" {
+                let retained: bool = migrated.connection().query_row(
+                "SELECT fast_override = 1 AND f.runtime_binding_revision = a.runtime_binding_revision
+                 FROM camp_member_fast_preference f JOIN agent_profile a ON a.id = f.agent_id
+                 WHERE f.camp_id = 'camp-join' AND f.agent_id = 'agent_1'",
+                [], |row| row.get(0),
+            ).unwrap();
+                assert!(retained);
+            }
+            assert!(!directory.join(AUTHORITY_MIGRATION_MANIFEST_FILE).exists());
+            assert!(directory.join(MIGRATION_BACKUP_ROOT).is_dir());
 
-        drop(migrated);
-        drop(lease);
-        std::fs::remove_dir_all(directory).unwrap();
+            drop(migrated);
+            drop(lease);
+            std::fs::remove_dir_all(directory).unwrap();
+        }
     }
 
     #[test]

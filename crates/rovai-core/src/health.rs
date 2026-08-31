@@ -2294,6 +2294,129 @@ pub async fn codex_model_catalog(path: &Path) -> Result<Value> {
     }
 }
 
+/// Metadata-only checks, invoked by the Runtime Check Manager or the admitted Run.
+/// Do not persist raw account/config responses (they may contain personal data).
+pub async fn claude_fast_eligibility(
+    runtime: &rovai_core::agent_profile::FrozenAgentRuntimeConfig,
+    cwd: &Path,
+) -> Result<rovai_core::camp_fast::NativeFastEligibility> {
+    use rovai_core::camp_fast::{NativeFastEligibility, claude_fast_version_supported};
+    if !claude_fast_version_supported(runtime.reported_version.as_deref())
+        || custom_fast_environment(AdapterKind::ClaudeCodeCli)
+    {
+        return Ok(NativeFastEligibility::default());
+    }
+    claude_fast_auth(Path::new(&runtime.executable_path), cwd).await
+}
+
+async fn claude_fast_auth(
+    path: &Path,
+    cwd: &Path,
+) -> Result<rovai_core::camp_fast::NativeFastEligibility> {
+    use rovai_core::camp_fast::{NativeFastEligibility, claude_subscription_auth};
+    let mut command = runtime_command(path);
+    command.args(["auth", "status"]).current_dir(cwd);
+    let output = bounded_output(&mut command, Duration::from_secs(15)).await?;
+    let eligible = output.status.success()
+        && serde_json::from_slice::<Value>(&output.stdout.bytes)
+            .is_ok_and(|status| claude_subscription_auth(&status));
+    Ok(NativeFastEligibility {
+        eligible,
+        runtime_default_fast: None,
+    })
+}
+
+pub fn custom_fast_environment(kind: AdapterKind) -> bool {
+    let keys: &[&str] = match kind {
+        AdapterKind::ClaudeCodeCli => &[
+            "ANTHROPIC_API_KEY",
+            "ANTHROPIC_AUTH_TOKEN",
+            "ANTHROPIC_BASE_URL",
+            "CLAUDE_CODE_USE_BEDROCK",
+            "CLAUDE_CODE_USE_VERTEX",
+            "CLAUDE_CODE_USE_FOUNDRY",
+            "CLAUDE_CODE_USE_AWS",
+            "CLAUDE_CODE_DISABLE_FAST_MODE",
+        ],
+        AdapterKind::CodexCli => &["OPENAI_API_KEY", "OPENAI_BASE_URL", "CODEX_API_KEY"],
+        _ => return true,
+    };
+    keys.iter()
+        .any(|key| env::var_os(key).is_some_and(|value| !value.is_empty() && value != "0"))
+}
+
+pub async fn codex_fast_eligibility(
+    runtime: &rovai_core::agent_profile::FrozenAgentRuntimeConfig,
+    cwd: &Path,
+) -> Result<rovai_core::camp_fast::NativeFastEligibility> {
+    use rovai_core::camp_fast::{CODEX_FAST_TURN_CAPABILITY, NativeFastEligibility};
+    if !runtime
+        .capabilities
+        .iter()
+        .any(|capability| capability == CODEX_FAST_TURN_CAPABILITY)
+        || custom_fast_environment(AdapterKind::CodexCli)
+    {
+        return Ok(NativeFastEligibility::default());
+    }
+    codex_fast_metadata(
+        Path::new(&runtime.executable_path),
+        cwd,
+        (runtime.model.source == "explicit").then_some(runtime.model.model_id.as_str()),
+    )
+    .await
+}
+
+async fn codex_fast_metadata(
+    path: &Path,
+    cwd: &Path,
+    explicit_model: Option<&str>,
+) -> Result<rovai_core::camp_fast::NativeFastEligibility> {
+    use rovai_core::camp_fast::codex_eligibility;
+    let mut command = runtime_command(path);
+    command
+        .args(["app-server", "--listen", "stdio://"])
+        .current_dir(cwd);
+    let mut process = RuntimeProbeProcess::spawn(
+        &mut command,
+        ACP_STDOUT_LIMIT,
+        DEFAULT_CAPTURE_LIMIT,
+        DEFAULT_LINE_LIMIT,
+        DEFAULT_CLEANUP_TIMEOUT,
+    )?;
+    let result = {
+        let (stdin, lines) = process.split_io()?;
+        timeout(Duration::from_secs(30), async {
+            write_json_line(stdin, &json!({"id": 1, "method": "initialize", "params": {
+                "clientInfo": {"name": "rovai_fast_check", "version": env!("CARGO_PKG_VERSION")},
+                "capabilities": {"experimentalApi": true}
+            }})).await?;
+            read_rpc_result(lines, 1).await?;
+            write_json_line(stdin, &json!({"method": "initialized", "params": {}})).await?;
+            write_json_line(stdin, &json!({"id": 2, "method": "account/read", "params": {"refreshToken": false}})).await?;
+            let account = read_rpc_result(lines, 2).await?;
+            write_json_line(stdin, &json!({"id": 3, "method": "config/read", "params": {"cwd": cwd, "includeLayers": true}})).await?;
+            let config = read_rpc_result(lines, 3).await?;
+            let mut models = Vec::new();
+            let mut cursor: Option<String> = None;
+            for id in 4..104 {
+                write_json_line(stdin, &json!({"id": id, "method": "model/list", "params": {
+                    "cursor": cursor, "includeHidden": true, "limit": 100
+                }})).await?;
+                let page = read_rpc_result(lines, id).await?;
+                models.extend(page.get("data").and_then(Value::as_array).context("model/list omitted data")?.iter().cloned());
+                cursor = page.get("nextCursor").and_then(Value::as_str).map(str::to_owned);
+                if cursor.is_none() {
+                    return Ok(codex_eligibility(&account, &config, &json!({"data": models}),
+                        explicit_model));
+                }
+            }
+            bail!("model/list exceeded pagination limit")
+        }).await.context("Fast metadata check timed out")?
+    };
+    process.finish().await?;
+    result
+}
+
 async fn write_json_line(stdin: &mut ManagedChildStdin, value: &Value) -> Result<()> {
     stdin
         .write_all(serde_json::to_string(value)?.as_bytes())
@@ -2547,6 +2670,7 @@ async fn probe_initialize_handshake(path: &Path) -> Result<()> {
 async fn probe_schema_capabilities(path: &Path) -> Result<(Vec<String>, Vec<String>)> {
     let schema_dir =
         env::temp_dir().join(format!("rovai-codex-schema-probe-{}", uuid::Uuid::new_v4()));
+    let _cleanup = ProbeRootCleanup(schema_dir.clone());
     let mut command = runtime_command(path);
     command
         .args(["app-server", "generate-json-schema", "--out"])
@@ -2561,23 +2685,49 @@ async fn probe_schema_capabilities(path: &Path) -> Result<(Vec<String>, Vec<Stri
         let _ = std::fs::remove_dir_all(&schema_dir);
         bail!(detail);
     }
-    let result = detect_schema_capabilities(&schema_dir).map(|(mut capabilities, mut missing)| {
-        let correlation_present = [
-            "v2/ThreadStartResponse.json",
-            "v2/TurnStartResponse.json",
-            "v2/ItemStartedNotification.json",
-        ]
-        .iter()
-        .all(|relative| schema_dir.join(relative).is_file());
-        if correlation_present {
-            capabilities.push("correlation.thread_turn_item".into());
-        } else {
-            missing.push("correlation.thread_turn_item".into());
+    let (mut capabilities, mut missing) = detect_schema_capabilities(&schema_dir)?;
+    let correlation_present = [
+        "v2/ThreadStartResponse.json",
+        "v2/TurnStartResponse.json",
+        "v2/ItemStartedNotification.json",
+    ]
+    .iter()
+    .all(|relative| schema_dir.join(relative).is_file());
+    if correlation_present {
+        capabilities.push("correlation.thread_turn_item".into());
+    } else {
+        missing.push("correlation.thread_turn_item".into());
+    }
+    let mut supports_fast_turn = schema_supports_codex_fast_turn(&schema_dir);
+    if !supports_fast_turn {
+        // Some versions export optional turn fields only with --experimental. A failed
+        // optional export must not downgrade the existing Product Runtime capabilities.
+        let experimental_dir = schema_dir.join("experimental");
+        let mut command = runtime_command(path);
+        command
+            .args([
+                "app-server",
+                "generate-json-schema",
+                "--experimental",
+                "--out",
+            ])
+            .arg(&experimental_dir);
+        if let Ok(output) = bounded_output(&mut command, Duration::from_secs(5)).await {
+            supports_fast_turn =
+                output.status.success() && schema_supports_codex_fast_turn(&experimental_dir);
         }
-        (capabilities, missing)
-    });
-    let _ = std::fs::remove_dir_all(&schema_dir);
-    result
+    }
+    if supports_fast_turn {
+        capabilities.push(rovai_core::camp_fast::CODEX_FAST_TURN_CAPABILITY.into());
+    }
+    Ok((capabilities, missing))
+}
+
+fn schema_supports_codex_fast_turn(schema_dir: &Path) -> bool {
+    std::fs::read(schema_dir.join("v2/TurnStartParams.json"))
+        .ok()
+        .and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok())
+        .is_some_and(|schema| schema.pointer("/properties/serviceTierForTurn").is_some())
 }
 
 fn detect_schema_capabilities(schema_dir: &Path) -> Result<(Vec<String>, Vec<String>)> {
@@ -2903,6 +3053,81 @@ mod tests {
     use super::*;
     use rovai_core::agent_runtime_adapter::{AcpProbeObservation, AgentRuntimeAdapterRegistry};
     use std::{fs, os::unix::fs::PermissionsExt, time::Instant};
+
+    #[tokio::test]
+    async fn native_fast_checks_use_the_selected_executable_and_execution_directory() {
+        let directory =
+            env::temp_dir().join(format!("rovai-fast-metadata-{}", uuid::Uuid::new_v4()));
+        let _cleanup = ProbeRootCleanup(directory.clone());
+        let cwd = directory.join("actual workspace 中文");
+        fs::create_dir_all(&cwd).unwrap();
+        let executable = directory.join("selected-runtime");
+        fs::write(&executable, r#"#!/bin/sh
+printf '%s\n' "$PWD" > native-cwd
+printf '%s\n' "$@" > native-argv
+if [ "$1:$2" = 'auth:status' ]; then
+  printf '%s\n' '{"loggedIn":true,"authMethod":"claude.ai","apiProvider":"firstParty","subscriptionType":"max"}'
+  exit 0
+fi
+while IFS= read -r request; do
+  printf '%s\n' "$request" >> native-requests
+  case "$request" in
+    *'"method":"initialize"'*) printf '%s\n' '{"id":1,"result":{}}' ;;
+    *'"method":"account/read"'*) printf '%s\n' '{"id":2,"result":{"account":{"type":"chatgpt"}}}' ;;
+    *'"method":"config/read"'*) printf '%s\n' '{"id":3,"result":{"config":{"model":"selected-model","service_tier":"priority"}}}' ;;
+    *'"cursor":"next"'*) printf '%s\n' '{"id":5,"result":{"data":[{"id":"selected-model","serviceTiers":[{"id":"priority"}],"defaultServiceTier":"default"}],"nextCursor":null}}' ;;
+    *'"method":"model/list"'*) printf '%s\n' '{"id":4,"result":{"data":[],"nextCursor":"next"}}' ;;
+  esac
+done
+"#).unwrap();
+        fs::set_permissions(&executable, fs::Permissions::from_mode(0o700)).unwrap();
+        assert!(claude_fast_auth(&executable, &cwd).await.unwrap().eligible);
+        assert_eq!(
+            fs::read_to_string(cwd.join("native-argv")).unwrap(),
+            "auth\nstatus\n"
+        );
+        let eligibility = codex_fast_metadata(&executable, &cwd, None).await.unwrap();
+        assert!(eligibility.eligible);
+        assert_eq!(
+            eligibility.runtime_default_fast,
+            Some(true),
+            "effective project config wins over model default"
+        );
+        let native_cwd = fs::read_to_string(cwd.join("native-cwd")).unwrap();
+        assert_eq!(
+            Path::new(native_cwd.trim()).canonicalize().unwrap(),
+            cwd.canonicalize().unwrap()
+        );
+        assert_eq!(
+            fs::read_to_string(cwd.join("native-argv")).unwrap(),
+            "app-server\n--listen\nstdio://\n"
+        );
+        let requests: Vec<Value> = fs::read_to_string(cwd.join("native-requests"))
+            .unwrap()
+            .lines()
+            .map(|line| serde_json::from_str(line).unwrap())
+            .collect();
+        let methods: Vec<_> = requests
+            .iter()
+            .map(|request| request["method"].as_str().unwrap())
+            .collect();
+        assert_eq!(
+            methods,
+            [
+                "initialize",
+                "initialized",
+                "account/read",
+                "config/read",
+                "model/list",
+                "model/list"
+            ]
+        );
+        assert_eq!(requests[2]["params"]["refreshToken"], false);
+        assert_eq!(
+            requests[3]["params"],
+            json!({"cwd": cwd, "includeLayers": true})
+        );
+    }
 
     #[tokio::test]
     async fn git_health_uses_only_a_resolved_absolute_executable() {
@@ -3741,6 +3966,18 @@ printf '%s\n' "$resume" >> "$request_log"
         assert!(capabilities.contains(&"workspace.additional_roots".to_string()));
         assert!(missing.contains(&"approval.file_request".to_string()));
         assert!(!missing.contains(&"approval.command_request".to_string()));
+        fs::create_dir_all(directory.join("v2")).unwrap();
+        for (fields, expected) in [
+            (json!({"serviceTier": {"type": "string"}}), false),
+            (json!({"serviceTierForTurn": {"type": "string"}}), true),
+        ] {
+            fs::write(
+                directory.join("v2/TurnStartParams.json"),
+                json!({"properties": fields}).to_string(),
+            )
+            .unwrap();
+            assert_eq!(schema_supports_codex_fast_turn(&directory), expected);
+        }
         std::fs::remove_dir_all(directory).expect("temporary schema directory should be removed");
     }
 }

@@ -131,5 +131,5 @@ stop 或替换后的迟到 callback 不进入 Core。Robot/Card handler 仍先 A
 
 - [钉钉渠道架构](../architecture/dingtalk-channel.md)
 - [Channel Storage v2](channel-storage-v2.md)
-- [V1.34-D05](../versions/v1.34/decisions.md#v1-34-d05)
+- [V1.36-D05](../versions/v1.36/decisions.md#v1-36-d05)
 - [本地验收边界](../development/local-workflow.md#钉钉-web-session-验收前置)

@@ -1,134 +1,109 @@
 ---
 document_type: implementation-plan
 version: v1.33
-authority: implementation-and-acceptance-status
+lifecycle: current
+authority: implementation-status
 status: completed
-last_updated: 2026-08-29
+last_updated: 2026-08-31
 ---
 
-# v1.33 实施计划
+# v1.33 实施与验收
 
-## 实施步骤
+基线：`4e796bdedcbe771a2cd0f7ce083703e0db16cafb`。在隔离 worktree 的
+`codex/pending-camp-input-v1` 分支实现；不覆盖日常 App 或生产 userData。
 
-- [x] 从固定 revision `f588c773c2652a9e78887a31d17de8ed37524bb0` 建立独立 worktree，并先提交 Rovai
-  风格的渠道设置 foundation；
-- [x] 完成 Migration 113 与 ExternalPrincipal author/Context 22 pairing；完成 Migration 114/115，以及 Migration 116、
-  Data Contract v1.28/schema 69、真实 Developer Identity、publication intent、Owner identity 与 PendingCampBinding；
-- [x] 以 existing directory Camp 投影 Project Catalog，删除 Channel 人工 ProjectBinding/bind/switch；完成 DM Quick Chat
-  generation、私聊限定 `/new`、群/话题 immutable project Camp 与 frozen pending-message FIFO；
-- [x] 删除 controller App 账号模型；完成 Developer Web Session、真实 user/tenant 回读、safeStorage Cookie jar、
-  identity drift/expiry fail-closed、切换账号的临时 Session/成功后替换/失败保留旧登录态，以及断开不删除 Bot credential；
-- [x] 完成 Web Session MemberBotProvisioner、Session cookie/CSRF console bootstrap、OpenPlatformApiClient 创建/
-  配置/发布/回读、发布无 Renderer QR/飞书确认页、旧 registration Provisioner/确认窗口/API 全量退役、持久 publication intent、
-  release 错误后的 published read-back、unknown remote 防重复、冻结 App 显式核对接管和多 WebSocket Host/启动恢复；
-- [x] 把首次创建收敛为固定模板优先、仅明确 non-creation rejection 才 self-build fallback；以
-  `publicationIntentId` correlation，并在任何后续 mutation 前 await Core App-ID durable barrier；
-- [x] 先启用 Bot 并发布/复用 `1.0.0` activation，再由唯一配置入口并行读取 Scope/Event/Callback/Manifest、按确定顺序
-  提交全部 mutation，并在一个 120 秒 deadline 中逐轮并行回读；Manifest 最多读写一次，同次 final verify 复用可信
-  convergence state，按真实 mutation 决定是否发布下一 patch，并在 crash/retry 中复用已存在版本；
-- [x] 只有无可信 App ID 的 create outcome unknown 进入 `failed_unknown_remote_state`；冻结 App 的 Event/Scope/Version/
-  credential/连接失败进入 `failed_recoverable`，在线配置核验与真正 WebSocket connect 分离为八阶段进度；
-- [x] 普通发布解析并上传 exact 队员受控头像；无引用才回退 Rovai icon，冻结 `1.0.0` App 可在显式核对中发布幂等
-  `1.0.1` 头像修复版本且不创建第二个 App；
-- [x] 把消息权限、Event 与 Callback readiness 从 Manifest 自证切到开放平台在线 API：补齐 P2P/group-at scopes、
-  `eventMode=4`、receive/roster events、发布后在线回读和同一冻结 App 的下一 patch 修复；
-- [x] 增加脱敏的 WebSocket、SDK policy、message normalized 与 handler accepted/rejected 分层诊断；SDK 无归一化前
-  raw hook 时不伪造 raw-event 日志；
-- [x] Core publication 状态机永久冻结每名队员的 App ID；完成后重复发布拒绝，历史 disabled 与凭据恢复只重开同一 intent、
-  核对同一 App，不存在换绑或第二次创建；
-- [x] 完成 p2p/group/topic identity、显式 mention gate、多 Bot collecting/finalize/timeout/mismatch；
-- [x] 完成 Owner verify/per-App identity 自动映射 gate、non-owner 零业务事实、canonical-first acknowledgement App、单张
-  原会话项目卡和 callback envelope/external message ID/nonce/version/CAS 重放防护；Non-owner 只收到私有 toast，成功后
-  Core 先消费再 durable recall，项目失效轮换卡片 authority，旧 private picker 在 Host tick 中失权、撤回并重发；Developer Session `tenantId` 与 event `tenant_key`
-  分开处理，发布期先冻结 `(app_id, owner_open_id digest)`，首条匹配的 Owner 事件再冻结 event tenant key；
-  该内部映射不投影为 Owner 待处理的 Renderer 状态；
-- [x] 实测确认飞书个人版入站可只携带 `open_id + union_id`；发布/同 App reconciliation 用各 App credential
-  调用 Application v6 get，以 `user_id_type=open_id` 读取当前 App 不可变 `creator_id`，作为该 App 的
-  `ownerOpenId` 随 Bot binding 原子冻结并以 `(app_id, open_id)` 稳定判断；复用 App 自管理权限而不要求
-  Contact scope 或通讯录读取，只持久化摘要；解析失败不完成发布，入站显示连接异常而非 non-owner；
-- [x] 完成 ChannelTurnRequest 单根 FIFO、统一原子 admission、永久失败/Runtime deferred 与 queue card 更新；
-- [x] 完成 ExternalQuote structured segment、`replyTo=null`、ExternalPrincipal source 与 CURRENT_INPUT v22；
-- [x] 完成父群 authoritative roster、普通群完整 membership，以及 Topic Camp 动态默认协作池：创建时完整 roster 与首轮
-  mention targets 分离，既有 Topic 在下一 AgentRun 前通过 Host generation 门闩同步 add/remove，已运行 Run 不受影响；
-- [x] 完成 ChannelDelivery Outbox、实际作者 Bot、原生 Principal mention、lease/retry/attention 和恢复；
-- [x] 用 Core-owned per-AgentRun execution console 替换用户可见 `agent_status/completion`；Main 与 Renderer 共享公开
-  Evidence 的安全 `publicCommand`、时序和状态。运行中与终态均按序平铺 command，不显示计数摘要或展开/收起动作；工具
-  input/output 与 patch body 不进入飞书。Run 终结后经过 900ms quiet window 固化 `terminal_sealed` snapshot，Core 只授权
-  Owner/App/message/exact sequence/page，无状态翻页由 Main 对原卡单次更新，不写 view state、不排 Outbox；下一条 root
-  admission 仍由原 App durable recall 旧控制台；
-- [x] 把正式 Agent 输出改为无标题永久 Markdown，并将公开 CampMessage 的 Managed Attachment v2 图片/文件按正文后
-  ordinal 原生投递、独立重试和失败 attention 收口；
-- [x] 完成 Preload/Renderer typed API、真实账号投影、唯一账号 QR、Provisioning Dialog、按绑定 brand 的官方应用详情
-  链接与 Rovai 双主题 Bot surface；移除 Project/Conversation、管理和停用命令，只保留安静诊断计数；
-- [x] 完成当前 Architecture、Contracts、UI、Version Decision、Context change 与导航；
-- [x] 运行完整 Rust、TypeScript、文档、Clippy、Desktop build 与 Migration 门禁；
-- [x] 使用隔离 userData 验收渠道设置日/夜主题、键盘、窄窗口和秘密不进入 Renderer；
-- [x] 提交最终实现并记录验证证据；最终 commit identity 由本分支 Git history 固化。
+## 交付项
 
-## 验收原则
+- Core migration 117、FIFO 私有输入、单编辑 token、自动续发与原子发布；
+- Composer 上方等宽队列，编辑复用结构化输入，保留普通草稿；
+- Composer 主操作保持单按钮：忙时无正文显示停止、有正文显示发送，附件边界由 UI 与 Core 共同验证；
+- 无自动重试、无心跳、无 Pending 附件或 Runtime mid-run 能力。
 
-- Feishu Owner 的 ExternalPrincipal 永远不等于 local owner；non-owner 在 observation 前停止且没有业务事实；
-- DM 自动 Quick Chat，`/new` 只支持 Owner 私聊且不进入模型；未绑定群/话题、未 mention、聚合不完整或 roster 不完整
-  都没有 CampMessage/Turn/Run 副作用；
-- 项目卡只含 opaque project ID/可控显示名，并由完整 canonical mention 顺序中的第一个 Bot 唯一投递到原群或原 Topic；
-  callback 只信 envelope identity 与 clicked message ID，Non-owner、旧卡、双击/重放不能改变 pending 或创建第二个 Camp；
-  成功后 Core authority 先失效再异步撤回，项目失效只刷新卡片，不能消费 pending；
-- 同一 Camp queued 请求在前一根 Turn 真正终结前不可进入公共会话；
-- 飞书 reply 只形成当前消息的 ExternalQuote，不产生内部 reply 或第二条 CampMessage；
-- 普通群 roster 与 Topic 动态默认协作池都复用 Camp Membership v1 exact source generation；Topic 创建后完整 roster 不会
-  扩大当前根消息 targets，A2A/Gather/retry/successor 在物化 Run 前必须等待 Host 新 generation。新增 Bot 下一 Run 可用，
-  移出 Bot 下一 Run fail closed，非终态 Run 不被 membership reconciliation 取消；
-- Secret 与 raw Feishu identity 不进入 Renderer/Agent；公开输出只来自 Core 已提交内容；
-- 执行控制台不含 reasoning/thought、tool input/output、stdout/stderr 或完整 patch body，不能覆盖正式正文；运行态和 sealed
-  终态都按序展示同源安全 command，保留 flags、参数和路径，不翻译、不截断。超长 sealed 内容只在同卡无状态分页；只有
-  Owner 能操作 exact App/message/snapshot/page，翻页只更新一次且不产生 Outbox。重启保持 sealed，下一根 Turn admission 后
-  无条件召回；永久正文与附件各有
-  稳定 dedupe，单个附件失败不得重发正文或已成功附件；
-- 连接不调用任何 App 创建接口或写入 App credential；发布不产生 QR/飞书确认页，registration 协议没有实现、API 或
-  交互入口；
-- identity 漂移、Session 失效、完成后重复发布、历史 disabled 恢复与未知远端状态全部 fail closed 或复用冻结 App，不能静默创建第二个 App；
-- 模板 create 的 transport/408/409/429/5xx、code 0 缺 App ID 与 Session 失效都不得 fallback；Core App-ID freeze 未完成时
-  不得读取 Secret、启用 Bot、配置或建版本；
-- App ID 已冻结后的 Event timeout 必须可继续核对同一 App，不能仅因 credential 尚未写入而标成 unknown；
-- Manifest、HTTP 200 与 WebSocket 握手都不能单独证明消息可达；critical scope、event subscription、长连接模式和
-  published version 必须通过在线回读；
-- 已发布 Bot 的本机动作只有跳转官方应用详情；Rovai 不声称可以停用或关闭远端 Bot；
-- 自动化只证明本地状态机和网络边界，不把未执行的真实租户外部效果写成通过。
+## 验证记录
 
-## 验证证据
+2026-08-30，本地功能与自动化验证结果如下；用户验收和主线合入另行记录，不计作已完成。
 
-本地仓库门禁：
+| 检查 | 结果 |
+| --- | --- |
+| `pnpm typecheck` | 通过 |
+| `pnpm test` | 通过；99 个 Vitest 文件、714 项用例，Node 测试 219 通过、1 项 Windows 限定跳过 |
+| `pnpm test:composer-input`、`pnpm test:desktop-bridge` | 通过真实 Electron 输入和 contextBridge 检查 |
+| `cargo fmt --all --check`、`cargo clippy --workspace --all-targets -- -D warnings` | 通过 |
+| `pnpm test:rust:pr` | lib 411、CLI 32、slow 291 项通过 |
+| `pnpm test:rust:core` | 182 项通过，4 项已有忽略项 |
+| `pnpm test:rust:staged` | 暂存真实改动后命中 workspace-default 全量路由，411 + 32 + 182 项通过 |
+| `DOCS_BASE_REF=4e796bdedcbe771a2cd0f7ce083703e0db16cafb pnpm docs:check:ci` | 通过通用文档治理 |
+| `pnpm package:mac`、`node scripts/verify-macos-app.mjs arm64` | arm64 开发包构建和 ad-hoc 签名校验通过 |
 
-- `cargo fmt --all -- --check`；
-- `cargo check --workspace --all-targets`；
-- `cargo clippy --workspace --all-targets --all-features -- -D warnings`；
-- `cargo test -p rovai-core --lib`；
-- `cargo test -p rovai-core --bin rovai`；
-- `cargo test -p rovai-core --bin rovai-core`；
-- Migration 116/119/120/121 upgrade、v118→v120、v119→v120 与 v120→v121 独立兼容、Developer Identity/publication intent、队员 App 身份冻结/历史 disabled 同 App reactivation、Owner-only Channel 状态机、发布期 App-scoped Owner prebinding、DM `/new`、PendingCampBinding、ExternalQuote、Context bytes 与
-  Secret projection、内置/managed 头像解析、正常发布头像传递、冻结 App 头像/readiness 修复、Manifest 假阳性、P2P
-  Scope ID 映射、template-first fallback matrix、durable barrier、activation-first、dynamic patch reuse、Event timeout
-  recoverable、Event/Callback mode fail-closed、原会话 project picker/Non-owner toast/authoritative message ID/旧 private
-  picker 与旧 card revision 已发送原位更新/`format_error` 一次性恢复/durable recall、execution console 完整安全命令/
-  输入输出隔离/terminal pending-sealed/无状态分页/单次 update/Owner 授权/重启恢复/消息身份、永久 Markdown、附件顺序/独立失败
-  、Topic 完整 roster 建 Camp但只启动明确 targets、Host refresh generation 之前不物化内部 Run、Bot 移出后待创建 Run
-  fail closed 且非终态 Run 不取消等定向测试全部通过；
-- `pnpm typecheck`；
-- `pnpm test`；
-- `pnpm build:desktop`；
-- `DOCS_BASE_REF=36f3b53ce1dddfd0e814b91ab1c29417bdc2c681 pnpm docs:check:ci`（本次分支相对 main 基线）。
+真实 Runtime 以打包 Core 运行，7 个场景全部通过：B/C 私有入队；A 结束时编辑 B 阻止 C 越过；
+A→B→C 各发布并执行一次；一次停止在 A 完全停止后自动发出 B；B 执行时 C 仍私有排队；保存编辑不改变位置、不覆盖普通草稿；
+重启保留编辑占用并拒绝旧 token。运行使用独立临时项目、userData、Skill Library 和 MCP config，
+只参考本机生产 Claude Code CLI 的 model/permissions 配置，没有复制生产数据或凭据。
 
-隔离 Desktop 验收使用独立临时 userData 和 `pnpm dev`：
+开发包位于 worktree 的 `dist/mac-arm64/Rovai AI.app`；本机 `dist/启动连续消息开发包.command`
+显式绑定上述隔离验收数据，避免双击 App 使用日常 userData。验收 Camp 与消息为合成数据。
+不把 macOS 本地验证扩展为 Windows 原生或所有 Runtime 的兼容性声明。
 
-- 1440、860、720 三档宽度均无横向溢出；720 下连接区与队员表按既有响应式规则折行；
-- Porcelain Day 与 Steel Night 的层级、颜色、边界、头像和不可用状态均与当前 Rovai 设置页一致；
-- 键盘焦点从“登录开放平台”按 Tab 依次经过可用的发布/继续核对/“飞书管理”动作，Shift+Tab 可逆；
-- 页面没有项目目录、会话绑定、Quick Chat 添加、重命名或归档入口；有异常时只显示 pending/error 诊断计数；
-- Renderer snapshot 与 Preload 不包含 Secret、credential ref、transport conversation 或 pending aggregate。
+UI 收尾按用户提供的 `rovai-message-queue-composer.html` 对齐：继承相同系统字体栈，队列文字
+10.5px、普通行 32px、6px 空心圆点；普通/编辑底色、边框混色和删除悬停色复用交互稿配方，
+同时随现有 day/night token 切换。整行和正文不触发编辑，仅由右侧 24px 小铅笔入口打开；删除独立。
+初版 `dafeb3ac` 的独立界面复核结论为 `ship`；用户随后指出暂停/继续模式与自动续发预期冲突，
+本轮已删除该模式、接口、入口和新库建表，并把提交按钮固定为“发送”。旧开发库的遗留暂停记录不再读取，
+不需要清空验收数据。原队列中的两条输入在新包启动后自动依次发布并各执行一次，后一条 Run 的开始时间
+晚于前一条结束时间；没有点击继续或重写输入。
 
-真实飞书租户的“连接前后 App 数量不变、发布只展示八阶段 Rovai 进度且不出现飞书创建确认页、首次 activation 后
-Event 能在 120 秒窗口内收敛、连续发布两名队员均不
-重新扫码、已发布行跳转绑定 App 的官方详情页、Session 失效不建未知 App、切换账号后旧 Bot 继续运行，以及私聊进入
-`channel.on('message')` 后按未绑定/已绑定路径响应”属于发布环境验收，仍需 Owner 持有可用
-企业权限；还需实测 Owner 私聊自动 Quick Chat、私聊 `/new`、non-owner gate、群/话题原会话单张项目卡、callback
-promotion 与成功撤回。本地自动化没有把这些外部效果伪造为通过。
+本轮重新通过类型检查、前端完整回归、Clippy、staged Rust 全 workspace、Rust PR 门禁、文档门禁、
+arm64 打包和签名检查，以及更新后的 7 个真实 Runtime 场景。验收脚本不再用人工暂停制造队列，
+通过真实运行中的 Turn 覆盖编辑与恢复，结束时不遗留编辑占用。
+移除暂停模式那轮的夜间截图、可访问性树均显示“发送”，队列没有暂停/继续入口。
+完整双主题、尺寸及 200% 缩放矩阵未补齐；最终原生鼠标点击与焦点复验仍受桌面工具故障限制，
+不把这些证据写成全部原生交互已通过。交互稿仍以本地 HTML/CSS 对照，未将历史编辑截图当作最终焦点证据。
+
+后续验收反馈将 Composer 右下角主操作收为一个按钮：运行中无正文（含仅空白字符）时为“停止”，
+有正文时为“发送”，删空恢复停止；空闲时为发送。复用同一个 button 节点并切换 type、事件和禁用状态，
+空输入框按 Enter 仍经既有发送门禁返回，不触发停止；入队和停止后自动续发的 Core 逻辑不变。
+该 Renderer 修正已通过类型检查、完整前端回归及真实 Electron 原生输入组件回归；既有渲染用例同步
+验证运行中/停止中不并列显示发送、终态恢复发送。原生整页鼠标与键盘切换验证仍受上述工具故障限制。
+
+2026-08-31，移除编辑区三处说明：队列下方的等待提示、框内编辑标题/顺序说明、框内本地草稿说明。
+保留编辑行标识、保存/取消、可访问名称及错误/恢复提示；操作按钮继续靠右。不改变 Core 状态机。
+类型检查、`App.test.ts` 147 项、原生 Composer 6 个输入场景、Pending Core 7 项确定性测试均通过。
+本轮 arm64 开发包重新构建、签名检查和启动核对通过；当前验收会话保留原队列、普通草稿、消息和 Run，
+第二位队员芝士已配置并加入会话。更新前的队首编辑继续保留，重开后由用户重新编辑或关闭，不代为提交。
+
+同日扩展既有 opt-in 验收脚本，以相同的 Codex CLI / gpt-5.6-sol / xhigh 配置运行两位队员。
+11 项场景检查通过：指定非队长“芝士”后 B/C/D 的续发目标保持不变；编辑队首时 A 自然完成后仍保留三条私有输入且不启动下一轮；
+取消编辑后发送原版 B，保存编辑后发送修改版 B，随后 C/D 各在前一条结束后执行一次；普通草稿不被覆盖。
+附件在队列非空时被拒绝且保留完整草稿，队列清空后原草稿可发送，芝士实际读出中文文件名附件中的随机校验值。
+既有一次停止后自动推进和重启编辑 token fencing 场景也通过。配置值与 Runtime 上报分开记录：本次 Codex Run 的
+`runtimeModel` 未上报，不用配置推断提供方返回的实际模型。测试使用全新隔离 fixture，不修改用户当前验收 Camp。
+原生 App 点击通道仍返回 `Sky Computer Use native pipe closed before response`，上述结果不等同于完整鼠标/焦点验收。
+
+同日修复队列正式发布后的续发目标刷新：此前普通发送会重新读取 Composer Draft，自动出队只刷新会话，
+导致路由标签滞后。Renderer 现在随公共消息发布重新读取空白 Draft 的 Core 投影，不等待 Run 完成，
+也不以私有入队或执行进度作为改址依据；已有草稿和迟到读取保护不变，没有增加重试或队列状态。
+独立 Electron 中挂载生产 `CampWorkspace` 的 7 个组合场景通过，覆盖出队到非 Lead、下一条回到 Lead、
+迟到读取、正文/附件/显式接收者、冻结来源和切换 Camp。相同夹具加载修复前的已提交组件时，稳定复现
+“B 已公开但仍在运行，续发目标未刷新”的失败。类型检查、既有 147 项 App 测试和 6 个原生输入场景通过。
+此处的受控 Core 投影用于验证 Renderer 时序，不声称新增真实 Runtime 或原生鼠标验收。
+arm64 开发包重建与 ad-hoc 签名检查通过；重建前对同一验收实例备份并核对 43 条公共消息、22 次执行记录，
+当前队列与编辑占用均为空，既有普通草稿和两位队员的 Runtime 配置保持不变。
+
+## 测试准入说明
+
+Pending 模块是队列准入、编辑 fencing 和原子发布的唯一 owner。已有消息和 Runtime 测试没有覆盖
+私有输入跨重启编辑、队首阻塞和 Message/Pending 同事务提交；纯函数不能证明这些 SQLite 边界。
+新增确定性数据库用例分别拥有 FIFO/成功唯一性、编辑重启/token、修复后命令身份、Continuation/Lead
+绑定时机、附件不消费、终态后推进/非终态阻塞与提交回滚。用户验收反馈后移除暂停/继续模式，
+既有停止和回滚测试分别更新为终态自动推进、发布失败需编辑保存；未新增或删除独立测试。
+fixture 使用临时目录，普通测试不启动真实 Runtime。
+最小命令为 `cargo test -p rovai-core --lib pending_camp_input::tests`。Migration 的现有准入矩阵扩展
+v1.29/schema-70 来源，新迁移 owner 验证原数据保留和重开幂等。
+
+已有 Collaboration/Runtime 的测试夹具继续显式构造已准入的公开消息；该入口仅在 `cfg(test)` 下存在。
+新的队列断言走生产 Composer 发送入口，避免把历史消息内核夹具误当作用户正在提交的草稿。
+
+真实 Runtime 验收入口为 `node scripts/accept-pending-camp-input.mjs --core <绝对 Core 路径>`。
+它创建全新的临时 userData、项目、Skill Library 和 MCP config，验证两队员定向续发、文件附件、三条队列的队首编辑、FIFO、停止后自动推进和重启 fencing，
+不加入普通测试门禁。可通过 `--runtime-config <JSON 路径>` 指定 adapterKind、model 和 permissions；配置不应含凭据。
+结果与合成验收 Camp 写入脚本打印的隔离 fixture；结束时不遗留人工暂停或编辑占用，供打包 App 后续验收。

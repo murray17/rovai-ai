@@ -674,6 +674,37 @@ impl MonitoringService {
         Ok(Self::record_usage_batches(database, &[batch])? > 0)
     }
 
+    pub fn record_service_tier(
+        database: &mut Database,
+        execution: &AgentRunExecution,
+        tier: &str,
+        observed: bool,
+    ) -> Result<()> {
+        if execution.runtime.adapter_kind != AdapterKind::CodexCli {
+            return Ok(());
+        }
+        let tier = match tier {
+            "fast" | "priority" => "priority",
+            "standard" | "default" => "default",
+            _ => "unknown",
+        };
+        let (collection_epoch, _) = collection_identity(database)?;
+        let transaction = database.connection_mut().transaction()?;
+        let sql = if observed {
+            "UPDATE runtime_usage_run_summary SET observed_service_tier = ?3 WHERE collection_epoch = ?1 AND agent_run_id = ?2"
+        } else {
+            "UPDATE runtime_usage_run_summary SET service_tier = ?3 WHERE collection_epoch = ?1 AND agent_run_id = ?2"
+        };
+        transaction.execute(sql, params![collection_epoch, execution.agent_run_id, tier])?;
+        project_codex_run_cost(
+            &transaction,
+            &collection_epoch,
+            &RuntimeUsageRun::from_execution(execution),
+        )?;
+        transaction.commit()?;
+        Ok(())
+    }
+
     pub fn record_usage_batches(
         database: &mut Database,
         batches: &[RuntimeUsageFlushBatch],
@@ -1216,7 +1247,7 @@ fn project_codex_run_cost(
     let row = transaction
         .query_row(
             r#"
-            SELECT model_key, service_tier, enrolled_at,
+            SELECT model_key, COALESCE(observed_service_tier, service_tier), enrolled_at,
                    uncached_input_tokens, cache_read_tokens,
                    cache_write_tokens, output_tokens,
                    cost_kind, cost_source
@@ -1270,6 +1301,13 @@ fn project_codex_run_cost(
             output,
         },
     ) else {
+        // A newly observed unknown tier must also withdraw an earlier requested-tier estimate.
+        transaction.execute(
+            "UPDATE runtime_usage_run_summary SET cost_amount_decimal = NULL, cost_currency = NULL,
+                cost_kind = NULL, cost_source = NULL, pricing_catalog_version = NULL
+             WHERE collection_epoch = ?1 AND agent_run_id = ?2 AND cost_kind = 'price_estimated' AND cost_source = 'price_catalog'",
+            params![collection_epoch, run.key.agent_run_id],
+        )?;
         return Ok(());
     };
     transaction.execute(
@@ -3215,7 +3253,7 @@ mod tests {
             runtime_version: Some("codex-cli 0.147.0".to_string()),
             provider_key: Some("openai".to_string()),
             model_key: Some("gpt-5.6-terra".to_string()),
-            service_tier: None,
+            service_tier: Some("default".into()),
         };
         database
             .connection()
@@ -3223,9 +3261,9 @@ mod tests {
                 r#"
                 INSERT INTO runtime_usage_run_summary(
                     collection_epoch, agent_run_id, runtime_kind, runtime_version,
-                    provider_key, model_key, parser_version, eligible_mask,
+                    provider_key, model_key, service_tier, parser_version, eligible_mask,
                     input_semantics, enrolled_at
-                ) VALUES(?1, ?2, 'codex-cli', ?3, 'openai', ?4, ?5, ?6, 'unknown', ?7)
+                ) VALUES(?1, ?2, 'codex-cli', ?3, 'openai', ?4, 'default', ?5, ?6, 'unknown', ?7)
                 "#,
                 params![
                     epoch,
@@ -3282,6 +3320,20 @@ mod tests {
         assert_eq!(cost.2, "price_estimated");
         assert_eq!(cost.3, "price_catalog");
         assert_eq!(cost.4, "openai-api-standard-2026-07-30-gpt-5.6-terra");
+        for (observed, expected) in [
+            (Some("default"), Some(cost.0.clone())),
+            (Some("unknown"), None),
+        ] {
+            let transaction = database.connection_mut().transaction().unwrap();
+            transaction.execute("UPDATE runtime_usage_run_summary SET service_tier = 'priority', observed_service_tier = ?1 WHERE agent_run_id = ?2", params![observed, run.key.agent_run_id]).unwrap();
+            project_codex_run_cost(&transaction, &epoch, &run).unwrap();
+            let amount: Option<String> = transaction.query_row("SELECT cost_amount_decimal FROM runtime_usage_run_summary WHERE agent_run_id = ?1", [&run.key.agent_run_id], |row| row.get(0)).unwrap();
+            assert_eq!(
+                amount, expected,
+                "native fallback/unknown must override the requested Fast price"
+            );
+            transaction.commit().unwrap();
+        }
         drop(database);
         std::fs::remove_dir_all(directory).unwrap();
     }

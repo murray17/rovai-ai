@@ -355,6 +355,23 @@ impl ClaudeCodeCliRuntimeAdapter {
             } else {
                 uuid::Uuid::new_v4().to_string()
             };
+        let fast_override = if let Some(fast) = &request.runtime.camp_fast {
+            let eligibility =
+                crate::health::claude_fast_eligibility(&request.runtime, request.workspace.path())
+                    .await
+                    .unwrap_or_default();
+            if let Some(sender) = &request.runtime_events {
+                let _ = sender.send(ClaudeCodeRuntimeEvent {
+                    event_type: "runtime.fast.eligibility",
+                    payload: serde_json::json!({"eligible": eligibility.eligible, "runtimeDefaultFast": null}),
+                });
+            }
+            eligibility.eligible.then_some(fast.fast_override).flatten()
+        } else {
+            None
+        };
+        let mut inline_settings = serde_json::json!({});
+        rovai_core::camp_fast::merge_claude_inline_settings(&mut inline_settings, fast_override)?;
         let mut command = Command::new(executable);
         configure_active_runtime_command(&mut command);
         if let Some(config) = &request.builtin_tools {
@@ -395,11 +412,12 @@ impl ClaudeCodeCliRuntimeAdapter {
             }
             command.args(["--effort", effort]);
         }
-        command.args(session_arguments(
+        command.args(launch_session_arguments(
             request.resumable_native_session_id.as_deref(),
             &native_session_id,
             request.session_bootstrap.as_deref(),
-        ));
+            &inline_settings,
+        )?);
         if !request.persist_session {
             command.arg("--no-session-persistence").arg("--tools=");
         }
@@ -988,6 +1006,21 @@ fn normalize_claude_runtime_events(
     state: &mut ClaudeCodeStreamState,
 ) -> Result<Vec<ClaudeCodeRuntimeEvent>> {
     let mut normalized = Vec::new();
+    if (event.get("type").and_then(Value::as_str) == Some("system")
+        && event.get("subtype").and_then(Value::as_str) == Some("init"))
+        || event.get("type").and_then(Value::as_str) == Some("result")
+    {
+        validate_claude_stream_session(event, expected_session_id)?;
+        if let Some(fast) = event
+            .get("fast_mode_state")
+            .and_then(rovai_core::camp_fast::ObservedFastState::from_claude)
+        {
+            normalized.push(ClaudeCodeRuntimeEvent {
+                event_type: "runtime.fast.observed",
+                payload: serde_json::json!({"state": fast}),
+            });
+        }
+    }
     match event.get("type").and_then(Value::as_str) {
         Some("system") if event.get("subtype").and_then(Value::as_str) == Some("api_retry") => {
             validate_claude_stream_session(event, expected_session_id)?;
@@ -1670,6 +1703,22 @@ fn validate_session_id(value: &str) -> Result<()> {
     Ok(())
 }
 
+fn launch_session_arguments(
+    resume: Option<&str>,
+    session_id: &str,
+    bootstrap: Option<&str>,
+    settings: &Value,
+) -> Result<Vec<String>> {
+    let mut args = session_arguments(resume, session_id, bootstrap);
+    if settings
+        .as_object()
+        .is_some_and(|settings| !settings.is_empty())
+    {
+        args.extend(["--settings".to_string(), serde_json::to_string(settings)?]);
+    }
+    Ok(args)
+}
+
 fn session_arguments(
     resumable_session_id: Option<&str>,
     native_session_id: &str,
@@ -1726,6 +1775,7 @@ mod tests {
             },
             permission_semantics: PermissionSemantics::RuntimeManagedV2,
             runtime: FrozenAgentRuntimeConfig {
+                camp_fast: None,
                 adapter_kind: AdapterKind::ClaudeCodeCli,
                 installation_id: "claude-test".to_string(),
                 installation_generation: 1,
@@ -1768,6 +1818,39 @@ mod tests {
     }
 
     #[test]
+    fn native_fast_state_is_session_scoped_and_preserves_cooldown() {
+        let session_id = "00000000-0000-4000-8000-000000000001";
+        for (native, expected) in [
+            ("on", "fast"),
+            ("off", "standard"),
+            ("cooldown", "cooldown"),
+        ] {
+            for kind in ["system", "result"] {
+                let mut stream = ClaudeCodeStreamState::default();
+                let event = json!({"type": kind, "subtype": "init", "session_id": session_id, "fast_mode_state": native});
+                let events =
+                    normalize_claude_runtime_events(&event, session_id, &mut stream).unwrap();
+                assert_eq!(
+                    events
+                        .iter()
+                        .find(|event| event.event_type == "runtime.fast.observed")
+                        .unwrap()
+                        .payload["state"],
+                    expected
+                );
+                assert!(
+                    normalize_claude_runtime_events(
+                        &event,
+                        "00000000-0000-4000-8000-000000000002",
+                        &mut stream
+                    )
+                    .is_err()
+                );
+            }
+        }
+    }
+
+    #[test]
     fn accepts_only_uuid_session_identifiers() {
         assert!(validate_session_id("0bdd2166-d420-40c6-94be-70b93eb290c5").is_ok());
         assert!(validate_session_id("latest").is_err());
@@ -1775,6 +1858,34 @@ mod tests {
 
     #[test]
     fn appends_complete_bootstrap_for_new_and_resumed_sessions() {
+        for resume in [None, Some("resume-id")] {
+            for fast in [None, Some(true), Some(false)] {
+                let mut settings = json!({});
+                rovai_core::camp_fast::merge_claude_inline_settings(&mut settings, fast).unwrap();
+                let args = launch_session_arguments(resume, "new-id", Some("bootstrap"), &settings)
+                    .unwrap();
+                assert_eq!(
+                    args[0],
+                    if resume.is_some() {
+                        "--resume"
+                    } else {
+                        "--session-id"
+                    }
+                );
+                assert_eq!(
+                    args.iter()
+                        .filter(|arg| arg.as_str() == "--settings")
+                        .count(),
+                    usize::from(fast.is_some())
+                );
+                if let Some(fast) = fast {
+                    assert_eq!(
+                        serde_json::from_str::<Value>(args.last().unwrap()).unwrap()["fastMode"],
+                        fast
+                    );
+                }
+            }
+        }
         assert_eq!(
             session_arguments(None, "new-id", Some("bootstrap-new")),
             vec![

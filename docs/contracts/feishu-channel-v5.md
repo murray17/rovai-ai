@@ -96,4 +96,4 @@ SQLite。预览的有界不可变页只在 Main 内存保存，进程退出或�
 - [飞书官方折叠面板](https://open.feishu.cn/document/feishu-cards/card-json-v2-components/containers/collapsible-panel)
 - [飞书官方卡片回传交互](https://open.feishu.cn/document/feishu-cards/card-callback-communication)
 - [飞书官方卡片回调处理](https://open.feishu.cn/document/uAjLw4CM/ukzMukzMukzM/feishu-cards/handle-card-callbacks)
-- [v1.34 实施计划](../versions/v1.34/implementation-plan.md)
+- [v1.36 实施计划](../versions/v1.36/implementation-plan.md)

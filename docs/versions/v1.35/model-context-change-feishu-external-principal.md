@@ -1,6 +1,6 @@
 ---
 document_type: model-context-change
-version: v1.33
+version: v1.35
 change_id: feishu-external-principal-and-quote
 revision: 1
 confirmed_revision: 1
@@ -14,7 +14,7 @@ acceptance_status: verified
 last_updated: 2026-08-27
 ---
 
-# v1.33 核心模型上下文变更说明：飞书 ExternalPrincipal 与 ExternalQuote
+# v1.35 核心模型上下文变更说明：飞书 ExternalPrincipal 与 ExternalQuote
 
 本文把开发者在本次任务中提供并确认的飞书补充方案 revision 1 固化为仓库版本说明。确认内容是：飞书消息
 作者只作为 ExternalPrincipal 来源，任意飞书 reply 作为当前唯一触发 CampMessage 的 Structured Content

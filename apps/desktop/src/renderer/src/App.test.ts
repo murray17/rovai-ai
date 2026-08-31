@@ -3494,6 +3494,9 @@ describe('task event projections', () => {
     expect(markup).not.toContain('live-execution-progress')
     expect(markup).toContain('aria-label="停止当前执行"')
     expect(markup).not.toContain('class="primary-button composer-send"')
+    expect((markup.match(/class="(?:primary-button composer-send|danger-button composer-stop)"/g) ?? []))
+      .toHaveLength(1)
+    expect(markup).not.toContain('加入待发送')
 
     const cachedPreviewMarkup = renderToStaticMarkup(createElement(CampWorkspace, {
       snapshot: groupedSnapshot,
@@ -3677,6 +3680,7 @@ describe('task event projections', () => {
     expect(cancellingMarkup).toContain('停止请求已发送，正在等待 Agent 运行时退出。')
     expect(cancellingMarkup).toContain('execution-disclosure run-live is-cancelling')
     expect(cancellingMarkup).toContain('aria-label="正在停止当前执行"')
+    expect(cancellingMarkup).not.toContain('class="primary-button composer-send"')
     expect(cancellingMarkup).not.toMatch(/<textarea[^>]*disabled/)
     expect(cancellingMarkup).not.toContain('execution-disclosure is-running')
 
@@ -3721,6 +3725,8 @@ describe('task event projections', () => {
     expect(terminalMarkup).toContain('reply-parent-quote')
     expect(terminalMarkup).toContain('你 ·')
     expect(terminalMarkup).toContain('aria-label="回复这条消息"')
+    expect(terminalMarkup).not.toContain('class="danger-button composer-stop"')
+    expect(terminalMarkup).toMatch(/class="primary-button composer-send"[^>]*>发送<\/button>/)
 
     const restoredMarkup = renderToStaticMarkup(createElement(CampWorkspace, {
       snapshot: {

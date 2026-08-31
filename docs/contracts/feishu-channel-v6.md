@@ -115,4 +115,4 @@ Main 复用原 Bot 的 SDK client 发送 `interactive`，使用由 delivery ID �
 - [飞书官方卡片回传交互](https://open.feishu.cn/document/feishu-cards/card-callback-communication)
 - [飞书 Card 2.0 Markdown 与原生 mention](https://open.feishu.cn/document/feishu-cards/card-json-v2-components/content-components/rich-text)
 - [飞书消息创建、大小限制与 UUID 去重](https://open.feishu.cn/document/server-docs/im-v1/message/create)
-- [v1.34 实施计划](../versions/v1.34/implementation-plan.md)
+- [v1.36 实施计划](../versions/v1.36/implementation-plan.md)

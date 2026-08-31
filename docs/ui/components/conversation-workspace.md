@@ -2,10 +2,24 @@
 document_type: ui-component-contract
 authority: renderer-camp-workspace
 status: accepted
-last_updated: 2026-08-30
+last_updated: 2026-08-31
 ---
 
 # Camp 会话工作区
+
+## 成员 Fast 响应模式
+
+成员浮层只为合格 Claude Code/Codex 绑定显示 Fast 胶囊；资格和作用域见
+[Camp Member Fast v1](../../contracts/camp-member-fast-v1.md)。保留既有行高、头像/名称层级和末尾操作菜单。
+胶囊视觉 20–22px、实际目标至少 28px、字体不低于 10.5px；使用现有语义主题 token，开启不只依赖颜色，
+同时填充闪电图标。未知默认采用中性样式，hover/focus 说明由 Runtime 继承、首次执行后显示观察结果。
+
+首次开启先用轻量行内提示确认额外用量，并持久记住确认；检查与恢复默认放进成员菜单。
+切换仅保存当前 Camp 该队员后续执行的意图，运行中提示当前执行不变。cooldown 不翻转开关，只在高亮
+意图旁给出警告。保存失败保留原状态，按钮不重建，确认后返回触发按钮焦点；背景检查不由打开浮层触发。
+
+长名册在浮层内滚动，最小验收 1280×720 保持 Composer/发送按钮可达。生产 CampWorkspace 的隔离 Electron
+fixture 由 `pnpm test:camp-fast-layout` 验证主题、尺寸、键盘/焦点、失败、费用确认、重测和恢复默认。
 
 Camp 是开放阅读面，不按角色铺不同底色。时间线、Agent 执行台、Approval/Recovery Dock 和
 Composer 共享主列；会话详情由标题栏入口打开浮层，不占用常驻侧列。普通叙述保持 `76ch` 阅读宽度，代码、表格等工件
@@ -18,7 +32,7 @@ Files Changed 历史 Review 真源。
 
 ## 打开与渐进历史
 
-Camp 的首个 meaningful paint 只依赖 [Camp Open Projection v8](../../contracts/camp-open-projection-v8.md)：
+Camp 的首个 meaningful paint 只依赖 [Camp Open Projection v9](../../contracts/camp-open-projection-v9.md)：
 Camp/成员、最近消息、当前运行摘要、pending Approval 和 Composer 可用即完成。项目导航恢复、侧栏刷新
 与可见来源确认在首屏后执行，失败不能撤销已打开会话。只显示“正在打开对话”的 Shell 不算完成。
 
@@ -202,6 +216,10 @@ Agent 公共正文不显示“来自执行”来源条，也不投影 compact �
 Mention、修复或手动接收者修改时，Composer 输入面上方的独立无框路由轨显示“继续发给 @成员”。
 路由轨与输入面共用同一条宽度轨道，但不计入正文编辑区高度。标签不是正文 Mention，也不创建父引用；
 发送成功时 Core 才把对象物化为 canonical Structured Mention。
+
+“已接受”以正式发布到公共会话为准：私有 Pending 入队不改变候选，自动出队发布后与手动发送一样刷新
+空白 Composer 的 Core 路由投影，不等待新一轮执行结束。刷新不得覆盖已输入正文、附件、显式接收者或
+已经冻结来源的 Draft；迟到的读取结果也不得覆盖其间开始的编辑或另一个 Camp。
 
 标签与默认 Lead 文案占用同一行。标签出现时不显示默认文案；显式 Member Mention、多人 Mention、
 `@所有队员` 和 reply 出现时两者都隐藏。点击标签的关闭按钮只取消当前来源延续并恢复
@@ -551,3 +569,35 @@ Camp Header 显示会话定位、待审批摘要和详情直接入口；文件 T
 Day/Night 复用同一 DOM 和状态矩阵。主要操作支持键盘；Drawer、stage、Dock、menus、disclosure
 和 Stop 均有可见焦点。Loading、Empty、Partial、Error、Disabled、Submitting 与 Recovery 必须
 保留当前上下文、草稿和可恢复导航，而不是用通用错误页覆盖整个工作区。
+
+## 连续消息与待发送编辑
+
+执行期间 Composer 保持可输入，右侧主操作始终只有一个按钮：输入框没有正文（含仅空白字符）时显示“停止”，
+有正文时切换为“发送”，删空后恢复“停止”；空闲时只显示“发送”。空输入框按 Enter 不触发停止。
+发送动作的文字始终为“发送”，提交或准备附件期间仅禁用按钮并暴露 busy 状态，
+不改成“加入待发送”或“提交中”。队列未空时，即使当前
+没有运行也继续入队。队列条位于 Composer 上方，与输入框同宽、同轴，按 FIFO 排列，不显示单条
+序号，不提供排序或合并；较长队列在有界区域滚动。Pending 不作为用户消息显示在公共时间线。
+普通排队不额外显示自动续发说明；编辑时不再显示队首等待、编辑标题或本地草稿说明，
+仅保留当前编辑行的状态标识和保存、取消操作。发送失败或编辑占用失效等需要处理的情况仍显示错误提示。
+
+队列继承现有系统字体栈，正文为 10.5px；普通行最小高度为 32px，以 6px 空心圆点起行。普通底色
+由 `--surface-subtle` 44% 与 `--conversation-surface` 混合，编辑底色由 `--brand-soft` 42% 与同一
+会话底色混合，配合轻边框和“正在编辑”文字区分状态。Day/Night 沿用各自语义 token，不新增全局字级或控件样式。
+
+队列正文和行背景仅展示，不响应编辑；只有右侧独立的 24px 小铅笔按钮在同一个输入位置打开编辑。
+普通草稿独立保留，结束编辑后恢复；删除使用相邻的独立按钮。编辑正文继续使用 StructuredMentionComposer，
+支持 @成员、@所有队员及取消已有 Reply。保存不能提交空消息，并保留原队列位置。切换编辑项或关闭编辑
+遇到未保存修改时提供“保存 / 放弃修改 / 继续编辑”，不静默丢弃。
+
+Core 编辑占用跨重启保留，刷新或重新进入 Camp 不自动认领或释放；恢复条提供“重新编辑 / 放弃未保存修改 / 删除”。
+未保存修改只在 Renderer 内存，异常退出可以丢失，重新编辑从已保存内容开始。等待编辑的队首阻塞后续输入，
+后面一条的编辑不阻塞前面消息。
+
+Composer 点击一次“停止”后，必须等当前执行完全停止，才自动发送队首一条；其余输入等待新一轮结束后按 FIFO 自动继续，
+不提供“暂停队列”或“继续发送”入口。上一轮正常结束、失败终态或停止完成都按同一规则推进，
+仍等待现有编辑、审批、恢复或运行状态结算。队首发送失败时原位展示错误，用户编辑保存后自动再次准入，
+或删除后让下一条继续；不隐藏失败、不自动重试，也不让后续消息越过队首。
+
+普通草稿带有附件而需要排队时禁用提交并说明“暂不支持排队附件，草稿已保留”。待发送编辑禁用按钮、
+粘贴和拖放附件。持久化和原子发布由 [Pending Camp Input v1](../../contracts/pending-camp-input-v1.md) 拥有。

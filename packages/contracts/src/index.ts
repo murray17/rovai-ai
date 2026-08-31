@@ -844,7 +844,17 @@ export interface CampViewedAcknowledgement {
   lastSeenGlobalSequence: number
 }
 
+export interface CampMemberFastView {
+  runtimeBindingRevision: string
+  fastOverride: boolean | null
+  runtimeDefaultFast: boolean | null
+  observedFastState: 'unknown' | 'standard' | 'fast' | 'cooldown'
+  unavailableReason: string | null
+}
+
 export interface CampMemberView {
+  fast?: CampMemberFastView
+
   agentId: string
   displayName: string
   avatarRef: string | null
@@ -1070,6 +1080,42 @@ export interface CampComposerDraftView {
   updatedAt: string | null
   expiresAt: string | null
 }
+
+export interface PendingCampInputView {
+  id: string
+  campId: string
+  enqueueSequence: number
+  revision: number
+  state: 'queued' | 'needs_repair'
+  content: StructuredCampMessageContent
+  body: string
+  replyIntent: CampComposerReplyIntentView | null
+  recipientSelectionRequired: boolean
+  lastAttemptErrorCode: string | null
+}
+
+export interface PendingInputEditSession {
+  pendingInputId: string
+  editToken: string
+  basePendingRevision: number
+  recoveryRequired: boolean
+}
+
+export interface CampPendingInputsView {
+  campId: string
+  executionActive: boolean
+  items: PendingCampInputView[]
+  editSession: PendingInputEditSession | null
+}
+
+export type PendingInputEditAction =
+  | { type: 'begin' | 'takeover' | 'cancel' | 'delete' }
+  | {
+      type: 'save'
+      content: StructuredCampMessageContent
+      replyToCampMessageId: string | null
+      recipientSelectionRequired: boolean
+    }
 
 export interface CampComposerContinuationIntentView {
   sourceCampMessageId: string
@@ -3174,6 +3220,8 @@ export type CoreMethod =
   | 'camps.create'
   | 'camps.discardPending'
   | 'camps.rename'
+  | 'camps.members.fast.check'
+  | 'camps.members.fast.set'
   | 'camps.members.add'
   | 'camps.members.removalPreview'
   | 'camps.members.remove'
@@ -3199,6 +3247,8 @@ export type CoreMethod =
   | 'tasks.list'
   | 'tasks.get'
   | 'camp.composerDraft.get'
+  | 'camp.pendingInputs.get'
+  | 'camp.pendingInputs.edit'
   | 'camp.composerDraft.save'
   | 'camp.composerDraft.startReply'
   | 'camp.composerDraft.cancelReply'

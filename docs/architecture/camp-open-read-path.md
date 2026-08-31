@@ -8,7 +8,7 @@ last_updated: 2026-08-28
 
 # Camp Open Read Path 架构
 
-字段与窗口见 [Camp Open Projection v8](../contracts/camp-open-projection-v8.md)与
+字段与窗口见 [Camp Open Projection v9](../contracts/camp-open-projection-v9.md)与
 [Camp Conversation Find v1](../contracts/camp-conversation-find-v1.md)。本架构把“进入会话”、
 “继续阅读”、“查找完整当前会话”和“检查运行详情”分成用途明确的接口，同时保持 SQLite Read Side
 为唯一权威。
@@ -120,6 +120,6 @@ Memory 分别拥有局部 loading/error；全屏 StartupGate 只允许覆盖 Mai
 
 - [Core 受管内容不变量](foundational-invariants.md#core-managed-content)
 - [协作与执行准入不变量](foundational-invariants.md#collaboration-admission)
-- [Camp Open Projection v8](../contracts/camp-open-projection-v8.md)
+- [Camp Open Projection v9](../contracts/camp-open-projection-v9.md)
 - [Camp Conversation Find v1](../contracts/camp-conversation-find-v1.md)
 - [Desktop Navigation Refresh](desktop-navigation-refresh.md)
