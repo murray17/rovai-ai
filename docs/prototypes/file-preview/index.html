@@ -1,0 +1,1603 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="day" data-rovai-platform="darwin">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Rovai AI · 独立文件预览区设计稿</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --canvas: #eceeef;
+      --surface: #fbfbfa;
+      --surface-raised: #ffffff;
+      --surface-subtle: #f0f2f4;
+      --surface-muted: #e7eaed;
+      --surface-selected: #e9ecee;
+      --surface-hover: #e8eaea;
+      --surface-sunken: #e4e8eb;
+      --workspace-surface-subtle: #f4f5f4;
+      --workspace-surface-raised: #ffffff;
+      --workspace-line: #d5dadd;
+      --workspace-line-strong: #bdc6ca;
+      --conversation-surface: #ffffff;
+      --inspector-surface: #ffffff;
+      --topbar: #fbfbfa;
+      --workspace-divider: rgba(97, 106, 115, .14);
+      --input: #ffffff;
+      --ink: #171b20;
+      --muted: #616a73;
+      --faint: #6e7382;
+      --line: #dfe4e8;
+      --line-strong: #c7cfd6;
+      --control-line: #8b9389;
+      --rail: #f3f4f4;
+      --rail-ink: #626b72;
+      --rail-line: #dadde0;
+      --rail-logo: #526f88;
+      --brand: #526f88;
+      --brand-hover: #3d5874;
+      --brand-contrast: #ffffff;
+      --brand-soft: #e9eef3;
+      --brand-ink: #405f7e;
+      --focus: #526f88;
+      --focus-soft: rgba(82, 111, 136, .16);
+      --ember: #d3a45f;
+      --success: #3e775c;
+      --success-soft: #e7f1ea;
+      --attention: #8a6226;
+      --attention-soft: #f8edda;
+      --danger: #a24c46;
+      --danger-soft: #f7e6e3;
+      --info: #416c86;
+      --info-soft: #e5eef3;
+      --neutral: #5f6678;
+      --neutral-soft: #ecefe9;
+      --evidence-canvas: #f4f6f3;
+      --evidence-surface: #ffffff;
+      --evidence-ink: #252a36;
+      --evidence-muted: #5f6678;
+      --evidence-line: #d5dad3;
+      --code-block-canvas: #eef2f5;
+      --diff-add: #137333;
+      --diff-add-soft: #d9f1e2;
+      --diff-remove: #b3261e;
+      --diff-remove-soft: #f5dede;
+      --diff-hunk-soft: #f3f4f4;
+      --identity-1: #a65f4a;
+      --identity-2: #39777a;
+      --identity-3: #74628f;
+      --shadow-float: 0 18px 56px rgba(38, 45, 58, .14);
+      --sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", "Segoe UI", sans-serif;
+      --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      --rail-width: 270px;
+      --ease: 150ms cubic-bezier(.2, .7, .2, 1);
+    }
+
+    :root[data-theme="night"] {
+      color-scheme: dark;
+      --canvas: #0d1114;
+      --surface: #151a1e;
+      --surface-raised: #1b2227;
+      --surface-subtle: #1a2024;
+      --surface-muted: #242d33;
+      --surface-selected: #222c33;
+      --surface-hover: #1d252b;
+      --surface-sunken: #10161a;
+      --workspace-surface-subtle: #11171b;
+      --workspace-surface-raised: #1c2328;
+      --workspace-line: #2b353b;
+      --workspace-line-strong: #3d4950;
+      --conversation-surface: #181d21;
+      --inspector-surface: #171d21;
+      --topbar: #151a1e;
+      --workspace-divider: rgba(171, 181, 188, .14);
+      --input: #1b2227;
+      --ink: #e7ecef;
+      --muted: #abb5bc;
+      --faint: #919da6;
+      --line: #333e46;
+      --line-strong: #53616b;
+      --control-line: #687b88;
+      --rail: #11161a;
+      --rail-ink: #a6b1b8;
+      --rail-line: #313b43;
+      --rail-logo: #b1c8d8;
+      --brand: #7897ae;
+      --brand-hover: #b1c8d8;
+      --brand-contrast: #091116;
+      --brand-soft: #22303a;
+      --brand-ink: #c0d4e1;
+      --focus: #8fb3cb;
+      --focus-soft: rgba(143, 179, 203, .18);
+      --ember: #d2aa72;
+      --success: #82b695;
+      --success-soft: #1a2b22;
+      --attention: #d2ac70;
+      --attention-soft: #302719;
+      --danger: #d6857f;
+      --danger-soft: #321e1d;
+      --info: #83afc9;
+      --info-soft: #182832;
+      --neutral: #abb5bc;
+      --neutral-soft: #242d33;
+      --evidence-canvas: #12191d;
+      --evidence-surface: #171f24;
+      --evidence-ink: #dce4e9;
+      --evidence-muted: #9eabb3;
+      --evidence-line: #35424a;
+      --code-block-canvas: #1d252b;
+      --diff-add: #92c7a5;
+      --diff-add-soft: #21412e;
+      --diff-remove: #e09a94;
+      --diff-remove-soft: #4c2221;
+      --diff-hunk-soft: #1b272a;
+      --identity-1: #c98572;
+      --identity-2: #70b0ae;
+      --identity-3: #a89ac8;
+      --shadow-float: 0 22px 64px rgba(0, 0, 0, .42);
+    }
+
+    * { box-sizing: border-box; }
+    [hidden] { display: none !important; }
+    html, body { width: 100%; min-width: 1016px; height: 100%; margin: 0; }
+    body {
+      display: flex;
+      overflow: hidden;
+      flex-direction: column;
+      color: var(--ink);
+      background: var(--canvas);
+      font: 13px/1.6 var(--sans);
+      text-rendering: optimizeLegibility;
+    }
+    button, select { color: inherit; font: inherit; }
+    button { cursor: pointer; }
+    button:active:not(:disabled) { transform: translateY(1px); }
+    button:disabled { cursor: default; opacity: .48; }
+    :where(button, select, [role="tab"], [tabindex]):focus-visible {
+      outline: 2px solid var(--focus);
+      outline-offset: 2px;
+    }
+    code, kbd { font-family: var(--mono); }
+    ::selection { color: var(--ink); background: var(--focus-soft); }
+    * { scrollbar-color: var(--control-line) transparent; scrollbar-width: thin; }
+    .sr-only {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      padding: 0;
+      margin: -1px;
+      overflow: hidden;
+      clip: rect(0, 0, 0, 0);
+      white-space: nowrap;
+      border: 0;
+    }
+    .icon {
+      display: block;
+      width: 100%;
+      height: 100%;
+      fill: none;
+      stroke: currentColor;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+      stroke-width: 1.55;
+      vector-effect: non-scaling-stroke;
+    }
+
+    .skip-link {
+      position: fixed;
+      top: 8px;
+      left: 8px;
+      z-index: 400;
+      padding: 7px 10px;
+      border: 1px solid var(--line-strong);
+      border-radius: 6px;
+      color: var(--ink);
+      background: var(--surface-raised);
+      transform: translateY(-160%);
+    }
+    .skip-link:focus { transform: translateY(0); }
+
+    .prototype-bar {
+      position: relative;
+      z-index: 50;
+      display: flex;
+      min-height: 62px;
+      flex: 0 0 auto;
+      align-items: center;
+      gap: 16px;
+      padding: 7px 14px;
+      border-bottom: 1px solid var(--line-strong);
+      background: var(--surface-raised);
+    }
+    .prototype-heading { display: grid; min-width: 244px; gap: 1px; }
+    .prototype-heading strong { font-size: 12.5px; letter-spacing: -.01em; }
+    .prototype-heading span { color: var(--faint); font-size: 9.5px; line-height: 1.35; }
+    .prototype-controls {
+      display: flex;
+      min-width: 0;
+      flex: 1;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 10px;
+    }
+    .prototype-field { display: grid; gap: 2px; }
+    .prototype-field > span { color: var(--faint); font-size: 8.5px; font-weight: 650; letter-spacing: .04em; }
+    .segments {
+      display: inline-flex;
+      min-height: 30px;
+      align-items: center;
+      gap: 2px;
+      padding: 2px;
+      border: 1px solid var(--line-strong);
+      border-radius: 7px;
+      background: var(--surface-subtle);
+    }
+    .segments button {
+      min-height: 24px;
+      padding: 0 8px;
+      border: 0;
+      border-radius: 5px;
+      color: var(--muted);
+      background: transparent;
+      font-size: 9.5px;
+      font-weight: 680;
+      white-space: nowrap;
+    }
+    .segments button:hover { color: var(--ink); background: var(--surface-hover); }
+    .segments button[aria-pressed="true"] { color: var(--brand-ink); background: var(--surface-raised); }
+    .prototype-select {
+      height: 30px;
+      min-width: 132px;
+      padding: 0 26px 0 8px;
+      border: 1px solid var(--line-strong);
+      border-radius: 7px;
+      color: var(--ink);
+      background: var(--surface-subtle);
+      font-size: 9.5px;
+    }
+
+    .prototype-stage { min-height: 0; flex: 1; padding: 10px; }
+    .prototype-stage[data-platform="win32"] {
+      --sans: "Segoe UI", "Microsoft YaHei UI", sans-serif;
+    }
+    .app-frame {
+      display: grid;
+      width: min(1660px, 100%);
+      height: 100%;
+      min-width: 0;
+      min-height: 0;
+      margin: 0 auto;
+      overflow: hidden;
+      grid-template-columns: var(--rail-width) minmax(0, 1fr);
+      grid-template-rows: 38px minmax(0, 1fr);
+      border: 1px solid var(--line-strong);
+      border-radius: 10px;
+      background: var(--surface);
+      box-shadow: var(--shadow-float);
+      transition: width var(--ease);
+    }
+    .prototype-stage[data-layout="middle"] .app-frame { width: min(1360px, 100%); }
+    .prototype-stage[data-layout="compact"] .app-frame { width: min(1040px, 100%); }
+
+    .windows-application-menu { display: none; }
+    .prototype-stage[data-platform="win32"] .app-frame {
+      grid-template-rows: 32px 38px minmax(0, 1fr);
+      background: var(--rail);
+    }
+    .prototype-stage[data-platform="win32"] .windows-application-menu {
+      display: flex;
+      width: calc(100% - 138px);
+      max-width: calc(100% - 138px);
+      height: 32px;
+      min-width: 0;
+      grid-column: 1 / -1;
+      grid-row: 1;
+      align-items: center;
+      justify-self: start;
+      padding: 0 6px;
+      color: var(--ink);
+      background: var(--rail);
+      user-select: none;
+      -webkit-app-region: drag;
+    }
+    .windows-application-menu-item {
+      height: 26px;
+      padding: 0 8px;
+      border: 0;
+      border-radius: 4px;
+      color: inherit;
+      background: transparent;
+      font: 400 12px/1 "Segoe UI", sans-serif;
+      cursor: default;
+      -webkit-app-region: no-drag;
+    }
+    .windows-application-menu-item:hover { background: var(--surface-selected); }
+    .windows-application-menu-item:focus-visible { outline-offset: -2px; }
+
+    .rail {
+      display: flex;
+      min-width: 0;
+      min-height: 0;
+      grid-column: 1;
+      grid-row: 1 / -1;
+      flex-direction: column;
+      border-right: 1px solid var(--rail-line);
+      color: var(--rail-ink);
+      background: var(--rail);
+    }
+    .rail-drag { height: 22px; flex: 0 0 22px; }
+    .prototype-stage[data-platform="win32"] .rail { grid-row: 2 / -1; }
+    .prototype-stage[data-platform="win32"] .rail-drag { height: 8px; flex-basis: 8px; }
+    .rail-brand {
+      display: flex;
+      min-height: 42px;
+      align-items: center;
+      gap: 9px;
+      padding: 0 15px 7px;
+      color: var(--ink);
+      font-size: 14px;
+      font-weight: 750;
+    }
+    .brand-mark { position: relative; width: 22px; height: 22px; color: var(--rail-logo); }
+    .brand-star {
+      position: absolute;
+      top: 1px;
+      left: 6px;
+      width: 10px;
+      height: 10px;
+      background: currentColor;
+      clip-path: polygon(50% 0, 62% 38%, 100% 50%, 62% 62%, 50% 100%, 38% 62%, 0 50%, 38% 38%);
+    }
+    .brand-horizon { position: absolute; right: 2px; bottom: 3px; left: 2px; height: 8px; border-top: 1.8px solid currentColor; border-radius: 50% 50% 0 0; }
+    .brand-horizon::after { position: absolute; top: -3px; left: 50%; width: 4px; height: 4px; border-radius: 50%; background: var(--ember); content: ""; transform: translateX(-50%); }
+    .rail-scroll { min-height: 0; flex: 1; overflow: auto; padding: 7px 9px 18px; }
+    .rail-primary, .camp-list { display: grid; gap: 2px; }
+    .rail-row, .camp-row, .settings-row {
+      position: relative;
+      display: grid;
+      width: 100%;
+      min-width: 0;
+      min-height: 36px;
+      grid-template-columns: 20px minmax(0, 1fr) auto;
+      align-items: center;
+      gap: 8px;
+      padding: 0 9px;
+      border: 0;
+      border-radius: 7px;
+      color: var(--rail-ink);
+      background: transparent;
+      text-align: left;
+      font-size: 12px;
+    }
+    .rail-row:hover, .camp-row:hover, .settings-row:hover { color: var(--ink); background: var(--surface-hover); }
+    .rail-row svg, .settings-row svg { width: 16px; height: 16px; }
+    .jump-box {
+      display: flex;
+      min-height: 34px;
+      align-items: center;
+      justify-content: space-between;
+      margin: 7px 0 16px;
+      padding: 0 10px;
+      border: 1px solid var(--rail-line);
+      border-radius: 7px;
+      color: var(--faint);
+      background: var(--surface-raised);
+      font-size: 10px;
+    }
+    .jump-box kbd { padding: 1px 5px; border: 1px solid var(--rail-line); border-radius: 4px; background: var(--surface-subtle); font: 9px/1.4 var(--sans); }
+    .rail-section { display: grid; gap: 3px; }
+    .rail-section-title { padding: 0 8px 5px; color: var(--muted); font-size: 10px; font-weight: 750; letter-spacing: .06em; }
+    .project-row { display: grid; min-height: 36px; grid-template-columns: 18px minmax(0, 1fr); align-items: center; gap: 7px; padding: 0 8px; color: var(--ink); font-size: 11.5px; font-weight: 650; }
+    .project-row svg { width: 15px; height: 15px; }
+    .camp-list { padding-left: 4px; }
+    .camp-row { min-height: 34px; grid-template-columns: minmax(0, 1fr) auto; padding-left: 21px; font-size: 11.5px; }
+    .camp-row.selected { color: var(--ink); background: var(--surface-selected); font-weight: 650; }
+    .camp-row.selected::before { position: absolute; top: 7px; bottom: 7px; left: 5px; width: 2px; border-radius: 2px; background: var(--brand); content: ""; }
+    .camp-row small { color: var(--faint); font-size: 8px; }
+    .rail-footer { padding: 8px 9px 11px; border-top: 1px solid var(--rail-line); }
+
+    .workspace-head {
+      position: relative;
+      display: grid;
+      min-width: 0;
+      min-height: 0;
+      grid-column: 2;
+      grid-row: 1;
+      grid-template-columns: minmax(390px, 1fr) minmax(430px, 500px) 238px;
+      overflow: hidden;
+      background: var(--conversation-surface);
+    }
+    .prototype-stage[data-inspector-collapsed="true"] .workspace-head { grid-template-columns: minmax(390px, 1fr) minmax(430px, 1fr); }
+    .prototype-stage[data-layout="middle"] .workspace-head { grid-template-columns: minmax(390px, 1fr) minmax(430px, 500px); }
+    .prototype-stage[data-layout="middle"] .inspector-head,
+    .prototype-stage[data-layout="middle"] .sidecar-toggle { display: none; }
+    .prototype-stage[data-layout="compact"] .workspace-head,
+    .prototype-stage[data-origin="review"] .workspace-head { grid-template-columns: minmax(0, 1fr); }
+    .prototype-stage[data-layout="compact"] .conversation-head,
+    .prototype-stage[data-layout="compact"] .inspector-head,
+    .prototype-stage[data-layout="compact"] .sidecar-toggle,
+    .prototype-stage[data-origin="review"] .conversation-head,
+    .prototype-stage[data-origin="review"] .inspector-head,
+    .prototype-stage[data-origin="review"] .sidecar-toggle { display: none; }
+    .conversation-head {
+      display: flex;
+      min-width: 0;
+      align-items: center;
+      gap: 6px;
+      padding: 0 14px;
+      border-right: 1px solid var(--workspace-divider);
+      background: var(--conversation-surface);
+    }
+    .breadcrumb { display: flex; min-width: 0; align-items: baseline; gap: 7px; }
+    .breadcrumb span { color: var(--faint); font-size: 9.5px; white-space: nowrap; }
+    .breadcrumb strong { overflow: hidden; color: var(--ink); font-size: 10.5px; text-overflow: ellipsis; white-space: nowrap; }
+    .top-status { margin-left: 1px; padding: 1px 5px; border-radius: 4px; color: var(--faint); background: var(--surface-muted); font: 500 8px/1.35 var(--mono); }
+    .icon-button {
+      display: inline-flex;
+      width: 26px;
+      min-height: 26px;
+      align-items: center;
+      justify-content: center;
+      padding: 0;
+      border: 1px solid transparent;
+      border-radius: 6px;
+      color: var(--muted);
+      background: transparent;
+      font-size: 9px;
+      font-weight: 600;
+    }
+    .icon-button:hover { color: var(--ink); background: var(--surface-hover); }
+    .icon-button svg { width: 15px; height: 15px; }
+
+    .app-main { min-width: 0; min-height: 0; grid-column: 2; grid-row: 2; overflow: hidden; }
+    .prototype-stage[data-platform="win32"] .workspace-head { grid-row: 2; }
+    .prototype-stage[data-platform="win32"] .app-main { grid-row: 3; }
+    .workspace-grid { display: grid; width: 100%; height: 100%; min-width: 0; min-height: 0; grid-template-columns: minmax(390px, 1fr) minmax(430px, 500px) 238px; }
+    .prototype-stage[data-inspector-collapsed="true"] .workspace-grid { grid-template-columns: minmax(390px, 1fr) minmax(430px, 1fr); }
+    .prototype-stage[data-inspector-collapsed="true"] .inspector { display: none; }
+    .prototype-stage[data-layout="middle"] .workspace-grid { grid-template-columns: minmax(390px, 1fr) minmax(430px, 500px); }
+    .prototype-stage[data-layout="middle"] .inspector { display: none; }
+    .prototype-stage[data-layout="compact"] .workspace-grid { grid-template-columns: minmax(0, 1fr); }
+    .prototype-stage[data-layout="compact"] .conversation-pane,
+    .prototype-stage[data-layout="compact"] .inspector { display: none; }
+    .prototype-stage[data-origin="review"] .workspace-grid { grid-template-columns: minmax(0, 1fr); }
+    .prototype-stage[data-origin="review"] .conversation-pane,
+    .prototype-stage[data-origin="review"] .inspector { display: none; }
+
+    .conversation-pane {
+      display: flex;
+      min-width: 0;
+      min-height: 0;
+      flex-direction: column;
+      border-right: 1px solid var(--workspace-divider);
+      background: var(--conversation-surface);
+    }
+    .timeline { min-height: 0; flex: 1; overflow: auto; padding: 24px 26px 18px; }
+    .timeline-track { width: min(700px, 100%); margin: 0 auto; }
+    .day-rule { display: flex; align-items: center; gap: 10px; margin: 0 0 20px; color: var(--faint); font: 9px/1.4 var(--mono); }
+    .day-rule::before, .day-rule::after { height: 1px; flex: 1; background: var(--line); content: ""; }
+    .message { display: grid; grid-template-columns: 28px minmax(0, 1fr); gap: 10px; margin-bottom: 20px; }
+    .avatar { display: grid; width: 28px; height: 28px; place-items: center; border: 1px solid var(--line); border-radius: 50%; color: var(--identity-1); background: var(--surface-subtle); font-size: 9px; font-weight: 780; }
+    .avatar.user { color: var(--brand-ink); }
+    .message-head { display: flex; align-items: baseline; gap: 7px; margin-bottom: 3px; }
+    .message-head strong { font-size: 10.5px; }
+    .message-head span { color: var(--faint); font: 8px/1.4 var(--mono); }
+    .message-copy p { max-width: 76ch; margin: 0; font-size: 12px; line-height: 1.68; }
+    .local-file-link { display: inline-flex; align-items: baseline; gap: 4px; padding: 1px 3px; border: 0; border-radius: 4px; color: var(--brand-ink); background: var(--brand-soft); font: 560 10.5px/1.45 var(--mono); text-decoration: none; }
+    .local-file-link:hover { color: var(--brand-hover); text-decoration: underline; }
+    .local-file-link svg { width: 11px; height: 11px; align-self: center; }
+    .run-card { margin: 0 0 20px 38px; overflow: hidden; border: 1px solid var(--line); border-radius: 9px; background: var(--evidence-surface); }
+    .run-card-head { display: grid; min-height: 48px; grid-template-columns: 30px minmax(0, 1fr) auto; align-items: center; gap: 9px; padding: 7px 10px; border: 0; color: var(--ink); background: transparent; text-align: left; }
+    .run-card-head:hover { background: var(--surface-hover); }
+    .run-icon { display: grid; width: 30px; height: 30px; place-items: center; border-radius: 7px; color: var(--evidence-muted); background: var(--surface-muted); }
+    .run-icon svg { width: 16px; height: 16px; }
+    .run-copy { display: grid; min-width: 0; gap: 1px; }
+    .run-copy strong { font-size: 10.5px; }
+    .run-copy span { color: var(--faint); font-size: 8.5px; }
+    .run-view { padding: 3px 7px; border: 1px solid var(--line-strong); border-radius: 5px; color: var(--muted); font-size: 8.5px; }
+    .run-files { display: grid; padding: 0 9px 7px; }
+    .run-file { display: grid; min-height: 28px; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 8px; padding: 0 4px; border: 0; border-radius: 5px; color: var(--muted); background: transparent; text-align: left; }
+    .run-file:hover { color: var(--ink); background: var(--surface-hover); }
+    .run-file code { overflow: hidden; font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
+    .run-file small { color: var(--faint); font-size: 8px; }
+    .composer-wrap { flex: 0 0 auto; padding: 10px 18px 14px; border-top: 1px solid var(--line); background: var(--conversation-surface); }
+    .composer { width: min(760px, 100%); margin: 0 auto; overflow: hidden; border: 1px solid var(--control-line); border-radius: 10px; background: var(--input); }
+    .composer-selections { display: none; gap: 6px; padding: 8px 9px 0; }
+    .composer-selections.has-selection { display: flex; }
+    .selection-chip { display: inline-flex; max-width: 100%; align-items: center; gap: 6px; padding: 5px 7px; border: 1px solid var(--evidence-line); border-radius: 6px; color: var(--evidence-ink); background: var(--evidence-canvas); font: 8.5px/1.35 var(--mono); }
+    .selection-chip svg { width: 12px; height: 12px; color: var(--evidence-muted); }
+    .composer-input { min-height: 46px; padding: 10px 11px 6px; color: var(--faint); font-size: 11px; }
+    .composer-actions { display: flex; min-height: 34px; align-items: center; gap: 3px; padding: 0 6px 6px; }
+    .composer-actions .send { margin-left: auto; padding: 5px 10px; border: 0; border-radius: 6px; color: var(--brand-contrast); background: var(--brand); font-size: 9px; font-weight: 720; }
+
+    .inspector-head {
+      display: flex;
+      min-width: 0;
+      align-items: center;
+      gap: 2px;
+      padding: 5px 38px 5px 5px;
+      border-left: 1px solid var(--workspace-divider);
+      background: var(--conversation-surface);
+    }
+    .prototype-stage[data-inspector-collapsed="true"] .inspector-head { display: none; }
+    .inspector-tabs { display: flex; min-width: 0; flex: 1; align-items: center; gap: 2px; }
+    .inspector-tab {
+      display: inline-flex;
+      min-width: 0;
+      height: 28px;
+      flex: 1;
+      align-items: center;
+      justify-content: center;
+      gap: 5px;
+      padding: 0 7px;
+      border: 0;
+      border-radius: 6px;
+      color: var(--muted);
+      background: transparent;
+      font-size: 9.5px;
+      font-weight: 600;
+    }
+    .inspector-tab:hover { color: var(--ink); background: var(--surface-hover); }
+    .inspector-tab[aria-selected="true"] { color: var(--ink); background: var(--surface-muted); }
+    .inspector-tab small { color: var(--faint); font: 8px/1 var(--mono); }
+    .sidecar-toggle { position: absolute; top: 5px; right: 5px; z-index: 30; display: grid; width: 28px; height: 28px; place-items: center; border: 0; border-radius: 6px; color: var(--faint); background: transparent; }
+    .sidecar-toggle:hover { color: var(--ink); background: var(--surface-hover); }
+    .sidecar-toggle svg { width: 14px; height: 14px; }
+    .inspector { min-width: 0; min-height: 0; overflow: auto; border-left: 1px solid var(--workspace-divider); background: var(--inspector-surface); }
+    .inspector-panel { padding: 11px 12px; }
+    .task-row { display: grid; grid-template-columns: 14px minmax(0, 1fr); gap: 7px; padding: 7px 1px; color: var(--muted); font-size: 9px; }
+    .task-row svg { width: 13px; height: 13px; margin-top: 1px; }
+    .member-row { display: grid; grid-template-columns: 28px minmax(0, 1fr); align-items: center; gap: 8px; padding: 8px 1px; }
+    .member-avatar { display: grid; width: 28px; height: 28px; place-items: center; border-radius: 50%; color: var(--surface-raised); background: var(--identity-2); font-size: 8px; font-weight: 760; }
+    .member-copy { display: grid; min-width: 0; gap: 1px; }
+    .member-copy strong { font-size: 9.5px; }
+    .member-copy small { overflow: hidden; color: var(--faint); font-size: 8px; text-overflow: ellipsis; white-space: nowrap; }
+
+    .preview-pane { position: relative; display: flex; min-width: 0; min-height: 0; flex-direction: column; background: var(--evidence-surface); }
+    .file-path-bar {
+      display: flex;
+      min-width: 0;
+      height: 32px;
+      flex: 0 0 32px;
+      align-items: center;
+      overflow: hidden;
+      padding: 0 10px;
+      border-bottom: 1px solid var(--line);
+      color: var(--faint);
+      background: var(--conversation-surface);
+    }
+    .file-path-trail {
+      display: flex;
+      width: 100%;
+      min-width: 0;
+      align-items: center;
+      justify-content: flex-start;
+      white-space: nowrap;
+      font: 500 9.5px/1.3 var(--mono);
+    }
+    .file-path-leading { min-width: 18px; flex: 0 1 auto; overflow: hidden; text-overflow: ellipsis; }
+    .file-path-separator { flex: 0 0 auto; margin: 0 7px; color: var(--workspace-line-strong); }
+    .file-path-name { min-width: 0; max-width: calc(100% - 42px); flex: 0 0 auto; overflow: hidden; color: var(--evidence-ink); font-weight: 650; text-overflow: ellipsis; }
+    .file-tabs {
+      position: relative;
+      z-index: 20;
+      display: flex;
+      min-width: 0;
+      height: 38px;
+      min-height: 0;
+      align-items: center;
+      gap: 2px;
+      padding: 5px 6px;
+      background: var(--conversation-surface);
+    }
+    .prototype-stage[data-inspector-collapsed="true"][data-layout="wide"][data-origin="conversation"] .file-tabs { padding-right: 42px; }
+    .tab-return {
+      display: none;
+      min-width: 0;
+      height: 28px;
+      flex: 0 0 auto;
+      align-items: center;
+      gap: 5px;
+      padding: 0 8px;
+      border: 0;
+      border-radius: 6px;
+      color: var(--muted);
+      background: transparent;
+      font-size: 9.5px;
+      font-weight: 600;
+      white-space: nowrap;
+    }
+    .tab-return:hover { color: var(--ink); background: var(--surface-hover); }
+    .tab-return svg { width: 13px; height: 13px; }
+    .prototype-stage[data-layout="compact"] .tab-return,
+    .prototype-stage[data-origin="review"] .tab-return { display: inline-flex; }
+    .tab-strip { display: flex; min-width: 0; flex: 1; align-items: center; gap: 2px; overflow: auto hidden; scrollbar-width: none; }
+    .tab-strip::-webkit-scrollbar { display: none; }
+    .file-tab {
+      position: relative;
+      display: flex;
+      min-width: 0;
+      max-width: 172px;
+      height: 28px;
+      flex: 0 0 auto;
+      align-items: center;
+      border-radius: 6px;
+      color: var(--muted);
+      background: transparent;
+      font: 600 9.5px/1.3 var(--sans);
+    }
+    .file-tab:hover { color: var(--ink); background: var(--surface-hover); }
+    .file-tab.is-active { color: var(--ink); background: var(--surface-muted); }
+    .file-tab.has-update::before { position: absolute; top: 5px; left: 4px; width: 4px; height: 4px; border-radius: 50%; background: var(--attention); content: ""; }
+    .tab-trigger { display: flex; min-width: 0; height: 28px; align-items: center; padding: 0 6px 0 8px; border: 0; color: inherit; background: transparent; text-align: left; font: inherit; }
+    .file-tab.has-update .tab-trigger { padding-left: 11px; }
+    .tab-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .tab-close { display: grid; width: 24px; height: 28px; flex: 0 0 24px; place-items: center; border: 0; border-radius: 5px; color: var(--faint); background: transparent; opacity: 0; pointer-events: none; transition: opacity var(--ease); }
+    .file-tab:hover .tab-close, .file-tab:focus-within .tab-close { opacity: 1; pointer-events: auto; }
+    .tab-close:hover { color: var(--ink); background: color-mix(in srgb, var(--ink) 7%, transparent); }
+    .tab-close svg { width: 10px; height: 10px; }
+    .tabs-overflow { width: 28px; height: 28px; flex: 0 0 28px; border: 0; border-radius: 6px; color: var(--faint); background: transparent; }
+    .tabs-overflow:hover { color: var(--ink); background: var(--surface-hover); }
+
+    .viewer-shell { position: relative; min-width: 0; min-height: 0; flex: 1; overflow: hidden; background: var(--evidence-canvas); }
+    .viewer-scene { position: absolute; inset: 0; overflow: auto; color: var(--evidence-ink); background: var(--evidence-canvas); }
+    .viewer-scene[data-scene="code"], .viewer-scene[data-scene="patch"], .viewer-scene[data-scene="large"] { background: var(--evidence-surface); }
+    .file-menu {
+      position: absolute;
+      top: 8px;
+      right: 10px;
+      z-index: 30;
+      width: 184px;
+      padding: 4px;
+      border: 1px solid var(--line-strong);
+      border-radius: 7px;
+      color: var(--ink);
+      background: var(--surface-raised);
+      box-shadow: var(--shadow-float);
+    }
+    .file-menu button { display: flex; width: 100%; min-height: 31px; align-items: center; gap: 7px; padding: 0 8px; border: 0; border-radius: 5px; color: var(--muted); background: transparent; text-align: left; font-size: 9px; }
+    .file-menu button:hover { color: var(--ink); background: var(--surface-hover); }
+    .file-menu svg { width: 13px; height: 13px; }
+    .file-menu hr { height: 1px; margin: 4px; border: 0; background: var(--line); }
+
+    .update-notice {
+      position: absolute;
+      top: 10px;
+      right: 10px;
+      z-index: 14;
+      display: none;
+      min-height: 32px;
+      align-items: center;
+      gap: 7px;
+      padding: 3px 4px 3px 8px;
+      border: 1px solid var(--line-strong);
+      border-radius: 7px;
+      color: var(--attention);
+      background: var(--surface-raised);
+      box-shadow: 0 8px 22px color-mix(in srgb, var(--canvas) 38%, transparent);
+      font-size: 9.5px;
+    }
+    .viewer-shell[data-status="updated"] .update-notice,
+    .viewer-shell[data-status="refreshing"] .update-notice,
+    .viewer-shell[data-status="refresh-error"] .update-notice { display: flex; }
+    .viewer-shell[data-status="refresh-error"] .update-notice { color: var(--danger); }
+    .update-notice svg { width: 13px; height: 13px; }
+    .viewer-shell[data-status="refreshing"] .update-notice svg { animation: refresh-spin 900ms linear infinite; }
+    .update-notice button { min-height: 24px; padding: 0 7px; border: 0; border-radius: 5px; color: currentColor; background: color-mix(in srgb, currentColor 10%, transparent); font-size: 8.5px; font-weight: 700; }
+    .update-notice button:hover { background: color-mix(in srgb, currentColor 16%, transparent); }
+    .viewer-shell[data-status="refreshing"] .update-notice button { display: none; }
+    .viewer-shell:is([data-status="updated"], [data-status="refreshing"], [data-status="refresh-error"]) .selection-popover { margin-right: 150px; }
+    @keyframes refresh-spin { to { transform: rotate(360deg); } }
+
+    .state-overlay {
+      position: absolute;
+      inset: 0;
+      z-index: 25;
+      display: none;
+      place-items: center;
+      padding: 28px;
+      background: color-mix(in srgb, var(--evidence-canvas) 97%, transparent);
+    }
+    .viewer-shell[data-status="opening"] .state-overlay.opening,
+    .viewer-shell[data-status="error"] .state-overlay.error { display: grid; }
+    .state-card { display: grid; width: min(360px, 100%); justify-items: center; gap: 9px; text-align: center; }
+    .state-icon { display: grid; width: 42px; height: 42px; place-items: center; border: 1px solid var(--evidence-line); border-radius: 10px; color: var(--evidence-muted); background: var(--evidence-surface); }
+    .state-icon svg { width: 20px; height: 20px; }
+    .state-card strong { font-size: 12px; }
+    .state-card p { max-width: 42ch; margin: 0; color: var(--evidence-muted); font-size: 9.5px; line-height: 1.55; }
+    .state-actions { display: flex; gap: 6px; margin-top: 3px; }
+    .state-actions button { min-height: 30px; padding: 0 9px; border: 1px solid var(--control-line); border-radius: 6px; color: var(--ink); background: var(--surface-raised); font-size: 9px; font-weight: 650; }
+    .state-actions button.primary { border-color: var(--brand); color: var(--brand-contrast); background: var(--brand); }
+    .skeleton { display: grid; width: min(420px, 100%); gap: 10px; }
+    .skeleton span { height: 10px; border-radius: 4px; background: var(--surface-muted); }
+    .skeleton span:nth-child(2) { width: 78%; }
+    .skeleton span:nth-child(3) { width: 91%; }
+    .skeleton span:nth-child(4) { width: 56%; }
+
+    .code-view { min-width: 620px; padding: 18px 0 36px; font: 10px/1.68 var(--mono); counter-reset: line 40; }
+    .code-line { display: grid; min-height: 17px; grid-template-columns: 49px minmax(max-content, 1fr); padding-right: 18px; white-space: pre; }
+    .code-line::before { display: block; padding-right: 12px; color: var(--faint); text-align: right; content: counter(line); counter-increment: line; user-select: none; }
+    .code-line:hover { background: color-mix(in srgb, var(--surface-hover) 56%, transparent); }
+    .code-line.selected { background: var(--focus-soft); box-shadow: inset 2px 0 0 var(--brand); }
+    .tok-key { color: var(--identity-3); }
+    .tok-fn { color: var(--brand-ink); }
+    .tok-str { color: var(--identity-2); }
+    .tok-comment { color: var(--faint); font-style: italic; }
+    .tok-type { color: var(--identity-1); }
+    .selection-popover { position: sticky; top: 10px; z-index: 8; display: flex; width: max-content; align-items: center; gap: 7px; margin: 0 14px 8px auto; padding: 5px 6px 5px 8px; border: 1px solid var(--line-strong); border-radius: 7px; color: var(--muted); background: var(--surface-raised); box-shadow: 0 8px 22px color-mix(in srgb, var(--canvas) 42%, transparent); font: 8.5px/1.3 var(--sans); }
+    .selection-popover button { min-height: 24px; padding: 0 7px; border: 0; border-radius: 5px; color: var(--brand-contrast); background: var(--brand); font-size: 8px; font-weight: 720; }
+
+    .document-view { width: min(720px, calc(100% - 40px)); min-height: 100%; margin: 0 auto; padding: 34px 18px 60px; background: var(--evidence-surface); }
+    .document-view h1 { margin: 0 0 9px; font-size: 25px; line-height: 1.2; letter-spacing: -.03em; }
+    .document-view .lede { margin: 0 0 22px; color: var(--evidence-muted); font-size: 12px; line-height: 1.7; }
+    .document-view h2 { margin: 26px 0 8px; padding-bottom: 5px; border-bottom: 1px solid var(--evidence-line); font-size: 14px; }
+    .document-view p, .document-view li { font-size: 11px; line-height: 1.72; }
+    .document-view ul { padding-left: 19px; }
+    .document-callout { margin: 15px 0; padding: 9px 11px; border-left: 2px solid var(--brand); color: var(--evidence-muted); background: var(--surface-subtle); font-size: 10px; }
+    .document-code { overflow: auto; padding: 10px 12px; border: 1px solid var(--evidence-line); border-radius: 7px; background: var(--code-block-canvas); font: 9.5px/1.62 var(--mono); white-space: pre; }
+    .document-asset { display: grid; min-height: 120px; margin-top: 16px; place-items: center; border: 1px solid var(--evidence-line); border-radius: 8px; color: var(--faint); background: linear-gradient(135deg, var(--surface-subtle), var(--evidence-surface)); }
+    .document-asset svg { width: 34px; height: 34px; margin-bottom: 5px; }
+    .html-preview { min-height: 100%; padding: 28px 20px 30px; background: var(--surface-subtle); }
+    .sandbox-sheet { width: min(720px, 100%); min-height: 430px; margin: 0 auto; overflow: hidden; border: 1px solid var(--evidence-line); border-radius: 10px; background: var(--surface-raised); }
+    .sandbox-browser { display: flex; min-height: 34px; align-items: center; gap: 7px; padding: 0 10px; border-bottom: 1px solid var(--evidence-line); color: var(--faint); background: var(--surface); font-size: 8px; }
+    .sandbox-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--line-strong); }
+    .sandbox-address { flex: 1; overflow: hidden; padding: 3px 7px; border-radius: 4px; background: var(--surface-muted); font: 8px/1.4 var(--mono); text-overflow: ellipsis; white-space: nowrap; }
+    .sandbox-body { display: grid; min-height: 394px; grid-template-columns: minmax(0, 1fr) 170px; }
+    .sandbox-copy { padding: 38px 34px; }
+    .sandbox-eyebrow { color: var(--brand-ink); font-size: 9px; font-weight: 760; letter-spacing: .1em; text-transform: uppercase; }
+    .sandbox-copy h2 { max-width: 13ch; margin: 10px 0 12px; font-size: 26px; line-height: 1.15; letter-spacing: -.035em; }
+    .sandbox-copy p { max-width: 43ch; margin: 0; color: var(--muted); font-size: 10px; line-height: 1.65; }
+    .sandbox-copy button { margin-top: 20px; padding: 7px 11px; border: 0; border-radius: 6px; color: var(--brand-contrast); background: var(--brand); font-size: 9px; font-weight: 700; }
+    .sandbox-art { position: relative; overflow: hidden; background: var(--brand-soft); }
+    .sandbox-art::before { position: absolute; top: 65px; right: -38px; width: 190px; height: 190px; border: 1px solid color-mix(in srgb, var(--brand) 40%, transparent); border-radius: 50%; content: ""; }
+    .sandbox-art::after { position: absolute; top: 105px; right: 15px; width: 88px; height: 88px; border-radius: 50%; background: color-mix(in srgb, var(--brand) 24%, transparent); content: ""; }
+
+    .image-view { display: grid; min-height: 100%; place-items: center; padding: 28px 24px 38px; background-color: var(--evidence-canvas); background-image: linear-gradient(45deg, var(--surface-muted) 25%, transparent 25%), linear-gradient(-45deg, var(--surface-muted) 25%, transparent 25%), linear-gradient(45deg, transparent 75%, var(--surface-muted) 75%), linear-gradient(-45deg, transparent 75%, var(--surface-muted) 75%); background-position: 0 0, 0 8px, 8px -8px, -8px 0; background-size: 16px 16px; }
+    .image-canvas { display: grid; width: min(620px, 90%); aspect-ratio: 16 / 10; place-items: center; overflow: hidden; border: 1px solid var(--evidence-line); border-radius: 8px; background: #172026; box-shadow: 0 14px 34px rgba(0, 0, 0, .18); transform: scale(var(--image-scale, 1)); transform-origin: center; transition: transform var(--ease); }
+    .image-canvas svg { width: 100%; height: 100%; }
+
+    .patch-view { min-width: 620px; padding: 22px 0 30px; font: 9.5px/1.55 var(--mono); }
+    .patch-file { display: flex; min-height: 31px; align-items: center; gap: 7px; padding: 0 12px; border-top: 1px solid var(--evidence-line); border-bottom: 1px solid var(--evidence-line); color: var(--evidence-muted); background: var(--surface-subtle); }
+    .patch-file svg { width: 13px; height: 13px; }
+    .diff-line { display: grid; min-height: 17px; grid-template-columns: 38px 38px 17px minmax(max-content, 1fr); padding-right: 14px; white-space: pre; }
+    .diff-line > span { display: grid; place-items: center; color: var(--faint); user-select: none; }
+    .diff-line.add { color: var(--diff-add); background: var(--diff-add-soft); }
+    .diff-line.remove { color: var(--diff-remove); background: var(--diff-remove-soft); }
+    .diff-line.hunk { color: var(--brand-ink); background: var(--diff-hunk-soft); }
+
+    .large-view { min-width: 620px; padding: 22px 0 35px; font: 9.5px/1.6 var(--mono); }
+    .page-window { position: sticky; top: 0; z-index: 4; display: flex; min-height: 28px; align-items: center; justify-content: space-between; padding: 0 12px; border-top: 1px solid var(--evidence-line); border-bottom: 1px solid var(--evidence-line); color: var(--evidence-muted); background: var(--surface-subtle); font-size: 8px; }
+    .log-line { display: grid; min-height: 17px; grid-template-columns: 58px 80px minmax(max-content, 1fr); gap: 9px; padding: 0 12px; white-space: pre; }
+    .log-line span:first-child { color: var(--faint); text-align: right; user-select: none; }
+    .log-time { color: var(--brand-ink); }
+    .log-warn { color: var(--attention); }
+
+    .empty-view { display: grid; min-height: 100%; place-items: center; padding: 30px; color: var(--faint); text-align: center; }
+    .empty-view svg { width: 28px; height: 28px; margin: 0 auto 7px; }
+    .empty-view strong { display: block; color: var(--muted); font-size: 11px; }
+    .empty-view p { margin: 3px 0 0; font-size: 9px; }
+
+    .toast {
+      position: fixed;
+      right: 24px;
+      bottom: 22px;
+      z-index: 300;
+      display: flex;
+      max-width: 360px;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 10px;
+      border: 1px solid var(--line-strong);
+      border-radius: 7px;
+      color: var(--ink);
+      background: var(--surface-raised);
+      box-shadow: var(--shadow-float);
+      font-size: 9.5px;
+      opacity: 0;
+      pointer-events: none;
+      transform: translateY(8px);
+      transition: opacity var(--ease), transform var(--ease);
+    }
+    .toast.show { opacity: 1; transform: translateY(0); }
+    .toast svg { width: 14px; height: 14px; color: var(--success); }
+
+    @media (max-width: 1280px) {
+      .prototype-heading { min-width: 198px; }
+      .prototype-heading span, .prototype-field > span { display: none; }
+      .prototype-controls { gap: 6px; }
+      .segments button { padding: 0 6px; }
+    }
+    @media (hover: none) {
+      .tab-close { opacity: 1; pointer-events: auto; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; }
+    }
+  </style>
+</head>
+<body>
+  <a class="skip-link" href="#previewPanel">跳到文件预览</a>
+
+  <svg aria-hidden="true" style="position:absolute;width:0;height:0;overflow:hidden">
+    <symbol id="i-chat" viewBox="0 0 24 24"><path d="M4 5h16v12H8l-4 3z"/><path d="M8 9h8M8 13h5"/></symbol>
+    <symbol id="i-users" viewBox="0 0 24 24"><circle cx="9" cy="8" r="3"/><path d="M3.5 19a5.5 5.5 0 0 1 11 0M15 6.5a2.5 2.5 0 0 1 0 5M16.5 14a4.5 4.5 0 0 1 4 4.5"/></symbol>
+    <symbol id="i-memory" viewBox="0 0 24 24"><path d="M7 4h10v16H7z"/><path d="M10 8h4M10 12h4M10 16h3"/></symbol>
+    <symbol id="i-folder" viewBox="0 0 24 24"><path d="M3 7h7l2 2h9v10H3z"/></symbol>
+    <symbol id="i-settings" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19 12a7 7 0 0 0-.1-1l2-1.6-2-3.4-2.5 1a8 8 0 0 0-1.8-1L14.2 3h-4.4l-.4 3a8 8 0 0 0-1.8 1L5.1 6 3 9.4 5.1 11a7 7 0 0 0 0 2L3 14.6 5.1 18l2.5-1a8 8 0 0 0 1.8 1l.4 3h4.4l.4-3a8 8 0 0 0 1.8-1l2.5 1 2.1-3.4-2.1-1.6a7 7 0 0 0 .1-1z"/></symbol>
+    <symbol id="i-file" viewBox="0 0 24 24"><path d="M5 3h9l5 5v13H5z"/><path d="M14 3v6h5"/></symbol>
+    <symbol id="i-code" viewBox="0 0 24 24"><path d="m9 7-5 5 5 5M15 7l5 5-5 5M13 4l-2 16"/></symbol>
+    <symbol id="i-x" viewBox="0 0 24 24"><path d="m7 7 10 10M17 7 7 17"/></symbol>
+    <symbol id="i-more" viewBox="0 0 24 24"><circle cx="5" cy="12" r="1" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1" fill="currentColor" stroke="none"/><circle cx="19" cy="12" r="1" fill="currentColor" stroke="none"/></symbol>
+    <symbol id="i-back" viewBox="0 0 24 24"><path d="m15 18-6-6 6-6"/></symbol>
+    <symbol id="i-panel-right-close" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M15 4v16M9 9l3 3-3 3"/></symbol>
+    <symbol id="i-panel-right-open" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M15 4v16M12 9l-3 3 3 3"/></symbol>
+    <symbol id="i-copy" viewBox="0 0 24 24"><rect x="8" y="8" width="11" height="11" rx="1"/><path d="M16 8V5H5v11h3"/></symbol>
+    <symbol id="i-external" viewBox="0 0 24 24"><path d="M13 5h6v6M19 5l-9 9"/><path d="M17 13v6H5V7h6"/></symbol>
+    <symbol id="i-reveal" viewBox="0 0 24 24"><path d="M3 7h7l2 2h9v10H3z"/><path d="m10 13 2 2 3-4"/></symbol>
+    <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M20 7v5h-5M4 17v-5h5"/><path d="M6.1 9a7 7 0 0 1 11.3-2L20 9M4 15l2.6 2A7 7 0 0 0 18 15"/></symbol>
+    <symbol id="i-alert" viewBox="0 0 24 24"><path d="M12 3 2.8 20h18.4z"/><path d="M12 9v5M12 17h.01"/></symbol>
+    <symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="m8 12 2.5 2.5L16 9"/></symbol>
+    <symbol id="i-search" viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m15.5 15.5 5 5"/></symbol>
+    <symbol id="i-paperclip" viewBox="0 0 24 24"><path d="m8 12 6-6a4 4 0 0 1 5.7 5.7l-8 8a6 6 0 0 1-8.5-8.5l8-8"/></symbol>
+    <symbol id="i-task" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="m8 12 2.5 2.5L16 9"/></symbol>
+    <symbol id="i-lock" viewBox="0 0 24 24"><rect x="5" y="10" width="14" height="10" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></symbol>
+  </svg>
+
+  <header class="prototype-bar" aria-label="设计稿控制区">
+    <div class="prototype-heading">
+      <strong>独立文件预览区 · 设计稿</strong>
+      <span>控制区不属于生产 UI；下方还原当前 Rovai App Shell</span>
+    </div>
+    <div class="prototype-controls">
+      <label class="prototype-field"><span>文件类型</span>
+        <select class="prototype-select" id="fileSelect">
+          <option value="code">TypeScript / 代码</option>
+          <option value="markdown">Markdown</option>
+          <option value="html">HTML 沙箱</option>
+          <option value="image">图片</option>
+          <option value="svg">SVG</option>
+          <option value="patch">Diff / Patch</option>
+          <option value="large">大型日志</option>
+          <optgroup label="不进入预览 · 使用默认应用">
+            <option value="pdf">PDF</option>
+            <option value="office">Office</option>
+            <option value="audio">音频</option>
+            <option value="video">视频</option>
+            <option value="archive">压缩包</option>
+            <option value="binary">数据库 / 二进制</option>
+          </optgroup>
+        </select>
+      </label>
+      <label class="prototype-field"><span>文件状态</span>
+        <select class="prototype-select" id="stateSelect">
+          <option value="ready">正常（无状态标签）</option>
+          <option value="updated">检测到更新</option>
+          <option value="refreshing">正在重新加载</option>
+          <option value="refresh-error">重新加载失败</option>
+          <option value="opening">首次打开中</option>
+          <option value="error">首次打开失败</option>
+        </select>
+      </label>
+      <div class="prototype-field"><span>来源</span><div class="segments" aria-label="返回来源">
+        <button type="button" data-origin-value="conversation" aria-pressed="true">会话</button>
+        <button type="button" data-origin-value="review" aria-pressed="false">Review</button>
+      </div></div>
+      <div class="prototype-field"><span>布局</span><div class="segments" aria-label="布局模式">
+        <button type="button" data-layout-value="wide" aria-pressed="true">宽</button>
+        <button type="button" data-layout-value="middle" aria-pressed="false">中</button>
+        <button type="button" data-layout-value="compact" aria-pressed="false">紧凑 / 200%</button>
+      </div></div>
+      <div class="prototype-field"><span>平台</span><div class="segments" aria-label="宿主平台">
+        <button type="button" data-platform-value="darwin" aria-pressed="true">macOS</button>
+        <button type="button" data-platform-value="win32" aria-pressed="false">Windows</button>
+      </div></div>
+      <div class="prototype-field"><span>主题</span><div class="segments" aria-label="主题">
+        <button type="button" data-theme-value="day" aria-pressed="true">Day</button>
+        <button type="button" data-theme-value="night" aria-pressed="false">Night</button>
+      </div></div>
+    </div>
+  </header>
+
+  <main class="prototype-stage" id="prototypeStage" data-layout="wide" data-origin="conversation" data-platform="darwin" data-inspector-collapsed="false">
+    <section class="app-frame" aria-label="Rovai 文件预览界面">
+      <div class="windows-application-menu" role="menubar" aria-label="应用菜单">
+        <button class="windows-application-menu-item" type="button" role="menuitem" aria-haspopup="menu" accesskey="f" tabindex="0" data-windows-menu="File">File</button>
+        <button class="windows-application-menu-item" type="button" role="menuitem" aria-haspopup="menu" accesskey="e" tabindex="-1" data-windows-menu="Edit">Edit</button>
+        <button class="windows-application-menu-item" type="button" role="menuitem" aria-haspopup="menu" accesskey="v" tabindex="-1" data-windows-menu="View">View</button>
+        <button class="windows-application-menu-item" type="button" role="menuitem" aria-haspopup="menu" accesskey="w" tabindex="-1" data-windows-menu="Window">Window</button>
+      </div>
+      <aside class="rail" aria-label="应用导航">
+        <div class="rail-drag"></div>
+        <div class="rail-brand"><span class="brand-mark" aria-hidden="true"><span class="brand-star"></span><span class="brand-horizon"></span></span><span>Rovai AI</span></div>
+        <div class="rail-scroll">
+          <nav class="rail-primary" aria-label="主要导航">
+            <button class="rail-row" type="button"><svg class="icon" aria-hidden="true"><use href="#i-chat"/></svg><span>快速对话</span></button>
+            <button class="rail-row" type="button"><svg class="icon" aria-hidden="true"><use href="#i-users"/></svg><span>队员</span></button>
+            <button class="rail-row" type="button"><svg class="icon" aria-hidden="true"><use href="#i-memory"/></svg><span>记忆</span></button>
+          </nav>
+          <div class="jump-box"><span>跳转到</span><kbd id="shortcutLabel" aria-hidden="true">⌘K</kbd></div>
+          <section class="rail-section">
+            <div class="rail-section-title">项目</div>
+            <div class="project-row"><svg class="icon" aria-hidden="true"><use href="#i-folder"/></svg><span>rovai-ai</span></div>
+            <div class="camp-list">
+              <button class="camp-row selected" type="button"><span>文件预览区设计</span><small>3</small></button>
+              <button class="camp-row" type="button"><span>Runtime 文件变更验证</span><small></small></button>
+              <button class="camp-row" type="button"><span>日常开发</span><small></small></button>
+            </div>
+          </section>
+        </div>
+        <div class="rail-footer"><button class="settings-row" type="button"><svg class="icon" aria-hidden="true"><use href="#i-settings"/></svg><span>设置</span></button></div>
+      </aside>
+
+      <header class="workspace-head">
+        <div class="conversation-head">
+          <div class="breadcrumb"><span>rovai-ai</span><span>/</span><strong>文件预览区设计</strong></div>
+          <span class="top-status">今天</span>
+        </div>
+        <div class="file-tabs">
+          <button class="tab-return" id="returnButton" type="button"><svg class="icon" aria-hidden="true"><use href="#i-back"/></svg><span id="returnLabel">返回会话</span></button>
+          <div class="tab-strip" id="tabStrip" role="tablist" aria-label="打开的文件"></div>
+          <button class="tabs-overflow" id="tabsOverflow" type="button" aria-label="显示全部打开的文件" hidden><svg class="icon" aria-hidden="true" style="width:14px;height:14px;margin:auto"><use href="#i-more"/></svg></button>
+        </div>
+        <div class="inspector-head">
+          <div class="inspector-tabs" role="tablist" aria-label="Camp 辅助信息">
+            <button class="inspector-tab" id="inspector-tab-tasks" type="button" role="tab" aria-selected="true" aria-controls="inspector-panel-tasks" tabindex="0" data-inspector-tab="tasks">任务 <small>2</small></button>
+            <button class="inspector-tab" id="inspector-tab-members" type="button" role="tab" aria-selected="false" aria-controls="inspector-panel-members" tabindex="-1" data-inspector-tab="members">队员 <small>2</small></button>
+          </div>
+        </div>
+        <button class="sidecar-toggle" id="sidecarToggle" type="button" aria-label="折叠任务与队员" aria-controls="inspectorPanel" aria-expanded="true" title="折叠任务与队员"><svg class="icon" aria-hidden="true"><use id="sidecarToggleIcon" href="#i-panel-right-close"/></svg></button>
+      </header>
+
+      <div class="app-main">
+        <div class="workspace-grid">
+          <section class="conversation-pane" aria-label="Camp 会话">
+            <div class="timeline" tabindex="0">
+              <div class="timeline-track">
+                <div class="day-rule"><span>今天</span></div>
+                <article class="message">
+                  <span class="avatar user" aria-hidden="true">MX</span>
+                  <div class="message-copy"><div class="message-head"><strong>你</strong><span>10:42</span></div><p>把文件预览方案补齐。重点看看 <button class="local-file-link" type="button" data-open-file="code"><svg class="icon" aria-hidden="true"><use href="#i-file"/></svg>apps/desktop/src/renderer/src/CampWorkspace.tsx:1249</button>，不要破坏当前会话布局。</p></div>
+                </article>
+                <article class="message">
+                  <span class="avatar" aria-hidden="true">R</span>
+                  <div class="message-copy"><div class="message-head"><strong>Rook</strong><span>10:44</span></div><p>合同已经收口。完整交互说明在 <button class="local-file-link" type="button" data-open-file="markdown"><svg class="icon" aria-hidden="true"><use href="#i-file"/></svg>docs/file-preview/README.md#交互</button>，HTML 隔离样例见 <button class="local-file-link" type="button" data-open-file="html"><svg class="icon" aria-hidden="true"><use href="#i-file"/></svg>fixtures/preview.html</button>。</p></div>
+                </article>
+                <div class="run-card">
+                  <button class="run-card-head" type="button" id="reviewTrigger">
+                    <span class="run-icon" aria-hidden="true"><svg class="icon"><use href="#i-folder"/></svg></span>
+                    <span class="run-copy"><strong>Files Changed</strong><span>4 个文件 · 6 次修改 · immutable Evidence</span></span>
+                    <span class="run-view" aria-hidden="true">View</span>
+                  </button>
+                  <div class="run-files">
+                    <button class="run-file" type="button" data-open-file="patch"><code>apps/desktop/src/renderer/src/file-preview/FilePreviewPane.tsx</code><small>+126 −8</small></button>
+                    <button class="run-file" type="button" data-open-file="code"><code>packages/contracts/src/index.ts</code><small>+42 −3</small></button>
+                  </div>
+                </div>
+                <article class="message">
+                  <span class="avatar" aria-hidden="true">R</span>
+                  <div class="message-copy"><div class="message-head"><strong>Rook</strong><span>10:51</span></div><p>大型日志不会进入完整 EditorState；它使用分页 Viewer，并保留绝对行号和内容 generation。</p></div>
+                </article>
+              </div>
+            </div>
+            <div class="composer-wrap">
+              <div class="composer" aria-label="消息输入区">
+                <div class="composer-selections" id="composerSelections"></div>
+                <div class="composer-input">给当前会话发送消息…</div>
+                <div class="composer-actions"><button class="icon-button" type="button" aria-label="添加附件"><svg class="icon" aria-hidden="true"><use href="#i-paperclip"/></svg></button><button class="send" type="button">发送</button></div>
+              </div>
+            </div>
+          </section>
+
+          <section class="preview-pane" id="previewPanel" aria-label="文件预览区">
+            <div class="file-path-bar" id="filePathBar" role="group" aria-label="当前项目相对路径">
+              <div class="file-path-trail" id="fileBreadcrumb">
+                <span class="file-path-leading" id="filePathLeading">apps &gt; desktop &gt; src &gt; renderer &gt; src</span>
+                <span class="file-path-separator" id="filePathSeparator" aria-hidden="true">&gt;</span>
+                <strong class="file-path-name" id="filePathName">CampWorkspace.tsx</strong>
+              </div>
+            </div>
+            <div class="viewer-shell" id="viewerShell" data-status="ready">
+              <div class="file-menu" id="fileMenu" hidden>
+                <button type="button" data-menu-action="copy-path"><svg class="icon" aria-hidden="true"><use href="#i-copy"/></svg>复制显示路径</button>
+                <button type="button" data-menu-action="open"><svg class="icon" aria-hidden="true"><use href="#i-external"/></svg>使用系统默认应用打开</button>
+                <button type="button" data-menu-action="reveal"><svg class="icon" aria-hidden="true"><use href="#i-reveal"/></svg><span data-reveal-label>在 Finder 中显示</span></button>
+                <button type="button" data-menu-action="reload"><svg class="icon" aria-hidden="true"><use href="#i-refresh"/></svg>重新加载</button>
+                <hr />
+                <button type="button" data-menu-action="close"><svg class="icon" aria-hidden="true"><use href="#i-x"/></svg>关闭当前文件</button>
+              </div>
+
+              <div class="update-notice" id="updateNotice" role="status" aria-live="polite"><svg class="icon" aria-hidden="true"><use href="#i-refresh"/></svg><span id="updateNoticeLabel">有更新</span><button type="button" id="refreshAction">重新加载</button></div>
+
+              <section class="viewer-scene" data-scene="code" id="panel-code" role="tabpanel" tabindex="0">
+                <div class="code-view">
+                  <div class="selection-popover"><span>已选择 L47–L50 · 164 字符</span><button type="button" id="attachSelection">附加到当前会话</button></div>
+                  <div class="code-line"><span><span class="tok-key">export interface</span> <span class="tok-type">FilePreviewTab</span> {</span></div>
+                  <div class="code-line"><span>  tabId: <span class="tok-type">string</span></span></div>
+                  <div class="code-line"><span>  previewKey: <span class="tok-type">string</span></span></div>
+                  <div class="code-line"><span>  handleId: <span class="tok-type">string</span></span></div>
+                  <div class="code-line"><span>  reopenToken: <span class="tok-type">string</span></span></div>
+                  <div class="code-line"><span>  displayPath: <span class="tok-type">string</span></span></div>
+                  <div class="code-line selected"><span>  loadState: <span class="tok-str">'opening'</span> | <span class="tok-str">'ready'</span> | <span class="tok-str">'error'</span></span></div>
+                  <div class="code-line selected"><span>  hasExternalUpdate: <span class="tok-type">boolean</span></span></div>
+                  <div class="code-line selected"><span>  isRefreshing: <span class="tok-type">boolean</span></span></div>
+                  <div class="code-line selected"><span>  error?: <span class="tok-type">FilePreviewError</span></span></div>
+                  <div class="code-line"><span>  target?: <span class="tok-type">FileLocationTarget</span></span></div>
+                  <div class="code-line"><span>}</span></div>
+                  <div class="code-line"><span></span></div>
+                  <div class="code-line"><span><span class="tok-key">export function</span> <span class="tok-fn">openFilePreview</span>(request: <span class="tok-type">OpenFilePreviewRequest</span>) {</span></div>
+                  <div class="code-line"><span>  <span class="tok-comment">// Renderer 只提交封闭来源，不提交任意路径。</span></span></div>
+                  <div class="code-line"><span>  <span class="tok-key">return</span> window.rovai.filePreview.<span class="tok-fn">open</span>(request)</span></div>
+                  <div class="code-line"><span>}</span></div>
+                </div>
+              </section>
+
+              <section class="viewer-scene" data-scene="markdown" id="panel-markdown" role="tabpanel" tabindex="0" hidden>
+                <article class="document-view">
+                  <h1>文件预览区</h1>
+                  <p class="lede">在不离开当前 Camp 的情况下阅读消息引用、附件与当前工作区文件。</p>
+                  <div class="document-callout">历史 Evidence 与当前磁盘文件始终是两个动作、两个真源。</div>
+                  <h2>交互</h2>
+                  <ul><li>再次打开相同文件时激活原 Tab，并更新定位目标。</li><li>紧凑布局替换会话，但保留时间线、Composer 和回复状态。</li><li>大于 4 MiB 的文本使用有界分页，不持有全文。</li></ul>
+                  <div class="document-code">window.rovai.filePreview.open({
+  kind: 'message_reference',
+  campId,
+  messageId,
+  rawReference: './src/app.tsx#L42'
+})</div>
+                  <div class="document-asset"><div><svg class="icon" aria-hidden="true"><use href="#i-file"/></svg><span>本地图片通过父句柄受控加载</span></div></div>
+                </article>
+              </section>
+
+              <section class="viewer-scene" data-scene="html" id="panel-html" role="tabpanel" tabindex="0" hidden>
+                <div class="html-preview">
+                  <div class="sandbox-sheet">
+                    <div class="sandbox-browser"><span class="sandbox-dot"></span><span class="sandbox-dot"></span><span class="sandbox-dot"></span><span class="sandbox-address">sandbox · opaque origin · network blocked</span><svg class="icon" aria-hidden="true" style="width:12px;height:12px"><use href="#i-lock"/></svg></div>
+                    <div class="sandbox-body"><div class="sandbox-copy"><span class="sandbox-eyebrow">Local prototype</span><h2>Quiet tools for deep work.</h2><p>内联 JavaScript 可以驱动页面控件；本地 CSS、图片和模块从受控协议加载。页面没有 Rovai API、Node、网络或导航能力。</p><button type="button" id="sandboxAction">运行页面内交互</button></div><div class="sandbox-art" aria-hidden="true"></div></div>
+                  </div>
+                </div>
+              </section>
+
+              <section class="viewer-scene" data-scene="image" id="panel-image" role="tabpanel" tabindex="0" hidden>
+                <div class="image-view"><div class="image-canvas" id="imageCanvas"><svg viewBox="0 0 800 500" role="img" aria-label="抽象山谷图片样例"><defs><linearGradient id="sky" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#30444f"/><stop offset="1" stop-color="#7897ae"/></linearGradient><linearGradient id="ground" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#172026"/><stop offset="1" stop-color="#405f52"/></linearGradient></defs><rect width="800" height="500" fill="url(#sky)"/><circle cx="635" cy="105" r="42" fill="#e7ecef" opacity=".86"/><path d="M0 390 190 168l112 142 104-99 173 179 81-85 140 121v74H0Z" fill="#26383e"/><path d="M0 430 214 258l108 95 117-76 139 114 87-55 135 98v66H0Z" fill="url(#ground)"/><path d="M200 182 166 268l48-10 33 35 48 6Z" fill="#dce4e9" opacity=".72"/><path d="M0 442c168-24 281-13 404 11 135 26 258 4 396-22v69H0Z" fill="#10171d" opacity=".72"/></svg></div></div>
+              </section>
+
+              <section class="viewer-scene" data-scene="svg" id="panel-svg" role="tabpanel" tabindex="0" hidden>
+                <div class="image-view"><div class="image-canvas" id="svgCanvas"><svg viewBox="0 0 800 500" role="img" aria-label="文件预览架构图"><rect width="800" height="500" fill="#f4f6f3"/><g fill="#fff" stroke="#526f88" stroke-width="2"><rect x="58" y="82" width="188" height="84" rx="10"/><rect x="306" y="82" width="188" height="84" rx="10"/><rect x="554" y="82" width="188" height="84" rx="10"/><rect x="182" y="300" width="188" height="84" rx="10"/><rect x="430" y="300" width="188" height="84" rx="10"/></g><g stroke="#526f88" stroke-width="2" fill="none"><path d="M246 124h60M494 124h60M648 166v72H524v62M152 166v72h124v62M370 342h60"/></g><g fill="#171b20" font-family="-apple-system, sans-serif" font-size="18" text-anchor="middle"><text x="152" y="117">Conversation</text><text x="152" y="141" font-size="13" fill="#616a73">closed source request</text><text x="400" y="117">Core Authority</text><text x="400" y="141" font-size="13" fill="#616a73">domain truth</text><text x="648" y="117">Electron Main</text><text x="648" y="141" font-size="13" fill="#616a73">native capability</text><text x="276" y="335">FilePreviewPane</text><text x="276" y="359" font-size="13" fill="#616a73">tabs + viewer</text><text x="524" y="335">Sandbox HTML</text><text x="524" y="359" font-size="13" fill="#616a73">opaque origin</text></g></svg></div></div>
+              </section>
+
+              <section class="viewer-scene" data-scene="patch" id="panel-patch" role="tabpanel" tabindex="0" hidden>
+                <div class="patch-view">
+                  <div class="patch-file"><svg class="icon" aria-hidden="true"><use href="#i-file"/></svg><code>apps/desktop/src/renderer/src/file-preview/FilePreviewPane.tsx</code></div>
+                  <div class="diff-line hunk"><span></span><span></span><span></span><code>@@ -118,7 +118,11 @@ export function FilePreviewPane()</code></div>
+                  <div class="diff-line"><span>118</span><span>118</span><span></span><code>  const activeTab = state.tabs.find((tab) =&gt; tab.tabId === state.activeTabId)</code></div>
+                  <div class="diff-line remove"><span>119</span><span></span><span>−</span><code>  const reopenRequest = activeTab?.reopenRequest</code></div>
+                  <div class="diff-line add"><span></span><span>119</span><span>+</span><code>  const reopenToken = activeTab?.reopenToken</code></div>
+                  <div class="diff-line add"><span></span><span>120</span><span>+</span><code>  const expectedGeneration = activeTab?.contentGeneration</code></div>
+                  <div class="diff-line"><span>120</span><span>121</span><span></span><code></code></div>
+                  <div class="diff-line add"><span></span><span>122</span><span>+</span><code>  useCampBoundPreviewState(state.campId)</code></div>
+                  <div class="diff-line"><span>121</span><span>123</span><span></span><code>  return &lt;FileViewerHost tab={activeTab} /&gt;</code></div>
+                  <div class="patch-file"><svg class="icon" aria-hidden="true"><use href="#i-file"/></svg><code>packages/contracts/src/index.ts</code></div>
+                  <div class="diff-line hunk"><span></span><span></span><span></span><code>@@ -956,6 +956,10 @@ export type StructuredCampMessageSegment =</code></div>
+                  <div class="diff-line"><span>956</span><span>956</span><span></span><code>  | { kind: 'text'; text: string }</code></div>
+                  <div class="diff-line add"><span></span><span>957</span><span>+</span><code>  | { kind: 'file_selection'; selection: FileSelectionSnapshot }</code></div>
+                </div>
+              </section>
+
+              <section class="viewer-scene" data-scene="large" id="panel-large" role="tabpanel" tabindex="0" hidden>
+                <div class="large-view">
+                  <div class="page-window"><span>已加载 12.40–12.66 MiB / 48.20 MiB</span><span>第 184,321–187,908 行 · generation 7f2a…</span></div>
+                  <div class="log-line"><span>184321</span><code class="log-time">10:44:12.047</code><code>INFO  file_preview.open source=message_reference handle=fp_4e91</code></div>
+                  <div class="log-line"><span>184322</span><code class="log-time">10:44:12.052</code><code>DEBUG authority verified camp=camp_29 source=message_814</code></div>
+                  <div class="log-line"><span>184323</span><code class="log-time">10:44:12.054</code><code>INFO  canonical target accepted generation=7f2a9d</code></div>
+                  <div class="log-line"><span>184324</span><code class="log-time">10:44:12.058</code><code>DEBUG page actual_start=12997632 actual_line=184321 next=13259776</code></div>
+                  <div class="log-line"><span>184325</span><code class="log-time">10:44:12.063</code><code>INFO  renderer page committed bytes=262144</code></div>
+                  <div class="log-line"><span>184326</span><code class="log-time">10:44:12.080</code><code class="log-warn">EVENT root watcher matched open tab; hasExternalUpdate=true</code></div>
+                  <div class="log-line"><span>184327</span><code class="log-time">10:44:12.081</code><code>DEBUG old generation remains visible until explicit reload</code></div>
+                  <div class="log-line"><span>184328</span><code class="log-time">10:44:12.104</code><code>INFO  page cache retained=3 evicted=1 memory=792KiB</code></div>
+                  <div class="log-line"><span>184329</span><code class="log-time">10:44:12.110</code><code>DEBUG selection range L184326:C1–L184327:C64</code></div>
+                  <div class="log-line"><span>184330</span><code class="log-time">10:44:12.113</code><code>INFO  visible page retained until explicit reload</code></div>
+                </div>
+              </section>
+
+              <section class="viewer-scene" data-scene="empty" id="panel-empty" role="tabpanel" tabindex="0" hidden><div class="empty-view"><div><svg class="icon" aria-hidden="true"><use href="#i-file"/></svg><strong>没有打开的文件</strong><p>从会话文件引用、附件或 Files Changed 打开文件。</p></div></div></section>
+
+              <div class="state-overlay opening" role="status" aria-live="polite"><div class="state-card"><div class="skeleton" aria-hidden="true"><span></span><span></span><span></span><span></span></div><strong>正在打开文件</strong><p>读取时间较长时才显示此反馈；完成后直接呈现内容。</p></div></div>
+              <div class="state-overlay error" role="alert"><div class="state-card"><span class="state-icon" aria-hidden="true"><svg class="icon"><use href="#i-alert"/></svg></span><strong>无法打开文件</strong><p>请检查文件仍然存在，并确认当前来源仍允许访问。</p><div class="state-actions"><button class="primary" type="button" data-recovery="retry-open">重试</button></div></div></div>
+            </div>
+          </section>
+
+          <aside class="inspector" id="inspectorPanel" aria-label="Camp 辅助信息">
+            <section class="inspector-panel" id="inspector-panel-tasks" role="tabpanel" aria-labelledby="inspector-tab-tasks" data-inspector-panel="tasks"><div class="task-row"><svg class="icon" aria-hidden="true"><use href="#i-task"/></svg><span>补齐文件预览合同</span></div><div class="task-row"><svg class="icon" aria-hidden="true"><use href="#i-task"/></svg><span>复核 HTML 隔离边界</span></div></section>
+            <section class="inspector-panel" id="inspector-panel-members" role="tabpanel" aria-labelledby="inspector-tab-members" data-inspector-panel="members" hidden><div class="member-row"><span class="member-avatar">R</span><span class="member-copy"><strong>Rook</strong><small>Codex · 可用</small></span></div><div class="member-row"><span class="member-avatar" style="background:var(--identity-3)">S</span><span class="member-copy"><strong>Sora</strong><small>Claude · 可用</small></span></div></section>
+          </aside>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <div class="toast" id="toast" role="status" aria-live="polite"><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg><span id="toastText">已完成</span></div>
+  <div class="sr-only" id="liveStatus" aria-live="polite"></div>
+
+  <script>
+    const fileCatalog = {
+      code: { name: 'CampWorkspace.tsx', path: 'apps/desktop/src/renderer/src/CampWorkspace.tsx', scene: 'code' },
+      markdown: { name: 'rovai-file-preview-implementation-plan.md', path: 'docs/prototypes/file-preview/rovai-file-preview-implementation-plan.md', scene: 'markdown' },
+      html: { name: 'preview.html', path: 'fixtures/preview.html', scene: 'html' },
+      image: { name: 'hero.png', path: 'fixtures/assets/hero.png', scene: 'image' },
+      svg: { name: 'architecture.svg', path: 'docs/architecture/file-preview.svg', scene: 'svg' },
+      patch: { name: 'changes.patch', path: 'fixtures/changes.patch', scene: 'patch' },
+      large: { name: 'runtime.log', path: 'logs/runtime.log', scene: 'large' },
+      pdf: { name: 'product-spec.pdf', path: 'docs/product-spec.pdf', behavior: 'system' },
+      office: { name: 'release-plan.pptx', path: 'planning/release-plan.pptx', behavior: 'system' },
+      audio: { name: 'briefing.m4a', path: 'recordings/briefing.m4a', behavior: 'system' },
+      video: { name: 'walkthrough.mp4', path: 'recordings/walkthrough.mp4', behavior: 'system' },
+      archive: { name: 'artifacts.zip', path: 'build/artifacts.zip', behavior: 'system' },
+      binary: { name: 'cache.sqlite3', path: 'data/cache.sqlite3', behavior: 'system' }
+    }
+
+    const initialTabs = ['markdown', 'code', 'html', 'image', 'patch']
+    let openTabs = [...initialTabs]
+    let activeFile = 'code'
+    function createReadyTabState() {
+      return { loadState: 'ready', hasExternalUpdate: false, isRefreshing: false, error: null }
+    }
+
+    const tabStates = new Map(initialTabs.map((key) => [key, createReadyTabState()]))
+    let menuTargetFile = null
+    let toastTimer
+    const refreshTimers = new Map()
+
+    const stage = document.getElementById('prototypeStage')
+    const fileSelect = document.getElementById('fileSelect')
+    const stateSelect = document.getElementById('stateSelect')
+    const tabStrip = document.getElementById('tabStrip')
+    const tabsOverflow = document.getElementById('tabsOverflow')
+    const viewerShell = document.getElementById('viewerShell')
+    const updateNoticeLabel = document.getElementById('updateNoticeLabel')
+    const refreshAction = document.getElementById('refreshAction')
+    const filePathBar = document.getElementById('filePathBar')
+    const filePathLeading = document.getElementById('filePathLeading')
+    const filePathSeparator = document.getElementById('filePathSeparator')
+    const filePathName = document.getElementById('filePathName')
+    const fileMenu = document.getElementById('fileMenu')
+    const inspectorTabs = [...document.querySelectorAll('[data-inspector-tab]')]
+    const sidecarToggle = document.getElementById('sidecarToggle')
+    const sidecarToggleIcon = document.getElementById('sidecarToggleIcon')
+    const returnLabel = document.getElementById('returnLabel')
+    const liveStatus = document.getElementById('liveStatus')
+    const shortcutLabel = document.getElementById('shortcutLabel')
+    const windowsMenuItems = [...document.querySelectorAll('[data-windows-menu]')]
+
+    function svgUse(id) {
+      return `<svg class="icon" aria-hidden="true"><use href="#${id}"/></svg>`
+    }
+
+    function pathSegmentsForFile(file) {
+      return file.path.split(/[\\/]+/).filter(Boolean)
+    }
+
+    function displayPathForFile(file) {
+      const segments = pathSegmentsForFile(file)
+      return stage.dataset.platform === 'win32'
+        ? segments.join(String.fromCharCode(92))
+        : segments.join('/')
+    }
+
+    function renderFileBreadcrumb(file) {
+      if (!file) {
+        filePathBar.hidden = true
+        return
+      }
+      filePathBar.hidden = false
+      const segments = pathSegmentsForFile(file)
+      const directorySegments = segments.slice(0, -1)
+      filePathLeading.textContent = directorySegments.join(' > ')
+      filePathLeading.hidden = directorySegments.length === 0
+      filePathSeparator.hidden = directorySegments.length === 0
+      filePathName.textContent = segments.at(-1) || file.name
+      const displayPath = displayPathForFile(file)
+      filePathBar.title = `当前项目相对路径：${displayPath}`
+      filePathBar.setAttribute('aria-label', `当前项目相对路径：${displayPath}`)
+    }
+
+    function showToast(message) {
+      const toast = document.getElementById('toast')
+      document.getElementById('toastText').textContent = message
+      toast.classList.add('show')
+      clearTimeout(toastTimer)
+      toastTimer = setTimeout(() => toast.classList.remove('show'), 1800)
+    }
+
+    function announce(message) {
+      liveStatus.textContent = ''
+      requestAnimationFrame(() => { liveStatus.textContent = message })
+    }
+
+    function activateInspectorTab(kind, moveFocus = false) {
+      inspectorTabs.forEach((button) => {
+        const selected = button.dataset.inspectorTab === kind
+        button.setAttribute('aria-selected', String(selected))
+        button.tabIndex = selected ? 0 : -1
+        if (selected && moveFocus) button.focus()
+      })
+      document.querySelectorAll('[data-inspector-panel]').forEach((panel) => {
+        panel.hidden = panel.dataset.inspectorPanel !== kind
+      })
+    }
+
+    function handleInspectorTabKey(event, index) {
+      let targetIndex = null
+      if (event.key === 'ArrowRight') targetIndex = (index + 1) % inspectorTabs.length
+      if (event.key === 'ArrowLeft') targetIndex = (index - 1 + inspectorTabs.length) % inspectorTabs.length
+      if (event.key === 'Home') targetIndex = 0
+      if (event.key === 'End') targetIndex = inspectorTabs.length - 1
+      if (targetIndex === null) return
+      event.preventDefault()
+      activateInspectorTab(inspectorTabs[targetIndex].dataset.inspectorTab, true)
+    }
+
+    function setInspectorCollapsed(collapsed, announceChange = false) {
+      stage.dataset.inspectorCollapsed = String(collapsed)
+      const label = collapsed ? '展开任务与队员' : '折叠任务与队员'
+      sidecarToggle.setAttribute('aria-expanded', String(!collapsed))
+      sidecarToggle.setAttribute('aria-label', label)
+      sidecarToggle.title = label
+      sidecarToggleIcon.setAttribute('href', collapsed ? '#i-panel-right-open' : '#i-panel-right-close')
+      if (announceChange) announce(collapsed ? '任务与队员已折叠' : '任务与队员已展开')
+      updateQuery()
+    }
+
+    function renderTabs(focusKey) {
+      tabStrip.replaceChildren()
+      openTabs.forEach((key, index) => {
+        const file = fileCatalog[key]
+        const tab = document.createElement('div')
+        const hasExternalUpdate = tabStates.get(key)?.hasExternalUpdate === true
+        tab.className = `file-tab${key === activeFile ? ' is-active' : ''}${hasExternalUpdate ? ' has-update' : ''}`
+        tab.id = `tab-item-${key}`
+        tab.title = `${displayPathForFile(file)}${hasExternalUpdate ? ' · 有更新' : ''}`
+        tab.innerHTML = `<button class="tab-trigger" id="tab-${key}" type="button" role="tab" aria-label="${file.name}${hasExternalUpdate ? '，有更新' : ''}" aria-selected="${String(key === activeFile)}" aria-controls="panel-${file.scene}" tabindex="${key === activeFile ? '0' : '-1'}" data-file-key="${key}"><span class="tab-label">${file.name}</span></button><button class="tab-close" type="button" aria-label="关闭 ${file.name}">${svgUse('i-x')}</button>`
+        const trigger = tab.querySelector('.tab-trigger')
+        trigger.addEventListener('click', () => activateFile(key, true))
+        tab.querySelector('.tab-close').addEventListener('click', (event) => {
+          event.stopPropagation()
+          closeTab(key)
+        })
+        tab.addEventListener('contextmenu', (event) => {
+          event.preventDefault()
+          menuTargetFile = key
+          fileMenu.hidden = false
+          fileMenu.style.top = '8px'
+          fileMenu.style.right = '10px'
+          announce(`${file.name} 文件操作菜单已打开`)
+        })
+        trigger.addEventListener('keydown', (event) => handleTabKey(event, key, index))
+        tabStrip.appendChild(tab)
+      })
+      requestAnimationFrame(updateTabsOverflow)
+      if (focusKey) document.getElementById(`tab-${focusKey}`)?.focus()
+    }
+
+    function updateTabsOverflow() {
+      tabsOverflow.hidden = tabStrip.scrollWidth <= tabStrip.clientWidth + 1
+    }
+
+    function handleTabKey(event, key, index) {
+      let targetIndex = null
+      if (event.key === 'ArrowRight') targetIndex = (index + 1) % openTabs.length
+      if (event.key === 'ArrowLeft') targetIndex = (index - 1 + openTabs.length) % openTabs.length
+      if (event.key === 'Home') targetIndex = 0
+      if (event.key === 'End') targetIndex = openTabs.length - 1
+      if (targetIndex !== null) {
+        event.preventDefault()
+        document.getElementById(`tab-${openTabs[targetIndex]}`)?.focus()
+        return
+      }
+      if (event.key === 'Enter' || event.key === ' ') {
+        event.preventDefault()
+        activateFile(key, true)
+      }
+      if (event.key === 'Delete') {
+        event.preventDefault()
+        closeTab(key, true)
+      }
+      if (event.altKey && event.shiftKey && (event.key === 'ArrowLeft' || event.key === 'ArrowRight')) {
+        event.preventDefault()
+        const next = event.key === 'ArrowLeft' ? Math.max(0, index - 1) : Math.min(openTabs.length - 1, index + 1)
+        if (next !== index) {
+          openTabs.splice(index, 1)
+          openTabs.splice(next, 0, key)
+          renderTabs(key)
+          announce(`${fileCatalog[key].name} 已移动`)
+        }
+      }
+    }
+
+    function closeTab(key, keepFocus = false) {
+      const index = openTabs.indexOf(key)
+      if (index < 0) return
+      const restoreTabFocus = keepFocus || document.getElementById(`tab-item-${key}`)?.contains(document.activeElement)
+      openTabs.splice(index, 1)
+      tabStates.delete(key)
+      clearTimeout(refreshTimers.get(key))
+      refreshTimers.delete(key)
+      if (activeFile === key) activeFile = openTabs[Math.min(index, openTabs.length - 1)] || null
+      if (!activeFile) {
+        document.querySelectorAll('.viewer-scene').forEach((scene) => { scene.hidden = scene.dataset.scene !== 'empty' })
+        renderFileBreadcrumb(null)
+        fileSelect.disabled = false
+        renderTabs()
+        announce('最后一个文件已关闭，返回会话')
+        return
+      }
+      activateFile(activeFile, false)
+      if (restoreTabFocus) document.getElementById(`tab-${activeFile}`)?.focus()
+    }
+
+    function activateFile(key, announceOpen = false) {
+      const file = fileCatalog[key]
+      if (!file) return
+      if (file.behavior === 'system') {
+        fileSelect.value = activeFile || 'code'
+        showToast(`${file.name} · 已交给系统默认应用`)
+        announce(`${file.name} 已交给系统默认应用，不打开文件预览`)
+        return
+      }
+      if (!openTabs.includes(key)) {
+        openTabs.push(key)
+        tabStates.set(key, createReadyTabState())
+      }
+      activeFile = key
+      fileSelect.value = key
+      syncStatusPresentation(tabStates.get(key) || createReadyTabState())
+      document.querySelectorAll('.viewer-scene').forEach((scene) => {
+        scene.hidden = scene.dataset.scene !== file.scene
+        if (!scene.hidden) scene.setAttribute('aria-labelledby', `tab-${key}`)
+        else scene.removeAttribute('aria-labelledby')
+      })
+      renderFileBreadcrumb(file)
+      renderTabs()
+      if (announceOpen) announce(`已打开 ${file.name}`)
+      updateQuery()
+    }
+
+    function scenarioForTabState(state) {
+      if (state.loadState === 'opening') return 'opening'
+      if (state.loadState === 'error') return 'error'
+      if (state.isRefreshing) return 'refreshing'
+      if (state.error?.phase === 'refresh') return 'refresh-error'
+      if (state.hasExternalUpdate) return 'updated'
+      return 'ready'
+    }
+
+    function syncStatusPresentation(state) {
+      const status = scenarioForTabState(state)
+      viewerShell.dataset.status = status
+      stateSelect.value = status
+      viewerShell.setAttribute('aria-busy', String(status === 'opening'))
+      if (status === 'updated') {
+        updateNoticeLabel.textContent = '有更新'
+        refreshAction.textContent = '重新加载'
+      }
+      if (status === 'refreshing') updateNoticeLabel.textContent = '正在重新加载'
+      if (status === 'refresh-error') {
+        updateNoticeLabel.textContent = '重新加载失败'
+        refreshAction.textContent = '重试'
+      }
+      refreshAction.disabled = status === 'refreshing'
+      refreshAction.setAttribute('aria-busy', String(status === 'refreshing'))
+    }
+
+    function setScenario(status, key = activeFile) {
+      if (!key) return
+      const state = createReadyTabState()
+      if (status === 'opening') state.loadState = 'opening'
+      if (status === 'error') {
+        state.loadState = 'error'
+        state.error = { phase: 'opening' }
+      }
+      if (status === 'updated') state.hasExternalUpdate = true
+      if (status === 'refreshing') {
+        state.hasExternalUpdate = true
+        state.isRefreshing = true
+      }
+      if (status === 'refresh-error') {
+        state.hasExternalUpdate = true
+        state.error = { phase: 'refresh' }
+      }
+      tabStates.set(key, state)
+      if (key === activeFile) syncStatusPresentation(state)
+      renderTabs()
+      updateQuery()
+      if (status === 'updated') announce(`${fileCatalog[key].name} 有更新，当前内容继续显示`)
+      if (status === 'refresh-error') announce(`${fileCatalog[key].name} 重新加载失败，当前内容继续显示`)
+    }
+
+    function refreshFile(key = activeFile) {
+      if (!key) return
+      const currentState = tabStates.get(key) || createReadyTabState()
+      if (currentState.isRefreshing) return
+      const refreshingFile = key
+      clearTimeout(refreshTimers.get(refreshingFile))
+      const refreshingState = {
+        ...currentState,
+        loadState: 'ready',
+        isRefreshing: true,
+        error: null
+      }
+      tabStates.set(refreshingFile, refreshingState)
+      if (refreshingFile === activeFile) syncStatusPresentation(refreshingState)
+      renderTabs()
+      updateQuery()
+      announce(`正在重新加载 ${fileCatalog[refreshingFile].name}，当前内容继续保留`)
+      const timer = setTimeout(() => {
+        refreshTimers.delete(refreshingFile)
+        if (!openTabs.includes(refreshingFile)) return
+        const readyState = createReadyTabState()
+        tabStates.set(refreshingFile, readyState)
+        if (refreshingFile === activeFile) syncStatusPresentation(readyState)
+        renderTabs()
+        updateQuery()
+        showToast('已重新加载文件')
+        announce(`${fileCatalog[refreshingFile].name} 已更新`)
+      }, 650)
+      refreshTimers.set(refreshingFile, timer)
+    }
+
+    function setLayout(layout) {
+      stage.dataset.layout = layout
+      document.querySelectorAll('[data-layout-value]').forEach((button) => button.setAttribute('aria-pressed', String(button.dataset.layoutValue === layout)))
+      returnLabel.textContent = stage.dataset.origin === 'review' ? '返回文件变更' : '返回会话'
+      updateQuery()
+    }
+
+    function setOrigin(origin) {
+      stage.dataset.origin = origin
+      document.querySelectorAll('[data-origin-value]').forEach((button) => button.setAttribute('aria-pressed', String(button.dataset.originValue === origin)))
+      returnLabel.textContent = origin === 'review' ? '返回文件变更' : '返回会话'
+      updateQuery()
+    }
+
+    function setTheme(theme) {
+      document.documentElement.dataset.theme = theme
+      document.querySelectorAll('[data-theme-value]').forEach((button) => button.setAttribute('aria-pressed', String(button.dataset.themeValue === theme)))
+      updateQuery()
+    }
+
+    function revealLabelForPlatform() {
+      return stage.dataset.platform === 'win32' ? '在文件资源管理器中显示' : '在 Finder 中显示'
+    }
+
+    function setPlatform(platform) {
+      stage.dataset.platform = platform
+      document.documentElement.dataset.rovaiPlatform = platform
+      document.querySelectorAll('[data-platform-value]').forEach((button) => button.setAttribute('aria-pressed', String(button.dataset.platformValue === platform)))
+      shortcutLabel.textContent = platform === 'win32' ? 'Ctrl+K' : '⌘K'
+      document.querySelectorAll('[data-reveal-label]').forEach((label) => { label.textContent = revealLabelForPlatform() })
+      if (activeFile && fileCatalog[activeFile]) renderFileBreadcrumb(fileCatalog[activeFile])
+      updateQuery()
+    }
+
+    function updateQuery() {
+      const params = new URLSearchParams(location.search)
+      params.set('theme', document.documentElement.dataset.theme)
+      params.set('layout', stage.dataset.layout)
+      params.set('origin', stage.dataset.origin)
+      params.set('platform', stage.dataset.platform)
+      params.set('file', activeFile || 'code')
+      params.set('state', viewerShell.dataset.status)
+      params.set('sidecar', stage.dataset.inspectorCollapsed === 'true' ? 'collapsed' : 'open')
+      history.replaceState(null, '', `${location.pathname}?${params}`)
+    }
+
+    fileSelect.addEventListener('change', () => activateFile(fileSelect.value, true))
+    stateSelect.addEventListener('change', () => {
+      clearTimeout(refreshTimers.get(activeFile))
+      refreshTimers.delete(activeFile)
+      setScenario(stateSelect.value)
+    })
+    document.querySelectorAll('[data-layout-value]').forEach((button) => button.addEventListener('click', () => setLayout(button.dataset.layoutValue)))
+    document.querySelectorAll('[data-origin-value]').forEach((button) => button.addEventListener('click', () => setOrigin(button.dataset.originValue)))
+    document.querySelectorAll('[data-platform-value]').forEach((button) => button.addEventListener('click', () => setPlatform(button.dataset.platformValue)))
+    document.querySelectorAll('[data-theme-value]').forEach((button) => button.addEventListener('click', () => setTheme(button.dataset.themeValue)))
+    document.querySelectorAll('[data-open-file]').forEach((button) => button.addEventListener('click', () => activateFile(button.dataset.openFile, true)))
+    inspectorTabs.forEach((button, index) => {
+      button.addEventListener('click', () => activateInspectorTab(button.dataset.inspectorTab))
+      button.addEventListener('keydown', (event) => handleInspectorTabKey(event, index))
+    })
+    sidecarToggle.addEventListener('click', () => setInspectorCollapsed(stage.dataset.inspectorCollapsed !== 'true', true))
+    windowsMenuItems.forEach((button, index) => {
+      button.addEventListener('click', () => showToast(`${button.dataset.windowsMenu} 将打开 Electron 原生子菜单`))
+      button.addEventListener('keydown', (event) => {
+        let targetIndex = null
+        if (event.key === 'ArrowRight') targetIndex = (index + 1) % windowsMenuItems.length
+        if (event.key === 'ArrowLeft') targetIndex = (index - 1 + windowsMenuItems.length) % windowsMenuItems.length
+        if (event.key === 'Home') targetIndex = 0
+        if (event.key === 'End') targetIndex = windowsMenuItems.length - 1
+        if (event.key === 'ArrowDown') {
+          event.preventDefault()
+          showToast(`${button.dataset.windowsMenu} 将打开 Electron 原生子菜单`)
+          return
+        }
+        if (targetIndex === null) return
+        event.preventDefault()
+        windowsMenuItems.forEach((item, itemIndex) => { item.tabIndex = itemIndex === targetIndex ? 0 : -1 })
+        windowsMenuItems[targetIndex].focus()
+      })
+    })
+
+    document.addEventListener('click', (event) => {
+      if (!event.target.closest('#fileMenu')) {
+        fileMenu.hidden = true
+        menuTargetFile = null
+      }
+    })
+    document.querySelectorAll('[data-menu-action]').forEach((button) => button.addEventListener('click', () => {
+      const action = button.dataset.menuAction
+      const targetFile = menuTargetFile || activeFile
+      if (action === 'close') closeTab(targetFile, true)
+      else if (action === 'reload') refreshFile(targetFile)
+      else showToast(action === 'copy-path' ? '显示路径已复制' : action === 'open' ? '已交给系统默认应用' : stage.dataset.platform === 'win32' ? '已在文件资源管理器中显示' : '已在 Finder 中显示')
+      fileMenu.hidden = true
+      menuTargetFile = null
+    }))
+
+    refreshAction.addEventListener('click', () => refreshFile(activeFile))
+    document.querySelectorAll('[data-recovery]').forEach((button) => button.addEventListener('click', () => {
+      const action = button.dataset.recovery
+      if (action === 'retry-open') {
+        const openingFile = activeFile
+        setScenario('opening', openingFile)
+        setTimeout(() => {
+          if (!openTabs.includes(openingFile)) return
+          setScenario('ready', openingFile)
+          showToast('文件已打开')
+        }, 500)
+      }
+    }))
+
+    document.getElementById('attachSelection').addEventListener('click', () => {
+      const selections = document.getElementById('composerSelections')
+      selections.classList.add('has-selection')
+      selections.innerHTML = `<span class="selection-chip">${svgUse('i-code')}CampWorkspace.tsx · L47–L50 · current_file</span>`
+      showToast('选区已附加到当前会话草稿')
+    })
+    document.getElementById('sandboxAction').addEventListener('click', (event) => {
+      event.currentTarget.textContent = event.currentTarget.textContent === '运行页面内交互' ? '交互已运行' : '运行页面内交互'
+    })
+    document.getElementById('reviewTrigger').addEventListener('click', () => { setOrigin('review'); activateFile('patch', true); document.getElementById('returnButton').focus() })
+    document.getElementById('returnButton').addEventListener('click', () => {
+      if (stage.dataset.origin === 'review') {
+        setOrigin('conversation')
+        document.getElementById('reviewTrigger').focus()
+        announce('已返回文件变更 Review')
+      } else {
+        showToast('已返回会话，文件 Tabs 保持打开')
+        document.querySelector('.timeline')?.focus()
+      }
+    })
+
+    new ResizeObserver(updateTabsOverflow).observe(tabStrip)
+
+    const params = new URLSearchParams(location.search)
+    const initialTheme = params.get('theme') === 'night' ? 'night' : 'day'
+    const initialLayout = ['wide', 'middle', 'compact'].includes(params.get('layout')) ? params.get('layout') : 'wide'
+    const initialOrigin = params.get('origin') === 'review' ? 'review' : 'conversation'
+    const initialPlatform = params.get('platform') === 'win32' ? 'win32' : 'darwin'
+    const requestedFile = fileCatalog[params.get('file')]
+    const initialFile = requestedFile && requestedFile.behavior !== 'system' ? params.get('file') : 'code'
+    const requestedState = params.get('state')
+    const initialState = ['ready', 'updated', 'refreshing', 'refresh-error', 'opening', 'error'].includes(requestedState) ? requestedState : 'ready'
+    const initialInspectorCollapsed = params.get('sidecar') === 'collapsed'
+    activateInspectorTab('tasks')
+    setPlatform(initialPlatform)
+    setTheme(initialTheme)
+    setLayout(initialLayout)
+    setOrigin(initialOrigin)
+    setInspectorCollapsed(initialInspectorCollapsed)
+    activateFile(initialFile, false)
+    setScenario(initialState)
+  </script>
+</body>
+</html>

@@ -52,6 +52,7 @@ Dark. `color-scheme: dark`.
 | `--workspace-attention-soft` | `#302617` |
 | `--workspace-faint` | `#8998a1` |
 | `--conversation-surface` | `#181d21` |
+| `--execution-running-surface` | `#1b2024` |
 | `--conversation-find-match` | `#5a4725` |
 | `--conversation-find-current` | `#845f23` |
 | `--conversation-find-line` | `#d2ac70` |

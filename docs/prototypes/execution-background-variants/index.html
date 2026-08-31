@@ -1,0 +1,535 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="day" data-palette="a" data-view="scene" data-placement="floating">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <meta name="description" content="Rovai AI 执行区浅色背景的三个候选方案。独立 HTML 设计稿，不连接 App 或 Runtime。">
+  <title>Rovai AI · 执行区浅色方案</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --page: #f5f6f7;
+      --conversation: #ffffff;
+      --surface: #fbfbfa;
+      --raised: #ffffff;
+      --hover: #e8eaea;
+      --ink: #171b20;
+      --muted: #616a73;
+      --line: #dfe4e8;
+      --line-strong: #c7cfd6;
+      --control-line: #8b9389;
+      --steel: #526f88;
+      --steel-ink: #405f7e;
+      --brand-soft: #e9eef3;
+      --info: #416c86;
+      --info-soft: #e5eef3;
+      --success: #3e775c;
+      --success-soft: #e7f1ea;
+      --danger: #a24c46;
+      --evidence: #f3f4f3;
+      --evidence-ink: #252a36;
+      --evidence-line: #d5dad3;
+      --focus: #526f88;
+      --float-shadow: 0 18px 56px rgba(38, 45, 58, .14);
+      --candidate-a: #fafafa;
+      --candidate-b: #f3f4f5;
+      --candidate-c: #f3f7fb;
+      --candidate-reference: #e9eef3;
+      --identity-one: #39777a;
+      --identity-two: #a65f4a;
+      --identity-three: #74628f;
+      --identity-four: #4f729b;
+      --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font: 13px/1.6 -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif;
+      color: var(--ink);
+      background: var(--page);
+      font-synthesis: none;
+      text-rendering: optimizeLegibility;
+    }
+    :root[data-theme="night"] {
+      color-scheme: dark;
+      --page: #0d1114;
+      --conversation: #181d21;
+      --surface: #151a1e;
+      --raised: #1b2227;
+      --hover: #1d252b;
+      --ink: #e7ecef;
+      --muted: #abb5bc;
+      --line: #333e46;
+      --line-strong: #53616b;
+      --control-line: #687b88;
+      --steel: #7897ae;
+      --steel-ink: #c0d4e1;
+      --brand-soft: #22303a;
+      --info: #83afc9;
+      --info-soft: #182832;
+      --success: #82b695;
+      --success-soft: #1a2b22;
+      --danger: #d6857f;
+      --evidence: #373f43;
+      --evidence-ink: #dce4e9;
+      --evidence-line: #35424a;
+      --focus: #8fb3cb;
+      --float-shadow: 0 22px 64px rgba(0, 0, 0, .42);
+      --candidate-a: #1b2024;
+      --candidate-b: #20262b;
+      --candidate-c: #1d272e;
+      --candidate-reference: #22303a;
+      --identity-one: #70b0ae;
+      --identity-two: #c98572;
+      --identity-three: #a89ac8;
+      --identity-four: #80abd1;
+    }
+    [data-palette="a"] { --run-fill: var(--candidate-a); }
+    [data-palette="b"] { --run-fill: var(--candidate-b); }
+    [data-palette="c"] { --run-fill: var(--candidate-c); }
+    [data-palette="reference"] { --run-fill: var(--candidate-reference); }
+    * { box-sizing: border-box; }
+    body { margin: 0; }
+    button, summary { -webkit-tap-highlight-color: transparent; }
+    button { font: inherit; color: inherit; cursor: pointer; }
+    button:focus-visible, a:focus-visible { outline: 2px solid var(--focus); outline-offset: 3px; }
+    [hidden] { display: none !important; }
+    ::selection { color: var(--ink); background: var(--brand-soft); }
+    code, time, .hex { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+    .icon { display: inline-block; width: 16px; height: 16px; flex: 0 0 auto; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+    .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+    .workbench { width: min(1392px, 100%); margin: 0 auto; padding: 26px 32px 24px; }
+    .masthead { display: flex; align-items: center; justify-content: space-between; gap: 24px; margin-bottom: 24px; }
+    .brand { display: inline-flex; align-items: center; gap: 10px; font-weight: 700; }
+    .brand-mark { width: 25px; height: 25px; color: var(--steel); }
+    .brand-divider { width: 1px; height: 15px; margin: 0 2px 0 6px; background: var(--line-strong); }
+    .brand small { color: var(--muted); font-size: 12px; font-weight: 450; }
+    .segmented { display: inline-flex; align-items: center; padding: 3px; gap: 2px; border: 1px solid var(--line-strong); border-radius: 8px; background: var(--conversation); }
+    .segmented button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 30px; border: 0; padding: 0 11px; border-radius: 5px; background: transparent; color: var(--muted); font-size: 12px; white-space: nowrap; }
+    .segmented button:hover { color: var(--ink); background: var(--hover); }
+    .segmented button[aria-pressed="true"] { color: var(--ink); background: var(--brand-soft); font-weight: 650; }
+    h1 { margin: 0 0 7px; font-size: 25px; font-weight: 650; letter-spacing: -.025em; line-height: 1.35; }
+    .intro { display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; margin-bottom: 20px; }
+    .intro p { margin: 0; color: var(--muted); font-size: 13px; }
+    .scope-note { flex: 0 0 auto; padding-bottom: 2px; font-size: 11px; color: var(--muted); }
+    .candidates { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-bottom: 23px; }
+    .candidate { display: flex; min-width: 0; align-items: center; gap: 14px; min-height: 92px; padding: 15px 17px; border: 1px solid var(--line-strong); border-radius: 10px; background: var(--conversation); text-align: left; }
+    .candidate:hover { border-color: var(--steel); }
+    .candidate[aria-pressed="true"] { outline: 1px solid var(--steel); border-color: var(--steel); }
+    .candidate-swatch { width: 46px; height: 50px; flex: 0 0 auto; border: 1px solid var(--line-strong); border-radius: 6px; background: var(--run-fill); }
+    .candidate-text { display: grid; min-width: 0; gap: 3px; }
+    .candidate-name { display: flex; align-items: center; flex-wrap: wrap; gap: 7px; font-size: 14px; font-weight: 650; }
+    .candidate-name .letter { color: var(--muted); font-size: 11px; font-weight: 600; }
+    .recommend { color: var(--steel-ink); font-size: 10px; font-weight: 550; }
+    .candidate-desc { font-size: 11.5px; color: var(--muted); }
+    .candidate .hex { font-size: 10.5px; color: var(--muted); }
+    .preview-toolbar { display: flex; min-height: 34px; align-items: center; flex-wrap: wrap; justify-content: space-between; gap: 10px 16px; margin-bottom: 12px; }
+    .preview-tools { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+    .preview-caption { display: flex; align-items: center; gap: 9px; color: var(--muted); font-size: 12px; }
+    .preview-caption strong { color: var(--ink); font-size: 13px; font-weight: 650; }
+    .preview-caption .dot { width: 14px; height: 14px; border: 1px solid var(--line-strong); border-radius: 4px; background: var(--run-fill); }
+    .text-button { display: inline-flex; min-height: 32px; align-items: center; gap: 6px; padding: 0 10px; border: 1px solid var(--line-strong); border-radius: 7px; background: var(--conversation); color: var(--muted); font-size: 11.5px; }
+    .text-button:hover { color: var(--ink); border-color: var(--steel); }
+    .text-button[aria-pressed="true"] { color: var(--ink); background: var(--brand-soft); }
+    .scene-scroll { overflow-x: auto; border: 1px solid var(--line-strong); border-radius: 11px; scrollbar-color: var(--line-strong) var(--surface); }
+    .scene { position: relative; min-width: 760px; height: 742px; overflow: hidden; background: var(--conversation); }
+    .scene-topbar { display: flex; height: 45px; align-items: center; justify-content: space-between; gap: 16px; padding: 0 18px; border-bottom: 1px solid var(--line); background: var(--conversation); }
+    .breadcrumb { display: inline-flex; align-items: center; gap: 9px; min-width: 0; color: var(--muted); font-size: 11.5px; }
+    .breadcrumb strong { color: var(--ink); font-weight: 500; }
+    .breadcrumb .icon { width: 12px; height: 12px; }
+    .topbar-actions { display: flex; gap: 14px; color: var(--muted); font-size: 11px; }
+    .topbar-actions > span { display: inline-flex; align-items: center; gap: 5px; }
+    .topbar-actions .execution-entry { border-radius: 5px; background: var(--hover); padding: 3px 7px; }
+    .topbar-actions small { font: 10px/1 var(--mono); }
+    .conversation { position: absolute; top: 45px; bottom: 123px; right: 0; left: 0; overflow: hidden; padding: 34px 42px 24px; }
+    .date-divider { display: flex; gap: 14px; align-items: center; margin-bottom: 23px; color: var(--muted); font-size: 10px; }
+    .date-divider:before, .date-divider:after { height: 1px; flex: 1; content: ""; background: var(--line); }
+    .view-buttons { position: absolute; z-index: 1; top: 12px; right: 14px; display: inline-flex; padding: 2px; border: 1px solid var(--line-strong); border-radius: 8px; color: var(--muted); background: var(--raised); }
+    .view-buttons span { display: inline-flex; min-height: 26px; align-items: center; padding: 0 9px; border-radius: 6px; font-size: 10.5px; font-weight: 680; }
+    .view-buttons .selected { color: var(--steel-ink); background: var(--brand-soft); }
+    .message { display: flex; gap: 11px; max-width: 690px; margin: 0 0 24px; }
+    .avatar { position: relative; display: inline-flex; width: 32px; height: 32px; flex: 0 0 auto; align-items: center; justify-content: center; border: 1px solid color-mix(in srgb, var(--avatar-color, var(--identity-one)) 50%, var(--conversation)); border-radius: 50%; color: var(--avatar-color, var(--identity-one)); background: color-mix(in srgb, var(--avatar-color, var(--identity-one)) 12%, var(--conversation)); font-size: 11px; font-weight: 650; }
+    .avatar[data-person="two"] { --avatar-color: var(--identity-two); }
+    .avatar[data-person="three"] { --avatar-color: var(--identity-three); }
+    .avatar[data-person="four"] { --avatar-color: var(--identity-four); }
+    .avatar[data-person="you"] { --avatar-color: var(--muted); }
+    .message-main { min-width: 0; padding-top: 1px; }
+    .message-meta { display: flex; align-items: baseline; gap: 9px; margin-bottom: 3px; font-size: 11px; }
+    .message-meta strong { color: var(--identity-one); font-weight: 650; }
+    .message-meta .you { color: var(--ink); }
+    .message-meta time { font-size: 9px; color: var(--muted); }
+    .message p { margin: 0; font-size: 13px; line-height: 1.7; }
+    .message p + p { margin-top: 5px; }
+    .message .secondary { color: var(--muted); }
+    .inline-code { padding: 1px 4px; border-radius: 3px; background: var(--evidence); color: var(--evidence-ink); font: 11px/1.5 var(--mono); }
+    .composer { position: absolute; right: 28px; bottom: 18px; left: 28px; }
+    .composer-route { display: flex; align-items: center; gap: 6px; margin: 0 0 10px 2px; font-size: 10px; color: var(--muted); }
+    .composer-route .icon { width: 12px; height: 12px; }
+    .composer-box { display: flex; height: 83px; flex-direction: column; justify-content: space-between; padding: 10px 12px 8px; border: 1px solid var(--control-line); border-radius: 8px; background: var(--raised); }
+    .composer-placeholder { color: var(--muted); font-size: 12px; }
+    .composer-bottom { display: flex; align-items: center; justify-content: space-between; color: var(--muted); }
+    .composer-bottom .mock-button { border-color: var(--danger); color: var(--conversation); background: var(--danger); }
+    .execution-panel { position: absolute; z-index: 2; display: flex; flex-direction: column; min-height: 0; overflow: hidden; background: var(--conversation); }
+    [data-placement="floating"] .execution-panel { top: 54px; right: 12px; width: 440px; height: 559px; border: 1px solid var(--line-strong); border-top: 2px solid var(--steel); border-radius: 10px; box-shadow: var(--float-shadow); }
+    .panel-heading { display: flex; min-height: 44px; align-items: center; gap: 8px; padding: 0 15px; border-bottom: 1px solid var(--line); font-size: 12px; }
+    .panel-heading .scope { font-size: 10px; color: var(--muted); }
+    .panel-heading .close { display: flex; margin-left: auto; }
+    .team { flex: 0 0 auto; padding: 11px 12px 10px; background: var(--conversation); }
+    .team-heading { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; font-size: 10px; color: var(--muted); }
+    .team-heading strong { display: inline-flex; align-items: center; gap: 6px; color: var(--steel-ink); font-weight: 650; }
+    .team-heading strong .icon { width: 14px; height: 14px; }
+    .placement-mock { display: inline-flex; align-items: center; gap: 4px; margin-left: auto; white-space: nowrap; font-size: 10px; }
+    .placement-mock .icon { width: 13px; height: 13px; }
+    .avatar-rail { display: flex; align-items: center; gap: 9px; }
+    .member { display: inline-flex; min-width: 38px; align-items: center; gap: 8px; padding: 3px; border: 1px solid transparent; border-radius: 7px; }
+    .member.selected { border-color: var(--control-line); background: var(--brand-soft); }
+    .member .avatar { width: 29px; height: 29px; }
+    .member .member-name { display: none; font-size: 10px; line-height: 1.25; font-weight: 650; }
+    .avatar .status-mark { position: absolute; right: -4px; bottom: -3px; display: grid; width: 13px; height: 13px; place-items: center; border-radius: 50%; background: var(--conversation); color: var(--success); }
+    .status-mark .icon { width: 10px; height: 10px; stroke-width: 1.8; }
+    .avatar .status-mark.live { color: var(--info); }
+    .run-header { display: flex; flex: 0 0 auto; min-width: 0; align-items: center; justify-content: space-between; gap: 12px; padding: 11px 12px 9px; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); background: var(--run-fill); }
+    .run-agent { display: flex; min-width: 0; align-items: center; gap: 8px; }
+    .run-agent-copy { display: grid; min-width: 0; gap: 1px; }
+    .run-agent-name { display: flex; align-items: baseline; flex-wrap: wrap; gap: 7px; }
+    .run-agent-name strong { font-size: 12px; font-weight: 650; }
+    .model-label { color: var(--steel-ink); font: 600 9px/1.4 var(--mono); }
+    .run-subtitle { color: var(--muted); font-size: 10px; }
+    .run-actions { display: flex; align-items: center; gap: 6px; }
+    .mock-button { display: inline-flex; min-height: 27px; align-items: center; justify-content: center; padding: 0 9px; border: 1px solid var(--line-strong); border-radius: 6px; background: var(--raised); font-size: 10.5px; font-weight: 600; white-space: nowrap; }
+    .mock-button.stop { color: var(--danger); }
+    .process-body { flex: 1; min-height: 0; overflow: auto; padding: 12px 12px 15px; background: var(--conversation); scrollbar-color: var(--line-strong) transparent; scrollbar-width: thin; }
+    .run-stage { position: relative; display: grid; grid-template-columns: 13px minmax(0, 1fr); gap: 8px; padding-bottom: 13px; }
+    .run-stage:first-child:before { position: absolute; top: 10px; bottom: -10px; left: 6px; width: 1px; background: var(--line-strong); content: ""; }
+    .stage-node { z-index: 1; display: grid; width: 12px; height: 12px; margin-top: 4px; place-items: center; border: 2px solid var(--success); border-radius: 50%; background: var(--success-soft); }
+    .stage-node:after { width: 4px; height: 4px; border-radius: 50%; background: var(--success); content: ""; }
+    .run-stage.running .stage-node { border-color: var(--info); background: var(--info-soft); }
+    .run-stage.running .stage-node:after { background: var(--info); }
+    .run-card { min-width: 0; padding: 10px 11px; border: 1px solid var(--line); border-radius: 8px; background: var(--conversation); }
+    .run-stage.running .run-card { border-color: color-mix(in srgb, var(--info) 50%, var(--line)); background: var(--run-fill); }
+    .run-time { display: flex; align-items: center; flex-wrap: wrap; gap: 7px; font-size: 9px; }
+    .run-time time { font-size: 10px; font-weight: 700; }
+    .run-state { color: var(--success); font-size: 9px; font-weight: 650; }
+    .running .run-state { color: var(--info); }
+    .current-badge { padding: 1px 5px; border-radius: 5px; color: var(--info); background: var(--info-soft); font-size: 8.5px; font-weight: 650; }
+    .run-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 9px; margin-top: 5px; color: var(--muted); font-size: 9px; }
+    .run-meta code { font-size: 9px; }
+    .tool-line { display: grid; grid-template-columns: 16px minmax(0, 1fr) 16px 16px; align-items: center; gap: 7px; margin-top: 12px; color: var(--muted); font-size: 10.5px; }
+    .tool-line .tool-copy { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .tool-line .tool-copy strong { font-weight: 600; color: var(--ink); }
+    .tool-line .live-icon { color: var(--info); width: 12px; height: 12px; }
+    .tool-line .chevron { width: 12px; height: 12px; }
+    .panel-footer { display: flex; flex: 0 0 auto; min-height: 29px; align-items: center; justify-content: space-between; padding: 0 14px; border-top: 1px solid var(--line); color: var(--muted); font-size: 9.5px; background: var(--conversation); }
+    [data-placement="bottom"] .scene .execution-panel { right: 0; bottom: 125px; left: 0; height: 339px; border-top: 1px solid var(--line-strong); }
+    [data-placement="bottom"] .scene .conversation { bottom: 465px; }
+    [data-placement="bottom"] .scene .panel-heading, [data-placement="bottom"] .scene .panel-footer { display: none; }
+    [data-placement="bottom"] .scene .team { display: flex; min-height: 58px; align-items: center; gap: 16px; padding: 7px 20px; }
+    [data-placement="bottom"] .scene .team-heading { display: grid; flex: 0 0 auto; gap: 1px; margin: 0; }
+    [data-placement="bottom"] .scene .team-heading .placement-mock { display: none; }
+    [data-placement="bottom"] .scene .avatar-rail { min-width: 0; gap: 8px; flex: 1; }
+    [data-placement="bottom"] .scene .member { min-width: 100px; padding: 5px 8px; border-color: var(--line-strong); }
+    [data-placement="bottom"] .scene .member.selected { border-color: var(--control-line); }
+    [data-placement="bottom"] .scene .member-name { display: block; }
+    [data-placement="bottom"] .scene .run-header { position: relative; padding: 10px 20px; }
+    [data-placement="bottom"] .scene .run-header:before { position: absolute; top: 3px; left: calc(50% - 17px); width: 34px; height: 2px; border-radius: 2px; background: var(--control-line); content: ""; }
+    [data-placement="bottom"] .scene .process-body { padding: 12px 20px; }
+    [data-placement="bottom"] .scene .topbar-actions .execution-entry { display: none; }
+    .bottom-placement { display: none; }
+    [data-placement="bottom"] .scene .bottom-placement { display: inline-flex; margin-left: auto; color: var(--muted); font-size: 10px; white-space: nowrap; }
+    .scene-footnote { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; padding: 11px 1px 0; color: var(--muted); font-size: 11px; }
+    .scene-footnote .legend { display: flex; align-items: center; flex-wrap: wrap; gap: 15px; }
+    .legend-item { display: inline-flex; align-items: center; gap: 6px; }
+    .legend-swatch { width: 12px; height: 12px; border: 1px solid var(--line-strong); border-radius: 3px; background: var(--run-fill); }
+    .legend-swatch.conversation-swatch { background: var(--conversation); }
+    .review-note { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; margin-top: 20px; padding-top: 17px; border-top: 1px solid var(--line-strong); }
+    .review-note p { margin: 0; color: var(--muted); font-size: 12px; }
+    .review-note p strong { color: var(--ink); font-weight: 600; }
+    .review-note small { max-width: 350px; color: var(--muted); font-size: 10.5px; text-align: right; }
+    .comparison-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; }
+    .compare-item { min-width: 0; }
+    .compare-title { display: flex; align-items: center; justify-content: space-between; margin: 0 0 9px; gap: 6px; }
+    .compare-title h2 { margin: 0; font-size: 12px; font-weight: 650; }
+    .compare-title .hex { font-size: 10px; color: var(--muted); }
+    .compare-sample { overflow: hidden; border: 1px solid var(--line-strong); border-radius: 8px; background: var(--conversation); }
+    .compare-sample .mini-team { display: flex; align-items: center; gap: 9px; height: 49px; padding: 8px 12px; background: var(--conversation); }
+    .compare-sample .mini-team .avatar { width: 25px; height: 25px; font-size: 9px; }
+    .compare-sample .run-header { min-height: 58px; gap: 5px; padding: 8px 10px; }
+    .compare-sample .run-header .avatar { display: none; }
+    .compare-sample .run-agent-name { gap: 5px; }
+    .compare-sample .run-agent-name strong { font-size: 11px; }
+    .compare-sample .model-label { display: none; }
+    .compare-sample .run-subtitle { font-size: 9px; }
+    .compare-sample .run-actions { gap: 4px; }
+    .compare-sample .mock-button { padding: 0 7px; min-height: 25px; font-size: 9px; }
+    .compare-sample .process-body { min-height: 258px; padding: 10px 8px; }
+    .compare-sample .run-card { padding: 9px 8px; }
+    .compare-sample .run-meta { gap: 4px; font-size: 8.5px; }
+    .compare-sample .run-meta .model-meta { display: none; }
+    .compare-sample .tool-line { gap: 4px; font-size: 9.5px; }
+    .compare-sample .current-badge { display: none; }
+    .compare-footer { display: grid; gap: 8px; margin-top: 10px; }
+    .compare-footer p { margin: 0; color: var(--muted); font-size: 11px; }
+    .compare-footer .text-button { justify-content: center; width: 100%; }
+    :root[data-view="compare"] .scene-section { display: none; }
+    :root[data-view="scene"] .comparison-section { display: none; }
+    :root[data-view="compare"] #placement-control { display: none; }
+    :root[data-view="compare"] #reference-button { display: none; }
+    @media (min-width: 1100px) { [data-placement="floating"] .message { max-width: calc(100% - 468px); } }
+    @media (max-width: 1050px) {
+      .workbench { padding: 20px; }
+      .comparison-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px 16px; }
+      .scope-note { display: none; }
+      .candidate { gap: 10px; padding: 13px; }
+      .candidate-swatch { width: 36px; }
+      .candidate-desc { font-size: 11px; }
+      .review-note { flex-direction: column; gap: 8px; }
+      .review-note small { max-width: none; text-align: left; }
+    }
+    @media (max-width: 640px) {
+      .workbench { padding: 16px 12px; }
+      .masthead { align-items: flex-start; gap: 12px; margin-bottom: 22px; }
+      .brand-divider, .brand small { display: none; }
+      .segmented button { padding: 0 9px; }
+      h1 { font-size: 22px; }
+      .intro p { font-size: 12px; }
+      .candidates { grid-template-columns: 1fr; gap: 8px; margin-bottom: 18px; }
+      .candidate { min-height: 70px; padding: 10px 13px; }
+      .candidate-swatch { height: 42px; }
+      .candidate-text { grid-template-columns: minmax(0, 1fr) auto; flex: 1; gap: 1px 10px; }
+      .candidate-name { grid-column: 1; grid-row: 1; font-size: 13px; }
+      .candidate-desc { grid-column: 1; grid-row: 2; }
+      .candidate .hex { grid-column: 2; grid-row: 1 / 3; align-self: center; }
+      .preview-toolbar { align-items: flex-start; flex-direction: column; }
+      .preview-tools { gap: 7px; }
+      .comparison-grid { grid-template-columns: 1fr; }
+      .scene-footnote { align-items: flex-start; flex-direction: column; gap: 6px; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      *, *:before, *:after { scroll-behavior: auto !important; animation: none !important; transition: none !important; }
+    }
+  </style>
+</head>
+<body>
+  <svg aria-hidden="true" style="position:absolute;width:0;height:0;overflow:hidden" xmlns="http://www.w3.org/2000/svg">
+    <symbol id="i-activity" viewBox="0 0 24 24"><path d="M2 12h5l3-7 4 14 3-7h5"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12 4 4 10-10"/></symbol>
+    <symbol id="i-live" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3" fill="currentColor" stroke="none"/></symbol>
+    <symbol id="i-down" viewBox="0 0 24 24"><path d="m7 10 5 5 5-5"/></symbol>
+    <symbol id="i-right" viewBox="0 0 24 24"><path d="m9 6 6 6-6 6"/></symbol>
+    <symbol id="i-close" viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></symbol>
+    <symbol id="i-tools" viewBox="0 0 24 24"><path d="M9 5h12M9 12h12M9 19h12M3 5h1M3 12h1M3 19h1"/></symbol>
+    <symbol id="i-members" viewBox="0 0 24 24"><circle cx="9" cy="8" r="3"/><path d="M3 20v-2a6 6 0 0 1 12 0v2M17 5a3 3 0 0 1 0 6m2 3a5 5 0 0 1 3 4v2"/></symbol>
+    <symbol id="i-task" viewBox="0 0 24 24"><rect x="4" y="3" width="16" height="18" rx="2"/><path d="m8 9 1 1 2-2m3 1h3m-9 6 1 1 2-2m3 1h3"/></symbol>
+    <symbol id="i-move" viewBox="0 0 24 24"><path d="M4 20h16M12 3v12m-4-4 4 4 4-4"/></symbol>
+    <symbol id="i-paperclip" viewBox="0 0 24 24"><path d="m9 12 6-6a3 3 0 0 1 4 4l-9 9a5 5 0 0 1-7-7l9-9M7 14l8-8"/></symbol>
+    <symbol id="i-reply" viewBox="0 0 24 24"><path d="M6 3v9a5 5 0 0 0 5 5h9m-4-4 4 4-4 4"/></symbol>
+    <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2m0 16v2M2 12h2m16 0h2M5 5l1.5 1.5m11 11L19 19M5 19l1.5-1.5m11-11L19 5"/></symbol>
+    <symbol id="i-moon" viewBox="0 0 24 24"><path d="M20 15.3A9 9 0 0 1 8.7 4a9 9 0 1 0 11.3 11.3Z"/></symbol>
+  </svg>
+  <main class="workbench">
+    <header class="masthead">
+      <div class="brand">
+        <svg class="brand-mark" viewBox="0 0 30 30" aria-hidden="true"><path d="m15 3 2.1 5.9L23 11l-5.9 2.1L15 19l-2.1-5.9L7 11l5.9-2.1Z" fill="currentColor"/><path d="M3 25q12-7 24 0" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round"/></svg>
+        <span>Rovai AI</span><span class="brand-divider"></span><small>配色设计稿</small>
+      </div>
+      <div class="segmented" role="group" aria-label="设计稿主题">
+        <button type="button" data-theme-choice="day" aria-pressed="true"><svg class="icon" aria-hidden="true"><use href="#i-sun"/></svg>日间</button>
+        <button type="button" data-theme-choice="night" aria-pressed="false"><svg class="icon" aria-hidden="true"><use href="#i-moon"/></svg>夜间</button>
+      </div>
+    </header>
+    <section class="intro" aria-labelledby="page-heading">
+      <div><h1 id="page-heading">执行区配色方案</h1><p>运行中的 Run 与「收起 / 停止」栏共用底色，其他区域保持会话底色。</p></div>
+      <span class="scope-note">三个浅色候选 · 一个上一版对照</span>
+    </section>
+    <div class="candidates" role="group" aria-label="选择配色方案">
+      <button class="candidate" type="button" data-choice="a" data-palette="a" aria-pressed="true" aria-label="A 瓷白，最轻，推荐">
+        <span class="candidate-swatch" aria-hidden="true"></span><span class="candidate-text"><span class="candidate-name"><span class="letter">A</span>瓷白<span class="recommend">推荐先看</span></span><span class="candidate-desc">最轻，几乎融入会话底色</span><span class="hex" data-hex-for="a">#FAFAFA</span></span>
+      </button>
+      <button class="candidate" type="button" data-choice="b" data-palette="b" aria-pressed="false" aria-label="B 浅雾灰，中性，层次更清楚">
+        <span class="candidate-swatch" aria-hidden="true"></span><span class="candidate-text"><span class="candidate-name"><span class="letter">B</span>浅雾灰</span><span class="candidate-desc">偏中性，层次比 A 清楚一点</span><span class="hex" data-hex-for="b">#F3F4F5</span></span>
+      </button>
+      <button class="candidate" type="button" data-choice="c" data-palette="c" aria-pressed="false" aria-label="C 淡钢蓝，只有一点蓝">
+        <span class="candidate-swatch" aria-hidden="true"></span><span class="candidate-text"><span class="candidate-name"><span class="letter">C</span>淡钢蓝</span><span class="candidate-desc">保留一点蓝，但明显比上一版浅</span><span class="hex" data-hex-for="c">#F3F7FB</span></span>
+      </button>
+    </div>
+    <div class="preview-toolbar">
+      <div class="preview-caption"><span class="dot" aria-hidden="true"></span><strong id="active-title">A · 瓷白</strong><span id="active-description">几乎白色，只留很轻的底色层次。</span></div>
+      <div class="preview-tools">
+        <div class="segmented" role="group" aria-label="预览方式"><button type="button" data-view-choice="scene" aria-pressed="true">完整场景</button><button type="button" data-view-choice="compare" aria-pressed="false">并排对比</button></div>
+        <div id="placement-control" class="segmented" role="group" aria-label="执行区位置"><button type="button" data-placement-choice="floating" aria-pressed="true">执行浮层</button><button type="button" data-placement-choice="bottom" aria-pressed="false">底部执行台</button></div>
+        <button type="button" id="reference-button" class="text-button" aria-pressed="false">看上一版</button>
+      </div>
+    </div>
+    <section class="scene-section" aria-label="完整场景预览">
+      <div class="scene-scroll">
+        <div class="scene" role="region" aria-label="会话工作区局部，模拟内容，产品按钮仅作外观示意">
+          <header class="scene-topbar">
+            <div class="breadcrumb"><span>快速对话</span><svg class="icon" aria-hidden="true"><use href="#i-right"/></svg><strong>执行区背景调整</strong></div>
+            <div class="topbar-actions"><span class="execution-entry"><svg class="icon" aria-hidden="true"><use href="#i-live"/></svg>执行 <small>1</small></span><span><svg class="icon" aria-hidden="true"><use href="#i-task"/></svg>任务 <small>0</small></span><span><svg class="icon" aria-hidden="true"><use href="#i-members"/></svg>队员 <small>4</small></span></div>
+          </header>
+          <div class="conversation">
+            <div class="view-buttons" aria-label="现有会话／地图按钮，仅作颜色参照"><span class="selected">会话</span><span>地图</span></div>
+            <div class="date-divider">示例对话</div>
+            <article class="message"><span class="avatar" data-person="you" aria-hidden="true">你</span><div class="message-main"><div class="message-meta"><strong class="you">你</strong><time>14:21</time></div><p>执行区的颜色再浅一些，只保留必要的层次。</p></div></article>
+            <article class="message"><span class="avatar" aria-hidden="true">C</span><div class="message-main"><div class="message-meta"><strong>Codex</strong><time>14:22</time></div><p>运行中的 Run 和操作栏使用同一底色。</p><p>历史记录、头像区和空白区域，与会话区保持一致。</p></div></article>
+            <article class="message"><span class="avatar" aria-hidden="true">C</span><div class="message-main"><div class="message-meta"><strong>Codex</strong><time>14:23</time></div><p>保留状态图标、边框和文字，不靠背景颜色单独表达执行状态。</p><p class="secondary">工具结果继续使用原来的 <code class="inline-code">Evidence</code> 配色。</p></div></article>
+          </div>
+          <div class="composer" aria-label="输入区外观示意">
+            <div class="composer-route"><svg class="icon" aria-hidden="true"><use href="#i-reply"/></svg>默认由 Lead · Codex 接收</div>
+            <div class="composer-box"><span class="composer-placeholder">和队伍继续前行：补充线索、调整方向或布置新任务…</span><div class="composer-bottom"><svg class="icon" aria-hidden="true"><use href="#i-paperclip"/></svg><span class="mock-button">停止</span></div></div>
+          </div>
+          <section class="execution-panel" aria-label="执行面板配色示意">
+            <div class="panel-heading"><svg class="icon" aria-hidden="true"><use href="#i-activity"/></svg><strong>执行</strong><span class="scope">当前会话</span><span class="close"><svg class="icon" aria-hidden="true"><use href="#i-close"/></svg></span></div>
+            <div class="team">
+              <div class="team-heading"><strong><svg class="icon" aria-hidden="true"><use href="#i-activity"/></svg>执行台</strong><span>1 位执行中 · 4 位队员</span><span class="placement-mock"><svg class="icon" aria-hidden="true"><use href="#i-move"/></svg>移到底部</span></div>
+              <div class="avatar-rail">
+                <span class="member selected"><span class="avatar" aria-hidden="true">C<span class="status-mark live"><svg class="icon"><use href="#i-live"/></svg></span></span><span class="member-name">Codex</span></span>
+                <span class="member"><span class="avatar" data-person="two" aria-hidden="true">C<span class="status-mark"><svg class="icon"><use href="#i-check"/></svg></span></span><span class="member-name">Claude<br>Code</span></span>
+                <span class="member"><span class="avatar" data-person="three" aria-hidden="true">K<span class="status-mark"><svg class="icon"><use href="#i-check"/></svg></span></span><span class="member-name">Kiro</span></span>
+                <span class="member"><span class="avatar" data-person="four" aria-hidden="true">C<span class="status-mark"><svg class="icon"><use href="#i-check"/></svg></span></span><span class="member-name">Cursor</span></span>
+                <span class="bottom-placement">移到浮层</span>
+              </div>
+            </div>
+            <div class="run-header-slot"></div>
+            <div class="process-body process-slot"></div>
+            <footer class="panel-footer"><span>连续执行历史</span><span>Esc 收起</span></footer>
+          </section>
+        </div>
+      </div>
+      <div class="scene-footnote">
+        <div class="legend"><span class="legend-item"><span class="legend-swatch" aria-hidden="true"></span>操作栏 / 运行中 Run <code id="run-hex">#FAFAFA</code></span><span class="legend-item"><span class="legend-swatch conversation-swatch" aria-hidden="true"></span>会话 / 历史 / 空白 <code id="conversation-hex">#FFFFFF</code></span></div>
+        <span id="contrast-label"></span>
+      </div>
+    </section>
+    <section class="comparison-section" aria-label="四种底色并排对比">
+      <div id="comparison-grid" class="comparison-grid"></div>
+      <div class="scene-footnote"><span>相同内容、相同边框和文字，只比较操作栏与运行中 Run 的底色。</span><span>上一版仅作对照，不是第四个候选。</span></div>
+    </section>
+    <footer class="review-note">
+      <p><strong>建议先看 A。</strong>如果你想尽量接近白底，选 A；希望历史和运行中更容易分开，选 B；仍想保留一点 Steel 气质，选 C。</p>
+      <small>基于 UI-UX-PRO-MAX 的低色量与对比度建议。<br>仅配色设计稿 · 模拟数据 · 不连接 App 或 Runtime</small>
+    </footer>
+    <p id="selection-status" class="sr-only" role="status" aria-live="polite"></p>
+    <noscript>请启用 JavaScript 以切换三个配色方案。这是一份离线设计稿，不会访问网络。</noscript>
+  </main>
+  <template id="run-header-template">
+    <div class="run-header">
+      <div class="run-agent"><span class="avatar" aria-hidden="true">C</span><div class="run-agent-copy"><div class="run-agent-name"><strong>Codex</strong><span class="model-label">Agent · 默认策略</span></div><span class="run-subtitle">共 2 次执行 · 当前正在执行</span></div></div>
+      <div class="run-actions" aria-label="停止和收起按钮外观示意"><span class="mock-button stop">停止</span><span class="mock-button">收起</span></div>
+    </div>
+  </template>
+  <template id="process-template">
+    <div class="run-stage historical"><span class="stage-node" aria-hidden="true"></span><div class="run-card"><div class="run-time"><time>14:18–14:20</time><span class="run-state">已完成</span></div><div class="run-meta"><span>执行 <code>run-history</code></span><span>直接执行</span></div></div></div>
+    <div class="run-stage running"><span class="stage-node" aria-hidden="true"></span><div class="run-card"><div class="run-time"><time>14:23–现在</time><span class="run-state">执行中</span><span class="current-badge">当前执行</span></div><div class="run-meta"><span>执行 <code>run-current</code></span><span>直接执行</span><span class="model-meta">模型 <code>runtime-default</code></span></div><div class="tool-line"><svg class="icon" aria-hidden="true"><use href="#i-tools"/></svg><span class="tool-copy"><strong>执行中</strong> · 检查执行区的样式与主题</span><svg class="icon live-icon" aria-label="运行中" role="img"><use href="#i-live"/></svg><svg class="icon chevron" aria-hidden="true"><use href="#i-down"/></svg></div></div></div>
+  </template>
+  <script>
+    'use strict';
+    const root = document.documentElement;
+    const variants = {
+      a: { title: 'A · 瓷白', description: '几乎白色，只留很轻的底色层次。', summary: '最轻的选择，主要依靠边框和状态文字区分。' },
+      b: { title: 'B · 浅雾灰', description: '更中性，层次比 A 清楚一点。', summary: '去掉明显色相，比瓷白多一点结构感。' },
+      c: { title: 'C · 淡钢蓝', description: '蓝色只留一点，明显比上一版浅。', summary: '保留 Steel 方向，但降低整块背景的色量。' },
+      reference: { title: '上一版 · 按钮同色', description: '用于对照：你觉得偏深的上一版。', summary: '直接使用会话 / 地图按钮选中态的底色。' }
+    };
+    const params = new URLSearchParams(location.search);
+    const pick = (key, choices, fallback) => choices.includes(params.get(key)) ? params.get(key) : fallback;
+    const state = {
+      variant: pick('variant', ['a', 'b', 'c', 'reference'], 'a'),
+      theme: pick('theme', ['day', 'night'], 'day'),
+      placement: pick('placement', ['floating', 'bottom'], 'floating'),
+      view: pick('view', ['scene', 'compare'], 'scene')
+    };
+    let lastCandidate = state.variant === 'reference' ? 'a' : state.variant;
+    const clone = (id) => document.getElementById(id).content.cloneNode(true);
+    document.querySelector('.run-header-slot').replaceWith(clone('run-header-template'));
+    document.querySelector('.process-slot').append(clone('process-template'));
+    const comparisonGrid = document.getElementById('comparison-grid');
+    ['reference', 'a', 'b', 'c'].forEach((key) => {
+      const item = document.createElement('article');
+      item.className = 'compare-item';
+      item.dataset.palette = key;
+      const title = document.createElement('header');
+      title.className = 'compare-title';
+      const heading = document.createElement('h2');
+      heading.textContent = variants[key].title;
+      const hex = document.createElement('span');
+      hex.className = 'hex';
+      hex.dataset.hexFor = key;
+      title.append(heading, hex);
+      const sample = document.createElement('div');
+      sample.className = 'compare-sample';
+      const team = document.createElement('div');
+      team.className = 'mini-team';
+      ['C', 'C', 'K'].forEach((initial, index) => {
+        const avatar = document.createElement('span');
+        avatar.className = 'avatar';
+        avatar.setAttribute('aria-hidden', 'true');
+        avatar.dataset.person = ['one', 'two', 'three'][index];
+        avatar.textContent = initial;
+        team.append(avatar);
+      });
+      const process = document.createElement('div');
+      process.className = 'process-body';
+      process.append(clone('process-template'));
+      sample.append(team, clone('run-header-template'), process);
+      const footer = document.createElement('div');
+      footer.className = 'compare-footer';
+      const description = document.createElement('p');
+      description.textContent = variants[key].summary;
+      const button = document.createElement('button');
+      button.className = 'text-button';
+      button.type = 'button';
+      button.textContent = '查看完整场景';
+      button.setAttribute('aria-label', '查看 ' + variants[key].title + ' 的完整场景');
+      button.addEventListener('click', () => {
+        state.variant = key;
+        if (key !== 'reference') lastCandidate = key;
+        state.view = 'scene';
+        render();
+        document.querySelector('[data-view-choice="scene"]').focus();
+      });
+      footer.append(description, button);
+      item.append(title, sample, footer);
+      comparisonGrid.append(item);
+    });
+    function luminance(hex) {
+      const rgb = hex.replace('#', '').match(/../g).map((pair) => parseInt(pair, 16) / 255)
+        .map((value) => value <= 0.04045 ? value / 12.92 : Math.pow((value + 0.055) / 1.055, 2.4));
+      return rgb[0] * 0.2126 + rgb[1] * 0.7152 + rgb[2] * 0.0722;
+    }
+    function contrast(a, b) {
+      const values = [luminance(a), luminance(b)].sort((x, y) => y - x);
+      return ((values[0] + 0.05) / (values[1] + 0.05)).toFixed(2);
+    }
+    function render() {
+      root.dataset.theme = state.theme;
+      root.dataset.palette = state.variant;
+      root.dataset.placement = state.placement;
+      root.dataset.view = state.view;
+      const tokens = getComputedStyle(root);
+      const token = (name) => tokens.getPropertyValue(name).trim();
+      document.querySelectorAll('[data-choice]').forEach((button) => button.setAttribute('aria-pressed', String(button.dataset.choice === state.variant)));
+      document.querySelectorAll('[data-theme-choice]').forEach((button) => button.setAttribute('aria-pressed', String(button.dataset.themeChoice === state.theme)));
+      document.querySelectorAll('[data-placement-choice]').forEach((button) => button.setAttribute('aria-pressed', String(button.dataset.placementChoice === state.placement)));
+      document.querySelectorAll('[data-view-choice]').forEach((button) => button.setAttribute('aria-pressed', String(button.dataset.viewChoice === state.view)));
+      document.querySelectorAll('[data-hex-for]').forEach((element) => { element.textContent = token('--candidate-' + element.dataset.hexFor).toUpperCase(); });
+      document.getElementById('active-title').textContent = state.view === 'compare' ? '并排对比' : variants[state.variant].title;
+      document.getElementById('active-description').textContent = state.view === 'compare' ? '上一版 / A / B / C' : variants[state.variant].description;
+      const reference = document.getElementById('reference-button');
+      reference.setAttribute('aria-pressed', String(state.variant === 'reference'));
+      reference.textContent = state.variant === 'reference' ? '回到 ' + variants[lastCandidate].title : '看上一版';
+      const fill = token('--candidate-' + state.variant);
+      document.getElementById('run-hex').textContent = fill.toUpperCase();
+      document.getElementById('conversation-hex').textContent = token('--conversation').toUpperCase();
+      document.getElementById('contrast-label').textContent = '次要文字对比度 ' + contrast(fill, token('--muted')) + ' : 1';
+      document.getElementById('selection-status').textContent = variants[state.variant].title + '，' + (state.theme === 'day' ? '日间' : '夜间') + '，' + (state.view === 'compare' ? '并排对比' : state.placement === 'floating' ? '执行浮层' : '底部执行台');
+      const nextUrl = new URL(location.href);
+      Object.entries(state).forEach(([key, value]) => nextUrl.searchParams.set(key, value));
+      try { history.replaceState(null, '', nextUrl); } catch { /* Some local file previews disallow history writes. */ }
+    }
+    document.querySelectorAll('[data-choice]').forEach((button) => button.addEventListener('click', () => { state.variant = button.dataset.choice; lastCandidate = state.variant; render(); }));
+    document.querySelectorAll('[data-theme-choice]').forEach((button) => button.addEventListener('click', () => { state.theme = button.dataset.themeChoice; render(); }));
+    document.querySelectorAll('[data-placement-choice]').forEach((button) => button.addEventListener('click', () => { state.placement = button.dataset.placementChoice; render(); }));
+    document.querySelectorAll('[data-view-choice]').forEach((button) => button.addEventListener('click', () => { state.view = button.dataset.viewChoice; render(); }));
+    document.getElementById('reference-button').addEventListener('click', () => { state.variant = state.variant === 'reference' ? lastCandidate : 'reference'; render(); });
+    render();
+  </script>
+</body>
+</html>
