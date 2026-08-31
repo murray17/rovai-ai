@@ -29,7 +29,7 @@ pub const NAVIGATION_SCHEMA_VERSION: i64 = 3;
 pub const EXECUTION_EVIDENCE_PAGE_SCHEMA_VERSION: i64 = 1;
 pub const CAMP_MESSAGE_AROUND_SCHEMA_VERSION: i64 = 1;
 pub const CAMP_MESSAGE_FIND_SCHEMA_VERSION: i64 = 1;
-pub const CAMP_OPEN_SCHEMA_VERSION: i64 = 5;
+pub const CAMP_OPEN_SCHEMA_VERSION: i64 = 6;
 pub const CAMP_MESSAGE_PAGE_SCHEMA_VERSION: i64 = 1;
 pub const AGENT_RUN_DIAGNOSTIC_SCHEMA_VERSION: i64 = 1;
 pub const NAVIGATION_RECENT_CAMP_LIMIT: usize = 5;
@@ -42,7 +42,6 @@ const CAMP_OPEN_DELIVERY_LIMIT: i64 = 200;
 const CAMP_OPEN_TURN_LIMIT: i64 = 64;
 const CAMP_OPEN_AGENT_RUN_LIMIT: i64 = 96;
 const CAMP_OPEN_APPROVAL_LIMIT: i64 = 32;
-const CAMP_OPEN_TIMELINE_LIMIT: i64 = 160;
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -727,7 +726,6 @@ pub struct CampOpenCoverage {
     pub agent_runs: CampOpenCollectionCoverage,
     pub execution_evidence: CampOpenCollectionCoverage,
     pub approvals: CampOpenCollectionCoverage,
-    pub timeline: CampOpenCollectionCoverage,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -747,7 +745,6 @@ pub struct CampOpenProjection {
     pub agent_run_file_changes: Vec<AgentRunFileChangesView>,
     pub agent_run_images: Vec<AgentRunImagesView>,
     pub approvals: Vec<ApprovalView>,
-    pub timeline: Vec<DomainEventView>,
     pub coverage: CampOpenCoverage,
 }
 
@@ -830,6 +827,7 @@ pub struct MessageDeliveryView {
 )]
 pub enum MessageDeliveryKindView {
     PublicA2a {
+        source_agent_run_id: String,
         dispatch_disposition: String,
         completion_role: Option<String>,
         gather_id: Option<String>,
@@ -1088,7 +1086,7 @@ impl ReadModelService {
         let membership_reconciliations = load_membership_reconciliations(&transaction, camp_id)?;
         let counts = load_camp_open_counts(&transaction, camp_id)?;
         let tasks = load_tasks(&transaction, camp_id, Some(CAMP_OPEN_TASK_LIMIT))?;
-        let messages = load_messages(&transaction, camp_id, CAMP_OPEN_MESSAGE_LIMIT)?;
+        let messages = load_open_messages(&transaction, camp_id, CAMP_OPEN_MESSAGE_LIMIT)?;
         let message_deliveries =
             load_message_deliveries(&transaction, camp_id, Some(CAMP_OPEN_DELIVERY_LIMIT))?;
         let turns = load_turns(&transaction, camp_id, Some(CAMP_OPEN_TURN_LIMIT))?;
@@ -1098,15 +1096,6 @@ impl ReadModelService {
         let agent_run_images = list_camp_images(&transaction, camp_id)?;
         let approvals =
             load_approvals(&transaction, camp_id, true, Some(CAMP_OPEN_APPROVAL_LIMIT))?;
-        let timeline = load_events(
-            &transaction,
-            Some(camp_id),
-            0,
-            through_global_sequence,
-            CAMP_OPEN_TIMELINE_LIMIT,
-            true,
-            true,
-        )?;
         let coverage = CampOpenCoverage {
             tasks: collection_coverage(tasks.len(), counts.tasks),
             messages: message_coverage(&messages, counts.messages),
@@ -1121,7 +1110,6 @@ impl ReadModelService {
                 counts.execution_evidence,
             ),
             approvals: collection_coverage(approvals.len(), counts.pending_approvals),
-            timeline: collection_coverage(timeline.len(), counts.timeline),
         };
         transaction.commit()?;
         Ok(CampOpenProjection {
@@ -1139,7 +1127,6 @@ impl ReadModelService {
             agent_run_file_changes,
             agent_run_images,
             approvals,
-            timeline,
             coverage,
         })
     }
@@ -1869,7 +1856,6 @@ struct CampOpenCounts {
     agent_runs: i64,
     execution_evidence: i64,
     pending_approvals: i64,
-    timeline: i64,
 }
 
 fn load_camp_open_counts(transaction: &Transaction<'_>, camp_id: &str) -> Result<CampOpenCounts> {
@@ -1896,14 +1882,7 @@ fn load_camp_open_counts(transaction: &Transaction<'_>, camp_id: &str) -> Result
                JOIN action_execution ON action_execution.id = approval.action_id
                JOIN agent_run ON agent_run.id = action_execution.agent_run_id
                JOIN camp_turn ON camp_turn.id = agent_run.camp_turn_id
-               WHERE camp_turn.camp_id = ?1 AND approval.status = 'pending'),
-              (SELECT COUNT(*)
-               FROM event_log
-               LEFT JOIN task AS event_task ON event_task.id = event_log.task_id
-               WHERE (event_log.camp_id = ?1
-                  OR (event_log.camp_id IS NULL AND event_task.camp_id = ?1))
-                 AND (event_log.entity_type = 'task'
-                   OR event_log.event_type = 'camp_turn.cancel_requested'))
+               WHERE camp_turn.camp_id = ?1 AND approval.status = 'pending')
             "#,
             [camp_id],
             |row| {
@@ -1915,7 +1894,6 @@ fn load_camp_open_counts(transaction: &Transaction<'_>, camp_id: &str) -> Result
                     agent_runs: row.get(4)?,
                     execution_evidence: row.get(5)?,
                     pending_approvals: row.get(6)?,
-                    timeline: row.get(7)?,
                 })
             },
         )
@@ -2194,6 +2172,37 @@ fn camp_message_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<CampMessageRow>
         presentation_json: row.get(12)?,
         created_at: row.get(13)?,
     })
+}
+
+// Camp open reads business projections without resolving publication events.
+// Snapshot/history readers retain their event sequence through load_messages.
+fn load_open_messages(
+    transaction: &Transaction<'_>,
+    camp_id: &str,
+    limit: i64,
+) -> Result<Vec<CampMessageView>> {
+    let mut statement = transaction.prepare(
+        r#"
+        SELECT id, sequence, NULL AS timeline_global_sequence,
+               author_type, author_id,
+               source_agent_run_id, body, structured_content_json, address_mode,
+               addressed_agent_ids_json, reply_to_camp_message_id, camp_turn_id,
+               CASE WHEN author_type = 'agent'
+                    THEN recipient_presentation_json
+                    ELSE presentation_json
+               END, created_at
+        FROM camp_message
+        WHERE camp_id = ?1 AND tombstoned_at IS NULL
+        ORDER BY sequence DESC LIMIT ?2
+        "#,
+    )?;
+    let rows = statement
+        .query_map(params![camp_id, limit], camp_message_row)?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    drop(statement);
+    let mut messages = hydrate_message_views(transaction, rows)?;
+    messages.reverse();
+    Ok(messages)
 }
 
 fn load_messages(
@@ -2698,7 +2707,7 @@ fn load_message_deliveries(
                recipient_canonical_position, edge_kind,
                target_parent_agent_run_id, return_to_agent_run_id,
                target_conversation_id,
-               recipient_membership_version_at_admission
+               recipient_membership_version_at_admission, source_agent_run_id
         FROM message_delivery
         WHERE camp_id = ?1
         ORDER BY
@@ -2719,6 +2728,7 @@ fn load_message_deliveries(
             let delivery_kind = row.get::<_, String>(18)?;
             let kind = match delivery_kind.as_str() {
                 "public_a2a" => MessageDeliveryKindView::PublicA2a {
+                    source_agent_run_id: row.get(29)?,
                     dispatch_disposition: row.get(19)?,
                     completion_role: row.get(20)?,
                     gather_id: row.get(21)?,
@@ -3881,7 +3891,65 @@ mod tests {
         );
         assert!(validate_camp_message_find_query("中").is_ok());
     }
+
+    #[test]
+    fn public_delivery_projection_preserves_causal_source_not_target_lineage() {
+        // Own the SQL -> public DTO seam with a minimal table, not another full Camp fixture.
+        // Existing read-model tests cover messages/evidence, not delivery source attribution.
+        let mut connection = rusqlite::Connection::open_in_memory().unwrap();
+        connection.execute_batch(r#"
+            CREATE TABLE message_delivery (
+                id TEXT, camp_id TEXT, message_id TEXT DEFAULT 'message',
+                camp_turn_id TEXT DEFAULT 'turn', task_id TEXT,
+                recipient_agent_id TEXT DEFAULT 'recipient', status TEXT,
+                dispatch_phase TEXT DEFAULT 'terminal', wait_condition TEXT,
+                dispatch_attempt_count INTEGER DEFAULT 1, retry_generation INTEGER DEFAULT 0,
+                context_manifest_id TEXT, target_agent_run_id TEXT,
+                manual_intervention_required INTEGER DEFAULT 0, failure_code TEXT,
+                version INTEGER DEFAULT 1, created_at TEXT DEFAULT '2026-08-31T00:00:00Z',
+                updated_at TEXT DEFAULT '2026-08-31T00:00:00Z', ended_at TEXT,
+                delivery_kind TEXT, dispatch_disposition TEXT DEFAULT 'dispatch',
+                completion_role TEXT DEFAULT 'required', gather_id TEXT,
+                gather_dispatch_delivery_id TEXT, recipient_canonical_position INTEGER,
+                edge_kind TEXT, target_parent_agent_run_id TEXT, return_to_agent_run_id TEXT,
+                target_conversation_id TEXT, recipient_membership_version_at_admission INTEGER DEFAULT 1,
+                source_agent_run_id TEXT, queue_sequence INTEGER DEFAULT 1
+            );
+            INSERT INTO message_delivery (
+                id, camp_id, status, delivery_kind, recipient_canonical_position, edge_kind,
+                source_agent_run_id, target_parent_agent_run_id, target_agent_run_id, return_to_agent_run_id
+            ) VALUES
+                ('pending', 'camp', 'pending', 'public_a2a', 0, 'forward', 'sender', 'sender', NULL, NULL),
+                ('running', 'camp', 'running', 'public_a2a', 1, 'forward', 'sender', 'sender', 'receiver', NULL),
+                ('return', 'camp', 'settled', 'public_a2a', 0, 'return', 'child', 'ancestor', 'continuation', 'caller'),
+                ('captured', 'camp', 'settled', 'public_a2a', 0, 'return', 'child', NULL, NULL, 'caller');
+            UPDATE message_delivery SET dispatch_disposition = 'gather_captured', gather_id = 'gather'
+                WHERE id = 'captured';
+            INSERT INTO message_delivery (
+                id, camp_id, status, delivery_kind, gather_id, target_conversation_id
+            ) VALUES ('completion', 'camp', 'pending', 'gather_completion', 'gather', 'conversation');
+        "#).unwrap();
+        let transaction = connection.transaction().unwrap();
+        // Full Snapshot and bounded Camp-open use the same projection with different ordering.
+        for limit in [None, Some(10)] {
+            let deliveries = super::load_message_deliveries(&transaction, "camp", limit).unwrap();
+            assert_eq!(deliveries.len(), 5);
+            for delivery in deliveries {
+                let value = serde_json::to_value(&delivery).unwrap();
+                match delivery.id.as_str() {
+                    "pending" | "running" => assert_eq!(value["sourceAgentRunId"], "sender"),
+                    "return" | "captured" => assert_eq!(value["sourceAgentRunId"], "child"),
+                    "completion" => assert!(value.get("sourceAgentRunId").is_none()),
+                    _ => unreachable!(),
+                }
+            }
+        }
+    }
 }
+
+#[cfg(all(test, feature = "slow-tests"))]
+#[path = "read_model/camp_open_tests.rs"]
+mod camp_open_slow_tests;
 
 #[cfg(all(test, feature = "slow-tests"))]
 mod slow_tests {

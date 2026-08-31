@@ -46,6 +46,7 @@ const prose = '这段较长的历史消息用于验证文件预览改变会话�
 const targetBody = [
   '主实现 `src/report/run_report.py`。',
   ...Array.from({ length: 12 }, (_, index) => `段落 ${index + 1}：${prose}`),
+  '完整路径 src/report/run_report.py。',
   '定位 `run_report.py:44-46`，这里是当前阅读位置。',
   'WBS(外码)/WBS描述/成本中心/FBP/GR-手工金额；心/FBP）有值；`run_gr_reminder.py`。',
   '已读取（https://example.com/wiki/spec）。文档中的改动：',

@@ -9,7 +9,7 @@ last_updated: 2026-08-31
 
 # Camp Open Projection v11
 
-v11 replaces [v10](camp-open-projection-v10.md)。所有既有集合、high-water、分页、coverage、channelSource、
+v11 replaces [v10](camp-open-projection-channel-v10.md)。所有既有集合、high-water、分页、coverage、channelSource、
 Fast 和文件变化语义不变；Snapshot/Open 只增加可选 `agentRunImages`，字段与只读规则由
 [Runtime Images v1](runtime-images-v1.md) 拥有。新 reader 将缺失视为 `[]`，旧 reader 可忽略，
 所以 Snapshot schema 34 / Open schema 5 保持不变。此字段不进入 Agent 模型 Context。

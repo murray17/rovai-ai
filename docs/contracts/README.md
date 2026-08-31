@@ -29,9 +29,11 @@ Architecture 解释组件如何组成，Version 概览记录交付范围；它�
 | --- | --- |
 | [Camp Member Fast v1（当前）](camp-member-fast-v1.md) | Camp/member/保存绑定代次的三态覆盖、原生订阅资格、执行冻结、观察与紧凑 UI |
 | [Runtime Images v2（当前）](runtime-images-v2.md) | 本地结构化图片、ACP 增量累积、bytes/稳定路径/Run 临时路径的混合存储、Camp-scoped 读取与独立展示 |
-| [Camp Open Projection v11（当前）](camp-open-projection-v11.md) | v10 保留；Snapshot 34/Open 5 增加可选 agentRunImages 元数据，图片 bytes 按需读取 |
-| [Camp Open Projection v10（历史）](camp-open-projection-v10.md) | v9 保留；Camp/Navigation 增加可选 channelSource，原始 title 不变，仅连接已有绑定 |
-| [Camp Open Projection v9（历史）](camp-open-projection-v9.md) | v8 保留；Snapshot 34/Open 5 增加可选 member.fast，仅查询安全缓存；不含渠道来源 |
+| [Camp Open Projection v12（当前）](camp-open-projection-v12.md) | Snapshot 34/Open 6；保留 main 业务投影与渠道来源、Runtime 图片，只读图片 bytes 按需读取 |
+| [Camp Open Projection v11（历史）](camp-open-projection-v11.md) | 渠道分支 Snapshot 34/Open 5 的可选 agentRunImages 元数据 |
+| [Camp Open Projection v10（历史）](camp-open-projection-v10.md) | main Snapshot 34/Open 6；Open 不读取 event_log，移除 timeline/coverage.timeline，保留 high-water 与业务卡片 |
+| [Camp Open Projection v10（渠道分支历史）](camp-open-projection-channel-v10.md) | v9 保留；Camp/Navigation 增加可选 channelSource，原始 title 不变；合并时保留原文以区分同号合同 |
+| [Camp Open Projection v9（历史）](camp-open-projection-v9.md) | v8 保留；Snapshot 34/Open 5 增加可选 member.fast，仅查询安全缓存 |
 | [Runtime Launch and Verification v29（当前）](runtime-launch-and-verification-v29.md) | v28 保留；现有 Check Manager 的 Fast metadata 与单执行原生覆盖 |
 | [Runtime Usage Monitoring v4（当前）](runtime-usage-monitoring-v4.md) | v3 保留；可选实际档位、observed 优先与未知撤回估价 |
 | [Pending Camp Input v1（当前）](pending-camp-input-v1.md) | 私有下一轮输入、FIFO、编辑 token、暂停、原子发布与无附件边界 |

@@ -86,7 +86,7 @@ Owner 可在私聊或群聊显式 `@Bot` 后复用现有 Quick Chat、项目选�
 五种已支持渠道会话复用普通 Camp 的首消息自动命名。Core 原始标题不带渠道前缀；来源由现有绑定投影，
 Renderer 在导航、搜索、顶部、最近会话和临时通知统一展示；手动重命名只编辑原始标题，闭合旧绑定仍保留来源。
 本轮不重命名历史 Camp、不新增 Migration，不改变路由、权限或项目绑定。规范见
-[Channel Camp Naming v1](../../contracts/channel-camp-naming-v1.md)、[Camp Open Projection v10](../../contracts/camp-open-projection-v10.md)
+[Channel Camp Naming v1](../../contracts/channel-camp-naming-v1.md)、[Camp Open Projection v10](../../contracts/camp-open-projection-channel-v10.md)
 和 [Notification Episode v5](../../contracts/notification-episode-v5.md)。这是局部可逆的命名/展示收敛，无需新增 Version Decision；
 不改变钉钉外部验收 NO-GO，不默认 push、打包或重启日常 App。
 

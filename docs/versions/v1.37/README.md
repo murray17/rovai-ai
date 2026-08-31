@@ -37,7 +37,7 @@ last_updated: 2026-08-31
 | --- | --- | --- |
 | Version lifecycle | 已更新 | 本概览、实施计划、版本索引；v1.36 冻结为 historical，未验收事实保留 |
 | Decisions | 已更新 | [V1.37-D01](decisions.md#v1-37-d01) 与 [CURRENT](../../decisions/CURRENT.md) |
-| Contracts | 已更新 | [Runtime Images v2](../../contracts/runtime-images-v2.md)、[Camp Open Projection v11](../../contracts/camp-open-projection-v11.md)、[Camp Message Send v16](../../contracts/camp-message-send-v16.md) |
+| Contracts | 已更新 | [Runtime Images v2](../../contracts/runtime-images-v2.md)、[Camp Open Projection v12](../../contracts/camp-open-projection-v12.md)、[Camp Message Send v16](../../contracts/camp-message-send-v16.md) |
 | Architecture | 已更新 | [Runtime 图片](../../architecture/runtime-images.md)、[Built-in Tool Runtime](../../architecture/builtin-tool-runtime.md#bootstrap-与-dynamic-context)及架构导航 |
 | UI | 已更新 | [Camp 会话工作区](../../ui/components/conversation-workspace.md#runtime-图片与消息图片)；保留既有双主题 |
 | Runtime Activity | 确认无需更新 | 内部图片观察不进入 Canonical Activity，不修改 classifier/映射或已有公开 Evidence |

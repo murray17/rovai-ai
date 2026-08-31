@@ -12,7 +12,9 @@ import {
   pasteStructuredPlainText,
   replaceStructuredSelection,
   selectedStructuredMentionContent,
+  skillQueryAtCaret,
   structuredMentionContentLength,
+  type StructuredMentionContent,
   type StructuredMentionEditorState
 } from './structured-mention-model'
 
@@ -26,6 +28,105 @@ const skill = (skillId: string, nameAtSend: string) => ({
   kind: 'skill_mention' as const,
   skillId,
   nameAtSend
+})
+
+describe('Skill queries at the caret', () => {
+  it.each(['', '请使用 ', '请使用\t', '请使用\u3000', '请使用：\n', '👩‍💻 ',
+    ...[...'，。！？；：、'].map((boundary) => `请使用${boundary}`)
+  ])('opens after the safe boundary in %j without depending on the rest of the body', (prefix) => {
+    for (const query of ['', 'worktree']) {
+      const caret = prefix.length + 1 + query.length
+      expect(skillQueryAtCaret([
+        { kind: 'text', text: `${prefix}/${query} 再继续` }
+      ], { anchor: caret, focus: caret })).toEqual({ start: prefix.length, end: caret, query })
+    }
+  })
+
+  it.each([
+    '', '普通正文', 'https://github.com', 'src/components/chat', 'foo/bar', '请使用/worktree',
+    '/work tree', '/work/', '/work@', '/work ', '/work\t', '/work\n', '/work\r', '/work\r\n',
+    '/work\u2028', '/work\u3000'
+  ])('does not treat %j as an active Skill query', (text) => {
+    expect(skillQueryAtCaret([{ kind: 'text', text }], {
+      anchor: text.length,
+      focus: text.length
+    })).toBeNull()
+  })
+
+  it('requires a collapsed caret within the current content', () => {
+    const content: StructuredMentionContent = [{ kind: 'text', text: '/work' }]
+    for (const selection of [
+      { anchor: 0, focus: 5 }, { anchor: 5, focus: 0 },
+      ...[-1, 0, 1.5, 6, Number.NaN, Number.POSITIVE_INFINITY]
+        .map((caret) => ({ anchor: caret, focus: caret }))
+    ]) {
+      expect(skillQueryAtCaret(content, selection)).toBeNull()
+    }
+  })
+
+  it.each([member('agent-a'), allMembers(), skill('skill-existing', 'review-pr')])(
+    'never starts against or crosses a $kind token',
+    (token) => {
+      expect(skillQueryAtCaret([token, { kind: 'text', text: '/work' }], {
+        anchor: 6, focus: 6
+      })).toBeNull()
+      expect(skillQueryAtCaret([
+        { kind: 'text', text: '/wo' }, token, { kind: 'text', text: 'rk' }
+      ], { anchor: 6, focus: 6 })).toBeNull()
+      expect(skillQueryAtCaret([token, { kind: 'text', text: ' /work' }], {
+        anchor: 7, focus: 7
+      })).toEqual({ start: 2, end: 7, query: 'work' })
+    }
+  )
+
+  it('derives a query from the latest replacement, paste and deletion results', () => {
+    const replaced = insertStructuredText({
+      content: [{ kind: 'text', text: '请 旧文本 再继续' }],
+      selection: { anchor: 5, focus: 2 }
+    }, '/')
+    expect(replaced.content).toEqual([{ kind: 'text', text: '请 / 再继续' }])
+    expect(skillQueryAtCaret(replaced.content, replaced.selection)).toEqual({ start: 2, end: 3, query: '' })
+
+    const pasted = pasteStructuredPlainText(replaced, 'work')
+    expect(pasted.content).toEqual([{ kind: 'text', text: '请 /work 再继续' }])
+    expect(skillQueryAtCaret(pasted.content, pasted.selection)).toEqual({ start: 2, end: 7, query: 'work' })
+
+    const deleted = deleteStructuredBackward(pasted)
+    expect(skillQueryAtCaret(deleted.content, deleted.selection)).toEqual({ start: 2, end: 6, query: 'wor' })
+
+    const removedSlash = deleteStructuredForward({ ...deleted, selection: { anchor: 2, focus: 2 } })
+    expect(skillQueryAtCaret(removedSlash.content, removedSlash.selection)).toBeNull()
+  })
+
+  it.each([' 再继续', '再继续', '\n再继续', '\u3000再继续'])(
+    'replaces only the query and preserves surrounding tokens and suffix %j',
+    (suffix) => {
+      const prefix = '请先检查模块，然后 '
+      const caret = 1 + prefix.length + '/wor'.length
+      const content: StructuredMentionContent = [
+        member('agent-a'),
+        { kind: 'text', text: `${prefix}/wor${suffix}` },
+        allMembers(),
+        skill('skill-existing', 'review-pr')
+      ]
+      const query = skillQueryAtCaret(content, { anchor: caret, focus: caret })!
+      expect(query).toEqual({ start: 1 + prefix.length, end: caret, query: 'wor' })
+      expect(insertSkillMentionWithTrailingSpace({
+        content,
+        selection: { anchor: query.start, focus: query.end }
+      }, 'skill-worktree', 'worktree')).toEqual({
+        content: [
+          member('agent-a'),
+          { kind: 'text', text: prefix },
+          skill('skill-worktree', 'worktree'),
+          { kind: 'text', text: suffix === '再继续' ? ` ${suffix}` : suffix },
+          allMembers(),
+          skill('skill-existing', 'review-pr')
+        ],
+        selection: { anchor: prefix.length + 3, focus: prefix.length + 3 }
+      })
+    }
+  )
 })
 
 describe('structured mention editing model', () => {

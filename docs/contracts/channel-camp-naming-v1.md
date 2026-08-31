@@ -66,6 +66,6 @@ Navigation schema 3、Snapshot schema 34、Open schema 5 与 Notification schema
 ## References
 
 - [Camp 命名不变量](../architecture/foundational-invariants.md#camp-lifecycle)
-- [Camp Open Projection v10](camp-open-projection-v10.md)
+- [Camp Open Projection v10](camp-open-projection-channel-v10.md)
 - [Notification Episode v5](notification-episode-v5.md)
 - [App Shell 与统一侧栏](../ui/components/app-shell-navigation.md)

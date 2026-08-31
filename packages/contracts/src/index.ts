@@ -1927,7 +1927,7 @@ export interface CampOpenMessageCoverage extends CampOpenCollectionCoverage {
 }
 
 export interface CampOpenProjection {
-  schemaVersion: 5
+  schemaVersion: 6
   throughGlobalSequence: number
   camp: CampSnapshot['camp']
   members: CampMemberView[]
@@ -1941,7 +1941,6 @@ export interface CampOpenProjection {
   agentRunFileChanges: AgentRunFileChangesView[]
   agentRunImages?: AgentRunImagesView[]
   approvals: ActionApprovalView[]
-  timeline: DomainEventView[]
   coverage: {
     tasks: CampOpenCollectionCoverage
     messages: CampOpenMessageCoverage
@@ -1950,7 +1949,6 @@ export interface CampOpenProjection {
     agentRuns: CampOpenCollectionCoverage
     executionEvidence: CampOpenCollectionCoverage
     approvals: CampOpenCollectionCoverage
-    timeline: CampOpenCollectionCoverage
   }
 }
 
@@ -2028,6 +2026,7 @@ interface MessageDeliveryBaseView {
 export type MessageDeliveryView = MessageDeliveryBaseView & (
   | {
       deliveryKind: 'public_a2a'
+      sourceAgentRunId?: string
       dispatchDisposition: 'dispatch' | 'gather_captured'
       completionRole: 'required' | 'optional' | null
       gatherId: string | null

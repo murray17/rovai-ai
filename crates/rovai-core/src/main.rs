@@ -948,13 +948,12 @@ fn log_camp_open_projection(
         "[camp-open] trace={trace_id} method={method} lock_ms={lock_ms} \
          reconcile_ms={reconcile_ms} projection_ms={projection_ms} \
          serialization_ms={serialization_ms} payload_bytes={payload_bytes} \
-         schema={} high_water={} messages={} runs={} evidence={} timeline={}",
+         schema={} high_water={} messages={} runs={} evidence={}",
         projection.schema_version,
         projection.through_global_sequence,
         projection.messages.len(),
         projection.agent_runs.len(),
         projection.execution_evidence.len(),
-        projection.timeline.len(),
     );
 }
 

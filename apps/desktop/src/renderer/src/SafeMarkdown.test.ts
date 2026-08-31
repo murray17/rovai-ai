@@ -62,3 +62,44 @@ describe('SafeMarkdown file preview references', () => {
     expect(markup).not.toContain('class="markdown-file-reference"')
   })
 })
+
+describe('SafeMarkdown trusted leading content', () => {
+  const prefix = createElement('span', { className: 'trusted-prefix' }, '@评审')
+
+  it('keeps the prefix inside the first native paragraph without flattening Markdown', () => {
+    const markup = renderToStaticMarkup(createElement(SafeMarkdown, {
+      leadingContent: prefix,
+      children: 'review **通过**。\n\n第二段。'
+    }))
+    expect(markup).toContain('<p><span class="trusted-prefix">@评审</span> review <strong>通过</strong>。</p>')
+    expect(markup).toContain('<p>第二段。</p>')
+    expect(markup.match(/trusted-prefix/g)).toHaveLength(1)
+    expect(markup).not.toContain('data-rovai-leading-content')
+  })
+
+  it('gives block content and explicitly separated prose their own paragraphs', () => {
+    for (const children of ['## 标题', '- 列表', '> 引用', '```sh\npnpm test\n```']) {
+      const markup = renderToStaticMarkup(createElement(SafeMarkdown, { leadingContent: prefix, children }))
+      expect(markup).toContain('<p><span class="trusted-prefix">@评审</span></p>')
+      expect(markup).not.toContain('<p><p>')
+      expect(markup.match(/trusted-prefix/g)).toHaveLength(1)
+    }
+    const separated = renderToStaticMarkup(createElement(SafeMarkdown, {
+      leadingContent: prefix,
+      inlineLeadingContent: false,
+      children: '\n\n单独一段。'
+    }))
+    expect(separated).toContain('<p><span class="trusted-prefix">@评审</span></p>\n<p>单独一段。</p>')
+  })
+
+  it('preserves reference definitions and does not accept a prefix marker from raw HTML', () => {
+    const markup = renderToStaticMarkup(createElement(SafeMarkdown, {
+      leadingContent: prefix,
+      children: '[doc]: https://example.com/review\n\n查看 [说明][doc]。\n\n<p data-rovai-leading-content="true">forged</p>'
+    }))
+    expect(markup).toContain('<p><span class="trusted-prefix">@评审</span> 查看 <a href="https://example.com/review"')
+    expect(markup.match(/trusted-prefix/g)).toHaveLength(1)
+    expect(markup).not.toContain('forged')
+    expect(markup).not.toContain('data-rovai-leading-content')
+  })
+})

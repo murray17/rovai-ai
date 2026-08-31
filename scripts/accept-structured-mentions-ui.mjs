@@ -70,6 +70,30 @@ const currentUserMentionContent = [
   { kind: 'current_user_mention', userId: 'local_user' },
   { kind: 'text', text: currentUserMentionText }
 ]
+const agentMemberMentionMessageId = 'message-agent-member-mention-accept'
+const agentLiteralMentionMessageId = 'message-agent-literal-mention-accept'
+const agentMemberMentionText = [
+  ' review 结论：**通过**。请检查开头的队员 Mention。',
+  '',
+  '## 事实复核',
+  '',
+  '- 保留列表与 `行内代码`',
+  '- 保留 [验收说明](docs/plan.md) 文件链接',
+  '',
+  '```sh',
+  'pnpm test',
+  '```',
+  '',
+  '| 检查项 | 结果 |',
+  '| --- | --- |',
+  '| Markdown | PASS |'
+].join('\n')
+const agentMemberMentionBody = `@叮叮${agentMemberMentionText}`
+const agentMemberMentionContent = [
+  { kind: 'member_mention', agentId: 'agent_1' },
+  { kind: 'text', text: agentMemberMentionText }
+]
+const agentLiteralMentionBody = '@叮叮 是普通文字，不应打开人物信息卡。'
 const nativeDomRegressionBody = '原生输入回归'
 const acceptanceModelCatalog = JSON.stringify([{
   id: 'gpt-structured-mentions-accept',
@@ -216,8 +240,8 @@ try {
     return button?.getAttribute('aria-pressed') === 'true' && !timeline?.hidden
   })()`)
   const initialSnapshot = await request(running.cdp, 'camps.snapshot', { campId })
-  assert(initialSnapshot.schemaVersion === 33,
-    `Camp snapshot schema is not v33: ${initialSnapshot.schemaVersion}`)
+  assert(initialSnapshot.schemaVersion === 34,
+    `Camp snapshot schema is not v34: ${initialSnapshot.schemaVersion}`)
   assert(
     deepEqual(initialSnapshot.members.map((member) => member.agentId), targetMemberIds),
     `Camp does not contain exactly the three target members: ${JSON.stringify(initialSnapshot.members)}`
@@ -255,6 +279,7 @@ try {
   }
   clipboardTouched = true
   await acceptComposerCutRegression(running.cdp, campId)
+  const inlineSkillInspection = await acceptInlineSkillQueries(running.cdp, campId, selectableSkill)
   await focusEditorAtEnd(running.cdp)
   await running.cdp.send('Input.insertText', { text: '/' })
   await waitForExpression(running.cdp, `(() => {
@@ -457,6 +482,7 @@ try {
       agentRunId: smokeRun.id,
       selectedSkillName: selectableSkill.name,
       structuredContent: smokeMessage.content,
+      inlineSkillInspection,
       selectionSnapshotDigest: persisted.selectionSnapshotDigest,
       resolutionDigest: persisted.resolutionDigest,
       renderedPayloadDigest: persisted.renderedPayloadDigest,
@@ -475,6 +501,7 @@ try {
       selectedSkillName: selectableSkill.name,
       selectedSkillText,
       skillPickerInspection,
+      inlineSkillInspection,
       structuredContent: selectedSkillDraft.content,
       clipboardItemCountBeforeTest: clipboardArchive.length,
       clipboardRestored: false,
@@ -1194,6 +1221,12 @@ try {
   assert(deepEqual(draftAfterPopover.content, expectedContent),
     `Opening the Composer popover changed the durable Draft: ${JSON.stringify(draftAfterPopover)}`)
 
+  // The native-DOM regression above also sends a message. Settle that safe
+  // Runtime before testing direct-send auto-open; a private queued publication
+  // has no synchronous Run receipt and intentionally does not move selection.
+  await waitForValue(() => request(running.cdp, 'camps.snapshot', { campId }),
+    (snapshot) => snapshot.agentRuns.every((run) =>
+      ['succeeded', 'failed', 'cancelled'].includes(run.status)), 30_000)
   await waitForExpression(running.cdp,
     `document.querySelector('.composer .composer-send')?.disabled === false`)
   await mouseClick(running.cdp, '.composer .composer-send')
@@ -1396,10 +1429,12 @@ try {
   // App then exercises the real read model, copy bridge, and Composer paste.
   await closeApp(running)
   running = null
+  await insertAgentMemberMentionFixtures(databasePath, campId)
   await insertCurrentUserMentionFixture(databasePath, campId)
   running = await launchApp(dataDir, debugPort, 1440, 920)
   await setTheme(running.cdp, 'night')
   await openCamp(running.cdp, campId)
+  const agentMemberMentionInspection = await acceptAgentMemberMention(running.cdp)
   await waitForExpression(running.cdp, `(() => {
     const message = document.querySelector('[data-message-id=${JSON.stringify(currentUserMentionMessageId)}]')
     return message?.querySelector('.current-user-markdown-body, .structured-message-body')?.textContent
@@ -1546,6 +1581,9 @@ try {
       && document.querySelector('.composer-reply-line strong')?.textContent === '回复 叮叮'
       && !document.querySelector('.mention-target-summary')
   ))()`)
+  // Use a constrained viewport to exercise real overflow. The bounded excerpt
+  // can fit at 1440px after Composer width changes, which is valid behavior.
+  await setViewport(running.cdp, 1040, 700)
   const lightweightReplyInspection = await inspectLightweightReply(running.cdp)
   assert(
     lightweightReplyInspection.theme === 'day'
@@ -1572,6 +1610,7 @@ try {
   )
   const lightweightReplyCapture = join(outputDir, 'message-reply-lightweight-day.png')
   await capture(running.cdp, lightweightReplyCapture)
+  await setViewport(running.cdp, 1440, 920)
 
   // Match Feishu's reply-dock keyboard boundary: Backspace at the absolute
   // body start cancels only the reply intent and keeps the visible Mention.
@@ -1756,18 +1795,21 @@ try {
   // Replying to the just-sent user message creates a normal quote without
   // adding a recipient, so the dock and the accepted parent quote are visible
   // together in the narrow CSS viewport.
+  const detailClose = 'button[aria-label="收起会话详情"]'
+  if (await evaluate(running.cdp,
+    `Boolean(document.querySelector(${JSON.stringify(detailClose)})?.getClientRects().length)`)) {
+    await mouseClick(running.cdp, detailClose)
+    await waitForExpression(running.cdp,
+      `!document.querySelector(${JSON.stringify(detailClose)})?.getClientRects().length`)
+  }
+  await moveMouseToElement(running.cdp,
+    `[data-message-id=${JSON.stringify(sentReplyMessage.id)}] .message-bubble`)
   await mouseClick(running.cdp,
     `[data-message-id=${JSON.stringify(sentReplyMessage.id)}] .message-reply-button`)
   await waitForValue(async () => request(running.cdp, 'camp.composerDraft.get', { campId }),
     (draft) => draft.replyIntent?.replyToCampMessageId === sentReplyMessage.id
       && draft.replyIntent.author?.authorType === 'user'
       && draft.replyIntent.recipientSelectionRequired === false, 10_000)
-  if (await evaluate(running.cdp,
-    `document.querySelector('.topbar-inspector-toggle')?.getAttribute('aria-pressed') === 'true'`)) {
-    await mouseClick(running.cdp, '.topbar-inspector-toggle')
-    await waitForExpression(running.cdp,
-      `document.querySelector('.topbar-inspector-toggle')?.getAttribute('aria-pressed') === 'false'`)
-  }
   await emulateDesktopZoom(running.cdp, 1040, 700, 2)
   await waitForExpression(running.cdp, `(() => Boolean(
     document.querySelector('.composer-box')
@@ -1829,6 +1871,12 @@ try {
   await mouseClick(running.cdp, '.composer-reply-cancel')
   await waitForValue(async () => request(running.cdp, 'camp.composerDraft.get', { campId }),
     (draft) => draft.replyIntent === null, 10_000)
+  // The Core receipt can arrive before cancelReply's Renderer focus callback.
+  // Finish that interaction before moving focus to the keyboard Reply action.
+  await waitForExpression(running.cdp, `(() => (
+    !document.querySelector('.composer-reply-line')
+      && document.activeElement?.id === 'camp-message'
+  ))()`)
   await setViewport(running.cdp, 1440, 920)
   await running.cdp.send('Page.bringToFront')
   await running.cdp.send('Emulation.setFocusEmulationEnabled', { enabled: true })
@@ -1872,6 +1920,7 @@ try {
     selectedSkillName: selectableSkill.name,
     selectedSkillText,
     skillPickerInspection,
+    inlineSkillInspection,
     campMessageId: sent.message.id,
     campTurnId: sent.message.campTurnId,
     agentRunIds: sent.runs.map((run) => run.id),
@@ -1884,6 +1933,7 @@ try {
     mentionSelectedText,
     selectedText,
     currentUserMentionInspection,
+    agentMemberMentionInspection,
     currentUserClipboardPayload,
     currentUserPasteDowngradedToText: true,
     availableReplyDraft,
@@ -1906,6 +1956,31 @@ try {
   }
 } catch (error) {
   testFailure = error
+  if (running) {
+    let diagnosticTimer
+    try {
+      await Promise.race([
+        (async () => {
+          await capture(running.cdp, join(outputDir, 'failure.png'))
+          const state = await evaluate(running.cdp, `(() => ({
+            activeElement: { id: document.activeElement?.id, className: document.activeElement?.className },
+            selectedRuns: [...document.querySelectorAll('.run-pulse-chip.is-selected')].map((node) => ({ ...node.dataset })),
+            focusedStages: [...document.querySelectorAll('.execution-process-stage.is-focused')].map((node) => ({ ...node.dataset })),
+            drawerCount: document.querySelectorAll('.execution-drawer').length,
+            composerText: document.querySelector('#camp-message')?.innerText ?? null
+          }))()`)
+          await writeFile(join(outputDir, 'failure-state.json'), JSON.stringify(state, null, 2))
+        })(),
+        new Promise((_, reject) => {
+          diagnosticTimer = setTimeout(() => reject(new Error('Failure diagnostics timed out')), 3_000)
+        })
+      ])
+    } catch (captureError) {
+      process.stderr.write(`Could not capture acceptance failure: ${captureError}\n`)
+    } finally {
+      clearTimeout(diagnosticTimer)
+    }
+  }
 } finally {
   if (running) {
     try {
@@ -2022,6 +2097,165 @@ async function insertCurrentUserMentionFixture(path, campId) {
   `)
 }
 
+async function insertAgentMemberMentionFixtures(path, campId) {
+  // These are inert presentation fixtures: no Delivery, Run or model invocation.
+  for (const message of [
+    { id: agentMemberMentionMessageId, body: agentMemberMentionBody, content: agentMemberMentionContent, recipients: ['agent_1'] },
+    { id: agentLiteralMentionMessageId, body: agentLiteralMentionBody, content: [{ kind: 'text', text: agentLiteralMentionBody }], recipients: [] }
+  ]) {
+    await runSql(path, `
+      BEGIN IMMEDIATE;
+      UPDATE camp SET last_message_sequence = last_message_sequence + 1, version = version + 1
+      WHERE id = ${sqlLiteral(campId)};
+      INSERT INTO camp_message(
+        id, camp_id, sequence, author_type, author_id, body, structured_content_json,
+        content_digest, address_mode, addressed_agent_ids_json, effective_recipient_ids_json,
+        agent_addressing_mode, version, created_at, updated_at
+      ) SELECT
+        ${sqlLiteral(message.id)}, id, last_message_sequence, 'agent', 'agent_2',
+        ${sqlLiteral(message.body)}, ${sqlLiteral(JSON.stringify(message.content))},
+        ${sqlLiteral(`sha256:structured-mentions-accept:${message.id}`)},
+        ${sqlLiteral(message.recipients.length ? 'explicit' : 'default')},
+        ${sqlLiteral(JSON.stringify(message.recipients))}, ${sqlLiteral(JSON.stringify(message.recipients))},
+        'automatic', 1, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+      FROM camp WHERE id = ${sqlLiteral(campId)};
+      COMMIT;
+    `)
+  }
+}
+
+async function acceptAgentMemberMention(cdp) {
+  const messageSelector = `[data-message-id="${agentMemberMentionMessageId}"]`
+  const tokenSelector = `${messageSelector} .message-mention-token[data-agent-id="agent_1"]`
+  await waitForSelector(cdp, tokenSelector)
+  const cases = []
+  const screenshots = {}
+  for (const variant of [
+    { name: 'day', theme: 'day', width: 1440, height: 920 },
+    { name: 'night', theme: 'night', width: 1440, height: 920 },
+    { name: 'day-compact', theme: 'day', width: 1040, height: 700 },
+    { name: 'night-compact', theme: 'night', width: 1040, height: 700 },
+    { name: 'night-wide', theme: 'night', width: 2560, height: 1440 },
+    { name: 'night-zoom200', theme: 'night', width: 2560, height: 1440, zoom: 2 }
+  ]) {
+    await setTheme(cdp, variant.theme)
+    if (variant.zoom) await emulateDesktopZoom(cdp, variant.width, variant.height, variant.zoom)
+    else await setViewport(cdp, variant.width, variant.height)
+    await evaluate(cdp, `document.querySelector(${JSON.stringify(messageSelector)})?.scrollIntoView({ block: 'start' })`)
+    await cdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 2, y: 2, button: 'none', buttons: 0 })
+    await wait(180)
+    const inspection = await evaluate(cdp, `(() => {
+      const message = document.querySelector(${JSON.stringify(messageSelector)})
+      const token = message?.querySelector('.message-mention-token')
+      const body = message?.querySelector('.member-mention-markdown-content')
+      const paragraph = body?.querySelector('p')
+      if (!token || !body || !paragraph) return null
+      const style = getComputedStyle(token)
+      const colorProbe = document.createElement('span')
+      colorProbe.style.color = 'var(--mention-ink)'
+      document.body.appendChild(colorProbe)
+      const expectedColor = getComputedStyle(colorProbe).color
+      colorProbe.remove()
+      const line = document.createRange()
+      const bodyText = [...paragraph.childNodes].find((node) => node.nodeType === Node.TEXT_NODE && node.textContent.trim())
+      line.setStart(bodyText, 0)
+      line.setEnd(bodyText, 1)
+      const paragraphStyle = getComputedStyle(paragraph)
+      const timeline = document.querySelector('.camp-timeline')
+      const literal = document.querySelector('[data-message-id="${agentLiteralMentionMessageId}"]')
+      return {
+        tokenText: token.textContent,
+        role: token.getAttribute('role'), tabIndex: token.getAttribute('tabindex'),
+        label: token.getAttribute('aria-label'), popup: token.getAttribute('aria-haspopup'),
+        color: style.color, expectedColor, background: style.backgroundColor,
+        display: style.display, cursor: style.cursor,
+        sameLine: Math.abs(token.getBoundingClientRect().top - line.getBoundingClientRect().top) < 3,
+        paragraphDisplay: paragraphStyle.display,
+        proseWidthPreserved: innerWidth < 1800 || (
+          paragraph.getBoundingClientRect().width <= parseFloat(paragraphStyle.maxWidth) + 1
+          && Number.isFinite(parseFloat(paragraphStyle.maxWidth))
+        ),
+        heading: body.querySelector('h3')?.textContent,
+        listCount: body.querySelectorAll('li').length,
+        strong: body.querySelector('strong')?.textContent,
+        code: body.querySelector('pre code')?.textContent?.trim(),
+        table: Boolean(body.querySelector('table')),
+        fileLink: Boolean(body.querySelector('a[title="docs/plan.md"]')),
+        literalText: literal?.querySelector('.safe-markdown')?.textContent,
+        literalHasToken: Boolean(literal?.querySelector('.message-mention-token')),
+        noOverflow: document.documentElement.scrollWidth <= innerWidth + 1
+          && timeline.scrollWidth <= timeline.clientWidth + 1
+      }
+    })()`)
+    assert(inspection && inspection.tokenText === '@叮叮'
+      && inspection.role === 'button' && inspection.tabIndex === '0'
+      && inspection.label === '查看叮叮的基础信息' && inspection.popup === 'dialog'
+      && inspection.color === inspection.expectedColor && inspection.background === 'rgba(0, 0, 0, 0)'
+      && inspection.display === 'inline' && inspection.cursor === 'pointer'
+      && inspection.sameLine && inspection.paragraphDisplay === 'block' && inspection.proseWidthPreserved
+      && inspection.heading === '事实复核' && inspection.listCount === 2
+      && inspection.strong === '通过' && inspection.code === 'pnpm test'
+      && inspection.table && inspection.fileLink && inspection.noOverflow
+      && inspection.literalText === agentLiteralMentionBody && !inspection.literalHasToken,
+    `Agent Member Mention regression (${variant.name}): ${JSON.stringify(inspection)}`)
+    cases.push({ variant: variant.name, ...inspection })
+    screenshots[variant.name] = join(outputDir, `agent-member-mention-${variant.name}.png`)
+    await capture(cdp, screenshots[variant.name])
+  }
+
+  await setViewport(cdp, 1440, 920)
+  await setTheme(cdp, 'night')
+  await evaluate(cdp, `window.getSelection()?.removeAllRanges()`)
+  await mouseClick(cdp, tokenSelector)
+  await waitForExpression(cdp, `document.querySelector('.mention-profile-popover')?.classList.contains('is-positioned')`)
+  await wait(180)
+  assertSelectedMemberPopover(await inspectMentionPopover(cdp), 'Agent leading Mention click')
+  screenshots.popover = join(outputDir, 'agent-member-mention-popover.png')
+  await capture(cdp, screenshots.popover)
+  await pressEscape(cdp)
+  await waitForExpression(cdp, `!document.querySelector('.mention-profile-popover')`)
+  for (const activation of [
+    { key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13, nativeVirtualKeyCode: 36 },
+    { key: ' ', code: 'Space', windowsVirtualKeyCode: 32, nativeVirtualKeyCode: 49 }
+  ]) {
+    await evaluate(cdp, `document.querySelector(${JSON.stringify(tokenSelector)})?.focus()`)
+    await pressKey(cdp, activation)
+    await waitForExpression(cdp, `document.querySelector('.mention-profile-popover')?.classList.contains('is-positioned')`)
+    await wait(180)
+    assertSelectedMemberPopover(await inspectMentionPopover(cdp), `Agent leading Mention ${activation.code}`)
+    await pressEscape(cdp)
+    await waitForExpression(cdp, `!document.querySelector('.mention-profile-popover')
+      && document.activeElement === document.querySelector(${JSON.stringify(tokenSelector)})`)
+  }
+
+  const drag = await evaluate(cdp, `(() => {
+    const token = document.querySelector(${JSON.stringify(tokenSelector)})
+    token.scrollIntoView({ block: 'center' })
+    const paragraph = document.querySelector(${JSON.stringify(messageSelector)} + ' .member-mention-markdown-content > p')
+    const text = [...paragraph.childNodes].find((node) => node.nodeType === Node.TEXT_NODE && node.textContent.trim())
+    const point = (node, offset, end) => {
+      const range = document.createRange()
+      range.setStart(node, offset); range.setEnd(node, offset + 1)
+      const rect = range.getBoundingClientRect()
+      return { x: end ? rect.right - 0.1 : rect.left + 0.1, y: rect.top + rect.height / 2 }
+    }
+    return { start: point(token.firstChild, 0, false), end: point(text, text.textContent.indexOf('review') + 5, true) }
+  })()`)
+  await dispatchMouseDrag(cdp, drag.start, drag.end)
+  const selectedText = await evaluate(cdp, `window.getSelection()?.toString() ?? ''`)
+  assert(selectedText.includes('@叮叮') && selectedText.includes('review')
+    && !(await evaluate(cdp, `Boolean(document.querySelector('.mention-profile-popover'))`)),
+  `Agent Mention drag selection failed: ${JSON.stringify(selectedText)}`)
+  await evaluate(cdp, `window.getSelection()?.removeAllRanges()`)
+  await moveMouseToElement(cdp, `${messageSelector} .message-surface`)
+  await mouseClick(cdp, `${messageSelector} .message-copy-button`)
+  await waitForExpression(cdp, `document.querySelector(${JSON.stringify(messageSelector)} + ' .copy-feedback')?.textContent === '已复制'`)
+  const copiedText = await runProcess('/usr/bin/pbpaste', [])
+  assert(copiedText === agentMemberMentionBody, `Agent Mention copy lost source content: ${JSON.stringify(copiedText)}`)
+  await evaluate(cdp, `document.querySelector('[data-message-id="${currentUserMentionMessageId}"]')?.scrollIntoView({ block: 'center' })`)
+  return { cases, screenshots, activations: ['click', 'Enter', 'Space'], selectedText, copyPreserved: true }
+}
+
 async function removeDirectoryWithRetry(path) {
   let lastError = null
   for (let attempt = 0; attempt < 20; attempt += 1) {
@@ -2074,6 +2308,11 @@ async function launchApp(userDataDir, port, width, height) {
     })
     await waitForExpression(cdp,
       `Boolean(window.rovai && document.querySelector('.app-shell'))`, 45_000)
+    await waitForValue(() => evaluate(cdp, 'window.rovai.supervisor.getSnapshot()', true),
+      (snapshot) => snapshot.fullCoreState === 'ready'
+        && ['skills', 'mcp', 'attachments', 'builtin-tools'].every((id) =>
+          snapshot.coreSubsystems.some((subsystem) => subsystem.id === id && subsystem.state === 'ready')),
+      45_000)
     const health = await request(cdp, 'health.check')
     const expectedDatabasePath = await realpath(join(userDataDir, 'rovai.sqlite'))
     const actualDatabasePath = await realpath(health.database.path)
@@ -2083,6 +2322,7 @@ async function launchApp(userDataDir, port, width, height) {
   } catch (error) {
     cdp?.close()
     await terminateChild(child)
+    await writeFile(join(outputDir, 'app-launch-failure.log'), stderr.join(''))
     throw error
   }
 }
@@ -2271,6 +2511,170 @@ async function acceptImeNewlineRegression(cdp, campId) {
     (value) => deepEqual(value.content, []), 10_000)
 
   return { trailingNewlineInspection, postNewlineInputInspection, draft }
+}
+
+async function acceptInlineSkillQueries(cdp, campId, skill) {
+  const query = `/${skill.name.slice(0, 4)}`
+  const optionSelector = `.skill-picker-menu [data-skill-name=${JSON.stringify(skill.name)}]`
+  const skillToken = { kind: 'skill_mention', skillId: skill.id, nameAtSend: skill.name }
+  const before = await request(cdp, 'camps.snapshot', { campId })
+  const expectDraft = (content) => waitForValue(
+    () => request(cdp, 'camp.composerDraft.get', { campId }),
+    (draft) => deepEqual(draft.content, content), 10_000)
+  const expectOpen = () => waitForSelector(cdp, optionSelector)
+  const expectClosed = () => waitForExpression(cdp,
+    `document.querySelector('#camp-message')?.getAttribute('aria-expanded') === 'false'`)
+  const replaceText = async (text) => {
+    await selectWholeEditor(cdp)
+    if (text) {
+      const lines = text.split('\n')
+      for (const [index, line] of lines.entries()) {
+        if (index > 0) await pressKey(cdp, {
+          key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13, nativeVirtualKeyCode: 36, modifiers: 8
+        })
+        if (line) await cdp.send('Input.insertText', { text: line })
+      }
+    } else {
+      await pressKey(cdp, {
+        key: 'Backspace', code: 'Backspace', windowsVirtualKeyCode: 8, nativeVirtualKeyCode: 51
+      })
+    }
+    await expectDraft(text ? [{ kind: 'text', text }] : [])
+  }
+  const chooseSkill = async () => {
+    await expectOpen()
+    await moveMouseToElement(cdp, optionSelector)
+    await waitForExpression(cdp,
+      `document.querySelector(${JSON.stringify(optionSelector)})?.getAttribute('aria-selected') === 'true'`)
+    await pressKey(cdp, {
+      key: 'Tab', code: 'Tab', windowsVirtualKeyCode: 9, nativeVirtualKeyCode: 48
+    })
+    await expectClosed()
+  }
+
+  const safeBoundaries = ['请使用 ', '你好，', '第一行\n', '请\u3000']
+  for (const prefix of safeBoundaries) {
+    await replaceText(`${prefix}${query}`)
+    await expectOpen()
+    await pressEscape(cdp)
+    await expectClosed()
+  }
+  const literalSlashText = ['https://example.com', '/usr/local', 'foo/bar', 'a/b', `正文${query}`, `${query} `]
+  for (const text of literalSlashText) {
+    await replaceText(text)
+    await expectClosed()
+  }
+
+  await replaceText('请粘贴 ')
+  await runProcess('/usr/bin/pbcopy', [], { input: query })
+  await pasteWithMetaV(cdp)
+  await expectOpen()
+  await expectDraft([{ kind: 'text', text: `请粘贴 ${query}` }])
+  await pressEscape(cdp)
+
+  await replaceText('前文 待替换 后文')
+  const selected = await evaluate(cdp, `(() => {
+    const editor = document.querySelector('#camp-message')
+    if (!(editor instanceof HTMLElement)) return false
+    editor.focus()
+    const walker = document.createTreeWalker(editor, NodeFilter.SHOW_TEXT)
+    let node
+    while ((node = walker.nextNode())) {
+      const start = node.textContent.indexOf('待替换')
+      if (start < 0) continue
+      window.getSelection().setBaseAndExtent(node, start, node, start + 3)
+      return true
+    }
+    return false
+  })()`)
+  assert(selected, 'Could not select the middle of the Composer body')
+  await cdp.send('Input.insertText', { text: query })
+  await chooseSkill()
+  const replacedDraft = await expectDraft([
+    { kind: 'text', text: '前文 ' }, skillToken, { kind: 'text', text: ' 后文' }
+  ])
+  assert(replacedDraft.body === `前文 /${skill.name} 后文`,
+    `Inline Skill replacement lost text or duplicated whitespace: ${JSON.stringify(replacedDraft)}`)
+
+  await replaceText('@')
+  await mouseClickMentionOption(cdp, targetMembers[0].displayName)
+  await expectDraft([
+    { kind: 'member_mention', agentId: targetMembers[0].agentId }, { kind: 'text', text: ' ' }
+  ])
+  await pressKey(cdp, {
+    key: 'Backspace', code: 'Backspace', windowsVirtualKeyCode: 8, nativeVirtualKeyCode: 51
+  })
+  await expectDraft([{ kind: 'member_mention', agentId: targetMembers[0].agentId }])
+  await cdp.send('Input.insertText', { text: ` ${query}` })
+  await chooseSkill()
+  const atomDraft = await expectDraft([
+    { kind: 'member_mention', agentId: targetMembers[0].agentId },
+    { kind: 'text', text: ' ' }, skillToken, { kind: 'text', text: ' ' }
+  ])
+  assert(atomDraft.body === `@${targetMembers[0].displayName} /${skill.name} `,
+    `Inline Skill replacement changed the preceding member: ${JSON.stringify(atomDraft)}`)
+
+  await replaceText('请使用 /')
+  const layouts = []
+  for (const [theme, width, height] of [['day', 1440, 920], ['night', 1040, 700]]) {
+    await setTheme(cdp, theme)
+    await setViewport(cdp, width, height)
+    await focusEditorAtEnd(cdp)
+    await expectOpen()
+    await moveMouseToElement(cdp, '.skill-picker-menu [role="option"]')
+    await waitForExpression(cdp,
+      `document.querySelector('.skill-picker-menu [role="option"]')?.getAttribute('aria-selected') === 'true'`)
+    await cdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 1, y: 1 })
+    await pressKey(cdp, {
+      key: 'ArrowUp', code: 'ArrowUp', windowsVirtualKeyCode: 38, nativeVirtualKeyCode: 126
+    })
+    const layout = await evaluate(cdp, `(() => {
+      const editor = document.querySelector('#camp-message')
+      const menu = document.querySelector('.skill-picker-menu')
+      const active = menu?.querySelector('[aria-selected="true"]')
+      if (!editor || !menu || !active) return null
+      const menuRect = menu.getBoundingClientRect()
+      const editorRect = editor.getBoundingClientRect()
+      const activeRect = active.getBoundingClientRect()
+      const options = [...menu.querySelectorAll('[role="option"]')]
+      return {
+        theme: document.documentElement.dataset.theme,
+        width: innerWidth, height: innerHeight,
+        menuAboveEditor: menuRect.bottom <= editorRect.top - 5,
+        viewportFits: menuRect.left >= 0 && menuRect.right <= innerWidth
+          && menuRect.top >= 0 && menuRect.bottom <= innerHeight,
+        activeVisible: activeRect.top >= menuRect.top && activeRect.bottom <= menuRect.bottom,
+        activeIsLast: active === options.at(-1),
+        activeDescendantMatches: editor.getAttribute('aria-activedescendant') === active.id,
+        optionCount: options.length,
+        menuOverflows: menu.scrollHeight > menu.clientHeight,
+        menuScrollTop: menu.scrollTop
+      }
+    })()`)
+    assert(layout?.theme === theme && layout.width === width && layout.height === height
+      && layout.menuAboveEditor && layout.viewportFits && layout.activeVisible
+      && layout.activeIsLast && layout.activeDescendantMatches
+      && (!layout.menuOverflows || layout.menuScrollTop > 0),
+    `Inline Skill menu layout or keyboard visibility regressed: ${JSON.stringify(layout)}`)
+    const capturePath = join(outputDir, `composer-inline-skills-${theme}-${width}.png`)
+    await capture(cdp, capturePath)
+    layouts.push({ ...layout, capture: capturePath })
+  }
+  await setTheme(cdp, 'day')
+  await setViewport(cdp, 1440, 920)
+  await replaceText('')
+  const after = await request(cdp, 'camps.snapshot', { campId })
+  assert(after.messages.length === before.messages.length
+    && after.agentRuns.length === before.agentRuns.length,
+  'Typing or selecting an inline Skill must not send a message or start a Run')
+  return {
+    safeBoundaries, literalSlashText,
+    nativePasteRemainsTextUntilSelected: true,
+    partialReplacement: replacedDraft.content,
+    preservedMember: atomDraft.content,
+    noAutomaticSend: true,
+    layouts
+  }
 }
 
 async function acceptComposerCutRegression(cdp, campId) {
@@ -2537,6 +2941,7 @@ async function pressKey(cdp, activation) {
     type: 'rawKeyDown',
     key: activation.key,
     code: activation.code,
+    modifiers: activation.modifiers ?? 0,
     windowsVirtualKeyCode: activation.windowsVirtualKeyCode,
     nativeVirtualKeyCode: activation.nativeVirtualKeyCode
   })
@@ -2544,6 +2949,7 @@ async function pressKey(cdp, activation) {
     type: 'keyUp',
     key: activation.key,
     code: activation.code,
+    modifiers: activation.modifiers ?? 0,
     windowsVirtualKeyCode: activation.windowsVirtualKeyCode,
     nativeVirtualKeyCode: activation.nativeVirtualKeyCode
   })
@@ -2985,7 +3391,9 @@ async function inspectLightweightReply(cdp) {
 
 async function request(cdp, method, params = {}) {
   return evaluate(cdp,
-    `window.rovai.request(${JSON.stringify(method)}, ${JSON.stringify(params)})`, true)
+    `window.rovai.request(${JSON.stringify(method)}, ${JSON.stringify(params)}).catch((failure) => {
+      throw new Error(JSON.stringify(failure))
+    })`, true)
 }
 
 async function capture(cdp, path) {

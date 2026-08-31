@@ -73,6 +73,29 @@ cargo test --workspace -- --list
 
 ## 测试层级
 
+### CampOpen 业务读取边界
+
+`read_model::camp_open_slow_tests` 拥有 Open 的完整 SQLite 读取边界：authorizer 拒绝任何直接或间接
+`event_log` 读取后，带附件、Task、Run、Delivery、Approval 和活动 Evidence 的投影仍须成功。历史事件
+`camp_id = NULL`、`task_id` 非空是保留的兼容输入。固定业务状态下分别加入 5 万、50 万、500 万无关事件，
+验证投影不变、watermark 前进和 SQL VM 步数不变；5 次读取只用于报告耗时分布，不断言易波动的毫秒阈值。
+
+这两个 owner 分别约束禁止越界读取与无关历史规模隔离；原有分页/完整 Snapshot 测试没有 SQL 授权边界，
+不能证明嵌套 hydration 不访问事件表，纯函数测试也无法覆盖该事务 seam。共享 `OwnedTestDatabase` fixture
+并在退出时清理，不访问日常数据库。Run 对象按 ID 比较完整字段，分别保留 Open 的活动优先顺序与
+完整 Snapshot 的原有排序。最小命令：
+
+```bash
+cargo test -p rovai-core --features slow-tests --lib camp_open_slow_tests:: -- --nocapture
+pnpm test:camp-open-projection
+```
+
+Electron 回归使用生产 adapter、CampWorkspace 与 CSS，验证空事件下的三类卡片、Task 业务原因、已加载
+旧页与 DOM 阅读锚点，以及后台新消息不抢位置。排序/时钟回拨输入矩阵由既有 `App.test.ts` owner 负责。
+夹具创建临时绝对 `userData`，不启动 Core/SQLite/Skill Library/Runtime；`ROVAI_KEEP_CAMP_OPEN_FIXTURE=1`
+保留测量和双主题截图。Linux CI 使用 `xvfb-run -a pnpm test:camp-open-projection`。这些分别是数据库边界
+和生产组件组合测试，不冒充已安装 App 的真实会话端到端耗时。
+
 ### 日常 commit 验证
 
 ```bash
@@ -166,6 +189,13 @@ pnpm build:desktop
 
 ### Electron 隔离世界回归
 
+执行台的头像轨道与协作投递收件人行运行 `pnpm test:execution-avatar-rail`。夹具挂载真实 CampWorkspace，
+用原生指针和键盘验证队员轨道、来源归属、重复投递去重、0 / 1 / 2 / 16 / 48 人的完整单行与溢出名单，
+以及名单滚动、焦点返回、Escape 层级、承载位置切换和双主题尺寸适配。它只使用临时 `userData` 与封闭
+演示投影，不启动 Core、Skill Library 或模型，不访问日常数据；`ROVAI_KEEP_EXECUTION_AVATAR_FIXTURE=1`
+保留截图与 fixture。Core 的投递来源 SQL → DTO seam 由 `read_model::tests::public_delivery_projection_preserves_causal_source_not_target_lineage`
+独立验证，不用 UI 夹具代替数据库读取验证。
+
 启动页面与 authority gate 的组合回归运行 `pnpm test:startup-presentation`。它在真实 Electron 中挂载生产 `App` 与 CSS，
 仅替换本机 API 和反馈时钟：验证 null/starting、四类恢复目标、迁移、ready 交接、首次训练、订阅竞态与明确阻断；
 同时检查 400ms 前无反馈、超时反馈只在内容区、未准入时没有权威请求、未知导航不显示空态。Main Window Session
@@ -189,7 +219,8 @@ Approval/Recovery Dock，验证大屏中 481/480/450/420px 会话的容器断点
 默认清理本次夹具。Linux CI 使用 `xvfb-run -a pnpm test:file-preview-layout`。
 
 消息文件引用运行 `pnpm test:file-reference-navigation`。它在同样隔离的真实 Electron 中挂载生产 Camp、Markdown 与预览，
-验证有来源的短文件名定位、行范围高亮、字段误识别及 URL 中文尾部恢复，并逐帧检查打开/关闭、键盘调宽和持续拖动时
+验证有来源的短文件名定位、行范围高亮、字段误识别及 URL 中文尾部恢复；真实鼠标覆盖已有选区下的普通/inline-code
+文件链接点击、链接内拖选不打开及其后的再次单击，键盘激活保持可用。并逐帧检查打开/关闭、键盘调宽和持续拖动时
 阅读锚点偏移不超过 2px；还覆盖用户滚动后的可见消息回退、底部跟随及紧凑模式返回。相同环境变量可保留双主题截图
 和测量报告；Linux CI 使用 `xvfb-run -a pnpm test:file-reference-navigation`，不替代 Main 的来源、文件类型和系统动作测试。
 

@@ -26,6 +26,6 @@ Camp Snapshot/Open 只查询图片元数据，Main 转发 opaque id 的 Camp-sco
 这次不扩展钉钉附件、登录、发布或 Stream 行为。
 
 接口与限额见 [Runtime Images v2](../contracts/runtime-images-v2.md)、投影见
-[Camp Open Projection v11](../contracts/camp-open-projection-v11.md)、展示见
+[Camp Open Projection v12](../contracts/camp-open-projection-v12.md)、展示见
 [Camp 会话工作区](../ui/components/conversation-workspace.md#runtime-图片与消息图片)。混合保存的理由见
 [V1.37-D01](../versions/v1.37/decisions.md#v1-37-d01)。
