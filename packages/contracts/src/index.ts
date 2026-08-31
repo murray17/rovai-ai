@@ -1987,6 +1987,7 @@ interface MessageDeliveryBaseView {
 export type MessageDeliveryView = MessageDeliveryBaseView & (
   | {
       deliveryKind: 'public_a2a'
+      sourceAgentRunId?: string
       dispatchDisposition: 'dispatch' | 'gather_captured'
       completionRole: 'required' | 'optional' | null
       gatherId: string | null

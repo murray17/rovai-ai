@@ -61,6 +61,7 @@ import {
 } from './ui-model'
 import { MemberAvatar } from './MemberAvatar'
 import { ExecutionAvatarRail } from './ExecutionAvatarRail'
+import { AgentRunDeliveryRecipients } from './AgentRunDeliveryRecipients'
 import { MemberPortrait } from './MemberPortrait'
 import { localizeExecutionEngineTerms } from './product-copy'
 import { writeClipboardText } from './clipboard'
@@ -5211,10 +5212,6 @@ function ExecutionDrawer({
               const focused = run.id === resolvedFocusedRunId
               const state = agentRunPresentation(run, cancelling)
               const runtimeModel = agentRunRuntimeModelPresentation(run.runtimeModel)
-              const runDeliveries = deliveries.filter((delivery) =>
-                delivery.targetAgentRunId === run.id
-                || (delivery.targetAgentRunId === null && delivery.campTurnId === run.campTurnId)
-              )
               return (
                 <li
                   className={`execution-process-stage status-${run.status}${focused ? ' is-focused' : ''}`}
@@ -5273,7 +5270,7 @@ function ExecutionDrawer({
                     {agentRunTerminalNote(run) && (
                       <p className="execution-terminal-note">{agentRunTerminalNote(run)}</p>
                     )}
-                    <AgentRunDeliveryRecipients deliveries={runDeliveries} memberById={memberById} />
+                    <AgentRunDeliveryRecipients sourceAgentRunId={run.id} deliveries={deliveries} memberById={memberById} />
                     <RunExecutionDisclosure
                       run={run}
                       progress={progressByRunId.get(run.id)}
@@ -5292,41 +5289,6 @@ function ExecutionDrawer({
           </ol>
         </div>
     </section>
-  )
-}
-
-function AgentRunDeliveryRecipients({
-  deliveries,
-  memberById
-}: {
-  deliveries: MessageDeliveryView[]
-  memberById: Map<string, CampSnapshot['members'][number]>
-}): JSX.Element | null {
-  const publicDeliveries = deliveries.filter(isPublicA2aDelivery)
-  if (publicDeliveries.length === 0) return null
-  const ordered = publicDeliveries.slice().sort((left, right) =>
-    left.recipientCanonicalPosition - right.recipientCanonicalPosition
-  )
-  return (
-    <div className="execution-run-recipients" aria-label="协作投递对象">
-      <small>协作投递</small>
-      {ordered.map((delivery) => {
-        const recipient = memberById.get(delivery.recipientAgentId)
-        const displayName = recipient?.displayName ?? delivery.recipientAgentId
-        return (
-          <span className="execution-run-recipient" key={delivery.id}>
-            <MemberAvatar
-              agentId={delivery.recipientAgentId}
-              avatarRef={recipient?.avatarRef ?? null}
-              displayName={displayName}
-              size="list"
-              decorative
-            />
-            <span>{displayName}</span>
-          </span>
-        )
-      })}
-    </div>
   )
 }
 

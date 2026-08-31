@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { createRoot } from 'react-dom/client'
-import type { AgentProfile, AgentRunView, CampComposerDraftView, CampSnapshot, ExecutionConsolePlacement } from '@contracts'
+import type { AgentProfile, AgentRunView, CampComposerDraftView, CampSnapshot, ExecutionConsolePlacement, MessageDeliveryView } from '@contracts'
 import { AppHeader } from '../../../apps/desktop/src/renderer/src/App'
 import { CampWorkspace } from '../../../apps/desktop/src/renderer/src/CampWorkspace'
 import '../../../apps/desktop/src/renderer/src/styles.css'
@@ -13,7 +13,7 @@ const longPath = `/fixture/workspace/${'execution_popover_width_regression_'.rep
 const longCommand = `git show HEAD -- ${longPath}`
 const longNarration = `这是隔离验收数据。长正文、路径和行内代码应在浮层内完整换行，命令标题保持单行省略。\n\n检查文件：\`${longPath}\`。\n\n\`\`\`text\n${longPath}\n\`\`\`\n\n正文结束标记：完整可读。`
 const names = ['洛可', '沐瓦', '绵栀', '奇鹿', '言川', '予墨', '知夏', '负责跨项目执行审查与回归验收的长名称队员', '时屿', '星澜', '安禾', '云舒']
-const agents: AgentProfile[] = Array.from({ length: 20 }, (_, index) => ({
+const agents: AgentProfile[] = Array.from({ length: 49 }, (_, index) => ({
   agentId: `agent-${index + 1}`, displayName: names[index] ?? `队员 ${index + 1}`,
   avatarRef: index < 4 ? `rovai://member-avatar/builtin/${['luoke', 'muwa', 'mianzhi', 'qilu'][index]}/v1` : null,
   accent: null, teamRole: '项目协作', professionalResponsibilities: '', personalityTraits: [],
@@ -24,8 +24,28 @@ const agents: AgentProfile[] = Array.from({ length: 20 }, (_, index) => ({
   createdAt: now, updatedAt: now, removedAt: null
 }))
 
-function snapshotFor(count: number, revision: number): CampSnapshot {
+function snapshotFor(count: number, revision: number, recipientCount = 0): CampSnapshot {
   const profiles = agents.slice(0, count)
+  const members = agents.slice(0, Math.max(count, recipientCount > 0 ? recipientCount + 1 : 0))
+  const deliveries: MessageDeliveryView[] = agents.slice(1, recipientCount + 1).flatMap((recipient, index) =>
+    [0, 1, 2].map(attempt => ({
+      id: `delivery-${index}-${attempt}`, messageId: `public-message-${attempt}`, campTurnId: 'turn-agent-1',
+      taskId: null, recipientAgentId: recipient.agentId, recipientMembershipVersionAtAdmission: 1,
+      deliveryKind: 'public_a2a' as const, sourceAgentRunId: 'run-agent-1', dispatchDisposition: 'dispatch' as const,
+      completionRole: 'required' as const, gatherId: null, gatherDispatchDeliveryId: null,
+      recipientCanonicalPosition: index, edgeKind: 'forward' as const, targetParentAgentRunId: 'run-agent-1',
+      returnToAgentRunId: null, status: attempt === 0 ? 'running' : 'pending',
+      dispatchPhase: attempt === 0 ? 'materialized' : 'attempted_waiting', waitCondition: attempt === 0 ? null : 'target_busy' as const,
+      dispatchAttemptCount: 1, retryGeneration: 0, contextManifestId: null,
+      targetAgentRunId: attempt === 0 ? `run-${recipient.agentId}` : null,
+      manualInterventionRequired: false, failureCode: null, version: 1,
+      createdAt: now, updatedAt: now, endedAt: null
+    }))
+  )
+  if (deliveries[0]?.deliveryKind === 'public_a2a') deliveries.push({
+    ...deliveries[0], id: 'incoming-delivery', sourceAgentRunId: 'run-agent-3',
+    recipientAgentId: 'agent-1', targetAgentRunId: 'run-agent-1', targetParentAgentRunId: 'run-agent-3'
+  })
   const runs: AgentRunView[] = profiles.map((agent, index) => {
     const status = (['running', 'waiting', 'running', 'succeeded', 'failed', 'cancelled'] as const)[index < 3 ? index : 3 + (index % 3)]
     return {
@@ -47,7 +67,7 @@ function snapshotFor(count: number, revision: number): CampSnapshot {
     camp: { id: campId, title: '执行台头像轨道', activationState: 'active', projectBindingKind: 'directory',
       projectPath: '/fixture/workspace', defaultLeadAgentId: profiles[0]?.agentId ?? null,
       membershipGeneration: 1, version: 1, createdAt: now, updatedAt: now },
-    members: profiles.map((agent, index) => ({ agentId: agent.agentId, displayName: agent.displayName,
+    members: members.map((agent, index) => ({ agentId: agent.agentId, displayName: agent.displayName,
       avatarRef: agent.avatarRef, teamRole: agent.teamRole, accent: '', membershipStatus: 'active',
       leaveRequestedAt: null, profilePresence: 'present', memberOrder: index, isDefaultLead: index === 0, version: 1 })),
     membershipReconciliations: [],
@@ -60,7 +80,7 @@ function snapshotFor(count: number, revision: number): CampSnapshot {
       sourceAgentRunId: null, body: fixtureMessage,
       content: [{ kind: 'text', text: fixtureMessage }], addressMode: 'default', attachments: [], addressedAgentIds: [], replyToCampMessageId: null,
       campTurnId: null, presentation: null, createdAt: now }],
-    messageDeliveries: [], turns: [], agentRuns: runs,
+    messageDeliveries: deliveries, turns: [], agentRuns: runs,
     executionEvidence: runs.flatMap<CampSnapshot['executionEvidence'][number]>(run => [{ id: `evidence-${run.agentId}`, agentRunId: run.id, executionEpoch: 1,
       sequence: 1, eventType: 'agent.text.delta', kind: 'narration', phase: 'updated',
       payload: { itemId: `message-${run.agentId}`, delta: longNarration },
@@ -98,18 +118,20 @@ Object.assign(window, { rovai: {
 
 function Fixture(): React.JSX.Element {
   const [count, setCount] = useState(12)
+  const [recipientCount, setRecipientCount] = useState(0)
   const [revision, setRevision] = useState(0)
   const [open, setOpen] = useState(true)
   const [placement, setPlacement] = useState<ExecutionConsolePlacement>('inspector')
   const [entryHost, setEntryHost] = useState<HTMLElement | null>(null)
   const [theme, setTheme] = useState('day')
-  const snapshot = snapshotFor(count, revision)
+  const snapshot = snapshotFor(count, revision, recipientCount)
   return <div className="app-shell app-shell-camp">
     <aside style={{ gridRow: '1 / -1', padding: '48px 24px', background: 'var(--rail)', color: 'var(--rail-ink)' }}>
       <strong>Rovai AI · 隔离验收</strong>
       <p style={{ fontSize: 12, lineHeight: 1.7 }}>真实生产组件，模拟队员数据。<br />不调用模型，不访问日常 Camp。</p>
       <div style={{ display: 'grid', gap: 8 }}>
         {[0, 1, 8, 12, 20].map(value => <button key={value} className="quiet-button" data-count={value} onClick={() => setCount(value)}>{value} 位队员</button>)}
+        {[0, 1, 2, 16, 48].map(value => <button key={`recipient-${value}`} className="quiet-button" data-recipient-count={value} onClick={() => setRecipientCount(value)}>{value} 位投递对象</button>)}
         <button className="quiet-button" data-refresh onClick={() => setRevision(value => value + 1)}>模拟状态刷新</button>
         <button className="quiet-button" data-theme-toggle onClick={() => {
           const next = theme === 'day' ? 'night' : 'day'
@@ -120,7 +142,7 @@ function Fixture(): React.JSX.Element {
     </aside>
     <AppHeader campTitle={snapshot.camp.title} contextLabel="隔离验收" camp={snapshot} detailEntryHostRef={setEntryHost} onFocusApprovals={() => {}} />
     <main className="content task-content">
-      <CampWorkspace snapshot={snapshot} projectName="隔离验收" agents={agents.slice(0, count)} busy={false} stopping={false}
+      <CampWorkspace snapshot={snapshot} projectName="隔离验收" agents={agents.slice(0, snapshot.members.length)} busy={false} stopping={false}
         onSend={async () => {}} onChangeLead={async () => {}} onTasksChanged={async () => {}} onResolveApproval={() => {}}
         onStop={() => {}} worldMapEnabled={false} inspectorVisible={open} detailEntryHost={entryHost}
         executionPlacement={placement} onExecutionPlacementChange={async value => { setPlacement(value); return value }}
