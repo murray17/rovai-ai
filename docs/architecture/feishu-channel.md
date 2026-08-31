@@ -8,7 +8,7 @@ last_updated: 2026-08-31
 
 # 飞书渠道架构
 
-字段、状态和恢复合同见 [Feishu Channel v7](../contracts/feishu-channel-v7.md)，credential 与 Developer Session 持久化见
+字段、状态和恢复合同见 [Feishu Channel v8](../contracts/feishu-channel-v8.md)，credential 与 Developer Session 持久化见
 [Channel Storage v2](../contracts/channel-storage-v2.md)，模型输入证据见
 [ContextManifest Evidence v22](../contracts/context-manifest-evidence-v22.md)，取舍理由见
 [v1.35 决策记录](../versions/v1.35/decisions.md)。
@@ -167,8 +167,8 @@ Project Catalog：卡片只得到 opaque project ID 和 display name，canonical
 渠道会话 identity 按场景冻结：
 
 - 私聊：`provider + tenant + chat + receiving app`；首次 Owner 消息自动创建 Quick Chat binding generation/Camp；
-- 普通群：`provider + tenant + chat`；首次 Owner 显式 mention 选择一次项目，此后一个长期 Camp；
-- 话题：`provider + tenant + chat + canonical topic`；每个话题各选择一次项目并拥有独立 Camp。
+- 普通群：`provider + tenant + chat`；首次 Owner 显式 mention 选择项目或开始 Quick Chat，此后一个长期 Camp；
+- 话题：`provider + tenant + chat + canonical topic`；每个话题独立选择项目或 Quick Chat，并拥有独立 Camp。
 
 这里的“话题”只指父群本身 `chat_mode=topic` 的独立话题群中的 canonical topic。普通群
 `chat_mode=group` 内从单条消息开启的 thread 不受支持：事件携带非空 `thread_id` 时，Host 在 observation 前静默停止，
@@ -186,6 +186,11 @@ callback 只信 envelope 的 operator identity 与 clicked message ID，并以 A
 message ID、nonce、version、expiry、frozen App 和 CAS 防 non-owner、双击与重放。所有 roster/project 前置检查通过后，
 同一事务创建 immutable binding/Camp、消费 pending，再把 frozen messages 按 FIFO 提升到统一 admission；随后才通过
 durable delivery 异步撤回卡片。项目失效时 Core 保留 pending、轮换 nonce/version 并更新原卡。
+
+Owner 也可在同一张卡选择“开始快速对话”，即使本机没有可用项目。它不是取消或跳过绑定：Core 使用自己受管的
+Quick Chat 目录，在同一 resolved 事务建立无 Project Catalog ID 的 binding/Camp，仍完成全部 Owner、卡片和 roster
+检查，并提升相同的 frozen FIFO。群/话题继续复用该 Camp，后续不能通过项目选择换绑；私聊及钉钉入口不变。
+Migration 132 只放宽 resolved pending 的项目可空约束，保留全部历史字段、行与 FK 引用，其他状态约束不变。
 
 ## 入站、聚合与串行准入
 

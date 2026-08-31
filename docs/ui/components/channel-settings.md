@@ -10,7 +10,7 @@ last_updated: 2026-08-31
 
 渠道设置是 Owner 在 Rovai 本机维护飞书/钉钉连接与队员 Bot 的 Renderer surface。群首次项目选择发生在对应外部会话的
 Owner-only 卡片中；Renderer 不提供 Channel 项目目录或会话绑定操作。领域状态和错误按 Provider 分别见
-[Feishu Channel v7](../../contracts/feishu-channel-v7.md)与
+[Feishu Channel v8](../../contracts/feishu-channel-v8.md)与
 [DingTalk Channel v5](../../contracts/dingtalk-channel-v5.md)；本页只拥有信息层级、交互与可访问性。
 
 ## 页面结构
@@ -117,13 +117,17 @@ message/callback envelope 会在同一入站流程自动记录 App-scoped identi
 正常流程是 Owner 私聊自动 Quick Chat，或飞书群/话题、钉钉普通群第一次有效 mention 后在对应卡片中选择项目；钉钉话题
 当前不接入。
 
-项目卡沿用 Rovai 克制、信息先行的表达：标题为“选择 Rovai 项目”，正文按普通群/Topic 明确选择作用域；选项只显示
-bounded project display name，提供绑定动作与“刷新项目”，不提供换绑入口。卡片不得显示 canonical path、外部 identity、
-credential 或内部错误。钉钉卡固定使用官方 AI Markdown 模板、Stream callback 且禁止转发。
+项目卡沿用 Rovai 克制、信息先行的表达：标题为“选择 Rovai 项目”。飞书正文为“选择一个项目，或直接开始快速对话。”，
+后接“选择项目后，这个话题之后都会使用该项目；快速对话不绑定项目。”；普通群用“群聊”替换“话题”。项目下拉框独占
+一行，仅显示 bounded project display name；下一行依次为“开始快速对话”和“刷新项目”。没有可用项目时不展示空下拉框，
+保留两个按钮及可直接快速对话的说明。两种选择都冻结同一个 Camp 工作区，不提供换绑入口。
+卡片不得显示 canonical path、外部 identity、credential 或内部错误。钉钉卡与项目操作保持不变，固定使用官方 AI Markdown
+模板、Stream callback 且禁止转发。
 
 只有 Owner 点击会消费卡片；Non-owner 只看到“仅 Rovai Owner 可以选择项目”私有 toast，公共卡不变化。项目失效时显示
 “该项目已不可用，请重新选择”并刷新原卡；旧卡/双击显示“该项目选择已完成或卡片已过期”。成功只显示短暂
-“项目已绑定，正在处理消息”反馈，Core 随后异步撤回卡片，不留下永久完成卡。
+“项目已绑定，正在处理消息”反馈；飞书 Quick Chat 为“已开始快速对话，正在处理消息”。Core 随后异步撤回卡片，
+不留下永久完成卡。
 
 ## 飞书永久正文卡
 
@@ -155,7 +159,7 @@ N 统计整轮 command，不计正文，也不是当前页数量；无 command �
 长行也保留首尾。无结果显示“（无可展示结果）”；过大且不可拆的 command 明确提示在 Rovai 查看，不静默重写命令。
 多页才在总面板内出现页码和上一页/下一页；翻页后总面板展开，单条 command 收起，包括返回第 1 页。
 成功翻页无 Toast；可响应的超时/服务不可用返回清晰的错误 Toast，完全离线时由飞书提示平台错误，不承诺自定义文案。
-安全、预算、封存与 callback 约束由 [Feishu Channel v7](../../contracts/feishu-channel-v7.md) 拥有；新页只经同步 response card 提交，
+安全、预算、封存与 callback 约束由 [Feishu Channel v8](../../contracts/feishu-channel-v8.md) 拥有；新页只经同步 response card 提交，
 不额外 PATCH，不增加 Renderer 设置或视图状态。
 
 ## 状态、错误与键盘
@@ -170,7 +174,7 @@ N 统计整轮 command，不计正文，也不是当前页数量；无 command �
 
 - [全局设计系统](../../../DESIGN.md)
 - [设置工作区 brief](../../../apps/desktop/.impeccable/surfaces/settings-workspace.md)
-- [Feishu Channel v7](../../contracts/feishu-channel-v7.md)
+- [Feishu Channel v8](../../contracts/feishu-channel-v8.md)
 - [飞书渠道架构](../../architecture/feishu-channel.md)
 - [DingTalk Channel v5](../../contracts/dingtalk-channel-v5.md)
 - [钉钉渠道架构](../../architecture/dingtalk-channel.md)

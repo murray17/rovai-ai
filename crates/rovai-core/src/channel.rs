@@ -45,6 +45,7 @@ const CHANNEL_TRANSPORT_RETENTION_DAYS: i64 = 7;
 const MAX_DELIVERY_ATTEMPTS: i64 = 5;
 const PENDING_BINDING_LIFETIME_HOURS: i64 = 24;
 const PROJECT_SELECTION_CARD_REVISION: i64 = 3;
+const FEISHU_PROJECT_SELECTION_CARD_REVISION: i64 = 4;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -4594,6 +4595,7 @@ impl ChannelService {
     pub fn resolve_pending_camp_binding(
         &self,
         database: &mut Database,
+        quick_chat_path: &Path,
         envelope: &CommandEnvelope<ResolvePendingCampBindingCommand>,
     ) -> Result<CommandExecution> {
         validate_nonempty(&envelope.payload.pending_binding_id, "pendingBindingId")?;
@@ -4608,12 +4610,16 @@ impl ChannelService {
         }
         if !matches!(
             envelope.payload.action.as_str(),
-            "bind" | "cancel" | "refresh"
+            "bind" | "quick_chat" | "cancel" | "refresh"
         ) {
-            anyhow::bail!("action must be bind, cancel, or refresh");
+            anyhow::bail!("action must be bind, quick_chat, cancel, or refresh");
         }
         if envelope.payload.action == "bind" && envelope.payload.project_id.is_none() {
             anyhow::bail!("bind action requires projectId");
+        }
+        let quick_chat = envelope.payload.action == "quick_chat";
+        if quick_chat && envelope.payload.project_id.is_some() {
+            anyhow::bail!("quick_chat action must not include projectId");
         }
         for (value, field) in [
             (envelope.payload.operator_open_id.as_ref(), "operatorOpenId"),
@@ -4627,7 +4633,9 @@ impl ChannelService {
                 validate_nonempty(value, field)?;
             }
         }
-        refresh_project_catalog(database)?;
+        if !quick_chat {
+            refresh_project_catalog(database)?;
+        }
         self.gateway.execute(database, envelope, |transaction| {
             if !is_channel_host(&envelope.actor) {
                 return Ok(rejected(
@@ -4647,6 +4655,18 @@ impl ChannelService {
                 return Ok(rejected(
                     "channel.host_required",
                     "Only this provider's trusted Channel Host can resolve a project card",
+                ));
+            }
+            if quick_chat
+                && (pending.conversation.provider != FEISHU_PROVIDER
+                    || !matches!(
+                        pending.conversation.conversation_kind.as_str(),
+                        "group" | "topic"
+                    ))
+            {
+                return Ok(rejected(
+                    "channel.binding.action_unsupported",
+                    "Quick Chat selection is only available for Feishu groups and topics",
                 ));
             }
             validate_owner_identity_input(
@@ -4791,64 +4811,79 @@ impl ChannelService {
                 ));
             }
 
-            let project_id = envelope
-                .payload
-                .project_id
-                .as_deref()
-                .context("bind action omitted projectId")?;
-            let project = transaction
-                .query_row(
-                    r#"
+            let (project_id, project_display_name, canonical_path) = if quick_chat {
+                if !quick_chat_path.is_absolute() || !quick_chat_path.is_dir() {
+                    anyhow::bail!("the managed Quick Chat directory is unavailable");
+                }
+                (
+                    None,
+                    None,
+                    quick_chat_path
+                        .canonicalize()?
+                        .to_string_lossy()
+                        .to_string(),
+                )
+            } else {
+                let project_id = envelope
+                    .payload
+                    .project_id
+                    .as_deref()
+                    .context("bind action omitted projectId")?;
+                let project = transaction
+                    .query_row(
+                        r#"
                     SELECT id, display_name, canonical_path
                     FROM project_catalog_item
                     WHERE id = ?1 AND status = 'active'
                     "#,
-                    [project_id],
-                    |row| {
-                        Ok((
-                            row.get::<_, String>(0)?,
-                            row.get::<_, String>(1)?,
-                            row.get::<_, String>(2)?,
-                        ))
-                    },
-                )
-                .optional()?;
-            let Some((project_id, project_display_name, canonical_path)) = project else {
-                let (next_version, project_options) = rotate_pending_project_picker(
-                    transaction,
-                    &pending,
-                    Some("project_unavailable"),
-                    &now_text,
-                )?;
-                return Ok(CommandHandlerResult::rejected(
-                    "channel.project_unavailable",
-                    json!({
-                        "message": "The selected Rovai project is no longer available",
-                        "pendingBindingId": pending.id,
-                        "expectedVersion": next_version,
-                        "projectOptions": project_options,
-                        "pickerRefreshQueued": true,
-                    }),
-                ));
+                        [project_id],
+                        |row| {
+                            Ok((
+                                row.get::<_, String>(0)?,
+                                row.get::<_, String>(1)?,
+                                row.get::<_, String>(2)?,
+                            ))
+                        },
+                    )
+                    .optional()?;
+                let Some((project_id, project_display_name, canonical_path)) = project else {
+                    let (next_version, project_options) = rotate_pending_project_picker(
+                        transaction,
+                        &pending,
+                        Some("project_unavailable"),
+                        &now_text,
+                    )?;
+                    return Ok(CommandHandlerResult::rejected(
+                        "channel.project_unavailable",
+                        json!({
+                            "message": "The selected Rovai project is no longer available",
+                            "pendingBindingId": pending.id,
+                            "expectedVersion": next_version,
+                            "projectOptions": project_options,
+                            "pickerRefreshQueued": true,
+                        }),
+                    ));
+                };
+                if !Path::new(&canonical_path).is_dir() {
+                    let (next_version, project_options) = rotate_pending_project_picker(
+                        transaction,
+                        &pending,
+                        Some("project_unavailable"),
+                        &now_text,
+                    )?;
+                    return Ok(CommandHandlerResult::rejected(
+                        "channel.project_unavailable",
+                        json!({
+                            "message": "The selected Rovai project directory is unavailable",
+                            "pendingBindingId": pending.id,
+                            "expectedVersion": next_version,
+                            "projectOptions": project_options,
+                            "pickerRefreshQueued": true,
+                        }),
+                    ));
+                }
+                (Some(project_id), Some(project_display_name), canonical_path)
             };
-            if !Path::new(&canonical_path).is_dir() {
-                let (next_version, project_options) = rotate_pending_project_picker(
-                    transaction,
-                    &pending,
-                    Some("project_unavailable"),
-                    &now_text,
-                )?;
-                return Ok(CommandHandlerResult::rejected(
-                    "channel.project_unavailable",
-                    json!({
-                        "message": "The selected Rovai project directory is unavailable",
-                        "pendingBindingId": pending.id,
-                        "expectedVersion": next_version,
-                        "projectOptions": project_options,
-                        "pickerRefreshQueued": true,
-                    }),
-                ));
-            }
             let active_binding_exists: bool = transaction.query_row(
                 r#"
                 SELECT EXISTS(
@@ -4916,17 +4951,19 @@ impl ChannelService {
                 |row| row.get(0),
             )?;
             let binding_id = format!("rvcb_{}", Uuid::new_v4().simple());
+            let execution_scope_kind = if quick_chat { "quick_chat" } else { "project" };
             transaction.execute(
                 r#"
                 INSERT INTO channel_conversation_binding(
                     id, channel_conversation_id, execution_scope_kind,
                     project_id, camp_id, status, generation, version,
                     created_at, updated_at, closed_at
-                ) VALUES (?1, ?2, 'project', ?3, NULL, 'active', ?4, 1, ?5, ?5, NULL)
+                ) VALUES (?1, ?2, ?3, ?4, NULL, 'active', ?5, 1, ?6, ?6, NULL)
                 "#,
                 params![
                     binding_id,
                     pending.conversation.id,
+                    execution_scope_kind,
                     project_id,
                     generation,
                     now_text
@@ -4935,9 +4972,14 @@ impl ChannelService {
             let mut binding = ChannelBindingAdmission {
                 binding_id: binding_id.clone(),
                 camp_id: None,
-                binding_kind: "directory".to_string(),
+                binding_kind: if quick_chat {
+                    "quick_chat"
+                } else {
+                    "directory"
+                }
+                .to_string(),
                 canonical_path,
-                project_status: Some("active".to_string()),
+                project_status: (!quick_chat).then(|| "active".to_string()),
                 conversation_kind: pending.conversation.conversation_kind.clone(),
             };
             let initial_members = if matches!(binding.conversation_kind.as_str(), "group" | "topic")
@@ -5011,6 +5053,7 @@ impl ChannelService {
                 "channel.binding.resolved",
                 json!({
                     "pendingBindingId": pending.id,
+                    "executionScopeKind": execution_scope_kind,
                     "projectId": project_id,
                     "projectDisplayName": project_display_name,
                     "bindingId": binding_id,
@@ -6960,7 +7003,11 @@ fn insert_pending_project_delivery(
         "pendingBindingId": input.pending_binding_id,
         "conversationDisplayName": input.conversation.display_name,
         "conversationKind": input.conversation.conversation_kind,
-        "cardRevision": PROJECT_SELECTION_CARD_REVISION,
+        "cardRevision": if input.conversation.provider == FEISHU_PROVIDER {
+            FEISHU_PROJECT_SELECTION_CARD_REVISION
+        } else {
+            PROJECT_SELECTION_CARD_REVISION
+        },
         "expectedVersion": input.expected_version,
         "nonce": input.nonce,
         "projectOptions": active_project_card_items(transaction)?,
@@ -7240,7 +7287,7 @@ fn reconcile_obsolete_project_picker_card_revision(
                         '$.cardRevision'
                     ) AS INTEGER),
                     0
-                ) < ?2
+                ) < CASE conversation.provider WHEN 'feishu' THEN ?2 ELSE ?3 END
                 AND (
                     (
                         candidate.status = 'failed'
@@ -7269,7 +7316,11 @@ fn reconcile_obsolete_project_picker_card_revision(
         WHERE pending.status = 'pending' AND pending.expires_at > ?1
         ORDER BY pending.created_at, pending.id
         "#,
-        params![now, PROJECT_SELECTION_CARD_REVISION],
+        params![
+            now,
+            FEISHU_PROJECT_SELECTION_CARD_REVISION,
+            PROJECT_SELECTION_CARD_REVISION
+        ],
         |row| {
             Ok((
                 row.get::<_, String>(0)?,
@@ -12127,6 +12178,25 @@ mod tests {
         command_id: &str,
         provider: &str,
     ) -> CommandExecution {
+        let command =
+            pending_picker_command(service, database, pending_binding_id, command_id, provider);
+        let quick_chat_path = quick_chat_path(database);
+        service
+            .resolve_pending_camp_binding(
+                database,
+                &quick_chat_path,
+                &provider_host_envelope(provider, command_id, command),
+            )
+            .unwrap()
+    }
+
+    fn pending_picker_command(
+        service: &ChannelService,
+        database: &mut Database,
+        pending_binding_id: &str,
+        command_id: &str,
+        provider: &str,
+    ) -> ResolvePendingCampBindingCommand {
         let existing_picker = database
             .connection()
             .query_row(
@@ -12217,41 +12287,535 @@ mod tests {
                     .unwrap();
                 (app_id, payload, picker_message_id)
             };
-        let project_id: String = database
-            .connection()
+        ResolvePendingCampBindingCommand {
+            pending_binding_id: pending_binding_id.to_string(),
+            app_id,
+            external_picker_message_id: picker_message_id,
+            action: "bind".to_string(),
+            project_id: payload["projectOptions"][0]["projectId"]
+                .as_str()
+                .map(ToString::to_string),
+            expected_version: payload["expectedVersion"].as_i64().unwrap(),
+            nonce: payload["nonce"].as_str().unwrap().to_string(),
+            operator_open_id: (provider == FEISHU_PROVIDER).then(|| "ou_user".to_string()),
+            operator_user_id: Some(if provider == DINGTALK_PROVIDER {
+                "owner-staff-1".to_string()
+            } else {
+                "ignored-envelope-user".to_string()
+            }),
+            operator_union_id: (provider == FEISHU_PROVIDER).then(|| "union_user".to_string()),
+        }
+    }
+
+    fn pending_workspace_picker(
+        service: &ChannelService,
+        database: &mut Database,
+        kind: &str,
+        chat_id: &str,
+    ) -> ResolvePendingCampBindingCommand {
+        let quick_chat_path = quick_chat_path(database);
+        service
+            .reconcile_feishu_group_roster(
+                database,
+                &host_envelope(
+                    &format!("{chat_id}-roster"),
+                    ReconcileFeishuGroupRosterCommand {
+                        provider: FEISHU_PROVIDER.to_string(),
+                        tenant_key: "tenant_1".to_string(),
+                        chat_id: chat_id.to_string(),
+                        present_app_ids: vec!["cli_app_1".to_string(), "cli_app_2".to_string()],
+                    },
+                ),
+            )
+            .unwrap();
+        let mut pending_id = String::new();
+        for index in 0..2 {
+            let observed = service
+                .observe_inbound(
+                    database,
+                    &host_envelope(
+                        &format!("{chat_id}-observe-{index}"),
+                        observation_command(
+                            "cli_app_1",
+                            &format!("{chat_id}-message-{index}"),
+                            chat_id,
+                            if kind == "topic" { "om_topic_root" } else { "" },
+                            kind,
+                            if index == 0 {
+                                "检查登录流程"
+                            } else {
+                                "再检查退出流程"
+                            },
+                            &[("agent_1", "cli_app_1")],
+                            true,
+                        ),
+                    ),
+                )
+                .unwrap();
+            let pending = service
+                .finalize_inbound(
+                    database,
+                    &quick_chat_path,
+                    &host_envelope(
+                        &format!("{chat_id}-finalize-{index}"),
+                        FinalizeChannelInboundCommand {
+                            aggregate_id: observed.result.payload["aggregateId"]
+                                .as_str()
+                                .unwrap()
+                                .to_string(),
+                        },
+                    ),
+                )
+                .unwrap();
+            assert_eq!(pending.result.code, "channel.binding.pending");
+            assert_eq!(pending.result.payload["projectCardQueued"], index == 0);
+            pending_id = pending.result.payload["pendingBindingId"]
+                .as_str()
+                .unwrap()
+                .to_string();
+        }
+        pending_picker_command(
+            service,
+            database,
+            &pending_id,
+            &format!("{chat_id}-picker"),
+            FEISHU_PROVIDER,
+        )
+    }
+
+    // This transaction owner covers the new no-project branch, not another
+    // project-binding fixture: both group kinds must retain FIFO and card authority.
+    #[test]
+    fn quick_chat_picker_needs_no_project_and_preserves_owner_fifo_and_binding_identity() {
+        for kind in ["group", "topic"] {
+            let mut database = seeded_runtime_database_owned();
+            let service = ChannelService::default();
+            connect_account(&service, &mut database);
+            publish_bot(&service, &mut database, "agent_1", "cli_app_1");
+            publish_bot(&service, &mut database, "agent_2", "cli_app_2");
+            let quick_chat_path = quick_chat_path(&database);
+            let mut command =
+                pending_workspace_picker(&service, &mut database, kind, "oc_workspace");
+            assert!(
+                command.project_id.is_none(),
+                "an empty catalog must still allow Quick Chat"
+            );
+            command.action = "quick_chat".to_string();
+            let mut non_owner = command.clone();
+            non_owner.operator_open_id = Some("ou_other".to_string());
+            non_owner.operator_user_id = Some("user_other".to_string());
+            non_owner.operator_union_id = Some("union_other".to_string());
+            let mut wrong_app = command.clone();
+            wrong_app.app_id = "cli_app_2".to_string();
+            let mut wrong_message = command.clone();
+            wrong_message.external_picker_message_id = "om_other".to_string();
+            let mut wrong_version = command.clone();
+            wrong_version.expected_version += 1;
+            let mut wrong_nonce = command.clone();
+            wrong_nonce.nonce = "wrong-nonce".to_string();
+            for (index, (input, code)) in [
+                (non_owner, "channel.binding.owner_required"),
+                (wrong_app, "channel.binding.callback_app_mismatch"),
+                (wrong_message, "channel.binding.stale_card"),
+                (wrong_version, "channel.binding.stale_card"),
+                (wrong_nonce, "channel.binding.invalid_nonce"),
+            ]
+            .into_iter()
+            .enumerate()
+            {
+                let rejected = service
+                    .resolve_pending_camp_binding(
+                        &mut database,
+                        &quick_chat_path,
+                        &host_envelope(&format!("quick-rejected-{index}"), input),
+                    )
+                    .unwrap();
+                assert_eq!(rejected.result.code, code);
+            }
+            let mut conflicting = command.clone();
+            conflicting.project_id = Some("untrusted-project".to_string());
+            assert!(
+                service
+                    .resolve_pending_camp_binding(
+                        &mut database,
+                        &quick_chat_path,
+                        &host_envelope("quick-conflicting", conflicting)
+                    )
+                    .is_err()
+            );
+            for (index, apps) in [vec!["cli_app_2"], vec!["cli_app_1", "cli_app_2"]]
+                .into_iter()
+                .enumerate()
+            {
+                service
+                    .reconcile_feishu_group_roster(
+                        &mut database,
+                        &host_envelope(
+                            &format!("quick-roster-{index}"),
+                            ReconcileFeishuGroupRosterCommand {
+                                provider: FEISHU_PROVIDER.to_string(),
+                                tenant_key: "tenant_1".to_string(),
+                                chat_id: "oc_workspace".to_string(),
+                                present_app_ids: apps
+                                    .into_iter()
+                                    .map(ToString::to_string)
+                                    .collect(),
+                            },
+                        ),
+                    )
+                    .unwrap();
+                if index == 0 {
+                    let rejected = service
+                        .resolve_pending_camp_binding(
+                            &mut database,
+                            &quick_chat_path,
+                            &host_envelope("quick-missing-roster", command.clone()),
+                        )
+                        .unwrap();
+                    assert_eq!(rejected.result.code, "channel.bot_not_in_roster");
+                }
+            }
+            database.connection().execute_batch(
+                "CREATE TEMP TRIGGER fail_quick_resolution BEFORE UPDATE ON pending_camp_binding
+                 WHEN NEW.status = 'resolved' BEGIN SELECT RAISE(ABORT, 'fixture resolution failure'); END;",
+            ).unwrap();
+            let envelope = host_envelope("quick-resolve", command.clone());
+            assert!(
+                service
+                    .resolve_pending_camp_binding(&mut database, &quick_chat_path, &envelope)
+                    .is_err()
+            );
+            for table in [
+                "camp",
+                "camp_message",
+                "camp_turn",
+                "agent_run",
+                "channel_conversation_binding",
+            ] {
+                assert_eq!(
+                    database
+                        .connection()
+                        .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| row
+                            .get::<_, i64>(0))
+                        .unwrap(),
+                    0,
+                    "failed resolution must not leak {table}"
+                );
+            }
+            assert_eq!(
+                database
+                    .connection()
+                    .query_row(
+                        "SELECT status FROM pending_camp_binding WHERE id = ?1",
+                        [&command.pending_binding_id],
+                        |row| row.get::<_, String>(0)
+                    )
+                    .unwrap(),
+                "pending"
+            );
+            database
+                .connection()
+                .execute_batch("DROP TRIGGER fail_quick_resolution")
+                .unwrap();
+            let resolved = service
+                .resolve_pending_camp_binding(&mut database, &quick_chat_path, &envelope)
+                .unwrap();
+            assert_eq!(resolved.result.code, "channel.binding.resolved");
+            assert_eq!(resolved.result.payload["executionScopeKind"], "quick_chat");
+            assert!(resolved.result.payload["projectId"].is_null());
+            assert!(resolved.result.payload["projectDisplayName"].is_null());
+            assert_eq!(resolved.result.payload["promotedMessageCount"], 2);
+            let camp_id = resolved.result.payload["campId"].as_str().unwrap();
+            let binding_id = resolved.result.payload["bindingId"].as_str().unwrap();
+            let persisted: (String, String, String, Option<String>, Option<String>) = database.connection().query_row(
+                "SELECT camp.project_binding_kind, camp.project_path, binding.execution_scope_kind,
+                        binding.project_id, pending.project_id
+                 FROM camp JOIN channel_conversation_binding binding ON binding.camp_id = camp.id
+                 JOIN pending_camp_binding pending ON pending.binding_id = binding.id
+                 WHERE camp.id = ?1 AND pending.status = 'resolved'",
+                [camp_id], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?)),
+            ).unwrap();
+            assert_eq!(
+                persisted,
+                (
+                    "quick_chat".to_string(),
+                    quick_chat_path
+                        .canonicalize()
+                        .unwrap()
+                        .to_string_lossy()
+                        .to_string(),
+                    "quick_chat".to_string(),
+                    None,
+                    None
+                )
+            );
+            assert_channel_camp_name(
+                &mut database,
+                camp_id,
+                "检查登录流程",
+                "generated",
+                FEISHU_PROVIDER,
+                kind,
+            );
+            assert_eq!(
+                database
+                    .connection()
+                    .query_row(
+                        "SELECT COUNT(*) FROM camp_member WHERE camp_id = ?1",
+                        [camp_id],
+                        |row| row.get::<_, i64>(0)
+                    )
+                    .unwrap(),
+                2
+            );
+            for (table, count) in [
+                ("camp_message", 1),
+                ("camp_turn", 1),
+                ("agent_run", 1),
+                ("channel_turn_request", 2),
+            ] {
+                assert_eq!(
+                    database
+                        .connection()
+                        .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| row
+                            .get::<_, i64>(0))
+                        .unwrap(),
+                    count
+                );
+            }
+            let duplicate = service
+                .resolve_pending_camp_binding(
+                    &mut database,
+                    &quick_chat_path,
+                    &host_envelope("quick-double-click", command.clone()),
+                )
+                .unwrap();
+            assert_eq!(duplicate.result.code, "channel.binding.stale_card");
+            command.action = "bind".to_string();
+            command.project_id = Some("another-project".to_string());
+            let rebind = service
+                .resolve_pending_camp_binding(
+                    &mut database,
+                    &quick_chat_path,
+                    &host_envelope("quick-cannot-rebind", command),
+                )
+                .unwrap();
+            assert_eq!(rebind.result.code, "channel.binding.stale_card");
+            let observed = service
+                .observe_inbound(
+                    &mut database,
+                    &host_envelope(
+                        "quick-next-message",
+                        observation_command(
+                            "cli_app_1",
+                            "om_next",
+                            "oc_workspace",
+                            if kind == "topic" { "om_topic_root" } else { "" },
+                            kind,
+                            "继续检查",
+                            &[("agent_1", "cli_app_1")],
+                            true,
+                        ),
+                    ),
+                )
+                .unwrap();
+            let next = service
+                .finalize_inbound(
+                    &mut database,
+                    &quick_chat_path,
+                    &host_envelope(
+                        "quick-next-finalize",
+                        FinalizeChannelInboundCommand {
+                            aggregate_id: observed.result.payload["aggregateId"]
+                                .as_str()
+                                .unwrap()
+                                .to_string(),
+                        },
+                    ),
+                )
+                .unwrap();
+            assert_eq!(next.result.payload["campId"], camp_id);
+            assert_eq!(
+                database
+                    .connection()
+                    .query_row(
+                        "SELECT COUNT(*) FROM channel_turn_request WHERE binding_id = ?1",
+                        [binding_id],
+                        |row| row.get::<_, i64>(0)
+                    )
+                    .unwrap(),
+                3
+            );
+            assert_eq!(
+                database
+                    .connection()
+                    .query_row(
+                        "SELECT COUNT(*) FROM channel_conversation_binding",
+                        [],
+                        |row| row.get::<_, i64>(0)
+                    )
+                    .unwrap(),
+                1
+            );
+            assert_eq!(
+                database
+                    .connection()
+                    .query_row(
+                        "SELECT COUNT(*) FROM channel_delivery WHERE pending_binding_id = ?1
+                 AND json_extract(payload_json, '$.operation') = 'recall'",
+                        [envelope.payload.pending_binding_id],
+                        |row| row.get::<_, i64>(0)
+                    )
+                    .unwrap(),
+                1
+            );
+        }
+    }
+
+    // The migration owner uses real pending/resolved rows and their FIFO/Outbox
+    // dependents; a blank-schema fixture cannot prove that FK cascades kept them.
+    #[test]
+    fn pending_picker_upgrade_keeps_history_rolls_back_failure_and_reuses_the_old_card() {
+        let mut database = seeded_runtime_database_owned();
+        let service = ChannelService::default();
+        connect_account(&service, &mut database);
+        publish_bot(&service, &mut database, "agent_1", "cli_app_1");
+        publish_bot(&service, &mut database, "agent_2", "cli_app_2");
+        seed_project(&database, "retained");
+        let quick_chat_path = quick_chat_path(&database);
+        let project = pending_workspace_picker(&service, &mut database, "group", "oc_retained");
+        assert!(project.project_id.is_some());
+        let bound = service
+            .resolve_pending_camp_binding(
+                &mut database,
+                &quick_chat_path,
+                &host_envelope("bind-retained-project", project),
+            )
+            .unwrap();
+        assert_eq!(bound.result.code, "channel.binding.resolved");
+        let mut pending = pending_workspace_picker(&service, &mut database, "topic", "oc_upgrade");
+        crate::db::downgrade_current_schema_to_v131_source_for_test(database.connection());
+        let snapshot = |connection: &rusqlite::Connection| {
+            [
+                "camp",
+                "camp_message",
+                "camp_turn",
+                "agent_run",
+                "channel_conversation_binding",
+                "pending_camp_binding",
+                "pending_camp_message",
+                "channel_delivery",
+            ]
+            .map(|table| {
+                let mut statement = connection
+                    .prepare(&format!("SELECT * FROM {table} ORDER BY 1, 2"))
+                    .unwrap();
+                statement
+                    .query_map([], |row| {
+                        (0..row.as_ref().column_count())
+                            .map(|index| row.get::<_, rusqlite::types::Value>(index))
+                            .collect::<rusqlite::Result<Vec<_>>>()
+                    })
+                    .unwrap()
+                    .collect::<rusqlite::Result<Vec<_>>>()
+                    .unwrap()
+            })
+        };
+        let before = snapshot(database.connection());
+        database.connection().execute_batch(
+            "CREATE TRIGGER fail_picker_upgrade BEFORE INSERT ON schema_migration
+             WHEN NEW.version = 132 BEGIN SELECT RAISE(ABORT, 'fixture picker upgrade failure'); END;",
+        ).unwrap();
+        let directory = database.directory().to_path_buf();
+        database.close();
+        let error = Database::open(&directory)
+            .err()
+            .expect("the injected migration must fail");
+        assert!(format!("{error:#}").contains("fixture picker upgrade failure"));
+        let failed = rusqlite::Connection::open(directory.join("rovai.sqlite")).unwrap();
+        assert_eq!(
+            snapshot(&failed),
+            before,
+            "failed migration must roll back rows and FK dependents"
+        );
+        assert_eq!(failed.query_row(
+            "SELECT contract_version, projection_schema_version FROM rovai_data_contract WHERE singleton = 1",
+            [], |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))).unwrap(), ("v1.41".to_string(), 82));
+        assert_eq!(
+            failed
+                .query_row(
+                    "SELECT COUNT(*) FROM schema_migration WHERE version = 132",
+                    [],
+                    |row| row.get::<_, i64>(0)
+                )
+                .unwrap(),
+            0
+        );
+        let schema: String = failed
             .query_row(
-                "SELECT id FROM project_catalog_item WHERE status = 'active' ORDER BY last_opened_at DESC LIMIT 1",
+                "SELECT sql FROM sqlite_schema WHERE name = 'pending_camp_binding'",
                 [],
                 |row| row.get(0),
             )
             .unwrap();
-        service
+        assert!(schema.contains("status = 'resolved' AND project_id IS NOT NULL"));
+        failed
+            .execute_batch("DROP TRIGGER fail_picker_upgrade")
+            .unwrap();
+        drop(failed);
+
+        let mut upgraded = Database::open(&directory).unwrap();
+        assert_eq!(
+            snapshot(upgraded.connection()),
+            before,
+            "successful migration must preserve all existing rows"
+        );
+        assert_eq!(
+            upgraded
+                .connection()
+                .query_row("SELECT COUNT(*) FROM pragma_foreign_key_check", [], |row| {
+                    row.get::<_, i64>(0)
+                })
+                .unwrap(),
+            0
+        );
+        assert_eq!(
+            upgraded
+                .connection()
+                .query_row("PRAGMA foreign_keys", [], |row| row.get::<_, i64>(0))
+                .unwrap(),
+            1
+        );
+        pending.action = "quick_chat".to_string();
+        pending.project_id = None;
+        let resolved = service
             .resolve_pending_camp_binding(
-                database,
-                &provider_host_envelope(
-                    provider,
-                    command_id,
-                    ResolvePendingCampBindingCommand {
-                        pending_binding_id: pending_binding_id.to_string(),
-                        app_id,
-                        external_picker_message_id: picker_message_id,
-                        action: "bind".to_string(),
-                        project_id: Some(project_id),
-                        expected_version: payload["expectedVersion"].as_i64().unwrap(),
-                        nonce: payload["nonce"].as_str().unwrap().to_string(),
-                        operator_open_id: (provider == FEISHU_PROVIDER)
-                            .then(|| "ou_user".to_string()),
-                        operator_user_id: Some(if provider == DINGTALK_PROVIDER {
-                            "owner-staff-1".to_string()
-                        } else {
-                            "ignored-envelope-user".to_string()
-                        }),
-                        operator_union_id: (provider == FEISHU_PROVIDER)
-                            .then(|| "union_user".to_string()),
-                    },
-                ),
+                &mut upgraded,
+                &quick_chat_path,
+                &host_envelope("old-card-quick-chat", pending),
             )
-            .unwrap()
+            .unwrap();
+        assert_eq!(resolved.result.code, "channel.binding.resolved");
+        assert_eq!(resolved.result.payload["executionScopeKind"], "quick_chat");
+        let after = snapshot(upgraded.connection());
+        drop(upgraded);
+        let reopened = Database::open(&directory).unwrap();
+        assert_eq!(
+            snapshot(reopened.connection()),
+            after,
+            "reopen cannot repeat the migration or callback"
+        );
+        assert_eq!(
+            reopened
+                .connection()
+                .query_row(
+                    "SELECT COUNT(*) FROM schema_migration WHERE version = 132",
+                    [],
+                    |row| row.get::<_, i64>(0)
+                )
+                .unwrap(),
+            1
+        );
     }
 
     #[test]
@@ -14651,6 +15215,7 @@ mod tests {
         let stale_message = service
             .resolve_pending_camp_binding(
                 &mut database,
+                &quick_chat_path,
                 &host_envelope(
                     "resolve-stale-picker-message",
                     ResolvePendingCampBindingCommand {
@@ -14672,6 +15237,7 @@ mod tests {
         let non_owner = service
             .resolve_pending_camp_binding(
                 &mut database,
+                &quick_chat_path,
                 &host_envelope(
                     "resolve-picker-non-owner",
                     ResolvePendingCampBindingCommand {
@@ -14713,6 +15279,7 @@ mod tests {
         let unavailable = service
             .resolve_pending_camp_binding(
                 &mut database,
+                &quick_chat_path,
                 &host_envelope(
                     "resolve-picker-project-became-unavailable",
                     ResolvePendingCampBindingCommand {
@@ -14873,6 +15440,7 @@ mod tests {
         let replay = service
             .resolve_pending_camp_binding(
                 &mut database,
+                &quick_chat_path,
                 &host_envelope(
                     "resolve-picker-replay-after-commit",
                     ResolvePendingCampBindingCommand {
@@ -15259,6 +15827,7 @@ mod tests {
         let stale = service
             .resolve_pending_camp_binding(
                 &mut database,
+                &quick_chat_path,
                 &host_envelope(
                     "reject-legacy-private-picker",
                     ResolvePendingCampBindingCommand {
@@ -15427,7 +15996,7 @@ mod tests {
             replacement["payload"]["expectedVersion"],
             original_version + 1
         );
-        assert_eq!(replacement["payload"]["cardRevision"], 3);
+        assert_eq!(replacement["payload"]["cardRevision"], 4);
         let (next_version, next_nonce_digest): (i64, String) = database
             .connection()
             .query_row(
@@ -15544,7 +16113,7 @@ mod tests {
             .execute(
                 r#"
                 UPDATE channel_delivery
-                SET payload_json = json_set(payload_json, '$.cardRevision', 2)
+                SET payload_json = json_set(payload_json, '$.cardRevision', 3)
                 WHERE pending_binding_id = ?1 AND delivery_kind = 'project_selection'
                 "#,
                 [&pending_binding_id],
@@ -15626,7 +16195,7 @@ mod tests {
             replacement["payload"]["expectedVersion"],
             original_version + 1
         );
-        assert_eq!(replacement["payload"]["cardRevision"], 3);
+        assert_eq!(replacement["payload"]["cardRevision"], 4);
         let (next_version, next_nonce_digest): (i64, String) = database
             .connection()
             .query_row(

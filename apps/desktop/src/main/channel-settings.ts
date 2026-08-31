@@ -1570,7 +1570,7 @@ export class ChannelSettingsService {
     const raw = (event.raw ?? {}) as RawCardActionEvent
     let result: StoredCommandResult
     try {
-      if (projectAction.action === 'bind'
+      if ((projectAction.action === 'bind' || projectAction.action === 'quick_chat')
         && !await this.#reconcileCardActionRoster(event.chatId)) {
         logFeishuBotDiagnostic('card.resolve_failed', {
           appIdDigest: digest(managed.appId),
@@ -2550,7 +2550,7 @@ type ProjectCardAction = {
   pendingBindingId: string
   expectedVersion: number
   nonce: string
-  action: 'bind' | 'cancel' | 'refresh'
+  action: 'bind' | 'quick_chat' | 'cancel' | 'refresh'
   projectId: string | null
 }
 
@@ -2584,7 +2584,12 @@ function projectCardActionResponse(result: StoredCommandResult): FeishuCardActio
     return { toast: { type: 'info', content: '已取消项目选择' } }
   }
   if (result.code === 'channel.binding.resolved') {
-    return { toast: { type: 'success', content: '项目已绑定，正在处理消息' } }
+    return { toast: {
+      type: 'success',
+      content: result.payload.executionScopeKind === 'quick_chat'
+        ? '已开始快速对话，正在处理消息'
+        : '项目已绑定，正在处理消息'
+    } }
   }
   if (result.code === 'channel.binding.expired'
     || result.code === 'channel.binding.not_found'
@@ -2624,11 +2629,13 @@ function projectCardAction(value: unknown, selectedOption?: string): ProjectCard
   if (!isRecord(value)) return null
   const action = value.rovaiAction === 'bind_project'
     ? 'bind'
-    : value.rovaiAction === 'cancel_binding'
-      ? 'cancel'
-      : value.rovaiAction === 'refresh_projects'
-        ? 'refresh'
-        : null
+    : value.rovaiAction === 'start_quick_chat'
+      ? 'quick_chat'
+      : value.rovaiAction === 'cancel_binding'
+        ? 'cancel'
+        : value.rovaiAction === 'refresh_projects'
+          ? 'refresh'
+          : null
   if (!action
     || typeof value.pendingBindingId !== 'string'
     || typeof value.nonce !== 'string'
@@ -2641,6 +2648,7 @@ function projectCardAction(value: unknown, selectedOption?: string): ProjectCard
       ? value.projectId
       : null
   if (action === 'bind' && !projectId) return null
+  if (action === 'quick_chat' && projectId !== null) return null
   return {
     pendingBindingId: value.pendingBindingId,
     expectedVersion: value.expectedVersion,
@@ -2713,12 +2721,11 @@ function projectSelectionCard(input: {
         }]
       }
     : null
-  const scopeCopy = input.conversationKind === 'topic'
-    ? [
-        '首次使用这个话题，需要先确定 Camp 的项目。',
-        '选择后，这个话题之后都会使用该项目。'
-      ]
-    : ['首次使用这个会话，需要先确定 Camp 的项目。']
+  const scope = input.conversationKind === 'topic' ? '话题' : '群聊'
+  const scopeCopy = [
+    '选择一个项目，或直接开始快速对话。',
+    `选择项目后，这个${scope}之后都会使用该项目；快速对话不绑定项目。`
+  ]
   const notice = input.notice === 'project_unavailable'
     ? '刚才选择的项目已不可用，项目列表已经更新。'
     : input.notice === 'moved_to_conversation'
@@ -2739,16 +2746,29 @@ function projectSelectionCard(input: {
             notice,
             ...scopeCopy,
             input.projectOptions.length === 0
-              ? '当前没有可用项目。请先在 Rovai 创建或打开一个项目，然后点击刷新。'
+              ? '当前没有可用项目。可以直接开始快速对话，或在 Rovai 创建或打开一个项目后刷新。'
               : null
           ].filter(Boolean).join('\n\n')
         },
         ...(projectSelector ? [projectSelector] : []),
         {
-          tag: 'button',
-          text: { tag: 'plain_text', content: '刷新项目' },
-          type: 'default',
-          value: actionValue('refresh_projects')
+          tag: 'column_set',
+          horizontal_spacing: '8px',
+          columns: [
+            { text: '开始快速对话', action: 'start_quick_chat', type: 'primary' },
+            { text: '刷新项目', action: 'refresh_projects', type: 'default' }
+          ].map((button) => ({
+            tag: 'column',
+            width: 'weighted',
+            weight: 1,
+            elements: [{
+              tag: 'button',
+              text: { tag: 'plain_text', content: button.text },
+              type: button.type,
+              width: 'fill',
+              behaviors: [{ type: 'callback', value: actionValue(button.action) }]
+            }]
+          }))
         }
       ]
     }

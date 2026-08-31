@@ -208,8 +208,10 @@ impl MainCampMigrationSource {
     }
 }
 
-pub(crate) const CURRENT_DATA_CONTRACT_VERSION: &str = "v1.41";
-pub(crate) const CURRENT_PROJECTION_SCHEMA_VERSION: i64 = 82;
+pub(crate) const CURRENT_DATA_CONTRACT_VERSION: &str = "v1.42";
+pub(crate) const CURRENT_PROJECTION_SCHEMA_VERSION: i64 = 83;
+const V132_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.41";
+const V132_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION: i64 = 82;
 const V130_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.40";
 const V130_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION: i64 = 81;
 const V129_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.39";
@@ -583,6 +585,7 @@ struct CurrentMigrationState {
     v129: bool,
     v130: bool,
     v131: bool,
+    v132: bool,
 }
 
 impl CurrentMigrationState {
@@ -661,6 +664,21 @@ impl CurrentMigrationState {
             return false;
         }
         if contract == CURRENT_DATA_CONTRACT_VERSION && schema == CURRENT_PROJECTION_SCHEMA_VERSION
+        {
+            return self.v132
+                && self.v126
+                && self.v127
+                && self.v128
+                && self.v129
+                && self.v130
+                && self.v131
+                && self.admits_channel_v125(channel_classifier_admissible, through_v113);
+        }
+        if self.v132 {
+            return false;
+        }
+        if contract == V132_MIGRATION_SOURCE_DATA_CONTRACT_VERSION
+            && schema == V132_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION
         {
             return self.v126
                 && self.v127
@@ -2349,7 +2367,7 @@ fn connection_has_current_data_contract(connection: &Connection) -> rusqlite::Re
         SELECT contract_version = ?1
                AND projection_schema_version = ?2
                AND classifier_version = ?3
-               AND EXISTS(SELECT 1 FROM schema_migration WHERE version = 131)
+               AND EXISTS(SELECT 1 FROM schema_migration WHERE version = 132)
         FROM rovai_data_contract
         WHERE singleton = 1
         "#,
@@ -2428,7 +2446,8 @@ fn load_current_migration_state(
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 128),
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 129),
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 130),
-               EXISTS(SELECT 1 FROM schema_migration WHERE version = 131)
+               EXISTS(SELECT 1 FROM schema_migration WHERE version = 131),
+               EXISTS(SELECT 1 FROM schema_migration WHERE version = 132)
         "#,
         [],
         |row| {
@@ -2495,6 +2514,7 @@ fn load_current_migration_state(
                 v129: row.get(59)?,
                 v130: row.get(60)?,
                 v131: row.get(61)?,
+                v132: row.get(62)?,
             })
         },
     )
@@ -4956,6 +4976,9 @@ impl Database {
             if !self.schema_migration_applied(131)? {
                 migration_step!("migration_131", self.migrate_fast_lifetime_contract_v131());
             }
+            if !self.schema_migration_applied(132)? {
+                migration_step!("migration_132", self.migrate_pending_quick_chat_v132());
+            }
             if let Err(error) =
                 crate::notification::maintain_notification_episode_retention(self.connection())
             {
@@ -5528,6 +5551,9 @@ impl Database {
         }
         if !self.schema_migration_applied(131)? {
             migration_step!("migration_131", self.migrate_fast_lifetime_contract_v131());
+        }
+        if !self.schema_migration_applied(132)? {
+            migration_step!("migration_132", self.migrate_pending_quick_chat_v132());
         }
         if let Err(error) =
             crate::notification::maintain_notification_episode_retention(self.connection())
@@ -20192,8 +20218,8 @@ impl Database {
             "UPDATE rovai_data_contract SET contract_version = ?1, projection_schema_version = ?2,
              updated_at = datetime('now') WHERE singleton = 1",
             params![
-                CURRENT_DATA_CONTRACT_VERSION,
-                CURRENT_PROJECTION_SCHEMA_VERSION
+                V132_MIGRATION_SOURCE_DATA_CONTRACT_VERSION,
+                V132_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION
             ],
         )?;
         transaction.execute(
@@ -20201,6 +20227,96 @@ impl Database {
             [],
         )?;
         transaction.commit()?;
+        Ok(())
+    }
+
+    fn migrate_pending_quick_chat_v132(&mut self) -> Result<()> {
+        self.connection
+            .execute_batch("PRAGMA foreign_keys = OFF;")?;
+        let migration_result = (|| -> Result<()> {
+            let transaction = self
+                .connection
+                .transaction_with_behavior(TransactionBehavior::Immediate)?;
+            let marker = transaction.query_row(
+                "SELECT contract_version, projection_schema_version, classifier_version
+                 FROM rovai_data_contract WHERE singleton = 1",
+                [],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, i64>(1)?,
+                        row.get::<_, String>(2)?,
+                    ))
+                },
+            )?;
+            let state = load_current_migration_state(&transaction)?;
+            if marker.0 != V132_MIGRATION_SOURCE_DATA_CONTRACT_VERSION
+                || marker.1 != V132_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION
+                || !state.admits(&marker.0, marker.1, &marker.2)
+            {
+                anyhow::bail!(
+                    "Quick Chat picker migration requires the exact preceding data contract"
+                );
+            }
+            transaction.execute_batch(
+                r#"
+                CREATE TABLE pending_camp_binding_v132 (
+                    id TEXT PRIMARY KEY,
+                    channel_conversation_id TEXT NOT NULL
+                        REFERENCES channel_conversation(id) ON DELETE CASCADE,
+                    owner_principal_id TEXT NOT NULL REFERENCES external_principal(id),
+                    acknowledgement_app_id TEXT NOT NULL CHECK(length(trim(acknowledgement_app_id)) > 0),
+                    status TEXT NOT NULL CHECK(status IN (
+                        'pending', 'resolving', 'resolved', 'cancelled', 'expired'
+                    )),
+                    version INTEGER NOT NULL DEFAULT 1 CHECK(version >= 1),
+                    nonce_digest TEXT NOT NULL CHECK(length(trim(nonce_digest)) > 0),
+                    expires_at TEXT NOT NULL,
+                    project_id TEXT REFERENCES project_catalog_item(id),
+                    binding_id TEXT UNIQUE REFERENCES channel_conversation_binding(id),
+                    camp_id TEXT UNIQUE REFERENCES camp(id),
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    resolved_at TEXT,
+                    CHECK(
+                        (status IN ('pending', 'resolving')
+                            AND project_id IS NULL AND binding_id IS NULL
+                            AND camp_id IS NULL AND resolved_at IS NULL)
+                        OR (status = 'resolved'
+                            AND binding_id IS NOT NULL
+                            AND camp_id IS NOT NULL AND resolved_at IS NOT NULL)
+                        OR (status IN ('cancelled', 'expired')
+                            AND project_id IS NULL AND binding_id IS NULL
+                            AND camp_id IS NULL AND resolved_at IS NOT NULL)
+                    )
+                );
+                INSERT INTO pending_camp_binding_v132
+                SELECT * FROM pending_camp_binding;
+                DROP TABLE pending_camp_binding;
+                ALTER TABLE pending_camp_binding_v132 RENAME TO pending_camp_binding;
+                CREATE UNIQUE INDEX pending_camp_binding_open_conversation_idx
+                    ON pending_camp_binding(channel_conversation_id)
+                    WHERE status IN ('pending', 'resolving');
+                CREATE INDEX pending_camp_binding_status_idx
+                    ON pending_camp_binding(status, expires_at, created_at, id);
+                "#,
+            )?;
+            validate_migration_foreign_keys(&transaction, &["pending_camp_binding"])?;
+            transaction.execute(
+                "UPDATE rovai_data_contract SET contract_version = ?1, projection_schema_version = ?2,
+                 updated_at = datetime('now') WHERE singleton = 1",
+                params![CURRENT_DATA_CONTRACT_VERSION, CURRENT_PROJECTION_SCHEMA_VERSION],
+            )?;
+            transaction.execute(
+                "INSERT INTO schema_migration(version, applied_at) VALUES (132, datetime('now'))",
+                [],
+            )?;
+            transaction.commit()?;
+            Ok(())
+        })();
+        let pragma_result = self.connection.execute_batch("PRAGMA foreign_keys = ON;");
+        migration_result?;
+        pragma_result?;
         Ok(())
     }
 
@@ -24901,7 +25017,57 @@ pub(crate) fn downgrade_current_schema_to_main_camp_source_for_test(
 }
 
 #[cfg(test)]
+pub(crate) fn downgrade_current_schema_to_v131_source_for_test(connection: &Connection) {
+    let applied: bool = connection
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM schema_migration WHERE version = 132)",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    if !applied {
+        return;
+    }
+    let schema: String = connection
+        .query_row(
+            "SELECT sql FROM sqlite_schema WHERE type = 'table' AND name = 'pending_camp_binding'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    let legacy = schema
+        .replacen("pending_camp_binding", "pending_camp_binding_v131", 1)
+        .replacen(
+            "OR (status = 'resolved'",
+            "OR (status = 'resolved' AND project_id IS NOT NULL",
+            1,
+        );
+    assert!(legacy.contains("status = 'resolved' AND project_id IS NOT NULL"));
+    connection
+        .execute_batch("PRAGMA foreign_keys = OFF;")
+        .unwrap();
+    let transaction = connection.unchecked_transaction().unwrap();
+    transaction.execute_batch(&legacy).unwrap();
+    transaction.execute_batch(
+        "INSERT INTO pending_camp_binding_v131 SELECT * FROM pending_camp_binding;
+         DROP TABLE pending_camp_binding;
+         ALTER TABLE pending_camp_binding_v131 RENAME TO pending_camp_binding;
+         CREATE UNIQUE INDEX pending_camp_binding_open_conversation_idx
+             ON pending_camp_binding(channel_conversation_id) WHERE status IN ('pending', 'resolving');
+         CREATE INDEX pending_camp_binding_status_idx
+             ON pending_camp_binding(status, expires_at, created_at, id);
+         DELETE FROM schema_migration WHERE version = 132;
+         UPDATE rovai_data_contract SET contract_version = 'v1.41', projection_schema_version = 82 WHERE singleton = 1;",
+    ).unwrap();
+    transaction.commit().unwrap();
+    connection
+        .execute_batch("PRAGMA foreign_keys = ON;")
+        .unwrap();
+}
+
+#[cfg(test)]
 pub(crate) fn downgrade_current_schema_to_v129_source_for_test(connection: &Connection) {
+    downgrade_current_schema_to_v131_source_for_test(connection);
     let applied: bool = connection
         .query_row(
             "SELECT EXISTS(SELECT 1 FROM schema_migration WHERE version = 130)",
@@ -27000,6 +27166,7 @@ mod tests {
             v129: version >= 129,
             v130: version >= 130,
             v131: version >= 131,
+            v132: version >= 132,
         }
     }
 
@@ -27105,6 +27272,12 @@ mod tests {
                 "current",
                 CURRENT_DATA_CONTRACT_VERSION,
                 CURRENT_PROJECTION_SCHEMA_VERSION,
+                132,
+            ),
+            (
+                "v1.41/schema-82 before Quick Chat project selection",
+                V132_MIGRATION_SOURCE_DATA_CONTRACT_VERSION,
+                V132_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION,
                 131,
             ),
             (
@@ -27450,13 +27623,29 @@ mod tests {
             );
         }
 
-        let current = migration_state_through(131);
+        let current = migration_state_through(132);
         let v092_source = migration_state_through(91);
         let mut missing_intermediate = current;
         missing_intermediate.v84 = false;
         let mut missing_index_migration = current;
         missing_index_migration.v129 = false;
+        let mut missing_quick_chat_migration = current;
+        missing_quick_chat_migration.v132 = false;
         let rejected = [
+            (
+                "current marker without Quick Chat picker migration",
+                missing_quick_chat_migration,
+                CURRENT_DATA_CONTRACT_VERSION,
+                CURRENT_PROJECTION_SCHEMA_VERSION,
+                V116_CLASSIFIER_VERSION,
+            ),
+            (
+                "old picker marker with the new resolved constraint",
+                current,
+                V132_MIGRATION_SOURCE_DATA_CONTRACT_VERSION,
+                V132_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION,
+                V116_CLASSIFIER_VERSION,
+            ),
             (
                 "current marker without index migration",
                 missing_index_migration,
@@ -27682,7 +27871,7 @@ mod tests {
             )
             .expect("current contract marker should load");
 
-        assert_eq!(state, migration_state_through(131));
+        assert_eq!(state, migration_state_through(132));
         assert!(state.admits(&contract, schema, &classifier));
         assert!(has_admissible_data_contract(
             &directory.join("rovai.sqlite")
@@ -29989,6 +30178,7 @@ mod tests {
             .execute_batch(CAMP_FAST_LIFETIME_SCHEMA_OBJECTS[1].1)
             .unwrap();
         database.migrate_fast_lifetime_contract_v131().unwrap();
+        database.migrate_pending_quick_chat_v132().unwrap();
         assert!(connection_has_current_data_contract(database.connection()).unwrap());
         let after: (String, String) = database.connection().query_row(
             "SELECT default_model_selection_json, runtime_binding_revision FROM agent_profile WHERE id = 'agent_1'", [], |row| Ok((row.get(0)?, row.get(1)?))).unwrap();

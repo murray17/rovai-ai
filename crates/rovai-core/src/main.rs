@@ -5200,6 +5200,7 @@ impl Core {
                 let mut database = self.database.lock().await;
                 let execution = ChannelService::default().resolve_pending_camp_binding(
                     &mut database,
+                    &self.data_dir.join("quick-chat"),
                     &system_command_envelope(
                         params.command_id,
                         "dingtalk-channel-host",
@@ -5367,9 +5368,15 @@ impl Core {
             "channels.feishu.pendingBinding.resolve" => {
                 let params: UserCommandParams<ResolvePendingCampBindingCommand> =
                     serde_json::from_value(request.params.clone())?;
+                let quick_chat_path = self.data_dir.join("quick-chat");
+                if params.command.action == "quick_chat" {
+                    std::fs::create_dir_all(&quick_chat_path)
+                        .context("failed to prepare the managed Quick Chat directory")?;
+                }
                 let mut database = self.database.lock().await;
                 let execution = ChannelService::default().resolve_pending_camp_binding(
                     &mut database,
+                    &quick_chat_path,
                     &system_command_envelope(
                         params.command_id,
                         "feishu-channel-host",

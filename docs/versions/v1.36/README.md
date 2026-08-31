@@ -34,7 +34,8 @@ Owner 可在私聊或群聊显式 `@Bot` 后复用现有 Quick Chat、项目选�
   console view state，推进到 `v1.38 / projection schema 79`；本次合并以 126/127 接入 main Pending/Fast，
   128 汇合到 `v1.39 / projection schema 80`，保留两侧受支持旧库与业务数据；129 在此基础上删除重复 Evidence 索引，
   推进到 `v1.40 / projection schema 81`，唯一约束与所有业务行保持原样；130 接入 main Fast 生命周期修复，
-  131 封闭当前 `v1.41 / projection schema 82`，精确 main119 receipt 映射至130，不重放已应用的修复；
+  131 封闭 `v1.41 / projection schema 82`，精确 main119 receipt 映射至130，不重放已应用的修复；132 保留原数据并允许
+  群/话题项目卡选择 Quick Chat 后完成无项目 binding，推进到当前 `v1.42 / projection schema 83`；
 - 账号连接在 Rovai QR Dialog 展示官方二维码；必要交互嵌入 Main 隔离的 sandbox 原生页面，不打开独立浏览器窗口。
   取消是静默 no-op，旧账号保留；以 corpId + staffId 校验身份，新身份与 Cookie Snapshot
   通过 Core 原子 `account.commitConnection` 一次写入 `rovai.sqlite`；失败只丢弃 staged jar，旧账号与 Session 不变；
@@ -59,7 +60,7 @@ Owner 可在私聊或群聊显式 `@Bot` 后复用现有 Quick Chat、项目选�
 - 群 roster 从钉钉当前群机器人列表读取并与已发布 Rovai Bot 交集后同步到既有 Camp Membership；运行中 Run 不被修改；
 - AI 卡片固定模板 `382e4302-551d-4880-bf29-a30acfab2e71.schema`、`callbackType=STREAM` 且禁止转发。执行控制台只展示
   Core 公开安全投影，不传 command stdout/stderr、工具 JSON 或推理；正式结果使用 Markdown；
-- 飞书执行卡按 [Feishu Channel v7](../../contracts/feishu-channel-v7.md) 区分实时紧凑卡和终态完整卡；实时只直接显示当前正文、
+- 飞书执行卡按 [Feishu Channel v8](../../contracts/feishu-channel-v8.md) 区分实时紧凑卡和终态完整卡；实时只直接显示当前正文、
   当前command及进度，总折叠保留10-command/20-block窗口并限制16KB/30-elements；终态在总折叠中混排公开文字与单条 command
   原生折叠；结果先脱敏再限 20 行/4KiB，timeline 按 15-command/50-element/24KB 分页。Core 同事务冻结内容与 sequence，
   翻页只读 sealed snapshot，由同步 response card 更新一次，返回第 1 页也保持外层展开；不再先 PATCH 后空 ACK。
@@ -68,6 +69,8 @@ Owner 可在私聊或群聊显式 `@Bot` 后复用现有 Quick Chat、项目选�
 - 飞书永久正文采用无标题 Card 2.0，正文下方以空格分隔的原生 @ 显示实际 A2A 接收对象及 Owner attention；
   上方按真实 CampMessage 回复关系显示直接父消息的静态摘要，不把话题根消息当成每次回复；
   不携带 Renderer 的结构化 `@你` 展示缓存，不改变源消息或 Agent Context；超长正文完整拆分，通知仅在最后一张卡出现；
+- 飞书群/话题首次项目卡提供一行项目下拉框，下一行“开始快速对话”“刷新项目”；文案明确“话题”或“群聊”。
+  两种选择共用 Owner、roster、卡片防重和 FIFO 原子绑定；空项目列表也可 Quick Chat，不增加换绑或钉钉入口；
 - 设置页保留飞书/钉钉 Tab、内置扫码 Dialog、队员发布、审批人选择、官方应用管理链接和 Provider-local 绑定诊断。
 
 ## 本轮存储优化
@@ -110,7 +113,7 @@ Stream fast ACK、入站 normalize/topic 拒绝、Owner gate、统一 admission�
 | --- | --- | --- |
 | Version lifecycle | 已更新 | 保留 main v1.33 Pending 与 v1.34 Fast；渠道历史/当前目录顺延至 v1.35/v1.36，v1.36 为唯一 current。迁入的历史决定只改元数据、ID 和链接；Data Contract 汇合另由新迁移拥有。 |
 | Decisions | 已更新 | [v1.36 决定](decisions.md)保留既有 D01–D05，并由 D06 记录已安装渠道 ledger 与 main schema 的无损汇合取舍。 |
-| Contracts | 已更新 | [DingTalk Channel v5](../../contracts/dingtalk-channel-v5.md)继承 v4 Web Session、Cookie schema 2、封闭 Console 发布与中断恢复，增加内置官方扫码、原生交互页和静默取消；[Channel Storage v2](../../contracts/channel-storage-v2.md)继续拥有 SQLite 原子事务、飞书三态检查与钉钉 completed 同应用凭据恢复；[Feishu Channel v7](../../contracts/feishu-channel-v7.md)保留 v6 双层终态/同步分页，增加实时滚动折叠预算和共享安全 publicResult，不新增 Migration；旧合同冻结为历史入口。 |
+| Contracts | 已更新 | [DingTalk Channel v5](../../contracts/dingtalk-channel-v5.md)继承 v4 Web Session、Cookie schema 2、封闭 Console 发布与中断恢复，增加内置官方扫码、原生交互页和静默取消；[Channel Storage v2](../../contracts/channel-storage-v2.md)继续拥有 SQLite 原子事务、飞书三态检查与钉钉 completed 同应用凭据恢复；[Feishu Channel v8](../../contracts/feishu-channel-v8.md)保留 v7 实时/终态执行卡与安全 publicResult，增加群/话题 Quick Chat 项目卡及保留数据的 Migration 132；旧合同冻结为历史入口。 |
 | Architecture | 已更新 | 钉钉/飞书架构保留渠道范围；[Availability-first Runtime](../../architecture/availability-first-runtime.md#migration-switch) 与 [Channel/Main Schema Join v2](../../contracts/channel-main-schema-join-v2.md)拥有旧主线/渠道精确汇合及原位逐事务升级。 |
 | UI | 已更新 | [渠道设置](../../ui/components/channel-settings.md)保留 Provider Tab、钉钉官方登录/审批/发布与 Provider-local 诊断合同，钉钉说明同步 Web Session；飞书终态文字/command、结果框与客户端本地折叠不变。 |
 | Runtime Activity | 确认无需更新 | 钉钉继续消费既有公开 AgentRun Evidence 和 CampMessage，不新增 Runtime activity kind 或 Adapter mapping。 |

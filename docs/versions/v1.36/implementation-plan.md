@@ -30,6 +30,24 @@ last_updated: 2026-08-31
 - [x] 单元测试覆盖 Console API wire、Web Session、Provisioner、Open API、Stream readiness/ACK、Inbound、Migration、Core admission 和 Renderer；
 - [x] 完成仓库全量 Rust、TypeScript、文档、UI detector 与 Desktop build 门禁并记录本次结果。
 
+## 2026-08-31 飞书项目卡与群/话题 Quick Chat
+
+- 卡片采用指定文案：普通群写“这个群聊”，独立话题写“这个话题”。项目下拉框独占一行，下面并排“开始快速对话”与
+  “刷新项目”；空项目目录仍可 Quick Chat，不把路径发送到飞书。复用原生 Card 2.0 控件与现有提交反馈，不重做 Renderer。
+- `quick_chat` 进入同一个 pending resolve、Owner/nonce/version/message/App/roster 校验和 FIFO admission 事务；
+  不创建伪项目、不取消原消息、不允许换绑。新 Camp 复用原自动命名；快速对话路径只由 Core 受管目录提供。
+- Migration 132 从精确 `v1.41/schema 82` 保留原行升级到 `v1.42/schema 83`，仅允许 resolved pending 没有项目 ID；
+  失败回滚并恢复外键，保留 pending 消息和 Outbox 引用。飞书 cardRevision 升4，已有 pending 旧卡沿既有恢复路径原位更新；
+  钉钉仍为3且没有新增快速对话卡入口。规范进入[Feishu Channel v8](../../contracts/feishu-channel-v8.md)，v7冻结。
+- 测试 owner：扩展既有 Host 卡片/回调用例覆盖两种群作用域、有/无项目与真实 operator；新增 Core 无项目绑定事务测试，
+  旧输入在变更前会拒绝 `action=quick_chat`。独立迁移用例验证真实 resolved/pending/FIFO/Outbox 行保留及注入失败回滚，
+  空 schema 测试不能代替这些引用保留证据；迁移准入矩阵扩展到132，不删除旧来源和负例。
+- 验证通过：workspace Rust 680项通过、4项既有忽略；最终改动补跑渠道27项与迁移准入矩阵1项；workspace/all-targets
+  Clippy（warnings denied）、typecheck、3文件97项Vitest、Desktop build、fmt和diff检查通过。文档治理9项、docs:check、
+  以main `cda05852`为显式base的docs CI通过，UI detector无告警。卡片验证为本地JSON/Host回归，不冒充飞书客户端实测。
+- 本轮未读取日常数据库或凭据、发送飞书消息、commit/push、打包、安装或重启 App。钉钉外部 NO-GO 范围不变，
+  并行钉钉头像四文件blob hash与任务开始一致；未操作Git index。
+
 ## 2026-08-31 合入主线执行正文与文件预览修复
 
 - 先将渠道 Camp 命名与飞书紧凑实时卡保存为 `32fd0804`。最初获取主线 `33003e13` 后，远端引用在执行期间推进；

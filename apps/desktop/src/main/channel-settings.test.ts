@@ -1848,7 +1848,10 @@ describe('channel settings service', () => {
           return {
             status: 'accepted',
             code: 'channel.binding.resolved',
-            payload: { projectDisplayName: 'Rovai 项目' }
+            payload: {
+              projectDisplayName: command.action === 'quick_chat' ? null : 'Rovai 项目',
+              executionScopeKind: command.action === 'quick_chat' ? 'quick_chat' : 'project'
+            }
           }
         }
         if (method === 'channels.executionConsole.source') {
@@ -1999,6 +2002,48 @@ describe('channel settings service', () => {
     expect(commands.filter(({ method }) => (
       method === 'channels.feishu.pendingBinding.resolve'
     ))).toHaveLength(2)
+    expect(harness.updateCard).not.toHaveBeenCalled()
+
+    for (const owner of [true, false]) {
+      const result = await cardHandler({
+        messageId: 'om_card',
+        chatId: 'oc_group',
+        operator: { openId: owner ? 'ou_owner' : 'ou_other' },
+        action: {
+          tag: 'button',
+          value: {
+            rovaiAction: 'start_quick_chat',
+            pendingBindingId: 'rvpcb_1',
+            expectedVersion: 1,
+            nonce: 'nonce-1',
+            operatorUserId: 'spoofed-owner'
+          }
+        },
+        raw: { operator: {
+          open_id: owner ? 'ou_owner' : 'ou_other',
+          user_id: owner ? 'owner-user-id' : 'other-user-id',
+          union_id: owner ? 'on_owner' : 'on_other'
+        } }
+      })
+      const resolveIndex = commands.findLastIndex(({ method }) => (
+        method === 'channels.feishu.pendingBinding.resolve'
+      ))
+      expect(commands[resolveIndex - 1]?.method).toBe('channels.roster.reconcile')
+      expect(commands[resolveIndex]?.command).toMatchObject({
+        action: 'quick_chat',
+        projectId: null,
+        pendingBindingId: 'rvpcb_1',
+        externalPickerMessageId: 'om_card',
+        expectedVersion: 1,
+        nonce: 'nonce-1',
+        appId: 'cli_a',
+        operatorUserId: owner ? 'owner-user-id' : 'other-user-id'
+      })
+      expect(result).toEqual({ toast: owner
+        ? { type: 'success', content: '已开始快速对话，正在处理消息' }
+        : { type: 'warning', content: '仅 Rovai Owner 可以选择项目' }
+      })
+    }
     expect(harness.updateCard).not.toHaveBeenCalled()
 
     const failedResult = await cardHandler({
@@ -2393,7 +2438,7 @@ describe('channel settings service', () => {
     await service.stop()
   })
 
-  it('delivers project pickers in the original group or topic and recalls them durably', async () => {
+  it.each([true, false])('delivers group/topic workspace pickers and recalls them durably (projects: %s)', async (hasProjects) => {
     const harness = controlledChannels({ cli_a: { openId: 'ou_bot_a', name: '审阅员' } })
     const settlements: Array<Record<string, unknown>> = []
     let delivered = false
@@ -2405,7 +2450,7 @@ describe('channel settings service', () => {
       conversationKind,
       expectedVersion: 1,
       nonce: `nonce-${conversationKind}`,
-      projectOptions: [{ projectId: 'project-safe', displayName: 'Rovai AI' }]
+      projectOptions: hasProjects ? [{ projectId: 'project-safe', displayName: 'Rovai AI' }] : []
     })
     const service = new ChannelSettingsService({
       credentialStore: memoryCredentialStore({
@@ -2486,7 +2531,7 @@ describe('channel settings service', () => {
     }
     expect(groupPickerInput.card.config).toEqual({ update_multi: true })
     expect(groupPickerInput.card.body.elements.some((element) => element.tag === 'action')).toBe(false)
-    expect(groupPickerInput.card.body.elements).toContainEqual({
+    if (hasProjects) expect(groupPickerInput.card.body.elements).toContainEqual({
       tag: 'select_static',
       type: 'default',
       width: 'fill',
@@ -2505,16 +2550,45 @@ describe('channel settings service', () => {
         }
       }]
     })
-    expect(groupPickerInput.card.body.elements).not.toContainEqual(expect.objectContaining({
-      tag: 'button',
-      type: 'primary'
-    }))
-    expect(groupPickerInput.card.body.elements).toContainEqual(expect.objectContaining({
-      tag: 'button',
-      text: { tag: 'plain_text', content: '刷新项目' }
-    }))
+    else expect(groupPickerInput.card.body.elements.some((element) => element.tag === 'select_static')).toBe(false)
+    for (const kind of ['group', 'topic'] as const) {
+      const target = kind === 'topic' ? 'oc_topic_group' : 'oc_group'
+      const picker = harness.send.mock.calls.find(([chat]) => chat === target)?.[1] as typeof groupPickerInput
+      expect(picker.card.body.elements.map((element) => element.tag)).toEqual(
+        hasProjects ? ['markdown', 'select_static', 'column_set'] : ['markdown', 'column_set']
+      )
+      const scope = kind === 'topic' ? '话题' : '群聊'
+      expect(picker.card.body.elements[0]?.content).toBe([
+        '选择一个项目，或直接开始快速对话。',
+        `选择项目后，这个${scope}之后都会使用该项目；快速对话不绑定项目。`,
+        ...(!hasProjects ? ['当前没有可用项目。可以直接开始快速对话，或在 Rovai 创建或打开一个项目后刷新。'] : [])
+      ].join('\n\n'))
+      expect(picker.card.body.elements.at(-1)).toEqual({
+        tag: 'column_set',
+        horizontal_spacing: '8px',
+        columns: [
+          { text: '开始快速对话', action: 'start_quick_chat', type: 'primary' },
+          { text: '刷新项目', action: 'refresh_projects', type: 'default' }
+        ].map((button) => ({
+          tag: 'column',
+          width: 'weighted',
+          weight: 1,
+          elements: [{
+            tag: 'button',
+            text: { tag: 'plain_text', content: button.text },
+            type: button.type,
+            width: 'fill',
+            behaviors: [{ type: 'callback', value: {
+              rovaiAction: button.action,
+              pendingBindingId: `rvpcb_${kind}`,
+              expectedVersion: 1,
+              nonce: `nonce-${kind}`
+            } }]
+          }]
+        }))
+      })
+    }
     expect(harness.send.mock.calls.map(([target]) => target)).not.toContain('ou_owner')
-    expect(JSON.stringify(harness.send.mock.calls)).toContain('首次使用这个话题')
     expect(JSON.stringify(harness.send.mock.calls)).not.toContain('选择后会立即处理刚才的消息。')
     expect(JSON.stringify(harness.send.mock.calls)).not.toContain('项目路径只保留在 Rovai 本机，不会发送到飞书。')
     expect(JSON.stringify(harness.send.mock.calls)).not.toContain('canonicalPath')

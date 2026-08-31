@@ -129,7 +129,9 @@ Unix rename 的 ctime 变化只在这条兼容路径解释，对象、长度和 
 主线 Pending/Fast/Fast 生命周期与渠道的 117/118/119 编号冲突按 [Channel/Main Schema Join v2](../contracts/channel-main-schema-join-v2.md)
 汇合：保留渠道顺序，把精确识别的主线 receipt 在同一原库事务内映射到 126/127/130。128/129 分别保留历史
 `v1.39/schema 80` 与 `v1.40/schema 81` marker；130 只记录已应用的Fast修复，131在完整chain和精确schema检查后
-发布当前 `v1.41/schema 82`，避免已映射130导致跳过最终封口。旧飞书 marker collision 同样复用原链。
+发布 `v1.41/schema 82`，避免已映射130导致跳过最终封口。旧飞书 marker collision 同样复用原链。
+后续 [Feishu Channel v8](../contracts/feishu-channel-v8.md) 的132只重建项目选择 pending 表，支持无项目的Quick Chat完成态，
+以同一事务保存全部原有行、引用和receipt，推进当前 `v1.42/schema 83`；仍使用上述逐步恢复，不重放131或已映射的130。
 不能仅凭版本字符串准入，也不能为了消除编号冲突清空凭据、队列、Fast 选择或改变业务 ID。
 
 内部 trace 保留 assessment/open、reconciliation、每个实际 migration、reassessment/reopen、core_ready 的耗时和
