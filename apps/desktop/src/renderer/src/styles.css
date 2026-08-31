@@ -1487,9 +1487,11 @@ html[data-rovai-platform="win32"] .bootstrap-shell-brand { padding-left: 20px; }
   position: relative;
   isolation: isolate;
   display: flex;
-  min-width: 0;
+  min-width: 120px;
   height: 28px;
-  flex: 0 0 180px;
+  flex: 0 1 180px;
+  container-name: file-preview-tab;
+  container-type: inline-size;
   align-items: center;
   overflow: hidden;
   border-radius: 6px;
@@ -1549,8 +1551,12 @@ html[data-rovai-platform="win32"] .bootstrap-shell-brand { padding-left: 20px; }
   font-weight: 600;
   text-align: start;
   white-space: nowrap;
-  /* The fade occupies trailing padding until the filename overflows. */
-  mask-image: linear-gradient(to right, black calc(100% - 16px), transparent);
+}
+@container file-preview-tab (max-width: 120px) {
+  .file-preview-tab-label {
+    /* Only fade overflowing names once tabs can no longer shrink. */
+    mask-image: linear-gradient(to right, black calc(100% - 16px), transparent);
+  }
 }
 .file-preview-tab-update { width: 5px; height: 5px; flex: 0 0 5px; border-radius: 50%; background: var(--attention); }
 .file-preview-tab-close {
