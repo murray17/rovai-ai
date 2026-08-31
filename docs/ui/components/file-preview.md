@@ -2,18 +2,20 @@
 document_type: ui-component-contract
 authority: renderer-file-preview
 status: accepted
-last_updated: 2026-08-30
+last_updated: 2026-08-31
 ---
 
 # Camp 文件预览区
 
 ## 会话内的文件链接
 
-文件链接保持正文阅读感，使用现有链接色、轻下划线与原生链接语义，不呈现为按钮或 Badge。Hover 加强下划线，
-键盘焦点使用既有 focus token；长路径可自然换行，不让正文横向溢出。
+文件链接保持正文阅读感与原生链接语义，不呈现为按钮或 Badge。普通文件链接继续使用现有链接色与轻下划线，
+Hover 加强下划线；键盘焦点使用既有 focus token，长路径可自然换行，不让正文横向溢出。
 
 - Markdown 文件链接 `[label](target)` 只显示可点击的 label；target 仅用于解析/打开，不在正文中重复常驻展示。
-- 反引号包裹的有效文件路径只显示一份路径，保留 inline-code/等宽样式；裸路径继续按高置信度规则识别。
+- 文件链接的整个 label 为 inline-code 时，显示通用文件 SVG 与一份等宽文字，移除灰底和嵌套 `<code>`。
+  默认无下划线，Hover 加强链接色并仅为文字显示 1px 虚线底线，按下或键盘焦点时不显示底线；不记录“已打开”状态。
+  普通 inline-code、代码块、混合格式 label 和其他链接保持原样；裸路径继续按高置信度规则识别。
 - 链接 title 显示完整原始 target，包括行列或 fragment。复制路径与显示所在位置继续使用文件 Tab 的既有上下文菜单。
 - 文件引用按 Markdown 语法节点识别，不拆开普通 URL、链接 label、图片、代码块或其他非文件 inline-code；
   用户消息其余文本、结构化 Mention/Skill、消息存储、整条消息复制与模型输入保持原合同。
