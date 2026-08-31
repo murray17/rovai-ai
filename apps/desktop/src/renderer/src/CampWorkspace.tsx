@@ -1153,16 +1153,19 @@ export function QuickChatWorkspace({
   )
 }
 
+const EMPTY_CAMP_MESSAGES: CampMessageView[] = []
+const EMPTY_LIVE_RUNTIME_EVENTS: LiveRuntimeEvent[] = []
+
 export function CampWorkspace({
   snapshot,
   openCoverage = null,
   messageHistory = null,
   onLoadEarlierMessages,
-  optimisticMessages = [],
+  optimisticMessages = EMPTY_CAMP_MESSAGES,
   projectName,
   agents,
   installations = [],
-  liveRuntimeEvents = [],
+  liveRuntimeEvents = EMPTY_LIVE_RUNTIME_EVENTS,
   busy,
   onSend,
   onPendingDraftPersisted,
@@ -1861,12 +1864,14 @@ export function CampWorkspace({
     content: StructuredCampMessageContent
   ): Promise<CampComposerDraftView> => queueDraftMutation(
     campId,
-    (draft) => window.rovai.request<CampComposerDraftView>('camp.composerDraft.save', {
-      campId,
-      expectedRevision: draft.revision,
-      content,
-      continuationSourceMessageId: draft.continuationIntent?.sourceCampMessageId ?? null
-    })
+    (draft) => JSON.stringify(draft.content) === JSON.stringify(content)
+      ? Promise.resolve(draft)
+      : window.rovai.request<CampComposerDraftView>('camp.composerDraft.save', {
+        campId,
+        expectedRevision: draft.revision,
+        content,
+        continuationSourceMessageId: draft.continuationIntent?.sourceCampMessageId ?? null
+      })
   )
 
   const loadReplyAnchorWindow = useCallback((messageId: string): Promise<CampMessageView[] | null> => {
@@ -2988,11 +2993,8 @@ export function CampWorkspace({
         expiresAt: null
       }
       if (draftCampId.current === campId) syncReplyDraft(acceptedDraftFallback)
-      const nextDraft = await window.rovai.request<CampComposerDraftView>(
-        'camp.composerDraft.get',
-        { campId }
-      )
-      if (draftCampId.current === campId) syncReplyDraft(nextDraft)
+      // The empty-Composer publication effect loads the next authoritative route.
+      // Do not block submission on a second read of the same consumed Draft.
     } catch {
       if (sendAttempted) {
         try {
@@ -4122,7 +4124,7 @@ export function CampWorkspace({
         }}
       >
         <PendingCampInputs key={snapshot.camp.id} campId={snapshot.camp.id}
-          refreshKey={snapshot.throughGlobalSequence + pendingRefresh}
+          refreshKey={pendingRefresh} executionActive={executionBlocked}
           members={composerMembers} skills={composerSkills} skillCatalogStatus={composerSkillCatalog.status}
           stopping={stopping} onStop={onStop} onQueueChange={setPendingQueue} onEditingChange={(editing) => {
             setPendingEditing(editing)

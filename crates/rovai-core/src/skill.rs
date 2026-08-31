@@ -442,7 +442,7 @@ struct CandidateSnapshot {
     total_bytes: u64,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 struct ExistingSkill {
     id: String,
     origin: SkillOrigin,
@@ -471,6 +471,39 @@ pub struct BundledSkillBootstrapReport {
     pub fast_path_count: usize,
     pub materialized_count: usize,
     pub repaired_count: usize,
+}
+
+/// A DB-only snapshot. Core keeps the skills subsystem closed until this plan's
+/// filesystem preparation and checked metadata commit have both completed.
+pub struct BundledSkillBootstrapPlan {
+    report: BundledSkillBootstrapReport,
+    definitions: Vec<PlannedBundledSkill>,
+}
+
+struct PlannedBundledSkill {
+    definition: BundledDefinition,
+    existing: Option<ExistingSkill>,
+    promoted: bool,
+}
+
+pub struct PreparedBundledSkillBootstrap {
+    report: BundledSkillBootstrapReport,
+    definitions: Vec<PreparedBundledSkill>,
+}
+
+struct PreparedBundledSkill {
+    plan: PlannedBundledSkill,
+    content: PreparedBundledContent,
+}
+
+enum PreparedBundledContent {
+    Unchanged,
+    Repaired,
+    Revision {
+        skill_id: String,
+        revision_id: String,
+        verified: CandidateSnapshot,
+    },
 }
 
 const MATTPOCOCK_SKILLS_REPOSITORY: &str = "https://github.com/mattpocock/skills";
@@ -1632,34 +1665,77 @@ impl SkillLibraryService {
         &self,
         database: &mut Database,
     ) -> Result<BundledSkillBootstrapReport> {
+        let plan = self.plan_bundled_skills(database)?;
+        let prepared = self.prepare_bundled_skills(plan)?;
+        self.commit_bundled_skills(database, prepared)
+    }
+
+    /// Read and normalize Library metadata without walking any filesystem tree.
+    pub fn plan_bundled_skills(
+        &self,
+        database: &mut Database,
+    ) -> Result<BundledSkillBootstrapPlan> {
         let mut report = BundledSkillBootstrapReport {
             changed: strip_official_skill_name_prefixes(database)?,
             fast_path_count: 0,
             materialized_count: 0,
             repaired_count: 0,
         };
-        for definition in BUNDLED_SKILLS {
-            self.install_bundled_definition(database, definition, &mut report)?;
-        }
-        Ok(report)
+        let definitions = BUNDLED_SKILLS
+            .iter()
+            .map(|definition| Self::plan_bundled_definition(database, definition, &mut report))
+            .collect::<Result<Vec<_>>>()?;
+        Ok(BundledSkillBootstrapPlan {
+            report,
+            definitions,
+        })
     }
 
-    fn install_bundled_definition(
-        &self,
+    fn plan_bundled_definition(
         database: &mut Database,
         definition: &BundledDefinition,
         report: &mut BundledSkillBootstrapReport,
-    ) -> Result<()> {
+    ) -> Result<PlannedBundledSkill> {
         if definition.name.starts_with("rovai-") {
             anyhow::bail!("official Skill names must not use the rovai- prefix");
         }
-        let expected = bundled_candidate_snapshot(definition)?;
         let promoted = promote_imported_skill_to_official(database, definition.name)?;
-        if promoted {
-            report.changed = true;
-        }
-        let existing = load_existing_skill_by_name(database, definition.name)?;
-        if !promoted
+        report.changed |= promoted;
+        Ok(PlannedBundledSkill {
+            definition: definition.clone(),
+            existing: load_existing_skill_by_name(database, definition.name)?,
+            promoted,
+        })
+    }
+
+    /// All metadata checks, hashing, copying, fsync and filesystem publication
+    /// run here. This phase deliberately cannot access the shared Database.
+    pub fn prepare_bundled_skills(
+        &self,
+        plan: BundledSkillBootstrapPlan,
+    ) -> Result<PreparedBundledSkillBootstrap> {
+        self.initialize_storage()?;
+        let mut report = plan.report;
+        let definitions = plan
+            .definitions
+            .into_iter()
+            .map(|definition| self.prepare_bundled_definition(definition, &mut report))
+            .collect::<Result<Vec<_>>>()?;
+        Ok(PreparedBundledSkillBootstrap {
+            report,
+            definitions,
+        })
+    }
+
+    fn prepare_bundled_definition(
+        &self,
+        plan: PlannedBundledSkill,
+        report: &mut BundledSkillBootstrapReport,
+    ) -> Result<PreparedBundledSkill> {
+        let definition = &plan.definition;
+        let existing = &plan.existing;
+        let expected = bundled_candidate_snapshot(definition)?;
+        if !plan.promoted
             && let Some(existing) = existing.as_ref().filter(|value| {
                 value.current_digest == expected.content_digest
                     && value.current_source_type == SkillRevisionSourceType::Bundled
@@ -1670,10 +1746,10 @@ impl SkillLibraryService {
             )?
         {
             report.fast_path_count += 1;
-            if restore_system_required_skill_configuration(database, definition.name)? {
-                report.changed = true;
-            }
-            return Ok(());
+            return Ok(PreparedBundledSkill {
+                plan,
+                content: PreparedBundledContent::Unchanged,
+            });
         }
 
         let token = format!("bundled-{}-{}", definition.name, Uuid::new_v4());
@@ -1695,13 +1771,10 @@ impl SkillLibraryService {
                 definition.name
             );
         }
-        if existing.as_ref().is_some_and(|value| {
+        let content = if let Some(existing) = existing.as_ref().filter(|value| {
             value.current_digest == verified.content_digest
                 && value.current_source_type == SkillRevisionSourceType::Bundled
         }) {
-            let existing = existing
-                .as_ref()
-                .context("Bundled Skill disappeared during verification")?;
             let current_content =
                 self.revision_content_path(&existing.id, &existing.current_revision_id);
             remove_directory_if_present(&current_content)?;
@@ -1709,8 +1782,70 @@ impl SkillLibraryService {
                 &staging_root.join(format!(".verify-{}", definition.name)),
                 &current_content,
             )?;
-            database.connection().execute(
-                r#"
+            report.repaired_count += 1;
+            PreparedBundledContent::Repaired
+        } else {
+            let skill_id = existing
+                .as_ref()
+                .map(|value| value.id.clone())
+                .unwrap_or_else(|| Uuid::new_v4().to_string());
+            let revision_id = Uuid::new_v4().to_string();
+            publish_directory(
+                &staging_root.join(format!(".verify-{}", definition.name)),
+                &self.revision_content_path(&skill_id, &revision_id),
+            )?;
+            PreparedBundledContent::Revision {
+                skill_id,
+                revision_id,
+                verified,
+            }
+        };
+        remove_directory_if_present(&staging_root)?;
+        Ok(PreparedBundledSkill { plan, content })
+    }
+
+    /// Register only fully prepared revisions, and fail closed if the Library
+    /// changed since planning. Unregistered files remain ordinary orphans for
+    /// the existing cleanup after a successful bootstrap; no filesystem I/O here.
+    pub fn commit_bundled_skills(
+        &self,
+        database: &mut Database,
+        prepared: PreparedBundledSkillBootstrap,
+    ) -> Result<BundledSkillBootstrapReport> {
+        let mut report = prepared.report;
+        for definition in prepared.definitions {
+            self.commit_bundled_definition(database, definition, &mut report)?;
+        }
+        Ok(report)
+    }
+
+    fn commit_bundled_definition(
+        &self,
+        database: &mut Database,
+        prepared: PreparedBundledSkill,
+        report: &mut BundledSkillBootstrapReport,
+    ) -> Result<()> {
+        let PlannedBundledSkill {
+            definition,
+            existing,
+            ..
+        } = prepared.plan;
+        if load_existing_skill_by_name(database, definition.name)? != existing {
+            anyhow::bail!(
+                "bundled Skill {} changed during preparation",
+                definition.name
+            );
+        }
+        let (skill_id, revision_id, verified) = match prepared.content {
+            PreparedBundledContent::Unchanged => {
+                report.changed |=
+                    restore_system_required_skill_configuration(database, definition.name)?;
+                return Ok(());
+            }
+            PreparedBundledContent::Repaired => {
+                let existing = existing.context("Bundled Skill disappeared during verification")?;
+                database.connection().execute(
+                    r#"
                         INSERT INTO event_log(
                             event_id, event_type, payload_json,
                             entity_type, entity_id, actor_type, actor_id, created_at
@@ -1718,36 +1853,28 @@ impl SkillLibraryService {
                             ?1, 'skill.bundled_repaired', ?2,
                             'skill', ?3, 'system', 'skill-library-bootstrap', ?4
                         )
-                        "#,
-                params![
-                    Uuid::new_v4().to_string(),
-                    serde_json::to_string(&json!({
-                        "skillId": existing.id,
-                        "revisionId": existing.current_revision_id,
-                        "contentDigest": existing.current_digest,
-                    }))?,
-                    existing.id,
-                    Utc::now().to_rfc3339(),
-                ],
-            )?;
-            report.repaired_count += 1;
-            report.changed = true;
-            if restore_system_required_skill_configuration(database, definition.name)? {
+                    "#,
+                    params![
+                        Uuid::new_v4().to_string(),
+                        serde_json::to_string(&json!({
+                            "skillId": existing.id,
+                            "revisionId": existing.current_revision_id,
+                            "contentDigest": existing.current_digest,
+                        }))?,
+                        existing.id,
+                        Utc::now().to_rfc3339(),
+                    ],
+                )?;
                 report.changed = true;
+                restore_system_required_skill_configuration(database, definition.name)?;
+                return Ok(());
             }
-            remove_directory_if_present(&staging_root)?;
-            return Ok(());
-        }
-        let skill_id = existing
-            .as_ref()
-            .map(|value| value.id.clone())
-            .unwrap_or_else(|| Uuid::new_v4().to_string());
-        let revision_id = Uuid::new_v4().to_string();
-        let final_content = self.revision_content_path(&skill_id, &revision_id);
-        publish_directory(
-            &staging_root.join(format!(".verify-{}", definition.name)),
-            &final_content,
-        )?;
+            PreparedBundledContent::Revision {
+                skill_id,
+                revision_id,
+                verified,
+            } => (skill_id, revision_id, verified),
+        };
         let command = PublishBundledSkillCommand {
             name: definition.name.to_string(),
             content_digest: verified.content_digest.clone(),
@@ -1792,7 +1919,7 @@ impl SkillLibraryService {
         };
         let skill_id_for_handler = skill_id.clone();
         let revision_id_for_handler = revision_id.clone();
-        let result = self.gateway.execute(database, &envelope, |transaction| {
+        self.gateway.execute(database, &envelope, |transaction| {
             if let Some(existing_id) = &existing_id {
                 insert_revision(
                     transaction,
@@ -1882,15 +2009,22 @@ impl SkillLibraryService {
                     entity_id: skill_id_for_handler.clone(),
                 }),
             ))
-        });
-        if result.is_err() {
-            let _ = remove_directory_if_present(final_content.parent().unwrap_or(&final_content));
-        }
-        result?;
+        })?;
         restore_system_required_skill_configuration(database, definition.name)?;
         report.changed = true;
-        remove_directory_if_present(&staging_root)?;
         Ok(())
+    }
+
+    #[cfg(all(test, feature = "slow-tests"))]
+    fn install_bundled_definition(
+        &self,
+        database: &mut Database,
+        definition: &BundledDefinition,
+        report: &mut BundledSkillBootstrapReport,
+    ) -> Result<()> {
+        let plan = Self::plan_bundled_definition(database, definition, report)?;
+        let prepared = self.prepare_bundled_definition(plan, report)?;
+        self.commit_bundled_definition(database, prepared, report)
     }
 
     #[cfg(all(test, feature = "slow-tests"))]
@@ -4510,6 +4644,63 @@ mod slow_tests {
         );
         remove_directory_if_present(&root).unwrap();
         remove_directory_if_present(&data).unwrap();
+    }
+
+    // This owns the new unlocked-preparation conflict boundary. The existing
+    // bootstrap policy test covers ordinary install/repair, but cannot expose a
+    // metadata change between filesystem preparation and the checked DB commit.
+    #[test]
+    fn bundled_preparation_does_not_overwrite_a_newer_library_configuration() {
+        let root = temporary_directory("rovai-bundled-preparation");
+        let mut database = Database::open(&root.join("database")).unwrap();
+        let service = SkillLibraryService::new(root.join("library")).unwrap();
+        let original = service
+            .install_bundled_skill_for_test(&mut database, "member-studio")
+            .unwrap();
+        let mut definition = bundled_definition("member-studio").unwrap().clone();
+        definition.files = &[(
+            "SKILL.md",
+            "---\nname: member-studio\ndescription: Updated fixture\n---\nUpdated bundled content.\n",
+            0o644,
+        )];
+        let mut report = BundledSkillBootstrapReport {
+            changed: false,
+            fast_path_count: 0,
+            materialized_count: 0,
+            repaired_count: 0,
+        };
+        let plan =
+            SkillLibraryService::plan_bundled_definition(&mut database, &definition, &mut report)
+                .unwrap();
+        let prepared = service
+            .prepare_bundled_definition(plan, &mut report)
+            .unwrap();
+        service
+            .set_enabled(
+                &mut database,
+                &user_envelope(
+                    "change-configuration-during-preparation",
+                    SetSkillEnabledCommand {
+                        skill_id: original.id.clone(),
+                        expected_version: original.version,
+                        enabled: false,
+                    },
+                ),
+            )
+            .unwrap();
+        let error = service
+            .commit_bundled_definition(&mut database, prepared, &mut report)
+            .unwrap_err();
+        assert!(error.to_string().contains("changed during preparation"));
+        let current = service.get(&database, &original.id).unwrap().unwrap();
+        assert!(!current.enabled);
+        assert_eq!(current.version, original.version + 1);
+        assert_eq!(current.current_revision.id, original.current_revision.id);
+        service
+            .verify_revision_content(&current.current_revision)
+            .unwrap();
+        drop(database);
+        remove_directory_if_present(&root).unwrap();
     }
 
     #[test]

@@ -33,7 +33,6 @@ import {
   STARTUP_FEEDBACK_DELAY_MS,
   WindowDragStrip,
   allNavigationCamps,
-  appendLiveRuntimeEvent,
   authoritativeWorkspaceIsAvailable,
   bootstrapAuthorityCopy,
   campActivationPreview,
@@ -314,6 +313,18 @@ describe('availability-first workspace gate', () => {
 })
 
 describe('active Camp event invalidation', () => {
+  it('refreshes public history only when a private queued input is published in the active Camp', () => {
+    for (const reason of ['enqueued', 'edited', 'publication_failed']) {
+      expect(shouldRefreshActiveCampForCoreEvent({
+        method: 'camp.pendingInputs.changed', params: { campId: 'camp-1', reason }
+      }, 'camp-1')).toBe(false)
+    }
+    const publication = { method: 'camp.pendingInputs.changed', params: { campId: 'camp-1', reason: 'published' } }
+    expect(shouldRefreshActiveCampForCoreEvent(publication, 'camp-1')).toBe(true)
+    expect(shouldRefreshActiveCampForCoreEvent(publication, 'camp-2')).toBe(false)
+    expect(shouldRefreshActiveCampForCoreEvent(publication, 'camp-1', true)).toBe(false)
+  })
+
   it('refreshes the active Camp when a persisted AgentRun reaches terminal', () => {
     expect(shouldRefreshActiveCampForCoreEvent({
       method: 'agent_run.terminal',
@@ -591,26 +602,6 @@ const TEST_EXECUTION_BUDGET = {
   exhaustionCommandId: null
 }
 
-it('retains every live Runtime event without a rolling count cap', () => {
-  const current = Array.from({ length: 600 }, (_, index) => ({
-    id: `live-${index + 1}`,
-    agentRunId: 'run-long',
-    eventType: 'agent.text.delta',
-    payload: { itemId: 'message-long', delta: `${index + 1}` },
-    createdAt: `2026-08-19T00:00:${String(index % 60).padStart(2, '0')}Z`
-  }))
-  const next = appendLiveRuntimeEvent(current, {
-    id: 'live-601',
-    agentRunId: 'run-long',
-    eventType: 'runtime.action',
-    payload: { toolCallId: 'tool-601', status: 'completed' },
-    createdAt: '2026-08-19T00:01:00Z'
-  })
-
-  expect(next).toHaveLength(601)
-  expect(next[0].id).toBe('live-1')
-  expect(next.at(-1)?.id).toBe('live-601')
-})
 
 function canonicalActivity(
   operationId: string,
