@@ -3369,11 +3369,9 @@ button.task-event-card:focus-visible .task-card-chevron { color: var(--brand-ink
 .live-progress-plan li.plan-inProgress { color: var(--info); }
 .live-progress-plan li.plan-completed { color: var(--success); }
 
-.approval-reason, .approval-runtime { margin: 8px 12px; color: var(--muted); font-size: 12px; line-height: 1.45; }
+.approval-runtime { margin: 8px 12px; color: var(--muted); font-size: 12px; line-height: 1.45; }
 .approval-runtime { margin-inline: 0; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
-.runtime-option { display: grid; gap: 3px; min-width: 0; padding: 8px 10px; border: 1px solid var(--line-strong); border-radius: 6px; color: var(--ink); background: var(--surface); text-align: left; cursor: pointer; }
-.runtime-option strong { font-size: 12px; }
-.runtime-option small { color: var(--muted); font-size: 10px; line-height: 1.35; }
+.runtime-option { display: inline-flex; min-width: 0; max-width: 100%; min-height: 28px; align-items: center; justify-content: center; padding: 4px 10px; border: 1px solid var(--line-strong); border-radius: 6px; color: var(--ink); background: var(--surface); font-size: 11.5px; font-weight: 650; line-height: 1.2; text-align: left; overflow-wrap: anywhere; cursor: pointer; }
 .runtime-option.option-deny, .runtime-option.option-cancel { border-color: color-mix(in srgb, var(--danger) 42%, var(--line-strong)); }
 .runtime-option.option-allow_once, .runtime-option.option-allow_session { border-color: color-mix(in srgb, var(--success) 42%, var(--line-strong)); }
 .runtime-option:hover:not(:disabled) { border-color: var(--brand); background: var(--brand-soft); }
@@ -3383,9 +3381,10 @@ button.task-event-card:focus-visible .task-card-chevron { color: var(--brand-ink
 
 .approval-dock {
   position: relative;
+  display: flex;
+  flex-direction: column;
   z-index: 12;
-  width: min(790px, calc(100% - 54px));
-  max-height: 260px;
+  max-height: min(360px, 45vh);
   margin: 0 auto 8px;
   overflow: hidden;
   border: 1px solid var(--approval-line);
@@ -3393,24 +3392,30 @@ button.task-event-card:focus-visible .task-card-chevron { color: var(--brand-ink
   background: var(--surface-raised);
   box-shadow: var(--shadow-float);
 }
+/* The bottom console and approval surface share the full conversation column. */
+.execution-drawer, .approval-dock { width: 100%; }
 .approval-dock::before { position: absolute; z-index: 1; top: 0; bottom: 0; left: 0; width: 3px; background: var(--attention); content: ""; }
-.approval-dock > header { display: flex; min-height: 42px; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 9px 8px 13px; border-bottom: 1px solid var(--line); background: color-mix(in srgb, var(--attention-soft) 55%, var(--surface-raised)); }
-.approval-dock > header > div { display: flex; min-width: 0; align-items: baseline; gap: 8px; }
-.approval-dock > header strong { color: var(--attention); font-size: 12px; }
+.approval-dock > header { display: flex; min-height: 36px; flex: 0 0 auto; align-items: center; justify-content: space-between; gap: 12px; padding: 6px 9px 6px 13px; border-bottom: 1px solid var(--line); background: color-mix(in srgb, var(--attention-soft) 55%, var(--surface-raised)); }
+.approval-dock-heading { display: flex; min-width: 0; flex: 1; align-items: baseline; gap: 9px; border-radius: 4px; }
+.approval-dock-heading:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.approval-dock-heading strong { min-width: 0; overflow: hidden; color: var(--ink); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.approval-dock-heading span { max-width: 40%; flex: 0 0 auto; }
 .approval-dock > header span { overflow: hidden; color: var(--muted); font-size: 10.5px; text-overflow: ellipsis; white-space: nowrap; }
-.approval-dock > header nav { display: flex; align-items: center; gap: 6px; }
+.approval-dock > header nav { display: flex; flex: 0 0 auto; align-items: center; gap: 6px; }
 .approval-dock > header nav button { display: grid; width: 24px; height: 24px; place-items: center; border: 0; border-radius: 5px; color: var(--attention); background: transparent; cursor: pointer; }
-.approval-dock > header nav button:hover:not(:disabled) { background: color-mix(in srgb, var(--attention) 10%, transparent); }
-.approval-dock > header nav button:disabled { cursor: default; opacity: .36; }
+.approval-dock > header nav button:hover:not([aria-disabled="true"]) { background: color-mix(in srgb, var(--attention) 10%, transparent); }
+.approval-dock > header nav button[aria-disabled="true"] { cursor: default; opacity: .36; }
 .approval-dock.is-collapsed > header { border-bottom: 0; }
 .approval-dock-collapse { font-size: 12px; }
-.approval-dock-scroll { max-height: 218px; overflow: auto; padding: 10px 12px 12px; }
-.approval-dock-title { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
-.approval-dock-title strong { font-size: 12px; }
-.approval-dock-title code { color: var(--faint); font: 10px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; }
-.approval-dock-scroll > p { margin: 7px 0; color: var(--muted); font-size: 11px; line-height: 1.45; }
-.approval-dock-scroll > pre { max-height: 92px; margin: 7px 0; overflow: auto; padding: 7px 8px; border: 1px solid var(--evidence-line); border-radius: 6px; color: var(--evidence-ink); background: var(--evidence-canvas); font: 10px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
-.approval-dock-actions { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 6px; }
+.approval-dock-scroll { min-height: 0; overflow: auto; padding: 9px 12px 10px; }
+.approval-reason-wrap { margin-bottom: 7px; }
+.approval-reason { margin: 0; color: var(--muted); font-size: 11px; line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; }
+.approval-reason:not(.is-expanded) { display: -webkit-box; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+.approval-reason-toggle { min-height: 24px; padding: 2px 0; border: 0; border-radius: 3px; color: var(--brand-ink); background: transparent; font-size: 10.5px; cursor: pointer; }
+.approval-reason-toggle:hover { text-decoration: underline; text-underline-offset: 2px; }
+.approval-reason-toggle:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.approval-dock-scroll > pre { max-height: min(220px, 30vh); margin: 0 0 9px; overflow: auto; padding: 8px 10px; border: 1px solid var(--evidence-line); border-radius: 6px; color: var(--evidence-ink); background: var(--evidence-canvas); font: 10.5px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre; }
+.approval-dock-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 6px; }
 
 .runtime-recovery-dock {
   z-index: 11;
@@ -3861,7 +3866,7 @@ button.attachment-open:disabled { cursor: wait; opacity: .76; }
   }
   .timeline-track { width: min(var(--conversation-wide-width), 100%); }
   .timeline-event-card:not(.task-event-card) { width: min(var(--conversation-artifact-width), 100%); }
-  .approval-dock, .runtime-recovery-dock { width: min(var(--conversation-wide-width), calc(100% - 54px)); }
+  .runtime-recovery-dock { width: min(var(--conversation-wide-width), calc(100% - 54px)); }
   .conversation-bubble:is(.user, .agent) { width: 100%; max-width: none; }
   .conversation-bubble:is(.user, .agent) .message-body { width: 100%; max-width: none; }
   .conversation-bubble.agent .message-surface { width: 100%; }
@@ -7404,7 +7409,7 @@ button.attachment-open:disabled { cursor: wait; opacity: .76; }
   .content.task-content { padding: 0; }
   .timeline-scroll { padding-right: 14px; padding-left: 14px; }
   .composer { padding-right: 14px; padding-left: 14px; }
-  .approval-dock, .runtime-recovery-dock { width: min(790px, calc(100% - 28px)); }
+  .runtime-recovery-dock { width: min(790px, calc(100% - 28px)); }
   .tabs-list { padding-right: 6px; padding-left: 6px; }
   .tabs-list button { font-size: 11px; }
   .member-workbench { grid-template-columns: 250px minmax(0, 1fr); }
@@ -7478,18 +7483,9 @@ button.attachment-open:disabled { cursor: wait; opacity: .76; }
   .composer-actions { max-width: 100%; flex-wrap: wrap; justify-content: flex-end; margin-left: auto; }
   .composer-hint-visual { display: none; }
 
-  .approval-dock,
   .runtime-recovery-dock { width: calc(100% - 24px); }
-  .approval-dock { max-height: none; }
-  .approval-dock > header,
-  .approval-dock > header > div { flex-wrap: wrap; gap: 6px 8px; }
-  .approval-dock > header nav { flex: 0 0 auto; margin-left: auto; }
-  .approval-dock > header span { overflow: visible; text-overflow: clip; white-space: normal; overflow-wrap: anywhere; }
-  .approval-dock-scroll { max-height: min(320px, 40vh); }
-  .approval-dock-title { flex-wrap: wrap; gap: 4px 8px; }
-  .approval-dock-title > *,
-  .approval-dock-scroll > p,
-  .runtime-option > * { min-width: 0; white-space: normal; overflow-wrap: anywhere; }
+  .approval-dock > header { gap: 6px; }
+  .approval-dock-heading { gap: 6px; }
   .runtime-recovery-dock > header,
   .runtime-recovery-heading { gap: 8px; }
   .runtime-recovery-heading span:not(.runtime-recovery-symbol),

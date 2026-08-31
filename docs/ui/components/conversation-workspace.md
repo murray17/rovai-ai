@@ -415,8 +415,21 @@ summary 与可选 detail；即使没有任何 Execution Evidence 也默认展开
 每个 Task 在创建位置只显示一张读取当前五态文案、标题和负责人的实时卡。Inspector list/detail
 负责发现和完整责任审计，Agent 过程负责执行事实；Task 取消不等于 AgentRun 或 CampTurn 取消。
 
-所有 pending Approval 位于 Composer 正上方的唯一非模态 Dock。多项请求显示“N 项待审批”，
-保留 Runtime 原生选项、范围和决定身份。Header/通知摘要只展开、定位并聚焦 Dock，不改变执行台位置或 Run selection，不强制切换详情内容；浮层按外部焦点规则收起。Approval 不进入消息时间线。
+所有 pending Approval 位于 Composer 正上方的唯一非模态 Dock。Header 待审批入口显示总数，
+Dock 内以队列计数和上一项／下一项导航呈现多项请求，保留 Runtime 原生选项、范围和决定身份。
+Header/通知摘要只展开、定位并聚焦 Dock，不改变执行台位置或 Run selection，不强制切换详情内容；浮层按外部焦点规则收起。Approval 不进入消息时间线。
+
+Dock 与底部执行台共用会话列全宽，不跟随正文或 Composer 的内缩轨道。单行顶栏显示当前请求摘要、
+当前队员与 Runtime、队列导航和收起入口；命令与请求 JSON 原样展示，达到内容高度上限后局部滚动。
+选项使用紧凑内容宽度按钮，严格保留 Runtime 的原始顺序、原生标签和 `optionId`，不显示 `consequence`，
+也不通过翻译或术语替换改写 Runtime 文案。ACP 缺少有效 `name` / `label` 时直接展示 `optionId`；
+Codex 无原生显示标签的决定由 Adapter 提供固定英文标签，响应值和作用域不变。
+
+翻页保持刚触发的导航按钮焦点。边界按钮使用 `aria-disabled`，仍可保持焦点但触发无操作。
+顶栏定位以及当前审批结束后接续下一项时只聚焦请求摘要；初次显示和普通刷新不主动聚焦决策按钮。
+Reason 仅在空白归一化后与动作摘要完全相同或自身为空时隐藏，不作语义推断。其余原文默认两行预览，
+超出时提供“展开全文 / 收起全文”，状态按审批 ID 隔离。容器宽度变化（含详情/文件区显隐与调整）时重新
+计算溢出，不重置该审批的展开状态；完整说明始终可读，不因压缩而永久丢失。
 
 Composer 中的 CampTurn Stop 继续是唯一整轮停止入口并 fence 当前执行树。共享 ExecutionDrawer 顶栏在
 “收起”旁提供唯一 AgentRun Stop，只停止当前聚焦 Run；底部和 Inspector 复用同一个直接停止入口与状态。

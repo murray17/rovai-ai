@@ -33,6 +33,8 @@ on:
       - "scripts/fixtures/file-preview-layout/**"
       - "scripts/lib/camp-fast-layout.test.mjs"
       - "scripts/fixtures/camp-fast-layout/**"
+      - "scripts/lib/approval-dock.test.mjs"
+      - "scripts/fixtures/approval-dock/**"
       - "package.json"
       - "pnpm-lock.yaml"
       - ".github/workflows/desktop-bridge.yml"
@@ -73,5 +75,6 @@ jobs:
           xvfb-run -a pnpm test:startup-presentation
           xvfb-run -a pnpm test:file-preview-layout
           xvfb-run -a pnpm test:camp-fast-layout
+          xvfb-run -a pnpm test:approval-dock
           pnpm exec vitest run apps/desktop/src/main/desktop-session.test.ts apps/desktop/src/renderer/src/CampNavigationPagination.test.ts
           pnpm exec vitest run apps/desktop/src/renderer/src/error-message.test.ts apps/desktop/src/main/core-client.test.ts apps/desktop/src/main/windows-data-root.test.ts apps/desktop/src/main/windows-bootstrap.test.ts apps/desktop/src/renderer/src/CoreSubsystemNotice.test.ts apps/desktop/src/renderer/src/App.test.ts

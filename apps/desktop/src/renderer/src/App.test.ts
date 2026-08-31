@@ -128,7 +128,6 @@ import {
   rectanglesOverlap,
   runningAgentRunForWorkspaceEntry,
   runPulseMemberNameLines,
-  runtimeOptionsForDisplay,
   taskCreationBlocksSubmittedRunAutoFocus
 } from './CampWorkspace'
 import {
@@ -2103,44 +2102,6 @@ describe('task event projections', () => {
     }, members, true)).toBe(false)
   })
 
-  it('keeps every Runtime option while placing cancel and deny first', () => {
-    const options = [
-      {
-        optionId: 'session', kind: 'allow_session' as const, label: '本 Session 允许',
-        consequence: '仅当前 Session。', nativeResponseDigest: 'session-digest'
-      },
-      {
-        optionId: 'custom', kind: 'other' as const, label: 'Runtime 自定义',
-        consequence: '保持 Runtime 原生语义。', nativeResponseDigest: 'custom-digest'
-      },
-      {
-        optionId: 'once', kind: 'allow_once' as const, label: '允许一次',
-        consequence: '仅当前请求。', nativeResponseDigest: 'once-digest'
-      },
-      {
-        optionId: 'deny', kind: 'deny' as const, label: '拒绝',
-        consequence: '不执行当前请求。', nativeResponseDigest: 'deny-digest'
-      },
-      {
-        optionId: 'cancel', kind: 'cancel' as const, label: '取消',
-        consequence: '取消当前请求。', nativeResponseDigest: 'cancel-digest'
-      }
-    ]
-
-    expect(runtimeOptionsForDisplay(options).map((option) => option.optionId)).toEqual([
-      'cancel',
-      'deny',
-      'custom',
-      'once',
-      'session'
-    ])
-    expect(runtimeOptionsForDisplay(options.slice(2)).map((option) => option.optionId)).toEqual([
-      'cancel',
-      'deny',
-      'once'
-    ])
-  })
-
   it('renders the visible Camp header and limits structural drag strips to overlay pages', () => {
     const camp = {
       camp: { activationState: 'active', createdAt: '2026-07-31T00:00:00Z' },
@@ -4000,7 +3961,10 @@ describe('task event projections', () => {
     }))
 
     expect(markup).toContain('aria-label="2 项待审批"')
-    expect(markup).toContain('洛可、沐瓦')
+    expect(markup).toContain('洛可 · Codex CLI')
+    expect(markup).not.toContain('洛可、沐瓦')
+    expect(markup).not.toContain('只允许当前请求。')
+    expect(markup).toContain('data-approval-summary')
     expect(markup).toContain('运行 pnpm test')
     expect(markup).toContain('aria-label="收起审批详情"')
     expect(markup).toContain('aria-expanded="true"')
