@@ -84,15 +84,15 @@ try {
   await waitForExpression(cdp, `Boolean(document.querySelector('.settings-sidebar-menu'))`, 5_000)
   await openSection(cdp, 'Skill')
   await waitForExpression(cdp, `Boolean(document.querySelector('.skill-settings')) && (
-    document.querySelectorAll('.skill-card').length === 11
+    document.querySelectorAll('.skill-card').length === 12
       || Boolean(document.querySelector('.skill-page-error'))
   )`, 30_000)
   const initialSkillState = await evaluate(cdp, `({
     cardCount: document.querySelectorAll('.skill-card').length,
     error: document.querySelector('.skill-page-error')?.textContent?.trim() ?? null
   })`)
-  if (initialSkillState.cardCount !== 11 || initialSkillState.error) {
-    throw new Error(`Skill settings did not load the eleven configurable official Skills: ${JSON.stringify(initialSkillState)}`)
+  if (initialSkillState.cardCount !== 12 || initialSkillState.error) {
+    throw new Error(`Skill settings did not load the twelve configurable official Skills: ${JSON.stringify(initialSkillState)}`)
   }
 
   await waitForEvaluation(cdp, `(async () => (
@@ -151,6 +151,7 @@ try {
       card.querySelector('[role="switch"]')?.getAttribute('aria-checked') === 'true'
     )
     const tastefulUi = skillCards.find((card) => card.dataset.skillName === 'tasteful-ui')
+    const uiUxProMax = skillCards.find((card) => card.dataset.skillName === 'ui-ux-pro-max')
     const diagnosingBugs = skillCards.find((card) => card.dataset.skillName === 'diagnosing-bugs')
     const panel = document.querySelector('.settings-panel')
     const libraryHeader = document.querySelector('.skill-library-columns')
@@ -244,6 +245,10 @@ try {
         revision: tastefulUi?.querySelector('.skill-detail-source-revision')?.textContent?.trim(),
         primaryRepository: tastefulUi?.querySelector('.skill-card-primary .skill-source-link')?.textContent?.trim() ?? null
       },
+      uiSkillDefaults: {
+        tastefulUiEnabled: tastefulUi?.querySelector('[role="switch"]')?.getAttribute('aria-checked'),
+        uiUxProMaxEnabled: uiUxProMax?.querySelector('[role="switch"]')?.getAttribute('aria-checked')
+      },
       mattSkillSource: {
         badge: diagnosingBugs?.querySelector('.skill-source')?.textContent?.trim(),
         repository: diagnosingBugs?.querySelector('.skill-detail-source .skill-source-link')?.textContent?.trim(),
@@ -317,6 +322,7 @@ try {
         'review-duo',
         'tasteful-ui',
         'tdd',
+        'ui-ux-pro-max',
         'worktree',
         'writing-for-agents'
       ])
@@ -326,8 +332,10 @@ try {
       ])
       || result.bundledCount !== 7
       || !result.bundledBadges.every((badge) => badge === 'Rovai')
-      || result.thirdPartyCount !== 4
+      || result.thirdPartyCount !== 5
       || result.enabledOfficialCount !== 11
+      || result.uiSkillDefaults.tastefulUiEnabled !== 'false'
+      || result.uiSkillDefaults.uiUxProMaxEnabled !== 'true'
       || JSON.stringify(result.skillNames) !== JSON.stringify([
         'analyze-agent-codebase',
         'campfire',
@@ -338,6 +346,7 @@ try {
         'review-duo',
         'tasteful-ui',
         'tdd',
+        'ui-ux-pro-max',
         'worktree',
         'writing-for-agents'
       ])

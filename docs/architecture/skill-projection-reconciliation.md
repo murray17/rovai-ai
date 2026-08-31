@@ -3,7 +3,7 @@ document_type: architecture
 architecture: skill-projection-reconciliation
 authority: skill-projection-access-and-reconciliation-boundaries
 status: accepted
-last_updated: 2026-08-21
+last_updated: 2026-08-31
 ---
 
 # Skill Projection Reconciliation Architecture
@@ -47,8 +47,9 @@ SkillExposureSnapshot (immutable start-time evidence in ContextManifest)
 
 Skill Library view 的 `managementPolicy` 来自 bundled official manifest，而不是用户可改数据库字段。
 `cli-operations` 与 `memory-stewardship` 为 `system_required`：bundled install 以 DB-only 事务恢复 enabled
-与全部十组 Assignment，命令边界拒绝修改；其余十一项 official Skill 为 `user_managed`。当前 inventory
-精确为十三项，名称和 provenance 由 ADR-0191 冻结。该策略只决定 Library desired
+与全部当前 Skill Delivery Groups 的 Assignment，命令边界拒绝修改；其余十二项 official Skill 为
+`user_managed`。当前 inventory 为十四项，名称、固定来源、默认启用值和管理策略由
+[`BUNDLED_SKILLS`](../../crates/rovai-core/src/skill.rs)统一声明。该策略只决定 Library desired
 state，不改变 projection ownership、preflight、Snapshot 或 Runtime load 证明。
 
 TRAE delivery group 的 Rovai-owned root 固定为项目 `.trae/skills`。该路径已用唯一名称/内容在

@@ -3,7 +3,7 @@ document_type: architecture
 architecture: builtin-tool-runtime
 authority: builtin-tool-component-boundaries
 status: accepted
-last_updated: 2026-08-27
+last_updated: 2026-08-31
 ---
 
 # Built-in Tool Runtime Architecture
@@ -51,8 +51,8 @@ Principal audience 投影分别见 [History 与寻址不变量](foundational-inv
 门禁见 [History 与寻址不变量](foundational-invariants.md#collaboration-history-addressing)。
 Current User Attention 与 progressive CLI teaching 分别见
 [Message Delivery 不变量](foundational-invariants.md#collaboration-delivery)和
-[Built-in 运输不变量](foundational-invariants.md#skills-builtin-transport)；完整十三项 official Skill inventory、Agent 主导队员创建、
-Runtime 对齐的 Camp 协作 Skill、四项固定 GitHub 来源与 management policy 见
+[Built-in 运输不变量](foundational-invariants.md#skills-builtin-transport)；当前 official Skill inventory、Agent 主导队员创建、
+Runtime 对齐的 Camp 协作 Skill、固定 GitHub 来源与 management policy 见
 [Skill Library 与投影不变量](foundational-invariants.md#skills-library-projection)。
 Memory 单命令的局部 Transport 决策见
 [Built-in 运输不变量](foundational-invariants.md#skills-builtin-transport)，独立 Hearth Review 与 actor-bounded mutation

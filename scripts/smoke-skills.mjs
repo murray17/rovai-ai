@@ -109,11 +109,12 @@ try {
       'review-duo',
       'tasteful-ui',
       'tdd',
+      'ui-ux-pro-max',
       'worktree',
       'writing-for-agents'
     ])
       && initialSkills.every((skill) => skill.origin === 'official'
-        && skill.enabled
+        && skill.enabled === (skill.name !== 'tasteful-ui')
         && skill.managementPolicy === (
           ['cli-operations', 'memory-stewardship'].includes(skill.name)
             ? 'system_required'
@@ -121,7 +122,7 @@ try {
         )
         && JSON.stringify(skill.groupAssignments.map((assignment) => assignment.groupKey).sort())
           === JSON.stringify(allDeliveryGroups)),
-    `Fresh Core did not install official Skills enabled for every Runtime group: ${JSON.stringify(initialSkills)}`
+    `Fresh Core did not install official Skills with their default enablement and all Runtime groups: ${JSON.stringify(initialSkills)}`
   )
   const mattSkillNames = new Set(['diagnosing-bugs', 'tdd', 'writing-for-agents'])
   const mattSkills = initialSkills.filter((skill) => mattSkillNames.has(skill.name))
