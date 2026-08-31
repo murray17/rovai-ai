@@ -131,13 +131,13 @@ export function ChannelSettings({ agents }: { agents: AgentProfile[] }): React.J
         )}
       />
 
-      <QrDialog
+      {snapshot?.activeQrAttempt?.kind !== 'dingtalk' && <QrDialog
         snapshot={snapshot}
         kind={selectedKind}
         busy={busy !== null}
         onClose={(attemptId) => void cancelQrAttempt(attemptId)}
         onRefresh={(attemptId) => void refreshLoginQr(attemptId)}
-      />
+      />}
 
       <PublishBotDialog
         agent={agents.find((candidate) => candidate.agentId === publishAgentId) ?? null}
@@ -222,8 +222,10 @@ export function ChannelSettingsView({
   onRetryPublish?(channel: ChannelProviderView, agent: AgentProfile): void
 }): React.JSX.Element {
   const members = useMemo(() => visibleChannelMembers(agents), [agents])
-  const channel = snapshot?.channels.find((candidate) => candidate.kind === selectedKind)
-    ?? snapshot?.channels[0]
+  // Keep DingTalk implementation and saved state, but do not expose its unfinished entry.
+  const channels = snapshot?.channels.filter((provider) => provider.kind !== 'dingtalk') ?? []
+  const channel = channels.find((candidate) => candidate.kind === selectedKind)
+    ?? channels[0]
     ?? null
   const pendingBindingCount = channel?.pendingBindingCount ?? snapshot?.pendingBindingCount ?? 0
   const bindingIssueCount = channel?.bindingIssueCount ?? snapshot?.bindingIssueCount ?? 0
@@ -264,10 +266,10 @@ export function ChannelSettingsView({
               id="channel-provider-heading"
               title="渠道"
               description="选择要连接和管理的平台。账号会话、应用凭据与项目路径都留在这台设备。"
-              summary={`${snapshot.channels.length} 个渠道`}
+              summary={`${channels.length} 个渠道`}
             />
             <div className="channel-provider-strip" role="tablist" aria-label="渠道">
-              {snapshot.channels.map((provider) => {
+              {channels.map((provider) => {
                 const selected = provider.kind === channel.kind
                 return (
                   <button
@@ -386,7 +388,7 @@ function ChannelSectionHeading({
   )
 }
 
-function ChannelConnectionRow({
+export function ChannelConnectionRow({
   channel,
   busy,
   onConnect,
@@ -547,7 +549,7 @@ function ChannelMemberBotTable({
   )
 }
 
-function QrDialog({
+export function QrDialog({
   snapshot,
   kind,
   busy,

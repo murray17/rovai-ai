@@ -70,7 +70,7 @@ describe('Channel settings', () => {
     expect(markup).toContain('>等待连接</button>')
   })
 
-  it('renders DingTalk beside Feishu with one Web Session login and no topic promise', () => {
+  it('hides DingTalk and falls back to Feishu even with an old DingTalk selection and published Bot', () => {
     const snapshot = unavailableSnapshot()
     snapshot.channels.push({
       kind: 'dingtalk',
@@ -104,18 +104,18 @@ describe('Channel settings', () => {
     }))
 
     expect(markup).toContain('<strong>飞书</strong>')
-    expect(markup).toContain('<strong>钉钉</strong>')
-    expect(markup).toContain('开发者账号会话 · 保存在 Rovai 本地数据库')
-    expect(markup).toContain('>重新连接</button>')
-    expect(markup).not.toContain('设备授权')
-    expect(markup).toContain('群聊首次由 Owner @')
-    expect(markup).toContain('钉钉话题暂不接入')
-    expect(markup).toContain('>钉钉管理</a>')
+    expect(markup).toContain('1 个渠道')
+    expect(markup.match(/role="tab"/gu)).toHaveLength(1)
+    expect(markup).not.toContain('钉钉')
+    expect(markup).not.toContain('>重新连接</button>')
+    expect(markup).not.toContain('u-app-1')
+    expect(snapshot.channels).toHaveLength(2)
+    expect(snapshot.channels[1].memberBots[0].appId).toBe('u-app-1')
     expect(markup).not.toMatch(/app secret|client secret|access token/i)
   })
 
   it.each(['not_connected', 'session_expired', 'connected'] as const)(
-    'offers one DingTalk connection action for %s',
+    'does not restore the hidden DingTalk entry from a %s snapshot without Feishu',
     (status) => {
       const snapshot = unavailableSnapshot()
       snapshot.channels = [{
@@ -131,10 +131,11 @@ describe('Channel settings', () => {
         agents: [], snapshot, selectedKind: 'dingtalk', onConnect: () => undefined
       }))
 
-      expect(markup.match(/>(连接钉钉|重新连接)<\/button>/gu)).toHaveLength(1)
-      expect(markup).toContain(status === 'not_connected' ? '>连接钉钉</button>' : '>重新连接</button>')
-      expect(markup).not.toContain('设备授权')
-      if (status === 'session_expired') expect(markup).toContain('登录已失效，请重新连接')
+      expect(markup).toContain('当前版本没有可用的渠道')
+      expect(markup).not.toContain('role="tab"')
+      expect(markup).not.toContain('钉钉')
+      expect(markup).not.toContain('重新连接')
+      expect(snapshot.channels[0].connection.status).toBe(status)
     }
   )
 

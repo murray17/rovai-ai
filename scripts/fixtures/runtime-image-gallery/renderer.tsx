@@ -12,18 +12,26 @@ Object.assign(window, { rovai: {
     calls.push({ method, params })
     return { mediaType: 'image/svg+xml', data: params.imageId === 'broken' ? btoa('not an image') : encoded }
   },
-  composerAttachments: { preview: async (id: string) => ({ mediaType: 'image/svg+xml', bytes: new TextEncoder().encode(id === 'attachment-broken' ? 'not an image' : svg) }) },
-  attachments: {
-    open: async (...args: string[]) => { calls.push({ open: args }); return {} },
-    reveal: async (...args: string[]) => { calls.push({ reveal: args }); return {} }
-  }
+  composerAttachments: { preview: async (id: string) => ({ mediaType: 'image/svg+xml', bytes: new TextEncoder().encode(id === 'attachment-broken' ? 'not an image' : svg) }) }
 } })
 const image = (id: string) => ({ id, displayName: id === 'broken' ? '已失效的图片.png' : '登录态恢复检查.svg', mediaType: 'image/svg+xml', byteSize: svg.length })
 const root = createRoot(document.getElementById('root')!)
+function imageFrame(node: HTMLImageElement) {
+  const frame = node.parentElement!.getBoundingClientRect()
+  const style = getComputedStyle(node.parentElement!)
+  return {
+    width: frame.width - parseFloat(style.borderLeftWidth) - parseFloat(style.borderRightWidth)
+      - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight),
+    height: frame.height - parseFloat(style.borderTopWidth) - parseFloat(style.borderBottomWidth)
+      - parseFloat(style.paddingTop) - parseFloat(style.paddingBottom),
+    naturalWidth: node.naturalWidth,
+    naturalHeight: node.naturalHeight
+  }
+}
 root.render(
   <main style={{ maxWidth: 880, margin: '32px auto', padding: '0 24px' }}>
     <p style={{ marginBottom: 18 }}>检查结果如下，图片只展示在本地运行记录中。</p>
-    <ImageGallery label="运行图片 · 3" images={['first', 'second', 'broken'].map(id => ({ kind: 'runtime', campId: 'fixture', image: image(id) }))} />
+    <ImageGallery images={['first', 'second', 'broken'].map(id => ({ kind: 'runtime', campId: 'fixture', image: image(id) }))} />
     <p style={{ margin: '24px 0 12px' }}>这张图片已作为消息附件发送。</p>
     <ImageGallery images={['attachment', 'attachment-broken'].map(id => ({ kind: 'attachment', campId: 'fixture', image: {
       ...image(id), kind: 'file', fileCount: 1, previewKind: 'image', runtimeProjectionState: 'available'
@@ -36,7 +44,7 @@ Object.assign(window, { imageGalleryTest: {
     const sequence = ++realResultSequence
     Object.assign(window, { rovai: { request: async (_method: string, params: { imageId: string }) => results[Number(params.imageId)] } })
     root.render(<main style={{ maxWidth: 880, margin: '32px auto', padding: '0 24px' }}>
-      <ImageGallery key={sequence} label="真实 Runtime 图片验收" images={results.map((result, index) => ({
+      <ImageGallery key={sequence} images={results.map((result, index) => ({
         kind: 'runtime', campId: `runtime-acceptance-${sequence}`, image: {
           id: String(index), displayName: result.displayName, mediaType: result.mediaType, byteSize: atob(result.data).length
         }
@@ -62,6 +70,8 @@ Object.assign(window, { imageGalleryTest: {
     columns: getComputedStyle(document.querySelector('.image-gallery-grid')!).gridTemplateColumns.split(' ').length,
     overflow: document.documentElement.scrollWidth > innerWidth,
     fit: [...document.querySelectorAll('.image-tile-preview img')].map(node => getComputedStyle(node).objectFit),
+    frames: [...document.querySelectorAll<HTMLImageElement>('.image-tile-preview img')].map(imageFrame),
+    lightboxFrames: [...document.querySelectorAll<HTMLImageElement>('.image-gallery-lightbox img')].map(imageFrame),
     dialog: Boolean(document.querySelector('[role="dialog"]')),
     active: document.activeElement?.getAttribute('aria-label')
   })

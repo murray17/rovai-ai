@@ -22,6 +22,9 @@ last_updated: 2026-08-31
   Antigravity generatedMedia、TRAE builtin 图片、Copilot binaryResultsForLlm。六种 Runtime 的图片结果链
   已通过隔离 Core；Cursor 旧版无 ACP，其他 Runtime 的上游/能力限制见[真实验收](runtime-image-acceptance.md)。
 - 共享图片 Gallery/Lightbox、消息附件顺序、Run supplement 排序、真实 Chromium 解码已实施。
+- 图片展示修正：同 Run 的已发送同摘要 Blob 图片只展示消息附件；Tool/发送图片共用内容列，
+  图片框按原比例贴合，不随正文缩小或补黑边；不显示文件名/来源标题或系统打开/Finder 菜单，
+  只保留看大图与关闭。不删除数据，不改变稳定路径零拷贝。
 - 飞书复用已有显式附件 Outbox，不自动上传 Runtime 图片；钉钉链路保持原样。
 - Migration 133 只新增图片元数据表和索引，Data Contract `v1.43 / schema 84`；旧业务行保持不变。
 - [model-context-change revision 1](model-context-change.md) 已由开发者二次确认并实施：精简文件帮助，
@@ -38,7 +41,7 @@ Applications 非终止安装见[本机交付记录](main-merge-and-daily-app.md)
 | --- | --- | --- |
 | Version lifecycle | 已更新 | 本概览、实施计划、版本索引；v1.36 冻结为 historical，未验收事实保留 |
 | Decisions | 已更新 | [V1.37-D01](decisions.md#v1-37-d01) 与 [CURRENT](../../decisions/CURRENT.md) |
-| Contracts | 已更新 | [Runtime Images v2](../../contracts/runtime-images-v2.md)、[Camp Open Projection v12](../../contracts/camp-open-projection-v12.md)、[Camp Message Send v16](../../contracts/camp-message-send-v16.md) |
+| Contracts | 已更新 | [Runtime Images v3](../../contracts/runtime-images-v3.md)、[Camp Open Projection v12](../../contracts/camp-open-projection-v12.md)、[Camp Message Send v16](../../contracts/camp-message-send-v16.md) |
 | Architecture | 已更新 | [Runtime 图片](../../architecture/runtime-images.md)、[Built-in Tool Runtime](../../architecture/builtin-tool-runtime.md#bootstrap-与-dynamic-context)及架构导航 |
 | UI | 已更新 | [Camp 会话工作区](../../ui/components/conversation-workspace.md#runtime-图片与消息图片)；保留既有双主题 |
 | Runtime Activity | 确认无需更新 | 内部图片观察不进入 Canonical Activity，不修改 classifier/映射或已有公开 Evidence |

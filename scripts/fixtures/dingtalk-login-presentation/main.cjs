@@ -17,7 +17,9 @@ const { DingTalkLoginView, DINGTALK_LOGIN_PAGE_OBSERVATION, parseDingTalkLoginPa
 const snapshot = { schemaVersion: 4, channels: [{ kind: 'dingtalk', displayName: '钉钉', hostStatus: 'ready',
   connection: { status: 'connected', account: { accountId: 'fixture-owner', userName: '原账号', tenantName: '测试企业',
     brand: 'dingtalk', connectedAt: '2026-08-31T00:00:00Z', lastVerifiedAt: '2026-08-31T00:00:00Z' } }, memberBots: [] }],
-  pendingBindingCount: 0, bindingIssueCount: 0, activeQrAttempt: null, activeProvisioning: null }
+  pendingBindingCount: 0, bindingIssueCount: 0,
+  activeQrAttempt: { kind: 'dingtalk', attemptId: 'legacy-attempt', purpose: 'account_login', agentId: null,
+    stage: 'awaiting_scan', qrDataUrl: null, expiresAt: null, detail: '旧钉钉登录' }, activeProvisioning: null }
 let parent, login, qr, finish, refuse, refreshes = 0, attempt = 0
 const sockets = new Set()
 const server = createServer((request, response) => {

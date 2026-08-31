@@ -471,14 +471,20 @@ summary 与可选 detail；即使没有任何 Execution Evidence 也默认展开
 图表完整边界。只把连续图片附件组合成一段 Gallery；`image A / image B / PDF / image C` 的文件顺序不变。
 PDF、文档、压缩包和目录继续使用现有文件块。
 
+两种图片共用消息内容列及响应式宽度，发送图片区域不随正文长短收缩。预览框和大图窗口贴合原图比例，
+保留高度上限和既有细边框，不用固定宽高补黑边，不裁切或重编码图片；圆角、间距与焦点样式一致。
+
 图片接近可视区域时读取，通过 Chromium 真实图片解码后展示；损坏/消失的 Runtime 图片显示“图片已不可用”，
 不影响其他图片或 AgentRun。稳定路径重开时可读取更新后的内容，不承诺历史不可变；临时路径和 inline 内容由
 已有 Blob 保留。缩略图点击或键盘激活打开大图，关闭后焦点回到该图，两个主题均使用现有颜色与焦点 token。
 
-消息图片保留附件系统打开、显示所在位置和现有风险确认；解码失败时主点击回退为系统打开，Runtime projection
-pending/recovery/failed 说明不被图片遮掉。Runtime 图片只可查看大图，不提供附件发送/打开所在位置入口。
-同一图同时作为 Runtime 结果和显式附件时允许重复，不新增跨来源去重。底层边界见
-[Runtime Images v2](../../contracts/runtime-images-v2.md)，不引入 File Preview 授权流程。
+Tool/Runtime 图片和发送图片均只显示图片，不显示文件名、来源/数量标题或 Runtime projection 说明；
+移除附件操作菜单、右键菜单、系统打开和在 Finder/文件资源管理器中显示的入口。非图片附件不受影响。
+只保留点击或键盘查看大图及关闭；大图标题仅供辅助技术读取，不占据可见空间，关闭控件覆盖在图片角落。
+图片解码失败时显示“图片已不可用”并禁用点击，不回退到系统打开。
+同一 Run 的可用图片附件与 Runtime Blob 摘要完全相同时只显示显式附件；底层记录保留，失效附件不能
+隐藏 Runtime 图。不同 Run、不同内容和可变稳定路径不参与过滤。底层边界见
+[Runtime Images v3](../../contracts/runtime-images-v3.md)，不引入 File Preview 授权流程。
 
 ## Task、Approval 与停止
 

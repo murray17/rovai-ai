@@ -1,5 +1,7 @@
+import { useEffect, useState } from 'react'
 import { createRoot } from 'react-dom/client'
-import { ChannelSettings } from '../../../apps/desktop/src/renderer/src/ChannelSettings'
+import type { ChannelSettingsSnapshot } from '../../../packages/contracts/src'
+import { ChannelConnectionRow, ChannelSettings, QrDialog, channelErrorMessage } from '../../../apps/desktop/src/renderer/src/ChannelSettings'
 import '../../../apps/desktop/src/renderer/src/styles.css'
 
 declare global {
@@ -13,7 +15,35 @@ window.addEventListener('error', event => errors.push(String(event.error?.stack 
 window.addEventListener('unhandledrejection', event => errors.push(String(event.reason)))
 document.body.style.overflow = 'auto'
 document.getElementById('root')!.style.padding = '24px'
-createRoot(document.getElementById('root')!).render(<ChannelSettings agents={[]} />)
+const root = createRoot(document.getElementById('root')!)
+root.render(<ChannelSettings agents={[]} />)
+
+// Keep the unfinished login components under test without adding a production entry or bypass flag.
+function RetainedDingTalkLogin() {
+  const [snapshot, setSnapshot] = useState<ChannelSettingsSnapshot | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  useEffect(() => {
+    void window.rovai.channels.get().then(setSnapshot)
+    return window.rovai.channels.onChanged(setSnapshot)
+  }, [])
+  const connect = async () => {
+    setBusy(true)
+    setError(null)
+    try { setSnapshot(await window.rovai.channels.connect('dingtalk')) }
+    catch (error) { setError(channelErrorMessage(error)) }
+    finally { setBusy(false) }
+  }
+  const channel = snapshot?.channels[0]
+  return <>
+    {error && <p role="alert">{error}</p>}
+    {channel && <ChannelConnectionRow channel={channel} busy={busy ? 'connect:dingtalk' : null}
+      onConnect={() => void connect()} />}
+    <QrDialog snapshot={snapshot} kind="dingtalk" busy={busy}
+      onClose={id => { void window.rovai.channels.cancelQrAttempt(id).then(setSnapshot) }}
+      onRefresh={id => { void window.rovai.channels.refreshLoginQr(id) }} />
+  </>
+}
 const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
 function check(value: unknown, message: string): asserts value { if (!value) throw new Error(message) }
 async function settle() {
@@ -54,6 +84,14 @@ function layout() {
 Object.assign(window, { dingtalkLoginTest: {
   async run() {
     const cases: string[] = []
+    await settle()
+    check(document.body.textContent?.includes('当前版本没有可用的渠道'), 'The public page must not fall back to hidden DingTalk')
+    check(!document.body.textContent?.includes('钉钉'), 'The public page must omit the entire DingTalk entry')
+    check(!document.querySelector('[role="dialog"]'), 'An old DingTalk login attempt must not reopen its hidden entry')
+    check(!(await window.loginFixture.facts()).attached, 'The hidden entry must not attach an official login view')
+    cases.push('public ChannelSettings hides DingTalk and its stale login attempt without deleting state')
+    await window.rovai.channels.cancelQrAttempt('legacy-attempt')
+    root.render(<RetainedDingTalkLogin />)
     await settle()
     await connect()
     check(!button('关闭').disabled, 'DingTalk login close is available while connect is pending')

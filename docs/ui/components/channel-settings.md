@@ -3,7 +3,7 @@ document_type: ui-component
 component: channel-settings
 authority: channel-settings-presentation-and-interaction
 status: accepted
-last_updated: 2026-08-31
+last_updated: 2026-09-01
 ---
 
 # 渠道设置
@@ -13,12 +13,17 @@ Owner-only 卡片中；Renderer 不提供 Channel 项目目录或会话绑定操
 [Feishu Channel v8](../../contracts/feishu-channel-v8.md)与
 [DingTalk Channel v5](../../contracts/dingtalk-channel-v5.md)；本页只拥有信息层级、交互与可访问性。
 
+当前对外渠道页只显示飞书。钉钉完整产品链路尚未验收，因此隐藏其整个入口、平台计数、连接/发布区域及
+残留登录弹窗；旧选中值回退到可见平台，没有可见平台时显示空态。不得显示“待接入”钉钉占位入口。
+这是 Renderer 发布范围的收敛，不删除钉钉实现、类型、凭据、账号或已有 Bot，也不改变后台生命周期。
+以下钉钉交互说明与独立组件测试保留为后续接入依据，不表示当前用户可以从渠道页进入。
+
 ## 页面结构
 
 页面沿用设置工作区的 Porcelain Day / Steel Night 世界和现有 `SettingsPageHeader`：
 
 1. `Settings / Channels` eyebrow、标题“渠道”、Owner 本机说明；
-2. 飞书/钉钉 Provider Tab；切换只改变当前展示，不合并账号、Bot 状态或诊断；
+2. 当前可见 Provider Tab（目前仅飞书）；切换只改变当前展示，不合并账号、Bot 状态或诊断；
 3. 当前 Provider 的渠道连接，展示真实开发者用户名、企业与可选 email，提供登录、切换和断开；
 4. 队员 Bot 列表，按成员稳定顺序显示头像、名称、角色、发布状态和单行动作；
 5. 只有存在 pending binding 或 binding error 时，显示安静的诊断计数，不提供正常操作入口。

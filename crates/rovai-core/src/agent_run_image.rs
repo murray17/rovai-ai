@@ -564,11 +564,29 @@ pub fn record_images(
 }
 
 pub fn list_camp_images(connection: &Connection, camp_id: &str) -> Result<Vec<AgentRunImagesView>> {
+    // Keep both records, but prefer the explicitly sent attachment when its immutable bytes
+    // match this Run's Blob. Stable paths remain live references, not frozen content identities.
     let mut statement = connection.prepare(
-        "SELECT image.agent_run_id, image.execution_epoch, image.created_at, image.id,
+        "WITH published_images AS (
+           SELECT DISTINCT message.source_agent_run_id AS agent_run_id, attachment.content_digest
+           FROM camp_message_attachment_ref reference
+           JOIN camp_message message ON message.camp_id=reference.camp_id
+             AND message.id=reference.camp_message_id
+           JOIN managed_attachment attachment ON attachment.camp_id=reference.camp_id
+             AND attachment.id=reference.attachment_id
+           WHERE reference.camp_id=?1 AND message.source_agent_run_id IS NOT NULL
+             AND message.author_type='agent' AND message.tombstoned_at IS NULL
+             AND attachment.kind='file' AND attachment.preview_kind='image'
+             AND attachment.state='available'
+         )
+         SELECT image.agent_run_id, image.execution_epoch, image.created_at, image.id,
                 image.display_name, image.media_type, image.byte_size
          FROM agent_run_image image JOIN agent_run run ON run.id=image.agent_run_id
-         JOIN camp_turn turn ON turn.id=run.camp_turn_id WHERE turn.camp_id=?1
+         JOIN camp_turn turn ON turn.id=run.camp_turn_id
+         LEFT JOIN managed_blob blob ON blob.id=image.content_blob_id
+         LEFT JOIN published_images published ON published.agent_run_id=image.agent_run_id
+           AND published.content_digest='sha256:' || blob.sha256
+         WHERE turn.camp_id=?1 AND published.agent_run_id IS NULL
          ORDER BY run.started_at, run.id, image.execution_epoch, image.ordinal, image.id",
     )?;
     let mut groups: Vec<AgentRunImagesView> = Vec::new();
@@ -1119,6 +1137,186 @@ mod tests {
                 .unwrap()
                 .len(),
             2
+        );
+    }
+
+    // Projection owns cross-source presentation: Runtime bytes followed by an explicit Send
+    // must not show the same picture twice. Storage/replay remains owned by the lifecycle test.
+    #[test]
+    fn published_attachment_replaces_matching_runtime_image_presentation() {
+        let mut database = crate::test_support::seeded_runtime_database_owned();
+        let root = database.directory().join("workspace");
+        seed(&database, &root);
+        let blobs = ManagedBlobStore::new(database.directory());
+        let bytes = b"one generated image";
+        let observation = RuntimeImageObservation {
+            tool_call_id: "generate".into(),
+            tool_name: None,
+            images: vec![RuntimeImageCandidate {
+                data: Some(STANDARD.encode(bytes)),
+                path: None,
+                media_type: Some("image/png".into()),
+            }],
+        };
+        assert_eq!(
+            record_images(&mut database, &blobs, "image-run", 1, None, &observation).unwrap(),
+            1
+        );
+        let image_id = list_camp_images(database.connection(), "image-camp").unwrap()[0].images[0]
+            .id
+            .clone();
+        // This is the persisted shape produced by the same Run's explicit message attachment.
+        database.connection().execute_batch(
+            "INSERT INTO camp_message(id,camp_id,sequence,author_type,author_id,source_agent_run_id,
+             body,structured_content_json,content_digest,address_mode,addressed_agent_ids_json,created_at,updated_at)
+             VALUES('image-message','image-camp',1,'agent','agent_1','image-run','',
+             '[]','sha256:image-message','default','[]','2026-08-31','2026-08-31');",
+        ).unwrap();
+        let digest = format!("sha256:{:x}", Sha256::digest(bytes));
+        for (attachment_id, content_digest, preview_kind) in [
+            ("image-attachment", digest.as_str(), "image"),
+            ("other-content", "sha256:different", "image"),
+            ("no-preview", digest.as_str(), "none"),
+        ] {
+            database.connection().execute(
+            "INSERT INTO managed_attachment(camp_id,id,kind,root_relative_payload_path,media_type,
+             byte_size,file_count,directory_count,node_count,content_digest,preview_kind,origin,state,
+             available_revision,created_by_type,created_by_id,created_at)
+             VALUES('image-camp',?1,'file',?2,'image/png',?3,1,0,1,
+             ?4,?5,'agent_workspace','available',1,'agent','agent_1','2026-08-31')",
+            params![attachment_id, format!("fixture/{attachment_id}.png"), bytes.len() as i64, content_digest, preview_kind],
+            ).unwrap();
+        }
+        database.connection().execute_batch(
+            "INSERT INTO camp_message_attachment_ref(camp_id,camp_message_id,ordinal,attachment_id,
+             display_name_snapshot,created_at) VALUES('image-camp','image-message',0,
+             'image-attachment','sent-image.png','2026-08-31');",
+        ).unwrap();
+        assert!(
+            list_camp_images(database.connection(), "image-camp")
+                .unwrap()
+                .is_empty(),
+            "one picture must not appear both as a sent attachment and a Runtime supplement"
+        );
+        assert!(
+            read_image(&database, &blobs, "image-camp", &image_id)
+                .unwrap()
+                .is_some()
+        );
+        // Only an available image published by this exact Run can replace the supplement.
+        // Each case rolls back to the same publication; these are distinct exclusion boundaries.
+        for (case, change) in [
+            (
+                "different content",
+                "UPDATE camp_message_attachment_ref SET attachment_id='other-content'",
+            ),
+            (
+                "not an image preview",
+                "UPDATE camp_message_attachment_ref SET attachment_id='no-preview'",
+            ),
+            (
+                "missing attachment",
+                "UPDATE managed_attachment SET state='missing',safe_reason_code='missing'",
+            ),
+            (
+                "corrupted attachment",
+                "UPDATE managed_attachment SET state='corrupted',safe_reason_code='corrupted'",
+            ),
+            (
+                "deleted attachment",
+                "UPDATE managed_attachment SET state='pending_delete',safe_reason_code='pending_delete'",
+            ),
+            (
+                "tombstoned message",
+                "UPDATE camp_message SET tombstoned_at='2026-09-01'",
+            ),
+            (
+                "another Run",
+                "UPDATE camp_message SET source_agent_run_id='another-run'",
+            ),
+            (
+                "no source Run",
+                "UPDATE camp_message SET source_agent_run_id=NULL",
+            ),
+            (
+                "user attachment",
+                "UPDATE camp_message SET author_type='user'",
+            ),
+        ] {
+            database
+                .connection()
+                .execute_batch("SAVEPOINT image_presentation_case")
+                .unwrap();
+            database.connection().execute_batch(change).unwrap();
+            let visible = list_camp_images(database.connection(), "image-camp").unwrap();
+            assert_eq!(
+                visible[0].images[0].id, image_id,
+                "{case} must not hide the Runtime image"
+            );
+            database
+                .connection()
+                .execute_batch(
+                    "ROLLBACK TO image_presentation_case; RELEASE image_presentation_case",
+                )
+                .unwrap();
+        }
+        // A live stable path may change after Send. Do not equate it with immutable attachment bytes.
+        let stable = database.directory().join("stable-image.png");
+        fs::write(&stable, bytes).unwrap();
+        let stable_observation = RuntimeImageObservation {
+            tool_call_id: "stable-result".into(),
+            tool_name: None,
+            images: vec![RuntimeImageCandidate {
+                data: None,
+                path: Some(stable.to_string_lossy().into_owned()),
+                media_type: Some("image/png".into()),
+            }],
+        };
+        assert_eq!(
+            record_images(
+                &mut database,
+                &blobs,
+                "image-run",
+                1,
+                None,
+                &stable_observation
+            )
+            .unwrap(),
+            1
+        );
+        let visible = list_camp_images(database.connection(), "image-camp").unwrap();
+        assert_eq!(visible[0].images.len(), 1);
+        assert_ne!(visible[0].images[0].id, image_id);
+        fs::write(&stable, b"new content at the stable path").unwrap();
+        let content = read_image(&database, &blobs, "image-camp", &visible[0].images[0].id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            STANDARD.decode(content.data).unwrap(),
+            b"new content at the stable path"
+        );
+        assert_eq!(
+            record_images(&mut database, &blobs, "image-run", 1, None, &observation).unwrap(),
+            0
+        );
+        assert_eq!(
+            database
+                .connection()
+                .query_row("SELECT COUNT(*) FROM agent_run_image", [], |row| row
+                    .get::<_, i64>(0))
+                .unwrap(),
+            2
+        );
+        assert_eq!(
+            database
+                .connection()
+                .query_row(
+                    "SELECT COUNT(*) FROM camp_message_attachment_ref",
+                    [],
+                    |row| row.get::<_, i64>(0)
+                )
+                .unwrap(),
+            1
         );
     }
 

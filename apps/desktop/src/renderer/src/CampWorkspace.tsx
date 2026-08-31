@@ -3852,9 +3852,10 @@ export function CampWorkspace({
                   if (timelineItem.kind === 'run_images') {
                     previousMessageAuthorKey = null
                     items.push(
-                      <div className="timeline-node runtime-image-supplement" key={timelineItem.id}>
-                        <ImageGallery label={`运行图片 · ${timelineItem.images.images.length}`}
-                          images={timelineItem.images.images.map((image) => ({ kind: 'runtime', campId: snapshot.camp.id, image }))} />
+                      <div className="timeline-node conversation-bubble runtime-image-supplement" key={timelineItem.id}>
+                        <div className="message-body">
+                          <ImageGallery images={timelineItem.images.images.map((image) => ({ kind: 'runtime', campId: snapshot.camp.id, image }))} />
+                        </div>
                       </div>
                     )
                     continue
@@ -4066,7 +4067,7 @@ export function CampWorkspace({
                                 {campMessage.attachments.length > 0 && (
                                   <div className="timeline-attachments" aria-label="消息附件">
                                     {groupMessageAttachments(campMessage.attachments).map((segment) => segment.kind === 'images'
-                                      ? <ImageGallery key={segment.attachments[0].id} onNotify={onNotify}
+                                      ? <ImageGallery key={segment.attachments[0].id}
                                           images={segment.attachments.map((image) => ({ kind: 'attachment', campId: snapshot.camp.id, image }))} />
                                       : <AttachmentCard attachment={segment.attachment} campId={snapshot.camp.id}
                                           key={segment.attachment.id} onNotify={onNotify} timeline />)}

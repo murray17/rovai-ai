@@ -64,6 +64,7 @@ const earlier = { ...campOpenProjectionAsSnapshot(projection(60)),
 let current = campOpenProjectionAsSnapshot(projection(60), earlier)
 let updateSnapshot: (snapshot: typeof current) => void
 let closeTask: () => void
+let imageResult = { mediaType: 'image/svg+xml', data: '' }
 const draft: CampComposerDraftView = { campId, body: '', content: [], revision: 1, attachments: [],
   replyIntent: null, continuationIntent: null, updatedAt: now, expiresAt: null }
 Object.assign(window, { rovai: {
@@ -71,8 +72,11 @@ Object.assign(window, { rovai: {
   request: async (method: string): Promise<unknown> => {
     if (method === 'skills.list' || method === 'skills.deliveryGroups.list') return []
     if (method === 'camp.composerDraft.get') return draft
+    if (method === 'agentRunImages.read') return imageResult
     throw new Error(`Unexpected fixture API: ${method}`)
-  }
+  },
+  composerAttachments: { preview: async () => ({ mediaType: imageResult.mediaType,
+    bytes: Uint8Array.from(atob(imageResult.data), character => character.charCodeAt(0)) }) }
 } })
 
 function Fixture(): React.JSX.Element {
@@ -110,6 +114,36 @@ Object.assign(window, { campOpenTest: {
   refresh: (append: boolean) => {
     current = campOpenProjectionAsSnapshot({ ...projection(append ? 61 : 60), throughGlobalSequence: append ? 101 : 100 }, current)
     updateSnapshot(current)
+  },
+  showImages: (result: { displayName: string; mediaType: string; data: string }, count = 1) => {
+    imageResult = result
+    const images = Array.from({ length: count }, (_, index) => ({ id: `image-${index}`, displayName: result.displayName,
+      mediaType: result.mediaType, byteSize: atob(result.data).length }))
+    current = { ...current, tasks: [], turns: [], agentRuns: [], agentRunFileChanges: [], messageDeliveries: [],
+      // Two distinct Runs deliberately show identical bytes to compare the two presentation paths.
+      messages: ['Tool 返回的图片', '通过 send 发送的图片'].map((body, index) => ({
+        ...messages[index], id: `image-message-${index}`, authorType: 'agent', authorId: agent.agentId,
+        sourceAgentRunId: index === 0 ? 'tool-run' : 'send-run', body, content: [{ kind: 'text', text: body }],
+        attachments: index === 0 ? [] : images.map(image => ({ ...image, kind: 'file', fileCount: 1,
+          previewKind: 'image', runtimeProjectionState: 'available' }))
+      })),
+      agentRunImages: [{ agentRunId: 'tool-run', executionEpoch: 1, createdAt: now, images }]
+    }
+    updateSnapshot(current)
+  },
+  imageAppearance: (source: 'tool' | 'send') => {
+    const container = element(source === 'tool' ? '.runtime-image-supplement' : '.timeline-attachments')
+    const previews = Array.from(container.querySelectorAll<HTMLButtonElement>('.image-tile-preview'))
+    container.scrollIntoView({ block: 'center' })
+    return previews.map(preview => {
+      const image = preview.querySelector('img')!
+      const bounds = preview.getBoundingClientRect()
+      const style = getComputedStyle(preview)
+      return { decoded: Boolean(image?.naturalWidth), width: Math.round(bounds.width), height: Math.round(bounds.height),
+        left: Math.round(bounds.left), border: style.border, radius: style.borderRadius, background: style.backgroundColor,
+        fit: image ? getComputedStyle(image).objectFit : null,
+        extraText: container.querySelector('.image-gallery')!.textContent!.trim() }
+    })
   },
   state: () => {
     const scroll = element('.timeline-scroll')

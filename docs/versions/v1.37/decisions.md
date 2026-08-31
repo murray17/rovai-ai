@@ -21,7 +21,7 @@ last_updated: 2026-08-31
 只接收已适配的结构化结果。稳定路径引用原文件，inline bytes 始终保存，仅 Run 临时路径为生命周期保存到
 现有 Blob。普通文件检查与真实解码构成最小读取链；失败局部降级。图片拥有独立 Run 元数据，不自动产生
 CampMessage/Attachment/渠道投递。当前规范由 [Runtime 图片架构](../../architecture/runtime-images.md)与
-[Runtime Images v2](../../contracts/runtime-images-v2.md) 拥有。
+[Runtime Images v3](../../contracts/runtime-images-v3.md) 拥有。
 
 ### 后果与替代方案
 

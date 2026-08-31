@@ -22,7 +22,7 @@ last_updated: 2026-08-31
 
 | 任务 | 必读资料 |
 |---|---|
-| 修改 Runtime 结构化图片、混合临时文件生命周期、Run 图片读取、图片附件 Gallery 或本地图片与飞书显式文件交付边界 | [Runtime 图片架构](architecture/runtime-images.md)、[Runtime Images v2](contracts/runtime-images-v2.md)、[Camp Open Projection v12](contracts/camp-open-projection-v12.md)及[统一图片展示](ui/components/conversation-workspace.md#runtime-图片与消息图片) |
+| 修改 Runtime 结构化图片、混合临时文件生命周期、Run 图片读取、图片附件 Gallery 或本地图片与飞书显式文件交付边界 | [Runtime 图片架构](architecture/runtime-images.md)、[Runtime Images v3](contracts/runtime-images-v3.md)、[Camp Open Projection v12](contracts/camp-open-projection-v12.md)及[统一图片展示](ui/components/conversation-workspace.md#runtime-图片与消息图片) |
 | 修改 Camp 成员 Fast、原生订阅资格、三态偏好、绑定代次或单次执行档位 | [Camp Member Fast v1](contracts/camp-member-fast-v1.md)、[Runtime Launch v29](contracts/runtime-launch-and-verification-v29.md)、[Usage v4](contracts/runtime-usage-monitoring-v4.md)、[Camp 会话工作区](ui/components/conversation-workspace.md) |
 | 判断长期架构约束或修改领域、持久化、安全、Runtime 边界 | 先读[当前 Architecture 索引](architecture/README.md)和相关当前 Contract；需要理解取舍时再从[当前决定导航](decisions/CURRENT.md)进入版本理由 |
 | 新增或修改 Version Decision、Architecture、Contract、版本文档或文档路由 | [决策治理与准入](decisions/README.md)、[当前决定导航](decisions/CURRENT.md)、对应目录 README，并运行通用文档门禁；禁止新增数字 ADR |
