@@ -10,7 +10,7 @@ last_updated: 2026-08-31
 
 渠道设置是 Owner 在 Rovai 本机维护飞书/钉钉连接与队员 Bot 的 Renderer surface。群首次项目选择发生在对应外部会话的
 Owner-only 卡片中；Renderer 不提供 Channel 项目目录或会话绑定操作。领域状态和错误按 Provider 分别见
-[Feishu Channel v6](../../contracts/feishu-channel-v6.md)与
+[Feishu Channel v7](../../contracts/feishu-channel-v7.md)与
 [DingTalk Channel v5](../../contracts/dingtalk-channel-v5.md)；本页只拥有信息层级、交互与可访问性。
 
 ## 页面结构
@@ -141,15 +141,21 @@ Unicode 字符，超长用省略号收尾。引用只作展示，不跳转、不
 
 ## 飞书执行卡
 
-飞书外部执行卡沿用原生执行台的阅读顺序：公开文字与 command 混排。执行中没有折叠容器；终态先显示真实“用时 18 秒”
-一类的时长，其后为原生分隔线，再把完整 timeline 放进默认收起的“执行过程 · N 条指令”原生面板。
+飞书执行中卡默认只露出最新公开正文（最多5行）、当前一条安全 command 和真实进度，例如“已完成 21 条指令 · 当前 1 条执行中”。
+历史收进默认关闭的“执行过程 · 最近 10 条 / 共 22 条”原生面板，只含最近10条 command、最多20个 timeline blocks；
+更早记录明确提示留待完成后查看。运行中没有单条结果折叠和分页；整卡按16KB/30个递归elements滚动裁剪，不能把全部历史
+仅包进总面板。新的整卡更新允许重新关闭实时面板；等待/失败计数使用真实状态，不制造进度百分比。
+
+终态沿用原生执行台的阅读顺序：公开文字与 command 混排。先显示真实“用时 18 秒”
+一类的时长，其后为原生分隔线，再把完整 timeline 的当前页放进默认收起的“执行过程 · N 条指令”原生面板。
 N 统计整轮 command，不计正文，也不是当前页数量；无 command 时标题仍为“执行过程”。缺失可靠起止时间时不虚构时长，
 同时省略时长与分隔线。每条 command 自带第二层原生折叠，安全命令/flags/路径在 header，展开后只有
 一个结果代码框，无二级标题。两层展开/收起都不请求 Rovai；永久正文卡仍独立显示。
-文字最多 10 行，长文为前 9 行加截断提示；安全结果最多 20 行和 4KiB，长结果显示前 9 / 截断提示 / 后 10。
+文字最多 10 行，长文为前 9 行加截断提示；安全结果只从独立 publicResult 读取，最多 20 行和 4KiB，长结果显示前 9 / 截断提示 / 后 10，
+长行也保留首尾。无结果显示“（无可展示结果）”；过大且不可拆的 command 明确提示在 Rovai 查看，不静默重写命令。
 多页才在总面板内出现页码和上一页/下一页；翻页后总面板展开，单条 command 收起，包括返回第 1 页。
 成功翻页无 Toast；可响应的超时/服务不可用返回清晰的错误 Toast，完全离线时由飞书提示平台错误，不承诺自定义文案。
-安全、预算、封存与 callback 约束由 [Feishu Channel v6](../../contracts/feishu-channel-v6.md) 拥有；新页只经同步 response card 提交，
+安全、预算、封存与 callback 约束由 [Feishu Channel v7](../../contracts/feishu-channel-v7.md) 拥有；新页只经同步 response card 提交，
 不额外 PATCH，不增加 Renderer 设置或视图状态。
 
 ## 状态、错误与键盘
@@ -164,7 +170,7 @@ N 统计整轮 command，不计正文，也不是当前页数量；无 command �
 
 - [全局设计系统](../../../DESIGN.md)
 - [设置工作区 brief](../../../apps/desktop/.impeccable/surfaces/settings-workspace.md)
-- [Feishu Channel v6](../../contracts/feishu-channel-v6.md)
+- [Feishu Channel v7](../../contracts/feishu-channel-v7.md)
 - [飞书渠道架构](../../architecture/feishu-channel.md)
 - [DingTalk Channel v5](../../contracts/dingtalk-channel-v5.md)
 - [钉钉渠道架构](../../architecture/dingtalk-channel.md)

@@ -28,7 +28,8 @@ Architecture 解释组件如何组成，Version 概览记录交付范围；它�
 | 合同 | 权威范围 |
 | --- | --- |
 | [Camp Member Fast v1（当前）](camp-member-fast-v1.md) | Camp/member/保存绑定代次的三态覆盖、原生订阅资格、执行冻结、观察与紧凑 UI |
-| [Camp Open Projection v9（当前）](camp-open-projection-v9.md) | v8 保留；Snapshot 34/Open 5 增加可选 member.fast，仅查询安全缓存 |
+| [Camp Open Projection v10（当前）](camp-open-projection-v10.md) | v9 保留；Camp/Navigation 增加可选 channelSource，原始 title 不变，仅连接已有绑定 |
+| [Camp Open Projection v9（历史）](camp-open-projection-v9.md) | v8 保留；Snapshot 34/Open 5 增加可选 member.fast，仅查询安全缓存；不含渠道来源 |
 | [Runtime Launch and Verification v29（当前）](runtime-launch-and-verification-v29.md) | v28 保留；现有 Check Manager 的 Fast metadata 与单执行原生覆盖 |
 | [Runtime Usage Monitoring v4（当前）](runtime-usage-monitoring-v4.md) | v3 保留；可选实际档位、observed 优先与未知撤回估价 |
 | [Pending Camp Input v1（当前）](pending-camp-input-v1.md) | 私有下一轮输入、FIFO、编辑 token、暂停、原子发布与无附件边界 |
@@ -40,11 +41,13 @@ Architecture 解释组件如何组成，Version 概览记录交付范围；它�
 | [First-run Onboarding v1（历史）](first-run-onboarding-v1.md) | Desktop 首次安装判定、三页 mandatory 状态、幂等 provisioning、`初次集结` 与第四页 Draft-only 入口；不允许无 Runtime 完成 |
 | [Camp Membership v1（当前）](camp-membership-v1.md) | 动态添加/移除、至少一位成员、generation/version、atomic cutover、durable reconciliation、exact lifetime fence 与受信外部来源 |
 | [Channel Storage v2（当前）](channel-storage-v2.md) | v1 存储与秘密边界不变；飞书三态检查、独立 Bot 启动及钉钉 completed 同应用凭据恢复 |
+| [Channel Camp Naming v1（当前）](channel-camp-naming-v1.md) | 五种渠道复用普通自动命名、原始 title 与只读 channelSource 分离、闭合绑定来源保留和 Renderer 前缀 |
 | [Channel Host Maintenance v1（当前）](channel-host-maintenance-v1.md) | 无永久 poll 回执的强类型维护请求、原子 FIFO/Outbox 维护、lease 恢复与真实业务命令幂等保留 |
 | [Channel/Main Schema Join v2（当前）](channel-main-schema-join-v2.md) | 精确来源与既有 receipt 含义不变；原库事务重映射 main 117/118/119→126/127/130，逐步恢复，128/129 历史合同保留，131 封口 |
 | [Channel/Main Schema Join v1（历史）](channel-main-schema-join-v1.md) | 主线 Pending/Fast 与渠道精确来源准入、126/127 receipt 与 128 封闭；副本执行位置由 v2 替代 |
 | [Channel Storage v1（历史）](channel-storage-v1.md) | 飞书/钉钉 credential 与 Developer Session 的 `rovai.sqlite` 明文存储、Main-only API、批量启动、账号/发布原子提交、CAS refresh 与旧 `.bin` clean break |
-| [Feishu Channel v6（当前）](feishu-channel-v6.md) | v5 执行卡封存/授权/预算不变，分页仅同步 response card；永久正文改为无标题卡片及实际接收对象行，原生 @ 空格分隔；无新 Migration |
+| [Feishu Channel v7（当前）](feishu-channel-v7.md) | v6 封存/分页/永久正文不变；实时卡当前正文/command/进度加10-command/20-block滚动折叠，16KB/30-element上限；共享安全 publicResult |
+| [Feishu Channel v6（历史）](feishu-channel-v6.md) | 分页仅同步 response card；永久正文改为无标题卡片及实际接收对象行；执行中平铺由 v7 替代 |
 | [Feishu Channel v5（历史）](feishu-channel-v5.md) | v4 封存/授权不变；终态双层原生折叠、翻页外层展开、15-command/50-element/24KB 分页与 4KiB 安全结果；分页 PATCH 后空 ACK 由 v6 替代 |
 | [Feishu Channel v4（历史）](feishu-channel-v4.md) | 终态文字/command 混排、原生单条折叠、安全结果 20 行、15-command/50-element 分页、不可变 sealed 内容与无状态翻页；Migration 125 清理旧 view state；终态容器和预算由 v5 替代 |
 | [Feishu Channel v3（历史）](feishu-channel-v3.md) | 飞书终态外层原生折叠、正文直接可见、仅过程分页与翻页保持展开；终态呈现由 v4 替代 |
@@ -154,7 +157,8 @@ Architecture 解释组件如何组成，Version 概览记录交付范围；它�
 | [Camp Message Send v5 (historical)](camp-message-send-v5.md) | v4 Core 效果与 wire 不变；收窄 `mentionUser` / `--to-user` 的消息局部使用边界，但正文不解析显示名 alias |
 | [Camp Message Send v4 (historical)](camp-message-send-v4.md) | v3 显式 Agent 寻址/caller return 加初版 `--to-user`、Structured Current User Mention 与原子通知 |
 | [Camp Message Send v4 Errata](camp-message-send-v4-errata.md) | 历史 v4 Current User Attention 生命周期与 locator-present exact verification 勘误；其修正已由 v5 继承 |
-| [Notification Episode v4（当前）](notification-episode-v4.md) | v3 精确 signal 生命周期加会话可见来源的有界批量确认与即时角标刷新 |
+| [Notification Episode v5（当前）](notification-episode-v5.md) | v4 生命周期不变；camp 增加只读 channelSource，schema 6 与原始 title 不变 |
+| [Notification Episode v4（历史）](notification-episode-v4.md) | v3 精确 signal 生命周期加会话可见来源的有界批量确认与即时角标刷新 |
 | [Notification Episode v3 (historical)](notification-episode-v3.md) | v2 精确 signal 加 Journal acknowledgement/Clear/remove invalidation、顺序式队列归约与 reset 清空；不含普通会话可见来源确认 |
 | [Notification Episode v2 (historical)](notification-episode-v2.md) | v1 三层模型加 Active Attention、exact HeadsUpSignal、事务式 Renderer cursor、pending-first Approval 与 acknowledge-only action；不含 signal 入队后的精确失效合同 |
 | [Notification Episode v1 (historical)](notification-episode-v1.md) | 初版 immutable Occurrence、separate Disposition、materialized Episode、minimal Change Journal、bounded write、typed action、heads-up 与 retention |

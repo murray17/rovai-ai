@@ -8,6 +8,7 @@ import type {
   NavigationSnapshot
 } from '@contracts'
 import { safeMarkdownHasRenderableContent } from './safe-markdown-model'
+import { createExecutionPublicResultProjector } from './public-result'
 
 export const RAIL_COLLAPSED_WIDTH = 52
 export const RAIL_EXPANDED_WIDTH = 176
@@ -95,6 +96,8 @@ export type ExecutionStep = {
    * while applying the same redaction rules as the local execution console.
    */
   publicCommand: string | null
+  /** Redacted, bounded result-only preview. Never a fallback to tool input or local detail. */
+  publicResult: string | null
   detail: string
   status: ActivityStatus
   activityDomain: string
@@ -462,6 +465,7 @@ export function buildLiveExecutionProgress(
         id: itemId,
         title,
         publicCommand,
+        publicResult: null,
         detail,
         status,
         activityDomain: canonical?.activityDomain ?? 'unknown',
@@ -492,6 +496,7 @@ export function buildLiveExecutionProgress(
         publicCommand: canonical?.activityDomain === 'shell'
           ? publicShellCommandPresentation(payload)
           : null,
+        publicResult: null,
         detail: runtimeActionEvidenceText(payload, canonical) ?? '',
         status,
         activityDomain: canonical?.activityDomain ?? 'unknown',
@@ -508,7 +513,8 @@ export function buildLiveExecutionProgress(
     // reliable terminal Runtime diff projection can produce modified-file rows.
   }
 
-  const stepById = new Map(steps.map((step) => [step.id, step]))
+  const publicResult = createExecutionPublicResultProjector(events, agentRunId)
+  const stepById = new Map(steps.map((step) => [step.id, { ...step, publicResult: publicResult(step) }]))
   const items = itemOrder.flatMap((key): ExecutionProgressItem[] => {
     if (key === 'plan') {
       const explanation = options.textMode === 'complete'

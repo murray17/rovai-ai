@@ -47,6 +47,7 @@
     "test:composer-continuation": "node --test scripts/lib/camp-composer-continuation.test.mjs",
     "test:startup-presentation": "node --test scripts/lib/desktop-startup-presentation.test.mjs",
     "test:camp-fast-layout": "node --test scripts/lib/camp-fast-layout.test.mjs",
+    "test:channel-camp-naming": "node --test scripts/lib/channel-camp-naming.test.mjs",
     "test:execution-avatar-rail": "node --test scripts/lib/execution-avatar-rail.test.mjs",
     "test:approval-dock": "node --test scripts/lib/approval-dock.test.mjs",
     "test:file-preview-layout": "node --test scripts/lib/file-preview-layout.test.mjs",

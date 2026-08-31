@@ -18,6 +18,7 @@ function tool(
       id,
       title: `指令 ${id}`,
       publicCommand: null,
+      publicResult: `结果 ${id}`,
       detail: `结果 ${id}`,
       status,
       activityDomain: 'shell',

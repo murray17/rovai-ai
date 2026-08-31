@@ -55,6 +55,8 @@ pub struct NavigationLeadSummary {
 pub struct NavigationCampItem {
     pub id: String,
     pub title: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub channel_source: Option<CampChannelSource>,
     pub activation_state: String,
     pub project_binding_kind: String,
     pub project_path: String,
@@ -129,6 +131,8 @@ pub struct CampListItem {
 pub struct CampView {
     pub id: String,
     pub title: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub channel_source: Option<CampChannelSource>,
     pub activation_state: String,
     pub project_binding_kind: String,
     pub project_path: String,
@@ -137,6 +141,33 @@ pub struct CampView {
     pub version: i64,
     pub created_at: String,
     pub updated_at: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CampChannelSource {
+    pub provider: String,
+    pub conversation_kind: String,
+}
+
+pub(crate) fn camp_channel_source_from_row(
+    row: &rusqlite::Row<'_>,
+    column: usize,
+) -> rusqlite::Result<Option<CampChannelSource>> {
+    let provider = row.get::<_, Option<String>>(column)?;
+    let conversation_kind = row.get::<_, Option<String>>(column + 1)?;
+    Ok(provider
+        .zip(conversation_kind)
+        .and_then(|(provider, conversation_kind)| {
+            matches!(
+                (provider.as_str(), conversation_kind.as_str()),
+                ("feishu", "p2p" | "group" | "topic") | ("dingtalk", "p2p" | "group")
+            )
+            .then_some(CampChannelSource {
+                provider,
+                conversation_kind,
+            })
+        }))
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -1682,8 +1713,12 @@ fn load_navigation_camps(transaction: &Transaction<'_>) -> Result<Vec<Navigation
                   AND agent_run.status IN ('queued', 'running', 'waiting')
             ),
             camp.version,
-            camp.activation_state
+            camp.activation_state,
+            channel_conversation.provider,
+            channel_conversation.conversation_kind
         FROM camp
+        LEFT JOIN channel_conversation_binding AS channel_binding ON channel_binding.camp_id = camp.id
+        LEFT JOIN channel_conversation ON channel_conversation.id = channel_binding.channel_conversation_id
         LEFT JOIN agent_profile AS lead ON lead.id = camp.default_lead_agent_id
         LEFT JOIN navigation_activity ON navigation_activity.camp_id = camp.id
         LEFT JOIN event_log AS activity_event
@@ -1712,6 +1747,7 @@ fn load_navigation_camps(transaction: &Transaction<'_>) -> Result<Vec<Navigation
         Ok(NavigationCampItem {
             id: row.get(0)?,
             title: row.get(1)?,
+            channel_source: camp_channel_source_from_row(row, 13)?,
             activation_state: row.get(12)?,
             project_binding_kind: row.get(2)?,
             project_path: row.get(3)?,
@@ -1907,16 +1943,21 @@ fn load_camp(transaction: &Transaction<'_>, camp_id: &str) -> Result<Option<Camp
     transaction
         .query_row(
             r#"
-            SELECT id, title, activation_state, project_binding_kind, project_path,
-                   default_lead_agent_id, membership_generation,
-                   version, created_at, updated_at
-            FROM camp WHERE id = ?1
+            SELECT camp.id, camp.title, camp.activation_state, camp.project_binding_kind, camp.project_path,
+                   camp.default_lead_agent_id, camp.membership_generation,
+                   camp.version, camp.created_at, camp.updated_at,
+                   channel_conversation.provider, channel_conversation.conversation_kind
+            FROM camp
+            LEFT JOIN channel_conversation_binding AS channel_binding ON channel_binding.camp_id = camp.id
+            LEFT JOIN channel_conversation ON channel_conversation.id = channel_binding.channel_conversation_id
+            WHERE camp.id = ?1
             "#,
             [camp_id],
             |row| {
                 Ok(CampView {
                     id: row.get(0)?,
                     title: row.get(1)?,
+                    channel_source: camp_channel_source_from_row(row, 10)?,
                     activation_state: row.get(2)?,
                     project_binding_kind: row.get(3)?,
                     project_path: row.get(4)?,
@@ -4738,6 +4779,19 @@ mod slow_tests {
         assert_eq!(snapshot.projects[0].name, "rovai-ai");
         assert_eq!(snapshot.projects[0].total_count, 2);
         assert_eq!(snapshot.projects[0].recent_camps.len(), 2);
+        assert!(
+            snapshot
+                .quick_chat
+                .recent_camps
+                .iter()
+                .chain(
+                    snapshot
+                        .projects
+                        .iter()
+                        .flat_map(|project| &project.recent_camps)
+                )
+                .all(|camp| camp.channel_source.is_none())
+        );
         assert_eq!(
             snapshot.projects[0].project_path,
             project_root.to_string_lossy()

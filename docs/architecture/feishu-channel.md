@@ -8,7 +8,7 @@ last_updated: 2026-08-31
 
 # 飞书渠道架构
 
-字段、状态和恢复合同见 [Feishu Channel v6](../contracts/feishu-channel-v6.md)，credential 与 Developer Session 持久化见
+字段、状态和恢复合同见 [Feishu Channel v7](../contracts/feishu-channel-v7.md)，credential 与 Developer Session 持久化见
 [Channel Storage v2](../contracts/channel-storage-v2.md)，模型输入证据见
 [ContextManifest Evidence v22](../contracts/context-manifest-evidence-v22.md)，取舍理由见
 [v1.35 决策记录](../versions/v1.35/decisions.md)。
@@ -270,15 +270,19 @@ Agent 永久输出使用实际作者 Agent 的已发布 Bot；作者 Bot 不可�
 
 每个 AgentRun 有一个 Core-owned execution console identity。Core 把可公开 Execution Evidence、Run 状态和公开输出
 coalesce 为同一 Card 2.0 snapshot；Main 与 Renderer 共同消费 shared execution presentation 生成的安全 `publicCommand`，
-始终滤掉 reasoning/thought。运行中以普通 Card 2.0 按真实时序直接展示进度；终态保留真实状态、稳定用时，按原始顺序
+始终滤掉 reasoning/thought。运行中 Card 2.0 只直接展示当前正文（最多5行）、当前command和真实状态计数；总原生折叠
+仅保留最近10条command、最多20个timeline blocks。实际测量整卡16,000 UTF-8 JSON bytes和30个递归elements预算，
+超限逐个移出最早历史并更新省略提示，不裁剪Core Evidence或永久输出。终态保留真实状态、稳定用时，按原始顺序
 在一个默认收起的“执行过程”原生面板内混排文字与单条 command 的原生折叠面板。TextBlock 最多 10 行，长文为前 9 行
 与截断提示；每条 command 的结果
 只在它自己的中性代码框中显示，不附“指令／状态／输出”等二级标题。相同公开正文去重，不在每页重复。
 
 shared presentation 保留命令的 executable、subcommand、flags、路径和非敏感参数，并统一脱敏自由正文、认证头、Token、
-Cookie 与敏感环境变量值。飞书只消费该安全命令字段，不从 `detail` 二次解析命令或结果。终态结果从明确文本字段提取，
+Cookie 与敏感环境变量值。飞书只消费该安全命令字段与共享 `ExecutionStep.publicResult`，不从 `detail` 二次解析命令或结果。
+结果预览在共享presentation中从完成操作的明确文本字段提取，
 先排除敏感值、stdin、完整 tool input/output JSON、原始 patch 和消息正文回显，再限制为最多 20 行；超过时为前 9 行、
-一行准确截断提示、后 10 行，并另限 4KiB；二进制/base64 结果不公开。`apply_patch` 使用明确工具名及 canonical
+一行准确截断提示、后 10 行，并另限 4KiB；极长行预算内保留首尾，二进制/base64 结果不公开。实时卡不展示该结果；
+原始本地detail仍保留原查看语义。`apply_patch` 使用明确工具名及 canonical
 结构化文件增删行，不公开 patch body。
 
 Run 进入终态后，Core 先把控制台置为 `terminal_pending`；公开 evidence/output 连续 900ms 没有变化后才生成最后一次

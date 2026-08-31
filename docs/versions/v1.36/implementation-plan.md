@@ -30,6 +30,42 @@ last_updated: 2026-08-31
 - [x] 单元测试覆盖 Console API wire、Web Session、Provisioner、Open API、Stream readiness/ACK、Inbound、Migration、Core admission 和 Renderer；
 - [x] 完成仓库全量 Rust、TypeScript、文档、UI detector 与 Desktop build 门禁并记录本次结果。
 
+## 2026-08-31 飞书紧凑实时执行卡
+
+- 实时默认只显示最新正文（5行）、当前一条command和真实进度。总原生面板默认关闭，最多保留最近10条command、
+  20个timeline blocks；实际Card JSON受16,000 UTF-8 bytes/30个递归elements约束，超限从最早历史移出并更新提示。
+  不改变Core Evidence、完整终态timeline或永久Agent回复；超大不可拆command诚实提示在Rovai查看，不静默改名。
+- 共享ExecutionStep新增publicResult，仅从明确完成输出生成安全预览；本地detail不变，飞书不直接投影detail。
+  继续20行/4KiB、先脱敏后截断，增加长行首尾保留与Core canonicalResult/error文本覆盖；空结果按方案提示。
+- 初次终态显式关闭总面板、pageIndex为0。v6同步分页回包、900ms封存、Owner/App/message/sequence授权、下一根撤回均保持；
+  钉钉纯文本输出及既有NO-GO验收范围不变，不回退附件中的旧分支/基线。
+- 当前规范升级为[Feishu Channel v7](../../contracts/feishu-channel-v7.md)，v6保持冻结。此为局部可逆presentation变更，
+  不增加Version Decision、Migration或Core/模型协议，不以本地卡片JSON测试冒充真实飞书客户端验收。
+- 定向4文件119项、全量131文件/1257项Vitest、typecheck和Desktop build通过；回归覆盖100/200/1000条指令实时窗口、
+  200条终态完整顺序、UTF-8字节驱动裁剪、超大单条诚实降级、跨窗口脱敏、独立publicResult、Host send/update及既有同步分页。
+  文档治理9项、docs:check和以main e95f192d为显式base的docs:check:ci通过，UI detector无告警。
+  Core封存/授权/撤回实现未修改；本轮不重复宣称外部客户端或打包验收。
+
+本轮不访问日常渠道凭据，不发外部测试消息，不提交/push、不打包/安装/重启App；保留同worktree的命名与钉钉改动。
+
+## 2026-08-31 渠道 Camp 命名
+
+- 共享渠道创建改为普通 `default` 命名；首次成功 admission 复用现有确定性命名函数，继续使用同一原子
+  CampMessage/Turn/Run 提交。五种已支持渠道均不再预填昵称/群名/项目名；既有标题不批量改写。
+- Navigation、Camp Snapshot/Open 与 Notification hydration 只从既有绑定投影 `channelSource`，闭合绑定同样保留。
+  Renderer 统一加来源前缀；重命名仍只保存原始标题，不新增 Migration、路由、权限或模型输入协议。
+- 扩展既有 Rust admission/投影/通知 fixture，未新增昂贵独立数据库测试。渠道25项、普通协作44项、Read Model14项、
+  Notification11项通过；`cargo clippy -p rovai-core --lib --tests -- -D warnings` 与格式检查通过。
+- `pnpm typecheck`、Desktop build、文档治理9项、`docs:check`、显式 main base 的 `docs:check:ci` 通过。
+  最后一轮 `pnpm exec vitest run --maxWorkers=2` 为130文件/1232项全通过；共享目录并行钉钉头像改动保持原样。
+- `pnpm test:channel-camp-naming` 使用全新临时 userData/Skill Library，挂载生产侧栏、顶部和 Quick Chat，
+  验证五种前缀、普通名称不变、长标题裁切及完整名称、键盘打开重命名、原生输入只保存原始标题、Day/Night与200%缩放。
+  隐藏窗口使用与既有 sidebar acceptance 相同的 Chromium 键盘注入，退出前解除 debugger 并销毁测试窗口；
+  不以窗口未收系统键盘事件修改产品菜单。200%下沿用现有窄视口滚动，不扩展为全局响应式重做。UI detector 无告警。
+
+UI 夹具仅使用内存投影，不启动 Core/Runtime、不调用飞书或钉钉、不读取日常凭据；它不是外部渠道端到端验收。
+本轮未提交、push、打包、安装或重启日常 App，钉钉既有 NO-GO 边界保持不变。
+
 ## 2026-08-31 PR #136 主线合并验证
 
 先将下节钉钉内置扫码和静默取消的已验证改动保存为 `7b39e744`，再合入

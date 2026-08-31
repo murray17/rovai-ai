@@ -1,5 +1,4 @@
-import type { AgentRunExecutionEvidenceView } from '@contracts'
-import { executionStepPublicTitle, type ExecutionStep } from './index'
+import type { ExecutionStep, LiveRuntimeEvent } from './index'
 
 const HIDDEN = '[已隐藏]'
 const SENSITIVE_NAME = /token|secret|password|passwd|authorization|credential|cookie|api[_-]?key|private[_-]?key|stdin|密码|口令/iu
@@ -11,37 +10,50 @@ const RAW_PATCH = /(?:\*\*\* (?:Begin Patch|Update File|Add File|Delete File)|^d
 const ROVAI_SEND = /(?:^|[\s/\\])rovai(?:\.exe)?["']?\s+send(?:\s|$)/u
 const MESSAGE_BODY = /--body(?:=|\s+)(?:"((?:\\.|[^"\\])*)"|'((?:\\.|[^'\\])*)'|([^\s;&|]+))/gu
 
-type CommandProjection = { title: string; result: string }
+type PublicEvidence = Pick<LiveRuntimeEvent, 'id' | 'agentRunId' | 'eventType' | 'payload' | 'canonical'>
 
-/** The channel boundary never uses ExecutionStep.detail: it mixes inputs and results. */
-export function createFeishuCommandProjector(
-  evidence: AgentRunExecutionEvidenceView[],
+/** Collect across the entire Run before any windowing or head/tail selection. */
+export function createExecutionPublicTextRedactor(
+  evidence: PublicEvidence[],
   agentRunId: string
-): (step: ExecutionStep) => CommandProjection {
-  const events = evidence.filter((event) => event.agentRunId === agentRunId)
+): (text: string) => string {
   const secrets = new Set<string>()
+  for (const event of evidence) {
+    if (event.agentRunId !== agentRunId) continue
+    collectSecrets(event.payload, secrets)
+    collectSecrets(event.canonical?.diffProjection, secrets)
+    const command = eventCommand(record(event.payload))
+    if (command && ROVAI_SEND.test(command)) {
+      for (const match of command.matchAll(MESSAGE_BODY)) {
+        const body = match[1] ?? match[2] ?? match[3]
+        addSecret(secrets, body)
+        addSecret(secrets, body?.replace(/\s+/gu, ' '))
+      }
+    }
+  }
+  const values = [...secrets].filter(Boolean).sort((left, right) => right.length - left.length)
+  return (text) => redactSecrets(text, values)
+}
+
+/** Inputs and local detail are never result sources. Only completed operations expose previews. */
+export function createExecutionPublicResultProjector(
+  evidence: PublicEvidence[],
+  agentRunId: string
+): (step: ExecutionStep) => string | null {
+  const events = evidence.filter((event) => event.agentRunId === agentRunId)
+  const redact = createExecutionPublicTextRedactor(events, agentRunId)
   const outputs = new Map<string, string>()
   const privateMessageOperations = new Set<string>()
   for (const event of events) {
-    collectSecrets(event.payload, secrets)
     const payload = record(event.payload)
     const operationId = event.canonical?.operationId ?? event.id
     const item = record(payload.item)
-    const input = record(payload.input)
-    const command = [item.command, input.command, input.commandLine, input.CommandLine, input.cmd, payload.input]
-      .find((value) => typeof value === 'string')
+    const command = eventCommand(payload)
     // Send results can echo the message in arbitrary, untyped response fields. They
     // are not an execution-result preview; the public message has its own TextBlock.
     if ((typeof command === 'string' && ROVAI_SEND.test(command))
       || [event.canonical?.toolName, payload.canonicalTool].includes('camp.message.send')) {
       privateMessageOperations.add(operationId)
-      if (typeof command === 'string') {
-        for (const match of command.matchAll(MESSAGE_BODY)) {
-          const body = match[1] ?? match[2] ?? match[3]
-          addSecret(secrets, body)
-          addSecret(secrets, body?.replace(/\s+/gu, ' '))
-        }
-      }
     }
     if (event.eventType === 'command.output.delta') {
       if (typeof payload.delta === 'string') {
@@ -56,21 +68,16 @@ export function createFeishuCommandProjector(
       output = textualResult(payload.output)
       if (payload.sourceAuthority === 'core') {
         const envelope = record(payload.coreEnvelope)
-        output = textualResult(envelope.result) ?? textualResult(envelope.error) ?? output
+        const projection = record(payload.operationProjection)
+        output = textualResult(envelope.result) ?? textualResult(envelope.error)
+          ?? textualResult(record(envelope.error).message)
+          ?? textualResult(projection.canonicalResult) ?? output
       }
     }
     if (output !== undefined) outputs.set(operationId, output)
   }
-  // Collect before selecting head/tail, including values declared in the omitted middle.
-  const values = [...secrets].filter(Boolean).sort((left, right) => right.length - left.length)
   return (step) => {
-    const title = step.toolName === 'apply_patch' ? 'apply_patch' : executionStepPublicTitle(step)
-    let safeTitle = RAW_PATCH.test(title)
-      ? '命令内容已隐藏（含原始补丁）'
-      : redactSecrets(title, values)
-    if (privateMessageOperations.has(step.id)) {
-      safeTitle = safeTitle.replace(MESSAGE_BODY, `--body ${HIDDEN}`)
-    }
+    if (step.status === 'running' || step.status === 'waiting') return null
     let result: string
     if (step.fileChanges?.length) {
       result = step.fileChanges
@@ -79,15 +86,26 @@ export function createFeishuCommandProjector(
     } else if (privateMessageOperations.has(step.id)) {
       result = '（消息内容不在执行结果中重复展示）'
     } else {
-      result = outputs.get(step.id) ?? ''
+      result = normalizeText(outputs.get(step.id) ?? '')
       if (RAW_PATCH.test(result)) result = '（原始补丁已隐藏）'
       else if (looksLikeStructuredResult(result)) result = '（结构化工具结果已隐藏）'
     }
-    return {
-      title: safeTitle,
-      result: resultPreview(redactSecrets(result, values))
-    }
+    return resultPreview(redact(result))
   }
+}
+
+export function executionPublicCommandTitle(step: ExecutionStep, redact: (text: string) => string): string {
+  const title = step.toolName === 'apply_patch' ? 'apply_patch' : step.publicCommand ?? step.title
+  if (RAW_PATCH.test(title)) return '命令内容已隐藏（含原始补丁）'
+  const safeTitle = redact(title)
+  return ROVAI_SEND.test(title) ? safeTitle.replace(MESSAGE_BODY, `--body ${HIDDEN}`) : safeTitle
+}
+
+function eventCommand(payload: Record<string, unknown>): string | undefined {
+  const item = record(payload.item)
+  const input = record(payload.input)
+  return [item.command, input.command, input.commandLine, input.CommandLine, input.cmd, payload.command, payload.input]
+    .find((value): value is string => typeof value === 'string')
 }
 
 function record(value: unknown): Record<string, unknown> {
@@ -179,8 +197,8 @@ function looksLikeStructuredResult(value: string): boolean {
   return /^\s*(?:\{\s*"|"[\w.-]+"\s*:|\[\s*\{)/mu.test(text)
 }
 
-function resultPreview(value: string): string {
-  if (!value.trim()) return '（无可公开的文本结果）'
+function resultPreview(value: string): string | null {
+  if (!value.trim()) return null
   if (/(?:data:[^\s,]+;base64,|(?:^|\n)\s*[A-Za-z0-9+/]{160,}={0,2}\s*(?:\n|$))/u.test(value)) {
     return '（二进制或编码结果已隐藏）'
   }
@@ -189,26 +207,35 @@ function resultPreview(value: string): string {
   const preview = lines.length <= 20
     ? lines
     : [...lines.slice(0, 9), `… 已截断 ${lines.length - 19} 行 …`, ...lines.slice(-10)]
-  const bounded = preview.map((line) => boundFeishuPreviewLine(line))
+  const bounded = preview.map((line) => boundExecutionPreviewLine(line, 512, true))
   if (new TextEncoder().encode(bounded.join('\n')).length <= 4096) return bounded.join('\n')
   // Preserve the selected head/tail lines while also bounding a dense 20-line
   // result. Newline separators and truncation notices are part of the budget.
   const lineBudget = Math.floor((4096 - preview.length + 1) / preview.length)
-  return preview.map((line) => boundFeishuPreviewLine(line, lineBudget)).join('\n')
+  return preview.map((line) => boundExecutionPreviewLine(line, lineBudget, true)).join('\n')
 }
 
 /** A line is not a byte budget. Keep pathological single-line results deliverable. */
-export function boundFeishuPreviewLine(line: string, byteLimit = 512): string {
+export function boundExecutionPreviewLine(line: string, byteLimit = 512, retainTail = false): string {
   const encoder = new TextEncoder()
   if (encoder.encode(line).length <= byteLimit) return line
-  const suffix = ' …（此行过长，已截断）'
+  const suffix = retainTail ? ' …（此行过长，已截断）… ' : ' …（此行过长，已截断）'
   const available = byteLimit - encoder.encode(suffix).length
+  const prefixBudget = retainTail ? Math.floor(available / 2) : available
   let bytes = 0
   let prefix = ''
   for (const character of line) {
     bytes += encoder.encode(character).length
-    if (bytes > available) break
+    if (bytes > prefixBudget) break
     prefix += character
   }
-  return prefix + suffix
+  if (!retainTail) return prefix + suffix
+  let tail = ''
+  bytes = 0
+  for (const character of Array.from(line).reverse()) {
+    bytes += encoder.encode(character).length
+    if (bytes > available - prefixBudget) break
+    tail = character + tail
+  }
+  return prefix + suffix + tail
 }

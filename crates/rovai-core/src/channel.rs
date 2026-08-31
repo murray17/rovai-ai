@@ -20,7 +20,8 @@ use crate::{
     camp_id::CampId,
     collaboration::{
         AddCampMemberCommand, CampMembershipMutationSource, CollaborationService,
-        ExternalChannelAdmissionInput, RemoveCampMemberCommand, append_domain_event,
+        DEFAULT_CAMP_TITLE, ExternalChannelAdmissionInput, RemoveCampMemberCommand,
+        append_domain_event,
     },
     command::{
         ActorRef, CommandEnvelope, CommandExecution, CommandHandlerResult, CommandResultStatus,
@@ -3745,11 +3746,9 @@ impl ChannelService {
             let mut binding = ChannelBindingAdmission {
                 binding_id: binding_id.clone(),
                 camp_id: None,
-                project_display_name: "快速对话".to_string(),
                 binding_kind: "quick_chat".to_string(),
                 canonical_path,
                 project_status: None,
-                conversation_display_name,
                 conversation_kind: "p2p".to_string(),
             };
             let camp_id = create_channel_camp(
@@ -4936,11 +4935,9 @@ impl ChannelService {
             let mut binding = ChannelBindingAdmission {
                 binding_id: binding_id.clone(),
                 camp_id: None,
-                project_display_name: project_display_name.clone(),
                 binding_kind: "directory".to_string(),
                 canonical_path,
                 project_status: Some("active".to_string()),
-                conversation_display_name: pending.conversation.display_name.clone(),
                 conversation_kind: pending.conversation.conversation_kind.clone(),
             };
             let initial_members = if matches!(binding.conversation_kind.as_str(), "group" | "topic")
@@ -5785,11 +5782,9 @@ struct FrozenInboundPayload {
 struct ChannelBindingAdmission {
     binding_id: String,
     camp_id: Option<String>,
-    project_display_name: String,
     binding_kind: String,
     canonical_path: String,
     project_status: Option<String>,
-    conversation_display_name: String,
     conversation_kind: String,
 }
 
@@ -6714,10 +6709,6 @@ fn load_active_channel_binding(
             r#"
             SELECT binding.id, binding.camp_id,
                    CASE binding.execution_scope_kind
-                       WHEN 'quick_chat' THEN '快速对话'
-                       ELSE project.display_name
-                   END,
-                   CASE binding.execution_scope_kind
                        WHEN 'quick_chat' THEN 'quick_chat'
                        ELSE 'directory'
                    END,
@@ -6725,8 +6716,7 @@ fn load_active_channel_binding(
                        WHEN 'quick_chat' THEN ?3
                        ELSE project.canonical_path
                    END,
-                   project.status,
-                   conversation.display_name, conversation.conversation_kind
+                   project.status, conversation.conversation_kind
             FROM channel_conversation_binding AS binding
             JOIN channel_conversation AS conversation
               ON conversation.id = binding.channel_conversation_id
@@ -6740,12 +6730,10 @@ fn load_active_channel_binding(
                 Ok(ChannelBindingAdmission {
                     binding_id: row.get(0)?,
                     camp_id: row.get(1)?,
-                    project_display_name: row.get(2)?,
-                    binding_kind: row.get(3)?,
-                    canonical_path: row.get(4)?,
-                    project_status: row.get(5)?,
-                    conversation_display_name: row.get(6)?,
-                    conversation_kind: row.get(7)?,
+                    binding_kind: row.get(2)?,
+                    canonical_path: row.get(3)?,
+                    project_status: row.get(4)?,
+                    conversation_kind: row.get(5)?,
                 })
             },
         )
@@ -6783,11 +6771,9 @@ fn create_quick_chat_binding(
     let mut binding = ChannelBindingAdmission {
         binding_id,
         camp_id: None,
-        project_display_name: "快速对话".to_string(),
         binding_kind: "quick_chat".to_string(),
         canonical_path: quick_chat_path.to_string(),
         project_status: None,
-        conversation_display_name: conversation.display_name.clone(),
         conversation_kind: conversation.conversation_kind.clone(),
     };
     binding.camp_id = Some(create_channel_camp(
@@ -7652,13 +7638,6 @@ fn create_channel_camp(
         .context("channel Camp requires a Default Lead")?;
     unique_targets.insert(default_lead.clone());
     let camp_id = CampId::new().to_string();
-    let title = format!(
-        "{} · {}",
-        binding.conversation_display_name, binding.project_display_name
-    )
-    .chars()
-    .take(80)
-    .collect::<String>();
     transaction.execute(
         r#"
         INSERT INTO camp(
@@ -7666,11 +7645,11 @@ fn create_channel_camp(
             project_binding_kind, project_path,
             default_lead_agent_id, activation_state, last_message_sequence,
             membership_generation, version, created_at, updated_at
-        ) VALUES (?1, ?2, 'generated', 'peer', ?3, ?4, ?5, 'active', 0, 1, 1, ?6, ?6)
+        ) VALUES (?1, ?2, 'default', 'peer', ?3, ?4, ?5, 'active', 0, 1, 1, ?6, ?6)
         "#,
         params![
             camp_id,
-            title,
+            DEFAULT_CAMP_TITLE,
             binding.binding_kind,
             binding.canonical_path,
             default_lead,
@@ -12078,6 +12057,54 @@ mod tests {
         path
     }
 
+    fn assert_channel_camp_name(
+        database: &mut Database,
+        camp_id: &str,
+        title: &str,
+        name_origin: &str,
+        provider: &str,
+        conversation_kind: &str,
+    ) {
+        let stored: (String, String) = database
+            .connection()
+            .query_row(
+                "SELECT title, name_origin FROM camp WHERE id = ?1",
+                [camp_id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(stored, (title.to_string(), name_origin.to_string()));
+        let source = json!({ "provider": provider, "conversationKind": conversation_kind });
+        let read_model = crate::read_model::ReadModelService;
+        let navigation = read_model.navigation_snapshot(database).unwrap();
+        let item = navigation
+            .quick_chat
+            .recent_camps
+            .iter()
+            .chain(
+                navigation
+                    .projects
+                    .iter()
+                    .flat_map(|project| &project.recent_camps),
+            )
+            .find(|camp| camp.id == camp_id)
+            .unwrap();
+        assert_eq!(item.title, title);
+        assert_eq!(serde_json::to_value(item).unwrap()["channelSource"], source);
+        let opened = read_model.camp_open_projection(database, camp_id).unwrap();
+        assert_eq!(opened.camp.title, title);
+        assert_eq!(
+            serde_json::to_value(&opened.camp).unwrap()["channelSource"],
+            source
+        );
+        let snapshot = read_model.camp_snapshot(database, camp_id).unwrap();
+        assert_eq!(snapshot.camp.title, title);
+        assert_eq!(
+            serde_json::to_value(&snapshot.camp).unwrap()["channelSource"],
+            source
+        );
+    }
+
     fn resolve_pending(
         service: &ChannelService,
         database: &mut Database,
@@ -12594,6 +12621,15 @@ mod tests {
             )
             .unwrap();
         assert_eq!(started.result.status, CommandResultStatus::Applied);
+        let camp_id = started.result.payload["campId"].as_str().unwrap();
+        assert_channel_camp_name(
+            &mut database,
+            camp_id,
+            DEFAULT_CAMP_TITLE,
+            "default",
+            DINGTALK_PROVIDER,
+            "p2p",
+        );
 
         let mut observation = observation_command(
             "ding-app-agent_1",
@@ -12653,6 +12689,14 @@ mod tests {
             .unwrap();
         assert_eq!(incomplete.result.status, CommandResultStatus::Rejected);
         assert_eq!(incomplete.result.code, "channel.inbound.not_ready");
+        assert_channel_camp_name(
+            &mut database,
+            camp_id,
+            DEFAULT_CAMP_TITLE,
+            "default",
+            DINGTALK_PROVIDER,
+            "p2p",
+        );
         let mut completed_observation = observation_command(
             "ding-app-agent_1",
             "ding-message-1",
@@ -12692,6 +12736,14 @@ mod tests {
             )
             .unwrap();
         assert_eq!(finalized.result.code, "channel.turn.admitted");
+        assert_channel_camp_name(
+            &mut database,
+            camp_id,
+            "帮我检查登录模块",
+            "generated",
+            DINGTALK_PROVIDER,
+            "p2p",
+        );
         for table in ["camp_message", "camp_turn", "agent_run"] {
             let count: i64 = database
                 .connection()
@@ -12911,6 +12963,14 @@ mod tests {
         );
         assert_eq!(resolved.result.code, "channel.binding.resolved");
         let camp_id = resolved.result.payload["campId"].as_str().unwrap();
+        assert_channel_camp_name(
+            &mut database,
+            camp_id,
+            "只点名一号",
+            "generated",
+            DINGTALK_PROVIDER,
+            "group",
+        );
         assert_eq!(
             database
                 .connection()
@@ -13511,6 +13571,25 @@ mod tests {
         assert_eq!(second_generation.result.payload["generation"], 2);
         assert_eq!(first_generation.result.payload["campCreated"], true);
         assert_eq!(second_generation.result.payload["campCreated"], true);
+        // /new creates default names only; closed generations retain their source.
+        let first_camp_id = first_generation.result.payload["campId"].as_str().unwrap();
+        let second_camp_id = second_generation.result.payload["campId"].as_str().unwrap();
+        assert_channel_camp_name(
+            &mut database,
+            first_camp_id,
+            DEFAULT_CAMP_TITLE,
+            "default",
+            FEISHU_PROVIDER,
+            "p2p",
+        );
+        assert_channel_camp_name(
+            &mut database,
+            second_camp_id,
+            DEFAULT_CAMP_TITLE,
+            "default",
+            FEISHU_PROVIDER,
+            "p2p",
+        );
         for table in ["camp_message", "camp_turn", "agent_run"] {
             let count: i64 = database
                 .connection()
@@ -13560,6 +13639,22 @@ mod tests {
             .unwrap();
         assert_eq!(finalized.result.code, "channel.turn.admitted");
         assert_eq!(finalized.result.payload["campCreated"], false);
+        assert_channel_camp_name(
+            &mut database,
+            second_camp_id,
+            "帮我检查",
+            "generated",
+            FEISHU_PROVIDER,
+            "p2p",
+        );
+        assert_channel_camp_name(
+            &mut database,
+            first_camp_id,
+            DEFAULT_CAMP_TITLE,
+            "default",
+            FEISHU_PROVIDER,
+            "p2p",
+        );
         assert_eq!(
             database
                 .connection()
@@ -14686,6 +14781,15 @@ mod tests {
         );
         assert_eq!(resolved.result.code, "channel.binding.resolved");
         assert_eq!(resolved.result.payload["promotedMessageCount"], 2);
+        let camp_id = resolved.result.payload["campId"].as_str().unwrap();
+        assert_channel_camp_name(
+            &mut database,
+            camp_id,
+            "先由二号确认项目",
+            "generated",
+            FEISHU_PROVIDER,
+            "group",
+        );
         for (table, expected) in [("camp_message", 1), ("camp_turn", 1), ("agent_run", 2)] {
             let count: i64 = database
                 .connection()
@@ -14872,6 +14976,42 @@ mod tests {
         );
         assert_eq!(settled_replay.result, settled.result);
 
+        // A local rename changes only the raw title and survives the next FIFO root.
+        let version = database
+            .connection()
+            .query_row("SELECT version FROM camp WHERE id = ?1", [camp_id], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        let renamed = crate::collaboration::CollaborationService::default()
+            .rename_camp(
+                &mut database,
+                &CommandEnvelope {
+                    command_id: "rename-channel-camp".to_string(),
+                    actor: ActorRef::User {
+                        user_id: CURRENT_USER_ID.to_string(),
+                    },
+                    camp_id: Some(camp_id.to_string()),
+                    expected_versions: Vec::new(),
+                    execution_epoch: None,
+                    payload: crate::collaboration::RenameCampCommand {
+                        camp_id: camp_id.to_string(),
+                        title: "OAuth 登录问题".to_string(),
+                        expected_version: version,
+                    },
+                },
+            )
+            .unwrap();
+        assert_eq!(renamed.result.status, CommandResultStatus::Applied);
+        assert_channel_camp_name(
+            &mut database,
+            camp_id,
+            "OAuth 登录问题",
+            "user",
+            FEISHU_PROVIDER,
+            "group",
+        );
+
         let finished_at = Utc::now().to_rfc3339();
         database.connection().execute(
             "UPDATE agent_run SET status = 'succeeded', wait_reason = NULL, ended_at = ?1, updated_at = ?1",
@@ -14913,6 +15053,14 @@ mod tests {
         // The next wake promotes the root; another must not duplicate it.
         service.host_tick(&mut database, &actor, &poll).unwrap();
         service.host_tick(&mut database, &actor, &poll).unwrap();
+        assert_channel_camp_name(
+            &mut database,
+            camp_id,
+            "OAuth 登录问题",
+            "user",
+            FEISHU_PROVIDER,
+            "group",
+        );
         for (table, expected) in [("camp_message", 2), ("camp_turn", 2), ("agent_run", 3)] {
             let count = database
                 .connection()
@@ -15845,6 +15993,14 @@ mod tests {
         let pending_id = pending.result.payload["pendingBindingId"].as_str().unwrap();
         let resolved = resolve_pending(&service, &mut database, pending_id, "topic-resolve");
         let camp_id = resolved.result.payload["campId"].as_str().unwrap();
+        assert_channel_camp_name(
+            &mut database,
+            camp_id,
+            "只点名一号",
+            "generated",
+            FEISHU_PROVIDER,
+            "topic",
+        );
         assert_eq!(
             database
                 .connection()

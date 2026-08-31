@@ -97,6 +97,7 @@ import { MemoryLibrary } from './MemoryLibrary'
 import { DiagnosticsCenter } from './DiagnosticsCenter'
 import { RuntimeMonitoring } from './RuntimeMonitoring'
 import { localizeExecutionEngineTerms } from './product-copy'
+import { formatCampTitle } from './camp-title'
 import {
   applyAppearanceSnapshot,
   initialAppearanceSnapshot
@@ -2148,8 +2149,9 @@ function AuthoritativeApp({
   const activeCampProject = activeProjectPath && displayNavigation
     ? displayNavigation.projects.find((project) => project.projectPath === activeProjectPath) ?? null
     : null
-  const activeCampTitle = activeCamp?.title
-    ?? (campSnapshot?.camp.id === activeCampId ? campSnapshot.camp.title : '')
+  const activeCampTitle = activeCamp
+    ? formatCampTitle(activeCamp)
+    : campSnapshot?.camp.id === activeCampId ? formatCampTitle(campSnapshot.camp) : ''
   const activeCampContextLabel = activeCampProject?.name
     ?? (activeProjectPath === currentProjectPath ? currentProjectLabel : '快速对话')
   const activeCancellingTurnIds = useMemo(
@@ -3872,7 +3874,7 @@ export function AppHeader({
         <div className="context-breadcrumb">
           {contextLabel && <span className="context-project">{contextLabel}</span>}
           {contextLabel && <span className="context-sep" aria-hidden="true">›</span>}
-          <h1>{title}</h1>
+          <h1 title={title}>{title}</h1>
         </div>
         <div className="topbar-context-status" aria-live="polite">
           {pendingApprovals > 0 && (

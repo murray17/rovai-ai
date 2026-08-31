@@ -62,7 +62,7 @@ Occurrence。
 
 ## References
 
-- [Notification Episode v4](../../contracts/notification-episode-v4.md)
+- [Notification Episode v5](../../contracts/notification-episode-v5.md)
 - [Current User Attention v4](../../contracts/current-user-attention-v4.md)
 - [App Shell 与统一侧栏](app-shell-navigation.md)
 - [DESIGN.md](../../../DESIGN.md)

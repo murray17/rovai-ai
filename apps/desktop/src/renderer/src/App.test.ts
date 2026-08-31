@@ -2444,6 +2444,7 @@ describe('task event projections', () => {
           totalCount: 1,
           recentCamps: [{
             id: 'camp-project', title: longTitle, activationState: 'active', projectPath: '/repo',
+            channelSource: { provider: 'feishu', conversationKind: 'topic' },
             projectBindingKind: 'directory', defaultLead: null, marker: 'unread_completed',
             lastActivityAt: '2026-07-22T00:00:01Z', lastActivityGlobalSequence: 12,
             latestCompletionGlobalSequence: 12, version: 2
@@ -2486,6 +2487,9 @@ describe('task event projections', () => {
     expect(markup).toContain('快速对话讨论')
     expect(markup).toContain('rovai-ai')
     expect(markup).toContain(longTitle)
+    expect(markup).toContain(`aria-label="【飞书话题】${longTitle}，有新回复"`)
+    expect(markup).toContain(`title="【飞书话题】${longTitle} · 有新回复"`)
+    expect(markup).toContain(`class="truncate">【飞书话题】${longTitle}</span>`)
     expect(markup).toContain('管理')
     expect(markup).toContain('aria-label="管理项目“rovai-ai”"')
     expect(markup).toContain('aria-label="管理“快速对话讨论”"')
@@ -4832,6 +4836,7 @@ describe('task event projections', () => {
         id: 'tool-settled',
         title: 'pnpm test',
         publicCommand: 'pnpm test',
+        publicResult: 'Tests passed',
         detail: 'Tests passed',
         status: 'completed' as const,
         activityDomain: 'shell',
@@ -5023,6 +5028,7 @@ describe('task event projections', () => {
           id: `tool-${iconKind}`,
           title: `${iconKind} command`,
           publicCommand: null,
+          publicResult: null,
           detail: `${iconKind} complete result`,
           status: 'completed' as const,
           activityDomain,
@@ -5131,7 +5137,7 @@ describe('task event projections', () => {
           key: 'tool:failed-command',
           kind: 'tool' as const,
           step: {
-            id: 'failed-command', title: 'pnpm test', publicCommand: 'pnpm test', detail: 'exit 1',
+            id: 'failed-command', title: 'pnpm test', publicCommand: 'pnpm test', publicResult: 'exit 1', detail: 'exit 1',
             status: 'failed' as const, activityDomain: 'shell', iconKind: 'terminal' as const,
             toolName: null,
             credibility: 'runtime_structured'

@@ -12,6 +12,7 @@ import type {
   StoredCommandResult
 } from '@contracts'
 import type { VisibleNotificationSources } from './CampWorkspace'
+import { formatCampTitle } from './camp-title'
 
 export const NOTIFICATION_RECOVERY_INTERVAL_MS = 30_000
 
@@ -656,7 +657,7 @@ function NotificationHeadsUp({
       >
         <strong>{presentation.label}</strong>
         <span>{presentation.message}</span>
-        <small>{entry.episode.camp.title}</small>
+        <small title={formatCampTitle(entry.episode.camp)}>{formatCampTitle(entry.episode.camp)}</small>
       </button>
       <button
         className="notification-heads-up-close"

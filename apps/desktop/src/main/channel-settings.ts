@@ -2003,7 +2003,7 @@ export class ChannelSettingsService {
           if (source.targetAppId !== delivery.targetAppId) {
             throw new Error('execution_console_target_app_mismatch')
           }
-          const card = executionConsoleCard(source)
+          const card = executionConsoleCard(source, { pageIndex: 0, outerExpanded: false })
           messageId = delivery.updateMessageId ?? null
           if (messageId) {
             await managed.channel.updateCard(messageId, card)

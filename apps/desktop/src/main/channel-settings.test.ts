@@ -2750,6 +2750,7 @@ describe('channel settings service', () => {
 
   it.each([
     { label: 'live send', runStatus: 'running', updateMessageId: null },
+    { label: 'live update', runStatus: 'running', updateMessageId: 'om_console' },
     { label: 'sealed send', runStatus: 'succeeded', updateMessageId: null },
     { label: 'sealed update', runStatus: 'succeeded', updateMessageId: 'om_console' }
   ])('keeps $label console disclosure separate from permanent Agent output cards', async ({ runStatus, updateMessageId }) => {
@@ -2857,7 +2858,15 @@ describe('channel settings service', () => {
       expect(visibleBody).not.toContain('执行台最终回复。')
     } else {
       expect(visibleBody).toContain('pnpm test')
-      expect(JSON.stringify(card)).not.toContain('collapsible_panel')
+      expect(card.body.elements).toEqual(expect.arrayContaining([
+        expect.objectContaining({ tag: 'collapsible_panel', element_id: 'execution_process', expanded: false,
+          header: expect.objectContaining({ title: { tag: 'plain_text', content: '执行过程 · 最近 1 条 / 共 1 条' } }),
+          elements: [{ tag: 'markdown', content: '✓ pnpm test' }]
+        })
+      ]))
+      expect(JSON.stringify(card).match(/collapsible_panel/gu)).toHaveLength(1)
+      expect(visibleBody).toContain('已完成 1 条指令')
+      expect(Buffer.byteLength(JSON.stringify(card))).toBeLessThanOrEqual(16_000)
     }
     expect(JSON.stringify(card)).not.toContain('private-stdout-token')
     expect(JSON.stringify(card).includes('tests passed')).toBe(runStatus === 'succeeded')

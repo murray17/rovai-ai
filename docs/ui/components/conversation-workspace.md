@@ -37,7 +37,7 @@ Files Changed 历史 Review 真源。
 
 ## 打开与渐进历史
 
-Camp 的首个 meaningful paint 只依赖 [Camp Open Projection v9](../../contracts/camp-open-projection-v9.md)：
+Camp 的首个 meaningful paint 只依赖 [Camp Open Projection v10](../../contracts/camp-open-projection-v10.md)：
 Camp/成员、最近消息、当前运行摘要、pending Approval 和 Composer 可用即完成。项目导航恢复、侧栏刷新
 与可见来源确认在首屏后执行，失败不能撤销已打开会话。只显示“正在打开对话”的 Shell 不算完成。
 

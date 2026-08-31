@@ -10,14 +10,15 @@ import {
   executionStepPublicTitle,
   liveRuntimeEventFromExecutionEvidence,
   type ActivityStatus,
-  type ExecutionProgressItem
+  type ExecutionProgressItem,
+  type ExecutionStep
 } from './index'
 import {
   groupConsecutiveToolItems,
   type GroupedExecutionProgressItem,
   type ToolProgressItem
 } from './tool-grouping'
-import { boundFeishuPreviewLine, createFeishuCommandProjector } from './feishu-result-preview'
+import { boundExecutionPreviewLine, createExecutionPublicTextRedactor, executionPublicCommandTitle } from './public-result'
 
 // The plain projection is also used by DingTalk; its contract is unchanged.
 const PLAIN_PAGE_CHAR_BUDGET = 10_000
@@ -25,9 +26,14 @@ const PLAIN_PAGE_OPERATION_BUDGET = 20
 const FEISHU_PAGE_COMMAND_BUDGET = 15
 const FEISHU_PAGE_ELEMENT_BUDGET = 50
 const FEISHU_PAGE_BYTE_BUDGET = 24_000
+const FEISHU_LIVE_COMMAND_BUDGET = 10
+const FEISHU_LIVE_BLOCK_BUDGET = 20
+const FEISHU_LIVE_ELEMENT_BUDGET = 30
+const FEISHU_LIVE_BYTE_BUDGET = 16_000
 type CardElement = Record<string, unknown>
 type TimelineBlock = { kind: 'text' | 'command'; element: CardElement }
 type TerminalTimeline = { pages: TimelineBlock[][]; commandCount: number }
+type LiveTimelineBlock = { kind: 'text'; body: string } | { kind: 'command'; body: string; status: ActivityStatus }
 
 export interface ExecutionConsoleCardOptions {
   pageIndex?: number
@@ -64,8 +70,8 @@ export function executionConsoleCard(
   snapshot: ExecutionConsoleSnapshot,
   options?: ExecutionConsoleCardOptions
 ): Record<string, unknown> {
-  if (!isTerminal(snapshot.run.status)) return renderLiveExecutionCard(snapshot)
-  return renderTerminalExecutionCard(snapshot, options)
+  if (!isTerminal(snapshot.run.status)) return renderCompactLiveExecutionCard(snapshot)
+  return renderTerminalTimelineCard(snapshot, options)
 }
 
 export function executionConsolePages(snapshot: ExecutionConsoleSnapshot): ExecutionConsolePage[] {
@@ -85,7 +91,7 @@ function executionPages(
 }
 
 export function executionConsolePageCount(snapshot: ExecutionConsoleSnapshot): number {
-  return isTerminal(snapshot.run.status) ? terminalTimelinePages(snapshot).pages.length : 1
+  return isTerminal(snapshot.run.status) ? paginateTerminalTimeline(snapshot).pages.length : 1
 }
 
 export function executionConsolePublicPage(
@@ -116,21 +122,113 @@ export function executionConsolePublicPage(
   }
 }
 
-function renderLiveExecutionCard(snapshot: ExecutionConsoleSnapshot): Record<string, unknown> {
+function renderCompactLiveExecutionCard(snapshot: ExecutionConsoleSnapshot): Record<string, unknown> {
   const status = agentRunPresentation(snapshot.run)
-  const body = liveExecutionBlocks(snapshot).join('\n\n') || '正在准备执行…'
-  return baseCard(
-    `${boundedPlainText(snapshot.agentDisplayName, 80)} · ${status.label}`,
-    cardTemplate(snapshot.run.status, snapshot.run.waitReason),
-    [{ tag: 'markdown', content: body }]
-  )
+  const redact = createExecutionPublicTextRedactor(snapshot.evidence, snapshot.agentRunId)
+  const items = progressItems(snapshot, true)
+  const blocks = items.flatMap((item): LiveTimelineBlock[] => {
+    if (item.kind === 'tool') return [{
+      kind: 'command',
+      body: commandLine(item.step, snapshot, redact),
+      status: activityStatusForAgentRun(item.step.status, snapshot.run.status)
+    }]
+    const body = redact(renderNonGroupItem(item, snapshot.run.status))
+    return body ? [{ kind: 'text', body }] : []
+  })
+  const publicOutput = snapshot.publicOutput?.trim()
+  if (publicOutput && !items.some((item) => item.kind === 'narration' && item.body.trim() === publicOutput)) {
+    blocks.push({ kind: 'text', body: redact(publicOutput) })
+  }
+  const commands = blocks.filter((block) => block.kind === 'command')
+  const currentText = blocks.findLast((block) => block.kind === 'text')
+  const currentCommand = commands.findLast((block) => block.status === 'running')
+    ?? commands.findLast((block) => block.status === 'waiting') ?? commands.at(-1)
+  const summary = liveProgressSummary(commands, snapshot)
+  let recent: LiveTimelineBlock[] = []
+  let recentCommands = 0
+  for (let index = blocks.length - 1; index >= 0 && recent.length < FEISHU_LIVE_BLOCK_BUDGET; index--) {
+    const block = blocks[index]
+    if (block.kind === 'command' && ++recentCommands > FEISHU_LIVE_COMMAND_BUDGET) break
+    recent.unshift(block)
+  }
+  const render = (commandBody: string | undefined): Record<string, unknown> => {
+    const elements: CardElement[] = []
+    if (currentText) elements.push(textBlock(currentText.body, 5).element)
+    if (commandBody) elements.push({ tag: 'markdown', content: commandBody })
+    elements.push({ tag: 'markdown', content: summary })
+    const visibleCommands = recent.filter((block) => block.kind === 'command').length
+    const omitted = commands.length - visibleCommands
+    const history: CardElement[] = []
+    if (omitted > 0) history.push({ tag: 'markdown', content: `… 更早 ${omitted} 条将在执行完成后查看 …` })
+    else if (recent.length < blocks.length) history.push({ tag: 'markdown', content: '… 更早的正文将在执行完成后查看 …' })
+    history.push(...recent.map((block) => block.kind === 'command'
+      ? { tag: 'markdown', content: block.body }
+      : textBlock(block.body).element))
+    if (!history.length) history.push({ tag: 'markdown', content: '暂无执行记录。' })
+    elements.push({
+      tag: 'collapsible_panel',
+      element_id: 'execution_process',
+      expanded: false,
+      header: {
+        title: { tag: 'plain_text', content: commands.length
+          ? `执行过程 · 最近 ${visibleCommands} 条 / 共 ${commands.length} 条` : '执行过程' },
+        icon: { tag: 'standard_icon', token: 'down-small-ccm_outlined', size: '16px 16px' },
+        icon_position: 'left',
+        icon_expanded_angle: -180
+      },
+      vertical_spacing: '8px',
+      padding: '0px',
+      elements: history
+    })
+    return baseCard(
+      `${boundedPlainText(snapshot.agentDisplayName, 80)} · ${status.label}`,
+      cardTemplate(snapshot.run.status, snapshot.run.waitReason),
+      elements
+    )
+  }
+  const fits = (card: Record<string, unknown>): boolean => measureCardBytes(card) <= FEISHU_LIVE_BYTE_BUDGET
+    && countCardElements((card.body as { elements: CardElement[] }).elements) <= FEISHU_LIVE_ELEMENT_BUDGET
+  let card = render(currentCommand?.body)
+  while (!fits(card) && recent.length) {
+    // Removing early history only affects this live projection, never sealed evidence.
+    recent = recent.slice(1)
+    card = render(currentCommand?.body)
+  }
+  if (!fits(card)) {
+    // An indivisible command can itself exceed a whole card. Do not silently rewrite it.
+    card = render('当前指令超出飞书卡片大小限制，请在 Rovai 查看。')
+  }
+  return card
 }
 
-function renderTerminalExecutionCard(
+function commandLine(
+  step: ExecutionStep,
+  snapshot: ExecutionConsoleSnapshot,
+  redact: (text: string) => string
+): string {
+  const title = executionPublicCommandTitle(step, redact).replace(/([\\`*_[\]<>])/gu, '\\$1')
+  return `${statusIcon(activityStatusForAgentRun(step.status, snapshot.run.status))} ${title}`
+}
+
+function liveProgressSummary(commands: Array<Extract<LiveTimelineBlock, { kind: 'command' }>>, snapshot: ExecutionConsoleSnapshot): string {
+  if (!commands.length) return snapshot.run.status === 'queued' ? '等待开始执行…'
+    : snapshot.run.status === 'waiting' ? agentRunPresentation(snapshot.run).label : '正在准备执行…'
+  const count = (status: ActivityStatus): number => commands.filter((command) => command.status === status).length
+  return [
+    `已完成 ${count('completed')} 条指令`,
+    count('running') ? `当前 ${count('running')} 条执行中` : '',
+    count('waiting') ? `${count('waiting')} 条等待中` : '',
+    count('failed') ? `${count('failed')} 条失败` : '',
+    count('stopped') ? `${count('stopped')} 条已停止` : '',
+    count('recorded') ? `${count('recorded')} 条已记录` : ''
+  ].filter(Boolean).join(' · ')
+}
+
+function renderTerminalTimelineCard(
   snapshot: ExecutionConsoleSnapshot,
   options: ExecutionConsoleCardOptions | undefined
 ): Record<string, unknown> {
-  const { pages, commandCount } = terminalTimelinePages(snapshot)
+  const { pages, commandCount } = paginateTerminalTimeline(snapshot)
   const requestedPageIndex = options?.pageIndex
   const requested = Number.isInteger(requestedPageIndex) ? requestedPageIndex ?? 0 : 0
   const pageIndex = Math.min(Math.max(0, requested), pages.length - 1)
@@ -180,46 +278,54 @@ function terminalTimelineCard(
 
 function terminalTimelineBlocks(snapshot: ExecutionConsoleSnapshot): TimelineBlock[] {
   const items = progressItems(snapshot, true)
-  const commandProjection = createFeishuCommandProjector(snapshot.evidence, snapshot.agentRunId)
+  const redact = createExecutionPublicTextRedactor(snapshot.evidence, snapshot.agentRunId)
   const blocks: TimelineBlock[] = items.flatMap((item, index): TimelineBlock[] => {
     if (item.kind !== 'tool') {
-      const body = renderNonGroupItem(item, snapshot.run.status)
+      const body = redact(renderNonGroupItem(item, snapshot.run.status))
       return body ? [textBlock(body)] : []
     }
-    const { title, result } = commandProjection(item.step)
     return [{
       kind: 'command',
-      element: {
-        tag: 'collapsible_panel',
-        element_id: `command_${index}`,
-        // Local Feishu client state only. No callback behavior on a command.
-        expanded: false,
-        header: {
-          title: {
-            tag: 'plain_text',
-            content: `${statusIcon(activityStatusForAgentRun(item.step.status, snapshot.run.status))} ${title}`
-          },
-          icon: { tag: 'standard_icon', token: 'down-small-ccm_outlined', size: '16px 16px' },
-          icon_position: 'right',
-          icon_expanded_angle: -180
-        },
-        vertical_spacing: '8px',
-        padding: '8px 0px 8px 0px',
-        elements: [resultFrame(result)]
-      }
+      element: renderCommandPanel(item.step, snapshot, index, redact)
     }]
   })
   const output = snapshot.publicOutput?.trim()
   if (output && !items.some((item) => item.kind === 'narration' && item.body.trim() === output)) {
-    blocks.push(textBlock(output))
+    blocks.push(textBlock(redact(output)))
   }
   return blocks.length ? blocks : [textBlock('没有可展示的执行记录。')]
 }
 
-function textBlock(body: string): TimelineBlock {
+function renderCommandPanel(
+  step: ExecutionStep,
+  snapshot: ExecutionConsoleSnapshot,
+  index: number,
+  redact: (text: string) => string
+): CardElement {
+  return {
+    tag: 'collapsible_panel',
+    element_id: `command_${index}`,
+    // Local Feishu client state only. No callback behavior on a command.
+    expanded: false,
+    header: {
+      title: {
+        tag: 'plain_text',
+        content: `${statusIcon(activityStatusForAgentRun(step.status, snapshot.run.status))} ${executionPublicCommandTitle(step, redact)}`
+      },
+      icon: { tag: 'standard_icon', token: 'down-small-ccm_outlined', size: '16px 16px' },
+      icon_position: 'right',
+      icon_expanded_angle: -180
+    },
+    vertical_spacing: '8px',
+    padding: '8px 0px 8px 0px',
+    elements: [resultFrame(step.publicResult ?? '（无可展示结果）')]
+  }
+}
+
+function textBlock(body: string, lineLimit = 10): TimelineBlock {
   const lines = body.trim().replace(/\r\n?/gu, '\n').split('\n')
-  const preview = lines.length <= 10 ? lines : [...lines.slice(0, 9), `… 已截断 ${lines.length - 9} 行 …`]
-  return { kind: 'text', element: { tag: 'markdown', content: preview.map((line) => boundFeishuPreviewLine(line)).join('\n') } }
+  const preview = lines.length <= lineLimit ? lines : [...lines.slice(0, lineLimit - 1), `… 已截断 ${lines.length - lineLimit + 1} 行 …`]
+  return { kind: 'text', element: { tag: 'markdown', content: preview.map((line) => boundExecutionPreviewLine(line)).join('\n') } }
 }
 
 function resultFrame(result: string): CardElement {
@@ -227,7 +333,7 @@ function resultFrame(result: string): CardElement {
   return { tag: 'markdown', content: `\`\`\`text\n${result.replace(/`{3}/gu, '`\u200b``')}\n\`\`\`` }
 }
 
-function terminalTimelinePages(snapshot: ExecutionConsoleSnapshot): TerminalTimeline {
+function paginateTerminalTimeline(snapshot: ExecutionConsoleSnapshot): TerminalTimeline {
   const rawBlocks = terminalTimelineBlocks(snapshot)
   const commandCount = rawBlocks.filter((block) => block.kind === 'command').length
   const fits = (blocks: TimelineBlock[], paged: boolean): boolean => {
@@ -236,7 +342,7 @@ function terminalTimelinePages(snapshot: ExecutionConsoleSnapshot): TerminalTime
     const card = terminalTimelineCard(snapshot, blocks, paged ? rawBlocks.length : 0, paged ? rawBlocks.length + 2 : 1, commandCount)
     const elements = (card.body as { elements: CardElement[] }).elements
     return countCardElements(elements) <= FEISHU_PAGE_ELEMENT_BUDGET
-      && new TextEncoder().encode(JSON.stringify(card)).length <= FEISHU_PAGE_BYTE_BUDGET
+      && measureCardBytes(card) <= FEISHU_PAGE_BYTE_BUDGET
   }
   const blocks = rawBlocks.map((block) => {
     if (fits([block], true)) return block
@@ -275,6 +381,10 @@ function countCardElements(elements: CardElement[]): number {
   return elements.reduce((count, element) => count + 1
     + countCardElements((element.elements ?? []) as CardElement[])
     + countCardElements((element.columns ?? []) as CardElement[]), 0)
+}
+
+function measureCardBytes(card: Record<string, unknown>): number {
+  return new TextEncoder().encode(JSON.stringify(card)).byteLength
 }
 
 function progressItems(snapshot: ExecutionConsoleSnapshot, complete = false): ExecutionProgressItem[] {

@@ -59,7 +59,8 @@ Owner 可在私聊或群聊显式 `@Bot` 后复用现有 Quick Chat、项目选�
 - 群 roster 从钉钉当前群机器人列表读取并与已发布 Rovai Bot 交集后同步到既有 Camp Membership；运行中 Run 不被修改；
 - AI 卡片固定模板 `382e4302-551d-4880-bf29-a30acfab2e71.schema`、`callbackType=STREAM` 且禁止转发。执行控制台只展示
   Core 公开安全投影，不传 command stdout/stderr、工具 JSON 或推理；正式结果使用 Markdown；
-- 飞书终态执行卡按 [Feishu Channel v6](../../contracts/feishu-channel-v6.md) 在总折叠中混排公开文字与单条 command
+- 飞书执行卡按 [Feishu Channel v7](../../contracts/feishu-channel-v7.md) 区分实时紧凑卡和终态完整卡；实时只直接显示当前正文、
+  当前command及进度，总折叠保留10-command/20-block窗口并限制16KB/30-elements；终态在总折叠中混排公开文字与单条 command
   原生折叠；结果先脱敏再限 20 行/4KiB，timeline 按 15-command/50-element/24KB 分页。Core 同事务冻结内容与 sequence，
   翻页只读 sealed snapshot，由同步 response card 更新一次，返回第 1 页也保持外层展开；不再先 PATCH 后空 ACK。
   SDK 按 event ID 去重点击，Main 有界应答错误、成功无 Toast；非 callback 投递继续校验更新业务码。
@@ -74,6 +75,15 @@ Owner 可在私聊或群聊显式 `@Bot` 后复用现有 Quick Chat、项目选�
 共享 Host 维护按 [Channel Host Maintenance v1](../../contracts/channel-host-maintenance-v1.md) 取消永久 poll 回执，
 保留同事务的队列推进、真实 admission 审计和 Outbox lease 恢复。此次内部维护/物理索引优化不改变模型上下文或 UI，
 不清理历史 event/Evidence、不执行 VACUUM，也不改变备份复制策略。属于局部可逆实现，无需新增 Version Decision。
+
+## 渠道 Camp 命名
+
+五种已支持渠道会话复用普通 Camp 的首消息自动命名。Core 原始标题不带渠道前缀；来源由现有绑定投影，
+Renderer 在导航、搜索、顶部、最近会话和临时通知统一展示；手动重命名只编辑原始标题，闭合旧绑定仍保留来源。
+本轮不重命名历史 Camp、不新增 Migration，不改变路由、权限或项目绑定。规范见
+[Channel Camp Naming v1](../../contracts/channel-camp-naming-v1.md)、[Camp Open Projection v10](../../contracts/camp-open-projection-v10.md)
+和 [Notification Episode v5](../../contracts/notification-episode-v5.md)。这是局部可逆的命名/展示收敛，无需新增 Version Decision；
+不改变钉钉外部验收 NO-GO，不默认 push、打包或重启日常 App。
 
 ## 保守能力边界
 
@@ -100,7 +110,7 @@ Stream fast ACK、入站 normalize/topic 拒绝、Owner gate、统一 admission�
 | --- | --- | --- |
 | Version lifecycle | 已更新 | 保留 main v1.33 Pending 与 v1.34 Fast；渠道历史/当前目录顺延至 v1.35/v1.36，v1.36 为唯一 current。迁入的历史决定只改元数据、ID 和链接；Data Contract 汇合另由新迁移拥有。 |
 | Decisions | 已更新 | [v1.36 决定](decisions.md)保留既有 D01–D05，并由 D06 记录已安装渠道 ledger 与 main schema 的无损汇合取舍。 |
-| Contracts | 已更新 | [DingTalk Channel v5](../../contracts/dingtalk-channel-v5.md)继承 v4 Web Session、Cookie schema 2、封闭 Console 发布与中断恢复，增加内置官方扫码、原生交互页和静默取消；[Channel Storage v2](../../contracts/channel-storage-v2.md)继续拥有 SQLite 原子事务、飞书三态检查与钉钉 completed 同应用凭据恢复；[Feishu Channel v6](../../contracts/feishu-channel-v6.md)继承 v5 双层折叠和预算，分页唯一更新为同步 response card，避免预先 PATCH 与空 ACK 竞争，不新增 Migration；旧合同冻结为历史入口。 |
+| Contracts | 已更新 | [DingTalk Channel v5](../../contracts/dingtalk-channel-v5.md)继承 v4 Web Session、Cookie schema 2、封闭 Console 发布与中断恢复，增加内置官方扫码、原生交互页和静默取消；[Channel Storage v2](../../contracts/channel-storage-v2.md)继续拥有 SQLite 原子事务、飞书三态检查与钉钉 completed 同应用凭据恢复；[Feishu Channel v7](../../contracts/feishu-channel-v7.md)保留 v6 双层终态/同步分页，增加实时滚动折叠预算和共享安全 publicResult，不新增 Migration；旧合同冻结为历史入口。 |
 | Architecture | 已更新 | 钉钉/飞书架构保留渠道范围；[Availability-first Runtime](../../architecture/availability-first-runtime.md#migration-switch) 与 [Channel/Main Schema Join v2](../../contracts/channel-main-schema-join-v2.md)拥有旧主线/渠道精确汇合及原位逐事务升级。 |
 | UI | 已更新 | [渠道设置](../../ui/components/channel-settings.md)保留 Provider Tab、钉钉官方登录/审批/发布与 Provider-local 诊断合同，钉钉说明同步 Web Session；飞书终态文字/command、结果框与客户端本地折叠不变。 |
 | Runtime Activity | 确认无需更新 | 钉钉继续消费既有公开 AgentRun Evidence 和 CampMessage，不新增 Runtime activity kind 或 Adapter mapping。 |

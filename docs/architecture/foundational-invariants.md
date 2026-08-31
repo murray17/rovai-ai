@@ -86,6 +86,7 @@ last_updated: 2026-08-31
 - Camp 创建是 User-only、幂等且原子的独立领域动作。它冻结 workspace、成员、Default Lead 和协作模式，但不创建 Conversation、消息、Turn、Run、Native Session 或执行 Workspace，也不把 Runtime ready 当成 Camp 创建前提。
 - Camp 可以持久存在于零消息、零 Conversation 状态。Conversation 只在原子 Execution Admission 中为每个精确目标惰性创建；该业务准入不执行 Workspace 文件系统、Git、Runtime discovery、可执行文件或 fingerprint 检查，多目标提交保持 all-or-none。
 - Camp 名称经过空白规范化并受 Unicode scalar 上限约束，持久记录 `default | generated | user` 来源。只有第一条已接受用户执行提交可把默认名确定性改为生成名；用户命名永不被自动覆盖。生成名从权威 Structured Content 中去掉连续的行首寻址 mention 后计算，不从原始 Markdown 猜测。
+- 飞书/钉钉渠道 Camp 复用同一默认命名与原子生成流程；渠道类型由既有绑定只读投影，前缀只在 Renderer 展示，不写入 title 或模型输入。闭合的历史绑定仍保留来源，不批量改写旧名称。字段见 [Channel Camp Naming v1](../contracts/channel-camp-naming-v1.md)。
 - Camp activation 是 Core-owned `pending | active` 状态。显式创建 Dialog 直接建立 Active Camp；经确认的一键入口建立 Pending Camp；Pending Camp 的第一条已接受用户提交在消息事务中将其激活。Pending Camp 不进入普通执行入口；空 Pending Camp 只能经受控丢弃或启动清理删除，有正文或附件的 Pending Draft 才能进入导航与恢复。
 
 <a id="camp-workspace"></a>

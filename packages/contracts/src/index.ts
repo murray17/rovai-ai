@@ -794,9 +794,14 @@ export interface CancelCampTurnCommand {
 
 export type NavigationCampMarker = 'loading' | 'unread_completed' | 'none'
 
+export type CampChannelSource =
+  | { provider: 'feishu'; conversationKind: 'p2p' | 'group' | 'topic' }
+  | { provider: 'dingtalk'; conversationKind: 'p2p' | 'group' }
+
 export interface NavigationCampItem {
   id: string
   title: string
+  channelSource?: CampChannelSource | null
   activationState: CampActivationState
   projectBindingKind: ProjectBindingKind
   projectPath: string
@@ -1863,6 +1868,7 @@ export interface CampSnapshot {
   camp: {
     id: string
     title: string
+    channelSource?: CampChannelSource | null
     activationState: CampActivationState
     projectBindingKind: ProjectBindingKind
     projectPath: string
@@ -2091,6 +2097,7 @@ export interface NotificationEpisodeView {
   camp: {
     id: string
     title: string
+    channelSource?: CampChannelSource | null
   }
   campTurnId: string | null
   primarySemantic: NotificationSemantic

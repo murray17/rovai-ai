@@ -794,7 +794,7 @@ impl CollaborationService {
             }
             let now = chrono::Utc::now().to_rfc3339();
             let (title, name_origin) = if normalized_name.is_empty() {
-                ("未命名对话".to_string(), CampNameOrigin::Default)
+                (DEFAULT_CAMP_TITLE.to_string(), CampNameOrigin::Default)
             } else {
                 (normalized_name.clone(), CampNameOrigin::User)
             };
@@ -2786,6 +2786,9 @@ impl CollaborationService {
                 "External channel message must contain a visible body",
             )));
         }
+        let generated_camp_name = generated_camp_name(&input.structured_content, |agent_id| {
+            member_names.get(agent_id).cloned()
+        })?;
         let created_conversation_ids = ensure_resolution_conversations(
             transaction,
             &input.camp_id,
@@ -2852,7 +2855,7 @@ impl CollaborationService {
                 execution_epoch: None,
                 command_id: &input.command_id,
                 now: &input.now,
-                generated_camp_name: None,
+                generated_camp_name: Some(generated_camp_name),
             },
         )?;
         Ok(Ok(ExternalChannelAdmissionResult {
@@ -4671,6 +4674,7 @@ fn validate_project_path(path: &str) -> Result<()> {
 }
 
 const CAMP_NAME_MAX_SCALARS: usize = 80;
+pub(crate) const DEFAULT_CAMP_TITLE: &str = "未命名对话";
 
 fn normalize_camp_name(value: &str) -> String {
     value.split_whitespace().collect::<Vec<_>>().join(" ")
@@ -4686,7 +4690,7 @@ fn generated_camp_name(
         .take(CAMP_NAME_MAX_SCALARS)
         .collect::<String>();
     Ok(if title.is_empty() {
-        "未命名对话".to_string()
+        DEFAULT_CAMP_TITLE.to_string()
     } else {
         title
     })

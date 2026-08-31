@@ -19,6 +19,9 @@ function command(sequence: number, cmd: string, output?: string, status: 'comple
 function narration(sequence: number, body: string): AgentRunExecutionEvidenceView {
   return evidence(sequence, 'agent.text.delta', 'narration', 'updated', { itemId: `text-${sequence}`, delta: body })
 }
+function runningCommand(sequence: number, cmd: string): AgentRunExecutionEvidenceView {
+  return evidence(sequence, 'activity.started', 'command', 'started', { item: { type: 'commandExecution', command: cmd, status: 'inProgress' } })
+}
 function canonical(operationId: string): NonNullable<AgentRunExecutionEvidenceView['canonical']> {
   return {
     operationId, activityDomain: 'shell', semanticKind: 'shell.execute', toolName: 'exec_command', presentationHint: 'shell', phase: 'terminal', outcome: 'succeeded', credibility: 'runtime_structured',
@@ -60,14 +63,129 @@ function countElements(list: Element[]): number {
 }
 
 describe('Feishu execution console card', () => {
-  it('keeps a live card plain with complete safe commands and no result output', () => {
+  it('keeps a live card compact with one local history panel, safe commands and no result output', () => {
     const card = executionConsoleCard(snapshot('running', { evidence: [narration(1, '正在检查项目。'), command(2, "sed -n '5p;15p' .rovai-validation/merge-target.txt", '05 echo-v4')] }))
     expect(card).toMatchObject({ schema: '2.0', header: { title: { content: '芝士 · 执行中' }, template: 'blue' } })
     expect(bodyText(card)).toContain('正在检查项目。')
     expect(bodyText(card)).toContain("sed -n '5p;15p' .rovai-validation/merge-target.txt")
     expect(bodyText(card)).not.toContain('05 echo-v4')
     expect(panels(card)).toEqual([])
+    expect(outerPanel(card)).toMatchObject({ expanded: false, header: { title: { content: '执行过程 · 最近 1 条 / 共 1 条' } } })
+    expect(elements(card).filter((element) => element.tag === 'markdown')).toHaveLength(3)
+    expect(bodyText(card)).toContain('已完成 1 条指令')
     expect(buttons(card)).toEqual([])
+  })
+
+  it('shows the current five-line text, one running command and exact progress above only the recent ten commands', () => {
+    const card = executionConsoleCard(snapshot('running', { evidence: [
+      narration(1, '最早的正文。'),
+      ...Array.from({ length: 21 }, (_, index) => command(index + 2, `check-${index + 1} --path repo/${index + 1}`, `private output ${index + 1}`)),
+      narration(23, Array.from({ length: 12 }, (_, index) => `当前正文第 ${index + 1} 行`).join('\n')),
+      runningCommand(24, "sed -n '5p;15p' .rovai-validation/merge-target.txt")
+    ] }))
+    const top = elements(card).filter((element) => element.tag === 'markdown')
+    expect(top).toHaveLength(3)
+    expect((top[0].content as string).split('\n')).toHaveLength(5)
+    expect(top[0].content).toContain('当前正文第 1 行')
+    expect(top[0].content).toContain('… 已截断 8 行 …')
+    expect(top[1].content).toBe("● sed -n '5p;15p' .rovai-validation/merge-target.txt")
+    expect(top[2].content).toBe('已完成 21 条指令 · 当前 1 条执行中')
+    expect(header(outerPanel(card)!)).toBe('执行过程 · 最近 10 条 / 共 22 条')
+    expect(timeline(card)[0].content).toBe('… 更早 12 条将在执行完成后查看 …')
+    expect(bodyText(card)).not.toContain('最早的正文。')
+    expect(bodyText(card)).not.toContain('check-12 --path')
+    expect(bodyText(card)).toContain('check-13 --path')
+    expect(JSON.stringify(card)).not.toContain('private output')
+    expect(panels(card)).toHaveLength(0)
+    expect(buttons(card)).toHaveLength(0)
+  })
+
+  it.each([100, 200, 1_000])('bounds a live %i-command Run without losing its full terminal timeline', (count) => {
+    const run = snapshot('running', { evidence: Array.from({ length: count }, (_, index) => [
+      narration(index * 2 + 1, `正文 ${index + 1}`),
+      command(index * 2 + 2, `check-${index + 1} --flag repo/${index + 1}`, `result-${index + 1}`)
+    ]).flat() })
+    const card = executionConsoleCard(run, { outerExpanded: true, pageIndex: 99 })
+    expect(outerPanel(card)?.expanded).toBe(false)
+    expect(header(outerPanel(card)!)).toBe(`执行过程 · 最近 10 条 / 共 ${count} 条`)
+    expect(timeline(card)).toHaveLength(21) // Twenty blocks plus the omission notice.
+    expect(bodyText(card)).toContain(`更早 ${count - 10} 条将在执行完成后查看`)
+    expect(JSON.stringify(card)).not.toContain('result-')
+    expect(Buffer.byteLength(JSON.stringify(card))).toBeLessThan(4_000)
+    expect(countElements(elements(card))).toBeLessThanOrEqual(30)
+    expect(buttons(card)).toEqual([])
+    expect(run.evidence).toHaveLength(count * 2)
+    if (count === 200) {
+      const sealed = { ...run, run: { ...run.run, status: 'succeeded' as const }, terminalAt: '2026-08-28T00:00:28Z' }
+      const pageCount = executionConsolePageCount(sealed)
+      const cards = Array.from({ length: pageCount }, (_, pageIndex) => executionConsoleCard(sealed, { pageIndex }))
+      expect(cards.flatMap(panels).map(header)).toEqual(Array.from({ length: count }, (_, index) => `✓ check-${index + 1} --flag repo/${index + 1}`))
+    }
+  })
+
+  it('caps a text-only live window and keeps real waiting and queued states honest', () => {
+    const card = executionConsoleCard(snapshot('running', { evidence: Array.from({ length: 40 }, (_, index) => narration(index + 1, `正文 ${index + 1}`)) }))
+    expect(header(outerPanel(card)!)).toBe('执行过程')
+    expect(timeline(card)).toHaveLength(21)
+    expect(bodyText(card)).toContain('更早的正文将在执行完成后查看')
+    expect(bodyText(card)).not.toContain('正文 20\n')
+    expect(bodyText(card)).toContain('正文 40')
+    expect(countElements(elements(card))).toBeLessThanOrEqual(30)
+    const queued = executionConsoleCard(snapshot('queued'))
+    expect(bodyText(queued)).toContain('等待开始执行…')
+    const waiting = executionConsoleCard(snapshot('waiting', { run: { status: 'waiting', waitReason: 'approval', terminalReasonCode: null } }))
+    expect(waiting.header).toMatchObject({ title: { content: '芝士 · 等待审批' }, template: 'orange' })
+    expect(bodyText(waiting)).toContain('等待审批')
+    expect(bodyText(waiting)).not.toContain('执行中')
+  })
+
+  it('uses true operation states for parallel progress instead of turning failures into completed commands', () => {
+    const card = executionConsoleCard(snapshot('running', { evidence: [
+      runningCommand(1, 'long-running --first'), command(2, 'completed'), command(3, 'failed', 'failure result', 'failed'),
+      runningCommand(4, 'another-running --last')
+    ] }))
+    const top = elements(card).filter((element) => element.tag === 'markdown')
+    expect(top[0].content).toBe('● another-running --last')
+    expect(top[1].content).toBe('已完成 1 条指令 · 当前 2 条执行中 · 1 条失败')
+    expect(bodyText(card)).toContain('✕ failed')
+    expect(bodyText(card)).not.toContain('failure result')
+  })
+
+  it('evicts old live blocks by measured UTF-8 JSON size while preserving the current text and complete command', () => {
+    const current = `inspect-current --path ${'项目/'.repeat(1_300)}file.txt`
+    const run = snapshot('running', { evidence: [
+      ...Array.from({ length: 20 }, (_, index) => command(index + 1, `inspect-${index} ${'😀'.repeat(700)}`)),
+      narration(21, '正在核对最终目录。'), runningCommand(22, current)
+    ] })
+    const card = executionConsoleCard(run)
+    const top = elements(card).filter((element) => element.tag === 'markdown')
+    expect(top[0].content).toBe('正在核对最终目录。')
+    expect(top[1].content).toBe(`● ${current}`)
+    expect(Buffer.byteLength(JSON.stringify(card))).toBeLessThanOrEqual(16_000)
+    expect(countElements(elements(card))).toBeLessThanOrEqual(30)
+    expect(header(outerPanel(card)!)).toBe('执行过程 · 最近 0 条 / 共 21 条')
+    expect(bodyText(card)).toContain('更早 21 条将在执行完成后查看')
+    expect(JSON.stringify(run)).toContain('inspect-0')
+  })
+
+  it('reports a live indivisible command above the whole-card limit without altering it or exceeding the budget', () => {
+    const cmd = `inspect ${'项目/'.repeat(8_000)}`
+    const card = executionConsoleCard(snapshot('running', { evidence: [narration(1, '当前正文仍保留。'), runningCommand(2, cmd)] }))
+    expect(bodyText(card)).toContain('当前正文仍保留。')
+    expect(bodyText(card)).toContain('当前指令超出飞书卡片大小限制，请在 Rovai 查看。')
+    expect(Buffer.byteLength(JSON.stringify(card))).toBeLessThanOrEqual(16_000)
+    expect(JSON.stringify(card)).not.toContain(cmd)
+  })
+
+  it('redacts current text and commands using secrets from evidence outside the live window', () => {
+    const card = executionConsoleCard(snapshot('running', { evidence: [
+      command(1, 'read-config', 'SERVICE_TOKEN=old-evidence-secret'),
+      ...Array.from({ length: 20 }, (_, index) => command(index + 2, `inspect-${index}`)),
+      narration(22, '正在检查 old-evidence-secret 的响应。'),
+      runningCommand(23, 'inspect --value old-evidence-secret --password private-password')
+    ] }))
+    expect(bodyText(card)).toContain('[已隐藏]')
+    expect(JSON.stringify(card)).not.toMatch(/old-evidence-secret|private-password|read-config/)
   })
 
   it('interleaves public text and individual native command panels in real order', () => {
@@ -337,7 +455,7 @@ describe('Feishu execution console card', () => {
     expect(buttons(empty)).toEqual([])
     expect(executionConsolePageCount(snapshot('succeeded'))).toBe(1)
     const card = executionConsoleCard(snapshot('succeeded', { evidence: [command(1, 'true', '')] }))
-    expect(result(panels(card)[0])).toBe('（无可公开的文本结果）')
+    expect(result(panels(card)[0])).toBe('（无可展示结果）')
     expect(buttons(card)).toEqual([])
   })
 

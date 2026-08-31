@@ -64,6 +64,7 @@ import { MemberAvatar } from './MemberAvatar'
 import { ExecutionAvatarRail } from './ExecutionAvatarRail'
 import { MemberPortrait } from './MemberPortrait'
 import { localizeExecutionEngineTerms } from './product-copy'
+import { formatCampTitle } from './camp-title'
 import { writeClipboardText } from './clipboard'
 import { runtimeReadinessLabel } from './runtime-status'
 import { runtimeEditorInstallation } from './MemberRuntimeParameters'
@@ -1145,7 +1146,7 @@ export function QuickChatWorkspace({
                   <span className="camp-marker-slot" aria-hidden="true">
                     {camp.marker === 'unread_completed' && <i className="task-dot camp-marker-unread_completed" />}
                   </span>
-                  <span className="truncate">{camp.title}</span>
+                  <span className="truncate" title={formatCampTitle(camp)}>{formatCampTitle(camp)}</span>
                   {camp.marker === 'loading' && <span className="camp-loading-spinner camp-marker-loading" role="img" aria-label="正在运行" />}
                   <small>{relativeTimeLabel(camp.lastActivityAt)}</small>
                 </button>
@@ -3592,7 +3593,7 @@ export function CampWorkspace({
   ) : null
 
   return (
-    <section className="workspace-shell camp-workspace" aria-label={`会话：${snapshot.camp.title}`}>
+    <section className="workspace-shell camp-workspace" aria-label={`会话：${formatCampTitle(snapshot.camp)}`}>
       <FilePreviewWorkspace
       >
         <section
