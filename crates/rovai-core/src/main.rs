@@ -197,15 +197,15 @@ use rovai_core::{
     },
     read_model::{CampOpenProjection, READ_MODEL_SCHEMA_VERSION, ReadModelService},
     runtime::{
-        AcknowledgeAgentRunCancellationCommand, AgentRunCancellationCandidate, AgentRunExecution,
-        AgentRunWorkspace, BindNativeSessionCommand, CampRuntimeCleanupTarget,
-        CancelAgentRunCommand, CancelCampTurnCommand, ClaimAgentRunCommand,
-        ExecutionRuntimeService, FailAgentRunCommand, MissingSendRecoveryBoundary,
-        MissingSendRecoveryCandidate, NativeSessionResumeDisposition, NativeSessionResumeFailure,
-        PermissionSemantics, PlannedShutdownAbortiveTerminal, RebindAgentRunRuntimeCommand,
-        RecordCancelledAgentRunEndingGitObservationCommand, RecordObservedRuntimeModelCommand,
-        RejectAgentRunDispatchCommand, ResolveAcceptedInputRecoveryBlockerCommand,
-        RestartNativeSessionCommand, SucceedAgentRunCommand,
+        AgentRunCancellationCandidate, AgentRunExecution, AgentRunWorkspace,
+        BindNativeSessionCommand, CampRuntimeCleanupTarget, CancelAgentRunCommand,
+        CancelCampTurnCommand, ClaimAgentRunCommand, ExecutionRuntimeService, FailAgentRunCommand,
+        MissingSendRecoveryBoundary, MissingSendRecoveryCandidate, NativeSessionResumeDisposition,
+        NativeSessionResumeFailure, PermissionSemantics, PlannedShutdownAbortiveTerminal,
+        RebindAgentRunRuntimeCommand, RecordCancelledAgentRunEndingGitObservationCommand,
+        RecordObservedRuntimeModelCommand, RejectAgentRunDispatchCommand,
+        ResolveAcceptedInputRecoveryBlockerCommand, RestartNativeSessionCommand,
+        SucceedAgentRunCommand,
     },
     runtime_discovery::{
         RuntimeDiscoveryObservation, RuntimeDiscoveryStatus, RuntimeExecutableCandidate,
@@ -248,7 +248,7 @@ use tokio::{
 };
 
 const RUNTIME_CANCELLATION_INTERRUPT_TIMEOUT: Duration = Duration::from_secs(2);
-const RUNTIME_CANCELLATION_FENCE_TIMEOUT: Duration = Duration::from_secs(1);
+const RUNTIME_CANCELLATION_TOTAL_TIMEOUT: Duration = Duration::from_secs(3);
 const RUNTIME_CANCELLATION_INGRESS_FLUSH_TIMEOUT: Duration = Duration::from_secs(5);
 const PLANNED_SHUTDOWN_PROTOCOL_VERSION: u32 = 3;
 const PLANNED_SHUTDOWN_MIN_DEADLINE_MS: u64 = 100;
@@ -268,6 +268,7 @@ const CAMP_ATTACHMENT_VIEW_QUIESCENCE_POLL_INTERVAL: Duration = Duration::from_m
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum RuntimeCancellationIngressFence {
     Flushed,
+    Reaped,
     Unproven,
 }
 
@@ -589,7 +590,7 @@ fn request_runs_outside_main_queue(method: &str) -> bool {
     )
 }
 
-async fn response_for_request(core: &Core, request: &Request) -> Response {
+async fn response_for_request(core: &Arc<Core>, request: &Request) -> Response {
     match core.handle(request).await {
         Ok(result) => {
             if request_did_invalidate_navigation(core, request, &result).await {
@@ -2197,67 +2198,50 @@ impl Core {
         self.codex_cli.forget_camp(camp_id).await;
     }
 
-    async fn stop_deleted_camp_runtime_kind(
-        &self,
+    async fn stop_deleted_camp_runtimes(
+        self: &Arc<Self>,
         targets: &[CampRuntimeCleanupTarget],
-        adapter_kind: AdapterKind,
-    ) {
-        for target in targets
-            .iter()
-            .filter(|target| target.adapter_kind == adapter_kind)
-        {
-            match adapter_kind {
-                AdapterKind::CodexCli => {
-                    self.codex_cli
-                        .forget_agent_run(&target.agent_run_id, target.execution_epoch)
-                        .await;
-                }
-                kind if kind.uses_acp() => {
-                    if let Some(adapter) = self.acp_adapter(kind) {
-                        adapter
-                            .forget_agent_run(&target.agent_run_id, target.execution_epoch)
-                            .await;
-                    }
-                }
-                AdapterKind::ClaudeCodeCli => {
-                    self.claude_code_cli
-                        .interrupt(&target.agent_run_id, target.execution_epoch)
-                        .await;
-                }
-                AdapterKind::AntigravityApp => {
-                    self.antigravity_app
-                        .interrupt(&target.agent_run_id, target.execution_epoch)
-                        .await;
-                }
-                _ => unreachable!("all Adapter kinds are handled"),
-            }
-        }
-    }
-
-    async fn stop_deleted_camp_runtimes(&self, targets: &[CampRuntimeCleanupTarget]) {
-        tokio::join!(
-            self.stop_deleted_camp_runtime_kind(targets, AdapterKind::CodexCli),
-            self.stop_deleted_camp_runtime_kind(targets, AdapterKind::OpencodeCli),
-            self.stop_deleted_camp_runtime_kind(targets, AdapterKind::CopilotCli),
-            self.stop_deleted_camp_runtime_kind(targets, AdapterKind::ClaudeCodeCli),
-            self.stop_deleted_camp_runtime_kind(targets, AdapterKind::AntigravityApp),
-            self.stop_deleted_camp_runtime_kind(targets, AdapterKind::KiroCli),
-            self.stop_deleted_camp_runtime_kind(targets, AdapterKind::QoderCli),
-            self.stop_deleted_camp_runtime_kind(targets, AdapterKind::CodebuddyCli),
-            self.stop_deleted_camp_runtime_kind(targets, AdapterKind::QwenCode),
-            self.stop_deleted_camp_runtime_kind(targets, AdapterKind::TraeCnCli),
-            self.stop_deleted_camp_runtime_kind(targets, AdapterKind::CursorAgent),
-            self.stop_deleted_camp_runtime_kind(targets, AdapterKind::KimiCodeCli),
-            self.stop_deleted_camp_runtime_kind(targets, AdapterKind::GrokBuild),
-        );
+    ) -> Result<()> {
+        let mut tasks = tokio::task::JoinSet::new();
         for target in targets {
-            self.planned_shutdown
-                .remove_active(&ActiveExecutionKey::new(
+            let core = self.clone();
+            let target = target.clone();
+            tasks.spawn(async move {
+                let fence = core
+                    .cleanup_agent_run_runtime(
+                        &target.agent_run_id,
+                        target.execution_epoch,
+                        target.adapter_kind.as_str(),
+                    )
+                    .await;
+                (target, fence)
+            });
+        }
+        let mut confirmed = true;
+        while let Some(result) = tasks.join_next().await {
+            let (target, fence) = result?;
+            if fence == RuntimeCancellationIngressFence::Unproven {
+                confirmed = false;
+            } else {
+                let database = self.database.lock().await;
+                ExecutionRuntimeService::default().record_runtime_cleanup_completed(
+                    &database,
                     &target.agent_run_id,
                     target.execution_epoch,
-                ))
-                .await;
+                )?;
+                drop(database);
+                self.planned_shutdown
+                    .cleanup_completed(&ActiveExecutionKey::new(
+                        &target.agent_run_id,
+                        target.execution_epoch,
+                    ))
+                    .await;
+            }
         }
+        if !confirmed {
+            anyhow::bail!("Camp execution cleanup is unconfirmed; deletion remains fenced");
+        }
+        Ok(())
     }
 
     async fn expire_elapsed_execution_budgets(&self, output: &mpsc::UnboundedSender<String>) {
@@ -3909,6 +3893,7 @@ impl Core {
     }
 
     async fn request_planned_stop(&self, execution: &ActiveExecutionSnapshot) -> bool {
+        self.planned_shutdown.cancel_active(&execution.key).await;
         match execution.adapter_kind {
             AdapterKind::ClaudeCodeCli => {
                 if !self
@@ -4956,7 +4941,7 @@ impl Core {
         }
     }
 
-    async fn handle(&self, request: &Request) -> Result<Value> {
+    async fn handle(self: &Arc<Self>, request: &Request) -> Result<Value> {
         if request.method.starts_with("skills.") {
             self.subsystems.require("skills")?;
         }
@@ -6589,16 +6574,42 @@ impl Core {
                 let camp_id = params.command.camp_id.clone();
                 let command_id = params.command_id.clone();
                 let force = params.command.force;
-                let runtime_cleanup_targets = if force {
+                let envelope =
+                    user_camp_command_envelope(params.command_id, camp_id.clone(), params.command);
+                if let Some(replay) = {
                     let database = self.database.lock().await;
-                    ExecutionRuntimeService::default()
-                        .list_camp_runtime_cleanup_targets(&database, &camp_id)?
+                    DomainCommandGateway.replay_if_recorded(&database, &envelope)?
+                } {
+                    return Ok(serde_json::to_value(replay.result)?);
+                }
+                let (runtime_cleanup_targets, prior_blockers) = if force {
+                    let mut database = self.database.lock().await;
+                    let blockers = match ExecutionRuntimeService::default()
+                        .settle_forced_camp_deletion(
+                            &mut database,
+                            &camp_id,
+                            envelope.payload.expected_version,
+                            &command_id,
+                        )? {
+                        Ok(blockers) => blockers,
+                        Err(rejection) => {
+                            let execution =
+                                DomainCommandGateway
+                                    .execute(&mut database, &envelope, |_| Ok(rejection))?;
+                            return Ok(serde_json::to_value(execution.result)?);
+                        }
+                    };
+                    (
+                        ExecutionRuntimeService::default()
+                            .list_camp_runtime_cleanup_targets(&database, &camp_id)?,
+                        blockers,
+                    )
                 } else {
-                    Vec::new()
+                    (Vec::new(), Vec::new())
                 };
                 if force {
                     self.stop_deleted_camp_runtimes(&runtime_cleanup_targets)
-                        .await;
+                        .await?;
                     self.runtime_fleet
                         .force_fence_camp_for_deletion(&camp_id)
                         .await?;
@@ -6625,9 +6636,10 @@ impl Core {
                     return Err(error);
                 }
                 let mut database = self.database.lock().await;
-                let execution = CollaborationService::default().delete_camp(
+                let execution = CollaborationService::default().delete_camp_after_settlement(
                     &mut database,
-                    &user_camp_command_envelope(params.command_id, camp_id, params.command),
+                    &envelope,
+                    &prior_blockers,
                 )?;
                 if execution.result.status == CommandResultStatus::Applied {
                     self.mark_skill_projections_dirty_best_effort(&mut database, true);
@@ -6731,12 +6743,17 @@ impl Core {
                 let mut database = self.database.lock().await;
                 let execution = ExecutionRuntimeService::default().request_camp_turn_cancellation(
                     &mut database,
-                    &user_camp_command_envelope(params.command_id, camp_id, params.command),
+                    &user_camp_command_envelope(params.command_id, camp_id.clone(), params.command),
                 )?;
-                let should_notify = execution.result.status == CommandResultStatus::Accepted;
+                let should_notify = execution.result.status == CommandResultStatus::Applied;
                 drop(database);
                 if should_notify {
                     self.agent_run_cancellation_notify.notify_one();
+                    emit_agent_run_terminal(
+                        &self.output,
+                        Some(&camp_id),
+                        json!({ "campId": camp_id, "result": execution.result }),
+                    );
                 }
                 Ok(serde_json::to_value(execution.result)?)
             }
@@ -6747,12 +6764,17 @@ impl Core {
                 let mut database = self.database.lock().await;
                 let execution = ExecutionRuntimeService::default().request_agent_run_cancellation(
                     &mut database,
-                    &user_camp_command_envelope(params.command_id, camp_id, params.command),
+                    &user_camp_command_envelope(params.command_id, camp_id.clone(), params.command),
                 )?;
-                let should_notify = execution.result.status == CommandResultStatus::Accepted;
+                let should_notify = execution.result.status == CommandResultStatus::Applied;
                 drop(database);
                 if should_notify {
                     self.agent_run_cancellation_notify.notify_one();
+                    emit_agent_run_terminal(
+                        &self.output,
+                        Some(&camp_id),
+                        json!({ "campId": camp_id, "result": execution.result }),
+                    );
                 }
                 Ok(serde_json::to_value(execution.result)?)
             }
@@ -8115,6 +8137,36 @@ impl Core {
         if runtime_kind.is_some_and(|kind| self.require_execution_subsystems(kind).is_err()) {
             return;
         }
+        let pending_cleanup = {
+            let database = self.database.lock().await;
+            ExecutionRuntimeService::default().runtime_cleanup_blocked_since(
+                &database,
+                &candidate.conversation_id,
+                &candidate.agent_run_id,
+            )
+        };
+        match pending_cleanup {
+            Ok(Some(requested_at)) => {
+                self.agent_run_cancellation_notify.notify_one();
+                let expired =
+                    chrono::DateTime::parse_from_rfc3339(&requested_at).map_or(true, |at| {
+                        chrono::Utc::now()
+                            .signed_duration_since(at)
+                            .num_milliseconds()
+                            >= 3000
+                    });
+                if expired {
+                    self.reject_agent_run_dispatch(&output, &candidate, "runtime_cleanup_unconfirmed",
+                        &anyhow::anyhow!("Previous execution cleanup could not be confirmed; retry after Runtime recovery")).await;
+                }
+                return;
+            }
+            Err(error) => {
+                eprintln!("failed to inspect Runtime cleanup fence: {error:#}");
+                return;
+            }
+            Ok(None) => {}
+        }
         let Some(launch_permit) = self.planned_shutdown.enter_launch().await else {
             return;
         };
@@ -8292,6 +8344,17 @@ impl Core {
         }
         let active_key =
             ActiveExecutionKey::new(&execution.agent_run_id, execution.execution_epoch);
+        let database = self.database.lock().await;
+        if !matches!(
+            ExecutionRuntimeService::default().load_agent_run_execution(
+                &database,
+                &execution.agent_run_id,
+                execution.execution_epoch,
+            ),
+            Ok(Some(_))
+        ) {
+            return;
+        }
         if !self
             .planned_shutdown
             .register_active(
@@ -8301,6 +8364,7 @@ impl Core {
             )
             .await
         {
+            drop(database);
             let error = anyhow::anyhow!(
                 "AgentRun execution could not enter the generation-local active registry"
             );
@@ -8315,6 +8379,7 @@ impl Core {
             .await;
             return;
         }
+        drop(database);
         let core = self.clone();
         let mut agent_run_tasks = self.agent_run_tasks.lock().await;
         while agent_run_tasks.try_join_next().is_some() {}
@@ -8329,6 +8394,8 @@ impl Core {
                     &mut launch_permit,
                 )
                 .await;
+            launch_permit.finish_launch();
+            let launch_cancelled = launch_permit.check_cancelled().is_err();
             // New Runs carry only a Camp-scoped root proof. Their terminal path may wake legacy
             // recovery work, but no legacy View admission is held across the Run lifecycle.
             if !release_agent_run_attachment_admission(
@@ -8340,6 +8407,7 @@ impl Core {
                     execution.camp_id
                 );
             }
+            if launch_cancelled { return; }
             if launch_result.is_ok() {
                 core.planned_shutdown
                     .remove_active_if_unbound(&active_key)
@@ -8643,118 +8711,82 @@ impl Core {
             match ExecutionRuntimeService::default().list_cancellation_candidates(&database, 32) {
                 Ok(candidates) => candidates,
                 Err(error) => {
-                    eprintln!("failed to scan AgentRun cancellation candidates: {error:#}");
+                    eprintln!("failed to scan Runtime cleanup: {error:#}");
                     return;
                 }
             }
         };
-        let mut interrupt_tasks = tokio::task::JoinSet::new();
+        let mut tasks = tokio::task::JoinSet::new();
         for candidate in candidates {
             let core = self.clone();
-            interrupt_tasks.spawn(async move {
-                let ingress_fence = core.interrupt_cancelled_agent_run(&candidate).await;
-                (candidate, ingress_fence)
+            tasks.spawn(async move {
+                let fence = core
+                    .cleanup_agent_run_runtime(
+                        &candidate.agent_run_id,
+                        candidate.execution_epoch,
+                        &candidate.adapter_kind,
+                    )
+                    .await;
+                (candidate, fence)
             });
         }
-        while let Some(result) = interrupt_tasks.join_next().await {
-            let (candidate, ingress_fence) = match result {
-                Ok(result) => result,
-                Err(error) => {
-                    eprintln!("AgentRun cancellation interrupt worker failed: {error}");
-                    continue;
-                }
+        while let Some(result) = tasks.join_next().await {
+            let Ok((candidate, fence)) = result else {
+                continue;
             };
-            let acknowledgement = {
-                let mut database = self.database.lock().await;
-                ExecutionRuntimeService::default().acknowledge_agent_run_cancellation(
-                    &mut database,
-                    &CommandEnvelope {
-                        command_id: format!(
-                            "runtime-cancellation-ack:{}:{}",
-                            candidate.agent_run_id, candidate.execution_epoch
-                        ),
-                        actor: ActorRef::System {
-                            component_id: "runtime-cancellation-coordinator".to_string(),
-                        },
-                        camp_id: Some(candidate.camp_id.clone()),
-                        expected_versions: Vec::new(),
-                        execution_epoch: None,
-                        payload: AcknowledgeAgentRunCancellationCommand {
-                            agent_run_id: candidate.agent_run_id.clone(),
-                            expected_version: candidate.version,
-                            execution_epoch: candidate.execution_epoch,
-                            ending_git_observation: None,
-                        },
-                    },
+            if fence == RuntimeCancellationIngressFence::Unproven {
+                // Rotate retries without changing business state or its version.
+                let database = self.database.lock().await;
+                let _ = ExecutionRuntimeService::default().defer_runtime_cleanup(
+                    &database,
+                    &candidate.agent_run_id,
+                    candidate.execution_epoch,
+                );
+                continue;
+            }
+            let recorded = {
+                let database = self.database.lock().await;
+                ExecutionRuntimeService::default().record_runtime_cleanup_completed(
+                    &database,
+                    &candidate.agent_run_id,
+                    candidate.execution_epoch,
                 )
             };
-            match acknowledgement {
-                Ok(execution) if execution.result.status == CommandResultStatus::Applied => {
-                    let accepted_input_outcome_unknown =
-                        execution.result.code == "agent_run.accepted_input_outcome_unknown";
-                    emit(
-                        output,
-                        if accepted_input_outcome_unknown {
-                            "agent_run.recovery_blocker_resolved"
-                        } else {
-                            "agent_run.cancelled"
-                        },
-                        json!({
-                            "campId": candidate.camp_id,
-                            "campTurnId": candidate.camp_turn_id,
-                            "agentRunId": candidate.agent_run_id,
-                            "executionEpoch": candidate.execution_epoch,
-                            "result": execution.result,
-                            "replayed": execution.replayed,
-                        }),
-                    );
-                    emit_navigation_invalidated(
-                        output,
-                        if accepted_input_outcome_unknown {
-                            "agent_run.recovery_blocker_resolved"
-                        } else {
-                            "agent_run.cancelled"
-                        },
-                        Some(&candidate.camp_id),
-                    );
-                    self.reconcile_skill_projection_after_run_terminal(&candidate.execution_root)
-                        .await;
-                    self.planned_shutdown
-                        .remove_active(&ActiveExecutionKey::new(
-                            &candidate.agent_run_id,
-                            candidate.execution_epoch,
-                        ))
-                        .await;
-                    if ingress_fence == RuntimeCancellationIngressFence::Flushed {
-                        self.project_agent_run_file_changes_after_terminal(
-                            &candidate.agent_run_id,
-                            candidate.execution_epoch,
-                        )
-                        .await;
-                    } else {
-                        eprintln!(
-                            "AgentRun {} cancellation ingress did not flush; file-change projection remains recoverable instead of freezing no_changes",
-                            candidate.agent_run_id
-                        );
-                    }
-                    if !accepted_input_outcome_unknown {
-                        let core = self.clone();
-                        tokio::spawn(async move {
-                            core.record_cancelled_run_ending_git_observation(&candidate)
-                                .await;
-                        });
-                    }
-                }
-                Ok(execution) if execution.result.code == "agent_run.cancellation_fenced" => {}
-                Ok(execution) => eprintln!(
-                    "AgentRun {} cancellation ACK was rejected: {}",
-                    candidate.agent_run_id, execution.result.code
-                ),
-                Err(error) => eprintln!(
-                    "failed to ACK AgentRun {} cancellation: {error:#}",
-                    candidate.agent_run_id
-                ),
+            if let Err(error) = recorded {
+                eprintln!("failed to record Runtime cleanup: {error:#}");
+                continue;
             }
+            self.planned_shutdown
+                .cleanup_completed(&ActiveExecutionKey::new(
+                    &candidate.agent_run_id,
+                    candidate.execution_epoch,
+                ))
+                .await;
+            emit(
+                output,
+                "agent_run.runtime_cleanup_completed",
+                json!({
+                    "campId": candidate.camp_id, "agentRunId": candidate.agent_run_id,
+                    "executionEpoch": candidate.execution_epoch,
+                }),
+            );
+            // Git and projection work do not extend the Runtime cleanup budget.
+            let core = self.clone();
+            tokio::spawn(async move {
+                core.reconcile_skill_projection_after_run_terminal(&candidate.execution_root)
+                    .await;
+                if fence == RuntimeCancellationIngressFence::Flushed {
+                    core.project_agent_run_file_changes_after_terminal(
+                        &candidate.agent_run_id,
+                        candidate.execution_epoch,
+                    )
+                    .await;
+                }
+                if matches!(candidate.status.as_str(), "cancelled" | "failed") {
+                    core.record_cancelled_run_ending_git_observation(&candidate)
+                        .await;
+                }
+            });
         }
     }
 
@@ -8801,148 +8833,104 @@ impl Core {
         }
     }
 
-    async fn interrupt_cancelled_agent_run(
+    async fn cleanup_agent_run_runtime(
         &self,
-        candidate: &AgentRunCancellationCandidate,
+        agent_run_id: &str,
+        execution_epoch: i64,
+        adapter_kind: &str,
     ) -> RuntimeCancellationIngressFence {
-        if candidate.status == "queued" {
-            return RuntimeCancellationIngressFence::Flushed;
-        }
-        if candidate.adapter_kind == "antigravity-app" {
-            if run_with_cancellation_deadline(
-                RUNTIME_CANCELLATION_INTERRUPT_TIMEOUT,
-                self.antigravity_app
-                    .interrupt(&candidate.agent_run_id, candidate.execution_epoch),
-            )
-            .await
-            .is_none()
-            {
-                eprintln!(
-                    "Antigravity interrupt timed out for AgentRun {}; execution remains fenced",
-                    candidate.agent_run_id
-                );
-            }
-            return if self
-                .antigravity_app
-                .wait_for_agent_run_quiescence(
-                    &candidate.agent_run_id,
-                    candidate.execution_epoch,
-                    RUNTIME_CANCELLATION_FENCE_TIMEOUT,
-                )
-                .await
-            {
-                RuntimeCancellationIngressFence::Flushed
-            } else {
-                RuntimeCancellationIngressFence::Unproven
-            };
-        }
-        if candidate.adapter_kind == "claude-code-cli" {
-            if run_with_cancellation_deadline(
-                RUNTIME_CANCELLATION_INTERRUPT_TIMEOUT,
-                self.claude_code_cli
-                    .interrupt(&candidate.agent_run_id, candidate.execution_epoch),
-            )
-            .await
-            .is_none()
-            {
-                eprintln!(
-                    "Claude Code interrupt timed out for AgentRun {}; execution remains fenced",
-                    candidate.agent_run_id
-                );
-            }
-            return if self
-                .claude_code_cli
-                .wait_for_agent_run_quiescence(
-                    &candidate.agent_run_id,
-                    candidate.execution_epoch,
-                    RUNTIME_CANCELLATION_FENCE_TIMEOUT,
-                )
-                .await
-            {
-                RuntimeCancellationIngressFence::Flushed
-            } else {
-                RuntimeCancellationIngressFence::Unproven
-            };
-        }
-        let Some(runtime) = self
-            .agent_run_runtime(&candidate.agent_run_id, candidate.execution_epoch)
-            .await
-        else {
-            return RuntimeCancellationIngressFence::Unproven;
-        };
-        match run_with_cancellation_deadline(
-            RUNTIME_CANCELLATION_INTERRUPT_TIMEOUT,
-            runtime.cancel(),
-        )
-        .await
-        {
-            Some(Ok(())) => {}
-            Some(Err(error)) => {
-                eprintln!(
-                    "failed to interrupt AgentRun {}: {error:#}",
-                    candidate.agent_run_id
-                );
-            }
-            None => {
-                eprintln!(
-                    "Runtime interrupt timed out for AgentRun {}; forcing logical Runtime fencing",
-                    candidate.agent_run_id
-                );
-            }
-        }
-        let ingress_flushed = run_with_cancellation_deadline(
-            RUNTIME_CANCELLATION_INGRESS_FLUSH_TIMEOUT,
-            runtime.detach_and_flush_ingress(),
-        )
-        .await;
-        if ingress_flushed != Some(true) {
-            eprintln!(
-                "Runtime ingress flush timed out for AgentRun {}; file-change projection will remain recoverable",
-                candidate.agent_run_id
-            );
-        }
-        let adapter_kind = runtime.adapter_kind();
-        let stopped = run_with_cancellation_deadline(RUNTIME_CANCELLATION_FENCE_TIMEOUT, async {
-            match adapter_kind {
-                rovai_core::agent_profile::AdapterKind::CodexCli => {
-                    self.codex_cli
-                        .forget_agent_run(&candidate.agent_run_id, candidate.execution_epoch)
-                        .await
+        let started = tokio::time::Instant::now();
+        let deadline = started + RUNTIME_CANCELLATION_TOTAL_TIMEOUT;
+        tokio::time::timeout_at(deadline, async {
+            let interrupt_deadline = started + Duration::from_secs(1);
+            let flush_deadline = started + Duration::from_millis(1500);
+            let key = ActiveExecutionKey::new(agent_run_id, execution_epoch);
+            self.planned_shutdown.cancel_active(&key).await;
+            let mut flushed = false;
+            let one_shot = matches!(adapter_kind, "antigravity-app" | "claude-code-cli");
+            loop {
+                if one_shot {
+                    if adapter_kind == "antigravity-app" {
+                        self.antigravity_app
+                            .interrupt(agent_run_id, execution_epoch)
+                            .await;
+                    } else {
+                        self.claude_code_cli
+                            .interrupt(agent_run_id, execution_epoch)
+                            .await;
+                    }
+                } else if let Some(runtime) =
+                    self.agent_run_runtime(agent_run_id, execution_epoch).await
+                {
+                    let _ = tokio::time::timeout_at(interrupt_deadline, runtime.cancel()).await;
+                    flushed =
+                        tokio::time::timeout_at(flush_deadline, runtime.detach_and_flush_ingress())
+                            .await
+                            == Ok(true);
+                    break;
                 }
-                kind @ (rovai_core::agent_profile::AdapterKind::OpencodeCli
-                | rovai_core::agent_profile::AdapterKind::CopilotCli
-                | rovai_core::agent_profile::AdapterKind::KiroCli
-                | rovai_core::agent_profile::AdapterKind::QoderCli
-                | rovai_core::agent_profile::AdapterKind::CodebuddyCli
-                | rovai_core::agent_profile::AdapterKind::QwenCode
-                | rovai_core::agent_profile::AdapterKind::TraeCnCli
-                | rovai_core::agent_profile::AdapterKind::CursorAgent
-                | rovai_core::agent_profile::AdapterKind::KimiCodeCli
-                | rovai_core::agent_profile::AdapterKind::GrokBuild) => {
-                    if let Some(adapter) = self.acp_adapter(kind) {
-                        adapter
-                            .forget_agent_run(&candidate.agent_run_id, candidate.execution_epoch)
+                if !self.planned_shutdown.launch_in_progress(&key).await
+                    || tokio::time::Instant::now() >= flush_deadline
+                {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+            loop {
+                let launching_before_stop = self.planned_shutdown.launch_in_progress(&key).await;
+                let stopped = if one_shot {
+                    let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+                    if adapter_kind == "antigravity-app" {
+                        self.antigravity_app
+                            .wait_for_agent_run_quiescence(agent_run_id, execution_epoch, remaining)
                             .await
                     } else {
-                        false
+                        self.claude_code_cli
+                            .wait_for_agent_run_quiescence(agent_run_id, execution_epoch, remaining)
+                            .await
                     }
+                } else {
+                    self.runtime_fleet
+                        .stop_agent_run_until(agent_run_id, execution_epoch, deadline)
+                        .await
+                };
+                if !stopped {
+                    return RuntimeCancellationIngressFence::Unproven;
                 }
-                rovai_core::agent_profile::AdapterKind::AntigravityApp => unreachable!(),
-                rovai_core::agent_profile::AdapterKind::ClaudeCodeCli => unreachable!(),
+                if !launching_before_stop {
+                    break;
+                }
+                // A launch may materialize a Host after the first lookup found
+                // none. Retire again after launch completion before confirming
+                // cleanup; the same total deadline still bounds this loop.
+                while self.planned_shutdown.launch_in_progress(&key).await {
+                    tokio::time::sleep(Duration::from_millis(10)).await;
+                }
+            }
+            if !one_shot {
+                let _ = tokio::time::timeout_at(deadline, async {
+                    if adapter_kind == "codex-cli" {
+                        self.codex_cli
+                            .forget_agent_run(agent_run_id, execution_epoch)
+                            .await;
+                    } else if let Ok(kind) = adapter_kind.parse::<AdapterKind>()
+                        && let Some(adapter) = self.acp_adapter(kind)
+                    {
+                        adapter
+                            .forget_agent_run(agent_run_id, execution_epoch)
+                            .await;
+                    }
+                })
+                .await;
+            }
+            if flushed || one_shot || execution_epoch == 0 {
+                RuntimeCancellationIngressFence::Flushed
+            } else {
+                RuntimeCancellationIngressFence::Reaped
             }
         })
-        .await;
-        if stopped != Some(true) {
-            eprintln!(
-                "Runtime detach timed out for AgentRun {}; persisted cancellation fence remains authoritative",
-                candidate.agent_run_id
-            );
-        }
-        if ingress_flushed == Some(true) {
-            RuntimeCancellationIngressFence::Flushed
-        } else {
-            RuntimeCancellationIngressFence::Unproven
-        }
+        .await
+        .unwrap_or(RuntimeCancellationIngressFence::Unproven)
     }
 
     async fn dispatch_runtime_deliveries(self: &Arc<Self>, output: &mpsc::UnboundedSender<String>) {
@@ -9556,12 +9544,37 @@ impl Core {
         Ok(())
     }
 
+    async fn begin_agent_run_input_dispatch(
+        &self,
+        execution: &AgentRunExecution,
+        delivery_id: &str,
+        launch_permit: &ExecutionLaunchPermit,
+    ) -> Result<()> {
+        launch_permit.check_cancelled()?;
+        let mut database = self.database.lock().await;
+        if !ContextService.begin_runtime_input_dispatch(
+            &mut database,
+            delivery_id,
+            &execution.agent_run_id,
+            execution.execution_epoch,
+        )? {
+            anyhow::bail!("Runtime input dispatch was fenced by Run settlement");
+        }
+        Ok(())
+    }
+
     async fn complete_active_runtime_route_handoff(
         &self,
         execution: &AgentRunExecution,
         binding: RuntimeRouteBinding,
         launch_permit: &mut ExecutionLaunchPermit,
     ) -> Result<()> {
+        if launch_permit.check_cancelled().is_err() {
+            // Keep ownership until the launch future finishes so one-shot adapters
+            // can drain/reap their child. Do not grant a new live route after Stop.
+            self.agent_run_cancellation_notify.notify_one();
+            return Ok(());
+        }
         let key = ActiveExecutionKey::new(&execution.agent_run_id, execution.execution_epoch);
         if !self
             .planned_shutdown
@@ -10320,6 +10333,7 @@ impl Core {
         output: &mpsc::UnboundedSender<String>,
         launch_permit: &mut ExecutionLaunchPermit,
     ) -> Result<()> {
+        launch_permit.check_cancelled()?;
         self.require_execution_subsystems(execution.runtime.adapter_kind)?;
         attachment_admission.prove(&execution.camp_id)?;
         let Some(skill_exposure) = self
@@ -10409,6 +10423,7 @@ impl Core {
                 execution_root.display()
             );
         }
+        launch_permit.check_cancelled()?;
         let initial_binding = self
             .prepare_initial_builtin_tool_binding(execution, resume_disposition)
             .await?;
@@ -10420,6 +10435,7 @@ impl Core {
         )?;
         self.persist_runtime_compatibility_digest(execution, &runtime_compatibility_digest)
             .await?;
+        launch_permit.check_cancelled()?;
         let runtime = self
             .codex_cli
             .ensure_agent_run_runtime(CodexAgentRunRuntimeRequest {
@@ -10490,6 +10506,7 @@ impl Core {
             .clone();
         self.bind_builtin_tool_runtime(&active_builtin_tools, execution, &binding_credential)
             .await?;
+        launch_permit.check_cancelled()?;
         let thread = runtime
             .start_or_resume_agent_thread(
                 &execution_root,
@@ -10542,6 +10559,7 @@ impl Core {
                         )?
                         .payload
                 };
+                launch_permit.check_cancelled()?;
                 let thread_id = runtime
                     .start_or_resume_agent_thread(
                         &execution_root,
@@ -10645,6 +10663,8 @@ impl Core {
         if delivery.status != "prepared" {
             anyhow::bail!("Runtime Input Delivery is not ready to send");
         }
+        self.begin_agent_run_input_dispatch(execution, &delivery.id, launch_permit)
+            .await?;
         let native_turn_id = match runtime
             .start_turn_with_config(
                 &prepared_context.rendered_payload,
@@ -10735,6 +10755,7 @@ impl Core {
         }
         // The credential identifies the long-lived Native Binding, not this
         // AgentRun. Core resolves the current active Run at every tool call.
+        launch_permit.check_cancelled()?;
         let binding_credential = self
             .prepare_initial_builtin_tool_binding(execution, resume_disposition)
             .await?;
@@ -10829,6 +10850,8 @@ impl Core {
         let (input_accepted_sender, mut input_accepted_receiver) = mpsc::unbounded_channel();
         let (runtime_event_sender, mut runtime_event_receiver) = mpsc::unbounded_channel();
         let (launch_handoff_sender, mut launch_handoff_receiver) = oneshot::channel();
+        self.begin_agent_run_input_dispatch(execution, &delivery.id, launch_permit)
+            .await?;
         let run = self.claude_code_cli.run(ClaudeCodeRunRequest {
             agent_run_id: execution.agent_run_id.clone(),
             execution_epoch: execution.execution_epoch,
@@ -11294,6 +11317,7 @@ impl Core {
                 execution_root.display()
             );
         }
+        launch_permit.check_cancelled()?;
         let binding_credential = self
             .prepare_initial_builtin_tool_binding(execution, resume_disposition)
             .await?;
@@ -11373,6 +11397,8 @@ impl Core {
         let (input_accepted_sender, mut input_accepted_receiver) = mpsc::unbounded_channel();
         let (runtime_event_sender, mut runtime_event_receiver) = mpsc::unbounded_channel();
         let (launch_handoff_sender, mut launch_handoff_receiver) = oneshot::channel();
+        self.begin_agent_run_input_dispatch(execution, &input_delivery.id, launch_permit)
+            .await?;
         let run = self.antigravity_app.run(AntigravityRunRequest {
             agent_run_id: execution.agent_run_id.clone(),
             execution_epoch: execution.execution_epoch,
@@ -11683,6 +11709,7 @@ impl Core {
         let adapter = self
             .acp_adapter(execution.runtime.adapter_kind)
             .context("AgentRun selected an unsupported ACP Adapter")?;
+        launch_permit.check_cancelled()?;
         let initial_binding = self
             .prepare_initial_builtin_tool_binding(execution, resume_disposition)
             .await?;
@@ -11759,6 +11786,7 @@ impl Core {
             .await?;
         let resumable_session_id = binding_credential.native_session_id.clone();
         let model = execution.runtime.model.model_id.as_str();
+        launch_permit.check_cancelled()?;
         let session = runtime
             .start_or_resume_session_with_native_rules(
                 resumable_session_id.as_deref(),
@@ -11833,6 +11861,7 @@ impl Core {
                 )?;
                 self.persist_runtime_compatibility_digest(execution, &runtime_compatibility_digest)
                     .await?;
+                launch_permit.check_cancelled()?;
                 runtime = adapter
                     .ensure_agent_run_runtime(
                         &execution.agent_run_id,
@@ -11859,6 +11888,7 @@ impl Core {
                     &replacement_binding,
                 )
                 .await?;
+                launch_permit.check_cancelled()?;
                 let session_id = runtime
                     .start_or_resume_session_with_native_rules(
                         None,
@@ -11910,6 +11940,8 @@ impl Core {
         }
         runtime
             .arm_grok_auto_compact_for_acceptance_if_requested()
+            .await?;
+        self.begin_agent_run_input_dispatch(execution, &delivery.id, launch_permit)
             .await?;
         let native_prompt_id = match runtime
             .start_prompt(&delivery.id, &prepared_context.runtime_payload)
@@ -13289,6 +13321,8 @@ async fn run_core(
         // launch gate closes. A crash in either direction is therefore
         // recoverable: every Run present before the next startup is fenced by
         // this cycle, including a launch that was already crossing handoff.
+        let mut early_cancelled_agent_runs = 0;
+        let mut early_unsettled_effect_agent_runs = 0;
         let controlled_shutdown_cycle_persisted =
             match tokio::time::timeout_at(settlement_deadline, async {
                 let mut database = core.database.lock().await;
@@ -13296,7 +13330,21 @@ async fn run_core(
                     &mut database,
                     core.planned_shutdown.generation(),
                     PLANNED_SHUTDOWN_PROTOCOL_VERSION,
-                )
+                )?;
+                let settlement = ExecutionRuntimeService::default()
+                    .settle_controlled_shutdown_runs(
+                        &mut database,
+                        core.planned_shutdown.generation(),
+                        false,
+                        (0, 0),
+                    )?;
+                early_cancelled_agent_runs = settlement.fenced_agent_runs.len();
+                early_unsettled_effect_agent_runs = settlement
+                    .fenced_agent_runs
+                    .iter()
+                    .filter(|run| run.has_unsettled_external_effects)
+                    .count();
+                Ok::<(), anyhow::Error>(())
             })
             .await
             {
@@ -13369,6 +13417,10 @@ async fn run_core(
             Vec::new()
         };
         let mut active_executions_observed = active.len();
+        let observed_keys = active
+            .iter()
+            .map(|execution| execution.key.clone())
+            .collect::<Vec<_>>();
 
         // Exit is the product-level cancellation linearization point. Once the
         // stable active snapshot exists, no new Runtime terminal or callback may
@@ -13520,8 +13572,17 @@ async fn run_core(
         };
         active_executions_observed =
             active_executions_observed.max(unresolved_executions_before_fence);
-        let terminal_executions_settled =
-            active_executions_observed.saturating_sub(unresolved_executions_before_fence);
+        // Registry removal can follow cancellation too. Count only committed
+        // Runtime terminal evidence, never business cancellation as a terminal race.
+        let terminal_executions_settled = tokio::time::timeout_at(output_deadline, async {
+            let database = core.database.lock().await;
+            ExecutionRuntimeService::default()
+                .count_runtime_terminal_settlements(&database, &observed_keys)
+        })
+        .await
+        .ok()
+        .and_then(Result::ok)
+        .unwrap_or(0);
         let fence_prerequisites_quiesced = controlled_shutdown_cycle_persisted
             && launch_quiesced
             && terminal_drained
@@ -13542,9 +13603,14 @@ async fn run_core(
             Some(
                 tokio::time::timeout_at(output_deadline, async {
                     let mut database = core.database.lock().await;
-                    ExecutionRuntimeService::default().settle_controlled_shutdown_cycle(
+                    ExecutionRuntimeService::default().settle_controlled_shutdown_runs(
                         &mut database,
                         core.planned_shutdown.generation(),
+                        true,
+                        (
+                            early_cancelled_agent_runs,
+                            early_unsettled_effect_agent_runs,
+                        ),
                     )
                 })
                 .await,
@@ -13578,6 +13644,10 @@ async fn run_core(
                 }
                 None => (0, 0),
             };
+        let cancelled_agent_runs_settled =
+            cancelled_agent_runs_settled + early_cancelled_agent_runs;
+        let unsettled_effect_agent_runs =
+            unsettled_effect_agent_runs + early_unsettled_effect_agent_runs;
         let unresolved_executions = match tokio::time::timeout_at(output_deadline, async {
             let database = core.database.lock().await;
             ExecutionRuntimeService::default().count_nonterminal_agent_runs(&database)
@@ -13603,6 +13673,23 @@ async fn run_core(
         let runtimes_quiesced = core
             .shutdown_all_runtimes_until(runtime_reap_deadline)
             .await;
+        if runtimes_quiesced && launch_quiesced && agent_tasks_quiesced {
+            let cleanup = tokio::time::timeout_at(output_deadline, async {
+                let database = core.database.lock().await;
+                for key in &observed_keys {
+                    ExecutionRuntimeService::default().record_runtime_cleanup_completed(
+                        &database,
+                        &key.agent_run_id,
+                        key.execution_epoch,
+                    )?;
+                }
+                Ok::<(), anyhow::Error>(())
+            })
+            .await;
+            if !matches!(cleanup, Ok(Ok(()))) {
+                deadline_expired = true;
+            }
+        }
 
         deadline_expired |= tokio::time::Instant::now() >= deadline
             || !launch_quiesced
@@ -20728,21 +20815,124 @@ while IFS= read -r _ignored; do :; done
         assert_eq!(invalidation["params"]["campId"], "rvcamp_test");
     }
 
+    #[cfg(all(target_os = "macos", feature = "slow-tests"))]
     #[tokio::test]
-    async fn cancellation_operations_use_an_independent_short_deadline() {
-        assert_eq!(
-            RUNTIME_CANCELLATION_INTERRUPT_TIMEOUT,
-            Duration::from_secs(2)
-        );
-        assert_eq!(
-            run_with_cancellation_deadline(Duration::from_millis(50), async { "ack" }).await,
-            Some("ack")
-        );
+    async fn cancellation_covers_launch_without_a_handle_and_has_one_total_deadline() {
+        assert_eq!(RUNTIME_CANCELLATION_TOTAL_TIMEOUT, Duration::from_secs(3));
+        let root =
+            std::env::temp_dir().join(format!("rovai-cleanup-launch-{}", uuid::Uuid::new_v4()));
+        let core = runtime_resolution_test_core(&root).unwrap();
+        let permit = core.planned_shutdown.enter_launch().await.unwrap();
+        let key = ActiveExecutionKey::new("launching", 1);
         assert!(
-            run_with_cancellation_deadline(Duration::from_millis(5), std::future::pending::<()>(),)
+            core.planned_shutdown
+                .register_active(&permit, key.clone(), AdapterKind::CodexCli)
                 .await
-                .is_none()
         );
+        let fence = tokio::time::timeout(
+            Duration::from_secs(5),
+            core.cleanup_agent_run_runtime("launching", 1, "codex-cli"),
+        )
+        .await
+        .unwrap();
+        assert_eq!(fence, RuntimeCancellationIngressFence::Unproven);
+        assert!(permit.check_cancelled().is_err());
+        assert_eq!(core.planned_shutdown.active_snapshots().await.len(), 1);
+        drop(permit);
+        assert_ne!(
+            core.cleanup_agent_run_runtime("launching", 1, "codex-cli")
+                .await,
+            RuntimeCancellationIngressFence::Unproven
+        );
+        core.planned_shutdown.cleanup_completed(&key).await;
+
+        // The initial lookup can find no Host while a previously admitted
+        // creation is still waiting. Materialize it after the interrupt/flush
+        // window and require a fresh reap before cleanup can be confirmed.
+        let executable = root.join("late-codex");
+        write_runtime_resolution_executable(
+            &executable,
+            "#!/bin/sh\ntrap '' TERM\nread -r line\nprintf '%s\\n' '{\"id\":1,\"result\":{}}'\nwhile read -r line; do :; done\n",
+        );
+        let runtime_config = FrozenAgentRuntimeConfig {
+            camp_fast: None,
+            adapter_kind: AdapterKind::CodexCli,
+            installation_id: "cleanup-fixture".into(),
+            installation_generation: 1,
+            search_environment_generation: 1,
+            executable_path: executable.to_string_lossy().into_owned(),
+            auth_scope: "local_user".into(),
+            reported_version: None,
+            executable_fingerprint: fingerprint_executable(&executable).unwrap(),
+            capabilities: vec!["codex.app_server_v2".into()],
+            protocol_version: "codex-app-server-v2".into(),
+            model: rovai_core::agent_profile::ResolvedModelSelection {
+                source: "runtime_default".into(),
+                model_id: "default".into(),
+                options: json!({}),
+            },
+            permissions: rovai_core::agent_profile::AdapterPermissionConfig {
+                adapter_kind: AdapterKind::CodexCli,
+                schema_version: 1,
+                values: json!({}),
+            },
+            native_session_compatibility_key: None,
+            binding_compatibility_digest: "cleanup-binding".into(),
+            host_config_digest: "cleanup-host".into(),
+            config_digest: "cleanup-config".into(),
+        };
+        let builtin_tools = BuiltinToolProcessConfig::create(
+            &executable,
+            &rovai_core::builtin_tool_transport::LocalIpcEndpoint::UnixSocket {
+                path: root.join("builtin.sock").to_string_lossy().into_owned(),
+            },
+            &root,
+        )
+        .unwrap();
+        let late_permit = core.planned_shutdown.enter_launch().await.unwrap();
+        let late_key = ActiveExecutionKey::new("late-host", 1);
+        assert!(
+            core.planned_shutdown
+                .register_active(&late_permit, late_key.clone(), AdapterKind::CodexCli)
+                .await
+        );
+        let late_launch = async {
+            tokio::time::sleep(Duration::from_millis(1700)).await;
+            let runtime = core
+                .codex_cli
+                .ensure_agent_run_runtime(CodexAgentRunRuntimeRequest {
+                    agent_run_id: "late-host",
+                    execution_epoch: 1,
+                    camp_id: "cleanup-camp",
+                    agent_id: "cleanup-agent",
+                    cwd: &root,
+                    frozen_runtime: &runtime_config,
+                    runtime_compatibility_digest: "cleanup-compatible",
+                    builtin_tools: &builtin_tools,
+                })
+                .await
+                .unwrap();
+            drop(late_permit);
+            runtime
+        };
+        let (fence, runtime) = tokio::join!(
+            core.cleanup_agent_run_runtime("late-host", 1, "codex-cli"),
+            late_launch,
+        );
+        let falsely_confirmed = fence != RuntimeCancellationIngressFence::Unproven
+            && runtime.process_id().await.is_some();
+        // Reap even when the assertion fails, leaving no fixture process behind.
+        let retry = core
+            .cleanup_agent_run_runtime("late-host", 1, "codex-cli")
+            .await;
+        assert!(!falsely_confirmed, "cleanup missed the late-created Host");
+        assert_ne!(retry, RuntimeCancellationIngressFence::Unproven);
+        assert!(runtime.process_id().await.is_none());
+        core.planned_shutdown.cleanup_completed(&late_key).await;
+        drop(runtime);
+        drop(builtin_tools);
+        drop(core);
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

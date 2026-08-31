@@ -16,6 +16,7 @@ import type {
   CampMessageView,
   CampOpenProjection,
   CampSnapshot,
+  StoredCommandResult,
   CanonicalRuntimeActivityView,
   CoreMethod,
   HealthStatus,
@@ -26,6 +27,7 @@ import type {
 } from '@contracts'
 import {
   App,
+  applyCancellationResult,
   AppHeader,
   CAMP_OPEN_FEEDBACK_DELAY_MS,
   ControlledShutdownOverlay,
@@ -1861,7 +1863,7 @@ describe('task event projections', () => {
     })
   })
 
-  it('keeps local cancelling state until the authoritative turn becomes terminal', () => {
+  it('limits stopping to a pending command on an active Turn', () => {
     const running = {
       turns: [{
         id: 'turn-running',
@@ -1906,7 +1908,7 @@ describe('task event projections', () => {
         ...turn,
         cancelRequestedAt: '2026-07-30T10:00:01Z'
       }))
-    })]).toEqual(['turn-running'])
+    })]).toEqual([])
     expect([...effectiveCancellingTurnIds(
       new Set(['turn-running', 'turn-from-another-camp']),
       running
@@ -1940,12 +1942,35 @@ describe('task event projections', () => {
       cancelRequestedAt: '2026-08-19T01:00:00Z'
     }
     expect([...effectiveCancellingRunIds(new Set(), { agentRuns: [requested] })])
-      .toEqual([activeRun.id])
+      .toEqual([])
     expect([...reconcileRunCancellationIds(local, { agentRuns: [requested] })])
       .toEqual([])
     expect([...reconcileRunCancellationIds(local, {
       agentRuns: [{ ...requested, status: 'cancelled' as const }]
     })]).toEqual([])
+
+    const snapshot = { agentRuns: [activeRun, { ...activeRun, id: 'unrelated' }],
+      turns: [{ id: 'turn', status: 'running' }] } as CampSnapshot
+    const result: StoredCommandResult = { commandId: 'stop', commandType: 'agent_run.cancel',
+      requestDigest: 'sha256:test', requestDigestVersion: 1, recordedAt: '2026-09-01T00:00:00Z',
+      resultEntity: null, status: 'applied', code: 'agent_run.accepted_input_outcome_unknown',
+      payload: { agentRunId: activeRun.id, status: 'failed', campTurnId: 'turn', campTurnStatus: 'running' }
+    }
+    const settled = applyCancellationResult(snapshot, result)
+    expect(settled.agentRuns[0].status).toBe('failed')
+    expect(settled.agentRuns[0].hasUnsettledExternalEffects).toBe(true)
+    expect(settled.agentRuns[1]).toBe(snapshot.agentRuns[1])
+    expect(settled.turns[0].status).toBe('running')
+    expect([...effectiveCancellingRunIds(local, settled)]).toEqual([])
+    expect(applyCancellationResult(snapshot, { ...result, status: 'rejected' })).toBe(snapshot)
+    const stoppedTurn = applyCancellationResult(snapshot, { ...result, payload: {
+      campTurnId: 'turn', campTurnStatus: 'cancelled', runs: [
+        { agentRunId: activeRun.id, terminalStatus: 'cancelled' },
+        { agentRunId: 'unrelated', terminalStatus: 'failed', terminalCode: 'agent_run.accepted_input_outcome_unknown' }
+      ]
+    } })
+    expect(stoppedTurn.agentRuns.map((run) => run.status)).toEqual(['cancelled', 'failed'])
+    expect(stoppedTurn.turns[0].status).toBe('cancelled')
   })
 
   it('admits Run Stop only for an active non-blocked Run outside Turn cancellation', () => {
@@ -1984,6 +2009,9 @@ describe('task event projections', () => {
       confirming: false,
       turnCancelling: false
     })).toBe('stopped')
+    expect(agentRunStopViewState({ ...run, status: 'failed', cancelRequestedAt: '2026-09-01T00:00:00Z' }, turn, {
+      cancelling: true, confirming: true, turnCancelling: true
+    })).toBe('hidden')
     expect(agentRunStopViewState({ ...run, waitReason: 'recovery_blocked' }, turn, {
       cancelling: false,
       confirming: false,
@@ -3664,10 +3692,10 @@ describe('task event projections', () => {
       stopping: true,
       onStop: () => undefined
     }))
-    expect(cancellingMarkup).toContain('正在停止')
-    expect(cancellingMarkup).toContain('停止请求已发送，正在等待 Agent 运行时退出。')
+    expect(cancellingMarkup).toContain('正在提交停止请求')
+    expect(cancellingMarkup).toContain('正在提交停止请求，完成后即可继续发送。')
     expect(cancellingMarkup).toContain('execution-disclosure run-live is-cancelling')
-    expect(cancellingMarkup).toContain('aria-label="正在停止当前执行"')
+    expect(cancellingMarkup).toContain('aria-label="正在提交停止请求"')
     expect(cancellingMarkup).not.toContain('class="primary-button composer-send"')
     expect(cancellingMarkup).not.toMatch(/<textarea[^>]*disabled/)
     expect(cancellingMarkup).not.toContain('execution-disclosure is-running')

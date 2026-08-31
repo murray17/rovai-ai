@@ -77,6 +77,7 @@ struct ActiveExecution {
     planned_stop_requested: bool,
     terminal_fingerprint: Option<String>,
     terminal_outcome: Option<RuntimeTerminalOutcome>,
+    cancellation: ExecutionCancellation,
 }
 
 #[derive(Debug)]
@@ -87,6 +88,14 @@ struct SettledExecution {
     terminal_outcome: RuntimeTerminalOutcome,
 }
 
+/// Shared with the existing active entry, including the period before a Host
+/// or route exists. Dropping a launch permit proves that no launch can resume.
+#[derive(Debug, Clone)]
+struct ExecutionCancellation {
+    cancelled: Arc<AtomicBool>,
+    launching: Arc<AtomicBool>,
+}
+
 /// A launch permit spans claim through the Adapter-specific prompt-send handoff.
 /// It is intentionally non-serializable and can only be obtained from the
 /// generation-local coordinator.
@@ -94,11 +103,29 @@ struct SettledExecution {
 pub struct ExecutionLaunchPermit {
     generation: String,
     guard: Option<OwnedRwLockReadGuard<()>>,
+    cancellation: ExecutionCancellation,
 }
 
 impl ExecutionLaunchPermit {
+    pub fn check_cancelled(&self) -> anyhow::Result<()> {
+        if self.cancellation.cancelled.load(Ordering::Acquire) {
+            anyhow::bail!("AgentRun launch was cancelled");
+        }
+        Ok(())
+    }
+
+    pub fn finish_launch(&self) {
+        self.cancellation.launching.store(false, Ordering::Release);
+    }
+
     fn complete_handoff(&mut self) {
         self.guard.take();
+    }
+}
+
+impl Drop for ExecutionLaunchPermit {
+    fn drop(&mut self) {
+        self.finish_launch();
     }
 }
 
@@ -258,6 +285,10 @@ impl PlannedShutdownCoordinator {
         Some(ExecutionLaunchPermit {
             generation: self.generation.clone(),
             guard: Some(guard),
+            cancellation: ExecutionCancellation {
+                cancelled: Arc::new(AtomicBool::new(false)),
+                launching: Arc::new(AtomicBool::new(true)),
+            },
         })
     }
 
@@ -321,10 +352,32 @@ impl PlannedShutdownCoordinator {
                 planned_stop_requested: false,
                 terminal_fingerprint: None,
                 terminal_outcome: None,
+                cancellation: permit.cancellation.clone(),
             },
         );
         self.active_changed.notify_waiters();
         true
+    }
+
+    pub async fn cancel_active(&self, key: &ActiveExecutionKey) {
+        if let Some(execution) = self.active.lock().await.get(key) {
+            execution
+                .cancellation
+                .cancelled
+                .store(true, Ordering::Release);
+        }
+    }
+
+    pub async fn launch_in_progress(&self, key: &ActiveExecutionKey) -> bool {
+        self.active
+            .lock()
+            .await
+            .get(key)
+            .is_some_and(|execution| execution.cancellation.launching.load(Ordering::Acquire))
+    }
+
+    pub async fn cleanup_completed(&self, key: &ActiveExecutionKey) -> bool {
+        self.remove_active_inner(key, true).await
     }
 
     pub async fn bind_route(&self, key: &ActiveExecutionKey, binding: RuntimeRouteBinding) -> bool {
@@ -400,15 +453,27 @@ impl PlannedShutdownCoordinator {
         &self,
         key: &ActiveExecutionKey,
     ) -> bool {
-        self.active
-            .lock()
-            .await
-            .get(key)
-            .is_some_and(|execution| execution.binding.is_some())
+        self.active.lock().await.get(key).is_some_and(|execution| {
+            execution.binding.is_some() || execution.cancellation.cancelled.load(Ordering::Acquire)
+        })
     }
 
     pub async fn remove_active(&self, key: &ActiveExecutionKey) -> bool {
-        let removed = self.active.lock().await.remove(key);
+        self.remove_active_inner(key, false).await
+    }
+
+    async fn remove_active_inner(&self, key: &ActiveExecutionKey, cleanup: bool) -> bool {
+        let removed = {
+            let mut active = self.active.lock().await;
+            if !cleanup
+                && active.get(key).is_some_and(|execution| {
+                    execution.cancellation.cancelled.load(Ordering::Acquire)
+                })
+            {
+                return false;
+            }
+            active.remove(key)
+        };
         if let Some(execution) = removed {
             if let (Some(binding), Some(terminal_fingerprint), Some(terminal_outcome)) = (
                 execution.binding,
@@ -433,10 +498,9 @@ impl PlannedShutdownCoordinator {
 
     pub async fn remove_active_if_unbound(&self, key: &ActiveExecutionKey) -> bool {
         let mut active = self.active.lock().await;
-        if active
-            .get(key)
-            .is_none_or(|execution| execution.binding.is_some())
-        {
+        if active.get(key).is_none_or(|execution| {
+            execution.binding.is_some() || execution.cancellation.cancelled.load(Ordering::Acquire)
+        }) {
             return false;
         }
         active.remove(key);
@@ -833,6 +897,28 @@ mod tests {
             coordinator.admit_terminal(conflicting).await.unwrap_err(),
             TerminalAdmissionError::ConflictingTerminal
         );
+    }
+
+    #[tokio::test]
+    async fn cancellation_keeps_an_unbound_launch_isolated_until_cleanup() {
+        let coordinator = PlannedShutdownCoordinator::new("cancel-generation");
+        let permit = coordinator.enter_launch().await.unwrap();
+        let key = ActiveExecutionKey::new("launching-run", 1);
+        assert!(
+            coordinator
+                .register_active(&permit, key.clone(), AdapterKind::CodexCli)
+                .await
+        );
+        assert!(coordinator.launch_in_progress(&key).await);
+        coordinator.cancel_active(&key).await;
+        assert!(permit.check_cancelled().is_err());
+        assert!(!coordinator.remove_active_if_unbound(&key).await);
+        assert!(!coordinator.remove_active(&key).await);
+        drop(permit);
+        assert!(!coordinator.launch_in_progress(&key).await);
+        assert_eq!(coordinator.active_snapshots().await.len(), 1);
+        assert!(coordinator.cleanup_completed(&key).await);
+        assert!(coordinator.active_snapshots().await.is_empty());
     }
 
     #[tokio::test]

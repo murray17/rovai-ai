@@ -567,11 +567,11 @@ The Camp-wide positive Core revision advanced by every effective Member addition
 _Avoid_: Collaboration State version, Member count, event sequence, model-visible roster revision
 
 **Camp Membership Cutover**:
-The atomic first phase of removing one Current CampMember: Core marks the relationship left, advances its version and the Camp Membership Generation, repairs Default Lead when needed, blocks all later business writes from Runs frozen under that membership version, requests cancellation of affected Runs, formally cancels Gather/Delivery work that has not begun, and releases non-terminal Task assignments. It preserves public history, terminal evidence and already-started external effects.
+The atomic removal of one Current CampMember. Core ends the exact membership lifetime, repairs Default Lead, releases open Task assignments, and terminally settles the existing directed set of member Runs, recipient/source/Gather Deliveries and their persisted target Runs. Unrelated same-Turn work continues. It preserves history and unknown external effects; Runtime cleanup follows independently.
 _Avoid_: best-effort leave, UI-only removal, rollback of external effects, synchronous process termination
 
 **Camp Membership Reconciliation**:
-The durable second phase created by a Camp Membership Cutover for every affected non-terminal AgentRun. It remains `reconciling` until those exact Runs reach a formal terminal settlement, then becomes `completed`; adding the same Member again cannot satisfy, reopen or retarget the old reconciliation.
+The durable audit of the exact Run set affected by a Camp Membership Cutover. New cutovers set equal target/settled counts and completed status in the same transaction. Historical reconciling rows may finish through the existing terminal trigger. Runtime cleanup is not an audit prerequisite, and re-adding a Member cannot reopen or retarget old work.
 _Avoid_: polling hint, Renderer progress authority, Run revival, implicit success
 
 **Executable Assignee**:
@@ -1511,11 +1511,11 @@ The bounded normalized text or structured payload of one AgentRun Execution Evid
 _Avoid_: silent truncation, local Blob path, raw protocol log, Markdown execution of tool output
 
 **CampTurn Stop**:
-The user-requested, idempotent cancellation of an active CampTurn's complete collaboration execution scope, including AgentRuns and unmaterialized Message Deliveries. Core atomically fences the Turn, cancels pending deliveries, closes new message/evidence/built-in-operation/descendant writes, and attempts native Runtime interruption before marking execution cancelled; Public A2A Messages, Message Deliveries, and Audit facts remain durable, while cancellation never creates a message to another member. The Composer's send position is the sole ordinary stop control while a CampTurn is active; Run Pulse, Header, Inspector, and Execution Drawer may project state or navigate but cannot cancel one Run or the Turn.
+The user-requested, idempotent termination of an active CampTurn's execution scope, including its Runs, pending Deliveries and Gather obligations. Core commits business terminal states before background Runtime cleanup; accepted or possibly effective input remains failed/outcome-unknown and is never automatically resent. Public history and external-effect evidence remain durable. Composer owns the whole-Turn control, while the shared Execution Drawer exposes the separate User-authorized Run-local Stop.
 _Avoid_: stop current UI row only, external transaction rollback, Task cancellation, process signal without fencing
 
 **Planned Shutdown**:
-The bounded Core process-lifecycle protocol used only for an intentional Rovai quit, restart, or update. It linearly closes new execution launch admission, requests stop for current-generation active execution handles, and temporarily preserves their live Runtime terminal and Built-in routes. It creates no CampTurn cancellation intent and no AgentRun cancellation request; only a matching Runtime Terminal Observation may settle a Run before the deadline, while an unresolved accepted input remains non-terminal for next-generation recovery classification.
+The bounded Core lifecycle for an intentional quit, restart or update. The existing protocol 3 request persists a shutdown cycle and terminally settles business obligations, then closes launch/routes, drains writers and reaps managed Runtime processes. It creates Run cancellation audit but no CampTurn Stop intent. Unknown effects survive as terminal failures, and cleanup deadlines do not keep business Runs active. The original report and Desktop watchdog remain in force.
 _Avoid_: CampTurn Stop, Core crash recovery, process kill as cancellation, cross-generation Runtime reattach, accepted-input retry
 
 **Runtime Terminal Observation**:
@@ -1523,7 +1523,7 @@ An Adapter-recognized Provider success, failure, or cancellation bound to one cu
 _Avoid_: process status, interrupt RPC result, inferred cancellation, log phrase, Native Session resume
 
 **Execution Drawer**:
-The Scheme C bottom-docked, user-selected projection of one AgentRun's current and historical execution state, activities, evidence links, waits, failures, and Public Messages. It derives from Core Read Side facts, can switch which Run is inspected, and owns no stop, approval, dispatch, retry, or message authority; v0.45 introduces no single-Run cancellation action.
+The shared user-selected surface for one AgentRun's execution state, activities, evidence, waits, failures and Public Messages. It derives from Core Read Side facts and can submit User-authorized Run-local Stop, but owns no execution, approval, dispatch or retry authority. Its stop spinner lasts only through command submission, never through background Runtime cleanup.
 _Avoid_: terminal emulator, independent activity store, Run controller, public timeline item, per-Run stop panel
 
 **Run Process Detail Surface**:

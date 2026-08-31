@@ -460,17 +460,10 @@ export function effectiveCancellingTurnIds(
   local: ReadonlySet<string>,
   snapshot: Pick<CampSnapshot, 'turns'>
 ): Set<string> {
-  const snapshotTurnIds = new Set(snapshot.turns.map((turn) => turn.id))
-  const next = new Set([...local].filter((turnId) => snapshotTurnIds.has(turnId)))
-  for (const turn of snapshot.turns) {
-    if (
-      CANCELLABLE_TURN_STATUSES.has(turn.status)
-      && turn.cancelRequestedAt !== null
-    ) {
-      next.add(turn.id)
-    }
-  }
-  return next
+  const activeIds = new Set(snapshot.turns
+    .filter((item) => CANCELLABLE_TURN_STATUSES.has(item.status))
+    .map((item) => item.id))
+  return new Set([...local].filter((id) => activeIds.has(id)))
 }
 
 export function reconcileRunCancellationIds(
@@ -496,18 +489,52 @@ export function reconcileRunCancellationIds(
 
 export function effectiveCancellingRunIds(
   local: ReadonlySet<string>,
-  snapshot: {
-    agentRuns: Pick<AgentRunView, 'id' | 'status' | 'cancelRequestedAt'>[]
-  }
+  snapshot: { agentRuns: Pick<AgentRunView, 'id' | 'status' | 'cancelRequestedAt'>[] }
 ): Set<string> {
-  const runIds = new Set(snapshot.agentRuns.map((run) => run.id))
-  const next = new Set([...local].filter((runId) => runIds.has(runId)))
-  for (const run of snapshot.agentRuns) {
-    if (CANCELLABLE_RUN_STATUSES.has(run.status) && run.cancelRequestedAt !== null) {
-      next.add(run.id)
+  const activeIds = new Set(snapshot.agentRuns
+    .filter((item) => CANCELLABLE_RUN_STATUSES.has(item.status))
+    .map((item) => item.id))
+  return new Set([...local].filter((id) => activeIds.has(id)))
+}
+
+// Apply only terminal facts returned by Core, then refresh the complete projection.
+// Cleanup ACK is deliberately absent from this presentation boundary.
+export function applyCancellationResult(
+  snapshot: CampSnapshot,
+  result: StoredCommandResult
+): CampSnapshot {
+  if (result.status !== 'applied') return snapshot
+  const payload = result.payload
+  const runs = new Map<string, { status: AgentRunView['status']; unknown: boolean }>()
+  const addRun = (id: unknown, status: unknown, code: unknown): void => {
+    if (typeof id === 'string' && (status === 'failed' || status === 'cancelled' || status === 'succeeded')) {
+      runs.set(id, { status, unknown: code === 'agent_run.accepted_input_outcome_unknown' })
     }
   }
-  return next
+  addRun(payload.agentRunId, payload.status, result.code)
+  if (Array.isArray(payload.runs)) {
+    for (const item of payload.runs) {
+      if (item && typeof item === 'object' && 'agentRunId' in item && 'terminalStatus' in item) {
+        addRun(item.agentRunId, item.terminalStatus, 'terminalCode' in item ? item.terminalCode : null)
+      }
+    }
+  }
+  const turnStatus = payload.campTurnStatus
+  return {
+    ...snapshot,
+    agentRuns: snapshot.agentRuns.map((run) => {
+      const settled = runs.get(run.id)
+      return settled ? {
+        ...run,
+        status: settled.status,
+        waitReason: null,
+        hasUnsettledExternalEffects: run.hasUnsettledExternalEffects || settled.unknown
+      } : run
+    }),
+    turns: snapshot.turns.map((turn) => turn.id === payload.campTurnId
+      && (turnStatus === 'completed' || turnStatus === 'failed' || turnStatus === 'cancelled')
+      ? { ...turn, status: turnStatus } : turn)
+  }
 }
 
 export function shouldLoadRuntimeHealth(
@@ -2789,6 +2816,9 @@ function AuthoritativeApp({
           }
         })
         if (result.status === 'rejected') throw new Error(commandFailureMessage(result))
+        if (campSnapshotRef.current?.camp.id === campId) {
+          setCampSnapshot(applyCancellationResult(campSnapshotRef.current, result))
+        }
       }))
     } catch (nextError) {
       setCancellingTurnIds((current) =>
@@ -2796,6 +2826,15 @@ function AuthoritativeApp({
       )
       setError(errorMessage(nextError))
       throw nextError
+    } finally {
+      setCancellingTurnIds((current) => new Set([...current].filter((id) => !requestedTurnIds.includes(id))))
+      if (requestedTurnIds.length > 0) {
+        try {
+          await refreshActiveCampSnapshot(campId)
+        } catch {
+          // The next poll refreshes the full projection.
+        }
+      }
     }
   }
 
@@ -2891,10 +2930,15 @@ function AuthoritativeApp({
       return
     }
 
+    if (campSnapshotRef.current?.camp.id === campId) {
+      setCampSnapshot(applyCancellationResult(campSnapshotRef.current, result))
+    }
+    setCancellingRunIds((current) => new Set([...current].filter((id) => id !== run.id)))
+    setConfirmingRunIds((current) => new Set([...current].filter((id) => id !== run.id)))
     try {
       await refreshActiveCampSnapshot(campId)
     } catch {
-      // The accepted/applied result is known; retain the local stopping projection until polling catches up.
+      // Core's terminal response already clears stopping; the next poll fills in the rest.
     }
   }
 

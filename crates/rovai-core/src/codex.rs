@@ -631,6 +631,18 @@ impl CodexHost {
         self.is_alive() && self.pending.lock().await.is_empty() && self.routes.is_empty().await
     }
 
+    pub(crate) async fn force_reap_until(&self, deadline: tokio::time::Instant) -> bool {
+        self.alive.store(false, Ordering::Release);
+        let Ok(mut child) = tokio::time::timeout_at(deadline, self.child.lock()).await else {
+            return false;
+        };
+        let _ = child.force_terminate_tree();
+        matches!(
+            tokio::time::timeout_at(deadline, child.wait()).await,
+            Ok(Ok(_))
+        )
+    }
+
     pub(crate) async fn shutdown_and_reap(&self) {
         self.alive.store(false, Ordering::Release);
         let mut child = self.child.lock().await;

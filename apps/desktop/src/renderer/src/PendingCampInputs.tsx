@@ -250,7 +250,7 @@ export function PendingCampInputs({
         onSubmit={() => { if (!saveDisabled) return perform(() => finish(true)) }} />
       <div className="composer-action-row">
         <div className="composer-actions">
-          {queue?.executionActive && <button className="danger-button composer-stop" type="button" disabled={stopping} onClick={onStop}>{stopping ? '正在停止…' : '停止'}</button>}
+          {queue?.executionActive && <button className="danger-button composer-stop" type="button" disabled={stopping} onClick={onStop}>{stopping ? '正在提交停止请求…' : '停止'}</button>}
           <button type="button" className="quiet-button" disabled={busy} onClick={() => {
             if (!ownsEdit) { setEdit(null); return }
             requestClose()

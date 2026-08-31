@@ -2869,10 +2869,11 @@ fn load_agent_runs(
                    WHERE runtime_input_delivery.agent_run_id = agent_run.id
                      AND runtime_input_delivery.status IN ('prepared', 'delivery_unknown')
                  )
+                 OR COALESCE(agent_run.last_error_code, '') = 'accepted_input_outcome_unknown'
                  OR (
                    agent_run.status IN ('failed', 'cancelled')
                    AND COALESCE(agent_run.last_error_code, '')
-                       = 'planned_shutdown_outcome_unknown'
+                       IN ('planned_shutdown_outcome_unknown', 'accepted_input_outcome_unknown')
                    AND EXISTS(
                      SELECT 1 FROM runtime_input_delivery
                      WHERE runtime_input_delivery.agent_run_id = agent_run.id
@@ -2899,7 +2900,7 @@ fn load_agent_runs(
             WHEN ?2 IS NOT NULL
              AND (agent_run.status IN ('queued', 'running', 'waiting') OR (
                agent_run.status IN ('failed', 'cancelled')
-               AND COALESCE(agent_run.last_error_code, '') = 'planned_shutdown_outcome_unknown'
+               AND COALESCE(agent_run.last_error_code, '') IN ('planned_shutdown_outcome_unknown', 'accepted_input_outcome_unknown')
              )) THEN 0
             WHEN ?2 IS NOT NULL THEN 1
             ELSE 0

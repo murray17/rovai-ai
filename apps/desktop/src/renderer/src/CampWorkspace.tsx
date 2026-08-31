@@ -268,7 +268,8 @@ export function agentRunStopViewState(
   local: { cancelling: boolean; confirming: boolean; turnCancelling: boolean }
 ): AgentRunStopViewState {
   if (run.status === 'cancelled') return 'stopped'
-  if (run.cancelRequestedAt !== null || local.cancelling || local.turnCancelling) return 'stopping'
+  if (!NON_TERMINAL_RUNS.has(run.status)) return 'hidden'
+  if (local.cancelling || local.turnCancelling) return 'stopping'
   if (local.confirming) return 'confirming'
   return canStopAgentRun(run, turn) ? 'available' : 'hidden'
 }
@@ -4548,14 +4549,14 @@ export function CampWorkspace({
               <button
                 className={showComposerStop ? 'danger-button composer-stop' : 'primary-button composer-send'}
                 type={showComposerStop ? 'button' : 'submit'}
-                aria-label={showComposerStop ? (stopping ? '正在停止当前执行' : '停止当前执行') : undefined}
+                aria-label={showComposerStop ? (stopping ? '正在提交停止请求' : '停止当前执行') : undefined}
                 onClick={showComposerStop ? onStop : undefined}
                 disabled={showComposerStop ? stopping || activeRuns.length === 0 : composerSendDisabled}
                 aria-busy={showComposerStop
                   ? stopping
                   : Boolean(busy || composerSubmitting || preparingAttachments.length > 0)}
               >
-                {showComposerStop ? (stopping ? '正在停止…' : '停止') : '发送'}
+                {showComposerStop ? (stopping ? '正在提交停止请求…' : '停止') : '发送'}
               </button>
             </div>
           </div>
@@ -4706,7 +4707,7 @@ function RunPulse({
           <strong>执行台</strong>
         </span>
         <span className="run-pulse-count" aria-live="polite">
-          {stopping ? '正在停止本轮协作 · ' : activeProcessCount > 0 ? `${activeProcessCount} 位执行中 · ` : ''}
+          {stopping ? '正在提交停止请求 · ' : activeProcessCount > 0 ? `${activeProcessCount} 位执行中 · ` : ''}
           {visibleProcesses.length} 位队员
         </span>
       </div>
@@ -5212,7 +5213,7 @@ function ExecutionDrawer({
             {stopViewState === 'stopped' ? (
               <span className="execution-run-stop-state tone-neutral" role="status">已停止</span>
             ) : stopViewState === 'stopping' ? (
-              <span className="execution-run-stop-state tone-attention" role="status">正在停止…</span>
+              <span className="execution-run-stop-state tone-attention" role="status">正在提交停止请求…</span>
             ) : stopViewState === 'confirming' ? (
               <span className="execution-run-stop-state tone-attention" role="status">正在确认停止状态</span>
             ) : null}
@@ -8518,7 +8519,7 @@ export function RunExecutionDisclosure({
         )}
       {cancelling && nonTerminal && (
         <div className="process-action cancelling" role="status">
-          停止请求已发送，正在等待 Agent 运行时退出。
+          正在提交停止请求，完成后即可继续发送。
         </div>
       )}
     </div>

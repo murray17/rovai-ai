@@ -2029,7 +2029,7 @@ mod tests {
         memory::{MEMORY_AGENT_MUTATIONS_PER_RUN, MemoryCreationOrigin, RetireMemoryCommand},
         memory_retrieval::{MemoryCacheState, MemoryReadInput, MemorySearchInput},
         message_delivery::{RetryMessageDeliveryCommand, dispatch_pending_for_recipient},
-        runtime::{AcknowledgeAgentRunCancellationCommand, FailAgentRunCommand},
+        runtime::FailAgentRunCommand,
     };
     use crate::{
         camp_attachment::CampAttachmentStore,
@@ -3381,7 +3381,7 @@ mod tests {
                 ),
             )
             .unwrap();
-        assert_eq!(stopped.result.status, CommandResultStatus::Accepted);
+        assert_eq!(stopped.result.status, CommandResultStatus::Applied);
 
         let cancelled: DeliveryCancellationSnapshot = fixture
             .database
@@ -4881,38 +4881,21 @@ mod tests {
         )
         .unwrap();
         transaction.commit().unwrap();
-        let (run_status, run_version, cancel_requested_at): (String, i64, Option<String>) = fixture
-            .database
-            .connection()
-            .query_row(
-                "SELECT status, version, cancel_requested_at FROM agent_run WHERE id = ?1",
-                [&member_run_id],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
-            )
-            .unwrap();
-        assert_eq!(run_status, "running");
+        let (run_status, _run_version, cancel_requested_at): (String, i64, Option<String>) =
+            fixture
+                .database
+                .connection()
+                .query_row(
+                    "SELECT status, version, cancel_requested_at FROM agent_run WHERE id = ?1",
+                    [&member_run_id],
+                    |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+                )
+                .unwrap();
+        assert_eq!(run_status, "cancelled");
         assert!(cancel_requested_at.is_some());
-        let settled = ExecutionRuntimeService::default()
-            .acknowledge_agent_run_cancellation(
-                &mut fixture.database,
-                &CommandEnvelope {
-                    command_id: "ack-gather-initiator-membership-ended".to_string(),
-                    actor: ActorRef::System {
-                        component_id: "runtime-cancellation-coordinator".to_string(),
-                    },
-                    camp_id: Some(fixture.camp_id.clone()),
-                    expected_versions: Vec::new(),
-                    execution_epoch: None,
-                    payload: AcknowledgeAgentRunCancellationCommand {
-                        agent_run_id: member_run_id.clone(),
-                        expected_version: run_version,
-                        execution_epoch: member_epoch,
-                        ending_git_observation: None,
-                    },
-                },
-            )
+        ExecutionRuntimeService::default()
+            .record_runtime_cleanup_completed(&fixture.database, &member_run_id, member_epoch)
             .unwrap();
-        assert_eq!(settled.result.status, CommandResultStatus::Applied);
 
         let final_state: (
             String,
@@ -6596,37 +6579,45 @@ Use this exact public input @agent_2";
             )
             .unwrap();
 
-        // Fault-inject an already-arriving Runtime terminal after the cancellation
-        // request. Terminal evidence remains independently testable, while every
-        // public output path must still honor the frozen membership revision.
-        fixture
+        // A terminal arriving from the departed lifetime may not overwrite the
+        // cancellation or publish, even after that Agent has rejoined the Camp.
+        let version = fixture
             .database
             .connection()
-            .execute(
-                r#"
-                UPDATE agent_run
-                SET cancel_requested_at = NULL, cancel_reason_code = NULL
-                WHERE id = ?1
-                "#,
+            .query_row(
+                "SELECT version FROM agent_run WHERE id = ?1",
                 [&fixture.source_run_id],
+                |row| row.get(0),
             )
             .unwrap();
-        let source_run_id = fixture.source_run_id.clone();
-        let completed = fixture.succeed_run_with_candidate(
-            &source_run_id,
-            fixture.source_epoch,
-            "这份终态证据可以结算，但不能再公开",
-            Some(MissingSendRecoveryCandidate::new(
-                MissingSendRecoveryBoundary::CodexCompletedTurn,
-                "这份终态证据可以结算，但不能再公开",
-            )),
-        );
-        assert_eq!(completed.result.status, CommandResultStatus::Applied);
-        assert!(completed.result.payload["finalCampMessageId"].is_null());
-        assert_eq!(
-            completed.result.payload["missingSendRecovery"]["decision"],
-            "skipped_membership_fenced"
-        );
+        let completed = ExecutionRuntimeService::default()
+            .succeed_agent_run(
+                &mut fixture.database,
+                &CommandEnvelope {
+                    command_id: "late-membership-terminal".into(),
+                    actor: ActorRef::System {
+                        component_id: "runtime-adapter:codex-cli".into(),
+                    },
+                    camp_id: Some(fixture.camp_id.clone()),
+                    expected_versions: Vec::new(),
+                    execution_epoch: None,
+                    payload: SucceedAgentRunCommand {
+                        agent_run_id: fixture.source_run_id.clone(),
+                        expected_version: version,
+                        execution_epoch: fixture.source_epoch,
+                        native_turn_id: "late-turn".into(),
+                        final_output: "这份迟到终态不能覆盖离队结算，也不能再公开".into(),
+                        missing_send_recovery_candidate: Some(MissingSendRecoveryCandidate::new(
+                            MissingSendRecoveryBoundary::CodexCompletedTurn,
+                            "这份迟到终态不能覆盖离队结算，也不能再公开",
+                        )),
+                        ending_git_observation: None,
+                    },
+                },
+            )
+            .unwrap();
+        assert_eq!(completed.result.status, CommandResultStatus::Rejected);
+        assert_eq!(completed.result.code, "agent_run.terminal_fenced");
         let state: (String, i64, String) = fixture
             .database
             .connection()
@@ -6644,7 +6635,7 @@ Use this exact public input @agent_2";
                 |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
             )
             .unwrap();
-        assert_eq!(state, ("succeeded".into(), 0, "completed:1/1".into()));
+        assert_eq!(state, ("cancelled".into(), 0, "completed:1/1".into()));
     }
 
     #[cfg(feature = "slow-tests")]

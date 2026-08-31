@@ -5339,7 +5339,7 @@ impl ChannelService {
                            COALESCE(
                                request_conversation.provider,
                                pending_conversation.provider
-                           )
+                           ), delivery.retry_suppression_json
                     FROM channel_delivery AS delivery
                     LEFT JOIN channel_turn_request AS request
                       ON request.id = delivery.request_id
@@ -5367,6 +5367,7 @@ impl ChannelService {
                             row.get::<_, Option<String>>(8)?,
                             row.get::<_, Option<String>>(9)?,
                             row.get::<_, String>(10)?,
+                            row.get::<_, Option<String>>(11)?,
                         ))
                     },
                 )
@@ -5383,6 +5384,7 @@ impl ChannelService {
                 source_agent_id,
                 source_camp_message_id,
                 provider,
+                retry_suppression_json,
             )) = state
             else {
                 return Ok(rejected(
@@ -5394,6 +5396,31 @@ impl ChannelService {
                 return Ok(rejected(
                     "channel.host_required",
                     "Only this provider's trusted Channel Host can settle deliveries",
+                ));
+            }
+            if let Some(suppression) = retry_suppression_json {
+                let suppression: Value = serde_json::from_str(&suppression)?;
+                if status != "sent" {
+                    if suppression["workerId"].as_str() != Some(envelope.payload.worker_id.as_str())
+                        || suppression["attemptCount"].as_i64() != Some(attempt_count)
+                    {
+                        return Ok(rejected("channel.delivery.lease_mismatch",
+                            "Late evidence must belong to the suppressed attempt"));
+                    }
+                    if envelope.payload.outcome == "sent" {
+                        transaction.execute(
+                            r#"UPDATE channel_delivery SET status = 'sent',
+                                external_delivery_message_id = ?2, failure_code = NULL,
+                                updated_at = ?3 WHERE id = ?1 AND status = 'failed'
+                                AND retry_suppression_json IS NOT NULL"#,
+                            params![envelope.payload.delivery_id,
+                                envelope.payload.external_delivery_message_id, Utc::now().to_rfc3339()],
+                        )?;
+                    }
+                }
+                return Ok(CommandHandlerResult::applied(
+                    "channel.delivery.late_observation_recorded",
+                    json!({ "deliveryId": envelope.payload.delivery_id, "retrySuppressed": true }), None,
                 ));
             }
             if matches!(status.as_str(), "sent" | "failed") {
@@ -7763,6 +7790,16 @@ fn try_admit_request(
     now: &str,
     command_id: &str,
 ) -> Result<AdmissionAttempt> {
+    let camp_id: Option<String> = transaction
+        .query_row(
+            "SELECT camp_id FROM channel_turn_request WHERE id = ?1 AND status = 'queued'",
+            [request_id],
+            |row| row.get(0),
+        )
+        .optional()?;
+    if let Some(camp_id) = camp_id {
+        crate::runtime::settle_pending_camp_cancellations_in_tx(transaction, &camp_id, now)?;
+    }
     let request = transaction
         .query_row(
             r#"
@@ -8315,6 +8352,14 @@ fn decline_unattended_channel_retries(
 }
 
 fn project_active_request_deliveries(transaction: &Transaction<'_>, now: &str) -> Result<()> {
+    project_active_request_deliveries_for_turn(transaction, None, now)
+}
+
+fn project_active_request_deliveries_for_turn(
+    transaction: &Transaction<'_>,
+    camp_turn_id: Option<&str>,
+    now: &str,
+) -> Result<()> {
     let active = query_rows(
         transaction,
         r#"
@@ -8326,9 +8371,10 @@ fn project_active_request_deliveries(transaction: &Transaction<'_>, now: &str) -
         JOIN channel_conversation
           ON channel_conversation.id = binding.channel_conversation_id
         WHERE request.status = 'admitted'
+          AND (?1 IS NULL OR request.camp_turn_id = ?1)
         ORDER BY request.created_at, request.id
         "#,
-        [],
+        [camp_turn_id],
         |row| {
             Ok((
                 row.get::<_, String>(0)?,
@@ -9004,7 +9050,66 @@ fn materialize_agent_attachments(
     Ok(())
 }
 
+/// Normal settlement preserves all pending output, including output not yet projected.
+pub(crate) fn settle_terminal_request_for_turn_in_tx(
+    transaction: &Transaction<'_>,
+    camp_turn_id: &str,
+    now: &str,
+) -> Result<()> {
+    project_active_request_deliveries_for_turn(transaction, Some(camp_turn_id), now)?;
+    settle_terminal_requests_for_turn(transaction, Some(camp_turn_id), now)
+}
+
+/// Only whole-Turn aborts suppress outbound work. A local Run stop must use
+/// normal settlement so another member's pending output remains deliverable.
+pub(crate) fn settle_channel_turn_after_abort_in_tx(
+    transaction: &Transaction<'_>,
+    camp_turn_id: &str,
+    reason_code: &str,
+    now: &str,
+) -> Result<()> {
+    let terminal: bool = transaction.query_row(
+        "SELECT status IN ('completed', 'failed', 'cancelled') FROM camp_turn WHERE id = ?1",
+        [camp_turn_id],
+        |row| row.get(0),
+    )?;
+    if !terminal {
+        return Ok(());
+    }
+    project_active_request_deliveries_for_turn(transaction, Some(camp_turn_id), now)?;
+    transaction.execute(
+        r#"UPDATE channel_delivery
+        SET retry_suppression_json = json_object(
+                'reasonCode', ?2, 'workerId', lease_owner, 'attemptCount', attempt_count,
+                'outcomeUnknown', json(CASE WHEN status = 'attempting' THEN 'true' ELSE 'false' END)),
+            failure_code = CASE WHEN status = 'attempting'
+                THEN 'channel_delivery_outcome_unknown' ELSE ?2 END,
+            status = 'failed', lease_owner = NULL, lease_expires_at = NULL,
+            ended_at = ?3, updated_at = ?3
+        WHERE request_id IN (SELECT id FROM channel_turn_request WHERE camp_turn_id = ?1)
+          AND delivery_kind IN ('agent_output', 'agent_attachment', 'attention')
+          AND status IN ('pending', 'attempting')"#,
+        params![camp_turn_id, reason_code, now],
+    )?;
+    transaction.execute(
+        r#"UPDATE channel_turn_request
+        SET status = 'failed', failure_code = ?2, completed_at = ?3,
+            updated_at = ?3, version = version + 1
+        WHERE camp_turn_id = ?1 AND status = 'admitted'"#,
+        params![camp_turn_id, reason_code, now],
+    )?;
+    Ok(())
+}
+
 fn settle_terminal_requests(transaction: &Transaction<'_>, now: &str) -> Result<()> {
+    settle_terminal_requests_for_turn(transaction, None, now)
+}
+
+fn settle_terminal_requests_for_turn(
+    transaction: &Transaction<'_>,
+    camp_turn_id: Option<&str>,
+    now: &str,
+) -> Result<()> {
     let terminal = query_rows(
         transaction,
         r#"
@@ -9024,9 +9129,10 @@ fn settle_terminal_requests(transaction: &Transaction<'_>, now: &str) -> Result<
         FROM channel_turn_request AS request
         JOIN camp_turn AS turn ON turn.id = request.camp_turn_id
         WHERE request.status = 'admitted'
+          AND (?1 IS NULL OR turn.id = ?1)
           AND turn.status IN ('completed', 'failed', 'cancelled')
         "#,
-        [],
+        [camp_turn_id],
         |row| {
             Ok((
                 row.get::<_, String>(0)?,
@@ -9111,6 +9217,7 @@ fn claim_deliveries(
             failure_code = COALESCE(failure_code, 'lease_expired'),
             available_at = ?1, updated_at = ?1
         WHERE status = 'attempting' AND lease_expires_at <= ?1
+          AND retry_suppression_json IS NULL
         "#,
         [&now_text],
     )?;
@@ -9120,6 +9227,7 @@ fn claim_deliveries(
         SELECT delivery.id
         FROM channel_delivery AS delivery
         WHERE delivery.status = 'pending' AND delivery.available_at <= ?1
+          AND delivery.retry_suppression_json IS NULL
           AND COALESCE(
               (
                   SELECT conversation.provider
@@ -12707,8 +12815,19 @@ mod tests {
                 "channel_delivery",
             ]
             .map(|table| {
+                let columns = connection
+                    .prepare(&format!("PRAGMA table_info({table})"))
+                    .unwrap()
+                    .query_map([], |row| row.get::<_, String>(1))
+                    .unwrap()
+                    .collect::<rusqlite::Result<Vec<_>>>()
+                    .unwrap()
+                    .into_iter()
+                    .filter(|column| column != "retry_suppression_json")
+                    .collect::<Vec<_>>()
+                    .join(", ");
                 let mut statement = connection
-                    .prepare(&format!("SELECT * FROM {table} ORDER BY 1, 2"))
+                    .prepare(&format!("SELECT {columns} FROM {table} ORDER BY 1, 2"))
                     .unwrap();
                 statement
                     .query_map([], |row| {
@@ -14082,6 +14201,195 @@ mod tests {
 
         assert_eq!(rejected.result.status, CommandResultStatus::Rejected);
         assert_eq!(rejected.result.code, "feishu_owner_identity.conflict");
+    }
+
+    // The channel owner proves the cross-module boundary: local cancellation
+    // preserves output, whole-Turn cancellation frees FIFO without an ACK.
+    #[test]
+    fn cancellation_preserves_local_output_and_suppresses_only_aborted_turn_retries() {
+        for whole_turn in [false, true] {
+            let mut database = seeded_runtime_database_owned();
+            let service = ChannelService::default();
+            connect_account(&service, &mut database);
+            publish_bot(&service, &mut database, "agent_1", "cli_app_1");
+            publish_bot(&service, &mut database, "agent_2", "cli_app_2");
+            seed_project(&database, "cancellation");
+            let path = quick_chat_path(&database);
+            let picker = pending_workspace_picker(&service, &mut database, "group", "oc_cancel");
+            service
+                .resolve_pending_camp_binding(
+                    &mut database,
+                    &path,
+                    &host_envelope("bind-cancel", picker),
+                )
+                .unwrap();
+            let (request_id, camp_id, turn_id, run_id, source_id): (String, String, String, String, String) = database.connection().query_row(
+                "SELECT request.id, request.camp_id, request.camp_turn_id, run.id, run.trigger_camp_message_id
+                 FROM channel_turn_request AS request JOIN agent_run AS run ON run.camp_turn_id = request.camp_turn_id
+                 JOIN camp_turn AS turn ON turn.id = request.camp_turn_id WHERE request.status = 'admitted'",
+                [], |row| Ok((row.get(0)?,row.get(1)?,row.get(2)?,row.get(3)?,row.get(4)?)),
+            ).unwrap();
+            let now = Utc::now().to_rfc3339();
+            let transaction = database.connection_mut().transaction().unwrap();
+            for (key, kind) in [
+                ("cancel-body", "agent_output"),
+                ("cancel-attention", "attention"),
+                ("cancel-sent", "attention"),
+                ("cancel-attempt", "attention"),
+            ] {
+                insert_delivery(
+                    &transaction,
+                    &request_id,
+                    key,
+                    kind,
+                    "cli_app_1",
+                    Some("agent_1"),
+                    Some(&source_id),
+                    &json!({"text": "test", "body": "test"}),
+                    &now,
+                )
+                .unwrap();
+            }
+            insert_attachment_delivery(
+                &transaction,
+                &request_id,
+                "cancel-file",
+                "cli_app_1",
+                "agent_1",
+                &source_id,
+                0,
+                &json!({"text": "file"}),
+                &now,
+            )
+            .unwrap();
+            transaction.execute("UPDATE channel_delivery SET status = 'sent', external_delivery_message_id = 'already-sent', ended_at = ?1 WHERE dedupe_key = 'cancel-sent'", [&now]).unwrap();
+            transaction.execute("UPDATE channel_delivery SET status = 'attempting', lease_owner = 'cancel-worker', attempt_count = 1, lease_expires_at = '2999-01-01T00:00:00Z' WHERE dedupe_key = 'cancel-attempt'", []).unwrap();
+            let attempting_id: String = transaction
+                .query_row(
+                    "SELECT id FROM channel_delivery WHERE dedupe_key = 'cancel-attempt'",
+                    [],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            transaction.commit().unwrap();
+            let runtime = crate::runtime::ExecutionRuntimeService::default();
+            let result = if whole_turn {
+                runtime
+                    .request_camp_turn_cancellation(
+                        &mut database,
+                        &CommandEnvelope {
+                            command_id: "stop-whole".into(),
+                            actor: ActorRef::User {
+                                user_id: "local_user".into(),
+                            },
+                            camp_id: Some(camp_id.clone()),
+                            expected_versions: Vec::new(),
+                            execution_epoch: None,
+                            payload: crate::runtime::CancelCampTurnCommand {
+                                camp_id: camp_id.clone(),
+                                camp_turn_id: turn_id,
+                                expected_version: 1,
+                            },
+                        },
+                    )
+                    .unwrap()
+            } else {
+                runtime
+                    .request_agent_run_cancellation(
+                        &mut database,
+                        &CommandEnvelope {
+                            command_id: "stop-local".into(),
+                            actor: ActorRef::User {
+                                user_id: "local_user".into(),
+                            },
+                            camp_id: Some(camp_id.clone()),
+                            expected_versions: Vec::new(),
+                            execution_epoch: None,
+                            payload: crate::runtime::CancelAgentRunCommand {
+                                camp_id,
+                                agent_run_id: run_id.clone(),
+                                expected_version: 1,
+                            },
+                        },
+                    )
+                    .unwrap()
+            };
+            assert_eq!(result.result.status, CommandResultStatus::Applied);
+            let state: (String, i64, bool) = database.connection().query_row(
+                "SELECT request.status, (SELECT count(*) FROM channel_delivery WHERE request_id = request.id AND dedupe_key IN ('cancel-body','cancel-file','cancel-attention') AND status = 'pending'), (SELECT cancel_acknowledged_at IS NULL FROM agent_run WHERE id = ?2) FROM channel_turn_request AS request WHERE id = ?1",
+                params![request_id, run_id], |row| Ok((row.get(0)?,row.get(1)?,row.get(2)?)),
+            ).unwrap();
+            assert_eq!(
+                state,
+                (
+                    if whole_turn { "failed" } else { "admitted" }.into(),
+                    if whole_turn { 0 } else { 3 },
+                    true
+                )
+            );
+            if !whole_turn {
+                continue;
+            }
+            let suppression: String = database
+                .connection()
+                .query_row(
+                    "SELECT retry_suppression_json FROM channel_delivery WHERE id = ?1",
+                    [&attempting_id],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(
+                serde_json::from_str::<Value>(&suppression).unwrap()["outcomeUnknown"],
+                true
+            );
+            for (outcome, retryable) in [("failed", true), ("sent", false)] {
+                service
+                    .settle_delivery(
+                        &mut database,
+                        &host_envelope(
+                            &format!("late-{outcome}"),
+                            SettleChannelDeliveryCommand {
+                                delivery_id: attempting_id.clone(),
+                                worker_id: "cancel-worker".into(),
+                                outcome: outcome.into(),
+                                external_delivery_message_id: (outcome == "sent")
+                                    .then(|| "late-sent".into()),
+                                failure_code: None,
+                                retryable,
+                            },
+                        ),
+                    )
+                    .unwrap();
+            }
+            service
+                .host_tick(
+                    &mut database,
+                    &ActorRef::System {
+                        component_id: FEISHU_CHANNEL_HOST_COMPONENT.into(),
+                    },
+                    &ChannelHostTickRequest {
+                        worker_id: "next-worker".into(),
+                        limit: 20,
+                    },
+                )
+                .unwrap();
+            let final_state: (String, String, i64, String) = database.connection().query_row(
+                "SELECT request.status, (SELECT external_delivery_message_id FROM channel_delivery WHERE id = ?2),
+                    (SELECT count(*) FROM channel_turn_request WHERE binding_id = request.binding_id AND status = 'admitted'),
+                    (SELECT external_delivery_message_id FROM channel_delivery WHERE dedupe_key = 'cancel-sent')
+                 FROM channel_turn_request AS request WHERE id = ?1", params![request_id, attempting_id],
+                |row| Ok((row.get(0)?,row.get(1)?,row.get(2)?,row.get(3)?)),
+            ).unwrap();
+            assert_eq!(
+                final_state,
+                (
+                    "failed".into(),
+                    "late-sent".into(),
+                    1,
+                    "already-sent".into()
+                )
+            );
+        }
     }
 
     #[test]

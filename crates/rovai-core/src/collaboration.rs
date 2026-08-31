@@ -42,7 +42,6 @@ use crate::{
     managed_attachment::{
         CommitManagedAttachmentIngest, ManagedAttachmentIngestSource, ManagedAttachmentService,
     },
-    message_delivery::cancel_pending_turn_deliveries,
     pending_camp_input::{self, SendPendingCampInputCommand},
     runtime::AgentRunWorkspace,
 };
@@ -1173,6 +1172,15 @@ impl CollaborationService {
         database: &mut Database,
         envelope: &CommandEnvelope<DeleteCampCommand>,
     ) -> Result<CommandExecution> {
+        self.delete_camp_after_settlement(database, envelope, &[])
+    }
+
+    pub fn delete_camp_after_settlement(
+        &self,
+        database: &mut Database,
+        envelope: &CommandEnvelope<DeleteCampCommand>,
+        prior_blockers: &[Value],
+    ) -> Result<CommandExecution> {
         self.gateway.execute(database, envelope, |transaction| {
             if !matches!(envelope.actor, ActorRef::User { .. }) {
                 return Ok(rejected(
@@ -1197,7 +1205,14 @@ impl CollaborationService {
                 ));
             }
 
-            let blockers = camp_delete_blockers(transaction, &envelope.payload.camp_id)?;
+            let mut blockers = camp_delete_blockers(transaction, &envelope.payload.camp_id)?;
+            if envelope.payload.force {
+                for blocker in prior_blockers {
+                    if !blockers.contains(blocker) {
+                        blockers.push(blocker.clone());
+                    }
+                }
+            }
             if !blockers.is_empty() && !envelope.payload.force {
                 return Ok(CommandHandlerResult::rejected(
                     "camp.delete_blocked",
@@ -4732,7 +4747,7 @@ fn content_after_leading_mentions(
     &content[cursor..]
 }
 
-fn camp_delete_blockers(transaction: &Connection, camp_id: &str) -> Result<Vec<Value>> {
+pub(crate) fn camp_delete_blockers(transaction: &Connection, camp_id: &str) -> Result<Vec<Value>> {
     let checks = [
         (
             "nonterminal_agent_run",
@@ -4935,27 +4950,15 @@ pub(crate) fn exhaust_camp_turn_execution_budget(
     if updated != 1 {
         anyhow::bail!("CampTurn changed before its Execution Budget was exhausted");
     }
-    let message_deliveries_cancelled = cancel_pending_turn_deliveries(
+    let settlement = crate::runtime::settle_abortive_camp_turn_in_tx(
         transaction,
         camp_turn_id,
         "execution_budget_exhausted",
         actor,
-        execution_epoch,
         now,
     )?;
-    let agent_runs_fenced = transaction.execute(
-        r#"
-        UPDATE agent_run
-        SET cancel_requested_at = ?2,
-            cancel_reason_code = 'execution_budget_exhausted',
-            version = version + 1,
-            updated_at = ?2
-        WHERE camp_turn_id = ?1
-          AND status IN ('queued', 'running', 'waiting')
-          AND cancel_requested_at IS NULL
-        "#,
-        params![camp_turn_id, now],
-    )? as i64;
+    let message_deliveries_cancelled = settlement.message_deliveries_cancelled;
+    let agent_runs_fenced = settlement.runs.len() as i64;
     append_domain_event(
         transaction,
         "camp_turn.execution_budget_exhausted",
@@ -5847,11 +5850,7 @@ pub(crate) fn end_camp_membership(
     )?;
 
     let reconciliation_id = format!("membership-reconciliation-{}", Uuid::new_v4());
-    let reconciliation_status = if affected_run_ids.is_empty() {
-        "completed"
-    } else {
-        "reconciling"
-    };
+    let reconciliation_status = "completed";
     transaction.execute(
         r#"
         INSERT INTO camp_membership_reconciliation(
@@ -5859,8 +5858,7 @@ pub(crate) fn end_camp_membership(
             status, reason_code, target_run_count, settled_run_count,
             created_at, updated_at, completed_at
         ) VALUES (
-            ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 0, ?9, ?9,
-            CASE WHEN ?8 = 0 THEN ?9 ELSE NULL END
+            ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?8, ?9, ?9, ?9
         )
         "#,
         params![
@@ -5880,20 +5878,9 @@ pub(crate) fn end_camp_membership(
             r#"
             INSERT INTO camp_membership_reconciliation_run(
                 reconciliation_id, agent_run_id, settled_at
-            ) VALUES (?1, ?2, NULL)
+            ) VALUES (?1, ?2, ?3)
             "#,
-            params![reconciliation_id, run_id],
-        )?;
-        transaction.execute(
-            r#"
-            UPDATE agent_run
-            SET cancel_requested_at = COALESCE(cancel_requested_at, ?2),
-                cancel_reason_code = COALESCE(cancel_reason_code, 'camp_membership_ended'),
-                version = version + CASE WHEN cancel_requested_at IS NULL THEN 1 ELSE 0 END,
-                updated_at = ?2
-            WHERE id = ?1 AND status IN ('queued', 'running', 'waiting')
-            "#,
-            params![run_id, now],
+            params![reconciliation_id, run_id, now],
         )?;
     }
 
@@ -6001,6 +5988,17 @@ pub(crate) fn end_camp_membership(
                 now,
             )?;
         }
+    }
+
+    for run_id in &affected_run_ids {
+        let settlement = crate::runtime::settle_abortive_agent_run_in_tx(
+            transaction,
+            run_id,
+            "camp_membership_ended",
+            actor,
+            now,
+        )?;
+        affected_turn_ids.insert(settlement.camp_turn_id);
     }
 
     let released = {
@@ -7713,10 +7711,7 @@ mod slow_tests {
         assert_eq!(removed.result.payload["membershipGeneration"], 2);
         assert_eq!(removed.result.payload["cancelRequestedRunCount"], 1);
         assert_eq!(removed.result.payload["releasedTaskCount"], 1);
-        assert_eq!(
-            removed.result.payload["reconciliationStatus"],
-            "reconciling"
-        );
+        assert_eq!(removed.result.payload["reconciliationStatus"], "completed");
         assert_eq!(
             database
                 .connection()
@@ -7806,7 +7801,7 @@ mod slow_tests {
         database
             .connection()
             .execute(
-                "UPDATE agent_run SET status = 'running', cancel_requested_at = NULL, cancel_reason_code = NULL WHERE id = ?1",
+                "UPDATE agent_run SET status = 'running', ended_at = NULL, cancel_requested_at = NULL, cancel_reason_code = NULL WHERE id = ?1",
                 [&run_id],
             )
             .unwrap();
@@ -8555,8 +8550,29 @@ mod slow_tests {
             .expect("force deletion should capture the active Runtime identity");
         assert_eq!(cleanup_targets.len(), 1);
         assert_eq!(cleanup_targets[0].adapter_kind, AdapterKind::CodexCli);
+        let runtime = ExecutionRuntimeService::default();
+        let stale = runtime
+            .settle_forced_camp_deletion(
+                &mut database,
+                &camp_id,
+                delete_version + 1,
+                "stale-force-delete",
+            )
+            .unwrap();
+        assert!(stale.is_err());
+        assert_eq!(runtime.count_nonterminal_agent_runs(&database).unwrap(), 1);
+        let prior_blockers = runtime
+            .settle_forced_camp_deletion(
+                &mut database,
+                &camp_id,
+                delete_version,
+                "force-delete-running-camp",
+            )
+            .unwrap()
+            .unwrap();
+        assert_eq!(runtime.count_nonterminal_agent_runs(&database).unwrap(), 0);
         let forced = service
-            .delete_camp(
+            .delete_camp_after_settlement(
                 &mut database,
                 &user_envelope(
                     "force-delete-running-camp",
@@ -8567,9 +8583,27 @@ mod slow_tests {
                         force: true,
                     },
                 ),
+                &prior_blockers,
             )
             .expect("forced delete should commit");
 
+        let replay = DomainCommandGateway
+            .replay_if_recorded(
+                &database,
+                &user_envelope(
+                    "force-delete-running-camp",
+                    Some(&camp_id),
+                    DeleteCampCommand {
+                        camp_id: camp_id.clone(),
+                        expected_version: delete_version,
+                        force: true,
+                    },
+                ),
+            )
+            .unwrap()
+            .unwrap();
+        assert!(replay.replayed);
+        assert_eq!(replay.result, forced.result);
         assert_eq!(forced.result.status, CommandResultStatus::Applied);
         assert_eq!(forced.result.code, "camp.deleted");
         assert_eq!(forced.result.payload["forced"], true);

@@ -37,7 +37,7 @@ Files Changed 历史 Review 真源。
 
 ## 打开与渐进历史
 
-Camp 的首个 meaningful paint 只依赖 [Camp Open Projection v12](../../contracts/camp-open-projection-v12.md)：
+Camp 的首个 meaningful paint 只依赖 [Camp Open Projection v13](../../contracts/camp-open-projection-v13.md)：
 Camp/成员、最近消息、当前运行摘要、pending Approval 和 Composer 可用即完成。项目导航恢复、侧栏刷新
 与可见来源确认在首屏后执行，失败不能撤销已打开会话。只显示“正在打开对话”的 Shell 不算完成。
 
@@ -89,7 +89,7 @@ Camp 可以回到 Quick Chat。Notification navigation、恢复位置写入和�
 
 Camp 只有一位 active member 时，“移出当前会话”仍可见但禁用，并直接解释“Camp 至少需要一位队员”。
 其他成员选择移除后，先打开读取
-[Camp Membership v1](../../contracts/camp-membership-v1.md)权威 preview 的确认 Dialog；读取期间显示骨架，失败
+[Camp Membership v2](../../contracts/camp-membership-v2.md)权威 preview 的确认 Dialog；读取期间显示骨架，失败
 原位重试。Dialog 只展示实际存在的影响：会被停止的 Run、被释放的 Task、等待/运行 Delivery 与 Gather Item，
 对应计数为零时整行不出现；没有任何实际影响时正文区整体折叠，不用“没有需要处理”或“继续保留”补齐版面。
 每项图标与标题首行基线对齐。Default Lead 必须先选择有效 successor。确认提交 exact membership
@@ -261,7 +261,7 @@ Mention，本 Draft 也只回到默认 Lead，不能让路由控件反复出现�
 
 每个 Run 的“协作投递”只显示 `public_a2a` 且 `sourceAgentRunId` 精确匹配该 Run 的收件人；不能从接收方
 Run、target parent、return target 或同一 CampTurn 推断发送归属。投递来源由
-[Camp Open Projection v12](../../contracts/camp-open-projection-v12.md#public-a2a-投递来源)提供；缺少来源时不展示猜测结果。
+[Camp Open Projection v13](../../contracts/camp-open-projection-v13.md#public-a2a-投递来源)提供；缺少来源时不展示猜测结果。
 同一队员的多次消息或重试按 `recipientAgentId` 去重，按首次消息时间、消息 ID 和消息内 canonical position
 保留稳定顺序，不随投递状态变化重排；底层投递、失败和恢复事实不合并、不修改。
 
@@ -382,7 +382,7 @@ Shell 结果面的左边界与 Tool 行 16px 类型图标的左边界同轴，�
 既有对齐。底部和 Inspector 复用同一行为。仍不显示
 standalone raw Evidence、Envelope JSON 或独立
 “查看完整工具调用”。精确合同见
-[Run Process Detail Surface v26](../../contracts/run-process-detail-surface-v26.md)。
+[Run Process Detail Surface v27](../../contracts/run-process-detail-surface-v27.md)。
 
 ### Runtime 终态文件变更与 AgentRun 文件变化
 
@@ -438,7 +438,7 @@ Inspector 复用同一语义。刷新不得自动打开执行台、改变 Run se
 当权威 AgentRun 已取消时，该 Run 中仍为 running 的 Tool Call 停止所有运行动画，并以中性图形和
 “已停止”作为主状态。该展示只表达父 Run 已失去继续执行权，不改写子活动的 Canonical phase/outcome，
 也不隐藏独立的外部效果待确认提示；明确 canonical cancelled 的 Tool Call 同样显示“已停止”。精确合同见
-[Run Process Detail Surface v26](../../contracts/run-process-detail-surface-v26.md)。
+[Run Process Detail Surface v27](../../contracts/run-process-detail-surface-v27.md)。
 
 当前非终态 Claude Code Run 收到安全 `runtime_api_retrying` Evidence 时，在精确 Run 过程内显示 attention
 notice：“Claude Code API 暂时不可用”，并显示最新重试次数、等待秒数和“本次执行尚未结束，可继续等待或
@@ -446,7 +446,7 @@ notice：“Claude Code API 暂时不可用”，并显示最新重试次数、�
 该状态仍是 running，不产生 Tool、Toast、消息或终态 failure；Run 终态后隐藏旧 notice，真实失败继续使用
 下述 Runtime failure 边界。Renderer 只接受固定 code/status 与有界数字，不展示 raw stderr、API body、
 凭证、用户名或绝对路径。精确合同见
-[Run Process Detail Surface v26](../../contracts/run-process-detail-surface-v26.md)。
+[Run Process Detail Surface v27](../../contracts/run-process-detail-surface-v27.md)。
 
 failed Claude Code 或 Antigravity Run 的公开 `failure` 必须在对应 Run stage 显示 Runtime 名称、安全
 summary 与可选 detail；即使没有任何 Execution Evidence 也默认展开，不能被空详情逻辑隐藏。标题按
@@ -509,10 +509,12 @@ Reason 仅在空白归一化后与动作摘要完全相同或自身为空时隐�
 
 Composer 中的 CampTurn Stop 继续是唯一整轮停止入口并 fence 当前执行树。共享 ExecutionDrawer 顶栏在
 “收起”旁提供唯一 AgentRun Stop，只停止当前聚焦 Run；底部和 Inspector 复用同一个直接停止入口与状态。
+停止等待只覆盖 IPC 提交阶段，文案为“正在提交停止请求…”；Applied 后立即显示 Core 返回的实际终态并刷新。
+既有 cancel_requested_at 或 Runtime 清理未完成不产生停止 spinner，未知结果保留外部效果提示。
 Header、Task 卡、时间线和 Composer 不增加 Run-local 入口。`recovery_blocked` 继续只显示“结束此运行”，
 不与普通 Stop 同时出现。Run-local 请求不创建 Camp 时间线消息；Turn-level 终态用户取消仍以一条“你已在
 {耗时} 后停止”进入时间线。精确资格、required/optional 后果与不确定态见
-[Run Process Detail Surface v26](../../contracts/run-process-detail-surface-v26.md)。
+[Run Process Detail Surface v27](../../contracts/run-process-detail-surface-v27.md)。
 
 ## 会话 Pane 紧凑布局
 
@@ -652,9 +654,9 @@ Camp Header 显示会话定位、待审批摘要和详情直接入口；文件 T
 重启或更新立即阻止新的界面交互；400ms 内完成则直接退出，超过门槛才显示无操作按钮的 modal 关闭等待面。
 标题为“正在安全退出”，正文说明正在保存本地状态并关闭后台服务，并以条件文案说明尚未完成的 AgentRun
 会一并取消。关闭开始后不再刷新 Camp 投影，取消结算产生的晚到请求拒绝也不显示为错误横幅或 Toast。
-稳定快照后的全部非终态 AgentRun 使用普通终态“已取消”；无法确认的外部效果继续显示
-“外部效果待确认”，不得被终态文案隐藏。普通 CampTurn Stop 继续显示“已取消”。精确边界见
-[Planned Shutdown v3](../../contracts/planned-shutdown-v3.md)。
+业务事务先将未发送 Run 结算为已取消，可能执行的 Run 为 failed/accepted_input_outcome_unknown；
+无法确认的外部效果继续显示“外部效果待确认”，不得被终态文案隐藏。普通 CampTurn Stop 继续显示“已取消”。精确边界见
+[Planned Shutdown v4](../../contracts/planned-shutdown-v4.md)。
 
 ## Theme, keyboard and failure states
 
