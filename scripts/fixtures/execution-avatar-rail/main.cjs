@@ -295,10 +295,101 @@ app.whenReady().then(async () => {
     assert.equal(await run("document.querySelectorAll('.run-pulse-bottom .run-pulse-chip-copy').length"), 12)
     assert.equal(await run("document.querySelector('.run-pulse-avatar-rail') === null"), true)
 
+    // Collaboration recipients are a separate identity row, not the process-selection rail.
+    const recipients = () => run(`(() => {
+      const row = document.querySelector('[data-agent-run-id="run-agent-1"] .execution-run-recipients')
+      const avatars = [...(row?.querySelectorAll('[data-recipient-id]') ?? [])]
+      const overflow = row?.querySelector('.execution-recipient-overflow')
+      const popup = document.querySelector('.execution-recipient-popover')
+      return { row: row?.getBoundingClientRect().toJSON() ?? null,
+        ids: avatars.map(node => node.dataset.recipientId),
+        names: avatars.map(node => node.getAttribute('aria-label')),
+        rects: [...avatars, ...(overflow ? [overflow] : [])].map(node => node.getBoundingClientRect().toJSON()),
+        portraits: avatars.map(node => node.querySelector('.member-avatar').getBoundingClientRect().width),
+        hidden: Number(overflow?.textContent.slice(1) ?? 0),
+        popupNames: [...(popup?.querySelectorAll('li > span:last-child') ?? [])].map(node => node.textContent),
+        popup: popup?.getBoundingClientRect().toJSON() ?? null,
+        tooltip: document.querySelector('.execution-recipient-tooltip')?.textContent ?? null,
+        focused: document.activeElement?.className,
+        drawer: Boolean(document.querySelector('.execution-drawer')),
+        pageOverflow: document.documentElement.scrollWidth > innerWidth }
+    })()`)
+    const assertRecipients = async total => {
+      const value = await recipients()
+      assert.equal(value.ids.length + value.hidden, total)
+      assert.equal(new Set(value.ids).size, value.ids.length, 'Repeated sends occupy one avatar')
+      assert.ok(!value.ids.includes('agent-1'), 'Incoming deliveries are not owned by the receiving run')
+      assert.ok(value.rects.every(rect => Math.abs(rect.y - value.rects[0].y) < 1), 'Recipients remain on one line')
+      assert.ok(value.rects.every(rect => rect.left >= value.row.left && rect.right <= value.row.right), 'No partial avatars')
+      assert.ok(value.portraits.every(width => width === 24))
+      assert.equal(value.pageOverflow, false)
+      return value
+    }
+    const revealRecipients = async () => {
+      await run("document.querySelector('.execution-run-recipients')?.scrollIntoView({block:'nearest',inline:'nearest',behavior:'instant'})")
+      await settle()
+    }
+    await click('[data-recipient-count="2"]')
+    await revealRecipients()
+    assert.deepEqual((await assertRecipients(2)).ids, ['agent-2', 'agent-3'])
+    await capture('delivery-avatars-bottom-night')
+    await click('[data-recipient-count="0"]')
+    assert.equal((await recipients()).row, null, 'No empty collaboration label')
+    await click('[data-recipient-count="1"]')
+    await assertRecipients(1)
+    await click('[data-recipient-count="48"]')
+    await revealRecipients()
+    assert.ok((await assertRecipients(48)).hidden > 0, 'Bottom dock also uses overflow disclosure')
+    await click('.execution-recipient-overflow')
+    let recipientState = await recipients()
+    assert.equal(recipientState.popupNames.length, recipientState.hidden)
+    assert.equal(recipientState.focused, 'execution-recipient-close')
+    await key('Tab')
+    assert.equal((await recipients()).focused, 'execution-recipient-list')
+    await key('PageDown')
+    assert.equal(await run("document.querySelector('.execution-recipient-list').scrollTop > 0"), true)
+    await key('Escape')
+    recipientState = await recipients()
+    assert.ok(recipientState.drawer && !recipientState.popup)
+    assert.equal(recipientState.focused, 'execution-recipient-overflow')
+    await run("document.querySelector('.execution-recipient-avatar').focus({preventScroll:true})")
+    await settle()
+    assert.equal((await recipients()).tooltip, '沐瓦')
+    await key('Escape')
+    assert.ok((await recipients()).drawer && !(await recipients()).tooltip, 'Name Escape preserves execution detail')
+
+    await run("window.deliveryDrawer = document.querySelector('.execution-drawer')")
+    await click('.run-pulse-bottom .execution-placement-button')
+    assert.equal(await run("window.deliveryDrawer === document.querySelector('.execution-drawer')"), true)
+    await click('[data-recipient-count="16"]')
+    await click('[data-theme-toggle]')
+    await click('.camp-detail-entry[data-detail="execution"]')
+    await revealRecipients()
+    await assertRecipients(16)
+    await capture('delivery-avatars-popover-day')
+    await click('.execution-recipient-overflow')
+    await capture('delivery-overflow-list-day')
+    await click('.execution-recipient-close')
+    assert.ok((await recipients()).drawer && !(await recipients()).popup)
+    await click('[data-theme-toggle]')
+    await click('.camp-detail-entry[data-detail="execution"]')
+    for (const [width, height] of [[1040, 700], [720, 460], [1440, 920]]) {
+      await window.webContents.debugger.sendCommand('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false })
+      await settle()
+      await revealRecipients()
+      await assertRecipients(16)
+      if (width === 1040) await capture('delivery-avatars-popover-night-1040')
+    }
+    await window.webContents.debugger.sendCommand('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] })
+    await assertRecipients(16)
+    await capture('delivery-avatars-popover-night-1440')
+
     console.log(JSON.stringify({ ok: true, cases: ['12/20-member overflow', '176px steps and overlap', 'mouse wheel/trackpad', 'keyboard and long-name tooltip',
       'selection and node retention', 'status refresh/reopen', 'Task navigation/repeated target', '8-member no overflow',
       'long prose containment', 'single-line command and full expanded output',
-      'Day/Night', '1040/1440/2560/200% layout', 'reduced motion', 'forced colors', 'bottom dock unchanged'] }))
+      'Day/Night', '1040/1440/2560/200% layout', 'reduced motion', 'forced colors', 'bottom dock unchanged',
+      '0/1/2/16/48 delivery recipients', 'source attribution and deduplication', 'single-line complete avatars',
+      'overflow list keyboard scrolling and focus return', 'nested Escape', 'recipient resize and placement preservation'] }))
     window.destroy()
     app.quit()
   } catch (error) {
