@@ -4330,6 +4330,9 @@ async function launchApp(port, width, height) {
     })
     await waitForExpression(cdp,
       `Boolean(window.rovai && document.querySelector('.app-shell'))`, 45_000)
+    // The bootstrap shell renders before authoritative Core requests are admitted.
+    await waitForExpression(cdp, `window.rovai.supervisor.getSnapshot()
+      .then(snapshot => snapshot.fullCoreState === 'ready')`, 45_000)
     const health = await evaluate(cdp, `window.rovai.request('health.check', {})`, true)
     assert(await realpath(health.database.path) === await realpath(databasePath),
       `Isolated App opened the wrong database: ${JSON.stringify(health.database.path)}`)
@@ -4392,15 +4395,19 @@ async function focusExecutionDrawerResizeHandle(cdp) {
 }
 
 async function mouseClickSelector(cdp, selector) {
+  await evaluate(cdp, `document.querySelector(${JSON.stringify(selector)})
+    ?.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'instant' })`)
+  // Timeline layout can settle on the following frame; measure after it moves.
+  await evaluate(cdp, 'new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))', true)
   const point = await evaluate(cdp, `(() => {
     const target = document.querySelector(${JSON.stringify(selector)})
     if (!(target instanceof HTMLElement)) return null
-    target.scrollIntoView({ block: 'center', inline: 'nearest' })
     const rect = target.getBoundingClientRect()
-    return { x: rect.left + (rect.width / 2), y: rect.top + (rect.height / 2) }
+    const x = rect.left + (rect.width / 2)
+    const y = rect.top + (rect.height / 2)
+    return target.contains(document.elementFromPoint(x, y)) ? { x, y } : null
   })()`)
-  assert(point, `Could not locate pointer target: ${selector}`)
-  await wait(80)
+  assert(point, `Could not locate an unobscured pointer target: ${selector}`)
   await cdp.send('Input.dispatchMouseEvent', {
     type: 'mouseMoved', x: point.x, y: point.y, button: 'none', buttons: 0
   })
@@ -4421,10 +4428,10 @@ async function pressKey(cdp, key, code, windowsVirtualKeyCode, nativeVirtualKeyC
 async function waitForExpression(cdp, expression, timeoutMs = 10_000) {
   const startedAt = Date.now()
   while (Date.now() - startedAt < timeoutMs) {
-    if (await evaluate(cdp, expression)) return
+    if (await evaluate(cdp, expression, true)) return
     await wait(100)
   }
-  if (await evaluate(cdp, expression)) return
+  if (await evaluate(cdp, expression, true)) return
   throw new Error(`Expression did not become true within ${timeoutMs}ms: ${expression}`)
 }
 
