@@ -1,7 +1,7 @@
 ---
 document_type: development-guide
 authority: desktop-ui-acceptance-infrastructure
-last_updated: 2026-08-30
+last_updated: 2026-08-31
 ---
 
 # 桌面 UI 验收与隔离数据
@@ -227,6 +227,10 @@ pnpm package:mac
 pnpm accept:runtime-activity-ui
 ```
 
+头像轨道的 8/12/20 位队员、176px 固定步长、键盘/滚轮、Tooltip、重复精确导航与滚动保留，
+另由 `pnpm test:execution-avatar-rail` 在真实 Electron 中挂载生产 CampWorkspace 验证；该 fixture
+使用隔离 `userData`、受控本机数据，不启动 Core 或真实 Runtime。
+
 受控夹具必须至少包含同一队员的多个历史/当前 AgentRun，并证明：
 
 - `.run-pulse-chip` 按队员而不是 Run 创建；同一 `data-agent-id` 只出现一个入口，入口数等于有
@@ -247,9 +251,11 @@ pnpm accept:runtime-activity-ui
   最大高度在 1040×700 与 200% zoom 下不覆盖消息历史、Agent 执行台、Approval Dock 或 Composer；
 - 默认底部 placement 下标题栏仅有“任务 / 队员”详情入口；点击“移到浮层”后底部 Run Pulse/Drawer
   消失，标题栏增加首位“执行”入口并自动打开浮层，完整顺序为“执行 / 任务 / 队员”。
-  两处入口都只显示头像、最多两行名称和
-  带形状的状态标记，不显示状态文字；右侧入口为全宽纵向列表、最多约四行且超出内部滚动，详情不显示
-  resize separator。点击“移回底部”恢复横向 Run Pulse、底部 Drawer、原基础 Tab、selected Agent/
+  底部入口保留头像、最多两行名称和带形状的状态标记；浮层内标题与人数同行，入口为不换行的头像轨道，
+  右下角状态符号、浅底选中态和 Hover/Focus Tooltip 可辨。轨道隐藏滚动条，溢出方向显示渐隐与箭头；
+  箭头固定移动四位（176px，末端收敛），滚轮、触控板、`← / → / Home / End` 与精确导航自动显露均通过。
+  队员顺序不随状态改变，切换、刷新与收起重开不重置轨道滚动，详情不显示 resize separator。
+  点击“移回底部”恢复横向 Run Pulse、底部 Drawer、原基础 Tab、selected Agent/
   focused Run 和底部高度偏好；移动前后必须是同一个 Drawer 与结果 DOM，并按比例保留 Drawer/结果
   阅读位置、disclosure 和加载状态；任一时刻不存在第二条过程时间线或重复入口；
 - 全新或旧版 General Preferences 没有位置字段时从底部开始；显式移到浮层后，切换 Camp、进入其他
@@ -407,10 +413,11 @@ Composer 与历史消息的人物信息卡截图是此交互的必留视觉证�
 | `scripts/capture-camp-inspectors.mjs` | 已有 Camp 的 Inspector 截图 | 必须设置 `ROVAI_CAPTURE_USER_DATA_DIR` |
 | `scripts/capture-desktop.mjs` | 通用页面、Runtime 和 Camp 流程 | 必须设置隔离 `userData`；省略或指向日常目录即拒绝启动 |
 
-Skill 页面验收必须先证明 Core 返回十二项 official Skill，再证明列表只展示其中十项
+Skill 页面验收必须先证明 Core 返回十四项 official Skill，再证明列表只展示其中十二项
 `user_managed` Skill；`cli-operations` 与 `memory-stewardship` 两项 `system_required` Skill 不产生列表行、
-禁用开关、生效范围或 locked badge。十个可配置 Skill 都由持久 `Skill.id` 经 FNV-1a 映射到
-`--identity-1..8` 中一个 token（不要求十项覆盖八种颜色），六个短标签显示“Rovai”，四个固定上游
+禁用开关、生效范围或 locked badge。各项初始开关状态与 bundled registry 的默认值一致。
+十二个可配置 Skill 都由持久 `Skill.id` 经 FNV-1a 映射到
+`--identity-1..8` 中一个 token（不要求十二项覆盖八种颜色），七个短标签显示“Rovai”，五个固定上游
 Skill 短标签显示“GitHub”；主行不存在来源明细，`DonkeyKing01/tasteful-ui-skill` / `159ccd47` 与
 `mattpocock/skills` / `84fdeffd` 只在“详情”中出现。列表名称/简介/来源字号至少为
 14/12.5/10.5px；宽窗列表的身份标记位留空，四个可见列名固定为

@@ -102,7 +102,10 @@ printf '%s\\n' '${JSON.stringify({ kind: 'core_startup', schemaVersion: 1, ...re
       client.retryFullCore()
       await restarting
     } finally { client.stop() }
-  })
+  // Real child I/O plus all three backoffs can exceed Vitest's default 5s
+  // under parallel builds. Keep the outer deadline beyond both owned waits,
+  // so timeout cleanup completes before the next case changes the fake binary.
+  }, 15_000)
   it.runIf(process.platform !== 'win32').each([
     ['admitted', true], ['migration_required', true], ['confirmed_absent', false]
   ] as const)('retains the %s assessment across a later preparation failure', async (kind, requiresExisting) => {

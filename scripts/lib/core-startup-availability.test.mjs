@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { randomUUID } from 'node:crypto'
 import { execFileSync, spawn } from 'node:child_process'
 import { lstat, mkdtemp, mkdir, realpath, rename, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -74,6 +75,86 @@ test('optional startup failures preserve authority RPC and can recover without r
         await rm(fixture, { recursive: true, force: true })
       }
     })
+  }
+})
+
+// This owns the Core RPC -> transaction -> private notification seam. Queue
+// ordering/edit semantics remain in pending_camp_input.rs; no Runtime is invoked.
+test('queued input commits notify Desktop without exposing private bodies in public history', async () => {
+  const fixture = await realpath(await mkdtemp(join(tmpdir(), 'rovai-queue-events-')))
+  const dataDir = process.platform === 'win32'
+    ? JSON.parse(execFileSync(binary, ['--prepare-windows-data-root', join(fixture, 'formal')], { encoding: 'utf8' })).core
+    : join(fixture, 'data')
+  const skillRoot = join(dataDir, 'managed-skill-library')
+  const mcpPath = join(dataDir, 'mcp.json')
+  let core = startCore(dataDir, skillRoot, mcpPath)
+  let database
+  try {
+    await core.ready
+    await core.settled()
+    const agent = (await core.request('members.list')).find(profile => profile.presence === 'present')
+    const created = await core.request('camps.create', {
+      commandId: randomUUID(), name: 'Private queue notification fixture', workspace: null,
+      memberAgentIds: [agent.agentId], defaultLeadAgentId: agent.agentId, collaborationMode: 'peer'
+    })
+    assert.equal(created.status, 'applied')
+    const campId = created.payload.campId
+    await core.close()
+    database = new DatabaseSync(join(dataDir, 'rovai.sqlite'))
+    const now = new Date().toISOString()
+    database.prepare(`INSERT INTO pending_camp_input(
+      id, camp_id, enqueue_sequence, state, structured_content_json, execution_json, user_id,
+      last_attempt_error_code, created_at, updated_at
+    ) VALUES ('held-head', ?, 1, 'needs_repair', ?, 'null', 'local_user', 'fixture.hold', ?, ?)`)
+      .run(campId, JSON.stringify([{ kind: 'text', text: 'Private held head' }]), now, now)
+    // A publication transaction must fail before it can create a Run or execute a
+    // model. The scheduler still has to announce the committed needs_repair state.
+    database.exec(`CREATE TRIGGER refuse_fixture_publication BEFORE INSERT ON camp_message
+      BEGIN SELECT RAISE(ABORT, 'fixture publication refusal'); END;`)
+    database.close()
+    database = null
+    core = startCore(dataDir, skillRoot, mcpPath)
+    await core.ready
+    const draft = await core.request('camp.composerDraft.save', {
+      campId, expectedRevision: 0, content: [{ kind: 'text', text: 'Private queued body' }]
+    })
+    const result = await core.request('camp.messages.send', {
+      commandId: randomUUID(), campId, draftRevision: draft.revision,
+      execution: { taskId: null, purpose: 'private queue fixture', completionRole: 'required' }
+    })
+    assert.equal(result.commandResult.code, 'pending_input.queued')
+    const item = (await core.request('camp.pendingInputs.get', { campId })).items[1]
+    const edit = async (action, editToken = null, target = item) => core.request('camp.pendingInputs.edit', {
+      commandId: randomUUID(), command: { campId, pendingInputId: target.id,
+        expectedRevision: target.revision, editToken, action }
+    })
+    const begun = await edit({ type: 'begin' })
+    assert.equal(begun.status, 'applied')
+    const editing = await core.request('camp.pendingInputs.get', { campId })
+    assert.equal(editing.editSession.editToken, begun.payload.editToken)
+    assert.equal((await edit({ type: 'cancel' }, begun.payload.editToken)).status, 'applied')
+    assert.equal((await edit({ type: 'delete' }, null, editing.items[0])).status, 'applied')
+    const deadline = Date.now() + 10_000
+    while (!core.notifications.some(event => event.method === 'camp.pendingInputs.changed' && event.params.reason === 'publication_failed')) {
+      assert.ok(Date.now() < deadline, 'A failed publication must notify the private queue')
+      await new Promise(resolve => setTimeout(resolve, 20))
+    }
+    const failed = await core.request('camp.pendingInputs.get', { campId })
+    assert.equal(failed.items.length, 1)
+    assert.equal(failed.items[0].state, 'needs_repair')
+    const invalidations = core.notifications.filter(event => event.method === 'camp.pendingInputs.changed')
+    assert.deepEqual(invalidations.map(event => event.params.reason), ['enqueued', 'edited', 'edited', 'edited', 'publication_failed'])
+    assert.ok(invalidations.every(event => event.params.campId === campId && Object.keys(event.params).length === 2))
+    await core.close()
+    database = new DatabaseSync(join(dataDir, 'rovai.sqlite'), { readOnly: true })
+    assert.equal(database.prepare('SELECT COUNT(*) AS count FROM agent_run').get().count, 0)
+    assert.equal(database.prepare('SELECT COUNT(*) AS count FROM camp_message').get().count, 0)
+    assert.equal(database.prepare("SELECT COUNT(*) AS count FROM event_log WHERE payload_json LIKE '%Private queued body%'").get().count, 0)
+  } finally {
+    database?.close()
+    await core.close()
+    await removeEphemeralRuntimeCampFilesRoot(dataDir, { temporaryDirectory: fixture })
+    await rm(fixture, { recursive: true, force: true })
   }
 })
 
@@ -163,6 +244,7 @@ function startCore(dataDir, skillRoot, mcpPath, extraArgs = []) {
   const startupFrames = []
   let nextId = 0
   let stderr = ''
+  const notifications = []
   let resolveReady
   let rejectReady
   const ready = new Promise((resolve, reject) => { resolveReady = resolve; rejectReady = reject })
@@ -182,6 +264,7 @@ function startCore(dataDir, skillRoot, mcpPath, extraArgs = []) {
   lines.on('line', (line) => {
     const message = JSON.parse(line)
     if (message.kind === 'core_startup') startupFrames.push(message)
+    if (message.method) notifications.push(message)
     if (message.kind === 'core_startup' && message.status === 'ready') {
       clearTimeout(startupTimeout)
       resolveReady(message)
@@ -221,6 +304,7 @@ function startCore(dataDir, skillRoot, mcpPath, extraArgs = []) {
     startupFrames,
     ready,
     request,
+    notifications,
     async settled() {
       const deadline = Date.now() + 10000
       while (Date.now() < deadline) {

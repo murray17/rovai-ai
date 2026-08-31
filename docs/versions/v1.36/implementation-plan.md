@@ -166,6 +166,26 @@ last_updated: 2026-08-31
 本轮没有写日常 SQLite、清理历史记录、运行 VACUUM、复制日常库、推送、打包、安装或重启日常 App；不等同于
 Windows/macOS packaged 验收或渠道远端验收，既有钉钉 NO-GO 项保持原状。
 
+## main 48a9140f 汇合与日常安装
+
+本次按用户要求合入最新main并打包到Applications；原位升级协议、独占lease、精确Rovai/Lumen票据、有限启动重试和
+禁止空库回退保持不变。`database_admission.rs`、CoreClient生产逻辑和Desktop Runtime Availability v2与合并前存储提交一致。
+
+- main新增119与渠道119重号：保留渠道116–129的含义，Fast生命周期修复追加130，131单独封闭 `v1.41/schema 82`；
+  精确main `v1.34/schema 73` 将119重映射130，保留applied_at、Fast覆盖/代次以及已经重新检测的资格缓存。
+- 新source加入既有最小schema拒绝矩阵；现有原位集成owner覆盖七种来源，原有四种强杀窗口保留并增加
+  main119重映射后、130提交后两个窗口。main119偏好保留测试按130编号接入同一owner，增加事务失败回滚和缺失trigger拒绝封口；
+  没有删除、禁用或替换其他active Rust case。
+- 已核对三项Fast trigger的规范化SQL与main原定义一致。128仍封闭v1.39/schema80，129仍封闭v1.40/schema81；
+  新功能receipt与最终seal分离，避免映射后的130跳过合同推进，不恢复复制库路径或增加迁移框架。
+- 数据库定向59项、TypeScript检查、Vitest126文件/1142项、Node220项（1项既有平台skip）、文档与Skill门禁通过；
+  真实Electron启动呈现、连续输入、执行头像栏与审批Dock四组回归通过。
+- 首轮并行构建暴露启动重试fixture的5秒外层超时短于其6秒内部等待；仅将该测试上限设为15秒，保证清理先于下一case。
+  产品250/750/1500ms重试与generation逻辑未改，定向和全量Vitest复跑通过。
+- Rust全量/Clippy、真实Core启动与macOS daily打包/隔离验收/安装在继续验证中；未以源码或单测通过代替packaged验收。
+
+本次不推送或创建PR；不修改日常SQLite，不替换用户数据，不主动终止日常App。钉钉外部端到端NO-GO边界仍保留。
+
 ## 主线合并兼容
 
 - [x] 合并 `main@91ecd6d4` 的 Camp Pending/Fast 与文件预览；保留主线 v1.33/v1.34，渠道记录顺延到 v1.35/v1.36；

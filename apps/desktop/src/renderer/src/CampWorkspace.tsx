@@ -61,6 +61,7 @@ import {
   timelineDayLabel
 } from './ui-model'
 import { MemberAvatar } from './MemberAvatar'
+import { ExecutionAvatarRail } from './ExecutionAvatarRail'
 import { MemberPortrait } from './MemberPortrait'
 import { localizeExecutionEngineTerms } from './product-copy'
 import { writeClipboardText } from './clipboard'
@@ -393,6 +394,7 @@ export function agentRunRuntimeModelPresentation(
 
 export type CampMessageSendReceipt = {
   pendingInputId?: string
+  publishedMessageSequence?: number
   campTurnId: string | null
   agentRunIds: string[]
   addressedAgentIds: string[]
@@ -1016,20 +1018,6 @@ export function formatStopElapsed(createdAt: string, cancelRequestedAt: string):
   return `${minutes}分${remainder ? `${remainder}秒` : ''}`
 }
 
-export function runtimeOptionsForDisplay(options: ActionApprovalView['options']): ActionApprovalView['options'] {
-  const priority: Record<ActionApprovalView['options'][number]['kind'], number> = {
-    cancel: 0,
-    deny: 1,
-    other: 2,
-    allow_once: 3,
-    allow_session: 4
-  }
-  return options
-    .map((option, index) => ({ option, index }))
-    .sort((left, right) => priority[left.option.kind] - priority[right.option.kind] || left.index - right.index)
-    .map(({ option }) => option)
-}
-
 export function campInspectorMembers(
   members: ReadonlyArray<CampSnapshot['members'][number]>
 ): CampSnapshot['members'] {
@@ -1180,16 +1168,19 @@ export function QuickChatWorkspace({
   )
 }
 
+const EMPTY_CAMP_MESSAGES: CampMessageView[] = []
+const EMPTY_LIVE_RUNTIME_EVENTS: LiveRuntimeEvent[] = []
+
 export function CampWorkspace({
   snapshot,
   openCoverage = null,
   messageHistory = null,
   onLoadEarlierMessages,
-  optimisticMessages = [],
+  optimisticMessages = EMPTY_CAMP_MESSAGES,
   projectName,
   agents,
   installations = [],
-  liveRuntimeEvents = [],
+  liveRuntimeEvents = EMPTY_LIVE_RUNTIME_EVENTS,
   busy,
   onSend,
   onPendingDraftPersisted,
@@ -1300,6 +1291,10 @@ export function CampWorkspace({
   const draftContent = useRef<StructuredCampMessageContent>([])
   const draftCampId = useRef<string | null>(null)
   const composerDraftRef = useRef<CampComposerDraftView | null>(null)
+  const initializedComposerRoute = useRef<{
+    draft: CampComposerDraftView
+    publishedMessageSequence: number
+  } | null>(null)
   const draftMutationQueues = useRef(new Map<string, Promise<CampComposerDraftView>>())
   const dragLeaveTimer = useRef<number | null>(null)
   const dragActivityTimer = useRef<number | null>(null)
@@ -1888,12 +1883,14 @@ export function CampWorkspace({
     content: StructuredCampMessageContent
   ): Promise<CampComposerDraftView> => queueDraftMutation(
     campId,
-    (draft) => window.rovai.request<CampComposerDraftView>('camp.composerDraft.save', {
-      campId,
-      expectedRevision: draft.revision,
-      content,
-      continuationSourceMessageId: draft.continuationIntent?.sourceCampMessageId ?? null
-    })
+    (draft) => JSON.stringify(draft.content) === JSON.stringify(content)
+      ? Promise.resolve(draft)
+      : window.rovai.request<CampComposerDraftView>('camp.composerDraft.save', {
+        campId,
+        expectedRevision: draft.revision,
+        content,
+        continuationSourceMessageId: draft.continuationIntent?.sourceCampMessageId ?? null
+      })
   )
 
   const loadReplyAnchorWindow = useCallback((messageId: string): Promise<CampMessageView[] | null> => {
@@ -1929,6 +1926,9 @@ export function CampWorkspace({
 
   useEffect(() => {
     if (!composerDraft || hasLocalDraftPayload || composerSubmitting || routingMutating) return
+    const initializedRoute = initializedComposerRoute.current
+    if (initializedRoute && initializedRoute.draft === composerDraftRef.current
+      && initializedRoute.publishedMessageSequence >= publishedMessageSequence) return
     const campId = snapshot.camp.id
     let cancelled = false
     // Pending publication bypasses submitMessage. Refresh Core's route projection
@@ -1942,6 +1942,7 @@ export function CampWorkspace({
       if (cancelled || draftCampId.current !== campId
         || composerDraftRef.current !== current || draftContent.current !== content
         || draftSaveTimer.current !== null || draftMutationQueues.current.has(campId)) return
+      initializedComposerRoute.current = { draft: refreshed, publishedMessageSequence }
       applyComposerDraft(campId, refreshed)
     })().catch(() => { /* Keep the current Draft; the next publication or Draft mutation refreshes it. */ })
     return () => { cancelled = true }
@@ -2545,6 +2546,7 @@ export function CampWorkspace({
     }
     setComposerDraft(null)
     composerDraftRef.current = null
+    initializedComposerRoute.current = null
     setPreparingAttachments([])
     setFailedAttachments([])
     setAttachmentDragState(null)
@@ -3015,11 +3017,18 @@ export function CampWorkspace({
         expiresAt: null
       }
       if (draftCampId.current === campId) syncReplyDraft(acceptedDraftFallback)
+      // Finish initializing the next route before accepting another keystroke:
+      // otherwise a fast next Draft can freeze a null continuation source.
       const nextDraft = await window.rovai.request<CampComposerDraftView>(
-        'camp.composerDraft.get',
-        { campId }
+        'camp.composerDraft.get', { campId }
       )
-      if (draftCampId.current === campId) syncReplyDraft(nextDraft)
+      if (draftCampId.current === campId) {
+        initializedComposerRoute.current = {
+          draft: nextDraft,
+          publishedMessageSequence: Math.max(publishedMessageSequence, sendReceipt?.publishedMessageSequence ?? 0)
+        }
+        syncReplyDraft(nextDraft)
+      }
     } catch {
       if (sendAttempted) {
         try {
@@ -4011,12 +4020,15 @@ export function CampWorkspace({
             <section className="camp-detail-content execution-sidecar-panel" hidden={inspectorSurfaceTab !== 'execution'}>
               {executionPlacement === 'inspector' && (
                 <RunPulse
+                  key={snapshot.camp.id}
                   placement="inspector"
                   placementButtonRef={inspectorPlacementButtonRef}
                   processes={executionProcesses}
                   memberById={memberById}
                   stopping={stopping}
                   selectedAgentId={executionDrawerAgentId}
+                  railActive={inspectorVisible && inspectorSurfaceTab === 'execution'}
+                  revealRequest={executionDrawerFocusRequest.sequence}
                   onOpen={openExecutionProcess}
                   onMovePlacement={moveExecutionToBottom}
                   placementPending={executionPlacementPending}
@@ -4151,7 +4163,7 @@ export function CampWorkspace({
         }}
       >
         <PendingCampInputs key={snapshot.camp.id} campId={snapshot.camp.id}
-          refreshKey={snapshot.throughGlobalSequence + pendingRefresh}
+          refreshKey={pendingRefresh} executionActive={executionBlocked}
           members={composerMembers} skills={composerSkills} skillCatalogStatus={composerSkillCatalog.status}
           stopping={stopping} onStop={onStop} onQueueChange={setPendingQueue} onEditingChange={(editing) => {
             setPendingEditing(editing)
@@ -4534,6 +4546,8 @@ function RunPulse({
   memberById,
   stopping,
   selectedAgentId,
+  railActive = true,
+  revealRequest = 0,
   onOpen,
   onMovePlacement,
   placementPending,
@@ -4545,6 +4559,8 @@ function RunPulse({
   memberById: Map<string, CampSnapshot['members'][number]>
   stopping: boolean
   selectedAgentId: string | null
+  railActive?: boolean
+  revealRequest?: number
   onOpen(agentId: string, trigger: HTMLButtonElement): void
   onMovePlacement(): void
   placementPending: boolean
@@ -4584,7 +4600,26 @@ function RunPulse({
           {visibleProcesses.length} 位队员
         </span>
       </div>
-      <ul className="run-pulse-list" aria-label="队员执行过程入口">
+      {placement === 'inspector' ? <ExecutionAvatarRail
+        items={visibleProcesses.flatMap(process => {
+          const run = preferredAgentProcessRun(process.runs)
+          if (!run) return []
+          const member = memberById.get(process.agentId)
+          const presentation = agentRunPresentation(run, stopping && NON_TERMINAL_RUNS.has(run.status))
+          return [{
+            agentId: process.agentId,
+            avatarRef: member?.avatarRef ?? null,
+            displayName: member?.displayName ?? process.agentId,
+            statusLabel: presentation.label,
+            statusTone: presentation.tone,
+            stateShape: runPulseStateShape(run, stopping)
+          }]
+        })}
+        selectedAgentId={selectedAgentId}
+        revealRequest={revealRequest}
+        active={railActive}
+        onOpen={onOpen}
+      /> : <ul className="run-pulse-list" aria-label="队员执行过程入口">
         {visibleProcesses.map((process) => {
           const run = preferredAgentProcessRun(process.runs)
           if (!run) return null
@@ -4632,7 +4667,7 @@ function RunPulse({
             </li>
           )
         })}
-      </ul>
+      </ul>}
       <div className="execution-placement-control">
         <button
           ref={placementButtonRef}
@@ -6326,34 +6361,41 @@ export function ApprovalDock({
 }): JSX.Element {
   const [activeIndex, setActiveIndex] = useState(0)
   const [collapsed, setCollapsed] = useState(false)
+  const [expandedReasonIds, setExpandedReasonIds] = useState<Set<string>>(() => new Set())
   const contentId = useId()
-  const previousApprovalCount = useRef(approvals.length)
+  const presentedFocusRequest = useRef<number | null>(null)
   const currentIndex = Math.min(activeIndex, approvals.length - 1)
   const approval = approvals[currentIndex]
-  const memberNames = [...new Set(approvals.map((item) =>
-    profileById.get(item.agentId)?.displayName ?? item.agentId
-  ))]
+  const previousApprovals = useRef({ ids: approvals.map((item) => item.id), activeId: approval.id })
+  const sourceLabel = `${profileById.get(approval.agentId)?.displayName ?? approval.agentId} · ${runtimeAdapterLabel(approval.adapterKind)}`
+  const showReason = Boolean(approval.reason?.trim())
+    && normalizedApprovalText(approval.reason ?? '') !== normalizedApprovalText(approval.actionSummary)
 
   useEffect(() => {
     if (activeIndex >= approvals.length) setActiveIndex(Math.max(approvals.length - 1, 0))
   }, [activeIndex, approvals.length])
 
   useEffect(() => {
-    const previousCount = previousApprovalCount.current
-    previousApprovalCount.current = approvals.length
-    if (approvals.length > previousCount) setCollapsed(false)
-    if (approvals.length >= previousCount || approvals.length === 0) return undefined
+    const previous = previousApprovals.current
+    const ids = approvals.map((item) => item.id)
+    previousApprovals.current = { ids, activeId: approval.id }
+    if (ids.some((id) => !previous.ids.includes(id))) setCollapsed(false)
+    setExpandedReasonIds((expanded) => {
+      const retained = new Set([...expanded].filter((id) => ids.includes(id)))
+      return retained.size === expanded.size ? expanded : retained
+    })
+    if (ids.includes(previous.activeId)) return undefined
     setCollapsed(false)
     const frame = window.requestAnimationFrame(() => {
       containerRef.current
-        ?.querySelector<HTMLButtonElement>('.runtime-option:not(:disabled)')
+        ?.querySelector<HTMLElement>('[data-approval-summary]')
         ?.focus({ preventScroll: true })
     })
     return () => window.cancelAnimationFrame(frame)
-  }, [approvals.length, containerRef])
+  }, [approvals, approval.id, containerRef])
 
   useEffect(() => {
-    if (focusRequest === null) return
+    if (focusRequest === null || presentedFocusRequest.current === focusRequest) return
     setCollapsed(false)
     if (focusApprovalId) {
       const targetIndex = approvals.findIndex((candidate) => candidate.id === focusApprovalId)
@@ -6362,22 +6404,15 @@ export function ApprovalDock({
   }, [approvals, focusApprovalId, focusRequest])
 
   useEffect(() => {
-    if (focusRequest === null || collapsed) return undefined
+    if (focusRequest === null || presentedFocusRequest.current === focusRequest || collapsed) return undefined
     if (focusApprovalId && approval.id !== focusApprovalId) return undefined
     let frame: number | null = null
     let scrolled = false
     let focusObserved = false
     const present = (): void => {
-      const presentationRoot = focusApprovalId
-        ? containerRef.current?.querySelector<HTMLElement>(
-            `[data-approval-id="${CSS.escape(focusApprovalId)}"]`
-          ) ?? null
-        : containerRef.current
-      const target = presentationRoot
-        ?.querySelector<HTMLButtonElement>('.runtime-option:not(:disabled)')
-        ?? (!focusApprovalId
-          ? containerRef.current?.querySelector<HTMLButtonElement>('.approval-dock-collapse')
-          : null)
+      const target = containerRef.current?.querySelector<HTMLElement>(focusApprovalId
+        ? `[data-approval-summary="${CSS.escape(focusApprovalId)}"]`
+        : '[data-approval-summary]')
       if (!target) {
         frame = window.requestAnimationFrame(present)
         return
@@ -6390,6 +6425,7 @@ export function ApprovalDock({
         })
       }
       if (focusObserved && document.activeElement === target) {
+        presentedFocusRequest.current = focusRequest
         onFocusPresented?.(focusRequest)
         return
       }
@@ -6406,16 +6442,23 @@ export function ApprovalDock({
   return (
     <section className={collapsed ? 'approval-dock is-collapsed' : 'approval-dock'} aria-label={`${approvals.length} 项待审批`} ref={containerRef}>
       <header>
-        <div>
-          <strong>{approvals.length > 1 ? `${approvals.length} 项待审批` : '待审批'}</strong>
-          <span>{memberNames.join('、')}</span>
+        <div className="approval-dock-heading" tabIndex={-1} data-approval-summary={approval.id}
+          aria-label={`${approval.actionSummary}, ${sourceLabel}`}>
+          <strong title={approval.actionSummary}>{approval.actionSummary}</strong>
+          <span title={sourceLabel}>{sourceLabel}</span>
         </div>
         <nav aria-label="审批请求控制">
           {approvals.length > 1 && (
             <>
-            <button type="button" aria-label="上一项审批" disabled={currentIndex === 0} onClick={() => setActiveIndex((index) => Math.max(0, index - 1))}>‹</button>
+            <button type="button" aria-label="上一项审批" aria-disabled={currentIndex === 0} onClick={(event) => {
+              event.currentTarget.focus({ preventScroll: true })
+              if (currentIndex > 0) setActiveIndex(currentIndex - 1)
+            }}>‹</button>
             <span>{currentIndex + 1} / {approvals.length}</span>
-            <button type="button" aria-label="下一项审批" disabled={currentIndex === approvals.length - 1} onClick={() => setActiveIndex((index) => Math.min(approvals.length - 1, index + 1))}>›</button>
+            <button type="button" aria-label="下一项审批" aria-disabled={currentIndex === approvals.length - 1} onClick={(event) => {
+              event.currentTarget.focus({ preventScroll: true })
+              if (currentIndex < approvals.length - 1) setActiveIndex(currentIndex + 1)
+            }}>›</button>
             </>
           )}
           <button
@@ -6435,23 +6478,27 @@ export function ApprovalDock({
         id={contentId}
         data-approval-id={approval.id}
       >
-        <div className="approval-dock-title">
-          <strong>{localizeExecutionEngineTerms(approval.actionSummary)}</strong>
-          <code>{approval.adapterKind} · {approval.actionKind}</code>
-        </div>
-        <p>{localizeExecutionEngineTerms(approval.reason ?? 'Agent 运行时请求你选择一个原生权限选项。')}</p>
+        {showReason && <ApprovalReason key={approval.id} reason={approval.reason!}
+          expanded={expandedReasonIds.has(approval.id)}
+          onToggle={() => setExpandedReasonIds((previous) => {
+            const next = new Set(previous)
+            if (next.has(approval.id)) next.delete(approval.id)
+            else next.add(approval.id)
+            return next
+          })} />}
         <pre>{JSON.stringify(approval.canonicalInput, null, 2)}</pre>
         <div className="approval-dock-actions">
-          {runtimeOptionsForDisplay(approval.options).map((option) => (
+          {approval.options.map((option) => (
             <button
               className={`runtime-option option-${option.kind}`}
               type="button"
               key={option.optionId}
               onClick={() => onResolve(approval, option.optionId)}
               disabled={busy}
+              title={option.label}
+              aria-label={option.label}
             >
-              <strong>{localizeExecutionEngineTerms(option.label)}</strong>
-              <small>{localizeExecutionEngineTerms(option.consequence)}</small>
+              {option.label}
             </button>
           ))}
           {approval.options.length === 0 && (
@@ -6461,6 +6508,41 @@ export function ApprovalDock({
       </div>}
     </section>
   )
+}
+
+function normalizedApprovalText(value: string): string {
+  return value.trim().replace(/\s+/g, ' ')
+}
+
+function ApprovalReason({ reason, expanded, onToggle }: {
+  reason: string
+  expanded: boolean
+  onToggle(): void
+}): JSX.Element {
+  const reasonId = useId()
+  const reasonRef = useRef<HTMLParagraphElement>(null)
+  const [overflows, setOverflows] = useState(false)
+
+  useLayoutEffect(() => {
+    const element = reasonRef.current
+    if (!element) return undefined
+    const measure = (): void => {
+      const lineHeight = Number.parseFloat(window.getComputedStyle(element).lineHeight)
+      setOverflows(element.scrollHeight > lineHeight * 2 + 1)
+    }
+    const observer = new ResizeObserver(measure)
+    observer.observe(element)
+    measure()
+    return () => observer.disconnect()
+  }, [reason])
+
+  return <div className="approval-reason-wrap">
+    <p ref={reasonRef} id={reasonId} className={expanded ? 'approval-reason is-expanded' : 'approval-reason'}>{reason}</p>
+    {(overflows || expanded) && <button type="button" className="approval-reason-toggle"
+      aria-expanded={expanded} aria-controls={reasonId} onClick={onToggle}>
+      {expanded ? '收起全文' : '展开全文'}
+    </button>}
+  </div>
 }
 
 function EmptyCampWelcome({

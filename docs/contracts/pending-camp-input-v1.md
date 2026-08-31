@@ -4,7 +4,7 @@ contract: pending-camp-input
 version: 1
 status: accepted
 authority: camp-next-turn-input-admission-and-editing
-last_updated: 2026-08-30
+last_updated: 2026-08-31
 ---
 
 # Pending Camp Input v1
@@ -51,6 +51,19 @@ basePendingRevision 和 recoveryRequired。没有 working content、心跳、超
 `camp.pendingInputs.get({campId})` 返回 CampPendingInputsView：executionActive、
 按 FIFO 排序的非终态 items 与 editSession。items 包含正文、结构化内容、Reply 投影、revision 和错误。
 这些数据只通过 Desktop 用户读取入口暴露；Agent History/Context 不读取私有输入。
+
+Core 在入队、编辑和发布尝试的事务完成后，通过既有 Desktop event 通道发送
+`camp.pendingInputs.changed({campId, reason})`。reason 为 `enqueued / edited / published /
+publication_failed`，只提示对应 Camp 重读私有队列，不携带正文、接收者、编辑 token，也不写入
+公共 event_log。`published` 同时触发该 Camp 的公共会话投影刷新，使 Continuation 在正式发布时更新；
+普通入队和编辑不读取完整会话或侧栏。执行启动、终态与取消继续使用既有 Camp-scoped
+`navigation.invalidated` 提示重读 executionActive。
+
+Renderer 在挂载、回到前台、Core ready/reconnect 和上述变更时读取队列，不按固定间隔轮询。
+突发通知合并为一个在途请求；读取期间又有通知时补读一次最新权威，内容未变时不替换本地队列。
+读取失败保留已知队列，下一次通知或前台恢复再读取；它不重放发送、编辑命令或释放编辑占用。
+提交成功后先初始化下一份 Draft 的权威路由，再恢复输入，避免快速连续输入以空 source 冻结接收者。
+普通发布刷新复用同一 Draft 已覆盖的消息序列，不因公共投影晚到而重复读取；晚到结果仍不得覆盖新草稿。
 
 `camp.pendingInputs.edit` 使用已有 UserCommandParams Envelope，command 包含 campId、pendingInputId、
 expectedRevision、nullable editToken 与 action：

@@ -1268,7 +1268,9 @@ mod tests {
             "channel_v125",
             "main_pending",
             "main_fast",
+            "main_fast_lifetime",
             "joined_v128",
+            "joined_v129",
         ] {
             let directory = std::env::temp_dir()
                 .join(format!("rovai-authority-migration-test-{}", Uuid::new_v4()));
@@ -1288,6 +1290,9 @@ mod tests {
             VALUES ('camp-join', 'kept draft', '[{"kind":"text","text":"kept draft"}]', 7, datetime('now'), datetime('now'), datetime('now', '+1 day'));
         "#).unwrap();
             match source {
+                "joined_v129" => crate::db::downgrade_current_schema_to_v129_source_for_test(
+                    database.connection(),
+                ),
                 "joined_v128" => crate::db::downgrade_current_schema_to_v128_source_for_test(
                     database.connection(),
                 ),
@@ -1307,10 +1312,16 @@ mod tests {
                     VALUES ('dingtalk', 'fixture-account', '{"fixture":"identity"}', '{"fixture":"kept session"}', 5, 1, 2);
                 "#).unwrap();
                 }
-                "main_pending" | "main_fast" => {
+                "main_pending" | "main_fast" | "main_fast_lifetime" => {
                     crate::db::downgrade_current_schema_to_main_camp_source_for_test(
                         &mut database,
-                        source == "main_fast",
+                        match source {
+                            "main_fast_lifetime" => {
+                                crate::db::MainCampMigrationSource::FastLifetime
+                            }
+                            "main_fast" => crate::db::MainCampMigrationSource::Fast,
+                            _ => crate::db::MainCampMigrationSource::Pending,
+                        },
                     );
                     database.connection().execute_batch(r#"
                     INSERT INTO pending_camp_input(id, camp_id, enqueue_sequence, revision, structured_content_json,
@@ -1318,7 +1329,7 @@ mod tests {
                     VALUES ('pending-join', 'camp-join', 1, 3, '[{"kind":"text","text":"kept queued input"}]',
                         '{"purpose":"fixture","completionRole":"required"}', 'fixture-owner', datetime('now'), datetime('now'));
                 "#).unwrap();
-                    if source == "main_fast" {
+                    if source.starts_with("main_fast") {
                         database.connection().execute_batch(r#"
                         INSERT INTO camp_member_fast_preference(camp_id, agent_id, runtime_binding_revision,
                             fast_override, cwd, executable_fingerprint, eligible)
@@ -1419,7 +1430,7 @@ mod tests {
                     )
                 );
             }
-            if source == "main_fast" {
+            if source.starts_with("main_fast") {
                 let retained: bool = migrated.connection().query_row(
                 "SELECT fast_override = 1 AND f.runtime_binding_revision = a.runtime_binding_revision
                  FROM camp_member_fast_preference f JOIN agent_profile a ON a.id = f.agent_id
@@ -1427,6 +1438,27 @@ mod tests {
                 [], |row| row.get(0),
             ).unwrap();
                 assert!(retained);
+            }
+            if source == "main_fast_lifetime" {
+                let applied_at: String = migrated
+                    .connection()
+                    .query_row(
+                        "SELECT applied_at FROM schema_migration WHERE version = 130",
+                        [],
+                        |row| row.get(0),
+                    )
+                    .unwrap();
+                assert_eq!(
+                    applied_at, "main-119-kept-time",
+                    "main 119 must map exactly, not be replayed"
+                );
+                let cache_retained: bool = migrated.connection().query_row(
+                    "SELECT eligible = 1 FROM camp_member_fast_preference WHERE camp_id = 'camp-join'", [], |row| row.get(0),
+                ).unwrap();
+                assert!(
+                    cache_retained,
+                    "mapped Fast lifetime must not invalidate caches again"
+                );
             }
             assert!(!directory.join(AUTHORITY_MIGRATION_MANIFEST_FILE).exists());
             assert!(!directory.join(MIGRATION_BACKUP_ROOT).exists());
@@ -1639,7 +1671,9 @@ mod tests {
             "legacy_switch",
             "legacy_published",
             "after_reconciliation",
+            "after_lifetime_reconciliation",
             "after_126",
+            "after_130",
         ] {
             let directory = std::env::temp_dir().join(format!(
                 "rovai-authority-migration-kill-test-{}",
@@ -1654,13 +1688,20 @@ mod tests {
                 )
                 .unwrap();
             match interruption {
+                "after_130" => crate::db::downgrade_current_schema_to_v129_source_for_test(
+                    database.connection(),
+                ),
                 "after_126" => crate::db::downgrade_current_schema_to_v125_source_for_test(
                     database.connection(),
                 ),
-                "after_reconciliation" => {
+                "after_reconciliation" | "after_lifetime_reconciliation" => {
                     crate::db::downgrade_current_schema_to_main_camp_source_for_test(
                         &mut database,
-                        true,
+                        if interruption == "after_lifetime_reconciliation" {
+                            crate::db::MainCampMigrationSource::FastLifetime
+                        } else {
+                            crate::db::MainCampMigrationSource::Fast
+                        },
                     )
                 }
                 _ => crate::db::downgrade_current_schema_to_v115_source_for_test(
@@ -1775,8 +1816,11 @@ mod tests {
         let target_phase = match interruption.as_str() {
             "legacy_switch" => AuthorityMigrationPhase::SwitchingAuthority,
             "legacy_published" => AuthorityMigrationPhase::SnapshotPublished,
-            "after_reconciliation" => AuthorityMigrationPhase::Reconciling,
+            "after_reconciliation" | "after_lifetime_reconciliation" => {
+                AuthorityMigrationPhase::Reconciling
+            }
             "after_126" => AuthorityMigrationPhase::Migrating { version: 126 },
+            "after_130" => AuthorityMigrationPhase::Migrating { version: 130 },
             _ => unreachable!(),
         };
         let mut pause = |progress: AuthorityMigrationProgress| {

@@ -41,7 +41,7 @@ Architecture 解释组件如何组成，Version 概览记录交付范围；它�
 | [Camp Membership v1（当前）](camp-membership-v1.md) | 动态添加/移除、至少一位成员、generation/version、atomic cutover、durable reconciliation、exact lifetime fence 与受信外部来源 |
 | [Channel Storage v2（当前）](channel-storage-v2.md) | v1 存储与秘密边界不变；飞书三态检查、独立 Bot 启动及钉钉 completed 同应用凭据恢复 |
 | [Channel Host Maintenance v1（当前）](channel-host-maintenance-v1.md) | 无永久 poll 回执的强类型维护请求、原子 FIFO/Outbox 维护、lease 恢复与真实业务命令幂等保留 |
-| [Channel/Main Schema Join v2（当前）](channel-main-schema-join-v2.md) | v1 精确来源与 receipt 含义不变；同一原库事务重映射 117/118→126/127，逐步恢复并保留 128/129 独立合同 |
+| [Channel/Main Schema Join v2（当前）](channel-main-schema-join-v2.md) | 精确来源与既有 receipt 含义不变；原库事务重映射 main 117/118/119→126/127/130，逐步恢复，128/129 历史合同保留，131 封口 |
 | [Channel/Main Schema Join v1（历史）](channel-main-schema-join-v1.md) | 主线 Pending/Fast 与渠道精确来源准入、126/127 receipt 与 128 封闭；副本执行位置由 v2 替代 |
 | [Channel Storage v1（历史）](channel-storage-v1.md) | 飞书/钉钉 credential 与 Developer Session 的 `rovai.sqlite` 明文存储、Main-only API、批量启动、账号/发布原子提交、CAS refresh 与旧 `.bin` clean break |
 | [Feishu Channel v6（当前）](feishu-channel-v6.md) | v5 执行卡封存/授权/预算不变，分页仅同步 response card；永久正文改为无标题卡片及实际接收对象行，原生 @ 空格分隔；无新 Migration |

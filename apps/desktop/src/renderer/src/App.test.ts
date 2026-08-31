@@ -33,7 +33,6 @@ import {
   STARTUP_FEEDBACK_DELAY_MS,
   WindowDragStrip,
   allNavigationCamps,
-  appendLiveRuntimeEvent,
   authoritativeWorkspaceIsAvailable,
   bootstrapAuthorityCopy,
   campActivationPreview,
@@ -128,7 +127,6 @@ import {
   rectanglesOverlap,
   runningAgentRunForWorkspaceEntry,
   runPulseMemberNameLines,
-  runtimeOptionsForDisplay,
   taskCreationBlocksSubmittedRunAutoFocus
 } from './CampWorkspace'
 import {
@@ -314,6 +312,18 @@ describe('availability-first workspace gate', () => {
 })
 
 describe('active Camp event invalidation', () => {
+  it('refreshes public history only when a private queued input is published in the active Camp', () => {
+    for (const reason of ['enqueued', 'edited', 'publication_failed']) {
+      expect(shouldRefreshActiveCampForCoreEvent({
+        method: 'camp.pendingInputs.changed', params: { campId: 'camp-1', reason }
+      }, 'camp-1')).toBe(false)
+    }
+    const publication = { method: 'camp.pendingInputs.changed', params: { campId: 'camp-1', reason: 'published' } }
+    expect(shouldRefreshActiveCampForCoreEvent(publication, 'camp-1')).toBe(true)
+    expect(shouldRefreshActiveCampForCoreEvent(publication, 'camp-2')).toBe(false)
+    expect(shouldRefreshActiveCampForCoreEvent(publication, 'camp-1', true)).toBe(false)
+  })
+
   it('refreshes the active Camp when a persisted AgentRun reaches terminal', () => {
     expect(shouldRefreshActiveCampForCoreEvent({
       method: 'agent_run.terminal',
@@ -591,26 +601,6 @@ const TEST_EXECUTION_BUDGET = {
   exhaustionCommandId: null
 }
 
-it('retains every live Runtime event without a rolling count cap', () => {
-  const current = Array.from({ length: 600 }, (_, index) => ({
-    id: `live-${index + 1}`,
-    agentRunId: 'run-long',
-    eventType: 'agent.text.delta',
-    payload: { itemId: 'message-long', delta: `${index + 1}` },
-    createdAt: `2026-08-19T00:00:${String(index % 60).padStart(2, '0')}Z`
-  }))
-  const next = appendLiveRuntimeEvent(current, {
-    id: 'live-601',
-    agentRunId: 'run-long',
-    eventType: 'runtime.action',
-    payload: { toolCallId: 'tool-601', status: 'completed' },
-    createdAt: '2026-08-19T00:01:00Z'
-  })
-
-  expect(next).toHaveLength(601)
-  expect(next[0].id).toBe('live-1')
-  expect(next.at(-1)?.id).toBe('live-601')
-})
 
 function canonicalActivity(
   operationId: string,
@@ -2102,44 +2092,6 @@ describe('task event projections', () => {
         }
       }
     }, members, true)).toBe(false)
-  })
-
-  it('keeps every Runtime option while placing cancel and deny first', () => {
-    const options = [
-      {
-        optionId: 'session', kind: 'allow_session' as const, label: '本 Session 允许',
-        consequence: '仅当前 Session。', nativeResponseDigest: 'session-digest'
-      },
-      {
-        optionId: 'custom', kind: 'other' as const, label: 'Runtime 自定义',
-        consequence: '保持 Runtime 原生语义。', nativeResponseDigest: 'custom-digest'
-      },
-      {
-        optionId: 'once', kind: 'allow_once' as const, label: '允许一次',
-        consequence: '仅当前请求。', nativeResponseDigest: 'once-digest'
-      },
-      {
-        optionId: 'deny', kind: 'deny' as const, label: '拒绝',
-        consequence: '不执行当前请求。', nativeResponseDigest: 'deny-digest'
-      },
-      {
-        optionId: 'cancel', kind: 'cancel' as const, label: '取消',
-        consequence: '取消当前请求。', nativeResponseDigest: 'cancel-digest'
-      }
-    ]
-
-    expect(runtimeOptionsForDisplay(options).map((option) => option.optionId)).toEqual([
-      'cancel',
-      'deny',
-      'custom',
-      'once',
-      'session'
-    ])
-    expect(runtimeOptionsForDisplay(options.slice(2)).map((option) => option.optionId)).toEqual([
-      'cancel',
-      'deny',
-      'once'
-    ])
   })
 
   it('renders the visible Camp header and limits structural drag strips to overlay pages', () => {
@@ -4005,7 +3957,10 @@ describe('task event projections', () => {
     }))
 
     expect(markup).toContain('aria-label="2 项待审批"')
-    expect(markup).toContain('洛可、沐瓦')
+    expect(markup).toContain('洛可 · Codex CLI')
+    expect(markup).not.toContain('洛可、沐瓦')
+    expect(markup).not.toContain('只允许当前请求。')
+    expect(markup).toContain('data-approval-summary')
     expect(markup).toContain('运行 pnpm test')
     expect(markup).toContain('aria-label="收起审批详情"')
     expect(markup).toContain('aria-expanded="true"')

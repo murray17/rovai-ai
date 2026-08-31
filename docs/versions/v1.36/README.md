@@ -33,7 +33,8 @@ Owner 可在私聊或群聊显式 `@Bot` 后复用现有 Quick Chat、项目选�
   `channel_developer_sessions`，切换到 `v1.37 / projection schema 78`；Migration 125 添加不可变终态 snapshot 并清理旧
   console view state，推进到 `v1.38 / projection schema 79`；本次合并以 126/127 接入 main Pending/Fast，
   128 汇合到 `v1.39 / projection schema 80`，保留两侧受支持旧库与业务数据；129 在此基础上删除重复 Evidence 索引，
-  推进到 `v1.40 / projection schema 81`，唯一约束与所有业务行保持原样；
+  推进到 `v1.40 / projection schema 81`，唯一约束与所有业务行保持原样；130 接入 main Fast 生命周期修复，
+  131 封闭当前 `v1.41 / projection schema 82`，精确 main119 receipt 映射至130，不重放已应用的修复；
 - 账号连接使用 Main 隔离的官方 Web Session 扫码/确认；以 corpId + staffId 校验身份，新身份与 Cookie Snapshot
   通过 Core 原子 `account.commitConnection` 一次写入 `rovai.sqlite`；失败只丢弃 staged jar，旧账号与 Session 不变；
 - 不需要 Rovai OAuth Client、loopback、Device Flow 或 token broker。schema-2 Cookie 重启恢复、官方 SSO 隐藏续接；
@@ -139,11 +140,19 @@ Stream fast ACK、入站 normalize/topic 拒绝、Owner gate、统一 admission�
 普通升级直接在票据的精确原库运行逐版本事务，不复制整库、创建新 manifest/backup、默认全库检查或替换文件。
 每步 DDL/DML 与 receipt 原子提交，中断后保留已完成步骤并继续；旧 manifest 兼容恢复仍在。
 
-保留 126/127 的精确映射和 128 的 `v1.39/schema 80` 历史封口；此前索引优化的 129/`v1.40/schema 81` 仍为目标，
-不再新增 migration。关键 schema metadata 和局部外键在各自边界校验，原库消失/替换时不允许自动或手动重试建空库。
+保留 126/127 的精确映射和 128 的 `v1.39/schema 80` 历史封口；当次改动以索引优化的129/`v1.40/schema 81`为目标，
+未额外新增 migration。关键 schema metadata 和局部外键在各自边界校验，原库消失/替换时不允许自动或手动重试建空库。
 启动瞬时重试独立于 crash budget，产品保持 400ms 延迟与原布局，统一“正在打开会话”及安全的最终失败恢复入口。
 117–125 与可达旧链审计、隔离回归和实际验证结果见[实施计划](implementation-plan.md#普通升级原位事务与启动反馈)。
 本次不推送、不打包、不安装或重启日常 App，不写日常数据库，也不改变钉钉既有 NO-GO 外部验收边界。
+
+### 再次合入主线并保留数据库协议：2026-08-31
+
+合入 `main@48a9140f` 的Fast偏好修复、输入队列/连续输入、执行头像栏、紧凑审批、模型目录与文件链接改进。
+数据库执行边界继续采用已确认的原位逐事务协议，不恢复普通Snapshot Switch，不创建空authority。
+为避免新main119覆盖渠道119，将其语义追加为130；精确main `v1.34/schema 73` 来源的119直接映射130并保留时间戳。
+131统一封闭当前合同，128/129的历史含义不变。只扩展已有汇合规则，没有新增planner或策略注册表，亦无需新增决定。
+本次安装按用户要求提升至 `/Applications`；隔离门禁与安装结果另记于实施计划，不将磁盘更新视为当前进程热升级。
 
 ### 飞书分页回退修正
 

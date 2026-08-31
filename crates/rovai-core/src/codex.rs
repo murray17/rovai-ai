@@ -1854,21 +1854,21 @@ fn approval_options(method: &str, request: &Value) -> Result<Vec<RuntimePermissi
             (
                 "decline",
                 "deny",
-                "拒绝",
+                "Deny",
                 "拒绝当前权限请求，不向 Runtime 授予所申请权限。",
                 false,
             ),
             (
                 "accept",
                 "allow_once",
-                "允许一次",
+                "Allow once",
                 "仅允许当前请求；后续请求仍可能再次询问。",
                 true,
             ),
             (
                 "acceptForSession",
                 "allow_session",
-                "本 Session 允许",
+                "Allow for this session",
                 "允许当前 Native Session 内使用该权限，不修改 Agent 的长期配置。",
                 true,
             ),
@@ -1878,28 +1878,28 @@ fn approval_options(method: &str, request: &Value) -> Result<Vec<RuntimePermissi
             (
                 "cancel",
                 "cancel",
-                "取消",
+                "Cancel",
                 "取消当前请求，不执行该操作。",
                 false,
             ),
             (
                 "decline",
                 "deny",
-                "拒绝",
+                "Deny",
                 "拒绝当前操作；Agent 可继续采用其他方式。",
                 false,
             ),
             (
                 "accept",
                 "allow_once",
-                "允许一次",
+                "Allow once",
                 "仅允许当前操作；后续相同操作仍可能再次询问。",
                 true,
             ),
             (
                 "acceptForSession",
                 "allow_session",
-                "本 Session 允许",
+                "Allow for this session",
                 "允许当前 Native Session 内的同类操作，不修改 Agent 的长期配置。",
                 true,
             ),
@@ -2844,6 +2844,26 @@ while IFS= read -r ignored; do :; done
         )
         .expect("known approval should map");
         assert_eq!(result, json!({"decision": "acceptForSession"}));
+        let options =
+            approval_options("item/commandExecution/requestApproval", &json!({})).unwrap();
+        assert_eq!(
+            options
+                .iter()
+                .map(|option| (option.option_id.as_str(), option.label.as_str()))
+                .collect::<Vec<_>>(),
+            vec![
+                ("cancel", "Cancel"),
+                ("decline", "Deny"),
+                ("accept", "Allow once"),
+                ("acceptForSession", "Allow for this session")
+            ]
+        );
+        for option in options {
+            assert_eq!(
+                option.native_response,
+                json!({"decision": option.option_id})
+            );
+        }
     }
 
     #[test]

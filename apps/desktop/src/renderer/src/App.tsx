@@ -131,15 +131,9 @@ import {
   createNavigationRefreshCoordinator,
   type NavigationRefreshTrigger
 } from './navigation-refresh-coordinator'
+import { createLiveRuntimeEventBuffer } from './live-runtime-event-buffer'
 
 export { allNavigationCamps }
-
-export function appendLiveRuntimeEvent(
-  current: LiveRuntimeEvent[],
-  event: LiveRuntimeEvent
-): LiveRuntimeEvent[] {
-  return [...current, event]
-}
 
 const ACTIVE_CAMP_INVALIDATION_EVENTS = new Set([
   'camp.member.fast.updated',
@@ -169,6 +163,11 @@ export function shouldRefreshActiveCampForCoreEvent(
   activeCampId: string | null,
   shuttingDown = false
 ): boolean {
+  if (event.method === 'camp.pendingInputs.changed') {
+    const params = asRecord(event.params)
+    return !shuttingDown && Boolean(activeCampId)
+      && params.campId === activeCampId && params.reason === 'published'
+  }
   if (shuttingDown || !activeCampId || !ACTIVE_CAMP_INVALIDATION_EVENTS.has(event.method)) {
     return false
   }
@@ -1014,6 +1013,7 @@ function AuthoritativeApp({
   const newConversationReturnFocus = useRef<HTMLElement | null>(null)
   const liveRuntimeEventSequence = useRef(0)
   const runtimeHealthRefreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const runtimeHealthRefreshIncludesMembers = useRef(false)
   const membersViewRef = useRef<MembersViewHandle>(null)
   const startupResolvedSessionId = useRef<string | null>(null)
   const pendingRestorableLocation = useRef<RestorableLocation | null>(null)
@@ -1299,13 +1299,14 @@ function AuthoritativeApp({
     return request
   }, [])
 
-  const loadMemberData = useCallback(async (): Promise<void> => {
-    const [, nextInstallations] = await Promise.all([
-      loadAgents(),
-      window.rovai.request<AdapterInstallation[]>('runtime.installations.list')
-    ])
+  const loadInstallations = useCallback(async (): Promise<void> => {
+    const nextInstallations = await window.rovai.request<AdapterInstallation[]>('runtime.installations.list')
     setInstallations(nextInstallations)
-  }, [loadAgents])
+  }, [])
+
+  const loadMemberData = useCallback(async (): Promise<void> => {
+    await Promise.all([loadAgents(), loadInstallations()])
+  }, [loadAgents, loadInstallations])
 
   const applyNavigationPreferences = useCallback((
     snapshot: NavigationPreferencesSnapshot
@@ -2038,7 +2039,10 @@ function AuthoritativeApp({
   ])
 
   useEffect(() => {
-    return window.rovai.onEvent((event: CoreEvent) => {
+    const liveEvents = createLiveRuntimeEventBuffer((batch) => {
+      setLiveRuntimeEvents((current) => [...current, ...batch])
+    })
+    const unsubscribe = window.rovai.onEvent((event: CoreEvent) => {
       const params = asRecord(event.params)
       if (shuttingDownRef.current) return
       const liveEvent = liveRuntimeEventFromCore(
@@ -2046,8 +2050,9 @@ function AuthoritativeApp({
         `live-${++liveRuntimeEventSequence.current}`
       )
       if (liveEvent) {
-        setLiveRuntimeEvents((current) => appendLiveRuntimeEvent(current, liveEvent))
+        liveEvents.push(liveEvent)
       }
+      if (event.method === 'agent_run.terminal') liveEvents.flush()
       if (event.method === 'runtime.state') {
         const runtimeStatus = stringField(params, 'status')
         if (runtimeStatus === 'shutting_down') {
@@ -2072,10 +2077,16 @@ function AuthoritativeApp({
         || event.method === 'runtime.discovery.completed'
         || event.method === 'runtime.availability.updated'
       ) {
+        runtimeHealthRefreshIncludesMembers.current ||= event.method !== 'runtime.availability.updated'
         if (runtimeHealthRefreshTimer.current) clearTimeout(runtimeHealthRefreshTimer.current)
         runtimeHealthRefreshTimer.current = setTimeout(() => {
           runtimeHealthRefreshTimer.current = null
-          void Promise.all([loadHealth(), loadMemberData()]).catch(() => undefined)
+          const includeMembers = runtimeHealthRefreshIncludesMembers.current
+          runtimeHealthRefreshIncludesMembers.current = false
+          void Promise.all([
+            loadHealth(),
+            includeMembers ? loadMemberData() : loadInstallations()
+          ]).catch(() => undefined)
         }, 80)
       }
       if (shouldRefreshNavigationForCoreEvent(event, shuttingDownRef.current)) {
@@ -2094,9 +2105,11 @@ function AuthoritativeApp({
         })
       }
     })
+    return () => { unsubscribe(); liveEvents.dispose() }
   }, [
     activeCampRefreshCoordinator,
     loadHealth,
+    loadInstallations,
     loadMemberData,
     loadOverview,
     navigationRefreshCoordinator
@@ -2147,6 +2160,10 @@ function AuthoritativeApp({
     [activeCampId, campSnapshot, cancellingTurnIds]
   )
   const activeCampStopping = activeCancellingTurnIds.size > 0
+  const activeOptimisticMessages = useMemo(
+    () => optimisticCampMessages.filter((entry) => entry.campId === activeCampId).map((entry) => entry.message),
+    [activeCampId, optimisticCampMessages]
+  )
   const activeCancellingRunIds = useMemo(
     () => campSnapshot?.camp.id === activeCampId
       ? effectiveCancellingRunIds(cancellingRunIds, campSnapshot)
@@ -3131,20 +3148,22 @@ function AuthoritativeApp({
           campId, commandId,
           message: { ...optimisticMessage, id: campMessageId, sequence, campTurnId }
         }])
+        void requestCampProjection(campId, 'open')
+          .then(async ({ snapshot }) => {
+            if (selectionGeneration !== campSelectionGeneration.current) return
+            campEventSequenceMarker.current = snapshot.throughGlobalSequence
+            setCampSnapshot(snapshot)
+            setOptimisticCampMessages((current) =>
+              current.filter((entry) => entry.commandId !== commandId)
+            )
+            if (selectionGeneration === campSelectionGeneration.current) await loadNavigation()
+          })
+          .catch((nextError) => setError(errorMessage(nextError)))
       }
-      void requestCampProjection(campId, 'open')
-        .then(async ({ snapshot }) => {
-          if (selectionGeneration !== campSelectionGeneration.current) return
-          campEventSequenceMarker.current = snapshot.throughGlobalSequence
-          setCampSnapshot(snapshot)
-          setOptimisticCampMessages((current) =>
-            current.filter((entry) => entry.commandId !== commandId)
-          )
-          if (selectionGeneration === campSelectionGeneration.current) await loadNavigation()
-        })
-        .catch((nextError) => setError(errorMessage(nextError)))
       return {
         ...(pendingInputId ? { pendingInputId } : {}),
+        ...(campMessageId && typeof result.commandResult.payload.sequence === 'number'
+          ? { publishedMessageSequence: sequence } : {}),
         campTurnId,
         agentRunIds,
         addressedAgentIds: optimisticMessage.addressedAgentIds
@@ -3530,9 +3549,7 @@ function AuthoritativeApp({
               ? campSnapshot.openCoverage?.messages ?? null
               : null}
             onLoadEarlierMessages={loadEarlierCampMessages}
-            optimisticMessages={optimisticCampMessages
-              .filter((entry) => entry.campId === activeCampId)
-              .map((entry) => entry.message)}
+            optimisticMessages={activeOptimisticMessages}
             projectName={activeCampProject?.name ?? null}
             agents={agents}
             installations={installations}

@@ -848,8 +848,6 @@ export interface CampMemberFastView {
   runtimeBindingRevision: string
   fastOverride: boolean | null
   runtimeDefaultFast: boolean | null
-  observedFastState: 'unknown' | 'standard' | 'fast' | 'cooldown'
-  unavailableReason: string | null
 }
 
 export interface CampMemberView {

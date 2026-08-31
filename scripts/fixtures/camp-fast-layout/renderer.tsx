@@ -17,8 +17,7 @@ const agents: AgentProfile[] = Array.from({ length: 16 }, (_, index) => ({
   createdAt: now, updatedAt: now, removedAt: null
 }))
 const values = new Map<string, CampMemberFastView>(agents.filter((_, index) => index !== 2 && index !== 3).map(agent => [agent.agentId, {
-  runtimeBindingRevision: `binding-${agent.agentId}`, fastOverride: null, runtimeDefaultFast: null,
-  observedFastState: 'unknown', unavailableReason: null
+  runtimeBindingRevision: `binding-${agent.agentId}`, fastOverride: null, runtimeDefaultFast: null
 }]))
 let updateSnapshot: (snapshot: CampSnapshot) => void
 let updateAgents: (agents: AgentProfile[]) => void
@@ -95,8 +94,9 @@ let bookmarkedButton: HTMLElement | null = null
 Object.assign(window, { fastTest: {
   settle: async () => { await new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))) },
   bookmark: () => { bookmarkedButton = element('.camp-fast-toggle') },
-  cooldown: () => {
-    const value = { ...values.get('agent-0')!, observedFastState: 'cooldown' as const, unavailableReason: 'Fast 暂时不可用，本次按标准速度执行' }
+  legacyObservation: (state: 'fast' | 'standard' | 'cooldown') => {
+    // Even an old cached projection carrying retired fields cannot influence the preference control.
+    const value = { ...values.get('agent-0')!, observedFastState: state, unavailableReason: 'Fast 暂时不可用，本次按标准速度执行' }
     values.set('agent-0', value)
     updateSnapshot({ ...initial, members: initial.members.map(member => ({ ...member, fast: values.get(member.agentId) })) })
   },
@@ -112,7 +112,7 @@ Object.assign(window, { fastTest: {
   },
   restore: () => {
     values.set('agent-0', { runtimeBindingRevision: 'binding-restored', fastOverride: null,
-      runtimeDefaultFast: null, observedFastState: 'unknown', unavailableReason: null })
+      runtimeDefaultFast: null })
     updateAgents(agents)
     updateSnapshot({ ...initial, members: initial.members.map(member => ({ ...member, fast: values.get(member.agentId) })) })
   },

@@ -6928,8 +6928,12 @@ impl Core {
                 let mut database = self.database.lock().await;
                 let execution = rovai_core::pending_camp_input::edit_input(
                     &mut database,
-                    &user_camp_command_envelope(params.command_id, camp_id, params.command),
+                    &user_camp_command_envelope(params.command_id, camp_id.clone(), params.command),
                 )?;
+                drop(database);
+                if execution.result.status != CommandResultStatus::Rejected && !execution.replayed {
+                    emit_pending_inputs_changed(&self.output, &camp_id, "edited");
+                }
                 Ok(serde_json::to_value(execution.result)?)
             }
             "camp.composerDraft.get" => {
@@ -7481,6 +7485,9 @@ impl Core {
             }
         };
         if let Some(execution) = queued {
+            if execution.result.status != CommandResultStatus::Rejected && !execution.replayed {
+                emit_pending_inputs_changed(&self.output, params.camp_id.as_str(), "enqueued");
+            }
             return Ok(
                 json!({"commandResult": execution.result, "replayed": execution.replayed, "preflight": null, "pendingExecution": null}),
             );
@@ -7562,11 +7569,15 @@ impl Core {
             }
         };
         if execution.result.status != CommandResultStatus::Rejected {
-            emit_navigation_invalidated(
-                &self.output,
-                "camp.messages.send",
-                Some(params.camp_id.as_str()),
-            );
+            if execution.result.payload.get("pendingInputId").is_some() {
+                emit_pending_inputs_changed(&self.output, params.camp_id.as_str(), "enqueued");
+            } else {
+                emit_navigation_invalidated(
+                    &self.output,
+                    "camp.messages.send",
+                    Some(params.camp_id.as_str()),
+                );
+            }
         }
         if let Some(prepared) = prepared_ingest {
             let cleanup_store = managed_store.clone();
@@ -10571,21 +10582,13 @@ impl Core {
         };
         {
             let mut database = self.database.lock().await;
-            if let Some(fast) = &execution.runtime.camp_fast {
-                let target = rovai_core::camp_fast::CampMemberFastTarget {
-                    camp_id: execution.camp_id.clone(),
-                    agent_id: execution.agent_id.clone(),
-                    runtime_binding_revision: fast.runtime_binding_revision.clone(),
-                    cwd: execution.workspace.execution_root.clone(),
-                    adapter_kind: AdapterKind::CodexCli,
-                };
-                rovai_core::camp_fast::record_eligibility(
-                    &database,
-                    &target,
-                    &execution.runtime,
-                    &fast_eligibility,
-                )?;
-            }
+            rovai_core::camp_fast::record_runtime_eligibility(
+                &database,
+                &execution.camp_id,
+                &execution.agent_id,
+                &execution.runtime,
+                &fast_eligibility,
+            )?;
             let requested = service_tier_for_turn
                 .or_else(|| {
                     fast_eligibility
@@ -15204,50 +15207,30 @@ async fn process_runtime_event(
         if execution.runtime.adapter_kind != scope.adapter_kind {
             return Ok(());
         }
-        if let Some(fast) = &execution.runtime.camp_fast {
-            if event_type == "runtime.fast.eligibility" {
-                let target = rovai_core::camp_fast::CampMemberFastTarget {
-                    camp_id: execution.camp_id.clone(),
-                    agent_id: execution.agent_id.clone(),
-                    runtime_binding_revision: fast.runtime_binding_revision.clone(),
-                    cwd: execution.workspace.execution_root.clone(),
-                    adapter_kind: scope.adapter_kind,
-                };
-                let eligibility = rovai_core::camp_fast::NativeFastEligibility {
-                    eligible: payload.get("eligible").and_then(Value::as_bool) == Some(true),
-                    runtime_default_fast: payload
-                        .get("runtimeDefaultFast")
-                        .and_then(Value::as_bool),
-                };
-                rovai_core::camp_fast::record_eligibility(
-                    &database,
-                    &target,
-                    &execution.runtime,
-                    &eligibility,
-                )?;
-            } else if let Some(state) = payload.get("state") {
-                let state = serde_json::from_value::<rovai_core::camp_fast::ObservedFastState>(
-                    state.clone(),
-                )?;
-                rovai_core::camp_fast::record_observation(
-                    &database,
-                    &execution.camp_id,
-                    &execution.agent_id,
-                    &fast.runtime_binding_revision,
-                    state,
-                    fast.fast_override.is_none(),
-                )?;
-                if let Some(tier) = payload.get("observedServiceTier").and_then(Value::as_str) {
-                    MonitoringService::record_service_tier(&mut database, &execution, tier, true)?;
-                }
+        if event_type == "runtime.fast.eligibility" {
+            let eligibility = rovai_core::camp_fast::NativeFastEligibility {
+                eligible: payload.get("eligible").and_then(Value::as_bool) == Some(true),
+                runtime_default_fast: payload.get("runtimeDefaultFast").and_then(Value::as_bool),
+            };
+            if rovai_core::camp_fast::record_runtime_eligibility(
+                &database,
+                &execution.camp_id,
+                &execution.agent_id,
+                &execution.runtime,
+                &eligibility,
+            )? {
+                emit(
+                    output,
+                    "camp.member.fast.updated",
+                    json!({"campId": execution.camp_id, "agentId": execution.agent_id}),
+                );
             }
+            return Ok(());
         }
-        emit(
-            output,
-            "camp.member.fast.updated",
-            json!({"campId": execution.camp_id, "agentId": execution.agent_id}),
-        );
-        return Ok(());
+        if let Some(tier) = payload.get("observedServiceTier").and_then(Value::as_str) {
+            MonitoringService::record_service_tier(&mut database, &execution, tier, true)?;
+        }
+        // Actual Fast state belongs to this Run's evidence below, never to Camp preferences.
     }
     if event_type == "runtime.model.observed" {
         let model_id = payload
@@ -17395,8 +17378,11 @@ async fn process_agent_run_exit(
 }
 
 async fn dispatch_pending_camp_inputs(core: &Core) {
-    let mut database = core.database.lock().await;
-    let heads = match rovai_core::pending_camp_input::ready_heads(&database) {
+    let heads = {
+        let database = core.database.lock().await;
+        rovai_core::pending_camp_input::ready_heads(&database)
+    };
+    let heads = match heads {
         Ok(heads) => heads,
         Err(error) => {
             eprintln!("Pending Camp Input admission failed: {error:#}");
@@ -17407,16 +17393,24 @@ async fn dispatch_pending_camp_inputs(core: &Core) {
         let camp_id = command.camp_id.clone();
         let envelope =
             user_camp_command_envelope(uuid::Uuid::new_v4().to_string(), camp_id.clone(), command);
-        match CollaborationService::default().send_pending_camp_input(&mut database, &envelope) {
+        let result = {
+            let mut database = core.database.lock().await;
+            CollaborationService::default().send_pending_camp_input(&mut database, &envelope)
+        };
+        match result {
             Ok(execution) if execution.result.status != CommandResultStatus::Rejected => {
+                emit_pending_inputs_changed(&core.output, &camp_id, "published");
                 emit_navigation_invalidated(
                     &core.output,
                     "camp.pendingInputs.published",
                     Some(&camp_id),
                 );
             }
-            Ok(_) => {}
-            Err(error) => eprintln!("Pending Camp Input publication paused: {error:#}"),
+            Ok(_) => emit_pending_inputs_changed(&core.output, &camp_id, "publication_failed"),
+            Err(error) => {
+                emit_pending_inputs_changed(&core.output, &camp_id, "publication_failed");
+                eprintln!("Pending Camp Input publication paused: {error:#}");
+            }
         }
     }
 }
@@ -17955,6 +17949,20 @@ fn emit_navigation_invalidated(
             Some(camp_id) => json!({ "reason": reason, "campId": camp_id }),
             None => json!({ "reason": reason }),
         },
+    );
+}
+
+fn emit_pending_inputs_changed(
+    output: &mpsc::UnboundedSender<String>,
+    camp_id: &str,
+    reason: &str,
+) {
+    // Private post-commit invalidation only. Never put queued content, recipients
+    // or edit tokens into the public event log or Runtime context.
+    emit(
+        output,
+        "camp.pendingInputs.changed",
+        json!({ "campId": camp_id, "reason": reason }),
     );
 }
 

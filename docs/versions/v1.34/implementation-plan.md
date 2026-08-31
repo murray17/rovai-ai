@@ -73,5 +73,54 @@ metadata，不发起模型请求。以下为主线整合后的本地结果；PR 
 首轮 Linux CI 暴露 fixture 预先打开浮层会被启动焦点事件收起；fixture 改为与正常工作区相同的初始收起状态，
 经原生点击入口打开后再断言，并保留全部布局/焦点断言。产品的浮层关闭规则未修改。
 
-本机边界：Claude 2.1.220 仅报告 `oauth_token`、订阅类型为空；Codex 0.147.0 标准与 experimental schema
-均无 `serviceTierForTurn`。两者均按未知/不支持隐藏，不能宣称本机原生 Fast 端到端成功。
+首轮实现的本机边界：Claude 2.1.220 仅报告 `oauth_token`、订阅类型为空；Codex 0.147.0 标准与 experimental schema
+均无 `serviceTierForTurn`。当时两者均按未知/不支持隐藏；Claude 判断过严的问题由下述修正处理，
+不能宣称本机原生 Fast 端到端成功。
+
+## 2026-08-31 最小修正
+
+用户确认只做三项修改，不继续扩展状态模型：
+
+1. Claude 原生 firstParty 登录接受 `claude.ai` / `oauth_token`，移除 `subscriptionType` 硬门槛。
+   继续拒绝自定义 Key/Base URL/云 Provider、未知认证方式与不支持的 CLI；运行资格由原生 Runtime 判断。
+2. Fast override 只在真正更换 Runtime 绑定时失效。模型变化使资格缓存失效，但保留所有 Camp 的偏好；
+   权限变化不修改 Fast。Migration 119 替换已发布的 v118 触发器，从 schema 72 升到 73，保留旧选择。
+   异步资格检测使用既有模型配置快照和冻结模型校验，不添加资格代次。
+3. 成员浮层只表达后续执行偏好，不显示实际状态警告。`runtime.fast.observed` 仅保存为当前 Run/epoch
+   的安全 Execution Evidence，Codex 实际 service tier 继续进入该 Run 的 monitoring；不回写 Camp。
+   三态下发不变：true 请求 Fast、false 请求 Standard、null 省略参数。旧观测列保留但不再使用，
+   不增加 preferenceRevision、observedRunId、currentRunFastState、lastRunFastState 或类似字段。
+
+本次 worktree：`/Users/murray.xue/VSCodeProjects/opensource/rovai-ai-fast-auth-preference-fix`；
+分支 `codex/fast-auth-preference-fix`，基线 `91ecd6d40d8618af20e3a3aa3d839d22da320637`。
+无需单独主线治理提交；沿用 v1.34 范围并同步当前合同、Runtime 边界、组件与兼容性文档。
+
+测试准入：扩展既有 `camp_fast` 认证矩阵与持久化 owner，覆盖缺失/null 套餐、官方 OAuth、两个 Camp 的
+相反选择、权限变更、模型失去/恢复资格、迟到旧模型结果、真正换绑定与冻结三态。旧 Camp 观测断言随该
+合同退出，运行观测的隔离/脱敏由既有 Execution Evidence owner 接手，未禁用测试。新增独立 v119 migration
+owner 是已发布 schema 72 的升级兼容入口；验证三态保留、旧 trigger 替换及重新打开幂等，纯函数不能覆盖此边界。
+最小命令分别为 `cargo test -p rovai-core --lib camp_fast::tests`、
+`cargo test -p rovai-core --lib db::tests::v119` 与既有 Execution Evidence owner。
+生产 Electron fixture 扩展旧 Fast/Standard/cooldown 投影不影响按钮、无警告的场景，保留原布局/键盘/失败/重测断言。
+
+修正验证在隔离 worktree 完成：
+
+| 检查 | 结果 |
+| --- | --- |
+| 定向认证/偏好、v119 升级、Run Evidence | 通过；Fast metadata 不产生 Canonical Activity |
+| `pnpm typecheck`、`pnpm test`、`pnpm build:desktop` | 通过；719 项 Vitest、219 项 Node，1 项既有平台 skip |
+| `pnpm test:rust:pr` | 416 项 lib、32 项 CLI、291 项 slow 通过 |
+| `cargo test -p rovai-core --bin rovai-core -- --quiet` | 184 项通过，4 项既有 ignore |
+| `cargo fmt --all --check`、严格 Clippy 全 workspace/all-targets | 通过 |
+| 生产 Electron Fast fixture | 通过；浅色/深色截图、键盘与旧观测不影响偏好/UI 已复核 |
+| diff-aware 文档门禁 | 对本次基线通过，无 checker exception |
+
+独立复核针对实现提交 `e0982586`，后续仅补充本节验证记录及概览说明：
+
+| Standards | Spec |
+| --- | --- |
+| 0 项待修问题；Rust 测试准入、既有视觉与无障碍边界符合规范。 | 0 项待修问题；三态下发、模型/权限保留选择、观测仅归属 Run，未扩展状态模型。 |
+
+PR CI、合并与清理结果由 [PR #126](https://github.com/murray17/rovai-ai/pull/126) 拥有。
+本机仅重跑原生 `--version` / `auth status`，确认 firstParty OAuth、套餐为空、无自定义环境；未调用模型、
+未读取凭据文件或钥匙串，也未触碰日常 App 数据。

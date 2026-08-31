@@ -7,12 +7,17 @@ describe('SafeMarkdown file preview references', () => {
   it('enables only explicit inline-code and high-confidence bare file references in file contexts', () => {
     const markup = renderToStaticMarkup(createElement(SafeMarkdown, {
       onFileReference: () => undefined,
-      children: '打开 `README.md` 或 ./src/app.ts:42。\n\n```text\n./secret.txt\n```'
+      children: '打开 `README.md` 或 ./src/app.ts:42。也可以点击 [`实现`](src/app.ts:4)。`Promise.all` 和 `sum()` 保持代码。\n\n```text\n./secret.txt\n```'
     }))
     expect(markup).toContain('title="README.md"')
     expect(markup).toContain('title="./src/app.ts:42"')
     expect(markup).not.toContain('title="./secret.txt"')
-    expect(markup).toContain('<code>README.md</code></a>')
+    expect(markup).toContain('<span class="inline-code-file-reference-label">README.md</span>')
+    expect(markup).toContain('<span class="inline-code-file-reference-label">实现</span>')
+    expect(markup).not.toContain('<code>README.md</code>')
+    expect(markup).not.toContain('<code>实现</code>')
+    expect(markup).toContain('<code>Promise.all</code>')
+    expect(markup).toContain('<code>sum()</code>')
   })
 
   it('keeps local images disabled by default and admits only URLs projected by the preview', () => {

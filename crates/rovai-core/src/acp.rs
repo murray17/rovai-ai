@@ -5425,53 +5425,46 @@ fn permission_options(request: &Value) -> Result<Vec<RuntimePermissionOption>> {
             .get("kind")
             .and_then(Value::as_str)
             .unwrap_or("other");
-        let (kind, allows_action, fallback_label, consequence) = match native_kind {
+        let (kind, allows_action, consequence) = match native_kind {
             "allow_once" => (
                 "allow_once",
                 true,
-                "允许一次",
                 "仅允许当前请求；后续相同操作仍可能再次询问。",
             ),
             "allow_always" => (
                 "other",
                 true,
-                "始终允许",
                 "按 Runtime 原生语义持续允许该类请求，作用域由 Runtime 决定。",
             ),
             value if value.starts_with("allow") => (
                 "other",
                 true,
-                "允许",
                 "按 Runtime 原生语义允许该请求，具体生命周期由 Runtime 决定。",
             ),
             "reject_once" | "deny" => (
                 "deny",
                 false,
-                "拒绝",
                 "拒绝当前请求；Agent 可继续采用不需要该权限的方式。",
             ),
             value if value.starts_with("reject") || value.starts_with("deny") => {
-                ("deny", false, "拒绝", "按 Runtime 原生语义拒绝该请求。")
+                ("deny", false, "按 Runtime 原生语义拒绝该请求。")
             }
-            "cancel" => (
-                "cancel",
-                false,
-                "取消",
-                "取消当前请求，不授予所申请的权限。",
-            ),
+            "cancel" => ("cancel", false, "取消当前请求，不授予所申请的权限。"),
             _ => (
                 "other",
                 false,
-                "按 Runtime 选项处理",
                 "选择该 Runtime 原生选项；其作用域和生命周期由 Runtime 决定。",
             ),
         };
-        let label = option
-            .get("name")
-            .or_else(|| option.get("label"))
-            .and_then(Value::as_str)
-            .filter(|value| !value.trim().is_empty())
-            .unwrap_or(fallback_label);
+        let label = ["name", "label"]
+            .into_iter()
+            .find_map(|field| {
+                option
+                    .get(field)
+                    .and_then(Value::as_str)
+                    .filter(|value| !value.trim().is_empty())
+            })
+            .unwrap_or(option_id);
         frozen.push(RuntimePermissionOption::from_native(
             option_id,
             kind,
@@ -9968,11 +9961,29 @@ while IFS= read -r ignored; do :; done
     fn approval_selects_the_exact_native_option_id() {
         let request = json!({
             "options": [
-                {"optionId": "once", "kind": "allow_once"},
-                {"optionId": "always", "kind": "allow_always"},
+                {"optionId": "once", "kind": "allow_once", "name": "  Runtime Allow once  ", "label": "unused"},
+                {"optionId": "always", "kind": "allow_always", "name": " ", "label": "Adapter always"},
                 {"optionId": "reject", "kind": "reject_once"}
             ]
         });
+        let options = permission_options(&request).expect("native options should freeze");
+        assert_eq!(
+            options
+                .iter()
+                .map(|option| (option.option_id.as_str(), option.label.as_str()))
+                .collect::<Vec<_>>(),
+            vec![
+                ("once", "  Runtime Allow once  "),
+                ("always", "Adapter always"),
+                ("reject", "reject")
+            ]
+        );
+        for option in &options {
+            assert_eq!(
+                option.native_response,
+                approval_result(&request, &option.option_id).unwrap()
+            );
+        }
         assert_eq!(
             approval_result(&request, "always").expect("approval should map"),
             json!({"outcome": {"outcome": "selected", "optionId": "always"}})

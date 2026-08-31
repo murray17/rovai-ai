@@ -137,6 +137,7 @@ pub fn classify_evidence_with_version(
                 | "runtime.plan"
                 | "runtime.plan.delta"
                 | "runtime.diagnostic"
+                | "runtime.fast.observed"
                 | "runtime.file_changes.snapshot"
         );
     let (mut activity_domain, mut semantic_kind, runtime_classification_is_structured) =

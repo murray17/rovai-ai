@@ -126,9 +126,10 @@ READ_WRITE/NOFOLLOW/NO_MUTEX 打开且不带 CREATE。任何写入前，在同�
 Unix rename 的 ctime 变化只在这条兼容路径解释，对象、长度和 mtime 仍必须匹配；普通票据保持完整严格比较。
 真实强杀覆盖切换前后两侧，也覆盖原位 reconciliation 和 126 已提交时的中断；未知对象始终阻断。
 
-主线 Pending/Fast 与渠道的 117/118 编号冲突按 [Channel/Main Schema Join v2](../contracts/channel-main-schema-join-v2.md)
-汇合：保留渠道顺序，把精确识别的旧主线 receipt 在同一原库事务内映射到 126/127，128 只在两侧 schema 全部完成后
-发布历史 `v1.39/schema 80` marker，129 再推进当前合同。旧飞书 marker collision 同样复用原链。
+主线 Pending/Fast/Fast 生命周期与渠道的 117/118/119 编号冲突按 [Channel/Main Schema Join v2](../contracts/channel-main-schema-join-v2.md)
+汇合：保留渠道顺序，把精确识别的主线 receipt 在同一原库事务内映射到 126/127/130。128/129 分别保留历史
+`v1.39/schema 80` 与 `v1.40/schema 81` marker；130 只记录已应用的Fast修复，131在完整chain和精确schema检查后
+发布当前 `v1.41/schema 82`，避免已映射130导致跳过最终封口。旧飞书 marker collision 同样复用原链。
 不能仅凭版本字符串准入，也不能为了消除编号冲突清空凭据、队列、Fast 选择或改变业务 ID。
 
 内部 trace 保留 assessment/open、reconciliation、每个实际 migration、reassessment/reopen、core_ready 的耗时和

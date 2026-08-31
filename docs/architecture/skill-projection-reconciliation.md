@@ -3,7 +3,7 @@ document_type: architecture
 architecture: skill-projection-reconciliation
 authority: skill-projection-access-and-reconciliation-boundaries
 status: accepted
-last_updated: 2026-08-21
+last_updated: 2026-08-31
 ---
 
 # Skill Projection Reconciliation Architecture
@@ -47,8 +47,9 @@ SkillExposureSnapshot (immutable start-time evidence in ContextManifest)
 
 Skill Library view 的 `managementPolicy` 来自 bundled official manifest，而不是用户可改数据库字段。
 `cli-operations` 与 `memory-stewardship` 为 `system_required`：bundled install 以 DB-only 事务恢复 enabled
-与全部十组 Assignment，命令边界拒绝修改；其余十一项 official Skill 为 `user_managed`。当前 inventory
-精确为十三项，名称和 provenance 由 ADR-0191 冻结。该策略只决定 Library desired
+与全部当前 Skill Delivery Groups 的 Assignment，命令边界拒绝修改；其余十二项 official Skill 为
+`user_managed`。当前 inventory 为十四项，名称、固定来源、默认启用值和管理策略由
+[`BUNDLED_SKILLS`](../../crates/rovai-core/src/skill.rs)统一声明。该策略只决定 Library desired
 state，不改变 projection ownership、preflight、Snapshot 或 Runtime load 证明。
 
 TRAE delivery group 的 Rovai-owned root 固定为项目 `.trae/skills`。该路径已用唯一名称/内容在
@@ -107,7 +108,15 @@ root 当作 active，或把已经完整恢复的 root 再次标为 removed。
 
 ## Bundled bootstrap 与完整性门禁
 
-Core ready 前先从 embedded bundled definitions 在内存计算 expected digest。数据库 current digest 与
+Authority ready 后，optional Skill bootstrap 先短暂持有数据库锁读取并规范化 Library metadata，
+随后在 blocking worker 中从 embedded bundled definitions 计算 expected digest，并完成所有目录检查、
+物化、哈希、fsync 和文件发布；这些文件操作不占用共享数据库锁，不阻塞 Composer Draft 或 Pending 准入。
+准备完成后重新持有短锁，核对规划时的 Skill identity、current Revision 和 version/configuration 仍未变化，
+仅提交 metadata 和 dirty 标记。整个过程由既有 subsystem initializer 串行化，Skill consumer/Runtime
+执行门禁直到 bootstrap 与必要的恢复完成后才开放。准备或提交失败保持门禁关闭；未注册的完整 Revision
+沿用成功 bootstrap 后的 orphan cleanup，不把文件存在误当作 Library 已提交。
+
+数据库 current digest 与
 文件树 paths/types/sizes/modes 全部匹配时，bootstrap 不创建 staging、不复制、不 `fsync`、不读取全文；
 只继续检查 system-required DB configuration。bundle 变化或轻量检查不匹配时才执行完整 materialize、
 digest verify 与 publish/repair。

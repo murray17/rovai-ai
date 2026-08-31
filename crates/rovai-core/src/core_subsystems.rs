@@ -253,38 +253,47 @@ impl super::Core {
             return;
         }
         if self.subsystems.begin("skills") {
-            let result = {
-                let mut database = self.database.lock().await;
-                (|| -> Result<()> {
-                    self.skill_library.initialize_storage()?;
+            let result = async {
+                let started = Instant::now();
+                let plan = {
+                    let mut database = self.database.lock().await;
                     SkillProjectionReconciler.synchronize_removed_execution_roots(
                         &mut database,
                         &parse_removed_skill_project_roots()?,
                     )?;
-                    let started = Instant::now();
-                    let bundled = self.skill_library.install_bundled_skills(&mut database)?;
-                    eprintln!(
-                        "[startup] stage=bundled_skills_ready duration_ms={} fast_path_count={} materialized_count={} repaired_count={} changed={}",
-                        started.elapsed().as_millis(),
-                        bundled.fast_path_count,
-                        bundled.materialized_count,
-                        bundled.repaired_count,
-                        bundled.changed,
-                    );
+                    self.skill_library.plan_bundled_skills(&mut database)?
+                };
+                let library = SkillLibraryService::deferred(self.skill_library.root().to_path_buf());
+                let prepared = tokio::task::spawn_blocking(move || library.prepare_bundled_skills(plan))
+                    .await
+                    .context("Bundled Skill preparation task failed")??;
+                let bundled = {
+                    let mut database = self.database.lock().await;
+                    let bundled = self.skill_library.commit_bundled_skills(&mut database, prepared)?;
                     if bundled.changed {
                         SkillProjectionReconciler
                             .mark_observed_roots_dirty(&mut database, false)?;
                     }
-                    for root in &self.startup_skill_execution_roots {
-                        SkillProjectionReconciler.reconcile_after_run_terminal(
-                            &mut database,
-                            &self.skill_library,
-                            Path::new(root),
-                        )?;
-                    }
-                    Ok(())
-                })()
-            };
+                    bundled
+                };
+                eprintln!(
+                    "[startup] stage=bundled_skills_ready duration_ms={} fast_path_count={} materialized_count={} repaired_count={} changed={}",
+                    started.elapsed().as_millis(),
+                    bundled.fast_path_count,
+                    bundled.materialized_count,
+                    bundled.repaired_count,
+                    bundled.changed,
+                );
+                for root in &self.startup_skill_execution_roots {
+                    let mut database = self.database.lock().await;
+                    SkillProjectionReconciler.reconcile_after_run_terminal(
+                        &mut database,
+                        &self.skill_library,
+                        Path::new(root),
+                    )?;
+                }
+                Ok(())
+            }.await;
             self.finish_subsystem("skills", result);
         }
         tokio::task::yield_now().await;

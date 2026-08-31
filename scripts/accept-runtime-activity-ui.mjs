@@ -430,10 +430,12 @@ try {
     && executionSidecar.chipCount === runtimes.length
     && executionSidecar.uniqueAgentIds.length === runtimes.length
     && executionSidecar.entryContract
-    && executionSidecar.verticalRows
-    && executionSidecar.fullWidthRows
-    && executionSidecar.listScrollHeight > executionSidecar.listClientHeight
-    && executionSidecar.listOverflowY === 'auto'
+    && executionSidecar.singleRow
+    && executionSidecar.compactAvatars
+    && executionSidecar.headingInline
+    && executionSidecar.listScrollWidth > executionSidecar.listClientWidth
+    && executionSidecar.listOverflowX === 'auto'
+    && executionSidecar.scrollbarWidth === 'none'
     && executionSidecar.drawerPlacement === 'inspector'
     && !executionSidecar.resizeHandle
     && executionSidecar.selectedAgentId === activeAgentId
@@ -1685,21 +1687,26 @@ async function collectExecutionSidecar(cdp) {
       entryContract: chips.every((chip) => {
         const name = chip.querySelector('.run-pulse-chip-copy strong')
         const state = chip.querySelector('.run-pulse-chip-state')
-        return chip.children.length === 3
-          && (name?.children.length ?? 0) >= 1
-          && (name?.children.length ?? 0) <= 2
+        return chip.children.length === 2
+          && !name
           && (state?.textContent?.trim() ?? '') === ''
           && Boolean(chip.getAttribute('aria-label'))
-          && Boolean(chip.getAttribute('title'))
+          && Boolean(state?.querySelector('svg'))
           && Boolean(state?.getAttribute('aria-label'))
           && Boolean([...state.classList].find((name) => name.startsWith('state-')))
       }),
-      verticalRows: rects.every((rect, index) => index === 0
-        || (Math.abs(rect.x - rects[0].x) <= 1 && rect.y > rects[index - 1].y)),
-      fullWidthRows: rects.every((rect) => list && Math.abs(rect.width - list.clientWidth) <= 4),
-      listClientHeight: list?.clientHeight ?? 0,
-      listScrollHeight: list?.scrollHeight ?? 0,
-      listOverflowY: list ? getComputedStyle(list).overflowY : null,
+      singleRow: rects.every((rect, index) => index === 0
+        || (Math.abs(rect.y - rects[0].y) <= 1 && rect.x > rects[index - 1].x)),
+      compactAvatars: rects.every((rect) => Math.abs(rect.width - 38) <= 1 && Math.abs(rect.height - 38) <= 1),
+      headingInline: (() => {
+        const title = sideDock?.querySelector('.run-pulse-title')?.getBoundingClientRect()
+        const count = sideDock?.querySelector('.run-pulse-count')?.getBoundingClientRect()
+        return Boolean(title && count && title.top < count.bottom && count.top < title.bottom)
+      })(),
+      listClientWidth: list?.clientWidth ?? 0,
+      listScrollWidth: list?.scrollWidth ?? 0,
+      listOverflowX: list ? getComputedStyle(list).overflowX : null,
+      scrollbarWidth: list ? getComputedStyle(list).scrollbarWidth : null,
       drawerPlacement: drawer?.dataset.placement ?? null,
       resizeHandle: Boolean(drawer?.querySelector('.execution-drawer-resize-handle')),
       selectedAgentId: sideDock?.querySelector('.run-pulse-chip.is-selected')?.dataset.agentId ?? null,
@@ -4323,6 +4330,9 @@ async function launchApp(port, width, height) {
     })
     await waitForExpression(cdp,
       `Boolean(window.rovai && document.querySelector('.app-shell'))`, 45_000)
+    // The bootstrap shell renders before authoritative Core requests are admitted.
+    await waitForExpression(cdp, `window.rovai.supervisor.getSnapshot()
+      .then(snapshot => snapshot.fullCoreState === 'ready')`, 45_000)
     const health = await evaluate(cdp, `window.rovai.request('health.check', {})`, true)
     assert(await realpath(health.database.path) === await realpath(databasePath),
       `Isolated App opened the wrong database: ${JSON.stringify(health.database.path)}`)
@@ -4385,15 +4395,19 @@ async function focusExecutionDrawerResizeHandle(cdp) {
 }
 
 async function mouseClickSelector(cdp, selector) {
+  await evaluate(cdp, `document.querySelector(${JSON.stringify(selector)})
+    ?.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'instant' })`)
+  // Timeline layout can settle on the following frame; measure after it moves.
+  await evaluate(cdp, 'new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))', true)
   const point = await evaluate(cdp, `(() => {
     const target = document.querySelector(${JSON.stringify(selector)})
     if (!(target instanceof HTMLElement)) return null
-    target.scrollIntoView({ block: 'center', inline: 'nearest' })
     const rect = target.getBoundingClientRect()
-    return { x: rect.left + (rect.width / 2), y: rect.top + (rect.height / 2) }
+    const x = rect.left + (rect.width / 2)
+    const y = rect.top + (rect.height / 2)
+    return target.contains(document.elementFromPoint(x, y)) ? { x, y } : null
   })()`)
-  assert(point, `Could not locate pointer target: ${selector}`)
-  await wait(80)
+  assert(point, `Could not locate an unobscured pointer target: ${selector}`)
   await cdp.send('Input.dispatchMouseEvent', {
     type: 'mouseMoved', x: point.x, y: point.y, button: 'none', buttons: 0
   })
@@ -4414,10 +4428,10 @@ async function pressKey(cdp, key, code, windowsVirtualKeyCode, nativeVirtualKeyC
 async function waitForExpression(cdp, expression, timeoutMs = 10_000) {
   const startedAt = Date.now()
   while (Date.now() - startedAt < timeoutMs) {
-    if (await evaluate(cdp, expression)) return
+    if (await evaluate(cdp, expression, true)) return
     await wait(100)
   }
-  if (await evaluate(cdp, expression)) return
+  if (await evaluate(cdp, expression, true)) return
   throw new Error(`Expression did not become true within ${timeoutMs}ms: ${expression}`)
 }
 

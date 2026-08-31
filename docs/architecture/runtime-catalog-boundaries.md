@@ -114,7 +114,8 @@ Runtime Check Manager；同 Runtime 串行、全局预算、deadline 与子进�
 
 新 Run 冻结偏好，Claude 使用一次 inline settings，Codex 使用原生单 Turn 字段。Fast 不参与 Host/Session
 兼容性，因此无需重建 Thread；不触碰用户全局设置。实际执行前复核资格，失败只停止下发覆盖，不清除
-Camp 意图。未知默认或实际状态保持未知，观察不变成 Activity/Evidence。字段合同见
+Camp 意图。模型变化仅失效资格缓存，权限变化不影响 Fast；实际绑定变化才清除覆盖。
+未知默认保持未知，实际观察仅进入当前 Run 的 Evidence/Usage，不回写 Camp 或生成 Canonical Activity。字段合同见
 [Camp Member Fast v1](../contracts/camp-member-fast-v1.md)，理由见
 [V1.34-D01](../versions/v1.34/decisions.md#v1-34-d01)。
 
