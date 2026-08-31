@@ -1888,7 +1888,7 @@ describe('channel settings service', () => {
           }
         }
         if (method === 'channels.host.tick') {
-          return { status: 'applied', code: 'channels.host.ticked', payload: { deliveries: [] } }
+          return { deliveries: [] }
         }
         return { status: 'applied', code: `${method}.applied`, payload: {} }
       })
@@ -2258,7 +2258,7 @@ describe('channel settings service', () => {
           }
         }
         if (method === 'channels.host.tick') {
-          return { status: 'applied', code: 'channels.host.ticked', payload: { deliveries: [] } }
+          return { deliveries: [] }
         }
         return { status: 'applied', code: `${method}.applied`, payload: {} }
       })
@@ -2350,21 +2350,19 @@ describe('channel settings service', () => {
         }
         if (method === 'channels.host.tick') {
           calls.push({ method, command })
+          expect(rawParams).toEqual({ workerId: expect.any(String), limit: 20 })
           if (refreshRequested) {
-            return { status: 'applied', payload: { deliveries: [], rosterRefreshes: [] } }
+            return { deliveries: [], rosterRefreshes: [] }
           }
           refreshRequested = true
           return {
-            status: 'applied',
-            payload: {
-              deliveries: [],
-              rosterRefreshes: [{
-                provider: 'feishu',
-                tenantKey: 'tenant-1',
-                chatId: 'oc_topic_group',
-                requiredRosterGeneration: 7
-              }]
-            }
+            deliveries: [],
+            rosterRefreshes: [{
+              provider: 'feishu',
+              tenantKey: 'tenant-1',
+              chatId: 'oc_topic_group',
+              requiredRosterGeneration: 7
+            }]
           }
         }
         if (method === 'channels.roster.reconcile') {
@@ -2425,9 +2423,9 @@ describe('channel settings service', () => {
           }] })
         }
         if (method === 'channels.host.tick') {
-          if (delivered) return { status: 'applied', payload: { deliveries: [] } }
+          if (delivered) return { deliveries: [] }
           delivered = true
-          return { status: 'applied', payload: { deliveries: [{
+          return { deliveries: [{
             deliveryId: 'picker-group', requestId: null, deliveryKind: 'project_selection',
             targetAppId: 'cli_a', credentialRef: 'feishu-member-a', chatId: 'oc_group',
             topicKey: '', conversationKind: 'group', attemptCount: 1,
@@ -2453,7 +2451,7 @@ describe('channel settings service', () => {
               pendingBindingId: 'rvpcb_group', expectedVersion: 2,
               externalPickerMessageId: 'om_picker_group'
             }
-          }] } }
+          }] }
         }
         if (method === 'channels.deliveries.settle') {
           settlements.push(command)
@@ -2571,7 +2569,7 @@ describe('channel settings service', () => {
           }
         }
         if (method === 'channels.host.tick') {
-          return { status: 'applied', code: 'channels.host.ticked', payload: { deliveries: [] } }
+          return { deliveries: [] }
         }
         return { status: 'applied', code: `${method}.applied`, payload: {} }
       })
@@ -2631,7 +2629,7 @@ describe('channel settings service', () => {
           })
         }
         if (method === 'channels.host.tick') {
-          return { status: 'applied', code: 'channels.host.ticked', payload: { deliveries: [] } }
+          return { deliveries: [] }
         }
         if (method === 'channels.feishu.owner.verify') {
           return {
@@ -2722,7 +2720,7 @@ describe('channel settings service', () => {
           }
         }
         if (method === 'channels.host.tick') {
-          return { status: 'applied', code: 'channels.host.ticked', payload: { deliveries: [] } }
+          return { deliveries: [] }
         }
         return { status: 'applied', code: `${method}.applied`, payload: {} }
       })
@@ -2776,32 +2774,29 @@ describe('channel settings service', () => {
           })
         }
         if (method === 'channels.host.tick') {
-          if (delivered) return { status: 'applied', payload: { deliveries: [] } }
+          if (delivered) return { deliveries: [] }
           delivered = true
           return {
-            status: 'applied',
-            payload: {
-              deliveries: [{
-                deliveryId: 'delivery-console', requestId: 'request-1',
-                deliveryKind: 'execution_console_upsert', targetAppId: 'cli_a',
-                credentialRef: 'feishu-member-a', chatId: 'oc_group', topicKey: '',
-                conversationKind: 'group', attemptCount: 1, updateMessageId,
-                recipientOpenId: 'ou_owner',
-                payload: {
-                  kind: 'execution_console_upsert', executionConsoleId: 'console-1',
-                  agentRunId: 'run-1', expectedSequence: 1
-                }
-              }, {
-                deliveryId: 'delivery-output', requestId: 'request-1',
-                deliveryKind: 'agent_output', targetAppId: 'cli_a',
-                credentialRef: 'feishu-member-a', chatId: 'oc_group', topicKey: '',
-                conversationKind: 'group', attemptCount: 1, updateMessageId: null,
-                recipientOpenId: 'ou_owner',
-                payload: { kind: 'agent_output', presentationVersion: 1, body: '这是永久正文。', mentionPrincipal: true,
-                  reply: { status: 'available', messageId: 'cm_parent', authorDisplayName: 'Murray', body: '请检查这个问题。' },
-                  memberRecipients: [{ agentId: 'agent-b', displayName: '响子', openId: 'ou_bot_b' }] }
-              }]
-            }
+            deliveries: [{
+              deliveryId: 'delivery-console', requestId: 'request-1',
+              deliveryKind: 'execution_console_upsert', targetAppId: 'cli_a',
+              credentialRef: 'feishu-member-a', chatId: 'oc_group', topicKey: '',
+              conversationKind: 'group', attemptCount: 1, updateMessageId,
+              recipientOpenId: 'ou_owner',
+              payload: {
+                kind: 'execution_console_upsert', executionConsoleId: 'console-1',
+                agentRunId: 'run-1', expectedSequence: 1
+              }
+            }, {
+              deliveryId: 'delivery-output', requestId: 'request-1',
+              deliveryKind: 'agent_output', targetAppId: 'cli_a',
+              credentialRef: 'feishu-member-a', chatId: 'oc_group', topicKey: '',
+              conversationKind: 'group', attemptCount: 1, updateMessageId: null,
+              recipientOpenId: 'ou_owner',
+              payload: { kind: 'agent_output', presentationVersion: 1, body: '这是永久正文。', mentionPrincipal: true,
+                reply: { status: 'available', messageId: 'cm_parent', authorDisplayName: 'Murray', body: '请检查这个问题。' },
+                memberRecipients: [{ agentId: 'agent-b', displayName: '响子', openId: 'ou_bot_b' }] }
+            }]
           }
         }
         if (method === 'channels.executionConsole.source') {
@@ -2902,16 +2897,16 @@ describe('channel settings service', () => {
           }] })
         }
         if (method === 'channels.host.tick') {
-          if (delivered) return { status: 'applied', payload: { deliveries: [] } }
+          if (delivered) return { deliveries: [] }
           delivered = true
-          return { status: 'applied', payload: { deliveries: [{
+          return { deliveries: [{
             deliveryId: 'delivery-recall', requestId: 'request-1',
             deliveryKind: 'execution_console_recall', targetAppId: 'cli_a',
             credentialRef: 'feishu-member-a', chatId: 'oc_group', topicKey: '',
             conversationKind: 'group', attemptCount: 1, updateMessageId: 'om_console',
             recipientOpenId: null,
             payload: { kind: 'execution_console_recall', executionConsoleId: 'console-1' }
-          }] } }
+          }] }
         }
         if (method === 'channels.deliveries.settle') {
           settlements.push(command)
@@ -2960,9 +2955,9 @@ describe('channel settings service', () => {
           }] })
         }
         if (method === 'channels.host.tick') {
-          if (delivered) return { status: 'applied', payload: { deliveries: [] } }
+          if (delivered) return { deliveries: [] }
           delivered = true
-          return { status: 'applied', payload: { deliveries: [{
+          return { deliveries: [{
             deliveryId: 'delivery-body', requestId: 'request-1', deliveryKind: 'agent_output',
             targetAppId: 'cli_a', credentialRef: 'feishu-member-a', chatId: 'oc_group',
             topicKey: '', conversationKind: 'group', attemptCount: 1, updateMessageId: null,
@@ -2978,7 +2973,7 @@ describe('channel settings service', () => {
               attachmentKind: 'image', fileName: 'result.png', size: bytes.byteLength,
               contentDigest, requiresBodyDelivery: true, ordinal: 0
             }
-          }] } }
+          }] }
         }
         if (method === 'camp.attachments.desktopOpenTarget') {
           return {

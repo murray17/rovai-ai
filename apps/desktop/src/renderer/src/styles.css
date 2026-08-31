@@ -4868,6 +4868,9 @@ button.attachment-open:disabled { cursor: wait; opacity: .76; }
 .startup-route-status h1 { margin: 0; color: var(--ink); font-size: 14px; font-weight: 680; }
 .startup-route-status p { margin: 0; color: var(--muted); font-size: 10px; line-height: 1.45; }
 .startup-route-status button { flex: 0 0 auto; margin-left: auto; }
+.startup-route-status { flex-wrap: wrap; }
+.startup-route-status > .startup-route-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-left: auto; }
+.startup-route-actions > p { flex-basis: 100%; }
 .startup-route-progress { width: 15px; height: 15px; flex: 0 0 15px; border: 2px solid color-mix(in srgb, var(--info) 24%, transparent); border-top-color: var(--info); border-radius: 50%; animation: startup-route-spin 700ms linear infinite; }
 .startup-route-loading[data-startup-status="waiting"] .startup-route-progress { border-color: var(--attention); animation: none; }
 .startup-route-error { margin: 0; padding: 9px 20px; border-bottom: 1px solid color-mix(in srgb, var(--danger) 24%, var(--line)); color: var(--danger); background: var(--danger-soft); font-size: 10px; line-height: 1.5; overflow-wrap: anywhere; }

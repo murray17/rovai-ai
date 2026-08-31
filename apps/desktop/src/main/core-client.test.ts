@@ -1,4 +1,4 @@
-import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -15,6 +15,7 @@ import {
   CoreClient,
   RovaiRequestError,
   coreProcessHomeDirectory,
+  coreStartupRetryDelay,
   coreLaunchArguments,
   desktopSkillLibraryRoot,
   runtimeCampFilesRoot,
@@ -59,6 +60,75 @@ afterEach(() => {
 })
 
 describe('CoreClient planned shutdown', () => {
+  it('admits only bounded transient authority retries, independently of the crash budget', () => {
+    const busy = { status: 'blocked' as const, authorityState: { kind: 'blocked' as const, reason: { kind: 'busy', stage: 'open' } } }
+    expect([0, 1, 2, 3].map(attempt => coreStartupRetryDelay(busy, attempt))).toEqual([250, 750, 1500, null])
+    expect(coreStartupRetryDelay({ status: 'failed', error: { code: 'authority_migration_schema_failed', message: 'SQLITE_BUSY', retryable: true, details: { stage: 'database_migration' } } }, 0)).toBe(250)
+    expect(coreStartupRetryDelay({ status: 'failed', error: { code: 'authority_recovery_failed', message: 'Requires explicit recovery', retryable: true, details: { stage: 'authority_recovery' } } }, 0)).toBeNull()
+    for (const kind of ['unknown_data_contract', 'ambiguous_authority_candidates', 'unsupported_authority_artifact', 'identity_changed', 'corrupt_or_unreadable']) {
+      expect(coreStartupRetryDelay({ ...busy, authorityState: { kind: 'blocked', reason: { kind } } }, 0)).toBeNull()
+    }
+    for (const code of ['authority_contract_changed', 'authority_migration_schema_failed']) {
+      expect(coreStartupRetryDelay({ status: 'blocked', error: { code, message: 'deterministic refusal', retryable: false, details: {} } }, 0)).toBeNull()
+    }
+  })
+
+  it.runIf(process.platform !== 'win32').each([
+    { status: 'blocked', authorityState: { kind: 'blocked', reason: { kind: 'busy', stage: 'open' } } },
+    { status: 'failed', authorityState: { kind: 'unknown' }, error: { code: 'authority_io_transient', message: 'Interrupted', retryable: true, details: { stage: 'database_admission' } } }
+  ])('exhausts startup retries without consuming crash restarts or opening authority (%j)', async refusal => {
+    useSupportedPosixHost()
+    const root = mkdtempSync(join(tmpdir(), 'rovai-core-startup-retry-'))
+    temporaryRoots.push(root)
+    const fakeCore = join(root, 'fake-core.sh')
+    writeFileSync(fakeCore, `#!/bin/sh
+printf '%s\\n' "$*" >> '${join(root, 'launches.txt')}'
+printf '%s\\n' '${JSON.stringify({ kind: 'core_startup', schemaVersion: 1, ...refusal })}'
+`)
+    chmodSync(fakeCore, 0o700)
+    process.env.ROVAI_CORE_BIN = fakeCore
+    const client = new CoreClient(root)
+    const snapshots: SupervisorSnapshot[] = []
+    client.onSnapshot(snapshot => snapshots.push(snapshot))
+    try {
+      const blocked = nextSnapshot(client, snapshot => snapshot.fullCoreState === 'blocked', 6_000)
+      client.start()
+      expect(await blocked).toMatchObject({ generation: 4, restartAttempt: 0, capabilities: { authoritativeWorkspace: false, coreRequests: false } })
+      expect(snapshots.every(snapshot => snapshot.restartAttempt === 0 && !snapshot.capabilities.authoritativeWorkspace)).toBe(true)
+      expect(snapshots.filter(snapshot => snapshot.fullCoreState === 'blocked')).toHaveLength(1)
+      expect(readFileSync(join(root, 'launches.txt'), 'utf8').trim().split('\n').map(args => args.includes('--require-existing-authority'))).toEqual([false, true, true, true])
+      // Explicit retry gets a fresh startup budget, even before refusal exit.
+      const restarting = nextSnapshot(client, snapshot => snapshot.generation === 5 && snapshot.fullCoreState === 'starting')
+      client.retryFullCore()
+      await restarting
+    } finally { client.stop() }
+  })
+  it.runIf(process.platform !== 'win32').each([
+    ['admitted', true], ['migration_required', true], ['confirmed_absent', false]
+  ] as const)('retains the %s assessment across a later preparation failure', async (kind, requiresExisting) => {
+    useSupportedPosixHost()
+    const root = mkdtempSync(join(tmpdir(), 'rovai-core-preparation-fence-'))
+    temporaryRoots.push(root)
+    const fakeCore = join(root, 'fake-core.sh')
+    writeFileSync(fakeCore, `#!/bin/sh
+printf '%s\\n' "$*" >> '${join(root, 'launches.txt')}'
+printf '%s\\n' '{"kind":"core_startup","schemaVersion":1,"status":"phase","phase":"preparing_runtime_storage","authorityState":{"kind":"${kind}"}}'
+printf '%s\\n' '{"kind":"core_startup","schemaVersion":1,"status":"failed","phase":"preparing_runtime_storage","authorityState":{"kind":"${kind}"},"error":{"code":"runtime_camp_files_root_admission_failed","message":"fixture refusal","retryable":false,"details":{"stage":"runtime_storage"}}}'
+`)
+    chmodSync(fakeCore, 0o700)
+    process.env.ROVAI_CORE_BIN = fakeCore
+    const client = new CoreClient(root)
+    try {
+      const first = nextSnapshot(client, snapshot => snapshot.fullCoreState === 'blocked')
+      client.start()
+      await first
+      const second = nextSnapshot(client, snapshot => snapshot.generation === 2 && snapshot.fullCoreState === 'blocked')
+      client.retryFullCore()
+      await second
+      expect(readFileSync(join(root, 'launches.txt'), 'utf8').trim().split('\n').map(args => args.includes('--require-existing-authority'))).toEqual([false, requiresExisting])
+    } finally { client.stop() }
+  })
+
   it('keeps an unadmitted Windows root blocked without inventing a Core path or consuming a generation', async () => {
     const client = new CoreClient(null)
     client.blockStartup({

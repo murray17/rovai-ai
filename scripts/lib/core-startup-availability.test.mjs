@@ -46,6 +46,9 @@ test('optional startup failures preserve authority RPC and can recover without r
       const core = startCore(dataDir, skillRoot, mcpPath)
       try {
         const frame = await core.ready
+        assert.ok(core.startupFrames.some(entry => entry.phase === 'preparing_runtime_storage'
+          && entry.authorityState?.kind === (process.platform === 'win32' ? 'admitted' : 'confirmed_absent')),
+        'Main receives the authority assessment before Runtime storage admission')
         assert.ok(frame.subsystems.some((entry) => entry.state === 'initializing'), 'authority ready precedes optional initialization')
         const statuses = await core.settled()
         assert.equal(statuses.find((entry) => entry.id === scenario.id)?.state, 'degraded')
@@ -108,6 +111,8 @@ test('authority recovery errors produce a retryable refusal rather than a crash 
       error.code === 'authority_recovery_failed' && error.phase === 'recovering_authority'
       && error.startupStatus === 'failed' && error.retryable === true
     )
+    assert.ok(refused.startupFrames.some(entry => entry.phase === 'preparing_runtime_storage'
+      && entry.authorityState?.kind === 'admitted'), 'a later refusal cannot erase knowledge of an existing authority')
     await refused.close()
     assert.equal(refused.process.exitCode, 0, 'deterministic refusal must not be an unexpected Core crash')
     writer = new DatabaseSync(join(dataDir, 'rovai.sqlite'))
@@ -128,13 +133,34 @@ test('authority recovery errors produce a retryable refusal rather than a crash 
   }
 })
 
-function startCore(dataDir, skillRoot, mcpPath) {
+test('a startup retry cannot initialize a disappeared authority', async () => {
+  const fixture = await realpath(await mkdtemp(join(tmpdir(), 'rovai-existing-authority-fence-')))
+  const dataDir = process.platform === 'win32'
+    ? JSON.parse(execFileSync(binary, ['--prepare-windows-data-root', join(fixture, 'formal')], { encoding: 'utf8' })).core
+    : join(fixture, 'data')
+  const core = startCore(dataDir, join(dataDir, 'managed-skill-library'), join(dataDir, 'mcp.json'), ['--require-existing-authority'])
+  try {
+    await assert.rejects(core.ready, error => error.code === 'authority_required_existing_missing' && error.retryable === false)
+    await core.close()
+    assert.equal(await lstat(join(dataDir, 'rovai.sqlite')).catch(() => null), null)
+    assert.equal(await lstat(join(dataDir, 'lumen.sqlite')).catch(() => null), null)
+    assert.equal(core.process.exitCode, 0)
+  } finally {
+    await core.close()
+    await removeEphemeralRuntimeCampFilesRoot(dataDir, { temporaryDirectory: fixture })
+    await rm(fixture, { recursive: true, force: true })
+  }
+})
+
+function startCore(dataDir, skillRoot, mcpPath, extraArgs = []) {
   const child = spawn(binary, [
     ...coreDataDirectoryArguments(dataDir),
     '--skill-library-root', skillRoot,
-    '--mcp-config-path', mcpPath
+    '--mcp-config-path', mcpPath,
+    ...extraArgs
   ], { cwd: repository, stdio: ['pipe', 'pipe', 'pipe'] })
   const pending = new Map()
+  const startupFrames = []
   let nextId = 0
   let stderr = ''
   let resolveReady
@@ -155,6 +181,7 @@ function startCore(dataDir, skillRoot, mcpPath) {
   const lines = createInterface({ input: child.stdout })
   lines.on('line', (line) => {
     const message = JSON.parse(line)
+    if (message.kind === 'core_startup') startupFrames.push(message)
     if (message.kind === 'core_startup' && message.status === 'ready') {
       clearTimeout(startupTimeout)
       resolveReady(message)
@@ -191,6 +218,7 @@ function startCore(dataDir, skillRoot, mcpPath) {
   }
   return {
     process: child,
+    startupFrames,
     ready,
     request,
     async settled() {

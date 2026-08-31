@@ -61,6 +61,28 @@ type ActiveChild = {
   token: ChildToken
   ready: boolean
   deterministicRefusal: boolean
+  startupRetryDelayMs: number | null
+}
+
+const STARTUP_RETRY_DELAYS_MS = [250, 750, 1500] as const
+
+export function coreStartupRetryDelay(
+  frame: Pick<CoreStartupWireFrame, 'status' | 'authorityState' | 'error'>,
+  attempt: number
+): number | null {
+  if (frame.status !== 'blocked' && frame.status !== 'failed') return null
+  const authority = frame.authorityState
+  const reason = authority?.kind === 'blocked' ? authority.reason : null
+  const reasonKind = reason && typeof reason === 'object' && 'kind' in reason ? reason.kind : null
+  if (authority?.kind === 'owned_by_active_core' || (reasonKind && reasonKind !== 'busy')
+    || frame.error?.code === 'authority_contract_changed') return null
+  const busy = reasonKind === 'busy'
+  // Native error classification belongs to Core, not string matching messages.
+  const details = frame.error?.details
+  const stage = details && typeof details === 'object' && 'stage' in details ? details.stage : null
+  const transient = frame.error?.retryable === true && frame.error.code.startsWith('authority_')
+    && (stage === 'database_admission' || stage === 'database_open' || stage === 'database_migration')
+  return busy || transient ? STARTUP_RETRY_DELAYS_MS[attempt] ?? null : null
 }
 
 export class RovaiRequestError extends Error implements RovaiRequestFailure {
@@ -269,6 +291,8 @@ export class CoreClient {
   #snapshot: SupervisorSnapshot = initialSupervisorSnapshot()
   #generation = 0
   #restartAttempts = 0
+  #startupRetryAttempts = 0
+  #requireExistingAuthority = false
   #restartTimer: NodeJS.Timeout | null = null
   #stableTimer: NodeJS.Timeout | null = null
   #queuedRetryGeneration: number | null = null
@@ -331,6 +355,7 @@ export class CoreClient {
       return this.getSnapshot()
     }
     this.#restartAttempts = 0
+    this.#startupRetryAttempts = 0
     this.start()
     return this.getSnapshot()
   }
@@ -392,6 +417,9 @@ export class CoreClient {
       this.#removedSkillProjectRoots,
       this.#mcpConfigPath
     )
+    // Once this Desktop has observed authority, retries/crash restarts cannot
+    // reinterpret its disappearance as a first install.
+    if (this.#requireExistingAuthority) args.push('--require-existing-authority')
     console.info('[startup] stage=core_spawn')
     const child = spawn(binary, args, {
       stdio: ['pipe', 'pipe', 'pipe'],
@@ -402,7 +430,8 @@ export class CoreClient {
       generation,
       token,
       ready: false,
-      deterministicRefusal: false
+      deterministicRefusal: false,
+      startupRetryDelayMs: null
     }
     this.#child = active
     this.#updateSnapshot({
@@ -676,8 +705,14 @@ export class CoreClient {
       )
       return
     }
+    if (frame.status === 'ready' || frame.phase === 'opening_authority' || frame.phase === 'migrating_authority'
+      || frame.authorityState?.kind === 'admitted' || frame.authorityState?.kind === 'migration_required'
+      || frame.authorityState?.kind === 'migration_failed' || coreStartupRetryDelay(frame, 0) !== null) {
+      this.#requireExistingAuthority = true
+    }
     if (frame.status === 'ready') {
       active.ready = true
+      this.#startupRetryAttempts = 0
       this.#updateSnapshot({
         generation,
         runtimeMode: 'full_core',
@@ -713,6 +748,7 @@ export class CoreClient {
     }
 
     active.deterministicRefusal = true
+    active.startupRetryDelayMs = active.ready ? null : coreStartupRetryDelay(frame, this.#startupRetryAttempts)
     const failure = frame.error
       ? structuredFailure(
           'infrastructure_failure',
@@ -726,7 +762,7 @@ export class CoreClient {
     this.#updateSnapshot({
       generation,
       runtimeMode: 'bootstrap_only',
-      fullCoreState: 'blocked',
+      fullCoreState: active.startupRetryDelayMs === null ? 'blocked' : 'starting',
       authorityState: frame.authorityState ?? { kind: 'unknown' },
       startupPhase: frame.phase ?? null,
       restartAttempt: this.#restartAttempts,
@@ -747,7 +783,7 @@ export class CoreClient {
     )
     this.#emit({
       method: 'runtime.state',
-      params: { status: 'blocked', authorityState: frame.authorityState }
+      params: { status: active.startupRetryDelayMs === null ? 'blocked' : 'starting', authorityState: frame.authorityState }
     })
   }
 
@@ -796,7 +832,14 @@ export class CoreClient {
       if (this.#queuedRetryGeneration === generation) {
         this.#queuedRetryGeneration = null
         this.#restartAttempts = 0
+        this.#startupRetryAttempts = 0
         this.start()
+      } else if (active.startupRetryDelayMs !== null) {
+        this.#startupRetryAttempts += 1
+        console.info('[startup] stage=startup_retry', { attempt: this.#startupRetryAttempts, delayMs: active.startupRetryDelayMs })
+        this.#restartTimer = setTimeout(() => {
+          if (!this.#stopping && this.#generation === generation && !this.#child) this.start()
+        }, active.startupRetryDelayMs)
       }
       return
     }

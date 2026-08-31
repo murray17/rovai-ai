@@ -5,7 +5,7 @@ use std::{
 
 use anyhow::{Context, Result};
 use chrono::{Duration, Utc};
-use rusqlite::{OptionalExtension, Transaction, params};
+use rusqlite::{OptionalExtension, Transaction, TransactionBehavior, params};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
@@ -507,8 +507,8 @@ impl DomainCommand for ReconcileFeishuGroupRosterCommand {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ChannelHostTickCommand {
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ChannelHostTickRequest {
     pub worker_id: String,
     #[serde(default = "default_delivery_claim_limit")]
     pub limit: usize,
@@ -518,9 +518,13 @@ fn default_delivery_claim_limit() -> usize {
     20
 }
 
-impl sealed::Sealed for ChannelHostTickCommand {}
-impl DomainCommand for ChannelHostTickCommand {
-    const TYPE: &'static str = "channel_host.tick";
+/// A poll response is not a durable command receipt. Outbox leases and queued
+/// request state, rather than replaying this response, own recovery.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChannelHostTickResult {
+    pub deliveries: Vec<ClaimedChannelDelivery>,
+    pub(crate) roster_refreshes: Vec<crate::message_delivery::TopicRosterRefreshRequest>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -5182,21 +5186,21 @@ impl ChannelService {
     pub fn host_tick(
         &self,
         database: &mut Database,
-        envelope: &CommandEnvelope<ChannelHostTickCommand>,
-    ) -> Result<CommandExecution> {
-        validate_nonempty(&envelope.payload.worker_id, "workerId")?;
-        if envelope.payload.limit == 0 || envelope.payload.limit > 100 {
+        actor: &ActorRef,
+        request: &ChannelHostTickRequest,
+    ) -> Result<ChannelHostTickResult> {
+        validate_nonempty(&request.worker_id, "workerId")?;
+        if request.limit == 0 || request.limit > 100 {
             anyhow::bail!("limit must be between 1 and 100");
         }
-        let provider = channel_host_provider(&envelope.actor)
+        let provider = channel_host_provider(actor)
             .context("Channel Host actor does not identify a supported provider")?;
-        self.gateway.execute(database, envelope, |transaction| {
-            if !is_channel_host(&envelope.actor) {
-                return Ok(rejected(
-                    "channel.host_required",
-                    "Only a trusted Channel Host can run the outbox pump",
-                ));
-            }
+        // Even an empty response can expire, settle or admit work. Keep all
+        // maintenance and delivery claims atomic, but never journal the poll.
+        let transaction = database
+            .connection_mut()
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let result = {
             let now = Utc::now();
             let now_text = now.to_rfc3339();
             transaction.execute(
@@ -5222,22 +5226,22 @@ impl ChannelService {
                 "#,
                 params![now_text, provider],
             )?;
-            reconcile_obsolete_project_picker_card_revision(transaction, &now_text)?;
-            reconcile_pending_project_picker_placement(transaction, &now_text)?;
-            expire_pending_project_pickers(transaction, &now_text)?;
-            decline_unattended_channel_retries(transaction, &envelope.actor, &now_text)?;
-            project_active_request_deliveries(transaction, &now_text)?;
-            settle_terminal_requests(transaction, &now_text)?;
-            promote_ready_requests(transaction, &now_text, &envelope.command_id)?;
+            reconcile_obsolete_project_picker_card_revision(&transaction, &now_text)?;
+            reconcile_pending_project_picker_placement(&transaction, &now_text)?;
+            expire_pending_project_pickers(&transaction, &now_text)?;
+            decline_unattended_channel_retries(&transaction, actor, &now_text)?;
+            project_active_request_deliveries(&transaction, &now_text)?;
+            settle_terminal_requests(&transaction, &now_text)?;
+            promote_ready_requests(&transaction, &now_text)?;
             let claims = claim_deliveries(
-                transaction,
+                &transaction,
                 provider,
-                &envelope.payload.worker_id,
-                envelope.payload.limit,
+                &request.worker_id,
+                request.limit,
                 &now,
             )?;
             let roster_refreshes = if provider == FEISHU_PROVIDER {
-                crate::message_delivery::pending_topic_roster_refreshes(transaction)?
+                crate::message_delivery::pending_topic_roster_refreshes(&transaction)?
             } else {
                 Vec::new()
             };
@@ -5259,15 +5263,13 @@ impl ChannelService {
                 "#,
                 [&retention_boundary],
             )?;
-            Ok(CommandHandlerResult::applied(
-                "channel.host.tick_completed",
-                json!({
-                    "deliveries": claims,
-                    "rosterRefreshes": roster_refreshes,
-                }),
-                None,
-            ))
-        })
+            ChannelHostTickResult {
+                deliveries: claims,
+                roster_refreshes,
+            }
+        };
+        transaction.commit()?;
+        Ok(result)
     }
 
     pub fn settle_delivery(
@@ -9032,11 +9034,7 @@ fn settle_terminal_requests(transaction: &Transaction<'_>, now: &str) -> Result<
     Ok(())
 }
 
-fn promote_ready_requests(
-    transaction: &Transaction<'_>,
-    now: &str,
-    command_id: &str,
-) -> Result<()> {
+fn promote_ready_requests(transaction: &Transaction<'_>, now: &str) -> Result<()> {
     let candidates = query_rows(
         transaction,
         r#"
@@ -9060,7 +9058,10 @@ fn promote_ready_requests(
         |row| row.get::<_, String>(0),
     )?;
     for request_id in candidates {
-        try_admit_request(transaction, &request_id, now, command_id)?;
+        // Audit causation belongs to the durable request, not a transient poll.
+        // try_admit_request appends request_id and admission, while the queued
+        // state and the same write transaction prevent a second admission.
+        try_admit_request(transaction, &request_id, now, "channel-host-maintenance")?;
     }
     Ok(())
 }
@@ -10750,6 +10751,85 @@ mod tests {
     use crate::{command::CommandResultStatus, test_support::seeded_runtime_database_owned};
 
     #[test]
+    fn host_ticks_are_ephemeral_and_reject_untrusted_or_invalid_requests() {
+        // This owner exercises the public maintenance interface against SQLite:
+        // repeated polls must not grow either command receipts or domain events.
+        let mut database = seeded_runtime_database_owned();
+        let service = ChannelService::default();
+        let request = ChannelHostTickRequest {
+            worker_id: "maintenance-test-worker".to_string(),
+            limit: 20,
+        };
+        let event_count = |database: &Database| -> i64 {
+            database
+                .connection()
+                .query_row("SELECT COUNT(*) FROM event_log", [], |row| row.get(0))
+                .unwrap()
+        };
+        let before = event_count(&database);
+        let writes_before = database.connection().total_changes();
+        for component in [
+            FEISHU_CHANNEL_HOST_COMPONENT,
+            DINGTALK_CHANNEL_HOST_COMPONENT,
+        ] {
+            let actor = ActorRef::System {
+                component_id: component.to_string(),
+            };
+            // The second poll models a repeated wake/response loss, not a replay
+            // of cached claims. With no work, neither poll may write anything.
+            for _ in 0..2 {
+                let tick = service.host_tick(&mut database, &actor, &request).unwrap();
+                assert_eq!(
+                    serde_json::to_value(tick).unwrap(),
+                    json!({
+                        "deliveries": [], "rosterRefreshes": [],
+                    })
+                );
+            }
+        }
+        for actor in [
+            ActorRef::User {
+                user_id: CURRENT_USER_ID.to_string(),
+            },
+            ActorRef::System {
+                component_id: "not-a-channel-host".to_string(),
+            },
+            ActorRef::Agent {
+                agent_id: "agent_1".to_string(),
+                source_agent_run_id: "run-1".to_string(),
+            },
+        ] {
+            assert!(service.host_tick(&mut database, &actor, &request).is_err());
+        }
+        let actor = ActorRef::System {
+            component_id: FEISHU_CHANNEL_HOST_COMPONENT.to_string(),
+        };
+        for (worker_id, limit) in [("", 20), (" ", 20), ("worker", 0), ("worker", 101)] {
+            assert!(
+                service
+                    .host_tick(
+                        &mut database,
+                        &actor,
+                        &ChannelHostTickRequest {
+                            worker_id: worker_id.to_string(),
+                            limit,
+                        }
+                    )
+                    .is_err()
+            );
+        }
+        for invalid in [
+            json!({"workerId":"worker", "commandId":"poll-id"}),
+            json!({"commandId":"poll-id", "command":{"workerId":"worker"}}),
+            json!({"workerId":"worker", "actor":{"type":"user"}}),
+        ] {
+            assert!(serde_json::from_value::<ChannelHostTickRequest>(invalid).is_err());
+        }
+        assert_eq!(event_count(&database), before);
+        assert_eq!(database.connection().total_changes(), writes_before);
+    }
+
+    #[test]
     fn feishu_output_projects_frozen_recipients_without_rewriting_camp_content() {
         // The SQL presentation seam owns recipient order/account isolation,
         // same-Camp reply excerpts and legacy unsent recovery. No Runtime or
@@ -12059,20 +12139,27 @@ mod tests {
             } else {
                 let picker_message_id = format!("om_picker_{pending_binding_id}");
                 let worker_id = format!("{command_id}-picker-worker");
-                let tick = service
-                    .host_tick(
-                        database,
-                        &provider_host_envelope(
-                            provider,
-                            &format!("{command_id}-picker-tick"),
-                            ChannelHostTickCommand {
+                let tick = serde_json::to_value(
+                    service
+                        .host_tick(
+                            database,
+                            &ActorRef::System {
+                                component_id: (if provider == DINGTALK_PROVIDER {
+                                    DINGTALK_CHANNEL_HOST_COMPONENT
+                                } else {
+                                    FEISHU_CHANNEL_HOST_COMPONENT
+                                })
+                                .to_string(),
+                            },
+                            &ChannelHostTickRequest {
                                 worker_id: worker_id.clone(),
                                 limit: 20,
                             },
-                        ),
-                    )
-                    .unwrap();
-                let picker = tick.result.payload["deliveries"]
+                        )
+                        .unwrap(),
+                )
+                .unwrap();
+                let picker = tick["deliveries"]
                     .as_array()
                     .unwrap()
                     .iter()
@@ -12702,18 +12789,21 @@ mod tests {
             )
             .unwrap();
 
-        service
-            .host_tick(
-                &mut database,
-                &dingtalk_host_envelope(
-                    "dingtalk-timeout-tick",
-                    ChannelHostTickCommand {
+        serde_json::to_value(
+            service
+                .host_tick(
+                    &mut database,
+                    &ActorRef::System {
+                        component_id: (DINGTALK_CHANNEL_HOST_COMPONENT).to_string(),
+                    },
+                    &ChannelHostTickRequest {
                         worker_id: "dingtalk-test-worker".to_string(),
                         limit: 10,
                     },
-                ),
-            )
-            .unwrap();
+                )
+                .unwrap(),
+        )
+        .unwrap();
         let terminal: (String, Option<String>) = database
             .connection()
             .query_row(
@@ -13488,26 +13578,29 @@ mod tests {
                 .unwrap();
             assert_eq!(count, 1, "{table} must be admitted atomically");
         }
-        let console_tick = service
-            .host_tick(
-                &mut database,
-                &host_envelope(
-                    "host-tick-open-console",
-                    ChannelHostTickCommand {
+        let console_tick = serde_json::to_value(
+            service
+                .host_tick(
+                    &mut database,
+                    &ActorRef::System {
+                        component_id: (FEISHU_CHANNEL_HOST_COMPONENT).to_string(),
+                    },
+                    &ChannelHostTickRequest {
                         worker_id: "channel-test-worker".to_string(),
                         limit: 20,
                     },
-                ),
-            )
-            .unwrap();
-        let console_delivery = console_tick.result.payload["deliveries"]
+                )
+                .unwrap(),
+        )
+        .unwrap();
+        let console_delivery = console_tick["deliveries"]
             .as_array()
             .unwrap()
             .iter()
             .find(|delivery| delivery["deliveryKind"] == "execution_console_upsert")
             .expect("an admitted AgentRun must open one execution console");
         assert!(
-            console_tick.result.payload["deliveries"]
+            console_tick["deliveries"]
                 .as_array()
                 .unwrap()
                 .iter()
@@ -13702,19 +13795,22 @@ mod tests {
                 ?2, ?3, 1, ?4)
         "#, params![agent_run_id, large_blob.id, large_payload.len() as i64, failed_at]).unwrap();
 
-        let tick = service
-            .host_tick(
-                &mut database,
-                &host_envelope(
-                    "host-tick-decline-channel-retry",
-                    ChannelHostTickCommand {
+        let tick = serde_json::to_value(
+            service
+                .host_tick(
+                    &mut database,
+                    &ActorRef::System {
+                        component_id: (FEISHU_CHANNEL_HOST_COMPONENT).to_string(),
+                    },
+                    &ChannelHostTickRequest {
                         worker_id: "channel-test-worker".to_string(),
                         limit: 20,
                     },
-                ),
-            )
-            .unwrap();
-        let claimed = tick.result.payload["deliveries"].as_array().unwrap();
+                )
+                .unwrap(),
+        )
+        .unwrap();
+        let claimed = tick["deliveries"].as_array().unwrap();
         assert!(claimed.iter().any(|delivery| {
             delivery["deliveryKind"] == "agent_output"
                 && delivery["payload"]["body"] == "partial channel output"
@@ -13749,19 +13845,22 @@ mod tests {
                 ],
             )
             .unwrap();
-        let sealed_tick = service
-            .host_tick(
-                &mut database,
-                &host_envelope(
-                    "host-tick-seal-channel-console",
-                    ChannelHostTickCommand {
+        let sealed_tick = serde_json::to_value(
+            service
+                .host_tick(
+                    &mut database,
+                    &ActorRef::System {
+                        component_id: (FEISHU_CHANNEL_HOST_COMPONENT).to_string(),
+                    },
+                    &ChannelHostTickRequest {
                         worker_id: "channel-test-worker".to_string(),
                         limit: 20,
                     },
-                ),
-            )
-            .unwrap();
-        let terminal_console = sealed_tick.result.payload["deliveries"]
+                )
+                .unwrap(),
+        )
+        .unwrap();
+        let terminal_console = sealed_tick["deliveries"]
             .as_array()
             .unwrap()
             .iter()
@@ -13997,20 +14096,23 @@ mod tests {
                 [&agent_run_id],
             )
             .unwrap();
-        let after_seal_tick = service
-            .host_tick(
-                &mut database,
-                &host_envelope(
-                    "host-tick-after-console-sealed",
-                    ChannelHostTickCommand {
+        let after_seal_tick = serde_json::to_value(
+            service
+                .host_tick(
+                    &mut database,
+                    &ActorRef::System {
+                        component_id: (FEISHU_CHANNEL_HOST_COMPONENT).to_string(),
+                    },
+                    &ChannelHostTickRequest {
                         worker_id: "channel-test-worker".to_string(),
                         limit: 20,
                     },
-                ),
-            )
-            .unwrap();
+                )
+                .unwrap(),
+        )
+        .unwrap();
         assert!(
-            after_seal_tick.result.payload["deliveries"]
+            after_seal_tick["deliveries"]
                 .as_array()
                 .unwrap()
                 .iter()
@@ -14063,19 +14165,22 @@ mod tests {
                 ),
             )
             .unwrap();
-        let attachment_tick = service
-            .host_tick(
-                &mut database,
-                &host_envelope(
-                    "host-tick-channel-attachment",
-                    ChannelHostTickCommand {
+        let attachment_tick = serde_json::to_value(
+            service
+                .host_tick(
+                    &mut database,
+                    &ActorRef::System {
+                        component_id: (FEISHU_CHANNEL_HOST_COMPONENT).to_string(),
+                    },
+                    &ChannelHostTickRequest {
                         worker_id: "channel-test-worker".to_string(),
                         limit: 20,
                     },
-                ),
-            )
-            .unwrap();
-        let attachment_delivery = attachment_tick.result.payload["deliveries"]
+                )
+                .unwrap(),
+        )
+        .unwrap();
+        let attachment_delivery = attachment_tick["deliveries"]
             .as_array()
             .unwrap()
             .iter()
@@ -14106,19 +14211,22 @@ mod tests {
                 ),
             )
             .unwrap();
-        let attention_tick = service
-            .host_tick(
-                &mut database,
-                &host_envelope(
-                    "host-tick-channel-attachment-attention",
-                    ChannelHostTickCommand {
+        let attention_tick = serde_json::to_value(
+            service
+                .host_tick(
+                    &mut database,
+                    &ActorRef::System {
+                        component_id: (FEISHU_CHANNEL_HOST_COMPONENT).to_string(),
+                    },
+                    &ChannelHostTickRequest {
                         worker_id: "channel-test-worker".to_string(),
                         limit: 20,
                     },
-                ),
-            )
-            .unwrap();
-        let attention_deliveries = attention_tick.result.payload["deliveries"]
+                )
+                .unwrap(),
+        )
+        .unwrap();
+        let attention_deliveries = attention_tick["deliveries"]
             .as_array()
             .unwrap()
             .iter()
@@ -14618,19 +14726,22 @@ mod tests {
         assert_eq!(author_type, "external_principal");
         assert_eq!(reply_to, None);
         assert_eq!(camp_path, project_path.to_string_lossy());
-        let outbox = service
-            .host_tick(
-                &mut database,
-                &host_envelope(
-                    "binding-outbox",
-                    ChannelHostTickCommand {
+        let outbox = serde_json::to_value(
+            service
+                .host_tick(
+                    &mut database,
+                    &ActorRef::System {
+                        component_id: (FEISHU_CHANNEL_HOST_COMPONENT).to_string(),
+                    },
+                    &ChannelHostTickRequest {
                         worker_id: "binding-worker".to_string(),
                         limit: 20,
                     },
-                ),
-            )
-            .unwrap();
-        let queue_acknowledgements = outbox.result.payload["deliveries"]
+                )
+                .unwrap(),
+        )
+        .unwrap();
+        let queue_acknowledgements = outbox["deliveries"]
             .as_array()
             .unwrap()
             .iter()
@@ -14642,7 +14753,7 @@ mod tests {
             "only the request that actually remained queued may emit a queue acknowledgement"
         );
         assert_eq!(queue_acknowledgements[0]["payload"]["status"], "queued");
-        let picker_recalls = outbox.result.payload["deliveries"]
+        let picker_recalls = outbox["deliveries"]
             .as_array()
             .unwrap()
             .iter()
@@ -14678,6 +14789,181 @@ mod tests {
             )
             .unwrap();
         assert_eq!(replay.result.code, "channel.binding.stale_card");
+
+        // The same FIFO fixture owns poll-response loss: claims remain leased,
+        // expiry is recoverable, and a later failure rolls the whole tick back.
+        let acknowledgement_id = queue_acknowledgements[0]["deliveryId"].as_str().unwrap();
+        let actor = ActorRef::System {
+            component_id: FEISHU_CHANNEL_HOST_COMPONENT.to_string(),
+        };
+        let poll = ChannelHostTickRequest {
+            worker_id: "replacement-worker".to_string(),
+            limit: 20,
+        };
+        let lease_state =
+            |database: &Database| -> (String, Option<String>, i64) {
+                database.connection().query_row(
+                "SELECT status, lease_owner, attempt_count FROM channel_delivery WHERE id = ?1",
+                [acknowledgement_id], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            ).unwrap()
+            };
+        database.connection().execute(
+            "UPDATE channel_delivery SET lease_expires_at = '2000-01-01T00:00:00Z' WHERE id = ?1",
+            [acknowledgement_id],
+        ).unwrap();
+        let before_failed_tick = lease_state(&database);
+        let fail_claim_sql =
+            "CREATE TEMP TRIGGER fail_channel_claim BEFORE UPDATE OF status ON channel_delivery
+             WHEN NEW.status = 'attempting' BEGIN SELECT RAISE(ABORT, 'fixture claim failure'); END;";
+        database.connection().execute_batch(fail_claim_sql).unwrap();
+        let error = service.host_tick(&mut database, &actor, &poll).unwrap_err();
+        assert!(error.to_string().contains("fixture claim failure"));
+        assert_eq!(
+            lease_state(&database),
+            before_failed_tick,
+            "lease expiry must roll back with the failed claim"
+        );
+        database
+            .connection()
+            .execute_batch("DROP TRIGGER fail_channel_claim")
+            .unwrap();
+
+        let recovered = service.host_tick(&mut database, &actor, &poll).unwrap();
+        let recovered_ack = recovered
+            .deliveries
+            .iter()
+            .find(|delivery| delivery.delivery_id == acknowledgement_id)
+            .expect("a lost poll response must recover the same delivery after lease expiry");
+        assert_eq!(recovered_ack.attempt_count, 2);
+        assert_eq!(recovered_ack.provider, FEISHU_PROVIDER);
+        // Keep this fixture's active lease independent of elapsed wall time.
+        database.connection().execute(
+            "UPDATE channel_delivery SET lease_expires_at = '2999-01-01T00:00:00Z' WHERE id = ?1",
+            [acknowledgement_id],
+        ).unwrap();
+        let repeated = service.host_tick(&mut database, &actor, &poll).unwrap();
+        assert!(
+            repeated
+                .deliveries
+                .iter()
+                .all(|delivery| delivery.delivery_id != acknowledgement_id)
+        );
+        let mut settlement = host_envelope(
+            "settle-recovered-ack",
+            SettleChannelDeliveryCommand {
+                delivery_id: acknowledgement_id.to_string(),
+                worker_id: "binding-worker".to_string(),
+                outcome: "sent".to_string(),
+                external_delivery_message_id: Some("om_recovered_ack".to_string()),
+                failure_code: None,
+                retryable: false,
+            },
+        );
+        let stale_worker = service.settle_delivery(&mut database, &settlement).unwrap();
+        assert_eq!(stale_worker.result.status, CommandResultStatus::Rejected);
+        settlement.command_id = "settle-recovered-ack-current-worker".to_string();
+        settlement.payload.worker_id = poll.worker_id.clone();
+        let settled = service.settle_delivery(&mut database, &settlement).unwrap();
+        assert_eq!(settled.result.status, CommandResultStatus::Applied);
+        let settled_replay = service.settle_delivery(&mut database, &settlement).unwrap();
+        assert!(
+            settled_replay.replayed,
+            "real settlement commands retain durable idempotency"
+        );
+        assert_eq!(settled_replay.result, settled.result);
+
+        let finished_at = Utc::now().to_rfc3339();
+        database.connection().execute(
+            "UPDATE agent_run SET status = 'succeeded', wait_reason = NULL, ended_at = ?1, updated_at = ?1",
+            [&finished_at],
+        ).unwrap();
+        database
+            .connection()
+            .execute(
+                "UPDATE camp_turn SET status = 'completed', ended_at = ?1, updated_at = ?1",
+                [&finished_at],
+            )
+            .unwrap();
+        // A claim failure after FIFO promotion must also roll back the new
+        // message, Turn, Run and their audit events, not only the outbox lease.
+        database.connection().execute_batch(fail_claim_sql).unwrap();
+        assert!(
+            service
+                .host_tick(&mut database, &actor, &poll)
+                .unwrap_err()
+                .to_string()
+                .contains("fixture claim failure")
+        );
+        for (table, expected) in [("camp_message", 1), ("camp_turn", 1), ("agent_run", 2)] {
+            let count = database
+                .connection()
+                .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| {
+                    row.get::<_, i64>(0)
+                })
+                .unwrap();
+            assert_eq!(
+                count, expected,
+                "{table}: failed maintenance must roll back admission"
+            );
+        }
+        database
+            .connection()
+            .execute_batch("DROP TRIGGER fail_channel_claim")
+            .unwrap();
+        // The next wake promotes the root; another must not duplicate it.
+        service.host_tick(&mut database, &actor, &poll).unwrap();
+        service.host_tick(&mut database, &actor, &poll).unwrap();
+        for (table, expected) in [("camp_message", 2), ("camp_turn", 2), ("agent_run", 3)] {
+            let count = database
+                .connection()
+                .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| {
+                    row.get::<_, i64>(0)
+                })
+                .unwrap();
+            assert_eq!(
+                count, expected,
+                "{table}: a maintenance wake must admit the next root exactly once"
+            );
+        }
+        assert_eq!(
+            database
+                .connection()
+                .query_row(
+                    "SELECT COUNT(*) FROM event_log WHERE event_type = 'camp_message.sent'",
+                    [],
+                    |row| row.get::<_, i64>(0),
+                )
+                .unwrap(),
+            2,
+            "both admitted messages retain their domain audit events"
+        );
+        assert_eq!(
+            database
+                .connection()
+                .query_row(
+                    "SELECT COUNT(*) FROM event_log event
+                 JOIN agent_run run ON event.entity_id = run.id
+                 WHERE event.event_type = 'agent_run.queued'
+                   AND run.idempotency_key LIKE 'channel-host-maintenance:%:admission:%'",
+                    [],
+                    |row| row.get::<_, i64>(0),
+                )
+                .unwrap(),
+            1,
+            "the single target of the queued message retains stable identity and its audit event"
+        );
+        assert_eq!(
+            database
+                .connection()
+                .query_row(
+                    "SELECT COUNT(*) FROM event_log WHERE command_type = 'channel_host.tick'",
+                    [],
+                    |row| row.get::<_, i64>(0),
+                )
+                .unwrap(),
+            0,
+            "even nonempty maintenance ticks have no permanent receipt"
+        );
     }
 
     #[test]
@@ -14767,19 +15053,22 @@ mod tests {
             )
             .unwrap();
 
-        let tick = service
-            .host_tick(
-                &mut database,
-                &host_envelope(
-                    "reconcile-legacy-private-picker",
-                    ChannelHostTickCommand {
+        let tick = serde_json::to_value(
+            service
+                .host_tick(
+                    &mut database,
+                    &ActorRef::System {
+                        component_id: (FEISHU_CHANNEL_HOST_COMPONENT).to_string(),
+                    },
+                    &ChannelHostTickRequest {
                         worker_id: "legacy-picker-worker".to_string(),
                         limit: 20,
                     },
-                ),
-            )
-            .unwrap();
-        let deliveries = tick.result.payload["deliveries"].as_array().unwrap();
+                )
+                .unwrap(),
+        )
+        .unwrap();
+        let deliveries = tick["deliveries"].as_array().unwrap();
         let recall = deliveries
             .iter()
             .find(|delivery| delivery["payload"]["operation"] == "recall")
@@ -14923,19 +15212,22 @@ mod tests {
             )
             .unwrap();
 
-        let first_tick = service
-            .host_tick(
-                &mut database,
-                &host_envelope(
-                    "claim-obsolete-picker-card",
-                    ChannelHostTickCommand {
+        let first_tick = serde_json::to_value(
+            service
+                .host_tick(
+                    &mut database,
+                    &ActorRef::System {
+                        component_id: (FEISHU_CHANNEL_HOST_COMPONENT).to_string(),
+                    },
+                    &ChannelHostTickRequest {
                         worker_id: "obsolete-picker-worker".to_string(),
                         limit: 20,
                     },
-                ),
-            )
-            .unwrap();
-        let obsolete_delivery_id = first_tick.result.payload["deliveries"]
+                )
+                .unwrap(),
+        )
+        .unwrap();
+        let obsolete_delivery_id = first_tick["deliveries"]
             .as_array()
             .unwrap()
             .iter()
@@ -14961,19 +15253,22 @@ mod tests {
             )
             .unwrap();
 
-        let recovery_tick = service
-            .host_tick(
-                &mut database,
-                &host_envelope(
-                    "recover-obsolete-picker-card",
-                    ChannelHostTickCommand {
+        let recovery_tick = serde_json::to_value(
+            service
+                .host_tick(
+                    &mut database,
+                    &ActorRef::System {
+                        component_id: (FEISHU_CHANNEL_HOST_COMPONENT).to_string(),
+                    },
+                    &ChannelHostTickRequest {
                         worker_id: "recovered-picker-worker".to_string(),
                         limit: 20,
                     },
-                ),
-            )
-            .unwrap();
-        let replacement = recovery_tick.result.payload["deliveries"]
+                )
+                .unwrap(),
+        )
+        .unwrap();
+        let replacement = recovery_tick["deliveries"]
             .as_array()
             .unwrap()
             .iter()
@@ -15012,20 +15307,23 @@ mod tests {
                 ),
             )
             .unwrap();
-        let no_loop_tick = service
-            .host_tick(
-                &mut database,
-                &host_envelope(
-                    "do-not-loop-current-picker-card",
-                    ChannelHostTickCommand {
+        let no_loop_tick = serde_json::to_value(
+            service
+                .host_tick(
+                    &mut database,
+                    &ActorRef::System {
+                        component_id: (FEISHU_CHANNEL_HOST_COMPONENT).to_string(),
+                    },
+                    &ChannelHostTickRequest {
                         worker_id: "current-picker-worker".to_string(),
                         limit: 20,
                     },
-                ),
-            )
-            .unwrap();
+                )
+                .unwrap(),
+        )
+        .unwrap();
         assert!(
-            no_loop_tick.result.payload["deliveries"]
+            no_loop_tick["deliveries"]
                 .as_array()
                 .unwrap()
                 .iter()
@@ -15112,19 +15410,22 @@ mod tests {
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .unwrap();
-        let first_tick = service
-            .host_tick(
-                &mut database,
-                &host_envelope(
-                    "claim-sent-obsolete-picker-card",
-                    ChannelHostTickCommand {
+        let first_tick = serde_json::to_value(
+            service
+                .host_tick(
+                    &mut database,
+                    &ActorRef::System {
+                        component_id: (FEISHU_CHANNEL_HOST_COMPONENT).to_string(),
+                    },
+                    &ChannelHostTickRequest {
                         worker_id: "sent-obsolete-picker-worker".to_string(),
                         limit: 20,
                     },
-                ),
-            )
-            .unwrap();
-        let obsolete_delivery_id = first_tick.result.payload["deliveries"]
+                )
+                .unwrap(),
+        )
+        .unwrap();
+        let obsolete_delivery_id = first_tick["deliveries"]
             .as_array()
             .unwrap()
             .iter()
@@ -15150,19 +15451,22 @@ mod tests {
             )
             .unwrap();
 
-        let recovery_tick = service
-            .host_tick(
-                &mut database,
-                &host_envelope(
-                    "update-sent-obsolete-picker-card",
-                    ChannelHostTickCommand {
+        let recovery_tick = serde_json::to_value(
+            service
+                .host_tick(
+                    &mut database,
+                    &ActorRef::System {
+                        component_id: (FEISHU_CHANNEL_HOST_COMPONENT).to_string(),
+                    },
+                    &ChannelHostTickRequest {
                         worker_id: "updated-picker-worker".to_string(),
                         limit: 20,
                     },
-                ),
-            )
-            .unwrap();
-        let replacement = recovery_tick.result.payload["deliveries"]
+                )
+                .unwrap(),
+        )
+        .unwrap();
+        let replacement = recovery_tick["deliveries"]
             .as_array()
             .unwrap()
             .iter()
@@ -15663,20 +15967,23 @@ mod tests {
             },
             "an internal Topic delivery must wait for a newer Host roster observation"
         );
-        let tick = service
-            .host_tick(
-                &mut database,
-                &host_envelope(
-                    "topic-roster-refresh-tick",
-                    ChannelHostTickCommand {
+        let tick = serde_json::to_value(
+            service
+                .host_tick(
+                    &mut database,
+                    &ActorRef::System {
+                        component_id: (FEISHU_CHANNEL_HOST_COMPONENT).to_string(),
+                    },
+                    &ChannelHostTickRequest {
                         worker_id: "topic-roster-test-host".to_string(),
                         limit: 20,
                     },
-                ),
-            )
-            .unwrap();
+                )
+                .unwrap(),
+        )
+        .unwrap();
         assert_eq!(
-            tick.result.payload["rosterRefreshes"],
+            tick["rosterRefreshes"],
             json!([{
                 "provider": "feishu",
                 "tenantKey": "tenant_1",

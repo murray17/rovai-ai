@@ -86,6 +86,7 @@ describe('DingTalk channel account connection', () => {
     try {
       await fixture.service.start()
       expect(fixture.streamStart).toHaveBeenCalledOnce()
+      await vi.waitFor(() => expect(fixture.commands).toContain('channels.dingtalk.host.tick'))
       expect(fixture.commands).not.toContain('channels.dingtalk.account.expire')
     } finally {
       await fixture.service.stop()
@@ -458,6 +459,10 @@ function completedBotFixture(options: {
       }
       const command = params.command ?? {}
       commands.push(method)
+      if (method === 'channels.dingtalk.host.tick') {
+        expect(params).toEqual({ workerId: expect.any(String), limit: 20 })
+        return { deliveries: [], rosterRefreshes: [] }
+      }
       if (method === 'channels.dingtalk.publicationIntent.storeCredential') {
         if (rejectedWrites-- > 0) return { status: 'rejected', code: 'channel_storage_fixture_failed' }
         expect(command.credentialRef).toBe(bot.credentialRef)

@@ -1904,12 +1904,15 @@ export class ChannelSettingsService {
         this.#nextRosterSweepAt = this.#now() + ROSTER_SWEEP_MS
         await this.#reconcileKnownGroupRosters()
       }
-      const tick = await this.#commandWithId('channels.host.tick', randomUUID(), {
+      const tick = await this.#dependencies.core.request<{
+        deliveries: ClaimedChannelDelivery[]
+        rosterRefreshes: TopicRosterRefreshRequest[]
+      }>('channels.host.tick', {
         workerId: HOST_WORKER_ID,
         limit: 20
       })
-      const rosterRefreshes = Array.isArray(tick.payload.rosterRefreshes)
-        ? tick.payload.rosterRefreshes as TopicRosterRefreshRequest[]
+      const rosterRefreshes = Array.isArray(tick.rosterRefreshes)
+        ? tick.rosterRefreshes
         : []
       await Promise.allSettled(rosterRefreshes.map((refresh) => {
         if (refresh.provider !== 'feishu'
@@ -1920,8 +1923,8 @@ export class ChannelSettingsService {
         }
         return this.#reconcileChatRoster(refresh.chatId, refresh.tenantKey, true)
       }))
-      const deliveries = Array.isArray(tick.payload.deliveries)
-        ? tick.payload.deliveries as ClaimedChannelDelivery[]
+      const deliveries = Array.isArray(tick.deliveries)
+        ? tick.deliveries
         : []
       for (const delivery of deliveries) await this.#deliver(delivery)
     } catch (error) {

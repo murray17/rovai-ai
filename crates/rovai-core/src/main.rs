@@ -65,7 +65,9 @@ use rovai_core::{
         executable_fingerprint as fingerprint_executable, observe_executable_file_identity,
         verify_executable_integrity,
     },
-    authority_migration::{AuthorityMigrationProgress, AuthorityMigrationRunner},
+    authority_migration::{
+        AuthorityMigrationProgress, AuthorityMigrationRunner, trace_startup_stage,
+    },
     builtin_tool_evidence_projection::{
         BUILTIN_TOOL_EVIDENCE_PROJECTION_SCHEMA_VERSION, project_builtin_tool_invocation,
     },
@@ -91,7 +93,7 @@ use rovai_core::{
     camp_open::CampOpenService,
     channel::{
         AdvanceDingTalkPublicationIntentCommand, AdvanceMemberBotPublicationIntentCommand,
-        AuthorizeChannelExecutionConsolePageCommand, ChannelHostTickCommand, ChannelService,
+        AuthorizeChannelExecutionConsolePageCommand, ChannelHostTickRequest, ChannelService,
         CommitDingTalkAccountConnectionCommand, CommitFeishuAccountConnectionCommand,
         CreateDingTalkPublicationIntentCommand, CreateMemberBotPublicationIntentCommand,
         DeleteChannelCredentialCommand, DeleteChannelDeveloperSessionCommand,
@@ -508,17 +510,17 @@ fn write_authority_block(block: &AuthorityBlock) -> Result<()> {
 }
 
 fn write_database_open_refusal(error: &DatabaseOpenError) -> Result<()> {
-    if let Some(block) = error.authority_block() {
-        return write_authority_block(block);
-    }
     write_startup_frame(
         "failed",
         None,
-        json!({ "kind": "unknown" }),
+        match error.authority_block() {
+            Some(block) => json!({ "kind": "blocked", "reason": block }),
+            None => json!({ "kind": "unknown" }),
+        },
         Some(structured_startup_error(
             error.code(),
             error.to_string(),
-            false,
+            error.retryable(),
             json!({ "stage": "database_open" }),
         )),
         None,
@@ -5465,19 +5467,17 @@ impl Core {
                 Ok(serde_json::to_value(execution.result)?)
             }
             "channels.dingtalk.host.tick" => {
-                let params: UserCommandParams<ChannelHostTickCommand> =
+                let params: ChannelHostTickRequest =
                     serde_json::from_value(request.params.clone())?;
                 let mut database = self.database.lock().await;
-                let execution = ChannelService::default().host_tick(
+                let tick = ChannelService::default().host_tick(
                     &mut database,
-                    &system_command_envelope(
-                        params.command_id,
-                        "dingtalk-channel-host",
-                        None,
-                        params.command,
-                    ),
+                    &ActorRef::System {
+                        component_id: "dingtalk-channel-host".to_string(),
+                    },
+                    &params,
                 )?;
-                Ok(serde_json::to_value(execution.result)?)
+                Ok(serde_json::to_value(tick)?)
             }
             "channels.inbound.observe" => {
                 let params: UserCommandParams<ObserveChannelInboundCommand> =
@@ -5534,19 +5534,17 @@ impl Core {
                 Ok(serde_json::to_value(execution.result)?)
             }
             "channels.host.tick" => {
-                let params: UserCommandParams<ChannelHostTickCommand> =
+                let params: ChannelHostTickRequest =
                     serde_json::from_value(request.params.clone())?;
                 let mut database = self.database.lock().await;
-                let execution = ChannelService::default().host_tick(
+                let tick = ChannelService::default().host_tick(
                     &mut database,
-                    &system_command_envelope(
-                        params.command_id,
-                        "feishu-channel-host",
-                        None,
-                        params.command,
-                    ),
+                    &ActorRef::System {
+                        component_id: "feishu-channel-host".to_string(),
+                    },
+                    &params,
                 )?;
-                Ok(serde_json::to_value(execution.result)?)
+                Ok(serde_json::to_value(tick)?)
             }
             "channels.executionConsole.source" => {
                 let params: ChannelExecutionConsoleSourceParams =
@@ -12684,7 +12682,19 @@ async fn run_core(
         None,
         None,
     )?;
-    let admission = match DatabaseAdmission::assess(&data_dir_lease) {
+    let assessment_started = Instant::now();
+    let assessment = DatabaseAdmission::assess(&data_dir_lease);
+    let source_contract = assessment
+        .as_ref()
+        .ok()
+        .and_then(AdmissionAssessment::source_contract_version)
+        .map(str::to_string);
+    trace_startup_stage(
+        "authority_assessment",
+        assessment_started.elapsed(),
+        source_contract.as_deref(),
+    );
+    let admission = match assessment {
         Ok(AdmissionAssessment::Blocked(block)) => {
             write_authority_block(&block)?;
             return Ok(());
@@ -12698,7 +12708,7 @@ async fn run_core(
                 Some(structured_startup_error(
                     &error.code,
                     error.message,
-                    false,
+                    error.retryable,
                     json!({ "stage": "database_admission" }),
                 )),
                 None,
@@ -12706,6 +12716,38 @@ async fn run_core(
             return Ok(());
         }
     };
+    if matches!(admission, AdmissionAssessment::Initializable(_))
+        && std::env::args_os().any(|argument| argument == "--require-existing-authority")
+    {
+        write_startup_frame(
+            "blocked",
+            Some("assessing_authority"),
+            json!({ "kind": "unknown" }),
+            Some(structured_startup_error(
+                "authority_required_existing_missing",
+                "Previously observed authority is absent; initialization is forbidden for this startup.",
+                false,
+                json!({ "stage": "database_admission" }),
+            )),
+            None,
+        )?;
+        return Ok(());
+    }
+    let assessed_authority = match &admission {
+        AdmissionAssessment::AdmittedExisting(_) => json!({ "kind": "admitted" }),
+        AdmissionAssessment::RequiresMigration(_) => json!({ "kind": "migration_required" }),
+        AdmissionAssessment::Initializable(_) => json!({ "kind": "confirmed_absent" }),
+        AdmissionAssessment::Blocked(_) => unreachable!("blocked assessment already returned"),
+    };
+    // Preserve knowledge of an existing authority before any later startup
+    // preparation can fail, including Runtime storage admission.
+    write_startup_frame(
+        "phase",
+        Some("preparing_runtime_storage"),
+        assessed_authority.clone(),
+        None,
+        None,
+    )?;
     #[cfg(target_os = "macos")]
     configure_user_automation_denial_root(&data_dir.join("automation-v1"))?;
     let runtime_camp_files_root = parse_runtime_camp_files_root()?;
@@ -12719,7 +12761,7 @@ async fn run_core(
             write_startup_frame(
                 "failed",
                 Some("preparing_runtime_storage"),
-                json!({ "kind": "admitted" }),
+                assessed_authority,
                 Some(structured_startup_error(
                     "runtime_camp_files_root_admission_failed",
                     format!("{error:#}"),
@@ -12742,11 +12784,18 @@ async fn run_core(
                 None,
                 None,
             )?;
-            match Database::open_admitted_with_runtime_camp_files_root(
+            let opening_started = Instant::now();
+            let opened = Database::open_admitted_with_runtime_camp_files_root(
                 *ticket,
                 attachment_views.root(),
                 attachment_views.root_identity_digest(),
-            ) {
+            );
+            trace_startup_stage(
+                "authority_open",
+                opening_started.elapsed(),
+                source_contract.as_deref(),
+            );
+            match opened {
                 Ok(database) => (database, "existing"),
                 Err(error) => {
                     write_database_open_refusal(&error)?;
@@ -13093,6 +13142,11 @@ async fn run_core(
     eprintln!(
         "[startup] stage=core_ready elapsed_ms={}",
         startup_started_at.elapsed().as_millis(),
+    );
+    trace_startup_stage(
+        "core_ready",
+        startup_started_at.elapsed(),
+        source_contract.as_deref(),
     );
     eprintln!("rovai-core {} ready", env!("CARGO_PKG_VERSION"));
     let runtime_discovery_core = core.clone();

@@ -3,7 +3,7 @@ document_type: architecture
 architecture: dingtalk-channel
 authority: dingtalk-channel-component-and-authority-boundaries
 status: accepted
-last_updated: 2026-08-30
+last_updated: 2026-08-31
 ---
 
 # 钉钉渠道架构
@@ -176,6 +176,9 @@ App 或目标已移出时 fail closed。
 不得通过宽松 parser、普通群 fallback、fabricated message success 或 Renderer 开关绕过这些 gate。
 
 ## 恢复与秘密
+
+共享 Host tick 按 [Channel Host Maintenance v1](../contracts/channel-host-maintenance-v1.md) 使用无 commandId 的直接
+维护请求，不写永久 poll 回执。原事务、FIFO、delivery lease/重试及真实结算命令的永久幂等保留，飞书与钉钉复用同一实现。
 
 Core 在同一个 SQLite 保存 account、Developer Session、Bot credential、publication intent、Bot identity、conversation/
 binding、roster、request、console 和 Outbox；Main 只保留运行期 `appKey/appSecret/robotCode` 与 Cookie jar。启动恢复所有

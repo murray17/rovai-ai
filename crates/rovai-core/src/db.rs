@@ -1,7 +1,7 @@
 use std::{
     collections::{BTreeMap, BTreeSet},
     path::{Path, PathBuf},
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 #[cfg(any(test, feature = "slow-tests"))]
@@ -25,7 +25,8 @@ use crate::camp_id::CampId;
 use crate::command::canonical_json_digest;
 use crate::context_index::{camp_message_content_digest, extract_context_references};
 use crate::database_admission::{
-    AuthorityBlock, ExistingAuthorityTicket, NewAuthorityTicket, TicketValidationError,
+    AuthorityBlock, ExistingAuthorityTicket, MigrationAuthorityOpen, NewAuthorityTicket,
+    TicketValidationError,
 };
 use crate::execution_budget::{
     CAMP_TURN_EXECUTION_BUDGET_SCHEMA_VERSION, PRODUCT_MAX_ACCEPTED_A2A,
@@ -144,8 +145,10 @@ const PENDING_CAMP_SCHEMA_OBJECTS: &[(&str, &str)] = &[
     ),
 ];
 
-pub(crate) const CURRENT_DATA_CONTRACT_VERSION: &str = "v1.39";
-pub(crate) const CURRENT_PROJECTION_SCHEMA_VERSION: i64 = 80;
+pub(crate) const CURRENT_DATA_CONTRACT_VERSION: &str = "v1.40";
+pub(crate) const CURRENT_PROJECTION_SCHEMA_VERSION: i64 = 81;
+const V129_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.39";
+const V129_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION: i64 = 80;
 const V128_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.38";
 const V128_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION: i64 = 79;
 const V125_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.37";
@@ -175,6 +178,13 @@ pub struct DatabaseOpenError {
 }
 
 impl DatabaseOpenError {
+    pub fn retryable(&self) -> bool {
+        matches!(self.authority_block(), Some(AuthorityBlock::Busy { .. }))
+            || matches!(
+                self.code,
+                "authority_sqlite_transient" | "authority_io_transient"
+            )
+    }
     pub fn code(&self) -> &'static str {
         self.code
     }
@@ -220,7 +230,11 @@ impl From<TicketValidationError> for DatabaseOpenError {
                 authority_block: Some(block),
             },
             TicketValidationError::Infrastructure(error) => Self {
-                code: "authority_ticket_infrastructure_failed",
+                code: if error.retryable {
+                    "authority_io_transient"
+                } else {
+                    "authority_ticket_infrastructure_failed"
+                },
                 message: error.message,
                 authority_block: None,
             },
@@ -413,6 +427,26 @@ pub(crate) struct DatabaseContractMarker {
     pub classifier_version: String,
 }
 
+/// Small, read-only admission evidence, not a second migration ledger. Even a
+/// receipt timestamp or DDL change must invalidate an already issued ticket.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct MigrationReceiptSnapshot {
+    schema_cookie: i64,
+    receipts: Vec<(i64, String)>,
+}
+
+impl MigrationReceiptSnapshot {
+    pub(crate) fn read(connection: &Connection) -> rusqlite::Result<Self> {
+        Ok(Self {
+            schema_cookie: connection.query_row("PRAGMA schema_version", [], |row| row.get(0))?,
+            receipts: connection
+                .prepare("SELECT version, applied_at FROM schema_migration ORDER BY version")?
+                .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
+                .collect::<rusqlite::Result<_>>()?,
+        })
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum DatabaseContractClassification {
     Current(DatabaseContractMarker),
@@ -481,6 +515,7 @@ struct CurrentMigrationState {
     v126: bool,
     v127: bool,
     v128: bool,
+    v129: bool,
 }
 
 impl CurrentMigrationState {
@@ -555,6 +590,18 @@ impl CurrentMigrationState {
             return false;
         }
         if contract == CURRENT_DATA_CONTRACT_VERSION && schema == CURRENT_PROJECTION_SCHEMA_VERSION
+        {
+            return self.v126
+                && self.v127
+                && self.v128
+                && self.v129
+                && self.admits_channel_v125(channel_classifier_admissible, through_v113);
+        }
+        if self.v129 {
+            return false;
+        }
+        if contract == V129_MIGRATION_SOURCE_DATA_CONTRACT_VERSION
+            && schema == V129_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION
         {
             return self.v126
                 && self.v127
@@ -1924,6 +1971,10 @@ fn main_camp_migration_collision(connection: &Connection) -> rusqlite::Result<Op
     if channel_objects != 0 {
         return Ok(None);
     }
+    Ok(pending_fast_schema_matches(connection, has_fast)?.then_some(has_fast))
+}
+
+fn pending_fast_schema_matches(connection: &Connection, has_fast: bool) -> rusqlite::Result<bool> {
     let normalized = |sql: &str| {
         sql.split_whitespace()
             .collect::<String>()
@@ -1947,10 +1998,10 @@ fn main_camp_migration_collision(connection: &Connection) -> rusqlite::Result<Op
                 .any(|(pending, _)| pending == name);
         if required {
             if actual.as_deref().map(&normalized) != Some(normalized(expected)) {
-                return Ok(None);
+                return Ok(false);
             }
         } else if actual.is_some() {
-            return Ok(None);
+            return Ok(false);
         }
     }
     let binding_columns: i64 = connection.query_row(
@@ -1964,10 +2015,33 @@ fn main_camp_migration_collision(connection: &Connection) -> rusqlite::Result<Op
         [],
         |row| row.get(0),
     )?;
-    if binding_columns != i64::from(has_fast) || tier_columns != i64::from(has_fast) {
-        return Ok(None);
+    Ok(binding_columns == i64::from(has_fast) && tier_columns == i64::from(has_fast))
+}
+
+/// Metadata-only checks for the joined schema; never read historical business
+/// rows or turn ordinary upgrades into whole-database integrity diagnostics.
+fn validate_joined_channel_schema(connection: &Connection) -> Result<()> {
+    if !pending_fast_schema_matches(connection, true)? {
+        anyhow::bail!("joined schema is missing the exact Pending/Fast objects or columns");
     }
-    Ok(Some(has_fast))
+    connection.prepare(
+        "SELECT terminal_snapshot_json, latest_sequence FROM channel_execution_console LIMIT 0",
+    )?;
+    connection
+        .prepare("SELECT provider, remote_app_id, payload_json FROM channel_credentials LIMIT 0")?;
+    connection.prepare(
+        "SELECT provider, account_id, session_json FROM channel_developer_sessions LIMIT 0",
+    )?;
+    let sealed_guard: bool = connection.query_row(
+        "SELECT EXISTS(SELECT 1 FROM sqlite_schema WHERE type = 'trigger'
+         AND name = 'channel_execution_console_snapshot_immutable')",
+        [],
+        |row| row.get(0),
+    )?;
+    if !sealed_guard {
+        anyhow::bail!("joined schema is missing the sealed snapshot guard");
+    }
+    Ok(())
 }
 
 fn connection_has_legacy_feishu_migration_collision(
@@ -2160,7 +2234,7 @@ fn connection_has_current_data_contract(connection: &Connection) -> rusqlite::Re
         SELECT contract_version = ?1
                AND projection_schema_version = ?2
                AND classifier_version = ?3
-               AND EXISTS(SELECT 1 FROM schema_migration WHERE version = 128)
+               AND EXISTS(SELECT 1 FROM schema_migration WHERE version = 129)
         FROM rovai_data_contract
         WHERE singleton = 1
         "#,
@@ -2236,7 +2310,8 @@ fn load_current_migration_state(
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 125),
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 126),
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 127),
-               EXISTS(SELECT 1 FROM schema_migration WHERE version = 128)
+               EXISTS(SELECT 1 FROM schema_migration WHERE version = 128),
+               EXISTS(SELECT 1 FROM schema_migration WHERE version = 129)
         "#,
         [],
         |row| {
@@ -2300,6 +2375,7 @@ fn load_current_migration_state(
                 v126: row.get(56)?,
                 v127: row.get(57)?,
                 v128: row.get(58)?,
+                v129: row.get(59)?,
             })
         },
     )
@@ -2932,6 +3008,9 @@ fn database_sqlite_open_error(
             authority_block: Some(Box::new(AuthorityBlock::Busy { stage })),
         };
     }
+    if crate::database_admission::sqlite_error_is_transient(&error) {
+        return DatabaseOpenError::operation("authority_sqlite_transient", operation, path, error);
+    }
     DatabaseOpenError::operation(code, operation, path, error)
 }
 
@@ -2962,8 +3041,70 @@ fn configure_runtime_connection(
         });
     }
     connection
-        .execute_batch("PRAGMA foreign_keys = ON; PRAGMA synchronous = NORMAL;")
+        .execute_batch(
+            "PRAGMA foreign_keys = ON; PRAGMA synchronous = NORMAL; PRAGMA busy_timeout = 5000;",
+        )
         .map_err(map_error)
+}
+
+/// Table rebuilds temporarily disable FK enforcement. Validate only their local
+/// write set and inbound FK dependents, before the same transaction commits its
+/// receipt. Schema metadata discovery does not scan unaffected historical rows.
+fn validate_migration_foreign_keys(transaction: &Transaction<'_>, tables: &[&str]) -> Result<()> {
+    let mut affected = tables
+        .iter()
+        .map(|table| (*table).to_string())
+        .collect::<BTreeSet<_>>();
+    let mut statement = transaction.prepare(
+        "SELECT child.name, fk.\"table\" FROM sqlite_schema AS child
+         JOIN pragma_foreign_key_list(child.name) AS fk WHERE child.type = 'table'",
+    )?;
+    for relation in statement.query_map([], |row| {
+        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+    })? {
+        let (child, parent) = relation?;
+        if tables
+            .iter()
+            .any(|table| parent.eq_ignore_ascii_case(table))
+        {
+            affected.insert(child);
+        }
+    }
+    for table in &affected {
+        if !transaction.query_row(
+            "SELECT EXISTS(SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = ?1)",
+            [table],
+            |row| row.get::<_, bool>(0),
+        )? {
+            continue;
+        }
+        let violation = transaction
+            .query_row(
+                "SELECT \"table\", rowid FROM pragma_foreign_key_check(?1) LIMIT 1",
+                [table],
+                |row| Ok((row.get::<_, String>(0)?, row.get::<_, Option<i64>>(1)?)),
+            )
+            .optional()?;
+        if let Some((table, row)) = violation {
+            anyhow::bail!("migration would leave a foreign-key violation in {table} row {row:?}");
+        }
+    }
+    Ok(())
+}
+
+fn add_migration_column_if_missing(
+    transaction: &Transaction<'_>,
+    table: &str,
+    column: &str,
+    definition: &str,
+) -> Result<()> {
+    if !table_columns(transaction, table)?
+        .iter()
+        .any(|name| name == column)
+    {
+        transaction.execute(&format!("ALTER TABLE {table} ADD COLUMN {definition}"), [])?;
+    }
+    Ok(())
 }
 
 fn finalize_staged_authority(
@@ -3005,6 +3146,7 @@ fn finalize_staged_authority(
     Ok(())
 }
 
+#[cfg(test)]
 fn validate_staged_authority(
     connection: &Connection,
     path: &Path,
@@ -3375,6 +3517,84 @@ impl Database {
         })
     }
 
+    /// Consumes no caller path: the only authority is the lease-bound ticket.
+    /// All validation precedes WAL configuration or application writes.
+    pub(crate) fn migrate_admitted_authority(
+        open: &MigrationAuthorityOpen<'_>,
+        runtime_camp_files_root: &Path,
+        runtime_camp_files_root_identity_digest: &str,
+        progress: &mut dyn FnMut(&str, Duration),
+    ) -> std::result::Result<(), DatabaseMigrationError> {
+        let MigrationAuthorityOpen::Upgrade {
+            path,
+            source_contract,
+            source_receipts,
+            ..
+        } = open
+        else {
+            unreachable!("interrupted snapshots use legacy recovery")
+        };
+        let started = Instant::now();
+        let connection = (|| {
+            open.revalidate()
+                .map_err(DatabaseMigrationError::from_ticket)?;
+            let connection = open_existing_authority_connection(path)
+                .map_err(DatabaseMigrationError::from_open)?;
+            let validate = || -> rusqlite::Result<bool> {
+                let transaction = connection.unchecked_transaction()?;
+                let matches = matches!(
+                    classify_database_contract(&transaction)?,
+                    DatabaseContractClassification::SupportedMigrationSource(ref marker) if marker == source_contract
+                ) && MigrationReceiptSnapshot::read(&transaction)?
+                    == *source_receipts;
+                transaction.commit()?;
+                Ok(matches)
+            };
+            match validate() {
+                Ok(true) => {}
+                Err(error) if crate::database_admission::sqlite_error_is_transient(&error) => {
+                    return Err(DatabaseMigrationError::from_sqlite(
+                        "authority_source_probe_failed",
+                        error,
+                    ));
+                }
+                Ok(false) | Err(_) => {
+                    return Err(DatabaseMigrationError::from_open(
+                        DatabaseOpenError::contract_changed(path),
+                    ));
+                }
+            }
+            open.revalidate()
+                .map_err(DatabaseMigrationError::from_ticket)?;
+            crate::monitoring::register_monitoring_sql_functions(&connection)
+                .map_err(DatabaseMigrationError::from_migration)?;
+            register_runtime_camp_files_functions(
+                &connection,
+                runtime_camp_files_root,
+                runtime_camp_files_root_identity_digest,
+            )
+            .map_err(DatabaseMigrationError::from_migration)?;
+            Ok(connection)
+        })();
+        progress("authority_open", started.elapsed());
+        let mut database = Self {
+            connection: connection?,
+            path: path.clone(),
+            runtime_camp_files_root: runtime_camp_files_root.to_path_buf(),
+            runtime_camp_files_root_identity_digest: runtime_camp_files_root_identity_digest
+                .to_string(),
+        };
+        database
+            .migrate_with_progress(false, progress)
+            .map_err(DatabaseMigrationError::from_migration)?;
+        validate_joined_channel_schema(database.connection())
+            .map_err(DatabaseMigrationError::from_migration)?;
+        // The connection closes normally. SQLite owns WAL/checkpoint recovery;
+        // never detach, copy, delete or replace authority files here.
+        Ok(())
+    }
+
+    #[cfg(test)]
     pub(crate) fn migrate_staged_authority_copy(
         path: &Path,
         runtime_camp_files_root: &Path,
@@ -3996,9 +4216,37 @@ impl Database {
     }
 
     fn migrate(&mut self, fresh_database: bool) -> Result<()> {
+        self.migrate_with_progress(fresh_database, &mut |_, _| {})
+    }
+
+    fn migrate_with_progress(
+        &mut self,
+        fresh_database: bool,
+        progress: &mut dyn FnMut(&str, Duration),
+    ) -> Result<()> {
+        // Observes existing steps only; no registry, alternate chain or outer
+        // transaction. Each migration still commits its own schema and receipt.
+        macro_rules! migration_step {
+            ($stage:expr, $operation:expr) => {{
+                let started = Instant::now();
+                let result = $operation;
+                progress($stage, started.elapsed());
+                result?
+            }};
+        }
         configure_runtime_connection(&self.connection, &self.path)?;
-        self.connection.execute_batch(
-            r#"
+        if !fresh_database {
+            migration_step!(
+                "migration_reconciliation",
+                self.reconcile_legacy_feishu_migration_collision()
+            );
+        }
+        if fresh_database {
+            let transaction = self
+                .connection
+                .transaction_with_behavior(TransactionBehavior::Immediate)?;
+            transaction.execute_batch(
+                r#"
             CREATE TABLE IF NOT EXISTS schema_migration (
                 version INTEGER PRIMARY KEY,
                 applied_at TEXT NOT NULL
@@ -4113,338 +4361,472 @@ impl Database {
             INSERT OR IGNORE INTO schema_migration(version, applied_at)
             VALUES (2, datetime('now'));
             "#,
-        )?;
+            )?;
+            transaction.commit()?;
+        }
         if self.schema_migration_applied(17)? {
             if !self.schema_migration_applied(18)? {
-                self.migrate_task_context_manifest_v18()?;
+                migration_step!("migration_18", self.migrate_task_context_manifest_v18());
             }
             if !self.schema_migration_applied(19)? {
-                self.migrate_skill_library_v19()?;
+                migration_step!("migration_19", self.migrate_skill_library_v19());
             }
             if !self.schema_migration_applied(20)? {
-                self.migrate_mcp_exposure_v20()?;
+                migration_step!("migration_20", self.migrate_mcp_exposure_v20());
             }
             if !self.schema_migration_applied(21)? {
-                self.migrate_memory_v21()?;
+                migration_step!("migration_21", self.migrate_memory_v21());
             }
             if !self.schema_migration_applied(22)? {
-                self.migrate_context_v22()?;
+                migration_step!("migration_22", self.migrate_context_v22());
             }
             if !self.schema_migration_applied(23)? {
-                self.migrate_memory_authority_v23(fresh_database)?;
+                migration_step!(
+                    "migration_23",
+                    self.migrate_memory_authority_v23(fresh_database)
+                );
             }
             if !self.schema_migration_applied(24)? {
-                self.migrate_memory_auto_policy_opt_in_v24()?;
+                migration_step!("migration_24", self.migrate_memory_auto_policy_opt_in_v24());
             }
             if !self.schema_migration_applied(25)? {
-                self.migrate_member_avatars_v25()?;
+                migration_step!("migration_25", self.migrate_member_avatars_v25());
             }
             if !self.schema_migration_applied(26)? {
-                self.migrate_member_presence_v26()?;
+                migration_step!("migration_26", self.migrate_member_presence_v26());
             }
             if !self.schema_migration_applied(27)? {
-                self.migrate_runtime_managed_permissions_v27()?;
+                migration_step!(
+                    "migration_27",
+                    self.migrate_runtime_managed_permissions_v27()
+                );
             }
             if !self.schema_migration_applied(28)? {
-                self.migrate_execution_evidence_v28()?;
+                migration_step!("migration_28", self.migrate_execution_evidence_v28());
             }
             if !self.schema_migration_applied(29)? {
-                self.migrate_automatic_partner_memory_v29()?;
+                migration_step!("migration_29", self.migrate_automatic_partner_memory_v29());
             }
             if !self.schema_migration_applied(30)? {
-                self.migrate_runtime_adapter_catalog_v30()?;
+                migration_step!("migration_30", self.migrate_runtime_adapter_catalog_v30());
             }
             if !self.schema_migration_applied(31)? {
-                self.migrate_managed_product_runtime_v31()?;
+                migration_step!("migration_31", self.migrate_managed_product_runtime_v31());
             }
             if !self.schema_migration_applied(32)? {
-                self.migrate_memory_store_v32()?;
+                migration_step!("migration_32", self.migrate_memory_store_v32());
             }
             if !self.schema_migration_applied(33)? {
-                self.migrate_context_manifest_v4_v33()?;
+                migration_step!("migration_33", self.migrate_context_manifest_v4_v33());
             }
             if !self.schema_migration_applied(34)? {
-                self.migrate_configured_camp_creation_v34()?;
+                migration_step!("migration_34", self.migrate_configured_camp_creation_v34());
             }
             if !self.schema_migration_applied(35)? {
-                self.migrate_directory_workspace_v35()?;
+                migration_step!("migration_35", self.migrate_directory_workspace_v35());
             }
             if !self.schema_migration_applied(36)? {
-                self.migrate_orphan_context_index_cleanup_v36()?;
+                migration_step!(
+                    "migration_36",
+                    self.migrate_orphan_context_index_cleanup_v36()
+                );
             }
             if !self.schema_migration_applied(37)? {
-                self.migrate_agent_authored_a2a_timeline_v37()?;
+                migration_step!(
+                    "migration_37",
+                    self.migrate_agent_authored_a2a_timeline_v37()
+                );
             }
             if !self.schema_migration_applied(38)? {
-                self.migrate_runtime_executable_identity_v38()?;
+                migration_step!(
+                    "migration_38",
+                    self.migrate_runtime_executable_identity_v38()
+                );
             }
             if !self.schema_migration_applied(39)? {
-                self.migrate_quick_chat_binding_v39()?;
+                migration_step!("migration_39", self.migrate_quick_chat_binding_v39());
             }
             if !self.schema_migration_applied(40)? {
-                self.migrate_camp_attachments_v40()?;
+                migration_step!("migration_40", self.migrate_camp_attachments_v40());
             }
             if !self.schema_migration_applied(41)? {
-                self.migrate_member_runtime_configuration_v41()?;
+                migration_step!(
+                    "migration_41",
+                    self.migrate_member_runtime_configuration_v41()
+                );
             }
             if !self.schema_migration_applied(42)? {
-                self.migrate_member_identity_v42()?;
+                migration_step!("migration_42", self.migrate_member_identity_v42());
             }
             if !self.schema_migration_applied(43)? {
-                self.migrate_in_app_notifications_v43()?;
+                migration_step!("migration_43", self.migrate_in_app_notifications_v43());
             }
             if !self.schema_migration_applied(44)? {
-                self.migrate_event_driven_member_calls_v44()?;
+                migration_step!("migration_44", self.migrate_event_driven_member_calls_v44());
             }
             if !self.schema_migration_applied(45)? {
-                self.migrate_member_call_capability_v45()?;
+                migration_step!("migration_45", self.migrate_member_call_capability_v45());
             }
             if !self.schema_migration_applied(46)? {
-                self.migrate_structured_camp_content_v46()?;
+                migration_step!("migration_46", self.migrate_structured_camp_content_v46());
             }
             if !self.schema_migration_applied(47)? {
-                self.migrate_camp_turn_execution_budget_v47()?;
+                migration_step!(
+                    "migration_47",
+                    self.migrate_camp_turn_execution_budget_v47()
+                );
             }
             if !self.schema_migration_applied(48)? {
-                self.migrate_native_session_member_identity_bootstrap_v48()?;
+                migration_step!(
+                    "migration_48",
+                    self.migrate_native_session_member_identity_bootstrap_v48()
+                );
             }
             if !self.schema_migration_applied(49)? {
-                self.migrate_skill_delivery_groups_v49()?;
+                migration_step!("migration_49", self.migrate_skill_delivery_groups_v49());
             }
             if !self.schema_migration_applied(50)? {
-                self.migrate_reserved_v50()?;
+                migration_step!("migration_50", self.migrate_reserved_v50());
             }
             if !self.schema_migration_applied(51)? {
-                self.migrate_camp_history_retrieval_v51()?;
+                migration_step!("migration_51", self.migrate_camp_history_retrieval_v51());
             }
             if !self.schema_migration_applied(52)? {
-                self.migrate_agent_identity_v52()?;
+                migration_step!("migration_52", self.migrate_agent_identity_v52());
             }
             if !self.schema_migration_applied(53)? {
-                self.migrate_canonical_runtime_activity_v53()?;
+                migration_step!(
+                    "migration_53",
+                    self.migrate_canonical_runtime_activity_v53()
+                );
             }
             if !self.schema_migration_applied(54)? {
-                self.migrate_context_formatter_v54()?;
+                migration_step!("migration_54", self.migrate_context_formatter_v54());
             }
             if !self.schema_migration_applied(55)? {
-                self.migrate_runtime_compatibility_digest_v55()?;
+                migration_step!(
+                    "migration_55",
+                    self.migrate_runtime_compatibility_digest_v55()
+                );
             }
             if !self.schema_migration_applied(56)? {
-                self.migrate_additive_mcp_clean_break_v56()?;
+                migration_step!("migration_56", self.migrate_additive_mcp_clean_break_v56());
             }
             if !self.schema_migration_applied(57)? {
-                self.migrate_member_task_camp_contract_v57()?;
+                migration_step!("migration_57", self.migrate_member_task_camp_contract_v57());
             }
             if !self.schema_migration_applied(58)? {
-                self.migrate_structured_message_clean_break_v58()?;
+                migration_step!(
+                    "migration_58",
+                    self.migrate_structured_message_clean_break_v58()
+                );
             }
             if !self.schema_migration_applied(59)? {
-                self.migrate_deterministic_public_context_v59()?;
+                migration_step!(
+                    "migration_59",
+                    self.migrate_deterministic_public_context_v59()
+                );
             }
             if !self.schema_migration_applied(60)? {
-                self.migrate_stable_collaboration_state_v60()?;
+                migration_step!(
+                    "migration_60",
+                    self.migrate_stable_collaboration_state_v60()
+                );
             }
             if !self.schema_migration_applied(61)? {
-                self.migrate_public_a2a_message_delivery_v61()?;
+                migration_step!(
+                    "migration_61",
+                    self.migrate_public_a2a_message_delivery_v61()
+                );
             }
             if !self.schema_migration_applied(62)? {
-                self.migrate_single_authority_delivery_context_v62()?;
+                migration_step!(
+                    "migration_62",
+                    self.migrate_single_authority_delivery_context_v62()
+                );
             }
             if !self.schema_migration_applied(63)? {
-                self.migrate_public_delivery_clean_break_v63()?;
+                migration_step!(
+                    "migration_63",
+                    self.migrate_public_delivery_clean_break_v63()
+                );
             }
             if !self.schema_migration_applied(64)? {
-                self.migrate_agent_cli_clean_break_v64()?;
+                migration_step!("migration_64", self.migrate_agent_cli_clean_break_v64());
             }
             if !self.schema_migration_applied(65)? {
-                self.migrate_durable_task_v2_v65()?;
+                migration_step!("migration_65", self.migrate_durable_task_v2_v65());
             }
             if !self.schema_migration_applied(66)? {
-                self.migrate_native_session_bootstrap_redelivery_v66()?;
+                migration_step!(
+                    "migration_66",
+                    self.migrate_native_session_bootstrap_redelivery_v66()
+                );
             }
             if !self.schema_migration_applied(67)? {
-                self.migrate_pending_camp_activation_v67()?;
+                migration_step!("migration_67", self.migrate_pending_camp_activation_v67());
             }
             if !self.schema_migration_applied(68)? {
-                self.migrate_collaboration_projection_v2_v68()?;
+                migration_step!(
+                    "migration_68",
+                    self.migrate_collaboration_projection_v2_v68()
+                );
             }
             if !self.schema_migration_applied(69)? {
-                self.migrate_bounded_omission_evidence_v69()?;
+                migration_step!("migration_69", self.migrate_bounded_omission_evidence_v69());
             }
             if !self.schema_migration_applied(70)? {
-                self.migrate_self_active_task_context_v70()?;
+                migration_step!("migration_70", self.migrate_self_active_task_context_v70());
             }
             if !self.schema_migration_applied(71)? {
-                self.migrate_explicit_empty_self_active_task_snapshot_v71()?;
+                migration_step!(
+                    "migration_71",
+                    self.migrate_explicit_empty_self_active_task_snapshot_v71()
+                );
             }
             if !self.schema_migration_applied(72)? {
-                self.migrate_runtime_drift_rebind_v72()?;
+                migration_step!("migration_72", self.migrate_runtime_drift_rebind_v72());
             }
             if !self.schema_migration_applied(73)? {
-                self.migrate_remove_agent_run_expected_output_v73()?;
+                migration_step!(
+                    "migration_73",
+                    self.migrate_remove_agent_run_expected_output_v73()
+                );
             }
             if !self.schema_migration_applied(74)? {
-                self.migrate_skill_default_assignments_v74()?;
+                migration_step!("migration_74", self.migrate_skill_default_assignments_v74());
             }
             if !self.schema_migration_applied(75)? {
-                self.migrate_skill_projection_access_v75()?;
+                migration_step!("migration_75", self.migrate_skill_projection_access_v75());
             }
             if !self.schema_migration_applied(76)? {
-                self.migrate_explicit_caller_return_delivery_v76()?;
+                migration_step!(
+                    "migration_76",
+                    self.migrate_explicit_caller_return_delivery_v76()
+                );
             }
             if !self.schema_migration_applied(77)? {
-                self.migrate_planned_shutdown_terminal_projection_v77()?;
+                migration_step!(
+                    "migration_77",
+                    self.migrate_planned_shutdown_terminal_projection_v77()
+                );
             }
             if !self.schema_migration_applied(78)? {
-                self.migrate_current_user_attention_v78()?;
+                migration_step!("migration_78", self.migrate_current_user_attention_v78());
             }
             if !self.schema_migration_applied(79)? {
-                self.migrate_notification_episodes_v79()?;
+                migration_step!("migration_79", self.migrate_notification_episodes_v79());
             }
             if !self.schema_migration_applied(80)? {
-                self.migrate_controlled_shutdown_fence_v80()?;
+                migration_step!("migration_80", self.migrate_controlled_shutdown_fence_v80());
             }
             if !self.schema_migration_applied(81)? {
-                self.migrate_notification_heads_up_invalidation_v81()?;
+                migration_step!(
+                    "migration_81",
+                    self.migrate_notification_heads_up_invalidation_v81()
+                );
             }
             if !self.schema_migration_applied(82)? {
-                self.migrate_memory_store_v3_v82()?;
+                migration_step!("migration_82", self.migrate_memory_store_v3_v82());
             }
             if !self.schema_migration_applied(83)? {
-                self.migrate_composer_reply_intent_v83()?;
+                migration_step!("migration_83", self.migrate_composer_reply_intent_v83());
             }
             if !self.schema_migration_applied(84)? {
-                self.migrate_exact_scope_memory_view_v84()?;
+                migration_step!("migration_84", self.migrate_exact_scope_memory_view_v84());
             }
             if !self.schema_migration_applied(85)? {
-                self.migrate_composer_recipient_continuation_v85()?;
+                migration_step!(
+                    "migration_85",
+                    self.migrate_composer_recipient_continuation_v85()
+                );
             }
             if !self.schema_migration_applied(86)? {
-                self.migrate_trae_runtime_catalog_v86()?;
+                migration_step!("migration_86", self.migrate_trae_runtime_catalog_v86());
             }
             if !self.schema_migration_applied(87)? {
-                self.migrate_durable_gather_v87()?;
+                migration_step!("migration_87", self.migrate_durable_gather_v87());
             }
             if !self.schema_migration_applied(88)? {
-                self.migrate_gather_continuation_v88()?;
+                migration_step!("migration_88", self.migrate_gather_continuation_v88());
             }
             if !self.schema_migration_applied(89)? {
-                self.migrate_compact_context_run_facts_v89()?;
+                migration_step!("migration_89", self.migrate_compact_context_run_facts_v89());
             }
             if !self.schema_migration_applied(90)? {
-                self.migrate_runtime_monitoring_v90()?;
+                migration_step!("migration_90", self.migrate_runtime_monitoring_v90());
             }
             if !self.schema_migration_applied(91)? {
-                self.migrate_current_input_skill_links_v91()?;
+                migration_step!("migration_91", self.migrate_current_input_skill_links_v91());
             }
             if !self.schema_migration_applied(92)? {
-                self.migrate_minimal_runtime_usage_v92()?;
+                migration_step!("migration_92", self.migrate_minimal_runtime_usage_v92());
             }
             if !self.schema_migration_applied(93)? {
-                self.migrate_a2a_public_only_v93()?;
+                migration_step!("migration_93", self.migrate_a2a_public_only_v93());
             }
             if !self.schema_migration_applied(94)? {
-                self.migrate_public_runtime_failures_v94()?;
+                migration_step!("migration_94", self.migrate_public_runtime_failures_v94());
             }
             if !self.schema_migration_applied(95)? {
-                self.migrate_camp_identity_v95()?;
+                migration_step!("migration_95", self.migrate_camp_identity_v95());
             }
             if !self.schema_migration_applied(96)? {
-                self.migrate_agent_run_runtime_model_v96()?;
+                migration_step!("migration_96", self.migrate_agent_run_runtime_model_v96());
             }
             if !self.schema_migration_applied(97)? {
-                self.migrate_windows_skill_projection_operation_v97()?;
+                migration_step!(
+                    "migration_97",
+                    self.migrate_windows_skill_projection_operation_v97()
+                );
             }
             if !self.schema_migration_applied(98)? {
-                self.migrate_self_authored_recent_messages_v98()?;
+                migration_step!(
+                    "migration_98",
+                    self.migrate_self_authored_recent_messages_v98()
+                );
             }
             if !self.schema_migration_applied(99)? {
-                self.migrate_camp_attachment_view_v99()?;
+                migration_step!("migration_99", self.migrate_camp_attachment_view_v99());
             }
             if !self.schema_migration_applied(100)? {
-                self.migrate_semantic_attachment_receipt_v100()?;
+                migration_step!(
+                    "migration_100",
+                    self.migrate_semantic_attachment_receipt_v100()
+                );
             }
             if !self.schema_migration_applied(101)? {
-                self.migrate_single_camp_publication_v101()?;
+                migration_step!("migration_101", self.migrate_single_camp_publication_v101());
             }
             if !self.schema_migration_applied(102)? {
-                self.migrate_unified_attachment_publication_v102()?;
+                migration_step!(
+                    "migration_102",
+                    self.migrate_unified_attachment_publication_v102()
+                );
             }
             if !self.schema_migration_applied(103)? {
-                self.migrate_trae_skill_delivery_group_v103()?;
+                migration_step!(
+                    "migration_103",
+                    self.migrate_trae_skill_delivery_group_v103()
+                );
             }
             if !self.schema_migration_applied(104)? {
-                self.migrate_cursor_runtime_catalog_v104()?;
+                migration_step!("migration_104", self.migrate_cursor_runtime_catalog_v104());
             }
             if !self.schema_migration_applied(105)? {
-                self.migrate_kimi_runtime_catalog_v105()?;
+                migration_step!("migration_105", self.migrate_kimi_runtime_catalog_v105());
             }
             if !self.schema_migration_applied(106)? {
-                self.migrate_kimi_compaction_detector_v106()?;
+                migration_step!(
+                    "migration_106",
+                    self.migrate_kimi_compaction_detector_v106()
+                );
             }
             if !self.schema_migration_applied(107)? {
-                self.migrate_grok_runtime_catalog_v107()?;
+                migration_step!("migration_107", self.migrate_grok_runtime_catalog_v107());
             }
             if !self.schema_migration_applied(108)? {
-                self.migrate_grok_compaction_detector_v108()?;
+                migration_step!(
+                    "migration_108",
+                    self.migrate_grok_compaction_detector_v108()
+                );
             }
             if !self.schema_migration_applied(109)? {
-                self.migrate_runtime_entrypoint_locator_identity_v109()?;
+                migration_step!(
+                    "migration_109",
+                    self.migrate_runtime_entrypoint_locator_identity_v109()
+                );
             }
             if !self.schema_migration_applied(110)? {
-                self.migrate_dynamic_camp_membership_v110()?;
+                migration_step!("migration_110", self.migrate_dynamic_camp_membership_v110());
             }
             if !self.schema_migration_applied(111)? {
-                self.migrate_message_delivery_zero_attempt_cancellation_v111()?;
+                migration_step!(
+                    "migration_111",
+                    self.migrate_message_delivery_zero_attempt_cancellation_v111()
+                );
             }
             if !self.schema_migration_applied(112)? {
-                self.migrate_managed_attachment_v2_v112()?;
+                migration_step!("migration_112", self.migrate_managed_attachment_v2_v112());
             }
             if !self.schema_migration_applied(113)? {
-                self.migrate_planned_shutdown_protocol_v3_v113()?;
+                migration_step!(
+                    "migration_113",
+                    self.migrate_planned_shutdown_protocol_v3_v113()
+                );
             }
             if !self.schema_migration_applied(114)? {
-                self.migrate_command_diff_projection_v114()?;
+                migration_step!("migration_114", self.migrate_command_diff_projection_v114());
             }
             if !self.schema_migration_applied(115)? {
-                self.migrate_agent_run_file_changes_v115()?;
+                migration_step!("migration_115", self.migrate_agent_run_file_changes_v115());
             }
-            self.reconcile_runtime_activity_channel_v116()?;
+            migration_step!(
+                "migration_116",
+                self.reconcile_runtime_activity_channel_v116()
+            );
             if !self.schema_migration_applied(117)? {
-                self.migrate_feishu_developer_session_v117()?;
+                migration_step!(
+                    "migration_117",
+                    self.migrate_feishu_developer_session_v117()
+                );
             }
             if !self.schema_migration_applied(118)? {
-                self.migrate_feishu_owner_camp_binding_v118()?;
+                migration_step!(
+                    "migration_118",
+                    self.migrate_feishu_owner_camp_binding_v118()
+                );
             }
             if !self.schema_migration_applied(119)? {
-                self.migrate_feishu_channel_execution_console_v119()?;
+                migration_step!(
+                    "migration_119",
+                    self.migrate_feishu_channel_execution_console_v119()
+                );
             }
             if !self.schema_migration_applied(120)? {
-                self.migrate_feishu_execution_console_view_state_v120()?;
+                migration_step!(
+                    "migration_120",
+                    self.migrate_feishu_execution_console_view_state_v120()
+                );
             }
             if !self.schema_migration_applied(121)? {
-                self.migrate_feishu_execution_console_terminal_sealing_v121()?;
+                migration_step!(
+                    "migration_121",
+                    self.migrate_feishu_execution_console_terminal_sealing_v121()
+                );
             }
             if !self.schema_migration_applied(122)? {
-                self.migrate_dingtalk_channel_v122()?;
+                migration_step!("migration_122", self.migrate_dingtalk_channel_v122());
             }
             if !self.schema_migration_applied(123)? {
-                self.migrate_dingtalk_direct_open_platform_v123()?;
+                migration_step!(
+                    "migration_123",
+                    self.migrate_dingtalk_direct_open_platform_v123()
+                );
             }
             if !self.schema_migration_applied(124)? {
-                self.migrate_channel_storage_v124()?;
+                migration_step!("migration_124", self.migrate_channel_storage_v124());
             }
             if !self.schema_migration_applied(125)? {
-                self.migrate_execution_console_snapshots_v125()?;
+                migration_step!(
+                    "migration_125",
+                    self.migrate_execution_console_snapshots_v125()
+                );
             }
             if !self.schema_migration_applied(126)? {
-                self.migrate_pending_camp_inputs_v126()?;
+                migration_step!("migration_126", self.migrate_pending_camp_inputs_v126());
             }
             if !self.schema_migration_applied(127)? {
-                self.migrate_camp_member_fast_v127()?;
+                migration_step!("migration_127", self.migrate_camp_member_fast_v127());
             }
             if !self.schema_migration_applied(128)? {
-                self.migrate_merged_channel_contract_v128()?;
+                migration_step!("migration_128", self.migrate_merged_channel_contract_v128());
+            }
+            if !self.schema_migration_applied(129)? {
+                migration_step!(
+                    "migration_129",
+                    self.migrate_execution_evidence_index_v129()
+                );
             }
             if let Err(error) =
                 crate::notification::maintain_notification_episode_retention(self.connection())
@@ -4538,345 +4920,477 @@ impl Database {
             )?;
         }
         if !self.schema_migration_applied(16)? {
-            self.migrate_runtime_adapter_catalog_v16()?;
+            migration_step!("migration_16", self.migrate_runtime_adapter_catalog_v16());
             self.connection.execute(
                 "INSERT INTO schema_migration(version, applied_at) VALUES (16, datetime('now'))",
                 [],
             )?;
         }
         if !self.schema_migration_applied(17)? {
-            self.migrate_lightweight_task_v17()?;
+            migration_step!("migration_17", self.migrate_lightweight_task_v17());
         }
         if !self.schema_migration_applied(18)? {
-            self.migrate_task_context_manifest_v18()?;
+            migration_step!("migration_18", self.migrate_task_context_manifest_v18());
         }
         if !self.schema_migration_applied(19)? {
-            self.migrate_skill_library_v19()?;
+            migration_step!("migration_19", self.migrate_skill_library_v19());
         }
         if !self.schema_migration_applied(20)? {
-            self.migrate_mcp_exposure_v20()?;
+            migration_step!("migration_20", self.migrate_mcp_exposure_v20());
         }
         if !self.schema_migration_applied(21)? {
-            self.migrate_memory_v21()?;
+            migration_step!("migration_21", self.migrate_memory_v21());
         }
         if !self.schema_migration_applied(22)? {
-            self.migrate_context_v22()?;
+            migration_step!("migration_22", self.migrate_context_v22());
         }
         if !self.schema_migration_applied(23)? {
-            self.migrate_memory_authority_v23(fresh_database)?;
+            migration_step!(
+                "migration_23",
+                self.migrate_memory_authority_v23(fresh_database)
+            );
         }
         if !self.schema_migration_applied(24)? {
-            self.migrate_memory_auto_policy_opt_in_v24()?;
+            migration_step!("migration_24", self.migrate_memory_auto_policy_opt_in_v24());
         }
         if !self.schema_migration_applied(25)? {
-            self.migrate_member_avatars_v25()?;
+            migration_step!("migration_25", self.migrate_member_avatars_v25());
         }
         if !self.schema_migration_applied(26)? {
-            self.migrate_member_presence_v26()?;
+            migration_step!("migration_26", self.migrate_member_presence_v26());
         }
         if !self.schema_migration_applied(27)? {
-            self.migrate_runtime_managed_permissions_v27()?;
+            migration_step!(
+                "migration_27",
+                self.migrate_runtime_managed_permissions_v27()
+            );
         }
         if !self.schema_migration_applied(28)? {
-            self.migrate_execution_evidence_v28()?;
+            migration_step!("migration_28", self.migrate_execution_evidence_v28());
         }
         if !self.schema_migration_applied(29)? {
-            self.migrate_automatic_partner_memory_v29()?;
+            migration_step!("migration_29", self.migrate_automatic_partner_memory_v29());
         }
         if !self.schema_migration_applied(30)? {
-            self.migrate_runtime_adapter_catalog_v30()?;
+            migration_step!("migration_30", self.migrate_runtime_adapter_catalog_v30());
         }
         if !self.schema_migration_applied(31)? {
-            self.migrate_managed_product_runtime_v31()?;
+            migration_step!("migration_31", self.migrate_managed_product_runtime_v31());
         }
         if !self.schema_migration_applied(32)? {
-            self.migrate_memory_store_v32()?;
+            migration_step!("migration_32", self.migrate_memory_store_v32());
         }
         if !self.schema_migration_applied(33)? {
-            self.migrate_context_manifest_v4_v33()?;
+            migration_step!("migration_33", self.migrate_context_manifest_v4_v33());
         }
         if !self.schema_migration_applied(34)? {
-            self.migrate_configured_camp_creation_v34()?;
+            migration_step!("migration_34", self.migrate_configured_camp_creation_v34());
         }
         if !self.schema_migration_applied(35)? {
-            self.migrate_directory_workspace_v35()?;
+            migration_step!("migration_35", self.migrate_directory_workspace_v35());
         }
         if !self.schema_migration_applied(36)? {
-            self.migrate_orphan_context_index_cleanup_v36()?;
+            migration_step!(
+                "migration_36",
+                self.migrate_orphan_context_index_cleanup_v36()
+            );
         }
         if !self.schema_migration_applied(37)? {
-            self.migrate_agent_authored_a2a_timeline_v37()?;
+            migration_step!(
+                "migration_37",
+                self.migrate_agent_authored_a2a_timeline_v37()
+            );
         }
         if !self.schema_migration_applied(38)? {
-            self.migrate_runtime_executable_identity_v38()?;
+            migration_step!(
+                "migration_38",
+                self.migrate_runtime_executable_identity_v38()
+            );
         }
         if !self.schema_migration_applied(39)? {
-            self.migrate_quick_chat_binding_v39()?;
+            migration_step!("migration_39", self.migrate_quick_chat_binding_v39());
         }
         if !self.schema_migration_applied(40)? {
-            self.migrate_camp_attachments_v40()?;
+            migration_step!("migration_40", self.migrate_camp_attachments_v40());
         }
         if !self.schema_migration_applied(41)? {
-            self.migrate_member_runtime_configuration_v41()?;
+            migration_step!(
+                "migration_41",
+                self.migrate_member_runtime_configuration_v41()
+            );
         }
         if !self.schema_migration_applied(42)? {
-            self.migrate_member_identity_v42()?;
+            migration_step!("migration_42", self.migrate_member_identity_v42());
         }
         if !self.schema_migration_applied(43)? {
-            self.migrate_in_app_notifications_v43()?;
+            migration_step!("migration_43", self.migrate_in_app_notifications_v43());
         }
         if !self.schema_migration_applied(44)? {
-            self.migrate_event_driven_member_calls_v44()?;
+            migration_step!("migration_44", self.migrate_event_driven_member_calls_v44());
         }
         if !self.schema_migration_applied(45)? {
-            self.migrate_member_call_capability_v45()?;
+            migration_step!("migration_45", self.migrate_member_call_capability_v45());
         }
         if !self.schema_migration_applied(46)? {
-            self.migrate_structured_camp_content_v46()?;
+            migration_step!("migration_46", self.migrate_structured_camp_content_v46());
         }
         if !self.schema_migration_applied(47)? {
-            self.migrate_camp_turn_execution_budget_v47()?;
+            migration_step!(
+                "migration_47",
+                self.migrate_camp_turn_execution_budget_v47()
+            );
         }
         if !self.schema_migration_applied(48)? {
-            self.migrate_native_session_member_identity_bootstrap_v48()?;
+            migration_step!(
+                "migration_48",
+                self.migrate_native_session_member_identity_bootstrap_v48()
+            );
         }
         if !self.schema_migration_applied(49)? {
-            self.migrate_skill_delivery_groups_v49()?;
+            migration_step!("migration_49", self.migrate_skill_delivery_groups_v49());
         }
         if !self.schema_migration_applied(50)? {
-            self.migrate_reserved_v50()?;
+            migration_step!("migration_50", self.migrate_reserved_v50());
         }
         if !self.schema_migration_applied(51)? {
-            self.migrate_camp_history_retrieval_v51()?;
+            migration_step!("migration_51", self.migrate_camp_history_retrieval_v51());
         }
         if !self.schema_migration_applied(52)? {
-            self.migrate_agent_identity_v52()?;
+            migration_step!("migration_52", self.migrate_agent_identity_v52());
         }
         if !self.schema_migration_applied(53)? {
-            self.migrate_canonical_runtime_activity_v53()?;
+            migration_step!(
+                "migration_53",
+                self.migrate_canonical_runtime_activity_v53()
+            );
         }
         if !self.schema_migration_applied(54)? {
-            self.migrate_context_formatter_v54()?;
+            migration_step!("migration_54", self.migrate_context_formatter_v54());
         }
         if !self.schema_migration_applied(55)? {
-            self.migrate_runtime_compatibility_digest_v55()?;
+            migration_step!(
+                "migration_55",
+                self.migrate_runtime_compatibility_digest_v55()
+            );
         }
         if !self.schema_migration_applied(56)? {
-            self.migrate_additive_mcp_clean_break_v56()?;
+            migration_step!("migration_56", self.migrate_additive_mcp_clean_break_v56());
         }
         if !self.schema_migration_applied(57)? {
-            self.migrate_member_task_camp_contract_v57()?;
+            migration_step!("migration_57", self.migrate_member_task_camp_contract_v57());
         }
         if !self.schema_migration_applied(58)? {
-            self.migrate_structured_message_clean_break_v58()?;
+            migration_step!(
+                "migration_58",
+                self.migrate_structured_message_clean_break_v58()
+            );
         }
         if !self.schema_migration_applied(59)? {
-            self.migrate_deterministic_public_context_v59()?;
+            migration_step!(
+                "migration_59",
+                self.migrate_deterministic_public_context_v59()
+            );
         }
         if !self.schema_migration_applied(60)? {
-            self.migrate_stable_collaboration_state_v60()?;
+            migration_step!(
+                "migration_60",
+                self.migrate_stable_collaboration_state_v60()
+            );
         }
         if !self.schema_migration_applied(61)? {
-            self.migrate_public_a2a_message_delivery_v61()?;
+            migration_step!(
+                "migration_61",
+                self.migrate_public_a2a_message_delivery_v61()
+            );
         }
         if !self.schema_migration_applied(62)? {
-            self.migrate_single_authority_delivery_context_v62()?;
+            migration_step!(
+                "migration_62",
+                self.migrate_single_authority_delivery_context_v62()
+            );
         }
         if !self.schema_migration_applied(63)? {
-            self.migrate_public_delivery_clean_break_v63()?;
+            migration_step!(
+                "migration_63",
+                self.migrate_public_delivery_clean_break_v63()
+            );
         }
         if !self.schema_migration_applied(64)? {
-            self.migrate_agent_cli_clean_break_v64()?;
+            migration_step!("migration_64", self.migrate_agent_cli_clean_break_v64());
         }
         if !self.schema_migration_applied(65)? {
-            self.migrate_durable_task_v2_v65()?;
+            migration_step!("migration_65", self.migrate_durable_task_v2_v65());
         }
         if !self.schema_migration_applied(66)? {
-            self.migrate_native_session_bootstrap_redelivery_v66()?;
+            migration_step!(
+                "migration_66",
+                self.migrate_native_session_bootstrap_redelivery_v66()
+            );
         }
         if !self.schema_migration_applied(67)? {
-            self.migrate_pending_camp_activation_v67()?;
+            migration_step!("migration_67", self.migrate_pending_camp_activation_v67());
         }
         if !self.schema_migration_applied(68)? {
-            self.migrate_collaboration_projection_v2_v68()?;
+            migration_step!(
+                "migration_68",
+                self.migrate_collaboration_projection_v2_v68()
+            );
         }
         if !self.schema_migration_applied(69)? {
-            self.migrate_bounded_omission_evidence_v69()?;
+            migration_step!("migration_69", self.migrate_bounded_omission_evidence_v69());
         }
         if !self.schema_migration_applied(70)? {
-            self.migrate_self_active_task_context_v70()?;
+            migration_step!("migration_70", self.migrate_self_active_task_context_v70());
         }
         if !self.schema_migration_applied(71)? {
-            self.migrate_explicit_empty_self_active_task_snapshot_v71()?;
+            migration_step!(
+                "migration_71",
+                self.migrate_explicit_empty_self_active_task_snapshot_v71()
+            );
         }
         if !self.schema_migration_applied(72)? {
-            self.migrate_runtime_drift_rebind_v72()?;
+            migration_step!("migration_72", self.migrate_runtime_drift_rebind_v72());
         }
         if !self.schema_migration_applied(73)? {
-            self.migrate_remove_agent_run_expected_output_v73()?;
+            migration_step!(
+                "migration_73",
+                self.migrate_remove_agent_run_expected_output_v73()
+            );
         }
         if !self.schema_migration_applied(74)? {
-            self.migrate_skill_default_assignments_v74()?;
+            migration_step!("migration_74", self.migrate_skill_default_assignments_v74());
         }
         if !self.schema_migration_applied(75)? {
-            self.migrate_skill_projection_access_v75()?;
+            migration_step!("migration_75", self.migrate_skill_projection_access_v75());
         }
         if !self.schema_migration_applied(76)? {
-            self.migrate_explicit_caller_return_delivery_v76()?;
+            migration_step!(
+                "migration_76",
+                self.migrate_explicit_caller_return_delivery_v76()
+            );
         }
         if !self.schema_migration_applied(77)? {
-            self.migrate_planned_shutdown_terminal_projection_v77()?;
+            migration_step!(
+                "migration_77",
+                self.migrate_planned_shutdown_terminal_projection_v77()
+            );
         }
         if !self.schema_migration_applied(78)? {
-            self.migrate_current_user_attention_v78()?;
+            migration_step!("migration_78", self.migrate_current_user_attention_v78());
         }
         if !self.schema_migration_applied(79)? {
-            self.migrate_notification_episodes_v79()?;
+            migration_step!("migration_79", self.migrate_notification_episodes_v79());
         }
         if !self.schema_migration_applied(80)? {
-            self.migrate_controlled_shutdown_fence_v80()?;
+            migration_step!("migration_80", self.migrate_controlled_shutdown_fence_v80());
         }
         if !self.schema_migration_applied(81)? {
-            self.migrate_notification_heads_up_invalidation_v81()?;
+            migration_step!(
+                "migration_81",
+                self.migrate_notification_heads_up_invalidation_v81()
+            );
         }
         if !self.schema_migration_applied(82)? {
-            self.migrate_memory_store_v3_v82()?;
+            migration_step!("migration_82", self.migrate_memory_store_v3_v82());
         }
         if !self.schema_migration_applied(83)? {
-            self.migrate_composer_reply_intent_v83()?;
+            migration_step!("migration_83", self.migrate_composer_reply_intent_v83());
         }
         if !self.schema_migration_applied(84)? {
-            self.migrate_exact_scope_memory_view_v84()?;
+            migration_step!("migration_84", self.migrate_exact_scope_memory_view_v84());
         }
         if !self.schema_migration_applied(85)? {
-            self.migrate_composer_recipient_continuation_v85()?;
+            migration_step!(
+                "migration_85",
+                self.migrate_composer_recipient_continuation_v85()
+            );
         }
         if !self.schema_migration_applied(86)? {
-            self.migrate_trae_runtime_catalog_v86()?;
+            migration_step!("migration_86", self.migrate_trae_runtime_catalog_v86());
         }
         if !self.schema_migration_applied(87)? {
-            self.migrate_durable_gather_v87()?;
+            migration_step!("migration_87", self.migrate_durable_gather_v87());
         }
         if !self.schema_migration_applied(88)? {
-            self.migrate_gather_continuation_v88()?;
+            migration_step!("migration_88", self.migrate_gather_continuation_v88());
         }
         if !self.schema_migration_applied(89)? {
-            self.migrate_compact_context_run_facts_v89()?;
+            migration_step!("migration_89", self.migrate_compact_context_run_facts_v89());
         }
         if !self.schema_migration_applied(90)? {
-            self.migrate_runtime_monitoring_v90()?;
+            migration_step!("migration_90", self.migrate_runtime_monitoring_v90());
         }
         if !self.schema_migration_applied(91)? {
-            self.migrate_current_input_skill_links_v91()?;
+            migration_step!("migration_91", self.migrate_current_input_skill_links_v91());
         }
         if !self.schema_migration_applied(92)? {
-            self.migrate_minimal_runtime_usage_v92()?;
+            migration_step!("migration_92", self.migrate_minimal_runtime_usage_v92());
         }
         if !self.schema_migration_applied(93)? {
-            self.migrate_a2a_public_only_v93()?;
+            migration_step!("migration_93", self.migrate_a2a_public_only_v93());
         }
         if !self.schema_migration_applied(94)? {
-            self.migrate_public_runtime_failures_v94()?;
+            migration_step!("migration_94", self.migrate_public_runtime_failures_v94());
         }
         if !self.schema_migration_applied(95)? {
-            self.migrate_camp_identity_v95()?;
+            migration_step!("migration_95", self.migrate_camp_identity_v95());
         }
         if !self.schema_migration_applied(96)? {
-            self.migrate_agent_run_runtime_model_v96()?;
+            migration_step!("migration_96", self.migrate_agent_run_runtime_model_v96());
         }
         if !self.schema_migration_applied(97)? {
-            self.migrate_windows_skill_projection_operation_v97()?;
+            migration_step!(
+                "migration_97",
+                self.migrate_windows_skill_projection_operation_v97()
+            );
         }
         if !self.schema_migration_applied(98)? {
-            self.migrate_self_authored_recent_messages_v98()?;
+            migration_step!(
+                "migration_98",
+                self.migrate_self_authored_recent_messages_v98()
+            );
         }
         if !self.schema_migration_applied(99)? {
-            self.migrate_camp_attachment_view_v99()?;
+            migration_step!("migration_99", self.migrate_camp_attachment_view_v99());
         }
         if !self.schema_migration_applied(100)? {
-            self.migrate_semantic_attachment_receipt_v100()?;
+            migration_step!(
+                "migration_100",
+                self.migrate_semantic_attachment_receipt_v100()
+            );
         }
         if !self.schema_migration_applied(101)? {
-            self.migrate_single_camp_publication_v101()?;
+            migration_step!("migration_101", self.migrate_single_camp_publication_v101());
         }
         if !self.schema_migration_applied(102)? {
-            self.migrate_unified_attachment_publication_v102()?;
+            migration_step!(
+                "migration_102",
+                self.migrate_unified_attachment_publication_v102()
+            );
         }
         if !self.schema_migration_applied(103)? {
-            self.migrate_trae_skill_delivery_group_v103()?;
+            migration_step!(
+                "migration_103",
+                self.migrate_trae_skill_delivery_group_v103()
+            );
         }
         if !self.schema_migration_applied(104)? {
-            self.migrate_cursor_runtime_catalog_v104()?;
+            migration_step!("migration_104", self.migrate_cursor_runtime_catalog_v104());
         }
         if !self.schema_migration_applied(105)? {
-            self.migrate_kimi_runtime_catalog_v105()?;
+            migration_step!("migration_105", self.migrate_kimi_runtime_catalog_v105());
         }
         if !self.schema_migration_applied(106)? {
-            self.migrate_kimi_compaction_detector_v106()?;
+            migration_step!(
+                "migration_106",
+                self.migrate_kimi_compaction_detector_v106()
+            );
         }
         if !self.schema_migration_applied(107)? {
-            self.migrate_grok_runtime_catalog_v107()?;
+            migration_step!("migration_107", self.migrate_grok_runtime_catalog_v107());
         }
         if !self.schema_migration_applied(108)? {
-            self.migrate_grok_compaction_detector_v108()?;
+            migration_step!(
+                "migration_108",
+                self.migrate_grok_compaction_detector_v108()
+            );
         }
         if !self.schema_migration_applied(109)? {
-            self.migrate_runtime_entrypoint_locator_identity_v109()?;
+            migration_step!(
+                "migration_109",
+                self.migrate_runtime_entrypoint_locator_identity_v109()
+            );
         }
         if !self.schema_migration_applied(110)? {
-            self.migrate_dynamic_camp_membership_v110()?;
+            migration_step!("migration_110", self.migrate_dynamic_camp_membership_v110());
         }
         if !self.schema_migration_applied(111)? {
-            self.migrate_message_delivery_zero_attempt_cancellation_v111()?;
+            migration_step!(
+                "migration_111",
+                self.migrate_message_delivery_zero_attempt_cancellation_v111()
+            );
         }
         if !self.schema_migration_applied(112)? {
-            self.migrate_managed_attachment_v2_v112()?;
+            migration_step!("migration_112", self.migrate_managed_attachment_v2_v112());
         }
         if !self.schema_migration_applied(113)? {
-            self.migrate_planned_shutdown_protocol_v3_v113()?;
+            migration_step!(
+                "migration_113",
+                self.migrate_planned_shutdown_protocol_v3_v113()
+            );
         }
         if !self.schema_migration_applied(114)? {
-            self.migrate_command_diff_projection_v114()?;
+            migration_step!("migration_114", self.migrate_command_diff_projection_v114());
         }
         if !self.schema_migration_applied(115)? {
-            self.migrate_agent_run_file_changes_v115()?;
+            migration_step!("migration_115", self.migrate_agent_run_file_changes_v115());
         }
-        self.reconcile_runtime_activity_channel_v116()?;
+        migration_step!(
+            "migration_116",
+            self.reconcile_runtime_activity_channel_v116()
+        );
         if !self.schema_migration_applied(117)? {
-            self.migrate_feishu_developer_session_v117()?;
+            migration_step!(
+                "migration_117",
+                self.migrate_feishu_developer_session_v117()
+            );
         }
         if !self.schema_migration_applied(118)? {
-            self.migrate_feishu_owner_camp_binding_v118()?;
+            migration_step!(
+                "migration_118",
+                self.migrate_feishu_owner_camp_binding_v118()
+            );
         }
         if !self.schema_migration_applied(119)? {
-            self.migrate_feishu_channel_execution_console_v119()?;
+            migration_step!(
+                "migration_119",
+                self.migrate_feishu_channel_execution_console_v119()
+            );
         }
         if !self.schema_migration_applied(120)? {
-            self.migrate_feishu_execution_console_view_state_v120()?;
+            migration_step!(
+                "migration_120",
+                self.migrate_feishu_execution_console_view_state_v120()
+            );
         }
         if !self.schema_migration_applied(121)? {
-            self.migrate_feishu_execution_console_terminal_sealing_v121()?;
+            migration_step!(
+                "migration_121",
+                self.migrate_feishu_execution_console_terminal_sealing_v121()
+            );
         }
         if !self.schema_migration_applied(122)? {
-            self.migrate_dingtalk_channel_v122()?;
+            migration_step!("migration_122", self.migrate_dingtalk_channel_v122());
         }
         if !self.schema_migration_applied(123)? {
-            self.migrate_dingtalk_direct_open_platform_v123()?;
+            migration_step!(
+                "migration_123",
+                self.migrate_dingtalk_direct_open_platform_v123()
+            );
         }
         if !self.schema_migration_applied(124)? {
-            self.migrate_channel_storage_v124()?;
+            migration_step!("migration_124", self.migrate_channel_storage_v124());
         }
         if !self.schema_migration_applied(125)? {
-            self.migrate_execution_console_snapshots_v125()?;
+            migration_step!(
+                "migration_125",
+                self.migrate_execution_console_snapshots_v125()
+            );
         }
         if !self.schema_migration_applied(126)? {
-            self.migrate_pending_camp_inputs_v126()?;
+            migration_step!("migration_126", self.migrate_pending_camp_inputs_v126());
         }
         if !self.schema_migration_applied(127)? {
-            self.migrate_camp_member_fast_v127()?;
+            migration_step!("migration_127", self.migrate_camp_member_fast_v127());
         }
         if !self.schema_migration_applied(128)? {
-            self.migrate_merged_channel_contract_v128()?;
+            migration_step!("migration_128", self.migrate_merged_channel_contract_v128());
+        }
+        if !self.schema_migration_applied(129)? {
+            migration_step!(
+                "migration_129",
+                self.migrate_execution_evidence_index_v129()
+            );
         }
         if let Err(error) =
             crate::notification::maintain_notification_episode_retention(self.connection())
@@ -9951,21 +10465,30 @@ impl Database {
                 VALUES (70, datetime('now'));
                 "#,
             )?;
+            validate_migration_foreign_keys(
+                &transaction,
+                &[
+                    "agent_run",
+                    "bootstrap_redelivery_requirement",
+                    "camp_turn",
+                    "context_manifest",
+                    "context_manifest_history_camp",
+                    "conversation",
+                    "message_delivery",
+                    "message_delivery_attempt",
+                    "native_session_bootstrap_evidence",
+                    "native_session_compaction_observation",
+                    "native_session_compaction_observer_lease",
+                    "native_session_resume_attempt",
+                    "runtime_input_delivery",
+                ],
+            )?;
             transaction.commit()?;
             Ok(())
         })();
         let foreign_keys_result = self.connection.execute_batch("PRAGMA foreign_keys = ON;");
         migration_result?;
         foreign_keys_result?;
-        if let Some((table, row_id)) = self
-            .connection
-            .query_row("PRAGMA foreign_key_check", [], |row| {
-                Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
-            })
-            .optional()?
-        {
-            anyhow::bail!("v70 migration left a foreign-key violation in {table} row {row_id}");
-        }
         Ok(())
     }
 
@@ -10001,24 +10524,27 @@ impl Database {
     }
 
     fn migrate_runtime_drift_rebind_v72(&mut self) -> Result<()> {
-        self.add_column_if_missing(
+        let transaction = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        add_migration_column_if_missing(
+            &transaction,
             "agent_run",
             "runtime_initial_reported_version",
             "runtime_initial_reported_version TEXT",
         )?;
-        self.add_column_if_missing(
+        add_migration_column_if_missing(
+            &transaction,
             "agent_run",
             "runtime_initial_executable_fingerprint",
             "runtime_initial_executable_fingerprint TEXT",
         )?;
-        self.add_column_if_missing(
+        add_migration_column_if_missing(
+            &transaction,
             "agent_run",
             "runtime_rebind_count",
             "runtime_rebind_count INTEGER NOT NULL DEFAULT 0 CHECK(runtime_rebind_count >= 0)",
         )?;
-        let transaction = self
-            .connection
-            .transaction_with_behavior(TransactionBehavior::Immediate)?;
         transaction.execute_batch(
             r#"
             UPDATE agent_run
@@ -10294,21 +10820,13 @@ impl Database {
                 VALUES (76, datetime('now'));
                 "#,
             )?;
+            validate_migration_foreign_keys(&transaction, &["event_log", "message_delivery"])?;
             transaction.commit()?;
             Ok(())
         })();
         let foreign_keys_result = self.connection.execute_batch("PRAGMA foreign_keys = ON;");
         migration_result?;
         foreign_keys_result?;
-        if let Some((table, row_id)) = self
-            .connection
-            .query_row("PRAGMA foreign_key_check", [], |row| {
-                Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
-            })
-            .optional()?
-        {
-            anyhow::bail!("v76 migration left a foreign-key violation in {table} row {row_id}");
-        }
         Ok(())
     }
 
@@ -10678,21 +11196,42 @@ impl Database {
                 VALUES (78, datetime('now'));
                 "#,
             )?;
+            validate_migration_foreign_keys(
+                &transaction,
+                &[
+                    "adapter_installation",
+                    "agent_run",
+                    "approval",
+                    "bootstrap_redelivery_requirement",
+                    "camp_message",
+                    "camp_turn",
+                    "context_manifest",
+                    "context_manifest_history_camp",
+                    "conversation",
+                    "conversation_message",
+                    "event_log",
+                    "hearth_memory_proposal",
+                    "in_app_notification",
+                    "in_app_notification_preference",
+                    "memory_revision",
+                    "message_attachment",
+                    "message_delivery",
+                    "message_delivery_attempt",
+                    "message_delivery_retry",
+                    "native_session_bootstrap_evidence",
+                    "native_session_compaction_observation",
+                    "native_session_compaction_observer_lease",
+                    "native_session_resume_attempt",
+                    "runtime_input_delivery",
+                    "task",
+                ],
+            )?;
             transaction.commit()?;
             Ok(())
         })();
         let foreign_keys_result = self.connection.execute_batch("PRAGMA foreign_keys = ON;");
         migration_result?;
         foreign_keys_result?;
-        if let Some((table, row_id)) = self
-            .connection
-            .query_row("PRAGMA foreign_key_check", [], |row| {
-                Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
-            })
-            .optional()?
-        {
-            anyhow::bail!("v78 migration left a foreign-key violation in {table} row {row_id}");
-        }
         Ok(())
     }
 
@@ -12209,21 +12748,22 @@ impl Database {
                 VALUES (82, datetime('now'));
                 "#,
             )?;
+            validate_migration_foreign_keys(
+                &transaction,
+                &[
+                    "hearth_memory_proposal",
+                    "memory",
+                    "memory_revision",
+                    "memory_revision_retrieval_key",
+                    "memory_supersession",
+                ],
+            )?;
             transaction.commit()?;
             Ok(())
         })();
         let foreign_keys_result = self.connection.execute_batch("PRAGMA foreign_keys = ON;");
         migration_result?;
         foreign_keys_result?;
-        if let Some((table, row_id)) = self
-            .connection
-            .query_row("PRAGMA foreign_key_check", [], |row| {
-                Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
-            })
-            .optional()?
-        {
-            anyhow::bail!("v82 migration left a foreign-key violation in {table} row {row_id}");
-        }
         Ok(())
     }
 
@@ -12544,21 +13084,16 @@ impl Database {
                 VALUES (86, datetime('now'));
                 "#,
             )?;
+            validate_migration_foreign_keys(
+                &transaction,
+                &["adapter_installation", "agent_profile"],
+            )?;
             transaction.commit()?;
             Ok(())
         })();
         let foreign_keys_result = self.connection.execute_batch("PRAGMA foreign_keys = ON;");
         migration_result?;
         foreign_keys_result?;
-        if let Some((table, row_id)) = self
-            .connection
-            .query_row("PRAGMA foreign_key_check", [], |row| {
-                Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
-            })
-            .optional()?
-        {
-            anyhow::bail!("v86 migration left a foreign-key violation in {table} row {row_id}");
-        }
         Ok(())
     }
 
@@ -13069,21 +13604,23 @@ impl Database {
                 VALUES (87, datetime('now'));
                 "#,
             )?;
+            validate_migration_foreign_keys(
+                &transaction,
+                &[
+                    "agent_run",
+                    "camp_turn",
+                    "context_manifest",
+                    "gather_item",
+                    "gather_record",
+                    "message_delivery",
+                ],
+            )?;
             transaction.commit()?;
             Ok(())
         })();
         let foreign_keys_result = self.connection.execute_batch("PRAGMA foreign_keys = ON;");
         migration_result?;
         foreign_keys_result?;
-        if let Some((table, row_id)) = self
-            .connection
-            .query_row("PRAGMA foreign_key_check", [], |row| {
-                Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
-            })
-            .optional()?
-        {
-            anyhow::bail!("v87 migration left a foreign-key violation in {table} row {row_id}");
-        }
         Ok(())
     }
 
@@ -13165,21 +13702,13 @@ impl Database {
                 VALUES (88, datetime('now'));
                 "#,
             )?;
+            validate_migration_foreign_keys(&transaction, &["context_manifest"])?;
             transaction.commit()?;
             Ok(())
         })();
         let foreign_keys_result = self.connection.execute_batch("PRAGMA foreign_keys = ON;");
         migration_result?;
         foreign_keys_result?;
-        if let Some((table, row_id)) = self
-            .connection
-            .query_row("PRAGMA foreign_key_check", [], |row| {
-                Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
-            })
-            .optional()?
-        {
-            anyhow::bail!("v88 migration left a foreign-key violation in {table} row {row_id}");
-        }
         Ok(())
     }
 
@@ -13377,26 +13906,40 @@ impl Database {
                 VALUES (89, datetime('now'));
                 "#,
             )?;
+            validate_migration_foreign_keys(
+                &transaction,
+                &[
+                    "agent_run",
+                    "bootstrap_redelivery_requirement",
+                    "camp_turn",
+                    "context_manifest",
+                    "context_manifest_history_camp",
+                    "conversation",
+                    "gather_item",
+                    "gather_record",
+                    "message_delivery",
+                    "message_delivery_attempt",
+                    "native_session_bootstrap_evidence",
+                    "native_session_compaction_observation",
+                    "native_session_compaction_observer_lease",
+                    "native_session_resume_attempt",
+                    "runtime_input_delivery",
+                ],
+            )?;
             transaction.commit()?;
             Ok(())
         })();
         let foreign_keys_result = self.connection.execute_batch("PRAGMA foreign_keys = ON;");
         migration_result?;
         foreign_keys_result?;
-        if let Some((table, row_id)) = self
-            .connection
-            .query_row("PRAGMA foreign_key_check", [], |row| {
-                Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
-            })
-            .optional()?
-        {
-            anyhow::bail!("v89 migration left a foreign-key violation in {table} row {row_id}");
-        }
         Ok(())
     }
 
     fn migrate_runtime_monitoring_v90(&mut self) -> Result<()> {
-        self.connection.execute_batch(
+        let transaction = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        transaction.execute_batch(
             r#"
             ALTER TABLE canonical_runtime_activity
                 ADD COLUMN started_at TEXT;
@@ -13412,6 +13955,7 @@ impl Database {
             VALUES (90, datetime('now'));
             "#,
         )?;
+        transaction.commit()?;
         Ok(())
     }
     fn migrate_current_input_skill_links_v91(&mut self) -> Result<()> {
@@ -13620,21 +14164,32 @@ impl Database {
                 VALUES (91, datetime('now'));
                 "#,
             )?;
+            validate_migration_foreign_keys(
+                &transaction,
+                &[
+                    "agent_run",
+                    "bootstrap_redelivery_requirement",
+                    "camp_turn",
+                    "context_manifest",
+                    "context_manifest_history_camp",
+                    "conversation",
+                    "gather_item",
+                    "gather_record",
+                    "message_delivery",
+                    "message_delivery_attempt",
+                    "native_session_bootstrap_evidence",
+                    "native_session_compaction_observation",
+                    "native_session_compaction_observer_lease",
+                    "native_session_resume_attempt",
+                    "runtime_input_delivery",
+                ],
+            )?;
             transaction.commit()?;
             Ok(())
         })();
         let foreign_keys_result = self.connection.execute_batch("PRAGMA foreign_keys = ON;");
         migration_result?;
         foreign_keys_result?;
-        if let Some((table, row_id)) = self
-            .connection
-            .query_row("PRAGMA foreign_key_check", [], |row| {
-                Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
-            })
-            .optional()?
-        {
-            anyhow::bail!("v91 migration left a foreign-key violation in {table} row {row_id}");
-        }
         Ok(())
     }
 
@@ -13996,21 +14551,24 @@ impl Database {
                 VALUES (93, datetime('now'));
                 "#,
             )?;
+            validate_migration_foreign_keys(
+                &transaction,
+                &[
+                    "agent_run",
+                    "camp_message",
+                    "context_manifest",
+                    "context_manifest_history_camp",
+                    "message_delivery",
+                    "message_delivery_attempt",
+                    "runtime_input_delivery",
+                ],
+            )?;
             transaction.commit()?;
             Ok(())
         })();
         let foreign_keys_result = self.connection.execute_batch("PRAGMA foreign_keys = ON;");
         migration_result?;
         foreign_keys_result?;
-        if let Some((table, row_id)) = self
-            .connection
-            .query_row("PRAGMA foreign_key_check", [], |row| {
-                Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
-            })
-            .optional()?
-        {
-            anyhow::bail!("v93 migration left a foreign-key violation in {table} row {row_id}");
-        }
         Ok(())
     }
 
@@ -14239,33 +14797,45 @@ impl Database {
                 VALUES (95, datetime('now'));
                 "#,
             )?;
+            validate_migration_foreign_keys(
+                &transaction,
+                &[
+                    "agent_run",
+                    "bootstrap_redelivery_requirement",
+                    "camp_turn",
+                    "context_manifest",
+                    "context_manifest_history_camp",
+                    "conversation",
+                    "gather_item",
+                    "gather_record",
+                    "message_delivery",
+                    "message_delivery_attempt",
+                    "native_session_bootstrap_evidence",
+                    "native_session_compaction_observation",
+                    "native_session_compaction_observer_lease",
+                    "native_session_resume_attempt",
+                    "runtime_input_delivery",
+                ],
+            )?;
             transaction.commit()?;
             Ok(())
         })();
         let foreign_keys_result = self.connection.execute_batch("PRAGMA foreign_keys = ON;");
         migration_result?;
         foreign_keys_result?;
-        if let Some((table, row_id)) = self
-            .connection
-            .query_row("PRAGMA foreign_key_check", [], |row| {
-                Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
-            })
-            .optional()?
-        {
-            anyhow::bail!("v95 migration left a foreign-key violation in {table} row {row_id}");
-        }
         Ok(())
     }
 
     fn migrate_agent_run_runtime_model_v96(&mut self) -> Result<()> {
-        self.add_column_if_missing(
+        let transaction = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        add_migration_column_if_missing(
+            &transaction,
             "agent_run",
             "runtime_observed_model_id",
             "runtime_observed_model_id TEXT",
         )?;
-        let transaction = self
-            .connection
-            .transaction_with_behavior(TransactionBehavior::Immediate)?;
         transaction.execute_batch(
             r#"
             UPDATE rovai_data_contract
@@ -14282,19 +14852,21 @@ impl Database {
     }
 
     fn migrate_windows_skill_projection_operation_v97(&mut self) -> Result<()> {
-        self.add_column_if_missing(
+        let transaction = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        add_migration_column_if_missing(
+            &transaction,
             "skill_projection_observation",
             "operation_id",
             "operation_id TEXT CHECK(operation_id IS NULL OR length(operation_id) = 36)",
         )?;
-        self.add_column_if_missing(
+        add_migration_column_if_missing(
+            &transaction,
             "skill_projection_observation",
             "entry_identity",
             "entry_identity TEXT CHECK(entry_identity IS NULL OR length(entry_identity) = 49)",
         )?;
-        let transaction = self
-            .connection
-            .transaction_with_behavior(TransactionBehavior::Immediate)?;
         transaction.execute_batch(
             r#"
             CREATE UNIQUE INDEX IF NOT EXISTS skill_projection_operation_unique
@@ -14514,21 +15086,32 @@ impl Database {
                 VALUES (98, datetime('now'));
                 "#,
             )?;
+            validate_migration_foreign_keys(
+                &transaction,
+                &[
+                    "agent_run",
+                    "bootstrap_redelivery_requirement",
+                    "camp_turn",
+                    "context_manifest",
+                    "context_manifest_history_camp",
+                    "conversation",
+                    "gather_item",
+                    "gather_record",
+                    "message_delivery",
+                    "message_delivery_attempt",
+                    "native_session_bootstrap_evidence",
+                    "native_session_compaction_observation",
+                    "native_session_compaction_observer_lease",
+                    "native_session_resume_attempt",
+                    "runtime_input_delivery",
+                ],
+            )?;
             transaction.commit()?;
             Ok(())
         })();
         let foreign_keys_result = self.connection.execute_batch("PRAGMA foreign_keys = ON;");
         migration_result?;
         foreign_keys_result?;
-        if let Some((table, row_id)) = self
-            .connection
-            .query_row("PRAGMA foreign_key_check", [], |row| {
-                Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
-            })
-            .optional()?
-        {
-            anyhow::bail!("v98 migration left a foreign-key violation in {table} row {row_id}");
-        }
         Ok(())
     }
 
@@ -15172,21 +15755,35 @@ impl Database {
                 VALUES (99, datetime('now'));
                 "#,
             )?;
+            validate_migration_foreign_keys(
+                &transaction,
+                &[
+                    "action_attempt",
+                    "action_execution",
+                    "agent_run",
+                    "approval",
+                    "camp_attachment_view",
+                    "camp_attachment_view_entry",
+                    "camp_attachment_view_operation",
+                    "camp_attachment_view_operation_entry",
+                    "camp_turn",
+                    "context_manifest",
+                    "conversation",
+                    "gather_item",
+                    "gather_record",
+                    "message_delivery",
+                    "message_delivery_attempt",
+                    "native_session_compaction_observer_lease",
+                    "runtime_delivery_checkpoint",
+                    "runtime_input_delivery",
+                ],
+            )?;
             transaction.commit()?;
             Ok(())
         })();
         let foreign_keys_result = self.connection.execute_batch("PRAGMA foreign_keys = ON;");
         migration_result?;
         foreign_keys_result?;
-        if let Some((table, row_id)) = self
-            .connection
-            .query_row("PRAGMA foreign_key_check", [], |row| {
-                Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
-            })
-            .optional()?
-        {
-            anyhow::bail!("v99 migration left a foreign-key violation in {table} row {row_id}");
-        }
         Ok(())
     }
 
@@ -15605,21 +16202,33 @@ impl Database {
                 VALUES (100, datetime('now'));
                 "#,
             )?;
+            validate_migration_foreign_keys(
+                &transaction,
+                &[
+                    "action_attempt",
+                    "action_execution",
+                    "agent_run",
+                    "approval",
+                    "camp_attachment_view",
+                    "camp_attachment_view_entry",
+                    "camp_turn",
+                    "context_manifest",
+                    "conversation",
+                    "gather_item",
+                    "gather_record",
+                    "message_delivery",
+                    "message_delivery_attempt",
+                    "native_session_compaction_observer_lease",
+                    "runtime_delivery_checkpoint",
+                    "runtime_input_delivery",
+                ],
+            )?;
             transaction.commit()?;
             Ok(())
         })();
         let foreign_keys_result = self.connection.execute_batch("PRAGMA foreign_keys = ON;");
         migration_result?;
         foreign_keys_result?;
-        if let Some((table, row_id)) = self
-            .connection
-            .query_row("PRAGMA foreign_key_check", [], |row| {
-                Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
-            })
-            .optional()?
-        {
-            anyhow::bail!("v100 migration left a foreign-key violation in {table} row {row_id}");
-        }
         Ok(())
     }
 
@@ -15875,21 +16484,22 @@ impl Database {
                 VALUES (102, datetime('now'));
                 "#,
             )?;
+            validate_migration_foreign_keys(
+                &transaction,
+                &[
+                    "camp_attachment_publication_resolution",
+                    "camp_attachment_view",
+                    "camp_attachment_view_operation",
+                    "message_attachment",
+                    "message_delivery",
+                ],
+            )?;
             transaction.commit()?;
             Ok(())
         })();
         let foreign_keys_result = self.connection.execute_batch("PRAGMA foreign_keys = ON;");
         migration_result?;
         foreign_keys_result?;
-        if let Some((table, row_id)) = self
-            .connection
-            .query_row("PRAGMA foreign_key_check", [], |row| {
-                Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
-            })
-            .optional()?
-        {
-            anyhow::bail!("v102 migration left a foreign-key violation in {table} row {row_id}");
-        }
         Ok(())
     }
 
@@ -16048,21 +16658,21 @@ impl Database {
                 VALUES (103, datetime('now'));
                 "#,
             )?;
+            validate_migration_foreign_keys(
+                &transaction,
+                &[
+                    "adapter_capability_snapshot",
+                    "skill",
+                    "skill_group_assignment",
+                    "skill_projection_observation",
+                ],
+            )?;
             transaction.commit()?;
             Ok(())
         })();
         let foreign_keys_result = self.connection.execute_batch("PRAGMA foreign_keys = ON;");
         migration_result?;
         foreign_keys_result?;
-        if let Some((table, row_id)) = self
-            .connection
-            .query_row("PRAGMA foreign_key_check", [], |row| {
-                Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
-            })
-            .optional()?
-        {
-            anyhow::bail!("v103 migration left a foreign-key violation in {table} row {row_id}");
-        }
         Ok(())
     }
 
@@ -16369,21 +16979,22 @@ impl Database {
                 VALUES (104, datetime('now'));
                 "#,
             )?;
+            validate_migration_foreign_keys(
+                &transaction,
+                &[
+                    "adapter_installation",
+                    "agent_profile",
+                    "skill",
+                    "skill_group_assignment",
+                    "skill_projection_observation",
+                ],
+            )?;
             transaction.commit()?;
             Ok(())
         })();
         let foreign_keys_result = self.connection.execute_batch("PRAGMA foreign_keys = ON;");
         migration_result?;
         foreign_keys_result?;
-        if let Some((table, row_id)) = self
-            .connection
-            .query_row("PRAGMA foreign_key_check", [], |row| {
-                Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
-            })
-            .optional()?
-        {
-            anyhow::bail!("v104 migration left a foreign-key violation in {table} row {row_id}");
-        }
         Ok(())
     }
 
@@ -16692,21 +17303,22 @@ impl Database {
                 VALUES (105, datetime('now'));
                 "#,
             )?;
+            validate_migration_foreign_keys(
+                &transaction,
+                &[
+                    "adapter_installation",
+                    "agent_profile",
+                    "skill",
+                    "skill_group_assignment",
+                    "skill_projection_observation",
+                ],
+            )?;
             transaction.commit()?;
             Ok(())
         })();
         let foreign_keys_result = self.connection.execute_batch("PRAGMA foreign_keys = ON;");
         migration_result?;
         foreign_keys_result?;
-        if let Some((table, row_id)) = self
-            .connection
-            .query_row("PRAGMA foreign_key_check", [], |row| {
-                Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
-            })
-            .optional()?
-        {
-            anyhow::bail!("v105 migration left a foreign-key violation in {table} row {row_id}");
-        }
         Ok(())
     }
 
@@ -16911,21 +17523,21 @@ impl Database {
                 VALUES (106, datetime('now'));
                 "#,
             )?;
+            validate_migration_foreign_keys(
+                &transaction,
+                &[
+                    "bootstrap_redelivery_requirement",
+                    "compaction_detector_policy",
+                    "native_session_compaction_observation",
+                    "native_session_compaction_observer_lease",
+                ],
+            )?;
             transaction.commit()?;
             Ok(())
         })();
         let foreign_keys_result = self.connection.execute_batch("PRAGMA foreign_keys = ON;");
         migration_result?;
         foreign_keys_result?;
-        if let Some((table, row_id)) = self
-            .connection
-            .query_row("PRAGMA foreign_key_check", [], |row| {
-                Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
-            })
-            .optional()?
-        {
-            anyhow::bail!("v106 migration left a foreign-key violation in {table} row {row_id}");
-        }
         Ok(())
     }
 
@@ -17071,21 +17683,22 @@ impl Database {
                 VALUES (107, datetime('now'));
                 "#,
             )?;
+            validate_migration_foreign_keys(
+                &transaction,
+                &[
+                    "adapter_installation",
+                    "agent_profile",
+                    "skill",
+                    "skill_group_assignment",
+                    "skill_projection_observation",
+                ],
+            )?;
             transaction.commit()?;
             Ok(())
         })();
         let foreign_keys_result = self.connection.execute_batch("PRAGMA foreign_keys = ON;");
         migration_result?;
         foreign_keys_result?;
-        if let Some((table, row_id)) = self
-            .connection
-            .query_row("PRAGMA foreign_key_check", [], |row| {
-                Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
-            })
-            .optional()?
-        {
-            anyhow::bail!("v107 migration left a foreign-key violation in {table} row {row_id}");
-        }
         Ok(())
     }
 
@@ -17188,21 +17801,21 @@ impl Database {
                 VALUES (108, datetime('now'));
                 "#,
             )?;
+            validate_migration_foreign_keys(
+                &transaction,
+                &[
+                    "bootstrap_redelivery_requirement",
+                    "compaction_detector_policy",
+                    "native_session_compaction_observation",
+                    "native_session_compaction_observer_lease",
+                ],
+            )?;
             transaction.commit()?;
             Ok(())
         })();
         let foreign_keys_result = self.connection.execute_batch("PRAGMA foreign_keys = ON;");
         migration_result?;
         foreign_keys_result?;
-        if let Some((table, row_id)) = self
-            .connection
-            .query_row("PRAGMA foreign_key_check", [], |row| {
-                Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
-            })
-            .optional()?
-        {
-            anyhow::bail!("v108 migration left a foreign-key violation in {table} row {row_id}");
-        }
         Ok(())
     }
 
@@ -17492,21 +18105,13 @@ impl Database {
                 VALUES (111, datetime('now'));
                 "#,
             )?;
+            validate_migration_foreign_keys(&transaction, &["message_delivery"])?;
             transaction.commit()?;
             Ok(())
         })();
         let foreign_keys_result = self.connection.execute_batch("PRAGMA foreign_keys = ON;");
         migration_result?;
         foreign_keys_result?;
-        if let Some((table, row_id)) = self
-            .connection
-            .query_row("PRAGMA foreign_key_check", [], |row| {
-                Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
-            })
-            .optional()?
-        {
-            anyhow::bail!("v111 migration left a foreign-key violation in {table} row {row_id}");
-        }
         Ok(())
     }
 
@@ -17980,21 +18585,32 @@ impl Database {
                 VALUES (116, datetime('now'));
                 "#,
             )?;
+            validate_migration_foreign_keys(
+                &transaction,
+                &[
+                    "camp_message",
+                    "channel_conversation",
+                    "channel_conversation_binding",
+                    "channel_delivery",
+                    "channel_inbound_aggregate",
+                    "channel_inbound_observation",
+                    "channel_turn_request",
+                    "context_manifest",
+                    "external_group_bot_roster",
+                    "external_group_bot_roster_state",
+                    "external_principal",
+                    "external_principal_app_identity",
+                    "feishu_account",
+                    "feishu_member_bot",
+                    "project_binding",
+                ],
+            )?;
             transaction.commit()?;
             Ok(())
         })();
         let foreign_keys_result = self.connection.execute_batch("PRAGMA foreign_keys = ON;");
         migration_result?;
         foreign_keys_result?;
-        if let Some((table, row_id)) = self
-            .connection
-            .query_row("PRAGMA foreign_key_check", [], |row| {
-                Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
-            })
-            .optional()?
-        {
-            anyhow::bail!("v116 migration left a foreign-key violation in {table} row {row_id}");
-        }
         Ok(())
     }
 
@@ -18408,6 +19024,20 @@ impl Database {
                 VALUES (118, datetime('now'));
                 "#,
             )?;
+            validate_migration_foreign_keys(
+                &transaction,
+                &[
+                    "channel_conversation_binding",
+                    "channel_delivery",
+                    "channel_turn_request",
+                    "feishu_owner_app_identity",
+                    "feishu_owner_identity",
+                    "pending_camp_binding",
+                    "pending_camp_message",
+                    "project_binding",
+                    "project_catalog_item",
+                ],
+            )?;
             transaction.commit()?;
             Ok(())
         })();
@@ -18416,15 +19046,6 @@ impl Database {
             .execute_batch("PRAGMA legacy_alter_table = OFF; PRAGMA foreign_keys = ON;");
         migration_result?;
         pragma_result?;
-        if let Some((table, row_id)) = self
-            .connection
-            .query_row("PRAGMA foreign_key_check", [], |row| {
-                Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
-            })
-            .optional()?
-        {
-            anyhow::bail!("v118 migration left a foreign-key violation in {table} row {row_id}");
-        }
         Ok(())
     }
 
@@ -18730,6 +19351,7 @@ impl Database {
                 VALUES (121, datetime('now'));
                 "#,
             )?;
+            validate_migration_foreign_keys(&transaction, &["channel_execution_console"])?;
             transaction.commit()?;
             Ok(())
         })();
@@ -18738,15 +19360,6 @@ impl Database {
             .execute_batch("PRAGMA legacy_alter_table = OFF; PRAGMA foreign_keys = ON;");
         migration_result?;
         pragma_result?;
-        if let Some((table, row_id)) = self
-            .connection
-            .query_row("PRAGMA foreign_key_check", [], |row| {
-                Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
-            })
-            .optional()?
-        {
-            anyhow::bail!("v121 migration left a foreign-key violation in {table} row {row_id}");
-        }
         Ok(())
     }
 
@@ -19312,6 +19925,63 @@ impl Database {
                 "merged channel contract requires complete channel, Pending and Fast migrations"
             );
         }
+        validate_joined_channel_schema(&transaction)?;
+        transaction.execute(
+            "UPDATE rovai_data_contract SET contract_version = ?1, projection_schema_version = ?2,
+             updated_at = datetime('now') WHERE singleton = 1",
+            params![
+                V129_MIGRATION_SOURCE_DATA_CONTRACT_VERSION,
+                V129_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION
+            ],
+        )?;
+        transaction.execute(
+            "INSERT INTO schema_migration(version, applied_at) VALUES (128, datetime('now'))",
+            [],
+        )?;
+        transaction.commit()?;
+        Ok(())
+    }
+
+    fn migrate_execution_evidence_index_v129(&mut self) -> Result<()> {
+        let transaction = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let state = load_current_migration_state(&transaction)?;
+        if !state.admits(
+            V129_MIGRATION_SOURCE_DATA_CONTRACT_VERSION,
+            V129_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION,
+            V116_CLASSIFIER_VERSION,
+        ) {
+            anyhow::bail!("execution evidence index migration requires the complete joined schema");
+        }
+        // The UNIQUE constraint already owns this exact ordered B-tree. Never
+        // remove the additional index unless the constraint can serve its reads.
+        let has_sequence_constraint: bool = transaction.query_row(
+            r#"
+            SELECT EXISTS (
+                SELECT 1 FROM pragma_index_list('agent_run_execution_evidence') AS idx
+                WHERE idx.origin = 'u' AND idx."unique" = 1 AND idx.partial = 0
+                  AND (SELECT COUNT(*) FROM pragma_index_xinfo(idx.name) WHERE key = 1) = 2
+                  AND EXISTS (
+                      SELECT 1 FROM pragma_index_xinfo(idx.name)
+                      WHERE key = 1 AND seqno = 0 AND name = 'agent_run_id'
+                        AND "desc" = 0 AND coll = 'BINARY'
+                  )
+                  AND EXISTS (
+                      SELECT 1 FROM pragma_index_xinfo(idx.name)
+                      WHERE key = 1 AND seqno = 1 AND name = 'sequence'
+                        AND "desc" = 0 AND coll = 'BINARY'
+                  )
+            )
+            "#,
+            [],
+            |row| row.get(0),
+        )?;
+        if !has_sequence_constraint {
+            anyhow::bail!("execution evidence sequence constraint is missing or incompatible");
+        }
+        transaction
+            .execute_batch("DROP INDEX IF EXISTS agent_run_execution_evidence_run_sequence_idx;")?;
         transaction.execute(
             "UPDATE rovai_data_contract SET contract_version = ?1, projection_schema_version = ?2,
              updated_at = datetime('now') WHERE singleton = 1",
@@ -19321,7 +19991,7 @@ impl Database {
             ],
         )?;
         transaction.execute(
-            "INSERT INTO schema_migration(version, applied_at) VALUES (128, datetime('now'))",
+            "INSERT INTO schema_migration(version, applied_at) VALUES (129, datetime('now'))",
             [],
         )?;
         transaction.commit()?;
@@ -24013,7 +24683,18 @@ pub(crate) fn downgrade_current_schema_to_main_camp_source_for_test(
 }
 
 #[cfg(test)]
+pub(crate) fn downgrade_current_schema_to_v128_source_for_test(connection: &Connection) {
+    connection.execute_batch(
+        "CREATE INDEX IF NOT EXISTS agent_run_execution_evidence_run_sequence_idx
+             ON agent_run_execution_evidence(agent_run_id, sequence);
+         DELETE FROM schema_migration WHERE version = 129;
+         UPDATE rovai_data_contract SET contract_version = 'v1.39', projection_schema_version = 80 WHERE singleton = 1;",
+    ).unwrap();
+}
+
+#[cfg(test)]
 fn downgrade_current_schema_to_v127_source_for_test(connection: &Connection) {
+    downgrade_current_schema_to_v128_source_for_test(connection);
     connection.execute_batch(
         "DELETE FROM schema_migration WHERE version = 128;
          UPDATE rovai_data_contract SET contract_version = 'v1.38', projection_schema_version = 79 WHERE singleton = 1;",
@@ -25786,6 +26467,176 @@ pub(crate) fn downgrade_current_schema_to_v98_source_for_test(connection: &Conne
 mod tests {
     use super::*;
 
+    #[test]
+    fn migration_foreign_key_checks_cover_inbound_dependents_not_unrelated_history() {
+        let mut connection = Connection::open_in_memory().unwrap();
+        connection
+            .execute_batch(
+                "PRAGMA foreign_keys = OFF;
+            CREATE TABLE parent(id INTEGER PRIMARY KEY);
+            CREATE TABLE child(parent_id INTEGER REFERENCES parent(id));
+            CREATE TABLE unrelated_parent(id INTEGER PRIMARY KEY);
+            CREATE TABLE unrelated_history(parent_id INTEGER REFERENCES unrelated_parent(id));
+            INSERT INTO parent VALUES (1);
+            INSERT INTO child VALUES (1);
+            INSERT INTO unrelated_history VALUES (99);",
+            )
+            .unwrap();
+        let transaction = connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .unwrap();
+        // A pre-existing, unrelated violation belongs to explicit diagnostics.
+        validate_migration_foreign_keys(&transaction, &["parent"]).unwrap();
+        transaction.execute("DELETE FROM parent", []).unwrap();
+        assert!(
+            validate_migration_foreign_keys(&transaction, &["parent"])
+                .unwrap_err()
+                .to_string()
+                .contains("child")
+        );
+        transaction.rollback().unwrap();
+        assert_eq!(
+            connection
+                .query_row("SELECT count(*) FROM parent", [], |row| row
+                    .get::<_, i64>(0))
+                .unwrap(),
+            1
+        );
+        let transaction = connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .unwrap();
+        transaction
+            .execute_batch("DELETE FROM child; DELETE FROM parent;")
+            .unwrap();
+        validate_migration_foreign_keys(&transaction, &["parent", "child"]).unwrap();
+        transaction.commit().unwrap();
+    }
+
+    #[test]
+    fn additive_migrations_commit_columns_and_receipt_in_one_transaction() {
+        // A minimal SQLite owner for the four previously non-atomic steps; no
+        // full workspace fixture is needed to prove DDL/receipt rollback.
+        for version in [72, 90, 96, 97] {
+            let connection = Connection::open_in_memory().unwrap();
+            connection.execute_batch("PRAGMA foreign_keys = ON;
+                CREATE TABLE schema_migration(version INTEGER PRIMARY KEY, applied_at TEXT);
+                CREATE TABLE rovai_data_contract(singleton INTEGER, contract_version TEXT, projection_schema_version INTEGER, reset_reason TEXT, updated_at TEXT);
+                INSERT INTO rovai_data_contract(singleton) VALUES (1);
+                CREATE TABLE agent_run(id TEXT PRIMARY KEY, runtime_reported_version TEXT, runtime_executable_fingerprint TEXT);
+                CREATE TABLE canonical_runtime_activity(id TEXT PRIMARY KEY);
+                CREATE TABLE skill_projection_observation(id TEXT PRIMARY KEY);").unwrap();
+            connection.execute_batch(&format!("CREATE TRIGGER reject_receipt BEFORE INSERT ON schema_migration WHEN NEW.version = {version} BEGIN SELECT RAISE(ABORT, 'injected receipt failure'); END;")).unwrap();
+            let mut database = Database {
+                connection,
+                path: PathBuf::from("unused-memory-fixture"),
+                runtime_camp_files_root: PathBuf::new(),
+                runtime_camp_files_root_identity_digest: String::new(),
+            };
+            let schema = |connection: &Connection| -> Vec<(String, String)> {
+                connection
+                    .prepare("SELECT name, COALESCE(sql, '') FROM sqlite_schema ORDER BY name")
+                    .unwrap()
+                    .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+                    .unwrap()
+                    .collect::<rusqlite::Result<_>>()
+                    .unwrap()
+            };
+            let before = schema(database.connection());
+            let run = |database: &mut Database| match version {
+                72 => database.migrate_runtime_drift_rebind_v72(),
+                90 => database.migrate_runtime_monitoring_v90(),
+                96 => database.migrate_agent_run_runtime_model_v96(),
+                97 => database.migrate_windows_skill_projection_operation_v97(),
+                _ => unreachable!(),
+            };
+            assert!(
+                run(&mut database)
+                    .unwrap_err()
+                    .to_string()
+                    .contains("injected receipt failure")
+            );
+            assert_eq!(
+                schema(database.connection()),
+                before,
+                "migration {version} leaked DDL before its receipt"
+            );
+            assert!(!database.schema_migration_applied(version).unwrap());
+            database
+                .connection()
+                .execute_batch("DROP TRIGGER reject_receipt")
+                .unwrap();
+            run(&mut database).unwrap();
+            assert!(database.schema_migration_applied(version).unwrap());
+        }
+    }
+
+    #[test]
+    fn admitted_migration_rechecks_contract_schema_and_exact_receipts_before_writing() {
+        use crate::{
+            core_data_dir_lock::CoreDataDirLease,
+            database_admission::{AdmissionAssessment, DatabaseAdmission},
+        };
+        for changed in ["contract", "projection", "classifier", "receipt", "schema"] {
+            let directory = std::env::temp_dir().join(format!(
+                "rovai-migration-source-revalidation-{}",
+                Uuid::new_v4()
+            ));
+            let database = crate::test_support::fresh_schema_database_fast_at(&directory);
+            downgrade_current_schema_to_v128_source_for_test(database.connection());
+            let runtime_root = database.runtime_camp_files_root().to_path_buf();
+            let runtime_identity = database
+                .runtime_camp_files_root_identity_digest()
+                .to_string();
+            drop(database);
+            let lease = CoreDataDirLease::acquire(&directory).unwrap();
+            let AdmissionAssessment::RequiresMigration(ticket) =
+                DatabaseAdmission::assess(&lease).unwrap()
+            else {
+                panic!("migration ticket required")
+            };
+            let mut open = ticket.into_migration().unwrap();
+            // Vary the admission evidence, not the file: this isolates the SQL
+            // recheck from the independent filesystem identity guard.
+            let MigrationAuthorityOpen::Upgrade {
+                source_contract,
+                source_receipts,
+                path,
+                ..
+            } = &mut open
+            else {
+                unreachable!()
+            };
+            match changed {
+                "contract" => source_contract.contract_version.push_str("-changed"),
+                "projection" => source_contract.projection_schema_version += 1,
+                "classifier" => source_contract.classifier_version.push_str("-changed"),
+                "receipt" => source_receipts
+                    .receipts
+                    .last_mut()
+                    .unwrap()
+                    .1
+                    .push_str("-changed"),
+                "schema" => source_receipts.schema_cookie += 1,
+                _ => unreachable!(),
+            }
+            let source = path.clone();
+            let before = std::fs::read(&source).unwrap();
+            let error = Database::migrate_admitted_authority(
+                &open,
+                &runtime_root,
+                &runtime_identity,
+                &mut |_, _| {},
+            )
+            .unwrap_err();
+            assert_eq!(error.code(), "authority_contract_changed", "{changed}");
+            assert!(!error.retryable());
+            assert_eq!(std::fs::read(source).unwrap(), before, "{changed}");
+            drop(open);
+            drop(lease);
+            std::fs::remove_dir_all(directory).unwrap();
+        }
+    }
+
     fn assert_schema_objects(
         connection: &Connection,
         object_type: &str,
@@ -25899,6 +26750,7 @@ mod tests {
             v126: version >= 126,
             v127: version >= 127,
             v128: version >= 128,
+            v129: version >= 129,
         }
     }
 
@@ -25989,6 +26841,12 @@ mod tests {
                 "current",
                 CURRENT_DATA_CONTRACT_VERSION,
                 CURRENT_PROJECTION_SCHEMA_VERSION,
+                129,
+            ),
+            (
+                "v1.39/schema-80 before redundant evidence index removal",
+                V129_MIGRATION_SOURCE_DATA_CONTRACT_VERSION,
+                V129_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION,
                 128,
             ),
             (
@@ -26316,11 +27174,27 @@ mod tests {
             );
         }
 
-        let current = migration_state_through(128);
+        let current = migration_state_through(129);
         let v092_source = migration_state_through(91);
         let mut missing_intermediate = current;
         missing_intermediate.v84 = false;
+        let mut missing_index_migration = current;
+        missing_index_migration.v129 = false;
         let rejected = [
+            (
+                "current marker without index migration",
+                missing_index_migration,
+                CURRENT_DATA_CONTRACT_VERSION,
+                CURRENT_PROJECTION_SCHEMA_VERSION,
+                V116_CLASSIFIER_VERSION,
+            ),
+            (
+                "old joined marker with a newer index migration",
+                current,
+                V129_MIGRATION_SOURCE_DATA_CONTRACT_VERSION,
+                V129_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION,
+                V116_CLASSIFIER_VERSION,
+            ),
             (
                 "source contract with wrong schema",
                 v092_source,
@@ -26381,6 +27255,142 @@ mod tests {
     }
 
     #[test]
+    fn v129_removes_only_the_redundant_index_atomically_and_keeps_sequence_uniqueness() {
+        // Index/ledger compatibility is owned here with a minimal in-memory
+        // schema. The existing authority_migration test owns full copy/switch.
+        for has_constraint in [true, false] {
+            let connection = Connection::open_in_memory().unwrap();
+            connection.execute_batch(&format!(
+                "CREATE TABLE schema_migration(version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL);
+                 CREATE TABLE rovai_data_contract(singleton INTEGER PRIMARY KEY, contract_version TEXT,
+                    projection_schema_version INTEGER, classifier_version TEXT, updated_at TEXT);
+                 INSERT INTO rovai_data_contract VALUES (1, 'v1.39', 80, 'activity-v2', 'kept-time');
+                 CREATE TABLE agent_run_execution_evidence(id TEXT PRIMARY KEY, agent_run_id TEXT NOT NULL,
+                    sequence INTEGER NOT NULL, payload_preview_json TEXT NOT NULL{});
+                 CREATE INDEX agent_run_execution_evidence_run_sequence_idx
+                    ON agent_run_execution_evidence(agent_run_id, sequence);
+                 INSERT INTO agent_run_execution_evidence VALUES
+                    ('e1', 'run-a', 1, 'first'), ('e2', 'run-a', 2, 'second'), ('e3', 'run-b', 1, 'other');",
+                if has_constraint { ", UNIQUE(agent_run_id, sequence)" } else { "" },
+            )).unwrap();
+            for version in 1..=128 {
+                connection
+                    .execute(
+                        "INSERT INTO schema_migration VALUES (?1, 'kept-time')",
+                        [version],
+                    )
+                    .unwrap();
+            }
+            let mut database = Database {
+                connection,
+                path: PathBuf::new(),
+                runtime_camp_files_root: PathBuf::new(),
+                runtime_camp_files_root_identity_digest: String::new(),
+            };
+            let redundant_index_exists = |database: &Database| -> bool {
+                database
+                    .connection()
+                    .query_row(
+                        "SELECT EXISTS(SELECT 1 FROM sqlite_schema WHERE type = 'index'
+                        AND name = 'agent_run_execution_evidence_run_sequence_idx')",
+                        [],
+                        |row| row.get(0),
+                    )
+                    .unwrap()
+            };
+            if !has_constraint {
+                let error = database
+                    .migrate_execution_evidence_index_v129()
+                    .unwrap_err();
+                assert!(error.to_string().contains("sequence constraint"));
+                assert!(redundant_index_exists(&database));
+                assert!(
+                    !load_current_migration_state(database.connection())
+                        .unwrap()
+                        .v129
+                );
+                continue;
+            }
+            database.connection().execute_batch(
+                "CREATE TEMP TRIGGER fail_index_migration BEFORE INSERT ON schema_migration
+                 WHEN NEW.version = 129 BEGIN SELECT RAISE(ABORT, 'fixture migration failure'); END;",
+            ).unwrap();
+            assert!(database.migrate_execution_evidence_index_v129().is_err());
+            assert!(
+                redundant_index_exists(&database),
+                "a failed migration must restore the dropped index"
+            );
+            assert_eq!(
+                database
+                    .connection()
+                    .query_row(
+                        "SELECT contract_version FROM rovai_data_contract",
+                        [],
+                        |row| row.get::<_, String>(0),
+                    )
+                    .unwrap(),
+                "v1.39"
+            );
+            assert!(
+                !load_current_migration_state(database.connection())
+                    .unwrap()
+                    .v129
+            );
+            database
+                .connection()
+                .execute_batch("DROP TRIGGER fail_index_migration")
+                .unwrap();
+            database.migrate_execution_evidence_index_v129().unwrap();
+            assert!(!redundant_index_exists(&database));
+            assert!(
+                load_current_migration_state(database.connection())
+                    .unwrap()
+                    .v129
+            );
+            assert_eq!(database.connection().query_row(
+                "SELECT contract_version, projection_schema_version FROM rovai_data_contract", [],
+                |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)),
+            ).unwrap(), (CURRENT_DATA_CONTRACT_VERSION.to_string(), CURRENT_PROJECTION_SCHEMA_VERSION));
+            let rows = database.connection().prepare(
+                "SELECT id, payload_preview_json FROM agent_run_execution_evidence ORDER BY agent_run_id, sequence",
+            ).unwrap().query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)))
+                .unwrap().collect::<rusqlite::Result<Vec<_>>>().unwrap();
+            assert_eq!(
+                rows,
+                [
+                    ("e1".to_string(), "first".to_string()),
+                    ("e2".to_string(), "second".to_string()),
+                    ("e3".to_string(), "other".to_string())
+                ]
+            );
+            let duplicate = database.connection().execute(
+                "INSERT INTO agent_run_execution_evidence VALUES ('duplicate', 'run-a', 1, 'must reject')", [],
+            ).unwrap_err();
+            assert_eq!(
+                duplicate.sqlite_error_code(),
+                Some(rusqlite::ErrorCode::ConstraintViolation)
+            );
+            let plan = database
+                .connection()
+                .prepare(
+                    "EXPLAIN QUERY PLAN SELECT id, sequence FROM agent_run_execution_evidence
+                 WHERE agent_run_id = 'run-a' AND sequence > 0 ORDER BY sequence LIMIT 50",
+                )
+                .unwrap()
+                .query_map([], |row| row.get::<_, String>(3))
+                .unwrap()
+                .collect::<rusqlite::Result<Vec<_>>>()
+                .unwrap()
+                .join("\n");
+            assert!(
+                plan.contains("USING INDEX sqlite_autoindex_agent_run_execution_evidence_"),
+                "{plan}"
+            );
+            assert!(!plan.contains("TEMP B-TREE"), "{plan}");
+        }
+    }
+
+    #[test]
     fn database_contract_preflight_admits_current_and_rejects_future_store() {
         let directory =
             std::env::temp_dir().join(format!("rovai-current-contract-smoke-{}", Uuid::new_v4()));
@@ -26396,7 +27406,7 @@ mod tests {
             )
             .expect("current contract marker should load");
 
-        assert_eq!(state, migration_state_through(128));
+        assert_eq!(state, migration_state_through(129));
         assert!(state.admits(&contract, schema, &classifier));
         assert!(has_admissible_data_contract(
             &directory.join("rovai.sqlite")
@@ -28552,7 +29562,20 @@ mod tests {
                 .admits("v1.38", 79, V116_CLASSIFIER_VERSION)
         );
         database.migrate_camp_member_fast_v127().unwrap();
+        // The seal must not accept a receipt with a missing critical object;
+        // this is a metadata check, not a scan of Camp or execution history.
+        database
+            .connection()
+            .execute_batch("DROP INDEX pending_camp_input_queue_idx")
+            .unwrap();
+        assert!(database.migrate_merged_channel_contract_v128().is_err());
+        assert!(!database.schema_migration_applied(128).unwrap());
+        database
+            .connection()
+            .execute_batch(PENDING_CAMP_SCHEMA_OBJECTS[1].1)
+            .unwrap();
         database.migrate_merged_channel_contract_v128().unwrap();
+        database.migrate_execution_evidence_index_v129().unwrap();
         assert!(connection_has_current_data_contract(database.connection()).unwrap());
         let after: (String, String) = database.connection().query_row(
             "SELECT default_model_selection_json, runtime_binding_revision FROM agent_profile WHERE id = 'agent_1'", [], |row| Ok((row.get(0)?, row.get(1)?))).unwrap();
@@ -32142,7 +33165,9 @@ mod tests {
                 |row| row.get(0),
             )
             .unwrap();
-        assert!(cycle_schema.contains("protocol_version = 2"));
+        // The current fixture has also applied 113: v2 remains admitted, but
+        // the later planned-shutdown contract additionally accepts v3.
+        assert!(cycle_schema.contains("protocol_version IN (2, 3)"));
         assert!(cycle_schema.contains("fenced_agent_run_count"));
         assert!(cycle_schema.contains("unsettled_effect_agent_run_count"));
         let contract: (String, i64) = database

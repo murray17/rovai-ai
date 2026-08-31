@@ -1,7 +1,7 @@
 ---
 document_type: architecture
 authority: current-foundational-invariants
-last_updated: 2026-08-30
+last_updated: 2026-08-31
 ---
 
 # 当前基础架构不变量
@@ -20,7 +20,7 @@ last_updated: 2026-08-30
   Camp、Member、Memory、Navigation 与其他业务读写只有 `authoritativeWorkspace` capability ready 后才能挂载。
   阻断期间不得创建替代数据库、查询未准入 authority 或用空集合冒充正常工作区。
   非权威页面框架不属于业务读写：本机恢复目标读取后先显示对应页面框架，正常慢启动/迁移沿用 400ms 内容区反馈，
-  不以 Core 未 ready 为由展示全屏恢复页；只有明确阻断或 crashed 才展示 Bootstrap 恢复面。
+  统一“正在打开会话”，不暴露内部阶段；只有最终阻断或 crashed 才展示“暂时无法打开会话”的 Bootstrap 恢复面。
 - Core 必须先持有绑定 canonical data directory 与稳定对象身份的 OS 排他 lease，再观察或操作 SQLite。数据库
   准入只返回 existing、initializable、migration 或 typed blocked；票据绑定 lease、不可复制、一次消费并在打开、
   清理或发布前复核相关对象。只有 `lumen.sqlite` 时精确使用它，不创建 `rovai.sqlite`。
@@ -28,10 +28,13 @@ last_updated: 2026-08-30
   清理。全新 authority 只在两个 namespace 都确认无 main/WAL/journal 后，通过 staging 与原子 no-replace 发布。
 - 只读探测报告需要正常 SQLite journal recovery 时，可在同一 lease 的 exact target 上让引擎完成恢复，再重新准入；
   不把正常 hot journal 回滚永久当作权限故障，也不授权业务写入或手动删除日志。正式连接统一配置 WAL 与同步策略。
-- 旧合同 migration 使用一致副本，原 main/sidecar 的私有备份、identity manifest、完整校验与原子切换；中断恢复按
-  current main 的 original/migrated identity 决定恢复，未知 identity fail closed。迁移失败保留原 authority 与壳层。
+- 受支持旧合同只在 ticket 的 exact 原库上执行逐版本事务，无 CREATE；任何写入前重验 contract/classifier/schema cookie/
+  全部 receipts 与文件 identity。每步 DDL/DML/marker/receipt 一起提交，中断后从缺失步骤继续；不新建普通升级副本、
+  备份或 manifest，不替换主文件，不默认全库扫描。迁移后只重新准入并打开同一 main，不以失败或原库消失为由建空库。
+  旧 manifest 继续按 current main 的 original/migrated identity 恢复；未知 identity fail closed。
 - Full Core Supervisor 发布单调 generation/revision 的完整快照。旧 child 的 frame、event、response 或 exit 不能污染
-  当前 generation；确定性准入阻断不消耗 crash budget。Renderer-facing request 继续是 `Promise<T>`，内部 transport
+  当前 generation；准入/打开/迁移的明确瞬时故障使用独立 250/750/1500ms startup retry，确定性错误不自动重试，均不
+  消耗 crash budget。已见 authority 的后续重启禁止初始化空库。Renderer-facing request 继续是 `Promise<T>`，内部 transport
   必须保留领域拒绝、基础设施失败、Full Core 不可用与 shutdown 的结构化类别；failure 以普通对象穿过 contextBridge，
   不能依赖 Error 自定义字段跨隔离世界保留。
 
@@ -43,6 +46,9 @@ last_updated: 2026-08-30
 - 命令在规范化后计算版本化请求摘要，并在一个 SQLite 写事务中重查幂等结果、校验 Actor、epoch、Capability、expected version 和领域门禁，再提交对象变化、审计事件与唯一命令结果。相同命令身份和相同摘要永久返回首次结果；相同身份但不同语义必须稳定冲突。
 - Repository 参加调用方拥有的 Unit of Work，不自行提交。Migration 只改变 schema 和数据，不在事务中执行 Runtime、Git、网络或文件系统补偿；提交后的唤醒只是可恢复提示，不是事实真源。
 - 领域事件日志用于审计、幂等结果和增量失效，不是 Event Sourcing 状态库、Outbox、Worker 队列或业务对象的替代真源。
+- 渠道 Host 的内部 tick 只推进已提交的 request/Outbox，不是新的业务意图入口，也不为每次唤醒保存永久命令回执。
+  维护步骤仍在 Core 单个写事务内调用既有 Handler；真实 admission 的领域事件、FIFO 防重和 delivery lease/结算幂等
+  均保留。精确请求与响应丢失恢复由 [Channel Host Maintenance v1](../contracts/channel-host-maintenance-v1.md) 拥有。
 
 <a id="core-managed-content"></a>
 

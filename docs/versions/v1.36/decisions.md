@@ -195,6 +195,41 @@ main 独立使用 117/118 保存 Pending/Fast。直接选取任一侧的编号�
 - 接受两个旧 main schema 的显式兼容成本；常规升级仍复用同一个 admission/copy/switch owner，不增加运行时双写。
 - 保留 legacy receipt 的原 applied_at，并允许映射后的 126/127 先于低编号渠道 checkpoint；只有完整 128 才可作为 current。
 
+<a id="v1-36-d07"></a>
+## V1.36-D07：严格准入后原位事务升级，快照仅保留旧中断恢复
+
+### 背景与决定
+
+默认 Snapshot Switch 为每个旧合同复制整库、迁移副本、再保存原 main/sidecar 并切换。即使只是 Pending/Fast
+additive schema 或 contract seal，时间、磁盘占用和故障面仍随历史数据库体积增长。逐步迁移已经具备 receipt，
+不需要为了正常 schema 升级再建立第二份完整权威状态。
+
+保留租约、双 namespace 排歧、exact ticket、source contract/receipt/schema fingerprint 与 identity 复核；确认后只在
+原 authority 使用既有逐版本 IMMEDIATE 事务迁移。每步 schema/data/marker/receipt 同时提交，失败回滚本步、下次从
+已提交 receipt 继续。main 117/118 的精确映射不变，只从 staging 移到原库事务。不引入 planner、strategy 或 descriptor registry。
+
+停止为普通升级创建 snapshot/manifest/backup、替换文件或执行全库完整性扫描。关键 schema 使用 metadata 检查，
+关闭外键重建的步骤在提交前检查显式受影响表。完整诊断、用户备份、损坏恢复与一般历史投影补算各自独立；既有历史
+manifest 仍按原对象身份恢复。迁移后重验同一 main 并重新 admission，不允许失败或重试时初始化空库。
+
+仅明确的数据库启动瞬时错误使用独立 250/750/1500ms 重试，不占用 crash budget；确定性错误保留壳层恢复入口。
+用户仍使用原来的 400ms 内容区反馈，统一“正在打开会话”；最终失败为“暂时无法打开会话”，技术细节留在诊断。
+
+该决定替代 V1.31-D03 与本文件 D06 的默认副本执行策略，不改变其权威准入、不覆盖未知对象或 receipt 汇合语义。
+当前规范为 [Desktop Runtime Availability v2](../../contracts/desktop-runtime-availability-v2.md)、
+[Channel/Main Schema Join v2](../../contracts/channel-main-schema-join-v2.md)与
+[Availability-first Runtime](../../architecture/availability-first-runtime.md#migration-switch)。
+
+### 取舍与后果
+
+- 接受逐版本提交后“已完成部分升级”的可恢复状态，不承诺失败时整个文件仍等同于升级前；原权威位置和业务数据仍受保护。
+- 不选择所有步骤包进一个大事务：失败会重做前面全部工作，增加锁持有时间；receipt 已提供明确的继续边界。
+- 不选择多级 migration planner 或常态保留 copy fallback：增加长期策略组合，并掩盖未审计迁移的事务边界问题。
+- 不删除旧 manifest 恢复：已安装版本可能在切换中被中断，不能因默认路径轻量化使这些现场失去恢复能力。
+- 不把 SQL 错误统一当作 transient 或 corruption：只重试明确锁/短暂 I/O；未知合同、换库和不匹配 schema 必须拒绝。
+- 已审计 117–125 与可达旧链；72/90/96/97 的事务外 DDL 修回本步骤事务，局部外键检查移到提交前。
+  验证归属与尚未完成的外部验收仍以本版本实施计划为准，不由本决定推断完成。
+
 ## 版本编号合并说明
 
 2026-08-30 合并 `main@27c6b16f` 时，主线已使用 v1.31 保存其他功能。渠道分支

@@ -1136,12 +1136,14 @@ export class DingTalkChannelSettingsService {
       for (const aggregate of snapshot.pendingAggregates) {
         await this.#finalize(aggregate.aggregateId).catch(() => undefined)
       }
-      const tick = await this.#command('channels.dingtalk.host.tick', {
+      const tick = await this.#dependencies.core.request<{
+        deliveries: ClaimedDelivery[]
+      }>('channels.dingtalk.host.tick', {
         workerId: WORKER_ID,
         limit: 20
       })
-      const deliveries = Array.isArray(tick.payload.deliveries)
-        ? tick.payload.deliveries as ClaimedDelivery[]
+      const deliveries = Array.isArray(tick.deliveries)
+        ? tick.deliveries
         : []
       for (const delivery of deliveries) await this.#deliver(delivery)
     } catch (error) {

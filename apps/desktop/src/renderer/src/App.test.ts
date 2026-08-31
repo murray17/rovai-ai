@@ -284,7 +284,7 @@ describe('availability-first workspace gate', () => {
     }))).toBe(true)
   })
 
-  it('explains an occupied authority without presenting an empty workspace', () => {
+  it('keeps an occupied authority technical reason out of the recovery copy', () => {
     const copy = bootstrapAuthorityCopy(supervisorSnapshot({
       fullCoreState: 'blocked',
       authorityState: {
@@ -295,22 +295,21 @@ describe('availability-first workspace gate', () => {
       startupPhase: null
     }))
 
-    expect(copy.title).toContain('另一个 Rovai Core')
-    expect(copy.description).toContain('没有创建第二份数据')
-    expect(`${copy.title}${copy.description}`).not.toMatch(/空工作区|空列表/)
+    expect(copy.title).toBe('暂时无法打开会话')
+    expect(copy.description).toContain('导出诊断')
+    expect(`${copy.title}${copy.description}`).not.toMatch(/Core|工作区|数据|authority/)
   })
 
-  it('describes Windows preparation refusal as a shell-only state with a desktop restart', () => {
+  it('uses the same product recovery copy for Windows preparation failures', () => {
     const copy = bootstrapAuthorityCopy(supervisorSnapshot({
       fullCoreState: 'blocked',
       authorityState: { kind: 'unknown' },
       startupPhase: 'preparing_windows_data_root'
     }))
 
-    expect(copy.title).toContain('数据目录尚未准备好')
-    expect(copy.description).toContain('Core 尚未启动')
-    expect(copy.description).toContain('重启桌面壳层')
-    expect(`${copy.title}${copy.description}`).not.toMatch(/数据库损坏|权限已修复/)
+    expect(copy.title).toBe('暂时无法打开会话')
+    expect(copy.description).toContain('重新打开')
+    expect(`${copy.title}${copy.description}`).not.toMatch(/Core|数据库|壳层|目录/)
   })
 })
 
@@ -683,11 +682,13 @@ describe('cold startup route presentation', () => {
       onRetry: () => undefined
     }))
     expect(loading).toContain('data-startup-route="camp"')
-    expect(loading).toContain('正在打开对话')
-    expect(loading).toContain('最近内容即将就绪')
+    expect(loading).toContain('正在打开会话')
+    expect(loading).toContain('准备好后会自动打开')
     expect(loading).not.toContain('startup-gate')
-    expect(waiting).toContain('Core unavailable')
-    expect(waiting).toContain('重试')
+    expect(waiting).not.toContain('Core unavailable')
+    expect(waiting).toContain('暂时无法打开会话')
+    expect(waiting).toContain('重新打开')
+    expect(waiting).toContain('导出诊断')
   })
 })
 

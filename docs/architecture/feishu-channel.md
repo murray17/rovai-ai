@@ -3,7 +3,7 @@ document_type: architecture
 architecture: feishu-channel
 authority: feishu-channel-component-and-authority-boundaries
 status: accepted
-last_updated: 2026-08-30
+last_updated: 2026-08-31
 ---
 
 # 飞书渠道架构
@@ -248,6 +248,10 @@ reconciliation 后才恢复物化。若目标已经移出则 fail closed。已�
 阻止任何新 Run。群 roster 读取不完整时所有这些边界都 fail closed。
 
 ## 输出、恢复与秘密
+
+共享 Host tick 按 [Channel Host Maintenance v1](../contracts/channel-host-maintenance-v1.md) 使用直接参数与响应，
+不生成 commandId 或永久 poll 回执；超时、投影、FIFO 提升和 delivery 领取仍原子提交。响应丢失依靠持久 lease 恢复，
+真实入站、绑定、admission 事件与 delivery settlement 的防重不变；历史 tick 回执不清理。
 
 `project_selection` 是唯一不依赖 ChannelTurnRequest 的 delivery：它关联 exact PendingCampBinding，使用冻结的
 acknowledgement App 直接发送到原群或原 Topic。payload 只有会话显示名、opaque 项目选项、nonce/version 与

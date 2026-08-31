@@ -1,7 +1,7 @@
 ---
 document_type: current-decision-navigation
 authority: current-authority-and-rationale-routing
-last_updated: 2026-08-30
+last_updated: 2026-08-31
 ---
 
 # 当前规范与决定理由导航
@@ -14,10 +14,11 @@ last_updated: 2026-08-30
 
 - Camp 队员 Fast 当前规范：[Camp Member Fast v1](../contracts/camp-member-fast-v1.md)、[Runtime 边界](../architecture/runtime-catalog-boundaries.md#camp-队员-fast-边界)、[Usage v4](../contracts/runtime-usage-monitoring-v4.md)；理由：[V1.34-D01](../versions/v1.34/decisions.md#v1-34-d01)。
 
-- 启动分层补充规范：[可选功能门禁](../contracts/desktop-runtime-availability-v1.md#7-authority-ready-and-optional-subsystem-gates)、[Windows Bootstrap assessment](../contracts/desktop-runtime-availability-v1.md#8-windows-pre-ready-bootstrap-assessment)；理由：[V1.31-D05](../versions/v1.31/decisions.md#v1-31-d05)、[V1.31-D06](../versions/v1.31/decisions.md#v1-31-d06)。
-- 渠道/main 数据迁移汇合：[Channel/Main Schema Join v1](../contracts/channel-main-schema-join-v1.md)、[Migration switch](../architecture/availability-first-runtime.md#migration-switch)；理由：[V1.36-D06](../versions/v1.36/decisions.md#v1-36-d06)。
+- 启动分层补充规范：[可选功能门禁](../contracts/desktop-runtime-availability-v2.md#7-authority-ready-and-optional-subsystem-gates)、[Windows Bootstrap assessment](../contracts/desktop-runtime-availability-v2.md#8-windows-pre-ready-bootstrap-assessment)；理由：[V1.31-D05](../versions/v1.31/decisions.md#v1-31-d05)、[V1.31-D06](../versions/v1.31/decisions.md#v1-31-d06)。
+- 渠道/main 数据迁移汇合：[Channel/Main Schema Join v2](../contracts/channel-main-schema-join-v2.md)、[原位升级与旧 switch 恢复](../architecture/availability-first-runtime.md#migration-switch)；理由：[V1.36-D06](../versions/v1.36/decisions.md#v1-36-d06)、[V1.36-D07](../versions/v1.36/decisions.md#v1-36-d07)。
+- 普通升级去整库复制、逐事务恢复与启动重试：[Desktop Runtime Availability v2](../contracts/desktop-runtime-availability-v2.md#4-migration-and-recovery)；理由：[V1.36-D07](../versions/v1.36/decisions.md#v1-36-d07)。
 
-- 当前规范：[Desktop 可用性与权威准入](../architecture/foundational-invariants.md#desktop-authority-admission)、[Availability-first Runtime](../architecture/availability-first-runtime.md)、[Desktop Runtime Availability v1](../contracts/desktop-runtime-availability-v1.md)、[基础 Core 不变量](../architecture/foundational-invariants.md#core-command-transaction)、[通知架构](../architecture/notification-episodes.md)、[Notification Episode v4](../contracts/notification-episode-v4.md)。
+- 当前规范：[Desktop 可用性与权威准入](../architecture/foundational-invariants.md#desktop-authority-admission)、[Availability-first Runtime](../architecture/availability-first-runtime.md)、[Desktop Runtime Availability v2](../contracts/desktop-runtime-availability-v2.md)、[基础 Core 不变量](../architecture/foundational-invariants.md#core-command-transaction)、[通知架构](../architecture/notification-episodes.md)、[Notification Episode v4](../contracts/notification-episode-v4.md)。
 - 理由来源：[v0.02](../versions/v0.02/decisions.md)、[v0.06](../versions/v0.06/decisions.md)、[v0.28](../versions/v0.28/decisions.md)、[v0.71](../versions/v0.71/decisions.md)、[V1.31-D01](../versions/v1.31/decisions.md#v1-31-d01)、[V1.31-D02](../versions/v1.31/decisions.md#v1-31-d02)、[V1.31-D03](../versions/v1.31/decisions.md#v1-31-d03)。
 
 ## Camp、Workspace 与 Attachments
@@ -32,6 +33,7 @@ last_updated: 2026-08-30
 
 ## Channels 与 External Principals
 
+- 内部调度合同：[Channel Host Maintenance v1](../contracts/channel-host-maintenance-v1.md)；只取消 poll 回执，保留真实业务命令与 Outbox 恢复。
 - 当前规范：[Channel Storage v2](../contracts/channel-storage-v2.md)、[飞书渠道架构](../architecture/feishu-channel.md)、[Feishu Channel v6](../contracts/feishu-channel-v6.md)、[钉钉渠道架构](../architecture/dingtalk-channel.md)、[DingTalk Channel v4](../contracts/dingtalk-channel-v4.md)、[Camp Membership v1](../contracts/camp-membership-v1.md)、[ContextManifest Evidence v22](../contracts/context-manifest-evidence-v22.md)和[渠道设置](../ui/components/channel-settings.md)。
 - 飞书理由来源：[V1.35-D01（已由 D09 取代）](../versions/v1.35/decisions.md#v1-35-d01)、[V1.35-D02](../versions/v1.35/decisions.md#v1-35-d02)、[V1.35-D03](../versions/v1.35/decisions.md#v1-35-d03)、[V1.35-D04（话题扩张部分已由 D15 取代）](../versions/v1.35/decisions.md#v1-35-d04)、[V1.35-D05](../versions/v1.35/decisions.md#v1-35-d05)、[V1.35-D06](../versions/v1.35/decisions.md#v1-35-d06)、[V1.35-D07](../versions/v1.35/decisions.md#v1-35-d07)、[V1.35-D08](../versions/v1.35/decisions.md#v1-35-d08)、[V1.35-D09（私聊投递部分已由 D12 取代）](../versions/v1.35/decisions.md#v1-35-d09)、[V1.35-D10](../versions/v1.35/decisions.md#v1-35-d10)、[V1.35-D11](../versions/v1.35/decisions.md#v1-35-d11)、[V1.35-D12](../versions/v1.35/decisions.md#v1-35-d12)、[V1.35-D13（终态展示与 view state 已由 D16 取代）](../versions/v1.35/decisions.md#v1-35-d13)、[V1.35-D14（命令展示与 callback 已由 D16 取代）](../versions/v1.35/decisions.md#v1-35-d14)、[V1.35-D15](../versions/v1.35/decisions.md#v1-35-d15)和[V1.35-D16](../versions/v1.35/decisions.md#v1-35-d16)。
 - 钉钉与共享渠道存储理由来源：[V1.36-D01（存储由 D04、OAuth 控制面由 D05 取代）](../versions/v1.36/decisions.md#v1-36-d01)、[V1.36-D02](../versions/v1.36/decisions.md#v1-36-d02)、[V1.36-D03](../versions/v1.36/decisions.md#v1-36-d03)、[V1.36-D04](../versions/v1.36/decisions.md#v1-36-d04)和[V1.36-D05](../versions/v1.36/decisions.md#v1-36-d05)。

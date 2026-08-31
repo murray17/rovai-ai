@@ -412,7 +412,7 @@ function assertBootstrapState(state, context) {
     && state.snapshot.capabilities.diagnosticsExport === true
     && state.snapshot.capabilities.fullCoreRetry === true,
   `${context} returned the wrong capability matrix: ${JSON.stringify(state.snapshot.capabilities)}`)
-  assert(state.title.includes('工作区') && !state.authoritativeTree,
+  assert(state.title === '暂时无法打开会话' && !state.authoritativeTree,
     `${context} mounted the wrong root: ${JSON.stringify(state)}`)
   assert(state.camps === 0 && state.members === 0 && state.memory === 0,
     `${context} exposed authoritative business surfaces: ${JSON.stringify(state)}`)

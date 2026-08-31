@@ -32,7 +32,8 @@ Owner 可在私聊或群聊显式 `@Bot` 后复用现有 Quick Chat、项目选�
   Contract 升到 `v1.36 / projection schema 77`；Migration 124 增加共享 `channel_credentials` 与
   `channel_developer_sessions`，切换到 `v1.37 / projection schema 78`；Migration 125 添加不可变终态 snapshot 并清理旧
   console view state，推进到 `v1.38 / projection schema 79`；本次合并以 126/127 接入 main Pending/Fast，
-  128 汇合到 `v1.39 / projection schema 80`，保留两侧受支持旧库与业务数据；
+  128 汇合到 `v1.39 / projection schema 80`，保留两侧受支持旧库与业务数据；129 在此基础上删除重复 Evidence 索引，
+  推进到 `v1.40 / projection schema 81`，唯一约束与所有业务行保持原样；
 - 账号连接使用 Main 隔离的官方 Web Session 扫码/确认；以 corpId + staffId 校验身份，新身份与 Cookie Snapshot
   通过 Core 原子 `account.commitConnection` 一次写入 `rovai.sqlite`；失败只丢弃 staged jar，旧账号与 Session 不变；
 - 不需要 Rovai OAuth Client、loopback、Device Flow 或 token broker。schema-2 Cookie 重启恢复、官方 SSO 隐藏续接；
@@ -66,6 +67,12 @@ Owner 可在私聊或群聊显式 `@Bot` 后复用现有 Quick Chat、项目选�
   不携带 Renderer 的结构化 `@你` 展示缓存，不改变源消息或 Agent Context；超长正文完整拆分，通知仅在最后一张卡出现；
 - 设置页保留飞书/钉钉 Tab、官方登录窗口、队员发布、审批人选择、官方应用管理链接和 Provider-local 绑定诊断。
 
+## 本轮存储优化
+
+共享 Host 维护按 [Channel Host Maintenance v1](../../contracts/channel-host-maintenance-v1.md) 取消永久 poll 回执，
+保留同事务的队列推进、真实 admission 审计和 Outbox lease 恢复。此次内部维护/物理索引优化不改变模型上下文或 UI，
+不清理历史 event/Evidence、不执行 VACUUM，也不改变备份复制策略。属于局部可逆实现，无需新增 Version Decision。
+
 ## 保守能力边界
 
 - 同一钉钉消息直接 `@` 多个 Bot 的完整 canonical mapping 尚无真实租户证据；普通群只在 `isInAtList` 且 bounded canonical
@@ -92,7 +99,7 @@ Stream fast ACK、入站 normalize/topic 拒绝、Owner gate、统一 admission�
 | Version lifecycle | 已更新 | 保留 main v1.33 Pending 与 v1.34 Fast；渠道历史/当前目录顺延至 v1.35/v1.36，v1.36 为唯一 current。迁入的历史决定只改元数据、ID 和链接；Data Contract 汇合另由新迁移拥有。 |
 | Decisions | 已更新 | [v1.36 决定](decisions.md)保留既有 D01–D05，并由 D06 记录已安装渠道 ledger 与 main schema 的无损汇合取舍。 |
 | Contracts | 已更新 | [DingTalk Channel v4](../../contracts/dingtalk-channel-v4.md)拥有 Web Session、Cookie schema 2、封闭 Console 发布与中断恢复；[Channel Storage v2](../../contracts/channel-storage-v2.md)继续拥有 SQLite 原子事务、飞书三态检查与钉钉 completed 同应用凭据恢复；[Feishu Channel v6](../../contracts/feishu-channel-v6.md)继承 v5 双层折叠和预算，分页唯一更新为同步 response card，避免预先 PATCH 与空 ACK 竞争，不新增 Migration；旧合同冻结为历史入口。 |
-| Architecture | 已更新 | 钉钉/飞书架构保留渠道范围；[Availability-first Runtime](../../architecture/availability-first-runtime.md#migration-switch) 与 [Channel/Main Schema Join v1](../../contracts/channel-main-schema-join-v1.md)补充旧主线与旧渠道的精确迁移汇合。 |
+| Architecture | 已更新 | 钉钉/飞书架构保留渠道范围；[Availability-first Runtime](../../architecture/availability-first-runtime.md#migration-switch) 与 [Channel/Main Schema Join v2](../../contracts/channel-main-schema-join-v2.md)拥有旧主线/渠道精确汇合及原位逐事务升级。 |
 | UI | 已更新 | [渠道设置](../../ui/components/channel-settings.md)保留 Provider Tab、钉钉官方登录/审批/发布与 Provider-local 诊断合同，钉钉说明同步 Web Session；飞书终态文字/command、结果框与客户端本地折叠不变。 |
 | Runtime Activity | 确认无需更新 | 钉钉继续消费既有公开 AgentRun Evidence 和 CampMessage，不新增 Runtime activity kind 或 Adapter mapping。 |
 | Runtime compatibility | 确认无需更新 | 不改变 Product Runtime command、Session、模型、权限、平台准入或实测支持矩阵。 |
@@ -124,6 +131,19 @@ Stream fast ACK、入站 normalize/topic 拒绝、Owner gate、统一 admission�
 渠道记录顺延到 v1.35/v1.36，仅变更元数据、ID/锚点和链接。迁移的新规范为
 [Channel/Main Schema Join v1](../../contracts/channel-main-schema-join-v1.md)，不覆盖已安装的渠道 migration ledger。
 两侧旧库经过真实 ticket/copy/switch 后保留原数据；新的 schema/marker 拒绝矩阵和完整门禁见实施计划。
+
+### 普通升级轻量化：2026-08-31
+
+上述 copy/switch 为主线合并当时的实施记录；当前执行策略已由 [V1.36-D07](decisions.md#v1-36-d07) 与
+[Desktop Runtime Availability v2](../../contracts/desktop-runtime-availability-v2.md)替代。严格确认 authority 后，
+普通升级直接在票据的精确原库运行逐版本事务，不复制整库、创建新 manifest/backup、默认全库检查或替换文件。
+每步 DDL/DML 与 receipt 原子提交，中断后保留已完成步骤并继续；旧 manifest 兼容恢复仍在。
+
+保留 126/127 的精确映射和 128 的 `v1.39/schema 80` 历史封口；此前索引优化的 129/`v1.40/schema 81` 仍为目标，
+不再新增 migration。关键 schema metadata 和局部外键在各自边界校验，原库消失/替换时不允许自动或手动重试建空库。
+启动瞬时重试独立于 crash budget，产品保持 400ms 延迟与原布局，统一“正在打开会话”及安全的最终失败恢复入口。
+117–125 与可达旧链审计、隔离回归和实际验证结果见[实施计划](implementation-plan.md#普通升级原位事务与启动反馈)。
+本次不推送、不打包、不安装或重启日常 App，不写日常数据库，也不改变钉钉既有 NO-GO 外部验收边界。
 
 ### 飞书分页回退修正
 
