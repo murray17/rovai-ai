@@ -388,8 +388,8 @@ Composer 与历史消息的人物信息卡截图是此交互的必留视觉证�
 
 Skill 页面验收必须先证明 Core 返回十四项 official Skill，再证明列表只展示其中十二项
 `user_managed` Skill；`cli-operations` 与 `memory-stewardship` 两项 `system_required` Skill 不产生列表行、
-禁用开关、生效范围或 locked badge。新安装的 `ui-ux-pro-max` 开关为开启，`tasteful-ui` 为关闭，其余
-可配置项默认开启。十二个可配置 Skill 都由持久 `Skill.id` 经 FNV-1a 映射到
+禁用开关、生效范围或 locked badge。各项初始开关状态与 bundled registry 的默认值一致。
+十二个可配置 Skill 都由持久 `Skill.id` 经 FNV-1a 映射到
 `--identity-1..8` 中一个 token（不要求十二项覆盖八种颜色），七个短标签显示“Rovai”，五个固定上游
 Skill 短标签显示“GitHub”；主行不存在来源明细，`DonkeyKing01/tasteful-ui-skill` / `159ccd47` 与
 `mattpocock/skills` / `84fdeffd` 只在“详情”中出现。列表名称/简介/来源字号至少为
