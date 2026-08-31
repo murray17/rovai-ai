@@ -114,7 +114,8 @@ ROVAI_DEV_USER_DATA_DIR="$(mktemp -d)/user-data" pnpm dev
 
 ## 钉钉 Web Session 验收前置
 
-钉钉连接使用 Rovai Main 的隔离官方登录窗口，不需要 OAuth Client 环境变量、loopback server、设备授权、token broker
+钉钉连接使用 Rovai 内置 QR Dialog；Main 隐藏加载官方页，必要时在 Dialog 内容区嵌入同一个 sandbox 原生页面。
+不打开系统浏览器或独立可见登录窗口，不需要 OAuth Client 环境变量、loopback server、设备授权、token broker
 或 DWS。用户须在具备企业应用开发能力的授权组织中扫码；能进入后台本身不等于具有创建/发布权限。
 不能借用第三方 Client Secret、用户 Chrome Profile 或日常 App 的 Cookie，也不能用 Bot AppKey 代替开发者登录。
 
@@ -126,9 +127,14 @@ ROVAI_DEV_USER_DATA_DIR="$(mktemp -d)/user-data" pnpm dev
 创建取得 ID 后所有恢复使用同一应用；未知创建结果不能重发创建。网页会话的重启/SSO 续接实测与 packaged App/Core
 恢复必须分别验收，不能彼此替代。Schema-1 OAuth Profile 保留到用户显式重连成功；不做伪造 Cookie 的自动迁移。
 
-字段、刷新、feature gate 与错误见 [DingTalk Channel v4](../contracts/dingtalk-channel-v4.md)。验收还须覆盖取消、断网、
+字段、刷新、feature gate 与错误见 [DingTalk Channel v5](../contracts/dingtalk-channel-v5.md)。验收还须覆盖取消、断网、
 明确撤销后重连与 Cookie CAS 保存；普通网络异常不得清空 Session。没有独立生产 OAuth Client 已不构成阻塞，
 但 Owner/Core/群聊/卡片等关键链路证据不完整时仍保持 NO-GO。
+
+登录呈现改动运行 `pnpm test:dingtalk-login` 与 `pnpm test:desktop-bridge`。前者在全新临时 userData/Skill Library
+使用生产 Renderer/preload/native view、仅本机 HTTP fixture 验证 UI 和 IPC，不启动 Core，不扫码或创建应用。
+`ROVAI_KEEP_DINGTALK_LOGIN_FIXTURE=1` 可保留测试生成的截图；原生页面截图与 Renderer 截图分开，不把占位图当作已绘制的远端页。
+真实扫码后的组织选择与安全挑战仍需在隔离实例单独验收，不能用本地模拟页面替代。
 
 ## 打包产物：构建与运行分开
 

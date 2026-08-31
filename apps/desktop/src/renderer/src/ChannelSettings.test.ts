@@ -22,6 +22,18 @@ describe('Channel settings', () => {
     }
   })
 
+  it.each(['Error', 'DingTalkConsoleError', 'DingTalkDeveloperApiError'])(
+    'unwraps Electron %s failures without alerting on an exact cancellation', (name) => {
+      const wrapped = (message: string): Error => new Error(
+        `Error invoking remote method 'rovai:channels-connect': ${name}: ${message}`
+      )
+      expect(channelErrorMessage(wrapped('dingtalk_operation_cancelled'))).toBeNull()
+      expect(channelErrorMessage(wrapped('dingtalk_open_platform_unavailable')))
+        .toBe('暂时无法连接钉钉开放平台，请检查网络后重试。')
+      expect(channelErrorMessage(wrapped('dingtalk_operation_cancelled_extra'))).not.toBeNull()
+    }
+  )
+
   it('renders the Rovai Settings header and an honest loading state before Main responds', () => {
     const markup = renderToStaticMarkup(createElement(ChannelSettings, {
       agents: [agent('agent-a', 0)]
@@ -58,7 +70,7 @@ describe('Channel settings', () => {
     expect(markup).toContain('>等待连接</button>')
   })
 
-  it('renders DingTalk beside Feishu with only browser login and no topic promise', () => {
+  it('renders DingTalk beside Feishu with one Web Session login and no topic promise', () => {
     const snapshot = unavailableSnapshot()
     snapshot.channels.push({
       kind: 'dingtalk',
@@ -103,7 +115,7 @@ describe('Channel settings', () => {
   })
 
   it.each(['not_connected', 'session_expired', 'connected'] as const)(
-    'offers one DingTalk browser connection action for %s',
+    'offers one DingTalk connection action for %s',
     (status) => {
       const snapshot = unavailableSnapshot()
       snapshot.channels = [{

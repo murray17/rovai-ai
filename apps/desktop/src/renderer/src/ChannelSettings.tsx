@@ -17,6 +17,7 @@ import {
 } from './AppDialog'
 import { MemberAvatar } from './MemberAvatar'
 import { SettingsPageHeader } from './SettingsPageHeader'
+import { ChannelLoginViewport } from './ChannelLoginViewport'
 import { memberBotAppDescription } from '../../shared/channel-member-bot-copy'
 
 export function visibleChannelMembers(agents: readonly AgentProfile[]): AgentProfile[] {
@@ -89,6 +90,12 @@ export function ChannelSettings({ agents }: { agents: AgentProfile[] }): React.J
     }
   }, [])
 
+  const refreshLoginQr = useCallback(async (attemptId: string): Promise<void> => {
+    setError(null)
+    try { await window.rovai.channels.refreshLoginQr(attemptId) }
+    catch (nextError) { setError(channelErrorMessage(nextError)) }
+  }, [])
+
   const publishChannel = snapshot?.channels.find((candidate) => candidate.kind === publishKind) ?? null
 
   return (
@@ -129,6 +136,7 @@ export function ChannelSettings({ agents }: { agents: AgentProfile[] }): React.J
         kind={selectedKind}
         busy={busy !== null}
         onClose={(attemptId) => void cancelQrAttempt(attemptId)}
+        onRefresh={(attemptId) => void refreshLoginQr(attemptId)}
       />
 
       <PublishBotDialog
@@ -543,43 +551,50 @@ function QrDialog({
   snapshot,
   kind,
   busy,
-  onClose
+  onClose,
+  onRefresh
 }: {
   snapshot: ChannelSettingsSnapshot | null
   kind: ChannelKind
   busy: boolean
   onClose: (attemptId: string) => void
+  onRefresh: (attemptId: string) => void
 }): React.JSX.Element {
   const attempt = snapshot?.activeQrAttempt ?? null
   if (!attempt) return <></>
   const attemptKind = attempt.kind ?? kind
   const providerName = attemptKind === 'dingtalk' ? '钉钉' : '飞书'
+  const interaction = attemptKind === 'dingtalk' && attempt.stage === 'awaiting_interaction'
+  const committing = attemptKind === 'dingtalk' && attempt.stage === 'saving_local_session'
   return (
-    <Dialog.Root open onOpenChange={(open) => { if (!open) onClose(attempt.attemptId) }}>
+    <Dialog.Root open onOpenChange={(open) => { if (!open && !committing) onClose(attempt.attemptId) }}>
       <Dialog.Portal>
         <Dialog.Overlay className="dialog-overlay app-dialog-overlay" />
-          <AppDialogContent className="channel-qr-dialog">
+        <AppDialogContent className={`channel-qr-dialog${attemptKind === 'dingtalk' ? ' is-dingtalk' : ''}${interaction ? ' has-platform-view' : ''}`}>
           <AppDialogHeader
             title={`登录${providerName}开放平台`}
-            description={attemptKind === 'dingtalk'
-              ? '在钉钉登录窗口中扫码或确认登录。本次不会创建应用、读取 App Secret 或发布 Bot。'
-              : '使用飞书扫码登录开发者平台。本次不会创建应用、读取 App Secret 或发布 Bot。'}
+            description={`使用${providerName}扫码登录开发者平台。本次不会创建应用、读取 App Secret 或发布 Bot。`}
             icon="shield"
-            closeDisabled={busy && attempt.stage !== 'failed'}
+            closeDisabled={committing || (attemptKind !== 'dingtalk' && busy && attempt.stage !== 'failed')}
           />
           <AppDialogBody className="channel-qr-body">
-            <div className={`channel-qr-frame is-${attempt.stage}`}>
-              {attempt.qrDataUrl
-                ? <img src={attempt.qrDataUrl} alt={`${providerName}连接二维码`} />
-                : <span aria-hidden="true"><ChannelMark kind={attemptKind} /></span>}
-            </div>
-            <strong>{attempt.detail}</strong>
+            {interaction
+              ? <ChannelLoginViewport key={attempt.attemptId} attemptId={attempt.attemptId} />
+              : <div className={`channel-qr-frame is-${attempt.stage}`}>
+                  {attempt.qrDataUrl
+                    ? <img src={attempt.qrDataUrl} alt={`${providerName}连接二维码`} />
+                    : <span aria-hidden="true"><ChannelMark kind={attemptKind} /></span>}
+                </div>}
+            <strong role="status" aria-live="polite">{attempt.detail}</strong>
             <small>{attempt.expiresAt
               ? `二维码有效期至 ${formatLocalTime(attempt.expiresAt)}`
               : '开发者会话保存在 Rovai 本地数据库，不会暴露给页面。'}</small>
           </AppDialogBody>
           <AppDialogFooter note="登录后，后续发布会复用同一开发者会话。">
-            <button className="quiet-button" type="button" onClick={() => onClose(attempt.attemptId)}>
+            {attemptKind === 'dingtalk' && attempt.stage === 'expired' && <button
+              className="primary-button" type="button" onClick={() => onRefresh(attempt.attemptId)}
+            >刷新二维码</button>}
+            <button className="quiet-button" type="button" disabled={committing} onClick={() => onClose(attempt.attemptId)}>
               {attempt.stage === 'failed' ? '关闭' : '取消'}
             </button>
           </AppDialogFooter>
@@ -825,7 +840,7 @@ function assertChannelSettingsSnapshot(value: ChannelSettingsSnapshot): ChannelS
 export function channelErrorMessage(error: unknown): string | null {
   const raw = error instanceof Error && error.message ? error.message : ''
   const message = raw
-    .replace(/^Error invoking remote method '[^']+': Error:\s*/, '')
+    .replace(/^Error invoking remote method '[^']+': (?:[A-Za-z_$][\w$]*Error|Error):\s*/, '')
     .trim()
   if (message === 'feishu_login_cancelled') return null
   if (message === 'dingtalk_operation_cancelled') return null
@@ -860,6 +875,7 @@ export function channelErrorMessage(error: unknown): string | null {
     dingtalk_web_session_store_invalid: '暂时无法读取本机钉钉登录态，数据已保留，请稍后重试。',
     dingtalk_web_session_store_unavailable: '暂时无法保存钉钉登录态，请稍后重试；已有会话和应用绑定会保留。',
     dingtalk_login_timeout: '本次钉钉登录等待超时，请重新连接；已有登录态会保留。',
+    dingtalk_login_view_unavailable: '暂时无法显示钉钉登录页，请关闭后重新连接。',
     dingtalk_login_identity_mismatch: '当前登录的钉钉账号或企业与原账号不一致，请重新连接。',
     dingtalk_console_protocol_unverified: '当前版本尚未完成钉钉后台此步骤的验证，操作已停止；已有应用身份会保留。',
     dingtalk_open_platform_unavailable: '暂时无法连接钉钉开放平台，请检查网络后重试。',

@@ -3,7 +3,7 @@ document_type: ui-component
 component: channel-settings
 authority: channel-settings-presentation-and-interaction
 status: accepted
-last_updated: 2026-08-30
+last_updated: 2026-08-31
 ---
 
 # 渠道设置
@@ -11,7 +11,7 @@ last_updated: 2026-08-30
 渠道设置是 Owner 在 Rovai 本机维护飞书/钉钉连接与队员 Bot 的 Renderer surface。群首次项目选择发生在对应外部会话的
 Owner-only 卡片中；Renderer 不提供 Channel 项目目录或会话绑定操作。领域状态和错误按 Provider 分别见
 [Feishu Channel v6](../../contracts/feishu-channel-v6.md)与
-[DingTalk Channel v4](../../contracts/dingtalk-channel-v4.md)；本页只拥有信息层级、交互与可访问性。
+[DingTalk Channel v5](../../contracts/dingtalk-channel-v5.md)；本页只拥有信息层级、交互与可访问性。
 
 ## 页面结构
 
@@ -43,7 +43,12 @@ Dialog、状态点和间距复用现有组件语法。
 `system_credential_encryption_unavailable`；身份读取超时和页面失败使用中文可操作提示，不向用户显示 `unknown` 或原始异常文本。
 连接行统一说明“开发者账号会话 · 保存在 Rovai 本地数据库”。
 
-钉钉使用同一个 modal 结构，由 Main 打开隔离的官方开放平台登录窗口，frame 只显示钉钉标记和当前阶段，不伪造二维码。未连接时为
+钉钉使用同一个 modal 结构，标题“登录钉钉开放平台”，直接展示 Main 从官方登录页读取的二维码，不打开系统浏览器或独立窗口。
+扫码后清除二维码并显示确认状态；平台提示过期时提供“刷新二维码”，未取得可信过期时间不显示倒计时。
+需要组织选择/安全确认时仅扩大同一个 Dialog，在内容区嵌入 Main-owned 原生官方页面；没有可提取的 QR 时也保留这个交互入口。
+原生页不持有 Rovai bridge；随窗口缩放和内容滚动裁剪，不能覆盖标题、关闭或取消按钮。普通 QR、状态和存储说明分行呈现，
+沿用 Day/Night Token、现有图标与按钮。关闭按钮、取消和 Escape 均取消 exact attempt，只有原子保存阶段短暂禁用。
+未连接时为
 “连接钉钉”，已连接或明确失效时为“重新连接”；进行中显示“等待授权…”。设备授权按钮、提示、等待状态和备用入口均删除。
 说明开发者 Web Session 保存在 Rovai 本地数据库，本次不创建应用或读取 AppSecret。重启恢复 Cookie，平台 SSO 能自动续接
 时不打开 Dialog；只有明确失效才显示“登录已失效，请重新连接”。取消登录是无告警的 no-op；网络、超时、存储或新
@@ -161,5 +166,5 @@ N 统计整轮 command，不计正文，也不是当前页数量；无 command �
 - [设置工作区 brief](../../../apps/desktop/.impeccable/surfaces/settings-workspace.md)
 - [Feishu Channel v6](../../contracts/feishu-channel-v6.md)
 - [飞书渠道架构](../../architecture/feishu-channel.md)
-- [DingTalk Channel v4](../../contracts/dingtalk-channel-v4.md)
+- [DingTalk Channel v5](../../contracts/dingtalk-channel-v5.md)
 - [钉钉渠道架构](../../architecture/dingtalk-channel.md)

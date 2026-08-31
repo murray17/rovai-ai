@@ -2378,6 +2378,14 @@ export type ChannelConversationKind = 'p2p' | 'group' | 'topic'
 
 export type ChannelQrAttemptPurpose = 'account_login'
 
+/** A presentation-only viewport in the trusted Rovai Renderer, never a URL. */
+export interface ChannelLoginViewBounds {
+  x: number
+  y: number
+  width: number
+  height: number
+}
+
 export interface ChannelQrAttemptView {
   kind?: ChannelKind
   attemptId: string
@@ -2388,6 +2396,7 @@ export interface ChannelQrAttemptView {
     | 'preparing'
     | 'awaiting_scan'
     | 'scan_confirmed'
+    | 'awaiting_interaction'
     | 'inspecting_identity'
     | 'saving_local_session'
     | 'connected'
@@ -2476,6 +2485,8 @@ export interface ChannelsApi {
     kind?: ChannelKind
   ): Promise<ChannelSettingsSnapshot>
   cancelQrAttempt(attemptId: string): Promise<ChannelSettingsSnapshot>
+  setLoginViewBounds(attemptId: string, bounds: ChannelLoginViewBounds | null): Promise<void>
+  refreshLoginQr(attemptId: string): Promise<void>
   onChanged(listener: (snapshot: ChannelSettingsSnapshot) => void): () => void
 }
 

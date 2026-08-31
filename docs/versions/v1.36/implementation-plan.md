@@ -8,7 +8,7 @@ last_updated: 2026-08-31
 
 # v1.36 实施计划
 
-> 当前状态：钉钉已按 [DingTalk Channel v4](../../contracts/dingtalk-channel-v4.md) 接入 Web Session 发布。
+> 当前状态：钉钉已按 [DingTalk Channel v5](../../contracts/dingtalk-channel-v5.md) 接入 Web Session 发布与内置扫码。
 > 同一测试应用的免审发布、产品只读恢复/头像上传/Stream 已通过隔离实测；Owner 入站/Core/群聊/卡片与 packaged
 > 恢复尚未完成，钉钉整体仍为 NO-GO。早期 checkpoint 记录不再代表当前协议完成度，详见[研究记录](../../research/dingtalk-web-session-probe.md)。
 
@@ -29,6 +29,29 @@ last_updated: 2026-08-31
 - [x] 设置页 Provider Tab、钉钉连接/发布/审批/管理入口、Provider-local 诊断与双主题样式；
 - [x] 单元测试覆盖 Console API wire、Web Session、Provisioner、Open API、Stream readiness/ACK、Inbound、Migration、Core admission 和 Renderer；
 - [x] 完成仓库全量 Rust、TypeScript、文档、UI detector 与 Desktop build 门禁并记录本次结果。
+
+## 2026-08-31 钉钉内置扫码与静默取消
+
+- [x] `dingtalk_operation_cancelled` 在 Host 作为 no-op 收敛，Renderer 兼容 Electron 的自定义 Error 包装；
+  网络/身份/存储失败仍显示，取消或迟到身份不提交连接、不清除旧账号；初始读取失败也释放 attempt；
+- [x] 沿用飞书的 Rovai Dialog、图标、按钮与 Day/Night Token，DingTalk QR 直接读取官方可见 canvas；
+  状态与存储说明分行，二维码留白；不打开独立可见窗口，不伪造 QR 或过期倒计时；
+- [x] Main sandbox `WebContentsView` 在必要交互时嵌入内容区；只给 Renderer 有界 PNG/封闭阶段，只接收 exact-attempt
+  矩形和刷新，不暴露 Cookie/Token、URL、脚本或通用浏览能力。缩放、滚动、动画和退出清理均有回归；
+- [x] 定向 Vitest 5 文件139项、全量 Vitest 127文件1171项、typecheck、Desktop build、真实 contextBridge 回归通过；
+  新 `pnpm test:dingtalk-login` 使用生产 Renderer/preload/native view 和本机页面，验证11类 UI/隔离行为；
+  人工检查 Day/Night QR、过期、原生页单独截图与200%内容裁剪，不把 Renderer 占位截图当原生页面；
+- [x] 匿名官方登录页的真实 QR 已在隔离 Electron 中经产品 DOM observer 读取；无用户 Cookie、扫码提交或应用创建。
+  frame 读取不等待无关资源完成，另有真实 Electron 的慢资源 fixture 覆盖；
+- [x] `pnpm docs:test`（9项）、`pnpm docs:check`、以 `48a9140f` 为 base 的 `pnpm docs:check:ci` 通过；
+  [DingTalk Channel v5](../../contracts/dingtalk-channel-v5.md) 新增本轮交互/错误合同，v4 保持冻结；
+- [ ] 用户在新内置 Dialog 中真实扫码后的组织选择/安全挑战、Core 原子连接及 packaged 验收仍需单独验证；
+  不以本地 fixture 代替，不改变钉钉其他外部端到端 NO-GO 项。
+
+这是局部可逆的登录呈现调整，不新增 Version Decision、不改变模型上下文、持久数据协议、发布或权限规则。
+Impeccable 仅用于沿用既有 surface 和安静取消的错误交互；没有新视觉体系或 hook。本轮没有 Git index 写入、提交/推送、
+打包、安装或重启日常 App。首次 Electron 并行运行的 bridge 用例退出超时，单独复跑通过；新夹具等待 DOM 的期限及
+macOS 原生层截图清理已收敛，不放宽产品超时、安全设置或真实验收标准。
 
 ## 2026-08-31 渠道轮询与索引优化
 

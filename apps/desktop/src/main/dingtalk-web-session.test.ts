@@ -7,35 +7,60 @@ import {
 
 const navigation = vi.hoisted(() => ({
   destination: 'https://open-dev.dingtalk.com/', loadFailure: false,
-  windows: [] as Array<{ options: Record<string, unknown>; destroyed: boolean }>
+  windows: [] as Array<{ options: Record<string, unknown>; destroyed: boolean }>,
+  observation: { kind: 'loading' } as unknown,
+  beforeObserve: () => {},
+  views: [] as Array<{ options: Record<string, unknown>; setBounds: ReturnType<typeof vi.fn>; reload: ReturnType<typeof vi.fn> }>
 }))
-vi.mock('electron', () => ({
-  session: { fromPartition: vi.fn() },
-  BrowserWindow: class {
-    readonly entry: { options: Record<string, unknown>; destroyed: boolean }
-    url = 'about:blank'
-    readonly webContents = {
-      getURL: () => this.url, isLoading: () => false,
-      setWindowOpenHandler: vi.fn(), on: vi.fn()
+vi.mock('electron', () => {
+  const page = () => {
+    let loaded = false
+    let closed = false
+    return {
+      getURL: () => loaded ? navigation.destination : 'about:blank', isLoading: () => false,
+      setWindowOpenHandler: vi.fn(), on: vi.fn(), setZoomFactor: vi.fn(), focus: vi.fn(),
+      isDestroyed: () => closed, close: vi.fn(() => { closed = true }), reload: vi.fn(),
+      mainFrame: { executeJavaScript: vi.fn(async () => { navigation.beforeObserve(); return navigation.observation }) },
+      loadURL: async () => {
+        if (navigation.loadFailure) throw new Error('net unavailable')
+        loaded = true
+      }
     }
+  }
+  class Window {
+    readonly entry: { options: Record<string, unknown>; destroyed: boolean }
+    readonly webContents = page()
+    readonly contentView = { addChildView: vi.fn(), removeChildView: vi.fn() }
     constructor(options: Record<string, unknown>) {
       this.entry = { options, destroyed: false }
       navigation.windows.push(this.entry)
     }
     setMenuBarVisibility(): void {}
-    async loadURL(): Promise<void> {
-      if (navigation.loadFailure) throw new Error('net unavailable')
-      this.url = navigation.destination
-    }
+    loadURL(): Promise<void> { return this.webContents.loadURL() }
+    once(): this { return this }
+    removeListener(): this { return this }
     isDestroyed(): boolean { return this.entry.destroyed }
     destroy(): void { this.entry.destroyed = true }
   }
-}))
+  return {
+    session: { fromPartition: vi.fn() }, BrowserWindow: Window, BaseWindow: Window,
+    WebContentsView: class {
+      readonly webContents = page()
+      readonly setBounds = vi.fn()
+      constructor(options: Record<string, unknown>) {
+        navigation.views.push({ options, setBounds: this.setBounds, reload: this.webContents.reload })
+      }
+    }
+  }
+})
 
 beforeEach(() => {
   navigation.windows = []
   navigation.destination = 'https://open-dev.dingtalk.com/'
   navigation.loadFailure = false
+  navigation.views = []
+  navigation.observation = { kind: 'loading' }
+  navigation.beforeObserve = () => {}
 })
 afterEach(() => vi.useRealTimers())
 
@@ -169,7 +194,10 @@ describe('DingTalk console cookie transport', () => {
   it('promotes a browser-free cookie jar on first login as well as on restart', async () => {
     const f = fixture()
     expect(await f.web.login({ signal: new AbortController().signal })).toEqual(identity)
-    expect(navigation.windows[0]!.options.show).toBe(true)
+    expect(navigation.windows[0]!.options.show).toBe(false)
+    expect(navigation.views[0]!.options).toMatchObject({ webPreferences: {
+      sandbox: true, nodeIntegration: false, contextIsolation: true, devTools: false
+    } })
     expect(f.apiSession.cookies.set).toHaveBeenCalledWith(expect.objectContaining({
       name: 'access_token', httpOnly: true, sameSite: 'lax', secure: true
     }))
@@ -193,6 +221,75 @@ describe('DingTalk console cookie transport', () => {
     f.session.cookies.get.mockClear()
     await f.web.snapshot()
     expect(f.session.cookies.get).toHaveBeenCalledOnce()
+  })
+
+  it('projects the official QR from a hidden page, deduplicates it and refreshes an expired QR in the same login', async () => {
+    vi.useFakeTimers()
+    const f = fixture()
+    const abort = new AbortController()
+    const onQrReady = vi.fn()
+    const onStage = vi.fn()
+    navigation.destination = 'https://login.dingtalk.com/oauth2/challenge.htm'
+    navigation.observation = { kind: 'qr', dataUrl: 'data:image/png;base64,aW1hZ2U=' }
+    const login = f.web.login({ signal: abort.signal, onQrReady, onStage })
+    const cancelled = expect(login).rejects.toThrow('dingtalk_operation_cancelled')
+    await vi.advanceTimersByTimeAsync(1_500)
+    expect(onQrReady).toHaveBeenCalledExactlyOnceWith({ payload: 'data:image/png;base64,aW1hZ2U=', expiresAt: null })
+    expect(navigation.windows.every((entry) => entry.options.show === false)).toBe(true)
+    expect(f.session.fetch).not.toHaveBeenCalled()
+
+    navigation.observation = { kind: 'expired' }
+    await vi.advanceTimersByTimeAsync(750)
+    expect(onStage).toHaveBeenLastCalledWith('expired')
+    f.web.refreshLoginQr()
+    expect(navigation.views[0]!.reload).toHaveBeenCalledOnce()
+    expect(onStage).toHaveBeenLastCalledWith('preparing')
+    navigation.observation = { kind: 'qr', dataUrl: 'data:image/png;base64,bmV3' }
+    await vi.advanceTimersByTimeAsync(750)
+    expect(onQrReady).toHaveBeenLastCalledWith({ payload: 'data:image/png;base64,bmV3', expiresAt: null })
+    abort.abort()
+    await vi.advanceTimersByTimeAsync(750)
+    await cancelled
+    expect(navigation.windows.every((entry) => entry.destroyed)).toBe(true)
+    f.web.refreshLoginQr()
+    expect(navigation.views[0]!.reload).toHaveBeenCalledOnce()
+  })
+
+  it('offers in-app official interaction only after a stable non-QR page, without popping up a window', async () => {
+    vi.useFakeTimers()
+    const f = fixture()
+    const abort = new AbortController()
+    const onStage = vi.fn()
+    navigation.destination = 'https://login.dingtalk.com/oauth2/challenge.htm'
+    navigation.observation = { kind: 'interaction' }
+    const login = f.web.login({ signal: abort.signal, onStage })
+    const cancelled = expect(login).rejects.toThrow('dingtalk_operation_cancelled')
+    await vi.advanceTimersByTimeAsync(1_500)
+    expect(onStage).not.toHaveBeenCalledWith('awaiting_interaction')
+    await vi.advanceTimersByTimeAsync(1_500)
+    expect(onStage).toHaveBeenLastCalledWith('awaiting_interaction')
+    expect(navigation.windows.every((entry) => entry.options.show === false)).toBe(true)
+    navigation.observation = { kind: 'scanned' }
+    await vi.advanceTimersByTimeAsync(750)
+    expect(onStage).toHaveBeenLastCalledWith('scan_confirmed')
+    abort.abort()
+    await vi.advanceTimersByTimeAsync(750)
+    await cancelled
+  })
+
+  it('drops a late QR observation after cancellation', async () => {
+    vi.useFakeTimers()
+    const f = fixture()
+    const abort = new AbortController()
+    const onQrReady = vi.fn()
+    navigation.destination = 'https://login.dingtalk.com/oauth2/challenge.htm'
+    navigation.observation = { kind: 'qr', dataUrl: 'data:image/png;base64,aW1hZ2U=' }
+    navigation.beforeObserve = () => abort.abort()
+    const login = f.web.login({ signal: abort.signal, onQrReady })
+    const cancelled = expect(login).rejects.toThrow('dingtalk_operation_cancelled')
+    await vi.advanceTimersByTimeAsync(1_500)
+    await cancelled
+    expect(onQrReady).not.toHaveBeenCalled()
   })
 
   it('does not turn a network failure into expiry or an interactive login', async () => {

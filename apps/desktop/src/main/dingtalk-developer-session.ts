@@ -1,11 +1,14 @@
 import { createHash } from 'node:crypto'
 import type { BrowserWindow } from 'electron'
+import type { ChannelLoginViewBounds } from '@contracts'
 import type { SqliteChannelDeveloperSessionStore } from './channel-credential-store'
 import {
   DingTalkConsoleError,
   ElectronDingTalkWebSession,
   requireDingTalkWebSession,
   type DingTalkWebIdentity,
+  type DingTalkWebLoginOptions,
+  type DingTalkWebLoginStage,
   type DingTalkWebSession,
   type StoredDingTalkWebSession
 } from './dingtalk-web-session'
@@ -19,9 +22,9 @@ export type DingTalkDeveloperIdentity = DingTalkWebIdentity & {
 }
 
 export type DingTalkLoginStage =
-  | 'preparing'
-  | 'awaiting_browser'
-  | 'inspecting_identity'
+  | DingTalkWebLoginStage
+  | 'loading_local_session'
+  | 'saving_local_session'
   | 'connected'
 
 export type PendingDingTalkDeveloperConnection = {
@@ -36,7 +39,10 @@ export interface DingTalkDeveloperSessionService {
   beginLogin(options: {
     signal: AbortSignal
     onStage?(stage: DingTalkLoginStage): void
+    onQrReady?: DingTalkWebLoginOptions['onQrReady']
   }): Promise<DingTalkDeveloperIdentity>
+  setLoginViewBounds?(bounds: ChannelLoginViewBounds | null): void
+  refreshLoginQr?(): void
   pendingConnection?(): PendingDingTalkDeveloperConnection
   activatePendingLogin?(sessionRevision: number): Promise<void>
   discardPendingLogin?(): Promise<DingTalkDeveloperIdentity | null>
@@ -63,6 +69,7 @@ export class ElectronDingTalkDeveloperSessionService implements DingTalkDevelope
   #legacy = false
   #active: LiveSession | null = null
   #pending: (PendingDingTalkDeveloperConnection & { web: DingTalkWebSession }) | null = null
+  #loggingIn: DingTalkWebSession | null = null
 
   constructor(options: {
     store: Pick<SqliteChannelDeveloperSessionStore, 'read' | 'replace'>
@@ -84,6 +91,7 @@ export class ElectronDingTalkDeveloperSessionService implements DingTalkDevelope
   beginLogin(options: {
     signal: AbortSignal
     onStage?(stage: DingTalkLoginStage): void
+    onQrReady?: DingTalkWebLoginOptions['onQrReady']
   }): Promise<DingTalkDeveloperIdentity> {
     return this.#exclusive(async () => {
       requireActive(options.signal)
@@ -91,6 +99,7 @@ export class ElectronDingTalkDeveloperSessionService implements DingTalkDevelope
       await this.#pending?.web.close().catch(() => undefined)
       this.#pending = null
       const web = this.#newSession()
+      this.#loggingIn = web
       try {
         const identity = await web.login(options)
         requireIdentity(identity)
@@ -103,9 +112,16 @@ export class ElectronDingTalkDeveloperSessionService implements DingTalkDevelope
       } catch (error) {
         await web.close().catch(() => undefined)
         throw safeSessionError(error)
+      } finally {
+        if (this.#loggingIn === web) this.#loggingIn = null
       }
     })
   }
+
+  // These presentation-only calls must not queue behind the pending login.
+  setLoginViewBounds(bounds: ChannelLoginViewBounds | null): void { this.#loggingIn?.setLoginViewBounds?.(bounds) }
+
+  refreshLoginQr(): void { this.#loggingIn?.refreshLoginQr?.() }
 
   pendingConnection(): PendingDingTalkDeveloperConnection {
     if (!this.#pending) throw sessionError('dingtalk_login_pending_session_missing')

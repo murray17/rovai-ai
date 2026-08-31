@@ -67,7 +67,7 @@ describe('DingTalk channel account connection', () => {
     const starting = fixture.service.start()
     try {
       await vi.waitFor(() => expect(fixture.developerSession.inspect).toHaveBeenCalled())
-      await expect(fixture.service.connect()).rejects.toThrow('dingtalk_operation_cancelled')
+      await expect(fixture.service.connect()).resolves.toBeUndefined()
       inspection.resolve(null)
       await starting
       expect(fixture.commands).not.toContain('channels.dingtalk.account.expire')
@@ -110,7 +110,7 @@ describe('DingTalk channel account connection', () => {
     const login = deferred<DingTalkDeveloperIdentity>()
     fixture.developerSession.beginLogin.mockReturnValueOnce(login.promise)
     const connecting = fixture.service.connect()
-    const assertion = expect(connecting).rejects.toThrow('dingtalk_operation_cancelled')
+    const assertion = expect(connecting).resolves.toBeUndefined()
     await vi.waitFor(() => expect(fixture.developerSession.beginLogin).toHaveBeenCalled())
     const attempt = (await fixture.service.get()).activeQrAttempt!
 
@@ -120,6 +120,101 @@ describe('DingTalk channel account connection', () => {
     expect(fixture.commands).not.toContain('channels.dingtalk.account.commitConnection')
     expect((await fixture.service.get()).provider.connection.account?.accountId).toBe('account-corp-a')
     expect((await fixture.service.get()).activeQrAttempt).toBeNull()
+  })
+
+  it.each(['Error', 'DingTalkConsoleError'])('finishes a cancelled login silently for %s and preserves the account', async (name) => {
+    const fixture = completedBotFixture({ credentialPresent: true })
+    fixture.developerSession.beginLogin.mockRejectedValueOnce(Object.assign(
+      new Error('dingtalk_operation_cancelled'), { name }
+    ))
+
+    await expect(fixture.service.connect()).resolves.toBeUndefined()
+
+    expect(fixture.developerSession.discardPendingLogin).toHaveBeenCalledOnce()
+    expect(fixture.developerSession.disconnect).not.toHaveBeenCalled()
+    expect(fixture.commands).not.toContain('channels.dingtalk.account.commitConnection')
+    expect(fixture.commands).not.toContain('channels.dingtalk.account.expire')
+    expect((await fixture.service.get()).activeQrAttempt).toBeNull()
+    expect((await fixture.service.get()).provider.connection).toMatchObject({
+      status: 'connected', account: { accountId: 'account-corp-a' }
+    })
+    expect(fixture.credential()?.appKey).toBe('ding-app-a')
+  })
+
+  it('projects QR stages and gates refresh/native viewport by the current attempt', async () => {
+    const fixture = completedBotFixture()
+    const login = deferred<DingTalkDeveloperIdentity>()
+    fixture.developerSession.beginLogin.mockReturnValueOnce(login.promise)
+    const connecting = fixture.service.connect()
+    await vi.waitFor(() => expect(fixture.developerSession.beginLogin).toHaveBeenCalledOnce())
+    const options = fixture.developerSession.beginLogin.mock.calls[0]![0]
+    const attemptId = (await fixture.service.get()).activeQrAttempt!.attemptId
+    const bounds = { x: 20, y: 100, width: 600, height: 400 }
+    const qr = { payload: 'data:image/png;base64,aW1hZ2U=', expiresAt: null } as const
+
+    options.onQrReady?.(qr)
+    expect((await fixture.service.get()).activeQrAttempt).toMatchObject({
+      attemptId, stage: 'awaiting_scan', qrDataUrl: qr.payload, expiresAt: null
+    })
+    fixture.service.setLoginViewBounds(attemptId, bounds)
+    fixture.service.refreshLoginQr('stale-attempt')
+    expect(fixture.developerSession.setLoginViewBounds).not.toHaveBeenCalled()
+    expect(fixture.developerSession.refreshLoginQr).not.toHaveBeenCalled()
+    fixture.service.refreshLoginQr(attemptId)
+    expect(fixture.developerSession.refreshLoginQr).toHaveBeenCalledOnce()
+
+    options.onStage?.('scan_confirmed')
+    expect((await fixture.service.get()).activeQrAttempt?.qrDataUrl).toBeNull()
+    fixture.service.refreshLoginQr(attemptId)
+    expect(fixture.developerSession.refreshLoginQr).toHaveBeenCalledOnce()
+    options.onStage?.('awaiting_interaction')
+    fixture.service.setLoginViewBounds('stale-attempt', bounds)
+    fixture.service.setLoginViewBounds(attemptId, bounds)
+    expect(fixture.developerSession.setLoginViewBounds).toHaveBeenCalledExactlyOnceWith(bounds)
+
+    options.onStage?.('expired')
+    fixture.service.refreshLoginQr(attemptId)
+    expect(fixture.developerSession.refreshLoginQr).toHaveBeenCalledTimes(2)
+    await fixture.service.cancelLogin('stale-attempt')
+    expect(options.signal.aborted).toBe(false)
+    await fixture.service.cancelLogin(attemptId)
+    expect(options.signal.aborted).toBe(true)
+    expect((await fixture.service.get()).activeQrAttempt).toBeNull()
+    expect(fixture.developerSession.setLoginViewBounds).toHaveBeenLastCalledWith(null)
+    // Late DOM observations and queued geometry must not resurrect a cancelled dialog.
+    options.onQrReady?.(qr)
+    options.onStage?.('awaiting_interaction')
+    fixture.service.refreshLoginQr(attemptId)
+    fixture.service.setLoginViewBounds(attemptId, bounds)
+    expect((await fixture.service.get()).activeQrAttempt).toBeNull()
+    expect(fixture.developerSession.refreshLoginQr).toHaveBeenCalledTimes(2)
+    expect(fixture.developerSession.setLoginViewBounds).toHaveBeenCalledTimes(2)
+    await expect(fixture.service.connect()).rejects.toThrow('已有一个钉钉登录流程')
+    login.resolve(identity('corp-other', 'owner-other'))
+    await expect(connecting).resolves.toBeUndefined()
+    expect(fixture.commands).not.toContain('channels.dingtalk.account.commitConnection')
+    expect(fixture.provision).not.toHaveBeenCalled()
+  })
+
+  it('clears a failed initial snapshot attempt so the Owner can reconnect again', async () => {
+    const fixture = completedBotFixture()
+    vi.spyOn(fixture.core, 'request').mockRejectedValueOnce(new Error('channel_storage_unavailable'))
+    await expect(fixture.service.connect()).rejects.toThrow('channel_storage_unavailable')
+    expect((await fixture.service.get()).activeQrAttempt).toBeNull()
+    fixture.developerSession.beginLogin.mockRejectedValueOnce(new Error('dingtalk_operation_cancelled'))
+    await expect(fixture.service.connect()).resolves.toBeUndefined()
+    expect(fixture.developerSession.beginLogin).toHaveBeenCalledOnce()
+  })
+
+  it.each(['dingtalk_open_platform_unavailable', 'dingtalk_login_timeout'])('still reports a real login failure: %s', async (code) => {
+    const fixture = completedBotFixture()
+    fixture.developerSession.beginLogin.mockRejectedValueOnce(Object.assign(new Error(code), { name: 'DingTalkConsoleError' }))
+
+    await expect(fixture.service.connect()).rejects.toThrow(code)
+
+    expect(fixture.developerSession.discardPendingLogin).toHaveBeenCalledOnce()
+    expect((await fixture.service.get()).activeQrAttempt).toBeNull()
+    expect((await fixture.service.get()).provider.connection.status).toBe('connected')
   })
 
   it('recovers a completed Bot missing its SQLite credential from the same frozen application', async () => {
@@ -502,6 +597,9 @@ function completedBotFixture(options: {
   const developerSession = {
     inspect: vi.fn<DingTalkDeveloperSessionService['inspect']>(async () => activeOwner),
     beginLogin: vi.fn<DingTalkDeveloperSessionService['beginLogin']>(async () => activeOwner),
+    setLoginViewBounds: vi.fn<NonNullable<DingTalkDeveloperSessionService['setLoginViewBounds']>>(),
+    refreshLoginQr: vi.fn<NonNullable<DingTalkDeveloperSessionService['refreshLoginQr']>>(),
+    discardPendingLogin: vi.fn(async () => activeOwner),
     disconnect: vi.fn(async () => undefined)
   }
   const service = new DingTalkChannelSettingsService({
@@ -520,7 +618,7 @@ function completedBotFixture(options: {
     streamRegistry: stream,
     createApiClient: () => api
   })
-  return { service, commands, provision, streamStart, verifyCard, developerSession,
+  return { service, core, commands, provision, streamStart, verifyCard, developerSession,
     credential: () => credential, intent: () => intent }
 }
 

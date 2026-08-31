@@ -164,6 +164,12 @@ const api: RovaiApi = {
     cancelQrAttempt(attemptId) {
       return ipcRenderer.invoke('rovai:channels-cancel-qr', attemptId)
     },
+    setLoginViewBounds(attemptId, bounds) {
+      return ipcRenderer.invoke('rovai:channels-login-view-bounds', attemptId, bounds)
+    },
+    refreshLoginQr(attemptId) {
+      return ipcRenderer.invoke('rovai:channels-refresh-login-qr', attemptId)
+    },
     onChanged(listener) {
       const handler = (
         _event: Electron.IpcRendererEvent,

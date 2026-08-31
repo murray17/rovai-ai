@@ -16,7 +16,7 @@ describe('Main-owned DingTalk Web Session', () => {
     expect(connected.userIdDigest).toMatch(/^sha256:[a-f0-9]{64}$/u)
     expect(JSON.stringify(connected)).not.toContain('cookie-secret')
     expect(f.store.record).toBeNull()
-    expect(stages).toEqual(['preparing', 'awaiting_browser', 'inspecting_identity'])
+    expect(stages).toEqual(['preparing', 'awaiting_scan', 'inspecting_identity'])
     await commit(f.service, f.store, connected.accountId)
     expect(f.store.record?.session).toEqual(cookieJar())
   })
@@ -27,6 +27,38 @@ describe('Main-owned DingTalk Web Session', () => {
     expect(await restarted.service.inspect()).toEqual(f.identity)
     expect(restarted.webs[0]!.restore).toHaveBeenCalledWith(cookieJar())
     expect(restarted.webs[0]!.login).not.toHaveBeenCalled()
+  })
+
+  it('forwards QR presentation and viewport controls without waiting for the login queue', async () => {
+    const web = webFixture(owner)
+    const store = new MemoryStore()
+    const service = new ElectronDingTalkDeveloperSessionService({ store, createSession: () => web })
+    let complete!: (identity: DingTalkWebIdentity) => void
+    const pending = new Promise<DingTalkWebIdentity>((resolve) => { complete = resolve })
+    web.login.mockImplementationOnce(async (options) => {
+      options.onStage?.('awaiting_scan')
+      options.onQrReady?.({ payload: 'data:image/png;base64,aW1hZ2U=', expiresAt: null })
+      return pending
+    })
+    const onQrReady = vi.fn()
+    const connecting = service.beginLogin({ signal: signal(), onQrReady })
+    await vi.waitFor(() => expect(onQrReady).toHaveBeenCalledOnce())
+    const bounds = { x: 20, y: 80, width: 600, height: 400 }
+    service.setLoginViewBounds(bounds)
+    service.refreshLoginQr()
+    expect(web.setLoginViewBounds).toHaveBeenCalledExactlyOnceWith(bounds)
+    expect(web.refreshLoginQr).toHaveBeenCalledOnce()
+    expect(store.record).toBeNull()
+    expect(web.request).not.toHaveBeenCalled()
+
+    complete(owner)
+    await connecting
+    service.setLoginViewBounds(bounds)
+    service.refreshLoginQr()
+    expect(web.setLoginViewBounds).toHaveBeenCalledOnce()
+    expect(web.refreshLoginQr).toHaveBeenCalledOnce()
+    await service.discardPendingLogin()
+    expect(store.record).toBeNull()
   })
 
   it.each(['dingtalk_open_platform_unavailable', 'dingtalk_open_platform_timeout', 'dingtalk_developer_session_expired'])(
@@ -217,7 +249,7 @@ function fixture(store = new MemoryStore()) {
     const web = webFixture(f.nextIdentity)
     if (f.nextLoginError) web.login.mockRejectedValueOnce(new DingTalkConsoleError(f.nextLoginError))
     else web.login.mockImplementation(async (options) => {
-      options.onStage?.('awaiting_browser')
+      options.onStage?.('awaiting_scan')
       options.onStage?.('inspecting_identity')
       f.afterLogin()
       return f.nextIdentity
@@ -234,6 +266,8 @@ function webFixture(identity: DingTalkWebIdentity) {
     get jar(): StoredDingTalkWebSession { return jar },
     set jar(value: StoredDingTalkWebSession) { jar = value },
     login: vi.fn<DingTalkWebSession['login']>(async () => identity),
+    setLoginViewBounds: vi.fn<NonNullable<DingTalkWebSession['setLoginViewBounds']>>(),
+    refreshLoginQr: vi.fn<NonNullable<DingTalkWebSession['refreshLoginQr']>>(),
     inspect: vi.fn<DingTalkWebSession['inspect']>(async () => identity),
     restore: vi.fn<DingTalkWebSession['restore']>(async (stored) => { jar = structuredClone(stored) }),
     snapshot: vi.fn<DingTalkWebSession['snapshot']>(async () => structuredClone(jar)),

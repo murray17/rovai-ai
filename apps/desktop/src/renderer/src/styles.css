@@ -5100,7 +5100,12 @@ button.attachment-open:disabled { cursor: wait; opacity: .76; }
 .channel-settings-state p { margin: 0; color: inherit; font-size: 10.5px; line-height: 1.6; }
 .channel-settings-inline-error { display: flex; min-height: 38px; align-items: center; justify-content: space-between; gap: 12px; margin-top: 18px; padding: 7px 10px 7px 13px; border-radius: 9px; color: var(--danger); background: var(--danger-soft); font-size: 10.5px; }
 .channel-qr-dialog { width: min(480px, calc(100vw - 48px)); }
+.dialog-content.app-dialog.channel-qr-dialog.has-platform-view { width: min(800px, calc(100vw - 48px)); }
+.channel-login-viewport { display: grid; width: 100%; height: clamp(140px, calc(100vh - 300px), 460px); place-items: center; overflow: hidden; border: 1px solid var(--line); border-radius: 8px; background: var(--qr-canvas); }
+.channel-login-viewport > span { max-width: 34ch; padding: 16px; color: var(--muted); font-size: 12px; line-height: 1.6; }
 .channel-qr-body { justify-items: center; text-align: center; }
+.channel-qr-dialog.is-dingtalk .channel-qr-body { display: grid; gap: 10px; }
+.channel-qr-dialog.is-dingtalk .channel-qr-frame { padding: 8px; }
 .channel-qr-frame { display: grid; width: 196px; height: 196px; place-items: center; overflow: hidden; border: 1px solid var(--line); border-radius: 12px; background: var(--qr-canvas); box-shadow: inset 0 0 0 7px var(--qr-canvas); }
 .channel-qr-frame img { display: block; width: 100%; height: 100%; object-fit: contain; }
 .channel-qr-frame > span { transform: scale(1.5); }

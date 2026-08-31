@@ -1,4 +1,4 @@
-import type { ChannelKind, ChannelSettingsSnapshot } from '@contracts'
+import type { ChannelKind, ChannelLoginViewBounds, ChannelSettingsSnapshot } from '@contracts'
 import type { ChannelSettingsService } from './channel-settings'
 import type { DingTalkChannelSettingsService } from './dingtalk-channel-settings'
 
@@ -120,6 +120,12 @@ export class ChannelSettingsCoordinator {
     }
     return this.get()
   }
+
+  setLoginViewBounds(attemptId: string, bounds: ChannelLoginViewBounds | null): void {
+    this.#dingtalk.setLoginViewBounds(attemptId, bounds)
+  }
+
+  refreshLoginQr(attemptId: string): void { this.#dingtalk.refreshLoginQr(attemptId) }
 
   dispose(): void {
     for (const unsubscribe of this.#unsubscribeChildren) unsubscribe()

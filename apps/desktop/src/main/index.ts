@@ -103,6 +103,7 @@ import { AppQuitCoordinator } from './app-quit-coordinator'
 import { ChannelSettingsService } from './channel-settings'
 import { createFeishuExecutionPreviewHost } from './feishu-execution-preview'
 import { ChannelSettingsCoordinator } from './channel-settings-coordinator'
+import { parseChannelLoginViewBounds } from './dingtalk-login-view'
 import { ChannelHostLifecycle } from './channel-host-lifecycle'
 import {
   SqliteChannelCredentialStore,
@@ -1160,6 +1161,18 @@ ipcMain.handle('rovai:channels-cancel-qr', (event, attemptId: unknown) => {
   requireMainWindow(event.sender)
   if (typeof attemptId !== 'string' || !attemptId) throw new Error('Invalid QR attempt ID')
   return channelSettings.cancelQrAttempt(attemptId)
+})
+
+ipcMain.handle('rovai:channels-login-view-bounds', (event, attemptId: unknown, bounds: unknown) => {
+  requireMainWindow(event.sender)
+  if (typeof attemptId !== 'string' || !attemptId) throw new Error('Invalid QR attempt ID')
+  channelSettings.setLoginViewBounds(attemptId, parseChannelLoginViewBounds(bounds))
+})
+
+ipcMain.handle('rovai:channels-refresh-login-qr', (event, attemptId: unknown) => {
+  requireMainWindow(event.sender)
+  if (typeof attemptId !== 'string' || !attemptId) throw new Error('Invalid QR attempt ID')
+  channelSettings.refreshLoginQr(attemptId)
 })
 
 ipcMain.handle('rovai:onboarding-get', () => requireOnboarding().get())

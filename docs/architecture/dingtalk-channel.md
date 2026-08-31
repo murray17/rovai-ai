@@ -8,7 +8,7 @@ last_updated: 2026-08-31
 
 # 钉钉渠道架构
 
-字段、状态和恢复合同见 [DingTalk Channel v4](../contracts/dingtalk-channel-v4.md)，credential 与 Developer Session 持久化见
+字段、状态和恢复合同见 [DingTalk Channel v5](../contracts/dingtalk-channel-v5.md)，credential 与 Developer Session 持久化见
 [Channel Storage v2](../contracts/channel-storage-v2.md)，共享 Camp admission、membership 与
 模型输入分别继续由 [Feishu Channel v2](../contracts/feishu-channel-v2.md)中已经 provider-neutral 的渠道核心、
 [Camp Membership v1](../contracts/camp-membership-v1.md)和
@@ -50,7 +50,10 @@ membership 与 Outbox。DingTalk Host 不直接创建 CampMessage、CampTurn 或
 
 ## Developer Web Session 与控制台 API
 
-Main 在隔离 Electron 窗口打开官方开放平台，用户扫码/确认并选择组织；`/baseInfo` 的 `corpId + staffId` 是 Owner 身份。
+Main 在隐藏、隔离的原生页面加载官方开放平台，把当前可信 QR PNG 投影到 Rovai 登录 Dialog；需要确认/选择组织时，
+同一个无 preload/Node 的 sandbox `WebContentsView` 嵌入 Dialog 内容区，Renderer 只传可见矩形，不获得页面或 Session 控制权。
+不打开系统浏览器或独立可见登录窗口。取消、完成和父窗口退出会清理页面及隐藏 host；取消是无告警的 no-op。
+`/baseInfo` 的 `corpId + staffId` 仍是 Owner 身份。
 Rovai 不需要预注册 OAuth Client、loopback、设备授权、token broker、第三方 Client Secret 或用户 Chrome Profile。
 平台 SSO 的 OAuth 页面只是平台自身的登录实现，不是 Rovai 的另一条授权链。
 
@@ -194,7 +197,7 @@ roster、finalize ready aggregate、领取 delivery 并结算。任何外部失�
 
 ## References
 
-- [DingTalk Channel v4](../contracts/dingtalk-channel-v4.md)
+- [DingTalk Channel v5](../contracts/dingtalk-channel-v5.md)
 - [Channel Storage v2](../contracts/channel-storage-v2.md)
 - [Camp Membership v1](../contracts/camp-membership-v1.md)
 - [渠道设置](../ui/components/channel-settings.md)

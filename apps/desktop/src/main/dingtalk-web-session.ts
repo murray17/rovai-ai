@@ -1,6 +1,10 @@
 import { randomUUID } from 'node:crypto'
 import { BrowserWindow, session as electronSession, type Cookie, type Session } from 'electron'
+import type { ChannelLoginViewBounds } from '@contracts'
 import { dingTalkConsoleFetch, type DingTalkConsoleFetch } from './dingtalk-console-transport'
+import {
+  DingTalkLoginView, DINGTALK_LOGIN_PAGE_OBSERVATION, parseDingTalkLoginPageObservation
+} from './dingtalk-login-view'
 
 export const DINGTALK_CONSOLE_ORIGIN = 'https://open-dev.dingtalk.com'
 const PORTAL_URL = `${DINGTALK_CONSOLE_ORIGIN}/`
@@ -22,6 +26,16 @@ export type StoredDingTalkCookie = Required<Pick<Cookie,
 export type StoredDingTalkWebSession = {
   schemaVersion: 2
   cookies: StoredDingTalkCookie[]
+}
+
+export type DingTalkWebLoginStage =
+  | 'preparing' | 'awaiting_scan' | 'scan_confirmed' | 'awaiting_interaction'
+  | 'expired' | 'inspecting_identity'
+
+export type DingTalkWebLoginOptions = {
+  signal: AbortSignal
+  onStage?(stage: DingTalkWebLoginStage): void
+  onQrReady?(qr: { payload: string; expiresAt: null }): void
 }
 
 export type DingTalkConsoleRequest = {
@@ -48,10 +62,9 @@ export class DingTalkConsoleError extends Error {
 /** Owns one isolated Chromium cookie jar. Never borrows a user's browser profile. */
 export interface DingTalkWebSession {
   restore(stored: StoredDingTalkWebSession): Promise<void>
-  login(options: {
-    signal: AbortSignal
-    onStage?(stage: 'awaiting_browser' | 'inspecting_identity'): void
-  }): Promise<DingTalkWebIdentity>
+  login(options: DingTalkWebLoginOptions): Promise<DingTalkWebIdentity>
+  setLoginViewBounds?(bounds: ChannelLoginViewBounds | null): void
+  refreshLoginQr?(): void
   inspect(signal?: AbortSignal): Promise<DingTalkWebIdentity>
   snapshot(): Promise<StoredDingTalkWebSession>
   request(path: string, options?: DingTalkConsoleRequest): Promise<unknown>
@@ -64,7 +77,9 @@ export class ElectronDingTalkWebSession implements DingTalkWebSession {
   readonly #fetchOverride: DingTalkConsoleFetch | undefined
   readonly #createSession: () => Session
   readonly #parent: () => BrowserWindow | null
-  readonly #windows = new Set<BrowserWindow>()
+  readonly #windows = new Set<BrowserWindow | DingTalkLoginView>()
+  #loginView: DingTalkLoginView | null = null
+  #refreshLogin: (() => void) | null = null
   readonly #closed = new AbortController()
 
   constructor(options: {
@@ -99,12 +114,13 @@ export class ElectronDingTalkWebSession implements DingTalkWebSession {
     }
   }
 
-  async login(options: {
-    signal: AbortSignal
-    onStage?(stage: 'awaiting_browser' | 'inspecting_identity'): void
-  }): Promise<DingTalkWebIdentity> {
-    return this.#visitPortal(true, options.signal, options.onStage)
+  async login(options: DingTalkWebLoginOptions): Promise<DingTalkWebIdentity> {
+    return this.#visitPortal(true, options.signal, options.onStage, options.onQrReady)
   }
+
+  setLoginViewBounds(bounds: ChannelLoginViewBounds | null): void { this.#loginView?.setBounds(bounds) }
+
+  refreshLoginQr(): void { this.#refreshLogin?.() }
 
   async inspect(signal?: AbortSignal): Promise<DingTalkWebIdentity> {
     try {
@@ -226,7 +242,10 @@ export class ElectronDingTalkWebSession implements DingTalkWebSession {
 
   async close(): Promise<void> {
     this.#closed.abort()
-    for (const window of this.#windows) if (!window.isDestroyed()) window.destroy()
+    this.#refreshLogin = null
+    for (const window of this.#windows) {
+      if (window instanceof DingTalkLoginView || !window.isDestroyed()) window.destroy()
+    }
     this.#windows.clear()
     await this.#session.clearStorageData()
   }
@@ -234,15 +253,18 @@ export class ElectronDingTalkWebSession implements DingTalkWebSession {
   async #visitPortal(
     interactive: boolean,
     signal?: AbortSignal,
-    onStage?: (stage: 'awaiting_browser' | 'inspecting_identity') => void
+    onStage?: DingTalkWebLoginOptions['onStage'],
+    onQrReady?: DingTalkWebLoginOptions['onQrReady']
   ): Promise<DingTalkWebIdentity> {
     if (signal?.aborted || this.#closed.signal.aborted) {
       throw new DingTalkConsoleError('dingtalk_operation_cancelled', true)
     }
     const portalSession = this.#session
     const parent = this.#parent()
-    const window = new BrowserWindow({
-      width: 1040, height: 800, show: interactive,
+    const loginView = interactive ? new DingTalkLoginView(portalSession, parent) : null
+    this.#loginView = loginView
+    const window = loginView ?? new BrowserWindow({
+      width: 1040, height: 800, show: false,
       title: '连接钉钉开发者账号',
       ...(parent ? { parent } : {}),
       webPreferences: {
@@ -251,7 +273,7 @@ export class ElectronDingTalkWebSession implements DingTalkWebSession {
       }
     })
     this.#windows.add(window)
-    window.setMenuBarVisibility(false)
+    if (window instanceof BrowserWindow) window.setMenuBarVisibility(false)
     window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
     window.webContents.on('will-navigate', (event, url) => {
       if (!isDingTalkPortalNavigation(url)) event.preventDefault()
@@ -267,8 +289,57 @@ export class ElectronDingTalkWebSession implements DingTalkWebSession {
     let loginSince: number | null = null
     let candidate: ElectronDingTalkWebSession | undefined
     let adopted = false
+    let pageGeneration = 0
+    let lastQrDataUrl = ''
+    let lastStage: DingTalkWebLoginStage = 'preparing'
+    let interactionSince: number | null = null
+    const emitStage = (stage: DingTalkWebLoginStage): void => {
+      if (lastStage === stage) return
+      lastStage = stage
+      onStage?.(stage)
+    }
+    const observeLoginPage = async (): Promise<void> => {
+      if (!loginView) return
+      const generation = pageGeneration
+      let observation
+      try {
+        observation = parseDingTalkLoginPageObservation(
+          // WebContents.executeJavaScript waits for the whole page to finish
+          // loading. Read the current frame so a slow optional resource cannot
+          // hold an already rendered QR behind the Rovai loading state.
+          await window.webContents.mainFrame.executeJavaScript(DINGTALK_LOGIN_PAGE_OBSERVATION)
+        )
+      } catch { return } // A navigation can dispose the old frame between polls.
+      if (generation !== pageGeneration || signal?.aborted || window.isDestroyed() || this.#closed.signal.aborted) return
+      if (observation.kind !== 'interaction') interactionSince = null
+      if (observation.kind === 'qr') {
+        loginView.setInteraction(false)
+        const changed = lastQrDataUrl !== observation.dataUrl || lastStage !== 'awaiting_scan'
+        lastQrDataUrl = observation.dataUrl
+        emitStage('awaiting_scan')
+        if (changed) onQrReady?.({ payload: observation.dataUrl, expiresAt: null })
+      } else if (observation.kind === 'interaction') {
+        interactionSince ??= Date.now()
+        if (Date.now() - interactionSince < 2_000) return
+        loginView.setInteraction(true)
+        emitStage('awaiting_interaction')
+      } else {
+        loginView.setInteraction(false)
+        emitStage(observation.kind === 'scanned' ? 'scan_confirmed'
+          : observation.kind === 'expired' ? 'expired' : 'preparing')
+      }
+    }
+    this.#refreshLogin = loginView ? () => {
+      if (window.isDestroyed() || signal?.aborted || !['expired', 'awaiting_scan'].includes(lastStage)) return
+      pageGeneration += 1
+      lastQrDataUrl = ''
+      interactionSince = null
+      loginView.setInteraction(false)
+      emitStage('preparing')
+      window.webContents.reload()
+    } : null
     const deadline = Date.now() + (interactive ? LOGIN_TIMEOUT_MS : INSPECT_TIMEOUT_MS)
-    onStage?.('awaiting_browser')
+    onStage?.('preparing')
     void window.loadURL(PORTAL_URL).then(() => { loaded = true }, () => { loadFailed = true })
     try {
       while (Date.now() < deadline) {
@@ -278,6 +349,7 @@ export class ElectronDingTalkWebSession implements DingTalkWebSession {
         const currentUrl = window.webContents.getURL()
         if (isDingTalkLoginUrl(currentUrl)) {
           loginSince ??= Date.now()
+          if (interactive) await observeLoginPage()
           // A navigation to login is not immediately expiry: allow the platform
           // to complete an automatic SSO redirect before requiring the user.
           if (!interactive && Date.now() - loginSince >= 3_000 && !window.webContents.isLoading()) {
@@ -306,12 +378,14 @@ export class ElectronDingTalkWebSession implements DingTalkWebSession {
             this.#session = candidate.#session
             this.#fetch = candidate.#fetch
             adopted = true
-            onStage?.('inspecting_identity')
+            loginView?.setInteraction(false)
+            emitStage('inspecting_identity')
             return identity
           } catch (error) {
             if (!(error instanceof DingTalkConsoleError)
               || !['dingtalk_developer_session_expired', 'dingtalk_login_identity_unavailable',
                 'dingtalk_open_platform_unavailable', 'dingtalk_open_platform_timeout'].includes(error.message)) throw error
+            if (interactive && error.message === 'dingtalk_login_identity_unavailable') await observeLoginPage()
           }
         } else if (loadFailed && !loaded && !window.webContents.isLoading()) {
           throw new DingTalkConsoleError('dingtalk_open_platform_unavailable')
@@ -323,7 +397,12 @@ export class ElectronDingTalkWebSession implements DingTalkWebSession {
       signal?.removeEventListener('abort', abort)
       this.#closed.signal.removeEventListener('abort', abort)
       this.#windows.delete(window)
-      if (!window.isDestroyed()) window.destroy()
+      if (this.#loginView === loginView) {
+        this.#loginView = null
+        this.#refreshLogin = null
+      }
+      if (loginView) loginView.destroy()
+      else if (!window.isDestroyed()) window.destroy()
       if (adopted) await portalSession.clearStorageData().catch(() => undefined)
       else await candidate?.close().catch(() => undefined)
     }
