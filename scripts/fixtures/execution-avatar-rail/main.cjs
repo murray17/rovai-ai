@@ -61,6 +61,7 @@ app.whenReady().then(async () => {
     }
   })()`)
   const click = async (selector, waitForScroll = true) => {
+    await focusWindow()
     const point = await run(`(() => { const node = document.querySelector(${JSON.stringify(selector)}); if (!node) throw new Error('Missing '+${JSON.stringify(selector)}); const r=node.getBoundingClientRect(); return { x:Math.round(r.x+r.width/2), y:Math.round(r.y+r.height/2) } })()`)
     window.webContents.sendInputEvent({ type: 'mouseMove', ...point })
     window.webContents.sendInputEvent({ type: 'mouseDown', ...point, button: 'left', clickCount: 1 })
@@ -68,7 +69,22 @@ app.whenReady().then(async () => {
     if (waitForScroll) await settle()
     return state()
   }
+  const focusWindow = async () => {
+    // Native keyboard input requires a focused window; DOM activeElement alone is not enough.
+    if (window.isFocused() && await run('document.hasFocus()')) return
+    if (!window.isFocused()) {
+      app.focus({ steal: true })
+      window.focus()
+    }
+    window.webContents.focus()
+    for (let attempt = 0; attempt < 80; attempt++) {
+      if (window.isFocused() && await run('document.hasFocus()')) return
+      await pause()
+    }
+    throw new Error('Execution avatar rail fixture did not gain keyboard focus')
+  }
   const key = async keyCode => {
+    await focusWindow()
     window.webContents.sendInputEvent({ type: 'keyDown', keyCode })
     if (keyCode === 'Enter') window.webContents.sendInputEvent({ type: 'char', keyCode: '\r' })
     window.webContents.sendInputEvent({ type: 'keyUp', keyCode })
@@ -76,11 +92,21 @@ app.whenReady().then(async () => {
     return state()
   }
   const focusAvatar = async agentId => {
+    await focusWindow()
     await run(`document.querySelector('.run-pulse-avatar-rail [data-agent-id="${agentId}"]').focus({preventScroll:true})`)
     await settle()
   }
+  const waitForState = async (predicate, description) => {
+    for (let attempt = 0; attempt < 120; attempt++) {
+      const value = await state()
+      if (predicate(value)) return value
+      await pause()
+    }
+    throw new Error(`Execution avatar rail did not reach ${description}`)
+  }
   const capture = async name => writeFileSync(join(dirname(userData), `${name}.png`), (await window.webContents.capturePage()).toPNG())
   const assertVisibleSelection = value => {
+    assert.ok(value.panel.height > 0 && value.rail.height > 0, 'The execution popover is visible')
     assert.ok(value.selectedRect.left >= value.rail.left - 1 && value.selectedRect.right <= value.rail.right + 1,
       `Selected avatar is clipped: ${JSON.stringify(value)}`)
   }
@@ -154,6 +180,8 @@ app.whenReady().then(async () => {
     value = await key('Left')
     assert.equal(value.focused, 'agent-1')
     value = await key('End')
+    value = await waitForState(value => value.focused === 'agent-20' && value.left === value.maximum,
+      'the last avatar and scroll boundary')
     assert.equal(value.focused, 'agent-20')
     assert.equal(value.left, value.maximum)
     assert.equal(value.selected, selectedBeforeKeyboard, 'Arrow navigation does not activate a different process')
@@ -179,6 +207,8 @@ app.whenReady().then(async () => {
       await click('.camp-detail-entry[data-detail="tasks"]')
       if (!await run("Boolean(document.querySelector('.task-related-runs button'))")) await click('.task-list-row')
       value = await click('.task-related-runs button')
+      value = await waitForState(value => value.panel.height > 0 && value.selected === 'agent-20' && value.left > 0,
+        'the related execution in the visible popover')
       assert.equal(value.selected, 'agent-20')
       assertVisibleSelection(value)
       assert.ok(value.left > 0 && value.sameNode)

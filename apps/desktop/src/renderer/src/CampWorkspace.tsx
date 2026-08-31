@@ -1181,7 +1181,7 @@ export function CampWorkspace({
   onCancelAgentRun = async () => undefined,
   stopping,
   onStop,
-  executionPlacement = 'bottom',
+  executionPlacement = 'inspector',
   onExecutionPlacementChange = async () => undefined,
   worldMapEnabled = true,
   workspaceEntrySnapshotReady = true,
@@ -4105,7 +4105,7 @@ export function CampWorkspace({
                         type="button"
                         disabled={executionPlacementPending}
                         onClick={moveExecutionToBottom}
-                      >{executionPlacementPending ? '正在保存…' : '将执行台移回底部'}</button>
+                      >{executionPlacementPending ? '正在保存…' : '移到底部'}</button>
                       {executionPlacementError && <span role="alert">{executionPlacementError.message}</span>}
                     </>}
                   </div>
@@ -4632,13 +4632,13 @@ function RunPulse({
   if (visibleProcesses.length === 0) return <></>
   const placementLabel = placementPending
     ? '正在保存'
-    : placement === 'bottom' ? '移到浮层' : '移回底部'
+    : placement === 'bottom' ? '移到浮层' : '移到底部'
   const placementAriaLabel = placement === 'bottom'
     ? '将执行台移到详情浮层并记住此位置'
-    : '将执行台移回会话底部并记住此位置'
+    : '将执行台移到会话底部并记住此位置'
   const placementTitle = placement === 'bottom'
     ? '移到浮层并记住此位置'
-    : '移回底部并记住此位置'
+    : '移到底部并记住此位置'
   return (
     <div className={`run-pulse run-pulse-${placement}`} aria-label="Agent 执行台">
       <div className="run-pulse-heading">
