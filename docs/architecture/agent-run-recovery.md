@@ -2,7 +2,7 @@
 document_type: architecture
 architecture: agent-run-recovery
 authority: agent-run-session-and-native-turn-recovery-boundaries
-last_updated: 2026-08-27
+last_updated: 2026-08-31
 ---
 
 # AgentRun Recovery
@@ -46,6 +46,12 @@ Approval、Runtime Delivery 和 prepared input，再分类 AgentRun：
 `recovery_blocked` 的 `runtime_recovery_required` 必须为 false。第二次启动不得重新标记为自动恢复，
 不得增加 execution epoch，也不得改变 accepted Delivery。
 
+完成上述分类和 MessageDelivery 启动结算后，Core 在开放普通执行前，以事务收敛旧版本仅因失败 Run
+的手动重试标记而残留 waiting 的 CampTurn。仅在 required 当前 Run 已失败、且该 Turn 没有任何
+非终态 Run 或 MessageDelivery 时，复用正常 Turn 聚合结算；
+真正的审批、恢复等待与执行占用不被绕过。重复启动不重写终态或重复记录结算事件，原失败证据、
+私有 Pending 输入与编辑占用均保留；续发仍由正常 Scheduler 的准入负责，恢复本身不发送消息。
+
 Migration 99/100 是两次 evidence-aware clean break：旧 Formatter 20 或 Manifest 20/Receipt v1 非终态输入在
 相应 View migration 前按 delivery/action evidence 终结，accepted outcome unknown 绝不能降为 cancelled。旧
 Manifest、payload Blob、Runtime Auth Receipt、ACK、Binding identity 和执行证据保留为 non-dispatchable history；
@@ -78,6 +84,11 @@ manual_retry_allowed = false
 accepted Runtime Input Delivery = unchanged
 CampTurn = recomputed
 ```
+
+required Run 失败后，等该轮所有当前 Run 责任与 MessageDelivery 结束，CampTurn 正常聚合为 failed。
+`manual_retry_allowed` 与 `retry_declined_at` 仅保留历史失败元数据，不代表执行占用，也不要求用户
+调用不存在的 Run 重试入口。Core 不重跑失败消息或自动创建 successor；
+[Pending Camp Input](../contracts/pending-camp-input-v1.md#自动续发错误和幂等)在该轮结算后按 FIFO 续发。
 
 CampTurn Stop、AgentRun 局部 Stop 与 Execution Budget 到期经同一 cancellation coordinator 走 Run 终态。
 CampTurn Stop 可使整轮成为 cancelled；Run-local Stop 不设置 Turn cancel request，required Run 取消后由
