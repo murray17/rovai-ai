@@ -75,4 +75,5 @@ last_updated: 2026-08-31
 
 上述是初始实施阶段的验证。后续真实 Runtime 补齐与结果见[图片验收](runtime-image-acceptance.md)：
 Antigravity 原生生成、TRAE/Copilot 专用图片结果已接入，六种 Runtime 已经过隔离 Core 的图片链。
-不是十三 Runtime 全部原生生图成功；没有真实飞书发件或 Windows 图片 UI 实测，不提升平台资格或日常 App。
+不是十三 Runtime 全部原生生图成功；没有真实飞书发件或 Windows 图片 UI 实测，不提升平台资格。
+后续 main 合并、完整回归与日常 App 安装结果见[本机交付记录](main-merge-and-daily-app.md)。

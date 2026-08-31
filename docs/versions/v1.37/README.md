@@ -29,7 +29,8 @@ last_updated: 2026-08-31
 - 当前仍 in_progress：Antigravity 边界已关闭，但 Cursor 非标准通知、所有 Runtime 原生生图及渠道实发
   并未全部验收；本机已观察到的工具/协议/上游限制保留，不提升任何 Runtime 平台资格。
 
-具体完成事实、测试 owner 与待办见[实施计划](implementation-plan.md)。没有 push、PR、安装或重启日常 App。
+具体完成事实、测试 owner 与待办见[实施计划](implementation-plan.md)。后续 main 合并、完整回归及
+Applications 非终止安装见[本机交付记录](main-merge-and-daily-app.md)；没有创建 PR 或重启日常 App。
 
 ## 跨版本文档影响
 

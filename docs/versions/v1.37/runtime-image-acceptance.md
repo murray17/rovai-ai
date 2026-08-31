@@ -81,5 +81,6 @@ Antigravity 生成图已人工检查截图。Camp snapshot 不含图片 bytes，
   `cda0585233b1a8957e5aada34335f879ecde7af8` 为显式 main base 的 `pnpm docs:check:ci`，以及
   `git diff --check` 通过；没有新增治理例外。
 
-原生 Runtime 与验收 Electron 均已退出，日常 App/Core 未重启。代码尚未提交、推送、打包或安装；
-没有将验收图片发送到飞书，也没有改变 DingTalk。
+原生 Runtime 与验收 Electron 均已退出，日常 App/Core 未重启。以上为图片验收阶段的事实，当时尚未
+提交、推送、打包或安装；没有将验收图片发送到飞书，也没有改变 DingTalk。之后的 main 合并与
+Applications 安装见[本机交付记录](main-merge-and-daily-app.md)。
