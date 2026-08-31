@@ -50,6 +50,7 @@ impl CampOpenService {
             }
             Some(reconcile_duration)
         };
+        crate::runtime::settle_pending_camp_cancellations(database, &camp_id)?;
         let projection_started_at = Instant::now();
         let projection = ReadModelService.camp_open_projection(database, &camp_id)?;
         Ok(CampOpenOutcome {
@@ -60,6 +61,7 @@ impl CampOpenService {
     }
 
     pub fn open(&self, database: &mut Database, camp_id: &str) -> Result<CampOpenOutcome> {
+        crate::runtime::settle_pending_camp_cancellations(database, camp_id)?;
         let projection_started_at = Instant::now();
         let projection = ReadModelService.camp_open_projection(database, camp_id)?;
         Ok(CampOpenOutcome {
@@ -154,6 +156,112 @@ mod slow_tests {
 
         drop(database);
         std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn open_repairs_only_cancellation_marked_work_in_the_requested_camp() {
+        use crate::collaboration::{
+            ExecutionRequest, TestCampMessageAddress, TestCampMessageCommand,
+        };
+        let mut database = crate::test_support::seeded_runtime_database_owned();
+        let service = CollaborationService::default();
+        let mut camps = Vec::new();
+        for index in 0..2 {
+            let mut create = CreateCampCommand::for_test_with_members(
+                database
+                    .directory()
+                    .join(format!("workspace-{index}"))
+                    .to_string_lossy()
+                    .into_owned(),
+                &["agent_1", "agent_2"],
+                "agent_1",
+            );
+            create.project_binding_kind = ProjectBindingKind::Directory;
+            let created = service
+                .create_camp(
+                    &mut database,
+                    &user_envelope(&format!("create-repair-{index}"), None, create),
+                )
+                .unwrap();
+            let camp_id = created.result.payload["campId"]
+                .as_str()
+                .unwrap()
+                .to_string();
+            let sent = service
+                .send_test_camp_message(
+                    &mut database,
+                    &user_envelope(
+                        &format!("send-repair-{index}"),
+                        Some(&camp_id),
+                        TestCampMessageCommand {
+                            camp_id: camp_id.clone(),
+                            draft_revision: None,
+                            body: "repair scope".into(),
+                            prepared_attachment_ids: Vec::new(),
+                            address: TestCampMessageAddress::Broadcast,
+                            reply_to_camp_message_id: None,
+                            execution: Some(ExecutionRequest {
+                                task_id: None,
+                                purpose: "repair scope".into(),
+                                completion_role: "required".into(),
+                                budget: None,
+                            }),
+                        },
+                    ),
+                )
+                .unwrap();
+            let runs = sent.result.payload["agentRunIds"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|id| id.as_str().unwrap().to_string())
+                .collect::<Vec<_>>();
+            assert_eq!(runs.len(), 2);
+            for run in &runs {
+                database.connection().execute("UPDATE agent_run SET status = 'waiting', wait_reason = 'runtime_delivery' WHERE id = ?1", [run]).unwrap();
+            }
+            database.connection().execute("UPDATE agent_run SET cancel_requested_at = '2026-08-31T00:00:00Z', cancel_reason_code = 'user_requested_agent_run_stop' WHERE id = ?1", [&runs[0]]).unwrap();
+            camps.push((camp_id, runs));
+        }
+        let projection = CampOpenService
+            .open(&mut database, &camps[0].0)
+            .unwrap()
+            .projection;
+        assert_eq!(
+            projection
+                .agent_runs
+                .iter()
+                .find(|run| run.id == camps[0].1[0])
+                .unwrap()
+                .status,
+            "cancelled"
+        );
+        assert_eq!(
+            projection
+                .agent_runs
+                .iter()
+                .find(|run| run.id == camps[0].1[1])
+                .unwrap()
+                .status,
+            "waiting"
+        );
+        assert_eq!(projection.turns[0].status, "waiting");
+        let other_status: String = database
+            .connection()
+            .query_row(
+                "SELECT status FROM agent_run WHERE id = ?1",
+                [&camps[1].1[0]],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(other_status, "waiting");
+        let changes = database.connection().total_changes();
+        CampOpenService.open(&mut database, &camps[0].0).unwrap();
+        assert_eq!(
+            database.connection().total_changes(),
+            changes,
+            "reopening a settled local cancellation must not write again"
+        );
     }
 
     #[test]

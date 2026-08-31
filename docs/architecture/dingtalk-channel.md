@@ -9,9 +9,9 @@ last_updated: 2026-08-31
 # 钉钉渠道架构
 
 字段、状态和恢复合同见 [DingTalk Channel v5](../contracts/dingtalk-channel-v5.md)，credential 与 Developer Session 持久化见
-[Channel Storage v2](../contracts/channel-storage-v2.md)，共享 Camp admission、membership 与
+[Channel Storage v3](../contracts/channel-storage-v3.md)，共享 Camp admission、membership 与
 模型输入分别继续由 [Feishu Channel v2](../contracts/feishu-channel-v2.md)中已经 provider-neutral 的渠道核心、
-[Camp Membership v1](../contracts/camp-membership-v1.md)和
+[Camp Membership v2](../contracts/camp-membership-v2.md)和
 [ContextManifest Evidence v22](../contracts/context-manifest-evidence-v22.md)拥有。取舍理由见
 [v1.36 决策记录](../versions/v1.36/decisions.md)。
 
@@ -180,7 +180,7 @@ App 或目标已移出时 fail closed。
 
 ## 恢复与秘密
 
-共享 Host tick 按 [Channel Host Maintenance v1](../contracts/channel-host-maintenance-v1.md) 使用无 commandId 的直接
+共享 Host tick 按 [Channel Host Maintenance v2](../contracts/channel-host-maintenance-v2.md) 使用无 commandId 的直接
 维护请求，不写永久 poll 回执。原事务、FIFO、delivery lease/重试及真实结算命令的永久幂等保留，飞书与钉钉复用同一实现。
 
 Core 在同一个 SQLite 保存 account、Developer Session、Bot credential、publication intent、Bot identity、conversation/
@@ -198,7 +198,7 @@ roster、finalize ready aggregate、领取 delivery 并结算。任何外部失�
 ## References
 
 - [DingTalk Channel v5](../contracts/dingtalk-channel-v5.md)
-- [Channel Storage v2](../contracts/channel-storage-v2.md)
-- [Camp Membership v1](../contracts/camp-membership-v1.md)
+- [Channel Storage v3](../contracts/channel-storage-v3.md)
+- [Camp Membership v2](../contracts/camp-membership-v2.md)
 - [渠道设置](../ui/components/channel-settings.md)
 - [v1.36 决策记录](../versions/v1.36/decisions.md)

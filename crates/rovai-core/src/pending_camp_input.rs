@@ -1268,24 +1268,9 @@ mod tests {
                 ),
             )
             .unwrap();
-        assert_eq!(result.result.status, CommandResultStatus::Accepted);
-        // An accepted Stop is not a completed Stop: A still owns execution until settled.
-        assert!(ready_heads(&database).unwrap().is_empty());
-        let transaction = database.connection_mut().transaction().unwrap();
-        transaction.execute("UPDATE agent_run SET status = 'cancelled', ended_at = datetime('now') WHERE camp_turn_id = ?1", [&turn_id]).unwrap();
-        let settled = crate::runtime::recompute_camp_turn(
-            &transaction,
-            &camp_id,
-            &turn_id,
-            &ActorRef::System {
-                component_id: "test".to_string(),
-            },
-            None,
-            &chrono::Utc::now().to_rfc3339(),
-        )
-        .unwrap();
-        assert_eq!(settled, "cancelled");
-        transaction.commit().unwrap();
+        assert_eq!(result.result.status, CommandResultStatus::Applied);
+        assert_eq!(result.result.payload["campTurnStatus"], "cancelled");
+        // The Stop transaction releases A's business ownership before Runtime cleanup.
         let item = read_queue(&database, &camp_id).unwrap().items.remove(0);
         let ready = ready_heads(&database).unwrap();
         assert_eq!(ready.len(), 1);

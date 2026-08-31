@@ -1128,7 +1128,10 @@ async fn cleanup_acp_client_terminals(
     let mut settled = HashSet::new();
     for (terminal_id, terminal) in terminals {
         let remaining = deadline.saturating_duration_since(Instant::now());
-        if timeout(remaining, terminal.wait_for_exit()).await.is_ok() {
+        if matches!(
+            timeout(remaining, terminal.wait_for_exit()).await,
+            Ok(Ok(_))
+        ) {
             settled.insert(terminal_id);
         }
     }
@@ -2395,6 +2398,35 @@ impl AcpHost {
             && self.pending.lock().await.is_empty()
             && self.routes.read().await.is_empty()
             && terminals_are_empty
+    }
+
+    pub(crate) async fn force_reap_until(&self, deadline: tokio::time::Instant) -> bool {
+        self.alive.store(false, Ordering::Release);
+        let (host_reaped, terminals_reaped) = tokio::join!(
+            async {
+                let Ok(mut child) = tokio::time::timeout_at(deadline, self.child.lock()).await
+                else {
+                    return false;
+                };
+                let _ = child.force_terminate_tree();
+                matches!(
+                    tokio::time::timeout_at(deadline, child.wait()).await,
+                    Ok(Ok(_))
+                )
+            },
+            async {
+                let Some(bridge) = &self.client_terminal_bridge else {
+                    return true;
+                };
+                tokio::time::timeout_at(deadline, async {
+                    bridge.release_all().await;
+                    bridge.is_empty().await
+                })
+                .await
+                    == Ok(true)
+            }
+        );
+        host_reaped && terminals_reaped
     }
 
     pub(crate) async fn shutdown_and_reap(&self) {

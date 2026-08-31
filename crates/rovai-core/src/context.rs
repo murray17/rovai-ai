@@ -1440,6 +1440,19 @@ impl ContextService {
             runtime_payload_digest,
         } = options;
         let transaction = database.connection_mut().transaction()?;
+        let active: bool = transaction.query_row(
+            r#"SELECT EXISTS(SELECT 1 FROM agent_run AS run
+                JOIN camp_turn AS turn ON turn.id = run.camp_turn_id
+                WHERE run.id = ?1 AND run.execution_epoch = ?2
+                  AND run.status IN ('running', 'waiting') AND run.cancel_requested_at IS NULL
+                  AND turn.status IN ('running', 'waiting') AND turn.cancel_requested_at IS NULL
+                  AND turn.execution_budget_exhausted_at IS NULL)"#,
+            params![agent_run_id, execution_epoch],
+            |row| row.get(0),
+        )?;
+        if !active {
+            anyhow::bail!("Runtime input preparation was fenced by Run settlement");
+        }
         if let Some(mut existing) = load_delivery(&transaction, agent_run_id, execution_epoch)? {
             let target = load_delivery_target(&transaction, &existing.id)?
                 .context("Runtime Input Delivery target does not exist")?;
@@ -1510,7 +1523,7 @@ impl ContextService {
                     r#"
                     UPDATE runtime_input_delivery
                     SET status = 'prepared', native_input_id = NULL,
-                        accepted_at = NULL, resolved_at = NULL,
+                        accepted_at = NULL, resolved_at = NULL, dispatch_started_at = NULL,
                         last_error = NULL, prepared_at = ?2, updated_at = ?2,
                         bootstrap_redelivery_present = ?3,
                         bootstrap_redelivery_revision = ?4,
@@ -1713,6 +1726,33 @@ impl ContextService {
         })
     }
 
+    /// Commit the external-send boundary before calling any Runtime adapter.
+    /// A false result forbids the send; cancellation and dispatch serialize here.
+    pub fn begin_runtime_input_dispatch(
+        &self,
+        database: &mut Database,
+        delivery_id: &str,
+        agent_run_id: &str,
+        execution_epoch: i64,
+    ) -> Result<bool> {
+        let now = chrono::Utc::now().to_rfc3339();
+        let transaction = database.connection_mut().transaction()?;
+        let changed = transaction.execute(
+            r#"UPDATE runtime_input_delivery SET dispatch_started_at = ?4, updated_at = ?4
+            WHERE id = ?1 AND agent_run_id = ?2 AND execution_epoch = ?3
+              AND status = 'prepared' AND dispatch_started_at IS NULL
+              AND EXISTS (SELECT 1 FROM agent_run AS run
+                  JOIN camp_turn AS turn ON turn.id = run.camp_turn_id
+                  WHERE run.id = ?2 AND run.execution_epoch = ?3
+                    AND run.status IN ('running', 'waiting') AND run.cancel_requested_at IS NULL
+                    AND turn.status IN ('running', 'waiting') AND turn.cancel_requested_at IS NULL
+                    AND turn.execution_budget_exhausted_at IS NULL)"#,
+            params![delivery_id, agent_run_id, execution_epoch, now],
+        )?;
+        transaction.commit()?;
+        Ok(changed == 1)
+    }
+
     pub fn acknowledge_input_delivery(
         &self,
         database: &mut Database,
@@ -1749,8 +1789,29 @@ impl ContextService {
         if updated != 1 {
             anyhow::bail!("Runtime Input Delivery changed before acknowledgement");
         }
-        let marker_updated = transaction.execute(
-            r#"
+        let current_execution: bool = transaction.query_row(
+            r#"SELECT EXISTS(SELECT 1 FROM agent_run AS run
+                JOIN conversation ON conversation.id = run.conversation_id
+                JOIN camp_turn AS turn ON turn.id = run.camp_turn_id
+                WHERE run.id = ?1 AND run.execution_epoch = ?2
+                  AND run.status IN ('running', 'waiting') AND run.cancel_requested_at IS NULL
+                  AND turn.status IN ('running', 'waiting') AND turn.cancel_requested_at IS NULL
+                  AND turn.execution_budget_exhausted_at IS NULL
+                  AND conversation.native_binding_id = ?3
+                  AND conversation.native_binding_generation = ?4)"#,
+            params![
+                row.agent_run_id,
+                row.execution_epoch,
+                row.native_binding_id,
+                row.native_binding_generation
+            ],
+            |row| row.get(0),
+        )?;
+        // A late acceptance is evidence only. It cannot move the current
+        // conversation's boundary or overwrite a successor's Native Binding.
+        if current_execution {
+            let marker_updated = transaction.execute(
+                r#"
             UPDATE conversation
             SET last_accepted_public_boundary_sequence = MAX(
                     last_accepted_public_boundary_sequence, ?3
@@ -1762,22 +1823,22 @@ impl ContextService {
               AND native_binding_generation = ?7
               AND last_accepted_public_boundary_sequence <= ?3
             "#,
-            params![
-                row.conversation_id,
-                row.native_binding_id,
-                row.boundary_camp_message_sequence,
-                row.charter_digest,
-                row.collaboration_state_digest,
-                now,
-                row.native_binding_generation,
-            ],
-        )?;
-        if marker_updated != 1 {
-            anyhow::bail!("Native Binding changed before input acknowledgement");
-        }
-        if let Some(redelivery_revision) = row.bootstrap_redelivery_revision {
-            let redelivery_updated = transaction.execute(
-                r#"
+                params![
+                    row.conversation_id,
+                    row.native_binding_id,
+                    row.boundary_camp_message_sequence,
+                    row.charter_digest,
+                    row.collaboration_state_digest,
+                    now,
+                    row.native_binding_generation,
+                ],
+            )?;
+            if marker_updated != 1 {
+                anyhow::bail!("Native Binding changed before input acknowledgement");
+            }
+            if let Some(redelivery_revision) = row.bootstrap_redelivery_revision {
+                let redelivery_updated = transaction.execute(
+                    r#"
                 UPDATE bootstrap_redelivery_requirement
                 SET acknowledged_revision = MAX(acknowledged_revision, ?3),
                     updated_at = ?4
@@ -1786,22 +1847,22 @@ impl ContextService {
                   AND requested_revision >= ?3
                   AND acknowledged_revision <= ?3
                 "#,
-                params![
-                    row.native_binding_id,
-                    row.native_binding_generation,
-                    redelivery_revision,
-                    now,
-                ],
-            )?;
-            if redelivery_updated != 1 {
-                anyhow::bail!(
-                    "Bootstrap Redelivery Requirement changed before input acknowledgement"
-                );
+                    params![
+                        row.native_binding_id,
+                        row.native_binding_generation,
+                        redelivery_revision,
+                        now,
+                    ],
+                )?;
+                if redelivery_updated != 1 {
+                    anyhow::bail!(
+                        "Bootstrap Redelivery Requirement changed before input acknowledgement"
+                    );
+                }
             }
-        }
-        if row.status == "delivery_unknown" {
-            transaction.execute(
-                r#"
+            if row.status == "delivery_unknown" {
+                transaction.execute(
+                    r#"
                 UPDATE agent_run
                 SET wait_reason = 'runtime_recovery',
                     runtime_recovery_required = 1,
@@ -1809,10 +1870,11 @@ impl ContextService {
                     version = version + 1, updated_at = ?2
                 WHERE id = ?1 AND status = 'waiting'
                   AND wait_reason = 'delivery_unknown'
-                  AND execution_epoch = ?3
+                  AND execution_epoch = ?3 AND cancel_requested_at IS NULL
                 "#,
-                params![row.agent_run_id, now, row.execution_epoch],
-            )?;
+                    params![row.agent_run_id, now, row.execution_epoch],
+                )?;
+            }
         }
         append_raw_event(
             &transaction,
@@ -1850,18 +1912,18 @@ impl ContextService {
         let transaction = database.connection_mut().transaction()?;
         let row = load_delivery_target(&transaction, delivery_id)?
             .context("Runtime Input Delivery does not exist")?;
-        if row.status == "accepted" {
+        if matches!(row.status.as_str(), "accepted" | "not_accepted") {
             transaction.commit()?;
             return Ok(());
         }
-        if row.status != "prepared" {
+        if !matches!(row.status.as_str(), "prepared" | "delivery_unknown") {
             anyhow::bail!("Runtime Input Delivery is not in prepared state");
         }
         transaction.execute(
             r#"
             UPDATE runtime_input_delivery
             SET status = 'delivery_unknown', last_error = ?2, updated_at = ?3
-            WHERE id = ?1 AND status = 'prepared'
+            WHERE id = ?1 AND status IN ('prepared', 'delivery_unknown')
             "#,
             params![delivery_id, error, now],
         )?;
@@ -1873,7 +1935,11 @@ impl ContextService {
                 execution_lease_owner = NULL,
                 execution_lease_expires_at = NULL,
                 version = version + 1, updated_at = ?2
-            WHERE id = ?1 AND status = 'running' AND execution_epoch = ?3
+            WHERE id = ?1 AND status IN ('running', 'waiting') AND execution_epoch = ?3
+              AND cancel_requested_at IS NULL
+              AND EXISTS (SELECT 1 FROM camp_turn WHERE id = agent_run.camp_turn_id
+                  AND status IN ('running', 'waiting') AND cancel_requested_at IS NULL
+                  AND execution_budget_exhausted_at IS NULL)
             "#,
             params![row.agent_run_id, now, row.execution_epoch],
         )?;
@@ -1882,7 +1948,11 @@ impl ContextService {
             UPDATE camp_turn
             SET status = 'waiting', version = version + 1, updated_at = ?2
             WHERE id = (SELECT camp_turn_id FROM agent_run WHERE id = ?1)
-              AND status IN ('running', 'waiting')
+              AND status IN ('running', 'waiting') AND cancel_requested_at IS NULL
+              AND execution_budget_exhausted_at IS NULL
+              AND EXISTS (SELECT 1 FROM agent_run WHERE id = ?1
+                  AND status = 'waiting' AND wait_reason = 'delivery_unknown'
+                  AND cancel_requested_at IS NULL)
             "#,
             params![row.agent_run_id, now],
         )?;
@@ -6409,9 +6479,9 @@ mod slow_tests {
         mcp_projection::{McpProjectionRequest, McpProjectionService},
         read_model::{READ_MODEL_SCHEMA_VERSION, ReadModelService},
         runtime::{
-            AcknowledgeAgentRunCancellationCommand, AgentRunWorkspace, BindNativeSessionCommand,
-            ClaimAgentRunCommand, ExecutionRuntimeService,
-            ResolveAcceptedInputRecoveryBlockerCommand, SucceedAgentRunCommand,
+            AgentRunWorkspace, BindNativeSessionCommand, ClaimAgentRunCommand,
+            ExecutionRuntimeService, ResolveAcceptedInputRecoveryBlockerCommand,
+            SucceedAgentRunCommand,
         },
         skill::{SetSkillEnabledCommand, SetSkillGroupAssignmentsCommand, SkillLibraryService},
         team_tool::{
@@ -11023,34 +11093,14 @@ mod slow_tests {
             .into_iter()
             .find(|candidate| candidate.agent_run_id == fixture.run_id)
             .unwrap();
-        let acknowledged = runtime
-            .acknowledge_agent_run_cancellation(
-                &mut fixture.database,
-                &CommandEnvelope {
-                    command_id: format!(
-                        "budget-recovery-ack:{}:{}",
-                        candidate.agent_run_id, candidate.execution_epoch
-                    ),
-                    actor: ActorRef::System {
-                        component_id: "runtime-cancellation-coordinator".to_string(),
-                    },
-                    camp_id: Some(fixture.camp_id.clone()),
-                    expected_versions: Vec::new(),
-                    execution_epoch: None,
-                    payload: AcknowledgeAgentRunCancellationCommand {
-                        agent_run_id: candidate.agent_run_id,
-                        expected_version: candidate.version,
-                        execution_epoch: candidate.execution_epoch,
-                        ending_git_observation: None,
-                    },
-                },
+        assert_eq!(candidate.status, "failed");
+        runtime
+            .record_runtime_cleanup_completed(
+                &fixture.database,
+                &candidate.agent_run_id,
+                candidate.execution_epoch,
             )
             .unwrap();
-        assert_eq!(
-            acknowledged.result.code,
-            "agent_run.accepted_input_outcome_unknown"
-        );
-        assert_eq!(acknowledged.result.payload["campTurnStatus"], "failed");
         let state: (String, String, Option<String>, i64, i64) = fixture
             .database
             .connection()
@@ -11435,6 +11485,231 @@ mod slow_tests {
         execution
     }
 
+    // Owns the transaction ordering across Runtime Input and cancellation.
+    // The existing acceptance/recovery owner does not exercise the dispatch CAS.
+    #[test]
+    fn cancellation_serializes_with_dispatch_and_late_acceptance_is_evidence_only() {
+        for dispatch_first in [false, true] {
+            let mut fixture = fixture();
+            let execution = bind_fixture_native_session(&mut fixture, "cancel-session");
+            let ContextMaterialization::Ready(prepared) = ContextService
+                .materialize(
+                    &mut fixture.database,
+                    &ManagedBlobStore::new(&fixture.directory),
+                    &MaterializeContextRequest {
+                        agent_run_id: &fixture.run_id,
+                        execution_epoch: fixture.execution_epoch,
+                        charter_delivery_mode: CharterDeliveryMode::NativeAppend,
+                        max_payload_bytes: DEFAULT_MAX_CONTEXT_PAYLOAD_BYTES,
+                    },
+                )
+                .unwrap()
+            else {
+                panic!("context must be ready");
+            };
+            let delivery = ContextService
+                .prepare_input_delivery(
+                    &mut fixture.database,
+                    &fixture.run_id,
+                    fixture.execution_epoch,
+                    &prepared.manifest_id,
+                )
+                .unwrap();
+            assert!(
+                !ContextService
+                    .begin_runtime_input_dispatch(
+                        &mut fixture.database,
+                        &delivery.id,
+                        &fixture.run_id,
+                        fixture.execution_epoch + 1
+                    )
+                    .unwrap()
+            );
+            if dispatch_first {
+                assert!(
+                    ContextService
+                        .begin_runtime_input_dispatch(
+                            &mut fixture.database,
+                            &delivery.id,
+                            &fixture.run_id,
+                            fixture.execution_epoch
+                        )
+                        .unwrap()
+                );
+                assert!(
+                    !ContextService
+                        .begin_runtime_input_dispatch(
+                            &mut fixture.database,
+                            &delivery.id,
+                            &fixture.run_id,
+                            fixture.execution_epoch
+                        )
+                        .unwrap()
+                );
+            }
+            let version = fixture
+                .database
+                .connection()
+                .query_row(
+                    "SELECT version FROM agent_run WHERE id = ?1",
+                    [&fixture.run_id],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            let result = ExecutionRuntimeService::default()
+                .request_agent_run_cancellation(
+                    &mut fixture.database,
+                    &CommandEnvelope {
+                        command_id: Uuid::new_v4().to_string(),
+                        actor: ActorRef::User {
+                            user_id: "local_user".into(),
+                        },
+                        camp_id: Some(fixture.camp_id.clone()),
+                        expected_versions: Vec::new(),
+                        execution_epoch: None,
+                        payload: crate::runtime::CancelAgentRunCommand {
+                            camp_id: fixture.camp_id.clone(),
+                            agent_run_id: fixture.run_id.clone(),
+                            expected_version: version,
+                        },
+                    },
+                )
+                .unwrap();
+            assert_eq!(result.result.status, CommandResultStatus::Applied);
+            assert_eq!(
+                result.result.payload["status"],
+                if dispatch_first {
+                    "failed"
+                } else {
+                    "cancelled"
+                }
+            );
+            assert_eq!(
+                ContextService
+                    .runtime_input_delivery_status(&fixture.database, &delivery.id)
+                    .unwrap()
+                    .as_deref(),
+                Some(if dispatch_first {
+                    "delivery_unknown"
+                } else {
+                    "not_accepted"
+                })
+            );
+            assert!(
+                !ContextService
+                    .begin_runtime_input_dispatch(
+                        &mut fixture.database,
+                        &delivery.id,
+                        &fixture.run_id,
+                        fixture.execution_epoch
+                    )
+                    .unwrap()
+            );
+            assert!(
+                ContextService
+                    .prepare_input_delivery(
+                        &mut fixture.database,
+                        &fixture.run_id,
+                        fixture.execution_epoch,
+                        &prepared.manifest_id
+                    )
+                    .is_err()
+            );
+            if dispatch_first {
+                ContextService
+                    .mark_input_delivery_unknown(
+                        &mut fixture.database,
+                        &delivery.id,
+                        "late transport error",
+                    )
+                    .unwrap();
+                ContextService
+                    .acknowledge_input_delivery(
+                        &mut fixture.database,
+                        &delivery.id,
+                        "late-accepted",
+                    )
+                    .unwrap();
+            }
+            let state: (String, i64, i64, bool, i64) = fixture.database.connection().query_row(
+                "SELECT run.status, run.version, run.manual_retry_allowed, run.cancel_acknowledged_at IS NULL,
+                    conversation.last_accepted_public_boundary_sequence
+                 FROM agent_run AS run JOIN conversation ON conversation.id = run.conversation_id WHERE run.id = ?1",
+                [&fixture.run_id], |row| Ok((row.get(0)?,row.get(1)?,row.get(2)?,row.get(3)?,row.get(4)?)),
+            ).unwrap();
+            assert_eq!(
+                state,
+                (
+                    if dispatch_first {
+                        "failed"
+                    } else {
+                        "cancelled"
+                    }
+                    .into(),
+                    version + 1,
+                    0,
+                    true,
+                    0
+                )
+            );
+            let runtime = ExecutionRuntimeService::default();
+            runtime
+                .record_runtime_cleanup_completed(
+                    &fixture.database,
+                    &fixture.run_id,
+                    fixture.execution_epoch + 1,
+                )
+                .unwrap();
+            let untouched: bool = fixture
+                .database
+                .connection()
+                .query_row(
+                    "SELECT cancel_acknowledged_at IS NULL FROM agent_run WHERE id = ?1",
+                    [&fixture.run_id],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert!(untouched);
+            assert!(
+                runtime
+                    .runtime_cleanup_blocked_since(
+                        &fixture.database,
+                        &execution.conversation_id,
+                        "next-run"
+                    )
+                    .unwrap()
+                    .is_some()
+            );
+            for _ in 0..2 {
+                // Cleanup replay is naturally idempotent, regardless of Run version.
+                runtime
+                    .record_runtime_cleanup_completed(
+                        &fixture.database,
+                        &fixture.run_id,
+                        fixture.execution_epoch,
+                    )
+                    .unwrap();
+            }
+            let cleanup: (i64, bool) = fixture.database.connection().query_row(
+                "SELECT version, cancel_acknowledged_at IS NOT NULL FROM agent_run WHERE id = ?1", [&fixture.run_id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            ).unwrap();
+            assert_eq!(cleanup, (version + 1, true));
+            assert!(
+                runtime
+                    .runtime_cleanup_blocked_since(
+                        &fixture.database,
+                        &execution.conversation_id,
+                        "next-run"
+                    )
+                    .unwrap()
+                    .is_none()
+            );
+            assert_eq!(execution.execution_epoch, fixture.execution_epoch);
+            fixture.cleanup();
+        }
+    }
+
     #[test]
     fn explicit_runtime_rejection_does_not_advance_or_downgrade_input_acceptance() {
         let mut fixture = fixture();
@@ -11464,6 +11739,16 @@ mod slow_tests {
             )
             .unwrap();
 
+        assert!(
+            ContextService
+                .begin_runtime_input_dispatch(
+                    &mut fixture.database,
+                    &delivery.id,
+                    &fixture.run_id,
+                    fixture.execution_epoch
+                )
+                .unwrap()
+        );
         ContextService
             .mark_input_delivery_not_accepted(
                 &mut fixture.database,
@@ -11499,6 +11784,16 @@ mod slow_tests {
             .unwrap();
         assert_eq!(retry.id, delivery.id);
         assert_eq!(retry.status, "prepared");
+        assert!(
+            ContextService
+                .begin_runtime_input_dispatch(
+                    &mut fixture.database,
+                    &retry.id,
+                    &fixture.run_id,
+                    fixture.execution_epoch
+                )
+                .unwrap()
+        );
         ContextService
             .acknowledge_input_delivery(&mut fixture.database, &retry.id, "acp-prompt-1")
             .unwrap();

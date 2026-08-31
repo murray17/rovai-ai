@@ -6,7 +6,7 @@ authority: version-scope-and-status
 design_status: confirmed
 implementation_status: in_progress
 model_context_change: true
-last_updated: 2026-08-31
+last_updated: 2026-09-01
 ---
 
 # Rovai-ai v1.37：Runtime 图片与飞书文件交付
@@ -29,6 +29,10 @@ last_updated: 2026-08-31
 - Migration 133 只新增图片元数据表和索引，Data Contract `v1.43 / schema 84`；旧业务行保持不变。
 - [model-context-change revision 1](model-context-change.md) 已由开发者二次确认并实施：精简文件帮助，
   仅新飞书 Session 增加冻结的文件交付提示；Charter revision 3 复用既有兼容路径，其余版本轴不变。
+- 取消可用性：以[已确认修订](model-context-change-cancellation.md)实施事务内终态、定向成员 cutover、渠道 FIFO
+  收口、发送前边界与三秒 Runtime 清理；Migration 134 为 Data Contract `v1.44 / schema 85`。
+  当前取消合同见 [Cancellation Settlement v1](../../contracts/cancellation-settlement-v1.md)，理由见
+  [V1.37-D02](decisions.md#v1-37-d02)。验收进度记录在实施计划，原图片/钉钉未验收项不因此升级。
 - 当前仍 in_progress：Antigravity 边界已关闭，但 Cursor 非标准通知、所有 Runtime 原生生图及渠道实发
   并未全部验收；本机已观察到的工具/协议/上游限制保留，不提升任何 Runtime 平台资格。
 

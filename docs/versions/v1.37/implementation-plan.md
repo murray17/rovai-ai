@@ -130,3 +130,69 @@ Antigravity 原生生成、TRAE/Copilot 专用图片结果已接入，六种 Run
   其他真实子进程、关闭与重试回归保留。图片组合夹具则先把鼠标移到中性位置，确保比较相同 hover
   状态；没有放宽图片尺寸或样式断言。CoreClient 16 项、typecheck、Desktop build 和隔离 CampOpen
   夹具修复后通过，等待新的 PR CI 结果。
+
+### 2026-09-01 取消可用性收口
+
+- 沿 [V1.37-D02](decisions.md#v1-37-d02) 与已确认的
+  [输入边界修订](model-context-change-cancellation.md) 实施：取消事务直接结算 Run/Turn 业务终态，
+  Runtime 清理只写同 Run/epoch 的清理事实，不再通过带 Run version 的 cancellation ACK 命令收口。
+  本机只读诊断确认旧卡点是迟到输入观察推进 Run version，使 ACK 被 fence；固定 ACK command ID
+  随新版本重试又产生幂等冲突。没有改写日常数据库或借重启掩盖这个问题。
+- 只增加 Input `dispatch_started_at`、Channel `retry_suppression_json` 和窄索引，Migration 134 原子升级至
+  v1.44/schema85。发送准入和取消以数据库提交排序；未知效果保持 failed/accepted_input_outcome_unknown，
+  不自动重发。非终态旧 prepared 保守迁移为 unknown，历史终态不改写。
+- 成员离队原样复用两个 affected selector，结算自身 lifetime 和已持久化关联工作的 Run，
+  原 pending delivery 原因码、Gather/item、Task 解除 assignee 保留。reconciliation 同事务 completed；
+  只重算受影响 Turn，同轮无关 Run 和仍 admitted 的渠道请求不受整轮关闭影响。
+- 三秒总清理预算涵盖启动 token、interrupt、flush 和受管进程 reap。超时保留 active/lease，
+  后续同 Conversation Run 有界失败；启动任务结束后再次确认 Host 回收，避免第一次没有 handle、
+  随后创建进程却提前记为已清理。强制删除保留幂等回放和原 bypassedBlockers，退出 wire protocol 仍为 3。
+- 打开 Camp 或渠道准入只补偿该 Camp 的旧半取消对象。Renderer 停止状态只表示请求尚未返回，
+  收到 Applied 即应用 Core 终态并刷新；不再等待 Runtime ACK。
+
+取消回归 owner 与准入说明：
+
+- `context::slow_tests::cancellation_serializes_with_dispatch_and_late_acceptance_is_evidence_only`
+  拥有发送准入/取消两个顺序、迟到 accepted/unknown、错误 epoch 和不推进版本的 cleanup replay；
+  同一 Conversation 的 cleanup gate 只在确认后解除。复用既有 Context fixture；旧 ACK 正向 owner
+  不覆盖提交顺序，纯 formatter 无法证明 SQLite 与 Conversation watermark 的隔离。
+  最小命令：`cargo test -p rovai-core --lib --features slow-tests cancellation_serializes_with_dispatch`。
+- `planned_shutdown::tests::cancellation_keeps_an_unbound_launch_isolated_until_cleanup`
+  使用内存 coordinator，拥有无 route 时 token 取消和 active 记录保留；旧 shutdown admission 测试没有
+  单 Run 取消状态。最小命令：`cargo test -p rovai-core --lib cancellation_keeps_an_unbound_launch`。
+- `runtime_fleet::tests::cancelled_run_retains_its_lease_until_a_confirmed_reap` 使用既有 fake Host，
+  连续两个超时验证第一次失败不能抹掉 Run 到进程的关联，再确认成功 reap 和重复清理；
+  这是全局 shutdown 并发测试没有的定向重试边界。
+  最小命令：`cargo test -p rovai-core --bin rovai-core cancelled_run_retains_its_lease`。
+- `tests::cancellation_covers_launch_without_a_handle_and_has_one_total_deadline` 替换原只验证 timeout
+  常量的测试；复用隔离 Core fixture，增加不结束的 launch 和窗口后才出现的协议夹具 Host。
+  该检查必须经过真实 Core 清理入口、launch registry 与受管子进程，内存 timer 测试不能证明 reap。
+  它不调用真实 Provider 或模型；超时允许 Unproven，但禁止进程仍在时宣称已清理。
+  最小命令：`cargo test -p rovai-core --bin rovai-core --features slow-tests cancellation_covers_launch`。
+- `channel::tests::cancellation_preserves_local_output_and_suppresses_only_aborted_turn_retries`
+  复用既有渠道 fixture，分别验证单 Run 和整轮边界、pending/attempting/sent、迟到回执与下一请求 FIFO。
+  旧发送重试测试没有取消业务事务，纯 outbox reducer 无法证明 Turn/request 的联动。
+  最小命令：`cargo test -p rovai-core --lib --features slow-tests cancellation_preserves_local_output`。
+- `camp_open::slow_tests::open_repairs_only_cancellation_marked_work_in_the_requested_camp`
+  复用 seeded fixture 建两个 Camp，验证只修目标半取消、保留普通 waiting，重复 Open 不写库。
+  旧投影 owner 只读，不能证明新增入口补偿的作用域。
+  最小命令：`cargo test -p rovai-core --lib --features slow-tests open_repairs_only_cancellation_marked_work`。
+- 扩展既有 migration chain/admission owner 验证 134 receipt 失败的完整回滚、重试和历史保留；
+  扩展原成员/A2A/Gather/删除/退出 owner 保留全部原边界，删除旧 ACK 测试仅因该命令协议在同次改动退出，
+  幂等、User/Camp/version 权限及 Run-local 效果关闭转由事务终态 owner 承担，没有删除支持的升级来源。
+  退出 owner 另验证两次业务结算的原 cycle NULL-count 约束，以及业务失败不能计为 Runtime terminal。
+- Renderer 复用 `App.test.ts` 取消投影 owner，验证 Core 返回 cancelled/failed 的即时应用和无关 Run 保留；
+  benchmark fingerprint 只同步当前 v1.44/schema85 断言。未增加模型可见上下文或测试专用产品入口。
+
+本轮隔离验证：
+
+- Library 全量含 slow 768 项：767 项通过，既有 Runtime 版本探测在并发负载下出现一次超时；
+  原条件单独复跑通过，没有放宽 deadline 或跳过该测试。退出/Git 观察/terminal provenance 的后续扩展通过。
+- Core Main 193 项和 CLI 32 项通过，4 项既有真实 Runtime 人工 smoke 仍按原规则忽略；
+  late-launch 使用拒绝 SIGTERM 的协议夹具，恢复“只查一次进程”的旧收尾会失败，修正后完整 Core 回归通过。
+  该 fixture 不接触日常 App；两个 membership affected selector 与 main 的函数正文逐字相同。
+- 类型检查、Clippy、133 文件/1352 项 Vitest、220 项 Node 测试（1 项既有 Windows 原生跳过）、
+  Desktop build 和隔离 CampOpen Electron 夹具通过。Node 首轮发现的 benchmark 当前版本断言已同步并全量复跑。
+- 文档单测、普通门禁及固定 main base `8988f58d624fea076716f79402888a2e5cb943e3` 的 CI 文档门禁通过。
+  新合同使用后继版本并更新 current 路由，原 accepted 历史合同保持不变；通用文档门禁没有增加例外。
+  本轮没有安装、重启日常 App，也没有向真实渠道发件。

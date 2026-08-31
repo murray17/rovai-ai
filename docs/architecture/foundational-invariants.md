@@ -48,7 +48,7 @@ last_updated: 2026-08-31
 - 领域事件日志用于审计、幂等结果和增量失效，不是 Event Sourcing 状态库、Outbox、Worker 队列或业务对象的替代真源。
 - 渠道 Host 的内部 tick 只推进已提交的 request/Outbox，不是新的业务意图入口，也不为每次唤醒保存永久命令回执。
   维护步骤仍在 Core 单个写事务内调用既有 Handler；真实 admission 的领域事件、FIFO 防重和 delivery lease/结算幂等
-  均保留。精确请求与响应丢失恢复由 [Channel Host Maintenance v1](../contracts/channel-host-maintenance-v1.md) 拥有。
+  均保留。精确请求与响应丢失恢复由 [Channel Host Maintenance v2](../contracts/channel-host-maintenance-v2.md) 拥有。
 
 <a id="core-managed-content"></a>
 
@@ -155,7 +155,7 @@ last_updated: 2026-08-31
 - `away` 阻止新 Run，但保留身份、CampMember、Task assignment、Runtime 配置、头像、Memory 和历史；归队只恢复未来活动资格。永久移除只在不存在非终态 Run 时推进 Presence 和审计，不物理删除身份或历史关联。
 - removed 成员从活动名册、寻址、分配、Runtime/Skill/MCP 投影和未来 Memory counterparty 中排除，但历史消息、Task、Run 和审计继续显示原身份。历史配置可以成为不可执行的保留事实，不能阻止当前 Installation 清理。
 - CampMember 表达 Camp 内关系而不是复制全局 Presence。成员顺序稳定，Default Lead 必须是当前有效关系；Camp 至少保留一位 active member。动态添加/移除使用 Camp membership generation 与关系 exact version；曾离开成员再次添加是普通添加但形成新的 membership lifetime，不复活旧授权。对当前 active member（包括 Presence 为 `away`）的相同 capability overrides add 是 no-op，不同 overrides 必须 conflict，不能借 add 静默旋转 lifetime；只有 left/不存在的真实添加要求 Profile 为 `present`。
-- 移除使用原子 cutover 与持久 reconciliation：同一提交结束关系、切换必要的 Lead、释放未终态 Task 并关闭新业务效果；该 lifetime 的 pending ordinary outbound Delivery 同步终态化，已 materialized 下游 Run 与成员自己的在途 Run 一起请求取消并进入 reconciliation；其余 Run/Delivery/Gather 只通过正式 terminal settlement 收口。外部 roster 事件必须通过受信 System allowlist、Camp-bound source namespace/binding 与 exact next reconciliation generation 才能进入同一领域命令。
+- 移除复用现有定向 membership cutover：结束关系、修复 Lead、释放开放 Task，按原 selector 结算成员 lifetime 的 Run、收件/来源/Gather Delivery 及已物化目标 Run；同一事务完成 reconciliation 审计，只重算 affected Turns。无关 Run 和渠道投递不受整轮取消；外部来源仍受 allowlist、Camp-bound source 与 exact generation 约束。
 
 <a id="member-projection"></a>
 
@@ -180,7 +180,7 @@ last_updated: 2026-08-31
 - Renderer 可以先本地显示待确认的用户消息，但不得把它当成 CampMessage。Core 接受发送时原子持久公共消息、Turn、目标 Run 和冻结配置；Scheduler 在执行边界完成 workspace、Runtime、Git、当前 exact membership lifetime/permission/fence 检查。所有 Agent 业务工具也必须匹配 Run 冻结的 membership version；再次添加同一 Agent 不恢复旧 Run 权限。失败产生诚实 Run 终态，不撤销已接受消息；per-Run ending Git observation 属于终态审计，Runtime 文件变化属于 terminal 后的附加 Evidence projection，二者都不是发送准入。
 - 一次 CampTurn 的 root Run 与 A2A 后代共享冻结 execution budget。Core 以一个事务检查与消费总 AgentRun、accepted A2A、depth、fanout 和相关 allowance，并对重放返回同一结果；客户端、Runtime 或多条 Delivery 不能拆分请求绕过预算。
 - CampMessage/CampTurn/AgentRun/Conversation 与 Domain Event 的创建、开始、更新和结束字段使用调用时 UTC wall clock；`AgentRun.created_at` 属于输入接受边界，`started_at` 属于实际 claim 边界。Execution Budget 另用非倒退 observation，取 wall clock、进程 awake elapsed anchor 和上次 observation 的最大值，使系统休眠计入 deadline、wall clock 回拨不延长预算；Budget observation 不得写入业务审计时间。
-- Composer Stop 作用于整个 CampTurn 执行树；共享 ExecutionDrawer 的 Run Stop 只作用于当前 AgentRun，不写 Turn cancel request、不取消兄弟 Run/Delivery，也不创建公共时间线消息。两者都由 Core 幂等持久取消意图并立即关闭相应 Run 的新领域写入，再由既有 coordinator 有界中断 Runtime；只有可靠 Runtime 终态才能声称已取消。非终态执行阻止待发送队列准入，整个 Camp 的执行结算后自动推进队首，不另设队列暂停/继续模式。外部效果是否待确认必须作为独立事实保留；缺少权威终态时设置 `hasUnsettledExternalEffects`，不得从 Run 的取消状态推断效果已经结算。
+- Composer Stop 作用于整个 CampTurn；共享 ExecutionDrawer 的 Run Stop 只作用于当前 Run，不取消兄弟 Run 或关闭整轮渠道输出。两者都在 Core 事务提交实际业务终态，IPC 返回后结束等待；Runtime 后台清理不影响业务终态。未知效果作为 hasUnsettledExternalEffects 独立保留，只有 Runtime 原生证据才能确认 Activity outcome。待发送队列按业务 Turn 完成推进，同 Conversation 的新执行仍须通过旧 Runtime 清理隔离。
 
 <a id="collaboration-task"></a>
 
@@ -275,8 +275,8 @@ last_updated: 2026-08-31
 
 - Runtime accepted input 只有在能证明原 Native Turn 的 identity、接受状态和可重连终态时才能恢复。证据不足进入 `recovery_blocked` 或 continuity-lost，不能重发可能已经产生外部效果的输入。
 - 新输入的恢复验证冻结 Manifest attachment receipt 的 closed shape/digest，再独立验证 admitted Runtime Files Root identity、精确 Camp root containment 与当前 Camp-root Auth Receipt；不要求 legacy View ready、append-only successor 或 generation 匹配。路径和历史 payload 不重新解析、探测或改写。Migration 99/100 的旧非终态输入按 delivery/action evidence 诚实终结，历史 Manifest/Blob/Auth Receipt/ACK 保留但不可再 dispatch。
-- Cancellation 有“已请求”和“Runtime 已终结”两个阶段。Run-local 请求提交即 fence 该 Run 的新 Camp/Task/Tool/A2A 写入，但不代表 Runtime 已退出；发送中断失败、进程失联或超时不能被投影为确定取消，Run、Activity 和 UI 必须保留 unknown/unsettled。
-- 计划关闭先持久化 shutdown cycle 并关闭新 launch；完成稳定快照后立即关闭 terminal/route 准入，再 best-effort 请求 Runtime 中断，并在同一产品事务中把全部非终态 AgentRun 结算为已取消。未知外部效果继续保留，且不得伪造 Runtime outcome。
+- Cancellation 在业务事务内结算 Run/义务和所属 Turn：未发送为 cancelled，accepted/unknown 或可能已执行为 failed/accepted_input_outcome_unknown，禁止自动重发。Runtime 使用原 active/launch token 有界清理，只有确认后写 cancel_acknowledged_at；清理不拥有业务终态。未确认清理的同 Conversation 新 Run 最多等待三秒，然后 failed/runtime_cleanup_unconfirmed，不允许重叠执行。
+- 计划关闭保留 protocolVersion 3/report 和既有 writer/route barrier；持久化 cycle 后先统一结算业务，barrier 后补齐再完成 cycle，Runtime 清理只影响清理事实与 deadline。未知外部效果保留，不伪造 Runtime outcome。
 - Diagnostics 是严格只读、最小化数据的 Core view；修复必须是用户显式选择的独立动作。导出集中脱敏，不能把 secret、完整路径、模型输入或 Runtime 原始输出作为便利诊断数据。
 
 <a id="runtime-platform-security"></a>
@@ -301,7 +301,7 @@ last_updated: 2026-08-31
 - Conversation handoff 只在明确、可验证的 Native Session continuation 边界保持连续性。Camp 公共历史与 portable context 属于 Rovai 逻辑连续性；Runtime native thread/session 是外部 binding。跨 Runtime、身份、Camp、binding generation 或不兼容 contract 的“恢复”必须创建新 Session，不能把摘要、同一路径或版本当作原生连续性证明。
 - Native Session Bootstrap 是完整、不可变的交付 bytes/digest，固定按 `SESSION_CHARTER → MEMBER_IDENTITY → MEMORY_ENTRYPOINT` 三段组合。`MEMBER_IDENTITY` 始终包含一个 six-field self aggregate 的最新值；Dynamic Context 中的 `COLLABORATION_STATE` 只包含当前 Camp peer routing/Lead，不泄露 peer persona、Presence、Runtime、Memory 或 busy 状态。新 Session/替换 Session 使用当时最新身份，既有 Session 不因编辑被热改写。
 - Session Charter 只拥有稳定产品合同、工具/Skill 进入方法与协作纪律，合同不兼容时通过版本和 Session rotation 切换，不把 operation schema 复制入永久 prompt。动态 AgentRun Context 只携带本次 `CURRENT_INPUT`、受限公共历史、Task/Run facts、附件和显式选择，不重复永久 Session 规则或把私有 Conversation 当公开上下文。
-- Bootstrap 各组件、完整序列化 bytes 和实际投递是不同 evidence 层；不用“已生成完整 Bootstrap”替代 Runtime accepted evidence。ContextManifest 记录冻结 digest/versions，Runtime Input Delivery Evidence 记录实际 bytes 与 accepted ACK；只有 accepted ACK 推进 Conversation 投递水位，失败/未知必须在后续输入重试。
+- Bootstrap 各组件、完整序列化 bytes 和实际投递是不同 evidence 层；不用“已生成完整 Bootstrap”替代 Runtime accepted evidence。ContextManifest 记录冻结 digest/versions，Runtime Input Delivery Evidence 记录实际 bytes 与 accepted ACK；只有当前有效 Run/epoch 和 Native Binding 的 accepted ACK 推进 Conversation 水位；明确未接受才可重新准备，accepted/unknown 不自动重发。迟到回执只补充证据，不修改 successor 水位。
 - Bootstrap redelivery 是 durable requirement，但 detector signal 本身不证明 compaction、不授权发送。Core 通过每 Native Session 唯一的 observer lease/generation、Runtime-owned policy epoch、prepared-input cutoff 和幂等 Session-scoped command 决定下一个尚未准备的输入是否需要 redelivery；旧 binding、旧 generation、迟到信号或已经 prepare 的输入都 fail closed。
 - 所有 Runtime 输入在一个 Core-owned 串行 preparation boundary 中冻结。Redelivery 是完整 Bootstrap 在本次输入上的 transient overlay，不改写 Session Charter、正常 Dynamic Context 或历史消息；Bootstrap+Current Input 共享有界 payload 门禁，无法完整交付时本次输入整体失败，不部分发送。
 - Runtime 特定 compaction detector 只能在真实 probe 证明 best-effort、非阻塞、不消费/伪造用户输入、不破坏 Session 且有可控停止边界时准入。Detector state 不是 Runtime Readiness，中断/恢复不可追溯推断 compaction。admission 优先使用具有 occurrence identity 的结构化 lifecycle event；上游若把原生 lifecycle 确定性降格为与 assistant chunk 同形的文本，只允许 Runtime 私有 compatibility route 在源码与真实 wire shape 均固定后完整匹配官方 frame，并用 Prompt-scoped 状态相关 started 与 completed。单个 active-Prompt completion、token/usage 下降、历史变短、模型 summary、宽泛关键词或普通 assistant 文本不能补猜；lifecycle frame 必须从公开 streamed text、final 和 Missing-Send 消费。没有 source tag、occurrence ID 或 provenance 时只能声明 `best_effort`，并明确记录模型逐字复现完整 frame 序列仍无法在 wire 层排除。已按目标场景查找但未见可靠信号时状态为 `NotObserved` / `Unverified` 且 policy `Disabled`；只有结构化负证据证明上游不提供时才声明 `Unsupported`。

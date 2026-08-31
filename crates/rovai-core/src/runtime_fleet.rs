@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use tokio::{
     sync::{Mutex, oneshot},
     task::JoinSet,
-    time::{Instant, MissedTickBehavior, timeout, timeout_at},
+    time::{Instant, MissedTickBehavior, timeout_at},
 };
 
 use crate::{
@@ -139,6 +139,25 @@ impl RuntimeProcessHost {
                     .store(true, std::sync::atomic::Ordering::Release);
             }
         }
+    }
+
+    async fn force_reap_until(&self, deadline: Instant) -> bool {
+        match self {
+            Self::Codex(host) => host.force_reap_until(deadline).await,
+            Self::Acp(host) => host.force_reap_until(deadline).await,
+            #[cfg(test)]
+            Self::Fake(host) => {
+                host.reaped.load(std::sync::atomic::Ordering::Acquire)
+                    || timeout_at(deadline, self.shutdown_and_reap()).await.is_ok()
+            }
+        }
+    }
+
+    async fn shutdown_and_reap_until(&self, deadline: Instant) -> bool {
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        let reserve = std::cmp::min(Duration::from_millis(250), remaining / 4);
+        let _ = timeout_at(deadline - reserve, self.shutdown_and_reap()).await;
+        self.force_reap_until(deadline).await
     }
 
     fn pid(&self) -> Option<u32> {
@@ -307,9 +326,8 @@ impl FleetState {
         let entry = self.processes.get_mut(process_id)?;
         self.idle_lru
             .remove(&(entry.last_used_sequence, process_id.to_string()));
-        if let Some(run_lease) = entry.run_lease.take() {
-            self.process_by_run.remove(&run_lease);
-        }
+        // Preserve the lease until a confirmed reap. A timeout must not make
+        // the next cleanup attempt mistake an owned process for an absent one.
         entry.idle_since = None;
         entry.state = FleetProcessState::Stopping;
         entry.host.clone()
@@ -962,6 +980,53 @@ impl AgentRuntimeFleetManager {
         }
     }
 
+    /// Retire exactly this Run's lease. Never make a timed-out Host reusable.
+    pub(crate) async fn stop_agent_run_until(
+        &self,
+        agent_run_id: &str,
+        execution_epoch: i64,
+        deadline: Instant,
+    ) -> bool {
+        let key = RunLeaseKey {
+            agent_run_id: agent_run_id.to_string(),
+            execution_epoch,
+        };
+        {
+            let mut state = self.state.lock().await;
+            if let Some(id) = state.process_by_run.get(&key).cloned()
+                && let Some(entry) = state.processes.get_mut(&id)
+            {
+                entry.retire_after_run = true;
+            }
+        }
+        let Ok(_operation) = timeout_at(deadline, self.operations.lock()).await else {
+            return false;
+        };
+        let target = {
+            let mut state = self.state.lock().await;
+            let Some(id) = state.process_by_run.get(&key).cloned() else {
+                return true;
+            };
+            let Some(host) = state.mark_stopping(&id) else {
+                return false;
+            };
+            (id, host)
+        };
+        if let Some(config) = target.1.builtin_tool_process_config() {
+            self.builtin_tool_leases
+                .unregister(config.process_id())
+                .await;
+        }
+        if !target.1.force_reap_until(deadline).await {
+            return false;
+        }
+        self.state.lock().await.remove_process(&target.0);
+        if let Some(records) = &self.owner_records {
+            records.remove(target.1.process_id());
+        }
+        true
+    }
+
     pub(crate) async fn invalidate_camp(&self, camp_id: &str) {
         self.invalidate_matching(|entry| entry.compatibility.camp_id == camp_id)
             .await;
@@ -1117,9 +1182,9 @@ impl AgentRuntimeFleetManager {
                 .unregister(config.process_id())
                 .await;
         }
-        if timeout(self.config.stop_timeout, host.shutdown_and_reap())
+        if !host
+            .shutdown_and_reap_until(Instant::now() + self.config.stop_timeout)
             .await
-            .is_err()
         {
             return false;
         }
@@ -1218,11 +1283,8 @@ impl AgentRuntimeFleetManager {
                         .checked_add(stop_timeout)
                         .unwrap_or(graceful_deadline),
                 );
-                let stop_completed = timeout_at(host_deadline, host.shutdown_and_reap())
-                    .await
-                    .is_ok();
-                let reaped = stop_completed && host.pid().is_none();
-                (fleet_process_id, owner_process_id, reaped, !stop_completed)
+                let reaped = host.shutdown_and_reap_until(host_deadline).await;
+                (fleet_process_id, owner_process_id, reaped, !reaped)
             });
         }
 
@@ -1439,6 +1501,51 @@ mod tests {
             .unwrap();
         assert_eq!(camp_a_again.host.process_id(), "host-a");
         fleet.shutdown_all().await;
+    }
+
+    #[tokio::test]
+    async fn cancelled_run_retains_its_lease_until_a_confirmed_reap() {
+        let fleet = AgentRuntimeFleetManager::new(test_config(Duration::from_secs(1)));
+        insert_fake_process(&fleet, "cancelled", Duration::from_millis(50)).await;
+        let key = RunLeaseKey {
+            agent_run_id: "run-cancelled".into(),
+            execution_epoch: 1,
+        };
+        for _ in 0..2 {
+            assert!(
+                !fleet
+                    .stop_agent_run_until(
+                        &key.agent_run_id,
+                        1,
+                        Instant::now() + Duration::from_millis(5)
+                    )
+                    .await
+            );
+            let state = fleet.state.lock().await;
+            assert_eq!(
+                state.process_by_run.get(&key).map(String::as_str),
+                Some("cancelled")
+            );
+            assert_eq!(
+                state.processes["cancelled"].state,
+                FleetProcessState::Stopping
+            );
+        }
+        assert!(
+            fleet
+                .stop_agent_run_until(
+                    &key.agent_run_id,
+                    1,
+                    Instant::now() + Duration::from_secs(1)
+                )
+                .await
+        );
+        assert!(fleet.state.lock().await.processes.is_empty());
+        assert!(
+            fleet
+                .stop_agent_run_until(&key.agent_run_id, 1, Instant::now())
+                .await
+        );
     }
 
     #[tokio::test]

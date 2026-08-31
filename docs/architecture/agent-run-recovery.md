@@ -10,8 +10,8 @@ last_updated: 2026-08-31
 本文描述 Core 重启后 AgentRun、Native Session 与 Native Turn 的长期恢复边界。规范依据是
 [Runtime 恢复与关闭不变量](foundational-invariants.md#runtime-recovery-shutdown)。受控关闭后的 product
 fence 由 [Runtime 恢复与关闭不变量](foundational-invariants.md#runtime-recovery-shutdown)拥有；字段级状态与命令见
-[Accepted Input Recovery v3](../contracts/accepted-input-recovery-v3.md)与
-[Planned Shutdown v3](../contracts/planned-shutdown-v3.md)。
+[Accepted Input Recovery v4](../contracts/accepted-input-recovery-v4.md)与
+[Planned Shutdown v4](../contracts/planned-shutdown-v4.md)。
 
 ## 1. 三个独立恢复对象
 
@@ -90,9 +90,11 @@ required Run 失败后，等该轮所有当前 Run 责任与 MessageDelivery 结
 调用不存在的 Run 重试入口。Core 不重跑失败消息或自动创建 successor；
 [Pending Camp Input](../contracts/pending-camp-input-v1.md#自动续发错误和幂等)在该轮结算后按 FIFO 续发。
 
-CampTurn Stop、AgentRun 局部 Stop 与 Execution Budget 到期经同一 cancellation coordinator 走 Run 终态。
-CampTurn Stop 可使整轮成为 cancelled；Run-local Stop 不设置 Turn cancel request，required Run 取消后由
-聚合得到 `failed / required_run_incomplete`，optional Run 不单独阻止完成；预算到期使 Turn 成为 failed。
+CampTurn Stop、AgentRun 局部 Stop 与 Execution Budget 到期调用同一事务结算；accepted/unknown 保留为
+failed/accepted_input_outcome_unknown，禁止自动重发。整轮 Stop 使 Turn cancelled，预算到期使 Turn failed；
+Run-local Stop 保留 required/optional 聚合，只在所有责任结束后进入 Turn 终态，合法渠道输出仍须正常送完。
+Runtime reaper 不再承担业务结算。发送前条件更新及迟到证据边界见
+[Accepted Input Recovery v4](../contracts/accepted-input-recovery-v4.md)。
 `recovery_blocked` 不提供普通 Run Stop，仍只允许既有“结束此运行”把 blocker 收敛为 outcome unknown。
 用户若要继续，必须检查 Workspace/Git/外部效果现场并发送新的后续任务；Core 不自动创建 successor。
 

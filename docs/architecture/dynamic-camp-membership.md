@@ -8,7 +8,7 @@ last_updated: 2026-08-26
 
 # 动态 Camp 队员关系架构
 
-字段级合同见 [Camp Membership v1](../contracts/camp-membership-v1.md)，决定理由见
+字段级合同见 [Camp Membership v2](../contracts/camp-membership-v2.md)，决定理由见
 [v1.29 决策记录](../versions/v1.29/decisions.md)。
 
 ## 权威模型
@@ -22,8 +22,8 @@ User Desktop command / trusted System hint
        ├─ add ordinary active lifetime
        └─ remove atomic cutover
           ├─ lead switch / task release
-          ├─ run + delivery + gather cancellation intent
-          └─ durable reconciliation
+          ├─ run + delivery + gather terminal settlement
+          └─ completed reconciliation audit
                          │
                          ▼
              formal terminal settlement
@@ -45,15 +45,14 @@ Context freeze 不等于 target roster freeze。仍属于当前 membership lifet
 
 ## 移除与收口
 
-Cutover transaction 先用 expected generation/version 防止 stale UI，然后结束关系、保证至少一位成员并完成
-必要 Lead 替换。所有未终态 Task 释放为 pending/unassigned；未分派责任在事务内终结；在途 Runtime 工作写入
-取消请求并进入 reconciliation。该 lifetime 尚未 materialize 的普通 outbound A2A 同时终态化，已 materialized
-的下游 Run 纳入 reconciliation。提交后所有 Agent 业务工具、普通 outbound Delivery materialization/retry 和
-publication 都按旧 exact membership version fail closed。
+Cutover transaction 先验证 expected generation/version，再结束关系、保证至少一位成员并完成必要 Lead 替换。
+直接复用 affected deliveries/run IDs 两个 selector：成员自身 lifetime 的 Run、收件 Delivery、它发起的 Gather、
+普通公开 A2A 来源 Delivery 及已物化的目标 Run；不递归扩张。未物化 Delivery 保留既有原因码，已物化 Delivery
+经目标 Run settlement 收口，开放 Task 恢复 pending/unassigned，Gather/item 按现有逻辑取消。
 
-Reconciliation 不拥有第二套取消动作；它只聚合正式 Run/Delivery/Gather terminal settlement。窄 terminal
-authority 可以报告可靠终态与外部效果不确定性，但不能调用业务工具或发布消息。这样 UI 可诚实显示“正在收口”
-而不把 SQLite 提交冒充 Runtime 已停止。
+每个 affected Run 直接调用统一终态 helper，只重算 affected Turns；reconciliation 的 target/settled 计数相等，
+status/completed_at 同事务完成。Runtime 后台清理与审计无关。同轮无关 Run 继续，ChannelTurnRequest 保持
+admitted 直到 Turn 真正终态且正常 Outbox 完成；成员移除不调用 whole-Turn abort 或渠道整轮关闭。
 
 ## 外部同步
 
@@ -63,6 +62,6 @@ authority 可以报告可靠终态与外部效果不确定性，但不能调用�
 
 ## Read side 与 Renderer
 
-[Camp Open Projection v8](../contracts/camp-open-projection-v8.md)投影当前 generation、成员 version 与 active
-reconciliation。Renderer 使用权威 removal preview 解释影响，以 exact values 提交；成功后重读 Camp，不在本地
+[Camp Open Projection v13](../contracts/camp-open-projection-v13.md)投影当前 generation、成员 version 与历史尚未完成的
+reconciliation；新 cutover 已同事务完成，不产生持续收口等待。Renderer 使用权威 removal preview 解释影响，以 exact values 提交；成功后重读 Camp，不在本地
 模拟关系。最后成员操作保持可发现但禁用，添加候选来自当前存在且不在 active set 的 AgentProfile。
