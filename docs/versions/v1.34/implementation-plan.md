@@ -17,7 +17,7 @@ Fast 顺延为 v1.34 / Migration 118，两条旧源升级路径分别验证。
 1. Migration 118、保存绑定代次、Camp preference、事务命令/receipt、异步检查 fence 和 Run freeze。
 2. Claude 原生认证、单 settings argv、on/off/cooldown；Codex 原生 metadata、schema 能力门禁、每 Turn 覆盖。
 3. Usage observed tier 优先级、未知撤回估价、原生成本保留。
-4. 既有成员浮层、一次用量提示、默认恢复、焦点稳定、布局与隔离 Electron 回归。
+4. 既有成员浮层、静默自动检测与直接开关、焦点稳定、布局与隔离 Electron 回归。
 5. 合同后继、版本切换、完整本地回归、独立复核、PR CI 与合并清理。
 
 ## Rust 测试准入
@@ -124,3 +124,45 @@ owner 是已发布 schema 72 的升级兼容入口；验证三态保留、旧 tr
 PR CI、合并与清理结果由 [PR #126](https://github.com/murray17/rovai-ai/pull/126) 拥有。
 本机仅重跑原生 `--version` / `auth status`，确认 firstParty OAuth、套餐为空、无自定义环境；未调用模型、
 未读取凭据文件或钥匙串，也未触碰日常 App 数据。
+
+## 2026-08-31 自动检测交互修正
+
+根据用户确认的自动检测范围，展开会话区队员浮层后，静默调用既有 `camps.members.fast.check`：
+仅检查缺少有效结果的 Claude/Codex 队员；不展示检测占位、成功通知或失败 Toast，移除手动检测菜单。
+当前 Camp 工作区复用正负结果和在途请求，切换浮层 Tab 不丢缓存；失败在下次展开重试，绑定、模型或
+Installation 检测依据变化时重新检查。旧请求先结束，迟到结果不能恢复旧绑定按钮，也不阻止其他成员切换 Fast。
+
+三态偏好、原生认证门禁、`fast.set`、执行冻结与 Run 监控均不变；没有新接口、迁移、持久状态或模型请求。
+扩展既有生产 Electron owner，覆盖自动检测、静默失败/重试、重复展开、正负缓存、同成员请求去重、
+Runtime/认证切换及旧响应隔离，继续保留布局、双主题、键盘焦点、保存失败和初始默认断言。
+Profile/Installation 先于 Camp 投影刷新时，不能沿用旧投影或本地保存结果展示 Fast，已有 fixture 增补此顺序。
+
+真实开发版复现了新安装仅有 `light_ready` 时的前置缺口：Claude 原生资格已通过，但只读投影仍要求 `ready`；
+Codex 此时还没有每轮档位能力快照，会提前被判为不支持。`runtime_for_target` 现在只复用完整且未过期的原生
+能力快照，否则沿既有检查队列先执行 `AvailabilityCheck`，随后再检查实际 cwd 的 Fast 资格。
+不放宽认证/协议门禁，不增加深检入口或模型请求。扩展既有 `camp_fast` 持久化/投影 owner，覆盖轻检、
+检查失败和未认证输入必须先补齐能力，不新增 Rust 测试函数或平行数据库夹具；最小命令为
+`cargo test -p rovai-core --lib camp_fast::tests -- --quiet`（3 项通过）。
+
+使用独立 worktree，分支 `codex/fast-auto-detection`，基线 `1a90e864ecfbe9e2d21d28f69dd122e461e40ea0`。
+沿用当前 v1.34，同步 Fast、Runtime、UI 和测试合同，无单独主线治理提交。
+
+本地 `pnpm typecheck`、`pnpm test`（731 项 Vitest、219 项 Node，1 项既有平台 skip）、
+`pnpm build:desktop` 和生产 Electron Fast fixture 通过；最终缓存字段精简后重新通过 Typecheck 和 Electron fixture。
+开发版 Core 由当前 worktree 单独构建，使用独立 userData、Skill Library 和验收工作目录，
+参考本机 Claude Code 2.1.236 与 Codex CLI 0.151.0 的原生安装和默认配置，不复制日常数据库或凭据。
+
+真实开发版中，两条 Runtime 均从 `light_ready` 自动补齐为 `ready`，并通过原生 Fast 资格检查后显示按钮。
+设置接口的 `true/false/null` 均已验证；两次重复展开未再次检测，期间没有 AgentRun。
+验收中用户补充取消 Fast 按钮的悬浮提示和费用确认：删除提示 DOM、确认状态、存储标记读写和样式，
+点击直接切换并保存，保留可访问名称与键盘焦点。既有 fixture 改为验证首次点击即保存。
+成员菜单中的“恢复默认响应模式”也按用户要求删除；未设置覆盖时仍由 Runtime 原生配置决定默认值。
+普通保存成功与运行中切换的提醒一并删除，Fast 正常交互静默，只有保存失败时显示错误反馈。
+完整 Rust lib 416 项通过；Core binary 184 项通过，4 项既有真实环境测试忽略。
+
+合入最新主线后重新通过 Fast、执行浮层和文件导航的生产 Electron 回归；
+[Fast 浮层截图](../../prototypes/camp-fast-auto-detection/fast-day-1280.png)来自隔离生产组件 fixture，使用合成队员与草稿，不含真实对话或凭据。
+
+用户已验收隔离开发版，并授权创建 PR、合并 main 和删除 worktree；最终门禁与合入结果由 PR 和 CI 记录拥有。
+用户验收产生的 Codex 执行确认请求了 `priority`，但当前原生会话日志、完成事件和用量事件未报告实际档位，
+不能把请求配置或执行成功当作服务端实际 Fast 的证据。本次未为该观测限制增加 UI 提示或状态模型。

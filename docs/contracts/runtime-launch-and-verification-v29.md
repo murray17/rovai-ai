@@ -15,6 +15,8 @@ Session、continuation 和错误边界不变；仅增加 [Camp Member Fast v1](c
 Fast 资格检查经过现有 Runtime Check Manager，不写一般 Product availability 的 attempt 结果；同 Runtime
 检查仍串行，全局并发预算不变。请求绑定 Camp/member/revision/cwd 和既有模型配置，过期结果不得覆盖新绑定或新模型的资格。检查只允许
 原生 auth/account/config/model metadata，使用受管 RuntimeProbeProcess、既有环境构造与有界清理。
+队员浮层展开时可以通过既有 `camps.members.fast.check` 静默补齐资格；不在 Camp 只读投影内启动进程，
+不发起模型请求，不为 Renderer 自动检测增加独立 Runtime 调度或绕过原生认证门禁。
 
 正常 Claude/Codex Run 在发送输入前复核资格，消费已冻结偏好。Claude 新建与 resume 都只传单一 inline
 settings；Codex 只传 `serviceTierForTurn`，缺少该原生字段就隐藏 Fast，不退回持久 `serviceTier`。

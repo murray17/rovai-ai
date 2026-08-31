@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import type { AgentProfile, CampComposerDraftView, CampMemberFastView, CampSnapshot } from '@contracts'
 import { AppHeader } from '../../../apps/desktop/src/renderer/src/App'
-import { CampWorkspace } from '../../../apps/desktop/src/renderer/src/CampWorkspace'
+import { CampWorkspace, type CampInspectorTab } from '../../../apps/desktop/src/renderer/src/CampWorkspace'
 import '../../../apps/desktop/src/renderer/src/styles.css'
 
 const now = '2026-08-31T00:00:00Z'
@@ -11,8 +11,8 @@ const agents: AgentProfile[] = Array.from({ length: 16 }, (_, index) => ({
   agentId: `agent-${index}`, displayName: index === 1 ? '负责分析超长项目名称和跨会话审查的队员' : `队员 ${index + 1}`,
   avatarRef: null, accent: null, teamRole: '项目协作', professionalResponsibilities: '', personalityTraits: [],
   workingPrinciples: '', growthTopic: '', defaultCapabilities: [], presence: 'present',
-  runtimeConfiguration: { adapterKind: index === 2 ? 'opencode-cli' : 'claude-code-cli',
-    model: { mode: 'runtime_default' }, permissions: { adapterKind: index === 2 ? 'opencode-cli' : 'claude-code-cli', schemaVersion: 1, values: {} } },
+  runtimeConfiguration: { adapterKind: index === 2 ? 'opencode-cli' : index === 1 ? 'codex-cli' : 'claude-code-cli',
+    model: { mode: 'runtime_default' }, permissions: { adapterKind: index === 2 ? 'opencode-cli' : index === 1 ? 'codex-cli' : 'claude-code-cli', schemaVersion: 1, values: {} } },
   runtimeReadiness: { status: 'ready', blockers: [] }, memberOrder: index, version: 1,
   createdAt: now, updatedAt: now, removedAt: null
 }))
@@ -27,13 +27,19 @@ const initial: CampSnapshot = {
     projectPath: '/fixture/workspace', defaultLeadAgentId: agents[0].agentId, membershipGeneration: 1, version: 1, createdAt: now, updatedAt: now },
   members: agents.map((agent, index) => ({ agentId: agent.agentId, displayName: agent.displayName, avatarRef: null,
     teamRole: agent.teamRole, accent: '', membershipStatus: 'active', leaveRequestedAt: null, profilePresence: 'present',
-    memberOrder: index, isDefaultLead: index === 0, version: 1, fast: values.get(agent.agentId) })),
+    memberOrder: index, isDefaultLead: index === 0, version: 1, fast: index === 1 || index === 4 ? undefined : values.get(agent.agentId) })),
   membershipReconciliations: [], tasks: [], messages: [], messageDeliveries: [], turns: [], agentRuns: [],
   executionEvidence: [], agentRunFileChanges: [], contextManifests: [], approvals: [], actions: [], timeline: []
 }
 let draft: CampComposerDraftView = { campId, body: '验收中保留的消息草稿', content: [{ kind: 'text', text: '验收中保留的消息草稿' }],
   revision: 1, attachments: [], replyIntent: null, continuationIntent: null, updatedAt: now, expiresAt: null }
 const requests: Array<{ method: string; params: unknown }> = []
+const checkFailures = new Set(['agent-4'])
+const heldChecks = new Map<string, Promise<void>>()
+const checksInFlight = new Map<string, number>()
+let maxChecksPerMember = 0
+let currentAgents = agents
+let bindingSequence = 0
 let failNext = false
 let holdNext = false
 let releaseResponse: (() => void) | null = null
@@ -50,9 +56,18 @@ Object.assign(window, { rovai: {
     if (method === 'camp.composerDraft.get') return draft
     if (method === 'camp.composerDraft.save') { draft = { ...draft, ...params, revision: draft.revision + 1 }; return draft }
     if (method === 'camps.members.fast.check') {
-      const value = values.get(params!.agentId) ?? null
-      await delayResponse()
-      return value
+      const agentId = params!.agentId as string
+      const count = (checksInFlight.get(agentId) ?? 0) + 1
+      checksInFlight.set(agentId, count)
+      maxChecksPerMember = Math.max(maxChecksPerMember, count)
+      const value = values.get(agentId) ?? null
+      const held = heldChecks.get(agentId)
+      heldChecks.delete(agentId)
+      try {
+        await held
+        if (checkFailures.delete(agentId)) throw new Error('fixture metadata unavailable')
+        return value
+      } finally { checksInFlight.set(agentId, count - 1) }
     }
     if (method === 'camps.members.fast.set') {
       if (failNext) { failNext = false; throw new Error('fixture offline') }
@@ -72,6 +87,7 @@ function Fixture(): React.JSX.Element {
   const [snapshot, setSnapshot] = useState(initial)
   const [profiles, setProfiles] = useState(agents)
   const [open, setOpen] = useState(false)
+  const [tab, setTab] = useState<CampInspectorTab>('members')
   const [entryHost, setEntryHost] = useState<HTMLElement | null>(null)
   const [notice, setNotice] = useState('')
   updateSnapshot = setSnapshot
@@ -82,8 +98,8 @@ function Fixture(): React.JSX.Element {
     <main className="content task-content">
       <CampWorkspace snapshot={snapshot} projectName="隔离验收" agents={profiles} busy={false} stopping={false}
         onSend={async () => {}} onChangeLead={async () => {}} onTasksChanged={async () => {}} onResolveApproval={() => {}}
-        onStop={() => {}} worldMapEnabled={false} inspectorVisible={open} inspectorTab="members" detailEntryHost={entryHost}
-        onOpenInspector={() => setOpen(true)} onCloseInspector={() => setOpen(false)} onNotify={setNotice} />
+        onStop={() => {}} worldMapEnabled={false} inspectorVisible={open} inspectorTab={tab} detailEntryHost={entryHost}
+        onOpenInspector={next => { setTab(next); setOpen(true) }} onCloseInspector={() => setOpen(false)} onNotify={setNotice} />
       <span className="sr-only" data-fixture-notice>{notice}</span>
     </main>
   </div>
@@ -91,6 +107,7 @@ function Fixture(): React.JSX.Element {
 createRoot(document.getElementById('root')!).render(<Fixture />)
 const element = (selector: string): HTMLElement => document.querySelector(selector)!
 let bookmarkedButton: HTMLElement | null = null
+let releaseCheck: (() => void) | null = null
 Object.assign(window, { fastTest: {
   settle: async () => { await new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))) },
   bookmark: () => { bookmarkedButton = element('.camp-fast-toggle') },
@@ -101,20 +118,23 @@ Object.assign(window, { fastTest: {
     updateSnapshot({ ...initial, members: initial.members.map(member => ({ ...member, fast: values.get(member.agentId) })) })
   },
   failNext: () => { failNext = true },
+  holdCheck: (agentId: string) => {
+    const wait = new Promise<void>(resolve => { releaseCheck = resolve })
+    heldChecks.set(agentId, wait)
+  },
+  releaseCheck: () => { releaseCheck?.(); releaseCheck = null },
   holdNext: () => { holdNext = true },
   release: () => { releaseResponse?.(); releaseResponse = null },
-  rebind: (kind: 'codex-cli' | 'opencode-cli') => {
-    values.delete('agent-0')
-    updateAgents(agents.map(agent => agent.agentId === 'agent-0' ? { ...agent,
+  rebind: (kind: 'claude-code-cli' | 'codex-cli' | 'opencode-cli', supported = false, keepProjection = false) => {
+    if (supported) values.set('agent-0', { runtimeBindingRevision: `binding-rebound-${++bindingSequence}`,
+      fastOverride: null, runtimeDefaultFast: null })
+    else values.delete('agent-0')
+    currentAgents = currentAgents.map(agent => agent.agentId === 'agent-0' ? { ...agent, version: agent.version + 1,
       runtimeConfiguration: { adapterKind: kind, model: { mode: 'runtime_default' },
-        permissions: { adapterKind: kind, schemaVersion: 1, values: {} } } } : agent))
-    updateSnapshot({ ...initial, members: initial.members.map(member => ({ ...member, fast: values.get(member.agentId) })) })
-  },
-  restore: () => {
-    values.set('agent-0', { runtimeBindingRevision: 'binding-restored', fastOverride: null,
-      runtimeDefaultFast: null })
-    updateAgents(agents)
-    updateSnapshot({ ...initial, members: initial.members.map(member => ({ ...member, fast: values.get(member.agentId) })) })
+        permissions: { adapterKind: kind, schemaVersion: 1, values: {} } } } : agent)
+    updateAgents(currentAgents)
+    if (!keepProjection) updateSnapshot({ ...initial, members: initial.members.map(member => ({ ...member,
+      fast: member.agentId === 'agent-0' ? undefined : values.get(member.agentId) })) })
   },
   snapshot: () => {
     const panel = element('.camp-detail-popover')
@@ -128,7 +148,7 @@ Object.assign(window, { fastTest: {
       panelBackground: panel ? getComputedStyle(panel).backgroundColor : null,
       pressed: button?.getAttribute('aria-pressed'), label: button?.getAttribute('aria-label'),
       sameNode: button === bookmarkedButton, focused: document.activeElement === button,
-      scrollable: scroll?.scrollHeight > scroll?.clientHeight, confirmation: Boolean(element('.camp-fast-cost-confirmation')),
+      scrollable: scroll?.scrollHeight > scroll?.clientHeight,
       sendHit: Boolean(sendRect && document.elementFromPoint(sendRect.x + sendRect.width / 2, sendRect.y + sendRect.height / 2)?.closest('.composer-send')),
       toggles: document.querySelectorAll('.camp-fast-toggle').length,
       pageOverflow: document.documentElement.scrollWidth > innerWidth,
@@ -136,6 +156,11 @@ Object.assign(window, { fastTest: {
       fontSize: button ? getComputedStyle(element('.camp-fast-pill')).fontSize : null,
       notice: element('[data-fixture-notice]')?.textContent,
       requests: requests.filter(request => request.method.startsWith('camps.members.fast.')),
-      saved: values.get('agent-0'), costAcknowledged: localStorage.getItem('rovai.camp-fast-cost-ack.v1') }
+      checks: requests.filter(request => request.method === 'camps.members.fast.check').map(request => request.params),
+      saves: requests.filter(request => request.method === 'camps.members.fast.set'),
+      maxChecksPerMember,
+      memberFast: Object.fromEntries(Array.from(document.querySelectorAll('.camp-inspector-member-row')).map((row, index) => [agents[index].agentId, Boolean(row.querySelector('.camp-fast-toggle'))])),
+      checkingText: /检测响应模式|正在检测响应模式|响应模式检测完成|恢复默认响应模式/.test(document.body.textContent ?? ''),
+      saved: values.get('agent-0') }
   }
 } })

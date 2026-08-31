@@ -109,8 +109,9 @@ catalog。Rovai 只有在唯一内容的项目 Skill 同时通过新 Session adv
 ## Camp 队员 Fast 边界
 
 Camp Fast service 只拥有成员局部三态偏好、保存绑定代次和安全 metadata 缓存；原生 Adapter 拥有认证、
-模型资格、默认设置解析和实际执行状态。普通 Camp 投影只读缓存，不调用 Runtime。显式检测进入既有
-Runtime Check Manager；同 Runtime 串行、全局预算、deadline 与子进程清理保持原有边界。
+模型资格、默认设置解析和实际执行状态。普通 Camp 投影只读缓存，不调用 Runtime。用户展开队员浮层后，
+Renderer 对没有有效结果的 Claude/Codex 绑定静默调用既有 Fast 检查接口；请求进入 Runtime Check Manager，
+同 Runtime 串行、全局预算、deadline 与子进程清理保持原有边界。页面缓存复用结果和在途请求，不新增轮询或原生配置解析。
 
 新 Run 冻结偏好，Claude 使用一次 inline settings，Codex 使用原生单 Turn 字段。Fast 不参与 Host/Session
 兼容性，因此无需重建 Thread；不触碰用户全局设置。实际执行前复核资格，失败只停止下发覆盖，不清除
