@@ -5110,11 +5110,10 @@ pub(crate) fn recompute_camp_turn(
         .any(|(role, status)| role == "required" && status == "cancelled")
     {
         ("failed", Some("required_run_incomplete"))
-    } else if has_failed_delivery {
-        ("failed", None)
-    } else if runs
-        .iter()
-        .any(|(role, status)| role == "required" && status == "failed")
+    } else if has_failed_delivery
+        || runs
+            .iter()
+            .any(|(role, status)| role == "required" && status == "failed")
     {
         ("failed", None)
     } else {
