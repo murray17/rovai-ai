@@ -1053,8 +1053,15 @@ export function projectLeadingCurrentUserMentionMarkdownBody(
     || content.slice(1).some((segment) => segment.kind === 'current_user_mention')
   ) return null
 
+  return structuredCampContentMarkdownText(content.slice(1), members)
+}
+
+function structuredCampContentMarkdownText(
+  content: StructuredCampMessageContent,
+  members: ReadonlyArray<Pick<CampSnapshot['members'][number], 'agentId' | 'displayName'>>
+): string {
   const names = new Map(members.map((member) => [member.agentId, member.displayName]))
-  return content.slice(1).map((segment) => {
+  return content.map((segment) => {
     if (segment.kind === 'text') return segment.text
     if (segment.kind === 'all_members_mention') return escapeMarkdownLiteral('@所有队员')
     if (segment.kind === 'member_mention') {
@@ -3949,7 +3956,11 @@ export function CampWorkspace({
                                   )
                                     ? (
                                         <div className="final-copy">
-                                          <SafeMarkdown
+                                          <AgentMessageMarkdownBody
+                                            body={displayBody}
+                                            content={campMessage.content}
+                                            members={snapshot.members}
+                                            onActivateMemberMention={openMemberProfilePopover}
                                             onFileReference={(rawReference, source, target) => {
                                               if (!filePreview) return
                                               captureFilePreviewAnchor(source)
@@ -3962,9 +3973,7 @@ export function CampWorkspace({
                                                 if (outcome.kind === 'error') onNotify(outcome.error.message)
                                               })
                                             }}
-                                          >
-                                            {displayBody}
-                                          </SafeMarkdown>
+                                          />
                                         </div>
                                       )
                                     : (
@@ -6919,10 +6928,63 @@ function MessageSurface({
   )
 }
 
+function AgentMessageMarkdownBody({
+  body,
+  content,
+  members,
+  onActivateMemberMention,
+  onFileReference
+}: {
+  body: string
+  content: StructuredCampMessageContent | null
+  members: CampSnapshot['members']
+  onActivateMemberMention(agentId: string, trigger: HTMLElement, focusPanel: boolean): void
+  onFileReference?: FileReferenceActivation
+}): JSX.Element {
+  // Only authoritative leading tokens form a recipient prefix. Literal @names
+  // stay Markdown text; the Renderer never derives addressing from the body.
+  let prefixLength = 0
+  for (const [index, segment] of (content ?? []).entries()) {
+    if (segment.kind === 'member_mention') prefixLength = index + 1
+    else if (segment.kind !== 'text' || segment.text.trim().length > 0) break
+  }
+  if (!content || prefixLength === 0) {
+    return <SafeMarkdown onFileReference={onFileReference}>{body}</SafeMarkdown>
+  }
+
+  const markdownBody = structuredCampContentMarkdownText(content.slice(prefixLength), members)
+  const hasBody = markdownBody.trim().length > 0
+  const inlineBody = hasBody && !/^\s*[\r\n]/u.test(markdownBody)
+  const prefix = (
+    <StructuredMessageBody
+      inline={hasBody}
+      body=""
+      content={content.slice(0, prefixLength)}
+      members={members}
+      onActivateMemberMention={onActivateMemberMention}
+    />
+  )
+  return (
+    <div className="member-mention-markdown-body" data-inline-body={inlineBody}>
+      {hasBody ? (
+        <SafeMarkdown
+          className="member-mention-markdown-content"
+          leadingContent={prefix}
+          inlineLeadingContent={inlineBody}
+          onFileReference={onFileReference}
+        >
+          {markdownBody}
+        </SafeMarkdown>
+      ) : prefix}
+    </div>
+  )
+}
+
 function StructuredMessageBody({
   body,
   content,
   members,
+  inline = false,
   renderLeadingCurrentUserMarkdown = false,
   onActivateMemberMention,
   onActivateAllMembersMention,
@@ -6931,6 +6993,7 @@ function StructuredMessageBody({
   body: string
   content: StructuredCampMessageContent | null
   members: CampSnapshot['members']
+  inline?: boolean
   renderLeadingCurrentUserMarkdown?: boolean
   onActivateMemberMention?(
     agentId: string,
@@ -6958,8 +7021,9 @@ function StructuredMessageBody({
     )
   }
   const memberById = new Map(members.map((member) => [member.agentId, member]))
+  const Tag = inline ? 'span' : 'p'
   return (
-    <p className="structured-message-body">
+    <Tag className="structured-message-body">
       {content.map((segment, index) => {
         if (segment.kind === 'text') return (
           <span key={`text-${index}`}>
@@ -7050,7 +7114,7 @@ function StructuredMessageBody({
           </span>
         )
       })}
-    </p>
+    </Tag>
   )
 }
 

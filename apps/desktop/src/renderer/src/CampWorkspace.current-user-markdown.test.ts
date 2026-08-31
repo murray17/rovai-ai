@@ -40,7 +40,8 @@ const members: CampSnapshot['members'] = [{
 function renderMessage(
   content: StructuredCampMessageContent,
   body = 'NON_AUTHORITATIVE_BODY_CACHE',
-  authorType: 'agent' | 'user' = 'agent'
+  authorType: 'agent' | 'user' = 'agent',
+  campMembers = members
 ): string {
   const message: CampMessageView = {
     id: 'message-current-user-markdown',
@@ -74,7 +75,7 @@ function renderMessage(
       createdAt: '2026-08-13T00:00:00Z',
       updatedAt: '2026-08-13T00:00:00Z'
     },
-    members,
+    members: campMembers,
     membershipReconciliations: [],
     tasks: [],
     messages: [message],
@@ -279,5 +280,118 @@ describe('Agent Current User Mention Markdown rendering', () => {
       expect(markup.replace(/<[^>]*>/gu, '')).not.toContain('docs/plan.md')
     }
     expect(currentUser).toContain('message-mention-token current-user')
+  })
+})
+
+describe('Agent leading Member Mention Markdown rendering', () => {
+  it('renders the structured recipient as an interactive prefix without losing GFM', () => {
+    const markup = renderMessage([
+      { kind: 'member_mention', agentId: 'agent_reviewer' },
+      { kind: 'text', text: [
+        ' review 结论：**通过**。',
+        '',
+        '## 事实复核',
+        '',
+        '- 保留列表和 `行内代码`',
+        '- [验收说明](docs/plan.md)',
+        '',
+        '```sh',
+        'pnpm test',
+        '```',
+        '',
+        '| 项目 | 结果 |',
+        '| --- | --- |',
+        '| Mention | PASS |',
+        '',
+        '<script>alert("unsafe")</script>'
+      ].join('\n') }
+    ])
+    const token = markup.match(/<span class="message-mention-token[^\"]*" data-agent-id="agent_reviewer"[^>]*>/)?.[0]
+    expect(token).toBeDefined()
+    expect(token).toContain('is-interactive')
+    expect(token).toContain('role="button"')
+    expect(token).toContain('tabindex="0"')
+    expect(token).toContain('aria-label="查看沐瓦的基础信息"')
+    expect(token).toContain('aria-haspopup="dialog"')
+    expect(markup).toContain('member-mention-markdown-body')
+    expect(markup).toContain('data-inline-body="true"')
+    expect(markup).toContain('<strong>通过</strong>')
+    expect(markup).toContain('<h3 data-markdown-heading="事实复核">事实复核</h3>')
+    expect(markup).toContain('<ul>')
+    expect(markup).toContain('<code>行内代码</code>')
+    expect(markup).toContain('title="docs/plan.md">验收说明</a>')
+    expect(markup).toContain('<pre><code class="language-sh">pnpm test')
+    expect(markup).toContain('<table>')
+    expect(markup).not.toContain('NON_AUTHORITATIVE_BODY_CACHE')
+    expect(markup).not.toContain('<script')
+    expect(markup).not.toContain('alert(&quot;unsafe&quot;)')
+  })
+
+  it('preserves multiple leading recipients and does not mutate authoritative content', () => {
+    const content: StructuredCampMessageContent = [
+      { kind: 'text', text: ' ' },
+      { kind: 'member_mention', agentId: 'agent_reviewer' },
+      { kind: 'text', text: ' ' },
+      { kind: 'member_mention', agentId: 'agent_author' },
+      { kind: 'text', text: ' 请一起 **复核**。' }
+    ]
+    const before = JSON.stringify(content)
+    const markup = renderMessage(content)
+    expect(markup).toContain('class="message-mention-token is-interactive" data-agent-id="agent_reviewer"')
+    expect(markup).toContain('class="message-mention-token is-interactive" data-agent-id="agent_author"')
+    expect(markup).toContain('<strong>复核</strong>')
+    expect(JSON.stringify(content)).toBe(before)
+  })
+
+  it('does not turn a literal at-name in an Agent body into an identity', () => {
+    const body = '@沐瓦 review 结论：**通过**。'
+    const markup = renderMessage([{ kind: 'text', text: body }], body)
+    expect(markup).toContain('@沐瓦 review 结论：<strong>通过</strong>。')
+    expect(markup).not.toContain('member-mention-markdown-body')
+    expect(markup).not.toContain('class="message-mention-token')
+  })
+
+  it.each(['left', 'removed', 'missing'] as const)('keeps an unavailable %s recipient static', (state) => {
+    const campMembers = state === 'missing' ? [members[0]] : [members[0], {
+      ...members[1],
+      ...(state === 'left' ? { membershipStatus: 'left' as const } : { profilePresence: 'removed' as const })
+    }]
+    const markup = renderMessage([
+      { kind: 'member_mention', agentId: 'agent_reviewer' },
+      { kind: 'text', text: ' **历史消息**' }
+    ], 'NON_AUTHORITATIVE_BODY_CACHE', 'agent', campMembers)
+    const token = markup.match(/<span class="message-mention-token[^\"]*" data-agent-id="agent_reviewer"[^>]*>/)?.[0]
+    expect(token).toBeDefined()
+    expect(token).toContain('is-unavailable')
+    expect(token).not.toContain('is-interactive')
+    expect(token).not.toContain('role=')
+    expect(token).not.toContain('tabindex=')
+    expect(markup).toContain(state === 'missing' ? '@不可用队员' : '@沐瓦')
+    expect(markup).toContain('<strong>历史消息</strong>')
+  })
+
+  it('does not interpret a recipient name as Markdown or HTML', () => {
+    const campMembers = [members[0], {
+      ...members[1],
+      displayName: '[评审](https://example.com/phish)<script>unsafe()</script>'
+    }]
+    const markup = renderMessage([
+      { kind: 'member_mention', agentId: 'agent_reviewer' },
+      { kind: 'text', text: ' **通过**' }
+    ], 'NON_AUTHORITATIVE_BODY_CACHE', 'agent', campMembers)
+    expect(markup).toContain('@[评审](https://example.com/phish)&lt;script&gt;unsafe()&lt;/script&gt;')
+    expect(markup).not.toContain('href="https://example.com/phish"')
+    expect(markup).not.toContain('<script>')
+    expect(markup).toContain('<strong>通过</strong>')
+  })
+
+  it('keeps a mention-only message visible and preserves the following paragraph boundary', () => {
+    const mention: StructuredCampMessageContent[number] = { kind: 'member_mention', agentId: 'agent_reviewer' }
+    const mentionOnly = renderMessage([mention])
+    expect(mentionOnly).toContain('@沐瓦</span>')
+    expect(mentionOnly).not.toContain('member-mention-markdown-content')
+    const separated = renderMessage([mention, { kind: 'text', text: '\n\n另一段 **正文**。' }])
+    expect(separated).toContain('data-inline-body="false"')
+    expect(separated).toContain('<p>另一段 <strong>正文</strong>。</p>')
   })
 })
