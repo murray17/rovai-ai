@@ -13,6 +13,7 @@ import {
 
 const root = resolve(import.meta.dirname, '..')
 const appPath = resolve(process.argv[2] ?? join(root, 'dist', 'mac-arm64', 'Rovai AI.app'))
+const previewOnly = process.argv.includes('--preview')
 const fixtureRoot = process.env.ROVAI_RUNTIME_ACTIVITY_ACCEPT_FIXTURE_ROOT
   ?? await mkdtemp(join(tmpdir(), 'rovai-runtime-activity-ui-accept-'))
 const dataDir = join(fixtureRoot, 'user-data')
@@ -30,7 +31,7 @@ const debugPort = process.env.ROVAI_RUNTIME_ACTIVITY_ACCEPT_DEBUG_PORT
   ? Number(process.env.ROVAI_RUNTIME_ACTIVITY_ACCEPT_DEBUG_PORT)
   : await availableLoopbackPort()
 const campId = 'rvcamp_01h47kvsy5fk1shh6w1g60eec0'
-const campTitle = 'v0.55 Agent 执行过程验收'
+const campTitle = previewOnly ? '执行背景分层验收 · 模拟数据' : 'v0.55 Agent 执行过程验收'
 const composerLayoutCampId = 'rvcamp_01h47kvsy5fk1shh6w1g60eec1'
 const composerLayoutCampTitle = 'v0.56 Composer 布局验收'
 const ambientEncounterCampId = 'rvcamp_01h47kvsy5fk1shh6w1g60eec2'
@@ -146,7 +147,7 @@ let clipboardTouched = false
 let testFailure = null
 let cleanupFailure = null
 try {
-  clipboardArchive = await snapshotClipboard()
+  if (!previewOnly) clipboardArchive = await snapshotClipboard()
   app = await launchApp(debugPort, 1440, 920)
   await setTheme(app.cdp, 'day')
   await activateControlledRun()
@@ -168,6 +169,11 @@ try {
     && workspaceEntryExecution.focusedRunId === activeRunId
     && !workspaceEntryExecution.drawerOwnsFocus,
     `A fresh installation did not open the latest Run in the popover without stealing focus: ${JSON.stringify(workspaceEntryExecution)}`)
+  if (previewOnly) {
+    console.log(JSON.stringify({ ready: true, mode: 'controlled-manual-preview', app: appPath,
+      fixtureRoot, userData: dataDir, skillLibrary: join(dataDir, 'managed-skill-library'), campId, campTitle }, null, 2))
+    await new Promise(resolveExit => app.child.once('exit', resolveExit))
+  } else {
   // The remaining matrix exercises both placements, starting from an explicit bottom choice.
   await waitForExpression(app.cdp, `document.querySelector('.camp-detail-popover')?.hidden === false`)
   await mouseClickSelector(app.cdp, '.run-pulse-inspector .execution-placement-button')
@@ -447,8 +453,12 @@ try {
   `Inspector execution Sidecar contract failed: ${JSON.stringify(executionSidecar)}`)
   const inspectorRuntimeModel = await collectFocusedRuntimeModelLayout(app.cdp)
   assertFocusedRuntimeModelLayout(inspectorRuntimeModel, 'Inspector')
+  const executionBackgrounds = { dayInspector: await verifyExecutionBackgrounds(app.cdp) }
   const executionSidecarCapture = join(outputDir, 'runtime-activity-execution-sidecar.png')
   await capture(app.cdp, executionSidecarCapture)
+  await setTheme(app.cdp, 'night')
+  executionBackgrounds.nightInspector = await verifyExecutionBackgrounds(app.cdp)
+  await setTheme(app.cdp, 'day')
 
   const executionGlobalPlacement = await verifyGlobalExecutionPlacement(app.cdp)
   const executionPlacementFailure = await verifyExecutionPlacementWriteFailure(app.cdp)
@@ -477,9 +487,11 @@ try {
     && JSON.stringify(returnedExecutionSelection.inspectorTabLabels) === JSON.stringify(['任务', '队员']),
   `Execution console did not return to the production bottom surface: ${JSON.stringify({ returnedExecutionDock, returnedExecutionSelection })}`)
 
+  executionBackgrounds.dayBottom = await verifyExecutionBackgrounds(app.cdp)
   await setTheme(app.cdp, 'night')
   const nightRuntimeModel = await collectFocusedRuntimeModelLayout(app.cdp)
   assertFocusedRuntimeModelLayout(nightRuntimeModel, 'Night bottom Drawer')
+  executionBackgrounds.nightBottom = await verifyExecutionBackgrounds(app.cdp)
   const nightRuntimeModelCapture = join(outputDir, 'runtime-activity-model-night.png')
   await capture(app.cdp, nightRuntimeModelCapture)
   await setTheme(app.cdp, 'day')
@@ -506,6 +518,7 @@ try {
         fixedModelRuntimeCount: runtimes.filter((entry) => entry.modelSelectionSource === 'explicit').length,
         inspectorRuntimeModel,
         nightRuntimeModel,
+        executionBackgrounds,
         responsiveRuntimeModels,
         executionGlobalPlacement,
         executionPlacementFailure
@@ -837,6 +850,7 @@ try {
       executionPlacementRestart,
       inspectorRuntimeModel,
       nightRuntimeModel,
+      executionBackgrounds,
       executionReturnedToBottom: returnedExecutionSelection,
       recipientOnlyHandoffFooter: handoffFooter,
       wideComposerLayout,
@@ -865,6 +879,7 @@ try {
   }
   await writeFile(reportPath, `${JSON.stringify(report, null, 2)}\n`)
   console.log(JSON.stringify({ ...report, reportPath }, null, 2))
+  }
   }
   }
 } catch (error) {
@@ -4090,6 +4105,36 @@ function assertCampWorldMapLayout(layout, label, expectedAgentCount) {
     && (layout.density !== 'condensed' || layout.liveCaptionText.includes('真实执行 · Codex CLI 验收'))
     && layout.documentOverflow <= 1,
   `${label} world map escaped its conversation container or lost real output: ${JSON.stringify(layout)}`)
+}
+
+async function verifyExecutionBackgrounds(cdp) {
+  const colors = await evaluate(cdp, `(() => {
+    const background = (selector) => {
+      const element = document.querySelector(selector)
+      return element ? getComputedStyle(element).backgroundColor : null
+    }
+    return {
+      theme: document.documentElement.dataset.theme,
+      selectedViewButton: background('.camp-conversation-view-controls button[aria-pressed="true"]'),
+      header: background('.execution-drawer-header'),
+      runningRun: background('.execution-process-stage.status-running .execution-process-card'),
+      historicalRun: background('.execution-process-stage[data-agent-run-id="${historicalRunId}"] .execution-process-card'),
+      canvas: background('.execution-drawer'),
+      conversation: background('.conversation-controls')
+    }
+  })()`)
+  const expected = {
+    day: { running: 'rgb(250, 250, 250)', selectedViewButton: 'rgb(233, 238, 243)' },
+    night: { running: 'rgb(27, 32, 36)', selectedViewButton: 'rgb(34, 48, 58)' }
+  }[colors.theme]
+  assert(expected && colors.conversation
+    && colors.selectedViewButton === expected.selectedViewButton
+    && colors.header === expected.running
+    && colors.runningRun === expected.running
+    && colors.historicalRun === colors.conversation
+    && colors.canvas === colors.conversation,
+  `Execution backgrounds diverged from the approved porcelain and conversation surfaces: ${JSON.stringify(colors)}`)
+  return colors
 }
 
 async function setTheme(cdp, preference) {

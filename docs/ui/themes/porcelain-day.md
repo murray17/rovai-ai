@@ -52,6 +52,7 @@ Light. `color-scheme: light`.
 | `--workspace-attention-soft` | `#f4ecdf` |
 | `--workspace-faint` | `#71808a` |
 | `--conversation-surface` | `#ffffff` |
+| `--execution-running-surface` | `#fafafa` |
 | `--conversation-find-match` | `#f4e4c3` |
 | `--conversation-find-current` | `#edc66f` |
 | `--conversation-find-line` | `#bd8a38` |

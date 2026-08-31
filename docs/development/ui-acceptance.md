@@ -206,6 +206,11 @@ pnpm package:mac
 pnpm accept:runtime-activity-ui
 ```
 
+需要把生产 App 留给人工检查时，可运行
+`node scripts/accept-runtime-activity-ui.mjs "dist/mac-arm64/Rovai AI.app" --preview`。
+它创建同样的隔离 fixture、打开明确标注“模拟数据”的执行 Camp 并等待用户关闭 App；不调用真实模型，
+不执行自动交互矩阵，也不把人工预览报告记为自动验收通过。缺省每次使用新的临时 `userData` 和隔离 Skill Library。
+
 头像轨道的 8/12/20 位队员、176px 固定步长、键盘/滚轮、Tooltip、重复精确导航与滚动保留，
 另由 `pnpm test:execution-avatar-rail` 在真实 Electron 中挂载生产 CampWorkspace 验证；该 fixture
 使用隔离 `userData`、受控本机数据，不启动 Core 或真实 Runtime。

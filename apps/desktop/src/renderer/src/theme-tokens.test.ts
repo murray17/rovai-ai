@@ -20,6 +20,7 @@ const requiredTokens = [
   '--workspace-attention-soft',
   '--workspace-faint',
   '--conversation-surface',
+  '--execution-running-surface',
   '--inspector-surface',
   '--conversation-inspector-line',
   '--home-surface',
@@ -96,6 +97,9 @@ function expectTextContrast(tokens: Record<string, string>): void {
     ['--ink', '--surface'],
     ['--muted', '--surface'],
     ['--faint', '--surface'],
+    ['--ink', '--execution-running-surface'],
+    ['--muted', '--execution-running-surface'],
+    ['--info', '--execution-running-surface'],
     ['--brand-contrast', '--brand'],
     ['--success', '--success-soft'],
     ['--attention', '--attention-soft'],
@@ -155,6 +159,7 @@ describe('Porcelain Day + Steel Night theme tokens', () => {
   it('scopes the approved porcelain surfaces and Steel emphasis', () => {
     expect(day['--canvas']).toBe('#eceeef')
     expect(day['--conversation-surface']).toBe('#ffffff')
+    expect(day['--execution-running-surface']).toBe('#fafafa')
     expect(day['--inspector-surface']).toBe('#ffffff')
     expect(day['--conversation-inspector-line']).toBe('#c7cfd6')
     expect(day['--home-surface']).toBe('#ffffff')
@@ -191,6 +196,7 @@ describe('Porcelain Day + Steel Night theme tokens', () => {
   it('uses the independently designed Steel Night palette without collapsing semantic colors', () => {
     expect(night['--canvas']).toBe('#0d1114')
     expect(night['--conversation-surface']).toBe('#181d21')
+    expect(night['--execution-running-surface']).toBe('#1b2024')
     expect(night['--inspector-surface']).toBe('#171d21')
     expect(night['--surface']).toBe('#151a1e')
     expect(night['--surface-raised']).toBe('#1b2227')
