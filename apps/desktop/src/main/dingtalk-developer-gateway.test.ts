@@ -1,9 +1,15 @@
-import { describe, expect, it, vi } from 'vitest'
+import { nativeImage, type NativeImage } from 'electron'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { DingTalkDeveloperApiError, DingTalkDeveloperGateway, dingTalkApplicationPresentation,
   type DingTalkDeveloperOperation, type DingTalkDeveloperRequest } from './dingtalk-developer-gateway'
 import { DingTalkConsoleError, type DingTalkWebSession } from './dingtalk-web-session'
 
-vi.mock('electron', () => ({ BrowserWindow: vi.fn(), session: { fromPartition: vi.fn() } }))
+vi.mock('electron', () => ({
+  BrowserWindow: vi.fn(), session: { fromPartition: vi.fn() },
+  nativeImage: { createFromBuffer: vi.fn() }
+}))
+
+beforeEach(() => { vi.mocked(nativeImage.createFromBuffer).mockReset() })
 
 const owner = { corpId: 'corp-fixture', userId: 'staff-fixture' }
 
@@ -75,20 +81,45 @@ describe('DingTalk Web Session developer gateway', () => {
     expect(f.request).toHaveBeenCalledOnce()
   })
 
-  it('uploads the member PNG through the console and updates avatar with the frozen app presentation', async () => {
+  it('resizes the 192px member PNG before upload and updates the same frozen app', async () => {
     const f = fixture()
     f.request.mockResolvedValueOnce(app()).mockResolvedValueOnce({ logoImg: 'new-media', logoImgUrl: iconUrl })
     const image = png()
+    const original = image.slice()
+    const uploadImage = png(240)
+    const resize = vi.fn(() => ({
+      isEmpty: () => false, getSize: () => ({ width: 240, height: 240 }),
+      toPNG: () => Buffer.from(uploadImage)
+    }))
+    vi.mocked(nativeImage.createFromBuffer).mockReturnValue({
+      isEmpty: () => false, getSize: () => ({ width: 192, height: 192 }), resize
+    } as unknown as NativeImage)
     expect(await run(f, 'app.avatar.upload', {}, image)).toEqual({ iconMediaId: 'new-media', iconUrl })
     expect(f.request.mock.calls[1]).toEqual(['/microapp/uploadPic/logo.json', {
-      method: 'POST', signal: undefined, timeoutMs: undefined, image
+      method: 'POST', signal: undefined, timeoutMs: undefined, image: uploadImage
     }])
+    expect(resize).toHaveBeenCalledExactlyOnceWith({ width: 240, height: 240, quality: 'best' })
+    expect(image).toEqual(original)
     f.request.mockResolvedValueOnce(app()).mockResolvedValueOnce(undefined)
       .mockResolvedValueOnce(app({ appIcon: 'new-media', iconUrl }))
     await run(f, 'app.update', { iconMediaId: 'new-media', iconUrl })
     expect(f.request.mock.calls[3]![1]?.body).toEqual({
       unifiedAppId: 'u-app', appName: '芝士', appDesc: 'Rovai AI 鉴定士', appIcon: 'new-media', iconUrl
     })
+    expect(posts(f).map(([path]) => path)).toEqual([
+      '/microapp/uploadPic/logo.json', '/openapp/unifiedapp/u-app/update'
+    ])
+  })
+
+  it('rejects an undecodable avatar locally without uploading or recreating the frozen app', async () => {
+    const f = fixture()
+    vi.mocked(nativeImage.createFromBuffer).mockReturnValue({
+      isEmpty: () => true
+    } as unknown as NativeImage)
+    await expect(run(f, 'app.avatar.upload', {}, png())).rejects.toMatchObject({
+      message: 'dingtalk_member_bot_avatar_unavailable', definitelyRejected: true
+    })
+    expect(f.request).not.toHaveBeenCalled()
   })
 
   it('does not accept a silent avatar no-op or a missing readback', async () => {
@@ -375,7 +406,20 @@ function scopes(names: string[], authed: string[], change: Record<string, unknow
     requiredApproval: false, sensitivityInvolved: 0, canEdit: true, freeApproval: false, ...change
   })) }]
 }
-function png() { return new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10, 0]) }
+// Structurally valid headers for the stubbed native codec; no real pixel data.
+function png(edge = 192) {
+  const bytes = new Uint8Array([
+    137, 80, 78, 71, 13, 10, 26, 10,
+    0, 0, 0, 13, 73, 72, 68, 82,
+    0, 0, 0, 0, 0, 0, 0, 0,
+    8, 6, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 73, 69, 78, 68, 0, 0, 0, 0
+  ])
+  const view = new DataView(bytes.buffer)
+  view.setUint32(16, edge)
+  view.setUint32(20, edge)
+  return bytes
+}
 function run(f: ReturnType<typeof fixture>, operation: DingTalkDeveloperOperation,
   values: DingTalkDeveloperRequest['values'] = {}, image?: Uint8Array) {
   return f.gateway.execute({ operation, expectedIdentity: owner, values: { unifiedAppId: 'u-app', ...values }, image })

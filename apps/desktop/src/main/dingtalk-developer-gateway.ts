@@ -1,5 +1,6 @@
 import type { ElectronDingTalkDeveloperSessionService, ExpectedDingTalkIdentity } from './dingtalk-developer-session'
 import { DingTalkConsoleError, isDingTalkAvatarPng, type DingTalkWebSession } from './dingtalk-web-session'
+import { prepareDingTalkAvatarPng } from './dingtalk-avatar'
 
 export type DingTalkDeveloperOperation =
   | 'app.create' | 'app.get' | 'app.update' | 'app.avatar.upload' | 'app.credentials.get'
@@ -91,9 +92,13 @@ async function executeConsoleOperation(
       return { appKey: app.clientId, appSecret: current.clientSecret }
     }
     case 'app.avatar.upload': {
+      const image = prepareDingTalkAvatarPng(request.image!)
+      if (!image) {
+        throw new DingTalkDeveloperApiError('dingtalk_member_bot_avatar_unavailable', { definitelyRejected: true })
+      }
       await readApp(web, id, options)
       const uploaded = record(await web.request('/microapp/uploadPic/logo.json', {
-        ...options, method: 'POST', image: request.image
+        ...options, method: 'POST', image
       }))
       if (!canonical(uploaded?.logoImg) || !imageUrl(uploaded.logoImgUrl)) {
         throw new DingTalkDeveloperApiError('dingtalk_app_avatar_upload_invalid')
