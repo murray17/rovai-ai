@@ -3718,7 +3718,7 @@ export function CampWorkspace({
                     previousMessageAuthorKey = null
                     items.push(
                       <div className="timeline-node timeline-day" key={`day-${dayKey}`}>
-                        {timelineDayLabel(timelineItem.createdAt, snapshot.camp.createdAt)}
+                        {timelineDayLabel(timelineItem.createdAt)}
                       </div>
                     )
                   }
