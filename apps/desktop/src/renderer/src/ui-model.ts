@@ -490,14 +490,14 @@ export function buildLiveExecutionProgress(
   const stepById = new Map(steps.map((step) => [step.id, step]))
   const items = itemOrder.flatMap((key): ExecutionProgressItem[] => {
     if (key === 'plan') {
-      const explanation = planExplanation.trim().slice(-2_000)
+      const explanation = planExplanation.trim()
       return explanation || plan.length > 0
         ? [{ key, kind: 'plan', explanation, plan }]
         : []
     }
     if (key.startsWith('narration:')) {
       const itemId = key.slice('narration:'.length)
-      const body = (narrationByItem.get(itemId) ?? '').trim().slice(-4_000)
+      const body = (narrationByItem.get(itemId) ?? '').trim()
       return safeMarkdownHasRenderableContent(body)
         ? [{ key, kind: 'narration', body }]
         : []

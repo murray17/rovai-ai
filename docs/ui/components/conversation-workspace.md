@@ -282,6 +282,10 @@ selection 不算“正在查看 non-terminal Run”。从其他 Camp、一级页
 不能滚动公共消息时间线。Drawer 空间不足时收缩、滚动或变为摘要，不能遮住 Approval Dock、
 Composer 或唯一 Stop。
 
+已加载的正文片段与计划说明完整呈现，不按固定字符数只保留末尾；后续输出追加时不得裁掉正文开头或
+破坏已有 Markdown 结构。实时投影与历史 Evidence 回读、底部与 Inspector 共用此规则；这不改变 Evidence
+分页、显式截断标记或 Managed Blob 的存储与读取边界。
+
 Task related execution、停止结果和世界地图入口在右侧承载时必须显示 Inspector、激活“执行”并打开
 精确 Agent/Run。关闭详情只清除 selection，保留位置和队员入口；隐藏 Inspector 只改变可见性，再次
 显示时保留“执行”Tab、Agent 与 Run。位置切换后焦点进入另一位置的对应切换控件，详情关闭/Escape
