@@ -48,8 +48,17 @@ last_updated: 2026-08-31
   检查执行结果截图；新主线增量没有 Rust、锁文件或打包配置变化，复用已验证的同一 Release Core。
 - 同 worktree 的 `dingtalk-avatar.ts/test.ts` 与 `dingtalk-developer-gateway.ts/test.ts` 并行改动原样保留且未纳入此提交；
   以上 TypeScript 测试覆盖当前组合工作树。这不改变钉钉真实 Owner/Core/群聊/卡片及 packaged 恢复的 NO-GO 边界。
-- 后续按本次用户指令生成 daily App、执行隔离打包验收并非终止安装到 Applications；打包与安装结果另记。
-  本次不推送、不创建 PR，也不授权重启当前日常 App。
+- 最终合并提交为 `685c844b`。`CARGO_BUILD_JOBS=2 pnpm package:mac:daily` 生成0.0.4 arm64 ad-hoc App并通过签名门；
+  包内21个 `out/` 文件逐个与本次构建哈希一致，Core/CLI Mach-O UUID与Release源一致。
+- `pnpm accept:bootstrap-shell-ui` 在全新隔离 userData/Skill Library 中通过：unknown authority保留、显式重试、
+  Day/Night/200%/reduced motion、Core强杀后的未提交事务回滚/1024条已提交fixture行保留、generation恢复，
+  以及Skills降级后同一Core内恢复。检查阻断与恢复截图，不使用日常数据或真实Runtime/渠道消息。
+- `pnpm install:mac:daily` 已非终止安装到 `/Applications/Rovai AI.app`，源/同卷暂存/最终目标签名门均通过。
+  旧包保留为 `Rovai AI.backup-before-channel-main-20260831-180113.app`；最终App的asar SHA-256为
+  `8b35cfb0ebc9eba86e91ec18185d753b34015616ad7022cdee65101838337b4e`，与验收包一致。
+  Core UUID为 `856D50EA-CFDD-310C-9900-A77F87B4BC2A`，CLI UUID为 `A2729EA3-536F-3922-A87A-E178D652D89E`。
+- 原日常App/Core/Helper六个PID全部仍存活，没有遗留打包验收进程。磁盘安装不是热升级，用户应稍后主动退出，
+  再从规范 `/Applications/Rovai AI.app` 启动。未推送、未创建PR、未重启或写日常SQLite；并行改动原样保留。
 
 ## 2026-08-31 飞书紧凑实时执行卡
 
