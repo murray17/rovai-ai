@@ -1,7 +1,7 @@
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
-import { afterEach, describe, expect, it, vi } from 'vitest'
-import { FileReferenceLink, FileReferenceText } from './FileReferenceLink'
+import { describe, expect, it } from 'vitest'
+import { FileReferenceText } from './FileReferenceLink'
 import { SafeMarkdown } from './SafeMarkdown'
 
 const examples = [
@@ -102,48 +102,9 @@ describe.each(renderers)('file-link presentation in $name', ({ render }) => {
   })
 })
 
-describe('file link activation', () => {
-  afterEach(() => vi.unstubAllGlobals())
-
-  it('opens the exact target without navigating the document and supports keyboard activation', () => {
-    const onActivate = vi.fn()
-    vi.stubGlobal('window', { getSelection: () => ({ toString: () => '' }) })
-    const link = FileReferenceLink({ rawReference: 'src/app.ts:20', children: '实现', className: 'message-file-reference', onActivate })
-    const props = link.props as { onClick(event: { detail: number; currentTarget: HTMLElement; preventDefault(): void }): void }
-    const preventDefault = vi.fn()
-    const currentTarget = {} as HTMLElement
-    props.onClick({ detail: 1, currentTarget, preventDefault })
-    props.onClick({ detail: 0, currentTarget, preventDefault })
-    expect(preventDefault).toHaveBeenCalledTimes(2)
-    expect(onActivate.mock.calls).toEqual([
-      ['src/app.ts:20', currentTarget, undefined], ['src/app.ts:20', currentTarget, undefined]
-    ])
-  })
-
-  it('keeps mouse text selection from opening a file, without blocking keyboard activation', () => {
-    const onActivate = vi.fn()
-    vi.stubGlobal('window', { getSelection: () => ({ toString: () => '选中文字' }) })
-    const link = FileReferenceLink({ rawReference: 'src/app.ts', children: '实现', className: 'message-file-reference', onActivate })
-    const props = link.props as { onClick(event: { detail: number; preventDefault(): void }): void }
-    props.onClick({ detail: 1, preventDefault: () => undefined })
-    expect(onActivate).not.toHaveBeenCalled()
-    props.onClick({ detail: 0, preventDefault: () => undefined })
-    expect(onActivate).toHaveBeenCalledWith('src/app.ts', undefined, undefined)
-  })
-
-  it('keeps the verified source and the requested line range separate on activation', () => {
-    const onActivate = vi.fn()
-    vi.stubGlobal('window', { getSelection: () => null })
-    const link = FileReferenceLink({
-      rawReference: 'run_report.py:44-46', sourceReference: 'src/report/run_report.py',
-      children: 'run_report.py:44-46', className: 'message-file-reference', onActivate
-    })
-    const currentTarget = {} as HTMLElement
-    const props = link.props as { onClick(event: { detail: number; currentTarget: HTMLElement; preventDefault(): void }): void }
-    props.onClick({ detail: 1, currentTarget, preventDefault: () => undefined })
-    expect(onActivate).toHaveBeenCalledWith('src/report/run_report.py', currentTarget, { line: 44, endLine: 46 })
-  })
-
+// Pointer selection, keyboard activation, exact sources and range targets are exercised
+// with native input in scripts/fixtures/file-reference-navigation/main.cjs.
+describe('file references without an opener', () => {
   it('preserves the original source when there is no file opener', () => {
     const source = '[方案](docs/plan.md) `src/app.ts:20`'
     expect(renderToStaticMarkup(createElement(FileReferenceText, { text: source }))).toBe(source)
