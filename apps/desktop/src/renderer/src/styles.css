@@ -1799,6 +1799,28 @@ html.file-preview-resizing .file-preview-pane { pointer-events: none; }
 .message-file-reference:hover { text-decoration-color: currentColor; }
 .markdown-file-reference:focus-visible,
 .message-file-reference:focus-visible { border-radius: 2px; outline: 2px solid var(--focus); outline-offset: 2px; }
+.markdown-file-reference.inline-code-file-reference,
+.message-file-reference.inline-code-file-reference {
+  font: .9em/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
+  text-decoration: none;
+}
+.inline-code-file-reference .file-preview-tab-icon {
+  display: inline-block;
+  width: 1em;
+  height: 1em;
+  margin-right: .28em;
+  vertical-align: -.12em;
+}
+.inline-code-file-reference:hover,
+.inline-code-file-reference:active { color: color-mix(in srgb, var(--info) 82%, var(--ink)); }
+.inline-code-file-reference:hover .inline-code-file-reference-label {
+  text-decoration-line: underline;
+  text-decoration-style: dashed;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+}
+.inline-code-file-reference:active .inline-code-file-reference-label,
+.inline-code-file-reference:focus-visible .inline-code-file-reference-label { text-decoration: none; }
 .file-preview-inline-error { max-width: 780px; margin: 0 auto 12px; color: var(--danger); font-size: 10px; }
 .file-preview-html-stage { position: relative; width: 100%; min-width: 0; min-height: 0; }
 .file-preview-html { width: 100%; height: 100%; border: 0; background: var(--conversation-surface); }

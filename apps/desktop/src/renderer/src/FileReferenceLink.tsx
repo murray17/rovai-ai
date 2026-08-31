@@ -1,4 +1,5 @@
-import { useMemo, type JSX, type ReactNode } from 'react'
+import { Children, isValidElement, useMemo, type JSX, type ReactNode } from 'react'
+import { FilePreviewTabIcon } from './FilePreviewTabIcon'
 import { projectMessageFileReferences } from './safe-markdown-model'
 
 export const FILE_REFERENCE_FRAGMENT = '#rovai-file-reference='
@@ -14,9 +15,15 @@ export function FileReferenceLink({
   className: string
   onActivate(rawReference: string): void
 }): JSX.Element {
+  const labelNodes = Children.toArray(children)
+  const onlyChild = labelNodes.length === 1 ? labelNodes[0] : null
+  const codeLabel = isValidElement<{ children?: ReactNode }>(onlyChild) && onlyChild.type === 'code'
+    ? onlyChild
+    : null
+
   return (
     <a
-      className={className}
+      className={codeLabel ? `${className} inline-code-file-reference` : className}
       href={`${FILE_REFERENCE_FRAGMENT}${encodeURIComponent(rawReference)}`}
       title={rawReference}
       onClick={(event) => {
@@ -26,7 +33,12 @@ export function FileReferenceLink({
       }}
       onAuxClick={(event) => event.preventDefault()}
     >
-      {children}
+      {codeLabel ? (
+        <>
+          <FilePreviewTabIcon kind="text" />
+          <span className="inline-code-file-reference-label">{codeLabel.props.children}</span>
+        </>
+      ) : children}
     </a>
   )
 }
