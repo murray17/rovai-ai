@@ -28,7 +28,7 @@ pub const NAVIGATION_SCHEMA_VERSION: i64 = 3;
 pub const EXECUTION_EVIDENCE_PAGE_SCHEMA_VERSION: i64 = 1;
 pub const CAMP_MESSAGE_AROUND_SCHEMA_VERSION: i64 = 1;
 pub const CAMP_MESSAGE_FIND_SCHEMA_VERSION: i64 = 1;
-pub const CAMP_OPEN_SCHEMA_VERSION: i64 = 5;
+pub const CAMP_OPEN_SCHEMA_VERSION: i64 = 6;
 pub const CAMP_MESSAGE_PAGE_SCHEMA_VERSION: i64 = 1;
 pub const AGENT_RUN_DIAGNOSTIC_SCHEMA_VERSION: i64 = 1;
 pub const NAVIGATION_RECENT_CAMP_LIMIT: usize = 5;
@@ -41,7 +41,6 @@ const CAMP_OPEN_DELIVERY_LIMIT: i64 = 200;
 const CAMP_OPEN_TURN_LIMIT: i64 = 64;
 const CAMP_OPEN_AGENT_RUN_LIMIT: i64 = 96;
 const CAMP_OPEN_APPROVAL_LIMIT: i64 = 32;
-const CAMP_OPEN_TIMELINE_LIMIT: i64 = 160;
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -693,7 +692,6 @@ pub struct CampOpenCoverage {
     pub agent_runs: CampOpenCollectionCoverage,
     pub execution_evidence: CampOpenCollectionCoverage,
     pub approvals: CampOpenCollectionCoverage,
-    pub timeline: CampOpenCollectionCoverage,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -712,7 +710,6 @@ pub struct CampOpenProjection {
     pub execution_evidence: Vec<AgentRunExecutionEvidenceView>,
     pub agent_run_file_changes: Vec<AgentRunFileChangesView>,
     pub approvals: Vec<ApprovalView>,
-    pub timeline: Vec<DomainEventView>,
     pub coverage: CampOpenCoverage,
 }
 
@@ -1052,7 +1049,7 @@ impl ReadModelService {
         let membership_reconciliations = load_membership_reconciliations(&transaction, camp_id)?;
         let counts = load_camp_open_counts(&transaction, camp_id)?;
         let tasks = load_tasks(&transaction, camp_id, Some(CAMP_OPEN_TASK_LIMIT))?;
-        let messages = load_messages(&transaction, camp_id, CAMP_OPEN_MESSAGE_LIMIT)?;
+        let messages = load_open_messages(&transaction, camp_id, CAMP_OPEN_MESSAGE_LIMIT)?;
         let message_deliveries =
             load_message_deliveries(&transaction, camp_id, Some(CAMP_OPEN_DELIVERY_LIMIT))?;
         let turns = load_turns(&transaction, camp_id, Some(CAMP_OPEN_TURN_LIMIT))?;
@@ -1061,15 +1058,6 @@ impl ReadModelService {
         let agent_run_file_changes = list_completed_run_file_changes(&transaction, camp_id)?;
         let approvals =
             load_approvals(&transaction, camp_id, true, Some(CAMP_OPEN_APPROVAL_LIMIT))?;
-        let timeline = load_events(
-            &transaction,
-            Some(camp_id),
-            0,
-            through_global_sequence,
-            CAMP_OPEN_TIMELINE_LIMIT,
-            true,
-            true,
-        )?;
         let coverage = CampOpenCoverage {
             tasks: collection_coverage(tasks.len(), counts.tasks),
             messages: message_coverage(&messages, counts.messages),
@@ -1084,7 +1072,6 @@ impl ReadModelService {
                 counts.execution_evidence,
             ),
             approvals: collection_coverage(approvals.len(), counts.pending_approvals),
-            timeline: collection_coverage(timeline.len(), counts.timeline),
         };
         transaction.commit()?;
         Ok(CampOpenProjection {
@@ -1101,7 +1088,6 @@ impl ReadModelService {
             execution_evidence,
             agent_run_file_changes,
             approvals,
-            timeline,
             coverage,
         })
     }
@@ -1826,7 +1812,6 @@ struct CampOpenCounts {
     agent_runs: i64,
     execution_evidence: i64,
     pending_approvals: i64,
-    timeline: i64,
 }
 
 fn load_camp_open_counts(transaction: &Transaction<'_>, camp_id: &str) -> Result<CampOpenCounts> {
@@ -1853,14 +1838,7 @@ fn load_camp_open_counts(transaction: &Transaction<'_>, camp_id: &str) -> Result
                JOIN action_execution ON action_execution.id = approval.action_id
                JOIN agent_run ON agent_run.id = action_execution.agent_run_id
                JOIN camp_turn ON camp_turn.id = agent_run.camp_turn_id
-               WHERE camp_turn.camp_id = ?1 AND approval.status = 'pending'),
-              (SELECT COUNT(*)
-               FROM event_log
-               LEFT JOIN task AS event_task ON event_task.id = event_log.task_id
-               WHERE (event_log.camp_id = ?1
-                  OR (event_log.camp_id IS NULL AND event_task.camp_id = ?1))
-                 AND (event_log.entity_type = 'task'
-                   OR event_log.event_type = 'camp_turn.cancel_requested'))
+               WHERE camp_turn.camp_id = ?1 AND approval.status = 'pending')
             "#,
             [camp_id],
             |row| {
@@ -1872,7 +1850,6 @@ fn load_camp_open_counts(transaction: &Transaction<'_>, camp_id: &str) -> Result
                     agent_runs: row.get(4)?,
                     execution_evidence: row.get(5)?,
                     pending_approvals: row.get(6)?,
-                    timeline: row.get(7)?,
                 })
             },
         )
@@ -2146,6 +2123,37 @@ fn camp_message_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<CampMessageRow>
         presentation_json: row.get(12)?,
         created_at: row.get(13)?,
     })
+}
+
+// Camp open reads business projections without resolving publication events.
+// Snapshot/history readers retain their event sequence through load_messages.
+fn load_open_messages(
+    transaction: &Transaction<'_>,
+    camp_id: &str,
+    limit: i64,
+) -> Result<Vec<CampMessageView>> {
+    let mut statement = transaction.prepare(
+        r#"
+        SELECT id, sequence, NULL AS timeline_global_sequence,
+               author_type, author_id,
+               source_agent_run_id, body, structured_content_json, address_mode,
+               addressed_agent_ids_json, reply_to_camp_message_id, camp_turn_id,
+               CASE WHEN author_type = 'agent'
+                    THEN recipient_presentation_json
+                    ELSE presentation_json
+               END, created_at
+        FROM camp_message
+        WHERE camp_id = ?1 AND tombstoned_at IS NULL
+        ORDER BY sequence DESC LIMIT ?2
+        "#,
+    )?;
+    let rows = statement
+        .query_map(params![camp_id, limit], camp_message_row)?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    drop(statement);
+    let mut messages = hydrate_message_views(transaction, rows)?;
+    messages.reverse();
+    Ok(messages)
 }
 
 fn load_messages(
