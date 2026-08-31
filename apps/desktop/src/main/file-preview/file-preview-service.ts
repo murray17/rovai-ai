@@ -28,6 +28,7 @@ import {
   openPreviewFile,
   pathIsWithin,
   referenceCandidatePath,
+  resolveFileReferencePath,
   type OpenedPreviewFile
 } from './file-preview-access'
 import {
@@ -517,8 +518,7 @@ export class FilePreviewService {
     try {
       const target = await this.#resolveReopenTarget(record)
       const parsed = this.#parsedReference(target)
-      const candidatePath = target.candidatePath
-        ?? referenceCandidatePath(parsed, target.rootPath, target.basePath)
+      const candidatePath = await this.#candidatePath(target, parsed)
       const beforeSequence = this.#watchers.sequence(record.canonicalRoot)
       const opened = await openPreviewFile(target.rootPath, candidatePath)
       const classification = await this.#classify(opened)
@@ -727,11 +727,15 @@ export class FilePreviewService {
     permitAuthorizationChallenge: boolean
   ): Promise<FilePreviewOperationResult<OpenFilePreviewResult>> {
     const parsed = this.#parsedReference(target)
-    const candidatePath = target.candidatePath
-      ?? referenceCandidatePath(parsed, target.rootPath, target.basePath)
+    const candidatePath = await this.#candidatePath(target, parsed)
     let opened: OpenedPreviewFile
     try {
-      const path = await inspectPreviewPath(target.rootPath, candidatePath)
+      // Explicit outside directories only need a native reveal, not a read grant.
+      // Relative/symlink escapes and non-message sources keep their existing gate.
+      const allowExternalDirectory = (request.kind === 'message_reference' || request.kind === 'camp_workspace')
+        && target.allowChildren !== false && parsed.pathKind !== 'relative'
+        && isAbsolute(candidatePath) && !pathIsWithin(resolve(target.rootPath), candidatePath)
+      const path = await inspectPreviewPath(target.rootPath, candidatePath, { allowExternalDirectory })
       if (path.kind === 'directory') {
         if (target.allowChildren === false || request.kind === 'run_evidence') {
           return failed('not_regular_file', '这个来源不支持打开文件夹。')
@@ -837,6 +841,16 @@ export class FilePreviewService {
     this.#handles.set(record.handleId, record)
     this.#subscribe(record)
     return ok({ kind: 'file_preview', file: this.#publicFile(record) })
+  }
+
+  async #candidatePath(
+    target: ResolvedTarget | Extract<FilePreviewAuthorityResult, { kind: 'file_target' }>,
+    parsed: ParsedFileReference
+  ): Promise<string> {
+    if (target.candidatePath) return target.candidatePath
+    return target.sourceKind === 'message_reference' || target.sourceKind === 'camp_workspace'
+      ? resolveFileReferencePath(parsed, target.rootPath, target.basePath)
+      : referenceCandidatePath(parsed, target.rootPath, target.basePath)
   }
 
   #parsedReference(target: { rawReference?: string; candidatePath?: string; target?: FileLocationTarget }): ParsedFileReference {
@@ -974,8 +988,7 @@ export class FilePreviewService {
     this.#requireActiveCamp(record.webContentsId, record.campId)
     const target = await this.#resolveReopenTarget(record)
     const parsed = this.#parsedReference(target)
-    const candidatePath = target.candidatePath
-      ?? referenceCandidatePath(parsed, target.rootPath, target.basePath)
+    const candidatePath = await this.#candidatePath(target, parsed)
     const opened = await openPreviewFile(target.rootPath, candidatePath)
     if (
       opened.canonicalRoot !== record.canonicalRoot
@@ -1005,8 +1018,7 @@ export class FilePreviewService {
   }> {
     const target = await this.#resolveReopenTarget(record)
     const parsed = this.#parsedReference(target)
-    const candidatePath = target.candidatePath
-      ?? referenceCandidatePath(parsed, target.rootPath, target.basePath)
+    const candidatePath = await this.#candidatePath(target, parsed)
     const opened = await openPreviewFile(target.rootPath, candidatePath)
     try {
       if (

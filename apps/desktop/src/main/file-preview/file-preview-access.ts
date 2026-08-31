@@ -1,7 +1,8 @@
 import { homedir } from 'node:os'
-import { open, realpath, stat, type FileHandle } from 'node:fs/promises'
+import { lstat, open, realpath, stat, type FileHandle } from 'node:fs/promises'
 import { basename, dirname, isAbsolute, relative, resolve, sep } from 'node:path'
 import type { FileContentVersion, ParsedFileReference } from '@contracts'
+import { parseFileReference } from '../../file-preview-reference'
 
 export class FilePreviewAccessError extends Error {
   constructor(
@@ -37,6 +38,36 @@ export function referenceCandidatePath(
   return resolve(basePath || rootPath, reference.pathPart)
 }
 
+// Resolve message punctuation only against an existing regular file. This does
+// not authorize the candidate: callers must still enforce canonical containment.
+export async function resolveFileReferencePath(
+  reference: ParsedFileReference,
+  rootPath: string,
+  basePath: string
+): Promise<string> {
+  const candidate = referenceCandidatePath(reference, rootPath, basePath)
+  const { line, column, endLine, endColumn } = reference.target ?? {}
+  if ([line, column, endLine, endColumn].some((value) => value !== undefined)
+    || !/[^:]:$/u.test(reference.pathPart)) return candidate
+
+  const path = reference.pathPart.slice(0, -1)
+  const repaired = parseFileReference(path)
+  // Do not create a location suffix or decode the already parsed path twice.
+  if (!repaired || repaired.target || repaired.pathPart !== path) return candidate
+  try {
+    await lstat(candidate)
+    return candidate
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') return candidate
+  }
+  const repairedCandidate = referenceCandidatePath({ ...reference, pathPart: path }, rootPath, basePath)
+  try {
+    return (await stat(repairedCandidate)).isFile() ? repairedCandidate : candidate
+  } catch {
+    return candidate
+  }
+}
+
 export function pathIsWithin(root: string, candidate: string): boolean {
   const remainder = relative(root, candidate)
   return remainder === '' || (!remainder.startsWith(`..${sep}`) && remainder !== '..' && !isAbsolute(remainder))
@@ -50,17 +81,27 @@ export async function canonicalizeExistingPath(path: string): Promise<string> {
   }
 }
 
-export async function inspectPreviewPath(rootPath: string, candidatePath: string): Promise<{
+export async function inspectPreviewPath(
+  rootPath: string,
+  candidatePath: string,
+  options: { allowExternalDirectory?: boolean } = {}
+): Promise<{
   canonicalRoot: string
   canonicalPath: string
   kind: 'file' | 'directory'
 }> {
   const canonicalRoot = await canonicalizeExistingPath(rootPath)
   const canonicalPath = await canonicalizeExistingPath(candidatePath)
-  if (!pathIsWithin(canonicalRoot, canonicalPath)) {
+  const withinRoot = pathIsWithin(canonicalRoot, canonicalPath)
+  const allowExternalDirectory = options.allowExternalDirectory
+    && !pathIsWithin(canonicalRoot, resolve(candidatePath))
+  if (!withinRoot && !allowExternalDirectory) {
     throw new FilePreviewAccessError('outside_authorized_root', '这个文件不在已授权目录中。')
   }
   const metadata = await stat(canonicalPath)
+  if (!withinRoot && !metadata.isDirectory()) {
+    throw new FilePreviewAccessError('outside_authorized_root', '这个文件不在已授权目录中。')
+  }
   if (!metadata.isFile() && !metadata.isDirectory()) {
     throw new FilePreviewAccessError('not_regular_file', '这里只能打开普通文件或文件夹。')
   }
