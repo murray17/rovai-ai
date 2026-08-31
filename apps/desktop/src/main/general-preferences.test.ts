@@ -25,7 +25,10 @@ describe('general preferences', () => {
   it('uses memory defaults and preserves a malformed source file for recovery', async () => {
     const directory = await temporaryDirectory()
     const filePath = join(directory, 'general-preferences.json')
-    expect(await readGeneralPreferences(filePath)).toEqual(DEFAULT_GENERAL_PREFERENCES)
+    expect(await readGeneralPreferences(filePath)).toEqual({
+      ...DEFAULT_GENERAL_PREFERENCES,
+      executionConsolePlacement: 'inspector'
+    })
     const malformed = '{broken'
     await writeFile(filePath, malformed)
     expect(await readGeneralPreferences(filePath)).toEqual(DEFAULT_GENERAL_PREFERENCES)
@@ -48,6 +51,7 @@ describe('general preferences', () => {
     })).toEqual({
       ...DEFAULT_GENERAL_PREFERENCES,
       lastSettingsSection: 'about',
+      executionConsolePlacement: 'bottom',
       worldMapEnabled: false
     })
     expect(parseGeneralPreferences({
@@ -58,7 +62,7 @@ describe('general preferences', () => {
       schemaVersion: 4,
       startupLocationMode: 'quick_chat',
       lastSettingsSection: 'diagnostics',
-      executionConsolePlacement: 'bottom',
+      executionConsolePlacement: 'inspector',
       newConversationDefaults: null,
       newConversationDefaultsRequireConfirmation: false,
       oneClickNewConversationEnabled: false,
@@ -74,7 +78,8 @@ describe('general preferences', () => {
       oneClickNewConversationEnabled: false
     })).toEqual({
       ...DEFAULT_GENERAL_PREFERENCES,
-      lastSettingsSection: 'channels'
+      lastSettingsSection: 'channels',
+      executionConsolePlacement: 'bottom'
     })
     expect(parseGeneralPreferences({
       schemaVersion: 2,
@@ -90,7 +95,7 @@ describe('general preferences', () => {
       schemaVersion: 4,
       startupLocationMode: 'quick_chat',
       lastSettingsSection: 'diagnostics',
-      executionConsolePlacement: 'bottom',
+      executionConsolePlacement: 'inspector',
       newConversationDefaults: {
         memberAgentIds: ['agent-a', 'agent-b'],
         defaultLeadAgentId: 'agent-a'
@@ -163,7 +168,7 @@ describe('general preferences', () => {
     await Promise.all([
       store.setStartupLocationMode('quick_chat'),
       store.setLastSettingsSection('runtime'),
-      store.setExecutionConsolePlacement('inspector'),
+      store.setExecutionConsolePlacement('bottom'),
       store.setWorldMapEnabled(false),
       store.setStartupLocationMode('last_location')
     ])
@@ -172,13 +177,14 @@ describe('general preferences', () => {
       schemaVersion: 4,
       startupLocationMode: 'last_location',
       lastSettingsSection: 'runtime',
-      executionConsolePlacement: 'inspector',
+      executionConsolePlacement: 'bottom',
       newConversationDefaults: null,
       newConversationDefaultsRequireConfirmation: false,
       oneClickNewConversationEnabled: false,
       worldMapEnabled: false
     })
     expect(JSON.parse(await readFile(filePath, 'utf8'))).toEqual(store.get())
+    expect((await GeneralPreferencesStore.load(filePath)).get()).toEqual(store.get())
     if (process.platform !== 'win32') {
       expect((await stat(filePath)).mode & 0o777).toBe(0o600)
     }
@@ -226,7 +232,7 @@ describe('general preferences', () => {
     await mkdir(filePath)
     const store = await GeneralPreferencesStore.load(filePath)
 
-    await expect(store.setExecutionConsolePlacement('inspector')).rejects.toBeInstanceOf(Error)
+    await expect(store.setExecutionConsolePlacement('bottom')).rejects.toBeInstanceOf(Error)
     expect(store.get()).toEqual(DEFAULT_GENERAL_PREFERENCES)
     expect((await readdir(directory)).filter((name) => name.endsWith('.tmp'))).toEqual([])
   })

@@ -1,5 +1,5 @@
 import { homedir } from 'node:os'
-import { open, realpath, type FileHandle } from 'node:fs/promises'
+import { open, realpath, stat, type FileHandle } from 'node:fs/promises'
 import { basename, dirname, isAbsolute, relative, resolve, sep } from 'node:path'
 import type { FileContentVersion, ParsedFileReference } from '@contracts'
 
@@ -50,12 +50,26 @@ export async function canonicalizeExistingPath(path: string): Promise<string> {
   }
 }
 
-export async function openPreviewFile(rootPath: string, candidatePath: string): Promise<OpenedPreviewFile> {
+export async function inspectPreviewPath(rootPath: string, candidatePath: string): Promise<{
+  canonicalRoot: string
+  canonicalPath: string
+  kind: 'file' | 'directory'
+}> {
   const canonicalRoot = await canonicalizeExistingPath(rootPath)
   const canonicalPath = await canonicalizeExistingPath(candidatePath)
   if (!pathIsWithin(canonicalRoot, canonicalPath)) {
     throw new FilePreviewAccessError('outside_authorized_root', '这个文件不在已授权目录中。')
   }
+  const metadata = await stat(canonicalPath)
+  if (!metadata.isFile() && !metadata.isDirectory()) {
+    throw new FilePreviewAccessError('not_regular_file', '这里只能打开普通文件或文件夹。')
+  }
+  return { canonicalRoot, canonicalPath, kind: metadata.isDirectory() ? 'directory' : 'file' }
+}
+
+export async function openPreviewFile(rootPath: string, candidatePath: string): Promise<OpenedPreviewFile> {
+  const { canonicalRoot, canonicalPath, kind } = await inspectPreviewPath(rootPath, candidatePath)
+  if (kind !== 'file') throw new FilePreviewAccessError('not_regular_file', '这里只能读取普通文件。')
   let file: FileHandle
   try {
     file = await open(canonicalPath, 'r')

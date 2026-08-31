@@ -30,6 +30,29 @@ last_updated: 2026-08-31
 - [x] 单元测试覆盖 Console API wire、Web Session、Provisioner、Open API、Stream readiness/ACK、Inbound、Migration、Core admission 和 Renderer；
 - [x] 完成仓库全量 Rust、TypeScript、文档、UI detector 与 Desktop build 门禁并记录本次结果。
 
+## 2026-08-31 PR #136 主线合并验证
+
+先将下节钉钉内置扫码和静默取消的已验证改动保存为 `7b39e744`，再合入
+`main@e95f192d8c50760321792d7b692a1772aa565957`（包含 PR #136 Camp Fast 自动检测）。
+保留渠道共享 `execution-presentation` 与 Renderer re-export，把主线年月日标签迁入当前 owner；
+主题同时保留渠道/二维码 Token 与主线资源链接 Token。执行台默认采用主线浮层，已保存的 `bottom`
+仍原样恢复；对应渠道设置旧 schema 用例显式断言保存值，不把新默认值当作覆盖用户选择的依据。
+主线 v1.34 Fast 的源验收记录随合并保留，当前版本仍为 v1.36，不新增 Migration 或 Version Decision。
+
+合并后在当前共享 worktree 使用隔离 fixture 完成：
+
+- `pnpm typecheck`、`pnpm test`（128 文件 / 1202 项 Vitest，220 项 Node 通过、1 项既有平台 skip）和
+  `pnpm build:desktop`；
+- staged 多 Rust target 路由执行 default-feature workspace 全量；另有292项 slow integration、
+  `cargo clippy --workspace --all-targets -- -D warnings` 与 `cargo fmt --all --check` 通过；
+- 真实 Electron 的钉钉内置扫码、contextBridge、Fast、文件导航、Composer 续发、执行头像栏和启动页面回归；
+  执行头像栏首次未取得原生键盘焦点，单独复跑通过，未放宽断言或修改该夹具；
+- `pnpm test:core-startup` 9项通过，涵盖旧失败 Turn 收敛、空闲 Camp 再接收输入、私有队列通知和启动恢复；
+- 文档治理9项、`docs:check`、以同一 main SHA 为 base 的 `docs:check:ci` 与 diff 空白检查通过。
+
+上述不调用模型、不读取日常渠道凭据，不等于钉钉真实扫码后的组织交互或远端收发验收；既有 NO-GO 项保留。
+分支推送/英文改名与用户要求的 daily App 安装结果由后续交付记录拥有，不以测试通过推断安装完成。
+
 ## 2026-08-31 钉钉内置扫码与静默取消
 
 - [x] `dingtalk_operation_cancelled` 在 Host 作为 no-op 收敛，Renderer 兼容 Electron 的自定义 Error 包装；

@@ -10,6 +10,7 @@ import {
 } from 'react'
 import type {
   AgentRunFileChangesView,
+  FileLocationTarget,
   FilePreviewErrorPayload,
   FilePreviewOperationResult,
   FilePreviewPageContent,
@@ -72,7 +73,7 @@ export interface FilePreviewContextValue {
   activeTabId: string | null
   openFeedback: FilePreviewOpenFeedback | null
   paneVisible: boolean
-  open(request: OpenFilePreviewRequest): Promise<FilePreviewOpenOutcome>
+  open(request: OpenFilePreviewRequest, target?: FileLocationTarget): Promise<FilePreviewOpenOutcome>
   openFileChanges(campId: string, changes: AgentRunFileChangesView, evidenceFileId?: string): void
   selectChangedFile(tabId: string, evidenceFileId: string): void
   showPane(): void
@@ -238,7 +239,7 @@ export function FilePreviewProvider({
   const finishOpening = useCallback(async (file: ResolvedFilePreview): Promise<void> => {
     const loaded = await loadContent(file)
     const current = tabsRef.current.find((tab) => tab.id === file.previewKey)
-    if (current?.kind !== 'file' || current.file.handleId !== file.handleId) {
+    if (current?.kind !== 'file' || current.file.handleId !== file.handleId || current.file.target !== file.target) {
       if (loaded.ok) revokeContent(loaded.content)
       return
     }
@@ -295,12 +296,16 @@ export function FilePreviewProvider({
     if (result.kind === 'evidence_review') return { kind: 'evidence_review', result }
     const file = result.file
     const duplicate = tabsRef.current.find((tab) => tab.kind === 'file' && tab.id === file.previewKey)
-    if (duplicate) {
+    if (duplicate?.kind === 'file') {
       await window.rovai.filePreview.release({ handleId: file.handleId })
+      const locatedFile = { ...duplicate.file, target: file.target }
       setTabs((current) => current.map((tab) => tab.kind === 'file' && tab.id === duplicate.id
-        ? { ...tab, file: { ...tab.file, target: file.target } }
+        ? { ...tab, file: locatedFile }
         : tab))
       showOpenedTab(duplicate.id, false, focusTab)
+      if (duplicate.loadState === 'opening' || (locatedFile.kind === 'paged_text' && locatedFile.target?.line)) {
+        void finishOpening(locatedFile)
+      }
       return { kind: 'preview', tabId: duplicate.id }
     }
     const tab: FilePreviewTabModel = {
@@ -323,11 +328,15 @@ export function FilePreviewProvider({
     return { kind: 'preview', tabId: tab.id }
   }, [finishOpening, setTabs, showOpenedTab])
 
-  const open = useCallback(async (request: OpenFilePreviewRequest): Promise<FilePreviewOpenOutcome> => {
+  const open = useCallback(async (request: OpenFilePreviewRequest, target?: FileLocationTarget): Promise<FilePreviewOpenOutcome> => {
     const focusTab = Boolean(document.activeElement?.closest('.file-preview-pane'))
+    const install = (result: OpenFilePreviewResult): Promise<FilePreviewOpenOutcome> => installOpenResult(
+      target && result.kind === 'file_preview' ? { ...result, file: { ...result.file, target } } : result,
+      focusTab
+    )
     try {
       const result = await window.rovai.filePreview.open(request)
-      if (result.ok) return installOpenResult(result.value, focusTab)
+      if (result.ok) return install(result.value)
       const challenge = result.error.authorizationChallenge
       if (result.error.code !== 'authorization_required' || !challenge) {
         return { kind: 'error', error: result.error }
@@ -338,7 +347,7 @@ export function FilePreviewProvider({
       })
       if (!granted.ok) return { kind: 'error', error: granted.error }
       if (!granted.value) return { kind: 'cancelled' }
-      return installOpenResult(granted.value.result, focusTab)
+      return install(granted.value.result)
     } catch {
       return { kind: 'error', error: errorFromUnknown() }
     }

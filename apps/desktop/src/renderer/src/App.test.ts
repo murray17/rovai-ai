@@ -2948,6 +2948,7 @@ describe('task event projections', () => {
       stopping: false,
       onStop: () => undefined,
       inspectorTab: 'members',
+      executionPlacement: 'bottom',
       runtimeRecovery: {
         campId: 'camp-1',
         targets: [{
@@ -3370,6 +3371,7 @@ describe('task event projections', () => {
 
     const workspaceProps: Parameters<typeof CampWorkspace>[0] = {
       snapshot: groupedSnapshot,
+      executionPlacement: 'bottom',
       projectName: 'Rovai',
       agents: [profile],
       liveRuntimeEvents: [{
@@ -3408,6 +3410,7 @@ describe('task event projections', () => {
       .toBeLessThan(markup.indexOf('class="message-copy-button"'))
     expect(markup).toContain('aria-label="Agent 执行台"')
     expect(markup).toContain('aria-label="将执行台移到详情浮层并记住此位置"')
+    expect(markup).toContain('>移到浮层</span>')
     expect(markup).toContain('class="run-pulse-title"')
     expect(markup).toContain('class="run-pulse-chip is-selected"')
     expect((markup.match(/class="run-pulse-chip(?: is-selected)?"/g) ?? [])).toHaveLength(1)
@@ -3479,7 +3482,6 @@ describe('task event projections', () => {
       onResolveApproval: () => undefined,
       stopping: false,
       onStop: () => undefined,
-      executionPlacement: 'inspector',
       inspectorVisible: true
     }))
     const inspectorTabListStart = inspectorMarkup.indexOf('class="camp-detail-entries"')
@@ -3491,6 +3493,8 @@ describe('task event projections', () => {
       .toBeLessThan(inspectorTabList.indexOf('>队员</span><small>'))
     expect(inspectorMarkup).toMatch(/data-detail="execution" aria-expanded="true"/)
     expect(inspectorMarkup).toContain('data-placement="inspector"')
+    expect(inspectorMarkup).toContain('>移到底部</span>')
+    expect(inspectorMarkup).not.toContain('class="run-pulse run-pulse-bottom"')
 
     const terminalInspectorMarkup = renderToStaticMarkup(createElement(CampWorkspace, {
       snapshot: {
@@ -3517,6 +3521,7 @@ describe('task event projections', () => {
 
     const ordinaryInspectorMarkup = renderToStaticMarkup(createElement(CampWorkspace, {
       snapshot,
+      executionPlacement: 'bottom',
       projectName: 'Rovai',
       agents: [profile],
       busy: false,
@@ -3965,7 +3970,8 @@ describe('task event projections', () => {
     expect(markup).toContain('aria-label="收起审批详情"')
     expect(markup).toContain('aria-expanded="true"')
     expect(markup).not.toContain('class="approval-card')
-    expect((markup.match(/class="camp-detail-entry"/g) ?? []).length).toBe(2)
+    expect((markup.match(/class="camp-detail-entry"/g) ?? []).length).toBe(3)
+    expect(markup).toContain('>执行</span><small>0</small>')
     expect(markup).toContain('>任务</span><small>0</small>')
     expect(markup).toContain('>队员</span><small>2</small>')
     expect(markup).not.toContain('上下文投递')
@@ -4216,7 +4222,7 @@ describe('task event projections', () => {
     expect((markup.match(/aria-label="查看洛可的基础信息"/g) ?? [])).toHaveLength(2)
     expect((markup.match(/data-agent-id="agent_1"/g) ?? [])).toHaveLength(2)
     expect(markup).not.toContain('message-author-link')
-    expect(markup).toMatch(/<div class="timeline-node timeline-day">\d{1,2}月\d{1,2}日 周[一二三四五六日] · DAY \d+<\/div>/)
+    expect(markup).toMatch(/<div class="timeline-node timeline-day">\d{4}年\d{1,2}月\d{1,2}日<\/div>/)
     expect(markup).not.toContain('今天 ·')
     expect(markup).not.toContain('发布准备')
     expect(markup).not.toContain('投递失败')

@@ -163,11 +163,15 @@ try {
     focusedRunId: document.querySelector('.execution-process-stage.is-focused')?.dataset.agentRunId ?? null,
     drawerOwnsFocus: Boolean(document.activeElement?.closest('.execution-drawer'))
   }))()`)
-  assert(workspaceEntryExecution.placement === 'bottom'
+  assert(workspaceEntryExecution.placement === 'inspector'
     && workspaceEntryExecution.selectedAgentId === activeAgentId
     && workspaceEntryExecution.focusedRunId === activeRunId
     && !workspaceEntryExecution.drawerOwnsFocus,
-    `Entering the running Camp did not open its latest Run without stealing focus: ${JSON.stringify(workspaceEntryExecution)}`)
+    `A fresh installation did not open the latest Run in the popover without stealing focus: ${JSON.stringify(workspaceEntryExecution)}`)
+  // The remaining matrix exercises both placements, starting from an explicit bottom choice.
+  await waitForExpression(app.cdp, `document.querySelector('.camp-detail-popover')?.hidden === false`)
+  await mouseClickSelector(app.cdp, '.run-pulse-inspector .execution-placement-button')
+  await waitForExpression(app.cdp, `document.querySelector('.execution-drawer')?.dataset.placement === 'bottom'`)
   if (!webSearchOnly) {
     await evaluate(app.cdp,
       `document.querySelector('.execution-drawer [aria-label="收起执行详情"]')?.click()`)
@@ -252,7 +256,7 @@ try {
         && Math.abs(placement.rightOffset) <= 0.75),
   `Message copy buttons did not share one top-right action anchor: ${JSON.stringify(conversationPresentation.copyButtonPlacements)}`)
   assert(conversationPresentation.dayLabels.length > 0
-    && conversationPresentation.dayLabels.every((label) => /^\d{1,2}月\d{1,2}日 周[一二三四五六日] · DAY \d+$/.test(label))
+    && conversationPresentation.dayLabels.every((label) => /^\d{4}年\d{1,2}月\d{1,2}日$/.test(label))
     && conversationPresentation.dayLabels.every((label) => !label.includes('今天') && !label.includes('发布准备')),
     `Timeline did not use durable message dates: ${JSON.stringify(conversationPresentation)}`)
 
@@ -814,6 +818,7 @@ try {
         (row) => row.groupingDefaults.resultRegionCount === 0
       ),
       sameAgentRunsShareOneProcess: observed.find((row) => row.agentId === activeAgentId)?.runCount === 2,
+      defaultExecutionPlacement: workspaceEntryExecution,
       recoveryBlockerPresentation,
       runningRunFocusedWithEvidence: observed.find((row) => row.agentId === activeAgentId)?.focusedEvidenceOpen === true,
       executionDrawerResize,
@@ -4237,16 +4242,16 @@ async function verifyExecutionPlacementAcrossRestart(currentApp) {
       `document.querySelector('.run-pulse-inspector .execution-placement-button')?.click()`)
     await waitForExpression(relaunchedApp.cdp,
       `Boolean(document.querySelector('.timeline-pane > .run-pulse-bottom'))`)
-    const restoredDefault = await evaluate(
+    const returnedToBottom = await evaluate(
       relaunchedApp.cdp,
       'window.rovai.generalPreferences.get()',
       true
     )
-    assert(restoredDefault.executionConsolePlacement === 'bottom',
-      `Restart acceptance could not restore the bottom preference: ${JSON.stringify(restoredDefault)}`)
+    assert(returnedToBottom.executionConsolePlacement === 'bottom',
+      `Restart acceptance could not save the explicit bottom preference: ${JSON.stringify(returnedToBottom)}`)
     return {
       app: relaunchedApp,
-      evidence: { beforeRestart, afterRestart, firstCampPaint, restoredDefault }
+      evidence: { beforeRestart, afterRestart, firstCampPaint, returnedToBottom }
     }
   } catch (error) {
     await closeApp(relaunchedApp)

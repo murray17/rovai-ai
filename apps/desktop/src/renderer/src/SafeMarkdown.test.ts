@@ -9,15 +9,24 @@ describe('SafeMarkdown file preview references', () => {
       onFileReference: () => undefined,
       children: '打开 `README.md` 或 ./src/app.ts:42。也可以点击 [`实现`](src/app.ts:4)。`Promise.all` 和 `sum()` 保持代码。\n\n```text\n./secret.txt\n```'
     }))
-    expect(markup).toContain('title="README.md"')
+    expect(markup).not.toContain('title="README.md"')
     expect(markup).toContain('title="./src/app.ts:42"')
     expect(markup).not.toContain('title="./secret.txt"')
-    expect(markup).toContain('<span class="inline-code-file-reference-label">README.md</span>')
+    expect(markup).toContain('<code>README.md</code>')
     expect(markup).toContain('<span class="inline-code-file-reference-label">实现</span>')
-    expect(markup).not.toContain('<code>README.md</code>')
     expect(markup).not.toContain('<code>实现</code>')
     expect(markup).toContain('<code>Promise.all</code>')
     expect(markup).toContain('<code>sum()</code>')
+  })
+
+  it('repairs an autolink and an identical Markdown label without swallowing Chinese prose', () => {
+    const source = 'https://example.com/wiki/requirements）。文档中的改动：'
+    for (const children of [source, `[${source}](${source})`]) {
+      const markup = renderToStaticMarkup(createElement(SafeMarkdown, { children, onFileReference: () => undefined }))
+      expect(markup).toContain('href="https://example.com/wiki/requirements"')
+      expect(markup).toContain('>https://example.com/wiki/requirements</a>）。文档中的改动：')
+      expect(markup).not.toContain('markdown-file-reference')
+    }
   })
 
   it('keeps local images disabled by default and admits only URLs projected by the preview', () => {

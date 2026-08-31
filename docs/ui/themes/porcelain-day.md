@@ -4,7 +4,7 @@ authority: renderer-theme
 status: accepted
 theme_id: porcelain-day
 mode: light
-last_updated: 2026-08-30
+last_updated: 2026-08-31
 ---
 
 # Porcelain Day
@@ -80,6 +80,8 @@ Light. `color-scheme: light`.
 | `--brand-contrast` | `#ffffff` |
 | `--brand-soft` | `#e9eef3` |
 | `--brand-ink` | `#405f7e` |
+| `--resource-link` | `#2b66d9` |
+| `--resource-link-hover` | `#1e4fb8` |
 | `--mention-ink` | `#2f61c8` |
 | `--mention-ink-hover` | `#244ea7` |
 | `--mention-feedback` | `rgba(47, 97, 200, 0.08)` |

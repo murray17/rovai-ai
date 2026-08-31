@@ -29,7 +29,7 @@ export const DEFAULT_GENERAL_PREFERENCES: GeneralPreferencesSnapshot = {
   schemaVersion: 4,
   startupLocationMode: 'last_location',
   lastSettingsSection: 'general',
-  executionConsolePlacement: 'bottom',
+  executionConsolePlacement: 'inspector',
   newConversationDefaults: null,
   newConversationDefaultsRequireConfirmation: false,
   oneClickNewConversationEnabled: false,
@@ -105,7 +105,7 @@ export function parseGeneralPreferences(value: unknown): GeneralPreferencesSnaps
     lastSettingsSection: value.lastSettingsSection,
     executionConsolePlacement: isExecutionConsolePlacement(value.executionConsolePlacement)
       ? value.executionConsolePlacement
-      : 'bottom',
+      : DEFAULT_GENERAL_PREFERENCES.executionConsolePlacement,
     newConversationDefaults: value.newConversationDefaults
       ? structuredClone(value.newConversationDefaults)
       : null,

@@ -1,7 +1,7 @@
 ---
 document_type: development-guide
 authority: test-policy-and-command-routing
-last_updated: 2026-08-30
+last_updated: 2026-08-31
 ---
 
 # 测试与 Smoke Test
@@ -188,6 +188,11 @@ Approval/Recovery Dock，验证大屏中 481/480/450/420px 会话的容器断点
 `ROVAI_KEEP_FILE_PREVIEW_FIXTURE=1` 保留双主题、宽/窄窗口、关闭提示和 200%/reduced-motion 截图；
 默认清理本次夹具。Linux CI 使用 `xvfb-run -a pnpm test:file-preview-layout`。
 
+消息文件引用运行 `pnpm test:file-reference-navigation`。它在同样隔离的真实 Electron 中挂载生产 Camp、Markdown 与预览，
+验证有来源的短文件名定位、行范围高亮、字段误识别及 URL 中文尾部恢复，并逐帧检查打开/关闭、键盘调宽和持续拖动时
+阅读锚点偏移不超过 2px；还覆盖用户滚动后的可见消息回退、底部跟随及紧凑模式返回。相同环境变量可保留双主题截图
+和测量报告；Linux CI 使用 `xvfb-run -a pnpm test:file-reference-navigation`，不替代 Main 的来源、文件类型和系统动作测试。
+
 涉及 Preload 请求 transport 或 Renderer 错误读取时，除普通 Vitest 外还运行：
 
 ```bash
@@ -328,7 +333,9 @@ Team Case 可在密封 manifest 中声明 `collaboration` 合同。Runner 将它
 
 `pnpm test:camp-fast-layout` 使用生产 CampWorkspace/CSS 的独立 Electron fixture，无需打包或 Core。
 关闭的模拟 API 只提供成员偏好与 Draft；临时 userData 与日常 App 完全分离，不调用模型。
-它拥有 Fast 的 1280×720/窄屏/大屏布局、日夜主题、键盘焦点、失败保留、首次用量确认、旧观测不影响偏好与恢复默认。
+它拥有 Fast 的 1280×720/窄屏/大屏布局、日夜主题、键盘焦点、失败保留、直接静默切换、旧观测不影响偏好与初始默认。
+同一 owner 还验证打开队员浮层后的静默自动检测、正负结果复用、失败重开重试、同成员请求去重、切换绑定自动重测与旧响应隔离；
+其他 Runtime 不检测，非官方认证的拒绝结果不显示入口，菜单不再暴露手动检测。
 `ROVAI_KEEP_FAST_FIXTURE=1` 保留本次临时截图供排错；成功默认自动清理。Linux CI 通过 `xvfb-run -a` 执行。
 
 以下命令使用已打包 App 和隔离 `userData`，不调用模型：

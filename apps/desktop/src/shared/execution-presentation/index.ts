@@ -34,27 +34,16 @@ export function allNavigationCamps(navigation: NavigationSnapshot): NavigationCa
   })
 }
 
-export function campDayNumber(createdAtIso: string, now: Date = new Date()): number {
-  const created = new Date(createdAtIso)
-  if (Number.isNaN(created.getTime())) return 1
-  const localDayStart = (date: Date): number =>
-    new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime()
-  const elapsedDays = Math.floor((localDayStart(now) - localDayStart(created)) / 86_400_000)
-  return Math.max(1, elapsedDays + 1)
-}
-
 export function localDayKey(iso: string): string {
   const date = new Date(iso)
   if (Number.isNaN(date.getTime())) return ''
   return `${date.getFullYear()}-${date.getMonth() + 1}-${date.getDate()}`
 }
 
-export function timelineDayLabel(dayIso: string, campCreatedAtIso: string): string {
+export function timelineDayLabel(dayIso: string): string {
   const date = new Date(dayIso)
   if (Number.isNaN(date.getTime())) return ''
-  const weekdays = ['周日', '周一', '周二', '周三', '周四', '周五', '周六']
-  const day = campDayNumber(campCreatedAtIso, date)
-  return `${date.getMonth() + 1}月${date.getDate()}日 ${weekdays[date.getDay()]} · DAY ${day}`
+  return `${date.getFullYear()}年${date.getMonth() + 1}月${date.getDate()}日`
 }
 
 export function messageClockTime(createdAtIso: string): string {

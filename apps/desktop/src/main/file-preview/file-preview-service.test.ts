@@ -1,5 +1,5 @@
 import { EventEmitter } from 'node:events'
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { basename, join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -16,12 +16,15 @@ class FakeWatcher extends EventEmitter {
 }
 
 let directories: string[] = []
+let services: FilePreviewService[] = []
 
 beforeEach(() => {
   directories = []
+  services = []
 })
 
 afterEach(async () => {
+  await Promise.all(services.map((service) => service.closeAll()))
   await Promise.all(directories.map((directory) => rm(directory, { recursive: true, force: true })))
 })
 
@@ -66,6 +69,7 @@ async function fixture(): Promise<{
     watchFactory: () => new FakeWatcher() as never
   })
   const service = new FilePreviewService(authority, native, registry)
+  services.push(service)
   await service.bindCamp(1, 'camp-1')
   return { root, authority, native, openPath, registry, service }
 }
@@ -75,6 +79,48 @@ function request(rawReference: string): OpenFilePreviewRequest {
 }
 
 describe('FilePreviewService', () => {
+  it('shows authorized directories in the file manager without a tab, watcher, or app launch', async () => {
+    const { root, service, registry, native, openPath } = await fixture()
+    await mkdir(join(root, 'reports'))
+    await mkdir(join(root, 'Untrusted.app'))
+    for (const path of [root, 'reports', 'Untrusted.app']) {
+      expect(await service.open(1, request(path))).toMatchObject({ ok: true, value: { kind: 'opened_in_system' } })
+    }
+    expect(native.revealPath).toHaveBeenCalledTimes(3)
+    expect(openPath).not.toHaveBeenCalled()
+    expect(service.handleCount).toBe(0)
+    expect(registry.rootCount).toBe(0)
+    await service.closeAll()
+  })
+
+  it('does not reveal missing, escaped, or inactive-Camp directories', async () => {
+    const { root, service, native } = await fixture()
+    const outside = await mkdtemp(join(tmpdir(), 'rovai-preview-directory-outside-'))
+    directories.push(outside)
+    await symlink(outside, join(root, 'outside'))
+    expect(await service.open(1, request('missing'))).toMatchObject({ ok: false, error: { code: 'file_not_found' } })
+    expect(await service.open(1, request('outside'))).toMatchObject({ ok: false, error: { code: 'authorization_required' } })
+    await service.bindCamp(1, 'camp-2')
+    expect(await service.open(1, request(root))).toMatchObject({ ok: false })
+    expect(native.revealPath).not.toHaveBeenCalled()
+    await service.closeAll()
+  })
+
+  it('keeps noninteractive preview children from opening a directory in the file manager', async () => {
+    const { root, service, native } = await fixture()
+    await writeFile(join(root, 'README.md'), '# Guide')
+    await mkdir(join(root, 'reports'))
+    const opened = await service.open(1, request('README.md'))
+    expect(opened.ok).toBe(true)
+    if (!opened.ok || opened.value.kind !== 'file_preview') return
+    expect(await service.open(1, {
+      kind: 'child_of_handle', parentHandleId: opened.value.file.handleId,
+      rawReference: './reports', allowSystemOpen: false
+    })).toMatchObject({ ok: false, error: { code: 'reference_not_clickable' } })
+    expect(native.revealPath).not.toHaveBeenCalled()
+    await service.closeAll()
+  })
+
   it('opens and reads supported files through an opaque handle', async () => {
     const { root, service, registry } = await fixture()
     await writeFile(join(root, 'README.md'), '# Hello')

@@ -72,7 +72,14 @@ import { FilePreviewPane } from './FilePreviewPane'
 import { FilePreviewResizeHandle, FilePreviewWorkspace } from './FilePreviewLayout'
 import { useOptionalFilePreview } from './FilePreviewContext'
 import { agentRunFileChangesSummaryLabel, inlineDiffLines, exactMutationDiffLines } from './file-changes-presentation'
-import { FileReferenceText } from './FileReferenceLink'
+import { FileReferenceText, type FileReferenceActivation } from './FileReferenceLink'
+import {
+  captureTimelineReadingAnchor,
+  restoreTimelineReadingAnchor,
+  visibleTimelineMessageAnchor,
+  type TimelineMessageAnchor,
+  type TimelineReadingAnchor
+} from './timeline-reading-anchor'
 import { RuntimeFailureNotice } from './RuntimeFailureNotice'
 import { identityColorToken } from './theme'
 import { availableComposerSkillsForLead } from './composer-skill-picker'
@@ -270,11 +277,6 @@ interface ConversationFindState {
   error: string | null
 }
 
-interface TimelineMessageAnchor {
-  messageId: string
-  topOffset: number
-}
-
 interface ConversationFindRestorePoint {
   campId: string
   scrollTop: number
@@ -283,15 +285,9 @@ interface ConversationFindRestorePoint {
   focusedElement: HTMLElement | null
 }
 
-function visibleTimelineMessageAnchor(timeline: HTMLElement): TimelineMessageAnchor | null {
-  const viewport = timeline.getBoundingClientRect()
-  for (const message of timeline.querySelectorAll<HTMLElement>('[data-message-id]')) {
-    const bounds = message.getBoundingClientRect()
-    if (bounds.bottom <= viewport.top || bounds.top >= viewport.bottom) continue
-    const messageId = message.dataset.messageId
-    if (messageId) return { messageId, topOffset: bounds.top - viewport.top }
-  }
-  return null
+function timelineViewportWidth(timeline: HTMLElement): number {
+  // Preserve fractional transition widths while accounting for a non-overlay scrollbar.
+  return timeline.getBoundingClientRect().width - (timeline.offsetWidth - timeline.clientWidth)
 }
 
 export function composerDraftNeedsReplyRepair(draft: CampComposerDraftView | null): boolean {
@@ -1198,7 +1194,7 @@ export function CampWorkspace({
   onCancelAgentRun = async () => undefined,
   stopping,
   onStop,
-  executionPlacement = 'bottom',
+  executionPlacement = 'inspector',
   onExecutionPlacementChange = async () => undefined,
   worldMapEnabled = true,
   workspaceEntrySnapshotReady = true,
@@ -1307,6 +1303,13 @@ export function CampWorkspace({
   const conversationFindRestorePoint = useRef<ConversationFindRestorePoint | null>(null)
   const conversationFindOpenRef = useRef(false)
   const timelineVisibleAnchorRef = useRef<TimelineMessageAnchor | null>(null)
+  const timelineLayoutAnchorRef = useRef<{
+    campId: string
+    width: number
+    hidden: boolean
+    scrollTop: number
+    anchor: TimelineReadingAnchor
+  } | null>(null)
   const [conversationFind, setConversationFind] = useState<ConversationFindState>({
     open: false,
     query: '',
@@ -2715,6 +2718,22 @@ export function CampWorkspace({
     campId: string,
     scroll: HTMLElement
   ): void => {
+    const layout = timelineLayoutAnchorRef.current
+    const width = timelineViewportWidth(scroll)
+    if (layout?.campId === campId && (
+      layout.hidden || layout.width !== width || !scroll.clientHeight
+      || (Math.abs(layout.scrollTop - scroll.scrollTop) <= 1
+        && timelineReadingPosition.current?.position.followingLatest === false)
+    )) return
+    if (width > 0 && scroll.clientHeight > 0 && (
+      !layout || layout.campId !== campId
+      || (!layout.hidden && layout.width === width && Math.abs(layout.scrollTop - scroll.scrollTop) > 1)
+    )) {
+      timelineLayoutAnchorRef.current = {
+        campId, width, hidden: false, scrollTop: scroll.scrollTop,
+        anchor: captureTimelineReadingAnchor(scroll)
+      }
+    }
     timelineVisibleAnchorRef.current = visibleTimelineMessageAnchor(scroll)
     const previousPosition = timelineReadingPosition.current?.campId === campId
       ? timelineReadingPosition.current.position
@@ -2748,6 +2767,43 @@ export function CampWorkspace({
       if (current) persistCampTimelineReadingPosition(current.campId, current.position)
     }, 180)
   }, [conversationFind.open])
+
+  const captureFilePreviewAnchor = useCallback((source?: HTMLElement): void => {
+    const scroll = timelineScrollRef.current
+    if (!scroll || !scroll.clientWidth) return
+    timelineLayoutAnchorRef.current = {
+      campId: snapshot.camp.id, width: timelineViewportWidth(scroll), hidden: false, scrollTop: scroll.scrollTop,
+      anchor: captureTimelineReadingAnchor(scroll, source)
+    }
+  }, [snapshot.camp.id])
+
+  const restoreTimelineLayout = useCallback((): void => {
+    const scroll = timelineScrollRef.current
+    if (!scroll) return
+    const campId = snapshot.camp.id
+    const saved = timelineLayoutAnchorRef.current
+    const width = timelineViewportWidth(scroll)
+    if (!width || !scroll.clientHeight) {
+      if (saved?.campId === campId) saved.hidden = true
+      return
+    }
+    const current = timelineReadingPosition.current
+    const followingLatest = current?.campId !== campId || current.position.followingLatest !== false
+    if (followingLatest) {
+      scroll.scrollTop = scroll.scrollHeight
+    } else if (saved?.campId === campId && (saved.hidden || saved.width !== width)) {
+      restoreTimelineReadingAnchor(scroll, saved.anchor)
+    }
+    timelineLayoutAnchorRef.current = {
+      campId, width, hidden: false, scrollTop: scroll.scrollTop,
+      anchor: saved?.campId === campId && !followingLatest ? saved.anchor : captureTimelineReadingAnchor(scroll)
+    }
+    timelineReadingPosition.current = { campId, position: { scrollTop: scroll.scrollTop, followingLatest } }
+    timelineViewportGeometry.current = {
+      campId, geometry: { scrollTop: scroll.scrollTop, scrollHeight: scroll.scrollHeight, clientHeight: scroll.clientHeight }
+    }
+    timelineVisibleAnchorRef.current = visibleTimelineMessageAnchor(scroll)
+  }, [snapshot.camp.id])
 
   const followTimelineAfterUserSend = useCallback((campId: string): void => {
     const scroll = timelineScrollRef.current
@@ -2786,6 +2842,10 @@ export function CampWorkspace({
           scroll.clientHeight
         )
         scroll.scrollTop = scrollTop
+        timelineLayoutAnchorRef.current = {
+          campId, width: timelineViewportWidth(scroll), hidden: false, scrollTop,
+          anchor: captureTimelineReadingAnchor(scroll)
+        }
         timelineReadingPosition.current = {
           campId,
           position: {
@@ -2811,6 +2871,8 @@ export function CampWorkspace({
     }
     return () => flushTimelineReadingPosition(campId)
   }, [conversationView, flushTimelineReadingPosition, snapshot.camp.id])
+
+  useLayoutEffect(restoreTimelineLayout, [conversationView, filePreview?.paneVisible, restoreTimelineLayout])
 
   useLayoutEffect(() => {
     if (conversationView !== 'conversation') return
@@ -2876,16 +2938,15 @@ export function CampWorkspace({
     let resizeFrame: number | null = null
     let settleFrame: number | null = null
     const observer = new ResizeObserver(() => {
-      const latest = timelineReadingPosition.current
-      const shouldFollowLatest = latest?.campId !== campId
-        || latest.position.followingLatest !== false
+      restoreTimelineLayout()
       if (resizeFrame !== null) window.cancelAnimationFrame(resizeFrame)
       if (settleFrame !== null) window.cancelAnimationFrame(settleFrame)
       resizeFrame = window.requestAnimationFrame(() => {
         resizeFrame = null
         settleFrame = window.requestAnimationFrame(() => {
           settleFrame = null
-          if (shouldFollowLatest) {
+          const latest = timelineReadingPosition.current
+          if (latest?.campId !== campId || latest.position.followingLatest !== false) {
             const position = followLatestCampTimeline(scroll)
             timelineReadingPosition.current = { campId, position }
           }
@@ -2907,7 +2968,7 @@ export function CampWorkspace({
       if (resizeFrame !== null) window.cancelAnimationFrame(resizeFrame)
       if (settleFrame !== null) window.cancelAnimationFrame(settleFrame)
     }
-  }, [conversationView, snapshot.camp.id])
+  }, [conversationView, restoreTimelineLayout, snapshot.camp.id])
 
   useEffect(() => {
     if (!onVisibleNotificationSources) return undefined
@@ -3691,6 +3752,13 @@ export function CampWorkspace({
               tabIndex={-1}
               aria-label="对话时间线"
               hidden={conversationView !== 'conversation'}
+              onWheelCapture={() => captureFilePreviewAnchor()}
+              onTouchStartCapture={() => captureFilePreviewAnchor()}
+              onKeyDownCapture={(event) => {
+                if (['ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End', ' '].includes(event.key)) {
+                  captureFilePreviewAnchor()
+                }
+              }}
               onScroll={(event) => recordTimelineReadingPosition(
                 snapshot.camp.id,
                 event.currentTarget
@@ -3731,7 +3799,7 @@ export function CampWorkspace({
                     previousMessageAuthorKey = null
                     items.push(
                       <div className="timeline-node timeline-day" key={`day-${dayKey}`}>
-                        {timelineDayLabel(timelineItem.createdAt, snapshot.camp.createdAt)}
+                        {timelineDayLabel(timelineItem.createdAt)}
                       </div>
                     )
                   }
@@ -3905,14 +3973,15 @@ export function CampWorkspace({
                                     ? (
                                         <div className="final-copy">
                                           <SafeMarkdown
-                                            onFileReference={(rawReference) => {
+                                            onFileReference={(rawReference, source, target) => {
                                               if (!filePreview) return
+                                              captureFilePreviewAnchor(source)
                                               void filePreview.open({
                                                 kind: 'message_reference',
                                                 campId: snapshot.camp.id,
                                                 messageId: campMessage.id,
                                                 rawReference
-                                              }).then((outcome) => {
+                                              }, target).then((outcome) => {
                                                 if (outcome.kind === 'error') onNotify(outcome.error.message)
                                               })
                                             }}
@@ -3936,14 +4005,15 @@ export function CampWorkspace({
                                                 trigger,
                                                 focusPanel
                                               )}
-                                            onFileReference={(rawReference) => {
+                                            onFileReference={(rawReference, source, target) => {
                                               if (!filePreview) return
+                                              captureFilePreviewAnchor(source)
                                               void filePreview.open({
                                                 kind: 'message_reference',
                                                 campId: snapshot.camp.id,
                                                 messageId: campMessage.id,
                                                 rawReference
-                                              }).then((outcome) => {
+                                              }, target).then((outcome) => {
                                                 if (outcome.kind === 'error') onNotify(outcome.error.message)
                                               })
                                             }}
@@ -4050,7 +4120,7 @@ export function CampWorkspace({
                         type="button"
                         disabled={executionPlacementPending}
                         onClick={moveExecutionToBottom}
-                      >{executionPlacementPending ? '正在保存…' : '将执行台移回底部'}</button>
+                      >{executionPlacementPending ? '正在保存…' : '移到底部'}</button>
                       {executionPlacementError && <span role="alert">{executionPlacementError.message}</span>}
                     </>}
                   </div>
@@ -4070,7 +4140,8 @@ export function CampWorkspace({
               />
             </section>
             <section className="camp-detail-content tab-scroll camp-members-panel" hidden={inspectorSurfaceTab !== 'members'}>
-              {inspectorSurfaceTab === 'members' && <CampMembersPanel key={snapshot.camp.id}
+              <CampMembersPanel key={snapshot.camp.id}
+                visible={inspectorVisible && inspectorSurfaceTab === 'members'}
                 snapshot={snapshot}
                 profileById={profileById}
                 installations={installations}
@@ -4080,7 +4151,7 @@ export function CampWorkspace({
                 onPreviewMemberRemoval={onPreviewMemberRemoval}
                 onRemoveMember={onRemoveMember}
                 onNotify={onNotify}
-              />}
+              />
             </section>
             </CampDetailPopover>}
           </div>
@@ -4577,13 +4648,13 @@ function RunPulse({
   if (visibleProcesses.length === 0) return <></>
   const placementLabel = placementPending
     ? '正在保存'
-    : placement === 'bottom' ? '移到浮层' : '移回底部'
+    : placement === 'bottom' ? '移到浮层' : '移到底部'
   const placementAriaLabel = placement === 'bottom'
     ? '将执行台移到详情浮层并记住此位置'
-    : '将执行台移回会话底部并记住此位置'
+    : '将执行台移到会话底部并记住此位置'
   const placementTitle = placement === 'bottom'
     ? '移到浮层并记住此位置'
-    : '移回底部并记住此位置'
+    : '移到底部并记住此位置'
   return (
     <div className={`run-pulse run-pulse-${placement}`} aria-label="Agent 执行台">
       <div className="run-pulse-heading">
@@ -5735,6 +5806,7 @@ export function RuntimeRecoveryDock({
 }
 
 function CampMembersPanel({
+  visible,
   snapshot,
   profileById,
   installations,
@@ -5745,6 +5817,7 @@ function CampMembersPanel({
   onRemoveMember,
   onNotify
 }: {
+  visible: boolean
   snapshot: CampSnapshot
   profileById: Map<string, AgentProfile>
   installations: AdapterInstallation[]
@@ -5758,16 +5831,86 @@ function CampMembersPanel({
   const [fastOverrides, setFastOverrides] = useState<Record<string, CampMemberFastView | null>>({})
   const [fastPending, setFastPending] = useState<string | null>(null)
   const fastPendingRef = useRef(false)
+  const fastChecks = useRef(new Map<string, {
+    scope: string
+    projection: CampMemberFastView | undefined
+    value: CampMemberFastView | null | undefined
+    failed: boolean
+  }>())
+  const fastCheckRequests = useRef(new Set<string>())
+  const fastChecksVisible = useRef(false)
+  const fastMounted = useRef(true)
   const fastBindingGeneration = useRef(0)
-  const fastBindingScope = JSON.stringify([snapshot.camp.id, snapshot.camp.projectPath,
-    snapshot.members.map(member => [member.agentId, member.membershipStatus,
-      member.fast?.runtimeBindingRevision, profileById.get(member.agentId)?.runtimeConfiguration])])
-  const [costConfirmation, setCostConfirmation] = useState<{ agentId: string; value: CampMemberFastView; trigger: HTMLButtonElement } | null>(null)
-  const costConfirmRef = useRef<HTMLButtonElement>(null)
+  const members = campInspectorMembers(snapshot.members)
+  const fastCheckScopes = new Map(members.map(member => {
+    const profile = profileById.get(member.agentId)
+    const runtime = profile?.runtimeConfiguration
+    const installation = runtime ? runtimeEditorInstallation(installations, runtime.adapterKind) : null
+    return [member.agentId, JSON.stringify([
+      snapshot.camp.id, snapshot.camp.projectPath, member.membershipStatus, member.profilePresence,
+      member.fast?.runtimeBindingRevision, profile?.version, runtime?.adapterKind, runtime?.model,
+      installation?.id, installation?.authScope, installation?.executablePath, installation?.enabled,
+      installation?.generation, installation?.snapshot?.executableFingerprint,
+      installation?.snapshot?.authenticationStatus, installation?.snapshot?.probeStatus,
+      installation?.snapshot?.lastSuccessfulProbeAt, installation?.snapshot?.staleAt
+    ])]
+  }))
+  const fastBindingScope = JSON.stringify([...fastCheckScopes])
+  useEffect(() => {
+    fastMounted.current = true
+    return () => { fastMounted.current = false }
+  }, [])
   useEffect(() => { setFastOverrides({}) }, [snapshot])
   useLayoutEffect(() => { fastBindingGeneration.current += 1; setFastOverrides({}) }, [fastBindingScope])
-  useEffect(() => { costConfirmRef.current?.focus() }, [costConfirmation])
-  const saveFast = async (agentId: string, value: CampMemberFastView, fastOverride: boolean | null): Promise<void> => {
+  // Keep per-member metadata results while the popover is closed or another tab is selected.
+  // Reconcile on render so a superseded request can finish before its replacement is queued.
+  useEffect(() => {
+    const opened = visible && !fastChecksVisible.current
+    fastChecksVisible.current = visible
+    for (const agentId of fastChecks.current.keys()) {
+      if (!fastCheckScopes.has(agentId)) fastChecks.current.delete(agentId)
+    }
+    for (const member of members) {
+      const agentId = member.agentId
+      const adapter = profileById.get(agentId)?.runtimeConfiguration?.adapterKind
+      if (adapter !== 'claude-code-cli' && adapter !== 'codex-cli') {
+        fastChecks.current.delete(agentId)
+        continue
+      }
+      const scope = fastCheckScopes.get(agentId)!
+      let check = fastChecks.current.get(agentId)
+      if (!check || check.scope !== scope) {
+        // Profile/installation refresh can precede the Camp projection after rebinding.
+        const value = check && check.projection === member.fast ? undefined : member.fast
+        check = { scope, projection: member.fast, value, failed: false }
+        fastChecks.current.set(agentId, check)
+      } else if (check.projection !== member.fast) {
+        check.projection = member.fast
+        check.value = member.fast
+        check.failed = false
+      }
+      if (opened && check.failed) {
+        check.value = undefined
+        check.failed = false
+      }
+      if (!visible || check.value !== undefined || fastCheckRequests.current.has(agentId)) continue
+      const target = check
+      fastCheckRequests.current.add(agentId)
+      void window.rovai.request<CampMemberFastView | null>('camps.members.fast.check', {
+        campId: snapshot.camp.id, agentId
+      }).then(value => {
+        if (fastChecks.current.get(agentId) === target) target.value = value
+      }).catch(() => {
+        if (fastChecks.current.get(agentId) !== target) return
+        target.value = null
+        target.failed = true
+      }).finally(() => {
+        fastCheckRequests.current.delete(agentId)
+        if (fastMounted.current) setFastOverrides(current => ({ ...current }))
+      })
+    }
+  })
+  const saveFast = async (agentId: string, value: CampMemberFastView, fastOverride: boolean): Promise<void> => {
     if (fastPendingRef.current) return
     fastPendingRef.current = true
     const generation = fastBindingGeneration.current
@@ -5777,36 +5920,14 @@ function CampMembersPanel({
         commandId: crypto.randomUUID(),
         command: { campId: snapshot.camp.id, agentId, expectedRuntimeBindingRevision: value.runtimeBindingRevision, fastOverride }
       })
-      if (result.status === 'rejected') throw new Error('队员配置已变化，请重新检测响应模式。')
+      if (result.status === 'rejected') throw new Error('队员配置已变化，请稍后重试。')
       if (generation !== fastBindingGeneration.current) return
       const updated = result.payload as { fast?: CampMemberFastView | null }
       setFastOverrides(current => ({ ...current, [agentId]: updated.fast ?? null }))
-      const running = snapshot.agentRuns.some(run => run.agentId === agentId && ['running', 'waiting'].includes(run.status))
-      onNotify(running ? '当前执行不会改变，后续执行将使用新设置' : fastOverride === null ? '已恢复默认响应模式' : '已保存，后续执行将使用新设置')
     } catch (error) {
       onNotify(readErrorMessage(error, '响应模式未保存，请重试。'))
     } finally { fastPendingRef.current = false; setFastPending(null) }
   }
-  const checkFast = async (agentId: string): Promise<void> => {
-    if (fastPendingRef.current) return
-    fastPendingRef.current = true
-    const generation = fastBindingGeneration.current
-    setFastPending(agentId)
-    try {
-      const value = await window.rovai.request<CampMemberFastView | null>('camps.members.fast.check', { campId: snapshot.camp.id, agentId })
-      if (generation !== fastBindingGeneration.current) return
-      setFastOverrides(current => ({ ...current, [agentId]: value }))
-      onNotify(value ? '响应模式检测完成' : '当前账号、模型或 Agent 运行时版本不支持此 Fast 设置。')
-    } catch { onNotify('暂时无法检测响应模式，请重试。') }
-    finally { fastPendingRef.current = false; setFastPending(null) }
-  }
-  const requestFast = (agentId: string, value: CampMemberFastView, next: boolean, trigger: HTMLButtonElement): void => {
-    let acknowledged = false
-    try { acknowledged = localStorage.getItem('rovai.camp-fast-cost-ack.v1') === 'true' } catch { /* Retain a safe confirmation when storage is unavailable. */ }
-    if (next && !acknowledged) { setCostConfirmation({ agentId, value, trigger }); return }
-    void saveFast(agentId, value, next)
-  }
-  const members = campInspectorMembers(snapshot.members)
   const presentCount = members.filter(campMemberIsLeadEligible).length
   const awayCount = members.length - presentCount
   const activeAgentIds = useMemo(
@@ -6011,21 +6132,6 @@ function CampMembersPanel({
         </div>
       </div>
 
-      {costConfirmation && <div className="camp-fast-cost-confirmation" role="group" aria-label="确认 Fast 用量">
-        <p>Fast 可能增加费用或更快消耗用量；Claude Code 也可能切换到支持 Fast 的模型。</p>
-        <button className="quiet-button compact" type="button" ref={costConfirmRef} onClick={() => {
-          const confirmation = costConfirmation
-          try { localStorage.setItem('rovai.camp-fast-cost-ack.v1', 'true') } catch { /* Confirmation still applies to this click. */ }
-          setCostConfirmation(null)
-          confirmation.trigger.focus({ preventScroll: true })
-          void saveFast(confirmation.agentId, confirmation.value, true)
-        }}>确认开启</button>
-        <button className="quiet-button compact" type="button" onClick={() => {
-          costConfirmation.trigger.focus({ preventScroll: true })
-          setCostConfirmation(null)
-        }}>取消</button>
-      </div>}
-
       {snapshot.membershipReconciliations.map((reconciliation) => {
         const displayName = profileById.get(reconciliation.agentId)?.displayName ?? '已移出队员'
         return (
@@ -6044,8 +6150,13 @@ function CampMembersPanel({
           const profile = profileById.get(member.agentId) ?? null
           const supportsFastCheck = profile?.runtimeConfiguration?.adapterKind === 'claude-code-cli'
             || profile?.runtimeConfiguration?.adapterKind === 'codex-cli'
+          const checkedFast = fastChecks.current.get(member.agentId)
+          const fastValue = !checkedFast || checkedFast.projection !== member.fast
+            ? member.fast
+            : checkedFast.scope === fastCheckScopes.get(member.agentId) ? checkedFast.value : undefined
           const fast = supportsFastCheck
-            ? Object.hasOwn(fastOverrides, member.agentId) ? fastOverrides[member.agentId] : member.fast
+            ? Object.hasOwn(fastOverrides, member.agentId) ? fastOverrides[member.agentId]
+              : fastValue
             : undefined
           const present = campMemberIsLeadEligible(member)
           const presenceLabel = member.leaveRequestedAt
@@ -6080,8 +6191,7 @@ function CampMembersPanel({
                 <small title={member.teamRole || undefined}>{runtimeLabel}</small>
               </span>
               {fast && <CampMemberFastToggle value={fast} displayName={member.displayName} pending={fastPending !== null}
-                runtimeName={profile?.runtimeConfiguration?.adapterKind === 'claude-code-cli' ? 'Claude Code' : 'Codex'}
-                onToggle={(next, trigger) => requestFast(member.agentId, fast, next, trigger)} />}
+                onToggle={next => { void saveFast(member.agentId, fast, next) }} />}
               <span className={`camp-inspector-member-state ${present ? '' : 'is-away'}`}>
                 <strong>{presenceLabel}</strong>
                 {runtimeTone === 'attention' && profile && <small className="runtime-attention">{runtimeReadinessLabel(profile.runtimeReadiness.status)}</small>}
@@ -6129,18 +6239,6 @@ function CampMembersPanel({
                       <small>{runtimeConfiguration ? runtimeLabel : '请先配置 Agent 运行时'}</small>
                     </DropdownMenu.Item>
                     <DropdownMenu.Separator className="camp-member-menu-separator" />
-                    {supportsFastCheck && <>
-                      <DropdownMenu.Item className="camp-member-menu-item" disabled={fastPending !== null}
-                        onSelect={() => { void checkFast(member.agentId) }}>
-                        <strong>{fastPending === member.agentId ? '正在检测响应模式…' : '检测响应模式'}</strong>
-                        <small>检查原生账号和能力，不发起模型请求</small>
-                      </DropdownMenu.Item>
-                      {fast && <DropdownMenu.Item className="camp-member-menu-item" disabled={fastPending !== null || fast.fastOverride === null}
-                        onSelect={() => { void saveFast(member.agentId, fast, null) }}>
-                        <strong>恢复默认响应模式</strong>
-                      </DropdownMenu.Item>}
-                      <DropdownMenu.Separator className="camp-member-menu-separator" />
-                    </>}
                     <DropdownMenu.Item
                       className="camp-member-menu-item is-danger"
                       disabled={members.length <= 1 || !onRemoveMember}
@@ -6932,7 +7030,7 @@ function StructuredMessageBody({
     focusPanel: boolean
   ): void
   onActivateAllMembersMention?(trigger: HTMLElement, focusPanel: boolean): void
-  onFileReference?(rawReference: string): void
+  onFileReference?: FileReferenceActivation
 }): JSX.Element {
   if (content === null) return <p><FileReferenceText text={body} onActivate={onFileReference} /></p>
   const markdownBody = renderLeadingCurrentUserMarkdown
