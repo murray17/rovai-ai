@@ -476,9 +476,12 @@ function RuntimeModelPicker({
   const initialModels = modelCatalogIsServiceable(initialCache)
     ? selectableModels(installation.snapshot?.models ?? [])
     : []
-  const cache = liveCatalog?.cache ?? initialCache
-  const models = liveCatalog
-    ? (modelCatalogIsServiceable(liveCatalog.cache) ? selectableModels(liveCatalog.models) : [])
+  const activeLiveCatalog = liveCatalogIsAtLeastAsRecent(liveCatalog, initialCache)
+    ? liveCatalog
+    : null
+  const cache = activeLiveCatalog?.cache ?? initialCache
+  const models = activeLiveCatalog
+    ? (modelCatalogIsServiceable(activeLiveCatalog.cache) ? selectableModels(activeLiveCatalog.models) : [])
     : initialModels
   const explicit = draft.model.mode === 'explicit' ? draft.model : null
   const selectedModel = explicit
@@ -493,14 +496,7 @@ function RuntimeModelPicker({
     setLoading(false)
     setRefreshFailed(false)
     setLiveCatalog(null)
-  }, [
-    adapterKind,
-    installation.id,
-    installation.lastProbeAttempt?.attemptedAt,
-    installation.lastProbeAttempt?.status,
-    initialCache.observedAt,
-    initialCache.status
-  ])
+  }, [adapterKind, installation.id])
 
   const loadCatalog = (): void => {
     if (!onOpenModelCatalog) return
@@ -535,7 +531,7 @@ function RuntimeModelPicker({
     loading,
     refreshFailed: refreshFailed || persistedRefreshFailed,
     servingCachedModels: models.length > 0,
-    refreshStatus: liveCatalog?.refreshStatus ?? null
+    refreshStatus: activeLiveCatalog?.refreshStatus ?? null
   })
   const missingSelectionLabel = explicit && !selectedModel
     ? missingModelLabel(explicit.modelId, cache.status)
@@ -661,6 +657,19 @@ function selectableModels(models: ModelDescriptor[]): ModelDescriptor[] {
 
 function modelCatalogIsServiceable(cache: RuntimeModelCatalogCache): boolean {
   return cache.status === 'fresh' || cache.status === 'stale'
+}
+
+export function liveCatalogIsAtLeastAsRecent(
+  liveCatalog: RuntimeModelCatalogView | null,
+  initialCache: RuntimeModelCatalogCache
+): boolean {
+  if (!liveCatalog) return false
+  const liveObservedAt = liveCatalog.cache.observedAt
+  const initialObservedAt = initialCache.observedAt
+  if (liveObservedAt === initialObservedAt) return true
+  if (liveObservedAt === null) return false
+  if (initialObservedAt === null) return true
+  return Date.parse(liveObservedAt) >= Date.parse(initialObservedAt)
 }
 
 function latestCatalogRefreshFailed(installation: AdapterInstallation): boolean {

@@ -1173,11 +1173,7 @@ export const MemberRuntimeForm = forwardRef<MemberRuntimeFormHandle, {
             installation={installation}
             draft={draft}
             disabled={busy !== null || !runtimeMutationAllowed}
-            onOpenModelCatalog={async () => {
-              const catalog = await openRuntimeModelCatalog(selectedKind)
-              await onReload()
-              return catalog
-            }}
+            onOpenModelCatalog={() => openRuntimeModelCatalog(selectedKind)}
             onChange={(nextDraft) => {
               setDraft(nextDraft)
               setSubmitError(null)

@@ -50,6 +50,8 @@ test('the production App preserves route-local cold startup feedback and Core ad
     const report = JSON.parse(stdout.split('\n').find(line => line.startsWith('{')))
     assert.equal(report.ok, true)
     assert.ok(report.cases.length >= 8)
+    assert.ok(report.cases.includes('Runtime availability refreshes health and installations without reloading members'))
+    assert.ok(report.cases.includes('Runtime discovery retains full refresh across mixed debounce events'))
   } finally {
     if (child && child.exitCode === null && child.signalCode === null) {
       child.kill('SIGKILL')
