@@ -8,6 +8,7 @@ const PINNED_THIRD_PARTY_SKILLS: &[(&str, &str)] = &[
     ("diagnosing-bugs", "DIAGNOSING_BUGS_FILES"),
     ("tasteful-ui", "TASTEFUL_UI_FILES"),
     ("tdd", "TDD_FILES"),
+    ("ui-ux-pro-max", "UI_UX_PRO_MAX_FILES"),
     ("writing-for-agents", "WRITING_FOR_AGENTS_FILES"),
 ];
 

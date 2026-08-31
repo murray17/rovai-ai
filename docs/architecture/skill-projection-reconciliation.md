@@ -3,7 +3,7 @@ document_type: architecture
 architecture: skill-projection-reconciliation
 authority: skill-projection-access-and-reconciliation-boundaries
 status: accepted
-last_updated: 2026-08-21
+last_updated: 2026-08-31
 ---
 
 # Skill Projection Reconciliation Architecture
@@ -47,9 +47,22 @@ SkillExposureSnapshot (immutable start-time evidence in ContextManifest)
 
 Skill Library view 的 `managementPolicy` 来自 bundled official manifest，而不是用户可改数据库字段。
 `cli-operations` 与 `memory-stewardship` 为 `system_required`：bundled install 以 DB-only 事务恢复 enabled
-与全部十组 Assignment，命令边界拒绝修改；其余十一项 official Skill 为 `user_managed`。当前 inventory
-精确为十三项，名称和 provenance 由 ADR-0191 冻结。该策略只决定 Library desired
+与全部当前 Skill Delivery Groups 的 Assignment，命令边界拒绝修改；其余十二项 official Skill 为
+`user_managed`。当前 inventory 为十四项，名称、固定来源、默认启用值和管理策略由
+[`BUNDLED_SKILLS`](../../crates/rovai-core/src/skill.rs)统一声明。该策略只决定 Library desired
 state，不改变 projection ownership、preflight、Snapshot 或 Runtime load 证明。
+
+首次安装时，official Skill 使用 registry 的 `enabled_by_default`；新导入 Skill 继续默认开启。
+默认 UI Skill 是 `ui-ux-pro-max`，默认开启；`tasteful-ui` 保持原名称、完整文件和手动启用能力，
+默认关闭。两者都为 `user_managed`，不互斥、不锁定；默认值只初始化尚未安装的 Skill，不覆盖已有
+Library 的 enablement 或 Assignment，因此升级前已启用的 `tasteful-ui` 仍保持启用，用户可自行关闭。
+UI Skill 的选择继续由现有启用状态、Group Assignment 与 Runtime 原生发现共同决定，不新增独立路由器。
+
+[`ui-ux-pro-max`](../../skills/ui-ux-pro-max/SKILL.md)固定在上游
+`nextlevelbuilder/ui-ux-pro-max-skill` 的 `8bd29e775453ebcae52b6e6514fbf134df0c5770`，随 Core
+嵌入完整运行资源；来源、许可证和 Rovai 路径/缓存适配记录在其
+[`NOTICE`](../../skills/ui-ux-pro-max/NOTICE)。搜索依赖宿主 Python 3 标准库，不依赖在线下载或第三方
+Python 包；脚本以当前加载的 Skill 根目录定位数据，搜索和验证入口不向 immutable Revision 写入字节码。
 
 TRAE delivery group 的 Rovai-owned root 固定为项目 `.trae/skills`。该路径已用唯一名称/内容在
 `traecli 0.120.52` 上同时验证新 Session 的 `available_commands_update` 和精确 `/skill` 调用；warm Host 的新

@@ -1,7 +1,7 @@
 ---
 document_type: user-guide
 authority: operations-guide
-last_updated: 2026-08-22
+last_updated: 2026-08-31
 ---
 
 # 操作指南
@@ -134,6 +134,10 @@ Camp 围绕一个真实项目、任务或长期目标建立。
 队员先分别给出观点，再整理共识、分歧、证据缺口和下一步选择，避免最先发言的人过早影响所有人。
 
 ## 7. Skill 支持
+
+新安装默认启用 `ui-ux-pro-max`（UI-UX-PRO-MAX）用于 UI/UX 任务。`tasteful-ui` 仍完整内置，
+但默认关闭，可在「设置 → Skills」手动启用。升级不会重置已有 Skill 开关；若此前已启用
+`tasteful-ui`，可在同一页面自行关闭。UI-UX-PRO-MAX 的本地搜索需要 Python 3，无需额外 Python 包。
 
 Rovai 可以把启用的 Skill 兼容追加到各 Runtime 对应的项目级 Skill 目录。
 

@@ -1,0 +1,21 @@
+UI-UX-PRO-MAX is vendored from:
+https://github.com/nextlevelbuilder/ui-ux-pro-max-skill
+
+Pinned upstream revision:
+8bd29e775453ebcae52b6e6514fbf134df0c5770
+
+Source directory: .claude/skills/ui-ux-pro-max/
+The upstream Skill content is licensed under the MIT License in LICENSE.
+
+The bundle includes the complete runtime instructions, references, Python search
+and validation scripts, and data (including catalog provenance and font licenses).
+Upstream repository tests/fixtures and development-only CLI/generator tooling are
+not runtime dependencies and are not bundled.
+
+Rovai-ai adds agents/openai.yaml for presentation metadata, narrows the trigger
+description to task routing, and adapts SKILL.md commands to the loaded Skill's
+absolute directory instead of a Claude-specific plugin installation.
+Search, design-system, and validation entrypoints disable Python bytecode writes so invoking
+them does not mutate an immutable Skill Revision. Whitespace-only lines in the
+adapted design-system generator are normalized. All data and references remain
+unchanged from the pinned source.

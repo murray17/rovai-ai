@@ -1,7 +1,7 @@
 ---
 document_type: architecture
 authority: current-foundational-invariants
-last_updated: 2026-08-30
+last_updated: 2026-08-31
 ---
 
 # 当前基础架构不变量
@@ -399,7 +399,7 @@ last_updated: 2026-08-30
 
 ### Skill Library、投影与完整性
 
-- Rovai Skill Library 只包含 official 或用户显式导入的 Skill；名称全局唯一，Revision 内容不可变且按内容 digest 验证。新安装 Skill 默认 enabled，并显式分配给全部当前 Skill Delivery Groups；后续 assignment 由用户管理，不存在隐式“未分配即全部”语义。
+- Rovai Skill Library 只包含 official 或用户显式导入的 Skill；名称全局唯一，Revision 内容不可变且按内容 digest 验证。新导入 Skill 默认 enabled；official Skill 首次安装采用 bundled registry 的 `enabled_by_default`，并显式分配给全部当前 Skill Delivery Groups。后续 user-managed enablement 与 assignment 由用户管理，bootstrap、升级与修复不重置已保存的选择，不存在隐式“未分配即全部”语义。默认 UI Skill 为 `ui-ux-pro-max`（默认开启）；`tasteful-ui` 完整保留且默认关闭，仍可手动启用。
 - Skill 文件投递、Runtime 发现/加载与协议 advertised command/Skill 是三层独立能力，分别记录 `Verified | DocumentationOnly | Unverified | NotObserved | Unsupported`。当前 parser 未识别只表示 Host 分类缺口，不能反推 Runtime 没有提供。TRAE managed projection 只拥有已通过唯一内容 advertisement 与真实调用验证的项目 `.trae/skills`；Runtime 同时扫描的其他项目/用户路径不进入 Rovai ownership 或 cleanup。
 - 投影只物化当前 Run 冻结且目标 Runtime 可投递的 Revision，不扫描未管理目录来扩大 Library。重叠 native discovery 必须有明确所有权/冲突策略，不覆盖 Project 或外部修改项。已启动 Run 使用冻结 exposure；新 Run 不得在 desired state 未收敛或内容无法证明时继续。
 - Library desired state、root access ledger 和 per-Run frozen exposure 是三个独立权威。事件只标记精确 root dirty，Reconciler 在 root scope 内去重、串行收敛并以 generation/digest 阻止迟到结果；失败不回滚 Library 真源，但相关新 Run fail closed。Run 启动前必须重新验证 Revision 路径、类型、大小、权限和 digest，不依赖历史目录扫描或 active-Run 引用作为新 Run 准入。

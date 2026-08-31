@@ -1,0 +1,4 @@
+interface:
+  display_name: "UI-UX-PRO-MAX"
+  short_description: "结合可搜索的设计参考、配色、字体与技术栈指南，设计、实现并检查界面体验"
+  default_prompt: "使用 $ui-ux-pro-max 结合当前项目的设计约束与技术栈，检索合适的 UI/UX 指南，完成界面设计、实现与验证。"

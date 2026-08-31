@@ -461,6 +461,8 @@ struct BundledDefinition {
     upstream_repository: Option<&'static str>,
     upstream_revision: Option<&'static str>,
     management_policy: SkillManagementPolicy,
+    // Applied only on first install; persisted user choices survive bootstrap and updates.
+    enabled_by_default: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -622,6 +624,7 @@ const BUNDLED_SKILLS: &[BundledDefinition] = &[
         upstream_repository: None,
         upstream_revision: None,
         management_policy: SkillManagementPolicy::UserManaged,
+        enabled_by_default: true,
     },
     BundledDefinition {
         name: "campfire",
@@ -629,6 +632,7 @@ const BUNDLED_SKILLS: &[BundledDefinition] = &[
         upstream_repository: None,
         upstream_revision: None,
         management_policy: SkillManagementPolicy::UserManaged,
+        enabled_by_default: true,
     },
     BundledDefinition {
         name: "cli-operations",
@@ -636,6 +640,7 @@ const BUNDLED_SKILLS: &[BundledDefinition] = &[
         upstream_repository: None,
         upstream_revision: None,
         management_policy: SkillManagementPolicy::SystemRequired,
+        enabled_by_default: true,
     },
     BundledDefinition {
         name: "diagnosing-bugs",
@@ -643,6 +648,7 @@ const BUNDLED_SKILLS: &[BundledDefinition] = &[
         upstream_repository: Some(MATTPOCOCK_SKILLS_REPOSITORY),
         upstream_revision: Some(MATTPOCOCK_SKILLS_REVISION),
         management_policy: SkillManagementPolicy::UserManaged,
+        enabled_by_default: true,
     },
     BundledDefinition {
         name: "memory-stewardship",
@@ -650,6 +656,7 @@ const BUNDLED_SKILLS: &[BundledDefinition] = &[
         upstream_repository: None,
         upstream_revision: None,
         management_policy: SkillManagementPolicy::SystemRequired,
+        enabled_by_default: true,
     },
     BundledDefinition {
         name: "member-studio",
@@ -657,6 +664,7 @@ const BUNDLED_SKILLS: &[BundledDefinition] = &[
         upstream_repository: None,
         upstream_revision: None,
         management_policy: SkillManagementPolicy::UserManaged,
+        enabled_by_default: true,
     },
     BundledDefinition {
         name: "worktree",
@@ -664,6 +672,7 @@ const BUNDLED_SKILLS: &[BundledDefinition] = &[
         upstream_repository: None,
         upstream_revision: None,
         management_policy: SkillManagementPolicy::UserManaged,
+        enabled_by_default: true,
     },
     BundledDefinition {
         name: "grill-duo",
@@ -671,6 +680,7 @@ const BUNDLED_SKILLS: &[BundledDefinition] = &[
         upstream_repository: Some(MATTPOCOCK_SKILLS_REPOSITORY),
         upstream_revision: Some(MATTPOCOCK_SKILLS_REVISION),
         management_policy: SkillManagementPolicy::UserManaged,
+        enabled_by_default: true,
     },
     BundledDefinition {
         name: "grill-duo-with-docs",
@@ -678,6 +688,7 @@ const BUNDLED_SKILLS: &[BundledDefinition] = &[
         upstream_repository: Some(MATTPOCOCK_SKILLS_REPOSITORY),
         upstream_revision: Some(MATTPOCOCK_SKILLS_REVISION),
         management_policy: SkillManagementPolicy::UserManaged,
+        enabled_by_default: true,
     },
     BundledDefinition {
         name: "review-duo",
@@ -685,6 +696,7 @@ const BUNDLED_SKILLS: &[BundledDefinition] = &[
         upstream_repository: None,
         upstream_revision: None,
         management_policy: SkillManagementPolicy::UserManaged,
+        enabled_by_default: true,
     },
     BundledDefinition {
         name: "tasteful-ui",
@@ -692,6 +704,7 @@ const BUNDLED_SKILLS: &[BundledDefinition] = &[
         upstream_repository: Some("https://github.com/DonkeyKing01/tasteful-ui-skill"),
         upstream_revision: Some("159ccd47a320f3a7bd0289d07366d422211895a1"),
         management_policy: SkillManagementPolicy::UserManaged,
+        enabled_by_default: false,
     },
     BundledDefinition {
         name: "tdd",
@@ -699,6 +712,15 @@ const BUNDLED_SKILLS: &[BundledDefinition] = &[
         upstream_repository: Some(MATTPOCOCK_SKILLS_REPOSITORY),
         upstream_revision: Some(MATTPOCOCK_SKILLS_REVISION),
         management_policy: SkillManagementPolicy::UserManaged,
+        enabled_by_default: true,
+    },
+    BundledDefinition {
+        name: "ui-ux-pro-max",
+        files: UI_UX_PRO_MAX_FILES,
+        upstream_repository: Some("https://github.com/nextlevelbuilder/ui-ux-pro-max-skill"),
+        upstream_revision: Some("8bd29e775453ebcae52b6e6514fbf134df0c5770"),
+        management_policy: SkillManagementPolicy::UserManaged,
+        enabled_by_default: true,
     },
     BundledDefinition {
         name: "writing-for-agents",
@@ -706,6 +728,7 @@ const BUNDLED_SKILLS: &[BundledDefinition] = &[
         upstream_repository: Some(MATTPOCOCK_SKILLS_REPOSITORY),
         upstream_revision: Some(MATTPOCOCK_SKILLS_REVISION),
         management_policy: SkillManagementPolicy::UserManaged,
+        enabled_by_default: true,
     },
 ];
 
@@ -1803,9 +1826,14 @@ impl SkillLibraryService {
                         INSERT INTO skill(
                             id, name, origin, enabled, lifecycle_status,
                             current_revision_id, version, created_at, updated_at
-                        ) VALUES (?1, ?2, 'official', 1, 'active', NULL, 1, ?3, ?3)
+                        ) VALUES (?1, ?2, 'official', ?3, 'active', NULL, 1, ?4, ?4)
                         "#,
-                    params![skill_id_for_handler, verified_for_handler.name, now],
+                    params![
+                        skill_id_for_handler,
+                        verified_for_handler.name,
+                        definition.enabled_by_default,
+                        now,
+                    ],
                 )?;
                 insert_revision(
                     transaction,
@@ -3760,6 +3788,7 @@ mod windows_skill_library_tests {
             upstream_repository: None,
             upstream_revision: None,
             management_policy: SkillManagementPolicy::UserManaged,
+            enabled_by_default: true,
         })
         .unwrap();
 
@@ -4236,11 +4265,16 @@ mod slow_tests {
                 "review-duo",
                 "tasteful-ui",
                 "tdd",
+                "ui-ux-pro-max",
                 "worktree",
                 "writing-for-agents"
             ]
         );
-        assert!(skills.iter().all(|skill| skill.enabled));
+        assert!(
+            skills
+                .iter()
+                .all(|skill| skill.enabled == (skill.name != "tasteful-ui"))
+        );
         assert!(skills.iter().all(|skill| {
             skill.management_policy
                 == if matches!(skill.name.as_str(), "cli-operations" | "memory-stewardship") {
@@ -4348,7 +4382,32 @@ mod slow_tests {
                 ),
             )
             .unwrap();
+        for (name, enabled) in [("tasteful-ui", true), ("ui-ux-pro-max", false)] {
+            let skill = skills.iter().find(|skill| skill.name == name).unwrap();
+            let changed = service
+                .set_enabled(
+                    &mut database,
+                    &user_envelope(
+                        &format!("toggle-{name}"),
+                        SetSkillEnabledCommand {
+                            skill_id: skill.id.clone(),
+                            expected_version: skill.version,
+                            enabled,
+                        },
+                    ),
+                )
+                .unwrap();
+            assert_eq!(changed.result.payload["enabled"], enabled);
+            assert_eq!(changed.result.payload["version"], skill.version + 1);
+        }
         service.install_bundled_skills(&mut database).unwrap();
+        for (name, enabled) in [("tasteful-ui", true), ("ui-ux-pro-max", false)] {
+            let initial = skills.iter().find(|skill| skill.name == name).unwrap();
+            let refreshed = service.get(&database, &initial.id).unwrap().unwrap();
+            assert_eq!(refreshed.enabled, enabled);
+            assert_eq!(refreshed.current_revision.id, initial.current_revision.id);
+            assert_eq!(refreshed.group_assignments, initial.group_assignments);
+        }
         let refreshed = service.get(&database, &worktree.id).unwrap().unwrap();
         assert!(!refreshed.enabled);
         assert_eq!(
@@ -4477,7 +4536,7 @@ mod slow_tests {
         service.install_bundled_skills(&mut database).unwrap();
 
         let skills = service.list(&database).unwrap();
-        assert_eq!(skills.len(), 13);
+        assert_eq!(skills.len(), BUNDLED_SKILLS.len());
         assert!(skills.iter().all(|skill| !skill.name.starts_with("rovai-")));
         let restored = skills
             .iter()
