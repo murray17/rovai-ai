@@ -1,7 +1,14 @@
+import * as childProcess from 'node:child_process'
+import { EventEmitter } from 'node:events'
 import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { PassThrough } from 'node:stream'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+
+vi.mock('node:child_process', async (importOriginal) => ({
+  ...await importOriginal<typeof import('node:child_process')>()
+}))
 
 vi.mock('electron', () => ({
   app: {
@@ -108,28 +115,51 @@ printf '%s\\n' '${JSON.stringify({ kind: 'core_startup', schemaVersion: 1, ...re
   }, 15_000)
   it.runIf(process.platform !== 'win32').each([
     ['admitted', true], ['migration_required', true], ['confirmed_absent', false]
-  ] as const)('retains the %s assessment across a later preparation failure', async (kind, requiresExisting) => {
+  ] as const)('retains the %s assessment across a later preparation failure', (kind, requiresExisting) => {
     useSupportedPosixHost()
     const root = mkdtempSync(join(tmpdir(), 'rovai-core-preparation-fence-'))
     temporaryRoots.push(root)
-    const fakeCore = join(root, 'fake-core.sh')
-    writeFileSync(fakeCore, `#!/bin/sh
-printf '%s\\n' "$*" >> '${join(root, 'launches.txt')}'
-printf '%s\\n' '{"kind":"core_startup","schemaVersion":1,"status":"phase","phase":"preparing_runtime_storage","authorityState":{"kind":"${kind}"}}'
-printf '%s\\n' '{"kind":"core_startup","schemaVersion":1,"status":"failed","phase":"preparing_runtime_storage","authorityState":{"kind":"${kind}"},"error":{"code":"runtime_camp_files_root_admission_failed","message":"fixture refusal","retryable":false,"details":{"stage":"runtime_storage"}}}'
-`)
-    chmodSync(fakeCore, 0o700)
-    process.env.ROVAI_CORE_BIN = fakeCore
+    process.env.ROVAI_CORE_BIN = process.execPath
+    const children: Array<ReturnType<typeof fakeChild>> = []
+    function fakeChild() {
+      return Object.assign(new EventEmitter(), {
+        stdin: new PassThrough(), stdout: new PassThrough(), stderr: new PassThrough(),
+        kill: vi.fn(() => true), killed: false
+      })
+    }
+    const spawn = vi.spyOn(childProcess, 'spawn').mockImplementation(() => {
+      const child = fakeChild()
+      children.push(child)
+      return child as unknown as childProcess.ChildProcess
+    })
     const client = new CoreClient(root)
     try {
-      const first = nextSnapshot(client, snapshot => snapshot.fullCoreState === 'blocked')
       client.start()
-      await first
-      const second = nextSnapshot(client, snapshot => snapshot.generation === 2 && snapshot.fullCoreState === 'blocked')
-      client.retryFullCore()
-      await second
-      expect(readFileSync(join(root, 'launches.txt'), 'utf8').trim().split('\n').map(args => args.includes('--require-existing-authority'))).toEqual([false, requiresExisting])
-    } finally { client.stop() }
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        const child = children[attempt]
+        // Exit can precede the final stdout data. Force that ordering instead of relying
+        // on how quickly a shell fixture happens to drain on macOS versus Linux.
+        child.emit('exit', 0, null)
+        child.stdout.write(`${JSON.stringify({ kind: 'core_startup', schemaVersion: 1, status: 'phase',
+          phase: 'preparing_runtime_storage', authorityState: { kind } })}\n`)
+        child.stdout.write(`${JSON.stringify({ kind: 'core_startup', schemaVersion: 1, status: 'failed',
+          phase: 'preparing_runtime_storage', authorityState: { kind }, error: {
+            code: 'runtime_camp_files_root_admission_failed', message: 'fixture refusal', retryable: false,
+            details: { stage: 'runtime_storage' }
+          } })}\n`)
+        expect(client.getSnapshot()).toMatchObject({ generation: attempt + 1, fullCoreState: 'blocked',
+          restartAttempt: 0, authorityState: { kind }, lastError: { code: 'runtime_camp_files_root_admission_failed' } })
+        if (attempt === 0) client.retryFullCore()
+        child.stdout.end()
+        child.stderr.end()
+        child.emit('close', 0, null)
+      }
+      expect(spawn.mock.calls.map(([, args]) => Array.isArray(args) && args.includes('--require-existing-authority')))
+        .toEqual([false, requiresExisting])
+    } finally {
+      client.stop()
+      for (const child of children) { child.stdin.destroy(); child.stdout.destroy(); child.stderr.destroy() }
+    }
   })
 
   it('keeps an unadmitted Windows root blocked without inventing a Core path or consuming a generation', async () => {

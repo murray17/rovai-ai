@@ -61,6 +61,9 @@ app.whenReady().then(async () => {
       await run(`document.documentElement.dataset.theme = ${JSON.stringify(theme)}`)
       for (const count of [1, 2]) {
         await run(`window.campOpenTest.showImages(${JSON.stringify(result)}, ${count})`)
+        // Compare the same interaction state: Linux's visible window may otherwise leave
+        // the pointer over only one image after the fixture scrolls each gallery into view.
+        window.webContents.sendInputEvent({ type: 'mouseMove', x: 1, y: 1 })
         const deadline = Date.now() + 5000
         let tool, sent
         while (Date.now() < deadline) {

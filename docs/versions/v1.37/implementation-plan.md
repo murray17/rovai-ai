@@ -124,3 +124,9 @@ Antigravity 原生生成、TRAE/Copilot 专用图片结果已接入，六种 Run
   `test:rust:pr` 的 Library 470 项、CLI 32 项、slow 294 项均通过；另跑 Core Main 187 项通过，
   4 项原有真实 Runtime 人工 Smoke 保持显式忽略，没有以单元测试替代外部验收。
   本次没有重新打包、安装或重启日常 App，也没有调用真实 Runtime 或向渠道发件。
+- 首次 PR CI 暴露两个跨平台时序问题：Core 子进程的 `exit` 可能先于最后 stdout 帧，导致启动拒绝与
+  authority assessment 被丢弃；改为 stdio `close` 后才释放 generation。既有三种 assessment 表驱动
+  owner 改用可控 stdout，固定“exit → 最后状态帧 → close”并保留重试参数断言，修复前均明确失败；
+  其他真实子进程、关闭与重试回归保留。图片组合夹具则先把鼠标移到中性位置，确保比较相同 hover
+  状态；没有放宽图片尺寸或样式断言。CoreClient 16 项、typecheck、Desktop build 和隔离 CampOpen
+  夹具修复后通过，等待新的 PR CI 结果。

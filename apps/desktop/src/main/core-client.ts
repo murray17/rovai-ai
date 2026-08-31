@@ -453,7 +453,9 @@ export class CoreClient {
       console.error(`[rovai-core] ${text}`)
     })
     child.on('error', (error) => this.#handleProcessError(generation, token, error))
-    child.on('exit', (code, signal) => {
+    // A child can exit before its last stdout frames are delivered. Keep this generation
+    // active until stdio closes so startup refusal/authority and final replies are not lost.
+    child.on('close', (code, signal) => {
       this.#handleExit(generation, token, code, signal)
     })
   }
