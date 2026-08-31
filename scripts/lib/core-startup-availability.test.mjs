@@ -155,6 +155,111 @@ test('queued input commits notify Desktop without exposing private bodies in pub
   }
 })
 
+// The library owns aggregation and edit fences. This process test owns the
+// startup -> ready -> send RPC / scheduler seam, including an already emptied queue.
+test('idle camps accept new input and drain backlog after legacy failed-turn recovery', async () => {
+  const fixture = await realpath(await mkdtemp(join(tmpdir(), 'rovai-idle-queue-recovery-')))
+  const dataDir = process.platform === 'win32'
+    ? JSON.parse(execFileSync(binary, ['--prepare-windows-data-root', join(fixture, 'formal')], { encoding: 'utf8' })).core
+    : join(fixture, 'data')
+  const skillRoot = join(dataDir, 'managed-skill-library')
+  const mcpPath = join(dataDir, 'mcp.json')
+  let core = startCore(dataDir, skillRoot, mcpPath)
+  let database
+  const camps = []
+  const sendText = async (campId, body) => {
+    const current = await core.request('camp.composerDraft.get', { campId })
+    const draft = await core.request('camp.composerDraft.save', {
+      campId, expectedRevision: current.revision, content: [{ kind: 'text', text: body }]
+    })
+    // No new Run or model is allowed in this transport/scheduler fixture.
+    return core.request('camp.messages.send', {
+      commandId: randomUUID(), campId, draftRevision: draft.revision, execution: null
+    })
+  }
+  try {
+    await core.ready
+    await core.settled()
+    const agentId = (await core.request('members.list')).find(profile => profile.presence === 'present').agentId
+    for (const backlog of [false, true]) {
+      const created = await core.request('camps.create', {
+        commandId: randomUUID(), name: 'Idle queue recovery fixture', workspace: null,
+        memberAgentIds: [agentId], defaultLeadAgentId: agentId, collaborationMode: 'peer'
+      })
+      assert.equal(created.status, 'applied')
+      const campId = created.payload.campId
+      const first = await sendText(campId, 'A')
+      assert.equal(first.commandResult.code, 'camp_message.sent')
+      camps.push({ campId, backlog, messageId: first.commandResult.payload.campMessageId, turnId: randomUUID() })
+    }
+    await core.close()
+    database = new DatabaseSync(join(dataDir, 'rovai.sqlite'))
+    const now = new Date().toISOString()
+    for (const { campId, backlog, messageId, turnId } of camps) {
+      database.prepare(`INSERT OR IGNORE INTO conversation(id, camp_id, agent_id, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?)`).run(randomUUID(), campId, agentId, now, now)
+      const conversationId = database.prepare('SELECT id FROM conversation WHERE camp_id = ? AND agent_id = ?').get(campId, agentId).id
+      database.prepare(`INSERT INTO camp_turn(id, camp_id, trigger_type, trigger_id, status, created_at, updated_at)
+        VALUES (?, ?, 'camp_message', ?, 'waiting', ?, ?)`).run(turnId, campId, messageId, now, now)
+      // Minimal terminal history from the old retry-wait rule, never dispatchable.
+      database.prepare(`INSERT INTO agent_run(
+        id, camp_turn_id, conversation_id, trigger_camp_message_id, initial_camp_context_through_sequence,
+        initial_conversation_context_through_sequence, responsibility_key, start_reason,
+        purpose, completion_role, effective_config_json, status,
+        idempotency_key, manual_retry_allowed, last_error_code, created_at, ended_at, updated_at
+      ) VALUES (?, ?, ?, ?, 1, 0, 'initial', 'initial', 'fixture', 'required', '{}',
+        'failed', ?, 1, 'runtime_launch_failed', ?, ?, ?)`)
+        .run(randomUUID(), turnId, conversationId, messageId, randomUUID(), now, now, now)
+      database.prepare('UPDATE camp_message SET camp_turn_id = ? WHERE id = ?').run(turnId, messageId)
+      for (const [index, body] of ['B', 'C'].entries()) {
+        database.prepare(`INSERT INTO pending_camp_input(
+          id, camp_id, enqueue_sequence, state, structured_content_json, execution_json, user_id, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, 'null', 'local_user', ?, ?)`)
+          .run(randomUUID(), campId, index + 1, backlog ? 'queued' : 'cancelled', JSON.stringify([{ kind: 'text', text: body }]), now, now)
+      }
+    }
+    database.close()
+    database = null
+    core = startCore(dataDir, skillRoot, mcpPath)
+    await core.ready
+    for (const { campId } of camps) {
+      assert.equal((await core.request('camp.pendingInputs.get', { campId })).executionActive, false,
+        'A legacy failed turn cannot remain an execution blocker after ready')
+    }
+    const direct = await sendText(camps[0].campId, 'Fresh input after clearing queue')
+    assert.equal(direct.commandResult.code, 'camp_message.sent')
+    assert.equal((await core.request('camp.pendingInputs.get', { campId: camps[0].campId })).items.length, 0)
+    const deadline = Date.now() + 10_000
+    const publishedCount = () => core.notifications.filter(event => event.method === 'camp.pendingInputs.changed'
+      && event.params.campId === camps[1].campId && event.params.reason === 'published').length
+    // Publication commits before its notification is enqueued; an RPC can see
+    // the empty queue first. Wait for both observable outcomes before asserting.
+    while ((await core.request('camp.pendingInputs.get', { campId: camps[1].campId })).items.length > 0
+      || publishedCount() < 2) {
+      assert.ok(Date.now() < deadline, 'An idle Camp must drain its backlog without another user action')
+      await new Promise(resolve => setTimeout(resolve, 20))
+    }
+    assert.equal(publishedCount(), 2)
+    await core.close()
+    database = new DatabaseSync(join(dataDir, 'rovai.sqlite'), { readOnly: true })
+    for (const { campId, backlog, turnId } of camps) {
+      const turn = database.prepare('SELECT status, ended_at FROM camp_turn WHERE id = ?').get(turnId)
+      assert.equal(turn.status, 'failed')
+      assert.ok(turn.ended_at)
+      const bodies = database.prepare('SELECT body FROM camp_message WHERE camp_id = ? ORDER BY sequence').all(campId).map(row => row.body)
+      assert.deepEqual(bodies, backlog ? ['A', 'B', 'C'] : ['A', 'Fresh input after clearing queue'])
+    }
+    assert.equal(database.prepare('SELECT COUNT(*) AS count FROM agent_run').get().count, 2,
+      'Startup must neither retry old Runs nor invent new Runs for this non-executing fixture')
+    assert.equal(database.prepare("SELECT COUNT(*) AS count FROM agent_run WHERE status = 'failed' AND manual_retry_allowed = 1 AND last_error_code = 'runtime_launch_failed'").get().count, 2)
+  } finally {
+    database?.close()
+    await core.close()
+    await removeEphemeralRuntimeCampFilesRoot(dataDir, { temporaryDirectory: fixture })
+    await rm(fixture, { recursive: true, force: true })
+  }
+})
+
 test('authority recovery errors produce a retryable refusal rather than a crash or false ready', async () => {
   const fixture = await realpath(await mkdtemp(join(tmpdir(), 'rovai-authority-recovery-')))
   const dataDir = process.platform === 'win32'
