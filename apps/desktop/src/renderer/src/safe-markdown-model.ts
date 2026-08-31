@@ -1,7 +1,7 @@
 import remarkGfm from 'remark-gfm'
 import remarkParse from 'remark-parse'
 import { unified } from 'unified'
-import { isInlineFileReference, parseFileReference, tokenizeFileReferences } from '../../file-preview-reference'
+import { inlineFileReferenceSource, isInlineFileReference, parseFileReference, tokenizeFileReferences } from '../../file-preview-reference'
 
 type MarkdownNode = {
   type?: unknown
@@ -60,6 +60,7 @@ export interface MessageFileReference {
   rawReference: string
   label: string
   inlineCode: boolean
+  sourceReference?: string
 }
 
 function markdownLinkLabel(node: MarkdownNode): string {
@@ -109,5 +110,13 @@ export function projectMessageFileReferences(source: string): MessageFileReferen
     if (Array.isArray(node.children)) node.children.forEach(visit)
   }
   visit(safeMarkdownParser.parse(source))
-  return references
+  const candidates = references.map((reference) => reference.rawReference)
+  return references.flatMap((reference) => {
+    if (!reference.inlineCode) return [reference]
+    const sourceReference = inlineFileReferenceSource(reference.rawReference, candidates)
+    return sourceReference === null ? [] : [{
+      ...reference,
+      ...(sourceReference !== reference.rawReference ? { sourceReference } : {})
+    }]
+  })
 }

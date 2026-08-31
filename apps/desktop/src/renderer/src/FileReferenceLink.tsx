@@ -1,19 +1,24 @@
 import { Children, isValidElement, useMemo, type JSX, type ReactNode } from 'react'
+import type { FileLocationTarget } from '@contracts'
+import { parseFileReference } from '../../file-preview-reference'
 import { FilePreviewTabIcon } from './FilePreviewTabIcon'
 import { projectMessageFileReferences } from './safe-markdown-model'
 
 export const FILE_REFERENCE_FRAGMENT = '#rovai-file-reference='
+export type FileReferenceActivation = (rawReference: string, source: HTMLElement, target?: FileLocationTarget) => void
 
 export function FileReferenceLink({
   rawReference,
   children,
   className,
+  sourceReference,
   onActivate
 }: {
   rawReference: string
   children: ReactNode
   className: string
-  onActivate(rawReference: string): void
+  sourceReference?: string
+  onActivate: FileReferenceActivation
 }): JSX.Element {
   const labelNodes = Children.toArray(children)
   const onlyChild = labelNodes.length === 1 ? labelNodes[0] : null
@@ -29,7 +34,8 @@ export function FileReferenceLink({
       onClick={(event) => {
         event.preventDefault()
         if (event.detail > 0 && window.getSelection()?.toString()) return
-        onActivate(rawReference)
+        onActivate(sourceReference ?? rawReference, event.currentTarget,
+          sourceReference ? parseFileReference(rawReference)?.target : undefined)
       }}
       onAuxClick={(event) => event.preventDefault()}
     >
@@ -48,7 +54,7 @@ export function FileReferenceText({
   onActivate
 }: {
   text: string
-  onActivate?(rawReference: string): void
+  onActivate?: FileReferenceActivation
 }): JSX.Element {
   const enabled = Boolean(onActivate)
   const references = useMemo(() => enabled ? projectMessageFileReferences(text) : [], [enabled, text])
@@ -61,6 +67,7 @@ export function FileReferenceText({
       <FileReferenceLink
         className="message-file-reference"
         rawReference={reference.rawReference}
+        sourceReference={reference.sourceReference}
         key={`${reference.start}:${reference.rawReference}`}
         onActivate={onActivate}
       >

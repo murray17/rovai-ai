@@ -1,8 +1,10 @@
 import { isValidElement, useEffect, useLayoutEffect, useMemo, useRef, type JSX, type ReactNode } from 'react'
 import Markdown, { defaultUrlTransform } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import { FILE_REFERENCE_FRAGMENT, FileReferenceLink } from './FileReferenceLink'
+import { FILE_REFERENCE_FRAGMENT, FileReferenceLink, type FileReferenceActivation } from './FileReferenceLink'
+import { remarkRepairCjkUrlTail } from './remark-repair-cjk-url-tail'
 import {
+  inlineFileReferenceSource,
   isInlineFileReference,
   parseFileReference,
   tokenizeFileReferences
@@ -13,6 +15,7 @@ type MarkdownTreeNode = {
   value?: string
   children?: MarkdownTreeNode[]
   url?: string
+  data?: { hProperties?: Record<string, string> }
 }
 
 function markdownHeadingText(children: ReactNode): string {
@@ -47,6 +50,19 @@ function scrollToMarkdownHeading(root: HTMLElement, target: string): boolean {
 
 function remarkFileReferences(): (tree: MarkdownTreeNode) => void {
   return (tree) => {
+    const candidates: string[] = []
+    const collect = (node: MarkdownTreeNode): void => {
+      if (node.type === 'link') {
+        if (node.url && parseFileReference(node.url)) candidates.push(node.url)
+      } else if (node.type === 'inlineCode') {
+        if (node.value && isInlineFileReference(node.value)) candidates.push(node.value)
+      } else if (node.type === 'text' && node.value) {
+        candidates.push(...tokenizeFileReferences(node.value).map((token) => token.raw))
+      } else if (!['code', 'html', 'definition', 'image', 'imageReference', 'linkReference'].includes(node.type ?? '')) {
+        node.children?.forEach(collect)
+      }
+    }
+    collect(tree)
     const visit = (node: MarkdownTreeNode): void => {
       if (!Array.isArray(node.children)) return
       const next: MarkdownTreeNode[] = []
@@ -59,11 +75,14 @@ function remarkFileReferences(): (tree: MarkdownTreeNode) => void {
           if (
             child.type === 'inlineCode'
             && typeof child.value === 'string'
-            && isInlineFileReference(child.value)
+            && inlineFileReferenceSource(child.value, candidates) !== null
           ) {
+            const sourceReference = inlineFileReferenceSource(child.value, candidates)!
             next.push({
               type: 'link',
               url: `${FILE_REFERENCE_FRAGMENT}${encodeURIComponent(child.value)}`,
+              ...(sourceReference !== child.value
+                ? { data: { hProperties: { 'data-file-source-reference': sourceReference } } } : {}),
               children: [{ type: 'inlineCode', value: child.value }]
             })
             continue
@@ -105,7 +124,7 @@ export function SafeMarkdown({
 }: {
   children: string
   className?: string
-  onFileReference?(rawReference: string): void
+  onFileReference?: FileReferenceActivation
   localImageUrl?(rawReference: string): string | null
   headingTarget?: string
   onHeadingTargetResult?(found: boolean): void
@@ -139,6 +158,7 @@ export function SafeMarkdown({
       <Markdown
         remarkPlugins={[
           [remarkGfm, { singleTilde: false }],
+          remarkRepairCjkUrlTail,
           ...(fileReferencesEnabled ? [remarkFileReferences] : [])
         ]}
         skipHtml
@@ -151,7 +171,7 @@ export function SafeMarkdown({
           h1: heading('h3'),
           h2: heading('h3'),
           h3: heading('h4'),
-          a({ href, children: linkChildren }) {
+          a({ href, children: linkChildren, node }) {
             if (href?.startsWith(FILE_REFERENCE_FRAGMENT) && fileReferencesEnabled) {
               let rawReference: string
               try {
@@ -164,7 +184,9 @@ export function SafeMarkdown({
                 <FileReferenceLink
                   className="markdown-file-reference"
                   rawReference={rawReference}
-                  onActivate={(reference) => callbacks.current.onFileReference?.(reference)}
+                  sourceReference={typeof node?.properties['data-file-source-reference'] === 'string'
+                    ? node.properties['data-file-source-reference'] : undefined}
+                  onActivate={(reference, source, target) => callbacks.current.onFileReference?.(reference, source, target)}
                 >
                   {markdownHeadingText(linkChildren).trim() ? linkChildren : rawReference}
                 </FileReferenceLink>
