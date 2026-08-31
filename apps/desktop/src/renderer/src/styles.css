@@ -1472,6 +1472,16 @@ html[data-rovai-platform="win32"] .bootstrap-shell-brand { padding-left: 20px; }
 }
 .file-preview-return:hover { color: var(--ink); background: var(--surface-hover); }
 .file-preview-return svg { width: 13px; height: 13px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.45; }
+.file-preview-tab-rail {
+  position: relative;
+  display: flex;
+  min-width: 0;
+  flex: 1 1 auto;
+  --tab-fade-start: 0px;
+  --tab-fade-end: 0px;
+}
+.file-preview-tab-rail.can-scroll-left { --tab-fade-start: 32px; }
+.file-preview-tab-rail.can-scroll-right { --tab-fade-end: 32px; }
 .file-preview-tab-strip {
   display: flex;
   min-width: 0;
@@ -1480,8 +1490,30 @@ html[data-rovai-platform="win32"] .bootstrap-shell-brand { padding-left: 20px; }
   gap: 2px;
   overflow: auto hidden;
   scrollbar-width: none;
+  mask-image: linear-gradient(to right, transparent, black var(--tab-fade-start), black calc(100% - var(--tab-fade-end)), transparent);
 }
 .file-preview-tab-strip::-webkit-scrollbar { display: none; }
+.file-preview-tab-scroll {
+  position: absolute;
+  z-index: 2;
+  top: 0;
+  display: grid;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 5px;
+  color: var(--muted);
+  cursor: pointer;
+  -webkit-app-region: no-drag;
+}
+.file-preview-tab-scroll.is-left { left: 0; background: linear-gradient(to right, var(--conversation-surface) 54%, transparent); }
+.file-preview-tab-scroll.is-right { right: 0; background: linear-gradient(to left, var(--conversation-surface) 54%, transparent); }
+.file-preview-tab-scroll:hover { color: var(--ink); }
+.file-preview-tab-scroll:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
+.file-preview-tab-scroll:disabled { visibility: hidden; pointer-events: none; }
+.file-preview-tab-scroll svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.6; }
 .file-preview-tabs-empty { padding-inline: 8px; color: var(--muted); font-size: 11px; }
 .file-preview-tab {
   position: relative;

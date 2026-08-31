@@ -240,14 +240,21 @@ Object.assign(window, { previewTest: {
   tabSnapshot() {
     const strip = element('.file-preview-tab-strip')!
     const bounds = strip.getBoundingClientRect()
+    const leftButton = element('.file-preview-tab-scroll.is-left')!
+    const rightButton = element('.file-preview-tab-scroll.is-right')!
+    const edges = { left: getComputedStyle(leftButton).visibility !== 'hidden', right: getComputedStyle(rightButton).visibility !== 'hidden' }
     return {
       overflow: strip.scrollWidth > strip.clientWidth + 1,
-      left: bounds.left, right: bounds.right, scrollLeft: strip.scrollLeft,
+      left: bounds.left, right: bounds.right, top: bounds.top, scrollLeft: strip.scrollLeft,
+      maximum: strip.scrollWidth - strip.clientWidth, edges,
+      visibleLeft: edges.left ? leftButton.getBoundingClientRect().right : bounds.left,
+      visibleRight: edges.right ? rightButton.getBoundingClientRect().left : bounds.right,
       tabs: [...document.querySelectorAll<HTMLElement>('.file-preview-tab')].map((tab) => {
         const rect = tab.getBoundingClientRect()
         const label = tab.querySelector<HTMLElement>('.file-preview-tab-label')!
         return { width: rect.width, left: rect.left, right: rect.right,
           selected: tab.querySelector('[role="tab"]')?.getAttribute('aria-selected') === 'true',
+          focused: tab.contains(document.activeElement),
           faded: getComputedStyle(label).maskImage !== 'none',
           iconWidth: tab.querySelector('.file-preview-tab-icon')!.getBoundingClientRect().width,
           closeWidth: tab.querySelector('.file-preview-tab-close')!.getBoundingClientRect().width }

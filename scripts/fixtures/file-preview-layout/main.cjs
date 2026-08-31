@@ -133,6 +133,7 @@ app.whenReady().then(async () => {
     const roomy = await tabs()
     equalWidths(roomy, 180)
     assert.equal(roomy.overflow, false)
+    assert.deepEqual(roomy.edges, { left: false, right: false })
     assert.ok(roomy.tabs.every(tab => !tab.faded))
     await capture('tabs-roomy-day')
 
@@ -142,6 +143,7 @@ app.whenReady().then(async () => {
     assert.ok(shrinking.tabs[0].width > 120 && shrinking.tabs[0].width < 180)
     equalWidths(shrinking, shrinking.tabs[0].width)
     assert.equal(shrinking.overflow, false, 'Tabs fit by shrinking before horizontal scrolling is needed')
+    assert.deepEqual(shrinking.edges, { left: false, right: false }, 'Arrows never consume space or cause early overflow')
     assert.ok(shrinking.tabs.every(tab => !tab.faded), 'Text must not fade before the minimum tab width')
     await capture('tabs-shrinking-day')
 
@@ -165,23 +167,109 @@ app.whenReady().then(async () => {
     assert.equal(closed.tabs.length, 4)
     closeTo(closed.tabs[0].width, shrinking.tabs[0].width, 'Closing a tab returns space to the remaining tabs')
     assert.equal(closed.overflow, false)
+    assert.deepEqual(closed.edges, { left: false, right: false })
     assert.ok(closed.tabs.every(tab => !tab.faded))
 
     await viewport(1_200)
     equalWidths(await tabs(), 120)
     assert.equal((await tabs()).overflow, true)
     await run('document.documentElement.dataset.theme = "night"')
+    await snapshot()
     await capture('tabs-minimum-night')
     await viewport(1_440)
     const expanded = await tabs()
     closeTo(expanded.tabs[0].width, shrinking.tabs[0].width, 'Widening the preview expands tabs')
     assert.equal(expanded.overflow, false)
+    assert.deepEqual(expanded.edges, { left: false, right: false }, 'Widening hides both arrows when all tabs fit')
     assert.ok(expanded.tabs.every(tab => !tab.faded))
     await capture('tabs-shrinking-night')
     await run('document.documentElement.dataset.theme = "day"; window.previewTest.closeExtraTabs()')
     await open()
     equalWidths(await tabs(), 180)
     assert.equal((await snapshot()).stored, null, 'Tab layout does not write preview width preferences')
+  })
+
+  await check('edge arrows track overflow and scroll without changing the active file or reading positions', async () => {
+    const tabs = async () => { await snapshot(); return run('window.previewTest.tabSnapshot()') }
+    const settledTabs = async () => {
+      let previous = -1
+      let stable = 0
+      for (let attempt = 0; attempt < 30; attempt += 1) {
+        await new Promise(resolve => setTimeout(resolve, 50))
+        const state = await tabs()
+        stable = Math.abs(state.scrollLeft - previous) < .1 ? stable + 1 : 0
+        if (stable >= 2) return state
+        previous = state.scrollLeft
+      }
+      throw new Error('Tab scrolling did not settle')
+    }
+    const reading = () => run(`({
+      selected: document.querySelector('[role="tab"][aria-selected="true"]').id,
+      conversation: document.querySelector('.camp-timeline').scrollTop,
+      file: document.querySelector('.file-preview-tab-panel:not([hidden]) .file-preview-code').scrollTop
+    })`)
+    for (let index = 0; index < 8; index += 1) await run(`window.previewTest.openTab(${index})`)
+    await run(`document.querySelector('.camp-timeline').scrollTop = 180;
+      document.querySelector('.file-preview-tab-panel:not([hidden]) .file-preview-code').scrollTop = 360`)
+    const before = await reading()
+    const end = await tabs()
+    assert.deepEqual(end.edges, { left: true, right: false }, 'Opening the last tab reveals the right endpoint')
+    assert.ok(end.tabs.every(tab => tab.width === 120))
+    await capture('tabs-scroll-end-day')
+
+    await click('.file-preview-tab-scroll.is-left')
+    const middle = await settledTabs()
+    assert.ok(middle.scrollLeft > 0 && middle.scrollLeft < end.scrollLeft, 'The left button scrolls toward earlier tabs')
+    assert.deepEqual(middle.edges, { left: true, right: true })
+    assert.deepEqual(await reading(), before, 'Scrolling does not activate a file or move either reading plane')
+    await capture('tabs-scroll-middle-day')
+
+    await run('document.querySelector(".file-preview-tab-scroll.is-left").focus()')
+    await key('Enter')
+    const start = await settledTabs()
+    closeTo(start.scrollLeft, 0, 'Repeated left navigation reaches the beginning')
+    assert.deepEqual(start.edges, { left: false, right: true })
+    assert.equal(start.tabs[0].focused, true, 'A disappearing arrow returns keyboard focus to the boundary tab')
+    assert.deepEqual(await reading(), before)
+
+    await window.webContents.debugger.sendCommand('Input.dispatchMouseEvent', {
+      type: 'mouseWheel', x: (start.left + start.right) / 2, y: start.top + 14, deltaX: 130, deltaY: 0
+    })
+    const wheeled = await settledTabs()
+    assert.ok(wheeled.scrollLeft > 0, 'Horizontal wheel input remains usable')
+    assert.deepEqual(wheeled.edges, { left: true, right: true }, 'Wheel input refreshes the edge buttons')
+    assert.deepEqual(await reading(), before)
+
+    await click('.file-preview-tab-scroll.is-right')
+    const right = await settledTabs()
+    closeTo(right.scrollLeft, right.maximum, 'The right button reaches the end')
+    assert.deepEqual(right.edges, { left: true, right: false })
+    assert.deepEqual(await reading(), before)
+
+    await run('document.querySelectorAll("[role=tab]")[3].focus({ preventScroll: true })')
+    const focused = await tabs()
+    const focusedTab = focused.tabs.find(tab => tab.focused)
+    assert.ok(focusedTab.left >= focused.visibleLeft - 1 && focusedTab.right <= focused.visibleRight + 1,
+      'Keyboard focus reveals the entire tab and close control clear of both arrows')
+    assert.deepEqual(await reading(), before, 'Moving focus retains manual tab activation')
+
+    await window.webContents.debugger.sendCommand('Emulation.setEmulatedMedia', {
+      features: [{ name: 'prefers-reduced-motion', value: 'reduce' }]
+    })
+    await run('document.querySelector(".file-preview-tab-scroll.is-right").focus()')
+    await key('Enter')
+    const reduced = await tabs()
+    closeTo(reduced.scrollLeft, reduced.maximum, 'Reduced motion jumps directly to the scroll target')
+    assert.equal(reduced.tabs.at(-1).focused, true)
+    await run('document.documentElement.dataset.theme = "night"')
+    await snapshot()
+    await capture('tabs-scroll-end-night')
+    await window.webContents.debugger.sendCommand('Emulation.setEmulatedMedia', { features: [] })
+    await run(`document.documentElement.dataset.theme = "day";
+      document.querySelector('.camp-timeline').scrollTop = 0;
+      window.previewTest.closeExtraTabs()`)
+    await open()
+    assert.deepEqual((await tabs()).edges, { left: false, right: false })
   })
 
   await check('dragging left protects the conversation minimum and commits only on release', async () => {
