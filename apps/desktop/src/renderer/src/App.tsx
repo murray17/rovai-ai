@@ -354,9 +354,9 @@ export function campOpenProjectionAsSnapshot(
   const messagesById = new Map<string, CampMessageView>()
   for (const message of previousEarlierMessages) messagesById.set(message.id, message)
   for (const message of projection.messages) messagesById.set(message.id, message)
-  const messages = [...messagesById.values()].sort((left, right) =>
-    left.sequence - right.sequence || left.id.localeCompare(right.id)
-  )
+  const messages = [...messagesById.values()]
+    .map((message) => ({ ...message, timelineGlobalSequence: null }))
+    .sort((left, right) => left.sequence - right.sequence || left.id.localeCompare(right.id))
   const loadedCount = messages.length
   const totalCount = Math.max(projection.coverage.messages.totalCount, loadedCount)
   const omittedCount = Math.max(0, totalCount - loadedCount)
@@ -376,7 +376,7 @@ export function campOpenProjectionAsSnapshot(
     contextManifests: [],
     approvals: projection.approvals,
     actions: [],
-    timeline: projection.timeline,
+    timeline: [],
     openCoverage: {
       ...projection.coverage,
       messages: {
@@ -1123,13 +1123,13 @@ function AuthoritativeApp({
           command: { campId }
         })
       : await requestAuthoritativeCampOpenProjection(window.rovai, campId, traceId)
-    if (projection.schemaVersion !== 5) throw new Error('会话打开数据版本不兼容。')
+    if (projection.schemaVersion !== 6) throw new Error('会话打开数据版本不兼容。')
     console.info(
       `[camp-open] trace=${traceId} stage=renderer_received method=${method} `
       + `elapsed_ms=${(performance.now() - startedAt).toFixed(1)} `
       + `schema=${projection.schemaVersion} high_water=${projection.throughGlobalSequence} `
       + `messages=${projection.messages.length} runs=${projection.agentRuns.length} `
-      + `evidence=${projection.executionEvidence.length} timeline=${projection.timeline.length}`
+      + `evidence=${projection.executionEvidence.length}`
     )
     return {
       snapshot: campOpenProjectionAsSnapshot(projection, campSnapshotRef.current),

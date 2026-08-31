@@ -1,4 +1,4 @@
-import { isValidElement, useEffect, useLayoutEffect, useMemo, useRef, type JSX, type ReactNode } from 'react'
+import { createContext, isValidElement, useContext, useEffect, useLayoutEffect, useMemo, useRef, type JSX, type ReactNode } from 'react'
 import Markdown, { defaultUrlTransform } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { FILE_REFERENCE_FRAGMENT, FileReferenceLink, type FileReferenceActivation } from './FileReferenceLink'
@@ -16,6 +16,28 @@ type MarkdownTreeNode = {
   children?: MarkdownTreeNode[]
   url?: string
   data?: { hProperties?: Record<string, string> }
+}
+
+const LeadingMarkdownContentContext = createContext<ReactNode>(null)
+
+function LeadingMarkdownContent(): JSX.Element {
+  return <>{useContext(LeadingMarkdownContentContext)}</>
+}
+
+function remarkLeadingContent({ enabled, inline }: { enabled: boolean; inline: boolean }): (tree: MarkdownTreeNode) => void {
+  return (tree) => {
+    if (!enabled) return
+    const children = tree.children ??= []
+    const firstBlock = children.find((node) => !['definition', 'footnoteDefinition'].includes(node.type ?? ''))
+    const paragraph = inline && firstBlock?.type === 'paragraph'
+      ? firstBlock
+      : { type: 'paragraph', children: [] }
+    if (paragraph !== firstBlock) children.unshift(paragraph)
+    paragraph.data = {
+      ...paragraph.data,
+      hProperties: { ...paragraph.data?.hProperties, 'data-rovai-leading-content': 'true' }
+    }
+  }
 }
 
 function markdownHeadingText(children: ReactNode): string {
@@ -120,7 +142,9 @@ export function SafeMarkdown({
   onFileReference,
   localImageUrl,
   headingTarget,
-  onHeadingTargetResult
+  onHeadingTargetResult,
+  leadingContent,
+  inlineLeadingContent = true
 }: {
   children: string
   className?: string
@@ -128,6 +152,9 @@ export function SafeMarkdown({
   localImageUrl?(rawReference: string): string | null
   headingTarget?: string
   onHeadingTargetResult?(found: boolean): void
+  /** Trusted inline UI, never parsed from the Markdown source. */
+  leadingContent?: ReactNode
+  inlineLeadingContent?: boolean
 }): JSX.Element {
   const rootRef = useRef<HTMLDivElement>(null)
   const callbacks = useRef({ onFileReference, onHeadingTargetResult })
@@ -135,6 +162,7 @@ export function SafeMarkdown({
     callbacks.current = { onFileReference, onHeadingTargetResult }
   }, [onFileReference, onHeadingTargetResult])
   const fileReferencesEnabled = Boolean(onFileReference)
+  const hasLeadingContent = leadingContent !== undefined && leadingContent !== null
 
   useEffect(() => {
     if (!headingTarget) return undefined
@@ -148,6 +176,7 @@ export function SafeMarkdown({
   // Parsing old messages must not be coupled to Composer keystrokes or Runtime
   // deltas. Keep event callbacks fresh without rebuilding the Markdown tree;
   // image projection changes still invalidate it because they change the output.
+  // Leading UI reads context so member/profile updates do not reparse Markdown.
   const markdown = useMemo(() => {
     const heading = (Tag: 'h3' | 'h4') => function MarkdownHeading({ children: headingChildren }: { children?: ReactNode }) {
       const text = markdownHeadingText(headingChildren)
@@ -159,7 +188,8 @@ export function SafeMarkdown({
         remarkPlugins={[
           [remarkGfm, { singleTilde: false }],
           remarkRepairCjkUrlTail,
-          ...(fileReferencesEnabled ? [remarkFileReferences] : [])
+          ...(fileReferencesEnabled ? [remarkFileReferences] : []),
+          [remarkLeadingContent, { enabled: hasLeadingContent, inline: inlineLeadingContent }]
         ]}
         skipHtml
         disallowedElements={[
@@ -168,6 +198,16 @@ export function SafeMarkdown({
         ]}
         unwrapDisallowed
         components={{
+          p({ node, children: paragraphChildren }) {
+            const leading = node?.properties['data-rovai-leading-content'] === 'true'
+            return (
+              <p>
+                {leading && <LeadingMarkdownContent />}
+                {leading && paragraphChildren ? ' ' : null}
+                {paragraphChildren}
+              </p>
+            )
+          },
           h1: heading('h3'),
           h2: heading('h3'),
           h3: heading('h4'),
@@ -240,11 +280,13 @@ export function SafeMarkdown({
         {children}
       </Markdown>
     )
-  }, [children, fileReferencesEnabled, localImageUrl])
+  }, [children, fileReferencesEnabled, localImageUrl, hasLeadingContent, inlineLeadingContent])
 
   return (
-    <div ref={rootRef} className={className ? `safe-markdown ${className}` : 'safe-markdown'}>
-      {markdown}
-    </div>
+    <LeadingMarkdownContentContext.Provider value={leadingContent}>
+      <div ref={rootRef} className={className ? `safe-markdown ${className}` : 'safe-markdown'}>
+        {markdown}
+      </div>
+    </LeadingMarkdownContentContext.Provider>
   )
 }

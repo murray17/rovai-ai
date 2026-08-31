@@ -857,87 +857,77 @@ export type CampConversationTimelineItem =
       kind: 'task_card'
       id: string
       createdAt: string
-      timelineGlobalSequence: number | null
       task: TaskView
     }
   | {
       kind: 'camp_message'
       id: string
       createdAt: string
-      timelineGlobalSequence: number | null
       message: CampMessageView
     }
   | {
       kind: 'run_file_changes'
       id: string
       createdAt: string
-      timelineGlobalSequence: null
       changes: AgentRunFileChangesView
     }
   | {
       kind: 'stop_event'
       id: string
       createdAt: string
-      timelineGlobalSequence: number | null
       campTurnId: string
       elapsedLabel: string
       hasUnsettledExternalEffects: boolean
     }
 
+const TIMELINE_KIND_RANK: Record<CampConversationTimelineItem['kind'], number> = {
+  camp_message: 0,
+  task_card: 1,
+  stop_event: 2,
+  run_file_changes: 3
+}
+
+function compareTimelinePresentationOrder(
+  left: CampConversationTimelineItem,
+  right: CampConversationTimelineItem
+): number {
+  return left.createdAt.localeCompare(right.createdAt)
+    || TIMELINE_KIND_RANK[left.kind] - TIMELINE_KIND_RANK[right.kind]
+    || left.id.localeCompare(right.id)
+}
+
 export function campConversationTimeline(
   messages: CampMessageView[],
   turns: CampSnapshot['turns'] = [],
-  timeline: CampSnapshot['timeline'] = [],
   agentRuns: CampSnapshot['agentRuns'] = [],
   tasks: CampSnapshot['tasks'] = [],
   agentRunFileChanges: CampSnapshot['agentRunFileChanges'] = []
 ): CampConversationTimelineItem[] {
-  const taskCreatedSequenceById = new Map(
-    timeline
-      .filter((event) =>
-        event.eventType === 'task.created'
-        && event.entityType === 'task'
-        && event.entityId !== null
-      )
-      .map((event) => [event.entityId as string, event.globalSequence])
-  )
   const taskCards: CampConversationTimelineItem[] = tasks.map((task) => ({
     kind: 'task_card',
     id: `task:${task.taskId}`,
     createdAt: task.createdAt,
-    timelineGlobalSequence: taskCreatedSequenceById.get(task.taskId) ?? null,
     task
   }))
   const runFileChangeCards: CampConversationTimelineItem[] = agentRunFileChanges.map((changes) => ({
     kind: 'run_file_changes',
     id: `run-file-changes:${changes.agentRunId}:${changes.executionEpoch}`,
     createdAt: changes.completedAt,
-    timelineGlobalSequence: null,
     changes
   }))
-  const publicMessages: CampConversationTimelineItem[] = messages
+  const publicMessages = messages
     .filter((message) => {
       const kind = (message.presentation as { kind?: string } | null)?.kind
       const isLegacyApprovalResolution = message.authorType === 'system'
         && message.authorId === 'approval'
       return kind !== 'a2a_event' && kind !== 'task_event' && !isLegacyApprovalResolution
     })
-    .map((message) => ({
+    .map((message): Extract<CampConversationTimelineItem, { kind: 'camp_message' }> => ({
       kind: 'camp_message',
       id: message.id,
       createdAt: message.createdAt,
-      timelineGlobalSequence: message.timelineGlobalSequence,
       message
     }))
-  const cancelSequenceByTurnId = new Map(
-    timeline
-      .filter((event) =>
-        event.eventType === 'camp_turn.cancel_requested'
-        && event.entityType === 'camp_turn'
-        && event.entityId !== null
-      )
-      .map((event) => [event.entityId as string, event.globalSequence])
-  )
   const unsettledTurnIds = new Set(
     agentRuns
       .filter((run) => run.hasUnsettledExternalEffects)
@@ -949,29 +939,32 @@ export function campConversationTimeline(
       kind: 'stop_event',
       id: `stop:${turn.id}`,
       createdAt: turn.cancelRequestedAt as string,
-      timelineGlobalSequence: cancelSequenceByTurnId.get(turn.id) ?? null,
       campTurnId: turn.id,
       elapsedLabel: formatStopElapsed(turn.createdAt, turn.cancelRequestedAt as string),
       hasUnsettledExternalEffects: unsettledTurnIds.has(turn.id)
     }))
 
-  const compareTimelineItems = (
-    left: CampConversationTimelineItem,
-    right: CampConversationTimelineItem
-  ): number => {
-    if (left.timelineGlobalSequence !== null && right.timelineGlobalSequence !== null) {
-      const sequenceOrder = left.timelineGlobalSequence - right.timelineGlobalSequence
-      if (sequenceOrder !== 0) return sequenceOrder
+  const sortedMessages = publicMessages.sort((left, right) => {
+    return left.message.sequence - right.message.sequence
+      || compareTimelinePresentationOrder(left, right)
+  })
+  const sortedCards = [...taskCards, ...stopEvents, ...runFileChangeCards]
+    .sort(compareTimelinePresentationOrder)
+  const sortedItems: CampConversationTimelineItem[] = []
+  let messageIndex = 0
+  let cardIndex = 0
+  // Sequence is authoritative for messages even when the wall clock moves back.
+  // Merge separately ordered streams instead of using a non-transitive comparator.
+  while (messageIndex < sortedMessages.length && cardIndex < sortedCards.length) {
+    if (compareTimelinePresentationOrder(sortedMessages[messageIndex], sortedCards[cardIndex]) <= 0) {
+      sortedItems.push(sortedMessages[messageIndex++])
+    } else {
+      sortedItems.push(sortedCards[cardIndex++])
     }
-    const timeOrder = left.createdAt.localeCompare(right.createdAt)
-    if (timeOrder !== 0) return timeOrder
-    const kindOrder = left.kind.localeCompare(right.kind)
-    return kindOrder !== 0 ? kindOrder : left.id.localeCompare(right.id)
   }
-  const sortedItems = [...taskCards, ...publicMessages, ...stopEvents, ...runFileChangeCards]
-    .sort(compareTimelineItems)
+  sortedItems.push(...sortedMessages.slice(messageIndex), ...sortedCards.slice(cardIndex))
   const lastPublicMessageByRunId = new Map<string, CampConversationTimelineItem>()
-  for (const item of publicMessages.slice().sort(compareTimelineItems)) {
+  for (const item of sortedMessages) {
     if (item.kind === 'camp_message' && item.message.sourceAgentRunId) {
       lastPublicMessageByRunId.set(item.message.sourceAgentRunId, item)
     }
@@ -985,7 +978,7 @@ export function campConversationTimeline(
     anchoredCardIds.add(card.id)
     cardsByAnchorMessageId.set(
       anchor.id,
-      [...(cardsByAnchorMessageId.get(anchor.id) ?? []), card].sort(compareTimelineItems)
+      [...(cardsByAnchorMessageId.get(anchor.id) ?? []), card].sort(compareTimelinePresentationOrder)
     )
   }
 
@@ -1060,8 +1053,15 @@ export function projectLeadingCurrentUserMentionMarkdownBody(
     || content.slice(1).some((segment) => segment.kind === 'current_user_mention')
   ) return null
 
+  return structuredCampContentMarkdownText(content.slice(1), members)
+}
+
+function structuredCampContentMarkdownText(
+  content: StructuredCampMessageContent,
+  members: ReadonlyArray<Pick<CampSnapshot['members'][number], 'agentId' | 'displayName'>>
+): string {
   const names = new Map(members.map((member) => [member.agentId, member.displayName]))
-  return content.slice(1).map((segment) => {
+  return content.map((segment) => {
     if (segment.kind === 'text') return segment.text
     if (segment.kind === 'all_members_mention') return escapeMarkdownLiteral('@所有队员')
     if (segment.kind === 'member_mention') {
@@ -1698,7 +1698,6 @@ export function CampWorkspace({
     () => campConversationTimeline(
       visibleCampMessages,
       snapshot.turns,
-      snapshot.timeline,
       snapshot.agentRuns,
       snapshot.tasks,
       snapshot.agentRunFileChanges
@@ -1706,7 +1705,6 @@ export function CampWorkspace({
     [
       snapshot.agentRuns,
       snapshot.tasks,
-      snapshot.timeline,
       snapshot.turns,
       snapshot.agentRunFileChanges,
       visibleCampMessages
@@ -3786,7 +3784,7 @@ export function CampWorkspace({
                     lastDayKey = dayKey
                     previousMessageAuthorKey = null
                     items.push(
-                      <div className="timeline-node timeline-day" key={`day-${dayKey}`}>
+                      <div className="timeline-node timeline-day" key={`day-${dayKey}-${timelineItem.id}`}>
                         {timelineDayLabel(timelineItem.createdAt)}
                       </div>
                     )
@@ -3958,7 +3956,11 @@ export function CampWorkspace({
                                   )
                                     ? (
                                         <div className="final-copy">
-                                          <SafeMarkdown
+                                          <AgentMessageMarkdownBody
+                                            body={displayBody}
+                                            content={campMessage.content}
+                                            members={snapshot.members}
+                                            onActivateMemberMention={openMemberProfilePopover}
                                             onFileReference={(rawReference, source, target) => {
                                               if (!filePreview) return
                                               captureFilePreviewAnchor(source)
@@ -3971,9 +3973,7 @@ export function CampWorkspace({
                                                 if (outcome.kind === 'error') onNotify(outcome.error.message)
                                               })
                                             }}
-                                          >
-                                            {displayBody}
-                                          </SafeMarkdown>
+                                          />
                                         </div>
                                       )
                                     : (
@@ -6928,10 +6928,63 @@ function MessageSurface({
   )
 }
 
+function AgentMessageMarkdownBody({
+  body,
+  content,
+  members,
+  onActivateMemberMention,
+  onFileReference
+}: {
+  body: string
+  content: StructuredCampMessageContent | null
+  members: CampSnapshot['members']
+  onActivateMemberMention(agentId: string, trigger: HTMLElement, focusPanel: boolean): void
+  onFileReference?: FileReferenceActivation
+}): JSX.Element {
+  // Only authoritative leading tokens form a recipient prefix. Literal @names
+  // stay Markdown text; the Renderer never derives addressing from the body.
+  let prefixLength = 0
+  for (const [index, segment] of (content ?? []).entries()) {
+    if (segment.kind === 'member_mention') prefixLength = index + 1
+    else if (segment.kind !== 'text' || segment.text.trim().length > 0) break
+  }
+  if (!content || prefixLength === 0) {
+    return <SafeMarkdown onFileReference={onFileReference}>{body}</SafeMarkdown>
+  }
+
+  const markdownBody = structuredCampContentMarkdownText(content.slice(prefixLength), members)
+  const hasBody = markdownBody.trim().length > 0
+  const inlineBody = hasBody && !/^\s*[\r\n]/u.test(markdownBody)
+  const prefix = (
+    <StructuredMessageBody
+      inline={hasBody}
+      body=""
+      content={content.slice(0, prefixLength)}
+      members={members}
+      onActivateMemberMention={onActivateMemberMention}
+    />
+  )
+  return (
+    <div className="member-mention-markdown-body" data-inline-body={inlineBody}>
+      {hasBody ? (
+        <SafeMarkdown
+          className="member-mention-markdown-content"
+          leadingContent={prefix}
+          inlineLeadingContent={inlineBody}
+          onFileReference={onFileReference}
+        >
+          {markdownBody}
+        </SafeMarkdown>
+      ) : prefix}
+    </div>
+  )
+}
+
 function StructuredMessageBody({
   body,
   content,
   members,
+  inline = false,
   renderLeadingCurrentUserMarkdown = false,
   onActivateMemberMention,
   onActivateAllMembersMention,
@@ -6940,6 +6993,7 @@ function StructuredMessageBody({
   body: string
   content: StructuredCampMessageContent | null
   members: CampSnapshot['members']
+  inline?: boolean
   renderLeadingCurrentUserMarkdown?: boolean
   onActivateMemberMention?(
     agentId: string,
@@ -6967,8 +7021,9 @@ function StructuredMessageBody({
     )
   }
   const memberById = new Map(members.map((member) => [member.agentId, member]))
+  const Tag = inline ? 'span' : 'p'
   return (
-    <p className="structured-message-body">
+    <Tag className="structured-message-body">
       {content.map((segment, index) => {
         if (segment.kind === 'text') return (
           <span key={`text-${index}`}>
@@ -7059,7 +7114,7 @@ function StructuredMessageBody({
           </span>
         )
       })}
-    </p>
+    </Tag>
   )
 }
 
@@ -8943,7 +8998,7 @@ export function TaskPanel({
         {detailTask.completionSummary && <section className="task-detail-section task-outcome is-completed"><strong>完成摘要</strong><p className="task-detail-copy">{detailTask.completionSummary}</p></section>}
         {detailTask.cancelReason && <section className="task-detail-section task-outcome"><strong>取消原因</strong><p className="task-detail-copy">{detailTask.cancelReason}</p></section>}
         <RelatedTaskExecution task={detailTask} snapshot={snapshot} onOpenAgent={onOpenAgent} />
-        <details className="task-audit-disclosure"><summary>审计信息</summary><TaskAuditDetail task={detailTask} snapshot={snapshot} /></details>
+        <details className="task-audit-disclosure"><summary>审计信息</summary><TaskAuditDetail task={detailTask} /></details>
         {detailTerminal
           ? <p className="task-terminal-note">已结束的任务保留为只读记录，不能重新打开或删除。</p>
           : <div className="task-detail-actions">
@@ -9108,17 +9163,7 @@ function formatDateTime(value: string): string {
   }).format(new Date(value))
 }
 
-function TaskAuditDetail({ task, snapshot }: { task: TaskView; snapshot: CampSnapshot }): JSX.Element {
-  const releaseEvent = [...snapshot.timeline].reverse().find((event) =>
-    event.entityType === 'task'
-      && event.entityId === task.taskId
-      && typeof event.payload === 'object'
-      && event.payload !== null
-      && 'cause' in event.payload
-  )
-  const cause = releaseEvent && typeof releaseEvent.payload === 'object' && releaseEvent.payload !== null
-    ? String((releaseEvent.payload as { cause?: unknown }).cause ?? '')
-    : ''
+function TaskAuditDetail({ task }: { task: TaskView }): JSX.Element {
   return (
     <section className="task-detail-section" aria-label="任务审计信息">
       <strong>责任与审计</strong>
@@ -9130,7 +9175,6 @@ function TaskAuditDetail({ task, snapshot }: { task: TaskView; snapshot: CampSna
         <div><dt>更新时间</dt><dd>{formatDateTime(task.updatedAt)}</dd></div>
         <div><dt>结束者</dt><dd>{task.closedByType ? `${task.closedByType} · ${task.closedById}` : '未结束'}</dd></div>
         <div><dt>结束时间</dt><dd>{task.closedAt ? formatDateTime(task.closedAt) : '未结束'}</dd></div>
-        {cause && <div><dt>审计原因</dt><dd>{cause}</dd></div>}
       </dl>
     </section>
   )

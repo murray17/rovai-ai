@@ -1,4 +1,4 @@
-import { Children, isValidElement, useMemo, type JSX, type ReactNode } from 'react'
+import { Children, isValidElement, useMemo, useRef, type JSX, type ReactNode } from 'react'
 import type { FileLocationTarget } from '@contracts'
 import { parseFileReference } from '../../file-preview-reference'
 import { FilePreviewTabIcon } from './FilePreviewTabIcon'
@@ -20,6 +20,7 @@ export function FileReferenceLink({
   sourceReference?: string
   onActivate: FileReferenceActivation
 }): JSX.Element {
+  const selectionAtPointerDown = useRef<Range | null>(null)
   const labelNodes = Children.toArray(children)
   const onlyChild = labelNodes.length === 1 ? labelNodes[0] : null
   const codeLabel = isValidElement<{ children?: ReactNode }>(onlyChild) && onlyChild.type === 'code'
@@ -31,9 +32,23 @@ export function FileReferenceLink({
       className={codeLabel ? `${className} inline-code-file-reference` : className}
       href={`${FILE_REFERENCE_FRAGMENT}${encodeURIComponent(rawReference)}`}
       title={rawReference}
+      onPointerDown={() => {
+        const selection = window.getSelection()
+        selectionAtPointerDown.current = selection?.rangeCount ? selection.getRangeAt(0).cloneRange() : null
+      }}
+      onPointerCancel={() => { selectionAtPointerDown.current = null }}
       onClick={(event) => {
         event.preventDefault()
-        if (event.detail > 0 && window.getSelection()?.toString()) return
+        const before = selectionAtPointerDown.current
+        selectionAtPointerDown.current = null
+        const selection = window.getSelection()
+        if (event.detail > 0 && selection?.rangeCount && selection.toString()) {
+          const range = selection.getRangeAt(0)
+          // An existing selection must not disable links; only suppress this gesture's new selection.
+          if (!before
+            || range.compareBoundaryPoints(Range.START_TO_START, before) !== 0
+            || range.compareBoundaryPoints(Range.END_TO_END, before) !== 0) return
+        }
         onActivate(sourceReference ?? rawReference, event.currentTarget,
           sourceReference ? parseFileReference(rawReference)?.target : undefined)
       }}

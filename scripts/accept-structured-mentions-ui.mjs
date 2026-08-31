@@ -70,6 +70,30 @@ const currentUserMentionContent = [
   { kind: 'current_user_mention', userId: 'local_user' },
   { kind: 'text', text: currentUserMentionText }
 ]
+const agentMemberMentionMessageId = 'message-agent-member-mention-accept'
+const agentLiteralMentionMessageId = 'message-agent-literal-mention-accept'
+const agentMemberMentionText = [
+  ' review 结论：**通过**。请检查开头的队员 Mention。',
+  '',
+  '## 事实复核',
+  '',
+  '- 保留列表与 `行内代码`',
+  '- 保留 [验收说明](docs/plan.md) 文件链接',
+  '',
+  '```sh',
+  'pnpm test',
+  '```',
+  '',
+  '| 检查项 | 结果 |',
+  '| --- | --- |',
+  '| Markdown | PASS |'
+].join('\n')
+const agentMemberMentionBody = `@叮叮${agentMemberMentionText}`
+const agentMemberMentionContent = [
+  { kind: 'member_mention', agentId: 'agent_1' },
+  { kind: 'text', text: agentMemberMentionText }
+]
+const agentLiteralMentionBody = '@叮叮 是普通文字，不应打开人物信息卡。'
 const nativeDomRegressionBody = '原生输入回归'
 const acceptanceModelCatalog = JSON.stringify([{
   id: 'gpt-structured-mentions-accept',
@@ -1405,10 +1429,12 @@ try {
   // App then exercises the real read model, copy bridge, and Composer paste.
   await closeApp(running)
   running = null
+  await insertAgentMemberMentionFixtures(databasePath, campId)
   await insertCurrentUserMentionFixture(databasePath, campId)
   running = await launchApp(dataDir, debugPort, 1440, 920)
   await setTheme(running.cdp, 'night')
   await openCamp(running.cdp, campId)
+  const agentMemberMentionInspection = await acceptAgentMemberMention(running.cdp)
   await waitForExpression(running.cdp, `(() => {
     const message = document.querySelector('[data-message-id=${JSON.stringify(currentUserMentionMessageId)}]')
     return message?.querySelector('.current-user-markdown-body, .structured-message-body')?.textContent
@@ -1907,6 +1933,7 @@ try {
     mentionSelectedText,
     selectedText,
     currentUserMentionInspection,
+    agentMemberMentionInspection,
     currentUserClipboardPayload,
     currentUserPasteDowngradedToText: true,
     availableReplyDraft,
@@ -2068,6 +2095,165 @@ async function insertCurrentUserMentionFixture(path, campId) {
     FROM camp WHERE id = ${sqlLiteral(campId)};
     COMMIT;
   `)
+}
+
+async function insertAgentMemberMentionFixtures(path, campId) {
+  // These are inert presentation fixtures: no Delivery, Run or model invocation.
+  for (const message of [
+    { id: agentMemberMentionMessageId, body: agentMemberMentionBody, content: agentMemberMentionContent, recipients: ['agent_1'] },
+    { id: agentLiteralMentionMessageId, body: agentLiteralMentionBody, content: [{ kind: 'text', text: agentLiteralMentionBody }], recipients: [] }
+  ]) {
+    await runSql(path, `
+      BEGIN IMMEDIATE;
+      UPDATE camp SET last_message_sequence = last_message_sequence + 1, version = version + 1
+      WHERE id = ${sqlLiteral(campId)};
+      INSERT INTO camp_message(
+        id, camp_id, sequence, author_type, author_id, body, structured_content_json,
+        content_digest, address_mode, addressed_agent_ids_json, effective_recipient_ids_json,
+        agent_addressing_mode, version, created_at, updated_at
+      ) SELECT
+        ${sqlLiteral(message.id)}, id, last_message_sequence, 'agent', 'agent_2',
+        ${sqlLiteral(message.body)}, ${sqlLiteral(JSON.stringify(message.content))},
+        ${sqlLiteral(`sha256:structured-mentions-accept:${message.id}`)},
+        ${sqlLiteral(message.recipients.length ? 'explicit' : 'default')},
+        ${sqlLiteral(JSON.stringify(message.recipients))}, ${sqlLiteral(JSON.stringify(message.recipients))},
+        'automatic', 1, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+      FROM camp WHERE id = ${sqlLiteral(campId)};
+      COMMIT;
+    `)
+  }
+}
+
+async function acceptAgentMemberMention(cdp) {
+  const messageSelector = `[data-message-id="${agentMemberMentionMessageId}"]`
+  const tokenSelector = `${messageSelector} .message-mention-token[data-agent-id="agent_1"]`
+  await waitForSelector(cdp, tokenSelector)
+  const cases = []
+  const screenshots = {}
+  for (const variant of [
+    { name: 'day', theme: 'day', width: 1440, height: 920 },
+    { name: 'night', theme: 'night', width: 1440, height: 920 },
+    { name: 'day-compact', theme: 'day', width: 1040, height: 700 },
+    { name: 'night-compact', theme: 'night', width: 1040, height: 700 },
+    { name: 'night-wide', theme: 'night', width: 2560, height: 1440 },
+    { name: 'night-zoom200', theme: 'night', width: 2560, height: 1440, zoom: 2 }
+  ]) {
+    await setTheme(cdp, variant.theme)
+    if (variant.zoom) await emulateDesktopZoom(cdp, variant.width, variant.height, variant.zoom)
+    else await setViewport(cdp, variant.width, variant.height)
+    await evaluate(cdp, `document.querySelector(${JSON.stringify(messageSelector)})?.scrollIntoView({ block: 'start' })`)
+    await cdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 2, y: 2, button: 'none', buttons: 0 })
+    await wait(180)
+    const inspection = await evaluate(cdp, `(() => {
+      const message = document.querySelector(${JSON.stringify(messageSelector)})
+      const token = message?.querySelector('.message-mention-token')
+      const body = message?.querySelector('.member-mention-markdown-content')
+      const paragraph = body?.querySelector('p')
+      if (!token || !body || !paragraph) return null
+      const style = getComputedStyle(token)
+      const colorProbe = document.createElement('span')
+      colorProbe.style.color = 'var(--mention-ink)'
+      document.body.appendChild(colorProbe)
+      const expectedColor = getComputedStyle(colorProbe).color
+      colorProbe.remove()
+      const line = document.createRange()
+      const bodyText = [...paragraph.childNodes].find((node) => node.nodeType === Node.TEXT_NODE && node.textContent.trim())
+      line.setStart(bodyText, 0)
+      line.setEnd(bodyText, 1)
+      const paragraphStyle = getComputedStyle(paragraph)
+      const timeline = document.querySelector('.camp-timeline')
+      const literal = document.querySelector('[data-message-id="${agentLiteralMentionMessageId}"]')
+      return {
+        tokenText: token.textContent,
+        role: token.getAttribute('role'), tabIndex: token.getAttribute('tabindex'),
+        label: token.getAttribute('aria-label'), popup: token.getAttribute('aria-haspopup'),
+        color: style.color, expectedColor, background: style.backgroundColor,
+        display: style.display, cursor: style.cursor,
+        sameLine: Math.abs(token.getBoundingClientRect().top - line.getBoundingClientRect().top) < 3,
+        paragraphDisplay: paragraphStyle.display,
+        proseWidthPreserved: innerWidth < 1800 || (
+          paragraph.getBoundingClientRect().width <= parseFloat(paragraphStyle.maxWidth) + 1
+          && Number.isFinite(parseFloat(paragraphStyle.maxWidth))
+        ),
+        heading: body.querySelector('h3')?.textContent,
+        listCount: body.querySelectorAll('li').length,
+        strong: body.querySelector('strong')?.textContent,
+        code: body.querySelector('pre code')?.textContent?.trim(),
+        table: Boolean(body.querySelector('table')),
+        fileLink: Boolean(body.querySelector('a[title="docs/plan.md"]')),
+        literalText: literal?.querySelector('.safe-markdown')?.textContent,
+        literalHasToken: Boolean(literal?.querySelector('.message-mention-token')),
+        noOverflow: document.documentElement.scrollWidth <= innerWidth + 1
+          && timeline.scrollWidth <= timeline.clientWidth + 1
+      }
+    })()`)
+    assert(inspection && inspection.tokenText === '@叮叮'
+      && inspection.role === 'button' && inspection.tabIndex === '0'
+      && inspection.label === '查看叮叮的基础信息' && inspection.popup === 'dialog'
+      && inspection.color === inspection.expectedColor && inspection.background === 'rgba(0, 0, 0, 0)'
+      && inspection.display === 'inline' && inspection.cursor === 'pointer'
+      && inspection.sameLine && inspection.paragraphDisplay === 'block' && inspection.proseWidthPreserved
+      && inspection.heading === '事实复核' && inspection.listCount === 2
+      && inspection.strong === '通过' && inspection.code === 'pnpm test'
+      && inspection.table && inspection.fileLink && inspection.noOverflow
+      && inspection.literalText === agentLiteralMentionBody && !inspection.literalHasToken,
+    `Agent Member Mention regression (${variant.name}): ${JSON.stringify(inspection)}`)
+    cases.push({ variant: variant.name, ...inspection })
+    screenshots[variant.name] = join(outputDir, `agent-member-mention-${variant.name}.png`)
+    await capture(cdp, screenshots[variant.name])
+  }
+
+  await setViewport(cdp, 1440, 920)
+  await setTheme(cdp, 'night')
+  await evaluate(cdp, `window.getSelection()?.removeAllRanges()`)
+  await mouseClick(cdp, tokenSelector)
+  await waitForExpression(cdp, `document.querySelector('.mention-profile-popover')?.classList.contains('is-positioned')`)
+  await wait(180)
+  assertSelectedMemberPopover(await inspectMentionPopover(cdp), 'Agent leading Mention click')
+  screenshots.popover = join(outputDir, 'agent-member-mention-popover.png')
+  await capture(cdp, screenshots.popover)
+  await pressEscape(cdp)
+  await waitForExpression(cdp, `!document.querySelector('.mention-profile-popover')`)
+  for (const activation of [
+    { key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13, nativeVirtualKeyCode: 36 },
+    { key: ' ', code: 'Space', windowsVirtualKeyCode: 32, nativeVirtualKeyCode: 49 }
+  ]) {
+    await evaluate(cdp, `document.querySelector(${JSON.stringify(tokenSelector)})?.focus()`)
+    await pressKey(cdp, activation)
+    await waitForExpression(cdp, `document.querySelector('.mention-profile-popover')?.classList.contains('is-positioned')`)
+    await wait(180)
+    assertSelectedMemberPopover(await inspectMentionPopover(cdp), `Agent leading Mention ${activation.code}`)
+    await pressEscape(cdp)
+    await waitForExpression(cdp, `!document.querySelector('.mention-profile-popover')
+      && document.activeElement === document.querySelector(${JSON.stringify(tokenSelector)})`)
+  }
+
+  const drag = await evaluate(cdp, `(() => {
+    const token = document.querySelector(${JSON.stringify(tokenSelector)})
+    token.scrollIntoView({ block: 'center' })
+    const paragraph = document.querySelector(${JSON.stringify(messageSelector)} + ' .member-mention-markdown-content > p')
+    const text = [...paragraph.childNodes].find((node) => node.nodeType === Node.TEXT_NODE && node.textContent.trim())
+    const point = (node, offset, end) => {
+      const range = document.createRange()
+      range.setStart(node, offset); range.setEnd(node, offset + 1)
+      const rect = range.getBoundingClientRect()
+      return { x: end ? rect.right - 0.1 : rect.left + 0.1, y: rect.top + rect.height / 2 }
+    }
+    return { start: point(token.firstChild, 0, false), end: point(text, text.textContent.indexOf('review') + 5, true) }
+  })()`)
+  await dispatchMouseDrag(cdp, drag.start, drag.end)
+  const selectedText = await evaluate(cdp, `window.getSelection()?.toString() ?? ''`)
+  assert(selectedText.includes('@叮叮') && selectedText.includes('review')
+    && !(await evaluate(cdp, `Boolean(document.querySelector('.mention-profile-popover'))`)),
+  `Agent Mention drag selection failed: ${JSON.stringify(selectedText)}`)
+  await evaluate(cdp, `window.getSelection()?.removeAllRanges()`)
+  await moveMouseToElement(cdp, `${messageSelector} .message-surface`)
+  await mouseClick(cdp, `${messageSelector} .message-copy-button`)
+  await waitForExpression(cdp, `document.querySelector(${JSON.stringify(messageSelector)} + ' .copy-feedback')?.textContent === '已复制'`)
+  const copiedText = await runProcess('/usr/bin/pbpaste', [])
+  assert(copiedText === agentMemberMentionBody, `Agent Mention copy lost source content: ${JSON.stringify(copiedText)}`)
+  await evaluate(cdp, `document.querySelector('[data-message-id="${currentUserMentionMessageId}"]')?.scrollIntoView({ block: 'center' })`)
+  return { cases, screenshots, activations: ['click', 'Enter', 'Space'], selectedText, copyPreserved: true }
 }
 
 async function removeDirectoryWithRetry(path) {

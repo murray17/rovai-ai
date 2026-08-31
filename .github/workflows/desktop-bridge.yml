@@ -42,6 +42,8 @@ on:
       - "apps/desktop/src/file-preview-reference*"
       - "scripts/lib/camp-fast-layout.test.mjs"
       - "scripts/fixtures/camp-fast-layout/**"
+      - "scripts/lib/camp-open-projection.test.mjs"
+      - "scripts/fixtures/camp-open-projection/**"
       - "scripts/lib/execution-avatar-rail.test.mjs"
       - "scripts/fixtures/execution-avatar-rail/**"
       - "scripts/lib/approval-dock.test.mjs"
@@ -87,6 +89,7 @@ jobs:
           xvfb-run -a pnpm test:file-preview-layout
           xvfb-run -a pnpm test:file-reference-navigation
           xvfb-run -a pnpm test:camp-fast-layout
+          xvfb-run -a pnpm test:camp-open-projection
           xvfb-run -a pnpm test:execution-avatar-rail
           xvfb-run -a pnpm test:approval-dock
           pnpm exec vitest run apps/desktop/src/main/desktop-session.test.ts apps/desktop/src/renderer/src/CampNavigationPagination.test.ts
