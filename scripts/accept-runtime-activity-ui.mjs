@@ -430,10 +430,12 @@ try {
     && executionSidecar.chipCount === runtimes.length
     && executionSidecar.uniqueAgentIds.length === runtimes.length
     && executionSidecar.entryContract
-    && executionSidecar.verticalRows
-    && executionSidecar.fullWidthRows
-    && executionSidecar.listScrollHeight > executionSidecar.listClientHeight
-    && executionSidecar.listOverflowY === 'auto'
+    && executionSidecar.singleRow
+    && executionSidecar.compactAvatars
+    && executionSidecar.headingInline
+    && executionSidecar.listScrollWidth > executionSidecar.listClientWidth
+    && executionSidecar.listOverflowX === 'auto'
+    && executionSidecar.scrollbarWidth === 'none'
     && executionSidecar.drawerPlacement === 'inspector'
     && !executionSidecar.resizeHandle
     && executionSidecar.selectedAgentId === activeAgentId
@@ -1685,21 +1687,26 @@ async function collectExecutionSidecar(cdp) {
       entryContract: chips.every((chip) => {
         const name = chip.querySelector('.run-pulse-chip-copy strong')
         const state = chip.querySelector('.run-pulse-chip-state')
-        return chip.children.length === 3
-          && (name?.children.length ?? 0) >= 1
-          && (name?.children.length ?? 0) <= 2
+        return chip.children.length === 2
+          && !name
           && (state?.textContent?.trim() ?? '') === ''
           && Boolean(chip.getAttribute('aria-label'))
-          && Boolean(chip.getAttribute('title'))
+          && Boolean(state?.querySelector('svg'))
           && Boolean(state?.getAttribute('aria-label'))
           && Boolean([...state.classList].find((name) => name.startsWith('state-')))
       }),
-      verticalRows: rects.every((rect, index) => index === 0
-        || (Math.abs(rect.x - rects[0].x) <= 1 && rect.y > rects[index - 1].y)),
-      fullWidthRows: rects.every((rect) => list && Math.abs(rect.width - list.clientWidth) <= 4),
-      listClientHeight: list?.clientHeight ?? 0,
-      listScrollHeight: list?.scrollHeight ?? 0,
-      listOverflowY: list ? getComputedStyle(list).overflowY : null,
+      singleRow: rects.every((rect, index) => index === 0
+        || (Math.abs(rect.y - rects[0].y) <= 1 && rect.x > rects[index - 1].x)),
+      compactAvatars: rects.every((rect) => Math.abs(rect.width - 38) <= 1 && Math.abs(rect.height - 38) <= 1),
+      headingInline: (() => {
+        const title = sideDock?.querySelector('.run-pulse-title')?.getBoundingClientRect()
+        const count = sideDock?.querySelector('.run-pulse-count')?.getBoundingClientRect()
+        return Boolean(title && count && title.top < count.bottom && count.top < title.bottom)
+      })(),
+      listClientWidth: list?.clientWidth ?? 0,
+      listScrollWidth: list?.scrollWidth ?? 0,
+      listOverflowX: list ? getComputedStyle(list).overflowX : null,
+      scrollbarWidth: list ? getComputedStyle(list).scrollbarWidth : null,
       drawerPlacement: drawer?.dataset.placement ?? null,
       resizeHandle: Boolean(drawer?.querySelector('.execution-drawer-resize-handle')),
       selectedAgentId: sideDock?.querySelector('.run-pulse-chip.is-selected')?.dataset.agentId ?? null,

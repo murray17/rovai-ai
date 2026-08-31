@@ -60,6 +60,7 @@ import {
   timelineDayLabel
 } from './ui-model'
 import { MemberAvatar } from './MemberAvatar'
+import { ExecutionAvatarRail } from './ExecutionAvatarRail'
 import { MemberPortrait } from './MemberPortrait'
 import { localizeExecutionEngineTerms } from './product-copy'
 import { writeClipboardText } from './clipboard'
@@ -3982,12 +3983,15 @@ export function CampWorkspace({
             <section className="camp-detail-content execution-sidecar-panel" hidden={inspectorSurfaceTab !== 'execution'}>
               {executionPlacement === 'inspector' && (
                 <RunPulse
+                  key={snapshot.camp.id}
                   placement="inspector"
                   placementButtonRef={inspectorPlacementButtonRef}
                   processes={executionProcesses}
                   memberById={memberById}
                   stopping={stopping}
                   selectedAgentId={executionDrawerAgentId}
+                  railActive={inspectorVisible && inspectorSurfaceTab === 'execution'}
+                  revealRequest={executionDrawerFocusRequest.sequence}
                   onOpen={openExecutionProcess}
                   onMovePlacement={moveExecutionToBottom}
                   placementPending={executionPlacementPending}
@@ -4505,6 +4509,8 @@ function RunPulse({
   memberById,
   stopping,
   selectedAgentId,
+  railActive = true,
+  revealRequest = 0,
   onOpen,
   onMovePlacement,
   placementPending,
@@ -4516,6 +4522,8 @@ function RunPulse({
   memberById: Map<string, CampSnapshot['members'][number]>
   stopping: boolean
   selectedAgentId: string | null
+  railActive?: boolean
+  revealRequest?: number
   onOpen(agentId: string, trigger: HTMLButtonElement): void
   onMovePlacement(): void
   placementPending: boolean
@@ -4555,7 +4563,26 @@ function RunPulse({
           {visibleProcesses.length} 位队员
         </span>
       </div>
-      <ul className="run-pulse-list" aria-label="队员执行过程入口">
+      {placement === 'inspector' ? <ExecutionAvatarRail
+        items={visibleProcesses.flatMap(process => {
+          const run = preferredAgentProcessRun(process.runs)
+          if (!run) return []
+          const member = memberById.get(process.agentId)
+          const presentation = agentRunPresentation(run, stopping && NON_TERMINAL_RUNS.has(run.status))
+          return [{
+            agentId: process.agentId,
+            avatarRef: member?.avatarRef ?? null,
+            displayName: member?.displayName ?? process.agentId,
+            statusLabel: presentation.label,
+            statusTone: presentation.tone,
+            stateShape: runPulseStateShape(run, stopping)
+          }]
+        })}
+        selectedAgentId={selectedAgentId}
+        revealRequest={revealRequest}
+        active={railActive}
+        onOpen={onOpen}
+      /> : <ul className="run-pulse-list" aria-label="队员执行过程入口">
         {visibleProcesses.map((process) => {
           const run = preferredAgentProcessRun(process.runs)
           if (!run) return null
@@ -4603,7 +4630,7 @@ function RunPulse({
             </li>
           )
         })}
-      </ul>
+      </ul>}
       <div className="execution-placement-control">
         <button
           ref={placementButtonRef}
