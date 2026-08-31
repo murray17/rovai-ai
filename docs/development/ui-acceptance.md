@@ -350,10 +350,12 @@ Runtime，继续证明 Picker → 发送 → send-time snapshot → Manifest res
 发送、人物信息卡、原生选区与复制回归。两者都使用三位带角色的队员和无模型安全 Runtime
 fixture，并共同证明：
 
-- `/` 只在空 Composer（或完整正文替换）中打开真实 Skill 下拉；候选按当前 Lead 的
-  Runtime 生效组过滤，菜单位于输入框上方且使用 Porcelain/Steel 层级；Enter 选择后写入
-  原子 `skill_mention { skillId, nameAtSend }` 和普通尾随空格，恢复 Composer 焦点并按同一身份持久化；
-  正文仍精确投影为 `/<skill-name> `，且不会自动发送；
+- `/` 在空 Composer、正文中的空白（含换行与全角空格）或中文标点后打开真实 Skill 下拉；
+  URL、路径、普通词内斜杠和跨原子 token 的内容不触发。候选按当前 Lead 的 Runtime 生效组过滤，
+  菜单位于输入框上方且使用 Porcelain/Steel 层级；日夜主题和窄窗口中不越界，键盘活动项保持可见；
+- Enter 或 Tab 明确选择后，仅将当前 `/query` 替换为原子
+  `skill_mention { skillId, nameAtSend }`，保留前后正文和其他 token，并复用已有空白或补一个普通尾随空格；
+  恢复 Composer 焦点并按同一身份持久化，Skill 的正文片段精确投影为 `/<skill-name>`，且不会自动发送；
 - 手写、粘贴和旧 Draft 中看似 `/<skill-name>` 的内容始终保持 Text，不按当前 Skill 反解析或升级；
 - Draft 中 Skill 后来 disabled、deleted、renamed 或对当前 Lead unassigned 时，token 保留冻结 Marker 并
   显示不可用状态；正文仍可发送，是否提供 `SKILL.md` 文件链接以发送时和 Run start-time 的 Core

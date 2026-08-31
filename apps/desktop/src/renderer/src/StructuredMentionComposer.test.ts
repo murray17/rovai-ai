@@ -7,8 +7,6 @@ import {
   insertSkillMentionWithTrailingSpace,
   mentionQueryAfterNativeTextInput,
   mentionQueryAfterTypedText,
-  skillQueryAfterNativeTextInput,
-  skillQueryAfterTypedText,
   shouldHandleStructuredComposerBackspaceAtStart,
   shouldReconcileStructuredComposerComposition,
   shouldSubmitStructuredComposerOnEnter,
@@ -185,31 +183,7 @@ describe('StructuredMentionComposer', () => {
     expect(mentionQueryAfterNativeTextInput(null, { anchor: 5, focus: 5 }, '普通@')).toBeNull()
   })
 
-  it('opens the Skill query only when slash input replaces the whole Composer body', () => {
-    const opened = skillQueryAfterTypedText(null, { anchor: 0, focus: 0 }, '/', 0)
-    expect(opened).toEqual({ start: 0, end: 1, query: '' })
-    expect(skillQueryAfterTypedText(opened, { anchor: 1, focus: 1 }, 'work', 1)).toEqual({
-      start: 0,
-      end: 5,
-      query: 'work'
-    })
-    expect(skillQueryAfterTypedText(null, { anchor: 2, focus: 2 }, '/', 2)).toBeNull()
-    expect(skillQueryAfterTypedText(null, { anchor: 0, focus: 4 }, '/', 4)).toEqual({
-      start: 0,
-      end: 1,
-      query: ''
-    })
-    expect(skillQueryAfterTypedText(opened, { anchor: 1, focus: 1 }, ' ', 1)).toBeNull()
-  })
-
-  it('restores an already advanced Skill query from native input and filters real metadata', () => {
-    const opened = skillQueryAfterNativeTextInput(null, { anchor: 1, focus: 1 }, '/', 1)
-    expect(opened).toEqual({ start: 0, end: 1, query: '' })
-    expect(skillQueryAfterNativeTextInput(opened, { anchor: 5, focus: 5 }, 'work', 5)).toEqual({
-      start: 0,
-      end: 5,
-      query: 'work'
-    })
+  it('filters Skills by name and description and keeps all options for an empty query', () => {
     expect(structuredSkillOptions(skills, 'agent')).toEqual([skills[0]])
     expect(structuredSkillOptions(skills, '并行')).toEqual([skills[1]])
     expect(structuredSkillOptions(skills, '')).toEqual(skills)

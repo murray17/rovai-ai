@@ -28,10 +28,12 @@ import {
   pasteStructuredPlainText,
   replaceStructuredSelection,
   selectedStructuredMentionContent,
+  skillQueryAtCaret,
   structuredMentionContentLength,
   type StructuredMentionContent,
   type StructuredMentionEditorState,
-  type StructuredMentionSelection
+  type StructuredMentionSelection,
+  type StructuredSkillQuery
 } from './structured-mention-model'
 import { MemberAvatar } from './MemberAvatar'
 import { SkillIdentityMark } from './SkillIdentityMark'
@@ -54,7 +56,7 @@ export interface StructuredMentionQuery {
   query: string
 }
 
-export type StructuredSkillQuery = StructuredMentionQuery
+export type { StructuredSkillQuery } from './structured-mention-model'
 
 export type StructuredMentionOption =
   | { kind: 'all_members'; label: '所有队员' }
@@ -174,59 +176,6 @@ export function mentionQueryAfterNativeTextInput(
   )
 }
 
-export function skillQueryAfterTypedText(
-  current: StructuredSkillQuery | null,
-  selection: StructuredMentionSelection,
-  text: string,
-  contentLength: number
-): StructuredSkillQuery | null {
-  const insertionStart = Math.min(selection.anchor, selection.focus)
-  const insertionEnd = Math.max(selection.anchor, selection.focus)
-  if (!current) {
-    const query = text.startsWith('/') ? text.slice(1) : null
-    if (
-      query === null
-      || insertionStart !== 0
-      || insertionEnd !== contentLength
-      || /[\s/@]/u.test(query)
-    ) return null
-    return { start: 0, end: text.length, query }
-  }
-  if (
-    selection.anchor !== selection.focus
-    || selection.anchor !== current.end
-    || /[\s/@]/u.test(text)
-  ) return null
-  return {
-    ...current,
-    end: current.end + text.length,
-    query: `${current.query}${text}`
-  }
-}
-
-export function skillQueryAfterNativeTextInput(
-  current: StructuredSkillQuery | null,
-  selectionAfterInput: StructuredMentionSelection,
-  text: string,
-  contentLengthAfterInput: number
-): StructuredSkillQuery | null {
-  if (selectionAfterInput.anchor !== selectionAfterInput.focus) return null
-  const insertionEnd = selectionAfterInput.anchor
-  if (
-    !text.startsWith('/')
-    && current
-    && current.end === insertionEnd
-    && current.query.endsWith(text)
-  ) return current
-  const insertionStart = Math.max(0, insertionEnd - text.length)
-  return skillQueryAfterTypedText(
-    current,
-    { anchor: insertionStart, focus: insertionStart },
-    text,
-    Math.max(0, contentLengthAfterInput - text.length)
-  )
-}
-
 export function insertSkillMentionWithTrailingSpace(
   state: StructuredMentionEditorState,
   skillId: string,
@@ -301,6 +250,22 @@ type StructuredComposerQuery =
   | { kind: 'mention'; value: StructuredMentionQuery }
   | { kind: 'skill'; value: StructuredSkillQuery }
 
+function composerQueryAfterEdit(
+  state: StructuredMentionEditorState,
+  mentionQuery: StructuredMentionQuery | null = null
+): StructuredComposerQuery | null {
+  if (mentionQuery) return { kind: 'mention', value: mentionQuery }
+  const skillQuery = skillQueryAtCaret(state.content, state.selection)
+  return skillQuery ? { kind: 'skill', value: skillQuery } : null
+}
+
+function skillQueriesEqual(left: StructuredSkillQuery | null, right: StructuredSkillQuery): boolean {
+  return left !== null
+    && left.start === right.start
+    && left.end === right.end
+    && left.query === right.query
+}
+
 interface EditorDomSnapshot {
   node: Node
   children: EditorDomSnapshot[]
@@ -326,6 +291,7 @@ export function StructuredMentionComposer({
 }: StructuredMentionComposerProps): JSX.Element {
   const fallbackEditorRef = useRef<HTMLDivElement>(null)
   const editorRef = providedEditorRef ?? fallbackEditorRef
+  const menuRef = useRef<HTMLDivElement>(null)
   const pendingSelectionRef = useRef<StructuredMentionSelection | null>(null)
   const restoreFocusAfterDomResetRef = useRef(false)
   const lastSelectionRef = useRef<StructuredMentionSelection>({ anchor: 0, focus: 0 })
@@ -366,10 +332,29 @@ export function StructuredMentionComposer({
   const menuOpen = query !== null
   const menuId = query?.kind === 'skill' ? skillMenuId : mentionMenuId
   const optionCount = query?.kind === 'skill' ? skillOptions.length : mentionOptions.length
+  const activeOptionIndex = Math.min(activeOption, Math.max(0, optionCount - 1))
 
   useEffect(() => {
     setActiveOption(0)
   }, [query?.kind, query?.value.query, query?.value.start])
+
+  useEffect(() => {
+    setActiveOption((current) => Math.min(current, Math.max(0, optionCount - 1)))
+  }, [optionCount])
+
+  useLayoutEffect(() => {
+    menuRef.current?.querySelector<HTMLElement>('[aria-selected="true"]')
+      ?.scrollIntoView({ block: 'nearest', inline: 'nearest' })
+  }, [activeOptionIndex, mentionOptions, skillOptions])
+
+  useLayoutEffect(() => {
+    // A parent draft replacement must not leave a query pointing at old text.
+    // Validate only an open query so Escape and restored drafts stay closed.
+    setQuery((current) => current?.kind === 'skill'
+      && !skillQueriesEqual(skillQueryAtCaret(content, lastSelectionRef.current), current.value)
+      ? null
+      : current)
+  }, [content])
 
   useEffect(() => () => {
     compositionGenerationRef.current += 1
@@ -422,19 +407,30 @@ export function StructuredMentionComposer({
   })
 
   const closeQueryIfSelectionMoved = (): void => {
-    if (!query) return
+    if (!query || isComposingRef.current) return
     const selection = currentSelection()
+    if (query.kind === 'skill') {
+      const nextQuery = skillQueryAtCaret(content, selection)
+      if (!skillQueriesEqual(nextQuery, query.value)) {
+        setQuery(nextQuery?.start === query.value.start ? { kind: 'skill', value: nextQuery } : null)
+      }
+      return
+    }
     const activeQuery = query.value
     if (
       selection.anchor !== selection.focus
       || selection.anchor < activeQuery.start + 1
       || selection.anchor > activeQuery.end
-    ) setQuery(null)
+    ) {
+      setQuery(null)
+      return
+    }
   }
 
   const syncNativeDom = (nativeEvent?: InputEvent): StructuredMentionEditorState | null => {
     const editor = editorRef.current
     if (!editor) return null
+    const editorFocused = document.activeElement === editor
     const nextContent = readStructuredContent(editor)
     const nextSelection = readDomSelection(editor)
     const requiresOwnershipReset = !editorDomMatchesReactProjection(editor, content)
@@ -451,40 +447,27 @@ export function StructuredMentionComposer({
       // removeChild. Remount the editor host instead, so React discards the
       // mutated subtree as one unit and establishes ownership again.
       // Identical markup can still contain split or replaced, unowned nodes.
-      pendingSelectionRef.current = nextSelection
-      restoreFocusAfterDomResetRef.current = restoreFocusAfterDomResetRef.current
-        || document.activeElement === editor
+      pendingSelectionRef.current = editorFocused ? nextSelection : null
+      restoreFocusAfterDomResetRef.current = editorFocused
       setEditorDomRevision((current) => current + 1)
     }
     if (contentChanged) {
-      pendingSelectionRef.current = nextSelection
+      pendingSelectionRef.current = editorFocused ? nextSelection : null
       onChange(nextContent)
     }
-    if (nativeEvent?.inputType === 'insertText' && nativeEvent.data !== null) {
-      const contentLength = structuredMentionContentLength(nextContent)
-      const selectionAfterInput = {
-        anchor: clamp(nextSelection.anchor, 0, contentLength),
-        focus: clamp(nextSelection.focus, 0, contentLength)
-      }
-      setQuery((current) => {
-        const nextMentionQuery = mentionQueryAfterNativeTextInput(
+    const next = { content: nextContent, selection: nextSelection }
+    setQuery((current) => {
+      if (!editorFocused) return null
+      const nextMentionQuery = nativeEvent?.inputType === 'insertText' && nativeEvent.data !== null
+        ? mentionQueryAfterNativeTextInput(
           current?.kind === 'mention' ? current.value : null,
-          selectionAfterInput,
-          nativeEvent.data ?? ''
+          nextSelection,
+          nativeEvent.data
         )
-        if (nextMentionQuery) return { kind: 'mention', value: nextMentionQuery }
-        const nextSkillQuery = skillQueryAfterNativeTextInput(
-          current?.kind === 'skill' ? current.value : null,
-          selectionAfterInput,
-          nativeEvent.data ?? '',
-          contentLength
-        )
-        return nextSkillQuery ? { kind: 'skill', value: nextSkillQuery } : null
-      })
-    } else if (nativeEvent) {
-      setQuery(null)
-    }
-    return { content: nextContent, selection: nextSelection }
+        : null
+      return composerQueryAfterEdit(next, nextMentionQuery)
+    })
+    return next
   }
 
   const reconcilePendingComposition = (): StructuredMentionEditorState | null => {
@@ -497,7 +480,7 @@ export function StructuredMentionComposer({
   }
 
   const chooseMentionOption = (option: StructuredMentionOption | undefined): void => {
-    if (!option || query?.kind !== 'mention' || disabled) return
+    if (!option || query?.kind !== 'mention' || disabled || isComposingRef.current) return
     const state: StructuredMentionEditorState = {
       content,
       selection: { anchor: query.value.start, focus: query.value.end }
@@ -511,7 +494,11 @@ export function StructuredMentionComposer({
   }
 
   const chooseSkillOption = (option: ComposerSkillOption | undefined): void => {
-    if (!option || query?.kind !== 'skill' || disabled) return
+    if (!option || query?.kind !== 'skill' || disabled || isComposingRef.current) return
+    if (!skillQueriesEqual(skillQueryAtCaret(content, currentSelection()), query.value)) {
+      setQuery(null)
+      return
+    }
     const state: StructuredMentionEditorState = {
       content,
       selection: { anchor: query.value.start, focus: query.value.end }
@@ -530,12 +517,13 @@ export function StructuredMentionComposer({
     const next = direction === 'backward'
       ? deleteStructuredBackward(state)
       : deleteStructuredForward(state)
-    setQuery((current) => {
-      if (!current) return null
-      const nextQuery = queryAfterDeletion(current.value, selection, direction)
-      return nextQuery ? { ...current, value: nextQuery } : null
-    })
     emitState(next)
+    setQuery((current) => {
+      const nextMentionQuery = current?.kind === 'mention'
+        ? queryAfterDeletion(current.value, selection, direction)
+        : null
+      return composerQueryAfterEdit(next, nextMentionQuery)
+    })
   }
 
   const handleBeforeInput = (event: FormEvent<HTMLDivElement>): void => {
@@ -547,23 +535,15 @@ export function StructuredMentionComposer({
     if (nativeEvent.inputType === 'insertText' && nativeEvent.data !== null) {
       event.preventDefault()
       const next = insertStructuredText(editorState(selection), nativeEvent.data)
-      const contentLength = structuredMentionContentLength(content)
+      emitState(next)
       setQuery((current) => {
         const nextMentionQuery = mentionQueryAfterTypedText(
           current?.kind === 'mention' ? current.value : null,
           selection,
           nativeEvent.data ?? ''
         )
-        if (nextMentionQuery) return { kind: 'mention', value: nextMentionQuery }
-        const nextSkillQuery = skillQueryAfterTypedText(
-          current?.kind === 'skill' ? current.value : null,
-          selection,
-          nativeEvent.data ?? '',
-          contentLength
-        )
-        return nextSkillQuery ? { kind: 'skill', value: nextSkillQuery } : null
+        return composerQueryAfterEdit(next, nextMentionQuery)
       })
-      emitState(next)
       return
     }
     if (nativeEvent.inputType === 'insertParagraph' || nativeEvent.inputType === 'insertLineBreak') {
@@ -584,8 +564,9 @@ export function StructuredMentionComposer({
     }
     if (nativeEvent.inputType === 'deleteByCut') {
       event.preventDefault()
-      setQuery(null)
-      emitState(replaceStructuredSelection(editorState(selection), []))
+      const next = replaceStructuredSelection(editorState(selection), [])
+      emitState(next)
+      setQuery(composerQueryAfterEdit(next))
     }
   }
 
@@ -595,7 +576,7 @@ export function StructuredMentionComposer({
       || event.nativeEvent.keyCode === 229
     if (isComposing) return
     if (document.activeElement !== event.currentTarget) return
-    const reconciledCompositionState = ['Enter', 'Backspace', 'Delete'].includes(event.key)
+    const reconciledCompositionState = ['Enter', 'Backspace', 'Delete', 'Escape'].includes(event.key)
       ? reconcilePendingComposition()
       : null
 
@@ -603,21 +584,20 @@ export function StructuredMentionComposer({
       event.preventDefault()
       if (optionCount > 0) {
         const direction = event.key === 'ArrowDown' ? 1 : -1
-        setActiveOption((current) => (current + direction + optionCount) % optionCount)
+        setActiveOption((current) => (Math.min(current, optionCount - 1) + direction + optionCount) % optionCount)
       }
       return
     }
-    if (menuOpen && event.key === 'Escape') {
+    if ((menuOpen || reconciledCompositionState) && event.key === 'Escape') {
       event.preventDefault()
       setQuery(null)
       return
     }
-    if (menuOpen && (event.key === 'Enter' || event.key === 'Tab')) {
+    if (menuOpen && ((event.key === 'Enter' && !event.shiftKey) || event.key === 'Tab')) {
       if (optionCount > 0) {
         event.preventDefault()
-        const optionIndex = Math.min(activeOption, optionCount - 1)
-        if (query?.kind === 'skill') chooseSkillOption(skillOptions[optionIndex])
-        else chooseMentionOption(mentionOptions[optionIndex])
+        if (query?.kind === 'skill') chooseSkillOption(skillOptions[activeOptionIndex])
+        else chooseMentionOption(mentionOptions[activeOptionIndex])
         return
       }
       setQuery(null)
@@ -676,16 +656,17 @@ export function StructuredMentionComposer({
       return
     }
     event.preventDefault()
-    setQuery(null)
     const plainText = event.clipboardData.getData('text/plain')
     const structuredContent = readStructuredMessageClipboardContent(
       event.clipboardData.getData('text/html'),
       plainText,
       members
     )
-    emitState(structuredContent
+    const next = structuredContent
       ? replaceStructuredSelection(editorState(), authorableStructuredContent(structuredContent))
-      : pasteStructuredPlainText(editorState(), plainText))
+      : pasteStructuredPlainText(editorState(), plainText)
+    emitState(next)
+    setQuery(composerQueryAfterEdit(next))
   }
 
   const handleCut = (event: ClipboardEvent<HTMLDivElement>): void => {
@@ -710,8 +691,9 @@ export function StructuredMentionComposer({
         selectedContent.map((segment) => segment.kind === 'text' ? segment.text : '').join('')
       )
     }
-    setQuery(null)
-    emitState(replaceStructuredSelection(state, []))
+    const next = replaceStructuredSelection(state, [])
+    emitState(next)
+    setQuery(composerQueryAfterEdit(next))
   }
 
   const handleCompositionStart = (_event: CompositionEvent<HTMLDivElement>): void => {
@@ -771,7 +753,7 @@ export function StructuredMentionComposer({
         aria-expanded={menuOpen}
         aria-controls={menuOpen ? menuId : undefined}
         aria-activedescendant={menuOpen && optionCount > 0
-          ? `${menuId}-${Math.min(activeOption, optionCount - 1)}`
+          ? `${menuId}-${activeOptionIndex}`
           : undefined}
         aria-disabled={disabled || undefined}
         contentEditable={!disabled}
@@ -781,8 +763,10 @@ export function StructuredMentionComposer({
         style={EDITOR_STYLE}
         onBeforeInput={handleBeforeInput}
         onInput={(event) => {
-          if (!isComposingRef.current) syncNativeDom(event.nativeEvent as InputEvent)
+          const nativeEvent = event.nativeEvent as InputEvent
+          if (!isComposingRef.current && !nativeEvent.isComposing) syncNativeDom(nativeEvent)
         }}
+        onSelect={closeQueryIfSelectionMoved}
         onKeyDown={handleKeyDown}
         onKeyUp={(event) => {
           if (['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) {
@@ -937,6 +921,7 @@ export function StructuredMentionComposer({
 
       {query && (
         <div
+          ref={menuRef}
           className={`structured-mention-menu mention-menu${query.kind === 'skill' ? ' skill-picker-menu' : ''}`}
           id={menuId}
           role="listbox"
@@ -954,14 +939,14 @@ export function StructuredMentionComposer({
             ? mentionOptions.map((option, index) => (
                 <button
                   id={`${menuId}-${index}`}
-                  className={index === activeOption ? 'active' : ''}
+                  className={index === activeOptionIndex ? 'active' : ''}
                   type="button"
                   role="option"
-                  aria-selected={index === activeOption}
+                  aria-selected={index === activeOptionIndex}
                   key={option.kind === 'all_members' ? 'all-members' : option.member.agentId}
                   disabled={disabled}
                   onPointerDown={(event) => event.preventDefault()}
-                  onMouseEnter={() => setActiveOption(index)}
+                  onMouseMove={() => setActiveOption(index)}
                   onClick={() => chooseMentionOption(option)}
                 >
                   <StructuredMentionOptionAvatar option={option} />
@@ -975,15 +960,15 @@ export function StructuredMentionComposer({
             : skillOptions.map((option, index) => (
                 <button
                   id={`${menuId}-${index}`}
-                  className={index === activeOption ? 'active' : ''}
+                  className={index === activeOptionIndex ? 'active' : ''}
                   type="button"
                   role="option"
-                  aria-selected={index === activeOption}
+                  aria-selected={index === activeOptionIndex}
                   data-skill-name={option.name}
                   key={option.id}
                   disabled={disabled}
                   onPointerDown={(event) => event.preventDefault()}
-                  onMouseEnter={() => setActiveOption(index)}
+                  onMouseMove={() => setActiveOption(index)}
                   onClick={() => chooseSkillOption(option)}
                 >
                   <SkillIdentityMark skillId={option.id} name={option.name} size="compact" />
@@ -992,7 +977,7 @@ export function StructuredMentionComposer({
                     <small>{option.description || (option.origin === 'official' ? 'Rovai 内置 Skill' : '用户导入 Skill')}</small>
                   </span>
                   <span className="skill-picker-enter" aria-hidden="true">
-                    {index === activeOption ? '↵' : ''}
+                    {index === activeOptionIndex ? '↵' : ''}
                   </span>
                 </button>
               ))}
@@ -1275,17 +1260,21 @@ function domPointOffset(editor: HTMLDivElement, node: Node, offset: number): num
       .slice(0, clamp(offset, 0, editor.childNodes.length))
       .reduce((length, child) => length + editorNodeLength(child), 0)
   }
-  const segment = closestEditorSegment(node)
-  if (!segment || !editor.contains(segment)) return editorNodeLength(editor)
+  if (!editor.contains(node)) return editorNodeLength(editor)
+  // Native editing may insert an untagged Text node or wrapper next to a token.
+  // Measure within its top-level child so surrounding tokens still count as one.
+  let segment = node
+  while (segment.parentNode && segment.parentNode !== editor) segment = segment.parentNode
   const start = domNodeStartOffset(editor, segment)
-  if (segment.dataset.editorSegment === 'token') {
+  if (segment.nodeType === Node.ELEMENT_NODE
+    && (segment as HTMLElement).dataset.editorSegment === 'token') {
     return start + (offset > 0 ? 1 : 0)
   }
   try {
     const range = document.createRange()
     range.selectNodeContents(segment)
     range.setEnd(node, offset)
-    return start + editorTextNodeLength(range.cloneContents())
+    return start + editorNodeLength(range.cloneContents())
   } catch {
     return start
   }
@@ -1301,22 +1290,15 @@ function domNodeStartOffset(editor: HTMLDivElement, target: Node): number {
 }
 
 function editorNodeLength(node: Node): number {
-  if (node.nodeType === Node.ELEMENT_NODE) {
-    const element = node as HTMLElement
-    if (element.dataset.editorSegment === 'token') return 1
-  }
-  return editorTextNodeLength(node)
-}
-
-function editorTextNodeLength(node: Node): number {
   if (node.nodeType === Node.TEXT_NODE) return node.textContent?.length ?? 0
   if (node.nodeType === Node.ELEMENT_NODE) {
     const element = node as HTMLElement
+    if (element.dataset.editorSegment === 'token') return 1
     if (isEditorCaretHost(element)) return readEditorCaretHostText(element).length
     if (element.tagName === 'BR') return isEditorCaretBreak(element) ? 0 : 1
   }
   return [...node.childNodes]
-    .reduce((length, child) => length + editorTextNodeLength(child), 0)
+    .reduce((length, child) => length + editorNodeLength(child), 0)
 }
 
 function isEditorCaretBreak(element: HTMLElement): boolean {
@@ -1360,7 +1342,7 @@ function textPointAtOffset(root: Node, targetOffset: number): { node: Node; offs
   let cursor = 0
   for (let index = 0; index < children.length; index += 1) {
     const child = children[index]
-    const length = editorTextNodeLength(child)
+    const length = editorNodeLength(child)
     if (child.nodeType === Node.ELEMENT_NODE && (child as HTMLElement).tagName === 'BR') {
       if (targetOffset <= cursor) return { node: root, offset: index }
       cursor += length
@@ -1372,13 +1354,6 @@ function textPointAtOffset(root: Node, targetOffset: number): { node: Node; offs
     cursor = end
   }
   return { node: root, offset: children.length }
-}
-
-function closestEditorSegment(node: Node): HTMLElement | null {
-  const element = node.nodeType === Node.ELEMENT_NODE
-    ? node as Element
-    : node.parentElement
-  return element?.closest<HTMLElement>('[data-editor-segment]') ?? null
 }
 
 function closestToken(target: EventTarget | null): HTMLElement | null {
