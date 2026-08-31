@@ -230,12 +230,16 @@ test('idle camps accept new input and drain backlog after legacy failed-turn rec
     assert.equal(direct.commandResult.code, 'camp_message.sent')
     assert.equal((await core.request('camp.pendingInputs.get', { campId: camps[0].campId })).items.length, 0)
     const deadline = Date.now() + 10_000
-    while ((await core.request('camp.pendingInputs.get', { campId: camps[1].campId })).items.length > 0) {
+    const publishedCount = () => core.notifications.filter(event => event.method === 'camp.pendingInputs.changed'
+      && event.params.campId === camps[1].campId && event.params.reason === 'published').length
+    // Publication commits before its notification is enqueued; an RPC can see
+    // the empty queue first. Wait for both observable outcomes before asserting.
+    while ((await core.request('camp.pendingInputs.get', { campId: camps[1].campId })).items.length > 0
+      || publishedCount() < 2) {
       assert.ok(Date.now() < deadline, 'An idle Camp must drain its backlog without another user action')
       await new Promise(resolve => setTimeout(resolve, 20))
     }
-    assert.equal(core.notifications.filter(event => event.method === 'camp.pendingInputs.changed'
-      && event.params.campId === camps[1].campId && event.params.reason === 'published').length, 2)
+    assert.equal(publishedCount(), 2)
     await core.close()
     database = new DatabaseSync(join(dataDir, 'rovai.sqlite'), { readOnly: true })
     for (const { campId, backlog, turnId } of camps) {
