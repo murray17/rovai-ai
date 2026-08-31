@@ -328,7 +328,9 @@ Team Case 可在密封 manifest 中声明 `collaboration` 合同。Runner 将它
 
 `pnpm test:camp-fast-layout` 使用生产 CampWorkspace/CSS 的独立 Electron fixture，无需打包或 Core。
 关闭的模拟 API 只提供成员偏好与 Draft；临时 userData 与日常 App 完全分离，不调用模型。
-它拥有 Fast 的 1280×720/窄屏/大屏布局、日夜主题、键盘焦点、失败保留、首次用量确认、旧观测不影响偏好与恢复默认。
+它拥有 Fast 的 1280×720/窄屏/大屏布局、日夜主题、键盘焦点、失败保留、直接静默切换、旧观测不影响偏好与初始默认。
+同一 owner 还验证打开队员浮层后的静默自动检测、正负结果复用、失败重开重试、同成员请求去重、切换绑定自动重测与旧响应隔离；
+其他 Runtime 不检测，非官方认证的拒绝结果不显示入口，菜单不再暴露手动检测。
 `ROVAI_KEEP_FAST_FIXTURE=1` 保留本次临时截图供排错；成功默认自动清理。Linux CI 通过 `xvfb-run -a` 执行。
 
 以下命令使用已打包 App 和隔离 `userData`，不调用模型：

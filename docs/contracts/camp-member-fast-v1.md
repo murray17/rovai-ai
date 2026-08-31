@@ -47,9 +47,15 @@ Runtime 自动 rebind 保留旧 Run 的冻结偏好及请求档位，不重读�
   receipt；同 commandId 重放不重复写入，异义复用遵循通用冲突规则。
 - Camp scope 不符返回 `camp_scope_mismatch`；旧绑定返回 `runtime_binding_conflict`；成员不活跃、绑定不支持
   或显式覆盖缺少合格资格返回 `camp_member_fast_unavailable`。显式恢复默认不要求资格仍可用。
-- `camps.members.fast.check { campId, agentId }` 是显式 metadata 检查，返回可选 Fast view。
+- `camps.members.fast.check { campId, agentId }` 是 metadata 检查，返回可选 Fast view。
   使用现有 Runtime Check Manager 的队列、同 Runtime 串行和有界进程清理，不新增页面轮询。普通打开 Camp
-  只读缓存；显式检测或下一次真实执行刷新资格，资格暂时不可用只隐藏入口，不清除覆盖。
+  只读缓存；用户展开队员浮层后，Renderer 对尚无有效结果的 Claude/Codex 队员静默调用该接口。
+  `light_ready` 尚无完整原生能力，检查接口须先复用 `AvailabilityCheck` 补齐能力快照，再检查 Fast 资格；
+  不能把轻检中缺失的 Codex 每轮档位能力当成不支持，也不能记录合格后再被只读投影的 `ready` 门槛挡住。
+  每位队员至多一个在途请求；支持与不支持的结果均在当前 Camp 工作区缓存，重复展开或切换浮层 Tab 不重测。
+  当前绑定、模型或 Installation 检测依据变化时失效旧结果；旧请求先结束，再检测当前绑定，迟到响应不能恢复旧入口。
+  请求失败只隐藏入口，下次展开可重试，不显示检测占位、成功通知或错误 Toast。下一次真实执行仍会刷新资格；
+  资格暂时不可用不清除覆盖，也不允许从客户端推断官方认证或能力。
 - `CampMemberView.fast` 为可选字段，只包含 `runtimeBindingRevision`、`fastOverride`、`runtimeDefaultFast`。
   过期、未验证、不合格、已离队和其他 Runtime 不投影该字段。Claude 的默认始终返回未知。
 - 保存偏好或刷新资格后发出 `camp.member.fast.updated`，Renderer 只刷新对应当前 Camp，不触发全局导航重建。
@@ -99,9 +105,10 @@ fallback/cooldown 后下一次 Run 仍消费原三态偏好。既有 Run/epoch �
 ## Renderer 合同
 
 沿用成员浮层中的 Fast 胶囊：视觉 20–22px、目标至少 28px、字体至少项目紧凑基线 10.5px。
-按钮只表达后续执行偏好。未知默认采用中性样式，hover/focus 说明继承；开启高亮表示请求 Fast，
+按钮只表达后续执行偏好。未知默认采用中性样式，可访问名称说明继承；开启高亮表示请求 Fast，
 不宣称已生效，不显示实际状态、cooldown 或请求不一致警告。Codex 可信原生默认可用于继承时的初始显示。
 `fastOverride ?? runtimeDefaultFast ?? false` 仅用于视觉，不得用于原生参数；`null` 必须省略覆盖。
-tooltip 明确只影响当前 Camp 该成员的后续执行；运行中修改给出当前执行不变的提示。
-首次开启先确认额外用量风险，并用本机偏好持久记住确认。重测/恢复默认放在成员菜单；DOM、键盘焦点
-和草稿保持稳定，保存失败保留旧值；长成员列表滚动，1280×720 下浮层不盖住 Composer。
+按钮不显示悬浮或焦点提示框，保留可访问名称与键盘焦点样式。
+点击直接切换并保存偏好，不显示费用提示、二次确认、保存成功或运行中切换提醒。
+成员菜单不提供手动检测或恢复默认项；DOM、键盘焦点和草稿保持稳定，保存失败才显示错误并保留旧值；
+长成员列表滚动，1280×720 下浮层不盖住 Composer。

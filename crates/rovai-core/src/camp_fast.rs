@@ -140,13 +140,16 @@ pub(crate) fn runtime_for_target_on_connection(
     {
         return Ok(None);
     }
-    let (installation_id, model, permissions): (Option<String>, Option<String>, Option<String>) = connection.query_row(
-        "SELECT default_runtime_installation_id, default_model_selection_json, default_permission_config_json FROM agent_profile WHERE id = ?1",
+    // Light readiness can freeze an ordinary Run, but has not loaded the native capabilities
+    // needed by Fast (including Codex's per-turn tier). Let the check manager resolve them first.
+    let configuration: Option<(Option<String>, Option<String>, Option<String>)> = connection.query_row(
+        "SELECT profile.default_runtime_installation_id, profile.default_model_selection_json, profile.default_permission_config_json
+         FROM agent_profile AS profile
+         JOIN adapter_capability_snapshot AS snapshot ON snapshot.installation_id = profile.default_runtime_installation_id
+         WHERE profile.id = ?1 AND snapshot.probe_status = 'ready' AND snapshot.stale_at IS NULL",
         [&expected.agent_id], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
-    )?;
-    let (Some(installation_id), Some(model), Some(permissions)) =
-        (installation_id, model, permissions)
-    else {
+    ).optional()?;
+    let Some((Some(installation_id), Some(model), Some(permissions))) = configuration else {
         return Ok(None);
     };
     let binding = ResolvedRuntimeBinding {
@@ -720,6 +723,30 @@ mod tests {
                     .result
                     .status,
                 CommandResultStatus::Applied
+            );
+        }
+        // A light-ready installation must request native capability resolution before Fast
+        // metadata can be checked; failed availability/authentication also stays hidden.
+        for (probe_status, authentication_status, ready) in [
+            ("light_ready", "unknown", false),
+            ("light_ready", "authentication_required", false),
+            ("light_failed", "unknown", false),
+            ("probe_failed", "authenticated", false),
+            ("ready", "authenticated", true),
+        ] {
+            database.connection().execute(
+                "UPDATE adapter_capability_snapshot SET probe_status = ?2, authentication_status = ?3 WHERE installation_id = ?1",
+                params![runtime.installation_id, probe_status, authentication_status],
+            ).unwrap();
+            assert_eq!(
+                runtime_for_target(&database, &initial).unwrap().is_some(),
+                ready,
+                "{probe_status}/{authentication_status} must resolve native capabilities first"
+            );
+            assert_eq!(
+                view(&database, camp_id, "agent_1").unwrap().is_some(),
+                ready,
+                "{probe_status}/{authentication_status}"
             );
         }
         let assert_saved_choices = |database: &Database| {
