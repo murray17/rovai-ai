@@ -493,11 +493,16 @@ Composer 为空时根据当前用户可见的 Camp 会话/任务时间线选择�
 
 ### Skill 快速选择
 
-Composer 为空或正文被完整选中时输入 `/`，打开当前 Lead 可用 Skill 的原生候选。候选来自真实
+Composer 在折叠光标前的 `/query` 位于正文开头、空白或中文标点 `，。！？；：、` 之后时，打开当前
+Lead 可用 Skill 的原生候选；已有正文不影响触发。查询词不包含空白、`/`、`@`，也不跨越结构化 token，
+URL、路径和紧贴普通正文或 token 的斜杠不触发。输入、粘贴、删除和原生输入同步都从编辑后的结构化正文与
+光标推导；选区先被输入替换为折叠光标再判断。候选来自真实
 Skill/生效组 Read Side；每行在 28×28 紧凑槽位复用 Skill 管理页由名称缩写和持久 Skill ID 稳定色
 组成的身份标记，但名称仍是主识别信息，身份色不表达启用、选中或健康状态。标记对辅助技术隐藏；
-方向键移动，Enter/Tab 选择，Esc 关闭。选中创建一个原子结构化 Skill token，
-视觉与正文投影仍为 `/<skill-name>`，随后插入一个可编辑普通空格。token 保存稳定 `skillId/nameAtSend`；
+方向键移动并保持当前项可见，Enter/Tab 选择，Shift+Enter 换行，Esc 关闭；IME 合成期间不选择或提交。
+光标离开查询范围、形成选区或正文不再满足触发规则时关闭。选中只替换当前 `/query`，保留前后正文，
+创建一个原子结构化 Skill token；视觉与正文投影仍为 `/<skill-name>`，随后补一个可编辑普通空格，
+已有空白时复用。token 保存稳定 `skillId/nameAtSend`；
 手写、粘贴和旧 Draft 的 lookalike 永远保持普通 Text，不自动升级。
 
 删除 token 一次删除整个结构化 identity；Draft 保存/恢复、undo/redo、IME、Mention、附件和发送边界继续

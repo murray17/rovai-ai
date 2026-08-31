@@ -11,6 +11,12 @@ export interface StructuredMentionSelection {
   focus: number
 }
 
+export interface StructuredSkillQuery {
+  start: number
+  end: number
+  query: string
+}
+
 export interface StructuredMentionEditorState {
   content: StructuredMentionContent
   selection: StructuredMentionSelection
@@ -66,6 +72,25 @@ export function structuredMentionContentLength(
     (length, segment) => length + (segment.kind === 'text' ? segment.text.length : 1),
     0
   )
+}
+
+const SKILL_QUERY_RE = /(^|[\s，。！？；：、])\/([^\s/@\uFFFC]*)$/u
+
+export function skillQueryAtCaret(
+  content: readonly StructuredMentionSegment[],
+  selection: StructuredMentionSelection
+): StructuredSkillQuery | null {
+  if (selection.anchor !== selection.focus) return null
+  // Match the editor's UTF-16 offsets and one-position atomic tokens. The
+  // placeholder is neither a safe slash boundary nor part of a query.
+  const projected = content.map((segment) => segment.kind === 'text' ? segment.text : '\uFFFC').join('')
+  const caret = selection.anchor
+  if (!Number.isInteger(caret) || caret < 0 || caret > projected.length) return null
+  const match = SKILL_QUERY_RE.exec(projected.slice(0, caret))
+  // JavaScript's $ also matches before a final newline; require the caret itself.
+  if (!match || match.index + match[0].length !== caret) return null
+  const query = match[2] ?? ''
+  return { start: caret - query.length - 1, end: caret, query }
 }
 
 export function selectedStructuredMentionContent(

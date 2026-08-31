@@ -12,8 +12,8 @@ import { build } from 'vite'
 const root = resolve(import.meta.dirname, '../..')
 const fixtureSource = join(root, 'scripts/fixtures/structured-mention-composer')
 
-test('native Composer edits preserve one copy of the text without unmounting the page', {
-  timeout: 45_000
+test('Composer edits preserve text, structured tokens and Skill query interactions', {
+  timeout: 60_000
 }, async () => {
   const fixture = await mkdtemp(join(tmpdir(), 'rovai-composer-input-test-'))
   let child
@@ -42,7 +42,7 @@ test('native Composer edits preserve one copy of the text without unmounting the
     let stderr = ''
     child.stdout.on('data', chunk => { stdout += chunk.toString() })
     child.stderr.on('data', chunk => { stderr += chunk.toString() })
-    const timeout = setTimeout(() => child.kill('SIGKILL'), 30_000)
+    const timeout = setTimeout(() => child.kill('SIGKILL'), 45_000)
     let code
     let signal
     try {
@@ -53,7 +53,7 @@ test('native Composer edits preserve one copy of the text without unmounting the
     assert.equal(code, 0, `Native Composer regression failed (${signal}):\n${stdout}\n${stderr}`)
     const report = JSON.parse(stdout.split('\n').find(line => line.startsWith('{')))
     assert.equal(report.ok, true)
-    assert.equal(report.cases.length, 6)
+    assert.equal(report.cases.length, 17)
   } finally {
     if (child && child.exitCode === null && child.signalCode === null) {
       child.kill('SIGKILL')
