@@ -16,7 +16,7 @@ last_updated: 2026-08-31
 
 前置版本：[v1.33](../v1.33/README.md)。[实施计划](implementation-plan.md)；[决定理由](decisions.md)。
 
-仅支持明确的 Claude 订阅登录与 Codex ChatGPT 登录，原生能力未知即隐藏。不增加通用 Runtime 性能配置。
+仅支持明确的 Claude 官方登录与 Codex ChatGPT 登录，原生能力未知即隐藏。不增加通用 Runtime 性能配置。
 本机 Claude 2.1.220 原生 firstParty OAuth 登录在套餐字段为空时仍通过入口认证门禁；Codex 0.147.0
 未导出 `serviceTierForTurn`，仍隐藏入口。隔离 fixture 验证 wire 和 UI，不据此宣称真实 Fast 付费执行已验证。
 
@@ -35,7 +35,7 @@ last_updated: 2026-08-31
 | Contracts | 已更新 | [Camp Member Fast v1](../../contracts/camp-member-fast-v1.md)、Runtime Launch v29、Usage v4、Camp Open v9 及[合同索引](../../contracts/README.md) |
 | Architecture | 已更新 | [Runtime Catalog Boundaries](../../architecture/runtime-catalog-boundaries.md)、[Runtime Monitoring](../../architecture/runtime-monitoring.md) |
 | UI | 已更新 | [Camp 会话工作区](../../ui/components/conversation-workspace.md)，保持既有视觉世界 |
-| Runtime Activity | 确认无需更新 | Fast 为独立 metadata，不增加或改变 Canonical Activity/Evidence 映射 |
+| Runtime Activity | 已更新 | Fast 观测保存为对应 Run 的 Execution Evidence，明确排除 Canonical Activity，不进入模型上下文 |
 | Runtime compatibility | 已更新 | [Runtime 兼容性](../../runtime-compatibility.md) 记录两个本机版本的 metadata-only 限制 |
 | Documentation routing | 已更新 | [docs/README.md](../../README.md)、当前决定/合同路由与[测试说明](../../development/testing.md) |
 | Root README | 确认无需更新 | 产品定位、安装与总体 Runtime 支持范围未扩大 |

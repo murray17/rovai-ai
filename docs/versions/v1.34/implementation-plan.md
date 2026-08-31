@@ -103,6 +103,24 @@ owner 是已发布 schema 72 的升级兼容入口；验证三态保留、旧 tr
 `cargo test -p rovai-core --lib db::tests::v119` 与既有 Execution Evidence owner。
 生产 Electron fixture 扩展旧 Fast/Standard/cooldown 投影不影响按钮、无警告的场景，保留原布局/键盘/失败/重测断言。
 
-修正验证：定向认证/偏好、v119 升级和 Run Evidence 回归已通过；全量门禁与独立复核进行中。
+修正验证在隔离 worktree 完成：
+
+| 检查 | 结果 |
+| --- | --- |
+| 定向认证/偏好、v119 升级、Run Evidence | 通过；Fast metadata 不产生 Canonical Activity |
+| `pnpm typecheck`、`pnpm test`、`pnpm build:desktop` | 通过；719 项 Vitest、219 项 Node，1 项既有平台 skip |
+| `pnpm test:rust:pr` | 416 项 lib、32 项 CLI、291 项 slow 通过 |
+| `cargo test -p rovai-core --bin rovai-core -- --quiet` | 184 项通过，4 项既有 ignore |
+| `cargo fmt --all --check`、严格 Clippy 全 workspace/all-targets | 通过 |
+| 生产 Electron Fast fixture | 通过；浅色/深色截图、键盘与旧观测不影响偏好/UI 已复核 |
+| diff-aware 文档门禁 | 对本次基线通过，无 checker exception |
+
+独立复核针对实现提交 `e0982586`，后续仅补充本节验证记录及概览说明：
+
+| Standards | Spec |
+| --- | --- |
+| 0 项待修问题；Rust 测试准入、既有视觉与无障碍边界符合规范。 | 0 项待修问题；三态下发、模型/权限保留选择、观测仅归属 Run，未扩展状态模型。 |
+
+PR CI、合并与清理结果由 [PR #126](https://github.com/murray17/rovai-ai/pull/126) 拥有。
 本机仅重跑原生 `--version` / `auth status`，确认 firstParty OAuth、套餐为空、无自定义环境；未调用模型、
 未读取凭据文件或钥匙串，也未触碰日常 App 数据。
