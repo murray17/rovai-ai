@@ -12126,6 +12126,7 @@ async fn run_core(
         }
         database.prepare_v2_recovery()?;
         mark_unstarted_deliveries_interrupted_before_dispatch(&mut database)?;
+        rovai_core::runtime::settle_legacy_retry_waits(&mut database)?;
         Ok(controlled)
     })();
     let controlled_shutdown_recovery = match recovery {

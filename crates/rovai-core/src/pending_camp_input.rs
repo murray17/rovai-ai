@@ -550,6 +550,26 @@ mod tests {
         database.connection().execute_batch("UPDATE agent_run SET status = 'succeeded', ended_at = datetime('now'); UPDATE camp_turn SET status = 'completed', ended_at = datetime('now');").unwrap();
     }
 
+    fn legacy_retry_wait(database: &Database, camp_turn_id: &str) {
+        database
+            .connection()
+            .execute(
+                "UPDATE agent_run SET status = 'failed', ended_at = '2026-08-31T00:00:00Z',
+             manual_retry_allowed = 1, retry_declined_at = NULL,
+             last_error_code = 'runtime_launch_failed'
+             WHERE camp_turn_id = ?1",
+                [camp_turn_id],
+            )
+            .unwrap();
+        database
+            .connection()
+            .execute(
+                "UPDATE camp_turn SET status = 'waiting', ended_at = NULL WHERE id = ?1",
+                [camp_turn_id],
+            )
+            .unwrap();
+    }
+
     fn publish(
         database: &mut Database,
         camp_id: &str,
@@ -678,117 +698,311 @@ mod tests {
 
     #[test]
     fn edit_recovery_blocks_head_and_fences_stale_save_and_cancel() {
-        let (mut database, camp_id) = setup();
-        send(&mut database, &camp_id, text("A"));
-        send(&mut database, &camp_id, text("B"));
-        send(&mut database, &camp_id, text("C"));
-        let items = read_queue(&database, &camp_id).unwrap().items;
-        let b = &items[0];
-        let c = &items[1];
-        let started = edit(
-            &mut database,
-            &camp_id,
-            b,
-            None,
-            PendingInputEditAction::Begin,
-        );
-        let old_token = started.result.payload["editToken"]
-            .as_str()
-            .unwrap()
-            .to_string();
-        complete_fixture_runs(&database);
-        assert!(ready_heads(&database).unwrap().is_empty());
-        assert_eq!(
-            edit(
+        for legacy_failure in [false, true] {
+            let (mut database, camp_id) = setup();
+            let first = send(&mut database, &camp_id, text("A"));
+            send(&mut database, &camp_id, text("B"));
+            send(&mut database, &camp_id, text("C"));
+            let items = read_queue(&database, &camp_id).unwrap().items;
+            let b = &items[0];
+            let c = &items[1];
+            let started = edit(
                 &mut database,
                 &camp_id,
-                c,
+                b,
                 None,
-                PendingInputEditAction::Begin
+                PendingInputEditAction::Begin,
+            );
+            let old_token = started.result.payload["editToken"]
+                .as_str()
+                .unwrap()
+                .to_string();
+            if legacy_failure {
+                legacy_retry_wait(
+                    &database,
+                    first.result.payload["campTurnId"].as_str().unwrap(),
+                );
+            } else {
+                complete_fixture_runs(&database);
+            }
+            assert!(ready_heads(&database).unwrap().is_empty());
+            assert_eq!(
+                edit(
+                    &mut database,
+                    &camp_id,
+                    c,
+                    None,
+                    PendingInputEditAction::Begin
+                )
+                .result
+                .code,
+                "pending_input.edit_open"
+            );
+            // Close/reopen a production-configured SQLite connection, then run Core's recovery hook.
+            let directory = database.directory().to_path_buf();
+            database.close();
+            let mut reopened = Database::open(&directory).unwrap();
+            recover_edit_sessions(&reopened).unwrap();
+            reopened.prepare_v2_recovery().unwrap();
+            crate::message_delivery::mark_unstarted_deliveries_interrupted_before_dispatch(
+                &mut reopened,
             )
-            .result
-            .code,
-            "pending_input.edit_open"
-        );
-        // Close/reopen a production-configured SQLite connection, then run Core's recovery hook.
-        let directory = database.directory().to_path_buf();
-        database.close();
-        let mut reopened = Database::open(&directory).unwrap();
-        recover_edit_sessions(&reopened).unwrap();
-        assert!(
-            read_queue(&reopened, &camp_id)
-                .unwrap()
-                .edit_session
-                .unwrap()
-                .recovery_required
-        );
-        assert!(ready_heads(&reopened).unwrap().is_empty());
-        let saved = |content| PendingInputEditAction::Save {
-            content,
-            reply_to_camp_message_id: None,
-            recipient_selection_required: false,
-        };
-        assert_eq!(
-            edit(
+            .unwrap();
+            crate::runtime::settle_legacy_retry_waits(&mut reopened).unwrap();
+            assert!(
+                !read_queue(&reopened, &camp_id).unwrap().execution_active,
+                "settling a legacy failed turn must not release its pending edit"
+            );
+            assert!(
+                read_queue(&reopened, &camp_id)
+                    .unwrap()
+                    .edit_session
+                    .unwrap()
+                    .recovery_required
+            );
+            assert!(ready_heads(&reopened).unwrap().is_empty());
+            let saved = |content| PendingInputEditAction::Save {
+                content,
+                reply_to_camp_message_id: None,
+                recipient_selection_required: false,
+            };
+            assert_eq!(
+                edit(
+                    &mut reopened,
+                    &camp_id,
+                    b,
+                    Some(&old_token),
+                    saved(text("lost edits"))
+                )
+                .result
+                .code,
+                "pending_input.edit_fenced"
+            );
+            let takeover = edit(
                 &mut reopened,
                 &camp_id,
                 b,
                 Some(&old_token),
-                saved(text("lost edits"))
-            )
-            .result
-            .code,
-            "pending_input.edit_fenced"
-        );
-        let takeover = edit(
-            &mut reopened,
-            &camp_id,
-            b,
-            Some(&old_token),
-            PendingInputEditAction::Takeover,
-        );
-        let token = takeover.result.payload["editToken"]
-            .as_str()
-            .unwrap()
-            .to_string();
-        assert_ne!(token, old_token);
-        assert_eq!(
+                PendingInputEditAction::Takeover,
+            );
+            let token = takeover.result.payload["editToken"]
+                .as_str()
+                .unwrap()
+                .to_string();
+            assert_ne!(token, old_token);
+            assert_eq!(
+                edit(
+                    &mut reopened,
+                    &camp_id,
+                    b,
+                    Some(&old_token),
+                    PendingInputEditAction::Cancel
+                )
+                .result
+                .code,
+                "pending_input.edit_fenced"
+            );
+            assert_eq!(
+                edit(&mut reopened, &camp_id, b, Some(&token), saved(text("  ")))
+                    .result
+                    .code,
+                "camp_message.empty_body"
+            );
+            assert!(ready_heads(&reopened).unwrap().is_empty());
             edit(
                 &mut reopened,
                 &camp_id,
                 b,
-                Some(&old_token),
-                PendingInputEditAction::Cancel
+                Some(&token),
+                saved(text("edited B")),
+            );
+            assert_eq!(
+                publish(&mut reopened, &camp_id, &b.id, b.revision)
+                    .result
+                    .code,
+                "pending_input.not_ready"
+            );
+            let updated = read_queue(&reopened, &camp_id).unwrap();
+            assert_eq!(updated.items[0].body, "edited B");
+            assert_eq!(updated.items[0].enqueue_sequence, b.enqueue_sequence);
+            assert_eq!(ready_heads(&reopened).unwrap()[0].pending_input_id, b.id);
+            drop(reopened);
+        }
+    }
+
+    #[test]
+    fn startup_settles_legacy_retry_waits_once_and_preserves_pending_inputs() {
+        // The same persisted failure must settle only after every Run is terminal.
+        for blocking_status in [None, Some("queued"), Some("running"), Some("waiting")] {
+            let (mut database, camp_id) = setup();
+            let first = send(
+                &mut database,
+                &camp_id,
+                vec![
+                    Segment::MemberMention {
+                        agent_id: "agent_1".to_string(),
+                    },
+                    Segment::MemberMention {
+                        agent_id: "agent_2".to_string(),
+                    },
+                    Segment::Text {
+                        text: " A".to_string(),
+                    },
+                ],
+            );
+            send(
+                &mut database,
+                &camp_id,
+                vec![
+                    Segment::MemberMention {
+                        agent_id: "agent_2".to_string(),
+                    },
+                    Segment::Text {
+                        text: " B".to_string(),
+                    },
+                ],
+            );
+            send(&mut database, &camp_id, text("C"));
+            let turn_id = first.result.payload["campTurnId"].as_str().unwrap();
+            legacy_retry_wait(&database, turn_id);
+            if let Some(status) = blocking_status {
+                database
+                    .connection()
+                    .execute(
+                        "UPDATE agent_run SET status = ?2, ended_at = NULL,
+                     wait_reason = CASE WHEN ?2 = 'waiting' THEN 'recovery_blocked' ELSE NULL END
+                     WHERE id = ?1",
+                        params![
+                            first.result.payload["agentRunIds"][1].as_str().unwrap(),
+                            status
+                        ],
+                    )
+                    .unwrap();
+            }
+            let store = CampAttachmentStore::new(database.directory());
+            let draft = store
+                .save_body(&mut database, &camp_id, "private draft")
+                .unwrap();
+            let items = read_queue(&database, &camp_id).unwrap().items;
+            let original_items = serde_json::to_value(&items).unwrap();
+            let public_counts = |database: &Database| -> (i64, i64, i64) {
+                database
+                    .connection()
+                    .query_row(
+                        "SELECT (SELECT COUNT(*) FROM camp_message),
+                     (SELECT COUNT(*) FROM camp_turn), (SELECT COUNT(*) FROM agent_run)",
+                        [],
+                        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+                    )
+                    .unwrap()
+            };
+            let counts = public_counts(&database);
+            assert!(ready_heads(&database).unwrap().is_empty());
+            let directory = database.directory().to_path_buf();
+            database.close();
+            let mut reopened = Database::open(&directory).unwrap();
+            reopened.prepare_v2_recovery().unwrap();
+            crate::message_delivery::mark_unstarted_deliveries_interrupted_before_dispatch(
+                &mut reopened,
             )
-            .result
-            .code,
-            "pending_input.edit_fenced"
-        );
-        assert_eq!(
-            edit(&mut reopened, &camp_id, b, Some(&token), saved(text("  ")))
-                .result
-                .code,
-            "camp_message.empty_body"
-        );
-        assert!(ready_heads(&reopened).unwrap().is_empty());
-        edit(
-            &mut reopened,
-            &camp_id,
-            b,
-            Some(&token),
-            saved(text("edited B")),
-        );
-        assert_eq!(
-            publish(&mut reopened, &camp_id, &b.id, b.revision)
-                .result
-                .code,
-            "pending_input.not_ready"
-        );
-        let updated = read_queue(&reopened, &camp_id).unwrap();
-        assert_eq!(updated.items[0].body, "edited B");
-        assert_eq!(updated.items[0].enqueue_sequence, b.enqueue_sequence);
-        assert_eq!(ready_heads(&reopened).unwrap()[0].pending_input_id, b.id);
-        drop(reopened);
+            .unwrap();
+            crate::runtime::settle_legacy_retry_waits(&mut reopened).unwrap();
+            let turn_state = |database: &Database| -> (String, Option<String>, i64) {
+                database
+                    .connection()
+                    .query_row(
+                        "SELECT status, ended_at, version FROM camp_turn WHERE id = ?1",
+                        [turn_id],
+                        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+                    )
+                    .unwrap()
+            };
+            let settled = turn_state(&reopened);
+            assert_eq!(
+                public_counts(&reopened),
+                counts,
+                "startup never republishes A"
+            );
+            assert_eq!(
+                serde_json::to_value(read_queue(&reopened, &camp_id).unwrap().items).unwrap(),
+                original_items
+            );
+            assert_eq!(store.load_draft(&reopened, &camp_id).unwrap(), draft);
+            if blocking_status.is_some() {
+                assert_eq!(settled.0, "waiting");
+                assert!(settled.1.is_none());
+                assert!(ready_heads(&reopened).unwrap().is_empty());
+                continue;
+            }
+            assert_eq!(settled.0, "failed");
+            assert!(settled.1.is_some());
+            let settlement_events = |database: &Database| -> i64 {
+                database
+                    .connection()
+                    .query_row(
+                        "SELECT COUNT(*) FROM event_log WHERE entity_id = ?1
+                     AND event_type = 'camp_turn.status_changed'
+                     AND json_extract(payload_json, '$.status') = 'failed'",
+                        [turn_id],
+                        |row| row.get(0),
+                    )
+                    .unwrap()
+            };
+            assert_eq!(settlement_events(&reopened), 1);
+            // A second startup must not change the terminal timestamp/version or duplicate its event.
+            reopened.prepare_v2_recovery().unwrap();
+            crate::message_delivery::mark_unstarted_deliveries_interrupted_before_dispatch(
+                &mut reopened,
+            )
+            .unwrap();
+            crate::runtime::settle_legacy_retry_waits(&mut reopened).unwrap();
+            assert_eq!(turn_state(&reopened), settled);
+            assert_eq!(settlement_events(&reopened), 1);
+            let preserved_failures: i64 = reopened
+                .connection()
+                .query_row(
+                    "SELECT COUNT(*) FROM agent_run WHERE camp_turn_id = ?1
+                 AND status = 'failed' AND manual_retry_allowed = 1
+                 AND retry_declined_at IS NULL AND last_error_code = 'runtime_launch_failed'
+                 AND ended_at = '2026-08-31T00:00:00Z' AND execution_epoch = 0",
+                    [turn_id],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(preserved_failures, 2);
+            let ready = ready_heads(&reopened).unwrap();
+            assert_eq!(ready.len(), 1);
+            assert_eq!(ready[0].pending_input_id, items[0].id);
+            assert_eq!(
+                publish(&mut reopened, &camp_id, &items[1].id, items[1].revision)
+                    .result
+                    .code,
+                "pending_input.not_ready"
+            );
+            let published = publish(&mut reopened, &camp_id, &items[0].id, items[0].revision);
+            assert_eq!(published.result.code, "camp_turn.queued");
+            let recipient: String = reopened
+                .connection()
+                .query_row(
+                    "SELECT conversation.agent_id FROM agent_run
+                 JOIN conversation ON conversation.id = agent_run.conversation_id
+                 WHERE agent_run.id = ?1",
+                    [published.result.payload["agentRunIds"][0].as_str().unwrap()],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(recipient, "agent_2");
+            assert_eq!(
+                public_counts(&reopened),
+                (counts.0 + 1, counts.1 + 1, counts.2 + 1)
+            );
+            assert_eq!(
+                read_queue(&reopened, &camp_id).unwrap().items[0].id,
+                items[1].id
+            );
+            assert!(ready_heads(&reopened).unwrap().is_empty());
+            assert_eq!(store.load_draft(&reopened, &camp_id).unwrap(), draft);
+        }
     }
 
     #[test]
@@ -1087,20 +1301,32 @@ mod tests {
             "Pending B freezes the current Fast choice when published, not when enqueued"
         );
         assert_eq!(frozen_config(&database, &turn_id), first_config);
-        let transaction = database.connection_mut().transaction().unwrap();
-        transaction.execute("UPDATE agent_run SET status = 'failed', ended_at = datetime('now'), manual_retry_allowed = 0 WHERE camp_turn_id = ?1", [turn]).unwrap();
-        crate::runtime::recompute_camp_turn(
-            &transaction,
-            &camp_id,
-            turn,
-            &ActorRef::System {
-                component_id: "test".to_string(),
-            },
-            None,
-            &chrono::Utc::now().to_rfc3339(),
-        )
-        .unwrap();
-        transaction.commit().unwrap();
+        for manual_retry_allowed in [0, 1] {
+            let transaction = database.connection_mut().transaction().unwrap();
+            transaction
+                .execute(
+                    "UPDATE agent_run SET status = 'failed', ended_at = datetime('now'),
+             manual_retry_allowed = ?2 WHERE camp_turn_id = ?1",
+                    params![turn, manual_retry_allowed],
+                )
+                .unwrap();
+            let settled = crate::runtime::recompute_camp_turn(
+                &transaction,
+                &camp_id,
+                turn,
+                &ActorRef::System {
+                    component_id: "test".to_string(),
+                },
+                None,
+                &chrono::Utc::now().to_rfc3339(),
+            )
+            .unwrap();
+            assert_eq!(
+                settled, "failed",
+                "legacy retry metadata must not keep a failed turn waiting"
+            );
+            transaction.commit().unwrap();
+        }
         let remaining = read_queue(&database, &camp_id).unwrap().items.remove(0);
         assert_eq!(
             ready_heads(&database).unwrap()[0].pending_input_id,

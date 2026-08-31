@@ -228,17 +228,18 @@ pnpm accept:runtime-activity-ui
   Home/End、Enter 恢复默认和 ARIA 数值均通过。用户高度在同一 Main Window Session 的收起重开、
   切换 Agent/Camp 后保持；调整不得改变所选 Agent/stage，sticky-bottom 仍跟随，手动上滚仍暂停；
   最大高度在 1040×700 与 200% zoom 下不覆盖消息历史、Agent 执行台、Approval Dock 或 Composer；
-- 默认底部 placement 下标题栏仅有“任务 / 队员”详情入口；点击“移到浮层”后底部 Run Pulse/Drawer
-  消失，标题栏增加首位“执行”入口并自动打开浮层，完整顺序为“执行 / 任务 / 队员”。
+- 默认浮层 placement 下标题栏顺序为“执行 / 任务 / 队员”；点击“移到底部”后仅保留“任务 / 队员”，
+  显示底部 Run Pulse/Drawer。再点击“移到浮层”后底部入口消失，恢复首位“执行”入口并自动打开浮层。
   底部入口保留头像、最多两行名称和带形状的状态标记；浮层内标题与人数同行，入口为不换行的头像轨道，
   右下角状态符号、浅底选中态和 Hover/Focus Tooltip 可辨。轨道隐藏滚动条，溢出方向显示渐隐与箭头；
   箭头固定移动四位（176px，末端收敛），滚轮、触控板、`← / → / Home / End` 与精确导航自动显露均通过。
   队员顺序不随状态改变，切换、刷新与收起重开不重置轨道滚动，详情不显示 resize separator。
-  点击“移回底部”恢复横向 Run Pulse、底部 Drawer、原基础 Tab、selected Agent/
+  点击“移到底部”恢复横向 Run Pulse、底部 Drawer、原基础 Tab、selected Agent/
   focused Run 和底部高度偏好；移动前后必须是同一个 Drawer 与结果 DOM，并按比例保留 Drawer/结果
   阅读位置、disclosure 和加载状态；任一时刻不存在第二条过程时间线或重复入口；
-- 全新或旧版 General Preferences 没有位置字段时从底部开始；显式移到浮层后，切换 Camp、进入其他
-  一级页面再返回和完整应用重启都继续由 Inspector 承载，再显式移回底部后同一矩阵继续由底部承载；
+- 全新或旧版 General Preferences 没有位置字段时从浮层开始；已保存的合法位置不被默认值覆盖。
+  显式选择浮层后，切换 Camp、进入其他一级页面再返回和完整应用重启都继续由 Inspector 承载；
+  显式移到底部后同一矩阵继续由底部承载；
   保存中重复点击被拒绝，注入偏好原子写失败后执行台和旧 snapshot 均保持原位并显示可重试错误，恢复
   Inspector 偏好时首个 Camp meaningful paint 不出现 bottom→inspector 闪跳；
 - placement=inspector 与 Inspector hidden 可以同时成立：进入不含 running Run 的 Camp 和已挂载 workspace

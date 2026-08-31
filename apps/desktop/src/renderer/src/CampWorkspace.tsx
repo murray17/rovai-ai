@@ -71,7 +71,14 @@ import { FilePreviewPane } from './FilePreviewPane'
 import { FilePreviewResizeHandle, FilePreviewWorkspace } from './FilePreviewLayout'
 import { useOptionalFilePreview } from './FilePreviewContext'
 import { agentRunFileChangesSummaryLabel, inlineDiffLines, exactMutationDiffLines } from './file-changes-presentation'
-import { FileReferenceText } from './FileReferenceLink'
+import { FileReferenceText, type FileReferenceActivation } from './FileReferenceLink'
+import {
+  captureTimelineReadingAnchor,
+  restoreTimelineReadingAnchor,
+  visibleTimelineMessageAnchor,
+  type TimelineMessageAnchor,
+  type TimelineReadingAnchor
+} from './timeline-reading-anchor'
 import { RuntimeFailureNotice } from './RuntimeFailureNotice'
 import { identityColorToken } from './theme'
 import { availableComposerSkillsForLead } from './composer-skill-picker'
@@ -269,11 +276,6 @@ interface ConversationFindState {
   error: string | null
 }
 
-interface TimelineMessageAnchor {
-  messageId: string
-  topOffset: number
-}
-
 interface ConversationFindRestorePoint {
   campId: string
   scrollTop: number
@@ -282,15 +284,9 @@ interface ConversationFindRestorePoint {
   focusedElement: HTMLElement | null
 }
 
-function visibleTimelineMessageAnchor(timeline: HTMLElement): TimelineMessageAnchor | null {
-  const viewport = timeline.getBoundingClientRect()
-  for (const message of timeline.querySelectorAll<HTMLElement>('[data-message-id]')) {
-    const bounds = message.getBoundingClientRect()
-    if (bounds.bottom <= viewport.top || bounds.top >= viewport.bottom) continue
-    const messageId = message.dataset.messageId
-    if (messageId) return { messageId, topOffset: bounds.top - viewport.top }
-  }
-  return null
+function timelineViewportWidth(timeline: HTMLElement): number {
+  // Preserve fractional transition widths while accounting for a non-overlay scrollbar.
+  return timeline.getBoundingClientRect().width - (timeline.offsetWidth - timeline.clientWidth)
 }
 
 export function composerDraftNeedsReplyRepair(draft: CampComposerDraftView | null): boolean {
@@ -1185,7 +1181,7 @@ export function CampWorkspace({
   onCancelAgentRun = async () => undefined,
   stopping,
   onStop,
-  executionPlacement = 'bottom',
+  executionPlacement = 'inspector',
   onExecutionPlacementChange = async () => undefined,
   worldMapEnabled = true,
   workspaceEntrySnapshotReady = true,
@@ -1294,6 +1290,13 @@ export function CampWorkspace({
   const conversationFindRestorePoint = useRef<ConversationFindRestorePoint | null>(null)
   const conversationFindOpenRef = useRef(false)
   const timelineVisibleAnchorRef = useRef<TimelineMessageAnchor | null>(null)
+  const timelineLayoutAnchorRef = useRef<{
+    campId: string
+    width: number
+    hidden: boolean
+    scrollTop: number
+    anchor: TimelineReadingAnchor
+  } | null>(null)
   const [conversationFind, setConversationFind] = useState<ConversationFindState>({
     open: false,
     query: '',
@@ -2702,6 +2705,22 @@ export function CampWorkspace({
     campId: string,
     scroll: HTMLElement
   ): void => {
+    const layout = timelineLayoutAnchorRef.current
+    const width = timelineViewportWidth(scroll)
+    if (layout?.campId === campId && (
+      layout.hidden || layout.width !== width || !scroll.clientHeight
+      || (Math.abs(layout.scrollTop - scroll.scrollTop) <= 1
+        && timelineReadingPosition.current?.position.followingLatest === false)
+    )) return
+    if (width > 0 && scroll.clientHeight > 0 && (
+      !layout || layout.campId !== campId
+      || (!layout.hidden && layout.width === width && Math.abs(layout.scrollTop - scroll.scrollTop) > 1)
+    )) {
+      timelineLayoutAnchorRef.current = {
+        campId, width, hidden: false, scrollTop: scroll.scrollTop,
+        anchor: captureTimelineReadingAnchor(scroll)
+      }
+    }
     timelineVisibleAnchorRef.current = visibleTimelineMessageAnchor(scroll)
     const previousPosition = timelineReadingPosition.current?.campId === campId
       ? timelineReadingPosition.current.position
@@ -2735,6 +2754,43 @@ export function CampWorkspace({
       if (current) persistCampTimelineReadingPosition(current.campId, current.position)
     }, 180)
   }, [conversationFind.open])
+
+  const captureFilePreviewAnchor = useCallback((source?: HTMLElement): void => {
+    const scroll = timelineScrollRef.current
+    if (!scroll || !scroll.clientWidth) return
+    timelineLayoutAnchorRef.current = {
+      campId: snapshot.camp.id, width: timelineViewportWidth(scroll), hidden: false, scrollTop: scroll.scrollTop,
+      anchor: captureTimelineReadingAnchor(scroll, source)
+    }
+  }, [snapshot.camp.id])
+
+  const restoreTimelineLayout = useCallback((): void => {
+    const scroll = timelineScrollRef.current
+    if (!scroll) return
+    const campId = snapshot.camp.id
+    const saved = timelineLayoutAnchorRef.current
+    const width = timelineViewportWidth(scroll)
+    if (!width || !scroll.clientHeight) {
+      if (saved?.campId === campId) saved.hidden = true
+      return
+    }
+    const current = timelineReadingPosition.current
+    const followingLatest = current?.campId !== campId || current.position.followingLatest !== false
+    if (followingLatest) {
+      scroll.scrollTop = scroll.scrollHeight
+    } else if (saved?.campId === campId && (saved.hidden || saved.width !== width)) {
+      restoreTimelineReadingAnchor(scroll, saved.anchor)
+    }
+    timelineLayoutAnchorRef.current = {
+      campId, width, hidden: false, scrollTop: scroll.scrollTop,
+      anchor: saved?.campId === campId && !followingLatest ? saved.anchor : captureTimelineReadingAnchor(scroll)
+    }
+    timelineReadingPosition.current = { campId, position: { scrollTop: scroll.scrollTop, followingLatest } }
+    timelineViewportGeometry.current = {
+      campId, geometry: { scrollTop: scroll.scrollTop, scrollHeight: scroll.scrollHeight, clientHeight: scroll.clientHeight }
+    }
+    timelineVisibleAnchorRef.current = visibleTimelineMessageAnchor(scroll)
+  }, [snapshot.camp.id])
 
   const followTimelineAfterUserSend = useCallback((campId: string): void => {
     const scroll = timelineScrollRef.current
@@ -2773,6 +2829,10 @@ export function CampWorkspace({
           scroll.clientHeight
         )
         scroll.scrollTop = scrollTop
+        timelineLayoutAnchorRef.current = {
+          campId, width: timelineViewportWidth(scroll), hidden: false, scrollTop,
+          anchor: captureTimelineReadingAnchor(scroll)
+        }
         timelineReadingPosition.current = {
           campId,
           position: {
@@ -2798,6 +2858,8 @@ export function CampWorkspace({
     }
     return () => flushTimelineReadingPosition(campId)
   }, [conversationView, flushTimelineReadingPosition, snapshot.camp.id])
+
+  useLayoutEffect(restoreTimelineLayout, [conversationView, filePreview?.paneVisible, restoreTimelineLayout])
 
   useLayoutEffect(() => {
     if (conversationView !== 'conversation') return
@@ -2863,16 +2925,15 @@ export function CampWorkspace({
     let resizeFrame: number | null = null
     let settleFrame: number | null = null
     const observer = new ResizeObserver(() => {
-      const latest = timelineReadingPosition.current
-      const shouldFollowLatest = latest?.campId !== campId
-        || latest.position.followingLatest !== false
+      restoreTimelineLayout()
       if (resizeFrame !== null) window.cancelAnimationFrame(resizeFrame)
       if (settleFrame !== null) window.cancelAnimationFrame(settleFrame)
       resizeFrame = window.requestAnimationFrame(() => {
         resizeFrame = null
         settleFrame = window.requestAnimationFrame(() => {
           settleFrame = null
-          if (shouldFollowLatest) {
+          const latest = timelineReadingPosition.current
+          if (latest?.campId !== campId || latest.position.followingLatest !== false) {
             const position = followLatestCampTimeline(scroll)
             timelineReadingPosition.current = { campId, position }
           }
@@ -2894,7 +2955,7 @@ export function CampWorkspace({
       if (resizeFrame !== null) window.cancelAnimationFrame(resizeFrame)
       if (settleFrame !== null) window.cancelAnimationFrame(settleFrame)
     }
-  }, [conversationView, snapshot.camp.id])
+  }, [conversationView, restoreTimelineLayout, snapshot.camp.id])
 
   useEffect(() => {
     if (!onVisibleNotificationSources) return undefined
@@ -3678,6 +3739,13 @@ export function CampWorkspace({
               tabIndex={-1}
               aria-label="对话时间线"
               hidden={conversationView !== 'conversation'}
+              onWheelCapture={() => captureFilePreviewAnchor()}
+              onTouchStartCapture={() => captureFilePreviewAnchor()}
+              onKeyDownCapture={(event) => {
+                if (['ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End', ' '].includes(event.key)) {
+                  captureFilePreviewAnchor()
+                }
+              }}
               onScroll={(event) => recordTimelineReadingPosition(
                 snapshot.camp.id,
                 event.currentTarget
@@ -3890,14 +3958,15 @@ export function CampWorkspace({
                                     ? (
                                         <div className="final-copy">
                                           <SafeMarkdown
-                                            onFileReference={(rawReference) => {
+                                            onFileReference={(rawReference, source, target) => {
                                               if (!filePreview) return
+                                              captureFilePreviewAnchor(source)
                                               void filePreview.open({
                                                 kind: 'message_reference',
                                                 campId: snapshot.camp.id,
                                                 messageId: campMessage.id,
                                                 rawReference
-                                              }).then((outcome) => {
+                                              }, target).then((outcome) => {
                                                 if (outcome.kind === 'error') onNotify(outcome.error.message)
                                               })
                                             }}
@@ -3921,14 +3990,15 @@ export function CampWorkspace({
                                                 trigger,
                                                 focusPanel
                                               )}
-                                            onFileReference={(rawReference) => {
+                                            onFileReference={(rawReference, source, target) => {
                                               if (!filePreview) return
+                                              captureFilePreviewAnchor(source)
                                               void filePreview.open({
                                                 kind: 'message_reference',
                                                 campId: snapshot.camp.id,
                                                 messageId: campMessage.id,
                                                 rawReference
-                                              }).then((outcome) => {
+                                              }, target).then((outcome) => {
                                                 if (outcome.kind === 'error') onNotify(outcome.error.message)
                                               })
                                             }}
@@ -4035,7 +4105,7 @@ export function CampWorkspace({
                         type="button"
                         disabled={executionPlacementPending}
                         onClick={moveExecutionToBottom}
-                      >{executionPlacementPending ? '正在保存…' : '将执行台移回底部'}</button>
+                      >{executionPlacementPending ? '正在保存…' : '移到底部'}</button>
                       {executionPlacementError && <span role="alert">{executionPlacementError.message}</span>}
                     </>}
                   </div>
@@ -4563,13 +4633,13 @@ function RunPulse({
   if (visibleProcesses.length === 0) return <></>
   const placementLabel = placementPending
     ? '正在保存'
-    : placement === 'bottom' ? '移到浮层' : '移回底部'
+    : placement === 'bottom' ? '移到浮层' : '移到底部'
   const placementAriaLabel = placement === 'bottom'
     ? '将执行台移到详情浮层并记住此位置'
-    : '将执行台移回会话底部并记住此位置'
+    : '将执行台移到会话底部并记住此位置'
   const placementTitle = placement === 'bottom'
     ? '移到浮层并记住此位置'
-    : '移回底部并记住此位置'
+    : '移到底部并记住此位置'
   return (
     <div className={`run-pulse run-pulse-${placement}`} aria-label="Agent 执行台">
       <div className="run-pulse-heading">
@@ -6915,7 +6985,7 @@ function StructuredMessageBody({
     focusPanel: boolean
   ): void
   onActivateAllMembersMention?(trigger: HTMLElement, focusPanel: boolean): void
-  onFileReference?(rawReference: string): void
+  onFileReference?: FileReferenceActivation
 }): JSX.Element {
   if (content === null) return <p><FileReferenceText text={body} onActivate={onFileReference} /></p>
   const markdownBody = renderLeadingCurrentUserMarkdown

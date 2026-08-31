@@ -32,6 +32,14 @@ on:
       - "scripts/fixtures/desktop-startup-presentation/**"
       - "scripts/lib/file-preview-layout.test.mjs"
       - "scripts/fixtures/file-preview-layout/**"
+      - "scripts/lib/file-reference-navigation.test.mjs"
+      - "scripts/fixtures/file-reference-navigation/**"
+      - "apps/desktop/src/renderer/src/timeline-reading-anchor*"
+      - "apps/desktop/src/renderer/src/FileReferenceLink*"
+      - "apps/desktop/src/renderer/src/SafeMarkdown*"
+      - "apps/desktop/src/renderer/src/safe-markdown-model*"
+      - "apps/desktop/src/renderer/src/remark-repair-cjk-url-tail*"
+      - "apps/desktop/src/file-preview-reference*"
       - "scripts/lib/camp-fast-layout.test.mjs"
       - "scripts/fixtures/camp-fast-layout/**"
       - "scripts/lib/execution-avatar-rail.test.mjs"
@@ -77,6 +85,7 @@ jobs:
           xvfb-run -a pnpm test:composer-continuation
           xvfb-run -a pnpm test:startup-presentation
           xvfb-run -a pnpm test:file-preview-layout
+          xvfb-run -a pnpm test:file-reference-navigation
           xvfb-run -a pnpm test:camp-fast-layout
           xvfb-run -a pnpm test:execution-avatar-rail
           xvfb-run -a pnpm test:approval-dock

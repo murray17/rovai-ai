@@ -1,7 +1,7 @@
 ---
 document_type: development-guide
 authority: test-policy-and-command-routing
-last_updated: 2026-08-30
+last_updated: 2026-08-31
 ---
 
 # 测试与 Smoke Test
@@ -187,6 +187,11 @@ Approval/Recovery Dock，验证大屏中 481/480/450/420px 会话的容器断点
 夹具只使用临时绝对 `userData` 与受控文件 API，不启动 Core/SQLite/Skill Library/Runtime，不读取真实 Camp。
 `ROVAI_KEEP_FILE_PREVIEW_FIXTURE=1` 保留双主题、宽/窄窗口、关闭提示和 200%/reduced-motion 截图；
 默认清理本次夹具。Linux CI 使用 `xvfb-run -a pnpm test:file-preview-layout`。
+
+消息文件引用运行 `pnpm test:file-reference-navigation`。它在同样隔离的真实 Electron 中挂载生产 Camp、Markdown 与预览，
+验证有来源的短文件名定位、行范围高亮、字段误识别及 URL 中文尾部恢复，并逐帧检查打开/关闭、键盘调宽和持续拖动时
+阅读锚点偏移不超过 2px；还覆盖用户滚动后的可见消息回退、底部跟随及紧凑模式返回。相同环境变量可保留双主题截图
+和测量报告；Linux CI 使用 `xvfb-run -a pnpm test:file-reference-navigation`，不替代 Main 的来源、文件类型和系统动作测试。
 
 涉及 Preload 请求 transport 或 Renderer 错误读取时，除普通 Vitest 外还运行：
 

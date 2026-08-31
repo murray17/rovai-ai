@@ -24,6 +24,7 @@ import { filePreviewAssetUrl, parseFilePreviewAssetUrl } from '../../file-previe
 import {
   canonicalizeExistingPath,
   FilePreviewAccessError,
+  inspectPreviewPath,
   openPreviewFile,
   pathIsWithin,
   referenceCandidatePath,
@@ -730,6 +731,23 @@ export class FilePreviewService {
       ?? referenceCandidatePath(parsed, target.rootPath, target.basePath)
     let opened: OpenedPreviewFile
     try {
+      const path = await inspectPreviewPath(target.rootPath, candidatePath)
+      if (path.kind === 'directory') {
+        if (target.allowChildren === false || request.kind === 'run_evidence') {
+          return failed('not_regular_file', '这个来源不支持打开文件夹。')
+        }
+        if (request.kind === 'child_of_handle' && request.allowSystemOpen === false) {
+          return failed('reference_not_clickable', '这个链接不能在预览中打开。')
+        }
+        this.#requireActiveCamp(webContentsId, target.campId)
+        // Reveal through the file manager, never launch a directory-shaped app bundle.
+        try {
+          this.#native.revealPath(path.canonicalPath)
+          return ok({ kind: 'opened_in_system', fileName: basename(path.canonicalPath) })
+        } catch {
+          return failed('open_failed', '无法在文件管理器中显示这个文件夹。', true)
+        }
+      }
       opened = await openPreviewFile(target.rootPath, candidatePath)
     } catch (error) {
       if (

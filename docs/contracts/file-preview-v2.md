@@ -4,7 +4,7 @@ contract: file-preview
 version: 2
 status: accepted
 authority: desktop-file-preview-wire
-last_updated: 2026-08-30
+last_updated: 2026-08-31
 ---
 
 # File Preview v2
@@ -33,7 +33,11 @@ type OpenFilePreviewResult =
 ```
 
 请求对象拒绝未知字段，字符串有界；Main 校验 sender 是当前应用窗口的主 frame并且请求 Camp 已提交为该窗口的
-当前 Camp。`opened_in_system` 只在一次明确用户激活中成功调用默认应用后返回，不创建任何长期资源。
+当前 Camp。`opened_in_system` 只在一次明确用户激活中成功调用默认应用或在系统文件管理器中显示已授权目录后返回，
+不创建任何长期资源。目录沿用相同的来源与 containment 校验，不能取得读取句柄，不能启动目录包。
+
+消息中的带行号短名只有在同条消息存在唯一明确文件路径时才可复用该来源；请求仍提交原文中的完整来源引用，
+行范围只是 Renderer 的阅读目标，不得用拼接出的新路径绕过 Core 来源校验或进行全盘模糊搜索。
 
 ## 公开文件描述
 
