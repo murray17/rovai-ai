@@ -182,7 +182,18 @@ Windows/macOS packaged 验收或渠道远端验收，既有钉钉 NO-GO 项保�
   真实Electron启动呈现、连续输入、执行头像栏与审批Dock四组回归通过。
 - 首轮并行构建暴露启动重试fixture的5秒外层超时短于其6秒内部等待；仅将该测试上限设为15秒，保证清理先于下一case。
   产品250/750/1500ms重试与generation逻辑未改，定向和全量Vitest复跑通过。
-- Rust全量/Clippy、真实Core启动与macOS daily打包/隔离验收/安装在继续验证中；未以源码或单测通过代替packaged验收。
+- Rust all-features全量通过：Library783、CLI32、Core189，保留4项既有ignored；Clippy all-targets/all-features、
+  `cargo fmt --check`、debug Core构建和真实Core启动8项通过，后者覆盖私有队列通知、功能恢复与禁止空库初始化。
+- 合并代码提交为 `201b93d2`。`pnpm package:mac:daily` 生成0.0.4 arm64 App并通过ad-hoc签名门；
+  App内Core/CLI Mach-O UUID与本次Release二进制一致。
+- `pnpm accept:bootstrap-shell-ui` 使用全新临时data-dir/Skill Library通过：unknown authority字节保留、明确重试不消耗
+  crash budget、Day/Night/200%/reduced motion、真实Core强杀后的事务回滚、1024条已提交fixture行保留、Renderer错误结构与
+  generation恢复，以及Skills降级后原Core内恢复。另只读核对fixture实际合同为 `v1.41/schema82/migration131`；
+  人工检查阻断与恢复截图，没有使用日常数据或启动模型。
+- 已通过 `pnpm install:mac:daily` 安装到 `/Applications/Rovai AI.app`，源/同卷暂存/目标三处验证通过；
+  旧包保留为 `Rovai AI.backup-before-channel-main-20260831-133034.app`，安装后Core/CLI UUID再次与Release一致。
+  原日常App/Core/Helper六个PID均仍存活；没有重启日常App，也未留下本轮dist验收进程。
+- `pnpm docs:test`、`pnpm docs:check` 及显式main SHA的 `pnpm docs:check:ci` 通过；没有为渠道历史目录增加检查例外。
 
 本次不推送或创建PR；不修改日常SQLite，不替换用户数据，不主动终止日常App。钉钉外部端到端NO-GO边界仍保留。
 
