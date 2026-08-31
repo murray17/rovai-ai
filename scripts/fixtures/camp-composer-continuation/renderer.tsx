@@ -11,6 +11,7 @@ const errors: string[] = []
 window.addEventListener('error', event => errors.push(String(event.error?.stack ?? event.message)))
 window.addEventListener('unhandledrejection', event => errors.push(String(event.reason)))
 const calls: string[] = []
+const savedContinuationSources: unknown[] = []
 const listeners = new Set<(event: CoreEvent) => void>()
 const emit = (method: string, params: Record<string, unknown>) => {
   for (const listener of listeners) listener({ method, params })
@@ -72,6 +73,7 @@ Object.assign(window, { rovai: {
       return structuredClone(drafts.get(String(params.campId)))
     }
     if (method === 'camp.composerDraft.save') {
+      savedContinuationSources.push(params.continuationSourceMessageId)
       const current = drafts.get(String(params.campId))!
       const content = params.content as CampComposerDraftView['content']
       const saved = { ...current, content, body: content.map(segment => segment.kind === 'text' ? segment.text : '').join(''),
@@ -127,6 +129,7 @@ async function reset(draft = emptyDraft()) {
     await flush()
   }
   calls.length = 0
+  savedContinuationSources.length = 0
   drafts.clear()
   drafts.set(campId, draft)
   nextRead = null
@@ -270,6 +273,59 @@ Object.assign(window, { continuationTest: { async run() {
   check(document.querySelector('.pending-input-list')?.textContent?.includes('已经自动保存的下一条'), 'Admission must appear in the private queue')
   check(snapshot.messages.length === 1, 'Private admission must not add a public message')
   cases.push('an autosaved pending send avoids duplicate Draft saves and reads')
+
+  for (const admission of ['pending', 'published']) {
+    await reset(continuedDraft('message-1'))
+    const previous = message(1, 'agent_2')
+    snapshot = { ...snapshot, messages: [previous], ...running(previous) }
+    if (admission === 'published') {
+      snapshot = { ...snapshot, turns: [], agentRuns: [] }
+      queue = { ...queue, executionActive: false }
+    }
+    await render()
+    editor().focus()
+    document.execCommand('insertText', false, '第一条继续给芝士')
+    await until(() => savedContinuationSources.length === 1, 'The first Draft must autosave its continuation')
+    const source = admission === 'published' ? 'message-2' : 'message-1'
+    const nextDraft = continuedDraft(source)
+    let heldNextDraft: ReturnType<typeof holdRead> | null = null
+    let sends = 0
+    send = async (draft) => {
+      sends += 1
+      check(draft.continuationIntent?.recipient.agentId === 'agent_2', 'Both sends must retain the non-Lead recipient')
+      drafts.set(campId, nextDraft)
+      if (sends === 1) {
+        if (admission === 'published') {
+          const sent = message(2, 'agent_2')
+          snapshot = { ...snapshot, throughGlobalSequence: 2, messages: [...snapshot.messages, sent], ...running(sent) }
+          await render()
+        }
+        heldNextDraft = holdRead()
+      }
+      return { ...(admission === 'published' ? { publishedMessageSequence: 2 } : { pendingInputId: 'queued-next' }),
+        agentRunIds: [], campTurnId: null, addressedAgentIds: ['agent_2'] }
+    }
+    const beforeSendReads = draftReads()
+    const pressEnter = () => editor().dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', bubbles: true, cancelable: true }))
+    pressEnter()
+    await until(() => heldNextDraft !== null && nextRead === null, 'Send must initialize the next authoritative route')
+    check(editor().getAttribute('aria-disabled') === 'true' && !editor().isContentEditable,
+      'A fast next keystroke must not freeze a null route before the next Draft is initialized')
+    pressEnter()
+    await flush()
+    check(sends === 1, 'A second send must wait for the route initialization')
+    heldNextDraft!.resolve(nextDraft)
+    await until(() => editor().getAttribute('aria-disabled') !== 'true' && continuation() === '继续发给 芝士',
+      'The next editor must restore the non-Lead route')
+    check(draftReads() === beforeSendReads + 1, 'Route initialization must not trigger a duplicate publication read')
+    editor().focus()
+    document.execCommand('insertText', false, '第二条还是给芝士')
+    await until(() => savedContinuationSources.length === 2, 'The second Draft must autosave')
+    check(savedContinuationSources[1] === source, 'A quick following Draft must persist the initialized continuation source')
+    pressEnter()
+    await until(() => sends === 2 && editor().getAttribute('aria-disabled') !== 'true', 'The second send must complete')
+  }
+  cases.push('delayed next-Draft initialization preserves the recipient across two quick sends')
 
   flushSync(() => root!.unmount())
   root = createRoot(document.getElementById('root')!)

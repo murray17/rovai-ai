@@ -3207,6 +3207,8 @@ function AuthoritativeApp({
       }
       return {
         ...(pendingInputId ? { pendingInputId } : {}),
+        ...(campMessageId && typeof result.commandResult.payload.sequence === 'number'
+          ? { publishedMessageSequence: sequence } : {}),
         campTurnId,
         agentRunIds,
         addressedAgentIds: optimisticMessage.addressedAgentIds
