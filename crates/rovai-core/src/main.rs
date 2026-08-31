@@ -59,13 +59,16 @@ use rovai_core::{
         UpdateAgentProfileCommand, VerifiedManagedInstallation,
     },
     agent_run_file_change::{self, AgentRunFileChangeProjector},
+    agent_run_image::{self, RuntimeImageObservation},
     agent_runtime_adapter::{
         AcpProbeObservation, AgentRuntimeAdapterRegistry, AntigravityProbeObservation,
         ClaudeCodeProbeObservation, CodexProbeObservation, ExecutableIntegrityStatus,
         executable_fingerprint as fingerprint_executable, observe_executable_file_identity,
         verify_executable_integrity,
     },
-    authority_migration::{AuthorityMigrationProgress, AuthorityMigrationRunner},
+    authority_migration::{
+        AuthorityMigrationProgress, AuthorityMigrationRunner, trace_startup_stage,
+    },
     builtin_tool_evidence_projection::{
         BUILTIN_TOOL_EVIDENCE_PROJECTION_SCHEMA_VERSION, project_builtin_tool_invocation,
     },
@@ -89,6 +92,21 @@ use rovai_core::{
     },
     camp_id::CampId,
     camp_open::CampOpenService,
+    channel::{
+        AdvanceDingTalkPublicationIntentCommand, AdvanceMemberBotPublicationIntentCommand,
+        AuthorizeChannelExecutionConsolePageCommand, ChannelHostTickRequest, ChannelService,
+        CommitDingTalkAccountConnectionCommand, CommitFeishuAccountConnectionCommand,
+        CreateDingTalkPublicationIntentCommand, CreateMemberBotPublicationIntentCommand,
+        DeleteChannelCredentialCommand, DeleteChannelDeveloperSessionCommand,
+        DisconnectDingTalkAccountCommand, DisconnectFeishuAccountCommand,
+        ExpireDingTalkAccountCommand, ExpireFeishuAccountCommand, FinalizeChannelInboundCommand,
+        GetChannelCredentialParams, GetChannelDeveloperSessionParams, ObserveChannelInboundCommand,
+        ReconcileFeishuGroupRosterCommand, ReplaceChannelDeveloperSessionCommand,
+        ResolvePendingCampBindingCommand, SettleChannelDeliveryCommand, StartNewFeishuDmCommand,
+        StorePublicationCredentialCommand, UpsertDingTalkAccountCommand,
+        UpsertDingTalkMemberBotCommand, UpsertFeishuAccountCommand, UpsertFeishuMemberBotCommand,
+        VerifyFeishuOwnerCommand,
+    },
     collaboration::{
         AddCampMemberCommand, CampActivationState, CampCollaborationMode, ChangeDefaultLeadCommand,
         CollaborationService, CreateCampCommand, CreateTaskCommand, DeleteCampCommand,
@@ -493,17 +511,17 @@ fn write_authority_block(block: &AuthorityBlock) -> Result<()> {
 }
 
 fn write_database_open_refusal(error: &DatabaseOpenError) -> Result<()> {
-    if let Some(block) = error.authority_block() {
-        return write_authority_block(block);
-    }
     write_startup_frame(
         "failed",
         None,
-        json!({ "kind": "unknown" }),
+        match error.authority_block() {
+            Some(block) => json!({ "kind": "blocked", "reason": block }),
+            None => json!({ "kind": "unknown" }),
+        },
         Some(structured_startup_error(
             error.code(),
             error.to_string(),
-            false,
+            error.retryable(),
             json!({ "stage": "database_open" }),
         )),
         None,
@@ -858,6 +876,13 @@ struct AgentRunFileChangesParams {
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct AgentRunImageParams {
+    camp_id: CampId,
+    image_id: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct CampMemberRemovalPreviewParams {
     camp_id: CampId,
     agent_id: String,
@@ -970,6 +995,13 @@ struct ExecutionEvidenceListParams {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct AgentRunDiagnosticParams {
     agent_run_id: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct ChannelExecutionConsoleSourceParams {
+    agent_run_id: String,
+    expected_sequence: i64,
 }
 
 fn default_execution_evidence_page_limit() -> i64 {
@@ -2035,6 +2067,24 @@ impl Core {
             .entry(camp_id.to_string())
             .or_insert_with(|| Arc::new(RwLock::new(())))
             .clone()
+    }
+
+    fn ensure_new_channel_camp_attachment_ready(
+        &self,
+        database: &mut Database,
+        execution: &CommandExecution,
+    ) -> Result<()> {
+        if execution.replayed
+            || execution.result.status == CommandResultStatus::Rejected
+            || execution.result.payload["campCreated"].as_bool() != Some(true)
+        {
+            return Ok(());
+        }
+        let camp_id = execution.result.payload["campId"]
+            .as_str()
+            .context("new Channel Camp result omitted campId")?;
+        self.attachment_views
+            .ensure_empty_camp_ready(database, camp_id)
     }
 
     async fn acquire_camp_attachment_mutation(
@@ -4918,6 +4968,670 @@ impl Core {
         }
         let _ = &request.params;
         match request.method.as_str() {
+            "channels.credentials.get" => {
+                let params: GetChannelCredentialParams =
+                    serde_json::from_value(request.params.clone())?;
+                let mut database = self.database.lock().await;
+                Ok(serde_json::to_value(
+                    ChannelService::default().channel_credential(&mut database, &params)?,
+                )?)
+            }
+            "channels.credentials.listPublished" => {
+                let mut database = self.database.lock().await;
+                Ok(serde_json::to_value(
+                    ChannelService::default().published_channel_credentials(&mut database)?,
+                )?)
+            }
+            "channels.credentials.delete" => {
+                let params: UserCommandParams<DeleteChannelCredentialCommand> =
+                    serde_json::from_value(request.params.clone())?;
+                let component = match params.command.provider.as_str() {
+                    "feishu" => "feishu-channel-host",
+                    "dingtalk" => "dingtalk-channel-host",
+                    _ => anyhow::bail!("unsupported channel provider"),
+                };
+                let mut database = self.database.lock().await;
+                let execution = ChannelService::default().delete_channel_credential(
+                    &mut database,
+                    &system_command_envelope(params.command_id, component, None, params.command),
+                )?;
+                Ok(serde_json::to_value(execution.result)?)
+            }
+            "channels.developerSession.get" => {
+                let params: GetChannelDeveloperSessionParams =
+                    serde_json::from_value(request.params.clone())?;
+                let mut database = self.database.lock().await;
+                Ok(serde_json::to_value(
+                    ChannelService::default().channel_developer_session(&mut database, &params)?,
+                )?)
+            }
+            "channels.developerSession.replace" => {
+                let params: UserCommandParams<ReplaceChannelDeveloperSessionCommand> =
+                    serde_json::from_value(request.params.clone())?;
+                let component = match params.command.provider.as_str() {
+                    "feishu" => "feishu-channel-host",
+                    "dingtalk" => "dingtalk-channel-host",
+                    _ => anyhow::bail!("unsupported channel provider"),
+                };
+                let mut database = self.database.lock().await;
+                let execution = ChannelService::default().replace_channel_developer_session(
+                    &mut database,
+                    &system_command_envelope(params.command_id, component, None, params.command),
+                )?;
+                Ok(serde_json::to_value(execution.result)?)
+            }
+            "channels.developerSession.delete" => {
+                let params: UserCommandParams<DeleteChannelDeveloperSessionCommand> =
+                    serde_json::from_value(request.params.clone())?;
+                let component = match params.command.provider.as_str() {
+                    "feishu" => "feishu-channel-host",
+                    "dingtalk" => "dingtalk-channel-host",
+                    _ => anyhow::bail!("unsupported channel provider"),
+                };
+                let mut database = self.database.lock().await;
+                let execution = ChannelService::default().delete_channel_developer_session(
+                    &mut database,
+                    &system_command_envelope(params.command_id, component, None, params.command),
+                )?;
+                Ok(serde_json::to_value(execution.result)?)
+            }
+            "channels.feishu.snapshot" => {
+                let mut database = self.database.lock().await;
+                Ok(serde_json::to_value(
+                    ChannelService::default().snapshot(&mut database)?,
+                )?)
+            }
+            "channels.dingtalk.snapshot" => {
+                let mut database = self.database.lock().await;
+                Ok(serde_json::to_value(
+                    ChannelService::default().dingtalk_snapshot(&mut database)?,
+                )?)
+            }
+            "channels.dingtalk.account.upsert" => {
+                let params: UserCommandParams<UpsertDingTalkAccountCommand> =
+                    serde_json::from_value(request.params.clone())?;
+                let mut database = self.database.lock().await;
+                let execution = ChannelService::default().upsert_dingtalk_account(
+                    &mut database,
+                    &system_command_envelope(
+                        params.command_id,
+                        "dingtalk-channel-host",
+                        None,
+                        params.command,
+                    ),
+                )?;
+                Ok(serde_json::to_value(execution.result)?)
+            }
+            "channels.dingtalk.account.commitConnection" => {
+                let params: UserCommandParams<CommitDingTalkAccountConnectionCommand> =
+                    serde_json::from_value(request.params.clone())?;
+                let mut database = self.database.lock().await;
+                let execution = ChannelService::default().commit_dingtalk_account_connection(
+                    &mut database,
+                    &system_command_envelope(
+                        params.command_id,
+                        "dingtalk-channel-host",
+                        None,
+                        params.command,
+                    ),
+                )?;
+                Ok(serde_json::to_value(execution.result)?)
+            }
+            "channels.dingtalk.account.disconnect" => {
+                let params: UserCommandParams<DisconnectDingTalkAccountCommand> =
+                    serde_json::from_value(request.params.clone())?;
+                let mut database = self.database.lock().await;
+                let execution = ChannelService::default().disconnect_dingtalk_account(
+                    &mut database,
+                    &user_command_envelope(params.command_id, params.command),
+                )?;
+                Ok(serde_json::to_value(execution.result)?)
+            }
+            "channels.dingtalk.account.expire" => {
+                let params: UserCommandParams<ExpireDingTalkAccountCommand> =
+                    serde_json::from_value(request.params.clone())?;
+                let mut database = self.database.lock().await;
+                let execution = ChannelService::default().expire_dingtalk_account(
+                    &mut database,
+                    &system_command_envelope(
+                        params.command_id,
+                        "dingtalk-channel-host",
+                        None,
+                        params.command,
+                    ),
+                )?;
+                Ok(serde_json::to_value(execution.result)?)
+            }
+            "channels.dingtalk.publicationIntent.create" => {
+                let params: UserCommandParams<CreateDingTalkPublicationIntentCommand> =
+                    serde_json::from_value(request.params.clone())?;
+                let mut database = self.database.lock().await;
+                let execution = ChannelService::default().create_dingtalk_publication_intent(
+                    &mut database,
+                    &system_command_envelope(
+                        params.command_id,
+                        "dingtalk-channel-host",
+                        None,
+                        params.command,
+                    ),
+                )?;
+                Ok(serde_json::to_value(execution.result)?)
+            }
+            "channels.dingtalk.publicationIntent.advance" => {
+                let params: UserCommandParams<AdvanceDingTalkPublicationIntentCommand> =
+                    serde_json::from_value(request.params.clone())?;
+                let mut database = self.database.lock().await;
+                let execution = ChannelService::default().advance_dingtalk_publication_intent(
+                    &mut database,
+                    &system_command_envelope(
+                        params.command_id,
+                        "dingtalk-channel-host",
+                        None,
+                        params.command,
+                    ),
+                )?;
+                Ok(serde_json::to_value(execution.result)?)
+            }
+            "channels.dingtalk.publicationIntent.storeCredential" => {
+                let params: UserCommandParams<StorePublicationCredentialCommand> =
+                    serde_json::from_value(request.params.clone())?;
+                let mut database = self.database.lock().await;
+                let execution = ChannelService::default().store_publication_credential(
+                    &mut database,
+                    &system_command_envelope(
+                        params.command_id,
+                        "dingtalk-channel-host",
+                        None,
+                        params.command,
+                    ),
+                )?;
+                Ok(serde_json::to_value(execution.result)?)
+            }
+            "channels.dingtalk.memberBot.upsert" => {
+                let params: UserCommandParams<UpsertDingTalkMemberBotCommand> =
+                    serde_json::from_value(request.params.clone())?;
+                let mut database = self.database.lock().await;
+                let execution = ChannelService::default().upsert_dingtalk_member_bot(
+                    &mut database,
+                    &system_command_envelope(
+                        params.command_id,
+                        "dingtalk-channel-host",
+                        None,
+                        params.command,
+                    ),
+                )?;
+                Ok(serde_json::to_value(execution.result)?)
+            }
+            "channels.dingtalk.owner.verify" => {
+                let params: UserCommandParams<VerifyFeishuOwnerCommand> =
+                    serde_json::from_value(request.params.clone())?;
+                let mut database = self.database.lock().await;
+                let execution = ChannelService::default().verify_feishu_owner(
+                    &mut database,
+                    &system_command_envelope(
+                        params.command_id,
+                        "dingtalk-channel-host",
+                        None,
+                        params.command,
+                    ),
+                )?;
+                Ok(serde_json::to_value(execution.result)?)
+            }
+            "channels.dingtalk.dm.startNew" => {
+                let params: UserCommandParams<StartNewFeishuDmCommand> =
+                    serde_json::from_value(request.params.clone())?;
+                let quick_chat_path = self.data_dir.join("quick-chat");
+                std::fs::create_dir_all(&quick_chat_path).with_context(|| {
+                    format!(
+                        "failed to prepare Quick Chat at {}",
+                        quick_chat_path.display()
+                    )
+                })?;
+                let mut database = self.database.lock().await;
+                let execution = ChannelService::default().start_new_feishu_dm(
+                    &mut database,
+                    &quick_chat_path,
+                    &system_command_envelope(
+                        params.command_id,
+                        "dingtalk-channel-host",
+                        None,
+                        params.command,
+                    ),
+                )?;
+                self.ensure_new_channel_camp_attachment_ready(&mut database, &execution)?;
+                Ok(serde_json::to_value(execution.result)?)
+            }
+            "channels.dingtalk.pendingBinding.resolve" => {
+                let params: UserCommandParams<ResolvePendingCampBindingCommand> =
+                    serde_json::from_value(request.params.clone())?;
+                let mut database = self.database.lock().await;
+                let execution = ChannelService::default().resolve_pending_camp_binding(
+                    &mut database,
+                    &self.data_dir.join("quick-chat"),
+                    &system_command_envelope(
+                        params.command_id,
+                        "dingtalk-channel-host",
+                        None,
+                        params.command,
+                    ),
+                )?;
+                self.ensure_new_channel_camp_attachment_ready(&mut database, &execution)?;
+                Ok(serde_json::to_value(execution.result)?)
+            }
+            "channels.feishu.account.upsert" => {
+                let params: UserCommandParams<UpsertFeishuAccountCommand> =
+                    serde_json::from_value(request.params.clone())?;
+                let mut database = self.database.lock().await;
+                let execution = ChannelService::default().upsert_feishu_account(
+                    &mut database,
+                    &system_command_envelope(
+                        params.command_id,
+                        "feishu-channel-host",
+                        None,
+                        params.command,
+                    ),
+                )?;
+                Ok(serde_json::to_value(execution.result)?)
+            }
+            "channels.feishu.account.commitConnection" => {
+                let params: UserCommandParams<CommitFeishuAccountConnectionCommand> =
+                    serde_json::from_value(request.params.clone())?;
+                let mut database = self.database.lock().await;
+                let execution = ChannelService::default().commit_feishu_account_connection(
+                    &mut database,
+                    &system_command_envelope(
+                        params.command_id,
+                        "feishu-channel-host",
+                        None,
+                        params.command,
+                    ),
+                )?;
+                Ok(serde_json::to_value(execution.result)?)
+            }
+            "channels.feishu.account.disconnect" => {
+                let params: UserCommandParams<DisconnectFeishuAccountCommand> =
+                    serde_json::from_value(request.params.clone())?;
+                let mut database = self.database.lock().await;
+                let execution = ChannelService::default().disconnect_feishu_account(
+                    &mut database,
+                    &user_command_envelope(params.command_id, params.command),
+                )?;
+                Ok(serde_json::to_value(execution.result)?)
+            }
+            "channels.feishu.account.expire" => {
+                let params: UserCommandParams<ExpireFeishuAccountCommand> =
+                    serde_json::from_value(request.params.clone())?;
+                let mut database = self.database.lock().await;
+                let execution = ChannelService::default().expire_feishu_account(
+                    &mut database,
+                    &system_command_envelope(
+                        params.command_id,
+                        "feishu-channel-host",
+                        None,
+                        params.command,
+                    ),
+                )?;
+                Ok(serde_json::to_value(execution.result)?)
+            }
+            "channels.feishu.publicationIntent.create" => {
+                let params: UserCommandParams<CreateMemberBotPublicationIntentCommand> =
+                    serde_json::from_value(request.params.clone())?;
+                let mut database = self.database.lock().await;
+                let execution = ChannelService::default().create_member_bot_publication_intent(
+                    &mut database,
+                    &system_command_envelope(
+                        params.command_id,
+                        "feishu-channel-host",
+                        None,
+                        params.command,
+                    ),
+                )?;
+                Ok(serde_json::to_value(execution.result)?)
+            }
+            "channels.feishu.publicationIntent.advance" => {
+                let params: UserCommandParams<AdvanceMemberBotPublicationIntentCommand> =
+                    serde_json::from_value(request.params.clone())?;
+                let mut database = self.database.lock().await;
+                let execution = ChannelService::default().advance_member_bot_publication_intent(
+                    &mut database,
+                    &system_command_envelope(
+                        params.command_id,
+                        "feishu-channel-host",
+                        None,
+                        params.command,
+                    ),
+                )?;
+                Ok(serde_json::to_value(execution.result)?)
+            }
+            "channels.feishu.publicationIntent.storeCredential" => {
+                let params: UserCommandParams<StorePublicationCredentialCommand> =
+                    serde_json::from_value(request.params.clone())?;
+                let mut database = self.database.lock().await;
+                let execution = ChannelService::default().store_publication_credential(
+                    &mut database,
+                    &system_command_envelope(
+                        params.command_id,
+                        "feishu-channel-host",
+                        None,
+                        params.command,
+                    ),
+                )?;
+                Ok(serde_json::to_value(execution.result)?)
+            }
+            "channels.feishu.memberBot.upsert" => {
+                let params: UserCommandParams<UpsertFeishuMemberBotCommand> =
+                    serde_json::from_value(request.params.clone())?;
+                let mut database = self.database.lock().await;
+                let execution = ChannelService::default().upsert_feishu_member_bot(
+                    &mut database,
+                    &system_command_envelope(
+                        params.command_id,
+                        "feishu-channel-host",
+                        None,
+                        params.command,
+                    ),
+                )?;
+                Ok(serde_json::to_value(execution.result)?)
+            }
+            "channels.feishu.owner.verify" => {
+                let params: UserCommandParams<VerifyFeishuOwnerCommand> =
+                    serde_json::from_value(request.params.clone())?;
+                let mut database = self.database.lock().await;
+                let execution = ChannelService::default().verify_feishu_owner(
+                    &mut database,
+                    &system_command_envelope(
+                        params.command_id,
+                        "feishu-channel-host",
+                        None,
+                        params.command,
+                    ),
+                )?;
+                Ok(serde_json::to_value(execution.result)?)
+            }
+            "channels.feishu.dm.startNew" => {
+                let params: UserCommandParams<StartNewFeishuDmCommand> =
+                    serde_json::from_value(request.params.clone())?;
+                let quick_chat_path = self.data_dir.join("quick-chat");
+                std::fs::create_dir_all(&quick_chat_path).with_context(|| {
+                    format!(
+                        "failed to prepare Quick Chat at {}",
+                        quick_chat_path.display()
+                    )
+                })?;
+                let mut database = self.database.lock().await;
+                let execution = ChannelService::default().start_new_feishu_dm(
+                    &mut database,
+                    &quick_chat_path,
+                    &system_command_envelope(
+                        params.command_id,
+                        "feishu-channel-host",
+                        None,
+                        params.command,
+                    ),
+                )?;
+                self.ensure_new_channel_camp_attachment_ready(&mut database, &execution)?;
+                Ok(serde_json::to_value(execution.result)?)
+            }
+            "channels.feishu.pendingBinding.resolve" => {
+                let params: UserCommandParams<ResolvePendingCampBindingCommand> =
+                    serde_json::from_value(request.params.clone())?;
+                let quick_chat_path = self.data_dir.join("quick-chat");
+                if params.command.action == "quick_chat" {
+                    std::fs::create_dir_all(&quick_chat_path)
+                        .context("failed to prepare the managed Quick Chat directory")?;
+                }
+                let mut database = self.database.lock().await;
+                let execution = ChannelService::default().resolve_pending_camp_binding(
+                    &mut database,
+                    &quick_chat_path,
+                    &system_command_envelope(
+                        params.command_id,
+                        "feishu-channel-host",
+                        None,
+                        params.command,
+                    ),
+                )?;
+                self.ensure_new_channel_camp_attachment_ready(&mut database, &execution)?;
+                Ok(serde_json::to_value(execution.result)?)
+            }
+            "channels.membership.add" => {
+                let params: UserCommandParams<AddCampMemberCommand> =
+                    serde_json::from_value(request.params.clone())?;
+                let camp_id = params.command.camp_id.clone();
+                let mut database = self.database.lock().await;
+                let execution = CollaborationService::default().add_camp_member(
+                    &mut database,
+                    &system_command_envelope(
+                        params.command_id,
+                        "channel-membership-sync",
+                        Some(camp_id),
+                        params.command,
+                    ),
+                )?;
+                Ok(serde_json::to_value(execution.result)?)
+            }
+            "channels.membership.remove" => {
+                let params: UserCommandParams<RemoveCampMemberCommand> =
+                    serde_json::from_value(request.params.clone())?;
+                let camp_id = params.command.camp_id.clone();
+                let mut database = self.database.lock().await;
+                let execution = CollaborationService::default().remove_camp_member(
+                    &mut database,
+                    &system_command_envelope(
+                        params.command_id,
+                        "channel-membership-sync",
+                        Some(camp_id),
+                        params.command,
+                    ),
+                )?;
+                Ok(serde_json::to_value(execution.result)?)
+            }
+            "channels.dingtalk.inbound.observe" => {
+                let params: UserCommandParams<ObserveChannelInboundCommand> =
+                    serde_json::from_value(request.params.clone())?;
+                let mut database = self.database.lock().await;
+                let execution = ChannelService::default().observe_inbound(
+                    &mut database,
+                    &system_command_envelope(
+                        params.command_id,
+                        "dingtalk-channel-host",
+                        None,
+                        params.command,
+                    ),
+                )?;
+                Ok(serde_json::to_value(execution.result)?)
+            }
+            "channels.dingtalk.roster.reconcile" => {
+                let params: UserCommandParams<ReconcileFeishuGroupRosterCommand> =
+                    serde_json::from_value(request.params.clone())?;
+                let mut database = self.database.lock().await;
+                let execution = ChannelService::default().reconcile_feishu_group_roster(
+                    &mut database,
+                    &system_command_envelope(
+                        params.command_id,
+                        "dingtalk-channel-host",
+                        None,
+                        params.command,
+                    ),
+                )?;
+                Ok(serde_json::to_value(execution.result)?)
+            }
+            "channels.dingtalk.inbound.finalize" => {
+                let params: UserCommandParams<FinalizeChannelInboundCommand> =
+                    serde_json::from_value(request.params.clone())?;
+                let quick_chat_path = self.data_dir.join("quick-chat");
+                std::fs::create_dir_all(&quick_chat_path).with_context(|| {
+                    format!(
+                        "failed to prepare Quick Chat at {}",
+                        quick_chat_path.display()
+                    )
+                })?;
+                let mut database = self.database.lock().await;
+                let execution = ChannelService::default().finalize_inbound(
+                    &mut database,
+                    &quick_chat_path,
+                    &system_command_envelope(
+                        params.command_id,
+                        "dingtalk-channel-host",
+                        None,
+                        params.command,
+                    ),
+                )?;
+                self.ensure_new_channel_camp_attachment_ready(&mut database, &execution)?;
+                Ok(serde_json::to_value(execution.result)?)
+            }
+            "channels.dingtalk.host.tick" => {
+                let params: ChannelHostTickRequest =
+                    serde_json::from_value(request.params.clone())?;
+                let mut database = self.database.lock().await;
+                let tick = ChannelService::default().host_tick(
+                    &mut database,
+                    &ActorRef::System {
+                        component_id: "dingtalk-channel-host".to_string(),
+                    },
+                    &params,
+                )?;
+                Ok(serde_json::to_value(tick)?)
+            }
+            "channels.inbound.observe" => {
+                let params: UserCommandParams<ObserveChannelInboundCommand> =
+                    serde_json::from_value(request.params.clone())?;
+                let mut database = self.database.lock().await;
+                let execution = ChannelService::default().observe_inbound(
+                    &mut database,
+                    &system_command_envelope(
+                        params.command_id,
+                        "feishu-channel-host",
+                        None,
+                        params.command,
+                    ),
+                )?;
+                Ok(serde_json::to_value(execution.result)?)
+            }
+            "channels.roster.reconcile" => {
+                let params: UserCommandParams<ReconcileFeishuGroupRosterCommand> =
+                    serde_json::from_value(request.params.clone())?;
+                let mut database = self.database.lock().await;
+                let execution = ChannelService::default().reconcile_feishu_group_roster(
+                    &mut database,
+                    &system_command_envelope(
+                        params.command_id,
+                        "feishu-channel-host",
+                        None,
+                        params.command,
+                    ),
+                )?;
+                Ok(serde_json::to_value(execution.result)?)
+            }
+            "channels.inbound.finalize" => {
+                let params: UserCommandParams<FinalizeChannelInboundCommand> =
+                    serde_json::from_value(request.params.clone())?;
+                let quick_chat_path = self.data_dir.join("quick-chat");
+                std::fs::create_dir_all(&quick_chat_path).with_context(|| {
+                    format!(
+                        "failed to prepare Quick Chat at {}",
+                        quick_chat_path.display()
+                    )
+                })?;
+                let mut database = self.database.lock().await;
+                let execution = ChannelService::default().finalize_inbound(
+                    &mut database,
+                    &quick_chat_path,
+                    &system_command_envelope(
+                        params.command_id,
+                        "feishu-channel-host",
+                        None,
+                        params.command,
+                    ),
+                )?;
+                self.ensure_new_channel_camp_attachment_ready(&mut database, &execution)?;
+                Ok(serde_json::to_value(execution.result)?)
+            }
+            "channels.host.tick" => {
+                let params: ChannelHostTickRequest =
+                    serde_json::from_value(request.params.clone())?;
+                let mut database = self.database.lock().await;
+                let tick = ChannelService::default().host_tick(
+                    &mut database,
+                    &ActorRef::System {
+                        component_id: "feishu-channel-host".to_string(),
+                    },
+                    &params,
+                )?;
+                Ok(serde_json::to_value(tick)?)
+            }
+            "channels.executionConsole.source" => {
+                let params: ChannelExecutionConsoleSourceParams =
+                    serde_json::from_value(request.params.clone())?;
+                let mut database = self.database.lock().await;
+                Ok(serde_json::to_value(
+                    ChannelService::default().execution_console_source(
+                        &mut database,
+                        &params.agent_run_id,
+                        params.expected_sequence,
+                    )?,
+                )?)
+            }
+            "channels.executionConsole.page.authorize" => {
+                let params: UserCommandParams<AuthorizeChannelExecutionConsolePageCommand> =
+                    serde_json::from_value(request.params.clone())?;
+                let mut database = self.database.lock().await;
+                let execution = ChannelService::default().authorize_execution_console_page(
+                    &mut database,
+                    &system_command_envelope(
+                        params.command_id,
+                        "feishu-channel-host",
+                        None,
+                        params.command,
+                    ),
+                )?;
+                Ok(serde_json::to_value(execution.result)?)
+            }
+            "channels.dingtalk.executionConsole.page.authorize" => {
+                let params: UserCommandParams<AuthorizeChannelExecutionConsolePageCommand> =
+                    serde_json::from_value(request.params.clone())?;
+                let mut database = self.database.lock().await;
+                let execution = ChannelService::default().authorize_execution_console_page(
+                    &mut database,
+                    &system_command_envelope(
+                        params.command_id,
+                        "dingtalk-channel-host",
+                        None,
+                        params.command,
+                    ),
+                )?;
+                Ok(serde_json::to_value(execution.result)?)
+            }
+            "channels.deliveries.settle" => {
+                let params: UserCommandParams<SettleChannelDeliveryCommand> =
+                    serde_json::from_value(request.params.clone())?;
+                let mut database = self.database.lock().await;
+                let execution = ChannelService::default().settle_delivery(
+                    &mut database,
+                    &system_command_envelope(
+                        params.command_id,
+                        "feishu-channel-host",
+                        None,
+                        params.command,
+                    ),
+                )?;
+                Ok(serde_json::to_value(execution.result)?)
+            }
+            "channels.dingtalk.deliveries.settle" => {
+                let params: UserCommandParams<SettleChannelDeliveryCommand> =
+                    serde_json::from_value(request.params.clone())?;
+                let mut database = self.database.lock().await;
+                let execution = ChannelService::default().settle_delivery(
+                    &mut database,
+                    &system_command_envelope(
+                        params.command_id,
+                        "dingtalk-channel-host",
+                        None,
+                        params.command,
+                    ),
+                )?;
+                Ok(serde_json::to_value(execution.result)?)
+            }
             "runtime.subsystems.get" => Ok(serde_json::to_value(self.subsystems.snapshot())?),
             "runtime.subsystems.retry" => {
                 self.initialize_optional_subsystems().await;
@@ -6060,6 +6774,16 @@ impl Core {
                 Ok(serde_json::to_value(
                     ReadModelService.camp_snapshot(&mut database, params.camp_id.as_str())?,
                 )?)
+            }
+            "agentRunImages.read" => {
+                let params: AgentRunImageParams = serde_json::from_value(request.params.clone())?;
+                let database = self.database.lock().await;
+                Ok(serde_json::to_value(agent_run_image::read_image(
+                    &database,
+                    &ManagedBlobStore::new(&self.data_dir),
+                    params.camp_id.as_str(),
+                    &params.image_id,
+                )?)?)
             }
             "agentRunFileChanges.get" => {
                 let params: AgentRunFileChangesParams =
@@ -11591,6 +12315,24 @@ fn user_camp_command_envelope<P>(
     }
 }
 
+fn system_command_envelope<P>(
+    command_id: String,
+    component_id: &str,
+    camp_id: Option<String>,
+    payload: P,
+) -> CommandEnvelope<P> {
+    CommandEnvelope {
+        command_id,
+        actor: ActorRef::System {
+            component_id: component_id.to_string(),
+        },
+        camp_id,
+        expected_versions: Vec::new(),
+        execution_epoch: None,
+        payload,
+    }
+}
+
 fn probe_status_name(status: health::AgentRuntimeProbeStatus) -> &'static str {
     match status {
         health::AgentRuntimeProbeStatus::Ready => "ready",
@@ -11967,7 +12709,19 @@ async fn run_core(
         None,
         None,
     )?;
-    let admission = match DatabaseAdmission::assess(&data_dir_lease) {
+    let assessment_started = Instant::now();
+    let assessment = DatabaseAdmission::assess(&data_dir_lease);
+    let source_contract = assessment
+        .as_ref()
+        .ok()
+        .and_then(AdmissionAssessment::source_contract_version)
+        .map(str::to_string);
+    trace_startup_stage(
+        "authority_assessment",
+        assessment_started.elapsed(),
+        source_contract.as_deref(),
+    );
+    let admission = match assessment {
         Ok(AdmissionAssessment::Blocked(block)) => {
             write_authority_block(&block)?;
             return Ok(());
@@ -11981,7 +12735,7 @@ async fn run_core(
                 Some(structured_startup_error(
                     &error.code,
                     error.message,
-                    false,
+                    error.retryable,
                     json!({ "stage": "database_admission" }),
                 )),
                 None,
@@ -11989,6 +12743,38 @@ async fn run_core(
             return Ok(());
         }
     };
+    if matches!(admission, AdmissionAssessment::Initializable(_))
+        && std::env::args_os().any(|argument| argument == "--require-existing-authority")
+    {
+        write_startup_frame(
+            "blocked",
+            Some("assessing_authority"),
+            json!({ "kind": "unknown" }),
+            Some(structured_startup_error(
+                "authority_required_existing_missing",
+                "Previously observed authority is absent; initialization is forbidden for this startup.",
+                false,
+                json!({ "stage": "database_admission" }),
+            )),
+            None,
+        )?;
+        return Ok(());
+    }
+    let assessed_authority = match &admission {
+        AdmissionAssessment::AdmittedExisting(_) => json!({ "kind": "admitted" }),
+        AdmissionAssessment::RequiresMigration(_) => json!({ "kind": "migration_required" }),
+        AdmissionAssessment::Initializable(_) => json!({ "kind": "confirmed_absent" }),
+        AdmissionAssessment::Blocked(_) => unreachable!("blocked assessment already returned"),
+    };
+    // Preserve knowledge of an existing authority before any later startup
+    // preparation can fail, including Runtime storage admission.
+    write_startup_frame(
+        "phase",
+        Some("preparing_runtime_storage"),
+        assessed_authority.clone(),
+        None,
+        None,
+    )?;
     #[cfg(target_os = "macos")]
     configure_user_automation_denial_root(&data_dir.join("automation-v1"))?;
     let runtime_camp_files_root = parse_runtime_camp_files_root()?;
@@ -12002,7 +12788,7 @@ async fn run_core(
             write_startup_frame(
                 "failed",
                 Some("preparing_runtime_storage"),
-                json!({ "kind": "admitted" }),
+                assessed_authority,
                 Some(structured_startup_error(
                     "runtime_camp_files_root_admission_failed",
                     format!("{error:#}"),
@@ -12025,11 +12811,18 @@ async fn run_core(
                 None,
                 None,
             )?;
-            match Database::open_admitted_with_runtime_camp_files_root(
+            let opening_started = Instant::now();
+            let opened = Database::open_admitted_with_runtime_camp_files_root(
                 *ticket,
                 attachment_views.root(),
                 attachment_views.root_identity_digest(),
-            ) {
+            );
+            trace_startup_stage(
+                "authority_open",
+                opening_started.elapsed(),
+                source_contract.as_deref(),
+            );
+            match opened {
                 Ok(database) => (database, "existing"),
                 Err(error) => {
                     write_database_open_refusal(&error)?;
@@ -12377,6 +13170,11 @@ async fn run_core(
     eprintln!(
         "[startup] stage=core_ready elapsed_ms={}",
         startup_started_at.elapsed().as_millis(),
+    );
+    trace_startup_stage(
+        "core_ready",
+        startup_started_at.elapsed(),
+        source_contract.as_deref(),
     );
     eprintln!("rovai-core {} ready", env!("CARGO_PKG_VERSION"));
     let runtime_discovery_core = core.clone();
@@ -13995,6 +14793,19 @@ async fn process_agent_run_acp_message(
             adapter_kind.as_str()
         );
     }
+    if let Some(images) = runtime.observe_images(native_prompt_id, &message).await {
+        persist_runtime_images(
+            core,
+            output,
+            agent_run_id,
+            execution_epoch,
+            runtime
+                .builtin_tool_process_config()
+                .map(BuiltinToolProcessConfig::run_tmp),
+            &images,
+        )
+        .await;
+    }
     let completed_action = match runtime
         .observe_message(native_prompt_id, &method, &params)
         .await
@@ -14418,6 +15229,21 @@ async fn process_runtime_event(
     let Some(_runtime_route_permit) = core.planned_shutdown.enter_runtime_route().await else {
         return Ok(());
     };
+    if event_type == agent_run_image::IMAGE_EVENT {
+        if let Ok(images) = serde_json::from_value::<RuntimeImageObservation>(payload.clone()) {
+            persist_runtime_images(
+                core,
+                output,
+                scope.agent_run_id,
+                scope.execution_epoch,
+                scope.managed_output_root,
+                &images,
+            )
+            .await;
+        }
+        // Internal image bytes/paths never become public Execution Evidence or channel messages.
+        return Ok(());
+    }
     if matches!(
         event_type,
         "runtime.fast.eligibility" | "runtime.fast.observed"
@@ -14502,6 +15328,43 @@ async fn process_runtime_event(
         }),
     );
     Ok(())
+}
+
+async fn persist_runtime_images(
+    core: &Core,
+    output: &mpsc::UnboundedSender<String>,
+    agent_run_id: &str,
+    execution_epoch: i64,
+    run_tmp: Option<&Path>,
+    images: &RuntimeImageObservation,
+) {
+    let mut database = core.database.lock().await;
+    match agent_run_image::record_images(
+        &mut database,
+        &ManagedBlobStore::new(&core.data_dir),
+        agent_run_id,
+        execution_epoch,
+        run_tmp,
+        images,
+    ) {
+        Ok(0) => {}
+        Ok(_) => {
+            if let Ok(Some(execution)) = ExecutionRuntimeService::default()
+                .load_agent_run_execution(&database, agent_run_id, execution_epoch)
+            {
+                emit(
+                    output,
+                    "agent_run.images.updated",
+                    json!({
+                        "campId": execution.camp_id,
+                        "agentRunId": agent_run_id,
+                        "executionEpoch": execution_epoch,
+                    }),
+                );
+            }
+        }
+        Err(_) => eprintln!("Runtime image observation skipped for AgentRun {agent_run_id}"),
+    }
 }
 
 async fn persist_runtime_evidence(
@@ -15769,6 +16632,19 @@ async fn process_agent_run_codex_message(
     }
     if method == "thread/tokenUsage/updated" {
         return;
+    }
+    if let Some(images) = agent_run_image::codex_tool_images(&message) {
+        persist_runtime_images(
+            core,
+            output,
+            agent_run_id,
+            execution_epoch,
+            runtime
+                .builtin_tool_process_config()
+                .map(BuiltinToolProcessConfig::run_tmp),
+            &images,
+        )
+        .await;
     }
     let (event_type, payload) = codex::normalize_event(&method, &params);
     runtime.observe_agent_message(&method, &params).await;
@@ -18380,6 +19256,86 @@ while IFS= read -r _ignored; do :; done
         assert!(!runtime_check_writes_diagnostic(
             RuntimeCheckFinalization::CleanupOnly
         ));
+    }
+
+    #[cfg(all(target_os = "macos", feature = "slow-tests"))]
+    #[tokio::test]
+    async fn new_channel_camp_is_materialized_before_runtime_dispatch() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let root = std::env::temp_dir().join(format!(
+            "rovai-channel-attachment-root-test-{}",
+            uuid::Uuid::new_v4()
+        ));
+        fs::create_dir_all(&root).unwrap();
+        let root = root.canonicalize().unwrap();
+        let workspace = root.join("data/quick-chat");
+        fs::create_dir_all(&workspace).unwrap();
+        let core = runtime_resolution_test_core(&root).unwrap();
+
+        let (camp_id, execution) = {
+            let mut database = core.database.lock().await;
+            let agent_id = AgentProfileService::default()
+                .list_profiles(&database)
+                .unwrap()
+                .into_iter()
+                .next()
+                .expect("the startup database should include a default member")
+                .agent_id;
+            let mut execution = CollaborationService::default()
+                .create_camp(
+                    &mut database,
+                    &CommandEnvelope {
+                        command_id: uuid::Uuid::new_v4().to_string(),
+                        actor: ActorRef::User {
+                            user_id: "test-user".to_string(),
+                        },
+                        camp_id: None,
+                        expected_versions: Vec::new(),
+                        execution_epoch: None,
+                        payload: CreateCampCommand {
+                            name: Some("Feishu DM".to_string()),
+                            project_binding_kind: ProjectBindingKind::QuickChat,
+                            project_path: workspace.display().to_string(),
+                            member_agent_ids: vec![agent_id.clone()],
+                            default_lead_agent_id: agent_id,
+                            collaboration_mode: CampCollaborationMode::Peer,
+                            activation_state: CampActivationState::Active,
+                        },
+                    },
+                )
+                .unwrap();
+            execution.result.payload["campCreated"] = Value::Bool(true);
+            let camp_id = execution.result.payload["campId"]
+                .as_str()
+                .unwrap()
+                .to_string();
+            core.ensure_new_channel_camp_attachment_ready(&mut database, &execution)
+                .unwrap();
+            (camp_id, execution)
+        };
+
+        assert!(!execution.replayed);
+        let authorization = core
+            .verified_camp_runtime_authorization(&camp_id, &workspace)
+            .await
+            .expect("a newly-created Channel Camp must be dispatchable immediately");
+        assert_eq!(authorization.camp_id, camp_id);
+
+        let attachment_root = authorization.attachment_root;
+        drop(core);
+        fs::set_permissions(&attachment_root, fs::Permissions::from_mode(0o700)).unwrap();
+        fs::set_permissions(
+            attachment_root.parent().unwrap(),
+            fs::Permissions::from_mode(0o700),
+        )
+        .unwrap();
+        fs::set_permissions(
+            attachment_root.parent().unwrap().parent().unwrap(),
+            fs::Permissions::from_mode(0o700),
+        )
+        .unwrap();
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[cfg(all(target_os = "macos", feature = "slow-tests"))]

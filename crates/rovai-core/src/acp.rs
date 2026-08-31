@@ -22,6 +22,7 @@ use rovai_core::{
         RuntimePermissionOption,
     },
     agent_profile::{AdapterKind, FrozenAgentRuntimeConfig},
+    agent_run_image::{AcpImageAccumulator, RuntimeImageObservation},
     agent_runtime_adapter::{
         AcpClientTerminalMode, AgentRuntimeAdapterRegistry, acp_model_catalog_from_session,
         acp_runtime_model_id_from_session, write_kiro_additive_agent_config,
@@ -558,6 +559,7 @@ struct AcpPromptObservation {
     streamed_agent_text: String,
     missing_send_recovery: AcpMissingSendRecoveryCollector,
     observed_tools: HashMap<String, ObservedToolMetadata>,
+    images: AcpImageAccumulator,
 }
 
 impl AcpPromptObservation {
@@ -568,6 +570,7 @@ impl AcpPromptObservation {
             streamed_agent_text: String::new(),
             missing_send_recovery: AcpMissingSendRecoveryCollector::default(),
             observed_tools: HashMap::new(),
+            images: AcpImageAccumulator::default(),
         }
     }
 }
@@ -3315,6 +3318,19 @@ impl AcpRuntime {
                 "error": {"code": code, "message": message}
             }))
             .await
+    }
+
+    pub async fn observe_images(
+        &self,
+        native_prompt_id: &str,
+        message: &Value,
+    ) -> Option<RuntimeImageObservation> {
+        let mut observation = self.active_observation.lock().await;
+        let observation = observation.as_mut()?;
+        if observation.prompt_id != native_prompt_id {
+            return None;
+        }
+        observation.images.observe(self.host.adapter_kind, message)
     }
 
     pub async fn observe_message(

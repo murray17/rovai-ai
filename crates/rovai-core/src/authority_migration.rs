@@ -2,12 +2,14 @@ use std::{
     fs::File,
     io::{self, Read},
     path::{Component, Path, PathBuf},
-    thread,
-    time::Duration,
+    time::{Duration, Instant},
 };
 
+#[cfg(test)]
 use rusqlite::{Connection, OpenFlags, backup::StepResult};
 use serde::{Deserialize, Serialize};
+#[cfg(test)]
+use std::thread;
 use uuid::Uuid;
 
 use crate::{
@@ -19,27 +21,45 @@ use crate::{
         observe_authority_identity_token,
     },
     db::{Database, DatabaseMigrationError, DatabaseOpenError},
-    platform::private_storage::{
-        atomic_write_private_json, create_private_new_file, prepare_private_directory,
-        publish_private_temporary_file,
-    },
+    platform::private_storage::create_private_new_file,
+};
+
+#[cfg(test)]
+use crate::platform::private_storage::{
+    atomic_write_private_json, prepare_private_directory, publish_private_temporary_file,
 };
 
 const MIGRATION_BACKUP_ROOT: &str = ".rovai-authority-migration-backups";
 const MANIFEST_MAX_BYTES: u64 = 128 * 1024;
+#[cfg(test)]
 const BACKUP_PAGES_PER_STEP: i32 = 256;
+#[cfg(test)]
 const BACKUP_BUSY_RETRY_LIMIT: usize = 200;
+#[cfg(test)]
 const BACKUP_BUSY_PAUSE: Duration = Duration::from_millis(25);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AuthorityMigrationPhase {
     RecoveringInterruptedSwitch,
+    OpeningAuthority,
+    Reconciling,
+    Migrating {
+        version: u32,
+    },
+    ReopeningAuthority,
+    #[cfg(test)]
     CreatingSnapshot,
+    #[cfg(test)]
     MigratingCopy,
+    #[cfg(test)]
     ValidatingCopy,
+    #[cfg(test)]
     PreservingOriginal,
+    #[cfg(test)]
     SwitchingAuthority,
+    #[cfg(test)]
+    SnapshotPublished,
     Reassessing,
     Completed,
 }
@@ -102,9 +122,10 @@ fn run_with_progress_inner(
                 runtime_camp_files_root,
                 runtime_camp_files_root_identity_digest,
                 progress,
+                None,
             )
         }
-        open @ MigrationAuthorityOpen::Upgrade { .. } => migrate_upgrade(
+        open @ MigrationAuthorityOpen::Upgrade { .. } => migrate_upgrade_in_place(
             open,
             runtime_camp_files_root,
             runtime_camp_files_root_identity_digest,
@@ -118,16 +139,48 @@ fn continue_after_reassessment(
     runtime_camp_files_root: &Path,
     runtime_camp_files_root_identity_digest: &str,
     progress: &mut dyn FnMut(AuthorityMigrationProgress),
+    expected: Option<&MigrationAuthorityOpen<'_>>,
 ) -> Result<Database, DatabaseMigrationError> {
-    match DatabaseAdmission::assess(lease).map_err(DatabaseMigrationError::from_admission)? {
+    if let Some(open) = expected {
+        open.revalidate_migrated_identity()
+            .map_err(DatabaseMigrationError::from_ticket)?;
+    }
+    let started = Instant::now();
+    let assessment =
+        DatabaseAdmission::assess(lease).map_err(DatabaseMigrationError::from_admission);
+    trace_startup_stage(
+        "authority_reassessment",
+        started.elapsed(),
+        assessment
+            .as_ref()
+            .ok()
+            .and_then(AdmissionAssessment::source_contract_version),
+    );
+    let assessment = assessment?;
+    if let Some(open) = expected {
+        open.revalidate_migrated_identity()
+            .map_err(DatabaseMigrationError::from_ticket)?;
+    }
+    match assessment {
         AdmissionAssessment::AdmittedExisting(ticket) => {
+            progress(phase(AuthorityMigrationPhase::ReopeningAuthority));
+            if let Some(open) = expected {
+                open.revalidate_migrated_identity()
+                    .map_err(DatabaseMigrationError::from_ticket)?;
+            }
+            let started = Instant::now();
             let database = Database::open_admitted_with_runtime_camp_files_root(
                 *ticket,
                 runtime_camp_files_root,
                 runtime_camp_files_root_identity_digest,
             )
-            .map_err(DatabaseMigrationError::from_open)?;
-            Ok(database)
+            .map_err(DatabaseMigrationError::from_open);
+            trace_startup_stage(
+                "authority_reopen",
+                started.elapsed(),
+                Some(crate::db::CURRENT_DATA_CONTRACT_VERSION),
+            );
+            database
         }
         AdmissionAssessment::RequiresMigration(ticket) => run_with_progress_inner(
             *ticket,
@@ -147,7 +200,67 @@ fn continue_after_reassessment(
     }
 }
 
-fn migrate_upgrade(
+fn migrate_upgrade_in_place(
+    open: MigrationAuthorityOpen<'_>,
+    runtime_camp_files_root: &Path,
+    runtime_camp_files_root_identity_digest: &str,
+    progress: &mut dyn FnMut(AuthorityMigrationProgress),
+) -> Result<Database, DatabaseMigrationError> {
+    let MigrationAuthorityOpen::Upgrade {
+        lease,
+        source_contract,
+        ..
+    } = &open
+    else {
+        unreachable!("upgrade path is selected by the ticket")
+    };
+    progress(phase(AuthorityMigrationPhase::OpeningAuthority));
+    Database::migrate_admitted_authority(
+        &open,
+        runtime_camp_files_root,
+        runtime_camp_files_root_identity_digest,
+        &mut |stage, elapsed| {
+            trace_startup_stage(stage, elapsed, Some(&source_contract.contract_version));
+            let next = if stage == "migration_reconciliation" {
+                AuthorityMigrationPhase::Reconciling
+            } else if let Some(version) = stage
+                .strip_prefix("migration_")
+                .and_then(|value| value.parse().ok())
+            {
+                AuthorityMigrationPhase::Migrating { version }
+            } else {
+                AuthorityMigrationPhase::OpeningAuthority
+            };
+            progress(phase(next));
+        },
+    )?;
+    progress(phase(AuthorityMigrationPhase::Reassessing));
+    let database = continue_after_reassessment(
+        lease,
+        runtime_camp_files_root,
+        runtime_camp_files_root_identity_digest,
+        progress,
+        Some(&open),
+    )?;
+    progress(phase(AuthorityMigrationPhase::Completed));
+    Ok(database)
+}
+
+/// Local diagnostic timing only: never include paths, SQL or credential rows.
+pub fn trace_startup_stage(stage: &str, elapsed: Duration, source_contract: Option<&str>) {
+    eprintln!(
+        "[startup] {}",
+        serde_json::json!({
+            "stage": stage, "elapsedMs": elapsed.as_millis(),
+            "sourceContract": source_contract, "targetContract": crate::db::CURRENT_DATA_CONTRACT_VERSION,
+        })
+    );
+}
+
+// Retained solely to construct genuine pre-upgrade crash fixtures. Production
+// contains the legacy reader/recovery below, never a new snapshot-switch writer.
+#[cfg(test)]
+fn legacy_snapshot_switch_for_test(
     open: MigrationAuthorityOpen<'_>,
     runtime_camp_files_root: &Path,
     runtime_camp_files_root_identity_digest: &str,
@@ -312,6 +425,7 @@ fn migrate_upgrade(
                 io::Error::other(error.to_string()),
             )
         })?;
+        progress(phase(AuthorityMigrationPhase::SnapshotPublished));
         std::fs::remove_file(&manifest_path).map_err(|error| {
             DatabaseMigrationError::io(
                 "authority_migration_manifest_remove_failed",
@@ -326,6 +440,7 @@ fn migrate_upgrade(
             runtime_camp_files_root,
             runtime_camp_files_root_identity_digest,
             progress,
+            None,
         )
     })();
 
@@ -337,6 +452,7 @@ fn migrate_upgrade(
     Ok(database)
 }
 
+#[cfg(test)]
 fn backup_authority(
     source: &Path,
     destination: &Path,
@@ -455,7 +571,7 @@ fn recover_interrupted_switch(
         restore_original_sidecars(lease, &backup_directory, &manifest)?;
         let staging = lease.data_dir().join(&manifest.staging_file_name);
         remove_generated_file_if_identity(&staging, &manifest.migrated_main_identity)?;
-    } else if current_identity == manifest.migrated_main_identity {
+    } else if current_identity.matches_legacy_rename(&manifest.migrated_main_identity) {
         preserve_stray_original_sidecars(lease, &backup_directory, &manifest)?;
     } else {
         return Err(DatabaseMigrationError::blocked(
@@ -478,6 +594,7 @@ fn recover_interrupted_switch(
     Ok(())
 }
 
+#[cfg(test)]
 #[derive(Debug, Clone)]
 struct SourceArtifact {
     kind: AuthorityArtifactKind,
@@ -485,6 +602,7 @@ struct SourceArtifact {
     identity: AuthorityArtifactIdentityToken,
 }
 
+#[cfg(test)]
 fn observe_source_artifacts(
     source: &Path,
     namespace: AuthorityNamespace,
@@ -525,6 +643,7 @@ fn observe_source_artifacts(
     Ok(artifacts)
 }
 
+#[cfg(test)]
 fn prepare_backup_directory(
     lease: &CoreDataDirLease,
     operation_id: Uuid,
@@ -624,6 +743,7 @@ fn open_existing_no_follow(path: &Path) -> io::Result<File> {
     File::open(path)
 }
 
+#[cfg(test)]
 fn detach_source_sidecars(
     lease: &CoreDataDirLease,
     backup_directory: &Path,
@@ -682,7 +802,7 @@ fn restore_original_sidecars(
     {
         let source = lease.data_dir().join(&artifact.source_file_name);
         match observe_authority_identity_token(&source) {
-            Ok(identity) if identity == artifact.source_identity => continue,
+            Ok(identity) if identity.matches_legacy_rename(&artifact.source_identity) => continue,
             Ok(_) => {
                 return Err(DatabaseMigrationError::operation(
                     "authority_migration_restore_target_changed",
@@ -710,7 +830,7 @@ fn restore_original_sidecars(
                 .expect("non-main migration artifact has detached name"),
         );
         match observe_authority_identity_token(&detached) {
-            Ok(identity) if identity == artifact.source_identity => {
+            Ok(identity) if identity.matches_legacy_rename(&artifact.source_identity) => {
                 std::fs::rename(&detached, &source).map_err(|error| {
                     DatabaseMigrationError::io(
                         "authority_migration_sidecar_restore_failed",
@@ -848,6 +968,7 @@ fn remove_generated_file_if_identity(
     }
 }
 
+#[cfg(test)]
 fn remove_generated_sqlite_files(path: &Path) {
     let name = path.as_os_str().to_string_lossy();
     let _ = std::fs::remove_file(path);
@@ -1007,6 +1128,7 @@ fn is_leaf(value: &str) -> bool {
     matches!(components.next(), Some(Component::Normal(_))) && components.next().is_none()
 }
 
+#[cfg(test)]
 fn leaf_name(path: &Path) -> Result<String, DatabaseMigrationError> {
     path.file_name()
         .and_then(|name| name.to_str())
@@ -1033,16 +1155,8 @@ fn artifact_kind_name(kind: AuthorityArtifactKind) -> &'static str {
     }
 }
 
-fn sqlite_retryable(error: &rusqlite::Error) -> bool {
-    matches!(
-        error,
-        rusqlite::Error::SqliteFailure(sqlite, _)
-            if matches!(
-                sqlite.code,
-                rusqlite::ErrorCode::DatabaseBusy | rusqlite::ErrorCode::DatabaseLocked
-            )
-    )
-}
+#[cfg(test)]
+use crate::database_admission::sqlite_error_is_transient as sqlite_retryable;
 
 fn phase(phase: AuthorityMigrationPhase) -> AuthorityMigrationProgress {
     AuthorityMigrationProgress {
@@ -1053,41 +1167,79 @@ fn phase(phase: AuthorityMigrationPhase) -> AuthorityMigrationProgress {
 }
 
 impl DatabaseMigrationError {
-    fn from_ticket(error: TicketValidationError) -> Self {
+    pub(crate) fn from_ticket(error: TicketValidationError) -> Self {
         match error {
             TicketValidationError::Blocked(block) => {
-                Self::blocked(*block, "authority migration ticket failed revalidation")
+                let changed = matches!(
+                    *block,
+                    AuthorityBlock::IdentityChanged { .. }
+                        | AuthorityBlock::DataDirectoryIdentityChanged
+                        | AuthorityBlock::UnsupportedAuthorityArtifact { .. }
+                );
+                let mut error =
+                    Self::blocked(*block, "authority migration ticket failed revalidation");
+                if changed {
+                    error.code = "authority_contract_changed".to_string();
+                }
+                error
             }
             TicketValidationError::Infrastructure(error) => Self::operation(
                 "authority_migration_ticket_infrastructure_failed",
                 &error.message,
-                false,
+                error.retryable,
             ),
         }
     }
 
     fn from_admission(error: crate::database_admission::AdmissionInfrastructureError) -> Self {
-        Self::operation(&error.code, &error.message, false)
+        Self::operation(&error.code, &error.message, error.retryable)
     }
 
-    fn from_open(error: DatabaseOpenError) -> Self {
+    pub(crate) fn from_open(error: DatabaseOpenError) -> Self {
         let block = error.authority_block().cloned();
         Self {
             code: error.code().to_string(),
             message: error.to_string(),
-            retryable: matches!(block.as_ref(), Some(AuthorityBlock::Busy { .. })),
+            retryable: error.retryable(),
             authority_block: block.map(Box::new),
         }
+    }
+
+    pub(crate) fn from_sqlite(code: &str, error: rusqlite::Error) -> Self {
+        Self::operation(
+            code,
+            &error.to_string(),
+            crate::database_admission::sqlite_error_is_transient(&error),
+        )
+    }
+
+    pub(crate) fn from_migration(error: anyhow::Error) -> Self {
+        if let Some(error) = error.downcast_ref::<DatabaseOpenError>() {
+            return Self {
+                code: error.code().to_string(),
+                message: error.to_string(),
+                retryable: error.retryable(),
+                authority_block: error.authority_block().cloned().map(Box::new),
+            };
+        }
+        let retryable = error
+            .downcast_ref::<rusqlite::Error>()
+            .is_some_and(crate::database_admission::sqlite_error_is_transient)
+            || error
+                .downcast_ref::<io::Error>()
+                .is_some_and(crate::database_admission::io_error_is_transient);
+        Self::operation(
+            "authority_migration_schema_failed",
+            &format!("{error:#}"),
+            retryable,
+        )
     }
 
     fn io(code: &'static str, operation: &str, path: &Path, error: io::Error) -> Self {
         Self::operation(
             code,
             &format!("failed to {operation} {}: {error}", path.display()),
-            matches!(
-                error.kind(),
-                io::ErrorKind::WouldBlock | io::ErrorKind::Interrupted
-            ),
+            crate::database_admission::io_error_is_transient(&error),
         )
     }
 }
@@ -1110,144 +1262,537 @@ mod tests {
     }
 
     #[test]
-    fn supported_database_is_migrated_on_a_copy_and_atomically_readmitted() {
+    fn supported_database_is_migrated_in_place_and_readmitted_without_snapshots() {
+        for source in [
+            "v115",
+            "channel_v125",
+            "main_pending",
+            "main_fast",
+            "main_fast_lifetime",
+            "joined_v128",
+            "joined_v129",
+        ] {
+            let directory = std::env::temp_dir()
+                .join(format!("rovai-authority-migration-test-{}", Uuid::new_v4()));
+            let mut database = crate::test_support::fresh_schema_database_fast_at(&directory);
+            database
+                .connection()
+                .execute(
+                    "UPDATE agent_profile SET display_name = '迁移保留值' WHERE id = 'agent_1'",
+                    [],
+                )
+                .unwrap();
+            database.connection().execute_batch(r#"
+            INSERT INTO camp(id, title, project_binding_kind, project_path, default_lead_agent_id,
+                last_message_sequence, version, created_at, updated_at)
+            VALUES ('camp-join', 'kept Camp', 'directory', '/tmp', 'agent_1', 0, 1, datetime('now'), datetime('now'));
+            INSERT INTO camp_composer_draft(camp_id, body, structured_content_json, revision, created_at, updated_at, expires_at)
+            VALUES ('camp-join', 'kept draft', '[{"kind":"text","text":"kept draft"}]', 7, datetime('now'), datetime('now'), datetime('now', '+1 day'));
+        "#).unwrap();
+            match source {
+                "joined_v129" => crate::db::downgrade_current_schema_to_v129_source_for_test(
+                    database.connection(),
+                ),
+                "joined_v128" => crate::db::downgrade_current_schema_to_v128_source_for_test(
+                    database.connection(),
+                ),
+                "v115" => crate::db::downgrade_current_schema_to_v115_source_for_test(
+                    database.connection(),
+                ),
+                "channel_v125" => {
+                    crate::db::downgrade_current_schema_to_v125_source_for_test(
+                        database.connection(),
+                    );
+                    database.connection().execute_batch(r#"
+                    INSERT INTO channel_credentials(credential_ref, provider, credential_kind, remote_app_id,
+                        payload_json, revision, created_at, updated_at)
+                    VALUES ('fixture-ref', 'feishu', 'member_bot', 'fixture-app', '{"fixture":"kept credential"}', 4, 1, 2);
+                    INSERT INTO channel_developer_sessions(provider, account_id, identity_json, session_json,
+                        revision, created_at, updated_at)
+                    VALUES ('dingtalk', 'fixture-account', '{"fixture":"identity"}', '{"fixture":"kept session"}', 5, 1, 2);
+                "#).unwrap();
+                }
+                "main_pending" | "main_fast" | "main_fast_lifetime" => {
+                    crate::db::downgrade_current_schema_to_main_camp_source_for_test(
+                        &mut database,
+                        match source {
+                            "main_fast_lifetime" => {
+                                crate::db::MainCampMigrationSource::FastLifetime
+                            }
+                            "main_fast" => crate::db::MainCampMigrationSource::Fast,
+                            _ => crate::db::MainCampMigrationSource::Pending,
+                        },
+                    );
+                    database.connection().execute_batch(r#"
+                    INSERT INTO pending_camp_input(id, camp_id, enqueue_sequence, revision, structured_content_json,
+                        execution_json, user_id, created_at, updated_at)
+                    VALUES ('pending-join', 'camp-join', 1, 3, '[{"kind":"text","text":"kept queued input"}]',
+                        '{"purpose":"fixture","completionRole":"required"}', 'fixture-owner', datetime('now'), datetime('now'));
+                "#).unwrap();
+                    if source.starts_with("main_fast") {
+                        database.connection().execute_batch(r#"
+                        INSERT INTO camp_member_fast_preference(camp_id, agent_id, runtime_binding_revision,
+                            fast_override, cwd, executable_fingerprint, eligible)
+                        SELECT 'camp-join', id, runtime_binding_revision, 1, '/tmp', 'fixture-fingerprint', 1
+                        FROM agent_profile WHERE id = 'agent_1';
+                    "#).unwrap();
+                    }
+                }
+                _ => unreachable!(),
+            }
+            let runtime_root = database.runtime_camp_files_root().to_path_buf();
+            let runtime_root_identity = database
+                .runtime_camp_files_root_identity_digest()
+                .to_string();
+            drop(database);
+
+            // Exercise the exact legacy namespace too; migration must not make
+            // a new rovai.sqlite beside an admitted lumen.sqlite.
+            let source_path = directory.join(if source == "main_pending" {
+                "lumen.sqlite"
+            } else {
+                "rovai.sqlite"
+            });
+            if source == "main_pending" {
+                std::fs::rename(directory.join("rovai.sqlite"), &source_path).unwrap();
+            }
+            let original_identity =
+                crate::core_data_dir_lock::FilesystemObjectIdentity::observe(&source_path).unwrap();
+            let lease = CoreDataDirLease::acquire(&directory).unwrap();
+            let AdmissionAssessment::RequiresMigration(ticket) =
+                DatabaseAdmission::assess(&lease).unwrap()
+            else {
+                panic!("supported historical contract must produce a migration ticket");
+            };
+            let migrated =
+                AuthorityMigrationRunner::run(*ticket, &runtime_root, &runtime_root_identity)
+                    .unwrap();
+            crate::test_support::assert_production_database_configuration(&migrated);
+            assert!(matches!(
+                classify_database_contract(migrated.connection()).unwrap(),
+                DatabaseContractClassification::Current(_)
+            ));
+            assert!(
+                !migrated
+                    .connection()
+                    .query_row(
+                        "SELECT EXISTS(SELECT 1 FROM sqlite_schema WHERE type = 'index'
+                    AND name = 'agent_run_execution_evidence_run_sequence_idx')",
+                        [],
+                        |row| row.get::<_, bool>(0),
+                    )
+                    .unwrap(),
+                "{source}"
+            );
+            let display_name: String = migrated
+                .connection()
+                .query_row(
+                    "SELECT display_name FROM agent_profile WHERE id = 'agent_1'",
+                    [],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(display_name, "迁移保留值", "{source}");
+            let draft: (String, i64) = migrated
+                .connection()
+                .query_row(
+                    "SELECT body, revision FROM camp_composer_draft WHERE camp_id = 'camp-join'",
+                    [],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                )
+                .unwrap();
+            assert_eq!(draft, ("kept draft".to_string(), 7), "{source}");
+            if source == "channel_v125" {
+                let credential: (String, i64) = migrated.connection().query_row(
+                "SELECT payload_json, revision FROM channel_credentials WHERE credential_ref = 'fixture-ref'",
+                [], |row| Ok((row.get(0)?, row.get(1)?)),
+            ).unwrap();
+                assert_eq!(
+                    credential,
+                    (r#"{"fixture":"kept credential"}"#.to_string(), 4)
+                );
+                let session: (String, i64) = migrated.connection().query_row(
+                "SELECT session_json, revision FROM channel_developer_sessions WHERE provider = 'dingtalk'",
+                [], |row| Ok((row.get(0)?, row.get(1)?)),
+            ).unwrap();
+                assert_eq!(session, (r#"{"fixture":"kept session"}"#.to_string(), 5));
+            }
+            if source.starts_with("main_") {
+                let pending: (String, i64) = migrated.connection().query_row(
+                "SELECT structured_content_json, revision FROM pending_camp_input WHERE id = 'pending-join'",
+                [], |row| Ok((row.get(0)?, row.get(1)?)),
+            ).unwrap();
+                assert_eq!(
+                    pending,
+                    (
+                        r#"[{"kind":"text","text":"kept queued input"}]"#.to_string(),
+                        3
+                    )
+                );
+            }
+            if source.starts_with("main_fast") {
+                let retained: bool = migrated.connection().query_row(
+                "SELECT fast_override = 1 AND f.runtime_binding_revision = a.runtime_binding_revision
+                 FROM camp_member_fast_preference f JOIN agent_profile a ON a.id = f.agent_id
+                 WHERE f.camp_id = 'camp-join' AND f.agent_id = 'agent_1'",
+                [], |row| row.get(0),
+            ).unwrap();
+                assert!(retained);
+            }
+            if source == "main_fast_lifetime" {
+                let applied_at: String = migrated
+                    .connection()
+                    .query_row(
+                        "SELECT applied_at FROM schema_migration WHERE version = 130",
+                        [],
+                        |row| row.get(0),
+                    )
+                    .unwrap();
+                assert_eq!(
+                    applied_at, "main-119-kept-time",
+                    "main 119 must map exactly, not be replayed"
+                );
+                let cache_retained: bool = migrated.connection().query_row(
+                    "SELECT eligible = 1 FROM camp_member_fast_preference WHERE camp_id = 'camp-join'", [], |row| row.get(0),
+                ).unwrap();
+                assert!(
+                    cache_retained,
+                    "mapped Fast lifetime must not invalidate caches again"
+                );
+            }
+            assert!(!directory.join(AUTHORITY_MIGRATION_MANIFEST_FILE).exists());
+            assert!(!directory.join(MIGRATION_BACKUP_ROOT).exists());
+            assert_eq!(
+                original_identity,
+                crate::core_data_dir_lock::FilesystemObjectIdentity::observe(&source_path).unwrap()
+            );
+            if source == "main_pending" {
+                assert!(!directory.join("rovai.sqlite").exists());
+            }
+            assert!(!std::fs::read_dir(&directory).unwrap().any(|entry| {
+                entry
+                    .unwrap()
+                    .file_name()
+                    .to_string_lossy()
+                    .starts_with(".rovai-authority-migration-")
+            }));
+
+            drop(migrated);
+            drop(lease);
+            std::fs::remove_dir_all(directory).unwrap();
+        }
+    }
+
+    #[test]
+    fn failed_step_rolls_back_its_ddl_and_resumes_after_the_last_receipt() {
         let directory =
-            std::env::temp_dir().join(format!("rovai-authority-migration-test-{}", Uuid::new_v4()));
+            std::env::temp_dir().join(format!("rovai-migration-step-failure-{}", Uuid::new_v4()));
         let database = crate::test_support::fresh_schema_database_fast_at(&directory);
+        crate::db::downgrade_current_schema_to_v125_source_for_test(database.connection());
+        // Upgrades must not replay fresh-install DDL outside a versioned step.
         database
             .connection()
-            .execute(
-                "UPDATE agent_profile SET display_name = '迁移保留值' WHERE id = 'agent_1'",
-                [],
-            )
+            .execute_batch("DROP INDEX event_task_idx")
             .unwrap();
-        crate::db::downgrade_current_schema_to_v115_source_for_test(database.connection());
-        let runtime_root = database.runtime_camp_files_root().to_path_buf();
-        let runtime_root_identity = database
+        database.connection().execute_batch("CREATE TRIGGER reject_127 BEFORE INSERT ON schema_migration WHEN NEW.version = 127 BEGIN SELECT RAISE(ABORT, 'injected migration failure'); END;").unwrap();
+        let root = database.runtime_camp_files_root().to_path_buf();
+        let identity = database
             .runtime_camp_files_root_identity_digest()
             .to_string();
         drop(database);
-
         let lease = CoreDataDirLease::acquire(&directory).unwrap();
         let AdmissionAssessment::RequiresMigration(ticket) =
             DatabaseAdmission::assess(&lease).unwrap()
         else {
-            panic!("supported historical contract must produce a migration ticket");
+            panic!("source must require migration")
         };
-        let migrated =
-            AuthorityMigrationRunner::run(*ticket, &runtime_root, &runtime_root_identity).unwrap();
-        crate::test_support::assert_production_database_configuration(&migrated);
-        assert!(matches!(
-            classify_database_contract(migrated.connection()).unwrap(),
-            DatabaseContractClassification::Current(_)
-        ));
-        let display_name: String = migrated
-            .connection()
+        let error = match AuthorityMigrationRunner::run(*ticket, &root, &identity) {
+            Err(error) => error,
+            Ok(_) => panic!("127 must fail"),
+        };
+        assert!(!error.retryable());
+        assert_eq!(error.code(), "authority_migration_schema_failed");
+        let source = lease.data_dir().join("rovai.sqlite");
+        let connection = Connection::open_with_flags(
+            &source,
+            OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_NOFOLLOW,
+        )
+        .unwrap();
+        let receipt: i64 = connection
+            .query_row("SELECT MAX(version) FROM schema_migration", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(receipt, 126);
+        let legacy_index_recreated: bool = connection
             .query_row(
-                "SELECT display_name FROM agent_profile WHERE id = 'agent_1'",
+                "SELECT EXISTS(SELECT 1 FROM sqlite_schema WHERE name = 'event_task_idx')",
                 [],
                 |row| row.get(0),
             )
             .unwrap();
-        assert_eq!(display_name, "迁移保留值");
-        assert!(!directory.join(AUTHORITY_MIGRATION_MANIFEST_FILE).exists());
-        assert!(directory.join(MIGRATION_BACKUP_ROOT).is_dir());
-
-        drop(migrated);
+        assert!(
+            !legacy_index_recreated,
+            "migration cannot run fresh-install bootstrap DDL"
+        );
+        let leaked: bool = connection.query_row("SELECT EXISTS(SELECT 1 FROM pragma_table_info('agent_profile') WHERE name = 'runtime_binding_revision') OR EXISTS(SELECT 1 FROM sqlite_schema WHERE name = 'camp_member_fast_preference')", [], |row| row.get(0)).unwrap();
+        assert!(!leaked, "127 DDL must roll back with its failed receipt");
+        connection.execute_batch("DROP TRIGGER reject_127; UPDATE schema_migration SET applied_at = 'retained-committed-receipt' WHERE version = 126;").unwrap();
+        drop(connection);
+        let AdmissionAssessment::RequiresMigration(ticket) =
+            DatabaseAdmission::assess(&lease).unwrap()
+        else {
+            panic!("partial committed source must remain admissible")
+        };
+        let database = AuthorityMigrationRunner::run(*ticket, &root, &identity).unwrap();
+        let retained: String = database
+            .connection()
+            .query_row(
+                "SELECT applied_at FROM schema_migration WHERE version = 126",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(retained, "retained-committed-receipt");
+        assert!(matches!(
+            classify_database_contract(database.connection()).unwrap(),
+            DatabaseContractClassification::Current(_)
+        ));
+        assert!(!directory.join(MIGRATION_BACKUP_ROOT).exists());
+        drop(database);
         drop(lease);
         std::fs::remove_dir_all(directory).unwrap();
     }
 
     #[test]
-    fn process_kill_during_switch_is_recovered_without_losing_authority() {
-        let directory = std::env::temp_dir().join(format!(
-            "rovai-authority-migration-kill-test-{}",
-            Uuid::new_v4()
-        ));
-        let database = crate::test_support::fresh_schema_database_fast_at(&directory);
-        database
-            .connection()
-            .execute(
-                "UPDATE agent_profile SET display_name = '中断后仍保留' WHERE id = 'agent_1'",
-                [],
-            )
-            .unwrap();
-        crate::db::downgrade_current_schema_to_v115_source_for_test(database.connection());
-        let runtime_root = database.runtime_camp_files_root().to_path_buf();
-        let runtime_root_identity = database
-            .runtime_camp_files_root_identity_digest()
-            .to_string();
-        drop(database);
-
-        let marker = directory.join("migration-switch-reached.test-marker");
-        let executable = std::env::current_exe().unwrap();
-        let mut child = Command::new(executable)
-            .arg("--exact")
-            .arg("authority_migration::tests::migration_process_kill_helper")
-            .arg("--nocapture")
-            .env("ROVAI_MIGRATION_KILL_HELPER_DATA_DIR", &directory)
-            .env("ROVAI_MIGRATION_KILL_HELPER_RUNTIME_ROOT", &runtime_root)
-            .env(
-                "ROVAI_MIGRATION_KILL_HELPER_RUNTIME_IDENTITY",
-                &runtime_root_identity,
-            )
-            .env("ROVAI_MIGRATION_KILL_HELPER_MARKER", &marker)
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .unwrap();
-
-        let deadline = std::time::Instant::now() + Duration::from_secs(20);
-        while !marker.exists() {
-            if let Some(status) = child.try_wait().unwrap() {
-                let output = child.wait_with_output().unwrap();
-                panic!(
-                    "migration helper exited before the switch marker ({status}):\nstdout:\n{}\nstderr:\n{}",
-                    String::from_utf8_lossy(&output.stdout),
-                    String::from_utf8_lossy(&output.stderr),
-                );
+    fn changed_authority_paths_refuse_migration_and_never_initialize_an_empty_store() {
+        for changed in [
+            "removed",
+            "replaced",
+            "sidecar",
+            "other_namespace",
+            "removed_after_migration",
+            "replaced_after_migration",
+            "replaced_before_reopen",
+        ] {
+            let directory =
+                std::env::temp_dir().join(format!("rovai-migration-path-fence-{}", Uuid::new_v4()));
+            let database = crate::test_support::fresh_schema_database_fast_at(&directory);
+            crate::db::downgrade_current_schema_to_v128_source_for_test(database.connection());
+            let root = database.runtime_camp_files_root().to_path_buf();
+            let identity = database
+                .runtime_camp_files_root_identity_digest()
+                .to_string();
+            drop(database);
+            let lease = CoreDataDirLease::acquire(&directory).unwrap();
+            let AdmissionAssessment::RequiresMigration(ticket) =
+                DatabaseAdmission::assess(&lease).unwrap()
+            else {
+                panic!("source must require migration")
+            };
+            let source = directory.join("rovai.sqlite");
+            match changed {
+                "removed" => std::fs::remove_file(&source).unwrap(),
+                "replaced" => {
+                    let replacement = directory.join("replacement.test-fixture");
+                    std::fs::write(&replacement, b"unrelated authority").unwrap();
+                    std::fs::rename(replacement, &source).unwrap();
+                }
+                "sidecar" => std::fs::write(
+                    directory.join("rovai.sqlite-journal"),
+                    b"unexplained sidecar",
+                )
+                .unwrap(),
+                "other_namespace" => {
+                    std::fs::write(directory.join("lumen.sqlite"), b"unexpected authority").unwrap()
+                }
+                "removed_after_migration"
+                | "replaced_after_migration"
+                | "replaced_before_reopen" => {}
+                _ => unreachable!(),
             }
-            assert!(
-                std::time::Instant::now() < deadline,
-                "migration helper did not reach the switch boundary"
-            );
-            thread::sleep(Duration::from_millis(20));
+            let mut before = std::fs::read(&source).ok();
+            let mut interrupted = false;
+            let result =
+                AuthorityMigrationRunner::run_with_progress(*ticket, &root, &identity, |update| {
+                    let after_migration = update.phase == AuthorityMigrationPhase::Reassessing
+                        && matches!(
+                            changed,
+                            "removed_after_migration" | "replaced_after_migration"
+                        );
+                    let before_reopen = update.phase == AuthorityMigrationPhase::ReopeningAuthority
+                        && changed == "replaced_before_reopen";
+                    if !interrupted && (after_migration || before_reopen) {
+                        interrupted = true;
+                        if changed == "removed_after_migration" {
+                            std::fs::remove_file(&source).unwrap();
+                        } else {
+                            let replacement = directory.join("late-replacement.test-fixture");
+                            std::fs::write(&replacement, b"unrelated late authority").unwrap();
+                            std::fs::rename(replacement, &source).unwrap();
+                        }
+                        before = std::fs::read(&source).ok();
+                    }
+                });
+            let error = match result {
+                Err(error) => error,
+                Ok(_) => panic!("changed authority must refuse"),
+            };
+            assert_eq!(error.code(), "authority_contract_changed", "{changed}");
+            assert!(!error.retryable());
+            assert_eq!(std::fs::read(&source).ok(), before);
+            assert!(!directory.join(MIGRATION_BACKUP_ROOT).exists());
+            assert!(!directory.join(AUTHORITY_MIGRATION_MANIFEST_FILE).exists());
+            if changed == "removed" {
+                let error = match continue_after_reassessment(
+                    &lease,
+                    &root,
+                    &identity,
+                    &mut |_| {},
+                    None,
+                ) {
+                    Err(error) => error,
+                    Ok(_) => panic!("reassessment must not initialize"),
+                };
+                assert_eq!(
+                    error.code(),
+                    "authority_migration_reassessment_lost_authority"
+                );
+                assert!(!source.exists());
+            }
+            drop(lease);
+            std::fs::remove_dir_all(directory).unwrap();
         }
-        child.kill().unwrap();
-        let status = child.wait().unwrap();
-        assert!(
-            !status.success(),
-            "helper must be terminated at the failpoint"
-        );
-        std::fs::remove_file(&marker).unwrap();
-        assert!(directory.join(AUTHORITY_MIGRATION_MANIFEST_FILE).is_file());
+    }
 
-        let lease = CoreDataDirLease::acquire(&directory).unwrap();
-        let AdmissionAssessment::RequiresMigration(ticket) =
-            DatabaseAdmission::assess(&lease).unwrap()
-        else {
-            panic!("interrupted switch must be represented by a recovery ticket");
-        };
-        let migrated =
-            AuthorityMigrationRunner::run(*ticket, &runtime_root, &runtime_root_identity).unwrap();
-        assert!(matches!(
-            classify_database_contract(migrated.connection()).unwrap(),
-            DatabaseContractClassification::Current(_)
-        ));
-        let display_name: String = migrated
-            .connection()
-            .query_row(
-                "SELECT display_name FROM agent_profile WHERE id = 'agent_1'",
-                [],
-                |row| row.get(0),
-            )
-            .unwrap();
-        assert_eq!(display_name, "中断后仍保留");
-        assert!(!directory.join(AUTHORITY_MIGRATION_MANIFEST_FILE).exists());
+    #[test]
+    fn process_kill_resumes_committed_migrations_and_both_legacy_switch_sides() {
+        for interruption in [
+            "legacy_switch",
+            "legacy_published",
+            "after_reconciliation",
+            "after_lifetime_reconciliation",
+            "after_126",
+            "after_130",
+        ] {
+            let directory = std::env::temp_dir().join(format!(
+                "rovai-authority-migration-kill-test-{}",
+                Uuid::new_v4()
+            ));
+            let mut database = crate::test_support::fresh_schema_database_fast_at(&directory);
+            database
+                .connection()
+                .execute(
+                    "UPDATE agent_profile SET display_name = '中断后仍保留' WHERE id = 'agent_1'",
+                    [],
+                )
+                .unwrap();
+            match interruption {
+                "after_130" => crate::db::downgrade_current_schema_to_v129_source_for_test(
+                    database.connection(),
+                ),
+                "after_126" => crate::db::downgrade_current_schema_to_v125_source_for_test(
+                    database.connection(),
+                ),
+                "after_reconciliation" | "after_lifetime_reconciliation" => {
+                    crate::db::downgrade_current_schema_to_main_camp_source_for_test(
+                        &mut database,
+                        if interruption == "after_lifetime_reconciliation" {
+                            crate::db::MainCampMigrationSource::FastLifetime
+                        } else {
+                            crate::db::MainCampMigrationSource::Fast
+                        },
+                    )
+                }
+                _ => crate::db::downgrade_current_schema_to_v115_source_for_test(
+                    database.connection(),
+                ),
+            }
+            let runtime_root = database.runtime_camp_files_root().to_path_buf();
+            let runtime_root_identity = database
+                .runtime_camp_files_root_identity_digest()
+                .to_string();
+            drop(database);
 
-        drop(migrated);
-        drop(lease);
-        std::fs::remove_dir_all(directory).unwrap();
+            let marker = directory.join("migration-switch-reached.test-marker");
+            let executable = std::env::current_exe().unwrap();
+            let mut child = Command::new(executable)
+                .arg("--exact")
+                .arg("authority_migration::tests::migration_process_kill_helper")
+                .arg("--nocapture")
+                .env("ROVAI_MIGRATION_KILL_HELPER_DATA_DIR", &directory)
+                .env("ROVAI_MIGRATION_KILL_HELPER_RUNTIME_ROOT", &runtime_root)
+                .env(
+                    "ROVAI_MIGRATION_KILL_HELPER_RUNTIME_IDENTITY",
+                    &runtime_root_identity,
+                )
+                .env("ROVAI_MIGRATION_KILL_HELPER_MARKER", &marker)
+                .env("ROVAI_MIGRATION_KILL_HELPER_INTERRUPTION", interruption)
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .spawn()
+                .unwrap();
+
+            let deadline = std::time::Instant::now() + Duration::from_secs(20);
+            while !marker.exists() {
+                if let Some(status) = child.try_wait().unwrap() {
+                    let output = child.wait_with_output().unwrap();
+                    panic!(
+                        "migration helper exited before the switch marker ({status}):\nstdout:\n{}\nstderr:\n{}",
+                        String::from_utf8_lossy(&output.stdout),
+                        String::from_utf8_lossy(&output.stderr),
+                    );
+                }
+                assert!(
+                    std::time::Instant::now() < deadline,
+                    "migration helper did not reach the switch boundary"
+                );
+                thread::sleep(Duration::from_millis(20));
+            }
+            child.kill().unwrap();
+            let status = child.wait().unwrap();
+            assert!(
+                !status.success(),
+                "helper must be terminated at the failpoint"
+            );
+            std::fs::remove_file(&marker).unwrap();
+            assert_eq!(
+                directory.join(AUTHORITY_MIGRATION_MANIFEST_FILE).is_file(),
+                interruption.starts_with("legacy_")
+            );
+            assert_eq!(
+                directory.join(MIGRATION_BACKUP_ROOT).exists(),
+                interruption.starts_with("legacy_")
+            );
+
+            let lease = CoreDataDirLease::acquire(&directory).unwrap();
+            let AdmissionAssessment::RequiresMigration(ticket) =
+                DatabaseAdmission::assess(&lease).unwrap()
+            else {
+                panic!("interrupted switch must be represented by a recovery ticket");
+            };
+            let migrated =
+                AuthorityMigrationRunner::run(*ticket, &runtime_root, &runtime_root_identity)
+                    .unwrap();
+            assert!(matches!(
+                classify_database_contract(migrated.connection()).unwrap(),
+                DatabaseContractClassification::Current(_)
+            ));
+            let display_name: String = migrated
+                .connection()
+                .query_row(
+                    "SELECT display_name FROM agent_profile WHERE id = 'agent_1'",
+                    [],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(display_name, "中断后仍保留");
+            assert!(!directory.join(AUTHORITY_MIGRATION_MANIFEST_FILE).exists());
+
+            drop(migrated);
+            drop(lease);
+            std::fs::remove_dir_all(directory).unwrap();
+        }
     }
 
     #[test]
@@ -1267,20 +1812,42 @@ mod tests {
         else {
             panic!("kill helper requires a supported migration source");
         };
-        let _ = AuthorityMigrationRunner::run_with_progress(
-            *ticket,
-            &runtime_root,
-            &runtime_identity,
-            |progress| {
-                if progress.phase != AuthorityMigrationPhase::SwitchingAuthority {
-                    return;
-                }
-                std::fs::write(&marker, b"ready").unwrap();
-                loop {
-                    thread::sleep(Duration::from_secs(1));
-                }
-            },
-        );
+        let interruption = std::env::var("ROVAI_MIGRATION_KILL_HELPER_INTERRUPTION").unwrap();
+        let target_phase = match interruption.as_str() {
+            "legacy_switch" => AuthorityMigrationPhase::SwitchingAuthority,
+            "legacy_published" => AuthorityMigrationPhase::SnapshotPublished,
+            "after_reconciliation" | "after_lifetime_reconciliation" => {
+                AuthorityMigrationPhase::Reconciling
+            }
+            "after_126" => AuthorityMigrationPhase::Migrating { version: 126 },
+            "after_130" => AuthorityMigrationPhase::Migrating { version: 130 },
+            _ => unreachable!(),
+        };
+        let mut pause = |progress: AuthorityMigrationProgress| {
+            if progress.phase != target_phase {
+                return;
+            }
+            std::fs::write(&marker, b"ready").unwrap();
+            loop {
+                thread::sleep(Duration::from_secs(1));
+            }
+        };
+        let result = if interruption.starts_with("legacy_") {
+            legacy_snapshot_switch_for_test(
+                ticket.into_migration().unwrap(),
+                &runtime_root,
+                &runtime_identity,
+                &mut pause,
+            )
+        } else {
+            AuthorityMigrationRunner::run_with_progress(
+                *ticket,
+                &runtime_root,
+                &runtime_identity,
+                pause,
+            )
+        };
+        result.unwrap();
         unreachable!("parent process must terminate the migration helper");
     }
 }

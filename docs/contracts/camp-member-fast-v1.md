@@ -28,6 +28,8 @@ Camp/Profile 删除级联清理。
 Migration 118 从 v1.33/schema 71 升级到 v1.34/schema 72，为现有 Profile 初始化不同代次，不创建覆盖。
 Migration 119 升级到 v1.34/schema 73，只替换错误的失效触发器并使旧资格缓存失效，保留所有三态覆盖和绑定代次；
 不增加偏好版本号、Run 状态字段或新表，也不删除既有观测列。此前已被错误删除的选择不能恢复。
+上述118/119是已发布主线的编号；渠道汇合链分别使用127/130，并由131封闭当前合同。精确旧主线来源的receipt映射与
+渠道既有编号保留由 [Channel/Main Schema Join v2](channel-main-schema-join-v2.md)拥有，不重放已完成的Fast修复。
 旧 Run 的可选 `campFast` 缺失仍可反序列化；不得修改既有 Run 的冻结配置。
 
 新 AgentRun 冻结 `campFast { runtimeBindingRevision, fastOverride }`。Codex 请求档位写入既有

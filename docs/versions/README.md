@@ -1,7 +1,7 @@
 ---
 document_type: versions-index
 authority: version-lifecycle
-current_version: v1.34
+current_version: v1.37
 last_updated: 2026-08-31
 ---
 
@@ -185,4 +185,7 @@ last_updated: 2026-08-31
 | v1.31 | `historical` | Desktop Bootstrap/Full Core 分层、SQLite lease/admission/copy migration 与正常日志恢复、Supervisor fencing、本机偏好 fail-open 和跨桥结构化错误已完成 | [v1.31/README.md](v1.31/README.md) |
 | v1.32 | `historical` | CLI 外部附件静默快照、保持 Core 根目录边界 | [v1.32/README.md](v1.32/README.md) |
 | v1.33 | `historical` | Camp 连续消息、私有待发送队列与编辑占用 | [v1.33/README.md](v1.33/README.md) |
-| v1.34 | `current` | Camp 队员三态 Fast 覆盖、原生资格与执行冻结、紧凑成员胶囊 | [v1.34/README.md](v1.34/README.md) |
+| v1.34 | `historical` | Camp 队员三态 Fast 覆盖、原生资格与执行冻结、紧凑成员胶囊 | [v1.34/README.md](v1.34/README.md) |
+| v1.35 | `historical` | 飞书队员 Bot、Owner-only Camp、原会话项目卡、动态 roster 与执行输出；channel 分支原 v1.33 编号顺延 | [v1.35/README.md](v1.35/README.md) |
+| v1.36 | `historical` | 共享 SQLite、飞书终态卡与钉钉 Web Session；钉钉单应用发布已隔离验证，Core/收发/群卡片与 packaged 验收未闭环 | [v1.36/README.md](v1.36/README.md) |
+| v1.37 | `current` | Runtime 结构化图片、混合生命周期、共享 Gallery 与飞书显式文件交付；模型输入教学待二次确认 | [v1.37/README.md](v1.37/README.md) |

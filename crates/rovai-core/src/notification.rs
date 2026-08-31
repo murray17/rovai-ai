@@ -12,6 +12,7 @@ use crate::{
     },
     current_user::CURRENT_USER_ID,
     db::Database,
+    read_model::{CampChannelSource, camp_channel_source_from_row},
 };
 
 const DEFAULT_PAGE_LIMIT: usize = 50;
@@ -268,6 +269,8 @@ impl NotificationChangeCause {
 pub struct NotificationCampView {
     pub id: String,
     pub title: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub channel_source: Option<CampChannelSource>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -1051,6 +1054,7 @@ struct RawEpisode {
     kind: String,
     camp_id: String,
     camp_title: String,
+    camp_channel_source: Option<CampChannelSource>,
     camp_turn_id: Option<String>,
     version: i64,
     attention_revision: i64,
@@ -1285,11 +1289,17 @@ fn load_episode_page(
                              AND occurrence.semantic = 'turn_completed'
                        ) THEN 40
                        ELSE 0
-                   END AS priority
+                   END AS priority,
+                   channel_conversation.provider AS channel_provider,
+                   channel_conversation.conversation_kind AS channel_conversation_kind
             FROM notification_episode AS episode
             JOIN notification_episode_disposition AS episode_disposition
               ON episode_disposition.episode_id = episode.id
             JOIN camp ON camp.id = episode.camp_id
+            LEFT JOIN channel_conversation_binding AS channel_binding
+              ON channel_binding.camp_id = camp.id
+            LEFT JOIN channel_conversation
+              ON channel_conversation.id = channel_binding.channel_conversation_id
             WHERE episode.recipient_user_id = :recipient
               AND episode.created_change_sequence <= :through
               AND episode.attention_revision
@@ -1315,7 +1325,8 @@ fn load_episode_page(
         )
         SELECT id, kind, camp_id, title, camp_turn_id, version,
                attention_revision, last_change_sequence, boundary_sort_at,
-               created_at, updated_at, cleared_through_attention_revision, priority
+               created_at, updated_at, cleared_through_attention_revision, priority,
+               channel_provider, channel_conversation_kind
         FROM ranked
         WHERE :cursor_priority IS NULL
            OR priority < :cursor_priority
@@ -1378,11 +1389,16 @@ fn load_raw_episode_by_id(
                    episode.camp_turn_id, episode.version, episode.attention_revision,
                    episode.last_change_sequence, episode.sort_at,
                    episode.created_at, episode.updated_at,
-                   disposition.cleared_through_attention_revision, 0
+                   disposition.cleared_through_attention_revision, 0,
+                   channel_conversation.provider, channel_conversation.conversation_kind
             FROM notification_episode AS episode
             JOIN notification_episode_disposition AS disposition
               ON disposition.episode_id = episode.id
             JOIN camp ON camp.id = episode.camp_id
+            LEFT JOIN channel_conversation_binding AS channel_binding
+              ON channel_binding.camp_id = camp.id
+            LEFT JOIN channel_conversation
+              ON channel_conversation.id = channel_binding.channel_conversation_id
             WHERE episode.id = ?1 AND episode.recipient_user_id = ?2
               AND episode.attention_revision
                   > disposition.cleared_through_attention_revision
@@ -1400,6 +1416,7 @@ fn raw_episode_from_row(row: &Row<'_>) -> rusqlite::Result<RawEpisode> {
         kind: row.get(1)?,
         camp_id: row.get(2)?,
         camp_title: row.get(3)?,
+        camp_channel_source: camp_channel_source_from_row(row, 13)?,
         camp_turn_id: row.get(4)?,
         version: row.get(5)?,
         attention_revision: row.get(6)?,
@@ -1775,6 +1792,7 @@ fn hydrate_episode(
         camp: NotificationCampView {
             id: raw.camp_id.clone(),
             title: raw.camp_title,
+            channel_source: raw.camp_channel_source,
         },
         camp_turn_id: raw.camp_turn_id.clone(),
         primary_semantic,
@@ -2282,6 +2300,19 @@ mod slow_tests {
     fn collaboration_episode_aggregates_mentions_and_separates_display_from_attention() {
         let (directory, mut database) = test_database();
         insert_camp(&database, "camp-episode", "协作事项");
+        // A closed DM binding still identifies its historic Camp after /new.
+        database.connection().execute_batch(
+            "INSERT INTO channel_conversation(
+                id, provider, tenant_key, chat_id, bot_scope_app_id, conversation_kind,
+                display_name, last_sender_display_name, first_seen_at, last_seen_at
+             ) VALUES ('channel-episode', 'feishu', 'tenant', 'chat', 'app', 'p2p',
+                       'Owner 私聊', 'Owner', '2026-08-01T00:00:00Z', '2026-08-01T00:00:00Z');
+             INSERT INTO channel_conversation_binding(
+                id, channel_conversation_id, execution_scope_kind, camp_id, status,
+                generation, created_at, updated_at, closed_at
+             ) VALUES ('binding-episode', 'channel-episode', 'quick_chat', 'camp-episode',
+                       'closed', 1, '2026-08-01T00:00:00Z', '2026-08-01T00:00:00Z', '2026-08-01T00:00:00Z');"
+        ).unwrap();
         insert_turn(&database, "turn-episode", "camp-episode", "running");
         insert_mention(
             &database,
@@ -2326,6 +2357,16 @@ mod slow_tests {
         assert_eq!(initial.items.len(), 1);
         assert_eq!(initial.unread_count, 1);
         let episode = &initial.items[0];
+        assert_eq!(episode.camp.title, "协作事项");
+        assert_eq!(
+            serde_json::to_value(&episode.camp).unwrap()["channelSource"],
+            json!({ "provider": "feishu", "conversationKind": "p2p" })
+        );
+        let raw = load_raw_episode_by_id(database.connection(), CURRENT_USER_ID, &episode.id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(raw.camp_title, "协作事项");
+        assert_eq!(raw.camp_channel_source, episode.camp.channel_source);
         assert_eq!(episode.kind, NotificationEpisodeKind::Collaboration);
         assert_eq!(episode.primary_semantic, NotificationSemantic::TurnFailed);
         assert_eq!(episode.mention_count, 2);

@@ -5,6 +5,7 @@ import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeTheme, prot
 import { isCampId } from '@contracts'
 import type {
   AppearanceSnapshot,
+  ChannelKind,
   CoreMethod,
   ExecutionConsolePlacement,
   MonitoringFilter,
@@ -99,6 +100,27 @@ import {
   type DesktopAutoUpdater
 } from './app-updates'
 import { AppQuitCoordinator } from './app-quit-coordinator'
+import { ChannelSettingsService } from './channel-settings'
+import { createFeishuExecutionPreviewHost } from './feishu-execution-preview'
+import { ChannelSettingsCoordinator } from './channel-settings-coordinator'
+import { parseChannelLoginViewBounds } from './dingtalk-login-view'
+import { ChannelHostLifecycle } from './channel-host-lifecycle'
+import {
+  SqliteChannelCredentialStore,
+  SqliteChannelDeveloperSessionStore
+} from './channel-credential-store'
+import { ElectronFeishuDeveloperSessionService } from './feishu-developer-session'
+import { FeishuWebSessionMemberBotProvisioner } from './feishu-member-bot-provisioner'
+import { ControlledMemberBotAvatarSourceResolver } from './member-bot-avatar-source'
+import {
+  DingTalkDeveloperGateway
+} from './dingtalk-developer-gateway'
+import { ElectronDingTalkDeveloperSessionService } from './dingtalk-developer-session'
+import { DingTalkOpenPlatformMemberBotProvisioner } from './dingtalk-member-bot-provisioner'
+import {
+  DINGTALK_REQUIRED_SCOPE_VALUES,
+  DingTalkChannelSettingsService
+} from './dingtalk-channel-settings'
 import { CoreFilePreviewSourceAuthority } from './file-preview/file-preview-authority'
 import { FilePreviewService } from './file-preview/file-preview-service'
 import {
@@ -113,6 +135,12 @@ import {
   parseReloadRequest,
   parseReopenRequest
 } from './file-preview/file-preview-ipc-input'
+
+function optionalChannelKind(value: unknown): ChannelKind | undefined {
+  if (value === undefined) return undefined
+  if (value === 'feishu' || value === 'dingtalk') return value
+  throw new Error('Invalid channel kind')
+}
 
 const mainStartupStartedAt = performance.now()
 console.info('[startup] stage=main_module_loaded elapsed_ms=0.0')
@@ -199,6 +227,7 @@ const allowedMethods = new Set<CoreMethod>([
   'agentRuns.resolveRecoveryBlocker',
   'camps.snapshot',
   'agentRunFileChanges.get',
+  'agentRunImages.read',
   'camp.messages.page',
   'camp.messages.around',
   'camp.messages.find',
@@ -324,6 +353,60 @@ function requireMemberAvatars(): MemberAvatarAssetService {
   return memberAvatars
 }
 
+const memberBotAvatarSource = new ControlledMemberBotAvatarSourceResolver({
+  read: (...args) => requireMemberAvatars().read(...args)
+})
+const channelCredentialStore = new SqliteChannelCredentialStore(core)
+const channelDeveloperSessionStore = new SqliteChannelDeveloperSessionStore(core)
+const feishuDeveloperSession = new ElectronFeishuDeveloperSessionService(
+  channelDeveloperSessionStore,
+  () => mainWindow
+)
+const feishuChannelSettings = new ChannelSettingsService({
+  core,
+  credentialStore: channelCredentialStore,
+  developerSession: feishuDeveloperSession,
+  memberBotProvisioner: new FeishuWebSessionMemberBotProvisioner(feishuDeveloperSession),
+  memberBotAvatarSource,
+  executionPreview: createFeishuExecutionPreviewHost(process.argv, coreDataPath)
+})
+const dingtalkDeveloperSession = new ElectronDingTalkDeveloperSessionService({
+  store: channelDeveloperSessionStore,
+  getParentWindow: () => mainWindow
+})
+const dingtalkDeveloperGateway = new DingTalkDeveloperGateway({
+  session: dingtalkDeveloperSession
+})
+const dingtalkChannelSettings = new DingTalkChannelSettingsService({
+  core,
+  credentialStore: channelCredentialStore,
+  developerSession: dingtalkDeveloperSession,
+  provisioner: new DingTalkOpenPlatformMemberBotProvisioner({
+    developerApi: dingtalkDeveloperGateway,
+    developerSession: dingtalkDeveloperSession
+  }),
+  avatarSource: memberBotAvatarSource,
+  requiredScopeValues: DINGTALK_REQUIRED_SCOPE_VALUES
+})
+const channelSettings = new ChannelSettingsCoordinator({
+  feishu: feishuChannelSettings,
+  dingtalk: dingtalkChannelSettings
+})
+const channelHostLifecycle = new ChannelHostLifecycle({
+  async start() {
+    await channelSettings.start()
+    if (coreDataPath !== null) {
+      await removeRetiredChannelCredentialFiles(coreDataPath).catch((error) => {
+        console.warn('[rovai] Retired channel credential file cleanup failed; Channel Hosts remain available.', error)
+      })
+    }
+  },
+  stop: () => channelSettings.stop()
+})
+channelSettings.onChanged((snapshot) => {
+  if (!mainWindow || mainWindow.isDestroyed() || mainWindow.webContents.isDestroyed()) return
+  mainWindow.webContents.send('rovai:channels-changed', snapshot)
+})
 const filePreview = new FilePreviewService(
   new CoreFilePreviewSourceAuthority(core),
   {
@@ -698,6 +781,9 @@ if (primaryInstance) void app.whenReady().then(async () => {
   core.onSnapshot((snapshot) => {
     mainWindow?.webContents.send('rovai:supervisor-changed', snapshot)
     maybeInitializeOnboarding(snapshot)
+    void channelHostLifecycle.update(snapshot).catch((error) => {
+      console.warn('[rovai] Channel Host transition failed; the App will remain available.', error)
+    })
   })
   createWindow()
   console.info(
@@ -800,6 +886,21 @@ if (primaryInstance) void app.whenReady().then(async () => {
   }
   app.quit()
 })
+
+async function removeRetiredChannelCredentialFiles(userDataPath: string): Promise<void> {
+  const root = join(userDataPath, 'channel-credentials')
+  const rootStat = await lstat(root).catch(() => null)
+  if (!rootStat?.isDirectory()) return
+  await unlink(join(root, 'feishu-developer-session.bin')).catch(() => undefined)
+  await unlink(join(root, 'dingtalk-developer-session.bin')).catch(() => undefined)
+  const entries = await readdir(root, { withFileTypes: true }).catch(() => [])
+  await Promise.all(entries
+    .filter((entry) => entry.isFile() && (
+      /^feishu-[a-z0-9-]+\.bin$/.test(entry.name)
+      || /^dingtalk-[a-z0-9-]+\.bin$/.test(entry.name)
+    ))
+    .map((entry) => unlink(join(root, entry.name)).catch(() => undefined)))
+}
 
 app.on('second-instance', () => {
   if (!mainWindow || mainWindow.isDestroyed()) return
@@ -1008,6 +1109,71 @@ ipcMain.handle('rovai:general-preferences-set-world-map', (_event, enabled: unkn
 
 ipcMain.handle('rovai:general-preferences-invalidate-new-conversation-defaults', () => {
   return requireGeneralPreferences().invalidateNewConversationDefaults()
+})
+
+ipcMain.handle('rovai:channels-get', (event) => {
+  requireMainWindow(event.sender)
+  return channelSettings.get()
+})
+
+ipcMain.handle('rovai:channels-connect', (event, kind: unknown) => {
+  requireMainWindow(event.sender)
+  return channelSettings.connect(optionalChannelKind(kind))
+})
+
+ipcMain.handle('rovai:channels-disconnect', (event, kind: unknown) => {
+  requireMainWindow(event.sender)
+  return channelSettings.disconnect(optionalChannelKind(kind))
+})
+
+ipcMain.handle('rovai:channels-publish-member-bot', (
+  event,
+  agentId: unknown,
+  kind: unknown
+) => {
+  requireMainWindow(event.sender)
+  if (typeof agentId !== 'string' || !agentId) throw new Error('Invalid Agent ID')
+  return channelSettings.publishMemberBot(agentId, optionalChannelKind(kind))
+})
+
+ipcMain.handle('rovai:channels-retry-member-bot', (event, agentId: unknown, kind: unknown) => {
+  requireMainWindow(event.sender)
+  if (typeof agentId !== 'string' || !agentId) throw new Error('Invalid Agent ID')
+  return channelSettings.retryMemberBot(agentId, optionalChannelKind(kind))
+})
+
+ipcMain.handle('rovai:channels-select-publication-approver', (
+  event,
+  agentId: unknown,
+  userId: unknown,
+  kind: unknown
+) => {
+  requireMainWindow(event.sender)
+  if (typeof agentId !== 'string' || !agentId) throw new Error('Invalid Agent ID')
+  if (typeof userId !== 'string' || !userId) throw new Error('Invalid DingTalk approver')
+  return channelSettings.selectPublicationApprover(
+    agentId,
+    userId,
+    optionalChannelKind(kind)
+  )
+})
+
+ipcMain.handle('rovai:channels-cancel-qr', (event, attemptId: unknown) => {
+  requireMainWindow(event.sender)
+  if (typeof attemptId !== 'string' || !attemptId) throw new Error('Invalid QR attempt ID')
+  return channelSettings.cancelQrAttempt(attemptId)
+})
+
+ipcMain.handle('rovai:channels-login-view-bounds', (event, attemptId: unknown, bounds: unknown) => {
+  requireMainWindow(event.sender)
+  if (typeof attemptId !== 'string' || !attemptId) throw new Error('Invalid QR attempt ID')
+  channelSettings.setLoginViewBounds(attemptId, parseChannelLoginViewBounds(bounds))
+})
+
+ipcMain.handle('rovai:channels-refresh-login-qr', (event, attemptId: unknown) => {
+  requireMainWindow(event.sender)
+  if (typeof attemptId !== 'string' || !attemptId) throw new Error('Invalid QR attempt ID')
+  channelSettings.refreshLoginQr(attemptId)
 })
 
 ipcMain.handle('rovai:onboarding-get', () => requireOnboarding().get())
@@ -1525,7 +1691,7 @@ const appQuitCoordinator = new AppQuitCoordinator({
     const stopAutomation = userAutomation?.stop() ?? Promise.resolve()
     userAutomation = null
     try {
-      await stopAutomation
+      await Promise.all([stopAutomation, channelHostLifecycle.stop()])
     } catch (error) {
       console.error('Rovai User Automation shutdown failed', error)
     }
@@ -1572,6 +1738,13 @@ function requireMainWindow(webContents: Electron.WebContents): BrowserWindow {
     throw new Error('Main window is unavailable')
   }
   return window
+}
+
+function requireObject(value: unknown): Record<string, unknown> {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    throw new Error('Invalid channel settings request')
+  }
+  return value as Record<string, unknown>
 }
 
 function requireFilePreviewSender(event: Electron.IpcMainInvokeEvent): number {

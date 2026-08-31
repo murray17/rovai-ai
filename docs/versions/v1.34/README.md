@@ -1,7 +1,7 @@
 ---
 document_type: version-overview
 version: v1.34
-lifecycle: current
+lifecycle: historical
 authority: version-scope-and-status
 design_status: confirmed
 implementation_status: completed

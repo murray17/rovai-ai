@@ -41,3 +41,9 @@ Managed v2 数据库、消息/Delivery 原子提交、Renderer 和 Runtime 专�
 | Runtime compatibility | 确认无需更新 | 未新增 Runtime 或宣称真实 Runtime 验收结果 |
 | Documentation routing | 已更新 | docs/README.md 与合同索引（本次实现同步） |
 | Root README | 确认无需更新 | 产品定位和安装方式不变 |
+
+## 合入渠道分支记录
+
+2026-08-30 随 `main@4e796bde` 合入渠道分支，按上述已完成实施事实冻结为 historical；
+原范围、模型确认、决定正文和验收边界保持不变。渠道记录因编号冲突顺延，当前版本由
+[版本索引](../README.md)的唯一指针确定。

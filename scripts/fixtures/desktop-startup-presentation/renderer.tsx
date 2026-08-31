@@ -34,6 +34,7 @@ let initialSupervisor = deferred<SupervisorSnapshot>()
 let onboarding = deferred<OnboardingSnapshot>()
 let root: Root | null = null
 let supervisor: SupervisorSnapshot
+let appearanceTheme: 'day' | 'night' = 'day'
 
 function starting(): SupervisorSnapshot {
   return {
@@ -70,7 +71,7 @@ function api(path = ''): unknown {
       if (path.split('.').at(-1)?.startsWith('on')) return () => undefined
       if (path === 'supervisor.getSnapshot') return initialSupervisor.promise
       if (path === 'desktopSession.getStartupSnapshot') { calls.push(path); return localSession.promise }
-      if (path === 'appearance.get') return Promise.resolve({ preference: 'system', resolvedTheme: 'day' })
+      if (path === 'appearance.get') return Promise.resolve({ preference: 'system', resolvedTheme: appearanceTheme })
       if (path === 'generalPreferences.get') return Promise.resolve({ schemaVersion: 4,
         startupLocationMode: 'last_location', lastSettingsSection: 'general', executionConsolePlacement: 'bottom',
         newConversationDefaults: null, newConversationDefaultsRequireConfirmation: false,
@@ -166,7 +167,8 @@ Object.assign(window, { startupTest: {
     pageFrame('camp', false)
     await advance(1)
     pageFrame('camp', true)
-    check(document.querySelector('main')?.textContent?.includes('升级本地数据'), 'Migration status stays inside the target page')
+    check(document.querySelector('main')?.textContent?.includes('正在打开会话'), 'Migration uses ordinary opening feedback')
+    check(!document.body.textContent?.match(/升级|数据库|migration|staging|schema|复制页数/), 'Internal migration details must not reach the opening UI')
     noAuthority()
     window.dispatchEvent(new KeyboardEvent('keydown', { key: 'k', metaKey: true, bubbles: true }))
     await flush()
@@ -175,9 +177,10 @@ Object.assign(window, { startupTest: {
 
     await reset({ kind: 'camp', campId }, false)
     publish({ startupPhase: 'migrating_authority' })
-    initialSupervisor.resolve(starting())
+    initialSupervisor.resolve({ ...starting(), runtimeMode: 'full_core', fullCoreState: 'ready',
+      capabilities: { ...supervisor.capabilities, authoritativeWorkspace: true, coreRequests: true } })
     await advance(400)
-    check(document.querySelector('main')?.textContent?.includes('升级本地数据'), 'A stale initial snapshot cannot replace a newer event')
+    check(document.querySelector('main')?.textContent?.includes('正在打开会话'), 'A stale initial ready snapshot cannot replace a newer starting event')
     noAuthority()
     cases.push('subscribe-first startup ignores a late initial Supervisor snapshot')
 
@@ -225,10 +228,13 @@ Object.assign(window, { startupTest: {
 
     await reset()
     publish({ fullCoreState: 'blocked', capabilities: { ...supervisor.capabilities, fullCoreRetry: true },
+      lastError: { code: 'authority_contract_changed', message: 'migration schema /private/fixture.sqlite', retryable: false, details: {} },
       authorityState: { kind: 'owned_by_active_core', dataDir: '/isolated/fixture', owner: { pid: 42 } } })
     await flush()
     check(document.querySelector('.bootstrap-shell'), 'An actual admission blocker still exposes recovery controls immediately')
     check(document.body.textContent?.includes('导出诊断'), 'Blocked startup retains diagnostics')
+    check(document.body.textContent?.includes('暂时无法打开会话') && document.body.textContent?.includes('重新打开'), 'Recovery actions use product copy')
+    check(!document.body.textContent?.match(/migration|schema|sqlite|private|Core/), 'Structured reasons remain in diagnostics only')
     noAuthority()
     cases.push('confirmed blocker remains recoverable without mounting authority')
 
@@ -236,8 +242,9 @@ Object.assign(window, { startupTest: {
     localSession.reject(new Error('Local session read failed'))
     await flush()
     pageFrame('location', true)
-    check(document.querySelector('[role="alert"]')?.textContent?.includes('Local session read failed'),
-      'Local session failure must be visible before 400ms')
+    check(document.querySelector('[role="alert"]')?.textContent?.includes('暂时无法打开会话'),
+      'Local session failure must expose recovery before 400ms')
+    check(!document.body.textContent?.includes('Local session read failed'), 'Local technical failure stays out of visible copy')
     noAuthority()
     cases.push('local preference read errors stay local and do not wait 400ms')
 
@@ -285,17 +292,36 @@ Object.assign(window, { startupTest: {
     cases.push('Runtime discovery retains full refresh across mixed debounce events')
     return { ok: true, cases }
   },
-  async capture(theme: string) {
-    await reset()
-    await advance(400)
+  async capture(theme: string, state = 'loading') {
+    appearanceTheme = theme === 'night' ? 'night' : 'day'
+    document.documentElement.dataset.theme = appearanceTheme
+    if (state === 'local-error') {
+      await reset(null)
+      localSession.reject(new Error('Private local preference failure'))
+    } else {
+      await reset()
+      if (state === 'blocked') {
+        publish({ fullCoreState: 'blocked', capabilities: { ...supervisor.capabilities, fullCoreRetry: true },
+          lastError: { code: 'authority_contract_changed', message: 'migration schema /private/fixture.sqlite', retryable: false, details: {} } })
+      } else {
+        await advance(400)
+      }
+    }
     document.documentElement.dataset.theme = theme
     await flush()
-    pageFrame('camp', true)
+    if (state === 'loading') pageFrame('camp', true)
+    check(document.documentElement.scrollWidth <= window.innerWidth, 'Startup recovery must not overflow horizontally')
+    if (state !== 'loading') {
+      check(document.body.textContent?.includes('暂时无法打开会话'), 'Failure capture keeps the same product title')
+      check(document.body.textContent?.includes('导出诊断'), 'Failure capture retains diagnostics')
+    }
+    noAuthority()
+    const progress = document.querySelector('.startup-route-progress')
     return {
       width: window.innerWidth,
       height: window.innerHeight,
       reducedMotion: matchMedia('(prefers-reduced-motion: reduce)').matches,
-      animation: getComputedStyle(document.querySelector('.startup-route-progress')!).animationName
+      animation: progress ? getComputedStyle(progress).animationName : 'none'
     }
   }
 } })

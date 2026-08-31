@@ -1046,6 +1046,15 @@ function authorableStructuredContent(
     if (segment.kind === 'current_user_mention') {
       return { kind: 'text' as const, text: '@你' }
     }
+    if (segment.kind === 'external_quote') {
+      const attachments = segment.attachmentSummaries
+        .map((attachment) => `\n[附件] ${attachment.name}${attachment.mediaType ? ` (${attachment.mediaType})` : ''}`)
+        .join('')
+      return {
+        kind: 'text' as const,
+        text: `[外部引用]\n${segment.senderDisplayName}：\n${segment.body}${attachments}`
+      }
+    }
     return segment
   }))
 }

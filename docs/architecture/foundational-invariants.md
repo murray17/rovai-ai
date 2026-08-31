@@ -20,7 +20,7 @@ last_updated: 2026-08-31
   Camp、Member、Memory、Navigation 与其他业务读写只有 `authoritativeWorkspace` capability ready 后才能挂载。
   阻断期间不得创建替代数据库、查询未准入 authority 或用空集合冒充正常工作区。
   非权威页面框架不属于业务读写：本机恢复目标读取后先显示对应页面框架，正常慢启动/迁移沿用 400ms 内容区反馈，
-  不以 Core 未 ready 为由展示全屏恢复页；只有明确阻断或 crashed 才展示 Bootstrap 恢复面。
+  统一“正在打开会话”，不暴露内部阶段；只有最终阻断或 crashed 才展示“暂时无法打开会话”的 Bootstrap 恢复面。
 - Core 必须先持有绑定 canonical data directory 与稳定对象身份的 OS 排他 lease，再观察或操作 SQLite。数据库
   准入只返回 existing、initializable、migration 或 typed blocked；票据绑定 lease、不可复制、一次消费并在打开、
   清理或发布前复核相关对象。只有 `lumen.sqlite` 时精确使用它，不创建 `rovai.sqlite`。
@@ -28,10 +28,13 @@ last_updated: 2026-08-31
   清理。全新 authority 只在两个 namespace 都确认无 main/WAL/journal 后，通过 staging 与原子 no-replace 发布。
 - 只读探测报告需要正常 SQLite journal recovery 时，可在同一 lease 的 exact target 上让引擎完成恢复，再重新准入；
   不把正常 hot journal 回滚永久当作权限故障，也不授权业务写入或手动删除日志。正式连接统一配置 WAL 与同步策略。
-- 旧合同 migration 使用一致副本，原 main/sidecar 的私有备份、identity manifest、完整校验与原子切换；中断恢复按
-  current main 的 original/migrated identity 决定恢复，未知 identity fail closed。迁移失败保留原 authority 与壳层。
+- 受支持旧合同只在 ticket 的 exact 原库上执行逐版本事务，无 CREATE；任何写入前重验 contract/classifier/schema cookie/
+  全部 receipts 与文件 identity。每步 DDL/DML/marker/receipt 一起提交，中断后从缺失步骤继续；不新建普通升级副本、
+  备份或 manifest，不替换主文件，不默认全库扫描。迁移后只重新准入并打开同一 main，不以失败或原库消失为由建空库。
+  旧 manifest 继续按 current main 的 original/migrated identity 恢复；未知 identity fail closed。
 - Full Core Supervisor 发布单调 generation/revision 的完整快照。旧 child 的 frame、event、response 或 exit 不能污染
-  当前 generation；确定性准入阻断不消耗 crash budget。Renderer-facing request 继续是 `Promise<T>`，内部 transport
+  当前 generation；准入/打开/迁移的明确瞬时故障使用独立 250/750/1500ms startup retry，确定性错误不自动重试，均不
+  消耗 crash budget。已见 authority 的后续重启禁止初始化空库。Renderer-facing request 继续是 `Promise<T>`，内部 transport
   必须保留领域拒绝、基础设施失败、Full Core 不可用与 shutdown 的结构化类别；failure 以普通对象穿过 contextBridge，
   不能依赖 Error 自定义字段跨隔离世界保留。
 
@@ -43,6 +46,9 @@ last_updated: 2026-08-31
 - 命令在规范化后计算版本化请求摘要，并在一个 SQLite 写事务中重查幂等结果、校验 Actor、epoch、Capability、expected version 和领域门禁，再提交对象变化、审计事件与唯一命令结果。相同命令身份和相同摘要永久返回首次结果；相同身份但不同语义必须稳定冲突。
 - Repository 参加调用方拥有的 Unit of Work，不自行提交。Migration 只改变 schema 和数据，不在事务中执行 Runtime、Git、网络或文件系统补偿；提交后的唤醒只是可恢复提示，不是事实真源。
 - 领域事件日志用于审计、幂等结果和增量失效，不是 Event Sourcing 状态库、Outbox、Worker 队列或业务对象的替代真源。
+- 渠道 Host 的内部 tick 只推进已提交的 request/Outbox，不是新的业务意图入口，也不为每次唤醒保存永久命令回执。
+  维护步骤仍在 Core 单个写事务内调用既有 Handler；真实 admission 的领域事件、FIFO 防重和 delivery lease/结算幂等
+  均保留。精确请求与响应丢失恢复由 [Channel Host Maintenance v1](../contracts/channel-host-maintenance-v1.md) 拥有。
 
 <a id="core-managed-content"></a>
 
@@ -80,6 +86,7 @@ last_updated: 2026-08-31
 - Camp 创建是 User-only、幂等且原子的独立领域动作。它冻结 workspace、成员、Default Lead 和协作模式，但不创建 Conversation、消息、Turn、Run、Native Session 或执行 Workspace，也不把 Runtime ready 当成 Camp 创建前提。
 - Camp 可以持久存在于零消息、零 Conversation 状态。Conversation 只在原子 Execution Admission 中为每个精确目标惰性创建；该业务准入不执行 Workspace 文件系统、Git、Runtime discovery、可执行文件或 fingerprint 检查，多目标提交保持 all-or-none。
 - Camp 名称经过空白规范化并受 Unicode scalar 上限约束，持久记录 `default | generated | user` 来源。只有第一条已接受用户执行提交可把默认名确定性改为生成名；用户命名永不被自动覆盖。生成名从权威 Structured Content 中去掉连续的行首寻址 mention 后计算，不从原始 Markdown 猜测。
+- 飞书/钉钉渠道 Camp 复用同一默认命名与原子生成流程；渠道类型由既有绑定只读投影，前缀只在 Renderer 展示，不写入 title 或模型输入。闭合的历史绑定仍保留来源，不批量改写旧名称。字段见 [Channel Camp Naming v1](../contracts/channel-camp-naming-v1.md)。
 - Camp activation 是 Core-owned `pending | active` 状态。显式创建 Dialog 直接建立 Active Camp；经确认的一键入口建立 Pending Camp；Pending Camp 的第一条已接受用户提交在消息事务中将其激活。Pending Camp 不进入普通执行入口；空 Pending Camp 只能经受控丢弃或启动清理删除，有正文或附件的 Pending Draft 才能进入导航与恢复。
 
 <a id="camp-workspace"></a>
@@ -169,6 +176,7 @@ last_updated: 2026-08-31
 - Camp、CampMember、Default Lead、Conversation、CampMessage、CampTurn、AgentRun 和 Task 由 Core 作为同一协作边界协调。Presence、Camp membership、Runtime readiness、Capability、权限、预算和 fencing 是相互独立的准入轴，不能由其中一项推导其余项。
 - CampMember 只表达 Camp 内关系，不复制全局 Presence。成员顺序使用稳定、不复用的关系序列；Default Lead 必须是当前有效关系且符合领导资格，Camp 至少保留一位 active member。动态关系命令使用 generation/version CAS，Lead successor 与影响预览由 Core 验证，不由 Renderer 自选替代。
 - Camp 只冻结 workspace binding 和成员关系，Git/Project 是可重观测投影而不是新聚合。新 Camp 不预创建 Conversation 或 Run；原子 Execution Admission 为精确目标惰性创建 Conversation、公共消息、Turn 与 queued Run，多目标保持 all-or-none。Workspace、Git、Runtime 与可执行文件检查属于后续 Scheduler dispatch 边界。永久删除默认要求 quiescent，force 只能在用户明确确认和持久停止/隔离边界后执行。
+- 外部渠道不得直接写 CampMessage、CampTurn 或 AgentRun；完成 transport dedup/聚合和 live binding recheck 后，必须复用同一原子 Execution Admission。尚未绑定或仍在渠道 FIFO 中的消息不是公共消息，也不进入 History、Context 或执行。`ExternalPrincipal` 只表达作者、上下文来源和回复目标，不继承 `local_user` 的项目、绑定或本机管理能力。
 - Renderer 可以先本地显示待确认的用户消息，但不得把它当成 CampMessage。Core 接受发送时原子持久公共消息、Turn、目标 Run 和冻结配置；Scheduler 在执行边界完成 workspace、Runtime、Git、当前 exact membership lifetime/permission/fence 检查。所有 Agent 业务工具也必须匹配 Run 冻结的 membership version；再次添加同一 Agent 不恢复旧 Run 权限。失败产生诚实 Run 终态，不撤销已接受消息；per-Run ending Git observation 属于终态审计，Runtime 文件变化属于 terminal 后的附加 Evidence projection，二者都不是发送准入。
 - 一次 CampTurn 的 root Run 与 A2A 后代共享冻结 execution budget。Core 以一个事务检查与消费总 AgentRun、accepted A2A、depth、fanout 和相关 allowance，并对重放返回同一结果；客户端、Runtime 或多条 Delivery 不能拆分请求绕过预算。
 - CampMessage/CampTurn/AgentRun/Conversation 与 Domain Event 的创建、开始、更新和结束字段使用调用时 UTC wall clock；`AgentRun.created_at` 属于输入接受边界，`started_at` 属于实际 claim 边界。Execution Budget 另用非倒退 observation，取 wall clock、进程 awake elapsed anchor 和上次 observation 的最大值，使系统休眠计入 deadline、wall clock 回拨不延长预算；Budget observation 不得写入业务审计时间。
@@ -291,7 +299,7 @@ last_updated: 2026-08-31
 ### Session continuity 与 Bootstrap
 
 - Conversation handoff 只在明确、可验证的 Native Session continuation 边界保持连续性。Camp 公共历史与 portable context 属于 Rovai 逻辑连续性；Runtime native thread/session 是外部 binding。跨 Runtime、身份、Camp、binding generation 或不兼容 contract 的“恢复”必须创建新 Session，不能把摘要、同一路径或版本当作原生连续性证明。
-- Native Session Bootstrap 是完整、不可变的交付 bytes/digest，固定按 `SESSION_CHARTER → MEMBER_IDENTITY → COLLABORATION_STATE` 三段组合。`MEMBER_IDENTITY` 始终包含一个 six-field self aggregate 的最新值；`COLLABORATION_STATE` 只包含当前 Camp peer routing/Lead，不泄露 peer persona、Presence、Runtime、Memory 或 busy 状态。新 Session/替换 Session 使用当时最新身份，既有 Session 不因编辑被热改写。
+- Native Session Bootstrap 是完整、不可变的交付 bytes/digest，固定按 `SESSION_CHARTER → MEMBER_IDENTITY → MEMORY_ENTRYPOINT` 三段组合。`MEMBER_IDENTITY` 始终包含一个 six-field self aggregate 的最新值；Dynamic Context 中的 `COLLABORATION_STATE` 只包含当前 Camp peer routing/Lead，不泄露 peer persona、Presence、Runtime、Memory 或 busy 状态。新 Session/替换 Session 使用当时最新身份，既有 Session 不因编辑被热改写。
 - Session Charter 只拥有稳定产品合同、工具/Skill 进入方法与协作纪律，合同不兼容时通过版本和 Session rotation 切换，不把 operation schema 复制入永久 prompt。动态 AgentRun Context 只携带本次 `CURRENT_INPUT`、受限公共历史、Task/Run facts、附件和显式选择，不重复永久 Session 规则或把私有 Conversation 当公开上下文。
 - Bootstrap 各组件、完整序列化 bytes 和实际投递是不同 evidence 层；不用“已生成完整 Bootstrap”替代 Runtime accepted evidence。ContextManifest 记录冻结 digest/versions，Runtime Input Delivery Evidence 记录实际 bytes 与 accepted ACK；只有 accepted ACK 推进 Conversation 投递水位，失败/未知必须在后续输入重试。
 - Bootstrap redelivery 是 durable requirement，但 detector signal 本身不证明 compaction、不授权发送。Core 通过每 Native Session 唯一的 observer lease/generation、Runtime-owned policy epoch、prepared-input cutoff 和幂等 Session-scoped command 决定下一个尚未准备的输入是否需要 redelivery；旧 binding、旧 generation、迟到信号或已经 prepare 的输入都 fail closed。
@@ -309,6 +317,7 @@ last_updated: 2026-08-31
 - 引用链闭包使用独立的有界 Profile：只补齐理解当前公开消息所需的 exact public ancestors，有固定深度/数量/字符优先级，并保留来源、裁剪和遗漏证据。每个祖先在投影时重做 live authorization；闭包不绕过 History scope、不把私有 Conversation 公开，也不把引用的附件自动展开为模型输入。
 - Whole-history omission 必须区分“候选真实为空”“候选存在但预算全部排除”“只投影部分”。当 exact ID 列表本身超过 evidence budget 时，Manifest 保留 total omitted count、可证明的 bounded digest/range 而不声称列出全部 ID。空 section 和整段省略有不同、显式、可测试证据。
 - Agent 与 Human Principal 的 body/snippet/search offset 使用分开、版本化投影。Agent-facing 视图不默认获得 Human 原文或未脱敏字段；History、Search、Context 和 Gather 必须选择与受众一致的投影并保留结构化 Principal 线索。
+- 外部渠道 reply 作为当前唯一触发 CampMessage 的受校验 Structured Content 引用段进入标准 body/Context 投影；被引消息不因此单独公开，transport message ID 不成为 Camp reply identity。Channel Host 不能用 prompt override 绕过 CampMessage、ContextManifest 或 Runtime Input Delivery Evidence。
 
 <a id="context-manifest-run-facts"></a>
 
@@ -524,6 +533,7 @@ last_updated: 2026-08-31
 - Conversation Header 的 Inspector 显隐是 Renderer 本地偏好，不产生领域命令。Stop 是时间线中的 CampTurn 终态投影；Copy 属于具体消息内容，Shared top bar 不取代页面自己的标题和动作。
 - 执行过程以 Agent 为稳定聚合单位：同一 Camp 中一个 Agent 的 Run chronology 形成一个过程入口，状态必须由证据和 Run authority 归约，不能按最后一条文本或动画猜测。
 - 普通 Camp Inspector 只有聚焦上下文和已定义的执行/详情入口；Approval 使用唯一 surface，不能在多个面板复制可操作控件或产生竞争决策。
+- 渠道账号与队员 Bot 只在 Owner 本机设置 surface 可操作；渠道页不维护第二套项目目录或会话绑定。飞书只接受已验证 Owner，私聊自动 Quick Chat，群/话题首次项目选择只通过 Owner 私聊卡片完成。Renderer 只得到脱敏投影；App Secret、Cookie/CSRF、本机路径、原始外部身份和 Host 恢复游标留在 Main/Core 对应权威，不进入 DOM、Renderer state 或 Agent Context。
 - Agent execution console 在一个已挂载 Camp workspace 内只有一个 Renderer-owned surface；其 `bottom | inspector`
   placement 是 Main-owned 的本机安装级展示偏好，最后一次成功的显式位置选择跨 Camp、页面切换和应用重启
   生效，但不进入 Camp/Core/SQLite 或云同步。旧偏好没有该字段时只补 `bottom`，不从历史 workspace、

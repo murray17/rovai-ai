@@ -1,15 +1,15 @@
 import { describe, expect, it } from 'vitest'
-import fixture from '../fixtures/agent-run-context-v20.json'
+import fixture from '../fixtures/agent-run-context-v22.json'
 import { isCampId, type ContextManifestView } from './index'
 
 describe('AgentRun context contract', () => {
-  it('uses the shared frozen v20 fixture', () => {
-    const formatterVersion: ContextManifestView['formatterVersion'] = 20
+  it('uses the shared frozen v22 fixture', () => {
+    const formatterVersion: ContextManifestView['formatterVersion'] = 22
 
     expect(fixture.agentRunContextFormatterVersion).toBe(formatterVersion)
     expect(fixture.contextManifestFormatterVersion).toBe(formatterVersion)
     expect(fixture.contextDeliveryProfileVersion).toBe(4)
-    expect(fixture.contextManifestVersion).toBe(19)
+    expect(fixture.contextManifestVersion).toBe(22)
     expect(fixture.messageProjectionAudience).toBe('agent_v1')
     expect(fixture.dynamicContextSectionOrder.slice(-2)).toEqual(['A2A_GUIDANCE?', 'CURRENT_INPUT'])
     expect(fixture.dynamicContextSectionOrder.at(-1)).toBe('CURRENT_INPUT')
@@ -39,6 +39,11 @@ describe('AgentRun context contract', () => {
     })
     expect(fixture.currentInputSourceShapes).toEqual({
       user: { type: 'user' },
+      externalPrincipal: {
+        type: 'external_principal',
+        provider: 'feishu',
+        displayName: 'Alice',
+      },
       memberCall: {
         type: 'member_call',
         senderAgentId: 'source-agent',
@@ -95,7 +100,11 @@ describe('AgentRun context contract', () => {
       messageIds: ['message-123'],
       reason: 'history_budget',
     })
-    expect(fixture.runFacts).toMatchObject({schemaVersion: 1, emptyProjection: 'section_omitted'})
+    expect(fixture.runFacts).toMatchObject({
+      schemaVersion: 2,
+      requiredFields: ['campResources'],
+      emptyOptionalProjection: 'camp_resources_only',
+    })
     expect(fixture.contextManifestRunFactEvidence).toEqual([
       'typedFactReferences', 'typedTaskReference', 'exactCompactJsonBytes', 'digest',
     ])

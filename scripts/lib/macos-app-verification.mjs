@@ -83,6 +83,13 @@ export function verifyAdhocMacosApp(appPath, arch, options = {}) {
     })
   }
 
+  for (const name of ['dws', 'dws.gz', 'dws.exe']) {
+    const forbiddenPath = join(resolvedAppPath, 'Contents', 'Resources', 'bin', name)
+    if (existsSync(forbiddenPath)) {
+      throw new Error(`DingTalk DWS must not be packaged: ${forbiddenPath}`)
+    }
+  }
+
   const bundleId = run('/usr/bin/plutil', [
     '-extract',
     'CFBundleIdentifier',

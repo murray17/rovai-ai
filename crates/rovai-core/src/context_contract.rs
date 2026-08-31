@@ -2,10 +2,10 @@ use serde_json::{Value, json};
 
 pub const NATIVE_SESSION_BOOTSTRAP_CONTRACT_VERSION: &str = "native_session_bootstrap_v3";
 pub const BOOTSTRAP_FORMATTER_VERSION: i64 = 3;
-pub const SESSION_CHARTER_REVISION: i64 = 2;
+pub const SESSION_CHARTER_REVISION: i64 = 3;
 pub const CODEX_SESSION_GUIDANCE_REVISION: i64 = 1;
-pub const AGENT_RUN_CONTEXT_FORMATTER_VERSION: i64 = 21;
-pub const CONTEXT_MANIFEST_VERSION: i64 = 21;
+pub const AGENT_RUN_CONTEXT_FORMATTER_VERSION: i64 = 22;
+pub const CONTEXT_MANIFEST_VERSION: i64 = 22;
 
 pub(crate) fn native_binding_context_contract() -> Value {
     json!({
@@ -23,7 +23,7 @@ mod tests {
 
     fn shared_fixture() -> Value {
         serde_json::from_str(include_str!(
-            "../../../packages/contracts/fixtures/agent-run-context-v21.json"
+            "../../../packages/contracts/fixtures/agent-run-context-v22.json"
         ))
         .expect("shared AgentRun context fixture must be valid JSON")
     }
@@ -34,10 +34,12 @@ mod tests {
         let legacy = json!({
             "nativeSessionBootstrap": fixture["nativeSessionBootstrap"],
             "bootstrapFormatterVersion": fixture["bootstrapFormatterVersion"],
+            "sessionCharterRevision": 2,
             "agentRunContextFormatterVersion": fixture["agentRunContextFormatterVersion"],
             "contextManifestVersion": fixture["contextManifestVersion"],
         });
         let current = native_binding_context_contract();
+        assert_eq!(current["sessionCharterRevision"], 3);
         assert_eq!(
             current,
             json!({
@@ -48,10 +50,17 @@ mod tests {
                 "contextManifestVersion": fixture["contextManifestVersion"],
             })
         );
-        assert_ne!(
-            crate::command::canonical_json_digest(&current).unwrap(),
-            crate::command::canonical_json_digest(&legacy).unwrap(),
-            "Session Charter revision must rotate every Adapter Binding compatibility digest"
-        );
+        let mut unversioned_charter = legacy.clone();
+        unversioned_charter
+            .as_object_mut()
+            .unwrap()
+            .remove("sessionCharterRevision");
+        for old_contract in [legacy, unversioned_charter] {
+            assert_ne!(
+                crate::command::canonical_json_digest(&current).unwrap(),
+                crate::command::canonical_json_digest(&old_contract).unwrap(),
+                "Session Charter revision must rotate every Adapter Binding compatibility digest"
+            );
+        }
     }
 }

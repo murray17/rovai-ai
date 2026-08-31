@@ -248,6 +248,10 @@ impl ManagedBlobStore {
                       SELECT 1 FROM agent_run_file_change_projection
                       WHERE agent_run_file_change_projection.details_blob_id = managed_blob.id
                   )
+                  AND NOT EXISTS (
+                      SELECT 1 FROM agent_run_image
+                      WHERE agent_run_image.content_blob_id = managed_blob.id
+                  )
                 ORDER BY managed_blob.id
                 "#,
             )?;
@@ -281,6 +285,9 @@ impl ManagedBlobStore {
                   AND NOT EXISTS (
                       SELECT 1 FROM agent_run_file_change_projection
                       WHERE details_blob_id = ?1
+                  )
+                  AND NOT EXISTS (
+                      SELECT 1 FROM agent_run_image WHERE content_blob_id = ?1
                   )
                 "#,
                 [&blob_id],

@@ -114,6 +114,8 @@ describe('Camp world map model', () => {
           step: {
             id: 'tool_1',
             title: '读取文件',
+            publicCommand: null,
+            publicResult: null,
             detail: 'CampWorkspace.tsx',
             status: 'running',
             activityDomain: 'filesystem',

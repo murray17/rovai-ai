@@ -37,7 +37,7 @@ Files Changed 历史 Review 真源。
 
 ## 打开与渐进历史
 
-Camp 的首个 meaningful paint 只依赖 [Camp Open Projection v10](../../contracts/camp-open-projection-v10.md)：
+Camp 的首个 meaningful paint 只依赖 [Camp Open Projection v12](../../contracts/camp-open-projection-v12.md)：
 Camp/成员、最近消息、当前运行摘要、pending Approval 和 Composer 可用即完成。项目导航恢复、侧栏刷新
 与可见来源确认在首屏后执行，失败不能撤销已打开会话。只显示“正在打开对话”的 Shell 不算完成。
 
@@ -180,6 +180,10 @@ Agent 公共正文不显示“来自执行”来源条，也不投影 compact �
 当前可操作的队员头像、显示名和 Mention 可打开同一个锚定人物信息卡，不导航。已离开、移除或
 不可解析身份保持静态。精确 token 行为见[结构化 Mention](structured-mentions.md)。
 
+飞书、钉钉通过 Owner 校验后进入 Camp 的用户消息，与普通 Camp 用户消息统一显示“你”和相同的用户头像、
+姓名颜色；不显示平台成员称呼或平台字样头像。这只是 Renderer 呈现，底层 `external_principal` 作者、Provider
+来源与权限边界保持不变，不转换为 `local_user`。
+
 ## 消息回复与父引用
 
 稳定的 user/agent 公共消息在内容列右上角与“复制”并列提供“回复”；鼠标悬停、消息内键盘聚焦或
@@ -208,6 +212,10 @@ Agent 公共正文不显示“来自执行”来源条，也不投影 compact �
 时间线，也不创建私密 thread。失效作者错误和替代成员选择独立展开，不受单行引用规则裁切。领域与字段边界见
 [Camp Composer Draft v2](../../contracts/camp-composer-draft-v2.md)，评审方向见
 [HTML 交互稿](../../prototypes/message-reply-chain/README.md)。
+
+渠道 `external_quote` 复用相同的回复图标、作者与单行摘要，无独立底色或边框；附件名称并入摘要，长内容省略。
+外部引用没有本地父消息导航关系，因此是不可点击、不可 Tab 聚焦、无交互悬停态的静态预览；保留真实引用作者，
+不统一改为“你”。此呈现不改变 Structured Content、引用正文/附件摘要或 Agent 上下文投影。
 
 正文编辑器的折叠光标位于绝对开头时，`Backspace` 等价于取消 reply dock：只清除 reply intent，保留正文、
 附件和所有可见 Mention，并让光标继续停在正文开头。有选区、光标不在开头或 IME 正在合成时不得触发该
@@ -253,7 +261,7 @@ Mention，本 Draft 也只回到默认 Lead，不能让路由控件反复出现�
 
 每个 Run 的“协作投递”只显示 `public_a2a` 且 `sourceAgentRunId` 精确匹配该 Run 的收件人；不能从接收方
 Run、target parent、return target 或同一 CampTurn 推断发送归属。投递来源由
-[Camp Open Projection v10](../../contracts/camp-open-projection-v10.md#public-a2a-投递来源)提供；缺少来源时不展示猜测结果。
+[Camp Open Projection v12](../../contracts/camp-open-projection-v12.md#public-a2a-投递来源)提供；缺少来源时不展示猜测结果。
 同一队员的多次消息或重试按 `recipientAgentId` 去重，按首次消息时间、消息 ID 和消息内 canonical position
 保留稳定顺序，不随投递状态变化重排；底层投递、失败和恢复事实不合并、不修改。
 
@@ -451,6 +459,32 @@ summary 与可选 detail；即使没有任何 Execution Evidence 也默认展开
 动作。成功后按权威 Snapshot 显示失败并把焦点返回 Composer；Renderer 不确认成功、不重发正文、
 不创建 successor。精确合同见
 [Run Process Detail Surface v5](../../contracts/run-process-detail-surface-v5.md)。
+
+## Runtime 图片与消息图片
+
+公开正文后先显示原有顺序的消息附件，再显示来源 Run 的本地图片，最后显示 `Files Changed`。
+每个 Run/epoch 的图片固定跟随该 Run 最后一条公开消息；没有公开消息时按 Run 图片时间定位，
+且仍在同 Run 文件变化卡之前。只读取图片元数据，不把图片变成正文或执行台 Tool。
+
+显式图片附件和 Runtime 图片共用 `ImageGallery` / `ImageTile` / Lightbox。一张单列，多张在正常宽度下
+双列、窄容器单列；全部展示，不增加四张上限或“查看全部”。使用 `object-fit: contain`，保留截图、文字和
+图表完整边界。只把连续图片附件组合成一段 Gallery；`image A / image B / PDF / image C` 的文件顺序不变。
+PDF、文档、压缩包和目录继续使用现有文件块。
+
+两种图片共用消息内容列及响应式宽度，发送图片区域不随正文长短收缩。预览框和大图窗口贴合原图比例，
+保留高度上限和既有细边框，不用固定宽高补黑边，不裁切或重编码图片；圆角、间距与焦点样式一致。
+
+图片接近可视区域时读取，通过 Chromium 真实图片解码后展示；损坏/消失的 Runtime 图片显示“图片已不可用”，
+不影响其他图片或 AgentRun。稳定路径重开时可读取更新后的内容，不承诺历史不可变；临时路径和 inline 内容由
+已有 Blob 保留。缩略图点击或键盘激活打开大图，关闭后焦点回到该图，两个主题均使用现有颜色与焦点 token。
+
+Tool/Runtime 图片和发送图片均只显示图片，不显示文件名、来源/数量标题或 Runtime projection 说明；
+移除附件操作菜单、右键菜单、系统打开和在 Finder/文件资源管理器中显示的入口。非图片附件不受影响。
+只保留点击或键盘查看大图及关闭；大图标题仅供辅助技术读取，不占据可见空间，关闭控件覆盖在图片角落。
+图片解码失败时显示“图片已不可用”并禁用点击，不回退到系统打开。
+同一 Run 的可用图片附件与 Runtime Blob 摘要完全相同时只显示显式附件；底层记录保留，失效附件不能
+隐藏 Runtime 图。不同 Run、不同内容和可变稳定路径不参与过滤。底层边界见
+[Runtime Images v3](../../contracts/runtime-images-v3.md)，不引入 File Preview 授权流程。
 
 ## Task、Approval 与停止
 

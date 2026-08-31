@@ -95,6 +95,8 @@ Preload 请求 transport 或 Renderer 错误读取改动还须运行 `pnpm test:
 App，以受控本机 API 和时钟验证页面框架、截止时间与 authority 请求门禁，不启动 Core 或访问日常数据。
 修改审批 Dock 的焦点、原生选项或 Reason 展示时运行 `pnpm test:approval-dock`，使用生产组件的隔离 Electron
 夹具验证键盘操作与动态布局，不启动 Core 或模型。
+修改钉钉内置扫码与官方原生页时运行 `pnpm test:dingtalk-login`：使用生产 Renderer/preload、Main native view 与本机页面
+验证二维码、刷新、静默取消、旧账号保留、缩放/裁剪和 bridge 隔离；不替代真实扫码、Core 或远端发布验收。
 修改文件预览分栏、Tab 或 File Change 详情时运行 `pnpm test:file-preview-layout`：真实 Electron 中组合生产标题栏、分栏、Tab 和 Viewer，
 验证鼠标/键盘调整、关闭与取消、比例持久化、单 Pane 替换、420–480px 会话紧凑排版与阅读位置保留；
 并验证常驻预览按钮、变更 Tab/当前文件切换、历史来源隔离、加载重试与原生拖拽区排除点击控件；不启动 Core 或模型。
@@ -107,6 +109,7 @@ App，以受控本机 API 和时钟验证页面框架、截止时间与 authorit
 | 任务 | 文档 |
 | --- | --- |
 | 启动开发 App、运行打包产物或区分日常/开发数据 | [本地开发与 App 隔离流程](local-workflow.md) |
+| 配置和验收钉钉 Web Session 渠道 | [本地开发与 App 隔离流程：钉钉 Web Session](local-workflow.md#钉钉-web-session-验收前置)、[DingTalk Channel v5](../contracts/dingtalk-channel-v5.md)、[Channel Storage v2](../contracts/channel-storage-v2.md) |
 | 创建、复用、交接、合入或清理 Git worktree | [Git Worktree 生命周期与清理](worktrees.md) |
 | 判断主机、Node、pnpm、Rust、Git 或 Runtime 前置条件 | [开发环境与依赖](environment.md) |
 | 新增 Product Runtime、建立真实 Probe 或完成逐平台准入 | [Agent Runtime 接入与准入 Checklist](runtime-integration-checklist.md) |

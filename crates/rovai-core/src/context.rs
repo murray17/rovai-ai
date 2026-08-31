@@ -8,6 +8,7 @@ use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
 const BUILTIN_CLI_CHARTER: &str = include_str!("../resources/charter-rovai-cli.md");
+const FEISHU_FILE_DELIVERY_GUIDANCE: &str = "This Camp is connected to an external channel. Local file paths and Runtime image previews are not delivered there; when the recipient needs the file itself, include `--file <path>` in the corresponding `rovai send` message.";
 const CODEX_FINAL_CAMP_ANSWER_GUIDANCE: &str = "When publishing the Camp-visible final answer with `rovai send`, use the complete final response in polished Markdown; do not send a compressed one-line summary and then write a richer Runtime final.";
 
 use crate::{
@@ -261,17 +262,6 @@ impl std::error::Error for ContextPayloadTooLarge {}
 pub struct ContextService;
 
 impl ContextService {
-    pub fn session_charter(
-        &self,
-        database: &Database,
-        agent_run_id: &str,
-        execution_epoch: i64,
-    ) -> Result<String> {
-        let snapshot = load_run_snapshot(database, agent_run_id, execution_epoch)?
-            .context("AgentRun is not active for Session Charter materialization")?;
-        build_session_charter(&snapshot)
-    }
-
     pub fn prepare_session_bootstrap(
         &self,
         database: &mut Database,
@@ -2222,7 +2212,31 @@ fn run_snapshot_adapter_kind(snapshot: &RunSnapshot) -> Result<AdapterKind> {
         .parse::<AdapterKind>()
 }
 
-fn build_session_charter(snapshot: &RunSnapshot) -> Result<String> {
+fn camp_has_active_feishu_binding(connection: &Connection, camp_id: &str) -> Result<bool> {
+    Ok(connection.query_row(
+        r#"
+        SELECT EXISTS(
+            SELECT 1 FROM channel_conversation_binding AS binding
+            JOIN channel_conversation AS conversation
+              ON conversation.id = binding.channel_conversation_id
+            WHERE binding.camp_id = ?1 AND binding.status = 'active'
+              AND conversation.provider = 'feishu'
+        )
+        "#,
+        [camp_id],
+        |row| row.get(0),
+    )?)
+}
+
+fn build_session_charter(
+    snapshot: &RunSnapshot,
+    has_active_feishu_binding: bool,
+) -> Result<String> {
+    let file_guidance = if has_active_feishu_binding {
+        format!("\n- {FEISHU_FILE_DELIVERY_GUIDANCE}")
+    } else {
+        String::new()
+    };
     let adapter_guidance = match run_snapshot_adapter_kind(snapshot)? {
         AdapterKind::CodexCli => format!("\n- {CODEX_FINAL_CAMP_ANSWER_GUIDANCE}"),
         _ => String::new(),
@@ -2238,8 +2252,9 @@ fn build_session_charter(snapshot: &RunSnapshot) -> Result<String> {
          - Current user instructions, current Core authorization and Run facts, and current tool, repository, and filesystem evidence outrank identity, Memory, history, and cached context.\n\
          - Core reauthorizes every operation at invocation; projected IDs and facts are not authorization tokens.\n\
          - Preserve existing user work. Do not infer omitted content; retrieve it only when the current work requires it. Memory indexes and retrieval keys are discovery hints; read a Memory before relying on it.\n\
-         - In SHARED_CONVERSATION, the top-level campId applies to every projected message; nextBodyOffset is the Unicode-scalar bodyOffset for a camp.read item; omitted sequence bounds may contain gaps and are not executable ranges.\n\n{}{}",
+         - In SHARED_CONVERSATION, the top-level campId applies to every projected message; nextBodyOffset is the Unicode-scalar bodyOffset for a camp.read item; omitted sequence bounds may contain gaps and are not executable ranges.\n\n{}{}{}",
         BUILTIN_CLI_CHARTER.trim(),
+        file_guidance,
         adapter_guidance,
     ))
 }
@@ -2314,7 +2329,10 @@ fn prepare_session_bootstrap_evidence_for_snapshot(
         });
     }
 
-    let charter = build_session_charter(snapshot)?;
+    // Channel guidance is selected only for new evidence, never when replaying a Binding.
+    let has_active_feishu_binding =
+        camp_has_active_feishu_binding(database.connection(), &snapshot.camp_id)?;
+    let charter = build_session_charter(snapshot, has_active_feishu_binding)?;
     let (entrypoint, observed, authorization_basis_digest) =
         build_memory_entrypoint(database, snapshot)?;
     let charter_digest = sha256_text(&charter);
@@ -4057,8 +4075,8 @@ fn load_originating_public_user_message<R: ContextReadConnection>(
     if row.8.is_some() {
         return Ok(None);
     }
-    if row.2 != "user" {
-        anyhow::bail!("Originating public message is not authored by a user");
+    if !matches!(row.2.as_str(), "user" | "external_principal") {
+        anyhow::bail!("Originating public message is not authored by a human principal");
     }
     let (body, mentions_current_user) =
         projected_historical_camp_message(database.context_connection(), row.5, row.6)?;
@@ -4303,6 +4321,7 @@ struct TriggerCampMessage {
     structured_content_json: Option<String>,
     content_digest: String,
     author_display_name: Option<String>,
+    author_provider: Option<String>,
 }
 
 fn load_trigger_camp_message<R: ContextReadConnection>(
@@ -4318,9 +4337,14 @@ fn load_trigger_camp_message<R: ContextReadConnection>(
                    message.author_type, message.author_id,
                    message.source_agent_run_id,
                    message.body, message.structured_content_json,
-                   message.content_digest, profile.display_name
+                   message.content_digest,
+                   COALESCE(profile.display_name, principal.display_name),
+                   principal.provider
             FROM camp_message AS message
             LEFT JOIN agent_profile AS profile ON profile.id = message.author_id
+            LEFT JOIN external_principal AS principal
+              ON principal.id = message.author_id
+             AND message.author_type = 'external_principal'
             WHERE message.id = ?1 AND message.camp_id = ?2
               AND message.sequence <= ?3
               AND message.tombstoned_at IS NULL
@@ -4341,6 +4365,7 @@ fn load_trigger_camp_message<R: ContextReadConnection>(
                     structured_content_json: row.get(6)?,
                     content_digest: row.get(7)?,
                     author_display_name: row.get(8)?,
+                    author_provider: row.get(9)?,
                 })
             },
         )
@@ -4435,8 +4460,10 @@ fn project_camp_current_input_source<R: ContextReadConnection>(
 ) -> Result<Value> {
     match snapshot.invocation_kind.as_str() {
         "direct" => {
-            if camp_message.author_type != "user"
-                || camp_message.source_agent_run_id.is_some()
+            if !matches!(
+                camp_message.author_type.as_str(),
+                "user" | "external_principal"
+            ) || camp_message.source_agent_run_id.is_some()
                 || snapshot.trigger_message_delivery_id.is_some()
                 || snapshot.a2a_parent_agent_run_id.is_some()
                 || snapshot.a2a_root_agent_run_id.is_some()
@@ -4444,7 +4471,11 @@ fn project_camp_current_input_source<R: ContextReadConnection>(
             {
                 anyhow::bail!("Direct Current Input trigger identity is inconsistent");
             }
-            Ok(json!({ "type": "user" }))
+            project_direct_current_input_source(
+                &camp_message.author_type,
+                camp_message.author_display_name.as_deref(),
+                camp_message.author_provider.as_deref(),
+            )
         }
         "a2a" => {
             let source_agent_run_id = camp_message
@@ -4476,6 +4507,30 @@ fn project_camp_current_input_source<R: ContextReadConnection>(
             }))
         }
         _ => anyhow::bail!("AgentRun invocation kind is unsupported for Current Input"),
+    }
+}
+
+fn project_direct_current_input_source(
+    author_type: &str,
+    author_display_name: Option<&str>,
+    author_provider: Option<&str>,
+) -> Result<Value> {
+    match author_type {
+        "user" => Ok(json!({ "type": "user" })),
+        "external_principal" => {
+            let display_name = author_display_name
+                .filter(|value| !value.trim().is_empty())
+                .context("External Principal display name is unavailable")?;
+            let provider = author_provider
+                .filter(|value| !value.trim().is_empty())
+                .context("External Principal provider is unavailable")?;
+            Ok(json!({
+                "type": "external_principal",
+                "provider": provider,
+                "displayName": display_name,
+            }))
+        }
+        _ => anyhow::bail!("Direct Current Input source is not a human principal"),
     }
 }
 
@@ -6273,6 +6328,35 @@ mod tests {
             assert_eq!(charter_delivery_mode_for_adapter(adapter_kind), expected);
         }
     }
+
+    #[test]
+    fn direct_current_input_projects_external_principal_without_raw_identity() {
+        assert_eq!(
+            project_direct_current_input_source("user", None, None).unwrap(),
+            json!({ "type": "user" })
+        );
+        assert_eq!(
+            project_direct_current_input_source(
+                "external_principal",
+                Some("Alice"),
+                Some("feishu")
+            )
+            .unwrap(),
+            json!({
+                "type": "external_principal",
+                "provider": "feishu",
+                "displayName": "Alice",
+            })
+        );
+        assert!(
+            project_direct_current_input_source("external_principal", None, Some("feishu"))
+                .is_err()
+        );
+        assert!(
+            project_direct_current_input_source("external_principal", Some("Alice"), None).is_err()
+        );
+        assert!(project_direct_current_input_source("system", None, None).is_err());
+    }
 }
 
 #[cfg(all(test, feature = "slow-tests"))]
@@ -6373,6 +6457,38 @@ mod slow_tests {
             drop(self);
             remove_managed_attachment_tree(&directory).unwrap();
         }
+    }
+
+    fn bind_fixture_feishu_channel(fixture: &Fixture) {
+        let connection = fixture.database.connection();
+        connection
+            .execute_batch(
+                r#"
+            INSERT INTO channel_conversation(
+                id, provider, tenant_key, chat_id, topic_key, bot_scope_app_id,
+                conversation_kind, display_name, last_sender_display_name,
+                first_seen_at, last_seen_at
+            ) VALUES (
+                'charter-channel', 'feishu', 'test-tenant', 'test-chat', '', 'test-app',
+                'p2p', 'Test channel', 'Owner', '2026-08-31', '2026-08-31'
+            );
+            "#,
+            )
+            .unwrap();
+        connection
+            .execute(
+                r#"
+            INSERT INTO channel_conversation_binding(
+                id, channel_conversation_id, execution_scope_kind, project_id, camp_id,
+                status, generation, created_at, updated_at
+            ) VALUES (
+                'charter-binding', 'charter-channel', 'quick_chat', NULL, ?1,
+                'active', 1, '2026-08-31', '2026-08-31'
+            )
+            "#,
+                [&fixture.camp_id],
+            )
+            .unwrap();
     }
 
     #[test]
@@ -8315,7 +8431,7 @@ mod slow_tests {
             .unwrap();
         assert!(manifest_schema.contains("run_fact_payload_json"));
         assert!(!manifest_schema.contains("run_notice_"));
-        assert!(manifest_schema.contains("formatter_version IN (20, 21)"));
+        assert!(manifest_schema.contains("formatter_version IN (20, 21, 22)"));
         assert!(manifest_schema.contains("message_projection_audience TEXT NOT NULL"));
         assert!(manifest_schema.contains("a2a_guidance_evidence_json TEXT NOT NULL"));
         let contract: (String, i64, i64) = reopened
@@ -11613,6 +11729,7 @@ mod slow_tests {
     #[test]
     fn newly_bound_session_bootstraps_on_its_current_generation() {
         let mut fixture = fixture();
+        bind_fixture_feishu_channel(&fixture);
         let execution = bind_fixture_native_session(&mut fixture, "new-native-session");
 
         let store = ManagedBlobStore::new(&fixture.directory);
@@ -11749,6 +11866,17 @@ mod slow_tests {
         assert_eq!(evidence.1, BOOTSTRAP_FORMATTER_VERSION);
         let charter_component = store.read_text(&fixture.database, &evidence.2).unwrap();
         assert!(charter_component.contains(CODEX_FINAL_CAMP_ANSWER_GUIDANCE));
+        assert_eq!(
+            charter_component
+                .matches(FEISHU_FILE_DELIVERY_GUIDANCE)
+                .count(),
+            1
+        );
+        assert!(
+            !prepared
+                .rendered_payload
+                .contains(FEISHU_FILE_DELIVERY_GUIDANCE)
+        );
         assert_eq!(sha256_text(&charter_component), evidence.4);
         for blob_id in [&evidence.2, &evidence.3] {
             let component = store.read_text(&fixture.database, blob_id).unwrap();
@@ -11777,6 +11905,10 @@ mod slow_tests {
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .unwrap();
+        fixture.database.connection().execute(
+            "UPDATE channel_conversation_binding SET status = 'closed', closed_at = '2026-08-31' WHERE id = 'charter-binding'",
+            [],
+        ).unwrap();
         let profile = AgentProfileService::default()
             .get_profile(&fixture.database, "agent_1")
             .unwrap()
@@ -11844,6 +11976,14 @@ mod slow_tests {
             refreshed_bootstrap.stable_evidence_digest,
             initial_bootstrap.stable_evidence_digest
         );
+        assert_eq!(
+            refreshed_bootstrap
+                .payload
+                .matches(FEISHU_FILE_DELIVERY_GUIDANCE)
+                .count(),
+            1
+        );
+        assert!(refreshed_bootstrap.payload.contains(&charter_component));
         assert!(
             refreshed_bootstrap
                 .payload
@@ -12383,21 +12523,32 @@ mod slow_tests {
             load_run_snapshot(&fixture.database, &fixture.run_id, fixture.execution_epoch)
                 .unwrap()
                 .unwrap();
-        let charter = build_session_charter(&snapshot).unwrap();
+        let charter = build_session_charter(&snapshot, false).unwrap();
         assert!(charter.ends_with(&format!("\n- {CODEX_FINAL_CAMP_ANSWER_GUIDANCE}")));
         assert_eq!(charter.matches(CODEX_FINAL_CAMP_ANSWER_GUIDANCE).count(), 1);
         let shared_charter = charter
             .strip_suffix(&format!("\n- {CODEX_FINAL_CAMP_ANSWER_GUIDANCE}"))
             .unwrap()
             .to_string();
+        assert_eq!(
+            build_session_charter(&snapshot, true).unwrap(),
+            format!(
+                "{shared_charter}\n- {FEISHU_FILE_DELIVERY_GUIDANCE}\n- {CODEX_FINAL_CAMP_ANSWER_GUIDANCE}"
+            )
+        );
         for adapter_kind in AdapterKind::ALL
             .into_iter()
             .filter(|adapter_kind| *adapter_kind != AdapterKind::CodexCli)
         {
             snapshot.effective_config["runtimeAdapter"] = json!(adapter_kind.as_str());
-            let other_charter = build_session_charter(&snapshot).unwrap();
+            let other_charter = build_session_charter(&snapshot, false).unwrap();
             assert_eq!(other_charter, shared_charter, "{adapter_kind:?}");
             assert!(!other_charter.contains(CODEX_FINAL_CAMP_ANSWER_GUIDANCE));
+            assert_eq!(
+                build_session_charter(&snapshot, true).unwrap(),
+                format!("{shared_charter}\n- {FEISHU_FILE_DELIVERY_GUIDANCE}"),
+                "{adapter_kind:?}"
+            );
         }
         assert!(BUILTIN_CLI_CHARTER.len() <= 2_560);
         assert!(
@@ -12458,6 +12609,71 @@ mod slow_tests {
         assert!(!charter.contains("Completing a Task or the current work"));
         assert!(!charter.contains("peer-coordination send"));
         assert!(!charter.contains("rovai_team"));
+        assert!(!charter.contains(FEISHU_FILE_DELIVERY_GUIDANCE));
+        assert_eq!(
+            FEISHU_FILE_DELIVERY_GUIDANCE,
+            "This Camp is connected to an external channel. Local file paths and Runtime image previews are not delivered there; when the recipient needs the file itself, include `--file <path>` in the corresponding `rovai send` message."
+        );
+        assert!(
+            !camp_has_active_feishu_binding(fixture.database.connection(), &fixture.camp_id)
+                .unwrap()
+        );
+
+        bind_fixture_feishu_channel(&fixture);
+        fixture.database.connection().execute(
+            "INSERT INTO project_catalog_item(id, canonical_path, display_name, status, created_at, updated_at) VALUES ('charter-project', ?1, 'Test project', 'active', '2026-08-31', '2026-08-31')",
+            [fixture.directory.display().to_string()],
+        ).unwrap();
+        for (provider, scope, status, expected) in [
+            ("feishu", "quick_chat", "active", true),
+            ("feishu", "project", "active", true),
+            ("feishu", "quick_chat", "closed", false),
+            ("feishu", "project", "closed", false),
+            ("dingtalk", "quick_chat", "active", false),
+            ("dingtalk", "project", "active", false),
+        ] {
+            fixture
+                .database
+                .connection()
+                .execute(
+                    "UPDATE channel_conversation SET provider = ?1 WHERE id = 'charter-channel'",
+                    [provider],
+                )
+                .unwrap();
+            fixture
+                .database
+                .connection()
+                .execute(
+                    r#"
+                UPDATE channel_conversation_binding
+                SET execution_scope_kind = ?1,
+                    project_id = CASE WHEN ?1 = 'project' THEN 'charter-project' ELSE NULL END,
+                    status = ?2,
+                    closed_at = CASE WHEN ?2 = 'closed' THEN '2026-08-31' ELSE NULL END
+                WHERE id = 'charter-binding'
+                "#,
+                    params![scope, status],
+                )
+                .unwrap();
+            assert_eq!(
+                camp_has_active_feishu_binding(fixture.database.connection(), &fixture.camp_id)
+                    .unwrap(),
+                expected,
+                "{provider}/{scope}/{status}"
+            );
+        }
+        fixture
+            .database
+            .connection()
+            .execute_batch(
+                "UPDATE channel_conversation SET provider = 'feishu' WHERE id = 'charter-channel';
+             UPDATE channel_conversation_binding SET camp_id = NULL WHERE id = 'charter-binding';",
+            )
+            .unwrap();
+        assert!(
+            !camp_has_active_feishu_binding(fixture.database.connection(), &fixture.camp_id)
+                .unwrap()
+        );
         fixture.cleanup();
     }
 
@@ -13880,6 +14096,34 @@ mod slow_tests {
             "generation-one-public-output",
             old_generation_output,
         );
+        let original_bootstrap = context
+            .prepare_session_bootstrap(
+                &mut fixture.database,
+                &store,
+                &fixture.run_id,
+                fixture.execution_epoch,
+                CharterDeliveryMode::NativeAppend,
+            )
+            .unwrap();
+        assert!(
+            !original_bootstrap
+                .payload
+                .contains(FEISHU_FILE_DELIVERY_GUIDANCE)
+        );
+        bind_fixture_feishu_channel(&fixture);
+        let frozen_bootstrap = context
+            .prepare_session_bootstrap(
+                &mut fixture.database,
+                &store,
+                &fixture.run_id,
+                fixture.execution_epoch,
+                CharterDeliveryMode::NativeAppend,
+            )
+            .unwrap();
+        assert_eq!(
+            frozen_bootstrap, original_bootstrap,
+            "a newly active channel must not rewrite existing Bootstrap evidence"
+        );
         let conversation_version: i64 = fixture
             .database
             .connection()
@@ -14046,6 +14290,31 @@ mod slow_tests {
             panic!("replacement-generation Bootstrap should be ready");
         };
         assert_eq!(replacement_context.expected_binding_generation, 2);
+        assert_eq!(
+            replacement_context
+                .runtime_payload
+                .matches(FEISHU_FILE_DELIVERY_GUIDANCE)
+                .count(),
+            1
+        );
+        assert!(
+            !replacement_context
+                .rendered_payload
+                .contains(FEISHU_FILE_DELIVERY_GUIDANCE)
+        );
+        assert_ne!(
+            replacement_context.bootstrap_evidence_id,
+            original_bootstrap.evidence_id
+        );
+        let old_charter_blob_id: String = fixture.database.connection().query_row(
+            "SELECT session_charter_blob_id FROM native_session_bootstrap_evidence WHERE id = ?1",
+            [&original_bootstrap.evidence_id], |row| row.get(0),
+        ).unwrap();
+        let old_charter = store
+            .read_text(&fixture.database, &old_charter_blob_id)
+            .unwrap();
+        assert!(original_bootstrap.payload.contains(&old_charter));
+        assert!(!old_charter.contains(FEISHU_FILE_DELIVERY_GUIDANCE));
         assert!(
             !replacement_context
                 .rendered_payload

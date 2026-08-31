@@ -100,3 +100,8 @@ Desktop 窗口和本机恢复能力不再与 SQLite authority 的成功打开绑
 - [Desktop Runtime Availability v1](../../contracts/desktop-runtime-availability-v1.md)
 - [First-run Onboarding v3](../../contracts/first-run-onboarding-v3.md)
 - [Desktop Bootstrap Shell](../../ui/components/bootstrap-shell.md)
+
+## 后续版本
+
+2026-08-30 渠道分支合并后，本版本按主线既有范围与验收证据冻结为 historical；
+[v1.35 钉钉与渠道集成](../v1.35/README.md)成为唯一 current，并保留本版本的启动准入与恢复能力。

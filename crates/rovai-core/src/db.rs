@@ -1,7 +1,7 @@
 use std::{
     collections::{BTreeMap, BTreeSet},
     path::{Path, PathBuf},
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 #[cfg(any(test, feature = "slow-tests"))]
@@ -25,7 +25,8 @@ use crate::camp_id::CampId;
 use crate::command::canonical_json_digest;
 use crate::context_index::{camp_message_content_digest, extract_context_references};
 use crate::database_admission::{
-    AuthorityBlock, ExistingAuthorityTicket, NewAuthorityTicket, TicketValidationError,
+    AuthorityBlock, ExistingAuthorityTicket, MigrationAuthorityOpen, NewAuthorityTicket,
+    TicketValidationError,
 };
 use crate::execution_budget::{
     CAMP_TURN_EXECUTION_BUDGET_SCHEMA_VERSION, PRODUCT_MAX_ACCEPTED_A2A,
@@ -56,6 +57,188 @@ pub struct Database {
     runtime_camp_files_root_identity_digest: String,
 }
 
+const CAMP_FAST_SCHEMA_OBJECTS: &[(&str, &str)] = &[
+    (
+        "agent_profile_fast_revision_insert",
+        r#"CREATE TRIGGER agent_profile_fast_revision_insert AFTER INSERT ON agent_profile
+            WHEN NEW.runtime_binding_revision = '' BEGIN
+                UPDATE agent_profile SET runtime_binding_revision = lower(hex(randomblob(16))) WHERE id = NEW.id;
+            END;"#,
+    ),
+    (
+        "agent_profile_fast_revision_update",
+        r#"CREATE TRIGGER agent_profile_fast_revision_update
+            AFTER UPDATE OF selected_runtime_adapter_kind, default_runtime_installation_id,
+                default_model_selection_json, default_permission_config_json ON agent_profile
+            WHEN OLD.selected_runtime_adapter_kind IS NOT NEW.selected_runtime_adapter_kind
+              OR OLD.default_runtime_installation_id IS NOT NEW.default_runtime_installation_id
+              OR OLD.default_model_selection_json IS NOT NEW.default_model_selection_json
+              OR OLD.default_permission_config_json IS NOT NEW.default_permission_config_json
+            BEGIN
+                UPDATE agent_profile SET runtime_binding_revision = lower(hex(randomblob(16))) WHERE id = NEW.id;
+                DELETE FROM camp_member_fast_preference WHERE agent_id = NEW.id;
+            END;"#,
+    ),
+    (
+        "camp_member_fast_preference",
+        r#"CREATE TABLE camp_member_fast_preference (
+                camp_id TEXT NOT NULL REFERENCES camp(id) ON DELETE CASCADE,
+                agent_id TEXT NOT NULL REFERENCES agent_profile(id) ON DELETE CASCADE,
+                runtime_binding_revision TEXT NOT NULL,
+                fast_override INTEGER CHECK(fast_override IN (0, 1)),
+                cwd TEXT NOT NULL,
+                executable_fingerprint TEXT NOT NULL,
+                eligible INTEGER NOT NULL DEFAULT 0 CHECK(eligible IN (0, 1)),
+                runtime_default_fast INTEGER CHECK(runtime_default_fast IN (0, 1)),
+                observed_fast_state TEXT NOT NULL DEFAULT 'unknown'
+                    CHECK(observed_fast_state IN ('unknown', 'standard', 'fast', 'cooldown')),
+                unavailable_reason TEXT,
+                PRIMARY KEY(camp_id, agent_id)
+            );"#,
+    ),
+];
+
+const PENDING_CAMP_SCHEMA_OBJECTS: &[(&str, &str)] = &[
+    (
+        "pending_camp_input",
+        r#"CREATE TABLE pending_camp_input (
+                id TEXT PRIMARY KEY,
+                camp_id TEXT NOT NULL REFERENCES camp(id) ON DELETE CASCADE,
+                enqueue_sequence INTEGER NOT NULL CHECK(enqueue_sequence > 0),
+                revision INTEGER NOT NULL DEFAULT 1 CHECK(revision > 0),
+                state TEXT NOT NULL DEFAULT 'queued'
+                    CHECK(state IN ('queued', 'needs_repair', 'published', 'cancelled')),
+                structured_content_json TEXT NOT NULL,
+                reply_to_camp_message_id TEXT,
+                recipient_selection_required INTEGER NOT NULL DEFAULT 0
+                    CHECK(recipient_selection_required IN (0, 1)),
+                execution_json TEXT NOT NULL,
+                user_id TEXT NOT NULL,
+                published_camp_message_id TEXT,
+                published_camp_turn_id TEXT,
+                published_at TEXT,
+                last_attempt_error_code TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                UNIQUE(camp_id, enqueue_sequence),
+                UNIQUE(camp_id, id),
+                CHECK((state = 'published') = (published_camp_message_id IS NOT NULL))
+            );"#,
+    ),
+    (
+        "pending_camp_input_queue_idx",
+        r#"CREATE INDEX pending_camp_input_queue_idx
+                ON pending_camp_input(camp_id, enqueue_sequence)
+                WHERE state IN ('queued', 'needs_repair');"#,
+    ),
+    (
+        "pending_input_edit_session",
+        r#"CREATE TABLE pending_input_edit_session (
+                camp_id TEXT PRIMARY KEY REFERENCES camp(id) ON DELETE CASCADE,
+                pending_input_id TEXT NOT NULL UNIQUE,
+                edit_token TEXT NOT NULL,
+                base_pending_revision INTEGER NOT NULL,
+                recovery_required INTEGER NOT NULL DEFAULT 0 CHECK(recovery_required IN (0, 1)),
+                FOREIGN KEY(camp_id, pending_input_id)
+                    REFERENCES pending_camp_input(camp_id, id) ON DELETE CASCADE
+            );"#,
+    ),
+];
+
+// The literal wire schema of main migration 119. Keep the legacy definitions
+// above intact: admission must distinguish both already-shipped Fast sources.
+const CAMP_FAST_LIFETIME_SCHEMA_OBJECTS: &[(&str, &str)] = &[
+    (
+        "agent_profile_fast_revision_update",
+        r#"CREATE TRIGGER agent_profile_fast_revision_update
+            AFTER UPDATE OF selected_runtime_adapter_kind, default_runtime_installation_id ON agent_profile
+            WHEN OLD.selected_runtime_adapter_kind IS NOT NEW.selected_runtime_adapter_kind
+              OR OLD.default_runtime_installation_id IS NOT NEW.default_runtime_installation_id
+            BEGIN
+                UPDATE agent_profile SET runtime_binding_revision = lower(hex(randomblob(16))) WHERE id = NEW.id;
+                DELETE FROM camp_member_fast_preference WHERE agent_id = NEW.id;
+            END;"#,
+    ),
+    (
+        "agent_profile_fast_model_update",
+        r#"CREATE TRIGGER agent_profile_fast_model_update
+            AFTER UPDATE OF default_model_selection_json ON agent_profile
+            WHEN OLD.default_model_selection_json IS NOT NEW.default_model_selection_json
+            BEGIN
+                UPDATE camp_member_fast_preference
+                    SET eligible = 0, runtime_default_fast = NULL
+                    WHERE agent_id = NEW.id;
+            END;"#,
+    ),
+    (
+        "adapter_installation_fast_binding_update",
+        r#"CREATE TRIGGER adapter_installation_fast_binding_update
+            AFTER UPDATE OF adapter_kind, executable_path, auth_scope ON adapter_installation
+            WHEN OLD.adapter_kind IS NOT NEW.adapter_kind
+              OR OLD.executable_path IS NOT NEW.executable_path
+              OR OLD.auth_scope IS NOT NEW.auth_scope
+            BEGIN
+                UPDATE agent_profile SET runtime_binding_revision = lower(hex(randomblob(16)))
+                    WHERE default_runtime_installation_id = NEW.id;
+                DELETE FROM camp_member_fast_preference WHERE agent_id IN (
+                    SELECT id FROM agent_profile WHERE default_runtime_installation_id = NEW.id
+                );
+            END;"#,
+    ),
+];
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum MainCampMigrationSource {
+    Pending,
+    Fast,
+    FastLifetime,
+}
+
+impl MainCampMigrationSource {
+    fn has_fast(self) -> bool {
+        self != Self::Pending
+    }
+
+    fn last_migration(self) -> i64 {
+        match self {
+            Self::Pending => 117,
+            Self::Fast => 118,
+            Self::FastLifetime => 119,
+        }
+    }
+}
+
+pub(crate) const CURRENT_DATA_CONTRACT_VERSION: &str = "v1.43";
+pub(crate) const CURRENT_PROJECTION_SCHEMA_VERSION: i64 = 84;
+const V133_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.42";
+const V133_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION: i64 = 83;
+const V132_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.41";
+const V132_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION: i64 = 82;
+const V130_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.40";
+const V130_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION: i64 = 81;
+const V129_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.39";
+const V129_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION: i64 = 80;
+const V128_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.38";
+const V128_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION: i64 = 79;
+const V125_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.37";
+const V125_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION: i64 = 78;
+const V124_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.36";
+const V124_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION: i64 = 77;
+const V123_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.35";
+const V123_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION: i64 = 76;
+const V122_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.34";
+const V122_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION: i64 = 75;
+const V121_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.33";
+const V121_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION: i64 = 74;
+const V120_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.32";
+const V120_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION: i64 = 73;
+const V119_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.31";
+const V119_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION: i64 = 72;
+const V118_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.30";
+const V118_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION: i64 = 71;
+const V117_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.29";
+const V117_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION: i64 = 70;
+
 #[derive(Debug)]
 pub struct DatabaseOpenError {
     code: &'static str,
@@ -64,6 +247,13 @@ pub struct DatabaseOpenError {
 }
 
 impl DatabaseOpenError {
+    pub fn retryable(&self) -> bool {
+        matches!(self.authority_block(), Some(AuthorityBlock::Busy { .. }))
+            || matches!(
+                self.code,
+                "authority_sqlite_transient" | "authority_io_transient"
+            )
+    }
     pub fn code(&self) -> &'static str {
         self.code
     }
@@ -109,7 +299,11 @@ impl From<TicketValidationError> for DatabaseOpenError {
                 authority_block: Some(block),
             },
             TicketValidationError::Infrastructure(error) => Self {
-                code: "authority_ticket_infrastructure_failed",
+                code: if error.retryable {
+                    "authority_io_transient"
+                } else {
+                    "authority_ticket_infrastructure_failed"
+                },
                 message: error.message,
                 authority_block: None,
             },
@@ -206,14 +400,6 @@ impl std::fmt::Display for DatabaseMigrationError {
 
 impl std::error::Error for DatabaseMigrationError {}
 
-pub(crate) const CURRENT_DATA_CONTRACT_VERSION: &str = "v1.34";
-pub(crate) const CURRENT_PROJECTION_SCHEMA_VERSION: i64 = 73;
-const V119_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.34";
-const V119_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION: i64 = 72;
-const V118_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.33";
-const V118_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION: i64 = 71;
-const V117_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.29";
-const V117_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION: i64 = 70;
 const V116_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.28";
 const V116_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION: i64 = 69;
 const V115_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.26";
@@ -310,6 +496,26 @@ pub(crate) struct DatabaseContractMarker {
     pub classifier_version: String,
 }
 
+/// Small, read-only admission evidence, not a second migration ledger. Even a
+/// receipt timestamp or DDL change must invalidate an already issued ticket.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct MigrationReceiptSnapshot {
+    schema_cookie: i64,
+    receipts: Vec<(i64, String)>,
+}
+
+impl MigrationReceiptSnapshot {
+    pub(crate) fn read(connection: &Connection) -> rusqlite::Result<Self> {
+        Ok(Self {
+            schema_cookie: connection.query_row("PRAGMA schema_version", [], |row| row.get(0))?,
+            receipts: connection
+                .prepare("SELECT version, applied_at FROM schema_migration ORDER BY version")?
+                .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
+                .collect::<rusqlite::Result<_>>()?,
+        })
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum DatabaseContractClassification {
     Current(DatabaseContractMarker),
@@ -369,15 +575,47 @@ struct CurrentMigrationState {
     v117: bool,
     v118: bool,
     v119: bool,
+    v120: bool,
+    v121: bool,
+    v122: bool,
+    v123: bool,
+    v124: bool,
+    v125: bool,
+    v126: bool,
+    v127: bool,
+    v128: bool,
+    v129: bool,
+    v130: bool,
+    v131: bool,
+    v132: bool,
+    v133: bool,
 }
 
 impl CurrentMigrationState {
+    fn admits_channel_v125(&self, classifier_admissible: bool, through_v113: bool) -> bool {
+        classifier_admissible
+            && through_v113
+            && self.v114
+            && self.v115
+            && self.v116
+            && self.v117
+            && self.v118
+            && self.v119
+            && self.v120
+            && self.v121
+            && self.v122
+            && self.v123
+            && self.v124
+            && self.v125
+    }
+
     fn admits(&self, contract: &str, schema: i64, classifier: &str) -> bool {
         let through_v69 = self.v66 && self.v67 && self.v68 && self.v69;
         if !through_v69 {
             return false;
         }
-        let through_v115 = self.v70
+        let through_v113 = through_v69
+            && self.v70
             && self.v71
             && self.v76
             && self.v77
@@ -416,13 +654,203 @@ impl CurrentMigrationState {
             && self.v110
             && self.v111
             && self.v112
-            && self.v113
-            && self.v114
-            && self.v115;
+            && self.v113;
+        let channel_classifier_admissible =
+            classifier == V043_CLASSIFIER_VERSION || classifier == V116_CLASSIFIER_VERSION;
+        // Main's 117/118/119 are remapped to 126/127/130 before the channel chain.
+        // These feature receipts may therefore precede channel checkpoints; only
+        // the final contract seals require the complete preceding channel chain.
+        if (self.v127 && !self.v126)
+            || (self.v130 && !self.v127)
+            || ((self.v126 || self.v127 || self.v130) && !self.v116)
+        {
+            return false;
+        }
         if contract == CURRENT_DATA_CONTRACT_VERSION && schema == CURRENT_PROJECTION_SCHEMA_VERSION
         {
-            return classifier == V116_CLASSIFIER_VERSION
-                && through_v115
+            return self.v133
+                && self.v132
+                && self.v126
+                && self.v127
+                && self.v128
+                && self.v129
+                && self.v130
+                && self.v131
+                && self.admits_channel_v125(channel_classifier_admissible, through_v113);
+        }
+        if self.v133 {
+            return false;
+        }
+        if contract == V133_MIGRATION_SOURCE_DATA_CONTRACT_VERSION
+            && schema == V133_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION
+        {
+            return self.v132
+                && self.v126
+                && self.v127
+                && self.v128
+                && self.v129
+                && self.v130
+                && self.v131
+                && self.admits_channel_v125(channel_classifier_admissible, through_v113);
+        }
+        if self.v132 {
+            return false;
+        }
+        if contract == V132_MIGRATION_SOURCE_DATA_CONTRACT_VERSION
+            && schema == V132_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION
+        {
+            return self.v126
+                && self.v127
+                && self.v128
+                && self.v129
+                && self.v130
+                && self.v131
+                && self.admits_channel_v125(channel_classifier_admissible, through_v113);
+        }
+        if self.v131 {
+            return false;
+        }
+        if contract == V130_MIGRATION_SOURCE_DATA_CONTRACT_VERSION
+            && schema == V130_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION
+        {
+            return self.v126
+                && self.v127
+                && self.v128
+                && self.v129
+                && self.admits_channel_v125(channel_classifier_admissible, through_v113);
+        }
+        if self.v129 {
+            return false;
+        }
+        if contract == V129_MIGRATION_SOURCE_DATA_CONTRACT_VERSION
+            && schema == V129_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION
+        {
+            return self.v126
+                && self.v127
+                && self.v128
+                && self.admits_channel_v125(channel_classifier_admissible, through_v113);
+        }
+        if self.v128 {
+            return false;
+        }
+        if contract == V128_MIGRATION_SOURCE_DATA_CONTRACT_VERSION
+            && schema == V128_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION
+        {
+            return channel_classifier_admissible
+                && through_v113
+                && self.v114
+                && self.v115
+                && self.v116
+                && self.v117
+                && self.v118
+                && self.v119
+                && self.v120
+                && self.v121
+                && self.v122
+                && self.v123
+                && self.v124
+                && self.v125;
+        }
+        if self.v125 {
+            return false;
+        }
+        if contract == V125_MIGRATION_SOURCE_DATA_CONTRACT_VERSION
+            && schema == V125_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION
+        {
+            return channel_classifier_admissible
+                && through_v113
+                && self.v114
+                && self.v115
+                && self.v116
+                && self.v117
+                && self.v118
+                && self.v119
+                && self.v120
+                && self.v121
+                && self.v122
+                && self.v123
+                && self.v124;
+        }
+        if self.v124 {
+            return false;
+        }
+        if contract == V124_MIGRATION_SOURCE_DATA_CONTRACT_VERSION
+            && schema == V124_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION
+        {
+            return channel_classifier_admissible
+                && through_v113
+                && self.v114
+                && self.v115
+                && self.v116
+                && self.v117
+                && self.v118
+                && self.v119
+                && self.v120
+                && self.v121
+                && self.v122
+                && self.v123;
+        }
+        if self.v123 {
+            return false;
+        }
+        if contract == V123_MIGRATION_SOURCE_DATA_CONTRACT_VERSION
+            && schema == V123_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION
+        {
+            return channel_classifier_admissible
+                && through_v113
+                && self.v114
+                && self.v115
+                && self.v116
+                && self.v117
+                && self.v118
+                && self.v119
+                && self.v120
+                && self.v121
+                && self.v122;
+        }
+        if self.v122 {
+            return false;
+        }
+        if contract == V122_MIGRATION_SOURCE_DATA_CONTRACT_VERSION
+            && schema == V122_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION
+        {
+            return channel_classifier_admissible
+                && through_v113
+                && self.v114
+                && self.v115
+                && self.v116
+                && self.v117
+                && self.v118
+                && self.v119
+                && self.v120
+                && self.v121;
+        }
+        if self.v121 {
+            return false;
+        }
+        if contract == V121_MIGRATION_SOURCE_DATA_CONTRACT_VERSION
+            && schema == V121_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION
+        {
+            return channel_classifier_admissible
+                && through_v113
+                && self.v114
+                && self.v115
+                && self.v116
+                && self.v117
+                && self.v118
+                && self.v119
+                && self.v120;
+        }
+        if self.v120 {
+            return false;
+        }
+        if contract == V120_MIGRATION_SOURCE_DATA_CONTRACT_VERSION
+            && schema == V120_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION
+        {
+            return channel_classifier_admissible
+                && through_v113
+                && self.v114
+                && self.v115
                 && self.v116
                 && self.v117
                 && self.v118
@@ -434,8 +862,10 @@ impl CurrentMigrationState {
         if contract == V119_MIGRATION_SOURCE_DATA_CONTRACT_VERSION
             && schema == V119_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION
         {
-            return classifier == V116_CLASSIFIER_VERSION
-                && through_v115
+            return channel_classifier_admissible
+                && through_v113
+                && self.v114
+                && self.v115
                 && self.v116
                 && self.v117
                 && self.v118;
@@ -446,7 +876,12 @@ impl CurrentMigrationState {
         if contract == V118_MIGRATION_SOURCE_DATA_CONTRACT_VERSION
             && schema == V118_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION
         {
-            return classifier == V116_CLASSIFIER_VERSION && through_v115 && self.v116 && self.v117;
+            return channel_classifier_admissible
+                && through_v113
+                && self.v114
+                && self.v115
+                && self.v116
+                && self.v117;
         }
         if self.v117 {
             return false;
@@ -454,7 +889,11 @@ impl CurrentMigrationState {
         if contract == V117_MIGRATION_SOURCE_DATA_CONTRACT_VERSION
             && schema == V117_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION
         {
-            return classifier == V116_CLASSIFIER_VERSION && through_v115 && self.v116;
+            return channel_classifier_admissible
+                && through_v113
+                && self.v114
+                && self.v115
+                && self.v116;
         }
         if self.v116 {
             return false;
@@ -465,7 +904,7 @@ impl CurrentMigrationState {
         if contract == V116_MIGRATION_SOURCE_DATA_CONTRACT_VERSION
             && schema == V116_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION
         {
-            return through_v115;
+            return through_v113 && self.v114 && self.v115;
         }
         if self.v115 {
             return false;
@@ -1585,10 +2024,285 @@ fn connection_has_admissible_data_contract(connection: &Connection) -> rusqlite:
         |row| row.get(0),
     );
     let migration_state = load_current_migration_state(connection);
-    Ok(matches!(
+    let normally_admissible = matches!(
         (marker, projection_exists, migration_state),
         (Ok(Some((contract, schema, classifier))), Ok(true), Ok(migrations))
             if migrations.admits(&contract, schema, &classifier)
+    );
+    if normally_admissible {
+        return Ok(true);
+    }
+    Ok(
+        connection_has_legacy_feishu_migration_collision(connection)?
+            || main_camp_migration_collision(connection)?.is_some(),
+    )
+}
+
+/// Main shipped Pending/Fast/Fast lifetime as 117/118/119 while this branch
+/// already used those numbers. Only the exact shipped main schemas may remap.
+fn main_camp_migration_collision(
+    connection: &Connection,
+) -> rusqlite::Result<Option<MainCampMigrationSource>> {
+    let marker = connection
+        .query_row(
+            "SELECT contract_version, projection_schema_version, classifier_version
+         FROM rovai_data_contract WHERE singleton = 1",
+            [],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, i64>(1)?,
+                    row.get::<_, String>(2)?,
+                ))
+            },
+        )
+        .optional()?;
+    let Some((contract, schema, classifier)) = marker else {
+        return Ok(None);
+    };
+    let source = match (contract.as_str(), schema, classifier.as_str()) {
+        ("v1.33", 71, V116_CLASSIFIER_VERSION) => MainCampMigrationSource::Pending,
+        ("v1.34", 72, V116_CLASSIFIER_VERSION) => MainCampMigrationSource::Fast,
+        ("v1.34", 73, V116_CLASSIFIER_VERSION) => MainCampMigrationSource::FastLifetime,
+        _ => return Ok(None),
+    };
+    let mut state = load_current_migration_state(connection)?;
+    if !state.v117
+        || state.v118 != source.has_fast()
+        || state.v119 != (source == MainCampMigrationSource::FastLifetime)
+    {
+        return Ok(None);
+    }
+    let max_version: i64 =
+        connection.query_row("SELECT MAX(version) FROM schema_migration", [], |row| {
+            row.get(0)
+        })?;
+    if max_version != source.last_migration() {
+        return Ok(None);
+    }
+    state.v117 = false;
+    state.v118 = false;
+    state.v119 = false;
+    if !state.admits(
+        V117_MIGRATION_SOURCE_DATA_CONTRACT_VERSION,
+        V117_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION,
+        &classifier,
+    ) {
+        return Ok(None);
+    }
+    let channel_objects: i64 = connection.query_row(
+        "SELECT COUNT(*) FROM sqlite_master WHERE name IN
+         ('external_principal', 'feishu_account', 'project_binding', 'project_catalog_item',
+          'channel_conversation', 'channel_delivery', 'dingtalk_account')",
+        [],
+        |row| row.get(0),
+    )?;
+    if channel_objects != 0 {
+        return Ok(None);
+    }
+    Ok(pending_fast_schema_matches(connection, source)?.then_some(source))
+}
+
+fn pending_fast_schema_matches(
+    connection: &Connection,
+    source: MainCampMigrationSource,
+) -> rusqlite::Result<bool> {
+    let has_fast = source.has_fast();
+    let has_lifetime = source == MainCampMigrationSource::FastLifetime;
+    let normalized = |sql: &str| {
+        sql.split_whitespace()
+            .collect::<String>()
+            .trim_end_matches(';')
+            .to_string()
+    };
+    for (name, expected) in PENDING_CAMP_SCHEMA_OBJECTS
+        .iter()
+        .chain(
+            CAMP_FAST_SCHEMA_OBJECTS
+                .iter()
+                .filter(|(name, _)| !has_lifetime || *name != "agent_profile_fast_revision_update"),
+        )
+        .chain(
+            CAMP_FAST_LIFETIME_SCHEMA_OBJECTS
+                .iter()
+                .filter(|(name, _)| has_lifetime || *name != "agent_profile_fast_revision_update"),
+        )
+    {
+        let actual = connection
+            .query_row(
+                "SELECT sql FROM sqlite_master WHERE name = ?1",
+                [name],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()?;
+        let required = (has_fast
+            && CAMP_FAST_SCHEMA_OBJECTS
+                .iter()
+                .any(|(fast, _)| fast == name))
+            || has_lifetime
+            || PENDING_CAMP_SCHEMA_OBJECTS
+                .iter()
+                .any(|(pending, _)| pending == name);
+        if required {
+            if actual.as_deref().map(&normalized) != Some(normalized(expected)) {
+                return Ok(false);
+            }
+        } else if actual.is_some() {
+            return Ok(false);
+        }
+    }
+    let binding_columns: i64 = connection.query_row(
+        "SELECT COUNT(*) FROM pragma_table_info('agent_profile')
+         WHERE name = 'runtime_binding_revision' AND type = 'TEXT' AND \"notnull\" = 1 AND dflt_value = ?1",
+        ["''"], |row| row.get(0),
+    )?;
+    let tier_columns: i64 = connection.query_row(
+        "SELECT COUNT(*) FROM pragma_table_info('runtime_usage_run_summary')
+         WHERE name = 'observed_service_tier' AND type = 'TEXT' AND \"notnull\" = 0",
+        [],
+        |row| row.get(0),
+    )?;
+    Ok(binding_columns == i64::from(has_fast) && tier_columns == i64::from(has_fast))
+}
+
+/// Metadata-only checks for the joined schema; never read historical business
+/// rows or turn ordinary upgrades into whole-database integrity diagnostics.
+fn validate_joined_channel_schema(connection: &Connection) -> Result<()> {
+    let source = if load_current_migration_state(connection)?.v130 {
+        MainCampMigrationSource::FastLifetime
+    } else {
+        MainCampMigrationSource::Fast
+    };
+    if !pending_fast_schema_matches(connection, source)? {
+        anyhow::bail!("joined schema is missing the exact Pending/Fast objects or columns");
+    }
+    connection.prepare(
+        "SELECT terminal_snapshot_json, latest_sequence FROM channel_execution_console LIMIT 0",
+    )?;
+    connection
+        .prepare("SELECT provider, remote_app_id, payload_json FROM channel_credentials LIMIT 0")?;
+    connection.prepare(
+        "SELECT provider, account_id, session_json FROM channel_developer_sessions LIMIT 0",
+    )?;
+    let sealed_guard: bool = connection.query_row(
+        "SELECT EXISTS(SELECT 1 FROM sqlite_schema WHERE type = 'trigger'
+         AND name = 'channel_execution_console_snapshot_immutable')",
+        [],
+        |row| row.get(0),
+    )?;
+    if !sealed_guard {
+        anyhow::bail!("joined schema is missing the sealed snapshot guard");
+    }
+    Ok(())
+}
+
+fn connection_has_legacy_feishu_migration_collision(
+    connection: &Connection,
+) -> rusqlite::Result<bool> {
+    let marker = connection
+        .query_row(
+            r#"
+            SELECT contract_version, projection_schema_version, classifier_version
+            FROM rovai_data_contract
+            WHERE singleton = 1
+            "#,
+            [],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, i64>(1)?,
+                    row.get::<_, String>(2)?,
+                ))
+            },
+        )
+        .optional()?;
+    let Some((contract, schema, classifier)) = marker else {
+        return Ok(false);
+    };
+    if contract != V118_MIGRATION_SOURCE_DATA_CONTRACT_VERSION
+        || schema != V118_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION
+        || (classifier != V043_CLASSIFIER_VERSION && classifier != V116_CLASSIFIER_VERSION)
+    {
+        return Ok(false);
+    }
+    let migrations = load_current_migration_state(connection)?;
+    if !migrations.admits(
+        V117_MIGRATION_SOURCE_DATA_CONTRACT_VERSION,
+        V117_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION,
+        &classifier,
+    ) {
+        return Ok(false);
+    }
+
+    let required_table_count: i64 = connection.query_row(
+        r#"
+        SELECT COUNT(*)
+        FROM sqlite_master
+        WHERE type = 'table'
+          AND name IN (
+              'canonical_runtime_activity',
+              'project_binding',
+              'external_principal',
+              'external_principal_app_identity',
+              'channel_conversation',
+              'channel_conversation_binding',
+              'feishu_account',
+              'feishu_member_bot',
+              'external_group_bot_roster_state',
+              'external_group_bot_roster',
+              'channel_inbound_aggregate',
+              'channel_inbound_observation',
+              'channel_turn_request',
+              'channel_delivery',
+              'feishu_member_bot_publication_intent'
+          )
+        "#,
+        [],
+        |row| row.get(0),
+    )?;
+    if required_table_count != 15 {
+        return Ok(false);
+    }
+    let developer_account_column_count: i64 = connection.query_row(
+        r#"
+        SELECT COUNT(*)
+        FROM pragma_table_info('feishu_account')
+        WHERE name IN (
+            'user_id_digest', 'tenant_id', 'user_name', 'email', 'brand',
+            'connected_at', 'last_verified_at'
+        )
+        "#,
+        [],
+        |row| row.get(0),
+    )?;
+    if developer_account_column_count != 7 {
+        return Ok(false);
+    }
+
+    let schema_sql = |table: &str| -> rusqlite::Result<Option<String>> {
+        connection
+            .query_row(
+                "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?1",
+                [table],
+                |row| row.get(0),
+            )
+            .optional()
+    };
+    let planned_shutdown_schema = schema_sql("planned_shutdown_cycle")?;
+    let camp_message_schema = schema_sql("camp_message")?;
+    let context_manifest_schema = schema_sql("context_manifest")?;
+    Ok(matches!(
+        (
+            planned_shutdown_schema,
+            camp_message_schema,
+            context_manifest_schema
+        ),
+        (Some(planned), Some(message), Some(manifest))
+            if planned.contains("CHECK(protocol_version = 2)")
+                && !planned.contains("protocol_version IN (2, 3)")
+                && message.contains("'external_principal'")
+                && manifest.contains("context_manifest_version = 22")
+                && manifest.contains("formatter_version = 22")
     ))
 }
 
@@ -1641,6 +2355,13 @@ pub(crate) fn classify_database_contract(
         marker.projection_schema_version,
         &marker.classifier_version,
     ) {
+        if connection_has_legacy_feishu_migration_collision(connection)?
+            || main_camp_migration_collision(connection)?.is_some()
+        {
+            return Ok(DatabaseContractClassification::SupportedMigrationSource(
+                marker,
+            ));
+        }
         return Ok(DatabaseContractClassification::Unknown(Some(marker)));
     }
     if marker.contract_version == CURRENT_DATA_CONTRACT_VERSION
@@ -1665,10 +2386,7 @@ fn connection_has_current_data_contract(connection: &Connection) -> rusqlite::Re
         SELECT contract_version = ?1
                AND projection_schema_version = ?2
                AND classifier_version = ?3
-               AND EXISTS(SELECT 1 FROM schema_migration WHERE version = 116)
-               AND EXISTS(SELECT 1 FROM schema_migration WHERE version = 117)
-               AND EXISTS(SELECT 1 FROM schema_migration WHERE version = 118)
-               AND EXISTS(SELECT 1 FROM schema_migration WHERE version = 119)
+               AND EXISTS(SELECT 1 FROM schema_migration WHERE version = 133)
         FROM rovai_data_contract
         WHERE singleton = 1
         "#,
@@ -1735,7 +2453,21 @@ fn load_current_migration_state(
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 116),
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 117),
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 118),
-               EXISTS(SELECT 1 FROM schema_migration WHERE version = 119)
+               EXISTS(SELECT 1 FROM schema_migration WHERE version = 119),
+               EXISTS(SELECT 1 FROM schema_migration WHERE version = 120),
+               EXISTS(SELECT 1 FROM schema_migration WHERE version = 121),
+               EXISTS(SELECT 1 FROM schema_migration WHERE version = 122),
+               EXISTS(SELECT 1 FROM schema_migration WHERE version = 123),
+               EXISTS(SELECT 1 FROM schema_migration WHERE version = 124),
+               EXISTS(SELECT 1 FROM schema_migration WHERE version = 125),
+               EXISTS(SELECT 1 FROM schema_migration WHERE version = 126),
+               EXISTS(SELECT 1 FROM schema_migration WHERE version = 127),
+               EXISTS(SELECT 1 FROM schema_migration WHERE version = 128),
+               EXISTS(SELECT 1 FROM schema_migration WHERE version = 129),
+               EXISTS(SELECT 1 FROM schema_migration WHERE version = 130),
+               EXISTS(SELECT 1 FROM schema_migration WHERE version = 131),
+               EXISTS(SELECT 1 FROM schema_migration WHERE version = 132),
+               EXISTS(SELECT 1 FROM schema_migration WHERE version = 133)
         "#,
         [],
         |row| {
@@ -1790,6 +2522,20 @@ fn load_current_migration_state(
                 v117: row.get(47)?,
                 v118: row.get(48)?,
                 v119: row.get(49)?,
+                v120: row.get(50)?,
+                v121: row.get(51)?,
+                v122: row.get(52)?,
+                v123: row.get(53)?,
+                v124: row.get(54)?,
+                v125: row.get(55)?,
+                v126: row.get(56)?,
+                v127: row.get(57)?,
+                v128: row.get(58)?,
+                v129: row.get(59)?,
+                v130: row.get(60)?,
+                v131: row.get(61)?,
+                v132: row.get(62)?,
+                v133: row.get(63)?,
             })
         },
     )
@@ -1851,6 +2597,53 @@ fn table_columns(connection: &Connection, table: &str) -> Result<Vec<String>> {
     Ok(statement
         .query_map([], |row| row.get::<_, String>(1))?
         .collect::<rusqlite::Result<Vec<_>>>()?)
+}
+
+fn migrate_planned_shutdown_protocol_v3_schema(transaction: &Transaction<'_>) -> Result<()> {
+    transaction.execute_batch(
+        r#"
+        CREATE TABLE planned_shutdown_cycle_v113 (
+            core_generation TEXT PRIMARY KEY
+                CHECK(length(trim(core_generation)) > 0),
+            protocol_version INTEGER NOT NULL
+                CHECK(protocol_version IN (2, 3)),
+            requested_at TEXT NOT NULL,
+            settled_at TEXT,
+            fenced_agent_run_count INTEGER
+                CHECK(fenced_agent_run_count IS NULL OR fenced_agent_run_count >= 0),
+            unsettled_effect_agent_run_count INTEGER
+                CHECK(
+                    unsettled_effect_agent_run_count IS NULL
+                    OR unsettled_effect_agent_run_count >= 0
+                ),
+            CHECK (
+                (settled_at IS NULL
+                    AND fenced_agent_run_count IS NULL
+                    AND unsettled_effect_agent_run_count IS NULL)
+                OR
+                (settled_at IS NOT NULL
+                    AND fenced_agent_run_count IS NOT NULL
+                    AND unsettled_effect_agent_run_count IS NOT NULL)
+            )
+        );
+
+        INSERT INTO planned_shutdown_cycle_v113(
+            core_generation, protocol_version, requested_at, settled_at,
+            fenced_agent_run_count, unsettled_effect_agent_run_count
+        )
+        SELECT core_generation, protocol_version, requested_at, settled_at,
+               fenced_agent_run_count, unsettled_effect_agent_run_count
+        FROM planned_shutdown_cycle;
+
+        DROP TABLE planned_shutdown_cycle;
+        ALTER TABLE planned_shutdown_cycle_v113 RENAME TO planned_shutdown_cycle;
+
+        CREATE INDEX planned_shutdown_cycle_pending_idx
+            ON planned_shutdown_cycle(requested_at, core_generation)
+            WHERE settled_at IS NULL;
+        "#,
+    )?;
+    Ok(())
 }
 
 fn admit_migration_action_resolution_source_v99(transaction: &Transaction<'_>) -> Result<()> {
@@ -2375,6 +3168,9 @@ fn database_sqlite_open_error(
             authority_block: Some(Box::new(AuthorityBlock::Busy { stage })),
         };
     }
+    if crate::database_admission::sqlite_error_is_transient(&error) {
+        return DatabaseOpenError::operation("authority_sqlite_transient", operation, path, error);
+    }
     DatabaseOpenError::operation(code, operation, path, error)
 }
 
@@ -2405,8 +3201,70 @@ fn configure_runtime_connection(
         });
     }
     connection
-        .execute_batch("PRAGMA foreign_keys = ON; PRAGMA synchronous = NORMAL;")
+        .execute_batch(
+            "PRAGMA foreign_keys = ON; PRAGMA synchronous = NORMAL; PRAGMA busy_timeout = 5000;",
+        )
         .map_err(map_error)
+}
+
+/// Table rebuilds temporarily disable FK enforcement. Validate only their local
+/// write set and inbound FK dependents, before the same transaction commits its
+/// receipt. Schema metadata discovery does not scan unaffected historical rows.
+fn validate_migration_foreign_keys(transaction: &Transaction<'_>, tables: &[&str]) -> Result<()> {
+    let mut affected = tables
+        .iter()
+        .map(|table| (*table).to_string())
+        .collect::<BTreeSet<_>>();
+    let mut statement = transaction.prepare(
+        "SELECT child.name, fk.\"table\" FROM sqlite_schema AS child
+         JOIN pragma_foreign_key_list(child.name) AS fk WHERE child.type = 'table'",
+    )?;
+    for relation in statement.query_map([], |row| {
+        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+    })? {
+        let (child, parent) = relation?;
+        if tables
+            .iter()
+            .any(|table| parent.eq_ignore_ascii_case(table))
+        {
+            affected.insert(child);
+        }
+    }
+    for table in &affected {
+        if !transaction.query_row(
+            "SELECT EXISTS(SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = ?1)",
+            [table],
+            |row| row.get::<_, bool>(0),
+        )? {
+            continue;
+        }
+        let violation = transaction
+            .query_row(
+                "SELECT \"table\", rowid FROM pragma_foreign_key_check(?1) LIMIT 1",
+                [table],
+                |row| Ok((row.get::<_, String>(0)?, row.get::<_, Option<i64>>(1)?)),
+            )
+            .optional()?;
+        if let Some((table, row)) = violation {
+            anyhow::bail!("migration would leave a foreign-key violation in {table} row {row:?}");
+        }
+    }
+    Ok(())
+}
+
+fn add_migration_column_if_missing(
+    transaction: &Transaction<'_>,
+    table: &str,
+    column: &str,
+    definition: &str,
+) -> Result<()> {
+    if !table_columns(transaction, table)?
+        .iter()
+        .any(|name| name == column)
+    {
+        transaction.execute(&format!("ALTER TABLE {table} ADD COLUMN {definition}"), [])?;
+    }
+    Ok(())
 }
 
 fn finalize_staged_authority(
@@ -2448,6 +3306,7 @@ fn finalize_staged_authority(
     Ok(())
 }
 
+#[cfg(test)]
 fn validate_staged_authority(
     connection: &Connection,
     path: &Path,
@@ -2818,6 +3677,84 @@ impl Database {
         })
     }
 
+    /// Consumes no caller path: the only authority is the lease-bound ticket.
+    /// All validation precedes WAL configuration or application writes.
+    pub(crate) fn migrate_admitted_authority(
+        open: &MigrationAuthorityOpen<'_>,
+        runtime_camp_files_root: &Path,
+        runtime_camp_files_root_identity_digest: &str,
+        progress: &mut dyn FnMut(&str, Duration),
+    ) -> std::result::Result<(), DatabaseMigrationError> {
+        let MigrationAuthorityOpen::Upgrade {
+            path,
+            source_contract,
+            source_receipts,
+            ..
+        } = open
+        else {
+            unreachable!("interrupted snapshots use legacy recovery")
+        };
+        let started = Instant::now();
+        let connection = (|| {
+            open.revalidate()
+                .map_err(DatabaseMigrationError::from_ticket)?;
+            let connection = open_existing_authority_connection(path)
+                .map_err(DatabaseMigrationError::from_open)?;
+            let validate = || -> rusqlite::Result<bool> {
+                let transaction = connection.unchecked_transaction()?;
+                let matches = matches!(
+                    classify_database_contract(&transaction)?,
+                    DatabaseContractClassification::SupportedMigrationSource(ref marker) if marker == source_contract
+                ) && MigrationReceiptSnapshot::read(&transaction)?
+                    == *source_receipts;
+                transaction.commit()?;
+                Ok(matches)
+            };
+            match validate() {
+                Ok(true) => {}
+                Err(error) if crate::database_admission::sqlite_error_is_transient(&error) => {
+                    return Err(DatabaseMigrationError::from_sqlite(
+                        "authority_source_probe_failed",
+                        error,
+                    ));
+                }
+                Ok(false) | Err(_) => {
+                    return Err(DatabaseMigrationError::from_open(
+                        DatabaseOpenError::contract_changed(path),
+                    ));
+                }
+            }
+            open.revalidate()
+                .map_err(DatabaseMigrationError::from_ticket)?;
+            crate::monitoring::register_monitoring_sql_functions(&connection)
+                .map_err(DatabaseMigrationError::from_migration)?;
+            register_runtime_camp_files_functions(
+                &connection,
+                runtime_camp_files_root,
+                runtime_camp_files_root_identity_digest,
+            )
+            .map_err(DatabaseMigrationError::from_migration)?;
+            Ok(connection)
+        })();
+        progress("authority_open", started.elapsed());
+        let mut database = Self {
+            connection: connection?,
+            path: path.clone(),
+            runtime_camp_files_root: runtime_camp_files_root.to_path_buf(),
+            runtime_camp_files_root_identity_digest: runtime_camp_files_root_identity_digest
+                .to_string(),
+        };
+        database
+            .migrate_with_progress(false, progress)
+            .map_err(DatabaseMigrationError::from_migration)?;
+        validate_joined_channel_schema(database.connection())
+            .map_err(DatabaseMigrationError::from_migration)?;
+        // The connection closes normally. SQLite owns WAL/checkpoint recovery;
+        // never detach, copy, delete or replace authority files here.
+        Ok(())
+    }
+
+    #[cfg(test)]
     pub(crate) fn migrate_staged_authority_copy(
         path: &Path,
         runtime_camp_files_root: &Path,
@@ -2871,6 +3808,18 @@ impl Database {
             runtime_camp_files_root_identity_digest: runtime_camp_files_root_identity_digest
                 .to_string(),
         };
+        if initialized_database != 0 {
+            staged
+                .reconcile_legacy_feishu_migration_collision()
+                .map_err(|error| {
+                    DatabaseOpenError::operation(
+                        "authority_migration_legacy_channel_reconciliation_failed",
+                        "reconcile legacy channel markers in staged authority copy",
+                        path,
+                        error,
+                    )
+                })?;
+        }
         staged.migrate(initialized_database == 0).map_err(|error| {
             DatabaseOpenError::operation(
                 "authority_migration_schema_failed",
@@ -2998,6 +3947,9 @@ impl Database {
             runtime_camp_files_root_identity_digest: runtime_camp_files_root_identity_digest
                 .to_string(),
         };
+        if initialized_database != 0 {
+            database.reconcile_legacy_feishu_migration_collision()?;
+        }
         database.migrate(initialized_database == 0)?;
         if let Some(reason) = reset_reason {
             database.connection.execute(
@@ -3424,9 +4376,37 @@ impl Database {
     }
 
     fn migrate(&mut self, fresh_database: bool) -> Result<()> {
+        self.migrate_with_progress(fresh_database, &mut |_, _| {})
+    }
+
+    fn migrate_with_progress(
+        &mut self,
+        fresh_database: bool,
+        progress: &mut dyn FnMut(&str, Duration),
+    ) -> Result<()> {
+        // Observes existing steps only; no registry, alternate chain or outer
+        // transaction. Each migration still commits its own schema and receipt.
+        macro_rules! migration_step {
+            ($stage:expr, $operation:expr) => {{
+                let started = Instant::now();
+                let result = $operation;
+                progress($stage, started.elapsed());
+                result?
+            }};
+        }
         configure_runtime_connection(&self.connection, &self.path)?;
-        self.connection.execute_batch(
-            r#"
+        if !fresh_database {
+            migration_step!(
+                "migration_reconciliation",
+                self.reconcile_legacy_feishu_migration_collision()
+            );
+        }
+        if fresh_database {
+            let transaction = self
+                .connection
+                .transaction_with_behavior(TransactionBehavior::Immediate)?;
+            transaction.execute_batch(
+                r#"
             CREATE TABLE IF NOT EXISTS schema_migration (
                 version INTEGER PRIMARY KEY,
                 applied_at TEXT NOT NULL
@@ -3541,313 +4521,487 @@ impl Database {
             INSERT OR IGNORE INTO schema_migration(version, applied_at)
             VALUES (2, datetime('now'));
             "#,
-        )?;
+            )?;
+            transaction.commit()?;
+        }
         if self.schema_migration_applied(17)? {
             if !self.schema_migration_applied(18)? {
-                self.migrate_task_context_manifest_v18()?;
+                migration_step!("migration_18", self.migrate_task_context_manifest_v18());
             }
             if !self.schema_migration_applied(19)? {
-                self.migrate_skill_library_v19()?;
+                migration_step!("migration_19", self.migrate_skill_library_v19());
             }
             if !self.schema_migration_applied(20)? {
-                self.migrate_mcp_exposure_v20()?;
+                migration_step!("migration_20", self.migrate_mcp_exposure_v20());
             }
             if !self.schema_migration_applied(21)? {
-                self.migrate_memory_v21()?;
+                migration_step!("migration_21", self.migrate_memory_v21());
             }
             if !self.schema_migration_applied(22)? {
-                self.migrate_context_v22()?;
+                migration_step!("migration_22", self.migrate_context_v22());
             }
             if !self.schema_migration_applied(23)? {
-                self.migrate_memory_authority_v23(fresh_database)?;
+                migration_step!(
+                    "migration_23",
+                    self.migrate_memory_authority_v23(fresh_database)
+                );
             }
             if !self.schema_migration_applied(24)? {
-                self.migrate_memory_auto_policy_opt_in_v24()?;
+                migration_step!("migration_24", self.migrate_memory_auto_policy_opt_in_v24());
             }
             if !self.schema_migration_applied(25)? {
-                self.migrate_member_avatars_v25()?;
+                migration_step!("migration_25", self.migrate_member_avatars_v25());
             }
             if !self.schema_migration_applied(26)? {
-                self.migrate_member_presence_v26()?;
+                migration_step!("migration_26", self.migrate_member_presence_v26());
             }
             if !self.schema_migration_applied(27)? {
-                self.migrate_runtime_managed_permissions_v27()?;
+                migration_step!(
+                    "migration_27",
+                    self.migrate_runtime_managed_permissions_v27()
+                );
             }
             if !self.schema_migration_applied(28)? {
-                self.migrate_execution_evidence_v28()?;
+                migration_step!("migration_28", self.migrate_execution_evidence_v28());
             }
             if !self.schema_migration_applied(29)? {
-                self.migrate_automatic_partner_memory_v29()?;
+                migration_step!("migration_29", self.migrate_automatic_partner_memory_v29());
             }
             if !self.schema_migration_applied(30)? {
-                self.migrate_runtime_adapter_catalog_v30()?;
+                migration_step!("migration_30", self.migrate_runtime_adapter_catalog_v30());
             }
             if !self.schema_migration_applied(31)? {
-                self.migrate_managed_product_runtime_v31()?;
+                migration_step!("migration_31", self.migrate_managed_product_runtime_v31());
             }
             if !self.schema_migration_applied(32)? {
-                self.migrate_memory_store_v32()?;
+                migration_step!("migration_32", self.migrate_memory_store_v32());
             }
             if !self.schema_migration_applied(33)? {
-                self.migrate_context_manifest_v4_v33()?;
+                migration_step!("migration_33", self.migrate_context_manifest_v4_v33());
             }
             if !self.schema_migration_applied(34)? {
-                self.migrate_configured_camp_creation_v34()?;
+                migration_step!("migration_34", self.migrate_configured_camp_creation_v34());
             }
             if !self.schema_migration_applied(35)? {
-                self.migrate_directory_workspace_v35()?;
+                migration_step!("migration_35", self.migrate_directory_workspace_v35());
             }
             if !self.schema_migration_applied(36)? {
-                self.migrate_orphan_context_index_cleanup_v36()?;
+                migration_step!(
+                    "migration_36",
+                    self.migrate_orphan_context_index_cleanup_v36()
+                );
             }
             if !self.schema_migration_applied(37)? {
-                self.migrate_agent_authored_a2a_timeline_v37()?;
+                migration_step!(
+                    "migration_37",
+                    self.migrate_agent_authored_a2a_timeline_v37()
+                );
             }
             if !self.schema_migration_applied(38)? {
-                self.migrate_runtime_executable_identity_v38()?;
+                migration_step!(
+                    "migration_38",
+                    self.migrate_runtime_executable_identity_v38()
+                );
             }
             if !self.schema_migration_applied(39)? {
-                self.migrate_quick_chat_binding_v39()?;
+                migration_step!("migration_39", self.migrate_quick_chat_binding_v39());
             }
             if !self.schema_migration_applied(40)? {
-                self.migrate_camp_attachments_v40()?;
+                migration_step!("migration_40", self.migrate_camp_attachments_v40());
             }
             if !self.schema_migration_applied(41)? {
-                self.migrate_member_runtime_configuration_v41()?;
+                migration_step!(
+                    "migration_41",
+                    self.migrate_member_runtime_configuration_v41()
+                );
             }
             if !self.schema_migration_applied(42)? {
-                self.migrate_member_identity_v42()?;
+                migration_step!("migration_42", self.migrate_member_identity_v42());
             }
             if !self.schema_migration_applied(43)? {
-                self.migrate_in_app_notifications_v43()?;
+                migration_step!("migration_43", self.migrate_in_app_notifications_v43());
             }
             if !self.schema_migration_applied(44)? {
-                self.migrate_event_driven_member_calls_v44()?;
+                migration_step!("migration_44", self.migrate_event_driven_member_calls_v44());
             }
             if !self.schema_migration_applied(45)? {
-                self.migrate_member_call_capability_v45()?;
+                migration_step!("migration_45", self.migrate_member_call_capability_v45());
             }
             if !self.schema_migration_applied(46)? {
-                self.migrate_structured_camp_content_v46()?;
+                migration_step!("migration_46", self.migrate_structured_camp_content_v46());
             }
             if !self.schema_migration_applied(47)? {
-                self.migrate_camp_turn_execution_budget_v47()?;
+                migration_step!(
+                    "migration_47",
+                    self.migrate_camp_turn_execution_budget_v47()
+                );
             }
             if !self.schema_migration_applied(48)? {
-                self.migrate_native_session_member_identity_bootstrap_v48()?;
+                migration_step!(
+                    "migration_48",
+                    self.migrate_native_session_member_identity_bootstrap_v48()
+                );
             }
             if !self.schema_migration_applied(49)? {
-                self.migrate_skill_delivery_groups_v49()?;
+                migration_step!("migration_49", self.migrate_skill_delivery_groups_v49());
             }
             if !self.schema_migration_applied(50)? {
-                self.migrate_reserved_v50()?;
+                migration_step!("migration_50", self.migrate_reserved_v50());
             }
             if !self.schema_migration_applied(51)? {
-                self.migrate_camp_history_retrieval_v51()?;
+                migration_step!("migration_51", self.migrate_camp_history_retrieval_v51());
             }
             if !self.schema_migration_applied(52)? {
-                self.migrate_agent_identity_v52()?;
+                migration_step!("migration_52", self.migrate_agent_identity_v52());
             }
             if !self.schema_migration_applied(53)? {
-                self.migrate_canonical_runtime_activity_v53()?;
+                migration_step!(
+                    "migration_53",
+                    self.migrate_canonical_runtime_activity_v53()
+                );
             }
             if !self.schema_migration_applied(54)? {
-                self.migrate_context_formatter_v54()?;
+                migration_step!("migration_54", self.migrate_context_formatter_v54());
             }
             if !self.schema_migration_applied(55)? {
-                self.migrate_runtime_compatibility_digest_v55()?;
+                migration_step!(
+                    "migration_55",
+                    self.migrate_runtime_compatibility_digest_v55()
+                );
             }
             if !self.schema_migration_applied(56)? {
-                self.migrate_additive_mcp_clean_break_v56()?;
+                migration_step!("migration_56", self.migrate_additive_mcp_clean_break_v56());
             }
             if !self.schema_migration_applied(57)? {
-                self.migrate_member_task_camp_contract_v57()?;
+                migration_step!("migration_57", self.migrate_member_task_camp_contract_v57());
             }
             if !self.schema_migration_applied(58)? {
-                self.migrate_structured_message_clean_break_v58()?;
+                migration_step!(
+                    "migration_58",
+                    self.migrate_structured_message_clean_break_v58()
+                );
             }
             if !self.schema_migration_applied(59)? {
-                self.migrate_deterministic_public_context_v59()?;
+                migration_step!(
+                    "migration_59",
+                    self.migrate_deterministic_public_context_v59()
+                );
             }
             if !self.schema_migration_applied(60)? {
-                self.migrate_stable_collaboration_state_v60()?;
+                migration_step!(
+                    "migration_60",
+                    self.migrate_stable_collaboration_state_v60()
+                );
             }
             if !self.schema_migration_applied(61)? {
-                self.migrate_public_a2a_message_delivery_v61()?;
+                migration_step!(
+                    "migration_61",
+                    self.migrate_public_a2a_message_delivery_v61()
+                );
             }
             if !self.schema_migration_applied(62)? {
-                self.migrate_single_authority_delivery_context_v62()?;
+                migration_step!(
+                    "migration_62",
+                    self.migrate_single_authority_delivery_context_v62()
+                );
             }
             if !self.schema_migration_applied(63)? {
-                self.migrate_public_delivery_clean_break_v63()?;
+                migration_step!(
+                    "migration_63",
+                    self.migrate_public_delivery_clean_break_v63()
+                );
             }
             if !self.schema_migration_applied(64)? {
-                self.migrate_agent_cli_clean_break_v64()?;
+                migration_step!("migration_64", self.migrate_agent_cli_clean_break_v64());
             }
             if !self.schema_migration_applied(65)? {
-                self.migrate_durable_task_v2_v65()?;
+                migration_step!("migration_65", self.migrate_durable_task_v2_v65());
             }
             if !self.schema_migration_applied(66)? {
-                self.migrate_native_session_bootstrap_redelivery_v66()?;
+                migration_step!(
+                    "migration_66",
+                    self.migrate_native_session_bootstrap_redelivery_v66()
+                );
             }
             if !self.schema_migration_applied(67)? {
-                self.migrate_pending_camp_activation_v67()?;
+                migration_step!("migration_67", self.migrate_pending_camp_activation_v67());
             }
             if !self.schema_migration_applied(68)? {
-                self.migrate_collaboration_projection_v2_v68()?;
+                migration_step!(
+                    "migration_68",
+                    self.migrate_collaboration_projection_v2_v68()
+                );
             }
             if !self.schema_migration_applied(69)? {
-                self.migrate_bounded_omission_evidence_v69()?;
+                migration_step!("migration_69", self.migrate_bounded_omission_evidence_v69());
             }
             if !self.schema_migration_applied(70)? {
-                self.migrate_self_active_task_context_v70()?;
+                migration_step!("migration_70", self.migrate_self_active_task_context_v70());
             }
             if !self.schema_migration_applied(71)? {
-                self.migrate_explicit_empty_self_active_task_snapshot_v71()?;
+                migration_step!(
+                    "migration_71",
+                    self.migrate_explicit_empty_self_active_task_snapshot_v71()
+                );
             }
             if !self.schema_migration_applied(72)? {
-                self.migrate_runtime_drift_rebind_v72()?;
+                migration_step!("migration_72", self.migrate_runtime_drift_rebind_v72());
             }
             if !self.schema_migration_applied(73)? {
-                self.migrate_remove_agent_run_expected_output_v73()?;
+                migration_step!(
+                    "migration_73",
+                    self.migrate_remove_agent_run_expected_output_v73()
+                );
             }
             if !self.schema_migration_applied(74)? {
-                self.migrate_skill_default_assignments_v74()?;
+                migration_step!("migration_74", self.migrate_skill_default_assignments_v74());
             }
             if !self.schema_migration_applied(75)? {
-                self.migrate_skill_projection_access_v75()?;
+                migration_step!("migration_75", self.migrate_skill_projection_access_v75());
             }
             if !self.schema_migration_applied(76)? {
-                self.migrate_explicit_caller_return_delivery_v76()?;
+                migration_step!(
+                    "migration_76",
+                    self.migrate_explicit_caller_return_delivery_v76()
+                );
             }
             if !self.schema_migration_applied(77)? {
-                self.migrate_planned_shutdown_terminal_projection_v77()?;
+                migration_step!(
+                    "migration_77",
+                    self.migrate_planned_shutdown_terminal_projection_v77()
+                );
             }
             if !self.schema_migration_applied(78)? {
-                self.migrate_current_user_attention_v78()?;
+                migration_step!("migration_78", self.migrate_current_user_attention_v78());
             }
             if !self.schema_migration_applied(79)? {
-                self.migrate_notification_episodes_v79()?;
+                migration_step!("migration_79", self.migrate_notification_episodes_v79());
             }
             if !self.schema_migration_applied(80)? {
-                self.migrate_controlled_shutdown_fence_v80()?;
+                migration_step!("migration_80", self.migrate_controlled_shutdown_fence_v80());
             }
             if !self.schema_migration_applied(81)? {
-                self.migrate_notification_heads_up_invalidation_v81()?;
+                migration_step!(
+                    "migration_81",
+                    self.migrate_notification_heads_up_invalidation_v81()
+                );
             }
             if !self.schema_migration_applied(82)? {
-                self.migrate_memory_store_v3_v82()?;
+                migration_step!("migration_82", self.migrate_memory_store_v3_v82());
             }
             if !self.schema_migration_applied(83)? {
-                self.migrate_composer_reply_intent_v83()?;
+                migration_step!("migration_83", self.migrate_composer_reply_intent_v83());
             }
             if !self.schema_migration_applied(84)? {
-                self.migrate_exact_scope_memory_view_v84()?;
+                migration_step!("migration_84", self.migrate_exact_scope_memory_view_v84());
             }
             if !self.schema_migration_applied(85)? {
-                self.migrate_composer_recipient_continuation_v85()?;
+                migration_step!(
+                    "migration_85",
+                    self.migrate_composer_recipient_continuation_v85()
+                );
             }
             if !self.schema_migration_applied(86)? {
-                self.migrate_trae_runtime_catalog_v86()?;
+                migration_step!("migration_86", self.migrate_trae_runtime_catalog_v86());
             }
             if !self.schema_migration_applied(87)? {
-                self.migrate_durable_gather_v87()?;
+                migration_step!("migration_87", self.migrate_durable_gather_v87());
             }
             if !self.schema_migration_applied(88)? {
-                self.migrate_gather_continuation_v88()?;
+                migration_step!("migration_88", self.migrate_gather_continuation_v88());
             }
             if !self.schema_migration_applied(89)? {
-                self.migrate_compact_context_run_facts_v89()?;
+                migration_step!("migration_89", self.migrate_compact_context_run_facts_v89());
             }
             if !self.schema_migration_applied(90)? {
-                self.migrate_runtime_monitoring_v90()?;
+                migration_step!("migration_90", self.migrate_runtime_monitoring_v90());
             }
             if !self.schema_migration_applied(91)? {
-                self.migrate_current_input_skill_links_v91()?;
+                migration_step!("migration_91", self.migrate_current_input_skill_links_v91());
             }
             if !self.schema_migration_applied(92)? {
-                self.migrate_minimal_runtime_usage_v92()?;
+                migration_step!("migration_92", self.migrate_minimal_runtime_usage_v92());
             }
             if !self.schema_migration_applied(93)? {
-                self.migrate_a2a_public_only_v93()?;
+                migration_step!("migration_93", self.migrate_a2a_public_only_v93());
             }
             if !self.schema_migration_applied(94)? {
-                self.migrate_public_runtime_failures_v94()?;
+                migration_step!("migration_94", self.migrate_public_runtime_failures_v94());
             }
             if !self.schema_migration_applied(95)? {
-                self.migrate_camp_identity_v95()?;
+                migration_step!("migration_95", self.migrate_camp_identity_v95());
             }
             if !self.schema_migration_applied(96)? {
-                self.migrate_agent_run_runtime_model_v96()?;
+                migration_step!("migration_96", self.migrate_agent_run_runtime_model_v96());
             }
             if !self.schema_migration_applied(97)? {
-                self.migrate_windows_skill_projection_operation_v97()?;
+                migration_step!(
+                    "migration_97",
+                    self.migrate_windows_skill_projection_operation_v97()
+                );
             }
             if !self.schema_migration_applied(98)? {
-                self.migrate_self_authored_recent_messages_v98()?;
+                migration_step!(
+                    "migration_98",
+                    self.migrate_self_authored_recent_messages_v98()
+                );
             }
             if !self.schema_migration_applied(99)? {
-                self.migrate_camp_attachment_view_v99()?;
+                migration_step!("migration_99", self.migrate_camp_attachment_view_v99());
             }
             if !self.schema_migration_applied(100)? {
-                self.migrate_semantic_attachment_receipt_v100()?;
+                migration_step!(
+                    "migration_100",
+                    self.migrate_semantic_attachment_receipt_v100()
+                );
             }
             if !self.schema_migration_applied(101)? {
-                self.migrate_single_camp_publication_v101()?;
+                migration_step!("migration_101", self.migrate_single_camp_publication_v101());
             }
             if !self.schema_migration_applied(102)? {
-                self.migrate_unified_attachment_publication_v102()?;
+                migration_step!(
+                    "migration_102",
+                    self.migrate_unified_attachment_publication_v102()
+                );
             }
             if !self.schema_migration_applied(103)? {
-                self.migrate_trae_skill_delivery_group_v103()?;
+                migration_step!(
+                    "migration_103",
+                    self.migrate_trae_skill_delivery_group_v103()
+                );
             }
             if !self.schema_migration_applied(104)? {
-                self.migrate_cursor_runtime_catalog_v104()?;
+                migration_step!("migration_104", self.migrate_cursor_runtime_catalog_v104());
             }
             if !self.schema_migration_applied(105)? {
-                self.migrate_kimi_runtime_catalog_v105()?;
+                migration_step!("migration_105", self.migrate_kimi_runtime_catalog_v105());
             }
             if !self.schema_migration_applied(106)? {
-                self.migrate_kimi_compaction_detector_v106()?;
+                migration_step!(
+                    "migration_106",
+                    self.migrate_kimi_compaction_detector_v106()
+                );
             }
             if !self.schema_migration_applied(107)? {
-                self.migrate_grok_runtime_catalog_v107()?;
+                migration_step!("migration_107", self.migrate_grok_runtime_catalog_v107());
             }
             if !self.schema_migration_applied(108)? {
-                self.migrate_grok_compaction_detector_v108()?;
+                migration_step!(
+                    "migration_108",
+                    self.migrate_grok_compaction_detector_v108()
+                );
             }
             if !self.schema_migration_applied(109)? {
-                self.migrate_runtime_entrypoint_locator_identity_v109()?;
+                migration_step!(
+                    "migration_109",
+                    self.migrate_runtime_entrypoint_locator_identity_v109()
+                );
             }
             if !self.schema_migration_applied(110)? {
-                self.migrate_dynamic_camp_membership_v110()?;
+                migration_step!("migration_110", self.migrate_dynamic_camp_membership_v110());
             }
             if !self.schema_migration_applied(111)? {
-                self.migrate_message_delivery_zero_attempt_cancellation_v111()?;
+                migration_step!(
+                    "migration_111",
+                    self.migrate_message_delivery_zero_attempt_cancellation_v111()
+                );
             }
             if !self.schema_migration_applied(112)? {
-                self.migrate_managed_attachment_v2_v112()?;
+                migration_step!("migration_112", self.migrate_managed_attachment_v2_v112());
             }
             if !self.schema_migration_applied(113)? {
-                self.migrate_planned_shutdown_protocol_v3_v113()?;
+                migration_step!(
+                    "migration_113",
+                    self.migrate_planned_shutdown_protocol_v3_v113()
+                );
             }
             if !self.schema_migration_applied(114)? {
-                self.migrate_command_diff_projection_v114()?;
+                migration_step!("migration_114", self.migrate_command_diff_projection_v114());
             }
             if !self.schema_migration_applied(115)? {
-                self.migrate_agent_run_file_changes_v115()?;
+                migration_step!("migration_115", self.migrate_agent_run_file_changes_v115());
             }
-            if !self.schema_migration_applied(116)? {
-                self.migrate_runtime_activity_classifier_v116()?;
-            }
+            migration_step!(
+                "migration_116",
+                self.reconcile_runtime_activity_channel_v116()
+            );
             if !self.schema_migration_applied(117)? {
-                self.migrate_pending_camp_inputs_v117()?;
+                migration_step!(
+                    "migration_117",
+                    self.migrate_feishu_developer_session_v117()
+                );
             }
             if !self.schema_migration_applied(118)? {
-                self.migrate_camp_member_fast_v118()?;
+                migration_step!(
+                    "migration_118",
+                    self.migrate_feishu_owner_camp_binding_v118()
+                );
             }
             if !self.schema_migration_applied(119)? {
-                self.migrate_fast_preference_lifetime_v119()?;
+                migration_step!(
+                    "migration_119",
+                    self.migrate_feishu_channel_execution_console_v119()
+                );
+            }
+            if !self.schema_migration_applied(120)? {
+                migration_step!(
+                    "migration_120",
+                    self.migrate_feishu_execution_console_view_state_v120()
+                );
+            }
+            if !self.schema_migration_applied(121)? {
+                migration_step!(
+                    "migration_121",
+                    self.migrate_feishu_execution_console_terminal_sealing_v121()
+                );
+            }
+            if !self.schema_migration_applied(122)? {
+                migration_step!("migration_122", self.migrate_dingtalk_channel_v122());
+            }
+            if !self.schema_migration_applied(123)? {
+                migration_step!(
+                    "migration_123",
+                    self.migrate_dingtalk_direct_open_platform_v123()
+                );
+            }
+            if !self.schema_migration_applied(124)? {
+                migration_step!("migration_124", self.migrate_channel_storage_v124());
+            }
+            if !self.schema_migration_applied(125)? {
+                migration_step!(
+                    "migration_125",
+                    self.migrate_execution_console_snapshots_v125()
+                );
+            }
+            if !self.schema_migration_applied(126)? {
+                migration_step!("migration_126", self.migrate_pending_camp_inputs_v126());
+            }
+            if !self.schema_migration_applied(127)? {
+                migration_step!("migration_127", self.migrate_camp_member_fast_v127());
+            }
+            if !self.schema_migration_applied(128)? {
+                migration_step!("migration_128", self.migrate_merged_channel_contract_v128());
+            }
+            if !self.schema_migration_applied(129)? {
+                migration_step!(
+                    "migration_129",
+                    self.migrate_execution_evidence_index_v129()
+                );
+            }
+            if !self.schema_migration_applied(130)? {
+                migration_step!(
+                    "migration_130",
+                    self.migrate_fast_preference_lifetime_v130()
+                );
+            }
+            if !self.schema_migration_applied(131)? {
+                migration_step!("migration_131", self.migrate_fast_lifetime_contract_v131());
+            }
+            if !self.schema_migration_applied(132)? {
+                migration_step!("migration_132", self.migrate_pending_quick_chat_v132());
+            }
+            if !self.schema_migration_applied(133)? {
+                migration_step!("migration_133", self.migrate_runtime_images_v133());
             }
             if let Err(error) =
                 crate::notification::maintain_notification_episode_retention(self.connection())
@@ -3941,320 +5095,492 @@ impl Database {
             )?;
         }
         if !self.schema_migration_applied(16)? {
-            self.migrate_runtime_adapter_catalog_v16()?;
+            migration_step!("migration_16", self.migrate_runtime_adapter_catalog_v16());
             self.connection.execute(
                 "INSERT INTO schema_migration(version, applied_at) VALUES (16, datetime('now'))",
                 [],
             )?;
         }
         if !self.schema_migration_applied(17)? {
-            self.migrate_lightweight_task_v17()?;
+            migration_step!("migration_17", self.migrate_lightweight_task_v17());
         }
         if !self.schema_migration_applied(18)? {
-            self.migrate_task_context_manifest_v18()?;
+            migration_step!("migration_18", self.migrate_task_context_manifest_v18());
         }
         if !self.schema_migration_applied(19)? {
-            self.migrate_skill_library_v19()?;
+            migration_step!("migration_19", self.migrate_skill_library_v19());
         }
         if !self.schema_migration_applied(20)? {
-            self.migrate_mcp_exposure_v20()?;
+            migration_step!("migration_20", self.migrate_mcp_exposure_v20());
         }
         if !self.schema_migration_applied(21)? {
-            self.migrate_memory_v21()?;
+            migration_step!("migration_21", self.migrate_memory_v21());
         }
         if !self.schema_migration_applied(22)? {
-            self.migrate_context_v22()?;
+            migration_step!("migration_22", self.migrate_context_v22());
         }
         if !self.schema_migration_applied(23)? {
-            self.migrate_memory_authority_v23(fresh_database)?;
+            migration_step!(
+                "migration_23",
+                self.migrate_memory_authority_v23(fresh_database)
+            );
         }
         if !self.schema_migration_applied(24)? {
-            self.migrate_memory_auto_policy_opt_in_v24()?;
+            migration_step!("migration_24", self.migrate_memory_auto_policy_opt_in_v24());
         }
         if !self.schema_migration_applied(25)? {
-            self.migrate_member_avatars_v25()?;
+            migration_step!("migration_25", self.migrate_member_avatars_v25());
         }
         if !self.schema_migration_applied(26)? {
-            self.migrate_member_presence_v26()?;
+            migration_step!("migration_26", self.migrate_member_presence_v26());
         }
         if !self.schema_migration_applied(27)? {
-            self.migrate_runtime_managed_permissions_v27()?;
+            migration_step!(
+                "migration_27",
+                self.migrate_runtime_managed_permissions_v27()
+            );
         }
         if !self.schema_migration_applied(28)? {
-            self.migrate_execution_evidence_v28()?;
+            migration_step!("migration_28", self.migrate_execution_evidence_v28());
         }
         if !self.schema_migration_applied(29)? {
-            self.migrate_automatic_partner_memory_v29()?;
+            migration_step!("migration_29", self.migrate_automatic_partner_memory_v29());
         }
         if !self.schema_migration_applied(30)? {
-            self.migrate_runtime_adapter_catalog_v30()?;
+            migration_step!("migration_30", self.migrate_runtime_adapter_catalog_v30());
         }
         if !self.schema_migration_applied(31)? {
-            self.migrate_managed_product_runtime_v31()?;
+            migration_step!("migration_31", self.migrate_managed_product_runtime_v31());
         }
         if !self.schema_migration_applied(32)? {
-            self.migrate_memory_store_v32()?;
+            migration_step!("migration_32", self.migrate_memory_store_v32());
         }
         if !self.schema_migration_applied(33)? {
-            self.migrate_context_manifest_v4_v33()?;
+            migration_step!("migration_33", self.migrate_context_manifest_v4_v33());
         }
         if !self.schema_migration_applied(34)? {
-            self.migrate_configured_camp_creation_v34()?;
+            migration_step!("migration_34", self.migrate_configured_camp_creation_v34());
         }
         if !self.schema_migration_applied(35)? {
-            self.migrate_directory_workspace_v35()?;
+            migration_step!("migration_35", self.migrate_directory_workspace_v35());
         }
         if !self.schema_migration_applied(36)? {
-            self.migrate_orphan_context_index_cleanup_v36()?;
+            migration_step!(
+                "migration_36",
+                self.migrate_orphan_context_index_cleanup_v36()
+            );
         }
         if !self.schema_migration_applied(37)? {
-            self.migrate_agent_authored_a2a_timeline_v37()?;
+            migration_step!(
+                "migration_37",
+                self.migrate_agent_authored_a2a_timeline_v37()
+            );
         }
         if !self.schema_migration_applied(38)? {
-            self.migrate_runtime_executable_identity_v38()?;
+            migration_step!(
+                "migration_38",
+                self.migrate_runtime_executable_identity_v38()
+            );
         }
         if !self.schema_migration_applied(39)? {
-            self.migrate_quick_chat_binding_v39()?;
+            migration_step!("migration_39", self.migrate_quick_chat_binding_v39());
         }
         if !self.schema_migration_applied(40)? {
-            self.migrate_camp_attachments_v40()?;
+            migration_step!("migration_40", self.migrate_camp_attachments_v40());
         }
         if !self.schema_migration_applied(41)? {
-            self.migrate_member_runtime_configuration_v41()?;
+            migration_step!(
+                "migration_41",
+                self.migrate_member_runtime_configuration_v41()
+            );
         }
         if !self.schema_migration_applied(42)? {
-            self.migrate_member_identity_v42()?;
+            migration_step!("migration_42", self.migrate_member_identity_v42());
         }
         if !self.schema_migration_applied(43)? {
-            self.migrate_in_app_notifications_v43()?;
+            migration_step!("migration_43", self.migrate_in_app_notifications_v43());
         }
         if !self.schema_migration_applied(44)? {
-            self.migrate_event_driven_member_calls_v44()?;
+            migration_step!("migration_44", self.migrate_event_driven_member_calls_v44());
         }
         if !self.schema_migration_applied(45)? {
-            self.migrate_member_call_capability_v45()?;
+            migration_step!("migration_45", self.migrate_member_call_capability_v45());
         }
         if !self.schema_migration_applied(46)? {
-            self.migrate_structured_camp_content_v46()?;
+            migration_step!("migration_46", self.migrate_structured_camp_content_v46());
         }
         if !self.schema_migration_applied(47)? {
-            self.migrate_camp_turn_execution_budget_v47()?;
+            migration_step!(
+                "migration_47",
+                self.migrate_camp_turn_execution_budget_v47()
+            );
         }
         if !self.schema_migration_applied(48)? {
-            self.migrate_native_session_member_identity_bootstrap_v48()?;
+            migration_step!(
+                "migration_48",
+                self.migrate_native_session_member_identity_bootstrap_v48()
+            );
         }
         if !self.schema_migration_applied(49)? {
-            self.migrate_skill_delivery_groups_v49()?;
+            migration_step!("migration_49", self.migrate_skill_delivery_groups_v49());
         }
         if !self.schema_migration_applied(50)? {
-            self.migrate_reserved_v50()?;
+            migration_step!("migration_50", self.migrate_reserved_v50());
         }
         if !self.schema_migration_applied(51)? {
-            self.migrate_camp_history_retrieval_v51()?;
+            migration_step!("migration_51", self.migrate_camp_history_retrieval_v51());
         }
         if !self.schema_migration_applied(52)? {
-            self.migrate_agent_identity_v52()?;
+            migration_step!("migration_52", self.migrate_agent_identity_v52());
         }
         if !self.schema_migration_applied(53)? {
-            self.migrate_canonical_runtime_activity_v53()?;
+            migration_step!(
+                "migration_53",
+                self.migrate_canonical_runtime_activity_v53()
+            );
         }
         if !self.schema_migration_applied(54)? {
-            self.migrate_context_formatter_v54()?;
+            migration_step!("migration_54", self.migrate_context_formatter_v54());
         }
         if !self.schema_migration_applied(55)? {
-            self.migrate_runtime_compatibility_digest_v55()?;
+            migration_step!(
+                "migration_55",
+                self.migrate_runtime_compatibility_digest_v55()
+            );
         }
         if !self.schema_migration_applied(56)? {
-            self.migrate_additive_mcp_clean_break_v56()?;
+            migration_step!("migration_56", self.migrate_additive_mcp_clean_break_v56());
         }
         if !self.schema_migration_applied(57)? {
-            self.migrate_member_task_camp_contract_v57()?;
+            migration_step!("migration_57", self.migrate_member_task_camp_contract_v57());
         }
         if !self.schema_migration_applied(58)? {
-            self.migrate_structured_message_clean_break_v58()?;
+            migration_step!(
+                "migration_58",
+                self.migrate_structured_message_clean_break_v58()
+            );
         }
         if !self.schema_migration_applied(59)? {
-            self.migrate_deterministic_public_context_v59()?;
+            migration_step!(
+                "migration_59",
+                self.migrate_deterministic_public_context_v59()
+            );
         }
         if !self.schema_migration_applied(60)? {
-            self.migrate_stable_collaboration_state_v60()?;
+            migration_step!(
+                "migration_60",
+                self.migrate_stable_collaboration_state_v60()
+            );
         }
         if !self.schema_migration_applied(61)? {
-            self.migrate_public_a2a_message_delivery_v61()?;
+            migration_step!(
+                "migration_61",
+                self.migrate_public_a2a_message_delivery_v61()
+            );
         }
         if !self.schema_migration_applied(62)? {
-            self.migrate_single_authority_delivery_context_v62()?;
+            migration_step!(
+                "migration_62",
+                self.migrate_single_authority_delivery_context_v62()
+            );
         }
         if !self.schema_migration_applied(63)? {
-            self.migrate_public_delivery_clean_break_v63()?;
+            migration_step!(
+                "migration_63",
+                self.migrate_public_delivery_clean_break_v63()
+            );
         }
         if !self.schema_migration_applied(64)? {
-            self.migrate_agent_cli_clean_break_v64()?;
+            migration_step!("migration_64", self.migrate_agent_cli_clean_break_v64());
         }
         if !self.schema_migration_applied(65)? {
-            self.migrate_durable_task_v2_v65()?;
+            migration_step!("migration_65", self.migrate_durable_task_v2_v65());
         }
         if !self.schema_migration_applied(66)? {
-            self.migrate_native_session_bootstrap_redelivery_v66()?;
+            migration_step!(
+                "migration_66",
+                self.migrate_native_session_bootstrap_redelivery_v66()
+            );
         }
         if !self.schema_migration_applied(67)? {
-            self.migrate_pending_camp_activation_v67()?;
+            migration_step!("migration_67", self.migrate_pending_camp_activation_v67());
         }
         if !self.schema_migration_applied(68)? {
-            self.migrate_collaboration_projection_v2_v68()?;
+            migration_step!(
+                "migration_68",
+                self.migrate_collaboration_projection_v2_v68()
+            );
         }
         if !self.schema_migration_applied(69)? {
-            self.migrate_bounded_omission_evidence_v69()?;
+            migration_step!("migration_69", self.migrate_bounded_omission_evidence_v69());
         }
         if !self.schema_migration_applied(70)? {
-            self.migrate_self_active_task_context_v70()?;
+            migration_step!("migration_70", self.migrate_self_active_task_context_v70());
         }
         if !self.schema_migration_applied(71)? {
-            self.migrate_explicit_empty_self_active_task_snapshot_v71()?;
+            migration_step!(
+                "migration_71",
+                self.migrate_explicit_empty_self_active_task_snapshot_v71()
+            );
         }
         if !self.schema_migration_applied(72)? {
-            self.migrate_runtime_drift_rebind_v72()?;
+            migration_step!("migration_72", self.migrate_runtime_drift_rebind_v72());
         }
         if !self.schema_migration_applied(73)? {
-            self.migrate_remove_agent_run_expected_output_v73()?;
+            migration_step!(
+                "migration_73",
+                self.migrate_remove_agent_run_expected_output_v73()
+            );
         }
         if !self.schema_migration_applied(74)? {
-            self.migrate_skill_default_assignments_v74()?;
+            migration_step!("migration_74", self.migrate_skill_default_assignments_v74());
         }
         if !self.schema_migration_applied(75)? {
-            self.migrate_skill_projection_access_v75()?;
+            migration_step!("migration_75", self.migrate_skill_projection_access_v75());
         }
         if !self.schema_migration_applied(76)? {
-            self.migrate_explicit_caller_return_delivery_v76()?;
+            migration_step!(
+                "migration_76",
+                self.migrate_explicit_caller_return_delivery_v76()
+            );
         }
         if !self.schema_migration_applied(77)? {
-            self.migrate_planned_shutdown_terminal_projection_v77()?;
+            migration_step!(
+                "migration_77",
+                self.migrate_planned_shutdown_terminal_projection_v77()
+            );
         }
         if !self.schema_migration_applied(78)? {
-            self.migrate_current_user_attention_v78()?;
+            migration_step!("migration_78", self.migrate_current_user_attention_v78());
         }
         if !self.schema_migration_applied(79)? {
-            self.migrate_notification_episodes_v79()?;
+            migration_step!("migration_79", self.migrate_notification_episodes_v79());
         }
         if !self.schema_migration_applied(80)? {
-            self.migrate_controlled_shutdown_fence_v80()?;
+            migration_step!("migration_80", self.migrate_controlled_shutdown_fence_v80());
         }
         if !self.schema_migration_applied(81)? {
-            self.migrate_notification_heads_up_invalidation_v81()?;
+            migration_step!(
+                "migration_81",
+                self.migrate_notification_heads_up_invalidation_v81()
+            );
         }
         if !self.schema_migration_applied(82)? {
-            self.migrate_memory_store_v3_v82()?;
+            migration_step!("migration_82", self.migrate_memory_store_v3_v82());
         }
         if !self.schema_migration_applied(83)? {
-            self.migrate_composer_reply_intent_v83()?;
+            migration_step!("migration_83", self.migrate_composer_reply_intent_v83());
         }
         if !self.schema_migration_applied(84)? {
-            self.migrate_exact_scope_memory_view_v84()?;
+            migration_step!("migration_84", self.migrate_exact_scope_memory_view_v84());
         }
         if !self.schema_migration_applied(85)? {
-            self.migrate_composer_recipient_continuation_v85()?;
+            migration_step!(
+                "migration_85",
+                self.migrate_composer_recipient_continuation_v85()
+            );
         }
         if !self.schema_migration_applied(86)? {
-            self.migrate_trae_runtime_catalog_v86()?;
+            migration_step!("migration_86", self.migrate_trae_runtime_catalog_v86());
         }
         if !self.schema_migration_applied(87)? {
-            self.migrate_durable_gather_v87()?;
+            migration_step!("migration_87", self.migrate_durable_gather_v87());
         }
         if !self.schema_migration_applied(88)? {
-            self.migrate_gather_continuation_v88()?;
+            migration_step!("migration_88", self.migrate_gather_continuation_v88());
         }
         if !self.schema_migration_applied(89)? {
-            self.migrate_compact_context_run_facts_v89()?;
+            migration_step!("migration_89", self.migrate_compact_context_run_facts_v89());
         }
         if !self.schema_migration_applied(90)? {
-            self.migrate_runtime_monitoring_v90()?;
+            migration_step!("migration_90", self.migrate_runtime_monitoring_v90());
         }
         if !self.schema_migration_applied(91)? {
-            self.migrate_current_input_skill_links_v91()?;
+            migration_step!("migration_91", self.migrate_current_input_skill_links_v91());
         }
         if !self.schema_migration_applied(92)? {
-            self.migrate_minimal_runtime_usage_v92()?;
+            migration_step!("migration_92", self.migrate_minimal_runtime_usage_v92());
         }
         if !self.schema_migration_applied(93)? {
-            self.migrate_a2a_public_only_v93()?;
+            migration_step!("migration_93", self.migrate_a2a_public_only_v93());
         }
         if !self.schema_migration_applied(94)? {
-            self.migrate_public_runtime_failures_v94()?;
+            migration_step!("migration_94", self.migrate_public_runtime_failures_v94());
         }
         if !self.schema_migration_applied(95)? {
-            self.migrate_camp_identity_v95()?;
+            migration_step!("migration_95", self.migrate_camp_identity_v95());
         }
         if !self.schema_migration_applied(96)? {
-            self.migrate_agent_run_runtime_model_v96()?;
+            migration_step!("migration_96", self.migrate_agent_run_runtime_model_v96());
         }
         if !self.schema_migration_applied(97)? {
-            self.migrate_windows_skill_projection_operation_v97()?;
+            migration_step!(
+                "migration_97",
+                self.migrate_windows_skill_projection_operation_v97()
+            );
         }
         if !self.schema_migration_applied(98)? {
-            self.migrate_self_authored_recent_messages_v98()?;
+            migration_step!(
+                "migration_98",
+                self.migrate_self_authored_recent_messages_v98()
+            );
         }
         if !self.schema_migration_applied(99)? {
-            self.migrate_camp_attachment_view_v99()?;
+            migration_step!("migration_99", self.migrate_camp_attachment_view_v99());
         }
         if !self.schema_migration_applied(100)? {
-            self.migrate_semantic_attachment_receipt_v100()?;
+            migration_step!(
+                "migration_100",
+                self.migrate_semantic_attachment_receipt_v100()
+            );
         }
         if !self.schema_migration_applied(101)? {
-            self.migrate_single_camp_publication_v101()?;
+            migration_step!("migration_101", self.migrate_single_camp_publication_v101());
         }
         if !self.schema_migration_applied(102)? {
-            self.migrate_unified_attachment_publication_v102()?;
+            migration_step!(
+                "migration_102",
+                self.migrate_unified_attachment_publication_v102()
+            );
         }
         if !self.schema_migration_applied(103)? {
-            self.migrate_trae_skill_delivery_group_v103()?;
+            migration_step!(
+                "migration_103",
+                self.migrate_trae_skill_delivery_group_v103()
+            );
         }
         if !self.schema_migration_applied(104)? {
-            self.migrate_cursor_runtime_catalog_v104()?;
+            migration_step!("migration_104", self.migrate_cursor_runtime_catalog_v104());
         }
         if !self.schema_migration_applied(105)? {
-            self.migrate_kimi_runtime_catalog_v105()?;
+            migration_step!("migration_105", self.migrate_kimi_runtime_catalog_v105());
         }
         if !self.schema_migration_applied(106)? {
-            self.migrate_kimi_compaction_detector_v106()?;
+            migration_step!(
+                "migration_106",
+                self.migrate_kimi_compaction_detector_v106()
+            );
         }
         if !self.schema_migration_applied(107)? {
-            self.migrate_grok_runtime_catalog_v107()?;
+            migration_step!("migration_107", self.migrate_grok_runtime_catalog_v107());
         }
         if !self.schema_migration_applied(108)? {
-            self.migrate_grok_compaction_detector_v108()?;
+            migration_step!(
+                "migration_108",
+                self.migrate_grok_compaction_detector_v108()
+            );
         }
         if !self.schema_migration_applied(109)? {
-            self.migrate_runtime_entrypoint_locator_identity_v109()?;
+            migration_step!(
+                "migration_109",
+                self.migrate_runtime_entrypoint_locator_identity_v109()
+            );
         }
         if !self.schema_migration_applied(110)? {
-            self.migrate_dynamic_camp_membership_v110()?;
+            migration_step!("migration_110", self.migrate_dynamic_camp_membership_v110());
         }
         if !self.schema_migration_applied(111)? {
-            self.migrate_message_delivery_zero_attempt_cancellation_v111()?;
+            migration_step!(
+                "migration_111",
+                self.migrate_message_delivery_zero_attempt_cancellation_v111()
+            );
         }
         if !self.schema_migration_applied(112)? {
-            self.migrate_managed_attachment_v2_v112()?;
+            migration_step!("migration_112", self.migrate_managed_attachment_v2_v112());
         }
         if !self.schema_migration_applied(113)? {
-            self.migrate_planned_shutdown_protocol_v3_v113()?;
+            migration_step!(
+                "migration_113",
+                self.migrate_planned_shutdown_protocol_v3_v113()
+            );
         }
         if !self.schema_migration_applied(114)? {
-            self.migrate_command_diff_projection_v114()?;
+            migration_step!("migration_114", self.migrate_command_diff_projection_v114());
         }
         if !self.schema_migration_applied(115)? {
-            self.migrate_agent_run_file_changes_v115()?;
+            migration_step!("migration_115", self.migrate_agent_run_file_changes_v115());
         }
-        if !self.schema_migration_applied(116)? {
-            self.migrate_runtime_activity_classifier_v116()?;
-        }
+        migration_step!(
+            "migration_116",
+            self.reconcile_runtime_activity_channel_v116()
+        );
         if !self.schema_migration_applied(117)? {
-            self.migrate_pending_camp_inputs_v117()?;
+            migration_step!(
+                "migration_117",
+                self.migrate_feishu_developer_session_v117()
+            );
         }
         if !self.schema_migration_applied(118)? {
-            self.migrate_camp_member_fast_v118()?;
+            migration_step!(
+                "migration_118",
+                self.migrate_feishu_owner_camp_binding_v118()
+            );
         }
         if !self.schema_migration_applied(119)? {
-            self.migrate_fast_preference_lifetime_v119()?;
+            migration_step!(
+                "migration_119",
+                self.migrate_feishu_channel_execution_console_v119()
+            );
+        }
+        if !self.schema_migration_applied(120)? {
+            migration_step!(
+                "migration_120",
+                self.migrate_feishu_execution_console_view_state_v120()
+            );
+        }
+        if !self.schema_migration_applied(121)? {
+            migration_step!(
+                "migration_121",
+                self.migrate_feishu_execution_console_terminal_sealing_v121()
+            );
+        }
+        if !self.schema_migration_applied(122)? {
+            migration_step!("migration_122", self.migrate_dingtalk_channel_v122());
+        }
+        if !self.schema_migration_applied(123)? {
+            migration_step!(
+                "migration_123",
+                self.migrate_dingtalk_direct_open_platform_v123()
+            );
+        }
+        if !self.schema_migration_applied(124)? {
+            migration_step!("migration_124", self.migrate_channel_storage_v124());
+        }
+        if !self.schema_migration_applied(125)? {
+            migration_step!(
+                "migration_125",
+                self.migrate_execution_console_snapshots_v125()
+            );
+        }
+        if !self.schema_migration_applied(126)? {
+            migration_step!("migration_126", self.migrate_pending_camp_inputs_v126());
+        }
+        if !self.schema_migration_applied(127)? {
+            migration_step!("migration_127", self.migrate_camp_member_fast_v127());
+        }
+        if !self.schema_migration_applied(128)? {
+            migration_step!("migration_128", self.migrate_merged_channel_contract_v128());
+        }
+        if !self.schema_migration_applied(129)? {
+            migration_step!(
+                "migration_129",
+                self.migrate_execution_evidence_index_v129()
+            );
+        }
+        if !self.schema_migration_applied(130)? {
+            migration_step!(
+                "migration_130",
+                self.migrate_fast_preference_lifetime_v130()
+            );
+        }
+        if !self.schema_migration_applied(131)? {
+            migration_step!("migration_131", self.migrate_fast_lifetime_contract_v131());
+        }
+        if !self.schema_migration_applied(132)? {
+            migration_step!("migration_132", self.migrate_pending_quick_chat_v132());
+        }
+        if !self.schema_migration_applied(133)? {
+            migration_step!("migration_133", self.migrate_runtime_images_v133());
         }
         if let Err(error) =
             crate::notification::maintain_notification_episode_retention(self.connection())
@@ -9329,21 +10655,30 @@ impl Database {
                 VALUES (70, datetime('now'));
                 "#,
             )?;
+            validate_migration_foreign_keys(
+                &transaction,
+                &[
+                    "agent_run",
+                    "bootstrap_redelivery_requirement",
+                    "camp_turn",
+                    "context_manifest",
+                    "context_manifest_history_camp",
+                    "conversation",
+                    "message_delivery",
+                    "message_delivery_attempt",
+                    "native_session_bootstrap_evidence",
+                    "native_session_compaction_observation",
+                    "native_session_compaction_observer_lease",
+                    "native_session_resume_attempt",
+                    "runtime_input_delivery",
+                ],
+            )?;
             transaction.commit()?;
             Ok(())
         })();
         let foreign_keys_result = self.connection.execute_batch("PRAGMA foreign_keys = ON;");
         migration_result?;
         foreign_keys_result?;
-        if let Some((table, row_id)) = self
-            .connection
-            .query_row("PRAGMA foreign_key_check", [], |row| {
-                Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
-            })
-            .optional()?
-        {
-            anyhow::bail!("v70 migration left a foreign-key violation in {table} row {row_id}");
-        }
         Ok(())
     }
 
@@ -9379,24 +10714,27 @@ impl Database {
     }
 
     fn migrate_runtime_drift_rebind_v72(&mut self) -> Result<()> {
-        self.add_column_if_missing(
+        let transaction = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        add_migration_column_if_missing(
+            &transaction,
             "agent_run",
             "runtime_initial_reported_version",
             "runtime_initial_reported_version TEXT",
         )?;
-        self.add_column_if_missing(
+        add_migration_column_if_missing(
+            &transaction,
             "agent_run",
             "runtime_initial_executable_fingerprint",
             "runtime_initial_executable_fingerprint TEXT",
         )?;
-        self.add_column_if_missing(
+        add_migration_column_if_missing(
+            &transaction,
             "agent_run",
             "runtime_rebind_count",
             "runtime_rebind_count INTEGER NOT NULL DEFAULT 0 CHECK(runtime_rebind_count >= 0)",
         )?;
-        let transaction = self
-            .connection
-            .transaction_with_behavior(TransactionBehavior::Immediate)?;
         transaction.execute_batch(
             r#"
             UPDATE agent_run
@@ -9672,21 +11010,13 @@ impl Database {
                 VALUES (76, datetime('now'));
                 "#,
             )?;
+            validate_migration_foreign_keys(&transaction, &["event_log", "message_delivery"])?;
             transaction.commit()?;
             Ok(())
         })();
         let foreign_keys_result = self.connection.execute_batch("PRAGMA foreign_keys = ON;");
         migration_result?;
         foreign_keys_result?;
-        if let Some((table, row_id)) = self
-            .connection
-            .query_row("PRAGMA foreign_key_check", [], |row| {
-                Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
-            })
-            .optional()?
-        {
-            anyhow::bail!("v76 migration left a foreign-key violation in {table} row {row_id}");
-        }
         Ok(())
     }
 
@@ -10056,21 +11386,42 @@ impl Database {
                 VALUES (78, datetime('now'));
                 "#,
             )?;
+            validate_migration_foreign_keys(
+                &transaction,
+                &[
+                    "adapter_installation",
+                    "agent_run",
+                    "approval",
+                    "bootstrap_redelivery_requirement",
+                    "camp_message",
+                    "camp_turn",
+                    "context_manifest",
+                    "context_manifest_history_camp",
+                    "conversation",
+                    "conversation_message",
+                    "event_log",
+                    "hearth_memory_proposal",
+                    "in_app_notification",
+                    "in_app_notification_preference",
+                    "memory_revision",
+                    "message_attachment",
+                    "message_delivery",
+                    "message_delivery_attempt",
+                    "message_delivery_retry",
+                    "native_session_bootstrap_evidence",
+                    "native_session_compaction_observation",
+                    "native_session_compaction_observer_lease",
+                    "native_session_resume_attempt",
+                    "runtime_input_delivery",
+                    "task",
+                ],
+            )?;
             transaction.commit()?;
             Ok(())
         })();
         let foreign_keys_result = self.connection.execute_batch("PRAGMA foreign_keys = ON;");
         migration_result?;
         foreign_keys_result?;
-        if let Some((table, row_id)) = self
-            .connection
-            .query_row("PRAGMA foreign_key_check", [], |row| {
-                Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
-            })
-            .optional()?
-        {
-            anyhow::bail!("v78 migration left a foreign-key violation in {table} row {row_id}");
-        }
         Ok(())
     }
 
@@ -11587,21 +12938,22 @@ impl Database {
                 VALUES (82, datetime('now'));
                 "#,
             )?;
+            validate_migration_foreign_keys(
+                &transaction,
+                &[
+                    "hearth_memory_proposal",
+                    "memory",
+                    "memory_revision",
+                    "memory_revision_retrieval_key",
+                    "memory_supersession",
+                ],
+            )?;
             transaction.commit()?;
             Ok(())
         })();
         let foreign_keys_result = self.connection.execute_batch("PRAGMA foreign_keys = ON;");
         migration_result?;
         foreign_keys_result?;
-        if let Some((table, row_id)) = self
-            .connection
-            .query_row("PRAGMA foreign_key_check", [], |row| {
-                Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
-            })
-            .optional()?
-        {
-            anyhow::bail!("v82 migration left a foreign-key violation in {table} row {row_id}");
-        }
         Ok(())
     }
 
@@ -11922,21 +13274,16 @@ impl Database {
                 VALUES (86, datetime('now'));
                 "#,
             )?;
+            validate_migration_foreign_keys(
+                &transaction,
+                &["adapter_installation", "agent_profile"],
+            )?;
             transaction.commit()?;
             Ok(())
         })();
         let foreign_keys_result = self.connection.execute_batch("PRAGMA foreign_keys = ON;");
         migration_result?;
         foreign_keys_result?;
-        if let Some((table, row_id)) = self
-            .connection
-            .query_row("PRAGMA foreign_key_check", [], |row| {
-                Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
-            })
-            .optional()?
-        {
-            anyhow::bail!("v86 migration left a foreign-key violation in {table} row {row_id}");
-        }
         Ok(())
     }
 
@@ -12447,21 +13794,23 @@ impl Database {
                 VALUES (87, datetime('now'));
                 "#,
             )?;
+            validate_migration_foreign_keys(
+                &transaction,
+                &[
+                    "agent_run",
+                    "camp_turn",
+                    "context_manifest",
+                    "gather_item",
+                    "gather_record",
+                    "message_delivery",
+                ],
+            )?;
             transaction.commit()?;
             Ok(())
         })();
         let foreign_keys_result = self.connection.execute_batch("PRAGMA foreign_keys = ON;");
         migration_result?;
         foreign_keys_result?;
-        if let Some((table, row_id)) = self
-            .connection
-            .query_row("PRAGMA foreign_key_check", [], |row| {
-                Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
-            })
-            .optional()?
-        {
-            anyhow::bail!("v87 migration left a foreign-key violation in {table} row {row_id}");
-        }
         Ok(())
     }
 
@@ -12543,21 +13892,13 @@ impl Database {
                 VALUES (88, datetime('now'));
                 "#,
             )?;
+            validate_migration_foreign_keys(&transaction, &["context_manifest"])?;
             transaction.commit()?;
             Ok(())
         })();
         let foreign_keys_result = self.connection.execute_batch("PRAGMA foreign_keys = ON;");
         migration_result?;
         foreign_keys_result?;
-        if let Some((table, row_id)) = self
-            .connection
-            .query_row("PRAGMA foreign_key_check", [], |row| {
-                Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
-            })
-            .optional()?
-        {
-            anyhow::bail!("v88 migration left a foreign-key violation in {table} row {row_id}");
-        }
         Ok(())
     }
 
@@ -12755,26 +14096,40 @@ impl Database {
                 VALUES (89, datetime('now'));
                 "#,
             )?;
+            validate_migration_foreign_keys(
+                &transaction,
+                &[
+                    "agent_run",
+                    "bootstrap_redelivery_requirement",
+                    "camp_turn",
+                    "context_manifest",
+                    "context_manifest_history_camp",
+                    "conversation",
+                    "gather_item",
+                    "gather_record",
+                    "message_delivery",
+                    "message_delivery_attempt",
+                    "native_session_bootstrap_evidence",
+                    "native_session_compaction_observation",
+                    "native_session_compaction_observer_lease",
+                    "native_session_resume_attempt",
+                    "runtime_input_delivery",
+                ],
+            )?;
             transaction.commit()?;
             Ok(())
         })();
         let foreign_keys_result = self.connection.execute_batch("PRAGMA foreign_keys = ON;");
         migration_result?;
         foreign_keys_result?;
-        if let Some((table, row_id)) = self
-            .connection
-            .query_row("PRAGMA foreign_key_check", [], |row| {
-                Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
-            })
-            .optional()?
-        {
-            anyhow::bail!("v89 migration left a foreign-key violation in {table} row {row_id}");
-        }
         Ok(())
     }
 
     fn migrate_runtime_monitoring_v90(&mut self) -> Result<()> {
-        self.connection.execute_batch(
+        let transaction = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        transaction.execute_batch(
             r#"
             ALTER TABLE canonical_runtime_activity
                 ADD COLUMN started_at TEXT;
@@ -12790,6 +14145,7 @@ impl Database {
             VALUES (90, datetime('now'));
             "#,
         )?;
+        transaction.commit()?;
         Ok(())
     }
     fn migrate_current_input_skill_links_v91(&mut self) -> Result<()> {
@@ -12998,21 +14354,32 @@ impl Database {
                 VALUES (91, datetime('now'));
                 "#,
             )?;
+            validate_migration_foreign_keys(
+                &transaction,
+                &[
+                    "agent_run",
+                    "bootstrap_redelivery_requirement",
+                    "camp_turn",
+                    "context_manifest",
+                    "context_manifest_history_camp",
+                    "conversation",
+                    "gather_item",
+                    "gather_record",
+                    "message_delivery",
+                    "message_delivery_attempt",
+                    "native_session_bootstrap_evidence",
+                    "native_session_compaction_observation",
+                    "native_session_compaction_observer_lease",
+                    "native_session_resume_attempt",
+                    "runtime_input_delivery",
+                ],
+            )?;
             transaction.commit()?;
             Ok(())
         })();
         let foreign_keys_result = self.connection.execute_batch("PRAGMA foreign_keys = ON;");
         migration_result?;
         foreign_keys_result?;
-        if let Some((table, row_id)) = self
-            .connection
-            .query_row("PRAGMA foreign_key_check", [], |row| {
-                Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
-            })
-            .optional()?
-        {
-            anyhow::bail!("v91 migration left a foreign-key violation in {table} row {row_id}");
-        }
         Ok(())
     }
 
@@ -13374,21 +14741,24 @@ impl Database {
                 VALUES (93, datetime('now'));
                 "#,
             )?;
+            validate_migration_foreign_keys(
+                &transaction,
+                &[
+                    "agent_run",
+                    "camp_message",
+                    "context_manifest",
+                    "context_manifest_history_camp",
+                    "message_delivery",
+                    "message_delivery_attempt",
+                    "runtime_input_delivery",
+                ],
+            )?;
             transaction.commit()?;
             Ok(())
         })();
         let foreign_keys_result = self.connection.execute_batch("PRAGMA foreign_keys = ON;");
         migration_result?;
         foreign_keys_result?;
-        if let Some((table, row_id)) = self
-            .connection
-            .query_row("PRAGMA foreign_key_check", [], |row| {
-                Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
-            })
-            .optional()?
-        {
-            anyhow::bail!("v93 migration left a foreign-key violation in {table} row {row_id}");
-        }
         Ok(())
     }
 
@@ -13617,33 +14987,45 @@ impl Database {
                 VALUES (95, datetime('now'));
                 "#,
             )?;
+            validate_migration_foreign_keys(
+                &transaction,
+                &[
+                    "agent_run",
+                    "bootstrap_redelivery_requirement",
+                    "camp_turn",
+                    "context_manifest",
+                    "context_manifest_history_camp",
+                    "conversation",
+                    "gather_item",
+                    "gather_record",
+                    "message_delivery",
+                    "message_delivery_attempt",
+                    "native_session_bootstrap_evidence",
+                    "native_session_compaction_observation",
+                    "native_session_compaction_observer_lease",
+                    "native_session_resume_attempt",
+                    "runtime_input_delivery",
+                ],
+            )?;
             transaction.commit()?;
             Ok(())
         })();
         let foreign_keys_result = self.connection.execute_batch("PRAGMA foreign_keys = ON;");
         migration_result?;
         foreign_keys_result?;
-        if let Some((table, row_id)) = self
-            .connection
-            .query_row("PRAGMA foreign_key_check", [], |row| {
-                Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
-            })
-            .optional()?
-        {
-            anyhow::bail!("v95 migration left a foreign-key violation in {table} row {row_id}");
-        }
         Ok(())
     }
 
     fn migrate_agent_run_runtime_model_v96(&mut self) -> Result<()> {
-        self.add_column_if_missing(
+        let transaction = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        add_migration_column_if_missing(
+            &transaction,
             "agent_run",
             "runtime_observed_model_id",
             "runtime_observed_model_id TEXT",
         )?;
-        let transaction = self
-            .connection
-            .transaction_with_behavior(TransactionBehavior::Immediate)?;
         transaction.execute_batch(
             r#"
             UPDATE rovai_data_contract
@@ -13660,19 +15042,21 @@ impl Database {
     }
 
     fn migrate_windows_skill_projection_operation_v97(&mut self) -> Result<()> {
-        self.add_column_if_missing(
+        let transaction = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        add_migration_column_if_missing(
+            &transaction,
             "skill_projection_observation",
             "operation_id",
             "operation_id TEXT CHECK(operation_id IS NULL OR length(operation_id) = 36)",
         )?;
-        self.add_column_if_missing(
+        add_migration_column_if_missing(
+            &transaction,
             "skill_projection_observation",
             "entry_identity",
             "entry_identity TEXT CHECK(entry_identity IS NULL OR length(entry_identity) = 49)",
         )?;
-        let transaction = self
-            .connection
-            .transaction_with_behavior(TransactionBehavior::Immediate)?;
         transaction.execute_batch(
             r#"
             CREATE UNIQUE INDEX IF NOT EXISTS skill_projection_operation_unique
@@ -13892,21 +15276,32 @@ impl Database {
                 VALUES (98, datetime('now'));
                 "#,
             )?;
+            validate_migration_foreign_keys(
+                &transaction,
+                &[
+                    "agent_run",
+                    "bootstrap_redelivery_requirement",
+                    "camp_turn",
+                    "context_manifest",
+                    "context_manifest_history_camp",
+                    "conversation",
+                    "gather_item",
+                    "gather_record",
+                    "message_delivery",
+                    "message_delivery_attempt",
+                    "native_session_bootstrap_evidence",
+                    "native_session_compaction_observation",
+                    "native_session_compaction_observer_lease",
+                    "native_session_resume_attempt",
+                    "runtime_input_delivery",
+                ],
+            )?;
             transaction.commit()?;
             Ok(())
         })();
         let foreign_keys_result = self.connection.execute_batch("PRAGMA foreign_keys = ON;");
         migration_result?;
         foreign_keys_result?;
-        if let Some((table, row_id)) = self
-            .connection
-            .query_row("PRAGMA foreign_key_check", [], |row| {
-                Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
-            })
-            .optional()?
-        {
-            anyhow::bail!("v98 migration left a foreign-key violation in {table} row {row_id}");
-        }
         Ok(())
     }
 
@@ -14550,21 +15945,35 @@ impl Database {
                 VALUES (99, datetime('now'));
                 "#,
             )?;
+            validate_migration_foreign_keys(
+                &transaction,
+                &[
+                    "action_attempt",
+                    "action_execution",
+                    "agent_run",
+                    "approval",
+                    "camp_attachment_view",
+                    "camp_attachment_view_entry",
+                    "camp_attachment_view_operation",
+                    "camp_attachment_view_operation_entry",
+                    "camp_turn",
+                    "context_manifest",
+                    "conversation",
+                    "gather_item",
+                    "gather_record",
+                    "message_delivery",
+                    "message_delivery_attempt",
+                    "native_session_compaction_observer_lease",
+                    "runtime_delivery_checkpoint",
+                    "runtime_input_delivery",
+                ],
+            )?;
             transaction.commit()?;
             Ok(())
         })();
         let foreign_keys_result = self.connection.execute_batch("PRAGMA foreign_keys = ON;");
         migration_result?;
         foreign_keys_result?;
-        if let Some((table, row_id)) = self
-            .connection
-            .query_row("PRAGMA foreign_key_check", [], |row| {
-                Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
-            })
-            .optional()?
-        {
-            anyhow::bail!("v99 migration left a foreign-key violation in {table} row {row_id}");
-        }
         Ok(())
     }
 
@@ -14983,21 +16392,33 @@ impl Database {
                 VALUES (100, datetime('now'));
                 "#,
             )?;
+            validate_migration_foreign_keys(
+                &transaction,
+                &[
+                    "action_attempt",
+                    "action_execution",
+                    "agent_run",
+                    "approval",
+                    "camp_attachment_view",
+                    "camp_attachment_view_entry",
+                    "camp_turn",
+                    "context_manifest",
+                    "conversation",
+                    "gather_item",
+                    "gather_record",
+                    "message_delivery",
+                    "message_delivery_attempt",
+                    "native_session_compaction_observer_lease",
+                    "runtime_delivery_checkpoint",
+                    "runtime_input_delivery",
+                ],
+            )?;
             transaction.commit()?;
             Ok(())
         })();
         let foreign_keys_result = self.connection.execute_batch("PRAGMA foreign_keys = ON;");
         migration_result?;
         foreign_keys_result?;
-        if let Some((table, row_id)) = self
-            .connection
-            .query_row("PRAGMA foreign_key_check", [], |row| {
-                Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
-            })
-            .optional()?
-        {
-            anyhow::bail!("v100 migration left a foreign-key violation in {table} row {row_id}");
-        }
         Ok(())
     }
 
@@ -15253,21 +16674,22 @@ impl Database {
                 VALUES (102, datetime('now'));
                 "#,
             )?;
+            validate_migration_foreign_keys(
+                &transaction,
+                &[
+                    "camp_attachment_publication_resolution",
+                    "camp_attachment_view",
+                    "camp_attachment_view_operation",
+                    "message_attachment",
+                    "message_delivery",
+                ],
+            )?;
             transaction.commit()?;
             Ok(())
         })();
         let foreign_keys_result = self.connection.execute_batch("PRAGMA foreign_keys = ON;");
         migration_result?;
         foreign_keys_result?;
-        if let Some((table, row_id)) = self
-            .connection
-            .query_row("PRAGMA foreign_key_check", [], |row| {
-                Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
-            })
-            .optional()?
-        {
-            anyhow::bail!("v102 migration left a foreign-key violation in {table} row {row_id}");
-        }
         Ok(())
     }
 
@@ -15426,21 +16848,21 @@ impl Database {
                 VALUES (103, datetime('now'));
                 "#,
             )?;
+            validate_migration_foreign_keys(
+                &transaction,
+                &[
+                    "adapter_capability_snapshot",
+                    "skill",
+                    "skill_group_assignment",
+                    "skill_projection_observation",
+                ],
+            )?;
             transaction.commit()?;
             Ok(())
         })();
         let foreign_keys_result = self.connection.execute_batch("PRAGMA foreign_keys = ON;");
         migration_result?;
         foreign_keys_result?;
-        if let Some((table, row_id)) = self
-            .connection
-            .query_row("PRAGMA foreign_key_check", [], |row| {
-                Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
-            })
-            .optional()?
-        {
-            anyhow::bail!("v103 migration left a foreign-key violation in {table} row {row_id}");
-        }
         Ok(())
     }
 
@@ -15747,21 +17169,22 @@ impl Database {
                 VALUES (104, datetime('now'));
                 "#,
             )?;
+            validate_migration_foreign_keys(
+                &transaction,
+                &[
+                    "adapter_installation",
+                    "agent_profile",
+                    "skill",
+                    "skill_group_assignment",
+                    "skill_projection_observation",
+                ],
+            )?;
             transaction.commit()?;
             Ok(())
         })();
         let foreign_keys_result = self.connection.execute_batch("PRAGMA foreign_keys = ON;");
         migration_result?;
         foreign_keys_result?;
-        if let Some((table, row_id)) = self
-            .connection
-            .query_row("PRAGMA foreign_key_check", [], |row| {
-                Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
-            })
-            .optional()?
-        {
-            anyhow::bail!("v104 migration left a foreign-key violation in {table} row {row_id}");
-        }
         Ok(())
     }
 
@@ -16070,21 +17493,22 @@ impl Database {
                 VALUES (105, datetime('now'));
                 "#,
             )?;
+            validate_migration_foreign_keys(
+                &transaction,
+                &[
+                    "adapter_installation",
+                    "agent_profile",
+                    "skill",
+                    "skill_group_assignment",
+                    "skill_projection_observation",
+                ],
+            )?;
             transaction.commit()?;
             Ok(())
         })();
         let foreign_keys_result = self.connection.execute_batch("PRAGMA foreign_keys = ON;");
         migration_result?;
         foreign_keys_result?;
-        if let Some((table, row_id)) = self
-            .connection
-            .query_row("PRAGMA foreign_key_check", [], |row| {
-                Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
-            })
-            .optional()?
-        {
-            anyhow::bail!("v105 migration left a foreign-key violation in {table} row {row_id}");
-        }
         Ok(())
     }
 
@@ -16289,21 +17713,21 @@ impl Database {
                 VALUES (106, datetime('now'));
                 "#,
             )?;
+            validate_migration_foreign_keys(
+                &transaction,
+                &[
+                    "bootstrap_redelivery_requirement",
+                    "compaction_detector_policy",
+                    "native_session_compaction_observation",
+                    "native_session_compaction_observer_lease",
+                ],
+            )?;
             transaction.commit()?;
             Ok(())
         })();
         let foreign_keys_result = self.connection.execute_batch("PRAGMA foreign_keys = ON;");
         migration_result?;
         foreign_keys_result?;
-        if let Some((table, row_id)) = self
-            .connection
-            .query_row("PRAGMA foreign_key_check", [], |row| {
-                Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
-            })
-            .optional()?
-        {
-            anyhow::bail!("v106 migration left a foreign-key violation in {table} row {row_id}");
-        }
         Ok(())
     }
 
@@ -16449,21 +17873,22 @@ impl Database {
                 VALUES (107, datetime('now'));
                 "#,
             )?;
+            validate_migration_foreign_keys(
+                &transaction,
+                &[
+                    "adapter_installation",
+                    "agent_profile",
+                    "skill",
+                    "skill_group_assignment",
+                    "skill_projection_observation",
+                ],
+            )?;
             transaction.commit()?;
             Ok(())
         })();
         let foreign_keys_result = self.connection.execute_batch("PRAGMA foreign_keys = ON;");
         migration_result?;
         foreign_keys_result?;
-        if let Some((table, row_id)) = self
-            .connection
-            .query_row("PRAGMA foreign_key_check", [], |row| {
-                Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
-            })
-            .optional()?
-        {
-            anyhow::bail!("v107 migration left a foreign-key violation in {table} row {row_id}");
-        }
         Ok(())
     }
 
@@ -16566,21 +17991,21 @@ impl Database {
                 VALUES (108, datetime('now'));
                 "#,
             )?;
+            validate_migration_foreign_keys(
+                &transaction,
+                &[
+                    "bootstrap_redelivery_requirement",
+                    "compaction_detector_policy",
+                    "native_session_compaction_observation",
+                    "native_session_compaction_observer_lease",
+                ],
+            )?;
             transaction.commit()?;
             Ok(())
         })();
         let foreign_keys_result = self.connection.execute_batch("PRAGMA foreign_keys = ON;");
         migration_result?;
         foreign_keys_result?;
-        if let Some((table, row_id)) = self
-            .connection
-            .query_row("PRAGMA foreign_key_check", [], |row| {
-                Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
-            })
-            .optional()?
-        {
-            anyhow::bail!("v108 migration left a foreign-key violation in {table} row {row_id}");
-        }
         Ok(())
     }
 
@@ -16870,21 +18295,1625 @@ impl Database {
                 VALUES (111, datetime('now'));
                 "#,
             )?;
+            validate_migration_foreign_keys(&transaction, &["message_delivery"])?;
             transaction.commit()?;
             Ok(())
         })();
         let foreign_keys_result = self.connection.execute_batch("PRAGMA foreign_keys = ON;");
         migration_result?;
         foreign_keys_result?;
-        if let Some((table, row_id)) = self
+        Ok(())
+    }
+
+    fn migrate_channel_platform_v116(&mut self) -> Result<()> {
+        self.connection
+            .execute_batch("PRAGMA foreign_keys = OFF;")?;
+        let migration_result = (|| -> Result<()> {
+            let transaction = self
+                .connection
+                .transaction_with_behavior(TransactionBehavior::Immediate)?;
+            let current_schema: String = transaction.query_row(
+                "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'camp_message'",
+                [],
+                |row| row.get(0),
+            )?;
+            let renamed_schema = if current_schema.contains("CREATE TABLE \"camp_message\"") {
+                current_schema.replacen(
+                    "CREATE TABLE \"camp_message\"",
+                    "CREATE TABLE camp_message_v113",
+                    1,
+                )
+            } else {
+                current_schema.replacen(
+                    "CREATE TABLE camp_message",
+                    "CREATE TABLE camp_message_v113",
+                    1,
+                )
+            };
+            let author_constraint = "CHECK(author_type IN ('user', 'agent', 'system'))";
+            let expanded_author_constraint =
+                "CHECK(author_type IN ('user', 'agent', 'system', 'external_principal'))";
+            let message_v113 = renamed_schema
+                .replace(
+                    "REFERENCES camp_message(id)",
+                    "REFERENCES camp_message_v113(id)",
+                )
+                .replacen(author_constraint, expanded_author_constraint, 1);
+            if !message_v113.contains("CREATE TABLE camp_message_v113")
+                || !message_v113.contains(expanded_author_constraint)
+            {
+                anyhow::bail!("v113 could not admit External Principal CampMessage authors");
+            }
+            let message_columns = table_columns(&transaction, "camp_message")?
+                .into_iter()
+                .map(|column| format!("\"{}\"", column.replace('"', "\"\"")))
+                .collect::<Vec<_>>()
+                .join(", ");
+            let dependent_schema = {
+                let mut statement = transaction.prepare(
+                    r#"
+                    SELECT sql
+                    FROM sqlite_master
+                    WHERE tbl_name = 'camp_message'
+                      AND type IN ('index', 'trigger')
+                      AND sql IS NOT NULL
+                    ORDER BY CASE type WHEN 'index' THEN 0 ELSE 1 END, name
+                    "#,
+                )?;
+                statement
+                    .query_map([], |row| row.get::<_, String>(0))?
+                    .collect::<rusqlite::Result<Vec<_>>>()?
+            };
+
+            transaction.execute_batch(&message_v113)?;
+            transaction.execute_batch(&format!(
+                "INSERT INTO camp_message_v113({message_columns}) \
+                 SELECT {message_columns} FROM camp_message;\n\
+                 DROP TABLE camp_message;\n\
+                 ALTER TABLE camp_message_v113 RENAME TO camp_message;"
+            ))?;
+            for schema in dependent_schema {
+                transaction.execute_batch(&schema)?;
+            }
+
+            let manifest_schema: String = transaction.query_row(
+                "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'context_manifest'",
+                [],
+                |row| row.get(0),
+            )?;
+            let renamed_manifest = if manifest_schema.contains("CREATE TABLE \"context_manifest\"")
+            {
+                manifest_schema.replacen(
+                    "CREATE TABLE \"context_manifest\"",
+                    "CREATE TABLE context_manifest_v113",
+                    1,
+                )
+            } else {
+                manifest_schema.replacen(
+                    "CREATE TABLE context_manifest",
+                    "CREATE TABLE context_manifest_v113",
+                    1,
+                )
+            };
+            let mut manifest_v113 = renamed_manifest
+                .replacen(
+                    "CHECK(formatter_version IN (20, 21))",
+                    "CHECK(formatter_version IN (20, 21, 22))",
+                    1,
+                )
+                .replacen(
+                    "CHECK(context_manifest_version IN (19, 20, 21))",
+                    "CHECK(context_manifest_version IN (19, 20, 21, 22))",
+                    1,
+                );
+            let pairing_start = manifest_v113
+                .find("                    CHECK(\n                        (context_manifest_version = 19")
+                .context("v113 could not locate the ContextManifest version pairing")?;
+            let pairing_end = manifest_v113[pairing_start..]
+                .find(
+                    "                    CHECK(\n                        previous_accepted_public_boundary_sequence",
+                )
+                .map(|offset| pairing_start + offset)
+                .context("v113 could not locate the ContextManifest pairing boundary")?;
+            manifest_v113.replace_range(
+                pairing_start..pairing_end,
+                r#"                    CHECK(
+                        (context_manifest_version = 19
+                         AND formatter_version = 20
+                         AND run_facts_schema_version = 1
+                         AND camp_attachment_view_receipt_version IS NULL
+                         AND camp_attachment_view_receipt_json IS NULL
+                         AND camp_attachment_view_receipt_digest IS NULL)
+                        OR
+                        (context_manifest_version = 20
+                         AND formatter_version = 21
+                         AND run_facts_schema_version = 2
+                         AND camp_attachment_view_receipt_version = 1
+                         AND camp_attachment_view_receipt_json IS NOT NULL
+                         AND camp_attachment_view_receipt_digest IS NOT NULL)
+                        OR
+                        (context_manifest_version = 21
+                         AND formatter_version = 21
+                         AND run_facts_schema_version = 2
+                         AND camp_attachment_view_receipt_version = 2
+                         AND camp_attachment_view_receipt_json IS NOT NULL
+                         AND camp_attachment_view_receipt_digest IS NOT NULL)
+                        OR
+                        (context_manifest_version = 22
+                         AND formatter_version = 22
+                         AND run_facts_schema_version = 2
+                         AND camp_attachment_view_receipt_version = 2
+                         AND camp_attachment_view_receipt_json IS NOT NULL
+                         AND camp_attachment_view_receipt_digest IS NOT NULL)
+                    ),
+"#,
+            );
+            if !manifest_v113.contains("CREATE TABLE context_manifest_v113")
+                || !manifest_v113.contains("CHECK(formatter_version IN (20, 21, 22))")
+                || !manifest_v113.contains("context_manifest_version IN (19, 20, 21, 22)")
+                || !manifest_v113.contains("context_manifest_version = 22")
+                || !manifest_v113.contains("formatter_version = 22")
+            {
+                anyhow::bail!("v113 could not admit External Principal context formatter v22");
+            }
+            let manifest_columns = table_columns(&transaction, "context_manifest")?
+                .into_iter()
+                .map(|column| format!("\"{}\"", column.replace('"', "\"\"")))
+                .collect::<Vec<_>>()
+                .join(", ");
+            let manifest_dependent_schema = {
+                let mut statement = transaction.prepare(
+                    r#"
+                    SELECT sql
+                    FROM sqlite_master
+                    WHERE tbl_name = 'context_manifest'
+                      AND type IN ('index', 'trigger')
+                      AND sql IS NOT NULL
+                    ORDER BY CASE type WHEN 'index' THEN 0 ELSE 1 END, name
+                    "#,
+                )?;
+                statement
+                    .query_map([], |row| row.get::<_, String>(0))?
+                    .collect::<rusqlite::Result<Vec<_>>>()?
+            };
+            transaction.execute_batch(&manifest_v113)?;
+            transaction.execute_batch(&format!(
+                "INSERT INTO context_manifest_v113({manifest_columns}) \
+                 SELECT {manifest_columns} FROM context_manifest;\n\
+                 DROP TABLE context_manifest;\n\
+                 ALTER TABLE context_manifest_v113 RENAME TO context_manifest;"
+            ))?;
+            for schema in manifest_dependent_schema {
+                let schema = schema
+                    .replacen(
+                        "context_manifest_v21_only_insert",
+                        "context_manifest_v22_only_insert",
+                        1,
+                    )
+                    .replacen(
+                        "NEW.context_manifest_version <> 21",
+                        "NEW.context_manifest_version <> 22",
+                        1,
+                    )
+                    .replacen(
+                        "new ContextManifest must use v21",
+                        "new ContextManifest must use v22",
+                        1,
+                    );
+                transaction.execute_batch(&schema)?;
+            }
+
+            transaction.execute_batch(
+                r#"
+                CREATE TABLE project_binding (
+                    id TEXT PRIMARY KEY,
+                    display_name TEXT NOT NULL CHECK(length(trim(display_name)) > 0),
+                    binding_kind TEXT NOT NULL CHECK(binding_kind IN ('quick_chat', 'directory')),
+                    canonical_path TEXT NOT NULL CHECK(length(trim(canonical_path)) > 0),
+                    status TEXT NOT NULL CHECK(status IN ('active', 'archived')),
+                    version INTEGER NOT NULL DEFAULT 1 CHECK(version >= 1),
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    archived_at TEXT,
+                    UNIQUE(canonical_path),
+                    CHECK(
+                        (status = 'active' AND archived_at IS NULL)
+                        OR (status = 'archived' AND archived_at IS NOT NULL)
+                    )
+                );
+                CREATE INDEX project_binding_status_idx
+                    ON project_binding(status, updated_at DESC, id);
+
+                CREATE TABLE external_principal (
+                    id TEXT PRIMARY KEY,
+                    provider TEXT NOT NULL CHECK(length(trim(provider)) > 0),
+                    tenant_key TEXT NOT NULL CHECK(length(trim(tenant_key)) > 0),
+                    external_user_id TEXT NOT NULL CHECK(length(trim(external_user_id)) > 0),
+                    display_name TEXT NOT NULL CHECK(length(trim(display_name)) > 0),
+                    version INTEGER NOT NULL DEFAULT 1 CHECK(version >= 1),
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    UNIQUE(provider, tenant_key, external_user_id)
+                );
+
+                CREATE TABLE external_principal_app_identity (
+                    principal_id TEXT NOT NULL REFERENCES external_principal(id) ON DELETE CASCADE,
+                    provider TEXT NOT NULL CHECK(length(trim(provider)) > 0),
+                    app_id TEXT NOT NULL CHECK(length(trim(app_id)) > 0),
+                    identity_kind TEXT NOT NULL CHECK(identity_kind IN ('open_id', 'user_id', 'union_id')),
+                    external_id TEXT NOT NULL CHECK(length(trim(external_id)) > 0),
+                    updated_at TEXT NOT NULL,
+                    PRIMARY KEY(principal_id, provider, app_id, identity_kind),
+                    UNIQUE(provider, app_id, identity_kind, external_id)
+                );
+                CREATE INDEX external_principal_app_identity_lookup_idx
+                    ON external_principal_app_identity(provider, app_id, principal_id, identity_kind);
+
+                CREATE TABLE channel_conversation (
+                    id TEXT PRIMARY KEY,
+                    provider TEXT NOT NULL CHECK(length(trim(provider)) > 0),
+                    tenant_key TEXT NOT NULL CHECK(length(trim(tenant_key)) > 0),
+                    chat_id TEXT NOT NULL CHECK(length(trim(chat_id)) > 0),
+                    topic_key TEXT NOT NULL DEFAULT '',
+                    bot_scope_app_id TEXT NOT NULL DEFAULT '',
+                    conversation_kind TEXT NOT NULL CHECK(conversation_kind IN ('p2p', 'group', 'topic')),
+                    display_name TEXT NOT NULL CHECK(length(trim(display_name)) > 0),
+                    last_sender_display_name TEXT NOT NULL CHECK(length(trim(last_sender_display_name)) > 0),
+                    last_sender_principal_id TEXT REFERENCES external_principal(id),
+                    first_seen_at TEXT NOT NULL,
+                    last_seen_at TEXT NOT NULL,
+                    version INTEGER NOT NULL DEFAULT 1 CHECK(version >= 1),
+                    UNIQUE(provider, tenant_key, chat_id, topic_key, bot_scope_app_id),
+                    CHECK(
+                        (conversation_kind = 'topic' AND length(topic_key) > 0
+                            AND bot_scope_app_id = '')
+                        OR (conversation_kind = 'group' AND topic_key = ''
+                            AND bot_scope_app_id = '')
+                        OR (conversation_kind = 'p2p' AND topic_key = ''
+                            AND length(bot_scope_app_id) > 0)
+                    )
+                );
+                CREATE INDEX channel_conversation_last_seen_idx
+                    ON channel_conversation(last_seen_at DESC, id);
+
+                CREATE TABLE channel_conversation_binding (
+                    id TEXT PRIMARY KEY,
+                    channel_conversation_id TEXT NOT NULL UNIQUE
+                        REFERENCES channel_conversation(id) ON DELETE CASCADE,
+                    project_binding_id TEXT NOT NULL REFERENCES project_binding(id),
+                    camp_id TEXT UNIQUE REFERENCES camp(id),
+                    status TEXT NOT NULL CHECK(status = 'active'),
+                    version INTEGER NOT NULL DEFAULT 1 CHECK(version >= 1),
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
+                CREATE INDEX channel_conversation_binding_project_idx
+                    ON channel_conversation_binding(project_binding_id, updated_at DESC, id);
+
+                CREATE TABLE feishu_account (
+                    id TEXT PRIMARY KEY,
+                    identity_digest TEXT NOT NULL CHECK(length(identity_digest) > 0),
+                    display_name TEXT NOT NULL CHECK(length(trim(display_name)) > 0),
+                    tenant_name TEXT NOT NULL CHECK(length(trim(tenant_name)) > 0),
+                    status TEXT NOT NULL CHECK(status IN ('connected', 'disconnected', 'session_expired')),
+                    version INTEGER NOT NULL DEFAULT 1 CHECK(version >= 1),
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    disconnected_at TEXT
+                );
+                CREATE UNIQUE INDEX feishu_account_single_connected_idx
+                    ON feishu_account(status) WHERE status = 'connected';
+
+                CREATE TABLE feishu_member_bot (
+                    agent_id TEXT PRIMARY KEY REFERENCES agent_profile(id),
+                    account_id TEXT NOT NULL REFERENCES feishu_account(id),
+                    app_id TEXT NOT NULL UNIQUE,
+                    bot_open_id TEXT,
+                    bot_display_name TEXT NOT NULL CHECK(length(trim(bot_display_name)) > 0),
+                    credential_ref TEXT NOT NULL UNIQUE CHECK(length(trim(credential_ref)) > 0),
+                    status TEXT NOT NULL CHECK(status IN (
+                        'provisioning', 'published', 'failed', 'disabled'
+                    )),
+                    failure_code TEXT,
+                    version INTEGER NOT NULL DEFAULT 1 CHECK(version >= 1),
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    published_at TEXT,
+                    CHECK(
+                        (status = 'published' AND published_at IS NOT NULL AND failure_code IS NULL)
+                        OR status <> 'published'
+                    )
+                );
+                CREATE INDEX feishu_member_bot_status_idx
+                    ON feishu_member_bot(status, updated_at DESC, agent_id);
+
+                CREATE TABLE external_group_bot_roster_state (
+                    provider TEXT NOT NULL CHECK(length(trim(provider)) > 0),
+                    tenant_key TEXT NOT NULL CHECK(length(trim(tenant_key)) > 0),
+                    chat_id TEXT NOT NULL CHECK(length(trim(chat_id)) > 0),
+                    generation INTEGER NOT NULL DEFAULT 1 CHECK(generation >= 1),
+                    observed_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    PRIMARY KEY(provider, tenant_key, chat_id)
+                );
+
+                CREATE TABLE external_group_bot_roster (
+                    provider TEXT NOT NULL,
+                    tenant_key TEXT NOT NULL,
+                    chat_id TEXT NOT NULL,
+                    app_id TEXT NOT NULL CHECK(length(trim(app_id)) > 0),
+                    agent_id TEXT NOT NULL REFERENCES agent_profile(id),
+                    status TEXT NOT NULL CHECK(status IN ('present', 'absent')),
+                    version INTEGER NOT NULL DEFAULT 1 CHECK(version >= 1),
+                    observed_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    PRIMARY KEY(provider, tenant_key, chat_id, app_id),
+                    FOREIGN KEY(provider, tenant_key, chat_id)
+                        REFERENCES external_group_bot_roster_state(provider, tenant_key, chat_id)
+                        ON DELETE CASCADE
+                );
+                CREATE INDEX external_group_bot_roster_status_idx
+                    ON external_group_bot_roster(
+                        provider, tenant_key, chat_id, status, agent_id
+                    );
+
+                CREATE TABLE channel_inbound_aggregate (
+                    id TEXT PRIMARY KEY,
+                    provider TEXT NOT NULL CHECK(length(trim(provider)) > 0),
+                    tenant_key TEXT NOT NULL CHECK(length(trim(tenant_key)) > 0),
+                    chat_id TEXT NOT NULL CHECK(length(trim(chat_id)) > 0),
+                    topic_key TEXT NOT NULL DEFAULT '',
+                    external_message_digest TEXT NOT NULL CHECK(length(external_message_digest) > 0),
+                    payload_digest TEXT NOT NULL CHECK(length(payload_digest) > 0),
+                    status TEXT NOT NULL CHECK(status IN ('collecting', 'finalized', 'failed')),
+                    canonical_mentions_complete INTEGER NOT NULL CHECK(canonical_mentions_complete IN (0, 1)),
+                    expected_app_ids_json TEXT NOT NULL,
+                    observed_app_ids_json TEXT NOT NULL,
+                    frozen_payload_json TEXT NOT NULL,
+                    deadline_at TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    finalized_at TEXT,
+                    failure_code TEXT,
+                    UNIQUE(provider, tenant_key, external_message_digest),
+                    CHECK(
+                        (status = 'collecting' AND finalized_at IS NULL AND failure_code IS NULL)
+                        OR (status = 'finalized' AND finalized_at IS NOT NULL AND failure_code IS NULL)
+                        OR (status = 'failed' AND finalized_at IS NOT NULL AND failure_code IS NOT NULL)
+                    )
+                );
+                CREATE INDEX channel_inbound_aggregate_collecting_idx
+                    ON channel_inbound_aggregate(status, deadline_at, id);
+
+                CREATE TABLE channel_inbound_observation (
+                    aggregate_id TEXT NOT NULL
+                        REFERENCES channel_inbound_aggregate(id) ON DELETE CASCADE,
+                    app_id TEXT NOT NULL,
+                    observation_digest TEXT NOT NULL,
+                    observed_at TEXT NOT NULL,
+                    PRIMARY KEY(aggregate_id, app_id)
+                );
+
+                CREATE TABLE channel_turn_request (
+                    id TEXT PRIMARY KEY,
+                    binding_id TEXT NOT NULL REFERENCES channel_conversation_binding(id),
+                    aggregate_id TEXT NOT NULL UNIQUE
+                        REFERENCES channel_inbound_aggregate(id) ON DELETE CASCADE,
+                    external_principal_id TEXT NOT NULL REFERENCES external_principal(id),
+                    ack_app_id TEXT NOT NULL,
+                    structured_content_json TEXT NOT NULL,
+                    addressed_agent_ids_json TEXT NOT NULL,
+                    status TEXT NOT NULL CHECK(status IN (
+                        'queued', 'admitted', 'completed', 'failed'
+                    )),
+                    queue_position INTEGER NOT NULL CHECK(queue_position >= 0),
+                    camp_id TEXT REFERENCES camp(id),
+                    camp_message_id TEXT UNIQUE REFERENCES camp_message(id),
+                    camp_turn_id TEXT UNIQUE REFERENCES camp_turn(id),
+                    trigger_camp_sequence INTEGER,
+                    failure_code TEXT,
+                    version INTEGER NOT NULL DEFAULT 1 CHECK(version >= 1),
+                    created_at TEXT NOT NULL,
+                    admitted_at TEXT,
+                    completed_at TEXT,
+                    updated_at TEXT NOT NULL,
+                    CHECK(
+                        (status = 'queued' AND admitted_at IS NULL AND completed_at IS NULL
+                            AND camp_message_id IS NULL AND camp_turn_id IS NULL)
+                        OR (status = 'admitted' AND admitted_at IS NOT NULL AND completed_at IS NULL
+                            AND camp_message_id IS NOT NULL AND camp_turn_id IS NOT NULL)
+                        OR (status IN ('completed', 'failed') AND completed_at IS NOT NULL)
+                    )
+                );
+                CREATE UNIQUE INDEX channel_turn_request_active_binding_idx
+                    ON channel_turn_request(binding_id)
+                    WHERE status = 'admitted';
+                CREATE INDEX channel_turn_request_queue_idx
+                    ON channel_turn_request(binding_id, status, queue_position, created_at, id);
+
+                CREATE TABLE channel_delivery (
+                    id TEXT PRIMARY KEY,
+                    request_id TEXT NOT NULL REFERENCES channel_turn_request(id) ON DELETE CASCADE,
+                    dedupe_key TEXT NOT NULL UNIQUE,
+                    delivery_kind TEXT NOT NULL CHECK(delivery_kind IN (
+                        'queue_ack', 'agent_status', 'agent_output', 'completion', 'attention'
+                    )),
+                    target_app_id TEXT NOT NULL,
+                    source_agent_id TEXT,
+                    source_camp_message_id TEXT REFERENCES camp_message(id),
+                    payload_json TEXT NOT NULL,
+                    status TEXT NOT NULL CHECK(status IN ('pending', 'attempting', 'sent', 'failed')),
+                    attempt_count INTEGER NOT NULL DEFAULT 0 CHECK(attempt_count >= 0),
+                    available_at TEXT NOT NULL,
+                    lease_owner TEXT,
+                    lease_expires_at TEXT,
+                    external_delivery_message_id TEXT,
+                    failure_code TEXT,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    ended_at TEXT,
+                    CHECK(
+                        (status IN ('pending', 'attempting') AND ended_at IS NULL)
+                        OR (status IN ('sent', 'failed') AND ended_at IS NOT NULL)
+                    ),
+                    CHECK(
+                        (status = 'attempting' AND lease_owner IS NOT NULL AND lease_expires_at IS NOT NULL)
+                        OR (status <> 'attempting' AND lease_owner IS NULL AND lease_expires_at IS NULL)
+                    )
+                );
+                CREATE INDEX channel_delivery_claim_idx
+                    ON channel_delivery(status, available_at, created_at, id);
+                CREATE INDEX channel_delivery_request_idx
+                    ON channel_delivery(request_id, status, delivery_kind, id);
+
+                UPDATE rovai_data_contract
+                SET contract_version = 'v1.29', projection_schema_version = 70,
+                    reset_reason = NULL, updated_at = datetime('now')
+                WHERE singleton = 1;
+
+                INSERT OR IGNORE INTO schema_migration(version, applied_at)
+                VALUES (116, datetime('now'));
+                "#,
+            )?;
+            validate_migration_foreign_keys(
+                &transaction,
+                &[
+                    "camp_message",
+                    "channel_conversation",
+                    "channel_conversation_binding",
+                    "channel_delivery",
+                    "channel_inbound_aggregate",
+                    "channel_inbound_observation",
+                    "channel_turn_request",
+                    "context_manifest",
+                    "external_group_bot_roster",
+                    "external_group_bot_roster_state",
+                    "external_principal",
+                    "external_principal_app_identity",
+                    "feishu_account",
+                    "feishu_member_bot",
+                    "project_binding",
+                ],
+            )?;
+            transaction.commit()?;
+            Ok(())
+        })();
+        let foreign_keys_result = self.connection.execute_batch("PRAGMA foreign_keys = ON;");
+        migration_result?;
+        foreign_keys_result?;
+        Ok(())
+    }
+
+    fn migrate_feishu_developer_session_v117(&mut self) -> Result<()> {
+        let transaction = self
             .connection
-            .query_row("PRAGMA foreign_key_check", [], |row| {
-                Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
-            })
-            .optional()?
-        {
-            anyhow::bail!("v111 migration left a foreign-key violation in {table} row {row_id}");
-        }
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        transaction.execute_batch(
+            r#"
+            ALTER TABLE feishu_account ADD COLUMN user_id_digest TEXT;
+            ALTER TABLE feishu_account ADD COLUMN tenant_id TEXT;
+            ALTER TABLE feishu_account ADD COLUMN user_name TEXT;
+            ALTER TABLE feishu_account ADD COLUMN email TEXT;
+            ALTER TABLE feishu_account ADD COLUMN brand TEXT
+                CHECK(brand IS NULL OR brand IN ('feishu', 'lark'));
+            ALTER TABLE feishu_account ADD COLUMN connected_at TEXT;
+            ALTER TABLE feishu_account ADD COLUMN last_verified_at TEXT;
+
+            UPDATE feishu_account
+            SET status = 'disconnected', disconnected_at = COALESCE(disconnected_at, datetime('now')),
+                version = version + 1, updated_at = datetime('now')
+            WHERE status IN ('connected', 'session_expired');
+
+            DELETE FROM feishu_account
+            WHERE id NOT IN (SELECT account_id FROM feishu_member_bot);
+
+            CREATE TABLE feishu_member_bot_publication_intent (
+                id TEXT PRIMARY KEY,
+                agent_id TEXT NOT NULL REFERENCES agent_profile(id),
+                account_id TEXT NOT NULL REFERENCES feishu_account(id),
+                expected_user_id_digest TEXT NOT NULL
+                    CHECK(length(trim(expected_user_id_digest)) > 0),
+                expected_tenant_id TEXT NOT NULL CHECK(length(trim(expected_tenant_id)) > 0),
+                requested_app_name TEXT NOT NULL CHECK(length(trim(requested_app_name)) > 0),
+                provisioning_mode TEXT NOT NULL
+                    CHECK(provisioning_mode = 'developer_session'),
+                state TEXT NOT NULL CHECK(state IN (
+                    'created', 'session_verified', 'app_created', 'credentials_read',
+                    'bot_configured', 'version_published', 'connection_verified',
+                    'completed', 'failed_recoverable', 'failed_unknown_remote_state'
+                )),
+                remote_app_id TEXT,
+                credential_ref TEXT,
+                last_completed_step TEXT,
+                failure_code TEXT,
+                version INTEGER NOT NULL DEFAULT 1 CHECK(version >= 1),
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                CHECK(
+                    (state = 'failed_unknown_remote_state' AND failure_code IS NOT NULL)
+                    OR state <> 'failed_unknown_remote_state'
+                )
+            );
+            CREATE INDEX feishu_member_bot_publication_intent_agent_idx
+                ON feishu_member_bot_publication_intent(agent_id, created_at DESC, id);
+            CREATE UNIQUE INDEX feishu_member_bot_publication_intent_active_agent_idx
+                ON feishu_member_bot_publication_intent(agent_id)
+                WHERE state NOT IN ('completed', 'failed_recoverable');
+
+            UPDATE rovai_data_contract
+            SET contract_version = 'v1.30', projection_schema_version = 71,
+                reset_reason = NULL, updated_at = datetime('now')
+            WHERE singleton = 1;
+
+            INSERT INTO schema_migration(version, applied_at)
+            VALUES (117, datetime('now'));
+            "#,
+        )?;
+        transaction.commit()?;
+        Ok(())
+    }
+
+    fn migrate_feishu_owner_camp_binding_v118(&mut self) -> Result<()> {
+        self.connection
+            .execute_batch("PRAGMA foreign_keys = OFF; PRAGMA legacy_alter_table = ON;")?;
+        let migration_result = (|| -> Result<()> {
+            let transaction = self
+                .connection
+                .transaction_with_behavior(TransactionBehavior::Immediate)?;
+            transaction.execute_batch(
+                r#"
+                CREATE TABLE project_catalog_item (
+                    id TEXT PRIMARY KEY,
+                    canonical_path TEXT NOT NULL UNIQUE
+                        CHECK(length(trim(canonical_path)) > 0),
+                    display_name TEXT NOT NULL CHECK(length(trim(display_name)) > 0),
+                    status TEXT NOT NULL CHECK(status IN ('active', 'unavailable', 'archived')),
+                    last_opened_at TEXT,
+                    version INTEGER NOT NULL DEFAULT 1 CHECK(version >= 1),
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
+                CREATE INDEX project_catalog_item_status_idx
+                    ON project_catalog_item(status, last_opened_at DESC, id);
+
+                INSERT INTO project_catalog_item(
+                    id, canonical_path, display_name, status, last_opened_at,
+                    version, created_at, updated_at
+                )
+                SELECT 'rvproj_' || lower(hex(randomblob(16))),
+                       project.canonical_path, project.display_name,
+                       CASE project.status WHEN 'active' THEN 'active' ELSE 'archived' END,
+                       project.updated_at, project.version,
+                       project.created_at, project.updated_at
+                FROM project_binding AS project
+                WHERE project.binding_kind = 'directory';
+
+                INSERT INTO project_catalog_item(
+                    id, canonical_path, display_name, status, last_opened_at,
+                    version, created_at, updated_at
+                )
+                SELECT 'rvproj_' || lower(hex(randomblob(16))),
+                       camp.project_path, camp.project_path, 'active',
+                       MAX(camp.updated_at), 1, MIN(camp.created_at), MAX(camp.updated_at)
+                FROM camp
+                WHERE camp.project_binding_kind = 'directory'
+                GROUP BY camp.project_path
+                ON CONFLICT(canonical_path) DO UPDATE SET
+                    last_opened_at = excluded.last_opened_at,
+                    updated_at = excluded.updated_at;
+
+                CREATE TABLE feishu_owner_identity (
+                    account_id TEXT PRIMARY KEY REFERENCES feishu_account(id) ON DELETE CASCADE,
+                    tenant_id TEXT NOT NULL CHECK(length(trim(tenant_id)) > 0),
+                    canonical_owner_principal_id TEXT NOT NULL UNIQUE,
+                    user_id_digest TEXT NOT NULL CHECK(length(trim(user_id_digest)) > 0),
+                    union_id_digest TEXT,
+                    verified_at TEXT NOT NULL,
+                    version INTEGER NOT NULL DEFAULT 1 CHECK(version >= 1),
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
+
+                INSERT INTO feishu_owner_identity(
+                    account_id, tenant_id, canonical_owner_principal_id,
+                    user_id_digest, union_id_digest, verified_at,
+                    version, created_at, updated_at
+                )
+                SELECT account.id, account.tenant_id,
+                       'rvep_' || lower(hex(randomblob(16))),
+                       account.user_id_digest, NULL,
+                       account.last_verified_at, 1,
+                       account.connected_at, account.last_verified_at
+                FROM feishu_account AS account
+                WHERE account.tenant_id IS NOT NULL
+                  AND account.user_id_digest IS NOT NULL
+                  AND account.connected_at IS NOT NULL
+                  AND account.last_verified_at IS NOT NULL;
+
+                CREATE TABLE feishu_owner_app_identity (
+                    account_id TEXT NOT NULL
+                        REFERENCES feishu_owner_identity(account_id) ON DELETE CASCADE,
+                    app_id TEXT NOT NULL CHECK(length(trim(app_id)) > 0),
+                    open_id_digest TEXT,
+                    user_id_digest TEXT,
+                    union_id_digest TEXT,
+                    verified_at TEXT NOT NULL,
+                    version INTEGER NOT NULL DEFAULT 1 CHECK(version >= 1),
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    PRIMARY KEY(account_id, app_id),
+                    CHECK(
+                        open_id_digest IS NOT NULL
+                        OR user_id_digest IS NOT NULL
+                        OR union_id_digest IS NOT NULL
+                    )
+                );
+                CREATE INDEX feishu_owner_app_identity_app_idx
+                    ON feishu_owner_app_identity(app_id, account_id);
+
+                ALTER TABLE channel_delivery RENAME TO channel_delivery_v117;
+                ALTER TABLE channel_turn_request RENAME TO channel_turn_request_v117;
+                ALTER TABLE channel_conversation_binding
+                    RENAME TO channel_conversation_binding_v117;
+                DROP INDEX channel_delivery_claim_idx;
+                DROP INDEX channel_delivery_request_idx;
+                DROP INDEX channel_turn_request_active_binding_idx;
+                DROP INDEX channel_turn_request_queue_idx;
+                DROP INDEX channel_conversation_binding_project_idx;
+
+                CREATE TABLE channel_conversation_binding (
+                    id TEXT PRIMARY KEY,
+                    channel_conversation_id TEXT NOT NULL
+                        REFERENCES channel_conversation(id) ON DELETE CASCADE,
+                    execution_scope_kind TEXT NOT NULL
+                        CHECK(execution_scope_kind IN ('quick_chat', 'project')),
+                    project_id TEXT REFERENCES project_catalog_item(id),
+                    camp_id TEXT UNIQUE REFERENCES camp(id),
+                    status TEXT NOT NULL CHECK(status IN ('active', 'closed')),
+                    generation INTEGER NOT NULL CHECK(generation >= 1),
+                    version INTEGER NOT NULL DEFAULT 1 CHECK(version >= 1),
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    closed_at TEXT,
+                    CHECK(
+                        (execution_scope_kind = 'quick_chat' AND project_id IS NULL)
+                        OR (execution_scope_kind = 'project' AND project_id IS NOT NULL)
+                    ),
+                    CHECK(
+                        (status = 'active' AND closed_at IS NULL)
+                        OR (status = 'closed' AND closed_at IS NOT NULL)
+                    )
+                );
+                CREATE UNIQUE INDEX channel_conversation_binding_active_idx
+                    ON channel_conversation_binding(channel_conversation_id)
+                    WHERE status = 'active';
+                CREATE UNIQUE INDEX channel_conversation_binding_generation_idx
+                    ON channel_conversation_binding(channel_conversation_id, generation);
+                CREATE INDEX channel_conversation_binding_project_idx
+                    ON channel_conversation_binding(project_id, updated_at DESC, id);
+
+                INSERT INTO channel_conversation_binding(
+                    id, channel_conversation_id, execution_scope_kind,
+                    project_id, camp_id, status, generation, version,
+                    created_at, updated_at, closed_at
+                )
+                SELECT binding.id, binding.channel_conversation_id,
+                       CASE project.binding_kind
+                           WHEN 'quick_chat' THEN 'quick_chat'
+                           ELSE 'project'
+                       END,
+                       CASE project.binding_kind
+                           WHEN 'quick_chat' THEN NULL
+                           ELSE catalog.id
+                       END,
+                       binding.camp_id, 'active', 1, binding.version,
+                       binding.created_at, binding.updated_at, NULL
+                FROM channel_conversation_binding_v117 AS binding
+                JOIN project_binding AS project
+                  ON project.id = binding.project_binding_id
+                LEFT JOIN project_catalog_item AS catalog
+                  ON catalog.canonical_path = project.canonical_path;
+
+                CREATE TABLE channel_turn_request (
+                    id TEXT PRIMARY KEY,
+                    binding_id TEXT NOT NULL REFERENCES channel_conversation_binding(id),
+                    aggregate_id TEXT NOT NULL UNIQUE
+                        REFERENCES channel_inbound_aggregate(id) ON DELETE CASCADE,
+                    external_principal_id TEXT NOT NULL REFERENCES external_principal(id),
+                    ack_app_id TEXT NOT NULL,
+                    structured_content_json TEXT NOT NULL,
+                    addressed_agent_ids_json TEXT NOT NULL,
+                    status TEXT NOT NULL CHECK(status IN (
+                        'queued', 'admitted', 'completed', 'failed'
+                    )),
+                    queue_position INTEGER NOT NULL CHECK(queue_position >= 0),
+                    camp_id TEXT REFERENCES camp(id),
+                    camp_message_id TEXT UNIQUE REFERENCES camp_message(id),
+                    camp_turn_id TEXT UNIQUE REFERENCES camp_turn(id),
+                    trigger_camp_sequence INTEGER,
+                    failure_code TEXT,
+                    version INTEGER NOT NULL DEFAULT 1 CHECK(version >= 1),
+                    created_at TEXT NOT NULL,
+                    admitted_at TEXT,
+                    completed_at TEXT,
+                    updated_at TEXT NOT NULL,
+                    CHECK(
+                        (status = 'queued' AND admitted_at IS NULL AND completed_at IS NULL
+                            AND camp_message_id IS NULL AND camp_turn_id IS NULL)
+                        OR (status = 'admitted' AND admitted_at IS NOT NULL
+                            AND completed_at IS NULL
+                            AND camp_message_id IS NOT NULL AND camp_turn_id IS NOT NULL)
+                        OR (status IN ('completed', 'failed') AND completed_at IS NOT NULL)
+                    )
+                );
+                CREATE UNIQUE INDEX channel_turn_request_active_binding_idx
+                    ON channel_turn_request(binding_id) WHERE status = 'admitted';
+                CREATE INDEX channel_turn_request_queue_idx
+                    ON channel_turn_request(binding_id, status, queue_position, created_at, id);
+
+                INSERT INTO channel_turn_request(
+                    id, binding_id, aggregate_id, external_principal_id,
+                    ack_app_id, structured_content_json, addressed_agent_ids_json,
+                    status, queue_position, camp_id, camp_message_id, camp_turn_id,
+                    trigger_camp_sequence, failure_code, version,
+                    created_at, admitted_at, completed_at, updated_at
+                )
+                SELECT id, binding_id, aggregate_id, external_principal_id,
+                       ack_app_id, structured_content_json, addressed_agent_ids_json,
+                       status, queue_position, camp_id, camp_message_id, camp_turn_id,
+                       trigger_camp_sequence, failure_code, version,
+                       created_at, admitted_at, completed_at, updated_at
+                FROM channel_turn_request_v117;
+
+                CREATE TABLE pending_camp_binding (
+                    id TEXT PRIMARY KEY,
+                    channel_conversation_id TEXT NOT NULL
+                        REFERENCES channel_conversation(id) ON DELETE CASCADE,
+                    owner_principal_id TEXT NOT NULL REFERENCES external_principal(id),
+                    acknowledgement_app_id TEXT NOT NULL CHECK(length(trim(acknowledgement_app_id)) > 0),
+                    status TEXT NOT NULL CHECK(status IN (
+                        'pending', 'resolving', 'resolved', 'cancelled', 'expired'
+                    )),
+                    version INTEGER NOT NULL DEFAULT 1 CHECK(version >= 1),
+                    nonce_digest TEXT NOT NULL CHECK(length(trim(nonce_digest)) > 0),
+                    expires_at TEXT NOT NULL,
+                    project_id TEXT REFERENCES project_catalog_item(id),
+                    binding_id TEXT UNIQUE REFERENCES channel_conversation_binding(id),
+                    camp_id TEXT UNIQUE REFERENCES camp(id),
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    resolved_at TEXT,
+                    CHECK(
+                        (status IN ('pending', 'resolving')
+                            AND project_id IS NULL AND binding_id IS NULL
+                            AND camp_id IS NULL AND resolved_at IS NULL)
+                        OR (status = 'resolved'
+                            AND project_id IS NOT NULL AND binding_id IS NOT NULL
+                            AND camp_id IS NOT NULL AND resolved_at IS NOT NULL)
+                        OR (status IN ('cancelled', 'expired')
+                            AND project_id IS NULL AND binding_id IS NULL
+                            AND camp_id IS NULL AND resolved_at IS NOT NULL)
+                    )
+                );
+                CREATE UNIQUE INDEX pending_camp_binding_open_conversation_idx
+                    ON pending_camp_binding(channel_conversation_id)
+                    WHERE status IN ('pending', 'resolving');
+                CREATE INDEX pending_camp_binding_status_idx
+                    ON pending_camp_binding(status, expires_at, created_at, id);
+
+                CREATE TABLE pending_camp_message (
+                    pending_binding_id TEXT NOT NULL
+                        REFERENCES pending_camp_binding(id) ON DELETE CASCADE,
+                    aggregate_id TEXT NOT NULL UNIQUE
+                        REFERENCES channel_inbound_aggregate(id) ON DELETE CASCADE,
+                    external_principal_id TEXT NOT NULL REFERENCES external_principal(id),
+                    ack_app_id TEXT NOT NULL CHECK(length(trim(ack_app_id)) > 0),
+                    structured_content_json TEXT NOT NULL,
+                    addressed_agent_ids_json TEXT NOT NULL,
+                    queue_position INTEGER NOT NULL CHECK(queue_position >= 1),
+                    created_at TEXT NOT NULL,
+                    PRIMARY KEY(pending_binding_id, queue_position)
+                );
+                CREATE INDEX pending_camp_message_fifo_idx
+                    ON pending_camp_message(pending_binding_id, queue_position, created_at, aggregate_id);
+
+                CREATE TABLE channel_delivery (
+                    id TEXT PRIMARY KEY,
+                    request_id TEXT REFERENCES channel_turn_request(id) ON DELETE CASCADE,
+                    pending_binding_id TEXT REFERENCES pending_camp_binding(id) ON DELETE CASCADE,
+                    dedupe_key TEXT NOT NULL UNIQUE,
+                    delivery_kind TEXT NOT NULL CHECK(delivery_kind IN (
+                        'project_selection', 'queue_ack', 'agent_status',
+                        'agent_output', 'completion', 'attention'
+                    )),
+                    target_app_id TEXT NOT NULL,
+                    source_agent_id TEXT,
+                    source_camp_message_id TEXT REFERENCES camp_message(id),
+                    payload_json TEXT NOT NULL,
+                    status TEXT NOT NULL CHECK(status IN ('pending', 'attempting', 'sent', 'failed')),
+                    attempt_count INTEGER NOT NULL DEFAULT 0 CHECK(attempt_count >= 0),
+                    available_at TEXT NOT NULL,
+                    lease_owner TEXT,
+                    lease_expires_at TEXT,
+                    external_delivery_message_id TEXT,
+                    failure_code TEXT,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    ended_at TEXT,
+                    CHECK(
+                        (request_id IS NOT NULL AND pending_binding_id IS NULL
+                            AND delivery_kind <> 'project_selection')
+                        OR (request_id IS NULL AND pending_binding_id IS NOT NULL
+                            AND delivery_kind = 'project_selection')
+                    ),
+                    CHECK(
+                        (status IN ('pending', 'attempting') AND ended_at IS NULL)
+                        OR (status IN ('sent', 'failed') AND ended_at IS NOT NULL)
+                    ),
+                    CHECK(
+                        (status = 'attempting' AND lease_owner IS NOT NULL
+                            AND lease_expires_at IS NOT NULL)
+                        OR (status <> 'attempting' AND lease_owner IS NULL
+                            AND lease_expires_at IS NULL)
+                    )
+                );
+                CREATE INDEX channel_delivery_claim_idx
+                    ON channel_delivery(status, available_at, created_at, id);
+                CREATE INDEX channel_delivery_request_idx
+                    ON channel_delivery(request_id, status, delivery_kind, id)
+                    WHERE request_id IS NOT NULL;
+                CREATE INDEX channel_delivery_pending_binding_idx
+                    ON channel_delivery(pending_binding_id, status, delivery_kind, id)
+                    WHERE pending_binding_id IS NOT NULL;
+
+                INSERT INTO channel_delivery(
+                    id, request_id, pending_binding_id, dedupe_key, delivery_kind,
+                    target_app_id, source_agent_id, source_camp_message_id,
+                    payload_json, status, attempt_count, available_at,
+                    lease_owner, lease_expires_at, external_delivery_message_id,
+                    failure_code, created_at, updated_at, ended_at
+                )
+                SELECT id, request_id, NULL, dedupe_key, delivery_kind,
+                       target_app_id, source_agent_id, source_camp_message_id,
+                       payload_json, status, attempt_count, available_at,
+                       lease_owner, lease_expires_at, external_delivery_message_id,
+                       failure_code, created_at, updated_at, ended_at
+                FROM channel_delivery_v117;
+
+                DROP TABLE channel_delivery_v117;
+                DROP TABLE channel_turn_request_v117;
+                DROP TABLE channel_conversation_binding_v117;
+                DROP TABLE project_binding;
+
+                UPDATE rovai_data_contract
+                SET contract_version = 'v1.31', projection_schema_version = 72,
+                    reset_reason = NULL, updated_at = datetime('now')
+                WHERE singleton = 1;
+
+                INSERT INTO schema_migration(version, applied_at)
+                VALUES (118, datetime('now'));
+                "#,
+            )?;
+            validate_migration_foreign_keys(
+                &transaction,
+                &[
+                    "channel_conversation_binding",
+                    "channel_delivery",
+                    "channel_turn_request",
+                    "feishu_owner_app_identity",
+                    "feishu_owner_identity",
+                    "pending_camp_binding",
+                    "pending_camp_message",
+                    "project_binding",
+                    "project_catalog_item",
+                ],
+            )?;
+            transaction.commit()?;
+            Ok(())
+        })();
+        let pragma_result = self
+            .connection
+            .execute_batch("PRAGMA legacy_alter_table = OFF; PRAGMA foreign_keys = ON;");
+        migration_result?;
+        pragma_result?;
+        Ok(())
+    }
+
+    fn migrate_feishu_channel_execution_console_v119(&mut self) -> Result<()> {
+        let transaction = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        transaction.execute_batch(
+            r#"
+            CREATE TABLE channel_execution_console (
+                id TEXT PRIMARY KEY,
+                agent_run_id TEXT NOT NULL UNIQUE
+                    REFERENCES agent_run(id) ON DELETE CASCADE,
+                request_id TEXT NOT NULL
+                    REFERENCES channel_turn_request(id) ON DELETE CASCADE,
+                channel_conversation_id TEXT NOT NULL
+                    REFERENCES channel_conversation(id) ON DELETE CASCADE,
+                camp_turn_id TEXT NOT NULL REFERENCES camp_turn(id) ON DELETE CASCADE,
+                agent_id TEXT NOT NULL REFERENCES agent_profile(id),
+                target_app_id TEXT NOT NULL CHECK(length(trim(target_app_id)) > 0),
+                external_message_id TEXT,
+                latest_sequence INTEGER NOT NULL DEFAULT 1 CHECK(latest_sequence >= 1),
+                delivered_sequence INTEGER NOT NULL DEFAULT 0
+                    CHECK(delivered_sequence >= 0 AND delivered_sequence <= latest_sequence),
+                latest_snapshot_digest TEXT NOT NULL
+                    CHECK(length(trim(latest_snapshot_digest)) > 0),
+                state TEXT NOT NULL CHECK(state IN (
+                    'opening', 'active', 'terminal', 'recall_pending',
+                    'recalled', 'recall_failed'
+                )),
+                failure_code TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                recalled_at TEXT,
+                CHECK(
+                    (state IN ('opening', 'active', 'terminal', 'recall_pending')
+                        AND recalled_at IS NULL)
+                    OR (state IN ('recalled', 'recall_failed') AND recalled_at IS NOT NULL)
+                )
+            );
+            CREATE INDEX channel_execution_console_conversation_idx
+                ON channel_execution_console(
+                    channel_conversation_id, state, created_at, agent_run_id
+                );
+            CREATE INDEX channel_execution_console_request_idx
+                ON channel_execution_console(request_id, state, agent_run_id);
+            CREATE TRIGGER channel_execution_console_identity_immutable
+            BEFORE UPDATE ON channel_execution_console
+            FOR EACH ROW
+            WHEN OLD.agent_run_id <> NEW.agent_run_id
+              OR OLD.request_id <> NEW.request_id
+              OR OLD.channel_conversation_id <> NEW.channel_conversation_id
+              OR OLD.camp_turn_id <> NEW.camp_turn_id
+              OR OLD.agent_id <> NEW.agent_id
+              OR OLD.target_app_id <> NEW.target_app_id
+            BEGIN
+                SELECT RAISE(ABORT, 'channel execution console identity is immutable');
+            END;
+
+            ALTER TABLE channel_delivery RENAME TO channel_delivery_v118;
+            DROP INDEX channel_delivery_claim_idx;
+            DROP INDEX channel_delivery_request_idx;
+            DROP INDEX channel_delivery_pending_binding_idx;
+
+            CREATE TABLE channel_delivery (
+                id TEXT PRIMARY KEY,
+                request_id TEXT REFERENCES channel_turn_request(id) ON DELETE CASCADE,
+                pending_binding_id TEXT REFERENCES pending_camp_binding(id) ON DELETE CASCADE,
+                console_id TEXT REFERENCES channel_execution_console(id) ON DELETE CASCADE,
+                dedupe_key TEXT NOT NULL UNIQUE,
+                delivery_kind TEXT NOT NULL CHECK(delivery_kind IN (
+                    'project_selection', 'queue_ack', 'execution_console_upsert',
+                    'execution_console_recall', 'agent_output',
+                    'agent_attachment', 'attention'
+                )),
+                priority INTEGER NOT NULL DEFAULT 60 CHECK(priority BETWEEN 0 AND 100),
+                target_app_id TEXT NOT NULL,
+                source_agent_id TEXT,
+                source_camp_message_id TEXT REFERENCES camp_message(id),
+                attachment_ordinal INTEGER CHECK(attachment_ordinal >= 0),
+                payload_json TEXT NOT NULL,
+                status TEXT NOT NULL CHECK(status IN ('pending', 'attempting', 'sent', 'failed')),
+                attempt_count INTEGER NOT NULL DEFAULT 0 CHECK(attempt_count >= 0),
+                available_at TEXT NOT NULL,
+                lease_owner TEXT,
+                lease_expires_at TEXT,
+                external_delivery_message_id TEXT,
+                failure_code TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                ended_at TEXT,
+                CHECK(
+                    (request_id IS NOT NULL AND pending_binding_id IS NULL
+                        AND delivery_kind <> 'project_selection')
+                    OR (request_id IS NULL AND pending_binding_id IS NOT NULL
+                        AND delivery_kind = 'project_selection')
+                ),
+                CHECK(
+                    (delivery_kind IN ('execution_console_upsert', 'execution_console_recall')
+                        AND console_id IS NOT NULL)
+                    OR (delivery_kind NOT IN ('execution_console_upsert', 'execution_console_recall')
+                        AND console_id IS NULL)
+                ),
+                CHECK(
+                    (delivery_kind = 'agent_attachment'
+                        AND source_camp_message_id IS NOT NULL
+                        AND attachment_ordinal IS NOT NULL)
+                    OR (delivery_kind <> 'agent_attachment' AND attachment_ordinal IS NULL)
+                ),
+                CHECK(
+                    (status IN ('pending', 'attempting') AND ended_at IS NULL)
+                    OR (status IN ('sent', 'failed') AND ended_at IS NOT NULL)
+                ),
+                CHECK(
+                    (status = 'attempting' AND lease_owner IS NOT NULL
+                        AND lease_expires_at IS NOT NULL)
+                    OR (status <> 'attempting' AND lease_owner IS NULL
+                        AND lease_expires_at IS NULL)
+                )
+            );
+            CREATE INDEX channel_delivery_claim_idx
+                ON channel_delivery(status, available_at, priority, created_at, id);
+            CREATE INDEX channel_delivery_request_idx
+                ON channel_delivery(request_id, status, delivery_kind, priority, id)
+                WHERE request_id IS NOT NULL;
+            CREATE INDEX channel_delivery_pending_binding_idx
+                ON channel_delivery(pending_binding_id, status, delivery_kind, id)
+                WHERE pending_binding_id IS NOT NULL;
+            CREATE INDEX channel_delivery_console_idx
+                ON channel_delivery(console_id, status, delivery_kind, id)
+                WHERE console_id IS NOT NULL;
+
+            INSERT INTO channel_delivery(
+                id, request_id, pending_binding_id, console_id,
+                dedupe_key, delivery_kind, priority, target_app_id,
+                source_agent_id, source_camp_message_id, attachment_ordinal,
+                payload_json, status, attempt_count, available_at,
+                lease_owner, lease_expires_at, external_delivery_message_id,
+                failure_code, created_at, updated_at, ended_at
+            )
+            SELECT id, request_id, pending_binding_id, NULL,
+                   dedupe_key, delivery_kind,
+                   CASE delivery_kind
+                       WHEN 'project_selection' THEN 5
+                       WHEN 'queue_ack' THEN 20
+                       WHEN 'agent_output' THEN 40
+                       ELSE 60
+                   END,
+                   target_app_id, source_agent_id, source_camp_message_id, NULL,
+                   payload_json, status, attempt_count, available_at,
+                   lease_owner, lease_expires_at, external_delivery_message_id,
+                   failure_code, created_at, updated_at, ended_at
+            FROM channel_delivery_v118
+            WHERE delivery_kind IN (
+                'project_selection', 'queue_ack', 'agent_output', 'attention'
+            );
+
+            DROP TABLE channel_delivery_v118;
+
+            UPDATE rovai_data_contract
+            SET contract_version = 'v1.32', projection_schema_version = 73,
+                reset_reason = NULL, updated_at = datetime('now')
+            WHERE singleton = 1;
+
+            INSERT INTO schema_migration(version, applied_at)
+            VALUES (119, datetime('now'));
+            "#,
+        )?;
+        transaction.commit()?;
+        Ok(())
+    }
+
+    fn migrate_feishu_execution_console_view_state_v120(&mut self) -> Result<()> {
+        let transaction = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        transaction.execute_batch(
+            r#"
+            ALTER TABLE channel_execution_console
+            ADD COLUMN display_mode TEXT NOT NULL DEFAULT 'live'
+                CHECK(display_mode IN ('live', 'collapsed', 'expanded'));
+            ALTER TABLE channel_execution_console
+            ADD COLUMN page_index INTEGER NOT NULL DEFAULT 0 CHECK(page_index >= 0);
+            ALTER TABLE channel_execution_console
+            ADD COLUMN view_version INTEGER NOT NULL DEFAULT 1 CHECK(view_version >= 1);
+
+            UPDATE channel_execution_console
+            SET display_mode = CASE
+                    WHEN state IN ('terminal', 'recall_pending', 'recalled', 'recall_failed')
+                        THEN 'collapsed'
+                    ELSE 'live'
+                END,
+                page_index = 0,
+                view_version = 1;
+
+            UPDATE rovai_data_contract
+            SET contract_version = 'v1.33', projection_schema_version = 74,
+                reset_reason = NULL, updated_at = datetime('now')
+            WHERE singleton = 1;
+
+            INSERT INTO schema_migration(version, applied_at)
+            VALUES (120, datetime('now'));
+            "#,
+        )?;
+        transaction.commit()?;
+        Ok(())
+    }
+
+    fn migrate_feishu_execution_console_terminal_sealing_v121(&mut self) -> Result<()> {
+        self.connection
+            .execute_batch("PRAGMA foreign_keys = OFF; PRAGMA legacy_alter_table = ON;")?;
+        let migration_result = (|| -> Result<()> {
+            let transaction = self
+                .connection
+                .transaction_with_behavior(TransactionBehavior::Immediate)?;
+            transaction.execute_batch(
+                r#"
+                ALTER TABLE channel_execution_console
+                    RENAME TO channel_execution_console_v120;
+                DROP INDEX channel_execution_console_conversation_idx;
+                DROP INDEX channel_execution_console_request_idx;
+                DROP TRIGGER channel_execution_console_identity_immutable;
+
+                CREATE TABLE channel_execution_console (
+                    id TEXT PRIMARY KEY,
+                    agent_run_id TEXT NOT NULL UNIQUE
+                        REFERENCES agent_run(id) ON DELETE CASCADE,
+                    request_id TEXT NOT NULL
+                        REFERENCES channel_turn_request(id) ON DELETE CASCADE,
+                    channel_conversation_id TEXT NOT NULL
+                        REFERENCES channel_conversation(id) ON DELETE CASCADE,
+                    camp_turn_id TEXT NOT NULL REFERENCES camp_turn(id) ON DELETE CASCADE,
+                    agent_id TEXT NOT NULL REFERENCES agent_profile(id),
+                    target_app_id TEXT NOT NULL CHECK(length(trim(target_app_id)) > 0),
+                    external_message_id TEXT,
+                    latest_sequence INTEGER NOT NULL DEFAULT 1 CHECK(latest_sequence >= 1),
+                    delivered_sequence INTEGER NOT NULL DEFAULT 0
+                        CHECK(delivered_sequence >= 0 AND delivered_sequence <= latest_sequence),
+                    latest_snapshot_digest TEXT NOT NULL
+                        CHECK(length(trim(latest_snapshot_digest)) > 0),
+                    state TEXT NOT NULL CHECK(state IN (
+                        'opening', 'active', 'terminal_pending', 'terminal_sealed',
+                        'recall_pending', 'recalled', 'recall_failed'
+                    )),
+                    failure_code TEXT,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    recalled_at TEXT,
+                    display_mode TEXT NOT NULL DEFAULT 'live'
+                        CHECK(display_mode IN ('live', 'collapsed', 'expanded')),
+                    page_index INTEGER NOT NULL DEFAULT 0 CHECK(page_index >= 0),
+                    view_version INTEGER NOT NULL DEFAULT 1 CHECK(view_version >= 1),
+                    CHECK(
+                        (state IN (
+                            'opening', 'active', 'terminal_pending', 'terminal_sealed',
+                            'recall_pending'
+                        ) AND recalled_at IS NULL)
+                        OR (state IN ('recalled', 'recall_failed') AND recalled_at IS NOT NULL)
+                    )
+                );
+
+                INSERT INTO channel_execution_console(
+                    id, agent_run_id, request_id, channel_conversation_id,
+                    camp_turn_id, agent_id, target_app_id, external_message_id,
+                    latest_sequence, delivered_sequence, latest_snapshot_digest,
+                    state, failure_code, created_at, updated_at, recalled_at,
+                    display_mode, page_index, view_version
+                )
+                SELECT id, agent_run_id, request_id, channel_conversation_id,
+                       camp_turn_id, agent_id, target_app_id, external_message_id,
+                       latest_sequence, delivered_sequence, latest_snapshot_digest,
+                       CASE state WHEN 'terminal' THEN 'terminal_sealed' ELSE state END,
+                       failure_code, created_at, updated_at, recalled_at,
+                       display_mode, page_index, view_version
+                FROM channel_execution_console_v120;
+
+                DROP TABLE channel_execution_console_v120;
+                CREATE INDEX channel_execution_console_conversation_idx
+                    ON channel_execution_console(
+                        channel_conversation_id, state, created_at, agent_run_id
+                    );
+                CREATE INDEX channel_execution_console_request_idx
+                    ON channel_execution_console(request_id, state, agent_run_id);
+                CREATE TRIGGER channel_execution_console_identity_immutable
+                BEFORE UPDATE ON channel_execution_console
+                FOR EACH ROW
+                WHEN OLD.agent_run_id <> NEW.agent_run_id
+                  OR OLD.request_id <> NEW.request_id
+                  OR OLD.channel_conversation_id <> NEW.channel_conversation_id
+                  OR OLD.camp_turn_id <> NEW.camp_turn_id
+                  OR OLD.agent_id <> NEW.agent_id
+                  OR OLD.target_app_id <> NEW.target_app_id
+                BEGIN
+                    SELECT RAISE(ABORT, 'channel execution console identity is immutable');
+                END;
+
+                UPDATE rovai_data_contract
+                SET contract_version = 'v1.34', projection_schema_version = 75,
+                    reset_reason = NULL, updated_at = datetime('now')
+                WHERE singleton = 1;
+
+                INSERT INTO schema_migration(version, applied_at)
+                VALUES (121, datetime('now'));
+                "#,
+            )?;
+            validate_migration_foreign_keys(&transaction, &["channel_execution_console"])?;
+            transaction.commit()?;
+            Ok(())
+        })();
+        let pragma_result = self
+            .connection
+            .execute_batch("PRAGMA legacy_alter_table = OFF; PRAGMA foreign_keys = ON;");
+        migration_result?;
+        pragma_result?;
+        Ok(())
+    }
+
+    fn migrate_dingtalk_channel_v122(&mut self) -> Result<()> {
+        let transaction = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        transaction.execute_batch(
+            r#"
+            CREATE TABLE dingtalk_account (
+                id TEXT PRIMARY KEY,
+                user_id_digest TEXT NOT NULL CHECK(length(user_id_digest) > 0),
+                corp_id TEXT NOT NULL CHECK(length(trim(corp_id)) > 0),
+                user_name TEXT NOT NULL CHECK(length(trim(user_name)) > 0),
+                corp_name TEXT NOT NULL CHECK(length(trim(corp_name)) > 0),
+                oauth_profile_ref TEXT NOT NULL UNIQUE
+                    CHECK(length(trim(oauth_profile_ref)) > 0),
+                status TEXT NOT NULL
+                    CHECK(status IN ('connected', 'disconnected', 'oauth_expired')),
+                version INTEGER NOT NULL DEFAULT 1 CHECK(version >= 1),
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                connected_at TEXT NOT NULL,
+                last_verified_at TEXT NOT NULL,
+                disconnected_at TEXT,
+                UNIQUE(corp_id, user_id_digest),
+                CHECK(
+                    (status = 'connected' AND disconnected_at IS NULL)
+                    OR (status <> 'connected' AND disconnected_at IS NOT NULL)
+                )
+            );
+            CREATE UNIQUE INDEX dingtalk_account_single_connected_idx
+                ON dingtalk_account(status) WHERE status = 'connected';
+
+            CREATE TABLE dingtalk_owner_identity (
+                account_id TEXT PRIMARY KEY
+                    REFERENCES dingtalk_account(id) ON DELETE CASCADE,
+                corp_id TEXT NOT NULL CHECK(length(trim(corp_id)) > 0),
+                canonical_owner_principal_id TEXT NOT NULL UNIQUE,
+                user_id_digest TEXT NOT NULL CHECK(length(user_id_digest) > 0),
+                version INTEGER NOT NULL DEFAULT 1 CHECK(version >= 1),
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                UNIQUE(corp_id, user_id_digest)
+            );
+
+            CREATE TABLE dingtalk_member_bot_publication_intent (
+                id TEXT PRIMARY KEY,
+                agent_id TEXT NOT NULL REFERENCES agent_profile(id),
+                account_id TEXT NOT NULL REFERENCES dingtalk_account(id),
+                expected_user_id_digest TEXT NOT NULL
+                    CHECK(length(expected_user_id_digest) > 0),
+                expected_corp_id TEXT NOT NULL CHECK(length(trim(expected_corp_id)) > 0),
+                requested_app_name TEXT NOT NULL CHECK(length(trim(requested_app_name)) > 0),
+                provisioning_mode TEXT NOT NULL CHECK(provisioning_mode = 'dws_gateway'),
+                state TEXT NOT NULL CHECK(state IN (
+                    'created', 'account_verified', 'app_created', 'credentials_read',
+                    'avatar_configured', 'robot_configured', 'permissions_configured',
+                    'version_created', 'awaiting_approver_selection',
+                    'awaiting_approval', 'version_released', 'stream_verified',
+                    'card_verified', 'completed', 'failed_recoverable',
+                    'failed_unknown_remote_state'
+                )),
+                remote_unified_app_id TEXT,
+                app_key TEXT,
+                robot_code TEXT,
+                credential_ref TEXT,
+                version_id TEXT,
+                approval_mode TEXT CHECK(
+                    approval_mode IS NULL
+                    OR approval_mode IN ('NO_APPROVAL', 'SELECT_APPROVER', 'AUTO')
+                ),
+                approver_user_id_digest TEXT,
+                last_completed_step TEXT,
+                failure_code TEXT,
+                version INTEGER NOT NULL DEFAULT 1 CHECK(version >= 1),
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                completed_at TEXT,
+                UNIQUE(agent_id),
+                UNIQUE(remote_unified_app_id),
+                UNIQUE(app_key),
+                UNIQUE(credential_ref),
+                CHECK(
+                    (state IN ('created', 'account_verified')
+                        AND remote_unified_app_id IS NULL)
+                    OR state NOT IN ('created', 'account_verified')
+                ),
+                CHECK(
+                    (state = 'completed' AND completed_at IS NOT NULL
+                        AND remote_unified_app_id IS NOT NULL
+                        AND app_key IS NOT NULL AND robot_code IS NOT NULL
+                        AND credential_ref IS NOT NULL AND version_id IS NOT NULL
+                        AND failure_code IS NULL)
+                    OR state <> 'completed'
+                ),
+                CHECK(
+                    (state IN ('failed_recoverable', 'failed_unknown_remote_state')
+                        AND failure_code IS NOT NULL)
+                    OR state NOT IN ('failed_recoverable', 'failed_unknown_remote_state')
+                )
+            );
+            CREATE INDEX dingtalk_publication_intent_state_idx
+                ON dingtalk_member_bot_publication_intent(state, updated_at DESC, id);
+
+            CREATE TABLE dingtalk_member_bot (
+                agent_id TEXT PRIMARY KEY REFERENCES agent_profile(id),
+                account_id TEXT NOT NULL REFERENCES dingtalk_account(id),
+                unified_app_id TEXT NOT NULL UNIQUE
+                    CHECK(length(trim(unified_app_id)) > 0),
+                app_key TEXT NOT NULL UNIQUE CHECK(length(trim(app_key)) > 0),
+                robot_code TEXT NOT NULL UNIQUE CHECK(length(trim(robot_code)) > 0),
+                bot_display_name TEXT NOT NULL CHECK(length(trim(bot_display_name)) > 0),
+                credential_ref TEXT NOT NULL UNIQUE CHECK(length(trim(credential_ref)) > 0),
+                owner_user_id_digest TEXT NOT NULL CHECK(length(owner_user_id_digest) > 0),
+                status TEXT NOT NULL CHECK(status IN ('published', 'disabled')),
+                failure_code TEXT,
+                version INTEGER NOT NULL DEFAULT 1 CHECK(version >= 1),
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                published_at TEXT NOT NULL,
+                CHECK(status <> 'published' OR failure_code IS NULL)
+            );
+            CREATE INDEX dingtalk_member_bot_status_idx
+                ON dingtalk_member_bot(status, updated_at DESC, agent_id);
+
+            CREATE TABLE dingtalk_owner_app_identity (
+                app_key TEXT PRIMARY KEY,
+                account_id TEXT NOT NULL REFERENCES dingtalk_account(id),
+                corp_id TEXT NOT NULL CHECK(length(trim(corp_id)) > 0),
+                user_id_digest TEXT NOT NULL CHECK(length(user_id_digest) > 0),
+                version INTEGER NOT NULL DEFAULT 1 CHECK(version >= 1),
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                UNIQUE(account_id, app_key)
+            );
+
+            CREATE VIEW channel_member_bot_directory AS
+            SELECT 'feishu' AS provider, agent_id, account_id, app_id,
+                   app_id AS remote_app_id, NULL AS robot_code,
+                   bot_display_name, credential_ref, status, failure_code,
+                   version, 'open_id' AS owner_identity_kind
+            FROM feishu_member_bot
+            UNION ALL
+            SELECT 'dingtalk' AS provider, agent_id, account_id, app_key AS app_id,
+                   unified_app_id AS remote_app_id, robot_code,
+                   bot_display_name, credential_ref, status, failure_code,
+                   version, 'user_id' AS owner_identity_kind
+            FROM dingtalk_member_bot;
+
+            CREATE VIEW channel_owner_app_identity_directory AS
+            SELECT 'feishu' AS provider, app_id, account_id,
+                   'open_id' AS identity_kind, open_id_digest AS identity_digest,
+                   version, updated_at
+            FROM feishu_owner_app_identity
+            UNION ALL
+            SELECT 'dingtalk' AS provider, app_key AS app_id, account_id,
+                   'user_id' AS identity_kind, user_id_digest AS identity_digest,
+                   version, updated_at
+            FROM dingtalk_owner_app_identity;
+
+            UPDATE rovai_data_contract
+            SET contract_version = 'v1.35', projection_schema_version = 76,
+                reset_reason = NULL, updated_at = datetime('now')
+            WHERE singleton = 1;
+
+            INSERT INTO schema_migration(version, applied_at)
+            VALUES (122, datetime('now'));
+            "#,
+        )?;
+        transaction.commit()?;
+        Ok(())
+    }
+
+    fn migrate_dingtalk_direct_open_platform_v123(&mut self) -> Result<()> {
+        let transaction = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        transaction.execute_batch(
+            r#"
+            ALTER TABLE dingtalk_member_bot_publication_intent
+                RENAME TO dingtalk_member_bot_publication_intent_v122;
+            DROP INDEX dingtalk_publication_intent_state_idx;
+
+            CREATE TABLE dingtalk_member_bot_publication_intent (
+                id TEXT PRIMARY KEY,
+                agent_id TEXT NOT NULL REFERENCES agent_profile(id),
+                account_id TEXT NOT NULL REFERENCES dingtalk_account(id),
+                expected_user_id_digest TEXT NOT NULL
+                    CHECK(length(expected_user_id_digest) > 0),
+                expected_corp_id TEXT NOT NULL CHECK(length(trim(expected_corp_id)) > 0),
+                requested_app_name TEXT NOT NULL CHECK(length(trim(requested_app_name)) > 0),
+                provisioning_mode TEXT NOT NULL
+                    CHECK(provisioning_mode = 'direct_open_platform'),
+                state TEXT NOT NULL CHECK(state IN (
+                    'created', 'account_verified', 'app_created', 'credentials_read',
+                    'avatar_configured', 'robot_configured', 'permissions_configured',
+                    'version_created', 'awaiting_approver_selection',
+                    'awaiting_approval', 'version_released', 'stream_verified',
+                    'card_verified', 'completed', 'failed_recoverable',
+                    'failed_unknown_remote_state'
+                )),
+                remote_unified_app_id TEXT,
+                app_key TEXT,
+                robot_code TEXT,
+                credential_ref TEXT,
+                version_id TEXT,
+                approval_mode TEXT CHECK(
+                    approval_mode IS NULL
+                    OR approval_mode IN ('NO_APPROVAL', 'SELECT_APPROVER', 'AUTO')
+                ),
+                approver_user_id_digest TEXT,
+                last_completed_step TEXT,
+                failure_code TEXT,
+                version INTEGER NOT NULL DEFAULT 1 CHECK(version >= 1),
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                completed_at TEXT,
+                UNIQUE(agent_id),
+                UNIQUE(remote_unified_app_id),
+                UNIQUE(app_key),
+                UNIQUE(credential_ref),
+                CHECK(
+                    (state IN ('created', 'account_verified')
+                        AND remote_unified_app_id IS NULL)
+                    OR state NOT IN ('created', 'account_verified')
+                ),
+                CHECK(
+                    (state = 'completed' AND completed_at IS NOT NULL
+                        AND remote_unified_app_id IS NOT NULL
+                        AND app_key IS NOT NULL AND robot_code IS NOT NULL
+                        AND credential_ref IS NOT NULL AND version_id IS NOT NULL
+                        AND failure_code IS NULL)
+                    OR state <> 'completed'
+                ),
+                CHECK(
+                    (state IN ('failed_recoverable', 'failed_unknown_remote_state')
+                        AND failure_code IS NOT NULL)
+                    OR state NOT IN ('failed_recoverable', 'failed_unknown_remote_state')
+                )
+            );
+            INSERT INTO dingtalk_member_bot_publication_intent(
+                id, agent_id, account_id, expected_user_id_digest,
+                expected_corp_id, requested_app_name, provisioning_mode,
+                state, remote_unified_app_id, app_key, robot_code,
+                credential_ref, version_id, approval_mode,
+                approver_user_id_digest, last_completed_step, failure_code,
+                version, created_at, updated_at, completed_at
+            )
+            SELECT id, agent_id, account_id, expected_user_id_digest,
+                   expected_corp_id, requested_app_name, 'direct_open_platform',
+                   state, remote_unified_app_id, app_key, robot_code,
+                   credential_ref, version_id, approval_mode,
+                   approver_user_id_digest, last_completed_step, failure_code,
+                   version, created_at, updated_at, completed_at
+            FROM dingtalk_member_bot_publication_intent_v122;
+            DROP TABLE dingtalk_member_bot_publication_intent_v122;
+            CREATE INDEX dingtalk_publication_intent_state_idx
+                ON dingtalk_member_bot_publication_intent(state, updated_at DESC, id);
+
+            UPDATE rovai_data_contract
+            SET contract_version = 'v1.36', projection_schema_version = 77,
+                reset_reason = NULL, updated_at = datetime('now')
+            WHERE singleton = 1;
+
+            INSERT INTO schema_migration(version, applied_at)
+            VALUES (123, datetime('now'));
+            "#,
+        )?;
+        transaction.commit()?;
+        Ok(())
+    }
+
+    fn migrate_channel_storage_v124(&mut self) -> Result<()> {
+        let transaction = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        transaction.execute_batch(
+            r#"
+            CREATE TABLE channel_credentials (
+                credential_ref TEXT PRIMARY KEY NOT NULL
+                    CHECK(length(trim(credential_ref)) > 0 AND length(credential_ref) <= 128),
+                provider TEXT NOT NULL CHECK(provider IN ('feishu', 'dingtalk')),
+                credential_kind TEXT NOT NULL CHECK(credential_kind = 'member_bot'),
+                remote_app_id TEXT NOT NULL
+                    CHECK(length(trim(remote_app_id)) > 0 AND length(remote_app_id) <= 512),
+                payload_json TEXT NOT NULL
+                    CHECK(length(payload_json) > 0 AND length(payload_json) <= 65536),
+                schema_version INTEGER NOT NULL DEFAULT 1 CHECK(schema_version = 1),
+                revision INTEGER NOT NULL DEFAULT 1 CHECK(revision >= 1),
+                created_at INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL,
+                UNIQUE(provider, credential_kind, remote_app_id)
+            );
+            CREATE INDEX channel_credentials_provider_idx
+                ON channel_credentials(provider);
+            CREATE INDEX channel_credentials_remote_app_idx
+                ON channel_credentials(provider, remote_app_id);
+
+            CREATE TABLE channel_developer_sessions (
+                provider TEXT PRIMARY KEY NOT NULL CHECK(provider IN ('feishu', 'dingtalk')),
+                account_id TEXT NOT NULL
+                    CHECK(length(trim(account_id)) > 0 AND length(account_id) <= 128),
+                identity_json TEXT NOT NULL
+                    CHECK(length(identity_json) > 0 AND length(identity_json) <= 65536),
+                session_json TEXT NOT NULL
+                    CHECK(length(session_json) > 0 AND length(session_json) <= 1048576),
+                schema_version INTEGER NOT NULL DEFAULT 1 CHECK(schema_version = 1),
+                revision INTEGER NOT NULL DEFAULT 1 CHECK(revision >= 1),
+                created_at INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL
+            );
+
+            UPDATE rovai_data_contract
+            SET contract_version = 'v1.37', projection_schema_version = 78,
+                reset_reason = NULL, updated_at = datetime('now')
+            WHERE singleton = 1;
+
+            INSERT INTO schema_migration(version, applied_at)
+            VALUES (124, datetime('now'));
+            "#,
+        )?;
+        transaction.commit()?;
+        Ok(())
+    }
+
+    fn migrate_execution_console_snapshots_v125(&mut self) -> Result<()> {
+        let transaction = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        transaction.execute_batch(
+            r#"
+            ALTER TABLE channel_execution_console ADD COLUMN terminal_snapshot_json TEXT
+                CHECK(terminal_snapshot_json IS NULL OR (
+                    json_valid(terminal_snapshot_json)
+                    AND json_extract(terminal_snapshot_json, '$.schemaVersion') IS 1
+                ));
+            ALTER TABLE channel_execution_console DROP COLUMN display_mode;
+            ALTER TABLE channel_execution_console DROP COLUMN page_index;
+            ALTER TABLE channel_execution_console DROP COLUMN view_version;
+            "#,
+        )?;
+        crate::channel::backfill_sealed_execution_console_snapshots(&transaction)?;
+        transaction.execute_batch(
+            r#"
+            CREATE TRIGGER channel_execution_console_snapshot_immutable
+            BEFORE UPDATE OF terminal_snapshot_json, latest_sequence ON channel_execution_console
+            FOR EACH ROW
+            WHEN OLD.terminal_snapshot_json IS NOT NULL
+              AND (NEW.terminal_snapshot_json IS NOT OLD.terminal_snapshot_json
+                OR NEW.latest_sequence <> OLD.latest_sequence)
+            BEGIN
+                SELECT RAISE(ABORT, 'sealed execution console snapshot is immutable');
+            END;
+
+            UPDATE rovai_data_contract
+            SET contract_version = 'v1.38', projection_schema_version = 79,
+                reset_reason = NULL, updated_at = datetime('now')
+            WHERE singleton = 1;
+            INSERT INTO schema_migration(version, applied_at)
+            VALUES (125, datetime('now'));
+            "#,
+        )?;
+        transaction.commit()?;
         Ok(())
     }
 
@@ -17024,53 +20053,450 @@ impl Database {
         let transaction = self
             .connection
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        migrate_planned_shutdown_protocol_v3_schema(&transaction)?;
         transaction.execute_batch(
             r#"
-            CREATE TABLE planned_shutdown_cycle_v113 (
-                core_generation TEXT PRIMARY KEY
-                    CHECK(length(trim(core_generation)) > 0),
-                protocol_version INTEGER NOT NULL
-                    CHECK(protocol_version IN (2, 3)),
-                requested_at TEXT NOT NULL,
-                settled_at TEXT,
-                fenced_agent_run_count INTEGER
-                    CHECK(fenced_agent_run_count IS NULL OR fenced_agent_run_count >= 0),
-                unsettled_effect_agent_run_count INTEGER
-                    CHECK(
-                        unsettled_effect_agent_run_count IS NULL
-                        OR unsettled_effect_agent_run_count >= 0
-                    ),
-                CHECK (
-                    (settled_at IS NULL
-                        AND fenced_agent_run_count IS NULL
-                        AND unsettled_effect_agent_run_count IS NULL)
-                    OR
-                    (settled_at IS NOT NULL
-                        AND fenced_agent_run_count IS NOT NULL
-                        AND unsettled_effect_agent_run_count IS NOT NULL)
-                )
-            );
-
-            INSERT INTO planned_shutdown_cycle_v113(
-                core_generation, protocol_version, requested_at, settled_at,
-                fenced_agent_run_count, unsettled_effect_agent_run_count
-            )
-            SELECT core_generation, protocol_version, requested_at, settled_at,
-                   fenced_agent_run_count, unsettled_effect_agent_run_count
-            FROM planned_shutdown_cycle;
-
-            DROP TABLE planned_shutdown_cycle;
-            ALTER TABLE planned_shutdown_cycle_v113 RENAME TO planned_shutdown_cycle;
-
-            CREATE INDEX planned_shutdown_cycle_pending_idx
-                ON planned_shutdown_cycle(requested_at, core_generation)
-                WHERE settled_at IS NULL;
-
             INSERT INTO schema_migration(version, applied_at)
             VALUES (113, datetime('now'));
             "#,
         )?;
         transaction.commit()?;
+        Ok(())
+    }
+
+    fn reconcile_main_camp_migration_collision(&mut self) -> Result<bool> {
+        let Some(source) = main_camp_migration_collision(&self.connection)? else {
+            return Ok(false);
+        };
+        let transaction = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        if main_camp_migration_collision(&transaction)? != Some(source) {
+            anyhow::bail!("main Camp migration identity changed before reconciliation");
+        }
+        // Preserve original timestamps and every feature row. New high-numbered
+        // receipts survive the lower channel chain and its historical seals.
+        transaction.execute(
+            "UPDATE schema_migration SET version = 126 WHERE version = 117",
+            [],
+        )?;
+        if source.has_fast() {
+            transaction.execute(
+                "UPDATE schema_migration SET version = 127 WHERE version = 118",
+                [],
+            )?;
+        }
+        if source == MainCampMigrationSource::FastLifetime {
+            transaction.execute(
+                "UPDATE schema_migration SET version = 130 WHERE version = 119",
+                [],
+            )?;
+        }
+        transaction.execute(
+            "UPDATE rovai_data_contract SET contract_version = ?1, projection_schema_version = ?2,
+             updated_at = datetime('now') WHERE singleton = 1",
+            params![
+                V117_MIGRATION_SOURCE_DATA_CONTRACT_VERSION,
+                V117_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION
+            ],
+        )?;
+        transaction.commit()?;
+        Ok(true)
+    }
+
+    fn migrate_merged_channel_contract_v128(&mut self) -> Result<()> {
+        let transaction = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let state = load_current_migration_state(&transaction)?;
+        if !state.v126
+            || !state.v127
+            || !state.admits(
+                V128_MIGRATION_SOURCE_DATA_CONTRACT_VERSION,
+                V128_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION,
+                V116_CLASSIFIER_VERSION,
+            )
+        {
+            anyhow::bail!(
+                "merged channel contract requires complete channel, Pending and Fast migrations"
+            );
+        }
+        validate_joined_channel_schema(&transaction)?;
+        transaction.execute(
+            "UPDATE rovai_data_contract SET contract_version = ?1, projection_schema_version = ?2,
+             updated_at = datetime('now') WHERE singleton = 1",
+            params![
+                V129_MIGRATION_SOURCE_DATA_CONTRACT_VERSION,
+                V129_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION
+            ],
+        )?;
+        transaction.execute(
+            "INSERT INTO schema_migration(version, applied_at) VALUES (128, datetime('now'))",
+            [],
+        )?;
+        transaction.commit()?;
+        Ok(())
+    }
+
+    fn migrate_execution_evidence_index_v129(&mut self) -> Result<()> {
+        let transaction = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let state = load_current_migration_state(&transaction)?;
+        if !state.admits(
+            V129_MIGRATION_SOURCE_DATA_CONTRACT_VERSION,
+            V129_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION,
+            V116_CLASSIFIER_VERSION,
+        ) {
+            anyhow::bail!("execution evidence index migration requires the complete joined schema");
+        }
+        // The UNIQUE constraint already owns this exact ordered B-tree. Never
+        // remove the additional index unless the constraint can serve its reads.
+        let has_sequence_constraint: bool = transaction.query_row(
+            r#"
+            SELECT EXISTS (
+                SELECT 1 FROM pragma_index_list('agent_run_execution_evidence') AS idx
+                WHERE idx.origin = 'u' AND idx."unique" = 1 AND idx.partial = 0
+                  AND (SELECT COUNT(*) FROM pragma_index_xinfo(idx.name) WHERE key = 1) = 2
+                  AND EXISTS (
+                      SELECT 1 FROM pragma_index_xinfo(idx.name)
+                      WHERE key = 1 AND seqno = 0 AND name = 'agent_run_id'
+                        AND "desc" = 0 AND coll = 'BINARY'
+                  )
+                  AND EXISTS (
+                      SELECT 1 FROM pragma_index_xinfo(idx.name)
+                      WHERE key = 1 AND seqno = 1 AND name = 'sequence'
+                        AND "desc" = 0 AND coll = 'BINARY'
+                  )
+            )
+            "#,
+            [],
+            |row| row.get(0),
+        )?;
+        if !has_sequence_constraint {
+            anyhow::bail!("execution evidence sequence constraint is missing or incompatible");
+        }
+        transaction
+            .execute_batch("DROP INDEX IF EXISTS agent_run_execution_evidence_run_sequence_idx;")?;
+        transaction.execute(
+            "UPDATE rovai_data_contract SET contract_version = ?1, projection_schema_version = ?2,
+             updated_at = datetime('now') WHERE singleton = 1",
+            params![
+                V130_MIGRATION_SOURCE_DATA_CONTRACT_VERSION,
+                V130_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION
+            ],
+        )?;
+        transaction.execute(
+            "INSERT INTO schema_migration(version, applied_at) VALUES (129, datetime('now'))",
+            [],
+        )?;
+        transaction.commit()?;
+        Ok(())
+    }
+
+    fn migrate_fast_preference_lifetime_v130(&mut self) -> Result<()> {
+        let transaction = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let state = load_current_migration_state(&transaction)?;
+        if state.v130
+            || !state.admits(
+                V130_MIGRATION_SOURCE_DATA_CONTRACT_VERSION,
+                V130_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION,
+                V116_CLASSIFIER_VERSION,
+            )
+            || !pending_fast_schema_matches(&transaction, MainCampMigrationSource::Fast)?
+        {
+            anyhow::bail!("Fast lifetime migration requires the exact legacy Fast schema");
+        }
+        transaction.execute_batch(
+            "UPDATE camp_member_fast_preference SET eligible = 0, runtime_default_fast = NULL;
+             DROP TRIGGER agent_profile_fast_revision_update;",
+        )?;
+        for (_, schema) in CAMP_FAST_LIFETIME_SCHEMA_OBJECTS {
+            transaction.execute_batch(schema)?;
+        }
+        transaction.execute(
+            "INSERT INTO schema_migration(version, applied_at) VALUES (130, datetime('now'))",
+            [],
+        )?;
+        // No contract marker here: main's already-applied 119 is mapped to 130
+        // before the channel chain. The separate seal runs for both sources.
+        transaction.commit()?;
+        Ok(())
+    }
+
+    fn migrate_fast_lifetime_contract_v131(&mut self) -> Result<()> {
+        let transaction = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let state = load_current_migration_state(&transaction)?;
+        if !state.v130
+            || !state.admits(
+                V130_MIGRATION_SOURCE_DATA_CONTRACT_VERSION,
+                V130_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION,
+                V116_CLASSIFIER_VERSION,
+            )
+        {
+            anyhow::bail!("Fast lifetime contract requires all channel and Fast migrations");
+        }
+        validate_joined_channel_schema(&transaction)?;
+        transaction.execute(
+            "UPDATE rovai_data_contract SET contract_version = ?1, projection_schema_version = ?2,
+             updated_at = datetime('now') WHERE singleton = 1",
+            params![
+                V132_MIGRATION_SOURCE_DATA_CONTRACT_VERSION,
+                V132_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION
+            ],
+        )?;
+        transaction.execute(
+            "INSERT INTO schema_migration(version, applied_at) VALUES (131, datetime('now'))",
+            [],
+        )?;
+        transaction.commit()?;
+        Ok(())
+    }
+
+    fn migrate_pending_quick_chat_v132(&mut self) -> Result<()> {
+        self.connection
+            .execute_batch("PRAGMA foreign_keys = OFF;")?;
+        let migration_result = (|| -> Result<()> {
+            let transaction = self
+                .connection
+                .transaction_with_behavior(TransactionBehavior::Immediate)?;
+            let marker = transaction.query_row(
+                "SELECT contract_version, projection_schema_version, classifier_version
+                 FROM rovai_data_contract WHERE singleton = 1",
+                [],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, i64>(1)?,
+                        row.get::<_, String>(2)?,
+                    ))
+                },
+            )?;
+            let state = load_current_migration_state(&transaction)?;
+            if marker.0 != V132_MIGRATION_SOURCE_DATA_CONTRACT_VERSION
+                || marker.1 != V132_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION
+                || !state.admits(&marker.0, marker.1, &marker.2)
+            {
+                anyhow::bail!(
+                    "Quick Chat picker migration requires the exact preceding data contract"
+                );
+            }
+            transaction.execute_batch(
+                r#"
+                CREATE TABLE pending_camp_binding_v132 (
+                    id TEXT PRIMARY KEY,
+                    channel_conversation_id TEXT NOT NULL
+                        REFERENCES channel_conversation(id) ON DELETE CASCADE,
+                    owner_principal_id TEXT NOT NULL REFERENCES external_principal(id),
+                    acknowledgement_app_id TEXT NOT NULL CHECK(length(trim(acknowledgement_app_id)) > 0),
+                    status TEXT NOT NULL CHECK(status IN (
+                        'pending', 'resolving', 'resolved', 'cancelled', 'expired'
+                    )),
+                    version INTEGER NOT NULL DEFAULT 1 CHECK(version >= 1),
+                    nonce_digest TEXT NOT NULL CHECK(length(trim(nonce_digest)) > 0),
+                    expires_at TEXT NOT NULL,
+                    project_id TEXT REFERENCES project_catalog_item(id),
+                    binding_id TEXT UNIQUE REFERENCES channel_conversation_binding(id),
+                    camp_id TEXT UNIQUE REFERENCES camp(id),
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    resolved_at TEXT,
+                    CHECK(
+                        (status IN ('pending', 'resolving')
+                            AND project_id IS NULL AND binding_id IS NULL
+                            AND camp_id IS NULL AND resolved_at IS NULL)
+                        OR (status = 'resolved'
+                            AND binding_id IS NOT NULL
+                            AND camp_id IS NOT NULL AND resolved_at IS NOT NULL)
+                        OR (status IN ('cancelled', 'expired')
+                            AND project_id IS NULL AND binding_id IS NULL
+                            AND camp_id IS NULL AND resolved_at IS NOT NULL)
+                    )
+                );
+                INSERT INTO pending_camp_binding_v132
+                SELECT * FROM pending_camp_binding;
+                DROP TABLE pending_camp_binding;
+                ALTER TABLE pending_camp_binding_v132 RENAME TO pending_camp_binding;
+                CREATE UNIQUE INDEX pending_camp_binding_open_conversation_idx
+                    ON pending_camp_binding(channel_conversation_id)
+                    WHERE status IN ('pending', 'resolving');
+                CREATE INDEX pending_camp_binding_status_idx
+                    ON pending_camp_binding(status, expires_at, created_at, id);
+                "#,
+            )?;
+            validate_migration_foreign_keys(&transaction, &["pending_camp_binding"])?;
+            transaction.execute(
+                "UPDATE rovai_data_contract SET contract_version = ?1, projection_schema_version = ?2,
+                 updated_at = datetime('now') WHERE singleton = 1",
+                params![V133_MIGRATION_SOURCE_DATA_CONTRACT_VERSION, V133_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION],
+            )?;
+            transaction.execute(
+                "INSERT INTO schema_migration(version, applied_at) VALUES (132, datetime('now'))",
+                [],
+            )?;
+            transaction.commit()?;
+            Ok(())
+        })();
+        let pragma_result = self.connection.execute_batch("PRAGMA foreign_keys = ON;");
+        migration_result?;
+        pragma_result?;
+        Ok(())
+    }
+
+    fn migrate_runtime_images_v133(&mut self) -> Result<()> {
+        let transaction = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let marker = transaction.query_row(
+            "SELECT contract_version, projection_schema_version, classifier_version
+             FROM rovai_data_contract WHERE singleton=1",
+            [],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, i64>(1)?,
+                    row.get::<_, String>(2)?,
+                ))
+            },
+        )?;
+        if marker.0 != V133_MIGRATION_SOURCE_DATA_CONTRACT_VERSION
+            || marker.1 != V133_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION
+            || !load_current_migration_state(&transaction)?.admits(&marker.0, marker.1, &marker.2)
+        {
+            anyhow::bail!("Runtime images migration requires the exact preceding data contract");
+        }
+        transaction.execute_batch(
+            "CREATE TABLE agent_run_image (
+                id TEXT PRIMARY KEY,
+                agent_run_id TEXT NOT NULL REFERENCES agent_run(id) ON DELETE CASCADE,
+                execution_epoch INTEGER NOT NULL,
+                tool_call_id TEXT NOT NULL,
+                source_key TEXT NOT NULL,
+                source_path TEXT,
+                content_blob_id TEXT REFERENCES managed_blob(id),
+                display_name TEXT NOT NULL,
+                media_type TEXT NOT NULL,
+                byte_size INTEGER NOT NULL CHECK(byte_size > 0 AND byte_size <= 20971520),
+                ordinal INTEGER NOT NULL CHECK(ordinal >= 0),
+                created_at TEXT NOT NULL,
+                CHECK((source_path IS NOT NULL) != (content_blob_id IS NOT NULL)),
+                UNIQUE(agent_run_id, execution_epoch, tool_call_id, source_key)
+             );
+             CREATE INDEX agent_run_image_run_idx ON agent_run_image(agent_run_id, execution_epoch, ordinal);
+             CREATE INDEX agent_run_image_blob_idx ON agent_run_image(content_blob_id)
+                WHERE content_blob_id IS NOT NULL;",
+        )?;
+        transaction.execute(
+            "UPDATE rovai_data_contract SET contract_version=?1, projection_schema_version=?2,
+             updated_at=datetime('now') WHERE singleton=1",
+            params![
+                CURRENT_DATA_CONTRACT_VERSION,
+                CURRENT_PROJECTION_SCHEMA_VERSION
+            ],
+        )?;
+        transaction.execute(
+            "INSERT INTO schema_migration(version, applied_at) VALUES(133, datetime('now'))",
+            [],
+        )?;
+        transaction.commit()?;
+        Ok(())
+    }
+
+    fn reconcile_legacy_feishu_migration_collision(&mut self) -> Result<bool> {
+        if self.reconcile_main_camp_migration_collision()? {
+            return Ok(true);
+        }
+        if !connection_has_legacy_feishu_migration_collision(&self.connection)? {
+            return Ok(false);
+        }
+        let transaction = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        if !connection_has_legacy_feishu_migration_collision(&transaction)? {
+            anyhow::bail!("legacy Feishu migration collision changed before reconciliation");
+        }
+        migrate_planned_shutdown_protocol_v3_schema(&transaction)?;
+        transaction.execute(
+            "INSERT INTO schema_migration(version, applied_at) VALUES (117, datetime('now'))",
+            [],
+        )?;
+        transaction.commit()?;
+        eprintln!("reconciled legacy Feishu migration marker collision");
+        Ok(true)
+    }
+
+    fn reconcile_runtime_activity_channel_v116(&mut self) -> Result<()> {
+        let v116_applied = self.schema_migration_applied(116)?;
+        if !v116_applied {
+            self.migrate_channel_platform_v116()?;
+            self.migrate_runtime_activity_classifier_v116()?;
+            return Ok(());
+        }
+
+        let channel_table_count: i64 = self.connection.query_row(
+            r#"
+            SELECT COUNT(*)
+            FROM sqlite_master
+            WHERE type = 'table'
+              AND name IN (
+                  'external_principal',
+                  'external_principal_app_identity',
+                  'channel_conversation',
+                  'channel_conversation_binding',
+                  'feishu_account',
+                  'feishu_member_bot',
+                  'external_group_bot_roster_state',
+                  'external_group_bot_roster',
+                  'channel_inbound_aggregate',
+                  'channel_inbound_observation',
+                  'channel_turn_request',
+                  'channel_delivery'
+              )
+            "#,
+            [],
+            |row| row.get(0),
+        )?;
+        let project_directory_count: i64 = self.connection.query_row(
+            r#"
+            SELECT COUNT(*)
+            FROM sqlite_master
+            WHERE type = 'table' AND name IN ('project_binding', 'project_catalog_item')
+            "#,
+            [],
+            |row| row.get(0),
+        )?;
+        match (channel_table_count, project_directory_count) {
+            (0, 0) => self.migrate_channel_platform_v116()?,
+            (12, 1) => {}
+            count => anyhow::bail!(
+                "v116 channel/runtime migration collision left a partial channel schema ({count:?})"
+            ),
+        }
+
+        let classifier: String = self.connection.query_row(
+            "SELECT classifier_version FROM rovai_data_contract WHERE singleton = 1",
+            [],
+            |row| row.get(0),
+        )?;
+        match classifier.as_str() {
+            V116_CLASSIFIER_VERSION => {}
+            V043_CLASSIFIER_VERSION => {
+                self.connection.execute(
+                    r#"
+                    UPDATE rovai_data_contract
+                    SET classifier_version = ?1, reset_reason = NULL,
+                        updated_at = datetime('now')
+                    WHERE singleton = 1
+                    "#,
+                    [V116_CLASSIFIER_VERSION],
+                )?;
+            }
+            value => anyhow::bail!("unsupported runtime activity classifier at v116: {value}"),
+        }
         Ok(())
     }
 
@@ -17172,96 +20598,21 @@ impl Database {
         Ok(())
     }
 
-    fn migrate_fast_preference_lifetime_v119(&mut self) -> Result<()> {
+    fn migrate_camp_member_fast_v127(&mut self) -> Result<()> {
         let transaction = self
             .connection
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
         transaction.execute_batch(
-            r#"
-            UPDATE camp_member_fast_preference
-                SET eligible = 0, runtime_default_fast = NULL;
-            DROP TRIGGER agent_profile_fast_revision_update;
-            CREATE TRIGGER agent_profile_fast_revision_update
-            AFTER UPDATE OF selected_runtime_adapter_kind, default_runtime_installation_id ON agent_profile
-            WHEN OLD.selected_runtime_adapter_kind IS NOT NEW.selected_runtime_adapter_kind
-              OR OLD.default_runtime_installation_id IS NOT NEW.default_runtime_installation_id
-            BEGIN
-                UPDATE agent_profile SET runtime_binding_revision = lower(hex(randomblob(16))) WHERE id = NEW.id;
-                DELETE FROM camp_member_fast_preference WHERE agent_id = NEW.id;
-            END;
-            CREATE TRIGGER agent_profile_fast_model_update
-            AFTER UPDATE OF default_model_selection_json ON agent_profile
-            WHEN OLD.default_model_selection_json IS NOT NEW.default_model_selection_json
-            BEGIN
-                UPDATE camp_member_fast_preference
-                    SET eligible = 0, runtime_default_fast = NULL
-                    WHERE agent_id = NEW.id;
-            END;
-            CREATE TRIGGER adapter_installation_fast_binding_update
-            AFTER UPDATE OF adapter_kind, executable_path, auth_scope ON adapter_installation
-            WHEN OLD.adapter_kind IS NOT NEW.adapter_kind
-              OR OLD.executable_path IS NOT NEW.executable_path
-              OR OLD.auth_scope IS NOT NEW.auth_scope
-            BEGIN
-                UPDATE agent_profile SET runtime_binding_revision = lower(hex(randomblob(16)))
-                    WHERE default_runtime_installation_id = NEW.id;
-                DELETE FROM camp_member_fast_preference WHERE agent_id IN (
-                    SELECT id FROM agent_profile WHERE default_runtime_installation_id = NEW.id
-                );
-            END;
-
-            UPDATE rovai_data_contract
-                SET projection_schema_version = 73, updated_at = datetime('now') WHERE singleton = 1;
-            INSERT INTO schema_migration(version, applied_at) VALUES (119, datetime('now'));
-            "#,
+            "ALTER TABLE agent_profile ADD COLUMN runtime_binding_revision TEXT NOT NULL DEFAULT '';
+             UPDATE agent_profile SET runtime_binding_revision = lower(hex(randomblob(16)));
+             ALTER TABLE runtime_usage_run_summary ADD COLUMN observed_service_tier TEXT;",
         )?;
-        transaction.commit()?;
-        Ok(())
-    }
-
-    fn migrate_camp_member_fast_v118(&mut self) -> Result<()> {
-        let transaction = self
-            .connection
-            .transaction_with_behavior(TransactionBehavior::Immediate)?;
-        transaction.execute_batch(
-            r#"
-            ALTER TABLE agent_profile ADD COLUMN runtime_binding_revision TEXT NOT NULL DEFAULT '';
-            UPDATE agent_profile SET runtime_binding_revision = lower(hex(randomblob(16)));
-            CREATE TRIGGER agent_profile_fast_revision_insert AFTER INSERT ON agent_profile
-            WHEN NEW.runtime_binding_revision = '' BEGIN
-                UPDATE agent_profile SET runtime_binding_revision = lower(hex(randomblob(16))) WHERE id = NEW.id;
-            END;
-            CREATE TRIGGER agent_profile_fast_revision_update
-            AFTER UPDATE OF selected_runtime_adapter_kind, default_runtime_installation_id,
-                default_model_selection_json, default_permission_config_json ON agent_profile
-            WHEN OLD.selected_runtime_adapter_kind IS NOT NEW.selected_runtime_adapter_kind
-              OR OLD.default_runtime_installation_id IS NOT NEW.default_runtime_installation_id
-              OR OLD.default_model_selection_json IS NOT NEW.default_model_selection_json
-              OR OLD.default_permission_config_json IS NOT NEW.default_permission_config_json
-            BEGIN
-                UPDATE agent_profile SET runtime_binding_revision = lower(hex(randomblob(16))) WHERE id = NEW.id;
-                DELETE FROM camp_member_fast_preference WHERE agent_id = NEW.id;
-            END;
-            CREATE TABLE camp_member_fast_preference (
-                camp_id TEXT NOT NULL REFERENCES camp(id) ON DELETE CASCADE,
-                agent_id TEXT NOT NULL REFERENCES agent_profile(id) ON DELETE CASCADE,
-                runtime_binding_revision TEXT NOT NULL,
-                fast_override INTEGER CHECK(fast_override IN (0, 1)),
-                cwd TEXT NOT NULL,
-                executable_fingerprint TEXT NOT NULL,
-                eligible INTEGER NOT NULL DEFAULT 0 CHECK(eligible IN (0, 1)),
-                runtime_default_fast INTEGER CHECK(runtime_default_fast IN (0, 1)),
-                observed_fast_state TEXT NOT NULL DEFAULT 'unknown'
-                    CHECK(observed_fast_state IN ('unknown', 'standard', 'fast', 'cooldown')),
-                unavailable_reason TEXT,
-                PRIMARY KEY(camp_id, agent_id)
-            );
-            ALTER TABLE runtime_usage_run_summary ADD COLUMN observed_service_tier TEXT;
-            UPDATE rovai_data_contract
-            SET contract_version = 'v1.34', projection_schema_version = 72,
-                updated_at = datetime('now') WHERE singleton = 1;
-            INSERT INTO schema_migration(version, applied_at) VALUES (118, datetime('now'));
-            "#,
+        for (_, schema) in CAMP_FAST_SCHEMA_OBJECTS {
+            transaction.execute_batch(schema)?;
+        }
+        transaction.execute(
+            "INSERT INTO schema_migration(version, applied_at) VALUES (127, datetime('now'))",
+            [],
         )?;
         transaction.commit()?;
         Ok(())
@@ -17279,7 +20630,7 @@ impl Database {
                 updated_at = datetime('now')
             WHERE singleton = 1;
 
-            INSERT INTO schema_migration(version, applied_at)
+            INSERT OR IGNORE INTO schema_migration(version, applied_at)
             VALUES (116, datetime('now'));
             "#,
         )?;
@@ -17287,52 +20638,16 @@ impl Database {
         Ok(())
     }
 
-    fn migrate_pending_camp_inputs_v117(&mut self) -> Result<()> {
+    fn migrate_pending_camp_inputs_v126(&mut self) -> Result<()> {
         let transaction = self
             .connection
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
-        transaction.execute_batch(
-            r#"
-            CREATE TABLE pending_camp_input (
-                id TEXT PRIMARY KEY,
-                camp_id TEXT NOT NULL REFERENCES camp(id) ON DELETE CASCADE,
-                enqueue_sequence INTEGER NOT NULL CHECK(enqueue_sequence > 0),
-                revision INTEGER NOT NULL DEFAULT 1 CHECK(revision > 0),
-                state TEXT NOT NULL DEFAULT 'queued'
-                    CHECK(state IN ('queued', 'needs_repair', 'published', 'cancelled')),
-                structured_content_json TEXT NOT NULL,
-                reply_to_camp_message_id TEXT,
-                recipient_selection_required INTEGER NOT NULL DEFAULT 0
-                    CHECK(recipient_selection_required IN (0, 1)),
-                execution_json TEXT NOT NULL,
-                user_id TEXT NOT NULL,
-                published_camp_message_id TEXT,
-                published_camp_turn_id TEXT,
-                published_at TEXT,
-                last_attempt_error_code TEXT,
-                created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL,
-                UNIQUE(camp_id, enqueue_sequence),
-                UNIQUE(camp_id, id),
-                CHECK((state = 'published') = (published_camp_message_id IS NOT NULL))
-            );
-            CREATE INDEX pending_camp_input_queue_idx
-                ON pending_camp_input(camp_id, enqueue_sequence)
-                WHERE state IN ('queued', 'needs_repair');
-            CREATE TABLE pending_input_edit_session (
-                camp_id TEXT PRIMARY KEY REFERENCES camp(id) ON DELETE CASCADE,
-                pending_input_id TEXT NOT NULL UNIQUE,
-                edit_token TEXT NOT NULL,
-                base_pending_revision INTEGER NOT NULL,
-                recovery_required INTEGER NOT NULL DEFAULT 0 CHECK(recovery_required IN (0, 1)),
-                FOREIGN KEY(camp_id, pending_input_id)
-                    REFERENCES pending_camp_input(camp_id, id) ON DELETE CASCADE
-            );
-            UPDATE rovai_data_contract
-                SET contract_version = 'v1.33', projection_schema_version = 71,
-                    updated_at = datetime('now') WHERE singleton = 1;
-            INSERT INTO schema_migration(version, applied_at) VALUES (117, datetime('now'));
-        "#,
+        for (_, schema) in PENDING_CAMP_SCHEMA_OBJECTS {
+            transaction.execute_batch(schema)?;
+        }
+        transaction.execute(
+            "INSERT INTO schema_migration(version, applied_at) VALUES (126, datetime('now'))",
+            [],
         )?;
         transaction.commit()?;
         Ok(())
@@ -21740,10 +25055,59 @@ impl Database {
 }
 
 #[cfg(test)]
-fn downgrade_current_schema_to_v119_source_for_test(connection: &Connection) {
+pub(crate) fn downgrade_current_schema_to_main_camp_source_for_test(
+    database: &mut Database,
+    source: MainCampMigrationSource,
+) {
+    downgrade_current_schema_to_v115_source_for_test(database.connection());
+    database.migrate_runtime_activity_classifier_v116().unwrap();
+    database.migrate_pending_camp_inputs_v126().unwrap();
+    if source.has_fast() {
+        database.migrate_camp_member_fast_v127().unwrap();
+    }
+    let connection = database.connection();
+    if source == MainCampMigrationSource::FastLifetime {
+        connection
+            .execute_batch("DROP TRIGGER agent_profile_fast_revision_update;")
+            .unwrap();
+        for (_, schema) in CAMP_FAST_LIFETIME_SCHEMA_OBJECTS {
+            connection.execute_batch(schema).unwrap();
+        }
+        connection.execute(
+            "INSERT INTO schema_migration(version, applied_at) VALUES (119, 'main-119-kept-time')",
+            [],
+        ).unwrap();
+    }
+    connection
+        .execute(
+            "UPDATE schema_migration SET version = 117 WHERE version = 126",
+            [],
+        )
+        .unwrap();
+    if source.has_fast() {
+        connection
+            .execute(
+                "UPDATE schema_migration SET version = 118 WHERE version = 127",
+                [],
+            )
+            .unwrap();
+    }
+    connection.execute(
+        "UPDATE rovai_data_contract SET contract_version = ?1, projection_schema_version = ?2 WHERE singleton = 1",
+        params![if source.has_fast() { "v1.34" } else { "v1.33" }, source.last_migration() - 46],
+    ).unwrap();
+    assert_eq!(
+        main_camp_migration_collision(connection).unwrap(),
+        Some(source)
+    );
+}
+
+#[cfg(test)]
+pub(crate) fn downgrade_current_schema_to_v131_source_for_test(connection: &Connection) {
+    connection.execute_batch("DROP TABLE IF EXISTS agent_run_image; DELETE FROM schema_migration WHERE version = 133;").unwrap();
     let applied: bool = connection
         .query_row(
-            "SELECT EXISTS(SELECT 1 FROM schema_migration WHERE version = 119)",
+            "SELECT EXISTS(SELECT 1 FROM schema_migration WHERE version = 132)",
             [],
             |row| row.get(0),
         )
@@ -21751,56 +25115,49 @@ fn downgrade_current_schema_to_v119_source_for_test(connection: &Connection) {
     if !applied {
         return;
     }
-    connection.execute_batch(r#"
-        DROP TRIGGER agent_profile_fast_model_update;
-        DROP TRIGGER adapter_installation_fast_binding_update;
-        DROP TRIGGER agent_profile_fast_revision_update;
-        CREATE TRIGGER agent_profile_fast_revision_update
-        AFTER UPDATE OF selected_runtime_adapter_kind, default_runtime_installation_id,
-            default_model_selection_json, default_permission_config_json ON agent_profile
-        WHEN OLD.selected_runtime_adapter_kind IS NOT NEW.selected_runtime_adapter_kind
-          OR OLD.default_runtime_installation_id IS NOT NEW.default_runtime_installation_id
-          OR OLD.default_model_selection_json IS NOT NEW.default_model_selection_json
-          OR OLD.default_permission_config_json IS NOT NEW.default_permission_config_json
-        BEGIN
-            UPDATE agent_profile SET runtime_binding_revision = lower(hex(randomblob(16))) WHERE id = NEW.id;
-            DELETE FROM camp_member_fast_preference WHERE agent_id = NEW.id;
-        END;
-        UPDATE rovai_data_contract SET projection_schema_version = 72 WHERE singleton = 1;
-        DELETE FROM schema_migration WHERE version = 119;
-    "#).unwrap();
-}
-
-#[cfg(test)]
-fn downgrade_current_schema_to_v118_source_for_test(connection: &Connection) {
-    downgrade_current_schema_to_v119_source_for_test(connection);
-    let applied: bool = connection
+    let schema: String = connection
         .query_row(
-            "SELECT EXISTS(SELECT 1 FROM schema_migration WHERE version = 118)",
+            "SELECT sql FROM sqlite_schema WHERE type = 'table' AND name = 'pending_camp_binding'",
             [],
             |row| row.get(0),
         )
         .unwrap();
-    if !applied {
-        return;
-    }
-    connection.execute_batch(r#"
-        DROP TRIGGER agent_profile_fast_revision_insert;
-        DROP TRIGGER agent_profile_fast_revision_update;
-        DROP TABLE camp_member_fast_preference;
-        ALTER TABLE agent_profile DROP COLUMN runtime_binding_revision;
-        ALTER TABLE runtime_usage_run_summary DROP COLUMN observed_service_tier;
-        UPDATE rovai_data_contract SET contract_version = 'v1.33', projection_schema_version = 71 WHERE singleton = 1;
-        DELETE FROM schema_migration WHERE version = 118;
-    "#).unwrap();
+    let legacy = schema
+        .replacen("pending_camp_binding", "pending_camp_binding_v131", 1)
+        .replacen(
+            "OR (status = 'resolved'",
+            "OR (status = 'resolved' AND project_id IS NOT NULL",
+            1,
+        );
+    assert!(legacy.contains("status = 'resolved' AND project_id IS NOT NULL"));
+    connection
+        .execute_batch("PRAGMA foreign_keys = OFF;")
+        .unwrap();
+    let transaction = connection.unchecked_transaction().unwrap();
+    transaction.execute_batch(&legacy).unwrap();
+    transaction.execute_batch(
+        "INSERT INTO pending_camp_binding_v131 SELECT * FROM pending_camp_binding;
+         DROP TABLE pending_camp_binding;
+         ALTER TABLE pending_camp_binding_v131 RENAME TO pending_camp_binding;
+         CREATE UNIQUE INDEX pending_camp_binding_open_conversation_idx
+             ON pending_camp_binding(channel_conversation_id) WHERE status IN ('pending', 'resolving');
+         CREATE INDEX pending_camp_binding_status_idx
+             ON pending_camp_binding(status, expires_at, created_at, id);
+         DELETE FROM schema_migration WHERE version = 132;
+         UPDATE rovai_data_contract SET contract_version = 'v1.41', projection_schema_version = 82 WHERE singleton = 1;",
+    ).unwrap();
+    transaction.commit().unwrap();
+    connection
+        .execute_batch("PRAGMA foreign_keys = ON;")
+        .unwrap();
 }
 
 #[cfg(test)]
-fn downgrade_current_schema_to_v116_source_for_test(connection: &Connection) {
-    downgrade_current_schema_to_v118_source_for_test(connection);
+pub(crate) fn downgrade_current_schema_to_v129_source_for_test(connection: &Connection) {
+    downgrade_current_schema_to_v131_source_for_test(connection);
     let applied: bool = connection
         .query_row(
-            "SELECT EXISTS(SELECT 1 FROM schema_migration WHERE version = 117)",
+            "SELECT EXISTS(SELECT 1 FROM schema_migration WHERE version = 130)",
             [],
             |row| row.get(0),
         )
@@ -21810,21 +25167,601 @@ fn downgrade_current_schema_to_v116_source_for_test(connection: &Connection) {
     }
     connection
         .execute_batch(
+            "DROP TRIGGER agent_profile_fast_model_update;
+         DROP TRIGGER adapter_installation_fast_binding_update;
+         DROP TRIGGER agent_profile_fast_revision_update;",
+        )
+        .unwrap();
+    connection
+        .execute_batch(CAMP_FAST_SCHEMA_OBJECTS[1].1)
+        .unwrap();
+    connection.execute_batch(
+        "DELETE FROM schema_migration WHERE version IN (130, 131);
+         UPDATE rovai_data_contract SET contract_version = 'v1.40', projection_schema_version = 81 WHERE singleton = 1;",
+    ).unwrap();
+}
+
+#[cfg(test)]
+pub(crate) fn downgrade_current_schema_to_v128_source_for_test(connection: &Connection) {
+    downgrade_current_schema_to_v129_source_for_test(connection);
+    connection.execute_batch(
+        "CREATE INDEX IF NOT EXISTS agent_run_execution_evidence_run_sequence_idx
+             ON agent_run_execution_evidence(agent_run_id, sequence);
+         DELETE FROM schema_migration WHERE version = 129;
+         UPDATE rovai_data_contract SET contract_version = 'v1.39', projection_schema_version = 80 WHERE singleton = 1;",
+    ).unwrap();
+}
+
+#[cfg(test)]
+fn downgrade_current_schema_to_v127_source_for_test(connection: &Connection) {
+    downgrade_current_schema_to_v128_source_for_test(connection);
+    connection.execute_batch(
+        "DELETE FROM schema_migration WHERE version = 128;
+         UPDATE rovai_data_contract SET contract_version = 'v1.38', projection_schema_version = 79 WHERE singleton = 1;",
+    ).unwrap();
+}
+
+#[cfg(test)]
+fn downgrade_current_schema_to_v126_source_for_test(connection: &Connection) {
+    let applied: bool = connection
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM schema_migration WHERE version = 127)",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    if !applied {
+        return;
+    }
+    downgrade_current_schema_to_v127_source_for_test(connection);
+    connection
+        .execute_batch(
+            "DROP TRIGGER agent_profile_fast_revision_insert;
+         DROP TRIGGER agent_profile_fast_revision_update;
+         DROP TABLE camp_member_fast_preference;
+         ALTER TABLE agent_profile DROP COLUMN runtime_binding_revision;
+         ALTER TABLE runtime_usage_run_summary DROP COLUMN observed_service_tier;
+         DELETE FROM schema_migration WHERE version = 127;",
+        )
+        .unwrap();
+}
+
+#[cfg(test)]
+pub(crate) fn downgrade_current_schema_to_v125_source_for_test(connection: &Connection) {
+    downgrade_current_schema_to_v126_source_for_test(connection);
+    let applied: bool = connection
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM schema_migration WHERE version = 126)",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    if !applied {
+        return;
+    }
+    connection
+        .execute_batch(
+            "DROP TABLE pending_input_edit_session;
+         DROP TABLE pending_camp_input;
+         DELETE FROM schema_migration WHERE version = 126;",
+        )
+        .unwrap();
+}
+
+#[cfg(test)]
+pub(crate) fn downgrade_current_schema_to_v124_source_for_test(connection: &Connection) {
+    downgrade_current_schema_to_v125_source_for_test(connection);
+    let applied: bool = connection
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM schema_migration WHERE version = 125)",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    if !applied {
+        return;
+    }
+    connection.execute_batch(r#"
+        BEGIN IMMEDIATE;
+        DROP TRIGGER channel_execution_console_snapshot_immutable;
+        ALTER TABLE channel_execution_console DROP COLUMN terminal_snapshot_json;
+        ALTER TABLE channel_execution_console ADD COLUMN display_mode TEXT NOT NULL DEFAULT 'live'
+            CHECK(display_mode IN ('live', 'collapsed', 'expanded'));
+        ALTER TABLE channel_execution_console ADD COLUMN page_index INTEGER NOT NULL DEFAULT 0 CHECK(page_index >= 0);
+        ALTER TABLE channel_execution_console ADD COLUMN view_version INTEGER NOT NULL DEFAULT 1 CHECK(view_version >= 1);
+        UPDATE rovai_data_contract SET contract_version = 'v1.37', projection_schema_version = 78 WHERE singleton = 1;
+        DELETE FROM schema_migration WHERE version = 125;
+        COMMIT;
+    "#).unwrap();
+}
+
+#[cfg(test)]
+fn downgrade_current_schema_to_v123_source_for_test(connection: &Connection) {
+    downgrade_current_schema_to_v124_source_for_test(connection);
+    let has_v124: bool = connection
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM schema_migration WHERE version = 124)",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    if !has_v124 {
+        return;
+    }
+    connection
+        .execute_batch(
             r#"
-        DROP TABLE IF EXISTS pending_input_edit_session;
-        DROP TABLE IF EXISTS pending_camp_input;
-        UPDATE rovai_data_contract
-            SET contract_version = 'v1.29', projection_schema_version = 70,
-                classifier_version = 'activity-v2' WHERE singleton = 1;
-        DELETE FROM schema_migration WHERE version = 117;
-    "#,
+            PRAGMA foreign_keys = OFF;
+            BEGIN IMMEDIATE;
+            DROP TABLE channel_developer_sessions;
+            DROP TABLE channel_credentials;
+            UPDATE rovai_data_contract
+            SET contract_version = 'v1.36', projection_schema_version = 77
+            WHERE singleton = 1;
+            DELETE FROM schema_migration WHERE version = 124;
+            COMMIT;
+            PRAGMA foreign_keys = ON;
+            "#,
+        )
+        .unwrap();
+}
+
+#[cfg(test)]
+fn downgrade_current_schema_to_v122_source_for_test(connection: &Connection) {
+    downgrade_current_schema_to_v123_source_for_test(connection);
+    let has_v123: bool = connection
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM schema_migration WHERE version = 123)",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    if !has_v123 {
+        return;
+    }
+    connection
+        .execute_batch(
+            r#"
+            PRAGMA foreign_keys = OFF;
+            BEGIN IMMEDIATE;
+            ALTER TABLE dingtalk_member_bot_publication_intent
+                RENAME TO dingtalk_member_bot_publication_intent_v123;
+            DROP INDEX dingtalk_publication_intent_state_idx;
+            CREATE TABLE dingtalk_member_bot_publication_intent (
+                id TEXT PRIMARY KEY,
+                agent_id TEXT NOT NULL REFERENCES agent_profile(id),
+                account_id TEXT NOT NULL REFERENCES dingtalk_account(id),
+                expected_user_id_digest TEXT NOT NULL
+                    CHECK(length(expected_user_id_digest) > 0),
+                expected_corp_id TEXT NOT NULL CHECK(length(trim(expected_corp_id)) > 0),
+                requested_app_name TEXT NOT NULL CHECK(length(trim(requested_app_name)) > 0),
+                provisioning_mode TEXT NOT NULL CHECK(provisioning_mode = 'dws_gateway'),
+                state TEXT NOT NULL CHECK(state IN (
+                    'created', 'account_verified', 'app_created', 'credentials_read',
+                    'avatar_configured', 'robot_configured', 'permissions_configured',
+                    'version_created', 'awaiting_approver_selection',
+                    'awaiting_approval', 'version_released', 'stream_verified',
+                    'card_verified', 'completed', 'failed_recoverable',
+                    'failed_unknown_remote_state'
+                )),
+                remote_unified_app_id TEXT,
+                app_key TEXT,
+                robot_code TEXT,
+                credential_ref TEXT,
+                version_id TEXT,
+                approval_mode TEXT CHECK(
+                    approval_mode IS NULL
+                    OR approval_mode IN ('NO_APPROVAL', 'SELECT_APPROVER', 'AUTO')
+                ),
+                approver_user_id_digest TEXT,
+                last_completed_step TEXT,
+                failure_code TEXT,
+                version INTEGER NOT NULL DEFAULT 1 CHECK(version >= 1),
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                completed_at TEXT,
+                UNIQUE(agent_id),
+                UNIQUE(remote_unified_app_id),
+                UNIQUE(app_key),
+                UNIQUE(credential_ref),
+                CHECK(
+                    (state IN ('created', 'account_verified')
+                        AND remote_unified_app_id IS NULL)
+                    OR state NOT IN ('created', 'account_verified')
+                ),
+                CHECK(
+                    (state = 'completed' AND completed_at IS NOT NULL
+                        AND remote_unified_app_id IS NOT NULL
+                        AND app_key IS NOT NULL AND robot_code IS NOT NULL
+                        AND credential_ref IS NOT NULL AND version_id IS NOT NULL
+                        AND failure_code IS NULL)
+                    OR state <> 'completed'
+                ),
+                CHECK(
+                    (state IN ('failed_recoverable', 'failed_unknown_remote_state')
+                        AND failure_code IS NOT NULL)
+                    OR state NOT IN ('failed_recoverable', 'failed_unknown_remote_state')
+                )
+            );
+            INSERT INTO dingtalk_member_bot_publication_intent(
+                id, agent_id, account_id, expected_user_id_digest,
+                expected_corp_id, requested_app_name, provisioning_mode,
+                state, remote_unified_app_id, app_key, robot_code,
+                credential_ref, version_id, approval_mode,
+                approver_user_id_digest, last_completed_step, failure_code,
+                version, created_at, updated_at, completed_at
+            )
+            SELECT id, agent_id, account_id, expected_user_id_digest,
+                   expected_corp_id, requested_app_name, 'dws_gateway',
+                   state, remote_unified_app_id, app_key, robot_code,
+                   credential_ref, version_id, approval_mode,
+                   approver_user_id_digest, last_completed_step, failure_code,
+                   version, created_at, updated_at, completed_at
+            FROM dingtalk_member_bot_publication_intent_v123;
+            DROP TABLE dingtalk_member_bot_publication_intent_v123;
+            CREATE INDEX dingtalk_publication_intent_state_idx
+                ON dingtalk_member_bot_publication_intent(state, updated_at DESC, id);
+            UPDATE rovai_data_contract
+            SET contract_version = 'v1.35', projection_schema_version = 76
+            WHERE singleton = 1;
+            DELETE FROM schema_migration WHERE version = 123;
+            COMMIT;
+            PRAGMA foreign_keys = ON;
+            "#,
+        )
+        .unwrap();
+}
+
+#[cfg(test)]
+fn downgrade_current_schema_to_v121_source_for_test(connection: &Connection) {
+    downgrade_current_schema_to_v122_source_for_test(connection);
+    let has_v122: bool = connection
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM schema_migration WHERE version = 122)",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    if !has_v122 {
+        return;
+    }
+    connection
+        .execute_batch(
+            r#"
+            PRAGMA foreign_keys = OFF;
+            BEGIN IMMEDIATE;
+            DROP VIEW IF EXISTS channel_owner_app_identity_directory;
+            DROP VIEW IF EXISTS channel_member_bot_directory;
+            DROP TABLE IF EXISTS dingtalk_owner_app_identity;
+            DROP TABLE IF EXISTS dingtalk_member_bot;
+            DROP TABLE IF EXISTS dingtalk_member_bot_publication_intent;
+            DROP TABLE IF EXISTS dingtalk_owner_identity;
+            DROP TABLE IF EXISTS dingtalk_account;
+            UPDATE rovai_data_contract
+            SET contract_version = 'v1.34', projection_schema_version = 75
+            WHERE singleton = 1;
+            DELETE FROM schema_migration WHERE version = 122;
+            COMMIT;
+            PRAGMA foreign_keys = ON;
+            "#,
+        )
+        .unwrap();
+}
+
+#[cfg(test)]
+fn downgrade_current_schema_to_v120_source_for_test(connection: &Connection) {
+    downgrade_current_schema_to_v121_source_for_test(connection);
+    let has_v121: bool = connection
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM schema_migration WHERE version = 121)",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    if !has_v121 {
+        return;
+    }
+    connection
+        .execute_batch(
+            r#"
+            BEGIN IMMEDIATE;
+            UPDATE rovai_data_contract
+            SET contract_version = 'v1.33', projection_schema_version = 74
+            WHERE singleton = 1;
+            DELETE FROM schema_migration WHERE version = 121;
+            COMMIT;
+            "#,
+        )
+        .unwrap();
+}
+
+#[cfg(test)]
+fn downgrade_current_schema_to_v119_source_for_test(connection: &Connection) {
+    downgrade_current_schema_to_v120_source_for_test(connection);
+    let has_v120: bool = connection
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM schema_migration WHERE version = 120)",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    if !has_v120 {
+        return;
+    }
+    connection
+        .execute_batch(
+            r#"
+            BEGIN IMMEDIATE;
+            ALTER TABLE channel_execution_console DROP COLUMN view_version;
+            ALTER TABLE channel_execution_console DROP COLUMN page_index;
+            ALTER TABLE channel_execution_console DROP COLUMN display_mode;
+            UPDATE rovai_data_contract
+            SET contract_version = 'v1.32', projection_schema_version = 73
+            WHERE singleton = 1;
+            DELETE FROM schema_migration WHERE version = 120;
+            COMMIT;
+            "#,
+        )
+        .unwrap();
+}
+
+#[cfg(test)]
+fn downgrade_current_schema_to_v118_source_for_test(connection: &Connection) {
+    downgrade_current_schema_to_v119_source_for_test(connection);
+    let has_v119: bool = connection
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM schema_migration WHERE version = 119)",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    if !has_v119 {
+        return;
+    }
+    for table in ["channel_execution_console", "channel_delivery"] {
+        let count: i64 = connection
+            .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(count, 0, "test downgrade requires empty {table}");
+    }
+    connection
+        .execute_batch(
+            r#"
+            PRAGMA foreign_keys = OFF;
+            BEGIN IMMEDIATE;
+            DROP TABLE channel_delivery;
+            DROP TABLE channel_execution_console;
+
+            CREATE TABLE channel_delivery (
+                id TEXT PRIMARY KEY,
+                request_id TEXT REFERENCES channel_turn_request(id) ON DELETE CASCADE,
+                pending_binding_id TEXT REFERENCES pending_camp_binding(id) ON DELETE CASCADE,
+                dedupe_key TEXT NOT NULL UNIQUE,
+                delivery_kind TEXT NOT NULL CHECK(delivery_kind IN (
+                    'project_selection', 'queue_ack', 'agent_status',
+                    'agent_output', 'completion', 'attention'
+                )),
+                target_app_id TEXT NOT NULL,
+                source_agent_id TEXT,
+                source_camp_message_id TEXT REFERENCES camp_message(id),
+                payload_json TEXT NOT NULL,
+                status TEXT NOT NULL CHECK(status IN ('pending', 'attempting', 'sent', 'failed')),
+                attempt_count INTEGER NOT NULL DEFAULT 0 CHECK(attempt_count >= 0),
+                available_at TEXT NOT NULL,
+                lease_owner TEXT,
+                lease_expires_at TEXT,
+                external_delivery_message_id TEXT,
+                failure_code TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                ended_at TEXT,
+                CHECK(
+                    (request_id IS NOT NULL AND pending_binding_id IS NULL
+                        AND delivery_kind <> 'project_selection')
+                    OR (request_id IS NULL AND pending_binding_id IS NOT NULL
+                        AND delivery_kind = 'project_selection')
+                ),
+                CHECK(
+                    (status IN ('pending', 'attempting') AND ended_at IS NULL)
+                    OR (status IN ('sent', 'failed') AND ended_at IS NOT NULL)
+                ),
+                CHECK(
+                    (status = 'attempting' AND lease_owner IS NOT NULL
+                        AND lease_expires_at IS NOT NULL)
+                    OR (status <> 'attempting' AND lease_owner IS NULL
+                        AND lease_expires_at IS NULL)
+                )
+            );
+            CREATE INDEX channel_delivery_claim_idx
+                ON channel_delivery(status, available_at, created_at, id);
+            CREATE INDEX channel_delivery_request_idx
+                ON channel_delivery(request_id, status, delivery_kind, id)
+                WHERE request_id IS NOT NULL;
+            CREATE INDEX channel_delivery_pending_binding_idx
+                ON channel_delivery(pending_binding_id, status, delivery_kind, id)
+                WHERE pending_binding_id IS NOT NULL;
+
+            UPDATE rovai_data_contract
+            SET contract_version = 'v1.31', projection_schema_version = 72
+            WHERE singleton = 1;
+            DELETE FROM schema_migration WHERE version = 119;
+            COMMIT;
+            PRAGMA foreign_keys = ON;
+            "#,
+        )
+        .unwrap();
+}
+
+#[cfg(test)]
+fn downgrade_current_schema_to_v117_source_for_test(connection: &Connection) {
+    downgrade_current_schema_to_v118_source_for_test(connection);
+    let has_v118: bool = connection
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM schema_migration WHERE version = 118)",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    if !has_v118 {
+        return;
+    }
+    for table in [
+        "pending_camp_message",
+        "pending_camp_binding",
+        "channel_delivery",
+        "channel_turn_request",
+        "channel_conversation_binding",
+    ] {
+        let count: i64 = connection
+            .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(count, 0, "test downgrade requires empty {table}");
+    }
+    connection
+        .execute_batch(
+            r#"
+            PRAGMA foreign_keys = OFF;
+            BEGIN IMMEDIATE;
+            DROP TABLE channel_delivery;
+            DROP TABLE channel_turn_request;
+            DROP TABLE pending_camp_message;
+            DROP TABLE pending_camp_binding;
+            DROP TABLE channel_conversation_binding;
+            DROP TABLE feishu_owner_app_identity;
+            DROP TABLE feishu_owner_identity;
+
+            CREATE TABLE project_binding (
+                id TEXT PRIMARY KEY,
+                display_name TEXT NOT NULL CHECK(length(trim(display_name)) > 0),
+                binding_kind TEXT NOT NULL CHECK(binding_kind IN ('quick_chat', 'directory')),
+                canonical_path TEXT NOT NULL CHECK(length(trim(canonical_path)) > 0),
+                status TEXT NOT NULL CHECK(status IN ('active', 'archived')),
+                version INTEGER NOT NULL DEFAULT 1 CHECK(version >= 1),
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                archived_at TEXT,
+                UNIQUE(canonical_path),
+                CHECK(
+                    (status = 'active' AND archived_at IS NULL)
+                    OR (status = 'archived' AND archived_at IS NOT NULL)
+                )
+            );
+            CREATE INDEX project_binding_status_idx
+                ON project_binding(status, updated_at DESC, id);
+            INSERT INTO project_binding(
+                id, display_name, binding_kind, canonical_path, status,
+                version, created_at, updated_at, archived_at
+            )
+            SELECT 'rvpb_' || lower(hex(randomblob(16))), display_name, 'directory',
+                   canonical_path,
+                   CASE status WHEN 'active' THEN 'active' ELSE 'archived' END,
+                   version, created_at, updated_at,
+                   CASE status WHEN 'active' THEN NULL ELSE updated_at END
+            FROM project_catalog_item;
+            DROP TABLE project_catalog_item;
+
+            CREATE TABLE channel_conversation_binding (
+                id TEXT PRIMARY KEY,
+                channel_conversation_id TEXT NOT NULL UNIQUE
+                    REFERENCES channel_conversation(id) ON DELETE CASCADE,
+                project_binding_id TEXT NOT NULL REFERENCES project_binding(id),
+                camp_id TEXT UNIQUE REFERENCES camp(id),
+                status TEXT NOT NULL CHECK(status = 'active'),
+                version INTEGER NOT NULL DEFAULT 1 CHECK(version >= 1),
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            CREATE INDEX channel_conversation_binding_project_idx
+                ON channel_conversation_binding(project_binding_id, updated_at DESC, id);
+
+            CREATE TABLE channel_turn_request (
+                id TEXT PRIMARY KEY,
+                binding_id TEXT NOT NULL REFERENCES channel_conversation_binding(id),
+                aggregate_id TEXT NOT NULL UNIQUE
+                    REFERENCES channel_inbound_aggregate(id) ON DELETE CASCADE,
+                external_principal_id TEXT NOT NULL REFERENCES external_principal(id),
+                ack_app_id TEXT NOT NULL,
+                structured_content_json TEXT NOT NULL,
+                addressed_agent_ids_json TEXT NOT NULL,
+                status TEXT NOT NULL CHECK(status IN ('queued', 'admitted', 'completed', 'failed')),
+                queue_position INTEGER NOT NULL CHECK(queue_position >= 0),
+                camp_id TEXT REFERENCES camp(id),
+                camp_message_id TEXT UNIQUE REFERENCES camp_message(id),
+                camp_turn_id TEXT UNIQUE REFERENCES camp_turn(id),
+                trigger_camp_sequence INTEGER,
+                failure_code TEXT,
+                version INTEGER NOT NULL DEFAULT 1 CHECK(version >= 1),
+                created_at TEXT NOT NULL,
+                admitted_at TEXT,
+                completed_at TEXT,
+                updated_at TEXT NOT NULL,
+                CHECK(
+                    (status = 'queued' AND admitted_at IS NULL AND completed_at IS NULL
+                        AND camp_message_id IS NULL AND camp_turn_id IS NULL)
+                    OR (status = 'admitted' AND admitted_at IS NOT NULL AND completed_at IS NULL
+                        AND camp_message_id IS NOT NULL AND camp_turn_id IS NOT NULL)
+                    OR (status IN ('completed', 'failed') AND completed_at IS NOT NULL)
+                )
+            );
+            CREATE UNIQUE INDEX channel_turn_request_active_binding_idx
+                ON channel_turn_request(binding_id) WHERE status = 'admitted';
+            CREATE INDEX channel_turn_request_queue_idx
+                ON channel_turn_request(binding_id, status, queue_position, created_at, id);
+
+            CREATE TABLE channel_delivery (
+                id TEXT PRIMARY KEY,
+                request_id TEXT NOT NULL REFERENCES channel_turn_request(id) ON DELETE CASCADE,
+                dedupe_key TEXT NOT NULL UNIQUE,
+                delivery_kind TEXT NOT NULL CHECK(delivery_kind IN (
+                    'queue_ack', 'agent_status', 'agent_output', 'completion', 'attention'
+                )),
+                target_app_id TEXT NOT NULL,
+                source_agent_id TEXT,
+                source_camp_message_id TEXT REFERENCES camp_message(id),
+                payload_json TEXT NOT NULL,
+                status TEXT NOT NULL CHECK(status IN ('pending', 'attempting', 'sent', 'failed')),
+                attempt_count INTEGER NOT NULL DEFAULT 0 CHECK(attempt_count >= 0),
+                available_at TEXT NOT NULL,
+                lease_owner TEXT,
+                lease_expires_at TEXT,
+                external_delivery_message_id TEXT,
+                failure_code TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                ended_at TEXT,
+                CHECK(
+                    (status IN ('pending', 'attempting') AND ended_at IS NULL)
+                    OR (status IN ('sent', 'failed') AND ended_at IS NOT NULL)
+                ),
+                CHECK(
+                    (status = 'attempting' AND lease_owner IS NOT NULL AND lease_expires_at IS NOT NULL)
+                    OR (status <> 'attempting' AND lease_owner IS NULL AND lease_expires_at IS NULL)
+                )
+            );
+            CREATE INDEX channel_delivery_claim_idx
+                ON channel_delivery(status, available_at, created_at, id);
+            CREATE INDEX channel_delivery_request_idx
+                ON channel_delivery(request_id, status, delivery_kind, id);
+
+            UPDATE rovai_data_contract
+            SET contract_version = 'v1.30', projection_schema_version = 71,
+                reset_reason = NULL, updated_at = datetime('now')
+            WHERE singleton = 1;
+            DELETE FROM schema_migration WHERE version = 118;
+            COMMIT;
+            PRAGMA foreign_keys = ON;
+            "#,
         )
         .unwrap();
 }
 
 #[cfg(test)]
 pub(crate) fn downgrade_current_schema_to_v115_source_for_test(connection: &Connection) {
-    downgrade_current_schema_to_v116_source_for_test(connection);
+    downgrade_current_schema_to_v117_source_for_test(connection);
     let has_v116: bool = connection
         .query_row(
             "SELECT EXISTS(SELECT 1 FROM schema_migration WHERE version = 116)",
@@ -21836,16 +25773,236 @@ pub(crate) fn downgrade_current_schema_to_v115_source_for_test(connection: &Conn
         return;
     }
     connection
+        .execute_batch("PRAGMA foreign_keys = OFF;")
+        .unwrap();
+
+    let current_message_schema: String = connection
+        .query_row(
+            "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'camp_message'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    let renamed_message_schema = if current_message_schema.contains("CREATE TABLE \"camp_message\"")
+    {
+        current_message_schema.replacen(
+            "CREATE TABLE \"camp_message\"",
+            "CREATE TABLE camp_message_v111_source",
+            1,
+        )
+    } else {
+        current_message_schema.replacen(
+            "CREATE TABLE camp_message",
+            "CREATE TABLE camp_message_v111_source",
+            1,
+        )
+    };
+    let message_schema = renamed_message_schema
+        .replace(
+            "REFERENCES camp_message(id)",
+            "REFERENCES camp_message_v111_source(id)",
+        )
+        .replacen(
+            "CHECK(author_type IN ('user', 'agent', 'system', 'external_principal'))",
+            "CHECK(author_type IN ('user', 'agent', 'system'))",
+            1,
+        );
+    let message_columns = table_columns(connection, "camp_message")
+        .unwrap()
+        .into_iter()
+        .map(|column| format!("\"{}\"", column.replace('"', "\"\"")))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let message_dependent_schema = connection
+        .prepare(
+            r#"
+            SELECT sql FROM sqlite_master
+            WHERE tbl_name = 'camp_message'
+              AND type IN ('index', 'trigger') AND sql IS NOT NULL
+            ORDER BY CASE type WHEN 'index' THEN 0 ELSE 1 END, name
+            "#,
+        )
+        .unwrap()
+        .query_map([], |row| row.get::<_, String>(0))
+        .unwrap()
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .unwrap();
+    connection.execute_batch(&message_schema).unwrap();
+    connection
+        .execute_batch(&format!(
+            "INSERT INTO camp_message_v111_source({message_columns}) \
+             SELECT {message_columns} FROM camp_message \
+             WHERE author_type <> 'external_principal';\n\
+             DROP TABLE camp_message;\n\
+             ALTER TABLE camp_message_v111_source RENAME TO camp_message;"
+        ))
+        .unwrap();
+    for schema in message_dependent_schema {
+        connection.execute_batch(&schema).unwrap();
+    }
+
+    let current_manifest_schema: String = connection
+        .query_row(
+            "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'context_manifest'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    let renamed_manifest_schema =
+        if current_manifest_schema.contains("CREATE TABLE \"context_manifest\"") {
+            current_manifest_schema.replacen(
+                "CREATE TABLE \"context_manifest\"",
+                "CREATE TABLE context_manifest_v111_source",
+                1,
+            )
+        } else {
+            current_manifest_schema.replacen(
+                "CREATE TABLE context_manifest",
+                "CREATE TABLE context_manifest_v111_source",
+                1,
+            )
+        };
+    let mut manifest_schema = renamed_manifest_schema
+        .replacen(
+            "CHECK(formatter_version IN (20, 21, 22))",
+            "CHECK(formatter_version IN (20, 21))",
+            1,
+        )
+        .replacen(
+            "CHECK(context_manifest_version IN (19, 20, 21, 22))",
+            "CHECK(context_manifest_version IN (19, 20, 21))",
+            1,
+        );
+    let pairing_start = manifest_schema
+        .find("                    CHECK(\n                        (context_manifest_version = 19")
+        .unwrap();
+    let pairing_end = manifest_schema[pairing_start..]
+        .find(
+            "                    CHECK(\n                        previous_accepted_public_boundary_sequence",
+        )
+        .map(|offset| pairing_start + offset)
+        .unwrap();
+    manifest_schema.replace_range(
+        pairing_start..pairing_end,
+        r#"                    CHECK(
+                        (context_manifest_version = 19
+                         AND formatter_version = 20
+                         AND run_facts_schema_version = 1
+                         AND camp_attachment_view_receipt_version IS NULL
+                         AND camp_attachment_view_receipt_json IS NULL
+                         AND camp_attachment_view_receipt_digest IS NULL)
+                        OR
+                        (context_manifest_version = 20
+                         AND formatter_version = 21
+                         AND run_facts_schema_version = 2
+                         AND camp_attachment_view_receipt_version = 1
+                         AND camp_attachment_view_receipt_json IS NOT NULL
+                         AND camp_attachment_view_receipt_digest IS NOT NULL)
+                        OR
+                        (context_manifest_version = 21
+                         AND formatter_version = 21
+                         AND run_facts_schema_version = 2
+                         AND camp_attachment_view_receipt_version = 2
+                         AND camp_attachment_view_receipt_json IS NOT NULL
+                         AND camp_attachment_view_receipt_digest IS NOT NULL)
+                    ),
+"#,
+    );
+    let manifest_columns = table_columns(connection, "context_manifest")
+        .unwrap()
+        .into_iter()
+        .map(|column| format!("\"{}\"", column.replace('"', "\"\"")))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let manifest_dependent_schema = connection
+        .prepare(
+            r#"
+            SELECT sql FROM sqlite_master
+            WHERE tbl_name = 'context_manifest'
+              AND type IN ('index', 'trigger') AND sql IS NOT NULL
+            ORDER BY CASE type WHEN 'index' THEN 0 ELSE 1 END, name
+            "#,
+        )
+        .unwrap()
+        .query_map([], |row| row.get::<_, String>(0))
+        .unwrap()
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .unwrap();
+    connection
         .execute_batch(
             r#"
+            DROP TRIGGER context_manifest_v22_only_insert;
+            DROP TRIGGER IF EXISTS context_manifest_version_immutable;
+            UPDATE context_manifest
+            SET context_manifest_version = 21, formatter_version = 21
+            WHERE context_manifest_version = 22;
+            "#,
+        )
+        .unwrap();
+    connection.execute_batch(&manifest_schema).unwrap();
+    connection
+        .execute_batch(&format!(
+            "INSERT INTO context_manifest_v111_source({manifest_columns}) \
+             SELECT {manifest_columns} FROM context_manifest;\n\
+             DROP TABLE context_manifest;\n\
+             ALTER TABLE context_manifest_v111_source RENAME TO context_manifest;"
+        ))
+        .unwrap();
+    for schema in manifest_dependent_schema {
+        let schema = schema
+            .replacen(
+                "context_manifest_v22_only_insert",
+                "context_manifest_v21_only_insert",
+                1,
+            )
+            .replacen(
+                "NEW.context_manifest_version <> 22",
+                "NEW.context_manifest_version <> 21",
+                1,
+            )
+            .replacen(
+                "new ContextManifest must use v22",
+                "new ContextManifest must use v21",
+                1,
+            );
+        connection.execute_batch(&schema).unwrap();
+    }
+
+    connection
+        .execute_batch(
+            r#"
+            DROP TABLE channel_delivery;
+            DROP TABLE channel_turn_request;
+            DROP TABLE channel_inbound_observation;
+            DROP TABLE channel_inbound_aggregate;
+            DROP TABLE external_group_bot_roster;
+            DROP TABLE external_group_bot_roster_state;
+            DROP TABLE feishu_member_bot_publication_intent;
+            DROP TABLE feishu_member_bot;
+            DROP TABLE feishu_account;
+            DROP TABLE channel_conversation_binding;
+            DROP TABLE channel_conversation;
+            DROP TABLE external_principal_app_identity;
+            DROP TABLE external_principal;
+            DROP TABLE project_binding;
             UPDATE rovai_data_contract
             SET contract_version = 'v1.28', projection_schema_version = 69,
                 classifier_version = 'activity-v1'
             WHERE singleton = 1;
             DELETE FROM schema_migration WHERE version = 116;
+            DELETE FROM schema_migration WHERE version = 117;
+            PRAGMA foreign_keys = ON;
             "#,
         )
         .unwrap();
+    assert_eq!(
+        connection
+            .query_row("SELECT COUNT(*) FROM pragma_foreign_key_check", [], |row| {
+                row.get::<_, i64>(0)
+            })
+            .unwrap(),
+        0
+    );
 }
 
 #[cfg(test)]
@@ -21956,6 +26113,79 @@ fn downgrade_current_schema_to_v112_source_for_test(connection: &Connection) {
                 ON planned_shutdown_cycle(requested_at, core_generation)
                 WHERE settled_at IS NULL;
             DELETE FROM schema_migration WHERE version = 113;
+            COMMIT;
+            "#,
+        )
+        .unwrap();
+}
+
+#[cfg(test)]
+fn downgrade_current_schema_to_legacy_feishu_collision_for_test(connection: &Connection) {
+    downgrade_current_schema_to_v117_source_for_test(connection);
+    connection
+        .execute_batch(
+            r#"
+            INSERT INTO feishu_account(
+                id, identity_digest, display_name, tenant_name, status,
+                created_at, updated_at, user_id_digest, tenant_id
+            ) VALUES (
+                'legacy-feishu-account', 'legacy-identity-digest', 'Legacy Owner',
+                'Legacy Tenant', 'disconnected', datetime('now'), datetime('now'),
+                'legacy-user-digest', 'legacy-tenant-id'
+            );
+
+            INSERT INTO feishu_member_bot(
+                agent_id, account_id, app_id, bot_display_name, credential_ref,
+                status, created_at, updated_at, published_at
+            ) VALUES (
+                'agent_1', 'legacy-feishu-account', 'cli_legacy_member_bot',
+                'Legacy Member Bot', 'legacy-member-bot-credential', 'published',
+                datetime('now'), datetime('now'), datetime('now')
+            );
+
+            INSERT INTO planned_shutdown_cycle(
+                core_generation, protocol_version, requested_at
+            ) VALUES ('legacy-pending-v2-generation', 2, datetime('now'));
+
+            BEGIN IMMEDIATE;
+            CREATE TABLE planned_shutdown_cycle_legacy_collision (
+                core_generation TEXT PRIMARY KEY
+                    CHECK(length(trim(core_generation)) > 0),
+                protocol_version INTEGER NOT NULL
+                    CHECK(protocol_version = 2),
+                requested_at TEXT NOT NULL,
+                settled_at TEXT,
+                fenced_agent_run_count INTEGER
+                    CHECK(fenced_agent_run_count IS NULL OR fenced_agent_run_count >= 0),
+                unsettled_effect_agent_run_count INTEGER
+                    CHECK(
+                        unsettled_effect_agent_run_count IS NULL
+                        OR unsettled_effect_agent_run_count >= 0
+                    ),
+                CHECK (
+                    (settled_at IS NULL
+                        AND fenced_agent_run_count IS NULL
+                        AND unsettled_effect_agent_run_count IS NULL)
+                    OR
+                    (settled_at IS NOT NULL
+                        AND fenced_agent_run_count IS NOT NULL
+                        AND unsettled_effect_agent_run_count IS NOT NULL)
+                )
+            );
+            INSERT INTO planned_shutdown_cycle_legacy_collision(
+                core_generation, protocol_version, requested_at, settled_at,
+                fenced_agent_run_count, unsettled_effect_agent_run_count
+            )
+            SELECT core_generation, protocol_version, requested_at, settled_at,
+                   fenced_agent_run_count, unsettled_effect_agent_run_count
+            FROM planned_shutdown_cycle;
+            DROP TABLE planned_shutdown_cycle;
+            ALTER TABLE planned_shutdown_cycle_legacy_collision
+                RENAME TO planned_shutdown_cycle;
+            CREATE INDEX planned_shutdown_cycle_pending_idx
+                ON planned_shutdown_cycle(requested_at, core_generation)
+                WHERE settled_at IS NULL;
+            DELETE FROM schema_migration WHERE version = 117;
             COMMIT;
             "#,
         )
@@ -22450,10 +26680,13 @@ pub(crate) fn downgrade_current_schema_to_v98_source_for_test(connection: &Conne
         )
         .unwrap();
     if has_v100 {
-        // v98 had neither semantic attachment receipts nor explicit ContextManifest
-        // versions. Preserve current v21 fixture rows long enough for the v98 table
-        // rebuild to strip those columns instead of letting the intermediate v99
-        // downgrade discard evidence that v99's schema cannot represent.
+        // First remove the current v112-only pairing so the preservation rewrite
+        // runs against the historical v111 schema. v98 had neither semantic
+        // attachment receipts nor explicit ContextManifest versions; preserve the
+        // fixture rows long enough for the v98 table rebuild to strip those columns
+        // instead of letting the intermediate v99 downgrade discard evidence that
+        // v99's schema cannot represent.
+        downgrade_current_schema_to_v111_source_for_test(connection);
         connection
             .execute_batch(
                 r#"
@@ -22734,6 +26967,176 @@ pub(crate) fn downgrade_current_schema_to_v98_source_for_test(connection: &Conne
 mod tests {
     use super::*;
 
+    #[test]
+    fn migration_foreign_key_checks_cover_inbound_dependents_not_unrelated_history() {
+        let mut connection = Connection::open_in_memory().unwrap();
+        connection
+            .execute_batch(
+                "PRAGMA foreign_keys = OFF;
+            CREATE TABLE parent(id INTEGER PRIMARY KEY);
+            CREATE TABLE child(parent_id INTEGER REFERENCES parent(id));
+            CREATE TABLE unrelated_parent(id INTEGER PRIMARY KEY);
+            CREATE TABLE unrelated_history(parent_id INTEGER REFERENCES unrelated_parent(id));
+            INSERT INTO parent VALUES (1);
+            INSERT INTO child VALUES (1);
+            INSERT INTO unrelated_history VALUES (99);",
+            )
+            .unwrap();
+        let transaction = connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .unwrap();
+        // A pre-existing, unrelated violation belongs to explicit diagnostics.
+        validate_migration_foreign_keys(&transaction, &["parent"]).unwrap();
+        transaction.execute("DELETE FROM parent", []).unwrap();
+        assert!(
+            validate_migration_foreign_keys(&transaction, &["parent"])
+                .unwrap_err()
+                .to_string()
+                .contains("child")
+        );
+        transaction.rollback().unwrap();
+        assert_eq!(
+            connection
+                .query_row("SELECT count(*) FROM parent", [], |row| row
+                    .get::<_, i64>(0))
+                .unwrap(),
+            1
+        );
+        let transaction = connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .unwrap();
+        transaction
+            .execute_batch("DELETE FROM child; DELETE FROM parent;")
+            .unwrap();
+        validate_migration_foreign_keys(&transaction, &["parent", "child"]).unwrap();
+        transaction.commit().unwrap();
+    }
+
+    #[test]
+    fn additive_migrations_commit_columns_and_receipt_in_one_transaction() {
+        // A minimal SQLite owner for the four previously non-atomic steps; no
+        // full workspace fixture is needed to prove DDL/receipt rollback.
+        for version in [72, 90, 96, 97] {
+            let connection = Connection::open_in_memory().unwrap();
+            connection.execute_batch("PRAGMA foreign_keys = ON;
+                CREATE TABLE schema_migration(version INTEGER PRIMARY KEY, applied_at TEXT);
+                CREATE TABLE rovai_data_contract(singleton INTEGER, contract_version TEXT, projection_schema_version INTEGER, reset_reason TEXT, updated_at TEXT);
+                INSERT INTO rovai_data_contract(singleton) VALUES (1);
+                CREATE TABLE agent_run(id TEXT PRIMARY KEY, runtime_reported_version TEXT, runtime_executable_fingerprint TEXT);
+                CREATE TABLE canonical_runtime_activity(id TEXT PRIMARY KEY);
+                CREATE TABLE skill_projection_observation(id TEXT PRIMARY KEY);").unwrap();
+            connection.execute_batch(&format!("CREATE TRIGGER reject_receipt BEFORE INSERT ON schema_migration WHEN NEW.version = {version} BEGIN SELECT RAISE(ABORT, 'injected receipt failure'); END;")).unwrap();
+            let mut database = Database {
+                connection,
+                path: PathBuf::from("unused-memory-fixture"),
+                runtime_camp_files_root: PathBuf::new(),
+                runtime_camp_files_root_identity_digest: String::new(),
+            };
+            let schema = |connection: &Connection| -> Vec<(String, String)> {
+                connection
+                    .prepare("SELECT name, COALESCE(sql, '') FROM sqlite_schema ORDER BY name")
+                    .unwrap()
+                    .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+                    .unwrap()
+                    .collect::<rusqlite::Result<_>>()
+                    .unwrap()
+            };
+            let before = schema(database.connection());
+            let run = |database: &mut Database| match version {
+                72 => database.migrate_runtime_drift_rebind_v72(),
+                90 => database.migrate_runtime_monitoring_v90(),
+                96 => database.migrate_agent_run_runtime_model_v96(),
+                97 => database.migrate_windows_skill_projection_operation_v97(),
+                _ => unreachable!(),
+            };
+            assert!(
+                run(&mut database)
+                    .unwrap_err()
+                    .to_string()
+                    .contains("injected receipt failure")
+            );
+            assert_eq!(
+                schema(database.connection()),
+                before,
+                "migration {version} leaked DDL before its receipt"
+            );
+            assert!(!database.schema_migration_applied(version).unwrap());
+            database
+                .connection()
+                .execute_batch("DROP TRIGGER reject_receipt")
+                .unwrap();
+            run(&mut database).unwrap();
+            assert!(database.schema_migration_applied(version).unwrap());
+        }
+    }
+
+    #[test]
+    fn admitted_migration_rechecks_contract_schema_and_exact_receipts_before_writing() {
+        use crate::{
+            core_data_dir_lock::CoreDataDirLease,
+            database_admission::{AdmissionAssessment, DatabaseAdmission},
+        };
+        for changed in ["contract", "projection", "classifier", "receipt", "schema"] {
+            let directory = std::env::temp_dir().join(format!(
+                "rovai-migration-source-revalidation-{}",
+                Uuid::new_v4()
+            ));
+            let database = crate::test_support::fresh_schema_database_fast_at(&directory);
+            downgrade_current_schema_to_v128_source_for_test(database.connection());
+            let runtime_root = database.runtime_camp_files_root().to_path_buf();
+            let runtime_identity = database
+                .runtime_camp_files_root_identity_digest()
+                .to_string();
+            drop(database);
+            let lease = CoreDataDirLease::acquire(&directory).unwrap();
+            let AdmissionAssessment::RequiresMigration(ticket) =
+                DatabaseAdmission::assess(&lease).unwrap()
+            else {
+                panic!("migration ticket required")
+            };
+            let mut open = ticket.into_migration().unwrap();
+            // Vary the admission evidence, not the file: this isolates the SQL
+            // recheck from the independent filesystem identity guard.
+            let MigrationAuthorityOpen::Upgrade {
+                source_contract,
+                source_receipts,
+                path,
+                ..
+            } = &mut open
+            else {
+                unreachable!()
+            };
+            match changed {
+                "contract" => source_contract.contract_version.push_str("-changed"),
+                "projection" => source_contract.projection_schema_version += 1,
+                "classifier" => source_contract.classifier_version.push_str("-changed"),
+                "receipt" => source_receipts
+                    .receipts
+                    .last_mut()
+                    .unwrap()
+                    .1
+                    .push_str("-changed"),
+                "schema" => source_receipts.schema_cookie += 1,
+                _ => unreachable!(),
+            }
+            let source = path.clone();
+            let before = std::fs::read(&source).unwrap();
+            let error = Database::migrate_admitted_authority(
+                &open,
+                &runtime_root,
+                &runtime_identity,
+                &mut |_, _| {},
+            )
+            .unwrap_err();
+            assert_eq!(error.code(), "authority_contract_changed", "{changed}");
+            assert!(!error.retryable());
+            assert_eq!(std::fs::read(source).unwrap(), before, "{changed}");
+            drop(open);
+            drop(lease);
+            std::fs::remove_dir_all(directory).unwrap();
+        }
+    }
+
     fn assert_schema_objects(
         connection: &Connection,
         object_type: &str,
@@ -22838,6 +27241,115 @@ mod tests {
             v117: version >= 117,
             v118: version >= 118,
             v119: version >= 119,
+            v120: version >= 120,
+            v121: version >= 121,
+            v122: version >= 122,
+            v123: version >= 123,
+            v124: version >= 124,
+            v125: version >= 125,
+            v126: version >= 126,
+            v127: version >= 127,
+            v128: version >= 128,
+            v129: version >= 129,
+            v130: version >= 130,
+            v131: version >= 131,
+            v132: version >= 132,
+            v133: version >= 133,
+        }
+    }
+
+    // This owner tests exact legacy-schema admission without a full Core fixture;
+    // in-place migration and retained business rows belong to authority_migration.
+    #[test]
+    fn main_camp_collision_rejects_lookalike_markers_and_partial_schemas() {
+        for source in [
+            MainCampMigrationSource::Pending,
+            MainCampMigrationSource::Fast,
+            MainCampMigrationSource::FastLifetime,
+        ] {
+            let connection = Connection::open_in_memory().unwrap();
+            connection.execute_batch(
+                "CREATE TABLE schema_migration(version INTEGER PRIMARY KEY, applied_at TEXT);
+                 CREATE TABLE rovai_data_contract(singleton INTEGER PRIMARY KEY, contract_version TEXT,
+                    projection_schema_version INTEGER, classifier_version TEXT);
+                 CREATE TABLE camp(id TEXT PRIMARY KEY);
+                 CREATE TABLE agent_profile(id TEXT PRIMARY KEY, selected_runtime_adapter_kind TEXT,
+                    default_runtime_installation_id TEXT, default_model_selection_json TEXT,
+                    default_permission_config_json TEXT);
+                 CREATE TABLE adapter_installation(id TEXT PRIMARY KEY, adapter_kind TEXT,
+                    executable_path TEXT, auth_scope TEXT);
+                 CREATE TABLE runtime_usage_run_summary(agent_run_id TEXT PRIMARY KEY);",
+            ).unwrap();
+            for version in 1..=source.last_migration() {
+                connection
+                    .execute(
+                        "INSERT INTO schema_migration VALUES (?1, 'kept-time')",
+                        [version],
+                    )
+                    .unwrap();
+            }
+            let marker = (
+                if source.has_fast() { "v1.34" } else { "v1.33" },
+                source.last_migration() - 46,
+            );
+            connection
+                .execute(
+                    "INSERT INTO rovai_data_contract VALUES (1, ?1, ?2, 'activity-v2')",
+                    params![marker.0, marker.1],
+                )
+                .unwrap();
+            for (_, schema) in PENDING_CAMP_SCHEMA_OBJECTS {
+                connection.execute_batch(schema).unwrap();
+            }
+            if source.has_fast() {
+                connection.execute_batch(
+                    "ALTER TABLE agent_profile ADD COLUMN runtime_binding_revision TEXT NOT NULL DEFAULT '';
+                     ALTER TABLE runtime_usage_run_summary ADD COLUMN observed_service_tier TEXT;",
+                ).unwrap();
+                for (_, schema) in CAMP_FAST_SCHEMA_OBJECTS {
+                    connection.execute_batch(schema).unwrap();
+                }
+            }
+            if source == MainCampMigrationSource::FastLifetime {
+                connection
+                    .execute_batch("DROP TRIGGER agent_profile_fast_revision_update;")
+                    .unwrap();
+                for (_, schema) in CAMP_FAST_LIFETIME_SCHEMA_OBJECTS {
+                    connection.execute_batch(schema).unwrap();
+                }
+            }
+            assert_eq!(
+                main_camp_migration_collision(&connection).unwrap(),
+                Some(source)
+            );
+            for mutation in [
+                "UPDATE rovai_data_contract SET projection_schema_version = 99",
+                "UPDATE rovai_data_contract SET classifier_version = 'activity-v1'",
+                "INSERT INTO schema_migration VALUES (126, 'unexpected-future')",
+                "DELETE FROM schema_migration WHERE version = 115",
+                "DELETE FROM schema_migration WHERE version = 117",
+                "CREATE TABLE feishu_account(id TEXT)",
+                "DROP TRIGGER IF EXISTS agent_profile_fast_model_update; CREATE TRIGGER agent_profile_fast_model_update AFTER UPDATE OF default_model_selection_json ON agent_profile BEGIN SELECT 1; END;",
+                "DROP INDEX pending_camp_input_queue_idx",
+                "DROP INDEX pending_camp_input_queue_idx; CREATE INDEX pending_camp_input_queue_idx ON pending_camp_input(camp_id)",
+            ] {
+                connection
+                    .execute_batch("SAVEPOINT admission_fixture")
+                    .unwrap();
+                connection.execute_batch(mutation).unwrap();
+                assert_eq!(
+                    main_camp_migration_collision(&connection).unwrap(),
+                    None,
+                    "{mutation}"
+                );
+                connection
+                    .execute_batch("ROLLBACK TO admission_fixture; RELEASE admission_fixture")
+                    .unwrap();
+            }
+            assert_eq!(
+                main_camp_migration_collision(&connection).unwrap(),
+                Some(source)
+            );
         }
     }
 
@@ -22848,25 +27360,103 @@ mod tests {
                 "current",
                 CURRENT_DATA_CONTRACT_VERSION,
                 CURRENT_PROJECTION_SCHEMA_VERSION,
+                133,
+            ),
+            (
+                "v1.42/schema-83 before local Runtime images",
+                V133_MIGRATION_SOURCE_DATA_CONTRACT_VERSION,
+                V133_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION,
+                132,
+            ),
+            (
+                "v1.41/schema-82 before Quick Chat project selection",
+                V132_MIGRATION_SOURCE_DATA_CONTRACT_VERSION,
+                V132_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION,
+                131,
+            ),
+            (
+                "v1.40/schema-81 after Fast lifetime correction but before seal",
+                V130_MIGRATION_SOURCE_DATA_CONTRACT_VERSION,
+                V130_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION,
+                130,
+            ),
+            (
+                "v1.40/schema-81 before Fast lifetime correction",
+                V130_MIGRATION_SOURCE_DATA_CONTRACT_VERSION,
+                V130_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION,
+                129,
+            ),
+            (
+                "v1.39/schema-80 before redundant evidence index removal",
+                V129_MIGRATION_SOURCE_DATA_CONTRACT_VERSION,
+                V129_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION,
+                128,
+            ),
+            (
+                "v1.38/schema-79 before the main/channel join",
+                V128_MIGRATION_SOURCE_DATA_CONTRACT_VERSION,
+                V128_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION,
+                125,
+            ),
+            (
+                "v1.37/schema-78 before immutable terminal snapshots",
+                V125_MIGRATION_SOURCE_DATA_CONTRACT_VERSION,
+                V125_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION,
+                124,
+            ),
+            (
+                "v1.36/schema-77 before SQLite channel storage",
+                V124_MIGRATION_SOURCE_DATA_CONTRACT_VERSION,
+                V124_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION,
+                123,
+            ),
+            (
+                "v1.35/schema-76 before direct DingTalk Open Platform",
+                V123_MIGRATION_SOURCE_DATA_CONTRACT_VERSION,
+                V123_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION,
+                122,
+            ),
+            (
+                "v1.34/schema-75 before DingTalk channel",
+                V122_MIGRATION_SOURCE_DATA_CONTRACT_VERSION,
+                V122_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION,
+                121,
+            ),
+            (
+                "v1.33/schema-74 after execution console view state",
+                V121_MIGRATION_SOURCE_DATA_CONTRACT_VERSION,
+                V121_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION,
+                120,
+            ),
+            (
+                "v1.32/schema-73 after Feishu execution console",
+                V120_MIGRATION_SOURCE_DATA_CONTRACT_VERSION,
+                V120_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION,
                 119,
             ),
             (
-                "v1.34/schema-72 before Fast lifetime correction",
+                "v1.31/schema-72 after Owner Camp binding",
                 V119_MIGRATION_SOURCE_DATA_CONTRACT_VERSION,
                 V119_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION,
                 118,
             ),
             (
-                "v1.33/schema-71 before Camp Fast",
+                "v1.30/schema-71 after Feishu developer session",
                 V118_MIGRATION_SOURCE_DATA_CONTRACT_VERSION,
                 V118_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION,
                 117,
             ),
             (
-                "v1.29/schema-70 before Pending Camp Input",
+                "v1.29/schema-70 after Feishu channel platform",
                 V117_MIGRATION_SOURCE_DATA_CONTRACT_VERSION,
                 V117_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION,
                 116,
+            ),
+            (
+                "v1.28/schema-69 after agent-run file changes",
+                V116_MIGRATION_SOURCE_DATA_CONTRACT_VERSION,
+                V116_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION,
+                115,
             ),
             (
                 "v1.26/schema-67 after Runtime diff projection",
@@ -22875,13 +27465,13 @@ mod tests {
                 114,
             ),
             (
-                "v1.25/schema-66 after planned shutdown v3",
+                "v1.25/schema-66 after planned shutdown protocol v3",
                 V114_MIGRATION_SOURCE_DATA_CONTRACT_VERSION,
                 V114_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION,
                 113,
             ),
             (
-                "v1.25/schema-66 after managed attachments",
+                "v1.25/schema-66 after managed attachment v2",
                 V114_MIGRATION_SOURCE_DATA_CONTRACT_VERSION,
                 V114_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION,
                 112,
@@ -23127,11 +27717,52 @@ mod tests {
             );
         }
 
-        let current = migration_state_through(119);
+        let current = migration_state_through(133);
         let v092_source = migration_state_through(91);
         let mut missing_intermediate = current;
         missing_intermediate.v84 = false;
+        let mut missing_index_migration = current;
+        missing_index_migration.v129 = false;
+        let mut missing_quick_chat_migration = current;
+        missing_quick_chat_migration.v132 = false;
+        let mut missing_image_migration = current;
+        missing_image_migration.v133 = false;
         let rejected = [
+            (
+                "current marker without Runtime image migration",
+                missing_image_migration,
+                CURRENT_DATA_CONTRACT_VERSION,
+                CURRENT_PROJECTION_SCHEMA_VERSION,
+                V116_CLASSIFIER_VERSION,
+            ),
+            (
+                "current marker without Quick Chat picker migration",
+                missing_quick_chat_migration,
+                CURRENT_DATA_CONTRACT_VERSION,
+                CURRENT_PROJECTION_SCHEMA_VERSION,
+                V116_CLASSIFIER_VERSION,
+            ),
+            (
+                "old picker marker with the new resolved constraint",
+                current,
+                V132_MIGRATION_SOURCE_DATA_CONTRACT_VERSION,
+                V132_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION,
+                V116_CLASSIFIER_VERSION,
+            ),
+            (
+                "current marker without index migration",
+                missing_index_migration,
+                CURRENT_DATA_CONTRACT_VERSION,
+                CURRENT_PROJECTION_SCHEMA_VERSION,
+                V116_CLASSIFIER_VERSION,
+            ),
+            (
+                "old joined marker with a newer index migration",
+                current,
+                V129_MIGRATION_SOURCE_DATA_CONTRACT_VERSION,
+                V129_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION,
+                V116_CLASSIFIER_VERSION,
+            ),
             (
                 "source contract with wrong schema",
                 v092_source,
@@ -23192,6 +27823,142 @@ mod tests {
     }
 
     #[test]
+    fn v129_removes_only_the_redundant_index_atomically_and_keeps_sequence_uniqueness() {
+        // Index/ledger compatibility is owned here with a minimal in-memory
+        // schema. The existing authority_migration test owns full copy/switch.
+        for has_constraint in [true, false] {
+            let connection = Connection::open_in_memory().unwrap();
+            connection.execute_batch(&format!(
+                "CREATE TABLE schema_migration(version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL);
+                 CREATE TABLE rovai_data_contract(singleton INTEGER PRIMARY KEY, contract_version TEXT,
+                    projection_schema_version INTEGER, classifier_version TEXT, updated_at TEXT);
+                 INSERT INTO rovai_data_contract VALUES (1, 'v1.39', 80, 'activity-v2', 'kept-time');
+                 CREATE TABLE agent_run_execution_evidence(id TEXT PRIMARY KEY, agent_run_id TEXT NOT NULL,
+                    sequence INTEGER NOT NULL, payload_preview_json TEXT NOT NULL{});
+                 CREATE INDEX agent_run_execution_evidence_run_sequence_idx
+                    ON agent_run_execution_evidence(agent_run_id, sequence);
+                 INSERT INTO agent_run_execution_evidence VALUES
+                    ('e1', 'run-a', 1, 'first'), ('e2', 'run-a', 2, 'second'), ('e3', 'run-b', 1, 'other');",
+                if has_constraint { ", UNIQUE(agent_run_id, sequence)" } else { "" },
+            )).unwrap();
+            for version in 1..=128 {
+                connection
+                    .execute(
+                        "INSERT INTO schema_migration VALUES (?1, 'kept-time')",
+                        [version],
+                    )
+                    .unwrap();
+            }
+            let mut database = Database {
+                connection,
+                path: PathBuf::new(),
+                runtime_camp_files_root: PathBuf::new(),
+                runtime_camp_files_root_identity_digest: String::new(),
+            };
+            let redundant_index_exists = |database: &Database| -> bool {
+                database
+                    .connection()
+                    .query_row(
+                        "SELECT EXISTS(SELECT 1 FROM sqlite_schema WHERE type = 'index'
+                        AND name = 'agent_run_execution_evidence_run_sequence_idx')",
+                        [],
+                        |row| row.get(0),
+                    )
+                    .unwrap()
+            };
+            if !has_constraint {
+                let error = database
+                    .migrate_execution_evidence_index_v129()
+                    .unwrap_err();
+                assert!(error.to_string().contains("sequence constraint"));
+                assert!(redundant_index_exists(&database));
+                assert!(
+                    !load_current_migration_state(database.connection())
+                        .unwrap()
+                        .v129
+                );
+                continue;
+            }
+            database.connection().execute_batch(
+                "CREATE TEMP TRIGGER fail_index_migration BEFORE INSERT ON schema_migration
+                 WHEN NEW.version = 129 BEGIN SELECT RAISE(ABORT, 'fixture migration failure'); END;",
+            ).unwrap();
+            assert!(database.migrate_execution_evidence_index_v129().is_err());
+            assert!(
+                redundant_index_exists(&database),
+                "a failed migration must restore the dropped index"
+            );
+            assert_eq!(
+                database
+                    .connection()
+                    .query_row(
+                        "SELECT contract_version FROM rovai_data_contract",
+                        [],
+                        |row| row.get::<_, String>(0),
+                    )
+                    .unwrap(),
+                "v1.39"
+            );
+            assert!(
+                !load_current_migration_state(database.connection())
+                    .unwrap()
+                    .v129
+            );
+            database
+                .connection()
+                .execute_batch("DROP TRIGGER fail_index_migration")
+                .unwrap();
+            database.migrate_execution_evidence_index_v129().unwrap();
+            assert!(!redundant_index_exists(&database));
+            assert!(
+                load_current_migration_state(database.connection())
+                    .unwrap()
+                    .v129
+            );
+            assert_eq!(database.connection().query_row(
+                "SELECT contract_version, projection_schema_version FROM rovai_data_contract", [],
+                |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)),
+            ).unwrap(), (V130_MIGRATION_SOURCE_DATA_CONTRACT_VERSION.to_string(), V130_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION));
+            let rows = database.connection().prepare(
+                "SELECT id, payload_preview_json FROM agent_run_execution_evidence ORDER BY agent_run_id, sequence",
+            ).unwrap().query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)))
+                .unwrap().collect::<rusqlite::Result<Vec<_>>>().unwrap();
+            assert_eq!(
+                rows,
+                [
+                    ("e1".to_string(), "first".to_string()),
+                    ("e2".to_string(), "second".to_string()),
+                    ("e3".to_string(), "other".to_string())
+                ]
+            );
+            let duplicate = database.connection().execute(
+                "INSERT INTO agent_run_execution_evidence VALUES ('duplicate', 'run-a', 1, 'must reject')", [],
+            ).unwrap_err();
+            assert_eq!(
+                duplicate.sqlite_error_code(),
+                Some(rusqlite::ErrorCode::ConstraintViolation)
+            );
+            let plan = database
+                .connection()
+                .prepare(
+                    "EXPLAIN QUERY PLAN SELECT id, sequence FROM agent_run_execution_evidence
+                 WHERE agent_run_id = 'run-a' AND sequence > 0 ORDER BY sequence LIMIT 50",
+                )
+                .unwrap()
+                .query_map([], |row| row.get::<_, String>(3))
+                .unwrap()
+                .collect::<rusqlite::Result<Vec<_>>>()
+                .unwrap()
+                .join("\n");
+            assert!(
+                plan.contains("USING INDEX sqlite_autoindex_agent_run_execution_evidence_"),
+                "{plan}"
+            );
+            assert!(!plan.contains("TEMP B-TREE"), "{plan}");
+        }
+    }
+
+    #[test]
     fn database_contract_preflight_admits_current_and_rejects_future_store() {
         let directory =
             std::env::temp_dir().join(format!("rovai-current-contract-smoke-{}", Uuid::new_v4()));
@@ -23207,7 +27974,7 @@ mod tests {
             )
             .expect("current contract marker should load");
 
-        assert_eq!(state, migration_state_through(119));
+        assert_eq!(state, migration_state_through(133));
         assert!(state.admits(&contract, schema, &classifier));
         assert!(has_admissible_data_contract(
             &directory.join("rovai.sqlite")
@@ -23496,7 +28263,7 @@ mod tests {
                 |row| row.get(0),
             )
             .unwrap();
-        assert!(manifest_schema.contains("CHECK(formatter_version IN (20, 21))"));
+        assert!(manifest_schema.contains("CHECK(formatter_version IN (20, 21, 22))"));
         let conversation: (Option<String>, Option<String>, i64, i64) = reopened
             .connection()
             .query_row(
@@ -23821,7 +28588,7 @@ mod tests {
                 |row| row.get(0),
             )
             .unwrap();
-        assert!(manifest_schema.contains("CHECK(formatter_version IN (20, 21))"));
+        assert!(manifest_schema.contains("CHECK(formatter_version IN (20, 21, 22))"));
         assert!(manifest_schema.contains("CHECK(context_delivery_profile_version = 4)"));
         assert!(!manifest_schema.contains("CHECK(context_delivery_profile_version = 3)"));
         let run: (String, Option<String>) = reopened
@@ -24936,7 +29703,7 @@ mod tests {
     fn v107_adds_grok_catalog_and_preserves_runtime_and_skill_rows() {
         let directory = std::env::temp_dir().join(format!("rovai-db-v107-test-{}", Uuid::new_v4()));
         let mut database = crate::test_support::fresh_schema_database_fast_at(&directory);
-        downgrade_current_schema_to_v119_source_for_test(database.connection());
+        downgrade_current_schema_to_v129_source_for_test(database.connection());
 
         fn restore_v106_closed_set(
             connection: &rusqlite::Connection,
@@ -25302,18 +30069,18 @@ mod tests {
             INSERT INTO camp_composer_draft(camp_id, body, structured_content_json, revision, created_at, updated_at, expires_at)
             VALUES ('camp-pending-migration', 'keep draft', '[{"kind":"text","text":"keep draft"}]', 7, datetime('now'), datetime('now'), datetime('now', '+1 day'));
         "#).unwrap();
-        downgrade_current_schema_to_v116_source_for_test(database.connection());
+        downgrade_current_schema_to_v125_source_for_test(database.connection());
         assert!(matches!(
             classify_database_contract(database.connection()).unwrap(),
             DatabaseContractClassification::SupportedMigrationSource(_)
         ));
-        database.migrate_pending_camp_inputs_v117().unwrap();
+        database.migrate_pending_camp_inputs_v126().unwrap();
         assert!(
             load_current_migration_state(database.connection())
                 .unwrap()
                 .admits(
-                    V118_MIGRATION_SOURCE_DATA_CONTRACT_VERSION,
-                    V118_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION,
+                    V128_MIGRATION_SOURCE_DATA_CONTRACT_VERSION,
+                    V128_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION,
                     V116_CLASSIFIER_VERSION,
                 )
         );
@@ -25326,7 +30093,7 @@ mod tests {
             reopened
                 .connection()
                 .query_row(
-                    "SELECT COUNT(*) FROM schema_migration WHERE version = 117",
+                    "SELECT COUNT(*) FROM schema_migration WHERE version = 126",
                     [],
                     |row| row.get::<_, i64>(0)
                 )
@@ -25347,9 +30114,9 @@ mod tests {
     }
 
     #[test]
-    fn v119_preserves_all_fast_choices_and_replaces_legacy_invalidation() {
+    fn v130_preserves_all_fast_choices_and_replaces_legacy_invalidation() {
         let (mut database, directory) = crate::test_support::seeded_runtime_database();
-        downgrade_current_schema_to_v119_source_for_test(database.connection());
+        downgrade_current_schema_to_v129_source_for_test(database.connection());
         assert!(matches!(
             classify_database_contract(database.connection()).unwrap(),
             DatabaseContractClassification::SupportedMigrationSource(_)
@@ -25377,6 +30144,31 @@ mod tests {
                 params![camp_id, revision, preference],
             ).unwrap();
         }
+        // Main's original migration owner is retained under the channel receipt.
+        // A failed correction cannot invalidate saved choices/caches, replace the
+        // old trigger, or allow the contract seal to advance independently.
+        assert!(database.migrate_fast_lifetime_contract_v131().is_err());
+        database
+            .connection()
+            .execute_batch(
+                "CREATE TEMP TRIGGER fail_fast_lifetime BEFORE INSERT ON schema_migration
+             WHEN NEW.version = 130 BEGIN SELECT RAISE(ABORT, 'fixture lifetime failure'); END;",
+            )
+            .unwrap();
+        assert!(database.migrate_fast_preference_lifetime_v130().is_err());
+        assert!(!database.schema_migration_applied(130).unwrap());
+        assert!(
+            pending_fast_schema_matches(database.connection(), MainCampMigrationSource::Fast)
+                .unwrap()
+        );
+        assert_eq!(database.connection().query_row(
+            "SELECT count(*) FROM camp_member_fast_preference WHERE eligible = 1 AND runtime_default_fast = 1",
+            [], |row| row.get::<_, i64>(0),
+        ).unwrap(), 3);
+        database
+            .connection()
+            .execute_batch("DROP TRIGGER fail_fast_lifetime;")
+            .unwrap();
         database.migrate(false).unwrap();
         assert!(connection_has_current_data_contract(database.connection()).unwrap());
         let saved_choices = |database: &Database| -> Vec<Option<bool>> {
@@ -25434,7 +30226,7 @@ mod tests {
         let migrations: i64 = reopened
             .connection()
             .query_row(
-                "SELECT count(*) FROM schema_migration WHERE version = 119",
+                "SELECT count(*) FROM schema_migration WHERE version = 130",
                 [],
                 |row| row.get(0),
             )
@@ -25446,7 +30238,7 @@ mod tests {
     }
 
     #[test]
-    fn v118_preserves_saved_bindings_and_introduces_no_fast_override() {
+    fn v127_preserves_saved_bindings_and_introduces_no_fast_override() {
         let mut database = crate::test_support::seeded_runtime_database_owned();
         let before: String = database
             .connection()
@@ -25456,14 +30248,79 @@ mod tests {
                 |row| row.get(0),
             )
             .unwrap();
-        downgrade_current_schema_to_v118_source_for_test(database.connection());
+        downgrade_current_schema_to_v126_source_for_test(database.connection());
         assert!(
             load_current_migration_state(database.connection())
                 .unwrap()
-                .admits("v1.33", 71, V116_CLASSIFIER_VERSION)
+                .admits("v1.38", 79, V116_CLASSIFIER_VERSION)
         );
-        database.migrate_camp_member_fast_v118().unwrap();
-        database.migrate_fast_preference_lifetime_v119().unwrap();
+        database.migrate_camp_member_fast_v127().unwrap();
+        // The seal must not accept a receipt with a missing critical object;
+        // this is a metadata check, not a scan of Camp or execution history.
+        database
+            .connection()
+            .execute_batch("DROP INDEX pending_camp_input_queue_idx")
+            .unwrap();
+        assert!(database.migrate_merged_channel_contract_v128().is_err());
+        assert!(!database.schema_migration_applied(128).unwrap());
+        database
+            .connection()
+            .execute_batch(PENDING_CAMP_SCHEMA_OBJECTS[1].1)
+            .unwrap();
+        database.migrate_merged_channel_contract_v128().unwrap();
+        database.migrate_execution_evidence_index_v129().unwrap();
+        database.migrate_fast_preference_lifetime_v130().unwrap();
+        database
+            .connection()
+            .execute_batch("DROP TRIGGER agent_profile_fast_model_update;")
+            .unwrap();
+        assert!(database.migrate_fast_lifetime_contract_v131().is_err());
+        assert!(!database.schema_migration_applied(131).unwrap());
+        database
+            .connection()
+            .execute_batch(CAMP_FAST_LIFETIME_SCHEMA_OBJECTS[1].1)
+            .unwrap();
+        database.migrate_fast_lifetime_contract_v131().unwrap();
+        database.migrate_pending_quick_chat_v132().unwrap();
+        // The additive image table, marker, and receipt must roll back together; reuse this source chain.
+        database.connection().execute_batch(
+            "CREATE TEMP TRIGGER reject_image_receipt BEFORE INSERT ON schema_migration
+             WHEN NEW.version = 133 BEGIN SELECT RAISE(ABORT, 'image receipt fixture failure'); END;"
+        ).unwrap();
+        assert!(
+            database
+                .migrate_runtime_images_v133()
+                .unwrap_err()
+                .to_string()
+                .contains("image receipt fixture failure")
+        );
+        assert!(!database.schema_migration_applied(133).unwrap());
+        let preceding: (String, i64) = database.connection().query_row(
+            "SELECT contract_version, projection_schema_version FROM rovai_data_contract WHERE singleton=1",
+            [], |row| Ok((row.get(0)?, row.get(1)?))
+        ).unwrap();
+        assert_eq!(
+            preceding,
+            (
+                V133_MIGRATION_SOURCE_DATA_CONTRACT_VERSION.to_owned(),
+                V133_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION
+            )
+        );
+        assert!(
+            !database
+                .connection()
+                .query_row(
+                    "SELECT EXISTS(SELECT 1 FROM sqlite_schema WHERE name='agent_run_image')",
+                    [],
+                    |row| row.get::<_, bool>(0)
+                )
+                .unwrap()
+        );
+        database
+            .connection()
+            .execute_batch("DROP TRIGGER reject_image_receipt")
+            .unwrap();
+        database.migrate_runtime_images_v133().unwrap();
         assert!(connection_has_current_data_contract(database.connection()).unwrap());
         let after: (String, String) = database.connection().query_row(
             "SELECT default_model_selection_json, runtime_binding_revision FROM agent_profile WHERE id = 'agent_1'", [], |row| Ok((row.get(0)?, row.get(1)?))).unwrap();
@@ -25499,29 +30356,78 @@ mod tests {
 
     #[test]
     fn v116_switches_new_activity_writes_without_reclassifying_history() {
-        let directory =
-            std::env::temp_dir().join(format!("rovai-db-v116-classifier-test-{}", Uuid::new_v4()));
-        let mut database = crate::test_support::fresh_schema_database_fast_at(&directory);
+        let (mut database, directory) = crate::test_support::seeded_runtime_database();
         downgrade_current_schema_to_v115_source_for_test(database.connection());
         database
             .connection()
             .execute_batch(
                 r#"
-                PRAGMA foreign_keys = OFF;
+                INSERT INTO camp(
+                    id, title, project_binding_kind, project_path,
+                    default_lead_agent_id, last_message_sequence,
+                    version, created_at, updated_at
+                ) VALUES (
+                    'camp-v116', 'V116 migration fixture', 'directory', '/tmp/rovai-v116',
+                    'agent_1', 0, 1,
+                    '2026-08-29T00:00:00Z', '2026-08-29T00:00:00Z'
+                );
+                INSERT INTO camp_member(
+                    camp_id, agent_id, status, capability_overrides_json,
+                    version, joined_at
+                ) VALUES (
+                    'camp-v116', 'agent_1', 'active', '{}', 1,
+                    '2026-08-29T00:00:00Z'
+                );
+                INSERT INTO conversation(
+                    id, camp_id, agent_id,
+                    summary_through_message_sequence, last_message_sequence,
+                    version, created_at, updated_at
+                ) VALUES (
+                    'conversation-v116', 'camp-v116', 'agent_1',
+                    0, 0, 1,
+                    '2026-08-29T00:00:00Z', '2026-08-29T00:00:00Z'
+                );
+                INSERT INTO camp_turn(
+                    id, camp_id, trigger_type, trigger_id, status,
+                    version, created_at, updated_at, ended_at
+                ) VALUES (
+                    'turn-v116', 'camp-v116', 'system_event',
+                    'trigger-v116', 'completed', 1,
+                    '2026-08-29T00:00:00Z', '2026-08-29T00:00:01Z',
+                    '2026-08-29T00:00:01Z'
+                );
+                INSERT INTO agent_run(
+                    id, camp_turn_id, conversation_id,
+                    initial_camp_context_through_sequence,
+                    initial_conversation_context_through_sequence,
+                    responsibility_key, responsibility_generation,
+                    start_reason, purpose, completion_role,
+                    effective_config_json, workspace_json, permission_semantics,
+                    status, idempotency_key, version,
+                    created_at, ended_at, updated_at
+                ) VALUES (
+                    'run-v116', 'turn-v116', 'conversation-v116',
+                    0, 0, 'fixture-v116', 0,
+                    'initial', 'preserve historical classifier', 'required',
+                    '{}', '{"executionRoot":"/tmp/rovai-v116","access":"write"}',
+                    'runtime_managed_v2', 'succeeded', 'fixture-v116', 1,
+                    '2026-08-29T00:00:00Z', '2026-08-29T00:00:01Z',
+                    '2026-08-29T00:00:01Z'
+                );
                 INSERT INTO canonical_runtime_activity(
                     agent_run_id, execution_epoch, operation_id, classifier_version,
                     activity_domain, semantic_kind, tool_name, presentation_hint,
                     phase, outcome, credibility, coverage_level, source_authority,
                     source_evidence_ids_json, first_evidence_sequence,
                     last_evidence_sequence, revision, created_at, updated_at
-                ) VALUES (
-                    'historical-run', 1, 'historical-operation', 'activity-v1',
+                )
+                SELECT id, execution_epoch, 'historical-operation', 'activity-v1',
                     'tool', 'tool.web.search', 'search', 'Web 搜索',
                     'terminal', 'succeeded', 'runtime_structured', 'fine_grained',
                     'runtime', '["historical-evidence"]', 1, 1, 1,
                     datetime('now'), datetime('now')
-                );
-                PRAGMA foreign_keys = ON;
+                FROM agent_run
+                WHERE id = 'run-v116';
                 "#,
             )
             .unwrap();
@@ -25553,8 +30459,79 @@ mod tests {
                 "Web 搜索".to_string()
             )
         );
+        assert!(connection_has_admissible_data_contract(database.connection()).unwrap());
 
         drop(database);
+        let reopened = Database::open_with_data_contract_enforcement(&directory, true)
+            .expect("the main-only v116 classifier store should gain the channel platform");
+        assert!(connection_has_current_data_contract(reopened.connection()).unwrap());
+        assert_schema_objects(
+            reopened.connection(),
+            "table",
+            &["project_catalog_item", "feishu_account", "dingtalk_account"],
+            true,
+        );
+        assert_eq!(
+            reopened
+                .connection()
+                .query_row(
+                    "SELECT classifier_version FROM canonical_runtime_activity WHERE operation_id = 'historical-operation'",
+                    [],
+                    |row| row.get::<_, String>(0),
+                )
+                .unwrap(),
+            V043_CLASSIFIER_VERSION
+        );
+
+        drop(reopened);
+        std::fs::remove_dir_all(directory).expect("temporary database should be removable");
+    }
+
+    #[test]
+    fn v116_collision_repairs_channel_store_classifier_without_downgrading_contract() {
+        let directory = std::env::temp_dir().join(format!(
+            "rovai-db-v116-channel-classifier-repair-{}",
+            Uuid::new_v4()
+        ));
+        let database = crate::test_support::fresh_schema_database_fast_at(&directory);
+        database
+            .connection()
+            .execute(
+                "UPDATE rovai_data_contract SET classifier_version = ?1 WHERE singleton = 1",
+                [V043_CLASSIFIER_VERSION],
+            )
+            .unwrap();
+        assert!(connection_has_admissible_data_contract(database.connection()).unwrap());
+        drop(database);
+
+        let reopened = Database::open_with_data_contract_enforcement(&directory, true)
+            .expect("the channel-first v116 store should gain the runtime classifier");
+        assert_eq!(
+            reopened
+                .connection()
+                .query_row(
+                    r#"
+                    SELECT contract_version, projection_schema_version, classifier_version
+                    FROM rovai_data_contract WHERE singleton = 1
+                    "#,
+                    [],
+                    |row| {
+                        Ok((
+                            row.get::<_, String>(0)?,
+                            row.get::<_, i64>(1)?,
+                            row.get::<_, String>(2)?,
+                        ))
+                    },
+                )
+                .unwrap(),
+            (
+                CURRENT_DATA_CONTRACT_VERSION.to_string(),
+                CURRENT_PROJECTION_SCHEMA_VERSION,
+                V116_CLASSIFIER_VERSION.to_string(),
+            )
+        );
+        assert!(!directory.join("inactive-data-quarantine").exists());
+        drop(reopened);
         std::fs::remove_dir_all(directory).expect("temporary database should be removable");
     }
 
@@ -25852,7 +30829,7 @@ mod tests {
                 CURRENT_PROJECTION_SCHEMA_VERSION,
                 1,
                 1,
-                0
+                0,
             )
         );
         assert_table_columns(upgraded.connection(), "camp", &["attachment_revision"], &[]);
@@ -25889,10 +30866,793 @@ mod tests {
             (
                 CURRENT_DATA_CONTRACT_VERSION.to_string(),
                 CURRENT_PROJECTION_SCHEMA_VERSION,
-                1
+                1,
             )
         );
         drop(restarted);
+        std::fs::remove_dir_all(directory).expect("temporary database should be removable");
+    }
+
+    #[test]
+    fn v119_upgrades_v112_preserves_evidence_and_installs_channel_contracts() {
+        let (database, directory) = crate::test_support::seeded_runtime_database();
+        downgrade_current_schema_to_v112_source_for_test(database.connection());
+        let source_counts: (i64, i64) = database
+            .connection()
+            .query_row(
+                r#"
+                SELECT
+                    (SELECT COUNT(*) FROM camp_message),
+                    (SELECT COUNT(*) FROM context_manifest)
+                "#,
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(
+            database
+                .connection()
+                .query_row(
+                    r#"
+                    SELECT contract_version, projection_schema_version,
+                           (SELECT COUNT(*) FROM schema_migration WHERE version BETWEEN 113 AND 118)
+                    FROM rovai_data_contract WHERE singleton = 1
+                    "#,
+                    [],
+                    |row| Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, i64>(1)?,
+                        row.get::<_, i64>(2)?,
+                    )),
+                )
+                .unwrap(),
+            ("v1.25".to_string(), 66, 0)
+        );
+        drop(database);
+
+        let upgraded = Database::open(&directory).expect("v112 source should migrate to v118");
+        assert_eq!(
+            upgraded
+                .connection()
+                .query_row(
+                    r#"
+                    SELECT contract_version, projection_schema_version,
+                           (SELECT COUNT(*) FROM schema_migration WHERE version = 113),
+                           (SELECT COUNT(*) FROM schema_migration WHERE version = 114),
+                           (SELECT COUNT(*) FROM schema_migration WHERE version = 115),
+                           (SELECT COUNT(*) FROM schema_migration WHERE version = 116),
+                           (SELECT COUNT(*) FROM schema_migration WHERE version = 117),
+                           (SELECT COUNT(*) FROM schema_migration WHERE version = 118),
+                           (SELECT COUNT(*) FROM schema_migration WHERE version = 119),
+                           (SELECT COUNT(*) FROM pragma_foreign_key_check)
+                    FROM rovai_data_contract WHERE singleton = 1
+                    "#,
+                    [],
+                    |row| Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, i64>(1)?,
+                        row.get::<_, i64>(2)?,
+                        row.get::<_, i64>(3)?,
+                        row.get::<_, i64>(4)?,
+                        row.get::<_, i64>(5)?,
+                        row.get::<_, i64>(6)?,
+                        row.get::<_, i64>(7)?,
+                        row.get::<_, i64>(8)?,
+                        row.get::<_, i64>(9)?,
+                    )),
+                )
+                .unwrap(),
+            (
+                CURRENT_DATA_CONTRACT_VERSION.to_string(),
+                CURRENT_PROJECTION_SCHEMA_VERSION,
+                1,
+                1,
+                1,
+                1,
+                1,
+                1,
+                1,
+                0,
+            )
+        );
+        assert_eq!(
+            upgraded
+                .connection()
+                .query_row(
+                    r#"
+                    SELECT
+                        (SELECT COUNT(*) FROM camp_message),
+                        (SELECT COUNT(*) FROM context_manifest)
+                    "#,
+                    [],
+                    |row| Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?)),
+                )
+                .unwrap(),
+            source_counts
+        );
+        assert_schema_objects(
+            upgraded.connection(),
+            "table",
+            &[
+                "project_catalog_item",
+                "feishu_owner_identity",
+                "feishu_owner_app_identity",
+                "external_principal",
+                "channel_conversation",
+                "pending_camp_binding",
+                "pending_camp_message",
+                "channel_turn_request",
+                "channel_delivery",
+                "channel_execution_console",
+                "feishu_member_bot_publication_intent",
+            ],
+            true,
+        );
+        let message_schema: String = upgraded
+            .connection()
+            .query_row(
+                "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'camp_message'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(message_schema.contains("'external_principal'"));
+        let manifest_schema: String = upgraded
+            .connection()
+            .query_row(
+                "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'context_manifest'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(manifest_schema.contains("context_manifest_version = 22"));
+        assert!(manifest_schema.contains("formatter_version = 22"));
+        for column in [
+            "user_id_digest",
+            "tenant_id",
+            "user_name",
+            "email",
+            "brand",
+            "connected_at",
+            "last_verified_at",
+        ] {
+            assert!(
+                table_columns(upgraded.connection(), "feishu_account")
+                    .unwrap()
+                    .contains(&column.to_string()),
+                "Migration 117 should retain feishu_account.{column}"
+            );
+        }
+        drop(upgraded);
+
+        let restarted = Database::open(&directory).expect("v119 restart should be idempotent");
+        assert_eq!(
+            restarted
+                .connection()
+                .query_row(
+                    "SELECT COUNT(*) FROM schema_migration WHERE version BETWEEN 113 AND 119",
+                    [],
+                    |row| row.get::<_, i64>(0),
+                )
+                .unwrap(),
+            7
+        );
+        drop(restarted);
+        std::fs::remove_dir_all(directory).expect("temporary database should be removable");
+    }
+
+    #[test]
+    fn v119_upgrades_v118_source_and_installs_execution_console_delivery_contract() {
+        let (database, directory) = crate::test_support::seeded_runtime_database();
+        downgrade_current_schema_to_v118_source_for_test(database.connection());
+        assert_eq!(
+            database
+                .connection()
+                .query_row(
+                    r#"
+                    SELECT contract_version, projection_schema_version,
+                           (SELECT COUNT(*) FROM schema_migration WHERE version = 119),
+                           (SELECT COUNT(*) FROM sqlite_master
+                            WHERE type = 'table' AND name = 'channel_execution_console')
+                    FROM rovai_data_contract WHERE singleton = 1
+                    "#,
+                    [],
+                    |row| Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, i64>(1)?,
+                        row.get::<_, i64>(2)?,
+                        row.get::<_, i64>(3)?,
+                    )),
+                )
+                .unwrap(),
+            ("v1.31".to_string(), 72, 0, 0)
+        );
+        let source_delivery_schema: String = database
+            .connection()
+            .query_row(
+                "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'channel_delivery'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(source_delivery_schema.contains("'agent_status'"));
+        assert!(source_delivery_schema.contains("'completion'"));
+        drop(database);
+
+        let upgraded = Database::open(&directory).expect("v118 source should migrate to v119");
+        assert!(connection_has_current_data_contract(upgraded.connection()).unwrap());
+        let delivery_schema: String = upgraded
+            .connection()
+            .query_row(
+                "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'channel_delivery'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        for delivery_kind in [
+            "execution_console_upsert",
+            "execution_console_recall",
+            "agent_attachment",
+        ] {
+            assert!(delivery_schema.contains(delivery_kind));
+        }
+        assert!(!delivery_schema.contains("'agent_status'"));
+        assert!(!delivery_schema.contains("'completion'"));
+        assert_schema_objects(
+            upgraded.connection(),
+            "table",
+            &["channel_execution_console", "channel_delivery"],
+            true,
+        );
+        drop(upgraded);
+
+        let restarted = Database::open(&directory).expect("v119 restart should be idempotent");
+        assert_eq!(
+            restarted
+                .connection()
+                .query_row(
+                    "SELECT COUNT(*) FROM schema_migration WHERE version = 119",
+                    [],
+                    |row| row.get::<_, i64>(0),
+                )
+                .unwrap(),
+            1
+        );
+        drop(restarted);
+        std::fs::remove_dir_all(directory).expect("temporary database should be removable");
+    }
+
+    #[test]
+    fn v120_adds_persistent_execution_console_view_state() {
+        let (database, directory) = crate::test_support::seeded_runtime_database();
+        downgrade_current_schema_to_v119_source_for_test(database.connection());
+        assert_eq!(
+            database
+                .connection()
+                .query_row(
+                    r#"
+                    SELECT contract_version, projection_schema_version,
+                           (SELECT COUNT(*) FROM schema_migration WHERE version = 120)
+                    FROM rovai_data_contract WHERE singleton = 1
+                    "#,
+                    [],
+                    |row| Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, i64>(1)?,
+                        row.get::<_, i64>(2)?,
+                    )),
+                )
+                .unwrap(),
+            ("v1.32".to_string(), 73, 0)
+        );
+        for column in ["display_mode", "page_index", "view_version"] {
+            assert!(
+                !table_columns(database.connection(), "channel_execution_console")
+                    .unwrap()
+                    .contains(&column.to_string())
+            );
+        }
+        drop(database);
+
+        let upgraded = Database::open(&directory).expect("v119 source should migrate to v120");
+        assert!(connection_has_current_data_contract(upgraded.connection()).unwrap());
+        for column in ["display_mode", "page_index", "view_version"] {
+            assert!(
+                !table_columns(upgraded.connection(), "channel_execution_console")
+                    .unwrap()
+                    .contains(&column.to_string()),
+                "Migration 120 adds {column}; Migration 125 must retire it on upgrade to current"
+            );
+        }
+        drop(upgraded);
+
+        let restarted = Database::open(&directory).expect("v120 restart should be idempotent");
+        assert_eq!(
+            restarted
+                .connection()
+                .query_row(
+                    "SELECT COUNT(*) FROM schema_migration WHERE version = 120",
+                    [],
+                    |row| row.get::<_, i64>(0),
+                )
+                .unwrap(),
+            1
+        );
+        drop(restarted);
+        std::fs::remove_dir_all(directory).expect("temporary database should be removable");
+    }
+
+    #[test]
+    fn v121_installs_terminal_pending_and_sealed_execution_console_states() {
+        let (database, directory) = crate::test_support::seeded_runtime_database();
+        downgrade_current_schema_to_v120_source_for_test(database.connection());
+        assert_eq!(
+            database
+                .connection()
+                .query_row(
+                    r#"
+                    SELECT contract_version, projection_schema_version,
+                           (SELECT COUNT(*) FROM schema_migration WHERE version = 121)
+                    FROM rovai_data_contract WHERE singleton = 1
+                    "#,
+                    [],
+                    |row| Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, i64>(1)?,
+                        row.get::<_, i64>(2)?,
+                    )),
+                )
+                .unwrap(),
+            ("v1.33".to_string(), 74, 0)
+        );
+        drop(database);
+
+        let upgraded = Database::open(&directory).expect("v120 source should migrate to v121");
+        assert!(connection_has_current_data_contract(upgraded.connection()).unwrap());
+        let console_schema: String = upgraded
+            .connection()
+            .query_row(
+                r#"
+                SELECT sql FROM sqlite_master
+                WHERE type = 'table' AND name = 'channel_execution_console'
+                "#,
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(console_schema.contains("'terminal_pending'"));
+        assert!(console_schema.contains("'terminal_sealed'"));
+        assert_eq!(
+            upgraded
+                .connection()
+                .query_row("SELECT COUNT(*) FROM pragma_foreign_key_check", [], |row| {
+                    row.get::<_, i64>(0)
+                })
+                .unwrap(),
+            0
+        );
+        for column in ["display_mode", "page_index", "view_version"] {
+            assert!(
+                !table_columns(upgraded.connection(), "channel_execution_console")
+                    .unwrap()
+                    .contains(&column.to_string()),
+                "Migration 125 retires legacy {column} after the v121 upgrade"
+            );
+        }
+        drop(upgraded);
+
+        let restarted = Database::open(&directory).expect("v121 restart should be idempotent");
+        assert_eq!(
+            restarted
+                .connection()
+                .query_row(
+                    "SELECT COUNT(*) FROM schema_migration WHERE version = 121",
+                    [],
+                    |row| row.get::<_, i64>(0),
+                )
+                .unwrap(),
+            1
+        );
+        drop(restarted);
+        std::fs::remove_dir_all(directory).expect("temporary database should be removable");
+    }
+
+    #[test]
+    fn v122_adds_dingtalk_channel_state_and_provider_neutral_directories() {
+        let (database, directory) = crate::test_support::seeded_runtime_database();
+        downgrade_current_schema_to_v121_source_for_test(database.connection());
+        assert_eq!(
+            database
+                .connection()
+                .query_row(
+                    r#"
+                    SELECT contract_version, projection_schema_version,
+                           (SELECT COUNT(*) FROM schema_migration WHERE version = 122)
+                    FROM rovai_data_contract WHERE singleton = 1
+                    "#,
+                    [],
+                    |row| Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, i64>(1)?,
+                        row.get::<_, i64>(2)?,
+                    )),
+                )
+                .unwrap(),
+            ("v1.34".to_string(), 75, 0)
+        );
+        assert_schema_objects(
+            database.connection(),
+            "table",
+            &[
+                "dingtalk_account",
+                "dingtalk_owner_identity",
+                "dingtalk_member_bot_publication_intent",
+                "dingtalk_member_bot",
+                "dingtalk_owner_app_identity",
+            ],
+            false,
+        );
+        drop(database);
+
+        let upgraded = Database::open(&directory).expect("v121 source should migrate to v122");
+        assert!(connection_has_current_data_contract(upgraded.connection()).unwrap());
+        assert_schema_objects(
+            upgraded.connection(),
+            "table",
+            &[
+                "dingtalk_account",
+                "dingtalk_owner_identity",
+                "dingtalk_member_bot_publication_intent",
+                "dingtalk_member_bot",
+                "dingtalk_owner_app_identity",
+            ],
+            true,
+        );
+        assert_schema_objects(
+            upgraded.connection(),
+            "view",
+            &[
+                "channel_member_bot_directory",
+                "channel_owner_app_identity_directory",
+            ],
+            true,
+        );
+        assert_eq!(
+            upgraded
+                .connection()
+                .query_row("SELECT COUNT(*) FROM pragma_foreign_key_check", [], |row| {
+                    row.get::<_, i64>(0)
+                },)
+                .unwrap(),
+            0
+        );
+        drop(upgraded);
+
+        let restarted = Database::open(&directory).expect("v122 restart should be idempotent");
+        assert_eq!(
+            restarted
+                .connection()
+                .query_row(
+                    "SELECT COUNT(*) FROM schema_migration WHERE version = 122",
+                    [],
+                    |row| row.get::<_, i64>(0),
+                )
+                .unwrap(),
+            1
+        );
+        drop(restarted);
+        std::fs::remove_dir_all(directory).expect("temporary database should be removable");
+    }
+
+    #[test]
+    fn v123_rehomes_existing_dingtalk_intents_to_direct_open_platform() {
+        let (database, directory) = crate::test_support::seeded_runtime_database();
+        let agent_id: String = database
+            .connection()
+            .query_row(
+                "SELECT id FROM agent_profile ORDER BY member_order LIMIT 1",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        database
+            .connection()
+            .execute_batch(
+                r#"
+                INSERT INTO dingtalk_account(
+                    id, user_id_digest, corp_id, user_name, corp_name,
+                    oauth_profile_ref, status, version, created_at, updated_at,
+                    connected_at, last_verified_at, disconnected_at
+                ) VALUES (
+                    'account-v123', 'sha256:owner-v123', 'corp-v123', 'Owner', '测试组织',
+                    'dingtalk-oauth:profile-v123', 'connected', 1,
+                    '2026-08-30T00:00:00Z', '2026-08-30T00:00:00Z',
+                    '2026-08-30T00:00:00Z', '2026-08-30T00:00:00Z', NULL
+                );
+                "#,
+            )
+            .unwrap();
+        database
+            .connection()
+            .execute(
+                r#"
+                INSERT INTO dingtalk_member_bot_publication_intent(
+                    id, agent_id, account_id, expected_user_id_digest,
+                    expected_corp_id, requested_app_name, provisioning_mode,
+                    state, version, created_at, updated_at
+                ) VALUES (
+                    'intent-v123', ?1, 'account-v123', 'sha256:owner-v123',
+                    'corp-v123', '芝士', 'direct_open_platform',
+                    'created', 4, '2026-08-30T00:00:00Z', '2026-08-30T00:00:01Z'
+                )
+                "#,
+                [agent_id],
+            )
+            .unwrap();
+        downgrade_current_schema_to_v122_source_for_test(database.connection());
+
+        assert_eq!(
+            database
+                .connection()
+                .query_row(
+                    r#"
+                    SELECT contract_version, projection_schema_version,
+                           (SELECT provisioning_mode
+                            FROM dingtalk_member_bot_publication_intent
+                            WHERE id = 'intent-v123'),
+                           (SELECT COUNT(*) FROM schema_migration WHERE version = 123)
+                    FROM rovai_data_contract WHERE singleton = 1
+                    "#,
+                    [],
+                    |row| Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, i64>(1)?,
+                        row.get::<_, String>(2)?,
+                        row.get::<_, i64>(3)?,
+                    )),
+                )
+                .unwrap(),
+            ("v1.35".to_string(), 76, "dws_gateway".to_string(), 0)
+        );
+        drop(database);
+
+        let upgraded = Database::open(&directory).expect("v122 source should migrate to v123");
+        assert!(connection_has_current_data_contract(upgraded.connection()).unwrap());
+        assert_eq!(
+            upgraded
+                .connection()
+                .query_row(
+                    r#"
+                    SELECT provisioning_mode, state, version, requested_app_name
+                    FROM dingtalk_member_bot_publication_intent
+                    WHERE id = 'intent-v123'
+                    "#,
+                    [],
+                    |row| Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, i64>(2)?,
+                        row.get::<_, String>(3)?,
+                    )),
+                )
+                .unwrap(),
+            (
+                "direct_open_platform".to_string(),
+                "created".to_string(),
+                4,
+                "芝士".to_string(),
+            )
+        );
+        assert_eq!(
+            upgraded
+                .connection()
+                .query_row("SELECT COUNT(*) FROM pragma_foreign_key_check", [], |row| {
+                    row.get::<_, i64>(0)
+                })
+                .unwrap(),
+            0
+        );
+        assert!(
+            upgraded
+                .connection()
+                .execute(
+                    "UPDATE dingtalk_member_bot_publication_intent SET provisioning_mode = 'dws_gateway' WHERE id = 'intent-v123'",
+                    [],
+                )
+                .is_err(),
+            "the upgraded schema must reject the retired helper mode"
+        );
+        drop(upgraded);
+
+        let restarted = Database::open(&directory).expect("v123 restart should be idempotent");
+        assert_eq!(
+            restarted
+                .connection()
+                .query_row(
+                    "SELECT COUNT(*) FROM schema_migration WHERE version = 123",
+                    [],
+                    |row| row.get::<_, i64>(0),
+                )
+                .unwrap(),
+            1
+        );
+        drop(restarted);
+        std::fs::remove_dir_all(directory).expect("temporary database should be removable");
+    }
+
+    #[test]
+    fn v124_adds_plaintext_channel_storage_without_importing_retired_files() {
+        let (database, directory) = crate::test_support::seeded_runtime_database();
+        downgrade_current_schema_to_v123_source_for_test(database.connection());
+        assert!(
+            !database
+                .connection()
+                .table_exists(None::<&str>, "channel_credentials")
+                .unwrap()
+        );
+        assert!(
+            !database
+                .connection()
+                .table_exists(None::<&str>, "channel_developer_sessions")
+                .unwrap()
+        );
+        let retired_directory = directory.join("channel-credentials");
+        std::fs::create_dir_all(&retired_directory).unwrap();
+        let retired_file = retired_directory.join("feishu-developer-session.bin");
+        std::fs::write(&retired_file, b"retired-encrypted-payload").unwrap();
+        drop(database);
+
+        let upgraded = Database::open(&directory).expect("v123 source should migrate to v124");
+        assert!(connection_has_current_data_contract(upgraded.connection()).unwrap());
+        assert_eq!(
+            upgraded
+                .connection()
+                .query_row(
+                    r#"
+                    SELECT
+                        (SELECT COUNT(*) FROM schema_migration WHERE version = 124),
+                        (SELECT COUNT(*) FROM channel_credentials),
+                        (SELECT COUNT(*) FROM channel_developer_sessions)
+                    "#,
+                    [],
+                    |row| Ok((
+                        row.get::<_, i64>(0)?,
+                        row.get::<_, i64>(1)?,
+                        row.get::<_, i64>(2)?
+                    )),
+                )
+                .unwrap(),
+            (1, 0, 0)
+        );
+        assert_eq!(
+            std::fs::read(&retired_file).unwrap(),
+            b"retired-encrypted-payload"
+        );
+        drop(upgraded);
+
+        let restarted = Database::open(&directory).expect("v124 restart should be idempotent");
+        assert_eq!(
+            restarted
+                .connection()
+                .query_row(
+                    "SELECT COUNT(*) FROM schema_migration WHERE version = 124",
+                    [],
+                    |row| row.get::<_, i64>(0),
+                )
+                .unwrap(),
+            1
+        );
+        drop(restarted);
+        std::fs::remove_dir_all(directory).expect("temporary database should be removable");
+    }
+
+    #[test]
+    fn legacy_feishu_migration_marker_collision_reconciles_without_quarantine() {
+        let (database, directory) = crate::test_support::seeded_runtime_database();
+        database
+            .connection()
+            .execute("DELETE FROM schema_migration WHERE version = 115", [])
+            .unwrap();
+        assert!(
+            !connection_has_admissible_data_contract(database.connection()).unwrap(),
+            "a generic current store missing v115 must still fail closed"
+        );
+        assert!(matches!(
+            classify_database_contract(database.connection()).unwrap(),
+            DatabaseContractClassification::Unknown(_)
+        ));
+        database
+            .connection()
+            .execute(
+                "INSERT INTO schema_migration(version, applied_at) VALUES (115, datetime('now'))",
+                [],
+            )
+            .unwrap();
+        downgrade_current_schema_to_legacy_feishu_collision_for_test(database.connection());
+
+        assert!(
+            connection_has_admissible_data_contract(database.connection()).unwrap(),
+            "the exact legacy Feishu marker collision must remain an admissible upgrade source"
+        );
+        drop(database);
+
+        let lease = crate::core_data_dir_lock::CoreDataDirLease::acquire(&directory).unwrap();
+        let crate::database_admission::AdmissionAssessment::RequiresMigration(ticket) =
+            crate::database_admission::DatabaseAdmission::assess(&lease).unwrap()
+        else {
+            panic!("the exact legacy Feishu marker collision must receive a migration ticket");
+        };
+        let runtime_root = directory.join("runtime-files");
+        let root_identity =
+            crate::camp_attachment_view::runtime_root_identity_digest_for_database(&runtime_root)
+                .unwrap();
+        let reopened = crate::authority_migration::AuthorityMigrationRunner::run(
+            *ticket,
+            &runtime_root,
+            &root_identity,
+        )
+        .expect("the legacy Feishu marker collision should reconcile in the admitted copy");
+        assert!(
+            !directory.join("inactive-data-quarantine").exists(),
+            "a recognized marker collision must not quarantine valid local state"
+        );
+        assert_eq!(
+            reopened
+                .connection()
+                .query_row(
+                    r#"
+                    SELECT
+                        (SELECT COUNT(*) FROM schema_migration WHERE version BETWEEN 113 AND 118),
+                        (SELECT COUNT(*) FROM feishu_account
+                         WHERE id = 'legacy-feishu-account'
+                           AND user_id_digest = 'legacy-user-digest'
+                           AND tenant_id = 'legacy-tenant-id'),
+                        (SELECT COUNT(*) FROM feishu_member_bot
+                         WHERE agent_id = 'agent_1'
+                           AND app_id = 'cli_legacy_member_bot'),
+                        (SELECT COUNT(*) FROM planned_shutdown_cycle
+                         WHERE core_generation = 'legacy-pending-v2-generation'
+                           AND protocol_version = 2),
+                        (SELECT COUNT(*) FROM pragma_foreign_key_check)
+                    "#,
+                    [],
+                    |row| {
+                        Ok((
+                            row.get::<_, i64>(0)?,
+                            row.get::<_, i64>(1)?,
+                            row.get::<_, i64>(2)?,
+                            row.get::<_, i64>(3)?,
+                            row.get::<_, i64>(4)?,
+                        ))
+                    },
+                )
+                .unwrap(),
+            (6, 1, 1, 1, 0)
+        );
+        let cycle_schema: String = reopened
+            .connection()
+            .query_row(
+                "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'planned_shutdown_cycle'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(cycle_schema.contains("protocol_version IN (2, 3)"));
+        reopened
+            .connection()
+            .execute(
+                r#"
+                INSERT INTO planned_shutdown_cycle(
+                    core_generation, protocol_version, requested_at
+                ) VALUES ('reconciled-v3-generation', 3, datetime('now'))
+                "#,
+                [],
+            )
+            .unwrap();
+        assert!(connection_has_current_data_contract(reopened.connection()).unwrap());
+
+        drop(reopened);
+        drop(lease);
         std::fs::remove_dir_all(directory).expect("temporary database should be removable");
     }
 
@@ -26138,7 +31898,7 @@ mod tests {
                 CURRENT_PROJECTION_SCHEMA_VERSION,
                 1,
                 1,
-                0
+                0,
             )
         );
         assert_table_columns(
@@ -26316,7 +32076,7 @@ mod tests {
                 CURRENT_PROJECTION_SCHEMA_VERSION,
                 1,
                 1,
-                1
+                1,
             )
         );
         assert_eq!(
@@ -28150,7 +33910,9 @@ mod tests {
                 |row| row.get(0),
             )
             .unwrap();
-        assert!(cycle_schema.contains("protocol_version = 2"));
+        // The current fixture has also applied 113: v2 remains admitted, but
+        // the later planned-shutdown contract additionally accepts v3.
+        assert!(cycle_schema.contains("protocol_version IN (2, 3)"));
         assert!(cycle_schema.contains("fenced_agent_run_count"));
         assert!(cycle_schema.contains("unsettled_effect_agent_run_count"));
         let contract: (String, i64) = database
@@ -32078,7 +37840,7 @@ mod tests {
             connection,
             "trigger",
             &[
-                "context_manifest_v21_only_insert",
+                "context_manifest_v22_only_insert",
                 "context_manifest_version_immutable",
                 "runtime_input_delivery_attachment_auth_insert",
                 "camp_attachment_view_camp_insert",
@@ -32088,7 +37850,10 @@ mod tests {
         assert_schema_objects(
             connection,
             "trigger",
-            &["context_manifest_v20_only_insert"],
+            &[
+                "context_manifest_v20_only_insert",
+                "context_manifest_v21_only_insert",
+            ],
             false,
         );
 

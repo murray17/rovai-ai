@@ -2,8 +2,8 @@ import { defineBenchmarkProfile } from '../execution/suite.mjs'
 import { digestJson } from '../protocol/canonical.mjs'
 
 export const CURRENT_CONTRACT_DATA_STORE = Object.freeze({
-  version: 'v1.25',
-  projectionSchemaVersion: 66
+  version: 'v1.28',
+  projectionSchemaVersion: 69
 })
 
 const criteria = [
@@ -35,7 +35,7 @@ const criteria = [
   criterion('CCC-009', 'Large-history omission JSON remains bounded rather than growing with all message IDs', [
     test('crates/rovai-core/src/context.rs', 'whole_history_omission_evidence_stays_bounded_for_large_intervals')
   ]),
-  criterion('CCC-010', 'ContextManifest version is 21 and Context Formatter version is 21', [
+  criterion('CCC-010', 'ContextManifest version is 22 and Context Formatter version is 22', [
     test('crates/rovai-core/src/context_contract.rs', 'binding_contract_freezes_each_context_axis_version')
   ]),
   criterion(
@@ -47,7 +47,8 @@ const criteria = [
       test('crates/rovai-core/src/db.rs', 'v104_adds_cursor_catalog_and_delivery_without_expanding_custom_skills'),
       test('crates/rovai-core/src/db.rs', 'v105_adds_kimi_catalog_and_delivery_without_expanding_custom_skills'),
       test('crates/rovai-core/src/db.rs', 'v111_upgrades_current_main_v110_and_keeps_zero_attempt_cancellation_terminal'),
-      test('crates/rovai-core/src/db.rs', 'v112_upgrades_v111_and_installs_managed_attachment_v2_idempotently')
+      test('crates/rovai-core/src/db.rs', 'v112_upgrades_v111_and_installs_managed_attachment_v2_idempotently'),
+      test('crates/rovai-core/src/db.rs', 'v119_upgrades_v112_preserves_evidence_and_installs_channel_contracts')
     ]
   ),
   criterion('CCC-012', 'CampSnapshot schema is 33', [
@@ -93,7 +94,7 @@ export const CURRENT_CONTRACT_CRITERIA = Object.freeze(criteria)
 
 export const CURRENT_CONTRACT_PROFILE = defineBenchmarkProfile({
   id: 'current-contract-conformance',
-  version: '1.25.0',
+  version: '1.28.0',
   lane: 'contract-conformance',
   hardOutcomeDefinition: {
     validity: 'deterministic_source_and_harness_valid',
@@ -111,8 +112,8 @@ export const CURRENT_CONTRACT_PROFILE = defineBenchmarkProfile({
     compositeScore: false
   },
   suite: {
-    id: 'rovai-v1.25-current-contract',
-    version: '1.25.0',
+    id: 'rovai-v1.28-current-contract',
+    version: '1.28.0',
     shuffle: false,
     rounds: [{ id: 'deterministic', ordinal: 1 }],
     cases: criteria.map((entry) => ({

@@ -9,7 +9,10 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     core_data_dir_lock::{CoreDataDirLease, FilesystemObjectIdentity},
-    db::{DatabaseContractClassification, DatabaseContractMarker, classify_database_contract},
+    db::{
+        DatabaseContractClassification, DatabaseContractMarker, MigrationReceiptSnapshot,
+        classify_database_contract,
+    },
 };
 
 const AUTHORITY_BUSY_TIMEOUT: Duration = Duration::from_millis(250);
@@ -108,6 +111,7 @@ pub enum AuthorityBlock {
 pub struct AdmissionInfrastructureError {
     pub code: String,
     pub message: String,
+    pub retryable: bool,
 }
 
 impl AdmissionInfrastructureError {
@@ -115,6 +119,7 @@ impl AdmissionInfrastructureError {
         Self {
             code: "authority_admission_filesystem_failed".to_string(),
             message: format!("failed to {operation} {}: {error}", path.display()),
+            retryable: io_error_is_transient(error),
         }
     }
 }
@@ -152,6 +157,21 @@ pub enum AdmissionAssessment<'lease> {
     Blocked(Box<AuthorityBlock>),
 }
 
+impl AdmissionAssessment<'_> {
+    pub fn source_contract_version(&self) -> Option<&str> {
+        match self {
+            Self::AdmittedExisting(_) => Some(crate::db::CURRENT_DATA_CONTRACT_VERSION),
+            Self::RequiresMigration(ticket) => match &ticket.state {
+                MigrationTicketState::Upgrade {
+                    source_contract, ..
+                } => Some(&source_contract.contract_version),
+                MigrationTicketState::Interrupted { .. } => None,
+            },
+            _ => None,
+        }
+    }
+}
+
 #[derive(Debug)]
 pub struct ExistingAuthorityTicket<'lease> {
     lease: &'lease CoreDataDirLease,
@@ -177,6 +197,7 @@ enum MigrationTicketState {
         namespace: AuthorityNamespace,
         artifacts: Box<NamespaceArtifactSet>,
         source_contract: DatabaseContractMarker,
+        source_receipts: MigrationReceiptSnapshot,
     },
     Interrupted {
         manifest: PathBuf,
@@ -203,6 +224,7 @@ pub(crate) enum MigrationAuthorityOpen<'lease> {
         path: PathBuf,
         namespace: AuthorityNamespace,
         source_contract: DatabaseContractMarker,
+        source_receipts: MigrationReceiptSnapshot,
         artifacts: Box<NamespaceArtifactSet>,
     },
     Interrupted {
@@ -308,6 +330,7 @@ impl<'lease> MigrationAuthorityTicket<'lease> {
                 namespace,
                 artifacts,
                 source_contract,
+                source_receipts,
             } => {
                 revalidate_namespace_artifacts(self.lease, &artifacts, BusyStage::Revalidation)?;
                 Ok(MigrationAuthorityOpen::Upgrade {
@@ -315,6 +338,7 @@ impl<'lease> MigrationAuthorityTicket<'lease> {
                     path: artifacts.main_path(),
                     namespace,
                     source_contract,
+                    source_receipts,
                     artifacts,
                 })
             }
@@ -344,11 +368,52 @@ impl<'lease> MigrationAuthorityTicket<'lease> {
 }
 
 impl MigrationAuthorityOpen<'_> {
+    /// Writes may change bytes and WAL state, never the authority's namespace or
+    /// main-file object. Use this fence around reassessment after our commits.
+    pub(crate) fn revalidate_migrated_identity(&self) -> Result<(), TicketValidationError> {
+        let Self::Upgrade {
+            lease,
+            artifacts,
+            namespace,
+            ..
+        } = self
+        else {
+            return self.revalidate();
+        };
+        revalidate_lease(lease)?;
+        let actual = observe_all(lease).map_err(observation_to_ticket_error)?;
+        let other = actual.namespace(match namespace {
+            AuthorityNamespace::Rovai => AuthorityNamespace::Lumen,
+            AuthorityNamespace::Lumen => AuthorityNamespace::Rovai,
+        });
+        if artifacts.main.as_ref().map(|main| &main.identity.object)
+            != actual
+                .namespace(*namespace)
+                .main
+                .as_ref()
+                .map(|main| &main.identity.object)
+            || other.main.is_some()
+            || !other.authoritative_sidecars().is_empty()
+        {
+            return Err(TicketValidationError::Blocked(Box::new(
+                AuthorityBlock::IdentityChanged {
+                    target: artifacts.main_path(),
+                    stage: BusyStage::Revalidation,
+                },
+            )));
+        }
+        Ok(())
+    }
+
     pub(crate) fn revalidate(&self) -> Result<(), TicketValidationError> {
         match self {
             Self::Upgrade {
-                lease, artifacts, ..
+                lease,
+                artifacts,
+                namespace,
+                ..
             } => {
+                debug_assert_eq!(*namespace, artifacts.namespace);
                 revalidate_lease(lease)?;
                 revalidate_namespace_artifacts(lease, artifacts, BusyStage::Revalidation)
             }
@@ -480,33 +545,34 @@ impl DatabaseAdmission {
             )));
         }
 
-        let classification = match probe_contract(artifacts, OpenFlags::SQLITE_OPEN_READ_ONLY) {
-            Ok(classification) => classification,
-            Err(error) => {
-                if let Some(recovery) = error.recovery_kind() {
-                    // One engine recovery per assessment. If a new writer makes
-                    // recovery necessary again, retry admission rather than
-                    // misreporting a read-only probe as a filesystem denial.
-                    if !allow_recovery {
-                        return Ok(AdmissionAssessment::Blocked(Box::new(
-                            AuthorityBlock::Busy {
-                                stage: BusyStage::Revalidation,
-                            },
-                        )));
-                    }
-                    match recover_sqlite_journal(lease, &observed, namespace, recovery) {
-                        Ok(()) => return Self::assess_with_recovery(lease, false),
-                        Err(ObservationFailure::Blocked(block)) => {
-                            return Ok(AdmissionAssessment::Blocked(Box::new(block)));
+        let (classification, source_receipts) =
+            match probe_contract(artifacts, OpenFlags::SQLITE_OPEN_READ_ONLY) {
+                Ok(probe) => probe,
+                Err(error) => {
+                    if let Some(recovery) = error.recovery_kind() {
+                        // One engine recovery per assessment. If a new writer makes
+                        // recovery necessary again, retry admission rather than
+                        // misreporting a read-only probe as a filesystem denial.
+                        if !allow_recovery {
+                            return Ok(AdmissionAssessment::Blocked(Box::new(
+                                AuthorityBlock::Busy {
+                                    stage: BusyStage::Revalidation,
+                                },
+                            )));
                         }
-                        Err(ObservationFailure::Infrastructure(error)) => return Err(error),
+                        match recover_sqlite_journal(lease, &observed, namespace, recovery) {
+                            Ok(()) => return Self::assess_with_recovery(lease, false),
+                            Err(ObservationFailure::Blocked(block)) => {
+                                return Ok(AdmissionAssessment::Blocked(Box::new(block)));
+                            }
+                            Err(ObservationFailure::Infrastructure(error)) => return Err(error),
+                        }
                     }
+                    return Ok(AdmissionAssessment::Blocked(Box::new(
+                        error.into_block(artifacts),
+                    )));
                 }
-                return Ok(AdmissionAssessment::Blocked(Box::new(
-                    error.into_block(artifacts),
-                )));
-            }
-        };
+            };
         let refreshed = match observe_namespace(lease, namespace) {
             Ok(refreshed) => refreshed,
             Err(ObservationFailure::Blocked(block)) => {
@@ -538,6 +604,8 @@ impl DatabaseAdmission {
                         namespace,
                         artifacts: Box::new(refreshed),
                         source_contract,
+                        source_receipts: source_receipts
+                            .expect("supported source has a receipt snapshot"),
                     },
                 })),
             ),
@@ -561,6 +629,31 @@ pub(crate) struct AuthorityArtifactIdentityToken {
     object_key: String,
     byte_length: u64,
     state_key: String,
+}
+
+impl AuthorityArtifactIdentityToken {
+    /// Only old manifest recovery may explain a rename's ctime change. Ordinary
+    /// admission still compares the entire token strictly. Object, size and
+    /// content mtime must all match; a replacement or content write is refused.
+    pub(crate) fn matches_legacy_rename(&self, before: &Self) -> bool {
+        if self == before {
+            return true;
+        }
+        #[cfg(unix)]
+        {
+            let after_times = self.state_key.split(':').collect::<Vec<_>>();
+            let before_times = before.state_key.split(':').collect::<Vec<_>>();
+            self.object_key == before.object_key
+                && self.byte_length == before.byte_length
+                && after_times.len() == 4
+                && before_times.len() == 4
+                && after_times[..2] == before_times[..2]
+        }
+        #[cfg(not(unix))]
+        {
+            false
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -741,6 +834,15 @@ fn observe_artifact(
     let metadata = match std::fs::symlink_metadata(&path) {
         Ok(metadata) => metadata,
         Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+        Err(error) if io_error_is_transient(&error) => {
+            return Err(ObservationFailure::Infrastructure(
+                AdmissionInfrastructureError::filesystem(
+                    "inspect authority artifact",
+                    &path,
+                    &error,
+                ),
+            ));
+        }
         Err(error) if error.kind() == io::ErrorKind::PermissionDenied => {
             return Err(ObservationFailure::Blocked(
                 AuthorityBlock::PermissionDenied {
@@ -888,7 +990,13 @@ impl ContractProbeFailure {
 fn probe_contract(
     artifacts: &NamespaceArtifactSet,
     access: OpenFlags,
-) -> Result<DatabaseContractClassification, ContractProbeFailure> {
+) -> Result<
+    (
+        DatabaseContractClassification,
+        Option<MigrationReceiptSnapshot>,
+    ),
+    ContractProbeFailure,
+> {
     let target = artifacts.main_path();
     let flags = access | OpenFlags::SQLITE_OPEN_NO_MUTEX | OpenFlags::SQLITE_OPEN_NOFOLLOW;
     let connection =
@@ -908,7 +1016,22 @@ fn probe_contract(
             stage: BusyStage::ContractQuery,
             error,
         })?;
-    classify_database_contract(&connection).map_err(|error| ContractProbeFailure {
+    let inspect = || -> rusqlite::Result<_> {
+        // The classification and ledger must describe one read snapshot.
+        let transaction = connection.unchecked_transaction()?;
+        let classification = classify_database_contract(&transaction)?;
+        let receipts = if matches!(
+            classification,
+            DatabaseContractClassification::SupportedMigrationSource(_)
+        ) {
+            Some(MigrationReceiptSnapshot::read(&transaction)?)
+        } else {
+            None
+        };
+        transaction.commit()?;
+        Ok((classification, receipts))
+    };
+    inspect().map_err(|error| ContractProbeFailure {
         stage: BusyStage::ContractQuery,
         error,
     })
@@ -989,6 +1112,18 @@ fn recover_sqlite_journal(
     Ok(())
 }
 
+pub(crate) fn sqlite_error_is_transient(error: &rusqlite::Error) -> bool {
+    matches!(error, rusqlite::Error::SqliteFailure(sqlite, _)
+        if matches!(sqlite.code, ErrorCode::DatabaseBusy | ErrorCode::DatabaseLocked)
+            || sqlite.extended_code == rusqlite::ffi::SQLITE_IOERR_BLOCKED)
+}
+
+pub(crate) fn io_error_is_transient(error: &io::Error) -> bool {
+    matches!(error.kind(), io::ErrorKind::WouldBlock | io::ErrorKind::Interrupted)
+        // Windows sharing / lock violations, not a general access-denied retry.
+        || (cfg!(windows) && matches!(error.raw_os_error(), Some(32 | 33)))
+}
+
 fn sqlite_block(
     target: &Path,
     stage: BusyStage,
@@ -1001,10 +1136,7 @@ fn sqlite_block(
         }
         _ => (None, None),
     };
-    if matches!(
-        code,
-        Some(ErrorCode::DatabaseBusy | ErrorCode::DatabaseLocked)
-    ) {
+    if sqlite_error_is_transient(&error) {
         return AuthorityBlock::Busy { stage };
     }
     if matches!(
@@ -1071,9 +1203,16 @@ fn revalidate_namespace_artifacts(
     expected: &NamespaceArtifactSet,
     stage: BusyStage,
 ) -> Result<(), TicketValidationError> {
-    let actual =
-        observe_namespace(lease, expected.namespace).map_err(observation_to_ticket_error)?;
-    if expected.authority_unchanged(&actual) {
+    let all = observe_all(lease).map_err(observation_to_ticket_error)?;
+    let actual = all.namespace(expected.namespace);
+    let other = all.namespace(match expected.namespace {
+        AuthorityNamespace::Rovai => AuthorityNamespace::Lumen,
+        AuthorityNamespace::Lumen => AuthorityNamespace::Rovai,
+    });
+    if expected.authority_unchanged(actual)
+        && other.main.is_none()
+        && other.authoritative_sidecars().is_empty()
+    {
         Ok(())
     } else {
         Err(TicketValidationError::Blocked(Box::new(
@@ -1113,6 +1252,31 @@ mod tests {
     use super::*;
     use crate::core_data_dir_lock::CoreDataDirLease;
     use std::process::{Child, Command, Stdio};
+
+    #[test]
+    fn legacy_rename_explains_only_ctime_not_replacement_or_content_changes() {
+        let before = AuthorityArtifactIdentityToken {
+            object_key: "device:inode".to_string(),
+            byte_length: 4096,
+            state_key: "10:123:11:456".to_string(),
+        };
+        assert!(before.matches_legacy_rename(&before));
+        let mut renamed = before.clone();
+        renamed.state_key = "10:123:12:789".to_string();
+        assert_eq!(renamed.matches_legacy_rename(&before), cfg!(unix));
+        assert_ne!(renamed, before, "ordinary admission remains strict");
+        for changed in ["object", "length", "mtime", "malformed"] {
+            let mut after = renamed.clone();
+            match changed {
+                "object" => after.object_key.push_str("-replaced"),
+                "length" => after.byte_length += 1,
+                "mtime" => after.state_key = "10:124:12:789".to_string(),
+                "malformed" => after.state_key = "10:123:12".to_string(),
+                _ => unreachable!(),
+            }
+            assert!(!after.matches_legacy_rename(&before), "{changed}");
+        }
+    }
 
     struct TestDirectory(PathBuf);
 

@@ -282,7 +282,7 @@ describe('availability-first workspace gate', () => {
     }))).toBe(true)
   })
 
-  it('explains an occupied authority without presenting an empty workspace', () => {
+  it('keeps an occupied authority technical reason out of the recovery copy', () => {
     const copy = bootstrapAuthorityCopy(supervisorSnapshot({
       fullCoreState: 'blocked',
       authorityState: {
@@ -293,22 +293,21 @@ describe('availability-first workspace gate', () => {
       startupPhase: null
     }))
 
-    expect(copy.title).toContain('另一个 Rovai Core')
-    expect(copy.description).toContain('没有创建第二份数据')
-    expect(`${copy.title}${copy.description}`).not.toMatch(/空工作区|空列表/)
+    expect(copy.title).toBe('暂时无法打开会话')
+    expect(copy.description).toContain('导出诊断')
+    expect(`${copy.title}${copy.description}`).not.toMatch(/Core|工作区|数据|authority/)
   })
 
-  it('describes Windows preparation refusal as a shell-only state with a desktop restart', () => {
+  it('uses the same product recovery copy for Windows preparation failures', () => {
     const copy = bootstrapAuthorityCopy(supervisorSnapshot({
       fullCoreState: 'blocked',
       authorityState: { kind: 'unknown' },
       startupPhase: 'preparing_windows_data_root'
     }))
 
-    expect(copy.title).toContain('数据目录尚未准备好')
-    expect(copy.description).toContain('Core 尚未启动')
-    expect(copy.description).toContain('重启桌面壳层')
-    expect(`${copy.title}${copy.description}`).not.toMatch(/数据库损坏|权限已修复/)
+    expect(copy.title).toBe('暂时无法打开会话')
+    expect(copy.description).toContain('重新打开')
+    expect(`${copy.title}${copy.description}`).not.toMatch(/Core|数据库|壳层|目录/)
   })
 })
 
@@ -341,6 +340,10 @@ describe('active Camp event invalidation', () => {
       method: 'agent_run.cancelled',
       params: { campId: 'camp-1', agentRunId: 'run-1' }
     }, 'camp-1')).toBe(true)
+    const images = { method: 'agent_run.images.updated', params: { campId: 'camp-1', agentRunId: 'run-1', executionEpoch: 1 } }
+    expect(shouldRefreshActiveCampForCoreEvent(images, 'camp-1')).toBe(true)
+    expect(shouldRefreshActiveCampForCoreEvent(images, 'camp-2')).toBe(false)
+    expect(shouldRefreshActiveCampForCoreEvent(images, 'camp-1', true)).toBe(false)
   })
 
   it('refreshes membership cutover and reconciliation projections', () => {
@@ -672,11 +675,13 @@ describe('cold startup route presentation', () => {
       onRetry: () => undefined
     }))
     expect(loading).toContain('data-startup-route="camp"')
-    expect(loading).toContain('正在打开对话')
-    expect(loading).toContain('最近内容即将就绪')
+    expect(loading).toContain('正在打开会话')
+    expect(loading).toContain('准备好后会自动打开')
     expect(loading).not.toContain('startup-gate')
-    expect(waiting).toContain('Core unavailable')
-    expect(waiting).toContain('重试')
+    expect(waiting).not.toContain('Core unavailable')
+    expect(waiting).toContain('暂时无法打开会话')
+    expect(waiting).toContain('重新打开')
+    expect(waiting).toContain('导出诊断')
   })
 })
 
@@ -1332,6 +1337,20 @@ describe('task event projections', () => {
       'kiro-message',
       'run-file-changes:run-kiro:1'
     ])
+    const images = [{
+      agentRunId: 'run-claude', executionEpoch: 1,
+      createdAt: '2026-08-28T06:49:55.000000Z',
+      images: [{ id: 'runtime-image', displayName: '结果.png', mediaType: 'image/png', byteSize: 32 }]
+    }]
+    const imageTimeline = campConversationTimeline([
+      message('claude-message', 1, 'run-claude', 'agent-claude', '2026-08-28T06:49:36.444822Z'),
+      message('kiro-message', 2, 'run-kiro', 'agent-kiro', '2026-08-28T06:49:40.099875Z')
+    ], [], [], [], [changes('run-claude', '2026-08-28T06:49:40.554605Z')], images)
+    expect(imageTimeline.map((item) => item.id)).toEqual([
+      'claude-message', 'run-images:run-claude:1', 'run-file-changes:run-claude:1', 'kiro-message'
+    ])
+    expect(campConversationTimeline([], [], [], [], [changes('run-claude', '2026-08-28T06:49:40Z')], images)
+      .map((item) => item.kind)).toEqual(['run_images', 'run_file_changes'])
   })
 
   it('renders a three-row Files Changed card with a quiet review entry and mixed totals', () => {
@@ -2451,6 +2470,7 @@ describe('task event projections', () => {
           totalCount: 1,
           recentCamps: [{
             id: 'camp-project', title: longTitle, activationState: 'active', projectPath: '/repo',
+            channelSource: { provider: 'feishu', conversationKind: 'topic' },
             projectBindingKind: 'directory', defaultLead: null, marker: 'unread_completed',
             lastActivityAt: '2026-07-22T00:00:01Z', lastActivityGlobalSequence: 12,
             latestCompletionGlobalSequence: 12, version: 2
@@ -2493,6 +2513,9 @@ describe('task event projections', () => {
     expect(markup).toContain('快速对话讨论')
     expect(markup).toContain('rovai-ai')
     expect(markup).toContain(longTitle)
+    expect(markup).toContain(`aria-label="【飞书话题】${longTitle}，有新回复"`)
+    expect(markup).toContain(`title="【飞书话题】${longTitle} · 有新回复"`)
+    expect(markup).toContain(`class="truncate">【飞书话题】${longTitle}</span>`)
     expect(markup).toContain('管理')
     expect(markup).toContain('aria-label="管理项目“rovai-ai”"')
     expect(markup).toContain('aria-label="管理“快速对话讨论”"')
@@ -2729,11 +2752,14 @@ describe('task event projections', () => {
     expect(capabilitiesGroup).toContain('<strong>Skills</strong>')
     expect(capabilitiesGroup).toContain('<strong>MCP</strong>')
     expect(capabilitiesGroup).toContain('<strong>Agent 运行时</strong>')
+    expect(capabilitiesGroup).toContain('<strong>渠道</strong>')
     expect(capabilitiesGroup).toContain('data-navigation-icon="sparkles"')
     expect(capabilitiesGroup).toContain('data-navigation-icon="blocks"')
     expect(capabilitiesGroup).toContain('data-navigation-icon="cpu"')
+    expect(capabilitiesGroup).toContain('data-navigation-icon="radio-tower"')
     expect(capabilitiesGroup.indexOf('<strong>Skills</strong>')).toBeLessThan(capabilitiesGroup.indexOf('<strong>MCP</strong>'))
     expect(capabilitiesGroup.indexOf('<strong>MCP</strong>')).toBeLessThan(capabilitiesGroup.indexOf('<strong>Agent 运行时</strong>'))
+    expect(capabilitiesGroup.indexOf('<strong>Agent 运行时</strong>')).toBeLessThan(capabilitiesGroup.indexOf('<strong>渠道</strong>'))
     expect(supportGroup).toContain('<strong>诊断与修复</strong>')
     expect(supportGroup).toContain('<strong>运行监控</strong>')
     expect(supportGroup).toContain('<strong>关于与更新</strong>')
@@ -2766,6 +2792,7 @@ describe('task event projections', () => {
       skills: 'Skills',
       mcp: 'MCP',
       runtime: 'Agent 运行时',
+      channels: '渠道',
       appearance: '外观',
       notifications: '提醒',
       monitoring: '运行监控',
@@ -4878,6 +4905,8 @@ describe('task event projections', () => {
       step: {
         id: 'tool-settled',
         title: 'pnpm test',
+        publicCommand: 'pnpm test',
+        publicResult: 'Tests passed',
         detail: 'Tests passed',
         status: 'completed' as const,
         activityDomain: 'shell',
@@ -5068,6 +5097,8 @@ describe('task event projections', () => {
         step: {
           id: `tool-${iconKind}`,
           title: `${iconKind} command`,
+          publicCommand: null,
+          publicResult: null,
           detail: `${iconKind} complete result`,
           status: 'completed' as const,
           activityDomain,
@@ -5127,6 +5158,7 @@ describe('task event projections', () => {
       kind: 'tool',
       step: {
         title: "printf '%s\\n' 'ROVAI_CLAUDE_EMPTY_OUTPUT_OK'",
+        publicCommand: "printf '%s\\n' 'ROVAI_CLAUDE_EMPTY_OUTPUT_OK'",
         status: 'completed'
       }
     })
@@ -5175,7 +5207,7 @@ describe('task event projections', () => {
           key: 'tool:failed-command',
           kind: 'tool' as const,
           step: {
-            id: 'failed-command', title: 'pnpm test', detail: 'exit 1',
+            id: 'failed-command', title: 'pnpm test', publicCommand: 'pnpm test', publicResult: 'exit 1', detail: 'exit 1',
             status: 'failed' as const, activityDomain: 'shell', iconKind: 'terminal' as const,
             toolName: null,
             credibility: 'runtime_structured'
@@ -5226,6 +5258,7 @@ describe('task event projections', () => {
       kind: 'tool',
       step: {
         title: 'pwd',
+        publicCommand: 'pwd',
         detail: '$ pwd\n/repo\n',
         status: 'completed'
       }

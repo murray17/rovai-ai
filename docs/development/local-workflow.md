@@ -112,6 +112,30 @@ ROVAI_DEV_USER_DATA_DIR="$(mktemp -d)/user-data" pnpm dev
 不要用 `electron-vite dev` 绕过启动器。不要把日常数据库复制到默认开发目录；复现真实 Camp 时按
 [桌面 UI 验收](ui-acceptance.md#从明确来源创建只读隔离副本)创建一次性副本。
 
+## 钉钉 Web Session 验收前置
+
+钉钉连接使用 Rovai 内置 QR Dialog；Main 隐藏加载官方页，必要时在 Dialog 内容区嵌入同一个 sandbox 原生页面。
+不打开系统浏览器或独立可见登录窗口，不需要 OAuth Client 环境变量、loopback server、设备授权、token broker
+或 DWS。用户须在具备企业应用开发能力的授权组织中扫码；能进入后台本身不等于具有创建/发布权限。
+不能借用第三方 Client Secret、用户 Chrome Profile 或日常 App 的 Cookie，也不能用 Bot AppKey 代替开发者登录。
+
+真实验收使用本节前述独立 `userData`/Skill Library。Cookie Snapshot 与 App Secret 只写隔离 SQLite；数据库中这些值
+是明文，目录和备份须按秘密数据保护，不得上传、复制进仓库或进入日志/诊断。请求 URL 可能含平台 access_token query，
+只记录封闭阶段、状态与身份匹配结果，不打印完整 URL、响应正文、Cookie 或 Secret。
+
+记录连接前后应用数量、App/冻结版本 identity、头像、Bot/权限、Owner-only 可见范围、发布读回、Stream 与收发证据。
+创建取得 ID 后所有恢复使用同一应用；未知创建结果不能重发创建。网页会话的重启/SSO 续接实测与 packaged App/Core
+恢复必须分别验收，不能彼此替代。Schema-1 OAuth Profile 保留到用户显式重连成功；不做伪造 Cookie 的自动迁移。
+
+字段、刷新、feature gate 与错误见 [DingTalk Channel v5](../contracts/dingtalk-channel-v5.md)。验收还须覆盖取消、断网、
+明确撤销后重连与 Cookie CAS 保存；普通网络异常不得清空 Session。没有独立生产 OAuth Client 已不构成阻塞，
+但 Owner/Core/群聊/卡片等关键链路证据不完整时仍保持 NO-GO。
+
+登录呈现改动运行 `pnpm test:dingtalk-login` 与 `pnpm test:desktop-bridge`。前者在全新临时 userData/Skill Library
+使用生产 Renderer/preload/native view、仅本机 HTTP fixture 验证 UI 和 IPC，不启动 Core，不扫码或创建应用。
+`ROVAI_KEEP_DINGTALK_LOGIN_FIXTURE=1` 可保留测试生成的截图；原生页面截图与 Renderer 截图分开，不把占位图当作已绘制的远端页。
+真实扫码后的组织选择与安全挑战仍需在隔离实例单独验收，不能用本地模拟页面替代。
+
 ## 打包产物：构建与运行分开
 
 构建只生成产物，不改变或重启日常安装版：
@@ -132,7 +156,9 @@ ROVAI_ALLOW_ISOLATED_INSTANCE=1 \
 
 Desktop 检测到这组显式隔离标记后，会以
 `--skill-library-root "$FIXTURE_ROOT/user-data/managed-skill-library"` 启动 Core；验收脚本不得绕过
-Desktop 另起一个仍指向日常全局 Skill Library 的 Core。
+Desktop 另起一个仍指向日常全局 Skill Library 的 Core。隔离实例与日常 App 都保持 `app.setName(APP_NAME)`；隔离只由显式
+`userData`、独立 `rovai.sqlite` 和独立 Skill Library 提供，不创建或访问 Keychain namespace。每次验证重新执行
+`mktemp -d`，避免旧数据库、渠道 credential 或 Developer Session 污染结果。
 
 AI Agent 不得把 `open "$(pwd)/dist/mac-arm64/Rovai AI.app"` 当作打包验证，因为该命令没有证明
 `userData` 隔离。签名和二进制检查不需要启动 App，优先使用

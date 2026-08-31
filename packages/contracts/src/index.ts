@@ -794,9 +794,14 @@ export interface CancelCampTurnCommand {
 
 export type NavigationCampMarker = 'loading' | 'unread_completed' | 'none'
 
+export type CampChannelSource =
+  | { provider: 'feishu'; conversationKind: 'p2p' | 'group' | 'topic' }
+  | { provider: 'dingtalk'; conversationKind: 'p2p' | 'group' }
+
 export interface NavigationCampItem {
   id: string
   title: string
+  channelSource?: CampChannelSource | null
   activationState: CampActivationState
   projectBindingKind: ProjectBindingKind
   projectPath: string
@@ -967,6 +972,13 @@ export type StructuredCampMessageSegment =
   | { kind: 'all_members_mention' }
   | { kind: 'current_user_mention'; userId: 'local_user' }
   | { kind: 'skill_mention'; skillId: string; nameAtSend: string }
+  | {
+      kind: 'external_quote'
+      senderDisplayName: string
+      body: string
+      attachmentSummaries: Array<{ name: string; mediaType: string | null }>
+      contentDigest: `sha256:${string}`
+    }
 
 export type StructuredCampMessageContent = StructuredCampMessageSegment[]
 
@@ -1027,8 +1039,9 @@ export interface CampMessageView {
   id: string
   sequence: number
   timelineGlobalSequence: number | null
-  authorType: 'user' | 'agent' | 'system'
+  authorType: 'user' | 'agent' | 'system' | 'external_principal'
   authorId: string
+  authorDisplayName?: string | null
   sourceAgentRunId: string | null
   body: string
   content: StructuredCampMessageContent
@@ -1582,6 +1595,12 @@ export interface AgentRunExecutionEvidencePage {
   evidence: AgentRunExecutionEvidenceView[]
 }
 
+export interface ExecutionConsolePage {
+  pageIndex: number
+  pageCount: number
+  body: string
+}
+
 export interface RuntimeInputDeliveryView {
   id: string
   executionEpoch: number
@@ -1721,7 +1740,7 @@ export interface ContextManifestView {
   mcpProjectionDigest: string
   selfActiveTaskEvidence: unknown
   selfActiveTaskEvidenceDigest: string
-  formatterVersion: 20
+  formatterVersion: 22
   renderedPayloadDigest: string
   delivery: RuntimeInputDeliveryView | null
   createdAt: string
@@ -1843,12 +1862,32 @@ export interface AgentRunFileChangesDetailView {
   files: AgentRunChangedFileDetailView[]
 }
 
+export interface AgentRunImageView {
+  id: string
+  displayName: string
+  mediaType: string
+  byteSize: number
+}
+
+export interface AgentRunImagesView {
+  agentRunId: string
+  executionEpoch: number
+  createdAt: string
+  images: AgentRunImageView[]
+}
+
+export interface AgentRunImageContent {
+  mediaType: string
+  data: string
+}
+
 export interface CampSnapshot {
   schemaVersion: 34
   throughGlobalSequence: number
   camp: {
     id: string
     title: string
+    channelSource?: CampChannelSource | null
     activationState: CampActivationState
     projectBindingKind: ProjectBindingKind
     projectPath: string
@@ -1867,6 +1906,7 @@ export interface CampSnapshot {
   agentRuns: AgentRunView[]
   executionEvidence: AgentRunExecutionEvidenceView[]
   agentRunFileChanges: AgentRunFileChangesView[]
+  agentRunImages?: AgentRunImagesView[]
   contextManifests: ContextManifestView[]
   approvals: ActionApprovalView[]
   actions: ActionView[]
@@ -1899,6 +1939,7 @@ export interface CampOpenProjection {
   agentRuns: AgentRunView[]
   executionEvidence: AgentRunExecutionEvidenceView[]
   agentRunFileChanges: AgentRunFileChangesView[]
+  agentRunImages?: AgentRunImagesView[]
   approvals: ActionApprovalView[]
   coverage: {
     tasks: CampOpenCollectionCoverage
@@ -2076,6 +2117,7 @@ export interface NotificationEpisodeView {
   camp: {
     id: string
     title: string
+    channelSource?: CampChannelSource | null
   }
   campTurnId: string | null
   primarySemantic: NotificationSemantic
@@ -2339,11 +2381,141 @@ export type SettingsSection =
   | 'skills'
   | 'mcp'
   | 'runtime'
+  | 'channels'
   | 'appearance'
   | 'notifications'
   | 'monitoring'
   | 'diagnostics'
   | 'about'
+
+export type ChannelKind = 'feishu' | 'dingtalk'
+
+export type ChannelHostStatus = 'unavailable' | 'ready'
+
+export type ChannelConnectionStatus = 'not_connected' | 'connected' | 'session_expired'
+
+export type ChannelPublicationStatus =
+  | 'unpublished'
+  | 'provisioning'
+  | 'published'
+  | 'failed'
+  | 'disabled'
+
+export type ChannelConversationKind = 'p2p' | 'group' | 'topic'
+
+export type ChannelQrAttemptPurpose = 'account_login'
+
+/** A presentation-only viewport in the trusted Rovai Renderer, never a URL. */
+export interface ChannelLoginViewBounds {
+  x: number
+  y: number
+  width: number
+  height: number
+}
+
+export interface ChannelQrAttemptView {
+  kind?: ChannelKind
+  attemptId: string
+  purpose: ChannelQrAttemptPurpose
+  agentId: string | null
+  stage:
+    | 'loading_local_session'
+    | 'preparing'
+    | 'awaiting_scan'
+    | 'scan_confirmed'
+    | 'awaiting_interaction'
+    | 'inspecting_identity'
+    | 'saving_local_session'
+    | 'connected'
+    | 'expired'
+    | 'cancelled'
+    | 'failed'
+  qrDataUrl: string | null
+  expiresAt: string | null
+  detail: string
+}
+
+export interface ChannelAccountView {
+  accountId: string
+  userName: string
+  email?: string
+  tenantName: string
+  brand: 'feishu' | 'lark' | 'dingtalk'
+  connectedAt: string
+  lastVerifiedAt: string
+}
+
+export interface ChannelConnectionView {
+  status: ChannelConnectionStatus
+  account: ChannelAccountView | null
+}
+
+export interface ChannelMemberBotView {
+  agentId: string
+  publicationStatus: ChannelPublicationStatus
+  botDisplayName: string | null
+  appId: string | null
+  managementUrl: string | null
+  failureCode: string | null
+}
+
+export interface MemberBotProvisioningView {
+  kind?: ChannelKind
+  publicationIntentId: string
+  agentId: string
+  stage:
+    | 'verifying_session'
+    | 'creating_app'
+    | 'activating_app'
+    | 'configuring_permissions'
+    | 'waiting_configuration'
+    | 'publishing_version'
+    | 'verifying_configuration'
+    | 'connecting_bot'
+    | 'completed'
+    | 'failed'
+    | 'unknown_remote_state'
+  detail: string
+  remoteAppId: string | null
+  failureCode: string | null
+  approvalCandidates?: Array<{ userId: string; displayName: string }>
+}
+
+export interface ChannelProviderView {
+  kind: ChannelKind
+  displayName: string
+  hostStatus: ChannelHostStatus
+  connection: ChannelConnectionView
+  memberBots: ChannelMemberBotView[]
+  pendingBindingCount?: number
+  bindingIssueCount?: number
+}
+
+export interface ChannelSettingsSnapshot {
+  schemaVersion: 4
+  channels: ChannelProviderView[]
+  pendingBindingCount: number
+  bindingIssueCount: number
+  activeQrAttempt: ChannelQrAttemptView | null
+  activeProvisioning: MemberBotProvisioningView | null
+}
+
+export interface ChannelsApi {
+  get(): Promise<ChannelSettingsSnapshot>
+  connect(kind?: ChannelKind): Promise<ChannelSettingsSnapshot>
+  disconnect(kind?: ChannelKind): Promise<ChannelSettingsSnapshot>
+  publishMemberBot(agentId: string, kind?: ChannelKind): Promise<ChannelSettingsSnapshot>
+  retryMemberBot(agentId: string, kind?: ChannelKind): Promise<ChannelSettingsSnapshot>
+  selectPublicationApprover(
+    agentId: string,
+    userId: string,
+    kind?: ChannelKind
+  ): Promise<ChannelSettingsSnapshot>
+  cancelQrAttempt(attemptId: string): Promise<ChannelSettingsSnapshot>
+  setLoginViewBounds(attemptId: string, bounds: ChannelLoginViewBounds | null): Promise<void>
+  refreshLoginQr(attemptId: string): Promise<void>
+  onChanged(listener: (snapshot: ChannelSettingsSnapshot) => void): () => void
+}
 
 export type MemberWorkspaceLocationTab = 'identity' | 'runtime'
 
@@ -3028,6 +3200,52 @@ export type CoreMethod =
   | 'mcp.import.scan'
   | 'mcp.import.commit'
   | 'conversations.restartNativeSession'
+  | 'channels.credentials.get'
+  | 'channels.credentials.listPublished'
+  | 'channels.credentials.delete'
+  | 'channels.developerSession.get'
+  | 'channels.developerSession.replace'
+  | 'channels.developerSession.delete'
+  | 'channels.feishu.snapshot'
+  | 'channels.feishu.account.upsert'
+  | 'channels.feishu.account.commitConnection'
+  | 'channels.feishu.account.disconnect'
+  | 'channels.feishu.account.expire'
+  | 'channels.feishu.publicationIntent.create'
+  | 'channels.feishu.publicationIntent.advance'
+  | 'channels.feishu.publicationIntent.storeCredential'
+  | 'channels.feishu.memberBot.upsert'
+  | 'channels.feishu.owner.verify'
+  | 'channels.feishu.dm.startNew'
+  | 'channels.feishu.pendingBinding.resolve'
+  | 'channels.dingtalk.snapshot'
+  | 'channels.dingtalk.account.upsert'
+  | 'channels.dingtalk.account.commitConnection'
+  | 'channels.dingtalk.account.disconnect'
+  | 'channels.dingtalk.account.expire'
+  | 'channels.dingtalk.publicationIntent.create'
+  | 'channels.dingtalk.publicationIntent.advance'
+  | 'channels.dingtalk.publicationIntent.storeCredential'
+  | 'channels.dingtalk.memberBot.upsert'
+  | 'channels.dingtalk.owner.verify'
+  | 'channels.dingtalk.dm.startNew'
+  | 'channels.dingtalk.pendingBinding.resolve'
+  | 'channels.dingtalk.inbound.observe'
+  | 'channels.dingtalk.roster.reconcile'
+  | 'channels.dingtalk.inbound.finalize'
+  | 'channels.dingtalk.host.tick'
+  | 'channels.dingtalk.executionConsole.page.authorize'
+  | 'channels.dingtalk.deliveries.settle'
+  | 'channels.membership.add'
+  | 'channels.membership.remove'
+  | 'channels.inbound.observe'
+  | 'channels.roster.reconcile'
+  | 'channels.inbound.finalize'
+  | 'channels.host.tick'
+  | 'channels.executionConsole.source'
+  | 'channels.executionConsole.page.authorize'
+  | 'channels.deliveries.settle'
+  | 'camp.attachments.desktopOpenTarget'
   | 'app.info'
   | 'camps.creationPreflight'
   | 'workspaces.validate'
@@ -3055,6 +3273,7 @@ export type CoreMethod =
   | 'agentRuns.resolveRecoveryBlocker'
   | 'camps.snapshot'
   | 'agentRunFileChanges.get'
+  | 'agentRunImages.read'
   | 'camp.messages.page'
   | 'camp.messages.around'
   | 'camp.messages.find'
@@ -3100,6 +3319,7 @@ export interface RovaiApi {
   appUpdates: AppUpdatesApi
   desktopSession: DesktopSessionApi
   generalPreferences: GeneralPreferencesApi
+  channels: ChannelsApi
   onboarding: OnboardingApi
   windowControls: WindowControlsApi
   navigationPreferences: NavigationPreferencesApi

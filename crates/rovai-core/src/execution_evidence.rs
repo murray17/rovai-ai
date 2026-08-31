@@ -875,7 +875,7 @@ fn normalize_public_payload(event_type: &str, payload: &Value) -> Value {
                     "durationMs": item.get("durationMs"),
                     "exitCode": item.get("exitCode"),
                     "aggregatedOutput": item.get("aggregatedOutput"),
-                    "output": item.get("output").or_else(|| item.get("result")),
+                    "output": public_activity_output(item),
                     "summary": item.get("summary"),
                     "changes": item.get("changes"),
                     "tool": item.get("tool"),
@@ -886,6 +886,32 @@ fn normalize_public_payload(event_type: &str, payload: &Value) -> Value {
         }
         _ => Value::Null,
     }
+}
+
+fn public_activity_output(item: &Value) -> Option<Value> {
+    // Structured images have a local-only consumer before Evidence normalization. Never duplicate
+    // their bytes/path into the public Tool output (including interrupted or started activities).
+    if item.get("type").and_then(Value::as_str) == Some("imageGeneration") {
+        return None;
+    }
+    if item.get("type").and_then(Value::as_str) == Some("mcpToolCall")
+        && let Some(content) = item.pointer("/result/content").and_then(Value::as_array)
+        && content
+            .iter()
+            .any(|block| block.get("type").and_then(Value::as_str) == Some("image"))
+    {
+        let text = content
+            .iter()
+            .filter_map(|block| {
+                (block.get("type").and_then(Value::as_str) == Some("text"))
+                    .then(|| block.get("text").and_then(Value::as_str))
+                    .flatten()
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        return (!text.is_empty()).then_some(Value::String(text));
+    }
+    item.get("output").or_else(|| item.get("result")).cloned()
 }
 
 fn normalize_runtime_search_operation_evidence(
@@ -1564,6 +1590,32 @@ mod tests {
         assert!(!encoded.contains("hiddenProviderPacket"));
         assert!(!encoded.contains("providerPrivateState"));
         assert!(!encoded.contains("internal-thread"));
+        for event in ["activity.started", "activity.completed"] {
+            let generated = normalize_public_payload(
+                event,
+                &json!({"item": {
+                    "id":"image-native", "type":"imageGeneration", "status":"completed",
+                    "result":"private-image-base64", "savedPath":"/private/generated.png"
+                }}),
+            );
+            assert!(generated["item"]["output"].is_null());
+            assert!(!generated.to_string().contains("private-image-base64"));
+            assert!(!generated.to_string().contains("/private/generated.png"));
+            let mcp = normalize_public_payload(
+                event,
+                &json!({"item": {
+                    "id":"image-mcp", "type":"mcpToolCall", "status":"completed",
+                    "result":{"content":[
+                        {"type":"text","text":"Before image"},
+                        {"type":"image","data":"private-image-base64","uri":"/private/generated.png","mimeType":"image/png"},
+                        {"type":"text","text":"After image"}
+                    ]}
+                }}),
+            );
+            assert_eq!(mcp["item"]["output"], "Before image\nAfter image");
+            assert!(!mcp.to_string().contains("private-image-base64"));
+            assert!(!mcp.to_string().contains("/private/generated.png"));
+        }
     }
 
     #[test]

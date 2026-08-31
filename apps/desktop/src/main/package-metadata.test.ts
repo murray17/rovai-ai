@@ -65,7 +65,7 @@ describe('desktop package metadata', () => {
     ])
   })
 
-  it('packages sidecars staged for the selected target without a legal preparation pipeline', () => {
+  it('packages only Rovai-owned target-specific sidecars', () => {
     expect(packageMetadata.build.mac.extraResources).toEqual([
       {
         from: 'resources/bin/macos-${arch}/rovai-core',
@@ -87,6 +87,14 @@ describe('desktop package metadata', () => {
       }
     ])
     expect(packageMetadata.build).not.toHaveProperty('extraResources')
+    expect(packageMetadata.build.mac.binaries).toEqual([
+      'Contents/Resources/bin/rovai-core',
+      'Contents/Resources/bin/rovai'
+    ])
+    expect(JSON.stringify(packageMetadata.build)).not.toMatch(/dws/iu)
+    expect(Object.keys(packageMetadata.scripts).some((name) => name.startsWith('dws:'))).toBe(false)
+    expect(packageMetadata.scripts.dev).not.toContain('dws')
+    expect(packageMetadata.scripts.build).not.toContain('dws')
     expect(Object.keys(packageMetadata.scripts).some((name) => name.startsWith('legal:'))).toBe(false)
     expect(packageMetadata.scripts.test).not.toContain('legal:')
     expect(packageMetadata.scripts['package:mac:unsigned']).not.toContain('legal:')
@@ -95,12 +103,15 @@ describe('desktop package metadata', () => {
     expect(packageMetadata.scripts['dist:mac:release:arm64']).toContain(
       'pnpm build:macos:arm64'
     )
+    expect(packageMetadata.scripts['build:macos:arm64']).not.toContain('dws')
     expect(packageMetadata.scripts['dist:mac:release:arm64']).not.toContain('legal:')
     expect(packageMetadata.scripts['dist:mac:release:x64']).toContain(
       'pnpm build:macos:x64'
     )
+    expect(packageMetadata.scripts['build:macos:x64']).not.toContain('dws')
     expect(packageMetadata.scripts['dist:mac:release:x64']).not.toContain('legal:')
     expect(packageMetadata.scripts['package:windows:x64']).toContain('pnpm build:windows:x64')
+    expect(packageMetadata.scripts['build:windows:x64']).not.toContain('dws')
     expect(packageMetadata.scripts['dist:windows:x64']).toContain('scripts/package-windows.mjs nsis')
     expect(packageMetadata.scripts['dist:windows:release:x64']).toContain('--require-signed')
     expect(packageMetadata.scripts['package:windows:x64']).not.toContain('legal:')

@@ -1,0 +1,188 @@
+diff --git a/es/index.js b/es/index.js
+index c5d5c57488d414e3078f19a235e4db7afebeda80..9944ffc4d188bf73b7472eb042266a1a24c855ab 100644
+--- a/es/index.js
++++ b/es/index.js
+@@ -104906,10 +104906,17 @@ class OutboundSender {
+      */
+     patchCard(messageId, card) {
+         return __awaiter(this, void 0, void 0, function* () {
+-            yield this.client.im.v1.message.patch({
++            const response = yield this.client.im.v1.message.patch({
+                 path: { message_id: messageId },
+                 data: { content: JSON.stringify(card) },
+             });
++            // HTTP success is not a successful card replacement. Do not expose
++            // the provider's free-form message or request data in the error.
++            if (!response || response.code !== 0) {
++                throw new LarkChannelError('unknown', 'feishu_card_update_failed', {
++                    cause: { code: response && Number.isSafeInteger(response.code) ? response.code : null },
++                });
++            }
+         });
+     }
+     /**
+@@ -105469,7 +105476,7 @@ class SafetyPipeline {
+             const task = () => __awaiter(this, void 0, void 0, function* () {
+                 var _e, _f;
+                 try {
+-                    yield handler();
++                    return yield handler();
+                 }
+                 catch (e) {
+                     (_f = (_e = this.logger).error) === null || _f === void 0 ? void 0 : _f.call(_e, `safety: action handler threw`, e);
+@@ -105483,10 +105490,10 @@ class SafetyPipeline {
+                 }
+             });
+             if (this.queueEnabled) {
+-                yield this.manager.run(queueScope, task);
++                return yield this.manager.run(queueScope, task);
+             }
+             else {
+-                yield task();
++                return yield task();
+             }
+         });
+     }
+@@ -106829,11 +106836,15 @@ class LarkChannel {
+                 const evt = normalizeCardAction(raw, { includeRaw });
+                 if (!evt)
+                     return;
+-                const actionId = cardActionId(evt.action);
+-                yield this.safety.pushAction(`card:${evt.messageId}:${evt.operator.openId}:${actionId}`, evt.chatId, () => __awaiter(this, void 0, void 0, function* () {
++                // Separate clicks may have identical button values (2 -> 1 -> 2).
++                // Only the platform event identity denotes a delivery duplicate.
++                const actionId = typeof raw.event_id === 'string' && raw.event_id
++                    ? `event:${this.opts.appId}:${raw.event_id}`
++                    : cardActionId(evt.action);
++                return yield this.safety.pushAction(`card:${evt.messageId}:${evt.operator.openId}:${actionId}`, evt.chatId, () => __awaiter(this, void 0, void 0, function* () {
+                     const h = this.handlers.cardAction;
+                     if (h)
+-                        yield h(evt);
++                        return yield h(evt);
+                 }));
+             }),
+             // Reactions — dedup only
+@@ -106864,6 +106875,21 @@ class LarkChannel {
+                     this.emitError(e);
+                 }
+             },
++            // Bot removed — direct fire, no safety. Feishu sends this event
++            // only to the Bot that was removed, so surface it before its
++            // WebSocket is eventually closed.
++            'im.chat.member.bot.deleted_v1': (raw) => {
++                var _a, _b;
++                const evt = normalizeBotAdded(raw, { includeRaw });
++                if (!evt)
++                    return;
++                try {
++                    (_b = (_a = this.handlers).botRemoved) === null || _b === void 0 ? void 0 : _b.call(_a, evt);
++                }
++                catch (e) {
++                    this.emitError(e);
++                }
++            },
+             // Drive comments — dedup + lock + queue (by fileToken).
+             // The dedup key folds in replyId so thread replies on the same
+             // top-level comment don't collide with each other (or with the
+diff --git a/lib/index.js b/lib/index.js
+index 0728b1d97ddac688b17642924e359c152dd52fd5..5917a59a5376eb330308ee73ce85b812966eeaa2 100644
+--- a/lib/index.js
++++ b/lib/index.js
+@@ -104924,10 +104924,17 @@ class OutboundSender {
+      */
+     patchCard(messageId, card) {
+         return __awaiter(this, void 0, void 0, function* () {
+-            yield this.client.im.v1.message.patch({
++            const response = yield this.client.im.v1.message.patch({
+                 path: { message_id: messageId },
+                 data: { content: JSON.stringify(card) },
+             });
++            // HTTP success is not a successful card replacement. Do not expose
++            // the provider's free-form message or request data in the error.
++            if (!response || response.code !== 0) {
++                throw new LarkChannelError('unknown', 'feishu_card_update_failed', {
++                    cause: { code: response && Number.isSafeInteger(response.code) ? response.code : null },
++                });
++            }
+         });
+     }
+     /**
+@@ -105487,7 +105494,7 @@ class SafetyPipeline {
+             const task = () => __awaiter(this, void 0, void 0, function* () {
+                 var _e, _f;
+                 try {
+-                    yield handler();
++                    return yield handler();
+                 }
+                 catch (e) {
+                     (_f = (_e = this.logger).error) === null || _f === void 0 ? void 0 : _f.call(_e, `safety: action handler threw`, e);
+@@ -105501,10 +105508,10 @@ class SafetyPipeline {
+                 }
+             });
+             if (this.queueEnabled) {
+-                yield this.manager.run(queueScope, task);
++                return yield this.manager.run(queueScope, task);
+             }
+             else {
+-                yield task();
++                return yield task();
+             }
+         });
+     }
+@@ -106847,11 +106854,15 @@ class LarkChannel {
+                 const evt = normalizeCardAction(raw, { includeRaw });
+                 if (!evt)
+                     return;
+-                const actionId = cardActionId(evt.action);
+-                yield this.safety.pushAction(`card:${evt.messageId}:${evt.operator.openId}:${actionId}`, evt.chatId, () => __awaiter(this, void 0, void 0, function* () {
++                // Separate clicks may have identical button values (2 -> 1 -> 2).
++                // Only the platform event identity denotes a delivery duplicate.
++                const actionId = typeof raw.event_id === 'string' && raw.event_id
++                    ? `event:${this.opts.appId}:${raw.event_id}`
++                    : cardActionId(evt.action);
++                return yield this.safety.pushAction(`card:${evt.messageId}:${evt.operator.openId}:${actionId}`, evt.chatId, () => __awaiter(this, void 0, void 0, function* () {
+                     const h = this.handlers.cardAction;
+                     if (h)
+-                        yield h(evt);
++                        return yield h(evt);
+                 }));
+             }),
+             // Reactions — dedup only
+@@ -106882,6 +106893,21 @@ class LarkChannel {
+                     this.emitError(e);
+                 }
+             },
++            // Bot removed — direct fire, no safety. Feishu sends this event
++            // only to the Bot that was removed, so surface it before its
++            // WebSocket is eventually closed.
++            'im.chat.member.bot.deleted_v1': (raw) => {
++                var _a, _b;
++                const evt = normalizeBotAdded(raw, { includeRaw });
++                if (!evt)
++                    return;
++                try {
++                    (_b = (_a = this.handlers).botRemoved) === null || _b === void 0 ? void 0 : _b.call(_a, evt);
++                }
++                catch (e) {
++                    this.emitError(e);
++                }
++            },
+             // Drive comments — dedup + lock + queue (by fileToken).
+             // The dedup key folds in replyId so thread replies on the same
+             // top-level comment don't collide with each other (or with the
+diff --git a/types/index.d.ts b/types/index.d.ts
+index 1741e0c90073ec038590131c09952a23c222575d..983dd3e6d39ab7b930c9c1146250dc183c0ed6da 100644
+--- a/types/index.d.ts
++++ b/types/index.d.ts
+@@ -322076,9 +322076,10 @@ interface CardStreamController {
+ interface EventMap {
+     message: (msg: NormalizedMessage) => void | Promise<void>;
+     reject: (evt: RejectEvent) => void;
+-    cardAction: (evt: CardActionEvent) => void | Promise<void>;
++    cardAction: (evt: CardActionEvent) => void | object | Promise<void | object>;
+     reaction: (evt: ReactionEvent) => void;
+     botAdded: (evt: BotAddedEvent) => void;
++    botRemoved: (evt: BotAddedEvent) => void;
+     comment: (evt: CommentEvent) => void | Promise<void>;
+     error: (err: LarkChannelError) => void;
+     reconnecting: () => void;

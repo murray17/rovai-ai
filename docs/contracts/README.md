@@ -28,17 +28,42 @@ Architecture 解释组件如何组成，Version 概览记录交付范围；它�
 | 合同 | 权威范围 |
 | --- | --- |
 | [Camp Member Fast v1（当前）](camp-member-fast-v1.md) | Camp/member/保存绑定代次的三态覆盖、原生订阅资格、执行冻结、观察与紧凑 UI |
-| [Camp Open Projection v10（当前）](camp-open-projection-v10.md) | Snapshot 34/Open 6；Open 仅读业务投影，不读取 event_log；移除 timeline/coverage.timeline，保留 high-water 与业务卡片 |
+| [Runtime Images v3（当前）](runtime-images-v3.md) | v2 来源/保存/读取不变；同 Run 的已发送同摘要图片优先展示，共用内容列与贴合原比例的图片框 |
+| [Runtime Images v2（历史）](runtime-images-v2.md) | 本地结构化图片、ACP 增量累积、混合存储与 Camp-scoped 读取；允许显式附件重复展示的规则由 v3 替代 |
+| [Camp Open Projection v12（当前）](camp-open-projection-v12.md) | Snapshot 34/Open 6；保留 main 业务投影与渠道来源、Runtime 图片，只读图片 bytes 按需读取 |
+| [Camp Open Projection v11（历史）](camp-open-projection-v11.md) | 渠道分支 Snapshot 34/Open 5 的可选 agentRunImages 元数据 |
+| [Camp Open Projection v10（历史）](camp-open-projection-v10.md) | main Snapshot 34/Open 6；Open 不读取 event_log，移除 timeline/coverage.timeline，保留 high-water 与业务卡片 |
+| [Camp Open Projection v10（渠道分支历史）](camp-open-projection-channel-v10.md) | v9 保留；Camp/Navigation 增加可选 channelSource，原始 title 不变；合并时保留原文以区分同号合同 |
 | [Camp Open Projection v9（历史）](camp-open-projection-v9.md) | v8 保留；Snapshot 34/Open 5 增加可选 member.fast，仅查询安全缓存 |
 | [Runtime Launch and Verification v29（当前）](runtime-launch-and-verification-v29.md) | v28 保留；现有 Check Manager 的 Fast metadata 与单执行原生覆盖 |
 | [Runtime Usage Monitoring v4（当前）](runtime-usage-monitoring-v4.md) | v3 保留；可选实际档位、observed 优先与未知撤回估价 |
 | [Pending Camp Input v1（当前）](pending-camp-input-v1.md) | 私有下一轮输入、FIFO、编辑 token、暂停、原子发布与无附件边界 |
 | [Camp Identity v1（当前）](camp-identity-v1.md) | 唯一 `rvcamp_` UUIDv7/Crockford 主键、strict boundary、SQLite/JSON/path 使用与 Native Session identity 分离 |
-| [Desktop Runtime Availability v1（当前）](desktop-runtime-availability-v1.md) | Bootstrap/Full Core capability、Supervisor generation/revision、data-dir lease、SQLite 准入票据、copy migration 与结构化 request failure |
+| [Desktop Runtime Availability v2（当前）](desktop-runtime-availability-v2.md) | 严格 lease/ticket 后原位逐版本事务、receipt 续跑、旧 manifest 恢复、独立瞬时重试与统一会话启动反馈；generation/capability 不变 |
+| [Desktop Runtime Availability v1（历史）](desktop-runtime-availability-v1.md) | Bootstrap/Full Core、SQLite 准入、copy/switch 与结构化 failure；旧 manifest 恢复仍保留，普通升级执行策略由 v2 替代 |
 | [First-run Onboarding v3（当前）](first-run-onboarding-v3.md) | v2 schema/flow 不变；首次安装改用 Full Core authority origin，损坏偏好只在内存降级且保留原文件 |
 | [First-run Onboarding v2（历史）](first-run-onboarding-v2.md) | v1 admission/provisioning 不变；schema 2 增加无可用 Runtime 时无产品副作用的 `runtime_deferred` 终态；其 pre-Core 文件存在性 admission 已由 v3 替代 |
 | [First-run Onboarding v1（历史）](first-run-onboarding-v1.md) | Desktop 首次安装判定、三页 mandatory 状态、幂等 provisioning、`初次集结` 与第四页 Draft-only 入口；不允许无 Runtime 完成 |
 | [Camp Membership v1（当前）](camp-membership-v1.md) | 动态添加/移除、至少一位成员、generation/version、atomic cutover、durable reconciliation、exact lifetime fence 与受信外部来源 |
+| [Channel Storage v2（当前）](channel-storage-v2.md) | v1 存储与秘密边界不变；飞书三态检查、独立 Bot 启动及钉钉 completed 同应用凭据恢复 |
+| [Channel Camp Naming v1（当前）](channel-camp-naming-v1.md) | 五种渠道复用普通自动命名、原始 title 与只读 channelSource 分离、闭合绑定来源保留和 Renderer 前缀 |
+| [Channel Host Maintenance v1（当前）](channel-host-maintenance-v1.md) | 无永久 poll 回执的强类型维护请求、原子 FIFO/Outbox 维护、lease 恢复与真实业务命令幂等保留 |
+| [Channel/Main Schema Join v2（当前）](channel-main-schema-join-v2.md) | 精确来源与既有 receipt 含义不变；原库事务重映射 main 117/118/119→126/127/130，逐步恢复，128/129 历史合同保留，131 封口 |
+| [Channel/Main Schema Join v1（历史）](channel-main-schema-join-v1.md) | 主线 Pending/Fast 与渠道精确来源准入、126/127 receipt 与 128 封闭；副本执行位置由 v2 替代 |
+| [Channel Storage v1（历史）](channel-storage-v1.md) | 飞书/钉钉 credential 与 Developer Session 的 `rovai.sqlite` 明文存储、Main-only API、批量启动、账号/发布原子提交、CAS refresh 与旧 `.bin` clean break |
+| [Feishu Channel v8（当前）](feishu-channel-v8.md) | v7 执行卡不变；群/话题首次卡支持项目或 Quick Chat，共用 Owner/roster/FIFO 原子绑定；Migration 132 保留旧数据并允许无项目 resolved |
+| [Feishu Channel v7（历史）](feishu-channel-v7.md) | v6 封存/分页/永久正文不变；实时卡当前正文/command/进度加10-command/20-block滚动折叠，16KB/30-element上限；共享安全 publicResult |
+| [Feishu Channel v6（历史）](feishu-channel-v6.md) | 分页仅同步 response card；永久正文改为无标题卡片及实际接收对象行；执行中平铺由 v7 替代 |
+| [Feishu Channel v5（历史）](feishu-channel-v5.md) | v4 封存/授权不变；终态双层原生折叠、翻页外层展开、15-command/50-element/24KB 分页与 4KiB 安全结果；分页 PATCH 后空 ACK 由 v6 替代 |
+| [Feishu Channel v4（历史）](feishu-channel-v4.md) | 终态文字/command 混排、原生单条折叠、安全结果 20 行、15-command/50-element 分页、不可变 sealed 内容与无状态翻页；Migration 125 清理旧 view state；终态容器和预算由 v5 替代 |
+| [Feishu Channel v3（历史）](feishu-channel-v3.md) | 飞书终态外层原生折叠、正文直接可见、仅过程分页与翻页保持展开；终态呈现由 v4 替代 |
+| [Feishu Channel v2（历史）](feishu-channel-v2.md) | Owner-only 入站、Quick Chat/PendingCampBinding、统一 admission、每 AgentRun 临时执行控制台、永久 Markdown 与 Managed Attachment 原生投递；终态平铺由 v3 替代，存储条款由 Channel Storage v2 替代 |
+| [Feishu Channel v1（历史）](feishu-channel-v1.md) | Developer Identity/Session、持久 Bot publication intent、owner-only ProjectBinding、ExternalPrincipal、multi-App aggregate、serial ChannelTurnRequest、roster 与 durable ChannelDelivery；不含 template/activation-first 恢复边界 |
+| [DingTalk Channel v5（当前）](dingtalk-channel-v5.md) | v4 身份/存储/发布不变；Rovai 内置官方 QR、Main sandbox 原生交互页、exact-attempt 刷新与静默取消；不新增 Migration |
+| [DingTalk Channel v4（历史）](dingtalk-channel-v4.md) | Main Web Session/SSO、schema-2 Cookie SQLite、封闭控制台创建/头像/Bot/权限/冻结版本发布、Owner-only 可见范围与中断防重建；独立窗口登录由 v5 内置扫码替代 |
+| [DingTalk Channel v3（历史）](dingtalk-channel-v3.md) | v2 发布/Stream/Owner/项目/投递不变；删除设备授权，仅浏览器 OAuth；其 Client/Profile 登录语义由 v4 Web Session 替代 |
+| [DingTalk Channel v2（历史）](dingtalk-channel-v2.md) | Main 直接 OAuth/Developer API、每队员 immutable 应用机器人、显式审批、Owner-only 私聊/普通群、统一 admission、群 roster、AI 卡片/Markdown、恢复和保守 feature gate；存储条款由 Channel Storage v2 替代 |
+| [DingTalk Channel v1（历史）](dingtalk-channel-v1.md) | Rovai OAuth/DWS Gateway、staged Profile 切换、每队员 immutable 应用机器人、Owner-only 私聊/普通群、统一 admission、AI 卡片/Markdown 与保守 feature gate |
 | [Camp Open Projection v8（历史）](camp-open-projection-v8.md) | v7 read/membership state 不变；Snapshot 34/Open 5 增加每 AgentRun/epoch 文件变化 summary |
 | [Camp Open Projection v7（历史）](camp-open-projection-v7.md) | v6 read/attachment state 不变；Snapshot 33/Open 4 增加 membership generation 与活动 reconciliation |
 | [Camp Open Projection v6（历史）](camp-open-projection-v6.md) | v5 read/evidence 不变；Message Attachment 增加 Runtime projection state，Renderer 诚实展示 pending/recovery/failed |
@@ -125,7 +150,8 @@ Architecture 解释组件如何组成，Version 概览记录交付范围；它�
 | [Built-in Tool Transport v7 (historical)](builtin-tool-transport-v7.md) | v0.67 的 Camp Message Send v4、exact Camp read addressing 与初版渐进式 CLI 教学；不作为 v0.73 CLI context/catalog 入口 |
 | [Built-in Tool Transport v7 Errata](builtin-tool-transport-v7-errata.md) | 历史 v7 locator-present recovery 勘误；其 self-write exact-read 语义已由 v8/v9 继承 |
 | [Durable Task v3（当前）](durable-task-v3.md) | User/Lead 责任定义、Assignee execution-state update、Camp-wide read、explicit owner、unassigned holding 与 advisory actions |
-| [Camp Message Send v15（当前）](camp-message-send-v15.md) | Agent/User Automation 保持既有合同；Desktop Composer 增加私有 next-turn admission |
+| [Camp Message Send v16（当前）](camp-message-send-v16.md) | v15 发送语义不变；收件人文件用途教学与新飞书 Session 的冻结交付提示，Charter revision 3 |
+| [Camp Message Send v15（历史）](camp-message-send-v15.md) | Agent/User Automation 保持既有合同；Desktop Composer 增加私有 next-turn admission |
 | [Camp Message Send v14（历史）](camp-message-send-v14.md) | v13 原子提交/结果不变；CLI 接受 Runtime 可读外部文件/目录并在 IPC 前快照 |
 | [Camp Message Send v13（历史）](camp-message-send-v13.md) | v12 input/结果不变；Agent files 一次 ingest 为 Managed v2，Delivery 不再进入 publication gate 或等待活跃 Run |
 | [Camp Message Send v12（历史）](camp-message-send-v12.md) | v11 publication/结果不变；body 可选默认空串，正文或至少一个文件即可构成 Send payload |
@@ -138,7 +164,8 @@ Architecture 解释组件如何组成，Version 概览记录交付范围；它�
 | [Camp Message Send v5 (historical)](camp-message-send-v5.md) | v4 Core 效果与 wire 不变；收窄 `mentionUser` / `--to-user` 的消息局部使用边界，但正文不解析显示名 alias |
 | [Camp Message Send v4 (historical)](camp-message-send-v4.md) | v3 显式 Agent 寻址/caller return 加初版 `--to-user`、Structured Current User Mention 与原子通知 |
 | [Camp Message Send v4 Errata](camp-message-send-v4-errata.md) | 历史 v4 Current User Attention 生命周期与 locator-present exact verification 勘误；其修正已由 v5 继承 |
-| [Notification Episode v4（当前）](notification-episode-v4.md) | v3 精确 signal 生命周期加会话可见来源的有界批量确认与即时角标刷新 |
+| [Notification Episode v5（当前）](notification-episode-v5.md) | v4 生命周期不变；camp 增加只读 channelSource，schema 6 与原始 title 不变 |
+| [Notification Episode v4（历史）](notification-episode-v4.md) | v3 精确 signal 生命周期加会话可见来源的有界批量确认与即时角标刷新 |
 | [Notification Episode v3 (historical)](notification-episode-v3.md) | v2 精确 signal 加 Journal acknowledgement/Clear/remove invalidation、顺序式队列归约与 reset 清空；不含普通会话可见来源确认 |
 | [Notification Episode v2 (historical)](notification-episode-v2.md) | v1 三层模型加 Active Attention、exact HeadsUpSignal、事务式 Renderer cursor、pending-first Approval 与 acknowledge-only action；不含 signal 入队后的精确失效合同 |
 | [Notification Episode v1 (historical)](notification-episode-v1.md) | 初版 immutable Occurrence、separate Disposition、materialized Episode、minimal Change Journal、bounded write、typed action、heads-up 与 retention |
@@ -195,7 +222,8 @@ Architecture 解释组件如何组成，Version 概览记录交付范围；它�
 | [Message Delivery v2 (historical)](message-delivery-v2.md) | `forward | return` 冻结边、target lineage、caller continuation，以及 v1 queue/attempt/recovery/settlement |
 | [Message Delivery v1 (historical)](message-delivery-v1.md) | 无 caller-return 分类的 recipient queue、dispatch attempt、waitCondition、retry/cancel 与 settlement |
 | [Current Input Skill Links v1（当前）](current-input-skill-links-v1.md) | Structured Skill Mention、per-Run send snapshot、start-time resolver 与 optional sibling `CURRENT_INPUT.skills[{name,path}]` |
-| [ContextManifest Evidence v21（当前）](context-manifest-evidence-v21.md) | Formatter 21 bytes 不变；View receipt v2 只冻结稳定附件语义；Migration 100 clean break 后由 publication guard 推进到 schema 56/Migration 101 |
+| [ContextManifest Evidence v22（当前）](context-manifest-evidence-v22.md) | v21 selection/evidence 不变；Formatter/Manifest 22 增加 ExternalPrincipal direct source 与 ExternalQuote deterministic projection |
+| [ContextManifest Evidence v21（历史）](context-manifest-evidence-v21.md) | Formatter 21 bytes 不变；View receipt v2 只冻结稳定附件语义；不含 ExternalPrincipal/ExternalQuote |
 | [ContextManifest Evidence v20（历史）](context-manifest-evidence-v20.md) | Formatter 21、mandatory Run Facts v2、Published View paths/physical receipt、schema 54 与 Migration 99 clean break |
 | [ContextManifest Evidence v19（历史）](context-manifest-evidence-v19.md) | Formatter v20 与 v18 wire 不变；冻结 Profile v4 的自身 recent 作者过滤、eligible omission、schema 53 与 Migration 98 clean break；不含 View receipt |
 | [ContextManifest Evidence v18（历史）](context-manifest-evidence-v18.md) | Formatter v20；v17 section/evidence 不变，Shared Conversation、Manifest 与 History Camp reference 只使用 canonical Camp ID；不含自身 recent 作者过滤 |

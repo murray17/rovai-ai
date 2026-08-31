@@ -10,6 +10,7 @@ import type {
   AdapterInstallation,
   AgentProfile,
   AgentRunFileChangesView,
+  AgentRunImagesView,
   AgentRunExecutionEvidencePage,
   AgentRunExecutionEvidenceView,
   AgentRunView,
@@ -47,6 +48,7 @@ import {
   agentRunWaitDetail,
   buildLiveExecutionProgress,
   executionEvidenceResultText,
+  executionStepPublicTitle,
   formatByteSize,
   liveRuntimeEventFromExecutionEvidence,
   type LiveExecutionProgress,
@@ -60,10 +62,12 @@ import {
   timelineDayLabel
 } from './ui-model'
 import { MemberAvatar } from './MemberAvatar'
+import { ImageGallery, groupMessageAttachments } from './ImageGallery'
 import { ExecutionAvatarRail } from './ExecutionAvatarRail'
 import { AgentRunDeliveryRecipients } from './AgentRunDeliveryRecipients'
 import { MemberPortrait } from './MemberPortrait'
 import { localizeExecutionEngineTerms } from './product-copy'
+import { formatCampTitle } from './camp-title'
 import { writeClipboardText } from './clipboard'
 import { runtimeReadinessLabel } from './runtime-status'
 import { runtimeEditorInstallation } from './MemberRuntimeParameters'
@@ -872,6 +876,12 @@ export type CampConversationTimelineItem =
       changes: AgentRunFileChangesView
     }
   | {
+      kind: 'run_images'
+      id: string
+      createdAt: string
+      images: AgentRunImagesView
+    }
+  | {
       kind: 'stop_event'
       id: string
       createdAt: string
@@ -884,7 +894,8 @@ const TIMELINE_KIND_RANK: Record<CampConversationTimelineItem['kind'], number> =
   camp_message: 0,
   task_card: 1,
   stop_event: 2,
-  run_file_changes: 3
+  run_images: 3,
+  run_file_changes: 4
 }
 
 function compareTimelinePresentationOrder(
@@ -901,7 +912,8 @@ export function campConversationTimeline(
   turns: CampSnapshot['turns'] = [],
   agentRuns: CampSnapshot['agentRuns'] = [],
   tasks: CampSnapshot['tasks'] = [],
-  agentRunFileChanges: CampSnapshot['agentRunFileChanges'] = []
+  agentRunFileChanges: CampSnapshot['agentRunFileChanges'] = [],
+  agentRunImages: AgentRunImagesView[] = []
 ): CampConversationTimelineItem[] {
   const taskCards: CampConversationTimelineItem[] = tasks.map((task) => ({
     kind: 'task_card',
@@ -915,6 +927,14 @@ export function campConversationTimeline(
     createdAt: changes.completedAt,
     changes
   }))
+  const runImageCards: CampConversationTimelineItem[] = agentRunImages
+    .filter((images) => images.images.length > 0)
+    .map((images) => ({
+      kind: 'run_images',
+      id: `run-images:${images.agentRunId}:${images.executionEpoch}`,
+      createdAt: images.createdAt,
+      images
+    }))
   const publicMessages = messages
     .filter((message) => {
       const kind = (message.presentation as { kind?: string } | null)?.kind
@@ -948,7 +968,7 @@ export function campConversationTimeline(
     return left.message.sequence - right.message.sequence
       || compareTimelinePresentationOrder(left, right)
   })
-  const sortedCards = [...taskCards, ...stopEvents, ...runFileChangeCards]
+  const sortedCards = [...taskCards, ...stopEvents, ...runImageCards, ...runFileChangeCards]
     .sort(compareTimelinePresentationOrder)
   const sortedItems: CampConversationTimelineItem[] = []
   let messageIndex = 0
@@ -971,20 +991,30 @@ export function campConversationTimeline(
   }
   const anchoredCardIds = new Set<string>()
   const cardsByAnchorMessageId = new Map<string, CampConversationTimelineItem[]>()
-  for (const card of runFileChangeCards) {
-    if (card.kind !== 'run_file_changes') continue
-    const anchor = lastPublicMessageByRunId.get(card.changes.agentRunId)
+  for (const card of [...runImageCards, ...runFileChangeCards]) {
+    if (card.kind !== 'run_file_changes' && card.kind !== 'run_images') continue
+    const runId = card.kind === 'run_images' ? card.images.agentRunId : card.changes.agentRunId
+    // With no public message, place the images immediately before that Run's Files Changed.
+    const fileCard = card.kind === 'run_images'
+      ? runFileChangeCards.find((candidate) => candidate.kind === 'run_file_changes'
+        && candidate.changes.agentRunId === runId && candidate.changes.executionEpoch === card.images.executionEpoch)
+      : undefined
+    const anchor = lastPublicMessageByRunId.get(runId) ?? fileCard
     if (!anchor) continue
     anchoredCardIds.add(card.id)
     cardsByAnchorMessageId.set(
       anchor.id,
-      [...(cardsByAnchorMessageId.get(anchor.id) ?? []), card].sort(compareTimelinePresentationOrder)
+      [...(cardsByAnchorMessageId.get(anchor.id) ?? []), card].sort((left, right) =>
+        TIMELINE_KIND_RANK[left.kind] - TIMELINE_KIND_RANK[right.kind]
+          || compareTimelinePresentationOrder(left, right)
+      )
     )
   }
 
   return sortedItems.flatMap((item) => {
     if (anchoredCardIds.has(item.id)) return []
-    return [item, ...(cardsByAnchorMessageId.get(item.id) ?? [])]
+    const cards = cardsByAnchorMessageId.get(item.id) ?? []
+    return item.kind === 'run_file_changes' ? [...cards, item] : [item, ...cards]
   })
 }
 
@@ -1034,6 +1064,15 @@ export function structuredCampContentPlainText(
     if (segment.kind === 'all_members_mention') return '@所有队员'
     if (segment.kind === 'current_user_mention') return '@你'
     if (segment.kind === 'skill_mention') return `/${segment.nameAtSend}`
+    if (segment.kind === 'external_quote') {
+      const attachments = segment.attachmentSummaries
+        .map((attachment) => `\n> [附件] ${attachment.name}${attachment.mediaType ? ` (${attachment.mediaType})` : ''}`)
+        .join('')
+      const body = segment.body.length > 0
+        ? segment.body.replaceAll('\n', '\n> ')
+        : '（无文本）'
+      return `引用 ${segment.senderDisplayName}：\n> ${body}${attachments}`
+    }
     return `@${names.get(segment.agentId) ?? '不可用队员'}`
   }).join('')
   return content[0]?.kind === 'current_user_mention' && content.length > 1
@@ -1069,6 +1108,9 @@ function structuredCampContentMarkdownText(
     }
     if (segment.kind === 'skill_mention') {
       return escapeMarkdownLiteral(`/${segment.nameAtSend}`)
+    }
+    if (segment.kind === 'external_quote') {
+      return escapeMarkdownLiteral(`引用 ${segment.senderDisplayName}：${segment.body}`)
     }
     return ''
   }).join('')
@@ -1133,7 +1175,7 @@ export function QuickChatWorkspace({
                   <span className="camp-marker-slot" aria-hidden="true">
                     {camp.marker === 'unread_completed' && <i className="task-dot camp-marker-unread_completed" />}
                   </span>
-                  <span className="truncate">{camp.title}</span>
+                  <span className="truncate" title={formatCampTitle(camp)}>{formatCampTitle(camp)}</span>
                   {camp.marker === 'loading' && <span className="camp-loading-spinner camp-marker-loading" role="img" aria-label="正在运行" />}
                   <small>{relativeTimeLabel(camp.lastActivityAt)}</small>
                 </button>
@@ -1700,13 +1742,15 @@ export function CampWorkspace({
       snapshot.turns,
       snapshot.agentRuns,
       snapshot.tasks,
-      snapshot.agentRunFileChanges
+      snapshot.agentRunFileChanges,
+      snapshot.agentRunImages
     ),
     [
       snapshot.agentRuns,
       snapshot.tasks,
       snapshot.turns,
       snapshot.agentRunFileChanges,
+      snapshot.agentRunImages,
       visibleCampMessages
     ]
   )
@@ -3578,7 +3622,7 @@ export function CampWorkspace({
   ) : null
 
   return (
-    <section className="workspace-shell camp-workspace" aria-label={`会话：${snapshot.camp.title}`}>
+    <section className="workspace-shell camp-workspace" aria-label={`会话：${formatCampTitle(snapshot.camp)}`}>
       <FilePreviewWorkspace
       >
         <section
@@ -3805,6 +3849,17 @@ export function CampWorkspace({
                     )
                     continue
                   }
+                  if (timelineItem.kind === 'run_images') {
+                    previousMessageAuthorKey = null
+                    items.push(
+                      <div className="timeline-node conversation-bubble runtime-image-supplement" key={timelineItem.id}>
+                        <div className="message-body">
+                          <ImageGallery images={timelineItem.images.images.map((image) => ({ kind: 'runtime', campId: snapshot.camp.id, image }))} />
+                        </div>
+                      </div>
+                    )
+                    continue
+                  }
                   if (timelineItem.kind === 'run_file_changes') {
                     previousMessageAuthorKey = null
                     items.push(
@@ -3836,9 +3891,7 @@ export function CampWorkspace({
                   }
                   const campMessage = timelineItem.message
                   const member = memberById.get(campMessage.authorId)
-                  const author = campMessage.authorType === 'user'
-                    ? '你'
-                    : member?.displayName ?? (campMessage.authorType === 'system' ? '系统' : campMessage.authorId)
+                  const author = campMessageAuthorLabel(campMessage, memberById)
                   const authorProfile = profileById.get(campMessage.authorId) ?? null
                   const authorProfileAvailable = Boolean(
                     campMessage.authorType === 'agent'
@@ -3851,7 +3904,9 @@ export function CampWorkspace({
                     ? runById.get(campMessage.sourceAgentRunId) ?? null
                     : null
                   const displayBody = campMessage.body
-                  const messageAuthorKey = campMessage.authorType === 'user' || campMessage.authorType === 'agent'
+                  const messageAuthorKey = campMessage.authorType === 'user'
+                    || campMessage.authorType === 'agent'
+                    || campMessage.authorType === 'external_principal'
                     ? `${campMessage.authorType}:${campMessage.authorId}`
                     : null
                   const followsSameAuthor = messageAuthorKey !== null
@@ -3902,10 +3957,12 @@ export function CampWorkspace({
                               decorative
                             />
                           ))}
-                      {campMessage.authorType === 'user' && (
+                      {(campMessage.authorType === 'user' || campMessage.authorType === 'external_principal') && (
                         <span className="local-message-avatar" aria-hidden="true">你</span>
                       )}
-                      {(campMessage.authorType === 'user' || campMessage.authorType === 'agent')
+                      {(campMessage.authorType === 'user'
+                        || campMessage.authorType === 'agent'
+                        || campMessage.authorType === 'external_principal')
                         ? (
                             <div className="message-body">
                               <div className="bubble-meta">
@@ -3942,7 +3999,7 @@ export function CampWorkspace({
                                   <ReplyParentQuote
                                     parent={replyParent}
                                     authorLabel={replyParent
-                                      ? campMessageAuthorLabel(replyParent, snapshot.members)
+                                      ? campMessageAuthorLabel(replyParent, memberById)
                                       : null}
                                     unavailable={replyParentUnavailable}
                                     loading={!replyParent && !replyParentUnavailable}
@@ -4009,15 +4066,11 @@ export function CampWorkspace({
                                 )}
                                 {campMessage.attachments.length > 0 && (
                                   <div className="timeline-attachments" aria-label="消息附件">
-                                    {campMessage.attachments.map((attachment) => (
-                                      <AttachmentCard
-                                        attachment={attachment}
-                                        campId={snapshot.camp.id}
-                                        key={attachment.id}
-                                        onNotify={onNotify}
-                                        timeline
-                                      />
-                                    ))}
+                                    {groupMessageAttachments(campMessage.attachments).map((segment) => segment.kind === 'images'
+                                      ? <ImageGallery key={segment.attachments[0].id}
+                                          images={segment.attachments.map((image) => ({ kind: 'attachment', campId: snapshot.camp.id, image }))} />
+                                      : <AttachmentCard attachment={segment.attachment} campId={snapshot.camp.id}
+                                          key={segment.attachment.id} onNotify={onNotify} timeline />)}
                                   </div>
                                 )}
                               </MessageSurface>
@@ -6846,12 +6899,12 @@ function StopOutcomeEvent({
 
 function campMessageAuthorLabel(
   message: CampMessageView,
-  members: CampSnapshot['members']
+  memberById: ReadonlyMap<string, CampSnapshot['members'][number]>
 ): string {
-  if (message.authorType === 'user') return '你'
+  // Channel admission is Owner-only; this label does not change the stored author.
+  if (message.authorType === 'user' || message.authorType === 'external_principal') return '你'
   if (message.authorType === 'system') return '系统'
-  return members.find((member) => member.agentId === message.authorId)?.displayName
-    ?? message.authorId
+  return memberById.get(message.authorId)?.displayName ?? message.authorId
 }
 
 function ReplyParentQuote({
@@ -6875,13 +6928,43 @@ function ReplyParentQuote({
       </div>
     )
   }
-  const excerpt = parent.body.split(/\s+/u).filter(Boolean).join(' ')
-  const label = `${authorLabel ?? '原消息'} · ${excerpt}`
+  return (
+    <MessageQuotePreview
+      authorLabel={authorLabel ?? '原消息'}
+      body={parent.body}
+      onReveal={onReveal}
+    />
+  )
+}
+
+function MessageQuotePreview({
+  authorLabel,
+  body,
+  onReveal
+}: {
+  authorLabel: string
+  body: string
+  onReveal?(): void
+}): JSX.Element {
+  const excerpt = body.split(/\s+/u).filter(Boolean).join(' ')
+  const label = `${authorLabel} · ${excerpt}`
+  const preview = (
+    <>
+      <ReplyMark />
+      <strong>{authorLabel}</strong>
+      <span>{excerpt}</span>
+    </>
+  )
+  if (!onReveal) {
+    return (
+      <span className="reply-parent-quote is-static" title={label}>
+        {preview}
+      </span>
+    )
+  }
   return (
     <button className="reply-parent-quote" type="button" title={label} onClick={onReveal}>
-      <ReplyMark />
-      <strong>{authorLabel ?? '原消息'}</strong>
-      <span>{excerpt}</span>
+      {preview}
     </button>
   )
 }
@@ -7025,11 +7108,18 @@ function StructuredMessageBody({
   return (
     <Tag className="structured-message-body">
       {content.map((segment, index) => {
-        if (segment.kind === 'text') return (
-          <span key={`text-${index}`}>
-            <FileReferenceText text={segment.text} onActivate={onFileReference} />
-          </span>
-        )
+        if (segment.kind === 'text') {
+          // Core's quote separator belongs to the plain-text/context projection;
+          // the shared preview already owns the visual gap before the message.
+          const text = content[index - 1]?.kind === 'external_quote'
+            ? segment.text.replace(/^\n\n/u, '')
+            : segment.text
+          return text ? (
+            <span key={`text-${index}`}>
+              <FileReferenceText text={text} onActivate={onFileReference} />
+            </span>
+          ) : null
+        }
         if (segment.kind === 'current_user_mention') {
           return (
             <span key={`current-user-${index}`}>
@@ -7049,6 +7139,19 @@ function StructuredMessageBody({
             >
               /{segment.nameAtSend}
             </span>
+          )
+        }
+        if (segment.kind === 'external_quote') {
+          const excerpt = [
+            segment.body,
+            ...segment.attachmentSummaries.map((attachment) => `[附件] ${attachment.name}`)
+          ].filter((text) => text.trim().length > 0).join(' ')
+          return (
+            <MessageQuotePreview
+              key={`external-quote-${index}`}
+              authorLabel={segment.senderDisplayName}
+              body={excerpt || '（无文本）'}
+            />
           )
         }
         if (segment.kind === 'all_members_mention') {
@@ -8005,11 +8108,12 @@ function ToolCallRow({
   const [activated, setActivated] = useState(false)
   const summaryRef = useRef<HTMLElement>(null)
   const status = activityStatusForAgentRun(step.status, runStatus)
+  const publicTitle = executionStepPublicTitle(step)
   const hasDetail = Boolean(step.detail) || completeEvidence !== undefined
   const summary = (
     <>
       <ToolCallIcon iconKind={step.iconKind} />
-      <span className="tool-call-title" title={step.title}>{step.title}</span>
+      <span className="tool-call-title" title={publicTitle}>{publicTitle}</span>
       <ToolCallState status={status} />
       <span
         className={`tool-call-disclosure-slot${hasDetail ? '' : ' is-placeholder'}`}
@@ -8053,7 +8157,7 @@ function ToolCallRow({
           completeEvidence={completeEvidence}
           expanded={expanded}
           resultKey={`${runId}:${step.id}`}
-          title={step.title}
+          title={publicTitle}
           summaryRef={summaryRef}
         />
       )}

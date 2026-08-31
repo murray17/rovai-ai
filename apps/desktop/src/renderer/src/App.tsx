@@ -90,12 +90,14 @@ import {
 import { NotificationSettings } from './NotificationSettings'
 import { SkillSettings } from './SkillSettings'
 import { McpSettings } from './McpSettings'
+import { ChannelSettings } from './ChannelSettings'
 import { SettingsPageHeader } from './SettingsPageHeader'
 import { GeneralSettings } from './GeneralSettings'
 import { MemoryLibrary } from './MemoryLibrary'
 import { DiagnosticsCenter } from './DiagnosticsCenter'
 import { RuntimeMonitoring } from './RuntimeMonitoring'
 import { localizeExecutionEngineTerms } from './product-copy'
+import { formatCampTitle } from './camp-title'
 import {
   applyAppearanceSnapshot,
   initialAppearanceSnapshot
@@ -144,6 +146,7 @@ const ACTIVE_CAMP_INVALIDATION_EVENTS = new Set([
   'agent_run.recovery_blocker_resolved',
   'agent_run.runtime_model_observed',
   'agent_run.terminal',
+  'agent_run.images.updated',
   'agent_run.file_changes_completed'
 ])
 
@@ -373,6 +376,7 @@ export function campOpenProjectionAsSnapshot(
     agentRuns: projection.agentRuns,
     executionEvidence: projection.executionEvidence,
     agentRunFileChanges: projection.agentRunFileChanges,
+    agentRunImages: projection.agentRunImages ?? [],
     contextManifests: [],
     approvals: projection.approvals,
     actions: [],
@@ -656,7 +660,6 @@ export function App(): React.JSX.Element {
       snapshot={startupSnapshot}
       feedbackVisible={startupFeedbackDelayElapsed}
       error={startupError}
-      migrating={supervisor?.startupPhase === 'migrating_authority'}
       onRetry={() => setStartupReadAttempt((attempt) => attempt + 1)}
     />
   }
@@ -692,13 +695,11 @@ function StartupWorkspace({
   snapshot,
   feedbackVisible,
   error,
-  migrating = false,
   onRetry
 }: {
   snapshot: DesktopStartupSnapshot | null
   feedbackVisible: boolean
   error: string | null
-  migrating?: boolean
   onRetry(): void
 }): React.JSX.Element {
   const target = snapshot ? startupTargetFromSnapshot(snapshot) : null
@@ -746,7 +747,6 @@ function StartupWorkspace({
               kind={target.kind}
               waiting={error !== null}
               error={error}
-              migrating={migrating}
               onRetry={onRetry}
             />
           : <StartupGate waiting={error !== null} error={error} onRetry={onRetry} />)}
@@ -787,8 +787,8 @@ export function BootstrapShell({
     setActionError(null)
     try {
       await window.rovai.supervisor.retryFullCore()
-    } catch (error) {
-      setActionError(errorMessage(error))
+    } catch {
+      setActionError('暂时无法重新打开，请重试。')
     } finally {
       setBusy(null)
     }
@@ -798,8 +798,8 @@ export function BootstrapShell({
     setActionError(null)
     try {
       await window.rovai.exportDiagnostics()
-    } catch (error) {
-      setActionError(errorMessage(error))
+    } catch {
+      setActionError('暂时无法导出诊断，请重试。')
     } finally {
       setBusy(null)
     }
@@ -808,8 +808,8 @@ export function BootstrapShell({
     setActionError(null)
     try {
       setAppearance(await window.rovai.appearance.setPreference(preference))
-    } catch (error) {
-      setActionError(errorMessage(error))
+    } catch {
+      setActionError('暂时无法保存外观设置，请重试。')
     }
   }
 
@@ -827,11 +827,6 @@ export function BootstrapShell({
           </span>
           <h1>{authorityCopy.title}</h1>
           <p>{authorityCopy.description}</p>
-          {snapshot?.startupPhase === 'migrating_authority' && (
-            <div className="bootstrap-migration-progress" role="progressbar" aria-label="正在升级本地数据">
-              <i />
-            </div>
-          )}
           <div className="bootstrap-actions">
             <button
               className="primary-button"
@@ -839,8 +834,7 @@ export function BootstrapShell({
               disabled={busy !== null || !snapshot?.capabilities.fullCoreRetry}
               onClick={() => void retry()}
             >
-              {busy === 'retry' ? '正在重试…'
-                : snapshot?.startupPhase === 'preparing_windows_data_root' ? '重启并重新检查' : '重新检查'}
+              {busy === 'retry' ? '正在打开会话' : '重新打开'}
             </button>
             <button
               className="quiet-button"
@@ -851,9 +845,9 @@ export function BootstrapShell({
               {busy === 'diagnostics' ? '正在导出…' : '导出诊断'}
             </button>
           </div>
-          {(actionError || snapshot?.lastError) && (
+          {actionError && (
             <p className="bootstrap-action-error" role="alert">
-              {actionError ?? snapshot?.lastError?.message}
+              {actionError}
             </p>
           )}
         </section>
@@ -861,7 +855,7 @@ export function BootstrapShell({
         <aside className="bootstrap-local-card">
           <div>
             <span className="bootstrap-local-label">本地外观</span>
-            <p>壳层设置不依赖权威工作区，可以继续使用。</p>
+            <p>你仍然可以调整外观。</p>
           </div>
           <div className="bootstrap-theme-options" role="group" aria-label="外观主题">
             {([
@@ -882,11 +876,7 @@ export function BootstrapShell({
           {(snapshot?.localDegradations.length ?? 0) > 0 && (
             <div className="bootstrap-degradations">
               <span className="bootstrap-local-label">本机设置提示</span>
-              <ul>
-                {snapshot?.localDegradations.map((degradation) => (
-                  <li key={degradation.code}>{degradation.message}</li>
-                ))}
-              </ul>
+              <p>部分本机设置暂时无法读取，可导出诊断以排查原因。</p>
             </div>
           )}
         </aside>
@@ -900,52 +890,11 @@ export function bootstrapAuthorityCopy(snapshot: SupervisorSnapshot | null): {
   title: string
   description: string
 } {
-  if (snapshot?.startupPhase === 'preparing_windows_data_root') {
-    return {
-      eyebrow: '桌面壳层已就绪',
-      title: '本机数据目录尚未准备好',
-      description: 'Core 尚未启动，也没有建立替代工作区。请查看具体原因，修复后重启桌面壳层并重新检查，或先导出诊断。'
-    }
-  }
-  if (!snapshot || snapshot.fullCoreState === 'idle' || snapshot.fullCoreState === 'starting') {
-    if (snapshot?.startupPhase === 'migrating_authority') {
-      return {
-        eyebrow: '正在安全升级',
-        title: '工作区数据正在迁移',
-        description: 'Rovai 正在一致副本上升级并验证数据；原数据库会保留到原子切换完成。'
-      }
-    }
-    return {
-      eyebrow: '桌面壳层已就绪',
-      title: '正在检查本地工作区',
-      description: '外观、诊断和本机状态已经可用；权威工作区通过检查后会自动打开。'
-    }
-  }
-  if (snapshot.authorityState.kind === 'owned_by_active_core') {
-    return {
-      eyebrow: '工作区正在使用',
-      title: '另一个 Rovai Core 正在使用这份数据',
-      description: '当前窗口没有创建第二份数据。关闭另一个实例后，可在这里重新检查。'
-    }
-  }
-  if (snapshot.authorityState.kind === 'migration_failed') {
-    return {
-      eyebrow: '升级尚未完成',
-      title: '原工作区仍被安全保留',
-      description: '迁移副本未通过完整流程，Rovai 没有切换或建立空数据库。可以重试并导出诊断。'
-    }
-  }
-  if (snapshot.fullCoreState === 'crashed') {
-    return {
-      eyebrow: '后台服务已停止',
-      title: '权威工作区暂时不可用',
-      description: '桌面壳层仍在运行。你可以重新检查，或先导出诊断信息。'
-    }
-  }
+  const starting = !snapshot || snapshot.fullCoreState === 'idle' || snapshot.fullCoreState === 'starting'
   return {
-    eyebrow: '权威检查已阻止启动',
-    title: '工作区没有被猜测或覆盖',
-    description: 'Rovai 保留了现有本地状态，不会用空列表冒充原工作区。请重新检查或导出诊断。'
+    eyebrow: starting ? '请稍候' : '会话尚未就绪',
+    title: starting ? '正在打开会话' : '暂时无法打开会话',
+    description: starting ? '准备好后会自动打开。' : '请重新打开，或导出诊断以排查原因。'
   }
 }
 
@@ -2202,8 +2151,9 @@ function AuthoritativeApp({
   const activeCampProject = activeProjectPath && displayNavigation
     ? displayNavigation.projects.find((project) => project.projectPath === activeProjectPath) ?? null
     : null
-  const activeCampTitle = activeCamp?.title
-    ?? (campSnapshot?.camp.id === activeCampId ? campSnapshot.camp.title : '')
+  const activeCampTitle = activeCamp
+    ? formatCampTitle(activeCamp)
+    : campSnapshot?.camp.id === activeCampId ? formatCampTitle(campSnapshot.camp) : ''
   const activeCampContextLabel = activeCampProject?.name
     ?? (activeProjectPath === currentProjectPath ? currentProjectLabel : '快速对话')
   const activeCancellingTurnIds = useMemo(
@@ -3804,6 +3754,25 @@ export function WindowDragStrip({
   return <div className={`window-drag-strip window-drag-strip-${page}`} aria-hidden="true" />
 }
 
+function StartupRecoveryActions({ onRetry }: { onRetry(): void }): React.JSX.Element {
+  const [exporting, setExporting] = useState(false)
+  const [exportError, setExportError] = useState(false)
+  const exportDiagnostics = async (): Promise<void> => {
+    setExporting(true)
+    setExportError(false)
+    try { await window.rovai.exportDiagnostics() }
+    catch { setExportError(true) }
+    finally { setExporting(false) }
+  }
+  return <div className="startup-route-actions">
+    <button className="quiet-button" type="button" onClick={onRetry}>重新打开</button>
+    <button className="quiet-button" type="button" disabled={exporting} onClick={() => void exportDiagnostics()}>
+      {exporting ? '正在导出…' : '导出诊断'}
+    </button>
+    {exportError && <p role="alert">暂时无法导出诊断，请重试。</p>}
+  </div>
+}
+
 export function StartupGate({
   waiting,
   error,
@@ -3824,14 +3793,13 @@ export function StartupGate({
       <header className="startup-route-status">
         <span className="startup-route-progress" aria-hidden="true" />
         <div>
-          <h1>{waiting ? '暂时无法打开上次位置' : '正在打开上次位置'}</h1>
+          <h1 role={error ? 'alert' : undefined}>{waiting ? '暂时无法打开会话' : '正在打开会话'}</h1>
           <p>{waiting
-            ? '上次位置仍保留在本机，可以在本地服务恢复后重试。'
-            : '页面框架已经就绪，最近内容即将就绪。'}</p>
+            ? '请重新打开，或导出诊断以排查原因。'
+            : '准备好后会自动打开。'}</p>
         </div>
-        {waiting && <button className="quiet-button" type="button" onClick={onRetry}>重试打开</button>}
+        {waiting && <StartupRecoveryActions onRetry={onRetry} />}
       </header>
-      {error && <p className="startup-route-error" role="alert">{error}</p>}
       <div className="startup-route-skeleton" aria-hidden="true">
         <span />
         <span />
@@ -3846,16 +3814,13 @@ export function StartupRouteLoading({
   kind,
   waiting,
   error,
-  migrating = false,
   onRetry
 }: {
   kind: RestorableLocation['kind']
   waiting: boolean
   error: string | null
-  migrating?: boolean
   onRetry(): void
 }): React.JSX.Element {
-  const label = { camp: '对话', members: '队员', memory: '记忆', quick_chat: '快速对话' }[kind]
   return (
     <section
       className={`startup-route-loading startup-route-loading-${kind}`}
@@ -3867,18 +3832,13 @@ export function StartupRouteLoading({
       <header className="startup-route-status">
         <span className="startup-route-progress" aria-hidden="true" />
         <div>
-          <h2>{waiting ? `${label}暂时无法打开` : `正在打开${label}`}</h2>
+          <h2 role={error ? 'alert' : undefined}>{waiting ? '暂时无法打开会话' : '正在打开会话'}</h2>
           <p>{waiting
-            ? '上次位置仍保留在本机，可以在本地服务恢复后重试。'
-            : migrating
-              ? '正在升级本地数据，完成后会自动打开；原工作区仍被保留。'
-              : '页面框架已经就绪，最近内容即将就绪。'}</p>
+            ? '请重新打开，或导出诊断以排查原因。'
+            : '准备好后会自动打开。'}</p>
         </div>
-        {waiting && (
-          <button className="quiet-button" type="button" onClick={onRetry}>重试</button>
-        )}
+        {waiting && <StartupRecoveryActions onRetry={onRetry} />}
       </header>
-      {error && <p className="startup-route-error" role="alert">{error}</p>}
       <div className="startup-route-skeleton" aria-hidden="true">
         <span />
         <span />
@@ -3916,7 +3876,7 @@ export function AppHeader({
         <div className="context-breadcrumb">
           {contextLabel && <span className="context-project">{contextLabel}</span>}
           {contextLabel && <span className="context-sep" aria-hidden="true">›</span>}
-          <h1>{title}</h1>
+          <h1 title={title}>{title}</h1>
         </div>
         <div className="topbar-context-status" aria-live="polite">
           {pendingApprovals > 0 && (
@@ -4000,6 +3960,7 @@ export function SettingsView({
         {section === 'runtime' && (
           <RuntimeInstallationsPanel health={health} installations={installations} onReload={onReload} />
         )}
+        {section === 'channels' && <ChannelSettings agents={agents} />}
         {section === 'appearance' && (
           <>
             <SettingsPageHeader

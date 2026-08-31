@@ -1,5 +1,5 @@
 const assert = require('node:assert/strict')
-const { mkdirSync, writeFileSync } = require('node:fs')
+const { mkdirSync, writeFileSync, readFileSync } = require('node:fs')
 const { isAbsolute, join, dirname } = require('node:path')
 const { app, BrowserWindow } = require('electron')
 const [renderer, userData] = process.argv.slice(2)
@@ -51,6 +51,33 @@ app.whenReady().then(async () => {
     await run("document.documentElement.dataset.theme = 'night'")
     await state()
     await capture('refresh-night')
+    const acceptanceFile = JSON.parse(process.env.ROVAI_IMAGE_ACCEPTANCE_FILES ?? '[]')[0]
+    if (acceptanceFile) assert.ok(isAbsolute(acceptanceFile.path))
+    const result = acceptanceFile
+      ? { displayName: acceptanceFile.displayName, mediaType: acceptanceFile.mediaType, data: readFileSync(acceptanceFile.path).toString('base64') }
+      : { displayName: '宽幅图片.svg', mediaType: 'image/svg+xml', data: Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="600"><rect width="100%" height="100%" fill="#a0bdc6"/></svg>').toString('base64') }
+    for (const [width, theme] of [[1040, 'day'], [1440, 'night'], [2560, 'day']]) {
+      window.setContentSize(width, 900)
+      await run(`document.documentElement.dataset.theme = ${JSON.stringify(theme)}`)
+      for (const count of [1, 2]) {
+        await run(`window.campOpenTest.showImages(${JSON.stringify(result)}, ${count})`)
+        // Compare the same interaction state: Linux's visible window may otherwise leave
+        // the pointer over only one image after the fixture scrolls each gallery into view.
+        window.webContents.sendInputEvent({ type: 'mouseMove', x: 1, y: 1 })
+        const deadline = Date.now() + 5000
+        let tool, sent
+        while (Date.now() < deadline) {
+          await run('window.campOpenTest.settle()')
+          tool = await run('window.campOpenTest.imageAppearance("tool")')
+          sent = await run('window.campOpenTest.imageAppearance("send")')
+          if (tool.length === count && sent.length === count && [...tool, ...sent].every(image => image.decoded)) break
+          await new Promise(resolve => setTimeout(resolve, 25))
+        }
+        await capture(`images-${theme}-${width}-${count}`)
+        assert.deepEqual(sent, tool, 'Tool and sent images must use the same layout and visual style in the real Camp')
+        assert.ok([...tool, ...sent].every(image => image.extraText === ''), 'Images have no visible labels, filenames or actions')
+      }
+    }
     assert.deepEqual(errors, [], 'No React key, rendering or fixture API errors')
     console.log(JSON.stringify({ ok: true, messages: appended.messages.length,
       refreshAnchorDelta: refreshed.anchorTop - before.anchorTop,

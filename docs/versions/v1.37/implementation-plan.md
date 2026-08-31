@@ -1,0 +1,132 @@
+---
+document_type: implementation-plan
+version: v1.37
+authority: implementation-and-acceptance-status
+status: in_progress
+last_updated: 2026-09-01
+---
+
+# v1.37 实施与验收
+
+## 实施
+
+- [x] 旧渠道改动先分开 checkpoint，未推送或打包。
+- [x] Core 图片表、Run/epoch fence、Blob GC root、Camp-scoped 读取与只读 metadata。
+- [x] stable path 只引用；inline 不因 path 存在而丢弃；Run 临时路径在清理前保存；路径允许跨目录和符号链接。
+- [x] ACP toolCallId 增量累积与 completed/failed flush；Claude Tool Result；Codex MCP 与原生生成图片。
+- [x] 内部图片不进入公开 Evidence、模型输入、CampMessage 或渠道发布。
+- [x] 共享 Gallery/Tile/lightbox；保序附件段；Run 图片在最后公开消息后、Files Changed 前。
+- [x] Chromium 真实解码、坏图局部降级、单列/双列/窄屏与既有双主题。
+- [x] 同 Run 的已发送同摘要 Blob 图片展示去重，底层数据不删除；统一 Tool/发送图片内容列与原比例图片框。
+- [x] 两种图片均去除文件名、来源/数量标题、projection 说明与系统打开/Finder 菜单，只保留大图预览和关闭。
+- [x] 钉钉完整产品链路未验收，合入 main 前隐藏渠道页整个入口；保留实现、已有数据及独立登录组件回归。
+- [x] 开发者单独确认 revision 1 后实施精确文件帮助与飞书新 Bootstrap 提示；静态资源与其他上下文轴不变。
+- [x] Antigravity 真实生成图片终态、TRAE/Copilot 专用图片结果 fixture 与适配；本机队员经过隔离 Core 复测。
+- [ ] Cursor 非标准生成通知的真实成功 fixture；本机旧 CLI 不支持 ACP，无证据不实现猜测 parser。
+
+## 验证 owner
+
+- `agent_run_image::tests::published_attachment_replaces_matching_runtime_image_presentation` 拥有跨来源展示过滤，
+  使用同一个隔离 SQLite fixture；既有混合存储测试没有消息/附件关系，不能覆盖这个组合读取 seam。
+  修复前同 Run 的 Blob 与同摘要附件会同时显示；覆盖内容/来源不匹配、附件失效、消息删除、稳定路径
+  可变与底层记录/重放保留。最小命令 `cargo test -p rovai-core --lib published_attachment_replaces_matching_runtime_image_presentation`。
+- 既有 `runtime-image-gallery` Electron owner 增加横/竖/方形/小图、单/多图和双主题比例检查；
+  `camp-open-projection` owner 在生产 CampWorkspace 中比较 Tool/发送图片的尺寸、对齐和样式，
+  防止发送图片因短正文而收缩，并确认图片没有额外文字/菜单；这两个 owner 分别验证组件图片比例与
+  会话组合布局，不重复存储矩阵。原图片菜单/系统打开回退随功能一起退出，替换为无入口断言，
+  Runtime/发送图片的大图、Escape 关闭、坏图禁用和焦点恢复仍验证。
+- `agent_run_image::tests`：新独立存储/协议边界，无可扩展的旧图片 owner；覆盖增量顺序/重放/failed、
+  结构化来源正反例、混合生命周期、epoch/Camp fence、Run 删除/Blob GC、跨目录和 symlink；
+  最小命令 `cargo test -p rovai-core --lib agent_run_image`。
+- `claude::tests::structured_tool_images_stay_internal_and_are_fenced_by_session_and_replay`：
+  Adapter 出口的 Session/replay fence 与内部图片/公开 action 分离，纯 parser fixture，不启动 Runtime。
+- 扩展 `execution_evidence::tests::provider_packets_are_reduced_to_public_evidence_fields`：
+  Codex 原生图片及 MCP 混合结果的图片 bytes/path 不进入公开 Evidence，只保留文字；开始/终态共用该边界。
+- 扩展既有 `db::tests::current_migration_state_admission_matrix`、旧 schema downgrade helper 与
+  `v127_preserves_saved_bindings_and_introduces_no_fast_override` 已有完整升级链；133 receipt 故障时
+  新表/marker 一起回滚，修复后可继续。current marker 缺 133 必须拒绝，v1.42/schema83 是明确升级源，
+  不降低过去的 receipt 判定，不额外创建完整 workspace fixture。
+- `ImageGallery.test.ts` 与既有 `App.test.ts`：连续分组、全部20图、解码失败、锚定顺序；
+  `channel-settings.test.ts` 沿用飞书附件独立上传失败/正文不重发的测试。
+- `node --test scripts/lib/runtime-image-gallery.test.mjs`：生产组件的隔离 Electron，真实 SVG decode、
+  坏图、contain、无附加文字/系统操作、lightbox 与焦点、双主题/窄屏。大图使用可用窗口空间，不得因
+  居中定位反而缩小；等待关闭后的焦点恢复完成再断言。无 Core/Runtime/渠道网络。
+  同一 decoder 验证 PNG/JPEG/WebP 和缺失 MIME 的二进制输入；不新增图片 codec。
+- Runtime compatibility 文档追加本次“协议 fixture ≠ 图片端到端”说明后，同步其既有 SHA-256 evidence revision；
+  不改变任何平台/Adapter 的 qualification status、Session 输入或历史资格 artifact。
+- 扩展既有 `context::slow_tests::session_charter_publishes_one_cli_only_builtin_contract`：实际 Schema 上
+  ordinary/Feishu/DingTalk、active/closed、Quick Chat/Project 与未绑定 Camp 的查询矩阵；全 Adapter 精确拼接。
+- 扩展既有 `newly_bound_session_bootstraps_on_its_current_generation` 与
+  `replacement_binding_bootstrap_excludes_self_output_from_the_old_generation`：同 Binding 关闭/新增渠道后
+  Charter 不变，正常替换才重新选提示，历史 Blob 可读且未重写，Dynamic Context 无新增提示。
+  复用已有完整 fixture，不新增独立数据库测试；该持久化/代次边界不能用纯格式化测试替代。
+  最小命令为 `cargo test -p rovai-core --features slow-tests --lib <上述测试名> -- --exact`，
+  `<上述测试名>` 必须包含 `context::slow_tests::` 前缀。
+- 扩展既有教学、CLI help 和 `context_contract::tests`：三条示例、精确文件帮助、旧无 revision / revision 2
+  的 digest 失配；现有纯正文/纯附件发送测试保持。最小命令 `cargo test -p rovai-core --lib camp_message_send_teaching`、
+  `cargo test -p rovai-core --lib context_contract` 与 `cargo test -p rovai-core --bin rovai`。
+- 核对到既有文档漂移：基础不变量曾把 Bootstrap 第三段写成 COLLABORATION_STATE；按既有实现、
+  formatter golden 和 Built-in 架构校正为 MEMORY_ENTRYPOINT。仅校正文档，不改变 Bootstrap 格式。
+
+## 证据状态
+
+- 图片实施阶段的 `pnpm typecheck`、`pnpm exec vitest run`（132 文件 / 1280 tests）、`pnpm build:desktop`
+  通过；revision 1 实施后再次运行 `pnpm typecheck` 通过，本轮未改 Renderer。
+- `cargo fmt --all --check`、`cargo clippy --workspace --all-targets --features slow-tests -- -D warnings`
+  通过；图片 focused Rust 4 tests 通过。
+- 生产 Gallery 的隔离 Electron 测试通过；独立 Impeccable finish-review 的菜单/回退/焦点三项均 resolved，
+  最终 disposition 为 ship。保留既有主题，不改全局设计。
+- `pnpm docs:test` 9 tests、普通及显式 main base `cda0585233b1a8957e5aada34335f879ecde7af8` 的
+  decision governance 检查通过；`git diff --check` 通过。
+- revision 1 二次确认后，`pnpm docs:check`、同一固定 main base 的 `docs:check:ci` 均通过；无治理例外。
+- revision 1 实施后 `cargo test --workspace --quiet -- --test-threads=2` 再次通过：lib 468、CLI 32、Core 185，4 项人工 Runtime
+  smoke 按既有规则 ignored。此前高并发一轮出现 Runtime discovery 超时，以及文档更新后摘要未同步；
+  摘要已按实际文档更新，降低测试并发后全部通过，没有放宽任何测试超时阈值。
+- `cargo test -p rovai-core --features slow-tests --lib context::slow_tests:: -- --test-threads=2`
+  全部 43 tests 通过，包含三项扩展 owner、纯附件 Current Input、历史 evidence 与 redelivery 冻结。
+  确认文案与实现的逐字比对也通过；未新增独立 Rust 测试函数。
+
+上述是初始实施阶段的验证。后续真实 Runtime 补齐与结果见[图片验收](runtime-image-acceptance.md)：
+Antigravity 原生生成、TRAE/Copilot 专用图片结果已接入，六种 Runtime 已经过隔离 Core 的图片链。
+不是十三 Runtime 全部原生生图成功；没有真实飞书发件或 Windows 图片 UI 实测，不提升平台资格。
+后续 main 合并、完整回归与日常 App 安装结果见[本机交付记录](main-merge-and-daily-app.md)。
+
+### 2026-09-01 图片展示收口
+
+- 本机最近一次生成的橘猫图片，Runtime Blob 与同 Run 显式发送附件具有相同 SHA-256；问题是展示重复，
+  不是生成两次。只读 metadata 过滤后保留发送图片，底层两种记录和稳定路径语义不变。
+- 定向 Rust 图片测试 5 项通过；Renderer/App/theme 定向 Vitest 176 项、typecheck 和 Desktop build 通过。
+- 使用这张实际 PNG 只读验证生产 Gallery 和完整 CampWorkspace；Tool/发送图片在 1040/1440/2560px
+  内容列一致，单/多图均无文件名、来源数量标题或系统操作。双主题、480px 窄窗、横/竖/方/小图
+  保持原比例且无补边；大图不缩小，Escape 关闭和焦点恢复通过。未重新调用模型或向渠道发件。
+- 沿用现有主题与组件；Impeccable 的布局检查无命中，全局扫描中的既有非图片 CSS 提示不扩大本次范围。
+- 文档单测 9 项、普通与固定 main base `cdafec7136f4135fd09ac5bf9592fd8a27b39b9a` 的通用文档门禁通过。
+  Applications 安装与重启另按用户后续明确要求进行，不以组件夹具通过代替打包 App 验收。
+- 用户明确要求重启后，`package:mac:daily` 的 arm64 ad-hoc 签名门禁和独立临时目录的 packaged 启动
+  验收通过（主页、队员、详情、新对话；未发送消息或调用模型）。随后通过安装门替换 Applications，
+  原 App 正常退出，新 Main/Core 为 40094/40119，均从规范安装路径启动，继续使用原数据目录。
+  App ASAR 摘要与构建产物一致；Core UUID `FBA0FFAD-4D68-34E2-B5BA-D8F0419C9789`，
+  CLI UUID `454A050D-6261-35C3-B29F-92910F8BC8A4`，均与构建暂存和打包产物一致。
+  旧 bundle 保留为 `/Applications/Rovai AI.backup-before-20260831T163050Z.app`；没有改写或替换日常数据，
+  没有 commit、push 或创建 PR。重启后桌面读取仅返回窗口名称、无截图，故最终日常会话的视觉复核未计为通过；
+  图片视觉证据来自上述使用实际 PNG 的生产组件/完整 CampWorkspace 隔离验收。
+
+### 2026-09-01 渠道入口发布范围
+
+- 按用户要求，渠道页只保留飞书；钉钉 Tab、计数、连接/发布区域与残留登录弹窗均隐藏。
+  旧选中值回退到飞书，只有钉钉的 Snapshot 显示正常空态。没有删除钉钉源码、账号、凭据或 Bot，
+  也没有改变 Main/Core 后台生命周期；钉钉完整产品链路仍未验收，不作为本次公开入口交付。
+- 既有 `ChannelSettings.test.ts` 覆盖含已发布 Bot 的旧选中值及各连接状态；
+  `test:dingtalk-login` 先验证真实渠道页不恢复隐藏入口和残留弹窗，再独立挂载保留的生产登录组件，
+  保留扫码、取消、重试、组织选择和原生视图隔离回归，不给产品增加隐藏开关。
+- typecheck、133 文件 / 1352 项 Vitest、220 项 Node 测试（1 项既有 Windows 原生跳过）、
+  独立 Electron 钉钉登录夹具、Desktop build、fmt、Clippy、文档与 Skill 门禁通过。
+  `test:rust:pr` 的 Library 470 项、CLI 32 项、slow 294 项均通过；另跑 Core Main 187 项通过，
+  4 项原有真实 Runtime 人工 Smoke 保持显式忽略，没有以单元测试替代外部验收。
+  本次没有重新打包、安装或重启日常 App，也没有调用真实 Runtime 或向渠道发件。
+- 首次 PR CI 暴露两个跨平台时序问题：Core 子进程的 `exit` 可能先于最后 stdout 帧，导致启动拒绝与
+  authority assessment 被丢弃；改为 stdio `close` 后才释放 generation。既有三种 assessment 表驱动
+  owner 改用可控 stdout，固定“exit → 最后状态帧 → close”并保留重试参数断言，修复前均明确失败；
+  其他真实子进程、关闭与重试回归保留。图片组合夹具则先把鼠标移到中性位置，确保比较相同 hover
+  状态；没有放宽图片尺寸或样式断言。CoreClient 16 项、typecheck、Desktop build 和隔离 CampOpen
+  夹具修复后通过，等待新的 PR CI 结果。

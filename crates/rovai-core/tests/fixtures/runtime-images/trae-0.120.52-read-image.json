@@ -1,0 +1,21 @@
+{
+  "jsonrpc": "2.0",
+  "method": "session/update",
+  "params": {
+    "sessionId": "image-fixture-session",
+    "update": {
+      "_meta": { "type": "builtin" },
+      "content": [{ "content": { "text": "", "type": "text" }, "type": "content" }],
+      "rawOutput": {
+        "Output": {
+          "content": "aW1hZ2UtZml4dHVyZQ==",
+          "file_path": "/fixture/blue-paper-boat.png",
+          "mime_type": "image/png"
+        }
+      },
+      "sessionUpdate": "tool_call_update",
+      "status": "completed",
+      "toolCallId": "read-image-fixture"
+    }
+  }
+}

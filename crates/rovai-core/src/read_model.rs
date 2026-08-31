@@ -7,6 +7,7 @@ use serde_json::Value;
 
 use crate::{
     agent_run_file_change::{AgentRunFileChangesView, list_completed_run_file_changes},
+    agent_run_image::{AgentRunImagesView, list_camp_images},
     camp_attachment::{DIRECTORY_MEDIA_TYPE, managed_attachment_summary},
     camp_content::{StructuredCampMessageContent, normalize_content, render_current_plain_text},
     camp_message_publication::{
@@ -54,6 +55,8 @@ pub struct NavigationLeadSummary {
 pub struct NavigationCampItem {
     pub id: String,
     pub title: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub channel_source: Option<CampChannelSource>,
     pub activation_state: String,
     pub project_binding_kind: String,
     pub project_path: String,
@@ -128,6 +131,8 @@ pub struct CampListItem {
 pub struct CampView {
     pub id: String,
     pub title: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub channel_source: Option<CampChannelSource>,
     pub activation_state: String,
     pub project_binding_kind: String,
     pub project_path: String,
@@ -136,6 +141,33 @@ pub struct CampView {
     pub version: i64,
     pub created_at: String,
     pub updated_at: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CampChannelSource {
+    pub provider: String,
+    pub conversation_kind: String,
+}
+
+pub(crate) fn camp_channel_source_from_row(
+    row: &rusqlite::Row<'_>,
+    column: usize,
+) -> rusqlite::Result<Option<CampChannelSource>> {
+    let provider = row.get::<_, Option<String>>(column)?;
+    let conversation_kind = row.get::<_, Option<String>>(column + 1)?;
+    Ok(provider
+        .zip(conversation_kind)
+        .and_then(|(provider, conversation_kind)| {
+            matches!(
+                (provider.as_str(), conversation_kind.as_str()),
+                ("feishu", "p2p" | "group" | "topic") | ("dingtalk", "p2p" | "group")
+            )
+            .then_some(CampChannelSource {
+                provider,
+                conversation_kind,
+            })
+        }))
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -204,6 +236,7 @@ pub struct CampMessageView {
     pub timeline_global_sequence: Option<i64>,
     pub author_type: String,
     pub author_id: String,
+    pub author_display_name: Option<String>,
     pub source_agent_run_id: Option<String>,
     pub body: String,
     pub content: StructuredCampMessageContent,
@@ -416,7 +449,7 @@ pub struct AgentRunDiagnosticView {
     pub observed_through_global_sequence: i64,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AgentRunExecutionEvidenceView {
     pub id: String,
@@ -655,6 +688,7 @@ pub struct CampSnapshot {
     pub agent_runs: Vec<AgentRunView>,
     pub execution_evidence: Vec<AgentRunExecutionEvidenceView>,
     pub agent_run_file_changes: Vec<AgentRunFileChangesView>,
+    pub agent_run_images: Vec<AgentRunImagesView>,
     pub context_manifests: Vec<ContextManifestView>,
     pub approvals: Vec<ApprovalView>,
     pub actions: Vec<ActionView>,
@@ -709,6 +743,7 @@ pub struct CampOpenProjection {
     pub agent_runs: Vec<AgentRunView>,
     pub execution_evidence: Vec<AgentRunExecutionEvidenceView>,
     pub agent_run_file_changes: Vec<AgentRunFileChangesView>,
+    pub agent_run_images: Vec<AgentRunImagesView>,
     pub approvals: Vec<ApprovalView>,
     pub coverage: CampOpenCoverage,
 }
@@ -1004,6 +1039,7 @@ impl ReadModelService {
             false,
         )?;
         let agent_run_file_changes = list_completed_run_file_changes(&transaction, camp_id)?;
+        let agent_run_images = list_camp_images(&transaction, camp_id)?;
         let context_manifests = load_context_manifests(&transaction, camp_id)?;
         let approvals = load_approvals(&transaction, camp_id, false, None)?;
         let actions = load_actions(&transaction, camp_id)?;
@@ -1030,6 +1066,7 @@ impl ReadModelService {
             agent_runs,
             execution_evidence,
             agent_run_file_changes,
+            agent_run_images,
             context_manifests,
             approvals,
             actions,
@@ -1056,6 +1093,7 @@ impl ReadModelService {
         let agent_runs = load_agent_runs(&transaction, camp_id, Some(CAMP_OPEN_AGENT_RUN_LIMIT))?;
         let execution_evidence = load_execution_evidence(&transaction, camp_id, None, true)?;
         let agent_run_file_changes = list_completed_run_file_changes(&transaction, camp_id)?;
+        let agent_run_images = list_camp_images(&transaction, camp_id)?;
         let approvals =
             load_approvals(&transaction, camp_id, true, Some(CAMP_OPEN_APPROVAL_LIMIT))?;
         let coverage = CampOpenCoverage {
@@ -1087,6 +1125,7 @@ impl ReadModelService {
             agent_runs,
             execution_evidence,
             agent_run_file_changes,
+            agent_run_images,
             approvals,
             coverage,
         })
@@ -1210,7 +1249,7 @@ impl ReadModelService {
             FROM camp_message
             WHERE camp_id = ?1
               AND tombstoned_at IS NULL
-              AND author_type IN ('user', 'agent')
+              AND author_type IN ('user', 'agent', 'external_principal')
             ORDER BY sequence ASC, id ASC
             "#,
         )?;
@@ -1615,7 +1654,7 @@ fn load_navigation_camps(transaction: &Transaction<'_>) -> Result<Vec<Navigation
                 MAX(CASE
                     WHEN (
                         {publication_predicate}
-                        AND camp_message.author_type IN ('user', 'agent')
+                        AND camp_message.author_type IN ('user', 'agent', 'external_principal')
                     ) OR event_log.event_type IN (
                         'agent_run.succeeded',
                         'agent_run.failed',
@@ -1668,8 +1707,12 @@ fn load_navigation_camps(transaction: &Transaction<'_>) -> Result<Vec<Navigation
                   AND agent_run.status IN ('queued', 'running', 'waiting')
             ),
             camp.version,
-            camp.activation_state
+            camp.activation_state,
+            channel_conversation.provider,
+            channel_conversation.conversation_kind
         FROM camp
+        LEFT JOIN channel_conversation_binding AS channel_binding ON channel_binding.camp_id = camp.id
+        LEFT JOIN channel_conversation ON channel_conversation.id = channel_binding.channel_conversation_id
         LEFT JOIN agent_profile AS lead ON lead.id = camp.default_lead_agent_id
         LEFT JOIN navigation_activity ON navigation_activity.camp_id = camp.id
         LEFT JOIN event_log AS activity_event
@@ -1698,6 +1741,7 @@ fn load_navigation_camps(transaction: &Transaction<'_>) -> Result<Vec<Navigation
         Ok(NavigationCampItem {
             id: row.get(0)?,
             title: row.get(1)?,
+            channel_source: camp_channel_source_from_row(row, 13)?,
             activation_state: row.get(12)?,
             project_binding_kind: row.get(2)?,
             project_path: row.get(3)?,
@@ -1884,16 +1928,21 @@ fn load_camp(transaction: &Transaction<'_>, camp_id: &str) -> Result<Option<Camp
     transaction
         .query_row(
             r#"
-            SELECT id, title, activation_state, project_binding_kind, project_path,
-                   default_lead_agent_id, membership_generation,
-                   version, created_at, updated_at
-            FROM camp WHERE id = ?1
+            SELECT camp.id, camp.title, camp.activation_state, camp.project_binding_kind, camp.project_path,
+                   camp.default_lead_agent_id, camp.membership_generation,
+                   camp.version, camp.created_at, camp.updated_at,
+                   channel_conversation.provider, channel_conversation.conversation_kind
+            FROM camp
+            LEFT JOIN channel_conversation_binding AS channel_binding ON channel_binding.camp_id = camp.id
+            LEFT JOIN channel_conversation ON channel_conversation.id = channel_binding.channel_conversation_id
+            WHERE camp.id = ?1
             "#,
             [camp_id],
             |row| {
                 Ok(CampView {
                     id: row.get(0)?,
                     title: row.get(1)?,
+                    channel_source: camp_channel_source_from_row(row, 10)?,
                     activation_state: row.get(2)?,
                     project_binding_kind: row.get(3)?,
                     project_path: row.get(4)?,
@@ -2418,12 +2467,24 @@ fn hydrate_message_views(
             let attachments = attachments_by_message_id
                 .remove(&row.id)
                 .unwrap_or_default();
+            let author_display_name = if row.author_type == "external_principal" {
+                transaction
+                    .query_row(
+                        "SELECT display_name FROM external_principal WHERE id = ?1",
+                        [&row.author_id],
+                        |row| row.get::<_, String>(0),
+                    )
+                    .optional()?
+            } else {
+                None
+            };
             Ok(CampMessageView {
                 id: row.id,
                 sequence: row.sequence,
                 timeline_global_sequence: row.timeline_global_sequence,
                 author_type: row.author_type,
                 author_id: row.author_id,
+                author_display_name,
                 source_agent_run_id: row.source_agent_run_id,
                 body,
                 content,
@@ -3032,6 +3093,34 @@ fn load_execution_evidence(
         )?
         .map(|row| execution_evidence_view(row?))
         .collect::<Result<Vec<_>>>()?;
+    attach_canonical_activity(transaction, &mut evidence)?;
+    Ok(evidence)
+}
+
+pub(crate) fn public_execution_evidence_for_agent_run(
+    transaction: &Transaction<'_>,
+    agent_run_id: &str,
+) -> Result<Vec<AgentRunExecutionEvidenceView>> {
+    let mut statement = transaction.prepare(
+        r#"
+        SELECT evidence.id, evidence.agent_run_id, evidence.execution_epoch,
+               evidence.sequence, evidence.event_type, evidence.kind,
+               evidence.phase, evidence.payload_preview_json,
+               evidence.content_blob_id, evidence.content_byte_count,
+               evidence.is_truncated, evidence.occurred_at
+        FROM agent_run_execution_evidence AS evidence
+        WHERE evidence.agent_run_id = ?1
+          AND evidence.event_type NOT IN (
+              'agent.reasoning.summary.delta', 'agent.thought.delta'
+          )
+        ORDER BY evidence.sequence
+        "#,
+    )?;
+    let mut evidence = statement
+        .query_map([agent_run_id], execution_evidence_row)?
+        .map(|row| execution_evidence_view(row?))
+        .collect::<Result<Vec<_>>>()?;
+    drop(statement);
     attach_canonical_activity(transaction, &mut evidence)?;
     Ok(evidence)
 }
@@ -4765,6 +4854,19 @@ mod slow_tests {
         assert_eq!(snapshot.projects[0].name, "rovai-ai");
         assert_eq!(snapshot.projects[0].total_count, 2);
         assert_eq!(snapshot.projects[0].recent_camps.len(), 2);
+        assert!(
+            snapshot
+                .quick_chat
+                .recent_camps
+                .iter()
+                .chain(
+                    snapshot
+                        .projects
+                        .iter()
+                        .flat_map(|project| &project.recent_camps)
+                )
+                .all(|camp| camp.channel_source.is_none())
+        );
         assert_eq!(
             snapshot.projects[0].project_path,
             project_root.to_string_lossy()

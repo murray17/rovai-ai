@@ -1,7 +1,7 @@
 ---
 document_type: current-decision-navigation
 authority: current-authority-and-rationale-routing
-last_updated: 2026-08-30
+last_updated: 2026-08-31
 ---
 
 # 当前规范与决定理由导航
@@ -14,20 +14,31 @@ last_updated: 2026-08-30
 
 - Camp 队员 Fast 当前规范：[Camp Member Fast v1](../contracts/camp-member-fast-v1.md)、[Runtime 边界](../architecture/runtime-catalog-boundaries.md#camp-队员-fast-边界)、[Usage v4](../contracts/runtime-usage-monitoring-v4.md)；理由：[V1.34-D01](../versions/v1.34/decisions.md#v1-34-d01)。
 
-- 启动分层补充规范：[可选功能门禁](../contracts/desktop-runtime-availability-v1.md#7-authority-ready-and-optional-subsystem-gates)、[Windows Bootstrap assessment](../contracts/desktop-runtime-availability-v1.md#8-windows-pre-ready-bootstrap-assessment)；理由：[V1.31-D05](../versions/v1.31/decisions.md#v1-31-d05)、[V1.31-D06](../versions/v1.31/decisions.md#v1-31-d06)。
+- 启动分层补充规范：[可选功能门禁](../contracts/desktop-runtime-availability-v2.md#7-authority-ready-and-optional-subsystem-gates)、[Windows Bootstrap assessment](../contracts/desktop-runtime-availability-v2.md#8-windows-pre-ready-bootstrap-assessment)；理由：[V1.31-D05](../versions/v1.31/decisions.md#v1-31-d05)、[V1.31-D06](../versions/v1.31/decisions.md#v1-31-d06)。
+- 渠道/main 数据迁移汇合：[Channel/Main Schema Join v2](../contracts/channel-main-schema-join-v2.md)、[原位升级与旧 switch 恢复](../architecture/availability-first-runtime.md#migration-switch)；理由：[V1.36-D06](../versions/v1.36/decisions.md#v1-36-d06)、[V1.36-D07](../versions/v1.36/decisions.md#v1-36-d07)。
+- 普通升级去整库复制、逐事务恢复与启动重试：[Desktop Runtime Availability v2](../contracts/desktop-runtime-availability-v2.md#4-migration-and-recovery)；理由：[V1.36-D07](../versions/v1.36/decisions.md#v1-36-d07)。
 
-- 当前规范：[Desktop 可用性与权威准入](../architecture/foundational-invariants.md#desktop-authority-admission)、[Availability-first Runtime](../architecture/availability-first-runtime.md)、[Desktop Runtime Availability v1](../contracts/desktop-runtime-availability-v1.md)、[基础 Core 不变量](../architecture/foundational-invariants.md#core-command-transaction)、[通知架构](../architecture/notification-episodes.md)、[Notification Episode v4](../contracts/notification-episode-v4.md)。
+- 当前规范：[Desktop 可用性与权威准入](../architecture/foundational-invariants.md#desktop-authority-admission)、[Availability-first Runtime](../architecture/availability-first-runtime.md)、[Desktop Runtime Availability v2](../contracts/desktop-runtime-availability-v2.md)、[基础 Core 不变量](../architecture/foundational-invariants.md#core-command-transaction)、[通知架构](../architecture/notification-episodes.md)、[Notification Episode v5](../contracts/notification-episode-v5.md)。
 - 理由来源：[v0.02](../versions/v0.02/decisions.md)、[v0.06](../versions/v0.06/decisions.md)、[v0.28](../versions/v0.28/decisions.md)、[v0.71](../versions/v0.71/decisions.md)、[V1.31-D01](../versions/v1.31/decisions.md#v1-31-d01)、[V1.31-D02](../versions/v1.31/decisions.md#v1-31-d02)、[V1.31-D03](../versions/v1.31/decisions.md#v1-31-d03)。
 
 ## Camp、Workspace 与 Attachments
 
-- 当前规范：[Camp/Composer 基础不变量](../architecture/foundational-invariants.md#camp-lifecycle)、[Camp Identity](../architecture/camp-identity.md)、[Camp Identity v1](../contracts/camp-identity-v1.md)、[动态 Camp 队员关系](../architecture/dynamic-camp-membership.md)、[Camp Membership v1](../contracts/camp-membership-v1.md)、[Camp Activation](../architecture/camp-activation-lifecycle.md)、[Composer Draft](../architecture/camp-composer-draft.md)、[Camp Composer Draft v6](../contracts/camp-composer-draft-v6.md)、[Camp Open](../architecture/camp-open-read-path.md)、[Camp Open Projection v10](../contracts/camp-open-projection-v10.md)、[Camp Attachments](../architecture/camp-published-attachment-view.md)、[Camp Attachment v7](../contracts/camp-attachment-v7.md)、[Camp Published Attachment View v4（legacy v1）](../contracts/camp-published-attachment-view-v4.md)、[Camp Permanent Deletion v2](../contracts/camp-permanent-deletion-v2.md)、[Runtime File Change Observation](../architecture/runtime-file-change-observation.md)、[Runtime File Change Observation v2](../contracts/runtime-file-change-observation-v2.md)、[First-run](../architecture/first-run-onboarding.md)及[First-run Onboarding v3](../contracts/first-run-onboarding-v3.md)。
+- Runtime 图片当前规范：[Runtime 图片架构](../architecture/runtime-images.md)、[Runtime Images v3](../contracts/runtime-images-v3.md)、[统一图片展示](../ui/components/conversation-workspace.md#runtime-图片与消息图片)；混合生命周期与不自动发布的理由：[V1.37-D01](../versions/v1.37/decisions.md#v1-37-d01)。
+
+- 当前规范：[Camp/Composer 基础不变量](../architecture/foundational-invariants.md#camp-lifecycle)、[Camp Identity](../architecture/camp-identity.md)、[Camp Identity v1](../contracts/camp-identity-v1.md)、[动态 Camp 队员关系](../architecture/dynamic-camp-membership.md)、[Camp Membership v1](../contracts/camp-membership-v1.md)、[Camp Activation](../architecture/camp-activation-lifecycle.md)、[Composer Draft](../architecture/camp-composer-draft.md)、[Camp Composer Draft v6](../contracts/camp-composer-draft-v6.md)、[Camp Open](../architecture/camp-open-read-path.md)、[Camp Open Projection v12](../contracts/camp-open-projection-v12.md)、[Camp Attachments](../architecture/camp-published-attachment-view.md)、[Camp Attachment v7](../contracts/camp-attachment-v7.md)、[Camp Published Attachment View v4（legacy v1）](../contracts/camp-published-attachment-view-v4.md)、[Camp Permanent Deletion v2](../contracts/camp-permanent-deletion-v2.md)、[Runtime File Change Observation](../architecture/runtime-file-change-observation.md)、[Runtime File Change Observation v2](../contracts/runtime-file-change-observation-v2.md)、[First-run](../architecture/first-run-onboarding.md)及[First-run Onboarding v3](../contracts/first-run-onboarding-v3.md)。
 - 理由来源：[v0.22](../versions/v0.22/decisions.md)、[v0.23](../versions/v0.23/decisions.md)、[v0.25](../versions/v0.25/decisions.md)、[v0.43](../versions/v0.43/decisions.md)、[v0.77](../versions/v0.77/decisions.md)、[v0.80](../versions/v0.80/decisions.md)、[v0.97](../versions/v0.97/decisions.md)、[v1.00](../versions/v1.00/decisions.md)、[v1.10](../versions/v1.10/decisions.md)、[V1.15-D01](../versions/v1.15/decisions.md#v1-15-d01)、[V1.15-D04](../versions/v1.15/decisions.md#v1-15-d04)、[V1.15-D06](../versions/v1.15/decisions.md#v1-15-d06)、[V1.16-D01](../versions/v1.16/decisions.md#v1-16-d01)、[V1.17-D01](../versions/v1.17/decisions.md#v1-17-d01)、[V1.19-D01](../versions/v1.19/decisions.md#v1-19-d01)、[V1.19-D02](../versions/v1.19/decisions.md#v1-19-d02)、[V1.20-D01](../versions/v1.20/decisions.md#v1-20-d01)、[V1.27-D08](../versions/v1.27/decisions.md#v1-27-d08)、[V1.28-D10](../versions/v1.28/decisions.md#v1-28-d10)、[V1.29-D01](../versions/v1.29/decisions.md#v1-29-d01)、[V1.29-D04](../versions/v1.29/decisions.md#v1-29-d04)、[V1.29-D06](../versions/v1.29/decisions.md#v1-29-d06)、[V1.29-D08](../versions/v1.29/decisions.md#v1-29-d08)、[V1.29-D09](../versions/v1.29/decisions.md#v1-29-d09)、[V1.31-D04](../versions/v1.31/decisions.md#v1-31-d04)。
 
 ## Camp 文件预览
 
 - 当前规范：[File Preview Architecture](../architecture/file-preview.md)、[File Preview v2](../contracts/file-preview-v2.md)、[Camp 文件预览区](../ui/components/file-preview.md)及[Camp 会话工作区](../ui/components/conversation-workspace.md)。
 - 理由来源：[V1.30-D01–D06](../versions/v1.30/decisions.md#v1-30-d01)；[D07](../versions/v1.30/decisions.md#v1-30-d07) 的选区方案本期已撤回。
+
+## Channels 与 External Principals
+
+- 内部调度合同：[Channel Host Maintenance v1](../contracts/channel-host-maintenance-v1.md)；只取消 poll 回执，保留真实业务命令与 Outbox 恢复。
+- 当前规范：[Channel Storage v2](../contracts/channel-storage-v2.md)、[飞书渠道架构](../architecture/feishu-channel.md)、[Feishu Channel v8](../contracts/feishu-channel-v8.md)、[钉钉渠道架构](../architecture/dingtalk-channel.md)、[DingTalk Channel v5](../contracts/dingtalk-channel-v5.md)、[Camp Membership v1](../contracts/camp-membership-v1.md)、[ContextManifest Evidence v22](../contracts/context-manifest-evidence-v22.md)和[渠道设置](../ui/components/channel-settings.md)。
+- 飞书理由来源：[V1.35-D01（已由 D09 取代）](../versions/v1.35/decisions.md#v1-35-d01)、[V1.35-D02](../versions/v1.35/decisions.md#v1-35-d02)、[V1.35-D03](../versions/v1.35/decisions.md#v1-35-d03)、[V1.35-D04（话题扩张部分已由 D15 取代）](../versions/v1.35/decisions.md#v1-35-d04)、[V1.35-D05](../versions/v1.35/decisions.md#v1-35-d05)、[V1.35-D06](../versions/v1.35/decisions.md#v1-35-d06)、[V1.35-D07](../versions/v1.35/decisions.md#v1-35-d07)、[V1.35-D08](../versions/v1.35/decisions.md#v1-35-d08)、[V1.35-D09（私聊投递部分已由 D12 取代）](../versions/v1.35/decisions.md#v1-35-d09)、[V1.35-D10](../versions/v1.35/decisions.md#v1-35-d10)、[V1.35-D11](../versions/v1.35/decisions.md#v1-35-d11)、[V1.35-D12](../versions/v1.35/decisions.md#v1-35-d12)、[V1.35-D13（终态展示与 view state 已由 D16 取代）](../versions/v1.35/decisions.md#v1-35-d13)、[V1.35-D14（命令展示与 callback 已由 D16 取代）](../versions/v1.35/decisions.md#v1-35-d14)、[V1.35-D15](../versions/v1.35/decisions.md#v1-35-d15)和[V1.35-D16](../versions/v1.35/decisions.md#v1-35-d16)。
+- 钉钉与共享渠道存储理由来源：[V1.36-D01（存储由 D04、OAuth 控制面由 D05 取代）](../versions/v1.36/decisions.md#v1-36-d01)、[V1.36-D02](../versions/v1.36/decisions.md#v1-36-d02)、[V1.36-D03](../versions/v1.36/decisions.md#v1-36-d03)、[V1.36-D04](../versions/v1.36/decisions.md#v1-36-d04)和[V1.36-D05](../versions/v1.36/decisions.md#v1-36-d05)。
 
 ## Member identity
 
@@ -36,7 +47,7 @@ last_updated: 2026-08-30
 
 ## Collaboration、Task 与 Message Delivery
 
-- 当前规范：[协作与消息基础不变量](../architecture/foundational-invariants.md#collaboration-admission)、[动态 Camp 队员关系](../architecture/dynamic-camp-membership.md)、[Public A2A Message Delivery](../architecture/public-a2a-message-delivery.md)、[Durable Gather](../architecture/durable-gather-barrier.md)、[Durable Task v3](../contracts/durable-task-v3.md)、[Camp Message Send v15](../contracts/camp-message-send-v15.md)、[Message Delivery v8](../contracts/message-delivery-v8.md)、[Gather v4](../contracts/gather-v4.md)和[Camp History Retrieval v4](../contracts/camp-history-v4.md)。
+- 当前规范：[协作与消息基础不变量](../architecture/foundational-invariants.md#collaboration-admission)、[动态 Camp 队员关系](../architecture/dynamic-camp-membership.md)、[Public A2A Message Delivery](../architecture/public-a2a-message-delivery.md)、[Durable Gather](../architecture/durable-gather-barrier.md)、[Durable Task v3](../contracts/durable-task-v3.md)、[Camp Message Send v16](../contracts/camp-message-send-v16.md)、[Message Delivery v8](../contracts/message-delivery-v8.md)、[Gather v4](../contracts/gather-v4.md)和[Camp History Retrieval v4](../contracts/camp-history-v4.md)。
 - 理由来源：[v0.15](../versions/v0.15/decisions.md)、[v0.45](../versions/v0.45/decisions.md)、[v0.47](../versions/v0.47/decisions.md)、[v0.54](../versions/v0.54/decisions.md)、[v0.59](../versions/v0.59/decisions.md)、[v0.62](../versions/v0.62/decisions.md)、[v0.67](../versions/v0.67/decisions.md)、[v0.89](../versions/v0.89/decisions.md)、[v0.90](../versions/v0.90/decisions.md)、[v1.06](../versions/v1.06/decisions.md)、[v1.07](../versions/v1.07/decisions.md)、[v1.14](../versions/v1.14/decisions.md)、[V1.19-D02](../versions/v1.19/decisions.md#v1-19-d02)、[V1.29-D01](../versions/v1.29/decisions.md#v1-29-d01)、[V1.29-D02](../versions/v1.29/decisions.md#v1-29-d02)、[V1.29-D05](../versions/v1.29/decisions.md#v1-29-d05)、[V1.29-D06](../versions/v1.29/decisions.md#v1-29-d06)。
 
 ## Runtime execution 与 Security
@@ -57,7 +68,7 @@ last_updated: 2026-08-30
 
 ## Session、Context 与 Bootstrap
 
-- 当前规范：[Context 基础不变量](../architecture/foundational-invariants.md#context-session-bootstrap)、[Native Session Bootstrap Redelivery](../architecture/native-session-bootstrap-redelivery.md)、[Structured Skill Links](../architecture/structured-current-input-skill-links.md)、[ContextManifest Evidence v21](../contracts/context-manifest-evidence-v21.md)、[Context Delivery Profile v4](../contracts/context-delivery-profile-v4.md)、[Run Facts v2](../contracts/run-facts-v2.md)和[Current Input Skill Links v1](../contracts/current-input-skill-links-v1.md)。
+- 当前规范：[Context 基础不变量](../architecture/foundational-invariants.md#context-session-bootstrap)、[Native Session Bootstrap Redelivery](../architecture/native-session-bootstrap-redelivery.md)、[Structured Skill Links](../architecture/structured-current-input-skill-links.md)、[ContextManifest Evidence v22](../contracts/context-manifest-evidence-v22.md)、[Context Delivery Profile v4](../contracts/context-delivery-profile-v4.md)、[Run Facts v2](../contracts/run-facts-v2.md)和[Current Input Skill Links v1](../contracts/current-input-skill-links-v1.md)。
 - 理由来源：[v0.21](../versions/v0.21/decisions.md)、[v0.35](../versions/v0.35/decisions.md)、[v0.44](../versions/v0.44/decisions.md)、[v0.48](../versions/v0.48/decisions.md)、[v0.50](../versions/v0.50/decisions.md)、[v0.52](../versions/v0.52/decisions.md)、[v0.54](../versions/v0.54/decisions.md)、[v0.89](../versions/v0.89/decisions.md)、[v0.90](../versions/v0.90/decisions.md)、[v0.94](../versions/v0.94/decisions.md)、[v0.98](../versions/v0.98/decisions.md)、[v1.07](../versions/v1.07/decisions.md)、[V1.15-D03](../versions/v1.15/decisions.md#v1-15-d03)、[V1.15-D04](../versions/v1.15/decisions.md#v1-15-d04)、[V1.15-D06](../versions/v1.15/decisions.md#v1-15-d06)、[V1.28-D05](../versions/v1.28/decisions.md#v1-28-d05)。
 
 ## Memory
@@ -97,7 +108,7 @@ last_updated: 2026-08-30
 
 ## 外部附件 CLI 入口
 
-- 当前规范：[Camp Attachment v7](../contracts/camp-attachment-v7.md)、[Camp Message Send v15](../contracts/camp-message-send-v15.md)、[Built-in Tool Transport v21](../contracts/builtin-tool-transport-v21.md)及[附件架构](../architecture/camp-published-attachment-view.md)。
+- 当前规范：[Camp Attachment v7](../contracts/camp-attachment-v7.md)、[Camp Message Send v16](../contracts/camp-message-send-v16.md)、[Built-in Tool Transport v21](../contracts/builtin-tool-transport-v21.md)及[附件架构](../architecture/camp-published-attachment-view.md)。
 - 主要理由：[V1.32-D01](../versions/v1.32/decisions.md#v1-32-d01)：由 CLI 以 Runtime 权限适配外部路径，保持 Core 的读取根目录限制。
 
 ## Camp 连续消息

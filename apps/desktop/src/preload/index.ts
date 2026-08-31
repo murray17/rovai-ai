@@ -2,6 +2,7 @@ import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import type {
   AppearanceSnapshot,
   AppUpdateSnapshot,
+  ChannelSettingsSnapshot,
   CoreEvent,
   CoreMethod,
   ExecutionConsolePlacement,
@@ -134,6 +135,48 @@ const api: RovaiApi = {
     },
     invalidateNewConversationDefaults() {
       return ipcRenderer.invoke('rovai:general-preferences-invalidate-new-conversation-defaults')
+    }
+  },
+  channels: {
+    get() {
+      return ipcRenderer.invoke('rovai:channels-get') as Promise<ChannelSettingsSnapshot>
+    },
+    connect(kind) {
+      return ipcRenderer.invoke('rovai:channels-connect', kind)
+    },
+    disconnect(kind) {
+      return ipcRenderer.invoke('rovai:channels-disconnect', kind)
+    },
+    publishMemberBot(agentId, kind) {
+      return ipcRenderer.invoke('rovai:channels-publish-member-bot', agentId, kind)
+    },
+    retryMemberBot(agentId, kind) {
+      return ipcRenderer.invoke('rovai:channels-retry-member-bot', agentId, kind)
+    },
+    selectPublicationApprover(agentId, userId, kind) {
+      return ipcRenderer.invoke(
+        'rovai:channels-select-publication-approver',
+        agentId,
+        userId,
+        kind
+      )
+    },
+    cancelQrAttempt(attemptId) {
+      return ipcRenderer.invoke('rovai:channels-cancel-qr', attemptId)
+    },
+    setLoginViewBounds(attemptId, bounds) {
+      return ipcRenderer.invoke('rovai:channels-login-view-bounds', attemptId, bounds)
+    },
+    refreshLoginQr(attemptId) {
+      return ipcRenderer.invoke('rovai:channels-refresh-login-qr', attemptId)
+    },
+    onChanged(listener) {
+      const handler = (
+        _event: Electron.IpcRendererEvent,
+        value: ChannelSettingsSnapshot
+      ): void => listener(value)
+      ipcRenderer.on('rovai:channels-changed', handler)
+      return () => ipcRenderer.removeListener('rovai:channels-changed', handler)
     }
   },
   onboarding: {

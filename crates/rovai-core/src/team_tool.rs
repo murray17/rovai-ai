@@ -18,6 +18,7 @@ use crate::{
         CAMP_MESSAGE_SEND_PUBLIC_ONLY_SCHEMA_DESCRIPTION,
         CAMP_MESSAGE_SEND_TO_PRINCIPAL_SCHEMA_DESCRIPTION,
     },
+    channel::ChannelService,
     collaboration::{
         CollaborationService, CreateTaskCommand, TaskAcceptanceCriteriaUpdate, TaskAssigneeFilter,
         TaskAssigneeUpdate, TaskDetail, TaskListPage, TaskListQuery, TaskStatus, UpdateTaskCommand,
@@ -1145,6 +1146,12 @@ impl TeamToolService {
             &supplied_credential_digest,
             attested_run,
         )?;
+        ChannelService::default().ensure_topic_roster_members(
+            database,
+            &sender.camp_id,
+            &invocation.input.to,
+            &command_id,
+        )?;
         let command = CampMessageSendCommand {
             native_binding_id: invocation.native_binding_id.clone(),
             credential_digest: supplied_credential_digest.clone(),
@@ -1327,6 +1334,12 @@ impl TeamToolService {
             &invocation.native_binding_id,
             &supplied_credential_digest,
             attested_run,
+        )?;
+        ChannelService::default().ensure_topic_roster_members(
+            database,
+            &sender.camp_id,
+            &invocation.input.to,
+            &command_id,
         )?;
         let command = GatherCommand {
             native_binding_id: invocation.native_binding_id.clone(),

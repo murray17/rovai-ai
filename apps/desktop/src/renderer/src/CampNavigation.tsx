@@ -38,6 +38,7 @@ import {
   shouldHandlePrimaryShortcut
 } from './renderer-platform'
 import { allNavigationCamps } from './ui-model'
+import { formatCampTitle } from './camp-title'
 
 export type NavigationSettingsSection = SettingsSection
 
@@ -779,7 +780,7 @@ export function CampNavigation({
             ) : action?.kind === 'delete' ? (
               <>
                 <AppDialogHeader
-                  title={`永久删除“${action.camp.title}”？`}
+                  title={`永久删除“${formatCampTitle(action.camp)}”？`}
                   description="Rovai 会永久删除会话数据，并请求停止这段对话中仍未结束的执行。"
                   icon="trash"
                   kicker="不可撤销"
@@ -854,7 +855,8 @@ const SETTINGS_SIDEBAR_GROUPS: SettingsSidebarGroup[] = [
     items: [
       { key: 'skills', icon: 'sparkles', label: 'Skills' },
       { key: 'mcp', icon: 'blocks', label: 'MCP' },
-      { key: 'runtime', icon: 'cpu', label: 'Agent 运行时' }
+      { key: 'runtime', icon: 'cpu', label: 'Agent 运行时' },
+      { key: 'channels', icon: 'radio-tower', label: '渠道' }
     ]
   },
   {
@@ -970,7 +972,7 @@ function CommandPalette({
         const projectName = camp.projectBindingKind === 'directory'
           ? projectNameByPath.get(camp.projectPath) ?? ''
           : '快速对话'
-        return camp.title.toLowerCase().includes(trimmedQuery)
+        return formatCampTitle(camp).toLowerCase().includes(trimmedQuery)
           || projectName.toLowerCase().includes(trimmedQuery)
       })
     : camps
@@ -1023,7 +1025,7 @@ function CommandPalette({
                 onClick={() => onCamp(camp)}
                 onMouseEnter={() => setActiveIndex(index)}
               >
-                <span className="truncate">{camp.title}</span>
+                <span className="truncate" title={formatCampTitle(camp)}>{formatCampTitle(camp)}</span>
                 <small>{camp.projectBindingKind === 'directory' ? projectNameByPath.get(camp.projectPath) ?? '项目' : '快速对话'}</small>
               </button>
             ))}
@@ -1189,7 +1191,7 @@ function CampRow({
   onCamp(camp: NavigationCampItem): void
   onAction(kind: 'rename' | 'delete', camp: NavigationCampItem): void
 }): JSX.Element {
-  const title = camp.title
+  const title = formatCampTitle(camp)
   const hasNewReply = camp.marker === 'unread_completed'
   const menuLabels = campNavigationMenuLabels(pinned)
   const menuItems: SidebarActionMenuItem[] = camp.activationState === 'pending'
