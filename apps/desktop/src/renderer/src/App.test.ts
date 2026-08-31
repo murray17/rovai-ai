@@ -4211,7 +4211,7 @@ describe('task event projections', () => {
     expect((markup.match(/aria-label="查看洛可的基础信息"/g) ?? [])).toHaveLength(2)
     expect((markup.match(/data-agent-id="agent_1"/g) ?? [])).toHaveLength(2)
     expect(markup).not.toContain('message-author-link')
-    expect(markup).toMatch(/<div class="timeline-node timeline-day">\d{1,2}月\d{1,2}日 周[一二三四五六日] · DAY \d+<\/div>/)
+    expect(markup).toMatch(/<div class="timeline-node timeline-day">\d{4}年\d{1,2}月\d{1,2}日<\/div>/)
     expect(markup).not.toContain('今天 ·')
     expect(markup).not.toContain('发布准备')
     expect(markup).not.toContain('投递失败')
