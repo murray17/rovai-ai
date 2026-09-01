@@ -15,11 +15,20 @@ const file: ResolvedFilePreview = {
 }
 const opens: OpenFilePreviewRequest[] = []
 const notices: string[] = []
+let chooseRootCalls = 0
 const unsupported = async (): Promise<never> => { throw new Error('Unexpected navigation fixture operation') }
 const api: FilePreviewApi = {
   bindCamp: async () => {},
   open: async (request) => {
     opens.push(request)
+    if (request.kind === 'message_reference' && request.rawReference === '../outside/config.toml') {
+      return { ok: false, error: {
+        code: 'authorization_required', message: '内部目录授权原因不应显示给用户。', retryable: false,
+        authorizationChallenge: {
+          pendingOpenId: 'pending-external-file', campId, displayReference: request.rawReference, expiresAt: Date.now() + 60_000
+        }
+      } }
+    }
     if (request.kind !== 'message_reference' || request.rawReference !== file.displayPath) return unsupported()
     return { ok: true, value: { kind: 'file_preview', file: { ...file, handleId: crypto.randomUUID() } } }
   },
@@ -30,7 +39,7 @@ const api: FilePreviewApi = {
   release: async () => ({ released: true }), onExternalUpdate: () => () => {},
   reopen: unsupported, readPage: unsupported, resolveLine: unsupported, readBinary: unsupported,
   prepareHtml: unsupported, reload: unsupported, openInSystem: unsupported, revealInFolder: unsupported,
-  copyPath: unsupported, chooseAuthorizedRoot: unsupported
+  copyPath: unsupported, chooseAuthorizedRoot: async () => { chooseRootCalls += 1; return null as never }
 }
 const draft = { campId, body: '保留原有草稿', content: [{ kind: 'text', text: '保留原有草稿' }], revision: 1,
   attachments: [], replyIntent: null, continuationIntent: null, updatedAt: null, expiresAt: null }
@@ -47,6 +56,7 @@ const targetBody = [
   '主实现 `src/report/run_report.py`。',
   ...Array.from({ length: 12 }, (_, index) => `段落 ${index + 1}：${prose}`),
   '完整路径 src/report/run_report.py。',
+  '外部配置：[config.toml](../outside/config.toml)。',
   '定位 `run_report.py:44-46`，这里是当前阅读位置。',
   'WBS(外码)/WBS描述/成本中心/FBP/GR-手工金额；心/FBP）有值；`run_gr_reminder.py`。',
   '已读取（https://example.com/wiki/spec）。文档中的改动：',
@@ -129,7 +139,7 @@ Object.assign(window, { navigationTest: {
       targetLines: [...document.querySelectorAll<HTMLElement>('.is-location-target')].map((row) => Number(row.dataset.fileRow)),
       targetVisible: Boolean(target && target.getBoundingClientRect().top >= viewer.getBoundingClientRect().top
         && target.getBoundingClientRect().bottom <= viewer.getBoundingClientRect().bottom),
-      messageY: message?.getBoundingClientRect().top, opens, notices, trace,
+      messageY: message?.getBoundingClientRect().top, opens, notices, chooseRootCalls, trace,
       draft: element('[contenteditable]')?.textContent,
       falseLinks: [...document.querySelectorAll<HTMLAnchorElement>('a[title]')]
         .filter((a) => /FBP|run_gr_reminder/u.test(a.title)).length,

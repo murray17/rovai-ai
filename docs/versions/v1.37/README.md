@@ -17,7 +17,10 @@ last_updated: 2026-09-01
 ## 范围与状态
 
 - 实施本机 Runtime 结构化图片，稳定路径零拷贝、inline bytes 优先、Run 临时图片复用 Blob；
-  不做目录范围或符号链接限制，不增加授权、File Preview 合同或通用复制机制。
+  图片链自身不做目录范围或符号链接限制，不借图片观察增加授权、File Preview 或通用复制机制。
+- [File Preview v3](../../contracts/file-preview-v3.md) 已实施：可信点击最终定位到具体普通文件后直接创建临时只读
+  Preview handle，工作区外文件不再弹目录选择器；HTML/Markdown 本地资源绑定文档目录并随 Tab 释放，Root Grant
+  仅保留给显式目录操作。理由见 [V1.37-D04](decisions.md#v1-37-d04)。
 - ACP 增量/终态、Claude Tool Result、Codex MCP/原生 imageGeneration 已接入；本机实测后补齐
   Antigravity generatedMedia、TRAE builtin 图片、Copilot binaryResultsForLlm。六种 Runtime 的图片结果链
   已通过隔离 Core；Cursor 旧版无 ACP，其他 Runtime 的上游/能力限制见[真实验收](runtime-image-acceptance.md)。

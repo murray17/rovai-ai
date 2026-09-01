@@ -221,7 +221,8 @@ Approval/Recovery Dock，验证大屏中 481/480/450/420px 会话的容器断点
 消息文件引用运行 `pnpm test:file-reference-navigation`。它在同样隔离的真实 Electron 中挂载生产 Camp、Markdown 与预览，
 验证有来源的短文件名定位、行范围高亮、字段误识别及 URL 中文尾部恢复；真实鼠标覆盖已有选区下的普通/inline-code
 文件链接点击、链接内拖选不打开及其后的再次单击，键盘激活保持可用。并逐帧检查打开/关闭、键盘调宽和持续拖动时
-阅读锚点偏移不超过 2px；还覆盖用户滚动后的可见消息回退、底部跟随及紧凑模式返回。相同环境变量可保留双主题截图
+阅读锚点偏移不超过 2px；还覆盖用户滚动后的可见消息回退、底部跟随、紧凑模式返回，以及旧
+`authorization_required` 结果不会调用目录选择器或泄露内部授权原因。相同环境变量可保留双主题截图
 和测量报告；Linux CI 使用 `xvfb-run -a pnpm test:file-reference-navigation`，不替代 Main 的来源、文件类型和系统动作测试。
 
 涉及 Preload 请求 transport 或 Renderer 错误读取时，除普通 Vitest 外还运行：

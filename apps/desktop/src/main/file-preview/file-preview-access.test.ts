@@ -1,4 +1,4 @@
-import { mkdtemp, mkdir, symlink, writeFile } from 'node:fs/promises'
+import { mkdtemp, mkdir, realpath, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -29,6 +29,20 @@ describe('file preview access', () => {
     await expect(openPreviewFile(root, join(root, 'link.txt'))).rejects.toMatchObject({
       code: 'outside_authorized_root'
     })
+  })
+
+  it('opens one exact external file without turning the source root into a directory grant', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'rovai-preview-root-'))
+    const outside = await mkdtemp(join(tmpdir(), 'rovai-preview-outside-'))
+    await writeFile(join(outside, 'notes.txt'), 'outside note')
+    await symlink(join(outside, 'notes.txt'), join(root, 'link.txt'))
+
+    const result = await openPreviewFile(root, join(root, 'link.txt'), { allowExternalFile: true })
+    opened.push(result)
+
+    expect(result.canonicalRoot).toBe(await realpath(outside))
+    expect(result.canonicalPath).toBe(await realpath(join(outside, 'notes.txt')))
+    expect(result.displayPath).toBe('notes.txt')
   })
 
   it('uses segment-aware containment', () => {
