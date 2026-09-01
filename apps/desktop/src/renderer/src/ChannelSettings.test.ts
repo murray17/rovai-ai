@@ -5,11 +5,22 @@ import type { AgentProfile, ChannelKind, ChannelsApi, ChannelSettingsSnapshot } 
 import {
   ChannelSettings,
   ChannelSettingsView,
+  ExecutionWebSettingsPanel,
   channelErrorMessage,
   visibleChannelMembers
 } from './ChannelSettings'
 
 describe('Channel settings', () => {
+  it('keeps the single global LAN execution setting at the bottom and collapsed by default', () => {
+    const panel = renderToStaticMarkup(createElement(ExecutionWebSettingsPanel))
+    expect(panel).toContain('<details class="channel-settings-section execution-web-settings">')
+    expect(panel).not.toContain('<details class="channel-settings-section execution-web-settings" open=""')
+    expect(panel).toContain('局域网执行台')
+    expect(panel).toContain('role="switch"')
+    expect(panel).toContain('min="1024" max="65535"')
+    expect(panel).toContain('修改端口后，此前发送的执行台链接可能失效。')
+  })
+
   it('exposes only the provider choice on the typed connection boundary', () => {
     expectTypeOf<ChannelsApi['connect']>().parameters.toEqualTypeOf<[kind?: ChannelKind]>()
   })

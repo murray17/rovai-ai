@@ -2,7 +2,7 @@
 document_type: versions-index
 authority: version-lifecycle
 current_version: v1.37
-last_updated: 2026-08-31
+last_updated: 2026-09-01
 ---
 
 # Rovai-ai 版本记录
@@ -188,4 +188,4 @@ last_updated: 2026-08-31
 | v1.34 | `historical` | Camp 队员三态 Fast 覆盖、原生资格与执行冻结、紧凑成员胶囊 | [v1.34/README.md](v1.34/README.md) |
 | v1.35 | `historical` | 飞书队员 Bot、Owner-only Camp、原会话项目卡、动态 roster 与执行输出；channel 分支原 v1.33 编号顺延 | [v1.35/README.md](v1.35/README.md) |
 | v1.36 | `historical` | 共享 SQLite、飞书终态卡与钉钉 Web Session；钉钉单应用发布已隔离验证，Core/收发/群卡片与 packaged 验收未闭环 | [v1.36/README.md](v1.36/README.md) |
-| v1.37 | `current` | Runtime 结构化图片、混合生命周期、共享 Gallery 与飞书显式文件交付；模型输入教学待二次确认 | [v1.37/README.md](v1.37/README.md) |
+| v1.37 | `current` | Runtime 图片、取消可用性、Agent 目标教学与飞书 LAN 只读执行台；部分真实 Runtime/渠道验收仍在进行 | [v1.37/README.md](v1.37/README.md) |

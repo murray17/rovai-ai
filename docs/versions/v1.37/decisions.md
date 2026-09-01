@@ -110,3 +110,31 @@ canonical file 可以位于来源 root 外，不生成 Root Grant，也不触发
   containment、MIME/大小门禁和 Tab 生命周期共同限制该范围，不能转成持久目录授权。
 - 拒绝继续要求 Root Grant：它增加无效 Modal，并把单文件意图扩大成目录能力。拒绝对点击文件永久信任：来源撤销、
   文件替换或身份变化后仍须失败。拒绝让 HTML 直接使用 `file://`：它绕过受控协议、sender gate 与资源释放边界。
+
+<a id="v1-37-d05"></a>
+## V1.37-D05：飞书执行卡使用固定直达 URL，局域网执行台以链接持有能力授权
+
+### 背景
+
+把执行过程继续塞进群卡会重复 Rovai 执行台、频繁改卡并受卡片预算限制；把“打开执行台”改成 callback、Owner 私聊与
+点击时签发又会引入外部身份、私聊幂等和地址刷新状态机。Card 2.0 的纯 `open_url` 无法在点击时先向 Rovai 请求最新地址，
+而一期明确只服务受控局域网内主动开启的只读查看，不承诺抵抗局域网主动中间人。
+
+### 决定
+
+飞书执行卡只保留状态和三个入口：最近输出与 exact-run 停止继续做 Owner callback；打开执行台使用创建卡片时冻结的
+`open_url`，不识别点击人。Desktop Main 运行一个全局 LAN HTTP/SSE 服务，按用户固定端口签发内存随机 Token，scope 只允许
+同渠道/App/Camp/队员中 focus Run 及其之前历史。IP 或端口变化不更新旧卡；Main 重启不恢复 Token。链接、局域网可达性和
+有效 Token 共同构成只读查看能力，不把它描述成 Owner-only。
+
+当前字段和错误由 [Feishu Channel v10](../../contracts/feishu-channel-v10.md) 拥有，组件边界与 UX 分别由
+[飞书渠道架构](../../architecture/feishu-channel.md)和[渠道设置](../../ui/components/channel-settings.md)拥有。
+
+### 后果与替代方案
+
+- 旧卡在 IP、端口或网络变化后可能失效，后续新卡才使用新地址；这是避免 address generation、批量卡片迁移和私聊恢复的
+  明确代价。
+- 获得链接且能进入局域网的人可以查看冻结 scope；HTTP 不能为主动攻击者提供保密保证，因此 Token 只减少偶然发现和
+  越权扩张，不把能力包装成 HTTPS 或飞书身份认证。
+- 拒绝继续把完整 timeline 放在卡片：它增加解释层、折叠/分页与持续更新复杂度。拒绝动态 callback/私聊：它违背直接打开
+  的产品行为，并没有解决 HTTP 主动攻击。拒绝每 Run 端口或冲突漂移：旧卡与运行时地址将变得不可预测。

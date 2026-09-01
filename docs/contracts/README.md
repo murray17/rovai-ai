@@ -59,7 +59,9 @@ Architecture 解释组件如何组成，Version 概览记录交付范围；它�
 | [Channel/Main Schema Join v2（当前）](channel-main-schema-join-v2.md) | 精确来源与既有 receipt 含义不变；原库事务重映射 main 117/118/119→126/127/130，逐步恢复，128/129 历史合同保留，131 封口 |
 | [Channel/Main Schema Join v1（历史）](channel-main-schema-join-v1.md) | 主线 Pending/Fast 与渠道精确来源准入、126/127 receipt 与 128 封闭；副本执行位置由 v2 替代 |
 | [Channel Storage v1（历史）](channel-storage-v1.md) | 飞书/钉钉 credential 与 Developer Session 的 `rovai.sqlite` 明文存储、Main-only API、批量启动、账号/发布原子提交、CAS refresh 与旧 `.bin` clean break |
-| [Feishu Channel v8（当前）](feishu-channel-v8.md) | v7 执行卡不变；群/话题首次卡支持项目或 Quick Chat，共用 Owner/roster/FIFO 原子绑定；Migration 132 保留旧数据并允许无项目 resolved |
+| [Feishu Channel v10（当前）](feishu-channel-v10.md) | v9 执行卡、固定 URL、授权和 callback 不变；Web 公开投影复用生产分组语义，每个 Run、连续操作组与 Command 使用独立 disclosure |
+| [Feishu Channel v9（历史）](feishu-channel-v9.md) | v8 绑定/永久投递不变；飞书执行卡收敛为状态与三个入口，固定 `open_url` 直达全局 LAN HTTP 只读执行台，内存 Token 限定历史 scope，Owner callback 仅保留最近输出与 exact-run 停止 |
+| [Feishu Channel v8（历史）](feishu-channel-v8.md) | v7 执行卡不变；群/话题首次卡支持项目或 Quick Chat，共用 Owner/roster/FIFO 原子绑定；Migration 132 保留旧数据并允许无项目 resolved；执行卡已由 v9 替代 |
 | [Feishu Channel v7（历史）](feishu-channel-v7.md) | v6 封存/分页/永久正文不变；实时卡当前正文/command/进度加10-command/20-block滚动折叠，16KB/30-element上限；共享安全 publicResult |
 | [Feishu Channel v6（历史）](feishu-channel-v6.md) | 分页仅同步 response card；永久正文改为无标题卡片及实际接收对象行；执行中平铺由 v7 替代 |
 | [Feishu Channel v5（历史）](feishu-channel-v5.md) | v4 封存/授权不变；终态双层原生折叠、翻页外层展开、15-command/50-element/24KB 分页与 4KiB 安全结果；分页 PATCH 后空 ACK 由 v6 替代 |

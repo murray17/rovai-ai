@@ -5,6 +5,7 @@ import type {
   ChannelSettingsSnapshot,
   CoreEvent,
   CoreMethod,
+  ExecutionWebSettingsSnapshot,
   ExecutionConsolePlacement,
   RestorableLocation,
   SettingsSection,
@@ -141,6 +142,12 @@ const api: RovaiApi = {
     get() {
       return ipcRenderer.invoke('rovai:channels-get') as Promise<ChannelSettingsSnapshot>
     },
+    getExecutionWebSettings() {
+      return ipcRenderer.invoke('rovai:execution-web-settings-get') as Promise<ExecutionWebSettingsSnapshot>
+    },
+    setExecutionWebSettings(settings) {
+      return ipcRenderer.invoke('rovai:execution-web-settings-set', settings)
+    },
     connect(kind) {
       return ipcRenderer.invoke('rovai:channels-connect', kind)
     },
@@ -177,6 +184,14 @@ const api: RovaiApi = {
       ): void => listener(value)
       ipcRenderer.on('rovai:channels-changed', handler)
       return () => ipcRenderer.removeListener('rovai:channels-changed', handler)
+    },
+    onExecutionWebSettingsChanged(listener) {
+      const handler = (
+        _event: Electron.IpcRendererEvent,
+        value: ExecutionWebSettingsSnapshot
+      ): void => listener(value)
+      ipcRenderer.on('rovai:execution-web-settings-changed', handler)
+      return () => ipcRenderer.removeListener('rovai:execution-web-settings-changed', handler)
     }
   },
   onboarding: {

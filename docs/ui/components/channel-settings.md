@@ -10,7 +10,7 @@ last_updated: 2026-09-01
 
 渠道设置是 Owner 在 Rovai 本机维护飞书/钉钉连接与队员 Bot 的 Renderer surface。群首次项目选择发生在对应外部会话的
 Owner-only 卡片中；Renderer 不提供 Channel 项目目录或会话绑定操作。领域状态和错误按 Provider 分别见
-[Feishu Channel v8](../../contracts/feishu-channel-v8.md)与
+[Feishu Channel v10](../../contracts/feishu-channel-v10.md)与
 [DingTalk Channel v5](../../contracts/dingtalk-channel-v5.md)；本页只拥有信息层级、交互与可访问性。
 
 当前对外渠道页只显示飞书。钉钉完整产品链路尚未验收，因此隐藏其整个入口、平台计数、连接/发布区域及
@@ -26,7 +26,8 @@ Owner-only 卡片中；Renderer 不提供 Channel 项目目录或会话绑定操
 2. 当前可见 Provider Tab（目前仅飞书）；切换只改变当前展示，不合并账号、Bot 状态或诊断；
 3. 当前 Provider 的渠道连接，展示真实开发者用户名、企业与可选 email，提供登录、切换和断开；
 4. 队员 Bot 列表，按成员稳定顺序显示头像、名称、角色、发布状态和单行动作；
-5. 只有存在 pending binding 或 binding error 时，显示安静的诊断计数，不提供正常操作入口。
+5. 只有存在 pending binding 或 binding error 时，显示安静的诊断计数，不提供正常操作入口；
+6. 页面最底部显示默认折叠的“局域网执行台”全局设置，不放入单个 Bot、Camp 或队员行。
 
 窄窗口保持同一内容顺序，表格式行折为纵向信息，不产生横向滚动。共享色彩只使用现有语义 Token；头像、按钮、
 Dialog、状态点和间距复用现有组件语法。
@@ -150,22 +151,32 @@ Unicode 字符，超长用省略号收尾。引用只作展示，不跳转、不
 
 ## 飞书执行卡
 
-飞书执行中卡默认只露出最新公开正文（最多5行）、当前一条安全 command 和真实进度，例如“已完成 21 条指令 · 当前 1 条执行中”。
-历史收进默认关闭的“执行过程 · 最近 10 条 / 共 22 条”原生面板，只含最近10条 command、最多20个 timeline blocks；
-更早记录明确提示留待完成后查看。运行中没有单条结果折叠和分页；整卡按16KB/30个递归elements滚动裁剪，不能把全部历史
-仅包进总面板。新的整卡更新允许重新关闭实时面板；等待/失败计数使用真实状态，不制造进度百分比。
+飞书执行卡保持安静的状态入口，不把 Rovai 执行台压缩进群消息。执行中只显示“队员名 · 执行中”和
+“显示最近输出 / 打开执行台 / 停止执行”；终态标题改为已完成、执行失败或已取消，并移除停止入口。
+默认不显示正文、command、结果、进度或统计。
 
-终态沿用原生执行台的阅读顺序：公开文字与 command 混排。先显示真实“用时 18 秒”
-一类的时长，其后为原生分隔线，再把完整 timeline 的当前页放进默认收起的“执行过程 · N 条指令”原生面板。
-N 统计整轮 command，不计正文，也不是当前页数量；无 command 时标题仍为“执行过程”。缺失可靠起止时间时不虚构时长，
-同时省略时长与分隔线。每条 command 自带第二层原生折叠，安全命令/flags/路径在 header，展开后只有
-一个结果代码框，无二级标题。两层展开/收起都不请求 Rovai；永久正文卡仍独立显示。
-文字最多 10 行，长文为前 9 行加截断提示；安全结果只从独立 publicResult 读取，最多 20 行和 4KiB，长结果显示前 9 / 截断提示 / 后 10，
-长行也保留首尾。无结果显示“（无可展示结果）”；过大且不可拆的 command 明确提示在 Rovai 查看，不静默重写命令。
-多页才在总面板内出现页码和上一页/下一页；翻页后总面板展开，单条 command 收起，包括返回第 1 页。
-成功翻页无 Toast；可响应的超时/服务不可用返回清晰的错误 Toast，完全离线时由飞书提示平台错误，不承诺自定义文案。
-安全、预算、封存与 callback 约束由 [Feishu Channel v8](../../contracts/feishu-channel-v8.md) 拥有；新页只经同步 response card 提交，
-不额外 PATCH，不增加 Renderer 设置或视图状态。
+“显示最近输出”展开最多最后 30 个公开正文与安全 command，按真实顺序混排；不展示结果、逐条状态或分页。
+它仍是 Owner callback，文案在展开后变成“收起最近输出”。“打开执行台”是直接 `open_url`，没有 loading、
+“已发送到私聊”或 Owner-only 文案；按钮只在卡片首次创建时已有可用 URL 才显示。“停止执行”保持危险样式，
+只在非终态显示，不使用 Spinner 制造第二个执行状态。
+
+卡片只在状态、按钮可用性或已展开最近输出窗口变化时更新。永久正文卡继续独立发布，执行卡仍是临时 surface；
+下一轮召回后不留下完成占位。安全、固定 URL、Token、callback 和串行更新边界由
+[Feishu Channel v10](../../contracts/feishu-channel-v10.md) 拥有。
+
+## 局域网执行台设置
+
+“局域网执行台”位于渠道页所有连接、发布与诊断内容之后，使用原生 `details/summary`，每次进入页面默认折叠。
+摘要只显示名称、一句“在同一网络中查看公开执行记录”和真实状态；展开后按现有设置行语法依次显示启用 Switch、
+端口、ready 时的当前地址、固定旧链接警告和一个保存按钮。端口输入使用数字键盘、`1024..65535`，完成输入并失焦后
+才显示行内错误；保存期间禁用按钮。状态必须以文字表达，不只依赖颜色。
+
+Web 执行台延续 Porcelain Day / Steel Night 的冷瓷灰、Steel 品牌、身份色与中性 Evidence 层级，不建立暖色替代主题。
+顶部只保留 Camp 名与“只读”，随后显示当前选中 Run 的触发消息和该队员的连续历史时间线；外部触发者在该阅读面固定显示
+为“你”，不显示“飞书成员”。每个 AgentRun 都有独立过程 disclosure，当前 Run 默认展开、历史 Run 默认收起；连续操作组
+与每个 Command 继续使用生产执行台的嵌套 disclosure，即使没有公开结果也保留可展开行。点击 Run 标题只切换顶部触发消息，
+不代替折叠入口。
+页面无写控制、分页或解释性图例，桌面与手机使用同一阅读顺序，无横向滚动；状态有文本、可见键盘焦点和最小 44px 手机点击区域。
 
 ## 状态、错误与键盘
 
@@ -179,7 +190,7 @@ N 统计整轮 command，不计正文，也不是当前页数量；无 command �
 
 - [全局设计系统](../../../DESIGN.md)
 - [设置工作区 brief](../../../apps/desktop/.impeccable/surfaces/settings-workspace.md)
-- [Feishu Channel v8](../../contracts/feishu-channel-v8.md)
+- [Feishu Channel v10](../../contracts/feishu-channel-v10.md)
 - [飞书渠道架构](../../architecture/feishu-channel.md)
 - [DingTalk Channel v5](../../contracts/dingtalk-channel-v5.md)
 - [钉钉渠道架构](../../architecture/dingtalk-channel.md)

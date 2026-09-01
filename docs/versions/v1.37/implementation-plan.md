@@ -32,6 +32,14 @@ last_updated: 2026-09-01
 - [x] 开发者二次确认 Agent 寻址帮助 revision 1 后，从 Bootstrap、Send/Gather schema 与 CLI help 删除
   inline fallback 机制教学；`--to` 保持唯一推荐入口，Charter revision 4→5，parser 与发送效果不变。
 - [x] Antigravity 真实生成图片终态、TRAE/Copilot 专用图片结果 fixture 与适配；本机队员经过隔离 Core 复测。
+- [x] 飞书执行卡改为纯状态入口；最近输出与 exact-run 停止保留 Owner callback，打开执行台使用首次创建时
+  冻结的 Card 2.0 `open_url`，更新、Main 重启及网络变化均不重签旧卡。
+- [x] Main 单例 `ExecutionViewService`、私有原子设置、默认关闭/8765、固定端口无漂移、RFC1918 地址选择、
+  内存 Token hash 与 immutable scope；Core 拥有历史 Run 授权、公开投影和 exact-run 取消。
+- [x] Snapshot GET + Fetch Streaming SSE、自包含只读页面、公开 redactor/result/file projection 与安全响应头。
+- [x] 按已确认交互稿把生产 Web 页面替换为 Porcelain Day / Steel Night 连续时间线：外部触发者显示“你”，
+  AgentRun、连续操作组和每个 Command 使用与生产执行台一致的嵌套 disclosure。
+- [x] 渠道页底部默认折叠的全局启用/端口设置、真实状态与旧链接警告；无网卡选择、远端探测或旧卡修复入口。
 - [ ] Cursor 非标准生成通知的真实成功 fixture；本机旧 CLI 不支持 ACP，无证据不实现猜测 parser。
 
 ## 验证 owner
@@ -267,6 +275,30 @@ Antigravity 原生生成、TRAE/Copilot 专用图片结果已接入，六种 Run
   退出 owner 另验证两次业务结算的原 cycle NULL-count 约束，以及业务失败不能计为 Runtime terminal。
 - Renderer 复用 `App.test.ts` 取消投影 owner，验证 Core 返回 cancelled/failed 的即时应用和无关 Run 保留；
   benchmark fingerprint 只同步当前 v1.44/schema85 断言。未增加模型可见上下文或测试专用产品入口。
+
+### 2026-09-01 飞书局域网只读执行台
+
+- `execution-view-service.test.ts` 覆盖精确设置 schema、损坏配置 fail-closed、RFC1918 地址选择、真实本机 HTTP、
+  fragment Token、不可变 Core scope、安全响应头、页面脚本语法及端口冲突后不漂移；服务不可用时不签发 URL。
+- `feishu-card.test.ts` 覆盖默认卡无正文/command/进度，打开入口只含 `open_url`，最近输出最多 30 条且无结果，
+  终态隐藏停止；`channel-settings.test.ts` 覆盖 URL 只在首次 send 签发、后续 update/Main 恢复不重签，以及 callback
+  Owner/exact-message/per-card 串行边界；停止 callback 的 Applied 结果会立即返回“已取消”终态卡，不再只返回 Toast。
+- Core 渠道生命周期 fixture 覆盖 Web scope 的 Camp/Agent/App/历史上界与错误 App 拒绝；独立 exact-run fixture
+  验证 Owner 只取消目标 AgentRun，重复动作不扩大到同 Turn 其他 Run。
+- Renderer 静态 owner 覆盖设置位于渠道页底部、原生 `details` 默认关闭、端口范围和固定警告；TypeScript 与聚焦
+  Vitest 已通过。真实 in-app Chromium 以桌面默认视口和 390×844 手机视口读取相同生产 HTML，验证 URL fragment
+  清除、连续展开时间线、历史 Run 触发消息切换、无横向滚动和 Steel 双主题 token；没有调用 Runtime 或向飞书发件。
+- `pnpm test` 通过：134 个 Vitest 文件 / 1365 项，Node 220 项通过、1 项既有 Windows 原生检查按平台跳过；
+  文档 9 项、Skill 3 项及普通治理门禁通过。`pnpm typecheck`、`pnpm build:desktop`、`git diff --check`、
+  `cargo fmt --all -- --check` 与全 workspace Clippy 零告警通过。
+- `pnpm test:rust:pr` 通过：Library 473 项、CLI 32 项、slow 297 项；地址创建时重解析和同时间戳历史上界
+  收紧后，Execution Web/Main 定向 55 项及两个 Core 授权 owner 再次通过。
+- 固定 PR base `21c954756bd1d21911b0eed609902cd3301ae516` 的 `docs:check:ci` 通过；
+  `pnpm package:mac:daily` 产出并验证 arm64 ad-hoc `dist/mac-arm64/Rovai AI.app`，Core 与 CLI 已入包。
+  本轮不安装、不启动，也不替换 `/Applications` 中的日常 App；没有调用 Runtime 或向真实飞书发件。
+- 后续产品校正已落到生产 Web 页面：Main 公开投影复用生产 execution grouping/result/redactor，外部触发者固定为“你”；
+  真实生产 HTML 已在 1440px 桌面、375×812 手机、812×375 横屏与日夜主题下验证 Run/操作组/Command 独立折叠、
+  44px 手机 summary、可见键盘焦点及无页面级横向滚动。定向 Vitest 3 文件 / 103 项与 TypeScript 检查通过。
 
 本轮隔离验证：
 

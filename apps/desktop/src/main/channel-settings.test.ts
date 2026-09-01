@@ -1869,7 +1869,7 @@ describe('channel settings service', () => {
             state: 'terminal_sealed'
           }
         }
-        if (method === 'channels.executionConsole.page.authorize') {
+        if (method === 'channels.executionConsole.recentOutput.authorize') {
           if (command.operatorUserId !== 'owner-user-id') {
             return {
               status: 'rejected',
@@ -1877,17 +1877,10 @@ describe('channel settings service', () => {
               payload: {}
             }
           }
-          if (command.snapshotSequence !== 7) {
-            return {
-              status: 'rejected',
-              code: 'channel.execution_console.stale_card',
-              payload: {}
-            }
-          }
           return {
             status: 'accepted',
-            code: 'channel.execution_console.page_authorized',
-            payload: { snapshotSequence: 7, pageIndex: command.pageIndex }
+            code: 'channel.execution_console.recent_output_authorized',
+            payload: { snapshotSequence: 7 }
           }
         }
         if (method === 'channels.host.tick') {
@@ -2082,10 +2075,9 @@ describe('channel settings service', () => {
       action: {
         tag: 'button',
         value: {
-          action: 'execution_console_page',
+          action: 'execution_recent_output',
           agentRunId: 'run-console',
-          snapshotSequence: 7,
-          pageIndex: 0,
+          visible: true,
           operatorUserId: 'spoofed-user'
         }
       },
@@ -2098,21 +2090,19 @@ describe('channel settings service', () => {
       }
     })
     const executionCallback = commands.find(({ method }) => (
-      method === 'channels.executionConsole.page.authorize'
+      method === 'channels.executionConsole.recentOutput.authorize'
     ))?.command
     expect(executionCallback).toMatchObject({
       appId: 'cli_a',
       externalMessageId: 'om_console',
       agentRunId: 'run-console',
-      snapshotSequence: 7,
-      pageIndex: 0,
       operatorOpenId: 'ou_owner',
       operatorUserId: 'owner-user-id',
       operatorUnionId: 'on_owner'
     })
     expect(JSON.stringify(executionCallback)).not.toContain('spoofed-user')
-    expect(executionCallback).not.toHaveProperty('pageCount')
-    const authorizationIndex = commands.findIndex(({ method }) => method === 'channels.executionConsole.page.authorize')
+    expect(executionCallback).not.toHaveProperty('snapshotSequence')
+    const authorizationIndex = commands.findIndex(({ method }) => method === 'channels.executionConsole.recentOutput.authorize')
     const sourceIndex = commands.findIndex(({ method }) => method === 'channels.executionConsole.source')
     expect(authorizationIndex).toBeLessThan(sourceIndex)
     expect(harness.updateCard).not.toHaveBeenCalled()
@@ -2122,12 +2112,7 @@ describe('channel settings service', () => {
           title: { tag: 'plain_text', content: '审阅员 · 已完成' }
         }),
         body: expect.objectContaining({ elements: expect.arrayContaining([
-          expect.objectContaining({ tag: 'collapsible_panel', element_id: 'execution_process', expanded: true,
-            elements: expect.arrayContaining([
-              expect.objectContaining({ tag: 'collapsible_panel', expanded: false }),
-              { tag: 'markdown', content: '执行台输出' }
-            ])
-          })
+          expect.objectContaining({ tag: 'markdown', content: '执行台输出' })
         ]) })
       }) }
     })
@@ -2140,10 +2125,9 @@ describe('channel settings service', () => {
       action: {
         tag: 'button',
         value: {
-          action: 'execution_console_page',
+          action: 'execution_recent_output',
           agentRunId: 'run-console',
-          snapshotSequence: 7,
-          pageIndex: 0
+          visible: true
         }
       },
       raw: {
@@ -2155,7 +2139,7 @@ describe('channel settings service', () => {
       }
     })
     expect(outsiderExecutionResult).toEqual({
-      toast: { type: 'warning', content: '仅 Rovai Owner 可以操作执行记录' }
+      toast: { type: 'warning', content: '无权限' }
     })
     expect(commands.filter(({ method }) => method === 'channels.executionConsole.source')).toHaveLength(sourceReadsBeforeOutsider)
     expect(harness.updateCard).not.toHaveBeenCalled()
@@ -2167,10 +2151,9 @@ describe('channel settings service', () => {
       action: {
         tag: 'button',
         value: {
-          action: 'execution_console_page',
+          action: 'execution_recent_output',
           agentRunId: 'run-console',
-          snapshotSequence: 7,
-          pageIndex: 0
+          visible: false
         }
       },
       raw: {
@@ -2181,7 +2164,11 @@ describe('channel settings service', () => {
         }
       }
     })
-    expect(repeatedPageResult).toEqual(pageResult)
+    expect(repeatedPageResult).toEqual({
+      card: { type: 'raw', data: expect.objectContaining({
+        body: expect.objectContaining({ elements: [expect.objectContaining({ tag: 'column_set' })] })
+      }) }
+    })
     expect(harness.updateCard).not.toHaveBeenCalled()
     expect(commands.filter(({ method }) => method === 'channels.host.tick')).toHaveLength(
       tickCountBeforePaging
@@ -2207,7 +2194,7 @@ describe('channel settings service', () => {
         startedAt: '2026-08-28T00:00:00Z', terminalAt: '2026-08-28T00:00:05Z',
         targetAppId: 'cli_a', externalMessageId: 'om_console', state: 'terminal_sealed'
       }
-      const authorized = { status: 'accepted', code: 'channel.execution_console.page_authorized', payload: {} }
+      const authorized = { status: 'accepted', code: 'channel.execution_console.recent_output_authorized', payload: { snapshotSequence: 7 } }
       const requests: string[] = []
       const service = new ChannelSettingsService({
         credentialStore: memoryCredentialStore({ 'feishu-member-a': { appId: 'cli_a', appSecret: 'secret-a' } }),
@@ -2221,7 +2208,7 @@ describe('channel settings service', () => {
           }] })
           if (method === 'agents.list') return [presentAgent()]
           if (method === 'channels.delivery.claim') return []
-          if (method === 'channels.executionConsole.page.authorize') {
+          if (method === 'channels.executionConsole.recentOutput.authorize') {
             if (failure === 'unavailable') throw Object.assign(new Error('private-core-diagnostic'), { code: 'full_core_unavailable' })
             return failure === 'authorize' ? deferred : authorized
           }
@@ -2240,7 +2227,7 @@ describe('channel settings service', () => {
         let response: unknown
         const pending = Promise.resolve(harness.handlers.get('cli_a:cardAction')!({
           messageId: 'om_console', chatId: 'oc_group', operator: { openId: 'ou_owner' },
-          action: { tag: 'button', value: { action: 'execution_console_page', agentRunId: 'run-console', snapshotSequence: 7, pageIndex: 0 } }
+          action: { tag: 'button', value: { action: 'execution_recent_output', agentRunId: 'run-console', visible: true } }
         })).then(value => { response = value })
         await vi.advanceTimersByTimeAsync(2500)
         expect(response).toEqual({ toast: { type: 'error', content: failure === 'unavailable'
@@ -2830,12 +2817,15 @@ describe('channel settings service', () => {
   ])('keeps $label console disclosure separate from permanent Agent output cards', async ({ runStatus, updateMessageId }) => {
     const harness = controlledChannels({ cli_a: { openId: 'ou_bot_a', name: '芝士' } })
     const settlements: Array<Record<string, unknown>> = []
+    const createExecutionViewUrl = vi.fn(async () => 'http://192.168.1.23:8765/execution/run-1#t=fixed-token')
+    const revokeExecutionViewUrl = vi.fn()
     let delivered = false
     const service = new ChannelSettingsService({
       credentialStore: memoryCredentialStore({
         'feishu-member-a': { appId: 'cli_a', appSecret: 'secret-a' }
       }),
       createChannel: harness.createChannel,
+      executionView: { createExecutionViewUrl, revokeExecutionViewUrl },
       ...inertInterval(),
       core: channelCore((method, rawParams) => {
         const command = ((rawParams as { command?: Record<string, unknown> } | undefined)?.command ?? {})
@@ -2878,6 +2868,11 @@ describe('channel settings service', () => {
           return {
             sequence: 1,
             agentRunId: 'run-1',
+            campId: 'camp-1',
+            campTurnId: 'turn-1',
+            channelConversationId: 'channel-1',
+            agentId: 'agent-a',
+            runCreatedAt: '2026-08-28T00:00:00Z',
             agentDisplayName: '芝士',
             run: { status: runStatus, waitReason: null, terminalReasonCode: null },
             evidence: consoleCommandEvidence('run-1'),
@@ -2919,31 +2914,14 @@ describe('channel settings service', () => {
     const visibleBody = card.body.elements
       .filter((element) => element.tag === 'markdown')
       .map((element) => element.content).join('\n')
-    if (runStatus === 'succeeded') {
-      expect(card.body.elements).toEqual(expect.arrayContaining([
-        expect.objectContaining({ tag: 'collapsible_panel', element_id: 'execution_process', expanded: false,
-          elements: expect.arrayContaining([
-            expect.objectContaining({ tag: 'collapsible_panel', expanded: false }),
-            { tag: 'markdown', content: '执行台最终回复。' }
-          ])
-        })
-      ]))
-      expect(visibleBody).not.toContain('pnpm test')
-      expect(visibleBody).not.toContain('执行台最终回复。')
-    } else {
-      expect(visibleBody).toContain('pnpm test')
-      expect(card.body.elements).toEqual(expect.arrayContaining([
-        expect.objectContaining({ tag: 'collapsible_panel', element_id: 'execution_process', expanded: false,
-          header: expect.objectContaining({ title: { tag: 'plain_text', content: '执行过程 · 最近 1 条 / 共 1 条' } }),
-          elements: [{ tag: 'markdown', content: '✓ pnpm test' }]
-        })
-      ]))
-      expect(JSON.stringify(card).match(/collapsible_panel/gu)).toHaveLength(1)
-      expect(visibleBody).toContain('已完成 1 条指令')
-      expect(Buffer.byteLength(JSON.stringify(card))).toBeLessThanOrEqual(16_000)
-    }
+    expect(card.body.elements).toEqual([expect.objectContaining({ tag: 'column_set' })])
+    expect(visibleBody).not.toContain('pnpm test')
+    expect(visibleBody).not.toContain('执行台最终回复。')
+    expect(JSON.stringify(card)).not.toContain('collapsible_panel')
     expect(JSON.stringify(card)).not.toContain('private-stdout-token')
-    expect(JSON.stringify(card).includes('tests passed')).toBe(runStatus === 'succeeded')
+    expect(JSON.stringify(card)).not.toContain('tests passed')
+    expect(createExecutionViewUrl).toHaveBeenCalledTimes(updateMessageId ? 0 : 1)
+    expect(JSON.stringify(card).includes('fixed-token')).toBe(updateMessageId === null)
     expect(harness.createMessage).toHaveBeenCalledTimes(1)
     const outputRequest = harness.createMessage.mock.calls[0][0] as unknown as { data: { content: string; msg_type: string; receive_id: string } }
     expect(outputRequest.data).toMatchObject({ msg_type: 'interactive', receive_id: 'oc_group' })
@@ -2956,6 +2934,134 @@ describe('channel settings service', () => {
     })
     expect(JSON.stringify(harness.send.mock.calls)).not.toContain('Rovai 队员回复')
     expect(settlements.every((command) => command.outcome === 'sent')).toBe(true)
+    await service.stop()
+  })
+
+  it('returns an 已取消 execution card immediately after the Owner stops the exact Run', async () => {
+    const harness = controlledChannels({ cli_a: { openId: 'ou_bot_a', name: '芝士' } })
+    const settlements: Array<Record<string, unknown>> = []
+    const commands: Array<{ method: string; command: Record<string, unknown> }> = []
+    let delivered = false
+    let runStatus: 'running' | 'cancelled' = 'running'
+    const service = new ChannelSettingsService({
+      credentialStore: memoryCredentialStore({
+        'feishu-member-a': { appId: 'cli_a', appSecret: 'secret-a' }
+      }),
+      createChannel: harness.createChannel,
+      ...inertInterval(),
+      core: channelCore((method, rawParams) => {
+        const command = ((rawParams as { command?: Record<string, unknown> } | undefined)?.command ?? {})
+        commands.push({ method, command })
+        if (method === 'channels.feishu.snapshot') {
+          return coreSnapshot({ memberBots: [{
+            agentId: 'agent-a', accountId: 'account-1', brand: 'feishu', appId: 'cli_a',
+            botDisplayName: '芝士', credentialRef: 'feishu-member-a', status: 'published',
+            failureCode: null, version: 1, ownerIdentityStatus: 'verified'
+          }] })
+        }
+        if (method === 'channels.host.tick') {
+          if (delivered) return { deliveries: [] }
+          delivered = true
+          return { deliveries: [{
+            deliveryId: 'delivery-console', requestId: 'request-1',
+            deliveryKind: 'execution_console_upsert', targetAppId: 'cli_a',
+            credentialRef: 'feishu-member-a', chatId: 'oc_group', topicKey: '',
+            conversationKind: 'group', attemptCount: 1, updateMessageId: null,
+            recipientOpenId: 'ou_owner',
+            payload: {
+              kind: 'execution_console_upsert', executionConsoleId: 'console-1',
+              agentRunId: 'run-1', expectedSequence: 1
+            }
+          }] }
+        }
+        if (method === 'channels.executionConsole.source') {
+          return {
+            sequence: 1,
+            agentRunId: 'run-1',
+            campId: 'camp-1',
+            campTurnId: 'turn-1',
+            channelConversationId: 'channel-1',
+            agentId: 'agent-a',
+            runCreatedAt: '2026-08-28T00:00:00Z',
+            agentDisplayName: '芝士',
+            run: { status: runStatus, waitReason: null, terminalReasonCode: null },
+            evidence: consoleCommandEvidence('run-1'),
+            publicOutput: null,
+            startedAt: '2026-08-28T00:00:00Z',
+            terminalAt: runStatus === 'cancelled' ? '2026-08-28T00:00:05Z' : null,
+            targetAppId: 'cli_a',
+            externalMessageId: runStatus === 'cancelled' ? 'om_sent' : null,
+            state: runStatus === 'cancelled' ? 'terminal_sealed' : 'active'
+          }
+        }
+        if (method === 'channels.executionConsole.agentRun.cancel') {
+          runStatus = 'cancelled'
+          return {
+            status: 'applied',
+            code: 'agent_run.cancelled',
+            payload: {
+              agentRunId: 'run-1',
+              campId: 'camp-1',
+              campTurnId: 'turn-1',
+              campTurnStatus: 'cancelled',
+              status: 'cancelled'
+            }
+          }
+        }
+        if (method === 'channels.deliveries.settle') {
+          settlements.push(command)
+          return { status: 'applied', payload: {} }
+        }
+        return { status: 'applied', payload: {} }
+      })
+    })
+
+    await service.start()
+    await vi.waitFor(() => expect(settlements).toHaveLength(1))
+
+    const response = await harness.handlers.get('cli_a:cardAction')!({
+      messageId: 'om_sent',
+      chatId: 'oc_group',
+      operator: { openId: 'ou_owner', userId: 'owner-user-id' },
+      action: {
+        tag: 'button',
+        value: { action: 'execution_stop', agentRunId: 'run-1' }
+      },
+      raw: {
+        event_id: 'evt-stop-1',
+        operator: {
+          open_id: 'ou_owner',
+          user_id: 'owner-user-id',
+          union_id: 'on_owner'
+        }
+      }
+    })
+
+    expect(commands.find(({ method }) => method === 'channels.executionConsole.agentRun.cancel')?.command)
+      .toMatchObject({
+        callbackEventId: 'evt-stop-1',
+        appId: 'cli_a',
+        externalMessageId: 'om_sent',
+        agentRunId: 'run-1',
+        operatorOpenId: 'ou_owner',
+        operatorUserId: 'owner-user-id',
+        operatorUnionId: 'on_owner'
+      })
+    expect(response).toEqual({
+      card: {
+        type: 'raw',
+        data: expect.objectContaining({
+          header: expect.objectContaining({
+            title: { tag: 'plain_text', content: '芝士 · 已取消' }
+          }),
+          body: expect.objectContaining({
+            elements: [expect.objectContaining({ tag: 'column_set' })]
+          })
+        })
+      },
+      toast: { type: 'success', content: '已取消执行' }
+    })
+    expect(JSON.stringify(response)).not.toContain('停止执行')
     await service.stop()
   })
 

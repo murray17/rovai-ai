@@ -2500,8 +2500,31 @@ export interface ChannelSettingsSnapshot {
   activeProvisioning: MemberBotProvisioningView | null
 }
 
+export type ExecutionWebServerState =
+  | 'disabled'
+  | 'starting'
+  | 'ready'
+  | 'port_conflict'
+  | 'no_lan_address'
+  | 'error'
+
+export interface ExecutionWebSettingsSnapshot {
+  schemaVersion: 1
+  enabled: boolean
+  port: number
+  server: {
+    state: ExecutionWebServerState
+    address: string | null
+    errorCode: string | null
+  }
+}
+
 export interface ChannelsApi {
   get(): Promise<ChannelSettingsSnapshot>
+  getExecutionWebSettings(): Promise<ExecutionWebSettingsSnapshot>
+  setExecutionWebSettings(
+    settings: Pick<ExecutionWebSettingsSnapshot, 'enabled' | 'port'>
+  ): Promise<ExecutionWebSettingsSnapshot>
   connect(kind?: ChannelKind): Promise<ChannelSettingsSnapshot>
   disconnect(kind?: ChannelKind): Promise<ChannelSettingsSnapshot>
   publishMemberBot(agentId: string, kind?: ChannelKind): Promise<ChannelSettingsSnapshot>
@@ -2515,6 +2538,9 @@ export interface ChannelsApi {
   setLoginViewBounds(attemptId: string, bounds: ChannelLoginViewBounds | null): Promise<void>
   refreshLoginQr(attemptId: string): Promise<void>
   onChanged(listener: (snapshot: ChannelSettingsSnapshot) => void): () => void
+  onExecutionWebSettingsChanged(
+    listener: (snapshot: ExecutionWebSettingsSnapshot) => void
+  ): () => void
 }
 
 export type MemberWorkspaceLocationTab = 'identity' | 'runtime'
@@ -3244,6 +3270,9 @@ export type CoreMethod =
   | 'channels.host.tick'
   | 'channels.executionConsole.source'
   | 'channels.executionConsole.page.authorize'
+  | 'channels.executionConsole.recentOutput.authorize'
+  | 'channels.executionConsole.agentRun.cancel'
+  | 'channels.executionConsole.webSnapshot'
   | 'channels.deliveries.settle'
   | 'camp.attachments.desktopOpenTarget'
   | 'app.info'

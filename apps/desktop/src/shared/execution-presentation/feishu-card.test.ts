@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { AgentRunExecutionEvidenceView } from '@contracts'
-import { executionConsoleCard, executionConsolePageCount, executionConsolePages, executionConsolePublicPage, type ExecutionConsoleSnapshot } from './feishu-card'
+import { executionConsoleCard, executionConsolePageCount, executionConsolePages, executionConsolePublicPage, feishuExecutionStateCard, type ExecutionConsoleSnapshot } from './feishu-card'
 
 type Element = Record<string, unknown>
 function snapshot(status: ExecutionConsoleSnapshot['run']['status'], overrides: Partial<ExecutionConsoleSnapshot> = {}): ExecutionConsoleSnapshot {
@@ -63,6 +63,56 @@ function countElements(list: Element[]): number {
 }
 
 describe('Feishu execution console card', () => {
+  it('renders the actual live card as three pure actions with an immutable direct open URL', () => {
+    const card = feishuExecutionStateCard(snapshot('running', {
+      evidence: [narration(1, '不应默认显示的正文'), command(2, 'pnpm test', '不应显示的结果')]
+    }), {
+      executionViewUrl: 'http://192.168.1.23:8765/execution/run-1#t=fixed-token',
+      recentOutputVisible: false
+    })
+
+    expect(JSON.stringify(card)).not.toContain('不应默认显示的正文')
+    expect(JSON.stringify(card)).not.toContain('不应显示的结果')
+    expect(buttons(card).map((button) => (button.text as { content: string }).content))
+      .toEqual(['显示最近输出', '打开执行台', '停止执行'])
+    expect(buttons(card)[1]).toMatchObject({
+      behaviors: [{
+        type: 'open_url',
+        default_url: 'http://192.168.1.23:8765/execution/run-1#t=fixed-token'
+      }]
+    })
+    expect(JSON.stringify(buttons(card)[1])).not.toContain('callback')
+    expect(JSON.stringify(buttons(card)[0])).not.toContain('snapshotSequence')
+    expect(JSON.stringify(buttons(card)[2])).not.toContain('snapshotSequence')
+  })
+
+  it('shows only the latest thirty ordered public items and never command results', () => {
+    const card = feishuExecutionStateCard(snapshot('running', {
+      evidence: Array.from({ length: 40 }, (_, index) => command(
+        index + 1,
+        `public-command-${index + 1}`,
+        `private-result-${index + 1}`
+      ))
+    }), { executionViewUrl: null, recentOutputVisible: true })
+    const text = bodyText(card)
+    expect(text).not.toContain('public-command-10')
+    expect(text).toContain('public-command-11')
+    expect(text).toContain('public-command-40')
+    expect(text).not.toContain('private-result')
+    expect(elements(card).filter((element) => element.tag === 'markdown')).toHaveLength(30)
+  })
+
+  it('keeps the direct URL and removes stop after a terminal transition', () => {
+    const card = feishuExecutionStateCard(snapshot('cancelled'), {
+      executionViewUrl: 'http://192.168.1.23:8765/execution/run-1#t=fixed-token',
+      recentOutputVisible: false
+    })
+    expect(card).toMatchObject({ header: { title: { content: '芝士 · 已取消' } } })
+    expect(buttons(card).map((button) => (button.text as { content: string }).content))
+      .toEqual(['显示最近输出', '打开执行台'])
+    expect(JSON.stringify(card)).toContain('fixed-token')
+  })
+
   it('keeps a live card compact with one local history panel, safe commands and no result output', () => {
     const card = executionConsoleCard(snapshot('running', { evidence: [narration(1, '正在检查项目。'), command(2, "sed -n '5p;15p' .rovai-validation/merge-target.txt", '05 echo-v4')] }))
     expect(card).toMatchObject({ schema: '2.0', header: { title: { content: '芝士 · 执行中' }, template: 'blue' } })

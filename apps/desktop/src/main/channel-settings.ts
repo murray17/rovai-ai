@@ -42,10 +42,10 @@ import type { FeishuExecutionPreviewHost } from './feishu-execution-preview'
 import { sendFeishuAgentOutput } from './feishu-agent-output-card'
 import { feishuPageCardResponse, feishuPageFailure, withFeishuPageDeadline, type FeishuCardActionResponse } from './feishu-card-action'
 import {
-  executionConsoleCard,
-  executionConsolePageCount,
+  feishuExecutionStateCard,
   type ExecutionConsoleSnapshot
 } from '../shared/execution-presentation/feishu-card'
+import type { ExecutionViewScope } from './execution-view-service'
 
 type CoreChannelSnapshot = {
   schemaVersion: 2
@@ -164,6 +164,11 @@ type DesktopAttachmentTarget = {
 }
 
 type ExecutionConsoleSource = ExecutionConsoleSnapshot & {
+  campId: string
+  campTurnId: string
+  channelConversationId: string
+  agentId: string
+  runCreatedAt: string
   targetAppId: string
   externalMessageId: string | null
   state: 'opening' | 'active' | 'terminal_pending' | 'terminal_sealed'
@@ -177,6 +182,10 @@ export interface ChannelHostDependencies {
   memberBotAvatarSource?: MemberBotAvatarSourceResolver
   createChannel?: CreateChannel
   executionPreview?: FeishuExecutionPreviewHost
+  executionView?: {
+    createExecutionViewUrl(scope: ExecutionViewScope): Promise<string | null>
+    revokeExecutionViewUrl(url: string | null): void
+  }
   now?: () => number
   setInterval?: typeof globalThis.setInterval
   clearInterval?: typeof globalThis.clearInterval
@@ -208,11 +217,23 @@ type RawInboundEvent = {
 }
 
 type RawCardActionEvent = {
+  event_id?: string
+  app_id?: string
   operator?: {
     open_id?: string
     user_id?: string
     union_id?: string
   }
+}
+
+type ExecutionCardPresentationState = {
+  agentRunId: string
+  targetAppId: string
+  externalMessageId: string | null
+  executionViewUrl: string | null
+  recentOutputVisible: boolean
+  latestSource: ExecutionConsoleSource
+  lastCardDigest: string | null
 }
 
 const HOST_WORKER_ID = `desktop-${randomUUID()}`
@@ -240,6 +261,8 @@ export class ChannelSettingsService {
   readonly #rosterReconciledAt = new Map<string, number>()
   readonly #rosterReconciliations = new Map<string, Promise<boolean>>()
   readonly #dmHints = new Map<string, number>()
+  readonly #executionCardStates = new Map<string, ExecutionCardPresentationState>()
+  readonly #executionCardTails = new Map<string, Promise<unknown>>()
   #activeQrAttempt: ChannelQrAttemptView | null = null
   #activeQrAbort: AbortController | null = null
   #activeProvisioning: ChannelSettingsSnapshot['activeProvisioning'] = null
@@ -317,6 +340,11 @@ export class ChannelSettingsService {
     const channels = [...this.#managedChannels.values()]
     this.#managedChannels.clear()
     this.#rosterReconciledAt.clear()
+    for (const state of this.#executionCardStates.values()) {
+      this.#dependencies?.executionView?.revokeExecutionViewUrl(state.executionViewUrl)
+    }
+    this.#executionCardStates.clear()
+    this.#executionCardTails.clear()
     await Promise.allSettled(channels.map((managed) => this.#disconnectManaged(managed)))
   }
 
@@ -1631,43 +1659,103 @@ export class ChannelSettingsService {
   ): Promise<FeishuCardActionResponse> {
     const raw = (event.raw ?? {}) as RawCardActionEvent
     try {
-      return await withFeishuPageDeadline(async (checkDeadline) => {
-        // Authenticate the Owner and exact sealed card before reading full result Blobs.
-        const result = await this.#commandWithId(
-          'channels.executionConsole.page.authorize',
-          randomUUID(),
-          {
-            agentRunId: action.agentRunId,
-            appId: managed.appId,
-            externalMessageId: event.messageId,
-            snapshotSequence: action.snapshotSequence,
-            pageIndex: action.pageIndex,
+      return await this.#enqueueExecutionCard(action.agentRunId, () => withFeishuPageDeadline(
+        async (checkDeadline) => {
+          let state = this.#executionCardStates.get(action.agentRunId)
+          if (state && (state.targetAppId !== managed.appId
+            || state.externalMessageId !== event.messageId)) {
+            return executionConsoleCardActionResponse('stale')
+          }
+          const operator = {
             operatorOpenId: raw.operator?.open_id ?? event.operator.openId ?? null,
             operatorUserId: raw.operator?.user_id ?? event.operator.userId ?? null,
             operatorUnionId: raw.operator?.union_id ?? null
-          },
-          false
-        )
-        checkDeadline()
-        if (result.status === 'rejected') {
-          return executionConsoleCardActionResponse(result.code)
+          }
+          if (action.action === 'execution_stop') {
+            if (!raw.event_id) return executionConsoleCardActionResponse('stale')
+            const result = await this.#commandWithId(
+              'channels.executionConsole.agentRun.cancel',
+              stableCommandId('execution-stop', managed.appId, raw.event_id),
+              {
+                callbackEventId: raw.event_id,
+                appId: managed.appId,
+                externalMessageId: event.messageId,
+                agentRunId: action.agentRunId,
+                ...operator
+              },
+              false
+            )
+            checkDeadline()
+            if (result.status === 'rejected') return executionConsoleCardActionResponse(result.code)
+            void this.#pump()
+            const terminalStatus = executionTerminalStatus(result.payload.status)
+            if (!state || !terminalStatus) {
+              return { toast: { type: 'success', content: '停止请求已处理' } }
+            }
+            const source: ExecutionConsoleSource = {
+              ...state.latestSource,
+              run: {
+                ...state.latestSource.run,
+                status: terminalStatus,
+                waitReason: null
+              },
+              state: 'terminal_pending'
+            }
+            state.latestSource = source
+            const card = feishuExecutionStateCard(source, state)
+            state.lastCardDigest = digest(JSON.stringify(card))
+            return {
+              ...feishuPageCardResponse(card),
+              toast: {
+                type: 'success',
+                content: terminalStatus === 'cancelled' ? '已取消执行' : '执行已结束'
+              }
+            }
+          }
+          const result = await this.#commandWithId(
+            'channels.executionConsole.recentOutput.authorize',
+            randomUUID(),
+            {
+              agentRunId: action.agentRunId,
+              appId: managed.appId,
+              externalMessageId: event.messageId,
+              ...operator
+            },
+            false
+          )
+          checkDeadline()
+          if (result.status === 'rejected') return executionConsoleCardActionResponse(result.code)
+          const sequence = result.payload.snapshotSequence
+          if (typeof sequence !== 'number' || !Number.isSafeInteger(sequence) || sequence < 1) {
+            return executionConsoleCardActionResponse('stale')
+          }
+          const current = await this.#dependencies!.core.request<ExecutionConsoleSource | null>(
+            'channels.executionConsole.source',
+            { agentRunId: action.agentRunId, expectedSequence: sequence }
+          )
+          checkDeadline()
+          if (!current || current.targetAppId !== managed.appId
+            || current.externalMessageId !== event.messageId) {
+            return executionConsoleCardActionResponse('stale')
+          }
+          state ??= {
+            agentRunId: current.agentRunId,
+            targetAppId: current.targetAppId,
+            externalMessageId: current.externalMessageId,
+            executionViewUrl: null,
+            recentOutputVisible: false,
+            latestSource: current,
+            lastCardDigest: null
+          }
+          this.#executionCardStates.set(action.agentRunId, state)
+          state.latestSource = current
+          state.recentOutputVisible = action.visible
+          const card = feishuExecutionStateCard(current, state)
+          state.lastCardDigest = digest(JSON.stringify(card))
+          checkDeadline()
+          return feishuPageCardResponse(card)
         }
-        const current = await this.#dependencies!.core.request<ExecutionConsoleSource | null>(
-          'channels.executionConsole.source',
-          { agentRunId: action.agentRunId, expectedSequence: action.snapshotSequence }
-        )
-        checkDeadline()
-        if (!current || current.targetAppId !== managed.appId
-          || current.externalMessageId !== event.messageId
-          || current.state !== 'terminal_sealed'
-          || action.pageIndex >= executionConsolePageCount(current)) {
-          return executionConsoleCardActionResponse('stale')
-        }
-        const card = executionConsoleCard(current, { pageIndex: action.pageIndex, outerExpanded: true })
-        // Return the only update inside the ACK; a separate pre-ACK PATCH can be reverted.
-        checkDeadline()
-        return feishuPageCardResponse(card)
-      })
+      ))
     } catch (error) {
       const { response, reason, providerCode } = feishuPageFailure(error)
       logFeishuBotDiagnostic('execution_console.card_response_failed', {
@@ -1935,6 +2023,23 @@ export class ChannelSettingsService {
   }
 
   async #deliver(delivery: ClaimedChannelDelivery): Promise<void> {
+    if (delivery.deliveryKind === 'execution_console_upsert') {
+      const agentRunId = requiredPayloadString(delivery.payload, 'agentRunId')
+      return this.#enqueueExecutionCard(agentRunId, () => this.#deliverNow(delivery, agentRunId))
+    }
+    if (delivery.deliveryKind === 'execution_console_recall') {
+      const state = this.#executionCardStateForMessage(delivery.targetAppId, delivery.updateMessageId)
+      const queueKey = state?.agentRunId
+        ?? `recall:${delivery.targetAppId}:${delivery.updateMessageId ?? delivery.deliveryId}`
+      return this.#enqueueExecutionCard(queueKey, () => this.#deliverNow(
+        delivery,
+        state?.agentRunId ?? null
+      ))
+    }
+    return this.#deliverNow(delivery, null)
+  }
+
+  async #deliverNow(delivery: ClaimedChannelDelivery, executionAgentRunId: string | null): Promise<void> {
     const managed = this.#managedChannels.get(delivery.targetAppId)
     if (!managed || managed.credentialRef !== delivery.credentialRef) {
       await this.#settleDelivery(delivery, null, new Error('target_bot_not_connected'))
@@ -1991,6 +2096,11 @@ export class ChannelSettingsService {
       } else if (delivery.deliveryKind === 'execution_console_recall') {
         messageId = delivery.updateMessageId ?? null
         if (messageId) await managed.channel.recallMessage(messageId)
+        if (executionAgentRunId) {
+          const state = this.#executionCardStates.get(executionAgentRunId)
+          this.#dependencies?.executionView?.revokeExecutionViewUrl(state?.executionViewUrl ?? null)
+          this.#executionCardStates.delete(executionAgentRunId)
+        }
       } else if (delivery.deliveryKind === 'execution_console_upsert') {
         const source = await this.#dependencies!.core.request<ExecutionConsoleSource | null>(
           'channels.executionConsole.source',
@@ -2003,14 +2113,41 @@ export class ChannelSettingsService {
           if (source.targetAppId !== delivery.targetAppId) {
             throw new Error('execution_console_target_app_mismatch')
           }
-          const card = executionConsoleCard(source, { pageIndex: 0, outerExpanded: false })
           messageId = delivery.updateMessageId ?? null
+          let state = this.#executionCardStates.get(source.agentRunId)
+          if (!state) {
+            state = {
+              agentRunId: source.agentRunId,
+              targetAppId: source.targetAppId,
+              externalMessageId: messageId,
+              executionViewUrl: messageId ? null : await this.#dependencies?.executionView
+                ?.createExecutionViewUrl({
+                  channelConversationId: source.channelConversationId,
+                  targetAppId: source.targetAppId,
+                  campId: source.campId,
+                  agentId: source.agentId,
+                  focusRunId: source.agentRunId,
+                  maxRunCreatedAt: source.runCreatedAt
+                }) ?? null,
+              recentOutputVisible: false,
+              latestSource: source,
+              lastCardDigest: null
+            }
+            this.#executionCardStates.set(source.agentRunId, state)
+          }
+          state.latestSource = source
+          const card = feishuExecutionStateCard(source, state)
+          const cardDigest = digest(JSON.stringify(card))
           if (messageId) {
-            await managed.channel.updateCard(messageId, card)
+            if (state.lastCardDigest !== cardDigest) {
+              await managed.channel.updateCard(messageId, card)
+            }
           } else {
             const sent = await managed.channel.send(delivery.chatId, { card }, replyOptions)
             messageId = sent.messageId
           }
+          state.externalMessageId = messageId
+          state.lastCardDigest = cardDigest
         } else {
           messageId = delivery.updateMessageId ?? null
         }
@@ -2060,6 +2197,11 @@ export class ChannelSettingsService {
           || (delivery.deliveryKind === 'queue_ack' && delivery.payload.action === 'recall'))
         && isRecallTargetRevoked(error)
       ) {
+        if (delivery.deliveryKind === 'execution_console_recall' && executionAgentRunId) {
+          const state = this.#executionCardStates.get(executionAgentRunId)
+          this.#dependencies?.executionView?.revokeExecutionViewUrl(state?.executionViewUrl ?? null)
+          this.#executionCardStates.delete(executionAgentRunId)
+        }
         await this.#settleDelivery(delivery, delivery.updateMessageId ?? null, null)
         return
       }
@@ -2206,6 +2348,29 @@ export class ChannelSettingsService {
       throw new Error(commandFailureMessage(result))
     }
     return result
+  }
+
+  #enqueueExecutionCard<T>(agentRunId: string, operation: () => Promise<T>): Promise<T> {
+    const previous = this.#executionCardTails.get(agentRunId) ?? Promise.resolve()
+    const result = previous.catch(() => undefined).then(operation)
+    const tail = result.then(() => undefined, () => undefined)
+    this.#executionCardTails.set(agentRunId, tail)
+    void tail.finally(() => {
+      if (this.#executionCardTails.get(agentRunId) === tail) {
+        this.#executionCardTails.delete(agentRunId)
+      }
+    })
+    return result
+  }
+
+  #executionCardStateForMessage(
+    targetAppId: string,
+    externalMessageId: string | null | undefined
+  ): ExecutionCardPresentationState | null {
+    if (!externalMessageId) return null
+    return [...this.#executionCardStates.values()].find((state) => (
+      state.targetAppId === targetAppId && state.externalMessageId === externalMessageId
+    )) ?? null
   }
 
   async #emit(): Promise<ChannelSettingsSnapshot> {
@@ -2554,14 +2719,11 @@ type ProjectCardAction = {
   projectId: string | null
 }
 
-type ExecutionConsoleCardActionName = 'execution_console_page'
+type ExecutionConsoleCardActionName = 'execution_recent_output' | 'execution_stop'
 
-type ExecutionConsoleCardAction = {
-  action: ExecutionConsoleCardActionName
-  agentRunId: string
-  snapshotSequence: number
-  pageIndex: number
-}
+type ExecutionConsoleCardAction =
+  | { action: 'execution_recent_output'; agentRunId: string; visible: boolean }
+  | { action: 'execution_stop'; agentRunId: string }
 
 type ProjectCardOption = {
   projectId: string
@@ -2606,7 +2768,7 @@ function executionConsoleCardActionResponse(
   result: string | ExecutionConsoleCardActionName
 ): FeishuCardActionResponse {
   if (result === 'channel.execution_console.owner_required') {
-    return { toast: { type: 'warning', content: '仅 Rovai Owner 可以操作执行记录' } }
+    return { toast: { type: 'warning', content: '无权限' } }
   }
   if (result === 'stale'
     || result === 'channel.execution_console.not_found'
@@ -2615,6 +2777,14 @@ function executionConsoleCardActionResponse(
     return { toast: { type: 'info', content: '执行记录状态已更新，请重新操作' } }
   }
   return { toast: { type: 'error', content: '执行记录更新失败，请重试' } }
+}
+
+function executionTerminalStatus(
+  value: unknown
+): 'succeeded' | 'failed' | 'cancelled' | null {
+  return value === 'succeeded' || value === 'failed' || value === 'cancelled'
+    ? value
+    : null
 }
 
 function projectSelectionOperation(payload: Record<string, unknown>): ProjectSelectionOperation {
@@ -2660,21 +2830,14 @@ function projectCardAction(value: unknown, selectedOption?: string): ProjectCard
 
 function executionConsoleCardAction(value: unknown): ExecutionConsoleCardAction | null {
   if (!isRecord(value)) return null
-  if (value.action !== 'execution_console_page'
-    || typeof value.agentRunId !== 'string'
-    || value.agentRunId.trim().length === 0
-    || typeof value.snapshotSequence !== 'number'
-    || !Number.isSafeInteger(value.snapshotSequence)
-    || value.snapshotSequence < 1
-    || typeof value.pageIndex !== 'number'
-    || !Number.isSafeInteger(value.pageIndex)
-    || value.pageIndex < 0) return null
-  return {
-    action: 'execution_console_page',
-    agentRunId: value.agentRunId,
-    snapshotSequence: value.snapshotSequence,
-    pageIndex: value.pageIndex
+  if (typeof value.agentRunId !== 'string' || value.agentRunId.trim().length === 0) return null
+  if (value.action === 'execution_recent_output' && typeof value.visible === 'boolean') {
+    return { action: value.action, agentRunId: value.agentRunId, visible: value.visible }
   }
+  if (value.action === 'execution_stop') {
+    return { action: value.action, agentRunId: value.agentRunId }
+  }
+  return null
 }
 
 function projectCardOptions(value: unknown): ProjectCardOption[] {
