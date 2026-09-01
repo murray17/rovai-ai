@@ -162,6 +162,30 @@ Object.assign(window, { startupTest: {
     }
 
     await reset()
+    const startupFrameBeforeShutdown = document.querySelector('[data-startup-frame="camp"]')
+    check(coreListeners.size > 0, 'The root App must subscribe to shutdown before Core is ready')
+    coreListeners.forEach(listener => listener({ method: 'runtime.state', params: { status: 'shutting_down' } }))
+    publish({ runtimeMode: 'bootstrap_only', fullCoreState: 'shutting_down', startupPhase: null,
+      capabilities: { ...supervisor.capabilities, authoritativeWorkspace: false, coreRequests: false } })
+    await flush()
+    check(startupFrameBeforeShutdown === document.querySelector('[data-startup-frame="camp"]'),
+      'Shutdown before authority ready must preserve the existing startup frame')
+    check(document.querySelector('.shutdown-scrim.is-pending'),
+      'Shutdown must block interaction during the anti-flash window')
+    await advance(399)
+    check(!document.querySelector('.shutdown-scrim.is-visible, .startup-route-loading'),
+      'Shutdown must not expose opening feedback during the anti-flash window')
+    await advance(1)
+    check(document.querySelector('.shutdown-scrim.is-visible'),
+      'Shutdown before authority ready must show safe-exit feedback after 400ms')
+    check(document.body.textContent?.includes('正在安全退出'),
+      'Shutdown before authority ready must use the safe-exit copy')
+    check(!document.querySelector('.startup-route-loading'),
+      'Shutdown feedback must replace route-opening feedback rather than compete with it')
+    noAuthority()
+    cases.push('pre-ready shutdown preserves its frame and shows only safe-exit feedback')
+
+    await reset()
     publish({ startupPhase: 'migrating_authority' })
     await advance(399)
     pageFrame('camp', false)
@@ -290,6 +314,32 @@ Object.assign(window, { startupTest: {
     }
     cases.push('Runtime availability refreshes health and installations without reloading members')
     cases.push('Runtime discovery retains full refresh across mixed debounce events')
+
+    const authoritativeWorkspaceBeforeShutdown = document.querySelector('.authoritative-workspace')
+    const appShellBeforeShutdown = document.querySelector('.app-shell')
+    check(authoritativeWorkspaceBeforeShutdown && appShellBeforeShutdown,
+      'The ready authority surface must be mounted before the shutdown transition')
+    coreListeners.forEach(listener => listener({ method: 'runtime.state', params: { status: 'shutting_down' } }))
+    publish({ runtimeMode: 'bootstrap_only', fullCoreState: 'shutting_down', startupPhase: null,
+      capabilities: { ...supervisor.capabilities, authoritativeWorkspace: false, coreRequests: false } })
+    await flush()
+    check(authoritativeWorkspaceBeforeShutdown.isConnected
+      && authoritativeWorkspaceBeforeShutdown === document.querySelector('.authoritative-workspace')
+      && appShellBeforeShutdown === document.querySelector('.app-shell'),
+      'Planned shutdown must retain the mounted authoritative workspace')
+    check(document.querySelector('.shutdown-scrim.is-pending'),
+      'The retained authority surface must be guarded during the anti-flash window')
+    check(!document.querySelector('.startup-route-loading'),
+      'Planned shutdown must not remount the route-opening surface')
+    await advance(399)
+    check(!document.querySelector('.shutdown-scrim.is-visible'),
+      'Safe-exit feedback must remain hidden before 400ms')
+    await advance(1)
+    check(document.querySelector('.shutdown-scrim.is-visible'),
+      'The retained authority surface must show safe-exit feedback after 400ms')
+    check(document.body.textContent?.includes('正在安全退出'),
+      'The retained authority surface must use the safe-exit copy')
+    cases.push('planned shutdown retains the authoritative surface and safe-exit modal')
     return { ok: true, cases }
   },
   async capture(theme: string, state = 'loading') {
