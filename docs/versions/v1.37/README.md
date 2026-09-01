@@ -21,7 +21,8 @@ last_updated: 2026-09-01
 - ACP 增量/终态、Claude Tool Result、Codex MCP/原生 imageGeneration 已接入；本机实测后补齐
   Antigravity generatedMedia、TRAE builtin 图片、Copilot binaryResultsForLlm。六种 Runtime 的图片结果链
   已通过隔离 Core；Cursor 旧版无 ACP，其他 Runtime 的上游/能力限制见[真实验收](runtime-image-acceptance.md)。
-- 共享图片 Gallery/Lightbox、消息附件顺序、Run supplement 排序、真实 Chromium 解码已实施。
+- 共享图片 Gallery/Lightbox、消息附件顺序、Run supplement 排序、公开消息前等待与终态兜底、
+  真实 Chromium 解码已实施。
 - 图片展示修正：同 Run 的已发送同摘要 Blob 图片只展示消息附件；Tool/发送图片共用内容列，
   图片框按原比例贴合，不随正文缩小或补黑边；不显示文件名/来源标题或系统打开/Finder 菜单，
   只保留看大图与关闭。不删除数据，不改变稳定路径零拷贝。

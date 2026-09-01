@@ -15,7 +15,8 @@ last_updated: 2026-09-01
 - [x] stable path 只引用；inline 不因 path 存在而丢弃；Run 临时路径在清理前保存；路径允许跨目录和符号链接。
 - [x] ACP toolCallId 增量累积与 completed/failed flush；Claude Tool Result；Codex MCP 与原生生成图片。
 - [x] 内部图片不进入公开 Evidence、模型输入、CampMessage 或渠道发布。
-- [x] 共享 Gallery/Tile/lightbox；保序附件段；Run 图片在最后公开消息后、Files Changed 前。
+- [x] 共享 Gallery/Tile/lightbox；保序附件段；运行中图片等待公开消息，终态无消息才兜底；
+  展示后位于最后公开消息后、Files Changed 前。
 - [x] Chromium 真实解码、坏图局部降级、单列/双列/窄屏与既有双主题。
 - [x] 同 Run 的已发送同摘要 Blob 图片展示去重，底层数据不删除；统一 Tool/发送图片内容列与原比例图片框。
 - [x] 两种图片均去除文件名、来源/数量标题、projection 说明与系统打开/Finder 菜单，只保留大图预览和关闭。
@@ -46,7 +47,8 @@ last_updated: 2026-09-01
   `v127_preserves_saved_bindings_and_introduces_no_fast_override` 已有完整升级链；133 receipt 故障时
   新表/marker 一起回滚，修复后可继续。current marker 缺 133 必须拒绝，v1.42/schema83 是明确升级源，
   不降低过去的 receipt 判定，不额外创建完整 workspace fixture。
-- `ImageGallery.test.ts` 与既有 `App.test.ts`：连续分组、全部20图、解码失败、锚定顺序；
+- `ImageGallery.test.ts` 与既有 `App.test.ts`：连续分组、全部20图、解码失败、锚定顺序、
+  运行中无消息时延迟与终态兜底；
   `channel-settings.test.ts` 沿用飞书附件独立上传失败/正文不重发的测试。
 - `node --test scripts/lib/runtime-image-gallery.test.mjs`：生产组件的隔离 Electron，真实 SVG decode、
   坏图、contain、无附加文字/系统操作、lightbox 与焦点、双主题/窄屏。大图使用可用窗口空间，不得因

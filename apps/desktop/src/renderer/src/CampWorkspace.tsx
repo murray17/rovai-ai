@@ -928,14 +928,6 @@ export function campConversationTimeline(
     createdAt: changes.completedAt,
     changes
   }))
-  const runImageCards: CampConversationTimelineItem[] = agentRunImages
-    .filter((images) => images.images.length > 0)
-    .map((images) => ({
-      kind: 'run_images',
-      id: `run-images:${images.agentRunId}:${images.executionEpoch}`,
-      createdAt: images.createdAt,
-      images
-    }))
   const publicMessages = messages
     .filter((message) => {
       const kind = (message.presentation as { kind?: string } | null)?.kind
@@ -948,6 +940,23 @@ export function campConversationTimeline(
       id: message.id,
       createdAt: message.createdAt,
       message
+    }))
+  const publicMessageRunIds = new Set(
+    publicMessages.flatMap((item) => item.message.sourceAgentRunId ?? [])
+  )
+  const runStatusById = new Map(agentRuns.map((run) => [run.id, run.status]))
+  const runImageCards: CampConversationTimelineItem[] = agentRunImages
+    .filter((images) => {
+      if (images.images.length === 0) return false
+      if (publicMessageRunIds.has(images.agentRunId)) return true
+      const status = runStatusById.get(images.agentRunId)
+      return status !== undefined && !NON_TERMINAL_RUNS.has(status)
+    })
+    .map((images) => ({
+      kind: 'run_images',
+      id: `run-images:${images.agentRunId}:${images.executionEpoch}`,
+      createdAt: images.createdAt,
+      images
     }))
   const unsettledTurnIds = new Set(
     agentRuns
