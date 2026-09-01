@@ -1790,7 +1790,8 @@ impl CollaborationService {
         {
             anyhow::bail!("membership removal reason must be 1-160 characters");
         }
-        self.gateway.execute(database, envelope, |transaction| {
+        let mut settled_run_ids = Vec::new();
+        let execution = self.gateway.execute(database, envelope, |transaction| {
             let camp = transaction
                 .query_row(
                     "SELECT membership_generation FROM camp WHERE id = ?1",
@@ -1942,6 +1943,7 @@ impl CollaborationService {
                 envelope.execution_epoch,
                 &now,
             )?;
+            settled_run_ids = outcome.affected_run_ids.clone();
             advance_membership_source_generation(
                 transaction,
                 &envelope.actor,
@@ -1973,7 +1975,9 @@ impl CollaborationService {
                     ),
                 }),
             ))
-        })
+        })?;
+        crate::runtime::pump_targets_after_runs_terminal(database, &settled_run_ids)?;
+        Ok(execution)
     }
 
     pub fn create_task(
@@ -5692,6 +5696,7 @@ pub(crate) struct CampMembershipEndOutcome {
     pub next_default_lead_agent_id: Option<String>,
     pub reconciliation_id: String,
     pub reconciliation_status: &'static str,
+    pub affected_run_ids: Vec<String>,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -6122,6 +6127,7 @@ pub(crate) fn end_camp_membership(
         next_default_lead_agent_id,
         reconciliation_id,
         reconciliation_status,
+        affected_run_ids,
     })
 }
 

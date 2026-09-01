@@ -1683,6 +1683,7 @@ struct Core {
     attachment_projection_requests: mpsc::UnboundedSender<String>,
     compaction_detector_policies: DesiredCompactionDetectorPolicies,
     agent_run_cancellation_notify: Notify,
+    agent_run_cleanup_inflight: Mutex<HashSet<ActiveExecutionKey>>,
     pending_execution_recovery: Mutex<()>,
     skill_library: SkillLibraryService,
     mcp_config: Result<McpConfigStore>,
@@ -8716,78 +8717,111 @@ impl Core {
                 }
             }
         };
-        let mut tasks = tokio::task::JoinSet::new();
         for candidate in candidates {
-            let core = self.clone();
-            tasks.spawn(async move {
-                let fence = core
-                    .cleanup_agent_run_runtime(
-                        &candidate.agent_run_id,
-                        candidate.execution_epoch,
-                        &candidate.adapter_kind,
-                    )
-                    .await;
-                (candidate, fence)
-            });
-        }
-        while let Some(result) = tasks.join_next().await {
-            let Ok((candidate, fence)) = result else {
-                continue;
-            };
-            if fence == RuntimeCancellationIngressFence::Unproven {
-                // Rotate retries without changing business state or its version.
-                let database = self.database.lock().await;
-                let _ = ExecutionRuntimeService::default().defer_runtime_cleanup(
-                    &database,
-                    &candidate.agent_run_id,
-                    candidate.execution_epoch,
-                );
+            let key = ActiveExecutionKey::new(&candidate.agent_run_id, candidate.execution_epoch);
+            if !self
+                .agent_run_cleanup_inflight
+                .lock()
+                .await
+                .insert(key.clone())
+            {
                 continue;
             }
-            let recorded = {
-                let database = self.database.lock().await;
-                ExecutionRuntimeService::default().record_runtime_cleanup_completed(
-                    &database,
+            let core = self.clone();
+            let output = output.clone();
+            tokio::spawn(async move {
+                // Keep the supervisor separate so a worker panic cannot permanently
+                // strand this process-local de-duplication key.
+                let cleanup_core = core.clone();
+                let cleanup = tokio::spawn(async move {
+                    cleanup_core
+                        .finish_agent_run_runtime_cleanup(&output, candidate)
+                        .await
+                });
+                let completed = match cleanup.await {
+                    Ok(completed) => completed,
+                    Err(error) => {
+                        eprintln!(
+                            "Runtime cleanup worker failed for {}/{}: {error}",
+                            key.agent_run_id, key.execution_epoch
+                        );
+                        false
+                    }
+                };
+                core.agent_run_cleanup_inflight.lock().await.remove(&key);
+                if completed {
+                    core.agent_run_cancellation_notify.notify_one();
+                }
+            });
+        }
+    }
+
+    async fn finish_agent_run_runtime_cleanup(
+        self: &Arc<Self>,
+        output: &mpsc::UnboundedSender<String>,
+        candidate: AgentRunCancellationCandidate,
+    ) -> bool {
+        let fence = self
+            .cleanup_agent_run_runtime(
+                &candidate.agent_run_id,
+                candidate.execution_epoch,
+                &candidate.adapter_kind,
+            )
+            .await;
+        if fence == RuntimeCancellationIngressFence::Unproven {
+            // Rotate retries without changing business state or its version.
+            let database = self.database.lock().await;
+            let _ = ExecutionRuntimeService::default().defer_runtime_cleanup(
+                &database,
+                &candidate.agent_run_id,
+                candidate.execution_epoch,
+            );
+            return false;
+        }
+        let recorded = {
+            let database = self.database.lock().await;
+            ExecutionRuntimeService::default().record_runtime_cleanup_completed(
+                &database,
+                &candidate.agent_run_id,
+                candidate.execution_epoch,
+            )
+        };
+        if let Err(error) = recorded {
+            eprintln!("failed to record Runtime cleanup: {error:#}");
+            return false;
+        }
+        self.planned_shutdown
+            .cleanup_completed(&ActiveExecutionKey::new(
+                &candidate.agent_run_id,
+                candidate.execution_epoch,
+            ))
+            .await;
+        emit(
+            output,
+            "agent_run.runtime_cleanup_completed",
+            json!({
+                "campId": candidate.camp_id, "agentRunId": candidate.agent_run_id,
+                "executionEpoch": candidate.execution_epoch,
+            }),
+        );
+        // Git and projection work do not extend the Runtime cleanup budget.
+        let core = self.clone();
+        tokio::spawn(async move {
+            core.reconcile_skill_projection_after_run_terminal(&candidate.execution_root)
+                .await;
+            if fence == RuntimeCancellationIngressFence::Flushed {
+                core.project_agent_run_file_changes_after_terminal(
                     &candidate.agent_run_id,
                     candidate.execution_epoch,
                 )
-            };
-            if let Err(error) = recorded {
-                eprintln!("failed to record Runtime cleanup: {error:#}");
-                continue;
-            }
-            self.planned_shutdown
-                .cleanup_completed(&ActiveExecutionKey::new(
-                    &candidate.agent_run_id,
-                    candidate.execution_epoch,
-                ))
                 .await;
-            emit(
-                output,
-                "agent_run.runtime_cleanup_completed",
-                json!({
-                    "campId": candidate.camp_id, "agentRunId": candidate.agent_run_id,
-                    "executionEpoch": candidate.execution_epoch,
-                }),
-            );
-            // Git and projection work do not extend the Runtime cleanup budget.
-            let core = self.clone();
-            tokio::spawn(async move {
-                core.reconcile_skill_projection_after_run_terminal(&candidate.execution_root)
+            }
+            if matches!(candidate.status.as_str(), "cancelled" | "failed") {
+                core.record_cancelled_run_ending_git_observation(&candidate)
                     .await;
-                if fence == RuntimeCancellationIngressFence::Flushed {
-                    core.project_agent_run_file_changes_after_terminal(
-                        &candidate.agent_run_id,
-                        candidate.execution_epoch,
-                    )
-                    .await;
-                }
-                if matches!(candidate.status.as_str(), "cancelled" | "failed") {
-                    core.record_cancelled_run_ending_git_observation(&candidate)
-                        .await;
-                }
-            });
-        }
+            }
+        });
+        true
     }
 
     async fn record_cancelled_run_ending_git_observation(
@@ -13041,6 +13075,7 @@ async fn run_core(
         attachment_projection_requests: attachment_projection_tx,
         compaction_detector_policies: compaction_detector_policies.clone(),
         agent_run_cancellation_notify: Notify::new(),
+        agent_run_cleanup_inflight: Mutex::new(HashSet::new()),
         pending_execution_recovery: Mutex::new(()),
         skill_library,
         mcp_config,
@@ -18873,6 +18908,7 @@ mod tests {
             attachment_projection_requests,
             compaction_detector_policies: compaction_detector_policies.clone(),
             agent_run_cancellation_notify: Notify::new(),
+            agent_run_cleanup_inflight: Mutex::new(HashSet::new()),
             pending_execution_recovery: Mutex::new(()),
             skill_library,
             mcp_config: Ok(mcp_config),
@@ -20813,6 +20849,225 @@ while IFS= read -r _ignored; do :; done
         assert_eq!(invalidation["method"], "navigation.invalidated");
         assert_eq!(invalidation["params"]["reason"], "agent_run.terminal");
         assert_eq!(invalidation["params"]["campId"], "rvcamp_test");
+    }
+
+    #[cfg(all(target_os = "macos", feature = "slow-tests"))]
+    #[tokio::test]
+    async fn runtime_cleanup_dispatch_is_non_blocking_and_deduplicated() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let root =
+            std::env::temp_dir().join(format!("rovai-cleanup-dispatch-{}", uuid::Uuid::new_v4()));
+        let workspace = root.join("workspace");
+        fs::create_dir_all(&workspace).unwrap();
+        let core = Arc::new(runtime_resolution_test_core(&root).unwrap());
+        let (camp_id, draft_revision) = {
+            let mut database = core.database.lock().await;
+            let agent_id = AgentProfileService::default()
+                .list_profiles(&database)
+                .unwrap()
+                .into_iter()
+                .next()
+                .expect("the startup database should include a default member")
+                .agent_id;
+            rovai_core::agent_profile::configure_test_runtime(&database, &[agent_id.as_str()]);
+            let created = CollaborationService::default()
+                .create_camp(
+                    &mut database,
+                    &CommandEnvelope {
+                        command_id: uuid::Uuid::new_v4().to_string(),
+                        actor: ActorRef::User {
+                            user_id: "test-user".to_string(),
+                        },
+                        camp_id: None,
+                        expected_versions: Vec::new(),
+                        execution_epoch: None,
+                        payload: CreateCampCommand {
+                            name: Some("Runtime cleanup dispatch".to_string()),
+                            project_binding_kind: ProjectBindingKind::Directory,
+                            project_path: workspace.display().to_string(),
+                            member_agent_ids: vec![agent_id.clone()],
+                            default_lead_agent_id: agent_id,
+                            collaboration_mode: CampCollaborationMode::Peer,
+                            activation_state: CampActivationState::Active,
+                        },
+                    },
+                )
+                .unwrap();
+            let camp_id = created.result.payload["campId"]
+                .as_str()
+                .unwrap()
+                .to_string();
+            core.attachment_views
+                .ensure_empty_camp_ready(&mut database, &camp_id)
+                .unwrap();
+            let draft_revision = CampAttachmentStore::new(&core.data_dir)
+                .save_body(&mut database, &camp_id, "Keep cleanup busy")
+                .unwrap()
+                .revision;
+            (camp_id, draft_revision)
+        };
+        let sent = core
+            .send_test_camp_message_request(SendCampMessageParams {
+                command_id: uuid::Uuid::new_v4().to_string(),
+                camp_id: CampId::parse(&camp_id).unwrap(),
+                draft_revision,
+                execution: Some(ExecutionRequest {
+                    task_id: None,
+                    purpose: "Exercise Runtime cleanup".to_string(),
+                    completion_role: "required".to_string(),
+                    budget: None,
+                }),
+            })
+            .await
+            .unwrap();
+        let agent_run_id = sent["commandResult"]["payload"]["agentRunIds"][0]
+            .as_str()
+            .unwrap_or_else(|| panic!("message did not create an AgentRun: {sent:#}"))
+            .to_string();
+        let (version, execution_epoch) = {
+            let mut database = core.database.lock().await;
+            let candidate = ExecutionRuntimeService::default()
+                .list_dispatchable_agent_runs(&database, 10)
+                .unwrap()
+                .into_iter()
+                .find(|candidate| candidate.agent_run_id == agent_run_id)
+                .expect("the queued Run should be dispatchable before cancellation");
+            let claimed = ExecutionRuntimeService::default()
+                .claim_agent_run(
+                    &mut database,
+                    &CommandEnvelope {
+                        command_id: uuid::Uuid::new_v4().to_string(),
+                        actor: ActorRef::System {
+                            component_id: "agent-run-scheduler".to_string(),
+                        },
+                        camp_id: Some(camp_id.clone()),
+                        expected_versions: Vec::new(),
+                        execution_epoch: None,
+                        payload: ClaimAgentRunCommand {
+                            agent_run_id: agent_run_id.clone(),
+                            expected_version: candidate.version,
+                            lease_owner: "cleanup-dispatch-test".to_string(),
+                            lease_seconds: 60,
+                            workspace: Some(candidate.execution_workspace()),
+                            starting_git_observation: None,
+                        },
+                    },
+                )
+                .unwrap();
+            assert_eq!(claimed.result.code, "agent_run.claimed");
+            (
+                candidate.version + 1,
+                claimed.result.payload["executionEpoch"].as_i64().unwrap(),
+            )
+        };
+        let permit = core.planned_shutdown.enter_launch().await.unwrap();
+        let key = ActiveExecutionKey::new(&agent_run_id, execution_epoch);
+        assert!(
+            core.planned_shutdown
+                .register_active(&permit, key.clone(), AdapterKind::CodexCli)
+                .await
+        );
+        {
+            let mut database = core.database.lock().await;
+            let cancelled = ExecutionRuntimeService::default()
+                .request_agent_run_cancellation(
+                    &mut database,
+                    &CommandEnvelope {
+                        command_id: uuid::Uuid::new_v4().to_string(),
+                        actor: ActorRef::User {
+                            user_id: "test-user".to_string(),
+                        },
+                        camp_id: Some(camp_id.clone()),
+                        expected_versions: Vec::new(),
+                        execution_epoch: None,
+                        payload: CancelAgentRunCommand {
+                            camp_id: camp_id.clone(),
+                            agent_run_id: agent_run_id.clone(),
+                            expected_version: version,
+                        },
+                    },
+                )
+                .unwrap();
+            assert_eq!(cancelled.result.code, "agent_run.cancelled");
+        }
+
+        tokio::time::timeout(
+            Duration::from_secs(1),
+            core.dispatch_agent_run_cancellations(&core.output),
+        )
+        .await
+        .expect("the scheduler-facing cleanup scan must not await Runtime cleanup");
+        assert_eq!(core.agent_run_cleanup_inflight.lock().await.len(), 1);
+        core.dispatch_agent_run_cancellations(&core.output).await;
+        assert_eq!(
+            core.agent_run_cleanup_inflight.lock().await.len(),
+            1,
+            "a second scan must not launch duplicate cleanup for the same execution"
+        );
+
+        tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                if core.agent_run_cleanup_inflight.lock().await.is_empty() {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+        })
+        .await
+        .expect("an unproven cleanup must release its de-duplication key");
+        {
+            let database = core.database.lock().await;
+            assert!(
+                ExecutionRuntimeService::default()
+                    .list_cancellation_candidates(&database, 100)
+                    .unwrap()
+                    .into_iter()
+                    .any(|candidate| candidate.agent_run_id == agent_run_id),
+                "an unproven cleanup must remain eligible for a later scan"
+            );
+        }
+        core.dispatch_agent_run_cancellations(&core.output).await;
+        assert_eq!(core.agent_run_cleanup_inflight.lock().await.len(), 1);
+
+        drop(permit);
+        tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                let acknowledged = {
+                    let database = core.database.lock().await;
+                    ExecutionRuntimeService::default()
+                        .list_cancellation_candidates(&database, 100)
+                        .unwrap()
+                        .into_iter()
+                        .all(|candidate| candidate.agent_run_id != agent_run_id)
+                };
+                if acknowledged && core.agent_run_cleanup_inflight.lock().await.is_empty() {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+        })
+        .await
+        .expect("background cleanup should acknowledge and release its de-duplication key");
+
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        CampAttachmentStore::new(&core.data_dir)
+            .remove_camp(&camp_id)
+            .unwrap();
+        let view_attachment_root = core.attachment_views.root().join("camps").join(&camp_id);
+        drop(core);
+        fs::set_permissions(&view_attachment_root, fs::Permissions::from_mode(0o700)).unwrap();
+        fs::set_permissions(
+            view_attachment_root.parent().unwrap(),
+            fs::Permissions::from_mode(0o700),
+        )
+        .unwrap();
+        fs::set_permissions(
+            view_attachment_root.parent().unwrap().parent().unwrap(),
+            fs::Permissions::from_mode(0o700),
+        )
+        .unwrap();
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[cfg(all(target_os = "macos", feature = "slow-tests"))]
