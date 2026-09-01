@@ -617,11 +617,17 @@ export function ControlledShutdownOverlay({
 }
 
 export function App(): React.JSX.Element {
-  const [supervisor, setSupervisor] = useState<SupervisorSnapshot | null>(null)
+  const [supervisorState, setSupervisorState] = useState<{
+    latest: SupervisorSnapshot | null
+    lastNonShutdown: SupervisorSnapshot | null
+  }>({ latest: null, lastNonShutdown: null })
+  const supervisor = supervisorState.latest
   const [startupSnapshot, setStartupSnapshot] = useState<DesktopStartupSnapshot | null>(null)
   const [startupError, setStartupError] = useState<string | null>(null)
   const [startupReadAttempt, setStartupReadAttempt] = useState(0)
   const [startupFeedbackDelayElapsed, setStartupFeedbackDelayElapsed] = useState(false)
+  const [runtimeShuttingDown, setRuntimeShuttingDown] = useState(false)
+  const [shutdownFeedbackVisible, setShutdownFeedbackVisible] = useState(false)
   const startupStartedAt = useRef(performance.now())
 
   useEffect(() => {
@@ -667,9 +673,15 @@ export function App(): React.JSX.Element {
     let disposed = false
     const apply = (snapshot: SupervisorSnapshot): void => {
       if (disposed || snapshot.schemaVersion !== 1) return
-      setSupervisor((current) => (
-        current === null || snapshot.revision > current.revision ? snapshot : current
-      ))
+      setSupervisorState((current) => {
+        if (current.latest !== null && snapshot.revision <= current.latest.revision) return current
+        return {
+          latest: snapshot,
+          lastNonShutdown: snapshot.fullCoreState === 'shutting_down'
+            ? current.lastNonShutdown
+            : snapshot
+        }
+      })
     }
     const unsubscribe = window.rovai.supervisor.onChanged(apply)
     void window.rovai.supervisor.getSnapshot().then(apply).catch(() => undefined)
@@ -679,26 +691,59 @@ export function App(): React.JSX.Element {
     }
   }, [])
 
-  if (supervisor?.fullCoreState === 'blocked' || supervisor?.fullCoreState === 'crashed') {
-    return <BootstrapShell snapshot={supervisor} />
-  }
-  if (!authoritativeWorkspaceIsAvailable(supervisor) || !startupSnapshot) {
-    return <StartupWorkspace
+  useEffect(() => window.rovai.onEvent((event: CoreEvent) => {
+    if (event.method !== 'runtime.state') return
+    if (stringField(asRecord(event.params), 'status') === 'shutting_down') {
+      setRuntimeShuttingDown(true)
+    }
+  }), [])
+
+  const shuttingDown = runtimeShuttingDown || supervisor?.fullCoreState === 'shutting_down'
+  const presentationSupervisor = shuttingDown ? supervisorState.lastNonShutdown : supervisor
+
+  useEffect(() => {
+    if (!shuttingDown) {
+      setShutdownFeedbackVisible(false)
+      return undefined
+    }
+    const timer = window.setTimeout(
+      () => setShutdownFeedbackVisible(true),
+      SHUTDOWN_FEEDBACK_DELAY_MS
+    )
+    return () => window.clearTimeout(timer)
+  }, [shuttingDown])
+
+  let workspace: React.JSX.Element
+  if (
+    presentationSupervisor?.fullCoreState === 'blocked'
+    || presentationSupervisor?.fullCoreState === 'crashed'
+  ) {
+    workspace = <BootstrapShell snapshot={presentationSupervisor} />
+  } else if (!authoritativeWorkspaceIsAvailable(presentationSupervisor) || !startupSnapshot) {
+    workspace = <StartupWorkspace
       snapshot={startupSnapshot}
-      feedbackVisible={startupFeedbackDelayElapsed}
-      error={startupError}
+      feedbackVisible={!shuttingDown && startupFeedbackDelayElapsed}
+      error={shuttingDown ? null : startupError}
       onRetry={() => setStartupReadAttempt((attempt) => attempt + 1)}
     />
+  } else {
+    workspace = (
+      <div className="authoritative-workspace">
+        <AuthoritativeApp
+          initialStartupSnapshot={startupSnapshot}
+          startupStartedAtMs={startupStartedAt.current}
+          startupFeedbackDelayElapsed={startupFeedbackDelayElapsed}
+        />
+        <CoreSubsystemNotice subsystems={presentationSupervisor?.coreSubsystems ?? []} />
+      </div>
+    )
   }
+
   return (
-    <div className="authoritative-workspace">
-      <AuthoritativeApp
-        initialStartupSnapshot={startupSnapshot}
-        startupStartedAtMs={startupStartedAt.current}
-        startupFeedbackDelayElapsed={startupFeedbackDelayElapsed}
-      />
-      <CoreSubsystemNotice subsystems={supervisor?.coreSubsystems ?? []} />
-    </div>
+    <>
+      {workspace}
+      {shuttingDown && <ControlledShutdownOverlay visible={shutdownFeedbackVisible} />}
+    </>
   )
 }
 
@@ -975,7 +1020,6 @@ function AuthoritativeApp({
   const [state, setState] = useState<LoadState>('loading')
   const [shuttingDown, setShuttingDown] = useState(false)
   const shuttingDownRef = useRef(false)
-  const [shutdownFeedbackVisible, setShutdownFeedbackVisible] = useState(false)
   const [notificationHeadsUpVisible, setNotificationHeadsUpVisible] = useState(false)
   const [startupSnapshot, setStartupSnapshot] = useState<DesktopStartupSnapshot | null>(
     initialStartupSnapshot
@@ -1652,18 +1696,6 @@ function AuthoritativeApp({
   useEffect(() => {
     void loadStartupSnapshot()
   }, [loadStartupSnapshot])
-
-  useEffect(() => {
-    if (!shuttingDown) {
-      setShutdownFeedbackVisible(false)
-      return undefined
-    }
-    const timer = window.setTimeout(
-      () => setShutdownFeedbackVisible(true),
-      SHUTDOWN_FEEDBACK_DELAY_MS
-    )
-    return () => window.clearTimeout(timer)
-  }, [shuttingDown])
 
   useEffect(() => {
     void loadOnboarding()
@@ -3438,7 +3470,6 @@ function AuthoritativeApp({
           error={onboardingError || startupError}
           onRetry={retryStartup}
         />
-        {shuttingDown && <ControlledShutdownOverlay visible={shutdownFeedbackVisible} />}
       </>
     )
   }
@@ -3489,7 +3520,6 @@ function AuthoritativeApp({
           )}
           onComplete={() => void completeOnboarding()}
         />
-        {shuttingDown && <ControlledShutdownOverlay visible={shutdownFeedbackVisible} />}
       </div>
     )
   }
@@ -3784,7 +3814,6 @@ function AuthoritativeApp({
         onOpenDetails={openUpdateSettings}
         onDownload={appUpdates.download}
       />
-      {shuttingDown && <ControlledShutdownOverlay visible={shutdownFeedbackVisible} />}
     </div>
     </FilePreviewProvider>
   )

@@ -4912,6 +4912,10 @@ describe('task event projections', () => {
       run, campId: 'camp-1'
     }))
     expect(markup).toContain('<details class="execution-disclosure worked is-terminal" open="">')
+    expect(markup).toContain('class="process-disclosure-label"')
+    expect(markup).toContain('class="process-disclosure-slot"')
+    expect(markup).toContain('<path d="m4.75 6.25 3.25 3.5 3.25-3.5"></path>')
+    expect(markup).not.toContain('⌄')
     expect(markup).toContain('Claude Code 返回错误')
     expect(markup).toContain('请求受到速率限制')
     expect(markup).toContain('请稍后重试。')

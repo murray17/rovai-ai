@@ -79,6 +79,7 @@ app.whenReady().then(async () => {
       'The saved value must agree with visible text')
     assert.equal(state.focused, true, 'Editing must retain focus')
     if (options.sameEditor) assert.equal(state.sameEditor, true, 'Simple native text edits must not reset the host')
+    return state
   }
   async function expectSkills(expected) {
     const state = await evaluate('window.composerTest.state()')
@@ -251,6 +252,26 @@ app.whenReady().then(async () => {
       await expectText('请完成以下工作：\n/agent')
       await key('Escape', 27)
       await expectSkills(null)
+    })
+
+    await run('external URL paste recovers an unowned empty placeholder as plain text', async () => {
+      const url = 'https://docs.example.test/wiki/url-paste-regression'
+      await reset('')
+      await evaluate('window.composerTest.captureEditor()')
+      await evaluate(`(() => {
+        const editor = document.getElementById('composer')
+        const emptyPlaceholder = editor.firstChild
+        emptyPlaceholder.replaceWith(emptyPlaceholder.cloneNode(true))
+        window.composerTest.focusEnd()
+        window.composerTest.paste(
+          ${JSON.stringify('https://docs.example.test/wiki/url-paste-regression')},
+          ${JSON.stringify('<a href="https://docs.example.test/wiki/url-paste-regression">https://docs.example.test/wiki/url-paste-regression</a>')}
+        )
+      })()`)
+      await frames()
+      const state = await expectText(url)
+      assert.equal(state.sameEditor, false, 'Lost DOM ownership must remount the complete editor host')
+      assert.equal(state.linkCount, 0, 'External URL HTML must be pasted as ordinary text')
     })
 
     await run('native fallback recomputes after replacement, deletion, undo and redo without event data', async () => {

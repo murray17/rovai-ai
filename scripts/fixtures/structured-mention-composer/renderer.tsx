@@ -79,9 +79,10 @@ function Harness() {
           focusEnd()
           editor().dispatchEvent(new InputEvent('input', { bubbles: true, inputType }))
         },
-        paste(text: string) {
+        paste(text: string, html = '') {
           const clipboardData = new DataTransfer()
           clipboardData.setData('text/plain', text)
+          if (html) clipboardData.setData('text/html', html)
           editor().dispatchEvent(new ClipboardEvent('paste', { bubbles: true, cancelable: true, clipboardData }))
         },
         selectText,
@@ -99,6 +100,7 @@ function Harness() {
             errors: [...errors],
             focused: document.activeElement === element,
             sameEditor: capturedEditor === element,
+            linkCount: element?.querySelectorAll('a').length ?? 0,
             menuKind: menu ? (menu.classList.contains('skill-picker-menu') ? 'skill' : 'mention') : null,
             skillOptions: [...(menu?.querySelectorAll<HTMLElement>('[role="option"]') ?? [])]
               .map(option => option.dataset.skillName),

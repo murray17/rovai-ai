@@ -401,10 +401,34 @@ export function StructuredMentionComposer({
     onChange(next.content)
   }
 
-  const editorState = (selection = currentSelection()): StructuredMentionEditorState => ({
-    content,
-    selection
-  })
+  const scheduleEditorDomReset = (
+    editor: HTMLDivElement,
+    selection: StructuredMentionSelection
+  ): void => {
+    const editorFocused = document.activeElement === editor
+    pendingSelectionRef.current = editorFocused ? selection : null
+    restoreFocusAfterDomResetRef.current = editorFocused
+    setEditorDomRevision((current) => current + 1)
+  }
+
+  const stateForControlledEdit = (selection = currentSelection()): StructuredMentionEditorState => {
+    const editor = editorRef.current
+    if (!editor || !editorDomRequiresOwnershipReset(
+      editor,
+      content,
+      editorDomProjectionRef.current?.tree
+    )) {
+      return { content, selection }
+    }
+
+    // A controlled edit can arrive before Chromium emits an input event for a
+    // native DOM replacement. Preserve that native state and remount the whole
+    // editor host before React commits the edit; diffing the stale descendants
+    // can otherwise throw removeChild and unmount the Renderer root.
+    const nativeContent = readStructuredContent(editor)
+    scheduleEditorDomReset(editor, selection)
+    return { content: nativeContent, selection }
+  }
 
   const closeQueryIfSelectionMoved = (): void => {
     if (!query || isComposingRef.current) return
@@ -430,14 +454,14 @@ export function StructuredMentionComposer({
   const syncNativeDom = (nativeEvent?: InputEvent): StructuredMentionEditorState | null => {
     const editor = editorRef.current
     if (!editor) return null
-    const editorFocused = document.activeElement === editor
     const nextContent = readStructuredContent(editor)
     const nextSelection = readDomSelection(editor)
-    const requiresOwnershipReset = !editorDomMatchesReactProjection(editor, content)
-      // The empty placeholder span is removed as a unit by React on first input.
-      // Its descendants may change without resetting the IME host, but the span
-      // itself must still be the node React owns.
-      || !editorDomMatchesSnapshot(editor, editorDomProjectionRef.current?.tree, content.length > 0)
+    const editorFocused = document.activeElement === editor
+    const requiresOwnershipReset = editorDomRequiresOwnershipReset(
+      editor,
+      content,
+      editorDomProjectionRef.current?.tree
+    )
     const contentChanged = !structuredContentEqual(content, nextContent)
     lastSelectionRef.current = nextSelection
     if (requiresOwnershipReset) {
@@ -447,9 +471,7 @@ export function StructuredMentionComposer({
       // removeChild. Remount the editor host instead, so React discards the
       // mutated subtree as one unit and establishes ownership again.
       // Identical markup can still contain split or replaced, unowned nodes.
-      pendingSelectionRef.current = editorFocused ? nextSelection : null
-      restoreFocusAfterDomResetRef.current = editorFocused
-      setEditorDomRevision((current) => current + 1)
+      scheduleEditorDomReset(editor, nextSelection)
     }
     if (contentChanged) {
       pendingSelectionRef.current = editorFocused ? nextSelection : null
@@ -511,7 +533,7 @@ export function StructuredMentionComposer({
 
   const deleteFromKeyboard = (
     direction: 'backward' | 'forward',
-    state = editorState()
+    state = stateForControlledEdit()
   ): void => {
     const selection = state.selection
     const next = direction === 'backward'
@@ -534,7 +556,7 @@ export function StructuredMentionComposer({
 
     if (nativeEvent.inputType === 'insertText' && nativeEvent.data !== null) {
       event.preventDefault()
-      const next = insertStructuredText(editorState(selection), nativeEvent.data)
+      const next = insertStructuredText(stateForControlledEdit(selection), nativeEvent.data)
       emitState(next)
       setQuery((current) => {
         const nextMentionQuery = mentionQueryAfterTypedText(
@@ -549,7 +571,7 @@ export function StructuredMentionComposer({
     if (nativeEvent.inputType === 'insertParagraph' || nativeEvent.inputType === 'insertLineBreak') {
       event.preventDefault()
       setQuery(null)
-      emitState(insertStructuredText(editorState(selection), '\n'))
+      emitState(insertStructuredText(stateForControlledEdit(selection), '\n'))
       return
     }
     if (nativeEvent.inputType === 'deleteContentBackward') {
@@ -564,7 +586,7 @@ export function StructuredMentionComposer({
     }
     if (nativeEvent.inputType === 'deleteByCut') {
       event.preventDefault()
-      const next = replaceStructuredSelection(editorState(selection), [])
+      const next = replaceStructuredSelection(stateForControlledEdit(selection), [])
       emitState(next)
       setQuery(composerQueryAfterEdit(next))
     }
@@ -618,18 +640,18 @@ export function StructuredMentionComposer({
     }
     if (event.key === 'Backspace') {
       event.preventDefault()
-      deleteFromKeyboard('backward', reconciledCompositionState ?? editorState())
+      deleteFromKeyboard('backward', reconciledCompositionState ?? stateForControlledEdit())
       return
     }
     if (event.key === 'Delete') {
       event.preventDefault()
-      deleteFromKeyboard('forward', reconciledCompositionState ?? editorState())
+      deleteFromKeyboard('forward', reconciledCompositionState ?? stateForControlledEdit())
       return
     }
     if (event.key === 'Enter' && event.shiftKey) {
       event.preventDefault()
       setQuery(null)
-      emitState(insertStructuredText(reconciledCompositionState ?? editorState(), '\n'))
+      emitState(insertStructuredText(reconciledCompositionState ?? stateForControlledEdit(), '\n'))
       return
     }
     if (shouldSubmitStructuredComposerOnEnter({
@@ -662,9 +684,10 @@ export function StructuredMentionComposer({
       plainText,
       members
     )
+    const baseState = stateForControlledEdit()
     const next = structuredContent
-      ? replaceStructuredSelection(editorState(), authorableStructuredContent(structuredContent))
-      : pasteStructuredPlainText(editorState(), plainText)
+      ? replaceStructuredSelection(baseState, authorableStructuredContent(structuredContent))
+      : pasteStructuredPlainText(baseState, plainText)
     emitState(next)
     setQuery(composerQueryAfterEdit(next))
   }
@@ -679,7 +702,7 @@ export function StructuredMentionComposer({
     // Own Cut before Chromium mutates the contenteditable subtree. Waiting for
     // deleteByCut leaves a native filler BR that can be mistaken for a newline.
     event.preventDefault()
-    const state = editorState(selection)
+    const state = stateForControlledEdit(selection)
     const selectedContent = selectedStructuredMentionContent(state)
     const structuredClipboard = createStructuredMessageClipboardData(selectedContent, members)
     if (structuredClipboard) {
@@ -1172,6 +1195,18 @@ function editorDomMatchesSnapshot(
     && children.every((child, index) => checkDescendants
       ? editorDomMatchesSnapshot(child, snapshot.children[index])
       : child === snapshot.children[index].node)
+}
+
+function editorDomRequiresOwnershipReset(
+  editor: HTMLDivElement,
+  content: StructuredMentionContent,
+  snapshot: EditorDomSnapshot | undefined
+): boolean {
+  return !editorDomMatchesReactProjection(editor, content)
+    // The empty placeholder span is removed as a unit by React on first input.
+    // Its descendants may change without resetting the IME host, but the span
+    // itself must still be the node React owns.
+    || !editorDomMatchesSnapshot(editor, snapshot, content.length > 0)
 }
 
 function editorDomMatchesReactProjection(
