@@ -4,7 +4,7 @@ authority: renderer-theme
 status: accepted
 theme_id: steel-night
 mode: dark
-last_updated: 2026-08-31
+last_updated: 2026-09-01
 ---
 
 # Steel Night
@@ -67,6 +67,10 @@ Dark. `color-scheme: dark`.
 | `--line` | `#333e46` |
 | `--line-strong` | `#53616b` |
 | `--control-line` | `#687b88` |
+| `--new-camp-picker-surface` | `#1b2227` |
+| `--new-camp-picker-soft` | `#22303a` |
+| `--new-camp-picker-hover` | `#24323b` |
+| `--new-camp-picker-line-strong` | `#6a8190` |
 | `--rail` | `#11161a` |
 | `--rail-ink` | `#a6b1b8` |
 | `--rail-line` | `#313b43` |
@@ -162,6 +166,10 @@ Night inherits the shared non-color structure from `:root`; aliases resolve agai
 | `--conversation-composer-width` | `1040px`; viewport `>= 1800px` 时为 `1440px` |
 
 ## Brand, semantic, identity, and evidence color rules
+
+The New Conversation workspace, member and Lead dropdowns use the dedicated
+`--new-camp-picker-*` assignments. They do not recolor the Dialog surface or the optional-configuration
+accordion.
 
 The same semantic separation as Day applies. Brightened identity colors retain stable ID mapping;
 they do not become statuses. Evidence and diffs remain neutral and structurally labeled. Narrative
