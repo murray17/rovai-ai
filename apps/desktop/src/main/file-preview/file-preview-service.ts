@@ -11,6 +11,7 @@ import type {
   FilePreviewHtmlDocument,
   FilePreviewOperationResult,
   FilePreviewPageContent,
+  FilePreviewPathPresentation,
   FilePreviewRootGrantResult,
   FilePreviewTextContent,
   FilePreviewKind,
@@ -46,6 +47,12 @@ const PENDING_OPEN_TTL_MS = 5 * 60 * 1000
 const MAX_HANDLES_PER_WINDOW = 64
 const HTML_TOKEN_TTL_MS = 10 * 60 * 1000
 const HTML_ASSET_BYTES = 8 * 1024 * 1024
+
+function canPresentProjectRelativePath(sourceKind: OpenFilePreviewRequest['kind']): boolean {
+  return sourceKind === 'message_reference'
+    || sourceKind === 'camp_workspace'
+    || sourceKind === 'run_evidence'
+}
 
 export type FilePreviewAuthorityResult =
   | {
@@ -102,6 +109,7 @@ interface ResolvedTarget {
   target?: FileLocationTarget
   openRisk: 'normal' | 'confirm'
   allowChildren: boolean
+  projectRoot?: string | null
 }
 
 type SupportedClassification = Omit<FilePreviewClassification, 'kind'> & { kind: FilePreviewKind }
@@ -117,7 +125,9 @@ interface PreviewHandleRecord {
   reopenTarget: ResolvedTarget
   canonicalRoot: string
   canonicalPath: string
+  projectRoot: string | null
   displayPath: string
+  pathPresentation: FilePreviewPathPresentation
   fileName: string
   version: FileContentVersion
   classification: SupportedClassification
@@ -529,6 +539,7 @@ export class FilePreviewService {
         return failed('open_failed', '这个文件类型需要使用系统默认应用打开。')
       }
       const supportedClassification = classification as SupportedClassification
+      const pathProjection = await this.#pathProjection(target, opened)
       const oldFile = record.file
       const oldRoot = record.canonicalRoot
       const oldPath = record.canonicalPath
@@ -538,11 +549,14 @@ export class FilePreviewService {
           ...target,
           target: parsed.target,
           openRisk: target.openRisk ?? 'normal',
-          allowChildren: target.allowChildren ?? true
+          allowChildren: target.allowChildren ?? true,
+          projectRoot: pathProjection.projectRoot
         },
         canonicalRoot: opened.canonicalRoot,
         canonicalPath: opened.canonicalPath,
-        displayPath: target.displayName || opened.displayPath,
+        projectRoot: pathProjection.projectRoot,
+        displayPath: pathProjection.displayPath,
+        pathPresentation: pathProjection.pathPresentation,
         fileName: target.displayName || opened.fileName,
         version: opened.version,
         classification: supportedClassification,
@@ -699,7 +713,8 @@ export class FilePreviewService {
         basePath: dirname(parent.canonicalPath),
         rawReference: request.rawReference,
         openRisk: 'normal',
-        allowChildren: true
+        allowChildren: true,
+        projectRoot: parent.projectRoot
       }
     }
     if (request.kind === 'authorized_root') {
@@ -715,7 +730,8 @@ export class FilePreviewService {
         basePath: grant.canonicalRoot,
         rawReference: request.rawReference,
         openRisk: 'normal',
-        allowChildren: true
+        allowChildren: true,
+        projectRoot: null
       }
     }
     this.#requireActiveCamp(webContentsId, request.campId)
@@ -815,6 +831,7 @@ export class FilePreviewService {
     if (allowChildren && (classification.kind === 'html' || classification.kind === 'markdown')) {
       capabilities.push('preview_asset')
     }
+    const pathProjection = await this.#pathProjection(target, opened)
     const record: PreviewHandleRecord = {
       handleId,
       webContentsId,
@@ -824,14 +841,17 @@ export class FilePreviewService {
         ...target,
         target: parsed.target,
         openRisk: target.openRisk ?? 'normal',
-        allowChildren
+        allowChildren,
+        projectRoot: pathProjection.projectRoot
       },
       sourceIdentity: target.sourceIdentity,
       file: opened.file,
       reopening: null,
       canonicalRoot: opened.canonicalRoot,
       canonicalPath: opened.canonicalPath,
-      displayPath: target.displayName || opened.displayPath,
+      projectRoot: pathProjection.projectRoot,
+      displayPath: pathProjection.displayPath,
+      pathPresentation: pathProjection.pathPresentation,
       fileName,
       version: opened.version,
       classification: supportedClassification,
@@ -857,6 +877,31 @@ export class FilePreviewService {
     return target.sourceKind === 'message_reference' || target.sourceKind === 'camp_workspace'
       ? resolveFileReferencePath(parsed, target.rootPath, target.basePath)
       : referenceCandidatePath(parsed, target.rootPath, target.basePath)
+  }
+
+  async #pathProjection(
+    target: ResolvedTarget | Extract<FilePreviewAuthorityResult, { kind: 'file_target' }>,
+    opened: OpenedPreviewFile
+  ): Promise<{
+      projectRoot: string | null
+      displayPath: string
+      pathPresentation: FilePreviewPathPresentation
+    }> {
+    const inheritedProjectRoot = 'projectRoot' in target ? target.projectRoot : undefined
+    let projectRoot = inheritedProjectRoot ?? null
+    if (inheritedProjectRoot === undefined && canPresentProjectRelativePath(target.sourceKind)) {
+      projectRoot = await canonicalizeExistingPath(target.rootPath).catch(() => null)
+    }
+    const pathPresentation: FilePreviewPathPresentation = projectRoot === opened.canonicalRoot
+      ? 'project_relative'
+      : 'file_name_only'
+    return {
+      projectRoot,
+      pathPresentation,
+      displayPath: pathPresentation === 'project_relative'
+        ? opened.displayPath
+        : target.displayName || opened.fileName
+    }
   }
 
   #fileAccessOptions(target: { sourceKind: OpenFilePreviewRequest['kind'] }): { allowExternalFile: boolean } {
@@ -899,6 +944,7 @@ export class FilePreviewService {
       reopenToken: record.reopenToken,
       previewKey: record.previewKey,
       displayPath: record.displayPath,
+      pathPresentation: record.pathPresentation,
       fileName: record.fileName,
       size: record.version.size,
       mime: record.classification.mime,

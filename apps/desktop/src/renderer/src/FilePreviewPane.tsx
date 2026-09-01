@@ -3,7 +3,7 @@ import { SafeMarkdown } from './SafeMarkdown'
 import { useFilePreview, type FilePreviewTabModel } from './FilePreviewContext'
 import { FileChangesPreview } from './FileChangesPreview'
 import { FilePreviewTabIcon } from './FilePreviewTabIcon'
-import { previewTabLabel } from './file-preview-tab-presentation'
+import { previewPathIsVisible, previewTabLabel, previewTabLabels } from './file-preview-tab-presentation'
 import { filePreviewAssetUrl } from '../../file-preview-asset-url'
 import { parseUnifiedPatch } from './file-preview-patch'
 
@@ -471,22 +471,26 @@ function Viewer({ tab }: { tab: FilePreviewTabModel }): React.JSX.Element {
 function FilePreviewDocument({ tab }: { tab: FilePreviewTabModel }): React.JSX.Element {
   const { reload, retry, changePage } = useFilePreview()
   const page = tab.content?.kind === 'page' ? tab.content.page : null
+  const showPath = previewPathIsVisible(tab.file)
+  const showUpdate = tab.hasExternalUpdate || tab.isRefreshing
+  const updateAction = showUpdate ? (
+    <button
+      className="file-preview-update-action"
+      type="button"
+      disabled={tab.isRefreshing}
+      onClick={() => void reload(tab.id)}
+    >
+      <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M13 5.5V2.8l-1.2 1.1A5.4 5.4 0 1 0 13.2 9" /></svg>
+      {tab.isRefreshing ? '正在重新加载' : '有更新'}
+    </button>
+  ) : null
   return (
     <>
-      <div className="file-preview-path-row">
+      {showPath && <div className="file-preview-path-row">
         <RelativePath path={tab.file.displayPath} fileName={tab.file.fileName} />
-        {(tab.hasExternalUpdate || tab.isRefreshing) && (
-          <button
-            className="file-preview-update-action"
-            type="button"
-            disabled={tab.isRefreshing}
-            onClick={() => void reload(tab.id)}
-          >
-            <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M13 5.5V2.8l-1.2 1.1A5.4 5.4 0 1 0 13.2 9" /></svg>
-            {tab.isRefreshing ? '正在重新加载' : '有更新'}
-          </button>
-        )}
-      </div>
+        {updateAction}
+      </div>}
+      {!showPath && updateAction && <div className="file-preview-update-row">{updateAction}</div>}
       <div className="file-preview-content">
         {tab.loadState === 'opening' && !tab.content && (
           <OpeningIndicator />
@@ -521,6 +525,7 @@ function FilePreviewDocument({ tab }: { tab: FilePreviewTabModel }): React.JSX.E
 
 export function FilePreviewPane(): React.JSX.Element {
   const { tabs, activeTabId, paneVisible } = useFilePreview()
+  const tabLabels = useMemo(() => previewTabLabels(tabs), [tabs])
   return (
     <section id="file-preview-pane" className="file-preview-pane" hidden={!paneVisible} aria-label="文件预览">
       {tabs.length === 0 && <div className="file-preview-empty">
@@ -535,7 +540,7 @@ export function FilePreviewPane(): React.JSX.Element {
         hidden={tab.id !== activeTabId}
         role="tabpanel"
         tabIndex={0}
-        aria-label={previewTabLabel(tab)}
+        aria-label={tabLabels.get(tab.id) ?? previewTabLabel(tab)}
         aria-labelledby={`file-preview-tab-${tab.id}`}
       >
         {tab.kind === 'file_change' ? <FileChangesPreview tab={tab} /> : <FilePreviewDocument tab={tab} />}

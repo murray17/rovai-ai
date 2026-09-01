@@ -14,12 +14,14 @@ import '../../../apps/desktop/src/renderer/src/styles.css'
 const file: ResolvedFilePreview = {
   previewKey: 'split-fixture', handleId: 'handle-1', reopenToken: 'reopen-1',
   displayPath: 'src/preview-layout.ts', fileName: 'preview-layout.ts',
+  pathPresentation: 'project_relative',
   size: 8_000, mime: 'text/plain', extension: '.ts', kind: 'code',
   hasExternalUpdate: false, contentVersion: { size: 8_000, mtimeMs: 1 },
   contentGeneration: 'generation-1', capabilities: ['read']
 }
 const tabFiles = ['src/app.ts', 'src/layout.tsx', 'src/theme.ts', 'src/routes.ts', 'src/search.ts',
   'src/settings.tsx', 'src/navigation.ts', 'src/very-long-file-preview-reading-anchor.tsx']
+const fileNameOnlyReference = 'external-preview.ts'
 const unsupported = async (): Promise<never> => { throw new Error('Unexpected fixture API operation') }
 const fileOpens: OpenFilePreviewRequest[] = []
 const releases: string[] = []
@@ -38,6 +40,9 @@ const api: FilePreviewApi = {
     } else if (request.kind === 'message_reference' && tabFiles.includes(request.rawReference)) {
       target = { ...file, previewKey: request.rawReference, displayPath: request.rawReference,
         fileName: request.rawReference.split('/').at(-1)! }
+    } else if (request.kind === 'message_reference' && request.rawReference === fileNameOnlyReference) {
+      target = { ...file, previewKey: fileNameOnlyReference, displayPath: fileNameOnlyReference,
+        pathPresentation: 'file_name_only', fileName: fileNameOnlyReference }
     } else if (request.kind !== 'message_reference' || request.rawReference !== file.displayPath) return unsupported()
     return { ok: true, value: { kind: 'file_preview', file: { ...target, handleId: crypto.randomUUID() } } }
   },
@@ -233,6 +238,12 @@ Object.assign(window, { previewTest: {
     await previewController.open({ kind: 'message_reference', campId: 'camp-1', messageId: 'message-1', rawReference })
     await settle()
   },
+  async openFileNameOnly() {
+    await previewController.open({
+      kind: 'message_reference', campId: 'camp-1', messageId: 'message-1', rawReference: fileNameOnlyReference
+    })
+    await settle()
+  },
   async closeExtraTabs() {
     previewController.closeMany(previewController.tabs.filter((tab) => tab.kind !== 'file' || tab.file.previewKey !== file.previewKey).map((tab) => tab.id))
     await settle()
@@ -259,6 +270,19 @@ Object.assign(window, { previewTest: {
           iconWidth: tab.querySelector('.file-preview-tab-icon')!.getBoundingClientRect().width,
           closeWidth: tab.querySelector('.file-preview-tab-close')!.getBoundingClientRect().width }
       })
+    }
+  },
+  pathSnapshot() {
+    const panel = element('.file-preview-tab-panel:not([hidden])')!
+    const content = panel.querySelector<HTMLElement>('.file-preview-content')!
+    const path = panel.querySelector<HTMLElement>('.file-preview-path-row')
+    const update = panel.querySelector<HTMLElement>('.file-preview-update-row')
+    return {
+      pathVisible: Boolean(path?.getClientRects().length),
+      pathHeight: path?.getBoundingClientRect().height ?? 0,
+      updateVisible: Boolean(update?.getClientRects().length),
+      panelTop: panel.getBoundingClientRect().top,
+      contentTop: content.getBoundingClientRect().top
     }
   },
   async openReview(index = 0) {

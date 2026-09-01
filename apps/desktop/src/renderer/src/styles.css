@@ -1788,7 +1788,8 @@ html.file-preview-resizing .file-preview-pane { pointer-events: none; }
 .file-preview-empty > svg { width: 28px; height: 28px; flex: 0 0 28px; color: var(--faint); }
 .file-preview-empty h2 { margin: 0; color: var(--ink); font-size: 13px; font-weight: 600; }
 .file-preview-empty p { max-width: 32ch; margin: 0; font-size: 12px; line-height: 1.6; }
-.file-preview-path-row {
+.file-preview-path-row,
+.file-preview-update-row {
   display: flex;
   min-width: 0;
   min-height: 31px;
@@ -1801,6 +1802,7 @@ html.file-preview-resizing .file-preview-pane { pointer-events: none; }
   background: var(--conversation-surface);
   font: 500 9.5px/1.3 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
+.file-preview-update-row { justify-content: flex-end; }
 .file-preview-path-parts { display: flex; min-width: 0; max-width: 100%; flex: 0 1 auto; align-items: center; overflow: hidden; white-space: nowrap; }
 .file-preview-path-leading,
 .file-preview-path-trailing { min-width: 0; max-width: 18ch; flex: 0 4 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

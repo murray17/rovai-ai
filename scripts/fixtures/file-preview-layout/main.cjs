@@ -125,6 +125,22 @@ app.whenReady().then(async () => {
     await capture('preview-day-1440x920')
   })
 
+  await check('filename-only files remove the complete path row and return its height to the viewer', async () => {
+    const projectFile = await run('window.previewTest.pathSnapshot()')
+    assert.equal(projectFile.pathVisible, true)
+    closeTo(projectFile.pathHeight, 31, 'Project-relative path row height')
+    assert.equal(projectFile.updateVisible, false)
+    await run('window.previewTest.openFileNameOnly()')
+    const fileNameOnly = await run('window.previewTest.pathSnapshot()')
+    assert.equal(fileNameOnly.pathVisible, false)
+    assert.equal(fileNameOnly.pathHeight, 0)
+    assert.equal(fileNameOnly.updateVisible, false)
+    closeTo(fileNameOnly.contentTop, fileNameOnly.panelTop, 'Filename-only viewer reclaims the path row')
+    await capture('preview-filename-only-day')
+    await run('window.previewTest.closeExtraTabs()')
+    await open()
+  })
+
   await check('tabs shrink equally before minimum-width overflow, and expand again after closing', async () => {
     const tabs = async () => { await snapshot(); return run('window.previewTest.tabSnapshot()') }
     const equalWidths = (state, width) => state.tabs.forEach(tab => closeTo(tab.width, width, 'Equal tab widths'))
