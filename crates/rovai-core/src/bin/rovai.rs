@@ -1670,7 +1670,7 @@ fn render_flat_input_help(output: &mut String, description: &BuiltinToolDescript
         if description.name == "team.gather" && argument.field == "to" {
             writeln!(
                 output,
-                "      Canonical member target; repeat as needed. Duplicate targets are frozen once."
+                "      Canonical member target; repeat for each additional distinct member."
             )
             .expect("writing help to a String cannot fail");
         }
@@ -2107,6 +2107,7 @@ fn operation_help_examples(operation: &str) -> &'static [&'static str] {
 mod tests {
     use super::*;
     use rovai_core::builtin_tool_transport::{BuiltinToolAuth, builtin_tool_description};
+    use rovai_core::camp_message_send_teaching::CAMP_MESSAGE_SEND_SUMMARY;
     #[cfg(windows)]
     use rovai_core::platform::local_ipc::LocalIpcListener;
 
@@ -2287,6 +2288,39 @@ mod tests {
         let gather_help = operation_help_text(&gather);
         assert!(gather_help.contains("only the last accepted return"));
         assert!(gather_help.contains("limited to 16 per Item/retry generation"));
+        assert!(
+            gather_help
+                .contains("Canonical member target; repeat for each additional distinct member.")
+        );
+        assert!(!gather_help.contains("inline"));
+        assert!(
+            parse_and_validate_operation_input(
+                &gather,
+                &[
+                    "--to".to_string(),
+                    "agent_2".to_string(),
+                    "--to".to_string(),
+                    "agent_3".to_string(),
+                    "--body".to_string(),
+                    "Compare the two approaches".to_string(),
+                ],
+            )
+            .is_ok()
+        );
+        assert!(
+            parse_and_validate_operation_input(
+                &gather,
+                &[
+                    "--to".to_string(),
+                    "agent_2".to_string(),
+                    "--to".to_string(),
+                    "agent_2".to_string(),
+                    "--body".to_string(),
+                    "Compare the two approaches".to_string(),
+                ],
+            )
+            .is_err()
+        );
     }
 
     #[test]
@@ -2646,11 +2680,8 @@ mod tests {
             )
             .is_err()
         );
-        assert!(
-            description
-                .summary
-                .contains("restricted inline Agent addressing")
-        );
+        assert_eq!(description.summary, CAMP_MESSAGE_SEND_SUMMARY);
+        assert!(!description.summary.contains("inline"));
         assert!(description.summary.contains("agentAddressingMode"));
         assert!(description.summary.contains("effectiveRecipients"));
         assert!(description.summary.contains("deliveryIds"));
@@ -2782,7 +2813,10 @@ mod tests {
         assert!(help.contains("does not represent approval"));
         assert!(help.contains("Agent addressing schedules concrete continuing work, not CC."));
         assert!(help.contains("This option is invalid with --public-only."));
-        assert!(help.contains("Restricted inline Agent addressing is disabled"));
+        assert!(help.contains(
+            "effectiveRecipients and deliveryIds are empty, and no Agent Delivery is created."
+        ));
+        assert!(!help.contains("inline Agent addressing"));
         assert!(help.contains("For multiline Markdown, pass real newline characters."));
         assert!(help.contains(
             r"Direct --body values are literal: \n inside ordinary shell quotes is text, not a line break."

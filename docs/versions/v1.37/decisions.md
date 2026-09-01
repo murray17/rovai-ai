@@ -79,5 +79,5 @@ malformed canonical token 与全部 recipient admission 保持不变。
   compatibility 轮换，不增加 wire、schema shape、数据库迁移或 Session Charter revision。
 - 拒绝继续“一行一个 alias”：它把普通多 mention 截断成部分投递。拒绝任意 mid-line alias：会把叙述文本误当
   调度。拒绝 invalid-tail 原子失败：这是旧行为没有的新严格度，无法为兼容兜底带来相称收益。
-- 当前规范由 [Camp Message Send v18](../../contracts/camp-message-send-v18.md)、[Public A2A Message Delivery](../../architecture/public-a2a-message-delivery.md)
+- 当前规范由 [Camp Message Send v19](../../contracts/camp-message-send-v19.md)、[Public A2A Message Delivery](../../architecture/public-a2a-message-delivery.md)
   与[确认 revision 3](model-context-change-multi-mention-cluster.md)共同拥有。

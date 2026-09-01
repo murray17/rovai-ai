@@ -27,6 +27,8 @@ last_updated: 2026-09-01
   寻址暗示；仅 Charter revision 3→4，`rovai send --help`、发送效果与 Agent audience 投影不变。
 - [x] 开发者确认多队员 mention cluster revision 3 后，将 Agent `body` help 收敛为 payload 说明；扩展
   Core-only 行首连续有效 alias 解析，未知/歧义/`@Principal` tail 保持 Text，不新增拒绝。
+- [x] 开发者二次确认 Agent 寻址帮助 revision 1 后，从 Bootstrap、Send/Gather schema 与 CLI help 删除
+  inline fallback 机制教学；`--to` 保持唯一推荐入口，Charter revision 4→5，parser 与发送效果不变。
 - [x] Antigravity 真实生成图片终态、TRAE/Copilot 专用图片结果 fixture 与适配；本机队员经过隔离 Core 复测。
 - [ ] Cursor 非标准生成通知的真实成功 fixture；本机旧 CLI 不支持 ACP，无证据不实现猜测 parser。
 
@@ -79,10 +81,27 @@ last_updated: 2026-09-01
   `message_delivery::tests::line_leading_display_name_alias_supports_whitespace_separated_clusters`、
   `team_tool::tests::slow_tests::public_send_schema_keeps_inline_fallback_out_of_agent_body_help` 与
   `team_tool::tests::slow_tests::public_send_resolves_line_leading_display_name_cluster_before_delivery`。
+- Agent 寻址帮助 revision 1 继续扩展上述既有 owner：逐字冻结完整 revision 5 Charter、Send summary、
+  `publicOnly` schema/help、Gather `body`/`to` schema 与 CLI `--to` help，并负向断言 Agent-visible teaching
+  不出现 inline fallback。CLI schema 验证不同 canonical `--to` 可重复、同一 ID 重复因 `uniqueItems` 拒绝；
+  原样运行 parser、SQLite multi-recipient、literal invalid-tail 与 PublicOnly owner，禁止新建平行 parser fixture。
 - 核对到既有文档漂移：基础不变量曾把 Bootstrap 第三段写成 COLLABORATION_STATE；按既有实现、
   formatter golden 和 Built-in 架构校正为 MEMORY_ENTRYPOINT。仅校正文档，不改变 Bootstrap 格式。
 
 ## 证据状态
+
+### 2026-09-01 Agent 寻址帮助去机制化
+
+- revision 1 七处精确教学 owner、完整 Session Charter revision 5、catalog compatibility 轴、Gather distinct/
+  duplicate `--to` 校验全部通过；既有 parser、SQLite multi-recipient 与 PublicOnly owner 原样通过。
+  `@惠 @Principal` 保持 accepted，只路由惠并保留 literal tail，没有增加严格拒绝。
+- `cargo fmt --all --check` 与 `cargo clippy --workspace --all-targets --features slow-tests -- -D warnings` 通过；
+  `pnpm test:rust:pr` 的 Library 472、CLI 32、slow 297 项全部通过。
+- `pnpm test` 通过：133 个 Vitest 文件 / 1357 项、220 项 Node tests，1 项既有 Windows 原生测试按平台跳过；
+  文档 9 项、Skill 3 项及对应治理门禁通过。`pnpm typecheck`、`pnpm build:desktop` 和
+  `git diff --check` 通过。
+- 固定 implementation PR base `a6353017ad9b678d112cd2edea9a99a7f6d96716` 的 `docs:check:ci` 通过。
+  本阶段未启动真实 Runtime、调用模型或发送 Camp/渠道消息；Applications 打包与非终止安装在 main 合并后执行。
 
 ### 2026-09-01 Principal 教学与多队员 mention cluster
 

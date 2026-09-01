@@ -47,7 +47,7 @@ last_updated: 2026-09-01
 
 ## Collaboration、Task 与 Message Delivery
 
-- 当前规范：[协作与消息基础不变量](../architecture/foundational-invariants.md#collaboration-admission)、[动态 Camp 队员关系](../architecture/dynamic-camp-membership.md)、[Public A2A Message Delivery](../architecture/public-a2a-message-delivery.md)、[Durable Gather](../architecture/durable-gather-barrier.md)、[Durable Task v3](../contracts/durable-task-v3.md)、[Camp Message Send v18](../contracts/camp-message-send-v18.md)、[Message Delivery v8](../contracts/message-delivery-v8.md)、[Gather v4](../contracts/gather-v4.md)和[Camp History Retrieval v4](../contracts/camp-history-v4.md)。
+- 当前规范：[协作与消息基础不变量](../architecture/foundational-invariants.md#collaboration-admission)、[动态 Camp 队员关系](../architecture/dynamic-camp-membership.md)、[Public A2A Message Delivery](../architecture/public-a2a-message-delivery.md)、[Durable Gather](../architecture/durable-gather-barrier.md)、[Durable Task v3](../contracts/durable-task-v3.md)、[Camp Message Send v19](../contracts/camp-message-send-v19.md)、[Message Delivery v8](../contracts/message-delivery-v8.md)、[Gather v5](../contracts/gather-v5.md)和[Camp History Retrieval v4](../contracts/camp-history-v4.md)。
 - 理由来源：[v0.15](../versions/v0.15/decisions.md)、[v0.45](../versions/v0.45/decisions.md)、[v0.47](../versions/v0.47/decisions.md)、[v0.54](../versions/v0.54/decisions.md)、[v0.59](../versions/v0.59/decisions.md)、[v0.62](../versions/v0.62/decisions.md)、[v0.67](../versions/v0.67/decisions.md)、[v0.89](../versions/v0.89/decisions.md)、[v0.90](../versions/v0.90/decisions.md)、[v1.06](../versions/v1.06/decisions.md)、[v1.07](../versions/v1.07/decisions.md)、[v1.14](../versions/v1.14/decisions.md)、[V1.19-D02](../versions/v1.19/decisions.md#v1-19-d02)、[V1.29-D01](../versions/v1.29/decisions.md#v1-29-d01)、[V1.29-D02](../versions/v1.29/decisions.md#v1-29-d02)、[V1.29-D05](../versions/v1.29/decisions.md#v1-29-d05)、[V1.29-D06](../versions/v1.29/decisions.md#v1-29-d06)及[V1.37-D03](../versions/v1.37/decisions.md#v1-37-d03)。
 
 ## Runtime execution 与 Security
@@ -108,7 +108,7 @@ last_updated: 2026-09-01
 
 ## 外部附件 CLI 入口
 
-- 当前规范：[Camp Attachment v7](../contracts/camp-attachment-v7.md)、[Camp Message Send v18](../contracts/camp-message-send-v18.md)、[Built-in Tool Transport v21](../contracts/builtin-tool-transport-v21.md)及[附件架构](../architecture/camp-published-attachment-view.md)。
+- 当前规范：[Camp Attachment v7](../contracts/camp-attachment-v7.md)、[Camp Message Send v19](../contracts/camp-message-send-v19.md)、[Built-in Tool Transport v21](../contracts/builtin-tool-transport-v21.md)及[附件架构](../architecture/camp-published-attachment-view.md)。
 - 主要理由：[V1.32-D01](../versions/v1.32/decisions.md#v1-32-d01)：由 CLI 以 Runtime 权限适配外部路径，保持 Core 的读取根目录限制。
 
 ## Camp 连续消息

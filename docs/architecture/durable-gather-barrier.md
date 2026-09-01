@@ -3,14 +3,14 @@ document_type: architecture
 architecture: durable-gather-barrier
 authority: gather-component-boundaries
 status: accepted
-last_updated: 2026-08-27
+last_updated: 2026-09-01
 ---
 
 # 持久 Gather Barrier 架构
 
 本架构组合 [Gather 不变量](foundational-invariants.md#collaboration-gather)、
 [Gather 不变量](foundational-invariants.md#collaboration-gather)、
-[ContextManifest 与 Run Facts 不变量](foundational-invariants.md#context-manifest-run-facts)、[Gather v4](../contracts/gather-v4.md)
+[ContextManifest 与 Run Facts 不变量](foundational-invariants.md#context-manifest-run-facts)、[Gather v5](../contracts/gather-v5.md)
 与 [Message Delivery v8](../contracts/message-delivery-v8.md)。
 
 ## 组件与权威
