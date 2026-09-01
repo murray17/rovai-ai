@@ -190,6 +190,7 @@ function controlledChannels(identities: Record<string, { openId: string; name: s
   recallMessage: ReturnType<typeof vi.fn>
   createMessage: ReturnType<typeof vi.fn>
   replyMessage: ReturnType<typeof vi.fn>
+  getMessage: ReturnType<typeof vi.fn>
   getChatMode: ReturnType<typeof vi.fn>
   isInChat: Map<string, ReturnType<typeof vi.fn>>
 } {
@@ -199,6 +200,7 @@ function controlledChannels(identities: Record<string, { openId: string; name: s
   const recallMessage = vi.fn(async () => undefined)
   const createMessage = vi.fn(async () => ({ code: 0, data: { message_id: 'om_output' } }))
   const replyMessage = vi.fn(async () => ({ code: 0, data: { message_id: 'om_output_reply' } }))
+  const getMessage = vi.fn(async () => ({ code: 0, data: { items: [] as unknown[] } }))
   const getChatMode = vi.fn(async (_chatId: string): Promise<'p2p' | 'group' | 'topic'> => 'group')
   const isInChat = new Map<string, ReturnType<typeof vi.fn>>()
   const createChannel = vi.fn((options: { appId: string }) => {
@@ -219,7 +221,7 @@ function controlledChannels(identities: Record<string, { openId: string; name: s
       getChatInfo: vi.fn(async () => ({ name: '测试群' })),
       rawClient: {
         im: { v1: {
-          message: { create: createMessage, reply: replyMessage },
+          message: { create: createMessage, reply: replyMessage, get: getMessage },
           chatMembers: {
             isInChat: observeMembership
           }
@@ -227,7 +229,18 @@ function controlledChannels(identities: Record<string, { openId: string; name: s
       }
     }
   }) as unknown as NonNullable<ChannelHostDependencies['createChannel']>
-  return { createChannel, handlers, send, updateCard, recallMessage, createMessage, replyMessage, getChatMode, isInChat }
+  return {
+    createChannel,
+    handlers,
+    send,
+    updateCard,
+    recallMessage,
+    createMessage,
+    replyMessage,
+    getMessage,
+    getChatMode,
+    isInChat
+  }
 }
 
 function inertInterval(): Pick<ChannelHostDependencies, 'setInterval' | 'clearInterval'> {
@@ -246,6 +259,8 @@ function normalizedMessage(input: {
   senderUnionId?: string
   omitSenderUserId?: boolean
   content: string
+  rawContentType?: string
+  rawEncodedContent?: string
   mentions?: Array<{ key: string; openId?: string; name?: string; isBot?: boolean }>
   rootId?: string
   threadId?: string
@@ -259,7 +274,7 @@ function normalizedMessage(input: {
     senderId: input.senderOpenId ?? input.senderUserId,
     senderName: '飞书成员',
     content: input.content,
-    rawContentType: 'text',
+    rawContentType: input.rawContentType ?? 'text',
     resources: [],
     mentions,
     mentionAll: false,
@@ -279,8 +294,8 @@ function normalizedMessage(input: {
         }
       },
       message: {
-        message_type: 'text',
-        content: JSON.stringify({ text: input.content }),
+        message_type: input.rawContentType ?? 'text',
+        content: input.rawEncodedContent ?? JSON.stringify({ text: input.content }),
         mentions: mentions.map((mention) => ({
           key: mention.key,
           name: mention.name,
@@ -1918,7 +1933,8 @@ describe('channel settings service', () => {
       chatId: 'oc_group',
       chatType: 'group',
       senderUserId: 'owner-user-id',
-      content: '@_bot /new',
+      content: '/new',
+      rawEncodedContent: JSON.stringify({ text: '@_bot /new' }),
       mentions: [{ key: '@_bot', openId: 'ou_bot_a', name: '审阅员', isBot: true }]
     }))
     expect(commands.filter(({ method }) => method === 'channels.feishu.dm.startNew')).toHaveLength(1)
@@ -2306,7 +2322,8 @@ describe('channel settings service', () => {
       chatId: 'oc_regular_group',
       chatType: 'group',
       senderUserId: 'owner-user-id',
-      content: '@_bot 普通群消息回复',
+      content: '普通群消息回复',
+      rawEncodedContent: JSON.stringify({ text: '@_bot 普通群消息回复' }),
       mentions: mention,
       rootId: 'om_regular_root',
       threadId: 'omt_regular_thread'
@@ -2316,7 +2333,8 @@ describe('channel settings service', () => {
       chatId: 'oc_topic_group',
       chatType: 'group',
       senderUserId: 'owner-user-id',
-      content: '@_bot 独立话题群消息',
+      content: '独立话题群消息',
+      rawEncodedContent: JSON.stringify({ text: '@_bot 独立话题群消息' }),
       mentions: mention,
       rootId: 'om_topic_root',
       threadId: 'omt_topic_thread',
@@ -2327,7 +2345,8 @@ describe('channel settings service', () => {
       chatId: 'oc_topic_group',
       chatType: 'group',
       senderUserId: 'owner-user-id',
-      content: '@_bot 独立话题群新话题',
+      content: '独立话题群新话题',
+      rawEncodedContent: JSON.stringify({ text: '@_bot 独立话题群新话题' }),
       mentions: mention,
       threadId: 'omt_second_topic'
     }))
@@ -2340,7 +2359,12 @@ describe('channel settings service', () => {
       chatId: 'oc_topic_group',
       conversationKind: 'topic',
       topicKey: 'om_topic_root',
-      conversationDisplayName: '测试群 · 话题'
+      conversationDisplayName: '测试群 · 话题',
+      quote: {
+        senderDisplayName: '飞书消息',
+        body: '[引用的飞书消息不可读取]',
+        attachmentSummaries: []
+      }
     })
     expect(observations[1]).toMatchObject({
       chatId: 'oc_topic_group',
@@ -2355,6 +2379,130 @@ describe('channel settings service', () => {
       botName: '审阅员'
     })
     expect(harness.isInChat.get('cli_a')).toHaveBeenCalledTimes(initialRosterReads + 3)
+    await service.stop()
+  })
+
+  it('separates a Topic structural root parent from an explicit normalized quote', async () => {
+    const harness = controlledChannels({ cli_a: { openId: 'ou_bot_a', name: '审阅员' } })
+    harness.getChatMode.mockResolvedValue('topic')
+    const quotedPost = JSON.stringify({
+      zh_cn: {
+        title: '',
+        content: [[
+          { tag: 'at', user_id: 'ou_writer', user_name: '小王' },
+          { tag: 'text', text: ' 原始问题' }
+        ]]
+      },
+      en_us: {
+        title: '',
+        content: [[
+          { tag: 'at', user_id: 'ou_writer', user_name: '小王' },
+          { tag: 'text', text: ' 原始问题' }
+        ]]
+      }
+    })
+    harness.getMessage.mockResolvedValue({
+      code: 0,
+      data: {
+        items: [{
+          message_id: 'om_topic_parent',
+          deleted: false,
+          msg_type: 'post',
+          body: { content: quotedPost },
+          mentions: [{
+            key: '@_user_1',
+            id: 'ou_writer',
+            id_type: 'open_id',
+            name: '小王'
+          }],
+          sender: { sender_name: 'Murray' }
+        }]
+      }
+    })
+    const observations: Record<string, unknown>[] = []
+    const service = new ChannelSettingsService({
+      credentialStore: memoryCredentialStore({
+        'feishu-member-a': { appId: 'cli_a', appSecret: 'secret-a' }
+      }),
+      createChannel: harness.createChannel,
+      ...inertInterval(),
+      core: channelCore((method, rawParams) => {
+        const command = ((rawParams as { command?: Record<string, unknown> } | undefined)?.command ?? {})
+        if (method === 'channels.feishu.snapshot') {
+          return coreSnapshot({ memberBots: [{
+            agentId: 'agent-a', accountId: 'account-1', brand: 'feishu', appId: 'cli_a',
+            botDisplayName: '审阅员', credentialRef: 'feishu-member-a', status: 'published',
+            failureCode: null, version: 1, ownerIdentityStatus: 'verified'
+          }] })
+        }
+        if (method === 'channels.feishu.owner.verify') {
+          return {
+            status: 'applied',
+            code: 'channel.owner.verified',
+            payload: { classification: 'owner' }
+          }
+        }
+        if (method === 'channels.inbound.observe') {
+          observations.push(command)
+          return {
+            status: 'accepted',
+            code: 'channel.inbound.collecting',
+            payload: { aggregateId: `rvcia_${observations.length}`, readyToFinalize: false }
+          }
+        }
+        if (method === 'channels.host.tick') return { deliveries: [] }
+        return { status: 'applied', code: `${method}.applied`, payload: {} }
+      })
+    })
+    await service.start()
+    const messageHandler = harness.handlers.get('cli_a:message')!
+    const mention = [{ key: '@_bot', openId: 'ou_bot_a', name: '审阅员', isBot: true }]
+
+    await messageHandler(normalizedMessage({
+      messageId: 'om_structural_child',
+      chatId: 'oc_topic_group',
+      chatType: 'group',
+      senderUserId: 'owner-user-id',
+      content: '结构父链消息',
+      rawEncodedContent: JSON.stringify({ text: '@_bot 结构父链消息' }),
+      mentions: mention,
+      rootId: 'om_topic_root',
+      threadId: 'omt_topic_thread',
+      replyToMessageId: 'om_topic_root'
+    }))
+    await messageHandler(normalizedMessage({
+      messageId: 'om_explicit_reply',
+      chatId: 'oc_topic_group',
+      chatType: 'group',
+      senderUserId: 'owner-user-id',
+      content: '显式回复',
+      rawEncodedContent: JSON.stringify({ text: '@_bot 显式回复' }),
+      mentions: mention,
+      rootId: 'om_topic_root',
+      threadId: 'omt_topic_thread',
+      replyToMessageId: 'om_topic_parent'
+    }))
+
+    expect(observations).toHaveLength(2)
+    expect(observations[0]).toMatchObject({
+      topicKey: 'om_topic_root',
+      body: '结构父链消息',
+      quote: null
+    })
+    expect(observations[1]).toMatchObject({
+      topicKey: 'om_topic_root',
+      body: '显式回复',
+      quote: {
+        senderDisplayName: 'Murray',
+        body: '@小王 原始问题',
+        attachmentSummaries: []
+      }
+    })
+    expect(harness.getMessage).toHaveBeenCalledTimes(1)
+    expect(harness.getMessage).toHaveBeenCalledWith({
+      path: { message_id: 'om_topic_parent' },
+      params: { with_sender_name: true }
+    })
     await service.stop()
   })
 
@@ -2793,9 +2941,10 @@ describe('channel settings service', () => {
       chatId: 'oc_multi',
       chatType: 'group',
       senderUserId: 'owner-user-id',
-      content: '@_bot_b @_bot_a 一起检查',
+      content: '@资料员 一起检查',
+      rawEncodedContent: JSON.stringify({ text: '@_bot_b @_bot_a 一起检查' }),
       mentions: [
-        { key: '@_bot_b', openId: 'ou_bot_b', name: '资料员', isBot: true },
+        { key: '@_bot_b', openId: 'ou_bot_b', name: '资料员', isBot: false },
         { key: '@_bot_a', openId: 'ou_bot_a', name: '审阅员', isBot: true }
       ]
     }))
@@ -2804,8 +2953,141 @@ describe('channel settings service', () => {
       acknowledgementAppId: 'cli_b',
       expectedAppIds: ['cli_a', 'cli_b'],
       canonicalAgentIds: ['agent-a', 'agent-b'],
-      canonicalMentionsComplete: true
+      canonicalMentionsComplete: true,
+      body: '一起检查'
     })
+    await service.stop()
+  })
+
+  it('freezes one SDK-normalized rich-text body across multi-Bot observations', async () => {
+    const harness = controlledChannels({
+      cli_alice: { openId: 'ou_alice', name: '爱丽丝' },
+      cli_kirigiri: { openId: 'ou_kirigiri', name: '雾切响子' },
+      cli_megumi: { openId: 'ou_megumi', name: '药师寺惠' }
+    })
+    const bots = [{
+      agentId: 'agent_6', accountId: 'account-1', brand: 'feishu', appId: 'cli_alice',
+      botDisplayName: '爱丽丝', credentialRef: 'feishu-alice', status: 'published',
+      failureCode: null, version: 1, ownerIdentityStatus: 'verified'
+    }, {
+      agentId: 'agent_7', accountId: 'account-1', brand: 'feishu', appId: 'cli_kirigiri',
+      botDisplayName: '雾切响子', credentialRef: 'feishu-kirigiri', status: 'published',
+      failureCode: null, version: 1, ownerIdentityStatus: 'verified'
+    }, {
+      agentId: 'agent_8', accountId: 'account-1', brand: 'feishu', appId: 'cli_megumi',
+      botDisplayName: '药师寺惠', credentialRef: 'feishu-megumi', status: 'published',
+      failureCode: null, version: 1, ownerIdentityStatus: 'verified'
+    }]
+    const observations: Record<string, unknown>[] = []
+    const service = new ChannelSettingsService({
+      credentialStore: memoryCredentialStore({
+        'feishu-alice': { appId: 'cli_alice', appSecret: 'secret-alice' },
+        'feishu-kirigiri': { appId: 'cli_kirigiri', appSecret: 'secret-kirigiri' },
+        'feishu-megumi': { appId: 'cli_megumi', appSecret: 'secret-megumi' }
+      }),
+      createChannel: harness.createChannel,
+      ...inertInterval(),
+      core: channelCore((method, rawParams) => {
+        const command = ((rawParams as { command?: Record<string, unknown> } | undefined)?.command ?? {})
+        if (method === 'channels.feishu.snapshot') return coreSnapshot({ memberBots: bots })
+        if (method === 'channels.feishu.owner.verify') {
+          return {
+            status: 'applied',
+            code: 'channel.owner.verified',
+            payload: { classification: 'owner' }
+          }
+        }
+        if (method === 'channels.inbound.observe') {
+          observations.push(command)
+          return {
+            status: 'accepted',
+            code: 'channel.inbound.collecting',
+            payload: { aggregateId: 'rvcia_rich_post', readyToFinalize: false }
+          }
+        }
+        if (method === 'channels.host.tick') return { deliveries: [] }
+        return { status: 'applied', code: `${method}.applied`, payload: {} }
+      })
+    })
+    await service.start()
+    const rawPost = JSON.stringify({
+      zh_cn: {
+        title: '',
+        content: [[
+          { tag: 'at', user_id: '@_user_1', user_name: '药师寺惠' },
+          { tag: 'text', text: ' ' },
+          { tag: 'at', user_id: '@_user_2', user_name: '雾切响子' },
+          { tag: 'text', text: ' ' },
+          { tag: 'at', user_id: '@_user_3', user_name: '爱丽丝' },
+          { tag: 'text', text: ' ' },
+          { tag: 'at', user_id: '@_user_4', user_name: '小王' },
+          { tag: 'text', text: ' 你们报个数' }
+        ]]
+      },
+      en_us: {
+        title: '',
+        content: [[
+          { tag: 'at', user_id: '@_user_1', user_name: '药师寺惠' },
+          { tag: 'text', text: ' ' },
+          { tag: 'at', user_id: '@_user_2', user_name: '雾切响子' },
+          { tag: 'text', text: ' ' },
+          { tag: 'at', user_id: '@_user_3', user_name: '爱丽丝' },
+          { tag: 'text', text: ' ' },
+          { tag: 'at', user_id: '@_user_4', user_name: '小王' },
+          { tag: 'text', text: ' 你们报个数' }
+        ]]
+      }
+    })
+    const rawMentions = [
+      { key: '@_user_1', openId: 'ou_megumi', name: '药师寺惠' },
+      { key: '@_user_2', openId: 'ou_kirigiri', name: '雾切响子' },
+      { key: '@_user_3', openId: 'ou_alice', name: '爱丽丝' },
+      { key: '@_user_4', openId: 'ou_human', name: '小王' }
+    ]
+    const cases = [{
+      appId: 'cli_alice',
+      content: '@药师寺惠 @雾切响子 @小王 你们报个数'
+    }, {
+      appId: 'cli_kirigiri',
+      content: '@药师寺惠 @爱丽丝 @小王 你们报个数'
+    }, {
+      appId: 'cli_megumi',
+      content: '@雾切响子 @爱丽丝 @小王 你们报个数'
+    }]
+    for (const current of cases) {
+      await harness.handlers.get(`${current.appId}:message`)!(normalizedMessage({
+        messageId: 'om_rich_post',
+        chatId: 'oc_multi',
+        chatType: 'group',
+        senderUserId: 'owner-user-id',
+        content: current.content,
+        rawContentType: 'post',
+        rawEncodedContent: rawPost,
+        mentions: rawMentions.map((mention) => ({
+          ...mention,
+          isBot: mention.openId === ({
+            cli_alice: 'ou_alice',
+            cli_kirigiri: 'ou_kirigiri',
+            cli_megumi: 'ou_megumi'
+          } as Record<string, string>)[current.appId]
+        }))
+      }))
+    }
+
+    expect(observations).toHaveLength(3)
+    expect(observations.map((observation) => observation.body)).toEqual([
+      '@小王 你们报个数',
+      '@小王 你们报个数',
+      '@小王 你们报个数'
+    ])
+    expect(observations).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        expectedAppIds: ['cli_alice', 'cli_kirigiri', 'cli_megumi'],
+        canonicalAgentIds: ['agent_6', 'agent_7', 'agent_8'],
+        canonicalMentionsComplete: true
+      })
+    ]))
+    expect(JSON.stringify(observations)).not.toMatch(/tag|@_user_|en_us/u)
     await service.stop()
   })
 
