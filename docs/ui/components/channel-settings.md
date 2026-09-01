@@ -10,20 +10,18 @@ last_updated: 2026-09-01
 
 渠道设置是 Owner 在 Rovai 本机维护飞书/钉钉连接与队员 Bot 的 Renderer surface。群首次项目选择发生在对应外部会话的
 Owner-only 卡片中；Renderer 不提供 Channel 项目目录或会话绑定操作。领域状态和错误按 Provider 分别见
-[Feishu Channel v12](../../contracts/feishu-channel-v12.md)与
-[DingTalk Channel v5](../../contracts/dingtalk-channel-v5.md)；本页只拥有信息层级、交互与可访问性。
+[Feishu Channel v14](../../contracts/feishu-channel-v14.md)与
+[DingTalk Channel v8](../../contracts/dingtalk-channel-v8.md)；本页只拥有信息层级、交互与可访问性。
 
-当前对外渠道页只显示飞书。钉钉完整产品链路尚未验收，因此隐藏其整个入口、平台计数、连接/发布区域及
-残留登录弹窗；旧选中值回退到可见平台，没有可见平台时显示空态。不得显示“待接入”钉钉占位入口。
-这是 Renderer 发布范围的收敛，不删除钉钉实现、类型、凭据、账号或已有 Bot，也不改变后台生命周期。
-以下钉钉交互说明与独立组件测试保留为后续接入依据，不表示当前用户可以从渠道页进入。
+当前渠道页同时显示飞书与钉钉。切换 Provider 只切换本地管理投影，不合并账号、Bot、待绑定或异常计数；
+既有钉钉账号和已发布 Bot 直接按真实状态恢复，不显示“待接入”占位入口。
 
 ## 页面结构
 
 页面沿用设置工作区的 Porcelain Day / Steel Night 世界和现有 `SettingsPageHeader`：
 
 1. `Settings / Channels` eyebrow、标题“渠道”、Owner 本机说明；
-2. 当前可见 Provider Tab（目前仅飞书）；切换只改变当前展示，不合并账号或 Bot 状态；
+2. 飞书与钉钉 Provider Tab，均使用打包进 App 的真实品牌图标；切换只改变当前展示，不合并账号、Bot 状态或诊断；
 3. 当前 Provider 的渠道连接，展示真实开发者用户名、企业与可选 email，提供登录、切换和断开；
 4. 队员 Bot 列表，按成员稳定顺序显示头像、名称、角色、发布状态和单行动作；
 5. 页面最底部显示默认折叠的“局域网执行台”全局设置，不放入单个 Bot、Camp 或队员行。
@@ -106,6 +104,10 @@ Session/Core commit 失败保留旧账号。不需要 Rovai OAuth Client 配置�
 浏览器打开。链接不依赖当前 Developer Session 的连接状态；Renderer 不拼接或接受任意 URL。关闭、停用、删除等
 远端应用治理只在官方开放平台完成。
 
+未发布行的身份说明固定为“发布后沿用队员身份”，不再解释名称和图标的内部配置方式。首次发布完成后，由新 Bot
+主动向 exact Owner 私聊发送“`<队员名> · 已发布`”欢迎卡；渠道页只显示正常已发布状态，不为欢迎卡增加进度、重试或
+错误状态。欢迎卡失败不得把该行改回“需处理”。
+
 重新发布 Dialog 必须显示已经冻结的 App ID，明确“不会创建或换绑其他应用”；进度中的创建阶段改为“正在核对已绑定应用…”。Renderer
 头像只从现有 `MemberAvatar` 读取；发布时 Main 独立解析同一个受控 `avatarRef` 并上传 exact icon rendition，渠道页不
 解析或接收本机头像路径。非空头像引用无法安全读取时，发布失败而不是展示或上传另一身份。
@@ -125,12 +127,13 @@ Renderer 不显示“会话接入”、待处理项目选择、绑定异常或�
 后接“选择项目后，这个话题之后都会使用该项目；快速对话不绑定项目。”；普通群用“群聊”替换“话题”。项目下拉框独占
 一行，仅显示 bounded project display name；下一行依次为“开始快速对话”和“刷新项目”。没有可用项目时不展示空下拉框，
 保留两个按钮及可直接快速对话的说明。两种选择都冻结同一个 Camp 工作区，不提供换绑入口。
-卡片不得显示 canonical path、外部 identity、credential 或内部错误。钉钉卡与项目操作保持不变，固定使用官方 AI Markdown
-模板、Stream callback 且禁止转发。
+卡片不得显示 canonical path、外部 identity、credential 或内部错误。钉钉固定使用官方 AI Markdown 模板、Stream callback
+且禁止转发；项目以最近使用顺序显示最多六个按钮，随后是“开始快速对话”和“刷新项目”，没有项目时仍能直接 Quick Chat。
 
-只有 Owner 点击会消费卡片；Non-owner 只看到“仅 Rovai Owner 可以选择项目”私有 toast，公共卡不变化。项目失效时显示
+只有 Owner 点击会消费卡片；飞书 Non-owner 看到私有无权限 toast，钉钉 Non-owner 的 callback 只完成平台 ACK，公共卡不变化。
+项目失效时显示
 “该项目已不可用，请重新选择”并刷新原卡；旧卡/双击显示“该项目选择已完成或卡片已过期”。成功只显示短暂
-“项目已绑定，正在处理消息”反馈；飞书 Quick Chat 为“已开始快速对话，正在处理消息”。Core 随后异步撤回卡片，
+“项目已绑定，正在处理消息”反馈；Quick Chat 为“已开始快速对话，消息已进入处理”。Core 随后异步撤回卡片，
 不留下永久完成卡。
 
 ## 飞书永久正文卡
@@ -145,22 +148,26 @@ Unicode 字符，超长用省略号收尾。引用只作展示，不跳转、不
 
 该行只呈现 Core 的实际 A2A 接收对象和显式 Owner attention；不代表新的飞书 Bot 互相调用。结构化 `@你` 不再重复留在
 飞书正文，普通文字中真正写出的 `@你` 保留。无法取得原生身份时名称静态显示，不冒充可用身份。
-永久正文完整保留，超长拆成连续卡片，仅首张显示回复摘要，只有最后一张显示接收对象。历史已发消息不批量替换，钉钉格式不在此变更范围。
+永久正文完整保留，超长拆成连续卡片，仅首张显示回复摘要，只有最后一张显示接收对象。历史已发消息不批量替换；
+钉钉永久 Markdown 输出保持既有格式，不与状态卡合并。
 
 ## 飞书执行卡
 
-飞书执行卡保持安静的状态入口，不把 Rovai 执行台压缩进群消息。执行中只显示“队员名 · 执行中”和
+钉钉复用本节的状态入口规则。飞书与钉钉执行卡都不把 Rovai 执行台压缩进群消息；执行中只显示“队员名 · 执行中”和
 “显示最近输出 / 打开执行台 / 停止执行”；终态标题改为已完成、执行失败或已取消，并移除停止入口。
 默认不显示正文、command、结果、进度或统计。
 
-“显示最近输出”展开最多最后 30 个公开正文与安全 command，按真实顺序混排；不展示结果、逐条状态或分页。
-它仍是 Owner callback，文案在展开后变成“收起最近输出”。“打开执行台”是直接 `open_url`，没有 loading、
-“已发送到私聊”或 Owner-only 文案；按钮只在卡片首次创建时已有可用 URL 才显示。“停止执行”保持危险样式，
+“显示最近输出”展开最多最后 30 个公开正文与安全 command，按真实顺序混排，不提供分页。两端的长 command 都显示
+状态符号与 `$`，按约 72 个显示列保留开头和目标尾部。飞书把每条 command 呈现为默认收起的原生面板，展开后最多显示
+两行安全结果；钉钉只展开整个最近输出区，不模拟逐 command 折叠，也不显示 command result。
+“显示最近输出”仍是 Owner callback，文案在展开后变成“收起最近输出”。“打开执行台”是直接 `open_url`，没有 loading、
+“已发送到私聊”或 Owner-only 文案；按钮只在卡片首次创建时已有可用 URL 才显示。“停止执行”在平台支持时使用危险样式，
 只在非终态显示，不使用 Spinner 制造第二个执行状态。
 
 卡片只在状态、按钮可用性或已展开最近输出窗口变化时更新。永久正文卡继续独立发布，执行卡仍是临时 surface；
 下一轮召回后不留下完成占位。安全、固定 URL、Token、callback 和串行更新边界由
-[Feishu Channel v12](../../contracts/feishu-channel-v12.md) 拥有。
+[Feishu Channel v14](../../contracts/feishu-channel-v14.md)和
+[DingTalk Channel v8](../../contracts/dingtalk-channel-v8.md)拥有。
 
 ## 局域网执行台设置
 
@@ -194,7 +201,7 @@ Web 执行台延续 Porcelain Day / Steel Night 的冷瓷灰、Steel 品牌、�
 
 - [全局设计系统](../../../DESIGN.md)
 - [设置工作区 brief](../../../apps/desktop/.impeccable/surfaces/settings-workspace.md)
-- [Feishu Channel v12](../../contracts/feishu-channel-v12.md)
+- [Feishu Channel v14](../../contracts/feishu-channel-v14.md)
 - [飞书渠道架构](../../architecture/feishu-channel.md)
-- [DingTalk Channel v5](../../contracts/dingtalk-channel-v5.md)
+- [DingTalk Channel v8](../../contracts/dingtalk-channel-v8.md)
 - [钉钉渠道架构](../../architecture/dingtalk-channel.md)

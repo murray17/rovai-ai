@@ -588,6 +588,7 @@ fn request_runs_outside_main_queue(method: &str) -> bool {
             | "campTurns.cancel"
             | "agentRuns.cancel"
             | "channels.executionConsole.agentRun.cancel"
+            | "channels.dingtalk.executionConsole.agentRun.cancel"
             | "runtime.pendingExecution.cancel"
             | "runtime.subsystems.retry"
     )
@@ -646,6 +647,7 @@ fn request_invalidates_navigation(method: &str) -> bool {
             | "campTurns.cancel"
             | "agentRuns.cancel"
             | "channels.executionConsole.agentRun.cancel"
+            | "channels.dingtalk.executionConsole.agentRun.cancel"
             | "agentRuns.resolveRecoveryBlocker"
     )
 }
@@ -5194,10 +5196,17 @@ impl Core {
             "channels.dingtalk.pendingBinding.resolve" => {
                 let params: UserCommandParams<ResolvePendingCampBindingCommand> =
                     serde_json::from_value(request.params.clone())?;
+                let quick_chat_path = self.data_dir.join("quick-chat");
+                std::fs::create_dir_all(&quick_chat_path).with_context(|| {
+                    format!(
+                        "failed to prepare Quick Chat at {}",
+                        quick_chat_path.display()
+                    )
+                })?;
                 let mut database = self.database.lock().await;
                 let execution = ChannelService::default().resolve_pending_camp_binding(
                     &mut database,
-                    &self.data_dir.join("quick-chat"),
+                    &quick_chat_path,
                     &system_command_envelope(
                         params.command_id,
                         "dingtalk-channel-host",
@@ -5570,33 +5579,35 @@ impl Core {
                     ChannelService::default().execution_web_snapshot(&mut database, &scope)?,
                 )?)
             }
-            "channels.executionConsole.recentOutput.authorize" => {
+            "channels.executionConsole.recentOutput.authorize"
+            | "channels.dingtalk.executionConsole.recentOutput.authorize" => {
                 let params: UserCommandParams<AuthorizeChannelExecutionRecentOutputCommand> =
                     serde_json::from_value(request.params.clone())?;
+                let component_id = if request.method.starts_with("channels.dingtalk.") {
+                    "dingtalk-channel-host"
+                } else {
+                    "feishu-channel-host"
+                };
                 let mut database = self.database.lock().await;
                 let execution = ChannelService::default().authorize_execution_recent_output(
                     &mut database,
-                    &system_command_envelope(
-                        params.command_id,
-                        "feishu-channel-host",
-                        None,
-                        params.command,
-                    ),
+                    &system_command_envelope(params.command_id, component_id, None, params.command),
                 )?;
                 Ok(serde_json::to_value(execution.result)?)
             }
-            "channels.executionConsole.agentRun.cancel" => {
+            "channels.executionConsole.agentRun.cancel"
+            | "channels.dingtalk.executionConsole.agentRun.cancel" => {
                 let params: UserCommandParams<ChannelAgentRunCancelCommand> =
                     serde_json::from_value(request.params.clone())?;
+                let component_id = if request.method.starts_with("channels.dingtalk.") {
+                    "dingtalk-channel-host"
+                } else {
+                    "feishu-channel-host"
+                };
                 let mut database = self.database.lock().await;
                 let execution = ChannelService::default().cancel_channel_agent_run(
                     &mut database,
-                    &system_command_envelope(
-                        params.command_id,
-                        "feishu-channel-host",
-                        None,
-                        params.command,
-                    ),
+                    &system_command_envelope(params.command_id, component_id, None, params.command),
                 )?;
                 let should_notify = execution.result.status == CommandResultStatus::Applied;
                 let camp_id = execution

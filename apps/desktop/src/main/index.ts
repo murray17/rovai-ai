@@ -393,6 +393,7 @@ const dingtalkChannelSettings = new DingTalkChannelSettingsService({
     developerSession: dingtalkDeveloperSession
   }),
   avatarSource: memberBotAvatarSource,
+  executionView,
   requiredScopeValues: DINGTALK_REQUIRED_SCOPE_VALUES
 })
 const channelSettings = new ChannelSettingsCoordinator({

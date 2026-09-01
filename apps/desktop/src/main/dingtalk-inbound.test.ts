@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { hasCanonicalSingleDingTalkBotTarget } from './dingtalk-channel-settings'
 import { normalizeDingTalkRobotMessage } from './dingtalk-inbound'
 
 const binding = { appKey: 'ding-app-a', robotCode: 'ding-app-a' }
@@ -13,8 +14,9 @@ describe('DingTalk inbound normalization', () => {
       conversationType: '2',
       conversationId: 'cid-group',
       conversationTitle: '协作群',
+      chatbotUserId: 'ding-bot-user-a',
       isInAtList: true,
-      atUsers: [{ dingtalkId: 'ding-app-a' }],
+      atUsers: [{ dingtalkId: 'ding-bot-user-a' }],
       robotCode: 'ding-app-a',
       msgtype: 'text',
       text: { content: '检查登录模块' },
@@ -33,9 +35,36 @@ describe('DingTalk inbound normalization', () => {
       chatId: 'cid-group',
       body: '检查登录模块',
       explicitlyAtBot: true,
-      atUsers: [{ staffId: null, dingtalkId: 'ding-app-a' }],
+      chatbotUserId: 'ding-bot-user-a',
+      atUsers: [{ staffId: null, dingtalkId: 'ding-bot-user-a' }],
       quote: { senderDisplayName: 'Alice', body: '引用内容' }
     })
+  })
+
+  it('uses chatbotUserId as the receiving Bot proof even when a human is also mentioned', () => {
+    const message = normalizeDingTalkRobotMessage({
+      msgId: 'msg-group-bot-proof',
+      senderCorpId: 'ding-corp',
+      senderStaffId: 'owner-user',
+      senderNick: 'Murray',
+      conversationType: '2',
+      openConversationId: 'cid-group',
+      chatbotUserId: 'ding-bot-user-a',
+      isInAtList: true,
+      atUsers: [
+        { dingtalkId: 'ding-bot-user-a' },
+        { staffId: 'colleague-user' }
+      ],
+      robotCode: 'ding-app-a',
+      msgtype: 'text',
+      text: { content: '请和同事一起检查' }
+    }, binding)
+
+    expect(message).toMatchObject({
+      chatbotUserId: 'ding-bot-user-a',
+      explicitlyAtBot: true
+    })
+    expect(hasCanonicalSingleDingTalkBotTarget(message)).toBe(true)
   })
 
   it('accepts the legacy senderStaff field and summarizes a private file', () => {
@@ -58,6 +87,27 @@ describe('DingTalk inbound normalization', () => {
       mediaType: 'application/pdf'
     }])
     expect(message.explicitlyAtBot).toBe(true)
+  })
+
+  it('does not mistake private callback routing metadata for a group topic', () => {
+    const message = normalizeDingTalkRobotMessage({
+      msgId: 'msg-private-thread-metadata',
+      senderCorpId: 'ding-corp',
+      senderStaffId: 'owner-user',
+      senderNick: 'Murray',
+      conversationType: '1',
+      conversationId: 'cid-private',
+      openConvThreadId: 'private-routing-id',
+      robotCode: 'ding-app-a',
+      msgtype: 'text',
+      text: { content: 'hello' }
+    }, binding)
+
+    expect(message).toMatchObject({
+      conversationKind: 'p2p',
+      chatId: 'cid-private',
+      body: 'hello'
+    })
   })
 
   it('does not substitute the Bot tenant for a missing sender tenant', () => {

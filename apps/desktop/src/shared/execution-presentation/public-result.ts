@@ -9,6 +9,8 @@ const PRIVATE_KEY = /-----BEGIN [^-\r\n]*PRIVATE KEY-----[\s\S]*?(?:-----END [^-
 const RAW_PATCH = /(?:\*\*\* (?:Begin Patch|Update File|Add File|Delete File)|^diff --git |^@@\s+-\d)/mu
 const ROVAI_SEND = /(?:^|[\s/\\])rovai(?:\.exe)?["']?\s+send(?:\s|$)/u
 const MESSAGE_BODY = /--body(?:=|\s+)(?:"((?:\\.|[^"\\])*)"|'((?:\\.|[^'\\])*)'|([^\s;&|]+))/gu
+export const CHANNEL_COMMAND_PREVIEW_COLUMNS = 72
+export const FEISHU_CARD_RESULT_PREVIEW_LINES = 2
 
 type PublicEvidence = Pick<LiveRuntimeEvent, 'id' | 'agentRunId' | 'eventType' | 'payload' | 'canonical'>
 
@@ -99,6 +101,96 @@ export function executionPublicCommandTitle(step: ExecutionStep, redact: (text: 
   if (RAW_PATCH.test(title)) return '命令内容已隐藏（含原始补丁）'
   const safeTitle = redact(title)
   return ROVAI_SEND.test(title) ? safeTitle.replace(MESSAGE_BODY, `--body ${HIDDEN}`) : safeTitle
+}
+
+/** Compact provider-card label; the complete safe command remains available in the Web console. */
+export function executionPublicCommandPreview(
+  step: ExecutionStep,
+  redact: (text: string) => string,
+  maxColumns = CHANNEL_COMMAND_PREVIEW_COLUMNS
+): string {
+  const title = executionPublicCommandTitle(step, redact).replace(/\s+/gu, ' ').trim()
+  const prompt = step.publicCommand && step.toolName !== 'apply_patch' ? `$ ${title}` : title
+  return truncateDisplayColumns(prompt, maxColumns)
+}
+
+/** Feishu-only folded result preview. DingTalk deliberately never consumes this projection. */
+export function feishuCardResultPreview(
+  value: string | null,
+  maxLines = FEISHU_CARD_RESULT_PREVIEW_LINES,
+  maxColumns = CHANNEL_COMMAND_PREVIEW_COLUMNS
+): string | null {
+  if (!value?.trim() || maxLines < 1 || maxColumns < 1) return null
+  const lines = value.trim().replace(/\r\n?/gu, '\n').split('\n')
+  const hasMoreLines = lines.length > maxLines
+  const visible = lines.slice(0, maxLines).map((line, index) => {
+    if (!hasMoreLines || index !== maxLines - 1) return truncateEndDisplayColumns(line, maxColumns)
+    const omission = ' …'
+    const omissionColumns = displayColumns(Array.from(omission))
+    if (omissionColumns >= maxColumns) return truncateEndDisplayColumns('…', maxColumns)
+    const body = takeDisplayColumns(Array.from(line.trimEnd()), maxColumns - omissionColumns, false)
+    return `${body.trimEnd()}${omission}`
+  })
+  return visible.join('\n')
+}
+
+/**
+ * Approximate terminal-cell width is more stable across mixed Chinese/ASCII commands than a
+ * UTF-16 or code-point count. Head and tail are retained because the executable and final target
+ * path are usually the two most useful parts of a long command.
+ */
+export function truncateDisplayColumns(value: string, maxColumns: number): string {
+  if (maxColumns < 1) return ''
+  const characters = Array.from(value)
+  if (displayColumns(characters) <= maxColumns) return value
+  if (maxColumns === 1) return '…'
+  const available = maxColumns - 1
+  const headBudget = Math.ceil(available * 0.75)
+  const tailBudget = available - headBudget
+  return `${takeDisplayColumns(characters, headBudget, false)}…${takeDisplayColumns(characters, tailBudget, true)}`
+}
+
+function truncateEndDisplayColumns(value: string, maxColumns: number): string {
+  if (maxColumns < 1) return ''
+  const characters = Array.from(value)
+  if (displayColumns(characters) <= maxColumns) return value
+  if (maxColumns === 1) return '…'
+  return `${takeDisplayColumns(characters, maxColumns - 1, false)}…`
+}
+
+function displayColumns(characters: string[]): number {
+  return characters.reduce((total, character) => total + displayColumnWidth(character), 0)
+}
+
+function takeDisplayColumns(characters: string[], budget: number, fromEnd: boolean): string {
+  const source = fromEnd ? [...characters].reverse() : characters
+  const selected: string[] = []
+  let used = 0
+  for (const character of source) {
+    const width = displayColumnWidth(character)
+    if (used + width > budget) break
+    selected.push(character)
+    used += width
+  }
+  return (fromEnd ? selected.reverse() : selected).join('')
+}
+
+function displayColumnWidth(character: string): number {
+  if (/\p{Mark}/u.test(character)) return 0
+  const code = character.codePointAt(0) ?? 0
+  return code >= 0x1100 && (
+    code <= 0x115f
+    || code === 0x2329 || code === 0x232a
+    || (code >= 0x2e80 && code <= 0xa4cf && code !== 0x303f)
+    || (code >= 0xac00 && code <= 0xd7a3)
+    || (code >= 0xf900 && code <= 0xfaff)
+    || (code >= 0xfe10 && code <= 0xfe19)
+    || (code >= 0xfe30 && code <= 0xfe6f)
+    || (code >= 0xff00 && code <= 0xff60)
+    || (code >= 0xffe0 && code <= 0xffe6)
+    || (code >= 0x1f300 && code <= 0x1faff)
+    || (code >= 0x20000 && code <= 0x3fffd)
+  ) ? 2 : 1
 }
 
 function eventCommand(payload: Record<string, unknown>): string | undefined {

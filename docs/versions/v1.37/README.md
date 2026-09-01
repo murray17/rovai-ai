@@ -9,10 +9,10 @@ model_context_change: true
 last_updated: 2026-09-01
 ---
 
-# Rovai-ai v1.37：Runtime 图片、文件预览、取消与飞书只读执行台
+# Rovai-ai v1.37：Runtime 图片、文件预览、取消与渠道只读执行台
 
-前置：[v1.36](../v1.36/README.md)。渠道已有代码先保存为 f0e1ce2f、b7316a57、6f9f8bd2；
-钉钉未完成 Owner/Core/群卡片/packaged 验收的 NO-GO 原样保留，本版本不继续实施钉钉。
+前置：[v1.36](../v1.36/README.md)。渠道已有代码先保存为 f0e1ce2f、b7316a57、6f9f8bd2；原钉钉 NO-GO
+在本版本后续由用户明确重开为单 Bot 真实验收，Topic/Thread 与附件仍保持关闭。
 
 ## 范围与状态
 
@@ -31,7 +31,7 @@ last_updated: 2026-09-01
   只保留看大图与关闭。不删除数据，不改变稳定路径零拷贝。
 - 会话切换复用当前 Renderer 内已成功解码的 Blob payload；附件命中后不重读，Runtime 命中后先显示再后台
   刷新当前内容。Tile 独立拥有 Object URL，128 MiB 淘汰只影响缓存 payload，不改变 Core 协议或稳定路径语义。
-- 飞书复用已有显式附件 Outbox，不自动上传 Runtime 图片；钉钉链路保持原样。
+- 飞书复用已有显式附件 Outbox，不自动上传 Runtime 图片；钉钉出站附件仍 disabled。
 - Migration 133 只新增图片元数据表和索引，Data Contract `v1.43 / schema 84`；旧业务行保持不变。
 - [model-context-change revision 1](model-context-change.md) 已由开发者二次确认并实施：精简文件帮助，
   仅新飞书 Session 增加冻结的文件交付提示；Charter revision 3 复用既有兼容路径，其余版本轴不变。
@@ -49,18 +49,29 @@ last_updated: 2026-09-01
 - 取消可用性：以[已确认 revision 2](model-context-change-cancellation.md)实施事务内 cancelled 终态、定向成员 cutover、渠道 FIFO
   收口、发送前边界与三秒 Runtime 清理；Migration 134 为 Data Contract `v1.44 / schema 85`。
   当前取消合同见 [Cancellation Settlement v2](../../contracts/cancellation-settlement-v2.md)，理由见
-  [V1.37-D02](decisions.md#v1-37-d02)。验收进度记录在实施计划，原图片/钉钉未验收项不因此升级。
+  [V1.37-D02](decisions.md#v1-37-d02)。验收进度记录在实施计划，未完成的真实外部验收不由本机测试替代。
 - 飞书执行卡已收敛为纯状态与三个入口；“打开执行台”在卡片创建时冻结 LAN HTTP `open_url`，以 Main 内存
   Token 限定同 Camp/队员、focus Run 及其之前历史，不做点击鉴权、Owner 私聊、地址刷新或旧卡修复。
   全局端口设置位于渠道页最底部并默认折叠；桌面/手机 Web 时间线已复用生产执行台的 AgentRun、操作组与
   Command 嵌套 disclosure，外部触发者固定显示“你”。缺少设置文件的首次使用默认开启并选择端口 8765，
   但只有当前存在已发布渠道 Bot 才监听；有效持久选择优先，异常配置失败关闭。当前合同见
-  [Feishu Channel v12](../../contracts/feishu-channel-v12.md)，理由见 [V1.37-D05](decisions.md#v1-37-d05)与
-  [V1.37-D08](decisions.md#v1-37-d08)。
+  [Feishu Channel v14](../../contracts/feishu-channel-v14.md)，理由见 [V1.37-D05](decisions.md#v1-37-d05)、
+  [V1.37-D08](decisions.md#v1-37-d08)、[V1.37-D10](decisions.md#v1-37-d10)与 [V1.37-D11](decisions.md#v1-37-d11)。
+- 钉钉渠道页入口已恢复，普通群项目卡增加 Quick Chat；执行中卡改为“显示最近输出 / 打开执行台 / 停止执行”，
+  终态移除停止。它与飞书共用一个全局 LAN 执行台和同一公开投影，打开入口是卡片创建时冻结的直接 URL，
+  最近输出与 exact-run 停止仍由 DingTalk App-scoped Owner `userId` 在 Core 鉴权。Topic/Thread、直接多 Bot 和附件 gate
+  不扩大。两端超长 command 共用 `$` 与首尾截断；飞书在逐 command 原生折叠中展示最多两行安全结果，钉钉继续
+  不展示 command result。新钉钉 Bot 描述前缀统一为 `Rovai AI Teammate`。当前合同见
+  [DingTalk Channel v8](../../contracts/dingtalk-channel-v8.md)，理由见
+  [V1.37-D09](decisions.md#v1-37-d09)、[V1.37-D10](decisions.md#v1-37-d10)与 [V1.37-D11](decisions.md#v1-37-d11)。
+- 钉钉普通群以 callback `chatbotUserId` 在 `atUsers` 中的精确匹配证明 receiving Bot；同消息还 @普通成员不再静默
+  丢弃，多 Rovai App 实际接收仍 fail closed，私聊继续直接 Quick Chat。飞书和钉钉新 Bot 首次发布 completed 后向
+  exact Owner 主动发送私聊欢迎卡，失败不回滚发布，completed 恢复不补发。渠道页使用真实飞书/钉钉品牌图标，未发布
+  身份说明改为“发布后沿用队员身份”。
 - [飞书入站规范化 revision 1](model-context-change-feishu-ingress-normalization.md) 已由开发者二次确认并实施：
   当前正文只冻结 SDK 单 locale 规范化结果，显式引用复用同一 normalizer；Topic
   `parent_id == canonical root_id` 只表达结构父链，不再伪造 ExternalQuote。历史消息与 Context Evidence
-  不回填，当前合同为 [Feishu Channel v12](../../contracts/feishu-channel-v12.md)，理由见
+  不回填，当前合同为 [Feishu Channel v14](../../contracts/feishu-channel-v14.md)，理由见
   [V1.37-D06](decisions.md#v1-37-d06)。
 - 飞书/钉钉 Channel Host 已删除永久 750ms/800ms interval：Core tick 按 provider 返回现有领域表的
   `hasOutstandingWork`，Main 以渠道/AgentRun/Runtime/settlement 事件走合并快路径，仅在仍有工作时保留十分钟
@@ -78,9 +89,9 @@ Applications 安装见[本机交付记录](main-merge-and-daily-app.md)；本轮
 | 范围 | 结论 | 证据或理由 |
 | --- | --- | --- |
 | Version lifecycle | 已更新 | 本概览、实施计划、版本索引；v1.36 冻结为 historical，未验收事实保留 |
-| Decisions | 已更新 | [V1.37-D01](decisions.md#v1-37-d01)、[V1.37-D02](decisions.md#v1-37-d02)、[V1.37-D03](decisions.md#v1-37-d03)、[V1.37-D04](decisions.md#v1-37-d04)、[V1.37-D05](decisions.md#v1-37-d05)、[V1.37-D06](decisions.md#v1-37-d06)、[V1.37-D07](decisions.md#v1-37-d07)、[V1.37-D08](decisions.md#v1-37-d08)与 [CURRENT](../../decisions/CURRENT.md) |
-| Contracts | 已更新 | [Runtime Images v3](../../contracts/runtime-images-v3.md)、[Camp Open Projection v14](../../contracts/camp-open-projection-v14.md)、[Cancellation Settlement v2](../../contracts/cancellation-settlement-v2.md)、[Camp Message Send v19](../../contracts/camp-message-send-v19.md)、[Gather v5](../../contracts/gather-v5.md)、[File Preview v3](../../contracts/file-preview-v3.md)、[Feishu Channel v12](../../contracts/feishu-channel-v12.md)及[Channel Host Maintenance v4](../../contracts/channel-host-maintenance-v4.md) |
-| Architecture | 已更新 | [Runtime 图片](../../architecture/runtime-images.md)、[File Preview](../../architecture/file-preview.md)、[飞书渠道](../../architecture/feishu-channel.md)、[Built-in Tool Runtime](../../architecture/builtin-tool-runtime.md#bootstrap-与-dynamic-context)及架构导航 |
+| Decisions | 已更新 | [V1.37-D01](decisions.md#v1-37-d01)、[V1.37-D02](decisions.md#v1-37-d02)、[V1.37-D03](decisions.md#v1-37-d03)、[V1.37-D04](decisions.md#v1-37-d04)、[V1.37-D05](decisions.md#v1-37-d05)、[V1.37-D06](decisions.md#v1-37-d06)、[V1.37-D07](decisions.md#v1-37-d07)、[V1.37-D08](decisions.md#v1-37-d08)、[V1.37-D09](decisions.md#v1-37-d09)、[V1.37-D10](decisions.md#v1-37-d10)、[V1.37-D11](decisions.md#v1-37-d11)与 [CURRENT](../../decisions/CURRENT.md) |
+| Contracts | 已更新 | [Runtime Images v3](../../contracts/runtime-images-v3.md)、[Camp Open Projection v14](../../contracts/camp-open-projection-v14.md)、[Cancellation Settlement v2](../../contracts/cancellation-settlement-v2.md)、[Camp Message Send v19](../../contracts/camp-message-send-v19.md)、[Gather v5](../../contracts/gather-v5.md)、[File Preview v3](../../contracts/file-preview-v3.md)、[Feishu Channel v14](../../contracts/feishu-channel-v14.md)、[DingTalk Channel v8](../../contracts/dingtalk-channel-v8.md)及[Channel Host Maintenance v4](../../contracts/channel-host-maintenance-v4.md) |
+| Architecture | 已更新 | [Runtime 图片](../../architecture/runtime-images.md)、[File Preview](../../architecture/file-preview.md)、[飞书渠道](../../architecture/feishu-channel.md)、[钉钉渠道](../../architecture/dingtalk-channel.md)、[Built-in Tool Runtime](../../architecture/builtin-tool-runtime.md#bootstrap-与-dynamic-context)及架构导航 |
 | UI | 已更新 | [Camp 会话工作区](../../ui/components/conversation-workspace.md#runtime-图片与消息图片)、[文件预览](../../ui/components/file-preview.md)与[渠道设置](../../ui/components/channel-settings.md)；保留既有双主题 |
 | Runtime Activity | 确认无需更新 | 内部图片观察不进入 Canonical Activity，不修改 classifier/映射或已有公开 Evidence |
 | Runtime compatibility | 已更新 | [兼容性清单](../../runtime-compatibility.md#2026-08-31-runtime-图片观察边界)区分协议 fixture 与真实 Runtime smoke |

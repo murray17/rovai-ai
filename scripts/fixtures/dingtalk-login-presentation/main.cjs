@@ -20,6 +20,8 @@ const snapshot = { schemaVersion: 4, channels: [{ kind: 'dingtalk', displayName:
   pendingBindingCount: 0, bindingIssueCount: 0,
   activeQrAttempt: { kind: 'dingtalk', attemptId: 'legacy-attempt', purpose: 'account_login', agentId: null,
     stage: 'awaiting_scan', qrDataUrl: null, expiresAt: null, detail: '旧钉钉登录' }, activeProvisioning: null }
+let executionWebSettings = { schemaVersion: 1, enabled: false, port: 8765,
+  server: { state: 'disabled', address: null, errorCode: null } }
 let parent, login, qr, finish, refuse, refreshes = 0, attempt = 0
 const sockets = new Set()
 const server = createServer((request, response) => {
@@ -95,6 +97,14 @@ app.whenReady().then(async () => {
     qr = observation.dataUrl
   }
   handle('rovai:channels-get', () => snapshot)
+  handle('rovai:execution-web-settings-get', () => executionWebSettings)
+  handle('rovai:execution-web-settings-set', value => {
+    executionWebSettings = { ...executionWebSettings, enabled: value.enabled, port: value.port,
+      server: { state: value.enabled ? 'ready' : 'disabled',
+        address: value.enabled ? '192.168.1.23' : null, errorCode: null } }
+    parent.webContents.send('rovai:execution-web-settings-changed', executionWebSettings)
+    return executionWebSettings
+  })
   handle('rovai:channels-connect', async kind => {
     assert.equal(kind, 'dingtalk')
     await createLogin()

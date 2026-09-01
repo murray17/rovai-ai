@@ -62,9 +62,9 @@ describe('DingTalk Web Session developer gateway', () => {
     const f = fixture()
     f.request.mockResolvedValueOnce({ unifiedAppId: 'u-app' })
     await f.gateway.execute({ operation: 'app.create', expectedIdentity: owner,
-      values: { appName: '芝士 🧀', description: 'Rovai AI 队员 · 鉴定士；开发测试。' } })
+      values: { appName: '芝士 🧀', description: 'Rovai AI Teammate · 鉴定士；开发测试。' } })
     expect(f.request.mock.calls[0]![1]?.body).toEqual({
-      appType: 2, appName: '芝士', appDesc: 'Rovai AI 队员 鉴定士 开发测试。'
+      appType: 2, appName: '芝士', appDesc: 'Rovai AI Teammate 鉴定士 开发测试。'
     })
     expect(dingTalkApplicationPresentation('惠', 'x')).toEqual({ name: '惠Bot', description: 'Rovai AI Member' })
     expect(dingTalkApplicationPresentation('a'.repeat(25), 'b'.repeat(205)))

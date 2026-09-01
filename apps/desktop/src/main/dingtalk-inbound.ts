@@ -13,6 +13,7 @@ export type DingTalkInboundMessage = {
   body: string
   attachmentSummaries: Array<{ name: string; mediaType: string | null }>
   explicitlyAtBot: boolean
+  chatbotUserId: string | null
   atUsers: Array<{ staffId: string | null; dingtalkId: string | null }>
   quote: {
     senderDisplayName: string
@@ -26,10 +27,6 @@ export function normalizeDingTalkRobotMessage(
   binding: { appKey: string; robotCode: string }
 ): DingTalkInboundMessage {
   const value = object(raw)
-  if (['openConvThreadId', 'openThreadId', 'threadId', 'topicId', 'topicKey']
-    .some((key) => first(value, key) !== null)) {
-    throw new Error('dingtalk_topic_not_supported')
-  }
   // Robot Stream callbacks expose the Owner identity as senderStaffId /
   // senderCorpId. Older payloads used senderStaff for the user, but the Bot's
   // chatbotCorpId is never a substitute for the sender tenant in an external
@@ -45,6 +42,10 @@ export function normalizeDingTalkRobotMessage(
   const group = conversationType === '2'
     || conversationType.toLowerCase() === 'group'
     || typeof value.openConversationId === 'string'
+  if (group && ['openConvThreadId', 'openThreadId', 'threadId', 'topicId', 'topicKey']
+    .some((key) => first(value, key) !== null)) {
+    throw new Error('dingtalk_topic_not_supported')
+  }
   const chatId = group
     ? first(value, 'openConversationId', 'conversationId')
     : first(value, 'conversationId') ?? `${binding.appKey}:${senderStaffId}`
@@ -56,6 +57,10 @@ export function normalizeDingTalkRobotMessage(
     throw new Error('dingtalk_inbound_robot_identity_mismatch')
   }
   const body = messageText(value) ?? summarizeMessage(value)
+  const chatbotUserId = first(value, 'chatbotUserId')
+  if (chatbotUserId && chatbotUserId.length > 512) {
+    throw new Error('dingtalk_inbound_chatbotUserId_invalid')
+  }
   const atUsers = normalizeAtUsers(value.atUsers)
   return {
     provider: 'dingtalk',
@@ -73,6 +78,7 @@ export function normalizeDingTalkRobotMessage(
     body: body.trim(),
     attachmentSummaries: messageAttachmentSummaries(value),
     explicitlyAtBot: !group || value.isInAtList === true || value.isInAtList === 'true',
+    chatbotUserId,
     atUsers,
     quote: normalizeQuote(value)
   }

@@ -11,6 +11,7 @@ import { describe, expect, it, vi } from 'vitest'
 import type { AgentRunExecutionEvidenceView } from '@contracts'
 import {
   ChannelSettingsService,
+  feishuMemberBotWelcomeCard,
   type ChannelHostDependencies
 } from './channel-settings'
 import type {
@@ -178,7 +179,12 @@ function fakeCreateChannel(): NonNullable<ChannelHostDependencies['createChannel
     botIdentity: { openId: 'bot-open-id', name: '审阅员' },
     on: vi.fn(() => () => undefined),
     connect: vi.fn(async () => undefined),
-    disconnect: vi.fn(async () => undefined)
+    disconnect: vi.fn(async () => undefined),
+    rawClient: {
+      im: { v1: { message: {
+        create: vi.fn(async () => ({ code: 0, data: { message_id: 'om_welcome' } }))
+      } } }
+    }
   })) as unknown as NonNullable<ChannelHostDependencies['createChannel']>
 }
 
@@ -685,6 +691,7 @@ describe('channel settings service', () => {
     const credentialStore = memoryCredentialStore()
     const memberBotUpserts: Record<string, unknown>[] = []
     const storedCredentials: Record<string, unknown>[] = []
+    let publicationIntentId = ''
     const provision = vi.fn(async () => ({
       appId: 'cli-normal',
       appSecret: 'normal-secret',
@@ -699,12 +706,15 @@ describe('channel settings service', () => {
       height: 192
     }
     const resolveAvatar = vi.fn(async () => avatarSource)
+    const channels = controlledChannels({
+      'cli-normal': { openId: 'bot-open-id', name: '审阅员' }
+    })
     const service = new ChannelSettingsService({
       credentialStore,
       developerSession: developerSession(owner),
       memberBotProvisioner: { create: provision },
       memberBotAvatarSource: { resolve: resolveAvatar },
-      createChannel: fakeCreateChannel(),
+      createChannel: channels.createChannel,
       core: channelCore((method, rawParams) => {
         if (method === 'channels.feishu.snapshot') {
           return coreSnapshot({ account: connectedAccount(owner) })
@@ -712,6 +722,11 @@ describe('channel settings service', () => {
         if (method === 'members.get') return presentAgent('agent-a', {
           avatarRef: 'rovai://member-avatar/builtin/luoke/v1'
         })
+        if (method === 'channels.feishu.publicationIntent.create') {
+          publicationIntentId = String(
+            (rawParams as { command: Record<string, unknown> }).command.publicationIntentId
+          )
+        }
         if (method === 'channels.feishu.memberBot.upsert') {
           memberBotUpserts.push(
             (rawParams as { command: Record<string, unknown> }).command
@@ -757,6 +772,19 @@ describe('channel settings service', () => {
         botOpenId: 'bot-open-id'
       })
     ])
+    expect(channels.createMessage).toHaveBeenCalledOnce()
+    expect(channels.createMessage).toHaveBeenCalledWith({
+      params: { receive_id_type: 'open_id' },
+      data: {
+        receive_id: 'ou_owner_normal',
+        msg_type: 'interactive',
+        content: JSON.stringify(feishuMemberBotWelcomeCard('审阅员')),
+        uuid: createHash('sha256')
+          .update(`feishu-member-bot-welcome-v1\0${publicationIntentId}`)
+          .digest('hex')
+          .slice(0, 50)
+      }
+    })
 
     expect(provision).toHaveBeenCalledTimes(1)
     const timingLines = diagnosticLines.filter((line) => (
@@ -770,6 +798,54 @@ describe('channel settings service', () => {
     ])
     expect(timingLines.join('\n')).not.toMatch(/cli-normal|normal-secret|ou_owner_normal/)
     info.mockRestore()
+  })
+
+  it('keeps a new Bot publication completed when the welcome card fails', async () => {
+    const owner = identity()
+    const channels = controlledChannels({
+      'cli-welcome-failure': { openId: 'bot-open-id', name: '审阅员' }
+    })
+    channels.createMessage.mockRejectedValueOnce(new Error('feishu_open_api_http_503'))
+    const advancedStates: string[] = []
+    const service = new ChannelSettingsService({
+      credentialStore: memoryCredentialStore(),
+      developerSession: developerSession(owner),
+      memberBotProvisioner: { create: vi.fn(async () => ({
+        appId: 'cli-welcome-failure',
+        appSecret: 'normal-secret',
+        ownerOpenId: 'ou_owner_normal',
+        botOpenId: 'bot-open-id',
+        botDisplayName: '审阅员',
+        publishedVersionId: null
+      })) },
+      createChannel: channels.createChannel,
+      core: channelCore((method, rawParams) => {
+        if (method === 'channels.feishu.snapshot') {
+          return coreSnapshot({ account: connectedAccount(owner) })
+        }
+        if (method === 'members.get') return presentAgent()
+        if (method === 'channels.feishu.publicationIntent.advance') {
+          advancedStates.push(String(
+            (rawParams as { command: Record<string, unknown> }).command.state
+          ))
+        }
+        return { status: 'applied' }
+      })
+    })
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+
+    try {
+      await expect(service.publishMemberBot('agent-a')).resolves.toMatchObject({
+        activeProvisioning: { stage: 'completed', remoteAppId: 'cli-welcome-failure' }
+      })
+      expect(advancedStates.at(-1)).toBe('completed')
+      expect(channels.createMessage).toHaveBeenCalledOnce()
+      expect(warn).toHaveBeenCalledWith(
+        '[rovai] Feishu member Bot welcome failed: feishu_open_api_http_503'
+      )
+    } finally {
+      warn.mockRestore()
+    }
   })
 
   it('keeps fresh activation copy distinct after the new App ID is frozen', async () => {
@@ -854,11 +930,14 @@ describe('channel settings service', () => {
     const advancedStates: string[] = []
     const storedCredentials: Record<string, unknown>[] = []
     let intentCreates = 0
+    const channels = controlledChannels({
+      'cli-frozen': { openId: 'bot-open-id', name: '审阅员' }
+    })
     const service = new ChannelSettingsService({
       credentialStore,
       developerSession: developerSession(owner),
       memberBotProvisioner: { create, reconcile },
-      createChannel: fakeCreateChannel(),
+      createChannel: channels.createChannel,
       core: channelCore((method, rawParams) => {
         if (method === 'channels.feishu.snapshot') {
           return coreSnapshot({
@@ -923,6 +1002,7 @@ describe('channel settings service', () => {
       'completed'
     ])
     expect(storedCredentials).toHaveLength(1)
+    expect(channels.createMessage).not.toHaveBeenCalled()
     expect(reactivated.channels[0].memberBots).toContainEqual(expect.objectContaining({
       agentId: 'agent-a',
       appId: 'cli-frozen',

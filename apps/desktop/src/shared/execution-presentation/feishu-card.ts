@@ -18,9 +18,16 @@ import {
   type GroupedExecutionProgressItem,
   type ToolProgressItem
 } from './tool-grouping'
-import { boundExecutionPreviewLine, createExecutionPublicTextRedactor, executionPublicCommandTitle } from './public-result'
+import {
+  boundExecutionPreviewLine,
+  createExecutionPublicTextRedactor,
+  executionPublicCommandPreview,
+  executionPublicCommandTitle,
+  feishuCardResultPreview
+} from './public-result'
 
-// The plain projection is also used by DingTalk; its contract is unchanged.
+// DingTalk consumes only this result-free plain projection. Command labels share the
+// bounded provider-card preview, while Feishu adds folded public results separately.
 const PLAIN_PAGE_CHAR_BUDGET = 10_000
 const PLAIN_PAGE_OPERATION_BUDGET = 20
 const FEISHU_PAGE_COMMAND_BUDGET = 15
@@ -30,10 +37,15 @@ const FEISHU_LIVE_COMMAND_BUDGET = 10
 const FEISHU_LIVE_BLOCK_BUDGET = 20
 const FEISHU_LIVE_ELEMENT_BUDGET = 30
 const FEISHU_LIVE_BYTE_BUDGET = 16_000
+const FEISHU_STATE_ELEMENT_BUDGET = 50
+const FEISHU_STATE_BYTE_BUDGET = 24_000
 type CardElement = Record<string, unknown>
 type TimelineBlock = { kind: 'text' | 'command'; element: CardElement }
 type TerminalTimeline = { pages: TimelineBlock[][]; commandCount: number }
 type LiveTimelineBlock = { kind: 'text'; body: string } | { kind: 'command'; body: string; status: ActivityStatus }
+type ExecutionRecentOutputEntry =
+  | { kind: 'text'; body: string }
+  | { kind: 'command'; elementId: string; label: string; result: string }
 
 export interface ExecutionConsoleCardOptions {
   pageIndex?: number
@@ -65,82 +77,129 @@ export function feishuExecutionStateCard(
   snapshot: ExecutionConsoleSnapshot,
   options: FeishuExecutionStateCardOptions
 ): Record<string, unknown> {
-  const terminal = isTerminal(snapshot.run.status)
-  const elements: CardElement[] = []
-  if (options.recentOutputVisible) {
-    const recent = recentOutputItems(snapshot)
-    elements.push(...(recent.length
-      ? recent.map((body) => ({ tag: 'markdown', content: body }))
-      : [{ tag: 'markdown', content: '暂无公开执行记录。' }]))
-    elements.push({ tag: 'hr' })
-  }
-  const buttons: CardElement[] = [{
-    tag: 'button',
-    text: {
-      tag: 'plain_text',
-      content: options.recentOutputVisible ? '收起最近输出' : '显示最近输出'
-    },
-    type: 'default',
-    width: 'fill',
-    behaviors: [{
-      type: 'callback',
-      value: {
-        action: 'execution_recent_output',
-        agentRunId: snapshot.agentRunId,
-        visible: !options.recentOutputVisible
-      }
-    }]
-  }]
-  if (options.executionViewUrl) {
-    buttons.push({
+  const terminal = executionStatusIsTerminal(snapshot.run.status)
+  let recent = options.recentOutputVisible ? executionRecentOutputEntries(snapshot) : []
+  const render = (): Record<string, unknown> => {
+    const elements: CardElement[] = []
+    if (options.recentOutputVisible) {
+      elements.push(...(recent.length
+        ? recent.map(recentOutputCardElement)
+        : [{ tag: 'markdown', content: '暂无公开执行记录。' }]))
+      elements.push({ tag: 'hr' })
+    }
+    const buttons: CardElement[] = [{
       tag: 'button',
-      text: { tag: 'plain_text', content: '打开执行台' },
+      text: {
+        tag: 'plain_text',
+        content: options.recentOutputVisible ? '收起最近输出' : '显示最近输出'
+      },
       type: 'default',
-      width: 'fill',
-      behaviors: [{ type: 'open_url', default_url: options.executionViewUrl }]
-    })
-  }
-  if (!terminal) {
-    buttons.push({
-      tag: 'button',
-      text: { tag: 'plain_text', content: '停止执行' },
-      type: 'danger',
       width: 'fill',
       behaviors: [{
         type: 'callback',
-        value: { action: 'execution_stop', agentRunId: snapshot.agentRunId }
+        value: {
+          action: 'execution_recent_output',
+          agentRunId: snapshot.agentRunId,
+          visible: !options.recentOutputVisible
+        }
       }]
+    }]
+    if (options.executionViewUrl) {
+      buttons.push({
+        tag: 'button',
+        text: { tag: 'plain_text', content: '打开执行台' },
+        type: 'default',
+        width: 'fill',
+        behaviors: [{ type: 'open_url', default_url: options.executionViewUrl }]
+      })
+    }
+    if (!terminal) {
+      buttons.push({
+        tag: 'button',
+        text: { tag: 'plain_text', content: '停止执行' },
+        type: 'danger',
+        width: 'fill',
+        behaviors: [{
+          type: 'callback',
+          value: { action: 'execution_stop', agentRunId: snapshot.agentRunId }
+        }]
+      })
+    }
+    elements.push({
+      tag: 'column_set',
+      horizontal_spacing: '8px',
+      columns: buttons.map((button) => ({
+        tag: 'column',
+        width: 'weighted',
+        weight: 1,
+        elements: [button]
+      }))
     })
+    return baseCard(
+      `${boundedPlainText(snapshot.agentDisplayName, 80)} · ${executionStateTitle(snapshot.run)}`,
+      cardTemplate(snapshot.run.status, snapshot.run.waitReason),
+      elements
+    )
   }
-  elements.push({
-    tag: 'column_set',
-    horizontal_spacing: '8px',
-    columns: buttons.map((button) => ({
-      tag: 'column',
-      width: 'weighted',
-      weight: 1,
-      elements: [button]
-    }))
-  })
-  return baseCard(
-    `${boundedPlainText(snapshot.agentDisplayName, 80)} · ${feishuExecutionStateTitle(snapshot.run)}`,
-    cardTemplate(snapshot.run.status, snapshot.run.waitReason),
-    elements
-  )
+  let card = render()
+  while (recent.length && (
+    measureCardBytes(card) > FEISHU_STATE_BYTE_BUDGET
+    || countCardElements((card.body as { elements: CardElement[] }).elements) > FEISHU_STATE_ELEMENT_BUDGET
+  )) {
+    recent = recent.slice(1)
+    card = render()
+  }
+  return card
 }
 
-function recentOutputItems(snapshot: ExecutionConsoleSnapshot): string[] {
+export function executionRecentOutputItems(snapshot: ExecutionConsoleSnapshot): string[] {
+  return executionRecentOutputEntries(snapshot).map((item) => item.kind === 'text'
+    ? item.body
+    : item.label.replace(/([\\`*_[\]<>])/gu, '\\$1'))
+}
+
+function executionRecentOutputEntries(snapshot: ExecutionConsoleSnapshot): ExecutionRecentOutputEntry[] {
   const redact = createExecutionPublicTextRedactor(snapshot.evidence, snapshot.agentRunId)
-  const items = progressItems(snapshot, true).flatMap((item): string[] => {
+  const items = progressItems(snapshot, true).flatMap((item, index): ExecutionRecentOutputEntry[] => {
     if (item.kind !== 'tool' && item.kind !== 'narration') return []
-    const body = item.kind === 'tool'
-      ? commandLine(item.step, snapshot, redact)
-      : redact(item.body)
-    return body.trim() ? [body.trim()] : []
+    if (item.kind === 'narration') {
+      const body = redact(item.body).trim()
+      return body ? [{ kind: 'text', body }] : []
+    }
+    const status = activityStatusForAgentRun(item.step.status, snapshot.run.status)
+    const command = executionPublicCommandPreview(item.step, redact)
+    if (!command) return []
+    return [{
+      kind: 'command',
+      elementId: `recent_command_${index}`,
+      label: `${statusIcon(status)} ${command}`,
+      result: feishuCardResultPreview(item.step.publicResult)
+        ?? (status === 'running' ? '（正在执行，暂无公开结果）' : '（无可展示结果）')
+    }]
   })
   const output = redact(snapshot.publicOutput?.trim() ?? '')
-  if (output && !items.some((item) => item === output)) items.push(output)
+  if (output && !items.some((item) => item.kind === 'text' && item.body === output)) {
+    items.push({ kind: 'text', body: output })
+  }
   return items.slice(-30)
+}
+
+function recentOutputCardElement(item: ExecutionRecentOutputEntry): CardElement {
+  if (item.kind === 'text') return { tag: 'markdown', content: item.body }
+  return {
+    tag: 'collapsible_panel',
+    element_id: item.elementId,
+    expanded: false,
+    header: {
+      title: { tag: 'plain_text', content: item.label },
+      icon: { tag: 'standard_icon', token: 'down-small-ccm_outlined', size: '16px 16px' },
+      icon_position: 'right',
+      icon_expanded_angle: -180
+    },
+    vertical_spacing: '8px',
+    padding: '8px 0px 8px 0px',
+    elements: [resultFrame(item.result)]
+  }
 }
 
 export interface ExecutionConsolePublicPage {
@@ -162,7 +221,7 @@ export function executionConsoleCard(
   snapshot: ExecutionConsoleSnapshot,
   options?: ExecutionConsoleCardOptions
 ): Record<string, unknown> {
-  if (!isTerminal(snapshot.run.status)) return renderCompactLiveExecutionCard(snapshot)
+  if (!executionStatusIsTerminal(snapshot.run.status)) return renderCompactLiveExecutionCard(snapshot)
   return renderTerminalTimelineCard(snapshot, options)
 }
 
@@ -183,14 +242,14 @@ function executionPages(
 }
 
 export function executionConsolePageCount(snapshot: ExecutionConsoleSnapshot): number {
-  return isTerminal(snapshot.run.status) ? paginateTerminalTimeline(snapshot).pages.length : 1
+  return executionStatusIsTerminal(snapshot.run.status) ? paginateTerminalTimeline(snapshot).pages.length : 1
 }
 
 export function executionConsolePublicPage(
   snapshot: ExecutionConsoleSnapshot,
   requestedPageIndex = 0
 ): ExecutionConsolePublicPage {
-  if (!isTerminal(snapshot.run.status)) {
+  if (!executionStatusIsTerminal(snapshot.run.status)) {
     const status = agentRunPresentation(snapshot.run)
     return {
       title: `${boundedPlainText(snapshot.agentDisplayName, 80)} · ${status.label}`,
@@ -681,7 +740,7 @@ function terminalTitle(run: ExecutionConsoleSnapshot['run']): string {
   return agentRunPresentation(run).label
 }
 
-function feishuExecutionStateTitle(run: ExecutionConsoleSnapshot['run']): string {
+export function executionStateTitle(run: ExecutionConsoleSnapshot['run']): string {
   if (run.status === 'cancelled') return '已取消'
   return terminalTitle(run)
 }
@@ -708,7 +767,7 @@ function cardTemplate(
   return 'grey'
 }
 
-function isTerminal(status: AgentRunView['status']): boolean {
+export function executionStatusIsTerminal(status: AgentRunView['status']): boolean {
   return status === 'succeeded' || status === 'failed' || status === 'cancelled'
 }
 

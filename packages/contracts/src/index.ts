@@ -3267,6 +3267,8 @@ export type CoreMethod =
   | 'channels.dingtalk.inbound.finalize'
   | 'channels.dingtalk.host.tick'
   | 'channels.dingtalk.executionConsole.page.authorize'
+  | 'channels.dingtalk.executionConsole.recentOutput.authorize'
+  | 'channels.dingtalk.executionConsole.agentRun.cancel'
   | 'channels.dingtalk.deliveries.settle'
   | 'channels.membership.add'
   | 'channels.membership.remove'

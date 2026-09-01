@@ -235,3 +235,96 @@ one-shot watchdog；清空后完全休眠。终态用独立 one-shot 跨过 900m
 - 拒绝把损坏配置也回退为开启：无法区分用户意图与磁盘异常。拒绝迁移所有既有 `false`：会覆盖明确选择。
   拒绝在没有已发布 Bot 时预热端口：没有可签发的入口却扩大监听面。拒绝端口冲突后自动漂移：会破坏固定 URL 与
   旧卡可预测性。
+
+<a id="v1-37-d09"></a>
+## V1.37-D09：钉钉复用飞书的状态卡与单一 LAN 执行台，不补 Topic 或第二套 Web 服务
+
+### 背景
+
+钉钉已有账号、独立 Bot、Stream、Owner、普通群 roster、统一 admission、FIFO 和 Outbox，但当前渠道页隐藏入口，
+执行卡仍把 live 正文流入 AI 卡并在终态做 Owner 分页。用户已明确以一个已发布 Bot 重开真实验收，并要求执行中固定为
+“显示最近输出 / 打开执行台 / 停止执行”三个按钮。另起 DingTalk H5、每 Run 端口或点击跳转服务会复制飞书已经收口的
+公开投影、Token、SSE 和生命周期；把 URL 也改成 callback 又会重新引入 Owner 私聊、动态地址和消息幂等。
+
+### 决定
+
+渠道页恢复飞书/钉钉两个真实 Provider Tab。钉钉普通群项目卡增加 Quick Chat；Topic/Thread 继续 fail closed，直接多 Bot
+和附件 gate 不扩大。执行卡采用与飞书相同的状态入口语义：最近输出与 exact-run 停止为 Owner callback，打开执行台为
+卡片创建时冻结的直接 URL action。飞书和钉钉共用 Desktop 唯一 `ExecutionViewService`、全局端口、内存 Token、
+immutable Camp/Agent/focus-history scope 与 SSE；Core Web snapshot 只接受冻结 Channel conversation 所属的 closed provider set。
+
+Main 为每个 DingTalk Run 保存临时 URL、展开状态、最新 source 和摘要，所有 delivery/callback/终态更新按 Run 串行。
+停止使用 callback message identity 的稳定命令 ID，DingTalk Host alias 进入同一个 provider-neutral Core exact-run command；
+成功后立即把当前卡投影为“已取消”，Outbox 仍负责最终恢复。最近输出最多 30 条公开正文和安全 command，不含 result；
+收起状态不因 Evidence 增长更新卡。字段与验证边界由
+[DingTalk Channel v6](../../contracts/dingtalk-channel-v6.md)拥有。
+
+### 后果与替代方案
+
+- 获得固定 URL 且能访问本机局域网的人可以读冻结 scope；它不识别 DingTalk 点击人，IP/端口变化不修旧卡，Main 重启
+  使 Token 失效。这与飞书当前 LAN HTTP 取舍一致，不把 HTTP 描述成主动攻击防护。
+- DingTalk AI 模板负责 URL/Callback 按钮的跨端表现；真实 Mac/手机必须验证 RFC1918 HTTP、fragment、operator userId、
+  SSE 与停止终态。测试未完成前只记录实现就绪，不声称 packaged/真实租户通过。
+- 拒绝保留旧 streaming/终态分页：它与“纯状态入口”冲突且持续制造卡片更新。拒绝 DingTalk 专属 Web 服务或 WebSocket：
+  同一公开 projection 和 SSE 已满足需求。拒绝为了体验表面对齐实现 Topic fallback、附件或同消息多 Bot：这些能力缺少
+  独立身份、下载/投递和 canonical target 证据，风险与三个按钮无关。
+
+<a id="v1-37-d10"></a>
+## V1.37-D10：共享紧凑 command 标签，但结果只进入飞书原生折叠面板
+
+### 背景
+
+真实钉钉卡片已经能呈现三个入口，但内置 AI 模板只提供整个 `staticMsgContent` 区域，无法像飞书 Card 2.0 一样为每条
+command 提供原生折叠。把 command result 全量平铺到钉钉会显著拉长群卡；完全不在飞书最近输出中提供结果，又浪费了
+已经验证的原生 `collapsible_panel`。两端还会遇到超长 shell command 挤占卡片宽度的问题。
+
+### 决定
+
+飞书最近输出中的每条 command 使用默认收起的原生面板，面板内只放既有安全 `publicResult` 的最多两行紧凑预览；
+钉钉继续使用整个最近输出区，不展示 command result，也不模拟逐条折叠。两端共用先 redaction、后按约 72 个终端显示列
+截断的 command 标签，显示状态符号和 `$`，保留命令开头与目标尾部。完整安全 command/result 继续由只读 Web 执行台
+承担。新发布钉钉 Bot 的默认描述同时统一为 `Rovai AI Teammate · <teamRole>`，但不修改或重建已有远端应用。
+
+当前字段与预算由 [Feishu Channel v13](../../contracts/feishu-channel-v13.md)和
+[DingTalk Channel v7](../../contracts/dingtalk-channel-v7.md)拥有。
+
+### 后果与替代方案
+
+- 飞书 Owner 展开的是群卡共享内容，不是私有结果面；因此只允许既有公开结果投影，不能从 raw Evidence、输入或本地详情
+  回退。Card 2.0 继续受 50-element/24 KiB 预算约束，超限时淘汰最旧最近项。
+- 钉钉与飞书的“最近输出”不追求组件完全同形，但保持相同入口、顺序、command 文案和安全范围；平台能力差异只落在
+  结果 disclosure，不复制自定义 H5 卡片或 callback 状态机。
+- 拒绝在钉钉平铺两行 result：不可折叠的结果会让高频命令重新变成执行日志流。拒绝按像素或设备型号动态测量：卡片
+  字体和宽度由客户端控制，近似显示列更稳定，也不需要增加远端探测。
+
+<a id="v1-37-d11"></a>
+## V1.37-D11：钉钉群目标使用 Bot 身份证明，首次发布发送非阻断欢迎卡
+
+### 背景
+
+钉钉普通群 callback 的 `atUsers` 同时包含 receiving Bot 和其他被 @成员；旧入口把“恰好一个 atUsers”当成单 Bot
+证明，导致合法群消息在进入 Core 前静默丢弃。钉钉回调同时提供 `chatbotUserId`，可与 `atUsers[].dingtalkId` 精确匹配。
+另一个体验缺口是队员发布完成后，Owner 只能从 Rovai 设置页判断是否可用，不知道渠道私聊已经就绪。飞书和钉钉在发布
+阶段都已经确认 exact Owner 平台身份，可以主动发卡，但为一次欢迎通知增加持久 Outbox 会复制 publication 状态。
+
+### 决定
+
+钉钉普通群以 `isInAtList=true` 且 `chatbotUserId` 出现在 `atUsers[].dingtalkId` 作为当前 receiving Bot 的 canonical
+证明；其他普通成员 mention 可以共存，不形成 Agent target。多个 Rovai App 的独立 Stream 实际接收同一消息时仍在
+3 秒窗口后整条 fail closed。私聊保持按 receiving App 直接创建/复用 Quick Chat，不增加项目选择。
+
+飞书和钉钉的新 Bot 在 publication durable completed 后，使用刚确认的 Owner `openId/userId` 主动发送一张无操作私聊
+欢迎卡，文案说明可以直接私聊、入群后需 @Bot。消息 ID 从 publication intent 稳定派生；失败只记录脱敏诊断，不回滚
+发布。completed Bot 的启动、凭据恢复或连接核对不补发，也不新增欢迎消息 Outbox/receipt。渠道页 Provider 标识改用本地
+打包的真实品牌图标，未发布身份说明收敛为“发布后沿用队员身份”。
+
+当前字段与行为由 [Feishu Channel v14](../../contracts/feishu-channel-v14.md)、
+[DingTalk Channel v8](../../contracts/dingtalk-channel-v8.md)、[飞书渠道架构](../../architecture/feishu-channel.md)、
+[钉钉渠道架构](../../architecture/dingtalk-channel.md)和[渠道设置](../../ui/components/channel-settings.md)拥有。
+
+### 后果与替代方案
+
+- 同时 @Bot 与普通成员的钉钉群消息恢复响应；缺失或不匹配 Bot identity 继续 fail closed，普通成员 ID 不进入模型或日志。
+- 欢迎卡是首次发布的可用性提示，不是业务状态真源；极端网络失败可能缺失，但不会把已经可用的 Bot 标成失败或重复建 App。
+- 拒绝只放宽为 `atUsers.length >= 1`：它无法证明 receiving Bot。拒绝让私聊也选项目：用户已确认私聊继续 Quick Chat。
+  拒绝为欢迎卡增加数据库状态机：它的可靠性价值不足以复制 publication 与 provider 去重事实。

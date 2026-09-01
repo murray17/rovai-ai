@@ -3,10 +3,15 @@ import type { CoreClient } from './core-client'
 import {
   DINGTALK_REQUIRED_SCOPE_VALUES,
   DingTalkChannelSettingsService,
+  type DingTalkExecutionConsoleSource,
   type DingTalkChannelHostDependencies,
+  dingtalkCardCallbackValue,
+  dingtalkMemberBotWelcomeCardParams,
   dingtalkOutTrackId,
+  executionCardParams,
   hasCanonicalSingleDingTalkBotTarget,
   presentDingTalkAppIds,
+  projectCardParams,
   selectSingleDingTalkInboundObservation,
   shouldAdvanceDingTalkPublicationStep
 } from './dingtalk-channel-settings'
@@ -15,7 +20,7 @@ import type {
   DingTalkDeveloperSessionService
 } from './dingtalk-developer-session'
 import type { DingTalkAppCredential } from './channel-credential-store'
-import { DingTalkOpenApiClient } from './dingtalk-open-api'
+import { DingTalkOpenApiClient, encodeDingTalkCardActionId } from './dingtalk-open-api'
 import { DingTalkStreamRegistry } from './dingtalk-stream-registry'
 import { DingTalkProvisioningError } from './dingtalk-member-bot-provisioner'
 
@@ -223,6 +228,7 @@ describe('DingTalk channel account connection', () => {
     await expect(fixture.service.publish('agent-a')).resolves.toBeUndefined()
 
     expect(fixture.provision).toHaveBeenCalledWith(expect.objectContaining({
+      description: 'Rovai AI Teammate · 鉴定士',
       frozen: {
         unifiedAppId: 'u-app-a', appKey: 'ding-app-a',
         robotCode: 'robot-a', versionId: 'version-a'
@@ -235,6 +241,7 @@ describe('DingTalk channel account connection', () => {
     })
     expect(fixture.streamStart).toHaveBeenCalledTimes(1)
     expect(fixture.verifyCard).toHaveBeenCalledTimes(1)
+    expect(fixture.welcomeCard).not.toHaveBeenCalled()
     expect((await fixture.service.get()).activeProvisioning).toMatchObject({
       stage: 'completed', remoteAppId: 'u-app-a', failureCode: null
     })
@@ -252,6 +259,40 @@ describe('DingTalk channel account connection', () => {
     expect(fixture.commands).not.toContain('channels.dingtalk.publicationIntent.storeCredential')
     expect(fixture.streamStart).toHaveBeenCalledTimes(1)
     expect(fixture.verifyCard).toHaveBeenCalledTimes(1)
+  })
+
+  it('sends one private welcome card after a new Bot publication completes', async () => {
+    const fixture = completedBotFixture({ beforeApp: 'created' })
+
+    await fixture.service.publish('agent-a')
+
+    expect(fixture.welcomeCard).toHaveBeenCalledOnce()
+    expect(fixture.welcomeCard).toHaveBeenCalledWith({
+      outTrackId: dingtalkOutTrackId('welcome', 'intent-a'),
+      openSpaceId: 'dtv1.card//IM_ROBOT.owner-a',
+      robotCode: 'robot-a',
+      space: 'p2p',
+      cardParamMap: dingtalkMemberBotWelcomeCardParams('芝士')
+    })
+    expect(fixture.intent()).toMatchObject({ state: 'completed' })
+  })
+
+  it('keeps a new Bot publication completed when the welcome card fails', async () => {
+    const fixture = completedBotFixture({ beforeApp: 'created' })
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    fixture.welcomeCard.mockRejectedValueOnce(new Error('dingtalk_open_api_http_503'))
+
+    try {
+      await expect(fixture.service.publish('agent-a')).resolves.toBeUndefined()
+
+      expect(fixture.welcomeCard).toHaveBeenCalledOnce()
+      expect(fixture.intent()).toMatchObject({ state: 'completed', lastCompletedStep: 'completed' })
+      expect(warn).toHaveBeenCalledWith(
+        '[rovai] DingTalk member Bot welcome failed: dingtalk_open_api_http_503'
+      )
+    } finally {
+      warn.mockRestore()
+    }
   })
 
   it.each(['remote_read', 'storage'] as const)(
@@ -331,6 +372,109 @@ describe('DingTalk channel account connection', () => {
     )
   })
 
+  it('renders the active execution card as three state actions without elapsed copy', () => {
+    const params = executionCardParams(executionSource('running'), {
+      executionViewUrl: 'http://192.168.1.23:8765/execution/run-1#t=grant',
+      recentOutputVisible: false
+    })
+    const system = JSON.parse(params.sys_full_json_obj) as {
+      msgButtons: Array<{ text: string; request?: boolean; url?: string }>
+    }
+
+    expect(params.msgTitle).toBe('爱丽丝 · 执行中')
+    expect(params.staticMsgContent).toBe('')
+    expect(system.msgButtons.map((button) => button.text)).toEqual([
+      '显示最近输出', '打开执行台', '停止执行'
+    ])
+    expect(system.msgButtons.map((button) => button.request === true ? 'callback' : 'url')).toEqual([
+      'callback', 'url', 'callback'
+    ])
+    expect(JSON.stringify(params)).not.toMatch(/秒|用时/u)
+  })
+
+  it('removes stop from terminal cards and keeps recent output as an Owner callback', () => {
+    const source = executionSource('cancelled')
+    source.publicOutput = '最终公开输出'
+    const params = executionCardParams(source, {
+      executionViewUrl: 'http://192.168.1.23:8765/execution/run-1#t=grant',
+      recentOutputVisible: true
+    })
+    const system = JSON.parse(params.sys_full_json_obj) as {
+      order: string[]
+      msgButtons: Array<{ text: string }>
+    }
+
+    expect(params.msgTitle).toBe('爱丽丝 · 已取消')
+    expect(params.staticMsgContent).toContain('最终公开输出')
+    expect(system.order).toEqual(['msgTitle', 'staticMsgContent', 'msgButtons'])
+    expect(system.msgButtons.map((button) => button.text)).toEqual([
+      '收起最近输出', '打开执行台'
+    ])
+  })
+
+  it('truncates long command labels and never includes command results in DingTalk', () => {
+    const source = executionSource('succeeded')
+    source.evidence = [{
+      id: 'evidence-1', agentRunId: 'run-1', executionEpoch: 1, sequence: 1,
+      eventType: 'activity.completed', kind: 'command', phase: 'completed',
+      payload: {
+        item: {
+          type: 'commandExecution',
+          command: `pnpm vitest ${'apps/desktop/really-long-directory/'.repeat(4)}final.test.ts`,
+          status: 'completed',
+          aggregatedOutput: 'must-not-show-command-result'
+        }
+      },
+      contentBlobId: null, contentByteCount: 0, isTruncated: false,
+      occurredAt: '2026-09-01T00:00:01Z', canonical: null
+    }]
+    const params = executionCardParams(source, {
+      executionViewUrl: null,
+      recentOutputVisible: true
+    })
+
+    expect(params.staticMsgContent).toMatch(/^✓ \$ pnpm vitest /u)
+    expect(params.staticMsgContent).toContain('…')
+    expect(params.staticMsgContent).toMatch(/final\.test\.ts$/u)
+    expect(params.staticMsgContent).not.toContain('must-not-show-command-result')
+  })
+
+  it('reads an encoded action from the official nested card callback content', () => {
+    const value = {
+      action: 'execution_recent_output',
+      agentRunId: 'run-1',
+      visible: true
+    }
+
+    expect(dingtalkCardCallbackValue({
+      outTrackId: 'card-1',
+      content: JSON.stringify({
+        cardPrivateData: {
+          actionIds: [encodeDingTalkCardActionId(value)],
+          params: {}
+        }
+      })
+    })).toEqual(value)
+  })
+
+  it('offers Quick Chat even when the DingTalk project catalog is empty', () => {
+    const params = projectCardParams({
+      pendingBindingId: 'pending-1', expectedVersion: 1, nonce: 'nonce-1', projectOptions: []
+    }, false)
+    const system = JSON.parse(params.sys_full_json_obj) as {
+      msgButtons: Array<{ text: string; id: string }>
+    }
+
+    expect(system.msgButtons.map((button) => button.text)).toEqual([
+      '开始快速对话', '刷新项目'
+    ])
+    expect(dingtalkCardCallbackValue({
+      content: JSON.stringify({
+        cardPrivateData: { actionIds: [system.msgButtons[0].id], params: {} }
+      })
+    })).toMatchObject({ action: 'quick_chat' })
+  })
+
   it('fails closed when one DingTalk message reaches multiple managed Bots', () => {
     const first = { message: { appId: 'ding-app-a' }, agentId: 'agent-a' }
     const retry = { message: { appId: 'ding-app-a' }, agentId: 'agent-a' }
@@ -344,20 +488,34 @@ describe('DingTalk channel account connection', () => {
   it('requires canonical atUsers proof for a direct group target', () => {
     expect(hasCanonicalSingleDingTalkBotTarget({
       conversationKind: 'group', explicitlyAtBot: true,
-      atUsers: [{ staffId: null, dingtalkId: 'ding-app-a' }]
+      chatbotUserId: 'ding-bot-user-a',
+      atUsers: [{ staffId: null, dingtalkId: 'ding-bot-user-a' }]
     })).toBe(true)
     expect(hasCanonicalSingleDingTalkBotTarget({
-      conversationKind: 'group', explicitlyAtBot: true, atUsers: []
+      conversationKind: 'group', explicitlyAtBot: true,
+      chatbotUserId: 'ding-bot-user-a', atUsers: []
     })).toBe(false)
     expect(hasCanonicalSingleDingTalkBotTarget({
       conversationKind: 'group', explicitlyAtBot: true,
-      atUsers: [
-        { staffId: null, dingtalkId: 'ding-app-a' },
-        { staffId: null, dingtalkId: 'ding-app-b' }
-      ]
+      chatbotUserId: 'ding-bot-user-a',
+      atUsers: [{ staffId: null, dingtalkId: 'ding-other-bot-user' }]
     })).toBe(false)
     expect(hasCanonicalSingleDingTalkBotTarget({
-      conversationKind: 'p2p', explicitlyAtBot: true, atUsers: []
+      conversationKind: 'group', explicitlyAtBot: true,
+      chatbotUserId: null,
+      atUsers: [{ staffId: null, dingtalkId: 'ding-bot-user-a' }]
+    })).toBe(false)
+    expect(hasCanonicalSingleDingTalkBotTarget({
+      conversationKind: 'group', explicitlyAtBot: true,
+      chatbotUserId: 'ding-bot-user-a',
+      atUsers: [
+        { staffId: null, dingtalkId: 'ding-bot-user-a' },
+        { staffId: 'colleague-user', dingtalkId: null }
+      ]
+    })).toBe(true)
+    expect(hasCanonicalSingleDingTalkBotTarget({
+      conversationKind: 'p2p', explicitlyAtBot: true,
+      chatbotUserId: null, atUsers: []
     })).toBe(true)
   })
 
@@ -560,7 +718,8 @@ function completedBotFixture(options: {
       }
       if (method === 'channels.dingtalk.publicationIntent.storeCredential') {
         if (rejectedWrites-- > 0) return { status: 'rejected', code: 'channel_storage_fixture_failed' }
-        expect(command.credentialRef).toBe(bot.credentialRef)
+        if (options.beforeApp) expect(command.credentialRef).toMatch(/^dingtalk-/u)
+        else expect(command.credentialRef).toBe(bot.credentialRef)
         expect(command.remoteAppId).toBe(bot.appKey)
         expect(command.expectedIntentVersion).toBe(intent.version)
         credential = { appKey: bot.appKey, ...command.credential as Omit<DingTalkAppCredential, 'appKey'> }
@@ -583,6 +742,7 @@ function completedBotFixture(options: {
   const streamStart = vi.spyOn(stream, 'start').mockResolvedValue(undefined)
   const api = new DingTalkOpenApiClient({ appKey: bot.appKey, appSecret: 'fixture-recovered-secret' })
   const verifyCard = vi.spyOn(api, 'createCardInstance').mockResolvedValue(undefined)
+  const welcomeCard = vi.spyOn(api, 'createAndDeliverCard').mockResolvedValue('rv-welcome')
   const provision = vi.fn<DingTalkChannelHostDependencies['provisioner']['create']>(async (input) => {
     const facts = {
       unifiedAppId: bot.unifiedAppId, appKey: bot.appKey,
@@ -618,7 +778,7 @@ function completedBotFixture(options: {
     streamRegistry: stream,
     createApiClient: () => api
   })
-  return { service, core, commands, provision, streamStart, verifyCard, developerSession,
+  return { service, core, commands, provision, streamStart, verifyCard, welcomeCard, developerSession,
     credential: () => credential, intent: () => intent }
 }
 
@@ -638,5 +798,28 @@ function identity(corpId: string, userId: string): DingTalkDeveloperIdentity {
     corpName: corpId,
     oauthProfileRef: `profile-${corpId}`,
     expiresAt: null
+  }
+}
+
+function executionSource(
+  status: DingTalkExecutionConsoleSource['run']['status']
+): DingTalkExecutionConsoleSource {
+  return {
+    sequence: 1,
+    agentRunId: 'run-1',
+    campId: 'camp-1',
+    campTurnId: 'turn-1',
+    channelConversationId: 'channel-conversation-1',
+    agentId: 'agent-alice',
+    agentDisplayName: '爱丽丝',
+    run: { status, waitReason: null, terminalReasonCode: null },
+    runCreatedAt: '2026-09-01T00:00:00Z',
+    evidence: [],
+    publicOutput: null,
+    startedAt: '2026-09-01T00:00:01Z',
+    terminalAt: status === 'running' ? null : '2026-09-01T00:00:02Z',
+    targetAppId: 'ding-app-alice',
+    externalMessageId: 'card-run-1',
+    state: status === 'running' ? 'active' : 'terminal_sealed'
   }
 }

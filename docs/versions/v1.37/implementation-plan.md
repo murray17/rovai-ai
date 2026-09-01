@@ -21,7 +21,12 @@ last_updated: 2026-09-01
 - [x] 同 Run 的已发送同摘要 Blob 图片展示去重，底层数据不删除；统一 Tool/发送图片内容列与原比例图片框。
 - [x] 两种图片均去除文件名、来源/数量标题、projection 说明与系统打开/Finder 菜单，只保留大图预览和关闭。
 - [x] Renderer 进程内缓存已解码 Blob payload；附件切回不重读，Runtime 切回先显示再后台刷新，Tile 独立释放 URL。
-- [x] 钉钉完整产品链路未验收，合入 main 前隐藏渠道页整个入口；保留实现、已有数据及独立登录组件回归。
+- [x] 初始合入时因完整产品链路未验收而隐藏钉钉入口；保留实现、已有数据及独立登录组件回归。
+- [x] 用户后续以已发布的“爱丽丝”Bot 重开钉钉范围：恢复渠道入口，增加普通群 Quick Chat、三入口状态卡、
+  共享 LAN 执行台及 DingTalk Owner recent/exact-run cancel；Topic、直接多 Bot 和附件 gate 不扩大。
+- [x] 飞书最近输出的每条 command 改为默认收起的原生面板，最多展示两行既有安全结果；钉钉继续不展示
+  command result。两端共用 `$`、约 72 显示列的首尾截断；新钉钉 Bot 描述前缀统一为 `Rovai AI Teammate`。
+- [ ] 使用“爱丽丝”完成钉钉桌面端/手机端真实租户验收；本项不由本地 fixture 或 Core 测试替代。
 - [x] 具体文件点击直接创建临时只读 Preview handle；工作区外文件、五类来源与 symlink 不再自动升级 Root Grant；
   HTML/Markdown 资源限定文档目录并随 Tab 释放，Renderer 删除 `authorization_required → chooseAuthorizedRoot()`。
 - [x] 开发者单独确认 revision 1 后实施精确文件帮助与飞书新 Bootstrap 提示；静态资源与其他上下文轴不变。
@@ -200,6 +205,8 @@ Antigravity 原生生成、TRAE/Copilot 专用图片结果已接入，六种 Run
 
 ### 2026-09-01 渠道入口发布范围
 
+> 本节记录初始发布收敛，已由下方“钉钉三入口状态卡与公开入口”和 V1.37-D09 取代。
+
 - 按用户要求，渠道页只保留飞书；钉钉 Tab、计数、连接/发布区域与残留登录弹窗均隐藏。
   旧选中值回退到飞书，只有钉钉的 Snapshot 显示正常空态。没有删除钉钉源码、账号、凭据或 Bot，
   也没有改变 Main/Core 后台生命周期；钉钉完整产品链路仍未验收，不作为本次公开入口交付。
@@ -291,7 +298,8 @@ Antigravity 原生生成、TRAE/Copilot 专用图片结果已接入，六种 Run
 - `execution-view-service.test.ts` 覆盖精确设置 schema、缺失文件默认开启、持久关闭选择优先、损坏/不可读配置
   fail-closed、无已发布 Bot 不解析网卡/不监听、Bot 发布后自动尝试和退出 published 后撤销、RFC1918 地址选择、真实本机 HTTP、
   fragment Token、不可变 Core scope、安全响应头、页面脚本语法及端口冲突后不漂移；服务不可用时不签发 URL。
-- `feishu-card.test.ts` 覆盖默认卡无正文/command/进度，打开入口只含 `open_url`，最近输出最多 30 条且无结果，
+- `feishu-card.test.ts` 覆盖默认卡无正文/command/进度，打开入口只含 `open_url`，最近输出最多 30 个逻辑项；command
+  默认收起、只展示最多两行安全结果，并在 50-element/24 KiB 预算内从最旧项淘汰；
   终态隐藏停止；`channel-settings.test.ts` 覆盖 URL 只在首次 send 签发、后续 update/Main 恢复不重签，以及 callback
   Owner/exact-message/per-card 串行边界；停止 callback 的 Applied 结果会立即返回“已取消”终态卡，不再只返回 Toast。
 - Core 渠道生命周期 fixture 覆盖 Web scope 的 Camp/Agent/App/历史上界与错误 App 拒绝；独立 exact-run fixture
@@ -403,3 +411,55 @@ Antigravity 原生生成、TRAE/Copilot 专用图片结果已接入，六种 Run
   全部通过。`pnpm typecheck`、`pnpm build:desktop`、Clippy、Rust fmt、三道文档门禁及 `git diff --check`
   通过，CI 文档门禁固定 base 为 `9ae5e250bdd7e25e601ce89ca9396bced380949c`。未启动日常 App、Core、
   Runtime 或真实渠道连接，未访问日常 SQLite，也未发送渠道消息。
+
+### 2026-09-01 钉钉三入口状态卡与公开入口
+
+- 渠道页恢复钉钉 Provider Tab 与同一 QR Dialog；已有账号、发布 Bot、App ID 和管理链接按真实 snapshot 呈现，
+  不创建第二套设置页。全局局域网执行台仍只在渠道页最底部出现一次并默认折叠。
+- 钉钉项目卡在最多六个最近项目后增加“开始快速对话 / 刷新项目”，Core 只允许普通群 `quick_chat`，创建目录后
+  原子提升原消息；Topic 继续拒绝。既有 roster owner 改为走 Quick Chat，证明成员来源和 FIFO 不因无项目绑定改变。
+- DingTalk Main 删除旧 live streaming/终态分页卡，增加 per-Run 临时状态和串行队列。新卡 ready 时只签发一次
+  `executionViewUrl`；执行中为三个按钮，终态两个，默认无正文和 elapsed 文案；展开只显示最后 30 条公开正文与
+  安全 command。停止使用稳定 callback 命令 ID，成功后即时更新为“已取消”。
+- Core Web scope 接受冻结 conversation 的 Feishu/DingTalk closed set；最近输出与 exact-run cancel 新增
+  `dingtalk-channel-host` typed alias，仍复用同一 Owner/App/message/run 权威。共享 `ExecutionViewService`、端口、
+  Token scope、公开 redactor/result/file projection 与 SSE 均未复制。
+- 本地验证已通过 `pnpm test`（135 个 Vitest 文件 / 1401 项、Node 221 项中 220 通过且 1 项 Windows 条件跳过）、
+  `pnpm test:rust:pr`（Library 474、CLI 32、slow 297 项）、TypeScript、Desktop production build、Rust fmt/check/clippy、
+  三道文档门禁与 `git diff --check`。DingTalk 登录隔离验收与 Desktop bridge 也通过，实图覆盖双主题、QR、原生企业选择页、
+  200% 缩放和 Escape。
+- Applications 日常安装版随后使用已发布的“爱丽丝”完成桌面端真实私聊：真实 p2p 回调携带
+  `openConvThreadId`，旧归一化错误地按 Topic 拒绝；现在先按 `conversationType` 判定私聊/群聊，只在普通群出现
+  Topic identity 时拒绝。回归先复现失败，修复后真实 inbound 已 finalized、对应 turn completed，状态卡和最终回复均成功投递。
+- 第一张真实终态卡虽被 API 接受，但按钮区为空。对照钉钉官方 Stream SDK 后确认内置 AI 模板要求 callback 按钮使用
+  `text/color/id/request`、URL 按钮使用 `text/color/url/iosUrl`，而不是旧的自造 `title/action` 对象；callback 的
+  `content.cardPrivateData.actionIds` 也改为解码有版本、长度上限且 fail-closed 的 action ID。真实桌面卡已显示终态
+  “显示最近输出 / 打开执行台”两个按钮及最终回复；收起态 order 只保留标题和按钮，展开态才加入公开输出组件，避免空组件形成大段留白。
+- 当前 Applications 已安装上述修复并恢复真实渠道连接。手机端、真实 recent-output/cancel callback、RFC1918 fragment
+  打开与 SSE 跨端行为仍待逐项验收；这些未完成项不由本地测试替代。内置 AI 模板终态的赞/踩属于钉钉原生模板组件，
+  当前不为移除它切换卡片模板。
+
+### 2026-09-01 渠道 command 紧凑呈现
+
+- `public-result.test.ts` 验证长 ASCII/中文 command 按显示列截断、保留开头和目标尾部、shell `$` 与 `apply_patch`
+  例外，以及飞书结果最多两行；完整公开投影与既有 Run 级 redaction 不变。
+- `feishu-card.test.ts` 验证最近输出用原生 command 折叠、公开结果只进入面板、50-element/24 KiB 预算；
+  `dingtalk-channel-settings.test.ts` 验证同一紧凑 command 标签不携带 command result。
+- `channel-member-bot-copy.test.ts`、`dingtalk-member-bot-provisioner.test.ts` 与
+  `dingtalk-developer-gateway.test.ts` 验证新钉钉 Bot 使用统一描述前缀及平台字符规范化。
+- 定向 Vitest 6 个文件 / 190 项与 `pnpm typecheck` 已通过；完整 `pnpm test` 的 135 个 Vitest 文件 / 1406 项、
+  Node 221 项中 220 项通过且 1 项 Windows 条件跳过，文档/Skill 门禁与 `pnpm build:desktop` 通过。真实飞书/钉钉
+  客户端卡片仍须在后续 Applications 验收中确认原生折叠、截断体感和钉钉无结果。
+
+### 2026-09-01 钉钉群目标与首次发布欢迎卡
+
+- DingTalk ingress 保留 callback `chatbotUserId`，群消息只在 `isInAtList=true` 且该身份存在于
+  `atUsers[].dingtalkId` 时进入观察窗；同消息的普通成员 mention 可共存，身份缺失/不匹配继续 fail closed。
+  私聊路径未改，仍按 receiving App 直接创建或复用 Quick Chat。
+- 飞书和钉钉在新 publication durable completed 后，向 exact Owner 发送一张“`<队员名> · 已发布`”私聊卡；
+  provider 消息 ID 从 publication intent 稳定派生，失败只记录脱敏诊断，completed 恢复不补发。
+- 渠道页 Provider 标识从“飞/钉”文字替换为打包进 App 的真实 SVG 品牌图标；未发布身份说明改为
+  “发布后沿用队员身份”。新钉钉应用描述与飞书统一使用 `Rovai AI Teammate · <teamRole>`。
+- 定向 Vitest 5 个文件 / 130 项与 `pnpm typecheck` 通过；完整 `pnpm test` 的 135 个 Vitest 文件 / 1411 项、
+  Node 221 项中 220 项通过且 1 项 Windows 条件跳过，文档/Skill 门禁和 `pnpm build:desktop` 通过。钉钉真实群聊
+  项目选择卡与两端首次欢迎卡仍须使用新发布 Bot 在 Applications 中验收。

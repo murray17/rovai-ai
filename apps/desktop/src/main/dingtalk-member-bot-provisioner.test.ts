@@ -329,7 +329,7 @@ describe('direct DingTalk Open Platform member Bot provisioning', () => {
 function input(overrides: Partial<DingTalkProvisioningInput> = {}): DingTalkProvisioningInput {
   return {
     appName: '芝士',
-    description: 'Rovai AI 队员 · 鉴定士',
+    description: 'Rovai AI Teammate · 鉴定士',
     readAvatarPng: async () => new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10, 0]),
     expectedCorpId: 'corp-1',
     expectedUserId: 'owner-1',

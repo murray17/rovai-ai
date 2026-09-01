@@ -1067,7 +1067,9 @@ impl ChannelService {
             capture_execution_console_snapshot(&transaction, &agent_run_id, sequence)?
         };
         transaction.commit()?;
-        if state == "terminal_sealed" && provider == FEISHU_PROVIDER {
+        if state == "terminal_sealed"
+            && matches!(provider.as_str(), FEISHU_PROVIDER | DINGTALK_PROVIDER)
+        {
             let blob_store = ManagedBlobStore::new(
                 database
                     .path()
@@ -1164,7 +1166,7 @@ impl ChannelService {
                   AND conversation.agent_id = ?4
                   AND console.target_app_id = ?5
                   AND console.channel_conversation_id = ?6
-                  AND channel.provider = 'feishu'
+                  AND channel.provider IN ('feishu', 'dingtalk')
                   AND member.status = 'active'
                   AND member.leave_requested_at IS NULL
                 "#,
@@ -5038,16 +5040,18 @@ impl ChannelService {
                     "Only this provider's trusted Channel Host can resolve a project card",
                 ));
             }
-            if quick_chat
-                && (pending.conversation.provider != FEISHU_PROVIDER
-                    || !matches!(
-                        pending.conversation.conversation_kind.as_str(),
-                        "group" | "topic"
-                    ))
-            {
+            let quick_chat_supported = match pending.conversation.provider.as_str() {
+                FEISHU_PROVIDER => matches!(
+                    pending.conversation.conversation_kind.as_str(),
+                    "group" | "topic"
+                ),
+                DINGTALK_PROVIDER => pending.conversation.conversation_kind == "group",
+                _ => false,
+            };
+            if quick_chat && !quick_chat_supported {
                 return Ok(rejected(
                     "channel.binding.action_unsupported",
-                    "Quick Chat selection is only available for Feishu groups and topics",
+                    "Quick Chat selection is unavailable for this channel conversation",
                 ));
             }
             validate_owner_identity_input(
@@ -5717,12 +5721,10 @@ impl ChannelService {
                     "Execution console does not exist",
                 ));
             };
-            if projection.provider != FEISHU_PROVIDER
-                || !is_channel_host_for_provider(&envelope.actor, &projection.provider)
-            {
+            if !is_channel_host_for_provider(&envelope.actor, &projection.provider) {
                 return Ok(rejected(
                     "channel.host_required",
-                    "Only the trusted Feishu Channel Host can cancel this AgentRun",
+                    "Only this provider's trusted Channel Host can cancel this AgentRun",
                 ));
             }
             validate_owner_identity_input(
@@ -14155,7 +14157,7 @@ mod tests {
     }
 
     #[test]
-    fn dingtalk_owner_dm_reuses_atomic_admission_and_topics_fail_closed() {
+    fn dingtalk_owner_dm_reuses_atomic_admission_executes_card_actions_and_topics_fail_closed() {
         let mut database = seeded_runtime_database_owned();
         let service = ChannelService::default();
         connect_dingtalk_account(&service, &mut database);
@@ -14329,6 +14331,100 @@ mod tests {
                 .unwrap();
             assert_eq!(count, 1, "DingTalk must reuse atomic admission for {table}");
         }
+
+        let console_tick = service
+            .host_tick(
+                &mut database,
+                &ActorRef::System {
+                    component_id: DINGTALK_CHANNEL_HOST_COMPONENT.to_string(),
+                },
+                &ChannelHostTickRequest {
+                    worker_id: "dingtalk-console-worker".to_string(),
+                    limit: 20,
+                },
+            )
+            .unwrap();
+        let console_delivery = console_tick
+            .deliveries
+            .iter()
+            .find(|delivery| delivery.delivery_kind == "execution_console_upsert")
+            .expect("DingTalk admission must open one execution state card");
+        let console_source = service
+            .execution_console_source(
+                &mut database,
+                console_delivery.payload["agentRunId"].as_str().unwrap(),
+                console_delivery.payload["expectedSequence"]
+                    .as_i64()
+                    .unwrap(),
+            )
+            .unwrap()
+            .expect("the DingTalk execution source must be readable");
+        service
+            .settle_delivery(
+                &mut database,
+                &dingtalk_host_envelope(
+                    "dingtalk-console-sent",
+                    SettleChannelDeliveryCommand {
+                        delivery_id: console_delivery.delivery_id.clone(),
+                        worker_id: "dingtalk-console-worker".to_string(),
+                        outcome: "sent".to_string(),
+                        external_delivery_message_id: Some("ding-card-run-1".to_string()),
+                        failure_code: None,
+                        retryable: false,
+                    },
+                ),
+            )
+            .unwrap();
+        let web_scope = ChannelExecutionWebScope {
+            channel_conversation_id: console_source.channel_conversation_id.clone(),
+            target_app_id: console_source.target_app_id.clone(),
+            camp_id: console_source.camp_id.clone(),
+            agent_id: console_source.agent_id.clone(),
+            focus_run_id: console_source.agent_run_id.clone(),
+            max_run_created_at: console_source.run_created_at.clone(),
+        };
+        let web_snapshot = service
+            .execution_web_snapshot(&mut database, &web_scope)
+            .unwrap()
+            .expect("the fixed DingTalk Web scope must read its public projection");
+        assert_eq!(web_snapshot.focus_run_id, console_source.agent_run_id);
+        let operator = (None, Some("owner-staff-1".to_string()), None);
+        let recent = service
+            .authorize_execution_recent_output(
+                &mut database,
+                &dingtalk_host_envelope(
+                    "dingtalk-console-recent",
+                    AuthorizeChannelExecutionRecentOutputCommand {
+                        agent_run_id: console_source.agent_run_id.clone(),
+                        app_id: "ding-app-agent_1".to_string(),
+                        external_message_id: "ding-card-run-1".to_string(),
+                        operator_open_id: operator.0.clone(),
+                        operator_user_id: operator.1.clone(),
+                        operator_union_id: operator.2.clone(),
+                    },
+                ),
+            )
+            .unwrap();
+        assert_eq!(recent.result.status, CommandResultStatus::Accepted);
+        let cancelled = service
+            .cancel_channel_agent_run(
+                &mut database,
+                &dingtalk_host_envelope(
+                    "dingtalk-console-cancel",
+                    ChannelAgentRunCancelCommand {
+                        callback_event_id: "ding-callback-1".to_string(),
+                        app_id: "ding-app-agent_1".to_string(),
+                        external_message_id: "ding-card-run-1".to_string(),
+                        agent_run_id: console_source.agent_run_id.clone(),
+                        operator_open_id: operator.0,
+                        operator_user_id: operator.1,
+                        operator_union_id: operator.2,
+                    },
+                ),
+            )
+            .unwrap();
+        assert_eq!(cancelled.result.status, CommandResultStatus::Applied);
+        assert_eq!(cancelled.result.payload["status"], "cancelled");
 
         let aggregate_count: i64 = database
             .connection()
@@ -14529,14 +14625,24 @@ mod tests {
             .unwrap();
         assert_eq!(pending.result.code, "channel.binding.pending");
         let pending_id = pending.result.payload["pendingBindingId"].as_str().unwrap();
-        let resolved = resolve_pending_for_provider(
+        let mut picker = pending_picker_command(
             &service,
             &mut database,
             pending_id,
             "dingtalk-group-roster-resolve",
             DINGTALK_PROVIDER,
         );
+        picker.action = "quick_chat".to_string();
+        picker.project_id = None;
+        let resolved = service
+            .resolve_pending_camp_binding(
+                &mut database,
+                &quick_chat_path,
+                &dingtalk_host_envelope("dingtalk-group-roster-resolve", picker),
+            )
+            .unwrap();
         assert_eq!(resolved.result.code, "channel.binding.resolved");
+        assert_eq!(resolved.result.payload["executionScopeKind"], "quick_chat");
         let camp_id = resolved.result.payload["campId"].as_str().unwrap();
         assert_channel_camp_name(
             &mut database,

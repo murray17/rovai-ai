@@ -103,13 +103,14 @@ describe('Channel settings', () => {
     expect(markup.match(/class="channel-member-bot-grid channel-member-bot-row"/g)).toHaveLength(2)
     expect(markup.indexOf('队员 agent-a')).toBeLessThan(markup.indexOf('队员 agent-b'))
     expect(markup).toContain('0 已发布 · 2 未发布')
-    expect(markup).toContain('名称沿用队员；应用图标由 Rovai 配置')
+    expect(markup).toContain('发布后沿用队员身份')
+    expect(markup).toContain('assets/channel-logos/feishu.svg')
     expect(markup).not.toContain('默认沿用队员名称与头像')
     expect(markup).toContain('disabled="" title="飞书渠道宿主尚未接入"')
     expect(markup).toContain('>等待连接</button>')
   })
 
-  it('hides DingTalk and falls back to Feishu even with an old DingTalk selection and published Bot', () => {
+  it('exposes DingTalk and keeps its published Bot management facts local', () => {
     const snapshot = unavailableSnapshot()
     snapshot.channels.push({
       kind: 'dingtalk',
@@ -143,18 +144,21 @@ describe('Channel settings', () => {
     }))
 
     expect(markup).toContain('<strong>飞书</strong>')
-    expect(markup).toContain('1 个渠道')
-    expect(markup.match(/role="tab"/gu)).toHaveLength(1)
-    expect(markup).not.toContain('钉钉')
-    expect(markup).not.toContain('>重新连接</button>')
-    expect(markup).not.toContain('u-app-1')
+    expect(markup).toContain('<strong>钉钉</strong>')
+    expect(markup).toMatch(/channel-mark-dingtalk[^>]*>\s*<img src=/u)
+    expect(markup).toContain('2 个渠道')
+    expect(markup.match(/role="tab"/gu)).toHaveLength(2)
+    expect(markup).toContain('钉钉连接')
+    expect(markup).toContain('星海科技')
+    expect(markup).toContain('芝士')
+    expect(markup).toContain('u-app-1')
     expect(snapshot.channels).toHaveLength(2)
     expect(snapshot.channels[1].memberBots[0].appId).toBe('u-app-1')
     expect(markup).not.toMatch(/app secret|client secret|access token/i)
   })
 
   it.each(['not_connected', 'session_expired', 'connected'] as const)(
-    'does not restore the hidden DingTalk entry from a %s snapshot without Feishu',
+    'renders DingTalk as the only available provider from a %s snapshot',
     (status) => {
       const snapshot = unavailableSnapshot()
       snapshot.channels = [{
@@ -170,10 +174,10 @@ describe('Channel settings', () => {
         agents: [], snapshot, selectedKind: 'dingtalk', onConnect: () => undefined
       }))
 
-      expect(markup).toContain('当前版本没有可用的渠道')
-      expect(markup).not.toContain('role="tab"')
-      expect(markup).not.toContain('钉钉')
-      expect(markup).not.toContain('重新连接')
+      expect(markup).not.toContain('当前版本没有可用的渠道')
+      expect(markup).toContain('role="tab"')
+      expect(markup).toContain('<strong>钉钉</strong>')
+      expect(markup).toContain('钉钉连接')
       expect(snapshot.channels[0].connection.status).toBe(status)
     }
   )
