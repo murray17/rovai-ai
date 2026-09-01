@@ -85,6 +85,7 @@ describe('ExecutionViewService', () => {
     const page = await fetch(href!.split('#')[0])
     expect(page.status).toBe(200)
     expect(page.headers.get('cache-control')).toBe('no-store')
+    expect(page.headers.get('connection')).toBe('close')
     const pageHtml = await page.text()
     expect(pageHtml).toContain('<meta name="viewport"')
     expect(pageHtml).toContain('data-brand-mark="horizon"')
@@ -99,11 +100,13 @@ describe('ExecutionViewService', () => {
 
     const unauthorized = await fetch(`http://127.0.0.1:${port}/api/execution/run-a/snapshot`)
     expect(unauthorized.status).toBe(401)
+    expect(unauthorized.headers.get('connection')).toBe('close')
     const response = await fetch(`http://127.0.0.1:${port}/api/execution/run-a/snapshot`, {
       headers: { Authorization: 'Bearer fixed-token-with-at-least-thirty-two-characters' }
     })
     expect(response.status).toBe(200)
     expect(response.headers.get('referrer-policy')).toBe('no-referrer')
+    expect(response.headers.get('connection')).toBe('close')
     const publicSnapshot = await response.json()
     expect(publicSnapshot).toMatchObject({
       schemaVersion: 1,
@@ -142,7 +145,9 @@ describe('ExecutionViewService', () => {
     expect((await fetch(`http://127.0.0.1:${port}/api/execution/run-a/snapshot`, {
       headers: { Authorization: 'Bearer fixed-token-with-at-least-thirty-two-characters' }
     })).status).toBe(401)
-    expect((await fetch(nextHref!.split('#')[0])).status).toBe(200)
+    const reboundPage = await fetch(nextHref!.split('#')[0])
+    expect(reboundPage.status).toBe(200)
+    await reboundPage.text()
 
     await service.stop()
     expect(eventListener).toBeNull()

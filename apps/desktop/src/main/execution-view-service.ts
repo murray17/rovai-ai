@@ -312,7 +312,10 @@ export class ExecutionViewService {
     const url = new URL(request.url, `http://${request.headers.host}`)
     const pageMatch = url.pathname.match(/^\/execution\/([A-Za-z0-9_-]{1,200})$/u)
     if (pageMatch) {
-      response.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' })
+      response.writeHead(200, {
+        'Content-Type': 'text/html; charset=utf-8',
+        'Connection': 'close'
+      })
       response.end(EXECUTION_VIEW_PAGE)
       return
     }
@@ -334,7 +337,10 @@ export class ExecutionViewService {
         sendEmpty(response, 410)
         return
       }
-      response.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' })
+      response.writeHead(200, {
+        'Content-Type': 'application/json; charset=utf-8',
+        'Connection': 'close'
+      })
       response.end(JSON.stringify(snapshot))
       return
     }
@@ -593,7 +599,7 @@ function applySecurityHeaders(response: ServerResponse): void {
 }
 
 function sendEmpty(response: ServerResponse, status: number): void {
-  response.writeHead(status)
+  response.writeHead(status, { 'Connection': 'close' })
   response.end()
 }
 
