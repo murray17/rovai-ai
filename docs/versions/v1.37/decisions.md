@@ -54,3 +54,29 @@ command ID 携带新版本 payload，永久触发幂等冲突。单纯放宽版�
 - 拒绝继续修补异步 ACK：无法消除失联进程对业务完成的依赖，也保留重复领域命令的冲突面。
 - 拒绝新增通用依赖图、额外 Input 状态协议或每 Run 工作目录隔离：现有持久关联足以界定离队范围，发送前一个
   条件更新足以界定未知证据；扩大模型不能消除本次根因。
+
+<a id="v1-37-d03"></a>
+## V1.37-D03：Agent 目标教学收敛到 `--to`，inline alias 只扩展连续有效前缀
+
+### 背景
+
+旧 parser 只识别逻辑行首的一个 exact display-name alias，导致自然生成的 `@惠 @响子` 只投递首位队员；
+同时把完整 alias grammar 写入 Agent `body` help 会与稳定 canonical `--to agent_N` 入口竞争。把 cluster 内
+未知 token 升级成新错误又会收紧旧行为，使原本可发布的正文被整体拒绝。
+
+### 决定
+
+Agent `body` help 只保留 payload 说明，canonical `--to` 是唯一推荐目标 authoring 入口。Core 继续把 inline
+addressing 当兼容与运维兜底：从逻辑行首连续解析由空白分隔的有效 canonical/exact active-member mention，
+保留 occurrence 顺序并按 canonical ID 去重 Delivery。第一个未知、歧义或普通文本终止 cluster；相关
+display-name lookalike 保持 Text 且不新增发送拒绝，后续 canonical token 延续既有 mid-line 语义。既有
+malformed canonical token 与全部 recipient admission 保持不变。
+
+### 后果与替代方案
+
+- 同一行可稳定表达多个现有队员，同时不把 alias 变成公开 Agent authoring 接口；catalog digest 按既有 Binding
+  compatibility 轮换，不增加 wire、schema shape、数据库迁移或 Session Charter revision。
+- 拒绝继续“一行一个 alias”：它把普通多 mention 截断成部分投递。拒绝任意 mid-line alias：会把叙述文本误当
+  调度。拒绝 invalid-tail 原子失败：这是旧行为没有的新严格度，无法为兼容兜底带来相称收益。
+- 当前规范由 [Camp Message Send v18](../../contracts/camp-message-send-v18.md)、[Public A2A Message Delivery](../../architecture/public-a2a-message-delivery.md)
+  与[确认 revision 3](model-context-change-multi-mention-cluster.md)共同拥有。

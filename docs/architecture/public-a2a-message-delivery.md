@@ -3,13 +3,13 @@ document_type: architecture
 architecture: public-a2a-message-delivery
 authority: public-message-and-delivery-boundaries
 status: accepted
-last_updated: 2026-08-27
+last_updated: 2026-09-01
 ---
 
 # Public A2A Message 与 Message Delivery 架构
 
 本文件定义 v0.45 以后 Agent-to-Agent 协作的长期组件边界。字段级输入、错误和状态合同
-分别见 [Camp Message Send v13](../contracts/camp-message-send-v13.md)、
+分别见 [Camp Message Send v18](../contracts/camp-message-send-v18.md)、
 [Current User Attention v4](../contracts/current-user-attention-v4.md)、
 [Message Delivery v8](../contracts/message-delivery-v8.md)、
 [Missing-Send Recovery Publication v2](../contracts/missing-send-recovery-publication-v2.md)、
@@ -22,9 +22,8 @@ last_updated: 2026-08-27
 reply reference 见
 [Message Delivery 不变量](foundational-invariants.md#collaboration-delivery)，成功 Run 的 zero-send safety net 见
 [Message Delivery 不变量](foundational-invariants.md#collaboration-delivery)。
-当前 Camp 显示名 inline alias 的 Core 解析与 canonical freeze 见
-[History 与寻址不变量](foundational-invariants.md#collaboration-history-addressing)，line-leading position
-门禁见 [History 与寻址不变量](foundational-invariants.md#collaboration-history-addressing)。
+当前 Camp 显示名 inline alias 的 Core-only 兼容解析、line-leading cluster 与 canonical freeze 见
+[History 与寻址不变量](foundational-invariants.md#collaboration-history-addressing)。
 Current User Attention 的身份、内容与原子通知决定见
 [Message Delivery 不变量](foundational-invariants.md#collaboration-delivery)。
 持久 Gather capture、Barrier 与 Completion Delivery 见
@@ -88,12 +87,13 @@ PublicOnly 与 Automatic-empty 都可能得到空数组，但前者必须保持�
 和 Agent wakeup，且不能从正文、结果数组或历史 event 反推模式。Principal attention 与 Agent routing 正交；
 `--to-principal` 只创建当前消息的 CurrentUserMention/Inbox effect，不创建 Delivery，也不代表批准。
 
-Display-name alias 只在上述发送事务内存在。Core 只在 logical line 的首个非空白 token 解析它；推荐的
-trailing handoff 是专门的最后一个非空行，该行仍须以 alias 开头。普通 mid-line prose 即使位于最后一行
-也不寻址。完整显示名后须为 Unicode 空白或正文结束；canonical `@agent_N` 位置语义不变并保持优先，
-最长完整显示名获胜，同长歧义按普通文本 fail closed。代码区、URL、转义、标点近似、昵称和 `--to`
-display name 不参与。命中后立即转换为 canonical Agent ID 与 Structured Member Mention；Dispatch Pump、
-Read Side 和 Renderer 都不得重新解析投影正文。
+Display-name alias 只在上述发送事务内作为 Core-only 兼容能力存在，不进入 Agent `body` help；Agent 目标
+authoring 只推荐 canonical `--to`。Core 可从 logical line 的首个非空白 token 开始，连续解析由 Unicode
+空白分隔的 canonical token 或 exact active-member display-name alias；ordinary prose、未知/歧义 alias 或
+未解析的 `@Principal` 结束 cluster，相关 display-name lookalike 保持 Text 且不新增拒绝。普通 mid-line
+display-name prose 不寻址；canonical `@agent_N` 位置、precedence 与既有 malformed-token 拒绝语义不变。最长完整显示名获胜，代码区、
+URL、转义、标点近似、昵称和 `--to` display name 不参与。有效 occurrence 立即转换为 canonical Agent ID 与
+Structured Member Mention；Dispatch Pump、Read Side 和 Renderer 都不得重新解析投影正文。
 
 ## 3. Delivery 生命周期与唯一 Dispatch Pump
 
