@@ -9,13 +9,19 @@ import type {
 import {
   activityStatusForAgentRun,
   buildLiveExecutionProgress,
-  liveRuntimeEventFromExecutionEvidence
+  liveRuntimeEventFromExecutionEvidence,
+  type ActivityIconKind,
+  type ActivityStatus
 } from '../shared/execution-presentation'
 import {
   createExecutionPublicResultProjector,
   createExecutionPublicTextRedactor,
   executionPublicCommandTitle
 } from '../shared/execution-presentation/public-result'
+import {
+  groupConsecutiveToolItems,
+  toolActivityGroupPresentation
+} from '../shared/execution-presentation/tool-grouping'
 import type { CoreClient } from './core-client'
 import { EXECUTION_VIEW_PAGE } from './execution-view-page'
 import {
@@ -73,15 +79,25 @@ type CoreExecutionWebSnapshot = {
   runs: CoreExecutionWebRun[]
 }
 
+type PublicExecutionActivity = {
+  iconKind: ActivityIconKind
+  title: string
+  status: ActivityStatus
+  statusLabel: string
+  result: string | null
+  files: Array<{ path: string; additions: number | null; deletions: number | null }>
+}
+
 type PublicExecutionItem =
   | { kind: 'narration'; body: string }
   | {
-    kind: 'activity'
-    icon: string
-    title: string
+    kind: 'activityGroup'
+    status: ActivityStatus
     statusLabel: string
-    result: string | null
-    files: Array<{ path: string; additions: number | null; deletions: number | null }>
+    primary: string
+    currentTitle: string | null
+    accessibleLabel: string
+    activities: PublicExecutionActivity[]
   }
 
 type PublicExecutionSnapshot = {
@@ -457,20 +473,39 @@ function publicExecutionSnapshot(raw: CoreExecutionWebSnapshot): PublicExecution
     const redact = createExecutionPublicTextRedactor(events, run.id)
     const projectResult = createExecutionPublicResultProjector(events, run.id)
     const progress = buildLiveExecutionProgress(events, run.id, { textMode: 'complete' })
-    const items = progress.items.flatMap((item): PublicExecutionItem[] => {
-      if (item.kind === 'tool') {
-        const status = activityStatusForAgentRun(item.step.status, run.status)
+    const groupedItems = groupConsecutiveToolItems(progress.items)
+    const trailingItem = groupedItems.at(-1)
+    const items = groupedItems.flatMap((item): PublicExecutionItem[] => {
+      if (item.kind === 'toolGroup') {
+        const presentation = toolActivityGroupPresentation(
+          item.items,
+          run.status,
+          run.status === 'running' && item === trailingItem
+        )
         return [{
-          kind: 'activity',
-          icon: activityIcon(item.step.iconKind),
-          title: executionPublicCommandTitle(item.step, redact),
-          statusLabel: activityLabel(status),
-          result: projectResult(item.step),
-          files: item.step.fileChanges?.map((file) => ({
-            path: file.path,
-            additions: file.additions,
-            deletions: file.deletions
-          })) ?? []
+          kind: 'activityGroup',
+          status: presentation.status,
+          statusLabel: presentation.statusLabel,
+          primary: presentation.primary,
+          currentTitle: presentation.currentTitle
+            ? redact(presentation.currentTitle)
+            : null,
+          accessibleLabel: redact(presentation.accessibleLabel),
+          activities: item.items.map(({ step }) => {
+            const status = activityStatusForAgentRun(step.status, run.status)
+            return {
+              iconKind: step.iconKind,
+              title: executionPublicCommandTitle(step, redact),
+              status,
+              statusLabel: activityLabel(status),
+              result: projectResult(step),
+              files: step.fileChanges?.map((file) => ({
+                path: file.path,
+                additions: file.additions,
+                deletions: file.deletions
+              })) ?? []
+            }
+          })
         }]
       }
       if (item.kind !== 'narration') return []
@@ -481,18 +516,27 @@ function publicExecutionSnapshot(raw: CoreExecutionWebSnapshot): PublicExecution
     if (output && !items.some((item) => item.kind === 'narration' && item.body === output)) {
       items.push({ kind: 'narration', body: output })
     }
-    if (run.fileChanges?.files.length && !items.some((item) => item.kind === 'activity' && item.files.length)) {
+    if (run.fileChanges?.files.length && !items.some((item) => item.kind === 'activityGroup'
+      && item.activities.some((activity) => activity.files.length))) {
       items.push({
-        kind: 'activity',
-        icon: '±',
-        title: '文件变化',
+        kind: 'activityGroup',
+        status: 'recorded',
         statusLabel: '已记录',
-        result: null,
-        files: run.fileChanges.files.map((file) => ({
-          path: file.path,
-          additions: Number.isFinite(file.additions) ? file.additions ?? null : null,
-          deletions: Number.isFinite(file.deletions) ? file.deletions ?? null : null
-        }))
+        primary: '已汇总 1 项操作',
+        currentTitle: null,
+        accessibleLabel: '已汇总 1 项操作；状态：已记录',
+        activities: [{
+          iconKind: 'file',
+          title: '文件变化',
+          status: 'recorded',
+          statusLabel: '已记录',
+          result: null,
+          files: run.fileChanges.files.map((file) => ({
+            path: file.path,
+            additions: Number.isFinite(file.additions) ? file.additions ?? null : null,
+            deletions: Number.isFinite(file.deletions) ? file.deletions ?? null : null
+          }))
+        }]
       })
     }
     return {
@@ -504,8 +548,8 @@ function publicExecutionSnapshot(raw: CoreExecutionWebSnapshot): PublicExecution
       purpose: bounded(redact(run.trigger.summary || run.purpose), 240),
       trigger: {
         summary: bounded(redact(run.trigger.summary), 2_000),
-        authorDisplayName: bounded(run.trigger.authorDisplayName, 80),
-        channelLabel: bounded(run.trigger.channelLabel || 'Rovai', 80),
+        authorDisplayName: '你',
+        channelLabel: '',
         createdAt: run.trigger.createdAt
       },
       items
@@ -520,10 +564,6 @@ function publicExecutionSnapshot(raw: CoreExecutionWebSnapshot): PublicExecution
     agent: { id: raw.agent.id, displayName: bounded(raw.agent.displayName, 80) },
     runs
   }
-}
-
-function activityIcon(kind: string): string {
-  return ({ terminal: '›_', file: '±', web: '↗', tool: '◇', rovai: 'R', runtime: '·' } as Record<string, string>)[kind] ?? '·'
 }
 
 function activityLabel(status: string): string {

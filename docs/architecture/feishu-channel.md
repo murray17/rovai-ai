@@ -8,7 +8,7 @@ last_updated: 2026-09-01
 
 # 飞书渠道架构
 
-字段、状态和恢复合同见 [Feishu Channel v9](../contracts/feishu-channel-v9.md)，credential 与 Developer Session 持久化见
+字段、状态和恢复合同见 [Feishu Channel v10](../contracts/feishu-channel-v10.md)，credential 与 Developer Session 持久化见
 [Channel Storage v3](../contracts/channel-storage-v3.md)，模型输入证据见
 [ContextManifest Evidence v22](../contracts/context-manifest-evidence-v22.md)，取舍理由见
 [v1.35 决策记录](../versions/v1.35/decisions.md)。
@@ -292,16 +292,16 @@ hash 和冻结的 `ChannelConversation/App/Camp/Agent/focusRun/maxRunCreatedAt` 
 
 浏览器先取当前 snapshot，再以 Fetch Streaming 建立 SSE。Main 每次都把冻结 scope 交给 Core，Core 复核 focus Run、
 渠道/App、Camp、队员、成员关系和历史上界，并只返回同 Camp/队员且不晚于 focus Run 的公开投影。Main 继续复用 shared
-execution redactor/projector 生成公开正文、安全 command/result 与文件变化；reasoning、完整工具输入、原始 patch、任意文件、
-终端/写入/审批能力、Cookie、Token 和敏感环境变量不跨出进程边界。网页使用当前双主题与连续时间线，桌面/手机共享
-同一结构；AgentRun、连续操作组和有公开 detail 的 command 复用生产执行台的嵌套 disclosure，不提供分页。
+execution grouping、redactor 与 result projector，把公开正文和连续操作组投影为页面所需的最小 shape；reasoning、完整工具输入、
+原始 patch、任意文件、终端/写入/审批能力、Cookie、Token 和敏感环境变量不跨出进程边界。网页使用当前双主题与连续时间线，
+外部触发者固定显示“你”；AgentRun、连续操作组和每个 Command 使用独立嵌套 disclosure，文件变化逐文件展开，不提供分页。
 
 “显示最近输出”和“停止执行”仍通过 callback envelope 的 operator、冻结 App 与 authoritative external message 做
 Owner 校验。停止命令还校验 exact AgentRun 仍可取消，Core 只结算这一条 Run；Main 不直接操作 Runtime 或扩大到整轮。
 SDK event ID 继续承担 callback 防重。可响应故障返回安全 Toast；Host 或设备离线时
 不承诺自定义飞书提示。
 
-Core 既有 `terminal_pending / terminal_sealed` 与不可变 terminal snapshot 继续供安全读取和历史兼容，但 v9 飞书卡不再
+Core 既有 `terminal_pending / terminal_sealed` 与不可变 terminal snapshot 继续供安全读取和历史兼容，但 v10 飞书卡不再
 呈现旧双层折叠或终态分页。钉钉仍消费原纯文本执行投影。下一条 root request admission 召回同 ChannelConversation 更早
 Turn 的执行卡，等待在途更新并把 target revoked 当作幂等成功；执行卡不是 CampMessage，也不参与请求业务 settlement。
 

@@ -97,7 +97,7 @@ malformed canonical token 与全部 recipient admission 保持不变。
 同渠道/App/Camp/队员中 focus Run 及其之前历史。IP 或端口变化不更新旧卡；Main 重启不恢复 Token。链接、局域网可达性和
 有效 Token 共同构成只读查看能力，不把它描述成 Owner-only。
 
-当前字段和错误由 [Feishu Channel v9](../../contracts/feishu-channel-v9.md) 拥有，组件边界与 UX 分别由
+当前字段和错误由 [Feishu Channel v10](../../contracts/feishu-channel-v10.md) 拥有，组件边界与 UX 分别由
 [飞书渠道架构](../../architecture/feishu-channel.md)和[渠道设置](../../ui/components/channel-settings.md)拥有。
 
 ### 后果与替代方案

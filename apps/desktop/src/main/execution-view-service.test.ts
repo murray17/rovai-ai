@@ -87,6 +87,12 @@ describe('ExecutionViewService', () => {
     expect(page.headers.get('cache-control')).toBe('no-store')
     const pageHtml = await page.text()
     expect(pageHtml).toContain('<meta name="viewport"')
+    expect(pageHtml).toContain('data-brand-mark="horizon"')
+    expect(pageHtml).toContain('run-disclosure')
+    expect(pageHtml).toContain('tool-group')
+    expect(pageHtml).toContain('command-disclosure')
+    expect(pageHtml).not.toContain('局域网视图')
+    expect(pageHtml).not.toContain('飞书成员')
     const pageScript = pageHtml.match(/<script>([\s\S]*)<\/script>/)?.[1]
     expect(pageScript).toBeTruthy()
     expect(() => new Script(pageScript!)).not.toThrow()
@@ -98,12 +104,29 @@ describe('ExecutionViewService', () => {
     })
     expect(response.status).toBe(200)
     expect(response.headers.get('referrer-policy')).toBe('no-referrer')
-    expect(await response.json()).toMatchObject({
+    const publicSnapshot = await response.json()
+    expect(publicSnapshot).toMatchObject({
       schemaVersion: 1,
       focusRunId: 'run-a',
       terminal: false,
-      runs: [{ id: 'run-a', items: [{ kind: 'narration', body: '公开正文' }] }]
+      runs: [{
+        id: 'run-a',
+        trigger: { authorDisplayName: '你', channelLabel: '' },
+        items: [{
+          kind: 'activityGroup',
+          status: 'completed',
+          statusLabel: '全部成功',
+          primary: '已执行 1 项操作',
+          activities: [{
+            iconKind: 'unknown',
+            title: 'pnpm test',
+            status: 'completed',
+            statusLabel: '已完成'
+          }]
+        }, { kind: 'narration', body: '公开正文' }]
+      }]
     })
+    expect(JSON.stringify(publicSnapshot)).not.toContain('private-stdout-token')
     expect(calls[0]).toMatchObject({ channelConversationId: 'channel-original' })
     expect(eventListener).not.toBeNull()
 
@@ -224,10 +247,31 @@ function coreSnapshot(): unknown {
         createdAt: '2026-09-01T00:00:00Z'
       },
       evidence: [{
-        id: 'evidence-a',
+        id: 'evidence-command',
         agentRunId: 'run-a',
         executionEpoch: 1,
         sequence: 1,
+        eventType: 'activity.completed',
+        kind: 'command',
+        phase: 'completed',
+        payload: {
+          item: {
+            type: 'commandExecution',
+            command: 'pnpm test',
+            status: 'completed',
+            aggregatedOutput: 'tests passed\nAuthorization: Bearer private-stdout-token'
+          }
+        },
+        contentBlobId: null,
+        contentByteCount: 64,
+        isTruncated: false,
+        occurredAt: '2026-09-01T00:00:02Z',
+        canonical: null
+      }, {
+        id: 'evidence-a',
+        agentRunId: 'run-a',
+        executionEpoch: 1,
+        sequence: 2,
         eventType: 'agent.text.delta',
         kind: 'narration',
         phase: 'updated',
@@ -235,7 +279,7 @@ function coreSnapshot(): unknown {
         contentBlobId: null,
         contentByteCount: 12,
         isTruncated: false,
-        occurredAt: '2026-09-01T00:00:02Z',
+        occurredAt: '2026-09-01T00:00:03Z',
         canonical: null
       }],
       publicOutput: null,

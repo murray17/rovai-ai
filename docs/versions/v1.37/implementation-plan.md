@@ -33,8 +33,8 @@ last_updated: 2026-09-01
 - [x] Main 单例 `ExecutionViewService`、私有原子设置、默认关闭/8765、固定端口无漂移、RFC1918 地址选择、
   内存 Token hash 与 immutable scope；Core 拥有历史 Run 授权、公开投影和 exact-run 取消。
 - [x] Snapshot GET + Fetch Streaming SSE、自包含只读页面、公开 redactor/result/file projection 与安全响应头。
-- [ ] 按已确认交互稿把生产 Web 页面替换为 Porcelain Day / Steel Night 连续时间线：外部触发者显示“你”，
-  AgentRun、连续操作组和有公开 detail 的 command 使用与生产执行台一致的嵌套 disclosure。
+- [x] 按已确认交互稿把生产 Web 页面替换为 Porcelain Day / Steel Night 连续时间线：外部触发者显示“你”，
+  AgentRun、连续操作组和每个 Command 使用与生产执行台一致的嵌套 disclosure。
 - [x] 渠道页底部默认折叠的全局启用/端口设置、真实状态与旧链接警告；无网卡选择、远端探测或旧卡修复入口。
 - [ ] Cursor 非标准生成通知的真实成功 fixture；本机旧 CLI 不支持 ACP，无证据不实现猜测 parser。
 
@@ -266,8 +266,9 @@ Antigravity 原生生成、TRAE/Copilot 专用图片结果已接入，六种 Run
 - 固定 PR base `21c954756bd1d21911b0eed609902cd3301ae516` 的 `docs:check:ci` 通过；
   `pnpm package:mac:daily` 产出并验证 arm64 ad-hoc `dist/mac-arm64/Rovai AI.app`，Core 与 CLI 已入包。
   本轮不安装、不启动，也不替换 `/Applications` 中的日常 App；没有调用 Runtime 或向真实飞书发件。
-- 后续产品校正要求 Web 页面复用生产执行台的嵌套 disclosure，并把飞书外部触发者显示为“你”；第三版 HTML 稿已完成
-  375px/桌面、日夜主题与 Run/操作组/Command 独立折叠检查，生产页面尚未按该稿替换。
+- 后续产品校正已落到生产 Web 页面：Main 公开投影复用生产 execution grouping/result/redactor，外部触发者固定为“你”；
+  真实生产 HTML 已在 1440px 桌面、375×812 手机、812×375 横屏与日夜主题下验证 Run/操作组/Command 独立折叠、
+  44px 手机 summary、可见键盘焦点及无页面级横向滚动。定向 Vitest 3 文件 / 103 项与 TypeScript 检查通过。
 
 本轮隔离验证：
 

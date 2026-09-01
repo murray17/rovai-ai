@@ -10,7 +10,7 @@ last_updated: 2026-09-01
 
 渠道设置是 Owner 在 Rovai 本机维护飞书/钉钉连接与队员 Bot 的 Renderer surface。群首次项目选择发生在对应外部会话的
 Owner-only 卡片中；Renderer 不提供 Channel 项目目录或会话绑定操作。领域状态和错误按 Provider 分别见
-[Feishu Channel v9](../../contracts/feishu-channel-v9.md)与
+[Feishu Channel v10](../../contracts/feishu-channel-v10.md)与
 [DingTalk Channel v5](../../contracts/dingtalk-channel-v5.md)；本页只拥有信息层级、交互与可访问性。
 
 当前对外渠道页只显示飞书。钉钉完整产品链路尚未验收，因此隐藏其整个入口、平台计数、连接/发布区域及
@@ -162,7 +162,7 @@ Unicode 字符，超长用省略号收尾。引用只作展示，不跳转、不
 
 卡片只在状态、按钮可用性或已展开最近输出窗口变化时更新。永久正文卡继续独立发布，执行卡仍是临时 surface；
 下一轮召回后不留下完成占位。安全、固定 URL、Token、callback 和串行更新边界由
-[Feishu Channel v9](../../contracts/feishu-channel-v9.md) 拥有。
+[Feishu Channel v10](../../contracts/feishu-channel-v10.md) 拥有。
 
 ## 局域网执行台设置
 
@@ -174,7 +174,8 @@ Unicode 字符，超长用省略号收尾。引用只作展示，不跳转、不
 Web 执行台延续 Porcelain Day / Steel Night 的冷瓷灰、Steel 品牌、身份色与中性 Evidence 层级，不建立暖色替代主题。
 顶部只保留 Camp 名与“只读”，随后显示当前选中 Run 的触发消息和该队员的连续历史时间线；外部触发者在该阅读面固定显示
 为“你”，不显示“飞书成员”。每个 AgentRun 都有独立过程 disclosure，当前 Run 默认展开、历史 Run 默认收起；连续操作组
-与每个有公开 detail 的 command 继续使用生产执行台的嵌套 disclosure。点击 Run 标题只切换顶部触发消息，不代替折叠入口。
+与每个 Command 继续使用生产执行台的嵌套 disclosure，即使没有公开结果也保留可展开行。点击 Run 标题只切换顶部触发消息，
+不代替折叠入口。
 页面无写控制、分页或解释性图例，桌面与手机使用同一阅读顺序，无横向滚动；状态有文本、可见键盘焦点和最小 44px 手机点击区域。
 
 ## 状态、错误与键盘
@@ -189,7 +190,7 @@ Web 执行台延续 Porcelain Day / Steel Night 的冷瓷灰、Steel 品牌、�
 
 - [全局设计系统](../../../DESIGN.md)
 - [设置工作区 brief](../../../apps/desktop/.impeccable/surfaces/settings-workspace.md)
-- [Feishu Channel v9](../../contracts/feishu-channel-v9.md)
+- [Feishu Channel v10](../../contracts/feishu-channel-v10.md)
 - [飞书渠道架构](../../architecture/feishu-channel.md)
 - [DingTalk Channel v5](../../contracts/dingtalk-channel-v5.md)
 - [钉钉渠道架构](../../architecture/dingtalk-channel.md)

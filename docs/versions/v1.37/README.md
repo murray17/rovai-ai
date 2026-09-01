@@ -45,9 +45,9 @@ last_updated: 2026-09-01
   [V1.37-D02](decisions.md#v1-37-d02)。验收进度记录在实施计划，原图片/钉钉未验收项不因此升级。
 - 飞书执行卡已收敛为纯状态与三个入口；“打开执行台”在卡片创建时冻结 LAN HTTP `open_url`，以 Main 内存
   Token 限定同 Camp/队员、focus Run 及其之前历史，不做点击鉴权、Owner 私聊、地址刷新或旧卡修复。
-  全局端口设置位于渠道页最底部并默认折叠；桌面/手机 Web 时间线的目标交互复用生产执行台的 AgentRun、操作组与
-  command 嵌套 disclosure，当前 HTML 稿已完成、生产页替换待确认。当前合同见
-  [Feishu Channel v9](../../contracts/feishu-channel-v9.md)，理由见 [V1.37-D04](decisions.md#v1-37-d04)。
+  全局端口设置位于渠道页最底部并默认折叠；桌面/手机 Web 时间线已复用生产执行台的 AgentRun、操作组与
+  Command 嵌套 disclosure，外部触发者固定显示“你”。当前合同见
+  [Feishu Channel v10](../../contracts/feishu-channel-v10.md)，理由见 [V1.37-D04](decisions.md#v1-37-d04)。
 - 当前仍 in_progress：Antigravity 边界已关闭，但 Cursor 非标准通知、所有 Runtime 原生生图及渠道实发
   并未全部验收；本机已观察到的工具/协议/上游限制保留，不提升任何 Runtime 平台资格。
 
@@ -60,7 +60,7 @@ Applications 安装见[本机交付记录](main-merge-and-daily-app.md)；本轮
 | --- | --- | --- |
 | Version lifecycle | 已更新 | 本概览、实施计划、版本索引；v1.36 冻结为 historical，未验收事实保留 |
 | Decisions | 已更新 | [V1.37-D01](decisions.md#v1-37-d01)、[V1.37-D04](decisions.md#v1-37-d04)与 [CURRENT](../../decisions/CURRENT.md) |
-| Contracts | 已更新 | [Runtime Images v3](../../contracts/runtime-images-v3.md)、[Camp Open Projection v12](../../contracts/camp-open-projection-v12.md)、[Camp Message Send v18](../../contracts/camp-message-send-v18.md)、[Feishu Channel v9](../../contracts/feishu-channel-v9.md) |
+| Contracts | 已更新 | [Runtime Images v3](../../contracts/runtime-images-v3.md)、[Camp Open Projection v12](../../contracts/camp-open-projection-v12.md)、[Camp Message Send v18](../../contracts/camp-message-send-v18.md)、[Feishu Channel v10](../../contracts/feishu-channel-v10.md) |
 | Architecture | 已更新 | [Runtime 图片](../../architecture/runtime-images.md)、[飞书渠道](../../architecture/feishu-channel.md)、[Built-in Tool Runtime](../../architecture/builtin-tool-runtime.md#bootstrap-与-dynamic-context)及架构导航 |
 | UI | 已更新 | [Camp 会话工作区](../../ui/components/conversation-workspace.md#runtime-图片与消息图片)与[渠道设置](../../ui/components/channel-settings.md)；保留既有双主题 |
 | Runtime Activity | 确认无需更新 | 内部图片观察不进入 Canonical Activity，不修改 classifier/映射或已有公开 Evidence |
