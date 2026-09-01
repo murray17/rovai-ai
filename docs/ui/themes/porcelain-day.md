@@ -4,7 +4,7 @@ authority: renderer-theme
 status: accepted
 theme_id: porcelain-day
 mode: light
-last_updated: 2026-08-31
+last_updated: 2026-09-01
 ---
 
 # Porcelain Day
@@ -67,6 +67,10 @@ Light. `color-scheme: light`.
 | `--line` | `#dfe4e8` |
 | `--line-strong` | `#c7cfd6` |
 | `--control-line` | `#8b9389` |
+| `--new-camp-picker-surface` | `#ffffff` |
+| `--new-camp-picker-soft` | `#e9eef3` |
+| `--new-camp-picker-hover` | `#edf2f5` |
+| `--new-camp-picker-line-strong` | `#8296a4` |
 | `--rail` | `#f3f4f4` |
 | `--rail-ink` | `#626b72` |
 | `--rail-line` | `#dadde0` |
@@ -161,6 +165,9 @@ Light. `color-scheme: light`.
 
 ## Brand, semantic, identity, and evidence color rules
 
+- The New Conversation workspace, member and Lead dropdowns use the dedicated
+  `--new-camp-picker-*` assignments. They do not recolor the Dialog surface or the optional-configuration
+  accordion.
 - `attention` is for pending user action or approval; warm `ember` is decorative and cannot replace it.
 - `danger` is for stop, permanent deletion, forgetting and confirmed failure—not ordinary disabled state.
 - Stable IDs map to `--identity-1..8`; identity color never signals state or permission.

@@ -30,6 +30,10 @@ const requiredTokens = [
   '--line',
   '--line-strong',
   '--control-line',
+  '--new-camp-picker-surface',
+  '--new-camp-picker-soft',
+  '--new-camp-picker-hover',
+  '--new-camp-picker-line-strong',
   '--brand',
   '--brand-hover',
   '--brand-contrast',
@@ -97,6 +101,9 @@ function expectTextContrast(tokens: Record<string, string>): void {
     ['--ink', '--surface'],
     ['--muted', '--surface'],
     ['--faint', '--surface'],
+    ['--ink', '--new-camp-picker-surface'],
+    ['--faint', '--new-camp-picker-surface'],
+    ['--muted', '--new-camp-picker-soft'],
     ['--ink', '--execution-running-surface'],
     ['--muted', '--execution-running-surface'],
     ['--info', '--execution-running-surface'],
@@ -171,6 +178,10 @@ describe('Porcelain Day + Steel Night theme tokens', () => {
     expect(day['--workspace-line']).toBe('#d5dadd')
     expect(day['--workspace-steel']).toBe('#476b85')
     expect(day['--line']).toBe('#dfe4e8')
+    expect(day['--new-camp-picker-surface']).toBe('#ffffff')
+    expect(day['--new-camp-picker-soft']).toBe('#e9eef3')
+    expect(day['--new-camp-picker-hover']).toBe('#edf2f5')
+    expect(day['--new-camp-picker-line-strong']).toBe('#8296a4')
     expect(day['--brand']).toBe('#526f88')
     expect(day['--brand-soft']).toBe('#e9eef3')
     expect(day['--brand-ink']).toBe('#405f7e')
@@ -205,6 +216,10 @@ describe('Porcelain Day + Steel Night theme tokens', () => {
     expect(night['--workspace-surface-selected']).toBe('#22303a')
     expect(night['--workspace-line']).toBe('#2b353b')
     expect(night['--workspace-steel']).toBe('#8fadc0')
+    expect(night['--new-camp-picker-surface']).toBe('#1b2227')
+    expect(night['--new-camp-picker-soft']).toBe('#22303a')
+    expect(night['--new-camp-picker-hover']).toBe('#24323b')
+    expect(night['--new-camp-picker-line-strong']).toBe('#6a8190')
     expect(night['--brand']).toBe('#7897ae')
     expect(night['--brand-soft']).toBe('#22303a')
     expect(night['--mention-ink']).toBe('#9cc7e2')
@@ -218,6 +233,15 @@ describe('Porcelain Day + Steel Night theme tokens', () => {
     expect(night['--danger']).not.toBe(night['--brand'])
     expect(night['--info']).not.toBe(night['--brand'])
     expect(contrast(night['--mention-ink'], night['--surface'])).toBeGreaterThanOrEqual(4.5)
+  })
+
+  it('keeps the selected New Conversation picker boundaries and text accessible', () => {
+    for (const tokens of [day, night]) {
+      expect(contrast(tokens['--ink'], tokens['--new-camp-picker-surface'])).toBeGreaterThanOrEqual(4.5)
+      expect(contrast(tokens['--faint'], tokens['--new-camp-picker-surface'])).toBeGreaterThanOrEqual(4.5)
+      expect(contrast(tokens['--muted'], tokens['--new-camp-picker-soft'])).toBeGreaterThanOrEqual(4.5)
+      expect(contrast(tokens['--new-camp-picker-line-strong'], tokens['--new-camp-picker-surface'])).toBeGreaterThanOrEqual(3)
+    }
   })
 
   it('preserves stable identity colors for Skill, MCP, and member marks in both themes', () => {

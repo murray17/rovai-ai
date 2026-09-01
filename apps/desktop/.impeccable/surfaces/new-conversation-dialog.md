@@ -62,6 +62,16 @@ state returns focus to the exact opener.
 Do not restore “协作方式 / 并肩协作 / 领队统筹 / 暂未开放”; the request continues to submit the existing
 `peer` semantics. This is a Renderer simplification, not a Core union or SQLite migration.
 
+## Active color review
+
+The [non-authoritative HTML color study](../../../../docs/prototypes/new-conversation-dialog-colors/index.html)
+keeps the current Dialog, Header, Footer and brand treatment while comparing the current picker colors with
+three cooler treatments for the workspace, member and Lead dropdowns. C “瓷白钢边” was selected on
+2026-09-01 and is implemented through the paired `--new-camp-picker-*` Day/Night semantic tokens. The
+optional-configuration accordion intentionally keeps the standard Dialog surface tokens because it is a
+secondary disclosure, not a picker. The study remains non-authoritative context; production tokens and this
+brief define the accepted component treatment.
+
 ## Inheritance and hard boundaries
 
 Inherit root [`DESIGN.md`](../../../../DESIGN.md), both theme contracts and
