@@ -3374,11 +3374,13 @@ button.task-event-card:focus-visible .task-card-chevron { color: var(--brand-ink
 }
 .execution-disclosure.worked { margin: 1px 0 12px; }
 .execution-disclosure.worked > summary {
-  display: flex;
+  display: grid;
+  min-width: 0;
   min-height: 34px;
+  grid-template-columns: minmax(0, 1fr) 24px;
   align-items: center;
-  gap: 6px;
-  padding: 5px 0 7px;
+  column-gap: 8px;
+  padding: 5px 2px 7px 0;
   border-bottom: 1px solid var(--line);
   color: var(--muted);
   cursor: pointer;
@@ -3388,8 +3390,13 @@ button.task-event-card:focus-visible .task-card-chevron { color: var(--brand-ink
   font-weight: 500;
 }
 .execution-disclosure.worked > summary::-webkit-details-marker { display: none; }
-.process-chevron { display: inline-grid; width: 14px; height: 14px; place-items: center; color: var(--faint); font-size: 13px; transition: transform 150ms ease; }
-.execution-disclosure.worked:not([open]) .process-chevron { transform: rotate(-90deg); }
+.execution-disclosure.worked > summary::marker { display: none; content: ""; }
+.process-disclosure-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.process-disclosure-slot { display: grid; width: 24px; height: 24px; place-items: center; justify-self: end; border-radius: 5px; color: var(--faint); transition: color 120ms ease, background-color 120ms ease; }
+.process-disclosure-slot svg { display: block; width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.55; transition: transform 150ms ease; }
+.execution-disclosure.worked:not([open]) .process-disclosure-slot svg { transform: rotate(-90deg); }
+.execution-disclosure.worked > summary:hover .process-disclosure-slot,
+.execution-disclosure.worked > summary:focus-visible .process-disclosure-slot { color: var(--ink); background: var(--surface-hover); }
 .process-content { display: grid; gap: 14px; padding: 13px 0 6px; }
 .run-live > .process-content { padding: 0; }
 .process-copy { margin: 0; color: var(--ink); font-size: 12.5px; line-height: 1.68; }
