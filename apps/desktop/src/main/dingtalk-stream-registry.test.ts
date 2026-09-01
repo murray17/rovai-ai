@@ -30,6 +30,41 @@ describe('DingTalk Stream registry', () => {
     expect(order).toEqual(['ack', 'handled'])
   })
 
+  it('delivers an ordinary group callback with opaque conversation routing metadata', async () => {
+    const client = new FakeStreamClient([])
+    const onMessage = vi.fn(async () => undefined)
+    const onFailure = vi.fn()
+    const registry = new DingTalkStreamRegistry({
+      createClient: () => client,
+      onMessage,
+      onCard: async () => undefined,
+      onFailure
+    })
+    await registry.start({ appKey: 'ding-app', appSecret: 'secret', robotCode: 'ding-app' })
+
+    client.emit(TOPIC_ROBOT, {
+      msgId: 'msg-group-routing-metadata',
+      senderCorpId: 'corp-1',
+      senderStaffId: 'owner-1',
+      conversationType: '2',
+      conversationId: 'group-1',
+      openConvThreadId: 'opaque-routing-id',
+      openThreadId: 'opaque-open-routing-id',
+      isInAtList: true,
+      robotCode: 'ding-app',
+      text: { content: 'hello group' }
+    })
+    await new Promise((resolve) => setImmediate(resolve))
+
+    expect(onFailure).not.toHaveBeenCalled()
+    expect(onMessage).toHaveBeenCalledWith(expect.objectContaining({
+      conversationKind: 'group',
+      chatId: 'group-1',
+      body: 'hello group',
+      explicitlyAtBot: true
+    }))
+  })
+
   it('routes card callbacks on the same app connection', async () => {
     const client = new FakeStreamClient([])
     const onCard = vi.fn(async () => undefined)

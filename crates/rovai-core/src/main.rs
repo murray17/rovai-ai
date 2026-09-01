@@ -1011,6 +1011,14 @@ struct ChannelExecutionConsoleSourceParams {
     expected_sequence: i64,
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct DingTalkCardActionContextParams {
+    app_id: String,
+    external_message_id: String,
+    button_text: String,
+}
+
 fn default_execution_evidence_page_limit() -> i64 {
     500
 }
@@ -5568,6 +5576,19 @@ impl Core {
                         &mut database,
                         &params.agent_run_id,
                         params.expected_sequence,
+                    )?,
+                )?)
+            }
+            "channels.dingtalk.cardActionContext" => {
+                let params: DingTalkCardActionContextParams =
+                    serde_json::from_value(request.params.clone())?;
+                let mut database = self.database.lock().await;
+                Ok(serde_json::to_value(
+                    ChannelService::default().dingtalk_card_action_context(
+                        &mut database,
+                        &params.app_id,
+                        &params.external_message_id,
+                        &params.button_text,
                     )?,
                 )?)
             }

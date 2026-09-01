@@ -358,3 +358,62 @@ external message 的独立实际接收仍进入 3 秒观察窗并整条 fail clo
 - 拒绝继续比较 `chatbotUserId` 与 `atUsers`：provider 明确不承诺该用途，真实回调已经反证。
 - 拒绝只看 `atUsers.length`：普通成员 mention 与 Bot target 不是同一命名空间。exact Stream binding 与
   `isInAtList` 已给出更窄且可验证的目标事实，不需要放宽 Owner、roster 或多 Bot 准入。
+
+<a id="v1-37-d13"></a>
+## V1.37-D13：钉钉群路由元数据不证明 Topic，群接入只承诺已安装应用 Bot 的内部群
+
+### 背景
+
+修正 opaque Bot ID 后的 Applications 真实复验取得了明确 transport 证据：同组织内部群通过“添加机器人”安装的 Bot
+确实收到 Owner `@` callback，但在进入 Core 前被 `dingtalk_topic_not_supported` 拒绝。旧 gate 把 group callback 的
+`openConvThreadId` 一律当成 Topic identity；首轮放开后，脱敏字段名诊断又证明同一普通内部群 callback 还携带
+`openThreadId`。真实私聊与普通内部群会使用这些字段作为路由元数据。同期在钉钉 UI 普通群和外部群中，同名队员只是
+普通成员身份；消息在客户端可见，但 Robot Stream 和 Core 均没有任何入站记录。
+
+### 决定
+
+`openConvThreadId / openThreadId` 按 Robot Stream 的不透明路由元数据处理，不参与 Topic 判定，也不进入 Core/模型。
+归一化仍先按 `conversationType` 判定 p2p/group；group 只有出现明确 `threadId / topicId / topicKey` 才以
+`dingtalk_topic_not_supported` fail closed。当前群能力只承诺同组织内部群中经“添加机器人”安装的企业内部应用 Bot；
+普通成员形态的普通群/外部群不轮询、不冒用成员账号，也不伪造已收到。
+
+当前字段和验证边界由 [DingTalk Channel v9](../../contracts/dingtalk-channel-v9.md)拥有，组件与 Feature Gate 由
+[钉钉渠道架构](../../architecture/dingtalk-channel.md)拥有。
+
+### 后果与替代方案
+
+- 合法内部群 callback 不再因平台路由字段在 Core 前被误杀；明确 Topic 身份、Owner、roster、多 App 观察窗和附件 gate
+  均不放宽。
+- 钉钉 UI 普通群/外部群中的普通成员身份仍可被用户看到和 `@`，但没有 Robot Stream callback，因此不属于 Rovai 可接入
+  的机器人群能力；这是外部平台投递边界，不以本地成功提示掩盖。
+- 拒绝删除全部 Topic gate：明确 Topic 身份仍缺独立 roster/Camp mapping 证据。拒绝继续按字段名封禁
+  `openConvThreadId / openThreadId`：真实普通消息已经反证。拒绝成员账号轮询旁路：它改变凭据、隐私、消息完整性和
+  平台合规边界。
+
+<a id="v1-37-d14"></a>
+## V1.37-D14：钉钉通用卡片从权威卡片实例恢复动作，不要求用户模板
+
+### 背景
+
+Applications 中真实内部群项目卡已能显示，但点击项目或“刷新项目”没有反应。受控 callback 诊断证明 Card Stream
+正常到达；钉钉内置通用 AI 模板把 `content.cardPrivateData.actionIds` 回传为模板内部节点 ID，而不是 Rovai 写入
+`msgButtons[].id` 的业务 action。被点击按钮文本则稳定出现在 `content.cardPrivateData.params.text`。旧 parser 因此
+无法解码 action 并静默返回。为绕过这一限制而要求普通用户先创建或选择卡片模板，不符合渠道的零配置使用边界。
+
+### 决定
+
+继续使用钉钉内置通用 AI 卡片和既有按钮，不增加用户创建、选择或发布模板的步骤，也不把项目选择改成依赖自定义模板
+的下拉框。Main 从真实 callback 提取有界按钮文本、receiving App 与 `outTrackId`；Core 用 exact App/card instance
+查询当前权威、已发送且版本一致的项目卡 delivery 或 execution console，并从冻结 payload 恢复唯一业务 action。
+按钮文本只作查找提示；恢复后的项目选择、Quick Chat、刷新、最近输出和停止仍进入原有命令，由 Owner、外部卡片 ID、
+nonce/version、AgentRun 与状态校验最终授权。旧 versioned action ID parser 保留为兼容路径。
+
+当前 callback 与验证合同由 [DingTalk Channel v9](../../contracts/dingtalk-channel-v9.md)拥有，组件边界由
+[钉钉渠道架构](../../architecture/dingtalk-channel.md)拥有。
+
+### 后果与替代方案
+
+- 已发送的通用项目卡在 Rovai 重启后仍可由数据库权威恢复动作，不依赖 Main 临时映射；卡片过期、App 不匹配、项目名
+  重名或未知按钮均 fail closed。
+- 拒绝信任按钮文本直接执行：文本可被伪造，且不含 Owner、版本或 Run 权威。拒绝只维护 Main 内存映射：重启后旧卡会
+  再次失效。拒绝要求用户自建模板：这把渠道实现约束泄漏成每位用户的配置负担。

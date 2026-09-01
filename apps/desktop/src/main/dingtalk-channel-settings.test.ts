@@ -5,6 +5,7 @@ import {
   DingTalkChannelSettingsService,
   type DingTalkExecutionConsoleSource,
   type DingTalkChannelHostDependencies,
+  dingtalkCardCallbackText,
   dingtalkCardCallbackValue,
   dingtalkMemberBotWelcomeCardParams,
   dingtalkOutTrackId,
@@ -455,6 +456,31 @@ describe('DingTalk channel account connection', () => {
         }
       })
     })).toEqual(value)
+  })
+
+  it('reads the selected button text from a real universal AI card callback', () => {
+    expect(dingtalkCardCallbackText({
+      content: JSON.stringify({
+        cardPrivateData: {
+          actionIds: ['node_ocm_callback_action_123'],
+          params: { text: '刷新项目' }
+        }
+      }),
+      outTrackId: 'rv-bind-card-1',
+      userId: 'owner-1',
+      value: '{}'
+    })).toBe('刷新项目')
+
+    expect(dingtalkCardCallbackText({
+      content: {
+        cardPrivateData: { params: { text: ' 显示最近输出 ' } }
+      }
+    })).toBe('显示最近输出')
+    expect(dingtalkCardCallbackText({
+      content: {
+        cardPrivateData: { params: { text: 'x'.repeat(513) } }
+      }
+    })).toBeNull()
   })
 
   it('offers Quick Chat even when the DingTalk project catalog is empty', () => {

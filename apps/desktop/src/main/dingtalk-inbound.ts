@@ -42,7 +42,10 @@ export function normalizeDingTalkRobotMessage(
   const group = conversationType === '2'
     || conversationType.toLowerCase() === 'group'
     || typeof value.openConversationId === 'string'
-  if (group && ['openConvThreadId', 'openThreadId', 'threadId', 'topicId', 'topicKey']
+  // Robot Stream uses openConvThreadId and openThreadId as opaque routing
+  // metadata even for ordinary chats. Neither proves that the message belongs
+  // to a DingTalk topic, so only explicit topic/thread identities may trip the gate.
+  if (group && ['threadId', 'topicId', 'topicKey']
     .some((key) => first(value, key) !== null)) {
     throw new Error('dingtalk_topic_not_supported')
   }

@@ -16,8 +16,10 @@ last_updated: 2026-09-02
 [v1.36 决策记录](../versions/v1.36/decisions.md)和
 [V1.37-D09](../versions/v1.37/decisions.md#v1-37-d09)、
 [V1.37-D10](../versions/v1.37/decisions.md#v1-37-d10)、
-[V1.37-D11](../versions/v1.37/decisions.md#v1-37-d11)与
-[V1.37-D12](../versions/v1.37/decisions.md#v1-37-d12)。
+[V1.37-D11](../versions/v1.37/decisions.md#v1-37-d11)、
+[V1.37-D12](../versions/v1.37/decisions.md#v1-37-d12)、
+[V1.37-D13](../versions/v1.37/decisions.md#v1-37-d13)与
+[V1.37-D14](../versions/v1.37/decisions.md#v1-37-d14)。
 
 ## 组件与权威
 
@@ -138,12 +140,19 @@ message ID 返回成功 ACK，再把 JSON parse、identity validation 和 Core a
 Main 内存，运行期不逐消息读取。
 
 Open API 只接受 `appKey/appSecret` 换取短期 access token。群 roster、群/私聊 Markdown 和卡片操作都使用
-固定 API origin 与有界 timeout。AI 卡固定使用模板 `382e4302-551d-4880-bf29-a30acfab2e71.schema`、
+固定 API origin 与有界 timeout。AI 卡固定使用钉钉内置通用模板 `382e4302-551d-4880-bf29-a30acfab2e71.schema`，
+用户无需选择、创建或发布模板；
+群聊永久正文使用 `POST /v1.0/robot/groupMessages/send`，私聊使用
+`POST /v1.0/robot/oToMessages/batchSend`。群接口只提交其公开 schema 中的 `robotCode`、`openConversationId`、
+`msgKey` 与 `msgParam`；不把不受支持的 `atUserIds` 伪装成原生提醒，正文中的 `@你` 只保留公开文本语义。
 `callbackType=STREAM`、`supportForward=false`。项目卡、“显示最近输出”和“停止执行”的 callback 仍须由 Core 校验
 exact App、Owner userId、outTrackId、nonce/version 或 AgentRun；卡片 payload 不能直接改变项目或执行状态。
 模板动态按钮使用官方 `msgButtons`：callback 以 `text/color/id/request` 表达，URL 入口以
-`text/color/url/iosUrl` 表达。Main 把既有 bounded action 对象编码为 versioned base64url action id，并从官方 nested
-`content.cardPrivateData.actionIds` 回调恢复；自造 `title/action` 对象即使创建 API 返回成功也不会被客户端渲染。
+`text/color/url/iosUrl` 表达。真实通用卡片 callback 的 `content.cardPrivateData.actionIds` 是模板内部节点 ID，不会回传
+`msgButtons[].id` 中的业务 action；选中按钮文本位于 `content.cardPrivateData.params.text`。Main 只提取有界按钮文本与
+exact `appKey/outTrackId`，Core 再从当前权威项目卡 delivery 或 execution console 恢复唯一 action，最后仍由原业务命令
+校验 Owner、卡片实例、nonce/version 或 Run 状态。按钮文本本身不是授权。旧的 versioned action id parser 仅作兼容；
+自造 `title/action` 对象即使创建 API 返回成功也不会被客户端渲染。
 
 执行卡不再复制完整执行台或使用 streaming/page callback。每个 Run 的 Main 内存状态冻结首次创建时的 LAN URL、最近输出
 开关、最新公开 source 和卡片摘要，delivery/callback/终态按 Run 串行。执行中为“最近输出 / 打开执行台 / 停止”三个入口，
@@ -164,7 +173,8 @@ Migration 122 为钉钉增加 account/publication/Bot/Owner identity 表，同�
 ```text
 Stream callback fast ACK
 → normalize exact appKey / robotCode / corpId / senderStaffId / msgId
-→ classify p2p/group, reject group topic identity, then require exact Stream binding + matching robotCode + isInAtList
+→ classify p2p/group, ignore opaque openConvThreadId/openThreadId, reject explicit group topic identity
+→ require exact Stream binding + matching robotCode + isInAtList
 → Core verify Owner from appKey + userId digest
 → p2p exact /new OR group roster reconcile
 → group first observe as durable incomplete aggregate
@@ -175,7 +185,9 @@ Stream callback fast ACK
 → CampMessage + CampTurn + initial AgentRun(s)
 ```
 
-私聊按 receiving App 建 Quick Chat；精确 `/new` 只旋转该私聊 Camp，不创建触发消息或 Run。普通群首次有效消息在原群发送
+私聊按 receiving App 建 Quick Chat；精确 `/new` 只旋转该私聊 Camp，不创建触发消息或 Run。同组织内部群通过“添加机器人”
+安装的 App Bot 才属于支持的群入口；普通成员形态的钉钉普通群/外部群不会投递 Robot Stream callback，Main 不通过成员
+账号或轮询旁路读取。支持群的首次有效消息在原群发送
 一张项目卡，可选择 opaque project ID 或直接建立 Quick Chat，随后处理原消息；绑定不可换绑。Owner 仍是 ExternalPrincipal，不获得本机
 `local_user` 权限。reply 只冻结为本次消息的 ExternalQuote，入站附件只保留名称/媒体类型摘要。
 
@@ -193,12 +205,12 @@ App 或目标已移出时 fail closed。
 | 能力 | 当前状态 | 解除条件 |
 | --- | --- | --- |
 | Owner 私聊 | enabled | 真实租户 Web Session、Stream 与回复验收 |
-| Owner 普通群显式 `@` | enabled | 真实群 roster、项目卡和输出验收 |
+| Owner 同组织内部群显式 `@` | enabled；Bot 必须由群“添加机器人”入口安装，普通成员形态的普通群/外部群不产生 Stream callback | 真实群 roster、项目卡和输出验收 |
 | 同消息直接多 Bot | disabled；普通群须由 exact Stream App、匹配 `robotCode` 与 `isInAtList=true` 证明 receiving Bot；opaque `chatbotUserId/atUsers` 不做相等判断，多个 receiving Rovai App 仍整条 fail closed，单 Bot 协作扩展只走 Core A2A | 多 App observation 真实证据 |
-| 话题/Thread | disabled；只有规范化为 group 后出现非空 topic/thread identity 才拒绝，p2p 的同名平台路由元数据不视为 Topic | 独立话题群与消息 thread identity、roster、Camp mapping 证据 |
+| 话题/Thread | disabled；`openConvThreadId / openThreadId` 是普通 callback 可能携带的不透明路由元数据，不作为 Topic 证明；只有明确 `threadId / topicId / topicKey` 才拒绝 | 独立话题群与消息 thread identity、roster、Camp mapping 证据 |
 | 入站附件 | summary only | 官方下载、授权和 Managed Attachment ingress 设计 |
 | 出站附件 | disabled，明确 unsupported | 已验证 app-only 原生投递和可恢复 message identity |
-| AI 状态卡 | enabled；项目/最近输出/停止 callback 与固定 URL 已接入，真实客户端仍需验收 | 桌面/手机真实投递、URL fragment、callback、SSE 与停止终态矩阵 |
+| AI 状态卡 | enabled；平台内置通用卡片无需用户模板；项目刷新、最近输出展开/收起已在真实桌面客户端验收，停止与固定 URL 已接入 | 手机真实投递、URL fragment、SSE 与停止终态矩阵 |
 
 不得通过宽松 parser、普通群 fallback、fabricated message success 或 Renderer 开关绕过这些 gate。
 
@@ -233,3 +245,5 @@ Renderer 状态重建业务事实。
 - [V1.37-D10](../versions/v1.37/decisions.md#v1-37-d10)
 - [V1.37-D11](../versions/v1.37/decisions.md#v1-37-d11)
 - [V1.37-D12](../versions/v1.37/decisions.md#v1-37-d12)
+- [V1.37-D13](../versions/v1.37/decisions.md#v1-37-d13)
+- [V1.37-D14](../versions/v1.37/decisions.md#v1-37-d14)

@@ -124,14 +124,36 @@ describe('DingTalk inbound normalization', () => {
     }, binding)).toThrow('dingtalk_inbound_senderCorpId_missing')
   })
 
-  it('fails closed for topics and mismatched robot identity', () => {
+  it('does not mistake ordinary group routing metadata for a topic', () => {
+    const message = normalizeDingTalkRobotMessage({
+      msgId: 'msg-group-routing-metadata',
+      senderCorpId: 'ding-corp',
+      senderStaffId: 'owner-user',
+      conversationType: '2',
+      conversationId: 'cid-group',
+      openConvThreadId: 'group-routing-id',
+      openThreadId: 'group-open-routing-id',
+      isInAtList: true,
+      robotCode: 'ding-app-a',
+      text: { content: 'hello group' }
+    }, binding)
+
+    expect(message).toMatchObject({
+      conversationKind: 'group',
+      chatId: 'cid-group',
+      body: 'hello group',
+      explicitlyAtBot: true
+    })
+  })
+
+  it('fails closed for explicit topic identity and mismatched robot identity', () => {
     expect(() => normalizeDingTalkRobotMessage({
       msgId: 'msg-topic',
       senderCorpId: 'ding-corp',
       senderStaffId: 'owner-user',
       conversationType: '2',
       conversationId: 'cid-group',
-      openConvThreadId: 'thread-1',
+      topicId: 'topic-1',
       robotCode: 'ding-app-a',
       text: { content: 'thread' }
     }, binding)).toThrow('dingtalk_topic_not_supported')

@@ -28,7 +28,7 @@ export class DingTalkOpenApiClient {
   }
 
   async groupRobotCodes(openConversationId: string): Promise<string[]> {
-    const response = await this.#request('/v1.0/robot/getBotListInGroup', {
+    const response = await this.#request('/v1.0/robot/groups/robots/query', {
       method: 'POST',
       body: JSON.stringify({ openConversationId })
     })
@@ -50,16 +50,14 @@ export class DingTalkOpenApiClient {
     robotCode: string
     title: string
     text: string
-    atUserIds?: readonly string[]
   }): Promise<string> {
-    const response = await this.#request('/v1.0/robot/orgGroupSend', {
+    const response = await this.#request('/v1.0/robot/groupMessages/send', {
       method: 'POST',
       body: JSON.stringify({
         openConversationId: input.openConversationId,
         robotCode: input.robotCode,
         msgKey: 'sampleMarkdown',
-        msgParam: JSON.stringify({ title: input.title, text: input.text }),
-        atUserIds: input.atUserIds ?? []
+        msgParam: JSON.stringify({ title: input.title, text: input.text })
       })
     })
     return deliveryIdentity(response)

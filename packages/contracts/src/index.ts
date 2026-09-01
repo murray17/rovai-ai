@@ -3262,6 +3262,7 @@ export type CoreMethod =
   | 'channels.dingtalk.owner.verify'
   | 'channels.dingtalk.dm.startNew'
   | 'channels.dingtalk.pendingBinding.resolve'
+  | 'channels.dingtalk.cardActionContext'
   | 'channels.dingtalk.inbound.observe'
   | 'channels.dingtalk.roster.reconcile'
   | 'channels.dingtalk.inbound.finalize'
