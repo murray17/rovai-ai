@@ -54,7 +54,12 @@ last_updated: 2026-09-01
   Token 限定同 Camp/队员、focus Run 及其之前历史，不做点击鉴权、Owner 私聊、地址刷新或旧卡修复。
   全局端口设置位于渠道页最底部并默认折叠；桌面/手机 Web 时间线已复用生产执行台的 AgentRun、操作组与
   Command 嵌套 disclosure，外部触发者固定显示“你”。当前合同见
-  [Feishu Channel v10](../../contracts/feishu-channel-v10.md)，理由见 [V1.37-D05](decisions.md#v1-37-d05)。
+  [Feishu Channel v11](../../contracts/feishu-channel-v11.md)，理由见 [V1.37-D05](decisions.md#v1-37-d05)。
+- [飞书入站规范化 revision 1](model-context-change-feishu-ingress-normalization.md) 已由开发者二次确认并实施：
+  当前正文只冻结 SDK 单 locale 规范化结果，显式引用复用同一 normalizer；Topic
+  `parent_id == canonical root_id` 只表达结构父链，不再伪造 ExternalQuote。历史消息与 Context Evidence
+  不回填，当前合同为 [Feishu Channel v11](../../contracts/feishu-channel-v11.md)，理由见
+  [V1.37-D06](decisions.md#v1-37-d06)。
 - 当前仍 in_progress：Antigravity 边界已关闭，但 Cursor 非标准通知、所有 Runtime 原生生图及渠道实发
   并未全部验收；本机已观察到的工具/协议/上游限制保留，不提升任何 Runtime 平台资格。
 
@@ -66,8 +71,8 @@ Applications 安装见[本机交付记录](main-merge-and-daily-app.md)；本轮
 | 范围 | 结论 | 证据或理由 |
 | --- | --- | --- |
 | Version lifecycle | 已更新 | 本概览、实施计划、版本索引；v1.36 冻结为 historical，未验收事实保留 |
-| Decisions | 已更新 | [V1.37-D01](decisions.md#v1-37-d01)、[V1.37-D02](decisions.md#v1-37-d02)、[V1.37-D03](decisions.md#v1-37-d03)、[V1.37-D04](decisions.md#v1-37-d04)、[V1.37-D05](decisions.md#v1-37-d05)与 [CURRENT](../../decisions/CURRENT.md) |
-| Contracts | 已更新 | [Runtime Images v3](../../contracts/runtime-images-v3.md)、[Camp Open Projection v14](../../contracts/camp-open-projection-v14.md)、[Cancellation Settlement v2](../../contracts/cancellation-settlement-v2.md)、[Camp Message Send v19](../../contracts/camp-message-send-v19.md)、[Gather v5](../../contracts/gather-v5.md)、[File Preview v3](../../contracts/file-preview-v3.md)及[Feishu Channel v10](../../contracts/feishu-channel-v10.md) |
+| Decisions | 已更新 | [V1.37-D01](decisions.md#v1-37-d01)、[V1.37-D02](decisions.md#v1-37-d02)、[V1.37-D03](decisions.md#v1-37-d03)、[V1.37-D04](decisions.md#v1-37-d04)、[V1.37-D05](decisions.md#v1-37-d05)、[V1.37-D06](decisions.md#v1-37-d06)与 [CURRENT](../../decisions/CURRENT.md) |
+| Contracts | 已更新 | [Runtime Images v3](../../contracts/runtime-images-v3.md)、[Camp Open Projection v14](../../contracts/camp-open-projection-v14.md)、[Cancellation Settlement v2](../../contracts/cancellation-settlement-v2.md)、[Camp Message Send v19](../../contracts/camp-message-send-v19.md)、[Gather v5](../../contracts/gather-v5.md)、[File Preview v3](../../contracts/file-preview-v3.md)及[Feishu Channel v11](../../contracts/feishu-channel-v11.md) |
 | Architecture | 已更新 | [Runtime 图片](../../architecture/runtime-images.md)、[File Preview](../../architecture/file-preview.md)、[飞书渠道](../../architecture/feishu-channel.md)、[Built-in Tool Runtime](../../architecture/builtin-tool-runtime.md#bootstrap-与-dynamic-context)及架构导航 |
 | UI | 已更新 | [Camp 会话工作区](../../ui/components/conversation-workspace.md#runtime-图片与消息图片)、[文件预览](../../ui/components/file-preview.md)与[渠道设置](../../ui/components/channel-settings.md)；保留既有双主题 |
 | Runtime Activity | 确认无需更新 | 内部图片观察不进入 Canonical Activity，不修改 classifier/映射或已有公开 Evidence |
