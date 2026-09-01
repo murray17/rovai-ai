@@ -2,7 +2,7 @@
 document_type: version-decisions
 version: v1.37
 lifecycle: current
-last_updated: 2026-09-01
+last_updated: 2026-09-02
 ---
 
 # v1.37 决定
@@ -328,3 +328,33 @@ command 提供原生折叠。把 command result 全量平铺到钉钉会显著�
 - 欢迎卡是首次发布的可用性提示，不是业务状态真源；极端网络失败可能缺失，但不会把已经可用的 Bot 标成失败或重复建 App。
 - 拒绝只放宽为 `atUsers.length >= 1`：它无法证明 receiving Bot。拒绝让私聊也选项目：用户已确认私聊继续 Quick Chat。
   拒绝为欢迎卡增加数据库状态机：它的可靠性价值不足以复制 publication 与 provider 去重事实。
+
+<a id="v1-37-d12"></a>
+## V1.37-D12：钉钉群目标以 exact Stream App 与明确 @事实证明，不比较 opaque 用户 ID
+
+### 背景
+
+Applications 真实内部群验收中，Owner 明确 `@` 已安装机器人后仍无响应；同一 Bot 私聊正常，四个已发布 Bot 的
+credential-bound Stream 均已连接，但 Core 没有收到任何群入站命令。回归入口要求
+`chatbotUserId === atUsers[].dingtalkId`，该相等关系来自合成 fixture，不是 provider 合同。钉钉文档把
+`chatbotUserId` 定义为“暂无使用场景，可忽略”的加密机器人 ID；官方仓库公开的真实 Stream callback 也证明
+`chatbotUserId` 与 Bot mention 的 `dingtalkId` 可以使用不同编码。
+
+### 决定
+
+钉钉普通群 receiving Bot 由三项闭合事实证明：callback 来自该 Bot 自己的 `appKey/appSecret` Stream client；
+callback 携带 `robotCode` 时必须匹配该 binding；`isInAtList=true`。`chatbotUserId` 与 `atUsers` 继续接受有界
+shape 归一化，但不再参与 Bot target 相等判断，也不得从普通成员 identity 推导 Agent。多个 Rovai App 对同一
+external message 的独立实际接收仍进入 3 秒观察窗并整条 fail closed；私聊和群 roster/Owner admission 不变。
+
+本决定只取代 [V1.37-D11](#v1-37-d11) 的群目标 ID 相等假设；D11 的首次发布欢迎卡、品牌图标和身份文案继续有效。
+当前字段与行为由 [DingTalk Channel v9](../../contracts/dingtalk-channel-v9.md)和
+[钉钉渠道架构](../../architecture/dingtalk-channel.md)拥有。
+
+### 后果与替代方案
+
+- 单 Bot 的合法内部群 `@` 不再因为 provider opaque ID 编码不同而在进入 Core 前静默丢弃；未明确 @、`robotCode`
+  不匹配和多个 receiving App 仍 fail closed。
+- 拒绝继续比较 `chatbotUserId` 与 `atUsers`：provider 明确不承诺该用途，真实回调已经反证。
+- 拒绝只看 `atUsers.length`：普通成员 mention 与 Bot target 不是同一命名空间。exact Stream binding 与
+  `isInAtList` 已给出更窄且可验证的目标事实，不需要放宽 Owner、roster 或多 Bot 准入。

@@ -107,13 +107,16 @@ export function selectSingleDingTalkInboundObservation<T extends {
 export function hasCanonicalSingleDingTalkBotTarget(
   message: Pick<
     DingTalkInboundMessage,
-    'conversationKind' | 'explicitlyAtBot' | 'chatbotUserId' | 'atUsers'
+    'conversationKind' | 'explicitlyAtBot'
   >
 ): boolean {
+  // The callback already arrived through this Bot's credential-bound Stream,
+  // and normalization verifies any supplied robotCode against that exact
+  // binding. DingTalk documents chatbotUserId as opaque/ignorable; real
+  // callbacks can encode it
+  // differently from atUsers[].dingtalkId, so equality is not target proof.
   return message.conversationKind === 'p2p'
-    || (message.explicitlyAtBot
-      && message.chatbotUserId !== null
-      && message.atUsers.some((candidate) => candidate.dingtalkId === message.chatbotUserId))
+    || message.explicitlyAtBot
 }
 
 type CoreDingTalkSnapshot = {

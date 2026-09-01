@@ -3,20 +3,21 @@ document_type: architecture
 architecture: dingtalk-channel
 authority: dingtalk-channel-component-and-authority-boundaries
 status: accepted
-last_updated: 2026-09-01
+last_updated: 2026-09-02
 ---
 
 # 钉钉渠道架构
 
-字段、状态和恢复合同见 [DingTalk Channel v8](../contracts/dingtalk-channel-v8.md)，credential 与 Developer Session 持久化见
+字段、状态和恢复合同见 [DingTalk Channel v9](../contracts/dingtalk-channel-v9.md)，credential 与 Developer Session 持久化见
 [Channel Storage v3](../contracts/channel-storage-v3.md)，共享 Camp admission、membership 与
 模型输入分别继续由 [Feishu Channel v2](../contracts/feishu-channel-v2.md)中已经 provider-neutral 的渠道核心、
 [Camp Membership v2](../contracts/camp-membership-v2.md)和
 [ContextManifest Evidence v22](../contracts/context-manifest-evidence-v22.md)拥有。取舍理由见
 [v1.36 决策记录](../versions/v1.36/decisions.md)和
-[V1.37-D09](../versions/v1.37/decisions.md#v1-37-d09)与
-[V1.37-D10](../versions/v1.37/decisions.md#v1-37-d10)与
-[V1.37-D11](../versions/v1.37/decisions.md#v1-37-d11)。
+[V1.37-D09](../versions/v1.37/decisions.md#v1-37-d09)、
+[V1.37-D10](../versions/v1.37/decisions.md#v1-37-d10)、
+[V1.37-D11](../versions/v1.37/decisions.md#v1-37-d11)与
+[V1.37-D12](../versions/v1.37/decisions.md#v1-37-d12)。
 
 ## 组件与权威
 
@@ -163,7 +164,7 @@ Migration 122 为钉钉增加 account/publication/Bot/Owner identity 表，同�
 ```text
 Stream callback fast ACK
 → normalize exact appKey / robotCode / corpId / senderStaffId / msgId
-→ classify p2p/group, then reject group topic identity and require chatbotUserId in canonical atUsers
+→ classify p2p/group, reject group topic identity, then require exact Stream binding + matching robotCode + isInAtList
 → Core verify Owner from appKey + userId digest
 → p2p exact /new OR group roster reconcile
 → group first observe as durable incomplete aggregate
@@ -178,9 +179,10 @@ Stream callback fast ACK
 一张项目卡，可选择 opaque project ID 或直接建立 Quick Chat，随后处理原消息；绑定不可换绑。Owner 仍是 ExternalPrincipal，不获得本机
 `local_user` 权限。reply 只冻结为本次消息的 ExternalQuote，入站附件只保留名称/媒体类型摘要。
 
-群 callback 以 `chatbotUserId` 与 `atUsers[].dingtalkId` 的匹配证明 receiving Bot；同一条消息还 @普通成员不再把
-Rovai target 扩成多个，也不再因 `atUsers.length > 1` 被入口静默丢弃。多 Rovai Bot 仍由多个独立 App Stream 的真实接收
-事实证明，并在 3 秒窗口后整条 fail closed。私聊不依赖 `chatbotUserId`，继续直接进入 Quick Chat。
+群 callback 由 exact credential-bound App Stream、已校验的 `robotCode` 与 `isInAtList=true` 共同证明 receiving Bot。
+`chatbotUserId` 与 `atUsers[].dingtalkId` 都是 opaque provider identity，真实 callback 可能使用不同编码，二者不得再做
+相等判断；普通成员 mention 也不得推导 Agent target。多 Rovai Bot 仍由多个独立 App Stream 的真实接收事实证明，
+并在 3 秒窗口后整条 fail closed。私聊不依赖 `isInAtList` 或 mention identity，继续直接进入 Quick Chat。
 
 群 roster 以远端当前机器人列表与本机 published DingTalk Bot 的交集为 authority，使用既有 membership
 generation/source binding reconcile。加入/移出从下一次新 Run 生效，已运行 Run 与历史保持冻结。roster 不可读、出现未知
@@ -192,7 +194,7 @@ App 或目标已移出时 fail closed。
 | --- | --- | --- |
 | Owner 私聊 | enabled | 真实租户 Web Session、Stream 与回复验收 |
 | Owner 普通群显式 `@` | enabled | 真实群 roster、项目卡和输出验收 |
-| 同消息直接多 Bot | disabled；普通群须由 `isInAtList + chatbotUserId ∈ atUsers[].dingtalkId` 证明 receiving Bot；其他普通成员 mention 可共存，多个 receiving Rovai App 仍整条 fail closed，单 Bot 协作扩展只走 Core A2A | 官方 canonical mention mapping + 多 App observation 真实证据 |
+| 同消息直接多 Bot | disabled；普通群须由 exact Stream App、匹配 `robotCode` 与 `isInAtList=true` 证明 receiving Bot；opaque `chatbotUserId/atUsers` 不做相等判断，多个 receiving Rovai App 仍整条 fail closed，单 Bot 协作扩展只走 Core A2A | 多 App observation 真实证据 |
 | 话题/Thread | disabled；只有规范化为 group 后出现非空 topic/thread identity 才拒绝，p2p 的同名平台路由元数据不视为 Topic | 独立话题群与消息 thread identity、roster、Camp mapping 证据 |
 | 入站附件 | summary only | 官方下载、授权和 Managed Attachment ingress 设计 |
 | 出站附件 | disabled，明确 unsupported | 已验证 app-only 原生投递和可恢复 message identity |
@@ -222,7 +224,7 @@ Renderer 状态重建业务事实。
 
 ## References
 
-- [DingTalk Channel v8](../contracts/dingtalk-channel-v8.md)
+- [DingTalk Channel v9](../contracts/dingtalk-channel-v9.md)
 - [Channel Storage v3](../contracts/channel-storage-v3.md)
 - [Camp Membership v2](../contracts/camp-membership-v2.md)
 - [渠道设置](../ui/components/channel-settings.md)
@@ -230,3 +232,4 @@ Renderer 状态重建业务事实。
 - [V1.37-D09](../versions/v1.37/decisions.md#v1-37-d09)
 - [V1.37-D10](../versions/v1.37/decisions.md#v1-37-d10)
 - [V1.37-D11](../versions/v1.37/decisions.md#v1-37-d11)
+- [V1.37-D12](../versions/v1.37/decisions.md#v1-37-d12)

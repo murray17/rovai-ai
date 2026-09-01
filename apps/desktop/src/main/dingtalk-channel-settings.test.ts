@@ -485,38 +485,16 @@ describe('DingTalk channel account connection', () => {
     expect(selectSingleDingTalkInboundObservation([])).toBeNull()
   })
 
-  it('requires canonical atUsers proof for a direct group target', () => {
+  it('requires the receiving Stream App and isInAtList for a direct group target', () => {
     expect(hasCanonicalSingleDingTalkBotTarget({
-      conversationKind: 'group', explicitlyAtBot: true,
-      chatbotUserId: 'ding-bot-user-a',
-      atUsers: [{ staffId: null, dingtalkId: 'ding-bot-user-a' }]
+      conversationKind: 'group', explicitlyAtBot: true
     })).toBe(true)
     expect(hasCanonicalSingleDingTalkBotTarget({
-      conversationKind: 'group', explicitlyAtBot: true,
-      chatbotUserId: 'ding-bot-user-a', atUsers: []
-    })).toBe(false)
-    expect(hasCanonicalSingleDingTalkBotTarget({
-      conversationKind: 'group', explicitlyAtBot: true,
-      chatbotUserId: 'ding-bot-user-a',
-      atUsers: [{ staffId: null, dingtalkId: 'ding-other-bot-user' }]
-    })).toBe(false)
-    expect(hasCanonicalSingleDingTalkBotTarget({
-      conversationKind: 'group', explicitlyAtBot: true,
-      chatbotUserId: null,
-      atUsers: [{ staffId: null, dingtalkId: 'ding-bot-user-a' }]
-    })).toBe(false)
-    expect(hasCanonicalSingleDingTalkBotTarget({
-      conversationKind: 'group', explicitlyAtBot: true,
-      chatbotUserId: 'ding-bot-user-a',
-      atUsers: [
-        { staffId: null, dingtalkId: 'ding-bot-user-a' },
-        { staffId: 'colleague-user', dingtalkId: null }
-      ]
+      conversationKind: 'p2p', explicitlyAtBot: true
     })).toBe(true)
     expect(hasCanonicalSingleDingTalkBotTarget({
-      conversationKind: 'p2p', explicitlyAtBot: true,
-      chatbotUserId: null, atUsers: []
-    })).toBe(true)
+      conversationKind: 'group', explicitlyAtBot: false
+    })).toBe(false)
   })
 
   it('discards staged cookies when the Core account commit fails', async () => {

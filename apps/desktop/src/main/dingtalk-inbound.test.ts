@@ -41,7 +41,7 @@ describe('DingTalk inbound normalization', () => {
     })
   })
 
-  it('uses chatbotUserId as the receiving Bot proof even when a human is also mentioned', () => {
+  it('uses the exact receiving App and isInAtList even when provider Bot IDs disagree', () => {
     const message = normalizeDingTalkRobotMessage({
       msgId: 'msg-group-bot-proof',
       senderCorpId: 'ding-corp',
@@ -49,10 +49,12 @@ describe('DingTalk inbound normalization', () => {
       senderNick: 'Murray',
       conversationType: '2',
       openConversationId: 'cid-group',
-      chatbotUserId: 'ding-bot-user-a',
+      // DingTalk documents chatbotUserId as opaque and ignorable. Real Stream
+      // callbacks can encode it differently from the Bot entry in atUsers.
+      chatbotUserId: '$:LWCP_v1:bot-user-a',
       isInAtList: true,
       atUsers: [
-        { dingtalkId: 'ding-bot-user-a' },
+        { dingtalkId: '$:LW]bot-user-a' },
         { staffId: 'colleague-user' }
       ],
       robotCode: 'ding-app-a',
@@ -61,7 +63,7 @@ describe('DingTalk inbound normalization', () => {
     }, binding)
 
     expect(message).toMatchObject({
-      chatbotUserId: 'ding-bot-user-a',
+      chatbotUserId: '$:LWCP_v1:bot-user-a',
       explicitlyAtBot: true
     })
     expect(hasCanonicalSingleDingTalkBotTarget(message)).toBe(true)

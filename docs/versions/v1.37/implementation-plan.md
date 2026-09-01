@@ -3,7 +3,7 @@ document_type: implementation-plan
 version: v1.37
 authority: implementation-and-acceptance-status
 status: in_progress
-last_updated: 2026-09-01
+last_updated: 2026-09-02
 ---
 
 # v1.37 实施与验收
@@ -463,3 +463,12 @@ Antigravity 原生生成、TRAE/Copilot 专用图片结果已接入，六种 Run
 - 定向 Vitest 5 个文件 / 130 项与 `pnpm typecheck` 通过；完整 `pnpm test` 的 135 个 Vitest 文件 / 1411 项、
   Node 221 项中 220 项通过且 1 项 Windows 条件跳过，文档/Skill 门禁和 `pnpm build:desktop` 通过。钉钉真实群聊
   项目选择卡与两端首次欢迎卡仍须使用新发布 Bot 在 Applications 中验收。
+
+### 2026-09-02 钉钉内部群真实回调修正
+
+- Applications 中新建归属同一组织的内部群，按机器人入口安装已发布 Bot 后，Owner 的真实 `@` 消息仍无响应；
+  数据库在受控 55 秒观察窗内没有新增 DingTalk group aggregate 或任何 Core command，而同一渠道私聊历史正常。
+- 入口 red test 使用 provider 公开真实 callback 形状复现：`isInAtList=true`，但 `chatbotUserId` 与
+  `atUsers[].dingtalkId` 使用不同 opaque 编码，旧 `hasCanonicalSingleDingTalkBotTarget` 返回 false。
+- 群目标改为 exact credential-bound Stream App、已校验 `robotCode` 与 `isInAtList=true`；mention identities 只做
+  有界归一化，不推导 Agent。两个定向 Vitest 文件共 54 项已通过；Applications 真实群项目卡与执行链待新包复验。
