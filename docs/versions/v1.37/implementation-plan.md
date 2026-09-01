@@ -23,6 +23,10 @@ last_updated: 2026-09-01
 - [x] Renderer 进程内缓存已解码 Blob payload；附件切回不重读，Runtime 切回先显示再后台刷新，Tile 独立释放 URL。
 - [x] 钉钉完整产品链路未验收，合入 main 前隐藏渠道页整个入口；保留实现、已有数据及独立登录组件回归。
 - [x] 开发者单独确认 revision 1 后实施精确文件帮助与飞书新 Bootstrap 提示；静态资源与其他上下文轴不变。
+- [x] 开发者单独确认 Principal 寻址教学 revision 1 后，从 Authority boundary 删除正文 `@Principal`
+  寻址暗示；仅 Charter revision 3→4，`rovai send --help`、发送效果与 Agent audience 投影不变。
+- [x] 开发者确认多队员 mention cluster revision 3 后，将 Agent `body` help 收敛为 payload 说明；扩展
+  Core-only 行首连续有效 alias 解析，未知/歧义/`@Principal` tail 保持 Text，不新增拒绝。
 - [x] Antigravity 真实生成图片终态、TRAE/Copilot 专用图片结果 fixture 与适配；本机队员经过隔离 Core 复测。
 - [ ] Cursor 非标准生成通知的真实成功 fixture；本机旧 CLI 不支持 ACP，无证据不实现猜测 parser。
 
@@ -69,11 +73,31 @@ last_updated: 2026-09-01
 - 扩展既有教学、CLI help 和 `context_contract::tests`：三条示例、精确文件帮助、旧无 revision / revision 2
   的 digest 失配；现有纯正文/纯附件发送测试保持。最小命令 `cargo test -p rovai-core --lib camp_message_send_teaching`、
   `cargo test -p rovai-core --lib context_contract` 与 `cargo test -p rovai-core --bin rovai`。
+- 扩展并重命名既有 inline parser、Send schema 与 SQLite alias owner：覆盖同一行 display/display、
+  canonical/display、重复 occurrence、换行、正文终止、literal invalid tail、两个 Structured Mention/Delivery
+  及 PublicOnly 完整旁路；不新增平行数据库 fixture。最小命令分别使用
+  `message_delivery::tests::line_leading_display_name_alias_supports_whitespace_separated_clusters`、
+  `team_tool::tests::slow_tests::public_send_schema_keeps_inline_fallback_out_of_agent_body_help` 与
+  `team_tool::tests::slow_tests::public_send_resolves_line_leading_display_name_cluster_before_delivery`。
 - 核对到既有文档漂移：基础不变量曾把 Bootstrap 第三段写成 COLLABORATION_STATE；按既有实现、
   formatter golden 和 Built-in 架构校正为 MEMORY_ENTRYPOINT。仅校正文档，不改变 Bootstrap 格式。
 
 ## 证据状态
 
+### 2026-09-01 Principal 教学与多队员 mention cluster
+
+- Principal Authority-boundary 精确 owner、Session Charter 矩阵、Send schema、PublicOnly、display-name parser 与
+  两队员 SQLite Delivery 定向 owner 全部通过；`@惠 @Principal` 明确保持 accepted，只路由惠并保留后半正文。
+- `cargo clippy --workspace --all-targets --features slow-tests -- -D warnings` 与 `cargo fmt --all --check` 通过；
+  `pnpm test:rust:pr` 的 Library 472、CLI 32、slow 297 项全部通过。
+- `pnpm test` 通过：133 个 Vitest 文件 / 1356 项、220 项 Node tests，1 项既有 Windows 原生测试按平台跳过；
+  文档 9 项、Skill 3 项及对应治理门禁通过。`pnpm typecheck`、`pnpm build:desktop` 和 `git diff --check` 通过。
+- 固定 PR base `5384c8e515fbbe468d1fc018afdc0a51c7ff886d` 的 `docs:check:ci` 通过。本阶段未调用模型、
+  启动真实 Runtime 或向渠道发件；Applications 打包与非终止安装在 main 合并后执行。
+
+- Principal 寻址教学 revision 1 实施后，两项精确 Rust owner、`cargo fmt --all --check`、文档单测 9 项、
+  普通文档门禁及固定 main base `02d5a3c381ae430cef67cf7ae43045c4301058ad` 的 CI 文档门禁通过；
+  未启动 Runtime、调用模型、发送消息、安装或重启日常 App。
 - 图片实施阶段的 `pnpm typecheck`、`pnpm exec vitest run`（132 文件 / 1280 tests）、`pnpm build:desktop`
   通过；revision 1 实施后再次运行 `pnpm typecheck` 通过，本轮未改 Renderer。
 - `cargo fmt --all --check`、`cargo clippy --workspace --all-targets --features slow-tests -- -D warnings`

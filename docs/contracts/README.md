@@ -157,7 +157,9 @@ Architecture 解释组件如何组成，Version 概览记录交付范围；它�
 | [Built-in Tool Transport v7 (historical)](builtin-tool-transport-v7.md) | v0.67 的 Camp Message Send v4、exact Camp read addressing 与初版渐进式 CLI 教学；不作为 v0.73 CLI context/catalog 入口 |
 | [Built-in Tool Transport v7 Errata](builtin-tool-transport-v7-errata.md) | 历史 v7 locator-present recovery 勘误；其 self-write exact-read 语义已由 v8/v9 继承 |
 | [Durable Task v3（当前）](durable-task-v3.md) | User/Lead 责任定义、Assignee execution-state update、Camp-wide read、explicit owner、unassigned holding 与 advisory actions |
-| [Camp Message Send v16（当前）](camp-message-send-v16.md) | v15 发送语义不变；收件人文件用途教学与新飞书 Session 的冻结交付提示，Charter revision 3 |
+| [Camp Message Send v18（当前）](camp-message-send-v18.md) | Agent body help 收敛到 payload；行首连续有效队员 alias 兼容解析，invalid alias tail 保持普通 Text |
+| [Camp Message Send v17（历史）](camp-message-send-v17.md) | v16 发送语义与 CLI help 不变；Principal 寻址教学去歧义，Charter revision 4 |
+| [Camp Message Send v16（历史）](camp-message-send-v16.md) | v15 发送语义不变；收件人文件用途教学与新飞书 Session 的冻结交付提示，Charter revision 3 |
 | [Camp Message Send v15（历史）](camp-message-send-v15.md) | Agent/User Automation 保持既有合同；Desktop Composer 增加私有 next-turn admission |
 | [Camp Message Send v14（历史）](camp-message-send-v14.md) | v13 原子提交/结果不变；CLI 接受 Runtime 可读外部文件/目录并在 IPC 前快照 |
 | [Camp Message Send v13（历史）](camp-message-send-v13.md) | v12 input/结果不变；Agent files 一次 ingest 为 Managed v2，Delivery 不再进入 publication gate 或等待活跃 Run |

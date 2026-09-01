@@ -1,7 +1,7 @@
 ---
 document_type: architecture
 authority: current-foundational-invariants
-last_updated: 2026-08-31
+last_updated: 2026-09-01
 ---
 
 # 当前基础架构不变量
@@ -202,7 +202,7 @@ last_updated: 2026-08-31
 - Agent 只能访问自己当前具备 Camp 关系和运行授权的公共历史；每次读取都重做 live authorization，ID、搜索命中、旧 Manifest、引用闭包或过去的关系不扩大 scope。跨 Camp search 只发现当前可见公开消息，后续 exact read 仍使用相同授权。
 - `camp.message.send` 只有 `automatic | public_only` 两种持久寻址意图。只有显式 built-in routing operation 且意图允许 Agent addressing 时才创建 Delivery；Runtime 自动 final、普通用户消息和纯 public publication 不能靠正文意外唤醒 Agent。
 - Agent Send 的 body 缺省为空字符串、files 缺省为空数组；trim 后正文非空或至少一个文件即可构成 payload，两者同时为空由领域服务拒绝。纯附件 accepted 消息忠实保存空 body，不生成占位正文，并沿用同一公共消息、publication、Delivery、receipt 与 Replay 边界。
-- Canonical Agent ID 是稳定目标形式。精确当前成员显示名可作为 Core 解析的便利 alias，但只在逻辑行首第一个非空白 token 处生效；mid-line prose 不寻址，歧义或不合格成员 fail closed。
+- Canonical Agent ID 是稳定目标形式，`--to` 是 Agent 唯一推荐的目标 authoring 入口。Core-only inline 兼容解析可在逻辑行首接受由空白分隔的连续 canonical token 或精确当前成员显示名；只消费连续有效前缀，遇到未知、歧义或普通 prose 即结束并保留 Text，mid-line display-name 不寻址。既有 malformed canonical token 仍 fail closed。
 - 当前 Run 作者可以按 exact message ID 读取自己刚提交且越过 publication fence 的消息；该窄例外不扩大历史高水位、其他作者或跨 Camp读取。
 
 <a id="collaboration-delivery"></a>

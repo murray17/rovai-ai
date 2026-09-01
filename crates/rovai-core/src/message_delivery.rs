@@ -618,6 +618,13 @@ struct InlineAddressingOccurrence {
     ordinal: usize,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum LineLeadingMentionClusterPosition {
+    Outside,
+    First,
+    Continuation,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct ActiveCampAgent {
     agent_id: String,
@@ -3579,7 +3586,17 @@ fn parse_inline_addressing(body: &str, active_agents: &[ActiveCampAgent]) -> Inl
     let mut index = 0_usize;
     let mut fenced = false;
     let mut inline_code = false;
+    let mut line_start = 0_usize;
+    let mut line_cluster_end = None;
+    let mut line_cluster_ended = false;
     while index < bytes.len() {
+        if bytes[index] == b'\n' {
+            line_start = index + 1;
+            line_cluster_end = None;
+            line_cluster_ended = false;
+            index += 1;
+            continue;
+        }
         if bytes[index..].starts_with(b"```") {
             fenced = !fenced;
             inline_code = false;
@@ -3612,6 +3629,17 @@ fn parse_inline_addressing(body: &str, active_agents: &[ActiveCampAgent]) -> Inl
             continue;
         }
 
+        let cluster_position = line_leading_mention_cluster_position(
+            body,
+            index,
+            line_start,
+            line_cluster_end,
+            line_cluster_ended,
+        );
+        if cluster_position == LineLeadingMentionClusterPosition::Outside {
+            line_cluster_ended = true;
+        }
+
         if bytes[index..].starts_with(b"@agent_") {
             let mut end = index + "@agent_".len();
             while end < bytes.len() && (bytes[end].is_ascii_alphanumeric() || bytes[end] == b'_') {
@@ -3625,14 +3653,18 @@ fn parse_inline_addressing(body: &str, active_agents: &[ActiveCampAgent]) -> Inl
                     end_byte: end,
                     ordinal: occurrences.len(),
                 });
+                if cluster_position != LineLeadingMentionClusterPosition::Outside {
+                    line_cluster_end = Some(end);
+                }
             } else {
                 malformed.push(format!("@{value}"));
+                line_cluster_ended = true;
             }
             index = end;
             continue;
         }
 
-        if !is_line_leading_display_name_alias(body, index) {
+        if cluster_position == LineLeadingMentionClusterPosition::Outside {
             index += 1;
             continue;
         }
@@ -3644,10 +3676,12 @@ fn parse_inline_addressing(body: &str, active_agents: &[ActiveCampAgent]) -> Inl
                 end_byte,
                 ordinal: occurrences.len(),
             });
+            line_cluster_end = Some(end_byte);
             index = end_byte;
             continue;
         }
 
+        line_cluster_ended = true;
         index += 1;
     }
     InlineAddressing {
@@ -3656,12 +3690,30 @@ fn parse_inline_addressing(body: &str, active_agents: &[ActiveCampAgent]) -> Inl
     }
 }
 
-fn is_line_leading_display_name_alias(body: &str, at_byte: usize) -> bool {
-    let line_start = body[..at_byte]
-        .rfind('\n')
-        .map(|position| position + 1)
-        .unwrap_or(0);
-    body[line_start..at_byte].chars().all(char::is_whitespace)
+fn line_leading_mention_cluster_position(
+    body: &str,
+    at_byte: usize,
+    line_start: usize,
+    line_cluster_end: Option<usize>,
+    line_cluster_ended: bool,
+) -> LineLeadingMentionClusterPosition {
+    if line_cluster_ended {
+        return LineLeadingMentionClusterPosition::Outside;
+    }
+
+    let gap = &body[line_cluster_end.unwrap_or(line_start)..at_byte];
+    if !gap.chars().all(char::is_whitespace) {
+        return LineLeadingMentionClusterPosition::Outside;
+    }
+    if line_cluster_end.is_some() {
+        if gap.is_empty() {
+            LineLeadingMentionClusterPosition::Outside
+        } else {
+            LineLeadingMentionClusterPosition::Continuation
+        }
+    } else {
+        LineLeadingMentionClusterPosition::First
+    }
 }
 
 fn match_display_name_mention<'a>(
@@ -3835,11 +3887,17 @@ https://example.test/@agent_7
     }
 
     #[test]
-    fn display_name_alias_requires_the_first_non_whitespace_position_on_a_line() {
-        let active_agents = vec![ActiveCampAgent {
-            agent_id: "agent_6".to_string(),
-            display_name: "爱丽丝".to_string(),
-        }];
+    fn line_leading_display_name_alias_supports_whitespace_separated_clusters() {
+        let active_agents = vec![
+            ActiveCampAgent {
+                agent_id: "agent_6".to_string(),
+                display_name: "爱丽丝".to_string(),
+            },
+            ActiveCampAgent {
+                agent_id: "agent_7".to_string(),
+                display_name: "鲍勃".to_string(),
+            },
+        ];
 
         let addressed = parse_inline_addressing(
             "迁移背景与约束……\n\n  @爱丽丝 请分析这个迁移方案",
@@ -3847,6 +3905,50 @@ https://example.test/@agent_7
         );
         assert_eq!(addressed.occurrences.len(), 1);
         assert_eq!(addressed.occurrences[0].agent_id, "agent_6");
+
+        for (body, expected) in [
+            ("@爱丽丝 @鲍勃 请处理", vec!["agent_6", "agent_7"]),
+            ("@agent_6 @鲍勃 请处理", vec!["agent_6", "agent_7"]),
+            ("@爱丽丝 @爱丽丝 请处理", vec!["agent_6", "agent_6"]),
+            ("@爱丽丝\n@鲍勃 请处理", vec!["agent_6", "agent_7"]),
+            ("@爱丽丝 请与 @鲍勃", vec!["agent_6"]),
+        ] {
+            let parsed = parse_inline_addressing(body, &active_agents);
+            assert_eq!(
+                parsed
+                    .occurrences
+                    .iter()
+                    .map(|occurrence| occurrence.agent_id.as_str())
+                    .collect::<Vec<_>>(),
+                expected,
+                "unexpected cluster routing in {body}"
+            );
+            assert!(
+                parsed.malformed.is_empty(),
+                "unexpected rejection in {body}"
+            );
+        }
+
+        for body in [
+            "@爱丽丝 @不存在 请处理",
+            "@爱丽丝 @Principal 请处理",
+            "@爱丽丝 @不存在 @鲍勃 请处理",
+        ] {
+            let parsed = parse_inline_addressing(body, &active_agents);
+            assert_eq!(
+                parsed
+                    .occurrences
+                    .iter()
+                    .map(|occurrence| occurrence.agent_id.as_str())
+                    .collect::<Vec<_>>(),
+                vec!["agent_6"]
+            );
+            assert!(parsed.malformed.is_empty());
+        }
+
+        let principal_first = parse_inline_addressing("@Principal @爱丽丝 请处理", &active_agents);
+        assert!(principal_first.occurrences.is_empty());
+        assert!(principal_first.malformed.is_empty());
 
         for body in [
             "让 Bob 分析一下 @爱丽丝 提出的迁移方案",
@@ -3925,6 +4027,11 @@ https://example.test/@agent_7
 
         assert!(parsed.occurrences.is_empty());
         assert!(parsed.malformed.is_empty());
+
+        let clustered = parse_inline_addressing("@爱丽丝 @重复 请处理", &active_agents);
+        assert_eq!(clustered.occurrences.len(), 1);
+        assert_eq!(clustered.occurrences[0].agent_id, "agent_6");
+        assert!(clustered.malformed.is_empty());
     }
 
     #[test]

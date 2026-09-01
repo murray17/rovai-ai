@@ -552,7 +552,7 @@ impl TeamToolService {
                     "type": "string",
                     "default": "",
                     "maxLength": CAMP_MESSAGE_SEND_MAX_BODY_BYTES,
-                    "description": "Optional exact public message body; omit it when at least one file supplies the complete payload. Canonical inline @agent_N tokens retain their existing positions. An exact active Camp member @display-name alias participates only as the first non-whitespace token on a line and must be followed by whitespace or end-of-body; put trailing routing on a dedicated final line. Code, URLs, and escaped literal regions are excluded."
+                    "description": "Optional exact public message body; omit it when at least one file supplies the complete payload."
                 },
                 "to": {
                     "type": "array",
@@ -2914,17 +2914,25 @@ mod tests {
     }
 
     #[cfg(feature = "slow-tests")]
-    fn public_send_schema_teaches_alias_boundary_and_canonical_to_values() {
+    fn public_send_schema_keeps_inline_fallback_out_of_agent_body_help() {
         let schema = TeamToolService::camp_message_send_input_schema();
         let body_description = schema["properties"]["body"]["description"]
             .as_str()
             .unwrap();
         let to_description = schema["properties"]["to"]["description"].as_str().unwrap();
 
-        assert!(body_description.contains("exact active Camp member @display-name"));
-        assert!(body_description.contains("first non-whitespace token on a line"));
-        assert!(body_description.contains("dedicated final line"));
-        assert!(body_description.contains("whitespace or end-of-body"));
+        assert_eq!(
+            body_description,
+            "Optional exact public message body; omit it when at least one file supplies the complete payload."
+        );
+        for hidden_fallback_term in [
+            "@agent_N",
+            "@display-name",
+            "cluster",
+            "dedicated final line",
+        ] {
+            assert!(!body_description.contains(hidden_fallback_term));
+        }
         assert!(to_description.contains("canonical Agent ID"));
         assert!(to_description.contains("Display names are not accepted here"));
     }
@@ -3712,7 +3720,15 @@ mod tests {
             before.0
         );
 
-        let literal_body = "@agent_2 谢谢\n@芝士 收口";
+        fixture
+            .database
+            .connection()
+            .execute_batch(
+                "UPDATE agent_profile SET display_name = '爱丽丝' WHERE id = 'agent_2';
+                 UPDATE agent_profile SET display_name = '鲍勃' WHERE id = 'agent_3';",
+            )
+            .unwrap();
+        let literal_body = "@爱丽丝 @鲍勃 @agent_2 谢谢";
         let mut invocation = fixture.public_send_invocation(
             "public-only-literal-agent-lookalikes",
             literal_body,
@@ -5302,19 +5318,19 @@ mod tests {
     }
 
     #[cfg(feature = "slow-tests")]
-    fn public_send_resolves_active_member_display_name_alias_before_delivery() {
+    fn public_send_resolves_line_leading_display_name_cluster_before_delivery() {
         let mut fixture = Fixture::new();
         fixture
             .database
             .connection()
-            .execute(
-                "UPDATE agent_profile SET display_name = '爱丽丝' WHERE id = 'agent_2'",
-                [],
+            .execute_batch(
+                "UPDATE agent_profile SET display_name = '爱丽丝' WHERE id = 'agent_2';
+                 UPDATE agent_profile SET display_name = '鲍勃' WHERE id = 'agent_3';",
             )
             .unwrap();
         let invocation = fixture.public_send_invocation(
-            "public-send-display-name-alias",
-            "@爱丽丝 v35 实现完成，请做只读 CR。",
+            "public-send-display-name-cluster",
+            "@爱丽丝 @鲍勃 v35 实现完成，请做只读 CR。",
             &[],
         );
 
@@ -5325,11 +5341,11 @@ mod tests {
         assert_eq!(sent.result.status, CommandResultStatus::Accepted);
         assert_eq!(
             sent.result.payload["effectiveRecipients"],
-            json!(["agent_2"])
+            json!(["agent_2", "agent_3"])
         );
         assert_eq!(
             sent.result.payload["deliveryIds"].as_array().unwrap().len(),
-            1
+            2
         );
         let message_id = sent.result.payload["messageId"].as_str().unwrap();
         let (body, content_json, delivery_count): (String, String, i64) = fixture
@@ -5347,15 +5363,52 @@ mod tests {
                 |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
             )
             .unwrap();
-        assert_eq!(body, "@爱丽丝 v35 实现完成，请做只读 CR。");
+        assert_eq!(body, "@爱丽丝 @鲍勃 v35 实现完成，请做只读 CR。");
         assert_eq!(
             serde_json::from_str::<Value>(&content_json).unwrap(),
             json!([
                 {"kind": "member_mention", "agentId": "agent_2"},
+                {"kind": "text", "text": " "},
+                {"kind": "member_mention", "agentId": "agent_3"},
                 {"kind": "text", "text": " v35 实现完成，请做只读 CR。"}
             ])
         );
-        assert_eq!(delivery_count, 1);
+        assert_eq!(delivery_count, 2);
+
+        let literal_tail_body = "@爱丽丝 @Principal 请处理";
+        let literal_tail = fixture.public_send_invocation(
+            "public-send-display-name-cluster-literal-tail",
+            literal_tail_body,
+            &[],
+        );
+        let sent = TeamToolService::default()
+            .send_public_message(&mut fixture.database, &literal_tail)
+            .unwrap();
+        assert_eq!(sent.result.status, CommandResultStatus::Accepted);
+        assert_eq!(
+            sent.result.payload["effectiveRecipients"],
+            json!(["agent_2"])
+        );
+        assert_eq!(
+            sent.result.payload["deliveryIds"].as_array().unwrap().len(),
+            1
+        );
+        let content_json: String = fixture
+            .database
+            .connection()
+            .query_row(
+                "SELECT structured_content_json FROM camp_message WHERE id = ?1",
+                [sent.result.payload["messageId"].as_str().unwrap()],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            serde_json::from_str::<Value>(&content_json).unwrap(),
+            json!([
+                {"kind": "member_mention", "agentId": "agent_2"},
+                {"kind": "text", "text": " @Principal 请处理"}
+            ])
+        );
     }
 
     #[cfg(feature = "slow-tests")]
@@ -10114,8 +10167,8 @@ Use this exact public input @agent_2";
     #[cfg(feature = "slow-tests")]
     mod slow_tests {
         #[test]
-        fn public_send_schema_teaches_alias_boundary_and_canonical_to_values() {
-            super::public_send_schema_teaches_alias_boundary_and_canonical_to_values();
+        fn public_send_schema_keeps_inline_fallback_out_of_agent_body_help() {
+            super::public_send_schema_keeps_inline_fallback_out_of_agent_body_help();
         }
         #[test]
         fn gather_acceptance_persists_unified_deliveries_and_split_budget() {
@@ -10150,8 +10203,8 @@ Use this exact public input @agent_2";
             super::gather_forward_retry_reuses_item_and_ready_wins();
         }
         #[test]
-        fn public_send_resolves_active_member_display_name_alias_before_delivery() {
-            super::public_send_resolves_active_member_display_name_alias_before_delivery();
+        fn public_send_resolves_line_leading_display_name_cluster_before_delivery() {
+            super::public_send_resolves_line_leading_display_name_cluster_before_delivery();
         }
         #[test]
         fn public_send_keeps_mid_line_display_name_alias_as_public_text() {
