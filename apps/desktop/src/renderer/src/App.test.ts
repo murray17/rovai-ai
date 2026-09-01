@@ -2822,15 +2822,15 @@ describe('task event projections', () => {
     expect(applicationGroup.indexOf('<strong>外观</strong>')).toBeLessThan(applicationGroup.indexOf('<strong>提醒</strong>'))
     expect(capabilitiesGroup).toContain('<strong>Skills</strong>')
     expect(capabilitiesGroup).toContain('<strong>MCP</strong>')
-    expect(capabilitiesGroup).toContain('<strong>Agent 运行时</strong>')
+    expect(capabilitiesGroup).toContain('<strong>运行时</strong>')
     expect(capabilitiesGroup).toContain('<strong>渠道</strong>')
     expect(capabilitiesGroup).toContain('data-navigation-icon="sparkles"')
     expect(capabilitiesGroup).toContain('data-navigation-icon="blocks"')
     expect(capabilitiesGroup).toContain('data-navigation-icon="cpu"')
     expect(capabilitiesGroup).toContain('data-navigation-icon="radio-tower"')
     expect(capabilitiesGroup.indexOf('<strong>Skills</strong>')).toBeLessThan(capabilitiesGroup.indexOf('<strong>MCP</strong>'))
-    expect(capabilitiesGroup.indexOf('<strong>MCP</strong>')).toBeLessThan(capabilitiesGroup.indexOf('<strong>Agent 运行时</strong>'))
-    expect(capabilitiesGroup.indexOf('<strong>Agent 运行时</strong>')).toBeLessThan(capabilitiesGroup.indexOf('<strong>渠道</strong>'))
+    expect(capabilitiesGroup.indexOf('<strong>MCP</strong>')).toBeLessThan(capabilitiesGroup.indexOf('<strong>运行时</strong>'))
+    expect(capabilitiesGroup.indexOf('<strong>运行时</strong>')).toBeLessThan(capabilitiesGroup.indexOf('<strong>渠道</strong>'))
     expect(supportGroup).toContain('<strong>诊断与修复</strong>')
     expect(supportGroup).toContain('<strong>运行监控</strong>')
     expect(supportGroup).toContain('<strong>关于与更新</strong>')
@@ -2862,7 +2862,7 @@ describe('task event projections', () => {
       general: '通用',
       skills: 'Skills',
       mcp: 'MCP',
-      runtime: 'Agent 运行时',
+      runtime: '运行时',
       channels: '渠道',
       appearance: '外观',
       notifications: '提醒',
@@ -2943,6 +2943,7 @@ describe('task event projections', () => {
     expect(rescan).toBeGreaterThan(0)
     expect(rescan).toBeLessThan(headerEnd)
     expect(headerEnd).toBeLessThan(directory)
+    expect(markup).toContain('<h1>运行时</h1>')
     expect(markup).toContain('管理本机 Agent 运行时及其可用状态。')
     expect(markup).not.toContain('Cursor Agent')
     expect(markup).not.toContain('高级诊断与自定义启动入口')
@@ -6274,12 +6275,12 @@ describe('task event projections', () => {
     expect(markup).not.toContain('Claude Code CLI')
     expect(markup).not.toContain('Antigravity App')
     expect(markup).not.toContain('/opt/homebrew/bin/codex')
-    expect(markup).toContain('<h3>运行时</h3>')
-    expect(markup).toContain('Agent 运行时')
+    expect(markup).toContain('<label class="field-label" for="member-runtime-select">运行时<select')
     expect(markup).toContain('保存运行配置')
     expect(markup).toContain('放弃更改')
     expect(markup).not.toContain('清除 Agent 运行时')
-    expect(markup).toContain('选择执行产品，并确认当前安装与可用状态')
+    expect(markup).not.toContain('<div class="member-section-heading">')
+    expect(markup).not.toContain('选择执行产品，并确认当前安装与可用状态')
   })
 
   it('keeps a missing Product Runtime as an unsaved draft and links to its checks', () => {
