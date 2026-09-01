@@ -3798,8 +3798,9 @@ impl ExecutionRuntimeService {
                 .query_map([], |row| row.get::<_, String>(0))?
                 .collect::<rusqlite::Result<Vec<_>>>()?
         };
+        let mut effect_evidence_run_ids = BTreeSet::new();
         for turn_id in camp_turns {
-            settle_abortive_camp_turn_in_tx(
+            let settlement = settle_abortive_camp_turn_in_tx(
                 &transaction,
                 &turn_id,
                 if cycle.0 == 3 {
@@ -3810,13 +3811,17 @@ impl ExecutionRuntimeService {
                 &actor,
                 &now,
             )?;
+            effect_evidence_run_ids.extend(
+                settlement
+                    .runs
+                    .into_iter()
+                    .filter(|run| run.external_effect_evidence_preserved)
+                    .map(|run| run.agent_run_id),
+            );
         }
         let mut fenced_agent_runs = Vec::with_capacity(targets.len());
         for (agent_run_id, _, _, execution_epoch, _, _, execution_root) in targets {
-            let has_unsettled_external_effects: bool = transaction.query_row(
-                "SELECT COALESCE(last_error_code = 'accepted_input_outcome_unknown', 0) FROM agent_run WHERE id = ?1",
-                [&agent_run_id], |row| row.get(0),
-            )?;
+            let has_unsettled_external_effects = effect_evidence_run_ids.contains(&agent_run_id);
             fenced_agent_runs.push(ControlledShutdownFencedAgentRun {
                 agent_run_id,
                 execution_epoch,
@@ -4625,6 +4630,8 @@ pub(crate) struct AbortiveRunSettlement {
     pub terminal_status: String,
     pub terminal_code: String,
     pub runtime_cleanup_required: bool,
+    #[serde(skip)]
+    pub external_effect_evidence_preserved: bool,
 }
 
 #[derive(Debug)]
@@ -4693,37 +4700,33 @@ pub(crate) fn settle_abortive_agent_run_in_tx(
             terminal_status: status,
             terminal_code: "agent_run.already_terminal".into(),
             runtime_cleanup_required: requested_at.is_some() && cleanup_ack.is_none(),
+            external_effect_evidence_preserved: false,
         });
     }
     let reason_code = previous_reason.as_deref().unwrap_or(reason_code);
-    let outcome_unknown: bool = transaction.query_row(
-        "SELECT EXISTS(SELECT 1 FROM runtime_input_delivery WHERE agent_run_id = ?1
-             AND (status IN ('accepted', 'delivery_unknown') OR (status = 'prepared' AND dispatch_started_at IS NOT NULL)))
-          OR EXISTS(SELECT 1 FROM action_execution WHERE agent_run_id = ?1
-             AND ((status = 'executing' AND dispatch_may_have_started_at IS NOT NULL)
-                  OR (status = 'unknown' AND unknown_disposition = 'active')))
-          OR EXISTS(SELECT 1 FROM runtime_delivery_checkpoint WHERE agent_run_id = ?1 AND status = 'delivering')",
-        [agent_run_id], |row| row.get(0),
+    let (accepted_input_preserved, action_effect_evidence, runtime_delivery_evidence): (
+        bool,
+        bool,
+        bool,
+    ) = transaction.query_row(
+        "SELECT
+               EXISTS(SELECT 1 FROM runtime_input_delivery WHERE agent_run_id = ?1
+                 AND (status IN ('accepted', 'delivery_unknown') OR (status = 'prepared' AND dispatch_started_at IS NOT NULL))),
+               EXISTS(SELECT 1 FROM action_execution WHERE agent_run_id = ?1
+                 AND ((status = 'executing' AND dispatch_may_have_started_at IS NOT NULL)
+                      OR (status = 'unknown' AND unknown_disposition = 'active'))),
+               EXISTS(SELECT 1 FROM runtime_delivery_checkpoint WHERE agent_run_id = ?1 AND status = 'delivering')",
+        [agent_run_id],
+        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
     )?;
+    let external_effect_evidence_preserved =
+        accepted_input_preserved || action_effect_evidence || runtime_delivery_evidence;
     let closure = close_abortive_run_effects(
         transaction,
         agent_run_id,
         now,
         AbortiveEffectClosureReason::cancellation(),
     )?;
-    let status = if outcome_unknown {
-        "failed"
-    } else {
-        "cancelled"
-    };
-    let error_code = outcome_unknown.then_some("accepted_input_outcome_unknown");
-    let event_type = if outcome_unknown {
-        "agent_run.accepted_input_outcome_unknown"
-    } else {
-        "agent_run.cancelled"
-    };
-    let details = outcome_unknown
-        .then(|| json!({"resolution": reason_code, "automaticRetryAllowed": false}).to_string());
     transaction.execute(
         "UPDATE agent_run SET status = ?2, wait_reason = NULL, wait_deadline_at = NULL,
              runtime_recovery_required = 0, execution_lease_owner = NULL, execution_lease_expires_at = NULL,
@@ -4732,7 +4735,14 @@ pub(crate) fn settle_abortive_agent_run_in_tx(
              terminal_resolution_source = NULL, terminal_reason_code = NULL, public_runtime_failure_json = NULL,
              ended_at = ?3, updated_at = ?3, version = version + 1
          WHERE id = ?1 AND status IN ('queued', 'running', 'waiting')",
-        params![agent_run_id, status, now, reason_code, error_code, details],
+        params![
+            agent_run_id,
+            "cancelled",
+            now,
+            reason_code,
+            Option::<&str>::None,
+            Option::<&str>::None
+        ],
     )?;
     if requested_at.is_none() {
         append_domain_event(
@@ -4747,14 +4757,16 @@ pub(crate) fn settle_abortive_agent_run_in_tx(
     }
     append_domain_event(
         transaction,
-        event_type,
+        "agent_run.cancelled",
         &camp_id,
         ("agent_run", agent_run_id),
         actor,
         Some(execution_epoch),
         &json!({
             "reasonCode": reason_code, "resolutionSource": "cancellation_transaction",
-            "acceptedInputPreserved": outcome_unknown, "automaticRetryAllowed": false,
+            "acceptedInputPreserved": accepted_input_preserved,
+            "externalEffectEvidencePreserved": external_effect_evidence_preserved,
+            "automaticRetryAllowed": false,
             "actionsMarkedUnknown": closure.actions_marked_unknown, "actionsClosed": closure.actions_closed,
             "approvalsCancelled": closure.approvals_cancelled, "deliveriesClosed": closure.deliveries_closed,
             "preparedInputsClosed": closure.prepared_inputs_closed,
@@ -4764,8 +4776,8 @@ pub(crate) fn settle_abortive_agent_run_in_tx(
         transaction,
         AgentRunDeliverySettlement {
             agent_run_id,
-            agent_run_status: status,
-            agent_run_error_code: error_code.or(Some(reason_code)),
+            agent_run_status: "cancelled",
+            agent_run_error_code: Some(reason_code),
             terminal_resolution_source: None,
             terminal_reason_code: None,
             final_output: None,
@@ -4780,9 +4792,10 @@ pub(crate) fn settle_abortive_agent_run_in_tx(
         camp_turn_id,
         conversation_id,
         execution_epoch,
-        terminal_status: status.into(),
-        terminal_code: event_type.into(),
+        terminal_status: "cancelled".into(),
+        terminal_code: "agent_run.cancelled".into(),
         runtime_cleanup_required: true,
+        external_effect_evidence_preserved,
     })
 }
 
@@ -6661,7 +6674,7 @@ mod tests {
             cancel_acknowledged_at: Option<String>,
             terminal_resolution_source: Option<String>,
             terminal_reason_code: Option<String>,
-            last_error_code: String,
+            last_error_code: Option<String>,
             input_delivery_status: String,
             aggregate_reason_code: Option<String>,
         }
@@ -6716,7 +6729,7 @@ mod tests {
                 },
             )
             .unwrap();
-        assert_eq!(state.run_status, "failed");
+        assert_eq!(state.run_status, "cancelled");
         assert!(state.cancel_requested_at.is_some());
         assert_eq!(
             state.cancel_reason_code.as_deref(),
@@ -6728,9 +6741,12 @@ mod tests {
                 && state.terminal_resolution_source.is_none()
                 && state.terminal_reason_code.is_none()
         );
-        assert_eq!(state.last_error_code, "accepted_input_outcome_unknown");
+        assert!(state.last_error_code.is_none());
         assert_eq!(state.input_delivery_status, "accepted");
-        assert_eq!(state.aggregate_reason_code.as_deref(), None);
+        assert_eq!(
+            state.aggregate_reason_code.as_deref(),
+            Some("required_run_incomplete")
+        );
         assert_eq!(
             service
                 .count_runtime_terminal_settlements(
@@ -6749,8 +6765,8 @@ mod tests {
             .iter()
             .find(|run| run.id == agent_run_id)
             .unwrap();
-        assert_eq!(run.status, "failed");
-        assert!(run.has_unsettled_external_effects);
+        assert_eq!(run.status, "cancelled");
+        assert!(!run.has_unsettled_external_effects);
         let turn = snapshot
             .turns
             .iter()
@@ -6836,7 +6852,7 @@ mod tests {
             .settle_controlled_shutdown_cycle(&mut database, "generation-existing-blocker")
             .unwrap();
         assert_eq!(settlement.fenced_agent_runs.len(), 1);
-        let after: (String, Option<String>, i64, String) = database
+        let after: (String, Option<String>, i64, Option<String>) = database
             .connection()
             .query_row(
                 r#"
@@ -6847,10 +6863,10 @@ mod tests {
                 |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
             )
             .unwrap();
-        assert_eq!(after.0, "failed");
+        assert_eq!(after.0, "cancelled");
         assert!(after.1.is_none());
         assert_eq!(after.2, 0);
-        assert_eq!(after.3, "accepted_input_outcome_unknown");
+        assert!(after.3.is_none());
         let snapshot = ReadModelService
             .camp_snapshot(&mut database, &camp_id)
             .unwrap();
@@ -6859,17 +6875,18 @@ mod tests {
             .iter()
             .find(|run| run.id == agent_run_id)
             .unwrap();
-        assert!(run.has_unsettled_external_effects);
+        assert_eq!(run.status, "cancelled");
+        assert!(!run.has_unsettled_external_effects);
 
         drop(database);
         std::fs::remove_dir_all(directory).unwrap();
     }
 
     #[test]
-    fn controlled_shutdown_startup_recovery_converges_prepared_input_to_terminal_unknown() {
+    fn controlled_shutdown_startup_recovery_cancels_run_and_preserves_dispatch_evidence() {
         struct StartupRecoveryState {
             run_status: String,
-            last_error_code: String,
+            last_error_code: Option<String>,
             input_delivery_status: String,
             input_resolved_at: Option<String>,
             cancel_requested_at: Option<String>,
@@ -6921,8 +6938,8 @@ mod tests {
                 },
             )
             .unwrap();
-        assert_eq!(state.run_status, "failed");
-        assert_eq!(state.last_error_code, "accepted_input_outcome_unknown");
+        assert_eq!(state.run_status, "cancelled");
+        assert!(state.last_error_code.is_none());
         assert_eq!(state.input_delivery_status, "delivery_unknown");
         assert!(state.input_resolved_at.is_none());
         assert!(state.cancel_requested_at.is_some());
@@ -8537,12 +8554,48 @@ mod tests {
         assert_eq!(run_ids.len(), 2);
         let target_run_id = run_ids[0].as_str().unwrap().to_string();
         let sibling_run_id = run_ids[1].as_str().unwrap().to_string();
-        let target_version: i64 = database
+        let runtime = ExecutionRuntimeService::default();
+        let claimed = runtime
+            .claim_agent_run(
+                &mut database,
+                &scheduler_envelope(
+                    "run-cancel-claim-target",
+                    &camp_id,
+                    ClaimAgentRunCommand {
+                        agent_run_id: target_run_id.clone(),
+                        expected_version: 1,
+                        lease_owner: "run-cancel-test-host".to_string(),
+                        lease_seconds: 60,
+                        workspace: Some(AgentRunWorkspace {
+                            execution_root: workspace.to_string_lossy().to_string(),
+                            access: "write".to_string(),
+                            isolation: "shared".to_string(),
+                        }),
+                        starting_git_observation: None,
+                    },
+                ),
+            )
+            .unwrap();
+        assert_ne!(claimed.result.status, CommandResultStatus::Rejected);
+        let (target_version, target_execution_epoch): (i64, i64) = database
             .connection()
             .query_row(
-                "SELECT version FROM agent_run WHERE id = ?1",
+                "SELECT version, execution_epoch FROM agent_run WHERE id = ?1",
                 [&target_run_id],
-                |row| row.get(0),
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        insert_test_runtime_input(
+            &database,
+            &target_run_id,
+            target_execution_epoch,
+            "prepared",
+        );
+        database
+            .connection()
+            .execute(
+                "UPDATE runtime_input_delivery SET dispatch_started_at = prepared_at WHERE agent_run_id = ?1",
+                [&target_run_id],
             )
             .unwrap();
         let turn_before: (String, i64, Option<String>) = database
@@ -8561,7 +8614,6 @@ mod tests {
                 |row| row.get(0),
             )
             .unwrap();
-        let runtime = ExecutionRuntimeService::default();
         let system_attempt = runtime
             .request_agent_run_cancellation(
                 &mut database,
@@ -8599,6 +8651,7 @@ mod tests {
             .unwrap();
         assert_eq!(requested.result.status, CommandResultStatus::Applied);
         assert_eq!(requested.result.code, "agent_run.cancelled");
+        assert_eq!(requested.result.payload["status"], "cancelled");
         let repeated_with_stale_version = runtime
             .request_agent_run_cancellation(
                 &mut database,
@@ -8618,24 +8671,50 @@ mod tests {
             "agent_run.already_terminal"
         );
 
-        let run_state: (Option<String>, Option<String>, Option<String>) = database
+        let run_state: (
+            String,
+            Option<String>,
+            String,
+            Option<String>,
+            Option<String>,
+            Option<String>,
+        ) = database
             .connection()
             .query_row(
                 r#"
                 SELECT
-                    (SELECT cancel_reason_code FROM agent_run WHERE id = ?1),
-                    (SELECT cancel_requested_at FROM agent_run WHERE id = ?2),
-                    (SELECT cancel_reason_code FROM agent_run WHERE id = ?2)
+                    target.status,
+                    target.last_error_code,
+                    input.status,
+                    target.cancel_reason_code,
+                    sibling.cancel_requested_at,
+                    sibling.cancel_reason_code
+                FROM agent_run AS target
+                JOIN runtime_input_delivery AS input ON input.agent_run_id = target.id
+                JOIN agent_run AS sibling ON sibling.id = ?2
+                WHERE target.id = ?1
                 "#,
                 params![target_run_id, sibling_run_id],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+                |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                        row.get(5)?,
+                    ))
+                },
             )
             .unwrap();
+        assert_eq!(run_state.0, "cancelled");
+        assert!(run_state.1.is_none());
+        assert_eq!(run_state.2, "delivery_unknown");
         assert_eq!(
-            run_state.0.as_deref(),
+            run_state.3.as_deref(),
             Some("user_requested_agent_run_stop")
         );
-        assert!(run_state.1.is_none() && run_state.2.is_none());
+        assert!(run_state.4.is_none() && run_state.5.is_none());
         let snapshot = ReadModelService
             .camp_snapshot(&mut database, &camp_id)
             .unwrap();
@@ -8650,6 +8729,8 @@ mod tests {
             Some("user_requested_agent_run_stop")
         );
         assert!(projected_target.cancel_acknowledged_at.is_none());
+        assert_eq!(projected_target.status, "cancelled");
+        assert!(!projected_target.has_unsettled_external_effects);
         let sibling_version: i64 = database
             .connection()
             .query_row(
@@ -8724,6 +8805,26 @@ mod tests {
         let candidates = runtime.list_cancellation_candidates(&database, 10).unwrap();
         assert_eq!(candidates.len(), 1);
         assert_eq!(candidates[0].agent_run_id, target_run_id);
+
+        // #153 wrote this exact terminal shape for cancellations. Preserve its raw
+        // evidence, but normalize the public projection to the corrected contract.
+        database
+            .connection()
+            .execute(
+                "UPDATE agent_run SET status = 'failed', last_error_code = 'accepted_input_outcome_unknown' WHERE id = ?1",
+                [&target_run_id],
+            )
+            .unwrap();
+        let legacy_snapshot = ReadModelService
+            .camp_snapshot(&mut database, &camp_id)
+            .unwrap();
+        let legacy_target = legacy_snapshot
+            .agent_runs
+            .iter()
+            .find(|run| run.id == target_run_id)
+            .unwrap();
+        assert_eq!(legacy_target.status, "cancelled");
+        assert!(!legacy_target.has_unsettled_external_effects);
 
         drop(database);
         std::fs::remove_dir_all(directory).unwrap();

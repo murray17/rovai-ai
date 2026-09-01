@@ -48,7 +48,7 @@ last_updated: 2026-09-01
 - 领域事件日志用于审计、幂等结果和增量失效，不是 Event Sourcing 状态库、Outbox、Worker 队列或业务对象的替代真源。
 - 渠道 Host 的内部 tick 只推进已提交的 request/Outbox，不是新的业务意图入口，也不为每次唤醒保存永久命令回执。
   维护步骤仍在 Core 单个写事务内调用既有 Handler；真实 admission 的领域事件、FIFO 防重和 delivery lease/结算幂等
-  均保留。精确请求与响应丢失恢复由 [Channel Host Maintenance v2](../contracts/channel-host-maintenance-v2.md) 拥有。
+  均保留。精确请求与响应丢失恢复由 [Channel Host Maintenance v3](../contracts/channel-host-maintenance-v3.md) 拥有。
 
 <a id="core-managed-content"></a>
 
@@ -180,7 +180,7 @@ last_updated: 2026-09-01
 - Renderer 可以先本地显示待确认的用户消息，但不得把它当成 CampMessage。Core 接受发送时原子持久公共消息、Turn、目标 Run 和冻结配置；Scheduler 在执行边界完成 workspace、Runtime、Git、当前 exact membership lifetime/permission/fence 检查。所有 Agent 业务工具也必须匹配 Run 冻结的 membership version；再次添加同一 Agent 不恢复旧 Run 权限。失败产生诚实 Run 终态，不撤销已接受消息；per-Run ending Git observation 属于终态审计，Runtime 文件变化属于 terminal 后的附加 Evidence projection，二者都不是发送准入。
 - 一次 CampTurn 的 root Run 与 A2A 后代共享冻结 execution budget。Core 以一个事务检查与消费总 AgentRun、accepted A2A、depth、fanout 和相关 allowance，并对重放返回同一结果；客户端、Runtime 或多条 Delivery 不能拆分请求绕过预算。
 - CampMessage/CampTurn/AgentRun/Conversation 与 Domain Event 的创建、开始、更新和结束字段使用调用时 UTC wall clock；`AgentRun.created_at` 属于输入接受边界，`started_at` 属于实际 claim 边界。Execution Budget 另用非倒退 observation，取 wall clock、进程 awake elapsed anchor 和上次 observation 的最大值，使系统休眠计入 deadline、wall clock 回拨不延长预算；Budget observation 不得写入业务审计时间。
-- Composer Stop 作用于整个 CampTurn；共享 ExecutionDrawer 的 Run Stop 只作用于当前 Run，不取消兄弟 Run 或关闭整轮渠道输出。两者都在 Core 事务提交实际业务终态，IPC 返回后结束等待；Runtime 后台清理不影响业务终态。未知效果作为 hasUnsettledExternalEffects 独立保留，只有 Runtime 原生证据才能确认 Activity outcome。待发送队列按业务 Turn 完成推进，同 Conversation 的新执行仍须通过旧 Runtime 清理隔离。
+- Composer Stop 作用于整个 CampTurn；共享 ExecutionDrawer 的 Run Stop 只作用于当前 Run，不取消兄弟 Run 或关闭整轮渠道输出。两者都在 Core 事务提交 cancelled 业务终态，IPC 返回后结束等待；Runtime 后台清理不影响业务终态。发送与效果不确定性继续保存在 Input/Action 审计中，但取消不产生公共 hasUnsettledExternalEffects 提示，也不允许自动重发。待发送队列按业务 Turn 完成推进，同 Conversation 的新执行仍须通过旧 Runtime 清理隔离。
 
 <a id="collaboration-task"></a>
 
@@ -275,7 +275,7 @@ last_updated: 2026-09-01
 
 - Runtime accepted input 只有在能证明原 Native Turn 的 identity、接受状态和可重连终态时才能恢复。证据不足进入 `recovery_blocked` 或 continuity-lost，不能重发可能已经产生外部效果的输入。
 - 新输入的恢复验证冻结 Manifest attachment receipt 的 closed shape/digest，再独立验证 admitted Runtime Files Root identity、精确 Camp root containment 与当前 Camp-root Auth Receipt；不要求 legacy View ready、append-only successor 或 generation 匹配。路径和历史 payload 不重新解析、探测或改写。Migration 99/100 的旧非终态输入按 delivery/action evidence 诚实终结，历史 Manifest/Blob/Auth Receipt/ACK 保留但不可再 dispatch。
-- Cancellation 在业务事务内结算 Run/义务和所属 Turn：未发送为 cancelled，accepted/unknown 或可能已执行为 failed/accepted_input_outcome_unknown，禁止自动重发。Runtime 使用原 active/launch token 有界清理，只有确认后写 cancel_acknowledged_at；清理不拥有业务终态。未确认清理的同 Conversation 新 Run 最多等待三秒，然后 failed/runtime_cleanup_unconfirmed，不允许重叠执行。
+- Cancellation 在业务事务内把目标 Run 结算为 cancelled 并收口义务和所属 Turn；未发送 Input 为 not_accepted，accepted/delivery_unknown 与可能已执行的 Action 证据保留，但不改变取消终态或产生公共待确认提示，原输入禁止自动重发。Runtime 使用原 active/launch token 有界清理，只有确认后写 cancel_acknowledged_at；清理不拥有业务终态。未确认清理的同 Conversation 新 Run 最多等待三秒，然后 failed/runtime_cleanup_unconfirmed，不允许重叠执行。
 - 计划关闭保留 protocolVersion 3/report 和既有 writer/route barrier；持久化 cycle 后先统一结算业务，barrier 后补齐再完成 cycle，Runtime 清理只影响清理事实与 deadline。未知外部效果保留，不伪造 Runtime outcome。
 - Diagnostics 是严格只读、最小化数据的 Core view；修复必须是用户显式选择的独立动作。导出集中脱敏，不能把 secret、完整路径、模型输入或 Runtime 原始输出作为便利诊断数据。
 

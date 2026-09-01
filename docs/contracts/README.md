@@ -27,11 +27,13 @@ Architecture 解释组件如何组成，Version 概览记录交付范围；它�
 
 | 合同 | 权威范围 |
 | --- | --- |
-| [Cancellation Settlement v1（当前）](cancellation-settlement-v1.md) | Run/Turn 取消事务终态、三秒清理、Conversation 隔离与目标 Camp 补偿 |
+| [Cancellation Settlement v2（当前）](cancellation-settlement-v2.md) | 取消 Run 统一为 cancelled；效果证据保留但不产生公共待确认提示，清理与后续调度边界不变 |
+| [Cancellation Settlement v1（历史）](cancellation-settlement-v1.md) | 取消事务按发送/效果证据区分 cancelled 与 failed/accepted_input_outcome_unknown 的旧规则 |
 | [Camp Member Fast v1（当前）](camp-member-fast-v1.md) | Camp/member/保存绑定代次的三态覆盖、原生订阅资格、执行冻结、观察与紧凑 UI |
 | [Runtime Images v3（当前）](runtime-images-v3.md) | v2 来源/保存/读取不变；同 Run 的已发送同摘要图片优先展示，共用内容列与贴合原比例的图片框 |
 | [Runtime Images v2（历史）](runtime-images-v2.md) | 本地结构化图片、ACP 增量累积、混合存储与 Camp-scoped 读取；允许显式附件重复展示的规则由 v3 替代 |
-| [Camp Open Projection v13（当前）](camp-open-projection-v13.md) | Snapshot 34/Open 6 不变；service 先定向修复半取消，投影仍不读事件日志 |
+| [Camp Open Projection v14（当前）](camp-open-projection-v14.md) | v13 wire/修复不变；精确兼容投影旧取消失败行，不改写底层证据 |
+| [Camp Open Projection v13（历史）](camp-open-projection-v13.md) | Snapshot 34/Open 6 不变；service 先定向修复半取消，投影仍不读事件日志 |
 | [Camp Open Projection v12（历史）](camp-open-projection-v12.md) | Snapshot 34/Open 6；保留 main 业务投影与渠道来源、Runtime 图片，只读图片 bytes 按需读取 |
 | [Camp Open Projection v11（历史）](camp-open-projection-v11.md) | 渠道分支 Snapshot 34/Open 5 的可选 agentRunImages 元数据 |
 | [Camp Open Projection v10（历史）](camp-open-projection-v10.md) | main Snapshot 34/Open 6；Open 不读取 event_log，移除 timeline/coverage.timeline，保留 high-water 与业务卡片 |
@@ -51,7 +53,8 @@ Architecture 解释组件如何组成，Version 概览记录交付范围；它�
 | [Channel Storage v3（当前）](channel-storage-v3.md) | 凭据与存储边界不变；整轮中止使用 nullable retry suppression，迟到 sent 保留证据 |
 | [Channel Storage v2（历史）](channel-storage-v2.md) | v1 存储与秘密边界不变；飞书三态检查、独立 Bot 启动及钉钉 completed 同应用凭据恢复 |
 | [Channel Camp Naming v1（当前）](channel-camp-naming-v1.md) | 五种渠道复用普通自动命名、原始 title 与只读 channelSource 分离、闭合绑定来源保留和 Renderer 前缀 |
-| [Channel Host Maintenance v2（当前）](channel-host-maintenance-v2.md) | 无 poll receipt 与 FIFO 不变；目标 Camp 半取消修复和抑制项不可重试 |
+| [Channel Host Maintenance v3（当前）](channel-host-maintenance-v3.md) | v2 维护与 FIFO 不变；目标 Camp 半取消修复采用 cancelled 终态投影 |
+| [Channel Host Maintenance v2（历史）](channel-host-maintenance-v2.md) | 无 poll receipt 与 FIFO 不变；目标 Camp 半取消修复和抑制项不可重试 |
 | [Channel Host Maintenance v1（历史）](channel-host-maintenance-v1.md) | 无永久 poll 回执的强类型维护请求、原子 FIFO/Outbox 维护、lease 恢复与真实业务命令幂等保留 |
 | [Channel/Main Schema Join v2（当前）](channel-main-schema-join-v2.md) | 精确来源与既有 receipt 含义不变；原库事务重映射 main 117/118/119→126/127/130，逐步恢复，128/129 历史合同保留，131 封口 |
 | [Channel/Main Schema Join v1（历史）](channel-main-schema-join-v1.md) | 主线 Pending/Fast 与渠道精确来源准入、126/127 receipt 与 128 封闭；副本执行位置由 v2 替代 |
@@ -128,7 +131,8 @@ Architecture 解释组件如何组成，Version 概览记录交付范围；它�
 | [Runtime Monitoring v1（历史）](runtime-monitoring-v1.md) | Clean-break collection/enrollment、稀疏 Usage Observation、Native Session fact、三类查询、Coverage、Tool Duration 与 Cost layer |
 | [Diagnostics Center v1（当前）](diagnostics-center-v1.md) | `diagnostics.check` typed read model、三态分类、显式单项修复映射、Recovery 与集中脱敏的 `rovai-diagnostics-v5` |
 | [User Automation v1（当前）](user-automation-v1.md) | 普通用户 `rovai app` 的独立本机 IPC、Runtime OS 隔离、原子 Camp/Run 自动化、真实 shell exit、双 cursor Diagnostic Trial、安全投影与私有 bundle |
-| [Accepted Input Recovery v4（当前）](accepted-input-recovery-v4.md) | 新增 dispatch_started_at；发送/取消事务排序，迟到回执只补证据 |
+| [Accepted Input Recovery v5（当前）](accepted-input-recovery-v5.md) | v4 发送边界不变；普通恢复失败与业务取消终态分离 |
+| [Accepted Input Recovery v4（历史）](accepted-input-recovery-v4.md) | 新增 `dispatch_started_at`；发送/取消事务排序，迟到回执只补证据 |
 | [Accepted Input Recovery v3（历史）](accepted-input-recovery-v3.md) | v2 outcome-unknown 边界不变；Manifest 21 使用语义 View receipt，并增加 Migration 100 clean break |
 | [Accepted Input Recovery v2（历史）](accepted-input-recovery-v2.md) | v1 正常恢复边界不变；增加 Migration 99 对旧 Formatter 20 非终态输入的 evidence-aware clean break |
 | [Accepted Input Recovery v1（历史）](accepted-input-recovery-v1.md) | accepted Runtime input 的启动分类、`recovery_blocked`、Scheduler fence、用户命令与 Stop/预算 outcome-unknown 收敛；不含 Migration 99 |
@@ -203,7 +207,8 @@ Architecture 解释组件如何组成，Version 概览记录交付范围；它�
 | [Camp Composer Draft v3（历史）](camp-composer-draft-v3.md) | v2 reply/continuation 边界不变；ready 附件可以独立构成用户发送 payload，空正文忠实持久化并保留原子消费 |
 | [Camp Composer Draft v2（历史）](camp-composer-draft-v2.md) | v1 reply 边界加 durable recipient continuation、source suppression、发送物化、显式修复与无 Default Lead fallback；仍继承正文非空发送要求 |
 | [Camp Composer Draft v1 (historical)](camp-composer-draft-v1.md) | Structured Content、附件引用、持久 reply intent、exact revision mutation、显式接收者修复与 Draft-only user send；不含 continuation |
-| [Planned Shutdown v4（当前）](planned-shutdown-v4.md) | wire 仍为 protocol 3；先业务结算再 Runtime 清理，未知终态与原 report 保留 |
+| [Planned Shutdown v5（当前）](planned-shutdown-v5.md) | v4 wire/report 不变；退出取消 Run 统一为 cancelled，内部未知效果计数保留 |
+| [Planned Shutdown v4（历史）](planned-shutdown-v4.md) | wire 仍为 protocol 3；先业务结算再 Runtime 清理，未知终态与原 report 保留 |
 | [Planned Shutdown v3（历史）](planned-shutdown-v3.md) | 退出、重启或更新统一取消全部非终态 AgentRun；稳定快照后立即关闭 terminal/route 准入，保留未知效果并使用 v3 report |
 | [Planned Shutdown v2（历史）](planned-shutdown-v2.md) | v1 generation-local reliable terminal 加 durable shutdown cycle、product fence、启动补偿、终态 unknown-effect 保留与 v2 report |
 | [App Update v1（当前）](app-update-v1.md) | Desktop 主动检查、独立 release/prompt 事实、显式下载与安装、精确提醒 dismiss、状态投影和 updater-first 受控退出 |
@@ -253,7 +258,8 @@ Architecture 解释组件如何组成，Version 概览记录交付范围；它�
 | [ContextManifest Evidence v9 (historical)](context-manifest-evidence-v9.md) | bounded public omission evidence；不作为 Formatter v13 恢复入口 |
 | [Context Delivery Profile v2 (historical)](context-delivery-profile-v2.md) | 公共引用链与历史 budget 的旧当前合同；不选择 self-active Task |
 | [Context Delivery Profile v1 (historical)](context-delivery-profile-v1.md) | AgentRun 公共消息窗口、Unicode scalar 正文截断、历史字符预算与遗漏提示 |
-| [Run Process Detail Surface v27（当前）](run-process-detail-surface-v27.md) | v26 布局不变；停止等待仅限 IPC，立即显示 Core 实际终态 |
+| [Run Process Detail Surface v28（当前）](run-process-detail-surface-v28.md) | v27 布局不变；取消显示已取消并清除旧外部效果提示 |
+| [Run Process Detail Surface v27（历史）](run-process-detail-surface-v27.md) | v26 布局不变；停止等待仅限 IPC，立即显示 Core 实际终态 |
 | [Run Process Detail Surface v26（历史）](run-process-detail-surface-v26.md) | 完整继承 v25；Web 搜索使用 `搜索 <query>` 与连续公开结果，保留非 Shell 结果面与缩进 |
 | [Run Process Detail Surface v25（历史）](run-process-detail-surface-v25.md) | 完整继承 v24；Shell disclosure 使用 `$ command` 与连续 output、独立结果面 token，并与 Terminal 图标左边界同轴 |
 | [Run Process Detail Surface v24（历史）](run-process-detail-surface-v24.md) | v23 分组与 live-tail 不变；`activity-v2` 五域、Renderer 中文标题、七类图标、Rovai Catalog identity、公开 typed query 与无历史回填切换 |

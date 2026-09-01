@@ -1972,7 +1972,8 @@ describe('task event projections', () => {
     const activeRun = {
       id: 'run-local-stop',
       status: 'running' as const,
-      cancelRequestedAt: null
+      cancelRequestedAt: null,
+      hasUnsettledExternalEffects: true
     }
     const local = new Set([activeRun.id, 'run-from-another-camp'])
     expect([...effectiveCancellingRunIds(local, { agentRuns: [activeRun] })])
@@ -1996,24 +1997,31 @@ describe('task event projections', () => {
       turns: [{ id: 'turn', status: 'running' }] } as CampSnapshot
     const result: StoredCommandResult = { commandId: 'stop', commandType: 'agent_run.cancel',
       requestDigest: 'sha256:test', requestDigestVersion: 1, recordedAt: '2026-09-01T00:00:00Z',
-      resultEntity: null, status: 'applied', code: 'agent_run.accepted_input_outcome_unknown',
-      payload: { agentRunId: activeRun.id, status: 'failed', campTurnId: 'turn', campTurnStatus: 'running' }
+      resultEntity: null, status: 'applied', code: 'agent_run.cancelled',
+      payload: { agentRunId: activeRun.id, status: 'cancelled', campTurnId: 'turn', campTurnStatus: 'running' }
     }
     const settled = applyCancellationResult(snapshot, result)
-    expect(settled.agentRuns[0].status).toBe('failed')
-    expect(settled.agentRuns[0].hasUnsettledExternalEffects).toBe(true)
+    expect(settled.agentRuns[0].status).toBe('cancelled')
+    expect(settled.agentRuns[0].hasUnsettledExternalEffects).toBe(false)
     expect(settled.agentRuns[1]).toBe(snapshot.agentRuns[1])
     expect(settled.turns[0].status).toBe('running')
     expect([...effectiveCancellingRunIds(local, settled)]).toEqual([])
     expect(applyCancellationResult(snapshot, { ...result, status: 'rejected' })).toBe(snapshot)
     const stoppedTurn = applyCancellationResult(snapshot, { ...result, payload: {
       campTurnId: 'turn', campTurnStatus: 'cancelled', runs: [
-        { agentRunId: activeRun.id, terminalStatus: 'cancelled' },
+        { agentRunId: activeRun.id, terminalStatus: 'cancelled', terminalCode: 'agent_run.cancelled' },
         { agentRunId: 'unrelated', terminalStatus: 'failed', terminalCode: 'agent_run.accepted_input_outcome_unknown' }
       ]
     } })
     expect(stoppedTurn.agentRuns.map((run) => run.status)).toEqual(['cancelled', 'failed'])
+    expect(stoppedTurn.agentRuns.map((run) => run.hasUnsettledExternalEffects)).toEqual([false, true])
     expect(stoppedTurn.turns[0].status).toBe('cancelled')
+
+    const alreadyTerminal = applyCancellationResult(snapshot, {
+      ...result,
+      code: 'agent_run.already_terminal'
+    })
+    expect(alreadyTerminal.agentRuns[0].hasUnsettledExternalEffects).toBe(true)
   })
 
   it('admits Run Stop only for an active non-blocked Run outside Turn cancellation', () => {
@@ -2096,7 +2104,8 @@ describe('task event projections', () => {
     }
     const agentRuns = [{
       campTurnId: turn.id,
-      hasUnsettledExternalEffects: true
+      status: 'cancelled',
+      hasUnsettledExternalEffects: false
     }] as CampSnapshot['agentRuns']
 
     expect(formatStopElapsed(turn.createdAt, turn.cancelRequestedAt)).toBe('2分18秒')
@@ -2111,7 +2120,7 @@ describe('task event projections', () => {
     expect(projected[1]).toMatchObject({
       id: 'stop:turn-stop',
       elapsedLabel: '2分18秒',
-      hasUnsettledExternalEffects: true
+      hasUnsettledExternalEffects: false
     })
 
     expect(campConversationTimeline(
@@ -3830,7 +3839,7 @@ describe('task event projections', () => {
         agentRuns: snapshot.agentRuns.map((run) => ({
           ...run,
           status: 'cancelled' as const,
-          hasUnsettledExternalEffects: true,
+          hasUnsettledExternalEffects: false,
           endedAt: '2026-07-28T05:00:06Z'
         })),
         timeline: [{
@@ -3862,7 +3871,7 @@ describe('task event projections', () => {
     expect(cancelledMarkup).toContain('workspace-grid inspector-collapsed')
     expect(cancelledMarkup).not.toContain('aria-label="会话详情"')
     expect(cancelledMarkup).toContain('你已在 5 秒后停止')
-    expect(cancelledMarkup).toContain('结果待确认 · 查看执行详情')
+    expect(cancelledMarkup).not.toContain('结果待确认 · 查看执行详情')
     expect(cancelledMarkup).not.toContain('run-message-state tone-neutral')
     expect(cancelledMarkup).not.toContain('pnpm test')
 

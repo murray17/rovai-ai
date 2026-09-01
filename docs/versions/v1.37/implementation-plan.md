@@ -189,8 +189,10 @@ Antigravity 原生生成、TRAE/Copilot 专用图片结果已接入，六种 Run
   本机只读诊断确认旧卡点是迟到输入观察推进 Run version，使 ACK 被 fence；固定 ACK command ID
   随新版本重试又产生幂等冲突。没有改写日常数据库或借重启掩盖这个问题。
 - 只增加 Input `dispatch_started_at`、Channel `retry_suppression_json` 和窄索引，Migration 134 原子升级至
-  v1.44/schema85。发送准入和取消以数据库提交排序；未知效果保持 failed/accepted_input_outcome_unknown，
-  不自动重发。非终态旧 prepared 保守迁移为 unknown，历史终态不改写。
+  v1.44/schema85。发送准入和取消以数据库提交排序；非终态旧 prepared 保守迁移为 unknown，历史终态不改写。
+  #153 初版曾将取消中的发送/效果不确定性写为 failed/accepted_input_outcome_unknown；真实主动停止验证表明该分类
+  会把用户已经完成的取消永久显示为失败和待确认，现已退役。取消 Run 统一为 cancelled，底层证据保留且不自动
+  重发；旧精确形状仅在 Read Side 兼容为已取消，不改写历史数据库。
 - 成员离队原样复用两个 affected selector，结算自身 lifetime 和已持久化关联工作的 Run，
   原 pending delivery 原因码、Gather/item、Task 解除 assignee 保留。reconciliation 同事务 completed；
   只重算受影响 Turn，同轮无关 Run 和仍 admitted 的渠道请求不受整轮关闭影响。
@@ -277,3 +279,21 @@ Antigravity 原生生成、TRAE/Copilot 专用图片结果已接入，六种 Run
 - `pnpm test` 通过：133 个 Vitest 文件 / 1362 项、221 项 Node tests（1 项既有 Windows 原生跳过），文档 9 项、
   Skill 3 项及普通治理门禁通过；固定 base `ea0634631697d40f72bac05df19aeeb694d2481d` 的
   `docs:check:ci` 通过。未启动日常 App、Core、Runtime，未访问或改写真实 Camp 数据。
+### 2026-09-01 主动停止取消分类补正
+
+- 退役 #153 引入的 `failed/accepted_input_outcome_unknown` 取消分类：用户主动停止统一结算为
+  `cancelled`，保留 Input/Action/Runtime Delivery 原始发送与效果证据、cleanup fence、禁止自动重发和
+  terminal delivery pump；运行时自行进入终态且仍有未决外部效果的非取消路径继续显示风险提示。
+- Read Side 只兼容 `cancel_requested_at` 已存在、`terminal_resolution_source` 为空的精确历史形状，
+  不改写数据库，也不覆盖普通 recovery blocker 或 Runtime terminal 证据。Renderer 仅在本次取消事务返回
+  `agent_run.cancelled` 时清除旧提示，`already_terminal` 保留原快照证据。
+- TDD owner 在旧实现上先得到 `agent_run.accepted_input_outcome_unknown` 失败，再通过；
+  `pnpm test:rust:pr` 的 Library 472、CLI 32、slow 297 项全部通过，Core Main 187 项通过、4 项既有真实
+  Runtime 人工 smoke 忽略，Core startup 以 `--test-concurrency=1` 运行 9 项通过。默认并发曾分别在
+  `skills` retry 和 `maintenance` settle 撞到既有十秒夹具上限，失败场景定向复跑通过；未放宽阈值或修改
+  无关启动代码。`cargo clippy --workspace --all-targets -- -D warnings`、
+  `cargo fmt --all --check`、`pnpm typecheck`、`pnpm build:desktop` 与 `git diff --check` 通过。
+- `pnpm test` 通过：133 个 Vitest 文件 / 1357 项、220 项 Node tests，1 项既有 Windows 原生测试按平台跳过；
+  文档 9 项、Skill 3 项及普通治理门禁通过。固定 PR base
+  `ea0634631697d40f72bac05df19aeeb694d2481d` 的 `docs:check:ci` 通过；本轮未启动日常 App 或真实 Runtime，
+  未改写日常数据库，也未向渠道发件。

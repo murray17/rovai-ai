@@ -3,7 +3,7 @@ document_type: architecture
 architecture: feishu-channel
 authority: feishu-channel-component-and-authority-boundaries
 status: accepted
-last_updated: 2026-08-31
+last_updated: 2026-09-01
 ---
 
 # 飞书渠道架构
@@ -254,7 +254,7 @@ reconciliation 后才恢复物化。若目标已经移出则 fail closed。已�
 
 ## 输出、恢复与秘密
 
-共享 Host tick 按 [Channel Host Maintenance v2](../contracts/channel-host-maintenance-v2.md) 使用直接参数与响应，
+共享 Host tick 按 [Channel Host Maintenance v3](../contracts/channel-host-maintenance-v3.md) 使用直接参数与响应，
 不生成 commandId 或永久 poll 回执；超时、投影、FIFO 提升和 delivery 领取仍原子提交。响应丢失依靠持久 lease 恢复，
 真实入站、绑定、admission 事件与 delivery settlement 的防重不变；历史 tick 回执不清理。
 

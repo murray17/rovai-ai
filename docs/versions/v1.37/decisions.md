@@ -41,16 +41,17 @@ command ID 携带新版本 payload，永久触发幂等冲突。单纯放宽版�
 ### 决定
 
 取消事务直接结算业务 Run、义务和受影响 Turn；Runtime 使用既有 active/launch permit 和受管进程后台清理。
-新增最小发送 timestamp 区分尚未发送与可能接受，未知结果保留为终态失败并禁止重发。成员离队完全保留既有
-定向 cutover 集合，单 Run/离队不关闭整轮渠道；整轮取消抑制重试并允许下一渠道请求推进。
+新增最小发送 timestamp 区分尚未发送与可能接受；取消原因拥有业务终态，目标 Run 一律为 cancelled，Input/Action
+未知证据留作审计且禁止重发，不升级为公共失败或待确认提示。成员离队完全保留既有定向 cutover 集合，单 Run/
+离队不关闭整轮渠道；整轮取消抑制重试并允许下一渠道请求推进。
 
-当前权威为 [Cancellation Settlement v1](../../contracts/cancellation-settlement-v1.md)及其专属合同；
-模型上下文边界已按[revision 1](model-context-change-cancellation.md)确认。
+当前权威为 [Cancellation Settlement v2](../../contracts/cancellation-settlement-v2.md)及其专属合同；
+模型上下文边界已按[revision 2](model-context-change-cancellation.md)确认。
 
 ### 后果与替代方案
 
-- 外部效果未知仍须核对；业务终态不证明进程退出或回滚。同 Conversation 清理无法确认时，新 Run 有界失败，
-  牺牲该次自动启动以避免旧新执行重叠。
+- 取消仍不证明进程退出、Input 未发送或效果回滚；底层证据保留，但不再把用户明确停止后的 Run 显示为失败或
+  “外部效果待确认”。同 Conversation 清理无法确认时，新 Run 仍有界失败，牺牲该次自动启动以避免旧新执行重叠。
 - 拒绝继续修补异步 ACK：无法消除失联进程对业务完成的依赖，也保留重复领域命令的冲突面。
 - 拒绝新增通用依赖图、额外 Input 状态协议或每 Run 工作目录隔离：现有持久关联足以界定离队范围，发送前一个
   条件更新足以界定未知证据；扩大模型不能消除本次根因。
