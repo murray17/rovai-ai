@@ -8551,8 +8551,12 @@ export function RunExecutionDisclosure({
       }}
     >
       <summary>
-        <span>{runDurationLabel(run)}</span>
-        <span className="process-chevron" aria-hidden="true">⌄</span>
+        <span className="process-disclosure-label">{runDurationLabel(run)}</span>
+        <span className="process-disclosure-slot" aria-hidden="true">
+          <svg viewBox="0 0 16 16" focusable="false">
+            <path d="m4.75 6.25 3.25 3.5 3.25-3.5" />
+          </svg>
+        </span>
       </summary>
       {content}
     </details>

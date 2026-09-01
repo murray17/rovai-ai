@@ -323,6 +323,13 @@ describe('Porcelain Day + Steel Night theme tokens', () => {
     )
   })
 
+  it('keeps AgentRun disclosure in a fixed trailing SVG track', () => {
+    expect(css).toMatch(/\.execution-disclosure\.worked > summary\s*\{[^}]*display:\s*grid[^}]*grid-template-columns:\s*minmax\(0, 1fr\) 24px/)
+    expect(css).toMatch(/\.process-disclosure-slot\s*\{[^}]*width:\s*24px[^}]*height:\s*24px/)
+    expect(css).toMatch(/\.process-disclosure-slot svg\s*\{[^}]*width:\s*14px[^}]*height:\s*14px[^}]*stroke-width:\s*1\.55/)
+    expect(css).toMatch(/\.execution-disclosure\.worked:not\(\[open\]\) \.process-disclosure-slot svg\s*\{[^}]*transform:\s*rotate\(-90deg\)/)
+  })
+
   it('keeps complete Tool results in the shared four-track, keyboard-scrollable surface', () => {
     expect(css).toMatch(/\.tool-call-summary\s*\{[^}]*display:\s*grid[^}]*grid-template-columns:\s*16px minmax\(0, 1fr\) 16px 20px/)
     expect(css).toMatch(/\.tool-call-icon svg\s*\{[^}]*width:\s*16px[^}]*height:\s*16px[^}]*fill:\s*none/)
