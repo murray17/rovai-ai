@@ -2507,6 +2507,7 @@ export interface ChannelSettingsSnapshot {
 
 export type ExecutionWebServerState =
   | 'disabled'
+  | 'no_published_bot'
   | 'starting'
   | 'ready'
   | 'port_conflict'

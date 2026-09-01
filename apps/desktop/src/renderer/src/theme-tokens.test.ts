@@ -400,6 +400,20 @@ describe('Porcelain Day + Steel Night theme tokens', () => {
     expect(css).toMatch(/\.skill-picker-enter\s*\{[^}]*color:\s*var\(--faint\)/)
   })
 
+  it('keeps the LAN execution disclosure centered in a stable SVG slot', () => {
+    expect(css).toMatch(
+      /\.execution-web-settings > summary\s*\{[^}]*display:\s*grid[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\) max-content 28px[^}]*align-items:\s*center/
+    )
+    expect(css).toMatch(
+      /\.execution-web-disclosure\s*\{[^}]*width:\s*28px[^}]*height:\s*28px[^}]*place-items:\s*center/
+    )
+    expect(css).toMatch(
+      /\.execution-web-disclosure svg\s*\{[^}]*width:\s*14px[^}]*height:\s*14px/
+    )
+    expect(css).not.toContain('.execution-web-settings > summary::after')
+    expect(css).not.toContain('.channel-binding-diagnostics')
+  })
+
   it('renders A2A recipients as blue interactive mentions', () => {
     expect(css).toMatch(/\.message-delivery-recipient-name\s*\{[^}]*color: var\(--mention-ink\)/)
     expect(css).toMatch(/\.message-mention-token\.is-interactive\s*\{[^}]*cursor:\s*pointer/)

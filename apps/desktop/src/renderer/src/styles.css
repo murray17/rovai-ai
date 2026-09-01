@@ -5217,25 +5217,25 @@ button.attachment-open:disabled { cursor: wait; opacity: .76; }
 .channel-publication-status:has(small) { display: grid; grid-template-columns: 6px auto; gap: 1px 7px; }
 .channel-publication-status:has(small)::before { grid-row: 1 / span 2; align-self: center; }
 .channel-publication-status small { grid-column: 2; color: var(--attention); font-size: 8.5px; line-height: 1.25; }
-.channel-binding-diagnostics { display: grid; grid-template-columns: repeat(2, minmax(104px, max-content)) minmax(220px, 1fr); gap: 18px; align-items: center; min-height: 66px; padding: 10px 8px; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
-.channel-binding-diagnostics > span { display: grid; grid-template-columns: auto 1fr; gap: 4px 7px; align-items: baseline; }
-.channel-binding-diagnostics strong { color: var(--ink); font: 620 16px/1 ui-monospace, SFMono-Regular, Menlo, monospace; }
-.channel-binding-diagnostics small { color: var(--faint); font-size: 9.5px; }
-.channel-binding-diagnostics > span.is-warning strong { color: var(--attention); }
-.channel-binding-diagnostics p { justify-self: end; max-width: 54ch; margin: 0; color: var(--muted); font-size: 9.5px; line-height: 1.55; text-align: right; }
 .execution-web-settings { margin-top: 30px !important; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); padding-top: 0; }
-.execution-web-settings > summary { display: flex; min-height: 58px; align-items: center; justify-content: space-between; gap: 18px; padding: 8px; cursor: pointer; list-style: none; }
+.execution-web-settings > summary { display: grid; min-height: 60px; grid-template-columns: minmax(0, 1fr) max-content 28px; align-items: center; column-gap: 12px; padding: 8px; border-radius: 7px; cursor: pointer; list-style: none; }
 .execution-web-settings > summary::-webkit-details-marker { display: none; }
-.execution-web-settings > summary:focus-visible { border-radius: 7px; outline: 2px solid var(--focus); outline-offset: 2px; }
+.execution-web-settings > summary::marker { content: ""; }
+.execution-web-settings > summary:hover { background: color-mix(in srgb, var(--workspace-surface-hover) 62%, transparent); }
+.execution-web-settings > summary:active { background: var(--surface-muted); }
+.execution-web-settings > summary:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 .execution-web-settings > summary > span:first-child { display: grid; min-width: 0; gap: 3px; }
 .execution-web-settings > summary strong { color: var(--ink); font-size: 12px; font-weight: 620; }
-.execution-web-settings > summary small { color: var(--muted); font-size: 9.5px; }
-.execution-web-settings > summary::after { order: 3; color: var(--faint); content: "⌄"; font-size: 14px; transition: transform 140ms ease; }
-.execution-web-settings[open] > summary::after { transform: rotate(180deg); }
-.execution-web-status { flex: 0 0 auto; margin-left: auto; font: 540 9.5px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: nowrap; }
+.execution-web-settings > summary small { overflow: hidden; color: var(--muted); font-size: 9.5px; text-overflow: ellipsis; white-space: nowrap; }
+.execution-web-status { display: inline-grid; min-height: 24px; grid-template-columns: 7px auto; align-items: center; gap: 6px; font: 540 9.5px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: nowrap; }
+.execution-web-status-dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; box-shadow: 0 0 0 3px color-mix(in srgb, currentColor 10%, transparent); }
 .execution-web-status.is-neutral { color: var(--faint); }
 .execution-web-status.is-success { color: var(--success); }
 .execution-web-status.is-warning { color: var(--attention); }
+.execution-web-disclosure { display: grid; width: 28px; height: 28px; place-items: center; align-self: center; justify-self: end; border-radius: 6px; color: var(--faint); }
+.execution-web-disclosure svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.65; transform-origin: center; transition: transform 140ms ease; }
+.execution-web-settings > summary:hover .execution-web-disclosure { color: var(--ink); background: var(--surface-muted); }
+.execution-web-settings[open] .execution-web-disclosure svg { transform: rotate(180deg); }
 .execution-web-form { display: grid; gap: 0; padding: 4px 8px 14px; border-top: 1px solid var(--line); }
 .execution-web-switch-row,
 .execution-web-port-row,
@@ -5330,8 +5330,6 @@ button.attachment-open:disabled { cursor: wait; opacity: .76; }
   .channel-bot-identity { grid-column: 1; grid-row: 2; margin-left: 44px; }
   .channel-publication-status { grid-column: 2; grid-row: 1; justify-self: end; }
   .channel-member-action { grid-column: 2; grid-row: 2; }
-  .channel-binding-diagnostics { grid-template-columns: repeat(2, minmax(104px, 1fr)); }
-  .channel-binding-diagnostics p { grid-column: 1 / -1; justify-self: start; text-align: left; }
 }
 
 @media (max-width: 560px) {
@@ -5345,7 +5343,9 @@ button.attachment-open:disabled { cursor: wait; opacity: .76; }
   .channel-publish-identity { grid-template-columns: auto minmax(0, 1fr); }
   .channel-publish-arrow { display: none; }
   .channel-publish-identity > .channel-mark { grid-column: 1; }
-  .execution-web-settings > summary { min-height: 56px; padding-inline: 4px; }
+  .execution-web-settings > summary { min-height: 64px; grid-template-columns: minmax(0, 1fr) 28px; row-gap: 1px; padding-inline: 4px; }
+  .execution-web-status { grid-column: 1; grid-row: 2; justify-self: start; }
+  .execution-web-disclosure { grid-column: 2; grid-row: 1 / span 2; }
   .execution-web-form { padding-inline: 4px; }
   .execution-web-switch-row,
   .execution-web-port-row,
@@ -5357,7 +5357,7 @@ button.attachment-open:disabled { cursor: wait; opacity: .76; }
   .channel-settings-state.is-loading > span::after { animation: none; }
   .channel-qr-frame > span { animation: none !important; }
   .channel-provisioning-dot { animation: none; }
-  .execution-web-settings > summary::after,
+  .execution-web-disclosure svg,
   .execution-web-switch-row input,
   .execution-web-switch-row input::after { transition: none; }
 }

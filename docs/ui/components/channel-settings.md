@@ -10,7 +10,7 @@ last_updated: 2026-09-01
 
 渠道设置是 Owner 在 Rovai 本机维护飞书/钉钉连接与队员 Bot 的 Renderer surface。群首次项目选择发生在对应外部会话的
 Owner-only 卡片中；Renderer 不提供 Channel 项目目录或会话绑定操作。领域状态和错误按 Provider 分别见
-[Feishu Channel v11](../../contracts/feishu-channel-v11.md)与
+[Feishu Channel v12](../../contracts/feishu-channel-v12.md)与
 [DingTalk Channel v5](../../contracts/dingtalk-channel-v5.md)；本页只拥有信息层级、交互与可访问性。
 
 当前对外渠道页只显示飞书。钉钉完整产品链路尚未验收，因此隐藏其整个入口、平台计数、连接/发布区域及
@@ -23,11 +23,10 @@ Owner-only 卡片中；Renderer 不提供 Channel 项目目录或会话绑定操
 页面沿用设置工作区的 Porcelain Day / Steel Night 世界和现有 `SettingsPageHeader`：
 
 1. `Settings / Channels` eyebrow、标题“渠道”、Owner 本机说明；
-2. 当前可见 Provider Tab（目前仅飞书）；切换只改变当前展示，不合并账号、Bot 状态或诊断；
+2. 当前可见 Provider Tab（目前仅飞书）；切换只改变当前展示，不合并账号或 Bot 状态；
 3. 当前 Provider 的渠道连接，展示真实开发者用户名、企业与可选 email，提供登录、切换和断开；
 4. 队员 Bot 列表，按成员稳定顺序显示头像、名称、角色、发布状态和单行动作；
-5. 只有存在 pending binding 或 binding error 时，显示安静的诊断计数，不提供正常操作入口；
-6. 页面最底部显示默认折叠的“局域网执行台”全局设置，不放入单个 Bot、Camp 或队员行。
+5. 页面最底部显示默认折叠的“局域网执行台”全局设置，不放入单个 Bot、Camp 或队员行。
 
 窄窗口保持同一内容顺序，表格式行折为纵向信息，不产生横向滚动。共享色彩只使用现有语义 Token；头像、按钮、
 Dialog、状态点和间距复用现有组件语法。
@@ -118,9 +117,8 @@ per-App identity 状态。已连接 Developer Identity 已确定 canonical Owner
 message/callback envelope 会在同一入站流程自动记录 App-scoped identity 并继续处理。映射缺失或冲突时由 Host/Core
 内部 fail closed，不能把用户名、群管理员身份或卡片 payload 当成 Owner 证据。
 
-页面可在 Provider 卡底部显示 `待处理项目选择 N` 与 `绑定异常 N` 两个低强调诊断值；零值可省略。它们只帮助 Owner
-理解当前 Provider 状态，不把另一 Provider 的计数相加到当前 Tab，也不展开项目列表、路径、会话 picker 或 resolve 操作。
-正常流程是 Owner 私聊自动 Quick Chat，或飞书群/话题、钉钉普通群第一次有效 mention 后在对应卡片中选择项目；钉钉话题
+Renderer 不显示“会话接入”、待处理项目选择、绑定异常或不可换绑提示；这些值即使存在于后台快照，也不形成页面区块或占位。
+正常流程仍是 Owner 私聊自动 Quick Chat，或飞书群/话题、钉钉普通群第一次有效 mention 后在对应卡片中选择项目；钉钉话题
 当前不接入。
 
 项目卡沿用 Rovai 克制、信息先行的表达：标题为“选择 Rovai 项目”。飞书正文为“选择一个项目，或直接开始快速对话。”，
@@ -162,7 +160,7 @@ Unicode 字符，超长用省略号收尾。引用只作展示，不跳转、不
 
 卡片只在状态、按钮可用性或已展开最近输出窗口变化时更新。永久正文卡继续独立发布，执行卡仍是临时 surface；
 下一轮召回后不留下完成占位。安全、固定 URL、Token、callback 和串行更新边界由
-[Feishu Channel v11](../../contracts/feishu-channel-v11.md) 拥有。
+[Feishu Channel v12](../../contracts/feishu-channel-v12.md) 拥有。
 
 ## 局域网执行台设置
 
@@ -170,6 +168,12 @@ Unicode 字符，超长用省略号收尾。引用只作展示，不跳转、不
 摘要只显示名称、一句“在同一网络中查看公开执行记录”和真实状态；展开后按现有设置行语法依次显示启用 Switch、
 端口、ready 时的当前地址、固定旧链接警告和一个保存按钮。端口输入使用数字键盘、`1024..65535`，完成输入并失焦后
 才显示行内错误；保存期间禁用按钮。状态必须以文字表达，不只依赖颜色。
+
+缺少本地设置文件的首次使用默认开启，Switch 必须显示为开启并选择端口 8765；有效的已保存选择始终优先，
+不得把用户保存的关闭状态重新打开。设置文件内容无效、无法解析或无法读取时失败关闭，并通过真实状态呈现降级；
+没有当前已发布渠道 Bot 时不开放端口，摘要以中性状态显示“等待 Bot 发布 · 8765”；首个 Bot 发布后自动尝试监听，
+最后一个退出已发布状态时自动关闭。端口冲突或没有私有局域网地址时保留开启选择，同时显示对应不可用状态。
+详情仍默认折叠，不增加确认框或迁移提示。
 
 Web 执行台延续 Porcelain Day / Steel Night 的冷瓷灰、Steel 品牌、身份色与中性 Evidence 层级，不建立暖色替代主题。
 顶部只保留 Camp 名与“只读”，随后显示当前选中 Run 的触发消息和该队员的连续历史时间线；外部触发者在该阅读面固定显示
@@ -190,7 +194,7 @@ Web 执行台延续 Porcelain Day / Steel Night 的冷瓷灰、Steel 品牌、�
 
 - [全局设计系统](../../../DESIGN.md)
 - [设置工作区 brief](../../../apps/desktop/.impeccable/surfaces/settings-workspace.md)
-- [Feishu Channel v11](../../contracts/feishu-channel-v11.md)
+- [Feishu Channel v12](../../contracts/feishu-channel-v12.md)
 - [飞书渠道架构](../../architecture/feishu-channel.md)
 - [DingTalk Channel v5](../../contracts/dingtalk-channel-v5.md)
 - [钉钉渠道架构](../../architecture/dingtalk-channel.md)

@@ -1,5 +1,5 @@
 import { createServer } from 'node:http'
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Script } from 'node:vm'
@@ -22,6 +22,20 @@ describe('Execution Web settings', () => {
     expect(parseExecutionWebSettings({ schemaVersion: 1, enabled: true, port: 8765, extra: true })).toBeNull()
   })
 
+  it('defaults a missing settings file to enabled without overriding a saved choice', async () => {
+    const root = await tempRoot()
+    const path = join(root, 'execution-web.json')
+
+    const firstUseStore = await ExecutionWebSettingsStore.load(path)
+    expect(firstUseStore.get()).toEqual({ schemaVersion: 1, enabled: true, port: 8765 })
+    expect(firstUseStore.loadDegradation).toBeNull()
+
+    await writeFile(path, JSON.stringify({ schemaVersion: 1, enabled: false, port: 18765 }), 'utf8')
+    const returningUserStore = await ExecutionWebSettingsStore.load(path)
+    expect(returningUserStore.get()).toEqual({ schemaVersion: 1, enabled: false, port: 18765 })
+    expect(returningUserStore.loadDegradation).toBeNull()
+  })
+
   it('fails closed to disabled defaults when the saved file is malformed', async () => {
     const root = await tempRoot()
     const path = join(root, 'execution-web.json')
@@ -29,6 +43,15 @@ describe('Execution Web settings', () => {
     const store = await ExecutionWebSettingsStore.load(path)
     expect(store.get()).toEqual({ schemaVersion: 1, enabled: false, port: 8765 })
     expect(store.loadDegradation?.code).toBe('execution_web_settings_invalid')
+  })
+
+  it('fails closed to disabled defaults when the saved file is unreadable', async () => {
+    const root = await tempRoot()
+    const path = join(root, 'execution-web.json')
+    await mkdir(path)
+    const store = await ExecutionWebSettingsStore.load(path)
+    expect(store.get()).toEqual({ schemaVersion: 1, enabled: false, port: 8765 })
+    expect(store.loadDegradation?.code).toBe('execution_web_settings_unreadable')
   })
 })
 
@@ -43,9 +66,59 @@ describe('ExecutionViewService', () => {
     })).toBe('192.168.1.23')
   })
 
+  it('keeps the default enabled without opening a port until a channel Bot is published', async () => {
+    const root = await tempRoot()
+    const settingsFilePath = join(root, 'execution-web.json')
+    let addressResolutionCount = 0
+    const service = new ExecutionViewService({
+      settingsFilePath,
+      resolveAddress: () => {
+        addressResolutionCount += 1
+        return null
+      },
+      core: {
+        onEvent() { return () => undefined },
+        async request<T>(): Promise<T> { return coreSnapshot() as T }
+      }
+    })
+
+    try {
+      await service.start()
+      expect(service.getSettings()).toEqual({
+        schemaVersion: 1,
+        enabled: true,
+        port: 8765,
+        server: {
+          state: 'no_published_bot',
+          address: null,
+          errorCode: 'execution_web_no_published_bot'
+        }
+      })
+      expect(addressResolutionCount).toBe(0)
+
+      await service.setPublishedChannelBotAvailable(true)
+      expect(service.getSettings()).toEqual({
+        schemaVersion: 1,
+        enabled: true,
+        port: 8765,
+        server: {
+          state: 'no_lan_address',
+          address: null,
+          errorCode: 'execution_web_no_lan_address'
+        }
+      })
+      expect(addressResolutionCount).toBe(1)
+      await expect(readFile(settingsFilePath, 'utf8')).rejects.toMatchObject({ code: 'ENOENT' })
+    } finally {
+      await service.stop()
+    }
+  })
+
   it('serves a no-store page and an immutable scoped public snapshot with a bearer token', async () => {
     const root = await tempRoot()
     const port = await availablePort()
+    const settingsFilePath = join(root, 'execution-web.json')
+    await writeFile(settingsFilePath, JSON.stringify({ schemaVersion: 1, enabled: false, port }), 'utf8')
     const calls: unknown[] = []
     let eventListener: ((event: CoreEvent) => void) | null = null
     let address: string | null = '127.0.0.1'
@@ -54,7 +127,7 @@ describe('ExecutionViewService', () => {
       'replacement-token-with-at-least-thirty-two-characters'
     ]
     const service = new ExecutionViewService({
-      settingsFilePath: join(root, 'execution-web.json'),
+      settingsFilePath,
       resolveAddress: () => address,
       randomToken: () => tokens.shift()!,
       core: {
@@ -68,6 +141,7 @@ describe('ExecutionViewService', () => {
         }
       }
     })
+    await service.setPublishedChannelBotAvailable(true)
     await service.start()
     await service.setSettings({ enabled: true, port })
     const scope: ExecutionViewScope = {
@@ -151,6 +225,14 @@ describe('ExecutionViewService', () => {
     expect(reboundPage.status).toBe(200)
     await reboundPage.text()
 
+    await service.setPublishedChannelBotAvailable(false)
+    expect(service.getSettings()).toMatchObject({
+      enabled: true,
+      port,
+      server: { state: 'no_published_bot', address: null }
+    })
+    expect(await service.createExecutionViewUrl(scope)).toBeNull()
+
     await service.stop()
     expect(eventListener).toBeNull()
     expect(JSON.parse(await readFile(join(root, 'execution-web.json'), 'utf8')))
@@ -182,6 +264,7 @@ describe('ExecutionViewService', () => {
     })
     let reader: ReadableStreamDefaultReader<Uint8Array> | null = null
     try {
+      await service.setPublishedChannelBotAvailable(true)
       await service.start()
       await service.setSettings({ enabled: true, port })
       const href = await service.createExecutionViewUrl({
@@ -222,8 +305,14 @@ describe('ExecutionViewService', () => {
     while (occupiedPort === originalPort) occupiedPort = await availablePort()
     const blocker = createServer()
     await new Promise<void>((resolve) => blocker.listen(occupiedPort, '127.0.0.1', resolve))
+    const settingsFilePath = join(root, 'execution-web.json')
+    await writeFile(
+      settingsFilePath,
+      JSON.stringify({ schemaVersion: 1, enabled: false, port: originalPort }),
+      'utf8'
+    )
     const service = new ExecutionViewService({
-      settingsFilePath: join(root, 'execution-web.json'),
+      settingsFilePath,
       resolveAddress: () => '127.0.0.1',
       randomToken: () => 'fixed-token-with-at-least-thirty-two-characters',
       core: {
@@ -232,6 +321,7 @@ describe('ExecutionViewService', () => {
       }
     })
     try {
+      await service.setPublishedChannelBotAvailable(true)
       await service.start()
       expect((await service.setSettings({ enabled: true, port: originalPort })).server.state).toBe('ready')
       const href = await service.createExecutionViewUrl({

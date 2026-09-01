@@ -11,4 +11,4 @@
 - AgentRun、连续操作组和每个 Command 的折叠层级是否与生产执行台一致，并在手机端仍然容易操作。
 
 对应结构、响应式规则与身份文案已落到 `ExecutionViewService` 的生产页面；当前语义由
-[Feishu Channel v11](../../contracts/feishu-channel-v11.md) 与[渠道设置 UI](../../ui/components/channel-settings.md)拥有。
+[Feishu Channel v12](../../contracts/feishu-channel-v12.md) 与[渠道设置 UI](../../ui/components/channel-settings.md)拥有。
