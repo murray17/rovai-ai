@@ -1099,16 +1099,9 @@ export const MemberRuntimeForm = forwardRef<MemberRuntimeFormHandle, {
 
   return (
     <section className="member-section member-runtime-section">
-      <div className="member-section-heading">
-        <div>
-          <h3>运行时</h3>
-          <p>选择执行产品，并确认当前安装与可用状态。</p>
-        </div>
-      </div>
-
       <form className="member-runtime-form" onSubmit={(event) => void submit(event)}>
         <div className="member-runtime-primary">
-          <label className="field-label" htmlFor="member-runtime-select">Agent 运行时
+          <label className="field-label" htmlFor="member-runtime-select">运行时
           <select
             id="member-runtime-select"
             value={selectedKind}
@@ -1582,7 +1575,7 @@ export function RuntimeInstallationsPanel({ health, onReload }: {
     <>
       <SettingsPageHeader
         eyebrow="Settings / Runtime"
-        title="Agent 运行时"
+        title="运行时"
         description="管理本机 Agent 运行时及其可用状态。"
         aside={(
           <button className="quiet-button" disabled={busy !== null || (health !== null && !hasQualifiedRuntime)} onClick={() => void rescan()}>

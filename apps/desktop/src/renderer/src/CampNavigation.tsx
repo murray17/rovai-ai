@@ -855,7 +855,7 @@ const SETTINGS_SIDEBAR_GROUPS: SettingsSidebarGroup[] = [
     items: [
       { key: 'skills', icon: 'sparkles', label: 'Skills' },
       { key: 'mcp', icon: 'blocks', label: 'MCP' },
-      { key: 'runtime', icon: 'cpu', label: 'Agent 运行时' },
+      { key: 'runtime', icon: 'cpu', label: '运行时' },
       { key: 'channels', icon: 'radio-tower', label: '渠道' }
     ]
   },
