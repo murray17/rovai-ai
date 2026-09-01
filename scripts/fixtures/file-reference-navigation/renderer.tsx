@@ -9,6 +9,7 @@ import '../../../apps/desktop/src/renderer/src/styles.css'
 const campId = 'camp-file-navigation'
 const file: ResolvedFilePreview = {
   previewKey: 'report', handleId: 'report', reopenToken: 'report', displayPath: 'src/report/run_report.py',
+  pathPresentation: 'project_relative',
   fileName: 'run_report.py', size: 8_000, mime: 'text/plain', extension: '.py', kind: 'code',
   hasExternalUpdate: false, contentVersion: { size: 8_000, mtimeMs: 1 },
   contentGeneration: 'generation-1', capabilities: ['read']

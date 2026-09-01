@@ -2,7 +2,7 @@ import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useSta
 import { createPortal } from 'react-dom'
 import { useFilePreview } from './FilePreviewContext'
 import { FilePreviewTabIcon } from './FilePreviewTabIcon'
-import { previewTabLabel, previewTabPresentation } from './file-preview-tab-presentation'
+import { previewTabLabel, previewTabLabels, previewTabPresentation } from './file-preview-tab-presentation'
 
 function tabDomId(tabId: string): string {
   return `file-preview-tab-${tabId}`
@@ -51,14 +51,7 @@ export function FilePreviewTabs({ compact = false }: { compact?: boolean } = {})
   const menuRef = useRef<HTMLDivElement>(null)
   const [menu, setMenu] = useState<{ tabId: string; left: number; top: number } | null>(null)
   const [announcement, setAnnouncement] = useState('')
-  const duplicateNames = useMemo(() => {
-    const counts = new Map<string, number>()
-    for (const tab of tabs) {
-      const key = `${tab.kind}:${previewTabPresentation(tab).fileName}`
-      counts.set(key, (counts.get(key) ?? 0) + 1)
-    }
-    return new Set([...counts].filter(([, count]) => count > 1).map(([name]) => name))
-  }, [tabs])
+  const tabLabels = useMemo(() => previewTabLabels(tabs), [tabs])
 
   const updateEdges = useCallback((): void => {
     const strip = listRef.current
@@ -243,8 +236,8 @@ export function FilePreviewTabs({ compact = false }: { compact?: boolean } = {})
           {tabs.length === 0 && <span className="file-preview-tabs-empty">文件预览</span>}
           {tabs.map((tab, index) => {
             const active = tab.id === activeTabId
-            const label = previewTabLabel(tab, duplicateNames)
-            const { displayPath, icon } = previewTabPresentation(tab)
+            const label = tabLabels.get(tab.id) ?? previewTabLabel(tab)
+            const { displayPath, fileName, icon } = previewTabPresentation(tab)
             const hasExternalUpdate = tab.kind === 'file' && tab.hasExternalUpdate
             const feedback = openFeedback?.tabId === tab.id ? openFeedback : null
             return (
@@ -279,7 +272,9 @@ export function FilePreviewTabs({ compact = false }: { compact?: boolean } = {})
                   aria-selected={active}
                   aria-controls={panelDomId(tab.id)}
                   tabIndex={active ? 0 : -1}
-                  title={tab.kind === 'file_change' ? `${displayPath}\nFile Change · ${tab.changes.completedAt}` : displayPath}
+                  title={tab.kind === 'file_change'
+                    ? `${displayPath}\nFile Change · ${tab.changes.completedAt}`
+                    : displayPath === fileName && label !== fileName ? label : displayPath}
                   onClick={() => activate(tab.id)}
                   onKeyDown={(event) => handleTabKeyDown(event, index)}
                 >
@@ -333,7 +328,7 @@ export function FilePreviewTabs({ compact = false }: { compact?: boolean } = {})
             ref={menuRef}
             className="file-preview-tab-menu"
             role="menu"
-            aria-label={`${previewTabLabel(tab, duplicateNames)} 操作`}
+            aria-label={`${tabLabels.get(tab.id) ?? previewTabLabel(tab)} 操作`}
             style={{ left: menu.left, top: menu.top }}
           >
             {tab.kind === 'file' && <><button role="menuitem" type="button" onClick={() => void runSystemAction(

@@ -7,6 +7,7 @@ import {
   type FilePreviewOpenFeedback,
   type FilePreviewTabModel
 } from './FilePreviewContext'
+import { FilePreviewPane } from './FilePreviewPane'
 import { FilePreviewTabs } from './FilePreviewTabs'
 
 vi.mock('./FilePreviewContext', () => ({ useFilePreview: vi.fn() }))
@@ -20,6 +21,7 @@ function tab(id: string): FilePreviewTabModel {
       handleId: `handle-${id}`,
       reopenToken: `reopen-${id}`,
       displayPath: `src/${id}.ts`,
+      pathPresentation: 'project_relative',
       fileName: `${id}.ts`,
       size: 10,
       mime: 'text/plain',
@@ -45,6 +47,11 @@ function tab(id: string): FilePreviewTabModel {
 function renderTabs(openFeedback: FilePreviewOpenFeedback | null = null): string {
   vi.mocked(useFilePreview).mockReturnValue({ ...preview, openFeedback })
   return renderToStaticMarkup(createElement(FilePreviewTabs))
+}
+
+function renderPane(): string {
+  vi.mocked(useFilePreview).mockReturnValue(preview)
+  return renderToStaticMarkup(createElement(FilePreviewPane))
 }
 
 let preview: FilePreviewContextValue
@@ -131,5 +138,93 @@ describe('FilePreviewTabs open feedback', () => {
     expect(markup).toContain('aria-label="second.ts，有更新"')
     expect(markup).not.toContain('file-preview-tab-open-feedback')
     expect(markup).not.toContain('is-arriving')
+  })
+
+  it('uses safe ordinals when same-name files have no parent path to disclose', () => {
+    const first = tab('external-first')
+    const second = tab('external-second')
+    first.file = { ...first.file, fileName: 'hui.html', displayPath: 'hui.html', pathPresentation: 'file_name_only' }
+    second.file = { ...second.file, fileName: 'hui.html', displayPath: 'hui.html', pathPresentation: 'file_name_only' }
+    preview.tabs = [first, second]
+    preview.activeTab = second
+    preview.activeTabId = second.id
+
+    const markup = renderTabs()
+
+    expect(markup).toContain('aria-label="hui.html · 1"')
+    expect(markup).toContain('aria-label="hui.html · 2"')
+    expect(markup).toContain('title="hui.html · 1"')
+    expect(markup).toContain('title="hui.html · 2"')
+  })
+
+  it('keeps parent-qualified labels for same-name project files', () => {
+    const docs = tab('docs')
+    const prototypes = tab('prototypes')
+    docs.file = { ...docs.file, fileName: 'hui.html', displayPath: 'docs/hui.html' }
+    prototypes.file = { ...prototypes.file, fileName: 'hui.html', displayPath: 'prototypes/hui.html' }
+    preview.tabs = [docs, prototypes]
+    preview.activeTab = prototypes
+    preview.activeTabId = prototypes.id
+
+    const markup = renderTabs()
+
+    expect(markup).toContain('aria-label="docs/hui.html"')
+    expect(markup).toContain('aria-label="prototypes/hui.html"')
+  })
+})
+
+describe('FilePreviewPane path presentation', () => {
+  it('shows a path row for a nested project file', () => {
+    const projectFile = tab('project-file')
+    projectFile.file = {
+      ...projectFile.file,
+      fileName: 'hui.html',
+      displayPath: 'docs/prototypes/hui.html',
+      kind: 'html'
+    }
+    preview.tabs = [projectFile]
+    preview.activeTab = projectFile
+    preview.activeTabId = projectFile.id
+
+    const markup = renderPane()
+
+    expect(markup).toContain('class="file-preview-path-row"')
+    expect(markup).toContain('aria-label="docs/prototypes/hui.html"')
+  })
+
+  it.each([
+    ['a project-root file', 'project_relative' as const],
+    ['an external file or attachment', 'file_name_only' as const]
+  ])('omits the path row for %s', (_label, pathPresentation) => {
+    const file = tab('filename-only')
+    file.file = { ...file.file, fileName: 'hui.html', displayPath: 'hui.html', pathPresentation }
+    preview.tabs = [file]
+    preview.activeTab = file
+    preview.activeTabId = file.id
+
+    const markup = renderPane()
+
+    expect(markup).not.toContain('file-preview-path-row')
+    expect(markup).not.toContain('file-preview-update-row')
+  })
+
+  it('keeps reload available in a transient update row when the path is hidden', () => {
+    const external = tab('updated-external')
+    external.file = {
+      ...external.file,
+      fileName: 'hui.html',
+      displayPath: 'hui.html',
+      pathPresentation: 'file_name_only'
+    }
+    external.hasExternalUpdate = true
+    preview.tabs = [external]
+    preview.activeTab = external
+    preview.activeTabId = external.id
+
+    const markup = renderPane()
+
+    expect(markup).not.toContain('file-preview-path-row')
+    expect(markup).toContain('class="file-preview-update-row"')
+    expect(markup).toContain('>有更新</button>')
   })
 })
