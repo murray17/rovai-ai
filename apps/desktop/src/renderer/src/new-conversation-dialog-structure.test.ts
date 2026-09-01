@@ -35,4 +35,13 @@ describe('New Conversation dialog presentation contract', () => {
     expect(component).toContain('disabled={projectActionsDisabled}')
     expect(component).toContain(': closeButtonRef.current')
   })
+
+  it('scopes the selected porcelain picker colors to dropdown controls', () => {
+    expect(styles).toMatch(/\.new-camp-picker-trigger\s*\{[^}]*border:\s*1px solid var\(--new-camp-picker-line-strong\)[^}]*background:\s*var\(--new-camp-picker-surface\)/s)
+    expect(styles).toMatch(/\.new-camp-picker-menu\s*\{[^}]*border:\s*1px solid var\(--new-camp-picker-line-strong\)[^}]*background:\s*var\(--new-camp-picker-surface\)/s)
+    expect(styles).toMatch(/\.new-camp-lead-trigger\s*\{[^}]*border:\s*1px solid var\(--new-camp-picker-line-strong\)[^}]*background:\s*var\(--new-camp-picker-surface\)/s)
+    expect(styles).toMatch(/\.new-camp-lead-menu\s*\{[^}]*border:\s*1px solid var\(--new-camp-picker-line-strong\)[^}]*background:\s*var\(--new-camp-picker-surface\)/s)
+    expect(styles).toMatch(/\.new-camp-optional-shell\s*\{[^}]*background:\s*var\(--surface\)/s)
+    expect(styles).toMatch(/\.new-camp-optional-icon\s*\{[^}]*background:\s*var\(--surface-muted\)/s)
+  })
 })
