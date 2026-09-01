@@ -26,10 +26,6 @@ export function normalizeDingTalkRobotMessage(
   binding: { appKey: string; robotCode: string }
 ): DingTalkInboundMessage {
   const value = object(raw)
-  if (['openConvThreadId', 'openThreadId', 'threadId', 'topicId', 'topicKey']
-    .some((key) => first(value, key) !== null)) {
-    throw new Error('dingtalk_topic_not_supported')
-  }
   // Robot Stream callbacks expose the Owner identity as senderStaffId /
   // senderCorpId. Older payloads used senderStaff for the user, but the Bot's
   // chatbotCorpId is never a substitute for the sender tenant in an external
@@ -45,6 +41,10 @@ export function normalizeDingTalkRobotMessage(
   const group = conversationType === '2'
     || conversationType.toLowerCase() === 'group'
     || typeof value.openConversationId === 'string'
+  if (group && ['openConvThreadId', 'openThreadId', 'threadId', 'topicId', 'topicKey']
+    .some((key) => first(value, key) !== null)) {
+    throw new Error('dingtalk_topic_not_supported')
+  }
   const chatId = group
     ? first(value, 'openConversationId', 'conversationId')
     : first(value, 'conversationId') ?? `${binding.appKey}:${senderStaffId}`

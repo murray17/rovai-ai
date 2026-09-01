@@ -18,7 +18,9 @@ last_updated: 2026-09-01
 - 渠道页同时显示飞书与钉钉；每个 Provider 只呈现自己的连接、Bot、待绑定和异常计数。
 - Owner 私聊、Owner 在普通群中对一个 Bot 的 canonical 显式 `@`、单根 FIFO、群 roster、项目绑定、
   Quick Chat、公开 Markdown 输出和 AI 状态卡 enabled。
-- 钉钉 Topic/Thread 始终 disabled；出现 topic identity 必须在 Core 准入前拒绝，不用普通群降级。
+- 钉钉 Topic/Thread 始终 disabled；只有已规范化为 `group` 的 callback 同时携带非空
+  `openConvThreadId / openThreadId / threadId / topicId / topicKey` 才按 topic identity 在 Core 准入前拒绝，
+  不用普通群降级。`p2p` callback 可携带平台私聊路由使用的同名字段，不能仅按字段名把 Owner 私聊误判为 Topic。
 - 同一消息直接点名多个 Bot、入站附件正文和出站附件仍不在本版范围。单 Bot 收到消息后由 Core A2A
   协作，不通过多个 Stream Bot 重复接收同一外部消息。
 
@@ -44,6 +46,12 @@ Quick Chat 都原子提升已排队消息并保持同一 FIFO。成功、取消�
 
 终态标题为“已完成 / 执行失败 / 已取消”，移除“停止执行”。服务不可用、端口冲突或没有可发布 LAN 地址时，
 该卡从创建起不显示“打开执行台”，不在服务恢复后修补旧卡。
+
+内置 AI 模板的动态按钮必须使用官方 `msgButtons` wire shape：callback 为
+`text + color + bounded versioned action id + request=true`，直接链接为 `text + color + url + iosUrl`；不得使用模板
+不会消费的自造 `title + action` 结构。callback action 从 Stream payload 的
+`content.cardPrivateData.actionIds` 读取并解码，继续以顶层 `outTrackId / userId` 做消息与 Owner 鉴权。版本化 action id
+只携带既有 bounded opaque 参数，畸形、超限或非对象值 fail closed。
 
 - “显示最近输出”是 Owner callback。Core 校验 provider/App、Owner `userId`、AgentRun 和 exact `outTrackId` 后，
   Main 展开或收起最后 30 条 Agent 公开正文与安全 command；不显示 command result、逐条结果统计或分页。
@@ -92,7 +100,9 @@ Web 与卡片只能读取触发消息摘要、Agent 公开正文、安全 comman
 ## 6. 验证边界
 
 单元与 Core 回归必须覆盖三按钮/终态两按钮、URL fragment 原样保留、无 elapsed 文案、Quick Chat 无项目路径、
-DingTalk Owner recent/cancel、错误 App/消息拒绝、DingTalk Web scope 和 per-card 串行更新。真实发布 Bot 还须分别在桌面端
+DingTalk Owner recent/cancel、官方动态按钮 wire shape 与 nested `actionIds`、`p2p` thread-like 路由元数据不误拒绝、
+群 Topic 继续拒绝、错误 App/消息拒绝、
+DingTalk Web scope 和 per-card 串行更新。真实发布 Bot 还须分别在桌面端
 与手机端验证卡片投递、callback operator `userId`、RFC1918 HTTP URL/fragment 打开、SSE 自动更新、停止后的即时终态、
 私聊、普通群项目/Quick Chat 和 FIFO；真实验收结果记录在当前版本实施计划，不由单元测试代替。
 

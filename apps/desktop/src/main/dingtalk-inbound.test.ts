@@ -60,6 +60,27 @@ describe('DingTalk inbound normalization', () => {
     expect(message.explicitlyAtBot).toBe(true)
   })
 
+  it('does not mistake private callback routing metadata for a group topic', () => {
+    const message = normalizeDingTalkRobotMessage({
+      msgId: 'msg-private-thread-metadata',
+      senderCorpId: 'ding-corp',
+      senderStaffId: 'owner-user',
+      senderNick: 'Murray',
+      conversationType: '1',
+      conversationId: 'cid-private',
+      openConvThreadId: 'private-routing-id',
+      robotCode: 'ding-app-a',
+      msgtype: 'text',
+      text: { content: 'hello' }
+    }, binding)
+
+    expect(message).toMatchObject({
+      conversationKind: 'p2p',
+      chatId: 'cid-private',
+      body: 'hello'
+    })
+  })
+
   it('does not substitute the Bot tenant for a missing sender tenant', () => {
     expect(() => normalizeDingTalkRobotMessage({
       msgId: 'msg-external',

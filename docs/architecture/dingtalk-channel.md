@@ -131,6 +131,9 @@ Open API 只接受 `appKey/appSecret` 换取短期 access token。群 roster、�
 固定 API origin 与有界 timeout。AI 卡固定使用模板 `382e4302-551d-4880-bf29-a30acfab2e71.schema`、
 `callbackType=STREAM`、`supportForward=false`。项目卡、“显示最近输出”和“停止执行”的 callback 仍须由 Core 校验
 exact App、Owner userId、outTrackId、nonce/version 或 AgentRun；卡片 payload 不能直接改变项目或执行状态。
+模板动态按钮使用官方 `msgButtons`：callback 以 `text/color/id/request` 表达，URL 入口以
+`text/color/url/iosUrl` 表达。Main 把既有 bounded action 对象编码为 versioned base64url action id，并从官方 nested
+`content.cardPrivateData.actionIds` 回调恢复；自造 `title/action` 对象即使创建 API 返回成功也不会被客户端渲染。
 
 执行卡不再复制完整执行台或使用 streaming/page callback。每个 Run 的 Main 内存状态冻结首次创建时的 LAN URL、最近输出
 开关、最新公开 source 和卡片摘要，delivery/callback/终态按 Run 串行。执行中为“最近输出 / 打开执行台 / 停止”三个入口，
@@ -150,7 +153,7 @@ Migration 122 为钉钉增加 account/publication/Bot/Owner identity 表，同�
 ```text
 Stream callback fast ACK
 → normalize exact appKey / robotCode / corpId / senderStaffId / msgId
-→ reject topic and group messages without one canonical atUsers target
+→ classify p2p/group, then reject group topic identity and group messages without one canonical atUsers target
 → Core verify Owner from appKey + userId digest
 → p2p exact /new OR group roster reconcile
 → group first observe as durable incomplete aggregate
@@ -176,7 +179,7 @@ App 或目标已移出时 fail closed。
 | Owner 私聊 | enabled | 真实租户 Web Session、Stream 与回复验收 |
 | Owner 普通群显式 `@` | enabled | 真实群 roster、项目卡和输出验收 |
 | 同消息直接多 Bot | disabled；普通群只有 `isInAtList` 且 canonical `atUsers` 恰好证明一个直接目标才进入 3 秒观察窗；缺失、歧义、多个 `atUsers` 或多个 receiving App 均整条 fail closed，单 Bot 协作扩展只走 Core A2A | 官方 canonical mention mapping + 多 App observation 真实证据 |
-| 话题/Thread | disabled，出现任一 topic identity 即拒绝 | 独立话题群与消息 thread identity、roster、Camp mapping 证据 |
+| 话题/Thread | disabled；只有规范化为 group 后出现非空 topic/thread identity 才拒绝，p2p 的同名平台路由元数据不视为 Topic | 独立话题群与消息 thread identity、roster、Camp mapping 证据 |
 | 入站附件 | summary only | 官方下载、授权和 Managed Attachment ingress 设计 |
 | 出站附件 | disabled，明确 unsupported | 已验证 app-only 原生投递和可恢复 message identity |
 | AI 状态卡 | enabled；项目/最近输出/停止 callback 与固定 URL 已接入，真实客户端仍需验收 | 桌面/手机真实投递、URL fragment、callback、SSE 与停止终态矩阵 |

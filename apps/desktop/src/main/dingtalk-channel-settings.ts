@@ -30,6 +30,7 @@ import {
 } from './dingtalk-member-bot-provisioner'
 import type { MemberBotAvatarSourceResolver } from './member-bot-avatar-source'
 import {
+  decodeDingTalkCardActionId,
   DingTalkOpenApiClient,
   dingtalkCardParams,
   type DingTalkCardButton
@@ -1132,7 +1133,7 @@ export class DingTalkChannelSettingsService {
   }
 
   async #handleCard(callback: DingTalkCardCallback): Promise<void> {
-    const value = callbackValue(callback.payload)
+    const value = dingtalkCardCallbackValue(callback.payload)
     if (!value) return
     const operatorUserId = recursiveString(callback.payload, 'userId')
       ?? recursiveString(callback.payload, 'staffId')
@@ -1704,30 +1705,42 @@ function boundedText(value: string, maxCharacters: number): string {
     : `${characters.slice(0, maxCharacters - 1).join('')}…`
 }
 
-function callbackValue(payload: Record<string, unknown>): Record<string, unknown> | null {
-  const candidates = recursiveValues(payload, new Set())
-  for (const candidate of candidates) {
-    if (typeof candidate === 'string') {
-      try {
-        const parsed = JSON.parse(candidate)
-        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-          const value = parsed as Record<string, unknown>
-          if ('pendingBindingId' in value || 'agentRunId' in value) return value
-        }
-      } catch { /* not a JSON callback value */ }
-    } else if (candidate && typeof candidate === 'object' && !Array.isArray(candidate)) {
-      const value = candidate as Record<string, unknown>
-      if ('pendingBindingId' in value || 'agentRunId' in value) return value
+export function dingtalkCardCallbackValue(
+  payload: Record<string, unknown>
+): Record<string, unknown> | null {
+  return findDingTalkCardCallbackValue(payload, new Set())
+}
+
+function findDingTalkCardCallbackValue(
+  candidate: unknown,
+  seen: Set<unknown>
+): Record<string, unknown> | null {
+  if (typeof candidate === 'string') {
+    const decoded = decodeDingTalkCardActionId(candidate)
+    if (decoded && isDingTalkCardCallbackValue(decoded)) return decoded
+    if (candidate.length > 32_768 || !/^[\s]*[\[{]/u.test(candidate)) return null
+    try {
+      return findDingTalkCardCallbackValue(JSON.parse(candidate), seen)
+    } catch {
+      return null
     }
+  }
+  if (!candidate || typeof candidate !== 'object' || seen.has(candidate)) return null
+  seen.add(candidate)
+  if (!Array.isArray(candidate)) {
+    const value = candidate as Record<string, unknown>
+    if (isDingTalkCardCallbackValue(value)) return value
+  }
+  const children = Array.isArray(candidate) ? candidate : Object.values(candidate)
+  for (const child of children) {
+    const found = findDingTalkCardCallbackValue(child, seen)
+    if (found) return found
   }
   return null
 }
 
-function recursiveValues(value: unknown, seen: Set<unknown>): unknown[] {
-  if (!value || typeof value !== 'object' || seen.has(value)) return [value]
-  seen.add(value)
-  if (Array.isArray(value)) return value.flatMap((item) => recursiveValues(item, seen))
-  return [value, ...Object.values(value).flatMap((item) => recursiveValues(item, seen))]
+function isDingTalkCardCallbackValue(value: Record<string, unknown>): boolean {
+  return 'pendingBindingId' in value || 'agentRunId' in value
 }
 
 function recursiveString(value: unknown, key: string): string | null {

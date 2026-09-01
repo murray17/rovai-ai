@@ -2,6 +2,8 @@ import { randomUUID } from 'node:crypto'
 
 const DEFAULT_API_ORIGIN = 'https://api.dingtalk.com'
 export const DINGTALK_AI_CARD_TEMPLATE_ID = '382e4302-551d-4880-bf29-a30acfab2e71.schema'
+const DINGTALK_CARD_ACTION_PREFIX = 'rovai.v1.'
+const MAX_DINGTALK_CARD_ACTION_BYTES = 4_096
 
 export class DingTalkOpenApiClient {
   readonly #appKey: string
@@ -217,6 +219,31 @@ export type DingTalkCardButton =
   | { title: string; value: Record<string, unknown> }
   | { title: string; url: string }
 
+export function encodeDingTalkCardActionId(value: Record<string, unknown>): string {
+  const json = JSON.stringify(value)
+  if (Buffer.byteLength(json, 'utf8') > MAX_DINGTALK_CARD_ACTION_BYTES) {
+    throw new Error('dingtalk_card_action_too_large')
+  }
+  return `${DINGTALK_CARD_ACTION_PREFIX}${Buffer.from(json, 'utf8').toString('base64url')}`
+}
+
+export function decodeDingTalkCardActionId(value: string): Record<string, unknown> | null {
+  if (!value.startsWith(DINGTALK_CARD_ACTION_PREFIX)) return null
+  const encoded = value.slice(DINGTALK_CARD_ACTION_PREFIX.length)
+  if (!encoded || encoded.length > Math.ceil(MAX_DINGTALK_CARD_ACTION_BYTES * 4 / 3) + 4
+    || !/^[A-Za-z0-9_-]+$/u.test(encoded)) return null
+  try {
+    const bytes = Buffer.from(encoded, 'base64url')
+    if (bytes.byteLength > MAX_DINGTALK_CARD_ACTION_BYTES) return null
+    const parsed = JSON.parse(bytes.toString('utf8'))
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+      ? parsed as Record<string, unknown>
+      : null
+  } catch {
+    return null
+  }
+}
+
 export function dingtalkCardParams(input: {
   title: string
   content?: string | null
@@ -238,10 +265,11 @@ export function dingtalkCardParams(input: {
     sys_full_json_obj: JSON.stringify({
       order,
       msgButtons: buttons.map((button) => ({
-        title: button.title,
-        action: 'url' in button
-          ? { type: 'url', value: button.url }
-          : { type: 'callback', value: JSON.stringify(button.value) }
+        text: button.title,
+        color: 'url' in button ? 'blue' : 'gray',
+        ...('url' in button
+          ? { url: button.url, iosUrl: button.url }
+          : { id: encodeDingTalkCardActionId(button.value), request: true })
       }))
     })
   }

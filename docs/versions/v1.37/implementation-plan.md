@@ -421,9 +421,17 @@ Antigravity 原生生成、TRAE/Copilot 专用图片结果已接入，六种 Run
 - Core Web scope 接受冻结 conversation 的 Feishu/DingTalk closed set；最近输出与 exact-run cancel 新增
   `dingtalk-channel-host` typed alias，仍复用同一 Owner/App/message/run 权威。共享 `ExecutionViewService`、端口、
   Token scope、公开 redactor/result/file projection 与 SSE 均未复制。
-- 本地验证已通过 `pnpm test`（135 个 Vitest 文件 / 1386 项、Node 221 项中 220 通过且 1 项 Windows 条件跳过）、
+- 本地验证已通过 `pnpm test`（135 个 Vitest 文件 / 1401 项、Node 221 项中 220 通过且 1 项 Windows 条件跳过）、
   `pnpm test:rust:pr`（Library 474、CLI 32、slow 297 项）、TypeScript、Desktop production build、Rust fmt/check/clippy、
   三道文档门禁与 `git diff --check`。DingTalk 登录隔离验收与 Desktop bridge 也通过，实图覆盖双主题、QR、原生企业选择页、
-  200% 缩放和 Escape；未访问日常数据或发送真实渠道消息。
-- “爱丽丝”桌面/手机真实投递结果仍待执行。完成前不把 AI 模板 URL action、callback operator
-  `userId`、RFC1918 fragment 或 SSE 跨端行为记为通过。
+  200% 缩放和 Escape。
+- Applications 日常安装版随后使用已发布的“爱丽丝”完成桌面端真实私聊：真实 p2p 回调携带
+  `openConvThreadId`，旧归一化错误地按 Topic 拒绝；现在先按 `conversationType` 判定私聊/群聊，只在普通群出现
+  Topic identity 时拒绝。回归先复现失败，修复后真实 inbound 已 finalized、对应 turn completed，状态卡和最终回复均成功投递。
+- 第一张真实终态卡虽被 API 接受，但按钮区为空。对照钉钉官方 Stream SDK 后确认内置 AI 模板要求 callback 按钮使用
+  `text/color/id/request`、URL 按钮使用 `text/color/url/iosUrl`，而不是旧的自造 `title/action` 对象；callback 的
+  `content.cardPrivateData.actionIds` 也改为解码有版本、长度上限且 fail-closed 的 action ID。真实桌面卡已显示终态
+  “显示最近输出 / 打开执行台”两个按钮及最终回复；收起态 order 只保留标题和按钮，展开态才加入公开输出组件，避免空组件形成大段留白。
+- 当前 Applications 已安装上述修复并恢复真实渠道连接。手机端、真实 recent-output/cancel callback、RFC1918 fragment
+  打开与 SSE 跨端行为仍待逐项验收；这些未完成项不由本地测试替代。内置 AI 模板终态的赞/踩属于钉钉原生模板组件，
+  当前不为移除它切换卡片模板。

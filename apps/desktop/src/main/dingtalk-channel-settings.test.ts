@@ -5,6 +5,7 @@ import {
   DingTalkChannelSettingsService,
   type DingTalkExecutionConsoleSource,
   type DingTalkChannelHostDependencies,
+  dingtalkCardCallbackValue,
   dingtalkOutTrackId,
   executionCardParams,
   hasCanonicalSingleDingTalkBotTarget,
@@ -18,7 +19,7 @@ import type {
   DingTalkDeveloperSessionService
 } from './dingtalk-developer-session'
 import type { DingTalkAppCredential } from './channel-credential-store'
-import { DingTalkOpenApiClient } from './dingtalk-open-api'
+import { DingTalkOpenApiClient, encodeDingTalkCardActionId } from './dingtalk-open-api'
 import { DingTalkStreamRegistry } from './dingtalk-stream-registry'
 import { DingTalkProvisioningError } from './dingtalk-member-bot-provisioner'
 
@@ -340,15 +341,15 @@ describe('DingTalk channel account connection', () => {
       recentOutputVisible: false
     })
     const system = JSON.parse(params.sys_full_json_obj) as {
-      msgButtons: Array<{ title: string; action: { type: string } }>
+      msgButtons: Array<{ text: string; request?: boolean; url?: string }>
     }
 
     expect(params.msgTitle).toBe('爱丽丝 · 执行中')
     expect(params.staticMsgContent).toBe('')
-    expect(system.msgButtons.map((button) => button.title)).toEqual([
+    expect(system.msgButtons.map((button) => button.text)).toEqual([
       '显示最近输出', '打开执行台', '停止执行'
     ])
-    expect(system.msgButtons.map((button) => button.action.type)).toEqual([
+    expect(system.msgButtons.map((button) => button.request === true ? 'callback' : 'url')).toEqual([
       'callback', 'url', 'callback'
     ])
     expect(JSON.stringify(params)).not.toMatch(/秒|用时/u)
@@ -362,14 +363,34 @@ describe('DingTalk channel account connection', () => {
       recentOutputVisible: true
     })
     const system = JSON.parse(params.sys_full_json_obj) as {
-      msgButtons: Array<{ title: string }>
+      order: string[]
+      msgButtons: Array<{ text: string }>
     }
 
     expect(params.msgTitle).toBe('爱丽丝 · 已取消')
     expect(params.staticMsgContent).toContain('最终公开输出')
-    expect(system.msgButtons.map((button) => button.title)).toEqual([
+    expect(system.order).toEqual(['msgTitle', 'staticMsgContent', 'msgButtons'])
+    expect(system.msgButtons.map((button) => button.text)).toEqual([
       '收起最近输出', '打开执行台'
     ])
+  })
+
+  it('reads an encoded action from the official nested card callback content', () => {
+    const value = {
+      action: 'execution_recent_output',
+      agentRunId: 'run-1',
+      visible: true
+    }
+
+    expect(dingtalkCardCallbackValue({
+      outTrackId: 'card-1',
+      content: JSON.stringify({
+        cardPrivateData: {
+          actionIds: [encodeDingTalkCardActionId(value)],
+          params: {}
+        }
+      })
+    })).toEqual(value)
   })
 
   it('offers Quick Chat even when the DingTalk project catalog is empty', () => {
@@ -377,13 +398,17 @@ describe('DingTalk channel account connection', () => {
       pendingBindingId: 'pending-1', expectedVersion: 1, nonce: 'nonce-1', projectOptions: []
     }, false)
     const system = JSON.parse(params.sys_full_json_obj) as {
-      msgButtons: Array<{ title: string; action: { value: string } }>
+      msgButtons: Array<{ text: string; id: string }>
     }
 
-    expect(system.msgButtons.map((button) => button.title)).toEqual([
+    expect(system.msgButtons.map((button) => button.text)).toEqual([
       '开始快速对话', '刷新项目'
     ])
-    expect(JSON.parse(system.msgButtons[0].action.value)).toMatchObject({ action: 'quick_chat' })
+    expect(dingtalkCardCallbackValue({
+      content: JSON.stringify({
+        cardPrivateData: { actionIds: [system.msgButtons[0].id], params: {} }
+      })
+    })).toMatchObject({ action: 'quick_chat' })
   })
 
   it('fails closed when one DingTalk message reaches multiple managed Bots', () => {
