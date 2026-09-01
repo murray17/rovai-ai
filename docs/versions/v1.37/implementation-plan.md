@@ -43,6 +43,8 @@ last_updated: 2026-09-01
 - [x] 飞书/钉钉永久 750ms/800ms Host interval 改为事件快路径与按需十分钟 one-shot watchdog；Core 从现有
   provider 领域表返回 `hasOutstandingWork`，终态 quiet window、Delivery settlement 与 retry deadline 独立唤醒，
   清空后完全休眠；不增加 WorkItem/deadline 镜像表。
+- [x] 开发者二次确认飞书入站规范化 revision 1 后，当前正文只冻结 SDK 单 locale 结果；显式引用复用
+  同一 normalizer，Topic root structural parent 不再创建 ExternalQuote。历史消息与 Evidence 不回填。
 - [ ] Cursor 非标准生成通知的真实成功 fixture；本机旧 CLI 不支持 ACP，无证据不实现猜测 parser。
 
 ## 验证 owner
@@ -107,6 +109,10 @@ last_updated: 2026-09-01
   原样运行 parser、SQLite multi-recipient、literal invalid-tail 与 PublicOnly owner，禁止新建平行 parser fixture。
 - 核对到既有文档漂移：基础不变量曾把 Bootstrap 第三段写成 COLLABORATION_STATE；按既有实现、
   formatter golden 和 Built-in 架构校正为 MEMORY_ENTRYPOINT。仅校正文档，不改变 Bootstrap 格式。
+- `channel-settings.test.ts` 的 rich-post owner 向三个 Bot 注入同一双 locale raw `post` 与各自 SDK
+  normalized content，断言三条 observation body 都只保留普通人类 mention 和一份文本，不含
+  `tag/user_id/placeholder/第二 locale`。Topic owner 断言 `parent_id == root_id` 不调用 `message.get` 且
+  `quote=null`，非 root parent 只读取一次并把双 locale `post` 规范化为单份人类可读引用。
 
 ## 证据状态
 
@@ -333,6 +339,22 @@ Antigravity 原生生成、TRAE/Copilot 专用图片结果已接入，六种 Run
 - `pnpm test` 通过：133 个 Vitest 文件 / 1362 项、221 项 Node tests（1 项既有 Windows 原生跳过），文档 9 项、
   Skill 3 项及普通治理门禁通过；固定 base `ea0634631697d40f72bac05df19aeeb694d2481d` 的
   `docs:check:ci` 通过。未启动日常 App、Core、Runtime，未访问或改写真实 Camp 数据。
+
+### 2026-09-01 飞书入站正文与 Topic 引用修复
+
+- 真实 ContextManifest 与同版本 SDK 源码定位到两个 Host 入站错误：raw `post` 的无类型递归遍历把
+  element metadata 和所有 locale 拼成正文；Topic `parent_id == root_id` 的结构父链被误当显式引用。
+  [revision 1](model-context-change-feishu-ingress-normalization.md) 经开发者二次确认后实施，不回填历史消息。
+- Desktop 当前正文只消费 SDK `NormalizedMessage.content`，逐 occurrence 删除其余冻结 target；显式
+  `text | post` quote 使用同一 SDK normalizer 并保留原文 mention。Topic structural root 不调用
+  `message.get`，非 root parent 仍只读取一次。Core command、Schema、Migration 与 Context version 轴不变。
+- 两个新增 owner 在旧实现上先稳定失败：三 Bot body 都包含 `tag/user_id/user_name` 与双 locale，Topic root
+  额外读取并创建 quote；修复后定向 53 项通过，并保留不可读取占位负向断言。
+- `pnpm typecheck`、`pnpm test`（134 个 Vitest 文件 / 1375 项；Node 221 项中 220 通过、1 项既有 Windows
+  检查按平台跳过；文档 9 项、Skill 3 项）、`pnpm build:desktop`、三道文档门禁与 `git diff --check`
+  通过。CI 文档门禁固定 base 为 `04ae35ffb03da83f96eb9e750303dfa6c9b23395`。未启动 Core/Electron/
+  Runtime 或真实飞书连接，未访问日常 SQLite，也未发送渠道消息。
+
 ### 2026-09-01 主动停止取消分类补正
 
 - 退役 #153 引入的 `failed/accepted_input_outcome_unknown` 取消分类：用户主动停止统一结算为
@@ -368,3 +390,8 @@ Antigravity 原生生成、TRAE/Copilot 专用图片结果已接入，六种 Run
   `cargo test -p rovai-core --lib terminal_execution_console_recovers_after_completed_request_and_restart`、
   `pnpm exec vitest run apps/desktop/src/main/channel-host-pump.test.ts apps/desktop/src/main/channel-settings.test.ts
   apps/desktop/src/main/dingtalk-channel-settings.test.ts apps/desktop/src/main/channel-settings-coordinator.test.ts`。
+- 合并最新 main 后完整复验：`pnpm test` 的 135 个 Vitest 文件 / 1382 项、Node 221 项中 220 通过且 1 项
+  Windows 条件跳过，文档 9 项与 Skill 3 项通过；`pnpm test:rust:pr` 的 Library 474、CLI 32、slow 297 项
+  全部通过。`pnpm typecheck`、`pnpm build:desktop`、Clippy、Rust fmt、三道文档门禁及 `git diff --check`
+  通过，CI 文档门禁固定 base 为 `9ae5e250bdd7e25e601ce89ca9396bced380949c`。未启动日常 App、Core、
+  Runtime 或真实渠道连接，未访问日常 SQLite，也未发送渠道消息。

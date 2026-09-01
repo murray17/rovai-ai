@@ -3,10 +3,13 @@ import { readFile } from 'node:fs/promises'
 import {
   createLarkChannel,
   LarkChannelError,
+  normalize,
   type BotAddedEvent,
+  type BotIdentity,
   type CardActionEvent,
   type LarkChannel,
-  type NormalizedMessage
+  type NormalizedMessage,
+  type RawMessageEvent
 } from '@larksuiteoapi/node-sdk'
 import type {
   AgentProfile,
@@ -1474,7 +1477,7 @@ export class ChannelSettingsService {
         .map((bot) => bot.botDisplayName)
     )
     if (managed.channel.botIdentity?.name) expectedBotNames.add(managed.channel.botIdentity.name)
-    const body = canonicalInboundBody(raw, message, expectedBotNames)
+    const body = canonicalInboundBody(message, expectedBotNames)
     const conversationDisplayName = await this.#conversationDisplayName(
       managed.channel,
       message,
@@ -1508,8 +1511,12 @@ export class ChannelSettingsService {
       await this.#emit()
       return
     }
-    const quote = message.replyToMessageId
-      ? await this.#readExternalQuote(managed.channel, message.replyToMessageId)
+    const quoteMessageId = message.replyToMessageId
+      && !(conversationKind === 'topic' && message.replyToMessageId === topicKey)
+      ? message.replyToMessageId
+      : null
+    const quote = quoteMessageId
+      ? await this.#readExternalQuote(managed.channel, quoteMessageId)
       : null
     const observation = await this.#commandWithId('channels.inbound.observe', stableCommandId(
       'observe', managed.appId, tenantKey, message.messageId
@@ -1957,7 +1964,11 @@ export class ChannelSettingsService {
       if (!item || item.deleted) throw new Error('quoted_message_unavailable')
       return {
         senderDisplayName: item.sender?.sender_name || '飞书成员',
-        body: externalMessageBody(item.msg_type, item.body?.content),
+        body: await externalMessageBody(item.msg_type, item.body?.content, {
+          messageId: item.message_id || messageId,
+          botIdentity: channel.botIdentity,
+          mentions: item.mentions
+        }),
         attachmentSummaries: externalAttachmentSummaries(item.msg_type, item.body?.content)
       }
     } catch {
@@ -2602,23 +2613,15 @@ function channelFailureDetail(error: unknown): string {
 }
 
 function canonicalInboundBody(
-  raw: RawInboundEvent,
   message: NormalizedMessage,
   expectedBotNames: ReadonlySet<string>
 ): string {
-  const rawMessage = raw.message
-  let body = rawMessage?.content
-    ? externalMessageBody(rawMessage.message_type ?? message.rawContentType, rawMessage.content)
-    : message.content
-  for (const mention of rawMessage?.mentions ?? []) {
-    if (!mention.key) continue
-    const replacement = mention.name && !expectedBotNames.has(mention.name)
-      ? `@${mention.name}`
-      : ''
-    body = body.split(mention.key).join(replacement)
-  }
-  if (!rawMessage?.mentions) {
-    for (const botName of expectedBotNames) body = body.split(`@${botName}`).join('')
+  let body = message.content
+  for (const mention of message.mentions) {
+    if (mention.isBot || !mention.name || !expectedBotNames.has(mention.name)) continue
+    const token = `@${mention.name}`
+    const index = body.indexOf(token)
+    if (index >= 0) body = `${body.slice(0, index)}${body.slice(index + token.length)}`
   }
   return body.replace(/[ \t]+/gu, ' ').replace(/^\s+|\s+$/gu, '')
 }
@@ -2688,12 +2691,63 @@ function arrayPayload(result: StoredCommandResult, key: string): string[] {
   return value
 }
 
-function externalMessageBody(messageType: string | undefined, encoded: string | undefined): string {
+type ExternalMessageNormalization = {
+  messageId: string
+  botIdentity?: BotIdentity
+  mentions?: Array<{
+    key?: string
+    id?: string | { open_id?: string; user_id?: string; union_id?: string }
+    id_type?: string
+    name?: string
+    tenant_key?: string
+  }>
+}
+
+async function externalMessageBody(
+  messageType: string | undefined,
+  encoded: string | undefined,
+  normalization: ExternalMessageNormalization
+): Promise<string> {
   if (!encoded) return '[引用消息无可读文本]'
+  if (messageType === 'text' || messageType === 'post') {
+    const mentions = (normalization.mentions ?? []).flatMap((mention) => {
+      if (!mention.key || !mention.id) return []
+      const id = typeof mention.id === 'string'
+        ? mention.id_type === 'user_id'
+          ? { user_id: mention.id }
+          : mention.id_type === 'union_id'
+            ? { union_id: mention.id }
+            : { open_id: mention.id }
+        : mention.id
+      return [{
+        key: mention.key,
+        id,
+        name: mention.name,
+        tenant_key: mention.tenant_key
+      }]
+    })
+    const event: RawMessageEvent = {
+      sender: { sender_id: {} },
+      message: {
+        message_id: normalization.messageId,
+        chat_id: 'external_quote',
+        chat_type: 'p2p',
+        message_type: messageType,
+        content: encoded,
+        mentions
+      }
+    }
+    const normalized = await normalize(event, {
+      botIdentity: normalization.botIdentity ?? {
+        openId: 'external_quote',
+        name: 'Rovai'
+      },
+      stripBotMentions: false
+    })
+    return normalized.content || (messageType === 'post' ? '[富文本消息]' : '[引用消息无可读文本]')
+  }
   try {
-    const parsed = JSON.parse(encoded) as unknown
-    if (messageType === 'text' && isRecord(parsed) && typeof parsed.text === 'string') return parsed.text
-    if (messageType === 'post') return collectText(parsed).join('').trim() || '[富文本消息]'
+    JSON.parse(encoded)
   } catch {
     return encoded.slice(0, 8_000)
   }
@@ -2713,16 +2767,6 @@ function externalAttachmentSummaries(
     } catch { /* deterministic fallback */ }
   }
   return [{ name, mediaType: messageType ?? null }]
-}
-
-function collectText(value: unknown): string[] {
-  if (typeof value === 'string') return [value]
-  if (Array.isArray(value)) return value.flatMap(collectText)
-  if (!isRecord(value)) return []
-  const direct = typeof value.text === 'string' ? [value.text] : []
-  return direct.concat(Object.entries(value)
-    .filter(([key]) => key !== 'text')
-    .flatMap(([, nested]) => collectText(nested)))
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

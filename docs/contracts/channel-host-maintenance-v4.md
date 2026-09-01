@@ -83,4 +83,4 @@ cursor、Renderer 缓存或 WebSocket 生命周期升级为恢复真源。
 - [Core 权威写入与幂等事务](../architecture/foundational-invariants.md#core-command-transaction)
 - [飞书渠道架构](../architecture/feishu-channel.md)
 - [钉钉渠道架构](../architecture/dingtalk-channel.md)
-- [V1.37-D06](../versions/v1.37/decisions.md#v1-37-d06)
+- [V1.37-D07](../versions/v1.37/decisions.md#v1-37-d07)

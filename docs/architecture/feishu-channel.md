@@ -8,7 +8,7 @@ last_updated: 2026-09-01
 
 # 飞书渠道架构
 
-字段、状态和恢复合同见 [Feishu Channel v10](../contracts/feishu-channel-v10.md)，credential 与 Developer Session 持久化见
+字段、状态和恢复合同见 [Feishu Channel v11](../contracts/feishu-channel-v11.md)，credential 与 Developer Session 持久化见
 [Channel Storage v3](../contracts/channel-storage-v3.md)，模型输入证据见
 [ContextManifest Evidence v22](../contracts/context-manifest-evidence-v22.md)，取舍理由见
 [v1.35 决策记录](../versions/v1.35/decisions.md)。
@@ -200,6 +200,11 @@ Host 只转交已验证 Owner 的私聊，或 Owner 在普通群/话题中显式
 未 mention 群消息、未知 Bot、群内 `/new` 和不完整 topic identity 在 observation 前停止。多个 App 可能收到同一飞书消息，因此 Core 先写
 `collecting` aggregate：
 
+当前消息正文的唯一 authority 是 Lark SDK 已完成单 locale、typed element 与 mention 解析的
+`NormalizedMessage.content`。Main 只再删除本轮冻结 target 中尚未由 SDK 删除的受管 Bot mention occurrence；
+raw event 继续服务 identity 与诊断，但不得被第二套递归字符串遍历器重新解释成正文。这样每个接收 App 为同一
+multi-Bot 消息提交完全相同的 body，Structured mention 仍只由 Core 根据 canonical targets 构造。
+
 ```text
 observation 1 ─┐
 observation 2 ─┼─ canonical payload equality
@@ -227,9 +232,15 @@ Runtime 暂未 ready 属于可重试排队 blocker；永久目标或授权错误
 
 ## 外部引用与模型输入
 
-飞书 `parent_id` 只触发一次当前读取。Host 读取并规范化被引用消息，把 `ExternalQuote` 作为当前唯一触发
-CampMessage 的 Structured Content segment 冻结；读取失败使用确定性不可读取文本。被引用消息不单独进入 Camp，
-飞书来源 CampMessage 的 `replyToCampMessageId` 始终为空，也不维护
+飞书 `parent_id` 只有在表达可引用的直接父消息时才触发一次当前读取。独立话题群中
+`parent_id == canonical topic root_id` 是 structural parent，只证明消息属于该 Topic；Host 不读取 root，也不创建
+`ExternalQuote`。p2p/group 的 parent，以及 Topic 中 `parent_id != root_id` 的非 root parent，继续读取一次并创建
+`ExternalQuote`。这只取代历史 V1.35-D03 把 Topic structural parent 也当引用的部分；普通 group thread 仍在
+observation 前拒绝。
+
+真正读取引用时，Host 对 `text | post` 复用锁定 Lark SDK normalizer，并保留原文 mention；`post` 只选择一个
+locale、只按 typed element schema 渲染，不能递归收集 `tag`、identity 或所有 locale 字符串。读取失败使用确定性
+不可读取文本。被引用消息不单独进入 Camp，飞书来源 CampMessage 的 `replyToCampMessageId` 始终为空，也不维护
 `externalMessageId -> CampMessageId` 投影。
 
 Core Context projector 把 ExternalQuote 通过标准 agent-facing body projection 放入 `CURRENT_INPUT.message`，并把

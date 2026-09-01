@@ -127,7 +127,7 @@ canonical file 可以位于来源 root 外，不生成 Root Grant，也不触发
 同渠道/App/Camp/队员中 focus Run 及其之前历史。IP 或端口变化不更新旧卡；Main 重启不恢复 Token。链接、局域网可达性和
 有效 Token 共同构成只读查看能力，不把它描述成 Owner-only。
 
-当前字段和错误由 [Feishu Channel v10](../../contracts/feishu-channel-v10.md) 拥有，组件边界与 UX 分别由
+当前字段和错误由 [Feishu Channel v11](../../contracts/feishu-channel-v11.md) 拥有，组件边界与 UX 分别由
 [飞书渠道架构](../../architecture/feishu-channel.md)和[渠道设置](../../ui/components/channel-settings.md)拥有。
 
 ### 后果与替代方案
@@ -140,7 +140,40 @@ canonical file 可以位于来源 root 外，不生成 Root Grant，也不触发
   的产品行为，并没有解决 HTTP 主动攻击。拒绝每 Run 端口或冲突漂移：旧卡与运行时地址将变得不可预测。
 
 <a id="v1-37-d06"></a>
-## V1.37-D06：渠道维护采用事件快路径与按需十分钟 watchdog，不建立通用工作日志
+## V1.37-D06：飞书当前正文只信 SDK 规范化结果，Topic root 父链不等于引用
+
+### 背景
+
+真实 Topic ContextManifest 证明了两个相互叠加的错误。Lark SDK 已经对 `post` 选择单 locale、按 element
+类型渲染并解析 mention，Main 却再次递归遍历 raw JSON，把 `tag`、`user_id`、`user_name` 和所有 locale
+拼进正文。独立话题群又会用与 canonical `root_id` 相同的 `parent_id` 表达结构归属，旧规则却把任意
+`parent_id` 都冻结成 ExternalQuote，于是没有显式引用的消息也显示“引用 Murray”。
+
+### 决定
+
+当前消息正文只使用 SDK `NormalizedMessage.content`；Main 仅逐 occurrence 删除本轮其他受管 target 的
+可见 mention，使所有接收 Bot 提交相同 body。真正读取外部父消息时，`text | post` 复用同一锁定 SDK
+normalizer、保留原文 mention 且只选择一个 locale。Topic 中 `parent_id == canonical root_id` 定义为
+structural parent，不读取、不创建 ExternalQuote；p2p/group parent 和 Topic 非 root parent 保持一次读取与
+ExternalQuote。
+
+当前字段与行为由 [Feishu Channel v11](../../contracts/feishu-channel-v11.md) 拥有，组件边界由
+[飞书渠道架构](../../architecture/feishu-channel.md)拥有，模型可见前后字节按
+[确认 revision 1](model-context-change-feishu-ingress-normalization.md)实施。本决定只取代历史 V1.35-D03
+把 Topic root structural parent 也视为引用的部分，不改写其余外部引用理由。
+
+### 后果与替代方案
+
+- 新消息不再携带 raw metadata、placeholder 或多 locale 副本；历史 CampMessage、Manifest 与 Runtime input
+  不回填。升级边界的同一 aggregate 若混入新旧 payload，继续 fail closed，可能需要用户重发一次。
+- 保留 Topic 非 root parent 的引用能力，代价是仍依赖飞书 `parent_id/root_id` 的精确关系；没有额外 UI
+  inference、外部 message 映射或内部 reply chain。
+- 拒绝修补递归 `collectText` 的字段黑名单：Feishu element 与 locale schema 扩展会继续把元数据误当正文。
+  拒绝在所有 Topic 中一律丢弃 `parent_id`：会同时删除真实的非 root 直接回复。拒绝回写历史消息：会破坏
+  已冻结的 Context/Evidence digest，且无法可靠恢复用户当时的完整 provider 语义。
+
+<a id="v1-37-d07"></a>
+## V1.37-D07：渠道维护采用事件快路径与按需十分钟 watchdog，不建立通用工作日志
 
 ### 背景
 
