@@ -351,8 +351,9 @@ export const EXECUTION_VIEW_PAGE = String.raw`<!doctype html>
     const nonTerminal = (run) => run.status === 'queued' || run.status === 'running' || run.status === 'waiting'
     const timeRange = (run) => clock(run.startedAt || run.createdAt) + '–' + (nonTerminal(run) ? '现在' : clock(run.endedAt || run.createdAt))
     const durationLabel = (run) => {
+      if (nonTerminal(run)) return '处理过程'
       const started = new Date(run.startedAt || run.createdAt).getTime()
-      const ended = new Date(nonTerminal(run) ? Date.now() : run.endedAt || run.createdAt).getTime()
+      const ended = new Date(run.endedAt || run.createdAt).getTime()
       if (!Number.isFinite(started) || !Number.isFinite(ended) || ended < started) return '处理过程'
       const seconds = Math.max(1, Math.round((ended - started) / 1000))
       if (seconds < 60) return '处理过程 · ' + seconds + '秒'

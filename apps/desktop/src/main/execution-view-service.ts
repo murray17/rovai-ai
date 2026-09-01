@@ -9,6 +9,7 @@ import type {
 import {
   activityStatusForAgentRun,
   buildLiveExecutionProgress,
+  liveRuntimeEventFromCore,
   liveRuntimeEventFromExecutionEvidence,
   type ActivityIconKind,
   type ActivityStatus
@@ -30,6 +31,7 @@ import {
 } from './execution-web-settings'
 
 const SSE_HEARTBEAT_MS = 20_000
+const SSE_REFRESH_COALESCE_MS = 64
 const IGNORED_INTERFACE = /^(?:lo|docker|veth|br-|bridge|utun|vmnet|vbox|awdl|llw)/iu
 const PREFERRED_INTERFACE = /^(?:en[01]|wlan|wifi|ethernet|eth)/iu
 
@@ -122,6 +124,7 @@ type Grant = {
   scope: Readonly<ExecutionViewScope>
   clients: Set<ServerResponse>
   refresh: Promise<void>
+  refreshTimer: ReturnType<typeof setTimeout> | null
 }
 
 type Listener = { server: Server; address: string; port: number }
@@ -235,7 +238,8 @@ export class ExecutionViewService {
       this.#grants.set(tokenHash, {
         scope: Object.freeze({ ...scope }),
         clients: new Set(),
-        refresh: Promise.resolve()
+        refresh: Promise.resolve(),
+        refreshTimer: null
       })
       return `http://${listener.address}:${listener.port}/execution/${encodeURIComponent(scope.focusRunId)}#t=${token}`
     })
@@ -381,9 +385,20 @@ export class ExecutionViewService {
   }
 
   #handleCoreEvent(event: CoreEvent): void {
-    if (!event.method.startsWith('agent_run.')) return
+    const liveEvent = liveRuntimeEventFromCore(event, 'execution-view-refresh')
+    if (!event.method.startsWith('agent_run.') && !liveEvent) return
+    const eventRunId = liveEvent?.agentRunId ?? coreEventAgentRunId(event)
     for (const [tokenHash, grant] of this.#grants) {
       if (!grant.clients.size) continue
+      if (eventRunId && eventRunId !== grant.scope.focusRunId) continue
+      this.#scheduleGrantRefresh(tokenHash, grant)
+    }
+  }
+
+  #scheduleGrantRefresh(tokenHash: string, grant: Grant): void {
+    if (grant.refreshTimer) return
+    grant.refreshTimer = setTimeout(() => {
+      grant.refreshTimer = null
       grant.refresh = grant.refresh.then(async () => {
         if (!grant.clients.size || !this.#grants.has(tokenHash)) return
         try {
@@ -402,7 +417,7 @@ export class ExecutionViewService {
           }
         } catch { /* A later Core event will retry; the AgentRun remains unaffected. */ }
       })
-    }
+    }, SSE_REFRESH_COALESCE_MS)
   }
 
   #writeHeartbeat(): void {
@@ -417,6 +432,8 @@ export class ExecutionViewService {
     const grant = this.#grants.get(tokenHash)
     if (!grant) return
     this.#grants.delete(tokenHash)
+    if (grant.refreshTimer) clearTimeout(grant.refreshTimer)
+    grant.refreshTimer = null
     for (const client of grant.clients) {
       if (!client.writableEnded) client.end()
     }
@@ -448,6 +465,12 @@ export class ExecutionViewService {
     const snapshot = this.getSettings()
     for (const listener of this.#listeners) listener(snapshot)
   }
+}
+
+function coreEventAgentRunId(event: CoreEvent): string | null {
+  if (!event.params || typeof event.params !== 'object' || Array.isArray(event.params)) return null
+  const value = (event.params as Record<string, unknown>).agentRunId
+  return typeof value === 'string' && value ? value : null
 }
 
 export function selectPrivateLanAddress(

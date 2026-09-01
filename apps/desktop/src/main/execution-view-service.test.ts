@@ -92,6 +92,8 @@ describe('ExecutionViewService', () => {
     expect(pageHtml).toContain('run-disclosure')
     expect(pageHtml).toContain('tool-group')
     expect(pageHtml).toContain('command-disclosure')
+    expect(pageHtml).toContain("if (nonTerminal(run)) return '处理过程'")
+    expect(pageHtml).not.toContain('nonTerminal(run) ? Date.now()')
     expect(pageHtml).not.toContain('局域网视图')
     expect(pageHtml).not.toContain('飞书成员')
     const pageScript = pageHtml.match(/<script>([\s\S]*)<\/script>/)?.[1]
@@ -153,6 +155,64 @@ describe('ExecutionViewService', () => {
     expect(eventListener).toBeNull()
     expect(JSON.parse(await readFile(join(root, 'execution-web.json'), 'utf8')))
       .toEqual({ schemaVersion: 1, enabled: true, port })
+  })
+
+  it('coalesces live execution events into a refreshed SSE snapshot', async () => {
+    const root = await tempRoot()
+    const port = await availablePort()
+    const eventListeners = new Set<(event: CoreEvent) => void>()
+    let requestCount = 0
+    const snapshot = coreSnapshot() as {
+      runs: Array<{ evidence: Array<{ payload: { delta?: string } }> }>
+    }
+    const service = new ExecutionViewService({
+      settingsFilePath: join(root, 'execution-web.json'),
+      resolveAddress: () => '127.0.0.1',
+      randomToken: () => 'live-refresh-token-with-at-least-thirty-two-characters',
+      core: {
+        onEvent(listener) {
+          eventListeners.add(listener)
+          return () => { eventListeners.delete(listener) }
+        },
+        async request<T>(): Promise<T> {
+          requestCount += 1
+          return structuredClone(snapshot) as T
+        }
+      }
+    })
+    let reader: ReadableStreamDefaultReader<Uint8Array> | null = null
+    try {
+      await service.start()
+      await service.setSettings({ enabled: true, port })
+      const href = await service.createExecutionViewUrl({
+        channelConversationId: 'channel-a',
+        targetAppId: 'app-a',
+        campId: 'camp-a',
+        agentId: 'agent-a',
+        focusRunId: 'run-a',
+        maxRunCreatedAt: '2026-09-01T00:00:00Z'
+      })
+      const stream = await fetch(`http://127.0.0.1:${port}/api/execution/run-a/events`, {
+        headers: { Authorization: `Bearer ${new URL(href!).hash.slice(3)}` }
+      })
+      reader = stream.body!.getReader()
+      expect((await reader.read()).done).toBe(false)
+
+      snapshot.runs[0].evidence[1].payload.delta = '自动更新后的正文'
+      for (const method of ['agent.text.delta', 'activity.started', 'activity.completed']) {
+        for (const listener of eventListeners) {
+          listener({ method, params: { agentRunId: 'run-a' } })
+        }
+      }
+      const update = await readWithin(reader, 1_000)
+      expect(update).not.toBeNull()
+      if (!update || update.done) throw new Error('execution_web_live_refresh_timeout')
+      expect(new TextDecoder().decode(update.value)).toContain('自动更新后的正文')
+      expect(requestCount).toBe(2)
+    } finally {
+      await reader?.cancel()
+      await service.stop()
+    }
   })
 
   it('does not drift to another port when the configured port is occupied', async () => {
@@ -225,6 +285,23 @@ async function availablePort(): Promise<number> {
   if (!address || typeof address === 'string') throw new Error('test_port_unavailable')
   await new Promise<void>((resolve) => server.close(() => resolve()))
   return address.port
+}
+
+async function readWithin(
+  reader: ReadableStreamDefaultReader<Uint8Array>,
+  milliseconds: number
+): Promise<ReadableStreamReadResult<Uint8Array> | null> {
+  let timer: ReturnType<typeof setTimeout> | null = null
+  try {
+    return await Promise.race([
+      reader.read(),
+      new Promise<null>((resolve) => {
+        timer = setTimeout(() => resolve(null), milliseconds)
+      })
+    ])
+  } finally {
+    if (timer) clearTimeout(timer)
+  }
 }
 
 function coreSnapshot(): unknown {
